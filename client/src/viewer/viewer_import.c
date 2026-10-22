@@ -16,6 +16,7 @@
 // Downloads land in $XDG_DOWNLOAD_DIR, else ~/Downloads, else the working directory natively
 // (like ui_settings_export), and as a browser download on the web.
 #include "viewer_internal.h"
+#include "klog.h"
 #include <cosmetics.h>
 #include <html_ui.h>
 #include <png_write.h>
@@ -73,7 +74,7 @@ static void dialog_hide(void) {
 }
 
 void viewer_alert(const char *message) {
-    printf("[viewer] alert: %s\n", message);
+    KN_LOG_VERBOSE2("[viewer] alert: %s\n", message);
     g_import.prompt_done = NULL;
     dialog_show(NULL, message, 0);
 }
@@ -131,7 +132,7 @@ void viewer_download_png(const char *name, const unsigned char *rgba, const int 
         a.download = UTF8ToString($1);
         a.click();
     }, temp, name);
-    printf("[viewer] download %s (%dx%d)\n", name, w, h);
+    KN_LOG_VERBOSE2("[viewer] download %s (%dx%d)\n", name, w, h);
 #else
     char path[1024];
     const char *dir = getenv("XDG_DOWNLOAD_DIR");
@@ -152,7 +153,7 @@ void viewer_download_png(const char *name, const unsigned char *rgba, const int 
         snprintf(path, sizeof(path), "%s", name);
         written = png_write_rgba(path, rgba, w, h);
     }
-    printf("[viewer] download %s: %s (%dx%d)\n", written ? "wrote" : "could not write", path, w, h);
+    KN_LOG_VERBOSE2("[viewer] download %s: %s (%dx%d)\n", written ? "wrote" : "could not write", path, w, h);
 #endif
 }
 
@@ -301,7 +302,7 @@ void viewer_import_path(const char *path, const int target) {
         fprintf(stderr, "[viewer] cannot read %s\n", path);
         return;
     }
-    printf("[viewer] import %s (target %d)\n", path, target);
+    KN_LOG_VERBOSE2("[viewer] import %s (target %d)\n", path, target);
 
     char key[256];
     if (ends_with(path, ".zip")) {

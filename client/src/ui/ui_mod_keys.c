@@ -15,6 +15,7 @@
 // ui_mods.c (the shared mods.ts keydown, console agent) calls ui_mod_keys_keydown after
 // its bind matching; ui_controls_mouse_event calls ui_mod_keys_ctrl_tp_mouse.
 #include <ui_logic.h>
+#include "klog.h"
 #include <app_mode.h>
 #include <backend_ui.h> // servers_ui_find_new_game (F4)
 #include <bhop_toast.h> // Ctrl TP shows its toggle message in the bhop toast
@@ -82,13 +83,13 @@ int ui_mod_keys_keydown(Client *client, const int key, const int input) {
             // (servers_ui_find_new_game: excludes this lobby; official lobbies open in the
             // browser), never a relaunch (that is F5 now, ui_controls.c reload_key).
             if (input) return 0;
-            printf("[controls] F4: find new game\n");
+            KN_LOG_VERBOSE2("[controls] F4: find new game\n");
             if (!servers_ui_find_new_game()) ui_notify(I18N("kn.mods.findNewGameNeedsMm", "Find New Game needs the matchmaker (offline or a direct server)"));
             return 0;
         case GLFW_KEY_F6: {
             // never waits for a text field (see the header)
             const char *name = stage_loaded_map(client);
-            printf("[controls] F6: the editor opens %s\n", name ? name : "its last session (no map loaded)");
+            KN_LOG_VERBOSE2("[controls] F6: the editor opens %s\n", name ? name : "its last session (no map loaded)");
             printf("Creating editor window\n");
             app_route_url_target("editor.html", 1); // window.open("editor.html")
             return 0;

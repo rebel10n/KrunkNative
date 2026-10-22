@@ -68,6 +68,9 @@ file(GLOB HTML_ENGINE_SOURCES client/src/html/engine/*.c)
 file(GLOB HTML_ENGINE_HEADERS client/src/html/engine/*.h)
 
 include_directories(shared/include)
+# The debug output level (shared/include/klog.h): client sources that several targets compile use
+# KN_LOG_DEBUG1 / KN_LOG_VERBOSE2, so every executable of this directory links kn_klog (end of file).
+add_library(kn_klog STATIC shared/src/klog.c shared/include/klog.h)
 
 file(GLOB_RECURSE SHARED_SOURCES shared/src/*.c)
 file(GLOB_RECURSE SHARED_HEADERS shared/include/*.h)
@@ -1912,3 +1915,13 @@ else ()
         add_test(NAME v10_bridge_test COMMAND v10_bridge_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     endif ()
 endif ()
+
+# kn_klog (above) for every executable here: the launcher, the asset and host tests and the webview test compile
+# client sources that reference g_kn_debug_level. Only executables: the third-party subprojects stay untouched.
+get_property(kn_root_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(kn_t IN LISTS kn_root_targets)
+    get_target_property(kn_type ${kn_t} TYPE)
+    if(kn_type STREQUAL "EXECUTABLE")
+        target_link_libraries(${kn_t} PRIVATE kn_klog)
+    endif()
+endforeach()

@@ -1,6 +1,7 @@
 // The web vault's self-test (client/include/alt_web.h, alt_web_selftest): the vault on a throwaway
 // IndexedDB database, so a real vault is never touched. Runs from the web build's ?kn_selftest=1 (web_dom.c).
 // Emscripten only: the native build has its own test (client/tests/alt_vault_test.c).
+#include "klog.h"
 #ifdef __EMSCRIPTEN__
 
 #include <alt_store.h>
@@ -20,7 +21,7 @@ static int g_fail;
 static void check(const int ok, const char *what) {
     if (ok) g_pass++;
     else g_fail++;
-    printf("[kn-selftest] %s alt: %s\n", ok ? "PASS" : "FAIL", what);
+    KN_LOG_DEBUG1("[kn-selftest] %s alt: %s\n", ok ? "PASS" : "FAIL", what);
 }
 
 static int contains(const uint8_t *hay, const size_t n, const char *needle) {

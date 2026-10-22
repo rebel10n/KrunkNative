@@ -25,6 +25,7 @@
 // hit-testing the button rects in paint order (the DOM target Krunker read from
 // Touch.target), which keeps the page free of extra JavaScript.
 #include <ui_mobile.h>
+#include "klog.h"
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <spectate.h>
@@ -153,7 +154,7 @@ int ui_mobile_active(void) {
     if (!g_mb.detected) {
         g_mb.detected = 1;
         g_mb.mobile = detect_mobile();
-        if (g_mb.mobile) printf("[mobile] mobile device detected: touch controls on, pointer lock off\n");
+        if (g_mb.mobile) KN_LOG_DEBUG1("[mobile] mobile device detected: touch controls on, pointer lock off\n");
     }
     return g_mb.mobile;
 }

@@ -13,6 +13,7 @@
 // Reconnect runs menu_retry_connect (the same server again, or a fresh seek on the brain), where
 // FRVR reloads the page (backToOrigin).
 #include <strike_ui.h>
+#include "klog.h"
 #include <html_dom.h>
 #include <html_ui.h>
 #include <i18n.h>
@@ -128,7 +129,7 @@ void strike_connect_tick(void) {
     const int shown = strike_screen_shown(STRIKE_SCREEN_POPUP_WARNING);
     if (C.popup == POPUP_NONE) {
         if (shown) {
-            printf("[strike] popup %s closed\n", strike_screen_id(STRIKE_SCREEN_POPUP_WARNING));
+            KN_LOG_DEBUG1("[strike] popup %s closed\n", strike_screen_id(STRIKE_SCREEN_POPUP_WARNING));
             strike_screen_remove(STRIKE_SCREEN_POPUP_WARNING);
         }
         C.dirty = 0;
@@ -141,7 +142,7 @@ void strike_connect_tick(void) {
 
 int strike_connect_action(const char *name) {
     if (!name || strcmp(name, "reconnect") != 0) return 0;
-    printf("[strike] reconnect\n");
+    KN_LOG_DEBUG1("[strike] reconnect\n");
     // kt(): the popup goes; with no screen left the menu is back, as "back" does
     set_popup(POPUP_NONE);
     strike_connect_tick();

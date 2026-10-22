@@ -27,6 +27,7 @@
 // goes through the target too and end() draws it with assets/shaders/laced.frag (the same
 // fullscreen triangle, the same saturate / hue step) instead of the plain composite.
 #include <gl.h>
+#include "klog.h"
 #include <GLFW/glfw3.h>
 #include <nettspend.h>
 #include <render_settings.h>
@@ -173,7 +174,7 @@ static int rt_allocate(const int width, const int height, int samples) {
     rt.width = width;
     rt.height = height;
     rt.samples = samples;
-    printf("[render] scene target %dx%d%s\n", width, height, samples ? " (MSAA)" : "");
+    KN_LOG_VERBOSE2("[render] scene target %dx%d%s\n", width, height, samples ? " (MSAA)" : "");
     return 1;
 }
 

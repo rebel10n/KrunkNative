@@ -12,6 +12,7 @@
 // Krunker simulates these in milliseconds; this file keeps its units (positions
 // in world units, velocities per ms, gravity per ms^2, lifetimes in ms).
 #include <gl.h>
+#include "klog.h"
 #include <vfx.h>
 #include <vfx_debris.h> // the debris piece and its pool slot
 #include <third_person.h> // camera_offset_active: no viewmodel muzzle in third person
@@ -481,7 +482,7 @@ static unsigned int vfx_custom_damage_texture(void) {
         snprintf(loaded, sizeof(loaded), "%s", setting);
         char full[1024];
         texture = client_render_ui_file(setting, full, sizeof(full)) ? load_texture(full) : 0;
-        if (setting[0]) printf("[vfx] customDamage %s -> %s\n", setting, texture && texture != texture_checker() ? "loaded" : "failed");
+        if (setting[0]) KN_LOG_VERBOSE2("[vfx] customDamage %s -> %s\n", setting, texture && texture != texture_checker() ? "loaded" : "failed");
     }
     return texture;
 }

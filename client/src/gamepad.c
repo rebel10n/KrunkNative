@@ -55,6 +55,7 @@
 //   - SDL_GAMECONTROLLERCONFIG (SDL's variable: mapping lines) and
 //     KRUNKNATIVE_GAMEPAD_DB (a gamecontrollerdb.txt path) add/override native mappings.
 #include <gamepad.h>
+#include "klog.h"
 #include <ks_client.h> // KrunkScript controller hooks
 #include <ui_logic.h>
 #include <html_ui.h>
@@ -404,8 +405,8 @@ static void on_left_stick_hold(const double raw_x, const double raw_y) {
 // Gamepad.trigger(type, button, value): the listeners CONTROLS registered.
 static void trigger(const int type, const GpEvent *e) {
     if (g_gp.log && (type != GP_HOLD || g_gp.log > 1)) {
-        if (e->name >= GP_BUTTON_NAMES) printf("[gamepad] %s %s [%.3f, %.3f]\n", GP_TYPE[type], GP_NAME[e->name], e->axis[0], e->axis[1]);
-        else printf("[gamepad] %s %s %.3f\n", GP_TYPE[type], GP_NAME[e->name], e->value);
+        if (e->name >= GP_BUTTON_NAMES) KN_LOG_VERBOSE2("[gamepad] %s %s [%.3f, %.3f]\n", GP_TYPE[type], GP_NAME[e->name], e->axis[0], e->axis[1]);
+        else KN_LOG_VERBOSE2("[gamepad] %s %s %.3f\n", GP_TYPE[type], GP_NAME[e->name], e->value);
     }
     // KrunkNative: no pad press / hold acts while a text field has focus (ui_text_input_focused,
     // the keyboard hotkeys' rule; v3.1.1 lets the pad through). Releases still land.
@@ -502,14 +503,14 @@ static void on_connected(const GpSample *pad, const char *name) {
     listen_axes(pad);
     g_gp.running = 1;
     g_gp.next_frame = 0.0;
-    printf("[gamepad] connected: %s (%s mapping, %d buttons, %d axes)\n", name ? name : "?",
+    KN_LOG_DEBUG1("[gamepad] connected: %s (%s mapping, %d buttons, %d axes)\n", name ? name : "?",
            pad && pad->standard ? "standard" : "raw", pad ? pad->button_count : 0, pad ? pad->axis_count : 0);
 }
 
 // _handleGamepadDisconnected: any pad going away stops the loop. Keys a stick or
 // button holds stay down (v3.1.1 drops its events without releasing them).
 static void on_disconnected(void) {
-    if (g_gp.connected) printf("[gamepad] disconnected\n");
+    if (g_gp.connected) KN_LOG_DEBUG1("[gamepad] disconnected\n");
     g_gp.running = 0;
     g_gp.connected = 0;
     memset(&g_gp.buttons, 0, sizeof(g_gp.buttons));
@@ -568,7 +569,7 @@ static void load_extra_mappings(void) {
     char *text = size > 0 ? malloc((size_t) size + 1) : NULL;
     if (text && fread(text, 1, (size_t) size, f) == (size_t) size) {
         text[size] = 0;
-        printf("[gamepad] mappings from %s: %s\n", path, glfwUpdateGamepadMappings(text) ? "ok" : "rejected");
+        KN_LOG_DEBUG1("[gamepad] mappings from %s: %s\n", path, glfwUpdateGamepadMappings(text) ? "ok" : "rejected");
     }
     free(text);
     fclose(f);
@@ -626,7 +627,7 @@ static void rumble(const int duration, const float magnitude) {
             p.vibrationActuator.playEffect("dual-rumble", {startDelay: 0, duration: $0, weakMagnitude: $1 * 0.5, strongMagnitude: $1});
         }
     }, duration, magnitude);
-    if (g_gp.log) printf("[gamepad] rumble %d ms, strong %.2f weak %.2f\n", duration, magnitude, magnitude * 0.5f);
+    if (g_gp.log) KN_LOG_VERBOSE2("[gamepad] rumble %d ms, strong %.2f weak %.2f\n", duration, magnitude, magnitude * 0.5f);
 #else
     static int logged;
     if (g_gp.log || !logged++) {
@@ -693,7 +694,7 @@ static void log_state(const Client *client) {
     char keys[sizeof(IDS) / sizeof(IDS[0]) + 1];
     for (size_t i = 0; i < sizeof(IDS) / sizeof(IDS[0]); i++) keys[i] = ui_controls_down(IDS[i]) ? "WSADJCRA"[i] : '.';
     keys[sizeof(IDS) / sizeof(IDS[0])] = 0;
-    printf("[gamepad] state t=%.2f connected=%d active=%d cntrl=%d menu=%d window=%d enabled=%d keys=%s", now, g_gp.connected,
+    KN_LOG_VERBOSE2("[gamepad] state t=%.2f connected=%d active=%d cntrl=%d menu=%d window=%d enabled=%d keys=%s", now, g_gp.connected,
            g_gp.active, ui_controls_input_is_cntrl(), html_ui_is_menu_open(), menu_window_is_open(), ui_controls_enabled(client), keys);
     if (client) printf(" cam_pitch=%.4f cam_yaw=%.4f", client->camera.rotation.x, client->camera.rotation.y);
     if (me && me->active) {

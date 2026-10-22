@@ -24,6 +24,7 @@
 // joinAssignment: JOINED_RANK on an open game socket, then the socket at the assignment's connection
 // with the account's token (krunker_net_join_match). Nothing is shown for it but the loading screen.
 #include <v10_ui.h>
+#include "klog.h"
 #include <v10_menu.h> // v10_menu_handle("loginOrRegister"): guests get v10's login modal
 #include <audio.h>
 #include <backend.h>
@@ -515,7 +516,7 @@ static void join_assignment(const cJSON *as) {
     const char *web = cJSON_GetStringValue(cJSON_GetObjectItem(as, "webUrl"));
     const int port = (int) v10_num(as, "port", 0);
     if (!host[0] || port <= 0) return;
-    printf("[ranked] joining %s (%s)\n", game, v10_str(as, "connection"));
+    KN_LOG_DEBUG1("[ranked] joining %s (%s)\n", game, v10_str(as, "connection"));
     invalidate();
     v10_popup_close();      // quickJoinRankedMatch / acceptMatch: clearPops()
     menu_show_window(MENU_WINDOW_NONE, 0);
@@ -531,7 +532,7 @@ static void join_assignment(const cJSON *as) {
 // popups close as v10's clearPops does. No connection, nothing to join (v10 answers success false).
 static void join_kio_match(const char *connection, const char *game) {
     if (!connection || !connection[0]) return;
-    printf("[ranked] joining %s (%s)\n", game ? game : "", connection);
+    KN_LOG_DEBUG1("[ranked] joining %s (%s)\n", game ? game : "", connection);
     R.in_match = 1;
     invalidate();
     v10_popup_close();
@@ -627,7 +628,7 @@ static void handle_message(const cJSON *msg) {
     } else if (!strcmp(status, "MATCHED")) {
         const cJSON *as = cJSON_GetObjectItem(p, "assignment");
         if (g_kio_queue && krunker_net_ranked_elsewhere(v10_str(as, "connection"))) {
-            printf("[ranked] match found while in another ranked game: ignored (v10 isInOtherRankedMatch)\n");
+            KN_LOG_DEBUG1("[ranked] match found while in another ranked game: ignored (v10 isInOtherRankedMatch)\n");
             clear_state();
             render();
             return;
@@ -640,7 +641,7 @@ static void handle_message(const cJSON *msg) {
             render();
             return;
         }
-        printf("[ranked] match found\n");
+        KN_LOG_DEBUG1("[ranked] match found\n");
         R.state = MM_FOUND;
         R.busy = 0;
         cJSON_Delete(R.assignment);
@@ -936,7 +937,7 @@ static void on_kio_claim(void *user, const int status, const cJSON *body) {
     cJSON *res = kio_result(body);
     // v10 adds the reward to its balance when the claim succeeds (rankedPoints += reward, v10:98744)
     if (status == 200 && cJSON_IsTrue(cJSON_GetObjectItem(res, "success"))) {
-        printf("[ranked] milestone claimed: +%d RP to the balance\n", g_claim_reward);
+        KN_LOG_DEBUG1("[ranked] milestone claimed: +%d RP to the balance\n", g_claim_reward);
         krunker_account_add_points(g_claim_reward);
     }
     on_claim(NULL, status, res);
@@ -981,7 +982,7 @@ static void on_kio_purchase(void *user, const int status, const cJSON *body) {
     cJSON *res = kio_result(body);
     // v10 takes the price off its balance when the purchase succeeds (rankedPoints -= price, v10:111042)
     if (status == 200 && cJSON_IsTrue(cJSON_GetObjectItem(res, "success"))) {
-        printf("[ranked] skin bought: -%d RP from the balance\n", g_buy.price);
+        KN_LOG_DEBUG1("[ranked] skin bought: -%d RP from the balance\n", g_buy.price);
         krunker_account_add_points(-(double) g_buy.price);
     }
     on_purchase(NULL, status, res);

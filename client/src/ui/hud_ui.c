@@ -32,6 +32,7 @@
 // browser can screenshot the HUD without clicking Play; `?kn_hud_demo=1`
 // (KRUNKNATIVE_HUD_DEMO=1) adds kill-feed rows and hit markers on a loop.
 #include <player_accounts.h>
+#include "klog.h"
 #include <backend_ui.h> // active_account: the local player's clan in the player list
 #include <client.h>
 
@@ -4256,7 +4257,7 @@ static void hud_autoplay_hide_menu(void) {
     char display[16];
     if (!holder || html_dom_get_style(holder, "display", display, sizeof(display)) < 0 || strcmp(display, "block") != 0) return;
 
-    printf("[hud_ui] autoplay: hiding the menu markup (menu_apply_open not active)\n");
+    KN_LOG_VERBOSE2("[hud_ui] autoplay: hiding the menu markup (menu_apply_open not active)\n");
     html_dom_set_class(html_dom_root(), "kn-menu-open", 0);
     html_dom_set_display(holder, "none");
     dom_display("menuHider", "none");
@@ -4280,7 +4281,7 @@ static void hud_autoplay(Client *client) {
     ui->autoplay_done = 1;
     // KRUNKNATIVE_AUTOPLAY_SPECTATE=1 / ?kn_autoplay_spectate=1: enter as a spectator (toggleSpect)
     if (hud_test_flag("kn_autoplay_spectate", "KRUNKNATIVE_AUTOPLAY_SPECTATE")) spectate_set_requested(1);
-    printf("[hud_ui] autoplay: entering the game\n");
+    KN_LOG_VERBOSE2("[hud_ui] autoplay: entering the game\n");
     client_set_menu_open(client, 0);
     client_enter_game(client);
     hud_autoplay_hide_menu();

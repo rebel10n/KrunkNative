@@ -21,6 +21,7 @@
 // catalogue has rarities past FRVR's legendary (Krunker's relic, contraband, unobtainable): those take the
 // legendary lights and power; the golden spin that FRVR offers after a heroic spin (cwe) is not opened.
 #include <strike_ui.h>
+#include "klog.h"
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <backend_ui.h>   // store_skin_preview
@@ -320,7 +321,7 @@ static void reward_fill(const HtmlElem root) {
     R.stars_w = R.stars_h = 0.0f;
     R.stars.count = 0;
     char *id = it ? (char *) it->id : NULL;
-    printf("[strike] REWARD %s %s (%s, %d left)\n", jstr(r, "type") ? jstr(r, "type") : "?", id ? id : jstr(r, "currency") ? jstr(r, "currency") : "",
+    KN_LOG_VERBOSE2("[strike] REWARD %s %s (%s, %d left)\n", jstr(r, "type") ? jstr(r, "type") : "?", id ? id : jstr(r, "currency") ? jstr(r, "currency") : "",
            l, cJSON_GetArraySize(R.rewards) - 1);
 }
 
@@ -347,7 +348,7 @@ static void finish(const int pop) {
     R.rewards = NULL;
     R.stars.visible = 0;
     if (pop && strike_screen_top() == STRIKE_SCREEN_REWARD) strike_screen_pop(); // kt()
-    printf("[strike] REWARD done\n");
+    KN_LOG_DEBUG1("[strike] REWARD done\n");
     if (done) done(user); // Pt's onPop
 }
 
@@ -388,7 +389,7 @@ static void on_equipped(void *user, const int status, const cJSON *data, const c
     const char *msg = jstr(error, "message");
     if (status == 200) {
         R.equipped = 1; // this.equipped
-        printf("[strike] reward equipped\n");
+        KN_LOG_VERBOSE2("[strike] reward equipped\n");
         if (strike_screen_root(STRIKE_SCREEN_REWARD)) strike_screen_rerender(STRIKE_SCREEN_REWARD);
     } else {
         printf("[strike] reward equip refused (%d): %s\n", status, msg ? msg : "no answer");
@@ -404,7 +405,7 @@ void strike_reward_choice(const char *const *item_ids, const int count, const St
     R.loading = 0;
     R.on_choice = on_choice;
     R.choice_user = user;
-    printf("[strike] REWARD_CHOICE %d options\n", R.option_count);
+    KN_LOG_VERBOSE2("[strike] REWARD_CHOICE %d options\n", R.option_count);
     if (strike_screen_shown(STRIKE_SCREEN_REWARD_CHOICE)) strike_screen_rerender(STRIKE_SCREEN_REWARD_CHOICE);
     else strike_screen_push(STRIKE_SCREEN_REWARD_CHOICE);
 }
@@ -497,7 +498,7 @@ char *strike_product_popup_html(const cJSON *product, const char *buy_action) {
                            {"price", amount_s}};
     char *html = strike_template("STORE_CONFIRM_PURCHASE", v, 8);
     free(power);
-    printf("[strike] product popup %s (%s, %d KR)\n", jstr(product, "_id") ? jstr(product, "_id") : "?", it->id, amount);
+    KN_LOG_DEBUG1("[strike] product popup %s (%s, %d KR)\n", jstr(product, "_id") ? jstr(product, "_id") : "?", it->id, amount);
     return html;
 }
 
@@ -622,7 +623,7 @@ int strike_reward_action(const char *a) {
         R.choice_user = NULL;
         strike_screen_pop();
         R.loading = 0;
-        printf("[strike] REWARD_CHOICE picked %d (%s)\n", choice, R.options[choice]);
+        KN_LOG_VERBOSE2("[strike] REWARD_CHOICE picked %d (%s)\n", choice, R.options[choice]);
         if (fn) fn(user, choice);
         return 1;
     }

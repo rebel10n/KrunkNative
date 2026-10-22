@@ -6,6 +6,7 @@
 // F4 (app_reload, the window kept) only for what a running process cannot take again.
 // The same restart serves the updates (game_reload.h "auto-restart for updates").
 #include <game_reload.h>
+#include "klog.h"
 #include <app_mode.h>        // app_reload, app_reload_prepare, app_exec_args
 #include <audio.h>
 #include <backend.h>         // backend_available: a lobby id needs the matchmaker
@@ -126,7 +127,7 @@ static void resume_parse(const char *resume) {
     g_rl.stage = RESUME_START;
     g_rl.since = -1.0;
     g_rl.resuming = 1;
-    printf("[reload] resume after the restart: %s %s%s%s\n", kind, target, third ? (official ? " region " : " mode ") : "", third ? third : "");
+    KN_LOG_DEBUG1("[reload] resume after the restart: %s %s%s%s\n", kind, target, third ? (official ? " region " : " mode ") : "", third ? third : "");
     if (!strcmp(kind, "game")) {
         // a lobby: the startup seek takes it by its game id (servers_ui_reload_resume: never the
         // launch seek nor excludeGame; gone or full, another one and a notice), so no second seek
@@ -148,7 +149,7 @@ int game_reload_resume_official(Client *client) {
     if (!g_rl.resuming || g_rl.stage != RESUME_START || strcmp(g_rl.kind, "krunker") != 0) return 0;
     g_rl.stage = RESUME_NONE;
     servers_ui_skip_startup_seek();
-    printf("[reload] resume: rejoining official game %s\n", g_rl.target);
+    KN_LOG_DEBUG1("[reload] resume: rejoining official game %s\n", g_rl.target);
     if (!krunker_net_reload_join(client, g_rl.target, g_rl.region[0] ? g_rl.region : NULL)) ui_notify("Reloaded. The game could not be rejoined");
     return 1;
 }
@@ -281,7 +282,7 @@ static int restart_reason(char *out, const size_t n) {
 // over. Returns only when the exec failed.
 static void restart(Client *client, const char *why) {
     char resume[300] = "";
-    printf("[reload] restart: %s\n", why);
+    KN_LOG_DEBUG1("[reload] restart: %s\n", why);
     if (session_line(client, resume, sizeof(resume))) set_env(RELOAD_RESUME_ENV, resume);
     client_settings_before_exec();
     app_reload(NULL);
@@ -298,13 +299,13 @@ static void reenter(Client *client) {
         snprintf(game, sizeof(game), "%s", krunker_net_session_game());
         snprintf(region, sizeof(region), "%s", krunker_net_region());
         if (krunker_net_reload_join(client, game, region)) {
-            printf("[reload] rejoining official game %s\n", game); // the join's loading state says it, no toast
+            KN_LOG_DEBUG1("[reload] rejoining official game %s\n", game); // the join's loading state says it, no toast
             return;
         }
     }
     if (!client->offline && servers_ui_reload_rejoin()) {
         // a matchmade lobby: the same one by its game id (gone or full: another one, said so)
-        printf("[reload] rejoining the lobby\n"); // the join's loading state says it, no toast
+        KN_LOG_DEBUG1("[reload] rejoining the lobby\n"); // the join's loading state says it, no toast
         return;
     }
     if (!client->offline && !client->net_connected) {
@@ -314,7 +315,7 @@ static void reenter(Client *client) {
     }
     const int offline = client->offline;
     if (ui_console_reconnect()) {
-        printf("[reload] %s\n", offline ? "the offline game restarts" : "rejoining the server");
+        KN_LOG_DEBUG1("[reload] %s\n", offline ? "the offline game restarts" : "rejoining the server");
         if (offline) ui_notify("Reloaded"); // a server rejoin: its loading state says it, no toast
         return;
     }
@@ -325,7 +326,7 @@ static void reenter(Client *client) {
 
 static void reload_now(Client *client) {
     const double started = glfwGetTime();
-    printf("[reload] %s: full reload\n", g_rl.why);
+    KN_LOG_DEBUG1("[reload] %s: full reload\n", g_rl.why);
     char why[1200] = "";
     const int page_or_files = restart_reason(why, sizeof(why));
     // the Client tab first: its startup-only ("*") rows are a reason to restart too
@@ -349,7 +350,7 @@ static void reload_now(Client *client) {
     if (ui->dom_ready && menu_window_is_open()) menu_show_window(ui->active_window, 1);
     hud_ui_relayout();
     client->hud_html.valid = 0;
-    printf("[reload] settings: %d changed; textures: %d, OBJ models: %d reloaded; GLTF models, sounds and window templates "
+    KN_LOG_DEBUG1("[reload] settings: %d changed; textures: %d, OBJ models: %d reloaded; GLTF models, sounds and window templates "
            "read again (%.0f ms)\n", settings, textures, models, (glfwGetTime() - started) * 1000.0);
     if (!page_or_files) g_rl.epoch = wall_now(); // nothing newer is left behind
     reenter(client);
@@ -383,7 +384,7 @@ static void resume_tick(Client *client) {
         if (!strcmp(g_rl.kind, "rejoin")) {
             // a server update: the same lobby again with the restart rejoin's backoff (servers_ui.c)
             g_rl.stage = RESUME_NONE;
-            printf("[reload] resume: rejoining %s after the server's update\n", g_rl.target);
+            KN_LOG_DEBUG1("[reload] resume: rejoining %s after the server's update\n", g_rl.target);
             servers_ui_resume_rejoin(g_rl.target);
             return;
         }
@@ -398,13 +399,13 @@ static void resume_tick(Client *client) {
         } else {
             g_rl.stage = RESUME_NONE;
             if (!lobby && same_server(client, g_rl.target)) { // the command line joins it already
-                printf("[reload] resume: already joining %s\n", g_rl.target);
+                KN_LOG_DEBUG1("[reload] resume: already joining %s\n", g_rl.target);
                 servers_ui_skip_startup_seek();
                 return;
             }
             snprintf(line, sizeof(line), "connect %s", g_rl.target);
         }
-        printf("[reload] resume: %s\n", line);
+        KN_LOG_DEBUG1("[reload] resume: %s\n", line);
         ui_console_exec(line);
         servers_ui_skip_startup_seek(); // the session is this one (no startup or launch seek after it)
 #endif
@@ -414,7 +415,7 @@ static void resume_tick(Client *client) {
     // RESUME_MODE: the offline game is up on its map; its mode too when it was another one
     if (client->offline && client->game.ready) {
         if (g_rl.mode >= 0 && game_mode_id(&client->game) != g_rl.mode) {
-            printf("[reload] resume: mode %d\n", g_rl.mode);
+            KN_LOG_DEBUG1("[reload] resume: mode %d\n", g_rl.mode);
             local_game_host(client, client->game.current_map_index, g_rl.mode);
         }
         g_rl.stage = RESUME_NONE;
@@ -436,7 +437,7 @@ int game_reload_server_updating(Client *client, const char *lobby_id) {
     else if (client && client->net_address[0]) snprintf(g_ar.resume, sizeof(g_ar.resume), "connect\t%s:%u", client->net_address, (unsigned int) client->net_port);
     else g_ar.resume[0] = 0;
     if (!g_ar.due) g_ar.due = glfwGetTime() + UPDATE_SCREEN_SECONDS;
-    printf("[reload] the server is restarting for an update: restarting the client in %.1f s, then %s%s\n", UPDATE_SCREEN_SECONDS,
+    KN_LOG_DEBUG1("[reload] the server is restarting for an update: restarting the client in %.1f s, then %s%s\n", UPDATE_SCREEN_SECONDS,
            lobby_id && lobby_id[0] ? "rejoining lobby " : client && client->net_address[0] ? "reconnecting to " : "back to the menu",
            lobby_id && lobby_id[0] ? lobby_id : client && client->net_address[0] ? client->net_address : "");
     return 1;
@@ -446,7 +447,7 @@ void game_reload_update_available(const char *what) {
     if (g_ar.newer || g_ar.done) return;
     g_ar.newer = 1;
     snprintf(g_ar.what, sizeof(g_ar.what), "%s", what ? what : "");
-    printf("[reload] a newer client is ready (%s): %s\n", g_ar.what,
+    KN_LOG_DEBUG1("[reload] a newer client is ready (%s): %s\n", g_ar.what,
            client_settings_auto_restart() ? "restarting in the menu or when the match ends" : "Auto-restart for updates is off (Update now restarts)");
 }
 
@@ -473,11 +474,11 @@ static void auto_restart_now(Client *client) {
     if (!resume[0] && !g_ar.server) session_line(client, resume, sizeof(resume));
 #ifdef __EMSCRIPTEN__
     if (!strncmp(resume, "rejoin\t", 7)) kn_js_session_set(WEB_REJOIN_KEY, resume + 7);
-    printf("[reload] %s: reloading the page\n", why);
+    KN_LOG_DEBUG1("[reload] %s: reloading the page\n", why);
     fflush(stdout);
     app_reload(NULL); // location.reload(): the address bar keeps ?game= / ?ws=
 #else
-    printf("[reload] %s: relaunching%s\n", why, resume[0] ? " (the new process resumes the session)" : "");
+    KN_LOG_DEBUG1("[reload] %s: relaunching%s\n", why, resume[0] ? " (the new process resumes the session)" : "");
     fflush(stdout);
     if (resume[0]) set_env(RELOAD_RESUME_ENV, resume);
     client_settings_before_exec();
@@ -510,11 +511,11 @@ static void auto_restart_tick(Client *client) {
     // the end of the match (the results stay a moment) is the time.
     if (html_ui_available() && html_ui_is_menu_open() && !client->in_game) {
         g_ar.due = now + UPDATE_MENU_SECONDS;
-        printf("[reload] newer client %s: in the menu, restarting in %.1f s\n", g_ar.what, UPDATE_MENU_SECONDS);
+        KN_LOG_DEBUG1("[reload] newer client %s: in the menu, restarting in %.1f s\n", g_ar.what, UPDATE_MENU_SECONDS);
         ui_notify(I18N("kn.update.restartingNotice", "Restarting for an update..."));
     } else if (client_round_ended(client)) {
         g_ar.due = now + UPDATE_MATCH_END_SECONDS;
-        printf("[reload] newer client %s: the match ended, restarting in %.1f s\n", g_ar.what, UPDATE_MATCH_END_SECONDS);
+        KN_LOG_DEBUG1("[reload] newer client %s: the match ended, restarting in %.1f s\n", g_ar.what, UPDATE_MATCH_END_SECONDS);
     }
 }
 

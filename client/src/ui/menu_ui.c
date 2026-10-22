@@ -12,6 +12,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include "klog.h"
 #include <quick_play_retry.h> // leaving the menu stops a Quick Play search
 #include <player_names.h> // Hide player names (player_names.h)
 #include <v10_wild_offer.h>
@@ -1546,7 +1547,7 @@ static void menu_request_play(const int offline) {
             fprintf(stderr, "[menu] failed to start the offline game\n");
             return;
         }
-        printf("[menu] started the offline game (in-process)\n");
+        KN_LOG_DEBUG1("[menu] started the offline game (in-process)\n");
     }
 
     if (!client_is_connected(client)) return; // the page shows the connection error screen

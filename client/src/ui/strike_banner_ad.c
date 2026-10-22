@@ -4,6 +4,7 @@
 // offer. The weekend schedules (2x class XP, 2x raid drops) are not on the banner yet: dxp-client exports
 // no accessor for them. Guests are asked to sign in; nothing is watched and nothing is requested for them.
 #include <strike_banner_ad.h>
+#include "klog.h"
 
 #include <backend_ui.h>
 #include <double_xp_offer.h>
@@ -68,14 +69,14 @@ static void on_claim(void *user, const DoubleXpResult result) {
     (void) user;
     g_slot.error = result == DOUBLE_XP_ERROR;
     const char *name = result == DOUBLE_XP_GRANTED ? "granted" : result == DOUBLE_XP_NOT_OFFERED ? "not offered" : "error";
-    printf("[strike] banner ad: double XP %s\n", name);
+    KN_LOG_VERBOSE2("[strike] banner ad: double XP %s\n", name);
     refresh();
 }
 
 void strike_banner_ad_claim(void) {
     g_slot.error = 0;
     if (!active_account()) { // a guest has no account to claim for: nothing is requested
-        printf("[strike] banner ad: double XP guest\n");
+        KN_LOG_VERBOSE2("[strike] banner ad: double XP guest\n");
         refresh();
         return;
     }

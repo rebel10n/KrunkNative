@@ -2,6 +2,7 @@
 // command line (--brain, --connect), the brain-or-direct decision and the per-frame
 // pump. Kept out of main.c so the backend stays one include + three calls there.
 #include <remote_images.h>
+#include "klog.h"
 #include <v10_social.h>
 #include <backend.h>
 #include "backend_internal.h" // backend_probe_tick (backend_common.c)
@@ -106,7 +107,7 @@ int backend_startup(Client *client, const int offline, const int scenario) {
     // the guest stubs in case no brain answers the probe
     const int brain_mode = backend_enabled() && !offline && !direct && !g_hub_page;
     servers_ui_init(client, brain_mode);
-    if (brain_mode) printf("[mm] matchmaking through %s\n", backend_url());
+    if (brain_mode) KN_LOG_DEBUG1("[mm] matchmaking through %s\n", backend_url());
     // Krunker Strike with a director (strike_director.h): it matchmakes, also without a brain; like
     // brain_mode, the transport starts once it answers
     const int director_mode = strike_director_enabled() && !offline && !direct && !g_hub_page;

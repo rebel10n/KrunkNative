@@ -9,6 +9,7 @@
 // - Krunker shows only the video (black until it plays); the texture.png fallback for an asset whose
 //   frames cannot be had is KrunkNative's.
 #include <gl.h>
+#include "klog.h"
 #include <map_video.h>
 #include <client.h>
 #include <knv.h>
@@ -114,7 +115,7 @@ static void mv_poll(MapVideo *v) {
             v->len = len;
             v->state = MV_PLAYING;
             v->start = -1.0;
-            printf("[video] %s: %u frames %dx%d at %.3g fps\n", v->id, v->info.frame_count, v->info.frame_w, v->info.frame_h,
+            KN_LOG_VERBOSE2("[video] %s: %u frames %dx%d at %.3g fps\n", v->id, v->info.frame_count, v->info.frame_w, v->info.frame_h,
                    (double) v->info.fps_num / (double) v->info.fps_den);
         } else {
             free(data);

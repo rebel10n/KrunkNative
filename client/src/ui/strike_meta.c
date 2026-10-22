@@ -33,6 +33,7 @@
 //   legacyData the END table (hud_modes_end_rows / _cell: the mode's endStats, the server's endSort
 //              order, team totals), else the players by score
 #include <strike_ui.h>
+#include "klog.h"
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <i18n.h>
@@ -274,7 +275,7 @@ static void on_missions(void *user, const int status, const cJSON *data, const c
     T.econ_missions = cJSON_Duplicate(data, 1);
     econ_cards_build();
     T.econ_seq++;
-    printf("[strike] missions: %d daily%s\n", cJSON_GetArraySize(T.econ_cards),
+    KN_LOG_VERBOSE2("[strike] missions: %d daily%s\n", cJSON_GetArraySize(T.econ_cards),
            cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "locked")) ? " (locked)" : "");
 }
 
@@ -482,7 +483,7 @@ static char *rewards_html(void) {
     char *claim = part_string("REWARDS_TAB_SCREEN", scan.claimable > 0 ? "claim" : "claim-disabled", NULL, 0);
     const StrikeVar v[] = {{"header", header ? header : ""}, {"columns", columns ? columns : ""}, {"claim", claim}};
     char *html = strike_template("REWARDS_TAB_SCREEN", v, 3);
-    printf("[strike] REWARDS_TAB_SCREEN %d levels, level %d, %d claimable\n", bp ? bp->item_count : 0, scan.level, scan.claimable);
+    KN_LOG_VERBOSE2("[strike] REWARDS_TAB_SCREEN %d levels, level %d, %d claimable\n", bp ? bp->item_count : 0, scan.level, scan.claimable);
     free(header);
     free(columns);
     free(claim);
@@ -530,7 +531,7 @@ static void bp_tab(const HtmlElem root, const int tab) {
         const StrikeVar v[] = {{"missions", body ? body : ""}};
         html = strike_template("MISSION_TAB_SCREEN", v, 1);
         free(body);
-        printf("[strike] MISSION_TAB_SCREEN %d daily missions\n", count);
+        KN_LOG_VERBOSE2("[strike] MISSION_TAB_SCREEN %d daily missions\n", count);
     } else if (tab == 0 && battlepass_ui_status() == 3) {
         // the "bpdl" was not sent or had no answer: the tab says so, with a Retry that asks again (bp-tab:0)
         const StrikeVar v[] = {{"message", I18N("kn.strike.rewardsFailed", "Couldn't load the Battle Pass.")}, {"action", "bp-tab:0"},
@@ -776,7 +777,7 @@ static void md_render(const HtmlElem root) {
         free(er);
     }
     html_dom_set_html(board, html ? html : "");
-    printf("[strike] MATCH_DETAILS_SCREEN %s, %d players, %d stat columns\n", ffa ? "ffa" : "teams", rn, sn);
+    KN_LOG_VERBOSE2("[strike] MATCH_DETAILS_SCREEN %s, %d players, %d stat columns\n", ffa ? "ffa" : "teams", rn, sn);
     free(html);
     free(cols);
 }
@@ -876,7 +877,7 @@ static void track_ask(void) { T.track_asked = strike_econ_get_game_config(on_gam
 static void on_claimed(void *user, const int status, const cJSON *data, const cJSON *error) {
     (void) data;
     const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
-    if (status == 200) printf("[strike] claimed %s\n", user ? "a mission" : "a track level");
+    if (status == 200) KN_LOG_DEBUG1("[strike] claimed %s\n", user ? "a mission" : "a track level");
     else printf("[strike] claim refused (%d): %s\n", status, msg ? msg : "no answer");
     if (user) { // a mission: its list again
         T.econ_missions_asked = 0;
@@ -907,7 +908,7 @@ static void on_track_claimed(void *user, const int status, const cJSON *data, co
         TQ.busy = 0;
         return;
     }
-    printf("[strike] claimed a track level\n");
+    KN_LOG_DEBUG1("[strike] claimed a track level\n");
     strike_reward_show(cJSON_GetObjectItemCaseSensitive(data, "rewards"), "progressionTrack", 0, track_after_reward, NULL);
 }
 
@@ -929,7 +930,7 @@ static const cJSON *track_slot_config(const char *slot_id) {
 static void track_claim_next(void) {
     if (TQ.i >= TQ.n) {
         TQ.busy = 0;
-        printf("[strike] Rewards Track: done\n");
+        KN_LOG_DEBUG1("[strike] Rewards Track: done\n");
         return;
     }
     const char *slot = TQ.slots[TQ.i++];
@@ -978,7 +979,7 @@ static void track_render(const HtmlElem profile) {
     const StrikeVar v[] = {{"columns", columns ? columns : ""}, {"claim", claim}};
     char *html = strike_template("PROGRESSION_TRACK", v, 2);
     if (html) html_dom_insert_html(host, HTML_INSERT_BEFORE_END, html);
-    printf("[strike] PROGRESSION_TRACK %d levels, level %d, %d claimable\n", max, level, claimable);
+    KN_LOG_VERBOSE2("[strike] PROGRESSION_TRACK %d levels, level %d, %d claimable\n", max, level, claimable);
     free(html);
     free(claim);
     free(columns);
@@ -1217,8 +1218,8 @@ int strike_meta_action(const char *a) {
         const int n = econ_on() ? strike_econ_track_claimable(slots, 64) : 0;
         TQ.n = TQ.i = 0;
         for (int i = 0; i < n; i++) snprintf(TQ.slots[TQ.n++], sizeof(TQ.slots[0]), "%s", slots[i]);
-        if (!econ_on()) printf("[strike] Rewards Track: claiming needs a signed-in Strike account\n");
-        else printf("[strike] Rewards Track: claiming %d level(s)\n", n);
+        if (!econ_on()) KN_LOG_DEBUG1("[strike] Rewards Track: claiming needs a signed-in Strike account\n");
+        else KN_LOG_VERBOSE2("[strike] Rewards Track: claiming %d level(s)\n", n);
         if (TQ.n > 0) {
             TQ.busy = 1;
             track_claim_next();

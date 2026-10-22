@@ -21,6 +21,7 @@
 // a Strike player respawns on their own, no menu in between (strike_hud_death_tick).
 // The round end: LEAN_END_SCREEN (WB, the template LEAN_END_SCREEN.html) over the game.
 #include <strike_ui.h>
+#include "klog.h"
 #include <player_names.h> // Hide player names (player_names.h)
 #include <strike_econ.h>
 #include <strike_double_xp.h>
@@ -1200,7 +1201,7 @@ static void end_fill(Client *client, const int result) {
         char first[16], second[24];
         const char *cls;
         lean_words(ffa, client->net_end_rank, result, first, sizeof(first), second, sizeof(second), &cls);
-        printf("[strike] end screen: title \"%s%s\" level %d (%lld / %lld), reward %d KR, xp +%lld, claim %s\n", first, second, st.now.level,
+        KN_LOG_DEBUG1("[strike] end screen: title \"%s%s\" level %d (%lld / %lld), reward %d KR, xp +%lld, claim %s\n", first, second, st.now.level,
                (long long) st.now.xp_in_level, (long long) st.now.xp_to_next, reward, (long long) st.gained,
                claim_visible(&st) ? "up" : "no");
         if (st.lvl_up) {
@@ -1261,7 +1262,7 @@ static void lean_show(Client *client, const int result) {
     end_fill(client, result);
     H.end_shown = 1;
     H.end_result = result;
-    printf("[strike] end screen (%s)\n", result > 0 ? "victory" : result == 0 ? "defeat" : "draw");
+    KN_LOG_DEBUG1("[strike] end screen (%s)\n", result > 0 ? "victory" : result == 0 ? "defeat" : "draw");
 }
 
 // the victory banner (zde / Nde: .frvr-in-game-ui__victory-screen, a tB of the large size) for the
@@ -1339,7 +1340,7 @@ static void banner_show(Client *client, const int result) {
     if (anchor) html_dom_insert_html(anchor, HTML_INSERT_BEFORE_BEGIN, html);
     else html_dom_insert_html(h, HTML_INSERT_BEFORE_END, html);
     free(html);
-    printf("[strike] end banner \"%s%s\"\n", texts[0], count > 1 ? texts[1] : "");
+    KN_LOG_DEBUG1("[strike] end banner \"%s%s\"\n", texts[0], count > 1 ? texts[1] : "");
     H.banner_timer = html_timer_add(END_ANIM_MS, banner_done, NULL);
 }
 
@@ -1630,6 +1631,6 @@ void strike_hud_scenario(Client *client, const cJSON *st) {
     H.scn_cross = sjn(st, "crosshair", 0); // state.strike.crosshair: the Dynamic crosshair at rest (none by default)
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(st, "end");
     if (cJSON_IsNumber(end)) strike_hud_end(client, end->valueint);
-    printf("[strike] in-game scenario: %d kill-feed rows, kill card %d, scoreboard %d (%d rows)\n", H.log_count, H.kill_card, H.scn_board,
+    KN_LOG_VERBOSE2("[strike] in-game scenario: %d kill-feed rows, kill card %d, scoreboard %d (%d rows)\n", H.log_count, H.kill_card, H.scn_board,
            H.scn_row_count);
 }

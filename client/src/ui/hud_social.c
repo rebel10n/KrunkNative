@@ -3,6 +3,7 @@
 // :11085-11107 (muteUser), :16065-16098 (io_addChat), :16222-16244 (filterCM / quick chat),
 // :16450-16490 and :16573-16580 (pressButton / releaseButton: spray, spray wheel, taunts).
 #include <hud_social.h>
+#include "klog.h"
 #include <sprays.h>
 #include <backend_ui.h> // active_account: premiumT
 #include <console.h>    // ui_console_on_chat: the dev console mirrors chat
@@ -156,14 +157,14 @@ int social_mark_position(Client *client) {
     const vec3 seg = {-m[8] * 1000.0f, -m[9] * 1000.0f, -m[10] * 1000.0f};
     const float t = world_solid_fraction(&client->game, origin, seg);
     if (!(t > 0.0f && t < 1.0f)) { // raycast(...).length > 0
-        printf("[social] ping: nothing within 1000 along the view (from %.1f,%.1f,%.1f dir %.2f,%.2f,%.2f)\n", (double) origin.x, (double) origin.y, (double) origin.z, (double) seg.x / 1000.0, (double) seg.y / 1000.0, (double) seg.z / 1000.0);
+        KN_LOG_VERBOSE2("[social] ping: nothing within 1000 along the view (from %.1f,%.1f,%.1f dir %.2f,%.2f,%.2f)\n", (double) origin.x, (double) origin.y, (double) origin.z, (double) seg.x / 1000.0, (double) seg.y / 1000.0, (double) seg.z / 1000.0);
         return 0;
     }
     const NetMarkPositionSendPacket hit = {origin.x + seg.x * t, origin.y + seg.y * t, origin.z + seg.z * t};
     uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(hit)];
     const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_MARK_POSITION, &hit, sizeof(hit));
     if (n) client_net_send(client, NET_PACKET_EXT, ext, n);
-    printf("[social] ping at %.2f,%.2f,%.2f\n", (double) hit.x, (double) hit.y, (double) hit.z);
+    KN_LOG_VERBOSE2("[social] ping at %.2f,%.2f,%.2f\n", (double) hit.x, (double) hit.y, (double) hit.z);
     return n != 0;
 }
 

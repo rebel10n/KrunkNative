@@ -6,6 +6,7 @@
 // payment hooks (logBtnFRVR, XsollaPopup, ...) are no-ops. Also installs the non-inline
 // listeners (setupDom's addEventListener calls).
 #include <v10_menu.h>
+#include "klog.h"
 #include <v10_social.h>
 #include <v10_studios.h>  // v10 Studios (v10_studios.c)
 #include <ui_logic.h>
@@ -126,7 +127,7 @@ H(h_set_setting) {
     if (value.kind == HTML_ARG_STR) snprintf(text, sizeof(text), "%s", value.str);
     else if (value.kind == HTML_ARG_BOOL) snprintf(text, sizeof(text), "%s", value.num != 0.0 ? "true" : "false");
     else snprintf(text, sizeof(text), "%.15g", value.num);
-    printf("[ui] handler setSetting %s=%s\n", key, text);
+    KN_LOG_VERBOSE2("[ui] handler setSetting %s=%s\n", key, text);
     ui_settings_set(key, &value);
     return 1;
 }

@@ -44,6 +44,7 @@
 // switchTab, index.js windows[3]): a tab switch rebuilds the grid only (om_switch_tab), a search
 // flips the hidden class of its tiles (om_filter). Neither rebuilds the window (no restyle of the page).
 #include <client.h>
+#include "klog.h"
 #include <html_dom.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -1165,7 +1166,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
 // ---------------------------------------------------------------- packets
 
 static void om_on_result(const NetSpawnResultPacket *r) {
-    printf("[object-manager] action %u item %d: %s (caps %u)\n", r->action, r->item, r->status ? object_manager_status_text(r->status) : "ok", r->caps);
+    KN_LOG_VERBOSE2("[object-manager] action %u item %d: %s (caps %u)\n", r->action, r->item, r->status ? object_manager_status_text(r->status) : "ok", r->caps);
     if (r->action == OM_ACTION_SPAWN_OBJECT && om_client()) om_spawn_answered(om_client(), r->item);
     g_om.caps = r->caps;
     g_om.extra_max = r->extra_max;

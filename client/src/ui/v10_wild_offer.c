@@ -19,6 +19,7 @@
 // the Store's shop front holds only the wild offer (v10's other shop displays come from its shop
 // API: KrunkNative has none), on the Eterno Shop tab above its empty state.
 #include <v10_wild_offer.h>
+#include "klog.h"
 #include <v10_notify.h>
 #include <desktop_notify.h> // the Wild Offer on the desktop, when the Notifications switch is on
 #include <v10_ui.h>
@@ -323,7 +324,7 @@ static void show_notification(void) {
     char v[24];
     snprintf(v, sizeof(v), "%d", id);
     html_storage_set(WO_SHOWN_KEY, v);                          // markOfferAsShown
-    printf("[wildoffer] notified offer %d (skin %d)\n", id, offer_skin(W.offer));
+    KN_LOG_DEBUG1("[wildoffer] notified offer %d (skin %d)\n", id, offer_skin(W.offer));
     fflush(stdout);
 }
 
@@ -340,7 +341,7 @@ int v10_wild_offer_frame(const char *label, const cJSON *frame) {
         const int notify = W.notify_next;
         W.asking = W.notify_next = 0;
         set_offer(cJSON_GetArrayItem(frame, 1));
-        printf("[wildoffer] offer %d\n", W.offer ? offer_id(W.offer) : 0);
+        KN_LOG_DEBUG1("[wildoffer] offer %d\n", W.offer ? offer_id(W.offer) : 0);
         fflush(stdout);
         if (notify && W.offer && available(W.offer)) show_notification();
         rerender();
@@ -365,7 +366,7 @@ int v10_wild_offer_frame(const char *label, const cJSON *frame) {
             sb_append(&sb, "<div style=\"display: flex; justify-content: center; margin: 10px 0;\">");
             v10_market_card(&sb, skin, 120, 120, "top-center", NULL, NULL);
             sb_append(&sb, "</div>");
-            printf("[wildoffer] bought offer %d: %s (skin %d)\n", offer_id(W.offer), k && k->name ? k->name : "?", skin);
+            KN_LOG_DEBUG1("[wildoffer] bought offer %d: %s (skin %d)\n", offer_id(W.offer), k && k->name ? k->name : "?", skin);
             fflush(stdout);
         }
         if (cJSON_IsNumber(cJSON_GetObjectItem(r, "funds"))) account_set_funds(v10_num(r, "funds", 0));
@@ -391,7 +392,7 @@ int v10_wild_offer_frame(const char *label, const cJSON *frame) {
         if (cJSON_IsNumber(cJSON_GetObjectItem(r, "funds"))) account_set_funds(v10_num(r, "funds", 0));
         dismiss_notification();
         set_offer(cJSON_GetObjectItem(r, "offer"));
-        printf("[wildoffer] refreshed: offer %d\n", W.offer ? offer_id(W.offer) : 0);
+        KN_LOG_DEBUG1("[wildoffer] refreshed: offer %d\n", W.offer ? offer_id(W.offer) : 0);
         fflush(stdout);
         v10_view_clear();
         v10_view_push(v10_io_success("Wild Offer Refreshed!", "You have refreshed your wild offer and received a new one.", "Awesome!", "accept slim"), NULL, NULL, NULL);

@@ -1,5 +1,6 @@
 // Discord Rich Presence over the local IPC socket (client/include/discord_rpc.h).
 #include <discord_rpc.h>
+#include "klog.h"
 
 #if defined(__EMSCRIPTEN__)
 
@@ -92,7 +93,7 @@ static void rpc_close(void) {
     if (g_rpc.fd >= 0) close(g_rpc.fd);
     g_rpc.fd = -1;
 #endif
-    if (g_rpc.connected) printf("[discord] disconnected\n");
+    if (g_rpc.connected) KN_LOG_DEBUG1("[discord] disconnected\n");
     g_rpc.connected = g_rpc.ready = g_rpc.sent = 0;
     g_rpc.in_len = 0;
     g_rpc.next_try = now_seconds() + RPC_RETRY_SECONDS;
@@ -257,7 +258,7 @@ static void handle_frame(const uint32_t op, const char *payload, const uint32_t 
         return;
     }
     if (op == OP_CLOSE) {
-        printf("[discord] closed by Discord: %.*s\n", (int) (len < 200 ? len : 200), payload);
+        KN_LOG_DEBUG1("[discord] closed by Discord: %.*s\n", (int) (len < 200 ? len : 200), payload);
         rpc_close();
         return;
     }
@@ -269,7 +270,7 @@ static void handle_frame(const uint32_t op, const char *payload, const uint32_t 
         g_rpc.sent = 0;
         const cJSON *user = cJSON_GetObjectItem(cJSON_GetObjectItem(msg, "data"), "user");
         const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(user, "username"));
-        printf("[discord] connected%s%s\n", name ? " as " : "", name ? name : "");
+        KN_LOG_DEBUG1("[discord] connected%s%s\n", name ? " as " : "", name ? name : "");
     } else if (evt && !strcmp(evt, "ERROR")) {
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(msg, "data"), "message"));
         fprintf(stderr, "[discord] error: %s\n", text ? text : "?");

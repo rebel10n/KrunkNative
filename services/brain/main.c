@@ -136,6 +136,8 @@ static void usage(const char *argv0) {
            "  --migrate-only   apply migrations and exit (same as kn_migrate)\n"
            "  --no-db          run without a database (registry is local to this brain)\n"
            "  --role R[,R]     auth, community, finder (brain.roles; default all three)\n"
+           "  --debug[=N]      log level: 0 (default) warnings and the startup lines, 1 (--debug) adds INFO,\n"
+           "                   2 (--debug=2, -d 2) adds DEBUG; also KRUNKNATIVE_DEBUG=N (the flag wins)\n"
            "  --brain.port=N   any config key can be overridden like this (or KN_BRAIN_PORT=N)\n"
            "Config: config/config.json (\"brain\" section, doc/backend.md).\n",
            argv0);
@@ -172,8 +174,21 @@ int main(int argc, char **argv) {
         fprintf(stderr, "kn_brain: config: %s\n", err);
         return 2;
     }
+    const char *debug_arg = NULL, *debug_next = NULL; // --debug[=N] / -d N: applied after the config's log.level
     for (int i = 1; i < argc; i++) {
         if (kn_config_arg_consumed(cfg, i)) continue;
+        const int dbg = kn_log_debug_arg(argv[i], i + 1 < argc ? argv[i + 1] : NULL);
+        if (dbg < 0) {
+            fprintf(stderr, "kn_brain: --debug: the level must be 0, 1 or 2\n");
+            kn_config_free(cfg);
+            return 2;
+        }
+        if (dbg) {
+            debug_arg = argv[i];
+            debug_next = dbg == 2 ? argv[i + 1] : NULL;
+            i += dbg - 1;
+            continue;
+        }
         if (!strcmp(argv[i], "--migrate")) migrate = 1;
         else if (!strcmp(argv[i], "--migrate-only")) migrate_only = 1;
         else if (!strcmp(argv[i], "--no-db")) no_db = 1;
@@ -195,12 +210,14 @@ int main(int argc, char **argv) {
         }
     }
     kn_log_configure(cfg);
+    if (debug_arg) kn_log_debug_arg(debug_arg, debug_next); // the flag wins over KRUNKNATIVE_DEBUG and log.level
+    else kn_log_debug_env();
     if (!brain_roles_load(cfg)) {
         fprintf(stderr, "kn_brain: brain.roles names no known role (auth, community, finder)\n");
         kn_config_free(cfg);
         return 2;
     }
-    KN_INFO("brain", "kn_brain, Krunker v%s, build %s, config %s", ruleset_current()->version, kn_build_commit_id(),
+    KN_NOTICE("brain", "kn_brain, Krunker v%s, build %s, config %s", ruleset_current()->version, kn_build_commit_id(),
             kn_config_path(cfg)[0] ? kn_config_path(cfg) : "(none, defaults)");
     /* database.auto_migrate (default: on for the zero-config sqlite file) applies
      * pending migrations at every start, like --migrate (coord-store) */
@@ -303,7 +320,7 @@ int main(int argc, char **argv) {
     if (!rc) {
         /* tests parse "listening on http://H:PORT (ws" from this line (brain.port=0): keep the format */
         KN_INFO("brain", "roles: %s", brain_roles_text());
-        KN_INFO("brain", "brain \"%s\" (region %s) listening on http://%s:%d (ws /mm/internal/ws)%s", b->id,
+        KN_NOTICE("brain", "brain \"%s\" (region %s) listening on http://%s:%d (ws /mm/internal/ws)%s", b->id,
                 b->region, host, kn_http_server_port(b->http), b->db ? "" : " [no database]");
         rc = kn_loop_run(b->loop) ? 1 : 0;
     }

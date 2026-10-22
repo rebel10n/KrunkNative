@@ -5,6 +5,7 @@
 // in v10's settings markup (setHed / setBodH folders, settName rows with the label.switch of
 // Settings > General), one switch per mode and one per map. The pure rules are in seek_filter.c.
 #include <seek_prefs.h>
+#include "klog.h"
 #include <seek_filter.h> // the pure core (unit-tested)
 #include <krunker_net.h> // krunker_net_in_client (the Server Type texts)
 #include <ui_logic.h>
@@ -130,7 +131,7 @@ void seek_prefs_migrate_servers(void) {
     if (ui_setting_saved(SEEK_SERVERS_MIGRATED_KEY)) return;
     const char *s = cJSON_GetStringValue(ui_setting_saved(SEEK_SERVERS_KEY));
     if (s && (!strcmp(s, "official") || !strcmp(s, "both"))) {
-        printf("[ui] Quickplay %s=%s -> kn (Box Office by default)\n", SEEK_SERVERS_KEY, s);
+        KN_LOG_VERBOSE2("[ui] Quickplay %s=%s -> kn (Box Office by default)\n", SEEK_SERVERS_KEY, s);
         ui_settings_set_string(SEEK_SERVERS_KEY, "kn");
     }
     const HtmlArg one = {HTML_ARG_NUM, 1.0, NULL};
@@ -408,7 +409,7 @@ static void section_html(StrBuf *sb, const int server_rows) {
 static void save_list(const char *key, const int *list, const int count) {
     char text[512] = "";
     seek_filter_list_text(list, count, text, sizeof(text));
-    printf("[ui] Quickplay %s=%s\n", key, text[0] ? text : "(none: the public rotation)");
+    KN_LOG_VERBOSE2("[ui] Quickplay %s=%s\n", key, text[0] ? text : "(none: the public rotation)");
     ui_settings_set_string(key, text);
 }
 

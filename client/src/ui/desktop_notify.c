@@ -5,6 +5,7 @@
 // with the title and text as argv items of an `on run argv` script (nothing is quoted or escaped).
 // Windows and the web build: no desktop notifier (desktop_notify_backend() is "none").
 #include <desktop_notify.h>
+#include "klog.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,7 +120,7 @@ void desktop_notify_item(const char *title, const char *text) {
     }
     if (env_on("KRUNKNATIVE_HEADLESS") || env_on("KRUNKNATIVE_NO_BROWSER")) return;
     if (!strcmp(desktop_notify_backend(), "none")) return;
-    printf("[desktop-notify] %s: %s\n", title, text);
+    KN_LOG_VERBOSE2("[desktop-notify] %s: %s\n", title, text);
     fflush(stdout);
     os_post(title, text);
 }

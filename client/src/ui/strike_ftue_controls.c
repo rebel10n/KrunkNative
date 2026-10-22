@@ -11,6 +11,7 @@
 // The steps that need FRVR's FTUE bots (enemies_near*, enemies_far*: FTUE_BOTS / FTUE_RESPAWN, which the
 // engine does not have) are left out; ui/strike/README.md lists them with the reason.
 #include <client.h>
+#include "klog.h"
 #include <html_dom.h>
 #include <html_ui.h>
 #include <map_catalog.h>
@@ -101,7 +102,7 @@ static void finish(void) {
     G.running = 0;
     strike_ftue_end(CONTROLS_FLOW);
     strike_ftue_controls_view_clear();
-    printf("[strike] ftue: controls done\n");
+    KN_LOG_VERBOSE2("[strike] ftue: controls done\n");
 }
 
 // The view of the current step (FRVR's nB render): the hand and ripple of a delayed step wait for their timer.
@@ -136,7 +137,7 @@ static void load(const int index) {
     G.delayed_done = 0;
     const CtlStep *s = &STEPS[index];
     strike_ftue_step_done(CONTROLS_FLOW, s->id);
-    printf("[strike] ftue: controls step %s\n", s->id);
+    KN_LOG_VERBOSE2("[strike] ftue: controls step %s\n", s->id);
     show();
     if (s->timer_ms) G.timer = html_timer_add(s->timer_ms, on_timer, NULL);
     if (s->delayed_hand_ms) G.delayed = html_timer_add(s->delayed_hand_ms, on_delayed, NULL);
@@ -179,7 +180,7 @@ void strike_ftue_controls_first_run(Client *client) {
     if (strike_ftue_completed(CONTROLS_FLOW)) return;
     const int map = map_catalog_index_of_key(SANDBOX_MAP);
     const int slot = client && map >= 0 ? local_game_pick_map(client, map) : -1;
-    printf("[strike] ftue: controls sandbox %s (slot %d)\n", SANDBOX_MAP, slot);
+    KN_LOG_VERBOSE2("[strike] ftue: controls sandbox %s (slot %d)\n", SANDBOX_MAP, slot);
     G.pending = 1;
 }
 

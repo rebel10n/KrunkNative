@@ -8,6 +8,7 @@
 // token request and the socket each hold the queue until they are done with it, so a stop can never
 // free it under a callback.
 #include <krunker_ranked.h>
+#include "klog.h"
 #include <krunker_account.h>
 #include <http_stream.h>
 #include <backend.h> // backend_url_encode
@@ -100,7 +101,7 @@ static void rq_done(void *user, const int status, const char *error) {
     (void) error;
     r->stream = NULL;
     cJSON *body = status && r->buf ? cJSON_Parse(r->buf) : NULL;
-    printf("[krunker-ranked] %s %s -> %s\n", r->method, r->url, status ? "answered" : "no answer");
+    KN_LOG_DEBUG1("[krunker-ranked] %s %s -> %s\n", r->method, r->url, status ? "answered" : "no answer");
     KrunkerRankedFn fn = r->fn;
     void *user_fn = r->user;
     rq_free(r);
@@ -462,7 +463,7 @@ static void *queue_thread(void *arg) {
         Q_UNLOCK(q);
         if (!q_stopped(q) && ws_handshake(&c, &a, http_url_target(q->url))) {
             opened = 1;
-            printf("[krunker-ranked] queue socket open\n");
+            KN_LOG_DEBUG1("[krunker-ranked] queue socket open\n");
             ws_read(q, &c);
         }
         Q_LOCK(q);

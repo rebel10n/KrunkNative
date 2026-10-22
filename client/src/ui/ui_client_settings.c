@@ -23,6 +23,7 @@
 // shutdown. On the web the same item and confirmation close the tab (window.close(), or the
 // page leaves the game when the browser keeps a tab that a script did not open).
 #include <client_settings.h>
+#include "klog.h"
 #include <desktop_notify.h> // the Notifications switch (desktopNotify) drives the desktop notifier
 #include <ui_logic.h>
 #include <backend.h>         // backend_social_reconnect (a proxy change)
@@ -616,7 +617,7 @@ static void swap_init(void) {
         swap_add_root(ui);
     }
     file_set_redirect(swap_redirect);
-    printf("[client] resource swapper: %d file(s) from %s\n", g_swap.count, g_swap.dir);
+    KN_LOG_DEBUG1("[client] resource swapper: %d file(s) from %s\n", g_swap.count, g_swap.dir);
 }
 #endif
 
@@ -680,7 +681,7 @@ static void apply_raw_input(void) {
     Client *client = g_cs.client;
     if (!client || !client->window || !glfwRawMouseMotionSupported()) return;
     glfwSetInputMode(client->window, GLFW_RAW_MOUSE_MOTION, raw ? GLFW_TRUE : GLFW_FALSE);
-    printf("[client] raw mouse motion %s\n", raw ? "on" : "off");
+    KN_LOG_DEBUG1("[client] raw mouse motion %s\n", raw ? "on" : "off");
 #else
     // main.c's web look (web_take_look) reads pointerrawupdate while Module.knMouse.raw is set
     EM_ASM({ var m = Module.knMouse || (Module.knMouse = {}); m.raw = $0; }, raw ? 1 : 0);
@@ -963,14 +964,14 @@ static void apply_priority(void) {
     for (int i = 0; i < COUNT(MAP); i++) {
         if (strcmp(MAP[i].name, value)) continue;
         if (!SetPriorityClass(GetCurrentProcess(), MAP[i].cls)) fprintf(stderr, "[client] priority %s failed\n", value);
-        else printf("[client] process priority %s\n", value);
+        else KN_LOG_DEBUG1("[client] process priority %s\n", value);
     }
 #else
     static const struct { const char *name; int nice; } MAP[] = {{"Below Normal", 5}, {"Low", 10}, {"Idle", 19}};
     for (int i = 0; i < COUNT(MAP); i++) {
         if (strcmp(MAP[i].name, value)) continue;
         if (setpriority(PRIO_PROCESS, 0, MAP[i].nice) != 0) fprintf(stderr, "[client] priority %s failed: %s\n", value, strerror(errno));
-        else printf("[client] process priority %s (nice %d)\n", value, MAP[i].nice);
+        else KN_LOG_DEBUG1("[client] process priority %s (nice %d)\n", value, MAP[i].nice);
     }
 #endif
 }
@@ -1018,7 +1019,7 @@ void client_settings_startup(Client *client, int *offline) {
     if (backend[0] && !(env_backend && *env_backend)) {
         set_env("KRUNKNATIVE_AUDIO_BACKEND", backend);
         g_cs.audio_env_set = 1;
-        printf("[client] audio backend %s\n", backend);
+        KN_LOG_DEBUG1("[client] audio backend %s\n", backend);
     }
     char output[AUDIO_DEVICE_NAME_MAX];
     cs_string("audioOutput", output, sizeof(output));
@@ -1037,7 +1038,7 @@ void client_settings_startup(Client *client, int *offline) {
 #endif
     if (offline && cs_bool("startOffline")) {
         *offline = 1;
-        printf("[client] start offline (Settings > Game > Gameplay)\n");
+        KN_LOG_DEBUG1("[client] start offline (Settings > Game > Gameplay)\n");
     }
 }
 
@@ -1485,7 +1486,7 @@ const char *ui_client_settings_reload(void) {
         char now[256];
         setting_value(s, now, sizeof(now));
         if (!strcmp(now, before[i])) continue;
-        printf("[client] reload: %s %s -> %s\n", s->key, before[i], now);
+        KN_LOG_DEBUG1("[client] reload: %s %s -> %s\n", s->key, before[i], now);
         if (s->flags & CS_RESTART) {
             if (!restart) restart = s->name; // applies at startup only
             continue;

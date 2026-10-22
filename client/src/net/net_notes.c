@@ -5,6 +5,7 @@
 // into a small queue that ui_console_tick() empties into the in-game console on the main
 // thread, so the native transport thread may call it too.
 #include <client.h>
+#include "klog.h"
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,7 +27,7 @@ void client_net_note(const int level, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line, sizeof(line), fmt, ap);
     va_end(ap);
-    printf("[net] %s\n", line);
+    KN_LOG_VERBOSE2("[net] %s\n", line);
     fflush(stdout);
 
     pthread_mutex_lock(&g_notes.lock);

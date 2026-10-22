@@ -1,4 +1,5 @@
 #include <gl.h>
+#include "klog.h"
 #include <GLFW/glfw3.h>
 #include <client.h>
 #include <cosmetics.h>
@@ -283,7 +284,7 @@ static void print_usage_to(FILE *out, const char *program) {
     // backend_parse_args, app_mode_parse_args) is listed: server/tests/strike_flavor_e2e.py checks it.
     fprintf(out, "Usage: %s [--offline|--sandbox] [--map <name>] [--headless] [--windowed|--fullscreen|--borderless]\n"
                  "          [--flavor base|strike] [--game|--hub|--viewer [query]] [--brain <url>] [--connect <host[:port]>]\n"
-                 "          [--mode online|offline] [--finder <url>] [map.json]\n"
+                 "          [--mode online|offline] [--finder <url>] [--debug[=N]] [map.json]\n"
                  "  --offline       play on the in-process sandbox server (no network); a random rotation map\n"
                  "                  unless --map / map.json (console `offline`, web ?offline=1)\n"
                  "  --sandbox       --offline on the sandbox map, v7's blank Test map (console `sandbox`, web ?sandbox)\n"
@@ -306,6 +307,7 @@ static void print_usage_to(FILE *out, const char *program) {
                  "  --mode online|offline     account mode (Settings > Game > Gameplay > Account Mode): offline = no account\n"
                  "                  service at all, every skin owned, nothing saved\n"
                  "  --finder <url>  the community server list (default https://matchmaker.krunk.io/servers; off = none)\n"
+                 KN_DEBUG_USAGE
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
                  "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
                  "       %s --help | -h | --version | --voice-info   (--voice-info: the linked Opus version)\n",
@@ -634,7 +636,11 @@ static void client_resolve_flavor(int *argc, char **argv) {
         } else if (!strcmp(argv[i], "--flavor")) {
             if (i + 1 < *argc) flavor_set_key(argv[++i]); // consume the key too
         } else {
-            argv[out++] = argv[i];
+            // --debug, --debug=N, -d N: the debug output level (klog.h), not an argument of the game
+            const int dbg = kn_debug_parse_arg(argv[i], i + 1 < *argc ? argv[i + 1] : NULL);
+            if (dbg < 0) exit(2);
+            if (dbg) i += dbg - 1;
+            else argv[out++] = argv[i];
         }
     }
     if (out < *argc) argv[out] = NULL;
@@ -642,6 +648,7 @@ static void client_resolve_flavor(int *argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    kn_debug_init_env(); // KRUNKNATIVE_DEBUG; a --debug flag on the command line overrides it (klog.h)
 #ifdef __EMSCRIPTEN__
     web_resolve_flavor(); // the web build has no command line: the page picks the flavor
 #else
@@ -916,7 +923,7 @@ int main(int argc, char **argv) {
 #endif
         stbi_image_free(icon.pixels);
     }
-    printf("[window] title \"%s\", class \"%s\", icon %s (%dx%d)\n", glfwGetWindowTitle(INSTANCE.window), window_wm_class(),
+    KN_LOG_DEBUG1("[window] title \"%s\", class \"%s\", icon %s (%dx%d)\n", glfwGetWindowTitle(INSTANCE.window), window_wm_class(),
            icon.pixels ? icon_path : "none", icon.width, icon.height);
 
     free(icon_path);

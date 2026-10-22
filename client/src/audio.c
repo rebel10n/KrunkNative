@@ -15,6 +15,7 @@
 // > AUDIO_STREAM_BYTES of MP3) stay compressed in memory and every voice streams them
 // through its own decoder instead.
 #include <audio.h>
+#include "klog.h"
 #include <voice_chat.h> // voice_audio_fini
 #include <shared.h>
 #include "audio_miniaudio.h"
@@ -493,7 +494,7 @@ static void voice_start(const PendingPlay *play) {
     ma_sound_start(&voice->sound);
 
     if (g_audio.log) {
-        printf("[audio] t=%.3f play%s %s vol=%.3f rate=%.2f%s", audio_now(),
+        KN_LOG_VERBOSE2("[audio] t=%.3f play%s %s vol=%.3f rate=%.2f%s", audio_now(),
             play->kind == VOICE_2D ? "2d" : "3d", clip->name,
             clamp01(voice->volume * category_factor(clip->category)) * g_audio.volumes[AUDIO_CAT_MASTER],
             play->rate, play->loop ? " loop" : "");
@@ -708,7 +709,7 @@ void audio_set_output_device(const char *name) {
         return;
     }
     if (ma_device_start(&g_audio.device) != MA_SUCCESS) fprintf(stderr, "[audio] cannot start the output device\n");
-    printf("[audio] output device %s\n", g_audio.device.playback.name);
+    KN_LOG_VERBOSE2("[audio] output device %s\n", g_audio.device.playback.name);
 #endif
 }
 
@@ -800,7 +801,7 @@ int audio_init(void) {
 
     if (g_audio.log) {
         const ma_device *device = ma_engine_get_device(&g_audio.engine);
-        printf("[audio] engine %u Hz, %u channels, %s: %s\n", ma_engine_get_sample_rate(&g_audio.engine), ma_engine_get_channels(&g_audio.engine),
+        KN_LOG_VERBOSE2("[audio] engine %u Hz, %u channels, %s: %s\n", ma_engine_get_sample_rate(&g_audio.engine), ma_engine_get_channels(&g_audio.engine),
             device ? ma_get_backend_name(device->pContext->backend) : "?", device ? device->playback.name : "?");
     }
 
@@ -1047,7 +1048,7 @@ void audio_stop(const char *name) {
     if (!g_audio.ready) return;
     const int clip = clip_find(name, 0);
     if (clip < 0) return;
-    if (g_audio.log) printf("[audio] t=%.3f stop %s\n", audio_now(), name);
+    if (g_audio.log) KN_LOG_VERBOSE2("[audio] t=%.3f stop %s\n", audio_now(), name);
     stop_matching(clip, 1, VOICE_2D);
 }
 

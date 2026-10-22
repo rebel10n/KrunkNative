@@ -1,5 +1,6 @@
 // Startup chdir to the install root of a packaged client (install_root.h).
 #include <install_root.h>
+#include "klog.h"
 
 #ifdef __EMSCRIPTEN__
 
@@ -81,7 +82,7 @@ int install_root_chdir(void) {
     char ui[PATH_MAX + 4];
     snprintf(ui, sizeof(ui), "%s/ui", root);
     if (!is_dir(ui) || chdir(root) != 0) return 0;
-    printf("[install] working directory %s (was %s)\n", root, cwd[0] ? cwd : "?");
+    KN_LOG_DEBUG1("[install] working directory %s (was %s)\n", root, cwd[0] ? cwd : "?");
     return 1;
 }
 

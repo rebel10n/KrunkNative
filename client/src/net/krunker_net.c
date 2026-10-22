@@ -7,6 +7,7 @@
 // on_client_socket_* events are made for a transport thread). Every use of the link (its ahNum,
 // the input compression state) holds K.lock, so frames leave in encode order from both threads.
 #include <krunker_net.h>
+#include "klog.h"
 #include <krunker_link.h>
 #include <krunker_build_fetch.h> // the live Krunker build (a published build.json, else krunker_build.h)
 #include <krunker_build_live.h>
@@ -256,21 +257,21 @@ static void trace_frame(const char *dir, const uint8_t *data, const size_t len) 
     if (!trace_on()) return;
     KrunkerFrame f;
     if (krunker_proto_decode(data, len, 0, &f) != KRUNKER_PROTO_OK) {
-        printf("[krunker] %s (%zu bytes, undecodable)\n", dir, len);
+        KN_LOG_VERBOSE2("[krunker] %s (%zu bytes, undecodable)\n", dir, len);
         return;
     }
     // (an outgoing rpc: its arguments may be the account's access token, rpc LOGIN)
     if ((!strcmp(dir, "=>") && !strcmp(f.name, krunker_c2s_wire(KRUNKER_C2S_RPC))) ||
         !strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_ACCOUNT_RESPONSE)) || !strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_NEW_TOKEN))) {
         // the account's answer / a new session token: tokens are never logged
-        printf("[krunker] %s %s ah=%d (account data, not logged)\n", dir, f.name, f.ah_echo);
+        KN_LOG_DEBUG1("[krunker] %s %s ah=%d (account data, not logged)\n", dir, f.name, f.ah_echo);
         krunker_frame_free(&f);
         return;
     }
     KrunkerBuf json = {0};
     const KrunkerValue args = KRUNKER_V_ARRAY(f.args, f.argc);
     krunker_value_to_json(&args, &json);
-    printf("[krunker] %s %s ah=%d %.*s\n", dir, f.name, f.ah_echo, json.len > 600 ? 600 : (int) json.len, json.data ? (const char *) json.data : "");
+    KN_LOG_VERBOSE2("[krunker] %s %s ah=%d %.*s\n", dir, f.name, f.ah_echo, json.len > 600 ? 600 : (int) json.len, json.data ? (const char *) json.data : "");
     krunker_buf_free(&json);
     krunker_frame_free(&f);
 }
@@ -305,7 +306,7 @@ static void recps_dump_frame(const uint8_t *data, const size_t len) {
             fclose(out);
             g_recps_done = 1;
         }
-        printf("[krunker] recps: %zu bytes of args %s %s\n", json.len, out ? "written to" : "NOT written to", path);
+        KN_LOG_VERBOSE2("[krunker] recps: %zu bytes of args %s %s\n", json.len, out ? "written to" : "NOT written to", path);
         krunker_buf_free(&json);
     } else if (strcmp(f.name, wire) == 0) {
         printf("[krunker] recps: no rows yet (logged out or no table), asked again\n");
@@ -328,7 +329,7 @@ static void recps_probe_tick(void) {
         g_recps_next = now + 3.0;
         g_recps_tries++;
         const int sent = krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_CRAFT_DATA_REQUEST), NULL, 0);
-        printf("[krunker] recps: request %d %s\n", g_recps_tries, sent ? "sent" : "not sent");
+        KN_LOG_VERBOSE2("[krunker] recps: request %d %s\n", g_recps_tries, sent ? "sent" : "not sent");
     }
     pthread_mutex_unlock(&K.lock);
 }
@@ -395,7 +396,7 @@ static void kmap_fail(int index, const char *custom_id, const char *why);
 
 static void link_event(void *user, const KrunkerLinkEvent kind, const char *text) {
     (void) user;
-    printf("[krunker] %s%s\n", kind == KRUNKER_LINK_EV_CAPTCHA ? "captcha required " : "", text ? text : "");
+    KN_LOG_VERBOSE2("[krunker] %s%s\n", kind == KRUNKER_LINK_EV_CAPTCHA ? "captcha required " : "", text ? text : "");
     char out[300];
     switch (kind) {
         case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big)
@@ -533,7 +534,7 @@ static void kmap_tick(Client *client) {
         const int slot = client_map_list_add(client, json);
         if (slot >= 0) {
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "name"));
-            printf("[krunker] map %d%s%s: %s (map slot %d)\n", index, K.map_req.custom_id[0] ? ", custom " : "", K.map_req.custom_id,
+            KN_LOG_VERBOSE2("[krunker] map %d%s%s: %s (map slot %d)\n", index, K.map_req.custom_id[0] ? ", custom " : "", K.map_req.custom_id,
                    name ? name : "?", slot);
             client_set_custom_game_id(client, json, K.map_req.custom_id); // GAME.COOKIES' key for this custom game
             pthread_mutex_lock(&K.lock);
@@ -788,12 +789,12 @@ static void socket_recent(void) {
     for (unsigned k = first; k < total; k++) frames[k - first] = K.link.recent[k % KRUNKER_LINK_RECENT];
     pthread_mutex_unlock(&K.lock);
     const double now = link_now_ms(NULL);
-    printf("[krunker] last %u frames before the close (oldest first; age: s before the close; dt: ms since the frame before):\n",
+    KN_LOG_VERBOSE2("[krunker] last %u frames before the close (oldest first; age: s before the close; dt: ms since the frame before):\n",
            total - first);
     for (unsigned k = first; k < total; k++) {
         const KrunkerLinkRecent *r = &frames[k - first];
-        if (k == first) printf("[krunker]   %c %-8s age %7.3f s  dt      -  args %s\n", r->dir, r->type, (now - r->t_ms) / 1000.0, r->args);
-        else printf("[krunker]   %c %-8s age %7.3f s  dt %6.1f ms  args %s\n", r->dir, r->type, (now - r->t_ms) / 1000.0,
+        if (k == first) KN_LOG_VERBOSE2("[krunker]   %c %-8s age %7.3f s  dt      -  args %s\n", r->dir, r->type, (now - r->t_ms) / 1000.0, r->args);
+        else KN_LOG_VERBOSE2("[krunker]   %c %-8s age %7.3f s  dt %6.1f ms  args %s\n", r->dir, r->type, (now - r->t_ms) / 1000.0,
                     r->t_ms - frames[k - first - 1].t_ms, r->args);
     }
 }
@@ -1533,8 +1534,8 @@ static void seek(void) {
     // the krunker.io account (krunker_account.h): matchmakerSeek's last parameter (:147630)
     if (K.access[0]) append_param(url, sizeof(url), "accessToken", K.access);
     K.state = KS_SEEK;
-    if (token_end) printf("[krunker] seek-game: %.*s(redacted)%.*s", (int) token_at, url, (int) (logged - token_end), url + token_end);
-    else printf("[krunker] seek-game: %.*s", (int) logged, url);
+    if (token_end) KN_LOG_VERBOSE2("[krunker] seek-game: %.*s(redacted)%.*s", (int) token_at, url, (int) (logged - token_end), url + token_end);
+    else KN_LOG_VERBOSE2("[krunker] seek-game: %.*s", (int) logged, url);
     printf("%s%s\n", K.captcha_sent ? "&captchaToken=(the player's Turnstile token)" : "", K.access[0] ? "&accessToken=(the krunker.io account's)" : "");
     const int queued = http_get(url, on_seek); // (the request keeps its own copy)
     wipe(K.captcha, sizeof(K.captcha));          // single-use: never sent twice
@@ -1586,9 +1587,9 @@ static void on_game_list(void *user, const int status, const char *body, const s
     }
     if (best) {
         snprintf(K.game_id, sizeof(K.game_id), "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
-        printf("[krunker] game-list: %s (%.0f players), not one of the recent games\n", K.game_id, best_players);
+        KN_LOG_DEBUG1("[krunker] game-list: %s (%.0f players), not one of the recent games\n", K.game_id, best_players);
     } else {
-        printf("[krunker] game-list: %s: the matchmaker picks (excludeGame %s)\n",
+        KN_LOG_DEBUG1("[krunker] game-list: %s: the matchmaker picks (excludeGame %s)\n",
                res ? (listed ? "no other game with room in the region" : "no games") : "unavailable", K.exclude[0] ? K.exclude : "none");
     }
     cJSON_Delete(res);
@@ -1643,7 +1644,7 @@ static void on_token(void *user, const int status, const char *body, const size_
         }
         K.token[n] = 0;
     }
-    if (K.token[0]) printf("[krunker] generate-token: %zu chars\n", strlen(K.token));
+    if (K.token[0]) KN_LOG_VERBOSE2("[krunker] generate-token: %zu chars\n", strlen(K.token));
     else fprintf(stderr, "[krunker] generate-token failed (HTTP %d): seeking without a validation token\n", status);
     seek();
 }
@@ -1679,7 +1680,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     if (K.qp_fn && quick_play_retry_stale(K.qp_gen)) {
         // Quick Play was stopped (F4 / Quick Match again, Escape, leaving the menu) while this seek was out:
         // the answer is dropped and the join ends quietly, the menu as the stop left it
-        printf("[krunker] quick play: a late answer is ignored (the search was stopped)\n");
+        KN_LOG_VERBOSE2("[krunker] quick play: a late answer is ignored (the search was stopped)\n");
         krunker_net_leave(K.client, NULL);
         menu_connect_stopped();
         return;
@@ -1707,7 +1708,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         } else {
             K.captcha_attempts++;
             K.state = KS_CAPTCHA;
-            printf("[krunker] seek-game: CaptchaRequired%s: the player solves Turnstile\n", refused ? " again (the token was refused)" : "");
+            KN_LOG_VERBOSE2("[krunker] seek-game: CaptchaRequired%s: the player solves Turnstile\n", refused ? " again (the token was refused)" : "");
             krunker_captcha_ask(K.captcha_attempts, refused, captcha_done, user);
         }
     } else if (status == 0) { // no answer at all (DNS, refused, timeout, the proxy)
@@ -1721,7 +1722,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         // seek, with nothing to exclude: the player left no game). The loading state stays up through
         // it (join), no toast; the log says why.
         const int full = !strcmp(error, "GameFull");
-        printf("[krunker] reload: official game %s is %s: seeking another game\n", K.game_id, full ? "full" : "gone");
+        KN_LOG_DEBUG1("[krunker] reload: official game %s is %s: seeking another game\n", K.game_id, full ? "full" : "gone");
         K.reload = 0;
         K.game_id[0] = 0;
         K.exclude[0] = 0;
@@ -1743,7 +1744,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         return;
     } else if (error && !strcmp(error, "GameFull") && kio_retry()) {
         // a Quick Play join's game is full (the list was stale, or Find New Game's answer): tried again after the backoff
-        printf("[krunker] seek-game: %s is full: Quick Play tries again\n", K.game_id[0] ? K.game_id : "(any)");
+        KN_LOG_VERBOSE2("[krunker] seek-game: %s is full: Quick Play tries again\n", K.game_id[0] ? K.game_id : "(any)");
         cJSON_Delete(res);
         return;
     } else if (status != 200 || error || !host || !game || !client_id) {
@@ -1762,7 +1763,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             K.seek_new_retries++;
             K.game_id[0] = 0;
             snprintf(K.exclude, sizeof(K.exclude), "%s", game);
-            printf("[krunker] seek-game: %s is full (the game list): seeking again without it\n", game);
+            KN_LOG_VERBOSE2("[krunker] seek-game: %s is full (the game list): seeking again without it\n", game);
             cJSON_Delete(res);
             seek();
             return;
@@ -1790,10 +1791,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (K.seek_new_retries < KRUNKER_SEEK_NEW_RETRIES) {
             K.seek_new_retries++;
             snprintf(K.exclude, sizeof(K.exclude), "%s", game);
-            printf("[krunker] seek-game: %s is a recent game: seeking again without it\n", game);
+            KN_LOG_VERBOSE2("[krunker] seek-game: %s is a recent game: seeking again without it\n", game);
         } else {
             snprintf(K.game_id, sizeof(K.game_id), "%s", K.fallback);
-            printf("[krunker] seek-game: only recent games have room: %s\n", K.fallback);
+            KN_LOG_VERBOSE2("[krunker] seek-game: only recent games have room: %s\n", K.fallback);
         }
         cJSON_Delete(res);
         seek();
@@ -1812,7 +1813,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         // the krunker.io account: "at=" + the fresh access token as it is (iîíîiìî :222367, after tc)
         snprintf(K.ws_url, sizeof(K.ws_url), "%s%s%s", K.ws_log, K.access[0] ? "&at=" : "", K.access);
         snprintf(K.host, sizeof(K.host), "%s", host);
-        printf("[krunker] seek-game: game %s on %s:%s, opening %s%s\n", game, host, port_s, K.ws_log,
+        KN_LOG_DEBUG1("[krunker] seek-game: game %s on %s:%s, opening %s%s\n", game, host, port_s, K.ws_log,
                K.access[0] ? "&at=(the krunker.io account's token)" : "");
         load_ws_texts();
         K.state = KS_CONNECTING;
@@ -1925,7 +1926,7 @@ static void open_match(void) {
         fail("%s", text);
         return;
     }
-    printf("[krunker] ranked match: opening %s%s\n", K.ws_log, K.access[0] ? "at=(the krunker.io account's token)" : "");
+    KN_LOG_DEBUG1("[krunker] ranked match: opening %s%s\n", K.ws_log, K.access[0] ? "at=(the krunker.io account's token)" : "");
     load_ws_texts();
     K.state = KS_CONNECTING;
     kmap_reset();
@@ -1942,7 +1943,7 @@ static void open_match(void) {
 static void on_access(void *user, const char *token) {
     if (stale(user) || K.state != KS_ACCOUNT) return;
     snprintf(K.access, sizeof(K.access), "%s", token && strlen(token) < sizeof(K.access) ? token : "");
-    if (K.access[0]) printf("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
+    if (K.access[0]) KN_LOG_DEBUG1("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
     else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
     if (K.match[0]) return open_match();
     K.state = KS_BUILD;
@@ -1958,7 +1959,7 @@ static int retry_version(const char *error) {
     if (K.version_retries >= 2 || (!build_url() && !krunker_build()->live)) return 0; // (nowhere else to get a build)
     snprintf(K.refused_build[K.version_retries], sizeof(K.refused_build[0]), "%s", krunker_build()->build_version);
     K.version_retries++;
-    printf("[krunker] seek-game: %s for buildVersion %s: checking for a newer Krunker build\n", error, krunker_build()->build_version);
+    KN_LOG_DEBUG1("[krunker] seek-game: %s for buildVersion %s: checking for a newer Krunker build\n", error, krunker_build()->build_version);
     K.state = KS_BUILD;
     krunker_build_refresh(build_url(), 1, on_build_retry, (void *) (uintptr_t) K.generation);
     return 1;
@@ -1988,7 +1989,7 @@ static void on_build_retry(void *user, const KrunkerBuildSource src, const char 
         fail("%s", text);
         return;
     }
-    printf("[krunker] seeking again with Krunker %s (buildVersion %s)\n", krunker_build()->client_version, krunker_build()->build_version);
+    KN_LOG_VERBOSE2("[krunker] seeking again with Krunker %s (buildVersion %s)\n", krunker_build()->client_version, krunker_build()->build_version);
     matchmaker();
     K.captcha_attempts = K.captcha_sent = 0;
     K.captcha_unavailable_retry = 0;
@@ -1997,8 +1998,8 @@ static void on_build_retry(void *user, const KrunkerBuildSource src, const char 
 
 // The region is known: the account's token, then the list or the seek.
 static void join_seek(void) {
-    if (K.exclude[0]) printf("[krunker] finding a new official game (region %s, not %s) through %s\n", K.region, K.exclude, K.matchmaker);
-    else printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
+    if (K.exclude[0]) KN_LOG_DEBUG1("[krunker] finding a new official game (region %s, not %s) through %s\n", K.region, K.exclude, K.matchmaker);
+    else KN_LOG_DEBUG1("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
     // the live client's order (seek, :147412): the account's fresh access token first (a refresh when it
     // is about to expire), then on_access starts Find New Game's list or seek-game, no validation token;
     // generate-token only before a captcha retry (captcha_done) or after a refused token (on_seek)
@@ -2071,7 +2072,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     matchmaker();
     wipe(K.access, sizeof(K.access));
     if (K.match[0]) { // a ranked match's socket (v10's _33929): no region to resolve, the account's token first
-        printf("[krunker] joining the ranked match at %s (game %s)\n", K.match, K.game_id[0] ? K.game_id : "(any)");
+        KN_LOG_DEBUG1("[krunker] joining the ranked match at %s (game %s)\n", K.match, K.game_id[0] ? K.game_id : "(any)");
         K.state = KS_ACCOUNT;
         krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
         return K.state != KS_CLOSED;
@@ -2121,7 +2122,7 @@ int krunker_net_reload_join(Client *client, const char *game_id, const char *reg
     char game[sizeof(K.game_id)], r[sizeof(K.region)];
     snprintf(game, sizeof(game), "%s", game_id ? game_id : "");
     snprintf(r, sizeof(r), "%s", region ? region : "");
-    printf("[krunker] reload: rejoining official game %s\n", game[0] ? game : "(any)");
+    KN_LOG_DEBUG1("[krunker] reload: rejoining official game %s\n", game[0] ? game : "(any)");
     return join(client, game, r[0] ? r : NULL, 0, NULL, 1, NULL);
 }
 
@@ -2165,7 +2166,7 @@ void krunker_net_leave(Client *client, const char *reason) {
         }
         pthread_mutex_unlock(&client->net_lock);
     }
-    printf("[krunker] leaving the official game%s%s\n", reason ? ": " : "", reason ? reason : "");
+    KN_LOG_DEBUG1("[krunker] leaving the official game%s%s\n", reason ? ": " : "", reason ? reason : "");
     if (reason) snprintf(K.failure, sizeof(K.failure), "%s", reason); // the error screen it ends on
     K.state = KS_OFF;
     Client *owner = client ? client : K.client;
@@ -2291,7 +2292,7 @@ int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, v
                " sign in to krunker.io\n");
         return 0;
     case KRUNKER_HOST_BUSY:
-        printf("[krunker] custom game: a request is already waiting for krunker.io's answer\n");
+        KN_LOG_VERBOSE2("[krunker] custom game: a request is already waiting for krunker.io's answer\n");
         return 0;
     case KRUNKER_HOST_READY:
         break;
@@ -2319,7 +2320,7 @@ int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, v
         printf("[krunker] custom game: the request was not sent\n");
         return 0;
     }
-    printf("[krunker] custom game: request sent to krunker.io (%zu config values)\n", slots);
+    KN_LOG_VERBOSE2("[krunker] custom game: request sent to krunker.io (%zu config values)\n", slots);
     return 1;
 }
 
@@ -2344,7 +2345,7 @@ static void host_custom_tick(const double now) {
     if (!replied) printf("[krunker] custom game: no answer from krunker.io\n");
     if (!done) return;
     if (game[0]) {
-        printf("[krunker] custom game: created %s\n", game);
+        KN_LOG_DEBUG1("[krunker] custom game: created %s\n", game);
         done(user, game, region, NULL);
         return;
     }
@@ -2378,7 +2379,7 @@ static void trace_sync_tick(Client *client) {
         const Player *me = client->me;
 #define SINCE(v, v0) ((v) >= (v0) ? (v) - (v0) : (v)) // a new socket restarts the link's counters
 
-        printf("[krunker] sync %.1fs: q %u (%u inputs) isn %d ack %d (%d behind) l %u f %u corr %u/%u max %.2f pending %zu "
+        KN_LOG_VERBOSE2("[krunker] sync %.1fs: q %u (%u inputs) isn %d ack %d (%d behind) l %u f %u corr %u/%u max %.2f pending %zu "
                "srv %.2f %.2f %.2f me %.2f %.2f %.2f lm %d lock %d paused %d cc %u/%u\n",
                dt, SINCE(q, q0), SINCE(frames, frames0), isn, ack, isn >= 0 && ack >= 0 ? isn - ack : -1, SINCE(syncs, syncs0),
                SINCE(failed, failed0), SINCE(corr, corr0), SINCE(recons, recons0), (double) client->net_recon_error_peak, client->net_pending_count, (double) sx, (double) sy, (double) sz,
@@ -2408,7 +2409,7 @@ static void on_login_token(void *user, const char *token) {
         }
     }
     pthread_mutex_unlock(&K.lock);
-    if (sent) printf("[krunker] signed in during the game: the socket logs in with the krunker.io account\n");
+    if (sent) KN_LOG_DEBUG1("[krunker] signed in during the game: the socket logs in with the krunker.io account\n");
 }
 
 void krunker_net_account_signed_in(void) {
@@ -2434,7 +2435,7 @@ void krunker_net_tick(Client *client) {
         points = K.link.account_ranked_points;
         pthread_mutex_unlock(&K.lock);
         if (signed_in) {
-            printf("[krunker] the game server signed in the krunker.io account %s (level %d)\n", name, level);
+            KN_LOG_DEBUG1("[krunker] the game server signed in the krunker.io account %s (level %d)\n", name, level);
             if (K.access[0]) krunker_account_note_game(name, level);
         }
         if (K.access[0] && rp_known) krunker_account_note_points(points);
@@ -2452,7 +2453,7 @@ void krunker_net_tick(Client *client) {
         snprintf(why, sizeof(why), "%s", K.map_why);
         pthread_mutex_unlock(&K.lock);
         i18n_replace(text, sizeof(text), K.tpl.map, 2, I18N_ARGV(label, why));
-        printf("[krunker] leaving: %s\n", text);
+        KN_LOG_DEBUG1("[krunker] leaving: %s\n", text);
         Client *leaving = client ? client : K.client;
         krunker_net_leave(leaving, text);
         if (leaving) on_client_socket_failed(leaving, text); // the session ended: the Lost Connection screen says why
@@ -2501,7 +2502,7 @@ void krunker_net_tick(Client *client) {
             pthread_mutex_lock(&K.lock);
             if (krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_cptR), args, 1)) K.link.captchas_solved++;
             pthread_mutex_unlock(&K.lock);
-            printf("[krunker] security challenge answered (%s proof of work, number %ld)\n", K.altcha.algorithm, K.altcha.next);
+            KN_LOG_VERBOSE2("[krunker] security challenge answered (%s proof of work, number %ld)\n", K.altcha.algorithm, K.altcha.next);
         } else if (rc < 0 && K.state == KS_OPEN) {
             set_popup_notice(1, "%s", K.tpl.pow);
         }

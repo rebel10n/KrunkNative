@@ -12,6 +12,7 @@
 // streaks (g_streaks + v10 data/streaks.js descriptions) and the Spin History rows (store_ui.c).
 // KrunkNative difference: player-made attribute values (name tags) are escaped; v10 inserts them raw.
 #include <ui_tooltip.h>
+#include "klog.h"
 #include <ui_logic.h>
 #include <shared.h>
 #include "../viewer/viewer_store.h"
@@ -64,7 +65,7 @@ void ui_tooltip_show(const HtmlElem el, const char *html) {
     char style[96];
     snprintf(style, sizeof(style), "top:%.6gpx;left:%.6gpx;", (double) at.y - ((double) box.h + TIP_GAP) - 4.0, (double) at.x);
     html_dom_set_attr(tip, "style", style);
-    printf("[tooltip] at %.0f,%.0f %.0fx%.0f\n", (double) at.x, (double) at.y - ((double) box.h + TIP_GAP) - 4.0, (double) box.w, (double) box.h);
+    KN_LOG_VERBOSE2("[tooltip] at %.0f,%.0f %.0fx%.0f\n", (double) at.x, (double) at.y - ((double) box.h + TIP_GAP) - 4.0, (double) box.w, (double) box.h);
 }
 
 static int attr_int(const HtmlElem el, const char *name, int *out) {

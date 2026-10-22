@@ -6,6 +6,7 @@
 // client->net_socket holds a virtual descriptor while the session is up, so every
 // client_net_send_packet() caller works unchanged: net_send_packet() hands virtual fds to
 // net_udp_client_send() below (any thread; g_cu.lock serialises the KnetConn).
+#include "klog.h"
 #ifndef __EMSCRIPTEN__
 #include <client.h>
 #include <knet.h>
@@ -245,7 +246,7 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
     pthread_mutex_unlock(&g_cu.lock);
     net_set_virtual_send(net_udp_client_send);
     if (knet_sim_active(&g_cu.sim)) {
-        printf("[udp] loss simulation: drop %d%% dup %d%% reorder %d%% (inbound)\n", g_cu.sim.drop, g_cu.sim.dup, g_cu.sim.reorder);
+        KN_LOG_VERBOSE2("[udp] loss simulation: drop %d%% dup %d%% reorder %d%% (inbound)\n", g_cu.sim.drop, g_cu.sim.dup, g_cu.sim.reorder);
     }
 
     pthread_mutex_lock(&client->net_lock);

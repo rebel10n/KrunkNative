@@ -1,4 +1,5 @@
 #include <server_cli.h>
+#include "klog.h"
 #include <ruleset.h> // the startup log: Krunker v10.0.3
 #include <flavor.h>   // --flavor / server.cfg `flavor`: the product flavor (Krunker Strike)
 #include <flavor_rules.h> // the flavor's mode rotation (Krunker Strike)
@@ -293,6 +294,14 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
 
+        // --debug[=N] / -d N: the debug output level (klog.h)
+        const int dbg = kn_debug_parse_arg(arg, i + 1 < argc ? argv[i + 1] : NULL);
+        if (dbg < 0) return 0;
+        if (dbg) {
+            i += dbg - 1;
+            continue;
+        }
+
         if (!strcmp(arg, "--port")) {
             if (++i >= argc || !parse_port(argv[i], &args->port)) return 0;
             continue;
@@ -455,6 +464,7 @@ static void print_usage(FILE *stream, const char *argv0) {
             "  --online-mode | --offline-mode   verify accounts by hasJoined (guests welcome) / no hasJoined\n"
             "  --log FILE           also append the console log to FILE\n"
             "  --version            print the version and exit\n"
+            KN_DEBUG_USAGE
             "\n"
             "Game:\n"
             "  --port PORT   TCP port to listen on (default %d); the server-info query answers on UDP PORT\n"
@@ -663,6 +673,7 @@ static const char *server_stop_description(const ServerStopReason reason, const 
 }
 
 int main(int argc, char **argv) {
+    kn_debug_init_env(); // KRUNKNATIVE_DEBUG; a --debug flag on the command line overrides it (klog.h)
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), (uint64_t) (uintptr_t) rand_memory);
     free(rand_memory);

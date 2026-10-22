@@ -1,5 +1,6 @@
 // The Krunker build an official join speaks, fetched live (client/include/krunker_build_fetch.h).
 #include <krunker_build_fetch.h>
+#include "klog.h"
 #include <krunker_build_live.h>
 #include <auth_join.h> // kn_sha256_bytes / kn_sha256_hex
 
@@ -197,7 +198,7 @@ static void finish(const KrunkerBuildSource src, const char *client_version, con
     if (src == KRUNKER_BUILD_SRC_REFUSED) {
         printf("[krunker] Krunker build %s refused: %s\n", client_version && client_version[0] ? client_version : "(unknown)", why ? why : "");
     } else {
-        printf("[krunker] Krunker build: %s %s (buildVersion %s, AHKEY 0x%llx)%s%s\n", krunker_build_source_name(src), b->client_version,
+        KN_LOG_DEBUG1("[krunker] Krunker build: %s %s (buildVersion %s, AHKEY 0x%llx)%s%s\n", krunker_build_source_name(src), b->client_version,
                b->build_version, (unsigned long long) b->ahkey, why && why[0] ? ": " : "", why ? why : "");
     }
     if (done) done(user, src, src == KRUNKER_BUILD_SRC_REFUSED ? client_version : b->client_version, why ? why : "");

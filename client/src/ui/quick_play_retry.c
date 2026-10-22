@@ -2,6 +2,7 @@
 // answered "full". The seeks, joins and their answers stay in servers_ui.c and krunker_net.c; they
 // call in here to schedule the next try, to mark a search out or answered, and to tell a stale answer.
 #include <quick_play_retry.h>
+#include "klog.h"
 
 #include <GLFW/glfw3.h>
 #include <stdio.h>
@@ -56,7 +57,7 @@ int quick_play_retry_schedule(QuickPlayRetryFn fn, void *user) {
     Q.fn = fn;
     Q.user = user;
     Q.at = glfwGetTime() + backoff(Q.tries);
-    printf("[mm] quick play: the lobby is full: trying again in %.0f s\n", backoff(Q.tries));
+    KN_LOG_VERBOSE2("[mm] quick play: the lobby is full: trying again in %.0f s\n", backoff(Q.tries));
     Q.tries++;
     return 1;
 }
@@ -69,13 +70,13 @@ void quick_play_retry_tick(void) {
     Q.fn = NULL;
     Q.user = NULL;
     Q.busy = 1; // the retry's own seek is out
-    printf("[mm] quick play: trying again\n");
+    KN_LOG_DEBUG1("[mm] quick play: trying again\n");
     fn(user);
 }
 
 void quick_play_retry_cancel(void) {
     if (quick_play_retry_running()) {
-        printf("[mm] quick play: search stopped\n");
+        KN_LOG_VERBOSE2("[mm] quick play: search stopped\n");
         menu_connect_stopped(); // the search's spinner goes with it
     }
     Q.gen++;

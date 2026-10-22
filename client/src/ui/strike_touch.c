@@ -21,6 +21,7 @@
 // angles) are FRVR's data: StrikeRules.touch (shared/include/strike_rules.h, extracted into
 // tools/strike/strike_data.json "input.touch"); the table below keeps what is code (binds, kinds).
 #include <strike_ui.h>
+#include "klog.h"
 #include <strike_rules.h>
 #include <strike_ftue.h>
 #include <flavor.h>
@@ -661,7 +662,7 @@ int strike_touch_customize_pointer(const int phase, const float x, const float y
     K.moving = 0; // ontouchend: controlMoving = null, r5()
     K.control = C_COUNT;
     layout_save();
-    printf("[strike] controls layout saved\n");
+    KN_LOG_VERBOSE2("[strike] controls layout saved\n");
     return 1;
 }
 

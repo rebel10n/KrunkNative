@@ -458,6 +458,9 @@ console-settings-test: build ## Dev console switch survives Settings opens / res
 crash-capture-test: build ## Crash capture: a forced NULL dereference writes a report with a frame list, the next start names it once, a forced 6 s stall writes a freeze dump and the client keeps running (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/crash_capture_e2e.py $(DEBUG_DIR)
 
+debug-levels-test: build ## The client debug levels (klog.h): the default run prints no level-2 line, --debug=2 prints more, a bad level is refused (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/debug_levels_e2e.py $(DEBUG_DIR)
+
 raw-mouse-test: build ## Raw mouse motion has one switch (Controls > Raw Mouse Input): on by default, off and on by click, stored Raw Input migrates once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/raw_mouse_e2e.py $(DEBUG_DIR)
 
@@ -1212,3 +1215,29 @@ help: ## Show this help
 	  /^# -+ [a-z-]+$$/ {gsub(/^# -+ /, ""); printf "\n\033[1m%s\033[0m\n", $$0} \
 	  /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf "\nVariables: GENERATOR=%s JOBS=%s HTML_ENGINE=%s EMSDK=%s PORT=%s\n\n" "$(GENERATOR)" "$(JOBS)" "$(HTML_ENGINE)" "$(EMSDK)" "$(PORT)"
+
+# Client e2e tests grep log lines that are level 1 or 2 (klog.h). They spawn client_bin with literal argv,
+# so they get the same effect as --debug=2 through KRUNKNATIVE_DEBUG (the env var; the default run prints level 0 only).
+E2E_DEBUG_TARGETS := strike-app-test viewer-diff frame-yield-test offline-dead-test mobile-touch-test nametag-test \
+	hide-names-test selection-test slowmo-arms-test spawn-camera-test mod-keys-f6-test \
+	weapons-client-test gun-unequip-test piss-hose-test nettspend-loadout-test locked-class-test \
+	guest-earned-test leaderboard-scroll-test version-menu-e2e guest-ledger-e2e guest-ledger-server-e2e \
+	secondary-req-test nettspend-vfx-test nettspend-arms-test minimap-round-test preview-hole-test \
+	menu-bleed-test class-preview-test preview-hole-test-web v10-market-e2e paint-picker-e2e \
+	layout-freeze-e2e loading-screens-e2e loading-mapname-e2e crash-limbo-e2e native-auth-test \
+	account-manager-test resize-early-test window-center-test asset-fetch-test user-assets-test \
+	console-settings-test crash-capture-test raw-mouse-test chat-globe-test bhop-setting-test \
+	fps-uncapped-test strike-vsync-test window-icon-test test-net krunker-official-e2e \
+	krunker-account-e2e krunker-challenges-e2e account-unify-e2e kio-spin-battlepass-e2e \
+	kio-battlepass-e2e kio-store-e2e kio-turf-e2e kio-market-e2e ranked-krunker-e2e target-select-e2e \
+	bots-chat-e2e command-auth-e2e live-signin-e2e votekick-e2e playerlist-ui-e2e row-centre-e2e \
+	billboard-e2e idle-kick-e2e join-spawn-e2e nuke-e2e ruleset-e2e v10-settings-e2e settings-wiring-e2e \
+	pickup-chat-e2e junk-wallet-e2e v10-rewards-e2e reconnect-test mm-token-e2e server-tabs-e2e \
+	menu-sources-e2e games-window-e2e seek-region-e2e seek-cross-region-e2e quickplay-retry-e2e \
+	raid-play-e2e seek-servers-migrate-e2e client-proxy-e2e auto-restart-e2e connect-ux-e2e \
+	console-reload-test console-give-autofill-test console-autofill-audit-test \
+	console-autofill-nondev-test console-visible-test console-end-paint-test download-screen-test \
+	strike-play-test strike-signedout-test strike-missions-timeout-test console-strike-test \
+	hitmarker-test end-title-test ui-transitions-test voice-test modes-test web-gl-errors \
+	web-session-e2e
+$(E2E_DEBUG_TARGETS): export KRUNKNATIVE_DEBUG := 2

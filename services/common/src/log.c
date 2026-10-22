@@ -11,12 +11,12 @@
 #include <time.h>
 
 static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
-static kn_log_level g_level = KN_LOG_INFO;
+static kn_log_level g_level = KN_LOG_NOTICE;
 static int g_json;
 static FILE *g_file;
 static char g_service[32] = "knsvc";
 
-static const char *const LEVEL_NAMES[] = {"trace", "debug", "info", "warn", "error", "fatal", "off"};
+static const char *const LEVEL_NAMES[] = {"trace", "debug", "info", "notice", "warn", "error", "fatal", "off"};
 
 kn_log_level kn_log_level_parse(const char *s, kn_log_level def) {
     if (!s || !*s) return def;
@@ -24,6 +24,43 @@ kn_log_level kn_log_level_parse(const char *s, kn_log_level def) {
         if (strcasecmp(s, LEVEL_NAMES[i]) == 0) return (kn_log_level)i;
     if (strcasecmp(s, "warning") == 0) return KN_LOG_WARN;
     return def;
+}
+
+// N = 0 (NOTICE, the default), 1 (INFO), 2 (DEBUG and TRACE). Returns 1 or 2 when arg was consumed.
+static int debug_level_value(const char *s, int *out) {
+    if (!s || !*s) return -1;
+    char *end = NULL;
+    const long v = strtol(s, &end, 10);
+    if (end == s || *end || v < 0 || v > 2) return -1;
+    *out = (int) v;
+    return 0;
+}
+
+static void set_debug_level(int level) {
+    g_level = level == 2 ? KN_LOG_DEBUG : level == 1 ? KN_LOG_INFO : KN_LOG_NOTICE;
+}
+
+int kn_log_debug_arg(const char *arg, const char *next) {
+    int level = 0;
+    if (!arg) return 0;
+    if (!strcmp(arg, "--debug")) { set_debug_level(1); return 1; }
+    if (!strncmp(arg, "--debug=", 8)) {
+        if (debug_level_value(arg + 8, &level) != 0) return -1;
+        set_debug_level(level);
+        return 1;
+    }
+    if (!strcmp(arg, "-d")) {
+        if (debug_level_value(next, &level) != 0) return -1;
+        set_debug_level(level);
+        return 2;
+    }
+    return 0;
+}
+
+void kn_log_debug_env(void) {
+    int level = 0;
+    const char *env = getenv("KRUNKNATIVE_DEBUG");
+    if (env && *env && debug_level_value(env, &level) == 0) set_debug_level(level);
 }
 
 void kn_log_init(const char *service) {

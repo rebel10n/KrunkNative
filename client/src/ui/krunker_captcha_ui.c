@@ -16,6 +16,7 @@
 // Tokens: read from the widget / the webview, checked for shape, handed to the requester once, then
 // wiped; never logged, never stored.
 #include <krunker_captcha.h>
+#include "klog.h"
 #include <krunker_build_live.h> // the current build's Turnstile site key
 #include <kn_webview.h>
 #ifndef __EMSCRIPTEN__
@@ -233,7 +234,7 @@ static void webview_proxy(char *out, const size_t n) {
         const int v6 = strchr(px.host, ':') != NULL; // an IPv6 literal goes in brackets
         snprintf(out, n, "%s://%s%s%s%s%s%s%s:%s", scheme, user, pass[0] ? ":" : "", pass, user[0] ? "@" : "", v6 ? "[" : "", px.host,
                  v6 ? "]" : "", px.port);
-        printf("[krunker] captcha: the challenge goes through the proxy %s\n", label);
+        KN_LOG_VERBOSE2("[krunker] captcha: the challenge goes through the proxy %s\n", label);
         wipe(user, sizeof(user));
         wipe(pass, sizeof(pass));
     }
@@ -259,7 +260,7 @@ static int webview_start(const int show_now) {
         return 0;
     }
     C.webview = 1;
-    printf("[krunker] captcha: krunker.io's challenge runs in the webview (%s)\n",
+    KN_LOG_VERBOSE2("[krunker] captcha: krunker.io's challenge runs in the webview (%s)\n",
            show_now ? "shown at once" : "hidden: shown only if it needs the player");
     return 1;
 }
@@ -287,7 +288,7 @@ static void webview_tick(void) {
     switch (rc) {
         case KN_WEBVIEW_TOKEN:
             if (krunker_captcha_token_shape_ok(token)) {
-                printf("[krunker] captcha: solved in the webview (%zu chars)\n", strlen(token));
+                KN_LOG_DEBUG1("[krunker] captcha: solved in the webview (%zu chars)\n", strlen(token));
                 finish(token);
             } else {
                 printf("[krunker] captcha: the webview answered something that is not a token\n");
@@ -300,7 +301,7 @@ static void webview_tick(void) {
             finish_with(NULL, 1);
             break;
         case KN_WEBVIEW_SHOWN: // the player is needed: the widget comes up in the game (its frames once drawn)
-            printf("[krunker] captcha: the player is needed: the widget is shown in the game\n");
+            KN_LOG_VERBOSE2("[krunker] captcha: the player is needed: the widget is shown in the game\n");
             C.needs_player = 1;
             break;
         default: break;
@@ -333,7 +334,7 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
     switch (kind) {
         case 1: // the token
             if (krunker_captcha_token_shape_ok(text)) {
-                printf("[krunker] captcha: Turnstile solved (%zu chars)\n", strlen(text));
+                KN_LOG_VERBOSE2("[krunker] captcha: Turnstile solved (%zu chars)\n", strlen(text));
                 finish(text);
             } else {
                 printf("[krunker] captcha: Turnstile answered something that is not a token\n");
@@ -346,7 +347,7 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
             break;
         case 3: // expired before we used it (it is used at once: rare)
         case 4:
-            printf("[krunker] captcha: Turnstile %s\n", kind == 3 ? "expired" : "timed out");
+            KN_LOG_VERBOSE2("[krunker] captcha: Turnstile %s\n", kind == 3 ? "expired" : "timed out");
             finish_with(NULL, 1);
             break;
         case 5: // needs the player: the widget is up and shows what to do
@@ -373,7 +374,7 @@ void krunker_captcha_ask(const int attempt, const int rejected, const KrunkerCap
     C.done = done;
     C.user = user;
     C.present_pending = 0;
-    printf("[krunker] captcha: asking the player (attempt %d%s)\n", attempt, rejected ? ", the last token was refused" : "");
+    KN_LOG_VERBOSE2("[krunker] captcha: asking the player (attempt %d%s)\n", attempt, rejected ? ", the last token was refused" : "");
     if (!html_ui_available()) { // no page (HTML_ENGINE=OFF): nothing can be shown
         printf("[krunker] captcha: no HTML UI in this build to show it\n");
         finish_with(NULL, 1);
@@ -508,13 +509,13 @@ int krunker_captcha_inline_char(const unsigned codepoint) {
 void krunker_captcha_pow_begin(void) {
     if (C.asking) return; // the matchmaker's challenge has the screen
     C.pow_failed = 0;
-    printf("[krunker] captcha: the game server's proof of work: solving it (nothing shown)\n");
+    KN_LOG_VERBOSE2("[krunker] captcha: the game server's proof of work: solving it (nothing shown)\n");
 }
 
 void krunker_captcha_pow_end(const int solved) {
     if (C.asking) return;
     if (solved) {
-        printf("[krunker] captcha: the game server's proof of work passed (nothing shown)\n");
+        KN_LOG_VERBOSE2("[krunker] captcha: the game server's proof of work passed (nothing shown)\n");
         return;
     }
     if (C.pow_failed) return;

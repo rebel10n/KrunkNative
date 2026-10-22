@@ -733,3 +733,17 @@ added to the game's list when it is picked.
   its own input, as in v3.1.1.
 - devConsole mirrors the browser's `console.*` output into the log. Krunker Box Office has no
   JavaScript console, so only game lines appear.
+
+## Debug Output Levels
+
+The client (`client_bin`), the dedicated server (`server_bin`) and the brain (`kn_brain`) print three levels:
+
+| Level | Flag | Prints |
+|---|---|---|
+| 0 (default) | none | errors, warnings and the lines a player needs (startup banner, connection established or lost) |
+| 1 | `--debug` (or `--debug=1`, `-d 1`) | lifecycle and state changes: window opened or closed, sign-in or out, lobby joined, round start and end, backend and probe results |
+| 2 | `--debug=2` (or `-d 2`) | everything else: per packet, per frame, per click, per HTTP request, asset loads, paint and layout traces |
+
+The environment variable `KRUNKNATIVE_DEBUG=0|1|2` sets the same level; the command-line flag wins over it, and the variable wins over the default 0. The brain also reads `KN_LOG_LEVEL`, which keeps its own names (`info` is level 1, `debug` level 2).
+
+The levels are assigned in code: the client uses `KN_LOG_DEBUG1(...)` and `KN_LOG_VERBOSE2(...)` (`shared/include/klog.h`, parsed in `shared/src/klog.c`) in place of `printf` for its tagged `[tag]` lines; plain `printf` stays level 0. `make debug-levels-test` checks the default and `--debug=2` output.

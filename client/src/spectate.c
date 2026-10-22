@@ -18,6 +18,7 @@
 //   - specNames toggles showSpectatorNameTags (nametags.c), next / previous skip bots that
 //     count as AI (mode.botsAsAI).
 #include <spectate.h>
+#include "klog.h"
 #include <player_names.h> // Hide player names (player_names.h)
 #include <ui_logic.h>
 #include <html_ui.h>
@@ -143,7 +144,7 @@ void spectate_begin(Client *client) {
     hud_ui_hide_death(client); // toggleGameUI(true): the death card goes away
     hud_spectate_reset();
     client_force_player_positions(client); // resetGameSessionState: no STATE came while we were dead
-    printf("[spectate] spectating\n");
+    KN_LOG_DEBUG1("[spectate] spectating\n");
 }
 
 void spectate_end(Client *client) {
@@ -153,7 +154,7 @@ void spectate_end(Client *client) {
     g_spect.active = 0;
     g_spect.target_uid = -1;
     client->camera.zoom = 1.0f;
-    printf("[spectate] stopped spectating\n");
+    KN_LOG_DEBUG1("[spectate] stopped spectating\n");
 }
 
 // 132.js bPZ1: the free cam continues from where the camera is (third-person orbit included).

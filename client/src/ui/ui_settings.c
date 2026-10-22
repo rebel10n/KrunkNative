@@ -7,6 +7,7 @@
 // in KrunkNative reads yet are stored and shown (their consumers come with the v7 settings
 // work).
 #include <ui_logic.h>
+#include "klog.h"
 #include <ui_mobile.h> // the phone defaults (collect_defaults) and the Beautiful preset's phone hiding
 #include <ui_settings_defaults.h> // v10's phone and desktop defaults (ui_settings_defaults.c)
 #include <audio.h>
@@ -1589,7 +1590,7 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
         voice_apply_setting(key, value); // WP-E: v7 voice chat settings (voice.c)
     else return; // cosmetic Krunker settings the engine has no counterpart for (kept in the store only)
 
-    printf("[ui] setting %s=%s\n", key, value);
+    KN_LOG_VERBOSE2("[ui] setting %s=%s\n", key, value);
 }
 
 // ---------------------------------------------------------------- inline handlers

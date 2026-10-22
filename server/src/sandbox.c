@@ -1,6 +1,7 @@
 // The offline sandbox server (server/include/server_sandbox.h): server_bin's core in the
 // client process over in-memory connections, stepped by the client's main loop.
 #include <server_sandbox.h>
+#include "klog.h"
 #include <server.h>
 #include <server_accounts.h>
 #include <server_config.h>
@@ -182,7 +183,7 @@ static const ServerTransport g_sandbox_transport = {
 
 static void sandbox_log_write(void *user, const char *text, const int length) {
     (void) user;
-    printf("[sandbox] %.*s", length, text);
+    KN_LOG_VERBOSE2("[sandbox] %.*s", length, text);
     fflush(stdout);
 }
 

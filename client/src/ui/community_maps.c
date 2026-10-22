@@ -8,6 +8,7 @@
 // not pass). Without a brain a published map cannot be had; the catalogue still works offline.
 
 #include <client.h>
+#include "klog.h"
 #include <community_host.h>
 #include <backend.h>
 #include <i18n.h>
@@ -89,7 +90,7 @@ static void on_map_data(void *user, const int status, const char *body, const si
         }
     }
     if (!kept) fprintf(stderr, "[community] %s: %s\n", req->name, error);
-    else printf("[community] downloaded %s\n", req->name);
+    else KN_LOG_DEBUG1("[community] downloaded %s\n", req->name);
     if (req->done) req->done(req->user, kept, kept ? NULL : error);
     free(req);
 }
@@ -207,7 +208,7 @@ static void on_published(void *user, const int status, const char *body, const s
             p->image = image && image[0] ? strdup(image) : NULL;
             g_published_count++;
         }
-        printf("[community] %zu published map(s) to host\n", g_published_count);
+        KN_LOG_DEBUG1("[community] %zu published map(s) to host\n", g_published_count);
     }
     cJSON_Delete(res);
     if (g_published_changed) g_published_changed();

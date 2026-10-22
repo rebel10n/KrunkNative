@@ -24,6 +24,7 @@
 // downloads viewer_import.c, the dev config editors viewer_config.c. The same showcase scene
 // also fills the store item view's iframe in the game and hub pages (viewer_embed.h, below).
 #include "viewer_internal.h"
+#include "klog.h"
 #include <viewer_embed.h>
 #include <cosmetics.h>
 #include <app_mode.h>
@@ -721,7 +722,7 @@ static void viewer_enter(Client *client, const char *query) {
     params_parse(query);
     state_from_params();
     vconfig_reset();
-    printf("[viewer] enter query=\"%s\"\n", query ? query : "");
+    KN_LOG_VERBOSE2("[viewer] enter query=\"%s\"\n", query ? query : "");
 
     static HtmlHandlerEntry handlers[VIEWER_MAX_HANDLERS];
     int count = 0;
@@ -956,7 +957,7 @@ void viewer_embed_frame(Client *client, const float delta) {
         }
         vscene_update_lights();
         vscene_build_showcase(index);
-        printf("[viewer] item view showcase %d\n", index);
+        KN_LOG_VERBOSE2("[viewer] item view showcase %d\n", index);
     }
 
     int fb_w = 0, fb_h = 0;

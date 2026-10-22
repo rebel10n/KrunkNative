@@ -8,6 +8,7 @@
 // Windows: WinHTTP (backend_winhttp.c: TLS against the Windows certificate store, the system
 // proxy, WebSockets on Windows 8+). A Windows client used to compile this file to no-op stubs:
 // no account service, an empty server finder and a game connection to 127.0.0.1.
+#include "klog.h"
 #ifndef __EMSCRIPTEN__
 #include <backend.h>
 #include <cJSON.h>
@@ -143,7 +144,7 @@ void backend_init(const char *cli_url) {
     if ((!url || !url[0]) && headless_enabled() && test_default && (!strncmp(test_default, "http://127.0.0.1", 16) || !strncmp(test_default, "http://localhost", 16))) {
         g_url_default = 1;
         backend_store_url(test_default);
-        printf("[backend] brain %s (test default)\n", backend_url());
+        KN_LOG_DEBUG1("[backend] brain %s (test default)\n", backend_url());
         return;
     }
     if ((!url || !url[0]) && headless_enabled()) {
@@ -160,7 +161,7 @@ void backend_init(const char *cli_url) {
         g_url_default = 1;
     }
     backend_store_url(url);
-    if (backend_enabled()) printf("[backend] brain %s\n", backend_url());
+    if (backend_enabled()) KN_LOG_DEBUG1("[backend] brain %s\n", backend_url());
 }
 
 int backend_url_is_default(void) { return g_url_default && backend_enabled(); }

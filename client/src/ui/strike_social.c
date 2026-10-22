@@ -32,6 +32,7 @@
 // getDefaultPFP(): the class icon 0. FRVR's "Invite Friends" / "+ More Friends" open the
 // platform's invite dialog, which KrunkNative does not have (canInvite() false: no button).
 #include <strike_ui.h>
+#include "klog.h"
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <backend.h>
@@ -193,7 +194,7 @@ static void on_friends(const cJSON *o) {
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "hasMore"))) request_friends(G.count);
     int online = 0;
     for (int i = 0; i < G.count; i++) online += G.friends[i].online;
-    printf("[strike] friends: %d (%d online)\n", G.count, online);
+    KN_LOG_VERBOSE2("[strike] friends: %d (%d online)\n", G.count, online);
     G.dirty = 1;
 }
 
@@ -206,7 +207,7 @@ static void on_invite(const cJSON *o) {
     snprintf(n.name, sizeof(n.name), "%s", jstr(o, "name"));
     snprintf(n.game, sizeof(n.game), "%s", jstr(o, "gameId"));
     if (!n.game[0]) return;
-    printf("[strike] invite from %s to %s\n", n.name, n.game);
+    KN_LOG_DEBUG1("[strike] invite from %s to %s\n", n.name, n.game);
     if (G.note_count < NOTES_SHOWN) note_show(&n);
     else if (G.queue_count < NOTES_QUEUE) G.queue[G.queue_count++] = n; // GC.push
 }
@@ -237,8 +238,8 @@ static void on_social(void *user, const cJSON *frame) {
     else if (!strcmp(type, "presence:offline") && f) f->online = 0, f->game[0] = 0, G.dirty = 1;
     else if (!strcmp(type, "presence:game") && f) set_game(f, o), G.dirty = 1;
     else if (!strcmp(type, "game:invite")) on_invite(o);
-    else if (!strcmp(type, "game:invite:sent")) printf("[strike] invite sent to %lld (%s)\n", (long long) jnum(o, "to"), jstr(o, "gameId"));
-    else if (!strcmp(type, "error")) printf("[strike] friends: %s %s\n", jstr(o, "code"), jstr(o, "message"));
+    else if (!strcmp(type, "game:invite:sent")) KN_LOG_DEBUG1("[strike] invite sent to %lld (%s)\n", (long long) jnum(o, "to"), jstr(o, "gameId"));
+    else if (!strcmp(type, "error")) KN_LOG_VERBOSE2("[strike] friends: %s %s\n", jstr(o, "code"), jstr(o, "message"));
 }
 
 static void send_invite(Friend *f, const char *game) {
@@ -247,7 +248,7 @@ static void send_invite(Friend *f, const char *game) {
     cJSON_AddNumberToObject(o, "to", (double) f->id);
     cJSON_AddStringToObject(o, "gameId", game);
     eb_send(o);
-    printf("[strike] invite %s to %s\n", f->name, game);
+    KN_LOG_DEBUG1("[strike] invite %s to %s\n", f->name, game);
 }
 
 // ---------------------------------------------------------------- S5: ede / sde
@@ -589,7 +590,7 @@ static void alert(const StrikeScreen s, const char *message) {
     snprintf(G.alert, sizeof(G.alert), "%s", message);
     if (strike_screen_top() == STRIKE_SCREEN_REPORT_PLAYER) strike_screen_pop();
     strike_screen_push(s);
-    printf("[strike] %s: %s\n", strike_screen_id(s), message);
+    KN_LOG_VERBOSE2("[strike] %s: %s\n", strike_screen_id(s), message);
 }
 
 static void report_result(const int ok) {
@@ -617,7 +618,7 @@ static void report_send(void) {
     backend_social_send(f);
     cJSON_Delete(f);
     G.sending = 1;
-    printf("[strike] report %s: %s\n", G.report_name, REPORT_OPTIONS[G.reason]);
+    KN_LOG_VERBOSE2("[strike] report %s: %s\n", G.report_name, REPORT_OPTIONS[G.reason]);
 }
 
 // ---------------------------------------------------------------- hooks
@@ -704,7 +705,7 @@ int strike_social_action(const char *a) {
     if (!strncmp(a, "friends-join:", 13)) { // quickConnect({server: friend.game})
         const Friend *f = friend_by_id(strtoll(a + 13, NULL, 10));
         if (f && f->game[0]) {
-            printf("[strike] join %s's game %s\n", f->name, f->game);
+            KN_LOG_VERBOSE2("[strike] join %s's game %s\n", f->name, f->game);
             servers_ui_join_link(f->game);
         }
         return 1;
@@ -748,7 +749,7 @@ int strike_social_action(const char *a) {
             char game[96];
             snprintf(game, sizeof(game), "%s", G.notes[i].game);
             note_dismiss(id);
-            printf("[strike] join the invite's game %s\n", game);
+            KN_LOG_DEBUG1("[strike] join the invite's game %s\n", game);
             servers_ui_join_link(game);
             break;
         }

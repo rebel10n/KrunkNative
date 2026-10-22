@@ -1,6 +1,7 @@
 // The V-Sync relaunch glue (gl_driver_env.h): the NVIDIA probe, the stored "vsync" and the re-exec.
 // Linux only; elsewhere gl_driver_vsync_relaunch does nothing. The decision is gl_driver_env.c.
 #include <gl_driver_env.h>
+#include "klog.h"
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 
@@ -96,7 +97,7 @@ void gl_driver_vsync_relaunch(const int argc, char **argv) {
     if (n <= 0) return; // no /proc: start as before, without the variable
     exe[n] = 0;
 
-    printf("[gl] relaunching with __GL_SYNC_TO_VBLANK=0 (V-Sync off)\n");
+    KN_LOG_DEBUG1("[gl] relaunching with __GL_SYNC_TO_VBLANK=0 (V-Sync off)\n");
     fflush(stdout);
     fflush(stderr);
     setenv(GL_DRIVER_SYNC_ENV, "0", 1);

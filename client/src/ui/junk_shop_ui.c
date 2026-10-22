@@ -4,6 +4,7 @@
 // account's session token in the URL (v10's ?token=, v10_url_token) and sets the Junk balance from the
 // reply. A guest's BUY is v10's loginOrRegister, as on every v10 shop card.
 #include <junk_shop_ui.h>
+#include "klog.h"
 #include <kio_store.h>
 #include <backend_ui.h>
 #include <v10_ui.h>
@@ -29,7 +30,7 @@ static void purchase_done(void *user, const int status, const cJSON *json) {
         if (cJSON_IsString(junk)) account_ui_set_junk(junk->valuestring);
         const cJSON *kr = cJSON_GetObjectItem(data, "kr");
         if (cJSON_IsNumber(kr)) account_ui_set_funds(kr->valuedouble);
-        printf("[junkshop] bought product %d: junk %s\n", product, cJSON_IsString(junk) ? junk->valuestring : "?");
+        KN_LOG_DEBUG1("[junkshop] bought product %d: junk %s\n", product, cJSON_IsString(junk) ? junk->valuestring : "?");
         fflush(stdout);
     } else {
         printf("[junkshop] purchase of product %d refused (status %d)\n", product, status);
@@ -137,7 +138,7 @@ static void bundle_purchase_done(void *user, const int status, const cJSON *json
     const int bundle = (int) (intptr_t) user;
     v10_expire("/api/shop/bundles");
     if (status == 200) {
-        printf("[junkshop] bought bundle %d\n", bundle);
+        KN_LOG_DEBUG1("[junkshop] bought bundle %d\n", bundle);
         fflush(stdout);
     } else {
         printf("[junkshop] purchase of bundle %d refused (status %d)\n", bundle, status);

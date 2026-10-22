@@ -9,6 +9,7 @@
 // Link with -sEXPORTED_RUNTIME_METHODS=ccall,UTF8ToString,stringToNewUTF8 and
 // -sEXPORTED_FUNCTIONS=...,_kn_ui_event,_kn_ui_resize_observed (EMSCRIPTEN_KEEPALIVE
 // keeps the symbols; the export list makes them reachable as Module._kn_ui_event).
+#include "klog.h"
 #ifdef __EMSCRIPTEN__
 
 #include "html_ui_backend.h"
@@ -1919,7 +1920,7 @@ static int g_st_pass, g_st_fail;
 static void st_check(const int ok, const char *what) {
     if (ok) g_st_pass++;
     else g_st_fail++;
-    printf("[kn-selftest] %s %s\n", ok ? "PASS" : "FAIL", what);
+    KN_LOG_DEBUG1("[kn-selftest] %s %s\n", ok ? "PASS" : "FAIL", what);
 }
 
 static int g_st_timer_fired;
@@ -1943,7 +1944,7 @@ static void st_part2(void *user);
 
 static void run_selftest(void) {
     char buf[256];
-    printf("[kn-selftest] start\n");
+    KN_LOG_DEBUG1("[kn-selftest] start\n");
     // the web vault (client/src/alt/alt_web_test.c): on a throwaway IndexedDB database, never the page's own
     st_check(alt_web_selftest() == 0, "alt vault: SubtleCrypto seal and open, the stored key, the stored record, wrong key and tamper");
 

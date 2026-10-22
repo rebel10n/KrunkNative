@@ -39,6 +39,7 @@
 // client_enter_game, menu_show_window / the windows.0.changeTab handler, menu_set_class_index,
 // the MenuUi net fields + menu_update_instructions, hud_ui_* (override, chat, kill feed,
 // death card, end screen, hit marker). See ui_scenario_apply().
+#include "klog.h"
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -799,7 +800,7 @@ static void scenario_step(Client *client) {
     const int boot_frame = g_sc.seq_origin == ORIGIN_INIT && g_sc.clock_ms < SCENARIO_FRAME_MS - 1e-3;
     if (g_sc.seq_origin_ms < 0.0 && !boot_frame && seq_origin_reached(client)) {
         g_sc.seq_origin_ms = g_sc.clock_ms;
-        printf("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.clock_ms / 1000.0);
+        KN_LOG_VERBOSE2("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.clock_ms / 1000.0);
     }
     while (!g_sc.seq_failed && seq_next_ms() <= g_sc.clock_ms + 1e-6) {
         char path[1100];
@@ -809,7 +810,7 @@ static void scenario_step(Client *client) {
             g_sc.seq_failed = 1;
             break;
         }
-        printf("[scenario] %dx%d at %.3f s (origin + %.0f ms) -> %s\n", g_sc.w, g_sc.h, g_sc.clock_ms / 1000.0,
+        KN_LOG_VERBOSE2("[scenario] %dx%d at %.3f s (origin + %.0f ms) -> %s\n", g_sc.w, g_sc.h, g_sc.clock_ms / 1000.0,
                g_sc.seq_ms[g_sc.seq_done], path);
         // the last frame is also <out> itself (smoke renders, a missing-render check)
         if (++g_sc.seq_done == g_sc.seq_count && !read_back(g_sc.out)) g_sc.seq_failed = 1;
@@ -1324,7 +1325,7 @@ static void run_console(const double clock_ms) {
     for (int i = 0; g_sc.applied_clock_ms >= 0.0 && i < g_sc.console_count; i++) {
         if (g_sc.console[i].done || clock_ms + 1e-6 < g_sc.applied_clock_ms + g_sc.console[i].at_ms) continue;
         g_sc.console[i].done = 1;
-        printf("[scenario] console at %.3f s: %s\n", clock_ms / 1000.0, g_sc.console[i].cmd);
+        KN_LOG_VERBOSE2("[scenario] console at %.3f s: %s\n", clock_ms / 1000.0, g_sc.console[i].cmd);
         ui_console_exec(g_sc.console[i].cmd);
     }
 }
@@ -1377,7 +1378,7 @@ static void apply_kpd_case(Client *client) {
     if (caller < 0) caller = sus ? 0 : 1;
     g_sc.kpd_case_done = 1;
     const NetKpdDataPacket d = {.sus = list[sus]->uid, .caller = list[caller]->uid};
-    printf("[scenario] K.P.D case: suspect %d (sees %d), caller %d\n", d.sus, seen >= 0 ? list[seen]->uid : -1, d.caller);
+    KN_LOG_VERBOSE2("[scenario] K.P.D case: suspect %d (sees %d), caller %d\n", d.sus, seen >= 0 ? list[seen]->uid : -1, d.caller);
     hud_votekick_on_kpd_data(client, &d);
 }
 
@@ -1416,7 +1417,7 @@ static int run_sequence(Client *client) {
         g_sc.seq_origin_ms = g_sc.clock_ms + SCENARIO_FRAME_MS;
         if (g_sc.seq_origin == ORIGIN_CYCLE) g_sc.seq_origin_ms = ceil(g_sc.seq_origin_ms / SCENARIO_ANIM_CYCLE_MS) * SCENARIO_ANIM_CYCLE_MS;
         apply_timed(client, g_sc.seq_origin_ms);
-        printf("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.seq_origin_ms / 1000.0);
+        KN_LOG_VERBOSE2("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.seq_origin_ms / 1000.0);
     }
     const int frames = SCENARIO_SEQ_ORIGIN_MAX_FRAMES + g_sc.seq_count +
                        (int) ceil(g_sc.seq_ms[g_sc.seq_count - 1] / SCENARIO_FRAME_MS);
@@ -1488,12 +1489,12 @@ int ui_scenario_run(Client *client) {
         if (f) {
             fputs(doc, f);
             fclose(f);
-            printf("[scenario] document -> %s\n", html_out);
+            KN_LOG_VERBOSE2("[scenario] document -> %s\n", html_out);
         }
         free(doc);
     }
     const int ok = read_back(g_sc.out);
-    if (ok) printf("[scenario] %dx%d at %.3f s -> %s\n", g_sc.w, g_sc.h, capture_ms / 1000.0, g_sc.out);
+    if (ok) KN_LOG_VERBOSE2("[scenario] %dx%d at %.3f s -> %s\n", g_sc.w, g_sc.h, capture_ms / 1000.0, g_sc.out);
     return ok ? 0 : 1;
 }
 

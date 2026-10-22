@@ -14,6 +14,7 @@
 // first-load bar) stays up while this client loads the game (FRVR: the bundle and its assets),
 // then the mount swaps it for "Loading Game" without an enter animation and MAIN_MENU is pushed.
 #include <strike_ui.h>
+#include "klog.h"
 #include <strike_notify.h>
 #include <strike_double_xp.h>
 #include <strike_ftue.h>
@@ -383,7 +384,7 @@ void strike_screen_push(const StrikeScreen s) {
         S.depth--;
     }
     S.stack[S.depth++] = (StackEntry) {.screen = s};
-    printf("[strike] screen %s\n", strike_screen_id(s));
+    KN_LOG_VERBOSE2("[strike] screen %s\n", strike_screen_id(s));
     sync_stack();
     strike_loading_complete(); // RA()
 }
@@ -629,7 +630,7 @@ void strike_ui_dom_init(Client *client) {
     S.dom_ready = 1;
     html_timer_add(BOOT_MAX_MS, boot_timeout_fire, NULL);
     srand((unsigned) time(NULL));
-    printf("[strike] Krunker Strike page ready (FRVR 1.37.2 mobile UI)\n");
+    KN_LOG_DEBUG1("[strike] Krunker Strike page ready (FRVR 1.37.2 mobile UI)\n");
     // the persistent parts of swe.view
     html_dom_set_html(S.holder, "<div class=\"frvr-notifications-holder\"></div><div class=\"ftue-overlay\"></div>"
                                 "<div class=\"frvr-loading-holder\"></div>");

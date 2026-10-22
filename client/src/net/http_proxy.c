@@ -1,6 +1,7 @@
 // Outgoing proxy selection (client/include/http_proxy.h): the client setting, else the standard
 // environment variables. The tunnels themselves are http_conn.c's (POSIX) and WinHTTP's (Windows).
 #include <http_proxy.h>
+#include "klog.h"
 #if !defined(__EMSCRIPTEN__)
 #include <ctype.h>
 #include <pthread.h>
@@ -217,7 +218,7 @@ void http_proxy_configure(const char *url, const HttpProxyScope scope) {
         const char *env = env2("https_proxy", "HTTPS_PROXY");
         if (!env) env = env2("http_proxy", "HTTP_PROXY");
         if (!env) env = env2("all_proxy", "ALL_PROXY");
-        printf("[http] proxy %s%s\n", line, !set && env ? " (the environment's proxy variables apply)" : "");
+        KN_LOG_VERBOSE2("[http] proxy %s%s\n", line, !set && env ? " (the environment's proxy variables apply)" : "");
     }
 }
 

@@ -6,6 +6,7 @@
 // placeholder is rebuilt in place (geometry_cache_reload: every mesh holding it draws the model),
 // GLTF models and sounds are read again on their next use, the HTML engine probes its missing
 // page images again (asset_arrival_bump). The same hooks as a map resource pack (mod_pack.c).
+#include "klog.h"
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
 #include <audio.h>
@@ -53,9 +54,9 @@ void asset_fetch_client_init(void) {
     asset_fetch_stats(&st);
     if (st.user_assets_only) {
         if (mode || cfg.origins) fprintf(stderr, "[assets] on-demand fetch off: %s (user assets only)\n", why);
-        printf("[assets] user assets fetched on demand into %suser-assets/\n", dir);
+        KN_LOG_VERBOSE2("[assets] user assets fetched on demand into %suser-assets/\n", dir);
     } else {
-        printf("[assets] on-demand fetch for %s (%s)\n", dir, st.has_manifest ? "content manifest" : "no manifest: any missing file");
+        KN_LOG_VERBOSE2("[assets] on-demand fetch for %s (%s)\n", dir, st.has_manifest ? "content manifest" : "no manifest: any missing file");
     }
     asset_set_fetch_hook(fetch_hook);
 }

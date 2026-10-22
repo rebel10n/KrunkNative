@@ -23,6 +23,7 @@
 // shop/purchase (v10 _38968 / the gift's purchaseProduct) or showPurchase's payment; they give v10's
 // guest behaviour (loginOrRegister) or the read-only notice.
 #include <kio_store.h>
+#include "klog.h"
 #include <junk_shop_ui.h>
 #include <krunker_account.h>
 #include <backend_ui.h>
@@ -144,7 +145,7 @@ static void on_answer(void *user, const int status, const cJSON *res) {
         else if (data && !cJSON_IsNull(data)) s->req.json = cJSON_Duplicate(data, 1);
     }
     ranked_rows_ms(s->req.json);
-    printf("[kio-store] %s: %d%s%s\n", s->path, status, s->error[0] ? " " : "", s->error);
+    KN_LOG_VERBOSE2("[kio-store] %s: %d%s%s\n", s->path, status, s->error[0] ? " " : "", s->error);
     menu_rerender_if_open(14); // the Store
     v10_refresh();             // the Ranked popup, an open item view
 }

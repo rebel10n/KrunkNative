@@ -1,6 +1,7 @@
 // Double XP (client/include/double_xp_offer.h): v10's end-screen 2x XP claim over the social socket
 // ("rqdxp" / "rrqdxp"), with the account's dxp.offer the brain keeps.
 #include <double_xp_offer.h>
+#include "klog.h"
 
 #include <backend.h>
 #include <backend_ui.h>
@@ -72,7 +73,7 @@ static void on_social(void *user, const cJSON *frame) {
     }
     account_double_xp_claimed(score->valuedouble);
     g_taken = active_account() ? active_account()->games : -1;
-    printf("[double_xp] doubled: score %.0f\n", score->valuedouble);
+    KN_LOG_DEBUG1("[double_xp] doubled: score %.0f\n", score->valuedouble);
     finish(DOUBLE_XP_GRANTED);
 }
 
@@ -92,7 +93,7 @@ static void send_claim(void) {
 
 // The claim of either button. done runs once, when rrqdxp is answered, or at once when nothing is sent.
 static void start_claim(DoubleXpDoneFn done, void *user, const double games) {
-    printf("[double_xp] rqdxp at games %.0f\n", games);
+    KN_LOG_DEBUG1("[double_xp] rqdxp at games %.0f\n", games);
     if (backend_available() != 1) {
         done(user, DOUBLE_XP_ERROR);
         return;

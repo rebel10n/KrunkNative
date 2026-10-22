@@ -14,6 +14,7 @@
 // so `show_navmeshes` after `off` is instant. v7 tracks a map switch through its own console
 // commands (rebuilt on the new map) and clears the overlay on any other switch; so does this.
 #include <gl.h>
+#include "klog.h"
 #include <nav_overlay.h>
 #include <nav_overlay_geom.h> // KrunkNative: the spectated bot's route / markers (GL-free geometry)
 #include <bot_path_net.h>     // NET_EXT_KN_BOT_PATH decode
@@ -351,7 +352,7 @@ void nav_overlay_bot_path(Client *client, const uint8_t *body, const uint16_t le
     NetBotPathPacket packet;
     if (!bot_path_packet_decode(body, length, &packet)) return;
     if (!g_bot.have || g_bot.packet.bot_sid != packet.bot_sid) // a new bot followed: one log line (server/tests/bot_overlay_e2e.py)
-        printf("[nav] bot path: sid %d state %s points %d flags 0x%x\n", packet.bot_sid, packet.state_name, packet.n, packet.flags);
+        KN_LOG_VERBOSE2("[nav] bot path: sid %d state %s points %d flags 0x%x\n", packet.bot_sid, packet.state_name, packet.n, packet.flags);
     g_bot.packet = packet;
     g_bot.have = 1;
     g_bot.at = nav_now_ms();
@@ -479,7 +480,7 @@ static void nav_show_build(const NavBuild *b) {
     if (!b->areas) ui_console_printf(COL_WARN, "nav: no walkable ground under this map's spawns (nothing to draw)");
     size_t vertices = 0;
     for (int i = 0; i < NAV_LAYERS; i++) vertices += b->layers[i].n / 3;
-    printf("[nav] overlay: %d areas, %d nodes, %zu vertices; navgen %.1f ms (worker), upload %.1f ms (frame), request to screen %.1f ms\n",
+    KN_LOG_VERBOSE2("[nav] overlay: %d areas, %d nodes, %zu vertices; navgen %.1f ms (worker), upload %.1f ms (frame), request to screen %.1f ms\n",
            b->areas, b->nodes, vertices, b->navgen_ms, nav_now_ms() - t0, b->total_ms);
 }
 

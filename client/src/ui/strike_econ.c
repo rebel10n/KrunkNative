@@ -2,6 +2,7 @@
 // from kn_brain's /strike gateway (services/brain/strike_econ.c, over v10_gapi), the requests of the
 // Strike screens and the loadout the game wears. Inert unless flavor_get() == FLAVOR_STRIKE.
 #include <strike_econ.h>
+#include "klog.h"
 
 #include <backend_ui.h>
 #include <flavor.h>
@@ -169,7 +170,7 @@ static void on_answer(void *user, int status, const cJSON *data, const cJSON *er
             g_refreshing = 0;
             g_acc.account_id = q.account_id;
             apply_me(data);
-            printf("[strike] account %d: level %d, %lld KR, %lld spin tickets, %lld golden\n", q.account_id, g_acc.level.level,
+            KN_LOG_VERBOSE2("[strike] account %d: level %d, %lld KR, %lld spin tickets, %lld golden\n", q.account_id, g_acc.level.level,
                    (long long) g_acc.wallet[STRIKE_CUR_KR], (long long) g_acc.wallet[STRIKE_CUR_SPIN_TICKET],
                    (long long) g_acc.wallet[STRIKE_CUR_GOLDEN_TICKET]);
             break;
@@ -425,15 +426,15 @@ static void logged(void *user, int status, const cJSON *data, const cJSON *error
         const cJSON *r;
         cJSON_ArrayForEach(r, cJSON_GetObjectItem(data, "rewards")) {
             const cJSON *item = cJSON_GetObjectItem(cJSON_GetObjectItem(r, "reward"), "item");
-            printf("[strike] spin won %s (%s) from %s\n", cJSON_GetStringValue(cJSON_GetObjectItem(item, "itemId")),
+            KN_LOG_DEBUG1("[strike] spin won %s (%s) from %s\n", cJSON_GetStringValue(cJSON_GetObjectItem(item, "itemId")),
                    cJSON_GetStringValue(cJSON_GetObjectItem(item, "name")), cJSON_GetStringValue(cJSON_GetObjectItem(r, "poolId")));
         }
     } else if (!strcmp(what, "equip")) {
         char *text = cJSON_PrintUnformatted(cJSON_GetObjectItem(data, "loadout"));
-        printf("[strike] loadout %s\n", text ? text : "{}");
+        KN_LOG_VERBOSE2("[strike] loadout %s\n", text ? text : "{}");
         free(text);
     } else {
-        printf("[strike] %s ok\n", what);
+        KN_LOG_VERBOSE2("[strike] %s ok\n", what);
     }
     (void) error;
 }

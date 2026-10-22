@@ -1,5 +1,6 @@
 // Krunker Strike director client (client/include/strike_director.h).
 #include <strike_director.h>
+#include "klog.h"
 #include <backend.h>
 #include <build_info.h> // kn_build_protocol: the x-game-version gate's value
 #include <flavor.h>
@@ -72,7 +73,7 @@ static void on_allocate(void *user, const int status, const char *body, const si
     AllocReq *r = user;
     StrikeAllocation a;
     strike_director_parse(status, body, &a);
-    if (a.ok) printf("[strike] director allocated %s at %s:%d%s%s\n", a.game_id, a.host, a.port, a.code[0] ? ", private code " : "", a.code);
+    if (a.ok) KN_LOG_DEBUG1("[strike] director allocated %s at %s:%d%s%s\n", a.game_id, a.host, a.port, a.code[0] ? ", private code " : "", a.code);
     else fprintf(stderr, "[strike] director allocate failed (HTTP %d): %s\n", status, a.error);
     if (r->fn) r->fn(r->user, &a);
     free(r);
@@ -102,7 +103,7 @@ int strike_director_allocate(const int priv, const char *region, const char *mod
     }
     r->fn = fn;
     r->user = user;
-    printf("[strike] POST %s\n", url);
+    KN_LOG_DEBUG1("[strike] POST %s\n", url);
     const int ok = backend_http_request("POST", url, text, on_allocate, r);
     cJSON_free(text);
     if (!ok) free(r);

@@ -3,6 +3,7 @@
 // Requests go over http_stream.h (headers on every platform, the client proxy natively); their
 // answers arrive on the main thread from krunker_account_tick.
 #include <krunker_account.h>
+#include "klog.h"
 #include <krunker_captcha.h>
 #include <http_stream.h>
 #include <html_dom.h>
@@ -228,7 +229,7 @@ static void load(void) {
     A.level = atoi(level);
     if (A.access[0] || A.refresh[0]) {
         A.state = KRUNKER_ACCOUNT_SIGNED_IN;
-        printf("[kio-account] restored the krunker.io account %s\n", A.name[0] ? A.name : "(name unknown)");
+        KN_LOG_DEBUG1("[kio-account] restored the krunker.io account %s\n", A.name[0] ? A.name : "(name unknown)");
     } else {
         A.name[0] = 0;
         A.level = 0;
@@ -365,7 +366,7 @@ static int req_start(Req *r, const ReqKind kind, const char *method, const char 
     r->stream = http_stream_start(method, url, headers, body, &cb, r);
     wipe(headers, sizeof(headers));
     const char *cut = kind == REQ_CODE ? strrchr(url, '/') : NULL;
-    printf("[kio-account] %s %.*s%s\n", method, cut ? (int) (cut - url + 1) : (int) strlen(url), url, cut ? "(challenge)" : "");
+    KN_LOG_DEBUG1("[kio-account] %s %.*s%s\n", method, cut ? (int) (cut - url + 1) : (int) strlen(url), url, cut ? "(challenge)" : "");
     if (!r->stream) {
         r->kind = REQ_NONE;
         return 0;
@@ -446,7 +447,7 @@ static void signed_in(const char *access, const char *refresh) {
     end_attempt();
     A.state = KRUNKER_ACCOUNT_SIGNED_IN;
     save();
-    printf("[kio-account] signed in to krunker.io as %s\n", A.name);
+    KN_LOG_DEBUG1("[kio-account] signed in to krunker.io as %s\n", A.name);
     set_message(0, "%s", ""); // v10: the login modal closes (account set), nothing else is said
     // best effort: the account's own name (the game server's "a" names it too, krunker_account_note_game)
     char url[512];
@@ -492,7 +493,7 @@ static void on_auth_answer(const int status, cJSON *res) {
         snprintf(A.challenge, sizeof(A.challenge), "%s", challenge);
         snprintf(A.code_kind, sizeof(A.code_kind), "%s", !strcmp(type, "check_2fa") ? "2fa" : "email");
         A.state = KRUNKER_ACCOUNT_CODE;
-        printf("[kio-account] krunker.io asks for a %s code\n", A.code_kind);
+        KN_LOG_DEBUG1("[kio-account] krunker.io asks for a %s code\n", A.code_kind);
         emit(KRUNKER_EV_CODE_ASKED);
         set_message(0, "%s", !strcmp(type, "check_2fa") ? I18N("kn.kio.account.ask2fa", "Enter the 6-digit code from your authenticator app.")
                                                         : I18N("kn.kio.account.askEmailCode", "Enter the code krunker.io sent to your email."));
@@ -500,7 +501,7 @@ static void on_auth_answer(const int status, cJSON *res) {
     }
     // ensure_verified, ensure_migrated, select_username, update_password, kid_age_gate,
     // kid_parental_consent: steps of krunker.io's own page
-    printf("[kio-account] krunker.io asks for a step of its own page (%s)\n", type);
+    KN_LOG_DEBUG1("[kio-account] krunker.io asks for a step of its own page (%s)\n", type);
     I18N_F(text, "kn.kio.account.finishOnSite", "krunker.io needs a step this client does not do ({0}): sign in once on krunker.io itself, then here again.", type);
     fail_sign_in(text);
 }
@@ -508,7 +509,7 @@ static void on_auth_answer(const int status, cJSON *res) {
 static void on_profile(const int status, cJSON *res) {
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(res, "data");
     if (status != 200 || !cJSON_IsObject(data)) {
-        printf("[kio-account] /player/me: HTTP %d (the name typed stays)\n", status);
+        KN_LOG_DEBUG1("[kio-account] /player/me: HTTP %d (the name typed stays)\n", status);
         return;
     }
     const char *keys[] = {"username", "player_name", "name"};
@@ -542,18 +543,18 @@ static void on_refresh(const int status, cJSON *res) {
         snprintf(A.access, sizeof(A.access), "%s", access);
         if (refresh && refresh[0]) snprintf(A.refresh, sizeof(A.refresh), "%s", refresh);
         save();
-        printf("[kio-account] the krunker.io session was refreshed\n");
+        KN_LOG_DEBUG1("[kio-account] the krunker.io session was refreshed\n");
         changed();
         serve_waiters(A.access);
         emit(KRUNKER_EV_REFRESHED);
         return;
     }
     if (status == 401) { // FRVR's INVALID_CREDENTIALS: the refresh token is no good any more
-        printf("[kio-account] the krunker.io session ended (refresh: HTTP %d): signed out\n", status);
+        KN_LOG_DEBUG1("[kio-account] the krunker.io session ended (refresh: HTTP %d): signed out\n", status);
         emit(KRUNKER_EV_EXPIRED);
         forget();
         set_message(1, "%s", I18N("kn.kio.account.expired", "Your krunker.io session ended: sign in again. Joining krunker.io servers as a guest until then."));
-        printf("[kio-account] %s\n", A.message); // logged only: the session end shows in the account header, not as a toast
+        KN_LOG_DEBUG1("[kio-account] %s\n", A.message); // logged only: the session end shows in the account header, not as a toast
         serve_waiters(NULL);
         return;
     }
@@ -658,7 +659,7 @@ static int start_sign_in(const char *login, const char *password) {
     A.email = strchr(login, '@') != NULL;
     A.state = KRUNKER_ACCOUNT_BUSY;
     set_message(0, "%s", I18N("generic.wait", "Please wait..."));
-    printf("[kio-account] signing in to krunker.io (%s)\n", A.email ? "email" : "username");
+    KN_LOG_DEBUG1("[kio-account] signing in to krunker.io (%s)\n", A.email ? "email" : "username");
     if (A.email) {
         post_login(NULL); // loginEmail has no Turnstile step
     } else {
@@ -691,7 +692,7 @@ int krunker_account_email_code(const char *email) {
     snprintf(body, sizeof(body), "{\"email\":\"%s\"}", mail);
     A.state = KRUNKER_ACCOUNT_BUSY;
     set_message(0, "%s", I18N("generic.wait", "Please wait..."));
-    printf("[kio-account] signing in to krunker.io (email code)\n");
+    KN_LOG_DEBUG1("[kio-account] signing in to krunker.io (email code)\n");
     if (!req_start(&A.auth, REQ_LOGIN, "POST", url, NULL, body)) {
         fail_sign_in(I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
         return 0;
@@ -765,7 +766,7 @@ void krunker_account_sign_out(void) {
     const int was = A.access[0] || A.refresh[0];
     forget();
     serve_waiters(NULL);
-    if (was) printf("[kio-account] signed out of krunker.io\n");
+    if (was) KN_LOG_DEBUG1("[kio-account] signed out of krunker.io\n");
     set_message(0, "%s", I18N("kn.kio.account.signedOut", "Signed out of krunker.io: krunker.io servers are joined as a guest."));
 }
 
@@ -872,7 +873,7 @@ void krunker_account_note_game(const char *name, const int level) {
     if (moved) {
         save();
         changed();
-        printf("[kio-account] the krunker.io game server names the account %s (level %d)\n", A.name, A.level);
+        KN_LOG_DEBUG1("[kio-account] the krunker.io game server names the account %s (level %d)\n", A.name, A.level);
     }
 }
 

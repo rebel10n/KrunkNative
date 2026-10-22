@@ -13,6 +13,7 @@
 // head (refDistance voiceDistance * 5, rolloff 1); voiceChatTrigger 0 makes the key a toggle.
 // The protocol / server side is shared/src/voice.c.
 #include <voice_chat.h>
+#include "klog.h"
 #include <hud_social.h>      // social_server_v7, mute_voice
 #include <player_accounts.h> // the account id of an older server's speaker (mute_voice)
 #include <player_names.h>    // the speaker's name as the notice shows it (Hide player names)
@@ -71,7 +72,7 @@ static void voice_log(const char *fmt, ...) {
     if (!voice_log_enabled()) return;
     va_list args;
     va_start(args, fmt);
-    printf("[voice] t=%.3f ", glfwGetTime());
+    KN_LOG_VERBOSE2("[voice] t=%.3f ", glfwGetTime());
     vprintf(fmt, args);
     printf("\n");
     fflush(stdout);

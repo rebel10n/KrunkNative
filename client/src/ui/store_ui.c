@@ -15,6 +15,7 @@
 // the won item's three.js scene (spin_item_set, into a <canvas> in #spinItemCanvas), flying in and
 // bobbing.
 #include <backend.h>
+#include "klog.h"
 #include <backend_ui.h>
 #include <app_mode.h>
 #include <ui_logic.h>
@@ -522,7 +523,7 @@ static const char *item_desc(const ViewerSkin *skin) {
 // or the Free KR coin art), flown in and bobbed the same way.
 static void show_item_image(const int skin, const char *src, const int rarity, const int coin) {
     const int three_d = coin ? spin_item_set_coin() : spin_item_set(skin);
-    printf("[store] won item shown as %s\n", three_d ? "its 3D model" : "its preview image");
+    KN_LOG_VERBOSE2("[store] won item shown as %s\n", three_d ? "its 3D model" : "its preview image");
     if (three_d) {
         // three.js's domElement: setSize keeps it at the holder's CSS size, display block
         set_html("spinItemCanvas", "<canvas id='knSpinItemGl' style='display:block;width:100%;height:100%'></canvas>");
@@ -569,7 +570,7 @@ static void load_next_item(void) {
     char src[160];
     store_skin_preview(item, src, sizeof(src));
     show_item_image(item, src, g_wheel.win_rarity, 0);
-    printf("[store] unboxing %s (skin %d, %d owned)\n", skin ? skin->name : "?", item, owned);
+    KN_LOG_VERBOSE2("[store] unboxing %s (skin %d, %d owned)\n", skin ? skin->name : "?", item, owned);
 }
 
 // f1835 / showSpinError: "Spin Error 9" (and the brain's "Not enough KR") open Purchase KR,
@@ -703,7 +704,7 @@ static void spin_finished(const int next) {
     const int rarity = g_wheel.win_rarity;
     g_wheel.end_val = 0;
     g_wheel.end_target = 100; // v10 f1847: iîiîîiï = 100 (the won slice then covers the whole wheel)
-    printf("[store] wheel stopped on %s\n", rarity >= 0 && rarity < g_viewer_rarity_count ? g_viewer_rarities[rarity].name : "?");
+    KN_LOG_VERBOSE2("[store] wheel stopped on %s\n", rarity >= 0 && rarity < g_viewer_rarity_count ? g_viewer_rarities[rarity].name : "?");
     audio_play("reward", 0.3f, 0, 1.0f);
     spin_wheel_confetti_reset();
     if (rarity >= 0 && rarity < 7) {

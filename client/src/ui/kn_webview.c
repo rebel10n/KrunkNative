@@ -39,6 +39,7 @@
 // WebView2Loader.dll, loaded at run time. No loader, or no runtime (GetAvailableCoreWebView2BrowserVersionString
 // fails), makes the backend unavailable: the callers end the request as they do with no webview.
 #include <kn_webview.h>
+#include "klog.h"
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -422,7 +423,7 @@ static int navigation_ok(const char *uri) {
 static void http_status(const unsigned status) {
     if (status < 400) return;
     W.http_err = status;
-    printf("[webview] %s answered HTTP %u\n", W.origin, status);
+    KN_LOG_VERBOSE2("[webview] %s answered HTTP %u\n", W.origin, status);
 }
 
 // The widget's messages ("kind:value", from the user script). on_origin: the message came from the
@@ -430,14 +431,14 @@ static void http_status(const unsigned status) {
 // one that failed, expired or timed out ends the challenge (the caller's failure, as the live client's null).
 static void widget_message(const char *s, const int on_origin) {
     if (!on_origin) {
-        printf("[webview] a message while the page is not on %s: ignored\n", W.origin);
+        KN_LOG_VERBOSE2("[webview] a message while the page is not on %s: ignored\n", W.origin);
         return;
     }
     const size_t len = strlen(s);
     if (!strncmp(s, "token:", 6)) {
         const size_t n = len - 6;
         if (W.taken) {
-            printf("[webview] a second token: ignored (one per challenge)\n");
+            KN_LOG_VERBOSE2("[webview] a second token: ignored (one per challenge)\n");
         } else if (n == 0 || n > KN_WEBVIEW_TOKEN_MAX) {
             printf("[webview] the widget answered something that is not a token (%zu chars)\n", n);
             W.ev_failed = 1;
@@ -446,7 +447,7 @@ static void widget_message(const char *s, const int on_origin) {
             memcpy(W.token, s + 6, n + 1);
             W.taken = 1;
             W.ev_token = 1;
-            printf("[webview] the challenge was solved: a token (%zu chars)\n", n);
+            KN_LOG_DEBUG1("[webview] the challenge was solved: a token (%zu chars)\n", n);
         }
     } else if (!strncmp(s, "error:", 6)) {
         char code[17];
@@ -464,15 +465,15 @@ static void widget_message(const char *s, const int on_origin) {
         set_msg(text);
         W.ev_failed = 1;
     } else if (!strncmp(s, "expired:", 8) || !strncmp(s, "timeout:", 8)) {
-        printf("[webview] the challenge %s\n", s[0] == 'e' ? "expired" : "timed out");
+        KN_LOG_VERBOSE2("[webview] the challenge %s\n", s[0] == 'e' ? "expired" : "timed out");
         set_msg(s[0] == 'e' ? "The challenge expired." : "The challenge timed out.");
         W.ev_failed = 1;
     } else if (!strncmp(s, "interstitial:", 13)) {
         // Cloudflare's own page check: it may pass by itself, so it is not a reason to show the widget
         // (the no-token backstop still is)
-        printf("[webview] Cloudflare checks the visit to %s first (hidden: waiting for it)\n", W.origin);
+        KN_LOG_DEBUG1("[webview] Cloudflare checks the visit to %s first (hidden: waiting for it)\n", W.origin);
     } else if (!strncmp(s, "interactive:", 12)) {
-        printf("[webview] Turnstile needs the player\n");
+        KN_LOG_DEBUG1("[webview] Turnstile needs the player\n");
         W.reveal = "Turnstile needs the player";
     } else if (!strncmp(s, "http:", 5)) {
         http_status((unsigned) strtoul(s + 5, NULL, 10));
@@ -866,7 +867,7 @@ static void reveal(const char *why) {
     if (W.inline_shown || !W.view || !W.offscreen) return;
     W.inline_shown = 1;
     W.dirty = 1; // (the first frame is taken at once)
-    printf("[webview] challenge shown (%s): in the game UI, no window\n", why);
+    KN_LOG_DEBUG1("[webview] challenge shown (%s): in the game UI, no window\n", why);
 }
 
 // ---------------------------------------------------------------- API
@@ -909,11 +910,11 @@ static int toolkit_up(void) {
     if (!gtk_init_check(NULL, NULL)) {
         W.toolkit = -1;
         snprintf(W.toolkit_err, sizeof(W.toolkit_err), "GTK found no display for the challenge");
-        printf("[webview] %s\n", W.toolkit_err);
+        KN_LOG_VERBOSE2("[webview] %s\n", W.toolkit_err);
         return 0;
     }
     W.toolkit = 1;
-    printf("[webview] WebKitGTK %u.%u.%u\n", webkit_get_major_version(), webkit_get_minor_version(), webkit_get_micro_version());
+    KN_LOG_DEBUG1("[webview] WebKitGTK %u.%u.%u\n", webkit_get_major_version(), webkit_get_minor_version(), webkit_get_micro_version());
     return 1;
 }
 
@@ -993,7 +994,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     gtk_window_set_focus(GTK_WINDOW(W.offscreen), GTK_WIDGET(W.view)); // the keys the game UI forwards go to the view
     if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
 
-    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
+    KN_LOG_DEBUG1("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
            proxy && proxy[0] ? ", through the client's proxy" : "");
     webkit_web_view_load_uri(W.view, resolved);
     kn_webview_pump();
@@ -1007,9 +1008,9 @@ void kn_webview_captcha_close(void) {
         W.offscreen = NULL;
         W.view = NULL;
         W.reveal = NULL;
-        if (!W.inline_shown) printf("[webview] challenge closed (it was never shown)\n");
+        if (!W.inline_shown) KN_LOG_DEBUG1("[webview] challenge closed (it was never shown)\n");
     }
-    if (W.inline_shown) printf("[webview] challenge closed (shown in the game UI)\n");
+    if (W.inline_shown) KN_LOG_DEBUG1("[webview] challenge closed (shown in the game UI)\n");
     session_end();
 }
 
@@ -1144,7 +1145,7 @@ static char *utf8_of(const wchar_t *w) {
 // The loader and the runtime, once: no loader or no runtime makes the backend unavailable (err says why).
 static int wv2_unavailable(const char *why) {
     snprintf(L.err, sizeof(L.err), "%s", why);
-    printf("[webview] %s\n", why);
+    KN_LOG_VERBOSE2("[webview] %s\n", why);
     return 0;
 }
 
@@ -1433,7 +1434,7 @@ static void backend_tick(void) {
 
 // The challenge did not start or broke (the runtime, the window): the request ends (the poll reports it).
 static void wv2_fail(const char *text) {
-    printf("[webview] %s\n", text);
+    KN_LOG_VERBOSE2("[webview] %s\n", text);
     set_msg(text);
     W.ev_failed = 1;
 }
@@ -1710,7 +1711,7 @@ static void reveal(const char *why) {
     }
     W.inline_shown = 1;
     W.dirty = 1; // (the first frame is taken at once)
-    printf("[webview] challenge shown (%s): in the game UI, no window\n", why);
+    KN_LOG_DEBUG1("[webview] challenge shown (%s): in the game UI, no window\n", why);
 }
 
 // ---------------------------------------------------------------- API (WebView2)
@@ -1721,7 +1722,7 @@ int kn_webview_available(void) { return !env_off() && wv2_loader(NULL, 0); }
 // quietly (RPC_E_CHANGED_MODE, miniaudio.h). Failing here is logged; the challenge then says WebView2 cannot start.
 void kn_webview_apartment_init(void) {
     const HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(com)) printf("[webview] the main thread's apartment: CoInitializeEx 0x%08lx\n", (unsigned long) com);
+    if (FAILED(com)) KN_LOG_VERBOSE2("[webview] the main thread's apartment: CoInitializeEx 0x%08lx\n", (unsigned long) com);
 }
 
 int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int in_ui, const int show_now,
@@ -1777,7 +1778,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
         return 0;
     }
     if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
-    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
+    KN_LOG_DEBUG1("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
            proxy && proxy[0] ? ", through the client's proxy" : "");
     kn_webview_pump();
     return 1;
@@ -1796,9 +1797,9 @@ void kn_webview_captcha_close(void) {
         wv2_clear_proxy_env();
         wv2_remove_session_dir();
         wv_gen++;
-        if (!W.inline_shown) printf("[webview] challenge closed (it was never shown)\n");
+        if (!W.inline_shown) KN_LOG_DEBUG1("[webview] challenge closed (it was never shown)\n");
     }
-    if (W.inline_shown) printf("[webview] challenge closed (shown in the game UI)\n");
+    if (W.inline_shown) KN_LOG_DEBUG1("[webview] challenge closed (shown in the game UI)\n");
     session_end();
 }
 
@@ -2043,7 +2044,7 @@ static void wk_set_proxy(WKWebsiteDataStore *ds, const char *proxy) {
         nw_proxy_config_add_excluded_domain(config, "127.0.0.1");
         ds.proxyConfigurations = @[ config ];
     } else {
-        printf("[webview] the challenge's proxy needs macOS 14: the challenge goes direct\n");
+        KN_LOG_VERBOSE2("[webview] the challenge's proxy needs macOS 14: the challenge goes direct\n");
     }
 }
 
@@ -2128,7 +2129,7 @@ static void reveal(const char *why) {
     W.inline_shown = 1;
     W.dirty = 0;
     wk_focus_widget(); // every show takes the keys
-    printf("[webview] challenge shown (%s): in the game UI, no window\n", why);
+    KN_LOG_DEBUG1("[webview] challenge shown (%s): in the game UI, no window\n", why);
     wk_snapshot_now(); // the first frame at once
 }
 
@@ -2222,7 +2223,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     [W.host makeFirstResponder:W.view];
     if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
 
-    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
+    KN_LOG_DEBUG1("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
            proxy && proxy[0] ? ", through the client's proxy" : "");
     [W.view loadRequest:[NSURLRequest requestWithURL:nsurl]];
     kn_webview_pump();
@@ -2234,9 +2235,9 @@ void kn_webview_captcha_close(void) {
         wk_drop_view();
         wk_drop_host();
         W.reveal = NULL;
-        if (!W.inline_shown) printf("[webview] challenge closed (it was never shown)\n");
+        if (!W.inline_shown) KN_LOG_DEBUG1("[webview] challenge closed (it was never shown)\n");
     }
-    if (W.inline_shown) printf("[webview] challenge closed (shown in the game UI)\n");
+    if (W.inline_shown) KN_LOG_DEBUG1("[webview] challenge closed (shown in the game UI)\n");
     session_end();
 }
 

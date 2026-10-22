@@ -7,6 +7,7 @@
 // per frame (render_target.c, main.c); the rest are kept in ClientRenderSettings for the
 // system that draws the thing (HUD, VFX, viewmodel), see the report table in the header.
 #include <render_settings.h>
+#include "klog.h"
 #include <ui_logic.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -317,7 +318,7 @@ static void set_window_mode(Client *client, const int mode) {
     }
     g_swap_dirty = 1; // monitor changes can reset the swap interval on some drivers
     client_pointer_refresh(client); // F11 / windowMode: a locked pointer is grabbed again on the new geometry
-    printf("[render] window mode %s\n", mode == RS_FULLSCREEN ? "fullscreen" : mode == RS_BORDERLESS ? "borderless" : "windowed");
+    KN_LOG_VERBOSE2("[render] window mode %s\n", mode == RS_FULLSCREEN ? "fullscreen" : mode == RS_BORDERLESS ? "borderless" : "windowed");
 }
 #endif
 
@@ -598,7 +599,7 @@ int client_apply_render_setting(Client *client, const char *key, const char *val
     }
     if (e->hook) e->hook(client);
     if (e->shared) return 0;
-    printf("[render] setting %s=%s\n", key, value);
+    KN_LOG_VERBOSE2("[render] setting %s=%s\n", key, value);
     return 1;
 }
 
@@ -763,7 +764,7 @@ static void release_display_mode(Client *client) {
     GLFWmonitor *monitor = glfwGetWindowMonitor(client->window);
     const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
     if (!vid || !g_desktop_w || (vid->width == g_desktop_w && vid->height == g_desktop_h)) return;
-    printf("[window] restoring the desktop video mode %dx%d\n", g_desktop_w, g_desktop_h);
+    KN_LOG_DEBUG1("[window] restoring the desktop video mode %dx%d\n", g_desktop_w, g_desktop_h);
     glfwSetWindowMonitor(client->window, NULL, client->windowed_rect.x, client->windowed_rect.y,
                          client->windowed_rect.width > 0 ? client->windowed_rect.width : WINDOW_STATE_DEFAULT_W,
                          client->windowed_rect.height > 0 ? client->windowed_rect.height : WINDOW_STATE_DEFAULT_H, 0);
@@ -921,7 +922,7 @@ void client_render_window_created(Client *client) {
     glfwSetWindowMaximizeCallback(window, window_maximize_cb);
     char where[64] = "";
     if (g_ws.has_pos) snprintf(where, sizeof(where), " at %d,%d (%s)", s->x, s->y, centred ? "centred on the work area" : "kept");
-    printf("[window] opened %s%s, windowed %dx%d%s%s%s\n",
+    KN_LOG_DEBUG1("[window] opened %s%s, windowed %dx%d%s%s%s\n",
            s->mode == RS_FULLSCREEN ? "fullscreen" : s->mode == RS_BORDERLESS ? "borderless" : "windowed",
            s->forced ? " (session)" : "", s->w, s->h, s->maximized ? " maximized" : "", where,
            g_ws.restored ? " (restored after restart)" : "");
@@ -946,7 +947,7 @@ void client_render_window_before_exec(Client *client) {
     char text[WINDOW_STATE_TEXT_MAX];
     if (window_state_encode(&s, text, sizeof(text))) {
         set_env(WINDOW_STATE_ENV, text);
-        printf("[window] restart with %s=%s\n", WINDOW_STATE_ENV, text);
+        KN_LOG_DEBUG1("[window] restart with %s=%s\n", WINDOW_STATE_ENV, text);
     }
     persist_window_state(&s);
     release_display_mode(client);

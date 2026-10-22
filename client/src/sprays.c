@@ -9,6 +9,7 @@
 // a spray into a used slot moves that decal. Older servers send NET_PACKET_SPRAY: one decal per
 // sid, index 0..52 = v3.1.1's Game.sprays (store items 2482 + i in v7).
 #include <gl.h>
+#include "klog.h"
 #include <sprays.h>
 #include <social_v7.h>
 #include <canvas2d.h>
@@ -189,7 +190,7 @@ void sprays_add(Client *client, const NetSprayPacket *packet) {
     float mov_t;
     const SprayDef def = spray_resolve(packet->spray_index, &mov_t);
     if (spray_place(client, packet->uid, -1, def, mov_t, packet->position, packet->y_rot, packet->x_rot, 0))
-        printf("[sprays] decal %d skin=%d texture=textures/sprays/%d.png\n", packet->uid, packet->spray_index, def.id);
+        KN_LOG_VERBOSE2("[sprays] decal %d skin=%d texture=textures/sprays/%d.png\n", packet->uid, packet->spray_index, def.id);
 }
 
 void sprays_add_v7(Client *client, const NetSprayV7Packet *packet) {
@@ -197,7 +198,7 @@ void sprays_add_v7(Client *client, const NetSprayV7Packet *packet) {
     float mov_t;
     const SprayDef def = spray_resolve_v7(packet->skin, &mov_t);
     if (spray_place(client, packet->uid, packet->slot, def, mov_t, packet->position, packet->y_rot, packet->x_rot, packet->z_rot))
-        printf("[sprays] decal %d_%u skin=%d texture=textures/sprays/%d.png\n", packet->uid, (unsigned) packet->slot, packet->skin, def.id);
+        KN_LOG_VERBOSE2("[sprays] decal %d_%u skin=%d texture=textures/sprays/%d.png\n", packet->uid, (unsigned) packet->slot, packet->skin, def.id);
 }
 
 void sprays_tick(Client *client) {

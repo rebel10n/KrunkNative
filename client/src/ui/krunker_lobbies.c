@@ -2,6 +2,7 @@
 // "Official lobbies"). Native only: platform behaviour, so the web build compiles the stubs at
 // the end (#ifndef __EMSCRIPTEN__) and never lists or requests anything from krunker.io.
 #include <join_errors.h>
+#include "klog.h"
 #include <krunker_lobbies.h>
 #include <krunker_net.h>
 #include <seek_prefs.h>
@@ -184,7 +185,7 @@ static void on_pings(void *user, cJSON *pings) {
     cJSON_Delete(K.pings);
     K.pings = pings;
     K.pinging = 0;
-    printf("[krunker] lobby row pings measured: %d regions\n", cJSON_GetArraySize(pings));
+    KN_LOG_DEBUG1("[krunker] lobby row pings measured: %d regions\n", cJSON_GetArraySize(pings));
     hide_tls_failed();
     run_waiting(); // the seek / Find Game that waited for these pings
     menu_rerender_if_open(2); // the rows' ping icons (windows[1].pingData)
@@ -286,7 +287,7 @@ static void on_list(void *user, const int status, const char *body, const size_t
         krunker_lobbies_measure_pings();
         char proxy[160];
         const int proxied = via_proxy(proxy, sizeof(proxy));
-        printf("[krunker] %d official lobbies (%.0f players) from %s%s%s\n", cJSON_GetArraySize(K.list), K.players, matchmaker_url(),
+        KN_LOG_DEBUG1("[krunker] %d official lobbies (%.0f players) from %s%s%s\n", cJSON_GetArraySize(K.list), K.players, matchmaker_url(),
                proxied ? " via proxy " : "", proxied ? proxy : "");
     } else {
         char proxy[160];
@@ -435,7 +436,7 @@ static void on_race(void *user, const char *region) {
     (void) user;
     if (region) {
         html_storage_set(KRUNKER_PING_CACHE_KEY, region); // ClientManager.setDefaultRegion
-        printf("[krunker] seek region: %s (%s), the first to answer the ping race\n", region, krunker_region_name(region));
+        KN_LOG_VERBOSE2("[krunker] seek region: %s (%s), the first to answer the ping race\n", region, krunker_region_name(region));
     } else {
         R.failed_ms = now_ms();
         printf("[krunker] seek region: every ping failed: %s for now\n", k_available[0]);
@@ -468,7 +469,7 @@ void krunker_seek_region_resolve(const KrunkerRegionFn fn, void *user) {
     R.racing = 1;
     char url[512];
     snprintf(url, sizeof(url), "%s/ping-list?hostname=krunker.io", matchmaker_url()); // fetchPingList (v10.js:147583-147588)
-    printf("[krunker] seek region: none chosen or cached: racing the regions' pings\n");
+    KN_LOG_VERBOSE2("[krunker] seek region: none chosen or cached: racing the regions' pings\n");
     if (!backend_http_get_external(url, KRUNKER_LOBBIES_TIMEOUT_MS, on_ping_list, NULL)) on_race(NULL, NULL);
 }
 
@@ -558,7 +559,7 @@ static int finder_open(const int mode) {
     }
     if (!best) return 0;
     snprintf(id, sizeof(id), "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
-    printf("[krunker] find game: official custom %s (mode %d)\n", id, mode);
+    KN_LOG_DEBUG1("[krunker] find game: official custom %s (mode %d)\n", id, mode);
     ui_loadout_clear_pops(); // the Searching popup gives way to the join
     krunker_lobbies_open(id);
     html_timer_add(FINDER_TOOK_LONG_MS, finder_took_long, NULL);
@@ -623,7 +624,7 @@ int krunker_lobbies_seek(void) {
         if (K.loading) {
             // v10's loading state while the list comes (no toast in the join flow): the spinner, unless
             // a game is still up (the join that follows shows it: krunker_net.c join)
-            printf("[krunker] seek: looking for a krunker.io server (the lobby list)\n");
+            KN_LOG_VERBOSE2("[krunker] seek: looking for a krunker.io server (the lobby list)\n");
             if (g_lobbies_client && !g_lobbies_client->net_connected && !g_lobbies_client->offline && !menu_connecting()) menu_show_connecting_map(NULL);
             return 1;
         }
@@ -653,7 +654,7 @@ int krunker_lobbies_seek(void) {
             printf("[krunker] seek: no other official lobby has room for %s, staying in %s\n", want, id);
             return 1;
         }
-        printf("[krunker] seek: official lobby %s%s\n", id, krunker_net_recent_rank(id) ? " (a recent one: nothing else has room)" : "");
+        KN_LOG_VERBOSE2("[krunker] seek: official lobby %s%s\n", id, krunker_net_recent_rank(id) ? " (a recent one: nothing else has room)" : "");
         quick_play_retry_arm(official_pick_again, NULL); // full when it is joined: the list is picked again (quick_play_retry.h)
         krunker_lobbies_open(id);
         quick_play_retry_disarm();
@@ -686,7 +687,7 @@ void krunker_lobbies_open(const char *id) {
     // so it never falls back to the browser behind the player's back. One that starts shows no toast:
     // the loading screen says it.
     if (krunker_net_in_client() && g_lobbies_client) {
-        printf("[krunker] official lobby %s: joining in-client\n", id);
+        KN_LOG_DEBUG1("[krunker] official lobby %s: joining in-client\n", id);
         menu_show_window(MENU_WINDOW_NONE, 0); // like a KrunkNative row: the Servers window makes way for the game
         // v10's loading screen, as for one of ours (servers_ui.c): the ring with "Loading <map> ..." for a
         // listed lobby (Krunker's own map name), the ring alone for a link, until its INIT or the error
@@ -700,7 +701,7 @@ void krunker_lobbies_open(const char *id) {
     const char *site = getenv("KRUNKNATIVE_KRUNKER_URL");
     char url[256], text[256];
     snprintf(url, sizeof(url), "%s/?game=%s", site && site[0] ? site : KRUNKER_DEFAULT_SITE, id);
-    printf("[krunker] official lobby %s: opening %s (in the browser: KRUNKNATIVE_KRUNKER_JOIN=browser)\n", id, url);
+    KN_LOG_VERBOSE2("[krunker] official lobby %s: opening %s (in the browser: KRUNKNATIVE_KRUNKER_JOIN=browser)\n", id, url);
     // the opt-out: krunker.io's own page joins it (ui_open_browser, never the in-client routing of
     // krunker.io links)
     ui_open_browser(url);

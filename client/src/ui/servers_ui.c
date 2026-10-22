@@ -13,6 +13,7 @@
 // after HELLO (net.c / net_web.c). v3.1.1's switchServer reloads the page with
 // ?game=<id>: the web build does exactly that, the native client re-seeks in place.
 #include <backend.h>
+#include "klog.h"
 #include <backend_ui.h>
 #include <console.h>     // ui_console_go_offline: the Games window's Play leaves a joined lobby
 #include <game_reload.h> // game_reload_server_updating: the auto-restart on a server update
@@ -400,7 +401,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
 #endif
     pthread_mutex_unlock(&client->net_lock);
 
-    printf("[mm] joining %s at %s:%d\n", g_game_id, host, port);
+    KN_LOG_DEBUG1("[mm] joining %s at %s:%d\n", g_game_id, host, port);
     page_game_url(g_game_id, NULL);
     // the spinner, "Loading <map> ..." for the lobby's map: the seek answer's, else the game list's row (a Quick Play
     // join has no list of its own; the brain's answer names the map)
@@ -415,7 +416,7 @@ static void direct_join(const char *host, int port);
 // network (seek it: a fresh ticket from the matchmaker) or a direct host:port.
 void servers_ui_redirect(const char *game_id, const char *host, const int port, const char *reason) {
     if (!g_client) return;
-    printf("[mm] server redirect: %s%s%s:%d (%s)\n", game_id && game_id[0] ? game_id : "", game_id && game_id[0] ? " / " : "",
+    KN_LOG_VERBOSE2("[mm] server redirect: %s%s%s:%d (%s)\n", game_id && game_id[0] ? game_id : "", game_id && game_id[0] ? " / " : "",
            host ? host : "", port, reason ? reason : "");
     if (game_id && game_id[0] && g_brain_mode && g_pin == PIN_NONE && backend_available() == 1) {
         switch_server(game_id);
@@ -600,7 +601,7 @@ static void on_link_list(void *user, const int status, const char *body, const s
         const cJSON *p = cJSON_GetObjectItem(meta, "port");
         const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
         if (id && h && cJSON_IsNumber(p) && p->valueint == g_client->net_port && !strcasecmp(h, g_client->net_address)) {
-            printf("[mm] direct server %s:%d is lobby %s\n", h, p->valueint, id);
+            KN_LOG_VERBOSE2("[mm] direct server %s:%d is lobby %s\n", h, p->valueint, id);
             page_game_url(id, cJSON_GetStringValue(cJSON_GetArrayItem(t, 1)));
             break;
         }
@@ -677,7 +678,7 @@ static void seek_req_free(SeekReq *r) {
 // when dropped (the request is freed).
 static int seek_overtaken(SeekReq *req) {
     if (!req || !seek_claim_overtaken(&g_claims, req->action)) return 0;
-    printf("[mm] late seek answer ignored: a later action took over (a lobby was entered, or krunker.io was asked for)\n");
+    KN_LOG_VERBOSE2("[mm] late seek answer ignored: a later action took over (a lobby was entered, or krunker.io was asked for)\n");
     if (req->serial == g_seek_serial) { // the last seek issued: nothing of this request is in flight any more
         g_seek_inflight = 0;
         g_rejoin_seek = 0;
@@ -700,7 +701,7 @@ void servers_quick_join_next(void);
 static void reload_fallback(const char *game_id, const int full) {
     char id[sizeof(g_seek_game)];
     snprintf(id, sizeof(id), "%s", game_id ? game_id : "");
-    printf("[mm] reload: lobby %s is %s: seeking another lobby\n", id[0] ? id : "(none)", full ? "full" : "gone");
+    KN_LOG_DEBUG1("[mm] reload: lobby %s is %s: seeking another lobby\n", id[0] ? id : "(none)", full ? "full" : "gone");
     if (g_client && !g_client->net_connected) menu_show_connecting_map(NULL);
     g_game_id[0] = 0;
     g_exclude_game[0] = 0;
@@ -782,7 +783,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     if (qp && quick_play_retry_stale(req->qp_gen)) {
         // the search was stopped (F4 / Quick Match again, Escape, leaving the menu) or replaced while this
         // answer was on its way: dropped, and the spinner stays as the stop left it
-        printf("[mm] quick play: a late answer is ignored (the search was stopped)\n");
+        KN_LOG_VERBOSE2("[mm] quick play: a late answer is ignored (the search was stopped)\n");
         if (req->serial == g_seek_serial) g_seek_inflight = 0;
         seek_req_free(req);
         return;
@@ -797,7 +798,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     g_find_seek = g_find_both = 0;
     if (g_pin != PIN_NONE) {
         // the user connected to / disconnected from a server by hand while this seek ran
-        printf("[mm] seek answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        KN_LOG_VERBOSE2("[mm] seek answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
         seek_req_free(req);
         return;
     }
@@ -839,7 +840,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         // another one, excluding it, SEEK_FULL_SKIPS_MAX times at most, then the game is full.
         const cJSON *game = cJSON_GetObjectItem(res, "gameId");
         const char *id = cJSON_IsString(game) ? game->valuestring : "";
-        printf("[mm] seek answer %s is full (%d/%d): not joining it\n", id,
+        KN_LOG_DEBUG1("[mm] seek answer %s is full (%d/%d): not joining it\n", id,
                (int) cJSON_GetNumberValue(cJSON_GetObjectItem(res, "players")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(res, "maxPlayers")));
         if (quiet) {
             g_quick_join_full = 1;
@@ -875,7 +876,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (cJSON_IsString(region)) snprintf(g_region, sizeof(g_region), "%s", region_id_of(region->valuestring)); // the seek answer names its edge: its v10 id
         g_quick_join_left = 0;
         g_account_game[0] = 0;
-        if (rejoin) printf("[mm] rejoin: %s with a fresh join ticket\n", cJSON_IsString(game) ? game->valuestring : "?");
+        if (rejoin) KN_LOG_DEBUG1("[mm] rejoin: %s with a fresh join ticket\n", cJSON_IsString(game) ? game->valuestring : "?");
         const cJSON *map = cJSON_GetObjectItem(res, "map"); // the lobby's map (brain_seek_reply)
         join_server(host->valuestring, port->valueint, cJSON_IsString(game) ? game->valuestring : "",
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
@@ -940,7 +941,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             } else if (cJSON_IsString(err) && !strcmp(err->valuestring, "NoOtherLobby") && g_client->net_connected) {
                 // KrunkNative's code for "only the lobby you leave has room": v10's matchmaker answers
                 // that same game instead and v10 lands back in it without a word, so: nothing shown
-                printf("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
+                KN_LOG_VERBOSE2("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
             } else {
                 printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
                 // v10's error screen, in the game too (v10.js:222076-222090: the menu with its message)
@@ -976,7 +977,7 @@ static void strike_seek_failed(const char *error) {
         snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
         // only this lobby has room: v10 lands back in the same game silently (no notice, the log says it);
         // a real failure keeps v10's error popup with v10's text
-        if (error && !strcmp(error, "NoOtherLobby")) printf("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
+        if (error && !strcmp(error, "NoOtherLobby")) KN_LOG_VERBOSE2("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
         else ui_error_popup(seek_error_text(error));
     } else {
         fatal_error(seek_error_text(error));
@@ -1013,11 +1014,11 @@ static void on_strike_finder(void *user, const int status, const char *body, con
         best_rank = rank;
     }
     if (g_pin != PIN_NONE) {
-        printf("[strike] finder answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        KN_LOG_VERBOSE2("[strike] finder answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
     } else if (best) {
         const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(best, "host"));
         const int port = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(best, "port"));
-        printf("[strike] finder pool: %s:%d (%d players)\n", host, port, best_players);
+        KN_LOG_VERBOSE2("[strike] finder pool: %s:%d (%d players)\n", host, port, best_players);
         g_find_seek = g_find_both = 0;
         g_strike_code[0] = 0;
         join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")), NULL, 0);
@@ -1047,7 +1048,7 @@ static int strike_finder_seek(const char *error) {
     char *copy = strdup(error ? error : "");
     g_seek_inflight = backend_http_request("GET", url, NULL, on_strike_finder, copy);
     if (!g_seek_inflight) free(copy);
-    else printf("[strike] falling back to the finder's Strike pool: GET %s\n", url);
+    else KN_LOG_VERBOSE2("[strike] falling back to the finder's Strike pool: GET %s\n", url);
     return g_seek_inflight;
 }
 
@@ -1057,7 +1058,7 @@ static void on_strike_allocation(void *user, const StrikeAllocation *a) {
     quick_play_retry_answered();
     g_rejoin_seek = 0;
     if (g_pin != PIN_NONE) {
-        printf("[strike] allocation ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        KN_LOG_VERBOSE2("[strike] allocation ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
         return;
     }
     // Find New Game / Quick Match: the director takes no excludeGame, so an answer on a server or game
@@ -1066,7 +1067,7 @@ static void on_strike_allocation(void *user, const StrikeAllocation *a) {
         char server[RECENT_LOBBY_ID_MAX];
         snprintf(server, sizeof(server), "%s:%d", a->host, a->port);
         if (recent_lobbies_rank(&g_recent_servers, server) || (g_find_prev_game[0] && !strcmp(a->game_id, g_find_prev_game))) {
-            printf("[strike] director answered the lobby this client leaves (%s): the finder's pool instead\n", a->game_id);
+            KN_LOG_VERBOSE2("[strike] director answered the lobby this client leaves (%s): the finder's pool instead\n", a->game_id);
             if (!strike_finder_seek(NULL)) strike_seek_failed("NoOtherLobby");
             return;
         }
@@ -1150,7 +1151,7 @@ static void seek_dropped(void) {
 // leave, exclude or rejoin.
 static void krunker_gives_way(const char *what) {
     if (!g_client || !krunker_net_active()) return;
-    printf("[mm] %s: the krunker.io game gives way to Box Office\n", what);
+    KN_LOG_VERBOSE2("[mm] %s: the krunker.io game gives way to Box Office\n", what);
     krunker_net_leave(g_client, NULL);
     g_game_id[0] = 0;
 }
@@ -1232,8 +1233,8 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
         if (recent[0]) {
             backend_url_encode(recent_enc, sizeof(recent_enc), recent);
             n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeRecent=%s", recent_enc);
-            if (g_exclude_game[0]) printf("[mm] seek: excluding %s, then the recent %s\n", g_exclude_game, recent);
-            else printf("[mm] quick play: leaving out the lobbies that were full: %s\n", recent);
+            if (g_exclude_game[0]) KN_LOG_VERBOSE2("[mm] seek: excluding %s, then the recent %s\n", g_exclude_game, recent);
+            else KN_LOG_VERBOSE2("[mm] quick play: leaving out the lobbies that were full: %s\n", recent);
         }
     }
     g_exclude_game[0] = 0;
@@ -1322,7 +1323,7 @@ static void on_token(void *user, const int status, const char *body, const size_
         const size_t cap = strlen(path) + strlen(enc) + 32;
         full = malloc(cap);
         if (full) snprintf(full, cap, "%s&validationToken=%s", path, enc);
-        printf("[mm] validation token (%zu chars)%s\n", len, req->retried ? ", fresh after a refusal" : "");
+        KN_LOG_VERBOSE2("[mm] validation token (%zu chars)%s\n", len, req->retried ? ", fresh after a refusal" : "");
     } else {
         printf("[mm] no validation token (generate-token HTTP %d): seeking without one\n", status);
     }
@@ -1392,7 +1393,7 @@ const char *servers_ui_seek_region(void) { return g_region; }
 static void seek_in_region(const char *requested_game) {
     if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", "local");
     if (g_pin != PIN_NONE) {
-        printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        KN_LOG_VERBOSE2("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
         g_exclude_game[0] = 0; // the Quick Match this skipped must not leak into a later seek
         g_reload_next = 0;     // nor the reload's mark
     }
@@ -1413,7 +1414,7 @@ static void on_region_race(void *user, const char *region) {
     PingSeek *ps = user;
     g_region_racing = 0;
     if (ping_seek_stale(ps)) { // the search was stopped while the pings ran: no seek of it
-        printf("[mm] quick play: a late ping race is ignored (the search was stopped)\n");
+        KN_LOG_DEBUG1("[mm] quick play: a late ping race is ignored (the search was stopped)\n");
         ping_seek_free(ps);
         return;
     }
@@ -1421,7 +1422,7 @@ static void on_region_race(void *user, const char *region) {
         snprintf(g_region, sizeof(g_region), "%s", region);
         html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
         html_storage_set(PINGED_KEY, g_region);
-        printf("[mm] seek region: %s, the first to answer the ping race\n", g_region);
+        KN_LOG_DEBUG1("[mm] seek region: %s, the first to answer the ping race\n", g_region);
     } else if (g_ping_regions && g_ping_regions->child && g_ping_regions->child->string) {
         snprintf(g_region, sizeof(g_region), "%s", g_ping_regions->child->string);
         html_storage_set("pingRegion7", g_region);
@@ -1436,7 +1437,7 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     PingSeek *ps = user;
     if (g_ping_pending > 0) g_ping_pending--;
     if (ping_seek_stale(ps)) { // the search was stopped while the list was out: no seek of it, no region race
-        printf("[mm] quick play: a late ping list is ignored (the search was stopped)\n");
+        KN_LOG_DEBUG1("[mm] quick play: a late ping list is ignored (the search was stopped)\n");
         ping_seek_free(ps);
         return;
     }
@@ -1463,7 +1464,7 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     // lowest measured one), logged here only
     const int have_list = cJSON_IsObject(list);
     const SeekRegionChoice how = seek_region_choose(have_list ? list : NULL, saved, cached, g_region, sizeof(g_region));
-    if (how == SEEK_REGION_UNLISTED) printf("[mm] default region %s is not in the matchmaker's list: seeking in %s instead\n", saved, g_region);
+    if (how == SEEK_REGION_UNLISTED) KN_LOG_VERBOSE2("[mm] default region %s is not in the matchmaker's list: seeking in %s instead\n", saved, g_region);
     if (have_list) {
         cJSON_Delete(g_ping_regions);
         g_ping_regions = list; // the region pickers' options
@@ -1492,7 +1493,7 @@ static int start_seek(const char *game_id);
 // an official lobby (on_seek's Find New Game fallback, with no lobby to stay in).
 static int launch_seek(void) {
     const SeekServers type = seek_prefs_servers();
-    printf("[mm] launch seek: Quickplay %s\n", type == SEEK_SERVERS_OFFICIAL ? "official krunker.io" : type == SEEK_SERVERS_BOTH ? "both" : "KrunkNative");
+    KN_LOG_DEBUG1("[mm] launch seek: Quickplay %s\n", type == SEEK_SERVERS_OFFICIAL ? "official krunker.io" : type == SEEK_SERVERS_BOTH ? "both" : "KrunkNative");
     qp_begin(); // the launch seek is a Quick Play search: its full lobbies are tried again (quick_play_retry.h)
     if (type == SEEK_SERVERS_OFFICIAL || (type == SEEK_SERVERS_BOTH && !g_brain_mode)) return qp_started(krunker_lobbies_seek());
     if (!g_brain_mode) return qp_started(0);
@@ -1607,7 +1608,7 @@ static int strike_join_code(const char *text) {
     code[n] = 0;
     while (*text == ' ') text++;
     if (*text || n < 4 || n > 12 || !strike_via_director() || g_seek_inflight) return 0;
-    printf("[strike] joining private lobby %s\n", code);
+    KN_LOG_DEBUG1("[strike] joining private lobby %s\n", code);
     menu_show_window(MENU_WINDOW_NONE, 0);
     g_pin = PIN_NONE;
     if (!strike_seek(1, code)) seek_unreachable(seek_claim_start(&g_claims));
@@ -1629,7 +1630,7 @@ static int join_official(const char *id, char *err, const size_t n) {
     snprintf(err, n, "%s", I18N("kn.connect.officialWeb", "Official krunker.io lobbies join in the desktop client, not in the browser build"));
     return -1;
 #else
-    printf("[mm] connect: official krunker.io lobby %s\n", id);
+    KN_LOG_DEBUG1("[mm] connect: official krunker.io lobby %s\n", id);
     krunker_lobbies_open(id); // in this client, or the browser (its own message)
     return 1;
 #endif
@@ -1647,7 +1648,7 @@ int servers_ui_connect_game(const char *text, char *err, const size_t n) {
         snprintf(err, n, "%s", I18N("kn.connect.noMatchmaker", "This game link needs the Box Office matchmaker, which is not reachable: enter host:port instead"));
         return -1;
     }
-    printf("[mm] connect: game %s\n", id);
+    KN_LOG_DEBUG1("[mm] connect: game %s\n", id);
     menu_show_window(MENU_WINDOW_NONE, 0);
     switch_server(id); // web: location -> ?game=<id> (f9: location.href = link); native: seek it
     return 1;
@@ -1671,7 +1672,7 @@ int servers_ui_join_link(const char *text) {
 // window's Friends tab): that game through the matchmaker, like a pasted code. 0 = no matchmaker.
 int servers_ui_join_game(const char *id) {
     if (!id || !id[0] || !g_brain_mode || backend_available() != 1) return 0;
-    printf("[mm] join game %s\n", id);
+    KN_LOG_VERBOSE2("[mm] join game %s\n", id);
     menu_show_window(MENU_WINDOW_NONE, 0);
     switch_server(id);
     return 1;
@@ -1681,7 +1682,7 @@ int servers_ui_is_current_game(const char *game_id) { return game_id && game_id[
 
 int servers_ui_private_match(void) {
     if (!strike_director_enabled() || g_seek_inflight) return 0;
-    printf("[strike] opening a private lobby\n");
+    KN_LOG_DEBUG1("[strike] opening a private lobby\n");
     menu_show_window(MENU_WINDOW_NONE, 0);
     g_pin = PIN_NONE;
     if (!strike_seek(1, NULL)) seek_unreachable(seek_claim_start(&g_claims));
@@ -1708,7 +1709,7 @@ int servers_ui_join_password(const char *password) {
     if (lobby) snprintf(g_password_game, sizeof(g_password_game), "%s", g_game_id);
     else snprintf(g_password_game, sizeof(g_password_game), "%s:%u", g_client->net_address, (unsigned int) g_client->net_port);
     pthread_mutex_unlock(&g_client->net_lock);
-    printf("[mm] joining %s again with the server password\n", g_password_game);
+    KN_LOG_DEBUG1("[mm] joining %s again with the server password\n", g_password_game);
     if (lobby) seek(g_game_id, 0, NULL);
     else client_net_switch_server(g_client);
     return 1;
@@ -2386,7 +2387,7 @@ static void on_finder(void *user, const int status, const char *body, const size
         cJSON_Delete(g_finder_servers);
         g_finder_servers = cJSON_Duplicate(servers, 1);
         g_finder_error[0] = 0;
-        printf("[finder] %s: %d servers\n", online_finder_url(), cJSON_GetArraySize(servers));
+        KN_LOG_DEBUG1("[finder] %s: %d servers\n", online_finder_url(), cJSON_GetArraySize(servers));
     } else {
         // the failure goes to the log and into the browser (it used to look like "no servers"):
         // the transport's reason (status 0, backend.h), the HTTP status, or an unusable answer
@@ -2421,7 +2422,7 @@ static void finder_refresh(void) {
         snprintf(g_finder_error, sizeof(g_finder_error), "the request could not be sent");
         fprintf(stderr, "[finder] %s failed: %s\n", url, g_finder_error);
     } else {
-        printf("[finder] GET %s\n", url);
+        KN_LOG_VERBOSE2("[finder] GET %s\n", url);
     }
 }
 
@@ -2484,7 +2485,7 @@ static void direct_join(const char *host, const int port) {
     net_web_target_url(g_client->net_ws_url, sizeof(g_client->net_ws_url), host, port);
 #endif
     pthread_mutex_unlock(&g_client->net_lock);
-    printf("[mm] direct connect %s:%d (%s mode)\n", host, port, online_mode_name());
+    KN_LOG_DEBUG1("[mm] direct connect %s:%d (%s mode)\n", host, port, online_mode_name());
     menu_show_window(MENU_WINDOW_NONE, 0);
     menu_show_connecting_map(NULL); // CONNECTING: the spinner until the server answers
     client_net_switch_server(g_client);
@@ -2500,7 +2501,7 @@ void servers_ui_disconnect(void) {
     if (g_pin != PIN_IDLE) g_last_direct = g_pin == PIN_DIRECT || !g_brain_mode || !g_game_id[0];
     g_pin = PIN_IDLE;
     g_left_offline = g_client->offline;
-    printf("[mm] disconnected by the user (reconnect: %s)\n", g_last_direct ? "same server" : g_game_id);
+    KN_LOG_DEBUG1("[mm] disconnected by the user (reconnect: %s)\n", g_last_direct ? "same server" : g_game_id);
     page_game_url(NULL, NULL); // devConsole disconnect: "/"
     if (g_client->offline) local_game_stop(g_client);
     client_net_stop(g_client, "Disconnected");
@@ -2523,20 +2524,20 @@ int servers_ui_reconnect_offline(void) {
 int servers_ui_reconnect(void) {
     if (!g_client) return 0;
     if (krunker_net_active()) { // an official krunker.io session: that game again (client_net_request_reconnect), never a Box Office seek
-        printf("[mm] reconnect: the official krunker.io game again\n");
+        KN_LOG_DEBUG1("[mm] reconnect: the official krunker.io game again\n");
         krunker_net_reconnect(g_client);
         return 1;
     }
     if (!g_last_direct && g_brain_mode && g_pin != PIN_DIRECT && (g_game_id[0] || g_client->net_join.client_key[0])) {
         char id[sizeof(g_game_id)];
         snprintf(id, sizeof(id), "%s", g_game_id);
-        printf("[mm] reconnect: seeking %s again\n", id[0] ? id : "a game");
+        KN_LOG_DEBUG1("[mm] reconnect: seeking %s again\n", id[0] ? id : "a game");
         seek(id[0] ? id : NULL, !id[0] || g_server_gone, NULL);
         return 1;
     }
     if (!g_client->net_address[0]) return 0;
     g_pin = g_last_direct ? PIN_DIRECT : PIN_NONE;
-    printf("[mm] reconnect: %s:%u\n", g_client->net_address, (unsigned int) g_client->net_port);
+    KN_LOG_DEBUG1("[mm] reconnect: %s:%u\n", g_client->net_address, (unsigned int) g_client->net_port);
     client_net_switch_server(g_client);
     return 1;
 }
@@ -2664,7 +2665,7 @@ int servers_ui_connection_lost(char *error, const size_t error_size, const char 
         g_rejoin_at = now + REJOIN_FIRST_DELAY;
     }
     snprintf(g_rejoin_game, sizeof(g_rejoin_game), "%s", g_game_id);
-    printf("[mm] %s (%s): rejoining %s through the matchmaker\n", key ? "join key refused" : "server stopped", error,
+    KN_LOG_DEBUG1("[mm] %s (%s): rejoining %s through the matchmaker\n", key ? "join key refused" : "server stopped", error,
            g_rejoin_game[0] ? g_rejoin_game : "the region's best lobby");
     menu_update_instructions();
     return 1;
@@ -2715,7 +2716,7 @@ int servers_ui_reload_rejoin(void) {
         return 0;
     char id[sizeof(g_game_id)];
     snprintf(id, sizeof(id), "%s", g_game_id);
-    printf("[mm] reload: rejoining lobby %s\n", id);
+    KN_LOG_DEBUG1("[mm] reload: rejoining lobby %s\n", id);
     g_reload_next = 1;
     seek(id, 0, NULL);
     return 1;
@@ -2740,7 +2741,7 @@ void servers_ui_resume_rejoin(const char *game_id) {
     g_rejoin_at = now + REJOIN_FIRST_DELAY;
     g_rejoin_until = now + REJOIN_WINDOW;
     snprintf(g_rejoin_game, sizeof(g_rejoin_game), "%s", game_id ? game_id : "");
-    printf("[mm] resume after the server's update: rejoining %s through the matchmaker\n", g_rejoin_game[0] ? g_rejoin_game : "the region's best lobby");
+    KN_LOG_DEBUG1("[mm] resume after the server's update: rejoining %s through the matchmaker\n", g_rejoin_game[0] ? g_rejoin_game : "the region's best lobby");
     menu_show_connect_error("GAME UPDATING", NET_ERROR_CODE_UPDATING); // the Game Updating screen with "Rejoining a game..."
 }
 
@@ -2770,7 +2771,7 @@ static void rejoin_tick(Client *client) {
     }
     char id[sizeof(g_rejoin_game)];
     snprintf(id, sizeof(id), "%s", g_rejoin_game);
-    printf("[mm] rejoin: seeking %s\n", id[0] ? id : "a game");
+    KN_LOG_DEBUG1("[mm] rejoin: seeking %s\n", id[0] ? id : "a game");
     g_rejoin_next = 1;
     seek(id[0] ? id : NULL, 1, NULL);
 }
@@ -2886,7 +2887,7 @@ static void connect_server(const char *text) {
     const int game = servers_ui_connect_game(text, err, sizeof(err));
     if (game > 0) return;
     if (game == 0 && servers_ui_parse_address(text, host, sizeof(host), &port, err, sizeof(err))) {
-        printf("[mm] connect window: %s:%d\n", host, port);
+        KN_LOG_VERBOSE2("[mm] connect window: %s:%d\n", host, port);
         servers_ui_connect_direct(host, port); // pinned, like the console's connect (its spinner: direct_join)
         return;
     }
@@ -3177,7 +3178,7 @@ static void on_game_list(void *user, const int status, const char *body, const s
             const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(g, 0));
             if (id && count++ < 4 && len + strlen(id) + 2 < sizeof(ids)) len += (size_t) snprintf(ids + len, sizeof(ids) - len, "%s%s", len ? "," : "", id);
         }
-        printf("[mm] game list (%s): %d lobbies %s\n", flavor_current()->key, cJSON_GetArraySize(games), ids);
+        KN_LOG_DEBUG1("[mm] game list (%s): %d lobbies %s\n", flavor_current()->key, cJSON_GetArraySize(games), ids);
     }
     cJSON_Delete(res);
     g_loaded = 1;
@@ -3190,7 +3191,7 @@ static void on_row_pings(void *user, cJSON *pings) {
     (void) user;
     cJSON_Delete(g_row_pings);
     g_row_pings = pings;
-    printf("[mm] row pings measured: %d regions\n", cJSON_GetArraySize(pings));
+    KN_LOG_DEBUG1("[mm] row pings measured: %d regions\n", cJSON_GetArraySize(pings));
     if (g_loaded) menu_rerender_if_open(2); // v10: only once the list has loaded (loadedServers)
 }
 
@@ -4331,7 +4332,7 @@ static void on_play_fetched(void *user, const cJSON *map, const char *error) {
     }
     if (!g_client->offline) client_net_disconnect(g_client, "Offline", "000000");
     menu_show_window(MENU_WINDOW_NONE, 0);
-    if (local_game_host_custom(g_client, map)) printf("[mm] playing published map %s offline\n", g_play_name);
+    if (local_game_host_custom(g_client, map)) KN_LOG_DEBUG1("[mm] playing published map %s offline\n", g_play_name);
     else ui_alert(I18N("kn.games.loadFailed", "Failed to load the game."));
 }
 
@@ -4365,7 +4366,7 @@ static void on_play_list(void *user, const int status, const char *body, const s
     const unsigned action = (unsigned) (uintptr_t) user; // the play's matchmaking action (seek_claim.h)
     (void) length;
     if (seek_claim_overtaken(&g_claims, action)) { // a later action entered a lobby: the play is not carried out
-        printf("[mm] play ignored: the player entered a lobby after it was asked for\n");
+        KN_LOG_VERBOSE2("[mm] play ignored: the player entered a lobby after it was asked for\n");
         return;
     }
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
@@ -4436,7 +4437,7 @@ int servers_ui_play_map(const char *name, const int catalogue) {
         snprintf(g_play_query, sizeof(g_play_query), "{\"i\":\"%s\",\"dsma\":[%d]}", name, index);
         g_exclude_game[0] = 0;
         g_play_seek = 1;
-        printf("[mm] play %s: a seek for that map (v10 playMap)\n", name);
+        KN_LOG_VERBOSE2("[mm] play %s: a seek for that map (v10 playMap)\n", name);
         seek(NULL, 0, NULL);
         return 1;
     }
@@ -4652,7 +4653,7 @@ int servers_ui_retry(void) {
 // servers_ui_retry. 0 = no matchmaking in this session (offline, no brain, direct server).
 static int quick_match_seek(void) {
     snprintf(g_exclude_game, sizeof(g_exclude_game), "%s", g_game_id);
-    printf("[mm] quick match: seeking a lobby other than %s\n", g_exclude_game[0] ? g_exclude_game : "(none)");
+    KN_LOG_VERBOSE2("[mm] quick match: seeking a lobby other than %s\n", g_exclude_game[0] ? g_exclude_game : "(none)");
     g_pin = PIN_NONE;
     g_game_id[0] = 0;
     (void) qp_started(start_seek(NULL)); // /mm/ping-list, then the seek with excludeGame
@@ -4740,7 +4741,7 @@ int servers_ui_find_new_game(void) {
         const int box_office = brain_search_out();
         quick_play_retry_cancel();
         if (seek_prefs_servers() != SEEK_SERVERS_OFFICIAL || !box_office) return 1;
-        printf("[mm] find new game: the Box Office search is stopped, Server Type krunker.io\n");
+        KN_LOG_VERBOSE2("[mm] find new game: the Box Office search is stopped, Server Type krunker.io\n");
     }
     qp_begin();
     return qp_started(find_new_game_seek());
@@ -4798,7 +4799,7 @@ void servers_ui_tick(Client *client) {
     if (g_director_mode && !g_brain_mode) { // Krunker Strike: the director's startup seek
         if (!g_started && g_pin == PIN_NONE) {
             g_started = 1;
-            printf("[strike] matchmaking through the director %s\n", strike_director_url());
+            KN_LOG_DEBUG1("[strike] matchmaking through the director %s\n", strike_director_url());
             seek(NULL, 1, NULL);
         }
         return;
@@ -4821,7 +4822,7 @@ void servers_ui_tick(Client *client) {
             // or full: on_seek's reload_fallback seeks another one and says so
             g_started = 1;
             g_pending_game[0] = g_pending_play[0] = 0;
-            printf("[mm] reload: rejoining lobby %s\n", g_reload_game);
+            KN_LOG_DEBUG1("[mm] reload: rejoining lobby %s\n", g_reload_game);
             g_reload_next = 1;
             start_seek(g_reload_game);
             g_reload_game[0] = 0;
@@ -4861,7 +4862,7 @@ void servers_ui_tick(Client *client) {
                     return e && e.type === 'reload' ? 1 : 0;
                 } catch (x) { return 0; }
             })) {
-            printf("[mm] reload: rejoining lobby %s\n", game);
+            KN_LOG_DEBUG1("[mm] reload: rejoining lobby %s\n", game);
             g_reload_next = 1;
         }
 #endif
@@ -4899,11 +4900,11 @@ void servers_ui_tick(Client *client) {
             // logged in after the matchmaker turned a guest away (AccountRequired): join that lobby now
             char id[sizeof(g_account_game)];
             snprintf(id, sizeof(id), "%s", g_account_game);
-            printf("[mm] logged in: joining %s\n", id);
+            KN_LOG_DEBUG1("[mm] logged in: joining %s\n", id);
             menu_show_window(MENU_WINDOW_NONE, 0);
             seek(id, 0, NULL);
         } else if (g_pin == PIN_NONE && g_game_id[0] && !client->in_game && !g_seek_inflight) {
-            printf("[mm] account changed: joining %s again so its server attaches it\n", g_game_id);
+            KN_LOG_DEBUG1("[mm] account changed: joining %s again so its server attaches it\n", g_game_id);
             seek(g_game_id, 1, NULL);
         }
     }

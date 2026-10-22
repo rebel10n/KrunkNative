@@ -3,6 +3,7 @@
 // transports and call backend_dispatch_text() / backend_dispatch_event() on the
 // main thread.
 #include <backend.h>
+#include "klog.h"
 #include "backend_internal.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -105,7 +106,7 @@ static void probe_done(void *user, const int status, const char *body, const siz
         g_avail = 1;
         g_retry_at = 0;
         g_retry_wait_s = 1;
-        printf("[backend] brain found at %s\n", backend_url());
+        KN_LOG_DEBUG1("[backend] brain found at %s\n", backend_url());
         if (g_social_wanted) backend_social_open();
         return;
     }

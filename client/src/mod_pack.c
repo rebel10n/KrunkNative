@@ -1,5 +1,6 @@
 // Map resource packs, see client/include/mod_pack.h.
 #include <mod_pack.h>
+#include "klog.h"
 #include <zip_read.h>
 #include <shared.h>
 #include <cJSON.h>
@@ -292,7 +293,7 @@ static void temp_root(char *out, const size_t n) {
 
 void mod_pack_clear(void) {
     if (!g_mp.url[0] && !g_mp.count) return;
-    if (g_mp.url[0]) printf("[mod] removed %s: the game's own files are back\n", g_mp.url);
+    if (g_mp.url[0]) KN_LOG_DEBUG1("[mod] removed %s: the game's own files are back\n", g_mp.url);
     file_set_overlay(NULL); // first: the refresh reads the game's own files
     refresh_caches();
     delete_files();
@@ -341,7 +342,7 @@ int mod_pack_load(const char *url) {
     const int entries = zip_read_entries(zip, size, extract_entry, NULL);
     free(zip);
     if (!entries || !g_mp.count) {
-        printf("[mod] %s: %s (%d entries, none replaces a game file)\n", url, entries ? "nothing to apply" : "not a zip archive", entries);
+        KN_LOG_DEBUG1("[mod] %s: %s (%d entries, none replaces a game file)\n", url, entries ? "nothing to apply" : "not a zip archive", entries);
         delete_files();
         free(zip_path);
         return 0;
@@ -351,7 +352,7 @@ int mod_pack_load(const char *url) {
     refresh_caches();
     int counts[4] = {0, 0, 0, 0};
     for (int i = 0; i < g_mp.count; i++) counts[g_mp.files[i].kind]++;
-    printf("[mod] loaded %s (%s): %d files replace the game's (%d textures, %d models, %d sounds)\n", url, zip_path, g_mp.count,
+    KN_LOG_DEBUG1("[mod] loaded %s (%s): %d files replace the game's (%d textures, %d models, %d sounds)\n", url, zip_path, g_mp.count,
            counts[MP_TEXTURE], counts[MP_MODEL_OBJ] + counts[MP_MODEL_GLTF], counts[MP_SOUND]);
     free(zip_path);
     return 1;

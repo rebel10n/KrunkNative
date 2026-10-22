@@ -1,5 +1,6 @@
 // Online / offline mode and the online-mode join handshake (client/include/online_mode.h).
 #include <client.h>
+#include "klog.h"
 #include <shared.h>
 #include <online_mode.h>
 #include <auth_join.h>
@@ -74,7 +75,7 @@ void online_mode_init(const char *cli_mode, const char *cli_finder) {
     while (n && g_finder[n - 1] == '/') g_finder[--n] = 0;
     free(web_mode);
     free(web_finder);
-    printf("[mode] %s%s%s\n", g_online ? "online" : "offline (guest, all skins, nothing saved)",
+    KN_LOG_VERBOSE2("[mode] %s%s%s\n", g_online ? "online" : "offline (guest, all skins, nothing saved)",
            g_finder[0] ? ", server finder " : "", g_finder);
 }
 
@@ -142,7 +143,7 @@ static void send_hj_join(Client *client) {
     const AccountInfo *acc = active_account();
     snprintf(join.name, sizeof(join.name), "%s", acc ? acc->name : "");
     client_net_send(client, NET_PACKET_JOIN, &join, sizeof(join));
-    printf("[auth] joining as %s (serverHash %.12s...)\n", join.name, g_join.server_hash);
+    KN_LOG_DEBUG1("[auth] joining as %s (serverHash %.12s...)\n", join.name, g_join.server_hash);
 }
 
 static void on_join_done(void *user, const int status, const char *body, const size_t length) {
@@ -185,7 +186,7 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     }
     g_join.has_deferred = 0;
     if (!g_online || !acc || !account_session_token()[0]) {
-        printf("[auth] the server verifies accounts; not signed in: joining as a guest\n");
+        KN_LOG_DEBUG1("[auth] the server verifies accounts; not signed in: joining as a guest\n");
         send_guest_join(client);
         return;
     }
@@ -372,13 +373,13 @@ static void live_start(Client *client, const char *want, const double now) {
     snprintf(g_live.pending_key, sizeof(g_live.pending_key), "%s", want);
     g_client = client;
     if (kind == NET_ACCOUNT_AUTH_GUEST) {
-        printf("[auth] signed out: back to a guest on this connection\n");
+        KN_LOG_DEBUG1("[auth] signed out: back to a guest on this connection\n");
         live_send_auth(client, kind, NULL, NULL);
         return;
     }
     const AccountInfo *acc = active_account();
     if (kind == NET_ACCOUNT_AUTH_SESSION) {
-        printf("[auth] signed in as %s: verifying it on this connection (session)\n", acc ? acc->name : "?");
+        KN_LOG_DEBUG1("[auth] signed in as %s: verifying it on this connection (session)\n", acc ? acc->name : "?");
         live_send_auth(client, kind, NULL, want);
         return;
     }
@@ -394,7 +395,7 @@ static void live_start(Client *client, const char *want, const double now) {
     cJSON_Delete(body);
     char url[320];
     snprintf(url, sizeof(url), "%s/auth/join", backend_url());
-    printf("[auth] signed in as %s: verifying it on this connection (hasJoined %.12s...)\n", g_live.hj_name, hash);
+    KN_LOG_DEBUG1("[auth] signed in as %s: verifying it on this connection (hasJoined %.12s...)\n", g_live.hj_name, hash);
     g_live.generation++;
     if (!text || !backend_http_request("POST", url, text, on_live_join_done, (void *) (uintptr_t) g_live.generation)) {
         fprintf(stderr, "[auth] could not reach %s\n", url);
@@ -473,7 +474,7 @@ void online_mode_on_rights(void *client_ptr, const void *body, const unsigned le
             char text[192];
             I18N_F(text, "kn.auth.liveRefused", "This server could not verify your account: you play on as before ({0})",
                    r.message[0] ? r.message : I18N("kn.auth.refused", "refused"));
-            printf("[auth] %s\n", text); // logged only: the connect flow shows no toast (the account header keeps the state)
+            KN_LOG_DEBUG1("[auth] %s\n", text); // logged only: the connect flow shows no toast (the account header keeps the state)
         }
     }
     g_live.rights = r.rights;
@@ -482,7 +483,7 @@ void online_mode_on_rights(void *client_ptr, const void *body, const unsigned le
         char was[48], now[48];
         live_rights_text(old_rights, was, sizeof(was));
         live_rights_text(r.rights, now, sizeof(now));
-        printf("[auth] connection %d: account %d -> %d, rights %s -> %s (%s)\n", r.conn_id, old_account, r.account_id, first ? "?" : was, now,
+        KN_LOG_DEBUG1("[auth] connection %d: account %d -> %d, rights %s -> %s (%s)\n", r.conn_id, old_account, r.account_id, first ? "?" : was, now,
                r.status == NET_ACCOUNT_RIGHTS_STATE ? "pushed" : "sign-in");
         object_manager_ui_rights_changed(); // the spawn menu and the KN guns ask for their caps again
     }

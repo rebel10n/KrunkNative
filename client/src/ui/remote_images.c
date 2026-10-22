@@ -3,6 +3,7 @@
 // Everything runs on the main thread: the engine asks from image_get(), the answers arrive through
 // backend_poll(); only the HTTP transfer itself is on the lane's worker.
 #include <remote_images.h>
+#include "klog.h"
 #include <backend.h>
 #include <html_ui.h>
 #include <shared.h> // asset_arrival_bump
@@ -148,7 +149,7 @@ static void on_body(void *user, const int status, const char *body, const size_t
         char why[300] = "";
         if (status == 200 && store(e, body, length, why, sizeof(why))) {
             e->state = RI_DONE;
-            printf("[remote-image] %s: %zu bytes%s\n", e->url, length, e->refresh ? " (refreshed)" : "");
+            KN_LOG_VERBOSE2("[remote-image] %s: %zu bytes%s\n", e->url, length, e->refresh ? " (refreshed)" : "");
             if (!e->refresh) asset_arrival_bump(); // the engine loads it (image_cache_retry_missing)
         } else {
             if (!why[0]) {

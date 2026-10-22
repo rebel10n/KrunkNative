@@ -1,5 +1,6 @@
 // Client updates in the menu (client/include/update_ui.h).
 #include <update_ui.h>
+#include "klog.h"
 #include <app_mode.h>        // app_reload: the web's Update now
 #include <console.h>
 #include <game_reload.h>     // game_reload_update_available / _update_pending: the automatic restart
@@ -149,7 +150,7 @@ void update_ui_tick(Client *client) {
         char *live = kn_js_page_build_value(1), *cur = kn_js_page_build_value(0);
         snprintf(g_web.live, sizeof(g_web.live), "%s", live ? live : "");
         const int newer = g_web.checked && live && live[0] && cur && cur[0] && strcmp(live, cur) != 0;
-        if (g_web.checked) printf("[update] page build %s, live %s: %s\n", cur ? cur : "?", live && live[0] ? live : "?", newer ? "newer page deployed" : "current");
+        if (g_web.checked) KN_LOG_DEBUG1("[update] page build %s, live %s: %s\n", cur ? cur : "?", live && live[0] ? live : "?", newer ? "newer page deployed" : "current");
         free(live);
         free(cur);
         g_web.checked = 1;
@@ -183,7 +184,7 @@ int update_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     (void) argc;
     if (!name) return -1;
     if (!strcmp(name, "knUpdateNow")) {
-        printf("[update] update now: reloading the page\n");
+        KN_LOG_DEBUG1("[update] update now: reloading the page\n");
         app_reload(NULL); // location.reload(): the address bar keeps the game
         return 1;
     }
@@ -309,7 +310,7 @@ static void init_once(void) {
     free(json);
     const char *launcher = getenv("KRUNKNATIVE_LAUNCHER");
     if (launcher && *launcher && kn_fs_exists(launcher)) snprintf(g_up.launcher, sizeof(g_up.launcher), "%s", launcher);
-    if (g_up.enabled) printf("[update] checking %s (this build %s)\n", g_up.url, kn_build_string());
+    if (g_up.enabled) KN_LOG_DEBUG1("[update] checking %s (this build %s)\n", g_up.url, kn_build_string());
 }
 
 static void *check_thread(void *arg) {
@@ -419,7 +420,7 @@ void update_ui_tick(Client *client) {
     g_up.fresh = 0;
     pthread_mutex_unlock(&g_up.lock);
     if (fresh) {
-        if (g_up.ok) printf("[update] latest %s: %s%s\n", g_up.latest,
+        if (g_up.ok) KN_LOG_DEBUG1("[update] latest %s: %s%s\n", g_up.latest,
                             g_up.local ? "local build, no update" : kn_update_state_name(g_up.state),
                             g_up.state != KN_UPDATE_CURRENT && can_update_now() ? " (Update now: via the launcher)" : "");
         else printf("[update] check failed: %s\n", g_up.error);
@@ -490,7 +491,7 @@ int update_ui_restart_via_launcher(Client *client, char *const *args) {
 #else
     if (tried) setenv(UPDATE_TRIED_ENV, g_up.latest_commit, 1);
 #endif
-    printf("[update] restarting through %s (pid %s waits)\n", g_up.launcher, pid);
+    KN_LOG_DEBUG1("[update] restarting through %s (pid %s waits)\n", g_up.launcher, pid);
     fflush(stdout);
 #ifndef _WIN32
     // like app_reload: sockets, files and the GL/X connection stay out of the launcher (which

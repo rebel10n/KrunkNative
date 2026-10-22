@@ -1,6 +1,7 @@
 // The region ping race (client/include/region_ping.h): v10.0.2's ClientManager.getRegion,
 // v10.js:147469-147507 (pingFetch :147455-147467).
 #include <region_ping.h>
+#include "klog.h"
 #include <backend.h>
 #include <krunker_regions.h> // krunker_region_ping_url: v10's ping URL rule
 #include <GLFW/glfw3.h> // glfwGetTime: the measured round trips
@@ -37,7 +38,7 @@ static void on_ping(void *user, const int status, const char *body, const size_t
     // fetch() resolves on any HTTP answer (v10's .then): only no answer at all (status 0: refused,
     // timed out, no route; BACKEND_HTTP_TLS_FAILED: the handshake) is a failed ping
     if (status > 0) {
-        if (!r->done) printf("[mm] ping race: %s answered first\n", p->region);
+        if (!r->done) KN_LOG_DEBUG1("[mm] ping race: %s answered first\n", p->region);
         finish(r, p->region);
     } else if (++r->failed >= r->started) {
         if (!r->done) printf("[mm] ping race: all pings failed\n");
@@ -79,7 +80,7 @@ int region_ping_race(const cJSON *ping_list, const RegionPingEligible eligible, 
     }
     const int started = r->started;
     if (--r->pending <= 0) free(r); // nothing in flight: fn is not called (0)
-    if (started) printf("[mm] ping race: %d region%s\n", started, started == 1 ? "" : "s");
+    if (started) KN_LOG_DEBUG1("[mm] ping race: %d region%s\n", started, started == 1 ? "" : "s");
     return started;
 }
 

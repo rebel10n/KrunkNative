@@ -26,6 +26,7 @@
 // The Strike classes are FRVR's six (tools/strike/strike_data.json "classes"): Krunker class ids
 // 0 Triggerman, 1 Hunter, 2 Run N Gun, 4 Shotgunner (Krunker's Vince), 5 Detective, 7 Rocketeer.
 #include <strike_ui.h>
+#include "klog.h"
 #include <player_names.h> // Hide player names (player_names.h)
 #include <strike_notify.h>
 #include <strike_ftue.h>
@@ -547,7 +548,7 @@ static void on_shop(void *user, const int status, const cJSON *data, const cJSON
     if (status != 200 || !cJSON_IsObject(data)) return;
     cJSON_Delete(M.shop);
     M.shop = cJSON_Duplicate(data, 1);
-    printf("[strike] shop: %d products\n", cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(M.shop, "products")));
+    KN_LOG_VERBOSE2("[strike] shop: %d products\n", cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(M.shop, "products")));
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_STORE);
     if (root) {
         store_products_fill(root);
@@ -590,7 +591,7 @@ static void on_bought(void *user, const int status, const cJSON *data, const cJS
     strike_reward_blocker_hide();
     // a late answer after purchase_expired (M.buying cleared) is logged, not shown again
     const int waiting = M.buying[0] != 0;
-    if (status == 200) printf("[strike] bought %s\n", M.buying);
+    if (status == 200) KN_LOG_DEBUG1("[strike] bought %s\n", M.buying);
     else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
     M.buying[0] = 0;
     strike_econ_get_shop(on_shop, NULL); // purchaseCount moved
@@ -792,7 +793,7 @@ static void on_tickets_bought(void *user, const int status, const cJSON *data, c
     (void) user;
     (void) data;
     const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
-    if (status == 200) printf("[strike] bought %s x%d\n", TICKET_PRODUCT, M.ticket_n);
+    if (status == 200) KN_LOG_DEBUG1("[strike] bought %s x%d\n", TICKET_PRODUCT, M.ticket_n);
     else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
     tickets_done();
 }
@@ -879,7 +880,7 @@ static void on_spun(void *user, const int status, const cJSON *data, const cJSON
         M.sp.A[k] = 0.5 + (double) rand() / RAND_MAX * 0.5;
         if (M.sp.A[k] > amax) amax = M.sp.A[k];
         const cJSON *item = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(r, "reward"), "item");
-        printf("[strike] spin result %d: pool %s rand %.4f item %s\n", k, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "poolId")), rnd,
+        KN_LOG_VERBOSE2("[strike] spin result %d: pool %s rand %.4f item %s\n", k, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "poolId")), rnd,
                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "itemId")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "itemId")) : "-");
     }
     for (int k = 0; k < M.sp.n; k++) M.sp.A[k] /= amax;
@@ -921,7 +922,7 @@ static void spin_buy(const int count) {
         M.sp.phase = 0;
         return;
     }
-    printf("[strike] spin %s x%d\n", w->id, count);
+    KN_LOG_VERBOSE2("[strike] spin %s x%d\n", w->id, count);
 }
 
 // One 1/60 s step of aue.render's spin state (FRVR moves the pointers by a fixed share per frame)
@@ -938,7 +939,7 @@ static void spin_step(void) {
             M.sp.f = 100.0 - M.sp.c * 100.0;
             M.sp.u = 0.0;
             M.sp.phase = M.sp.f > 0.0 ? 3 : 4;
-            printf("[strike] spin landed on %s\n", M.sp.pool);
+            KN_LOG_VERBOSE2("[strike] spin landed on %s\n", M.sp.pool);
             audio_play("reward", 0.3f, 0, 1.0f);
             strike_reward_show(M.sp.rewards, "spinWheel", M.sp.heroic, NULL, NULL);
         }
@@ -1421,7 +1422,7 @@ static void on_equipped(void *user, const int status, const cJSON *data, const c
     (void) user;
     (void) data;
     const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
-    if (status == 200) printf("[strike] equipped (%s)\n", M.item_cat >= 0 && M.item_cat < CAT_COUNT ? CATS[M.item_cat].title : "?");
+    if (status == 200) KN_LOG_VERBOSE2("[strike] equipped (%s)\n", M.item_cat >= 0 && M.item_cat < CAT_COUNT ? CATS[M.item_cat].title : "?");
     else printf("[strike] equip refused (%d): %s\n", status, msg ? msg : "no answer");
 }
 
@@ -1430,7 +1431,7 @@ static void item_pick(const int index) {
     if (CATS[M.item_cat].type == CAT_SKIN_COLOR) { // rde: loadout.skinColIndex = r, saved (ac("loadout.skinColIndex"))
         if (index == skin_color_index()) return;
         ui_loadout_select_skin_color(index);
-        printf("[strike] skin color %d (%s)\n", index, SKIN_COLOR_NAMES[index]);
+        KN_LOG_VERBOSE2("[strike] skin color %d (%s)\n", index, SKIN_COLOR_NAMES[index]);
         HtmlElem root;
         if ((root = strike_screen_root(STRIKE_SCREEN_ITEM_SELECTION))) item_selection_fill(root);
         if ((root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZATION))) customization_fill(root);
@@ -1482,7 +1483,7 @@ static void on_board(void *user, const int status, const cJSON *data, const cJSO
     for (size_t i = 0; board && i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
         if (!strcmp(board, NAMES[i][0])) snprintf(M.board_cols[1], sizeof(M.board_cols[1]), "%s", NAMES[i][1]);
     }
-    printf("[strike] leaderboard %s: %d players\n", board ? board : "?", M.live_board_count);
+    KN_LOG_VERBOSE2("[strike] leaderboard %s: %d players\n", board ? board : "?", M.live_board_count);
     popup_open(POPUP_LEADERBOARD);
 }
 
@@ -1692,7 +1693,7 @@ static void preset_save_custom(void) {
     }
     char *json = o ? cJSON_PrintUnformatted(o) : NULL;
     if (json) html_storage_set("strikeCustomPre", json);
-    printf("[strike] custom saved: resolution %g, fov %g\n", key_number("resolution"), key_number("fov"));
+    KN_LOG_VERBOSE2("[strike] custom saved: resolution %g, fov %g\n", key_number("resolution"), key_number("fov"));
     free(json);
     cJSON_Delete(o);
 }
@@ -1708,7 +1709,7 @@ static void preset_restore_custom(void) {
         else if (cJSON_IsNumber(v)) preset_store(&SETTING_ROWS[i], v->valuedouble);
     }
     cJSON_Delete(o);
-    printf("[strike] custom restored: resolution %g, fov %g\n", key_number("resolution"), key_number("fov"));
+    KN_LOG_VERBOSE2("[strike] custom restored: resolution %g, fov %g\n", key_number("resolution"), key_number("fov"));
 }
 
 static void preset_save_index(void) {
@@ -1731,7 +1732,7 @@ static void preset_select(const int id) {
     }
     M.preset = id;
     preset_save_index();
-    printf("[strike] preset %d: resolution %g, fov %g\n", id, key_number("resolution"), key_number("fov"));
+    KN_LOG_VERBOSE2("[strike] preset %d: resolution %g, fov %g\n", id, key_number("resolution"), key_number("fov"));
 }
 
 // a setting changed by hand: the preset becomes Custom (selectSettingPre(2, true): nothing is restored)
@@ -2116,7 +2117,7 @@ static void feedback_answer(void *user, int status, const cJSON *data, const cJS
     if (!root) return;
     if (status >= 200 && status < 300) {
         FB.sent = 1;
-        printf("[strike] feedback sent (%d)\n", status);
+        KN_LOG_VERBOSE2("[strike] feedback sent (%d)\n", status);
         strike_screen_pop();
         strike_screen_push(STRIKE_SCREEN_FEEDBACK_THANKS);
         return;
@@ -2289,7 +2290,7 @@ static void switch_teams_update(const HtmlElem root, const Client *client) {
 void strike_menu_quick_connect(void) { play(); }
 
 static void action(const char *a) {
-    printf("[strike] action %s\n", a);
+    KN_LOG_VERBOSE2("[strike] action %s\n", a);
     if (strike_notify_action(a)) return; // the notifications holder (strike_notify.c)
     if (strike_meta_action(a)) return;   // missions tab, match details report, rewards track (strike_meta.c)
     if (strike_social_action(a)) return; // friends, invites, report (strike_social.c)
@@ -2395,7 +2396,7 @@ static void action(const char *a) {
         if (root) store_section(root, atoi(a + 14));
     } else if (!strcmp(a, "controls-reset")) {
         // Ahe(): mobile_layouts[current] = {} saved -> every control back at its Gw position
-        printf("[strike] controls reset\n");
+        KN_LOG_VERBOSE2("[strike] controls reset\n");
         strike_touch_layout_reset();
     } else if (!strcmp(a, "home")) {
         if (!html_ui_is_menu_open() && M.client) client_set_menu_open(M.client, 1);

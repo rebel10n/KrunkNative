@@ -41,6 +41,7 @@
 //    notification here: its system messages are ui_notify.c's generic toast, a follow and a gift /
 //    sale are Inbox mail (windows[29], the unread count), a message is in the chat and the Friends tab.
 #include <v10_notify.h>
+#include "klog.h"
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <ui_tooltip.h>
@@ -182,7 +183,7 @@ static void mount_items(void) {
         html_dom_insert_html(center, HTML_INSERT_AFTER_BEGIN, html);
         free(html);
         n->mounted = 1;
-        printf("[notify] show #%d \"%s\": %s (%.0f ms)\n", n->id, n->title, n->text, n->duration);
+        KN_LOG_VERBOSE2("[notify] show #%d \"%s\": %s (%.0f ms)\n", n->id, n->title, n->text, n->duration);
     }
 }
 
@@ -202,7 +203,7 @@ static int find(const int id) {
 
 static void remove_at(const int i, const char *why) {
     if (i < 0 || i >= N.count) return;
-    printf("[notify] %s #%d\n", why, N.items[i].id);
+    KN_LOG_VERBOSE2("[notify] %s #%d\n", why, N.items[i].id);
     unmount(&N.items[i]);
     free(N.items[i].html);
     memmove(&N.items[i], &N.items[i + 1], (size_t) (N.count - i - 1) * sizeof(N.items[0]));
@@ -274,7 +275,7 @@ static void notify_click(const int id) {
     if (i < 0) return;
     const V10NotifyClick cb = N.items[i].on_click;
     void *user = N.items[i].user;
-    printf("[notify] click #%d\n", id);
+    KN_LOG_VERBOSE2("[notify] click #%d\n", id);
     if (cb) cb(user);
     v10_notify_dismiss(id); // the callback may have dismissed it already: unknown ids are ignored
 }
@@ -325,9 +326,9 @@ static void announce_store(const char *message, const int ranked, const char *la
     N.ranked_on = ranked != 0;
     snprintf(N.ranked_label, sizeof(N.ranked_label), "%s", label ? label : "");
     N.announce_shown = -1;
-    if (N.announce[0]) printf("[notify] announcement \"%s\"%s\n", N.announce, N.ranked_on ? " + ranked-queue" : "");
-    else if (N.ranked_on) printf("[notify] announcement ranked-queue \"%s\"\n", N.ranked_label);
-    else printf("[notify] announcement cleared\n");
+    if (N.announce[0]) KN_LOG_VERBOSE2("[notify] announcement \"%s\"%s\n", N.announce, N.ranked_on ? " + ranked-queue" : "");
+    else if (N.ranked_on) KN_LOG_VERBOSE2("[notify] announcement ranked-queue \"%s\"\n", N.ranked_label);
+    else KN_LOG_VERBOSE2("[notify] announcement cleared\n");
 }
 
 void v10_announce_set(const char *message) { announce_store(message, 0, NULL); }
@@ -512,7 +513,7 @@ static void panel_render(void) {
         html_dom_set_html(holder, html);
         free(html);
         N.mounted = 1;
-        printf("[emoji] panel open \"%s\": %d emoji\n", N.query, N.list_count);
+        KN_LOG_VERBOSE2("[emoji] panel open \"%s\": %d emoji\n", N.query, N.list_count);
     } else { // the keyed each block: the list and the count follow the filter
         const HtmlElem list = html_dom_query(holder, ".emoji-list"), count = html_dom_query(holder, ".emoji-count");
         list_markup(&sb);
@@ -609,7 +610,7 @@ static void select_emoji(const int k) { // window.selectEmoji(index)
         snprintf(insert, sizeof(insert), ":%s:", N.map[N.list[k]].name);
         html_dom_text_replace(input, at, start, insert); // value = head + ":" + name + ":" + tail
         html_dom_text_set_selection(input, at + (int) strlen(insert), at + (int) strlen(insert));
-        printf("[emoji] selected :%s:\n", N.map[N.list[k]].name);
+        KN_LOG_VERBOSE2("[emoji] selected :%s:\n", N.map[N.list[k]].name);
     }
     if (html_dom_active_element() != input) html_dom_focus(input);
     // $emojiPanelOpen = false; the next keyup re-evaluates (here: the next changed frame)
@@ -681,7 +682,7 @@ void v10_emoji_append_chat(char *buf, const size_t size, size_t *len, const char
                 // room for it and the row's closing "</span></div><br>" + U+200E; else it stays text
                 if (*len + sb.len + img.len + 48 < size) {
                     sb_append_n(&sb, img.data, img.len);
-                    printf("[emoji] chat :%s:\n", N.map[e].name);
+                    KN_LOG_VERBOSE2("[emoji] chat :%s:\n", N.map[e].name);
                     p = q + 1;
                     sb_free(&img);
                     continue;

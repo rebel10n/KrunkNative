@@ -15,6 +15,7 @@
 // Everything here is client renderer state; the preview Player is a private copy
 // that never joins client->game.players.
 #include <gl.h>
+#include "klog.h"
 #include <client.h>
 #include <html_ui.h>
 #include <html_dom.h> // html_dom_viewport
@@ -482,7 +483,7 @@ static void preview_dump(const char *path, const int width, const int height) {
             for (int x = 0; x < width; x++) fwrite(src + (size_t) x * 4, 1, 3, file);
         }
         fclose(file);
-        printf("[preview] render target written to %s\n", path);
+        KN_LOG_VERBOSE2("[preview] render target written to %s\n", path);
     }
 
     free(pixels);
@@ -559,7 +560,7 @@ static void preview_log_bones(const ClassPreview *preview, const int width, cons
     }
     if (!strcmp(buf, last)) return;
     snprintf(last, sizeof last, "%s", buf);
-    printf("[preview] bones%s\n", buf);
+    KN_LOG_VERBOSE2("[preview] bones%s\n", buf);
     fflush(stdout);
 }
 
@@ -630,7 +631,7 @@ void client_class_preview_render(Client *client) {
         const int box[4] = {(int) lroundf(preview->x * preview->dpr), (int) lroundf(preview->y * preview->dpr), width, height};
         if (memcmp(last, box, sizeof(last)) != 0) {
             memcpy(last, box, sizeof(last));
-            printf("[preview] rect %d,%d %dx%d (dpr %g)\n", box[0], box[1], box[2], box[3], preview->dpr);
+            KN_LOG_VERBOSE2("[preview] rect %d,%d %dx%d (dpr %g)\n", box[0], box[1], box[2], box[3], preview->dpr);
             fflush(stdout); // in order with the capture's stderr lines (preview_hole_e2e.py)
         }
     }
@@ -728,7 +729,7 @@ void client_class_preview_render(Client *client) {
     // html_ui_render; the web copies it into the real canvas).
     html_dom_canvas_gl(canvas, preview->color_tex, preview->fbo, width, height);
     if (rect_log && !preview->shown) {
-        printf("[preview] first frame %dx%d\n", width, height);
+        KN_LOG_VERBOSE2("[preview] first frame %dx%d\n", width, height);
         fflush(stdout);
     }
     preview->shown = 1;

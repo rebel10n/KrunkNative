@@ -18,6 +18,7 @@
 //    its JOIN packet (servers_ui_join_password). No countdown. Leave seeks a new game (v10:
 //    location = location.origin, a fresh page = a fresh game).
 #include <v10_party.h>
+#include "klog.h"
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -48,7 +49,7 @@ void v10_party_copy_invite_link(const int toast) {
     char link[512];
     servers_ui_invite_link(link, sizeof(link)); // "https://" + location.host + "/?game=" + gameId
     html_clipboard_write(link);
-    printf("[party] invite link copied: %s\n", link);
+    KN_LOG_DEBUG1("[party] invite link copied: %s\n", link);
     HtmlElem b = html_dom_by_id("inviteButton");
     if (b) html_dom_set_text(b, "Copied URL"); // inviteButton.textContent
     if (g_invite_timer) html_timer_cancel(g_invite_timer);
@@ -75,7 +76,7 @@ static void clipboard_join(void *user) {
     g_clipboard_timer = 0;
     char *text = g_clipboard;
     g_clipboard = NULL;
-    if (text) printf("[party] join from the clipboard: %s\n", text);
+    if (text) KN_LOG_DEBUG1("[party] join from the clipboard: %s\n", text);
     if (text) v10_party_join_text(text);
     else menu_show_window(MENU_WINDOW_JOIN, 0); // readText() refused: .catch -> showWindow(24)
     free(text);
@@ -100,7 +101,7 @@ void v10_party_open_join_window(const int skip_clipboard) {
 
 int v10_party_join_game(const char *game_id) {
     if (!game_id || !game_id[0]) return 0;
-    printf("[party] join friend's game %s\n", game_id);
+    KN_LOG_DEBUG1("[party] join friend's game %s\n", game_id);
     return servers_ui_join_game(game_id);
 }
 
@@ -179,7 +180,7 @@ void v10_party_code_passed(void) {
     if (!g_code_official) return;
     g_code_official = 0;
     ui_loadout_clear_pops(); // CODE_PASSED: clearPops (:219221)
-    printf("[party] the official lobby took the password\n");
+    KN_LOG_DEBUG1("[party] the official lobby took the password\n");
 }
 
 static void submit_game_code(void) {
@@ -191,7 +192,7 @@ static void submit_game_code(void) {
         uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(code)];
         const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_GAME_CODE, code, (uint16_t) (strlen(code) + 1));
         if (n) krunker_net_send_packet(NET_PACKET_EXT, ext, n);
-        printf("[party] password sent to the official lobby\n");
+        KN_LOG_DEBUG1("[party] password sent to the official lobby\n");
         return;
     }
     if (strlen(code) >= SERVER_PASSWORD_MAX) {

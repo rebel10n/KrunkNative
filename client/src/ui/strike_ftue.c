@@ -13,6 +13,7 @@
 // The controls tutorial (FRVR nB, the view below: its tap blur, hands, ripple, arrows, reload highlight and
 // "Let's Go!") runs its steps in strike_ftue_controls.c.
 #include <account_split.h> // the krunker.io identity counts only on an official game (account_split.h)
+#include "klog.h"
 #include <strike_ui.h>
 #include <strike_ftue.h>
 #include <krunker_account.h>
@@ -76,7 +77,7 @@ int strike_ftue_first_run(void) {
         cJSON_DeleteItemFromObjectCaseSensitive(entry, "played");
         cJSON_AddTrueToObject(entry, "played");
         save_store(root);
-        printf("[strike] ftue: first run for %s, quick connect\n", account_key());
+        KN_LOG_DEBUG1("[strike] ftue: first run for %s, quick connect\n", account_key());
     }
     cJSON_Delete(root);
     return first;

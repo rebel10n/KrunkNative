@@ -3,6 +3,7 @@
 // same library net_web.c uses). Callbacks already run on the main thread; HTTP
 // completions and social frames are still delivered from backend_poll() so both
 // platforms call back at the same point of the frame.
+#include "klog.h"
 #ifdef __EMSCRIPTEN__
 #include <backend.h>
 #include "backend_internal.h"
@@ -61,7 +62,7 @@ void backend_init(const char *cli_url) {
     if (g_url_default) memmove(url, url + 1, strlen(url));
     backend_store_url(url);
     free(url);
-    if (backend_enabled()) printf("[backend] brain %s\n", backend_url());
+    if (backend_enabled()) KN_LOG_DEBUG1("[backend] brain %s\n", backend_url());
 }
 
 int backend_url_is_default(void) { return g_url_default && backend_enabled(); }

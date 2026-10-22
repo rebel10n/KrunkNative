@@ -17,6 +17,7 @@
 // All of it is shared by the native and web clients: main.c feeds GLFW events (the
 // emscripten GLFW port reports DOM keys as GLFW keys) and the page's focusChat events.
 #include <prop_hunt_client.h> // Prop Hunt keys
+#include "klog.h"
 #include <ui_logic.h>
 #include <player_names.h> // the local echo's own name (Hide player names)
 #include <v10_notify.h> // the chat's emoji panel keys
@@ -1073,7 +1074,7 @@ static void capture_bind(const int code) {
     if (i < 0) return;
     v7_update(i, g_ctl.changer_alt, code);
     char name[32];
-    printf("[controls] bind %s%s (%s) = %s\n", V7_BINDS[i].name, g_ctl.changer_alt ? "_alt" : "", V7_BINDS[i].bind,
+    KN_LOG_VERBOSE2("[controls] bind %s%s (%s) = %s\n", V7_BINDS[i].name, g_ctl.changer_alt ? "_alt" : "", V7_BINDS[i].bind,
            ui_controls_key_name(code, name, sizeof(name)));
     menu_show_window(7, 1);
 #ifdef __EMSCRIPTEN__
@@ -1227,7 +1228,7 @@ static void chat_send(Client *client, const char *text) {
     const char *raw = client && client->menu_name[0] ? client->menu_name : "Guest";
     const char *me = player_names_shown(-1, 1, raw, pn, sizeof(pn));
     hud_ui_add_player_chat(me ? me : raw, text, 1); // our own line: a human's
-    printf("[controls] chat (local echo): %s\n", text);
+    KN_LOG_VERBOSE2("[controls] chat (local echo): %s\n", text);
 }
 
 // pressButton(chatKey) for #chatInput: send + clear + blur when focused, else focus.
@@ -1509,7 +1510,7 @@ static void reload_key(void) {
     g_ctl.game_key = 0; // no preventDefault: the browser's own F5 reloads too
     app_reload(NULL);
 #else
-    printf("[controls] reload key: relaunch\n");
+    KN_LOG_VERBOSE2("[controls] reload key: relaunch\n");
     game_reload_relaunch_request("F5");
 #endif
 }
@@ -1521,7 +1522,7 @@ static void reconnect_key(void) {
     g_ctl.game_key = 0; // no preventDefault: the browser's own F5 reloads too
     app_reload(NULL);
 #else
-    printf("[controls] reconnect key\n");
+    KN_LOG_VERBOSE2("[controls] reconnect key\n");
     ui_console_exec("reconnect");
 #endif
 }

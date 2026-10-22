@@ -16,6 +16,7 @@
 // KRUNKNATIVE_NET_JITTER_MS=<+- ms> hold every received packet and every sent input batch
 // that long (order kept, like TCP). KRUNKNATIVE_RECON_LOG=1 prints each correction.
 #include <client.h>
+#include "klog.h"
 #include <game_config.h> // game_network_data: the "q" window (tickRate)
 #include <ks_client.h> // ks_client_no_prediction
 #include <krunker_net.h> // krunker_net_inputs_paused: an official server's "lock"
@@ -55,7 +56,7 @@ static void recon_load_env(void) {
     g_recon.jitter = jitter ? fmaxf(0.0f, (float) atof(jitter)) / 1000.0f : 0.0f;
     g_recon.log = log && log[0] && log[0] != '0';
     if (g_recon.delay > 0.0f || g_recon.jitter > 0.0f) {
-        printf("[recon] debug latency: %.0f ms one-way, +-%.0f ms jitter\n", g_recon.delay * 1000.0f, g_recon.jitter * 1000.0f);
+        KN_LOG_VERBOSE2("[recon] debug latency: %.0f ms one-way, +-%.0f ms jitter\n", g_recon.delay * 1000.0f, g_recon.jitter * 1000.0f);
     }
 }
 
@@ -277,7 +278,7 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     if (error > NET_RECON_CORRECTION_EPS) client->net_recon_corrections++;
 
     if (g_recon.log) {
-        printf("[recon] #%u ack %d replayed %zu/%zu error %.4f pos %.3f %.3f %.3f noclip %d\n", client->net_recon_count,
+        KN_LOG_VERBOSE2("[recon] #%u ack %d replayed %zu/%zu error %.4f pos %.3f %.3f %.3f noclip %d\n", client->net_recon_count,
                (int) packet->ack_seq, client->net_pending_count, before, error, me->position.x, me->position.y, me->position.z,
                me->noclip);
         fflush(stdout);

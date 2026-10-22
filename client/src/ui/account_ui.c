@@ -14,6 +14,7 @@
 // (client/src/alt/, the Account Manager). The v3.1.1 keys (krunker_id, krunker_username, krunker_token)
 // are only read once, to move an older build's session into the list (load_session).
 #include <v10_menu.h> // the v10 page's header bar (v10_menu.c)
+#include "klog.h"
 #include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
@@ -472,7 +473,7 @@ static void chal_capture(const char *label, const cJSON *frame) {
     const int ok = fp && fwrite(text, 1, strlen(text), fp) == strlen(text) && fputc('\n', fp) != EOF && fclose(fp) == 0;
     if (fp && !ok) fclose(fp);
     if (ok && rename(tmp, path) == 0)
-        printf("[account] challenge capture: %s (%d challenges, %d frames)\n", path,
+        KN_LOG_DEBUG1("[account] challenge capture: %s (%d challenges, %d frames)\n", path,
                cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_chal_capture, "activeChallenges")),
                cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_chal_capture, "frames")));
     else printf("[account] challenge capture: cannot write %s\n", path);
@@ -500,8 +501,8 @@ static void kio_frame(const char *label, const cJSON *frame) {
         chal_capture("a", frame);
         menu_rerender_if_open(33); // the open Challenges window: its list is account.activeChallenges (v10_rewards.c)
         if (account_backend() == ACCOUNT_BACKEND_KRUNKER) battlepass_ui_account_answered(); // io_accountResponse: windows[5].data || send("bpdl")
-        else printf("[account] (the krunker.io account's data arrived while %s is the active backend)\n", "krunk.io");
-        printf("[account] the krunker.io account's data from the game server: %s, %.0f KR, %d skins\n", name, obj_num("player_funds"),
+        else KN_LOG_DEBUG1("[account] (the krunker.io account's data arrived while %s is the active backend)\n", "krunk.io");
+        KN_LOG_DEBUG1("[account] the krunker.io account's data from the game server: %s, %.0f KR, %d skins\n", name, obj_num("player_funds"),
                cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins")));
     } else if (!strcmp(label, "ua")) {
         kio_set_data(cJSON_GetArrayItem(frame, 1));
@@ -1146,7 +1147,7 @@ static void account_response(const cJSON *frame) {
     apply_menu_name();
     mark_header();
     show_acc_resp(NULL);
-    if (!had) printf("[account] logged in as %s (id %d, level %d, %.0f KR)\n", g_acc.name, g_acc.id, g_acc.level, g_acc.funds);
+    if (!had) KN_LOG_DEBUG1("[account] logged in as %s (id %d, level %d, %.0f KR)\n", g_acc.name, g_acc.id, g_acc.level, g_acc.funds);
     // updateAccount -> updateWindow(5); updateWindow(null, true): the open window re-renders
     rerender_windows();
     menu_update_class_box(); // dJ()
@@ -1170,7 +1171,7 @@ static void end_session(void) {
 // logoutAcc()
 static void logout(void) {
     end_session();
-    printf("[account] logged out\n");
+    KN_LOG_DEBUG1("[account] logged out\n");
     menu_show_window(5, 1); // showWindow(5)
     menu_update_class_box();
 }
@@ -1179,7 +1180,7 @@ static void logout(void) {
 int account_ui_sign_out_of(const char *username) {
     if (!g_logged_in || !username || strcmp(g_acc.name, username)) return 0;
     end_session();
-    printf("[account] logged out\n");
+    KN_LOG_DEBUG1("[account] logged out\n");
     menu_update_class_box();
     return 1;
 }
@@ -1200,7 +1201,7 @@ int account_ui_logout(void) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the krunker.io account (its tokens only: the krunk.io session stays)
         if (!krunker_account_signed_in()) return 0;
         krunker_account_sign_out();
-        printf("[account] signed out of krunker.io\n");
+        KN_LOG_DEBUG1("[account] signed out of krunker.io\n");
         active_tick();
         menu_show_window(5, 1); // showWindow(5): v10's login modal for the guest now
         return 1;

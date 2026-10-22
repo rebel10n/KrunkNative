@@ -28,6 +28,7 @@
 // Every GL object made here is freed here; the private Game / Map / Player never touch the
 // client's game.
 #include <gl.h>
+#include "klog.h"
 #include "viewer_internal.h"
 #include <cosmetics.h>
 #include <gltf.h>
@@ -1330,7 +1331,7 @@ int vscene_update_texture_rgba(const char *key, const unsigned char *rgba, const
     }
     texture_upload(texture, rgba, w, h);
     override_note(path, 0);
-    printf("[viewer] updateTexture %s (%dx%d)\n", key, w, h);
+    KN_LOG_VERBOSE2("[viewer] updateTexture %s (%dx%d)\n", key, w, h);
     free(path);
     return 1;
 }
@@ -1378,7 +1379,7 @@ int vscene_update_mesh_obj(const char *key, const char *obj_path) {
     if (!path) return 0;
     const int ok = geometry_replace(path, obj_path);
     if (ok) override_note(path, 1);
-    printf("[viewer] updateMesh %s %s\n", key, ok ? "ok" : "failed");
+    KN_LOG_VERBOSE2("[viewer] updateMesh %s %s\n", key, ok ? "ok" : "failed");
     free(path);
     return ok;
 }
@@ -1394,7 +1395,7 @@ int vscene_update_mesh_gltf(const char *key, const char *file_path, const char *
     if (!path) return 0;
     const int ok = gltf_model_override(path, file_path);
     if (ok) override_note(path, 2);
-    printf("[viewer] updateMesh %s.%s %s\n", key, ext, ok ? "ok" : "failed");
+    KN_LOG_VERBOSE2("[viewer] updateMesh %s.%s %s\n", key, ext, ok ? "ok" : "failed");
     free(path);
     return ok;
 }
