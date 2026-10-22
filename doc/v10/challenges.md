@@ -83,6 +83,26 @@ Making the Box Office set identical to the official one needs krunker.io's chall
 bundle, and this change does not invent them. The data step is a new brain migration from that definition
 set (all three dialects) and is not part of this change.
 
+### 4a. Searched for the official definitions (2026-10-22)
+
+The official client has no challenge-definition route. The bundle (`deob-10.0.3.js`) lists every API path, and
+none is a challenge list; challenges reach the client only in the signed-in account (`activeChallenges`, slot
+38). Read-only GETs through the proxy (`http://127.0.0.1:8888`), raw bodies in `~/.cache/kn-official-challenges/`:
+
+| Endpoint | HTTP | Note |
+|---|---|---|
+| `GET https://api.krunker.io/challenges` | 404 | "Cannot GET" |
+| `GET https://api.krunker.io/challenges/list` | 404 | |
+| `GET https://api.krunker.io/challenge` | 404 | |
+| `GET https://api.krunker.io/ranked/shop` | 404 | |
+| `GET https://api.krunker.io/creators/events` | 404 | |
+| `GET https://api.krunker.io/skins` | 404 | |
+| `GET https://api.krunker.io/maps` | 401 | needs a signed-in account |
+| `GET https://api.krunker.io/player/me` | 401 | needs a signed-in account |
+
+So the definitions are only in a signed-in account's `activeChallenges`. No migration is added: writing one would
+invent the rows. Box Office keeps the brain's seed until the definitions can be read from a real account.
+
 ## 5. Tests
 
 - `server/tests/krunker_challenges_e2e.py` (`make krunker-challenges-e2e`): the krunker.io stub with an account
