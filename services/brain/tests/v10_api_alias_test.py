@@ -40,7 +40,7 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from v10_api_data_test import v10_unpack  # noqa: E402 - the packed-format port (its main is guarded)
+from v10_api_data_test import skins_as_sent, v10_unpack  # noqa: E402 - the packed-format port (its main is guarded)
 
 ARG = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 ROOT = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -452,11 +452,11 @@ def run_raw_checks(port):
           status == 200 and ctype.startswith("text/plain"), "status %s type %s" % (status, ctype))
     try:
         decoded = v10_unpack(raw.decode("utf-8"))
-        ok = decoded == skins_file
-        detail = "decoded %d rows, file %d" % (len(decoded), len(skins_file)) if not ok else ""
+        ok = decoded == skins_as_sent(skins_file)
+        detail = "decoded %d rows, expected %d" % (len(decoded), len(skins_file)) if not ok else ""
     except Exception as e:  # noqa: BLE001 - a broken pack is a failed check
         ok, detail = False, repr(e)[:200]
-    check("GET /data/skins decodes (v10 unpack) to assets/skins.json, in order  [v10.0.3 L4171; v10.js 28035]", ok, detail)
+    check("GET /data/skins decodes (v10 unpack) to assets/skins.json (video skins as stills), in order  [v10.0.3 L4171; v10.js 28035]", ok, detail)
 
     status, ctype, raw = call_raw(port, "GET", "/data/spins")
     jstatus, spins_json = call(port, "GET", "/api/data/spins")

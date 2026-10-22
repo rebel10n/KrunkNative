@@ -116,6 +116,7 @@ set(KN_BRAIN_SOURCES
     user_assets.c                   # GET /api/user-assets/<id>/<file>: Krunker's user-asset host, mirrored + cached
     v10_api.c                       # v10 REST at the root: /maps, /maps/:id, /titles, packed /data/skins and /data/spins
     v10_pack.c                      # v10's packed JSON (unpack in v10.js 27744-27985)
+    v10_skin_still.c                # a video skin in /data/skins: sent as its still (no video store)
     v10_market.c                    # v10 REST market, items, trades, moderation, mods and KPD: the empty shapes and refusals
     v10_account.c                   # v10 REST account and player routes: player/me, wallet, profile, ranked boards, match history, daily spin
     v10_auth.c                      # v10 REST /auth/* routes mapped onto auth.c's accounts
@@ -256,6 +257,13 @@ add_test(NAME brain_streams COMMAND kn_brain_streams_test)
 set_tests_properties(brain_streams PROPERTIES LABELS "knsvc;brain")
 set_tests_properties(brain_releases PROPERTIES LABELS "knsvc;brain")
 set_tests_properties(brain_registry PROPERTIES LABELS "knsvc;brain")
+
+# v10 video skins in /data/skins: sent as stills (no video store), the official records' still paths (pure)
+add_executable(kn_brain_skin_still_test tests/test_v10_skin_still.c v10_skin_still.c)
+target_include_directories(kn_brain_skin_still_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_skin_still_test PRIVATE knsvc)
+add_test(NAME brain_skin_still COMMAND kn_brain_skin_still_test)
+set_tests_properties(brain_skin_still PROPERTIES LABELS "knsvc;brain")
 
 # svc-accounts: accounts + social socket end to end against PostgreSQL (own schema;
 # skips with 77 when the database or python websockets is unavailable).

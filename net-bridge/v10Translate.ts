@@ -158,9 +158,9 @@ const ENT_V9_COSMETICS = ENT_V8_ANON + 1;
 const ENT_V9_SHOW_BADGES = ENT_V9_COSMETICS + 36;
 export const ENT_V9_SIZE = ENT_V9_SHOW_BADGES + 1;
 
+// A loadout slot's store index (a copy "<copyId>#<index>" or {i, m} is read to its index: nativeEvents.loadoutIndex)
 function storeIndex(value: unknown): number {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 0 ? n : -1;
+  return EV.loadoutIndex(value);
 }
 
 function int32(value: unknown, fallback: number): number {

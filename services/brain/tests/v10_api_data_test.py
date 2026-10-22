@@ -143,6 +143,41 @@ def v10_unpack(text):
     return read()
 
 
+def skins_as_sent(rows):
+    """The rows GET /data/skins sends for assets/skins.json: each video skin (`video` set, no truthy `asset`)
+    without `video`, `projection` and `texSrc`, with the still's `thumbnail` (services/brain/v10_skin_still.c,
+    the same rule). Every other row is the file's row."""
+    def truthy(v):
+        if v is None or v is False:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return v != 0
+        if isinstance(v, str):
+            return v != ""
+        return True
+
+    def still(r):
+        if r.get("type") == 3 and r.get("tex") is not None:
+            return "/textures/previews/melee/melee_%d_%d.png" % (r["id"], r["tex"])
+        if r.get("type") == 5 and r.get("tex") is None:
+            return "/textures/previews/cosmetics/5_%d.png" % r["id"]
+        return None
+
+    out = []
+    for r in rows:
+        r = dict(r)
+        if r.get("video") is not None and not truthy(r.get("asset")):
+            for k in ("video", "projection", "texSrc"):
+                r.pop(k, None)
+            path = still(r)
+            if path:
+                r["thumbnail"] = path
+        out.append(r)
+    return out
+
+
 def load_json(rel):
     with open(os.path.join(ROOT, rel), "rb") as fp:
         return json.loads(fp.read())
@@ -229,11 +264,11 @@ def main():
               status == 200 and ctype.startswith("text/plain"), "status %s type %s" % (status, ctype))
         try:
             decoded = v10_unpack(raw.decode("utf-8"))
-            ok = decoded == skins_file
-            detail = "decoded %d rows, file %d" % (len(decoded), len(skins_file)) if not ok else ""
+            ok = decoded == skins_as_sent(skins_file)
+            detail = "decoded %d rows, expected %d" % (len(decoded), len(skins_file)) if not ok else ""
         except Exception as e:  # noqa: BLE001 - a broken pack is a failed check
             ok, detail = False, repr(e)[:200]
-        check("GET /data/skins decodes (v10 unpack) to every row of assets/skins.json, in order", ok, detail)
+        check("GET /data/skins decodes (v10 unpack) to every row of assets/skins.json (video skins as stills), in order", ok, detail)
 
         # /data/spins: the wheels table, packed; equal to the JSON /api/data/spins serves (102764)
         status, ctype, raw = http(port, "/data/spins")

@@ -477,9 +477,28 @@ export function hairColorToKrunker(color: number): string | number {
   return color >= 0 ? `#${color.toString(16).padStart(6, "0")}` : 0;
 }
 
-function cosmeticIndex(value: unknown): number {
+// A loadout slot's store index. v10.0.3 sends a slot three ways: a number (the store index), an owned
+// copy as the string "<copyId>#<skinIndex>" (its paint and wear live on that copy: selectSkin, and
+// getSkin's skinId split at the '#') or a metadata slot {i, m} (i the store index, m the copy's data).
+// KrunkNative keeps no per-copy state, so every form resolves to its store index, and any other value
+// (none, or a non-integer) is -1 as before.
+export function loadoutIndex(value: unknown): number {
+  if (typeof value === "string") {
+    const hash = value.indexOf("#");
+    if (hash >= 0) return storeIndexOf(value.slice(hash + 1));
+  }
+  if (value !== null && typeof value === "object") return storeIndexOf((value as { i?: unknown }).i);
+  return storeIndexOf(value);
+}
+
+function storeIndexOf(value: unknown): number {
+  if (typeof value === "string" && value.trim() === "") return -1;
   const n = Number(value);
   return Number.isInteger(n) && n >= 0 ? n : -1;
+}
+
+function cosmeticIndex(value: unknown): number {
+  return loadoutIndex(value);
 }
 
 // Krunker ent array -> PlayerCosmetics (gameserver.ts applyEntData: 3 hat, 4 back, 10 skinColIndex,

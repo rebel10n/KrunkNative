@@ -7,7 +7,8 @@
  *   GET /maps/by-name/:name    {data: map JSON} for an official map name (v10 maps.getMapByName)
  *   GET /titles                {data: [title rows]} from assets/titles.json (v10 titles.getTitles)
  *   GET /data/skins            the packed skins table (assets/skins.json; v10 reads responseText
- *                              with its unpack, v10_pack.h)
+ *                              with its unpack, v10_pack.h; a video skin is sent as its still,
+ *                              v10_skin_still.h, since KrunkNative has no video store)
  *   GET /data/spins            the packed wheels table (store_spins_json, as /api/data/spins)
  *
  * Maps come from shared/include/krunker_maps.h (the 46 official maps, v10.0.2's list) and
@@ -26,6 +27,7 @@
 #include "map_catalog.h"
 #include "krunker_maps.h"
 #include "v10_pack.h"
+#include "v10_skin_still.h"
 #include "knsvc/config.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
@@ -205,6 +207,7 @@ static void h_data_skins(kn_http_req *req, void *ud) {
         v10_reply_error(req, 503, "SKINS_UNAVAILABLE", "Skins are not available");
         return;
     }
+    v10_skin_still(skins); /* the video skins: no video store, so the still (v10_skin_still.h) */
     g_skins_packed = v10_pack_json(skins);
     cJSON_Delete(skins);
     if (!g_skins_packed) {

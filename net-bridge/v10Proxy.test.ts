@@ -99,6 +99,35 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
   assert.strictEqual(T.encodeChat("   "), null);
 }
 
+// ---- loadout slots in the ENTER_GAME array (v10.0.3 selectSkin / getMyLoadout): an owned copy is the
+// string "<copyId>#<skinIndex>" (the copy's paint lives on that copy), and a metadata slot is {i, m}
+// (m.paint is the copy's paint). Both keep their store index in the ENT: KrunkNative keeps no
+// per-copy paint, so the paint itself has nothing to carry, but the skin it paints must not be lost.
+{
+  const en: unknown[] = new Array(T.EN_LENGTH).fill(0);
+  en[T.EN.CLASS] = 2;
+  en[T.EN.SECONDARY] = 5;
+  en[T.EN.SPRAY] = 7;
+  en[T.EN.SKINS] = ["812#4211", { i: 12, m: { paint: "#dc3c3c" } }];
+  en[T.EN.MELEE] = "813#7446";
+  en[T.EN.HAT] = "814#3";
+  en[T.EN.LAG_COMP] = 0.5;
+  en[T.EN.ATTACH] = -1;
+  const ent = T.encodeEnter(en)!;
+  assert.strictEqual(ent.readInt32LE(EV.ENT_SPRAY_SIZE), 4211, "primary: an owned copy keeps its store index");
+  assert.strictEqual(ent.readInt32LE(EV.ENT_SPRAY_SIZE + 4), 12, "secondary: a {i, m} slot keeps its store index");
+  assert.strictEqual(ent.readInt32LE(EV.ENT_SPRAY_SIZE + 8), 7446, "melee: an owned copy keeps its store index");
+  assert.strictEqual(ent.readInt32LE(16), 3, "hat: an owned copy keeps its store index");
+  // a plain index and -1 (none) are unchanged
+  const plain: unknown[] = new Array(T.EN_LENGTH).fill(0);
+  plain[T.EN.SKINS] = [11, -1];
+  plain[T.EN.MELEE] = -1;
+  const pe = T.encodeEnter(plain)!;
+  assert.strictEqual(pe.readInt32LE(EV.ENT_SPRAY_SIZE), 11);
+  assert.strictEqual(pe.readInt32LE(EV.ENT_SPRAY_SIZE + 4), -1);
+  assert.strictEqual(pe.readInt32LE(EV.ENT_SPRAY_SIZE + 8), -1);
+}
+
 // ---- MODE_STATE (40): the joiner's mode snapshot, and OBJECT_STATE (100): the join's object list.
 // Layouts from shared/include/shared.h (NetModeStatePacket, NetObjectStatePacket), little endian.
 type TestFlag = { x: number; y: number; z: number; carrier: number; team: number; uid: number; active: boolean };
