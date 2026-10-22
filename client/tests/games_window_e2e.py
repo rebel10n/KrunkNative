@@ -180,6 +180,13 @@ def shot(name, t):
     return f"{t} frames {os.path.join(SHOTS, name)} 1\n" if SHOTS else ""
 
 
+# A request the client logged to a host that is not this test's stub: the finder (matchmaker.krunk.io by default),
+# the brain, krunker.io. A test never reaches production; a hit here fails the run.
+def production_sends(log):
+    return [l.strip() for l in log.splitlines()
+            if re.search(r"^\[(http|finder|krunker)\].*https?://(?!127\.0\.0\.1|localhost)", l)]
+
+
 def run_native(script, brain_port, kio_port, tag, timeout=240, args=("--offline", "--map", "kanji")):
     server_list = os.path.join(WORK, f"servers-{tag}.json")
     with open(server_list, "w") as f:
@@ -193,6 +200,7 @@ def run_native(script, brain_port, kio_port, tag, timeout=240, args=("--offline"
                 "XDG_STATE_HOME": os.path.join(WORK, "state-" + tag), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_ASSETS_DIR": ASSETS,
+                "KRUNKNATIVE_FINDER_URL": "off",  # the finder's default is matchmaker.krunk.io (production)
                 # the brain stub (an explicit URL counts as available); the Box Office lobbies are the fixed list
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_SERVER_LIST": server_list,
                 # krunker.io's stub: its data API (the Games tabs' lists); its matchmaker is not asked for these
@@ -210,7 +218,10 @@ def run_native(script, brain_port, kio_port, tag, timeout=240, args=("--offline"
                 os.killpg(p.pid, signal.SIGKILL)
                 p.wait()
     with open(log, errors="replace") as f:
-        return f.read()
+        text = f.read()
+    prod = production_sends(text)
+    check(not prod, f"no request went to a production host ({prod[:2]})")
+    return text
 
 
 def fold(s):

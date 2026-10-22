@@ -25,6 +25,11 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# the asset tree: this checkout's, else the main checkout's (a worktree may lack the large content: fonts, models)
+ASSETS = os.environ.get("KRUNKNATIVE_ASSETS_DIR") or next(
+    (d for d in (os.path.join(ROOT, "assets"), os.path.expanduser("~/src/KrunkNative/assets")) if os.path.isdir(os.path.join(d, "models"))),
+    os.path.join(ROOT, "assets"))
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-server-tabs-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 failures = []
@@ -77,6 +82,13 @@ def fold(s):
     return re.sub(r"\s+", " ", s or "").strip()
 
 
+# A request the client logged to a host that is not this test's stub: the finder (matchmaker.krunk.io by default),
+# the brain, krunker.io. A test never reaches production; a hit here fails the run.
+def production_sends(log):
+    return [l.strip() for l in log.splitlines()
+            if re.search(r"^\[(http|finder|krunker)\].*https?://(?!127\.0\.0\.1|localhost)", l)]
+
+
 def run_native(script, stub_port, timeout=240):
     server_list = os.path.join(WORK, "servers.json")
     with open(server_list, "w") as f:
@@ -89,6 +101,9 @@ def run_native(script, stub_port, timeout=240):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                "KRUNKNATIVE_ASSETS_DIR": ASSETS,
+                # the server finder is off: its default is matchmaker.krunk.io (production); a test never reaches it
+                "KRUNKNATIVE_FINDER_URL": "off",
                 # no brain here: the Box Office list is the fixed one, and its requests are refused
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:9", "KRUNKNATIVE_SERVER_LIST": server_list,
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % stub_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
@@ -104,7 +119,10 @@ def run_native(script, stub_port, timeout=240):
                 os.killpg(p.pid, signal.SIGKILL)
                 p.wait()
     with open(log, errors="replace") as f:
-        return f.read()
+        text = f.read()
+    prod = production_sends(text)
+    check(not prod, f"no request went to a production host ({prod[:2]})")
+    return text
 
 
 def group_name(s):
@@ -147,7 +165,8 @@ def main():
               "2600 text @krunk_first [id=serverHolder] .setHed\n"
               "2700 nodes @krunk_kio [id=serverHolder] .kioHed\n2710 nodes @krunk_kiorow [id=serverHolder] .kioRow\n"
               "2720 call setExpandedRegion 0\n2728 nodes @krunk_rows [id=serverHolder] .settNameIn\n2730 nodes @krunk_slides .purejscarousel .slide\n"
-              "2740 grep @krunk_custom Chicago [id=serverHolder]\n")
+              "2740 grep @krunk_custom Chicago [id=serverHolder]\n"
+              "2745 text @krunk_cnt [id=playerCnt]\n")
     part, t = host_steps(2800, "krunk")  # + Host Game on krunk.io: the Box Office step (no brain here)
     script += part
     # krunker.io's tab (switchTab 1): its own groups, then + Host Game on it
@@ -156,9 +175,12 @@ def main():
                "%d nodes @kio_kio [id=serverHolder] .kioHed\n%d call setExpandedRegion 1\n"
                "%d nodes @kio_kiorow [id=serverHolder] .kioRow\n%d nodes @kio_slides .purejscarousel .slide\n"
                "%d grep @kio_custom Somebody [id=serverHolder]\n%d grep @kio_chi Chicago [id=serverHolder]\n"
-               % (t, t + 50, t + 100, t + 120, t + 140, t + 160, t + 170, t + 180, t + 190))
+               "%d text @kio_cnt [id=playerCnt]\n"
+               % (t, t + 50, t + 100, t + 120, t + 140, t + 160, t + 170, t + 180, t + 190, t + 195))
     part, t = host_steps(t + 300, "kio")  # + Host Game on krunker.io: its Start Game needs a krunker.io game first
     script += part
+    # back to krunk.io: its own count again (the krunker.io count is not kept on the krunk.io tab)
+    script += "%d call windows.1.switchTab 0\n%d text @krunk_back [id=playerCnt]\n" % (t + 100, t + 150)
     script += "%d quit\n" % (t + 200)
     log = run_native(script, port)
     stub.shutdown()
@@ -172,6 +194,9 @@ def main():
     check(nodes(log, "@krunk_rows") >= 3, f"krunk.io: our rows are listed ({nodes(log, '@krunk_rows')})")
     check(nodes(log, "@krunk_slides") >= 3, f"krunk.io: the map carousel of our published-map customs ({nodes(log, '@krunk_slides')})")
     check(grep(log, "@krunk_custom") >= 1, "krunk.io: Chicago's group holds our lobby")
+    # the In game counter is the tab's website's: Box Office's 14 (the brain's total) on krunk.io, krunker.io's 21 on krunker.io
+    _, cnt_k = text(log, "@krunk_cnt")
+    check(fold(cnt_k) == "14 In Game", f"krunk.io: the In Game count is Box Office's own 14 ({fold(cnt_k)!r})")
 
     # krunker.io's tab: its own groups only, Official Customs first, then Custom Games, then the regions
     check(grep(log, "@default_kio") == 1, "switchTab 1: the krunker.io tab is selected")
@@ -182,11 +207,16 @@ def main():
     check(nodes(log, "@kio_slides") >= 3, f"krunker.io: the map carousel of its published-map customs ({nodes(log, '@kio_slides')})")
     check(grep(log, "@kio_custom") >= 1, "krunker.io: its custom game is in its Custom Games group")
     check(grep(log, "@kio_chi") == 0, "krunker.io: none of our (Chicago) rows")
+    _, cnt_o = text(log, "@kio_cnt")
+    check(fold(cnt_o) == "21 In Game", f"krunker.io: the In Game count is krunker.io's own 21 ({fold(cnt_o)!r})")
+    _, cnt_back = text(log, "@krunk_back")
+    check(fold(cnt_back) == "14 In Game", f"switching back to krunk.io swaps the count back to 14 ({fold(cnt_back)!r})")
 
     # + Host Game: the window's backend is the tab's
     _, msg_k = text(log, "@krunk_msg")
-    # no brain here: the brain's refusal (the request went to Box Office, not to krunker.io)
-    check(any(s in fold(msg_k or "") for s in ("Box Office servers are unavailable", "Could not reach the matchmaker", "Creating Game")),
+    # no brain here: the request went to the brain (/mm/host-game) and its refusal shows v10's generic line
+    check("/mm/host-game" in log and any(s in fold(msg_k or "") for s in ("Box Office servers are unavailable", "Could not reach the matchmaker",
+          "Creating Game", "Please try again")),
           f"krunk.io's Start Game goes to the brain ({fold(msg_k)!r})")
     _, msg_o = text(log, "@kio_msg")
     check("Join a krunker.io game first" in fold(msg_o or ""),

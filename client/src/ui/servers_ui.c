@@ -1876,6 +1876,14 @@ static int tab_lists(const cJSON *lists[2]) {
     return 2;
 }
 
+// The "In Game" count of one tab's website, read from that website's own source and never the other's:
+// krunk.io = Box Office's brain total + its finder-only servers (g_total_players, g_finder_players);
+// krunker.io = its official lobbies' totalPlayerCount (krunker_lobbies.c), 0 until that list is listed.
+static double tab_players(const int tab) {
+    if (tab == SERVER_TAB_KRUNKER) return krunker_lobbies_list() ? krunker_lobbies_players() : 0;
+    return (brain_games() ? g_total_players : 0) + g_finder_players;
+}
+
 // The default tab is the active backend's (krunker_net_active): it follows the backend when that changes,
 // and stays where the player put it while it does not.
 static void server_tab_follow(void) {
@@ -3118,9 +3126,8 @@ static char *gen_list(void) {
     sb_append(&sb, "</div>");
     free(servers);
     char total[32], social[32];
-    // after get_servers: + finder-only; + the official krunker.io lobbies' players when they are listed
-    // (v10's "In Game" is krunker.io's totalPlayerCount)
-    const double players = (brain_games() ? g_total_players : 0) + g_finder_players + (krunker_lobbies_list() ? krunker_lobbies_players() : 0);
+    // the tab's website only: krunk.io's count or krunker.io's (v10's "In Game" is krunker.io's totalPlayerCount)
+    const double players = tab_players(g_server_tab);
     comma_number(total, sizeof(total), players);
     comma_number(social, sizeof(social), g_social_players);
     char in_game[64], in_editor[64], on_social[64];
