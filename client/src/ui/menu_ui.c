@@ -1719,8 +1719,9 @@ static void menu_poll_connection(Client *client) {
         }
     }
 
-    // KrunkNative: a server shutdown / a refused join key / a lost session rejoins through the
-    // matchmaker with a fresh ticket (servers_ui.c); a give-up is final and ends every rejoin.
+    // KrunkNative: a server shutdown / a refused join key rejoins through the matchmaker with a fresh
+    // ticket (servers_ui.c); a lost session (no server ERROR) is the Lost Connection screen at once, as
+    // v10 (connection_dropped); a give-up is final and ends every rejoin.
     int rejoining = 0;
     if (status == NET_STATUS_FAILED) {
         if (gave_up) servers_ui_gave_up();

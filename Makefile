@@ -424,8 +424,8 @@ loading-mapname-e2e: build ## Box Office loading screen names the lobby's map: a
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/loading_mapname_e2e.py $(DEBUG_DIR)
 
 .PHONY: crash-limbo-e2e
-crash-limbo-e2e: build ## A lost game server never leaves the client on a loading screen: killed mid-round, a silent TCP stub, a stub that never answers the join; the Lost connection error shows within its deadline and serverinfo is not OPEN (headless)
-	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 540 $(PYTHON) -I client/tests/crash_limbo_e2e.py $(DEBUG_DIR) $(CURDIR)
+crash-limbo-e2e: build ## A lost game server never leaves the client on a loading screen: killed mid-round (direct, and matched through a stub matchmaker: lobby gone / matchmaker down, Find Game ends on the screen), a silent TCP stub, a stub that never answers the join; the Lost connection error shows within its deadline and serverinfo is not OPEN (headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 720 $(PYTHON) -I client/tests/crash_limbo_e2e.py $(DEBUG_DIR) $(CURDIR)
 
 native-auth-test: build ## Native client accounts e2e: register with email, verify, login, forgot password -> mailed code -> reset (local kn_brain + fake SMTP, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/native_auth_e2e.py $(DEBUG_DIR)

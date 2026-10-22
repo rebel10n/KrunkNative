@@ -102,14 +102,13 @@ void on_client_socket_disconnect(Client *client) {
 
     // The transport lost the session without a word from the server: say what it saw (v7's
     // io_disconnect(null, "000001", closeEvent): "Code: <close code> | Reason: <close reason>").
-    // A matchmade session (a join ticket) is rejoined with a fresh ticket by servers_ui.c
-    // (servers_ui_connection_lost): the transport holds so the old ticket is not resent meanwhile.
+    // v10.0.3's socket.onclose shows the Lost Connection screen at once (deob 111477 -> 261688 -> 261271).
     char message[sizeof(client->net_status_error)];
     if (drop[0] && !strncmp(drop, "Lost connection", 15)) snprintf(message, sizeof(message), "%s", drop); // a deadline / timeout's own text
     else snprintf(message, sizeof(message), "Lost connection to the server: %s", drop[0] ? drop : "the connection was closed");
     // A lost session is a dead connection: held, so the transport does not retry behind the loading spinner. The
-    // page shows the Lost Connection screen with its Retry (menu_poll_connection); a matchmade session's rejoin
-    // (servers_ui.c) still takes a fresh ticket.
+    // page shows the Lost Connection screen with Find Game / Reconnect (menu_poll_connection); a matchmade session is
+    // not rejoined on a timer either (servers_ui.c connection_dropped: Find Game is the fresh seek, as v10).
     if (!client->offline && !client->net_should_quit) client->net_hold_retry = 1;
     net_set_status_code(client, NET_STATUS_FAILED, message, "000001");
     pthread_mutex_lock(&client->net_lock);
