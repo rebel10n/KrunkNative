@@ -101,7 +101,7 @@ void color_cube_fini(ColorCube *cube) {
     free(cube);
 }
 
-PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, const int is_left, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed, const int no_left_sleeve) {
+PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, const int is_left, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed, const int no_left_sleeve, const float shoulder_fwd) {
     PlayerArmMesh *arm = calloc(1, sizeof(PlayerArmMesh));
     if (!arm) return NULL;
 
@@ -112,12 +112,15 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         is_left ? weapon->left_hold.y : weapon->right_hold.y,
         (is_left ? weapon->left_hold.z : weapon->right_hold.z) + (third_person ? 0.0f : weapon->hold_distance_offset), // genArm: aD += us && hDstOff
     };
+    // the shoulder's depth: the weapon's offset.z moved by shoulder_fwd (the hold stays where it is; the anchor and the
+    // arm's length and angles measure from this shoulder, so the upper arm starts there)
+    const float shoulder_z = weapon->offset.z - shoulder_fwd;
 
     const float arm_scale = game_constants.arm_scale * (third_person ? 1.0f : 0.68f);
     const float arm_length = MIN(game_constants.upper_arm_length + game_constants.lower_arm_length - 0.01f, sqrtf(
         powf(((weapon->offset.x * left_handed_mlt - hold.x) * (is_left && weapon->akimbo ? -1.0f : 1.0f) - x), 2.0f) +
         powf((weapon->offset.y + hold.y - y), 2.0f) +
-        powf((weapon->offset.z - hold.z), 2.0f)
+        powf((shoulder_z - hold.z), 2.0f)
     ));
 
     float arm_angles[3];
@@ -186,11 +189,11 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     arm->anchor.position.x = x - weapon->offset.x * left_handed_mlt;
     arm->anchor.position.y = y - weapon->offset.y;
     // genArms also pushes the merged first-person arms mesh forward by hDstOff inside the weapon group.
-    arm->anchor.position.z = -weapon->offset.z + (third_person ? 0.0f : weapon->hold_distance_offset);
+    arm->anchor.position.z = -shoulder_z + (third_person ? 0.0f : weapon->hold_distance_offset);
     arm->anchor.scale = (vec3) {1.0f, 1.0f, 1.0f};
 
-    arm->anchor.rotation.x = -arm_angles[1] + atan2f(weapon->offset.y + hold.y - y, -(weapon->offset.z - hold.z));
-    arm->anchor.rotation.y = atan2f(x - (weapon->offset.x * left_handed_mlt - hold.x) * (is_left && weapon->akimbo ? -1.0f : 1.0f), -(weapon->offset.z - hold.z));
+    arm->anchor.rotation.x = -arm_angles[1] + atan2f(weapon->offset.y + hold.y - y, -(shoulder_z - hold.z));
+    arm->anchor.rotation.y = atan2f(x - (weapon->offset.x * left_handed_mlt - hold.x) * (is_left && weapon->akimbo ? -1.0f : 1.0f), -(shoulder_z - hold.z));
     arm->anchor.rotation_order = ROTATION_ORDER_EXTRINSIC;
     arm->anchor.parent = &arm->pivot;
     arm->pivot.scale = (vec3) {1.0f, 1.0f, 1.0f};
@@ -198,14 +201,15 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     return arm;
 }
 
-PlayerArms *generate_arms(const Weapon *weapon, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed, const int no_left_sleeve) {
+PlayerArms *generate_arms(const Weapon *weapon, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed, const int no_left_sleeve, const float off_shoulder_fwd) {
     PlayerArms *arms = calloc(1, sizeof(PlayerArms));
     if (!arms) return NULL;
 
     const float offset = (-game_constants.chest_width + game_constants.arm_scale * 0.5f - game_constants.arm_inset) * (third_person ? 1.0f : weapon->hold_width ? weapon->hold_width : 0.4f);
 
-    arms->left = generate_arm(offset, game_constants.arm_offset, weapon, !left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed, no_left_sleeve);
-    arms->right = generate_arm(-offset, game_constants.arm_offset, weapon,  left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed, no_left_sleeve);
+    // the off arm is the one holding left_hold (is_left): arms->left unless left-handed; only it takes off_shoulder_fwd
+    arms->left = generate_arm(offset, game_constants.arm_offset, weapon, !left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed, no_left_sleeve, left_handed ? 0.0f : off_shoulder_fwd);
+    arms->right = generate_arm(-offset, game_constants.arm_offset, weapon,  left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed, no_left_sleeve, left_handed ? off_shoulder_fwd : 0.0f);
 
     if (!arms->left || !arms->right) {
         free(arms->left);
@@ -1301,13 +1305,17 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const float shoulder_mlt = third_person ? 1.0f : (weapon->hold_width ? weapon->hold_width : 0.4f);
                     drank_grip.left_hold.x = -left_shoulder_x * shoulder_mlt;
                     drank_grip.left_hold.y = pelvis_height + NETTSPEND_OFF_HAND_RISE - (game_constants.player_height - game_constants.camera_height) - weapon->offset.y;
-                    drank_grip.left_hold.z = drank_grip.offset.z + NETTSPEND_OFF_HAND_FWD;
+                    // third person: the hold moves back by twice the shoulder's shift (the arm solver carries the hand with the
+                    // shoulder at about twice its step, measured: the shoulder -0.5 took the wrist -0.95), so the wrist stays at
+                    // NETTSPEND_TP_OFF_HAND_FWD while the shoulder joint moves forward
+                    drank_grip.left_hold.z = drank_grip.offset.z + (third_person ? NETTSPEND_TP_OFF_HAND_FWD - 2.0f * NETTSPEND_TP_OFF_SHOULDER_FWD : NETTSPEND_OFF_HAND_FWD);
                     arms_weapon = &drank_grip;
                 }
 
                 // the wrist item's noLeftSleeve (genArms' options: the arms are built with the wrist's flag)
                 const int no_left_sleeve = look.wrist && (look.wrist->flags2 & VS2_NO_LEFT_SLEEVE);
-                PlayerArms *arms = generate_arms(arms_weapon, colors[1], colors[5], colors[0], third_person, player->left_handed, no_left_sleeve);
+                const float off_shoulder_fwd = drank && third_person ? NETTSPEND_TP_OFF_SHOULDER_FWD : 0.0f;
+                PlayerArms *arms = generate_arms(arms_weapon, colors[1], colors[5], colors[0], third_person, player->left_handed, no_left_sleeve, off_shoulder_fwd);
                 if (!arms) continue;
 
                 arms->anchor.parent = player_mesh->upper_body_anchor;

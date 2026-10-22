@@ -71,14 +71,22 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 // player_generate_meshes) raised NETTSPEND_OFF_HAND_RISE, and NETTSPEND_OFF_HAND_FWD from the shoulder's depth (0: beside
 // the hip, not in front of the body). The rest is the pose itself, so the arm's bend is generated for its real length;
 // first person's refill starts and ends there too (its hidden arm comes up from the same hold).
-// At this rest the wrist is about 5.5 above the feet, and the elbow sits about 2.2 below the shoulder (the bend's side, the
+// At this rest the wrist is about 5.5 above the feet, and the elbow sits about 2.1 below the shoulder (the bend's side, the
 // pole in player_arm_reach, decides which way it bends; its size does not matter, the chord lies in the y-z plane).
 // FWD is measured, not derived: negative is toward the front (-z). At 0 the third-person wrist sat 0.06 behind the hip line
-// (z -27.94; the feet's z is -28 at the test pose); -0.35 moves it 0.32 forward (z -28.26, 0.26 in front of the hip line,
-// the user's 2026-10-22 "forward a bit"). Moving the hand forward tilts the forearm, so the elbow sinks from 1.95 to 2.18
-// below the shoulder (the test's limit is 2.25): the response is not 1:1, the arm solver's reach decides it.
+// (z -27.94; the feet's z is -28 at the test pose); -0.35 moved it 0.32 forward (z -28.26, the user's 2026-10-22
+// "forward a bit"). First person keeps this FWD (its rest is 0.3 further back than third person's at the same value).
 #define NETTSPEND_OFF_HAND_RISE 1.0f
 #define NETTSPEND_OFF_HAND_FWD (-0.35f)
+// Third person: the off hand's forward rest (-0.65: the wrist 0.58 in front of the hip line, z -28.58; the user's 2026-10-22
+// "nudged FORWARDS relative to the head"). The off shoulder's joint moves forward by NETTSPEND_TP_OFF_SHOULDER_FWD (the
+// upper arm's root: it sat 0.56 behind the body's centre, on the back face, so the arm looked detached). The arm solver
+// carries the hand about twice the shoulder's step (measured: -0.5 took the wrist -0.95), so the hold moves back by
+// -2 * the shoulder's step to keep the wrist at NETTSPEND_TP_OFF_HAND_FWD (player_mesh.c). The shoulder's step is the
+// off arm's only (generate_arms); the trigger shoulder keeps the pistol's depth. First person keeps NETTSPEND_OFF_HAND_FWD:
+// its rest at -0.65 would sit ahead of the torso's front face.
+#define NETTSPEND_TP_OFF_HAND_FWD (-0.65f)
+#define NETTSPEND_TP_OFF_SHOULDER_FWD (-0.5f)
 // Third person: the shoulders sit this far higher than the generated arms (player_generate_meshes lowers the Drank's
 // offset.y by it); the hands stay where their holds put them, so the arms rise instead of hanging from the shoulder.
 #define NETTSPEND_TP_SHOULDER_RISE 0.5f
