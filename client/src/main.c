@@ -1441,35 +1441,18 @@ static void client_remove_player(Client *client, const int uid) {
     }
 }
 
-void client_apply_state(Client *client, const NetStatePacket *packet) {
+void client_apply_state(Client *client, const NetStatePacket *packet, const int version) {
     Player *player = client_find_player(client, packet->uid);
     if (!player) return;
 
     // Our own player is predicted; the server corrects it with RECON ("l", net/recon.c) only.
     if (player == client->me) return;
 
-    // index.js updatePlayerPositions ("k"): with forcePos the state snaps, otherwise
-    // x1/y1/z1 and xDir1/yDir1 are where the model is now and the packet is the target that
-    // players.js update() reaches in (1000 / sendRateA) * interpolation ms.
-    const vec3 position = player->position;
-    const vec2 direction = player->direction;
-    net_packet_apply_player(player, packet);
+    // index.js updatePlayerPositions ("k"): with forcePos the state snaps, otherwise the packet is
+    // the target (position, look, step value) that players.js update() reaches in
+    // (1000 / sendRateA) * interpolation ms (net_player_apply_state).
     player->send_rate = (float) game_network_data(&client->game)->send_hz; // WP-E: the round's networkData (sendRateA)
-
-    if (player->force_pos) {
-        player->interpolate = 0;
-        player->force_pos = 0;
-        return;
-    }
-
-    player->dt = 0.0f;
-    player->interp_pos_start = position;
-    player->interp_pos_end = player->position;
-    player->interp_dir_start = direction;
-    player->interp_dir_end = player->direction;
-    player->position = position;
-    player->direction = direction;
-    player->interpolate = 1;
+    net_player_apply_state(player, packet, version);
 }
 
 void client_send_cycle_packet(Client *client) {
@@ -1565,11 +1548,10 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             break;
         }
         case NET_PACKET_STATE: {
-            if (packet->length != sizeof(NetStatePacket) || !client->game.ready) break;
-
-            NetStatePacket state;
-            memcpy(&state, packet->payload, sizeof(state));
-            client_apply_state(client, &state);
+            NetStatePacket state; // V1 (57 bytes, servers before 1.4.5) or V2 (79): never dropped for its size
+            const int version = net_packet_read_state(&state, packet->payload, packet->length);
+            if (!version || !client->game.ready) break;
+            client_apply_state(client, &state, version);
             break;
         }
         case NET_PACKET_RECON: {

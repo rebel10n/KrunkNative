@@ -2481,12 +2481,14 @@ static void net_broadcast_states_tick(void) {
         // (io_killPlayer camLookAt, killer.interpolate = false) and the killer holds still there.
         if (!net_client_in_live_world(client) || (!spectating && client->player->mode.locked)) continue;
         const Player *viewer = spectating ? NULL : client->player; // spectators see everyone
+        // a peer before 1.4.5 checks the 57-byte STATE exactly: it gets V1 (no step / ground / grapple / ping)
+        const uint16_t size = net_peer_has_state_v2(client->peer_minor, client->peer_patch) ? NET_STATE_PACKET_V2_SIZE : NET_STATE_PACKET_V1_SIZE;
         batch.length = 0;
         for (size_t j = 0; j < state_count; j++) {
             if (!game_network_relevant(&g_server->game, viewer, state_players[j])) continue; // WP-E mode.viewDis
-            if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]))) continue;
+            if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], size)) continue;
             net_batch_flush(client, &batch); // full (> ~140 players): send and start the next batch
-            net_batch_append(&batch, NET_PACKET_STATE, &states[j], sizeof(states[j]));
+            net_batch_append(&batch, NET_PACKET_STATE, &states[j], size);
         }
         net_batch_flush(client, &batch);
     }

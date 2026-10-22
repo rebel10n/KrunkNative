@@ -566,6 +566,25 @@ static void case_rotation_math(void) {
         net_packet_apply_player(&q, &st);
         CHECK(q.step_val == 0.25f && q.on_ground && q.grapple.active && q.grapple.point.y == 2.0f && q.ping == 42.0f,
               "the STATE fields apply to the player");
+
+        // The STATE's two sizes: a 57-byte V1 (peers before 1.4.5) reads with its tail at rest, a 79-byte V2 whole,
+        // anything else is malformed. A client that only took the 79-byte form dropped every STATE of a 1.4.4
+        // server: the others stood at their spawn with frozen legs.
+        CHECK(NET_STATE_PACKET_V1_SIZE == 57 && NET_STATE_PACKET_V2_SIZE == 79, "STATE sizes %zu / %zu", (size_t) NET_STATE_PACKET_V1_SIZE, (size_t) NET_STATE_PACKET_V2_SIZE);
+        st.position[0] = 7.0f;
+        NetStatePacket v1 = {.step_val = 9.0f, .on_ground = 0, .grapple_active = 1, .ping = 1.0f};
+        CHECK(net_packet_read_state(&v1, &st, NET_STATE_PACKET_V1_SIZE) == NET_STATE_V1, "a 57-byte STATE reads as V1");
+        CHECK(v1.position[0] == 7.0f && v1.step_val == 0.0f && v1.on_ground == 1 && !v1.grapple_active && v1.ping == 0.0f, "V1: the tail reads as rest, grounded");
+        NetStatePacket v2 = {0};
+        CHECK(net_packet_read_state(&v2, &st, NET_STATE_PACKET_V2_SIZE) == NET_STATE_V2 && v2.step_val == 0.25f && v2.grapple[2] == 3.0f, "a 79-byte STATE reads as V2");
+        CHECK(!net_packet_read_state(&v2, &st, 58) && !net_packet_read_state(&v2, &st, 56) && !net_packet_read_state(&v2, &st, 0), "58 / 56 / 0 bytes are malformed");
+        Player r = {.step_val = 0.5f, .on_ground = 0, .ping = 77.0f};
+        r.grapple.active = 1;
+        net_packet_apply_player_v1(&r, &v1);
+        CHECK(r.position.x == 7.0f && r.step_val == 0.5f && !r.on_ground && r.grapple.active && r.ping == 77.0f, "the V1 apply keeps step, ground, grapple and ping");
+        CHECK(net_peer_has_state_v2(NET_PROTOCOL_MINOR_EXT, NET_PROTOCOL_PATCH_STATE_V2) && net_peer_has_state_v2(NET_PROTOCOL_MINOR_EXT + 1, 0) &&
+              !net_peer_has_state_v2(NET_PROTOCOL_MINOR_EXT, NET_PROTOCOL_PATCH_STATE_V2 - 1) && !net_peer_has_state_v2(NET_PROTOCOL_MINOR_V7, 9),
+              "the 79-byte STATE goes to 1.4.5+ peers only");
     }
     const float bad[] = {NAN, INFINITY, -INFINITY};
     for (size_t i = 0; i < 3; i++) {
@@ -630,17 +649,7 @@ static void case_turn_right(void) {
             next_state += server_tick;
             NetStatePacket state;
             net_packet_from_player(&state, sim->s);
-            const vec2 dir = watched->direction;
-            const vec3 pos = watched->position;
-            net_packet_apply_player(watched, &state);
-            watched->dt = 0.0f;
-            watched->interp_pos_start = pos;
-            watched->interp_pos_end = watched->position;
-            watched->interp_dir_start = dir;
-            watched->interp_dir_end = watched->direction;
-            watched->position = pos;
-            watched->direction = dir;
-            watched->interpolate = 1;
+            net_player_apply_state(watched, &state, NET_STATE_V2); // client_apply_state
             states++;
         }
         // the client's game_tick (in sim_step) ran player_update(watched) for this frame
@@ -683,6 +692,69 @@ static void case_turn_right(void) {
 
 // A hostile client: huge, NaN and inf look values (single frames, as the server's
 // player_accept_input sees them) must never reach the physics, the STATE or the "l".
+// A remote player's walk cycle (player_mesh.c legs: sin(step_val)) is the server's step value, lerped
+// between consecutive STATEs like the position (v10.js:169517 posBuffer 's'); it never re-derives it
+// from the distance covered (which a 10 Hz STATE stream, snapped by every packet, turned into a stall)
+// and the playerStep sound fires at each zero crossing (posStep). A V1 STATE (a server before 1.4.5)
+// carries no step value: the cycle comes from the distance covered, as before.
+static void case_remote_step(void) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    if (!sim_init(sim, "311_sandstorm.json", 0, 0.0f, 0.0f)) { CHECK(0, "map"); free(sim); return; }
+
+    Player *watched = player_init(&sim->client);
+    watched->uid = 2;
+    game_players_add(&sim->client, watched);
+    player_spawn(watched);
+    watched->send_rate = 10.0f;
+    watched->force_pos = 1; // SPAWN: the first STATE snaps (client_apply_spawn)
+    const vec3 origin = watched->position;
+
+    NetStatePacket state = {0};
+    net_packet_from_player(&state, watched);
+    state.uid = 2;
+    state.active = 1;
+    state.step_val = 0.0f;
+    state.on_ground = 1;
+    net_player_apply_state(watched, &state, NET_STATE_V2);
+    CHECK(!watched->interpolate && watched->step_carried && watched->step_val == 0.0f, "the first STATE after a spawn snaps");
+
+    // the server's player walks: stepVal 0 -> 1.2 while it moves 3 units, then -1.2 (its stepDir flipped)
+    const float steps[] = {1.2f, -1.2f, 0.9f};
+    const unsigned short events_before = watched->step_events;
+    float min_mid = 10.0f, max_mid = -10.0f, prev = 0.0f;
+    int monotone = 1;
+    for (size_t i = 0; i < 3; i++) {
+        state.position[0] = origin.x + 3.0f * (float) (i + 1);
+        state.step_val = steps[i];
+        net_player_apply_state(watched, &state, NET_STATE_V2);
+        CHECK(watched->interpolate && watched->step_val == prev && watched->interp_step_end == steps[i], "STATE %zu: the step value is the target, not the value", i);
+        // 100 ms (one send period at 10 Hz / interpolation 1.1 -> ~91% of the way) in 6 frames
+        for (int f = 0; f < 6; f++) {
+            const float before = watched->step_val;
+            game_tick(&sim->client, (float) (sim->now += 1.0 / 60.0), 1.0f / 60.0f);
+            if (f == 2) { min_mid = MIN(min_mid, watched->step_val); max_mid = MAX(max_mid, watched->step_val); }
+            if ((steps[i] > prev && watched->step_val < before - 1e-6f) || (steps[i] < prev && watched->step_val > before + 1e-6f)) monotone = 0;
+        }
+        CHECK(fabsf(watched->step_val - steps[i]) < 0.12f * fabsf(steps[i] - prev) + 1e-3f, "STATE %zu: step %f did not reach %f from %f", i, watched->step_val, steps[i], prev);
+        prev = watched->step_val;
+    }
+    CHECK(monotone, "the step value moved away from its target between states");
+    CHECK(min_mid > -1.1f && max_mid < 1.1f, "mid-way values %f / %f: the step is lerped, not snapped", min_mid, max_mid);
+    CHECK(watched->step_events == events_before + 3, "playerStep at each zero crossing: %u events, expected 3", watched->step_events - events_before);
+    CHECK(watched->position.x > origin.x + 8.0f, "the position interpolated to %f (origin %f)", watched->position.x, origin.x);
+
+    // a V1 STATE (no step value): the cycle from the distance covered, the carried value is forgotten
+    NetStatePacket v1;
+    net_packet_read_state(&v1, &state, NET_STATE_PACKET_V1_SIZE);
+    v1.position[0] = origin.x + 20.0f;
+    const float carried = watched->step_val;
+    net_player_apply_state(watched, &v1, NET_STATE_V1);
+    CHECK(!watched->step_carried && watched->on_ground, "V1: nothing carried, grounded");
+    for (int f = 0; f < 6; f++) game_tick(&sim->client, (float) (sim->now += 1.0 / 60.0), 1.0f / 60.0f);
+    CHECK(fabsf(watched->step_val - carried) > 0.1f, "V1: the step value %f still moves with the distance (was %f)", watched->step_val, carried);
+    free(sim);
+}
+
 static void case_bad_rotation(void) {
     Sim *sim = calloc(1, sizeof(Sim));
     if (!sim_init(sim, "311_sandstorm.json", 0, 0.0f, 0.0f)) { CHECK(0, "map"); free(sim); return; }
@@ -877,6 +949,7 @@ int main(void) {
     // Last: these games draw from the shared spawn RNG, and the cases above expect its sequence.
     case_rotation_math();
     case_turn_right();
+    case_remote_step();
     case_bad_rotation();
 
     if (g_failures) {

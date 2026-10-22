@@ -1246,6 +1246,8 @@ typedef struct Player_t {
     vec3 interp_pos_end;
     vec2 interp_dir_start;
     vec2 interp_dir_end;
+    float interp_step_start; // v10 posBuffer 's': the step value of the last STATE and of the target one
+    float interp_step_end;
 
     float health;
     int max_health;
@@ -1323,6 +1325,11 @@ typedef struct Player_t {
     float step_val;
     float step_chase;
     unsigned char step_dir_neg:1; // Krunker stepDir: 0 = +1, 1 = -1 (flips at +-PI/2)
+    // A remote player whose STATE carries the server's step value (1.4.5, the v10 "k" record's stepVal):
+    // player_update lerps it between states (v10.js:169517) instead of re-deriving it from the distance
+    // covered; pos_step is v10's posStep (the step sound at each sign change). 0 for older servers.
+    unsigned char step_carried:1;
+    unsigned char pos_step:1;
 
     // ---- v10.0.2 Stalker rework (GameModeConfig.stalker_v10; v10:168968-169434, 169664-169685,
     // 169754-169764, 170078, 170153-170154): the stalker's leap, wall stick and coyote time
@@ -2602,7 +2609,10 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // any non-zero fists as a fists kill.
 #define NET_PROTOCOL_PATCH 5
 // Patch 5: NetStatePacket carries the v10 "k" record's step value, on-ground flag, grapple and ping (see the struct).
-// The layout changed: a KN client and server come from one build (doc/v10/net.md, section 8).
+// The STATE grew from 57 to 79 bytes: readers take both (net_packet_read_state) and a server sends the 57-byte
+// form to a peer that announced an older patch (net_peer_has_state_v2), like SPAWN / RECON for WP-C.
+#define NET_PROTOCOL_PATCH_STATE_V2 5
+int net_peer_has_state_v2(int minor, int patch); // the peer's HELLO / INIT minor.patch (same major) takes the 79-byte STATE
 // Patch 4: NetDomZoneState carries the zone's map object id (NET_PACKET_DOM_UPDATE). Like patch 3 this is a
 // layout change for a KN client and server built together; the packet has no version field of its own.
 // Patch 3: NetModeFlag carries the flag's map object id and its active bit (NET_PACKET_MODE_STATE and
@@ -2731,6 +2741,14 @@ typedef struct {
     float grapple[3];       // the grapple point x, y, z (player.grapple.point)
     float ping;             // player.ping: smoothed RTT in ms
 } NetStatePacket;
+
+// A STATE is 57 bytes from peers before 1.4.5 (V1) and 79 from 1.4.5 on (V2). Every reader takes both
+// (net_packet_read_state); a server sends V1 to a peer that announced patch < NET_PROTOCOL_PATCH_STATE_V2.
+// A mismatched pair used to drop every STATE: the others stood still at their spawn, legs frozen.
+#define NET_STATE_PACKET_V1_SIZE (offsetof(NetStatePacket, step_val)) // up to crouch_val
+#define NET_STATE_PACKET_V2_SIZE (sizeof(NetStatePacket))             // + step_val, on_ground, grapple, ping
+#define NET_STATE_V1 1
+#define NET_STATE_V2 2
 
 // Krunker "l" (packetHandlers.ts buildLPacket, index.js reconcilePlayer): the owner's
 // authoritative movement state right after the server processed input `ack_seq`; the client
@@ -3755,7 +3773,14 @@ void net_packet_from_input(NetInputPacket*, const Input*);
 void net_packet_to_input(Input*, const NetInputPacket*);
 int net_packet_read_input(NetInputPacket*, const NetPacket*); // full, 23-byte v2 or 22-byte v1 INPUT; 0 = malformed
 void net_packet_from_player(NetStatePacket*, const Player*);
-void net_packet_apply_player(Player*, const NetStatePacket*);
+void net_packet_apply_player(Player*, const NetStatePacket*);    // every field (a V2 STATE)
+void net_packet_apply_player_v1(Player*, const NetStatePacket*); // the V1 fields: step, ground, grapple and ping keep their values
+// A V1 (57-byte) or V2 (79-byte) STATE payload: NET_STATE_V1 / NET_STATE_V2 (the V1 tail reads as rest), 0 = malformed
+int net_packet_read_state(NetStatePacket*, const void *payload, uint16_t length);
+// index.js updatePlayerPositions ("k") for a remote player: with force_pos the state snaps, otherwise the
+// player stays where it is and the packet becomes the interpolation target (position, look and, for a
+// V2 STATE, the step value) that player_update reaches in (1000 / send_rate) * interpolation ms.
+void net_player_apply_state(Player*, const NetStatePacket*, int version);
 void net_packet_from_recon(NetReconPacket*, const Player*, int32_t ack_seq); // buildLPacket
 void net_packet_apply_recon(Player*, const NetReconPacket*);                // reconcilePlayer's snap (no replay)
 // WP-C: a V1 (58-byte) or V2+ RECON; the v7 fields a V1 lacks come from `keep` (the client's own

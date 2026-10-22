@@ -482,6 +482,16 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
         s.health = p ? p->health : 100.0f;
         s.aim_val = 1.0f - (float) num(K(KRB_K_AIM_VAL), 1); // Krunker 1 = hip, ours 0
         s.crouch_val = (float) num(K(KRB_K_CROUCH_VAL), 0);
+        // the 1.4.5 tail: the server's walk cycle ([6] stepVal, lerped by player_update), onGround (an
+        // unset ground flag froze every leg: player_update stepped grounded players only), grapple, ping
+        s.step_val = (float) num(K(KRB_K_STEP_VAL), 0);
+        s.on_ground = truthy(K(KRB_K_ON_GROUND)) ? 1 : 0;
+        const KrunkerValue *grapple = K(KRB_K_GRAPPLE);
+        if (krunker_is(grapple, KRUNKER_ARRAY) && grapple->len >= 3) {
+            s.grapple_active = 1;
+            for (int axis = 0; axis < 3; axis++) s.grapple[axis] = (float) num(grapple->u.items + axis, 0);
+        }
+        s.ping = (float) num(K(KRB_K_PING), 0);
         emit(l, NET_PACKET_STATE, &s, sizeof(s));
         fx_grapple(l, sid, K(KRB_K_GRAPPLE));
 #undef K

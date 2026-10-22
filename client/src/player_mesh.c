@@ -2036,9 +2036,9 @@ void player_mesh_debug_log(Player *player, const double now) {
     if (!file || !player->mesh || player->render_you || !player->active) return;
 
     PlayerMesh *pm = player->mesh;
-    fprintf(file, "{\"t\":%.2f,\"uid\":%d,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"yaw\":%.4f,\"pitch\":%.4f,\"cr\":%.4f,\"step\":%.4f,\"chase\":%.4f,\"g\":%d,\"wi\":%d,\"aim\":%.3f,\"interp\":%d,",
+    fprintf(file, "{\"t\":%.2f,\"uid\":%d,\"x\":%.4f,\"y\":%.4f,\"z\":%.4f,\"yaw\":%.4f,\"pitch\":%.4f,\"cr\":%.4f,\"step\":%.4f,\"chase\":%.4f,\"g\":%d,\"wi\":%d,\"aim\":%.3f,\"interp\":%d,\"sc\":%d,",
             now * 1000.0, player->uid, player->position.x, player->position.y, player->position.z, player->direction.y, player->direction.x,
-            player->crouch_val, player->step_val, player->step_chase, player->on_ground, player->loadout_index, player->aim_val, player->interpolate);
+            player->crouch_val, player->step_val, player->step_chase, player->on_ground, player->loadout_index, player->aim_val, player->interpolate, player->step_carried);
     player_log_matrix(file, "root", pm->anchor);
     fputc(',', file);
     player_log_matrix(file, "lower", pm->body_anchor);

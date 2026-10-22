@@ -286,7 +286,13 @@ Protocol 1.4.5 (NET_PROTOCOL_PATCH 5): `NetStatePacket` (NET_PACKET_STATE, 6, th
 values the v10 "k" record needs and the state did not have: `float step_val` (player.step_val, v10 stepVal), `uint8
 on_ground`, `uint8 grapple_active` with `float grapple[3]` (player.grapple.point), and `float ping`. The server fills
 them from the player (shared/src/net.c net_packet_from_player) and the client applies them (net_packet_apply_player,
-from client_apply_state). The same single-build rule applies: the state packet grew from 57 to 79 bytes, so a KN client
-and server must come from one build. The bridge (`net-bridge/v10Translate.ts`) maps the record field by field
-(`v10.js` 191557 sender; 220285 handler).
+from client_apply_state). The state packet grew from 57 to 79 bytes; unlike patches 3 and 4 the two sizes are both
+read: `net_packet_read_state` takes the 57-byte V1 (its tail at rest, on_ground 1) and the 79-byte V2, and a server
+sends V1 to a peer that announced patch < 5 (`net_peer_has_state_v2`, like SPAWN / RECON for WP-C). A client that only
+took the 79-byte form dropped every STATE of a 1.4.4 server: the other players stood at their spawn with frozen legs.
+The remote walk cycle is the v10 rule (v10.js:169517): `player_update` lerps the carried step value between
+consecutive STATEs (`step_carried`, posBuffer 's') and fires the step sound at each zero crossing (posStep); a V1
+STATE keeps the distance-driven cycle. The bridge (`net-bridge/v10Translate.ts`) maps the record field by field
+(`v10.js` 191557 sender; 220285 handler); the native official-server link (`client/src/net/krunker_link.c`) fills
+the tail from the record's [6] stepVal, [7] onGround, [11] grapple and [12] ping.
 

@@ -3891,12 +3891,24 @@ void player_update(Player *player, const float delta) {
         player->position.y = player->interp_pos_start.y + (player->interp_pos_end.y - player->interp_pos_start.y) * progress;
         player->position.z = player->interp_pos_start.z + (player->interp_pos_end.z - player->interp_pos_start.z) * progress;
 
-        if (player->on_ground) {
-            player_step(player, hypotf(player->last_position.x - player->position.x, player->last_position.z - player->position.z));
-        }
-
         // yaw = lerpAngle(xDir2, xDir1, min(1, interp)), pitch likewise (players.js update)
         const float t = MIN(1.0f, progress);
+
+        if (player->step_carried) {
+            // v10.js:169517: stepVal = s1 + (s2 - s1) * t between the two buffered states (the server's
+            // walk cycle, never re-derived here); playerStep(sound only) when it crosses zero (posStep)
+            player->step_val = player->interp_step_start + (player->interp_step_end - player->interp_step_start) * t;
+            if (!player->pos_step && player->step_val > 0.0f) {
+                player->pos_step = 1;
+                player->step_events++;
+            } else if (player->pos_step && player->step_val < 0.0f) {
+                player->pos_step = 0;
+                player->step_events++;
+            }
+        } else if (player->on_ground) {
+            // a server whose STATE carries no step value (before 1.4.5): the cycle from the distance covered
+            player_step(player, hypotf(player->last_position.x - player->position.x, player->last_position.z - player->position.z));
+        }
         player->direction.y = player_lerp_angle(player->interp_dir_end.y, player->interp_dir_start.y, t);
         player->direction.x = player_lerp_angle(player->interp_dir_end.x, player->interp_dir_start.x, t);
     }

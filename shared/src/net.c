@@ -206,7 +206,7 @@ void net_player_teleport(Player *player, const float x, const float y, const flo
     player->z_vel_cylinder = 0.0f;
 }
 
-void net_packet_apply_player(Player *player, const NetStatePacket *packet) {
+void net_packet_apply_player_v1(Player *player, const NetStatePacket *packet) {
     player->active = packet->active;
     player->input_seq = packet->ack_seq;
     player->position.x = packet->position[0];
@@ -220,15 +220,63 @@ void net_packet_apply_player(Player *player, const NetStatePacket *packet) {
     player->health = packet->health;
     player->aim_val = packet->aim_val;
     player->crouch_val = packet->crouch_val;
-    player->step_val = packet->step_val;
-    player->on_ground = packet->on_ground ? 1 : 0;
-    player->grapple.active = packet->grapple_active ? 1 : 0;
-    player->grapple.point = (vec3) {packet->grapple[0], packet->grapple[1], packet->grapple[2]};
-    player->ping = packet->ping;
 
     if (packet->loadout_index >= 0 && packet->loadout_index < player->loadout_size && packet->loadout_index != player->loadout_index) {
         player_swap_weapon(player, packet->loadout_index, 0, 1, 1);
     }
+}
+
+void net_packet_apply_player(Player *player, const NetStatePacket *packet) {
+    net_packet_apply_player_v1(player, packet);
+    player->step_val = isfinite(packet->step_val) ? packet->step_val : 0.0f;
+    player->on_ground = packet->on_ground ? 1 : 0;
+    player->grapple.active = packet->grapple_active ? 1 : 0;
+    player->grapple.point = (vec3) {packet->grapple[0], packet->grapple[1], packet->grapple[2]};
+    player->ping = packet->ping;
+}
+
+int net_peer_has_state_v2(const int minor, const int patch) {
+    return minor > NET_PROTOCOL_MINOR_EXT || (minor == NET_PROTOCOL_MINOR_EXT && patch >= NET_PROTOCOL_PATCH_STATE_V2);
+}
+
+int net_packet_read_state(NetStatePacket *state, const void *payload, const uint16_t length) {
+    if (length != NET_STATE_PACKET_V1_SIZE && length != NET_STATE_PACKET_V2_SIZE) return 0;
+    memset(state, 0, sizeof(*state));
+    memcpy(state, payload, length);
+    if (length == NET_STATE_PACKET_V2_SIZE) return NET_STATE_V2;
+    state->on_ground = 1; // a V1 sender's players stepped from the distance covered: always "grounded"
+    return NET_STATE_V1;
+}
+
+void net_player_apply_state(Player *player, const NetStatePacket *packet, const int version) {
+    const vec3 position = player->position;
+    const vec2 direction = player->direction;
+    const float step = player->step_val;
+    if (version >= NET_STATE_V2) {
+        net_packet_apply_player(player, packet);
+        player->step_carried = 1;
+    } else {
+        net_packet_apply_player_v1(player, packet);
+        player->step_carried = 0;
+    }
+
+    if (player->force_pos) { // v10.js:220298 forcePos: x, y, z, the look and stepVal snap, posBuffer emptied
+        player->interpolate = 0;
+        player->force_pos = 0;
+        return;
+    }
+
+    player->dt = 0.0f;
+    player->interp_pos_start = position;
+    player->interp_pos_end = player->position;
+    player->interp_dir_start = direction;
+    player->interp_dir_end = player->direction;
+    player->interp_step_start = step;
+    player->interp_step_end = player->step_val;
+    player->position = position;
+    player->direction = direction;
+    player->step_val = step;
+    player->interpolate = 1;
 }
 
 // packetHandlers.ts buildLPacket: `player` right after the tick that ran input `ack_seq`.

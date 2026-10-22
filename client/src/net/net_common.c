@@ -206,16 +206,16 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_STATE: {
-            if (length != sizeof(NetStatePacket)) {
+            NetStatePacket packet; // V1 (57) or V2 (79 bytes)
+            const int version = net_packet_read_state(&packet, payload, length);
+            if (!version) {
                 client_net_log_bad_payload("state", type, payload, length);
                 break;
             }
 
-            NetStatePacket packet;
-            memcpy(&packet, payload, sizeof(packet));
-
-            printf("{\"type\":\"state\",\"id\":%u,\"uid\":%d,\"ack_seq\":%d,\"active\":%u,\"loadout_index\":%d,\"position\":[%g,%g,%g],\"velocity\":[%g,%g,%g],\"direction\":[%g,%g],\"health\":%g,\"aim_val\":%g,\"crouch_val\":%g}",
+            printf("{\"type\":\"state\",\"id\":%u,\"version\":%d,\"uid\":%d,\"ack_seq\":%d,\"active\":%u,\"loadout_index\":%d,\"position\":[%g,%g,%g],\"velocity\":[%g,%g,%g],\"direction\":[%g,%g],\"health\":%g,\"aim_val\":%g,\"crouch_val\":%g,\"step_val\":%g,\"on_ground\":%u}",
                    (unsigned int) type,
+                   version,
                    packet.uid,
                    packet.ack_seq,
                    (unsigned int) packet.active,
@@ -230,7 +230,9 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.direction[1],
                    packet.health,
                    packet.aim_val,
-                   packet.crouch_val);
+                   packet.crouch_val,
+                   packet.step_val,
+                   (unsigned int) packet.on_ground);
             break;
         }
         case NET_PACKET_CYCLE:

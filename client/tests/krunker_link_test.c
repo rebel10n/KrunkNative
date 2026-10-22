@@ -2305,12 +2305,19 @@ int main(void) {
     for (int i = 0; i < 26; i++) k[i] = KRUNKER_V_NUM(0);
     k[0] = KRUNKER_V_NUM(7); k[1] = KRUNKER_V_NUM(10); k[4] = KRUNKER_V_NUM(90); k[5] = KRUNKER_V_NUM(-45); k[10] = KRUNKER_V_NUM(1);
     k[13] = KRUNKER_V_NUM(9);
+    // the 1.4.5 tail: [6] stepVal, [7] onGround, [11] grapple [x, y, z], [12] ping. An unfilled onGround (0) froze
+    // every leg on the official servers: player_update only stepped grounded players.
+    KrunkerValue grapple[3] = {KRUNKER_V_NUM(4), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6)};
+    k[6] = KRUNKER_V_NUM(0.75); k[7] = KRUNKER_V_NUM(1); k[11] = KRUNKER_V_ARRAY(grapple, 3); k[12] = KRUNKER_V_NUM(55);
     feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(k, 26), KRUNKER_V_NUM(10), KRUNKER_V_NUM(1234)}, 3);
     NetStatePacket st;
     p = find_in(NET_PACKET_STATE, 0);
     if (p) memcpy(&st, p->payload, sizeof(st));
     CHECK(p && !find_in(NET_PACKET_STATE, 1) && st.uid == 7 && st.position[0] == 10.0f && fabsf(st.direction[1] - (float) (M_PI / 2)) < 1e-5f &&
           fabsf(st.direction[0] + (float) (M_PI / 4)) < 1e-5f && st.health == 60.0f && st.aim_val == 0.0f, "STATE (aimVal 1 = hip = our 0)");
+    CHECK(p && p->length == NET_STATE_PACKET_V2_SIZE && st.step_val == 0.75f && st.on_ground == 1 && st.grapple_active == 1 && st.grapple[0] == 4.0f &&
+          st.grapple[2] == 6.0f && st.ping == 55.0f, "STATE carries stepVal, onGround, grapple and ping (got step %g ground %u grapple %u ping %g)",
+          st.step_val, (unsigned) st.on_ground, (unsigned) st.grapple_active, st.ping);
     clear();
 
     // "l" -> RECON + PING_RESULT, answered "v"
