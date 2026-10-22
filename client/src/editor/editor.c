@@ -133,6 +133,17 @@ void editor_apply_lighting(void) {
     l->fog_far = (float) ed_json_num(g_ed.proj->map_config, "fogD", 2000);
     l->fog_enabled = l->fog_far > l->fog_near;
     l->enabled = 1;
+    // The output state (map.c env: toneMapping 0..4, toneMappingExposure 0..10 to 0.1,
+    // outputEncoding 0..2, a missing key = the default) and v10's physical lights (correct_lights
+    // 1, as map_environment.c env_output). Without these the view kept the last game's output
+    // (its ACES / sRGB stayed loaded behind the page): blown whites, washed-out colours.
+    const double tone = ed_json_num(g_ed.proj->map_config, "toneMapping", 0);
+    const double exposure = ed_json_num(g_ed.proj->map_config, "toneMappingExposure", 1);
+    const double encoding = ed_json_num(g_ed.proj->map_config, "outputEncoding", 0);
+    l->tone_mapping = (int) fmin(fmax(tone, 0.0), 4.0);
+    l->tone_mapping_exposure = (float) (round(fmin(fmax(exposure, 0.0), 10.0) * 10.0) / 10.0);
+    l->output_encoding = (int) fmin(fmax(encoding, 0.0), 2.0);
+    l->correct_lights = 1;
     const float u = (float) M_PI * ((float) ed_json_num(g_ed.proj->map_config, "sunAngY", 54) / -180.0f);
     const float v = (float) M_PI * ((float) ed_json_num(g_ed.proj->map_config, "sunAngX", 90) / -180.0f);
     vec3 d = {cosf(v), sinf(v) * sinf(u), sinf(v) * cosf(u)};
@@ -988,6 +999,9 @@ static void page_enter(Client *client, const char *query) {
                         html_storage_get("mapToEdit", NULL, 0) <= 0;
     open_start_projects(query);
     if (g_ed.project_count) ed_project_activate(g_ed.projects[0]);
+    // every entry sets the view's whole lighting state: the game's (or the last page's) is still
+    // loaded behind this page, and map_environment_restore gives it back on leaving
+    if (g_ed.proj) editor_apply_lighting();
 
     ed_toolbar_show();
     ed_panel_left_show();

@@ -8,6 +8,7 @@
 #include <backend_ui.h>
 #include <download_ui.h> // ?download
 #include <debug_capture.h>
+#include <map_environment.h> // the game's environment back after a page (leave_page)
 #include <input_script.h>
 #include <render_settings.h> // client_render_toggle_fullscreen (F11)
 #include <html_ui.h>
@@ -529,6 +530,9 @@ static void swap_callbacks(GLFWwindow *window, const int to_page) {
 
 static void leave_page(void) {
     if (g_app.page && g_app.entered && g_app.page->leave) g_app.page->leave(g_app.client);
+    // the page may have set the global lighting / sky / shadows for its own view (the editor):
+    // the loaded game map's environment comes back for the game page behind it
+    if (g_app.page) map_environment_restore();
     g_app.page = NULL;
     g_app.entered = 0;
 }

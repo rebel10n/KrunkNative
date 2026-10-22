@@ -101,21 +101,37 @@ static void env_apply_zone(const Map *map, const int index) {
     shadow_environment(env->shadow_r, env->shadow_d, env->light_d);
 }
 
+// Switches the global lighting / sky / shadow state to zone `zone` of the loaded map (-1 = the map's own).
+static void env_apply_state(const int zone) {
+    if (zone < 0) {
+        g_render_lighting = g_env_map_lighting;
+        glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
+        const int mode_sky = g_env_mode && g_env_mode->config.has_sky_col;
+        sky_load(mode_sky ? NULL : g_env_map->raw_data);
+        shadow_set_normal_bias(g_env_map->env.shadow_nb);
+        shadow_environment(-1, -1, -1.0f);
+    } else {
+        env_apply_zone(g_env_map, zone);
+    }
+}
+
 int map_environment_update(const Map *map, const vec3 camera_position) {
     if (!map || map != g_env_map) return -1;
     const int zone = world_environment_zone_at(map, camera_position);
     if (zone == g_env_zone) return zone;
 
-    if (zone < 0) {
-        g_render_lighting = g_env_map_lighting;
-        glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
-        const int mode_sky = g_env_mode && g_env_mode->config.has_sky_col;
-        sky_load(mode_sky ? NULL : map->raw_data);
-        shadow_set_normal_bias(map->env.shadow_nb);
-        shadow_environment(-1, -1, -1.0f);
-    } else {
-        env_apply_zone(map, zone);
-    }
+    env_apply_state(zone);
     g_env_zone = zone;
     return zone;
+}
+
+void map_environment_restore(void) {
+    if (!g_env_map) { // no map: the v3.1.1 output the menu and other pages render with (map_environment_unload)
+        g_render_lighting.tone_mapping = 0;
+        g_render_lighting.tone_mapping_exposure = 1.0f;
+        g_render_lighting.output_encoding = 0;
+        g_render_lighting.correct_lights = 0;
+        return;
+    }
+    env_apply_state(g_env_zone);
 }

@@ -1019,6 +1019,10 @@ editor-inspector-test: build ## Object inspector + Environment/Terrain/Zone/Ocea
 editor-windows-test: build ## Assets / Mods / Textures / Sounds / My Games windows vs v7.1.4 (headless, no brain; tools/editor/windows_check.py)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/windows_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
+.PHONY: editor-lighting-test
+editor-lighting-test: build ## Editor view lighting after a bright game (ACES / sRGB must not leak into the editor) vs a fresh editor (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/lighting_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 .PHONY: editor-publish-test
 editor-publish-test: build ## Editor publishing / My Games / asset windows against a local kn_brain (headless; needs config/config.json DB creds or KN_TEST_DB_DRIVER=sqlite)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_e2e.py $(DEBUG_DIR)

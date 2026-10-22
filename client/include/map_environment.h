@@ -12,6 +12,10 @@
 // the environment of zone -1 and builds the ocean.
 void map_environment_map_loaded(const Map *map, const GameMode *mode);
 void map_environment_unload(void);
+// The loaded map's current environment (its zone, else its own) applied again: app_mode.c calls it
+// when a page is left, so the game behind a page that drew with its own lighting (the editor) gets
+// its lighting back. No map loaded: the v3.1.1 output, as map_environment_unload.
+void map_environment_restore(void);
 
 // Every frame with the camera position: switches RenderLighting / sky / fog / shadows to the
 // environment zone the camera is in (-1 = the map's own). Returns the active zone index.
