@@ -23,6 +23,31 @@ Optional overrides go in `tools/krunker-local/config.json` (git-ignored); the de
 `config.example.json`: the source tree, the KrunkNative roots used to fill missing assets,
 ports, the brain URL and the official hosts to route.
 
+## Playability check
+
+`make playable-check` (or `tools/krunker-local/playable.sh`) starts a stack on free loopback ports (its own
+brain, server, bridge and harness page, with pids in `$KN_PLAYABLE_HOME/run`, default
+`~/.cache/kn-playable-check`), joins the official client headless, plays one round, and asserts each of these
+from the report that `krunker-local.mjs playable` writes:
+
+| | assertion (PASS or FAIL) |
+|---|---|
+| a | init completes: `initInProgress` false, the mode set |
+| b | the HUD renders in the round (DOM: `#bottomLeftHealth`, `#ammoVal` laid out, a canvas visible) |
+| c | `window.__kn_game` readable during the round |
+| d | input reaches the server and makes state: W held (the player moves), the mouse moved (the player turns), a click (a bullet trail of the local shot is drawn); the bridge's `<- q` frames and `-> l` samples advance |
+| e | the frame counter (the page's animation frames) advances in every 5 s of a 60 s window |
+| f | the round ends: `#endUI` (the end screen) is shown |
+| g | the next round starts: a new `init` on the socket, the local player active, the end screen gone |
+| h | page exceptions at or under `KN_PLAYABLE_MAX_EXC` (default 0); the first is listed with its location |
+
+It exits 0 only when every assertion passes. `playable-check.mjs <report.json> [max]` runs the
+assertions again on a saved report. Env: `KN_PLAYABLE_ROUND_S` (round length, default 90),
+`KN_PLAYABLE_MAX_EXC`, `KN_PLAYABLE_HOME`. The report is `$KN_PLAYABLE_HOME/run/playable-report.json`;
+screenshots are in `shots/playable-*.png`. The bullet trail is counted from the page's `physObj` call that
+has a trail argument and the local player as shooter (a shell casing passes `false` there). A round needs
+the game server's round length, so the run takes about 5 minutes.
+
 ## The v10 bridge (the join path)
 
 The official client's WebSocket (msgpack, v10 labels) reaches a KrunkerBox game server through the

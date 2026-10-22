@@ -527,7 +527,7 @@ function bridgeLines() {
 
 // The labels the bridge has sent, counted from its trace lines ("[v10-proxy] <sid> -> <label>"). Each call reads only what
 // was added since the last one, so a long trace costs nothing per poll.
-function bridgeLabelCounter(file) {
+function bridgeLabelCounter(file, arrow = "->") {
   let pos = 0;
   let partial = "";
   const counts = new Map();
@@ -543,7 +543,7 @@ function bridgeLabelCounter(file) {
       const lines = (partial + buf.toString("utf8")).split("\n");
       partial = lines.pop();
       for (const line of lines) {
-        const m = / -> (\S+)$/.exec(line);
+        const m = (arrow === "->" ? / -> (\S+)$/ : / <- (\S+)$/).exec(line);
         if (m) counts.set(m[1], (counts.get(m[1]) || 0) + 1);
       }
     } finally {
@@ -784,10 +784,236 @@ async function join() {
   }
 }
 
-function help() {
-  console.log(`usage: krunker-local.mjs prepare|serve|check|join   (config: ${cfg._file})`);
+// playable: the playability check's run (tools/krunker-local/playable.sh). It joins the official client through the bridge,
+// plays one round with input (move, look, fire), samples the page and the bridge once a second, holds the frame counter for
+// 60 s, waits for the round's end screen and then for the next round, and prints one JSON report on stdout. It asserts
+// nothing: playable-check.mjs decides each assertion from this report.
+const PLAY = { joinMs: 150000, frameMs: 60000, roundMs: 300000, nextMs: 300000, failedMs: 30000 };
+// the frame counter: every animation frame the page runs (a wrapper, installed before the page's own scripts)
+const RAF_HOOK = `(() => { window.__kn_frames = 0; const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function (cb) { return raf(function (t) { window.__kn_frames++; return cb(t); }); }; })();`;
+const CLICK_TO_PLAY_JS = `(() => { const hits = [...document.querySelectorAll("div,span,button,a")].filter((e) => /click to play/i.test(e.innerText || ""));
+  const e = hits.find((x) => ![...x.children].some((c) => /click to play/i.test(c.innerText || ""))) || hits[0];
+  if (!e) return null; e.click(); return e.tagName + "." + String(e.className).slice(0, 40); })()`;
+// The page's state as one JSON string: the HUD and the end screen by their ids in the official index.html (visible when laid
+// out), the canvas, the frame counter, and the game object (window.__kn_game, loader.js): the local player (the sid that
+// players.currentSid names) and its state. inRound: the local player is active in a game instance past its init.
+// tracers counts the local player's own bullet trails: the game's physObj call (the particles manager) with a number as its
+// trail argument and the local player as the shooter (a casing passes false there). The wrapper only counts; the call goes on.
+const PLAY_SNAP_JS = `(() => {
+  const r1 = (v) => typeof v === "number" ? Math.round(v * 10) / 10 : null;
+  const r3 = (v) => typeof v === "number" ? Math.round(v * 1000) / 1000 : null;
+  const vis = (e) => { if (!e) return false; const s = getComputedStyle(e); const b = e.getBoundingClientRect(); return s.display !== "none" && s.visibility !== "hidden" && b.width > 0 && b.height > 0; };
+  const byId = (x) => document.getElementById(x);
+  const out = { frames: window.__kn_frames || 0, tracers: window.__kn_tracers || 0, physCalls: window.__kn_phys || 0,
+    canvasVisible: [...document.querySelectorAll("canvas")].some((c) => vis(c) && c.width > 0 && c.height > 0),
+    hud: { health: vis(byId("bottomLeftHealth")), ammo: vis(byId("ammoVal")) },
+    endUI: vis(byId("endUI")),
+    clickToPlay: [...document.querySelectorAll("div,span,button,a")].some((e) => /click to play/i.test(e.innerText || "") && vis(e)),
+    gameExposed: !!window.__kn_game && typeof window.__kn_game === "object", game: null, inRound: false };
+  const g = window.__kn_game;
+  if (out.gameExposed) {
+    const pl = g.players || {};
+    const list = Array.isArray(pl.list) ? pl.list : [];
+    const p = list.find((x) => x && x.sid === pl.currentSid) || null;
+    const fx = g.particles;
+    if (fx && typeof fx.physObj === "function" && !fx.__knHooked) {
+      const orig = fx.physObj;
+      fx.physObj = function (...a) {
+        window.__kn_phys = (window.__kn_phys || 0) + 1;
+        if (typeof a[6] === "number" && a[8] && a[8].isYou === true) window.__kn_tracers = (window.__kn_tracers || 0) + 1;
+        return orig.apply(this, a);
+      };
+      fx.__knHooked = true;
+    }
+    out.game = { initInProgress: g.initInProgress === true, gameClosed: g.gameClosed === true, isDestroyed: g.isDestroyed === true,
+      modeIndex: g.modeIndex == null ? null : g.modeIndex, modeSet: !!g.mode, hasInstance: !!g.gameInstance,
+      players: list.length, localActive: !!(p && p.active === true),
+      local: p ? { x: r1(p.x), y: r1(p.y), z: r1(p.z), yaw: r3(p.xDire), pitch: r3(p.yDire), loadoutIndex: p.loadoutIndex,
+        ammo: Array.isArray(p.ammos) ? p.ammos[p.loadoutIndex] : null } : null };
+    out.inRound = out.game.localActive && out.game.hasInstance && !out.game.initInProgress && !out.game.gameClosed && !out.game.isDestroyed;
+  }
+  return JSON.stringify(out); })()`;
+
+async function playable() {
+  if (!cfg.bridge) throw new Error('playable needs the "bridge" config');
+  const shots = path.join(cfg.runDir, "shots");
+  fs.mkdirSync(shots, { recursive: true });
+  const t0 = Date.now();
+  const log = (m) => console.error(`[playable +${Math.round((Date.now() - t0) / 1000)}s] ${m}`);
+  const cdpPort = await freePort();
+  const child = spawn(findChrome(), [
+    "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
+    `--user-data-dir=${path.join(cfg.runDir, `playable-${t0}`)}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
+  ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
+  const report = { check: "playable", build: "v10.0.3", url: cfg.localUrl, startedAt: new Date(t0).toISOString(),
+    roundSeconds: Number(process.env.KN_ROUND_SECONDS) || null, phase: "start", joined: false, clicked: null, consent: false,
+    spawnClicks: 0, seeks: 0, samples: [], input: null, framesWindow: null, end: null, nextRound: null,
+    exceptionCount: 0, exceptions: [], consoleErrors: [], failed: [], httpErrors: [], shots: [] };
+  let phase = "start";
+  const labels = bridgeLabelCounter(cfg.bridge.log); // "-> label": what the server and bridge sent the client
+  const frames = bridgeLabelCounter(cfg.bridge.log, "<-"); // "<- label": what the client sent (q = its input frames)
+  try {
+    let targets = [];
+    for (let i = 0; i < 60 && !targets.some((t) => t.type === "page"); i++) {
+      try { targets = await getJSON(`http://127.0.0.1:${cdpPort}/json/list`); } catch (e) { /* not up yet */ }
+      await sleep(250);
+    }
+    const page = targets.find((t) => t.type === "page");
+    if (!page) throw new Error("no page target from Chromium");
+    const ws = new WebSocket(page.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    let id = 0;
+    const pending = new Map();
+    const reqUrl = new Map();
+    const send = (method, params = {}) => new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(m.data);
+      if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); return; }
+      const p = msg.params || {};
+      switch (msg.method) {
+        case "Network.requestWillBeSent": reqUrl.set(p.requestId, redact(p.request.url)); break;
+        case "Network.loadingFailed":
+          if (report.failed.length < 50) report.failed.push(`${(reqUrl.get(p.requestId) || "").slice(0, 120)}: ${p.errorText}`);
+          break;
+        case "Network.responseReceived":
+          if (/seek-game/.test(p.response.url)) report.seeks++;
+          if (p.response.status >= 400 && report.httpErrors.length < 50) report.httpErrors.push(`${p.response.status} ${redact(p.response.url).slice(0, 120)}`);
+          break;
+        case "Runtime.exceptionThrown": {
+          const d = p.exceptionDetails;
+          const cf = (d.stackTrace && d.stackTrace.callFrames) || [];
+          const top = cf[0] || {};
+          // every exception is counted; the first 50 are kept with their location (a flood would otherwise fill the report)
+          report.exceptionCount++;
+          if (report.exceptions.length < 50) report.exceptions.push({ phase, t: Date.now() - t0, text: ((d.exception || {}).description || d.text || "").split("\n")[0].slice(0, 200),
+            where: `${top.url || d.url || "?"}:${top.lineNumber ?? d.lineNumber}:${top.columnNumber ?? d.columnNumber} ${top.functionName || ""}`.trim(),
+            frames: cf.slice(0, 3).map((f) => `${f.functionName || "?"}@${f.lineNumber}:${f.columnNumber}`) });
+          break;
+        }
+        case "Runtime.consoleAPICalled":
+          if (p.type === "error" && report.consoleErrors.length < 20) report.consoleErrors.push(p.args.map((a) => a.value ?? a.description).join(" ").slice(0, 200));
+          break;
+      }
+    };
+    const evalJS = async (expression) => {
+      const r = await send("Runtime.evaluate", { expression, returnByValue: true });
+      return r.result && r.result.result ? r.result.result.value : null;
+    };
+    const key = (type, k, code, vk) => send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, text: type === "keyDown" ? k : undefined });
+    const mouse = (type, x, y) => send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: type === "mouseMoved" ? 0 : 1 });
+    const shot = async (step) => {
+      const r = await send("Page.captureScreenshot", { format: "png" });
+      const file = path.join(shots, `playable-${step}.png`);
+      if (r.result && r.result.data) { fs.writeFileSync(file, Buffer.from(r.result.data, "base64")); report.shots.push(file); }
+    };
+    const snap = async () => {
+      const s = JSON.parse((await evalJS(PLAY_SNAP_JS)) || "{}");
+      const c = labels();
+      const q = frames();
+      s.t = Date.now() - t0;
+      s.phase = phase;
+      s.bridge = { l: c.get("l") || 0, init: c.get("init") || 0, end: c.get("end") || 0, start: c.get("start") || 0, tracer: c.get("9") || 0, q: q.get("q") || 0 };
+      report.samples.push(s);
+      return s;
+    };
+    const tick = async () => { const s = await snap(); await sleep(1000); return s; };
+    const clickSpawn = async () => { const c = await evalJS(CLICK_TO_PLAY_JS); if (c) report.spawnClicks++; return c; };
+
+    await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
+    // the page keeps its anonymous session and preferences in localStorage (profileSeed); a fresh profile has none
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: RAF_HOOK });
+    await send("Page.navigate", { url: cfg.localUrl });
+    log("page loading");
+    await sleep(cfg.loadWaitMs);
+    for (let i = 0; i < 10 && (await evalJS(CONSENT_OPEN_JS)); i++) {
+      report.consent = !!(await evalJS(ACCEPT_JS)) || report.consent;
+      await sleep(2000);
+    }
+    await sleep(cfg.afterAcceptMs);
+    // The page seeks a lobby on its own after the accept. Quick Match from inside a lobby is "Find New Game" and the one-lobby
+    // server answers NoOtherLobby, so Quick Match is pressed only when the page has not sought yet (as the join does).
+    report.clicked = report.seeks ? `skipped: the page sought on its own (${report.seeks} seek before the click)` : await evalJS(CLICK_PLAY_JS);
+    log(`quick play: ${report.clicked}`);
+
+    // join: the spawn prompt ("CLICK TO PLAY") is clicked as a user would; the round is in when the local player is active
+    phase = "join";
+    let lastClick = 0;
+    const joinDeadline = Date.now() + PLAY.joinMs;
+    while (Date.now() < joinDeadline) {
+      const s = await tick();
+      if (s.inRound) { report.joined = true; break; }
+      if (s.clickToPlay && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
+    }
+    log(report.joined ? "in the round" : "not in the round");
+
+    // input: W held for two seconds, the mouse moved right for look, one left click for fire; state read before and after
+    if (report.joined) {
+      phase = "input";
+      const before = await snap();
+      await key("keyDown", "w", "KeyW", 87);
+      await sleep(500);
+      for (let i = 0; i < 8; i++) { await mouse("mouseMoved", 640 + i * 12, 360); await sleep(60); }
+      await mouse("mousePressed", 640, 360);
+      await sleep(150);
+      await mouse("mouseReleased", 640, 360);
+      await sleep(1500);
+      await key("keyUp", "w", "KeyW", 87);
+      await sleep(800);
+      report.input = { before, after: await snap() };
+    }
+
+    // the frame counter over 60 s of the round (the page keeps animating through the round)
+    phase = "frames";
+    const f0 = Date.now();
+    report.framesWindow = { startMs: f0 - t0 };
+    while (Date.now() - f0 < PLAY.frameMs) await tick();
+    report.framesWindow.endMs = Date.now() - t0;
+
+    // the round's end: the end screen (#endUI) is shown
+    phase = "round";
+    const roundDeadline = Date.now() + (report.joined ? PLAY.roundMs : PLAY.failedMs);
+    while (Date.now() < roundDeadline) {
+      const s = await tick();
+      if (s.endUI) { report.end = { t: s.t, bridgeEnd: s.bridge.end, bridgeInit: s.bridge.init }; break; }
+    }
+    log(report.end ? "end screen shown" : "no end screen");
+    if (report.end) await shot("end");
+
+    // the next round: a new init on the socket, the end screen gone, the local player active again
+    phase = "next";
+    if (report.end) {
+      const nextDeadline = Date.now() + (report.joined ? PLAY.nextMs : PLAY.failedMs);
+      while (Date.now() < nextDeadline) {
+        const s = await tick();
+        if (s.clickToPlay && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
+        if (s.inRound && !s.endUI && s.bridge.init > report.end.bridgeInit) { report.nextRound = { t: s.t, bridgeInit: s.bridge.init }; break; }
+      }
+    }
+    log(report.nextRound ? "next round in" : "no next round");
+    if (report.nextRound) await shot("next");
+    await shot("final");
+    phase = "done";
+    report.bridgeCounts = Object.fromEntries(labels());
+    report.bridgeArrows = Object.fromEntries(frames());
+    report.bridgeClosed = fs.existsSync(cfg.bridge.log)
+      ? fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /socket closed/.test(l)).slice(-10) : [];
+    ws.close();
+  } finally {
+    try { child.kill("SIGTERM"); } catch (e) { /* already gone */ }
+  }
+  report.phase = phase;
+  report.finishedAt = new Date().toISOString();
+  console.log(JSON.stringify(report, null, 2));
 }
 
-const cmds = { prepare, serve, check, join, help };
+function help() {
+  console.log(`usage: krunker-local.mjs prepare|serve|check|join|playable   (config: ${cfg._file})`);
+}
+
+const cmds = { prepare, serve, check, join, playable, help };
 if (!cmds[cmd]) { help(); process.exit(2); }
 Promise.resolve(cmds[cmd]()).catch((e) => { console.error("krunker-local:", e.message); process.exit(1); });

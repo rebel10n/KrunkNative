@@ -638,6 +638,13 @@ V10_NATIVE ?= 127.0.0.1:21015
 v10-bridge: build ## Run the v10 client bridge (C): ws://V10_BIND:V10_LISTEN/ws -> native V10_NATIVE (defaults 127.0.0.1:8081 -> 127.0.0.1:21015)
 	./$(DEBUG_DIR)/v10_bridge --v10-listen=$(V10_LISTEN) --bind=$(V10_BIND) --native=$(V10_NATIVE) $(ARGS)
 
+# The playability check (tools/krunker-local/playable.sh; doc: tools/krunker-local/README.md): the official v10.0.3 client
+# joins the local stack headless, plays a round with input and the next one, and the assertions (a)-(h) come from its report.
+# Env: KN_PLAYABLE_HOME, KN_PLAYABLE_ROUND_S (round length, default 90), KN_PLAYABLE_MAX_EXC (default 0).
+.PHONY: playable-check
+playable-check: build ## Playability check: the official client joins a local round, plays through its end and the next round (headless; exit 1 on a FAIL)
+	tools/krunker-local/playable.sh
+
 bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck + unit-test net-bridge, and test the WebRTC gateway when Go is installed
 	cd $(BRIDGE_DIR) && npm run typecheck && npm test
 	@if command -v go >/dev/null; then cd $(BRIDGE_DIR)/rtc && GOTOOLCHAIN=local go test ./...; else echo "go not installed, skipping net-bridge/rtc tests"; fi
