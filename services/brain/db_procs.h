@@ -147,8 +147,8 @@ extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MAT
 
 /* ---- the v10 lottery (db_lottery.c, 0348_lottery; lottery.c): the view, an entry, the settlement */
 extern const kn_proc P_LOTTERY_VIEW, P_LOTTERY_PARTICIPATE, P_LOTTERY_SETTLE;
-/* ---- the Junk-priced shop (db_shop.c, 0349_shop_junk; shop.c): the display and a purchase */
-extern const kn_proc P_SHOP_DISPLAY, P_SHOP_PURCHASE;
+/* ---- the Junk-priced shop (db_shop.c, 0349_shop_junk; shop.c): the display and a purchase; the bundles (0354) */
+extern const kn_proc P_SHOP_DISPLAY, P_SHOP_PURCHASE, P_SHOP_BUNDLES;
 /* ---- the signed-out guest's balance (db_guest.c, 0350_guest_profiles; guest.c, accounts.c guest_credit /
  * guest_claim): the view, a match's credit (once per match), the claim at login. Ids are checked in C. */
 extern const kn_proc P_GUEST_PROFILE, P_GUEST_CREDIT, P_GUEST_CLAIM;

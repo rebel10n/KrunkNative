@@ -141,8 +141,9 @@ def main():
         time.sleep(3)
         cmd("ui showWindow(14);windows[13].switchTab(5)", 3)  # the Store's Eterno Shop tab
         cmd("shot %s/1-eterno.png" % OUT, 1)
-        cmd("ui knKioShopBuy(%d,%d)" % (1000000 + crate, crate), 1)  # BUY on the Junk Crate card
-        m = wait_for(clog, r"\[junkshop\] bought product %d: junk (\S+)" % crate, 15)
+        # the Junk display ids are offset (db_shop.c SHOP_JUNK_BASE 100000): the product's node is 1000000 + id
+        cmd("ui knKioShopBuy(%d,%d)" % (1000000 + crate + 100000, crate + 100000), 1)  # BUY on the Junk Crate card
+        m = wait_for(clog, r"\[junkshop\] bought product %d: junk (\S+)" % (crate + 100000), 15)
         check(m is not None and m.group(1) == "7.50", "client: BUY on the Junk Crate charges 2.50 Junk (balance %r)" % (m and m.group(1)))
         cmd("shot %s/2-bought.png" % OUT, 1)
         check(not wait_for(clog, r"\[junkshop\] purchase of product", 0.1), "client: the purchase was not refused")

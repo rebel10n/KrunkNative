@@ -11,5 +11,8 @@
 void junk_shop_render(StrBuf *sb);
 // knKioShopBuy on Box Office (kio_store.c): the product's purchase, one unit
 void junk_shop_buy(int product_id);
+// the store home's bundle grid (store_ui.c v10_store_home): the brain's GET /api/shop/bundles rows as v10's bundle
+// cards (svelte-lri212, deob-10.0.3.js 144642); nothing is drawn while they load or when none are published
+void junk_shop_bundles_render(StrBuf *sb);
 
 #endif

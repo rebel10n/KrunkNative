@@ -50,6 +50,7 @@ if not DB and DRIVER == "postgres":
 SCHEMA = "kn_test_shop_%d" % os.getpid()
 SECRET = "kn-shop-test-%d" % os.getpid()
 FAILS = []
+JUNK_BASE = 100000  # db_shop.c SHOP_JUNK_BASE: a Junk product's display id is shop_products.id + this
 DBCFG = {}
 
 
@@ -193,7 +194,7 @@ async def scenario(port):
         b_id, b_tok = await register(sock_b, bob)
         check(a_id > 0 and b_id > 0, "two accounts registered")
 
-        status, body = http(port, "GET", "/api/shop/displays?tag=limited")
+        status, body = http(port, "GET", "/api/shop/displays?tag=nothing")
         check(status == 404 and err_of(body) == "No display found with this tag", "a tag with no product is 404: %s %s" % (status, body))
 
         query("INSERT INTO shop_products (display_tag, name, description, image_url, price_currency_id, price_amount, purchase_limit, active, sort_order)"
@@ -205,6 +206,7 @@ async def scenario(port):
         a = one("SELECT id FROM shop_products WHERE name = 'Shop Test Crate'")
         b = one("SELECT id FROM shop_products WHERE name = 'Shop Test Pack'")
         c = one("SELECT id FROM shop_products WHERE name = 'Shop Test Retired'")
+        ja, jb, jc = a + JUNK_BASE, b + JUNK_BASE, c + JUNK_BASE  # the display and purchase ids
         query("INSERT INTO shop_product_contents (product_id, ord, content_type, skin_id, quantity) VALUES (%d, 0, 'skin', 7438, 1)" % a)
         query("INSERT INTO shop_product_contents (product_id, ord, content_type, skin_id, quantity) VALUES (%d, 0, 'skin', 7439, 2)" % b)
         query("INSERT INTO shop_product_contents (product_id, ord, content_type, skin_id, quantity) VALUES (%d, 1, 'skin', 7440, 1)" % b)
@@ -213,10 +215,13 @@ async def scenario(port):
         status, body = http(port, "GET", "/api/shop/displays?tag=limited")
         data = body.get("data", {}) if isinstance(body, dict) else {}
         products = data.get("products", {})
-        check(status == 200 and set(products) == {str(a), str(b)},
-              "the display lists the two active products (not the retired one): %s %s" % (status, sorted(products)))
-        pa = products.get(str(a), {})
-        pb = products.get(str(b), {})
+        junk = {k: v for k, v in products.items() if int(k) >= JUNK_BASE}
+        official = {k: v for k, v in products.items() if int(k) < JUNK_BASE}
+        check(status == 200 and set(junk) == {str(ja), str(jb)} and len(official) == 26,
+              "the display lists the two active Junk products (not the retired one) and the 26 official ones: %s %s"
+              % (status, sorted(products)))
+        pa = products.get(str(ja), {})
+        pb = products.get(str(jb), {})
         price = (pa.get("prices") or [{}])[0]
         check(price.get("type") == "virtual" and price.get("virtual") == {"amount": 250, "currency_id": 2, "currency": "JNK"},
               "a Junk price is v10's virtual block in hundredths: %s" % price.get("virtual"))
@@ -225,13 +230,14 @@ async def scenario(port):
               "the product carries its contents, its per-user limit and a zero purchase count")
         check(pb.get("purchase_limit") is None and len(pb.get("contents", [])) == 2,
               "a product with no limit has purchase_limit null and both contents")
-        children = [ch.get("product_id") for ch in data.get("children", [])]
-        check(children == [a, b] and all(ch.get("type") == "product" for ch in data.get("children", [])),
-              "the display's children are the products in sort order: %s" % children)
+        junk_nodes = [ch for ch in data.get("children", []) if ch.get("product_id", 0) >= JUNK_BASE]
+        children = [ch.get("product_id") for ch in junk_nodes]
+        check(children == [ja, jb] and all(ch.get("type") == "product" for ch in junk_nodes),
+              "the Junk products are the display's last children, in sort order: %s" % children)
 
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": a, "quantity": 1})
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": ja, "quantity": 1})
         check(status == 401 and err_of(body) == "LoginRequired", "a purchase without a token is refused: %s %s" % (status, body))
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": a, "quantity": 1}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": ja, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Not enough Junk", "a purchase with no Junk is refused: %s %s" % (status, body))
         check(one("SELECT COUNT(*) FROM shop_purchases WHERE account_id = %d" % a_id) == 0
               and one("SELECT COUNT(*) FROM skin_transactions WHERE account_id = %d AND skin_id = 7438" % a_id) == 0,
@@ -239,7 +245,7 @@ async def scenario(port):
 
         err, _ = await node.op("junk_credit", id=a_id, amount=1000, reason="trigger")
         assert err is None, err
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": a, "quantity": 2}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": ja, "quantity": 2}, a_tok)
         d = body.get("data", {}) if isinstance(body, dict) else {}
         check(status == 200 and d.get("success") is True and d.get("price_paid") == 500 and d.get("currency_id") == 2
               and d.get("junk") == "5.00" and d.get("rewards") == [{"type": "skin", "skin_id": 7438, "amount": 2}],
@@ -250,13 +256,13 @@ async def scenario(port):
         check(one("SELECT COALESCE(SUM(delta), 0) FROM skin_transactions WHERE account_id = %d AND skin_id = 7438" % a_id) == 2,
               "two skins of 7438 are in the account (skin ledger)")
 
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": a, "quantity": 1}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": ja, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Purchase limit reached", "the per-account limit of 2 refuses a third: %s" % body)
         status, body = http(port, "GET", "/api/shop/displays?tag=limited", token=a_tok)
-        pa2 = body["data"]["products"][str(a)] if status == 200 else {}
+        pa2 = body["data"]["products"][str(ja)] if status == 200 else {}
         check(pa2.get("purchase_count") == 2, "the display counts the account's two crates: %s" % pa2.get("purchase_count"))
 
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": b, "quantity": 1}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": jb, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Not enough Junk", "a 10.00 pack with 5.00 Junk is refused: %s" % body)
         check(one("SELECT player_junk FROM players WHERE player_id = %d" % a_id) == 500
               and one("SELECT COUNT(*) FROM shop_purchases WHERE account_id = %d AND product_id = %d" % (a_id, b)) == 0,
@@ -264,25 +270,63 @@ async def scenario(port):
 
         err, _ = await node.op("junk_credit", id=a_id, amount=600, reason="trigger")
         assert err is None, err
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": b, "quantity": 1}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": jb, "quantity": 1}, a_tok)
         d = body.get("data", {}) if isinstance(body, dict) else {}
         check(status == 200 and d.get("junk") == "1.00" and d.get("rewards") == [
             {"type": "skin", "skin_id": 7439, "amount": 2}, {"type": "skin", "skin_id": 7440, "amount": 1}],
               "the pack costs 10.00 and grants both of its contents: %s %s" % (status, body))
 
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": c, "quantity": 1}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": jc, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Product not found", "a retired product is not sold: %s" % body)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 999999, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Product not found", "an unknown product is refused: %s" % body)
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": b, "quantity": 0}, a_tok)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": jb, "quantity": 0}, a_tok)
         check(status == 400 and err_of(body) == "Invalid quantity.", "a zero quantity is refused: %s" % body)
 
         check(one("SELECT COALESCE(SUM(amount), 0) FROM junk_transactions WHERE account_id = %d" % a_id)
               == one("SELECT player_junk FROM players WHERE player_id = %d" % a_id) == 100,
               "the ledger of the account sums to its balance (1.00)")
         status, body = http(port, "GET", "/api/shop/displays?tag=limited", token=b_tok)
-        check(status == 200 and body["data"]["products"][str(b)]["purchase_count"] == 0,
+        check(status == 200 and body["data"]["products"][str(jb)]["purchase_count"] == 0,
               "another account's purchase count is its own (zero)")
+
+        # the official "limited" products (0354_store_catalog: krunker.io's display, verbatim), read and refused
+        hovi = official.get("35", {})
+        check(hovi.get("name") == "Hovi" and hovi.get("prices") == [{"id": 36, "price_ref": "io.krunker.skin7994", "type": "virtual",
+              "virtual": {"amount": 100, "currency_id": 1, "currency": "KR"}, "available": True}]
+              and hovi.get("contents") == [{"id": 34, "type": "skin", "ref": "7994", "quantity": 1}]
+              and hovi.get("purchase_limit") == 1 and hovi.get("purchase_limit_scope") == "per_user"
+              and hovi.get("display_ids") == [37] and hovi.get("purchase_count") == 0,
+              "Hovi (35) is krunker.io's product as the display has it: %s" % hovi)
+        groza = official.get("26", {})
+        check((groza.get("prices") or [{}])[0].get("real") == {"price_usd": 2.99},
+              "a money product carries its USD price: %s" % groza.get("prices"))
+        dyn = [ch for ch in data.get("children", []) if ch.get("id") == 33]
+        check(dyn and dyn[0].get("type") == "dynamic" and dyn[0]["data"]["dynamic"]["steps"][0] == {"min_quantity": 500, "price_usd": 0.22}
+              and official.get("33", {}).get("display_ids") == [],
+              "the dynamic node keeps its quantity steps; a product with no display id carries none: %s" % dyn)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Not sold on Box Office", "an official product is not sold on Box Office: %s %s" % (status, body))
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 999, "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Product not found", "an unknown low id is refused: %s" % body)
+        check(one("SELECT COUNT(*) FROM shop_official_purchases WHERE account_id = %d" % a_id) == 0,
+              "a refused official purchase writes no purchase row")
+
+        # the store home's bundle grid (store_bundles; v10's ALL_BUNDLE_DATA keys). Nothing ships: the grid stays empty
+        status, body = http(port, "GET", "/api/shop/bundles")
+        check(status == 200 and body.get("data") == [], "no bundle is published, so the grid is empty: %s %s" % (status, body))
+        query("INSERT INTO store_bundles (id, name, price, original_price, discount_pct, skins, expiry, info, funds, junk, premium,"
+              " event_name, event_ends_at, active, sort_order)"
+              " VALUES (900001, 'Shop Test Bundle', 4.99, 9.99, 50, '7438,7439', NULL, 'Test info', 0, 0, 0, NULL, NULL, 1, 1)")
+        query("INSERT INTO store_bundles (id, name, price, original_price, discount_pct, skins, expiry, info, funds, junk, premium,"
+              " event_name, event_ends_at, active, sort_order)"
+              " VALUES (900002, 'Shop Test Retired Bundle', 1.0, NULL, NULL, '', NULL, '', 0, 0, 0, NULL, NULL, 0, 2)")
+        status, body = http(port, "GET", "/api/shop/bundles")
+        want = [{"ID": 900001, "NAME": "Shop Test Bundle", "PRICE": 4.99, "ORIGINAL_PRICE": 9.99, "DISCOUNT_PCT": 50,
+                 "SKINS": "7438,7439", "EXPIRY": None, "INFO": "Test info", "FUNDS": 0, "JUNK": 0, "PREMIUM": 0,
+                 "EVENT_NAME": None, "EVENT_ENDS_AT": None}]
+        check(status == 200 and body.get("data") == want,
+              "a published bundle is listed in v10's ALL_BUNDLE_DATA keys and an inactive one is not: %s" % body)
 
 
 def start_brain(env, log_path, extra):

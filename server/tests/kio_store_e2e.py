@@ -120,7 +120,7 @@ def eterno(t, label):
 
 def script():
     s = ["0 menu"]
-    s += eterno(500, "bo1")  # 1. Box Office
+    s += eterno(500, "bo1")  # 1. Box Office (its brain display loads later: see check 4)
     s += ["2500 call closWind",
           '2600 call krunkerJoin "%s"' % kae.GAME_PICK,
           "7000 vis @g " + SIGNED]
@@ -224,9 +224,10 @@ def shop_requests(stub, until=None):
 
 def checks(text, stub):
     bo1 = text_of(text, "bo1")
-    check("1. Box Office: the Eterno Shop is Box Office's empty state", text_of(text, "bo1err") == "No offers right now" and nodes(text, "bo1empty") == 1,
-          text_of(text, "bo1err"))
-    check("1. ... with no krunker.io product", not words(text, "bo1", WORDS) and nodes(text, "bo1front") == 0, words(text, "bo1", WORDS))
+    # Box Office's own catalogue is the brain's "limited" display (seeded with krunker.io's public products, 0354_store_catalog);
+    # the krunker.io stub's own product (Weekend Picks) never reaches it, before or after the game (check 4)
+    check("1. Box Office: the Eterno Shop never shows the krunker.io stub's product (Weekend Picks)", not words(text, "bo1", ["Weekend"]),
+          words(text, "bo1", ["Weekend"]))
 
     check("2. joining the official game makes krunker.io the active backend", "[account] active account backend: krunker.io" in text,
           re.findall(r"\[account\] active.*", text)[:3])
@@ -269,7 +270,8 @@ def checks(text, stub):
 
     check("4. leaving switches back to Box Office", "[account] active account backend: krunk.io" in text, re.findall(r"\[account\] active.*", text)[:4])
     bo2 = text_of(text, "bo2")
-    check("4. the Eterno Shop is Box Office's again, exactly as before the game", bo2 == bo1 and nodes(text, "bo2front") == 0 and nodes(text, "bo2empty") == 1 and text_of(text, "bo2err") == "No offers right now",
+    check("4. the Eterno Shop is Box Office's again: the brain's products, as before the game", nodes(text, "bo2front") == 1
+          and nodes(text, "bo2empty") == 0 and words(text, "bo2", ["Hovi", "Mug"]) == ["Hovi", "Mug"] and not words(text, "bo2", ["Weekend"]),
           (bo1[-120:], bo2[-120:]))
     after = log_mark(text, "bo2")
     check("4. no krunker.io shop request after leaving", "[kio-store] shop/" not in after and "[kio-store] ranked/" not in after,

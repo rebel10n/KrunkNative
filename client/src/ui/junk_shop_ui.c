@@ -10,9 +10,11 @@
 #include <v10_menu.h>
 #include <ui_logic.h>
 #include <i18n.h>
+#include <html_dom.h>
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SHOP_TTL_MS 60000 // the display's cache (v10's shop store keeps it until a purchase)
@@ -46,6 +48,80 @@ void junk_shop_render(StrBuf *sb) {
     const cJSON *products = cJSON_IsObject(data) ? cJSON_GetObjectItem(data, "products") : NULL;
     if (!products || cJSON_GetArraySize(products) == 0) return; // loading, no product, or an error: nothing to draw
     kio_store_display_html(sb, data);
+}
+
+// the bundle card's text: the brain's rows are staff data, so the markup is escaped
+static void esc_into(StrBuf *sb, const char *s) {
+    for (; s && *s; s++) {
+        switch (*s) {
+        case '<': sb_append(sb, "&lt;"); break;
+        case '>': sb_append(sb, "&gt;"); break;
+        case '&': sb_append(sb, "&amp;"); break;
+        case '"': sb_append(sb, "&quot;"); break;
+        case '\'': sb_append(sb, "&#39;"); break;
+        default: sb_appendf(sb, "%c", *s); break;
+        }
+    }
+}
+
+static const char *bundle_text(const cJSON *b, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(b, key);
+    return cJSON_IsString(v) ? v->valuestring : "";
+}
+
+static double bundle_num(const cJSON *b, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(b, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+#define BUNDLES_TTL_MS 60000
+
+void junk_shop_bundles_render(StrBuf *sb) {
+    const V10Req *r = v10_get("/api/shop/bundles", BUNDLES_TTL_MS);
+    const cJSON *data = r && r->status == 200 && r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
+    if (!cJSON_IsArray(data)) return; // loading, or an error: nothing to draw
+    const cJSON *b;
+    cJSON_ArrayForEach(b, data) {
+        const cJSON *id = cJSON_GetObjectItem(b, "ID");
+        if (!cJSON_IsNumber(id)) continue;
+        char art[320];
+        char path[64];
+        snprintf(path, sizeof path, "img/backgrounds/bundles/b_%d.png", (int) id->valuedouble);
+        html_dom_asset_url(path, art, sizeof art);
+        const double price = bundle_num(b, "PRICE");
+        const double disc = bundle_num(b, "DISCOUNT_PCT");
+        const double orig = bundle_num(b, "ORIGINAL_PRICE");
+        const int discounted = disc > 0;
+        sb_appendf(sb, "<div class=\"bundle-card svelte-lri212\" style=\"background-image: url(%s); background-repeat: no-repeat; background-size: cover;\">", art);
+        if (discounted) sb_appendf(sb, "<div class=\"bundle-discount-label svelte-lri212\">-%d%%</div>", (int) (disc + 0.5));
+        sb_append(sb, "<div class=\"bundle-icon svelte-lri212\" role=\"button\" tabindex=\"0\"><div class=\"bundle-item-name svelte-lri212\">");
+        esc_into(sb, bundle_text(b, "NAME"));
+        sb_append(sb, "</div></div>");
+        // the skins (SKINS: comma-separated indices), four thumbnails and "+N" for the rest
+        sb_append(sb, "<div class=\"bundle-highlights svelte-lri212\">");
+        const char *skins = bundle_text(b, "SKINS");
+        int shown = 0, total = 0;
+        for (const char *p = skins; *p;) {
+            char *end = NULL;
+            const long idx = strtol(p, &end, 10);
+            if (end == p) break;
+            total++;
+            if (shown < 4) {
+                char thumb[320];
+                store_skin_preview((int) idx, thumb, sizeof thumb);
+                sb_appendf(sb, "<div class=\"bundle-item-req svelte-lri212\" style=\"background-image: url(%s)\"></div>", thumb);
+                shown++;
+            }
+            p = end;
+            while (*p == ',' || *p == ' ') p++;
+        }
+        if (total > shown) sb_appendf(sb, "<div class=\"bundle-item-more svelte-lri212\">+%d</div>", total - shown);
+        sb_append(sb, "</div>");
+        if (discounted && orig > 0) sb_appendf(sb, "<div class=\"bundle-original-price svelte-lri212\">$%.2f</div>", orig);
+        // BUY is v10's button; Box Office sells no bundle yet, so the button draws and sends nothing
+        sb_appendf(sb, "<div class=\"bundle-buy-btn%s svelte-lri212\" role=\"button\" tabindex=\"0\"><div class=\"bundle-buy-btn-text svelte-lri212\">BUY $%.2f</div></div></div>",
+                   discounted ? " bundle-buy-btn-discount" : "", price);
+    }
 }
 
 void junk_shop_buy(const int product_id) {

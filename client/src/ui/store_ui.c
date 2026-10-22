@@ -1211,23 +1211,36 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
     I18N_F(spin_name, "windows.store.spin", "{0} Spin", hw->name);
     sb_appendf(sb, " <div class=\"heroic-spin-name svelte-lri212\">%s <div class=\"heroic-spin-price svelte-lri212\" style=\"color: %s !important;\">%d KR <div class=\"ticket-img-sep svelte-lri212\">|</div> <img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 56px !important;\" src=\"%s\"></div></div> <div class=\"heroic-spin-img svelte-lri212\" style=\"background-image: url(%s);\"></div> <div class=\"heroic-img-grad svelte-lri212\" style=\"margin-left: 0 !important; background-image: linear-gradient(transparent, %s30);\"></div></div> ",
                spin_name, col, hw->price, ticket, thumb, col);
-    // bundles (bundleData): none without the store API
-    sb_append(sb, "<div class=\"bundle-holder svelte-lri212\"><div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn disabled svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow svelte-lri212\"></div></div></div> <div class=\"bundleCols svelte-lri212\"></div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
+    // bundles (bundleData): the brain's rows (GET /api/shop/bundles, junk_shop_ui.c); the grid is empty while none are published
+    sb_append(sb, "<div class=\"bundle-holder svelte-lri212\"><div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn disabled svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow svelte-lri212\"></div></div></div> <div class=\"bundleCols svelte-lri212\">");
+    junk_shop_bundles_render(sb);
+    sb_append(sb, "</div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
 }
 
 // Prize Wheels: wheels 0 (Starter) and 2 (Heroic), not hidden, not locked (store.js data; the
 // dated wheels of v10's gapi /data/spins are hidden or over)
+// v10's Prize Wheels tab (deob-10.0.3.js 145133): only wheels 0 and 2, not hidden, not locked, and either
+// live (no dates, or startDate < now <= endDate: iíîíîïî, 28912) or inside the display window
+// (displayDate <= now < startDate and now < endDate, 145133). The Free KR wheel is hidden on every platform.
+static int wheel_listed_v10(const int i, const UiWheel *w) {
+    if (i != 0 && i != 2) return 0;
+    if (w->hide || w->locked) return 0;
+    if (!w->src) return 1;
+    const int64_t now = (int64_t) time(NULL) * 1000;
+    const int64_t s = w->src->start_ms, e = w->src->end_ms, d = w->src->display_ms;
+    const int live = (!s || now > s) && (!e || now <= e);
+    const int window = d && s && now >= d && now < s && (!e || now < e);
+    return live || window;
+}
+
 static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
     int tickets = 0;
     tickets = owned_tickets();
     sb_appendf(sb, "<div class=\"prize-wheels-tab svelte-5s5opu\"><div class=\"prize-wheels-header svelte-5s5opu\"><div class=\"prize-wheels-sub svelte-5s5opu\">%s</div> <div class=\"view-tickets-btn svelte-5s5opu\"><button class=\"main-button svelte-whnh40 main-button-slim\" type=\"button\" onclick=\"playSelect();windows[13].viewTickets()\">%s<span class=\"ticket-count-sep svelte-5s5opu\"></span><span class=\"ticket-count-num svelte-5s5opu\">%d</span></button></div></div> <div class=\"prize-wheel-table svelte-5s5opu\">",
                I18N("windows.store.wheels.sub", "Try your luck and spin for a chance to win some new skins!"), I18N("windows.store.wheels.viewTickets", "View Tickets"), tickets);
-    // v10: wheels 0 and 2, and the dated ones while they run (not hidden / locked; the Free KR
-    // wheel only off mobile, which it is hidden on anyway)
     for (int i = 0; i < wheel_count(); i++) {
         const UiWheel *w = wheel_at(i);
-        const int dated = w->src && (w->src->start_ms || w->src->end_ms);
-        if (!(i == 0 || i == 2 || (dated && !w->hide && !w->locked))) continue;
+        if (!wheel_listed_v10(i, w)) continue;
         const char *col = w->head_col;
         int locked = !acc || (w->free && acc->level < w->min_lvl);
         int sho_kr = 1;

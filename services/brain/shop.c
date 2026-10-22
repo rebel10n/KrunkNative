@@ -40,6 +40,7 @@ static int db_ready(void) { return S.b && S.b->db && S.enabled; }
 typedef struct Pending {
     kn_http_req *req;
     int purchase;            /* 0 display, 1 purchase */
+    int bundles;             /* 1: P_SHOP_BUNDLES (no account, no tag) */
     int64_t account;
     int64_t product;
     int64_t quantity;
@@ -68,7 +69,9 @@ static void on_db(kn_db_result *res, void *ud) {
 static void run_db(Pending *q) {
     char acc[24], prod[24], qty[24];
     snprintf(acc, sizeof acc, "%lld", (long long) q->account);
-    if (q->purchase) {
+    if (q->bundles) {
+        kn_db_call(S.b->db, &P_SHOP_BUNDLES, KN_DB_ARGS("1"), on_db, q);
+    } else if (q->purchase) {
         snprintf(prod, sizeof prod, "%lld", (long long) q->product);
         snprintf(qty, sizeof qty, "%lld", (long long) q->quantity);
         kn_db_call(S.b->db, &P_SHOP_PURCHASE, KN_DB_ARGS(acc, prod, qty), on_db, q);
@@ -162,11 +165,29 @@ static void h_purchase(kn_http_req *req, void *ud) {
     cJSON_Delete(args);
 }
 
+/* GET /api/shop/bundles: the store's bundle grid (v10's ALL_BUNDLE_DATA rows; public, no account) */
+static void h_bundles(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!db_ready()) {
+        reply_error(req, 503, "ShopUnavailable");
+        return;
+    }
+    Pending *q = calloc(1, sizeof *q);
+    if (!q) {
+        reply_error(req, 500, "internal");
+        return;
+    }
+    q->req = req;
+    q->bundles = 1;
+    run_db(q);
+}
+
 int shop_init(Brain *b) {
     S.b = b;
     S.enabled = kn_config_bool(b->cfg, "brain.shop.enabled", 1);
     kn_http_route(b->http, "GET", "/api/shop/displays", h_display, b);
     kn_http_route(b->http, "POST", "/api/shop/purchase", h_purchase, b);
+    kn_http_route(b->http, "GET", "/api/shop/bundles", h_bundles, b);
     /* the v10 root paths (v10.js 26520-26535) */
     kn_http_route(b->http, "GET", "/shop/displays/:tag", h_display, b);
     kn_http_route(b->http, "GET", "/shop/displays", h_display, b);

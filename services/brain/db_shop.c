@@ -14,6 +14,11 @@
  *   junk_spend (reason "shop"; "Not enough Junk" writes nothing), the contents are granted through
  *   db_add_skin (source "shop"), and the purchase row is written, all in one transaction.
  *   Refused: "Product not found", "Invalid quantity.", "Purchase limit reached".
+ * The "limited" display also carries the official products of krunker.io's display (0354_store_catalog,
+ * shop_official_products), verbatim, first; their ids are krunker.io's and Box Office's Junk products' display
+ * ids are shop_products.id + SHOP_JUNK_BASE, so the two never share a key. A purchase below the offset is an
+ * official product and is refused "Not sold on Box Office" (Box Office sells no money or KR product yet).
+ * P_SHOP_BUNDLES () -> the store's bundle rows (store_bundles, 0354), as v10's ALL_BUNDLE_DATA keys (GET /api/shop/bundles).
  */
 #include "db_procs.h"
 
@@ -28,6 +33,9 @@
 #define PI(i) pint(P(i))
 #define SHOP_MAX_QUANTITY 100
 #define SHOP_NODE_BASE 1000000 /* the product nodes' display ids (the front is 1) */
+/* the Junk-priced products' display ids are shop_products.id + this: the official "limited" products keep krunker.io's
+ * ids (0354_store_catalog, all below it), so the two never share a key; a purchase below it is krunker.io's */
+#define SHOP_JUNK_BASE 100000
 
 static int64_t pint(const char *s) { return s ? strtoll(s, NULL, 10) : 0; }
 
@@ -49,23 +57,117 @@ static int64_t bought_so_far(Dbx *x, const int64_t account, const int64_t produc
 
 /* ------------------------------------------------------------------ display */
 
+static double jnum(const cJSON *o, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(o, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+/* the official "limited" products (0354_store_catalog: krunker.io's display, verbatim): their nodes and
+ * products go in first, under the front. A product's display id is its node's id (v10's display_ids), so
+ * the shop reads them the way it reads krunker.io's display. Returns the count (0 with dbx_failed on error). */
+static int64_t official_products(Dbx *x, const char *tag, const int64_t account, cJSON *children, cJSON *products) {
+    cJSON *rows = dbx_rows(x, SQL(.any = "SELECT id AS id__i, node_id AS node__i, node_order AS ord__i, node_type,"
+                                         " node_data, name, description, image_url, price_id AS price_id__i, price_ref,"
+                                         " price_type, price_usd AS usd__f, price_amount AS amount__i,"
+                                         " price_currency_id AS currency_id__i, price_currency, purchase_limit AS limit__i,"
+                                         " purchase_limit_scope, display_id AS display__i FROM shop_official_products"
+                                         " WHERE display_tag = $1 AND active = 1 ORDER BY node_order, id"),
+                           KN_DB_ARGS(tag));
+    if (dbx_failed(x)) {
+        cJSON_Delete(rows);
+        return 0;
+    }
+    int64_t count = 0;
+    for (int i = 0; rows && i < cJSON_GetArraySize(rows); i++) {
+        const cJSON *row = cJSON_GetArrayItem(rows, i);
+        const int64_t id = jint(row, "id");
+        char key[24];
+        snprintf(key, sizeof key, "%lld", (long long) id);
+        const char *text = jtext(row, "node_data");
+        cJSON *node_data = kn_json_parse(text, strlen(text));
+        if (!node_data) node_data = cJSON_CreateObject();
+        const char *ptype = jtext(row, "price_type");
+        cJSON *pr = cJSON_CreateObject();
+        cJSON_AddNumberToObject(pr, "id", (double) id);
+        cJSON_AddStringToObject(pr, "name", jtext(row, "name"));
+        cJSON_AddStringToObject(pr, "description", jtext(row, "description"));
+        cJSON_AddStringToObject(pr, "image_url", jtext(row, "image_url"));
+        cJSON_AddTrueToObject(pr, "active");
+        cJSON_AddTrueToObject(pr, "available");
+        cJSON *price = cJSON_CreateObject();
+        cJSON_AddNumberToObject(price, "id", (double) jint(row, "price_id"));
+        cJSON_AddStringToObject(price, "price_ref", jtext(row, "price_ref"));
+        cJSON_AddStringToObject(price, "type", ptype);
+        if (!strcmp(ptype, "real")) {
+            cJSON *real = cJSON_CreateObject();
+            cJSON_AddNumberToObject(real, "price_usd", jnum(row, "usd"));
+            cJSON_AddItemToObject(price, "real", real);
+        } else {
+            cJSON *virt = cJSON_CreateObject();
+            cJSON_AddNumberToObject(virt, "amount", (double) jint(row, "amount"));
+            cJSON_AddNumberToObject(virt, "currency_id", (double) jint(row, "currency_id"));
+            cJSON_AddStringToObject(virt, "currency", jtext(row, "price_currency"));
+            cJSON_AddItemToObject(price, "virtual", virt);
+        }
+        cJSON_AddTrueToObject(price, "available");
+        cJSON *prices = cJSON_CreateArray();
+        cJSON_AddItemToArray(prices, price);
+        cJSON_AddItemToObject(pr, "prices", prices);
+
+        cJSON *contents = dbx_rows(x, SQL(.any = "SELECT content_id AS id__i, content_type AS type, ref,"
+                                                  " quantity AS quantity__i FROM shop_official_contents"
+                                                  " WHERE product_id = $1 ORDER BY ord"),
+                                   KN_DB_ARGS(I64S(id)));
+        if (dbx_failed(x)) {
+            cJSON_Delete(contents);
+            cJSON_Delete(node_data);
+            cJSON_Delete(pr);
+            cJSON_Delete(rows);
+            return 0;
+        }
+        cJSON_AddItemToObject(pr, "contents", contents ? contents : cJSON_CreateArray());
+
+        const int64_t limit = jint(row, "limit");
+        if (limit > 0) {
+            cJSON_AddNumberToObject(pr, "purchase_limit", (double) limit);
+            cJSON_AddStringToObject(pr, "purchase_limit_scope", jtext(row, "purchase_limit_scope"));
+        } else {
+            cJSON_AddNullToObject(pr, "purchase_limit");
+        }
+        const int64_t bought = account > 0 ? dbx_int(x, SQL(.any = "SELECT COALESCE(SUM(quantity), 0) FROM shop_official_purchases"
+                                                                   " WHERE account_id = $1 AND product_id = $2"),
+                                                     KN_DB_ARGS(I64S(account), I64S(id)), 0) : 0;
+        if (dbx_failed(x)) {
+            cJSON_Delete(node_data);
+            cJSON_Delete(pr);
+            cJSON_Delete(rows);
+            return 0;
+        }
+        cJSON_AddNumberToObject(pr, "purchase_count", (double) bought);
+        cJSON *dids = cJSON_CreateArray();
+        const cJSON *dv = cJSON_GetObjectItem(row, "display");
+        if (cJSON_IsNumber(dv)) cJSON_AddItemToArray(dids, cJSON_CreateNumber(dv->valuedouble)); // NULL: no display id
+        cJSON_AddItemToObject(pr, "display_ids", dids);
+
+        cJSON *node = cJSON_CreateObject();
+        cJSON_AddNumberToObject(node, "id", (double) jint(row, "node"));
+        cJSON_AddNumberToObject(node, "parent_id", 1);
+        cJSON_AddNumberToObject(node, "order", (double) jint(row, "ord"));
+        cJSON_AddStringToObject(node, "type", jtext(row, "node_type"));
+        cJSON_AddItemToObject(node, "data", node_data);
+        cJSON_AddNumberToObject(node, "product_id", (double) id);
+        cJSON_AddItemToArray(children, node);
+        cJSON_AddItemToObject(products, key, pr);
+        count++;
+    }
+    cJSON_Delete(rows);
+    return count;
+}
+
 static kn_db_result *run_display(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const char *tag = P(0) && *P(0) ? P(0) : "limited";
     const int64_t account = PI(1);
-    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT id AS id__i, name, description, image_url, price_amount AS price__i,"
-                                          " purchase_limit AS limit__i FROM shop_products"
-                                          " WHERE display_tag = $1 AND active = 1 ORDER BY sort_order, id"),
-                           KN_DB_ARGS(tag));
-    if (dbx_failed(&x)) {
-        cJSON_Delete(rows);
-        return dbx_finish(&x, NULL);
-    }
-    if (!rows || cJSON_GetArraySize(rows) == 0) {
-        cJSON_Delete(rows);
-        dbx_refuse(&x, "No display found with this tag");
-        return dbx_finish(&x, NULL);
-    }
     cJSON *display = cJSON_CreateObject();
     cJSON *children = cJSON_CreateArray();
     cJSON *products = cJSON_CreateObject();
@@ -73,11 +175,39 @@ static kn_db_result *run_display(kn_dbconn *c, int n, const char *const *p) {
     cJSON_AddStringToObject(display, "type", "front");
     cJSON_AddNumberToObject(display, "order", 0);
     cJSON_AddItemToObject(display, "data", cJSON_CreateObject());
-    for (int i = 0; i < cJSON_GetArraySize(rows); i++) {
+    const int64_t official = official_products(&x, tag, account, children, products);
+    if (dbx_failed(&x)) {
+        cJSON_Delete(display);
+        cJSON_Delete(children);
+        cJSON_Delete(products);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT id AS id__i, name, description, image_url, price_amount AS price__i,"
+                                          " purchase_limit AS limit__i FROM shop_products"
+                                          " WHERE display_tag = $1 AND active = 1 ORDER BY sort_order, id"),
+                           KN_DB_ARGS(tag));
+    if (dbx_failed(&x)) {
+        cJSON_Delete(rows);
+        cJSON_Delete(display);
+        cJSON_Delete(children);
+        cJSON_Delete(products);
+        return dbx_finish(&x, NULL);
+    }
+    if (official == 0 && (!rows || cJSON_GetArraySize(rows) == 0)) {
+        cJSON_Delete(rows);
+        cJSON_Delete(display);
+        cJSON_Delete(children);
+        cJSON_Delete(products);
+        dbx_refuse(&x, "No display found with this tag");
+        return dbx_finish(&x, NULL);
+    }
+    for (int i = 0; rows && i < cJSON_GetArraySize(rows); i++) {
         const cJSON *row = cJSON_GetArrayItem(rows, i);
-        const int64_t id = jint(row, "id");
+        const int64_t raw = jint(row, "id");
+        const int64_t id = raw + SHOP_JUNK_BASE; // the display id (see SHOP_JUNK_BASE)
         char key[24];
         snprintf(key, sizeof key, "%lld", (long long) id);
+        if (cJSON_HasObjectItem(products, key)) continue; // unreachable with the offset; kept as a guard
         cJSON *pr = cJSON_CreateObject();
         cJSON_AddNumberToObject(pr, "id", (double) id);
         cJSON_AddStringToObject(pr, "name", jtext(row, "name"));
@@ -104,7 +234,7 @@ static kn_db_result *run_display(kn_dbconn *c, int n, const char *const *p) {
 
         cJSON *contents = dbx_rows(&x, SQL(.any = "SELECT skin_id AS ref__i, quantity AS quantity__i FROM shop_product_contents"
                                                   " WHERE product_id = $1 ORDER BY ord"),
-                                   KN_DB_ARGS(I64S(id)));
+                                   KN_DB_ARGS(I64S(raw)));
         if (dbx_failed(&x)) {
             cJSON_Delete(contents);
             cJSON_Delete(pr);
@@ -132,7 +262,7 @@ static kn_db_result *run_display(kn_dbconn *c, int n, const char *const *p) {
         const int64_t limit = jint(row, "limit");
         if (limit > 0) cJSON_AddNumberToObject(pr, "purchase_limit", (double) limit);
         else cJSON_AddNullToObject(pr, "purchase_limit");
-        cJSON_AddNumberToObject(pr, "purchase_count", (double) (account > 0 ? bought_so_far(&x, account, id) : 0));
+        cJSON_AddNumberToObject(pr, "purchase_count", (double) (account > 0 ? bought_so_far(&x, account, raw) : 0));
         cJSON_AddStringToObject(pr, "purchase_limit_scope", "per_user");
         cJSON *dids = cJSON_CreateArray();
         cJSON_AddItemToArray(dids, cJSON_CreateNumber(1));
@@ -149,7 +279,7 @@ static kn_db_result *run_display(kn_dbconn *c, int n, const char *const *p) {
         cJSON *node = cJSON_CreateObject();
         cJSON_AddNumberToObject(node, "id", (double) (SHOP_NODE_BASE + id));
         cJSON_AddNumberToObject(node, "parent_id", 1);
-        cJSON_AddNumberToObject(node, "order", i);
+        cJSON_AddNumberToObject(node, "order", (double) cJSON_GetArraySize(children));
         cJSON_AddStringToObject(node, "type", "product");
         cJSON_AddItemToObject(node, "data", cJSON_CreateObject());
         cJSON_AddNumberToObject(node, "product_id", (double) id);
@@ -167,11 +297,21 @@ const kn_proc P_SHOP_DISPLAY = {"shop_display", NULL, run_display};
 
 static kn_db_result *run_purchase(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    const int64_t account = PI(0), product = PI(1), quantity = PI(2);
+    const int64_t account = PI(0), quantity = PI(2);
+    int64_t product = PI(1);
     if (quantity < 1 || quantity > SHOP_MAX_QUANTITY) {
         dbx_refuse(&x, "Invalid quantity.");
         return dbx_finish(&x, NULL);
     }
+    if (product < SHOP_JUNK_BASE) {
+        // below the offset: krunker.io's official products (0354_store_catalog), which Box Office does not sell yet
+        const int64_t official = dbx_int(&x, SQL(.any = "SELECT COUNT(*) FROM shop_official_products WHERE id = $1"),
+                                         KN_DB_ARGS(I64S(product)), 0);
+        if (dbx_failed(&x)) return dbx_finish(&x, NULL);
+        dbx_refuse(&x, official > 0 ? "Not sold on Box Office" : "Product not found");
+        return dbx_finish(&x, NULL);
+    }
+    product -= SHOP_JUNK_BASE;
     // the product row lock: two purchases of the last unit queue here
     if (dbx_exec(&x, SQL(.any = "UPDATE shop_products SET sort_order = sort_order WHERE id = $1"), KN_DB_ARGS(I64S(product))) < 0)
         return dbx_finish(&x, NULL);
@@ -242,3 +382,55 @@ static kn_db_result *run_purchase(kn_dbconn *c, int n, const char *const *p) {
     return dbx_json(&x, "shop_purchase", o);
 }
 const kn_proc P_SHOP_PURCHASE = {"shop_purchase", NULL, run_purchase};
+
+/* ------------------------------------------------------------------ bundles */
+
+/* P_SHOP_BUNDLES () -> the rows v10 receives as ALL_BUNDLE_DATA (deob-10.0.3.js 111331 "abd", handler 242852),
+ * as an array of its keys: ID, NAME, PRICE, ORIGINAL_PRICE, DISCOUNT_PCT, SKINS, EXPIRY, INFO, FUNDS, JUNK,
+ * PREMIUM, EVENT_NAME, EVENT_ENDS_AT. The table (0354_store_catalog) is staff-published; none ships. */
+static kn_db_result *run_bundles(kn_dbconn *c, int n, const char *const *p) {
+    (void) n;
+    (void) p;
+    Dbx x = {c, NULL};
+    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT id AS id__i, name, price AS price__f, original_price AS original__f,"
+                                          " discount_pct AS discount__f, skins, expiry, info, funds AS funds__i,"
+                                          " junk AS junk__f, premium AS premium__i, event_name, event_ends_at"
+                                          " FROM store_bundles WHERE active = $1 ORDER BY sort_order, id"),
+                           KN_DB_ARGS("1"));
+    if (dbx_failed(&x)) {
+        cJSON_Delete(rows);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON *out = cJSON_CreateArray();
+    for (int i = 0; rows && i < cJSON_GetArraySize(rows); i++) {
+        const cJSON *row = cJSON_GetArrayItem(rows, i);
+        cJSON *b = cJSON_CreateObject();
+        cJSON_AddNumberToObject(b, "ID", (double) jint(row, "id"));
+        cJSON_AddStringToObject(b, "NAME", jtext(row, "name"));
+        cJSON_AddNumberToObject(b, "PRICE", jnum(row, "price"));
+        const cJSON *orig = cJSON_GetObjectItem(row, "original");
+        const cJSON *disc = cJSON_GetObjectItem(row, "discount");
+        const cJSON *exp = cJSON_GetObjectItem(row, "expiry");
+        const cJSON *ev = cJSON_GetObjectItem(row, "event_name");
+        const cJSON *evend = cJSON_GetObjectItem(row, "event_ends_at");
+        if (cJSON_IsNumber(orig)) cJSON_AddNumberToObject(b, "ORIGINAL_PRICE", orig->valuedouble);
+        else cJSON_AddNullToObject(b, "ORIGINAL_PRICE");
+        if (cJSON_IsNumber(disc)) cJSON_AddNumberToObject(b, "DISCOUNT_PCT", disc->valuedouble);
+        else cJSON_AddNullToObject(b, "DISCOUNT_PCT");
+        cJSON_AddStringToObject(b, "SKINS", jtext(row, "skins"));
+        if (cJSON_IsString(exp)) cJSON_AddStringToObject(b, "EXPIRY", exp->valuestring);
+        else cJSON_AddNullToObject(b, "EXPIRY");
+        cJSON_AddStringToObject(b, "INFO", jtext(row, "info"));
+        cJSON_AddNumberToObject(b, "FUNDS", (double) jint(row, "funds"));
+        cJSON_AddNumberToObject(b, "JUNK", jnum(row, "junk"));
+        cJSON_AddNumberToObject(b, "PREMIUM", (double) jint(row, "premium"));
+        if (cJSON_IsString(ev)) cJSON_AddStringToObject(b, "EVENT_NAME", ev->valuestring);
+        else cJSON_AddNullToObject(b, "EVENT_NAME");
+        if (cJSON_IsString(evend)) cJSON_AddStringToObject(b, "EVENT_ENDS_AT", evend->valuestring);
+        else cJSON_AddNullToObject(b, "EVENT_ENDS_AT");
+        cJSON_AddItemToArray(out, b);
+    }
+    cJSON_Delete(rows);
+    return dbx_json(&x, "shop_bundles", out);
+}
+const kn_proc P_SHOP_BUNDLES = {"shop_bundles", NULL, run_bundles};
