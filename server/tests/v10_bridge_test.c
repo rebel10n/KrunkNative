@@ -547,6 +547,7 @@ int main(void) {
     uint8_t sp[150];
     spawn_buf(sp, 2, 0, 1, 3, 1, 90, 1, 2, 3, 0, 0, "other");
     native_send(&g_native, NET_PACKET_SPAWN, sp, 150);
+    native_send(&g_native, NET_PACKET_SPAWN, sp, 150);
     WAIT_FOR(client_count("0") >= 1);
     KrunkerFrame addo;
     int found_other = 0;
@@ -587,7 +588,6 @@ int main(void) {
     CHECK(client_get("start", 0, &st) && st.argc == 8 && vequal(&st.args[0], &KRUNKER_V_NUM(300)) && vequal(&st.args[7], &KRUNKER_V_NUM(4)) &&
           st.args[6].type == KRUNKER_NIL && vequal(&st.args[5], &KRUNKER_V_NUM(1)), "start is [300, 0, 0, 0, 0, 1, null, 4]");
     krunker_frame_free(&st);
-
     // the leaderboard (14, free for all) and its LEADER_STATS repeat (consumed)
     uint8_t board[257];
     memset(board, 0, sizeof board);
@@ -902,6 +902,63 @@ int main(void) {
         CHECK(v10_bridge_untranslated("END") == 0 && v10_bridge_untranslated("MODE_END") == 0, "END and MODE_END are translated, the session goes on");
     }
 
+    // the next round: the round change is the game state ENDED (gsc 5), then the next map's MAP_INFO (its MAP_REQUEST), the
+    // config, the networking, INIT for that map (the same v10 "init" again: the client runs its init for the new round),
+    // RANKED after it (net_send_init), and the map's MAP_DATA. Our respawn then starts the round (START again).
+    {
+        const uint8_t gsc_end[3] = {0x01, 0x09, 0x05};
+        native_send(&g_native, NET_PACKET_EXT, gsc_end, 3);
+        WAIT_FOR(client_count("gsc") == 2);
+        KrunkerFrame ge;
+        CHECK(client_get("gsc", 1, &ge) && ge.argc == 1 && vequal(&ge.args[0], &KRUNKER_V_NUM(5)), "gsc [5]: the round ended");
+        krunker_frame_free(&ge);
+
+        const char map2_text[] = "{\"name\":\"Second Map\",\"objects\":[]}";
+        const size_t map2_len = strlen(map2_text);
+        const uint32_t map2_hash = 0xbeef01;
+        uint8_t *mi2 = mk(44);
+        w_i32(mi2, 0, 4);
+        w_i32(mi2, 4, (int32_t)map2_hash);
+        w_i32(mi2, 8, (int32_t)map2_len);
+        w_str(mi2, 12, "Second Map");
+        native_send(&g_native, NET_PACKET_MAP_INFO, mi2, 44);
+        WAIT_FOR(native_count(NET_PACKET_MAP_REQUEST) == 2);
+        NFrame *req2 = native_nth(NET_PACKET_MAP_REQUEST, 1);
+        CHECK(req2 && req2->len == 4 && rd_i32_test(req2->payload, 0) == (int32_t)map2_hash, "MAP_REQUEST for the next round's map hash");
+
+        native_send(&g_native, NET_PACKET_GAME_CONFIG, chunk1, 8 + cut);
+        native_send(&g_native, NET_PACKET_GAME_CONFIG, chunk2, 8 + config_len - cut);
+        native_send(&g_native, NET_PACKET_NETWORK_DATA, network, 10);
+        uint8_t init2[18];
+        memcpy(init2, init, sizeof init2);
+        w_i32(init2, 3, 4); /* the next map's index */
+        native_send(&g_native, NET_PACKET_INIT, init2, sizeof init2);
+        native_send(&g_native, NET_PACKET_EXT, ranked_off, 3);
+        uint8_t *mc2n = mk(10 + map2_len);
+        w_i32(mc2n, 0, (int32_t)map2_hash); w_i32(mc2n, 4, 0); w_u16(mc2n, 8, (uint16_t)map2_len); memcpy(mc2n + 10, map2_text, map2_len);
+        native_send(&g_native, NET_PACKET_MAP_DATA, mc2n, 10 + map2_len);
+        free(mc2n);
+        WAIT_FOR(client_count("init") == 2);
+        KrunkerFrame ini2;
+        CHECK(client_get("init", 1, &ini2) && ini2.argc == 20, "the next round's init has 20 arguments");
+        if (ini2.argc == 20) {
+            const KrunkerValue *a = ini2.args;
+            CHECK(vequal(&a[0], &KRUNKER_V_NUM(4)), "the next round's init arg 0 is its map index");
+            CHECK(a[9].type == KRUNKER_MAP && is_str(map_get(&a[9], "data"), map2_text), "the next round's init arg 9: its map JSON");
+        }
+        krunker_frame_free(&ini2);
+        CHECK(v10_bridge_untranslated("MAP_INFO") == 0, "the round change is translated, no stop at MAP_INFO");
+
+        // our respawn in the next round: the START again (the bridge held the others' adds for it)
+        uint8_t sp_next[150];
+        spawn_buf(sp_next, 1, 1, 1, 4, 0, 100, 1, 2, 3, 0, 0, "me");
+        native_send(&g_native, NET_PACKET_SPAWN, sp_next, 150);
+        WAIT_FOR(client_count("start") == 2);
+        KrunkerFrame st2;
+        CHECK(client_get("start", 1, &st2) && st2.argc == 8, "start again in the next round");
+        krunker_frame_free(&st2);
+    }
+
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
         {0, 1, "noc"}, {1, 1, "unl"}, {2, 1, "fh"}, {7, 1, "frz"}, {1, 0, "unl"},
@@ -983,7 +1040,7 @@ int main(void) {
 
     // the stop is final: one init, one stop, one gv
     CHECK(v10_bridge_untranslated("CHEAT") == 1, "one stop at CHEAT borders");
-    CHECK(client_count("init") == 1, "one init");
+    CHECK(client_count("init") == 2, "two inits: the round's and the next round's");
     CHECK(client_count("gv") == 1, "one gv");
 
     // close: the client closes and the bridge drops the session

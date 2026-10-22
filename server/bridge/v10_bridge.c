@@ -801,6 +801,17 @@ static void flush_pending_end(V10Session *s) {
     finish_out(s, &o, "END");
 }
 
+/* a new round (the server's MAP_INFO after the init): the next map's config, networking, INIT and RANKED come after it
+ * (net_send_init), so the client gets the same v10 "init" for that map. Those are waited for again; START comes with our
+ * next active SPAWN, and the others' adds are held until then. */
+static void round_restart(V10Session *s) {
+    s->init_sent = 0;
+    s->started = 0;
+    s->have_config_text = 0;
+    s->network_received = 0;
+    s->ranked_received = 0;
+}
+
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
     if (s->closed) return;
     if (s->bridge->trace) {
@@ -819,7 +830,8 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     /* an END waits for the MODE_END that follows it: any other packet first ends it without an end table */
     if (s->pending_end && type != NET_PACKET_MODE_END) flush_pending_end(s);
     if (s->stopped) return;
-    const int ranked = type == NET_PACKET_EXT && n >= 3 && rd_u16(p, 0) == V10_EXT_RANKED;
+    if (s->init_sent && type == NET_PACKET_MAP_INFO) round_restart(s);
+    const int ranked =type == NET_PACKET_EXT && n >= 3 && rd_u16(p, 0) == V10_EXT_RANKED;
     const int init_part = type == NET_PACKET_MAP_DATA || type == NET_PACKET_GAME_CONFIG || type == NET_PACKET_NETWORK_DATA || ranked;
     if (s->have_pending_init && !init_part) {
         queue_push(s, type, p, n);
