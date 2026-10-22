@@ -716,7 +716,19 @@ async function join() {
     report.game = await evalJS(`(() => { const g = window.__kn_game; return { exposed: !!g, keys: g ? Object.keys(g).slice(0, 25) : null, text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 120) }; })()`);
     await shot("4-after-accept");
     // the game's own "CLICK TO PLAY" prompt (the spawn after the ENT): the element holding that text, clicked as a user would
-    report.clickToPlay = await evalJS(`(() => { const hits = [...document.querySelectorAll("div,span,button,a")].filter((e) => /click to play/i.test(e.innerText || "")); const e = hits.find((x) => ![...x.children].some((c) => /click to play/i.test(c.innerText || ""))) || hits[0]; if (!e) return null; e.click(); return e.tagName + "." + String(e.className).slice(0, 40); })()`);
+    report.clickToPlay = await evalJS(`(() => { const hits = [...document.querySelectorAll("div,span,button,a")].filter((e) => /click to play/i.test(e.innerText || "")); const e = hits.find((x) => ![...x.children].some((c) => /click to play/i.test(c.innerText || ""))) || hits[0]; if (!e) return null; const b = e.getBoundingClientRect(); return { el: e.tagName + "." + String(e.className).slice(0, 40), x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height }; })()`);
+    // a trusted click at the element's centre (Input.dispatchMouseEvent, like a user's pointer): the game's enter waits on a
+    // document mousedown that is a user gesture, and pointer lock needs one too; el.click() from Runtime.evaluate is untrusted
+    report.clickToPlayProbe = null;
+    if (report.clickToPlay && report.clickToPlay.w > 0) {
+      const { x, y } = report.clickToPlay;
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0, clickCount: 0 });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+      await sleep(40);
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+    }
+    await sleep(1500);
+    report.clickToPlayProbe = await evalJS(`(() => ({ lock: !!document.pointerLockElement, text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 100), inGame: ${IN_GAME_JS} }))()`);
     await sleep(5000);
     report.afterPlay = await evalJS(`(() => ({ canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","), text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 160), gameExposed: !!window.__kn_game }))()`);
     await shot("5-after-play");
