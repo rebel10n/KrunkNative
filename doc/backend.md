@@ -772,7 +772,7 @@ brain draining).
 | `GET /streams/top` (also `/api/streams/top`) | v10 `streams.getTopStreams` (`/streams/top?cb=2`, v10:25992) | `{"success":true,"data":{"streams":[{username,title,viewerCount,thumbnailUrl,languageCode,eventTags,featured}],"promo":false,"dropCampaigns":[]}}`: Twitch Helix live streams of `streams.twitch.game` (default "Krunker"), cached `streams.cache_s` (30), the last good list while Twitch is down; `503 StreamsUnavailable` without `streams.twitch.client_id` / `client_secret` (env `KN_STREAMS_TWITCH_CLIENT_ID` / `KN_STREAMS_TWITCH_CLIENT_SECRET`). `services/brain/streams.c`; the client never holds the credentials |
 | `GET /streams/thumb?url=` (also `/api/streams/thumb`) | KrunkNative: the Live Streams cards' previews, from before the native engine loaded remote images (client/src/ui/remote_images.c). No client asks it now: a card's `<img src>` is its `thumbnailUrl`, as v10 sets it | `{"success":true,"data":{"url","image":"data:image/jpeg;base64,..."}}`. Only `https://` URLs on `streams.thumbs.hosts` (default `["static-cdn.jtvnw.net"]`) with a plain `.jpg` / `.jpeg` / `.png` path (no query, escapes or dot segments) are fetched: `400 InvalidThumbnail` otherwise. No redirects, at most `streams.thumbs.max_bytes` (256 KiB; `502 ThumbnailTooLarge`), JPEG / PNG only (`502 ThumbnailNotImage`), other failures `502 ThumbnailUnavailable`; answers cached `streams.thumbs.cache_s` (300), failures `streams.thumbs.fail_cache_s` (30), 32 URLs, 4 transfers at once. `streams.thumbs.cdn_url` (tests: a stub CDN) fetches the allowed URL's path from another base. `services/brain/stream_thumbs.c` |
 | `GET /mm/generate-token` | Krunker `matchmaker/generate-token` | `text/plain` validation token for the next seek-game (rate-limited: 120/min per address, then 429 `TooManyRequests`) |
-| `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION][&validationToken=T]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl"}` |
+| `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION][&validationToken=T]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl","map"}` |
 | `GET /mm/host-game?region=R&config=JSON[&token=SESSION]` (also `POST`, JSON body `{region, config}`) | (game socket `custom` in v3.1.1) | same as seek-game, for a freshly hosted custom lobby |
 | `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
 | `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
@@ -839,7 +839,9 @@ FORCE_ENTER, HEAD/POST/OPTIONS on the list routes, player counts, the 404
   where the reference sends the player into the least populated (full) lobby.
 * An `OPTIONS` preflight on `seek-game` / `host-game` answers 204 and issues no
   ticket.
-* `seek-game` appends `region` and `webUrl` after the v3.1.1 keys.
+* `seek-game` appends `region` and `webUrl` after the v3.1.1 keys. It also carries `map`: the
+  lobby's map name as its game-list row names it (the loading screen's "Loading <map> ..." of a
+  Quick Play join, which holds no game list). Absent when the lobby names no map.
 * `/mm/ranked/*` exists (v10's ranked queue over HTTP instead of its matchmaker WebSocket; the
   old `/mm/queue/*` answers ClientOutdated, see 6.5), as do `/mm/status`, `/mm/regions`,
   `/mm/brains`, `/mm/host-game` and `/mm/admin/drain`.

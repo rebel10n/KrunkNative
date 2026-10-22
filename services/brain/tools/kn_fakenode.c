@@ -6,7 +6,7 @@
  *   kn_fakenode --brain ws://127.0.0.1:5050/mm/internal/ws --secret S --node NY
  *               [--region us-nj] [--host 127.0.0.1] [--port 21015] [--lobbies 1]
  *               [--players 0] [--max 8] [--custom] [--map Burg] [--mode ffa]
- *               [--web-url URL] [--version 1.0.0] [--quiet]
+ *               [--map-index N] [--web-url URL] [--version 1.0.0] [--quiet]
  * Signals: SIGUSR1 = +1 player in the first lobby, SIGUSR2 = send drain.
  * Every received frame is printed to stdout as "<- {json}".
  */
@@ -30,6 +30,7 @@ typedef struct Lobby {
 static struct {
     const char *brain, *secret, *node, *region, *host, *web_url, *map, *mode, *version;
     int port, max, custom, quiet;
+    int map_index; /* --map-index: meta.mapIndex (an official map's Krunker index); -1 = none, as a community map */
     Lobby lobbies[16];
     int lobby_count;
     kn_loop *loop;
@@ -68,6 +69,7 @@ static cJSON *tuple(const Lobby *l) {
     cJSON_AddNumberToObject(m, "mode", 0);
     cJSON_AddStringToObject(m, "modeName", g.mode);
     cJSON_AddStringToObject(m, "map", g.map);
+    if (g.map_index >= 0) cJSON_AddNumberToObject(m, "mapIndex", g.map_index);
     cJSON_AddStringToObject(m, "host", g.host);
     cJSON_AddNumberToObject(m, "port", g.port);
     cJSON_AddNumberToObject(m, "timeLeft", 240);
@@ -218,6 +220,7 @@ int main(int argc, char **argv) {
     g.host = "127.0.0.1";
     g.map = "Burg";
     g.mode = "ffa";
+    g.map_index = -1;
     g.version = "1.0.0";
     g.port = 21015;
     g.max = 8;
@@ -236,6 +239,7 @@ int main(int argc, char **argv) {
         else if (OPT("--max")) g.max = atoi(v);
         else if (OPT("--map")) g.map = v;
         else if (OPT("--mode")) g.mode = v;
+        else if (OPT("--map-index")) g.map_index = atoi(v);
         else if (OPT("--web-url")) g.web_url = v;
         else if (OPT("--version")) g.version = v;
         else if (!strcmp(a, "--custom")) g.custom = 1;

@@ -187,6 +187,10 @@ cJSON *brain_seek_reply_ex(Brain *b, MmNode *n, const char *game_id, int64_t acc
     cJSON_AddNumberToObject(reply, "port", n->public_port);
     cJSON_AddStringToObject(reply, "clientId", ticket);
     cJSON_AddStringToObject(reply, "region", n->region);
+    /* the lobby's map, as its game-list row names it (the server's own map name): the joining client's loading
+     * screen says "Loading <map> ..." from it, and a Quick Play join never holds the game list to read it from */
+    const MmLobby *lobby = b->registry ? registry_lobby_find(b->registry, game_id, NULL) : NULL;
+    if (lobby && lobby->map[0]) cJSON_AddStringToObject(reply, "map", lobby->map);
     if (n->web_url[0]) cJSON_AddStringToObject(reply, "webUrl", n->web_url);
     else cJSON_AddNullToObject(reply, "webUrl");
     free(ticket);

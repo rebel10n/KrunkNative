@@ -352,8 +352,9 @@ static const char *game_map(const char *id) {
 
 // joinServer(host, port, gameId, clientKey): point the transport at the game server.
 // region: the lobby's (a seek answer's; NULL = unknown, looked up in the game list).
+// map: the lobby's map as the seek answer names it (NULL = not known: the game list's row is read instead).
 static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url,
-                        const char *region, const unsigned action) {
+                        const char *region, const char *map, const unsigned action) {
     Client *client = g_client;
     seek_claim_enter(&g_claims, action); // the request this lobby answers (0: a server's own redirect or ticket)
     quick_play_retry_end(); // a lobby took the player: the Quick Play search is over
@@ -398,7 +399,9 @@ static void join_server(const char *host, const int port, const char *game_id, c
 
     printf("[mm] joining %s at %s:%d\n", g_game_id, host, port);
     page_game_url(g_game_id, NULL);
-    menu_show_connecting_map(game_map(g_game_id)); // the spinner, "Loading <map> ..." for the lobby's map
+    // the spinner, "Loading <map> ..." for the lobby's map: the seek answer's, else the game list's row (a Quick Play
+    // join has no list of its own; the brain's answer names the map)
+    menu_show_connecting_map(map && map[0] ? map : game_map(g_game_id));
     client_net_switch_server(client);
 }
 
@@ -417,13 +420,13 @@ void servers_ui_redirect(const char *game_id, const char *host, const int port, 
     }
     if (host && host[0] && port > 0) {
         if (g_pin != PIN_NONE) direct_join(host, port); // a direct server sends us on: still direct
-        else join_server(host, port, game_id, NULL, NULL, NULL, 0);
+        else join_server(host, port, game_id, NULL, NULL, NULL, NULL, 0);
     }
 }
 
 void servers_ui_join_ticket(const char *host, const int port, const char *game_id, const char *ticket, const char *web_url) {
     if (!g_client || !host) return;
-    join_server(host, port, game_id, ticket, web_url, NULL, 0);
+    join_server(host, port, game_id, ticket, web_url, NULL, NULL, 0);
     page_game_url(NULL, NULL); // a ranked match (gameConfig.isFromQueue): the link is "/"
 }
 
@@ -870,9 +873,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         g_quick_join_left = 0;
         g_account_game[0] = 0;
         if (rejoin) printf("[mm] rejoin: %s with a fresh join ticket\n", cJSON_IsString(game) ? game->valuestring : "?");
+        const cJSON *map = cJSON_GetObjectItem(res, "map"); // the lobby's map (brain_seek_reply)
         join_server(host->valuestring, port->valueint, cJSON_IsString(game) ? game->valuestring : "",
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
-                    cJSON_IsString(region) ? region->valuestring : NULL, action);
+                    cJSON_IsString(region) ? region->valuestring : NULL, cJSON_IsString(map) ? map->valuestring : NULL, action);
     } else if (quiet && g_quick_join_left > 0) {
         const cJSON *full = cJSON_GetObjectItem(res, "error");
         if (cJSON_IsString(full) && !strcmp(full->valuestring, "GameFull")) g_quick_join_full = 1; // the sweep is tried again when it runs out
@@ -1013,7 +1017,7 @@ static void on_strike_finder(void *user, const int status, const char *body, con
         printf("[strike] finder pool: %s:%d (%d players)\n", host, port, best_players);
         g_find_seek = g_find_both = 0;
         g_strike_code[0] = 0;
-        join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")), 0);
+        join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")), NULL, 0);
     } else {
         fprintf(stderr, "[strike] finder pool: no Strike server with room (HTTP %d)\n", status);
         // Find New Game / Quick Match: the finder lists nothing it leaves, so from a lobby the answer is
@@ -1067,7 +1071,7 @@ static void on_strike_allocation(void *user, const StrikeAllocation *a) {
     if (a->ok) {
         g_find_seek = g_find_both = 0;
         snprintf(g_strike_code, sizeof(g_strike_code), "%s", a->code);
-        join_server(a->host, a->port, a->game_id, a->ticket, NULL, a->region, 0);
+        join_server(a->host, a->port, a->game_id, a->ticket, NULL, a->region, NULL, 0);
         return;
     }
     // an outdated client cannot play anywhere this director serves: no fallback
