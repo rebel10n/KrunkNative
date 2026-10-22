@@ -27,6 +27,15 @@ function getJson(url) {
   const env = stackEnv();
   const shot = process.argv[2] || '/tmp/kn-web-session-close-node-down.png';
   const build = process.env.KN_WEB_BUILD || path.resolve(__dirname, '../../../cmake-build-debug');
+  // The stack writes its env once the brain and bridge answer, not once the node has registered: a page opened
+  // before the node is listed runs its launch seek against no lobby and never retries. Wait for the listing first.
+  let up = false;
+  for (let i = 0; i < 120 && !up; i++) {
+    await sleep(500);
+    const list = await getJson(`http://127.0.0.1:${env.BRAIN}/mm/game-list?hostname=krunknative`);
+    up = !!(list && Array.isArray(list.games) && list.games.length > 0);
+  }
+  if (!up) { console.log('FAIL the node is listed by the brain before the page opens'); process.exit(1); }
   const page = await openPage(env.BASE + '/');
   const failures = [];
   let node2 = null;
