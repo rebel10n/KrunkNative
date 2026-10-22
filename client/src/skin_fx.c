@@ -480,10 +480,17 @@ static void fx_paint_material(BasicMaterial *material, const WornSkinPaint paint
     }
 }
 
+// Probe (two-client paint e2e, client/tests/paint_shader_two_client_e2e.py): one line per painted mesh with the paint state
+// the material now carries. Only a painted mesh logs, so any other player's line is a paint their client drew.
+static void fx_paint_probe(const BasicMaterial *material) {
+    fprintf(stderr, "[paint] mesh enabled=%d shader=%d\n", material->paint_enabled, material->paint_shader);
+}
+
 void skin_fx_apply_paint(Mesh *mesh, const WornSkinPaint paint, const ViewerSkin *skin) {
     if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
     if (paint.color < 0 && paint.shader < 0) return;
     fx_paint_material((BasicMaterial *) mesh->material, paint, skin);
+    fx_paint_probe((const BasicMaterial *) mesh->material);
 }
 
 // v10.0.3 deob-10.0.3.js:233833-233837: paintTargets true paints every mesh; a list paints the meshes whose name is in it.
@@ -509,6 +516,7 @@ void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, co
         if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) continue;
         if (!fx_paint_target(skin ? skin->paint_targets : NULL, gltf_instance_mesh_name(model, i))) continue;
         fx_paint_material((BasicMaterial *) mesh->material, paint, skin);
+        fx_paint_probe((const BasicMaterial *) mesh->material);
     }
 }
 
