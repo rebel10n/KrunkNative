@@ -198,7 +198,9 @@
 //                                text=<C-escaped clipboard>" (selection + Ctrl+C tests)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   1200 frames /tmp/f 120       write this and the next 119 finished frames (page included) as
-//                                /tmp/f_0000.png ... (input_script_frame_presented)
+//                                /tmp/f_0000.png ... (input_script_frame_presented); each logs "[input_script]
+//                                frame /tmp/f_0000.png t=1200 open=1 ... rect=x,y,w,h ..." (the `console` probe's
+//                                fields: the developer console's state as that frame was painted)
 //   3000 quit                    close the window
 // Events run at the start of the first frame whose time is >= t, before the input is
 // sampled, so a key held from t=0 to t=1500 is down for the inputs of [0, 1500).
@@ -240,7 +242,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SCRIPT_MAX_EVENTS 512
+#define SCRIPT_MAX_EVENTS 4096 // a key sweep across a round end is ~1500 lines (console_draw_sweep_e2e.py); the table is static (BSS)
 
 typedef struct {
     float t;          // ms
@@ -360,6 +362,7 @@ static void script_load(void) {
 
     g_script.active = 1;
     fprintf(stderr, "[input_script] %d events from %s%s\n", g_script.count, path, g_script.fixed_delta > 0.0f ? " (fixed delta)" : "");
+    if (g_script.count == SCRIPT_MAX_EVENTS) fprintf(stderr, "[input_script] WARNING: more than %d lines, the rest are dropped\n", SCRIPT_MAX_EVENTS);
 }
 
 float input_script_delta(const float delta) {
@@ -1686,6 +1689,10 @@ void input_script_frame_presented(Client *client) {
     char path[200];
     snprintf(path, sizeof(path), "%s_%04d.png", g_script.frames, g_script.frames_index++);
     write_frame_png(client, path);
-    fprintf(stderr, "[input_script] frame %s\n", path); // orders the captures against the log
+    // orders the captures against the log; the developer console's state as this frame was painted
+    // (ui_console_probe), so a per-frame test knows which frames must show it (console_draw_sweep_e2e.py)
+    char con[320];
+    ui_console_probe(con, sizeof(con));
+    fprintf(stderr, "[input_script] frame %s t=%.0f %s\n", path, g_script.time, con);
     g_script.frames_left--;
 }

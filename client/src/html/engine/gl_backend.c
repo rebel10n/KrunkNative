@@ -564,27 +564,17 @@ static void set_stencil_pass(GlBackend *b, int on) {
 // FBO pool
 // ---------------------------------------------------------------------------
 
-static int fbo_acquire(GlBackend *b, int w, int h) {
-    w = pot(w < 1 ? 1 : w);
-    h = pot(h < 1 ? 1 : h);
+// Deletes an entry's GL objects and leaves it empty (w = h = 0: never matched by a request again).
+static void fbo_gl_free(GlBackend *b, FboEntry *e) {
+    if (e->tex && b->bound_tex == e->tex) b->bound_tex = 0;
+    glDeleteFramebuffers(1, &e->fbo);
+    glDeleteRenderbuffers(1, &e->rbo);
+    glDeleteTextures(1, &e->tex);
+    e->fbo = e->rbo = e->tex = 0;
+    e->w = e->h = 0;
+}
 
-    int best = -1;
-    for (int i = 0; i < b->n_fbos; i++) {
-        FboEntry *e = &b->fbos[i];
-        if (e->in_use || e->w < w || e->h < h) continue;
-        if (best < 0 || e->w * e->h < b->fbos[best].w * b->fbos[best].h) best = i;
-    }
-    if (best >= 0) {
-        b->fbos[best].in_use = 1;
-        return best;
-    }
-    if (b->n_fbos == GLB_MAX_FBOS) return -1;
-
-    FboEntry *e = &b->fbos[b->n_fbos];
-    memset(e, 0, sizeof(*e));
-    e->w = w;
-    e->h = h;
-
+static int fbo_gl_alloc(GlBackend *b, FboEntry *e, int w, int h) {
     glGenTextures(1, &e->tex);
     glBindTexture(GL_TEXTURE_2D, e->tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -609,14 +599,50 @@ static int fbo_acquire(GlBackend *b, int w, int h) {
 
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         printf("html gl backend: group framebuffer incomplete (0x%x)\n", (unsigned) status);
-        glDeleteFramebuffers(1, &e->fbo);
-        glDeleteRenderbuffers(1, &e->rbo);
-        glDeleteTextures(1, &e->tex);
-        return -1;
+        fbo_gl_free(b, e);
+        return 0;
+    }
+    e->w = w;
+    e->h = h;
+    return 1;
+}
+
+// A free entry for a (pot) w x h request. The pool is GLB_MAX_FBOS entries and never shrinks, so
+// once it holds 24 entries of other sizes no fitting one can be made (the old code returned -1
+// here for good): an opacity group then skipped its whole subtree, the console's .modal (opacity
+// .95) among them, and it vanished while still open. A full pool now resizes its smallest free
+// entry; -1 only when every entry is in use (a group deeper than the pool).
+static int fbo_acquire(GlBackend *b, int w, int h) {
+    w = pot(w < 1 ? 1 : w);
+    h = pot(h < 1 ? 1 : h);
+
+    int best = -1;
+    for (int i = 0; i < b->n_fbos; i++) {
+        FboEntry *e = &b->fbos[i];
+        if (e->in_use || e->w < w || e->h < h) continue;
+        if (best < 0 || e->w * e->h < b->fbos[best].w * b->fbos[best].h) best = i;
+    }
+    if (best >= 0) {
+        b->fbos[best].in_use = 1;
+        return best;
     }
 
-    e->in_use = 1;
-    return b->n_fbos++;
+    int slot = b->n_fbos;
+    if (slot == GLB_MAX_FBOS) {
+        for (int i = 0; i < b->n_fbos; i++) {
+            if (b->fbos[i].in_use) continue;
+            if (slot == GLB_MAX_FBOS || b->fbos[i].w * b->fbos[i].h < b->fbos[slot].w * b->fbos[slot].h) slot = i;
+        }
+        if (slot == GLB_MAX_FBOS) return -1;
+        fbo_gl_free(b, &b->fbos[slot]);
+    } else {
+        memset(&b->fbos[slot], 0, sizeof(FboEntry));
+    }
+
+    if (!fbo_gl_alloc(b, &b->fbos[slot], w, h)) return -1;
+    b->fbos[slot].in_use = 1;
+    if (slot == b->n_fbos) b->n_fbos++;
+    return slot;
 }
 
 static void fbo_release(GlBackend *b, int i) {
