@@ -22,16 +22,53 @@
    ingame-playerlist.html.gz): Chromium ignores a table's padding when its borders collapse, so v10's
    rows start at the table's edge (pListTable's 10 px padding is cleared here), and each row is 34.7 px
    tall: the 3 px collapsed tr border-bottom (main.css `th, tr`) is part of the row. This engine adds
-   no collapsed border to a row's height, so the cells carry the difference as bottom padding: the
-   local row (its own row in v10: 28.7 px) keeps 11.7 px, the others 12.9 px (they are 34.7 px apart). */
+   no collapsed border to a row's height, so the cells carry the difference as bottom padding. The
+   paddings below keep each row's height: their sum is v10's (21.7 CSS px for the local row, 22.9 for
+   the others), split so the bottom is the top plus the separator (see the Player List block below). */
 .pListTable {
 	padding: 0;
 }
 .pListTable td {
-	padding-bottom: 11.7px;
+	padding-top: 9.35px;
+	padding-bottom: 12.35px;
 }
 .pListTable tr + tr td {
-	padding-bottom: 12.9px;
+	padding-top: 9.95px;
+	padding-bottom: 12.95px;
+}
+
+/* KrunkNative deviates from v10 here, on purpose (user, 2026-10-22: "we should deviate from krunker for the
+   vertical alignment of the player list because it just makes sense. i want everything perfectly sitting
+   vertical in each row."). Every element of every row (the header's, the players', the local row's) sits on
+   its row's geometric middle, the middle of the band above the 3 px separator (main.css `th, tr`). v10's own
+   CSS puts them a few px high: the name cell is an inline-block in an anonymous cell (its text baseline-
+   aligned), the actions cell is a float at the top of the row, and the buttons' negative margins lift them.
+   Here both cells are table cells (the actions one keeps its content on the right edge: text-align right),
+   each cell centres its content, and every inline item centres on the same middle. The bottom padding is
+   the top's plus the separator's 3 px, so the cell's middle is the band's middle and each row keeps its
+   height. */
+.pListTable td.pListName,
+.pListTable td.pListActions {
+	display: table-cell;
+	float: none;
+	vertical-align: middle;
+}
+.pListTable td.pListActions {
+	text-align: right;
+}
+.pListTable td .pListPing,
+.pListTable td .pListVoice,
+.pListTable td > i,
+.pListTable td a,
+.pListTable td .punishButton,
+.pListTable td .muteUserBtn {
+	vertical-align: middle !important;
+}
+.pListTable td .punishButton,
+.pListTable td .punishButton img,
+.pListTable td .muteUserBtn {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
 }
 
 /* KrunkNative: v10's text emoji that Chrome draws in colour (Noto Color Emoji: the ranked texts, the

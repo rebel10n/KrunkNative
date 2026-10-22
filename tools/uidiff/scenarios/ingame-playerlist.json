@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v10/ingame/ingame-playerlist.png",
+  "ref": "doc/ref/krunknative/ingame-playerlist-centred.png",
   "size": [
     1280,
     720
@@ -55,5 +55,5 @@
     ]
   },
   "frames": 3,
-  "note": "The Player List of a lobby with three account players, signed in at level 30. Reference: the offline v10 sandbox (capture-v10.js)."
+  "note": "The Player List of a lobby with three account players, signed in at level 30. Reference: KrunkNative's own render (doc/ref/krunknative/ingame-playerlist-centred.png), not v10's: see the regions' notes."
 }

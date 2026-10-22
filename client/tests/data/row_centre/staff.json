@@ -1,0 +1,64 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": 23,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "name": "Local User",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Local User",
+      "score": 200000,
+      "funds": 0,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "skins": [],
+      "dev": 1
+    },
+    "playerList": [
+      {
+        "uid": 2,
+        "name": "Kanzaki",
+        "clan": "VIP",
+        "ping": 34,
+        "account": 9100,
+        "level": 12,
+        "host": true,
+        "speaking": true
+      },
+      {
+        "uid": 3,
+        "name": "Rook",
+        "ping": 87,
+        "account": 9101,
+        "level": 7,
+        "speaking": true
+      },
+      {
+        "uid": 4,
+        "name": "Sable",
+        "clan": "CMD",
+        "ping": 162,
+        "account": 9102,
+        "level": 3,
+        "hacker": true,
+        "sus": true
+      }
+    ],
+    "spectate": true
+  },
+  "frames": 3,
+  "note": "Row-centre fixture (client/tests/row_centre_e2e.py): the Player List of the spectate scenario with a DEV account (Kill / TPAll / TP2 / TPME / the punish popup), a host star, voice icons and a K.P.D suspect row, so every element the list draws is in one render."
+}

@@ -45,9 +45,14 @@ def state_of(v7_name, **kw):
     return st
 
 
-def add(name, state, regs, note, frames=3, ref_dir="ingame"):
-    scen[name] = {"ref": "%s/%s/%s.png" % (REF, ref_dir, name), "size": [1280, 720], "background": g.GAME_BG,
-                  "state": state, "frames": frames, "note": note + " Reference: the offline v10 sandbox (capture-v10.js)."}
+def add(name, state, regs, note, frames=3, ref_dir="ingame", ref=None):
+    """ref: a reference other than v10's capture (a KrunkNative render of a deliberate deviation)."""
+    if ref:
+        scen[name] = {"ref": ref, "size": [1280, 720], "background": g.GAME_BG, "state": state, "frames": frames,
+                      "note": note + " Reference: KrunkNative's own render (" + ref + "), not v10's: see the regions' notes."}
+    else:
+        scen[name] = {"ref": "%s/%s/%s.png" % (REF, ref_dir, name), "size": [1280, 720], "background": g.GAME_BG,
+                      "state": state, "frames": frames, "note": note + " Reference: the offline v10 sandbox (capture-v10.js)."}
     regions[name] = regs
 
 
@@ -208,9 +213,9 @@ def main():
 
     # the Player List (pListKey -> showWindow(23)) of a populated lobby, signed in: per row the ping,
     # the profile link (red: isHacker), the clan, chat / voice mute, the K.P.D call and Votekick
-    # (client/src/ui/hud_ui.c, hud_votekick.c). The reference is the v10
-    # sandbox with three bots made account players (capture-v10.js ingame-playerlist); its
-    # "Developer Tools" block below the table is the browser sandbox's own extension (isSandbox).
+    # (client/src/ui/hud_ui.c, hud_votekick.c). The states are v10's sandbox with three bots made account
+    # players (capture-v10.js ingame-playerlist; the v10 capture is the parity source for the elements and
+    # their order, not for their vertical alignment, which KN deliberately changed: see plist_regions).
     rc = rects("ingame-playerlist")
     st = state_of("ingame-pause-esc") if "ingame-pause-esc" in g.scen else state_of("ingame-plain")
     st.update(menu=True, window=23, name="Local User",
@@ -220,17 +225,26 @@ def main():
                           {"uid": 4, "name": "Sable", "clan": "CMD", "ping": 162, "account": 9102, "level": 3, "hacker": True}])
     mw = rc["menuWindow"]
 
+    # KrunkNative deviates from v10 here (user, 2026-10-22: "we should deviate from krunker for the vertical
+    # alignment of the player list because it just makes sense. i want everything perfectly sitting vertical in
+    # each row."): every element of a row sits on its row's middle (ui/css/kn-v10-menu.css, Player List;
+    # client/tests/row_centre_e2e.py). The reference is KrunkNative's own render of that list (re-pinned
+    # 2026-10-22, doc/ref/krunknative/ingame-playerlist*-centred.png), so the regions have no v10 offset.
     def plist_regions(rc, rows_note):
-        # every element of a row (the ping, the name, the buttons) sits where v10's own CSS puts it: the
-        # name's line, a few px above the row's geometric middle (the float and the buttons' negative margins)
-        return [R("player-list-header", pad(rc["playerSearchH"], 2), "text", "#playerSearchH: Player List [4] and the search box"),
-                R("player-list-rows", pad(rc["playerListH"], 2), "text", "#playerListH: " + rows_note),
+        # v10's sandbox window is 26 px higher than a lobby's (its Developer Tools block, below the rows): the
+        # rects are the render's, so they move down 26 px from v10's capture to where a lobby's list is
+        def lobby(r):
+            return [r[0], r[1] + 26, r[2], r[3]]
+        return [R("player-list-header", lobby(pad(rc["playerSearchH"], 2)), "text",
+                  "#playerSearchH: Player List [4] and the search box (KN's centred list: no sandbox offset)", ref_offset=[0, 0]),
+                R("player-list-rows", lobby(pad(rc["playerListH"], 2)), "text", "#playerListH: " + rows_note, ref_offset=[0, 0]),
                 R("player-list-sandbox-tools", [mw[0], rc["playerListH"][1] + rc["playerListH"][3], mw[2],
                                                 mw[1] + mw[3] - rc["playerListH"][1] - rc["playerListH"][3]], "text",
                   "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list", skip=True)]
     add("ingame-playerlist", st, plist_regions(rc, "the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / "
-                                                   "Votekick per player, all on the name's line as v10's CSS lays them out"),
-        "The Player List of a lobby with three account players, signed in at level 30.")
+                                                   "Votekick per player, each element on its row's middle (KN's deviation from v10)"),
+        "The Player List of a lobby with three account players, signed in at level 30.",
+        ref="doc/ref/krunknative/ingame-playerlist-centred.png")
 
     # the same list while spectating (capture-v10.js ingame-playerlist-spectate: window.spectating): v10's
     # genList puts a Focus Player button (punishButton, the visibility icon) before each row's ping and a
@@ -239,8 +253,9 @@ def main():
     st = dict(st, spectate=True)
     add("ingame-playerlist-spectate", st,
         plist_regions(rc, "while spectating: Clear Focus in the local row, then the Focus Player eye / ping / name [clan] / "
-                          "chat mute / voice mute / K.P.D / Votekick per player, all on the name's line as v10's CSS lays them out"),
-        "The Player List of the same lobby while spectating: the Focus Player and Clear Focus buttons.")
+                          "chat mute / voice mute / K.P.D / Votekick per player, each element on its row's middle (KN's deviation from v10)"),
+        "The Player List of the same lobby while spectating: the Focus Player and Clear Focus buttons.",
+        ref="doc/ref/krunknative/ingame-playerlist-spectate-centred.png")
 
     for name in sorted(scen):
         with open(os.path.join(HERE, "scenarios", name + ".json"), "w") as fh:

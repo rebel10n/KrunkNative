@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v10/ingame/ingame-playerlist-spectate.png",
+  "ref": "doc/ref/krunknative/ingame-playerlist-spectate-centred.png",
   "size": [
     1280,
     720
@@ -56,5 +56,5 @@
     "spectate": true
   },
   "frames": 3,
-  "note": "The Player List of the same lobby while spectating: the Focus Player and Clear Focus buttons. Reference: the offline v10 sandbox (capture-v10.js)."
+  "note": "The Player List of the same lobby while spectating: the Focus Player and Clear Focus buttons. Reference: KrunkNative's own render (doc/ref/krunknative/ingame-playerlist-spectate-centred.png), not v10's: see the regions' notes."
 }
