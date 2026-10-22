@@ -269,6 +269,17 @@ static int store_count(const Blob *blobs, size_t nb, const char *label) {
     }
     return c;
 }
+// the index of the first message with this label in a client's messages (-1 when there is none)
+static int store_first_index(const Blob *blobs, size_t nb, const char *label) {
+    for (size_t i = 0; i < nb; i++) {
+        KrunkerFrame fr;
+        memset(&fr, 0, sizeof fr);
+        const int hit = krunker_proto_decode(blobs[i].data, blobs[i].len, 0, &fr) == KRUNKER_PROTO_OK && !strcmp(fr.name, label);
+        krunker_frame_free(&fr);
+        if (hit) return (int)i;
+    }
+    return -1;
+}
 static int client_get(const char *label, int nth, KrunkerFrame *out) { return store_get(g_blobs, g_nblobs, label, nth, out); }
 static int client_count(const char *label) { return store_count(g_blobs, g_nblobs, label); }
 static void send_on(kn_ws *ws, const char *label, const KrunkerValue *args, uint32_t argc) {
@@ -1154,11 +1165,26 @@ int main(void) {
         WAIT_FOR(client2_count("init") == 1);
         CHECK(client2_count("init") == 1, "the second session gets its own init");
 
+        // a bot (162) reaches the joiner before its own SPAWN, as the native server sends the bots on connect (AI.sync): its aai
+        // (the client's AI.cSpawn, which builds the bot in the game's scene) waits for our START, as another player's add does.
+        // Before START the client's scene is not up for it: the aai threw "reading 'add'" for each bot (13 per join in the
+        // playable check), and the bots of a join sent before its enter arrived in that window.
+        uint8_t bot_join[237];
+        memset(bot_join, 0, sizeof bot_join);
+        w_i32(bot_join, 0, 6); w_i32(bot_join, 4, 0); w_str(bot_join, 8, "Bot");
+        native_send_conn(&g_native, 1, NET_PACKET_AI_ADD_V7, bot_join, 237);
+        pump(100);
+        CHECK(client2_count("aai") == 0, "a bot's add before the joiner's START waits for it (no aai before START)");
+
         // its own SPAWN (active, it is the player): its add record carries its socket id and uid, and its START
         uint8_t sp2_self[150];
         spawn_buf(sp2_self, uid2, 1, 1, 4, 0, 100, 1, 2, 3, 0, 0, "peer");
         native_send_conn(&g_native, 1, NET_PACKET_SPAWN, sp2_self, 150);
         WAIT_FOR(client2_count("start") == 1);
+        WAIT_FOR(client2_count("aai") == 1);
+        CHECK(store_first_index(g_blobs2, g_nblobs2, "start") >= 0 &&
+              store_first_index(g_blobs2, g_nblobs2, "start") < store_first_index(g_blobs2, g_nblobs2, "aai"),
+              "the held bot's aai goes out after our START");
         int own2 = 0;
         for (int k = 0; k < client2_count("0") && !own2; k++) {
             KrunkerFrame f;

@@ -920,10 +920,15 @@ async function runPeer(ctx) {
       const d = msg.params || {};
       if (msg.method === "Network.webSocketFrameReceived" && d.response && d.response.opcode === 2) peerFrame(d.response.payloadData);
       else if (msg.method === "Runtime.exceptionThrown") {
+        // the same location the first page records (its file:line:col and the top frames), so a throw on this page is named
         const ex = d.exceptionDetails || {};
+        const cf = (ex.stackTrace && ex.stackTrace.callFrames) || [];
+        const top = cf[0] || {};
         p.exceptionCount++;
         p.excAt.push(now());
-        if (p.exceptions.length < 20) p.exceptions.push({ t: now(), text: ((ex.exception || {}).description || ex.text || "").split("\n")[0].slice(0, 200) });
+        if (p.exceptions.length < 20) p.exceptions.push({ t: now(), text: ((ex.exception || {}).description || ex.text || "").split("\n")[0].slice(0, 200),
+          where: `${top.url || ex.url || "?"}:${top.lineNumber ?? ex.lineNumber}:${top.columnNumber ?? ex.columnNumber} ${top.functionName || ""}`.trim(),
+          frames: cf.slice(0, 3).map((f) => `${f.functionName || "?"}@${f.lineNumber}:${f.columnNumber}`) });
       }
     };
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");

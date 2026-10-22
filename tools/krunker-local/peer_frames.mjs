@@ -164,7 +164,12 @@ export function peerRows(r, maxExc = 0) {
   const jEnd = (p.joinedAt ?? jStart) + 3000;
   const exc1 = excAt1.filter((t) => t >= jStart && t <= jEnd).length;
   const exc2 = (p.excAt || []).filter((t) => t >= jStart && t <= jEnd).length;
+  // the first exception of the second page in the window, with its location (the harness keeps the first 20 with where)
+  const firstIn2 = (p.exceptions || []).find((e) => e.t >= jStart && e.t <= jEnd);
+  const firstIn1 = (r.exceptions || []).find((e) => e.t >= jStart && e.t <= jEnd);
+  const where1 = firstIn1 ? `; first page first: ${firstIn1.text} at ${firstIn1.where || "?"}` : "";
+  const where2 = (firstIn2 ? `; second page first: ${firstIn2.text} at ${firstIn2.where || "?"}` : "") + where1;
   add("2d", ids[3][1], exc1 <= maxExc && exc2 <= maxExc,
-    `first page ${exc1} and second page ${exc2} exceptions during the second player's join (${sec(jStart)} to ${sec(jEnd)}), threshold ${maxExc}`);
+    `first page ${exc1} and second page ${exc2} exceptions during the second player's join (${sec(jStart)} to ${sec(jEnd)}), threshold ${maxExc}${where2}`);
   return rows;
 }

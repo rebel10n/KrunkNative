@@ -1047,6 +1047,14 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         if (chunk.count < 16) flush_bot_sync(s);
         return;
     }
+    /* a bot's add (aai, the client's AI.cSpawn) waits for our START, as another player's add does: the bot is built in the
+     * game's scene, which is not up before START (the page threw "reading 'add'" for each bot sent right after the INIT or
+     * before the enter). flush_held sends it after our start, in order. The bot sync (ai) is not held: it only hides the
+     * bots and moves those it finds by sid. */
+    if (s->init_sent && !s->started && type == NET_PACKET_AI_ADD_V7) {
+        hold_push(s, type, p, n);
+        return;
+    }
     if (s->init_sent && type == NET_PACKET_AI_ADD_V7) {
         v10_out_init(&o);
         v10_map_bot_add(&o, p, n);
