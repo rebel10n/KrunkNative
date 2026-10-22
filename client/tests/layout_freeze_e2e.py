@@ -299,11 +299,12 @@ def scenario_skins(brain_url, token, name):
     h, t = hover_lines(t, "skinList", 10)
     lines += h
     lines += ["%d clickid itemSearch" % t, "%d type a" % (t + 300), "%d type k" % (t + 600), "%d type 4" % (t + 900),
+              "%d up BACKSPACE" % (t + 1200),   # the keyup runs searchItems (onkeyup): type only fires the char
               "%d rects @searched .skinCard" % (t + 1600)]
     t += 1800
     h, t = hover_lines(t, "skinList", 8)
     lines += h
-    lines += ["%d clickid itemSearch" % t, "%d down BACKSPACE" % (t + 200), "%d down BACKSPACE" % (t + 400), "%d down BACKSPACE" % (t + 600)]
+    lines += ["%d clickid itemSearch" % t] + ["%d %s" % (t + 200 * k, c) for k in (1, 2, 3) for c in ("down BACKSPACE", "up BACKSPACE")]
     t += 1200
     w, t = wheel_lines(t, 30)
     lines += w

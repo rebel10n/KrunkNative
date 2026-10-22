@@ -415,6 +415,10 @@ v10-market-e2e: build ## v10 Market & Trading from the v10 page: list, buy, quic
 paint-picker-e2e: build ## The owned card's paint picker: the Hat chooser's paint button opens the popup, Paint sends the socket's "ip" frame, the copy is made with its paint, the toast and the badge show it; an account with no paint gets the empty state; a refused Paint says why (local kn_brain on sqlite, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/paint_picker_e2e.py $(DEBUG_DIR) $(CURDIR)
 
+.PHONY: layout-freeze-e2e
+layout-freeze-e2e: build ## Real-scale layout freeze check: a scratch kn_brain with every catalogue skin (8069 owned, painted copies, listings), Customize's Select Skin (scroll, search, hover) and market Stats (50 rows, hover, scroll); fails on a layout pass or engine frame above LAYOUT_FREEZE_LIMIT_MS (1000); headless, no production
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1500 $(PYTHON) -I client/tests/layout_freeze_e2e.py $(DEBUG_DIR) $(CURDIR)
+
 .PHONY: loading-screens-e2e
 loading-screens-e2e: build ## Stuck "Loading" screens: the Junkyard, Trading, the Inbox (list and message), the Clan window and its Settings, and the lottery get an answer or an error with Retry within a deadline (local kn_brain on sqlite, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1800 $(PYTHON) -I client/tests/loading_screens_e2e.py $(DEBUG_DIR) $(CURDIR)
