@@ -28,6 +28,7 @@
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
 #include <strike_econ.h>  // Krunker Strike: the economy's knStrike* handlers (strike_econ.c)
+#include <paint_picker.h> // the owned card's paint popup (paint_picker_handle)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <math.h>
 #include <stdio.h>
@@ -613,6 +614,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_daily_spin_handle,     // v10_daily_spin.c: the sidebar's Daily Spin
     v10_wild_offer_handle,     // v10_wild_offer.c: v10 Wild Offers (knWo*)
     v10_wallet_handle,         // v10_wallet.c: v10 Wallet and Inventory (knV10Wallet*)
+    paint_picker_handle,       // paint_picker.c: the owned card's paint popup (paintOpen, paintPick, paintApply)
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item

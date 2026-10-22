@@ -6278,6 +6278,28 @@ White shadow: #A6A6A6
 	background-color: #00a500;
 }
 
+/* the owned card's paint button (paint_picker.c; v10's paint-icon, bottom left like the info button's corner) */
+.selctPaintBtn {
+	color: #fff;
+	background-color: #00B800;
+	padding: 2px 4px;
+	cursor: pointer;
+	pointer-events: auto;
+	z-index: 9999999;
+	position: absolute;
+	display: flex;
+	align-items: center;
+	border-radius: 4px;
+	top: 147px;
+	left: 5px;
+}
+.selctPaintBtn .material-icons {
+	font-size: 16px;
+}
+.selctPaintBtn:hover {
+	background-color: #00a500;
+}
+
 .selctDelBtn {
 	font-size: 12px;
 	color: #fff;

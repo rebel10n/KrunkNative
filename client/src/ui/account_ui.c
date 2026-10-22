@@ -489,6 +489,58 @@ void account_remove_skin(const int skin_index) {
     }
 }
 
+// One unit of a stack entry (no id) taken; the entry goes at 0.
+static void take_stack_unit(cJSON *skins, cJSON *entry) {
+    const cJSON *cnt = cJSON_GetObjectItem(entry, "cnt");
+    const int n = (cJSON_IsNumber(cnt) ? cnt->valueint : 1) - 1;
+    if (n > 0) {
+        cJSON_ReplaceItemInObject(entry, "cnt", cJSON_CreateNumber(n));
+        return;
+    }
+    int i = 0;
+    cJSON *x;
+    cJSON_ArrayForEach(x, skins) {
+        if (x == entry) break;
+        i++;
+    }
+    cJSON_DeleteItemFromArray(skins, i);
+}
+
+// A paint applied (POST /items/<sid>/paint, client/src/ui/paint_picker.c): one unit of the paint is taken; the copy
+// copy_id gets the paint m (a new copy, or a repaint). from_stack: sid was an unpainted unit's stack, so one of its units
+// became the copy. The brain pushes the account again ("ua") after this, which replaces it.
+void account_paint_applied(const int item, const int paint, const int copy_id, const int from_stack, const cJSON *m) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return;
+    if (!g_logged_in || !g_acc.data) return;
+    cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
+    if (!cJSON_IsArray(skins)) return;
+    cJSON *e, *copy = NULL, *paint_stack = NULL, *item_stack = NULL;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *id = cJSON_GetObjectItem(e, "id");
+        if (!cJSON_IsNumber(ind)) continue;
+        if (cJSON_IsNumber(id)) {
+            if (id->valueint == copy_id) copy = e;
+        } else if (ind->valueint == paint && !paint_stack) {
+            paint_stack = e;
+        } else if (ind->valueint == item && !item_stack) {
+            item_stack = e;
+        }
+    }
+    if (copy) {
+        cJSON_ReplaceItemInObject(copy, "m", m ? cJSON_Duplicate(m, 1) : cJSON_CreateObject());
+    } else {
+        cJSON *fresh = cJSON_CreateObject();
+        cJSON_AddNumberToObject(fresh, "ind", item);
+        cJSON_AddNumberToObject(fresh, "cnt", 1);
+        cJSON_AddNumberToObject(fresh, "id", copy_id);
+        cJSON_AddItemToObject(fresh, "m", m ? cJSON_Duplicate(m, 1) : cJSON_CreateObject());
+        cJSON_AddNumberToObject(fresh, "st", 0);
+        cJSON_AddItemToArray(skins, fresh);
+        if (from_stack && item_stack) take_stack_unit(skins, item_stack);
+    }
+    if (paint_stack) take_stack_unit(skins, paint_stack);
+}
+
 void account_set_last_reward(const double ms) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in || !g_acc.data) return;

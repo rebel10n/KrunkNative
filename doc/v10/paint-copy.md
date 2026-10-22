@@ -173,6 +173,10 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   - the reply is `{copy_id, item_id, paint_item_id, m, count}` (`count`: the paints left).
   - The work is one transaction: `sh_item_paint` (`economy.c`) → `P_ITEM_PAINT` / `run_item_paint` (`db_economy.c`).
     The paint unit is consumed through `db_add_skin` (its audit row, source `paint`).
+- The social socket's `ip` frame (`social_ws.c` table, `sh_item_paint` in `economy.c`; the gapi socket has no `/items/`
+  route): `["ip", skinId, item, paint, colour, shader, uid]` -> `["ipr", {copy_id, item_id, paint_item_id, m, count} | null,
+  uid]`, or `["po", null, message]` for a refusal (the native paint picker's apply, `paint_picker.c`). Same work and
+  refusals as the HTTP route; the email gate counts it as a market write (`account_security.c`, F_MARKET).
 - `GET /market/inventory` (`v10_market.c`, `reply_inventory`): stacks as `{i, cnt, sid, st: 1}` (cnt = the unpainted
   units, sid = the store index), then one `{i, sid, m, st: 0}` row per painted copy (no `cnt`), with `m` = `{paint}` or
   `{paintShader}`.
@@ -214,11 +218,15 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   `copies_r` for the v10 page. The native client's trade and quick-sell pickers do not show copies yet.
 - The listing rows show a painted copy's paint (`m`); the purchase reply's `m` is still the listing's own value, not the
   paint.
-- No native paint picker. The official picker (a popup over the item viewer, deob:122013-122180, opened from an
-  inventory row at deob:149066) has no counterpart on origin/main: nothing calls `POST /items/{id}/paint` from the
-  client, and no window lists the owned paints. The only paint apply in the native client is the clan banner
-  (`clan_ui.c`, `POST /clans/{id}/banner-color`), which is a clan route. The owned card's badge (`skin_paint.c`,
-  `ui_loadout.c` `owned_paint_badge`) reads the owned entries' `m`, so a painted copy shows its badge once the list has it.
+- The native paint picker (`client/src/ui/paint_picker.c`) is opened from the owned card's paint button in the Loadout
+  chooser (`ui_loadout.c` `owned_card`, `paintOpen(ind, sid)`). It lists the owned paints (the owned list, sorted as
+  deob:122041) with their counts and applies the picked one over the social socket: the `ip` frame (see Routes), then it
+  takes the paint's unit locally (`account_paint_applied`) and the brain's `ua` push replaces the list. Not ported: the
+  official picker's preview (its item viewer iframe, deob:122013-122180); the popup shows the paints as swatches. The v10
+  button itself sits in the store inventory grid (deob:147316 markup, gated on `paintTargets` and a skinId at
+  deob:150226), not in the Loadout chooser; the native button is on the chooser's card, where the owned badge is. A
+  krunker.io account gets no button (nothing is sent to krunker.io for a paint, `v10_gapi` refuses writes there).
+  The clan banner (`clan_ui.c`, `POST /clans/{id}/banner-color`) is a separate clan route.
 - A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge. The paint of a copy is the client's own
   one (its `$account.skins`, section 6), so the local model is painted. A native client paints another player's worn
   skins from SKINS V2 (patch 6). The paint is the owner's first painted copy of that store index, the plain-index rule
@@ -271,3 +279,8 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   checks fail (403 NOT_IMPLEMENTED and no copy rows).
 - `net-bridge/v10Proxy.test.ts`: a `{i, m}` weapon slot keeps its paint in our spawn's add record, a copy-id slot and a
   plain index keep none. Run against origin/main's bridge sources, it fails (`T.loadoutPaintOf is not a function`).
+- `client/tests/paint_picker_e2e.py`: a scratch kn_brain and headless client_bin (online, token login). The Hat chooser's
+  Bullseye Halo (an unpainted unit) and two Red Paints: the card's paint button opens the picker, Paint sends `ip`, the
+  brain makes the copy (skin_copies, #dc3c3c), one paint is taken, the popup closes with "Painted Bullseye Halo with Red
+  Paint", and the card's badge reads "Painted: Red Paint". An account with no paint gets v10's empty state; a refused Paint
+  shows the brain's reason. Before this change the card has no paint button (the first check fails).

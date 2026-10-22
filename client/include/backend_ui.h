@@ -153,6 +153,8 @@ void clan_ui_reset(void);                   // account changed: drop clanData
 void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
 void account_remove_skin(int skin_index);   // acc.removeSkin: -1 of skin (a redeemed spin ticket)
+// A paint applied (paint_picker.c): one paint unit taken, copy_id gets paint m (from_stack: a stack's unit became it)
+void account_paint_applied(int item, int paint, int copy_id, int from_stack, const cJSON *m);
 void account_set_last_reward(double ms);    // acc.lastReward (the Free KR wheel's clock)
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)

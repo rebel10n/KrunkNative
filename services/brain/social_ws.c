@@ -777,6 +777,7 @@ static const SocialRoute k_routes[] = {
     {"raml", sh_mail_read_all},
     {"li", sh_market_list},
     {"uli", sh_market_unlist},
+    {"ip", sh_item_paint},              /* v10 items.setPaint: ["ip", skin, item, paint, colour, shader, uid] -> ["ipr", copy | null, uid] (economy.c) */
     {"pi", sh_market_buy},
     {"fil", sh_market_filter},
     {"srt", sh_inventory_sort},

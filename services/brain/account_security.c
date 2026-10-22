@@ -428,7 +428,7 @@ static unsigned frame_feature(const char *label, const cJSON *f) {
     if (!strcmp(label, "ict")) return F_CHAT;
     if (!strcmp(label, "ps") || !strcmp(label, "com")) return F_POST;
     if (!strcmp(label, "kr")) return F_GIFT;
-    if (!strcmp(label, "li") || !strcmp(label, "pi")) return F_MARKET;
+    if (!strcmp(label, "li") || !strcmp(label, "pi") || !strcmp(label, "ip")) return F_MARKET;
     if (!strcmp(label, "ctr") || !strcmp(label, "trA")) return F_TRADE;
     if (!strcmp(label, "cln") && cJSON_IsNumber(fa(f, 1)) && fa_int(f, 1, 0) == 1) return F_CLAN; /* create */
     if (!strcmp(label, "uploadM")) return F_PUBLISH;

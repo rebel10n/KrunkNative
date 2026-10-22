@@ -411,6 +411,10 @@ preview-hole-test-web: ## The same for the web build in headless Chromium at sev
 v10-market-e2e: build ## v10 Market & Trading from the v10 page: list, buy, quick sell, trade offer, accept (local kn_brain on sqlite, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/v10_market_e2e.py $(DEBUG_DIR) $(CURDIR)
 
+.PHONY: paint-picker-e2e
+paint-picker-e2e: build ## The owned card's paint picker: the Hat chooser's paint button opens the popup, Paint sends the socket's "ip" frame, the copy is made with its paint, the toast and the badge show it; an account with no paint gets the empty state; a refused Paint says why (local kn_brain on sqlite, headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/paint_picker_e2e.py $(DEBUG_DIR) $(CURDIR)
+
 .PHONY: loading-screens-e2e
 loading-screens-e2e: build ## Stuck "Loading" screens: the Junkyard, Trading, the Inbox (list and message), the Clan window and its Settings, and the lottery get an answer or an error with Retry within a deadline (local kn_brain on sqlite, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1800 $(PYTHON) -I client/tests/loading_screens_e2e.py $(DEBUG_DIR) $(CURDIR)
