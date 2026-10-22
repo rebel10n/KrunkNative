@@ -98,10 +98,20 @@ c.loadWaitMs = 20000; c.afterAcceptMs = 6000; c.joinWaitMs = 150000;
 fs.writeFileSync(dir + "/tools/krunker-local/config.json", JSON.stringify(c, null, 2) + "\n");' "$REPO" || exit 1
 
 export KN_BRAIN_INTERNAL_SECRET="$SECRET"
-start brain kn_brain "$BRAIN" "$BUILD/services/brain/kn_brain" --brain.host=127.0.0.1 --brain.port="$BRAIN" \
-  --database.driver=sqlite --database.path="$RUN/brain.db" --migrate --brain.region=local --brain.id=playable \
-  --brain.public_url=https://matchmaker.beta.krunker.io \
-  --accounts.signup_rewards.enabled=false --finder.poll_interval_s=1 || exit 1
+# The brain's port is picked free, but another process can take it before the brain binds it: run 2 of the 2026-10-22
+# stability target died with "cannot listen on 127.0.0.1:36770: Address already in use" and the run failed before it began.
+# A brain that exits before it listens gets the next free port, up to three tries (its pid file is removed first).
+for attempt in 1 2 3; do
+  start brain kn_brain "$BRAIN" "$BUILD/services/brain/kn_brain" --brain.host=127.0.0.1 --brain.port="$BRAIN" \
+    --database.driver=sqlite --database.path="$RUN/brain.db" --migrate --brain.region=local --brain.id=playable \
+    --brain.public_url=https://matchmaker.beta.krunker.io \
+    --accounts.signup_rewards.enabled=false --finder.poll_interval_s=1 && break
+  rm -f "$RUN/brain.pid"
+  [ "$attempt" -lt 3 ] || exit 1
+  rm -f "$RUN/brain.db" "$RUN/brain.db-"* "$RUN/brain.db-journal"
+  pick $((BRAIN + 1)); BRAIN=$PICK
+  echo "playable: brain retry on port $BRAIN (attempt $((attempt + 1)))" >&2
+done
 start server server_bin "$SERVER" env KN_GAMESERVER_BRAIN_SECRET="$SECRET" "$BUILD/server_bin" --cfg none \
   --config "$RUN/rotation.json" --headless --no-cli --port "$SERVER" --mode ffa --round-seconds "$ROUND_S" \
   --region us-nj --node-id PLAYABLE --name "Krunker Box Office playable" \

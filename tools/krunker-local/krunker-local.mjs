@@ -1172,10 +1172,17 @@ async function playable() {
       await key("keyDown", "w", "KeyW", 87);
       await sleep(500);
       for (let i = 0; i < 8; i++) { await mouse("mouseMoved", 640 + i * 12, 360); await sleep(60); }
-      await mouse("mousePressed", 640, 360);
-      await sleep(150);
-      await mouse("mouseReleased", 640, 360);
-      await sleep(1500);
+      // The fire press repeats until the page logs a hitscan shot (its physObj call with a numeric trail: the shot assertion (i)
+      // reads). One press can come out as a shell casing only (the first fire of the window): (d) counts that as a shot, but
+      // (i) then has no hitscan to check (2 of 3 runs on 3f4756dd, 2026-10-22). Each try is a real press and release; at most four.
+      for (let k = 0; k < 4; k++) {
+        await mouse("mousePressed", 640, 360);
+        await sleep(150);
+        await mouse("mouseReleased", 640, 360);
+        await sleep(400);
+        if ((await snap()).hits > (before.hits || 0)) break;
+      }
+      await sleep(1100);
       await key("keyUp", "w", "KeyW", 87);
       await sleep(800);
       report.input = { before, after: await snap() };
