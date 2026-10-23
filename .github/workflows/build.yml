@@ -545,7 +545,7 @@ jobs:
       # client/tests/melee_assets_test checks the melee models and textures the client loads. They are
       # downloaded game content (gitignored, not in the checkout): fetch the melee part from the download host.
       - name: Melee game content
-        run: python3 -I tools/assets/fetch_content.py assets --only models/melee/ --only textures/melee/
+        run: python3 -I tools/assets/fetch_content.py assets --only models/melee/ --only textures/melee/ --only textures/weapons/pat/
 
       - name: make check
         run: make check
