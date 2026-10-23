@@ -458,6 +458,7 @@ const KnUpdatePlatform *kn_update_manifest_platform(const KnUpdateManifest *m, c
 }
 
 const char *kn_update_download_url(const KnUpdateManifest *m, const char *platform, const char *kind) {
+    if (kind && !strcmp(kind, "AppImage")) return m ? m->page : ""; // no archive for it: the release page
     const KnUpdatePlatform *p = kn_update_manifest_platform(m, platform);
     const char *archive = kn_update_archive_kind(platform);
     for (int pass = 0; p && pass < 2; pass++) {
@@ -648,8 +649,9 @@ int kn_install_marker_parse(const char *json, const size_t len, KnInstallMarker 
     return out->format >= 1;
 }
 
+// deb/rpm: the package manager's; AppImage: a read-only image, replaced by downloading the new one
 int kn_install_self_updatable(const KnInstallMarker *m) {
-    return m && strcmp(m->package, "deb") != 0 && strcmp(m->package, "rpm") != 0;
+    return m && strcmp(m->package, "deb") != 0 && strcmp(m->package, "rpm") != 0 && strcmp(m->package, "AppImage") != 0;
 }
 
 #define KN_STR2(x) #x

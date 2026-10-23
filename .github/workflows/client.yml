@@ -9,6 +9,9 @@ name: Client
 #   BoxOffice-linux-x64.tar.gz, BoxOffice-linux-arm64.tar.gz  Ubuntu 22.04 build, dynamic: distro OpenSSL 3,
 #                                                             glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+),
 #                                                             WebKitGTK bundled for the captcha webview
+#   BoxOffice-linux-x64.AppImage, BoxOffice-linux-arm64.AppImage
+#                                                             the same package as one AppImage (the recommended
+#                                                             Linux download; tools/release/package-appimage.sh)
 #   BoxOffice-windows-x64.zip                                 MinGW-w64, fully static
 #   BoxOffice-macos-arm64.zip, BoxOffice-macos-x64.zip        BoxOffice.app, ANGLE (Metal), static OpenSSL, macOS 11+
 # plus the mobile apps (platform/README.md), WebViews over https://krunk.io/ (the web client is
@@ -124,6 +127,15 @@ jobs:
           missing="$(comm -23 <(git ls-files assets | grep -vx assets/README.md | sort) \
             <(tar -tzf "out/BoxOffice-${{ matrix.platform }}.tar.gz" | sed -n 's|^runtime/||p' | grep '^assets/' | sort))"
           [ -z "$missing" ] || { echo "::error title=Package::tracked assets missing from the package: $missing"; exit 1; }
+
+      # The same package as an AppImage (tools/release/package-appimage.sh, pinned appimagetool). It runs
+      # with no FUSE here (APPIMAGE_EXTRACT_AND_RUN) and its --version must match the tarball's launcher.
+      - name: AppImage
+        run: |
+          set -euo pipefail
+          a="${{ matrix.platform }}"
+          tools/release/package-appimage.sh "out/BoxOffice-$a.tar.gz" out
+          APPIMAGE_EXTRACT_AND_RUN=1 "out/BoxOffice-$a.AppImage" --version
 
       # Unpack the package the way users do, in distro containers, and run --version (no game content
       # in CI, so no render: tools/release/test-client-linux.sh with a content dir does that locally).
@@ -552,8 +564,10 @@ jobs:
             echo
             echo "| Platform | Downloads |"
             echo "|---|---|"
-            row "Linux x64 (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-x64 tar.gz
-            row "Linux arm64 (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-arm64 tar.gz
+            row "Linux x64 AppImage (recommended; any distro with glibc 2.35+)" linux-x64 AppImage
+            row "Linux arm64 AppImage (recommended; any distro with glibc 2.35+)" linux-arm64 AppImage
+            row "Linux x64 tar.gz (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-x64 tar.gz
+            row "Linux arm64 tar.gz (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-arm64 tar.gz
             row "Windows 10+ x64" windows-x64 zip
             row "macOS 11+ Apple silicon" macos-arm64 zip
             row "macOS 11+ Intel" macos-x64 zip

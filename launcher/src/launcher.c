@@ -489,8 +489,10 @@ static void *work(void *arg) {
         if (!L.in.has_marker) {
             status(-1, NULL, "Development build: not updating");
         } else if (!kn_install_self_updatable(&L.in.marker)) {
+            const int appimage = !strcmp(L.in.marker.package, "AppImage");
             status(-1, kn_update_download_url(&m, L.in.platform, L.in.marker.package),
-                   "Update %s available: update " KN_PRODUCT_NAME " with your package manager", L.latest);
+                   appimage ? "Update %s available: download the new AppImage" : "Update %s available: update " KN_PRODUCT_NAME " with your package manager",
+                   L.latest);
         } else if (!L.in.root_writable) {
             status(-1, L.in.root, "Update available, but the install directory is read-only");
         } else if (!update_executables(&m)) {
