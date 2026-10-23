@@ -3638,7 +3638,13 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         char path[256], enc[192];
         backend_url_encode(enc, sizeof(enc), id);
         snprintf(path, sizeof(path), "/mm/game-info?game=%s", enc);
-        mm_get(path, on_checked_info, NULL);
+        if (!mm_get(path, on_checked_info, NULL)) {
+            // not sent (the brain gate while a krunker.io session is active, or a full queue): no answer will come,
+            // so the row says ERROR as v7 does when game-info fails, instead of doing nothing
+            if (cell) html_dom_set_text(cell, "ERROR");
+            if (g_checked_timer) html_timer_cancel(g_checked_timer);
+            g_checked_timer = html_timer_add(1000.0, checked_restore, NULL);
+        }
         return 1;
     }
     return -1;
