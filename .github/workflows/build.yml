@@ -13,7 +13,7 @@ on:
 # not cancelled: agents push faster than a build takes); PR runs cancel their predecessor.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true # only the newest push matters: an older commit's run is superseded
 
 permissions:
   contents: read
