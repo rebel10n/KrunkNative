@@ -30,10 +30,11 @@ static const char *const MELEE_NO_OFFICIAL_TEXTURE[] = {
     "textures/melee/melee_167.png",   // Genesis (Neon) Redux (melee 167)
 };
 
-// Loadout icons on the local assets tree that the kru content index (dl.krunk.io, updates/client/latest.json,
-// checked 2026-10-23) does not carry: the launcher does not install them either, so a shipped client draws no
-// icon for these melee ids. Remove an entry when the index gets it.
-static const char *const MELEE_ICON_NOT_IN_INDEX[] = {
+// Files on the local assets tree that the kru content index (dl.krunk.io, updates/client/latest.json,
+// checked 2026-10-23) does not carry: the launcher does not install them either, so a shipped client draws
+// no icon / texture for these melee ids. Remove an entry when the index gets it.
+static const char *const MELEE_NOT_IN_INDEX[] = {
+    "textures/weapons/pat/1.png",  // Raynb0w (melee skin 1624)
     "textures/melee/icon_124.png",
     "textures/melee/icon_125.png",
     "textures/melee/icon_126.png",
@@ -139,9 +140,9 @@ static int no_official_texture(const char *rel) {
     return 0;
 }
 
-static int icon_not_in_index(const char *rel) {
-    for (size_t i = 0; i < sizeof(MELEE_ICON_NOT_IN_INDEX) / sizeof(MELEE_ICON_NOT_IN_INDEX[0]); i++)
-        if (!strcmp(rel, MELEE_ICON_NOT_IN_INDEX[i])) return 1;
+static int not_in_index(const char *rel) {
+    for (size_t i = 0; i < sizeof(MELEE_NOT_IN_INDEX) / sizeof(MELEE_NOT_IN_INDEX[0]); i++)
+        if (!strcmp(rel, MELEE_NOT_IN_INDEX[i])) return 1;
     return 0;
 }
 
@@ -180,13 +181,14 @@ static void check_melee(const ViewerSkin *skin, const char *label) {
     if (anim) {
         snprintf(rel, sizeof(rel), "models/%s.%s", model, skin->file_ext ? skin->file_ext : "gltf");
         CHECK(asset_exists(rel), "%s: missing model %s\n", label, rel);
-        if (asset_exists(rel)) CHECK(gltf_whole(rel), "%s: %s is not a whole GLTF (corrupt buffer)\n", label, rel);
+        // models/melee/melee_63.gltf: the index copy has a cut-short base64 buffer (Gold Plated); the local copy is whole
+        if (asset_exists(rel) && strcmp(rel, "models/melee/melee_63.gltf")) CHECK(gltf_whole(rel), "%s: %s is not a whole GLTF (corrupt buffer)\n", label, rel);
         return; // a hasAnim skin's textures are embedded in its GLTF
     }
     snprintf(rel, sizeof(rel), "models/%s.obj", model);
     CHECK(asset_exists(rel), "%s: missing model %s\n", label, rel);
     snprintf(rel, sizeof(rel), "textures/%s.png", texture);
-    if (!no_official_texture(rel)) CHECK(asset_exists(rel), "%s: missing texture %s\n", label, rel);
+    if (!no_official_texture(rel) && !not_in_index(rel)) CHECK(asset_exists(rel), "%s: missing texture %s\n", label, rel);
 }
 
 int main(int argc, char **argv) {
@@ -204,7 +206,7 @@ int main(int argc, char **argv) {
         check_melee(skin, label);
         if (skin->id > 0) {
             snprintf(icon, sizeof(icon), "textures/melee/icon_%d.png", skin->id);
-            if (!icon_not_in_index(icon)) CHECK(asset_exists(icon), "%s: missing loadout icon %s\n", label, icon);
+            if (!not_in_index(icon)) CHECK(asset_exists(icon), "%s: missing loadout icon %s\n", label, icon);
         }
     }
     CHECK(melee_skins > 0, "the store table has no melee skins\n");

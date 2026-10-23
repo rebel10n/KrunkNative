@@ -871,11 +871,17 @@ else ()
     # map_vivo_gap_test: the loader's objects around Vivo's wall-top gap (shared/tests/map_vivo_gap_test.c).
     # Run from the source root (assets/).
     add_executable(map_vivo_gap_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_vivo_gap_test.c)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(map_vivo_gap_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
     target_link_libraries(map_vivo_gap_test PRIVATE m)
     add_test(NAME map_vivo_gap_test COMMAND map_vivo_gap_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # vivo_floor_test: a player on Vivo's wall-top stack (shared/tests/vivo_floor_test.c) is supported at y 37.
     add_executable(vivo_floor_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/vivo_floor_test.c)
     target_link_libraries(vivo_floor_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(vivo_floor_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
     add_test(NAME vivo_floor_test COMMAND vivo_floor_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # nav_overlay_test (KrunkNative spectate overlay): the NET_EXT_KN_BOT_PATH body
     # (shared/src/bot_path_net.c fill / decode) and the GL-free overlay geometry
