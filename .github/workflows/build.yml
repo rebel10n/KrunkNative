@@ -216,26 +216,21 @@ jobs:
   # build shares; README.md "ANGLE / Metal (macOS)"). CI never builds ANGLE: the ANGLE jobs
   # download the prebuilt release asset pinned and checksummed in tools/angle/angle.lock
   # (tools/angle/fetch-angle.sh; published by the dispatch-only `angle` workflow) and are
-  # skipped, with a warning, when there is none for their arch. The `desktop` entry keeps
-  # Apple's deprecated OpenGL 4.1 fallback (KRUNKNATIVE_GL_BACKEND=desktop) compiling.
+  # skipped, with a warning, when there is none for their arch. One build per arch: the renderer
+  # is ANGLE (Metal) everywhere; the desktop OpenGL fallback is a configure option, not a CI job.
   macos:
     needs: meta
-    name: macOS (Clang, ${{ matrix.gl == 'angle' && 'ANGLE/Metal' || 'desktop GL 4.1' }}, ${{ matrix.arch }})
+    name: macOS (Clang, ANGLE/Metal, ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: macos-latest
             arch: arm64
-            gl: angle
           # macos-13 (the last Intel "latest") was retired on 2025-12-04;
           # macos-15-intel is the supported x86_64 label until ~Aug 2027.
           - runner: macos-15-intel
             arch: x86_64
-            gl: angle
-          - runner: macos-latest
-            arch: arm64
-            gl: desktop
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
@@ -245,10 +240,8 @@ jobs:
         with:
           submodules: recursive
 
-      # available=false when angle.lock has no asset for this arch: the job's build steps are
-      # skipped (the desktop entry still compiles the macOS code).
+      # available=false when angle.lock has no asset for this arch: the job's build steps are skipped.
       - name: Fetch prebuilt ANGLE
-        if: matrix.gl == 'angle'
         id: angle
         run: tools/angle/fetch-angle.sh "macos-${{ matrix.arch }}" "$ANGLE_DIR" >> "$GITHUB_OUTPUT"
 
@@ -256,7 +249,7 @@ jobs:
       # never `brew update`/upgrade. Homebrew has no Intel bottles any more, so an upgrade
       # there compiles cmake from source (~45 min).
       - name: Install build dependencies
-        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        if: steps.angle.outputs.available == 'true'
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_UPGRADE: 1
@@ -279,21 +272,21 @@ jobs:
           done
 
       - name: Build (Release)
-        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
-        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=${{ matrix.gl }} ${{ needs.meta.outputs.cmake_flags }}"
+        if: steps.angle.outputs.available == 'true'
+        run: make release CMAKE_FLAGS="-DKRUNKNATIVE_GL_BACKEND=angle ${{ needs.meta.outputs.cmake_flags }}"
 
       - name: Run tests
-        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        if: steps.angle.outputs.available == 'true'
         run: ./cmake-build-release/proc_input_test
 
       - name: HTML engine smoke probe
-        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        if: steps.angle.outputs.available == 'true'
         run: ./cmake-build-release/ui_test lexbor-probe
 
       # client_bin links @rpath/libEGL.dylib with an @executable_path rpath, and the build copied
       # ANGLE's dylibs next to it (GLFW dlopens @rpath/libEGL.dylib + @rpath/libGLESv2.dylib).
       - name: Check ANGLE bundling
-        if: matrix.gl == 'angle' && steps.angle.outputs.available == 'true'
+        if: steps.angle.outputs.available == 'true'
         run: |
           set -euxo pipefail
           otool -L cmake-build-release/client_bin | tee /dev/stderr | grep -q '@rpath/libEGL.dylib'
@@ -307,23 +300,23 @@ jobs:
       # (fonts, models, textures). Run them locally with the assets (README.md "ANGLE / Metal").
 
       - name: Stage macOS artifact
-        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        if: steps.angle.outputs.available == 'true'
         run: |
           set -euxo pipefail
           mkdir -p dist
           cp -v cmake-build-release/client_bin cmake-build-release/server_bin dist/
           # ANGLE (Metal): client_bin loads them from its own directory (@executable_path rpath)
-          if [ "${{ matrix.gl }}" = angle ]; then cp -v cmake-build-release/libEGL.dylib cmake-build-release/libGLESv2.dylib dist/; fi
+          cp -v cmake-build-release/libEGL.dylib cmake-build-release/libGLESv2.dylib dist/
           cp -R ui dist/ui
           # no `| head` under pipefail: ls/find die of SIGPIPE once head has its lines
           du -sh dist
           find dist -maxdepth 1 | sort
 
       - name: Upload artifacts
-        if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
+        if: steps.angle.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: BoxOffice-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
+          name: BoxOffice-macos-${{ matrix.arch }}
           path: dist/**
           if-no-files-found: error
 
