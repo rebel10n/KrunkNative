@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -127,8 +128,9 @@ def fetch_object(objects_url, cache, sha, size):
     if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
         raise ValueError("object %s: size or sha256 mismatch" % sha)
     os.makedirs(os.path.dirname(obj), exist_ok=True)
-    tmp = obj + ".tmp%d" % os.getpid()
-    with open(tmp, "wb") as f:
+    # one temp file per call: workers fetching the same object (same bytes, same sha) must not share it
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(obj), prefix=os.path.basename(obj) + ".tmp")
+    with os.fdopen(fd, "wb") as f:
         f.write(data)
     os.replace(tmp, obj)
     return obj, size
