@@ -62,8 +62,8 @@ static const DlPkg PKGS[] = {
     {"windows-x64", DL_OS_WINDOWS, "x64", "Windows 10 / 11 (x64)", "Windows 10 and 11, 64-bit", {"zip"}},
     {"macos-arm64", DL_OS_MAC, "arm64", "macOS (Apple silicon)", "macOS 11 or newer, Apple silicon (M1 and later)", {"zip"}},
     {"macos-x64", DL_OS_MAC, "x64", "macOS (Intel)", "macOS 11 or newer, Intel", {"zip"}},
-    {"linux-x64", DL_OS_LINUX, "x64", "Linux x86_64 (glibc 2.35+)", "x86_64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)", {"tar.gz"}},
-    {"linux-arm64", DL_OS_LINUX, "arm64", "Linux arm64 (glibc 2.35+)", "arm64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)", {"tar.gz"}},
+    {"linux-x64", DL_OS_LINUX, "x64", "Linux x86_64 (glibc 2.35+)", "x86_64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)", {"AppImage", "tar.gz"}},
+    {"linux-arm64", DL_OS_LINUX, "arm64", "Linux arm64 (glibc 2.35+)", "arm64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)", {"AppImage", "tar.gz"}},
     {"android", DL_OS_ANDROID, NULL, "Android", "Android 7.0 or newer", {"apk"}},
     {"ios", DL_OS_IOS, NULL, "iPhone / iPad", "Add Krunker Box Office to your Home Screen", {"ipa"}},
 };
@@ -256,7 +256,8 @@ static const char *pkg_desc(const DlPkg *p) {
 }
 
 static void ext_label(const DlPkg *p, const char *ext, char *out, const size_t n) {
-    if (!strcmp(ext, "tar.gz") && p->os == DL_OS_LINUX) snprintf(out, n, "%s", I18N("kn.download.tarAnyDistro", ".tar.gz (any distro)"));
+    if (!strcmp(ext, "AppImage") && p->os == DL_OS_LINUX) snprintf(out, n, "%s", I18N("kn.download.appImageAnyDistro", ".AppImage (any distro)"));
+    else if (!strcmp(ext, "tar.gz") && p->os == DL_OS_LINUX) snprintf(out, n, "%s", I18N("kn.download.tarAnyDistro", ".tar.gz (any distro)"));
     else snprintf(out, n, ".%s", ext);
 }
 
@@ -321,8 +322,9 @@ static void rec_howto(StrBuf *sb, const DlDevice *d, const DlOs os) {
                                                "choose Open. The launcher downloads the game content (about 1.7 GB) and keeps it up to date."));
             break;
         case DL_OS_LINUX:
-            how(sb, I18N("kn.download.howLinux", "Unpack the .tar.gz into a folder of its own and run {0}./BoxOffice{1}. The launcher downloads the game content "
-                                                 "(about 1.7 GB) on the first start and keeps the client up to date."));
+            how(sb, I18N("kn.download.howLinux", "Make the .AppImage executable ({0}chmod +x{1} on it, or Properties, Allow executing), then run it. "
+                                                 "It needs no install. The launcher downloads the game content (about 1.7 GB) on the first start "
+                                                 "and keeps the client up to date. The .tar.gz unpacks into a folder of its own: run {0}./BoxOffice{1} there."));
             break;
         case DL_OS_ANDROID:
             how(sb, d->app ? I18N("kn.download.howAndroidApp", "You are playing in the Krunker Box Office app: it always runs the latest game from krunk.io.")
@@ -365,7 +367,7 @@ static void other_row(StrBuf *sb, const DlPkg *p, const int odd) {
     }
     for (int i = 0; i < DL_EXT_MAX && p->exts[i]; i++) {
         pkg_url(p, p->exts[i], url, sizeof(url));
-        snprintf(label, sizeof(label), ".%s", p->exts[i]);
+        ext_label(p, p->exts[i], label, sizeof(label));
         dl_link(sb, "knDlLink", url, label);
     }
     sb_append(sb, "</div></div>");
