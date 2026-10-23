@@ -779,6 +779,31 @@ static int gltf_skin_available(const ViewerSkin *skin, const char *model_key) {
     return ok;
 }
 
+// A weapon skin flagged pending (weapon_skin_pending): its GLTF or OBJ model is on disk now. The generate
+// loop's own test, read from the files, so it asks the same question the build did (gltf_model_load starts the
+// download of a missing GLTF). The player's meshes are then rebuilt (main.c client_refresh_weapon_skins).
+int player_weapon_skin_ready(const Player *player) {
+    const PlayerMesh *player_mesh = player->mesh;
+    if (!player_mesh || !player_mesh->weapon_skin_pending || !player->game) return 0;
+    for (int i = 0; i < player->loadout_size; i++) {
+        const Weapon *weapon = player->game->weapons[player->loadout[i]];
+        if (!weapon || !weapon->src || nettspend_weapon_kind(player->loadout[i])) continue;
+        const ViewerSkin *skin = player_slot_skin(player, i, weapon);
+        if (!skin) continue;
+        char model[128], texture[192];
+        weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
+        if (gltf_skin_available(skin, model)) return 1;
+        char rel[192], *path;
+        snprintf(rel, sizeof(rel), "models/%s.obj", model);
+        path = concat(assets_path(), rel);
+        FILE *file = path ? fopen(path, "rb") : NULL;
+        if (file) fclose(file);
+        free(path);
+        if (file) return 1;
+    }
+    return 0;
+}
+
 // The GLTF remodels follow their carrier's visibility and advance their clips.
 static void player_weapon_models_update(const PlayerMesh *player_mesh, const int loadout_size) {
     if (!player_mesh->arms) return;
@@ -1408,6 +1433,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                     // hasAnim: a GLTF remodel, one instance per hand below (empty_geometry marks it)
                     Geometry *skin_geo = gltf_skin_available(skin, model) ? gltf_empty_geometry() : skin_model(model);
                     if (!skin_geo && skin) { // a remodel this build lacks: the plain weapon
+                        player_mesh->weapon_skin_pending = 1; // not on disk yet (or never): rebuilt when it is
                         skin = NULL;
                         weapon_skin_keys(weapon, NULL, model, sizeof(model), texture, sizeof(texture));
                         skin_geo = skin_model(model);

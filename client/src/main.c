@@ -1273,6 +1273,19 @@ void client_add_player_mesh(Client *client, Player *player, const int render_you
     }
 }
 
+// A weapon skin whose model was still downloading when a player was built showed the plain weapon; once the
+// model is on disk the player is rebuilt the way a respawn rebuilds it (client_drop_player_mesh + add), not on the
+// next death.
+static void client_refresh_weapon_skins(Client *client) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        Player *player = client->game.players[i];
+        if (!player || !player_weapon_skin_ready(player)) continue;
+        scene_remove_player_mesh(player->render_you ? client->fps_scene : client->scene, player->mesh, player->loadout_size);
+        player_meshes_fini(player);
+        client_add_player_mesh(client, player, player->render_you);
+    }
+}
+
 void client_drop_player_mesh(Client *client, Player *player) {
     if (!player->mesh) return;
 
@@ -2408,6 +2421,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
     camera_feel_update(MIN(delta, game_constants.max_delta)); // RENDER.updateShake(deltaMs)
     hud_ui_nuke_flash_step(delta); // index.js gameLoop: the Nuke's #imgFlash fades by gameTimeDiff
     for (size_t i = 0; i < client->game.player_count; i++) player_mesh_debug_log(client->game.players[i], now); // KRUNKNATIVE_PLAYER_LOG
+    static unsigned int weapon_skin_tick; // every 30 frames: the pending weapon skins' files (client_refresh_weapon_skins)
+    if (!(++weapon_skin_tick % 30)) client_refresh_weapon_skins(client);
 
     // World + first-person scene, then the native HUD / overlay (client_tick composites the page after).
     // resolution/antiAlias/aspectRatio/saturationn/hue: world + first-person passes go

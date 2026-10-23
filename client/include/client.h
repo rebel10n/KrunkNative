@@ -526,6 +526,9 @@ typedef struct {
     Mesh *prop;
     double pet_clock;             // gltf_clock() of the last pet / item-effect update, < 0 before the first
     float effect_timer;           // players.js itemEffects effectTimer (ms)
+    // a weapon skin's model was not on disk when this was built (the plain weapon shows meanwhile):
+    // player_weapon_skin_ready() says when to rebuild the player's meshes (client_refresh_weapon_skins)
+    int weapon_skin_pending;
 } PlayerMesh;
 
 enum {
@@ -539,6 +542,7 @@ int prop_hunt_player(const Player*);
 void player_update_meshes(Player*, int);
 void player_meshes_fini(Player*);
 void player_mesh_debug_log(Player*, double now); // KRUNKNATIVE_PLAYER_LOG (player_mesh.c)
+int player_weapon_skin_ready(const Player*); // a pending weapon skin's model is on disk now (player_mesh.c)
 // KrunkNative Piss: world points of the held weapon's hose (the first-person one in the trigger hand,
 // else the pelvis one): its tip (hoseTip, where the spray leaves), its back end and the trigger hand's
 // centre; any may be NULL. 0 when the held weapon has no hose.
