@@ -572,7 +572,7 @@ static void swap_scan(const char *rel) {
 
 static void swap_add_root(const char *path) {
     if (g_swap.root_count >= 3 || !path || !*path) return;
-    char resolved[CS_PATH_MAX];
+    char resolved[PATH_MAX]; // realpath writes up to PATH_MAX; glibc's _FORTIFY_SOURCE aborts on a smaller buffer
 #ifdef _WIN32
     if (!_fullpath(resolved, path, sizeof(resolved))) return;
     for (char *c = resolved; *c; c++) if (*c == '\\') *c = '/';
