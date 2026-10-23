@@ -527,12 +527,7 @@ static void parts_free(Parts *ps) {
 }
 
 static int face_mask(const cJSON *f) {
-    // prefab.c prefab_face_mask: "f" hex, bit 5 - i = Krunker face i
-    if (!cJSON_IsString(f)) return 0x3f;
-    const long bits = strtol(f->valuestring, NULL, 16);
-    int mask = 0;
-    for (int i = 0; i < 6; i++) if (bits & (1L << (5 - i))) mask |= 1 << i;
-    return mask;
+    return map_face_mask(f); // shared map.c: the v10 "f" reading (hex or list), same as prefab.c
 }
 
 // Builds the part of one object; 0 = nothing exported for it.

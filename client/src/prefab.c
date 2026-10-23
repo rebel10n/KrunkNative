@@ -34,17 +34,9 @@
 #define PREFAB_AMBIENT_MULT 0.7f
 
 
+// the "f" switches (hex string or list, shared map.c map_face_mask)
 static int prefab_face_mask(const cJSON *raw_faces) {
-    if (!cJSON_IsString(raw_faces)) return 0x3f;
-
-    const long bits = strtol(cJSON_GetStringValue(raw_faces), NULL, 16);
-    int mask = 0;
-
-    for (int i = 0; i < 6; i++) {
-        if (bits & (1 << (5 - i))) mask |= 1 << i;
-    }
-
-    return mask;
+    return map_face_mask(raw_faces);
 }
 
 static void prefab_apply_lighting_controls(BasicMaterial *material, const Object *object) {

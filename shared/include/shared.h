@@ -640,6 +640,10 @@ Map *map_init_ex(const cJSON*, int build_meshes);
 // become CUBE (numeric strings index like numbers). Validation rejects unknown ids first
 // (map_validate.h); the name lookup is prefab_id_from_name (prefabs.h).
 int map_raw_object_prefab(const cJSON *raw_obj);
+// The CUBE face mask (bit i = Krunker face i) of a raw object's "f" field, as v10's map loader reads
+// it: a hex string, a list of per-face switches, or anything else (no "f") = all six faces.
+// shared/src/map.c explains the v10 reference lines.
+int map_face_mask(const cJSON *raw_faces);
 // 1 when map_init makes a map->objects entry for this raw object: it has p and s arrays and its
 // prefab builds a map object (not TERMINAL, AI_SPAWNER, BOT_SPAWNER or EVENT; prefab_info()
 // PREFAB_R_NO_OBJECT). Code pairing raw_data objects with map->objects in order must skip

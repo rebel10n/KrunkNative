@@ -69,6 +69,38 @@ static int map_truthy(const cJSON *item) {
     return 1;
 }
 
+// The CUBE face switches of a raw map object as v10 reads them (deob-10.0.3.js: the map loader
+// at the CUBE addBlock call, `f[i] && f[i][k] != null ? f[k] : 1`, and UTILS.convertFaces for
+// strings). Bit i of the result is Krunker face i (0 +X, 1 -X, 2 top, 3 bottom, 4 +Z, 5 -Z).
+//  - a hex string (convertFaces): the binary digits are read MSB first, face i = digit i. Values of
+//    7 or 8 bits take the top digits. "" is falsy in JS and keeps every face.
+//  - a list [1, 1, 1, 1, 1, 0] (4541 objects in the custom maps): element i is the switch of face
+//    i; a missing or null element is on, a falsy one (0, false, "") is off.
+//  - no "f", a number or any other value: every face (generateCube's default [1,1,1,1,1,1]).
+int map_face_mask(const cJSON *raw_faces) {
+    if (cJSON_IsString(raw_faces)) {
+        const char *s = cJSON_GetStringValue(raw_faces);
+        if (!s || !*s) return 0x3f;
+        const unsigned long bits = strtoul(s, NULL, 16);
+        int length = 6;
+        while (length < 64 && (bits >> length) != 0) length++;
+        int mask = 0;
+        for (int i = 0; i < 6; i++) {
+            if ((bits >> (length - 1 - i)) & 1ul) mask |= 1 << i;
+        }
+        return mask;
+    }
+    if (cJSON_IsArray(raw_faces)) {
+        int mask = 0;
+        for (int i = 0; i < 6; i++) {
+            const cJSON *item = cJSON_GetArrayItem(raw_faces, i);
+            if (!item || cJSON_IsNull(item) || map_truthy(item)) mask |= 1 << i;
+        }
+        return mask;
+    }
+    return 0x3f;
+}
+
 int map_raw_object_prefab(const cJSON *raw_obj) {
     const cJSON *obj_i = cJSON_GetObjectItem(raw_obj, "i");
     const cJSON *obj_id = cJSON_GetObjectItem(raw_obj, "id");

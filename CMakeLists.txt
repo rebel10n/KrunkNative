@@ -861,6 +861,10 @@ else ()
         target_link_libraries(map_drop_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
     endif ()
     add_test(NAME map_drop_test COMMAND map_drop_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    # map_face_mask_test: the CUBE face switches of a raw "f" field, hex or list (shared/tests/map_face_mask_test.c).
+    add_executable(map_face_mask_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_face_mask_test.c)
+    target_link_libraries(map_face_mask_test PRIVATE m)
+    add_test(NAME map_face_mask_test COMMAND map_face_mask_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # map_vivo_gap_test: the loader's objects around Vivo's wall-top gap (shared/tests/map_vivo_gap_test.c).
     # Run from the source root (assets/).
     add_executable(map_vivo_gap_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_vivo_gap_test.c)
