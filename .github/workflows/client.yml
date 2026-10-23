@@ -436,10 +436,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 2026-10-23: this install hung for 35 min (the job's timeout cancelled it). Capped, so a hang fails fast.
       - name: Install XcodeGen
+        timeout-minutes: 10
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_UPGRADE: 1
+          HOMEBREW_NO_ANALYTICS: 1
         run: brew install xcodegen
 
       # an empty web/ folder reference: the app opens KN_SERVER_URL
