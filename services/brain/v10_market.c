@@ -1385,8 +1385,11 @@ static void step_view_listings(Op *op) {
     op_call(op, sh_market_filter, f);
 }
 
-/* {stats, owners, sales, listings, stackable, wearable} (the view's four parts, and KrunkNative's
- * "none" for stackable and wearable: the skins file has neither) */
+/* {stats, owners, sales, listings, stackable, wearable}: the view's four parts. stackable true: KrunkNative keeps
+ * every item as a stack (inventory counts; a painted copy is a copy of a stacked item, not a mint), and 10.0.3 adds
+ * its Mints (and Wear) tabs only for stackable === false, a per-copy minted item whose instances it lists
+ * (deob-10.0.3.js:123271-123281, 123335); KrunkNative has no instances (/items/:id/instances is []). wearable false:
+ * the skins file has no wear. */
 static void reply_view(Op *op) {
     if (op_failed(op)) return;
     const cJSON *info = op_arg(op, "0", 3);
@@ -1405,7 +1408,7 @@ static void reply_view(Op *op) {
         }
     }
     cJSON_AddItemToObject(o, "listings", listings);
-    cJSON_AddFalseToObject(o, "stackable");
+    cJSON_AddTrueToObject(o, "stackable");
     cJSON_AddFalseToObject(o, "wearable");
     v10_reply_data(op->req, 200, o);
 }

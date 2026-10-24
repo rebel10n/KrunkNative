@@ -465,8 +465,8 @@ def market_scenario(port, path):
     expect_data("140 GET /items/{id}/view", st, r,
                 lambda d: isinstance(d, dict) and isinstance(d.get("stats"), dict) and is_int(d["stats"].get("onS"))
                 and any(o.get("nm") == BUYER for o in d.get("owners") or []) and isinstance(d.get("sales"), list)
-                and isinstance(d.get("listings"), list) and d.get("stackable") is False and d.get("wearable") is False,
-                "{stats, owners, sales, listings, stackable, wearable} (v10.0.3 5160; v10.js 128558)")
+                and isinstance(d.get("listings"), list) and d.get("stackable") is True and d.get("wearable") is False,
+                "{stats, owners, sales, listings, stackable true (no Mints tab: 10.0.3 adds it for stackable === false, deob-10.0.3.js:123271), wearable}")
     st, r = http(port, "GET", "/items/%d/view" % NO_ITEM)
     expect_not_found("140 GET /items/{id}/view (unknown)", st, r, "ITEMS_INVALID_ID")
     st, r = http(port, "GET", "/items/%d/sales?range=0" % ITEM)

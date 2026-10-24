@@ -17,7 +17,7 @@ v10.0.2 lines (`v10.js`) of the earlier pass.
 - **no 10.0.3 reader**: 10.0.3 defines the call but nothing reads it.
 - **open**: a known difference left for a later change (the reason is in the cell).
 
-Counts: verified 142, fixed 33, by design 26, no 10.0.3 reader 16, open 1 (218 rows).
+Counts: verified 141, fixed 35, by design 26, no 10.0.3 reader 16, open 0 (218 rows).
 
 Cross-cutting findings:
 
@@ -133,7 +133,7 @@ After this change (the v10 API completion, branch api-full-http): implemented 83
 | 81 | gapi | GET | `/shop/wild-offer` | shop.getWildOffer (26539) | missing: not_found fallback (public_routes.c:677) | implemented | wild_offer.c (P_WILD_OFFER: kr_transactions, skin_transactions) | verified (30486-30500; 143826-143996) |
 | 82 | gapi | POST | `/shop/wild-offer/purchase` | shop.purchaseWildOffer (26544) | missing: not_found fallback (public_routes.c:677) | implemented | wild_offer.c (P_WILD_OFFER_BUY: players.player_funds, skin_transactions) | verified (30486-30500; 143826-143996) |
 | 83 | gapi | POST | `/shop/wild-offer/refresh` | shop.refreshWildOffer (26553) | missing: not_found fallback (public_routes.c:677) | implemented | wild_offer.c (P_WILD_OFFER_REFRESH: kr_transactions) | verified (30486-30500; 143826-143996) |
-| 84 | gapi | GET | `/lottery/{id}` | lottery.getLottery (26566) | missing: not_found fallback (public_routes.c:677) | alias | lottery.c | open: `current_draw.prizes` is not sent, so the prize boxes are empty (30513; 142922-142949) |
+| 84 | gapi | GET | `/lottery/{id}` | lottery.getLottery (26566) | missing: not_found fallback (public_routes.c:677) | alias | lottery.c | **fixed**: `current_draw.prizes`, the window's prize list rolled when its draw opens (db_lottery.c draw_open; the first is the Grand Prize), and paid by the draw (30513; 142922-142960) |
 | 85 | gapi | POST | `/lottery/{id}/participate` | lottery.participateInLottery (26571) | missing: not_found fallback (public_routes.c:677) | alias | lottery.c | **fixed**: cost_quantity is the units paid, not bundles (30518; 142675-142699, 142917) |
 | 86 | gapi | GET | `/maps` | maps.getMaps (26581) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c | verified (30527; 262624) |
 | 87 | gapi | GET | `/maps/{id}` | maps.getMap (26586) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c | verified (30532; 256740) |
@@ -189,7 +189,7 @@ After this change (the v10 API completion, branch api-full-http): implemented 83
 | 137 | gapi | GET | `/market/black-market/rank` | market.getBlackMarketRank (26929) | missing: not_found fallback (public_routes.c:677) | implemented (null: no rank) (was: empty) | ranked_profiles (peak_mmr) | verified (122641-122654, 30940; 152786, 152831) |
 | 138 | gapi | POST | `/market/black-market/purchase` | market.purchaseBlackMarketItem (26934) | missing: not_found fallback (public_routes.c:677) | implemented (was: refusal (403 NOT_IMPLEMENTED)) | economy.c (sh_blackm_buy); skin_transactions, players | verified (122641-122654, 30940; 152786, 152831) |
 | 139 | gapi | GET | `/market/history[?{q}]` | market.getHistory (26948) | missing: not_found fallback (public_routes.c:677) | implemented (was: refusal (403 NOT_IMPLEMENTED)) | economy.c (market_page history); market_listings | verified (122659; 147567, 150717) |
-| 140 | gapi | GET | `/items/{id}/view` | items.getView (26957) | missing: not_found fallback (public_routes.c:677) | implemented (404 for an id not in skins.json) (was: empty (404 for an id not in skins.json)) | economy.c (P_MARKET_ITEM, sh_item_stats, sh_market_filter); market_listings, inventory | verified (122532; 123330-123753); stackable false adds an empty Mints tab (123271) |
+| 140 | gapi | GET | `/items/{id}/view` | items.getView (26957) | missing: not_found fallback (public_routes.c:677) | implemented (404 for an id not in skins.json) (was: empty (404 for an id not in skins.json)) | economy.c (P_MARKET_ITEM, sh_item_stats, sh_market_filter); market_listings, inventory | **fixed**: stackable true: every KrunkNative item is a stack, so no empty Mints / Wear tab (10.0.3 adds them for stackable === false) (122532; 123271-123281, 123335) |
 | 141 | gapi | GET | `/items/{id}/sales?range={r}` | items.getSales (26963) | missing: not_found fallback (public_routes.c:677) | implemented (404 for an id not in skins.json) (was: empty (404 for an id not in skins.json)) | economy.c (sh_item_stats); market_listings | verified (30985; 123825) |
 | 142 | gapi | GET | `/items/{id}/instances?sort={s}` | items.getInstances (26969) | missing: not_found fallback (public_routes.c:677) | empty (404 for an id not in skins.json; no per-copy instances) (was: empty (404 for an id not in skins.json)) | none (KrunkNative keeps no per-copy instances) | by design: empty, no per-copy instances (122546; 123297) |
 | 143 | gapi | POST | `/items/{id}/paint` | items.setPaint (26974) | missing: not_found fallback (public_routes.c:677) | implemented (`{item_id, paint_item_id}`; {id} = a copy or a stack's store index; 400 for a non-paint) (was: refusal (403 NOT_IMPLEMENTED)) | v10_market.c h_item_paint -> economy.c sh_item_paint -> db_economy.c run_item_paint (skin_copies, 0352; doc/v10/paint-copy.md) | verified: error.message read (122139) |
