@@ -56,10 +56,12 @@ WEAPON_NONSCALAR_NOTES = {
 
 
 # Engine config keys with a GameConstants field (strike_constants_apply in strike_rules.c converts the units).
+# Strike's config also has v7.1.4's slippingSpeed, playerSlippingJumpCooldown, terrainSlideThreshold and
+# terrainSlipDecel: no code reads them (v7 or Strike) and v10.0.3 has none, so GameConstants has no field.
 PHYSICS_KEYS = (
     "billboardCnt", "mouseSens", "worldUV", "playerHeight", "borderH", "cameraHeight", "climbHeight", "dltMx",
-    "jumpVel", "aimJumpSlow", "jumpPush", "crouchJump", "crouchSpd", "crouchLean", "playerSpeed", "slippingSpeed",
-    "airSpeed", "aimSlow", "playerSlippingJumpCooldown", "terrainSlideThreshold", "terrainSlipDecel",
+    "jumpVel", "aimJumpSlow", "jumpPush", "crouchJump", "crouchSpd", "crouchLean", "playerSpeed",
+    "airSpeed", "aimSlow",
     "terrainSlideDecel", "terrainDecel", "slideDecel", "airDecel", "groundDecel", "ladderDecel", "crouchDst",
     "gravity", "armScale", "armInset", "chestWidth", "chestScale", "legScale", "legHeight", "headScale", "decelMin",
     "slideTime", "playerSlideVelMlt", "playerTerrainSlideVelMlt", "idleAnimS", "interpolation", "leanSens",

@@ -8,7 +8,9 @@ collision padding, ranked rules, map 0, INIT_GAME). Four are constants the 10.0.
 have and no code reads (slipping speed, terrain slide threshold, terrain slip decel, slipping jump
 cooldown; the jump cooldown itself matches: 0 after a jump). One is a session placeholder, not a
 constant. One audit statement was wrong about our code (row 332, isOfficial), and the audit is
-corrected. No ruleset or movement code changed.
+corrected. No ruleset or movement code changed then; on 2026-10-24 the four dead constants were removed
+from `GameConstants` (rows 1-4), and every constant of `constants_v10.c` now cites its `deob-10.0.3.js`
+line and is checked against the bundle's config object by `weapons_v10_test` (`shared/tests/data/v10/config.json`).
 
 ## Reference and method
 
@@ -31,10 +33,10 @@ corrected. No ruleset or movement code changed.
 
 | # | Audit row | KN value (file:line) | Krunker v10.0.3 | Result |
 |---|---|---|---|---|
-| 1 | Slipping speed | 0.3 (`constants_v10.c:35`) | no `slippingSpeed` key | not found (dead) |
-| 2 | Terrain slide threshold | 1.9 (`constants_v10.c:40`) | no `terrainSlideThreshold` key | not found (dead) |
-| 3 | Terrain slip decel | 0.99 (`constants_v10.c:41`) | no `terrainSlipDecel` key | not found (dead); the terrain decel that is read matches |
-| 4 | Slipping jump cooldown | 0.5 s (`constants_v10.c:39`) | no `playerSlippingJumpCooldown` key; the jump sets the cooldown to 0 | not found (dead); behaviour matches |
+| 1 | Slipping speed | removed (was 0.3, `slipping_speed`) | no `slippingSpeed` key | not found (dead): removed 2026-10-24 |
+| 2 | Terrain slide threshold | removed (was 1.9, `terrain_slide_threshold`) | no `terrainSlideThreshold` key | not found (dead): removed 2026-10-24 |
+| 3 | Terrain slip decel | removed (was 0.99, `terrain_slip_decel`) | no `terrainSlipDecel` key | not found (dead): removed 2026-10-24; the terrain decel that is read matches |
+| 4 | Slipping jump cooldown | removed (was 0.5 s, `player_slipping_jump_cooldown`) | no `playerSlippingJumpCooldown` key; the jump sets the cooldown to 0 | not found (dead): removed 2026-10-24; behaviour matches |
 | 5 | Crouch slow | 0.3 (`constants_v10.c:38`, used `player.c:1757`) | setting `crchSpd`, default 0.3 | match |
 | 6 | Collision padding | 1.1 (`constants_v10.c:75`) | `collPad` = 1.1 | match |
 | 7 | Ranked: no kill streaks, no class XP | `ruleset.c:37` `.no_streaks`, `.no_class_xp` | `!isRanked` on streaks and class scores | match |
@@ -50,7 +52,9 @@ corrected. No ruleset or movement code changed.
   tip "Slippery Ice Effect" (deob 22907). No code reads a slipping speed.
 - v7.1.4: `slippingSpeed = 0.0003` per ms (v7 2117), i.e. 0.3 per second in KN's units. No v7 game code
   reads it (`grep -rn slippingSpeed` in v7 `src/` finds only the export line).
-- KN reads it only in the Strike export (`shared/src/rules/strike/strike_rules.c:93`). Left as is.
+- KN read it only in the Strike export (`strike_rules.c`, Strike's config carries the v7 key). Removed
+  2026-10-24 with rows 2-4: the field is gone from `GameConstants`, and `tools/strike/gen_rules.py` no
+  longer lists the four keys among Strike's physics keys.
 
 ### 2. Terrain slide threshold (`terrain_slide_threshold` 1.9)
 
@@ -58,14 +62,14 @@ corrected. No ruleset or movement code changed.
   The terrain test (deob 192234) is `y <= terrain height`, with no slope threshold. The literal 1.9 in
   movement code is absent (the 1.9 literals are a weapon inspect value and a HUD scale).
 - v7.1.4: `terrainSlideThreshold = 1.9` (v7 2135), no reader.
-- Left as is.
+- Removed 2026-10-24.
 
 ### 3. Terrain slip decel (`terrain_slip_decel` 0.99)
 
 - 10.0.3: no `terrainSlipDecel` key (v7 2125: 0.99, no reader). The decel on terrain is
   `this.onTerrain ? 0.99` (deob 191631), which is KN's `terrain_decel` (`constants_v10.c:43`, the value
   that is read). That value matches.
-- Left as is.
+- Removed 2026-10-24.
 
 ### 4. Slipping jump cooldown (`player_slipping_jump_cooldown` 0.5 s)
 
@@ -74,7 +78,7 @@ corrected. No ruleset or movement code changed.
   "Jump Cooldown" setting is.
 - KN: `player->jump_timer = 0` (`shared/src/world.c:415`), and the comment at `shared/src/player.c:1268`
   says the same. Behaviour matches.
-- Left as is (the constant is unread in movement).
+- Removed 2026-10-24 (the constant was unread in movement).
 
 ### 5. Crouch slow (`crouch_slow` 0.3): match
 

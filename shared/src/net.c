@@ -488,6 +488,15 @@ int net_chat_allow(NetChatLimiter *limiter, const float now) {
     return limiter->count <= NET_CHAT_BURST_MAX;
 }
 
+// config.chatInterval (deob-10.0.3.js:22468): a chat line within NET_CHAT_INTERVAL of the sender's last
+// delivered line is dropped.
+int net_chat_spaced(NetChatLimiter *limiter, const float now) {
+    if (limiter->has_line && now - limiter->last_line < NET_CHAT_INTERVAL) return 0;
+    limiter->last_line = now;
+    limiter->has_line = 1;
+    return 1;
+}
+
 void net_packet_chat(NetChatPacket *packet, const int uid, const NetChatKind kind, const char *name, const char *text) {
     memset(packet, 0, sizeof(*packet));
     packet->uid = uid;

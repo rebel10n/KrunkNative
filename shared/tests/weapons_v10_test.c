@@ -344,6 +344,7 @@ static void check_config(const cJSON *config) {
 
     // chat, lag compensation, net rates (shared.h)
     CHECK(NET_CHAT_MAX_CHARS == (int) num(config, "chatMaxLength", -1), "chatMaxLength");
+    CHECK(near(NET_CHAT_INTERVAL, num(config, "chatInterval", NAN) / 1000.0), "chatInterval");
     CHECK(near(GAME_STATE_HISTORY, num(config, "stateHistory", NAN) / 1000.0), "stateHistory");
     CHECK(NET_STATE_SEND_HZ == (int) num(config, "serverSendFrequency", -1) && near(GAME_LAG_COMP_SEND_RATE, num(config, "serverSendFrequency", NAN)),
           "serverSendFrequency");
