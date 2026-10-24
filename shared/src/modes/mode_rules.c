@@ -5,6 +5,8 @@
 // mode_deposit.c.
 #include "mode_internal.h"
 #include <ai.h>
+#include <stalker.h> // STALKER_PICKED
+#include <map_catalog.h> // raid.onEnd: game.mapIndex (Bastion)
 #include <math.h>
 #include <string.h>
 
@@ -143,7 +145,22 @@ int mode_cond_raid(const Game *game) {
     return 0;
 }
 
-// raid.js onEnd: with time left, every active player without a time gets the elapsed time.
+// The official map index of the map being played (game.mapIndex), -1 none.
+static int raid_map_index(const Game *game) {
+    if (!game->maps || game->current_map_index < 0 || (size_t) game->current_map_index >= game->map_count) return -1;
+    return map_catalog_map_index_of_json(game->maps[game->current_map_index]);
+}
+
+#define RAID_MAP_BASTION 43 // game.mapIndex 43: its run challenges need runProg.bthrone (the throne)
+
+// raid.onEnd (v10.0.3, deob-10.0.3.js:118390-118425), when the clock did not run out (gameTimerP > 0):
+// - every active player without a time gets the elapsed clock (timer, gameTimer) and, with an account in a
+//   public-type game (`!isCustom || mimicPubs`), challenges.update("time", gameTimer ms);
+// - every winner (didWin: the team winCondition gave the round) still active, with an account: on any map but
+//   Bastion (43), or there after "bthrone": "rnodmg" (no damage taken), "r1hp" (health <= 1), "rnogun" (no shot);
+//   and on any map "rsolo" when no other non-bot player was ever in the run with it (runPeakPlayers <= 1),
+//   "rsolofull" when that solo run also ends at full health.
+// Raid keeps its winner in a public game (mode_public_no_winner), so didWin is the winCondition's.
 void mode_end_raid(Game *game) {
     if (game->round_timer <= 0.0f) return; // gameTimerP <= 0
     const float total = game->mode->started_timer;
@@ -152,7 +169,60 @@ void mode_end_raid(Game *game) {
         if (!player || player->mode.has_timer || !player->active) continue;
         player->mode.has_timer = 1;
         player->mode.timer = total - game->round_timer;
+        const int ms = (int) floorf(player->mode.timer * 1000.0f);
+        if (ms > 0) game_challenge(game, player, "time", ms, -1, -1); // game_challenge: an account, pub type
     }
+    const ModeWinner winner = mode_pick_winner(game);
+    const int bastion = raid_map_index(game) == RAID_MAP_BASTION;
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (!player || !player->active) continue;
+        const int did_win = (player->team && player->team == winner.team) || player == winner.player;
+        if (!did_win) continue;
+        const int solo = player->mode.run_peak_players <= 1;
+        const int run = !bastion || player->mode.run_bthrone;
+        if (run && player->mode.run_dmg_taken <= 0.0f) game_challenge(game, player, "rnodmg", 1, -1, -1);
+        if (run && player->health <= 1.0f) game_challenge(game, player, "r1hp", 1, -1, -1);
+        if (run && !player->mode.run_shots) game_challenge(game, player, "rnogun", 1, -1, -1);
+        if (solo) game_challenge(game, player, "rsolo", 1, -1, -1);
+        if (solo && player->health >= (float) player->max_health) game_challenge(game, player, "rsolofull", 1, -1, -1);
+    }
+}
+
+// raid.update (deob-10.0.3.js:118426-118439): the non-bot players in the game; an active player's
+// runPeakPlayers keeps the most it saw.
+void mode_update_raid(Game *game, const float delta) {
+    (void) delta;
+    int humans = 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i] && !game->players[i]->is_bot) humans++;
+    }
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (player && player->active && humans > player->mode.run_peak_players) player->mode.run_peak_players = humans;
+    }
+}
+
+// raid.onAIDeath (deob-10.0.3.js:118440-118447) and zom.onAIDeath (deob-10.0.3.js:119232-119235): a player's AI kill
+// is challenges.update("aik", 1, {wep: loadout[loadoutIndex]}), the weapon it holds then.
+void mode_ai_kill_challenge(Game *game, Player *killer) {
+    if (!game || !killer) return;
+    const int held = killer->loadout && killer->loadout_index >= 0 && killer->loadout_index < killer->loadout_size
+                         ? killer->loadout[killer->loadout_index] : -1;
+    game_challenge(game, killer, "aik", 1, held, -1);
+}
+
+// Player.init's run fields (deob-10.0.3.js:190648-190651) are reset in mode_player_spawned; these feed them.
+void mode_run_shot(Game *game, Player *player) {
+    if (game && player && game_is_authority(game)) player->mode.run_shots++;
+}
+
+void mode_run_damage(Game *game, Player *player, const float damage) {
+    if (game && player && damage > 0.0f && game_is_authority(game)) player->mode.run_dmg_taken += damage;
+}
+
+void mode_run_progress(Player *player, const char *key) {
+    if (player && key && !strcmp(key, "bthrone")) player->mode.run_bthrone = 1;
 }
 
 // trai onKill: outside the wait timers, "<victim>'s Ghost" (AI kind 0) where they died.
@@ -382,7 +452,11 @@ void mode_start_race(Game *game) {
 }
 
 // def: warmupReset (players are re-placed by their next spawn) + lockMove
+// def.gameStart: warmupReset, then lockMove (deob-10.0.3.js:119800-119803). v10 runs gameStart after the round's
+// setGameState (deob-10.0.3.js:220047-220049, 220145), so warmupReset leaves Defuse IN_PROGRESS through "match
+// starting in"; KN's game_start_round sets the state after gameStart, so that timer keeps it IDLE.
 void mode_start_def(Game *game) {
+    mode_warmup_reset(game);
     mode_lock_move(game);
 }
 
@@ -647,8 +721,8 @@ void mode_trigger_pick_boss(Game *game, const float overflow) {
 }
 
 // Krunker v10.0.2 pickStalker (v10:188459-188474): knife only, no regen, health floor(200 + 50 x
-// (active players - 1)) (v7.1.4: 400). v10 also broadcasts STALKER_PICKED ("You are the Living"
-// popup) to the others: not ported (HUD only).
+// (active players - 1)) (v7.1.4: 400). v10 then broadcasts STALKER_PICKED to everyone but the stalker
+// (deob-10.0.3.js:217949; their "You are the Living" popup, client/src/ui/hud_stalker.c).
 void mode_trigger_pick_stalker(Game *game, const float overflow) {
     (void) overflow;
     const int active = mode_active_count(game);
@@ -661,6 +735,7 @@ void mode_trigger_pick_stalker(Game *game, const float overflow) {
         const int knife = WEAPON_ID_KNIFE;
         mode_set_player_loadout(stalker, &knife, 1, 0);
         mode_send_loadout(game, stalker);
+        if (game->mode && game->mode->config.stalker_v10) stalker_send_picked(game, stalker); // v7.1.4 had no STALKER_PICKED
     }
 }
 
