@@ -113,6 +113,10 @@
 //                                each of our own spawns log the same as "@spawn0".."@spawn4" (client/tests/spawn_camera_e2e.py)
 //   100 players                  log every player of the session: "[input_script] players t=100 n=2 5:Name@x,y,z
 //                                9:Guest@x,y,z*" (* us, - inactive)
+//   100 models @label            log every player's model (v10.0.3 class models, player_class_model.h): "[input_script]
+//                                models t=100 @label n=2 5:body=model,mdl=2,asset=11441g,clip=Move 9:body=default,..."
+//                                (body: default, model, none, fallback, - dead; clip: the GLTF's clip, * while a one-shot
+//                                runs; stalker=1: the Stalker look)
 //   100 aimlast                  turn the look onto the centre of the newest object (the crate the Object Manager
 //                                spawned last), as `tp` sets the look: the crosshair is on it for a grab or a pick
 //   100 pg @label                log the Physics Gun's grab (om_build.c): "[input_script] pg t=100 @label shown=x,y,z
@@ -219,6 +223,7 @@
 #include <mode_world.h> // `flags`
 #include <object_manager.h> // `om object` (OM_TAB_OBJECTS)
 #include <third_person.h> // `tpstate`
+#include <player_class_model.h> // `models`: the class models
 #include <world.h>        // `tpstate`: world_solid_fraction
 #include <bots.h>         // `tpstate`: bot_object_blocks_player
 #include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
@@ -999,6 +1004,21 @@ static void script_run(Client *client, const ScriptEvent *e) {
         }
         line[o] = 0;
         fprintf(stderr, "[input_script] players t=%.0f n=%zu%s\n", g_script.time, client->game.player_count, line);
+    } else if (!strcmp(e->cmd, "models")) {
+        // models @label: each player's model, "uid:body=..,mdl=..,asset=..,clip=.." (player_class_model_describe)
+        char line[4096];
+        size_t o = 0;
+        for (size_t i = 0; i < client->game.player_count && o + 160 < sizeof(line); i++) {
+            const Player *p = client->game.players[i];
+            if (!p) continue;
+            char model[128];
+            player_class_model_describe(p, model, sizeof(model));
+            for (char *c = model; *c; c++)
+                if (*c == ' ') *c = ',';
+            o += (size_t) snprintf(line + o, sizeof(line) - o, " %d:%s%s", p->uid, model, p == client->me ? "*" : "");
+        }
+        line[o] = 0;
+        fprintf(stderr, "[input_script] models t=%.0f %s n=%zu%s\n", g_script.time, e->arg, client->game.player_count, line);
     } else if (!strcmp(e->cmd, "state")) {
         // state: one log line with the held slot and the menu/lock state (scripted checks); cursor =
         // the window's GLFW cursor mode (normal: the player sees the mouse, disabled: the game has it)

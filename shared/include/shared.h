@@ -1245,6 +1245,10 @@ typedef struct Player_t {
     unsigned char notarget:1;   // /notarget (KrunkNative, Source's notarget): bots and AIs never pick this player as a target
     unsigned char interpolate:1;
     unsigned char force_pos:1;  // Krunker forcePos: the next remote state snaps instead of interpolating (spawn / first sighting)
+    // players.hideAll (NET_EXT_PLAYER_SYNC, net_ext.h): sync_seen is latestData (the last player sync had this player),
+    // sync_hidden its model hidden by a sync that left it out (objInstances.visible = false) until a STATE has it again
+    unsigned char sync_seen:1;
+    unsigned char sync_hidden:1;
     unsigned char inspecting:1;
 
     unsigned char is_hidden:1;
@@ -1361,6 +1365,10 @@ typedef struct Player_t {
     unsigned char prop_rot;       // propRot: the model turns with the look
     unsigned char prop_rot_saved_set; // propRotSaved != null
     float prop_rot_saved;         // propRotSaved: the yaw the model keeps while propRot is off
+    // v10.0.3 player.assetTxt (players.updateAssetID, deob-10.0.3.js:197964): the class model's asset a "uai"
+    // swapped in (NET_EXT_PLAYER_ASSET_ID), "" = the class's aID. Client only; kept for this life, dropped at the
+    // player's death (client/src/player_class_model.c)
+    char asset_txt[32];
 
     float *ramp_fix;
 
@@ -3122,6 +3130,7 @@ typedef struct {
 #define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
 #define NET_ERROR_CODE_PASSWORD "004005" // the server password (gameserver.password) is missing / wrong / locked out
 #define NET_ERROR_CODE_FLAVOR "004007"   // a cross-flavor peer (Krunker Strike vs Krunker Box Office); shown, not acted on
+#define NET_ERROR_CODE_CAPTCHA "004008"  // "CAPTCHA FAILED": the in-game captcha was refused or not answered (server_captcha.h); shown
 
 // NET_PACKET_BILLBOARD: the server's billboard ad (server.cfg billboard, the v3.1.1 init "bill":
 // txt, txtCol, bgCol). While a server sends one, every BILLBOARD map object of every map shows
@@ -3716,6 +3725,10 @@ typedef enum {
     NET_MODE_COUNTER_KR_TAGS = 0, // "krt dogTags" to the carrier
     NET_MODE_COUNTER_CHARGE = 1,  // "chrg sid, krankedTimer ms" (Kranked)
     NET_MODE_COUNTER_HEAD = 2,    // "bh sid, headMlt" (Bighead FFA)
+    // "krt dogTags, depositType" with depositType 1 / 2 (a live event's mode.depositType): the same dogTags, shown in
+    // #giftTagHolder with props/prop_60 / events/event_7 instead of #krTagHolder's spray (deob-10.0.3.js:258906-258918)
+    NET_MODE_COUNTER_GIFT_TAGS = 3,
+    NET_MODE_COUNTER_EVENT_TAGS = 4,
 } NetModeCounterKind;
 
 typedef struct {

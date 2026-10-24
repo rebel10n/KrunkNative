@@ -20,6 +20,7 @@
 #include <sky.h>
 #include <render_settings.h>
 #include <player_pose_render.h> // attachTo's "hands" / "handL" points (player.pose hold / holdL)
+#include <player_class_model.h> // player.playAnim / stopAnim: the class model
 #include <ui_logic.h>
 #include <cJSON.h>
 #include <stdio.h>
@@ -1525,16 +1526,21 @@ void ks_scene_api(KsApiImpl *api) {
 // ---------------------------------------------------------------------------
 // Players' models (player.getAsset / playAnim / stopAnim)
 
-// getAsset(): meshRef.children[0], the custom player model (class aID). KN draws the default
-// block model for every class, so there is none: undefined (v7's answer without a model).
+// getAsset(): meshRef.children[0], the class model (config.mdl, player_class_model.h) as an obj3D. Not wired: the
+// drawn model is the player's, not a scene object of this module, so the answer stays undefined (v7's answer
+// without a model).
 int ks_scene_player_asset(KsScript *s, const Player *p, KsValue *out) {
     (void) s; (void) p;
     *out = ks_undef();
     return 0;
 }
 
-void ks_scene_player_play_anim(const Player *p, const char *clip, const int reps) { (void) p; (void) clip; (void) reps; }
-void ks_scene_player_stop_anim(const Player *p) { (void) p; }
+// playAnim(clip, reps): meshRef.playClip(clip, isNumber(reps) ? reps : 1) on the drawn GLTF class model, with no
+// hasAnims test (deob-10.0.3.js:208232-208238); stopAnim(): meshRef.stopAllClips() (:208240-208244)
+void ks_scene_player_play_anim(const Player *p, const char *clip, const int reps) {
+    if (clip) player_class_model_script_clip(p, clip, reps);
+}
+void ks_scene_player_stop_anim(const Player *p) { player_class_model_script_clip(p, NULL, 0); }
 
 MeshTransform *ks_scene_camera_transform(void) { return &g_sc.camera_xf; }
 

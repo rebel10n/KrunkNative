@@ -2,7 +2,8 @@
 // branch, deob-10.0.3.js:193806-193815). A player whose class has an animated model (aID with "g" / "q" / "f") sends
 // NET_EXT_PLAYER_ANIM [sid, clip] to the spectators (NET_TARGET_NON_PLAYERS) and to the other active players within
 // mode.viewDis || 600; nobody else, and nothing for a class without one, an inactive player or a non-authority game.
-// The jump and the melee call it (player.c). Run from the repository root.
+// The jump and the melee call it (player.c). players.updateAssetID ("uai", :197964-197970): with config.mdl and a
+// non-empty text the authority broadcasts NET_EXT_PLAYER_ASSET_ID [sid, text]. Run from the repository root.
 #include <shared.h>
 #include <player_anim.h>
 #include <game_config.h>
@@ -24,12 +25,23 @@ typedef struct {
 } Sent;
 static Sent g_sent[MAX_SENT];
 static int g_sent_count;
+static struct {
+    int uid;
+    NetPlayerAssetIdPacket p;
+} g_asset[MAX_SENT];
+static int g_asset_count;
 
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
     uint16_t subtype = 0, body_length = 0;
     const uint8_t *body = NULL;
     if (type != NET_PACKET_EXT || !net_ext_unpack(payload, length, &subtype, &body, &body_length)) return;
+    if (subtype == NET_EXT_PLAYER_ASSET_ID && body_length == sizeof(NetPlayerAssetIdPacket) && g_asset_count < MAX_SENT) {
+        g_asset[g_asset_count].uid = uid;
+        memcpy(&g_asset[g_asset_count].p, body, sizeof(NetPlayerAssetIdPacket));
+        g_asset_count++;
+        return;
+    }
     if (subtype != NET_EXT_PLAYER_ANIM || body_length != sizeof(NetPlayerAnimPacket) || g_sent_count >= MAX_SENT) return;
     g_sent[g_sent_count].uid = uid;
     memcpy(&g_sent[g_sent_count].anim, body, sizeof(NetPlayerAnimPacket));
@@ -101,6 +113,16 @@ int main(void) {
     snprintf(cls->ext.asset_id, sizeof(cls->ext.asset_id), "%s", "77en");
     CHECK(!player_class_has_anims(actor), "aID 77en: an OBJ model, no clips");
     snprintf(cls->ext.asset_id, sizeof(cls->ext.asset_id), "%s", "4821g");
+
+    // updateAssetID: broadcast("uai", sid, assetTxt) for a class with a model and a non-empty text; nothing else
+    player_update_asset_id(actor, "");
+    player_update_asset_id(actor, "777q");
+    CHECK(g_asset_count == 1 && g_asset[0].uid == NET_TARGET_ALL && g_asset[0].p.sid == 1 && !strcmp(g_asset[0].p.asset, "777q"),
+          "uai: [sid 1, \"777q\"] to everyone (%d sent)", g_asset_count);
+    cls->ext.model = 0;
+    player_update_asset_id(actor, "777q");
+    cls->ext.model = 2;
+    CHECK(g_asset_count == 1 && g_sent_count == 0, "uai: nothing for a class without a model (%d)", g_asset_count);
 
     // an inactive actor, a clip past the list, a non-authority game (a client mirror): nothing
     actor->active = 0;

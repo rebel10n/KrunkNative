@@ -5,12 +5,17 @@
 #include <render_settings.h>
 #include <ui_logic.h> // ui_setting_weapon_float: vmSetts Per Weapon
 #include <skin_fx.h>
+#include <skin_video.h> // the upgraded weapons' altSkin video
 #include <third_person.h> // the local third-person model
 #include <prop_hunt.h> // Prop Hunt: the prop model
 #include <social_v7.h> // game_player_is_prop
+#include <stalker.h> // v10 Stalker: isStalker, the knife texture
+#include <stalker_client.h> // the Stalker's opacity
 #include <pets.h>
+#include <player_class_model.h> // v10.0.3 class models (config.mdl)
 #include <ruleset.h> // game_constants_of: the flavor's constants (Krunker Strike crouch lean)
 #include <vfx.h>
+#include <player_pose_render.h> // v10.0.3 player.pose on the model
 #include "viewer/viewer_store.h" // game.store.skins: weapon / melee skins
 #include <math.h>
 #include <stdio.h>
@@ -372,8 +377,9 @@ static void player_update_melee_arms(const Player *player, PlayerArms *arms, con
     arms->left->pivot.position.z = step_anim;
     arms->right->pivot.position.z = -step_anim;
 
-    // armMeshes[0] += meleeAnim.lArm reach / punch
-    const float l_arm = ma[MELEE_ANIM_L_ARM];
+    // armMeshes[0] += meleeAnim.lArm reach / punch, unless a holdL pose holds something in that hand
+    // (deob-10.0.3.js:193770-193776)
+    const float l_arm = player->pose.has && player->pose.hold_l ? 0.0f : ma[MELEE_ANIM_L_ARM];
     arms->left->pivot.position.z += l_arm;
     arms->left->pivot.position.y -= l_arm * 0.27f;
     arms->left->pivot.rotation.y += l_arm * 0.1f;
@@ -782,13 +788,15 @@ static int gltf_skin_available(const ViewerSkin *skin, const char *model_key) {
 // A weapon skin flagged pending (weapon_skin_pending): its GLTF or OBJ model is on disk now. The generate
 // loop's own test, read from the files, so it asks the same question the build did (gltf_model_load starts the
 // download of a missing GLTF). The player's meshes are then rebuilt (main.c client_refresh_weapon_skins).
+// A v10.0.3 class model that no longer matches the player (a swapped asset, its file arrived) asks for it too.
 int player_weapon_skin_ready(const Player *player) {
     const PlayerMesh *player_mesh = player->mesh;
+    if (player_mesh && player->game && player_class_model_stale(player, player_mesh->class_model)) return 1;
     if (!player_mesh || !player_mesh->weapon_skin_pending || !player->game) return 0;
     for (int i = 0; i < player->loadout_size; i++) {
         const Weapon *weapon = player->game->weapons[player->loadout[i]];
         if (!weapon || !weapon->src || nettspend_weapon_kind(player->loadout[i])) continue;
-        const ViewerSkin *skin = player_slot_skin(player, i, weapon);
+        const ViewerSkin *skin = i < 8 && (player->upgraded_slots >> i & 1) ? NULL : player_slot_skin(player, i, weapon); // altSkin
         if (!skin) continue;
         char model[128], texture[192];
         weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
@@ -916,7 +924,7 @@ static void player_look_colors(const PlayerLook *look, const int uid, int colors
 // RENDER.loadMesh(generateMeshData(item), 0, y, 0, rot, scale, holder): the item's model
 // ("<store.types[assetType || type]><id>.obj", textures/<...>[_<tex>].png) with its material options
 // (skin_material: colour, opacity, side, alphaTest, wire, tileS, frames, the glow).
-// TODO (WP-F part 2): pulsT / frames / movT / rAnim / rgb animation, env maps, shaderNum, video.
+// The animations, env maps, shaderNum and v10.0.3's video (noVideoSkins: the model texture) are skin_fx_apply's.
 static Mesh *generate_item_mesh(const ViewerSkin *item, const vec3 at, const vec3 rotation, const float scale, MeshTransform *holder) {
     char model[128], texture[160];
     cosmetic_asset_keys(item, model, sizeof(model), texture, sizeof(texture));
@@ -999,7 +1007,7 @@ static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const Playe
     if (look->shoe && player_mesh->legs[0]) {
         for (int i = 0; i < 2; i++) {
             const float x = game_constants.leg_scale * 0.5f * (i == 1 ? -1.0f : 1.0f);
-            player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_SHOE_R + i, look->shoe, player_mesh->anchor, x,
+            player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_SHOE_R + i, look->shoe, &player_mesh->hold, x, // meshHoldObj
                                      game_constants.leg_height - look->shoe->sit_off - 0.01f, -game_constants.leg_height, item_scl(look->shoe));
             player_mesh->shoe_hidden[i] = (look->shoe->flags2 & VS2_RANDOM_LEG) && random_leg != i;
         }
@@ -1090,8 +1098,12 @@ static void dye_color_cube(ColorCube *cube, const ViewerSkin *dye) {
     for (size_t k = 0; cube && k < cube->mesh_count; k++) skin_fx_apply_dye(cube->meshes[k], dye);
 }
 
+// The dye's genHead / genBody / genLeg / genArms options, video and projection included (v10.0.3: the Deep Space and
+// Glitch dyes play videos/video_<n>.mp4 on every body part and the first-person arms, deob-10.0.3.js:194337-194581)
 static void player_dye_meshes(PlayerMesh *player_mesh, const size_t loadout_size, const ViewerSkin *dye) {
-    if (!(dye->flags & VS_RGB) && dye->color < 0 && dye->opac <= 0.0f && !(dye->tex && !(dye->flags & VS_TEX_NUM)) && !(dye->flags2 & VS2_PROJECTION)) return;
+    if (!(dye->flags & VS_RGB) && dye->color < 0 && dye->opac <= 0.0f && !(dye->tex && !(dye->flags & VS_TEX_NUM)) &&
+        !(dye->flags2 & (VS2_PROJECTION | VS2_VIDEO)))
+        return;
     dye_color_cube(player_mesh->head, dye);
     dye_color_cube(player_mesh->body, dye);
     for (int i = 0; i < 2; i++) {
@@ -1200,7 +1212,14 @@ void player_generate_meshes(Player *player, const int render_you) {
     memcpy(colors, player->game->classes[player->class_index].colors, sizeof(colors));
     player_look_colors(&look, player->uid, colors, &waist_color);
 
-    // TODO: mode specific skins
+    // modelOverrides.Stalker (deob-10.0.3.js:118195-118205, applied :194107-194181): noCosmetics (the
+    // outfit, mode_apply_outfit, and the melee skin below), every colour 0 (v10 tests `!== undefined`, so the
+    // zeros apply; v7.1.4's truthy test skipped them) and opacity 0.1 on the body parts (stalker_render.c)
+    const int stalker = player_is_stalker(player->game, player);
+    if (stalker) {
+        for (int i = 0; i < 6; i++) colors[i] = 0;
+        waist_color = 0;
+    }
 
     // KrunkNative: the local player's model for the third-person camera (third_person.h) is the
     // same third-person model as v7's game.config.thirdPerson builds for renderYou
@@ -1222,7 +1241,11 @@ void player_generate_meshes(Player *player, const int render_you) {
     }
 
     player_mesh->body_anchor->position.y = game_constants.leg_height;
-    player_mesh->body_anchor->parent = player_mesh->anchor;
+    // meshHoldObj (deob-10.0.3.js:194103-194105): the body, the legs and the shoes hang off it, a pose's bodyY
+    // moves it (player_pose_render.c); the pet holder and KrunkScript attachments stay on the anchor
+    player_mesh->hold.parent = player_mesh->anchor;
+    player_mesh->hold.scale = player_mesh->hands_anchor.scale = player_mesh->hand_l_anchor.scale = (vec3) {1.0f, 1.0f, 1.0f};
+    player_mesh->body_anchor->parent = &player_mesh->hold;
     player_mesh->upper_body_anchor->parent = player_mesh->body_anchor;
 
     player_mesh->anchor->scale = player_mesh->body_anchor->scale = player_mesh->upper_body_anchor->scale = (vec3) {1.0f, 1.0f, 1.0f};
@@ -1246,9 +1269,13 @@ void player_generate_meshes(Player *player, const int render_you) {
     if (player->game->map->config.model == MODEL_TYPE_SPRITE) {
 
     } else {
+        // v10.0.3 class models (player_class_model.h): config.mdl's sprite or model stands in for the body, before
+        // Prop Hunt's prop (deob-10.0.3.js:194229-194266). Like the prop's, the body and arms are still built.
+        player_mesh->class_model = player_class_model_create(player, render_you, third_person);
+        if (player_mesh->class_model) player_mesh->class_model->holder.parent = player_mesh->anchor; // objInstances
         // Prop Hunt (players.js :171319): the prop model stands in for the body. The body and arms are still built
         // (the loadout and the arm anchors read them) but scene_add_player_mesh keeps them out of the scene.
-        if (prop_hunt_player(player) && third_person) {
+        if (prop_hunt_player(player) && third_person && !player_class_model_replaces_body(player_mesh->class_model)) {
             player_mesh->prop = player_prop_mesh(player->prop_id);
             if (player_mesh->prop) player_mesh->prop->transform.parent = player_mesh->anchor;
         }
@@ -1275,14 +1302,14 @@ void player_generate_meshes(Player *player, const int render_you) {
                 const int shoe_leg = look.shoe && (!(look.shoe->flags2 & VS2_RANDOM_LEG) || random_leg == i);
                 ColorCube *leg = generate_leg(i, colors[2], colors[3], shoe_leg ? look.shoe->leg_len : 0.0f);
 
-                leg->transform.parent = player_mesh->anchor;
+                leg->transform.parent = &player_mesh->hold;
                 player_mesh->legs[i] = leg;
             }
 
             for (int i = 0; i < 2; i++) {
                 PlayerCrouchedLeg *leg = generate_crouched_leg(i, colors[2], colors[3]);
 
-                leg->anchor.parent = player_mesh->anchor;
+                leg->anchor.parent = &player_mesh->hold;
                 player_mesh->crouched_legs[i] = leg;
             }
         }
@@ -1351,11 +1378,17 @@ void player_generate_meshes(Player *player, const int render_you) {
                 int sel_skin = -1;                        // arms->selection: the store skin worn,
                 char sel_model[128] = "", sel_tex[192] = ""; // the model / texture keys built
 
+                // generateMeshes: an upgraded slot (krumMachine) wears its upgradeWeapons altSkin instead of the player's
+                // skin (deob-10.0.3.js:194480-194486); KrunkNative draws only its video (skin_video_alt_skin), not a remodel
+                const int upgraded = i < 8 && (player->upgraded_slots >> i & 1);
+
                 // MELEE MESH (the meleeIndex store item, else melee_0)
                 if (weapon->melee) {
-                    const ViewerSkin *skin = player_slot_skin(player, i, weapon);
+                    // the stalker: no melee skin (noCosmetics) and texSrc "melee/melee_0_5" (deob-10.0.3.js:194611)
+                    const ViewerSkin *skin = stalker || upgraded ? NULL : player_slot_skin(player, i, weapon);
                     char model[64], texture[192];
                     viewer_melee_keys(skin, model, sizeof(model), texture, sizeof(texture));
+                    if (stalker) snprintf(texture, sizeof(texture), "%s", STALKER_KNIFE_TEXTURE);
 
                     GltfInstance *melee_model = NULL;
                     Mesh *melee_carrier = gltf_skin_carrier(skin, model, &melee_model); // hasAnim: GLTF remodel
@@ -1390,6 +1423,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                         } else if (skin && melee_model) {
                             skin_fx_apply_paint_gltf(melee_model, player_slot_paint(player, i, weapon), skin); // loadAnimMesh's paint
                         }
+                        if (upgraded && !melee_carrier) skin_fx_apply_video(melee, skin_video_alt_skin(player->loadout[i]), 1, 1);
                         melee->transform.parent = &arms->anchor;
 
                         // First person (no src + renderYou) builds the two arms as separate meshes with a base
@@ -1427,7 +1461,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                 const NettspendWeapon kn_kind = nettspend_weapon_kind(player->loadout[i]);
                 if (weapon->src && !kn_kind) {
                     // player.skins[slot]: remodel / texture, yOff / zOff, mScl and the glow (ai)
-                    const ViewerSkin *skin = player_slot_skin(player, i, weapon);
+                    const ViewerSkin *skin = upgraded ? NULL : player_slot_skin(player, i, weapon);
                     char model[128], texture[192];
                     weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
                     // hasAnim: a GLTF remodel, one instance per hand below (empty_geometry marks it)
@@ -1469,6 +1503,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                             }
                             if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
                             if (skin) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon), skin);
+                            if (upgraded) skin_fx_apply_video(weapon_mesh, skin_video_alt_skin(player->loadout[i]), 1, 1); // tFilter Linear
                         }
                         arms->weapon_models[j] = weapon_model;
 
@@ -1590,7 +1625,11 @@ void player_generate_meshes(Player *player, const int render_you) {
         // the dye's material (tex, colour, opacity, glow, rgb) on every body part (genHead / genBody /
         // genLeg / genArms getMat)
         if (look.dye_item) player_dye_meshes(player_mesh, player->loadout_size, look.dye_item);
+        // the Stalker's opacity 0.1 (transparent) on the same parts: genHead / genBody / genLeg / genArms
+        // get it, the knife does not (deob-10.0.3.js:194337-194566)
+        if (stalker) stalker_render_body_opacity(player_mesh, (size_t) player->loadout_size);
     }
+    player_mesh->stalker = (unsigned char) stalker;
 }
 
 // The arm meshes only (extender / upper / joint / lower), not the weapon.
@@ -1750,8 +1789,13 @@ void player_update_meshes(Player *player, const int is_preview) {
         player_mesh->anchor->position = player->position;
         player_mesh->anchor->rotation.y = prop_model_yaw(player);
     } else if (player->game->map->config.model != MODEL_TYPE_SPRITE) {
-        player_mesh->anchor->rotation.y = player->direction.y + step_yaw;
+        // a faceRide pose faces the entity the player rides (deob-10.0.3.js:193675-193681)
+        float yaw = player->direction.y;
+        player_pose_face_ride_yaw(player, &yaw);
+        player_mesh->anchor->rotation.y = yaw + step_yaw;
     }
+    // v10.0.3 class model (player_class_model.c): no step bob / sway, its clips and its animation
+    player_class_model_update(player, player_mesh->class_model, player_mesh->anchor, step_yaw);
 
     step_half -= step_half * player->crouch_val * game_constants.crouch_anim_mlt;
     step_anim -= step_anim * player->crouch_val * game_constants.crouch_anim_mlt;
@@ -1939,6 +1983,10 @@ void player_update_meshes(Player *player, const int is_preview) {
         if (player->render_you && !third_person && !pouring) player_arm_mesh_set_visible(off_arm, 0);
     }
 
+    // v10.0.3 player.pose (applyPose, refreshWeaponVisibility, syncHands / syncHandL; player_pose_render.c):
+    // after the movement's own leg, arm and upper-body pose, before the charm / GLTF visibility below
+    player_pose_render(player, player->render_you && !third_person, step_anim);
+
     // the charm sways with the weapon (players.js:501-504)
     PlayerArms *charm_arms = player->loadout_index >= 0 && player->loadout_index < player->loadout_size ? player_mesh->arms[player->loadout_index] : NULL;
     if (charm_arms && charm_arms->charm) {
@@ -2036,6 +2084,7 @@ void player_meshes_fini(Player *player) {
     }
 
     if (player_mesh->prop) fx_mesh_fini(player_mesh->prop);
+    player_class_model_free(player_mesh->class_model);
     pet_free(player_mesh->pet);
     free(player_mesh->upper_body_anchor);
     free(player_mesh->body_anchor);

@@ -3,6 +3,7 @@
 #include <knet.h> // virtual (UDP) descriptors
 #include <math.h>
 #include <net_ext.h> // NetServerLinePacket (the static asserts after net_format_server_line)
+#include <player_anim.h> // net_reconcile: no class-model clips from a replay
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -384,7 +385,9 @@ size_t net_reconcile(Player *player, const NetReconPacket *packet, Input *pendin
         if (drop_all || pending[i].seq <= packet->ack_seq) continue;
         pending[kept++] = pending[i];
     }
+    player_anim_set_replay(1); // v10.0.3 players.jump: `if (!recon) playClip(player, "Jump", 1)` (player_anim.h)
     for (size_t i = 0; i < kept && player->active; i++) player_proc_input(player, &pending[i], 1, move_lock);
+    player_anim_set_replay(0);
     return kept;
 }
 

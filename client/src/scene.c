@@ -2,6 +2,7 @@
 #include <client.h>
 #include <gltf.h>
 #include <pets.h>
+#include <player_class_model.h>
 #include <shadow.h>
 #include <math.h>
 #include <stdlib.h>
@@ -9,11 +10,19 @@
 
 Scene *scene_init() {
     Scene *scene = calloc(1, sizeof(Scene));
+    if (scene) scene->lasting = 1;
     return scene;
 }
 
 void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
-    scene_add_pet(scene, player_mesh->pet, player_mesh->render_you);
+    // a probe of the parts (Scene.lasting 0: stalker_render.c, om_outline.c, main.c's sync hiding) leaves the pet out:
+    // scene_add_pet remembers the scene, and the probe's is gone once it returns (a later removal read it)
+    if (scene->lasting) scene_add_pet(scene, player_mesh->pet, player_mesh->render_you);
+    // v10.0.3 class model (player_class_model.h): generateMeshes builds it instead of the body, arms and weapons
+    if (player_mesh->class_model && player_class_model_replaces_body(player_mesh->class_model)) {
+        scene_add_class_model(scene, player_mesh->class_model, scene->lasting && player_mesh->render_you);
+        return;
+    }
     if (player_mesh->prop) { // Prop Hunt: the prop is the whole body; the body, arms and cosmetics stay out of the scene
         scene_add_mesh(scene, player_mesh->prop);
         return;
@@ -90,6 +99,7 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
 void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
     if (!player_mesh) return;
     scene_remove_pet(player_mesh->pet);
+    if (player_mesh->class_model) scene_remove_class_model(scene, player_mesh->class_model, player_mesh->render_you);
     if (player_mesh->prop) scene_remove_mesh(scene, player_mesh->prop);
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {

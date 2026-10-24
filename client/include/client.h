@@ -551,6 +551,9 @@ typedef struct {
     // Prop Hunt: the prop model a Prop-team player wears instead of its body (players.js :171319:
     // "<prefab name>_0" at y scale + CPY, scaled by the prefab's scale), NULL otherwise
     Mesh *prop;
+    // v10.0.3 class model (player_class_model.h: config.mdl 1 Sprite / 2 Model, generateMeshes :194228-194266): it
+    // stands in for the body, arms, weapons and cosmetics (still built, kept out of the scene); NULL: the default body
+    struct PlayerClassModel *class_model;
     double pet_clock;             // gltf_clock() of the last pet / item-effect update, < 0 before the first
     float effect_timer;           // players.js itemEffects effectTimer (ms)
     // a weapon skin's model was not on disk when this was built (the plain weapon shows meanwhile):
@@ -596,6 +599,9 @@ void mesh_fini(Mesh*); // CAUTION: does NOT free underlying vertex/element buffe
 typedef struct {
     size_t mesh_count;
     Mesh **meshes;
+    // made by scene_init(); 0 for a probe of a model's parts (`Scene parts = {0, NULL}`, filled by
+    // scene_add_player_mesh to see which meshes it would draw), which pets and class models must not remember
+    unsigned char lasting;
 } Scene;
 
 Scene *scene_init();
@@ -799,6 +805,7 @@ typedef struct {
     uint8_t net_server_minor;      // WP-B: INIT minor (NET_PROTOCOL_MINOR_V7 servers take the v7 combat packets)
     int net_client_id;             // INIT client_id: this connection's id (v7 player.id, the comp lobby key)
     uint8_t net_server_patch;      // WP-C: INIT patch (net_peer_has_wpc: the server reads ENT V8)
+    uint8_t net_player_sync;       // the server marks its player syncs (NET_EXT_PLAYER_SYNC, players.hideAll) since the INIT
     float net_input_accum;         // WP-C: frame time (s) since the last sampled input frame (index.js inputFrameDelta, netRate)
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
@@ -1063,6 +1070,7 @@ void client_add_player_mesh(Client*, Player*, int render_you);
 void client_drop_player_mesh(Client*, Player*);
 void client_player_spawned(Client*, Player*, int is_you); // meshes + (is_you) in-game state after a spawn
 void client_force_player_positions(Client*); // players.js forcePos(): every remote player's next STATE snaps
+void client_players_hide_all(Client*);       // NET_EXT_PLAYER_SYNC: players.hideAll(), settling the sync before it (main.c)
 int client_map_prepare_init(Client*, NetInitPacket*);   // 1: apply now (map_index resolved), 0: map download started
 int client_map_hold(Client*, const NetPacket*);         // 1: packet queued until the streamed map is in
 int client_map_take_ready(Client*, NetInitPacket*, NetPacket**, size_t*); // 1: download done (INIT + held packets, caller frees)

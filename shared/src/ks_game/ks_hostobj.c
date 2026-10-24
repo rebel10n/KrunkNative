@@ -9,6 +9,8 @@
 #include <ai_parts.h>
 #include <modes.h>
 #include <net_ext.h> // "spb" (player.speed)
+#include <game_config.h> // class_overrides: player.assetID (config.aID)
+#include <player_anim.h> // player.assetID = v: players.updateAssetID
 #include <triggers.h> // TRIGGER_EVENT_* (toggleDestructible)
 #include <weapons.h>
 
@@ -197,13 +199,22 @@ static KsValue pl_disable_default(KsScript *s, void *native, const KsValue *args
 
 static KsValue pl_asset_id(KsScript *s, void *native, uint32_t id)
 {
-    // config.aID: KN players have no custom model asset (updateAssetID needs config.mdl)
+    // get assetID(): `config && config.aID || ""` (deob-10.0.3.js:207880-207882): the class's, never a swap
     PLAYER_OR(r, ks_undef());
     (void) r;
-    (void) p;
-    return str_value(s, "");
+    const Game *game = p->game;
+    const ClassConfig *c = game && game->classes && p->class_index >= 0 && (size_t) p->class_index < game->class_count ? &game->classes[p->class_index] : NULL;
+    return str_value(s, class_overrides(c)->asset_id);
 }
-static void pl_asset_id_set(KsScript *s, void *native, uint32_t id, KsValue v) { (void) s; (void) native; (void) id; (void) v; }
+// set assetID(v): game.players.updateAssetID(player, v) (deob-10.0.3.js:207883-207887), on either side: `v += ""`
+// (player_anim.c: the server broadcasts "uai", a client swaps its copy's model)
+static void pl_asset_id_set(KsScript *s, void *native, uint32_t id, KsValue v)
+{
+    PLAYER_SET(r);
+    char text[NET_PLAYER_ASSET_TEXT];
+    ks_to_string(s, v, text, sizeof(text));
+    player_update_asset_id(p, text);
+}
 
 static KsValue pl_on_wall(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_bool(p->on_wall != 0); }
 static void pl_on_wall_set(KsScript *s, void *native, uint32_t id, KsValue v) { (void) s; PLAYER_SET(r); p->on_wall = truthy(v) ? (p->on_wall ? p->on_wall : 1) : 0; }

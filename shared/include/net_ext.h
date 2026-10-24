@@ -30,6 +30,7 @@ typedef enum {
     NET_EXT_ENTITY_EVENT = 0x0103,  // "ee"  [eid, name, a, b]
     NET_EXT_ENTITY_ATTACH = 0x0104, // "ea+" [playerSid, eid, {o, lk, ctl, soft, nd}] (also init syncData.entAtt)
     NET_EXT_ENTITY_DETACH = 0x0105, // "ea-" [playerSid, eid]
+    NET_EXT_ENTITY_CONTROLLED = 0x0106, // "l" SYNC_PLAYER's tail [eid, tick, state{}]: the entity we control (applyControlledSync)
 
     // 0x0200 player state, S -> C
     NET_EXT_PLAYER_POSE = 0x0200,  // "pz"  NetPlayerPosePacket: sid, pose | 0 (player_pose.h)
@@ -37,25 +38,33 @@ typedef enum {
     NET_EXT_PLAYER_SPEED_BOOST = 0x0202, // "spb" speedBoost, silent (NetSpeedBoostPacket; official lobbies, krunker_link.c)
     NET_EXT_PLAYER_NAME = 0x0203,        // "00" a player's new name (NetPlayerNamePacket; official lobbies, krunker_link.c)
     NET_EXT_PLAYER_ANIM = 0x0204,        // "c"  NetPlayerAnimPacket: a clip of an animated class model (doc/v10/s2c-coverage.md)
+    NET_EXT_PLAYER_ASSET_ID = 0x0205,    // "uai" NetPlayerAssetIdPacket: a class model's asset swapped (players.updateAssetID)
+    NET_EXT_PLAYER_INTER_PROG = 0x0208,  // "p" / "mp" NetInterProgPacket: the spectated player's interact / charge bar
     NET_EXT_PLAYER_MOVE_VALS = 0x0210,   // SYNC_PLAYER's sendVals: NetPlayerMoveValsPacket, the movement scheme's state with a RECON
+    NET_EXT_PLAYER_SYNC = 0x0211,        // "k" UPDATE_PLAYERS' players.hideAll: no body, ahead of every player sync's STATEs
+    NET_EXT_VALUE_TEXT = 0x0212,         // "cv" / "gv" with a string value: NetValueTextPacket (numbers stay NetValuePacket)
 
     // 0x0300 store / live service, S -> C
     NET_EXT_SKIN_DEFINITION_CHANGED = 0x0300, // "sdc" NetExtJsonChunk + JSON [skinId, skin] (doc/v10/s2c-coverage.md)
     NET_EXT_SPIN_WHEELS_UPDATED = 0x0301,     // "swu" spin data
     NET_EXT_GAME_ANNOUNCEMENT = 0x0302,       // "gameAnnouncement" NetGameAnnouncementPacket
     NET_EXT_SPEECH_BUBBLE = 0x0303,           // "sb" NetSpeechBubblePacket: the menu mascot's speech bubble
+    NET_EXT_UNBOX_MESSAGE = 0x0304,           // "unb" / "unbS" NetUnboxMessagePacket: "<name> unboxed [item]" in the chat
+    NET_EXT_LOTTERY_PRIZE_WON = 0x0305,       // "lotWin" NetLotteryPrizePacket: "<name> won <prize> in the raffle!"
+    NET_EXT_SPIN_WHEEL_RESPONSE = 0x0306,     // "spinW" NetSpinWheelPacket: a map prize wheel (manager.spinners) spins
 
     // 0x0400 Discord link
     NET_EXT_DISCORD_LINK_WAIT = 0x0400,   // "dlnkW" C -> S
     NET_EXT_DISCORD_LINK_RESULT = 0x0401, // "dlnkR" S -> C
 
     // 0x0500 charge consent (KrunkScript purchases)
-    NET_EXT_CHARGE_CONSENT_REQUEST = 0x0500,  // "chreq" S -> C: requestId, value, flag
-    NET_EXT_CHARGE_CONSENT_RESPONSE = 0x0501, // "chrsp" C -> S: requestId[, 1]
+    NET_EXT_CHARGE_CONSENT_REQUEST = 0x0500,  // "chreq" S -> C NetChargeConsentRequestPacket: requestId, value, flag
+    NET_EXT_CHARGE_CONSENT_RESPONSE = 0x0501, // "chrsp" C -> S NetChargeConsentResponsePacket: requestId[, 1]
 
     // 0x0600 ranked
     NET_EXT_JOINED_RANK = 0x0600, // "joinedRank" C -> S, no body (v7 key, first used by v10)
     NET_EXT_LATEST_RANKED_MMR_CHANGE = 0x0601, // "lrmr" S -> C NetLatestRankedMmrPacket: the roster player's rating change
+    NET_EXT_WARS_CLAN = 0x0602,                // "warsClan" S -> C NetWarsClanPacket: the Turf Wars clan holding this map, or none
 
     // 0x0700 protocol / ruleset (KrunkNative, the version toggle)
     NET_EXT_BLOCK_PROTOCOL = 0x0700,
@@ -105,6 +114,11 @@ typedef enum {
     NET_EXT_STALKER_TAUNT = 0x0a10,  // C -> S NetStalkerTauntPacket ("stlkrt" i: the stalker's taunt key, :260109)
     NET_EXT_STALKER_PICKED = 0x0a11, // S -> C, no body (pickStalker's broadcastEx to all but the stalker, :217949)
 
+    // 0x0c00 the in-game captcha: v10.0.3's "cpt" / "cptR" (deob-10.0.3.js:111424-111437; doc/v10/captcha.md). Bodies
+    // are text, NUL-terminated: the ALTCHA challenge JSON / the solved payload (base64), each under NET_EXT_BODY_MAX
+    NET_EXT_CAPTCHA = 0x0c00,        // "cpt"  S -> C: {algorithm, challenge, maxnumber, salt, signature}
+    NET_EXT_CAPTCHA_ANSWER = 0x0c01, // "cptR" C -> S: the payload; S -> C with no body: accepted (v10's _hideCaptcha)
+
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
 
@@ -128,7 +142,8 @@ typedef enum {
                                         // in the game (a joiner's: v10.js:219715 `2 == a0 || a0 && showEndScreen`)
     // 0x8030 official krunker.io HUD (client/src/net/krunker_link.c -> client/src/net/game_events.c),
     // client-local: the link turns an official packet our own NetPackets cannot carry into one of
-    // these for the client's inbound queue; no server sends or receives them
+    // these for the client's inbound queue; no server sends or receives them, except _COUNTDOWN, which our own
+    // server also sends (a wait timer's countdown, shared/src/modes/mode_net.c mode_send_countdown)
     NET_EXT_KN_OFFICIAL_AMMO = 0x8030,         // "uamo" NetOfficialAmmoPacket
     NET_EXT_KN_OFFICIAL_CHAT_I18N = 0x8031,    // "chi" NetOfficialChatI18nHeader + strings
     NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
@@ -154,6 +169,8 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_CODE_TIMER = 0x8063,   // "codeT" UPDATE_CODE_TIMER, int32 seconds: "Submit - Ns"
     NET_EXT_KN_OFFICIAL_CODE_PASSED = 0x8064,  // "codeP" CODE_PASSED, no body: clearPops
     NET_EXT_KN_OFFICIAL_GAME_CODE = 0x8065,    // client -> link only: the typed password, NUL-terminated -> C2S "code" [value]
+    // 0x8070 the official socket's editor handoff (client-local, like 0x8030)
+    NET_EXT_KN_OFFICIAL_EDIT_MAP = 0x8070,     // "edMp" EDIT_MAP: NetExtBlobChunk + a slice of the map JSON (grabMap's answer)
     // 0x8080 official KrunkScript runtime objects (client-local, client/src/entities.c)
     NET_EXT_KN_OFFICIAL_LIVE_OBJECT = 0x8080,  // "lo" one [id, {type, x, y, z, w, l, h, s, data}] (NetExtJsonChunk; init syncData.lo)
     NET_EXT_KN_OFFICIAL_LIVE_SYNC = 0x8081,    // "slo" one [id, op] ("remove") (NetExtJsonChunk)
@@ -318,6 +335,30 @@ typedef struct {
     float vals[8];   // SRM: onGroundFrames, onWallFrames, wishDash, dashTimer, walldashTimer, tmpVel x, y, z; Vehicle: forwardV, reverseV, angVel
 } NetPlayerMoveValsPacket;
 _Static_assert(sizeof(NetPlayerMoveValsPacket) == 44, "NetPlayerMoveValsPacket: the wire body is 44 bytes");
+
+// NET_EXT_PLAYER_SYNC (S -> C, no body): the start of one player sync, v10's "k" UPDATE_PLAYERS. Its handler runs
+// players.hideAll() first (deob-10.0.3.js:258582, :194883-194894): every other active player whose model was not in
+// the previous sync gets forcePos, every one is marked not latestData and hidden; the STATEs of this sync then show
+// theirs again (snapping a forcePos one, :258600-258610). A player the sync leaves out (past mode.viewDis, isHidden,
+// a K.P.D suspect, :222346) is not drawn until a sync has it again. KrunkNative's server sends it to EXT peers right
+// before each sync's STATE batch, an empty sync included (syncState sends "k" with an empty list, :222350); the
+// official link turns every "k" into one. Clients of servers that never send it keep drawing every player. The
+// client settles each sync at the next marker, as one sync's STATEs may reach it over two frames (main.c
+// client_players_hide_all).
+//
+// NET_EXT_VALUE_TEXT (S -> C): a "cv" CUSTOM_VAL / "gv" UPDATE_GLOBAL_VALUE whose value is a string. v10 keeps either
+// type in custVals / globalVals (handlers :258558-258560, :257834-257836); Load Data stores a stored value that is not
+// a number as the string (`isNaN(parseFloat(v)) ? v : parseFloat(v)`, :183563), the HUD's text elements show it
+// (:177319, :180099) and the conditions compare it as JS does (a number-string comparison: Number(text)). A number
+// keeps its NetValuePacket (NET_PACKET_CUSTOM_VALUE / NET_PACKET_GLOBAL_VALUE); peers before EXT get no text.
+#define NET_VALUE_TEXT_SIZE 301 // TRIGGER_VALUE_TEXT_SIZE: a stored value (KS_STORAGE_VALUE_BYTES) whole
+typedef struct {
+    uint8_t type;                   // NET_PACKET_CUSTOM_VALUE ("cv", to the player) or NET_PACKET_GLOBAL_VALUE ("gv", to all)
+    uint8_t flags;                  // NET_VALUE_* (NET_VALUE_RESET: a global set cleared first)
+    char key[71];                   // TRIGGER_VALUE_KEY_SIZE, NUL-terminated
+    char text[NET_VALUE_TEXT_SIZE]; // the value, UTF-8, NUL-terminated
+} NetValueTextPacket;
+_Static_assert(sizeof(NetValueTextPacket) == 374, "NetValueTextPacket: the wire body is 374 bytes");
 
 // NET_EXT_KN_OFFICIAL_AMMO: Krunker "uamo" UPDATE_AMMO [ammos, reserveAmmos] (game.deob.js:220425 ->
 // players.updatePlayerAmmo): our player's magazine per loadout slot and, in finiteAmmo modes, its
@@ -765,6 +806,18 @@ typedef struct {
     float reps;    // repetitions: v10's playClip(player, name, arg2 || 1)
 } NetPlayerAnimPacket;
 
+// NET_EXT_PLAYER_ASSET_ID (S -> C): v10 "uai" UPDATE_ASSET_ID [sid, assetTxt] (iíiïiiï, deob-10.0.3.js:257784 ->
+// players.updateAssetID :197964): `if (config.mdl && assetTxt.length)` the player's next model build loads that asset
+// instead of the class's aID (player.assetTxt, nulled by generateMeshes :194265), and an active player is rebuilt at
+// once (regenMeshes). The authority broadcasts it from updateAssetID (KrunkScript's `player.assetID = ...` setter,
+// :207883-207887; shared/src/player_anim.c player_update_asset_id). The client keeps it for the player's life (one for
+// a dead player waits for its spawn; client/src/player_class_model.c).
+#define NET_PLAYER_ASSET_TEXT 32
+typedef struct {
+    int32_t sid;                       // the player (its uid on the KrunkNative wire)
+    char asset[NET_PLAYER_ASSET_TEXT]; // assetTxt (`+= ""`), NUL-terminated, cut to 31 bytes
+} NetPlayerAssetIdPacket;
+
 // NET_EXT_SPEECH_BUBBLE (S -> C): v10 "sb" SHOW_SPEECH_BUBBLE [html, ms, sigh] (iíììiîì, deob-10.0.3.js:261181): the menu
 // mascot's bubble (#txtBubble's innerHTML, #bubbleContainer scale(1.0), back to scale(0.0) after ms || 2500), a sigh_0 /
 // sigh_1 at volume 0.2 first when sigh. v10 sends ["sb", "welc", username] after "ready" (:261464); the official game
@@ -775,6 +828,100 @@ typedef struct {
     uint8_t sigh;                      // play a sigh first
     char text[NET_SPEECH_BUBBLE_TEXT]; // the server's HTML, NUL-terminated (the client shows its text, tags dropped)
 } NetSpeechBubblePacket;
+
+// NET_EXT_PLAYER_INTER_PROG (S -> C): v10 "p" INTER_PROG [prog] (iìììîíí, deob-10.0.3.js:259394) and "mp" INTER_M_PROG
+// [prog] (iiííïïi :259398): the bars of the player a spectator follows, interactProg (an interact hold, #interactProg)
+// and interactMProg (a weapon charge, the game overlay's upright bar). display = prog > 0. The authority sends them
+// from its update loop (:222274-222292) to the connections whose specStream is that player, (prog || 0).round(3),
+// when the value changed. KrunkNative's server keeps the last value per spectator (server/src/net.c), so a spectator
+// switching to another player gets that player's bar at once; v10 keeps it per player and waits for its next change.
+enum { NET_INTER_BAR_INTERACT, NET_INTER_BAR_CHARGE, NET_INTER_BAR_COUNT };
+typedef struct {
+    uint8_t bar;  // NET_INTER_BAR_*
+    float prog;   // 0..1 (a charge past 1 is an ovrChrg weapon's over-charge), 0 hides the bar
+} NetInterProgPacket;
+_Static_assert(sizeof(NetInterProgPacket) == 5, "NetInterProgPacket: the wire body is 5 bytes");
+
+// NET_EXT_UNBOX_MESSAGE (S -> C): v10 "unb" UNBOX_MESSAGE [name, itemIndex, kr] (iíïîiìí, deob-10.0.3.js:254321) and
+// "unbS" UNBOX_MESSSAGE_S [playerId, skinIndex] (iíiíïíi :254331): with Show Unboxings on, the chat line
+// "<span style='color:#fff'>{name}</span> unboxed <span class='click' style='color:{rarity colour}'>[{item}]</span>"
+// (i18n windows.store.unboxed). unb names the unboxer itself; a kr > 0 is a Free KR spin: item = store.freeKR[itemIndex]
+// ({rarity}, name kr + " KR", no viewItem). unbS names a player of the game (players.findById); the server sends it when a
+// map prize wheel stops (updateSpinners :219471-219476: everyone for rarity >= 2, else the spinner alone).
+enum { NET_UNBOX_NAMED, NET_UNBOX_PLAYER };
+#define NET_UNBOX_NAME_SIZE 32
+typedef struct {
+    int32_t uid;                    // NET_UNBOX_PLAYER: the player's uid; NET_UNBOX_NAMED: -1
+    int32_t item;                   // store.skins index, or store.freeKR index when kr > 0
+    int32_t kr;                     // the KR a Free KR spin won, 0 = a skin
+    uint8_t kind;                   // NET_UNBOX_*
+    char name[NET_UNBOX_NAME_SIZE]; // NET_UNBOX_NAMED: the unboxer's name (NUL-terminated)
+} NetUnboxMessagePacket;
+_Static_assert(sizeof(NetUnboxMessagePacket) == 45, "NetUnboxMessagePacket: the wire body is 45 bytes");
+
+// NET_EXT_LOTTERY_PRIZE_WON (S -> C): v10 "lotWin" LOTTERY_PRIZE_WON [lotteryId, entryId, prize {type, ref, quantity},
+// playerId] (iíiìïïi, deob-10.0.3.js:255154): "<span style='color:#fff'>{alias}</span> won{prize} in the raffle!" for a
+// winner in this game (players.findById). prize: skin -> " [name]" in the rarity colour (no such skin: " Nx Skin ref"),
+// currency -> " N Krunkies" / " N Junk" / " N Ranked Points" (ref 1 / 2 / 3, else "Currency ref"), subscription ->
+// " N days of ref", anything else nothing.
+enum { NET_PRIZE_OTHER, NET_PRIZE_SKIN, NET_PRIZE_CURRENCY, NET_PRIZE_SUBSCRIPTION };
+typedef struct {
+    double quantity; // prize.quantity
+    int32_t uid;     // the winner's uid
+    uint8_t type;    // NET_PRIZE_*
+    char ref[51];    // prize.ref as text ("812", "1", "Premium"), NUL-terminated
+} NetLotteryPrizePacket;
+_Static_assert(sizeof(NetLotteryPrizePacket) == 64, "NetLotteryPrizePacket: the wire body is 64 bytes");
+
+// NET_EXT_SPIN_WHEEL_RESPONSE (S -> C): v10 "spinW" SPIN_WHEEL_RESPONSE [socketId, uid, error, randNum, skinIndex, funds]
+// (iiîïiiì, deob-10.0.3.js:254991): without an error, a map prize wheel (manager.spinners[uid], a PRIZE_WHEEL object)
+// spins to randNum and wins skinIndex (updateSpinner :219408); when it is our spin the account takes the skin and its
+// KR becomes funds.
+typedef struct {
+    double funds;  // mine: the account's KR after the spin
+    int32_t uid;   // the spinner's uid: its place among the map's spinners (MapManager.addSpinner :186551)
+    float rand;    // randNum: the stop, spinVal = 2 pi (rand / 100 + 13) + pi / 2
+    int32_t skin;  // the item won (store.skins index)
+    uint8_t mine;  // socketId was ours
+} NetSpinWheelPacket;
+_Static_assert(sizeof(NetSpinWheelPacket) == 21, "NetSpinWheelPacket: the wire body is 21 bytes");
+
+// NET_EXT_CHARGE_CONSENT_REQUEST (S -> C): v10 "chreq" CHARGE_CONSENT_REQUEST [id, amount, modal] (iîiîiïi,
+// deob-10.0.3.js:257673; the server's authorizeSpend :221223): a map script asks to charge "This game wants to charge you
+// {floor(amount)} KR": the #chargeModal card (modal) or the #chargeConfirm [1] / [2] prompt. It closes after 15 s
+// unanswered (the server declines then, :221241). NET_EXT_CHARGE_CONSENT_RESPONSE (C -> S): "chrsp" [id, 1] accepts,
+// [id] declines (:257700).
+typedef struct {
+    double amount;  // KR asked
+    int32_t id;     // the request's id, echoed in the response
+    uint8_t modal;  // 1: the #chargeModal card
+} NetChargeConsentRequestPacket;
+_Static_assert(sizeof(NetChargeConsentRequestPacket) == 13, "NetChargeConsentRequestPacket: the wire body is 13 bytes");
+typedef struct {
+    int32_t id;
+    uint8_t accept;
+} NetChargeConsentResponsePacket;
+_Static_assert(sizeof(NetChargeConsentResponsePacket) == 5, "NetChargeConsentResponsePacket: the wire body is 5 bytes");
+
+// NET_EXT_WARS_CLAN (S -> C): v10 "warsClan" WARS_CLAN [clan_id, clan_name, clan_logo, clan_banner_color] (iíìïïíì,
+// deob-10.0.3.js:255551; init's syncData.warsClan :256999, the server's territorialWars.setClanInfo :215092): the Turf
+// Wars clan holding this map (has 0: none, ["warsClan", null]). Once per game, 1 s after we entered (or after it came
+// while in the game), textPopup("Turf Wars", "Territory controlled by " + clan_name) (:242096, :255563).
+typedef struct {
+    int32_t clan_id;
+    uint8_t has;
+    char clan_name[32];
+    char clan_logo[64];    // String(clan_logo), "" none
+    char banner_color[24]; // String(clan_banner_color)
+} NetWarsClanPacket;
+_Static_assert(sizeof(NetWarsClanPacket) == 125, "NetWarsClanPacket: the wire body is 125 bytes");
+
+// NET_EXT_KN_OFFICIAL_EDIT_MAP: a slice of one blob too big for NetExtJsonChunk's 255 slices (a map JSON)
+typedef struct {
+    uint16_t part;  // this slice's index
+    uint16_t parts; // slices of the blob (>= 1)
+} NetExtBlobChunk;
+#define NET_EXT_BLOB_CHUNK_DATA (NET_EXT_BODY_MAX - (int) sizeof(NetExtBlobChunk))
 #pragma pack(pop)
 
 // The name of a NET_PLAYER_CLIP_* (v10's clip list, deob-10.0.3.js:21165), NULL out of range.
