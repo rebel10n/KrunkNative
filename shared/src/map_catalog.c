@@ -2,6 +2,13 @@
 // files under assets/maps/official/, mapIndex 0..45) plus the community maps, among them the v3.1.1 official
 // maps as "311_<key>" and v3.1.1's old_* maps (the v1.5.2 era) as "152_<key>".
 //
+// The 311_* and 152_* maps are a deliberate KrunkNative addition, not part of v10 (whose catalogue has none
+// of them) and not a leftover of an older client version: the user keeps them (2026-10-12, and 2026-10-24:
+// "old maps should be preserved"). They are map content, not code for an older version, so the v10-only rule
+// (AGENTS.md "Krunker Parity") does not retire them. They are community maps (MAP_SOURCE_CUSTOM, mapIndex -1,
+// out of the rotation and Krunker's official list), load through the v3.1.1 / v7.1.4 map JSON compatibility
+// AGENTS.md requires, and are listed in doc/v10/kn-additions.md. Parity audits: do not flag them.
+//
 // Sources: Krunker_v7.1.4/src/data/maps.js (the first 32 official maps: name, fileName; the index is the
 // v7 mapIndex, the same as v10's) and data/map.js rotationMaps; the v10.0.2 official list (krunker_maps.h,
 // generated) for the official files and the mapIndex of the 14 maps v7 does not have; Krunker_v3.1.1
@@ -91,7 +98,8 @@ static const MapCatalogEntry k_catalog[] = {
     CUSTOM("eterno_jump", "eterno_jump", "Community", "", NULL),
     CUSTOM("slide_moonlight", "slide_moonlight", "Community", "", "img/maps/community/slide_moonlight.png"),
     CUSTOM("zombie_high", "Zombie_High", "IamFiercer", "https://user-assets.krunker.io/md23677/mod.zip", "img/maps/community/zombie_high.png"),
-    // the v3.1.1 official maps (v3.1.1 MAPS order) as "311_<key>"; Host Game card labels as v3.1.1 showed them
+    // KrunkNative addition, kept on purpose (see the top of the file): the v3.1.1 official maps (v3.1.1 MAPS
+    // order) as "311_<key>"; Host Game card labels as v3.1.1 showed them
     V311("burg", "Burg", "", "2018", "v3.2", 0),
     V311("littletown", "Littletown", "", "2018", "v0.9", 1),
     V311("sandstorm", "Sandstorm", "CrispyCrust", "2019", "v2.3", 2),
@@ -107,7 +115,8 @@ static const MapCatalogEntry k_catalog[] = {
     V311("industry", "Industry", "CrispyCrust", "2020", "v1.0", 12),
     V311("soul_sanctum", "Soul Sanctum", "", "2020", "", 13),
     V311("evacuation", "Evacuation", "Creationfier", "2020", "vTest", 14),
-    // v3.1.1's custom_maps/old_*.json (its ASCII filename order) as "152_<key>"
+    // KrunkNative addition, kept on purpose (see the top of the file): v3.1.1's custom_maps/old_*.json (its
+    // ASCII filename order) as "152_<key>"
     V152("burg", "Burg"),
     V152("freight", "Freight"),
     V152("kanji", "Kanji"),
