@@ -44,6 +44,19 @@ static void test_next_round(Game *game) {
     g_next_round_calls++;
 }
 
+// GameHooks.junk_credit (game.sendUserJunk): the account credit the server asks kn_brain for.
+static int g_junk_calls;
+static int g_junk_uid;
+static int64_t g_junk_hundredths;
+static char g_junk_reason[16];
+static void test_junk_credit(Game *game, const Player *player, const int64_t hundredths, const char *reason) {
+    (void) game;
+    g_junk_calls++;
+    g_junk_uid = player->uid;
+    g_junk_hundredths = hundredths;
+    snprintf(g_junk_reason, sizeof(g_junk_reason), "%s", reason ? reason : "");
+}
+
 static const SentPacket *find_sent(const int type, const int uid, const int nth) {
     int seen = 0;
     for (int i = 0; i < g_sent_count; i++) {
@@ -1249,11 +1262,27 @@ static void test_interact_hold(Game *game) {
         game_interact_scan(game, a, &scan);
         CHECK(scan.last_type == GAME_INTERACT_KEY && scan.last_uid == 0, "Junk prompt: type 7 (%d)", scan.last_type);
         CHECK(a->interact_progress == 0.0f, "no bar for a press interact");
+        // 59 Reward Junk "0.01" (deob-10.0.3.js:183592-183598): an account player in a public,
+        // non-sandbox game -> game.sendUserJunk("trigger", player, v), the account credit
+        // (GameHooks.junk_credit, in hundredths). The game prints no line itself: sendUserJunk sends
+        // FOUND_JUNK "jnk" only from the backend's reply (deob-10.0.3.js:221137-221145), which is the
+        // server's game_found_junk once kn_brain accepted the credit (server/src/accounts.c).
+        const GameHooks saved_hooks = game->hooks;
+        const unsigned char had_account = a->has_account;
+        game->hooks.junk_credit = test_junk_credit;
+        a->has_account = 1;
         game->now += 1.0f;
         g_sent_count = 0;
+        g_junk_calls = 0;
         game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
         CHECK(!junk->active, "one press takes the Junk at once (v7 has no hold for onInteractKey)");
-        // 59 Reward Junk "0.01": sendUserJunk's "jnk" -> io_foundJunk, the finder's own line
+        CHECK(g_junk_calls == 1 && g_junk_uid == a->uid && g_junk_hundredths == 1 && !strcmp(g_junk_reason, "trigger"),
+              "Junk: sendUserJunk(\"trigger\") credits the finder 1 hundredth (%d calls, %lld)", g_junk_calls, (long long) g_junk_hundredths);
+        CHECK(!find_sent(NET_PACKET_CHAT, -2, 0), "Junk: no chat line from the game (the server prints it on the brain's credit)");
+
+        // the brain accepted: "jnk" -> addChat(-1, null, "You found [x.xx] Junk", 1) to the finder only
+        g_sent_count = 0;
+        game_found_junk(game, a, 0.01);
         const SentPacket *line = find_sent(NET_PACKET_CHAT, a->uid, 0);
         NetChatPacket chat = {0};
         if (line && line->length == sizeof(chat)) memcpy(&chat, line->payload, sizeof(chat));
@@ -1261,12 +1290,12 @@ static void test_interact_hold(Game *game) {
               "Junk: \"You found [0.01] Junk\" to the finder (%s)", line ? chat.text : "no CHAT");
         CHECK(!find_sent(NET_PACKET_CHAT, NET_TARGET_ALL, 0) && !find_sent(NET_PACKET_CHAT, -2, 1), "Junk: the line is the finder's only");
 
-        // the Amount: parseFloat(tct || 0), non-zero and < 100 (toFixed(2)); bots have no account
+        // the Amount: parseFloat(tct || 0), non-zero and < 100, in hundredths; [KN] a negative one
+        // is not credited (triggers_actions.c reward_junk); bots have no account
         TriggerActionData *reward = junk->trig->action_count == 2 ? &junk->trig->actions[1] : NULL;
         CHECK(reward && reward->action == TRIGGER_ACTION_REWARD_JUNK, "Junk: the second action is Reward Junk");
-        static const struct { const char *tct; const char *line; } amounts[] = {
-            {" 2.5", "You found [2.50] Junk"}, {"99.999", "You found [100.00] Junk"}, {"-1", "You found [-1.00] Junk"},
-            {"100", NULL}, {"0", NULL}, {"abc", NULL}, {"0x10", NULL}, {"", NULL},
+        static const struct { const char *tct; int64_t hundredths; } amounts[] = {
+            {" 2.5", 250}, {"99.999", 10000}, {"-1", 0}, {"100", 0}, {"0", 0}, {"abc", 0}, {"0x10", 0}, {"", 0},
         };
         for (size_t i = 0; reward && i < sizeof(amounts) / sizeof(amounts[0]); i++) {
             snprintf(reward->text, sizeof(reward->text), "%s", amounts[i].tct);
@@ -1276,12 +1305,13 @@ static void test_interact_hold(Game *game) {
             junk->trig->triggered = 0;
             game->now += 1.0f;
             g_sent_count = 0;
+            g_junk_calls = 0;
+            g_junk_hundredths = 0;
             game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
-            line = find_sent(NET_PACKET_CHAT, a->uid, 0);
-            memset(&chat, 0, sizeof(chat));
-            if (line && line->length == sizeof(chat)) memcpy(&chat, line->payload, sizeof(chat));
-            CHECK(!junk->active && (amounts[i].line ? line && !strcmp(chat.text, amounts[i].line) : !line),
-                  "Junk \"%s\": %s (%s)", amounts[i].tct, amounts[i].line ? amounts[i].line : "no line", line ? chat.text : "none");
+            CHECK(!junk->active && g_junk_calls == (amounts[i].hundredths ? 1 : 0) && g_junk_hundredths == amounts[i].hundredths
+                  && !find_sent(NET_PACKET_CHAT, -2, 0),
+                  "Junk \"%s\": %lld hundredths credited, no line (%d calls, %lld)", amounts[i].tct, (long long) amounts[i].hundredths,
+                  g_junk_calls, (long long) g_junk_hundredths);
         }
         if (reward) snprintf(reward->text, sizeof(reward->text), "0.01"), reward->has_text = 1;
         junk->active = 1;
@@ -1290,9 +1320,12 @@ static void test_interact_hold(Game *game) {
         a->is_bot = 1;
         game->now += 1.0f;
         g_sent_count = 0;
+        g_junk_calls = 0;
         game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
-        CHECK(!junk->active && !find_sent(NET_PACKET_CHAT, -2, 0), "Junk: a bot takes it without a line");
+        CHECK(!junk->active && !g_junk_calls && !find_sent(NET_PACKET_CHAT, -2, 0), "Junk: a bot takes it without a credit or a line");
         a->is_bot = 0;
+        a->has_account = had_account;
+        game->hooks = saved_hooks;
         game->map->objects = saved;
         game->map->object_count = saved_count;
     }

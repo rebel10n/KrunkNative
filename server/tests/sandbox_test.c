@@ -381,13 +381,13 @@ static void test_wpc_peer_mix(void) {
     sandbox_stop();
 }
 
-// STATE packets in c->packets[from..] about `uid` (-1: any)
+// STATE packets in c->packets[from..] about `uid` (-1: any). Read as every client reads them
+// (net_packet_read_state): these 1.3.0 test peers get the 57-byte V1, a 1.4.5+ peer the 79-byte V2.
 static int states_about(const TestClient *c, const int from, const int uid) {
     int n = 0;
     for (int i = from; i < c->count; i++) {
-        if (c->packets[i].type != NET_PACKET_STATE || c->packets[i].length != sizeof(NetStatePacket)) continue;
         NetStatePacket state;
-        memcpy(&state, c->packets[i].payload, sizeof(state));
+        if (c->packets[i].type != NET_PACKET_STATE || !net_packet_read_state(&state, c->packets[i].payload, c->packets[i].length)) continue;
         n += uid < 0 || state.uid == uid;
     }
     return n;
