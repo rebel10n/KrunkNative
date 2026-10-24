@@ -3,17 +3,18 @@
 
   python3 -I server/tests/krunker_challenges_e2e.py BUILD_DIR      (run from the repository root)
 
-  T1  Box Office (kn_brain, signed in, the default seed): "Map Challenges" lists every official map of the
-      catalogue by its name (shared/src/map_catalog.c OFFICIAL entries, first letter capitalised as v10's
-      UTILS.capFirst), not only the seeded Burg / Sandstorm / Kanji; no "Loading" and no error text.
+  T1  Box Office (kn_brain, signed in, the default seed): "Map Challenges" has a card for each map with a
+      challenge, as v10.0.3 draws (`if (counts["map_" + i])`, deob-10.0.3.js:250887-250895): the seeded Burg /
+      Sandstorm / Kanji by name (shared/src/map_catalog.c OFFICIAL entries, first letter capitalised as v10's
+      UTILS.capFirst) and no other map; no "Loading" and no error text.
   T2  official krunker.io (the krunker_account_e2e stub; its account's activeChallenges carry one map challenge
       per official map, a "Complete all" map challenge with no mp, weapon rows, a nightmare row and a ranked
       row, each named "STUB ..."): the window lists all 46 maps, the Complete-all card, the nightmare and the
       "Ranked Challenges" header with its card; none of the brain's seeded names appear.
-  T3  official, the stub account without an activeChallenges array: the full layout (46 maps, the headers) and
-      no "Loading" / error text.
-  T4  Box Office, signed in but kn_brain gone before the window's first request: the full layout and no
+  T3  official, the stub account without an activeChallenges array: the headers, no map card, and no
       "Loading" / error text.
+  T4  Box Office, signed in but kn_brain gone before the window's first request: the headers, no map card,
+      and no "Loading" / error text.
   T5  the stub's activeChallenges as a capture, converted by tools/brain/challenges_from_capture.py into a
       migration; a kn_brain on it lists the same map and weapon rows (names, types, DAT, REW, icon) and the
       window shows the stub's no-map, nightmare and ranked rows. Doc: doc/v10/challenges.md 4c.
@@ -80,6 +81,8 @@ def map_catalogue():
 
 
 MAPS = map_catalogue()
+# the default seed's map challenges (services/db/migrations/sqlite/0107_progression.sql): Burg, Sandstorm, Kanji
+SEEDED_MAPS = [0, 2, 10]
 
 
 def has_name(text, name):
@@ -199,7 +202,8 @@ class Client:
             env[k] = "http://127.0.0.1:9"
         env.update(env_extra)
         self.out = open(self.log, "w")
-        self.proc = subprocess.Popen(list(prefix) + ["stdbuf", "-oL", "-eL", CLIENT, "--offline"], stdout=self.out, stderr=subprocess.STDOUT,
+        # --debug: the sign-in checks read debug-level lines ("[account] logged in as", klog.h)
+        self.proc = subprocess.Popen(list(prefix) + ["stdbuf", "-oL", "-eL", CLIENT, "--offline", "--debug"], stdout=self.out, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, env=env, cwd=ROOT, start_new_session=True)
         PROCS.append(self.proc)
 
@@ -295,11 +299,18 @@ class Client:
         self.out.close()
 
 
-def layout_checks(tag, text, want_names=True):
-    """the full layout: every official map by name, the headers, and no load / error text"""
-    missing = [n for n, _ in MAPS if not has_name(text, n)]
-    check(f"{tag}: Map Challenges lists all {len(MAPS)} official maps by name", want_names and not missing,
+def layout_checks(tag, text, want=None):
+    """the layout: a card for exactly the maps in `want` (mapIndex list; None = every official map), the headers,
+    and no load / error text"""
+    want = [i for _, i in MAPS] if want is None else want
+    names = [n for n, i in MAPS if i in want]
+    missing = [n for n in names if not has_name(text, n)]
+    check(f"{tag}: Map Challenges has the cards of its {len(names)} maps with challenges", not missing,
           "missing: " + ", ".join(missing[:12]) if missing else "")
+    # a few names that are not also words of the window's text (challenge names, headers)
+    extra = [n for n, i in MAPS if i not in want and n in ("Littletown", "Subzero", "Shipment", "Freight", "Lostworld")
+             and has_name(text, n)]
+    check(f"{tag}: no card for a map without challenges", not extra, ", ".join(extra))
     for head in ("Map Challenges", "Weapon Challenges", "Nightmare Challenges", "Ranked Challenges"):
         check(f"{tag}: the '{head}' header is shown", head in text, text[:120])
     err = ERROR_RE.search(text)
@@ -322,7 +333,7 @@ def box_office(brain_port, stub_results):
         text = c.wait_window("Map Challenges", 40)
         shot = c.shot("/tmp/challenges-box-office.png")
         check("T1: the Challenges window is open with the brain's account", "Map Challenges" in text, text[:160])
-        layout_checks("T1", text)
+        layout_checks("T1", text, SEEDED_MAPS)
         check("T1: the screenshot was saved", bool(shot), shot)
     finally:
         c.close()
@@ -334,7 +345,7 @@ def box_office(brain_port, stub_results):
         time.sleep(2)
         c2.ui("windows[32].openHome()")
         text = c2.wait_window("Map Challenges", 25)
-        layout_checks("T4", text)
+        layout_checks("T4", text, [])
     finally:
         c2.close()
         brain.stop()
@@ -466,7 +477,7 @@ def main():
         stub.stop()
         c3, text3, stub3 = official_run("off3", None, None, http_brain)
         try:
-            layout_checks("T3", text3)
+            layout_checks("T3", text3, [])
         finally:
             c3.close()
             stub3.stop()
