@@ -2,7 +2,8 @@
 
 // Krunker v7.1.4 weapon 7 (src/data/weapons.js): the base of its upgradeWeapons entry (upgraded.c); v10
 // plays the rebalanced copy in shared/src/rules/v10/weapons_rebalance_v10.c. Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: altSkin, type, noAo, muzOff, muzOffY, muzMlt, caseZOff, rumble, icnPad.
+// recoil from per-ms to per-s; fields not ported yet: type, noAo, muzOff, muzOffY, muzMlt, caseZOff, rumble, icnPad.
+// The altSkin (the Nova Semi remodel) is client-side: viewer_weapon_alt_skin.
 const Weapon g_semi_auto = {
     .name = "Semi Auto",
     .src = "weapon_8",

@@ -68,6 +68,7 @@ void vscene_orbit_wheel(float dy);
 void vscene_orbit_key(int dom_key_code);
 // the current player's state, for the import targets
 int  vscene_player_weapon_slot(void);       // weaponIndex
+int  vscene_player_weapon_id(void);         // loadout[weaponIndex], -1 without a player
 const Weapon *vscene_player_weapon(void);   // d.weapon
 int  vscene_player_is_melee(void);
 // the size the scene renders at (cosmetic page: 512 x 512 CSS px at the container's top-left)

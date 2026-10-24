@@ -2,7 +2,8 @@
 
 // Krunker v7.1.4 weapon 5 (src/data/weapons.js), unchanged in v10.0.3: the ruleset's entry, checked against
 // shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: altSkin, noAo, nCase, nRing, shine, type, muzOff, muzMlt, rumble, icnPad, expScale.
+// recoil from per-ms to per-s; fields not ported yet: noAo, nCase, nRing, shine, type, muzOff, muzMlt, rumble, icnPad, expScale.
+// The altSkin (the Nova Pump remodel) is client-side: viewer_weapon_alt_skin.
 const Weapon g_shotgun = {
     .name = "Shotgun",
     .src = "weapon_6",

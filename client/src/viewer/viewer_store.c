@@ -101,6 +101,42 @@ const ViewerCharmMount *viewer_charm_mount(const int weapon_id) {
     return weapon_id >= 0 && weapon_id < VIEWER_CHARM_WEAPONS && g_viewer_charm_mounts[weapon_id].set ? &g_viewer_charm_mounts[weapon_id] : NULL;
 }
 
+// The altSkins of v10.0.3's two weapon tables that swap the model (both keep v7.1.4's, src/data/weapons.js and
+// upgradeWeapons.js). weapons (deob-10.0.3.js:112381-115372): 5 Shotgun "Nova Pump" (:112928-112949), 7 Semi Auto
+// "Nova Semi" (:113147-113164), 9 Akimbo Uzi "Nova Uzi" (:113362-113371) and 11 Alien Blaster "Nova Alien"
+// (:113548-113568). upgradeWeapons (deob:199770-202673): 5, 7 and 9 the same remodels plus {projection: true, video: 2,
+// outline: 0, outlineS: 1.05} (:200322-200353, :200559-200584, :200784-200801) and 11 Cupids Blaster {mid: 4, seas: 6,
+// weapon: 12, rarity: 0} (:201026-201030). Every other upgraded altSkin is only that video and outline; no other weapon
+// has one. The video and the outline are not kept here: skin_video_alt_skin and zombies_render.c draw them.
+#define ALT_SKIN(nm, wp, md, md_t, ss, fl) .name = nm, .type = 0, .weapon = wp, .id = -1, .rarity = 0, .seas = ss, .pat = -1, \
+                                           .mid = md, .mid_t = md_t, .flags = fl, .emiss = -1, .color = -1
+static const ViewerAltSkin k_alt_nova_pump = {
+    .skin = {ALT_SKIN("Nova Pump", 6, 0, 38, 2, VS_BLOCKED), .y_off = -0.5f, .z_off = 0.28f, .m_scl = 1.0f, .scl = 0.9f},
+    .charm_m = {-0.37f, -0.2f, 1.18f},
+};
+static const ViewerAltSkin k_alt_nova_semi = {
+    .skin = {ALT_SKIN("Nova Semi", 8, 0, 0, 3, VS_BLOCKED)},
+    .charm_m = {-0.29999999999999993f, -0.35000000000000014f, 1.13f},
+};
+static const ViewerAltSkin k_alt_nova_uzi = {.skin = {ALT_SKIN("Nova Uzi", 10, 0, 0, 3, VS_BLOCKED)}};
+static const ViewerAltSkin k_alt_nova_alien = {
+    .skin = {ALT_SKIN("Nova Alien", 12, 5, 0, 7, VS_BLOCKED), .y_off = -0.2f, .m_scl = 1.5f},
+    .charm_m = {-0.51f, -0.14f, -1.2500000000000013f},
+    .no_snd = 1,
+};
+static const ViewerAltSkin k_alt_cupids_blaster = {.skin = {ALT_SKIN(NULL, 12, 4, -1, 6, 0)}}; // no name, not blocked
+#undef ALT_SKIN
+
+const ViewerAltSkin *viewer_weapon_alt_skin(const int weapon_id, const int upgraded) {
+    switch (weapon_id) {
+        case 5: return &k_alt_nova_pump;
+        case 7: return &k_alt_nova_semi;
+        case 9: return &k_alt_nova_uzi;
+        case 11: return upgraded ? &k_alt_cupids_blaster : &k_alt_nova_alien;
+        default: return NULL;
+    }
+}
+
 const ViewerOptionList *viewer_option_list(const ViewerListKind kind, const int key, const int season) {
     for (int i = 0; i < g_viewer_list_count; i++) {
         const ViewerOptionList *list = &g_viewer_lists[i];

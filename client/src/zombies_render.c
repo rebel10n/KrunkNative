@@ -9,8 +9,8 @@
 //     onlyWeapons weapon that changes every 250 ms (floor(timer / 250)) and the real pick from 80%
 //     on (a teddy roll shows the teddy from the start, as in v7), rising from the box top by
 //     (mysteryBoxOffset 10 - height) * progress; it stays where it stopped while it waits to be
-//     taken (state 2). Weapons: "weapons/<src>" at scale * 1.5, rotation (xR, yR + PI/2, zR); the
-//     teddy: "teddy_0" at scale 9, rotation r.
+//     taken (state 2). Weapons: "weapons/<src>" (or its altSkin's remodel) at (mScl || scale) * 1.5,
+//     rotation (xR, yR + PI/2, zR); the teddy: "teddy_0" at scale 9, rotation r.
 //   game.changeKrumWeapon / updateKrumMachines: while upgrading the weapon slides out along the
 //     machine's facing (krumMachineOffset 10 * (p <= 0.5 ? 1 - p : p), p = timer / anim) at
 //     y - height / 4, hidden while 0.3 < p < 0.7, the upgradeWeapons entry from p <= 0.5 on.
@@ -21,8 +21,9 @@
 //     bobs (x / z sin(bob) * 0.1) and turns (y += delta * 0.001); landed (readyClaim) it stops
 //     tilting and switches to the "adrp_1" texture.
 //
-// KN notes: weapons have no altSkin record in KN (no mid models or glow skins), so the upgraded weapon
-// shows its base model, with the altSkin's video (v10.0.3 upgradeWeapons altSkin {projection, video 2},
+// KN notes: the weapon shows the altSkin remodel of its table (viewer_weapon_alt_skin: the Nova Pump / Semi /
+// Uzi / Alien on the box and the machine's first stage, the upgraded Nova ones and the Cupids Blaster after it),
+// the upgraded entry with the altSkin's video (v10.0.3 upgradeWeapons altSkin {projection, video 2},
 // skin_video_alt_skin; deob-10.0.3.js:218796-218845 loadMesh passes video / projection) unless
 // noVideoSkins strips it, and its outline. The airdrop overlay icon (game-overlay.js,
 // /img/streaks/package/<icon>.png, ui/img from tools/ui-import/fetch_live_assets.py) is drawn by
@@ -38,6 +39,7 @@
 #include <ruleset.h>
 #include <skin_fx.h>    // the upgraded weapon's altSkin video
 #include <skin_video.h>
+#include "viewer/viewer_store.h" // the weapons' altSkin remodels
 
 #define ZR_MYSTERY_BOX_OFFSET 10.0f   // config.mysteryBoxOffset
 #define ZR_KRUM_OFFSET 10.0f          // config.krumMachineOffset
@@ -225,9 +227,12 @@ static void zr_machine_weapon(const Game *game, ZrMachine *m, const int id, cons
     } else {
         const Weapon *weapon = krum && stage ? weapon_upgraded(id) : zr_weapon(game, id);
         if (!weapon || !weapon->src) weapon = zr_weapon(game, id);
-        m->weapon = prefab_weapon_mesh(weapon, 0);
+        // (stage ? upgradeWeapons : weapons)[id].altSkin: its remodel (deob-10.0.3.js:218628-218631, :218796-218805)
+        const ViewerAltSkin *alt = viewer_weapon_alt_skin(id, krum && stage);
+        float scale = 1.0f;
+        m->weapon = prefab_weapon_mesh(weapon, alt ? &alt->skin : NULL, 0, &scale);
         if (!m->weapon) return;
-        const float scale = (weapon->scale != 0.0f ? weapon->scale : 1.0f) * 1.5f; // (mScl || scale) * 1.5
+        scale *= 1.5f; // (mScl || scale) * 1.5
         m->weapon->transform.rotation = (vec3) {r.x, r.y + (float) M_PI / 2.0f, r.z};
         m->weapon->transform.scale = (vec3) {scale, scale, scale};
     }

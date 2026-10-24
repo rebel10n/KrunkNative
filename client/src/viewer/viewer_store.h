@@ -188,6 +188,19 @@ struct cJSON;
 int viewer_skin_define(int index, const struct cJSON *skin);
 // weapons.js charm mount of a weapon id, NULL when the weapon takes no charm
 const ViewerCharmMount *viewer_charm_mount(int weapon_id);
+// Krunker v10.0.3 weapon altSkin remodels: the item a weapon wears when no store skin applies to its slot (none, one of
+// another weapon, or a krumMachine-upgraded slot: generateMeshes, deob-10.0.3.js:194480-194486), and the one the
+// mystery box, the Krum machine and the map's pickups show (deob:218628-218633, :218796-218805, :218965-218967,
+// :219014-219016). `skin` holds what the store-skin paths read (mid, midT, yOff, zOff, mScl, scl, weapon); the charm
+// mount moves to charmM{X,Y,Z}Off (`skin || weapon`, deob:194791) and noSnd keeps the shot's plain sound (deob:196405).
+typedef struct {
+    ViewerSkin skin;
+    float charm_m[3]; // charmM{X,Y,Z}Off, 0 = the weapon's
+    int no_snd;       // noSnd
+} ViewerAltSkin;
+// weapons[weapon_id].altSkin (upgraded 0) or upgradeWeapons[weapon_id].altSkin (upgraded 1) when it swaps the model
+// (it has a mid), NULL otherwise: no altSkin, or an upgraded one that only adds the video (skin_video_alt_skin).
+const ViewerAltSkin *viewer_weapon_alt_skin(int weapon_id, int upgraded);
 // The option list of a dropdown, NULL when there is none (e.g. a weapon without skins).
 const ViewerOptionList *viewer_option_list(ViewerListKind kind, int key, int season);
 // "Name [Rarity]" (or "Default") of option i into buf.

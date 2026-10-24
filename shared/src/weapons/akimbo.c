@@ -2,7 +2,8 @@
 
 // Krunker v7.1.4 weapon 9 (src/data/weapons.js): the base of its upgradeWeapons entry (upgraded.c); v10
 // plays the rebalanced copy in shared/src/rules/v10/weapons_rebalance_v10.c. Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: noAo, altSkin, type, caseYOff, caseZOff, muzOff, movSpread, expScale, rumble, icnPad.
+// recoil from per-ms to per-s; fields not ported yet: noAo, type, caseYOff, caseZOff, muzOff, movSpread, expScale, rumble, icnPad.
+// The altSkin (the Nova Uzi remodel) is client-side: viewer_weapon_alt_skin.
 const Weapon g_akimbo = {
     .name = "Akimbo Uzi",
     .src = "weapon_10",

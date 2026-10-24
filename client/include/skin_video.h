@@ -45,7 +45,8 @@ void skin_video_set_disabled(int disabled);
 int skin_video_disabled(void);
 // The altSkin video of upgradeWeapons[id] (deob-10.0.3.js:199770-202652: {projection: true,
 // video: 2, outline: 0, outlineS: 1.05} on every upgraded weapon with an altSkin but the Cupids
-// Blaster, a remodel), -1 for none.
+// Blaster, a remodel), -1 for none. The Shotgun / Semi Auto / Akimbo Uzi ones also swap the model
+// (viewer_weapon_alt_skin): the video plays on the remodel.
 int skin_video_alt_skin(int upgraded_weapon_id);
 // Every texture deleted (shutdown).
 void skin_video_clear(void);

@@ -5,8 +5,9 @@
 // (`upgraded: true`), used for a loadout slot a krumMachine upgraded (player.upgrades[slot]).
 // Each entry is its base weapon plus the gameplay fields below (checked against v10.0.3's table,
 // shared/tests/data/v10/upgradeWeapons.json, by weapons_v10_test). Upgrades drop minRec and
-// canUpgrade (and the Alien Blaster's noComp, the Grappler's customOnly). Not ported: the cosmetic altSkin / muzID / charm
-// changes, magReserve (finiteAmmo modes), and the Cupids Blaster's funcOnHit.
+// canUpgrade (and the Alien Blaster's noComp, the Grappler's customOnly). The cosmetic altSkin is client-side (its
+// remodel viewer_weapon_alt_skin, its video skin_video_alt_skin). Not ported: the muzID / charm changes, magReserve
+// (finiteAmmo modes), and the Cupids Blaster's funcOnHit.
 
 static Weapon g_upgraded[WEAPON_COUNT];
 static int g_upgraded_ready;

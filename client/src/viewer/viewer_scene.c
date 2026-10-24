@@ -749,6 +749,11 @@ int vscene_player_weapon_slot(void) {
     return vs.player ? vs.player->loadout_index : 0;
 }
 
+int vscene_player_weapon_id(void) {
+    const Player *p = vs.player;
+    return p && p->loadout && p->loadout_index >= 0 && p->loadout_index < p->loadout_size ? p->loadout[p->loadout_index] : -1;
+}
+
 const Weapon *vscene_player_weapon(void) {
     return vs.player ? vs.player->weapon : NULL;
 }

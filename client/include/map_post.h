@@ -33,7 +33,9 @@ int map_post_spawned_meshes(void);
 void prefab_build_vertices(const Object *object, int shown, float out[PREFAB_BUILD_VERTICES * PREFAB_BUILD_FLOATS]);
 Mesh *prefab_build_batch_mesh(Geometry *geometry);
 Mesh *prefab_pickup_mesh(int weapon_id, int no_texture, float *scale); // prefab.c: a weapon pickup's model (caller owns it)
-Mesh *prefab_weapon_mesh(const Weapon *weapon, int no_texture);   // prefab.c: a weapon's model, unposed (caller owns it)
+struct ViewerSkin;
+// prefab.c: a weapon's model or its altSkin remodel (viewer_weapon_alt_skin), unposed, *scale its loadMesh scale (caller owns it)
+Mesh *prefab_weapon_mesh(const Weapon *weapon, const struct ViewerSkin *alt_skin, int no_texture, float *scale);
 Mesh *prefab_asset_mesh(const char *model, const char *texture);   // prefab.c: models/<model>.obj + textures/<texture>.png (caller owns it)
 unsigned int prefab_asset_texture(const char *src);               // prefab.c: textures/<src>.png (cached; the missing-texture checker)
 

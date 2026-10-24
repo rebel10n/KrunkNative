@@ -10,7 +10,9 @@
 //   - v10.0.3 video skins (skin_video.c): the Glitch / Deep Space dyes and the Mysterious Orb melee show
 //     videos/video_<n>.mp4 (its .knv sidecar) and the frame changes with the clock; noVideoSkins gives
 //     them their regular texture (none for a dye, melee_20 for the melee) and no projection;
-//   - v10.0.3 material extras (tools/gltf_test/env_extras.gltf): env (the opt-in reflections) and noFog.
+//   - v10.0.3 material extras (tools/gltf_test/env_extras.gltf): env (the opt-in reflections) and noFog;
+//   - v10.0.3 weapon altSkin remodels (viewer_weapon_alt_skin): the Nova Pump / Semi / Uzi / Alien and the Cupids
+//     Blaster load their model and texture, and the upgraded ones play the altSkin video on the remodel.
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -20,6 +22,7 @@
 #include <headless.h>
 #include <render_settings.h>
 #include <pets.h>
+#include <ruleset.h>
 #include <skin_fx.h>
 #include <skin_video.h>
 #include "../../client/src/viewer/viewer_store.h"
@@ -336,6 +339,84 @@ static void check_video_skins(void) {
     skin_video_clear();
 }
 
+// v10.0.3 weapon altSkin remodels (viewer_weapon_alt_skin; weapons deob-10.0.3.js:112928-113568, upgradeWeapons
+// :200322-201030): the table, and each remodel's model ("weapons/<src>_<mid>") and getReModel texture
+// ("weapons/weapon_<weapon>_<midT || mid>") load from the content set; the upgraded ones play the altSkin video on it.
+static void check_weapon_remodels(void) {
+    static const struct {
+        int id, upgraded, mid;
+        const char *name, *model, *texture;
+        float m_scl, y_off, z_off, charm_x;
+        int no_snd, video;
+    } want[] = {
+        {5, 0, 0, "Nova Pump", "weapons/weapon_6_0", "weapons/weapon_6_38", 1.0f, -0.5f, 0.28f, -0.37f, 0, -1},
+        {7, 0, 0, "Nova Semi", "weapons/weapon_8_0", "weapons/weapon_8_0", 0.0f, 0.0f, 0.0f, -0.3f, 0, -1},
+        {9, 0, 0, "Nova Uzi", "weapons/weapon_10_0", "weapons/weapon_10_0", 0.0f, 0.0f, 0.0f, 0.0f, 0, -1},
+        {11, 0, 5, "Nova Alien", "weapons/weapon_12_5", "weapons/weapon_12_5", 1.5f, -0.2f, 0.0f, -0.51f, 1, -1},
+        {5, 1, 0, "Nova Pump", "weapons/weapon_6_0", "weapons/weapon_6_38", 1.0f, -0.5f, 0.28f, -0.37f, 0, 2},
+        {7, 1, 0, "Nova Semi", "weapons/weapon_8_0", "weapons/weapon_8_0", 0.0f, 0.0f, 0.0f, -0.3f, 0, 2},
+        {9, 1, 0, "Nova Uzi", "weapons/weapon_10_0", "weapons/weapon_10_0", 0.0f, 0.0f, 0.0f, 0.0f, 0, 2},
+        {11, 1, 4, NULL, "weapons/weapon_12_4", "weapons/weapon_12_4", 0.0f, 0.0f, 0.0f, 0.0f, 0, -1}, // Cupids Blaster
+    };
+    int others = 0;
+    for (int id = 0; id < 29; id++) {
+        if (id == 5 || id == 7 || id == 9 || id == 11) continue;
+        others += viewer_weapon_alt_skin(id, 0) != NULL || viewer_weapon_alt_skin(id, 1) != NULL;
+    }
+    CHECK(!others && !viewer_weapon_alt_skin(-1, 0) && !viewer_weapon_alt_skin(64, 1), "no other weapon swaps its model (%d)", others);
+    skin_video_set_disabled(0);
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        const ViewerAltSkin *alt = viewer_weapon_alt_skin(want[i].id, want[i].upgraded);
+        const Weapon *weapon = rules_weapon(want[i].id);
+        CHECK(alt && weapon && weapon->src, "weapon %d (upgraded %d): an altSkin remodel", want[i].id, want[i].upgraded);
+        if (!alt || !weapon || !weapon->src) continue;
+        const ViewerSkin *s = &alt->skin;
+        char model[96], texture[96];
+        snprintf(model, sizeof(model), "weapons/%s_%d", weapon->src, s->mid);
+        snprintf(texture, sizeof(texture), "%s%d_%d", g_viewer_types[0], s->weapon, s->mid_t > 0 ? s->mid_t : s->mid); // getReModel
+        CHECK(s->mid == want[i].mid && !strcmp(model, want[i].model) && !strcmp(texture, want[i].texture), "%s: %s / %s", want[i].model, model, texture);
+        CHECK((want[i].name ? s->name && !strcmp(s->name, want[i].name) : !s->name) && s->type == 0 && s->weapon - 1 == want[i].id,
+              "weapon %d: the item %s", want[i].id, s->name ? s->name : "(no name)");
+        CHECK(s->m_scl == want[i].m_scl && s->y_off == want[i].y_off && s->z_off == want[i].z_off && s->x_off == 0.0f,
+              "%s: mScl %g yOff %g zOff %g", want[i].model, s->m_scl, s->y_off, s->z_off);
+        CHECK(fabsf(alt->charm_m[0] - want[i].charm_x) < 1e-5f && alt->no_snd == want[i].no_snd, "%s: charmMXOff %g, noSnd %d", want[i].model,
+              alt->charm_m[0], alt->no_snd);
+        CHECK(!(s->flags2 & (VS2_VIDEO | VS2_PROJECTION)) && (!want[i].upgraded || skin_video_alt_skin(want[i].id) == want[i].video),
+              "%s: the video is skin_video_alt_skin's (%d)", want[i].model, want[i].video);
+
+        char rel[160];
+        snprintf(rel, sizeof(rel), "models/%s.obj", model);
+        char *path = concat(assets_path(), rel);
+        Geometry *geometry = path ? load_obj_model(path, 0) : NULL;
+        free(path);
+        CHECK(geometry && geometry->index_count > 300, "%s.obj loads (%d indices)", model, geometry ? geometry->index_count : -1);
+        snprintf(rel, sizeof(rel), "textures/%s.png", texture);
+        path = concat(assets_path(), rel);
+        const unsigned tex = path ? load_texture(path) : 0;
+        free(path);
+        CHECK(tex && tex != texture_checker(), "%s.png loads", texture);
+        if (!geometry || want[i].video < 0) continue;
+
+        // the upgraded remodel: its altSkin video in screen space (LinearFilter) over the remodel's own texture
+        FILE *f = fopen("assets/videos/video_2.mp4.knv", "rb");
+        if (!f) {
+            printf("gltf_test: %s video skipped (no assets/videos/video_2.mp4.knv: make video-frames)\n", model);
+            continue;
+        }
+        fclose(f);
+        BasicMaterial *material = basic_material_init();
+        material->double_sided = 0;
+        material->texture = tex;
+        Mesh *mesh = mesh_init(geometry, (Material *) material);
+        const int playing = skin_fx_apply_video(mesh, skin_video_alt_skin(want[i].id), 1, 1);
+        CHECK(playing && material->texture && material->texture != tex && material->projection_uv && material->double_sided,
+              "%s upgraded: video_2 in screen space on the remodel", model);
+        skin_fx_forget(mesh);
+        mesh_fini(mesh);
+    }
+    skin_video_clear();
+}
+
 int main(int argc, char **argv) {
     headless_parse_args(&argc, argv);
     vt_init(&g_geometry_cache);
@@ -375,6 +456,7 @@ int main(int argc, char **argv) {
     check_follow();
     check_effects();
     check_video_skins();
+    check_weapon_remodels();
     check_meshopt_models();
     check_material_extras();
 

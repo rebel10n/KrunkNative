@@ -196,6 +196,11 @@ static int weapon_texture_key(char *key, const size_t n) {
 
     const int slot = vscene_player_weapon_slot();
     const ViewerSkin *skin = viewer_skin(slot == 0 ? g_viewer.e.skin_prim.num : slot == 1 ? g_viewer.e.skin_sec.num : -1);
+    const ViewerAltSkin *alt = skin ? NULL : viewer_weapon_alt_skin(vscene_player_weapon_id(), 0);
+    if (alt) { // no skin: weapon.altSkin, a remodel: getReModel's texture (v7 viewer.js:1950-1956), the one the model wears
+        snprintf(key, n, "%s%d_%d", g_viewer_types[0], alt->skin.weapon, alt->skin.mid_t > 0 ? alt->skin.mid_t : alt->skin.mid);
+        return 1;
+    }
     if (!skin) snprintf(key, n, "weapons/%s", weapon->src);
     else if (skin->mid >= 0) snprintf(key, n, "weapons/%s_%d", weapon->src, skin->mid);       // n.midT || ...: midT
     else if (viewer_skin_tex_truthy(skin)) snprintf(key, n, "%s", skin->tex);

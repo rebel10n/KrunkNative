@@ -2068,14 +2068,29 @@ Mesh *prefab_canvas_mesh(Object *object, const cJSON *raw_obj, const unsigned in
     return mesh;
 }
 
-// "weapons/<src>" with the weapon's own texture (no altSkin: KN's weapon table has none), front
-// faces only; the scale and pose are the caller's. NULL without a model.
-Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
+// "weapons/<src>" with the weapon's own texture, or the altSkin remodel `alt_skin` (viewer_weapon_alt_skin, NULL =
+// none) as genWeaponMeshData / changeMysteryWeapon / changeKrumWeapon load it: src "weapons/<src>_<mid>", texSrc
+// getReModel "weapons/weapon_<weapon>_<midT || mid>" (deob-10.0.3.js:184768-184772, :218630-218631, :218804-218805,
+// :27889-27895); a remodel that does not load gives the plain weapon. Front faces only; the pose is the caller's,
+// *scale (may be NULL) the loadMesh scale before the caller's factor: the drawn remodel's mScl || weapon.scale || 1.
+// NULL without a model.
+Mesh *prefab_weapon_mesh(const Weapon *weapon, const ViewerSkin *alt_skin, const int no_texture, float *scale) {
     if (!weapon || !weapon->src) return NULL;
-    char model[96];
-    snprintf(model, sizeof(model), "weapons/%s", weapon->src);
-    Mesh *mesh = prefab_model_mesh(model, model, no_texture || client_render_settings()->no_textures);
+    const int ntx = no_texture || client_render_settings()->no_textures;
+    char model[96], texture[96];
+    Mesh *mesh = NULL;
+    if (alt_skin && alt_skin->mid >= 0) {
+        snprintf(model, sizeof(model), "weapons/%s_%d", weapon->src, alt_skin->mid);
+        snprintf(texture, sizeof(texture), "%s%d_%d", g_viewer_types[0], alt_skin->weapon, alt_skin->mid_t > 0 ? alt_skin->mid_t : alt_skin->mid);
+        mesh = prefab_model_mesh(model, texture, ntx);
+    }
+    if (!mesh) {
+        alt_skin = NULL;
+        snprintf(model, sizeof(model), "weapons/%s", weapon->src);
+        mesh = prefab_model_mesh(model, model, ntx);
+    }
     if (!mesh) return NULL;
+    if (scale) *scale = alt_skin && alt_skin->m_scl != 0.0f ? alt_skin->m_scl : weapon->scale != 0.0f ? weapon->scale : 1.0f;
     ((BasicMaterial *) mesh->material)->double_sided = 0;
     if (weapon->tint) { // KrunkNative weapons (the Tool Gun)
         ((BasicMaterial *) mesh->material)->color = (vec4) {(float) ((weapon->tint >> 16) & 255) / 255.0f,
@@ -2084,9 +2099,10 @@ Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
     return mesh;
 }
 
-// MapManager.addWeapon -> genWeaponMeshData(weapons[id]): "weapons/<src>" with its own texture
-// (noTex "ntx": the default texture), loadMesh scale weapon.scale * (equipment ? 2 : 1). The
-// pose (y + pickupOff, rotateY / X / Z) is the caller's (map_post.c). NULL for an unknown id.
+// resetPickups / updatePickup -> genWeaponMeshData(weaponConfig[id], store, altSkin) (deob-10.0.3.js:218963-218967,
+// :219012-219016): "weapons/<src>" with its own texture, or the weapon's altSkin remodel (the Nova Pump / Semi / Uzi /
+// Alien: viewer_weapon_alt_skin), noTex "ntx": the default texture; loadMesh scale (altSkin.mScl || weapon.scale) *
+// (equipment ? 2 : 1). The pose (y + pickupOff, rotateY / X / Z) is the caller's (map_post.c). NULL for an unknown id.
 // Weapon transparency / glow flags (seeThrough, transp) are not in KN's weapon table (documented).
 Mesh *prefab_pickup_mesh(const int weapon_id, const int no_texture, float *scale) {
     if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !rules_weapon(weapon_id)) return NULL;
@@ -2102,8 +2118,10 @@ Mesh *prefab_pickup_mesh(const int weapon_id, const int no_texture, float *scale
         if (hose && scale) *scale = 2.0f;
         return hose;
     }
-    Mesh *mesh = prefab_weapon_mesh(weapon, no_texture);
-    if (mesh && scale) *scale = (weapon->scale != 0.0f ? weapon->scale : 1.0f) * (weapon->equipment ? 2.0f : 1.0f);
+    const ViewerAltSkin *alt = viewer_weapon_alt_skin(weapon_id, 0);
+    float base = 1.0f;
+    Mesh *mesh = prefab_weapon_mesh(weapon, alt ? &alt->skin : NULL, no_texture, &base);
+    if (mesh && scale) *scale = base * (weapon->equipment ? 2.0f : 1.0f);
     return mesh;
 }
 

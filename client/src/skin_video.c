@@ -53,8 +53,8 @@ int skin_video_disabled(void) {
 int skin_video_alt_skin(const int id) {
     // upgradeWeapons (deob-10.0.3.js:199770-202652) ids with altSkin {projection: true, video: 2}: all but the
     // Cupids Blaster 11 (altSkin {mid: 4}: a remodel, no video) and 17 Bomb, 19 Build Tool, 20 Grappler, 23 Slimer,
-    // 25 Minigun, 26 War Machine (no altSkin). The Semi Auto (7) and Akimbo Uzi (9) altSkins add a remodel (mid 0,
-    // "Nova Semi" / "Nova Uzi") that KrunkNative does not draw: their video lies on the regular model.
+    // 25 Minigun, 26 War Machine (no altSkin). The Shotgun (5), Semi Auto (7) and Akimbo Uzi (9) altSkins add a
+    // remodel (mid 0: "Nova Pump" / "Nova Semi" / "Nova Uzi", viewer_weapon_alt_skin): their video lies on it.
     static const uint32_t VIDEO_ALT_SKINS = 0x1FFFFFFFu & ~((1u << 11) | (1u << 17) | (1u << 19) | (1u << 20) | (1u << 23) | (1u << 25) | (1u << 26));
     return id >= 0 && id < 29 && (VIDEO_ALT_SKINS >> id & 1u) ? 2 : -1;
 }
