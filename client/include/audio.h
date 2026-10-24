@@ -122,6 +122,7 @@ int  audio_handle_play(const char *name, float volume, int loop, float rate, int
 void audio_handle_volume(int handle, float volume);
 void audio_handle_rate(int handle, float rate);
 void audio_handle_fade(int handle, float from, float to, float ms);
+void audio_handle_position(int handle, vec3 position); // a positional voice moves (Howl.pos; 2D voices ignore it)
 void audio_handle_mute(int handle, int muted);
 int  audio_handle_resume(int handle);  // play(): resumes a paused voice, restarts a finished one
 void audio_handle_pause(int handle);

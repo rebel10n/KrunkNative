@@ -503,7 +503,8 @@ static void voice_start(const PendingPlay *play) {
         if (play->kind != VOICE_2D) {
             const ma_vec3f l = ma_engine_listener_get_position(&g_audio.engine, 0);
             const float dx = play->position.x - l.x, dy = play->position.y - l.y, dz = play->position.z - l.z;
-            printf(" pos=(%.1f,%.1f,%.1f) dist=%.1f", play->position.x, play->position.y, play->position.z, sqrtf(dx * dx + dy * dy + dz * dz));
+            printf(" pos=(%.1f,%.1f,%.1f) dist=%.1f ref=%.1f roll=%.2f", play->position.x, play->position.y, play->position.z,
+                   sqrtf(dx * dx + dy * dy + dz * dz), play->ref_distance, play->rolloff);
         }
         printf("\n");
         fflush(stdout);
@@ -1131,6 +1132,13 @@ void audio_handle_fade(const int handle, const float from, const float to, const
     const float cat = category_factor(g_audio.clips[voice->clip].category) * spatial_compensation(voice);
     voice->volume = to;
     ma_sound_set_fade_in_milliseconds(&voice->sound, clamp01(from) * cat, clamp01(to) * cat, (ma_uint64) (ms > 0.0f ? ms : 0.0f));
+}
+
+void audio_handle_position(const int handle, const vec3 position) {
+    AudioVoice *voice = handle_voice(handle);
+    PendingPlay *pending = handle_pending(handle);
+    if (pending) pending->position = position;
+    if (voice && voice->kind != VOICE_2D) ma_sound_set_position(&voice->sound, position.x, position.y, position.z);
 }
 
 void audio_handle_mute(const int handle, const int muted) {

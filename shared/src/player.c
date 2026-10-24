@@ -2200,9 +2200,10 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // TODO: toggle aim (HUD)
         player->aim_val = 0.0f;
     } else if (player->weapon->zoom && (!player->weapon->no_aim || player->swap_timer > 0.0f)) {
-        // v10.0.3: also !movement[movSch].noThrow (SRM: the aim key dashes instead, deob-10.0.3.js:191450)
+        // v10.0.3: also !movement[movSch].noThrow (SRM: the aim key dashes instead) and !this.isStalker (the
+        // stalker's aim key is its leap: it never aims, so its knife is never thrown or charged, deob-10.0.3.js:191450)
         const int can_scope = player->reload_timer <= 0.0f && player->swap_timer <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees)) &&
-                              !movement_scheme_no_throw(player);
+                              !movement_scheme_no_throw(player) && !movement_stalker(player);
 
         if (input->scope && player->aim_val < 1.0f && can_scope) {
             player_cancel_inspect(player);
