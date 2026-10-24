@@ -221,7 +221,8 @@ static void test_commands(Game *game) {
     printf("Running bot command test...\n");
     reset_sent();
     CHECK(!strcmp(run("/bot_list"), "No bots."), "empty list (%s)", g_reply);
-    CHECK(!strcmp(run("/bot_type"), "Bot type: nextbot (use bot_type nextbot|tfue)"), "bot_type (%s)", g_reply);
+    CHECK(!strcmp(run("/bot_type"), "Bot type: nextbot, the default AI is nextbot. Switch with bot_type nextbot|tfue (a switch removes every bot)."),
+          "bot_type (%s)", g_reply);
     CHECK(!strcmp(run("/bot_difficulty"), "Bot difficulty: 3"), "default difficulty (%s)", g_reply);
 
     run("/bot_add 3 difficulty=normal");
@@ -266,7 +267,8 @@ static void test_commands(Game *game) {
     run("/bot_difficulty hard");
     CHECK(!strcmp(g_reply, "Bot difficulty set to 1.8 (3 live bots updated; applies to future bot_add)."), "bot_difficulty (%s)", g_reply);
     run("/bot_difficulty whatever");
-    CHECK(!strcmp(g_reply, "Usage: bot_difficulty <easy|normal|hard|max|number>"), "bot_difficulty usage (%s)", g_reply);
+    CHECK(!strcmp(g_reply, "Usage: bot_difficulty easy|normal|hard|max|<number>. Presets: easy 0.65, normal 1.0, hard 1.8, max (accuracy 100, sees 5000 units)."),
+          "bot_difficulty usage (%s)", g_reply);
     run("/bot_diff normal");
     CHECK(!strcmp(g_reply, "Bot difficulty set to 1 (3 live bots updated; applies to future bot_add)."), "bot_diff alias (%s)", g_reply);
 
