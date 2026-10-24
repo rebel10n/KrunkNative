@@ -4574,16 +4574,6 @@ static void on_host(void *user, const int status, const char *body, const size_t
     cJSON_Delete(res);
 }
 
-// Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the
-// request's config (the game is created on a server it finds; "Game Created" then the join), after the
-// hosting captcha (host_captcha_done). 0 when the brain is not available or the request cannot be sent.
-int servers_ui_host_game(const char *config_json) {
-    if (backend_available() != 1 || !config_json) return 0;
-    if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", servers_ui_auto_region()); // a confirmed race result only
-    const size_t n = strlen(config_json) * 3 + 512;
-    char *path = malloc(n), *enc = malloc(strlen(config_json) * 3 + 1), region[96];
-    if (!path || !enc) {
-        free(path);
 // A host request waiting for its captcha (kn_captcha.h): the /mm/host-game path and its matchmaking action
 typedef struct {
     char *path;
@@ -4610,6 +4600,16 @@ static void host_captcha_done(void *user, const char *payload) {
     free(hc);
 }
 
+// Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the
+// request's config (the game is created on a server it finds; "Game Created" then the join), after the
+// hosting captcha (host_captcha_done). 0 when the brain is not available or the request cannot be sent.
+int servers_ui_host_game(const char *config_json) {
+    if (backend_available() != 1 || !config_json) return 0;
+    if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", servers_ui_auto_region()); // a confirmed race result only
+    const size_t n = strlen(config_json) * 3 + 512;
+    char *path = malloc(n), *enc = malloc(strlen(config_json) * 3 + 1), region[96];
+    if (!path || !enc) {
+        free(path);
         free(enc);
         return 0;
     }
