@@ -145,9 +145,11 @@ Only the entity manager calls the shared script, and only through `onEntityInit`
 **The server in Box Office.** It matches: `ks_server_round_init` loads the server script and then the shared one, and
 `ks_game_start` runs `spawnPending` before `start()` (`shared/src/ks_game/ks_entities.c`).
 
-**The client in Box Office.** It is missing. A 10.0.3 client steps `"sim"` entities locally between baselines and runs
-controlled ones (`advance` / `stepControlled`, :213790-213990). That needs entity replication, which Box Office servers
-do not send yet, and a client entity manager. `client/src/entities.c` snaps to baselines.
+**The client in Box Office.** `client/src/ks/ks_client_host.c` loads `scripts.shared` after the client script, and
+the shared manager keeps the replicated copy. It steps the `"sim"` entities on the entity clock between baselines,
+replays the ticks a late baseline covers and runs the controlled entity with the player's inputs (`advance` /
+`stepControlled`, :213790-213990). The replication, the client copy and the attachments are in
+`doc/v10/entities-1003.md`.
 
 ## 6. GAME.NETWORK on official lobbies (`sd`)
 
@@ -200,10 +202,9 @@ Added here:
 
 Missing, outside this package:
 
-- `LIVE_OBJECTS.addAsset` (:211292) and the live object wrapper (`id`, `delete`).
 - `player.pose` belongs to `doc/v10/player-pose.md`.
-- The entity wrapper's `attachPlayer`, `updateAttachment` and `detachPlayer`, and the ctx's `peer` / `peers`, all in the
-  entities package.
+- `LIVE_OBJECTS.addAsset` with the live object wrapper (`id`, `delete`), the entity wrapper's `attachPlayer`,
+  `updateAttachment` and `detachPlayer`, and the ctx's `peer` / `peers` are in `doc/v10/entities-1003.md`.
 
 ## Tests
 
