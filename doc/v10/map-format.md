@@ -60,7 +60,7 @@ Keys read off the map root in `generate` (L167200-168560):
 | `scripts.shared` | **new third script** (besides `client`/`server`), compiled into `game.sharedScript` and run on both sides for entity simulation (L187094-187097, L189962) | `'shared' == _ ? this.sharedScript = ... : this.mainScript = ...` | v7 has `client`/`server` only | stored (`Map.shared_script`, v10 dialect); not run (entities package) |
 | `shadowNB` | **new**: sky-light shadow `normalBias`, clamp 0..5, default 0 | L201758 | - (`R:2738-2772` sets only `bias = -0.0004`) | yes: `MapEnvironment.shadow_nb` 0..5, `shadow_normal_bias` in basic.frag (world units along the normal) |
 | `correctLights` | **removed as a toggle**: THREE r186 has no legacy lights, so lights are always physical. Still parsed per environment zone (L164748), with no effect seen | renderer `init` L199044-199061 has no `useLegacyLights` | `R:408` `useLegacyLights = !correctLights` | yes: the v10 dialect always renders physical lights (map_environment.c) |
-| `outputEncoding` | now maps to `renderer.outputColorSpace`; table `Default->NoColorSpace, sRGB->SRGBColorSpace, Linear->LinearSRGBColorSpace`; **index 0 is forced to 2 (Linear)** (`0 == _ && (_ = 2)`) | L17259, L199057-199058 | `config.js:948` (Default = LinearEncoding), `R:407` | no (unchanged v7 behaviour; renderer package) |
+| `outputEncoding` | now maps to `renderer.outputColorSpace`; table `Default->NoColorSpace, sRGB->SRGBColorSpace, Linear->LinearSRGBColorSpace`; **index 0 is forced to 2 (Linear)** (`0 == _ && (_ = 2)`). With ColorManagement off (`deob-10.0.3.js:230030`) the output conversion is a no-op, so no value changes the image | L17259, L199057-199058; `deob-10.0.3.js:231105-231109`, `63117-63136` | `config.js:948` (Default = LinearEncoding), `R:407` | yes: parsed, no output encoding (basic.frag / sky.frag; doc/v10/render.md) |
 | `ambientI`, `lightI` and all light intensities | **multiplied by `lightIntensityScaling = Math.PI`** (r155+ physical units) | `_7479 = Math.PI` L18383; L201738, L201743; point/spot/dir/rect L200274-200296; KS lights L183152-183205; lightMap L199446 | unscaled (`R:2744,2754,1718-1762`) | yes: `Ruleset.light_unit_factor` (`ruleset_current()->light_unit_factor`) multiplies ambient, sun, point / spot / directional and lightMap intensities in basic.c; rect-area unscaled like v10 |
 | everything else (`ambient light sky fog fogD lightD sunAngX/Y shadowR/D skyDome* terrain* zone* ocean oc* tris xyz colors spawns camPos dthY nAmb oldAO hasLM welMsg gui config modes`) | unchanged | | | unchanged |
 
@@ -72,8 +72,8 @@ forced on) with intensities x `Ruleset.light_unit_factor` (PI): headless capture
 Kanji under v7.1.4's legacy lights and v10's differed no more than two runs of the same build
 (animated content). What does change in v10: point / spot lights fall off with the physical
 inverse-square curve instead of the legacy linear one, and a map with `correctLights: true` (none under
-assets/maps) renders PI times brighter than in v7. The linear output default (`outputEncoding` 0 -> 2)
-is not ported.
+assets/maps) renders PI times brighter than in v7. `outputEncoding` has no effect in v10.0.3 (ColorManagement
+off: no output conversion), and KN renders it so (doc/v10/render.md).
 
 Spawns (`spawns[i] = [x,y,z,team,dir,comp,teamOnly,spread]`, L168458-168469) are identical to
 `map.js:1469-1478`. Terrain (`Terrain.CONFIG_PROPS` L161995) and zone (`Zone.CONFIG_PROPS`
@@ -211,7 +211,7 @@ getter points to editor.krunker.io), so editor-only fields cannot be verified fr
 
 Status (v10-maps package): items 1-4 and the map-data part of 5 (archetype parse and validation,
 ENTITY instances, `scripts.shared` stored) are done, and the renderer constant of 7 (x PI) is in
-`Ruleset.light_unit_factor`; the entity manager, KS (6) and `outputEncoding` are open.
+`Ruleset.light_unit_factor`; the entity manager and KS (6) are open (`outputEncoding`: no effect in v10.0.3, doc/v10/render.md).
 
 1. `PREFAB_SCRAPCRATE = 97` (generic prop like CRATE, scale 5) and `PREFAB_ENTITY = 98` (no object;
    collect instance), plus `PREFAB_BOT_PATH_NODE` as an alias of 41. Raise `PREFAB_COUNT`.

@@ -10,9 +10,13 @@
 //   map: skyDomeTex ? (skyDomeTexA ? "<id>/texture" (user asset) : "sky_6") : none, scrolled by
 //   skyDomeMovT / 1e6 per ms along skyDomeMovD (0: u); emissiveMap "<skyDomeEmisTex>/texture",
 //   else "<src>_e".
-//   onBeforeCompile: after the whole fragment shader (tone mapping and output encoding
-//   included) gl_FragColor.rgb *= getGradient(uv): mix(mix(col2, col1, v / 0.5),
-//   mix(col1, col0, (v - 0.5) / 0.5), step(0.5, v)) with v the sphere's uv.y (1 at the top).
+//   the gradient getGradient(uv): mix(mix(col2, col1, v / 0.5), mix(col1, col0, (v - 0.5) / 0.5),
+//   step(0.5, v)) with v the sphere's uv.y (1 at the top). v7 multiplied it after tone mapping and
+//   output encoding (onBeforeCompile); v10.0.3 sets it as the material's outputNode
+//   (deob-10.0.3.js:108785-108793), so it is tone mapped after, and there is no output encoding
+//   (ColorManagement off, assets/shaders/basic.frag). v10.0.3's sky dome also passes the emissive
+//   texture as an asset (`asset: true`, deob:223062-223064, the "checkered sky" fix): KN always
+//   loaded skyDomeEmisTex from user-assets/<id>/texture.png, so the fix needs no change here.
 // The ENVIRONMENT_ZONE records carry the same keys (map_environment.c reloads the dome).
 #include <gl.h>
 #include <client.h>
@@ -291,7 +295,6 @@ void sky_render(Camera *camera) {
     glUniform3f(glGetUniformLocation(sky.program, "end_color"), sky.stops[2].x, sky.stops[2].y, sky.stops[2].z);
     glUniform1i(glGetUniformLocation(sky.program, "tone_mapping"), g_render_lighting.tone_mapping);
     glUniform1f(glGetUniformLocation(sky.program, "tone_mapping_exposure"), g_render_lighting.tone_mapping_exposure);
-    glUniform1i(glGetUniformLocation(sky.program, "output_encoding"), g_render_lighting.output_encoding);
 
     if (sky.textured) {
         glActiveTexture(GL_TEXTURE0);

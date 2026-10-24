@@ -188,7 +188,11 @@ static int user_asset_attach_gltf(Mesh *carrier, GltfModel *model, const Object 
             m->base.transparent = 1;
         }
         if (side == 2) m->double_sided = 1;
-        m->fog_enabled = object->fog_enabled;
+        // v10.0.3 model setup (deob-10.0.3.js:233656-233663): no env on a map asset, so every map takes
+        // encodingTypes[texEncode || 0] (1 sRGB, else raw); asset noFog or the material's userData.noFog (gltf.c)
+        m->texture_srgb = m->emissive_srgb = object->tex_encoding == 1;
+        m->gltf_srgb_maps = 0;
+        if (!object->fog_enabled) m->fog_enabled = 0;
     }
     if (object->anim_start) gltf_instance_play_clip(instance, object->anim_start, 0);
     g_assets[g_asset_count++] = (UserAssetInstance) {carrier, instance};

@@ -21,7 +21,11 @@
 // maps are read onto BasicMaterial (basic.frag's PBR path: GGX with the metal / roughness of the map, the
 // normal map perturbing the lit normal; metallicFactor / roughnessFactor / normalScale). A material with
 // no such map is lit by the lighting setting like the rest of the scene (Lambert / Phong / Standard).
-// Env maps (skin `env`) are a BasicMaterial feature still to come.
+// v10.0.3's model setup (deob-10.0.3.js:233655-233709) on every instance: the material extras (GLTFLoader
+// userData) "noFog" (fog off) and "env" (the opt-in environment reflections, env_map.h; the material is
+// then shaded as MeshStandardMaterial with its factors), and the colour spaces: texels are uploaded raw
+// (NoColorSpace); the base colour / emissive maps keep GLTFLoader's sRGB only for an asset with env
+// (a skin env map, skin_fx.c) or texEncode 1 (user_asset.c): BasicMaterial.gltf_srgb_maps.
 #include <client.h>
 
 typedef struct GltfModel GltfModel;

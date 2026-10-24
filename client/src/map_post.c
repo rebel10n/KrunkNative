@@ -626,7 +626,9 @@ int map_post_build_draws(void) {
 // WEAPON_PICKUP, rebuilt when the weapon it holds changes, shown while the pickup is active and
 // holds a weapon, at its (moved) position + pickupOff 1, rotateY(r2) rotateX(r0 - PI/2)
 // rotateZ(r1) (equipment: rotateX(r0) rotateZ(r1 - PI/2)), the state from map-C's
-// game_pickup_state (client mirror of "inat" / "pkups").
+// game_pickup_state (client mirror of "inat" / "pkups"). v10.0.3's genWeaponMeshData sets noFog on the
+// pickup model: it is the only weapon material with noFog (the player's viewmodel and third-person
+// weapons are fogged, see main.c's viewmodel pass).
 typedef struct {
     int uid;
     const Object *object;
@@ -688,6 +690,8 @@ static void post_pickups_frame(const Game *game) {
                 if (nettspend_weapon_kind(state.weapon)) p->mesh->transform.rotation.x += (float) M_PI;
                 p->mesh->transform.scale = (vec3) {scale, scale, scale};
                 p->mesh->no_shadow_receive = 0;
+                // genWeaponMeshData (deob-10.0.3.js:184768-184783): shadowsR, noShadow and noFog: pickups are never fogged
+                if (p->mesh->material && p->mesh->material->vtable == &basic_material_vtable) ((BasicMaterial *) p->mesh->material)->fog_enabled = 0;
                 scene_add_mesh(g_pickup_scene, p->mesh);
             }
         }

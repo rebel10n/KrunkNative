@@ -1,8 +1,9 @@
 #version 450 core
-// Krunker v7.1.4 SkyDome (sky.c): three.js r150 MeshBasicMaterial (texel * white) or, with an
-// emissive colour, StrippedLambertMaterial in the light-less background scene (emissive *
-// emissiveMap only), then tonemapping_fragment / encodings_fragment, then the onBeforeCompile
-// gradient multiply after dithering. No fog (the background scene has none).
+// Krunker SkyDome (sky.c): MeshBasicMaterial (texel * white) or, with an emissive colour, the emissive
+// colour times its map (v10.0.3: MeshBasicMaterial colour = emissive, map = the "_e" / emissive asset
+// texture, deob-10.0.3.js:223036-223071). v10.0.3 multiplies the gradient into the material's outputNode
+// (deob:108785-108793), so the renderer's output stage tone maps it afterwards; there is no output
+// encoding (ColorManagement is off, basic.frag). No fog (fog: false).
 out vec4 frag_color;
 
 in vec2 tex_coord;
@@ -19,7 +20,6 @@ uniform vec3 middle_color;
 uniform vec3 end_color;
 uniform int tone_mapping;
 uniform float tone_mapping_exposure;
-uniform int output_encoding;
 
 vec3 tone_map(vec3 color) {
     if (tone_mapping == 1) return tone_mapping_exposure * color;
@@ -52,14 +52,11 @@ void main() {
         if (use_emissive_map) emissive *= texture(emissive_map, tex_coord).rgb;
         color = vec4(emissive, texel.a);
     }
-    color.rgb = tone_map(color.rgb);
-    if (output_encoding == 1) {
-        color.rgb = mix(pow(color.rgb, vec3(0.41666)) * 1.055 - vec3(0.055), color.rgb * 12.92, vec3(lessThanEqual(color.rgb, vec3(0.0031308))));
-    }
-    // SkyDome getGradient(RES * uv): xy = uv.yx, h = 0.5
+    // getGradient: v < 0.5 ? mix(end, middle, v / 0.5) : mix(middle, first, (v - 0.5) / 0.5), v the sphere's uv.y
     float v = sphere_uv.y;
     float h = 0.5;
     vec3 gradient = mix(mix(end_color, middle_color, v / h), mix(middle_color, first_color, (v - h) / (1.0 - h)), step(h, v));
     color.rgb *= gradient;
+    color.rgb = tone_map(color.rgb);
     frag_color = color;
 }

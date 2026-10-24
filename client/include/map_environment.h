@@ -3,8 +3,9 @@
 // (client/src/map_environment.c): renderer output (toneMapping, toneMappingExposure,
 // outputEncoding, correctLights -> RenderLighting), the ocean (ocean.c) and the ENVIRONMENT_ZONE
 // swaps of lights / fog / sky colour / sky dome / shadows by camera position (render.js
-// updateEnvironment). main.c applies the map's own lighting first (client_apply_map_lighting),
-// then calls map_environment_map_loaded.
+// updateEnvironment; v10.0.3's return to the map keeps a zone's lights where the map has none),
+// and getEnvMap for the GLB reflections (env_map.h). main.c applies the map's own lighting first
+// (client_apply_map_lighting), then calls map_environment_map_loaded.
 #include <shared.h>
 #include <modes.h>
 

@@ -9,7 +9,8 @@
 //     each loads with meshes, a sane size, and its clips (when it has any) move it;
 //   - v10.0.3 video skins (skin_video.c): the Glitch / Deep Space dyes and the Mysterious Orb melee show
 //     videos/video_<n>.mp4 (its .knv sidecar) and the frame changes with the clock; noVideoSkins gives
-//     them their regular texture (none for a dye, melee_20 for the melee) and no projection.
+//     them their regular texture (none for a dye, melee_20 for the melee) and no projection;
+//   - v10.0.3 material extras (tools/gltf_test/env_extras.gltf): env (the opt-in reflections) and noFog.
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -96,6 +97,28 @@ static void check_gltf_pet(const int store_index, const char *what) {
     const double pose2 = model_pose(pet->model);
     CHECK(fabs(pose1 - pose0) > 1e-6 || fabs(pose2 - pose0) > 1e-6, "%s: the clips move the model (%.6f %.6f %.6f)", what, pose0, pose1, pose2);
     pet_free(pet);
+}
+
+// v10.0.3's model setup reads the material extras (GLTFLoader userData, deob-10.0.3.js:233662-233669):
+// env (parseFloat, limitMM 0..4) opts the material into getEnvMap reflections, noFog turns its fog off.
+// Textures are uploaded raw (NoColorSpace): no texture here, so no GLTFLoader sRGB tag either.
+static void check_material_extras(void) {
+    GltfModel *model = gltf_model_load("tools/gltf_test/env_extras.gltf");
+    CHECK(model != NULL, "env_extras.gltf loads");
+    GltfInstance *instance = model ? gltf_instance_create(model, 1.0f) : NULL;
+    CHECK(instance && instance->mesh_count == 3, "env_extras.gltf: 3 meshes");
+    int env_nofog = 0, env_clamped = 0, plain = 0;
+    for (size_t i = 0; instance && i < instance->mesh_count; i++) {
+        const BasicMaterial *m = (const BasicMaterial *) instance->meshes[i]->material;
+        if (m->scene_env_intensity == 2.5f && !m->fog_enabled && m->metalness_factor == 1.0f) env_nofog++;
+        else if (m->scene_env_intensity == 4.0f && m->fog_enabled) env_clamped++;
+        else if (m->scene_env_intensity == 0.0f && m->fog_enabled) plain++;
+        CHECK(!m->gltf_srgb_maps && !m->texture_srgb, "env_extras.gltf mesh %zu: no sRGB maps", i);
+    }
+    CHECK(env_nofog == 1, "extras {env: 2.5, noFog: true}: envMapIntensity 2.5, fog off");
+    CHECK(env_clamped == 1, "extras {env: \"9\"}: parseFloat, limitMM(.., 0, 4) = 4");
+    CHECK(plain == 1, "no extras: no reflections, fogged");
+    if (instance) gltf_instance_fini(instance);
 }
 
 // gltfpack output (KHR_mesh_quantization + EXT_meshopt_compression): Mirror Image (50578, AI.js
@@ -353,6 +376,7 @@ int main(int argc, char **argv) {
     check_effects();
     check_video_skins();
     check_meshopt_models();
+    check_material_extras();
 
     glfwDestroyWindow(window);
     glfwTerminate();

@@ -31,6 +31,9 @@ typedef struct {
     float metallic;           // metallicFactor (glTF default 1)
     float roughness;          // roughnessFactor (glTF default 1)
     float normal_scale;       // normalTexture.scale
+    // the material's extras (GLTFLoader: material.userData), read by v10.0.3's model setup (deob-10.0.3.js:233662-233669)
+    float env;                // parseFloat(userData.env): > 0 opts the material into getEnvMap reflections
+    int no_fog;               // userData.noFog: material.fog = false
 } GltfMaterial;
 
 typedef struct {
@@ -62,7 +65,6 @@ struct GltfModel {
     size_t material_count;
     unsigned int *textures;   // per image: GL texture, 0 = not loaded / failed
     unsigned char *texture_tried;
-    unsigned char *image_srgb; // per image: used as base colour / emissive map (sRGB)
     float **inverse_bind;     // per skin: joint_count row-major 4x4 matrices
     unsigned char *in_scene;  // per node: reachable from the default scene
     struct GltfModel *next;
@@ -246,31 +248,11 @@ static GLint gl_wrap(const int wrap) {
     return wrap == 33071 ? GL_CLAMP_TO_EDGE : wrap == 33648 ? GL_MIRRORED_REPEAT : GL_REPEAT;
 }
 
-// sRGB -> linear, 8-bit: three.js GLTFLoader tags base colour and emissive maps sRGBEncoding
-// and Krunker renders with outputEncoding Linear (render.js:406, encodingTypes[0]), so those
-// texels reach the shader decoded to linear; BasicMaterial samples raw, so decode at upload.
-static void srgb_to_linear(unsigned char *pixels, const size_t count) {
-    static unsigned char table[256];
-    static int ready;
-    if (!ready) {
-        for (int i = 0; i < 256; i++) {
-            const double c = i / 255.0;
-            const double l = c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
-            table[i] = (unsigned char) (l * 255.0 + 0.5);
-        }
-        ready = 1;
-    }
-    for (size_t i = 0; i < count; i++) {
-        pixels[i * 4] = table[pixels[i * 4]];
-        pixels[i * 4 + 1] = table[pixels[i * 4 + 1]];
-        pixels[i * 4 + 2] = table[pixels[i * 4 + 2]];
-    }
-}
-
 // Texture of image `index`: external URIs through load_texture (texture cache, flipped like
-// every texture; no sRGB decode, like the OBJ items' textures); embedded ones (bufferView / data
-// URI) decoded here, flipped the same way (gltf UVs are flipped at load, so both kinds sample
-// alike). Sampler filters as three.js: default LINEAR_MIPMAP_LINEAR / LINEAR.
+// every texture); embedded ones (bufferView / data URI) decoded here, flipped the same way (gltf UVs
+// are flipped at load, so both kinds sample alike). No sRGB decode at upload: v10.0.3 keeps
+// GLTFLoader's sRGB tag only for an asset with env (BasicMaterial.gltf_srgb_maps, decoded when
+// sampled). Sampler filters as three.js: default LINEAR_MIPMAP_LINEAR / LINEAR.
 static unsigned int gltf_texture(GltfModel *model, const int index, const int sampler_index) {
     if (index < 0 || (size_t) index >= model->data->images_count) return 0;
     if (model->texture_tried[index]) return model->textures[index];
@@ -335,8 +317,6 @@ static unsigned int gltf_texture(GltfModel *model, const int index, const int sa
         return model->textures[index];
     }
 
-    if (model->image_srgb[index]) srgb_to_linear(pixels, (size_t) width * (size_t) height);
-
     const cgltf_sampler *sampler = sampler_index >= 0 && (size_t) sampler_index < model->data->samplers_count ? &model->data->samplers[sampler_index] : NULL;
     glGenTextures(1, &texture);
     glActiveTexture(GL_TEXTURE0);
@@ -364,6 +344,27 @@ static int texture_view_image(const cgltf_texture_view *view, const cgltf_data *
     if (texture->image) return (int) cgltf_image_index(data, texture->image);
     if (texture->has_webp && texture->webp_image) return (int) cgltf_image_index(data, texture->webp_image);
     return -1;
+}
+
+// GLTFLoader assignExtrasToUserData: an object `extras` becomes material.userData. v10.0.3 reads two keys of it:
+//   env:   parseFloat(userData.env) (> 0: envMap = getEnvMap(), envMapIntensity = limitMM(env, 0, 4))
+//   noFog: truthy -> material.fog = false (deob-10.0.3.js:233662-233669)
+static void material_extras(const cgltf_material *src, GltfMaterial *m) {
+    if (!src->extras.data) return;
+    cJSON *extras = cJSON_Parse(src->extras.data);
+    if (!cJSON_IsObject(extras)) {
+        cJSON_Delete(extras);
+        return;
+    }
+    const cJSON *env = cJSON_GetObjectItem(extras, "env");
+    if (cJSON_IsNumber(env)) m->env = (float) cJSON_GetNumberValue(env);
+    else if (cJSON_IsString(env)) m->env = strtof(cJSON_GetStringValue(env), NULL); // parseFloat: a leading number
+    if (!(m->env > 0.0f)) m->env = 0.0f; // NaN, 0 or negative: no reflections
+    const cJSON *no_fog = cJSON_GetObjectItem(extras, "noFog");
+    m->no_fog = no_fog && !cJSON_IsNull(no_fog) && !cJSON_IsFalse(no_fog) &&
+                !(cJSON_IsNumber(no_fog) && cJSON_GetNumberValue(no_fog) == 0.0) &&
+                !(cJSON_IsString(no_fog) && !cJSON_GetStringValue(no_fog)[0]);
+    cJSON_Delete(extras);
 }
 
 static void load_materials(GltfModel *model) {
@@ -398,8 +399,7 @@ static void load_materials(GltfModel *model) {
         if (src->alpha_mode == cgltf_alpha_mode_mask) m->alpha_test = src->alpha_cutoff;
         m->blend = src->alpha_mode == cgltf_alpha_mode_blend;
         m->double_sided = src->double_sided;
-        if (m->base_image >= 0) model->image_srgb[m->base_image] = 1;
-        if (m->emissive_image >= 0) model->image_srgb[m->emissive_image] = 1;
+        material_extras(src, m);
     }
 }
 
@@ -641,7 +641,6 @@ GltfModel *gltf_model_load(const char *path) {
 
     model->textures = calloc(data->images_count ? data->images_count : 1, sizeof(unsigned int));
     model->texture_tried = calloc(data->images_count ? data->images_count : 1, 1);
-    model->image_srgb = calloc(data->images_count ? data->images_count : 1, 1);
     model->in_scene = calloc(data->nodes_count ? data->nodes_count : 1, 1);
     model->inverse_bind = calloc(data->skins_count ? data->skins_count : 1, sizeof(float *));
     load_materials(model);
@@ -808,6 +807,11 @@ static Mesh *instance_mesh(const GltfModel *model, const GltfPrimitive *prim, Ge
         // render.js loadAnimMesh: depthWrite = !transparent for gltf/glb
         material->no_depth_write = m->blend;
         material->double_sided = m->double_sided;
+        // GLTFLoader's sRGB base colour / emissive maps (kept by v10.0.3 for an asset with env, client.h)
+        material->gltf_srgb_maps = m->base_image >= 0 || m->emissive_image >= 0;
+        // v10.0.3 model setup (deob-10.0.3.js:233662-233669): userData.noFog, and the opt-in reflections
+        if (m->no_fog) material->fog_enabled = 0;
+        if (m->env > 0.0f) material->scene_env_intensity = m->env < 4.0f ? m->env : 4.0f;
     }
     material->use_vertex_color = prim->color_vbo != 0; // three.js GLTFLoader: vertexColors with COLOR_0
     Mesh *mesh = mesh_init(geometry, (Material *) material);

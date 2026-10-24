@@ -129,7 +129,6 @@ U(u_sprite, "sprite");
 U(u_correct_lights, "correct_lights");
 U(u_tone_mapping, "tone_mapping");
 U(u_tone_mapping_exposure, "tone_mapping_exposure");
-U(u_output_encoding, "output_encoding");
 U(u_use_light_map, "use_light_map");
 U(u_clip_enabled, "clip_enabled");
 U(u_clip_plane, "clip_plane");
@@ -167,6 +166,22 @@ U(u_use_normal_map, "use_normal_map");
 U(u_normal_map, "normal_map");
 U(u_normal_scale, "normal_scale");
 #undef U
+
+// v10.0.3 GLB environment reflections (env_map.h): getEnvMap's PMREM table (unit 9) and the DFG LUT (unit 10)
+#define U(var, name) static GlUniform var = GL_UNIFORM_INIT(name)
+U(u_use_scene_env, "use_scene_env");
+U(u_scene_env_map, "scene_env_map");
+U(u_scene_env_dfg, "scene_env_dfg");
+U(u_scene_env_intensity, "scene_env_intensity");
+U(u_emissive_srgb, "emissive_srgb");
+#undef U
+
+static unsigned int g_scene_env_texture, g_scene_env_dfg;
+
+void basic_material_set_scene_env(const unsigned int env, const unsigned int dfg) {
+    g_scene_env_texture = env;
+    g_scene_env_dfg = dfg;
+}
 
 // basic.frag light arrays (MAX_LIGHTS): lt_type 0 point, 1 spot, 2 directional, 3 rect
 enum { LU_TYPE, LU_POSITION, LU_DIRECTION, LU_COLOR, LU_PARAMS, LU_HALF_WIDTH, LU_HALF_HEIGHT, LU_COUNT };
@@ -360,11 +375,13 @@ void basic_material_update_uniforms(Material *base) {
 
     gl_uniform_mat3(&u_tex_transform, program, GL_TRUE, transform);
     gl_uniform_1i(&u_tex, program, 0);
-    gl_uniform_1i(&u_tex_srgb, program, material->texture_srgb);
+    // GLB maps keep GLTFLoader's sRGB only for an asset with env (deob-10.0.3.js:233656-233658, client.h)
+    const int gltf_srgb = material->gltf_srgb_maps && material->env_map;
+    gl_uniform_1i(&u_tex_srgb, program, material->texture_srgb || gltf_srgb);
+    gl_uniform_1i(&u_emissive_srgb, program, material->emissive_srgb || gltf_srgb);
     gl_uniform_1i(&u_sprite, program, material->sprite);
     gl_uniform_1i(&u_tone_mapping, program, g_render_lighting.tone_mapping);
     gl_uniform_1f(&u_tone_mapping_exposure, program, g_render_lighting.tone_mapping_exposure);
-    gl_uniform_1i(&u_output_encoding, program, g_render_lighting.output_encoding);
 
     // liquids: 55.js render() adds delta * 0.003 to liquidVal every frame and re-displaces the
     // vertices every liquidFreq (50) ms; objectAnim off never displaces them (flat)
@@ -432,12 +449,29 @@ void basic_material_update_uniforms(Material *base) {
         }
     }
 
-    // glTF PBR maps: a material without them is lit by the lighting setting, as before
+    // v10.0.3 GLB environment reflections: only "if (!material.envMap)" (deob:233666), so a skin env map wins
+    const int scene_env = material->scene_env_intensity > 0.0f && !material->env_map && g_scene_env_texture && g_scene_env_dfg;
+    gl_uniform_1i(&u_use_scene_env, program, scene_env);
+    if (scene_env) {
+        gl_uniform_1i(&u_scene_env_map, program, BASIC_SCENE_ENV_TEXTURE_UNIT);
+        gl_uniform_1i(&u_scene_env_dfg, program, BASIC_SCENE_ENV_DFG_TEXTURE_UNIT);
+        gl_uniform_1f(&u_scene_env_intensity, program, material->scene_env_intensity);
+        glActiveTexture(GL_TEXTURE0 + BASIC_SCENE_ENV_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, g_scene_env_texture);
+        glActiveTexture(GL_TEXTURE0 + BASIC_SCENE_ENV_DFG_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, g_scene_env_dfg);
+        glActiveTexture(GL_TEXTURE0);
+    }
+
+    // glTF PBR maps: a material without them is lit by the lighting setting, as before (an env material is
+    // shaded as the MeshStandardMaterial it is in v10: its factors are uploaded without a map too)
     gl_uniform_1i(&u_use_metal_rough_map, program, material->metal_rough_texture != 0);
-    if (material->metal_rough_texture) {
-        gl_uniform_1i(&u_metal_rough_map, program, BASIC_METAL_ROUGHNESS_TEXTURE_UNIT);
+    if (material->metal_rough_texture || scene_env) {
         gl_uniform_1f(&u_metalness_factor, program, material->metalness_factor);
         gl_uniform_1f(&u_roughness_factor, program, material->roughness_factor);
+    }
+    if (material->metal_rough_texture) {
+        gl_uniform_1i(&u_metal_rough_map, program, BASIC_METAL_ROUGHNESS_TEXTURE_UNIT);
         glActiveTexture(GL_TEXTURE0 + BASIC_METAL_ROUGHNESS_TEXTURE_UNIT);
         glBindTexture(GL_TEXTURE_2D, material->metal_rough_texture);
         glActiveTexture(GL_TEXTURE0);

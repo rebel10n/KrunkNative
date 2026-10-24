@@ -75,11 +75,12 @@ uniform vec3 lt_half_width[MAX_LIGHTS];
 uniform vec3 lt_half_height[MAX_LIGHTS];
 
 // renderer state of the map environment (map_environment.c, RenderLighting): useLegacyLights =
-// !correctLights, toneMapping 0..4 with toneMappingExposure, outputEncoding (1 sRGB)
+// !correctLights, toneMapping 0..4 with toneMappingExposure. v10.0.3 has no output encoding: Krunker turns
+// ColorManagement off (deob-10.0.3.js:230030), so RenderOutputNode's workingToColorSpace (deob:63877-63882) is the
+// no-op ColorSpaceNode (deob:63117-63136) and outputEncoding 1 (sRGB) renders like 0.
 uniform bool correct_lights;
 uniform int tone_mapping;
 uniform float tone_mapping_exposure;
-uniform int output_encoding;
 uniform bool tex_srgb;  // the map texture is sRGBEncoding ("ten" 1): decoded when sampled
 uniform bool sprite;    // THREE.SpriteMaterial: never lit
 // three.js lightMap (texture unit 3, BASIC_LIGHT_MAP_TEXTURE_UNIT): indirect irradiance +=
@@ -91,9 +92,11 @@ uniform bool use_light_map;
 uniform sampler2D light_map;
 uniform float light_map_intensity;
 
-// three.js emissiveMap (texture unit 2): totalEmissiveRadiance = emissive * texel.rgb
+// three.js emissiveMap (texture unit 2): totalEmissiveRadiance = emissive * texel.rgb; emissive_srgb: the map is
+// SRGBColorSpace (a GLB asset with env, texEncode 1: BasicMaterial.gltf_srgb_maps / emissive_srgb)
 uniform bool use_emissive_map;
 uniform sampler2D emissive_map;
+uniform bool emissive_srgb;
 vec3 emissive_radiance;
 
 // WP-F store-item effects (client/src/skin_fx.c). env: the skin's "<tex>_env" equirectangular map
@@ -139,6 +142,15 @@ uniform float roughness_factor;
 uniform bool use_normal_map;
 uniform sampler2D normal_map;
 uniform float normal_scale;
+
+// v10.0.3 GLB environment reflections (client/include/env_map.h): a GLB material whose glTF extras carry "env"
+// reflects render.getEnvMap() at envMapIntensity scene_env_intensity (deob-10.0.3.js:233665-233669). scene_env_map
+// (unit 9) is its PMREM filtered on the CPU: column = PMREM level 0..8 (roughness level / 8), row = the direction's
+// elevation (asin(y) / PI + 0.5); scene_env_dfg (unit 10) is three r18x's DFG_LUT (u roughness, v dotNV).
+uniform bool use_scene_env;
+uniform sampler2D scene_env_map;
+uniform sampler2D scene_env_dfg;
+uniform float scene_env_intensity;
 bool pbr_active;  // the material's PBR shading (set in main, lit materials only)
 float pbr_alpha;  // GGX alpha = roughness^2
 vec3 pbr_f0;      // specular F0 = mix(0.04, albedo, metalness)
@@ -324,6 +336,55 @@ vec3 krunker_lambert(vec3 diffuse, vec3 normal) {
     }
 
     return outgoing;
+}
+
+// textureCubeUV on the PMREM (deob-10.0.3.js:70449-70467): mip = clamp(roughnessToMip(roughness), -2, CUBEUV_MAX_MIP
+// 6), the two PMREM levels lodMax - floor(mip) and the next one blended by fract(mip). Level = 6 - mip, so the
+// table's linear filter across its 9 columns is that blend. roughnessToMip: deob:70426-70448.
+vec3 krunker_scene_env_sample(vec3 dir, float roughness) {
+    float mip;
+    if (roughness >= 0.8) mip = (1.0 - roughness) * (-1.0 + 2.0) / (1.0 - 0.8) - 2.0;
+    else if (roughness >= 0.4) mip = (0.8 - roughness) * (2.0 + 1.0) / (0.8 - 0.4) - 1.0;
+    else if (roughness >= 0.305) mip = (0.4 - roughness) * (3.0 - 2.0) / (0.4 - 0.305) + 2.0;
+    else if (roughness >= 0.21) mip = (0.305 - roughness) * (4.0 - 3.0) / (0.305 - 0.21) + 3.0;
+    else mip = -2.0 * log2(1.16 * roughness);
+    float level = 6.0 - clamp(mip, -2.0, 6.0);
+    vec2 uv = vec2((level + 0.5) / 9.0, asin(clamp(dir.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
+    return texture(scene_env_map, uv).rgb;
+}
+
+// PhysicalLightingModel.computeMultiscattering (deob:70081-70091): FssEss and Fms * Ems for one specular F0, F90 1
+void krunker_multiscatter(vec3 f0, vec2 dfg, out vec3 single_scatter, out vec3 multi_scatter) {
+    vec3 fss_ess = f0 * dfg.x + dfg.y;
+    float ems = 1.0 - (dfg.x + dfg.y);
+    vec3 f_avg = f0 + (1.0 - f0) * 0.047619;
+    vec3 fms = fss_ess * f_avg / (1.0 - ems * f_avg);
+    single_scatter = fss_ess;
+    multi_scatter = fms * ems;
+}
+
+// The environment's light on a MeshStandardMaterial (three r18x): EnvironmentNode (deob:71245-71275) adds
+//   radiance      = pmrem(normalize(mix(reflect(-V, N), N, roughness^4)), roughness) * envMapIntensity
+//   iblIrradiance = pmrem(N, 1) * PI * envMapIntensity
+// and PhysicalLightingModel.indirectSpecular (deob:70268-70318) lights the material with them:
+//   specular += radiance * mix(single_d, single_m, metal) + mix(multi_d, multi_m, metal) * iblIrradiance / PI
+//   diffuse  += albedo * (1 - metal) * (1 - (single_d + multi_d)) * iblIrradiance / PI
+// with the dielectric layer's F0 0.04 and the metallic layer's F0 the albedo (setupSpecular, deob:71366-71371), the
+// roughness max(r, 0.0525) (getRoughness, deob:69209; the geometry roughness of KN's flat normals is 0) and the DFG
+// term from the DFG_LUT (deob:69407-69420).
+vec3 krunker_scene_env(vec3 albedo, float metalness, float roughness, vec3 n) {
+    float r = clamp(max(roughness, 0.0525), 0.0, 1.0);
+    vec3 v = normalize(camera_position - world_pos);
+    vec3 dir = normalize(mix(reflect(-v, n), n, r * r * r * r));
+    vec3 radiance = krunker_scene_env_sample(dir, r) * scene_env_intensity;
+    vec3 irradiance = krunker_scene_env_sample(n, 1.0) * scene_env_intensity; // iblIrradiance / PI
+    vec2 dfg = texture(scene_env_dfg, vec2(r, clamp(dot(n, v), 0.0, 1.0))).rg;
+    vec3 single_d, multi_d, single_m, multi_m;
+    krunker_multiscatter(vec3(0.04), dfg, single_d, multi_d);
+    krunker_multiscatter(albedo, dfg, single_m, multi_m);
+    vec3 specular = radiance * mix(single_d, single_m, metalness) + mix(multi_d, multi_m, metalness) * irradiance;
+    vec3 diffuse = albedo * (1.0 - metalness) * (1.0 - (single_d + multi_d)) * irradiance;
+    return specular + diffuse;
 }
 
 // three.js r150 tonemapping_pars_fragment (renderer.toneMapping, toneMappingExposure)
@@ -601,7 +662,10 @@ void main() {
     if (paint_enabled) base_color.rgb = paint_apply(base_color.rgb, scaled_tex_coord, scaled_tex_coord);
 
     emissive_radiance = emissive.rgb * emissive.a;
-    if (use_emissive_map) emissive_radiance *= texture(emissive_map, t_tex_coord.xy).rgb;
+    if (use_emissive_map) {
+        vec3 emissive_texel = texture(emissive_map, t_tex_coord.xy).rgb;
+        emissive_radiance *= emissive_srgb ? srgb_to_linear(emissive_texel) : emissive_texel;
+    }
     emissive_radiance += paint_glow; // deob:108752-108755: emissiveNode = (emissiveNode || 0) + glow * intensity
 
     vec3 albedo = base_color.rgb;
@@ -623,12 +687,14 @@ void main() {
 
         vec3 diffuse = albedo;
         if (use_normal_map) normal = krunker_perturb_normal(normal, t_tex_coord.xy, krunker_normal_map_sample(t_tex_coord.xy));
-        if (use_metal_rough_map) {
+        float metalness = 0.0, roughness = 1.0;
+        if (use_metal_rough_map || use_scene_env) {
             // MeshStandardMaterial: diffuse = albedo * (1 - metalness), specular F0 = mix(0.04, albedo, metalness),
-            // alpha = roughness^2; roughness is clamped as three.js does (0.04 minimum)
-            vec3 mr = texture(metal_rough_map, t_tex_coord.xy).rgb;
-            float roughness = clamp(roughness_factor * mr.g, 0.04, 1.0);
-            float metalness = clamp(metalness_factor * mr.b, 0.0, 1.0);
+            // alpha = roughness^2; roughness is clamped as three.js does (0.04 minimum). A GLB env material is
+            // shaded so with its factors alone too (v10's GLB materials are MeshStandardMaterial).
+            vec3 mr = use_metal_rough_map ? texture(metal_rough_map, t_tex_coord.xy).rgb : vec3(1.0);
+            roughness = clamp(roughness_factor * mr.g, 0.04, 1.0);
+            metalness = clamp(metalness_factor * mr.b, 0.0, 1.0);
             pbr_active = true;
             pbr_alpha = roughness * roughness;
             pbr_f0 = mix(vec3(0.04), albedo, metalness);
@@ -636,6 +702,7 @@ void main() {
         }
 
         base_color.rgb = krunker_lambert(diffuse, normal);
+        if (use_scene_env) base_color.rgb += krunker_scene_env(albedo, metalness, roughness, normal);
     }
 
     if (use_env_map) {
@@ -647,10 +714,9 @@ void main() {
         base_color.rgb = albedo * texture(env_map, env_uv).rgb * env_map_intensity + emissive_radiance;
     }
 
-    // three.js r150 fragment tail: tonemapping_fragment, encodings_fragment, then fog_fragment
-    base_color.rgb = krunker_tone_map(base_color.rgb);
-    if (output_encoding == 1) base_color.rgb = linear_to_srgb(base_color.rgb);
-
+    // v10.0.3 fragment tail (three r18x): the material's setupOutput fogs (deob-10.0.3.js:68245-68253), then the
+    // renderer's output (getOutput, deob:67960-67961) tone maps it; no output encoding (ColorManagement off, see
+    // the renderer state uniforms above).
     if (fog_enabled && material_fog_enabled) { // unlit (MeshBasicMaterial light cones) is fogged too
         base_color.rgb = krunker_fog(base_color.rgb);
     }
@@ -665,5 +731,6 @@ void main() {
         base_color.rgb = mix(base_color.rgb, strip, krunker_ramp_strip(-across));
     }
 
+    base_color.rgb = krunker_tone_map(base_color.rgb);
     frag_color = base_color;
 }
