@@ -55,7 +55,7 @@ REFS = {
     "v7": {"public": "/home/user/jails/kru/src/Krunker_v7.1.4/public", "manifest": "menu-assets-v7.txt"},
     # the live krunker.io site (Krunker v10), mirrored by fetch_live_site.py; written to <ui>/
     "v10": {"public": os.path.expanduser("~/.cache/kn-v10/live/site/public"), "manifest": "menu-assets-v7.txt",
-            "client_js": os.path.expanduser("~/Downloads/v10.0.2.js")},
+            "client_js": os.path.expanduser("~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js")},
 }
 
 

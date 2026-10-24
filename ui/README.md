@@ -43,7 +43,7 @@ the settings / controls tabs into `<stage>/v10-capture/`, in sandboxed headless 
 allow-list of krunker.io hosts, GET/HEAD only, no WebSocket). On 2026-10-13 krunker.io answered
 this machine with Cloudflare's "ACCESS DENIED" (403 on every path, also from headless Chromium),
 so the windows were captured in its offline mode (`KN_V10_PUBLIC=<mirror>/public`): the same
-page and pinned client script (`~/.cache/kn-v10/v10.js`, the 2026-10-13 v10.0.2 bundle) answered
+page and pinned client script (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`, the 2026-10-13 v10.0.2 bundle) answered
 from the mirror with nothing leaving the machine, FRVR's SDK replaced by an inert logged-out
 stand-in, and no API (store data, server lists, news). Files taken from it are marked **rendered**.
 

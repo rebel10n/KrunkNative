@@ -1,5 +1,5 @@
 // Game controllers: Krunker's gamepad module and the controller half of CONTROLS, ported from
-// v3.1.1 and brought to v10.0.2 (~/.cache/kn-v10/v10.js, the Gamepad class and CONTROLS'
+// v3.1.1 and brought to v10.0.2 (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, the Gamepad class and CONTROLS'
 // `if (!this.isMobile)` block). v10 kept v3.1.1's loop, threshold, event machine and rumble;
 // what it changed, and this file follows:
 //   - _keyMapping.gamepad names button 16 "vendor" (no CONTROLS mapping: KrunkScript only);

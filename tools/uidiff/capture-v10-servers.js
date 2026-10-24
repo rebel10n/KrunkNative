@@ -41,7 +41,7 @@ const { CDP, sleep } = require('../kref/cdp.js');
 const REPO = path.resolve(__dirname, '..', '..');
 const HOME = os.homedir();
 const OFFLINE = path.resolve(process.env.KN_V10_PUBLIC || path.join(HOME, '.cache/kn-v10/live/site/public'));
-const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(HOME, '.cache/kn-v10/v10.js');
+const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(HOME, 'jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js');
 const V7_PUBLIC = process.env.KN_V7_PUBLIC || '/home/user/jails/kru/src/Krunker_v7.1.4/public';
 const ASSET_DIRS = [path.join(HOME, '.cache/kn-v10/live/stage/assets'), path.join(HOME, '.cache/kn-v10/live/web/assets.krunker.io'),
   path.join(REPO, 'assets', 'v10'), path.join(REPO, 'assets'), V7_PUBLIC];

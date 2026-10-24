@@ -2,11 +2,15 @@
 """Write the Krunker v10.0.2 table fixtures shared/tests/data/v10/{weapons,classes}.json.
 
 The v10 client bundle is untrusted and never executed: its weaponConfig and classConfig arrays
-are read statically by the acorn extractor (~/.cache/kn-v10-tools/extract.js, no eval; resolves
-identifiers and babel defineProperty chains) into one JSON file, e.g.
+were read statically by an acorn extractor (no eval; resolves identifiers and babel defineProperty
+chains; formerly ~/.cache/kn-v10-tools/extract.js, not kept) into one JSON file, a list of
+{"items": [...]} tables, e.g.
 
-    node ~/.cache/kn-v10-tools/extract.js ~/.cache/kn-v10/v10.js "Sniper Rifle" "Triggerman" > v10.json
+    node <extractor> ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js "Sniper Rifle" "Triggerman" > v10.json
     python3 -I tools/kref/v10-fixtures.py v10.json shared/tests/data/v10
+
+The v10.0.3 tables are dumped by ~/jails/kru/src/Krunker_v10.0.3/deob/tools/extractors/ into
+deob/tables/ (wpn-1003-defaults.json, cls-1003.json: plain lists, see deob/README.md).
 
 This applies v10's weaponConfig post-processing loop (v10:101949-101956: id, adSpread 0, reloY 1,
 movSpread 1, lsMlt 0.5, burst false / burstC 0 / burstR 50 when burst is unset), drops the

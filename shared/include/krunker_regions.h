@@ -7,8 +7,8 @@
  * doc/v10/regions.md): the client's pickers and ping race (client/src/ui/region_names.c, servers_ui.c,
  * krunker_lobbies.c), the brain's /mm/ping-list keys and its seek routing (services/brain/registry.c).
  *
- * From the 10.0.3 bundle (~/.cache/kn-v103/deob-10.0.3.js; the same values in v10.0.2's
- * ~/.cache/kn-v10/v10.js at 16443-16469 and 18672-18701):
+ * From the 10.0.3 bundle (~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js; the same values in v10.0.2's
+ * ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js at 16443-16469 and 18672-18701):
  *   - availableRegions, line 19306: the production list, in the order the Default Region dropdown
  *     shows it (settings list defaultRegion.options, v10.js:203294); "sss" is pushed on the beta host
  *     only (19308), ["local"] is the list of a dev host (19311)

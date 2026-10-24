@@ -8,8 +8,8 @@
 #include <ruleset.h>
 
 // Krunker v10.0.2's posed hit boxes (shared/include/hitboxes.h; doc/v10/gameplay.md section 3).
-// "v10:N" = line N of the renamed 10.0.2 bundle (~/.cache/kn-v10/v10.js, the same lines as the
-// original ~/Downloads/v10.0.2.js). The THREE hierarchy v10 keeps per player (complexHitboxes):
+// "v10:N" = line N of the 10.0.2 bundle (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js; the identifier-renamed
+// copy the port used kept its lines). The THREE hierarchy v10 keeps per player (complexHitboxes):
 //
 //   hitboxHoldObj   pos (x, y + |6 sin(sV) stepAnim|, z), rot.y xD - 2 sin(sV) stepAnim
 //    +- upperBodyHoldObj   pos.y legHeight - crouchDst cV, rot.x crouchLean cV + 0.5 yD

@@ -3,7 +3,7 @@
 // Krunker v10.0.2's weapon balance pass (doc/v10/gameplay.md section 5): v10 copies of the ten
 // v7.1.4 entries whose stats changed. Generated from shared/src/weapons/<v7 file> with the v10
 // values substituted; each changed field carries its v10.js evidence ("v10:N" = line N of the
-// renamed 10.0.2 bundle ~/.cache/kn-v10/v10.js, the same lines as ~/Downloads/v10.0.2.js, at the
+// 10.0.2 bundle ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, at the
 // weapon entry; the extractor dump ~/.cache/kn-v10/ext/v10.json holds the parsed values). Every
 // other field is the v7 value: shared/tests/weapons_v10_test.c checks the whole v10 table
 // against shared/tests/data/v10/weapons.json (the extracted v10 weaponConfig) field by field.

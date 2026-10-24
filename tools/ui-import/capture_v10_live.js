@@ -17,7 +17,7 @@
 // and the same pinned client script, but no request leaves the machine. Every krunker.io /
 // *.krunker.io request is answered from the mirror by Fetch.fulfillRequest (the page keeps its
 // https://krunker.io/ origin, so the client's host checks behave as live); the page's module
-// script (static/index-*.js) is KN_V10_CLIENT_JS (default ~/.cache/kn-v10/v10.js), and libs/
+// script (static/index-*.js) is KN_V10_CLIENT_JS (default ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js), and libs/
 // files the mirror lacks (it never downloads .js) come from KN_V10_LIBS (default v7.1.4's
 // public/libs). Everything else is refused as above, and the proxy is a dead port. Used when the
 // live site refuses this machine (Cloudflare "ACCESS DENIED", 2026-10-13).
@@ -45,7 +45,7 @@ if (!STAGE) { process.stderr.write('usage: capture_v10_live.js <stage dir>\n'); 
 const NM = process.env.KN_NODE_MODULES || path.join(__dirname, '../../net-bridge/node_modules');
 const WebSocket = require(path.join(NM, 'ws'));
 const OFFLINE = process.env.KN_V10_PUBLIC ? path.resolve(process.env.KN_V10_PUBLIC) : '';
-const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(require('os').homedir(), '.cache/kn-v10/v10.js');
+const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(require('os').homedir(), 'jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js');
 const LIBS = process.env.KN_V10_LIBS || '/home/user/jails/kru/src/Krunker_v7.1.4/public/libs';
 // offline: a closed port, so anything not fulfilled from disk fails instead of leaving the machine
 const PROXY = OFFLINE ? 'http://127.0.0.1:9' : (process.env.KN_FETCH_PROXY || 'http://127.0.0.1:8888');

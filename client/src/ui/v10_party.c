@@ -1,5 +1,5 @@
 // Krunker v10.0.2 Invite / Join (client/include/v10_party.h). Readable v10 sources (the
-// deobfuscated client, ~/.cache/kn-v10/v10.js): window.copyInviteLink, openJoinWindow, joinGame
+// 10.0.2 client, ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js): window.copyInviteLink, openJoinWindow, joinGame
 // and its parser (_72569: krunker.io|127.0.0.1:8080 /?(party|game)= links, /^([A-Z]+):(\w+)$/
 // codes), the matchInfoHolder Svelte component (svelte-1vrfz9w: Invite = playSelect +
 // copyInviteLink, Join = playSelect + openJoinWindow), the social panel's conversation header

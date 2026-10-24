@@ -1,5 +1,5 @@
-// Krunker v10.0.2 store data: the store module of the live v10 client (~/.cache/kn-v10/v10.js, the
-// deobfuscated bundle, lines 102800-103420; read, never executed) transcribed as data, plus its
+// Krunker v10.0.2 store data: the store module of the live v10 client (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, the
+// 10.0.2 bundle, lines 102800-103420; read, never executed) transcribed as data, plus its
 // load-time loop applyShopMutations (v10.js:103066) ported to plain JS.
 //
 // v10 has no store table in the bundle: the client fetches it from gapi at load time

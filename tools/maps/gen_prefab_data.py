@@ -34,7 +34,7 @@ NON_FLAGS = {"id", "name", "src", "defaultSize", "scale", "lineCol", "opacity", 
 
 
 # Krunker v10.0.2 additions (doc/v10/map-format.md §1, §5), transcribed by hand from the v10
-# client bundle (~/Downloads/v10.0.2.js is obfuscated and never executed): prefabs 97 SCRAPCRATE
+# client bundle (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js is obfuscated and never executed): prefabs 97 SCRAPCRATE
 # (L156724) and 98 ENTITY (L156744), the canDynamic flag of CUBE / TRIGGER / CUSTOM_ASSET (editor
 # metadata for the "dyn" key), condition 12 "Custom Action" (L162580) and actions 72-74 (L163648).
 # The v7 rows keep their v7 values (id 41 stays TERMINAL; BOT_PATH_NODE is an alias in prefabs.c).

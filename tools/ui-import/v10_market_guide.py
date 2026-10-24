@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """Krunker v10.0.2's Market & Trading "Guide" tab text, as C string literals.
 
-  python3 -I tools/ui-import/v10_market_guide.py [v10.js] > client/src/ui/v10_market_guide.h
+  python3 -I tools/ui-import/v10_market_guide.py [game.js] > client/src/ui/v10_market_guide.h
 
-Reads (never runs) the deobfuscated v10 client (default ~/.cache/kn-v10/v10.js, doc/v10/ui.md) and
-prints the guide sections' Svelte templates (the `_4461("...")` literals of component svelte-4log2q:
-Basics, Trading, Safety, Glossary, Tips) verbatim. Their empty lists (`.guide-controls`,
+Reads (never runs) the v10.0.2 client (default ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, doc/v10/ui.md) and
+prints the guide sections' Svelte templates (the `var t = template("...")` literals of component
+svelte-4log2q, whatever the bundle names the helper: Basics, Trading, Safety, Glossary, Tips) verbatim. Their empty lists (`.guide-controls`,
 `.guide-rarities`, `.guide-glossary`) are filled by client/src/ui/v10_market.c.
 """
 import os
 import re
 import sys
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/.cache/kn-v10/v10.js")
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js")
 TITLES = ["What is Trade Plaza?", "Trading Basics", "Red Flags: Warning Signs", "Glossary of Trading Terms", "Pro Tips"]
 NAMES = ["basics", "trading", "safety", "glossary", "tips"]
 
-lit_re = re.compile(r"var _\d+ = _4461\((\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')")
+lit_re = re.compile(r"var [^\s=]+ = [^\s(]+\((\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')")
 
 
 def js_string(lit):
@@ -35,7 +35,7 @@ def main():
     found = {}
     with open(SRC, encoding="utf-8") as f:
         for line in f:
-            if "svelte-4log2q" not in line or "_4461(" not in line:
+            if "svelte-4log2q" not in line:
                 continue
             m = lit_re.search(line)
             if not m:

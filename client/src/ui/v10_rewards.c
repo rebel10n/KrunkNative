@@ -1,7 +1,7 @@
 // Krunker v10.0.2 rewards on the v10 page (ui/, soon ui/): the signup rewards, the
 // Challenges window and the Battle Pass entry points, driven by kn_brain's real data.
 //
-// Sources (the bundle, ~/.cache/kn-v10/v10.js; references "captured from the offline v10 sandbox"):
+// Sources (the bundle, ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js; references "captured from the offline v10 sandbox"):
 //   _39408  the Signup Rewards popup (window.showSignupRewards: genericPopup(_, "signupRewardsPop"),
 //           #signupRewardsButton in #signedOutHeaderBar; REGISTER = clearPops + loginOrRegister(true))
 //           and the end screen's #matchEndSignupIncentives (props.origin "match_end")

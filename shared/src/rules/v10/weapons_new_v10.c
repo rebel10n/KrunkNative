@@ -3,7 +3,7 @@
 
 // Krunker v10.0.2's two new secondaries (doc/v10/gameplay.md section 5 "New weapons"), only in the
 // v10 ruleset's table (weapons_v10.c). Every value is v10.js's entry ("v10:N" = line N of the
-// renamed 10.0.2 bundle ~/.cache/kn-v10/v10.js); checked field by field against
+// 10.0.2 bundle ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js); checked field by field against
 // shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times in s (JS ms / 1000),
 // recoil per s (JS per ms x 1000). Not ported (cosmetic / no KN consumer): assetIcon, refDist,
 // rollOff, transp, noAo, nCase, nMuz, nRing, shine, wyOff, muzOff, muzMlt, rumble, icnPad, expScale.

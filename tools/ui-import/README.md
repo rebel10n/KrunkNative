@@ -24,7 +24,7 @@ Writes `ui/`. Provenance per file: `ui/README.md`.
 ```sh
 # 1. mirror the live site (pages, stylesheets, fonts, every image they and the client script name)
 KN_FETCH_PROXY=http://127.0.0.1:8888 python3 -I tools/ui-import/fetch_live_site.py --stage ~/.cache/kn-v10/live/site \
-    --client-js ~/Downloads/v10.0.2.js --manifest tools/ui-import/menu-assets-v7.txt
+    --client-js ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js --manifest tools/ui-import/menu-assets-v7.txt
 # 2. the page tree (the client script is parsed by v10_bundle.js, never run)
 python3 -I tools/ui-import/import.py --ui ui [--public <stage>/public] [--client-js v10.js]
 ```
@@ -44,7 +44,7 @@ only), no WebSocket and no sendBeacon. Blocked requests go to `blocked.tsv`. Out
 `<stage>/v10-capture/` (`windows.json` = every `showWindow(n)` plus the settings and Change
 Controls tabs). Offline mode, used when krunker.io refuses the machine (Cloudflare 403, as on
 2026-10-13): `KN_V10_PUBLIC=<stage>/public` answers every krunker.io request from the mirror
-(`KN_V10_CLIENT_JS`, default `~/.cache/kn-v10/v10.js`, for `static/index-*.js`; `KN_V10_LIBS`,
+(`KN_V10_CLIENT_JS`, default `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`, for `static/index-*.js`; `KN_V10_LIBS`,
 default v7.1.4's `public/libs`, for the libs the mirror never fetched; an inert FRVR SDK
 stand-in), with a dead proxy so nothing leaves the machine. Then:
 

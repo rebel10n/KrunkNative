@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Krunker v10.0.2 in-game reference captures for tools/uidiff (doc/ref/krunker-v10/ingame/), taken
-// from the OFFLINE v10 sandbox: the pinned v10.0.2 client (~/.cache/kn-v10/v10.js) on the mirrored
+// from the OFFLINE v10 sandbox: the pinned v10.0.2 client (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js) on the mirrored
 // krunker.io page, in sandboxed headless Chromium, with nothing leaving the machine.
 //
 //   node tools/uidiff/capture-v10.js [--out doc/ref/krunker-v10] [--list] [--probe <js>] [name...]
@@ -13,7 +13,7 @@
 //     mirror (KN_V10_PUBLIC, default ~/.cache/kn-v10/live/site/public; the page keeps its
 //     https://krunker.io/ origin) and then from local asset trees (ASSET_DIRS: the v10 live asset
 //     stage, KrunkNative's assets/, v7.1.4's public/), and fails everything else (other hosts, POST);
-//   - the page's module script (static/index-*.js) is KN_V10_CLIENT_JS (default ~/.cache/kn-v10/v10.js);
+//   - the page's module script (static/index-*.js) is KN_V10_CLIENT_JS (default ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js);
 //     libs/ the mirror lacks come from v7.1.4's public/libs; FRVR's SDK is an inert stub (logged out);
 //   - window.WebSocket throws (set before any page script) and navigator.sendBeacon is a no-op:
 //     never a matchmaker, game, social or queue socket; no login, no cookies or tokens of ours.
@@ -35,7 +35,7 @@ const { CDP, sleep } = require('../kref/cdp.js');
 const REPO = path.resolve(__dirname, '..', '..');
 const HOME = os.homedir();
 const OFFLINE = path.resolve(process.env.KN_V10_PUBLIC || path.join(HOME, '.cache/kn-v10/live/site/public'));
-const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(HOME, '.cache/kn-v10/v10.js');
+const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(HOME, 'jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js');
 const V7_PUBLIC = process.env.KN_V7_PUBLIC || '/home/user/jails/kru/src/Krunker_v7.1.4/public';
 // ui/ last: the live v10 files tools/ui-import pinned there (live_assets_v10.lock: the menu-bg art the
 // Game Updating screen picks, of which the mirror has one)

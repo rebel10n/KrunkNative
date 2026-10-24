@@ -13,7 +13,7 @@ each element is shown (html_dom_is_shown: rendered, visible, not transparent, no
 `:preview` / `:spray` are the GL-drawn class preview and spray wheel) and `chat @label <place>`
 checks, which read #chatHolder's box (`rect` probes) and compare its place in #uiBase with the
 main.css rule of the state (CHAT_PLACES). The expectations follow Krunker v10.0.2, the page in
-ui/ (~/.cache/kn-v10/v10.js, `v10:N` = its line: UI.toggleMenu / toggleMenuHider / toggleControlUI /
+ui/ (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, `v10:N` = its line: UI.toggleMenu / toggleMenuHider / toggleControlUI /
 toggleGameUI / hideUI / showEndScreen / toggleEndScreen, v10:160950-161060), which keeps v7.1.4's
 transitions apart from what the scenarios note. The scenarios run as guests (no account): v10
 hides a guest's chat on the menu (hideChatIfGuestUser, v10:208576, from toggleMenuHider

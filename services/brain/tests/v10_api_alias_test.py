@@ -12,7 +12,7 @@ account is registered over POST /auth/register (its Bearer token the logged-in c
 completed market sales are seeded for it (the items/prices map is the mean per skin: 400 for skin 7, 120 for 9).
 Every check is one HTTP request, one (method, path) of the v10 inventory, with the JSON shape its consumer
 reads. The label names the v10.0.3 decoded line (grep-able in /tmp/api-full-http-ref/v10.0.3.decoded.js,
-the gapi client table is on line 5161) and the v10.0.2 line (~/.cache/kn-v10/v10.js). Stdlib only.
+the gapi client table is on line 5161) and the v10.0.2 line (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js). Stdlib only.
 
 A route is FAIL when the brain does not route it (the 404 fallback {"error": "not_found"}), routes it with
 the wrong method (405), or answers 5xx (the v10 gapi wrapper throws on any status >= 500). Login routes

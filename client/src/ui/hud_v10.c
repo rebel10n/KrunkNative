@@ -2,7 +2,7 @@
 //
 // v10's in-game HUD is still the legacy DOM of v7.1.4 (#inGameUI and its ids, doc/v10/ui.md
 // section 5), which hud_ui.c drives; this file holds what v10 does differently, read
-// from the v10.0.2 client (~/.cache/kn-v10/v10.js, `v10:N` = its line) and checked against the
+// from the v10.0.2 client (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, `v10:N` = its line) and checked against the
 // offline v10 sandbox captures (doc/ref/krunker-v10/ingame/, tools/uidiff/capture-v10.js):
 //   - #chatUIHolder (new in v10, markup display:none) wraps the chat: toggleMenuHider(on) runs
 //     hideChatIfGuestUser(on) (v10:161017, 208576): on the menu a guest has no chat, an account

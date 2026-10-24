@@ -3,7 +3,7 @@
 doc/v10/api-inventory.md): a gapi frame ["gapi", rid, method, path, body] must get the reply the
 v10.0.3 consumer reads, {"data": ...} on success or {"error": {"code", "message"}} on failure, with
 the field names and the meaning of each value the consumer uses (game.js, decrypted; the same paths
-and field names are in ~/.cache/kn-v10/v10.js). Each check is labelled with its route number.
+and field names are in ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js). Each check is labelled with its route number.
 
   gapi_tunnel_test.py <kn_brain> <repo root>
 

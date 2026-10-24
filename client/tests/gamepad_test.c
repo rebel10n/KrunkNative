@@ -1,5 +1,5 @@
 // gamepad_test: the controller module (client/src/gamepad.c) against Krunker v10.0.2's Gamepad
-// class and CONTROLS' controller block (~/.cache/kn-v10/v10.js): the right trigger is the "shoot"
+// class and CONTROLS' controller block (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js): the right trigger is the "shoot"
 // KEY (press / release) and a fake mouse button at triggerThres while held, the left stick's
 // 8-way sectors after the rescaling dead zone, KrunkScript hooks for every button and stick
 // (vendor included), Disable Controllers (toggleGamepad) and vibrationMlt.

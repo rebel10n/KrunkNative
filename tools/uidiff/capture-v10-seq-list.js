@@ -1,5 +1,5 @@
 // The sequences of capture-v10-seq.js (doc/ref/krunker-v10.0.2/sequences/): UI-PARITY-AUDIT section 3.
-// v10 line numbers (v10:N) are ~/.cache/kn-v10/v10.js, the client the sandbox runs. Every sequence
+// v10 line numbers (v10:N) are ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, the client the sandbox runs. Every sequence
 // names the native scenario that renders the same frames (tools/uidiff/scenarios/seq-<name>.json).
 // `unreachable` sequences are listed with the reason and never captured (nothing is faked).
 'use strict';

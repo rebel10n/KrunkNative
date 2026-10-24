@@ -1,4 +1,4 @@
-// The phone defaults of Krunker v10.0.2 (~/.cache/kn-v10/v10.js, the settings definitions near
+// The phone defaults of Krunker v10.0.2 (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, the settings definitions near
 // 10011000-10100000: `val` per setting, with isMobile true or false). Each row lists both values so
 // the table reads as v10's; ui_settings.c applies the one for the platform over the scraped tabs.
 //
