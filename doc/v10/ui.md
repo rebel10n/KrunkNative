@@ -72,7 +72,7 @@ sites carry over. Differences:
 | Id | Label | v7.1.4 | v10.0.2 | v10 line |
 |---|---|---|---|---|
 | 3 | customize | width 850 (windows.json) | width 1525. Loadout is now a 3-tab shell (`#loadoutToolbar` tabs Class / Loadout / Customize, `#charPreviewSlot` live preview, `loadoutStyle` windows wrap their items in `.wcpRow`) | 211547, 210927 |
-| 5 | profile | width 955. Tabs: home, Friends, **Partner**, Settings, Connections, **vpn_key** | width 1280. Tabs `profileTabs`: home, Friends, Settings, Connections (Partner and 2FA key tabs removed). Discord link section mounts Svelte `discordLinkMount` | 211812, 212065; v10:18630 vs v7:src/config.js:2663 |
+| 5 | profile | width 955. Tabs: home, Friends, **Partner**, Settings, Connections, **vpn_key** | width 1280. Tabs `profileTabs`: home, Friends, Settings, Connections (Partner and 2FA key tabs removed). Discord link section mounts Svelte `discordLinkMount`. 10.0.3: stat tabs `statTabs` General Stats, Killstreaks, Other Stats, Class Stats, Raids; Settings adds Promotional Emails and the usernames row (deob-10.0.3.js:21519-21520, 247396-247763). KN: these tabs (`account_ui.c` gen_account), plus its Medals stat tab; section 9 | 211812, 212065; v10:18630 vs v7:src/config.js:2663 |
 | 13 | clan | home, Members, Stats, Requests | adds a 5th tab (settings icon). Tab 0 mounts `clan-ownership-transfer-banner` + `clan-loot-mode-display`, tab 4 mounts `clan-settings` (logo upload 512x512 PNG for 20,000 KR, MOTD, recruitment, loot mode, ownership transfer via `rpc('clan-transfer-initiate'/'clan-transfer-respond')`). Covered in clans.md | 213330; v10:18612 vs v7:src/config.js:2635 |
 | 14 | shop_crafting | tabs: home, Prize Wheels, Premium, Purchase KR, Redeem Keys, **Marketplace**, **plumbing** (crafting) | tabs `shopTabs`: home, Prize Wheels, Premium, Purchase KR, Redeem Keys, **Eterno Shop** (tab 5 sets `.eterno` class + music player "Eterno Rules the World"/`eterno_lofi`). Marketplace moved to `openExchange()`. Home tab is Svelte `_44131` (bundles, wild offers, heroic spin) | 213583; v10:16476 vs v7:src/config.js:157 |
 | 6 | battlepass | `bpTabs` home, Challenges | unchanged tabs. Background `/img/battlepass/bg_window_5.png` | 212116, 127471 |
@@ -102,7 +102,7 @@ All are `genericPopup({component, props}, cls)` or Svelte overlays.
 | Ranked home card | ranked modal | `.rank-card`, `.season-banner`, `.rank-icon` | rank icons `img/ranked/ranks/rank_*.svg` | 98974, 97509 |
 | Leaderboards | `openLeaderboards(cat)` | `defaultModal`, `_49281` | player_score/kills/wins/timeplayed/funds/followed/nukes/skinvalue/eventcount; clan score/members; raid best time per map (Tortuga, Laboratory, Soul Sanctum, Khepri, Bastion); ranked Rating/Matches; KrunkCup `.krunkcup-component` | 138718-138800, 138699 |
 | Social hub | `openSocial(tab)` | `socialModal`, `_49999` | tabs Social / Friends / Clan / Search; feeds Hot / Global / Following / News / Giveaways; posts, comments, DMs (`.conversation-root`, emoji panel), follow lists, profile search, player profile (`openPlayerProfile`), clan view (`openClanView`), map/mod detail, Studios | 139579-140479, 215697-215745 |
-| Market and trading | `openExchange(tab, idx)` | `exchangeModal`, `_46780` | `.market-grid`, `.item-detail-container`, `.trading-tab`, `.qs-window` (quick sell), price/fee modal. Ported: client/src/ui/v10_market.c (doc/v7/economy.md section 8). Differs: no Junk / crafting (Junkyard shows no recipes), no item instances (wear, mints, serials, paint, styles, name tags), price estimates from kn_brain's own mean sale prices (`["r","market","prices"]`, fetched when the exchange opens like v10's getPrices), then the bundled data/prices.js snapshot, else v10's "~ Unknown", flat previews instead of the 3D showcase iframe, sales charts as SVG images with HTML axis labels, item lists paged client-side (Load More) instead of by API cursor, fees/levels/limits from the server (`ecfg`) | 129991-132599 |
+| Market and trading | `openExchange(tab, idx)` | `exchangeModal`, `_46780` | `.market-grid`, `.item-detail-container`, `.trading-tab`, `.qs-window` (quick sell), price/fee modal. Ported: client/src/ui/v10_market.c (doc/v7/economy.md section 8). Differs: no item instances (wear, mints, serials, styles, name tags; paint is a painted copy, doc/v10/paint-copy.md), price estimates from kn_brain's own mean sale prices (`["r","market","prices"]`, fetched when the exchange opens like v10's getPrices), then the bundled data/prices.js snapshot, else v10's "~ Unknown", flat previews instead of the 3D showcase iframe, sales charts as SVG images with HTML axis labels, item lists paged client-side (Load More) instead of by API cursor, fees/levels/limits from the server (`ecfg`) | 129991-132599 |
 | Items / inventory | `openItems()` | `itemsModal` | `.items-view-root` | 215702 |
 | Lottery / raffles | `openLottery(id=3)` | `defaultModal lotteryModal`, `_43358` | `img/lottery_bg*.webp` | 125584, 215678 Brain: services/brain/lottery.c (0348_lottery; GET / POST `/api/lottery/<id>`, the token in `?token=`). |
 | Turf Wars (Territory Wars) | menu item | `defaultModal`, `_51011` | `TERRITORY_WARS_INTRO_DATE "2026-03-17"`, payouts tab, `img/territory_map.webp`, `img/turf/<mapId>-raised.png` | 141788-142713 |
@@ -312,6 +312,27 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     deob-10.0.3.js:249986-250008); the Junkyard panel calls `craftMenu()` without a click sound; the Eterno
     Shop shows "Loading eterno shop..." while the brain's display loads and "Error: Failed to load eterno
     shop" with Retry when it fails, nothing more when it is empty (deob-10.0.3.js:144540-144551).
+  - Store bundle cards (`junk_shop_ui.c`, deob-10.0.3.js:144630-144642, 144978-145057): the art is on
+    `.bundle-icon`, which holds the discount label and the struck original price; an owned card is
+    `filter: grayscale(1)`. Four skin thumbnails in their rarity's border (`viewItem(id)`), or three and a
+    `+N` box past four, empty boxes past the list's end. BUY reads `"BUY $" + PRICE` unformatted or
+    "Already Purchased"; the art and BUY call `playSelect(0.1)` then `bundlePopup(true, false, ID)`. Order
+    (144811-144823): newest DATE first, cheapest first for a guest or level 10 and below, owned last; the
+    grid is asked with the session token, so OWNED is the account's. Box Office has no bundle popup (v10's
+    bundlePop, 242965: items, offer timer, BUY / GIFT through the payment provider) and no conditional
+    bundles (they come with v10's bundle-availability push): `bundlePopup` goes to the bundle's purchase,
+    which the brain refuses (USD).
+  - Purchase KR (deob-10.0.3.js:145668-145702, 116856-116929, 28524-28532): on KR sale weekends (Saturday /
+    Sunday UTC of an odd ISO week, the menu's `v10_menu_kr_sale`, the same rule as its KR DISCOUNT badge)
+    every card shows `10% Off` on `#E040FB` and its `priceSale`; the 160000 KR ("???", `goldenKr`) and
+    350000 KR ("Beyond Belief!", `beyondBelief`) cards list for a `spendingTier` 2 account (krunker.io's
+    `spending_tier` / setData [48]; Box Office accounts have none).
+  - Prize Wheels (deob-10.0.3.js:145125-145212, 145325-145368): a listed wheel before its startDate is
+    greyed with no overlay or click and its price reads "Unlocks in HH:MM:SS", counting down every second
+    (guests too) until it starts and the tab redraws; the display window lists it (KN's own `locked`
+    counted the dates, so it never did). The promo badge (`promoText` on `promoCol || #ff8f00`) and the
+    `aReq` lock (`acc[ind] < val`: locked, priced `txt`; `shared/src/store_spins.c` parses it) are in;
+    the 10x price is `priceTxt * multi` (NaN for a text price, as in v10).
   - Server browser: the `2XP` badge (a double-XP mode, not dedicated, not custom) and krunker.io's
     promoted-server star, sorted first in the legacy browser (deob-10.0.3.js:246616, 246633). Box Office's
     own `pr` means a password, so it stays a lock.
@@ -325,15 +346,42 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
   - Clans: the loot settings' "Last updated ... on" is `toLocaleDateString()` (M/D/YYYY), the ownership
     transfer banner names the clan from `clanData.clan_name`, the MOTD's Remove shows while the textarea
     holds text (as of the last redraw: KN reads the textarea on clicks, not on every keystroke).
-  - Market: seller, creator and owner names open the player's profile.
+  - Market: seller, creator and owner names open the player's profile. The owners rows (Listing Details and
+    the item page) draw v10.0.3's creator badge (`owner-badge creator`, verified, "Creator") before the
+    subscriber and featured ones, from the row's `cr` (deob-10.0.3.js:146126, 151912; 123066, 123737):
+    kn_brain's owners rows carry it from `players.creator_badge`. Quick Sell has v10.0.3's Junk: the
+    value row ("N Junk each", two places), the total's Junk line (after a `<br>` when both currencies
+    pay), the `qs-btn-junk` "Get Junk" button (action 1) and "Sold X for Junk"; an item v10 neither
+    sells nor destroys (noSale Black Market items, opensea) says "This item cannot be sold back for
+    currency." with no action (deob-10.0.3.js:122598-122638, 147609-147940, 149025-149031). The Junk per
+    unit is the rarity's scrap (Contraband 5, Unobtainable 50; 0.01 for minQuickSell), credited to the
+    Junk wallet by kn_brain (`qsi` mode 1, `POST /market/quick-sell` action 1; doc/v10/junk.md). On the
+    krunker.io backend it stays read-only like the market's other writes. Kept KN deviation: an item
+    with no KR (a Black Market item never quick-sells for KR here) and no Junk can still be destroyed.
+    The Market side-nav entry plays `playSelect()` / `playTick()` (deob-10.0.3.js:158413-158475).
   - Profile (window 5): the name opens `openPlayerProfile`; the Friends tab lists online friends first.
+    The tabs are 10.0.3's `profileTabs` (home, Friends, Settings, Connections; deob-10.0.3.js:21519): v7's
+    Partner and promo code tabs are gone, as in v10 (no Box Office feature behind them). The stat tabs are
+    `statTabs` (General Stats, Killstreaks, Other Stats, Class Stats, Raids; deob-10.0.3.js:21520), then KN's
+    Medals for a Box Office account (`kn-additions.md`). Raids (deob-10.0.3.js:247596-247634) has Totals,
+    AI Kills, Boss Kills, Deaths and the Tortuga / Laboratory / Soul Sanctum / Khepri / Bastion cards from
+    `acc.raidStats` (setData slot 52): the krunker.io account's comes in "ua"; kn_brain keeps no raid
+    stats, so a Box Office account shows v10's empty state (0/0 (0%), --:--). Connections
+    (deob-10.0.3.js:247686-247752) has the collapsible Discord and Twitch sections (`collapseCon`). Discord
+    is v10's link component in its not-configured state (kn_brain's `/discord/status` answers
+    `{linked: false}`, v10_auth.c): "Discord Account (none)", no Link button, "Discord linking is currently
+    unavailable.". Twitch is v10's unlinked markup with Drops Earned (owned `drop` items); its Link
+    (`linkTwitchPop`) is not available (no Twitch linking: no OAuth client, no twitchId) and does nothing.
+    Settings has Promotional Emails (`togglePromoEmails`: POST `/email/preferences`, which kn_brain refuses,
+    so the row stays unchecked as v10's does after a failed call) and the usernames row (`manageAccNames`,
+    the usernames popup).
   - Social panel: opening it, or switching to a tab, starts that tab afresh as v10's components do
     (Social on Global, Friends with no chat open, no filter, empty draft); the Search tab's scroll is kept.
-- **Known gaps left** (larger ports, not done here): the store's bundle cards (art on `.bundle-icon`, its
-  `bundlePopup` click, 3 thumbnails + `+N`, ordering), the Purchase KR sale weekends and the 160000 KR
-  card, the Prize Wheels' "Unlocks in" state and promo badge, `showPremiumBenefits()`; the host form's
+- **Known gaps left** (larger ports, not done here): the store's bundle popup (`bundlePopup`, with
+  conditional bundles), `showPremiumBenefits()`; the host form's
   Host Presets and Share on Hub row, the non-Custom host types' banners and map lists, the community-map
-  Select block, `canRehost`; window 5 is still v7's (Partner and promo tabs, no Connections tab, no Raids
-  stats, no Promotional Emails / username / deletion rows); the market's creator badge, Quick Sell Junk
-  and Black Market title reward; the profile popup's Badges, Titles and Skins tabs; the menu items play
+  Select block, `canRehost`; window 5's "Processing Deletion" / Cancel state (`requestDeletion(0)`,
+  `acc.reqDel`: kn_brain has no deletion request route, and `requestDeletion` has no handler), Twitch
+  linking and drop claims, and Account Security's Current Password field (10.0.3 sends `upp` with the
+  refresh token instead, deob-10.0.3.js:244645-244650; kn_brain's `upp` checks the old password); the market's Black Market title reward; the profile popup's Badges, Titles and Skins tabs; the menu items play
   `playSelect(0.1)` where v10 plays `playSelect()`.

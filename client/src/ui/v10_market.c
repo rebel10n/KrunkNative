@@ -31,8 +31,9 @@
 //                                                         / ["trC"] / ["trCA"]
 //   /trades/player-search, /trades/inventory/<id>         ["sp"] / ["ri"]
 //   /market/black-market(/purchase)                       the store table / ["pbm"]
-// What does not exist here: Junk and crafting (the Junkyard has no recipes), item instances (wear,
-// mints, serials, paint, styles, name tags: every item is a stack) and the 3D showcase. The estimates of
+// Quick Sell's Junk is the Junk wallet's (doc/v10/junk.md: "qsi" mode 1, the inventory rows' qj). What
+// does not exist here: item instances (wear, mints, serials, styles, name tags: an item is a stack or a
+// painted copy) and the 3D showcase. The estimates of
 // /webhooks/general/items/prices are ["r","market","prices"]: this economy's own mean sale prices,
 // then the bundled data/prices.js snapshot (social_estimate_value); with neither, v10's "~ Unknown".
 #include <backend.h>
@@ -54,6 +55,7 @@
 #include <ui_vgrid.h> // the Create Trade inventory lists: virtual (v10_market_tick)
 #include <skin_paint.h>   // a painted copy's badge (v10.0.3's PaintedBadge after the card: deob-10.0.3.js:150273-150277)
 #include <paint_picker.h> // the inventory tile's Paint button (deob:147316, gated at deob:150226-150228)
+#include <junk.h>         // Quick Sell's Junk: the hundredths of the inventory rows, the reply's balance (doc/v10/junk.md)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -1619,6 +1621,9 @@ static void owners_list(StrBuf *sb, const int catalog) {
     const cJSON *o;
     cJSON_ArrayForEach(o, M.downers) {
         sb_appendf(sb, "<li class=\"%s-row %s\"><span class=\"%s-rank %s\">#%d</span> ", h, hash, h, hash, ++i);
+        // the row's creator, subscriber and featured badges: cr / su / ft (deob-10.0.3.js:151912-151923; the item
+        // page's 123737-123748). cr is players.creator_badge (kn_brain's owners rows, db_economy.c P_MARKET_ITEM)
+        if (jint(o, "cr", 0)) sb_appendf(sb, "<i class=\"material-icons %s creator %s\" title=\"Creator\">verified</i>", catalog ? "items-detail-owner-badge" : "owner-badge", hash);
         sb_append(sb, " ");
         if (jint(o, "su", 0)) sb_appendf(sb, "<i class=\"material-icons %s premium %s\" title=\"Subscriber\">beenhere</i>", catalog ? "items-detail-owner-badge" : "owner-badge", hash);
         sb_append(sb, " ");
@@ -1799,26 +1804,47 @@ static void list_modal_dynamic(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
-static void qs_values(const int index, int *kr, int *can_kr, int *can_destroy) {
+// v10.0.3's quick sell value of an owned item (deob-10.0.3.js:122598-122638) from the brain's inventory row
+// (economy.c decorate_inventory): qs = KR per unit, qj = Junk per unit in hundredths, nqs = noQuickSell,
+// nqv = an item v10 neither sells nor destroys (noSale && blackM, or opensea)
+typedef struct {
+    int kr, junk; // junk in hundredths
+    int can_kr, can_junk, can_destroy, can_qs;
+} QsValue;
+
+static QsValue qs_values(const int index) {
+    QsValue v = {0};
     const cJSON *r = inv_row(index);
-    *kr = r ? jint(r, "qs", 0) : 0;
-    *can_kr = *kr > 0 && !(r && jint(r, "nqs", 0));
-    *can_destroy = !*can_kr; // noQuickSell or no KR value (Black Market items): destroy only (economy.c)
+    if (r && jint(r, "nqv", 0)) return v; // "This item cannot be sold back for currency."
+    const int nqs = r && jint(r, "nqs", 0);
+    v.kr = nqs || !r ? 0 : jint(r, "qs", 0);
+    v.junk = nqs || !r ? 0 : jint(r, "qj", 0);
+    v.can_kr = v.kr > 0;
+    v.can_junk = v.junk > 0;
+    v.can_qs = v.can_kr || v.can_junk;
+    // v10: canDestroy = noQuickSell. KrunkNative: also an item with neither value (economy.c quick_sell_each: a
+    // Black Market item never quick-sells for KR), which v10 would sell for KR: destroy only
+    v.can_destroy = nqs || !v.can_qs;
+    return v;
 }
 
-// the Quick Sell window (_46234), pushed on the shared v10 view stack (v10_ui.h)
+static void qs_button(StrBuf *sb, const char *cls, const char *id, const int mode, const char *label) {
+    sb_appendf(sb, "<button type=\"button\" class=\"qs-btn %s svelte-1o11rsf\" id=\"%s\"%s onclick=\"v10mk.qsgo(%d)\">%s</button>", cls, id,
+               M.busy ? " disabled" : "", mode, label);
+}
+
+// the Quick Sell window (_46234, deob-10.0.3.js:147609-147940), pushed on the shared v10 view stack (v10_ui.h)
 static void qs_html(StrBuf *sb) {
     char n[32];
     const ViewerSkin *s = skin(M.sel_skin);
     if (!s) return;
-    int kr, can_kr, can_destroy;
-    qs_values(M.sel_skin, &kr, &can_kr, &can_destroy);
+    const QsValue v = qs_values(M.sel_skin);
     const int count = M.sel_count;
     char url[512];
     thumb(url, sizeof(url), s);
     const char *col = rarity_color(s);
     sb_appendf(sb, "<div class=\"qs-overlay svelte-1o11rsf\" role=\"presentation\" onclick=\"v10mk.mclose()\"><div class=\"qs-window svelte-1o11rsf\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Quick sell\" onclick=\"v10mk.stop()\">"
-                   "<div class=\"qs-title svelte-1o11rsf\">%s</div> <div class=\"qs-item-preview svelte-1o11rsf\" style=\"border-color: %s;\">", can_destroy ? "Destroy Item" : "Quick Sell", col);
+                   "<div class=\"qs-title svelte-1o11rsf\">%s</div> <div class=\"qs-item-preview svelte-1o11rsf\" style=\"border-color: %s;\">", v.can_destroy ? "Destroy Item" : "Quick Sell", col);
     if (s->type == 4) sb_appendf(sb, "<div class=\"qs-thumb qs-thumb-spray svelte-1o11rsf\" style=\"background-image: url(%s)\"></div>", url);
     else {
         sb_appendf(sb, "<img class=\"qs-thumb svelte-1o11rsf\" src=\"%s\" alt=\"", url);
@@ -1830,22 +1856,46 @@ static void qs_html(StrBuf *sb) {
     sb_append(sb, "</div> ");
     if (count > 1) sb_appendf(sb, "<div class=\"qs-item-sub svelte-1o11rsf\">%d owned</div>", count);
     sb_append(sb, "</div></div> ");
-    if (can_destroy) {
+    char junk[24];
+    if (!v.can_qs && !v.can_destroy) { // deob-10.0.3.js:147614, 147808-147810
+        sb_append(sb, "<div class=\"qs-error-text svelte-1o11rsf\">This item cannot be sold back for currency.</div>");
+    } else if (v.can_destroy) {
         sb_append(sb, "<div class=\"qs-no-value svelte-1o11rsf\">This item has no value. You can destroy it to free up inventory.</div>");
-    } else {
-        fmt(n, sizeof(n), kr);
-        sb_appendf(sb, "<div class=\"qs-values svelte-1o11rsf\"><div class=\"qs-value-row svelte-1o11rsf\"><span class=\"qs-value-label svelte-1o11rsf\">KR</span> "
-                       "<span class=\"qs-value-each svelte-1o11rsf\"><span class=\"qs-value-num svelte-1o11rsf\">%s</span> KR each</span></div> </div>", n);
+    } else { // the KR and Junk rows (deob-10.0.3.js:147811-147834): Junk each with two places (toFixed(2))
+        sb_append(sb, "<div class=\"qs-values svelte-1o11rsf\">");
+        if (v.can_kr) {
+            fmt(n, sizeof(n), v.kr);
+            sb_appendf(sb, "<div class=\"qs-value-row svelte-1o11rsf\"><span class=\"qs-value-label svelte-1o11rsf\">KR</span> "
+                           "<span class=\"qs-value-each svelte-1o11rsf\"><span class=\"qs-value-num svelte-1o11rsf\">%s</span> KR each</span></div>", n);
+        }
+        sb_append(sb, " ");
+        if (v.can_junk) {
+            junk_format(v.junk, junk, sizeof(junk));
+            sb_appendf(sb, "<div class=\"qs-value-row svelte-1o11rsf\"><span class=\"qs-value-label svelte-1o11rsf\">Junk</span> "
+                           "<span class=\"qs-value-each svelte-1o11rsf\"><span class=\"qs-value-num svelte-1o11rsf\">%s</span> Junk each</span></div>", junk);
+        }
+        sb_append(sb, "</div>");
     }
     sb_append(sb, " ");
-    if (count > 1) {
+    if (count > 1 && (v.can_qs || v.can_destroy)) { // deob-10.0.3.js:147838-147883
         sb_appendf(sb, "<label class=\"qs-amount-label svelte-1o11rsf\" for=\"qs-amount-select\">Amount</label> <select id=\"qs-amount-select\" class=\"qs-amount-select svelte-1o11rsf\"%s onchange=\"v10mk.qsmode(this.value)\">"
                        "<option value=\"0\"%s>1 Item</option><option value=\"1\"%s>All But 1</option><option value=\"2\"%s>All</option></select> ",
                    M.busy ? " disabled" : "", M.qs_mode == 0 ? " selected" : "", M.qs_mode == 1 ? " selected" : "", M.qs_mode == 2 ? " selected" : "");
         const int units = M.qs_mode == 0 ? 1 : M.qs_mode == 1 ? (count - 1 > 0 ? count - 1 : 0) : count;
-        if (can_kr && units > 0) {
-            fmt(n, sizeof(n), (double) kr * units);
-            sb_appendf(sb, "<div class=\"qs-total svelte-1o11rsf\">You will receive: <span class=\"qs-total-num svelte-1o11rsf\">%s</span> KR total (%d \xc3\x97)  </div>", n, units);
+        if (v.can_qs && units > 0) { // "You will receive: N KR total (U ×) <br> J Junk total (U ×)"
+            sb_append(sb, "<div class=\"qs-total svelte-1o11rsf\">You will receive: ");
+            if (v.can_kr) {
+                fmt(n, sizeof(n), (double) v.kr * units);
+                sb_appendf(sb, "<span class=\"qs-total-num svelte-1o11rsf\">%s</span> KR total (%d \xc3\x97)", n, units);
+            }
+            sb_append(sb, " ");
+            if (v.can_kr && v.can_junk) sb_append(sb, "<br>");
+            sb_append(sb, " ");
+            if (v.can_junk) {
+                junk_format((int64_t) v.junk * units, junk, sizeof(junk));
+                sb_appendf(sb, "<span class=\"qs-total-num svelte-1o11rsf\">%s</span> Junk total (%d \xc3\x97)", junk, units);
+            }
+            sb_append(sb, "</div>");
         }
     }
     sb_append(sb, " ");
@@ -1855,10 +1905,14 @@ static void qs_html(StrBuf *sb) {
         sb_append(sb, "</div>");
     }
     sb_appendf(sb, " <div class=\"qs-actions svelte-1o11rsf\"><button type=\"button\" class=\"qs-btn qs-btn-cancel svelte-1o11rsf\"%s onclick=\"v10mk.mclose()\">Cancel</button> ", M.busy ? " disabled" : "");
-    if (can_destroy)
-        sb_appendf(sb, "<button type=\"button\" class=\"qs-btn qs-btn-destroy svelte-1o11rsf\" id=\"v10mkQsGo\"%s onclick=\"v10mk.qsgo(2)\">%s</button>", M.busy ? " disabled" : "", M.busy ? "Destroying\xe2\x80\xa6" : "Destroy");
-    else
-        sb_appendf(sb, "<button type=\"button\" class=\"qs-btn qs-btn-kr svelte-1o11rsf\" id=\"v10mkQsGo\"%s onclick=\"v10mk.qsgo(0)\">%s</button> ", M.busy ? " disabled" : "", M.busy ? "\xe2\x80\xa6" : "Get KR");
+    // Destroy (action 2), else Get KR (0) and Get Junk (1) (deob-10.0.3.js:147893-147930)
+    if (v.can_destroy) {
+        qs_button(sb, "qs-btn-destroy", "v10mkQsGo", 2, M.busy ? "Destroying\xe2\x80\xa6" : "Destroy");
+    } else if (v.can_qs) {
+        if (v.can_kr) qs_button(sb, "qs-btn-kr", "v10mkQsGo", 0, M.busy ? "\xe2\x80\xa6" : "Get KR");
+        sb_append(sb, " ");
+        if (v.can_junk) qs_button(sb, "qs-btn-junk", "v10mkQsJunk", 1, M.busy ? "\xe2\x80\xa6" : "Get Junk");
+    }
     sb_append(sb, "</div></div></div>");
 }
 
@@ -3443,7 +3497,8 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         M.busy = 1;
         M.qs_err[0] = 0;
         M.pending = ACT_QS;
-        const double v[4] = {a0 == 2 ? 2 : 0, M.sel_skin, 0, M.sel_count > 1 ? M.qs_mode : 0}; // qsi(mode, skin, uid, amount)
+        // qsi(mode, skin, uid, amount): v10.0.3's action 0 Get KR, 1 Get Junk, 2 Destroy (deob-10.0.3.js:147675-147679)
+        const double v[4] = {a0 >= 0 && a0 <= 2 ? a0 : 0, M.sel_skin, 0, M.sel_count > 1 ? M.qs_mode : 0};
         cJSON *f = econ_frame("qsi", 4, v, M.op);
         // a painted copy: the sale's skin_id (v10's quickSellItem(.., skin_id) with the unit's instanceId, deob:147673-147675)
         // is the frame's ext "copy" (economy.c sh_quick_sell: ext.copy >= V10_COPY_ID_BASE is the copy sold)
@@ -3792,10 +3847,18 @@ static void on_social(void *user, const cJSON *frame) {
             const ViewerSkin *s = skin(M.sel_skin);
             const int left = jint(a1, "c", 0), sold = M.sel_count - left;
             if (cJSON_GetObjectItemCaseSensitive(a1, "f")) apply_funds(jnum(a1, "f"));
+            // the Junk balance after the sale (v10.0.3 sets the account's junk from the reply, deob-10.0.3.js:147736)
+            const cJSON *j = cJSON_GetObjectItemCaseSensitive(a1, "j");
+            if (cJSON_IsNumber(j) && jnum(a1, "jnk") > 0) {
+                char junk[24];
+                junk_format(junk_hundredths(j->valuedouble), junk, sizeof(junk));
+                account_ui_set_junk(junk);
+            }
             for (int k = 0; k < sold; k++) account_remove_skin(M.sel_skin);
             char msg[160];
-            const int destroyed = jnum(a1, "kr") <= 0;
-            snprintf(msg, sizeof(msg), destroyed ? "Destroyed %s" : "Sold %s for KR", s && s->name ? s->name : "item");
+            // deob-10.0.3.js:149025-149031: "Destroyed X" / "Sold X for Junk" / "Sold X for KR"
+            const char *fmt_msg = jnum(a1, "jnk") > 0 ? "Sold %s for Junk" : jnum(a1, "kr") > 0 ? "Sold %s for KR" : "Destroyed %s";
+            snprintf(msg, sizeof(msg), fmt_msg, s && s->name ? s->name : "item");
             M.modal = MODAL_NONE;
             notify(1, msg);
             inventory_load();
@@ -3914,8 +3977,10 @@ static void menu_sync(void *user) {
     if (item) {
         char oc[64] = "";
         if (html_dom_get_attr(item, "onclick", oc, sizeof(oc)) < 0 || !oc[0]) {
-            html_dom_set_attr(item, "onclick", "playSelect(0.1),openExchange()");
-            html_dom_set_attr(item, "onmouseenter", "playTick(0.1)");
+            // v10.0.3's side-nav items: playSelect() with no volume (0.15) on click, playTick() on hover
+            // (deob-10.0.3.js:158413-158436, 158458, 158475)
+            html_dom_set_attr(item, "onclick", "playSelect(),openExchange()");
+            html_dom_set_attr(item, "onmouseenter", "playTick()");
         }
         // only on a change: a style write invalidates the page's layout (every 500 ms otherwise)
         char cur[16] = "";
