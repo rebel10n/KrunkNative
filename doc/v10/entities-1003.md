@@ -158,8 +158,9 @@ whose GLB joins the scene through `user_asset_object_added`.
 
 ## 7. Not done
 
-- Shots against entity parts (rayVsPart, :214014) and their damage (`entities.damage` from a hit, :196082). KN's shots
-  ignore dyn objects, so they pass through the parts on both sides.
+- Shots against entity parts: a shot stops at a solid part on both sides as at any block, but it is not 10.0.3's
+  rayVsPart (:214014: the part's yawed box at its part pose, nd riders passing through) and it does not damage the
+  entity (`entities.damage` from a hit, :196082).
 - The live assets' rayProxy (shots against a cpx asset, :212244).
 - On the bridge, the `l` slot 26 assumes a movement scheme without sendVals: the bridge sends none.
 
