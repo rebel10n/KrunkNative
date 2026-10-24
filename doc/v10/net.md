@@ -324,7 +324,8 @@ name of v10.0.3's network sound table fits (`inspect_monte_carlo_spin` needs 25 
 skin and asset sound names. The server sends the 24-byte V1 layouts (48 / 25 / 39 bytes, `net_sound_packet_to_v1`) to a peer that
 announced an older patch (`net_peer_has_sound_v2`) and drops a sound whose name does not fit them, since a cut name would name
 another file; readers take both (`net_sound_packet_read`). The C v10 bridge announces patch 7, reads both, and maps SOUND to
-v10's "s" / "so" and STOP_SOUND to "sso" with the networkSounds id (`v10_map_sound`); the TypeScript bridge (1.4.5) gets V1.
+v10's "s" / "so" and STOP_SOUND to "sso" with the networkSounds id (`v10_map_sound`); the TypeScript bridge announces 1.4.7
+too and does the same (`mapSound` / `mapStopSound`, the id table `net-bridge/networkSounds.ts` generated with the C one).
 
 Protocol 1.4.6 (NET_PROTOCOL_PATCH 6): `NetSkinsPacketV2` (NET_PACKET_SKINS, 35, 40 bytes) carries the paint of each worn
 skin after the uid and the three store indices: `PlayerSkinPaints` (primary, secondary, melee), each a `SkinPaint` {int32 color
@@ -332,8 +333,8 @@ skin after the uid and the three store indices: `PlayerSkinPaints` (primary, sec
 (`net_peer_has_skin_paint`, shared/src/net.c); a peer on an older patch gets the 16-byte `NetSkinsPacket` (V1) it reads today,
 and every reader takes both sizes (`net_packet_read_skins`), so bots (which send V1 to everyone) and pre-patch servers still
 work. The paint is the owner's first painted copy of each index (doc/v10/paint-copy.md). The native client applies it to the
-player's weapon and melee skin meshes (`skin_fx_apply_paint`). The bridge's C side (server/bridge) announces patch 6 and
-accepts both sizes; the TypeScript v10 bridge still announces 1.4.5 patch 5 and gets V1.
+player's weapon and melee skin meshes (`skin_fx_apply_paint`). Both v10 bridges (server/bridge and net-bridge, protocol
+1.4.7) accept both sizes and read no paint for another player's add record.
 
 Protocol 1.4.5 (NET_PROTOCOL_PATCH 5): `NetStatePacket` (NET_PACKET_STATE, 6, the per-tick player state) carries the
 values the v10 "k" record needs and the state did not have: `float step_val` (player.step_val, v10 stepVal), `uint8

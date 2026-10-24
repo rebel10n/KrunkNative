@@ -26,6 +26,8 @@
 //                           the physics gun have no v10 label and stay untranslated (the stop names them)
 // After the init (the v10 server sends these in this order on a live join, see the report):
 //   native GLOBAL_VALUE (121) -> gv;  PLAYER_SOUND (125) -> asnd / rsnd;  TIMER (15) -> t
+//   native SOUND (102) -> s (at a player or forcePos) / so (2D);  STOP_SOUND (124) -> sso: the sound as its
+//                           config.networkSounds id (networkSounds.ts), a user asset's id, else the name
 //   native MODE_STATE (40), no objective and no move lock -> ts, ufi, ufl (flags in play), lv, lock, gmsg
 //   native OBJECT_STATE (100) -> do, ro, gte, bnk, mo, mf
 //   native EXT GAME_STATE (0x0901) -> gsc;  EXT GAME_ANNOUNCEMENT (0x0302, no ranked-queue action) -> gameAnnouncement
@@ -42,6 +44,7 @@
 //   KN ids that have no translation at all still stop the session by name.
 
 import * as EV from "./nativeEvents";
+import { networkSoundIndex } from "./networkSounds";
 
 export const NATIVE = Object.freeze({
   HELLO: 1,
@@ -69,6 +72,9 @@ export const V10_IN = Object.freeze({
   INIT_GAME: "init",
   UPDATE_GLOBAL_VALUE: "gv",
   ADD_PLAYER_SOUND: "asnd",
+  PLAYER_SOUND: "s", // deob-10.0.3.js PLAYER_SOUND (:111186), the handler :257766: game.playerSound
+  PLAY_SOUND: "so", // PLAY_SOUND (:111196), the handler :257758: mode 1 is a 2D play
+  STOP_SOUND: "sso", // STOP_SOUND (:111197), the handler :257754
   REMOVE_PLAYER_SOUND: "rsnd",
   NOCLIP: "noc", // v10.js 220244: one on/off argument, the "commands.noclip" message is the client's own
   UNLIMITED_AMMO: "unl", // v10.js 220262
@@ -109,9 +115,10 @@ export const V10_IN = Object.freeze({
   TELEPORT_FROM_NODE: "mf",
 } as const);
 
-// KN HELLO: this bridge speaks protocol 1.4.5 (NET_PROTOCOL_MAJOR/MINOR/PATCH; patch 5: NetStatePacket's v10 "k" record)
-// and Krunker v10 only (NET_HELLO_RULESETS = 1 << 2), flavor nibble 0 (net_hello_make in shared/src/net.c).
-export const HELLO_PAYLOAD = Buffer.from([1, 4, 5, 1 << 2]);
+// KN HELLO: this bridge speaks protocol 1.4.7 (NET_PROTOCOL_MAJOR/MINOR/PATCH; patch 5: NetStatePacket's v10 "k" record,
+// 6: the 40-byte SKINS with paint, 7: the sound packets' 64-byte names) and Krunker v10 only (NET_HELLO_RULESETS = 1 << 2),
+// flavor nibble 0 (net_hello_make in shared/src/net.c). The C bridge (server/bridge) announces the same.
+export const HELLO_PAYLOAD = Buffer.from([1, 4, 7, 1 << 2]);
 
 // The v10 ENTER_GAME ("en") array, positions as the client builds them (v10.js 208129, 35 entries).
 // Cosmetic positions are randomised through _69645(null, type): the type id is in the comment.
@@ -237,6 +244,8 @@ export const NATIVE_MORE = Object.freeze({
   GAME_CONFIG: 183, // NET_PACKET_GAME_CONFIG (LOBBY + 3)
   GLOBAL_VALUE: 121, // NET_PACKET_GLOBAL_VALUE (TRIGGERS + 1): the join's global values, v10 "gv"
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
+  SOUND: 102, // NET_PACKET_SOUND: game.playSound (NetSoundPacket), v10 "s" / "so"
+  STOP_SOUND: 124, // NET_PACKET_STOP_SOUND (TRIGGERS + 4): a trigger's Stop Sound (NetStopSoundPacket), v10 "sso"
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
   RECON: 110, // NET_PACKET_RECON: the owner's authoritative state after an input (NetReconPacket, the v10 "l")
   LEAVE: 20, // NET_PACKET_LEAVE: another player disconnected (NetLeavePacket, Krunker "2")
@@ -325,11 +334,22 @@ export function parseGlobalValue(p: Buffer): { reset: boolean; key: string; valu
   return { reset: (p[0] & VALUE_RESET) !== 0, key: p.subarray(1, end).toString("utf8"), value: p.readDoubleLE(1 + VALUE_KEY_SIZE) };
 }
 
-// NetPlayerSoundPacket: int32 uid, uint8 add, force, loop, float volume, rate, char name[24].
-const SOUND_NAME_SIZE = 24;
+// The sound packets' name field: NET_SOUND_NAME_SIZE (64) since protocol patch 7, NET_SOUND_NAME_SIZE_V1 (24) before
+// (shared.h NET_PROTOCOL_PATCH_SOUND_V2). This bridge announces patch 7 and reads both (an older server sends 24).
+export const SOUND_NAME_SIZE = 64;
+export const SOUND_NAME_SIZE_V1 = 24;
+function soundNameSize(length: number, others: number): number {
+  return length === others + SOUND_NAME_SIZE ? SOUND_NAME_SIZE : length === others + SOUND_NAME_SIZE_V1 ? SOUND_NAME_SIZE_V1 : 0;
+}
+function soundName(p: Buffer, at: number, size: number): string {
+  const nul = p.indexOf(0, at);
+  return p.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
+}
+
+// NetPlayerSoundPacket: int32 uid, uint8 add, force, loop, float volume, rate, char name[24 | 64] (39 / 79 bytes).
 export function parsePlayerSound(p: Buffer): { uid: number; add: boolean; force: boolean; loop: boolean; volume: number; rate: number; name: string } | null {
-  if (p.length !== 15 + SOUND_NAME_SIZE) return null;
-  const nul = p.indexOf(0, 15);
+  const size = soundNameSize(p.length, 15);
+  if (!size) return null;
   return {
     uid: p.readInt32LE(0),
     add: p[4] !== 0,
@@ -337,8 +357,66 @@ export function parsePlayerSound(p: Buffer): { uid: number; add: boolean; force:
     loop: p[6] !== 0,
     volume: p.readFloatLE(7),
     rate: p.readFloatLE(11),
-    name: p.subarray(15, nul < 0 || nul > 15 + SOUND_NAME_SIZE ? 15 + SOUND_NAME_SIZE : nul).toString("utf8"),
+    name: soundName(p, 15, size),
   };
+}
+
+// NetSoundPacket: char name[24 | 64], int32 uid (a player; -1 at the position, -2 a 2D sound), float position[3],
+// float volume, rate (48 / 88 bytes).
+export type NativeSound = { name: string; uid: number; position: [number, number, number]; volume: number; rate: number };
+export function parseSound(p: Buffer): NativeSound | null {
+  const size = soundNameSize(p.length, 24);
+  if (!size) return null;
+  return {
+    name: soundName(p, 0, size),
+    uid: p.readInt32LE(size),
+    position: [p.readFloatLE(size + 4), p.readFloatLE(size + 8), p.readFloatLE(size + 12)],
+    volume: p.readFloatLE(size + 16),
+    rate: p.readFloatLE(size + 20),
+  };
+}
+
+// NetStopSoundPacket: char name[24 | 64] (an asset's id digits), uint8 asset (25 / 65 bytes).
+export function parseStopSound(p: Buffer): { name: string; asset: boolean } | null {
+  const size = soundNameSize(p.length, 1);
+  if (!size) return null;
+  return { name: soundName(p, 0, size), asset: p[size] !== 0 };
+}
+
+// The sound as v10's server sends it: networkSounds.indexOf(name) when the list has the name, a user asset's id with
+// isAsset ("asset:<id>", or a stop's digits), else the name (an emitterSounds name: the client plays a string as it is,
+// deob-10.0.3.js:257767). The C bridge's sound_value (server/bridge/v10_translate.c) does the same.
+function soundDigits(s: string): number {
+  return /^[0-9]{1,9}$/.test(s) ? parseInt(s, 10) : -1;
+}
+function soundValue(name: string, assetDigits: boolean): { sound: number | string; asset: boolean } {
+  if (assetDigits && soundDigits(name) >= 0) return { sound: soundDigits(name), asset: true };
+  if (!assetDigits && name.startsWith("asset:") && soundDigits(name.slice(6)) >= 0) return { sound: soundDigits(name.slice(6)), asset: true };
+  const id = networkSoundIndex(name);
+  return { sound: id >= 0 ? id : name, asset: false };
+}
+
+// SOUND as v10's server sends it (game.playSound, deob-10.0.3.js:216760-216770): uid >= 0 "s" [sound, sid, x, y, z, vol,
+// rate, null, null, false, isAsset] (played at that player), uid -1 the same with forcePos true (at x y z, sid 0), uid -2
+// "so" [sound, vol, 1, 0, 0, 0, rate, null, null, isAsset] (mode 1: a 2D play). NetSoundPacket has no dist / roll.
+export function mapSound(p: Buffer): Mapped {
+  const snd = parseSound(p);
+  if (!snd) return { messages: [], stop: "malformed" };
+  if (!snd.name) return { messages: [] }; // playSound: nothing to play
+  const { sound, asset } = soundValue(snd.name, false);
+  if (snd.uid === -2) return { messages: [[V10_IN.PLAY_SOUND, [sound, snd.volume, 1, 0, 0, 0, snd.rate, null, null, asset]]] };
+  const force = snd.uid < 0;
+  const [x, y, z] = snd.position;
+  return { messages: [[V10_IN.PLAYER_SOUND, [sound, force ? 0 : snd.uid, x, y, z, snd.volume, snd.rate, null, null, force, asset]]] };
+}
+
+// STOP_SOUND: "sso" [sound, isAsset] (deob-10.0.3.js:257754), the sound as mapSound picks it (an asset's id as a number).
+export function mapStopSound(p: Buffer): Mapped {
+  const st = parseStopSound(p);
+  if (!st) return { messages: [], stop: "malformed" };
+  if (!st.name) return { messages: [] };
+  const { sound, asset } = soundValue(st.name, st.asset);
+  return { messages: [[V10_IN.STOP_SOUND, [sound, asset]]] };
 }
 
 // NetTimerPacket: int32 seconds, uint8 end (1: the end-screen countdown to the next round).
@@ -662,10 +740,12 @@ export function mapGameAnnouncement(body: Buffer): Mapped {
 
 // ---- SKINS and SPAWN: a player's spawn, as the v10 add record (ADD_PLAYERS "0") and the start of ours.
 
-// NetSkinsPacket: int32 uid, PlayerSkins {primary, secondary, melee} (int32 each).
+// NetSkinsPacket: int32 uid, PlayerSkins {primary, secondary, melee} (int32 each), 16 bytes; from protocol patch 6 the
+// 40-byte NetSkinsPacketV2 adds each skin's paint, which the add record does not carry for another player (as in the
+// C bridge's v10_parse_skins), so both read the same.
 export type NativeSkins = { uid: number; primary: number; secondary: number; melee: number };
 export function parseSkins(p: Buffer): NativeSkins | null {
-  if (p.length !== 16) return null;
+  if (p.length !== 16 && p.length !== 40) return null;
   return { uid: p.readInt32LE(0), primary: p.readInt32LE(4), secondary: p.readInt32LE(8), melee: p.readInt32LE(12) };
 }
 

@@ -7,7 +7,10 @@ import assert from "assert";
 import http from "http";
 import net from "net";
 import WebSocket from "ws";
+import fs from "fs";
+import path from "path";
 import * as EV from "./nativeEvents";
+import { NETWORK_SOUNDS, networkSoundIndex } from "./networkSounds";
 import * as UTILS from "./utils";
 import * as T from "./v10Translate";
 import * as v10Proxy from "./v10Proxy";
@@ -290,6 +293,59 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   [1, 40, 3, 1, 2, 10, 0, 4].forEach((v, i) => board.writeInt32LE(v, 1 + i * 4));
   assert.deepStrictEqual(T.mapLeaderboard(board, 0).messages, [["7", [[1, 40, 3, 1, 2, 10, 0, 4]]]]);
   assert.match(T.mapLeaderboard(board, 1).stop || "", /Free for All/);
+}
+
+{
+  // config.networkSounds (networkSounds.ts, generated with the C table): the fixture the C test reads, deob-10.0.3.js:21141
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "shared", "tests", "data", "v10", "networkSounds.json"), "utf8"));
+  assert.strictEqual(fixture.source, "deob-10.0.3.js:21141");
+  assert.deepStrictEqual([...NETWORK_SOUNDS], fixture.networkSounds, "networkSounds.ts is the fixture's table");
+  assert.strictEqual(NETWORK_SOUNDS.length, 399);
+  assert.deepStrictEqual([networkSoundIndex("spray"), networkSoundIndex("weapon_1"), networkSoundIndex("weapon_17_4"),
+    networkSoundIndex("inspect_monte_carlo_spin"), networkSoundIndex("melee_equip")], [0, 5, 135, 267, -1]);
+
+  // protocol 1.4.7 layouts: PLAYER_SOUND 39 / 79, SKINS 16 / 40
+  const ps = Buffer.alloc(79);
+  ps.writeInt32LE(2, 0); ps[4] = 1; ps.writeFloatLE(0.5, 7); ps.writeFloatLE(1.25, 11); ps.write("inspect_monte_carlo_spin", 15, "utf8");
+  assert.deepStrictEqual(T.parsePlayerSound(ps), { uid: 2, add: true, force: false, loop: false, volume: 0.5, rate: 1.25, name: "inspect_monte_carlo_spin" });
+  assert.strictEqual(T.parsePlayerSound(ps.subarray(0, 78)), null);
+  assert.strictEqual(T.parsePlayerSound(ps.subarray(0, 39))?.name, "inspect_monte_carlo_spin", "a 39-byte V1: the 24-byte field read whole");
+  const skins = Buffer.alloc(40, 0xff);
+  [7, 11, 12, 13].forEach((v, i) => skins.writeInt32LE(v, i * 4));
+  assert.deepStrictEqual(T.parseSkins(skins), { uid: 7, primary: 11, secondary: 12, melee: 13 }, "SKINS V2: the paint is not read");
+  assert.deepStrictEqual(T.parseSkins(skins.subarray(0, 16)), { uid: 7, primary: 11, secondary: 12, melee: 13 });
+  assert.strictEqual(T.parseSkins(skins.subarray(0, 39)), null);
+
+  // SOUND (NetSoundPacket 88 / 48) -> s / so with the sound's networkSounds id; STOP_SOUND (65 / 25) -> sso
+  const sound = (name: string, uid: number, v1 = false) => {
+    const n = v1 ? 24 : 64;
+    const b = Buffer.alloc(n + 24);
+    b.write(name, 0, "utf8");
+    b.writeInt32LE(uid, n);
+    b.writeFloatLE(1.5, n + 4); b.writeFloatLE(2, n + 8); b.writeFloatLE(-3, n + 12); b.writeFloatLE(0.5, n + 16); b.writeFloatLE(1.25, n + 20);
+    return b;
+  };
+  assert.deepStrictEqual(T.mapSound(sound("weapon_1", 7)).messages, [["s", [5, 7, 1.5, 2, -3, 0.5, 1.25, null, null, false, false]]]);
+  assert.deepStrictEqual(T.mapSound(sound("nuke_0", -1)).messages, [["s", ["nuke_0", 0, 1.5, 2, -3, 0.5, 1.25, null, null, true, false]]],
+    "an emitterSounds name the network list lacks goes as the name, forcePos at x y z");
+  assert.deepStrictEqual(T.mapSound(sound("asset:30001", -2)).messages, [["so", [30001, 0.5, 1, 0, 0, 0, 1.25, null, null, true]]],
+    "a 2D user asset sound");
+  assert.deepStrictEqual(T.mapSound(sound("inspect_monte_carlo_spin", 7)).messages, [["s", [267, 7, 1.5, 2, -3, 0.5, 1.25, null, null, false, false]]]);
+  assert.deepStrictEqual(T.mapSound(sound("taunt_0", 3, true)).messages, [["s", [1, 3, 1.5, 2, -3, 0.5, 1.25, null, null, false, false]]],
+    "a pre-patch-7 server's 48-byte SOUND");
+  assert.strictEqual(T.mapSound(sound("taunt_0", 3, true).subarray(0, 47)).stop, "malformed");
+  assert.deepStrictEqual(T.mapSound(sound("", 3)), { messages: [] }, "no name, nothing plays");
+  const stop = (name: string, asset: boolean, v1 = false) => {
+    const n = v1 ? 24 : 64;
+    const b = Buffer.alloc(n + 1);
+    b.write(name, 0, "utf8");
+    b[n] = asset ? 1 : 0;
+    return b;
+  };
+  assert.deepStrictEqual(T.mapStopSound(stop("30001", true)).messages, [["sso", [30001, true]]]);
+  assert.deepStrictEqual(T.mapStopSound(stop("scare_0", false, true)).messages, [["sso", ["scare_0", false]]]);
+  assert.deepStrictEqual(T.mapStopSound(stop("spray", false, true)).messages, [["sso", [0, false]]]);
+  assert.strictEqual(T.mapStopSound(stop("spray", false).subarray(0, 26)).stop, "malformed");
 }
 
 {
@@ -668,10 +724,11 @@ async function main(): Promise<void> {
   assert.strictEqual(forwarded.payload.length, 9); // "127.0.0.1" (loopback peer, no forwarding header)
   assert.strictEqual(nativeFrames.length, 1); // nothing else until the client speaks
 
-  // 3. LOAD -> HELLO: protocol 1.4.5 (NET_PROTOCOL_PATCH 5, the NetStatePacket layout), Krunker v10 ruleset bit
+  // 3. LOAD -> HELLO: protocol 1.4.7 (NET_PROTOCOL_PATCH 7: the sound packets' 64-byte names; 6 the SKINS paint, 5 the
+  //    NetStatePacket layout), Krunker v10 ruleset bit
   sendV10("load");
   const hello = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.HELLO), "HELLO");
-  assert.deepStrictEqual([...hello.payload], [1, 4, 5, 4]);
+  assert.deepStrictEqual([...hello.payload], [1, 4, 7, 4]);
   sendV10("load"); // a second LOAD sends no second HELLO
   await sleep(100);
   assert.strictEqual(nativeFrames.filter((f) => f.type === T.NATIVE.HELLO).length, 1);
@@ -776,6 +833,31 @@ async function main(): Promise<void> {
   native.write(nativeFrame(125, removed));
   const rsnd = await waitFor(() => clientMessages.find((m) => m.label === "rsnd"), "rsnd");
   assert.deepStrictEqual(rsnd.args, [2, "footstep", false]);
+
+  // patch 7 (the HELLO above): the 64-byte sound names. SOUND is game.playSound's "s" with the networkSounds id (267
+  // inspect_monte_carlo_spin, which a 24-byte name could not carry), STOP_SOUND an "sso", a 79-byte PLAYER_SOUND an asnd
+  const playSound = Buffer.alloc(88);
+  playSound.write("inspect_monte_carlo_spin", 0, "utf8");
+  playSound.writeInt32LE(2, 64);
+  playSound.writeFloatLE(0.5, 80);
+  playSound.writeFloatLE(1, 84);
+  native.write(nativeFrame(T.NATIVE_MORE.SOUND, playSound));
+  const s = await waitFor(() => clientMessages.find((m) => m.label === "s"), "s");
+  assert.deepStrictEqual(s.args, [267, 2, 0, 0, 0, 0.5, 1, null, null, false, false]);
+  const stopSound = Buffer.alloc(65);
+  stopSound.write("spray", 0, "utf8");
+  native.write(nativeFrame(T.NATIVE_MORE.STOP_SOUND, stopSound));
+  const sso = await waitFor(() => clientMessages.find((m) => m.label === "sso"), "sso");
+  assert.deepStrictEqual(sso.args, [0, false]);
+  const longLoop = Buffer.alloc(79);
+  longLoop.writeInt32LE(2, 0);
+  longLoop[4] = 1; // add
+  longLoop.writeFloatLE(1, 7);
+  longLoop.writeFloatLE(1, 11);
+  longLoop.write("inspect_monte_carlo_spin", 15, "utf8");
+  native.write(nativeFrame(125, longLoop));
+  const asnd2 = await waitFor(() => clientMessages.filter((m) => m.label === "asnd")[1], "the second asnd");
+  assert.deepStrictEqual(asnd2.args, [2, "inspect_monte_carlo_spin", { loop: false, vol: 1, rate: 1 }]);
 
   // the round timer is a t [seconds, end] to the client
   const timer = Buffer.alloc(5);
@@ -1126,7 +1208,7 @@ async function main(): Promise<void> {
   v10Proxy.closeAllSessions(true);
   bridge.close();
   nativeServer.close();
-  console.info("v10Proxy test: ok (connect, LOAD->HELLO, the chunked map INIT, gv, asnd/rsnd, t, ENTER_GAME->ENT, chat, PING->PONG, then the stop)");
+  console.info("v10Proxy test: ok (connect, LOAD->HELLO, the chunked map INIT, gv, asnd/rsnd, s/sso, t, ENTER_GAME->ENT, chat, PING->PONG, then the stop)");
   process.exit(0);
 }
 

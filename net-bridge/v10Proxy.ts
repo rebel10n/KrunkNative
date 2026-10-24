@@ -15,6 +15,7 @@
 //   native INIT (2)                                    -> init (INIT_GAME), held until the map is whole;
 //                                                         packets after it are queued meanwhile
 //   native GLOBAL_VALUE (121), PLAYER_SOUND (125), TIMER (15) -> gv, asnd / rsnd, t
+//   native SOUND (102), STOP_SOUND (124)               -> s / so, sso (the sound by its networkSounds id)
 //   native MODE_STATE (40), OBJECT_STATE (100)         -> ts, lv, lock, gmsg; do, ro, gte, bnk, mo, mf
 //   native MODE_STATE flags (in play)                  -> ufl (uid, x, y, z, carrier) and ufi (team lines)
 //   native SKINS (35), SPAWN (4)                        -> kept, then ADD_PLAYERS "0" (+ start for us)
@@ -56,6 +57,8 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.GAME_CONFIG]: "GAME_CONFIG",
   [T.NATIVE_MORE.GLOBAL_VALUE]: "GLOBAL_VALUE",
   [T.NATIVE_MORE.PLAYER_SOUND]: "PLAYER_SOUND",
+  [T.NATIVE_MORE.SOUND]: "SOUND",
+  [T.NATIVE_MORE.STOP_SOUND]: "STOP_SOUND",
   [T.NATIVE_MORE.TIMER]: "TIMER",
   [T.NATIVE_MORE.CHEAT]: "CHEAT",
   [T.NATIVE_MORE.MODE_STATE]: "MODE_STATE",
@@ -470,6 +473,15 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     // (v10.js 190131, 190145; the server's own broadcasts have these arguments).
     if (!sound.add) sendWs(session, T.V10_IN.REMOVE_PLAYER_SOUND, sound.uid, sound.name, sound.force);
     else sendWs(session, T.V10_IN.ADD_PLAYER_SOUND, sound.uid, sound.name, { loop: sound.loop, vol: sound.volume, rate: sound.rate });
+    return;
+  }
+  // SOUND: game.playSound's "s" at a player or a position, "so" for a 2D sound; STOP_SOUND: the trigger's "sso". The
+  // sound goes by its config.networkSounds id when the list has the name (T.mapSound)
+  if (session.initSent && (type === T.NATIVE_MORE.SOUND || type === T.NATIVE_MORE.STOP_SOUND)) {
+    const name = type === T.NATIVE_MORE.SOUND ? "SOUND" : "STOP_SOUND";
+    const mapped = type === T.NATIVE_MORE.SOUND ? T.mapSound(payload) : T.mapStopSound(payload);
+    if (mapped.stop) return stopAt(session, name, mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }
   // CHEAT: one chat command's flag, on or off: the v10 handler for that label takes the value (v10.js 220244-220264)
