@@ -3067,7 +3067,10 @@ def run_native_kio_tls():
           "[krunker] lobby row pings measured: 2 regions" in text, [l for l in lines if "pings measured" in l][-2:])
 
 
-FINDER_ROOM, BRAIN_ROOM = "FinderAlphaRoom", "BrainBravoRoom"  # the two Box Office rows' names (grep needles)
+FINDER_ROOM, BRAIN_ROOM = "FinderAlphaRoom", "BrainBravoRoom"  # the two Box Office servers' names
+# The finder row's grep needle: its map. A finder row is titled "<mode> - <map>", never with its server's name
+# (servers_ui.c row_title, ec928630b); the brain lobby's row is its custom name (h), BRAIN_ROOM, on another map.
+FINDER_MAP = "Sandstorm"
 
 
 def run_native_kio_list():
@@ -3078,7 +3081,7 @@ def run_native_kio_list():
     "list-offline": the session is on krunk.io (--offline) with the brain answering: the krunk.io tab lists the brain's
     lobby and the finder's server (two groups), krunker.io's tab its official lobbies. The brain URL is <stub>/brain
     and the finder's <stub>/servers, so the gate's prefix match leaves the finder alone."""
-    finder = [{"host": "127.0.0.1", "port": 7201, "name": FINDER_ROOM, "map": "Kanji", "region": "de-fra", "players": 2, "max": 8, "mode": 0}]
+    finder = [{"host": "127.0.0.1", "port": 7201, "name": FINDER_ROOM, "map": FINDER_MAP, "region": "de-fra", "players": 2, "max": 8, "mode": 0}]
     brain = [["BOHOST:1", "us-nj", 2, 8, {"i": "Kanji", "g": 0, "cs": True, "h": BRAIN_ROOM, "host": "127.0.0.1", "port": 7101}, 240]]
 
     def steps_for():
@@ -3086,7 +3089,7 @@ def run_native_kio_list():
                  "3110 text @ld0 [id=menuWindow]"]
         t = 3200
         for i in range(3):  # krunk.io's groups in list order (a group index past the last one opens nothing)
-            steps += [f"{t} call setExpandedRegion {i}", f"{t + 40} grep @f{i} {FINDER_ROOM} [id=serverHolder] .settNameIn",
+            steps += [f"{t} call setExpandedRegion {i}", f"{t + 40} grep @f{i} {FINDER_MAP} [id=serverHolder] .settNameIn",
                       f"{t + 60} grep @b{i} {BRAIN_ROOM} [id=serverHolder] .settNameIn"]
             t += 150
         steps += [f"{t} call windows.1.switchTab 1", f"{t + 50} nodes @hdrs1 [id=serverHolder] .setHed",
@@ -3161,8 +3164,10 @@ def run_native_badmap():
     """A lobby whose init names a map index this client lacks: the client closes the krunker.io socket,
     the game stops and v10's Lost Connection screen says which map; no toast, no game left running."""
     label = "native-badmap"
-    # the player's path: the offline game, the server browser, a click on the official lobby
-    script = ("0 menu\n300 call showWindow 2\n3000 call krunkerJoin \"%s\"\n"
+    # the player's path: the offline game, the server browser, a click on the official lobby. Server Type krunker.io:
+    # the error screen's Find Game follows the Server Type (servers_ui_official_find_game, 09d2cc9e2), and with the
+    # default Box Office it seeks Box Office (here: the no-matchmaker notice), never krunker.io
+    script = ("0 menu\n200 call setSetting \"knSeekServers\" \"official\"\n300 call showWindow 2\n3000 call krunkerJoin \"%s\"\n"
               "9000 text @toast [id=knNotify]\n9100 nodes @box .instructionsHeader\n9200 text @screen [id=instructionsUpdate]\n"
               "9250 text @tab .instructionsTab\n9300 state\n12000 state\n12100 text @toast2 [id=knNotify]\n"
               # v10's Find Game (the first tab): a new official game, not the same one again
