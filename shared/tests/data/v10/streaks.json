@@ -1,0 +1,71 @@
+[
+ {
+  "name": "Nuke",
+  "desc": "Calls in a nuclear bomb that detonates after 10 seconds, killing all players that are spawned at the time the nuke goes off",
+  "slot": 2,
+  "kills": 25,
+  "reqAccount": true,
+  "activate": "<fn>",
+  "reset": "<fn>",
+  "start": "<fn>",
+  "update": "<fn>",
+  "index": 0
+ },
+ {
+  "name": "Airdrop",
+  "desc": "Calls in a air drop package containing various things.",
+  "slot": 1,
+  "kills": 12,
+  "noCustoms": true,
+  "activate": "<fn>",
+  "index": 1
+ },
+ {
+  "name": "Refill",
+  "desc": "Dev Streak",
+  "slot": 0,
+  "kills": 5,
+  "devOnly": true,
+  "activate": "<fn>",
+  "index": 2
+ },
+ {
+  "name": "Bombardment",
+  "desc": "Deploys a Bomber that carpet bombs the entire map",
+  "slot": 2,
+  "kills": 20,
+  "activate": "<fn>",
+  "calcPos": "<fn>",
+  "reset": "<fn>",
+  "end": "<fn>",
+  "start": "<fn>",
+  "update": "<fn>",
+  "onCollision": "<fn>",
+  "onKill": "<fn>",
+  "index": 3
+ },
+ {
+  "name": "Slimer",
+  "desc": "Equips the player with a slime gun that spawns slime pads which players gain a boost from",
+  "slot": 0,
+  "kills": 7,
+  "activate": "<fn>",
+  "index": 4
+ },
+ {
+  "name": "Juggernaut",
+  "desc": "Equips the player with a Juggernaut Suit & Minigun",
+  "slot": 2,
+  "kills": 30,
+  "activate": "<fn>",
+  "index": 5
+ },
+ {
+  "name": "War Machine",
+  "desc": "Equips the player with a Powerful Grenade Launcher",
+  "slot": 1,
+  "kills": 15,
+  "activate": "<fn>",
+  "index": 6
+ }
+]

@@ -1,0 +1,115 @@
+[
+ {
+  "name": "Boosted",
+  "key": "speed",
+  "timer": 0,
+  "def": 1,
+  "max": 5,
+  "mlt": 0.1,
+  "mid": 41,
+  "execute": "<fn>",
+  "index": 0
+ },
+ {
+  "name": "Sleight of Hand",
+  "key": "reload",
+  "timer": 0,
+  "def": 1,
+  "max": 5,
+  "mlt": 0.1,
+  "mid": 42,
+  "execute": "<fn>",
+  "index": 1
+ },
+ {
+  "name": "Rapid Fire",
+  "key": "fRate",
+  "timer": 0,
+  "def": 1,
+  "max": 5,
+  "mlt": 0.05,
+  "mid": 43,
+  "execute": "<fn>",
+  "index": 2
+ },
+ {
+  "name": "Siphon",
+  "key": "siphon",
+  "timer": 0,
+  "def": 0,
+  "max": 5,
+  "hp": 10,
+  "mlt": 1,
+  "mid": 44,
+  "execute": "<fn>",
+  "index": 3
+ },
+ {
+  "name": "Rooted",
+  "key": "rooted",
+  "timer": 25,
+  "def": 1,
+  "max": 2,
+  "mlt": 0.25,
+  "mid": 45,
+  "execute": "<fn>",
+  "index": 4
+ },
+ {
+  "name": "Dizzy",
+  "key": "drunk",
+  "timer": 35,
+  "def": 0,
+  "max": 4,
+  "mlt": 0.25,
+  "mid": 46,
+  "execute": "<fn>",
+  "index": 5
+ },
+ {
+  "name": "Poisoned",
+  "key": "enraged",
+  "timer": 40,
+  "def": 0,
+  "hp": 10,
+  "max": 1,
+  "mlt": 1,
+  "mid": 47,
+  "execute": "<fn>",
+  "index": 6
+ },
+ {
+  "name": "Jump Boost",
+  "key": "jump",
+  "timer": 0,
+  "def": 1,
+  "max": 5,
+  "mlt": 0.1,
+  "mid": 51,
+  "execute": "<fn>",
+  "index": 7
+ },
+ {
+  "name": "Zapped",
+  "key": "zap",
+  "timer": 5,
+  "def": 0,
+  "hp": 2,
+  "max": 10,
+  "mlt": 0.5,
+  "mid": 52,
+  "execute": "<fn>",
+  "index": 8
+ },
+ {
+  "name": "Strength",
+  "key": "dmg",
+  "timer": 0,
+  "def": 1,
+  "max": 10,
+  "mlt": 0.1,
+  "mid": 53,
+  "execute": "<fn>",
+  "index": 9
+ }
+]

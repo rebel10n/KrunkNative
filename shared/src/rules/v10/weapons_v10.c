@@ -1,12 +1,12 @@
 #include <stddef.h>
 #include <weapons.h>
 
-// Krunker v10.0.2's weapon table (doc/v10/gameplay.md section 5; v10.js weaponConfig v10:98982):
-// ids 0-28 keep v7.1.4's order and meaning, with the ten rebalanced entries replaced by their v10
-// copies (weapons_rebalance_v10.c), and 29 Boulder / 30 Compressor are new (weapons_new_v10.c).
-// Every other entry is the v7 definition itself: the extractor diff (~/.cache/kn-v10/ext/
-// diff-weapons.txt) finds no other changed field, and shared/tests/weapons_v10_test.c checks the
-// whole table against shared/tests/data/v10/weapons.json.
+// Krunker v10.0.3's weapon table (doc/v10/gameplay.md section 5; weaponConfig deob-10.0.3.js:112381-115372,
+// the same values as v10.0.2's): ids 0-28 keep v7.1.4's order and meaning, with the ten rebalanced entries
+// replaced by their v10 copies (weapons_rebalance_v10.c), and 29 Boulder / 30 Compressor are new
+// (weapons_new_v10.c). Every other entry is the v7 definition itself, which v10.0.3 keeps:
+// shared/tests/weapons_v10_test.c checks the whole table field by field against
+// shared/tests/data/v10/weapons.json (the 10.0.3 weaponConfig, tools/kref/v10-fixtures.py).
 const Weapon *const g_weapons_v10[WEAPON_TABLE_COUNT] = {
     &g_awp, &g_ak47_v10, &g_pistol_v10, &g_smg_v10, &g_revolver,
     &g_shotgun, &g_lmg_v10, &g_semi_auto_v10, &g_rpg,

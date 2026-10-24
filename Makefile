@@ -252,7 +252,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/trigger_authority_test
 	./$(DEBUG_DIR)/editor_bus_test
 	./$(DEBUG_DIR)/editor_serialize_test . --golden doc/ref/krunker-v7.1.4/editor/inspector-edits.json
-	./$(DEBUG_DIR)/weapons_v7_test
+	./$(DEBUG_DIR)/weapons_v10_test
 	./$(DEBUG_DIR)/spawn_test
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/charge_grapple_test
@@ -739,6 +739,7 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/social_test
 	./$(DEBUG_DIR)/votekick_test
+	./$(DEBUG_DIR)/trade_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
 

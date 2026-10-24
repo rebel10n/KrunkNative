@@ -1,24 +1,24 @@
 #include <stddef.h>
 #include <weapons.h>
 
-// Krunker v10.0.2's two new secondaries (doc/v10/gameplay.md section 5 "New weapons"), only in the
-// v10 ruleset's table (weapons_v10.c). Every value is v10.js's entry ("v10:N" = line N of the
-// 10.0.2 bundle ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js); checked field by field against
-// shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times in s (JS ms / 1000),
+// Krunker v10's two new secondaries (doc/v10/gameplay.md section 5 "New weapons"; added in v10.0.2,
+// unchanged in v10.0.3), only in the v10 ruleset's table (weapons_v10.c). Every value is the v10.0.3
+// entry ("deob-10.0.3.js:N" = line N of ~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js); checked
+// field by field against shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times in s (JS ms / 1000),
 // recoil per s (JS per ms x 1000). Not ported (cosmetic / no KN consumer): assetIcon, refDist,
 // rollOff, transp, noAo, nCase, nMuz, nRing, shine, wyOff, muzOff, muzMlt, rumble, icnPad, expScale.
 
-// id 29 Boulder (v10:101808-101858): a carried rock (models/weapons/weapon_30.obj "Rock",
+// id 29 Boulder (deob-10.0.3.js:115235-115286): a carried rock (models/weapons/weapon_30.obj "Rock",
 // textures/weapons/weapon_30.png, icon_30). type 3 (equipment slot) but `secondary`, no damage
 // fields, no `req`: no class or mode hands it out in the bundle (map logic / KrunkScript give it).
 // Holding it slows (spdMlt 0.85, jumMlt 0.88) and makes gravity 1.7x (gravMlt, new in v10:
-// player procInputs v10:169754 `* (this.weapon.gravMlt || 1)`). It never fires: no ammo, and
+// player procInputs deob-10.0.3.js:191697 `* (this.weapon.gravMlt || 1)`). It never fires: no ammo, and
 // canThrow false.
 const Weapon g_boulder = {
     .name = "Boulder",
     .src = "weapon_30",
     .icon = "icon_30",
-    .sound = NULL,          // 'sound': '' (v10:101813)
+    .sound = NULL,          // 'sound': '' (deob-10.0.3.js:115240)
 
     .secondary = 1,         // 'secondary': !0
     .no_inspect = 1,        // 'nInsp': !0
@@ -49,17 +49,17 @@ const Weapon g_boulder = {
     .recover = 0.98f,       // 'recover': 0.98
     .recover_f = 0.98f,     // 'recoverF': 0.98
     .lean_mlt = 0.3f,       // 'leanMlt': 0.3
-    .burst_rate = 0.05f,    // weapons post-processing: burstR 50 when not a burst weapon (v10:101955)
+    .burst_rate = 0.05f,    // weapons post-processing: burstR 50 when not a burst weapon (deob-10.0.3.js:115390-115394)
 };
 
-// id 30 Compressor (v10:101859-101944): a level-45 secondary (minRec 45 + req, noComp) that fires
-// only its physPow ray: noDmg skips the bullet ray (players.shoot v10:172690 / 172853), and
-// nonObjImpulse (weapon-level, new in v10; v7 had it on modes only, v10:172808) makes that ray a
+// id 30 Compressor (deob-10.0.3.js:115286-115372): a level-45 secondary (minRec 45 + req, noComp) that fires
+// only its physPow ray: noDmg skips the bullet ray (players.shoot deob-10.0.3.js:196341, 196599), and
+// nonObjImpulse (weapon-level, new in v10; v7 had it on modes only, deob-10.0.3.js:196538) makes that ray a
 // fixed push of the shooter along the shot, physPow 0.1 x impulseMlt, whatever it hits. physPull
-// flips the sign when the shot came from the aim input (v10:172807 `physPull && rMouse`, x -1 at
-// v10:172832), and rShoot lets the aim input fire (procInputs v10:170122): left click pushes the
+// flips the sign when the shot came from the aim input (deob-10.0.3.js:196537 `physPull && rMouse`, x -1
+// at :196585), and rShoot lets the aim input fire (procInputs deob-10.0.3.js:192359): left click pushes the
 // shooter back, right click pulls it forward. Other players and objects are not moved (the
-// nonObjImpulse path breaks before the object push, v10:172960). Model weapon_31.obj, sound
+// nonObjImpulse path skips the object push, deob-10.0.3.js:196731). Model weapon_31.obj, sound
 // weapon_31.mp3, icon_31.
 const Weapon g_compressor = {
     .name = "Compressor",
@@ -125,5 +125,5 @@ const Weapon g_compressor = {
     .recoil_tween_y = 0.22f,
     .recoil_anim_mask = 1,  // Y only
     .jump_bob_y_mlt = 0.5f, // 'jumpYM': 0.5
-    .burst_rate = 0.05f,    // weapons post-processing: burstR 50 (v10:101955)
+    .burst_rate = 0.05f,    // weapons post-processing: burstR 50 (deob-10.0.3.js:115390-115394)
 };

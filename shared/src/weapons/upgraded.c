@@ -3,8 +3,8 @@
 
 // Krunker v7.1.4 src/data/upgradeWeapons.js: a second 29-entry table indexed like weapons.js
 // (`upgraded: true`), used for a loadout slot a krumMachine upgraded (player.upgrades[slot]).
-// Each entry is its base weapon plus the gameplay fields below (checked against
-// shared/tests/data/v7/upgradeWeapons.json by weapons_v7_test). Upgrades drop minRec and
+// Each entry is its base weapon plus the gameplay fields below (checked against v10.0.3's table,
+// shared/tests/data/v10/upgradeWeapons.json, by weapons_v10_test). Upgrades drop minRec and
 // canUpgrade (and the Alien Blaster's noComp, the Grappler's customOnly). Not ported: the cosmetic altSkin / muzID / charm
 // changes, magReserve (finiteAmmo modes), and the Cupids Blaster's funcOnHit.
 
@@ -22,7 +22,7 @@ static void burst(Weapon *w, const unsigned int count, const float rate) {
     w->burst_rate = rate;
 }
 
-// The base entries: v10.0.2's upgradeWeapons table (v10:175073) is v7.1.4's unchanged, independent
+// The base entries: v10.0.3's upgradeWeapons table (deob-10.0.3.js:199770-202673) is v7.1.4's unchanged, independent
 // of the v10 balance pass (its Zombie Assaulter keeps dmgDrop 5 and the Pistol swapTime 260), so it
 // builds on the v7.1.4 definitions (shared/src/weapons/), not on the ruleset's rebalanced copies.
 static const Weapon *const k_base[WEAPON_COUNT] = {

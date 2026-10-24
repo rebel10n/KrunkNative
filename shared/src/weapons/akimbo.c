@@ -1,7 +1,7 @@
 #include <weapons.h>
 
-// Krunker v7.1.4 weapon 9 (src/data/weapons.js; values checked against shared/tests/data/v7/weapons.json
-// by shared/tests/weapons_v7_test.c). Times are converted from ms to s and
+// Krunker v7.1.4 weapon 9 (src/data/weapons.js): the base of its upgradeWeapons entry (upgraded.c); v10
+// plays the rebalanced copy in shared/src/rules/v10/weapons_rebalance_v10.c. Times are converted from ms to s and
 // recoil from per-ms to per-s; fields not ported yet: noAo, altSkin, type, caseYOff, caseZOff, muzOff, movSpread, expScale, rumble, icnPad.
 const Weapon g_akimbo = {
     .name = "Akimbo Uzi",

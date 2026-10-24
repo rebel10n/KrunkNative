@@ -91,8 +91,8 @@ static void knife_anim(Player *player, const int type, const float charge) {
     }
 }
 
-// Krunker v7.1.4 weapon 12 (src/data/weapons.js; values checked against shared/tests/data/v7/weapons.json
-// by shared/tests/weapons_v7_test.c). Times are converted from ms to s and
+// Krunker v7.1.4 weapon 12 (src/data/weapons.js), unchanged in v10.0.3: the ruleset's entry, checked against
+// shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times are converted from ms to s and
 // recoil from per-ms to per-s; fields not ported yet: noSkins, sound, type, rumble, rumbleDur, icnPad.
 const Weapon g_knife = {
     .name = "Combat Knife",

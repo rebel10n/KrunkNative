@@ -1,7 +1,7 @@
 #include <weapons.h>
 
-// Krunker v7.1.4 weapon 13 (src/data/weapons.js; values checked against shared/tests/data/v7/weapons.json
-// by shared/tests/weapons_v7_test.c). Times are converted from ms to s and
+// Krunker v7.1.4 weapon 13 (src/data/weapons.js), unchanged in v10.0.3: the ruleset's entry, checked against
+// shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times are converted from ms to s and
 // recoil from per-ms to per-s; fields not ported yet: nRing, noAo, nCase, nMuz, kill, type, muzOff, muzOffY, muzID, muzMlt, rumble, icnPad.
 const Weapon g_crossbow = {
     .name = "Crossbow",

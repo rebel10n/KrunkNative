@@ -49,9 +49,9 @@ update `KN_CLASS_NETTSPEND_STORED`.
 
 Tests: `ruleset_test`, `nettspend_test` and `class_spawn_test` check that the Nettspend is the last
 class at `KN_CLASS_BASE` and that the stored id still resolves to it. `config_test` checks that
-GAME_CONFIG `classes` accepts it and refuses the id one past it. The class table comparisons with
-Krunker's (`weapons_v7_test`, and the v10.0.3 fixture check `weapons_v10_test`) cover only the first
-`CLASS_COUNT` classes.
+GAME_CONFIG `classes` accepts it and refuses the id one past it. The class table comparison with
+Krunker's (`weapons_v10_test`, against the v10.0.3 fixtures in `shared/tests/data/v10/`) covers only the
+first `CLASS_COUNT` classes.
 `client/tests/nettspend_loadout_e2e.py` reads the id from `shared.h`.
 
 ## The v3.1.1 and v1.5.2-era maps (`311_*`, `152_*`)

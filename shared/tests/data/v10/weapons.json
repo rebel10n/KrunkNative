@@ -1236,7 +1236,7 @@
   "physRang": 0,
   "physPow": 0,
   "minRec": 15,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "nAuto": true,
   "noAo": true,
   "transp": true,
@@ -1360,7 +1360,7 @@
   "nCase": true,
   "minRec": 50,
   "noComp": true,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "kill": [
    "",
    50
@@ -1758,7 +1758,7 @@
   "secondary": true,
   "equipment": false,
   "minRec": 20,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "swapWiggle": 0.4,
   "shine": 35,
   "type": 1,
@@ -1881,7 +1881,7 @@
   "noAim": false,
   "nAuto": false,
   "minRec": 30,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "noAo": true,
   "physRang": 0,
   "physPow": 0,
@@ -1992,7 +1992,7 @@
   "zoom": 1,
   "rot": [
    0,
-   "<expr:Math['PI'] / 2>",
+   1.5707963267948966,
    -0.4
   ],
   "leftHoldY": -0.3,
@@ -2181,7 +2181,7 @@
   "range": 50,
   "rot": [
    0,
-   "<expr:Math['PI'] / 2>",
+   1.5707963267948966,
    -0.4
   ],
   "leftHoldY": 0.6,
@@ -2231,7 +2231,7 @@
   "physRang": 0,
   "physPow": 0,
   "customOnly": true,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "nAuto": true,
   "noAo": true,
   "transp": true,
@@ -2325,7 +2325,7 @@
   "noAim": false,
   "nAuto": true,
   "minRec": 40,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "noAo": true,
   "physRang": 0,
   "physPow": 0,
@@ -2426,7 +2426,7 @@
   "secondary": true,
   "equipment": false,
   "minRec": 25,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "swapWiggle": 0.4,
   "shine": 35,
   "type": 1,
@@ -2659,7 +2659,7 @@
   "physRang": 0,
   "physPow": 0,
   "minRec": 35,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "kill": [
    "",
    75
@@ -2989,7 +2989,7 @@
   "ovrChrg": false,
   "spdMlt": 1.04,
   "minRec": 10,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "ammo": 12,
   "reload": 750,
   "dmg": 15,
@@ -3207,7 +3207,7 @@
   "zoom": 1,
   "rot": [
    0,
-   "<expr:Math['PI'] / 2>",
+   1.5707963267948966,
    -0.4
   ],
   "leftHoldY": -0.3,
@@ -3261,7 +3261,7 @@
   "shine": 35,
   "type": 1,
   "minRec": 45,
-  "req": "<expr:_34256>",
+  "req": "<expr:Identifier>",
   "physRang": 50,
   "physPow": 0.1,
   "physPull": true,

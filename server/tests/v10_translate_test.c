@@ -425,7 +425,7 @@ int main(void) {
         // SHOT trail per weapon class: the value the server writes into NetShotPacket.trail (weapon_shot_trail, the Krunker v10
         // shoot() rule) is the tracer's slot 6 as the bridge maps it. The trail classes are the Sniper Rifle (weapon.trail: 1 on
         // every shot; the AWP Blaster upgrade copies it), the Charge Rifle (weapon.trailChrg: 2 on a full-charge shot, 0 on a
-        // normal one) and a weapon with no trail (0). The flags are the shared/src/weapons data (checked by weapons_v7_test).
+        // normal one) and a weapon with no trail (0). The flags are the shared/src/weapons data (checked by weapons_v10_test).
         // Before the server wrote the trail byte every shot sent 0, so the two trail classes fail on that tree.
         {
             static const struct { const char *cls; int trail, trail_charge, full, want; } shot_trail[] = {

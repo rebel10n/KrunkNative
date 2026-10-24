@@ -1,15 +1,14 @@
 #include <weapons.h>
 
-// Krunker v10.0.2's weapon balance pass (doc/v10/gameplay.md section 5): v10 copies of the ten
-// v7.1.4 entries whose stats changed. Generated from shared/src/weapons/<v7 file> with the v10
-// values substituted; each changed field carries its v10.js evidence ("v10:N" = line N of the
-// 10.0.2 bundle ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, at the
-// weapon entry; the extractor dump ~/.cache/kn-v10/ext/v10.json holds the parsed values). Every
-// other field is the v7 value: shared/tests/weapons_v10_test.c checks the whole v10 table
-// against shared/tests/data/v10/weapons.json (the extracted v10 weaponConfig) field by field.
-// Times in s (JS ms / 1000), as in the v7 files.
+// Krunker v10's weapon balance pass (doc/v10/gameplay.md section 5; v10.0.2's, which v10.0.3 keeps): v10
+// copies of the ten v7.1.4 entries whose stats changed. Generated from shared/src/weapons/<v7 file> with
+// the v10 values substituted; each changed field cites its line in the decoded v10.0.3 bundle
+// ("deob-10.0.3.js:N", ~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js; weaponConfig :112381) and the
+// v7.1.4 value it replaced ("old -> new"). Every other field is the v7 value, which v10.0.3 keeps:
+// shared/tests/weapons_v10_test.c checks the whole table against shared/tests/data/v10/weapons.json (the
+// 10.0.3 weaponConfig) field by field. Times in s (JS ms / 1000), as in the v7 files.
 
-// id 1: from shared/src/weapons/ak47.c (g_ak47)
+// id 1 (deob-10.0.3.js:112487): from shared/src/weapons/ak47.c (g_ak47)
 const Weapon g_ak47_v10 = {
     .name = "Assault Rifle",
     .src = "weapon_2",
@@ -24,7 +23,7 @@ const Weapon g_ak47_v10 = {
     .projectile = 1,
     .projectile_disable = 1,
 
-    .ammo = 30, // v10:99088 ammo 28 -> 30
+    .ammo = 30, // deob-10.0.3.js:112528 ammo 28 -> 30
     .swap_time = 0.3f,
     .reload_time = 1.5f,
     .aim_speed = 0.13f,
@@ -33,8 +32,8 @@ const Weapon g_ak47_v10 = {
     .headshot_mlt = 1.5f,
     .pierce = 1.0f,
     .range = 700.0f,
-    .damage_drop = 8.0f, // v10:99088 dmgDrop 5 -> 8
-    .rate = 0.115f, // v10:99088 rate 120 -> 115 ms
+    .damage_drop = 8.0f, // deob-10.0.3.js:112535 dmgDrop 5 -> 8
+    .rate = 0.115f, // deob-10.0.3.js:112529 rate 120 -> 115 ms
     .spread = 100.0f,
     .min_spread = 5.0f,
     .recoil = 3.0f,
@@ -88,7 +87,7 @@ const Weapon g_ak47_v10 = {
     .projectile_config = {.speed = 2.6f, .gravity = 0.00011f, .range = 3000.0f, .damage = 23.0f},
 };
 
-// id 2: from shared/src/weapons/pistol.c (g_pistol)
+// id 2 (deob-10.0.3.js:112601): from shared/src/weapons/pistol.c (g_pistol)
 const Weapon g_pistol_v10 = {
     .name = "Pistol",
     .src = "weapon_3",
@@ -103,7 +102,7 @@ const Weapon g_pistol_v10 = {
     .projectile_disable = 1,
 
     .ammo = 10,
-    .swap_time = 0.35f, // v10:99202 swapTime 260 -> 350 ms
+    .swap_time = 0.35f, // deob-10.0.3.js:112636 swapTime 260 -> 350 ms
     .reload_time = 0.7f,
     .aim_speed = 0.11f,
     .speed_mlt = 1.05f,
@@ -157,7 +156,7 @@ const Weapon g_pistol_v10 = {
     .projectile_config = {.speed = 2.3f, .gravity = 0.0001f, .range = 1600.0f, .damage = 12.0f},
 };
 
-// id 3: from shared/src/weapons/smg.c (g_smg)
+// id 3 (deob-10.0.3.js:112704): from shared/src/weapons/smg.c (g_smg)
 const Weapon g_smg_v10 = {
     .name = "Submachine Gun",
     .src = "weapon_4",
@@ -172,7 +171,7 @@ const Weapon g_smg_v10 = {
     .projectile = 1,
     .projectile_disable = 1,
 
-    .ammo = 24, // v10:99305 ammo 30 -> 24
+    .ammo = 24, // deob-10.0.3.js:112746 ammo 30 -> 24
     .swap_time = 0.3f,
     .reload_time = 1.0f,
     .aim_speed = 0.11f,
@@ -181,7 +180,7 @@ const Weapon g_smg_v10 = {
     .headshot_mlt = 1.5f,
     .pierce = 1.0f,
     .range = 700.0f,
-    .damage_drop = 9.0f, // v10:99305 dmgDrop 12 -> 9
+    .damage_drop = 9.0f, // deob-10.0.3.js:112752 dmgDrop 12 -> 9
     .rate = 0.095f,
     .spread = 70.0f,
     .min_spread = 5.0f,
@@ -232,7 +231,7 @@ const Weapon g_smg_v10 = {
     .projectile_config = {.speed = 2.4f, .gravity = 0.00011f, .range = 2700.0f, .damage = 18.0f},
 };
 
-// id 6: from shared/src/weapons/lmg.c (g_lmg)
+// id 6 (deob-10.0.3.js:113027): from shared/src/weapons/lmg.c (g_lmg)
 const Weapon g_lmg_v10 = {
     .name = "Machine Gun",
     .src = "weapon_7",
@@ -247,18 +246,18 @@ const Weapon g_lmg_v10 = {
     .projectile = 1,
     .projectile_disable = 1,
 
-    .ammo = 50, // v10:99628 ammo 60 -> 50
+    .ammo = 50, // deob-10.0.3.js:113069 ammo 60 -> 50
     .swap_time = 0.6f,
     .reload_time = 3.3f,
     .aim_speed = 0.2f,
     .speed_mlt = 0.79f,
     .jump_mlt = 0.85f,
-    .damage = 17.0f, // v10:99628 dmg 18 -> 17
+    .damage = 17.0f, // deob-10.0.3.js:113071 dmg 18 -> 17
     .headshot_mlt = 1.5f,
     .pierce = 1.0f,
     .range = 700.0f,
     .damage_drop = 10.0f,
-    .rate = 0.125f, // v10:99628 rate 130 -> 125 ms
+    .rate = 0.125f, // deob-10.0.3.js:113103 rate 130 -> 125 ms
     .spread = 300.0f,
     .min_spread = 10.0f,
     .recoil = 3.2f,
@@ -309,7 +308,7 @@ const Weapon g_lmg_v10 = {
     .projectile_config = {.speed = 2.3f, .gravity = 0.0001f, .range = 3000.0f, .damage = 18.0f},
 };
 
-// id 7: from shared/src/weapons/semi.c (g_semi_auto)
+// id 7 (deob-10.0.3.js:113119): from shared/src/weapons/semi.c (g_semi_auto)
 const Weapon g_semi_auto_v10 = {
     .name = "Semi Auto",
     .src = "weapon_8",
@@ -326,7 +325,7 @@ const Weapon g_semi_auto_v10 = {
 
     .ammo = 8,
     .swap_time = 0.3f,
-    .reload_time = 1.35f, // v10:99720 reload 1500 -> 1350 ms
+    .reload_time = 1.35f, // deob-10.0.3.js:113179 reload 1500 -> 1350 ms
     .aim_speed = 0.12f,
     .speed_mlt = 1.0f,
     .damage = 35.0f,
@@ -334,7 +333,7 @@ const Weapon g_semi_auto_v10 = {
     .pierce = 0.2f,
     .range = 1000.0f,
     .damage_drop = 0.0f,
-    .rate = 0.145f, // v10:99720 rate 150 -> 145 ms
+    .rate = 0.145f, // deob-10.0.3.js:113208 rate 150 -> 145 ms
     .spread = 250.0f,
     .recoil = 10.0f,
     .recoil_y = 0.36f,
@@ -385,7 +384,7 @@ const Weapon g_semi_auto_v10 = {
     .projectile_config = {.speed = 2.5f, .gravity = 0.0001f, .range = 4000.0f, .damage = 33.0f},
 };
 
-// id 9: from shared/src/weapons/akimbo.c (g_akimbo)
+// id 9 (deob-10.0.3.js:113348): from shared/src/weapons/akimbo.c (g_akimbo)
 const Weapon g_akimbo_v10 = {
     .name = "Akimbo Uzi",
     .src = "weapon_10",
@@ -400,11 +399,11 @@ const Weapon g_akimbo_v10 = {
 
     .ammo = 28,
     .swap_time = 0.3f,
-    .reload_time = 1.2f, // v10:99949 reload 1300 -> 1200 ms
+    .reload_time = 1.2f, // deob-10.0.3.js:113382 reload 1300 -> 1200 ms
     .aim_speed = 0.12f,
     .speed_mlt = 1.04f,
-    .damage = 16.0f, // v10:99949 dmg 15 -> 16
-    .headshot_mlt = 1.5f, // v10:99949 hsMlt 1 -> 1.5
+    .damage = 16.0f, // deob-10.0.3.js:113383 dmg 15 -> 16
+    .headshot_mlt = 1.5f, // deob-10.0.3.js:113384 hsMlt 1 -> 1.5
     .pierce = 1.0f,
     .range = 500.0f,
     .damage_drop = 13.0f,
@@ -446,7 +445,7 @@ const Weapon g_akimbo_v10 = {
     .can_upgrade = 1,
 };
 
-// id 10: from shared/src/weapons/deagle.c (g_deagle)
+// id 10 (deob-10.0.3.js:113441): from shared/src/weapons/deagle.c (g_deagle)
 const Weapon g_deagle_v10 = {
     .name = "Desert Eagle",
     .src = "weapon_11",
@@ -461,12 +460,12 @@ const Weapon g_deagle_v10 = {
     .projectile_disable = 1,
 
     .ammo = 7,
-    .swap_time = 0.35f, // v10:100042 swapTime 200 -> 350 ms
+    .swap_time = 0.35f, // deob-10.0.3.js:113476 swapTime 200 -> 350 ms
     .reload_time = 1.0f,
     .aim_speed = 0.11f,
     .speed_mlt = 1.0f,
     .damage = 45.0f,
-    .headshot_mlt = 1.4f, // v10:100042 hsMlt 1.2 -> 1.4
+    .headshot_mlt = 1.4f, // deob-10.0.3.js:113484 hsMlt 1.2 -> 1.4
     .pierce = 0.85f,
     .range = 700.0f,
     .damage_drop = 10.0f,
@@ -514,7 +513,7 @@ const Weapon g_deagle_v10 = {
     .projectile_config = {.speed = 2.3f, .gravity = 0.0001f, .range = 1500.0f, .damage = 50.0f},
 };
 
-// id 14: from shared/src/weapons/famas.c (g_famas)
+// id 14 (deob-10.0.3.js:113910): from shared/src/weapons/famas.c (g_famas)
 const Weapon g_famas_v10 = {
     .name = "Famas",
     .src = "weapon_15",
@@ -527,22 +526,22 @@ const Weapon g_famas_v10 = {
     .no_auto = 1,
     .burst = 1,
     .burst_count = 3,
-    .burst_rate = 0.085f, // v10:100483 burstR 90 -> 85 ms
+    .burst_rate = 0.085f, // deob-10.0.3.js:113942 burstR 90 -> 85 ms
     .has_attach = 1,
     .projectile = 1,
     .projectile_disable = 1,
 
-    .ammo = 24, // v10:100483 ammo 30 -> 24
+    .ammo = 24, // deob-10.0.3.js:113954 ammo 30 -> 24
     .swap_time = 0.3f,
-    .reload_time = 1.5f, // v10:100483 reload 1200 -> 1500 ms
+    .reload_time = 1.5f, // deob-10.0.3.js:113956 reload 1200 -> 1500 ms
     .aim_speed = 0.13f,
     .speed_mlt = 0.95f,
     .damage = 28.0f,
     .headshot_mlt = 1.5f,
     .pierce = 1.0f,
     .range = 900.0f,
-    .damage_drop = 8.0f, // v10:100483 dmgDrop 5 -> 8
-    .rate = 0.33f, // v10:100483 rate 280 -> 330 ms
+    .damage_drop = 8.0f, // deob-10.0.3.js:113961 dmgDrop 5 -> 8
+    .rate = 0.33f, // deob-10.0.3.js:113955 rate 280 -> 330 ms
     .spread = 90.0f,
     .min_spread = 5.0f,
     .recoil = 3.0f,
@@ -589,10 +588,10 @@ const Weapon g_famas_v10 = {
     .type = 0,
     .mag_reserve = 4,
     .can_upgrade = 1,
-    .projectile_config = {.speed = 2.4f, .gravity = 0.0001f, .range = 3000.0f, .damage = 26.0f}, // v10:100483 pj_dmg 28 -> 26
+    .projectile_config = {.speed = 2.4f, .gravity = 0.0001f, .range = 3000.0f, .damage = 26.0f}, // deob-10.0.3.js:113930 pj_dmg 28 -> 26
 };
 
-// id 18: from shared/src/weapons/blaster.c (g_blaster)
+// id 18 (deob-10.0.3.js:114247): from shared/src/weapons/blaster.c (g_blaster)
 const Weapon g_blaster_v10 = {
     .name = "Blaster",
     .src = "weapon_19",
@@ -668,10 +667,10 @@ const Weapon g_blaster_v10 = {
     .mag_reserve = 4,
     .leg_mlt = 1.0f,
     .can_upgrade = 1,
-    .projectile_config = {.speed = 1.0f, .gravity = 0.0f, .range = 500.0f, .damage = 45.0f, .no_impact = 1}, // v10:100820 pj_dmg 35 -> 45
+    .projectile_config = {.speed = 1.0f, .gravity = 0.0f, .range = 500.0f, .damage = 45.0f, .no_impact = 1}, // deob-10.0.3.js:114290 pj_dmg 35 -> 45
 };
 
-// id 21: from shared/src/weapons/v7_tehchy9.c (g_tehchy9)
+// id 21 (deob-10.0.3.js:114496): from shared/src/weapons/v7_tehchy9.c (g_tehchy9)
 const Weapon g_tehchy9_v10 = {
     .name = "Tehchy-9",
     .src = "weapon_22",
@@ -684,7 +683,7 @@ const Weapon g_tehchy9_v10 = {
     .burst_count = 3,
     .burst_rate = 0.09f,
     .ammo = 15,
-    .swap_time = 0.35f, // v10:101069 swapTime 200 -> 350 ms
+    .swap_time = 0.35f, // deob-10.0.3.js:114520 swapTime 200 -> 350 ms
     .reload_time = 1.0f,
     .aim_speed = 0.1f,
     .speed_mlt = 1.0f,
