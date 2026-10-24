@@ -32,6 +32,7 @@
 #include <ai.h>             // "ana": NetAIAnimPacket
 #include <progression.h> // overlay.medalsList: the medals "6" / "am" give by index
 #include <social_v7.h>
+#include <stalker.h>   // NetStalkerTauntPacket: the stalker's taunt ("stlkrt")
 #include <voice.h> // the v7 voice framing ("vc" <-> NET_PACKET_VOICE_V7)
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
@@ -365,6 +366,18 @@ static void emit_player_info(KrunkerLink *l, KrunkerLinkPlayer *p) {
     emit(l, NET_PACKET_PLAYER_INFO, &p->info, sizeof(p->info));
 }
 
+// ADD_PLAYERS' propID: offset 21 of the 10.0.3 layout (KRUNKER_ADD_PROP_ID_1003, see on_add_players), NULL
+// for a build whose stride is not the 10.0.3 one (its offsets may have moved) or when the entry is shorter.
+#define KRUNKER_ADD_STRIDE_1003 53
+#define KRUNKER_ADD_PROP_ID_1003 21
+static const KrunkerValue *add_prop_id(const KrunkerBuild *b, const KrunkerValue *e, const uint32_t left) {
+    if (b->add_stride != KRUNKER_ADD_STRIDE_1003 || left <= KRUNKER_ADD_PROP_ID_1003) return NULL;
+    for (int slot = 0; slot < KRB_ADD_COUNT; slot++) {
+        if (b->add[slot] == KRUNKER_ADD_PROP_ID_1003) return NULL; // a build that put a named field there
+    }
+    return &e[KRUNKER_ADD_PROP_ID_1003];
+}
+
 // "0" ADD_PLAYERS: a flat list, 53 (0x35) values per player (game.deob.js:220266-220330); the
 // players.add arguments (:171902, player.init :169089): [0] id (socket id) [1] sid [2] x [3] y
 // [4] z [5] name [6] classIndex [7] health (null: maxHealth) [8] maxHealth [9] team [15] secIndex
@@ -436,10 +449,12 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         }
         emit(l, NET_PACKET_SPAWN, &s, sizeof(s));
         if (p) emit_player_info(l, p); // after SPAWN, as our own server sends it
-        // Prop Hunt: players.add's updateProp(player, propID || 1) for a Prop-team player (krunker_link_prophunt.c)
-        // players.add's propID ("0" [21], :171902) has no position in the layout yet (tools/krunker/extract_build.py):
-        // a Prop-team spawn gets the default prop (1) as updateProp(player, propID || 1) does without one
-        krunker_link_prophunt_spawned(l, s.uid, s.team, NULL);
+        // Prop Hunt: players.add's updateProp(player, propID || 1) for a Prop-team player (krunker_link_prophunt.c).
+        // propID is "0" [21] (getPlayerAddData packs player.propID there, deob-10.0.3.js:198810; the handler passes
+        // [21] as players.add's 25th parameter, :258132, which calls updateProp(player, it || 1, true), :195129).
+        // tools/krunker/extract_build.py does not name it (players.add stores it nowhere), so it is read at its
+        // 10.0.3 offset while the build keeps the 10.0.3 stride; another layout gets the default prop (1).
+        krunker_link_prophunt_spawned(l, s.uid, s.team, add_prop_id(b, e, left));
     }
 }
 
@@ -550,7 +565,9 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     l->syncs++;
     l->last_ack = r.ack_seq;
     memcpy(l->sync_pos, r.position, sizeof(l->sync_pos));
-    if (krunker_is(ping, KRUNKER_NUM)) {
+    // [1] Math.round(ping) (syncState, deob-10.0.3.js:222389): the handler takes it only when truthy
+    // (`you && sync && sync[1]`, :258311), so a 0 keeps the last ping shown
+    if (krunker_is(ping, KRUNKER_NUM) && ping->u.num != 0) {
         const NetPingResultPacket pr = {.ping_ms = (int32_t) ping->u.num};
         emit(l, NET_PACKET_PING_RESULT, &pr, sizeof(pr));
     }
@@ -605,7 +622,10 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     memset(&k, 0, sizeof(k));
     k.victim_uid = (int32_t) role(f, b->kill, KRB_KILL_VICTIM)->u.num;
     k.victim_deaths = (int32_t) num(role(f, b->kill, KRB_KILL_DEATHS), 0);
-    k.killer_uid = (int32_t) num(role(f, b->kill, KRB_KILL_KILLER), -1);
+    // the killer's sid, 0 for none (`killer ? killer.sid : 0`, deob-10.0.3.js:198678; sids start at 1, :195059):
+    // the handler's findBySid(0) finds nobody (:258663) and draws the "committed ..." row (:258832). Ours says none with -1.
+    const double killer_sid = num(role(f, b->kill, KRB_KILL_KILLER), 0);
+    k.killer_uid = killer_sid > 0 ? (int32_t) killer_sid : -1;
     k.weapon_index = -1;
     const KrunkerValue *info = role(f, b->kill, KRB_KILL_INFO);
     if (krunker_is(info, KRUNKER_MAP)) {
@@ -2154,16 +2174,19 @@ static void on_projectile(KrunkerLink *l, const KrunkerFrame *f) {
 }
 
 // "bmb" SHOW_BOMBARDMENT [bombs] (:220832): the handler's list, BOMB_STRIDE values a bomb. Each one is
-// physObj(x, y, z, 0, yD -PI / 2, range, trails, .., stored[2], sid, .., {pjSp}): a bomb falling from the
-// bomber's drop height with no owner; the server's "pre" ends it. The list's position is the build's
-// role (absent: no bombs drawn).
+// physObj(x, y, z, 0, yD -PI / 2, range, trails, .., stored[2], sid, .., customProj): a bomb falling from
+// the bomber's drop height with no owner; the server's "pre" ends it. The list's position is the build's
+// role (absent: no bombs drawn). v10.0.3's initBombs pushes the customProj object itself, {pjSp}
+// (deob-10.0.3.js:207088-207104); a bare number is read as the pjSp too.
 static void on_bombardment(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *list = role(f, krunker_build()->bomb, KRB_BOMB_LIST);
     for (uint32_t i = 0; krunker_is(list, KRUNKER_ARRAY) && i + BOMB_STRIDE <= list->len; i += BOMB_STRIDE) {
         const KrunkerValue *sid = krunker_at(list, i + 3);
         if (!krunker_is(sid, KRUNKER_NUM)) continue;
         const double pos[3] = {num(krunker_at(list, i), 0), num(krunker_at(list, i + 1), 0), num(krunker_at(list, i + 2), 0)};
-        emit_bomb(l, pos, 0.0, -M_PI / 2, num(krunker_at(list, i + 4), 1), (int) sid->u.num, -1);
+        const KrunkerValue *proj = krunker_at(list, i + 4);
+        const double pj_speed = krunker_is(proj, KRUNKER_MAP) ? num(krunker_get(proj, "pjSp"), 1) : num(proj, 1);
+        emit_bomb(l, pos, 0.0, -M_PI / 2, pj_speed, (int) sid->u.num, -1);
     }
 }
 
@@ -2235,10 +2258,15 @@ static void on_zombie_perks(KrunkerLink *l, const KrunkerFrame *f) {
     emit(l, NET_PACKET_PERKS, &p, sizeof(p));
 }
 
-// "bh" UPDATE_HEAD_SIZE [sid, headMlt, ..] (iïîiíiï :221034): Big Head's head scale
+// "bh" UPDATE_HEAD_SIZE [sid, headMlt, reset] (iïîiíiï :221034): Big Head's head scale
 static void on_head_size(KrunkerLink *l, const KrunkerFrame *f) {
     if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
-    const NetModeCounterPacket c = {.kind = NET_MODE_COUNTER_HEAD, .uid = (int32_t) arg(f, 0)->u.num, .value = (float) num(arg(f, 1), 1)};
+    // [sid, mlt, reset] -> players.updateHeadSize(p, mlt, reset) (deob-10.0.3.js:259406 -> :194975): reset sets
+    // headMlt 1, otherwise only a mlt above 1 is taken; anything else changes nothing
+    const double mlt = num(arg(f, 1), 0);
+    const int reset = truthy(arg(f, 2));
+    if (!reset && !(mlt > 1)) return;
+    const NetModeCounterPacket c = {.kind = NET_MODE_COUNTER_HEAD, .uid = (int32_t) arg(f, 0)->u.num, .value = reset ? 1.0f : (float) mlt};
     emit(l, NET_PACKET_MODE_COUNTER, &c, sizeof(c));
 }
 
@@ -2749,7 +2777,8 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
             if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f) && !krunker_link_lobby_frame(l, id, &f) &&
-                !krunker_link_script_frame(l, id, &f) && !krunker_link_prophunt_frame(l, id, &f))
+                !krunker_link_script_frame(l, id, &f) && !krunker_link_prophunt_frame(l, id, &f) &&
+                !krunker_link_s2c_frame(l, id, &f)) // krunker_link_s2c.c (doc/v10/s2c-coverage.md)
                 l->unknown_in++;
             break;
         }
@@ -2760,9 +2789,11 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
 
 // "a" ACCOUNT_RESPONSE [error, id, username, data, token, ...] (iîïïiii, game.deob.js:210016): the
 // game server signed the socket's account in (the `at=` of krunker_account.h). data is the account
-// row (new Account(id, name, data), :114314): its level is floor(rankVar * sqrt(player_score))
-// (updateLevel, rankVar 0.03). An error string (arg 0) = not signed in. The token (arg 4, the
-// legacy krunker_token) is not kept: krunker_account.h holds the session.
+// row: 10.0.3 builds new Account(id, username, null) and then setData(data) (deob-10.0.3.js:244357 /
+// :244361 -> :244082), which indexes it (:128966-129016): [6] score (the level is floor(rankVar *
+// sqrt(score)), rankVar 0.03), [12] isDev, [18] role, [27] jobRating, [28] jobRatingPos, [47] rankedPoints.
+// An error string (arg 0) = not signed in. The token (arg 4, the legacy krunker_token) is not kept:
+// krunker_account.h holds the session.
 // v10's Account.setData(row) reads row[47] as rankedPoints (v10:112873): JS's row[47] is the array's item
 // 47 or the "47" key of an object, so the row is read both ways. NULL: the row carries no such value.
 static const KrunkerValue *row_points(const KrunkerValue *row) {
@@ -2776,6 +2807,13 @@ static const KrunkerValue *row_points(const KrunkerValue *row) {
 static const KrunkerValue *row_score(const KrunkerValue *row) {
     if (krunker_is(row, KRUNKER_ARRAY)) return krunker_at(row, 6);
     return krunker_get(row, "player_score");
+}
+
+static const KrunkerValue *item_at(const KrunkerValue *v, uint32_t i); // below
+// setData's row[i] (array item or "<i>" key), else the object form's column `key`
+static const KrunkerValue *row_field(const KrunkerValue *row, const uint32_t i, const char *key) {
+    const KrunkerValue *v = item_at(row, i);
+    return v ? v : krunker_get(row, key);
 }
 
 static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
@@ -2792,10 +2830,12 @@ static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
     const int level = (int) floor(0.03 * sqrt(s > 0 ? s : 0)); // progression_level (shared/src/progression.c)
     l->account_level = level < 1 ? 1 : level;
     const KrunkerValue *data = arg(f, 3);
-    l->account_role = (int) krunker_num(krunker_get(data, "player_role"), 0);
-    l->account_dev = (int) krunker_num(krunker_get(data, "player_developer"), 0);
-    l->account_job_rating = (int) krunker_num(krunker_get(data, "jobrating"), 0);
-    l->account_job_rating_pos = (int) krunker_num(krunker_get(data, "jobratingpositive"), 0);
+    // setData's indices (an array row, or the "<i>" keys of an object); the database column names of the
+    // constructor's object form (player_role, ...) when the row has no such index
+    l->account_role = (int) krunker_num(row_field(data, 18, "player_role"), 0);
+    l->account_dev = (int) krunker_num(row_field(data, 12, "player_developer"), 0); // ~~row[12]
+    l->account_job_rating = (int) krunker_num(row_field(data, 27, "jobrating"), 0);
+    l->account_job_rating_pos = (int) krunker_num(row_field(data, 28, "jobratingpositive"), 0);
     const KrunkerValue *points = row_points(data);
     if (krunker_is(points, KRUNKER_NUM)) {
         l->account_rp_known = 1;
@@ -3209,6 +3249,10 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 0;
             const int prop = krunker_link_prophunt_send(l, subtype, body, body_length); // "prp" / "prpR"
             if (prop >= 0) return prop;
+            if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket)) { // the stalker's taunt key: ["stlkrt", i] (:260109)
+                const KrunkerValue args[] = {KRUNKER_V_NUM(body[0])};
+                return send_c2s(l, KRUNKER_C2S_STALKER_TAUNT, args, 1);
+            }
             if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionSendPacket)) {
                 // markPosition (:170208, sent :221369 only `isRanked || isComp`): ["mpos", {x, y, z}]
                 if (!l->is_ranked && !l->is_comp) return 0;

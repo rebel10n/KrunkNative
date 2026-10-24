@@ -32,15 +32,18 @@ typedef enum {
     NET_EXT_ENTITY_DETACH = 0x0105, // "ea-" [playerSid, eid]
 
     // 0x0200 player state, S -> C
-    NET_EXT_PLAYER_POSE = 0x0200,  // "pz"  sid, pose | 0
+    NET_EXT_PLAYER_POSE = 0x0200,  // "pz"  NetPlayerPosePacket: sid, pose | 0 (player_pose.h)
     NET_EXT_PLAYER_LOCKS = 0x0201, // "plk" NetPlayerLocksPacket: disableShooting, disableMelee
     NET_EXT_PLAYER_SPEED_BOOST = 0x0202, // "spb" speedBoost, silent (NetSpeedBoostPacket; official lobbies, krunker_link.c)
     NET_EXT_PLAYER_NAME = 0x0203,        // "00" a player's new name (NetPlayerNamePacket; official lobbies, krunker_link.c)
+    NET_EXT_PLAYER_ANIM = 0x0204,        // "c"  NetPlayerAnimPacket: a clip of an animated class model (doc/v10/s2c-coverage.md)
+    NET_EXT_PLAYER_MOVE_VALS = 0x0210,   // SYNC_PLAYER's sendVals: NetPlayerMoveValsPacket, the movement scheme's state with a RECON
 
     // 0x0300 store / live service, S -> C
-    NET_EXT_SKIN_DEFINITION_CHANGED = 0x0300, // "sdc" {skinId, skin}
+    NET_EXT_SKIN_DEFINITION_CHANGED = 0x0300, // "sdc" NetExtJsonChunk + JSON [skinId, skin] (doc/v10/s2c-coverage.md)
     NET_EXT_SPIN_WHEELS_UPDATED = 0x0301,     // "swu" spin data
     NET_EXT_GAME_ANNOUNCEMENT = 0x0302,       // "gameAnnouncement" NetGameAnnouncementPacket
+    NET_EXT_SPEECH_BUBBLE = 0x0303,           // "sb" NetSpeechBubblePacket: the menu mascot's speech bubble
 
     // 0x0400 Discord link
     NET_EXT_DISCORD_LINK_WAIT = 0x0400,   // "dlnkW" C -> S
@@ -81,6 +84,26 @@ typedef enum {
     NET_EXT_PROP_ROTATION = 0x0a01, // S -> C NetPropRotationPacket ("prpR" sid, propRot, propRotSaved, reset)
     NET_EXT_PROP_PICK = 0x0a02,     // C -> S NetPropPickPacket ("prp" propID: the wheel / a random prop)
     NET_EXT_PROP_ROTATE = 0x0a03,   // C -> S NetPropRotatePacket ("prpR" [reset]: toggle / reset the rotation)
+
+    // 0x0b00 the live trade of Trade mode (doc/v10/trade.md; bodies in shared/include/live_trade.h). C -> S:
+    NET_EXT_TRADE_REQUEST = 0x0b00,  // "strd"  NetTradeRequestPacket (the player list's Trade button; int [5, sid] is NET_PACKET_INTERACT)
+    NET_EXT_TRADE_INIT = 0x0b01,     // "trd"   NetTradeInitPacket: [sid, 1] accepts sid's request
+    NET_EXT_TRADE_UPDATE = 0x0b02,   // "utrd"  NetTradeUpdatePacket: [skin, action, copyId]
+    NET_EXT_TRADE_CURRENCY = 0x0b03, // "utrdc" NetTradeCurrencyPacket: [currency, action, amount]
+    NET_EXT_TRADE_ACCEPT = 0x0b04,   // "atrd"  no body
+    NET_EXT_TRADE_DECLINE = 0x0b05,  // "dtrd"  no body
+    NET_EXT_TRADE_CANCEL = 0x0b06,   // "ctrd"  no body
+    NET_EXT_TRADE_CHAT = 0x0b07,     // "tct"   the line, NUL-terminated
+    // S -> C:
+    NET_EXT_TRADE_RESPONSE = 0x0b10,       // "trd"   NetTradeResponsePacket: types 0 request, 2 canceled, 3 accepted, 4 process, 5 reset
+    NET_EXT_TRADE_OPEN = 0x0b11,           // "trd"   type 1: NetTradeChunkHeader + a slice of the JSON [mine, theirs]
+    NET_EXT_TRADE_ITEM = 0x0b12,           // "utrd"  NetTradeItemPacket: [ownerSid, add, skin, copyId]
+    NET_EXT_TRADE_CURRENCY_STATE = 0x0b13, // "utrdc" NetTradeCurrencyStatePacket: [ownerSid, action, currency, amount]
+    NET_EXT_TRADE_RESULT = 0x0b14,         // "atrd"  NetTradeChunkHeader + a slice of the JSON [error, funds, removed, added, meta]
+    NET_EXT_TRADE_CHAT_LINE = 0x0b15,      // "tch"   NetTradeChatLinePacket: [name, msg, type, color]
+    // 0x0a10 Stalker (shared/include/stalker.h): Krunker's "stlkrt" / "stlkpd" (deob-10.0.3.js:111022, :111363)
+    NET_EXT_STALKER_TAUNT = 0x0a10,  // C -> S NetStalkerTauntPacket ("stlkrt" i: the stalker's taunt key, :260109)
+    NET_EXT_STALKER_PICKED = 0x0a11, // S -> C, no body (pickStalker's broadcastEx to all but the stalker, :217949)
 
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
@@ -149,7 +172,20 @@ typedef enum {
     NET_EXT_KN_GUEST_ID = 0x8140,     // C -> S NetGuestIdPacket: the menu's guest id, sent while signed out, once per connection
     NET_EXT_KN_GUEST_EARNED = 0x8141, // S -> C, no body: v10's "ger" (GUEST_EARNED_REWARDS): this guest's balance changed, fetch it again
     NET_EXT_KN_RANKED_NOTICE = 0x8142, // S -> C NetRankedNoticePacket: the brain's "queued for ranked" line, the player apart from the text
+    // 0x8150 v10.0.3 event kill pools (shared/include/kill_pools.h, doc/v10/kill-pools.md): the END's otherData.items
+    NET_EXT_KN_END_ITEM = 0x8150, // S -> C NetEndItemPacket, one per item the match paid, right after the END
 } NetExtSubtype;
+
+// NET_EXT_KN_END_ITEM (S -> C): one of the items a public match paid this player from the ongoing events'
+// kill pools (v10.0.3 endGame's itemRewards, sent as the END's otherData.items {t: "skin", i, r},
+// deob-10.0.3.js:221797-221807, :221896-221900). The server sends them in draw order once the END is out;
+// the end screen holds the ones with an icon (r) for its Collect Rewards button. The account already has
+// them (the stats commit grants them).
+typedef struct {
+    int32_t skin;   // i: the store skin index
+    char icon[28];  // r: the event's killPoolsIcon (./img/<icon>.webp), "" none (NUL-terminated)
+} NetEndItemPacket;
+_Static_assert(sizeof(NetEndItemPacket) == 32, "NetEndItemPacket: the wire body is 32 bytes");
 
 // NET_EXT_KN_GUEST_ID (C -> S): the guest id the menu keeps in its own storage: 32 lowercase hex digits
 // (16 random bytes), NUL-terminated. It is the guest's identity for the brain's guest_profiles table, as
@@ -270,6 +306,18 @@ typedef struct {
     int32_t uid;   // the player's sid
     char name[32]; // PLAYER_NAME_SIZE, NUL-terminated
 } NetPlayerNamePacket;
+
+// NET_EXT_PLAYER_MOVE_VALS (S -> C): v10 SYNC_PLAYER's movement-scheme sendVals (deob-10.0.3.js:222398-222403; the
+// owner reads them back at :258289-258295 before replaying): the class movSch's state right after input
+// `ack_seq`, sent just before the RECON of the same ack and only for a scheme with sendVals (SRM 8 values, Vehicle
+// 3; player_movement_send_vals, shared.h). The client applies it with that RECON (client/src/net/recon.c).
+typedef struct {
+    int32_t ack_seq; // the NetReconPacket.ack_seq it goes with
+    int32_t scheme;  // the MovementScheme the values are of
+    int32_t count;   // values used (<= PLAYER_MOVE_VALS_MAX)
+    float vals[8];   // SRM: onGroundFrames, onWallFrames, wishDash, dashTimer, walldashTimer, tmpVel x, y, z; Vehicle: forwardV, reverseV, angVel
+} NetPlayerMoveValsPacket;
+_Static_assert(sizeof(NetPlayerMoveValsPacket) == 44, "NetPlayerMoveValsPacket: the wire body is 44 bytes");
 
 // NET_EXT_KN_OFFICIAL_AMMO: Krunker "uamo" UPDATE_AMMO [ammos, reserveAmmos] (game.deob.js:220425 ->
 // players.updatePlayerAmmo): our player's magazine per loadout slot and, in finiteAmmo modes, its
@@ -682,13 +730,58 @@ typedef struct {
     uint8_t disable_melee;
 } NetPlayerLocksPacket;
 
+// NET_EXT_PLAYER_POSE: v10 "pz" PLAYER_POSE [sid, pose || 0] (game.setPlayerPose deob-10.0.3.js:221041,
+// client players.setPose :195354): the player's sanitized pose (shared/include/player_pose.h), `has`
+// 0 = pose 0 (cleared). Our server also sends it after a posed player's SPAWN (v10's init plrPose).
+typedef struct {
+    int32_t uid;          // sid
+    uint16_t has;         // PLAYER_POSE_* keys present
+    uint8_t legs, weapon, bob, face_ride, hold, hold_l;
+    float leg_x, body_y, torso_x;
+    float arm_l[3], arm_r[3];
+} NetPlayerPosePacket;
+
 // NET_EXT_KN_OFFICIAL_OBJECT_MOVED: v10 "objmv" OBJECT_MOVED [uid, x, y, z] (game.moveObject :187893):
 // a dyn map object moved; y is the GameObject's centre (bottom + h / 2); riders move with it
 typedef struct {
     int32_t uid;
     float x, y, z;
 } NetObjectMovedPacket;
+
+// NET_EXT_PLAYER_ANIM (S -> C): v10 "c" PLAYER_ANIM [sid, clipIndex] (iíîiiìï, deob-10.0.3.js:257769 -> players.playClip
+// :193806): the player's class model plays clip `clip` of NET_PLAYER_CLIP_* (the clip list :21165) `reps` times (the
+// handler's arg 2 || 1; the server sends two arguments). Only a player whose class has an animated model plays clips
+// (hasAnims = config.aID holds "g", "q" or "f", :194877 / :195127; the model is config.mdl 2's loadAnimMesh, :194251).
+// The authority sends it (playClip's isServer branch :193808-193815) for "Jump" (players.jump, not a recon :195271) and
+// "Melee" (players.melee :195909) to every spectator and to every other active player within mode.viewDis || 600 of
+// the player (shared/src/player_anim.c); never to the player itself (its own client plays them locally).
+enum {
+    NET_PLAYER_CLIP_IDLE, NET_PLAYER_CLIP_MOVE, NET_PLAYER_CLIP_MOVE_FAST, NET_PLAYER_CLIP_JUMP,
+    NET_PLAYER_CLIP_MELEE, NET_PLAYER_CLIP_SHOOT, NET_PLAYER_CLIP_CROUCH, NET_PLAYER_CLIP_COUNT
+};
+typedef struct {
+    int32_t sid;   // the player (its uid on the KrunkNative wire)
+    uint8_t clip;  // NET_PLAYER_CLIP_*
+    float reps;    // repetitions: v10's playClip(player, name, arg2 || 1)
+} NetPlayerAnimPacket;
+
+// NET_EXT_SPEECH_BUBBLE (S -> C): v10 "sb" SHOW_SPEECH_BUBBLE [html, ms, sigh] (iíììiîì, deob-10.0.3.js:261181): the menu
+// mascot's bubble (#txtBubble's innerHTML, #bubbleContainer scale(1.0), back to scale(0.0) after ms || 2500), a sigh_0 /
+// sigh_1 at volume 0.2 first when sigh. v10 sends ["sb", "welc", username] after "ready" (:261464); the official game
+// server answers it. KrunkNative's own server sends none (its welcome text is the official server's, not in the bundle).
+#define NET_SPEECH_BUBBLE_TEXT 256
+typedef struct {
+    uint32_t ms;                       // how long it shows, 0 = 2500
+    uint8_t sigh;                      // play a sigh first
+    char text[NET_SPEECH_BUBBLE_TEXT]; // the server's HTML, NUL-terminated (the client shows its text, tags dropped)
+} NetSpeechBubblePacket;
 #pragma pack(pop)
+
+// The name of a NET_PLAYER_CLIP_* (v10's clip list, deob-10.0.3.js:21165), NULL out of range.
+const char *net_player_clip_name(int clip);
+// The NET_PLAYER_CLIP_* of a clip name, -1 none.
+int net_player_clip_index(const char *name);
+_Static_assert(sizeof(NetPlayerPosePacket) == 48, "NetPlayerPosePacket: the wire body is 48 bytes");
 
 // Writes the envelope (subtype + body) into out (at least NET_EXT_HEADER_SIZE + body_length
 // bytes); returns its length, 0 when the body is too long.

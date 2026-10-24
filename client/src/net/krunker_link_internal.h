@@ -28,3 +28,10 @@ void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f);
 int krunker_link_prophunt_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
 void krunker_link_prophunt_spawned(KrunkerLink *l, int sid, int team, const KrunkerValue *prop_id);
 int krunker_link_prophunt_send(KrunkerLink *l, uint16_t subtype, const uint8_t *body, uint16_t length);
+
+// krunker_link_s2c.c: the S2C packets doc/v10/s2c-coverage.md classifies that no other file translates: the
+// player clips ("c"), the menu's speech bubble ("ready" / "sb"), the comp lobby table ("cd" / "cda" / "uid"), store
+// skin definitions ("sdc"), the ranked rating card ("lrmr"), game announcements, the found-junk line ("jnk"), the map
+// script's log ("ksL"), and the packets ignored on purpose (live service / ads / dev tools). 1 = handled (unknown_in
+// does not count it).
+int krunker_link_s2c_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);

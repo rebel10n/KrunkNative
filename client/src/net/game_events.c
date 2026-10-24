@@ -11,6 +11,7 @@
 #include <backend_ui.h>      // NET_PACKET_REDIRECT: servers_ui_redirect
 #include <online_mode.h>     // NET_PACKET_AUTH_CHALLENGE: online-mode join (net/online_mode.c)
 #include <v10_notify.h> // NET_EXT_GAME_ANNOUNCEMENT: the game announcement banner
+#include <s2c_events.h> // NET_EXT_PLAYER_ANIM / SPEECH_BUBBLE / SKIN_DEFINITION_CHANGED (doc/v10/s2c-coverage.md)
 #include <nettspend_audio.h> // NET_EXT_KN_LACED: the Purple Drank's laced spell, its ambience (nettspend_audio.c)
 #include <client.h>
 #include <strike_hud_fx.h>   // STRIKE_DMG_KEY_AI: the Strike damage numbers' bot key (events_strike_damage_number)
@@ -50,6 +51,7 @@
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <strike_ui.h>       // Krunker Strike: its own in-game UI gets the same events (strike_hud.c)
 #include <prop_hunt_client.h> // Prop Hunt: "up" / "prpR"
+#include <stalker_client.h> // Stalker: "stlkpd"
 #include "../ui/account_flags.h" // account_flag_code: the killer's Country Flag for the Strike kill card
 #include <i18n.h>     // NET_EXT_KN_OFFICIAL_CHAT_I18N: an official server's "chi" key, translated here
 #include <map_post.h> // NET_EXT_KN_OFFICIAL_LEADER_BOARD: a map LEADERBOARD's rows
@@ -1381,9 +1383,17 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetLatestRankedMmrPacket lrmr;
                 memcpy(&lrmr, body, sizeof(lrmr));
                 hud_endscreen_v10_ranked(lrmr.mmr_change, lrmr.latest_rank, lrmr.rp_change); // the rank card's "Rating +N"
+            } else if (subtype == NET_EXT_KN_END_ITEM && body_length >= sizeof(NetEndItemPacket)) { // an event kill pool item (otherData.items)
+                NetEndItemPacket item;
+                memcpy(&item, body, sizeof(item));
+                item.icon[sizeof(item.icon) - 1] = 0;
+                hud_endscreen_v10_offer_item(item.skin, item.icon); // the Collect Rewards button (hud_endscreen_v10.c)
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
+            else if (s2c_events_on_ext(client, subtype, body, body_length)) {} // "c" / "sb" / "sdc" (s2c_events.c, doc/v10/s2c-coverage.md)
+            else if (subtype == NET_EXT_PLAYER_MOVE_VALS) client_recon_move_vals(client, body, body_length); // the next RECON's scheme sendVals
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
+            else if (subtype == NET_EXT_STALKER_PICKED) hud_stalker_on_picked(client); // "stlkpd": the Living's popup (hud_stalker.c)
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
             else if (subtype == NET_EXT_KN_SERVER_LINE && body_length == sizeof(NetServerLinePacket)) { // a join / leave / vote kick line (events_server_line)
                 NetServerLinePacket line;

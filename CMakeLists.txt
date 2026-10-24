@@ -203,6 +203,8 @@ set(SERVER_CORE_SOURCES
     server/src/ks_storage.c
     server/src/bot_banter.c       # bot chat via kn_brain (templates only without a brain link: the offline sandbox)
     server/src/votekick.c
+    server/src/trade.c            # the live trade of Trade mode (doc/v10/trade.md): sessions, packets, the brain ops
+    server/src/trade_session.c    # ... its state machine (pure, unit-tested by trade_test)
     server/src/published_maps.c   # published:<creator>/<name> maps: v10's checks + the cache (the fetch is brain.c's)
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
@@ -723,8 +725,9 @@ else ()
         target_link_libraries(class_spawn_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
-    # weapons_v7_test / combat_test (WP-B): v7.1.4 class / weapon / effect / streak tables against
-    # shared/tests/data/v7 (tools/kref/v7-dump.js), and the charge / hitbox / streak / effect maths
+    # weapons_v10_test / combat_test (WP-B): the Krunker v10.0.3 class / weapon / effect / streak / attachment /
+    # upgrade tables against shared/tests/data/v10 (tools/kref/v10-fixtures.py from deob-10.0.3.js), and the
+    # charge / hitbox / streak / effect maths
     # weapon_req_test (shared/src/game_config.c game_weapon_req, interact.c random_weapon): the game mode's weapon req
     # (customOnly: a custom game that is not comp or a dev; noComp), the spawn's Grappler and the random pickups' pool
     add_executable(weapon_req_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/weapon_req_test.c)
@@ -742,6 +745,14 @@ else ()
         target_link_libraries(junk_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
     endif ()
     add_test(NAME junk_test COMMAND junk_test)
+    # kill_pools_test: the v10.0.3 event kill pools (shared/src/kill_pools.c): getKillReward's weights, dilute / add,
+    # the "nothing" share under 100, skin-only contents and endGame's min(kills, 30) draws (doc/v10/kill-pools.md)
+    add_executable(kill_pools_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/kill_pools_test.c)
+    target_link_libraries(kill_pools_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(kill_pools_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
+    add_test(NAME kill_pools_test COMMAND kill_pools_test)
     add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
     target_link_libraries(zombies_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -760,7 +771,7 @@ else ()
     # flavor_storage_test: each flavor's native storage directory (Box Office unchanged, Strike its own)
     # krunker_regions_test: the Krunker v10.0.3 region table (shared/src/krunker_regions.c): the dropdown's order,
     #   dedicated-only ids, names, the nearest-region rule (lowest ping, then great circle) and getRegion's ping URL
-    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test)
+    foreach (wpb_test weapons_v10_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -802,6 +813,15 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(comp_ranked_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+
+    # player_anim_test: v10.0.3 PLAYER_ANIM ("c") from the authority (shared/src/player_anim.c, players.playClip's
+    # isServer branch): who gets a Jump / Melee clip of an animated class model (doc/v10/s2c-coverage.md)
+    add_executable(player_anim_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/player_anim_test.c)
+    target_link_libraries(player_anim_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(player_anim_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME player_anim_test COMMAND player_anim_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # forfeit_test: the ranked team forfeit vote (shared/src/forfeit.c, v10 voteToForfeit)
     add_executable(forfeit_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/forfeit_test.c)
@@ -957,6 +977,13 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(votekick_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # trade_test (doc/v10/trade.md): the live trade's state machine (trade_session.c) and its server flow over the sandbox
+    # (requests, the inventories, utrd / utrdc / atrd, the countdown, the settle, cancel / leave) with the brain frames faked
+    add_executable(trade_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/trade_test.c)
+    target_link_libraries(trade_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(trade_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
 
     # object_manager_test: the KrunkNative Object Manager (F1 spawn menu) over the sandbox: extra
     # loadout weapons, pickups at the crosshair, permissions, rate limit, join sync; the Properties
@@ -1085,12 +1112,28 @@ else ()
         target_link_libraries(ramp_fix_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # movement_scheme_test (v10.0.3 class movSch, doc/v10/movement-schemes.md): every movement scheme's motion,
+    # SRM's keys, camType 1's fixed offset and the sendVals reconciliation
+    add_executable(movement_scheme_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/movement_scheme_test.c)
+    target_link_libraries(movement_scheme_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(movement_scheme_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # atomic_sign_test: Atomic's object 833 (an invisible sign) is walk-through, and a player at its spot falls
     add_executable(atomic_sign_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/atomic_sign_test.c)
     target_link_libraries(atomic_sign_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(atomic_sign_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+
+    # player_pose_test (v10.0.3 player.pose, PLAYER_POSE "pz", bodyY, applyFreezeOthers): shared/src/player_pose.c
+    add_executable(player_pose_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/player_pose_test.c)
+    target_link_libraries(player_pose_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(player_pose_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME player_pose_test COMMAND player_pose_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # ks_game_v1003_test (v10.0.3 KrunkScript): getMatch().started during the countdown, AI.spawn alwaysSync
     add_executable(ks_game_v1003_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/ks_game_v1003_test.c)
@@ -1162,7 +1205,7 @@ else ()
 
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
-    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/ui/player_names.c
+    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/ui/player_names.c
                    client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
                    shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                    shared/src/season.c shared/src/voice.c shared/src/social.c)
@@ -1170,6 +1213,13 @@ else ()
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
     target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)
     add_test(NAME krunker_link_test COMMAND krunker_link_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    # kn_captcha_test (client/include/kn_captcha.h): Box Office's captcha in the client: the brain's ALTCHA challenge
+    # fetched (a backend double), solved over frames by krunker_altcha.c, its payload the 1.0.6 widget's, the sign-in frame
+    add_executable(kn_captcha_test client/tests/kn_captcha_test.c client/src/net/kn_captcha.c client/src/net/krunker_altcha.c
+                   shared/src/auth_join.c)
+    target_include_directories(kn_captcha_test PRIVATE client/include shared/include)
+    target_link_libraries(kn_captcha_test PRIVATE cJSON m)
+    add_test(NAME kn_captcha_test COMMAND kn_captcha_test)
 
     # ranked_route_test (client/include/ranked_route.h): the Ranked popup's backend rule (the connected server's)
     add_executable(ranked_route_test client/tests/ranked_route_test.c client/src/net/ranked_route.c)
@@ -1243,6 +1293,7 @@ else ()
     if (NOT WIN32)
         add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
                        client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
+                       client/src/net/krunker_link_s2c.c
                        client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c client/src/ui/player_names.c
                        client/src/ui/quick_play_retry.c
                        shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
@@ -1288,6 +1339,14 @@ else ()
     target_include_directories(skin_paint_test PRIVATE client/include shared/include)
     target_link_libraries(skin_paint_test PRIVATE cJSON m)
     add_test(NAME skin_paint_test COMMAND skin_paint_test ${CMAKE_SOURCE_DIR})
+
+    # skin_define_test: v10.0.3 "sdc" SKIN_DEFINITION_CHANGED on the client (client/src/viewer/viewer_skin_define.c):
+    # a store entry the server redefines, as viewer_skin() returns it (doc/v10/s2c-coverage.md)
+    add_executable(skin_define_test client/tests/skin_define_test.c client/src/viewer/viewer_store.c
+        client/src/viewer/viewer_store_table.c client/src/viewer/viewer_skin_define.c)
+    target_include_directories(skin_define_test PRIVATE client/include client/lib shared/include)
+    target_link_libraries(skin_define_test PRIVATE cJSON m)
+    add_test(NAME skin_define_test COMMAND skin_define_test)
 
     # melee_assets_test: every melee skin of the store table loads its model, texture and loadout icon from
     # assets/ (the melee_63 GLTF was a corrupt v7.1.4 copy; four official textures do not exist, see the test)
@@ -1354,7 +1413,7 @@ else ()
     # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
     add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
-                   client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_sounds.c
+                   client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_sounds.c
                    client/src/net/krunker_altcha.c client/src/ui/player_names.c)
     target_include_directories(krunker_sync_test PRIVATE client/include)
     target_link_libraries(krunker_sync_test PRIVATE m)
@@ -1808,6 +1867,7 @@ else ()
         client/src/gltf_meshopt.c
         client/src/pets.c
         client/src/skin_fx.c
+        client/src/skin_video.c
         client/src/cosmetics.c
         client/src/viewer/viewer_store.c
         client/src/viewer/viewer_store_table.c

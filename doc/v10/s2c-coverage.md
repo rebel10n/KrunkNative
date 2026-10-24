@@ -1,0 +1,181 @@
+# v10.0.3 server-to-client packet coverage
+
+Which of Krunker v10.0.3's server-to-client (S2C) packets the official-server link translates, which ones Krunker Box
+Office covers some other way, and which ones it ignores on purpose. Line numbers are `deob-10.0.3.js:<line>`
+(`/home/user/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js`). The client registers its handlers in one object at
+:261708-261760 (`iíÍíiïï`). The socket class handles a few names itself at :111420-111455 (`_0`, `_1`, `io-init`,
+`cpt`, `cptR`).
+
+## Method
+
+`deob/tables/s2c-1003.json` has 263 names. A name counts as handled when `client/src/net` references its
+`KRUNKER_S2C_<NAME>` id (`shared/include/krunker_build.h`), or when it handles the wire name as a string
+(`krunker_link.c` `account_scoped`: the account frames go to the account UI). The 2026-10-24 audit
+(`deob/audit-2026-10-24/rendering-network.md` row 25) counted 111 unreferenced names. When this pass started there were
+110. Each one's handler was read in the deob and given one of these classes:
+
+| Class | Meaning |
+|---|---|
+| **ported** | Translated now (`client/src/net/krunker_link_s2c.c`). The KN wire carries the same event, and the server sends it when v10's server would. |
+| **by name** | Already handled by wire name: `account_scoped` -> `io.account_frame` -> the account UI (`client/src/ui/account_ui.c`, `battlepass_ui.c`, `v10_daily_spin.c`). The link now also counts them as handled. |
+| **KN equivalent** | Krunker Box Office does this through its own service (kn_brain, its own store or accounts). On an official server the packet is about the krunker.io account, which this client does not keep. Ignored on purpose. |
+| **irrelevant** | Real-money store and payment providers, ads, surveys, third-party account linking, developer debug views, or an empty handler. Ignored on purpose. |
+| **other agent** | Owned by another feature this round (trade, poses, AI parts). Not touched here. |
+| **open** | Needed for UI or render parity and not ported yet. The reason is in the table. |
+
+`krunker_link_s2c_frame` returns 1 for every **ported**, **by name**, **KN equivalent** and **irrelevant** row, so
+`KrunkerLink.unknown_in` counts only the **open** and **other agent** names.
+
+## New KN wire packets
+
+| EXT subtype | Name | v10 | Body | Sent by KN's server |
+|---|---|---|---|---|
+| 0x0204 | `NET_EXT_PLAYER_ANIM` | `c` PLAYER_ANIM | `NetPlayerAnimPacket {int32 sid, uint8 clip, float reps}`. `clip` is an index into `["Idle", "Move", "MoveFast", "Jump", "Melee", "Shoot", "Crouch"]` (:21165). | Yes. `shared/src/player_anim.c` runs `player_play_clip` from `player_jump` and `player_melee` on the authority. It sends only for a class whose `aID` holds `g`, `q` or `f` (hasAnims, :194877). It goes to the spectators (`NET_TARGET_NON_PLAYERS`) and to every other active player within `mode.viewDis \|\| 600` (:193806-193815). |
+| 0x0300 | `NET_EXT_SKIN_DEFINITION_CHANGED` | `sdc` | `NetExtJsonChunk` slices of one JSON array `[skinId, skin]`, like the entity records | No. kn_brain owns KN's skin definitions and has no push yet. The subtype is ready for one. |
+| 0x0303 | `NET_EXT_SPEECH_BUBBLE` | `sb` SHOW_SPEECH_BUBBLE | `NetSpeechBubblePacket {uint32 ms (0 = 2500), uint8 sigh, char text[256]}` | No. The welcome text answers v10's `["sb", "welc", username]`, and the official game server writes it. It is not in the bundle. |
+
+Existing subtypes and packets the link now also fills from official packets: `NET_PACKET_COMP_LOBBY` (`cd` / `cda`),
+`NET_EXT_LATEST_RANKED_MMR_CHANGE` (`lrmr`), `NET_EXT_GAME_ANNOUNCEMENT` (`gameAnnouncement`), `NET_PACKET_CHAT`
+`NET_CHAT_FOUND_JUNK` (`jnk`) and `NET_PACKET_SCRIPT_LOG` (`ksL`).
+
+Client consumers are in `client/src/net/s2c_events.c`:
+
+- `c` checks the player's class (active, `mdl` 2 with an animated `aID`). This client draws no class models yet
+  (`player_mesh.c` builds the default body for every class), so the clip has nothing to play on: it is logged at debug
+  level 1. Once a class model exists as a GLTF instance, `gltf_instance_play_clip(model, name, reps)` goes in
+  `on_player_anim`.
+- `sb` shows the bubble on `#txtBubble` with tags dropped, because `menu_show_speech_bubble` escapes its text. When
+  `sigh` is set it first plays `sigh_0` or `sigh_1` at 0.2.
+- `sdc` is applied by `viewer_skin_define` (`client/src/viewer/viewer_skin_define.c`). It maps the fields as
+  `tools/ui-import/gen_viewer_store.js` does and repeats v10's entry setup (:116530): BACK gets `assetType` 2, HEAD gets
+  `assetType` 1, and a `free` item gets `noSpin` and is left out of the wheels. Not applied: a `template` key (the
+  generated table folds v10's template rows in already), a dye's colours, and a new index in the dropdown and wheel
+  lists. Models already built keep their look until rebuilt, as in v10.
+
+## Classification of the 110 names
+
+| Name | Wire | Handler | v10 behaviour | Class | KN mapping / reason |
+|---|---|---|---|---|---|
+| RPC_SUCCESS | `_0` | :111438 (socket) | resolves the rpc promise | by name | `account_scoped`; krunker_net.c matches the rpc |
+| RPC_ERROR | `_1` | :111438 (socket) | rejects the rpc promise | by name | as above |
+| FORCE_PING | `fp` | none | no handler registered in 10.0.3 | irrelevant | nothing to do |
+| GAME_INSTANCE_ID | `inst-id` | :257259 | fetches game info for the menu's region label | KN equivalent | the seek result already names the game (krunker_net.c) |
+| REDEEM_VOUCHER_RESPONSE | `vr` | :253771 | voucher window result | KN equivalent | vouchers are kn_brain's |
+| ADD_MAIL | `kml` | :253788 | mail window data | KN equivalent | kn_brain |
+| READY | `ready` | :261397 | news maps, register-ad popup, then `send("sb", "welc", username)` (:261464); falsy: `socket.close()` | **ported** | sends `["sb", "welc", account name \| null]`; falsy raises `KRUNKER_LINK_EV_CLOSE` |
+| CLAN_RESPONSE | `cln` | :255453 | clan window | by name | `account_scoped` |
+| PURCHASE_RESPONSE | `pur` | :242316 | KR real-money purchase | irrelevant | no real-money store |
+| PURCHASE_PRODUCT_RESPONSE | `ppr` | :242357 | shop product purchase | KN equivalent | the shop is kn_brain's |
+| PURCHASE_PREMIUM_RESPONSE | `purprm` | :242434 | premium purchase | irrelevant | real money |
+| PURCHASE_BUNDLE_RESPONSE | `purb` | :242470 | bundle purchase | irrelevant | real money |
+| UPDATE_PREMIUM_AMOUNT | `uprm` | :242710 | `account.premiumT` | KN equivalent | kn_brain account |
+| PURCHASE_RESPONSE_2 | `purbp` | windows[5].purchaseRes :248266 | battle pass purchase | KN equivalent | the pass on the official socket is `bpdl` / `bppd` (by name); purchases are not offered |
+| PURCHASE_LEVEL_RESPONSE | `purbpl` | windows[5].purchaseLvlRes :248160 | pass level purchase | KN equivalent | as above |
+| CLAIM_ITEM_RESPONSE | `bpclmr` | windows[5].claimItemRes :248052 | pass claim | KN equivalent | as above |
+| SHOW_SPEECH_BUBBLE | `sb` | :261181 | menu mascot bubble, `ms \|\| 2500`, optional sigh | **ported** | `NET_EXT_SPEECH_BUBBLE` |
+| CLAN_LEAVE_RESPONSE | `clnL` | :255456 | clan window | KN equivalent | kn_brain clans |
+| WARS_CLAN | `warsClan` | :255551 | `territorialWars.setClanInfo`, then once per game a "Turf Wars / Territory controlled by X" textPopup 1 s after entering | open | needs hooks in krunker_link.c's `en` and `init` (the popup waits until we entered) and the Turf Wars HUD state; KN's own Turf Wars is server/src/accounts.c |
+| UPLOAD_RESPONSE | `upR` | :255675 | upload window text | KN equivalent | kn_brain uploads |
+| UPLOAD_PROFILE_RESPONSE | `upPR` | :255687 | profile picture uploaded | KN equivalent | kn_brain |
+| SPIN_RESPONSE | `spin` | :254882 | prize wheel result | KN equivalent | spins are kn_brain's (spin_wheel.c) |
+| SAVE_SPIN_HISTORY | `spinH` | :254698 | spin history popup | KN equivalent | kn_brain |
+| SPIN_WHEEL_RESPONSE | `spinW` | :254991 | a map spinner object's spin: `updateSpinner(uid, ..., skin)`, funds and skin to the spinner | open | the map's SPIN WHEEL objects have no KN spinner state or animation yet (the interact `cnfm` 2 is translated, krunker_link_world.c) |
+| SPIN_KR | `spinKR` | :255333 | free KR spin | KN equivalent | kn_brain daily spin |
+| PURCHASE_ERROR | `pErr` | window.purchaseError :243648 | purchase error popup | irrelevant | real money |
+| UNBOX_MESSAGE | `unb` | :254321 | chat line "X unboxed [item]" (showUnboxings) | open | needs a client chat composer for `windows.store.unboxed` with store names and rarity colours (like hud_ui.c's found line) |
+| UNBOX_MESSSAGE_S | `unbS` | :254331 | chat line "<player> unboxed [item]" | open | as above |
+| UPDATE_FUNDS | `uf` | :242199 | account funds / junk | by name | `account_scoped` |
+| SET_DEBUG | `debug` | :258527 | developer debug mode line | irrelevant | developer only |
+| SET_EXPERIMENTAL | `exf` | :258490 | developer flag line | irrelevant | developer only |
+| PLAYER_ANIM | `c` | :257769 | `playClip(player, animList[i], reps \|\| 1)` on the class model | **ported** | `NET_EXT_PLAYER_ANIM`, sent by KN's server too; no class model drawn yet (see above) |
+| ADD_TRADE_CHAT | `tch` | :259539 | trade window chat | other agent | trade |
+| INTER_PROG | `p` | :259394 | spectated player's interact bar, sent to `specStream` viewers (:222279) | open | KN's bar reads the local player only (ui_interact.c); needs a spectate value and a server send per spectator target |
+| INTER_M_PROG | `mp` | :259398 | spectated player's charge bar (:222288) | open | as above (build_ui.c) |
+| NEW_PASS_RESPONSE | `upp` | :244558 | password change | irrelevant | the official account's auth is FRVR's |
+| ADD_DEBUG_POING | `dbgp` | :241808 | debug sphere | irrelevant | developer view |
+| CRAFT_RESPONSE | `crftr` | windows[13].craftRes :249907 | crafting window | KN equivalent | kn_brain |
+| CUSTOM_NETWORK_MESSAGE | `sd` | :241493 | `mainScript.onNetworkMessage(id, data)` | open | KN has `NET_PACKET_SCRIPT_MSG`, but its body is `ks_serialize` data built by the KrunkScript VM; translating msgpack to it belongs with KrunkScript |
+| CONSOLE_LOG | `clog` | console.log | developer log | irrelevant | nothing shown |
+| OPEN_MAIL | `rml` | :253782 | mail window | KN equivalent | kn_brain |
+| UPDATE_MAIL | `gmc` | :253785 | mail count | KN equivalent | kn_brain |
+| UPDATE_CHALLENGES | `chg` | :255485 | challenge progress | by name | `account_scoped` |
+| UPDATE_CHALLENGES_PROGRESS | `uchp` | :255501 | challenge progress | by name | `account_scoped` |
+| SOCKET_PING_RESULT | `pir` | :258337 | empty handler | irrelevant | nothing to do |
+| CHALLENGE_COMPLETED | `chgC` | :255516 | end-screen challenge card | by name | `account_scoped` |
+| COUNTRY_FLAG_UPDATE | `flgr` | :255545 | profile flag | KN equivalent | kn_brain profile |
+| BADGE_UPDATE | `bdgr` | :255573 | profile badge | KN equivalent | kn_brain |
+| BADGE_CLAIM_RESPONSE | `cbdgr` | :255580 | badge claimed popup | KN equivalent | kn_brain |
+| BADGE_CLAIM_MULTI_RES | `nbdgr` | :255586 | badges unlocked popup | KN equivalent | kn_brain |
+| HIDE_STATUS | `hdsr` | :255593 | profile hide status | KN equivalent | kn_brain |
+| PREMIUM_RESPONSE | `prmR` | :255424 | windows[13].resp | KN equivalent | kn_brain |
+| ALIAS_RESPONSE | `nmeR` | :255429 | windows[4].aResp (alias change) | KN equivalent | kn_brain |
+| TRADE_RESPONSE | `trd` | :253238 | trade flow | other agent | trade |
+| SHOW_POPUP | `pRes` | :252578 | generic success / info / error popup | KN equivalent | the popups of KN's own windows; no sender in the bundle's game code |
+| LOADING_POPUP | `lmsg` | :252589 | loading popup | KN equivalent | as above |
+| ANNOUNCEMENT | `ann` | :244311 | empty handler | irrelevant | nothing to do |
+| UPDATE_TRADE_RESPONSE | `utrd` | :253308 | trade items | other agent | trade |
+| UPDATE_TRADE_CURRENCY_RESPONSE | `utrdc` | :253316 | trade currency | other agent | trade |
+| TRADE_A_RESPONSE | `atrd` | :253269 | trade done | other agent | trade |
+| TWITCH_DROPS_RESPONSE | `twitchDropsResponse` | :255459 | Twitch drops | irrelevant | third-party linking |
+| TWITCH_REMOVE_RESPONSE | `twitchRemoveResponse` | :261619 | Twitch unlink | irrelevant | third-party linking |
+| TWITCH_VERIFY_RESPONSE | `twitchVerifyResponse` | :261606 | Twitch link | irrelevant | third-party linking |
+| DISCORD_LINK_RESULT | `dlnkR` | :244326 | Discord link result popup | KN equivalent | answers `dlnkW`, which this client never sends on the official socket (KN's Discord link is kn_brain's, EXT 0x0401) |
+| NFT_RESPONSE | `nftR` | :252555 | NFT claim popup | irrelevant | web3 |
+| PROMOS_RESPONSE | `pdR` | :255462 | promos list | irrelevant | live ops |
+| DEDI_BUY_RESPONSE | `dsrvl` | :255465 | dedicated server purchase | irrelevant | real money (KN hosting is kn_brain's) |
+| FRIENDS_LIST_RESPONSE | `gfrnd` | :255468 | profile friends list | KN equivalent | kn_brain / event bus |
+| VOTE_MAP | `vm` | window.voteMap :257932 | map up / down vote | KN equivalent | community map votes go through kn_brain |
+| UPDATE_SETTINGS | `loadS` | :244091 | cloud settings import | KN equivalent | settings are local / kn_brain |
+| AI_PARTS | `aip` | AI.syncParts :206506 (sent :206566) | AI part glow, hidden nodes, held clip, solid pose | other agent | KrunkScript AI parts (`shared/src/ai_parts.c`, in progress this round) |
+| EDIT_MAP | `edMp` | :259803 | opens the editor on a map | open | low value: opens `/editor.html` in a new tab; KN would open its own editor with the map |
+| LOAD_XSOLLA | `xst` | :242164 | payment widget | irrelevant | real money |
+| SYNC_P_CON_DATA | `cd` | :256533 | the comp lobby table `{key: entry}` | **ported** | `NET_PACKET_COMP_LOBBY` CLEAR + SET per entry; KN's server already sends it (shared/src/comp_lobby.c) |
+| SYNC_P_CON_OBJ | `cda` | :256526 | one comp lobby entry, null removes | **ported** | `NET_PACKET_COMP_LOBBY` SET / REMOVE |
+| CON_UID | `uid` | :261633 | our lobbyPlayers key; `conUID_` for a reconnect's `clientUID` | **ported** | the comp lobby's own entry (uid 0 = the INIT client_id); the table is sent again when it comes late. Reconnect `clientUID` is not used (krunker_net.c joins fresh) |
+| ADD_HELPER_C | `hlpr` | render.addHelperC :232576 | debug helper | irrelevant | developer view |
+| DEBUG_COMPLEX_HITBOX | `dch` | :257798 | debug hitbox view | irrelevant | developer view |
+| ADD_HITBOX_HELPER | `hbdb` | :258441 | debug hitbox boxes | irrelevant | developer view |
+| SCRIPT_LOG | `ksL` | :261492 | console `[KRUNKSCRIPT] args.join(" ")` | **ported** | `NET_PACKET_SCRIPT_LOG` (KN's server sends it from server/src/ks_server_host.c) |
+| UPDATE_ASSET_ID | `uai` | :257784 | `players.updateAssetID`: a class model's asset changes | open | needs class models (mdl 1 / 2), which player_mesh.c does not draw |
+| FOUND_JUNK | `jnk` | :242285 (sent :221143) | "You found [x.xx] Junk" line, junk balance | **ported** | `NET_PACKET_CHAT` `NET_CHAT_FOUND_JUNK`, the line KN's server sends (shared/src/triggers.c `game_found_junk`); the balance stays the account frames' |
+| AVAILABLE_BUNDLE_DATA | `gbdr` | :242875 | store bundle ad | irrelevant | real money |
+| ALL_BUNDLE_DATA | `abd` | :242852 | store bundle ad | irrelevant | real money |
+| FORCE_VIDEO_AD | `vad` | window.forceVideoAd :262361 | video ad | irrelevant | ads |
+| OPEN_METAMASK_AUTH | `vmm` | :252520 | MetaMask sign-in | irrelevant | web3 |
+| METAMASK_LINK_RESPONSE | `vmms` | :252541 | MetaMask linked | irrelevant | web3 |
+| METAMASK_UNLINK_RESPONSE | `rmm` | :252548 | MetaMask unlinked | irrelevant | web3 |
+| BOTS_POPUP | `bcfg` | window.botsPopup :254234 | developer bot debugging popup | irrelevant | developer only |
+| UPDATE_COUNTRY | `cntry` | :242964 | empty handler | irrelevant | nothing to do |
+| DATA_LOADED | `bpdl` | :255599 | battle pass data | by name | `account_scoped` (battlepass_ui.c) |
+| RECIEVE_DOUBLE_XP | `rrqdxp` | :262335 | XP doubled after an ad | irrelevant | ad reward |
+| SYNC_BP_PROG | `bppd` | :255602 | battle pass progress | by name | `account_scoped` |
+| SURVEY_BUNDLE_RESPONSE | `svybRes` | :242299 | survey reward | irrelevant | surveys |
+| GAME_ANNOUNCEMENT | `gameAnnouncement` | :244564 | announcement banner | **ported** | `NET_EXT_GAME_ANNOUNCEMENT`: the message and the `ranked-queue` action's label (:133490). Not carried: target, trackId, bundleId, displayIds, the other actions (`profile`, `shop`, `events`, `raffle`, `leaderboards`, `ranked`, `login`, `register`, :133340) |
+| GAME_SURVEY | `gameSurvey` | :244851 | survey toast | irrelevant | surveys |
+| SKIN_DEFINITION_CHANGED | `sdc` | :261708-261714 | `store.skins[skinId] = skin` + entry setup (:116530) | **ported** | `NET_EXT_SKIN_DEFINITION_CHANGED` -> `viewer_skin_define` |
+| SPIN_WHEELS_UPDATED | `swu` | :261715 | `store.applySpinData`, prize wheel redraw | KN equivalent | the wheels this client shows are kn_brain's (shared/src/store_spins_table.c) |
+| DEBUG_RAYCAST | `debug_rc` | :261745 | collision debug drawing | irrelevant | developer view |
+| POPUP_REGISTER_REWARDS | `prr` | :242717 | register-rewards popup | irrelevant | FRVR registration promo |
+| LATEST_RANKED_MMR_CHANGE | `lrmr` | :255609 | end-screen rank card values when the change is non-zero | **ported** | `NET_EXT_LATEST_RANKED_MMR_CHANGE` (rp_change 0: the official balance comes as `ub`) |
+| GUEST_EARNED_REWARDS | `ger` | :133742 | refetches the FRVR guest profile | KN equivalent | about krunker.io's guest; KN's own `ger` is `NET_EXT_KN_GUEST_EARNED` from server/src/accounts.c for kn_brain's guest |
+| DAILY_SPIN_CLAIM_RESPONSE | `dslr` | :261748 | daily spin ticket | by name | `account_scoped` (v10_daily_spin.c) |
+| UPDATE_LOTTERY_ENTRIES | `lotEnt` | :255149 | raffle window entries | KN equivalent | the raffle is gapi / kn_brain's |
+| LOTTERY_PRIZE_WON | `lotWin` | :255154 | chat line "<player> won <prize> in the raffle!" | open | needs a client chat composer with store names (as `unb`) |
+| LOTTERY_PRIZE_WON_PLAYER | `lotWinP` | :255184 | our prize into the account | KN equivalent | kn_brain account |
+| LOTTERY_STARTED | `lotStart` | :255225 | raffle window refresh | KN equivalent | gapi / kn_brain |
+| LOTTERY_ENDED | `lotEnd` | :255230 | raffle window refresh | KN equivalent | gapi / kn_brain |
+| CHARGE_CONSENT_REQUEST | `chreq` | :257673 (sent :221249) | "This game wants to charge you N KR" modal, 15 s, answer `chrsp` | open | EXT 0x0500 / 0x0501 exist with no consumer: KrunkScript KR charges are not ported (doc/v10/net.md section 6). Without an answer the server times out after 15 s and declines |
+| PLAYER_POSE | `pz` | :261743 | `players.setPose` | other agent | poses (`NET_EXT_PLAYER_POSE`, krunker_link_script.c) |
+
+Totals: 11 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`),
+10 by name, 36 KN equivalent, 35 irrelevant, 7 other agent, 11 open.
+
+## Open work
+
+- Class models (`mdl` 1 sprite / 2 model, `aID`, `animS`, `mdlS`, `mdlYO`, `mdPY` / `mdPS`, `mdlDr`, :194228-194266)
+  in player_mesh.c. Until they exist, `c` and `uai` reach the client but have nothing to animate or swap.
+- The spectated player's interact and charge bars (`p` / `mp`), on both the server and the client.
+- Chat lines with store items: `unb`, `unbS`, `lotWin`.
+- `warsClan`'s Turf Wars popup and clan state, `spinW` map spinners, `sd` KrunkScript network messages, `chreq` KR
+  charges.
+- `edMp`, which would open KN's editor with the map.

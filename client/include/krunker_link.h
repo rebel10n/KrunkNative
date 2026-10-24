@@ -343,6 +343,15 @@ typedef struct {
     int round_ended;
     KrunkerLinkRecent recent[KRUNKER_LINK_RECENT];
     unsigned recent_total;
+    // the comp lobby table ("cd" / "cda", krunker_link_s2c.c): v10 keys game.lobbyPlayers by connection (the key the
+    // server gave us is CON_UID "uid", kept in con_uid), our comp menu by uid. Each key gets a uid the first time it
+    // shows (ours: the INIT's client_id 0, the uid comp_ui.c takes as ours) and keeps it; the entries as last
+    // emitted are kept so a "uid" after the table re-emits it with our entry under the right uid.
+    char con_uid[32];
+    char lobby_key[KRUNKER_LINK_MAX_PLAYERS][32];
+    NetCompLobbyEntry lobby_entry[KRUNKER_LINK_MAX_PLAYERS];
+    uint8_t lobby_live[KRUNKER_LINK_MAX_PLAYERS]; // 1: the key's entry is in the table (a "cda" null removed it)
+    int lobby_count;
 } KrunkerLink;
 
 // Copies `len` bytes of server or wire text into dst (NUL-terminated, at most dst_len - 1 bytes), with every byte

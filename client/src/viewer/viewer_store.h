@@ -177,6 +177,15 @@ const ViewerDye *viewer_dye(int index);
 ViewerSkin *viewer_skin_edit(int index);
 ViewerDye *viewer_dye_edit(int index);
 void viewer_skin_edits_clear(void);
+// v10.0.3 "sdc" SKIN_DEFINITION_CHANGED: the store entry the server defined for `index` (0..VIEWER_SKIN_INDEX_MAX),
+// zeroed when new; viewer_skin() returns it instead of the table row from then on. NULL out of range / out of slots.
+// viewer_skin_define.c fills it from the server's JSON (viewer_skin_define).
+#define VIEWER_SKIN_INDEX_MAX 65535
+ViewerSkin *viewer_skin_define_slot(int index);
+// The server's store.skins[index] = skin (a JSON object as v10 keeps it): fills the index's definition slot
+// (client/src/viewer/viewer_skin_define.c). 1 = applied, 0 = not an object / out of range / out of slots.
+struct cJSON;
+int viewer_skin_define(int index, const struct cJSON *skin);
 // weapons.js charm mount of a weapon id, NULL when the weapon takes no charm
 const ViewerCharmMount *viewer_charm_mount(int weapon_id);
 // The option list of a dropdown, NULL when there is none (e.g. a weapon without skins).

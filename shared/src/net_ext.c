@@ -19,3 +19,17 @@ int net_ext_unpack(const void *payload, const uint16_t length, uint16_t *subtype
     if (body_length) *body_length = (uint16_t) (length - NET_EXT_HEADER_SIZE);
     return 1;
 }
+
+// v10's player clip list (deob-10.0.3.js:21165): PLAYER_ANIM's clipIndex is a position in it (players.playClip :193810)
+static const char *const k_player_clips[NET_PLAYER_CLIP_COUNT] = {"Idle", "Move", "MoveFast", "Jump", "Melee", "Shoot", "Crouch"};
+
+const char *net_player_clip_name(const int clip) {
+    return clip >= 0 && clip < NET_PLAYER_CLIP_COUNT ? k_player_clips[clip] : NULL;
+}
+
+int net_player_clip_index(const char *name) {
+    for (int i = 0; name && i < NET_PLAYER_CLIP_COUNT; i++) {
+        if (!strcmp(k_player_clips[i], name)) return i;
+    }
+    return -1;
+}

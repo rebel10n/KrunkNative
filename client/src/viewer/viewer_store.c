@@ -14,7 +14,21 @@ static struct {
     ViewerDye dye[VIEWER_MAX_EDITS];
 } g_edits;
 
+// v10.0.3 "sdc" SKIN_DEFINITION_CHANGED (deob-10.0.3.js:261708-261714): the server replaced store.skins[skinId] at
+// run time (client/src/viewer/viewer_skin_define.c parses it); the definition stands in for the table row from then
+// on, under the dev edits. An index past the table is a new item: viewer_skin finds it, the lists built from the
+// table (g_viewer_skin_count, the option lists) do not.
+#define VIEWER_MAX_DEFINES 256
+static struct {
+    int count;
+    int skin_index[VIEWER_MAX_DEFINES];
+    ViewerSkin skin[VIEWER_MAX_DEFINES];
+} g_defines;
+
 static const ViewerSkin *table_skin(const int index) {
+    for (int i = 0; i < g_defines.count; i++) {
+        if (g_defines.skin_index[i] == index) return &g_defines.skin[i];
+    }
     return index >= 0 && index < g_viewer_skin_count ? &g_viewer_skins[index] : NULL;
 }
 
@@ -23,6 +37,17 @@ const ViewerSkin *viewer_skin(const int index) {
         if (g_edits.skin_index[i] == index) return &g_edits.skin[i];
     }
     return table_skin(index);
+}
+
+ViewerSkin *viewer_skin_define_slot(const int index) {
+    if (index < 0 || index > VIEWER_SKIN_INDEX_MAX) return NULL;
+    for (int i = 0; i < g_defines.count; i++) {
+        if (g_defines.skin_index[i] == index) return &g_defines.skin[i];
+    }
+    if (g_defines.count >= VIEWER_MAX_DEFINES) return NULL;
+    g_defines.skin_index[g_defines.count] = index;
+    memset(&g_defines.skin[g_defines.count], 0, sizeof(g_defines.skin[0]));
+    return &g_defines.skin[g_defines.count++];
 }
 
 ViewerSkin *viewer_skin_edit(const int index) {
