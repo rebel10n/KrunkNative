@@ -4,6 +4,7 @@
 // coverage doc gives each one's reason). Line numbers: deob-10.0.3.js (Krunker_v10.0.3/deob/game.deob.js); the
 // handler table is the iíÍíiïï object at :261708.
 //   c      PLAYER_ANIM          [sid, clipIndex, reps]   NET_EXT_PLAYER_ANIM (iíîiiìï :257769 -> players.playClip :193806)
+//   uai    UPDATE_ASSET_ID      [sid, assetTxt]          NET_EXT_PLAYER_ASSET_ID (iíiïiiï :257784 -> players.updateAssetID :197964)
 //   ready  READY                [ready]                  "sb" ["welc", username] back (iiîîíìí :261397, the send :261464);
 //                                                        ready falsy: the live client closes the socket (KRUNKER_LINK_EV_CLOSE)
 //   sb     SHOW_SPEECH_BUBBLE   [html, ms, sigh]         NET_EXT_SPEECH_BUBBLE (iíììiîì :261181)
@@ -15,7 +16,20 @@
 //   gameAnnouncement [{message, actions, ...}]           NET_EXT_GAME_ANNOUNCEMENT (iîííiîí :244564)
 //   jnk    FOUND_JUNK           [balance, amount]        NET_PACKET_CHAT NET_CHAT_FOUND_JUNK "You found [x.xx] Junk" (iïíííîì :242285)
 //   ksL    SCRIPT_LOG           [isError, args]          NET_PACKET_SCRIPT_LOG (iíiïïiï :261492): the map script's console line
+//   sd     CUSTOM_NETWORK_MESSAGE [id, data]             NET_PACKET_SCRIPT_MSG (iïíiiií :241493 -> mainScript.onNetworkMessage):
+//                                                        the server script's GAME.NETWORK.send / broadcast, data's "V_" keys
+//                                                        stripped (ks_net_body_from_official, shared/src/ks/ks_net_official.c)
+//   p / mp INTER_PROG / INTER_M_PROG [prog]              NET_EXT_PLAYER_INTER_PROG: the spectated player's bars (:259394 / :259398)
+//   unb    UNBOX_MESSAGE        [name, itemIndex, kr]    NET_EXT_UNBOX_MESSAGE NAMED (iíïîiìí :254321)
+//   unbS   UNBOX_MESSSAGE_S     [playerId, skinIndex]    NET_EXT_UNBOX_MESSAGE PLAYER (iíiíïíi :254331)
+//   lotWin LOTTERY_PRIZE_WON    [lotId, entryId, prize, playerId] NET_EXT_LOTTERY_PRIZE_WON (iíiìïïi :255154)
+//   spinW  SPIN_WHEEL_RESPONSE  [socketId, uid, err, randNum, skin, funds] NET_EXT_SPIN_WHEEL_RESPONSE (iiîïiiì :254991)
+//   chreq  CHARGE_CONSENT_REQUEST [id, amount, modal]    NET_EXT_CHARGE_CONSENT_REQUEST (iîiîiïi :257673); its answer
+//                                                        NET_EXT_CHARGE_CONSENT_RESPONSE goes out as "chrsp" [id(, 1)] (:257700)
+//   warsClan WARS_CLAN          [id, name, logo, color]  NET_EXT_WARS_CLAN (iíìïïíì :255551); init's syncData.warsClan too (:256999)
+//   edMp   EDIT_MAP             [mapJson]                NET_EXT_KN_OFFICIAL_EDIT_MAP slices: the editor opens it (iiíïìiì :259803)
 #include "krunker_link_internal.h"
+#include <ks_net.h>
 #include <net_ext.h>
 #include <math.h>
 #include <stdio.h>
@@ -81,6 +95,15 @@ static void on_player_anim(KrunkerLink *l, const KrunkerFrame *f) {
     const NetPlayerAnimPacket p = {.sid = (int32_t) krunker_num(arg(f, 0), -1), .clip = (uint8_t) clip,
                                    .reps = (float) (reps != 0 && !isnan(reps) ? reps : 1.0)}; // `|| 1`
     emit_ext(l, NET_EXT_PLAYER_ANIM, &p, sizeof(p));
+}
+
+// "uai" [sid, assetTxt]: updateAssetID(findBySid(sid), assetTxt) does `assetTxt += ""` and needs config.mdl and a
+// non-empty text (the client's consumer checks the class, client/src/net/s2c_events.c)
+static void on_update_asset_id(KrunkerLink *l, const KrunkerFrame *f) {
+    NetPlayerAssetIdPacket p = {.sid = (int32_t) krunker_num(arg(f, 0), -1)};
+    key_string(arg(f, 1), p.asset, sizeof(p.asset)); // a string or a number as JS String() spells it
+    if (!p.asset[0]) return;
+    emit_ext(l, NET_EXT_PLAYER_ASSET_ID, &p, sizeof(p));
 }
 
 // ---------------------------------------------------------------- the menu's speech bubble
@@ -335,11 +358,195 @@ static void on_script_log(KrunkerLink *l, const KrunkerFrame *f) {
     krunker_link_emit(l, NET_PACKET_SCRIPT_LOG, payload, (uint16_t) (1 + len));
 }
 
+// ["sd", id, data] -> onNetworkMessage(id, data): one SCRIPT_MSG (KsNetChunkHeader slices) like our server's send_body
+static void on_network_message(KrunkerLink *l, const KrunkerFrame *f) {
+    static uint8_t body[KS_NET_MAX_BODY];
+    static uint16_t seq; // one official session at a time: the link's message counter
+    const int len = ks_net_body_from_official(arg(f, 0), arg(f, 1), body, sizeof(body));
+    if (len < 0) return;
+    const size_t slice = (size_t) KS_NET_CHUNK_DATA, count = ((size_t) len + slice - 1) / slice; // ks_net_make_chunk's slices
+    if (count > 255) return;
+    const uint16_t msg = seq++;
+    for (size_t i = 0; i < count; i++) {
+        uint8_t out[NET_MAX_PAYLOAD];
+        const size_t at = i * slice, n = (size_t) len - at < slice ? (size_t) len - at : slice;
+        const KsNetChunkHeader h = {.msg_seq = msg, .chunk = (uint8_t) i, .chunk_count = (uint8_t) count};
+        memcpy(out, &h, sizeof(h));
+        memcpy(out + sizeof(h), body + at, n);
+        krunker_link_emit(l, NET_PACKET_SCRIPT_MSG, out, (uint16_t) (sizeof(h) + n));
+    }
+}
+
+// ---------------------------------------------------------------- the spectated player's bars
+
+// "p" [prog] -> iìììîíí (:259394): interactProg.display = prog && prog > 0, .prog = prog || 0; "mp" [prog] -> iiííïïi
+// (:259398) the same for interactMProg (the wire has no overCharged flag: display = prog > 0). The server sends them only
+// to a connection whose specStream is that player (:222279 / :222288).
+static void on_inter_prog(KrunkerLink *l, const KrunkerFrame *f, const uint8_t bar) {
+    const double prog = krunker_num(arg(f, 0), 0);
+    const NetInterProgPacket p = {.bar = bar, .prog = (float) (isnan(prog) ? 0.0 : prog)};
+    emit_ext(l, NET_EXT_PLAYER_INTER_PROG, &p, sizeof(p));
+}
+
+// ---------------------------------------------------------------- unbox / raffle chat lines
+
+// players.findById(id) (:198775): the player whose id (its "0" socket id) === id; its sid, -1 none
+static int sid_by_id(const KrunkerLink *l, const KrunkerValue *v) {
+    const char *id = krunker_str(v);
+    for (int i = 0; id && id[0] && i < l->player_count; i++) {
+        if (!strcmp(l->players[i].id, id)) return l->players[i].sid;
+    }
+    return -1;
+}
+
+// A store index as JS indexes store.skins with it: a whole number >= 0, or a string of one ("812"); -1 otherwise
+static int32_t store_index(const KrunkerValue *v) {
+    double d = krunker_num(v, -1);
+    if (krunker_is(v, KRUNKER_STR)) {
+        char *end = NULL;
+        d = strtod(krunker_str(v), &end);
+        if (!end || *end || end == krunker_str(v)) return -1;
+    }
+    return d >= 0 && d < INT32_MAX && d == floor(d) ? (int32_t) d : -1;
+}
+
+// "unb" [name, itemIndex, kr] (iíïîiìí): the unboxer by name; a truthy kr: the Free KR item store.freeKR[itemIndex]
+static void on_unbox(KrunkerLink *l, const KrunkerFrame *f) {
+    NetUnboxMessagePacket p;
+    memset(&p, 0, sizeof(p));
+    p.uid = -1;
+    p.kind = NET_UNBOX_NAMED;
+    key_string(arg(f, 0), p.name, sizeof(p.name));
+    p.item = store_index(arg(f, 1));
+    const double kr = krunker_num(arg(f, 2), 0);
+    p.kr = truthy(arg(f, 2)) && kr > 0 && kr < INT32_MAX ? (int32_t) kr : 0;
+    if (p.item < 0) return; // store.skins[undefined] / freeKR[undefined]: nothing shows
+    emit_ext(l, NET_EXT_UNBOX_MESSAGE, &p, sizeof(p));
+}
+
+// "unbS" [playerId, skinIndex] (iíiíïíi): `if (skin && player)` (the third argument, false, is not read)
+static void on_unbox_player(KrunkerLink *l, const KrunkerFrame *f) {
+    const NetUnboxMessagePacket p = {.uid = sid_by_id(l, arg(f, 0)), .item = store_index(arg(f, 1)), .kind = NET_UNBOX_PLAYER};
+    if (p.uid < 0 || p.item < 0) return;
+    emit_ext(l, NET_EXT_UNBOX_MESSAGE, &p, sizeof(p));
+}
+
+// "lotWin" [lotteryId, entryId, prize {type, ref, quantity}, playerId] (iíiìïïi): a winner in this game
+// (findById(playerId)); the prize as the line names it. A quantity that is no number reads 0 here.
+static void on_lottery_won(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *prize = arg(f, 2);
+    NetLotteryPrizePacket p;
+    memset(&p, 0, sizeof(p));
+    p.uid = sid_by_id(l, arg(f, 3));
+    if (p.uid < 0 || !krunker_is(prize, KRUNKER_MAP)) return; // no winner here / prize.type of a non-object throws
+    const char *type = krunker_str(krunker_get(prize, "type"));
+    p.type = !type ? NET_PRIZE_OTHER : !strcmp(type, "skin") ? NET_PRIZE_SKIN : !strcmp(type, "currency") ? NET_PRIZE_CURRENCY
+           : !strcmp(type, "subscription") ? NET_PRIZE_SUBSCRIPTION : NET_PRIZE_OTHER;
+    js_join_item(krunker_get(prize, "ref"), p.ref, sizeof(p.ref)); // `${ref}`
+    const double q = krunker_num(krunker_get(prize, "quantity"), 0);
+    p.quantity = isnan(q) ? 0 : q;
+    emit_ext(l, NET_EXT_LOTTERY_PRIZE_WON, &p, sizeof(p));
+}
+
+// ---------------------------------------------------------------- map prize wheels
+
+// "spinW" [socketId, uid, error, randNum, skinIndex, funds] (iiîïiiì): `if (!error)`; ours (socketId == our socket's
+// id) gives the account the skin and its KR (the client checks it has an account); every client spins the wheel.
+static void on_spin_wheel(KrunkerLink *l, const KrunkerFrame *f) {
+    if (truthy(arg(f, 2))) return;
+    char socket[64];
+    key_string(arg(f, 0), socket, sizeof(socket));
+    NetSpinWheelPacket p;
+    memset(&p, 0, sizeof(p));
+    const double rand_num = krunker_num(arg(f, 3), 0), funds = krunker_num(arg(f, 5), 0);
+    p.uid = (int32_t) krunker_num(arg(f, 1), -1);
+    p.rand = (float) (isnan(rand_num) ? 0.0 : rand_num);
+    p.skin = store_index(arg(f, 4));
+    p.mine = (uint8_t) (socket[0] && l->socket_id[0] && !strcmp(socket, l->socket_id));
+    p.funds = isnan(funds) ? 0 : funds;
+    if (p.uid < 0) return; // spinners[i].uid == uid: no spinner has a negative uid
+    emit_ext(l, NET_EXT_SPIN_WHEEL_RESPONSE, &p, sizeof(p));
+}
+
+// ---------------------------------------------------------------- KR charge consent
+
+// "chreq" [id, amount, modal] (iîiîiïi): `if (account)`, the prompt (the client: #chargeModal or #chargeConfirm, closed
+// unanswered after 15 s). Our account on this socket is the one "a" ACCOUNT_RESPONSE named (account_name).
+static void on_charge_request(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!l->account_name[0]) return;
+    const double amount = krunker_num(arg(f, 1), 0);
+    const NetChargeConsentRequestPacket p = {.amount = isnan(amount) ? 0 : amount, .id = (int32_t) krunker_num(arg(f, 0), 0),
+                                             .modal = (uint8_t) truthy(arg(f, 2))};
+    emit_ext(l, NET_EXT_CHARGE_CONSENT_REQUEST, &p, sizeof(p));
+}
+
+int krunker_link_s2c_send(KrunkerLink *l, const uint16_t subtype, const uint8_t *body, const uint16_t length) {
+    if (subtype != NET_EXT_CHARGE_CONSENT_RESPONSE) return -1;
+    if (length < sizeof(NetChargeConsentResponsePacket)) return 0;
+    NetChargeConsentResponsePacket r;
+    memcpy(&r, body, sizeof(r));
+    // iïííìíì (:257700): accept ["chrsp", id, 1], decline ["chrsp", id]
+    const KrunkerValue args[] = {KRUNKER_V_NUM(r.id), KRUNKER_V_NUM(1)};
+    return krunker_link_send(l, krunker_c2s_wire(KRUNKER_C2S_CHARGE_CONSENT_RESPONSE), args, r.accept ? 2 : 1);
+}
+
+// ---------------------------------------------------------------- Turf Wars
+
+static void emit_wars_clan(KrunkerLink *l, const int has, const KrunkerValue *id, const KrunkerValue *name, const KrunkerValue *logo,
+                           const KrunkerValue *color) {
+    NetWarsClanPacket p;
+    memset(&p, 0, sizeof(p));
+    p.has = (uint8_t) has;
+    if (has) {
+        p.clan_id = (int32_t) krunker_num(id, 0);
+        js_join_item(name, p.clan_name, sizeof(p.clan_name));
+        js_join_item(logo, p.clan_logo, sizeof(p.clan_logo));
+        js_join_item(color, p.banner_color, sizeof(p.banner_color));
+    }
+    emit_ext(l, NET_EXT_WARS_CLAN, &p, sizeof(p));
+}
+
+// "warsClan" [clan_id, clan_name, clan_logo, clan_banner_color] (iíìïïíì): clan_id != null ? the clan : null
+static void on_wars_clan(KrunkerLink *l, const KrunkerFrame *f) {
+    emit_wars_clan(l, !nil(arg(f, 0)), arg(f, 0), arg(f, 1), arg(f, 2), arg(f, 3));
+}
+
+// init (:256999): syncData.warsClan ? setClanInfo({its four fields}) : setClanInfo(null), every init. The client's INIT
+// already clears the clan (s2c_ui_on_init), so only a clan goes out, right after the INIT.
+void krunker_link_s2c_init(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *w = krunker_get(arg(f, 11), "warsClan");
+    if (truthy(w))
+        emit_wars_clan(l, 1, krunker_get(w, "clan_id"), krunker_get(w, "clan_name"), krunker_get(w, "clan_logo"),
+                       krunker_get(w, "clan_banner_color"));
+}
+
+// ---------------------------------------------------------------- the editor
+
+// "edMp" [mapJson] (iiíïìiì): `if (map)` the editor opens it (mapToEdit, window.open("/editor.html")). The JSON goes
+// to the client as sent, in NetExtBlobChunk slices; the client drops the objects' col / l false and opens its editor.
+static void on_edit_map(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *map = arg(f, 0);
+    if (!truthy(map) || !krunker_is(map, KRUNKER_STR)) return; // a non-string: JSON.parse throws, saveVal("[object ...]")
+    const char *text = krunker_str(map);
+    const size_t len = map->len, parts = (len + NET_EXT_BLOB_CHUNK_DATA - 1) / NET_EXT_BLOB_CHUNK_DATA;
+    if (parts > 65535) return;
+    uint8_t body[NET_EXT_BODY_MAX];
+    for (size_t p = 0; p < parts; p++) {
+        const size_t off = p * NET_EXT_BLOB_CHUNK_DATA;
+        const size_t n = len - off < (size_t) NET_EXT_BLOB_CHUNK_DATA ? len - off : (size_t) NET_EXT_BLOB_CHUNK_DATA;
+        const NetExtBlobChunk head = {(uint16_t) p, (uint16_t) parts};
+        memcpy(body, &head, sizeof(head));
+        memcpy(body + sizeof(head), text + off, n);
+        emit_ext(l, NET_EXT_KN_OFFICIAL_EDIT_MAP, body, (uint16_t) (sizeof(head) + n));
+    }
+}
+
 // ---------------------------------------------------------------- dispatch
 
 int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFrame *f) {
     switch (id) {
         case KRUNKER_S2C_PLAYER_ANIM: on_player_anim(l, f); return 1;
+        case KRUNKER_S2C_UPDATE_ASSET_ID: on_update_asset_id(l, f); return 1;
         case KRUNKER_S2C_READY: on_ready(l, f); return 1;
         case KRUNKER_S2C_SHOW_SPEECH_BUBBLE: on_speech_bubble(l, f); return 1;
         case KRUNKER_S2C_SYNC_P_CON_DATA: on_lobby_data(l, f); return 1;
@@ -350,6 +557,16 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_GAME_ANNOUNCEMENT: on_game_announcement(l, f); return 1;
         case KRUNKER_S2C_FOUND_JUNK: on_found_junk(l, f); return 1;
         case KRUNKER_S2C_SCRIPT_LOG: on_script_log(l, f); return 1;
+        case KRUNKER_S2C_CUSTOM_NETWORK_MESSAGE: on_network_message(l, f); return 1;
+        case KRUNKER_S2C_INTER_PROG: on_inter_prog(l, f, NET_INTER_BAR_INTERACT); return 1;
+        case KRUNKER_S2C_INTER_M_PROG: on_inter_prog(l, f, NET_INTER_BAR_CHARGE); return 1;
+        case KRUNKER_S2C_UNBOX_MESSAGE: on_unbox(l, f); return 1;
+        case KRUNKER_S2C_UNBOX_MESSSAGE_S: on_unbox_player(l, f); return 1;
+        case KRUNKER_S2C_LOTTERY_PRIZE_WON: on_lottery_won(l, f); return 1;
+        case KRUNKER_S2C_SPIN_WHEEL_RESPONSE: on_spin_wheel(l, f); return 1;
+        case KRUNKER_S2C_CHARGE_CONSENT_REQUEST: on_charge_request(l, f); return 1;
+        case KRUNKER_S2C_WARS_CLAN: on_wars_clan(l, f); return 1;
+        case KRUNKER_S2C_EDIT_MAP: on_edit_map(l, f); return 1;
 
         // Taken before the dispatch by name (krunker_link.c account_scoped -> io.account_frame -> the account UI)
         case KRUNKER_S2C_RPC_SUCCESS:

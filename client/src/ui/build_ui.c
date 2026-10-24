@@ -26,6 +26,9 @@
 #include <world.h>
 #include <render_settings.h>
 #include <cJSON.h>
+#include <s2c_events.h> // the spectated player's charge bar ("mp")
+#include <spectate.h>
+#include <net_ext.h>    // NET_INTER_BAR_*
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -251,9 +254,11 @@ void build_ui_render(Client *client) {
     const int in_game = me && me->active && me->weapon && !html_ui_is_menu_open() && !hud_ui_end_screen_up();
     const int sc = g_bui.sc_on;
     const int wheel = !sc && in_game && me->select_build && me->weapon->build;
-    const double prog = sc ? g_bui.sc_prog : build_ui_charge_progress(me);
-    const int over = sc ? g_bui.sc_over : me && me->over_charged;
-    const int charge = (sc || in_game) && (prog > 0.0 || over);
+    // spectating: the followed player's interMProg as the server sends it ("mp", deob-10.0.3.js:259398, no overCharged)
+    const int spec = !sc && !in_game && client && spectate_active() && client->game.ready && !html_ui_is_menu_open() && !hud_ui_end_screen_up();
+    const double prog = sc ? g_bui.sc_prog : spec ? s2c_events_spectate_bar(NET_INTER_BAR_CHARGE) : build_ui_charge_progress(me);
+    const int over = sc ? g_bui.sc_over : !spec && me && me->over_charged;
+    const int charge = (sc || in_game || spec) && (prog > 0.0 || over);
     const ClientRenderSettings *rs = client_render_settings();
     const int cross = !sc && in_game && me->weapon->build && !me->select_build && rs && rs->crosshair_type == 0;
     const int show = wheel || charge || cross;

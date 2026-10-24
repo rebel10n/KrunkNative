@@ -17,6 +17,8 @@
 // All of it is shared by the native and web clients: main.c feeds GLFW events (the
 // emscripten GLFW port reports DOM keys as GLFW keys) and the page's focusChat events.
 #include <prop_hunt_client.h> // Prop Hunt keys
+#include <stalker_client.h> // the Stalker's taunt keys
+#include <stalker.h>
 #include "klog.h"
 #include <ui_logic.h>
 #include <player_names.h> // the local echo's own name (Hide player names)
@@ -81,8 +83,10 @@ static const char *const KEYBOARD_MAP[256] = {
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL,
 };
-// The `toggle: true` settings of v10.0.2's SETTINGS.list (settings order) offered by the
-// Toggle rows: value, "name [category header]" (windows[6].gen; ui/windows/controls-1.html).
+// The `toggle: true` settings of v10.0.3's SETTINGS.list (settings order) offered by the
+// Toggle rows: value, "name [category header]" (windows[6].gen, deob-10.0.3.js:248437-248444;
+// ui/windows/controls-1.html). Checked against deob-10.0.3.js:236845-241193 on 2026-10-24: the
+// same 92 entries in the same order with the same English labels.
 // v10 also lists the hidden per-weapon clones (scrollDir_0, ...); KrunkNative has no per-weapon
 // settings yet, so they are left out.
 static const char *const TOGGLE_SETTINGS[][2] = {
@@ -108,6 +112,7 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"textureAnim", "Texture Animations [Performance]"},
     {"objectAnim", "Object Animations [Performance]"},
     {"noPaintAnim", "Disable Animated Paints [Performance]"},
+    {"noVideoSkins", "Disable Video Skins [Performance]"}, // v10.0.3 (toggle: true, deob-10.0.3.js:237521)
     {"screenShake", "Screen Shake [Performance]"},
     {"weaponShine", "Weapons Shine [Performance]"},
     {"showExplo", "Show Explosions [Performance]"},
@@ -180,6 +185,7 @@ static const char *const TOGGLE_SETTINGS[][2] = {
 };
 
 // v7.1.4's CONTROLS.binds (src/libs/controls.js): every ControlBind(name, def, altDef), with
+// v10.0.3's names and defaults (deob-10.0.3.js:235041-235093, all 82 checked 2026-10-24), with
 // the bind / array index the controls window addresses it by and the KrunkNative bind id
 // the game side acts on (-1: stored and shown, not acted on yet). Storage keys are v7's:
 // cont_<name> and cont_<name>_alt (shoot/aim are shoot1Key/aim1Key: v3.1.1's shootKey /
@@ -306,7 +312,9 @@ static const V7Bind V7_BINDS[] = {
 #define MESSAGE_COUNT 6
 #define MESSAGE_MAX 72 // config.chatMaxLength 70
 
-// windows[6].tabs (index.js): tab name, then rows {i18n key, bind, index, list, group, list index}.
+// windows[6].tabs (index.js; v10.0.3 deob-10.0.3.js:248384-248399, rows, groups and their
+// windows.controls.<key> labels checked 2026-10-24): tab name, then rows {i18n key, bind, index,
+// list, group, list index}. KrunkNative's own rows follow v10's on the General tab.
 // `list` "toggleSets" = a Toggle <select> row, "chatMessages" = a quick chat Message input row.
 typedef struct {
     const char *label;  // windows.controls.<key> (en)
@@ -1379,8 +1387,12 @@ static void press_button(Client *client, const int code) {
     if (client && spectate_press_key(client, code)) return;
     // kickVoteY / kickVoteN (v10 :221373): a running vote kick takes [1] / [2] (the weapon keys
     // still swap: v10 handles both); hud_votekick.c checks the vote, the account and that we live
-    if (client && v7_is("kickVoteY", code)) hud_votekick_key(client, 1);
-    else if (client && v7_is("kickVoteN", code)) hud_votekick_key(client, 0);
+    // A KR charge prompt ("chreq", v10 :259942 `if (charge && !voteKick)`) takes them when no vote did (s2c_ui.c)
+    if (client && v7_is("kickVoteY", code)) {
+        if (!hud_votekick_key(client, 1)) s2c_ui_charge_key(client, 1);
+    } else if (client && v7_is("kickVoteN", code)) {
+        if (!hud_votekick_key(client, 0)) s2c_ui_charge_key(client, 0);
+    }
     Player *me = client ? client->me : NULL;
     if (!me || !me->active) return;
     // sprayWheelKey (premium / sandbox): opens the wheel; else sprayKey: "spry" (v7) / "int" 0 (v3)
@@ -1393,6 +1405,9 @@ static void press_button(Client *client, const int code) {
     if (v7_is("propRotR", code)) prop_hunt_rotate(client, 1);
     for (int i = 0; i < TAUNT_COUNT; i++) { // Prop team: "prpt", i
         if (v7_is_at("taunt", i, code)) social_taunt(client, i);
+    }
+    for (int i = 0; i < STALKER_TAUNT_COUNT; i++) { // the stalker: "stlkrt", i (deob-10.0.3.js:260106-260110)
+        if (v7_is_at("stalkerTaunt", i, code)) hud_stalker_taunt(client, i);
     }
     for (int i = 0; i < MESSAGE_COUNT; i++) { // f2028(i): quick chat
         if (v7_is_at("message", i, code)) social_quick_chat(client, g_ctl.messages[i]);

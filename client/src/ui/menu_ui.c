@@ -296,7 +296,8 @@ void client_pointer_update(Client *client) {
     in.end_results = (unsigned char) hud_ui_end_screen_interactive();
     in.script_unlock = (unsigned char) ks_client_input_unlocked();
     in.script_free = (unsigned char) (ks_client_pointer_free() && !ks_client_input_unlocked());
-    in.modal = (unsigned char) krunker_captcha_needs_player(); // the security challenge: clicks and typing go to it
+    // the security challenge: clicks and typing go to it; a KR charge's #chargeModal (CONTROLS.toggle(false), v10 :257689)
+    in.modal = (unsigned char) (krunker_captcha_needs_player() || s2c_ui_charge_modal_open());
     const int had_controls = g_ptr.want.controls;
     g_ptr.want = pointer_lock_step(&g_ptr.tracker, &in);
     if (!in.game) {

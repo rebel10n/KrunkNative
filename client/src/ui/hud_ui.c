@@ -61,6 +61,7 @@ void hud_ui_hit(Client*, int kill);
 #include <badges.h>   // WP-E: v7 badges on the boards
 #include <progression.h> // WP-E part 2c: overlay.medalsList (the Medals tab)
 #include <hud_social.h> // WP-E part 2b: mute lists, chat channels
+#include <stalker_client.h> // v10 Stalker: its controls, the leap timer, #hiddenMsg
 #include <online_mode.h> // online_mode_server_rights: the player list's staff buttons
 #include <krunker_net.h> // krunker_net_is_host: the host of an official custom lobby (its staff buttons)
 #include <net_ext.h>     // NET_RIGHTS_*
@@ -777,8 +778,8 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
 // custom lobby, one vote at a time: hud_votekick.c) and the staff buttons (Kill, TP2, TPME, the
 // punish popup) for DEV / the host, which run the server's own chat commands (/kill, /tp, /bring,
 // /kick, /ban). A K.P.D officer's case (hud_votekick.c kpdData) puts the suspect first in a red
-// row. Not ported: Trade (mode.canTrade: KrunkNative has no in-lobby trading), FREEZE, Kick Spec and
-// the bots popup (no server action behind them yet).
+// row. In a canTrade mode (Trade) every row starts with Trade Player (requestTrade -> "strd", the live
+// trade: trade_ui.c). Not ported: FREEZE, Kick Spec and the bots popup (no server action behind them yet).
 static char g_plist_search[64]; // windows[22].playerSearch
 
 typedef struct {
@@ -900,6 +901,9 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
     sb_append(sb, "</a>");
     if (r->speaking) sb_append(sb, "<span class='pListVoice material-icons'>volume_up</span>");
     sb_append(sb, "</td><td class='pListActions'>");
+    if (client && client->game.mode && client->game.mode->config.can_trade) // "Trade Player" (deob-10.0.3.js:250341, trade_ui.c)
+        sb_appendf(sb, "<span onmouseenter='playTick()' title='Trade Player' class='punishButton' onclick='requestTrade(\"%d\", this)'>"
+                       "<span class='takeAction material-icons'>store</span></span>", r->uid);
     if (r->account_id > 0 || r->level >= 1) { // level >= 1: the buttons show mutedChat / VoiceAccountIds
         const int chat_muted = scenario ? r->chat_muted : social_chat_muted(r->account_id);
         const int voice_muted = scenario ? r->voice_muted : social_voice_muted(r->account_id);
@@ -2710,6 +2714,99 @@ void hud_ui_found_junk(const char *line) {
     hud_add_chat_markup(markup);
 }
 
+// " <span class='click[ rainbowText]' style='color:<rarity>'[ onclick='viewItem(i)']>[" + fixStr(name) + "]</span>": the
+// store item of an unbox / raffle line (v10 RENDER.rarityAnim && rarities[r].animate: only Unobtainable, 6, animates)
+static void hud_store_item_span(char *out, const size_t size, size_t *len, const int rarity, const int view_item, const char *name) {
+    const int r = rarity >= 0 && rarity < g_viewer_rarity_count ? rarity : 0;
+    const int rainbow = r == 6 && !client_render_settings()->disable_rarity_anim;
+    hb_append(out, size, len, " <span class='click%s' style='color:%s'", rainbow ? " rainbowText" : "", g_viewer_rarities[r].color);
+    if (view_item >= 0) hb_append(out, size, len, " onclick='viewItem(%d)'", view_item);
+    hb_append(out, size, len, ">[");
+    hb_append_fixed(out, size, len, name);
+    hb_append(out, size, len, "]</span>");
+}
+
+// fixStr(streamMode ? scrambleS(name) : name), the unboxer / winner of a line
+static void hud_line_who(const Client *client, const int uid, const char *name, char *out, const size_t size) {
+    const Player *player = uid >= 0 ? game_find_player((Game *) &client->game, uid) : NULL;
+    char shown[PLAYER_NAME_SIZE * 2];
+    size_t len = 0;
+    out[0] = 0;
+    hb_append_fixed(out, size, &len, streamer_name(player ? player->name : name ? name : "", shown, sizeof(shown)));
+}
+
+// v10 "unb" (iíïîiìí, deob-10.0.3.js:254321) / "unbS" (iíiíïíi :254331), shown only with Settings > Chat > Show
+// Unboxings on (showUnboxings, default on, :238450): "<span style='color:#fff'>" + t("windows.store.unboxed", who,
+// "</span>") + the item. unb's Free KR item is store.freeKR[item] (:116375: {kr: [5], rarity: 0}, [10] 1, [20] 2,
+// [500] 3) named "<kr> KR", without viewItem; unbS (a map prize wheel's stop) names a player of the game
+// (players.findById, the line needs both it and the skin). v10's line is chat type 4 (1 for unb while the spin
+// window is closed): both draw the same plain row.
+void hud_ui_unboxed(Client *client, const int uid, const char *name, const int item, const int kr) {
+    if (!client || !html_ui_available() || !html_ui_is_ready() || ui_setting_is_false("showUnboxings")) return;
+    char item_name[256] = "";
+    int rarity, view_item = -1;
+    if (kr > 0) {
+        if (item < 0 || item > 3) return; // store.freeKR[item].rarity of a missing entry throws
+        rarity = item;
+        snprintf(item_name, sizeof(item_name), "%d KR", kr);
+    } else {
+        const ViewerSkin *skin = viewer_skin(item);
+        if (!skin) return;
+        rarity = skin->rarity;
+        view_item = item;
+        snprintf(item_name, sizeof(item_name), "%s", skin->name ? skin->name : "");
+    }
+    if (uid >= 0 && !game_find_player(&client->game, uid)) return;
+    char who[PLAYER_NAME_SIZE * 4], unboxed[sizeof(who) + 64], markup[1024];
+    hud_line_who(client, uid, name, who, sizeof(who));
+    I18N_F(unboxed, "windows.store.unboxed", "{0}{1} unboxed", who, "</span>");
+    size_t len = 0;
+    markup[0] = 0;
+    hb_append(markup, sizeof(markup), &len, "<span style='color:#fff'>%s", unboxed);
+    hud_store_item_span(markup, sizeof(markup), &len, rarity, view_item, item_name);
+    hud_add_chat_markup(markup);
+}
+
+// `${n}` of a number: a whole one without decimals
+static void hud_js_number(const double v, char *out, const size_t size) {
+    if (v == floor(v) && fabs(v) < 1e15) snprintf(out, size, "%.0f", v);
+    else snprintf(out, size, "%.17g", v);
+}
+
+// v10 "lotWin" (iíiìïïi, deob-10.0.3.js:255154): "<span style='color:#fff'>" + who + "</span> won" + prize + " in the
+// raffle!" (chat type 4; no setting gates it). A skin the store has: its span (parseInt(ref) || 0); one it does not:
+// " Nx Skin ref". Currency: " N Krunkies" / " N Junk" / " N Ranked Points" (ref 1 / 2 / 3), else " N Currency ref".
+// Subscription: " N days of ref". Deliberate difference: v10 writes the server's ref into the line as markup, this
+// line escapes it.
+void hud_ui_raffle_won(Client *client, const int uid, const int type, const char *ref, const double quantity) {
+    if (!client || !html_ui_available() || !html_ui_is_ready() || !game_find_player(&client->game, uid)) return;
+    char qty[32], prize[512] = "", text[160];
+    size_t len = 0;
+    hud_js_number(quantity, qty, sizeof(qty));
+    if (!ref) ref = "";
+    if (type == NET_PRIZE_SKIN) {
+        const int index = (int) strtol(ref, NULL, 10); // parseInt(ref) || 0
+        const ViewerSkin *skin = viewer_skin(index >= 0 ? index : 0);
+        if (skin) hud_store_item_span(prize, sizeof(prize), &len, skin->rarity, index >= 0 ? index : 0, skin->name ? skin->name : "");
+        else {
+            snprintf(text, sizeof(text), " %sx Skin %s", qty, ref);
+            hb_append_escaped(prize, sizeof(prize), &len, text);
+        }
+    } else if (type == NET_PRIZE_CURRENCY) {
+        const char *currency = !strcmp(ref, "1") ? "Krunkies" : !strcmp(ref, "2") ? "Junk" : !strcmp(ref, "3") ? "Ranked Points" : NULL;
+        if (currency) snprintf(text, sizeof(text), " %s %s", qty, currency);
+        else snprintf(text, sizeof(text), " %s Currency %s", qty, ref);
+        hb_append_escaped(prize, sizeof(prize), &len, text);
+    } else if (type == NET_PRIZE_SUBSCRIPTION) {
+        snprintf(text, sizeof(text), " %s days of %s", qty, ref);
+        hb_append_escaped(prize, sizeof(prize), &len, text);
+    }
+    char who[PLAYER_NAME_SIZE * 4], markup[1024];
+    hud_line_who(client, uid, NULL, who, sizeof(who));
+    snprintf(markup, sizeof(markup), "<span style='color:#fff'>%s</span> won%s in the raffle!", who, prize);
+    hud_add_chat_markup(markup);
+}
+
 // Empties #chatList and marks the session's join lines as written (a scenario brings
 // its own chat history).
 void hud_ui_clear_chat(void) {
@@ -3681,7 +3778,11 @@ static void hud_end_results(const Client *client) {
         char html[512];
         const char *n1 = mode->config.team_options[0] ? mode->config.team_options[0] : "Alpha";
         const char *n2 = mode->config.team_options[1] ? mode->config.team_options[1] : "Bravo";
-        const int winner = g_end_result < 0 ? 0 : g_end_result ? (client->me ? client->me->team : 0) : (client->me ? 3 - client->me->team : 0);
+        // the trophy goes to the END's winner team (v10 teamTotal0 / 1, deob-10.0.3.js:257452: `winTeam == 1`): MODE_END's
+        // winner team once it is in. Only before it, the team is read off our own result; a public match's defeat for
+        // everyone (winner -1, deob-10.0.3.js:221681) has MODE_END say -1, so no team gets one.
+        const int known = hud_modes_end_winner_team();
+        const int winner = known ? known : g_end_result < 0 ? 0 : g_end_result ? (client->me ? client->me->team : 0) : (client->me ? 3 - client->me->team : 0);
         snprintf(html, sizeof(html), "%s<span class=\"teamTotalN0\">%s</span><span class=\"teamTotalScore\">%d</span>",
                  winner == 1 ? "<div class='material-icons teamWin0'>emoji_events</div>" : "", n1, mode->team_scores[1]);
         HtmlElem t = html_dom_by_id("teamTotal0");
@@ -4639,6 +4740,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_gametime_step(client, in_game && !html_ui_is_menu_open(), hud_now_ms(client)); // the top-right game time tile
     hud_v7modes_tick(client, in_game, g_hud_layout_epoch); // rounds, KR tags, big head, speed run (hud_v7modes.c)
     social_prop_hud_tick(client, in_game && g_hud_ui.visible > 0, g_hud_layout_epoch); // WP-E: prop controls + taunt keys (hud_social.c)
+    hud_stalker_tick(client, in_game && g_hud_ui.visible > 0 && !spectate_active(), g_hud_layout_epoch); // v10 Stalker (hud_stalker.c)
     hud_gui_update(client); // map-G: the map's custom "gui" elements in #customGUIHolder (hud_gui.c)
     ui_notify_tick(now * 1000.0); // the notification center (ui_notify.c)
     bhop_toast_tick(now * 1000.0); // the bhop toast (bhop_toast.c): ticked nowhere else

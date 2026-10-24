@@ -15,6 +15,9 @@
 #include <string.h>
 #include <ruleset.h>
 #include <ui_mobile.h> // the phone prompt: "Tap to ..." and its bottom (v10 updateInteract)
+#include <s2c_events.h> // the spectated player's bar ("p")
+#include <spectate.h>
+#include <net_ext.h>    // NET_INTER_BAR_*
 
 #define INTERACT_KEY_COLOR "#FBC02D"        // COLORS.interactPopup.key
 #define INTERACT_ENOUGH_COLOR "#9eeb56"     // COLORS.interactPopup.enough
@@ -297,10 +300,14 @@ static void apply_progress_style(const HtmlElem holder, const HtmlElem bar) {
 }
 
 // updateInteractProgress ("p" = the player's interProg): #interactProg shows while > 0,
-// #interProgB is the bar. The local copy computes the same interact_progress.
+// #interProgB is the bar. The local copy computes the same interact_progress. While we spectate it is
+// the followed player's, as the server sends it ("p" INTER_PROG, deob-10.0.3.js:259394; s2c_events.c).
 static void update_progress(Client *client) {
     static float shown = -1.0f;
-    const float progress = in_game(client) ? roundf(client->me->interact_progress * 1000.0f) / 1000.0f : 0.0f;
+    const int spectating = client && spectate_active() && client->game.ready && !html_ui_is_menu_open();
+    const float progress = in_game(client) ? roundf(client->me->interact_progress * 1000.0f) / 1000.0f
+                           : spectating    ? s2c_events_spectate_bar(NET_INTER_BAR_INTERACT)
+                                           : 0.0f;
     const HtmlElem holder = html_dom_by_id("interactProg");
     const HtmlElem bar = html_dom_by_id("interProgB");
     if (holder && progress > 0.0f) apply_progress_style(holder, bar);

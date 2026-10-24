@@ -31,8 +31,16 @@ Office covers some other way, and which ones it ignores on purpose. Line numbers
 | EXT subtype | Name | v10 | Body | Sent by KN's server |
 |---|---|---|---|---|
 | 0x0204 | `NET_EXT_PLAYER_ANIM` | `c` PLAYER_ANIM | `NetPlayerAnimPacket {int32 sid, uint8 clip, float reps}`. `clip` is an index into `["Idle", "Move", "MoveFast", "Jump", "Melee", "Shoot", "Crouch"]` (:21165). | Yes. `shared/src/player_anim.c` runs `player_play_clip` from `player_jump` and `player_melee` on the authority. It sends only for a class whose `aID` holds `g`, `q` or `f` (hasAnims, :194877). It goes to the spectators (`NET_TARGET_NON_PLAYERS`) and to every other active player within `mode.viewDis \|\| 600` (:193806-193815). |
+| 0x0205 | `NET_EXT_PLAYER_ASSET_ID` | `uai` UPDATE_ASSET_ID | `NetPlayerAssetIdPacket {int32 sid, char asset[32]}` (`assetTxt += ""`) | Yes. KrunkScript's `player.assetID = v` runs `player_update_asset_id` (players.updateAssetID :197964): with `config.mdl` and a non-empty text the authority broadcasts it (:197968-197970). |
 | 0x0300 | `NET_EXT_SKIN_DEFINITION_CHANGED` | `sdc` | `NetExtJsonChunk` slices of one JSON array `[skinId, skin]`, like the entity records | No. kn_brain owns KN's skin definitions and has no push yet. The subtype is ready for one. |
 | 0x0303 | `NET_EXT_SPEECH_BUBBLE` | `sb` SHOW_SPEECH_BUBBLE | `NetSpeechBubblePacket {uint32 ms (0 = 2500), uint8 sigh, char text[256]}` | No. The welcome text answers v10's `["sb", "welc", username]`, and the official game server writes it. It is not in the bundle. |
+| 0x0208 | `NET_EXT_PLAYER_INTER_PROG` | `p` INTER_PROG / `mp` INTER_M_PROG | `NetInterProgPacket {uint8 bar (0 interact, 1 charge), float prog}` | Yes. Each tick, to every spectator following an active player, when that player's `interact_progress` or charge (`charge_time / (chrgTime \|\| throwCharge)`), rounded to 3 places, differs from what the spectator got last (:222274-222292). v10 keeps the last value per player; KN per spectator, so a switch shows the new player's bars at once. |
+| 0x0304 | `NET_EXT_UNBOX_MESSAGE` | `unb` / `unbS` | `NetUnboxMessagePacket {int32 uid (-1 named), int32 item, int32 kr (> 0: freeKR[item]), uint8 kind, char name[32]}` | No (see the rows). |
+| 0x0305 | `NET_EXT_LOTTERY_PRIZE_WON` | `lotWin` | `NetLotteryPrizePacket {double quantity, int32 uid, uint8 type (other, skin, currency, subscription), char ref[51]}` | No. |
+| 0x0306 | `NET_EXT_SPIN_WHEEL_RESPONSE` | `spinW` | `NetSpinWheelPacket {double funds, int32 uid, float rand, int32 skin, uint8 mine}` | No. |
+| 0x0500 / 0x0501 | `NET_EXT_CHARGE_CONSENT_REQUEST` / `_RESPONSE` | `chreq` / `chrsp` | `NetChargeConsentRequestPacket {double amount, int32 id, uint8 modal}`, `NetChargeConsentResponsePacket {int32 id, uint8 accept}` | No (an unmonetized server declines first). It would ignore a response. |
+| 0x0602 | `NET_EXT_WARS_CLAN` | `warsClan` | `NetWarsClanPacket {int32 clan_id, uint8 has, char clan_name[32], clan_logo[64], banner_color[24]}` | No. |
+| 0x8070 | `NET_EXT_KN_OFFICIAL_EDIT_MAP` | `edMp` | `NetExtBlobChunk {uint16 part, parts}` slices of the map JSON (more than `NetExtJsonChunk`'s 255) | Client-local (the link only). |
 
 Existing subtypes and packets the link now also fills from official packets: `NET_PACKET_COMP_LOBBY` (`cd` / `cda`),
 `NET_EXT_LATEST_RANKED_MMR_CHANGE` (`lrmr`), `NET_EXT_GAME_ANNOUNCEMENT` (`gameAnnouncement`), `NET_PACKET_CHAT`
@@ -40,10 +48,11 @@ Existing subtypes and packets the link now also fills from official packets: `NE
 
 Client consumers are in `client/src/net/s2c_events.c`:
 
-- `c` checks the player's class (active, `mdl` 2 with an animated `aID`). This client draws no class models yet
-  (`player_mesh.c` builds the default body for every class), so the clip has nothing to play on: it is logged at debug
-  level 1. Once a class model exists as a GLTF instance, `gltf_instance_play_clip(model, name, reps)` goes in
-  `on_player_anim`.
+- `c` plays the clip on the player's drawn class model when the player is active and its class's `aID` is animated
+  (`client/src/player_class_model.c`, doc/v10/class-models.md).
+- `uai` keeps the asset for the player (`player.asset_txt`, only for a class with a model) and rebuilds an active
+  player's model at once (regenMeshes). One for a player this client has not seen yet (KN's server runs `onPlayerSpawn`
+  before the SPAWN goes out) waits for that player's first model.
 - `sb` shows the bubble on `#txtBubble` with tags dropped, because `menu_show_speech_bubble` escapes its text. When
   `sigh` is set it first plays `sigh_0` or `sigh_1` at 0.2.
 - `sdc` is applied by `viewer_skin_define` (`client/src/viewer/viewer_skin_define.c`). It maps the fields as
@@ -51,6 +60,18 @@ Client consumers are in `client/src/net/s2c_events.c`:
   `assetType` 1, and a `free` item gets `noSpin` and is left out of the wheels. Not applied: a `template` key (the
   generated table folds v10's template rows in already), a dye's colours, and a new index in the dropdown and wheel
   lists. Models already built keep their look until rebuilt, as in v10.
+- `p` / `mp` keep the followed player's bars; `s2c_events_spectate_bar` gives them to `#interactProg` (ui_interact.c) and
+  the charge bar (build_ui.c) while we spectate, and they start at 0 with every spectate.
+- `unb` / `unbS` / `lotWin` are chat lines (`hud_ui_unboxed`, `hud_ui_raffle_won` in hud_ui.c): store names from the viewer
+  table, rarity colours, `rainbowText` for Unobtainable, `viewItem` on skins. `unb` / `unbS` wait for Show Unboxings.
+  The raffle line escapes the prize text, which v10 writes as markup.
+- `spinW` pays our account (`account_set_funds`, `account_add_skin`) and spins `client/src/prize_wheels.c`'s spinner:
+  the map's PRIZE_WHEEL objects whose wheel (`sty`, store.wheels 0..2) is not missing, ticket-only, hidden or locked,
+  stepped every 50 ms like `updateSpinners` with its tick_0, reward, cheer and explosion sounds. A pool wheel throws in
+  v10 at its stop (`wheel.rarities` undefined), so it ends silently here too.
+- `chreq`, `warsClan` and `edMp` are `client/src/ui/s2c_ui.c`. The charge modal holds the pointer lock off (menu_ui.c).
+  The keys answer a request when the vote kick did not take them. The Turf Wars popup is scheduled when we enter (the
+  menu closes on a ready game we play or spectate) or when the clan comes while we are in; it shows once per game.
 
 ## Classification of the 110 names
 
@@ -74,27 +95,27 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | CLAIM_ITEM_RESPONSE | `bpclmr` | windows[5].claimItemRes :248052 | pass claim | KN equivalent | as above |
 | SHOW_SPEECH_BUBBLE | `sb` | :261181 | menu mascot bubble, `ms \|\| 2500`, optional sigh | **ported** | `NET_EXT_SPEECH_BUBBLE` |
 | CLAN_LEAVE_RESPONSE | `clnL` | :255456 | clan window | KN equivalent | kn_brain clans |
-| WARS_CLAN | `warsClan` | :255551 | `territorialWars.setClanInfo`, then once per game a "Turf Wars / Territory controlled by X" textPopup 1 s after entering | open | needs hooks in krunker_link.c's `en` and `init` (the popup waits until we entered) and the Turf Wars HUD state; KN's own Turf Wars is server/src/accounts.c |
+| WARS_CLAN | `warsClan` | :255551 | `territorialWars.setClanInfo`, then once per game a "Turf Wars / Territory controlled by X" textPopup 1 s after entering | **ported** | `NET_EXT_WARS_CLAN`, also from init's `syncData.warsClan` (:256999, `krunker_link_s2c_init`); the clan and the popup are `client/src/ui/s2c_ui.c`. The `wars_banner` banners are not drawn (no such nodes on KN maps). KN's server sends none: its Turf Wars (server/src/accounts.c) counts kills but has no map-controller lookup |
 | UPLOAD_RESPONSE | `upR` | :255675 | upload window text | KN equivalent | kn_brain uploads |
 | UPLOAD_PROFILE_RESPONSE | `upPR` | :255687 | profile picture uploaded | KN equivalent | kn_brain |
 | SPIN_RESPONSE | `spin` | :254882 | prize wheel result | KN equivalent | spins are kn_brain's (spin_wheel.c) |
 | SAVE_SPIN_HISTORY | `spinH` | :254698 | spin history popup | KN equivalent | kn_brain |
-| SPIN_WHEEL_RESPONSE | `spinW` | :254991 | a map spinner object's spin: `updateSpinner(uid, ..., skin)`, funds and skin to the spinner | open | the map's SPIN WHEEL objects have no KN spinner state or animation yet (the interact `cnfm` 2 is translated, krunker_link_world.c) |
+| SPIN_WHEEL_RESPONSE | `spinW` | :254991 | a map spinner object's spin: `updateSpinner(uid, ..., skin)`, funds and skin to the spinner | **ported** | `NET_EXT_SPIN_WHEEL_RESPONSE`; `client/src/prize_wheels.c` keeps the map's spinners and their spinInfo, steps them every 50 ms and plays the ticks / reward sounds; ours pays the account. The wheel canvas and the won item's model are not drawn. KN's server sends none: its prize wheels (interact 9) do nothing, the KR store is kn_brain's |
 | SPIN_KR | `spinKR` | :255333 | free KR spin | KN equivalent | kn_brain daily spin |
 | PURCHASE_ERROR | `pErr` | window.purchaseError :243648 | purchase error popup | irrelevant | real money |
-| UNBOX_MESSAGE | `unb` | :254321 | chat line "X unboxed [item]" (showUnboxings) | open | needs a client chat composer for `windows.store.unboxed` with store names and rarity colours (like hud_ui.c's found line) |
-| UNBOX_MESSSAGE_S | `unbS` | :254331 | chat line "<player> unboxed [item]" | open | as above |
+| UNBOX_MESSAGE | `unb` | :254321 | chat line "X unboxed [item]" (showUnboxings) | **ported** | `NET_EXT_UNBOX_MESSAGE` NAMED -> `hud_ui_unboxed` (store names, rarity colours, Free KR items). KN's server sends none: KN spins go over kn_brain's social socket, which the game server does not see |
+| UNBOX_MESSSAGE_S | `unbS` | :254331 | chat line "<player> unboxed [item]" (a map prize wheel's stop, :219473) | **ported** | `NET_EXT_UNBOX_MESSAGE` PLAYER -> `hud_ui_unboxed`. KN's server sends none (no map prize wheel spins, as `spinW`) |
 | UPDATE_FUNDS | `uf` | :242199 | account funds / junk | by name | `account_scoped` |
 | SET_DEBUG | `debug` | :258527 | developer debug mode line | irrelevant | developer only |
 | SET_EXPERIMENTAL | `exf` | :258490 | developer flag line | irrelevant | developer only |
-| PLAYER_ANIM | `c` | :257769 | `playClip(player, animList[i], reps \|\| 1)` on the class model | **ported** | `NET_EXT_PLAYER_ANIM`, sent by KN's server too; no class model drawn yet (see above) |
+| PLAYER_ANIM | `c` | :257769 | `playClip(player, animList[i], reps \|\| 1)` on the class model | **ported** | `NET_EXT_PLAYER_ANIM`, sent by KN's server too; played on the class model (player_class_model.c) |
 | ADD_TRADE_CHAT | `tch` | :259539 | trade window chat | other agent | trade |
-| INTER_PROG | `p` | :259394 | spectated player's interact bar, sent to `specStream` viewers (:222279) | open | KN's bar reads the local player only (ui_interact.c); needs a spectate value and a server send per spectator target |
-| INTER_M_PROG | `mp` | :259398 | spectated player's charge bar (:222288) | open | as above (build_ui.c) |
+| INTER_PROG | `p` | :259394 | spectated player's interact bar, sent to `specStream` viewers (:222279) | **ported** | `NET_EXT_PLAYER_INTER_PROG` bar 0; KN's server sends it to each spectator following the player (server/src/net.c `net_broadcast_inter_progress`); the client draws it while spectating (ui_interact.c) |
+| INTER_M_PROG | `mp` | :259398 | spectated player's charge bar (:222288) | **ported** | `NET_EXT_PLAYER_INTER_PROG` bar 1, sent and drawn as `p` (build_ui.c) |
 | NEW_PASS_RESPONSE | `upp` | :244558 | password change | irrelevant | the official account's auth is FRVR's |
 | ADD_DEBUG_POING | `dbgp` | :241808 | debug sphere | irrelevant | developer view |
 | CRAFT_RESPONSE | `crftr` | windows[13].craftRes :249907 | crafting window | KN equivalent | kn_brain |
-| CUSTOM_NETWORK_MESSAGE | `sd` | :241493 | `mainScript.onNetworkMessage(id, data)` | open | KN has `NET_PACKET_SCRIPT_MSG`, but its body is `ks_serialize` data built by the KrunkScript VM; translating msgpack to it belongs with KrunkScript |
+| CUSTOM_NETWORK_MESSAGE | `sd` | :241493 | `mainScript.onNetworkMessage(id, data)` | done | `NET_PACKET_SCRIPT_MSG` (krunker_link_s2c.c `on_network_message`); the msgpack data's `V_` keys are stripped into the `ks_serialize` body by `ks_net_body_from_official` (shared/src/ks/ks_net_official.c). The client's `GAME.NETWORK.send` goes back out as C2S `sd` (krunker_link.c). doc/v10/krunkscript-1003.md section 6 |
 | CONSOLE_LOG | `clog` | console.log | developer log | irrelevant | nothing shown |
 | OPEN_MAIL | `rml` | :253782 | mail window | KN equivalent | kn_brain |
 | UPDATE_MAIL | `gmc` | :253785 | mail count | KN equivalent | kn_brain |
@@ -127,7 +148,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | VOTE_MAP | `vm` | window.voteMap :257932 | map up / down vote | KN equivalent | community map votes go through kn_brain |
 | UPDATE_SETTINGS | `loadS` | :244091 | cloud settings import | KN equivalent | settings are local / kn_brain |
 | AI_PARTS | `aip` | AI.syncParts :206506 (sent :206566) | AI part glow, hidden nodes, held clip, solid pose | other agent | KrunkScript AI parts (`shared/src/ai_parts.c`, in progress this round) |
-| EDIT_MAP | `edMp` | :259803 | opens the editor on a map | open | low value: opens `/editor.html` in a new tab; KN would open its own editor with the map |
+| EDIT_MAP | `edMp` | :259803 | opens the editor on a map | **ported** | `NET_EXT_KN_OFFICIAL_EDIT_MAP` (client-local, `NetExtBlobChunk` slices) -> `s2c_ui_edit_map`: col / l false dropped, staged as `mapToEdit`, KN's editor opened (as F6). KN's own `edMp` is kn_brain's social socket (services/brain/creations.c) |
 | LOAD_XSOLLA | `xst` | :242164 | payment widget | irrelevant | real money |
 | SYNC_P_CON_DATA | `cd` | :256533 | the comp lobby table `{key: entry}` | **ported** | `NET_PACKET_COMP_LOBBY` CLEAR + SET per entry; KN's server already sends it (shared/src/comp_lobby.c) |
 | SYNC_P_CON_OBJ | `cda` | :256526 | one comp lobby entry, null removes | **ported** | `NET_PACKET_COMP_LOBBY` SET / REMOVE |
@@ -136,7 +157,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | DEBUG_COMPLEX_HITBOX | `dch` | :257798 | debug hitbox view | irrelevant | developer view |
 | ADD_HITBOX_HELPER | `hbdb` | :258441 | debug hitbox boxes | irrelevant | developer view |
 | SCRIPT_LOG | `ksL` | :261492 | console `[KRUNKSCRIPT] args.join(" ")` | **ported** | `NET_PACKET_SCRIPT_LOG` (KN's server sends it from server/src/ks_server_host.c) |
-| UPDATE_ASSET_ID | `uai` | :257784 | `players.updateAssetID`: a class model's asset changes | open | needs class models (mdl 1 / 2), which player_mesh.c does not draw |
+| UPDATE_ASSET_ID | `uai` | :257784 | `players.updateAssetID`: a class model's asset changes | **ported** | `NET_EXT_PLAYER_ASSET_ID`, sent by KN's server too (KrunkScript `player.assetID`); the model is rebuilt with it (player_class_model.c) |
 | FOUND_JUNK | `jnk` | :242285 (sent :221143) | "You found [x.xx] Junk" line, junk balance | **ported** | `NET_PACKET_CHAT` `NET_CHAT_FOUND_JUNK`, the line KN's server sends (shared/src/triggers.c `game_found_junk`); the balance stays the account frames' |
 | AVAILABLE_BUNDLE_DATA | `gbdr` | :242875 | store bundle ad | irrelevant | real money |
 | ALL_BUNDLE_DATA | `abd` | :242852 | store bundle ad | irrelevant | real money |
@@ -160,22 +181,23 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | GUEST_EARNED_REWARDS | `ger` | :133742 | refetches the FRVR guest profile | KN equivalent | about krunker.io's guest; KN's own `ger` is `NET_EXT_KN_GUEST_EARNED` from server/src/accounts.c for kn_brain's guest |
 | DAILY_SPIN_CLAIM_RESPONSE | `dslr` | :261748 | daily spin ticket | by name | `account_scoped` (v10_daily_spin.c) |
 | UPDATE_LOTTERY_ENTRIES | `lotEnt` | :255149 | raffle window entries | KN equivalent | the raffle is gapi / kn_brain's |
-| LOTTERY_PRIZE_WON | `lotWin` | :255154 | chat line "<player> won <prize> in the raffle!" | open | needs a client chat composer with store names (as `unb`) |
+| LOTTERY_PRIZE_WON | `lotWin` | :255154 | chat line "<player> won <prize> in the raffle!" | **ported** | `NET_EXT_LOTTERY_PRIZE_WON` -> `hud_ui_raffle_won` (skin / currency / subscription prizes). KN's server sends none: the raffle is gapi / kn_brain's |
 | LOTTERY_PRIZE_WON_PLAYER | `lotWinP` | :255184 | our prize into the account | KN equivalent | kn_brain account |
 | LOTTERY_STARTED | `lotStart` | :255225 | raffle window refresh | KN equivalent | gapi / kn_brain |
 | LOTTERY_ENDED | `lotEnd` | :255230 | raffle window refresh | KN equivalent | gapi / kn_brain |
-| CHARGE_CONSENT_REQUEST | `chreq` | :257673 (sent :221249) | "This game wants to charge you N KR" modal, 15 s, answer `chrsp` | open | EXT 0x0500 / 0x0501 exist with no consumer: KrunkScript KR charges are not ported (doc/v10/net.md section 6). Without an answer the server times out after 15 s and declines |
+| CHARGE_CONSENT_REQUEST | `chreq` | :257673 (sent :221249) | "This game wants to charge you N KR" modal, 15 s, answer `chrsp` | **ported** | `NET_EXT_CHARGE_CONSENT_REQUEST` -> `s2c_ui_charge_request`: #chargeModal or #chargeConfirm ([1] / [2] = kickVoteY / kickVoteN), closed after 15 s, at init and on leaving; `NET_EXT_CHARGE_CONSENT_RESPONSE` goes out as `chrsp`. KN's server sends none: its `GAME.PAYMENTS.authorizeSpend` answers false first, as v10 does for an unmonetized studio (server/src/ks_server_host.c) |
 | PLAYER_POSE | `pz` | :261743 | `players.setPose` | ported | `NET_EXT_PLAYER_POSE` (krunker_link_script.c, init `plrPose` too; client/src/player_pose_render.c; doc/v10/player-pose.md) |
 
-Totals: 12 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`),
-10 by name, 36 KN equivalent, 35 irrelevant, 6 other agent, 11 open.
+Totals: 23 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`, `sd`,
+`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`), 10 by name, 36 KN equivalent, 35
+irrelevant, 6 other agent, 0 open.
 
 ## Open work
 
-- Class models (`mdl` 1 sprite / 2 model, `aID`, `animS`, `mdlS`, `mdlYO`, `mdPY` / `mdPS`, `mdlDr`, :194228-194266)
-  in player_mesh.c. Until they exist, `c` and `uai` reach the client but have nothing to animate or swap.
-- The spectated player's interact and charge bars (`p` / `mp`), on both the server and the client.
-- Chat lines with store items: `unb`, `unbS`, `lotWin`.
-- `warsClan`'s Turf Wars popup and clan state, `spinW` map spinners, `sd` KrunkScript network messages, `chreq` KR
-  charges.
-- `edMp`, which would open KN's editor with the map.
+- Class models are drawn (doc/v10/class-models.md); its open items are listed there (the class camera types, getAsset).
+- KN's server producing what only the official one sends today: `warsClan` needs a map-controller lookup from kn_brain's
+  Turf Wars (services/brain/turf.c) at round start; `spinW` / `unbS` need map prize wheel spins paid from the brain's KR
+  wallet with its wheel roll; `unb` / `lotWin` need the brain to tell game servers about spins and raffle wins; `chreq`
+  needs a monetized studio (KrunkScript `authorizeSpend`).
+- Drawing what the client now keeps: the prize wheel canvas and its won item (prize_wheels.c holds the spinInfo), the
+  Turf Wars `wars_banner` banners (no map has the nodes yet).

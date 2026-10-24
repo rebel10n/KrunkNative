@@ -302,6 +302,19 @@ void hud_ui_end_refresh(void); // re-render the end screen tab (the Battle Pass 
 void hud_ui_end_results_now(const Client*); // --render-scenario endscreen.results: skip config.endAnim
 void hud_ui_skin_found(Client*, int uid, int skin); // season-system: NET_PACKET_SKIN_FOUND (v7 "skin" / "skinF")
 void hud_ui_found_junk(const char *line);           // NET_CHAT_FOUND_JUNK "You found [x.xx] Junk" (v7 io_foundJunk)
+// v10 "unb" / "unbS" (NET_EXT_UNBOX_MESSAGE): "<name> unboxed [item]" with Show Unboxings on. uid >= 0: a player of the
+// game, else `name`; kr > 0: the Free KR item store.freeKR[item] ("<kr> KR"), else store.skins[item].
+void hud_ui_unboxed(Client*, int uid, const char *name, int item, int kr);
+// v10 "lotWin" (NET_EXT_LOTTERY_PRIZE_WON): "<name> won <prize> in the raffle!" (type NET_PRIZE_*)
+void hud_ui_raffle_won(Client*, int uid, int type, const char *ref, double quantity);
+// The v10.0.3 S2C follow-ups' page parts (client/src/ui/s2c_ui.c, doc/v10/s2c-coverage.md):
+void s2c_ui_charge_request(Client*, int id, double amount, int modal); // "chreq": #chargeModal / #chargeConfirm, 15 s
+int  s2c_ui_charge_key(Client*, int yes);         // kickVoteY / kickVoteN while a charge waits (no vote took it): 1 = taken
+int  s2c_ui_charge_modal_open(void);              // #chargeModal is up: the pointer lock stays off (menu_ui.c)
+void s2c_ui_wars_clan(Client*, int has, const char *clan_name); // "warsClan": the clan; the Turf Wars popup once per game
+void s2c_ui_on_init(Client*);                     // INIT: no clan, the popup may show again, no charge prompt
+void s2c_ui_tick(Client*);                        // per frame: entering the game schedules the Turf Wars popup
+void s2c_ui_edit_map(const char *json, size_t len); // "edMp": the map staged as mapToEdit, the editor opened
 void hud_ui_end_challenge_completed(int icon, const char *name);
 void hud_ui_render_team(const Client*);     // the player card's team type / name (io_updateTeam, isYou)
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
