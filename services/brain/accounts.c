@@ -45,11 +45,14 @@ void acct_config_load(Brain *b) {
     AcctConfig *c = &g_acct;
     memset(c, 0, sizeof *c);
     c->name_min = cfg_int(cfg, "name_min", 3);
-    c->name_max = cfg_int(cfg, "name_max", 16);
+    /* a new name: v10.0.3's config.maxNameLength 14 (deob-10.0.3.js:22725; the username input is maxlength 14,
+     * 129253). Only a new name is held to it (register, a new display name): a stored name of up to 32 characters
+     * (KrunkNative allowed 16 before) still signs in, resumes and mirrors (acct_name_stored_ok): no forced renames */
+    c->name_max = cfg_int(cfg, "name_max", 14);
     c->pass_min = cfg_int(cfg, "password_min", 6);
     c->pass_max = cfg_int(cfg, "password_max", 100);
     c->alias_min = cfg_int(cfg, "alias_min", 3);
-    c->alias_max = cfg_int(cfg, "alias_max", 16);
+    c->alias_max = cfg_int(cfg, "alias_max", 14); /* the name shown in game: maxNameLength 14, as name_max */
     c->session_ttl_s = (int64_t) cfg_int(cfg, "session_ttl_days", 30) * 86400;
     c->max_sessions = cfg_int(cfg, "max_sessions", 20);
     c->starting_kr = kn_config_int(cfg, "accounts.starting_kr", 0);
@@ -126,6 +129,16 @@ const char *acct_validate_name(const char *name) {
         if (!isalnum((unsigned char) *p) && *p != '_') return "Username may only contain letters, digits, and underscores.";
     }
     return NULL;
+}
+
+/* a name already stored (any length the accounts table holds, up to the 32 the config clamp allows): the charset
+ * only, so a name made under an older, longer name_max is never refused where it is looked up or mirrored */
+static int acct_name_stored_ok(const char *name) {
+    const size_t n = name ? strlen(name) : 0;
+    if (n < 1 || n > 32) return 0;
+    for (const char *p = name; *p; p++)
+        if (!isalnum((unsigned char) *p) && *p != '_') return 0;
+    return 1;
 }
 
 const char *acct_validate_password(const char *pass) {
@@ -999,7 +1012,7 @@ void acct_ensure_central(int64_t central_id, const char *username, AcctReplyFn c
         cb(ud, "Accounts are unavailable.", NULL);
         return;
     }
-    if (central_id <= 0 || central_id > INT32_MAX || acct_validate_name(username)) {
+    if (central_id <= 0 || central_id > INT32_MAX || !acct_name_stored_ok(username)) { /* a stored central name */
         cb(ud, "Invalid account.", NULL);
         return;
     }

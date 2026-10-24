@@ -73,6 +73,7 @@ static struct {
     char host_guest[33];       // a guest host's device guest id (32 hex; host_account_id is 0 for a guest)
     char host_name[32];
     int custom_had_players;
+    int host_transfers;        // this game's host transfers (v10.0.3 game.hostTransfers, ACC_HOST_TRANSFER_LIMIT)
     cJSON *pending_host;       // "host" waiting for its published map (/api/map-data)
     uint32_t pending_rid;
     cJSON *hosted_map;         // the fetched published map of the current custom game (owned)
@@ -3505,6 +3506,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     snprintf(g_acc.webhook, sizeof(g_acc.webhook), "%s", webhook && strlen(webhook) <= COMP_WEBHOOK_URL_MAX ? webhook : "");
     g_acc.webhook_posted = 0;
     g_acc.custom_had_players = 0;
+    g_acc.host_transfers = 0;
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");
     g_acc.host_account_id = cJSON_IsNumber(host_id) ? host_id->valueint : 0;
     snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", acc_str(cJSON_GetObjectItem(frame, "hostGuestId"), ""));
@@ -3535,16 +3537,37 @@ static ClientConnection *acc_next_host(void) {
     return NULL;
 }
 
+// v10.0.3 config.hostTransferLimit (deob-10.0.3.js:22620): a game's host passes at most 5 times (game.hostTransfers,
+// 215732; "This server exceeded Host Transfer limit"). Past it the game goes on without a host (inferred: the official
+// server's code is not in the bundle; a hostless game is what uh(null) shows the client, 256716-256717).
+#define ACC_HOST_TRANSFER_LIMIT 5
+
 // The host left and the lobby goes on: `next` hosts from now on (the custom host's rights and cheats follow
-// accounts_is_custom_host; the player list's star and the rights are sent to everyone and to `next`).
+// accounts_is_custom_host; the player list's star and the rights are sent to everyone and to `next`). The lines are
+// v10.0.3's on a host change: "You are now Host!" to the new host, "Host Transfered to {0}" to everyone else
+// (deob-10.0.3.js:256720-256727).
 static void acc_transfer_host(ClientConnection *next) {
-    server_log("[brain] custom game: the host left, %s (account %d) hosts now", next->name, next->acct.account_id);
+    if (g_acc.host_transfers >= ACC_HOST_TRANSFER_LIMIT) {
+        server_log("[brain] custom game: the host left, the transfer limit (%d) is reached: no host from now on", ACC_HOST_TRANSFER_LIMIT);
+        g_acc.host_account_id = 0;
+        g_acc.host_guest[0] = 0;
+        g_acc.host_name[0] = 0;
+        net_broadcast_chat(NULL, "This server exceeded Host Transfer limit");
+        return;
+    }
+    g_acc.host_transfers++;
+    server_log("[brain] custom game: the host left, %s (account %d) hosts now (transfer %d of %d)", next->name, next->acct.account_id,
+               g_acc.host_transfers, ACC_HOST_TRANSFER_LIMIT);
     g_acc.host_account_id = next->acct.account_id;
     snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", next->acct.account_id > 0 ? "" : next->acct.guest_id);
     snprintf(g_acc.host_name, sizeof(g_acc.host_name), "%s", next->name);
     char message[SERVER_PLAYER_NAME_MAX + 32];
-    snprintf(message, sizeof(message), "%s is the new host", next->name);
-    net_broadcast_chat(NULL, message);
+    snprintf(message, sizeof(message), "Host Transfered to %s", next->name);
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *c = &g_server->clients[i];
+        if (c->acct.join_state != SERVER_JOIN_READY) continue;
+        acc_chat_to(c, c == next ? "You are now Host!" : message);
+    }
     acc_broadcast_info(next);
     accounts_push_rights(next);
 }

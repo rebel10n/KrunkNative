@@ -126,12 +126,12 @@
   },
   "accounts": {
     "name_min": 3,
-    "name_max": 16,
+    "name_max": 14,
     "password_min": 6,
     "password_max": 100,
     "password_iterations": 600000,
     "alias_min": 3,
-    "alias_max": 16,
+    "alias_max": 14,
     "session_ttl_days": 30,
     "max_sessions": 20,
     "starting_kr": 0,
@@ -214,7 +214,7 @@
     "timeout_ms": 20000
   },
   "streams": {
-    "_comment": "v10 Live Streams (services/brain/streams.c, GET /streams/top): Twitch Helix, the Krunker category. Put the client id and secret only in your gitignored config.json or KN_STREAMS_TWITCH_CLIENT_ID / KN_STREAMS_TWITCH_CLIENT_SECRET; empty = the route answers 503 (the menu shows no streams).",
+    "_comment": "v10 Live Streams (services/brain/streams.c, GET /streams/top): Twitch Helix, the Krunker category. Put the client id and secret only in your gitignored config.json or KN_STREAMS_TWITCH_CLIENT_ID / KN_STREAMS_TWITCH_CLIENT_SECRET; empty = the route answers the empty list {success, data: {streams: []}} (the menu shows no streams).",
     "enabled": true,
     "cache_s": 30,
     "timeout_ms": 8000,

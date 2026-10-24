@@ -19,9 +19,9 @@
 
 /* ---- config ("accounts" section, doc/backend.md) */
 typedef struct AcctConfig {
-    int name_min, name_max;         /* username length (3..16, v3.1.1 accounts.ts) */
+    int name_min, name_max;         /* a new username's length (3..14: v10.0.3 maxNameLength; v3.1.1 had 16) */
     int pass_min, pass_max;         /* password length (6..100) */
-    int alias_min, alias_max;       /* display name length (3..16) */
+    int alias_min, alias_max;       /* a new display name's length (3..14) */
     int64_t session_ttl_s;          /* sliding session lifetime (30 days) */
     int max_sessions;               /* per account; oldest dropped (20) */
     int64_t starting_kr;            /* KR on register (0) */

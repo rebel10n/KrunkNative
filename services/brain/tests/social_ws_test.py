@@ -267,7 +267,10 @@ async def scenario(base, internal_url, secret):
 
         # register validation (v3.1.1 accounts.ts strings)
         r = await a.call("a", "a", 0, ["ab", "secret1", 0], "captcha")
-        check(r[1] == "Username must be 3–16 characters.", "short username rejected: %r" % r[1])
+        check(r[1] == "Username must be 3–14 characters.", "short username rejected: %r" % r[1])
+        # a new name is at most v10.0.3's maxNameLength 14 (deob-10.0.3.js:22725)
+        r = await a.call("a", "a", 0, ["n" * 15, "secret1", 0], "captcha")
+        check(r[1] == "Username must be 3–14 characters.", "a 15-character username rejected (maxNameLength 14): %r" % r[1])
         r = await a.call("a", "a", 0, ["bad name!", "secret1", 0], "captcha")
         check(r[1] == "Username may only contain letters, digits, and underscores.", "bad chars rejected")
         r = await a.call("a", "a", 0, [alice, "123", 0], "captcha")
@@ -344,7 +347,7 @@ async def scenario(base, internal_url, secret):
         r = await b.call("nmeR", "nme", "Bob Display")
         check(r[1] is None and r[2] == "Bob Display", "display name set")
         r = await b.call("nmeR", "nme", "x")
-        check(r[1] == "Display name must be 3–16 characters.", "short display name refused")
+        check(r[1] == "Display name must be 3–14 characters.", "short display name refused")
 
         # clans (menu window protocol)
         r = await b.call("cln", "cln", 1, "BOB", None)

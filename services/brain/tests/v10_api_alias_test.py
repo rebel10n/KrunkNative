@@ -166,6 +166,15 @@ def p_root(fields=None):
     return f
 
 
+def p_search(window):
+    """a legacy search answer {data: [...], index}: index is the window whose searchResp takes it
+    (windows[resp.index].searchResp, deob-10.0.3.js:255448-255451)"""
+    def f(status, body):
+        ok = status == 200 and isinstance(body, dict) and isinstance(body.get("data"), list) and body.get("index") == window
+        return ok, "data list, index %d" % window if ok else "HTTP %d, %s" % (status, json.dumps(body)[:120])
+    return f
+
+
 def p_json(status, body):
     """a JSON answer from a routed matchmaker path: the object on 200, or the matchmaker's named refusal
     ({success: 0, error: name}, e.g. NoAvailableServers 503 when no game server is up; the menu catches it)"""
@@ -183,9 +192,11 @@ def p_purchase(status, body):
     d = body.get("data") if isinstance(body, dict) else None
     if status == 200 and isinstance(d, dict) and isinstance(d.get("success"), bool):
         return True, "data.success is a bool"
-    if is_error(status, body):
-        return True, "refusal %d (no such skin in the shop)" % status
-    return False, "HTTP %d, no data.success" % status
+    # a refusal is a text error: v10.0.3 shows the top-level string error (deob-10.0.3.js:127095-127101, 127277), and
+    # refetches the shop on exactly "Skin not found or not available" (127096)
+    if 400 <= status < 500 and isinstance(body, dict) and body.get("error") == "Skin not found or not available":
+        return True, "refusal %d, the text error v10.0.3 refetches on (no such skin in the shop)" % status
+    return False, "HTTP %d %s" % (status, json.dumps(body)[:120])
 
 
 def p_participate(status, body):
@@ -356,14 +367,14 @@ def checks(guest_id):
         # creations.c: the legacy webhooks, read from the raw body (apiRequest, v10.js 131894-131950)
         ("GET", "/webhooks/general/maps/list?index=2&pos=0", None, p_root({"data": "list"}),
          "v10.0.3 L5161 listMaps (legacy apiRequest); v10.js 221943-221946, def 131894", None),
-        ("GET", "/webhooks/general/maps/search?val=x&cat=-1", None, p_root({"data": "list"}),
-         "v10.0.3 L5161 searchMap (legacy apiRequest); v10.js def 131908", None),
+        ("GET", "/webhooks/general/maps/search?val=x&cat=-1", None, p_search(9),
+         "searchMap (legacy apiRequest, deob-10.0.3.js:148015): index 9, the Maps window (searchResp 249327)", None),
         ("GET", "/webhooks/general/maps/config?mn=Sandstorm", None, p_root(),
          "v10.0.3 L292 maps/config; v10.js def 131914 (no preset: the empty {}, source none)", None),
         ("GET", "/webhooks/general/mods/list?index=0&pos=0", None, p_root({"data": "list"}),
          "v10.0.3 L5161 listMods (legacy apiRequest); v10.js 211797, def 131921", None),
-        ("GET", "/webhooks/general/mods/search?val=x", None, p_root({"data": "list"}),
-         "v10.0.3 L5161 searchMod (legacy apiRequest); v10.js 219061-219063, def 131928", None),
+        ("GET", "/webhooks/general/mods/search?val=x", None, p_search(3),
+         "searchMod (legacy apiRequest, deob-10.0.3.js:148035): index 3, the Mods window (searchResp 247232)", None),
         ("GET", "/webhooks/general/assets/list?index=0&cat=-1", None, p_root({"data": "list"}),
          "v10.0.3 L5161 listAssets (legacy apiRequest); v10.js def 131933", None),
         ("GET", "/webhooks/general/assets/search?index=2&cat=-1&val=x", None, p_root({"data": "list"}),
@@ -548,7 +559,7 @@ def main():
         if m is None:
             return 1
         port = int(m.group(1))
-        token = register(port, "f5alias" + secrets.token_hex(4))
+        token = register(port, "f5al" + secrets.token_hex(4))  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
         check("a test account registers (POST /auth/register) for the logged-in checks", token is not None)
         seed_sales(cfg["path"])
         run_checks(port, token)

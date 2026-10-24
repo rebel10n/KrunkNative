@@ -769,7 +769,7 @@ brain draining).
 | `GET /mm/regions` | (Krunker Box Office) | `[{"id","name","players","games","nodes"}]` known + live regions |
 | `GET /mm/game-list[?hostname=]` | `/mm/game-list` | `{"success":true,"totalPlayerCount":N,"games":[tuple,...]}` all live lobbies of every region |
 | `GET /mm/game-info?game=ID` | `/mm/game-info` | the tuple; unknown id -> best quick-join pick (v3.1.1), `InvalidGameId` if none |
-| `GET /streams/top` (also `/api/streams/top`) | v10 `streams.getTopStreams` (`/streams/top?cb=2`, v10:25992) | `{"success":true,"data":{"streams":[{username,title,viewerCount,thumbnailUrl,languageCode,eventTags,featured}],"promo":false,"dropCampaigns":[]}}`: Twitch Helix live streams of `streams.twitch.game` (default "Krunker"), cached `streams.cache_s` (30), the last good list while Twitch is down; `503 StreamsUnavailable` without `streams.twitch.client_id` / `client_secret` (env `KN_STREAMS_TWITCH_CLIENT_ID` / `KN_STREAMS_TWITCH_CLIENT_SECRET`). `services/brain/streams.c`; the client never holds the credentials |
+| `GET /streams/top` (also `/api/streams/top`) | v10 `streams.getTopStreams` (`/streams/top?cb=2`, deob-10.0.3.js:29925-29926; consumer 162110-162195) | `{"success":true,"data":{"streams":[{id,username,title,viewerCount,thumbnailUrl,startedAt,provider,languageCode,featured}],"promo":true,"dropCampaigns":[]}}`: Twitch Helix live streams of `streams.twitch.game` (default "Krunker"), cached `streams.cache_s` (30), the last good list while Twitch is down. 10.0.3 reads `data.streams` (an array; anything else is its error state), splits `featured` from the rest sorted by `viewerCount`, shows the promo card for `promo === true` and reads `dropCampaigns || []` (`streamerNames` per campaign, 162248): `featured` comes from `streams.featured` (logins), `promo` from `streams.promo` (default true, as api.krunker.io answered on 2026-10-24), `dropCampaigns` from `streams.drop_campaigns`. No Twitch source (`streams.enabled` off, or no `streams.twitch.client_id` / `client_secret`, env `KN_STREAMS_TWITCH_CLIENT_ID` / `KN_STREAMS_TWITCH_CLIENT_SECRET`): **200** `{"success":true,"data":{"streams":[]}}`, the empty list the menu shows as no streams (not a 503: 10.0.3 throws on any status >= 500, deob-10.0.3.js:29806). A Twitch failure with no list yet, or too many waiting requests: `503 StreamsUnavailable`. `services/brain/streams.c`, `streams_norm.c`; the client never holds the credentials |
 | `GET /streams/thumb?url=` (also `/api/streams/thumb`) | KrunkNative: the Live Streams cards' previews, from before the native engine loaded remote images (client/src/ui/remote_images.c). No client asks it now: a card's `<img src>` is its `thumbnailUrl`, as v10 sets it | `{"success":true,"data":{"url","image":"data:image/jpeg;base64,..."}}`. Only `https://` URLs on `streams.thumbs.hosts` (default `["static-cdn.jtvnw.net"]`) with a plain `.jpg` / `.jpeg` / `.png` path (no query, escapes or dot segments) are fetched: `400 InvalidThumbnail` otherwise. No redirects, at most `streams.thumbs.max_bytes` (256 KiB; `502 ThumbnailTooLarge`), JPEG / PNG only (`502 ThumbnailNotImage`), other failures `502 ThumbnailUnavailable`; answers cached `streams.thumbs.cache_s` (300), failures `streams.thumbs.fail_cache_s` (30), 32 URLs, 4 transfers at once. `streams.thumbs.cdn_url` (tests: a stub CDN) fetches the allowed URL's path from another base. `services/brain/stream_thumbs.c` |
 | `GET /mm/generate-token` | Krunker `matchmaker/generate-token` | `text/plain` validation token for the next seek-game (rate-limited: 120/min per address, then 429 `TooManyRequests`) |
 | `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION][&validationToken=T]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl","map"}` |
@@ -1214,10 +1214,10 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 
 | key | default | meaning |
 | --- | --- | --- |
-| `name_min` / `name_max` | `3` / `16` | username length; letters, digits, `_` (v3.1.1 `NAME_RE`) |
+| `name_min` / `name_max` | `3` / `14` | a new username's length (v10.0.3 `maxNameLength` 14, deob-10.0.3.js:22725); letters, digits, `_` (v3.1.1 `NAME_RE`). Only registration checks it: a stored name of up to 32 characters (KrunkNative's limit was 16) still signs in, resumes and mirrors |
 | `password_min` / `password_max` | `6` / `100` | password length (max bounds PBKDF2 work) |
 | `password_iterations` | `600000` | PBKDF2-HMAC-SHA256 iterations (`kn_password_*`); older hashes are re-hashed on login |
-| `alias_min` / `alias_max` | `3` / `16` | display name ("nme"): letters, digits, space, `_`, `-` |
+| `alias_min` / `alias_max` | `3` / `14` | a new display name ("nme"): letters, digits, space, `_`, `-`; a set name is kept |
 | `session_ttl_days` | `30` | sliding lifetime of session tokens |
 | `max_sessions` | `20` | sessions kept per account (oldest dropped) |
 | `starting_kr` | `0` | KR granted on register (ledger row `starting`) |
@@ -1347,7 +1347,7 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 
 `info` = `{level, levelProg, alias, premium, funds, score, clan, dev, mod, banned, badges}`
 (ignored by v3.1.1). Then `["gmc", unreadMail]` (JSON clients). Error strings:
-`Username must be 3–16 characters.`, `Username may only contain letters, digits, and
+`Username must be 3–14 characters.`, `Username may only contain letters, digits, and
 underscores.`, `Password must be ≥ 6 characters.`, `Password is too long.`,
 `Username already taken.`, `Invalid login.`, `Invalid credentials.`, `Please Try
 Later`, `Too many failed logins for this IP`, `Banned: <reason>` / `Account banned.`,
@@ -1992,13 +1992,16 @@ matchmaker on `004004` / `004006` and on a refused join key (9.4); `004004` on a
   moderator's (v10.0.3 shows it for `isHost || canGlobalKick`, deob-10.0.3.js:254169); the kicked
   player reads "Kicked by host" (`game.kick`, 222586-222588); a DEV cannot be kicked that way.
   Custom games have no vote kick (v10's Votekick needs `!game.isCustom`, 250341). A DEV kicks and
-  bans through the chat command layer. Deliberate or open differences from v10.0.3: Ban (action 1)
-  stays a DEV's (a KrunkNative ban is a persistent account ban, v10.0.3's host / moderator ban is
-  that game's only); there is no Transfer Host button (action 8), no `transferHostOnLeave` setting
-  (v10 default on, 19992-19998), no `hostTransferLimit` of 5 (22620) and no "You are now Host!" /
-  "Host Transfered to {0}" lines (256720-256727): the transfer on leave is KrunkNative's
-  (`acc_transfer_host`, a plain chat line). Neither game lets an ordinary host change the
-  settings mid-game (v10's Rehost is staff-only, 129063, 248793-248797).
+  bans through the chat command layer. A host transfer (`acc_transfer_host`) says v10.0.3's lines,
+  "You are now Host!" to the new host and "Host Transfered to {0}" to everyone else
+  (256720-256727), and a game's host passes at most `hostTransferLimit` 5 times (22620,
+  `game.hostTransfers` 215732): past it everyone reads "This server exceeded Host Transfer limit"
+  and the game goes on without a host (inferred: the server code is not in the bundle). Deliberate
+  or open differences from v10.0.3: Ban (action 1) stays a DEV's (a KrunkNative ban is a persistent
+  account ban, v10.0.3's host / moderator ban is that game's only); there is no Transfer Host button
+  (action 8) and no `transferHostOnLeave` setting (v10 default on, 19992-19998): the host passes on
+  leave when two or more players remain. Neither game lets an ordinary host change the settings
+  mid-game (v10's Rehost is staff-only, 129063, 248793-248797).
 * **Published (community DB) maps:** `config.customMap` (alias `mapName`) names the map to
   host. A map this server has (its own list incl. custom dirs / the command-line map, then
   a catalogue entry whose name or key is exactly that) is used directly; otherwise

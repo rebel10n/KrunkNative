@@ -175,7 +175,7 @@ async def craft(s, sid):
 
 
 async def scenario(url, db):
-    name_a, name_b, name_out = "craft_a%d" % os.getpid(), "craft_b%d" % os.getpid(), "craft_out%d" % os.getpid()
+    name_a, name_b, name_out = "craft_a%d" % os.getpid(), "craft_b%d" % os.getpid(), "craft_o%d" % os.getpid()  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
     aid = await register(url, name_a)
     bid = await register(url, name_b)
     await register(url, name_out)

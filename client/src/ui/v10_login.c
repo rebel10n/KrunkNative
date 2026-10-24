@@ -173,8 +173,10 @@ static void render_register(StrBuf *sb, const char *mail, const char *name, cons
                    "onkeydown=\"knV10LoginKey()", I18N("generic.email", "Email"), I18N("generic.auth.enterEmail", "Enter Email"));
     append_value(sb, mail);
     if (!kio()) {
+    // a new name is at most v10.0.3's maxNameLength 14 (deob-10.0.3.js:22725; its username input is maxlength 14,
+    // 129253). The login card's field has no cap: a name made under KrunkNative's older 16 still signs in
     sb_appendf(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accName\" class=\"input-label\">%s</label></div> "
-                   "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"%s\" "
+                   "<input id=\"accName\" type=\"text\" maxlength=\"14\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"%s\" "
                    "onkeydown=\"knV10LoginKey()", I18N("generic.username", "Username"), I18N("generic.auth.enterUsername", "Enter Username"));
     append_value(sb, name);
     sb_appendf(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accPass\" class=\"input-label\">%s</label></div> "

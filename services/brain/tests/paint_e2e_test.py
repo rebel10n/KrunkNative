@@ -42,7 +42,7 @@ BRAIN = os.path.join(ARG, "services", "brain", "kn_brain") if os.path.isdir(ARG)
 NAME = "kn_test_paint_e2e_%d" % os.getpid()
 SECRET = "kn-paint-e2e-secret-%d" % os.getpid()
 PASSWORD = "paintpass1"
-OWNER = "paint_e2e_owner"
+OWNER = "paint_owner"  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
 SKIN = 0            # a tradable skin in assets/skins.json (the market test's ITEM)
 PAINT = 7776        # a colour paint, #dc3c3c (v10_paint.c)
 PAINT_HEX = "#dc3c3c"
@@ -219,17 +219,17 @@ def scenario(port, db):
           st == 400 and "paint" in str(err_of(reply).get("message", "")), "HTTP %d %s" % (st, json.dumps(reply)[:200]))
 
 SHADER_PAINT = 7795  # Spectrum (paintShader 0; v10_paint.c)
-BUYER = "paint_e2e_buyer"
+BUYER = "paint_buyer"  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
 
 
 def scenario_shader(port, db):
     """A shader paint (paintShader 0, no colour): the copy, its listing, the purchase and the buyer's copy keep m."""
-    st, reply = http(port, "POST", "/auth/register", {"username": "paint_e2e_shader", "password": PASSWORD})
+    st, reply = http(port, "POST", "/auth/register", {"username": "paint_shader", "password": PASSWORD})
     token = reply.get("token") if isinstance(reply, dict) else None
     check("shader: the seller registers", st == 200 and bool(token), "HTTP %d" % st)
     if not token:
         return
-    acc = query(db, "SELECT id FROM accounts WHERE username = ?", ("paint_e2e_shader",))
+    acc = query(db, "SELECT id FROM accounts WHERE username = ?", ("paint_shader",))
     acc_id = acc[0][0] if acc else 0
     seed(db, [
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (acc_id, SKIN)),
