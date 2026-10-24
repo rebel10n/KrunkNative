@@ -412,10 +412,11 @@ def main():
         json.dump(cfg, fp)
     log_path = os.path.join(tmp, "brain.log")
     log = open(log_path, "w")
-    proc = subprocess.Popen([BRAIN, "--config", os.path.join(tmp, "config.json"), "--migrate"], stdout=log, stderr=subprocess.STDOUT,
-                            cwd=ROOT, start_new_session=True)
+    proc = None
     rc = 1
     try:
+        proc = subprocess.Popen([BRAIN, "--config", os.path.join(tmp, "config.json"), "--migrate"], stdout=log, stderr=subprocess.STDOUT,
+                                cwd=ROOT, start_new_session=True)
         port = None
         for _ in range(1200):
             if proc.poll() is not None:
@@ -436,11 +437,12 @@ def main():
         print("FAIL exception: %r" % (e,))
         rc = 1
     finally:
-        proc.terminate()
-        try:
-            proc.wait(10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        if proc:
+            proc.terminate()
+            try:
+                proc.wait(10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
         log.close()
         with open(log_path) as fp:
             errs = [l for l in fp.read().splitlines() if " ERROR " in l or "deadlock" in l.lower()]

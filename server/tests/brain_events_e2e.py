@@ -460,11 +460,13 @@ def main():
     brain_bin = f"{BUILD}/services/brain/kn_brain"
     if not os.access(f"{BUILD}/server_bin", os.X_OK) or not os.access(brain_bin, os.X_OK):
         print("brain_events_e2e: no server_bin / kn_brain in %s: skipped" % BUILD)
+        shutil.rmtree(WORK, ignore_errors=True)
         return 77
     scratch = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
     r = subprocess.run(scratch + ["create", "sqlite", NAME], capture_output=True)
     if r.returncode:
         print("brain_events_e2e: sqlite unavailable: skipped")
+        shutil.rmtree(WORK, ignore_errors=True)
         return 77
     dbcfg = json.loads(r.stdout)
     db = Sql(dbcfg["path"])
