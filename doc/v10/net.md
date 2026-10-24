@@ -385,10 +385,10 @@ gameState. Sender `deob-10.0.3.js:221968` (sandbox 261893), handler 256748-25687
 
 Config keys `applyConfig` reads (216116-216423): `isComp`, `webhook`, `teams` / `specs` / `lockedTeams` (comp
 account teams), `weps` / `cls` / `prks` (custom tables, clamped per option), the 84 serverConfig options
-(`deob-10.0.3.js:19528-20127`, plus `nameTeam3..5` / `t3Dmg..t5Dmg` spliced in at 20128-20154), the paid flags
+(`deob-10.0.3.js:19528-20100`, plus `nameTeam3..5` / `t3Dmg..t5Dmg` spliced in at 20101-20127), the paid flags
 `maxPS` / `promServ` (19510), `maps`, `modes`, `classes`. Every serverConfig option matches KN's
 `k_server_options` (shared/src/game_config.c) in key, def, defC, min, max, maxG / maxP / maxF / maxD, except
-`rampFix` (Solid Ramp Sides, new in 10.0.3, 20069-20076): hostTypes [0, 1] and defC true, after
+`rampFix` (Solid Ramp Sides, new in 10.0.3, 20068-20075): hostTypes [0, 1] and defC true, after
 `headClipFix` (**fixed**). gap: KN does not keep `teams` / `specs` / `lockedTeams` or the paid flags (live
 service).
 
@@ -468,6 +468,7 @@ service).
 | `cv` / `gv` | `(key, value)`, value a number or a non-numeric string (`isNaN(parseFloat(v)) ? v : parseFloat(v)`) | 258558, 183563 | gap: NetValuePacket is a double, a string arrives as 0 (the same as JS for conditions: `parseInt(v) \|\| undefined`) |
 | the rest of `krunker_link_world.c` | `uct` (stride 6), `crsp` (xD degrees), `ai` (stride 9), `aai`, `gt`, `gmsg`, `tx` (`\|\| 28`), `lkt` (MM:SS), the zombie machines, `inat` / `inatA`, `tgui`, `cnfm`, init syncData parts | per handler | OK |
 | `e+` `e-` `es` `ee` `ea+` `ea-` `plk` `objmv` `lo` `slo` | inline handlers / `liveObjects` | 261720-261741, 258504, 212277, 212320, 216882 | OK |
+| `pz` PLAYER_POSE | `[sid, pose \| 0]` (players.setPose) and init syncData `plrPose` | 195354, 256989-256993 | handled since this audit (`krunker_link_script.c`, doc/v10/player-pose.md); not re-audited here |
 | `code` / `codeT` / `codeP` | `[]` / `[seconds]` / `[]` | 256641-256648 | OK |
 | `up` / `prpR` | `[sid, propID, skip, propSwitches]` / `[sid, propRot, propRotSaved, reset]` | 259365, 259385 | OK |
 | `a` ACCOUNT_RESPONSE | `[error, id, username, row, token, ...]`; the row goes through `Account.setData`, which **indexes** it: [6] score, [12] isDev, [18] role, [27] jobRating, [28] jobRatingPos, [47] rankedPoints | 244344-244361, 128966-129016 | **fixed**: role / isDev / the job ratings were read by database column names the 10.0.3 row never has (always 0: no K.P.D deputy tools, no dev rights); now by index, the names kept as the object form's fallback |
