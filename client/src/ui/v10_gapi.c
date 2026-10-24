@@ -14,6 +14,7 @@
 // the kn_brain socket is held meanwhile, so nothing reaches the Box Office account either.
 #include <backend.h>
 #include <backend_ui.h>
+#include <html_dom.h> // html_timer_add: the retry's backoff
 #include <krunker_account.h>
 #include <v10_social.h>
 #include <i18n.h>
@@ -24,13 +25,50 @@
 
 #define GAPI_PENDING 64
 
+// v10.0.3's fetch retries these statuses three times, 300 ms then doubling, before its wrapper sees the answer
+// (deob-10.0.3.js:30003-30016); the tunnel does the same with the request it sent. Bounded (at most four sends per
+// request, 2.1 s of backoff) and charged to the socket's write / read classes like any request, so it cannot hammer
+// the brain; a 4xx (a refusal, a 429) is never retried, as in 10.0.3.
+#define GAPI_RETRIES 3
+#define GAPI_RETRY_MS 300
+
 static struct {
     int64_t rid;
     V10GapiFn fn;
     void *user;
+    cJSON *frame;   // the request as sent (resent on a retryable status)
+    int attempt;    // retries made
+    int timer;      // the pending retry's html timer (0 none)
 } g_pending[GAPI_PENDING];
 static int64_t g_next_rid = 1;
 static int g_listening;
+
+static int gapi_retryable(const int status) {
+    return status == 408 || status == 500 || status == 502 || status == 503 || status == 504 || status == 522 || status == 524;
+}
+
+static void gapi_slot_free(const int i) {
+    if (g_pending[i].timer) html_timer_cancel(g_pending[i].timer);
+    cJSON_Delete(g_pending[i].frame);
+    g_pending[i].frame = NULL;
+    g_pending[i].timer = 0;
+    g_pending[i].attempt = 0;
+    g_pending[i].fn = NULL;
+}
+
+static void gapi_resend(void *user) {
+    const int64_t rid = (int64_t) (intptr_t) user;
+    for (int i = 0; i < GAPI_PENDING; i++) {
+        if (!g_pending[i].fn || g_pending[i].rid != rid || !g_pending[i].timer) continue;
+        g_pending[i].timer = 0;
+        if (g_pending[i].frame && backend_social_send(g_pending[i].frame)) return;
+        const V10GapiFn fn = g_pending[i].fn;
+        void *u = g_pending[i].user;
+        gapi_slot_free(i);
+        fn(u, 0, NULL, NULL); // the socket is gone: the caller's own failure path
+        return;
+    }
+}
 
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
@@ -41,7 +79,7 @@ static void on_social(void *user, const cJSON *frame) {
             if (!g_pending[i].fn) continue;
             const V10GapiFn fn = g_pending[i].fn;
             void *u = g_pending[i].user;
-            g_pending[i].fn = NULL;
+            gapi_slot_free(i);
             fn(u, 0, NULL, NULL);
         }
         return;
@@ -50,12 +88,20 @@ static void on_social(void *user, const cJSON *frame) {
     const cJSON *rid = cJSON_GetArrayItem(frame, 1);
     if (!cJSON_IsNumber(rid)) return;
     for (int i = 0; i < GAPI_PENDING; i++) {
-        if (!g_pending[i].fn || g_pending[i].rid != (int64_t) rid->valuedouble) continue;
-        const V10GapiFn fn = g_pending[i].fn;
-        void *u = g_pending[i].user;
-        g_pending[i].fn = NULL;
+        if (!g_pending[i].fn || g_pending[i].rid != (int64_t) rid->valuedouble || g_pending[i].timer) continue;
         const cJSON *status = cJSON_GetArrayItem(frame, 2), *payload = cJSON_GetArrayItem(frame, 3);
         const int st = cJSON_IsNumber(status) ? status->valueint : 200;
+        if (gapi_retryable(st) && g_pending[i].frame && g_pending[i].attempt < GAPI_RETRIES) {
+            const int id = html_timer_add((double) (GAPI_RETRY_MS << g_pending[i].attempt), gapi_resend, (void *) (intptr_t) g_pending[i].rid);
+            if (id > 0) {
+                g_pending[i].attempt++;
+                g_pending[i].timer = id;
+                return;
+            }
+        }
+        const V10GapiFn fn = g_pending[i].fn;
+        void *u = g_pending[i].user;
+        gapi_slot_free(i);
         if (st == 429) {
             // v10.0.3's gapi wrapper answers any 429 with this string and no data, whatever the body
             // (deob-10.0.3.js:30051-30057); the brain's {code RATE_LIMITED, message, retry_ms} is not shown.
@@ -194,17 +240,22 @@ int v10_gapi(const char *method, const char *path, const cJSON *body, const V10G
     cJSON_AddItemToArray(f, cJSON_CreateString(path));
     cJSON_AddItemToArray(f, body ? cJSON_Duplicate(body, 1) : cJSON_CreateNull());
     const int sent = backend_social_send(f);
-    cJSON_Delete(f);
-    if (!sent) return 0;
+    if (!sent) {
+        cJSON_Delete(f);
+        return 0;
+    }
     g_pending[slot].rid = rid;
     g_pending[slot].fn = fn;
     g_pending[slot].user = user;
+    g_pending[slot].frame = f; // kept for a retry (gapi_resend)
+    g_pending[slot].attempt = 0;
+    g_pending[slot].timer = 0;
     return 1;
 }
 
 void v10_gapi_cancel(const V10GapiFn fn, void *user) {
     for (int i = 0; i < GAPI_PENDING; i++)
-        if (g_pending[i].fn == fn && g_pending[i].user == user) g_pending[i].fn = NULL;
+        if (g_pending[i].fn == fn && g_pending[i].user == user) gapi_slot_free(i);
     for (int i = 0; i < KIO_PENDING; i++)
         if (g_kio[i].id && g_kio[i].fn == fn && g_kio[i].user == user) g_kio[i].id = 0, g_kio[i].fn = NULL;
 }

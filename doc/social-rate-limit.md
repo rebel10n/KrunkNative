@@ -124,11 +124,13 @@ its usual error.
 
 * `client/src/ui/v10_gapi.c`: a gapi 429 is answered as v10.0.3's gapi wrapper answers any 429,
   whatever its body: no data and the error string "Rate limit exceeded. Try again later."
-  (deob-10.0.3.js:30051-30057), so the brain's `RATE_LIMITED` message and `retry_ms` are not shown. No
-  retry: 10.0.3's fetch retries only 408, 500, 502, 503, 504, 522 and 524, three times from 300 ms,
-  doubling (deob-10.0.3.js:30003-30016). That retry is not ported to the socket (deliberate): a 5xx on
-  the tunnel is the brain's definitive answer (a database failure, no logo source), not a proxy's
-  transient one, so resending it would only repeat the work.
+  (deob-10.0.3.js:30051-30057), so the brain's `RATE_LIMITED` message and `retry_ms` are not shown.
+  A 429 is never resent. A request answered 408, 500, 502, 503, 504, 522 or 524 is resent as v10.0.3's
+  fetch resends it: up to three times, after 300, 600 and 1200 ms (deob-10.0.3.js:30003-30016), then
+  the last answer reaches the caller. That cannot hammer the brain: at most four sends per request,
+  spaced 2.1 s in all, each charged to its class (`read` / `write`) like any frame, and a refusal
+  (any 4xx) is final. The brain's 5xx on the tunnel are database failures and the logo upload's 503,
+  so a retry mostly repeats a transient failure, which is what 10.0.3's retry is for.
 * `client/src/ui/v10_social.c`: `EB_RATE_LIMITED` with `of` = `msg:send` fails the oldest pending
   message, as before. With another `of`, it clears the loading flag of that list (`friends:list`
   or `msg:history`) and shows the message, so nothing waits forever. Neither retries by itself.

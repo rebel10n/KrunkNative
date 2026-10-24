@@ -164,6 +164,10 @@ static struct {
     int nviews;
     int unread_shown;                // the menu badge's last value
     int scenario;
+    // the conversation's load-earlier-on-scroll (v10.0.3 deob-10.0.3.js:157767-157790)
+    float earlier_anchor;            // scrollHeight - scrollTop when an earlier page was asked (0 none): kept after it lands
+    float msgs_top;                  // #v10sMessages' scrollTop at the last tick (-1 unknown)
+    int64_t msgs_peer;               // the conversation msgs_top belongs to
 } S;
 
 // ------------------------------------------------------------------ small helpers
@@ -521,34 +525,40 @@ char *v10_social_window_friends_html(void) {
     StrBuf sb = {0};
     sb_append(&sb, "<div id='friendList'>");
     if (cJSON_GetArraySize(S.friends) == 0) sb_append(&sb, "<span style='color:#9a9a9a'>You don't have any friends yet.</span>");
+    // online friends first, the list's order otherwise (v10 sorts by st, stably, deob-10.0.3.js:255470-255481). v10
+    // also writes a friend's status message (sm) for "Online" and a featured check_circle (plf): the bus's friend
+    // objects carry neither
     int i = 0;
-    const cJSON *f;
-    cJSON_ArrayForEach(f, S.friends) {
-        const char *name = jstr(f, "name"), *game = jstr(f, "gameInstanceId");
-        const int online = jtrue(f, "online");
-        sb_append(&sb, "<div><div style='margin-bottom:10px;text-align:left;padding-bottom:10px;border-bottom:3px solid #ffffff33;padding-top:10px;'>"
-                       "<img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='./img/player_pfp.png' /><div class='folInfHldr'>");
-        if (jtrue(f, "premium")) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
-        sb_append(&sb, "<a href='javascript:void(0)' onclick=\"openPlayerProfile(");
-        sb_arg(&sb, name);
-        sb_append(&sb, ")\" class='lName' style='color:rgba(255,255,255,0.9)'>");
-        sb_append_esc(&sb, name);
-        sb_appendf(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:16px;margin-top:4px;max-width:500px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;'>%s</div></div><div style='float:right;'>",
-                   online ? "<div class='onStatus' style='background:#27ab32'></div>Online" : "<div class='onStatus' style='background:#7f7f7f'></div>Offline");
-        if (game[0]) {
-            char url[160];
-            snprintf(url, sizeof(url), "/?game=%s", game);
-            sb_append(&sb, "<div class='button buttonG' style='padding:10px;margin-right:15px;' onclick=\"openURL(");
-            sb_arg(&sb, url);
-            sb_append(&sb, ",1)\">Join</div>");
-        }
-        if (!kio()) { // krunker.io account: unfollowing is not ported (it changes that account)
-            sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
+    for (int pass = 0; pass < 2; pass++) {
+        const cJSON *f;
+        cJSON_ArrayForEach(f, S.friends) {
+            const char *name = jstr(f, "name"), *game = jstr(f, "gameInstanceId");
+            const int online = jtrue(f, "online");
+            if (online != !pass) continue;
+            sb_append(&sb, "<div><div style='margin-bottom:10px;text-align:left;padding-bottom:10px;border-bottom:3px solid #ffffff33;padding-top:10px;'>"
+                           "<img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='./img/player_pfp.png' /><div class='folInfHldr'>");
+            if (jtrue(f, "premium")) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+            sb_append(&sb, "<a href='javascript:void(0)' onclick=\"openPlayerProfile(");
             sb_arg(&sb, name);
-            sb_appendf(&sb, ",%d)\">Remove Friend</div>", i);
+            sb_append(&sb, ")\" class='lName' style='color:rgba(255,255,255,0.9)'>");
+            sb_append_esc(&sb, name);
+            sb_appendf(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:16px;margin-top:4px;max-width:500px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;'>%s</div></div><div style='float:right;'>",
+                       online ? "<div class='onStatus' style='background:#27ab32'></div>Online" : "<div class='onStatus' style='background:#7f7f7f'></div>Offline");
+            if (game[0]) {
+                char url[160];
+                snprintf(url, sizeof(url), "/?game=%s", game);
+                sb_append(&sb, "<div class='button buttonG' style='padding:10px;margin-right:15px;' onclick=\"openURL(");
+                sb_arg(&sb, url);
+                sb_append(&sb, ",1)\">Join</div>");
+            }
+            if (!kio()) { // krunker.io account: unfollowing is not ported (it changes that account)
+                sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
+                sb_arg(&sb, name);
+                sb_appendf(&sb, ",%d)\">Remove Friend</div>", i);
+            }
+            i++;
+            sb_append(&sb, "</div></div></div>");
         }
-        i++;
-        sb_append(&sb, "</div></div></div>");
     }
     sb_append(&sb, "</div>");
     return sb_finish(&sb);
@@ -797,6 +807,12 @@ static void eb_on_error(const cJSON *o) {
     // a refused frame (social_ws.c's rate limit) names the frame it refuses in "of": only a refused
     // msg:send is a failed message; the others release their own loading flag and show the brain's text
     const char *of = jstr(o, "of");
+    // an error of another request (an unknown type, or game:invite: strike_social.c's own; the brain names it in `of`)
+    // is shown, and never fails a pending msg:send bubble
+    if (of[0] && strcmp(of, "msg:send") && strcmp(code, "EB_RATE_LIMITED")) {
+        snprintf(S.eb_error, sizeof(S.eb_error), "%s", text);
+        return;
+    }
     if (!strcmp(code, "EB_RATE_LIMITED") && of[0] && strcmp(of, "msg:send")) {
         if (!strcmp(of, "friends:list")) S.friends_loading = 0;
         if (!strcmp(of, "msg:history"))
@@ -978,16 +994,33 @@ static void conv_open(const int64_t peer) {
     }
 }
 
+// v10.0.3's load earlier (deob-10.0.3.js:157767-157783): 25 messages before the oldest, the list's distance from the
+// bottom kept, so the messages on screen stay where they are when the page lands above them (render)
 static void conv_load_earlier(void) {
     Conv *c = conv_get(S.selected, 0);
     if (!c || !c->has_more || !c->oldest || c->loading) return;
     c->loading = 1;
+    const HtmlElem m = html_dom_by_id("v10sMessages");
+    HtmlScroll sc;
+    S.earlier_anchor = m && html_dom_get_scroll(m, &sc) ? sc.height - sc.top : 0.0f;
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "type", "msg:history");
     cJSON_AddNumberToObject(o, "peer", (double) S.selected);
     cJSON_AddNumberToObject(o, "before", (double) c->oldest);
     cJSON_AddNumberToObject(o, "limit", 25);
     eb_send(o);
+}
+
+// a JS string's length of UTF-8 text: v10.0.3's canSend is text.length <= 512 and its counter 512 - length
+// (deob-10.0.3.js:157704-157705, 158229), in UTF-16 units: a 4-byte sequence (an emoji) is 2. The brain counts the
+// same way (social_eb.c utf16_units), so a message the box allows is never refused EB_TEXT_TOO_LONG.
+static size_t utf16_len(const char *s) {
+    size_t n = 0;
+    for (; *s; s++) {
+        const unsigned char c = (unsigned char) *s;
+        if ((c & 0xC0) != 0x80) n += c >= 0xF0 ? 2 : 1;
+    }
+    return n;
 }
 
 // _50152 send: a pending bubble, then msg:send
@@ -997,8 +1030,7 @@ static void conv_send(void) {
     while (*t == ' ' || *t == '\n' || *t == '\t' || *t == '\r') t++;
     size_t len = strlen(t);
     while (len && (t[len - 1] == ' ' || t[len - 1] == '\n' || t[len - 1] == '\t' || t[len - 1] == '\r')) len--;
-    size_t chars = 0;
-    for (size_t i = 0; i < strlen(S.compose); i++) chars += ((unsigned char) S.compose[i] & 0xC0) != 0x80;
+    const size_t chars = utf16_len(S.compose);
     if (!S.selected || !len || chars > EB_TEXT_MAX || S.eb_status != EB_CONNECTED || S.selected == my_id()) return;
     memcpy(text, t, len);
     text[len] = 0;
@@ -1455,8 +1487,7 @@ static void sb_conversation(StrBuf *sb) {
             sb_append(sb, "</div></div>");
         }
     }
-    size_t chars = 0;
-    for (const char *p = S.compose; *p; p++) chars += ((unsigned char) *p & 0xC0) != 0x80;
+    const size_t chars = utf16_len(S.compose);
     const int left = EB_TEXT_MAX - (int) chars;
     const char *t = S.compose;
     while (*t == ' ' || *t == '\n' || *t == '\t') t++;
@@ -1547,7 +1578,7 @@ static void search_changed(void) {
 static void sb_search_tab(StrBuf *sb) {
     sb_append(sb, "<div class=\"profile-search-root svelte-fo44ss\">");
     sb_window_header(sb, "person_search", "Player Profiles");
-    sb_append(sb, "</div> <div class=\"profile-search-content svelte-fo44ss\"><div class=\"profile-search-form svelte-fo44ss\"><i class=\"material-icons profile-search-icon svelte-fo44ss\">search</i> "
+    sb_append(sb, "</div> <div class=\"profile-search-content svelte-fo44ss\" id=\"v10sSearchContent\"><div class=\"profile-search-form svelte-fo44ss\"><i class=\"material-icons profile-search-icon svelte-fo44ss\">search</i> "
                   "<input type=\"text\" class=\"profile-search-input svelte-fo44ss\" placeholder=\"Search username...\" autocomplete=\"off\" spellcheck=\"false\" "
                   "aria-label=\"Player name search\" id=\"v10sSearchQ\" oninput=\"v10sInput('search',this.value)\" value=\"");
     sb_append_esc(sb, S.search_q);
@@ -1917,11 +1948,11 @@ static void sb_profile_right(StrBuf *sb, View *v) {
             cJSON_ArrayForEach(rp, v->reports) {
                 const int idx = (int) jnum(rp, "rp_index");
                 sb_appendf(sb, "<div class=\"profile-detail-report svelte-1hghrmf\" id=\"v10sReport%d\"><div class=\"profile-detail-report-head svelte-1hghrmf\"><b>", row++);
-                sb_append(sb, idx >= 0 && idx < 7 ? k_report_reasons[idx] : "Unknown"); // rp_text is escaped by the brain
+                sb_append(sb, idx >= 0 && idx < 7 ? k_report_reasons[idx] : "Unknown");
                 sb_append(sb, "</b> <span>from </span>");
                 sb_append_esc(sb, jstr(rp, "rp_reportername"));
                 sb_append(sb, "</div><div class=\"profile-detail-report-text svelte-1hghrmf\">");
-                sb_append(sb, jstr(rp, "rp_text"));
+                sb_append_esc(sb, jstr(rp, "rp_text")); // raw from the brain, as v10.0.3's text node (deob-10.0.3.js:126950)
                 sb_append(sb, "</div></div>");
             }
         }
@@ -2520,6 +2551,13 @@ static void render(void) {
     keep_restore(&k);
     // the conversation follows its newest message
     const Conv *c = S.tab == TAB_FRIENDS && S.selected ? conv_get(S.selected, 0) : NULL;
+    if (c && !c->loading && S.earlier_anchor > 0.0f) { // an earlier page landed: the same distance from the bottom
+        const HtmlElem m = html_dom_by_id("v10sMessages");
+        HtmlScroll sc;
+        if (m && html_dom_get_scroll(m, &sc)) html_dom_set_scroll(m, sc.left, sc.height - S.earlier_anchor);
+        S.earlier_anchor = 0.0f;
+        if (m && html_dom_get_scroll(m, &sc)) S.msgs_top = sc.top;
+    }
     const int last = c && c->n ? c->msgs[c->n - 1].local_id : 0;
     if (c && last != g_last_bottom_local) {
         const HtmlElem m = html_dom_by_id("v10sMessages");
@@ -2530,8 +2568,23 @@ static void render(void) {
     S.rendered = 1;
 }
 
-// genericPopup({component: _49999}, "socialModal")
-static void open_hub(const int tab) {
+// v10 mounts a tab's component afresh whenever it is shown (openSocial builds a new panel, a tab switch a new
+// pane): the Social tab starts on Global with an empty search (deob-10.0.3.js:157431, 157434), the Friends tab
+// with no friend selected, no filter and an empty draft (157120, 157633, 157697). The Search tab keeps the
+// panel's query (its initialQuery, 158253), which a new panel starts empty.
+static void mount_tab(const int tab) {
+    if (tab == TAB_SOCIAL) {
+        S.sub = 0;
+        S.social_query[0] = 0;
+    } else if (tab == TAB_FRIENDS) {
+        S.selected = 0;
+        S.friend_filter[0] = 0;
+        S.compose[0] = 0;
+    }
+}
+
+// genericPopup({component: _49999}, "socialModal"), with the state as it is (the scenario renderer's presets)
+static void show_hub(const int tab) {
     ui_loadout_clear_pops(); // resetPops()
     const HtmlElem holder = html_dom_by_id("popupHolder"), pop = html_dom_by_id("genericPop");
     if (!pop) return;
@@ -2544,6 +2597,14 @@ static void open_hub(const int tab) {
     if (S.tab == TAB_SOCIAL) feeds_load(1);
     g_last_bottom_local = 0;
     render();
+}
+
+// openSocial(initialTab): a new panel, no initialQuery (deob-10.0.3.js:252405-252411)
+static void open_hub(const int tab) {
+    S.search_q[0] = 0;
+    search_changed();
+    mount_tab(tab >= 0 && tab <= 2 ? tab : 0);
+    show_hub(tab);
 }
 
 // ------------------------------------------------------------------ render: the view stack (#app's .view-stack)
@@ -3068,8 +3129,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             const int was = S.compose[0] != 0;
             snprintf(S.compose, sizeof(S.compose), "%s", value);
             // the counter / send button follow the text without re-rendering the textarea
-            size_t chars = 0;
-            for (const char *p = S.compose; *p; p++) chars += ((unsigned char) *p & 0xC0) != 0x80;
+            const size_t chars = utf16_len(S.compose);
             const HtmlElem send = html_dom_by_id("v10sSend");
             const char *t = S.compose;
             while (*t == ' ' || *t == '\n' || *t == '\t') t++;
@@ -3148,6 +3208,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     } else if (!strcmp(op, "noop")) {
     } else if (!strcmp(op, "tab")) {
         S.tab = (int) arg_num(args, argc, 1, 0);
+        mount_tab(S.tab);
         if (S.tab == TAB_SOCIAL) feeds_load(1); // the panes mount again
         if (S.tab == TAB_SEARCH && S.search_q[0] && !S.searched) search_changed();
         render();
@@ -3323,6 +3384,26 @@ static void menu_badge(void) {
     html_dom_set_text(badge, text);
 }
 
+// v10.0.3 loads earlier messages when the conversation is scrolled to within 80 px of the top (its scroll handler,
+// deob-10.0.3.js:157784-157790, bound at 158232). The native engine has no scroll event: a scroll is a change of
+// #v10sMessages' scrollTop since the last tick, so a short list that never scrolls keeps its button only, as in 10.0.3.
+static void conv_scroll_tick(void) {
+    const Conv *c = S.open && S.tab == TAB_FRIENDS && S.selected ? conv_get(S.selected, 0) : NULL;
+    const HtmlElem m = c ? html_dom_by_id("v10sMessages") : 0;
+    HtmlScroll sc;
+    if (!m || !html_dom_get_scroll(m, &sc)) {
+        S.msgs_top = -1.0f;
+        return;
+    }
+    const int scrolled = S.msgs_peer == S.selected && S.msgs_top >= 0.0f && sc.top != S.msgs_top;
+    S.msgs_peer = S.selected;
+    S.msgs_top = sc.top;
+    if (scrolled && sc.top <= 80.0f && c->has_more && !c->loading) {
+        conv_load_earlier();
+        render();
+    }
+}
+
 void v10_social_tick(void) {
     if (!ui_page_is_v10()) return;
     if (!S.inited) {
@@ -3345,6 +3426,7 @@ void v10_social_tick(void) {
         S.last_ping = now_ms();
         eb_send_type("presence:ping", NULL, 0);
     }
+    conv_scroll_tick();
     menu_badge();
 }
 
@@ -3391,7 +3473,7 @@ void v10_social_scenario(const cJSON *st) {
         S.results = cJSON_Duplicate(cJSON_GetObjectItem(search, "results"), 1);
         S.searched = S.results != NULL;
     }
-    open_hub(S.tab);
+    show_hub(S.tab);
     const cJSON *view = cJSON_GetObjectItem(st, "view");
     if (view) {
         const char *type = jstr(view, "type");
