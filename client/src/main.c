@@ -2484,6 +2484,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
             input.x_dir = g_look.x;
             input.y_dir = g_look.y;
         }
+        entities_ride_look(client, &input.y_dir); // v10.0.3: a ridden entity turns the look, lk locks it (entities.c)
         // controls.js: the pitch is clamped and xDr = rotation.y % Math.PI2 before the input
         // frame takes them, so the yaw sent (and predicted) never grows without bound.
         input.x_dir = player_clamp_pitch(input.x_dir);

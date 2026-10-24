@@ -315,8 +315,11 @@ void entities_describe(const Client *client, char *out, const size_t size) {
         }
     }
     if (client->me && ks_entities_attachment(&client->game, (int) client->me->uid, &attached, &soft, NULL, NULL, NULL) && soft) attached = -1;
+    KsEntityView ride;
+    const int riding = attached >= 0 && ks_entities_find(&client->game, attached, &ride);
     snprintf(out, size, "entities=%d parts=%d solid=%d live=%d spawns=%u states=%u removes=%u events=%u attaches=%u lives=%u moves=%u "
-                        "attached=%d first=%d@%.2f,%.2f,%.2f/%.2f",
+                        "attached=%d ride_yaw=%.2f look=%.2f first=%d@%.2f,%.2f,%.2f/%.2f",
              count, parts, solid, ks_entities_live_count(&client->game), E.spawns, E.states, E.removes, E.events, E.attaches, E.lives, E.moves,
-             attached, has ? first.eid : -1, has ? first.pose.x : 0.0, has ? first.pose.y : 0.0, has ? first.pose.z : 0.0, has ? first.pose.yaw : 0.0);
+             attached, riding ? fmod(ride.render.yaw, 2.0 * M_PI) : 0.0, client->me ? client->me->direction.y : 0.0f, has ? first.eid : -1,
+             has ? first.pose.x : 0.0, has ? first.pose.y : 0.0, has ? first.pose.z : 0.0, has ? first.pose.yaw : 0.0);
 }
