@@ -397,6 +397,19 @@ def market_scenario(port, path):
                 lambda d: isinstance(d, dict) and d.get("has_more") is False and any(
                     x.get("ski") == ITEM and is_int(x.get("onS")) for x in d.get("stats") or []),
                 "{stats: [{ski, onS, low, high}], has_more} (v10.0.3 5160; v10.js 128424)")
+    # paging: every owned item is a row (no 50-row cut before the filters), sorted as the grid sorts (old: store
+    # index), one page after another by next_cursor (deob-10.0.3.js:30873-30900, 150895-150918, 151236-151262)
+    st, r = http(port, "GET", "/market/stats?sort=old&limit=1")
+    p1 = data_of(r) or {}
+    st2, r2 = http(port, "GET", "/market/stats?sort=old&limit=1&cursor=%s" % p1.get("next_cursor"))
+    p2 = data_of(r2) or {}
+    st3, r3 = http(port, "GET", "/market/stats?sort=old&limit=100")
+    every = [x.get("ski") for x in (data_of(r3) or {}).get("stats", [])]
+    check("129 GET /market/stats paged: limit 1 gives one row, has_more and next_cursor; the next page follows; sort old is the store order",
+          st == 200 and st2 == 200 and len(p1.get("stats", [])) == 1 and p1.get("has_more") is True and p1.get("next_cursor") == 1
+          and len(every) >= 2 and every == sorted(every) and [x.get("ski") for x in p1["stats"] + p2.get("stats", [])] == every[:2]
+          and (data_of(r3) or {}).get("has_more") is False and (data_of(r3) or {}).get("next_cursor") is None,
+          "p1 %s p2 %s every %s" % (json.dumps(p1)[:160], json.dumps(p2)[:120], every))
     st, r = http(port, "GET", "/market/items/%d/sales" % ITEM)
     expect_data("130 GET /market/items/{id}/sales", st, r,
                 lambda d: isinstance(d, dict) and d.get("ind") == ITEM and is_int(d.get("onS")) and any(

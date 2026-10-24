@@ -246,6 +246,7 @@ typedef struct MarketCtx {
     unsigned rar_mask, wep_mask, type_mask; /* rarities / weapons (index + 1) / types to keep, 0 = all */
     int season;       /* 0 = all */
     int desc;         /* fil order "0": highest price first */
+    int all;          /* stats: every row (the HTTP /market/stats pages them itself), not the socket page's 50 */
     char text[64];
 } MarketCtx;
 
@@ -388,18 +389,25 @@ static void market_query(SocialSession *s, MarketCtx *c) {
         rc = social_query(s, SQL(.any = LISTING_ROWS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
                           KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "stats")) {
-        /* + the v10 Market Stats cards' On Sale / Low / High (onS, low, high: open listings) */
-        rc = social_query(s, SQL(.pg = "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c, sum(count)::bigint AS \"inC\","
-                                  " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS \"onS\","
-                                  " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low,"
-                                  " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high"
-                                  " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50",
-                            .any = "SELECT skin_id AS ski, sum(count) AS cnt__i, sum(count) AS c__i, sum(count) AS inC__i,"
-                                   " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS onS__i,"
-                                   " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low__i,"
-                                   " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high__i"
-                                   " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50"),
-                     0, NULL, market_done, c);
+        /* + the v10 Market Stats cards' On Sale / Low / High (onS, low, high: open listings). The socket page keeps the
+         * 50 rarest rows; the HTTP route (c->all) takes every row and filters / sorts / pages them (v10_market.c) */
+#define STATS_SQL_PG(LIMIT)                                                                                        \
+    "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c, sum(count)::bigint AS \"inC\","        \
+    " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS \"onS\"," \
+    " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low," \
+    " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high" \
+    " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id" LIMIT
+#define STATS_SQL_ANY(LIMIT)                                                                                       \
+    "SELECT skin_id AS ski, sum(count) AS cnt__i, sum(count) AS c__i, sum(count) AS inC__i,"                         \
+    " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS onS__i," \
+    " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low__i," \
+    " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high__i" \
+    " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id" LIMIT
+        static const kn_sql page50 = {.pg = STATS_SQL_PG(" LIMIT 50"), .any = STATS_SQL_ANY(" LIMIT 50")};
+        static const kn_sql every = {.pg = STATS_SQL_PG(""), .any = STATS_SQL_ANY("")};
+#undef STATS_SQL_PG
+#undef STATS_SQL_ANY
+        rc = social_query(s, c->all ? &every : &page50, 0, NULL, market_done, c);
     } else if (!strcmp(c->sub, "prices")) {
         /* KrunkNative (v10's getPrices / items/prices, the cards' "~ N KR" estimate badge): each item's
          * estimate from this economy's own completed market sales, the rounded mean price (v10's comes
@@ -528,6 +536,7 @@ void sh_market_stats_http(SocialSession *s, const cJSON *f) {
     snprintf(c->page, sizeof c->page, "market");
     snprintf(c->sub, sizeof c->sub, "stats");
     c->item = -1;
+    c->all = 1;
     filter_args(c, f);
     market_query(s, c);
 }

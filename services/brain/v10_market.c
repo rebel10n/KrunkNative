@@ -71,6 +71,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "acct_internal.h"
 #include "knsvc/json.h"
@@ -216,6 +217,7 @@ typedef struct Args {
     char name[64];                   /* a player's name */
     char text[96];                   /* searchTerm */
     int ectx;                        /* ErrCtx: the codes the route's errors map to */
+    char sort[16];                   /* the stats grid's sort (rarity, name, season, type, new, old) */
 } Args;
 
 struct Op {
@@ -737,12 +739,48 @@ static void step_stats(Op *op) {
 }
 
 /* ["0", "market", "stats", rows | null] */
+/* the stats grid's order (v10.0.3's item grid comparator, deob-10.0.3.js:146885-146903): name A-Z, rarity high
+ * first, season newest first (seas || 1), type ascending, new / old by store index; ties (and an unknown sort) keep
+ * the store index order */
+static const char *g_stats_sort;
+
+static int stats_cmp(const void *pa, const void *pb) {
+    const cJSON *a = *(const cJSON *const *) pa, *b = *(const cJSON *const *) pb;
+    const int64_t ia = kn_json_int(a, "ski", -1), ib = kn_json_int(b, "ski", -1);
+    const SkinInfo *ka = acct_skin(ia), *kb = acct_skin(ib);
+    int r = 0;
+    if (ka && kb) {
+        if (!strcmp(g_stats_sort, "name")) r = strcasecmp(ka->name, kb->name);
+        else if (!strcmp(g_stats_sort, "rarity")) r = kb->rarity - ka->rarity;
+        else if (!strcmp(g_stats_sort, "season")) r = (kb->seas ? kb->seas : 1) - (ka->seas ? ka->seas : 1);
+        else if (!strcmp(g_stats_sort, "type")) r = ka->type - kb->type;
+        else if (!strcmp(g_stats_sort, "new")) r = ib > ia ? 1 : ib < ia ? -1 : 0;
+    }
+    if (r) return r;
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
+}
+
+/* ["0", "market", "stats", rows | null]: every filtered row, sorted, then the page after the cursor (an offset).
+ * v10.0.3 sends sort, cursor (the previous page's next_cursor) and the filters, and reads stats, has_more and
+ * next_cursor (deob-10.0.3.js:30873-30900, 150895-150918, load more 151236-151262). */
 static void reply_stats(Op *op) {
     if (op_failed(op)) return;
     const cJSON *rows = op_arg(op, "0", 3);
+    const int n = cJSON_IsArray(rows) ? cJSON_GetArraySize(rows) : 0;
+    const cJSON **sorted = n > 0 ? malloc((size_t) n * sizeof *sorted) : NULL;
+    for (int i = 0; sorted && i < n; i++) sorted[i] = cJSON_GetArrayItem(rows, i);
+    g_stats_sort = op->a.sort[0] ? op->a.sort : "rarity";
+    if (sorted) qsort(sorted, (size_t) n, sizeof *sorted, stats_cmp);
+    const int start = op->a.cursor > 0 && op->a.cursor < n ? (int) op->a.cursor : op->a.cursor >= n ? n : 0;
+    const int end = start + (int) op->a.limit < n ? start + (int) op->a.limit : n;
+    cJSON *page = cJSON_CreateArray();
+    for (int i = start; sorted && i < end; i++) cJSON_AddItemToArray(page, cJSON_Duplicate(sorted[i], 1));
+    free(sorted);
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddItemToObject(o, "stats", cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : cJSON_CreateArray());
-    cJSON_AddFalseToObject(o, "has_more");
+    cJSON_AddItemToObject(o, "stats", page);
+    cJSON_AddBoolToObject(o, "has_more", end < n);
+    if (end < n) cJSON_AddNumberToObject(o, "next_cursor", end);
+    else cJSON_AddNullToObject(o, "next_cursor");
     v10_reply_data(op->req, 200, o);
 }
 
@@ -755,6 +793,11 @@ static void h_market_stats(kn_http_req *req, void *ud) {
     a.wep = csv_bits(req, "weapons");
     a.typ = csv_bits(req, "types");
     a.season = query_int(req, "season", 0);
+    query_text(req, "sort", a.sort, sizeof a.sort);
+    a.cursor = query_int(req, "cursor", 0);
+    a.limit = query_int(req, "limit", 50);
+    if (a.limit < 1) a.limit = 1;
+    if (a.limit > 100) a.limit = 100;
     route_begin(req, 0, 0, step_stats, reply_stats, &a, NULL);
 }
 
