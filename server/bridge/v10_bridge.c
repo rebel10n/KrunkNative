@@ -945,6 +945,10 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         try_emit_init(s);
         return;
     }
+    /* init's eventIndex (NET_EXT_INIT_EVENT, right after the INIT): v10 has no message for it after its init, which this
+     * bridge may have built already (v10_init_game puts 0 there): consumed. Deliberate: a bridged v10 page plays no
+     * event (an event 3 round would show the EVENT prefab's meshes, deob-10.0.3.js:256309) */
+    if (type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_INIT_EVENT) return;
     /* the start of a player sync (net_ext.h NET_EXT_PLAYER_SYNC): this chunk's "k" goes out even when it lists nobody,
      * so the v10 client's hideAll runs for it as for the server's own "k" (deob-10.0.3.js:258582) */
     if (type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_PLAYER_SYNC) {

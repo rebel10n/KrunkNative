@@ -2803,6 +2803,14 @@ static void test_net_gaps_1003(void) {
               !strcmp(link.round_id, "round-18") && link.game_timer_ms == 240000 && link.override_scripts && link.game_state == 2,
           "init [2] [10] [17]-[21]: event %d hash %s session %s round %s timer %.0f scripts %d state %d", link.event_index, link.map_hash,
           link.session_id, link.round_id, link.game_timer_ms, link.override_scripts, link.game_state);
+    {
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_INIT_EVENT, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_INIT_EVENT, &len) : NULL;
+        NetInitEventPacket ev = {0};
+        if (b && len == sizeof(ev)) memcpy(&ev, b, sizeof(ev));
+        CHECK(b && ev.event_index == 3 && find_in(NET_PACKET_INIT, 0) < find_in(NET_PACKET_EXT, k), "init [2] eventIndex 3: INIT_EVENT after the INIT");
+    }
     clear();
 
     // "0" [17] customLoadout (getPlayerAddData :198810 -> players.add updateLoadout :195103-195108): the player's

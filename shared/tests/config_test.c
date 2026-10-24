@@ -89,10 +89,8 @@ static void check_value(const char *what, const GameConfigTable table, const voi
         CHECK((num != 0.0) == cJSON_IsTrue(expect), "%s %s = %g, v7 %s", what, expect->string, num, cJSON_IsTrue(expect) ? "true" : "false");
     } else if (cJSON_IsNumber(expect)) {
         const double want = expect->valuedouble;
-        if (!strcmp(expect->string, "lckCmYR")) { // KN keeps it as a flag (ClassMovement.lock_pitch): v7 only tests it
-            CHECK((num != 0.0) == (want != 0.0), "%s lckCmYR = %g, v7 %g", what, num, want);
-            return;
-        }
+        // lckCmYR: movement keeps a flag (ClassMovement.lock_pitch), the class camera its value
+        // (ClassOverrides.lock_y_rot), which the value read back is
         CHECK(near(num, want), "%s %s = %g, v7 %g", what, expect->string, num, want);
     }
 }
@@ -301,6 +299,46 @@ static void test_inputs_and_merge(void) {
     cJSON_free(b);
     cJSON_Delete(round);
     cJSON_Delete(again);
+}
+
+// v10.0.3 applyConfig's comp rosters and paid upgrades (deob-10.0.3.js:216139-216156, :216372-216381)
+static void test_rosters_and_upgrades(void) {
+    printf("comp rosters, lockedTeams, maxPS / promServ...\n");
+    GameConfig g = g_default_game_config;
+    // a 65-character name and a non-string are dropped (1..64 characters); with isComp the rosters lock the teams
+    cJSON *cfg = cJSON_Parse("{\"isComp\":true,\"teams\":[[\"alice\",\"\",5,\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"],[\"bob\"]],"
+                             "\"specs\":[\"carol\"],\"maxPS\":1}");
+    game_config_read(&g, cfg, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_CUSTOM);
+    CHECK(g.comp && g.locked_teams && g.max_ps && !g.prom_serv, "rosters lock the teams, maxPS kept (locked %d maxPS %d)", g.locked_teams, g.max_ps);
+    cJSON *out = game_config_write(&g);
+    CHECK(cJSON_IsTrue(cJSON_GetObjectItem(out, "lockedTeams")) && cJSON_IsTrue(cJSON_GetObjectItem(out, "maxPS")) &&
+              cJSON_IsFalse(cJSON_GetObjectItem(out, "promServ")) && !cJSON_GetObjectItem(out, "teams"),
+          "written: lockedTeams, maxPS, promServ false; the rosters are not");
+    cJSON_Delete(out);
+
+    Game game;
+    memset(&game, 0, sizeof(game));
+    game.config = g;
+    game_config_host(&game, cfg, GAME_HOST_CUSTOM);
+    CHECK(game_config_roster_team(&game, "alice") == 1 && game_config_roster_team(&game, "bob") == 2 &&
+              !game_config_roster_team(&game, "carol") && !game_config_roster_team(&game, ""),
+          "getAccountTeamIndex + 1: alice 1, bob 2, a spec or a stranger 0");
+    game.config.comp = 0;
+    CHECK(!game_config_roster_team(&game, "alice"), "outside a comp lobby: no roster team");
+    game_config_free(&game);
+    cJSON_Delete(cfg);
+
+    // no rosters (or not comp): lockedTeams only from cfg.lockedTeams; empty lists lock nothing
+    g = g_default_game_config;
+    cfg = cJSON_Parse("{\"teams\":[[\"alice\"],[]],\"promServ\":true}");
+    game_config_read(&g, cfg, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_CUSTOM);
+    CHECK(!g.locked_teams && g.prom_serv && !g.max_ps, "rosters of a non-comp lobby lock nothing (accountTeams needs isComp)");
+    cJSON_Delete(cfg);
+    g = g_default_game_config;
+    cfg = cJSON_Parse("{\"isComp\":true,\"teams\":[[],[\"\"]],\"lockedTeams\":1}");
+    game_config_read(&g, cfg, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_CUSTOM);
+    CHECK(g.locked_teams && !game_config_roster_given(cfg), "empty rosters: no accountTeams; cfg.lockedTeams still locks");
+    cJSON_Delete(cfg);
 }
 
 static Player *spawn(Game *game, const int uid, const int class_index) {
@@ -758,6 +796,7 @@ int main(void) {
     test_v7_cases(sandstorm);
     test_validate();
     test_inputs_and_merge();
+    test_rosters_and_upgrades();
     test_class_overrides(sandstorm);
     test_map_config(sandstorm);
     test_mimic_pubs(sandstorm);

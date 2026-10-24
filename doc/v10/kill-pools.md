@@ -119,6 +119,13 @@ not modelled here); events end at `endsAt` (v10's API decides which events are o
 signs in during a round (a live sign-in) draws from the next round on: the round it joined as a guest is
 not committed to it.
 
+The same events give a public round its `eventIndex` (v10 updateEventIndex at game.init, deob-10.0.3.js:219733-219751:
+0, and with no host, not custom / official / comp, the `id` of the first event running now). KrunkNative's server takes
+the brain's list (`id`, `startsAt`, `endsAt`; `kill_pools_event_index`, `server/src/accounts.c accounts_round_changed`)
+and sends it after every INIT as `NET_EXT_INIT_EVENT` (`Game.event_index`; the official link forwards init's [2]).
+10.0.3's consumers of the index (the EVENT prefab's `event_0` meshes for event 3, the event popup, an event's reward
+skins and limited-time mode) need event fields KrunkNative's feed does not have: not ported.
+
 ### A feed entry
 
 ```json

@@ -689,7 +689,31 @@ void game_config_read(GameConfig *g, const cJSON *cfg, const int clamp, const in
     g->comp = (unsigned char) (comp || gc_truthy(gc_item(cfg, "isComp"))); // game.isComp = !!cfg.isComp
     g->mimic_pubs = (unsigned char) gc_truthy(gc_item(cfg, "mimicPubs"));
     g->is_private = (unsigned char) gc_truthy(gc_item(cfg, "private"));
+    // lockedTeams = !!accountTeams || !!cfg.lockedTeams (deob-10.0.3.js:216148); the paid upgrades !!cfg[varN] (:216372)
+    g->locked_teams = (unsigned char) ((g->comp && game_config_roster_given(cfg)) || gc_truthy(gc_item(cfg, "lockedTeams")));
+    g->max_ps = (unsigned char) gc_truthy(gc_item(cfg, "maxPS"));
+    g->prom_serv = (unsigned char) gc_truthy(gc_item(cfg, "promServ"));
     game_config_sync_teams(g);
+}
+
+// applyConfig's account list filter (deob-10.0.3.js:216130-216138): the strings of 1..64 characters, the first 50
+static int gc_roster_list(const cJSON *list, const char *name) {
+    int kept = 0, found = 0;
+    const cJSON *e;
+    if (!cJSON_IsArray(list)) return 0;
+    cJSON_ArrayForEach(e, list) {
+        if (kept >= GAME_CONFIG_ROSTER_MAX) break;
+        if (!cJSON_IsString(e) || !e->valuestring[0] || strlen(e->valuestring) > GAME_CONFIG_ROSTER_NAME_MAX) continue;
+        kept++;
+        if (name && !strcmp(e->valuestring, name)) found = 1;
+    }
+    return name ? found : kept;
+}
+
+int game_config_roster_given(const cJSON *cfg) {
+    const cJSON *teams = gc_item(cfg, "teams");
+    return cJSON_IsArray(teams) && cJSON_GetArraySize(teams) == 2 &&
+           (gc_roster_list(cJSON_GetArrayItem(teams, 0), NULL) > 0 || gc_roster_list(cJSON_GetArrayItem(teams, 1), NULL) > 0);
 }
 
 int game_config_merge(GameConfig *g, const cJSON *cfg, const int clamp) {
@@ -732,6 +756,9 @@ cJSON *game_config_write(const GameConfig *g) {
     if (g->comp) cJSON_AddBoolToObject(out, "isComp", 1);
     if (g->mimic_pubs) cJSON_AddBoolToObject(out, "mimicPubs", 1);
     if (g->is_private) cJSON_AddBoolToObject(out, "private", 1);
+    if (g->locked_teams) cJSON_AddBoolToObject(out, "lockedTeams", 1); // the client's comp menu (config.lockedTeams)
+    cJSON_AddBoolToObject(out, "maxPS", g->max_ps);       // v10's config always has the serverUpg keys (:216372-216376)
+    cJSON_AddBoolToObject(out, "promServ", g->prom_serv);
     return out;
 }
 
@@ -1213,8 +1240,8 @@ static int gc_class_bit(const ClassConfig *c, const int bit) {
 }
 
 // cls[id] movement keys -> ClassConfig.movement (WP-A ClassMovement). Its fields read 0 as the v7
-// default, so a valid explicit 0 is written as 1e-6 (no visible difference); lckCmYR is a number
-// in v7 but only tested for truthiness (player.js:871).
+// default, so a valid explicit 0 is written as 1e-6 (no visible difference); lckCmYR is a number:
+// movement only tests it (lock_pitch), its value goes to ClassOverrides.lock_y_rot for the camera.
 static void gc_class_movement(ClassConfig *c, const GameConfigOption *o, const cJSON *item) {
     ClassMovement *m = &c->movement;
     if (o->kind == GC_BOOL) {
@@ -1252,8 +1279,13 @@ static void gc_class_movement(ClassConfig *c, const GameConfigOption *o, const c
         case CM_WALL_JUMP_DECEL: field = &m->wall_jump_decel; break;
         case CM_WALL_JUMP_VEL: field = &m->wall_jump_vel; break;
         case CM_LOCK_PITCH: {
-            const double v = gc_override_number(o, item, m->lock_pitch ? 1.0 : 0.0);
-            if (!isnan(v)) m->lock_pitch = v != 0.0;
+            // procInputs only tests it (the input pitch 0, deob-10.0.3.js:191283); the class camera
+            // reads its value (pchObjc.rotation.x = -PI/2 * lckCmYR, deob-10.0.3.js:260837-260839)
+            const double v = gc_override_number(o, item, c->ext.lock_y_rot);
+            if (!isnan(v)) {
+                m->lock_pitch = v != 0.0;
+                c->ext.lock_y_rot = (float) v;
+            }
             return;
         }
         default: return;
@@ -1461,7 +1493,7 @@ int game_config_value(const GameConfigTable table, const void *entry, const char
             case GC_STORE_EXT_FLOAT: v = gc_to_v7(*(const float *) ((const char *) x + o->offset), o->unit); break;
             case GC_STORE_EXT_U8: v = *((const unsigned char *) x + o->offset); break;
             case GC_STORE_EXT_STR: s = (const char *) x + o->offset; break;
-            case GC_STORE_MOVE: v = gc_movement_value(&c->movement, o); break;
+            case GC_STORE_MOVE: v = o->bit == CM_LOCK_PITCH ? x->lock_y_rot : gc_movement_value(&c->movement, o); break;
             default: return 0;
         }
     } else if (table == GAME_CONFIG_WEAPON) {
@@ -1537,6 +1569,17 @@ int game_config_apply(Game *game, const cJSON *cfg, const int clamp, const int h
         if (cJSON_IsObject(item)) cJSON_AddItemToObject(st->applied, keys[i], cJSON_Duplicate(item, 1));
     }
     return 1;
+}
+
+int game_config_roster_team(Game *game, const char *account_name) {
+    if (!game || !game->config.comp || !account_name || !account_name[0]) return 0;
+    const GameConfigState *st = game->config_state;
+    const cJSON *teams = st ? gc_item(st->request, "teams") : NULL;
+    if (!cJSON_IsArray(teams) || cJSON_GetArraySize(teams) != 2 || !game_config_roster_given(st->request)) return 0;
+    for (int t = 0; t < 2; t++) {
+        if (gc_roster_list(cJSON_GetArrayItem(teams, t), account_name)) return t + 1;
+    }
+    return 0;
 }
 
 void game_config_host(Game *game, const cJSON *request, const int host_index) {

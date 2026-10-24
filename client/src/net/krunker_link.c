@@ -328,6 +328,14 @@ static cJSON *custom_map(const KrunkerValue *custom, char *id, const size_t id_s
     return json;
 }
 
+// init [2] eventIndex (game.init, deob-10.0.3.js:219812) for the client's game, after the INIT (which resets it)
+static void emit_event_index(KrunkerLink *l) {
+    const NetInitEventPacket ev = {.event_index = l->event_index};
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(ev)];
+    const uint16_t len = net_ext_pack(ext, sizeof(ext), NET_EXT_INIT_EVENT, &ev, sizeof(ev));
+    if (len) emit(l, NET_PACKET_EXT, ext, len);
+}
+
 // init [mapIndex, modeIndex, eventIndex, ..., customsData] (INIT_GAME, game.deob.js:219289 -> 219300):
 // mapIndex is a position in Krunker's official list (the live client GETs <gapi>/maps/<mapIndex> when it
 // does not have it, :219292; this client ships the list, krunker_maps.h); a custom game sends its map
@@ -388,11 +396,13 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
         info.init = init;
         l->io.map(l->io.user, &info); // takes info.custom
         emit(l, NET_PACKET_SOCIAL_V7, &social, 1);
+        emit_event_index(l);
         return;
     }
     cJSON_Delete(info.custom);
     emit(l, NET_PACKET_INIT, &init, sizeof(init));
     emit(l, NET_PACKET_SOCIAL_V7, &social, 1);
+    emit_event_index(l);
 }
 
 // A player's account fields as v10 keeps them from its "0" entry (players.add :220273-220283): the

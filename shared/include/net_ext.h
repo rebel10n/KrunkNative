@@ -31,6 +31,7 @@ typedef enum {
     NET_EXT_ENTITY_ATTACH = 0x0104, // "ea+" [playerSid, eid, {o, lk, ctl, soft, nd}] (also init syncData.entAtt)
     NET_EXT_ENTITY_DETACH = 0x0105, // "ea-" [playerSid, eid]
     NET_EXT_ENTITY_CONTROLLED = 0x0106, // "l" SYNC_PLAYER's tail [eid, tick, state{}]: the entity we control (applyControlledSync)
+    NET_EXT_ENTITY_SEED = 0x0107,   // init syncData.entSeed [seed]: the match seed of the entities' ctx.rand (entities.setup)
 
     // 0x0200 player state, S -> C
     NET_EXT_PLAYER_POSE = 0x0200,  // "pz"  NetPlayerPosePacket: sid, pose | 0 (player_pose.h)
@@ -86,6 +87,7 @@ typedef enum {
     NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
     NET_EXT_GAME_STATE = 0x0901,    // "gsc" S -> C NetGameStatePacket: v10 gameState (INITIALIZING .. ENDED), every change
     NET_EXT_VOTE_FORFEIT = 0x0902,  // "vf" S -> C NetVoteForfeitPacket: the team's forfeit vote (team only; null when it ends)
+    NET_EXT_INIT_EVENT = 0x0903,    // init [2] eventIndex S -> C NetInitEventPacket: the round's live event, right after the INIT
 
     // 0x0a00 Prop Hunt (shared/include/prop_hunt.h): Krunker's "up" / "prpR" / "prp" / "prpR" (v10 game.deob.js
     // players.updateProp :171837, the client's iìiiìïí / iîîììîi :221007 / :221019, the keys :221435)
@@ -113,6 +115,7 @@ typedef enum {
     // 0x0a10 Stalker (shared/include/stalker.h): Krunker's "stlkrt" / "stlkpd" (deob-10.0.3.js:111022, :111363)
     NET_EXT_STALKER_TAUNT = 0x0a10,  // C -> S NetStalkerTauntPacket ("stlkrt" i: the stalker's taunt key, :260109)
     NET_EXT_STALKER_PICKED = 0x0a11, // S -> C, no body (pickStalker's broadcastEx to all but the stalker, :217949)
+    NET_EXT_PLAYER_SOUND_FALLOFF = 0x0a12, // S -> C NetPlayerSoundFalloffPacket: "asnd" data.dist / roll, right before its NET_PACKET_PLAYER_SOUND
 
     // 0x0c00 the in-game captcha: v10.0.3's "cpt" / "cptR" (deob-10.0.3.js:111424-111437; doc/v10/captcha.md). Bodies
     // are text, NUL-terminated: the ALTCHA challenge JSON / the solved payload (base64), each under NET_EXT_BODY_MAX
@@ -359,6 +362,14 @@ typedef struct {
     char text[NET_VALUE_TEXT_SIZE]; // the value, UTF-8, NUL-terminated
 } NetValueTextPacket;
 _Static_assert(sizeof(NetValueTextPacket) == 374, "NetValueTextPacket: the wire body is 374 bytes");
+
+// NET_EXT_INIT_EVENT (S -> C): v10 init's [2] eventIndex (game.init, deob-10.0.3.js:219812), which our INIT has no room
+// for: sent right after every INIT (KrunkNative's server: Game.event_index; the official link: init [2]). A server that
+// never sends it plays no event (0).
+typedef struct {
+    int32_t event_index; // the event's id, 0 none
+} NetInitEventPacket;
+_Static_assert(sizeof(NetInitEventPacket) == 4, "NetInitEventPacket: the wire body is 4 bytes");
 
 // NET_EXT_KN_OFFICIAL_AMMO: Krunker "uamo" UPDATE_AMMO [ammos, reserveAmmos] (game.deob.js:220425 ->
 // players.updatePlayerAmmo): our player's magazine per loadout slot and, in finiteAmmo modes, its
@@ -763,6 +774,17 @@ typedef struct {
     uint8_t parts; // slices of the record (>= 1)
 } NetExtJsonChunk;
 #define NET_EXT_JSON_CHUNK_DATA (NET_EXT_BODY_MAX - (int) sizeof(NetExtJsonChunk))
+
+// NET_EXT_PLAYER_SOUND_FALLOFF: the 3D falloff of v10's addPlayerSound data ({vol, rate, dist, roll, loop},
+// game.addPlayerSound deob-10.0.3.js:220423-220437; the stalker's taunt sends dist 20, roll 1.1 :198335-198340),
+// which NetPlayerSoundPacket has no room for. Sent right before the NET_PACKET_PLAYER_SOUND add of the same
+// player (the reliable stream keeps them in order); the client plays that sound with this refDistance /
+// rolloffFactor (Howler's pannerAttr) instead of its defaults (25 / 1). A peer without EXT plays the defaults.
+typedef struct {
+    int32_t uid;    // the player of the PLAYER_SOUND that follows
+    float distance; // data.dist: refDistance
+    float rolloff;  // data.roll: rolloffFactor
+} NetPlayerSoundFalloffPacket;
 
 // NET_EXT_PLAYER_LOCKS: v10 "plk" PLAYER_LOCKS [disableShooting, disableMelee] (iìïîììî :220492):
 // our player's KrunkScript locks (player.disableShooting / disableMelee), until the next "plk"

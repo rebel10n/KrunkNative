@@ -39,7 +39,9 @@ typedef struct {
 } KillPool;
 
 typedef struct {
+    int id;               // the event's id: the eventIndex of a public round it runs in (updateEventIndex)
     double starts_at_ms;  // startsAt.getTime()
+    double ends_at_ms;    // endsAt.getTime() (KrunkNative's feed; v10's config.events end), 0 = open-ended
     double weight;        // killPoolsWeight || 0 (a percentage)
     int dilute;           // killPoolsMode === "dilute"
     char icon[KILL_POOL_ICON_SIZE]; // killPoolsIcon, "" none (the item has no `r`)
@@ -65,6 +67,9 @@ typedef double (*KillPoolRandom)(void *user);
 int kill_pools_parse(KillPoolEvents *out, const cJSON *events);
 // ongoingEvents.some(e => e.killPools.length > 0): whether endGame draws at all
 int kill_pools_any(const KillPoolEvents *events);
+// game.updateEventIndex's search (deob-10.0.3.js:219733-219751): the id of the first event (list order) with
+// start <= now <= end, 0 none. The caller applies the public-round rule (no host, not custom / official / comp).
+int kill_pools_event_index(const KillPoolEvents *events, double now_ms);
 // getKillReward (deob-10.0.3.js:220807-220924): 1 and *out when this draw pays an item, 0 for none
 int kill_pools_draw(const KillPoolEvents *events, KillPoolRandom random, void *user, KillReward *out);
 // endGame's loop: min(kills, KILL_POOL_DRAWS_MAX) draws into out[] (at most max); returns the items drawn

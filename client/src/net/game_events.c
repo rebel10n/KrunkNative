@@ -152,7 +152,6 @@ static const char *events_name(const Client *client, const Player *player, char 
 // players.kill(player) on the client: stop simulating and drop the meshes.
 static void events_player_dead(Client *client, Player *player) {
     player->active = 0;
-    player->asset_txt[0] = 0; // a "uai" class-model swap lasts this life (player_class_model.c)
     player->input_queue_size = 0;
     free(player->input_queue);
     player->input_queue = NULL;
@@ -582,8 +581,8 @@ static void events_cheat(Client *client, const NetCheatPacket *packet) {
         case NET_CHEAT_HELD: // KrunkNative: a dev's Physics Gun carries us (mode_input_locked: our input moves nothing)
             if (client->me) client->me->om_held = (unsigned char) !!on;
             break;
-        case NET_CHEAT_FROZEN: // official "frz" (game.deob.js:220495): no line, prediction stops (ks_player_allows)
-            if (client->me) client->me->frozen = (unsigned char) on;
+        case NET_CHEAT_FROZEN: // "frz" (deob-10.0.3.js:258510-258518): no line; freeze and the four flags, prediction stops (ks_player_allows)
+            if (client->me) player_apply_freeze(client->me, on);
             break;
         case NET_CHEAT_BORDERS:
             client->game.config.disable_borders = (unsigned int) !on; // movement prediction
@@ -1403,8 +1402,14 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 if (client->game.ready) client_players_hide_all(client);
             }
             else if (subtype == NET_EXT_VALUE_TEXT) client_triggers_value_text(client, body, body_length); // a string "cv" / "gv"
+            else if (subtype == NET_EXT_INIT_EVENT && body_length >= sizeof(NetInitEventPacket)) { // init [2]: the round's eventIndex
+                NetInitEventPacket ev;
+                memcpy(&ev, body, sizeof(ev));
+                client->game.event_index = ev.event_index;
+            }
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
             else if (subtype == NET_EXT_STALKER_PICKED) hud_stalker_on_picked(client); // "stlkpd": the Living's popup (hud_stalker.c)
+            else if (subtype == NET_EXT_PLAYER_SOUND_FALLOFF) client_triggers_player_sound_falloff(body, body_length); // "asnd" dist / roll (map_triggers.c)
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
             else if (subtype == NET_EXT_KN_SERVER_LINE && body_length == sizeof(NetServerLinePacket)) { // a join / leave / vote kick line (events_server_line)
                 NetServerLinePacket line;
@@ -1496,6 +1501,9 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             }
             else if (subtype == AI_PARTS_EXT_SUBTYPE) { // v10.0.3 "aip" AI.syncParts: glows, hidden nodes, held clip, solid (ai_parts.h)
                 if (!game_is_authority(&client->game)) ai_parts_on_ext(&client->game, body, body_length);
+            }
+            else if (subtype == AI_REFL_EXT_SUBTYPE) { // v10.0.3 getData refl: the AI model's reflections (ai_parts.h)
+                if (!game_is_authority(&client->game)) ai_parts_on_refl(&client->game, body, body_length);
             }
             else entities_on_ext(client, subtype, body, body_length); // v10 entities, runtime blocks, objmv, plk (entities.c)
             return 1;

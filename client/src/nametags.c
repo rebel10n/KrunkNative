@@ -770,9 +770,9 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         // player init sets B8epi1 = false on every spawn (v10.js:169228), so a respawn starts hidden
         if (!player->active || !player->mesh) tag->visible = 0;
 
-        // sync_hidden: a player the last marked sync left out (main.c client_players_hide_all). Deliberate: v10's name
-        // pass skips its rules for a player without latestData (deob-10.0.3.js:261108-261110), so its tag would stay up
-        // at the hidden model's last spot; ours goes with the model.
+        // sync_hidden: a player the last marked sync left out (main.c client_players_hide_all). v10's name pass hides
+        // the tag of a player without latestData too (`else { Zt450f = false }`, deob-10.0.3.js:261108-261130); it runs
+        // every 200 ms, so v10's tag can outlive the model by up to that, ours goes with it.
         if (hidden || rs->nametag_opacity <= 0.0f || !player->active || player == me || player->is_you ||
             !player->mesh || (spectating && player->uid == target_uid) || !tag->visible || player->sync_hidden) {
             nt_tag_hide(tag);

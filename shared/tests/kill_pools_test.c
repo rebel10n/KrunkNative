@@ -110,6 +110,15 @@ int main(void) {
     KillPoolEvents bad_icon = parse("[{\"startsAt\":0,\"killPoolsWeight\":100,\"killPoolsIcon\":\"../x\\\"><b>\",\"killPools\":[]}]");
     CHECK(!bad_icon.events[0].icon[0], "an icon with a path or markup is dropped");
 
+    // updateEventIndex's search (deob-10.0.3.js:219733-219751): the first event running now, its id; 0 none
+    KillPoolEvents evs = parse("[{\"id\":4,\"startsAt\":2000,\"endsAt\":3000},{\"id\":7,\"startsAt\":1000,\"endsAt\":5000},"
+                               "{\"id\":9,\"startsAt\":1000}]");
+    CHECK(evs.events[0].id == 4 && evs.events[1].ends_at_ms == 5000.0 && evs.events[2].ends_at_ms == 0.0, "id / endsAt parsed");
+    CHECK(kill_pools_event_index(&evs, 1500.0) == 7, "1500: event 7 (4 not started)");
+    CHECK(kill_pools_event_index(&evs, 2500.0) == 4, "2500: event 4, the first in list order");
+    CHECK(kill_pools_event_index(&evs, 6000.0) == 9, "6000: 9, open-ended");
+    CHECK(kill_pools_event_index(&evs, 500.0) == 0 && kill_pools_event_index(&none, 2500.0) == 0, "none running / no events: 0");
+
     if (g_failures) {
         printf("kill_pools_test: %d of %d checks failed\n", g_failures, g_checks);
         return 1;

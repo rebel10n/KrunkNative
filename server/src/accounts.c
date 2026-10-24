@@ -2,6 +2,7 @@
 // (server/include/server_accounts.h, doc/backend.md section 8).
 #include <ruleset.h> // meta.ruleset
 #include <server_accounts.h>
+#include <server_captcha.h> // the in-game captcha: the welcome's flag, the brain's "captcha-r"
 #include <server_log.h>
 #include <director_gate.h> // Krunker Strike director tickets
 #include <brain.h>
@@ -1204,7 +1205,7 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
 
 // The ongoing events the brain serves ("welcome" gameEvents, "game-events" pushes): v10's
 // game.ongoingEvents, which its host sets from the events API (the bundle only reads it). Empty
-// without a brain: no draws.
+// without a brain: no draws. accounts_round_changed reads it for the round's eventIndex.
 static KillPoolEvents g_kill_events;
 // This round's draws of one connection, filled at the round's commit (acc_commit_round), read by its
 // stats (acc_player_stats) and the end items (NET_EXT_KN_END_ITEM)
@@ -1634,11 +1635,17 @@ void accounts_round_changed(void) {
     Game *game = &g_server->game;
     // v10 updateEventFlags: the class XP flag of this round, fixed at its start (double_xp.h)
     g_acc.class_double = dxp_schedule((int64_t) time(NULL) * 1000).double_class_xp;
+    // v10 updateEventIndex (deob-10.0.3.js:219733-219751, at game.init): 0, and in a public round (no host, not
+    // custom / official / comp) the first event of config.events running now. KrunkNative's events are the brain's
+    // gameEvents (g_kill_events, the kill pools' list). INIT carries it (net.c NET_EXT_INIT_EVENT).
+    game->event_index = !g_acc.custom && !game->config.comp ? kill_pools_event_index(&g_kill_events, (double) time(NULL) * 1000.0) : 0;
     const int mode_id = game_mode_id(game);
     game_network_apply(game, g_server->config.tick_rate); // WP-E: the round's networkData (applyNetworking, mode.sendR)
 
     // per-mode lobby size and round length (config, CLI --round-seconds)
-    g_server->config.max_players = (unsigned short) (g_acc.custom && game->config.max_players > 0 ? game->config.max_players
+    // a hosted lobby's paid "40 Player Server" upgrade: maxPlayers = config.maxPS ? 40 : config.maxPlayers (deob-10.0.3.js:261891)
+    g_server->config.max_players = (unsigned short) (g_acc.custom && game->config.max_ps ? 40
+                                                     : g_acc.custom && game->config.max_players > 0 ? game->config.max_players
                                                                                                 : gs_lobby_size(&g_gs_config, mode_id));
     // game_init already started the clock with the previous round_length: correct it
     const float seconds = g_acc.custom ? 0.0f : gs_round_seconds(&g_gs_config, mode_id);
@@ -3594,6 +3601,17 @@ static void acc_tick_custom(void) {
     if (!players && (g_acc.custom_had_players || g_server->now - g_acc.custom_since > ACC_HOST_IDLE_REVERT)) acc_revert_custom("lobby empty");
 }
 
+// v10 game.host (game_config_set_host): the uid of the custom game's host (accounts_is_custom_host, the first such
+// connection), every tick, so a transfer, the host's sign-in / sign-out and the lobby going public reach the game
+// (pickSimon, KrunkScript CONFIG.getHost). None outside a custom game, or while its host is not connected.
+static void acc_sync_game_host(void) {
+    int host = -1;
+    for (size_t i = 0; g_acc.custom && host < 0 && i < g_server->client_count; i++) {
+        if (accounts_is_custom_host(&g_server->clients[i])) host = g_server->clients[i].id;
+    }
+    game_config_set_host(&g_server->game, host);
+}
+
 // ------------------------------------------------------------------ brain events
 
 // NET_EXT_KN_STRIKE_ROUND (Krunker Strike): the round's XP for the player's round end (strike_hud.c)
@@ -3673,6 +3691,7 @@ static void acc_handle_frame(cJSON *frame) {
     else if (!strcmp(type, "map-data")) acc_handle_map_data(frame);
     else if (!strcmp(type, "bot-banter-reply")) bot_banter_on_brain_frame(frame); // bot chat (server/src/bot_banter.c)
     else if (!strcmp(type, "game-events")) acc_kill_events_set(cJSON_GetObjectItem(frame, "events")); // ongoingEvents changed
+    else if (!strcmp(type, "captcha-r")) game_captcha_on_brain_frame(frame); // the in-game captcha (game_captcha.c)
     else if (!strcmp(type, "assign")) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));
@@ -3769,9 +3788,13 @@ void accounts_tick(const float now) {
             if (!community || !community[0]) community = cJSON_GetStringValue(cJSON_GetObjectItem(ev.frame, "brainId"));
             snprintf(g_community, sizeof(g_community), "%s", community ? community : "");
             acc_kill_events_set(cJSON_GetObjectItem(ev.frame, "gameEvents")); // the ongoing events (kill pools)
+            game_captcha_set_enforce(ev.frame); // captcha.enforce: the in-game captcha (game_captcha.c)
             acc_send_snapshot();
         }
-        else if (ev.kind == BRAIN_EV_LINK_DOWN) acc_link_down();
+        else if (ev.kind == BRAIN_EV_LINK_DOWN) {
+            acc_link_down();
+            game_captcha_link_down();
+        }
         else if (ev.kind == BRAIN_EV_FRAME) acc_handle_frame(ev.frame);
         cJSON_Delete(ev.frame);
     }
@@ -3790,6 +3813,7 @@ void accounts_tick(const float now) {
     if (g_acc.round_end_seen && !g_acc.webhook_posted && g_acc.custom && g_acc.webhook[0]) acc_post_webhook();
     acc_tick_ranked();
     acc_tick_custom();
+    acc_sync_game_host();
     acc_kpd_expire(now);
 
     if (g_acc.push_at && now >= g_acc.push_at) acc_push_lobby_now();

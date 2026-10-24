@@ -61,7 +61,10 @@ int kill_pools_parse(KillPoolEvents *out, const cJSON *events) {
     cJSON_ArrayForEach(e, events) {
         if (!cJSON_IsObject(e) || out->count >= KILL_POOL_EVENTS_MAX) continue;
         KillPoolEvent *ev = &out->events[out->count++];
+        ev->id = kp_int(cJSON_GetObjectItemCaseSensitive(e, "id"));
+        if (ev->id < 0) ev->id = 0;
         ev->starts_at_ms = kp_time(cJSON_GetObjectItemCaseSensitive(e, "startsAt"));
+        ev->ends_at_ms = kp_time(cJSON_GetObjectItemCaseSensitive(e, "endsAt"));
         ev->weight = kp_num(e, "killPoolsWeight");
         const char *mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "killPoolsMode"));
         ev->dilute = mode && !strcmp(mode, "dilute");
@@ -86,6 +89,14 @@ int kill_pools_parse(KillPoolEvents *out, const cJSON *events) {
         }
     }
     return out->count;
+}
+
+int kill_pools_event_index(const KillPoolEvents *events, const double now_ms) {
+    for (int i = 0; events && i < events->count; i++) {
+        const KillPoolEvent *e = &events->events[i];
+        if (e->id > 0 && now_ms >= e->starts_at_ms && (e->ends_at_ms <= 0.0 || now_ms <= e->ends_at_ms)) return e->id;
+    }
+    return 0;
 }
 
 int kill_pools_any(const KillPoolEvents *events) {

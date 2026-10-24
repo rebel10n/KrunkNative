@@ -5,6 +5,7 @@
 #include <cosmetics.h>
 #include <skin_fx.h>
 #include <pets.h>
+#include <player_class_model.h> // a spawn builds a class model again
 #include <build_info.h>
 #include <vfx.h>
 #include <ai_render.h>
@@ -1417,6 +1418,9 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->aim_val = 0.0f;
         player->crouch_val = 0.0f;
         player_update_height(player);
+        // ...and generateMeshes again (players.add :195119): a v10.0.3 class model showing a "uai" swap goes back to
+        // the class's aID, a waiting assetTxt is taken (player_class_model.h); client_player_spawned builds it
+        if (player_class_model_spawn_rebuild(player)) client_drop_player_mesh(client, player);
     }
 
     snprintf(player->name, sizeof(player->name), "%.*s", (int) sizeof(packet->name) - 1, packet->name);
@@ -1596,6 +1600,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     lobby_vote_reset();                 // WP-E: the end screen's vote cards go
     // INIT carries the Krunker mode id (modes.js index), not a rotation index
     client->game.is_ranked = 0; // the server's NET_EXT_KN_RANKED_MATCH follows this INIT (game_events.c)
+    client->game.event_index = 0; // its NET_EXT_INIT_EVENT too (a server without it plays no event)
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
     mod_pack_map_loaded(client->game.map ? client->game.map->raw_data : NULL); // the map's modURL resource pack
     client_load_map(client);

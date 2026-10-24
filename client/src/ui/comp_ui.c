@@ -144,7 +144,9 @@ void comp_ui_refresh(Client *client) {
         // an empty slot (e NULL) has no player: the mine flag is for the filled ones only
         player_slot(team == 1 ? &left : &right, game, e, team == 1, my_team, slot, e && e->uid == client->net_client_id);
     }
-    if (game->config.select_team) { // selTeam: Join / Leave Team under each list
+    // selTeam: Join / Leave Team under each list, unless the teams are locked (an account roster or cfg.lockedTeams:
+    // `config.selTeam && !config.lockedTeams`, deob-10.0.3.js:256636)
+    if (game->config.select_team && !game->config.locked_teams) {
         sb_appendf(&left, "<div class='compSwpTmB' style='background-color:#eb4034' onmouseenter='playTick()' onclick='playSelect();toggleTeam(%d)'>%s</div>",
                    my_team == 1 ? 0 : 1, my_team == 1 ? "Leave Team" : "Join Team");
         sb_appendf(&right, "<div class='compSwpTmB' style='background-color:#3489eb' onmouseenter='playTick()' onclick='playSelect();toggleTeam(%d)'>%s</div>",

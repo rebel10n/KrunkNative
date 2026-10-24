@@ -8,7 +8,7 @@
 //                    the carried tags reach mode.tagHoldLimit (textures/sprays/114.png); a live
 //                    event's depositType 1 / 2 puts it in #giftTagHolder instead, with
 //                    img/props/prop_60.png / img/events/event_7.png (deob-10.0.3.js:258906-258918;
-//                    the event image is not in ui/img: the count shows without it).
+//                    event_7 from assets.krunker.io, ui/README.md).
 //   #bhHolder        initGame: inline-block in bighead modes; f2014 sizes its head
 //                    calc(40px * headMlt) from the local player's headMlt.
 //   #speedRunHolder  f1889 + mode.custUI (gameModes/parkour.js, race.js) while game.doLogTime:

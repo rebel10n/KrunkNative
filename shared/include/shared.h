@@ -732,7 +732,8 @@ typedef struct {
     int cam_type;                 // camType: 0 FPS, 1 3rd person, 2 platformer X, 3 platformer Z, 4 orthographic
     float cam_offset[3];          // camOffX/Y/Z 0..500
     float ortho_f;                // orthoF 1..1000 (50)
-    float lock_cam_pitch;         // lockCamP 0..1
+    float lock_cam_pitch;         // lockCamP "Face Player" 0..1: the camera yaw chases the body (client/src/class_camera.c)
+    float lock_y_rot;             // lckCmYR "Lock Y Rot" -1..1: camera pitch -PI/2 * it (ClassMovement.lock_pitch: input pitch 0)
     float y_cam_limit;            // yCmLim 0..1
     unsigned char cam_rotation;   // camRot (1)
     unsigned char fp_lock;        // fPLock
@@ -1236,10 +1237,10 @@ typedef struct Player_t {
     unsigned char god_mode:1;
     unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;
-    // Krunker "frz" (SET_FROZEN, game.deob.js:220495): freeze = !defaultMovement, !defaultVelocity,
-    // disableShooting, disableMelee (ks_player_allows answers 0 for those while set). Official lobbies
-    // send it (krunker_link.c), our authority with game.applyFreezeOthers (player_pose.c, /freezeothers);
-    // it stays until "frz" false.
+    // v10 player.freeze: set by "frz" (SET_FROZEN, deob-10.0.3.js:258510-258518; official lobbies through
+    // krunker_link.c) and by our authority's game.applyFreezeOthers (player_pose.c, /freezeothers). The marker
+    // only: player_apply_freeze writes the four flags v10 writes with it (defaultMovement, defaultVelocity,
+    // disableShooting, disableMelee) into the script's flags, which ks_player_allows reads.
     unsigned char frozen:1;
     // Krunker "plk" PLAYER_LOCKS (iìïîììî :220492): player.disableShooting / disableMelee set by the
     // lobby's KrunkScript; ks_player_allows answers 0 for KS_PLAYER_CAN_SHOOT / _CAN_MELEE while set
@@ -1821,6 +1822,13 @@ typedef struct {
     unsigned char comp;               // isComp: a comp host (hostTypes[1].comp)
     unsigned char mimic_pubs;         // mimicPubs (zombies / raid hosts)
     unsigned char is_private;         // private
+    // v10.0.3 applyConfig (deob-10.0.3.js:216139-216156, :216372-216381): lockedTeams = a comp lobby's account rosters
+    // (cfg.teams: two lists of account names) or cfg.lockedTeams; the comp menu then offers no Join / Leave Team
+    // (:256636). The paid server upgrades (config.serverUpg, :19510-19518): maxPS "40 Player Server" (a hosted lobby of
+    // 40, :261891) and promServ "Promote Server" (the listing's; nothing in the game reads it), false unless set
+    unsigned char locked_teams;
+    unsigned char max_ps;
+    unsigned char prom_serv;
     int game_rounds;                  // gamRounds 1..10 (def 1, comp 3)
     float intermission_time;          // intermTmr (s) 5..120 (30)
     float objective_time;             // objtvTime (min) 0.1..10 (1)
@@ -2231,6 +2239,10 @@ typedef struct Game_t {
     // v10 game.freezeOthers (deob-10.0.3.js:221548): the last applyFreezeOthers request (player_pose.c),
     // false again at each round's start (:219811)
     unsigned char freeze_others;
+    // v10 game.eventIndex (init [2]): the live event of this round, 0 none. updateEventIndex (deob-10.0.3.js:219733-219751)
+    // gives a public round the first ongoing event's id (server/src/accounts.c, the brain's gameEvents); clients get it
+    // with the INIT (NET_EXT_INIT_EVENT)
+    int event_index;
     GameForfeit forfeit;          // the team forfeit vote (shared/src/forfeit.c)
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;

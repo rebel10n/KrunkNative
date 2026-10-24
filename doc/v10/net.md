@@ -265,6 +265,7 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x0501 | `NET_EXT_CHARGE_CONSENT_RESPONSE` | `chrsp` | C to S |
 | 0x0600 | `NET_EXT_JOINED_RANK` | `joinedRank` | C to S |
 | 0x0700.. | `NET_EXT_BLOCK_PROTOCOL` | (KN: ruleset / version toggle) | both |
+| 0x0903 | `NET_EXT_INIT_EVENT` | `init`'s [2] eventIndex (`NetInitEventPacket`, right after the INIT) | S to C |
 | 0x0b00 | `NET_EXT_TRADE_REQUEST` | `strd` | C to S |
 | 0x0b01 | `NET_EXT_TRADE_INIT` | `trd` | C to S |
 | 0x0b02 | `NET_EXT_TRADE_UPDATE` | `utrd` | C to S |
@@ -389,7 +390,7 @@ gameState. Sender `deob-10.0.3.js:221968` (sandbox 261893), handler 256748-25687
 | [11] | flg / obj / zone (`on_init_hud`), round wins and world sync (`krunker_link_world_init`), live objects / entities (`krunker_link_script_init`) | OK |
 | [12] | `applyNetworking`: `snf || 10`, `tf || 30`, `sf || 1` -> NETWORK_DATA; `aist` / `los` / `adst` are server-side sync periods | OK |
 | [14] [15] [16] | `is_official`, `is_comp`, `is_ranked` | OK |
-| [2] [10] [17]-[21] | event index, map hash, session / round ids, timer (the "t" packet carries it), override scripts, gameState | **fixed**: read into the link (`event_index`, `map_hash`, `session_id`, `round_id`, `game_timer_ms`, `override_scripts`, `game_state`; the init note logs them). Deliberate: [20] is the server's compiled JavaScript of the map's scripts (220169-220187), not run (the client compiles the map's own KrunkScript); [10] is unread by 10.0.3 too; KN has no event table for [2] |
+| [2] [10] [17]-[21] | event index, map hash, session / round ids, timer (the "t" packet carries it), override scripts, gameState | **fixed**: read into the link (`event_index`, `map_hash`, `session_id`, `round_id`, `game_timer_ms`, `override_scripts`, `game_state`; the init note logs them). Deliberate: [20] is the server's compiled JavaScript of the map's scripts (220169-220187), not run (the client compiles the map's own KrunkScript); [10] is unread by 10.0.3 too. [2] -> NET_EXT_INIT_EVENT after the INIT (`Game.event_index`); KN's own server fills it as updateEventIndex does (219733-219751: a public round's first ongoing event, the brain's `gameEvents`, `kill_pools_event_index`). What 10.0.3 does with it is not ported (the EVENT prefab's `event_0` group, shown for event 3 at "start", 256309; the event popup; the event's reward skins and limitedTimeMode votes, 221732, 221830): KN's events carry kill pools only (doc/v10/kill-pools.md) |
 
 Config keys `applyConfig` reads (216116-216423): `isComp`, `webhook`, `teams` / `specs` / `lockedTeams` (comp
 account teams), `weps` / `cls` / `prks` (custom tables, clamped per option), the 84 serverConfig options
@@ -397,8 +398,12 @@ account teams), `weps` / `cls` / `prks` (custom tables, clamped per option), the
 `maxPS` / `promServ` (19510), `maps`, `modes`, `classes`. Every serverConfig option matches KN's
 `k_server_options` (shared/src/game_config.c) in key, def, defC, min, max, maxG / maxP / maxF / maxD, except
 `rampFix` (Solid Ramp Sides, new in 10.0.3, 20068-20075): hostTypes [0, 1] and defC true, after
-`headClipFix` (**fixed**). gap: KN does not keep `teams` / `specs` / `lockedTeams` or the paid flags (live
-service).
+`headClipFix` (**fixed**). **fixed**: `lockedTeams` (= a comp lobby's account rosters `teams` or `cfg.lockedTeams`,
+216148) is kept, written with the config and hides the comp menu's Join / Leave Team (256636; `comp_ui.c`); KN's server
+puts a rostered account on its roster team when it joins a comp lobby (`game_config_roster_team`, 216009-216014); the
+paid upgrades `maxPS` (a hosted lobby of 40, 261891) and `promServ` (no game consumer) are kept and always written
+(216372-216376). Deliberate: `specs` (accountSpecs) only feeds `validateAccount`, which 10.0.3 never calls; KN's host
+window has no roster or Server Upgrades fields (v10's createPrivateRoom sends them only from those fields).
 
 ### 9.3 Client to server
 
@@ -445,7 +450,7 @@ service).
 | `ts` / `5` / `6` | `[team, score]` (none: reset) / `[delta, relay, absolute, classIndex]` / `[medals, killSound, totalKills, inc]` | 259141, 259236, 259296 | OK |
 | `7` / `ulb` | flat `[sid, ...leaderStats]*` / `[objSid, [name, value]*]` | 258972, 257831 | OK |
 | `uamo` / `lv` / `st` / `kst` / `wstk` / `am` | `[ammos, reserves]` / `[lives]` / `[streak, cnt]` / `[sid, count]` / `[weapon, count]` / flat `[name \| index, score, sound, count \|\| 1]*` | 258396, 259282, 258864, 258946, 258893, 259312 | OK |
-| `krt` UPDATE_KR_TAGS | `[dogTags, depositType \|\| 0]` (1 = the gift-tag holder) | 258906 | **fixed**: depositType 1 / 2 -> NET_MODE_COUNTER_GIFT_TAGS / _EVENT_TAGS, shown in `#giftTagHolder` with props/prop_60 / events/event_7 (the event image is not in ui/img) |
+| `krt` UPDATE_KR_TAGS | `[dogTags, depositType \|\| 0]` (1 = the gift-tag holder) | 258906 | **fixed**: depositType 1 / 2 -> NET_MODE_COUNTER_GIFT_TAGS / _EVENT_TAGS, shown in `#giftTagHolder` with props/prop_60 / events/event_7 (ui/img/events, fetched from assets.krunker.io) |
 | `ufl` / `ufp` / `ufi` | `[uid, x, y, z, carrier \|\| 0]` / `[uid, x, y, z]` / `[team, text]` | 218287, 218401, 259227 | OK |
 | `obj` / `uobj` / `wep` | `[uid, objtvTime ms, initial]` / `[uid, onZone]` / `[weaponId]` | 219218, 219271, 219284 | OK |
 | `rds` / `zn` / `ac` | `[roundCount, noSwitch, winTeam, {team: wins}]` / `[[x, z, sizeX, sizeZ]]` / `[sid, sid2 \| null, text]` | 256671, 219210, 258952 | OK |

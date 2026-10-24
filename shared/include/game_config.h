@@ -94,6 +94,15 @@ void game_config_read(GameConfig*, const cJSON *cfg, int clamp, int host_index);
 // many were applied.
 int game_config_merge(GameConfig*, const cJSON *cfg, int clamp);
 cJSON *game_config_write(const GameConfig*);  // every serverConfig varN with its value
+// A comp lobby's account rosters (applyConfig, deob-10.0.3.js:216130-216156): cfg.teams, two lists of account names
+// (strings of 1..64 characters, the first 50 of each). game_config_roster_given: either list names someone (with
+// isComp, config.lockedTeams). game_config_roster_team: the roster team (1 / 2) of an account name in the hosted
+// comp lobby's request (game_config_host), 0 none (getAccountTeamIndex + 1, :222558-222576, :216009-216014). cfg.specs
+// (accountSpecs) only feeds v10's validateAccount, which 10.0.3 never calls: not kept.
+#define GAME_CONFIG_ROSTER_MAX 50
+#define GAME_CONFIG_ROSTER_NAME_MAX 64
+int game_config_roster_given(const cJSON *cfg);
+int game_config_roster_team(Game *game, const char *account_name);
 // The value of option `var` of a table entry (SERVER: GameConfig*, CLASS: ClassConfig*, WEAPON:
 // Weapon*, EFFECT: EffectConfig*) in v7 units: numbers / bools / select indices in *num, inputs
 // in *str. 0 when KN does not keep that key (client-only weapon visuals) or `var` is unknown.

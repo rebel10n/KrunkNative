@@ -346,8 +346,8 @@ typedef struct {
     KrunkerLinkRecent recent[KRUNKER_LINK_RECENT];
     unsigned recent_total;
     // init's arguments past the map and its config (the handler deob-10.0.3.js:256748-256858), kept per round:
-    //   [2]  eventIndex: the round's live event (game.init's eventIndex: map.generate's event meshes, the event banner,
-    //        :219812, :257140); KrunkNative has no event table, it is kept and logged
+    //   [2]  eventIndex: the round's live event (game.init's eventIndex, :219812) -> NET_EXT_INIT_EVENT after the
+    //        INIT (the client's Game.event_index, as KrunkNative's own server sends it)
     //   [10] the official map's hash (the server's mapHashes[mapIndex], null for a custom map): the 10.0.3 handler
     //        takes it and never reads it (iiïïììi / iïíiïîì), nor does KrunkNative; kept for the log
     //   [17] sessionId / [18] roundId: game.sessionId / roundId, which v10 only reports (game_session_id / round_id of

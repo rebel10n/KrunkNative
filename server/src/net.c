@@ -804,6 +804,10 @@ void net_comp_lobby_sync(ClientConnection *client) {
     comp_lobby_send_all(game, client->id);
     const int team = accounts_assigned_team(client); // ranked: the roster team, never picked
     if (team) comp_lobby_set_team(game, client->id, team);
+    // a comp host's account rosters (cfg.teams): the account's team when it is on one (getAccountTeamIndex + 1,
+    // deob-10.0.3.js:216009-216014); config.lockedTeams then keeps the comp menu's Join / Leave Team away
+    const int roster = team || !identity.name[0] ? 0 : game_config_roster_team(game, identity.name);
+    if (roster) comp_lobby_set_team(game, client->id, roster);
 }
 
 // "gsc" to one connection (EXT peers): the current game state
@@ -822,6 +826,15 @@ static void net_send_ranked_match(ClientConnection *client) {
     const NetRankedMatchPacket packet = {.ranked = (uint8_t) !!accounts_ranked_active()};
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
     const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_RANKED_MATCH, &packet, sizeof(packet));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
+// v10 init's [2] eventIndex (Game.event_index), which NetInitPacket has no room for: right after the INIT
+static void net_send_event_index(ClientConnection *client) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    const NetInitEventPacket packet = {.event_index = g_server->game.event_index};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_INIT_EVENT, &packet, sizeof(packet));
     if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
 }
 
@@ -849,6 +862,7 @@ static void net_send_init(ClientConnection *client) {
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
     net_send_game_state(client);  // v10 gameState: a joiner learns the phase now (its names follow it)
     net_send_ranked_match(client); // v10 INIT isRanked: after the INIT, which resets the client's game
+    net_send_event_index(client);  // v10 INIT eventIndex, likewise
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     net_comp_lobby_sync(client);  // comp lobby: the connection's entry + the table
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync

@@ -874,11 +874,15 @@ int main(void) {
     // a marked sync with nobody else in it (NET_EXT_PLAYER_SYNC alone): an empty k, v10's hideAll trigger (updateState
     // sends the empty list, deob-10.0.3.js:222350)
     {
+        // init's eventIndex (NET_EXT_INIT_EVENT) is consumed, no stop
+        const uint8_t event[6] = {(uint8_t) (NET_EXT_INIT_EVENT & 0xff), (uint8_t) (NET_EXT_INIT_EVENT >> 8), 7, 0, 0, 0};
+        native_send(&g_native, NET_PACKET_EXT, event, sizeof event);
         const uint8_t marker[2] = {(uint8_t) (NET_EXT_PLAYER_SYNC & 0xff), (uint8_t) (NET_EXT_PLAYER_SYNC >> 8)};
         native_send(&g_native, NET_PACKET_EXT, marker, 2);
         WAIT_FOR(client_count("k") >= 2);
         KrunkerFrame ke;
         CHECK(client_get("k", 1, &ke) && ke.argc == 3 && ke.args[0].type == KRUNKER_ARRAY && ke.args[0].len == 0, "a marked sync of nobody: k []");
+        CHECK(!v10_bridge_untranslated("EXT 0x0903"), "INIT_EVENT consumed, no stop");
         krunker_frame_free(&ke);
     }
 
