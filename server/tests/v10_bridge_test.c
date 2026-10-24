@@ -186,6 +186,18 @@ static void native_send_conn(Native *nt, int conn, uint8_t type, const uint8_t *
 }
 static void native_send(Native *nt, uint8_t type, const uint8_t *p, size_t len) { native_send_conn(nt, 0, type, p, len); }
 
+// One v10.0.3 entity record as the server sends it: EXT subtype, NetExtJsonChunk {0, 1}, the JSON (ks_entities.c)
+static void send_entity_ext(const uint16_t subtype, const char *json) {
+    uint8_t buf[2 + sizeof(NetExtJsonChunk) + 512];
+    const size_t n = strlen(json);
+    buf[0] = (uint8_t) (subtype & 0xff);
+    buf[1] = (uint8_t) (subtype >> 8);
+    buf[2] = 0;
+    buf[3] = 1;
+    memcpy(buf + 4, json, n);
+    native_send(&g_native, NET_PACKET_EXT, buf, 4 + n);
+}
+
 static int native_count(uint8_t type) {
     int c = 0;
     for (size_t i = 0; i < g_native.n; i++) c += g_native.frames[i].type == type;
@@ -719,6 +731,12 @@ int main(void) {
     krunker_frame_free(&ann);
     free(card);
 
+    // v10.0.3 entities (shared/include/ks_entities.h): an entity's spawn before our START is held (its body goes in the
+    // game's scene, which is not up before it) and goes out after it as "e+"
+    send_entity_ext(NET_EXT_ENTITY_SPAWN, "[7,1,0,{\"x\":4,\"y\":0,\"z\":4},\"\",\"sim\",50]");
+    pump(50);
+    CHECK(client_count("e+") == 0 && v10_bridge_untranslated("EXT 0x0100") == 0, "an entity spawn is held until our start");
+
     // SKINS, then the SPAWN of another player and of ours: the add record (ADD_PLAYERS "0") and our start
     uint8_t skins[16];
     w_i32(skins, 0, 2); w_i32(skins, 4, 7); w_i32(skins, 8, 8); w_i32(skins, 12, 9);
@@ -771,6 +789,27 @@ int main(void) {
         CHECK(addo.args[1].type == KRUNKER_NUM && addo.args[1].u.num == 1, "ADD_PLAYERS takes 1");
         krunker_frame_free(&addo);
     }
+
+    // the held entity spawn after our start, then a baseline, an attachment and a live object (deob-10.0.3.js:261720-261742)
+    WAIT_FOR(client_count("e+") == 1);
+    KrunkerFrame ent;
+    CHECK(client_get("e+", 0, &ent) && ent.argc == 1 && ent.args[0].type == KRUNKER_ARRAY && ent.args[0].len == 7 &&
+              vequal(&ent.args[0].u.items[0], &KRUNKER_V_NUM(7)) && vequal(map_get(&ent.args[0].u.items[3], "x"), &KRUNKER_V_NUM(4)),
+          "e+ is [[7, 1, 0, {x, y, z}, \"\", sim, 50]]");
+    krunker_frame_free(&ent);
+    send_entity_ext(NET_EXT_ENTITY_STATE, "[7,12,{\"x\":5}]");
+    send_entity_ext(NET_EXT_ENTITY_ATTACH, "[1,7,{\"o\":[0,1,0],\"lk\":1,\"ctl\":0,\"soft\":0,\"nd\":0}]");
+    send_entity_ext(NET_EXT_KN_OFFICIAL_LIVE_OBJECT, "[0,{\"type\":\"asset\",\"aid\":\"46802\",\"x\":1,\"y\":2,\"z\":3,\"s\":1,\"ry\":0}]");
+    WAIT_FOR(client_count("lo") == 1);
+    CHECK(client_get("es", 0, &ent) && ent.argc == 1 && ent.args[0].len == 1 && ent.args[0].u.items[0].len == 3 &&
+              vequal(&ent.args[0].u.items[0].u.items[1], &KRUNKER_V_NUM(12)), "es is [[[7, 12, {x}]]]");
+    krunker_frame_free(&ent);
+    CHECK(client_get("ea+", 0, &ent) && ent.argc == 3 && vequal(&ent.args[0], &KRUNKER_V_NUM(1)) && vequal(map_get(&ent.args[2], "lk"), &KRUNKER_V_NUM(1)),
+          "ea+ is [1, 7, {o, lk, ctl, soft, nd}]");
+    krunker_frame_free(&ent);
+    CHECK(client_get("lo", 0, &ent) && ent.argc == 1 && ent.args[0].len == 1 && is_str(map_get(&ent.args[0].u.items[0].u.items[1], "type"), "asset"),
+          "lo is [[[0, {type: asset, ...}]]]");
+    krunker_frame_free(&ent);
 
     // the leaderboard (14, free for all) and its LEADER_STATS repeat (consumed)
     uint8_t board[257];

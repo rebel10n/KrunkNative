@@ -61,6 +61,14 @@
 #define V10_IN_SYNC_ALL_AI "ai"
 #define V10_IN_UPDATE_LEADERS "7"
 #define V10_IN_START_GAME "start"
+#define V10_IN_ENTITY_SPAWN "e+"       /* deob-10.0.3.js ENTITY_SPAWN (:111372): applySpawn(payload) (:261720) */
+#define V10_IN_ENTITY_REMOVE "e-"      /* applyRemove(eid, reason) */
+#define V10_IN_ENTITY_STATE "es"       /* applyBaselines([[eid, tick, state], ...]) */
+#define V10_IN_ENTITY_EVENT "ee"       /* clientEventQueue.push({eid, name, a, b}) */
+#define V10_IN_ENTITY_ATTACH "ea+"     /* applyAttach(sid, eid, opts, isYou) */
+#define V10_IN_ENTITY_DETACH "ea-"     /* applyDetach(sid, eid) */
+#define V10_IN_SYNC_NEW_OBJECTS "lo"   /* liveObjects.syncNewObjects([[id, data], ...]) (:111352) */
+#define V10_IN_SYNC_LIVE_OBJECTS "slo" /* liveObjects.syncLiveObjects([[id, "remove"], ...]) */
 #define V10_IN_GAME_ANNOUNCEMENT "gameAnnouncement"
 #define V10_IN_UPDATE_FLAG "ufl"
 #define V10_IN_UPDATE_FLAG_INFO "ufi"
@@ -221,6 +229,10 @@ int v10_official_map_index(const uint8_t *map, size_t map_len);
  * /maps/<index>). A community map's INIT carries the map JSON inline in arg 9 and the native index. */
 void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len,
                    KrunkerValue config, KrunkerValue network, int ranked);
+/* The same with the entities' match seed in the init's sync data (syncData.entSeed, deob-10.0.3.js:220292: the client's
+ * entities.setup(sharedScript, entSeed), :256976-256979) when has_seed. */
+void v10_init_game_seed(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len, KrunkerValue config,
+                        KrunkerValue network, int ranked, int has_seed, double seed);
 /* The networkData object of the init (snf, tf, sf). */
 KrunkerValue v10_network_value(V10Out *o, const V10Network *net);
 
@@ -305,6 +317,17 @@ void v10_map_enter_game(V10Out *o);
 void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shooter);
 /* RECON (NetReconPacket, 89 bytes): the owner's movement state as the "l" sync array (mapRecon in v10Translate.ts). */
 void v10_map_recon(V10Out *o, const uint8_t *p, size_t n);
+/* The same with SYNC_PLAYER's controlled entity [eid, tick, state] (NET_EXT_ENTITY_CONTROLLED right before the RECON) as
+ * the array's last element, at 26 (no movement-scheme sendVals on the bridge; deob-10.0.3.js:222404-222405, the client
+ * reads it at 26 + sendVals, :258296). NULL: the plain 26 slots. */
+void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON *controlled);
+/* v10.0.3 KrunkScript entities and live objects (shared/include/ks_entities.h): one native record of `subtype` (the
+ * JSON array of a NET_EXT_ENTITY_* / NET_EXT_KN_OFFICIAL_LIVE_* EXT) as its v10 message, the handlers' arguments
+ * (deob-10.0.3.js:261720-261742): "e+" [payload], "e-" eid reason, "es" [[eid, tick, state]], "ee" eid name a b,
+ * "ea+" sid eid opts, "ea-" sid eid, "lo" [[id, data]], "slo" [[id, op]]. Sets o->stop for any other subtype or shape. */
+void v10_map_entity_record(V10Out *o, uint16_t subtype, const cJSON *rec);
+/* 1 for the subtypes v10_map_entity_record maps (the seed and the controlled entity are the bridge's to place) */
+int v10_entity_subtype(uint16_t subtype);
 /* PICKUP (NetPickupPacket, 26 bytes): one pickup's state as the "inat" message (mapPickup in v10Translate.ts). */
 void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n);
 /* CHEAT (NetCheatPacket: uint8 flag, uint8 on): 0 when malformed. */

@@ -12,6 +12,7 @@
 #include "krunker_proto.h"
 #include "progression.h" /* PROGRESSION_MEDAL_COUNT: the END_MEDALS indexes */
 #include "v10_translate.h"
+#include "net_ext.h"
 #include "weapons.h" /* weapon_shot_trail: the server's NetShotPacket.trail rule (the SHOT trail classes below) */
 
 
@@ -526,6 +527,16 @@ int main(void) {
             CHECK(ro.count == 1 && ro.msgs[0].args[0].u.items[23].len == 4 && vequal(&ro.msgs[0].args[0].u.items[23].u.items[3], &KRUNKER_V_NUM(13)),
                   "a grapple: its point and range");
             v10_out_free(&ro);
+            // v10.0.3: the controlled entity [eid, tick, state] as the array's slot 26 (deob-10.0.3.js:222404-222405, :258296)
+            cJSON *ctl = cJSON_Parse("[9,40,{\"x\":3.5}]");
+            v10_out_init(&ro);
+            v10_map_recon_controlled(&ro, rc, 89, ctl);
+            const KrunkerValue *slot = ro.count == 1 && ro.msgs[0].args[0].len == 27 ? &ro.msgs[0].args[0].u.items[26] : NULL;
+            CHECK(slot && slot->type == KRUNKER_ARRAY && slot->len == 3 && vequal(&slot->u.items[0], &KRUNKER_V_NUM(9)) &&
+                      vequal(&slot->u.items[1], &KRUNKER_V_NUM(40)) && slot->u.items[2].type == KRUNKER_MAP,
+                  "l: the controlled entity in slot 26");
+            v10_out_free(&ro);
+            cJSON_Delete(ctl);
         }
 
         // INPUT (q, v10.js 221577): the window's frames field by field (decodeInputBatch in v10Translate.ts)
@@ -1532,6 +1543,61 @@ int main(void) {
         v10_out_free(&e);
     }
 
+    // ---- v10.0.3 KrunkScript entities and live objects (v10_map_entity_record): the handlers' arguments (:261720-261742)
+    {
+        struct { uint16_t subtype; const char *json; const char *label; uint32_t argc; } cases[] = {
+            {NET_EXT_ENTITY_SPAWN, "[7,1,0,{\"x\":4},\"t\",\"sim\",50]", "e+", 1},
+            {NET_EXT_ENTITY_REMOVE, "[7,\"script\"]", "e-", 2},
+            {NET_EXT_ENTITY_STATE, "[7,30,{\"x\":5}]", "es", 1},
+            {NET_EXT_ENTITY_EVENT, "[7,\"hop\",1.5,2]", "ee", 4},
+            {NET_EXT_ENTITY_ATTACH, "[2,7,{\"o\":[0,1,0],\"lk\":1,\"ctl\":0,\"soft\":0,\"nd\":0}]", "ea+", 3},
+            {NET_EXT_ENTITY_DETACH, "[2,7]", "ea-", 2},
+            {NET_EXT_KN_OFFICIAL_LIVE_OBJECT, "[0,{\"type\":\"asset\",\"aid\":\"46802\"}]", "lo", 1},
+            {NET_EXT_KN_OFFICIAL_LIVE_SYNC, "[0,\"remove\"]", "slo", 1},
+        };
+        for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+            cJSON *rec = cJSON_Parse(cases[c].json);
+            V10Out eo;
+            v10_out_init(&eo);
+            v10_map_entity_record(&eo, cases[c].subtype, rec);
+            CHECK(!eo.stop && eo.count == 1 && !strcmp(eo.msgs[0].label, cases[c].label) && eo.msgs[0].argc == cases[c].argc,
+                  "entity record -> %s (%u args)", cases[c].label, cases[c].argc);
+            if (!eo.stop && eo.count == 1 && cases[c].subtype == NET_EXT_ENTITY_STATE)
+                CHECK(eo.msgs[0].args[0].type == KRUNKER_ARRAY && eo.msgs[0].args[0].len == 1 && eo.msgs[0].args[0].u.items[0].len == 3,
+                      "es: one list of baselines");
+            if (!eo.stop && eo.count == 1 && cases[c].subtype == NET_EXT_ENTITY_SPAWN)
+                CHECK(eo.msgs[0].args[0].type == KRUNKER_ARRAY && eo.msgs[0].args[0].len == 7, "e+: the spawn payload");
+            if (!eo.stop && eo.count == 1 && cases[c].subtype == NET_EXT_ENTITY_EVENT)
+                CHECK(vequal(&eo.msgs[0].args[2], &KRUNKER_V_NUM(1.5)) && eo.msgs[0].args[1].type == KRUNKER_STR, "ee: eid, name, a, b");
+            CHECK(v10_entity_subtype(cases[c].subtype), "a mapped entity subtype");
+            v10_out_free(&eo);
+            cJSON_Delete(rec);
+        }
+        cJSON *bad = cJSON_Parse("[7]");
+        V10Out eo;
+        v10_out_init(&eo);
+        v10_map_entity_record(&eo, NET_EXT_ENTITY_EVENT, bad);
+        CHECK(eo.stop != NULL, "a short entity record stops");
+        v10_out_free(&eo);
+        cJSON_Delete(bad);
+        CHECK(!v10_entity_subtype(NET_EXT_ENTITY_SEED) && !v10_entity_subtype(NET_EXT_ENTITY_CONTROLLED), "the seed and the l tail are the bridge's");
+        // the init's syncData carries entSeed when the server sent one (:220292)
+        const V10Init seed_init = {3, 0, 30, 1, 3};
+        const char *seed_map = "{\"name\":\"SeedMap\",\"objects\":[]}";
+        for (int with = 0; with < 2; with++) {
+            v10_out_init(&eo);
+            v10_init_game_seed(&eo, &seed_init, (const uint8_t *)seed_map, strlen(seed_map), KRUNKER_V_NIL, KRUNKER_V_NIL, 0, with, -12345);
+            const KrunkerValue *sync = eo.count == 1 && eo.msgs[0].argc > 11 ? &eo.msgs[0].args[11] : NULL;
+            int found = 0;
+            for (uint32_t k = 0; sync && sync->type == KRUNKER_MAP && k < sync->len; k++) {
+                const KrunkerValue *key = &sync->u.items[2 * k];
+                if (key->type == KRUNKER_STR && key->len == 7 && !memcmp(key->u.str, "entSeed", 7))
+                    found = vequal(&sync->u.items[2 * k + 1], &KRUNKER_V_NUM(-12345)) ? 1 : -1;
+            }
+            CHECK(with ? found == 1 : found == 0, "init syncData.entSeed %s", with ? "present" : "absent without a seed");
+            v10_out_free(&eo);
+        }
+    }
     printf("v10_translate_test: %d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

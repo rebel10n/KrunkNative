@@ -12,6 +12,7 @@
  * damaged multi-byte sequence can differ by a replacement character).
  */
 #include "v10_translate.h"
+#include "net_ext.h" /* NET_EXT_ENTITY_* (the entity records) */
 
 #include "krunker_maps.h" /* KRUNKER_OFFICIAL_MAPS: the official list an official map's INIT is numbered by */
 #include "progression.h" /* g_progression_medals: the names of the END_MEDALS medals */
@@ -783,13 +784,19 @@ int v10_official_map_index(const uint8_t *map, size_t map_len) {
 /* INIT_GAME arguments (buildInitArgs, v10.js 222270). */
 void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len, KrunkerValue config,
                    KrunkerValue network, int ranked) {
+    v10_init_game_seed(o, init, map, map_len, config, network, ranked, 0, 0.0);
+}
+
+void v10_init_game_seed(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len, KrunkerValue config,
+                        KrunkerValue network, int ranked, int has_seed, double seed) {
     const int official = v10_official_map_index(map, map_len);
     const int32_t map_index = official >= 0 ? official : init->map_index;
     const KrunkerValue empty = v10_obj(o, NULL, NULL, 0);
-    /* the init's sync data (v7 getSyncData, game.js 3844): gor 1 is a game in progress; the v10 init reads it */
-    const char *const sync_keys[1] = {"gor"};
-    const KrunkerValue sync_vals[1] = {KRUNKER_V_NUM(1)};
-    const KrunkerValue sync = v10_obj(o, sync_keys, sync_vals, 1);
+    /* the init's sync data (v7 getSyncData, game.js 3844): gor 1 is a game in progress; the v10 init reads it; v10.0.3's
+     * entSeed (:220292) when the server sent its entities' seed */
+    const char *const sync_keys[2] = {"gor", "entSeed"};
+    const KrunkerValue sync_vals[2] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(seed)};
+    const KrunkerValue sync = v10_obj(o, sync_keys, sync_vals, has_seed ? 2 : 1);
     const char *const map_keys[5] = {"data", "id", "creator", "info", "accType"};
     const KrunkerValue map_vals[5] = {KRUNKER_V_STRN((const char *)map, map_len), KRUNKER_V_NIL, KRUNKER_V_STR(""), empty, KRUNKER_V_NUM(1)};
     const KrunkerValue map_obj = v10_obj(o, map_keys, map_vals, 5);
@@ -1177,7 +1184,11 @@ void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shoot
 /* RECON: NetReconPacket (89 bytes, packed) -> the "l" sync array (mapRecon, v10Translate.ts). The inverse of the native
  * client's on_sync_player (krunker_link.c): the 26 slots, by index. */
 #define RECON_SIZE 89
-void v10_map_recon(V10Out *o, const uint8_t *p, size_t n) {
+static KrunkerValue json_value(V10Out *o, const cJSON *j, int depth);
+
+void v10_map_recon(V10Out *o, const uint8_t *p, size_t n) { v10_map_recon_controlled(o, p, n, NULL); }
+
+void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON *controlled) {
     if (n != RECON_SIZE) {
         o->stop = "malformed (not the v3 NetReconPacket)";
         return;
@@ -1188,7 +1199,7 @@ void v10_map_recon(V10Out *o, const uint8_t *p, size_t n) {
         const KrunkerValue g[4] = {KRUNKER_V_NUM(rd_f32(p, 73)), KRUNKER_V_NUM(rd_f32(p, 77)), KRUNKER_V_NUM(rd_f32(p, 81)), KRUNKER_V_NUM(rd_f32(p, 85))};
         grapple = v10_arr(o, g, 4);
     }
-    const KrunkerValue sync[26] = {
+    KrunkerValue sync[27] = {
         KRUNKER_V_NUM(rd_i32(p, 0)), /* inputSN (ack_seq) */
         KRUNKER_V_NUM(0), /* ping: not in the packet */
         KRUNKER_V_NUM(rd_f32(p, 4)), KRUNKER_V_NUM(rd_f32(p, 8)), KRUNKER_V_NUM(rd_f32(p, 12)), /* x, y, z */
@@ -1207,8 +1218,49 @@ void v10_map_recon(V10Out *o, const uint8_t *p, size_t n) {
         grapple,
         KRUNKER_V_NUM(rd_f32(p, 60) * 1000), /* canSlideT, ms */
         KRUNKER_V_NIL, /* protected */
+        KRUNKER_V_NIL, /* the controlled entity, below */
     };
-    v10_push(o, V10_IN_SYNC_PLAYER, (KrunkerValue[]){v10_arr(o, sync, 26)}, 1);
+    if (controlled) sync[26] = json_value(o, controlled, 0);
+    v10_push(o, V10_IN_SYNC_PLAYER, (KrunkerValue[]){v10_arr(o, sync, controlled ? 27 : 26)}, 1);
+}
+
+int v10_entity_subtype(const uint16_t subtype) {
+    return subtype == NET_EXT_ENTITY_SPAWN || subtype == NET_EXT_ENTITY_REMOVE || subtype == NET_EXT_ENTITY_STATE ||
+           subtype == NET_EXT_ENTITY_EVENT || subtype == NET_EXT_ENTITY_ATTACH || subtype == NET_EXT_ENTITY_DETACH ||
+           subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT || subtype == NET_EXT_KN_OFFICIAL_LIVE_SYNC;
+}
+
+void v10_map_entity_record(V10Out *o, const uint16_t subtype, const cJSON *rec) {
+    if (!cJSON_IsArray(rec)) {
+        o->stop = "malformed (not a JSON array)";
+        return;
+    }
+    const KrunkerValue v = json_value(o, rec, 0);
+    const char *label = NULL;
+    int spread = 0, wrap = 0, want = 0; /* spread: the record's items are the arguments; wrap: one list of the record */
+    switch (subtype) {
+    case NET_EXT_ENTITY_SPAWN: label = V10_IN_ENTITY_SPAWN; want = 7; break;
+    case NET_EXT_ENTITY_REMOVE: label = V10_IN_ENTITY_REMOVE; spread = 1; want = 2; break;
+    case NET_EXT_ENTITY_STATE: label = V10_IN_ENTITY_STATE; wrap = 1; want = 3; break;
+    case NET_EXT_ENTITY_EVENT: label = V10_IN_ENTITY_EVENT; spread = 1; want = 4; break;
+    case NET_EXT_ENTITY_ATTACH: label = V10_IN_ENTITY_ATTACH; spread = 1; want = 3; break;
+    case NET_EXT_ENTITY_DETACH: label = V10_IN_ENTITY_DETACH; spread = 1; want = 2; break;
+    case NET_EXT_KN_OFFICIAL_LIVE_OBJECT: label = V10_IN_SYNC_NEW_OBJECTS; wrap = 1; want = 2; break;
+    case NET_EXT_KN_OFFICIAL_LIVE_SYNC: label = V10_IN_SYNC_LIVE_OBJECTS; wrap = 1; want = 2; break;
+    default: o->stop = "not an entity record"; return;
+    }
+    if (v.type != KRUNKER_ARRAY || (int)v.len < want) {
+        o->stop = "malformed (a short entity record)";
+        return;
+    }
+    if (spread) {
+        v10_push(o, label, v.u.items, (uint32_t)want);
+    } else if (wrap) {
+        const KrunkerValue list = v10_arr(o, &v, 1);
+        v10_push(o, label, &list, 1);
+    } else {
+        v10_push(o, label, &v, 1);
+    }
 }
 
 /* PICKUP: NetPickupPacket (26 bytes, packed): int32 uid @0, int32 weapon @4 (-1 empty), uint8 active @8, uint8 moved @9,

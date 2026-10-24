@@ -138,6 +138,15 @@ typedef struct V10Session {
     int init_sent;
     int global_values_sent;
     int stopped;
+    /* v10.0.3 entities (shared/include/ks_entities.h): the match seed for the init's syncData.entSeed, the controlled
+     * entity for the next "l", the NetExtJsonChunk record being assembled */
+    int has_ent_seed;
+    double ent_seed;
+    cJSON *controlled;
+    char *ent_chunk;
+    size_t ent_chunk_len;
+    int ent_chunk_next, ent_chunk_parts;
+    uint16_t ent_chunk_subtype;
 } V10Session;
 
 struct V10Bridge {
@@ -324,6 +333,8 @@ static void session_free(V10Session *s) {
     free(s->held);
     free(s->pending_end);
     free(s->own_spawn);
+    cJSON_Delete(s->controlled);
+    free(s->ent_chunk);
     free(s);
 }
 
@@ -763,7 +774,7 @@ static void emit_init(V10Session *s) {
     v10_out_init(&o);
     const KrunkerValue config = v10_config_value(&o, s->config_root);
     const KrunkerValue network = v10_network_value(&o, &s->network);
-    v10_init_game(&o, &init, s->map_text, s->map_len, config, network, s->ranked);
+    v10_init_game_seed(&o, &init, s->map_text, s->map_len, config, network, s->ranked, s->has_ent_seed, s->ent_seed);
     send_out(s, &o);
     v10_out_free(&o);
     s->init_sent = 1;
@@ -841,6 +852,9 @@ static void flush_pending_end(V10Session *s) {
 static void round_restart(V10Session *s) {
     s->init_sent = 0;
     s->started = 0;
+    s->has_ent_seed = 0; /* the next round's INIT is followed by its own */
+    cJSON_Delete(s->controlled);
+    s->controlled = NULL;
     s->own_alive = 0;
     s->have_config_text = 0;
     s->network_received = 0;
@@ -862,6 +876,38 @@ static void remember_own_spawn(V10Session *s, const uint8_t *p, size_t n, int ac
     s->own_spawn_n = n;
 }
 
+/* One JSON record of NetExtJsonChunk slices (net_ext.h): the record once its last slice is in, NULL meanwhile or when
+ * the slices are broken (a new record starts at slice 0) */
+static cJSON *ent_record(V10Session *s, const uint16_t subtype, const uint8_t *body, const size_t n) {
+    if (n < sizeof(NetExtJsonChunk)) return NULL;
+    const int part = body[0], parts = body[1];
+    const uint8_t *data = body + sizeof(NetExtJsonChunk);
+    const size_t len = n - sizeof(NetExtJsonChunk);
+    if (!parts || part >= parts) return NULL;
+    if (parts == 1) return cJSON_ParseWithLength((const char *)data, len);
+    if (part == 0 || s->ent_chunk_subtype != subtype || part != s->ent_chunk_next) {
+        free(s->ent_chunk);
+        s->ent_chunk = NULL;
+        s->ent_chunk_len = 0;
+        if (part != 0) return NULL;
+        s->ent_chunk_subtype = subtype;
+        s->ent_chunk_parts = parts;
+    }
+    char *grown = realloc(s->ent_chunk, s->ent_chunk_len + len);
+    if (!grown) return NULL;
+    s->ent_chunk = grown;
+    memcpy(s->ent_chunk + s->ent_chunk_len, data, len);
+    s->ent_chunk_len += len;
+    s->ent_chunk_next = part + 1;
+    if (s->ent_chunk_next < s->ent_chunk_parts) return NULL;
+    cJSON *rec = cJSON_ParseWithLength(s->ent_chunk, s->ent_chunk_len);
+    free(s->ent_chunk);
+    s->ent_chunk = NULL;
+    s->ent_chunk_len = 0;
+    s->ent_chunk_next = 0;
+    return rec;
+}
+
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
     if (s->closed) return;
     if (s->bridge->trace) {
@@ -881,6 +927,26 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->pending_end && type != NET_PACKET_MODE_END) flush_pending_end(s);
     if (s->stopped) return;
     if (s->init_sent && type == NET_PACKET_MAP_INFO) round_restart(s);
+    /* v10.0.3 entities: the match seed after an INIT goes into that init's syncData.entSeed (deob-10.0.3.js:220292); one
+     * after the init was built cannot reach the client (v10 reads it in the init only): its ctx.rand then differs until the
+     * baselines put the entities right. The controlled entity waits for the RECON it precedes ("l"'s tail). */
+    if (type == NET_PACKET_EXT && n >= 2 && (rd_u16(p, 0) == NET_EXT_ENTITY_SEED || rd_u16(p, 0) == NET_EXT_ENTITY_CONTROLLED)) {
+        const uint16_t sub = rd_u16(p, 0);
+        cJSON *rec = ent_record(s, sub, p + 2, n - 2);
+        if (!rec) return;
+        if (sub == NET_EXT_ENTITY_SEED) {
+            const cJSON *v = cJSON_IsArray(rec) ? cJSON_GetArrayItem(rec, 0) : rec;
+            if (cJSON_IsNumber(v) && !s->init_sent) {
+                s->has_ent_seed = 1;
+                s->ent_seed = v->valuedouble;
+            }
+            cJSON_Delete(rec);
+        } else {
+            cJSON_Delete(s->controlled);
+            s->controlled = rec;
+        }
+        return;
+    }
     const int ranked = type == NET_PACKET_EXT && n >= 3 && rd_u16(p, 0) == V10_EXT_RANKED;
     const int init_part = type == NET_PACKET_MAP_DATA || type == NET_PACKET_GAME_CONFIG || type == NET_PACKET_NETWORK_DATA || ranked;
     if (s->have_pending_init && !init_part) {
@@ -1207,11 +1273,30 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         finish_out(s, &o, "SHOT");
         return;
     }
-    /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon) */
+    /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon), with the controlled entity that
+     * came right before it */
     if (s->init_sent && type == NET_PACKET_RECON) {
         v10_out_init(&o);
-        v10_map_recon(&o, p, n);
+        v10_map_recon_controlled(&o, p, n, s->controlled);
+        cJSON_Delete(s->controlled);
+        s->controlled = NULL;
         finish_out(s, &o, "RECON");
+        return;
+    }
+    /* v10.0.3 entities and live objects: their messages build bodies in the game's scene, which is not up before START
+     * (as a bot's add): held until then, in order */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && v10_entity_subtype(rd_u16(p, 0))) {
+        if (!s->started) {
+            hold_push(s, type, p, n);
+            return;
+        }
+        const uint16_t sub = rd_u16(p, 0);
+        cJSON *rec = ent_record(s, sub, p + 2, n - 2);
+        if (!rec) return; /* a slice of a longer record */
+        v10_out_init(&o);
+        v10_map_entity_record(&o, sub, rec);
+        cJSON_Delete(rec);
+        finish_out(s, &o, native_name(type, p, n));
         return;
     }
     /* PICKUP: one pickup's state, the pickup half of v10's "inat" (see v10_map_pickup) */
