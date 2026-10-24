@@ -114,7 +114,10 @@ static void build(KrunkerLink *l, const KrunkerValue *a, const uint32_t argc, co
     memset(&p, 0, sizeof(p));
     p.uid = (int32_t) A(8)->u.num;
     p.build_index = (uint8_t) num(A(0), 0);
-    p.direction = (int8_t) num(A(7), 0);
+    // dir is radians (rotDir: Left 0, Front PI / 2, Right PI, Back -PI / 2, deob-10.0.3.js:195816-195826, sent
+    // by buildObj :216805); NetBuildPacket.direction counts quarter turns 0..3 (shared/src/build.c build_quarter)
+    const long quarter = lround(num(A(7), 0) / (M_PI / 2.0));
+    p.direction = (int8_t) (((quarter % 4) + 4) % 4);
     p.position[0] = (float) num(A(1), 0);
     p.position[1] = (float) num(A(2), 0);
     p.position[2] = (float) num(A(3), 0);
