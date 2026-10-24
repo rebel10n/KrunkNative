@@ -15,7 +15,9 @@
 #include <triggers_v7.h>
 #include <map_catalog.h>
 #include <knet.h>
+#include <net_ext.h>
 #include <shared.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +64,9 @@ typedef struct {
     uint32_t map_hash;
     char *map_json;
     size_t map_size;
+    // v10.0.3 entity / live object EXTs (one slice each here): "<name> <json>" in arrival order
+    char ents[256][200];
+    int ent_count;
 } Client;
 
 static KsScript *g_cs; // a client-side heap to decode messages in
@@ -167,9 +172,30 @@ static void handle(Client *c, const NetPacket *p)
             c->msg_count++;
             break;
         }
+        case NET_PACKET_EXT: {
+            uint16_t subtype = 0, n = 0;
+            const uint8_t *body = NULL;
+            if (!net_ext_unpack(p->payload, p->length, &subtype, &body, &n) || n < sizeof(NetExtJsonChunk) || c->ent_count >= 256) break;
+            const char *name = subtype == NET_EXT_ENTITY_SPAWN ? "e+" : subtype == NET_EXT_ENTITY_REMOVE ? "e-" : subtype == NET_EXT_ENTITY_STATE ? "es"
+                             : subtype == NET_EXT_ENTITY_EVENT ? "ee" : subtype == NET_EXT_ENTITY_ATTACH ? "ea+" : subtype == NET_EXT_ENTITY_DETACH ? "ea-"
+                             : subtype == NET_EXT_ENTITY_SEED ? "seed" : subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT ? "lo"
+                             : subtype == NET_EXT_KN_OFFICIAL_LIVE_SYNC ? "slo" : NULL;
+            if (!name || (subtype == NET_EXT_ENTITY_STATE && c->ent_count >= 200)) break; // (room for the rest)
+            snprintf(c->ents[c->ent_count++], sizeof(c->ents[0]), "%s %.*s", name, (int) (n - sizeof(NetExtJsonChunk)),
+                     (const char *) body + sizeof(NetExtJsonChunk));
+            break;
+        }
         default:
             break;
     }
+}
+
+// The entity records starting with `prefix` ("e+ [7,")
+static int count_ent(const Client *c, const char *prefix)
+{
+    int n = 0;
+    for (int i = 0; i < c->ent_count; i++) n += !strncmp(c->ents[i], prefix, strlen(prefix));
+    return n;
 }
 
 static void drain(Client *c)
@@ -670,6 +696,9 @@ static const char *k_entity_server =
     "    GAME.log(\"moved\", toStr e.position.x);\n"
     "    GAME.log(\"destroyed\", toStr b.damage(100, id));\n"
     "    GAME.log(\"gone\", toStr notEmpty GAME.ENTITIES.findById(\"10000\"));\n"
+    "    bool att = e.attachPlayer(id, {});\n"
+    "    obj a = GAME.LIVE_OBJECTS.addAsset(\"46802\", 5, 6, 7, 2, 0, {});\n"
+    "    GAME.log(\"attach\", toStr att, \"asset\", toStr a.id);\n"
     "    obj r = GAME.RAYCAST.from(-500, 2, -500, 1, 0, 0, 100);\n"
     "    GAME.log(\"ray\", toStr r.hit, r.type, toStr GAME.UTILS.math.round(r.dist));\n"
     "    GAME.log(\"fromPlayer\", toStr GAME.RAYCAST.fromPlayer(\"999\", 50).hit);\n"
@@ -677,7 +706,8 @@ static const char *k_entity_server =
     "public action onEntitySpawn(str id, str archetype) { GAME.log(\"hook spawn\", id, archetype); }\n"
     "public action onEntityEvent(str id, str name, num a, num b) { GAME.log(\"hook event\", id, name, toStr a, toStr b); }\n"
     "public action onEntityDamage(str id, str doerID, num amount) { GAME.log(\"hook damage\", id, toStr notEmpty doerID, toStr amount); }\n"
-    "public action onEntityDestroyed(str id, str doerID) { GAME.log(\"hook destroyed\", id); }\n";
+    "public action onEntityDestroyed(str id, str doerID) { GAME.log(\"hook destroyed\", id); }\n"
+    "public action onEntityAttach(str id, str playerID) { GAME.log(\"hook attach\", id); }\n";
 
 // Catalogue map + an archetype "Crate" (hp 50, data {speed: 2}), an ENTITY instance 7 at (4, 2, 4)
 // with spawn params {speed: 3}, and a static cube at (-480, 0, -500) for the ray.
@@ -732,7 +762,7 @@ static void test_entities(void)
     CHECK(g_server->game.map->archetype_count == 1, "entities: the archetype is in the map (%zu)", g_server->game.map->archetype_count);
     CHECK(g_server->game.map->entity_instance_count == 1, "entities: the ENTITY instance is in the map (%zu)", g_server->game.map->entity_instance_count);
 
-    Client *a = connect_client(NET_PROTOCOL_MINOR_V7);
+    Client *a = connect_client(NET_PROTOCOL_MINOR_EXT);
     pump(40);
     CHECK(a->uid >= 0, "entities: spawned");
     // the scenario's lines (script console), then the hooks as the entity manager queues them
@@ -747,6 +777,32 @@ static void test_entities(void)
     }
     // entity 10000 is destroyed before its first step: only entity 7 emits its hop
     CHECK(count_log_prefix(a, "hook event ") == 1, "entities: one hop (the entity that stepped): %d", count_log_prefix(a, "hook event "));
+    CHECK(has_log(a, "attach true asset 0") && has_log(a, "hook attach 7"), "entities: attachPlayer, onEntityAttach, addAsset");
+
+    // v10.0.3 replication (shared/include/ks_entities.h): the joiner's entSeed and "e+" after its HELLO, the script's
+    // spawn, the baselines, the events ("_damage" and the emitted hop), the destroyed entity's "e-", "ea+", "lo"
+    CHECK(count_ent(a, "seed [") == 1, "replication: entSeed once (%d)", count_ent(a, "seed ["));
+    CHECK(count_ent(a, "e+ [7,1,") >= 1 && count_ent(a, "e+ [10000,1,") == 1, "replication: \"e+\" for 7 (init) and 10000 (spawn)");
+    CHECK(count_ent(a, "ee [7,\"_damage\",20,30]") == 1 && count_ent(a, "ee [10000,\"_damage\",100,-50]") == 1, "replication: \"_damage\" events");
+    CHECK(count_ent(a, "e- [10000,\"destroyed\"]") == 1, "replication: the destroyed entity's \"e-\"");
+    CHECK(count_ent(a, "ee [7,\"hop\",1.5,2]") == 1, "replication: the emitted hop");
+    CHECK(count_ent(a, "es [7,") >= 20, "replication: baselines of 7 (%d)", count_ent(a, "es [7,"));
+    char att[64];
+    snprintf(att, sizeof(att), "ea+ [%d,7,{\"o\":[0,0,0]", a->uid);
+    CHECK(count_ent(a, att) == 1, "replication: \"ea+\" (%s)", att);
+    CHECK(count_ent(a, "lo [0,{\"type\":\"asset\",\"aid\":\"46802\",\"x\":5,\"y\":6,\"z\":7,\"s\":2,\"ry\":0") == 1, "replication: \"lo\" of the asset");
+    // the rider is pinned on the server: at entity 7's pose (x 40 after the teleport)
+    const Player *rider = NULL;
+    for (size_t i = 0; i < g_server->game.player_count; i++)
+        if (g_server->game.players[i] && (int) g_server->game.players[i]->uid == a->uid) rider = g_server->game.players[i];
+    CHECK(rider && fabsf(rider->position.x - 40.0f) < 1e-3f && fabsf(rider->position.z - 4.0f) < 1e-3f, "replication: the rider is pinned (%.2f, %.2f)",
+          rider ? rider->position.x : 0.0f, rider ? rider->position.z : 0.0f);
+    // a late joiner gets the state: seed, the live object, the entity, the attachment
+    Client *b = connect_client(NET_PROTOCOL_MINOR_EXT);
+    pump(5);
+    CHECK(count_ent(b, "seed [") == 1 && count_ent(b, "lo [0,") == 1 && count_ent(b, "e+ [7,1,") == 1 && count_ent(b, att) == 1,
+          "replication: a joiner's seed / lo / e+ / ea+ (%d %d %d %d)", count_ent(b, "seed ["), count_ent(b, "lo [0,"), count_ent(b, "e+ [7,1,"),
+          count_ent(b, att));
     sandbox_stop();
     free_clients();
 }
