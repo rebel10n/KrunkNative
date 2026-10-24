@@ -428,6 +428,8 @@ static const GameModeConfig *cfg(const Game *game) {
     return game && game->mode ? &game->mode->config : NULL;
 }
 
+// `mode.gravMlt ?? 1` (deob-10.0.3.js:191697): Chaos Snipers 0.92, Impulsed 1.05. v10 would take a 0; no v10.0.3
+// mode sets one, so 0 here is "unset" (the movement test checks both modes: shared/tests/movement_scheme_test.c).
 float mode_grav_mlt(const Game *game) {
     const GameModeConfig *c = cfg(game);
     return c && c->grav_mlt > 0.0f ? c->grav_mlt : 1.0f;
@@ -438,6 +440,8 @@ float mode_jump_mlt(const Game *game) {
     return c && c->jump_mlt > 0.0f ? c->jump_mlt : 1.0f;
 }
 
+// `mode.groundAccel ?? 1` on the ground and the air acceleration (deob-10.0.3.js:191624): Chaos Snipers and
+// Impulsed 2. As with gravMlt, no v10.0.3 mode sets a 0.
 float mode_ground_accel(const Game *game) {
     const GameModeConfig *c = cfg(game);
     return c && c->ground_accel > 0.0f ? c->ground_accel : 1.0f;

@@ -20,6 +20,7 @@
 #include <game_config.h> // game_network_data: the "q" window (tickRate)
 #include <ks_client.h> // ks_client_no_prediction
 #include <krunker_net.h> // krunker_net_inputs_paused: an official server's "lock"
+#include <net_ext.h> // NetPlayerMoveValsPacket: the movement scheme's sendVals with a RECON
 #include <ui_logic.h>  // ui_setting_number ("netRate")
 #include <ui_mobile.h> // ui_mobile_active (netRate's mobile default)
 #include <GLFW/glfw3.h>
@@ -257,9 +258,28 @@ void client_recon_after_tick(Client *client) {
 }
 
 // "l": reconcilePlayer(l, true).
+// v10 SYNC_PLAYER's movement-scheme sendVals (deob-10.0.3.js:258289-258295): the server sends them just before the
+// RECON of the same ack (NET_EXT_PLAYER_MOVE_VALS); they are kept until that RECON writes them with the rest.
+static struct {
+    int valid;
+    NetPlayerMoveValsPacket packet;
+} g_move_vals;
+
+void client_recon_move_vals(Client *client, const void *body, const size_t length) {
+    (void) client;
+    if (length < sizeof(g_move_vals.packet)) return;
+    memcpy(&g_move_vals.packet, body, sizeof(g_move_vals.packet));
+    g_move_vals.valid = g_move_vals.packet.count > 0 && g_move_vals.packet.count <= PLAYER_MOVE_VALS_MAX;
+}
+
 void client_recon_apply(Client *client, const NetReconPacket *packet) {
     Player *me = client->me;
+    // reconcilePlayer: SRM's / Vehicle's state of the acked input, before the replay runs from it
+    // (net_reconcile's snap leaves these fields alone, so writing them first is the same)
+    const int move_vals = g_move_vals.valid && g_move_vals.packet.ack_seq == packet->ack_seq;
+    g_move_vals.valid = 0;
     if (client->game.is_local || !me || !me->active) return;
+    if (move_vals) player_movement_apply_vals(me, g_move_vals.packet.scheme, g_move_vals.packet.vals, g_move_vals.packet.count);
 
     const vec3 predicted = me->position;
     const int predicted_active = me->active;

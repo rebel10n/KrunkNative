@@ -1863,13 +1863,16 @@ static void scheme_srm_mov(Player *player, const Input *raw_input, const int v10
     s->cmd_right = (signed char) (raw_dir >= 2 && raw_dir <= 4 ? 1 : raw_dir >= 6 || raw_dir == 0 ? -1 : 0);
     srm_update_velocity(player);
 
-    // wishdir: (rightmove, 0, forwardmove) turned by xDire about y (iíîìïïi, deob-10.0.3.js:28407);
-    // nothing without movDir or keys
+    // wishdir: (rightmove, 0, forwardmove) turned by xDire about y; nothing without movDir or keys.
+    // v10 builds the matrix from the quaternion of Euler (0, xDire, 0) (iíîìïïi, deob-10.0.3.js:28407-28434):
+    // m0 = m10 = 1 - 2 sin^2(a / 2), m8 = -m2 = 2 sin(a / 2) cos(a / 2). Kept in that form: a diagonal's
+    // |wishdir|^2 is 2 only to rounding, and the strafe overlay's 2 - |wishdir|^2 turns on those bits.
     double wishdir[3] = {0.0, 0.0, 0.0};
     if (v10_dir >= 0 && (s->cmd_right || s->cmd_forward)) {
-        const double yaw = movement_js(player->direction.y);
-        wishdir[0] = cos(yaw) * s->cmd_right + sin(yaw) * s->cmd_forward;
-        wishdir[2] = -sin(yaw) * s->cmd_right + cos(yaw) * s->cmd_forward;
+        const double half = movement_js(player->direction.y) / 2.0;
+        const double sy = sin(half), y2 = sy + sy, yy = sy * y2, wy = cos(half) * y2;
+        wishdir[0] = (1.0 - yy) * s->cmd_right + wy * s->cmd_forward;
+        wishdir[2] = -wy * s->cmd_right + (1.0 - yy) * s->cmd_forward;
     }
     const double friction_on = s->on_ground_ms <= SRM_FRICTION_DELAY_MS ? 0.0 : 1.0;
     if (player->on_ground) {
@@ -2293,7 +2296,8 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     if (!move_lock) {
         const float dt = delta * 1000.0f;
         const double dt_ms = round((double) delta * 10000.0) / 10.0; // v7's frame in ms (whole ms, or the 0.1 floor)
-        const float ground_accel_mlt = MOVEMENT_OR(mode_movement->ground_accel, 1.0f); // mode.groundAccel: ground and air
+        // `mode.groundAccel ?? 1` on the ground and in the air (deob-10.0.3.js:191624; Chaos Snipers / Impulsed 2)
+        const float ground_accel_mlt = MOVEMENT_OR(mode_movement->ground_accel, 1.0f);
         float accel;
 
         // grA / 100 and arA / 100 per ms (KrunkNative keeps them x1000 per s)
@@ -2370,7 +2374,8 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             const float wall_power = movement_wall_jump_power(player);
             const float wall_decel = mode_movement->wall_jump_decel ? mode_movement->wall_jump_decel : MOVEMENT_OR(knobs->wall_jump_decel, 0.3f);
             const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && wall_power > 0.0f && player->crouch_val ? wall_decel : 1.0f;
-            // v10.0.2 also x weapon.gravMlt (v10:169754, Boulder 1.7; no v7 weapon sets it, 0 = 1)
+            // config.gravMlt x (weapon.gravMlt || 1) x (mode.gravMlt ?? 1) (deob-10.0.3.js:191697; Boulder 1.7,
+            // Chaos Snipers 0.92, Impulsed 1.05)
             const float weapon_grav = player->weapon && player->weapon->gravity_mlt > 0.0f ? player->weapon->gravity_mlt : 1.0f;
             player->velocity.y -= delta * (game_constants.gravity * player->game->config.gravity_mlt * weapon_grav * MOVEMENT_OR(mode_movement->gravity_mlt, 1.0f)) * wall_mlt;
         }
@@ -3781,7 +3786,8 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const vec3 dir = combat_shot_vector(range, pitch, yaw);
     HitList hits = {0};
 
-    // v7.1.4 knockback: config impulseMlt x mode impulseMlt; noImpulseDist drops the distance term
+    // knockback: config.impulseMlt x (mode.impulseMlt != null ? mode.impulseMlt : 1) (deob-10.0.3.js:196585 the shooter,
+    // :196732 a hit; Impulsed 3, Zombies / Classic FFA 0); noImpulseDist drops the distance term
     const GameModeConfig *mode_config = game->mode ? &game->mode->config : NULL;
     const float impulse_mlt = game->config.impulse_mlt * (mode_config && mode_config->has_impulse_mlt ? mode_config->impulse_mlt : 1.0f);
     const int no_impulse_dist = mode_config && mode_config->no_impulse_dist;
