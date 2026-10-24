@@ -7,9 +7,8 @@
 // "pz" PLAYER_POSE [sid, pose | 0] (players.setPose deob-10.0.3.js:195354) and init's syncData.plrPose
 // [[sid, pose], ...] (:256989-256993) become NET_EXT_PLAYER_POSE (player_pose_render.c applies them).
 //
-// Not translated (documented gaps):
-//   - "ee" ENTITY_EVENT is forwarded, but its only consumer in v10 is the map's client / shared
-//     KrunkScript (clientEventQueue -> onEntityEvent hooks), which our client does not run.
+// "ee" ENTITY_EVENT goes to the client's entity manager (clientEventQueue -> the client script's onEntityEvent),
+// which also runs the map's scripts.shared on the replicated entities (shared/include/ks_entities.h).
 #include "krunker_link_internal.h"
 #include <net_ext.h>
 #include <player_pose.h>
@@ -173,12 +172,18 @@ void krunker_link_script_controlled(KrunkerLink *l, const KrunkerValue *controll
     if (krunker_is(controlled, KRUNKER_ARRAY) && controlled->len >= 1) emit_json(l, NET_EXT_ENTITY_CONTROLLED, controlled);
 }
 
-// init's syncData (arg 11) parts of these (:219478-219496): lo (live blocks), ent (entity spawn
+// init's syncData (arg 11) parts of these (:256970-256993): lo (live objects), entSeed, ent (entity spawn
 // payloads, applySyncData), entAtt ([sid, eid, opts] attachments), chg ([uid, x, y, z] moved objects)
 void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *sync = arg(f, 11);
     if (!krunker_is(sync, KRUNKER_MAP)) return;
     emit_each(l, NET_EXT_KN_OFFICIAL_LIVE_OBJECT, krunker_get(sync, "lo"));
+    // entSeed (:256976-256979): the match seed of the entities' ctx.rand, before their spawns
+    const KrunkerValue *seed = krunker_get(sync, "entSeed");
+    if (krunker_is(seed, KRUNKER_NUM)) {
+        const KrunkerValue one = KRUNKER_V_ARRAY((KrunkerValue *) seed, 1);
+        emit_json(l, NET_EXT_ENTITY_SEED, &one);
+    }
     emit_each(l, NET_EXT_ENTITY_SPAWN, krunker_get(sync, "ent"));
     emit_each(l, NET_EXT_ENTITY_ATTACH, krunker_get(sync, "entAtt"));
     const KrunkerValue *poses = krunker_get(sync, "plrPose"); // [[sid, poseData], ...] (:220294-220302)

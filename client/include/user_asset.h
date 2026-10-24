@@ -42,6 +42,9 @@ void user_asset_map_unload(Scene *scene);
 // A map object's mesh is about to be freed (shared/src/map.c map_fini / map_object_free): its GLTF
 // instance and any wait for its model go with it.
 void user_asset_mesh_freed(const void *mesh);
+// A map object built after the map loaded (a live asset, entities.c): the GLTF instance under its carrier joins the
+// scene now (one still downloading joins when it arrives, user_asset_arrived).
+void user_asset_object_added(const void *carrier);
 void user_asset_frame(void);
 // A downloaded file arrived (asset_fetch_client.c, after the loaders' caches were refreshed): a map
 // object whose model was still downloading when the map was built gets it now (an OBJ is re-centred on

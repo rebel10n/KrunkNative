@@ -4,7 +4,7 @@
 
 #include <ks_game.h>
 
-enum { KS_REF_PLAYER = 1, KS_REF_AI, KS_REF_OBJECT, KS_REF_ENTITY };
+enum { KS_REF_PLAYER = 1, KS_REF_AI, KS_REF_OBJECT, KS_REF_ENTITY, KS_REF_LIVE };
 
 // ---------------------------------------------------------------------------
 // Entities (v10.0.2 entity manager, L184033-185900; doc/v10/map-format.md section 4): the
@@ -22,6 +22,22 @@ typedef struct {
     double a, b;
 } KsEntEvent;
 
+#define KS_ENT_SIM_BUF 14                 // client simBuf: the stepped poses kept (pushSimPose, deob-10.0.3.js:213417)
+#define KS_ENT_POSE_BUF 20                // client poseBuf: another player's controlled entity (:214458)
+#define KS_ENT_PARTS 40                   // solid parts per entity (config.archetypeObjectLimit)
+#define KS_ENT_BLEND_MS 100.0             // applyBaselines' blend {left: 100}
+#define KS_ENT_SEND_HZ 10                 // game.sendFrequency || 10 (getRenderPose / glueSoftRider)
+
+typedef struct {
+    double t, x, y, z, yaw, pitch, roll;
+} KsEntPose;
+
+typedef struct {                          // buildBody's colObjs entry (deob-10.0.3.js:212880-212901), solid parts only
+    double off[3], size[3];
+    char name[16];                        // rec.n when it matches /^\w{1,12}$/ (its skeleton keys <n>_x .. <n>_roll), "" none
+    int is_model;                         // rec.aid != null
+} KsEntPart;
+
 typedef struct KsEntity {
     int eid;
     const MapArchetype *arch;           // the map's archetype (outlives the round)
@@ -37,18 +53,60 @@ typedef struct KsEntity {
     uint32_t rng;                       // ctx.rand stream of the step in progress
     KsEntEvent events[KS_ENT_EVENTS];   // ctx.emit calls of the step in progress
     int event_count;
+    // v10.0.3 replication and attachments (deob-10.0.3.js:212434-212464)
+    char mode[8];                       // "sim" (spawnPayload's mode)
+    KsEntPose prev;                     // prevPose (commitPose)
+    int has_prev;
+    cJSON *prev_wire;                   // prevWire: the state before the step in progress (ctx.peer)
+    int controller;                     // the controlling player's sid (a ctl attachment), -1 none
+    int controlled_by_local;            // client: our own player controls it
+    int ctl_dirty;                      // server: a controlled step to broadcast
+    double ctl_t0, ctl_acc;             // server: ctlWindow {t0, acc}
+    int has_ctl_window;
+    double blend[3], blend_left;        // client: applyBaselines' visual blend
+    KsEntPose sim_buf[KS_ENT_SIM_BUF];  // client: simBuf
+    int sim_count;
+    KsEntPose pose_buf[KS_ENT_POSE_BUF]; // client: poseBuf
+    int pose_count;
+    KsEntPose render;                   // client: renderPose (updateVisuals)
+    int has_render;
+    double sim_render_t;                // client: simRenderT
+    int has_sim_render_t;
+    KsEntPose soft_carry;               // client: softCarryPose
+    int has_soft_carry;
+    int has_carry_step;                 // server: carryStep {ox, oz, dx, dy, dz, dYaw}
+    double carry_ox, carry_oz, carry_dx, carry_dy, carry_dz, carry_dyaw;
+    double last_sim_ms;                 // lastSimMs (freezeSlowest)
+    KsEntPart parts[KS_ENT_PARTS];      // colObjs (the archetype's solid parts)
+    int part_count;
 } KsEntity;
 
 // Server hooks queued by the manager and drained into the main script after each advance (v10
-// queueServerHook / drainServerHooks): onEntitySpawn, onEntityEvent, onEntityDamage, onEntityDestroyed.
-enum { KS_ENT_HOOK_SPAWN = 1, KS_ENT_HOOK_EVENT, KS_ENT_HOOK_DAMAGE, KS_ENT_HOOK_DESTROYED };
+// queueServerHook / drainServerHooks): onEntitySpawn, onEntityEvent, onEntityDamage, onEntityDestroyed,
+// onEntityAttach, onEntityDetach. On a client the same queue is v10's clientEventQueue (drainClientEvents):
+// "_spawn", "_removed" and the replicated / locally emitted events.
+enum { KS_ENT_HOOK_SPAWN = 1, KS_ENT_HOOK_EVENT, KS_ENT_HOOK_DAMAGE, KS_ENT_HOOK_DESTROYED, KS_ENT_HOOK_ATTACH, KS_ENT_HOOK_DETACH,
+       KS_ENT_HOOK_REMOVED };
 typedef struct {
     int kind;
     int eid;
     char text[KS_ENT_NAME_MAX + 1];     // archetype name (spawn) or event name
-    char doer[24];                      // damage / destroyed: the doer's player id ("" none)
+    char doer[24];                      // damage / destroyed / attach / detach: the player id ("" none)
     double a, b;                        // event numbers, or the damage amount in a
 } KsEntHook;
+
+// One attachments entry (v10 attachments Map, sid -> {eid, o, by, lk, ctl, soft, nd}, deob-10.0.3.js:213455-213463)
+typedef struct {
+    int sid, eid;
+    double o[3], by;
+    int lk, ctl, soft, nd;
+} KsEntAttach;
+
+// LIVE_OBJECTS (v10 liveObjects, deob-10.0.3.js:212096-212411): the authority's runtime objects, [id, data]
+typedef struct {
+    int id;
+    cJSON *data;                        // {type: "asset", aid, x, y, z, s, ry, data: {cpx}} as broadcast in "lo"
+} KsLiveObject;
 
 typedef struct {
     KsEntity **items;                   // creation order (v10 entities Map); active entities only
@@ -59,6 +117,14 @@ typedef struct {
     double clock_ms;                    // the round's clock (v10 startTime based), ms
     long tick;                          // floor(clock / KS_ENT_STEP_MS)
     uint32_t seed;                      // v10 matchSeed (ctx.rand streams)
+    int replaying;                      // v10 replaying: ctx.emit is ignored (baseline replays, client / recon steps)
+    KsEntAttach *att;                   // attachments, insertion order (v10 Map)
+    size_t att_count, att_cap;
+    size_t baseline_cursor;             // broadcastBaselines' round robin
+    int budget_streak;                  // advance over its 2 ms budget, in a row
+    KsLiveObject *live;                 // LIVE_OBJECTS (the authority)
+    size_t live_count, live_cap;
+    int live_next_id;
 } KsEntities;
 
 // The stable `native` of a host wrapper: one per (kind, engine id) for the life of the

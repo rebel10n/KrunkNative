@@ -328,6 +328,11 @@ void user_asset_mesh_freed(const void *mesh) {
     }
 }
 
+void user_asset_object_added(const void *carrier) {
+    for (size_t i = 0; carrier && g_asset_scene && i < g_asset_count; i++)
+        if (g_assets[i].carrier == carrier) scene_add_gltf(g_asset_scene, g_assets[i].instance);
+}
+
 void user_asset_frame(void) {
     const double now = gltf_clock();
     map_video_frame(now);

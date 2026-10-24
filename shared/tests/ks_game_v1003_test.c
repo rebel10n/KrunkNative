@@ -12,6 +12,7 @@
 #include <ai.h>
 #include <ai_parts.h>
 #include <ks_game.h>
+#include <ks_entities.h>
 #include <net_ext.h>
 #include <ruleset.h>
 #include <math.h>
@@ -19,6 +20,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define KS_ENT_STEP_TEST_MS 33.333333333333336 // one entity tick (v10 iîíìîíi)
 
 static int g_failures;
 static int g_checks;
@@ -613,6 +616,30 @@ static void test_ai_wrapper(void) {
     cJSON_Delete(map);
 }
 
+// ---------------------------------------------------------------- player script flags across spawns
+
+// v10.0.3 player.init on every (re)spawn (deob-10.0.3.js:190737-190752): the movement flags come back on, disableShooting /
+// disableMelee stay with the player object; a leave drops them all (the next player of that uid is a new object)
+static void test_player_flags(void) {
+    printf("Running player script flags test...\n");
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    static Game game;
+    game_on(&game, map, MODE_ID_FFA);
+    game.is_local = 1;
+    Player *p = add_player(&game, 2);
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n"
+                      "    me.defaultMovement = false;\n    me.defaultVelocity = false;\n    me.disableShooting = true;\n"
+                      "    me.disableMelee = true;\n}\n");
+    CHECK(!ks_player_allows(p, KS_PLAYER_DEFAULT_MOVEMENT) && !ks_player_allows(p, KS_PLAYER_CAN_SHOOT), "the script's flags are set");
+    ks_game_on_player_spawn(&game, p);
+    CHECK(ks_player_allows(p, KS_PLAYER_DEFAULT_MOVEMENT) && ks_player_allows(p, KS_PLAYER_DEFAULT_VELOCITY), "a respawn turns the movement back on");
+    CHECK(!ks_player_allows(p, KS_PLAYER_CAN_SHOOT) && !ks_player_allows(p, KS_PLAYER_CAN_MELEE), "a respawn keeps disableShooting / disableMelee");
+    ks_game_on_player_leave_uid(&game, p->uid);
+    CHECK(ks_player_allows(p, KS_PLAYER_CAN_SHOOT) && ks_player_allows(p, KS_PLAYER_CAN_MELEE), "a leave drops them: the next player of the uid is new");
+    ks_game_unload(&game);
+    cJSON_Delete(map);
+}
+
 // ---------------------------------------------------------------- AI.spawn reflections (refl)
 
 // v10.0.3: refl = isNumber(reflections) ? limitMM(parseFloat, 0, 4) : 0 (deob-10.0.3.js:211721), carried by getData's
@@ -702,6 +729,302 @@ static void test_move_dir(void) {
     cJSON_Delete(map);
 }
 
+
+// ---------------------------------------------------------------- v10.0.3 entity replication, the client copy, attachments, LIVE_OBJECTS
+
+// scripts.shared: the spawn's speed, x walks by speed * delta plus 10 * the forward input, r takes ctx.rand(), and
+// tick 3 emits "step" (deob-10.0.3.js:213425-213433 stepEntity, :213790-213822 stepControlled)
+static const char *k_ent_shared =
+    "public obj action onEntityInit(str id, str archetype, obj spawn) {\n"
+    "    obj s = {};\n"
+    "    s.speed = (num) spawn.speed;\n"
+    "    s.r = 0;\n"
+    "    return s;\n"
+    "}\n"
+    "public obj action simulateEntity(str id, str archetype, obj state, obj ctx, num delta) {\n"
+    "    obj inputs = ctx.inputs;\n"
+    "    state.x = (num) state.x + (num) state.speed * delta + (num) inputs.forward * 10 * delta;\n"
+    "    state.r = ctx.rand();\n"
+    "    if (ctx.tick == 3) { ctx.emit(\"step\", 1, 2); }\n"
+    "    return state;\n"
+    "}\n";
+
+// the server script: the attach API, a state write, LIVE_OBJECTS.addAsset and a despawn through onCustomTrigger
+static const char *k_ent_server =
+    "public action onCustomTrigger(str playerID, str customParam, num value) {\n"
+    "    obj e = GAME.ENTITIES.findById(\"7\");\n"
+    "    num[] up = num[0, 2, 0];\n"
+    "    num[] none = num[0, 0, 0];\n"
+    "    if (customParam == \"attach\") { GAME.log(\"att \" + toStr(e.attachPlayer(playerID, {o: up, nd: true}))); }\n"
+    "    if (customParam == \"ctl\") { GAME.log(\"ctl \" + toStr(e.updateAttachment(playerID, {ctl: true, o: none}))); }\n"
+    "    if (customParam == \"detach\") { GAME.log(\"det \" + toStr(e.detachPlayer(playerID)) + \" \" + toStr(e.detachPlayer(playerID))); }\n"
+    "    if (customParam == \"speed\") { GAME.log(\"set \" + toStr(e.setVar(\"speed\", 9))); }\n"
+    "    if (customParam == \"hurt\") { GAME.log(\"hurt \" + toStr(e.damage(5, playerID)) + \" \" + toStr(e.hp)); }\n"
+    "    if (customParam == \"asset\") {\n"
+    "        obj a = GAME.LIVE_OBJECTS.addAsset(\"46802q\", 1, 2, 3, 500, 0.5, {complexCollision: true});\n"
+    "        GAME.log(\"asset \" + toStr(a.id));\n"
+    "        a.delete();\n"
+    "    }\n"
+    "    if (customParam == \"despawn\") { GAME.ENTITIES.despawn(\"7\"); }\n"
+    "}\n"
+    "public action onEntityAttach(str id, str playerID) { GAME.log(\"hook attach \" + id + \" \" + playerID); }\n"
+    "public action onEntityDetach(str id, str playerID) { GAME.log(\"hook detach \" + id + \" \" + playerID); }\n"
+    "public action onEntityDamage(str id, str playerID, num amount) { GAME.log(\"hook damage \" + id); }\n"
+    "public action onEntityEvent(str id, str name, num a, num b) { GAME.log(\"hook event \" + id + \" \" + name); }\n";
+
+// the client script: the client events of the copy (drainClientEvents, :222201-222214)
+static const char *k_ent_client =
+    "public action onEntitySpawn(str id, str archetype) { GAME.log(\"c spawn \" + id + \" \" + archetype); }\n"
+    "public action onEntityEvent(str id, str name, num a, num b) { GAME.log(\"c event \" + id + \" \" + name + \" \" + toStr(a) + \" \" + toStr(b)); }\n"
+    "public action onEntityRemoved(str id) { GAME.log(\"c removed \" + id); }\n";
+
+// The ramp map plus an archetype "Mover" (coll 1, one 2 x 2 x 2 part) and ENTITY 7 at (4, 100, 4) (clear of the ramp:
+// collideWorld would push it), speed 3
+static cJSON *entity_map(void) {
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    cJSON *arch = cJSON_CreateObject();
+    cJSON_AddNumberToObject(arch, "id", 1);
+    cJSON_AddStringToObject(arch, "name", "Mover");
+    cJSON_AddNumberToObject(arch, "coll", 1);
+    cJSON_AddNumberToObject(arch, "hp", 50);
+    cJSON *parts = cJSON_AddArrayToObject(arch, "objects");
+    cJSON *part = cJSON_CreateObject();
+    cJSON_AddItemToObject(part, "p", cJSON_CreateFloatArray((const float[]) {0, 0, 0}, 3));
+    cJSON_AddItemToObject(part, "s", cJSON_CreateFloatArray((const float[]) {2, 2, 2}, 3));
+    cJSON_AddItemToArray(parts, part);
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(map, "archetypes"), arch);
+    cJSON *inst = cJSON_CreateObject();
+    cJSON_AddNumberToObject(inst, "i", 98);
+    cJSON_AddItemToObject(inst, "p", cJSON_CreateFloatArray((const float[]) {4, 100, 4}, 3));
+    cJSON_AddNumberToObject(inst, "eid", 7);
+    cJSON_AddNumberToObject(inst, "ar", 1);
+    cJSON_AddNumberToObject(cJSON_AddObjectToObject(inst, "sp"), "speed", 3);
+    cJSON_AddItemToArray(cJSON_GetObjectItem(map, "objects"), inst);
+    return map;
+}
+
+// The EXT records sent since the last call, in order: the entity subtypes go to the client copy (`skip_states`:
+// the baselines are dropped); counts per subtype & 0xff in `seen`
+static int g_seen[256];
+static char g_last_live[256], g_last_attach[256], g_last_remove[128];
+static void forward_records(Game *client, const int skip_states, const double local_ms) {
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, n = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type != NET_PACKET_EXT || !net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &n)) continue;
+        if (n < sizeof(NetExtJsonChunk) || body[1] != 1) continue; // these records are one slice each
+        cJSON *rec = cJSON_ParseWithLength((const char *) body + sizeof(NetExtJsonChunk), n - sizeof(NetExtJsonChunk));
+        g_seen[subtype & 0xff] += (subtype >> 8) == 1;
+        char *text = rec ? cJSON_PrintUnformatted(rec) : NULL;
+        switch (subtype) {
+            case NET_EXT_ENTITY_SEED: ks_entities_net_seed(client, rec); break;
+            case NET_EXT_ENTITY_SPAWN: ks_entities_net_spawn(client, rec); break;
+            case NET_EXT_ENTITY_REMOVE:
+                snprintf(g_last_remove, sizeof(g_last_remove), "%s", text ? text : "");
+                ks_entities_net_remove(client, rec);
+                break;
+            case NET_EXT_ENTITY_STATE:
+                if (!skip_states) ks_entities_net_baseline(client, rec, local_ms);
+                break;
+            case NET_EXT_ENTITY_EVENT: ks_entities_net_event(client, rec); break;
+            case NET_EXT_ENTITY_ATTACH:
+                snprintf(g_last_attach, sizeof(g_last_attach), "%s", text ? text : "");
+                ks_entities_net_attach(client, rec, 2);
+                break;
+            case NET_EXT_ENTITY_DETACH: ks_entities_net_detach(client, rec); break;
+            case NET_EXT_ENTITY_CONTROLLED: ks_entities_net_controlled(client, rec); break;
+            case NET_EXT_KN_OFFICIAL_LIVE_OBJECT:
+            case NET_EXT_KN_OFFICIAL_LIVE_SYNC:
+                g_seen[subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT ? 0xf0 : 0xf1]++;
+                if (subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT) snprintf(g_last_live, sizeof(g_last_live), "%s", text ? text : "");
+                break;
+            default: break;
+        }
+        free(text);
+        cJSON_Delete(rec);
+    }
+    g_sent_count = 0;
+}
+
+static double state_x(const Game *game, const char *key) {
+    KsEntityView v;
+    if (!ks_entities_find(game, 7, &v)) return NAN;
+    const cJSON *item = cJSON_GetObjectItem(v.state, key);
+    return cJSON_IsNumber(item) ? item->valuedouble : NAN;
+}
+
+static void test_entity_replication(void) {
+    printf("Running v10.0.3 entity replication / client copy / attachments / LIVE_OBJECTS test...\n");
+    cJSON *map = entity_map();
+    static Game server, client;
+    static KsHost shost, chost;
+    static KsApiImpl capi[KS_API_COUNT];
+    game_on(&server, map, MODE_ID_FFA);
+    server.is_local = 1;
+    Player *sp = add_player(&server, 2);
+    shost = server_host();
+    g_log_count = 0;
+    CHECK(ks_game_load(&server, KS_SIDE_SERVER, k_ent_server, strlen(k_ent_server), &shost, NULL) == 0, "the server script loads (%s)", g_log_count ? g_log[0] : "");
+    CHECK(ks_game_load_shared(&server, KS_SIDE_SERVER, k_ent_shared, strlen(k_ent_shared), &shost, NULL) == 0, "scripts.shared loads (server)");
+    g_sent_count = 0;
+    ks_game_start(&server); // spawnPending: "e+" for 7
+    CHECK(ks_entities_count(&server) == 1, "the ENTITY instance spawned");
+
+    game_on(&client, map, MODE_ID_FFA);
+    client.is_local = 0; // a client: not the authority
+    client.hooks.send = NULL;
+    Player *cp = add_player(&client, 2);
+    cp->is_you = 1;
+    memset(capi, 0, sizeof(capi));
+    ks_game_api_fill(capi, KS_SIDE_CLIENT);
+    chost = (KsHost) {.side = KS_SIDE_CLIENT, .log = host_log, .api = capi};
+    CHECK(ks_game_load(&client, KS_SIDE_CLIENT, k_ent_client, strlen(k_ent_client), &chost, NULL) == 0, "the client script loads");
+    CHECK(ks_game_load_shared(&client, KS_SIDE_CLIENT, k_ent_shared, strlen(k_ent_shared), &chost, NULL) == 0, "scripts.shared loads (client)");
+
+    // a joiner's state: entSeed, "e+" (getSyncData, :220283-220292); the broadcast "e+" of the spawn too
+    ks_entities_send_state(&server, 5);
+    CHECK(g_sent_count >= 3 && g_sent[g_sent_count - 1].uid == 5, "the joiner's records go to its uid (%d sent)", g_sent_count);
+    memset(g_seen, 0, sizeof(g_seen));
+    forward_records(&client, 1, 0.0);
+    CHECK(g_seen[0x07] == 1 && g_seen[0x00] == 2, "entSeed once, e+ twice (broadcast + init) (%d, %d)", g_seen[0x07], g_seen[0x00]);
+    CHECK(ks_entities_count(&client) == 1 && fabs(state_x(&client, "x") - 4.0) < 1e-9 && state_x(&client, "speed") == 3.0,
+          "the client copy has entity 7 at x 4 with its state");
+
+    // one second: the server steps 30 ticks; the client steps its copy on the same clock with no baseline
+    const double step = 1000.0 / 60.0;
+    double clock = 1.0; // a millisecond ahead of the tick boundaries (60 float steps of 16.67 ms fall just short of 1000)
+    g_log_count = 0;
+    ks_game_update(&server, clock, 1.0);
+    forward_records(&client, 1, clock);
+    ks_entities_client_frame(&client, clock, clock, clock);
+    for (int i = 0; i < 60; i++) {
+        ks_game_update(&server, step, 1.0);
+        clock += step;
+        forward_records(&client, 1, clock);
+        ks_entities_client_frame(&client, clock, clock, step);
+    }
+    const double sx = state_x(&server, "x"), cx = state_x(&client, "x");
+    CHECK(fabs(sx - 7.0) < 1e-6, "server: x walked 3 in 30 ticks (%.6f)", sx);
+    CHECK(fabs(cx - sx) < 1e-9 && state_x(&client, "r") == state_x(&server, "r"),
+          "client: its own steps match the server's, ctx.rand included (x %.9f / %.9f, r %.9f / %.9f)", cx, sx, state_x(&client, "r"),
+          state_x(&server, "r"));
+    CHECK(logged("c spawn 7 Mover"), "the client script's onEntitySpawn (\"_spawn\")");
+    CHECK(logged("c event 7 step 1 2") && logged("hook event 7 step"), "\"step\": the client's own emit and the server's onEntityEvent");
+    CHECK(g_seen[0x03] >= 1, "\"ee\" broadcast (%d)", g_seen[0x03]);
+    KsEntityView v;
+    CHECK(ks_entities_find(&client, 7, &v) && v.render.x <= v.pose.x && v.render.x > v.pose.x - 0.2, "the render pose trails the stepped pose (simBuf at now - 33 ms: %.4f / %.4f)",
+          v.render.x, v.pose.x);
+
+    // a state write on the server: its baseline reaches a client that is 10 ticks ahead, which replays them on it
+    ks_game_on_custom_trigger(&server, "2", "speed", 0);
+    CHECK(logged("set true"), "setVar");
+    cJSON *baseline = NULL;
+    for (int i = 0; i < g_sent_count && !baseline; i++) {
+        uint16_t subtype = 0, n = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type == NET_PACKET_EXT && net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &n) && subtype == NET_EXT_ENTITY_STATE)
+            baseline = cJSON_ParseWithLength((const char *) body + sizeof(NetExtJsonChunk), n - sizeof(NetExtJsonChunk));
+    }
+    CHECK(baseline && cJSON_GetArrayItem(baseline, 1)->valueint == 30, "applyStateWrite broadcasts the baseline at tick 30");
+    g_sent_count = 0;
+    const double ahead = clock + 10 * KS_ENT_STEP_TEST_MS + 1.0;
+    ks_entities_client_frame(&client, ahead, ahead, 10 * KS_ENT_STEP_TEST_MS);
+    if (baseline) ks_entities_net_baseline(&client, baseline, ahead);
+    cJSON_Delete(baseline);
+    for (int i = 0; i < 20; i++) ks_game_update(&server, step, 1.0); // the server reaches tick 40
+    clock += 20 * step;
+    g_sent_count = 0;
+    CHECK(fabs(state_x(&client, "x") - state_x(&server, "x")) < 1e-9 && fabs(state_x(&server, "x") - 10.0) < 1e-6,
+          "the replay: the client's ticks 31-40 ran again at speed 9 (x %.6f / %.6f)", state_x(&client, "x"), state_x(&server, "x"));
+
+    // attachPlayer: the player pinned at the entity plus o, "ea+", onEntityAttach; pinAllServer keeps it there
+    g_log_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "attach", 0);
+    CHECK(logged("att true"), "attachPlayer returns true");
+    CHECK(fabsf(sp->position.x - (float) state_x(&server, "x")) < 1e-4f && fabsf(sp->position.y - 102.0f) < 1e-4f && fabsf(sp->position.z - 4.0f) < 1e-4f &&
+              sp->on_ground,
+          "pinPlayer: at the entity + (0, 2, 0) (%.3f, %.3f, %.3f)", sp->position.x, sp->position.y, sp->position.z);
+    int eid = -1, soft = 1, ctl = 1, lk = 1, nd = 0;
+    CHECK(ks_entities_attachment(&server, 2, &eid, &soft, &ctl, &lk, &nd) && eid == 7 && !soft && !ctl && !lk && nd, "the attachment record");
+    CHECK(ks_entities_shot_passes(&server, sp, 7), "nd: shots pass through its own entity");
+    ks_game_on_custom_trigger(&server, "2", "hurt", 0);
+    CHECK(logged("hurt false 50"), "nd: the rider's damage is refused (%s)", g_log_count ? g_log[g_log_count - 1] : "none");
+    memset(g_seen, 0, sizeof(g_seen));
+    forward_records(&client, 0, clock);
+    CHECK(g_seen[0x04] == 1 && strstr(g_last_attach, "[2,7,{\"o\":[0,2,0],\"lk\":0,\"ctl\":0,\"soft\":0,\"nd\":1}]"), "\"ea+\" [sid, eid, opts]: %s",
+          g_last_attach);
+    for (int i = 0; i < 6; i++) ks_game_update(&server, step, 1.0);
+    clock += 6 * step;
+    CHECK(logged("hook attach 7 2"), "onEntityAttach after the advance");
+    CHECK(fabsf(sp->position.x - (float) state_x(&server, "x")) < 1e-4f, "pinAllServer: the rider follows (%.3f / %.3f)", sp->position.x,
+          state_x(&server, "x"));
+    // the client copy pins its own player in procInputs (ks_entities_player_ride)
+    Input idle = {.seq = 1, .delta = 0.016f, .move_dir = -1};
+    cp->position = (vec3) {0, 0, 0};
+    CHECK(ks_entities_player_ride(&client, cp, &idle, 0) && fabsf(cp->position.y - 102.0f) < 1e-4f && fabsf(cp->position.z - 4.0f) < 1e-4f,
+          "client: the rider is pinned (%.3f, %.3f, %.3f)", cp->position.x, cp->position.y, cp->position.z);
+
+    // updateAttachment ctl: the rider steps its entity with its inputs on both sides (stepControlled)
+    ks_game_on_custom_trigger(&server, "2", "ctl", 0);
+    CHECK(logged("ctl true"), "updateAttachment returns true");
+    forward_records(&client, 0, clock);
+    ks_entities_client_frame(&client, clock, clock, step);
+    const double before = state_x(&server, "x");
+    Input fwd = {.seq = 41, .delta = 0.016f, .move_dir = 0}; // forward: v10 movDirs[1] + PI / 2 = 0, forward 1
+    CHECK(ks_entities_player_ride(&server, sp, &fwd, 0), "server: the controller rides");
+    CHECK(ks_entities_player_ride(&client, cp, &fwd, 0), "client: the controller predicts");
+    CHECK(fabs(state_x(&server, "x") - (before + 9 * 0.016 + 10 * 0.016)) < 1e-9, "a controlled step: speed and forward input over 16 ms (%.6f)",
+          state_x(&server, "x") - before);
+    CHECK(fabs(state_x(&client, "x") - state_x(&server, "x")) < 1e-9, "client prediction = server (%.9f / %.9f)", state_x(&client, "x"),
+          state_x(&server, "x"));
+    g_sent_count = 0;
+    ks_game_update(&server, step, 1.0); // broadcastControlled: the moved controlled entity as a baseline
+    int controlled_states = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, n = 0;
+        const uint8_t *body = NULL;
+        controlled_states += g_sent[i].type == NET_PACKET_EXT && net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &n) &&
+                             subtype == NET_EXT_ENTITY_STATE;
+    }
+    CHECK(controlled_states >= 1, "broadcastControlled (%d baselines)", controlled_states);
+    g_sent_count = 0;
+    ks_entities_send_controlled(&server, sp, 2);
+    CHECK(g_sent_count == 1 && g_sent[0].uid == 2, "the \"l\" tail to the controller");
+    forward_records(&client, 0, clock);
+
+    // detachPlayer: once ("ea-", onEntityDetach), a second time false
+    g_log_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "detach", 0);
+    CHECK(logged("det true false"), "detachPlayer (%s)", g_log_count ? g_log[0] : "none");
+    memset(g_seen, 0, sizeof(g_seen));
+    forward_records(&client, 0, clock);
+    CHECK(g_seen[0x05] == 1 && !ks_entities_attachment(&client, 2, NULL, NULL, NULL, NULL, NULL), "\"ea-\" reaches the client copy");
+    ks_game_update(&server, step, 1.0);
+    CHECK(logged("hook detach 7 2"), "onEntityDetach");
+
+    // LIVE_OBJECTS.addAsset: the id's digits, the scale clamped to 100, complexCollision as cpx; delete() -> "slo"
+    g_log_count = 0;
+    g_sent_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "asset", 0);
+    CHECK(logged("asset 0"), "addAsset returns the live object (id 0)");
+    memset(g_seen, 0, sizeof(g_seen));
+    forward_records(&client, 0, clock);
+    CHECK(g_seen[0xf0] == 1 && g_seen[0xf1] == 1, "\"lo\" then \"slo\" (%d, %d)", g_seen[0xf0], g_seen[0xf1]);
+    CHECK(!strcmp(g_last_live, "[0,{\"type\":\"asset\",\"aid\":\"46802\",\"x\":1,\"y\":2,\"z\":3,\"s\":100,\"ry\":0.5,\"data\":{\"cpx\":true}}]"),
+          "the asset record: %s", g_last_live);
+
+    // a despawn: "e-" [eid, "script"], the client's onEntityRemoved
+    g_log_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "despawn", 0);
+    forward_records(&client, 0, clock);
+    ks_entities_client_frame(&client, clock + step, clock + step, step);
+    CHECK(!strcmp(g_last_remove, "[7,\"script\"]") && ks_entities_count(&client) == 0 && logged("c removed 7"), "\"e-\": %s", g_last_remove);
+
+    ks_game_unload(&client);
+    ks_game_unload(&server);
+    cJSON_Delete(map);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -716,6 +1039,8 @@ int main(void) {
     test_ai_wrapper();
     test_move_dir();
     test_ai_reflections();
+    test_player_flags();
+    test_entity_replication();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);
