@@ -78,7 +78,7 @@ obfuscated). Numeric diff: only differences are the Stalker block below plus a c
 | Stalker leap: the aim input (`input[6]`, rMouse) while grounded / stuck to a wall / within the 150 ms coyote time, not in replays and not while attached to an entity, cooldown 3000 ms, impulse 0.15 along the look vector (x,z,y); the client keeps it as the input's `velObj` | v10:169664-169685, coyote `stalkerCoyoteTime = 150` v10:170078 | none (new) |
 | Stalker wall stick: pressing jump against a wall in the air sticks (`stuckToWall`, `stuckToWallDir` 1-4): no gravity and velocity 0 while stuck (v10:169754-169755), no movement (`defaultMovement && !stuckToWall`, v10:169764), no wall jump (v10:170155); the next jump press releases with a 0.03 push off the wall | v10:170153-170154 | none |
 | Stalker: wall-jump allowed on `notWallJ` objects (`!obj.notWallJ \|\| this.isStalker`) | v10:169909 | player.js wall-jump collision |
-| Stalker: hidden from render after 300 ms without moving (`isStalker && noMovT >= 300`) | v10:169790 | none |
+| Stalker: hidden from render after 300 ms without moving (`isStalker && noMovT >= 300`) | v10:169790 | none (ported: `shared/src/stalker.c`, doc/v10/stalker.md) |
 | gravity also scaled by `weapon.gravMlt` (new weapon field, used by Boulder 1.7) | v10:169754 `(this.weapon.gravMlt \|\| 1)` | player.js:1224 (no weapon term) |
 | weapon `rShoot`: primary fire also triggered by the right/aim input (used by Compressor); `shoot()` gets the aim input as its last argument (v10:170139) for `physPull` | v10:170122 `_59781 \|\| this.weapon.rShoot && _59782` | none |
 | `jump()` sets `didStickToWall = true`, counts a skin stat `jumps` | v10:172012-172015 | players.js:1692 |
@@ -308,7 +308,7 @@ bots that close in on the Drank, or human play. The 0.8-1.2 KDR band is met by N
 | table | v10 | result |
 |---|---|---|
 | attachments (Reflex Sight, Acog Scope) | v10:178097 | identical to v7 data/attach.js |
-| killstreaks (7: Nuke ... War Machine) | v10:178405 | identical except Bombardment lost `devOnly: true` (v7 streaks.js:82, now usable) |
+| killstreaks (7: Nuke ... War Machine) | v10:178405, deob-10.0.3.js:203338-203523 | identical except Bombardment lost `devOnly: true` (v7 streaks.js:82): everyone's, ported (doc/v10/kill-pools.md section 1); the Refill stays devOnly (a dev account's only) |
 | effects (10) | v10:162141 | identical |
 
 ## 6. Modes (v10:104079-105960, list at v10:105413 vs v7 data/modes.js)
@@ -343,7 +343,7 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 | team round wins | only counted for best-of games | also counted outside best-of when a team wins (`teamRoundWins[winTeam]++`) | v10:191057-191059 |
 | killstreaks | `mode.noStreaks \|\| config.noStreaks` | also off when `isRanked` (the killer's streak count only; deathStreak still counts, v10:174051) | v10:174076 |
 | class XP | saved in pub games | not saved in ranked (`isPubType() && !isRanked`) | v10:173631 |
-| kill rewards | none | event `killPools` (weighted skin drops during live events, `getKillReward`) | v10:190436-190539 |
+| kill rewards | none | event `killPools` (weighted skin drops during live events, `getKillReward`), ported: doc/v10/kill-pools.md section 2 | v10:190436-190539, deob-10.0.3.js:220807-220924 |
 | end screen | — | `showRaidPromo` 50% in non-raid pubs (END_GAME extra field) | v10:191274 |
 
 ## 8. Spawns and match flow
@@ -375,7 +375,6 @@ re-checked against 10.0.3 in `gameplay-1003-audit.md` and `rules-1003.md`: every
 | team round wins outside best-of (section 7) | `shared/src/modes/mode_round.c` (`mode_end_game`, the `else` of `if (mode->best_of)`; `deob-10.0.3.js:221597-221605`, rules-1003.md section 1) | modes_test (`test_round_wins_outside_best_of`) |
 | Battle Pass points per public match (section 7) | `bp_match_points` (`shared/src/season.c`), sent for public matches only by `acc_add_progress` (`server/src/accounts.c`); `deob-10.0.3.js:221705-221776`, rules-1003.md section 2 | season_test |
 
-Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), raid challenges /
-`noProfileStats`, the Stalker's render-side changes (model opacity 0.1, hidden after 300 ms still), its HUD
-(leap timer, STALKER_PICKED popup, taunts), event kill pools, `poseData.bodyY`, `markPosition`, and the match-flow
-items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md).
+Not ported yet: raid challenges / `noProfileStats`, `poseData.bodyY`, `markPosition`, and the match-flow
+items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md). The Stalker's
+render side, HUD, taunts and sounds are ported: doc/v10/stalker.md.

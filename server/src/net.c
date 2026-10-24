@@ -3,10 +3,12 @@
 // (ClientConnection.transport): TCP sockets (net_tcp.c), UDP peers (net_udp.c) or the
 // in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <prop_hunt.h> // Prop Hunt: "prp" / "prpR", the prop after a SPAWN
+#include <stalker.h>   // Stalker: "stlkrt", the hidden stalker out of the state stream
 #include <server.h>
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
+#include <server_trade.h>    // the live trade of Trade mode (NET_EXT_TRADE_*, int [5, sid]; doc/v10/trade.md)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
 #include <bot_banter.h>      // bot chat through kn_brain (GameHooks.bot_banter)
 #include <ai.h>
@@ -399,9 +401,9 @@ static int net_recipient_takes(ClientConnection *client, const int type, const v
         memcpy(&id, payload, sizeof(id));
         if (id >= 0 && id < GAME_MAX_PROJECTILES) slot = id;
     }
-    if (slot >= 0) client->missed_projectiles &= ~(UINT64_C(1) << slot); // a launch it sees, or the slot's end
+    if (slot >= 0) client->missed_projectiles[slot / 64] &= ~(UINT64_C(1) << (slot % 64)); // a launch it sees, or the slot's end
     if (!net_live_only_packet(type) || net_client_in_live_world(client)) return 1;
-    if (slot >= 0 && type == NET_PACKET_PROJECTILE) client->missed_projectiles |= UINT64_C(1) << slot;
+    if (slot >= 0 && type == NET_PACKET_PROJECTILE) client->missed_projectiles[slot / 64] |= UINT64_C(1) << (slot % 64);
     return 0;
 }
 
@@ -410,20 +412,23 @@ static int net_recipient_takes(ClientConnection *client, const int type, const v
 // shooter). Transient events (tracers, explosions, sounds, clips) are not replayed, like v7;
 // the player positions follow with the next STATE (the client snaps on spawn).
 static void net_resync_live_world(ClientConnection *client) {
-    const uint64_t missed = client->missed_projectiles;
-    client->missed_projectiles = 0;
-    for (int slot = 0; missed && slot < GAME_MAX_PROJECTILES; slot++) {
+    uint64_t missed[sizeof(client->missed_projectiles) / sizeof(client->missed_projectiles[0])];
+    memcpy(missed, client->missed_projectiles, sizeof(missed));
+    memset(client->missed_projectiles, 0, sizeof(client->missed_projectiles));
+    for (int slot = 0; slot < GAME_MAX_PROJECTILES; slot++) {
         const GameProjectile *p = &g_server->game.projectiles[slot];
-        if (!(missed & (UINT64_C(1) << slot)) || !p->active || !net_peer_takes(client, NET_PACKET_PROJECTILE)) continue;
+        if (!(missed[slot / 64] & (UINT64_C(1) << (slot % 64))) || !p->active || !net_peer_takes(client, NET_PACKET_PROJECTILE)) continue;
+        const int bomb = p->streak == STREAK_BOMBARDMENT + 1; // a Bombardment bomb (game_spawn_bomb): no owner on the wire
         const NetProjectilePacket packet = {
             .id = p->id,
-            .owner_uid = p->owner_uid,
+            .owner_uid = bomb ? -1 : p->owner_uid,
             .weapon_index = p->weapon_index,
             .position = {p->position.x, p->position.y, p->position.z},
             .velocity = {p->velocity.x, p->velocity.y, p->velocity.z},
             .gravity = p->config.gravity,
             .range = p->range,
             .ai_kind = (uint8_t) p->ai_kind,
+            .bomb = (uint8_t) bomb,
         };
         net_send_packet(client->fd, NET_PACKET_PROJECTILE, &packet, sizeof(packet));
         const GameAIShot *shot = g_server->game.ai ? &g_server->game.ai->shots[slot] : NULL;
@@ -918,6 +923,14 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
         if (n) net_send_packet(client->fd, NET_PACKET_EXT, prop, n);
     }
 
+    // v10 init syncData.plrPose (deob-10.0.3.js:220294-220302): a posed player's pose after its SPAWN, so a
+    // joiner (net_send_existing_spawns) has it; again after a respawn, which the client takes as the same pose
+    if (player->pose.has && client->peer_minor >= NET_PROTOCOL_MINOR_EXT) {
+        uint8_t pose[NET_EXT_HEADER_SIZE + sizeof(NetPlayerPosePacket)];
+        const uint16_t n = player_pose_pack(player, pose, sizeof(pose));
+        if (n) net_send_packet(client->fd, NET_PACKET_EXT, pose, n);
+    }
+
     // KrunkNative Object Manager: the SPAWN rebuilt the class loadout; the extra weapons follow it
     if (player->extra_weapon_count > 0 && ks_server_peer_v7(client)) {
         NetLoadoutExtraPacket extra = {.uid = player->uid};
@@ -1168,7 +1181,7 @@ static void net_change_map_internal(const int map_index, const int mode_index, c
 
     for (size_t i = 0; i < g_server->client_count; i++) {
         g_server->clients[i].joined = 0;
-        g_server->clients[i].missed_projectiles = 0; // game_init drops every projectile
+        memset(g_server->clients[i].missed_projectiles, 0, sizeof(g_server->clients[i].missed_projectiles)); // game_init drops every projectile
     }
 
     game_init(&g_server->game, map_index, mode_index, 0);
@@ -1524,7 +1537,7 @@ void net_add_client(ClientConnection *client) {
     memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
     client->om_extra_count = 0; // Object Manager: no extra weapons yet
     memset(&client->keep, 0, sizeof(client->keep)); // KrunkNative: no kept player state yet
-    client->missed_projectiles = 0;
+    memset(client->missed_projectiles, 0, sizeof(client->missed_projectiles));
     client->join_spawn_due = 0;
     g_server->clients[g_server->client_count] = *client;
 
@@ -1550,6 +1563,7 @@ void net_remove_client(ClientConnection *client) {
 
     accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
     votekick_on_leave(client); // a vote kick's target left (void), or a voter (recounted)
+    trade_on_leave(client);    // its trade requests / session end ("NAME left the trade")
     comp_lobby_leave(&g_server->game, client->id); // syncLobbyP(player, id, 1)
     on_client_disconnect(client);
     net_set_spectating(client, 0);
@@ -1628,7 +1642,8 @@ static void net_send_player_chat(ClientConnection *to, const ClientConnection *f
 }
 
 // io_ct: burst limit (closing the socket like the v3.1.1 server, code 4008),
-// 70 characters, blank lines dropped, then "ch" to everyone. v7.1.4 sendPlayerChat (server/index.ts:2065,
+// 70 characters, blank lines dropped, "/" commands, config.chatInterval (a line sooner than 800 ms after the
+// sender's last one is dropped, NET_CHAT_INTERVAL), then "ch" to everyone. v7.1.4 sendPlayerChat (server/index.ts:2065,
 // the reference for v10's "ct" [channel, msg], deob-10.0.3.js:257277): the team channel only exists in team
 // modes, and its lines go to the sender's team only (the sender included, teammates = the room members whose
 // player has the sender's team: no spectator); v3 "ct" is the global channel.
@@ -1649,6 +1664,10 @@ static int net_handle_chat(ClientConnection *client, const char *payload, const 
 
     if (chat_command_handle(net_chat_host(), client->id, text)) { // "/" commands answer the sender only
         server_log("[cmd] %s: %s", client->name, text);
+        return 1;
+    }
+    if (!net_chat_spaced(&client->chat_limiter, (float) net_time())) { // config.chatInterval (NET_CHAT_INTERVAL)
+        server_log("[chat] %s: dropped, sooner than %.1f s after the last line", client->name, (double) NET_CHAT_INTERVAL);
         return 1;
     }
 
@@ -2153,7 +2172,9 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             if (packet->length == sizeof(NetInteractV7Packet)) {
                 NetInteractV7Packet interact;
                 memcpy(&interact, packet->payload, sizeof(interact));
-                if (interact.action == 1) game_player_interact_v7(&g_server->game, client->player, interact.type, interact.uid, interact.secondary);
+                if (interact.action == 1 && interact.type == GAME_INTERACT_TRADE && !interact.secondary)
+                    trade_handle_interact(client, interact.uid); // "int" [5, sid]: the trade prompt (deob-10.0.3.js:260125)
+                else if (interact.action == 1) game_player_interact_v7(&g_server->game, client->player, interact.type, interact.uid, interact.secondary);
                 else if (!net_drop_extra(client, interact.action)) game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
                 break;
             }
@@ -2231,6 +2252,9 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             } else if (subtype == NET_EXT_PROP_ROTATE && body_length >= sizeof(NetPropRotatePacket) && client->player) // "prpR" [reset]
                 game_prop_rotate(&g_server->game, client->player, body[0] != 0);
             else if (subtype == NET_EXT_KN_SWAP_TEAM) net_handle_swap_team(client, body, body_length); // Tap-to-Play Switch Teams
+            else if (trade_handle_ext(client, subtype, body, body_length)) net_note_activity(client); // the live trade (trade.c)
+            else if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket) && client->player) // "stlkrt" i (stalker.h)
+                game_player_stalker_taunt(&g_server->game, client->player, body[0]);
             break;
         }
         default:
@@ -2332,7 +2356,11 @@ static int net_idle_exempt(const ClientConnection *client) {
 // Never kicked: spectators, the end screen (players.clear() leaves no player to check), the
 // exemptions above.
 void net_check_idle_clients(const float now) {
-    const float timeout = g_server->config.idle_timeout;
+    // mode.maxNoMov (Trade 180 s, deob-10.0.3.js:119709): the mode's own no-movement kick in game, where
+    // the server kicks at all (idle_kick_seconds > 0); the v10 client never reads it (its kick is the menu's)
+    const GameModeConfig *idle_mode = g_server->game.mode ? &g_server->game.mode->config : NULL;
+    const float timeout = g_server->config.idle_timeout > 0.0f && idle_mode && idle_mode->max_no_mov > 0.0f
+                              ? idle_mode->max_no_mov : g_server->config.idle_timeout;
     const float menu_timeout = g_server->config.idle_menu_timeout;
     if (timeout <= 0.0f && menu_timeout <= 0.0f) return;
 
@@ -2427,6 +2455,15 @@ static void net_send_reconciliation(void) {
 
         NetReconPacket packet;
         net_packet_from_recon(&packet, player, player->input_seq);
+        // v10 SYNC_PLAYER's movement-scheme sendVals (deob-10.0.3.js:222398): SRM's / Vehicle's state for the
+        // same ack, right before the RECON so the client replays from it (EXT peers; others keep their own)
+        NetPlayerMoveValsPacket vals = {.ack_seq = packet.ack_seq, .scheme = (int32_t) player_movement_scheme(player)};
+        vals.count = player_movement_send_vals(player, vals.vals);
+        if (vals.count && client->peer_minor >= NET_PROTOCOL_MINOR_EXT) {
+            uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(vals)];
+            const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_PLAYER_MOVE_VALS, &vals, (uint16_t) sizeof(vals));
+            if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+        }
         // WP-C: the v7 movement locks (and the grapple) only to 1.3.1+ peers (1.3.0 / net-bridge read exactly 58 bytes)
         const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_RECON_PACKET_V3_SIZE : NET_RECON_PACKET_V1_SIZE;
         net_send_packet(client->fd, NET_PACKET_RECON, &packet, size);
@@ -2495,7 +2532,9 @@ static void net_broadcast_states_tick(void) {
     size_t state_count = 0;
     for (size_t j = 0; j < g_server->game.player_count && state_count < sizeof(states) / sizeof(states[0]); j++) {
         Player *player = g_server->game.players[j];
-        if (!player || !player->active) continue;
+        // syncState leaves out a hidden player (a still stalker, forceHide) for every viewer, spectators
+        // too (`!target.isHidden`, deob-10.0.3.js:222346; shared/src/stalker.c)
+        if (!player || !player->active || player->is_hidden) continue;
         state_players[state_count] = player;
         net_packet_from_player(&states[state_count++], player);
     }

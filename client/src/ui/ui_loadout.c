@@ -157,9 +157,10 @@ static const struct { const char *name; int id; } SCOPES[] = {
 static const struct { const char *name; int min_rec; } ATTACHMENTS[] = {{"Reflex Sight", 0}, {"Acog Scope", 20}};
 #define ATTACH_COUNT 2
 
-// data/streaks.js (Game.streaks, index order): name, slot, kills, devOnly
+// data/streaks.js (Game.streaks, index order): name, slot, kills, devOnly (v10.0.3, deob-10.0.3.js:203338-203520:
+// the Refill is a dev's only, the Bombardment everyone's; shared/src/effects.c g_streaks)
 static const struct { const char *name; int slot, kills, dev; } STREAKS[] = {
-    {"Nuke", 2, 25, 0}, {"Airdrop", 1, 12, 0}, {"Refill", 0, 5, 1}, {"Bombardment", 2, 20, 1},
+    {"Nuke", 2, 25, 0}, {"Airdrop", 1, 12, 0}, {"Refill", 0, 5, 1}, {"Bombardment", 2, 20, 0},
     {"Slimer", 0, 7, 0}, {"Juggernaut", 2, 30, 0}, {"War Machine", 1, 15, 0},
 };
 #define STREAK_COUNT ((int) (sizeof(STREAKS) / sizeof(STREAKS[0])))

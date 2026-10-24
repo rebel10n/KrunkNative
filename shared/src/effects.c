@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ruleset.h>
+#include <pcg_basic.h> // Bombardment: UTILS.randFloat
 
 // effects.js (timer in s; `mid` is the "am" medal icon).
 const EffectConfig g_effects[EFFECT_COUNT] = {
@@ -29,15 +30,18 @@ const EffectConfig g_effects[EFFECT_COUNT] = {
     {"Strength", "dmg", 0.0f, 1.0f, 10, 0.1f, 0.0f, 53},
 };
 
-// streaks.js
+// streaks.js, Krunker v10.0.3's table (deob-10.0.3.js:203338-203520): name, slot, kills and flags.
+// v10 dropped the Bombardment's devOnly (v7.1.4 streaks.js:86 had it): every player picks, earns and
+// calls it. The Refill stays devOnly ("Dev Streak", :203397-203401): only a dev account sees it in the
+// Select Streaks window (:251688-251689) and earns it (players.updateStreaks, :198375).
 const StreakConfig g_streaks[STREAK_COUNT] = {
-    [STREAK_NUKE] = {"Nuke", 2, 25, .req_account = 1},
-    [STREAK_AIRDROP] = {"Airdrop", 1, 12, .no_customs = 1},
-    [STREAK_REFILL] = {"Refill", 0, 5, .dev_only = 1},
-    [STREAK_BOMBARDMENT] = {"Bombardment", 2, 20, .dev_only = 1},
-    [STREAK_SLIMER] = {"Slimer", 0, 7},
-    [STREAK_JUGGERNAUT] = {"Juggernaut", 2, 30},
-    [STREAK_WAR_MACHINE] = {"War Machine", 1, 15},
+    [STREAK_NUKE] = {"Nuke", 2, 25, .req_account = 1},              // :203339-203343
+    [STREAK_AIRDROP] = {"Airdrop", 1, 12, .no_customs = 1},         // :203388-203392
+    [STREAK_REFILL] = {"Refill", 0, 5, .dev_only = 1},              // :203397-203401
+    [STREAK_BOMBARDMENT] = {"Bombardment", 2, 20},                  // :203407-203410
+    [STREAK_SLIMER] = {"Slimer", 0, 7},                             // :203498-203501
+    [STREAK_JUGGERNAUT] = {"Juggernaut", 2, 30},                    // :203506-203509
+    [STREAK_WAR_MACHINE] = {"War Machine", 1, 15},                  // :203514-203517
 };
 
 const int g_default_streak_indexes[STREAK_SLOTS] = {-1, -1, STREAK_NUKE};
@@ -494,9 +498,11 @@ static void streak_add(Player *player, const int streak) {
     streak_send(player, streak);
 }
 
-// players.updateStreaks (after realKillStreak++): earn the picked streaks reached exactly, then
-// reset at the highest picked one. v7's server keeps the last picked slot's kills
-// (maxConfiguredStreak); slot order makes that the highest for every stock streak.
+// players.updateStreaks (after realKillStreak++, deob-10.0.3.js:198373-198386): earn the picked streaks
+// reached exactly, then reset at the highest picked one. A devOnly pick only counts for a dev account
+// (`!devOnly || player.account && player.account.isDev`, :198375). v10's server keeps the last picked
+// slot's kills (maxPossibleStreak, :242055-242060, devOnly picks included); slot order makes that the
+// highest for every stock streak.
 void player_update_streaks(Player *player) {
     Game *game = player->game;
     unsigned int max_kills = 0;
@@ -504,7 +510,7 @@ void player_update_streaks(Player *player) {
         const int s = player->streak_indexes[slot];
         if (s < 0 || s >= STREAK_COUNT) continue;
         if ((unsigned int) g_streaks[s].kills > max_kills) max_kills = (unsigned int) g_streaks[s].kills;
-        if (g_streaks[s].dev_only || streak_disabled(game, s)) continue;
+        if ((g_streaks[s].dev_only && !player->dev) || streak_disabled(game, s)) continue;
         if (player->real_kill_streak == (unsigned int) g_streaks[s].kills) streak_add(player, s);
     }
     if (player->real_kill_streak >= max_kills) player->real_kill_streak = 0;
@@ -522,13 +528,140 @@ int game_start_nuke(Game *game, Player *player) {
     return 1;
 }
 
-// streaks.js activate(); Refill and Bombardment are not ported (the dev-only two never activate
-// for non-dev accounts). The Airdrop is map-logic WP-H's (shared/src/airdrop.c).
+// ---- streaks.js Bombardment (deob-10.0.3.js:203406-203496)
+// "Deploys a Bomber that carpet bombs the entire map": calcPos lays a 10 x 10 grid over the bounds of
+// the map's spawns, then one column of 10 bombs (stored[2]) falls every 500 ms, each from 250 to 500
+// units above the highest spawn. A bomb that hits a player deals 150 (a kill: "Bombed" +100), then
+// explodes (radius 150, 150 at the centre, the owner spared); whoever it hurts without killing is
+// Rooted and Dizzy.
+#define BOMBARDMENT_WAVE_TIME 0.5f // bombardmentTimer = 500 (ms), :203472 / :203484
+#define BOMBARDMENT_KILL_SCORE 100 // onKill: "6" [50 (Bombed), 100, 0, 1] and players.score(100), :203494-203495
+
+static float streak_rand(const float lo, const float hi) { // UTILS.randFloat (Math.random() * (b - a) + a)
+    return lo + (hi - lo) * (float) ldexp((double) pcg32_random(), -32);
+}
+
+// calcPos (:203414-203461). The bounds start at 0 (not at the first spawn), so they always take the
+// map's origin in, as v10's do. The 6 x 6 cells over the bounds grow by two cells before the low
+// x / z edges and the grid runs 10 cells from there (two cells out on the low side, one on the high).
+static void bombardment_calc_pos(Game *game) {
+    float min_x = 0.0f, max_x = 0.0f, min_z = 0.0f, max_z = 0.0f, max_y = 0.0f;
+    for (size_t i = 0; game->map && i < game->map->spawn_count; i++) {
+        const vec3 p = game->map->spawns[i]->position;
+        if (p.x < min_x) min_x = p.x;
+        if (p.x > max_x) max_x = p.x;
+        if (p.z < min_z) min_z = p.z;
+        if (p.z > max_z) max_z = p.z;
+        if (p.y > max_y) max_y = p.y;
+    }
+    const float step_x = (max_x - min_x) / 6.0f, step_z = (max_z - min_z) / 6.0f;
+    float x = min_x - step_x * 2.0f;
+    for (int wave = 0; wave < GAME_BOMBARDMENT_WAVES; wave++) {
+        float z = min_z - step_z * 2.0f;
+        for (int b = 0; b < GAME_BOMBARDMENT_WAVE_BOMBS; b++) {
+            float *bomb = &game->bombardment_bombs[wave][b * 3];
+            bomb[0] = x + streak_rand(-15.0f, 15.0f);
+            bomb[1] = max_y + streak_rand(250.0f, 500.0f);
+            bomb[2] = z + streak_rand(-15.0f, 15.0f);
+            z += step_z;
+        }
+        x += step_x;
+    }
+    game->bombardment_wave = 0;
+    game->bombardment_waves = GAME_BOMBARDMENT_WAVES;
+}
+
+// reset / end (:203462-203470): no timer, no bombs left (game.resetStreaks at every round, the end)
+void game_reset_bombardment(Game *game) {
+    game->bombardment_timer = 0.0f;
+    game->bombardment_player = NULL;
+    game->bombardment_wave = 0;
+    game->bombardment_waves = 0;
+}
+
+// activate + start (:203411-203412, :203471-203476): `!bombardmentTimer && !bombardmentBombs.length`,
+// then the first wave in 500 ms and "bbm" 0 to everyone: the client plays adrop_0 (iïìïîii,
+// :258062-258066). KrunkNative has no "bbm" packet: the server sends that sound as a 2D
+// NET_PACKET_SOUND, which is all the client does with it.
+int game_start_bombardment(Game *game, Player *player) {
+    if (game->bombardment_timer > 0.0f || game->bombardment_wave < game->bombardment_waves) return 0;
+    game->bombardment_timer = BOMBARDMENT_WAVE_TIME;
+    game->bombardment_player = player;
+    bombardment_calc_pos(game);
+    NetSoundPacket sound;
+    memset(&sound, 0, sizeof(sound));
+    snprintf(sound.name, sizeof(sound.name), "adrop_0");
+    sound.uid = -2; // a 2D sound, not positional (NetSoundPacket.uid, triggers_actions.c NET_SOUND_UID_2D)
+    sound.volume = 1.0f;
+    sound.rate = 1.0f;
+    game_send(game, NET_TARGET_ALL, NET_PACKET_SOUND, &sound, sizeof(sound)); // broadcast("bbm", 0)
+    return 1;
+}
+
+// update (:203477-203488), not on the end screen: every 500 ms the next wave (projectiles.initBombs
+// with bombardmentBombs[0], then shift); 500 ms after the last one it ends ("bbm" 1: the client does
+// nothing with it, so nothing is sent).
+void game_tick_bombardment(Game *game, const float delta) {
+    if (game->end_timer > 0.0f || game->bombardment_timer <= 0.0f) return;
+    game->bombardment_timer -= delta;
+    if (game->bombardment_timer > 0.0f) return;
+    if (game->bombardment_wave >= game->bombardment_waves) {
+        game_reset_bombardment(game);
+        return;
+    }
+    game->bombardment_timer = BOMBARDMENT_WAVE_TIME;
+    const float *wave = game->bombardment_bombs[game->bombardment_wave++];
+    // initBombs (:207081-207109): positions to 0.1, pjSp = randFloat(0.3, 0.7) to 0.001
+    for (int b = 0; b < GAME_BOMBARDMENT_WAVE_BOMBS; b++) {
+        const vec3 at = {roundf(wave[b * 3] * 10.0f) / 10.0f, roundf(wave[b * 3 + 1] * 10.0f) / 10.0f, roundf(wave[b * 3 + 2] * 10.0f) / 10.0f};
+        game_spawn_bomb(game, game->bombardment_player, at, roundf(streak_rand(0.3f, 0.7f) * 1000.0f) / 1000.0f);
+    }
+}
+
+// A streak projectile's or blast's kill (projectiles.update :207007-207009, game.explosion
+// :217023-217025): streaks[stk].onKill. Only the Bombardment has one: "6" [50, 100, 0, 1] (the
+// "Bombed" medal, +100) to the bombardment player and players.score(100) (no kill multiplier: score's
+// isKill is unset, players.score :197841-197847).
+void game_streak_on_kill(Game *game, const int streak, Player *owner) {
+    if (streak != STREAK_BOMBARDMENT + 1 || !owner || !game_is_authority(game)) return;
+    NetKillMedalsPacket medals;
+    memset(&medals, 0, sizeof(medals));
+    medals.count = 1;
+    snprintf(medals.medals[0].text, sizeof(medals.medals[0].text), "Bombed"); // overlay.medalsList[50]
+    medals.medals[0].score = BOMBARDMENT_KILL_SCORE;
+    medals.kills = (int32_t) owner->kills;
+    game_send(game, owner->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals));
+    player_score(owner, BOMBARDMENT_KILL_SCORE, 0);
+}
+
+// streaks[stk].onCollision (:207010-207011, :217026-217027): a hit that did not kill (the damage
+// refused included: a teammate, a god-mode player). The Bombardment's gives Rooted and Dizzy
+// (giveEffect 4, 5, one stack each, :203489-203491).
+void game_streak_on_collision(Game *game, const int streak, Player *player) {
+    if (streak != STREAK_BOMBARDMENT + 1 || !player || !game_is_authority(game)) return;
+    player_give_effect(player, EFFECT_ROOTED, 1);
+    player_give_effect(player, EFFECT_DIZZY, 1);
+}
+
+// streaks.js Refill.activate (deob-10.0.3.js:203402-203404, devOnly): the thrown knife back
+// (refillPlayer, :217853-217858) once it has been out for 5 s: `!player.canThrow && Date.now() -
+// player.lastThrowTime >= 5000`. KrunkNative times the throw on the game clock.
+static int streak_refill(Game *game, Player *player) {
+    if (player->can_throw || game->now - player->last_throw_time < 5.0f) return 0;
+    player->can_throw = 1; // refillKnife
+    game_send(game, player->uid, NET_PACKET_REFILL, NULL, 0); // REFILL_KNIFE
+    return 1;
+}
+
+// streaks.js activate() (deob-10.0.3.js:203344-203520). The Airdrop is map-logic WP-H's
+// (shared/src/airdrop.c).
 static int streak_activate(Player *player, const int streak) {
     Game *game = player->game;
     switch (streak) {
         case STREAK_NUKE: return game_start_nuke(game, player);
         case STREAK_AIRDROP: return airdrop_streak_activate(game, player);
+        case STREAK_REFILL: return streak_refill(game, player);
+        case STREAK_BOMBARDMENT: return game_start_bombardment(game, player);
         case STREAK_SLIMER:
             if (!player->active || player_has_equipment(player)) return 0;
             player_give_weapon(player, WEAPON_ID_SLIMER);

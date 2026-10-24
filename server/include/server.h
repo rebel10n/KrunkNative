@@ -195,7 +195,7 @@ typedef struct {
     // Projectile slots (GameProjectile.id) whose PROJECTILE the live-world filter held back while
     // this connection was dead or in the menu; resent from the game state when it spawns
     // (net.c net_resync_live_world)
-    uint64_t missed_projectiles;
+    uint64_t missed_projectiles[(GAME_MAX_PROJECTILES + 63) / 64]; // bit (slot & 63) of word slot / 64
 } ClientConnection;
 
 typedef struct {

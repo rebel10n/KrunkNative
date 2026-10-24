@@ -21,7 +21,7 @@
 #include <string.h>
 #include <ruleset.h>
 
-#define PROJ_MAX 64
+#define PROJ_MAX GAME_MAX_PROJECTILES // the server's slots (a Bombardment draws up to 100 bombs at once)
 // 95.js: the owner's predicted physObj flies 3000 units unless "pre" ends it first.
 #define PROJ_LOCAL_DST 3000.0f
 // A prediction waits this long for its server PROJECTILE before it stops linking.

@@ -37,7 +37,17 @@ static NetProjectileEndPacket g_last_end;
 static int g_nuke_states[2];  // "n" 0 / 1 broadcasts
 static int g_nuke_kills;      // KILL packets flagged as Nuke kills (stk 0)
 static int g_nuke_hit_uid = -1; // the uid that got the target-less "4"
-static int g_nuke_medal;      // the "Nuke" medal's score
+static int g_nuke_medal;      // the "Nuked" medal's score (overlay.medalsList[40])
+
+// test_bombardment: the Bombardment's packets
+static int g_bomb_sounds;       // adrop_0 2D sounds ("bbm" 0)
+static int g_bomb_launches;     // PROJECTILE packets with .bomb
+static int g_bomb_bad_launch;   // a bomb PROJECTILE with an owner, a weapon or a speed out of 0.4 x [0.3, 0.7]
+static NetProjectilePacket g_last_bomb;
+static int g_bombed_medal;      // the "Bombed" medal's score (overlay.medalsList[50])
+static int g_bombed_medal_uid = -1;
+static int g_streak_kill_stk = -2; // NET_KILL_STREAK of the last KILL (-1 none)
+static int g_other_medals;      // KILL_MEDALS other than Bombed / Nuked (kill rewards a streak kill must skip)
 
 // test_hit_damage: the packets game_send_hit sends, in order (EXT subtypes as 1000 + subtype)
 static int g_hit_seq[4], g_hit_seq_n, g_hit_tenths;
@@ -61,8 +71,25 @@ static void test_send(Game *game, const int uid, const int type, const void *pay
     if (type == NET_PACKET_HIT && length == sizeof(NetHitPacket) && ((const NetHitPacket *) payload)->target_uid == -1) g_nuke_hit_uid = uid;
     if (type == NET_PACKET_KILL_MEDALS && length == sizeof(NetKillMedalsPacket)) {
         const NetKillMedalsPacket *m = payload;
-        if (m->count == 1 && !strcmp(m->medals[0].text, "Nuke")) g_nuke_medal = m->medals[0].score;
+        if (m->count == 1 && !strcmp(m->medals[0].text, "Nuked")) g_nuke_medal = m->medals[0].score;
+        else if (m->count == 1 && !strcmp(m->medals[0].text, "Bombed")) {
+            g_bombed_medal += m->medals[0].score;
+            g_bombed_medal_uid = uid;
+        } else g_other_medals++;
     }
+    if (type == NET_PACKET_SOUND && length == sizeof(NetSoundPacket) && !strcmp(((const NetSoundPacket *) payload)->name, "adrop_0") &&
+        ((const NetSoundPacket *) payload)->uid == -2 && uid == NET_TARGET_ALL)
+        g_bomb_sounds++;
+    if (type == NET_PACKET_PROJECTILE && length == sizeof(NetProjectilePacket) && ((const NetProjectilePacket *) payload)->bomb) {
+        const NetProjectilePacket *b = payload;
+        g_last_bomb = *b;
+        g_bomb_launches++;
+        const float speed = -b->velocity[1];
+        if (b->owner_uid != -1 || b->weapon_index != -1 || b->gravity != 0.0f || b->range != 1500.0f || speed < 0.4f * 0.3f - 1e-4f ||
+            speed > 0.4f * 0.7f + 1e-4f || fabsf(b->velocity[0]) > 1e-4f || fabsf(b->velocity[2]) > 1e-4f)
+            g_bomb_bad_launch++;
+    }
+    if (type == NET_PACKET_KILL && length == sizeof(NetKillPacket)) g_streak_kill_stk = NET_KILL_STREAK(((const NetKillPacket *) payload)->fists);
     if (type == NET_PACKET_PROJECTILE_END && length == sizeof(NetProjectileEndPacket)) {
         g_last_end = *(const NetProjectileEndPacket *) payload;
         g_end_count++;
@@ -557,7 +584,8 @@ static void test_streaks(Game *game) {
 
 // streaks.js Nuke: a guest's 25-kill Nuke through the streak key ("k2" -> checkStreak), "n" 0, 10 s
 // later "n" 1 and every active enemy dies (not the caller, its team mates, god mode players or the
-// dead), 50 score each, the "Nuke" medal, a "4" to the caller; the kills carry stk 0. NextBots
+// dead), 50 score each, the "Nuked" medal (v10.0.3: "6" [40, ...], deob-10.0.3.js:203375), a "4" to the
+// caller; the kills carry stk 0. NextBots
 // never earn streaks (v7: streakIndexs []).
 static void test_nuke(const cJSON **maps) {
     printf("nuke...\n");
@@ -597,7 +625,7 @@ static void test_nuke(const cJSON **maps) {
     CHECK(!enemy->active && !bot->active, "the enemies die (bots too)");
     CHECK(caller->active && mate->active && god->active && !dead->active, "not the caller, a team mate or god mode");
     CHECK(g_nuke_kills == 2 && g_nuke_medal == 100 && g_nuke_hit_uid == caller->uid && (float) caller->score - score0 == 100.0f,
-          "2 Nuke kills (stk 0), the Nuke medal +100, the \"4\" to the caller, score +100 (%d kills, medal %d, hit %d, +%.0f)",
+          "2 Nuke kills (stk 0), the Nuked medal +100, the \"4\" to the caller, score +100 (%d kills, medal %d, hit %d, +%.0f)",
           g_nuke_kills, g_nuke_medal, g_nuke_hit_uid, (float) caller->score - score0);
 
     // NextBots: player.js streakIndexs [] (shared/src/bots.c) earn nothing
@@ -609,6 +637,207 @@ static void test_nuke(const cJSON **maps) {
 
     mode_fini(game.mode);
     game.mode = NULL;
+}
+
+// Krunker v10.0.3's streak table (deob-10.0.3.js:203338-203520) and its devOnly gate: the Bombardment
+// is everyone's in v10 (v7.1.4 had it devOnly), the Refill a dev account's only (players.updateStreaks
+// :198375). The Refill gives the thrown knife back once it has been out 5 s (:203402-203404).
+static void test_streak_table(Game *game) {
+    printf("v10.0.3 streak table and devOnly...\n");
+    static const struct { const char *name; int slot, kills, req_account, no_customs, dev_only; } v10[STREAK_COUNT] = {
+        {"Nuke", 2, 25, 1, 0, 0}, {"Airdrop", 1, 12, 0, 1, 0}, {"Refill", 0, 5, 0, 0, 1}, {"Bombardment", 2, 20, 0, 0, 0},
+        {"Slimer", 0, 7, 0, 0, 0}, {"Juggernaut", 2, 30, 0, 0, 0}, {"War Machine", 1, 15, 0, 0, 0},
+    };
+    for (int i = 0; i < STREAK_COUNT; i++) {
+        const StreakConfig *c = &g_streaks[i];
+        CHECK(!strcmp(c->name, v10[i].name) && c->slot == v10[i].slot && c->kills == v10[i].kills && c->req_account == v10[i].req_account &&
+              c->no_customs == v10[i].no_customs && c->dev_only == v10[i].dev_only, "streak %d %s matches v10.0.3", i, v10[i].name);
+    }
+
+    // a player (not a dev) with the Refill and the Bombardment picked: 5 kills give nothing, 20 a Bombardment
+    Player *p = add_player(game, 60, 0);
+    const int picks[STREAK_SLOTS] = {STREAK_REFILL, -1, STREAK_BOMBARDMENT};
+    player_set_streak_indexes(p, picks);
+    CHECK(p->streak_indexes[0] == STREAK_REFILL && p->streak_indexes[2] == STREAK_BOMBARDMENT, "the picks stay (both in their slot)");
+    p->dev = 0;
+    kill_n(game, p, 5);
+    CHECK(!p->streaks_owned[STREAK_REFILL] && p->real_kill_streak == 5, "no Refill for a player who is not a dev");
+    kill_n(game, p, 15);
+    CHECK(p->streaks_owned[STREAK_BOMBARDMENT] == 1 && p->real_kill_streak == 0, "20 kills: a Bombardment (no devOnly in v10), the counter resets");
+    p->streaks_owned[STREAK_BOMBARDMENT] = 0;
+
+    // a dev: 5 kills give the Refill
+    p->dev = 1;
+    kill_n(game, p, 5);
+    CHECK(p->streaks_owned[STREAK_REFILL] == 1, "a dev earns the Refill at 5");
+    // Refill.activate: only while the knife is out, 5 s after the throw
+    p->can_throw = 1;
+    CHECK(!player_use_streak(p, STREAK_REFILL) && p->streaks_owned[STREAK_REFILL] == 1, "Refill: refused while the knife is in hand");
+    p->can_throw = 0;
+    p->last_throw_time = game->now;
+    CHECK(!player_use_streak(p, STREAK_REFILL), "Refill: refused before 5 s");
+    game->now += 5.0f;
+    CHECK(player_use_streak(p, STREAK_REFILL) && p->can_throw && !p->streaks_owned[STREAK_REFILL], "Refill: the knife is back after 5 s");
+    p->dev = 0;
+    player_kill(p, NULL, NULL, 1);
+}
+
+// streaks.js Bombardment (deob-10.0.3.js:203406-203496, projectiles.initBombs :207081-207109, stored[2]
+// :206749-206775, game.explosion :216994-217029): adrop_0 for everyone, a wave of 10 bombs every 0.5 s
+// over the spawns' grid, 100 bombs, the end 0.5 s after the last wave. A bomb that hits deals 150 (a
+// kill: stk 3, no kill rewards, "Bombed" +100), then explodes (150 / 150), sparing its owner; whoever it
+// hurts without killing, or cannot hurt (a team mate), is Rooted and Dizzy.
+static void test_bombardment(const cJSON **maps) {
+    printf("bombardment...\n");
+    Game game = {0};
+    game_configure(&game, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+    game.hooks.send = test_send;
+    game.lag_comp = 0;
+    game.mode = mode_init(MODE_ID_TDM);
+
+    Player *caller = add_player(&game, 1, 0);
+    const int picks[STREAK_SLOTS] = {-1, -1, STREAK_BOMBARDMENT};
+    player_set_streak_indexes(caller, picks);
+    caller->team = 1;
+    for (int i = 0; i < 20; i++) player_kill(add_player(&game, 100 + i, 0), caller, NULL, 1);
+    CHECK(caller->streaks_owned[STREAK_BOMBARDMENT] == 1, "20 kills earn the Bombardment");
+
+    // the grid's bounds: the spawns' and the origin, two cells out on the low sides
+    float min_x = 0, max_x = 0, min_z = 0, max_z = 0, max_y = 0;
+    for (size_t i = 0; i < game.map->spawn_count; i++) {
+        const vec3 q = game.map->spawns[i]->position;
+        min_x = fminf(min_x, q.x), max_x = fmaxf(max_x, q.x), min_z = fminf(min_z, q.z), max_z = fmaxf(max_z, q.z), max_y = fmaxf(max_y, q.y);
+    }
+    const float step_x = (max_x - min_x) / 6.0f, step_z = (max_z - min_z) / 6.0f;
+
+    g_bomb_sounds = g_bomb_launches = g_bomb_bad_launch = 0;
+    caller->position = (vec3) {0.0f, 5000.0f, 0.0f}; // far above the bombs: no bomb reaches it
+    player_check_streak(caller, 2);
+    CHECK(!caller->streaks_owned[STREAK_BOMBARDMENT] && game.bombardment_player == caller && fabsf(game.bombardment_timer - 0.5f) < 1e-6f &&
+          game.bombardment_waves == GAME_BOMBARDMENT_WAVES && g_bomb_sounds == 1, "the streak key calls it in: adrop_0 for everyone, the first wave in 0.5 s");
+    int grid_ok = 1;
+    for (int w = 0; w < GAME_BOMBARDMENT_WAVES; w++) {
+        for (int b = 0; b < GAME_BOMBARDMENT_WAVE_BOMBS; b++) {
+            const float *bomb = &game.bombardment_bombs[w][b * 3];
+            const float x = min_x - 2.0f * step_x + (float) w * step_x, z = min_z - 2.0f * step_z + (float) b * step_z;
+            if (fabsf(bomb[0] - x) > 15.001f || fabsf(bomb[2] - z) > 15.001f || bomb[1] < max_y + 250.0f || bomb[1] > max_y + 500.0f) grid_ok = 0;
+        }
+    }
+    CHECK(grid_ok, "calcPos: a 10 x 10 grid from two cells below the spawns' x / z, 250 to 500 above the highest spawn");
+    CHECK(!game_start_bombardment(&game, caller), "one Bombardment at a time");
+
+    float now = game.now;
+    for (int i = 0; i < 49; i++) game_tick(&game, now += 0.01f, 0.01f);
+    CHECK(g_bomb_launches == 0, "no bomb before 0.5 s");
+    int peak = 0;
+    for (int i = 0; i < 2; i++) game_tick(&game, now += 0.01f, 0.01f);
+    CHECK(g_bomb_launches == GAME_BOMBARDMENT_WAVE_BOMBS && game.bombardment_wave == 1, "0.5 s: the first wave, 10 bombs (%d)", g_bomb_launches);
+    for (int i = 0; i < 600 && game.bombardment_timer > 0.0f; i++) {
+        game_tick(&game, now += 0.01f, 0.01f);
+        int active = 0;
+        for (int k = 0; k < GAME_MAX_PROJECTILES; k++) active += game.projectiles[k].active && game.projectiles[k].streak;
+        if (active > peak) peak = active;
+    }
+    CHECK(g_bomb_launches == GAME_BOMBARDMENT_WAVES * GAME_BOMBARDMENT_WAVE_BOMBS && !g_bomb_bad_launch,
+          "100 bombs, each straight down at 0.4 x pjSp (0.3..0.7), no owner or weapon on the wire (%d, %d bad)", g_bomb_launches, g_bomb_bad_launch);
+    CHECK(!game.bombardment_timer && !game.bombardment_player && fabsf(now - game.now) < 1e-3f, "it ends 0.5 s after the last wave");
+    printf("  sandstorm: at most %d bombs in flight\n", peak);
+    CHECK(caller->active && caller->health == (float) caller->max_health, "the caller is never hurt");
+    CHECK(game_start_bombardment(&game, caller), "after the end, another can be called");
+    game_reset_bombardment(&game);
+    for (int k = 0; k < GAME_MAX_PROJECTILES; k++) game.projectiles[k].active = 0;
+
+    // a direct hit: 150 kills a 100 HP enemy; stk 3 in the kill, no kill rewards, "Bombed" +100 to the caller
+    Player *enemy = add_player(&game, 3, 0);
+    Player *mate = add_player(&game, 4, 0);
+    Player *tank = add_player(&game, 5, 3); // Spray N Pray, 170 HP: the blast hurts it without killing
+    enemy->team = tank->team = 2;
+    mate->team = 1;
+    place(enemy, 0.0f, 0.0f);
+    place(mate, 40.0f, 0.0f);
+    place(tank, 0.0f, 100.0f);
+    caller->position = (vec3) {-60.0f, 1000.0f, 0.0f}; // in the blast: spared
+    caller->health = (float) caller->max_health;
+    const int score0 = caller->score;
+    g_bombed_medal = 0;
+    g_bombed_medal_uid = -1;
+    g_other_medals = 0;
+    g_streak_kill_stk = -2;
+    g_bomb_launches = 0;
+    game_spawn_bomb(&game, caller, (vec3) {0.0f, 1040.0f, 0.0f}, 1.0f);
+    CHECK(g_bomb_launches == 1 && fabsf(g_last_bomb.velocity[1] + 0.4f) < 1e-5f, "a bomb at pjSp 1 falls at 0.4");
+    for (int i = 0; i < 30 && !g_bombed_medal; i++) game_tick(&game, now += 0.01f, 0.01f);
+    CHECK(!enemy->active && g_streak_kill_stk == STREAK_BOMBARDMENT, "the hit kills the enemy, the kill carries stk 3 (%d)", g_streak_kill_stk);
+    CHECK(g_bombed_medal == 100 && g_bombed_medal_uid == caller->uid && caller->score - score0 == 100 && !g_other_medals,
+          "\"Bombed\" +100 to the caller, no kill rewards (medal %d, +%d, %d others)", g_bombed_medal, caller->score - score0, g_other_medals);
+    CHECK(caller->active && caller->health == (float) caller->max_health && !caller->effects[EFFECT_ROOTED], "the blast spares its owner");
+    CHECK(mate->active && mate->health == (float) mate->max_health && mate->effects[EFFECT_ROOTED] == 1 && mate->effects[EFFECT_DIZZY] == 1,
+          "a team mate in the blast takes no damage but is Rooted and Dizzy");
+    CHECK(tank->active && tank->health < (float) tank->max_health && tank->effects[EFFECT_ROOTED] == 1 && tank->effects[EFFECT_DIZZY] == 1,
+          "an enemy the blast hurts is Rooted and Dizzy (%.1f HP)", tank->health);
+
+    // the caller leaving stops the waves and ends its bombs in the air
+    CHECK(game_start_bombardment(&game, caller), "a new Bombardment");
+    for (int i = 0; i < 60; i++) game_tick(&game, now += 0.01f, 0.01f);
+    int in_air = 0;
+    for (int k = 0; k < GAME_MAX_PROJECTILES; k++) in_air += game.projectiles[k].active && game.projectiles[k].streak;
+    game_player_left(&game, caller);
+    int left = 0;
+    for (int k = 0; k < GAME_MAX_PROJECTILES; k++) left += game.projectiles[k].active && game.projectiles[k].streak;
+    CHECK(in_air > 0 && !left && !game.bombardment_player && !game.bombardment_timer, "the caller leaves: no more waves, its bombs end (%d in the air)", in_air);
+
+    mode_fini(game.mode);
+    game.mode = NULL;
+}
+
+// The bombs in flight at once on every official map (no players in the way): KrunkNative's pool has
+// GAME_MAX_PROJECTILES slots where v10's grows, so a full bombardment must fit with room for the
+// players' own projectiles.
+static void test_bombardment_pool(void) {
+    printf("bombardment pool on the official maps...\n");
+    int worst = 0;
+    char worst_map[64] = "";
+    for (int m = 0; m < 64; m++) {
+        char path[160];
+        snprintf(path, sizeof(path), "assets/maps/official/%02d_", m);
+        // find the file with that prefix
+        static const char *const names[] = {"burg", "littletown", "sandstorm", "subzero", "undergrowth", "shipment", "freight", "lostworld",
+                                            "citadel", "oasis", "kanji", "industry", "lumber", "evacuation", "site", "skytemple", "lagoon",
+                                            "bureau", "tortuga", "tropicano", "krunk_plaza", "arena", "habitat", "atomic", "old_burg",
+                                            "throwback", "stockade", "facility", "clockwork", "laboratory", "shipyard", "soul_sanctum",
+                                            "bazaar", "erupt", "hq", "khepri", "lush", "vivo", "slide_moonlight", "eterno_simulator"};
+        if (m >= (int) (sizeof(names) / sizeof(names[0]))) break;
+        snprintf(path, sizeof(path), "assets/maps/official/%02d_%s.json", m, names[m]);
+        cJSON *map = NULL;
+        if (load_json_file(path, &map)) continue;
+        const cJSON *maps[1] = {map};
+        Game game = {0};
+        game_configure(&game, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+        game_init(&game, 0, -1, 1);
+        game.hooks.send = test_send;
+        Player *caller = add_player(&game, 1, 0);
+        caller->position = (vec3) {0.0f, 1e5f, 0.0f};
+        g_bomb_launches = 0;
+        game_start_bombardment(&game, caller);
+        int peak = 0;
+        float now = game.now;
+        for (int i = 0; i < 2000; i++) {
+            game_tick(&game, now += 0.01f, 0.01f);
+            int active = 0;
+            for (int k = 0; k < GAME_MAX_PROJECTILES; k++) active += game.projectiles[k].active && game.projectiles[k].streak;
+            if (active > peak) peak = active;
+        }
+        if (peak > worst) {
+            worst = peak;
+            snprintf(worst_map, sizeof(worst_map), "%s", names[m]);
+        }
+        CHECK(g_bomb_launches == 100, "%s: all 100 bombs fly (%d)", names[m], g_bomb_launches);
+        // the Game is left as it is (the test process ends); the map JSON stays referenced by it
+    }
+    printf("  at most %d bombs in flight (%s)\n", worst, worst_map);
+    CHECK(worst <= GAME_BOMBARDMENT_WAVES * GAME_BOMBARDMENT_WAVE_BOMBS && GAME_MAX_PROJECTILES - worst >= 64,
+          "the pool keeps 64 slots for the players' projectiles during the worst bombardment (%d of %d)", worst, GAME_MAX_PROJECTILES);
 }
 
 static void test_upgrades(Game *game) {
@@ -887,7 +1116,10 @@ int main(void) {
     test_charge(&game);
     test_effects(&game);
     test_streaks(&game);
+    test_streak_table(&game);
     test_nuke(maps);
+    test_bombardment(maps);
+    test_bombardment_pool();
     test_upgrades(&game);
     test_mode_multipliers(&game);
     test_chall_mode(&game);

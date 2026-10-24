@@ -33,10 +33,18 @@ static void projectile_send_end(Game *game, const GameProjectile *projectile, co
     game_send(game, NET_TARGET_ALL, NET_PACKET_PROJECTILE_END, &packet, sizeof(packet));
 }
 
-// projectiles.init: the first free slot, Krunker's rounding of the launch values.
+// v10.0.3 projectiles.stored[2] (deob-10.0.3.js:206749-206775), a Bombardment bomb: spd 0.4 (x pjSp),
+// no gravity, range 1500, dmg 150, explode 150 with eDmg 150, dontPred (no lag compensation), info
+// {stk: 3}. Its life (24000 ms) never ends a flight before the range does (1500 units at 0.12 to
+// 0.28 units/ms is 5.4 to 12.5 s), so it is not modelled.
+static const ProjectileConfig g_streak_bomb = {.speed = 0.4f, .range = 1500.0f, .damage = 150.0f, .explode = 150.0f, .explode_damage = 150.0f,
+                                               .dont_pred = 1};
+
+// projectiles.init: the first free slot, Krunker's rounding of the launch values. `streak` (stk + 1):
+// a streak's projectile (initBombs), launched by Projectile.init itself: no rounding of the direction.
 static void projectile_spawn(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *base,
                              const vec3 origin, const float yaw, const float pitch, const int thrown_melee, const int ai_kind,
-                             const ProjectileShot *shot) {
+                             const ProjectileShot *shot, const int streak) {
     if (!game_is_authority(game) || !base) return;
 
     // Projectile.init: spd * v, dmg = ceil(dmg * d) * dmgMlt (v7.1.4 charge)
@@ -58,8 +66,8 @@ static void projectile_spawn(Game *game, Player *owner, const int weapon_index, 
     }
     if (!projectile) return;
 
-    const float yaw_r = roundf(yaw * 1000.0f) / 1000.0f;
-    const float pitch_r = roundf(pitch * 1000.0f) / 1000.0f;
+    const float yaw_r = streak ? yaw : roundf(yaw * 1000.0f) / 1000.0f;
+    const float pitch_r = streak ? pitch : roundf(pitch * 1000.0f) / 1000.0f;
 
     projectile->owner_uid = owner ? owner->uid : -1;
     projectile->weapon_index = weapon_index;
@@ -74,6 +82,7 @@ static void projectile_spawn(Game *game, Player *owner, const int weapon_index, 
     projectile->config = *config;
     projectile->effect = shot ? shot->effect : -1;
     projectile->effect_count = shot && shot->effect_count > 0 ? shot->effect_count : 1;
+    projectile->streak = streak;
     projectile->speed = config->speed;
     projectile->range = config->range;
     projectile->yaw_dir = yaw_r - (float) M_PI;
@@ -84,37 +93,53 @@ static void projectile_spawn(Game *game, Player *owner, const int weapon_index, 
         config->speed * cosf(projectile->yaw_dir) * cosf(pitch_r),
     };
 
+    const int bomb = streak == STREAK_BOMBARDMENT + 1;
     const NetProjectilePacket packet = {
         .id = projectile->id,
-        .owner_uid = projectile->owner_uid,
+        .owner_uid = bomb ? -1 : projectile->owner_uid, // "bmb" names no owner (no minimap blip, :207104)
         .weapon_index = weapon_index,
         .position = {projectile->position.x, projectile->position.y, projectile->position.z},
         .velocity = {projectile->velocity.x, projectile->velocity.y, projectile->velocity.z},
         .gravity = config->gravity,
         .range = config->range,
         .ai_kind = (uint8_t) ai_kind,
+        .bomb = (uint8_t) bomb,
     };
     game_send(game, NET_TARGET_ALL, NET_PACKET_PROJECTILE, &packet, sizeof(packet));
 }
 
+// projectiles.initBombs, one bomb (deob-10.0.3.js:207081-207109): Projectile.init(x, y, z, 0,
+// stored[2].yD (-PI / 2), stored[2], player, {stk: 3}, {pjSp}). v10 sends the wave as one "bmb"
+// [x, y, z, sid, {pjSp}, ...]; KrunkNative sends each bomb's PROJECTILE with .bomb set.
+// v10's pool grows without bound; KrunkNative's has GAME_MAX_PROJECTILES (192) slots, room for a whole
+// bombardment's 100 bombs and the players' own (combat_test test_bombardment_pool measures the official
+// maps); a bomb that finds no free slot is skipped.
+void game_spawn_bomb(Game *game, Player *owner, const vec3 position, const float pj_speed) {
+    const ProjectileShot shot = {.speed_mlt = pj_speed > 0.0f ? pj_speed : 1.0f, .effect = -1};
+    projectile_spawn(game, owner, -1, &g_streak_bomb, position, 0.0f, (float) -M_PI / 2.0f, 0, 0, &shot, STREAK_BOMBARDMENT + 1);
+}
+
 void game_spawn_projectile(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config,
                            const vec3 origin, const float yaw, const float pitch, const int thrown_melee) {
-    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0, NULL);
+    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0, NULL, 0);
 }
 
 void game_spawn_projectile_ex(Game *game, Player *owner, const int weapon_index, const ProjectileConfig *config, const vec3 origin,
                               const float yaw, const float pitch, const int thrown_melee, const ProjectileShot *shot) {
-    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0, shot);
+    projectile_spawn(game, owner, weapon_index, config, origin, yaw, pitch, thrown_melee, 0, shot, 0);
 }
 
 // ai.js shots: projectiles.init(x, y, z, yaw, pitch, stored[kind], null, {}, true, "orb_0")
 void game_spawn_ai_projectile(Game *game, const int stored_kind, const vec3 origin, const float yaw, const float pitch) {
-    projectile_spawn(game, NULL, -1, game_ai_projectile_config(stored_kind), origin, yaw, pitch, 0, stored_kind, NULL);
+    projectile_spawn(game, NULL, -1, game_ai_projectile_config(stored_kind), origin, yaw, pitch, 0, stored_kind, NULL, 0);
 }
 
-// game.explosion(x, y, z, radius, dmg, owner): 1 - distance / radius of the damage,
-// a fifth for the owner (who may hurt themselves).
-void game_explosion(Game *game, const vec3 position, float radius, float damage, Player *owner, const int weapon_index) {
+// game.explosion(x, y, z, radius, dmg, owner, info): 1 - distance / radius of the damage,
+// a fifth for the owner (who may hurt themselves). info.stk (`streak` = stk + 1, deob-10.0.3.js:
+// 216994-217029): the owner is spared, the kills carry stk and skip the kill rewards
+// (players.kill's last argument `info.stk != null`), then the streak's onKill / onCollision.
+void game_explosion_streak(Game *game, const vec3 position, float radius, float damage, Player *owner, const int weapon_index,
+                           const int streak) {
     if (!game_is_authority(game) || radius <= 0.0f) return;
     radius *= mode_explosion_size_mlt(game);            // v7 mode.explSMlt (Impulsed 2), before the "ex"
     if (owner) damage *= player_attr_damage(owner);     // v7 source.attributes.dmg (Strength), players and AIs
@@ -126,6 +151,7 @@ void game_explosion(Game *game, const vec3 position, float radius, float damage,
         Player *player = game->players[i];
         if (!player || !player->active) continue;
         if (!world_pvp_allows(owner, player)) continue; // WP-B: v7 explosion noPVP / forcePVP filter
+        if (streak && player == owner) continue;        // `info.stk != null && owner == player` (:217000)
 
         const float dx = player->position.x - position.x;
         const float dy = player->position.y - position.y;
@@ -136,8 +162,11 @@ void game_explosion(Game *game, const vec3 position, float radius, float damage,
 
         const float dealt = damage * falloff * (player == owner ? 0.2f : 1.0f) * mode_explosion_damage_mlt(game, owner, player); // explMlt
         if (player_change_health(player, owner, dealt, 0)) {
-            PlayerKillInfo info = {.weapon_id = weapon_index, .distance = distance};
-            player_kill(player, owner, &info, 0);
+            PlayerKillInfo info = {.weapon_id = weapon_index, .distance = distance, .streak = streak};
+            player_kill(player, owner, &info, streak != 0);
+            if (streak) game_streak_on_kill(game, streak, owner);
+        } else if (streak) {
+            game_streak_on_collision(game, streak, player);
         }
     }
 
@@ -151,6 +180,10 @@ void game_explosion(Game *game, const vec3 position, float radius, float damage,
     }
 }
 
+void game_explosion(Game *game, const vec3 position, const float radius, const float damage, Player *owner, const int weapon_index) {
+    game_explosion_streak(game, position, radius, damage, owner, weapon_index, 0);
+}
+
 typedef struct {
     Player *player;
     GameAI *ai;
@@ -158,6 +191,7 @@ typedef struct {
     Object *object;     // u[0].obj of a map object hit
     PlayerStoredState state; // the player's rewound box (head / leg zones)
     int zone;           // v10 hit boxes: 1 + HitKind of the box hit; 0 = the v7 zones by height
+    GameAIHitPart part; // v10.0.3 preciseHits: the AI model part hit (deob-10.0.3.js:206849-206860)
 } ProjectileHit;
 
 int game_object_shootable(const Object*); // shared/src/player.c (the hitscan object filter)
@@ -264,9 +298,11 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
     for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
         if (step_length <= 0.0f || !game_ai_projectile_can_hit(game, projectile, ai)) continue;
-        const float t = game_ai_line_hit(ai, projectile->position, step);
+        GameAIHitPart part; // v10.0.3: usesHitTest() ? hitTest (the posed model) : the box
+        const float t = game_ai_ray_hit(game, ai, projectile->position, step, &part);
         if (t > 0.0f && t <= 1.0f && t < best.t) {
             best = (ProjectileHit) {NULL, ai, t};
+            best.part = part;
             *hit_any = 1;
         }
     }
@@ -307,8 +343,8 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
             if (owner) damage *= player_attr_damage(owner);
 
             // u[0].ai: changeHealth(-dmg, owner, thrown knife), killScore, "4"
-            if (hit.ai) game_ai_projectile_hit_ai(game, projectile, hit.ai, owner, damage); // WP-F: player or AI shooter rules
-            if (hit.player && !owner) game_ai_projectile_hit_player(game, projectile, hit.player); // an AI shot's effectInd (WP-F)
+            if (hit.ai) game_ai_projectile_hit_ai_part(game, projectile, hit.ai, owner, damage, &hit.part); // WP-F: player or AI shooter rules
+            if (hit.player && !owner && !projectile->streak) game_ai_projectile_hit_player(game, projectile, hit.player); // an AI shot's effectInd (WP-F)
             // u[0].obj: destructible health and onShoot / onDamage / onProjectile / onThrowingMelee triggers
             if (hit.object) game_object_hit(game, hit.object, owner, damage, projectile->thrown_melee, GAME_HIT_PROJECTILE);
             // an impact on the terrain or on a map object still there to see (after this hit's damage)
@@ -339,11 +375,16 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                     if (projectile->effect == EFFECT_ZAPPED && owner) hit.player->zapped_by = owner->uid;
                 }
                 if (player_change_health(hit.player, owner, damage, head)) {
-                    PlayerKillInfo info = {.weapon_id = projectile->weapon_index, .distance = 0.0f};
+                    PlayerKillInfo info = {.weapon_id = projectile->weapon_index, .distance = 0.0f, .streak = projectile->streak};
                     info.thrown = projectile->thrown_melee;
                     info.headshot = (unsigned char) head;
                     info.legshot = (unsigned char) (leg && !head); // WP-E part 2c: the "ls" stat
-                    player_kill(hit.player, owner, &info, 0);
+                    // a streak's projectile (deob-10.0.3.js:207001-207012): {stk}, no kill rewards, then the
+                    // streak's onKill; a hit that does not kill runs its onCollision instead
+                    player_kill(hit.player, owner, &info, projectile->streak != 0);
+                    if (projectile->streak) game_streak_on_kill(game, projectile->streak, owner);
+                } else if (projectile->streak) {
+                    game_streak_on_collision(game, projectile->streak, hit.player);
                 }
             }
 
@@ -358,11 +399,21 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
     if (projectile->active) return;
 
     if (projectile->config.explode > 0.0f) {
-        game_explosion(game, projectile->position, projectile->config.explode, projectile->config.explode_damage,
-                       game_find_player(game, projectile->owner_uid), projectile->weapon_index);
+        game_explosion_streak(game, projectile->position, projectile->config.explode, projectile->config.explode_damage,
+                              game_find_player(game, projectile->owner_uid), projectile->weapon_index, projectile->streak);
     }
 
     projectile_send_end(game, projectile, hit_object);
+}
+
+void game_end_streak_projectiles(Game *game, const int owner_uid) {
+    if (!game_is_authority(game)) return;
+    for (int i = 0; i < GAME_MAX_PROJECTILES; i++) {
+        GameProjectile *projectile = &game->projectiles[i];
+        if (!projectile->active || !projectile->streak || projectile->owner_uid != owner_uid) continue;
+        projectile->active = 0;
+        projectile_send_end(game, projectile, 0);
+    }
 }
 
 void game_tick_projectiles(Game *game, const float delta) {

@@ -361,9 +361,11 @@ int game_is_pub_type(const Game *game) {
     return game && (game->is_sandbox || !game_config_is_custom(game) || game->config.mimic_pubs);
 }
 
-// game.incStat(stat, player): mode.skipStats is not ported (no v7 mode lists one KrunkNative runs).
+// game.incStat(stat, player): not a mode.skipStats key (v10.0.3 Raid / Zombies skip h, s, crc and step,
+// deob-10.0.3.js:217356), then an account's tmpStats in a pub-type game.
 void game_inc_stat(Game *game, const Player *player, const char *key) {
     if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
+    if (mode_skip_stat(game, key)) return;
     game->hooks.progress(game, player, 1, key, 1, -1, -1, -1);
 }
 
@@ -495,6 +497,7 @@ void game_start_round(Game *game) {
     game->kill_count = 0;
     game->nuke_timer = 0.0f;
     game->nuke_player = NULL;
+    game_reset_bombardment(game); // game.resetStreaks (deob-10.0.3.js:219925)
     game->leaders_dirty = 1;
     memset(game->projectiles, 0, sizeof(game->projectiles));
 
@@ -502,6 +505,7 @@ void game_start_round(Game *game) {
     // (gameTime), waitTimers, conditions, objectives, gameStart, then multiObjectTrigger("onGameStart")
     game_set_state(game, GAME_STATE_INITIALIZING); // v10 setGameState(INITIALIZING) at startGame
     forfeit_round_start(game);                     // v10 startGame: no forfeit vote, no starts
+    game->freeze_others = 0;                       // v10 startGame: freezeOthers = false (deob-10.0.3.js:219811)
     trigger_round_reset(game);
     zombies_round_start(game); // WP-H finishInit: mystery boxes / krum machines, power-ups, airdrops
     if (game->mode) mode_round_start(game);
@@ -521,13 +525,15 @@ static void game_send_timer(Game *game, const int uid, const int seconds, const 
 }
 
 // endGame(): didWin = (team && team == winner) || player == winner; "end" carries didWin
-// when there is a winner, else -1 (draw).
+// when there is a winner, else -1 (draw). A public match's winner -1 (ModeWinner.no_one, deob-10.0.3.js:221681)
+// is a winner nobody matches: didWin false for everyone (deob-10.0.3.js:221695, 221896), so every player's END
+// says defeat (the client's "def", deob-10.0.3.js:257370).
 static void game_send_end(Game *game, Player *player, const ModeWinner winner, const NetLeaderboardPacket *board, const int32_t *rewards) {
     NetEndPacket packet;
     memset(&packet, 0, sizeof(packet));
 
-    const int did_win = (player->team && player->team == winner.team) || player == winner.player;
-    packet.result = (int8_t) (winner.team || winner.player ? did_win : -1);
+    const int did_win = !winner.no_one && ((player->team && player->team == winner.team) || player == winner.player);
+    packet.result = (int8_t) (mode_winner_set(winner) ? did_win : -1);
     packet.next_round = (int32_t) ceilf(game->end_timer);
     packet.winner_uid = winner.player ? winner.player->uid : -1;
     packet.board = *board;
@@ -545,7 +551,7 @@ static size_t game_end_order(Game *game, Player **sorted, ModeWinner *winner) {
     if (game->mode) mode_sort_players(game, sorted, count);
     else count = game_sorted_players(game, sorted, GAME_LEADERBOARD_MAX);
 
-    *winner = (ModeWinner) {0, NULL};
+    *winner = (ModeWinner) {0, NULL, 0};
     if (game->mode) *winner = mode_pick_winner(game);
     else if (count) winner->player = sorted[0];
     return count;
@@ -589,18 +595,21 @@ void game_end_round(Game *game) {
     if (game_is_ranked(game) && rules->ranked.shutdown_ms > 0) end_timer = rules->ranked.shutdown_ms / 1000.0f;
     game->end_timer = end_timer > 0.0f ? end_timer : GAME_END_TIMER;
     game_set_state(game, GAME_STATE_POST_MATCH); // v10 endGame: setGameState(POST_MATCH)
-    game->round_timer = 0.0f;
     game->round_seconds_sent = -1;
     game->nuke_timer = 0.0f;
     game->nuke_player = NULL;
+    game_reset_bombardment(game); // v10 holds it while endTimer runs (Bombardment.update) and resets it with the next round
 
+    // endGame: the end order (endSort / orderByScore) and the winner, then mode.onPreEnd / onEnd (Zombies' wave
+    // score, Raid's times and run challenges). v10.0.3 sorts once, before onPreEnd, and builds the end table in that
+    // order (deob-10.0.3.js:221647-221650, 221689, 221851-221880): Zombies' onPreEnd gives everyone the same score,
+    // so a second sort would put its board back in join order. The winCondition and Raid's onEnd read the clock
+    // left (gameTimerP: a "skip" end keeps it, deob-10.0.3.js:182870-182873, 118375, 118391), so it is cleared after.
     Player *sorted[GAME_LEADERBOARD_MAX];
     ModeWinner winner;
-    size_t count = game_end_order(game, sorted, &winner);
-    if (game->mode) { // v7 mode.onPreEnd / onEnd (Zombies wave score, Raid times), then the end order again (WP-D)
-        mode_on_game_end(game);
-        count = game_end_order(game, sorted, &winner);
-    }
+    const size_t count = game_end_order(game, sorted, &winner);
+    if (game->mode) mode_on_game_end(game);
+    game->round_timer = 0.0f;
 
     // endGame(): player.reward for every player (hooks.reward: accounts live in the server). The
     // reward hook folds in additionalReward (claimed KR Packages), then it resets (game.js:191331).
@@ -633,6 +642,7 @@ void game_end_round(Game *game) {
         game_send_end_medals(game, player); // WP-E part 2c: endData.mdls
         game_send_end(game, player, winner, &board, rewards);
     }
+    game_clear_player_poses(game); // v10 endGame: a posed player's pose goes with its END (deob-10.0.3.js:221901-221903)
 
     if (game->mode) mode_send_end(game, winner, sorted, count);
     bot_chat_on_match_end(game, &winner, sorted, count); // KrunkNative bot chat: one or two bots say gg (shared/src/bot_chat.c)
@@ -728,6 +738,11 @@ void game_player_left(Game *game, Player *player) {
         game->nuke_player = NULL;
         game->nuke_timer = 0.0f;
     }
+    // KrunkNative difference: v10 keeps bombing for a bombardment player who left (bombardmentPlayer stays
+    // a live object, deob-10.0.3.js:203473); KN frees the Player, so the waves stop and its bombs in the air
+    // go away, like the Nuke above
+    if (game->bombardment_player == player) game_reset_bombardment(game);
+    game_end_streak_projectiles(game, player->uid);
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *other = game->players[i];
@@ -864,17 +879,19 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                 }
 
                 if (nuke_reward) {
-                    // v7.1.4: "6" [Nuke medal, reward] and the "4" hit marker, then the score
+                    // v10.0.3 (deob-10.0.3.js:203374-203377): "6" [40, reward, 0, 1] (overlay.medalsList[40],
+                    // the "Nuked" icon medal) and the "4" hit marker, then players.score(nukePlayer, reward):
+                    // no isKill, so no killMlt / noScoreK (players.score :197847-197862)
                     NetKillMedalsPacket medals;
                     memset(&medals, 0, sizeof(medals));
                     medals.count = 1;
-                    snprintf(medals.medals[0].text, sizeof(medals.medals[0].text), "Nuke");
+                    snprintf(medals.medals[0].text, sizeof(medals.medals[0].text), "Nuked");
                     medals.medals[0].score = nuke_reward;
                     medals.kills = (int32_t) game->nuke_player->kills;
                     game_send(game, game->nuke_player->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals));
                     const NetHitPacket hit = {.target_uid = -1}; // send("4"): the hit marker and hit_0, no damage number
                     game_send(game, game->nuke_player->uid, NET_PACKET_HIT, &hit, sizeof(hit));
-                    player_score(game->nuke_player, nuke_reward, 1);
+                    player_score(game->nuke_player, nuke_reward, 0);
                 }
                 // v7 streaks.js: findTriggers("onNukeEnd", nukePlayer) in custom games; KN fires it on
                 // every map (official maps have no nuke triggers)
@@ -883,6 +900,8 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                 if (game->nuke_player && game->hooks.give_skin && pcg32_boundedrand(140) == 139) game_give_skin(game, game->nuke_player, 4040, "streak");
             }
         }
+
+        game_tick_bombardment(game, delta); // game.updateStreaks: Bombardment.update (deob-10.0.3.js:203477-203488)
 
         if (game->vote_kick) {
             game->vote_kick->timer = MAX(0.0f, game->vote_kick->timer - delta);

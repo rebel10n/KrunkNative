@@ -1,5 +1,8 @@
 #include <shared.h>
 #include <prop_hunt.h> // Prop Hunt: the disguise a spawn resets / gives
+#include <player_anim.h> // v10 PLAYER_ANIM: the Jump / Melee clips of an animated class model
+#include <net_ext.h>     // NET_PLAYER_CLIP_*
+#include <stalker.h> // v10 Stalker: noMovT / isHidden
 #include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
 #include <bot_chat.h>
@@ -80,7 +83,12 @@ Player *player_init(Game *game) {
 }
 
 void player_update_height(Player *player) {
-    player->height = game_constants.player_height - player->crouch_val * game_constants.crouch_distance;
+    float drop = player->crouch_val * game_constants.crouch_distance;
+    // v10 updateHeight (deob-10.0.3.js:193561-193566): on a rendering client the local player's pose bodyY
+    // moves the eye with the posed body (an emote's lowering); render_you is never set on an authority, which
+    // like v10's server keeps the plain height (the hit boxes do not follow the pose)
+    if (player->render_you && (player->pose.has & PLAYER_POSE_BODY_Y)) drop -= player->pose.body_y;
+    player->height = game_constants.player_height - drop;
 }
 
 // setClass: the class loadout of `player` from its class_index and secondary_index: the primary, the picked
@@ -244,6 +252,8 @@ void player_spawn(Player *player) {
     player->stuck_to_wall_dir = 0;
     player->last_stalker_leap = 0.0f;
     player->stalker_coyote_time = 0.0f;
+    player->no_move_time = 0.0f; // init: noMovT = 0, isHidden = false (deob-10.0.3.js:190674, :190729)
+    player->is_hidden = 0;
 
     player->air_time = 0.0f;
     player->covered_distance = 0.0f;
@@ -770,6 +780,9 @@ void player_movement_spawn(Player *player) {
     player->was_on_ground = 1;
     player->stop_crouch = player->was_stop_crouch = 0;
     player->height_old = player->height;
+    // resetMovVals (deob-10.0.3.js:195029-195040, on spawn :191059 and on a class change :190817): the
+    // movement scheme's sendVals back to 0 (tmpVel {0, 0, 0}); the cmd and overlay copies go with them
+    memset(&player->scheme, 0, sizeof(player->scheme));
 }
 
 // A map object's collision box in v7 terms: centre x/z, half width w / length l, bottom and top.
@@ -1298,6 +1311,7 @@ void player_jump(Player *player) {
     const float vel = hypotf(player->velocity.x, player->velocity.z);
     player->velocity.x -= jump_push * vel * sinf(player->direction.y);
     player->velocity.z -= jump_push * vel * cosf(player->direction.y);
+    player_play_clip(player, NET_PLAYER_CLIP_JUMP); // `if (!recon) playClip(player, "Jump", 1)` (deob-10.0.3.js:195271; authority only)
 }
 
 // players.tryJump: autoJump jumps on every grounded tick the key is held (v7 sends jump while
@@ -1436,12 +1450,554 @@ void player_inspect_weapon(Player *player) {
     }
 }
 
-// v7.1.4 index.js gameLoop, a frame that samples no input frame (netRate): `if ((tmpPlayer.config.movSch
-// || 0) == 0 && tmpPlayer.config.trnSp == 1) { yDire = CONTROLS.yDr; xDire = cameraYaw;
-// updateMshClient }`. Other schemes and turn speeds keep the look of the last input frame.
-int player_look_follows_camera(const Player *player) {
+// ---------------------------------------------------------------- v10.0.3 movement schemes
+// Krunker v10.0.3 game.movement (deob-10.0.3.js:18553-19199), picked by the class movSch
+// (`game.movement[this.config.movSch || 0]`, deob-10.0.3.js:191275). procInputs calls the scheme's
+// dir (the look, deob-10.0.3.js:191385-191391, under defaultRotation), mov (the acceleration,
+// :191716-191722, under defaultMovement and not stuck to a wall) and vel (the integration,
+// :191741-191747, under defaultVelocity); a scheme without one runs Default's (movement[0]). The
+// scheme keys: airDecel (SRM 1: the air decel), noThrow (SRM: no aiming, :191450) and noWallJ (SRM:
+// no wall jumps, :192436). Everything runs in player_proc_input on both sides, so the prediction
+// and the server agree; SRM's and Vehicle's sendVals reach the owner with each reconciliation
+// (NET_EXT_PLAYER_MOVE_VALS, shared/include/net_ext.h). doc/v10/movement-schemes.md.
+//
+// movDir is config.movDirs[input[4]] + movDrP * PI (deob-10.0.3.js:191302-191305), undefined
+// without a move key or while KrunkScript disables it. SRM's keys and dashes and Vehicle's
+// throttle and steering read the raw input array (input[4] / [6] / [7]), which KrunkScript's
+// disabledInputs never touch: a script that disables movDir still drives a vehicle.
+
+// SRM's config (deob-10.0.3.js:18685-18726)
+#define SRM_FRICTION 0.006
+#define SRM_BASE_SPEED 0.07
+#define SRM_GROUND_ACCEL 0.014
+#define SRM_GROUND_DECEL 0.01             // groundDeacceleration: the friction's minimum speed
+#define SRM_AIR_ACCEL 0.00085
+#define SRM_AIR_DECEL 0.00085             // airDeacceleration: accelerating against the velocity
+#define SRM_SIDE_STRAFE_ACCEL 0.05
+#define SRM_SIDE_STRAFE_SPEED 0.01
+#define SRM_MIN_RAMP_SLIDE_VELOCITY 0.125
+#define SRM_ON_WALL_MAX_MS 116.0          // onWallMaxFrames
+#define SRM_FRICTION_DELAY_MS 33.0        // mov: onGroundFrames <= 33 lands without friction or ground move
+#define SRM_WISH_DASH_MS 300.0f           // mov: input[6] keeps the dash wanted for 300 ms
+
+typedef struct {
+    double acceleration, cooldown, speed, height;
+} SrmDash;
+static const SrmDash k_srm_dash = {1000.0, 1000.0, 0.09999500000000001, 0.035};
+static const SrmDash k_srm_walldash = {1000.0, 1150.0, 0.052500000000000005, 0.07};
+// wallNormal[onWall - 1] (onWall 1: +x side of the wall, 2: -x, 3: +z, 4: -z)
+static const double k_srm_wall_normal[4][3] = {{1.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}, {0.0, 0.0, 1.0}, {0.0, 0.0, -1.0}};
+
+MovementScheme player_movement_scheme(const Player *player) {
+    const int scheme = movement_knobs(player)->scheme;
+    return scheme > 0 && scheme < MOVEMENT_SCHEME_COUNT ? (MovementScheme) scheme : MOVEMENT_SCHEME_DEFAULT;
+}
+
+// (trnSp || 1) * (trnSpd || 1): Default.dir's and Vehicle.dir's turn speed
+static float movement_turn_speed(const Player *player) {
+    const ClassConfig *class_config = movement_class(player);
+    return MOVEMENT_OR(movement_knobs(player)->turn_rate, 1.0f) * (class_config ? MOVEMENT_OR(class_config->turn_speed, 1.0f) : 1.0f);
+}
+
+// Default.dir at a turn speed of 1 or more copies the input look; Vehicle and MMORPG turn the body
+// themselves, and a slower turn lags it. The camera then keeps the mouse look (v10's camera is
+// always CONTROLS; the player model is xDire / yDire).
+int player_direction_is_look(const Player *player) {
+    const MovementScheme scheme = player_movement_scheme(player);
+    return scheme != MOVEMENT_SCHEME_VEHICLE && scheme != MOVEMENT_SCHEME_MMORPG && movement_turn_speed(player) >= 1.0f;
+}
+
+// KrunkNative's Input.move_dir k (0 forward, clockwise, -1 none) as v10's input[4] index i:
+// config.movDirs[i] = -PI + (i + 1) * PI / 4 (deob-10.0.3.js:19251-19253), so i = (k + 1) % 8.
+static int movement_v10_dir(const int move_dir) {
+    return move_dir >= 0 && move_dir <= 7 ? (move_dir + 1) % 8 : -1;
+}
+
+// movDir: config.movDirs[i] + (movDrP || 0) * PI in v10's double
+static double movement_dir_angle(const Player *player, const int v10_dir) {
+    return -M_PI + (double) (v10_dir + 1) * M_PI / 4.0 + movement_js(movement_knobs(player)->move_dir_offset) * M_PI;
+}
+
+// The air decel a scheme sets (`IÍîiíîî.airDecel || this.config.airDec || config.airDecel`, :191631), 0 = none
+static float movement_scheme_air_decel(const Player *player) {
+    return player_movement_scheme(player) == MOVEMENT_SCHEME_SRM ? 1.0f : 0.0f;
+}
+
+static int movement_scheme_no_throw(const Player *player) {
+    return player_movement_scheme(player) == MOVEMENT_SCHEME_SRM;
+}
+
+static int movement_scheme_no_wall_jump(const Player *player) {
+    return player_movement_scheme(player) == MOVEMENT_SCHEME_SRM;
+}
+
+// Default.dir (deob-10.0.3.js:18555-18588): at a turn speed (trnSp || 1) * (trnSpd || 1) of 1 or more
+// xDire / yDire take the input look; below it they turn toward it at speed * 0.01 rad per ms.
+static void scheme_default_dir(Player *player, const Input *input, const float delta) {
+    const float turn = movement_turn_speed(player);
+    if (turn >= 1.0f) {
+        player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
+        player->direction.y = input->y_dir;
+    } else {
+        const float pi2 = (float) M_PI * 2.0f, step = turn * 0.01f * delta * 1000.0f;
+        const float d = fmodf(player->direction.y - input->y_dir + pi2, pi2);
+        const float move = MIN(MIN(fabsf(d - pi2), d), step);
+        player->direction.y = fmodf(player->direction.y + (d - (float) M_PI >= 0.0f ? 1.0f : -1.0f) * move + pi2, pi2);
+        if (player->direction.x < input->x_dir) player->direction.x = MIN(player->direction.x + step, input->x_dir);
+        else if (player->direction.x > input->x_dir) player->direction.x = MAX(player->direction.x - step, input->x_dir);
+    }
+}
+
+// Vehicle.dir (deob-10.0.3.js:19107-19141): on the ground the W keys (input[4] 0..2) build forwardV by
+// vhpF per 60 fps frame up to vhmP, the S keys (4..6) reverseV by vhrF up to vhmR, both bleed off
+// without their keys. Above vhtrsh forwardV (or in reverse) the D keys (2..4) and A keys (0, 6, 7)
+// steer angVel by (trnSp || 1) [* vhtrsv * 10 * (forwardV + reverseV)] * (trnSpd || 1) * 0.004 a
+// frame, mirrored in reverse. The look (input[2] / [3]) does not turn a vehicle.
+static void scheme_vehicle_dir(Player *player, const int v10_dir, const double dt_ms) {
+    if (!player->on_ground) return;
+    const ClassOverrides *vh = class_overrides(movement_class(player));
+    MovementSchemeState *s = &player->scheme;
+    const double frames = dt_ms / (1000.0 / 60.0);
+    const int forward = v10_dir == 0 || v10_dir == 1 || v10_dir == 2;
+    const int reverse = v10_dir == 4 || v10_dir == 5 || v10_dir == 6;
+    double forward_v = s->forward_v, reverse_v = s->reverse_v;
+    forward_v += (forward ? 1.0 : -1.0) * movement_js(vh->vehicle_power_force) * frames;
+    reverse_v += (reverse ? 1.0 : -1.0) * movement_js(vh->vehicle_reverse_force) * frames;
+    forward_v = MAX(0.0, MIN(movement_js(vh->vehicle_max_power), forward_v));
+    reverse_v = MAX(0.0, MIN(movement_js(vh->vehicle_max_reverse), reverse_v));
+    s->forward_v = (float) forward_v;
+    s->reverse_v = (float) reverse_v;
+
+    const ClassConfig *class_config = movement_class(player);
+    double turn = movement_js(MOVEMENT_OR(movement_knobs(player)->turn_rate, 1.0f));
+    if (vh->vehicle_turn_conv) turn *= movement_js(vh->vehicle_turn_conv) * 10.0 * (forward_v + reverse_v);
+    turn *= class_config ? movement_js(MOVEMENT_OR(class_config->turn_speed, 1.0f)) : 1.0;
+    turn *= 0.004;
+    const double sign = reverse ? -1.0 : 1.0;
+    if (forward_v >= movement_js(vh->vehicle_turn_threshold) || reverse) {
+        double ang_vel = s->ang_vel;
+        if (v10_dir == 2 || v10_dir == 3 || v10_dir == 4) ang_vel -= sign * frames * turn;
+        if (v10_dir == 0 || v10_dir == 6 || v10_dir == 7) ang_vel += sign * frames * turn;
+        s->ang_vel = (float) ang_vel;
+    }
+}
+
+// MMORPG.dir (deob-10.0.3.js:19178-19189): with a move key the body (xDire) turns toward the
+// direction it moves in (mouseX - movDir - PI / 2) at 0.012 rad per ms; the pitch (yDire) is never
+// set, and without a key the body keeps its heading while the camera turns freely.
+static void scheme_mmorpg_dir(Player *player, const Input *input, const int v10_dir, const double dt_ms) {
+    if (v10_dir < 0) return; // movDir != null
+    const double pi2 = M_PI * 2.0, step = dt_ms * 0.012;
+    const double target = movement_js(input->y_dir) - movement_dir_angle(player, v10_dir) - M_PI / 2.0;
+    const double d = fmod(movement_js(player->direction.y) - target + pi2, pi2);
+    const double move = MIN(MIN(fabs(d - pi2), d), step);
+    player->direction.y = (float) fmod(movement_js(player->direction.y) + (d - M_PI >= 0.0 ? 1.0 : -1.0) * move + pi2, pi2);
+}
+
+// movement[movSch].dir || movement[0].dir (deob-10.0.3.js:191385-191391). `raw_dir` is input[4]
+// as sent (Vehicle reads it unmasked), `masked_dir` the movDir after KrunkScript (MMORPG's).
+static void movement_scheme_dir(Player *player, const Input *input, const int raw_dir, const int masked_dir, const float delta) {
+    const double dt_ms = round((double) delta * 10000.0) / 10.0;
+    switch (player_movement_scheme(player)) {
+        case MOVEMENT_SCHEME_VEHICLE: scheme_vehicle_dir(player, movement_v10_dir(raw_dir), dt_ms); break;
+        case MOVEMENT_SCHEME_MMORPG: scheme_mmorpg_dir(player, input, movement_v10_dir(masked_dir), dt_ms); break;
+        default: scheme_default_dir(player, input, delta); break;
+    }
+}
+
+// Default.mov (deob-10.0.3.js:18589-18605): the keys relative to the look (xDire). A "3rd Person"
+// class camera (camType 1) without mouse rotation (camRot) moves relative to its fixed offset
+// instead: -getDir(camOffX, camOffZ, 0, 0) % PI. Diagonals (movDir off 0, +-PI/2 and PI) get
+// config.strafeSpd unless the mode is realMov; noclip flies up or down with the pitch.
+static void scheme_default_mov(Player *player, const float accel_in, const int v10_dir) {
+    if (v10_dir < 0) return; // movDir !== undefined (the strafe factor before it changes nothing then)
+    double origin = movement_js(player->direction.y);
+    const ClassOverrides *cam = class_overrides(movement_class(player));
+    if (cam->cam_type == 1 && !cam->cam_rotation) origin = fmod(-atan2(movement_js(cam->cam_offset[2]), movement_js(cam->cam_offset[0])), M_PI);
+    const double move_dir = movement_dir_angle(player, v10_dir);
+    float accel = accel_in;
+    if (move_dir != M_PI && move_dir != 0.0 && move_dir != M_PI / 2.0 && move_dir != -M_PI / 2.0 && !movement_real(player)) accel *= player->game->config.strafe_speed;
+    // in double like v10: 90 degrees off the look direction the cosine is a tiny difference of two
+    // angles, and float error there drifts the player sideways over a long climb
+    player->velocity.x += (float) (accel * cos(move_dir - origin));
+    player->velocity.z += (float) (accel * sin(move_dir - origin));
+    if (player->noclip) player->velocity.y += accel * (player->direction.x * (move_dir > 0.0 ? -1.0f : 1.0f));
+}
+
+// Dir Only.mov (deob-10.0.3.js:18673-18679): the keys move along the world axes, the look ignored
+// (W -z, D +x; no strafeSpd).
+static void scheme_dir_only_mov(Player *player, const float accel, const int v10_dir) {
+    if (v10_dir < 0) return;
+    const double move_dir = movement_dir_angle(player, v10_dir);
+    player->velocity.x += (float) (accel * cos(move_dir));
+    player->velocity.z += (float) (accel * sin(move_dir));
+}
+
+// MMORPG.mov (deob-10.0.3.js:19190-19197): the keys relative to the input look (the camera), not to
+// the body: angle = -((mouseX - movDir - PI / 2) % 2PI) - PI / 2. No strafeSpd.
+static void scheme_mmorpg_mov(Player *player, const Input *input, const float accel, const int v10_dir) {
+    if (v10_dir < 0) return;
+    double angle = fmod(movement_js(input->y_dir) - movement_dir_angle(player, v10_dir) - M_PI / 2.0, M_PI * 2.0);
+    angle = -angle - M_PI / 2.0;
+    player->velocity.x += (float) (accel * cos(angle));
+    player->velocity.z += (float) (accel * sin(angle));
+}
+
+// ---- SRM (deob-10.0.3.js:18680-19021): Quake-style movement. On the ground friction and a
+// baseSpeed acceleration (no friction for the first 33 ms after a landing, so a held jump keeps a
+// bhop's speed), in the air the classic strafe acceleration (side keys alone: sideStrafeSpeed /
+// sideStrafeAcceleration), the jump key auto-hops, the aim key dashes (on the ground) or wall-dashes
+// (off a wall in the air, the velocity reflected off it), and a ramp hit fast enough bounces.
+
+static double srm_len_xz(const vec3 v) {
+    return sqrt((double) v.x * v.x + (double) v.z * v.z);
+}
+
+// UpdateVelocity: tmpVel = velocity
+static void srm_update_velocity(Player *player) {
+    player->scheme.tmp_vel = player->velocity;
+}
+
+// AutoBhop: players.jump(player); wishJump = justJumped = true
+static void srm_auto_bhop(Player *player, int *just_jumped) {
+    player_jump(player);
+    *just_jumped = 1;
+}
+
+// iíïiïíí(ramp) (deob-10.0.3.js:28436-28444): the ramp's slope in degrees (dir 0 / PI along x, else z)
+static double srm_ramp_angle(const Object *ramp) {
+    const vec3 size = ramp->scale;
+    const double run = ramp->direction == 0 || ramp->direction == 2 ? size.x : size.z;
+    return atan((double) size.y / run) * 57.29577951308232;
+}
+
+// a := (x, y, z) of tmpVel along nDir[ramp.dir]: "x" for dir 0 / PI, "z" for PI / 2 / 1.5 PI
+static double srm_ramp_axis_speed(const Player *player, const Object *ramp) {
+    return ramp->direction == 0 || ramp->direction == 2 ? player->scheme.tmp_vel.x : player->scheme.tmp_vel.z;
+}
+
+// SetAccelerationValues (deob-10.0.3.js:18984-19020, isYou): the strafe overlay's angles. Only the HUD
+// reads them (client/src/vfx.c). v10 also zeroes tmpVel.y there; the next UpdateVelocity always
+// overwrites it before anything reads it, so that is left out.
+static void srm_overlay(Player *player, const double cmd[3], const double wishdir[3], const double wishspeed, const double accel, const double dt_ms) {
+    MovementSchemeState *s = &player->scheme;
+    if (!(player->air_time > 0.0f && (s->cmd_forward || s->cmd_right))) {
+        s->overlay_valid = 0;
+        return;
+    }
+    const double v[3] = {s->tmp_vel.x, 0.0, s->tmp_vel.z};
+    const double w[3] = {wishdir[0], 0.0, wishdir[2]};
+    const double lc = sqrt(cmd[0] * cmd[0] + cmd[2] * cmd[2]);
+    const double lv = sqrt(v[0] * v[0] + v[2] * v[2]);
+    const double lw = sqrt(w[0] * w[0] + w[2] * w[2]);
+#define SRM_SIGN_CROSS(a, b) ((a)[0] * (b)[2] - (a)[2] * (b)[0] < 0.0 ? -1.0 : (a)[0] * (b)[2] - (a)[2] * (b)[0] > 0.0 ? 1.0 : 0.0)
+    const double base = acos((cmd[0] * w[0] + cmd[2] * w[2]) / (lc * lw)) * SRM_SIGN_CROSS(w, cmd);
+    const double side = SRM_SIGN_CROSS(w, v);
+    const double optimal = side * acos(wishspeed * (1.0 - accel * dt_ms) / (lv * lw)) - base;
+    double minimum = wishspeed / (2.0 - lw * lw) * lw / lv;
+    minimum = side * acos(minimum < 1.0 ? minimum : 1.0) - base;
+    const double maximum = side * acos(accel * -0.5 * dt_ms * wishspeed * lw / lv) - base;
+    double current = SRM_SIGN_CROSS(cmd, v) * acos((v[0] * cmd[0] + v[2] * cmd[2]) / (lv * lc));
+#undef SRM_SIGN_CROSS
+    const double pi2 = M_PI * 2.0;
+    current += trunc((minimum - current) / pi2) * pi2;
+    current += trunc((maximum - current) / pi2) * pi2;
+    s->overlay[0] = (float) current;
+    s->overlay[1] = (float) optimal;
+    s->overlay[2] = (float) minimum;
+    s->overlay[3] = (float) maximum;
+    s->overlay_valid = 1;
+}
+
+// Accelerate (deob-10.0.3.js:18923-18940): crouching halves the wanted speed; add up to it along wishdir
+static void srm_accelerate(Player *player, const double wishdir[3], double wishspeed, const double accel, const double dt_ms) {
+    const MovementSchemeState *s = &player->scheme;
+    wishspeed *= 1.0 - movement_js(player->crouch_val) / 2.0;
+    const double add = wishspeed - (s->tmp_vel.x * wishdir[0] + s->tmp_vel.y * wishdir[1] + s->tmp_vel.z * wishdir[2]);
+    double accel_speed = accel * dt_ms * wishspeed;
+    if (player->is_you) {
+        const double cmd[3] = {s->cmd_right, 0.0, s->cmd_forward};
+        srm_overlay(player, cmd, wishdir, wishspeed, accel, dt_ms);
+    }
+    if (!(add <= 0.0)) {
+        if (accel_speed > add) accel_speed = add;
+        player->velocity.x += (float) (accel_speed * wishdir[0]);
+        player->velocity.z += (float) (accel_speed * wishdir[2]);
+    }
+}
+
+// Dash (deob-10.0.3.js:18839-18881): "dash" pushes along the move keys (the last tick's cmd; along the
+// look without keys), "walldash" reflects tmpVel off the wall (x 0.7 from a ramp) and pushes along it,
+// or straight off the wall when standing still against it without keys. The speed is at least the
+// current one; velocity.y becomes the dash's height (a ramp walldash adds the ramp speed).
+static void srm_dash(Player *player, const int wall, const int v10_dir, const Object *ramp, const int from_ramp, const double dt_ms, int *just_jumped) {
+    MovementSchemeState *s = &player->scheme;
+    const SrmDash *dash = wall ? &k_srm_walldash : &k_srm_dash;
+    const double *normal = k_srm_wall_normal[player->on_wall >= 1 && player->on_wall <= 4 ? player->on_wall - 1 : 0];
+    int still = 0;
+    if (wall) {
+        // reflect: v - n * 2 (v . n)
+        const double dot = s->tmp_vel.x * normal[0] + s->tmp_vel.z * normal[2];
+        const double rx = s->tmp_vel.x - normal[0] * dot * 2.0, rz = s->tmp_vel.z - normal[2] * dot * 2.0;
+        still = fabsf(s->tmp_vel.x) <= 0.0075f && fabsf(s->tmp_vel.z) <= 0.0075f && v10_dir < 0;
+        s->tmp_vel.x = (float) (rx * (from_ramp ? 0.7 : 1.0));
+        s->tmp_vel.z = (float) (rz * (from_ramp ? 0.7 : 1.0));
+    }
+    s->wish_dash = 0.0f;
+    if (wall) s->walldash_timer = (float) dash->cooldown;
+    else s->dash_timer = (float) dash->cooldown;
+
+    double dir[3];
+    if (!wall) {
+        if (v10_dir < 0 || (s->cmd_right == 0 && s->cmd_forward == 0)) {
+            dir[0] = -sin(movement_js(player->direction.y)), dir[1] = 0.0, dir[2] = -cos(movement_js(player->direction.y));
+        } else {
+            const double angle = movement_dir_angle(player, v10_dir) - movement_js(player->direction.y);
+            dir[0] = cos(angle), dir[1] = 0.0, dir[2] = sin(angle);
+        }
+    } else if (still) {
+        dir[0] = normal[0], dir[1] = 0.0, dir[2] = normal[2];
+    } else {
+        dir[0] = s->tmp_vel.x, dir[1] = 0.0, dir[2] = s->tmp_vel.z;
+    }
+    const double len = sqrt(dir[0] * dir[0] + dir[2] * dir[2]);
+    const double inv = 1.0 / (len ? len : 1.0); // normalize: a zero vector stays zero
+    dir[0] *= inv, dir[2] *= inv;
+
+    const double speed = MAX(dash->speed + dt_ms / (wall ? 25000.0 : 1500.0), srm_len_xz(s->tmp_vel));
+    if (ramp || from_ramp) srm_auto_bhop(player, just_jumped);
+    player->velocity.x = 0.0f;
+    if (from_ramp && ramp) {
+        // Intentional difference: v10 scales the ramp speed by iíïiïíí(player) / 45, the slope of the
+        // *player*, which has no dir: undefined, so velocity.y became NaN (a falsy NaN then froze the
+        // vertical integration). The ramp's slope is the evident intent and keeps the numbers finite.
+        player->velocity.y = (float) (dash->height + fabs(srm_ramp_axis_speed(player, ramp)) * (srm_ramp_angle(ramp) / 45.0) * 0.8);
+    } else {
+        player->velocity.y = (float) dash->height;
+    }
+    player->velocity.z = 0.0f;
+    srm_update_velocity(player);
+    srm_accelerate(player, dir, speed, dash->acceleration, dt_ms);
+}
+
+// RampBounce (deob-10.0.3.js:18959-18978): landing on a ramp turns the fall into speed down the
+// slope (tmpVel.y * min(1, slope / 45) * 0.75 along the ramp's dir); a held jump hops off it.
+static void srm_ramp_bounce(Player *player, const Object *ramp, const double angle, const int jump, int *just_jumped) {
+    const double bounce = player->scheme.tmp_vel.y * MIN(1.0, angle / 45.0) * 0.75;
+    if (jump) srm_auto_bhop(player, just_jumped);
+    switch (ramp->direction) {
+        case 0: player->velocity.x += (float) bounce; break;
+        case 1: player->velocity.z += (float) bounce; break;
+        case 2: player->velocity.x -= (float) bounce; break;
+        case 3: player->velocity.z -= (float) bounce; break;
+        default: break;
+    }
+    srm_update_velocity(player);
+}
+
+// collidingRamp: map.manager.getGridArrays(x, y, z).find(o => o.ramp && player.collides(o)), the first
+// ramp of the player's grid cell (map order) the player's box touches
+static const Object *srm_colliding_ramp(const Player *player) {
+    const Map *map = player->game->map;
+    const int cell[3] = {
+        (int) floorf(player->position.x / MOVEMENT_QUAD_SIZE),
+        (int) floorf(player->position.y / MOVEMENT_QUAD_SIZE),
+        (int) floorf(player->position.z / MOVEMENT_QUAD_SIZE),
+    };
+    for (size_t i = 0; map && i < map->object_count; i++) {
+        const Object *object = map->objects[i];
+        if (!object->ramp || object->complex_coll || object->collision_type == COLLISION_TYPE_NONE) continue;
+        MovementBox box;
+        movement_box(object, &box);
+        if (movement_in_cell(cell, &box, object) && movement_collides(player, object, &box)) return object;
+    }
+    return NULL;
+}
+
+// SRM.mov (deob-10.0.3.js:18727-18838)
+static void scheme_srm_mov(Player *player, const Input *raw_input, const int v10_dir, const double dt_ms) {
+    MovementSchemeState *s = &player->scheme;
+    const int raw_dir = movement_v10_dir(raw_input->move_dir); // SetMovementDir: input[4] unmasked
+    int just_jumped = 0;
+
+    if (player->on_ground) s->on_ground_ms += (float) dt_ms;
+    else s->on_ground_ms = 0.0f;
+    if (player->on_wall) s->on_wall_ms += (float) dt_ms;
+    else s->on_wall_ms = 0.0f;
+
+    const Object *ramp = player->on_ground ? srm_colliding_ramp(player) : NULL;
+    if (s->on_wall_ms <= SRM_ON_WALL_MAX_MS) {
+        // tmpVel.x || velocity.x: a wall contact (collision zeroed the velocity) keeps the speed it came with
+        if (s->tmp_vel.x) player->velocity.x = s->tmp_vel.x;
+        if (s->tmp_vel.z) player->velocity.z = s->tmp_vel.z;
+    }
+    const double angle = ramp ? srm_ramp_angle(ramp) : 0.0;
+    const double min_slide = (double) (int32_t) (200.0 - angle * SRM_MIN_RAMP_SLIDE_VELOCITY * 1.25 * 25.0) / 1000.0; // (200 - a * ...) | 0
+    const double flat_speed = srm_len_xz(s->tmp_vel);
+    if (ramp && s->tmp_vel.y < 0.0f && player->on_ground && (min_slide * -0.5 / s->tmp_vel.y <= 0.1 || flat_speed < min_slide)) {
+        srm_ramp_bounce(player, ramp, angle, raw_input->jump, &just_jumped);
+    } else if (raw_input->jump && (!ramp || flat_speed < min_slide)) {
+        // wishJump is cleared at the top of every tick, so only airTime, velocity.y and wishDash gate it
+        if (player->air_time == 0.0f && player->velocity.y == 0.0f && !s->wish_dash) srm_auto_bhop(player, &just_jumped);
+    } else if (player->on_ground && ramp && flat_speed >= min_slide) {
+        if (s->wish_dash && s->walldash_timer <= 0.0f && player->on_wall) srm_dash(player, 1, v10_dir, ramp, 1, dt_ms, &just_jumped);
+        srm_update_velocity(player);
+    }
+
+    if (raw_input->scope) s->wish_dash = SRM_WISH_DASH_MS;
+    if (s->wish_dash > 0.0f) s->wish_dash = MAX(0.0f, s->wish_dash - (float) dt_ms);
+    if (s->dash_timer > 0.0f) s->dash_timer = MAX(0.0f, s->dash_timer - (float) dt_ms);
+    if (s->walldash_timer > 0.0f) s->walldash_timer = MAX(0.0f, s->walldash_timer - (float) dt_ms);
+
+    if (s->dash_timer <= 0.0f && s->wish_dash && player->on_ground) {
+        srm_dash(player, 0, v10_dir, ramp, 0, dt_ms, &just_jumped);
+    } else if (s->walldash_timer <= 0.0f && s->wish_dash && !player->on_ground && player->on_wall) {
+        srm_dash(player, 1, v10_dir, ramp, 0, dt_ms, &just_jumped);
+    }
+    if (just_jumped) return;
+
+    // SetMovementDir (deob-10.0.3.js:18887-18902): input[4] 0..2 forward (-1), 4..6 back (+1); 2..4
+    // right (+1), 6, 7, 0 left (-1)
+    s->cmd_forward = (signed char) (raw_dir >= 0 && raw_dir <= 2 ? -1 : raw_dir >= 4 && raw_dir <= 6 ? 1 : 0);
+    s->cmd_right = (signed char) (raw_dir >= 2 && raw_dir <= 4 ? 1 : raw_dir >= 6 || raw_dir == 0 ? -1 : 0);
+    srm_update_velocity(player);
+
+    // wishdir: (rightmove, 0, forwardmove) turned by xDire about y (iíîìïïi, deob-10.0.3.js:28407);
+    // nothing without movDir or keys
+    double wishdir[3] = {0.0, 0.0, 0.0};
+    if (v10_dir >= 0 && (s->cmd_right || s->cmd_forward)) {
+        const double yaw = movement_js(player->direction.y);
+        wishdir[0] = cos(yaw) * s->cmd_right + sin(yaw) * s->cmd_forward;
+        wishdir[2] = -sin(yaw) * s->cmd_right + cos(yaw) * s->cmd_forward;
+    }
+    const double friction_on = s->on_ground_ms <= SRM_FRICTION_DELAY_MS ? 0.0 : 1.0;
+    if (player->on_ground) {
+        // ApplyFriction (deob-10.0.3.js:18903-18922)
+        const double speed = srm_len_xz(s->tmp_vel);
+        const double drop = (speed < SRM_GROUND_DECEL ? SRM_GROUND_DECEL : speed) * SRM_FRICTION * dt_ms * friction_on;
+        double keep = MAX(0.0, speed - drop);
+        if (speed > 0.0) keep /= speed;
+        player->velocity.x = (float) (player->velocity.x * keep);
+        player->velocity.z = (float) (player->velocity.z * keep);
+        if (friction_on == 0.0) return;
+        // GroundMove (deob-10.0.3.js:18941-18946): normalized wishdir at baseSpeed + delta / 1000
+        const double len = sqrt(wishdir[0] * wishdir[0] + wishdir[2] * wishdir[2]);
+        const double inv = 1.0 / (len ? len : 1.0);
+        wishdir[0] *= inv, wishdir[2] *= inv;
+        srm_accelerate(player, wishdir, sqrt(wishdir[0] * wishdir[0] + wishdir[2] * wishdir[2]) * (SRM_BASE_SPEED + dt_ms / 1000.0), SRM_GROUND_ACCEL, dt_ms);
+    } else {
+        // AirMove (deob-10.0.3.js:18947-18958): the raw wishdir (a diagonal is sqrt 2 long)
+        double wishspeed = sqrt(wishdir[0] * wishdir[0] + wishdir[2] * wishdir[2]) * SRM_BASE_SPEED;
+        double accel = s->tmp_vel.x * wishdir[0] + s->tmp_vel.y * wishdir[1] + s->tmp_vel.z * wishdir[2] < 0.0 ? SRM_AIR_DECEL : SRM_AIR_ACCEL;
+        if (s->cmd_forward == 0 && s->cmd_right != 0) {
+            if (wishspeed > SRM_SIDE_STRAFE_SPEED) wishspeed = SRM_SIDE_STRAFE_SPEED;
+            accel = SRM_SIDE_STRAFE_ACCEL;
+        }
+        srm_accelerate(player, wishdir, wishspeed, accel, dt_ms);
+    }
+    srm_update_velocity(player);
+}
+
+// ---- Vehicle.mov (deob-10.0.3.js:19142-19167): forwardV - reverseV pushes along the heading (accel
+// * 120 per unit), x / z drift with vhdr per 60 fps frame (the exact integral, x speedX / speedZ),
+// and angVel turns the heading with vhaDr. The asset model's roll (meshRef, angVel * vhtL) is the
+// client's (a class "Model" asset; KrunkNative does not draw class assets yet).
+static void scheme_vehicle_mov(Player *player, const float accel, const double dt_ms) {
+    const ClassOverrides *vh = class_overrides(movement_class(player));
     const ClassMovement *knobs = movement_knobs(player);
-    return knobs->scheme == 0 && MOVEMENT_OR(knobs->turn_rate, 1.0f) == 1.0f;
+    MovementSchemeState *s = &player->scheme;
+    const double frames = dt_ms / (1000.0 / 60.0);
+    const double drag = movement_js(vh->vehicle_drag), angular_drag = movement_js(vh->vehicle_angular_drag);
+    const double push = (double) accel * 120.0 * ((double) s->forward_v - s->reverse_v);
+    const double yaw = movement_js(player->direction.y);
+    const double vx = player->velocity.x - sin(yaw) * push;
+    const double vz = player->velocity.z - cos(yaw) * push;
+    const double nvx = vx * pow(drag, frames), nvz = vz * pow(drag, frames);
+    player->position.x += (float) ((nvx - vx) / log(drag) * movement_js(MOVEMENT_OR(knobs->speed_x, 1.0f)));
+    player->position.z += (float) ((nvz - vz) / log(drag) * movement_js(MOVEMENT_OR(knobs->speed_z, 1.0f)));
+    player->velocity.x = (float) nvx;
+    player->velocity.z = (float) nvz;
+    const double ang = (double) s->ang_vel * pow(angular_drag, frames);
+    player->direction.y = (float) fmod(yaw + (ang - s->ang_vel) / log(angular_drag), M_PI * 2.0);
+    s->ang_vel = (float) ang;
+}
+
+// movement[movSch].mov || movement[0].mov (deob-10.0.3.js:191716-191722)
+static void movement_scheme_mov(Player *player, const Input *raw_input, const Input *input, const float accel, const double dt_ms) {
+    const int v10_dir = movement_v10_dir(input->move_dir); // movDir after KrunkScript's mask
+    switch (player_movement_scheme(player)) {
+        case MOVEMENT_SCHEME_FOLLOW_MOUSE: {
+            // Follow Mouse.mov (deob-10.0.3.js:18651-18656): always forward along the look, keys unused
+            const double angle = -movement_js(player->direction.y) - M_PI / 2.0;
+            player->velocity.x += (float) (accel * cos(angle));
+            player->velocity.z += (float) (accel * sin(angle));
+            break;
+        }
+        case MOVEMENT_SCHEME_MOVE_RIGHT:
+            // Move Right.mov (deob-10.0.3.js:18658-18662): velocity (0.01, -, 0) every tick
+            player->velocity.x = 0.01f;
+            player->velocity.z = 0.0f;
+            break;
+        case MOVEMENT_SCHEME_FLY: {
+            // Fly.mov (deob-10.0.3.js:18664-18671): always along the look, the pitch lifting it
+            const double yaw = movement_js(player->direction.y) + M_PI, pitch = movement_js(player->direction.x);
+            player->velocity.x += (float) (accel * sin(yaw) * cos(pitch));
+            player->velocity.z += (float) (accel * cos(yaw) * cos(pitch));
+            player->velocity.y += (float) (accel * sin(pitch));
+            break;
+        }
+        case MOVEMENT_SCHEME_DIR_ONLY: scheme_dir_only_mov(player, accel, v10_dir); break;
+        case MOVEMENT_SCHEME_SRM: scheme_srm_mov(player, raw_input, v10_dir, dt_ms); break;
+        case MOVEMENT_SCHEME_VEHICLE: scheme_vehicle_mov(player, accel, dt_ms); break;
+        case MOVEMENT_SCHEME_MMORPG: scheme_mmorpg_mov(player, input, accel, v10_dir); break;
+        default: scheme_default_mov(player, accel, v10_dir); break;
+    }
+}
+
+// Vehicle.vel (deob-10.0.3.js:19168-19175): only y moves here (Vehicle.mov moved x / z), with the
+// 0.9993 per ms decay integrated exactly; gravity still pulls it in procInputs.
+static void scheme_vehicle_vel(Player *player, const double dt_ms) {
+    if (!player->velocity.y) return;
+    const double decay = 0.9993;
+    const double v = player->velocity.y * pow(decay, dt_ms);
+    player->position.y += (float) ((v - player->velocity.y) / log(decay) * movement_js(MOVEMENT_OR(movement_knobs(player)->speed_y, 1.0f)));
+    player->velocity.y = (float) v;
+}
+
+// SYNC_PLAYER's sendVals (deob-10.0.3.js:222398-222403): the scheme's state after the acked input, in
+// sendVals order; the owner writes them back before its replay (:258289-258295). 0 = the scheme has none.
+int player_movement_send_vals(const Player *player, float vals[PLAYER_MOVE_VALS_MAX]) {
+    const MovementSchemeState *s = &player->scheme;
+    switch (player_movement_scheme(player)) {
+        case MOVEMENT_SCHEME_SRM: // onGroundFrames, onWallFrames, wishDash, dashTimer, walldashTimer, tmpVel
+            vals[0] = s->on_ground_ms, vals[1] = s->on_wall_ms, vals[2] = s->wish_dash, vals[3] = s->dash_timer;
+            vals[4] = s->walldash_timer, vals[5] = s->tmp_vel.x, vals[6] = s->tmp_vel.y, vals[7] = s->tmp_vel.z;
+            return 8;
+        case MOVEMENT_SCHEME_VEHICLE: // forwardV, reverseV, angVel
+            vals[0] = s->forward_v, vals[1] = s->reverse_v, vals[2] = s->ang_vel;
+            return 3;
+        default:
+            return 0;
+    }
+}
+
+void player_movement_apply_vals(Player *player, const int scheme, const float vals[PLAYER_MOVE_VALS_MAX], const int count) {
+    if (scheme != (int) player_movement_scheme(player)) return; // a class change raced the sync
+    for (int i = 0; i < count; i++) if (!isfinite(vals[i])) return;
+    MovementSchemeState *s = &player->scheme;
+    if (scheme == MOVEMENT_SCHEME_SRM && count == 8) {
+        s->on_ground_ms = vals[0], s->on_wall_ms = vals[1], s->wish_dash = vals[2], s->dash_timer = vals[3];
+        s->walldash_timer = vals[4], s->tmp_vel = (vec3) {vals[5], vals[6], vals[7]};
+    } else if (scheme == MOVEMENT_SCHEME_VEHICLE && count == 3) {
+        s->forward_v = vals[0], s->reverse_v = vals[1], s->ang_vel = vals[2];
+    }
+}
+
+// v10.0.3 gameLoop, a frame that samples no input frame (netRate): `if ((tmpPlayer.config.movSch || 0)
+// == 0 && tmpPlayer.config.trnSp == 1) { yDire = CONTROLS.yDr; xDire = cameraYaw; updateMsh }`
+// (deob-10.0.3.js:260853-260857). Other schemes and turn speeds keep the look of the last input frame.
+int player_look_follows_camera(const Player *player) {
+    return player_movement_scheme(player) == MOVEMENT_SCHEME_DEFAULT && MOVEMENT_OR(movement_knobs(player)->turn_rate, 1.0f) == 1.0f;
 }
 
 // JS Number.prototype.round(3) (2.js): Math.round(v * 1000) / 1000, halves toward +inf.
@@ -1563,23 +2119,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
     }
 
-    // movement.js[0].dir: below a turn speed of 1 (class trnSp * trnSpd) the look turns at most
-    // speed * 0.01 rad per ms
-    const ClassConfig *turn_class = movement_class(player);
-    const float turn = MOVEMENT_OR(knobs->turn_rate, 1.0f) * (turn_class ? MOVEMENT_OR(turn_class->turn_speed, 1.0f) : 1.0f);
-    if (!ks_player_allows(player, KS_PLAYER_DEFAULT_ROTATION)) {
-        // KrunkScript defaultRotation = false: the script turns the player (player.js:969)
-    } else if (turn >= 1.0f) {
-        player->direction.x = CLAMP(input->x_dir, -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
-        player->direction.y = input->y_dir;
-    } else {
-        const float pi2 = (float) M_PI * 2.0f, step = turn * 0.01f * delta * 1000.0f;
-        const float d = fmodf(player->direction.y - input->y_dir + pi2, pi2);
-        const float move = MIN(MIN(fabsf(d - pi2), d), step);
-        player->direction.y = fmodf(player->direction.y + (d - (float) M_PI >= 0.0f ? 1.0f : -1.0f) * move + pi2, pi2);
-        if (player->direction.x < input->x_dir) player->direction.x = MIN(player->direction.x + step, input->x_dir);
-        else if (player->direction.x > input->x_dir) player->direction.x = MAX(player->direction.x - step, input->x_dir);
-    }
+    // the movement scheme's dir, or Default's (deob-10.0.3.js:191385-191391); KrunkScript
+    // defaultRotation = false: the script turns the player
+    if (ks_player_allows(player, KS_PLAYER_DEFAULT_ROTATION)) movement_scheme_dir(player, input, raw_input->move_dir, input->move_dir, delta);
 
     const int feel_loadout_index = player->loadout_index;
 
@@ -1650,7 +2192,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // TODO: toggle aim (HUD)
         player->aim_val = 0.0f;
     } else if (player->weapon->zoom && (!player->weapon->no_aim || player->swap_timer > 0.0f)) {
-        const int can_scope = player->reload_timer <= 0.0f && player->swap_timer <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees));
+        // v10.0.3: also !movement[movSch].noThrow (SRM: the aim key dashes instead, deob-10.0.3.js:191450)
+        const int can_scope = player->reload_timer <= 0.0f && player->swap_timer <= 0.0f && (!player->weapon->melee || (player->can_throw && player->game->config.throwable_melees)) &&
+                              !movement_scheme_no_throw(player);
 
         if (input->scope && player->aim_val < 1.0f && can_scope) {
             player_cancel_inspect(player);
@@ -1764,7 +2308,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         if (player->on_ladder) decel = game_constants.ladder_decel;
         else if (player->on_terrain) decel = game_constants.terrain_decel;
         else if (player->on_ground) decel = MOVEMENT_OR(knobs->ground_decel, game_constants.ground_decel);
-        else decel = MOVEMENT_OR(knobs->air_decel, game_constants.air_decel);
+        else decel = MOVEMENT_OR(movement_scheme_air_decel(player), MOVEMENT_OR(knobs->air_decel, game_constants.air_decel)); // scheme airDecel first (:191631)
 
         if (player->can_slide_timer > 0.0f) {
             player->can_slide_timer -= delta;
@@ -1791,7 +2335,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
                 // on the S keys (movDirs 4..6).
                 const float vel = hypotf(player->velocity.x, player->velocity.z);
                 float yaw = player->direction.y;
-                const int v7_dir = input->move_dir >= 0 ? (input->move_dir + 1) % 8 : -1; // config.movDirs index
+                const int v7_dir = movement_v10_dir(raw_input->move_dir); // input[4] as sent (deob-10.0.3.js:191663-191665)
                 const ClassConfig *class_config = movement_class(player);
                 if ((knobs->free_slide || mode_movement->free_slide) && v7_dir >= 0) yaw -= (float) M_PI / 4.0f * (float) (v7_dir - 1);
                 else if (class_config && class_config->back_slide && v7_dir >= 4 && v7_dir <= 6) yaw += (float) M_PI;
@@ -1839,21 +2383,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         accel *= mode_speed_mlt(player->game, player); // Kranked bonuses.speed (player.js:1236, WP-D)
         accel *= player_has_perk(player, PERK_SPEED) ? 1.15f : 1.0f;
 
-        // movement.js[0].mov (defaultMovement): diagonal movDirs get config.strafeSpd unless realMov
-        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && !player->stuck_to_wall && input->move_dir >= 0) { // v10: not while stuck (v10:169764)
-            const float yaw_origin = player->direction.y; // TODO: camType 1 without camRot uses the camera offset
-            float strafe = 1.0f;
-            if (input->move_dir % 2 && !movement_real(player)) strafe = player->game->config.strafe_speed;
-
-            // in double like v7: 90 degrees off the look direction the cosine is a tiny difference
-            // of two angles, and float error there drifts the player sideways over a long climb
-            const double angle = -M_PI / 2.0 + M_PI / 4.0 * input->move_dir + movement_js(knobs->move_dir_offset) * M_PI - movement_js(yaw_origin);
-            player->velocity.x += (float) (accel * strafe * cos(angle));
-            player->velocity.z += (float) (accel * strafe * sin(angle));
-
-            // movDir > 0 (movDirs 4..7: back, back-diagonals, left) flies down
-            if (player->noclip) player->velocity.y += accel * strafe * (player->direction.x * (input->move_dir >= 3 && input->move_dir <= 6 ? -1.0f : 1.0f));
-        }
+        // the movement scheme's mov, or Default's (deob-10.0.3.js:191716-191722): defaultMovement, not
+        // while stuck to a wall
+        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && !player->stuck_to_wall) movement_scheme_mov(player, raw_input, input, accel, dt_ms);
 
         if (!contact) {
             if (player->x_vel_cylinder) {
@@ -1871,7 +2403,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // the full yaw change while holding right or forward-right (turning right) and left or
         // forward-left (turning left). v3.1.1: x0.73, pure strafe keys only.
         if (!contact && yaw_delta && player->game->config.air_strafe &&
-            (((input->move_dir == 2 || input->move_dir == 1) && yaw_delta > 0.0f) || ((input->move_dir == 6 || input->move_dir == 7) && yaw_delta < 0.0f))) {
+            (((raw_input->move_dir == 2 || raw_input->move_dir == 1) && yaw_delta > 0.0f) || ((raw_input->move_dir == 6 || raw_input->move_dir == 7) && yaw_delta < 0.0f))) { // input[4] (deob-10.0.3.js:191736)
             const float vel = hypotf(player->velocity.x, player->velocity.z);
             const float dir = atan2f(-player->velocity.z, -player->velocity.x) + yaw_delta;
 
@@ -1879,10 +2411,12 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             player->velocity.z = vel * sinf(dir + (float) M_PI);
         }
 
-        // movement.js[0].vel
+        // the movement scheme's vel, or Default's (deob-10.0.3.js:191741-191747; Default.vel :18606-18648)
         const float speed_x = MOVEMENT_OR(knobs->speed_x, 1.0f), speed_y = MOVEMENT_OR(knobs->speed_y, 1.0f), speed_z = MOVEMENT_OR(knobs->speed_z, 1.0f);
         if (!ks_player_allows(player, KS_PLAYER_DEFAULT_VELOCITY)) {
             // KrunkScript defaultVelocity = false: no integration or friction (player.js:1264)
+        } else if (player_movement_scheme(player) == MOVEMENT_SCHEME_VEHICLE) {
+            scheme_vehicle_vel(player, dt_ms);
         } else if (player->game->config.fixed_movement && !player->noclip) {
             // fixMov: the exact integral of the per-ms decay, x += (v d^t - v) / ln d
             if (player->velocity.x) {
@@ -1929,6 +2463,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // player.js:1271-1290: jump lets go, then the rope reels in and holds the player on its sphere
         if (input->jump) player_end_grapple(player);
         if (player->grapple.active) player_grapple_pull(player, dt, decel);
+
+        // v10 noMovT / isHidden, outside replays (deob-10.0.3.js:191766-191779; shared/src/stalker.c)
+        if (!recon) stalker_update_hidden(player, delta);
 
         if (!input->shoot && !recon) player->doing_interact = 0;
 
@@ -2123,7 +2660,8 @@ weapon_done:;
 
     // Wall jump: at most wallJumpMax per airborne period (v3.1.1: unlimited); the class / mode
     // wallJV, wallJYV and config.wallJP shape it. v10: not while stuck to a wall (v10:170155).
-    if (!move_lock && player->wall_jump && player->wall_jump_count < player->wall_jump_max && !player->on_ground && !player->on_ladder &&
+    // v10.0.3: not under a noWallJ movement scheme (SRM, deob-10.0.3.js:192436)
+    if (!move_lock && !movement_scheme_no_wall_jump(player) && player->wall_jump && player->wall_jump_count < player->wall_jump_max && !player->on_ground && !player->on_ladder &&
         player->on_wall && !player->stuck_to_wall && movement_wall_jump_power(player) > 0.0f) {
         if (player->did_wall_jump && !input->jump) player->did_wall_jump = 0;
 
@@ -2463,6 +3001,7 @@ typedef struct {
     GameAI *ai;         // players.js shoot / melee: game.AI.ais boxes (authority)
     PlayerStoredState state; // a player hit: the rewound box it was traced against (head / leg zones)
     int zone;           // v10 hit boxes: 1 + HitKind of the box hit; 0 = the v7 zones by height
+    GameAIHitPart part; // v10.0.3 preciseHits: the AI model part hit (has_part 0 = its box)
 } Hit;
 
 typedef struct {
@@ -2591,9 +3130,13 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
     for (int i = 0; game->ai && i < game->ai->count; i++) {
         GameAI *ai = &game->ai->ais[i];
         if (!ai->active || (shooter->team && shooter->team == ai->team && !(game->mode && game->mode->config.dmg_team) && !game->config.friendly_fire)) continue;
-        const float t = game_ai_line_hit(ai, origin, dir);
+        // v10.0.3: usesHitTest() ? hitTest (the posed model, no box) : the box (deob-10.0.3.js:196017, :196677)
+        GameAIHitPart part;
+        const float t = game_ai_ray_hit(game, ai, origin, dir, &part);
         if (t <= 0.0f || t > 1.0f) continue;
-        hit_list_push(hits, (Hit) {NULL, NULL, t, ai});
+        Hit hit = {NULL, NULL, t, ai};
+        hit.part = part;
+        hit_list_push(hits, hit);
     }
 }
 
@@ -2757,8 +3300,10 @@ static int combat_kill_reward(Game *game, Player *killer, Player *victim, const 
 
         if (info && info->headshot) score += combat_medal(medals, "Headshot", 50);
         if (info && info->wallbang) score += combat_medal(medals, "Wallbang", 25);
-        if (!scope && weapon && info && info->distance * weapon->range > 200.0f) score += combat_medal(medals, "Longshot", 25);
+        // dst * range > 200, scoped weapons too (deob-10.0.3.js:192586)
+        if (weapon && info && info->distance * weapon->range > 200.0f) score += combat_medal(medals, "Longshot", 25);
     }
+    if (victim->mode.flag) score += combat_medal(medals, "Snatched", 50); // the victim carried a flag (deob-10.0.3.js:192591-192594)
 
     if (killer->health <= (float) killer->max_health * 0.2f && killer->active) score += combat_medal(medals, "Close Call", 20);
     if (killer->death_streak >= 3) score += combat_medal(medals, "Comeback", 25);
@@ -2786,18 +3331,21 @@ void player_score(Player *player, int amount, const int is_kill) {
     if (!game_is_authority(game) || !amount) return;
 
     amount = mode_score_scale(game, player, amount, is_kill); // v7 killMlt / oneflag carrier multipliers (WP-D)
+    if (mode_double_xp(game)) amount *= 2; // v10.0.3 isDoubleXP (aon / md in a pub-type game, deob-10.0.3.js:197855)
     if (amount > 0 && zombies_double_points(game)) amount *= 2; // WP-H: doublePointsTimer
     const int gain = mode_score_gain(game, amount, is_kill); // noScoreK: kill rewards add nothing
     player->score += gain;
     if (player->active) player->life_score += gain; // WP-E: scoreL (the death screen's "Score")
-    if (gain) game_challenge(game, player, "score", gain, -1, -1); // WP-E part 2c: challenges.update(game, "score")
-    const int cap = mode_score_cap(game); // v7 noScrLimit: no cap (WP-D)
+    const int cap = mode_score_cap(game, player); // pub-type games, not a dev, not noScrLimit (deob-10.0.3.js:197869)
     if (cap && player->score > cap) {
         player->score = cap;
         amount = 0;
     }
 
     mode_on_score(game, player, amount, is_kill); // objectiveScore + team score (players.teamScore)
+    // WP-E part 2c: challenges.update(game, "score", amt) with the amount after the cap (a capped score adds 0;
+    // a noScoreK kill still adds its amount: deob-10.0.3.js:197903-197905)
+    if (amount) game_challenge(game, player, "score", amount, -1, -1);
 
     const NetScorePacket packet = {.delta = amount, .score = player->score};
     game_send(game, player->uid, NET_PACKET_SCORE, &packet, sizeof(packet));
@@ -2866,6 +3414,9 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     }
 
     if (damage > 0.0f) victim->hit_timer = GAME_REGEN_DELAY;
+    // v10.0.3 changeHealth: runDmgTaken += the damage, capped at the health left, unless in god mode
+    // (deob-10.0.3.js:198005-198007; Raid's "rnodmg")
+    if (damage > 0.0f && !victim->god_mode) mode_run_damage(game, victim, damage > victim->health ? victim->health : damage);
 
     victim->health = CLAMP(victim->health - damage, 0.0f, (float) victim->max_health);
     if (victim->god_mode) victim->health = (float) victim->max_health;
@@ -2942,8 +3493,17 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     Game *game = player->game;
     if (!game_is_authority(game)) return; // clients wait for the server's KILL packet
 
+    // v10.0.3 players.kill (deob-10.0.3.js:198485-198496): with botsAsAI (Raid) a bot's kill has no killer and a
+    // bot's death no kill-feed row; noKillFeed (Traitor) hides every row ("3" hideFeed)
+    const int bots_as_ai = game->mode && game->mode->config.bots_as_ai;
+    if (killer && killer->is_bot && bots_as_ai) killer = NULL;
+    const int hide_feed = (player->is_bot && bots_as_ai) || (game->mode && game->mode->config.no_kill_feed);
+    // deaths, deathsL and the "d" challenge only once the match runs: `!waitTimers || !waitTimers[0] ||
+    // waitTimers[0].contTime` (deob-10.0.3.js:198511)
+    const int counts_death = !mode_waiting(game);
+
     player->active = 0;
-    player->deaths++;
+    if (counts_death) player->deaths++;
     player->last_killer_uid = -1;
     player->death_time = game->now;
     player->input_queue_size = 0;
@@ -2954,7 +3514,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     if (streaks) player->death_streak++;
 
     game->kill_count++;
-    game_challenge(game, player, "d", 1, -1, -1); // WP-E part 2c: challenges.update(game, "d", 1)
+    if (counts_death) game_challenge(game, player, "d", 1, -1, -1); // WP-E part 2c: challenges.update(game, "d", 1)
     if (game->hooks.kill) game->hooks.kill(game, player, killer); // v10 territorialWars.onPlayerDeath
     bot_chat_on_kill(game, player, killer); // KrunkNative bot chat: the odd kill / death comment (shared/src/bot_chat.c)
 
@@ -3047,7 +3607,11 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         .weapon_index = weapon_index,
         .headshot = (uint8_t) (kill_info && kill_info->headshot),
         .wallbang = (uint8_t) (kill_info && kill_info->wallbang),
-        .fists = (uint8_t) ((kill_info && kill_info->fists ? NET_KILL_FISTS : 0) | (kill_info && kill_info->streak == STREAK_NUKE + 1 ? NET_KILL_NUKE : 0)),
+        // info.stk: NET_KILL_NUKE for a Nuke kill (every patch 2 peer), the streak bits for any streak's
+        // (the kill feed's img/streaks/<stk>.png: the Bombardment's bombs, stk 3)
+        .fists = (uint8_t) ((kill_info && kill_info->fists ? NET_KILL_FISTS : 0) | (kill_info && kill_info->streak == STREAK_NUKE + 1 ? NET_KILL_NUKE : 0) |
+                            (kill_info && kill_info->streak > 0 && kill_info->streak < 16 ? kill_info->streak << NET_KILL_STREAK_SHIFT : 0) |
+                            (hide_feed ? NET_KILL_HIDE_FEED : 0)),
         .victim_deaths = (int32_t) player->deaths,
         .killer_kills = killer ? (int32_t) killer->kills : 0,
         .killer_class = killer ? killer->class_index : -1,
@@ -3095,6 +3659,7 @@ void player_melee(Player *player) {
     }
     player->charge_time = 0.0f;
     player->full_charge = 0;
+    player_play_clip(player, NET_PLAYER_CLIP_MELEE); // playClip(player, "Melee", 1) (deob-10.0.3.js:195909; authority only)
 
     // TODO: gamepad rumble?
     // isYou: weapon.anim(player, TWEEN, canThrow ? (throw ? 3 : 1) : 2, d), cancelInspect (v10.js:172423;
@@ -3107,6 +3672,7 @@ void player_melee(Player *player) {
     if (is_throw) {
         // projectiles.init(stored[0]) with wId 12: the knife flies, Bullseye on a kill.
         player->can_throw = !!player->unlimited_ammo;
+        player->last_throw_time = player->game->now; // lastThrowTime (deob-10.0.3.js:195939): the Refill streak's wait
         player->shot_count++;
         const vec3 origin = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
         // stored[0] with {d, v: max(0.3, d)}: ceil(180 * d) damage, 0.38 * v speed
@@ -3133,7 +3699,9 @@ void player_melee(Player *player) {
 
     for (size_t i = 0; i < hits.count && damage > 0.0f; i++) {
         Player *victim = hits.items[i].player;
-        if (hits.items[i].ai && !mode_waiting(game)) game_ai_damage(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0); // G.ai: !waitTimers
+        // G.ai: !waitTimers; v10.0.3 part ? dmg * part.m, part.m 0 = armourHit (deob-10.0.3.js:196062-196079)
+        if (hits.items[i].ai && !mode_waiting(game))
+            game_ai_damage_part(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0, NAN, -1, 0, &hits.items[i].part);
         // G.obj: destructible health and onMelee / onDamage / onPunch triggers
         if (hits.items[i].object) game_object_hit(game, (Object *) hits.items[i].object, player, player->smite ? 10000.0f : damage, 0, GAME_HIT_MELEE);
         if (hits.items[i].object) zombies_melee_object(game, player, hits.items[i].object); // WP-H: share a ready box
@@ -3330,8 +3898,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             // v7 players.js: the crit band (crd / crh) and the weapon's effectOnHit (floor(charge * 10) stacks)
             const float hit_y = shot_height + range * hit->t * sinf(pitch);
             const int ai_effect_count = (int) floorf(charge * 10.0f);
-            game_ai_damage_ex(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0, hit_y,
-                              weapon->effect_on_hit > 0 && ai_effect_count > 0 ? weapon->effect_on_hit - 1 : -1, ai_effect_count);
+            // v10.0.3: a model part scales the damage (part.m), an armour part (m 0) stops the bullet (deob-10.0.3.js:196797-196817)
+            if (game_ai_damage_part(game, hit->ai, player, player->smite ? 10000.0f : dealt, 0, hit_y,
+                                    weapon->effect_on_hit > 0 && ai_effect_count > 0 ? weapon->effect_on_hit - 1 : -1, ai_effect_count, &hit->part))
+                break;
             damage -= weapon->pierce ? base * COMBAT_DENSITY_DEFAULT * weapon->pierce : damage;
         } else {
             if (!hit->object) break; // WP-B: the terrain stops the bullet
@@ -3624,6 +4194,7 @@ void player_shoot(Player *player) {
     // v7.1.4 shoot: `!player.disableShooting && config.canShoot` (KrunkScript; 1 without a script)
     if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
     player->fire_count++; // players.js shoot: input.syncTime = true (the official "q" syncTimes)
+    mode_run_shot(player->game, player); // v10.0.3 shoot: runShots++ (deob-10.0.3.js:196342; Raid's "rnogun")
     // TODO: increase shots stat
     Game *game = player->game;
     const Weapon *weapon = player->weapon;

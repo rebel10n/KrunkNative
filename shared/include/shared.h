@@ -6,6 +6,7 @@
 #include <weapons.h>
 #include <cJSON.h>
 #include <common.h>
+#include <player_pose.h> // PlayerPose (Player.pose), v10 "pz"
 
 typedef struct {
     int billboard_count;
@@ -24,13 +25,9 @@ typedef struct {
     float crouch_speed;
     float crouch_lean;
     float player_speed;
-    float slipping_speed;
     float air_speed;
     float aim_slow;
     float crouch_slow;
-    float player_slipping_jump_cooldown;
-    float terrain_slide_threshold;
-    float terrain_slip_decel;
     float terrain_slide_decel;
     float terrain_decel;
     float slide_decel;
@@ -85,7 +82,7 @@ typedef struct {
     float wrist_scale; // v10 wristScale: the wrist frame's scale is wrist_scale * the arm's width
 } GameConstants;
 
-// Krunker v10.0.2's physics and animation constants (shared/src/rules/v10/constants_v10.c).
+// Krunker v10.0.3's physics and animation constants (shared/src/rules/v10/constants_v10.c).
 extern const GameConstants game_constants;
 
 // Krunker v7.1.4 data/prefabs.js prefab ids (map object "i"; doc/v7/map-logic.md §1.4).
@@ -684,8 +681,24 @@ void map_object_free(Object *object);
 // movement.js). No official v7 class sets one; custom maps can (config.cls). A field left 0 reads
 // as the v7 default named in its comment, so the class table lists only changes. v7 defaults
 // reproduce the v3.1.1 constants. Accel/decel are in v7 units (per ms; grA/arA per 100 ms).
+// config.movSch: game.movement[movSch || 0], the class's movement scheme (Krunker v10.0.3 movement
+// list, deob-10.0.3.js:18545-19188; the class option's names, deob-10.0.3.js:20342). Each has a dir
+// (the look), a mov (the acceleration) and a vel (the integration); a scheme without one runs
+// Default's. shared/src/player.c ports them all; doc/v10/movement-schemes.md describes each.
+typedef enum {
+    MOVEMENT_SCHEME_DEFAULT,      // 0 "Default": WASD relative to the look (the v7 movement)
+    MOVEMENT_SCHEME_FOLLOW_MOUSE, // 1 "Follow Mouse": always runs toward the look's yaw, keys unused
+    MOVEMENT_SCHEME_MOVE_RIGHT,   // 2 "Move Right": velocity.x = 0.01 every tick (auto runner)
+    MOVEMENT_SCHEME_FLY,          // 3 "Fly": always flies along the look, pitch included
+    MOVEMENT_SCHEME_DIR_ONLY,     // 4 "Dir Only": the keys move along fixed world axes
+    MOVEMENT_SCHEME_SRM,          // 5 "SRM": Quake-style ground / air strafing, dashes, auto bhop
+    MOVEMENT_SCHEME_VEHICLE,      // 6 "Vehicle": throttle / reverse / steering with the vh* class config
+    MOVEMENT_SCHEME_MMORPG,       // 7 "MMORPG": keys relative to the camera, the body turns to the move
+    MOVEMENT_SCHEME_COUNT,
+} MovementScheme;
+
 typedef struct ClassMovement {
-    int scheme;             // movSch: game.movement index (0 Default; the others are not ported yet)
+    int scheme;             // movSch: MovementScheme (0 Default); out of range runs Default
     float speed_x;          // speedX, 0 = 1: x step multiplier in the integration
     float speed_y;          // speedY, 0 = 1
     float speed_z;          // speedZ, 0 = 1
@@ -734,15 +747,16 @@ typedef struct {
     float model_y_offset;         // mdlYO -50..50
     float speed_length;           // spdLnTh 1..500 (500)
     float step_sd;                // stpSD 0..1 (step sound dynamic)
-    float vehicle_drag;           // vhdr 0.001..0.999 (.97)
-    float vehicle_air_drag;       // vhaDr 0.001..0.999 (.94)
-    float vehicle_tilt;           // vhtL -100..100 (-2.7)
-    float vehicle_turn_h;         // vhtrsh 0..0.01 (.0025)
-    float vehicle_turn_v;         // vhtrsv 0..1 (0)
-    float vehicle_move_power;     // vhmP 0..1 (.12)
-    float vehicle_power_f;        // vhpF 0..0.1 (.0012)
-    float vehicle_move_rot;       // vhmR 0..1 (.0375)
-    float vehicle_rot_f;          // vhrF 0..0.1 (.0005)
+    // the "Vehicle Config" of movement scheme 6 (prefix "vh", deob-10.0.3.js:18826-18906)
+    float vehicle_drag;           // vhdr "Drag" 0.001..0.999 (.97): x / z velocity kept per 60 fps frame
+    float vehicle_angular_drag;   // vhaDr "Angular Drag" 0.001..0.999 (.94): angVel kept per frame
+    float vehicle_turn_lean;      // vhtL "Turn Lean" -100..100 (-2.7): the asset model's roll per angVel
+    float vehicle_turn_threshold; // vhtrsh "Turn Threshold" 0..0.01 (.0025): forwardV needed to steer
+    float vehicle_turn_conv;      // vhtrsv "Turn Conv" 0..1 (0): steering scales with the speed when set
+    float vehicle_max_power;      // vhmP "Max Power" 0..1 (.12): forwardV cap
+    float vehicle_power_force;    // vhpF "Power Force" 0..0.1 (.0012): forwardV per frame on the throttle
+    float vehicle_max_reverse;    // vhmR "Max Reverse" 0..1 (.0375): reverseV cap
+    float vehicle_reverse_force;  // vhrF "Reverse Force" 0..0.1 (.0005): reverseV per frame in reverse
     float jump_cooldown;          // jpC 0.1..3 (1)
     unsigned char can_shoot;      // canShoot (1)
     unsigned char shoot_to_cam;   // shtToCam
@@ -794,14 +808,24 @@ typedef struct {
     ClassOverrides ext;    // WP-E: the other cls[id] keys (camera, model, vehicle, shooting), read via class_overrides()
 } ClassConfig;
 
-#define CLASS_COUNT 16 // Krunker v10.0.2's classConfig: what the menus, challenges and class stats list
+// Krunker v10.0.3's classes (deob-10.0.3.js:115405-115747, 16 entries, Triggerman to Infiltrator, the same
+// as v10.0.2's): what the menus, challenges, class stats and classLim0..15 list.
+#define CLASS_COUNT 16
 #define CLASS_ID_SURVIVOR 14
 #define CLASS_ID_INFILTRATOR 15
-// KrunkNative-only classes sit after Krunker's (doc/v7/decisions.md "Nettspend class"): in the
-// ruleset's class table (Game.classes, rules_class_count() = CLASS_TABLE_COUNT), so spawns,
-// packets and the picker take them, but outside CLASS_COUNT.
-#define CLASS_ID_NETTSPEND 16
-#define CLASS_TABLE_COUNT 17
+// KrunkNative's own classes are a mod on top of v10, not part of v10's table (doc/v10/kn-additions.md;
+// doc/v7/decisions.md "Nettspend class"). They always come after every Krunker class: KN_CLASS_BASE is
+// CLASS_COUNT, so if v10's table grows they move up with it (user, 2026-10-24: "the id can be changed to
+// always be last, it's a mod on top of v10"), like WEAPON_ID_KN_BASE for weapons.
+// They are in the ruleset's class table (Game.classes, rules_class_count() = CLASS_TABLE_COUNT), so
+// spawns, packets and the picker take them, but outside CLASS_COUNT. classes_v10.c asserts the stored
+// number (KN_CLASS_NETTSPEND_STORED) and lists what to migrate when it moves.
+#define KN_CLASS_BASE CLASS_COUNT
+#define CLASS_ID_NETTSPEND (KN_CLASS_BASE + 0)
+#define KN_CLASS_COUNT 1
+#define CLASS_TABLE_COUNT (KN_CLASS_BASE + KN_CLASS_COUNT)
+// The Nettspend's id as saved settings, loadout presets and the brain's rows hold it (16 since 2026-10-14)
+#define KN_CLASS_NETTSPEND_STORED 16
 // The class tables are the rulesets' (shared/include/ruleset.h; rules_classes() / Game.classes).
 
 // ---- WP-B: Krunker v7.1.4 status effects, perks and killstreaks (shared/src/effects.c) ----
@@ -855,12 +879,13 @@ enum {
 #define PLAYER_PERK_MAX 8
 #define GAME_MAX_ZOMBIE_PERKS 4 // config.maxZombiePerks
 
-// streaks.js: one pick per slot (streakIndex1..3, ENT streakIndexes), earned at realKillStreak == kills.
+// streaks.js: one pick per slot (streakIndex1..3, ENT streakIndexes), earned at realKillStreak == kills
+// (Krunker v10.0.3's table: deob-10.0.3.js:203338-203520).
 typedef enum {
     STREAK_NUKE,
     STREAK_AIRDROP,
-    STREAK_REFILL,      // devOnly
-    STREAK_BOMBARDMENT, // devOnly
+    STREAK_REFILL,      // devOnly: a dev account's only (deob-10.0.3.js:203401)
+    STREAK_BOMBARDMENT, // everyone's since v10 (v7.1.4 had it devOnly; deob-10.0.3.js:203407-203410)
     STREAK_SLIMER,
     STREAK_JUGGERNAUT,
     STREAK_WAR_MACHINE,
@@ -875,7 +900,7 @@ typedef struct {
     int kills;             // realKillStreak needed
     unsigned char req_account:1; // reqAccount: needs player.account, which every v7.1.4 server player has (effects.c streak_add)
     unsigned char no_customs:1;  // noCustoms: not in custom games
-    unsigned char dev_only:1;    // devOnly
+    unsigned char dev_only:1;    // devOnly: picked and earned by a dev account only (player.account.isDev, Player.dev)
 } StreakConfig;
 
 extern const StreakConfig g_streaks[STREAK_COUNT];
@@ -1136,15 +1161,16 @@ enum {
     PLAYER_SHOW_BADGES_ALL = 0x0F,
 };
 
-// Lag compensation: v3.1.1 players.js storeState / fetchState (shared/src/player.c). One
-// stateHistory entry {time, h, x, y, z} per server update; entries older than
-// config.stateHistory are dropped. The ring holds 500 ms at the 240 Hz tick_rate maximum.
+// Lag compensation: v3.1.1 players.js storeState / fetchState (shared/src/player.c; v10.0.3's,
+// deob-10.0.3.js:193246-193302, are the same). One stateHistory entry {time, h, x, y, z} per server
+// update; entries config.stateHistory old or older are dropped (:193261). The ring holds 500 ms at the
+// 240 Hz tick_rate maximum (server.cfg; the default is config.serverTickFrequency 30, :22840).
 #define PLAYER_STATE_HISTORY_MAX 128
-#define GAME_STATE_HISTORY 0.5f       // config.stateHistory (500 ms)
+#define GAME_STATE_HISTORY 0.5f       // config.stateHistory (500 ms, deob-10.0.3.js:22878)
 #define LAG_COMP_ANCHOR_V3 0      // server.cfg lag_comp_anchor 0: v3.1.1 ping * 2 * lagComp from processing
 #define LAG_COMP_ANCHOR_EXACT 1   // 1 (default): the shot input's client time on the server clock + 1 ping
 #define LAG_COMP_ANCHOR_ARRIVAL 2 // 2: the shot input's arrival + 1 ping (the exact mode's fallback)
-#define GAME_LAG_COMP_SEND_RATE 10.0f // player.cSendRate default (ent[16] servSendR off; = NET_STATE_SEND_HZ)
+#define GAME_LAG_COMP_SEND_RATE 10.0f // player.cSendRate default (ent[16] servSendR off; = NET_STATE_SEND_HZ, config.serverSendFrequency)
 typedef struct {
     double time;       // Game.state_now when stored
     vec3 position;     // x, y, z (feet)
@@ -1170,6 +1196,27 @@ typedef struct {
     double left_at;               // leftCampAreaTime (game time, < 0 none)
 } PlayerStalkerCamp;
 
+// The state movement schemes keep on the player (Krunker v10.0.3 movement.js; deob-10.0.3.js:18686-19045).
+// The server syncs a scheme's sendVals to the owner with the movement state (SYNC_PLAYER,
+// deob-10.0.3.js:222398; NET_EXT_PLAYER_MOVE_VALS here) and resetMovVals zeroes them on spawn and on a
+// class change (deob-10.0.3.js:195029). Times in ms, velocities per ms like Player.velocity.
+typedef struct {
+    // SRM (5) sendVals: onGroundFrames, onWallFrames (ms grounded / on a wall), wishDash (ms the dash
+    // press stays wanted), dashTimer, walldashTimer (cooldowns), tmpVel (the velocity the scheme saw last)
+    float on_ground_ms, on_wall_ms, wish_dash, dash_timer, walldash_timer;
+    vec3 tmp_vel;
+    // SRM this.cmd {forwardmove, rightmove}: the last tick's keys, which a dash at the start of the
+    // next tick reads. v10 keeps it on the scheme object every player shares (the last player any
+    // tick ran); KrunkNative keeps each player's own so prediction and the server agree.
+    signed char cmd_forward, cmd_right;
+    // SRM overlayInfo (isYou, SetAccelerationValues): the strafe helper's current / optimal / minimum /
+    // maximum angles (rad), drawn by the client's HUD (client/src/vfx.c); only an airborne strafe sets it
+    unsigned char overlay_valid:1;
+    float overlay[4];
+    // Vehicle (6) sendVals: forwardV (throttle), reverseV (reverse), angVel (steering, rad per frame)
+    float forward_v, reverse_v, ang_vel;
+} MovementSchemeState;
+
 typedef struct Player_t {
     struct Game_t* game;
 
@@ -1186,8 +1233,9 @@ typedef struct Player_t {
     unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;
     // Krunker "frz" (SET_FROZEN, game.deob.js:220495): freeze = !defaultMovement, !defaultVelocity,
-    // disableShooting, disableMelee (ks_player_allows answers 0 for those while set). Only official
-    // lobbies send it (krunker_link.c); it stays until "frz" false.
+    // disableShooting, disableMelee (ks_player_allows answers 0 for those while set). Official lobbies
+    // send it (krunker_link.c), our authority with game.applyFreezeOthers (player_pose.c, /freezeothers);
+    // it stays until "frz" false.
     unsigned char frozen:1;
     // Krunker "plk" PLAYER_LOCKS (iìïîììî :220492): player.disableShooting / disableMelee set by the
     // lobby's KrunkScript; ks_player_allows answers 0 for KS_PLAYER_CAN_SHOOT / _CAN_MELEE while set
@@ -1214,6 +1262,7 @@ typedef struct Player_t {
     unsigned char did_wall_jump:1;
     unsigned char can_slide:1;
     unsigned char can_throw:1;
+    float last_throw_time;        // lastThrowTime (game->now, s) of the last knife throw: the Refill streak waits 5 s
     int in_object;                // Krunker inObject: map object index + 1 of the onEnter trigger stood in, 0 = none
     unsigned char making_progress:1; // Krunker makingProg: an onInteract hold advanced this tick
     unsigned char doing_interact:1;  // Krunker doingInter: holding M1 in an onInteract trigger (no weapon use)
@@ -1338,6 +1387,7 @@ typedef struct Player_t {
     unsigned char stop_crouch:1;  // stopCrouch: hit a ceiling this tick
     unsigned char was_stop_crouch:1; // wasStopCrouch: headClipFix blocks crouch and jump for one tick
     // ---- end WP-A movement state ----
+    MovementSchemeState scheme;   // the class movement scheme's own state (movSch 5 SRM, 6 Vehicle)
 
     float jump_rotate;
 
@@ -1362,6 +1412,7 @@ typedef struct Player_t {
     float stalker_coyote_time;         // stalkerCoyoteTime (s): 0.15 after leaving the ground or a wall
     float last_stalker_leap;           // lastStalkerLeap (game time, s); leaps 3 s apart
     PlayerStalkerCamp stalker_camp;    // stalk.update camping (Living players)
+    float no_move_time;                // noMovT (s): procInputs time without velocity; is_hidden from 0.3 (shared/src/stalker.c)
 
     PlayerTween land_tween;     // landBobY (landTween)
     PlayerTween jump_bob_tween; // jumpBobY (jumpTween, and the landing tween's jumpBobY -> 0)
@@ -1376,6 +1427,10 @@ typedef struct Player_t {
     float melee_anim[MELEE_ANIM_CHANNELS]; // meleeAnim: first-person melee swing / throw / equip pose
     MeleeAnimTween melee_anim_tween;       // meleeAnim.anim
     signed char hand_anim_ind;             // handAnimInd: 0 (unset), then -1 / 1 alternating per swing
+    // v10 poseData (KrunkScript player.pose, "pz"; shared/include/player_pose.h): set by the authority's
+    // script, kept across deaths, cleared at the round's end; pose_lerp is the client's smoothing of it
+    PlayerPose pose;
+    PlayerPoseLerp pose_lerp;
 
     // shoot(): recoilTween on recoilTweenY/R/YM/Z (weapon.recoilAnim): phase 1 kicks the
     // masked values to the weapon's targets linearly, phase 2 eases all four back to 0.
@@ -1605,6 +1660,11 @@ float player_round3(float v); // JS v.round(3); procInputs rounds delta (ms), ya
 float player_wrap_yaw(float yaw); // controls.js xDr = rotation.y % Math.PI2: (-2pi, 2pi), non-finite -> 0
 float player_clamp_pitch(float pitch); // controls.js pitchObj clamp [-pi/2, pi/2], non-finite -> 0
 int player_look_follows_camera(const Player*); // class (movSch || 0) == 0 && trnSp == 1: frames without an input frame turn it with the camera
+int player_direction_is_look(const Player*);   // the scheme's dir copies the input look (Default's, turn speed >= 1); else the camera keeps its own look
+MovementScheme player_movement_scheme(const Player*); // the class movSch (out of range = Default)
+#define PLAYER_MOVE_VALS_MAX 8
+int player_movement_send_vals(const Player*, float vals[PLAYER_MOVE_VALS_MAX]); // the scheme's sendVals (SYNC_PLAYER), 0 = none
+void player_movement_apply_vals(Player*, int scheme, const float vals[PLAYER_MOVE_VALS_MAX], int count); // the owner's copy of them
 void player_scroll_weapon(Player*, int dir, int recon); // manager.reload(player, +-1): wheel / melee on melee
 // KrunkNative Object Manager: the class / mode part of the loadout (slots [0, base)); the extra
 // weapons (shared/src/object_manager.c) follow it. The whole loadout for a player without extra
@@ -1663,6 +1723,7 @@ void player_update_streaks(Player*);                // updateStreaks after a kil
 int player_use_streak(Player*, int streak);         // useStreak: 1 when it activated
 void player_check_streak(Player*, int slot);        // checkStreak: the streak key / "k<slot>"
 int game_start_nuke(struct Game_t*, Player*);       // streaks.js Nuke.start: 0 when one is running
+int game_start_bombardment(struct Game_t*, Player*); // streaks.js Bombardment.activate: 0 when one is running
 float player_hitbox_pad_w(const Player*);           // hitboxPadW: game hitBoxPad + class hbS
 float player_hitbox_pad_h(const Player*);           // hitboxPadH: game hitBoxPad + class hbH
 float player_hurtbox_scale(const Player*);          // v10 hurtboxScale: game hurtboxScale x class hurtboxScale (0 reads as 1)
@@ -1686,7 +1747,7 @@ int player_can_damage(const Player *dealer, const Player *victim); // teams, fri
 #define GAME_CONFIG_V7 1
 #define GAME_CONFIG_HAS_LOG_TIME 1      // log_time / last_checkpoint_time (map-B)
 #define GAME_CONFIG_TEAMS 6             // team 0 + config.teamLimit (5) teams
-#define GAME_CONFIG_CLASS_LIMITS 16     // classLim0..15, config.classes
+#define GAME_CONFIG_CLASS_LIMITS CLASS_COUNT // classLim0..15 (one per v10 class), config.classes
 
 typedef struct {
     int max_players;
@@ -1973,7 +2034,13 @@ typedef struct {
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
 // (Krunker spd is units/ms); `range` counts down with the distance flown.
-#define GAME_MAX_PROJECTILES 64
+// 192: v10's pool has no bound; a Bombardment alone keeps up to 100 bombs in the air (a bomb that misses
+// every surface flies its 1500 units, up to 12.5 s), so 64 dropped up to a third of them on the official
+// maps (combat_test test_bombardment_pool). A client of 64 slots ignores the slots above.
+#define GAME_MAX_PROJECTILES 192
+// streaks.js Bombardment.calcPos (deob-10.0.3.js:203422-203444): a 10 x 10 grid over the spawns' bounds
+#define GAME_BOMBARDMENT_WAVES 10      // columns along x (6 + 4), one wave each
+#define GAME_BOMBARDMENT_WAVE_BOMBS 10 // rows along z (6 + 4), the bombs of one wave
 
 // ProjectileConfig: shared/include/weapons.h (every Weapon carries its v7 pj_* block).
 
@@ -1995,6 +2062,7 @@ typedef struct {
     ProjectileConfig config;
     int effect;         // WP-B effectInd: EffectId given on a hit, -1 none (Zapper)
     int effect_count;   // effectC: stacks (floor(charge * 10))
+    int streak;         // info.stk + 1 of a streak's projectile (STREAK_BOMBARDMENT + 1: a bomb, stored[2]), 0 none
 } GameProjectile;
 
 // WP-B: one shot's projectiles.init options (v7.1.4 players.js shoot / melee): the charge
@@ -2147,6 +2215,9 @@ typedef struct Game_t {
     // ruleset's ranked rules apply (ruleset.h Ruleset.ranked, game_is_ranked).
     unsigned char is_ranked;
     unsigned char game_state;     // GameState (v10 gameState): INITIALIZING until the first round starts
+    // v10 game.freezeOthers (deob-10.0.3.js:221548): the last applyFreezeOthers request (player_pose.c),
+    // false again at each round's start (:219811)
+    unsigned char freeze_others;
     GameForfeit forfeit;          // the team forfeit vote (shared/src/forfeit.c)
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
@@ -2214,6 +2285,14 @@ typedef struct Game_t {
     struct GameConfigState *config_state;
     float nuke_timer;
     Player *nuke_player;
+    // streaks.js Bombardment (deob-10.0.3.js:203414-203488): bombardmentTimer (s; a wave every 0.5 s),
+    // bombardmentPlayer and bombardmentBombs (calcPos: GAME_BOMBARDMENT_WAVES waves of
+    // GAME_BOMBARDMENT_WAVE_BOMBS bombs, x, y, z each; waves [bombardment_wave, bombardment_waves) are left)
+    float bombardment_timer;
+    Player *bombardment_player;
+    int bombardment_wave;
+    int bombardment_waves;
+    float bombardment_bombs[GAME_BOMBARDMENT_WAVES][GAME_BOMBARDMENT_WAVE_BOMBS * 3];
 
     VoteKick *vote_kick;
 
@@ -2335,6 +2414,8 @@ typedef enum {
     GAME_INTERACT_BANK = 1,        // deposit box: deposit / withdraw
     GAME_INTERACT_BOMB = 3,        // bomb site plant / equip / defuse (data 1..3; modes)
     GAME_INTERACT_TRIGGER = 4,     // onHoldMouse: "Hold [M1] to <inm || Interact>" (priority 1)
+    GAME_INTERACT_TRADE = 5,       // Trade mode: "Press [key] to Trade with [NAME]", id = the player's sid (deob-10.0.3.js:192472;
+                                   // the client's prompt, client/src/ui/trade_ui.c; the server's request, server/src/trade.c)
     GAME_INTERACT_PICKUP = 6,      // WEAPON_PICKUP: "Press [key] to <inm || pickup NAME> [price]"
     GAME_INTERACT_KEY = 7,         // onInteractKey trigger: "Press [key] to <inm || Interact> [cost]"
     GAME_INTERACT_SPINNER = 9,     // PRIZE_WHEEL (KR store wheels: no store natively)
@@ -2424,6 +2505,20 @@ void game_spawn_projectile_ex(Game*, Player *owner, int weapon_index, const Proj
                               int thrown_melee, const ProjectileShot *shot);
 void game_tick_projectiles(Game*, float delta);
 void game_explosion(Game*, vec3 position, float radius, float damage, Player *owner, int weapon_index);
+// game.explosion with info.stk (a streak's blast, deob-10.0.3.js:216994-217029): `streak` = stk + 1, 0 none.
+// A streak's blast spares its owner, kills skip the kill rewards, and the streak's onKill / onCollision run.
+void game_explosion_streak(Game*, vec3 position, float radius, float damage, Player *owner, int weapon_index, int streak);
+// projectiles.initBombs, one bomb (deob-10.0.3.js:207081-207109): stored[2] dropped straight down from
+// `position` at 0.4 * pj_speed units/ms, owned by `owner` (the bombardment player), info {stk: 3}
+void game_spawn_bomb(Game*, Player *owner, vec3 position, float pj_speed);
+// A streak's onKill / onCollision (Bombardment: "Bombed" +100 / Rooted + Dizzy), `streak` = stk + 1
+void game_streak_on_kill(Game*, int streak, Player *owner);
+void game_streak_on_collision(Game*, int streak, Player *player);
+// The streak projectiles (bombs) of `owner_uid` end at once, no impact (their owner left)
+void game_end_streak_projectiles(Game*, int owner_uid);
+// streaks.js Bombardment.update / reset (game.updateStreaks / resetStreaks): the waves, every tick
+void game_tick_bombardment(Game*, float delta);
+void game_reset_bombardment(Game*);
 
 #define NET_DEFAULT_PORT 21015
 #define NET_MAX_PAYLOAD 512
@@ -2524,18 +2619,24 @@ typedef enum {
 #define NET_MAP_MAX_SIZE (4u * 1024u * 1024u) // largest map JSON streamed to clients
 #define NET_MAP_CHUNK_SIZE 496                // NetMapDataPacket payload bytes per frame
 
-// Chat (Krunker v3.1.1: #chatInput maxlength=70, server burst limit 3 messages / 1 s).
+// Chat: config.chatMaxLength 70 (deob-10.0.3.js:22470; #chatInput maxlength=70 since v3.1.1),
+// config.chatInterval 800 ms (deob-10.0.3.js:22468), and the v3.1.1 server's burst limit (3 messages / 1 s).
 #define NET_CHAT_MAX_CHARS 70       // code points kept from a message
 #define NET_CHAT_TEXT_SIZE 288      // bytes incl. NUL: 70 code points of UTF-8 always fit
 #define NET_CHAT_BURST_WINDOW 1.0f  // seconds
 #define NET_CHAT_BURST_MAX 3        // messages per window; more closes the connection (4008)
+// config.chatInterval: the least time between two chat lines of one player. The 10.0.3 client reads no
+// chatInterval (it sends every line, deob-10.0.3.js:260042-260044 -> 257277): it is the server's, whose
+// code is not in the bundle. KrunkNative drops a line that comes sooner after the sender's last delivered
+// one (net_chat_spaced); "/" commands, which answer the sender only, are not paced.
+#define NET_CHAT_INTERVAL 0.8f
 #define NET_PING_INTERVAL 5.0f      // seconds between ping probes (io_po setTimeout 5e3)
-#define NET_RECON_SEND_HZ 1         // v3.1.1 config.syncFrequency: the "l" reconciliation rate
+#define NET_RECON_SEND_HZ 1         // config.serverSyncFrequency (deob-10.0.3.js:22838; v3.1.1 syncFrequency): the "l" reconciliation rate
 #define NET_RECON_SEQ_ALL INT32_MAX // "l" sn of a server-driven snap (MAX_SAFE_INTEGER): drop every pending input
 #define NET_INPUT_SEND_INTERVAL (1.0f / 30.0f) // v3.1.1 config.clientSendRate (1000 / 30 ms): one "q" per window
 #define NET_INPUT_BATCH_MAX 20      // frames per NetInputBatchPacket (a 1000+ fps window flushes early)
 #define NET_RECON_PENDING_MAX 2000  // reconcilePlayer: tmpInpts.length >= 2000 drops pending inputs
-#define NET_STATE_SEND_HZ 10        // v3.1.1 gameserver.ts K_PACKET_FREQUENCY ("k" sendRateA); not applied yet: STATE still goes out every tick
+#define NET_STATE_SEND_HZ 10        // config.serverSendFrequency (deob-10.0.3.js:22836; v3.1.1 gameserver.ts K_PACKET_FREQUENCY, "k" sendRateA); not applied yet: STATE still goes out every tick
 #define NET_PING_EWMA_ALPHA 0.35f   // packetHandlers.ts PING_EWMA_ALPHA
 #define NET_PING_MAX_MS 5000        // PING_MAX_REASONABLE_MS
 
@@ -2872,8 +2973,9 @@ typedef struct {
 _Static_assert(sizeof(NetKillPacket) == 35, "NetKillPacket: older peers check this exact size");
 #define NET_KILL_FISTS 0x01 // NetKillPacket.fists bit 0: melee without the knife (Krunker fs)
 #define NET_KILL_NUKE 0x02  // bit 1: a Nuke kill, v7 info {stk: 0} (the kill feed's img/streaks/0.png)
-// Bits only the official-Krunker link sets (client/src/net/krunker_link.c, never on the wire: our
-// servers send 0 there and net.c keeps only NET_KILL_FISTS for older peers):
+// Bits the official-Krunker link sets (client/src/net/krunker_link.c); net.c keeps only NET_KILL_FISTS
+// for pre-patch-2 peers. Our servers send the streak bits (a Bombardment's kills, stk 3) and HIDE_FEED
+// too, never THROWN:
 #define NET_KILL_THROWN 0x04    // killInfo.pj: a thrown melee (the feed's img/thrown_0.png before the melee icon)
 #define NET_KILL_HIDE_FEED 0x08 // "3" hideFeed: no kill-feed row (player.killedBy still counts)
 #define NET_KILL_STREAK_SHIFT 4 // bits 4-7: killInfo.stk + 1 (0 = not a streak kill): img/streaks/<stk>.png
@@ -3137,7 +3239,7 @@ typedef enum {
     NET_CHEAT_FORCE_COLLIDE = 4,   // "forcecol" -> map objects forced collidable
     NET_CHEAT_THIRD_PERSON = 5,    // KrunkNative /thirdperson: the third-person camera granted (1) / taken (0)
     NET_CHEAT_HELD = 6,            // KrunkNative Physics Gun: a dev carries you (1: your input moves nothing) / let go (0)
-    NET_CHEAT_FROZEN = 7,          // "frz" -> me->frozen (official lobbies, krunker_link.c; our own server never sends it)
+    NET_CHEAT_FROZEN = 7,          // "frz" -> me->frozen (official lobbies, krunker_link.c; our server: game_apply_freeze_others)
 } NetCheatFlag;
 
 typedef struct {
@@ -3850,8 +3952,13 @@ int net_chat_sanitize(char *out, size_t size, const char *in, size_t length); //
 typedef struct {
     float window_start;
     int count;
+    float last_line;         // when the last chat line was delivered (has_line)
+    unsigned char has_line;
 } NetChatLimiter;
 int net_chat_allow(NetChatLimiter*, float now); // 0 = burst exceeded (Krunker closes the socket)
+// config.chatInterval: 1 (and the line counts as delivered at `now`) when NET_CHAT_INTERVAL has passed
+// since the last delivered line, 0 = drop it.
+int net_chat_spaced(NetChatLimiter*, float now);
 void net_packet_chat(NetChatPacket*, int uid, NetChatKind, const char *name, const char *text);
 // A server line about a player as one string: `template` with its first "$" replaced by `name` ("unknown" when
 // empty), config.serverMessages style ("$ joined the game"). The composed form of NET_EXT_KN_SERVER_LINE (net_ext.h),

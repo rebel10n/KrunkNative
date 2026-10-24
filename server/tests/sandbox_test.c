@@ -749,11 +749,11 @@ static int got_chat_v7(const TestClient *c, const int from, const char *needle) 
 // A server projectile with no owner (above the map, flying up), returns its slot
 static int launch_projectile(const vec3 at, const float speed, const float range) {
     const ProjectileConfig config = {.speed = speed, .range = range};
-    uint64_t before = 0;
-    for (int i = 0; i < GAME_MAX_PROJECTILES; i++) before |= (uint64_t) g_server->game.projectiles[i].active << i;
+    unsigned char before[GAME_MAX_PROJECTILES];
+    for (int i = 0; i < GAME_MAX_PROJECTILES; i++) before[i] = g_server->game.projectiles[i].active;
     game_spawn_projectile(&g_server->game, NULL, 0, &config, at, 0.0f, 1.4f, 0);
     for (int i = 0; i < GAME_MAX_PROJECTILES; i++) {
-        if (g_server->game.projectiles[i].active && !(before >> i & 1)) return i;
+        if (g_server->game.projectiles[i].active && !before[i]) return i;
     }
     return -1;
 }
@@ -839,7 +839,9 @@ static void test_class(void) {
     // KrunkNative's Nettspend: playable here (a KrunkNative lobby), with its own Drank and Money Spread
     chat(&c, "/class Nettspend");
     pump(&c, 61);
-    CHECK(chat_contains(&c, "Switched to Nettspend (16)."), "/class Nettspend reply");
+    char switched[48];
+    snprintf(switched, sizeof(switched), "Switched to Nettspend (%d).", CLASS_ID_NETTSPEND);
+    CHECK(chat_contains(&c, switched), "/class Nettspend reply");
     CHECK(p->class_index == CLASS_ID_NETTSPEND && p->loadout_size >= 2 && p->loadout[0] == WEAPON_ID_DRANK && p->loadout[1] == WEAPON_ID_MONEY_SPREAD,
           "the Nettspend's loadout: class %d (%d %d)", p->class_index, p->loadout_size > 0 ? p->loadout[0] : -1, p->loadout_size > 1 ? p->loadout[1] : -1);
     // the same switch in an official krunker.io game (game_class_allowed, the one class gate) is refused
