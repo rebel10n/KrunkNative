@@ -186,13 +186,22 @@ Added here:
   `speedBoost || 1`; a server write clamps it to 0.1..10 and sends the player `"spb"`.
 - On the client scene object (obj3D, :208565-208600): `intensity` (lights, 0..15), `distance` (point and spot lights,
   0..1000) and `color` (lights, `#rrggbb`), in `client/src/ks/ks_scene.c`. They read 0 / "" on other objects, and
-  a write re-syncs the light. Compile-checked only: the client has no KrunkScript scene test harness.
+  a write re-syncs the light. `client/tests/ks_scene_e2e.py` tests them on a headless client_bin:
+  `python3 -I client/tests/ks_scene_e2e.py <build dir>`. With `KRUNKNATIVE_KS_LOG_STDOUT=1` the client script
+  console is echoed on stdout.
+- On the player wrapper, the skins (:207943, :208302-208320):
+  - `currentSkinIndex`: the melee item on a melee weapon, otherwise the slot's weapon skin.
+  - `getSkin(type)`, on both sides: 0 is the current slot's weapon skin, then 1 hat, 15 head, 2 body, 14 back,
+    6 waist, 9 pet, 11 wrist, 3 melee, 16 card; any other type is -1.
+  - `setSkin`: only the map studio's custom skins, which Box Office games do not have, so nothing passes.
+  - `giveSkin`: the six scripting skins (7529, 7530, 7713, 7714, 7715, 7621) for an account in a pub-type game,
+    through `game_give_skin` and kn_brain. 10.0.3 also allows four custom maps by id; Box Office's server does
+    not know a hosted map's id.
 
 Missing, outside this package:
 
 - `LIVE_OBJECTS.addAsset` (:211292) and the live object wrapper (`id`, `delete`).
-- On the player wrapper: `currentSkinIndex`, `giveSkin`, `setSkin` and `getSkin` (store skins, :207943, :208302-208320).
-  `player.pose` belongs to `doc/v10/player-pose.md`.
+- `player.pose` belongs to `doc/v10/player-pose.md`.
 - The entity wrapper's `attachPlayer`, `updateAttachment` and `detachPlayer`, and the ctx's `peer` / `peers`, all in the
   entities package.
 

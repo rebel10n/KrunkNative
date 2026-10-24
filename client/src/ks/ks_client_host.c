@@ -14,6 +14,10 @@
 #include <gltf.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <game_config.h> // class_overrides: player.assetID
+#include <net_ext.h> // NET_PLAYER_ASSET_TEXT
+#include <player_class_model.h> // player.assetID: the class model's swap
+#include <entities.h> // v10.0.3 entities: the client half of game.update
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,10 +108,21 @@ Game *ksc_game(void) { return g_ksc.client ? &g_ksc.client->game : NULL; }
 
 // GAME.log / runtime errors (2.8): "[KRUNKSCRIPT] <text>" in the developer console (cyan,
 // errors dark red as v7's console styles) and on stdout / the browser console.
+// KRUNKNATIVE_KS_LOG_STDOUT=1 echoes it on stdout natively too (the client script tests, client/tests/ks_scene_e2e.py).
 static void ksc_console(const int is_error, const char *text) {
     ui_console_printf(is_error ? "#ff6b6b" : "#00e5ff", "[KRUNKSCRIPT] %s", text);
 #ifdef __EMSCRIPTEN__
     fprintf(stderr, "[KRUNKSCRIPT] %s%s\n", is_error ? "error: " : "", text);
+#else
+    static int echo = -1;
+    if (echo < 0) {
+        const char *v = getenv("KRUNKNATIVE_KS_LOG_STDOUT");
+        echo = v && v[0] && v[0] != '0';
+    }
+    if (echo) {
+        printf("[KRUNKSCRIPT] %s%s\n", is_error ? "error: " : "", text);
+        fflush(stdout);
+    }
 #endif
 }
 
@@ -244,7 +259,35 @@ static KsValue pc_stop_anim(KsScript *s, void *native, const KsValue *a, int n) 
     return ks_undef();
 }
 
+// get assetID(): `config && config.aID || ""` (deob-10.0.3.js:207880-207882), the class's, never a swap
+static KsValue pc_get_asset_id(KsScript *s, void *native, uint32_t id) {
+    (void) id;
+    const Player *p = ks_player_of(native);
+    if (!p) return ks_undef();
+    const Game *game = p->game;
+    const ClassConfig *c = game && game->classes && p->class_index >= 0 && (size_t) p->class_index < game->class_count ? &game->classes[p->class_index] : NULL;
+    const char *aid = class_overrides(c)->asset_id;
+    return ks_str(s, aid, strlen(aid));
+}
+
+// set assetID(v): players.updateAssetID(player, v += "") (:207883-207887, :197964-197975) on this client: with
+// config.mdl and a non-empty text it waits in assetTxt and an active player's model is generated again at once
+// (regenMeshes), which takes it (player_class_model.h)
+static void pc_set_asset_id(KsScript *s, void *native, uint32_t id, KsValue v) {
+    (void) id;
+    Player *p = ks_player_of(native);
+    Client *client = g_ksc.client;
+    if (!p) return;
+    char text[NET_PLAYER_ASSET_TEXT];
+    ks_to_string(s, v, text, sizeof(text));
+    if (!player_class_model_set_asset(p, text) || !client || !p->active || !p->mesh) return;
+    const int render_you = p->render_you;
+    client_drop_player_mesh(client, p);
+    client_add_player_mesh(client, p, render_you);
+}
+
 static const KsHostProp g_client_player_props[] = {
+    {"assetID", pc_get_asset_id, pc_set_asset_id, NULL, 0},
     {"visible", pc_get_visible, pc_set_visible, NULL, 0},
     {"inView", pc_get_in_view, NULL, NULL, 0},
     {"getAsset", NULL, NULL, pc_get_asset, 0},
@@ -527,17 +570,22 @@ void ks_client_round(Client *client, const int server_minor) {
     ks_input_round_reset(client);
     if (!client->game.ready || !client->game.map) return;
 
-    size_t len = 0;
+    size_t len = 0, shared_len = 0;
     char *src = ks_game_map_source(&client->game, KS_SIDE_CLIENT, &len);
-    if (!src) return;
+    // v10.0.3 prepareGame (deob-10.0.3.js:220186-220193): scripts.shared on the client too, after the main script;
+    // the entity manager steps the replicated entities with it (ks_entities.h, client/src/entities.c)
+    char *shared = ks_game_map_source(&client->game, KS_SIDE_SHARED, &shared_len);
+    if (!src && !shared) return;
 
     g_ksc.loaded = 1;
     g_ksc.map = client->game.map;
     // GAME.OVERLAY.getSize() is valid in global initialisers (Snake Demo's `obj bounds`).
     ks_overlay_client_init();
     ks_game_set_player_class(&client->game, g_ksc.player_class.props ? &g_ksc.player_class : NULL);
-    const int rc = ks_game_load(&client->game, KS_SIDE_CLIENT, src, len, &g_ksc.host, &g_ksc);
+    const int rc = src ? ks_game_load(&client->game, KS_SIDE_CLIENT, src, len, &g_ksc.host, &g_ksc) : 0;
     free(src);
+    if (shared) ks_game_load_shared(&client->game, KS_SIDE_CLIENT, shared, shared_len, &g_ksc.host, &g_ksc);
+    free(shared);
     if (rc != 0 || !ksc_script()) return;
     // UTILS.rand* on the client: a random stream (6.4; Math.random in v7)
     ks_game_seed(&client->game, (uint64_t) host_now(NULL) * 2654435761u ^ (uint64_t) (uintptr_t) client);
@@ -551,6 +599,8 @@ void ks_client_round(Client *client, const int server_minor) {
 
 void ks_client_frame(Client *client, const float world_delta_seconds, const float frame_delta_seconds) {
     g_ksc.frame++;
+    // v10 game.update's entity half (advance, the client events into this script, updateVisuals), before update()
+    entities_update(client, frame_delta_seconds);
     if (!g_ksc.loaded) return;
     // The game the script belongs to went away (left the server, a new map without INIT yet).
     if (!client->game.ready || client->game.map != g_ksc.map || (!client->offline && !client->net_connected)) {
