@@ -1968,6 +1968,19 @@ else ()
         target_link_libraries(third_person_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # class_camera_test: v10.0.3's class camera (client/src/class_camera.c): updateCamMouse's freeMouse /
+    # aimFov, the offset pose (parallel with camRot, lookAt with freeMouse, the Orthographic camera at a world
+    # point), the cursor's aim on the 3rd Person / Platformer planes, lockCamP / lckCmYR / yCmLim and a map's
+    # config.cls. GL-free: it includes class_camera.c, the GL target only provides headers.
+    add_executable(class_camera_test client/tests/class_camera_test.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(class_camera_test PRIVATE client/include client/lib)
+    target_link_libraries(class_camera_test PRIVATE freetype glfw m)
+    krunknative_link_gl(class_camera_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(class_camera_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME class_camera_test COMMAND class_camera_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
     # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
     option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)
