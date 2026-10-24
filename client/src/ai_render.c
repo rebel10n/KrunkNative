@@ -532,7 +532,10 @@ static void air_update_meshes(Client *client, const float dt_ms) {
         if (!ai || ai->serial != slot->serial) air_drop_mesh(slot);
     }
     if (!list) return;
-    if (!game_is_authority(&client->game)) game_ai_client_update(&client->game, dt_ms);
+    if (!game_is_authority(&client->game)) {
+        game_ai_client_update(&client->game, dt_ms);
+        ai_parts_tick(&client->game); // a solid pose whose model was still arriving: applySolid again (solidWait, :206420)
+    }
 
     for (int i = 0; i < list->count; i++) {
         GameAI *ai = &list->ais[i];
