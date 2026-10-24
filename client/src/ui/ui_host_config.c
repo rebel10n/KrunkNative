@@ -9,6 +9,7 @@
 #include <modes.h>
 #include <html_ui.h>
 #include <i18n.h>
+#include <backend_ui.h> // active_account(): Server Upgrades for an account, its funds
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,6 +109,19 @@ static void entry_rows(StrBuf *sb, const GameConfigTable table, const char lette
     }
 }
 
+// v10.0.3's Server Upgrades (deob-10.0.3.js:19510-19518): the Server tab's KR-priced switches of an account's
+// Custom host, sent as booleans under their varN (createPrivateRoom, :229870-229876). The game reads maxPS as a
+// 40-player lobby and keeps promServ (shared/src/game_config.c); Box Office charges no KR for either, v10's
+// funds check before hosting is all there is (:229816).
+static const struct {
+    const char *name, *var;
+    int cost;
+} SERVER_UPGRADES[] = {
+    {"40 Player Server", "maxPS", 1000},
+    {"Promote Server", "promServ", 2500},
+};
+static int g_cost; // windows[7].costVal: the checked switches' KR, 0 whenever the window is generated (:248659)
+
 // One Advanced matrix: the select + switch header, then every entry's rows (only the open one shown).
 // The tab bodies start hidden (the .hide class: windows[7]'s tabs show one at a time); the Host
 // Game flow's steps show them by their own step (ui_host_config_step_html), so no .hide there.
@@ -201,6 +215,19 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
                        config_name(o), (int) k, value, min, top, step, o->var, value, (int) k);
         }
     }
+    if (comp) {
+        // a comp host's Team Rosters: account names per team and the spectators, comma separated
+        // (deob-10.0.3.js:249026-249037; read back as teams / specs, :229848-229868)
+        if (open) sb_append(sb, "</div>");
+        open = 1;
+        sb_append(sb, "<div class='setHed' style='margin-bottom:15px'>Team Rosters</div><div class='setBodH'>");
+        static const char *const ROSTERS[3][2] = {{"Team 1 Players", "compRosterT1"}, {"Team 2 Players", "compRosterT2"}, {"Spectators", "compRosterSpecs"}};
+        for (int r = 0; r < 3; r++)
+            sb_appendf(sb, "<div class='settNameSmall'>%s<input id='%s' value='' type='text' placeholder='&lt;name0&gt;, &lt;name1&gt;...' "
+                           "style='border-radius:6px;border:none;background:#eee;padding:6px;padding-bottom:6px;float:right;margin-top:5px;margin-bottom:5px;' "
+                           "autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div>",
+                       ROSTERS[r][0], ROSTERS[r][1]);
+    }
     if (open) sb_append(sb, "</div>");
     sb_append(sb, "</div>");
 }
@@ -241,6 +268,15 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
         }
         settings_rows(&sb, host_type, preset);
     } else if (tab == HOST_CONFIG_TAB_SERVER && choices) {
+        g_cost = 0;
+        if (active_account()) { // Server Upgrades: an account's host (deob-10.0.3.js:249047-249053)
+            sb_append(&sb, "<div class='setHed' style='margin-bottom:15px;'>Server Upgrades</div><div class='setBodH'>");
+            for (size_t i = 0; i < sizeof(SERVER_UPGRADES) / sizeof(SERVER_UPGRADES[0]); i++)
+                sb_appendf(&sb, "<div class='settNameSmall'>%s <label class='switch'><input id='servUp%s' type='checkbox' onchange='windows[7].updateSet(%d,this)'>"
+                                "<span class='slider'></span></label><span style='float:right;margin-right:10px;color:rgba(255,255,255,0.5)'>%d <b style='color:#fff'>KR</b></span></div>",
+                           SERVER_UPGRADES[i].name, SERVER_UPGRADES[i].var, SERVER_UPGRADES[i].cost, SERVER_UPGRADES[i].cost);
+            sb_append(&sb, "</div>");
+        }
         // t("server.config.private") (deob-10.0.3.js:249056)
         sb_appendf(&sb, "<div class='setHed' style='margin-bottom:15px;'>Privacy</div><div class='setBodH'><div class='settNameSmall'>%s <label class='switch'>"
                        "<input id='makePrivate' type='checkbox'><span class='slider'></span></label></div><div class='settNameSmall'>Server Password<input id='passCode' value='' "
@@ -309,8 +345,19 @@ static void matrix_toggle(int *open, const HtmlArg *args, const int argc, const 
 }
 
 int ui_host_config_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) ev;
     if (!name) return -1;
+    if (!strcmp(name, "windows.7.updateSet")) { // updateSet(cost, el): costVal +/- cost, #hCustCost (deob-10.0.3.js:248477-248482)
+        const HtmlElem el = argc > 1 && args[1].kind == HTML_ARG_THIS ? (HtmlElem) args[1].num : ev ? ev->target : 0;
+        const int cost = arg_num(args, argc, 0, 0);
+        if (el && cost) {
+            g_cost += html_dom_get_checked(el) ? cost : -cost;
+            const HtmlElem label = html_dom_by_id("hCustCost");
+            char text[32];
+            if (g_cost) snprintf(text, sizeof(text), "%d KR", g_cost);
+            if (label) html_dom_set_text(label, g_cost ? text : "None");
+        }
+        return 1;
+    }
     if (!strcmp(name, "windows.7.toggle")) { // flips every input whose id starts with the prefix
         char selector[64];
         snprintf(selector, sizeof(selector), "input[id^='%s']", arg_str(args, argc, 0));
@@ -424,6 +471,13 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
             cJSON_Delete(request);
             return NULL;
         }
+        // costVal && (!acc || acc.funds < costVal): "Insufficient Funds" (deob-10.0.3.js:229816-229818)
+        const AccountInfo *acc = active_account();
+        if (g_cost && (!acc || acc->funds < g_cost)) {
+            snprintf(err, err_size, "%s", I18N("funds.insufficient", "Insufficient Funds"));
+            cJSON_Delete(request);
+            return NULL;
+        }
         value_of("passCode", text, sizeof(text));
         if (strlen(text) > 16) {
             snprintf(err, err_size, "Password too long (max 16)");
@@ -453,7 +507,36 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
             cJSON_AddNumberToObject(request, o->var, atof(text));
         }
     }
+    if (flags & GAME_HOST_FLAG_COMP) { // teams = [team 1, team 2] when either is named, specs when any (:229848-229868)
+        static const char *const IDS[3] = {"compRosterT1", "compRosterT2", "compRosterSpecs"};
+        cJSON *lists[3];
+        for (int r = 0; r < 3; r++) {
+            char names[512];
+            lists[r] = cJSON_CreateArray();
+            value_of(IDS[r], names, sizeof(names));
+            for (char *t = strtok(names, ","); t; t = strtok(NULL, ",")) { // split(","), trim, drop empties
+                while (*t == ' ' || *t == '\t') t++;
+                size_t len = strlen(t);
+                while (len && (t[len - 1] == ' ' || t[len - 1] == '\t')) t[--len] = 0;
+                if (len) cJSON_AddItemToArray(lists[r], cJSON_CreateString(t));
+            }
+        }
+        if (cJSON_GetArraySize(lists[0]) || cJSON_GetArraySize(lists[1])) {
+            cJSON *teams = cJSON_AddArrayToObject(request, "teams");
+            cJSON_AddItemToArray(teams, lists[0]);
+            cJSON_AddItemToArray(teams, lists[1]);
+        } else {
+            cJSON_Delete(lists[0]);
+            cJSON_Delete(lists[1]);
+        }
+        if (cJSON_GetArraySize(lists[2])) cJSON_AddItemToObject(request, "specs", lists[2]);
+        else cJSON_Delete(lists[2]);
+    }
     if (choices) {
+        for (size_t i = 0; i < sizeof(SERVER_UPGRADES) / sizeof(SERVER_UPGRADES[0]); i++) {
+            snprintf(id, sizeof(id), "servUp%s", SERVER_UPGRADES[i].var);
+            if (html_dom_by_id(id)) cJSON_AddBoolToObject(request, SERVER_UPGRADES[i].var, checked(id));
+        }
         if (g_wep_conf) read_matrix(request, "weps", GAME_CONFIG_WEAPON, 'W');
         if (g_cls_conf) read_matrix(request, "cls", GAME_CONFIG_CLASS, 'C');
         if (g_effect_conf) read_matrix(request, "prks", GAME_CONFIG_EFFECT, 'E');

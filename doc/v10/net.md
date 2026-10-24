@@ -402,8 +402,11 @@ account teams), `weps` / `cls` / `prks` (custom tables, clamped per option), the
 216148) is kept, written with the config and hides the comp menu's Join / Leave Team (256636; `comp_ui.c`); KN's server
 puts a rostered account on its roster team when it joins a comp lobby (`game_config_roster_team`, 216009-216014); the
 paid upgrades `maxPS` (a hosted lobby of 40, 261891) and `promServ` (no game consumer) are kept and always written
-(216372-216376). Deliberate: `specs` (accountSpecs) only feeds `validateAccount`, which 10.0.3 never calls; KN's host
-window has no roster or Server Upgrades fields (v10's createPrivateRoom sends them only from those fields).
+(216372-216376). Deliberate: `specs` (accountSpecs) only feeds `validateAccount`, which 10.0.3 never calls. KN's host
+window has v10's fields for them (`client/src/ui/ui_host_config.c`): a comp host's Team Rosters (`compRosterT1` /
+`compRosterT2` / `compRosterSpecs`, 249026-249037, read back as `teams` / `specs`, 229848-229868) and an account's
+Custom host's Server Upgrades (`servUp<varN>`, 249047-249053, sent as booleans, 229870-229876) with the Server Cost
+line (`updateSet`, 248477-248482) and the funds check (229816); Box Office charges no KR for the upgrades.
 
 ### 9.3 Client to server
 

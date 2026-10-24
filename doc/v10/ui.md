@@ -280,3 +280,60 @@ grep -o -E "[\"'](\./|/)?(img|textures|videos|sound|models|scares|promo|css|font
   (`ui/css/kn-v10-news.css`, from before the engine had `aspect-ratio`; same 1170:150 result), remote
   `banner_url` images are not loaded (no banner box then), Twitch's inline `<svg>` icon is drawn
   as an SVG image, and the event date has a plain space before AM/PM (Chrome: U+202F).
+
+## 9. v10.0.3 parity check of settings, controls and the dynamic screens (2026-10-24)
+
+Read against `deob-10.0.3.js` (the webcracked 10.0.3 bundle). The scripts were throwaway (a Babel walk
+over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the way
+`ui_settings_collect_defaults` reads it).
+
+- **Settings defaults.** `SETTINGS.list` (deob-10.0.3.js:236845-241193) has 292 settings and every `val`
+  is literal or an `isMobile` ternary in the decoded bundle (the earlier audit's "obfuscated" ones were
+  string-array lookups). The desktop defaults KN scrapes, plus `client/src/ui/ui_settings_defaults.c` and
+  `ui_settings.c` COLOR_SETTINGS, match all of them except the deliberate `rawMouse` (on) and
+  `defaultRegion` (a getter over the ping cache, handled by `ui_client_settings.c` / `servers_ui.c`).
+  The phone column matches the 16 `isMobile` settings. Fixed: `audioInput` (`"default"`, the capture's
+  select is empty) and the hidden `scoreBoardTrigger` / `voiceChatTrigger` (1, Continuous) had no
+  default. Slider ranges and steps (119 sliders) and row labels match. 10.0.3 changed no default
+  over 10.0.2; it only added `noVideoSkins`.
+- **Control binds.** All 82 `ControlBind(name, def, alt)` (deob-10.0.3.js:235041-235093) match
+  `ui_controls.c` V7_BINDS; KN's 11 extra binds (Reload Game, Object Manager, ...) come after them. The
+  Change Controls tabs, groups, rows and `windows.controls.<key>` labels (deob-10.0.3.js:248384-248399)
+  match. The Toggle selects' list (every `toggle: true` setting, deob-10.0.3.js:248437-248444) lacked
+  10.0.3's Disable Video Skins; added.
+- **Window 49** is Esports ("Regional Pickup Servers": NACK / KPC / CKA, deob-10.0.3.js:251750-251778;
+  header key `windows.esports.header` is missing from the table, so "UNLOCALIZED STRING"). Nothing in
+  10.0.3 opens it: no `showWindow(49)` in the bundle or `index.html`, no menu button, and every computed
+  `showWindow(x)` there resolves to other windows. `ui/windows/49.html` matches it; KN adds no opener.
+- **Social hub settings popup** (`social_ui.c`): v7.1.4's "Manage Ad Preferences" (openOneTrust) is gone;
+  10.0.3 has no such entry.
+- **Dynamic screens**, fixed to 10.0.3:
+  - Store: the home tab's bundle slider arrows and wheel scroll (`windows[13].updateScroll`,
+    deob-10.0.3.js:249986-250008); the Junkyard panel calls `craftMenu()` without a click sound; the Eterno
+    Shop shows "Loading eterno shop..." while the brain's display loads and "Error: Failed to load eterno
+    shop" with Retry when it fails, nothing more when it is empty (deob-10.0.3.js:144540-144551).
+  - Server browser: the `2XP` badge (a double-XP mode, not dedicated, not custom) and krunker.io's
+    promoted-server star, sorted first in the legacy browser (deob-10.0.3.js:246616, 246633). Box Office's
+    own `pr` means a password, so it stays a lock.
+  - Host form: the headings are `windows.host.modes` / `classes` / `settings` and `server.config.private`
+    ("Select Modes", "Select Classes", "Server Settings", "Private"). A comp host has the Team Rosters
+    (Team 1 / Team 2 Players, Spectators: `teams` / `specs`), an account's Custom host the Server Upgrades
+    (40 Player Server 1000 KR, Promote Server 2500 KR: `maxPS` / `promServ`) with the Server Cost line and
+    v10's "Insufficient Funds" check (deob-10.0.3.js:249026-249053, 229816-229876; no KR is charged).
+  - Ranked home: the Challenges link and the milestone claim play no click sound, the description takes
+    `expanded` with the progression details, the map cards have the map name as `alt`.
+  - Clans: the loot settings' "Last updated ... on" is `toLocaleDateString()` (M/D/YYYY), the ownership
+    transfer banner names the clan from `clanData.clan_name`, the MOTD's Remove shows while the textarea
+    holds text (as of the last redraw: KN reads the textarea on clicks, not on every keystroke).
+  - Market: seller, creator and owner names open the player's profile.
+  - Profile (window 5): the name opens `openPlayerProfile`; the Friends tab lists online friends first.
+  - Social panel: opening it, or switching to a tab, starts that tab afresh as v10's components do
+    (Social on Global, Friends with no chat open, no filter, empty draft); the Search tab's scroll is kept.
+- **Known gaps left** (larger ports, not done here): the store's bundle cards (art on `.bundle-icon`, its
+  `bundlePopup` click, 3 thumbnails + `+N`, ordering), the Purchase KR sale weekends and the 160000 KR
+  card, the Prize Wheels' "Unlocks in" state and promo badge, `showPremiumBenefits()`; the host form's
+  Host Presets and Share on Hub row, the non-Custom host types' banners and map lists, the community-map
+  Select block, `canRehost`; window 5 is still v7's (Partner and promo tabs, no Connections tab, no Raids
+  stats, no Promotional Emails / username / deletion rows); the market's creator badge, Quick Sell Junk
+  and Black Market title reward; the profile popup's Badges, Titles and Skins tabs; the menu items play
+  `playSelect(0.1)` where v10 plays `playSelect()`.
