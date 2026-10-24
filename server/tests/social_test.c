@@ -226,6 +226,7 @@ static void test_chat_channels(void) {
     CHECK(got_chat(d, "hello all", NULL, NULL) == 1, "global: the v3 peer gets NET_PACKET_CHAT");
     CHECK(!count_type(d, NET_PACKET_CHAT_V7), "no CHAT_V7 for the v3 peer");
 
+    pump(48); // config.chatInterval: a's next line 0.8 s after the last (NET_CHAT_INTERVAL)
     reset_received();
     chat_v7(a, CHAT_CHANNEL_TEAM, "team only");
     pump(3);
@@ -233,6 +234,16 @@ static void test_chat_channels(void) {
     CHECK(got_chat(b, "team only", &channel, NULL) == 2 && channel == 1, "team: teammate on channel 1");
     CHECK(!got_chat(c, "team only", NULL, NULL), "team: the enemy gets nothing");
     CHECK(got_chat(d, "team only", NULL, NULL) == 1, "team: the v3 teammate gets the v3 line");
+
+    // config.chatInterval 800 ms: a line 0.05 s after the last one is dropped (the sender too), then one in time goes out
+    reset_received();
+    chat_v7(a, CHAT_CHANNEL_GLOBAL, "too soon");
+    pump(3);
+    CHECK(!got_chat(a, "too soon", NULL, NULL) && !got_chat(b, "too soon", NULL, NULL), "chatInterval: a line 0.05 s after the last is dropped");
+    pump(48);
+    chat_v7(a, CHAT_CHANNEL_GLOBAL, "in time");
+    pump(3);
+    CHECK(got_chat(b, "in time", NULL, NULL) == 2, "chatInterval: the next line 0.85 s later goes out");
 
     reset_received();
     chat_v3(d, "from v3");
