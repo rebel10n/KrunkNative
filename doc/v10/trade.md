@@ -124,10 +124,10 @@ migration `0357_live_trades`) is the authority on what anyone owns:
 | Brain | `econ_live_trade_inventories` / `econ_live_trade` (economy.c), `P_LIVE_TRADE_OPEN` / `P_LIVE_TRADE` (db_economy.c), `0357_live_trades` (all three dialects) |
 | Client window | `client/src/ui/trade_ui.c` (windows[36] markup, handlers `windows[36].*`, `acceptRequest`, `requestTrade`), `ui_windows.c` `gen_37`, `menu_ui.c` (another window / the close cancels), `hud_ui.c` (the player list's Trade Player button, the request line) |
 | Official lobbies | `client/src/net/krunker_link_trade.c` (`trd` `utrd` `utrdc` `atrd` `tch`, `ch` type 3; out `strd` `trd` `utrd` `utrdc` `atrd` `dtrd` `ctrd` `tct`) |
-| Tests | `server/tests/trade_test.c` (the state machine + the server flow over the sandbox, the brain faked), `services/brain/tests/live_trade_test.py` (the two ops on a scratch database) |
+| Tests | `server/tests/trade_test.c` (the state machine + the server flow over the sandbox, the brain faked; `make test-net`), `services/brain/tests/live_trade_test.py` (the two ops on a scratch database; ctest `brain_live_trade`), `server/tests/live_trade_e2e.py` (server_bin + kn_brain + two raw clients; `make live-trade-e2e`); `--render-scenario` with a `"trade"` state draws the window headless |
 
 Deliberate differences: the window redraws a side's list from its state instead of v10's in-place DOM edits (same
-markup); the request line's [Accept] is `acceptRequest(sid, this)` (C sets "[Accepted]"); the chat and KR inputs
+markup); the request line is the chat's own row with the [Accept] span appended, `acceptRequest(sid, this)` (C sets "[Accepted]"); the chat and KR inputs
 send on Enter through their own `onkeydown` (v10's page-wide key handler); a spray card shows its first frame
 (no `sprayAnm` keyframes); the search matches name, creator and weapon (v10 also keyW, drops, limT). Premium's
 "Reduced Trade Fees & Cooldowns" (`:19349`) has no live-trade numbers in the bundle: not applied.
