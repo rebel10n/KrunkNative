@@ -14,6 +14,9 @@
 // - The built-in kinds' own trigger actions (Jack O' Lantern 62, Mirror Image 65) are backend KR
 //   actions, no-ops without kn_brain (Decision 4): the kinds carry no trigger.
 #include <ai.h>
+#include <ai_parts.h> // v10.0.3 AI parts: preciseHits, ai.solid, the playAnim hold
+#include <ks_game.h> // v10.0.3 onAIDamage / onAIPartDamage / onAIDeath
+#include <net_ext.h>
 #include <zombies.h> // map-logic WP-H: insta-kill
 #include <map_ai.h>
 #include <map_catalog.h>
@@ -255,6 +258,12 @@ static void ai_asset_flags(GameAIData *d) {
     }
     digits[n] = 0;
     d->asset = n ? atoi(digits) : 0; // assetID = asset.replace(/[^\d]/g, "")
+}
+
+void game_ai_data_set_asset(GameAIData *d, const char *asset) { // dat.asset = (asset || "") + "", its letters and assetID
+    if (!d) return;
+    ai_copy(d->asset_text, sizeof(d->asset_text), asset ? asset : "");
+    ai_asset_flags(d);
 }
 
 // MapManager.buildAIData(obj, triggers) + addAI's clamps. `name` gets aiName ("" when invalid).
@@ -504,12 +513,15 @@ void game_ai_reset(Game *game) {
     if (!game->ai) return;
     GameAIs *list = game->ai;
     ai_free_records(list);
+    ai_parts_reset(list); // the AIs' parts and solids go; the model cache (AI.rigs) stays like v10.0.3's
+    AiPartsState *parts = list->parts;
     const unsigned serial = list->serial;
     int bots[GAME_AI_MAP_BOT_MAX];
     const int bot_count = list->map_bot_count;
     memcpy(bots, list->map_bot_ids, sizeof(bots));
     memset(list, 0, sizeof(*list));
     list->serial = serial; // spawn serials keep growing: client meshes never mix two AIs
+    list->parts = parts;
     memcpy(list->map_bot_ids, bots, sizeof(bots)); // map_bots_spawn_pending removes last round's map bots
     list->map_bot_count = bot_count;
 }
@@ -517,6 +529,7 @@ void game_ai_reset(Game *game) {
 void game_ai_free(Game *game) {
     if (!game || !game->ai) return;
     ai_free_records(game->ai);
+    ai_parts_free(game->ai);
     free(game->ai);
     game->ai = NULL;
 }
@@ -663,6 +676,7 @@ GameAI *game_ai_spawn_ex(Game *game, int sid, const int index, const char *name,
     GameAI *ai = &list->ais[list->count++];
     ai_init(ai, position, name, index, data, sid, !game_is_authority(game));
     ai->serial = ++list->serial;
+    ai_parts_spawned(game, ai); // idleT0 = now (v10.0.3 AI.init, deob-10.0.3.js:204903)
     return ai;
 }
 
@@ -886,6 +900,24 @@ float game_ai_line_hit(const GameAI *ai, const vec3 origin, const vec3 direction
     return line_in_rect(origin, direction, ai->position, box);
 }
 
+// v10.0.3: usesHitTest() ? hitTest(...) (and no box) : lineInRect (deob-10.0.3.js:196017-196030, :196677-196689,
+// :206849-206860)
+float game_ai_ray_hit(Game *game, GameAI *ai, const vec3 origin, const vec3 direction, GameAIHitPart *part) {
+    if (part) memset(part, 0, sizeof(*part));
+    if (ai_parts_hit_model(game, ai)) {
+        float t = -1.0f, mult = 1.0f;
+        char name[AI_PART_NAME_SIZE];
+        if (!ai_parts_hit_test(game, ai, origin, direction, &t, name, sizeof(name), &mult)) return -1.0f;
+        if (part) {
+            part->has_part = 1;
+            snprintf(part->name, sizeof(part->name), "%s", name);
+            part->mult = mult;
+        }
+        return t;
+    }
+    return game_ai_line_hit(ai, origin, direction);
+}
+
 // The target's position (and its crouch for the aim), 0 when it is gone.
 static int ai_target_position(Game *game, GameAI *ai, vec3 *out, float *crouch, int *is_player) {
     *crouch = 0.0f;
@@ -1036,6 +1068,7 @@ void game_ai_remove(Game *game, GameAI *ai) { // AI.removeFully
     ai->active = 0;
     ai->removed = 1;
     ai->respawn_timer = 0.0f;
+    ai_parts_drop_solid(game, ai); // removeFully: solidPose = null; applySolid() (deob-10.0.3.js:206589)
     if (game_is_authority(game)) {
         const NetAIRemovePacket packet = {.sid = ai->sid};
         for (int i = 0; i < ai->sent_count; i++) game_send(game, ai->sent_to[i], NET_PACKET_AI_REMOVE, &packet, sizeof(packet));
@@ -1060,6 +1093,8 @@ static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
 #ifdef SPAWNABLES_HAVE_AI_HOOKS
         if (game_is_authority(game)) mode_v7_on_ai_death(game, ai, source); // game.mode.onAIDeath (WP-D)
 #endif
+        // v10.0.3 KrunkScript onAIDeath(sid, name, killerId) after mode.onAIDeath (deob-10.0.3.js:206338-206341)
+        if (game_is_authority(game)) ks_game_on_ai_death(game, ai->sid, ai->name, source);
         // reward && isPubType(): skin drops (not ported, see the header)
         if (source && ai_player_siphon(source) > 0.0f) player_change_health(source, NULL, -ai_player_siphon(source), 0); // siphon heals
     }
@@ -1088,11 +1123,19 @@ static void ai_aggro(Game *game, GameAI *ai, const int is_player, Player *player
 // AI.changeHealth(amount, source, forceTarget, set) for a player (or no) source.
 int game_ai_change_health(Game *game, GameAI *ai, float amount, Player *source, const int force_target, const int set) {
     const int was_active = ai->active;
+    char part[AI_PART_NAME_SIZE];
+    const int has_part = ai_parts_take_dmg_part(game, ai, part, sizeof(part)); // dmgPart = this.dmgPart; this.dmgPart = null
     if (source && zombies_insta_kill(game) && ai->health) amount = -(ai->health * 2.0f); // WP-H: instaKillTimer (AI.changeHealth)
     if (ai->health) {
         const float before = ai->health;
         if (set) ai->health = amount;
         else ai->health += amount;
+        // v10.0.3 KrunkScript (server): onAIDamage(sid, playerId, dmg), then onAIPartDamage(sid, part, playerId, dmg) for a
+        // model hit, before the death check (deob-10.0.3.js:206243-206249)
+        if (!set && amount < 0.0f && game_is_authority(game)) {
+            ks_game_on_ai_damage(game, ai->sid, source, -amount);
+            if (has_part) ks_game_on_ai_part_damage(game, ai->sid, part, source, -amount);
+        }
         if (ai->health <= 0.0f) {
             ai_kill(game, ai, source, 0);
         } else if (amount > 0.0f) {
@@ -1108,8 +1151,9 @@ int game_ai_change_health(Game *game, GameAI *ai, float amount, Player *source, 
             ai->last_hit_uid = source->uid;
             ai->last_hit_timer = AI_LAST_HIT_MS;
         }
-        // `amount < this.behaviour == 1` is (amount < true) == amount < 1: damage (and 0) aggroes
-        if (amount < 1.0f && (!source->team || source->team != ai->team) && (force_target || ai->target.kind == AI_TARGET_NONE) &&
+        // `amount < this.behaviour == 1` is (amount < true) == amount < 1: damage (and 0) aggroes; v10.0.3: not while a
+        // script sets the target (!this.scriptTarget, deob-10.0.3.js:206276)
+        if (amount < 1.0f && !ai->script_target && (!source->team || source->team != ai->team) && (force_target || ai->target.kind == AI_TARGET_NONE) &&
             ai->data.targets_players) {
             ai_aggro(game, ai, 1, source, NULL);
         }
@@ -1120,12 +1164,18 @@ int game_ai_change_health(Game *game, GameAI *ai, float amount, Player *source, 
 int game_ai_change_health_by_ai(Game *game, GameAI *ai, const float amount, GameAI *source) {
     if (source == ai) return 0;
     const int was_active = ai->active;
+    char part[AI_PART_NAME_SIZE];
+    const int has_part = ai_parts_take_dmg_part(game, ai, part, sizeof(part));
     if (ai->health) {
         ai->health += amount;
+        if (amount < 0.0f && game_is_authority(game)) { // an AI source is no player: playerId "" (deob-10.0.3.js:206245)
+            ks_game_on_ai_damage(game, ai->sid, NULL, -amount);
+            if (has_part) ks_game_on_ai_part_damage(game, ai->sid, part, NULL, -amount);
+        }
         if (ai->health <= 0.0f) ai_kill(game, ai, NULL, 0);
         else if (amount > 0.0f && ai->health > ai->max_health) ai->health = ai->max_health;
     }
-    if (source && amount < 1.0f && (!source->team || source->team != ai->team) && ai->target.kind == AI_TARGET_NONE &&
+    if (source && amount < 1.0f && !ai->script_target && (!source->team || source->team != ai->team) && ai->target.kind == AI_TARGET_NONE &&
         ai->data.targets_ai) {
         ai_aggro(game, ai, 0, NULL, source);
     }
@@ -1147,9 +1197,18 @@ void game_ai_set_health(Game *game, GameAI *ai, const float value) {
 
 void game_ai_damage_ex(Game *game, GameAI *ai, Player *dealer, float damage, const int force_target, const float hit_y, const int effect,
                        const int effect_count) {
-    if (!ai || !ai->active || ai->invincible) return;
+    game_ai_damage_part(game, ai, dealer, damage, force_target, hit_y, effect, effect_count, NULL);
+}
+
+int game_ai_damage_part(Game *game, GameAI *ai, Player *dealer, float damage, const int force_target, const float hit_y, const int effect,
+                        const int effect_count, const GameAIHitPart *part) {
+    if (!ai || !ai->active || ai->invincible) return 0;
     int crit = 0;
-    if (hit_y == hit_y && ai->data.crit_dmg && ai->data.crit_hei && ai->position.y + ai->height * 2.0f - hit_y < ai->data.crit_hei) {
+    const int model_hit = part && part->has_part;
+    if (model_hit) { // v10.0.3: part ? dmg * part.m (crit when part.m > 1) : the crit band (deob-10.0.3.js:196799-196805)
+        damage *= part->mult;
+        crit = part->mult > 1.0f;
+    } else if (hit_y == hit_y && ai->data.crit_dmg && ai->data.crit_hei && ai->position.y + ai->height * 2.0f - hit_y < ai->data.crit_hei) {
         crit = 1;
         damage *= ai->data.crit_dmg;
     }
@@ -1157,13 +1216,19 @@ void game_ai_damage_ex(Game *game, GameAI *ai, Player *dealer, float damage, con
         game_ai_give_effect(game, ai, effect, effect_count);
         if (effect == AI_EFFECT_ZAPPED && dealer) ai->zapped_by = dealer->uid;
     }
+    if (model_hit && !part->mult) { // armourHit: onAIPartDamage(sid, part, playerId, 0) while active, no damage (deob-10.0.3.js:206223)
+        if (game_is_authority(game)) ks_game_on_ai_part_damage(game, ai->sid, part->name, dealer, 0.0);
+        return 1;
+    }
+    ai_parts_set_dmg_part(game, ai, model_hit ? part->name : NULL); // dmgPart = part || null
     game_ai_change_health(game, ai, -damage, dealer, force_target, 0);
-    if (!dealer) return;
+    if (!dealer) return 0;
 #ifdef SPAWNABLES_HAVE_AI_HOOKS
     if (ai->kill_score && game->mode && game->mode->config.points_per_hit) player_score(dealer, (int) ceilf(damage * game->mode->config.points_per_hit), 1);
 #endif
     if (!ai->active && ai->kill_score) player_score(dealer, ai->kill_score, 1);
     ai_send_hit(game, ai, dealer, damage, crit);
+    return 0;
 }
 
 void game_ai_damage(Game *game, GameAI *ai, Player *dealer, const float damage, const int force_target) {
@@ -1197,7 +1262,15 @@ void game_ai_play_anim(Game *game, GameAI *ai, const char *clip, const int raw) 
 }
 
 void game_ai_play_anim_reps(Game *game, GameAI *ai, const char *clip, const int reps, const int raw) {
+    game_ai_play_anim_hold(game, ai, clip, reps, raw, 0);
+}
+
+void game_ai_play_anim_hold(Game *game, GameAI *ai, const char *clip, const double reps_in, const int raw, const int hold) {
     if (!ai || !ai->data.has_anim || !clip || !clip[0]) return;
+    const int reps = (int) reps_in;
+    // v10.0.3 AI.playAnim on the server (deob-10.0.3.js:206455-206465): a raw clip sets clipState {n, t0, reps:
+    // max(1, reps || 1), hold} (the pose of clipAt) and heldClip = hold ? clip : null (partsDirty when it changes)
+    if (game_is_authority(game) && raw) ai_parts_play_anim(game, ai, clip, reps_in, hold);
     if (!game_is_authority(game)) {
         ai_copy(ai->clip, sizeof(ai->clip), clip);
         ai->clip_reps = reps;
@@ -1218,7 +1291,8 @@ void game_ai_play_anim_reps(Game *game, GameAI *ai, const char *clip, const int 
     ai_copy(packet.clip, sizeof(packet.clip), clip);
     for (size_t i = 0; i < game->player_count; i++) {
         const Player *p = game->players[i];
-        if (!p || !p->active || ai_d3d(p->position, ai->position) > GAME_AI_SYNC_RANGE) continue;
+        // v10.0.3 (deob-10.0.3.js:206471): spectating || alwaysSync || within 800
+        if (!p || !p->active || (!ai->data.always_sync && ai_d3d(p->position, ai->position) > GAME_AI_SYNC_RANGE)) continue;
         game_send(game, p->uid, NET_PACKET_AI_ANIM, &packet, sizeof(packet));
     }
     game_send(game, NET_TARGET_NON_PLAYERS, NET_PACKET_AI_ANIM, &packet, sizeof(packet)); // spectators
@@ -1292,19 +1366,33 @@ int game_ai_projectile_can_hit(Game *game, const GameProjectile *projectile, con
 }
 
 void game_ai_projectile_hit_ai(Game *game, const GameProjectile *projectile, GameAI *target, Player *owner, const float damage) {
+    game_ai_projectile_hit_ai_part(game, projectile, target, owner, damage, NULL);
+}
+
+void game_ai_projectile_hit_ai_part(Game *game, const GameProjectile *projectile, GameAI *target, Player *owner, float damage,
+                                    const GameAIHitPart *part) {
     if (!target || target->invincible) return;
     if (owner) { // effectInd (+ zappedBy) unless a teammate; changeHealth(-dmg, owner, wId == 12)
 #ifdef EFFECT_STACK_MAX
         const int effect = projectile->effect >= 0 && (!owner->team || owner->team != target->team) ? projectile->effect : -1;
-        game_ai_damage_ex(game, target, owner, damage, projectile->thrown_melee, NAN, effect, projectile->effect_count);
+        game_ai_damage_part(game, target, owner, damage, projectile->thrown_melee, NAN, effect, projectile->effect_count, part);
 #else
-        game_ai_damage_ex(game, target, owner, damage, projectile->thrown_melee, NAN, -1, 0);
+        game_ai_damage_part(game, target, owner, damage, projectile->thrown_melee, NAN, -1, 0, part);
 #endif
         return;
     }
     const GameAIShot *shot = ai_shot_of(game, projectile);
     if (!shot) return;
     if (shot->effect >= 0) game_ai_give_effect(game, target, shot->effect, 1);
+    // v10.0.3 (deob-10.0.3.js:206911-206920): part ? dmg * part.m; part.m 0 -> armourHit (no player: playerId "")
+    if (part && part->has_part) {
+        damage *= part->mult;
+        if (!part->mult) {
+            if (game_is_authority(game)) ks_game_on_ai_part_damage(game, target->sid, part->name, NULL, 0.0);
+            return;
+        }
+    }
+    ai_parts_set_dmg_part(game, target, part && part->has_part ? part->name : NULL);
     GameAI *shooter = game_ai_find(game, shot->sid);
     if (shooter && shooter->serial != shot->serial) shooter = NULL;
     if (shooter) game_ai_change_health_by_ai(game, target, -damage, shooter);
@@ -1590,6 +1678,9 @@ static void ai_update(Game *game, const int index, const float q) {
     GameAIs *list = game->ai;
     GameAI *ai = &list->ais[index];
     if (ai->removed) return;
+    // v10.0.3: `if (this.behavior == 0) return` before the respawn timer (deob-10.0.3.js:205618); only a script's
+    // ai.behaviour = 0 sets it (AI.init never does)
+    if (ai->has_script_behavior && ai->script_behavior == 0.0f) return;
 
     if (ai->respawn_timer) {
         ai->respawn_timer -= q;
@@ -1731,7 +1822,14 @@ static void ai_update(Game *game, const int index, const float q) {
     int moving = 0;
     // behaviour 1 (every AI: init sets it; the `behavior == 0` early-out is a typo)
     ai->action_freq -= q;
-    if (ai->action_freq <= 0.0f) {
+    if (ai->script_target) { // v10.0.3 (deob-10.0.3.js:205765): a script's target is kept until it leaves or dies
+        const Player *t = ai->target.kind == AI_TARGET_PLAYER ? game_find_player(game, ai->target.id) : NULL;
+        if (ai->target.kind == AI_TARGET_PLAYER && (!t || !t->active)) ai_clear_target(ai);
+        if (ai->target.kind == AI_TARGET_AI) {
+            const GameAI *o = game_ai_find(game, ai->target.id);
+            if (!o || !o->active || o->serial != ai->target.serial) ai_clear_target(ai);
+        }
+    } else if (ai->action_freq <= 0.0f) {
         const vec3 eye = {ai->position.x, ai->position.y + ai->height / 2.0f, ai->position.z};
         const AICandidate found = ai_find_target(game, ai, eye, ai->data.target_furthest);
         const int changed = found.player ? !(ai->target.kind == AI_TARGET_PLAYER && ai->target.id == found.player->uid)
@@ -1755,6 +1853,8 @@ static void ai_update(Game *game, const int index, const float q) {
     if (ai->target.kind != AI_TARGET_NONE) {
         goal.at = target_at;
         goal.target = 1;
+    } else if (ai->has_goal) { // v10.0.3 ai.moveTo: target || goal || roamTarget || startP (deob-10.0.3.js:205779)
+        goal.at = ai->goal;
     } else {
         const Object *node = ai->data.path_count && ai->path_index < ai->data.path_count ? ai_path_node(game, ai->data.path[ai->path_index]) : NULL;
         if (node) {
@@ -1920,7 +2020,9 @@ static void ai_update(Game *game, const int index, const float q) {
     ai = &list->ais[index];
 #endif
 
+    const int moved_before = ai->did_move;
     ai->did_move = ai_d3d(ai->position, ai->old) >= 0.1f;
+    if (ai->did_move != moved_before) ai_parts_moved(game, ai); // movT0 = now (deob-10.0.3.js:206063)
     ai_stuck(ai, q, moving);
     ai_drift(ai, q, mlt);
 
@@ -1968,6 +2070,7 @@ void game_ai_tick(Game *game, const float delta_ms) {
         if (list->force_dance_timer <= 0.0f) list->force_dance_timer = 0.0f;
     }
     if (!list->count) return;
+    ai_parts_tick(game); // v10.0.3: an AI whose solid pose waits for its model applies it now (deob-10.0.3.js:206420)
     list->updating = 1;
     for (int i = list->count - 1; i >= 0; i--) ai_update(game, i, delta_ms); // AI.update walks the list backwards
     list->updating = 0;
@@ -2140,6 +2243,16 @@ void game_ai_sync(Game *game) {
     NetAISyncEntry entries[GAME_AI_MAX];
     NetAISyncV7Entry entries7[GAME_AI_MAX];
 
+    // v10.0.3 AI.sync (deob-10.0.3.js:206561-206568): a partsDirty AI sends "aip" to everyone it was sent to
+    for (int i = 0; i < list->count; i++) {
+        GameAI *ai = &list->ais[i];
+        AiParts *parts = ai->removed ? NULL : ai_parts_of(game, ai, 0);
+        if (!parts || !parts->dirty) continue;
+        parts->dirty = 0;
+        for (int k = 0; k < ai->sent_count; k++) ai_parts_send(game, ai, ai->sent_to[k]);
+        if (ai->sent_non_players) ai_parts_send(game, ai, NET_TARGET_NON_PLAYERS);
+    }
+
     for (size_t p = 0; p < game->player_count; p++) {
         const Player *player = game->players[p];
         if (!player || !player->active) continue;
@@ -2154,6 +2267,8 @@ void game_ai_sync(Game *game) {
                 count++;
             } else {
                 ai_send_add(game, player->uid, ai);
+                // getData's pg / hn / hc / sp (v10.0.3 :205151-205152): KN's "aai" has no room, the "aip" follows it
+                if (ai_parts_has_state(game, ai)) ai_parts_send(game, ai, player->uid);
             }
         }
         ai_send_sync(game, player->uid, entries, count);
@@ -2167,6 +2282,7 @@ void game_ai_sync(Game *game) {
         if (list->non_players_dirty || !ai->sent_non_players) {
             ai->sent_non_players = 1;
             ai_send_add(game, NET_TARGET_NON_PLAYERS, ai);
+            if (ai_parts_has_state(game, ai)) ai_parts_send(game, ai, NET_TARGET_NON_PLAYERS);
         }
         if (ai->active) {
             ai_sync_entry(ai, &entries[count]);
@@ -2352,6 +2468,7 @@ void game_ai_apply_remove(Game *game, const NetAIRemovePacket *packet) { // remo
     if (!list) return;
     for (int i = list->count - 1; i >= 0; i--) {
         if (list->ais[i].sid != packet->sid) continue;
+        ai_parts_drop_solid(game, &list->ais[i]); // AI.remove: solidPose = null; applySolid() (deob-10.0.3.js:206605)
         list->ais[i].active = 0;
         list->ais[i].removed = 1;
     }

@@ -521,6 +521,63 @@ void ks_game_on_player_damage(Game *game, Player *victim, Player *doer, const do
     ks_handle_unpin(s, args[0]);
 }
 
+// v10.0.3 AI hooks: the sid as a number, the player's id string ("" for no player), deob-10.0.3.js:206223-206341
+void ks_game_on_ai_damage(Game *game, const int sid, const Player *doer, const double amount)
+{
+    if (!server_hook(game, "onAIDamage")) return;
+    KsScript *s = game->ks->script;
+    KsValue args[3] = {ks_num(sid), doer ? id_value(s, doer) : ks_str(s, "", 0), ks_num(amount)};
+    ks_handle_pin(s, args[1]);
+    ks_game_call(game, "onAIDamage", args, 3);
+    ks_handle_unpin(s, args[1]);
+}
+
+void ks_game_on_ai_part_damage(Game *game, const int sid, const char *part, const Player *doer, const double amount)
+{
+    if (!server_hook(game, "onAIPartDamage")) return;
+    KsScript *s = game->ks->script;
+    KsValue args[4] = {ks_num(sid), ks_str(s, part ? part : "", part ? strlen(part) : 0), ks_num(0), ks_num(amount)};
+    ks_handle_pin(s, args[1]);
+    args[2] = doer ? id_value(s, doer) : ks_str(s, "", 0);
+    ks_handle_pin(s, args[2]);
+    ks_game_call(game, "onAIPartDamage", args, 4);
+    ks_handle_unpin(s, args[2]);
+    ks_handle_unpin(s, args[1]);
+}
+
+void ks_game_on_ai_death(Game *game, const int sid, const char *name, const Player *killer)
+{
+    if (!server_hook(game, "onAIDeath")) return;
+    KsScript *s = game->ks->script;
+    KsValue args[3] = {ks_num(sid), ks_str(s, name ? name : "", name ? strlen(name) : 0), ks_num(0)};
+    ks_handle_pin(s, args[1]);
+    args[2] = killer ? id_value(s, killer) : ks_str(s, "", 0);
+    ks_handle_pin(s, args[2]);
+    ks_game_call(game, "onAIDeath", args, 3);
+    ks_handle_unpin(s, args[2]);
+    ks_handle_unpin(s, args[1]);
+}
+
+void ks_game_on_object_damage(Game *game, const int sid, const int interface_id, const Player *doer, const double amount)
+{
+    if (!server_hook(game, "onObjectDamage")) return;
+    KsScript *s = game->ks->script;
+    KsValue args[4] = {ks_num(sid), ks_num(interface_id), doer ? id_value(s, doer) : ks_str(s, "", 0), ks_num(amount)};
+    ks_handle_pin(s, args[2]);
+    ks_game_call(game, "onObjectDamage", args, 4);
+    ks_handle_unpin(s, args[2]);
+}
+
+void ks_game_on_object_destroyed(Game *game, const int sid, const int interface_id, const Player *doer)
+{
+    if (!server_hook(game, "onObjectDestroyed")) return;
+    KsScript *s = game->ks->script;
+    KsValue args[3] = {ks_num(sid), ks_num(interface_id), doer ? id_value(s, doer) : ks_str(s, "", 0)};
+    ks_handle_pin(s, args[2]);
+    ks_game_call(game, "onObjectDestroyed", args, 3);
+    ks_handle_unpin(s, args[2]);
+}
+
 void ks_game_on_player_leave_uid(Game *game, const int uid)
 {
     if (server_hook(game, "onPlayerLeave")) {

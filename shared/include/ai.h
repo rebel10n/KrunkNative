@@ -74,7 +74,8 @@ typedef struct {
     unsigned char respawn_r:1;    // rr: random respawn time in [100, respawnT || 5000]
     unsigned char can_shoot:1;    // cs
     unsigned char can_hit:1;      // cnh (melee)
-    unsigned char always_sync:1;  // AI.spawn alwaysSync (v10.0.3): synced to every player whatever its distance
+    unsigned char always_sync:1;  // AI.spawn alwaysSync (v10.0.3, aSync): AI.sync / playAnim skip the 800 range (deob-10.0.3.js:206471, :206576)
+    unsigned char precise:1;      // AI.spawn preciseHits (v10.0.3, prc): shots hit the animated model (shared/include/ai_parts.h)
     unsigned char xray:1;         // xv: targets through walls (xrayVis)
     unsigned char targets_ai:1;   // tAi (targAI)
     unsigned char targets_players:1; // tPl == null (targPlr)
@@ -145,6 +146,8 @@ typedef struct {
     unsigned serial;              // AI target: its GameAI.serial (a re-used sid is someone else)
     vec3 point;                   // AI_TARGET_POINT
 } GameAITarget;
+
+typedef struct AiPartsState AiPartsState;
 
 typedef struct GameAI_t {
     int sid;                      // generateSID(ais): the lowest free id from 1
@@ -225,6 +228,16 @@ typedef struct GameAI_t {
     char clip[GAME_AI_ANIM_SIZE]; // the last "ana" clip to play once ("" none)
     unsigned clip_serial;         // bumped per "ana"
     int clip_reps;                // AI.playAnim reps (v10.0.2 mesh.playClip(clip, reps)): the local copy plays the clip this many times; "ana" plays once
+    // v10.0.3 AI clip clock (AI.clipAt, deob-10.0.3.js:205216): idleT0 / movT0 in game ms (ai_parts.c)
+    double anim_idle_t0, anim_mov_t0;
+    // v10.0.3 KrunkScript AI wrapper (deob-10.0.3.js:208323-208510): autoTarget / target (scriptTarget: no automatic
+    // targeting, :205765), moveTo / clearMoveTo (goal: chased when no target, :205779), behaviour (ai.behavior: 0
+    // freezes the server update, :205618; unset until a script writes it)
+    unsigned char script_target:1;
+    unsigned char has_goal:1;
+    unsigned char has_script_behavior:1;
+    vec3 goal;
+    float script_behavior;
 } GameAI;
 
 // An owned data record: a pending map AI (addAI) or a parsed key bag; trigger actions live here.
@@ -261,6 +274,7 @@ typedef struct GameAIs_t {
     int map_bot_ids[GAME_AI_MAP_BOT_MAX]; // GameBot.id of the BOT_SPAWNER bots of this round
     int map_bot_count;
     GameAIShot shots[GAME_MAX_PROJECTILES]; // the v7 AI shot in each projectile slot (ai_kind 1, no owner)
+    struct AiPartsState *parts;   // v10.0.3 AI parts (ai_parts.h): the per-AI parts state and the model cache (AI.rigs)
 } GameAIs;
 
 // ---- packets
@@ -393,6 +407,8 @@ void game_ai_free(Game*);                        // game_ai_reset + free the lis
 void game_ai_spawn_map(Game*);                   // = map_ai_spawn_pending (shared/include/map_ai.h)
 void game_ai_data_defaults(GameAIData*);         // AI.init's defaults for an empty `dat`
 void game_ai_builtin_data(int index, GameAIData*); // the built-in kind's record (AI.js vA767[index])
+// dat.asset as given ("46802q"): asset_text, the g / q / f (has_anim) and the other letters, asset = its digits
+void game_ai_data_set_asset(GameAIData*, const char *asset);
 // AI.spawn(sid 0 = generateSID, index, name, x, y, z, data NULL = built-in kind): NULL past
 // config.aiLimit (40 listed AIs) unless `force` (cSpawn / zombies addAI(..., true)).
 GameAI *game_ai_spawn(Game*, int sid, int index, const char *name, vec3 position, const GameAIData *data);
@@ -415,6 +431,10 @@ void game_ai_play_anim(Game*, GameAI*, const char *clip, int raw);         // AI
 // AI.playAnim(ai, clip, reps, raw) (v10.0.2): reps reaches the local copy (the in-process client plays the clip reps
 // times); the "ana" packet carries no reps, so networked clients play it once (v10.0.2 servAnim passes 1).
 void game_ai_play_anim_reps(Game*, GameAI*, const char *clip, int reps, int raw);
+// v10.0.3 ai.playAnim(clip, reps, hold) (deob-10.0.3.js:208455, AI.playAnim :206452): a raw clip also sets
+// the server's clip state (n, t0, reps, hold: the pose clipAt / hitTest / solid use) and heldClip
+// (hold: the clip stays on its last frame on every client, "aip").
+void game_ai_play_anim_hold(Game*, GameAI*, const char *clip, double reps, int raw, int hold);
 // Hits on an AI by a player's bullet / melee / projectile / explosion (players.js shoot,
 // projectiles.js, game.explosion): invincible, changeHealth, pointsPerHit, killScore, "4".
 void game_ai_damage(Game*, GameAI*, Player *dealer, float damage, int force_target);
@@ -422,6 +442,20 @@ void game_ai_damage(Game*, GameAI*, Player *dealer, float damage, int force_targ
 void game_ai_damage_ex(Game*, GameAI*, Player *dealer, float damage, int force_target, float hit_y, int effect, int effect_count);
 // Ray / box test against an AI box (x/z +-scale, y .. y + 2 * height), lineInRect semantics.
 float game_ai_line_hit(const GameAI*, vec3 origin, vec3 direction);
+// v10.0.3 shots / melee / projectiles: usesHitTest() ? hitTest (the posed model) : the box (deob-10.0.3.js
+// :196017, :196677, :206849). The fraction along `direction` (<= 0 or > 1: no hit); a model hit fills
+// *part (its name and multiplier, has_part 1).
+typedef struct {
+    unsigned char has_part;       // hit.part != null (a precise AI's model was hit)
+    char name[49];                // part.n (AI_PART_NAME_SIZE)
+    float mult;                   // part.m: partMult (0 = armour: onAIPartDamage(..., 0), no damage)
+} GameAIHitPart;
+float game_ai_ray_hit(Game*, GameAI*, vec3 origin, vec3 direction, GameAIHitPart *part);
+// game_ai_damage_ex with the hit's part (NULL = a box hit): part.m scales the damage (crit when > 1, no crit
+// band), part.m 0 is an armour hit (armourHit: onAIPartDamage with 0, no damage). Returns 1 for an armour
+// hit (a bullet stops there, deob-10.0.3.js:196815-196817).
+int game_ai_damage_part(Game*, GameAI*, Player *dealer, float damage, int force_target, float hit_y, int effect, int effect_count,
+                        const GameAIHitPart *part);
 // Game.canSee(player, x, y, z, 0, 0, true) == null with the hitscan object filter.
 int game_ai_player_can_see(const Game*, const Player*, vec3 target);
 // Game.canSee(from, x, y, z, pad) == null for a bare point `from` (no height: the ray starts
@@ -438,6 +472,8 @@ int game_ai_projectile_skips_objects(const Game*, const GameProjectile*); // pro
 int game_ai_projectile_can_hit(Game*, const GameProjectile*, const GameAI *target);
 // u[0].ai of a shot: player owners -> game_ai_damage_ex; AI shooters -> changeHealth(-dmg, shooter).
 void game_ai_projectile_hit_ai(Game*, const GameProjectile*, GameAI *target, Player *owner, float damage);
+// The same with the v10.0.3 model part of the hit (NULL = a box hit; game_ai_ray_hit)
+void game_ai_projectile_hit_ai_part(Game*, const GameProjectile*, GameAI *target, Player *owner, float damage, const GameAIHitPart *part);
 // u[0].plr of an AI shot: effectInd (se) on the player.
 void game_ai_projectile_hit_player(Game*, const GameProjectile*, Player *target);
 

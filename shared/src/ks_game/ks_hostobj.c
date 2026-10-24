@@ -6,9 +6,11 @@
 #include "ks_game_internal.h"
 
 #include <ai.h>
+#include <ai_parts.h>
 #include <modes.h>
 #include <weapons.h>
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -623,6 +625,7 @@ static KsValue pl_rotation(KsScript *s, void *n, uint32_t id) { return pl_sub(s,
     {"position", pl_position, NULL, NULL, 1},                                                                          \
     {"velocity", pl_velocity, NULL, NULL, 1},                                                                          \
     {"health", pl_health, pl_health_set, NULL, 0},                                                                     \
+    {"pose", ks_player_pose_get, ks_player_pose_set, NULL, 0}, /* v10.0.3 player.pose (ks_pose.c) */                   \
     {"registerSyncValues", NULL, NULL, pl_register, 0},                                                                \
     {"deregisterSyncValues", NULL, NULL, pl_deregister, 0},                                                            \
     {"respawn", NULL, NULL, pl_respawn, 0}
@@ -664,8 +667,18 @@ static KsValue ai_path_index(KsScript *s, void *n, uint32_t id) { (void) s; (voi
 #else
 static KsValue ai_path_index(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num(0) : ks_undef(); }
 #endif
-static KsValue ai_behaviour(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num(a->behaviour_type) : ks_undef(); }
-static void ai_behaviour_set(KsScript *s, void *n, uint32_t id, KsValue v) { (void) s; (void) id; GameAI *a = ai_of(n); if (a) a->behaviour_type = (int) ks_to_float(v); }
+// v10.0.3 behaviour reads / writes ai.behavior (not behavType): undefined until a script sets it, 0 freezes the AI's
+// server update (deob-10.0.3.js:208374-208379, :205618)
+static KsValue ai_behaviour(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a && a->has_script_behavior ? ks_num(a->script_behavior) : ks_undef(); }
+static void ai_behaviour_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) s;
+    (void) id;
+    GameAI *a = ai_of(n);
+    if (!a) return;
+    a->script_behavior = (float) ks_to_float(v); // parseFloat(v) || 0
+    a->has_script_behavior = 1;
+}
 static KsValue ai_health(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num(a->health) : ks_undef(); }
 static void ai_health_set(KsScript *s, void *n, uint32_t id, KsValue v)
 {
@@ -685,24 +698,203 @@ static void ai_health_set(KsScript *s, void *n, uint32_t id, KsValue v)
     if (a->health <= 0.0f && game_is_authority(game)) game_ai_kill(game, a, NULL);
 #endif
 }
-// AI.playAnim(ai, clip, reps, raw) (server only; a string clip, reps default 1)
+// ai.playAnim(clip, reps, hold) (server only; a non-empty string clip, reps = isNumber(reps) ? reps : 1):
+// AI.playAnim(ai, clip, reps, true, !!hold) (deob-10.0.3.js:208455-208460). hold keeps the clip on its last frame
+// (clipState.hold on the server, heldClip on every client)
 static KsValue ai_play_anim(KsScript *s, void *n, const KsValue *args, int argc)
 {
     GameAI *a = ai_of(n);
     KsRef *r = ref_of(n);
     size_t len = 0;
-    const char *clip = ks_str_utf8(ARG(0), &len);
-    (void) s;
-    if (!a || !clip || !r || r->kg->side != KS_SIDE_SERVER) return ks_undef();
+    const char *clip = ARG(0).tag == KS_STR ? ks_str_utf8(ARG(0), &len) : NULL;
+    if (!a || !clip || !len || !r || r->kg->side != KS_SIDE_SERVER) return ks_undef();
 #ifdef GAME_AI_HAVE_V7_API
     char name[64];
     snprintf(name, sizeof(name), "%.*s", (int) (len < sizeof(name) ? len : sizeof(name) - 1), clip);
-    // v10.0.2: AI.playAnim(ai, clip, reps, true) with reps = isNumber(reps) ? reps : 1 (a non-finite reps is 1)
-    const double reps_num = ARG(1).tag == KS_NUM ? ARG(1).as.num : 1.0;
-    const int reps = isfinite(reps_num) ? (int) fmax(-1000.0, fmin(1000.0, reps_num)) : 1;
-    game_ai_play_anim_reps(ks_native_game(n), a, name, reps, 1);
+    const double reps_num = is_number(ARG(1)) ? ARG(1).as.num : 1.0;
+    const double reps = fmax(-1000.0, fmin(1000.0, reps_num));
+    game_ai_play_anim_hold(ks_native_game(n), a, name, reps, 1, truthy(ARG(2)));
 #endif
+    (void) s;
     return ks_undef();
+}
+
+// /^[\w.\-]{1,48}$/ on a string (iiÍíìíï, deob-10.0.3.js:209277)
+static int part_name(const KsValue v, char *out, const size_t size)
+{
+    size_t len = 0;
+    const char *str = v.tag == KS_STR ? ks_str_utf8(v, &len) : NULL;
+    if (!str || !len || len > 48 || len >= size) return 0;
+    for (size_t i = 0; i < len; i++) {
+        const unsigned char c = (unsigned char) str[i];
+        if (!(isalnum(c) || c == '_' || c == '.' || c == '-')) return 0;
+    }
+    memcpy(out, str, len);
+    out[len] = 0;
+    return 1;
+}
+
+// /^#([0-9A-F]{3}){1,2}$/i (iîiïiíì, deob-10.0.3.js:27469)
+static int hex_color(const KsValue v, char *out, const size_t size)
+{
+    size_t len = 0;
+    const char *str = v.tag == KS_STR ? ks_str_utf8(v, &len) : NULL;
+    if (!str || (len != 4 && len != 7) || str[0] != '#' || len >= size) return 0;
+    for (size_t i = 1; i < len; i++)
+        if (!isxdigit((unsigned char) str[i])) return 0;
+    memcpy(out, str, len);
+    out[len] = 0;
+    return 1;
+}
+
+static double clamp_d(const double v, const double lo, const double hi) { return v < lo ? lo : v > hi ? hi : v; } // iìîìíií
+static double fixed2(const double v) { return (v < 0 ? -1.0 : 1.0) * floor(fabs(v) * 100.0 + 0.5) / 100.0; } // +v.toFixed(2)
+
+static KsValue ai_active(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_bool(a->active) : ks_undef(); }
+static void ai_path_index_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) s;
+    (void) id;
+    GameAI *a = ai_of(n);
+#ifdef GAME_AI_HAVE_V7_API
+    if (a) a->path_index = (int) ks_to_float(v); // parseFloat(v) || 0
+#else
+    (void) a;
+    (void) v;
+#endif
+}
+static KsValue ai_max_health(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num(a->max_health) : ks_undef(); }
+// speed / turnSpeed: the per-ms rates over 0.031 / 0.002; isNumber writes clamped to 0..10 (deob-10.0.3.js:208393-208408)
+static KsValue ai_speed(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num((double) (a->speed / 0.031f)) : ks_undef(); } // float storage: undo it in float
+static void ai_speed_set(KsScript *s, void *n, uint32_t id, KsValue v) { (void) s; (void) id; GameAI *a = ai_of(n); if (a && is_number(v)) a->speed = (float) clamp_d(v.as.num, 0, 10) * 0.031f; }
+static KsValue ai_turn_speed(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num((double) (a->turn_speed / 0.002f)) : ks_undef(); }
+static void ai_turn_speed_set(KsScript *s, void *n, uint32_t id, KsValue v) { (void) s; (void) id; GameAI *a = ai_of(n); if (a && is_number(v)) a->turn_speed = (float) clamp_d(v.as.num, 0, 10) * 0.002f; }
+// team: team || 0; isNumber writes team = _team = clamp(parseInt(v), 0, 1000) || undefined (deob-10.0.3.js:208409-208416)
+static KsValue ai_team(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num(a->team) : ks_undef(); }
+static void ai_team_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) id;
+    GameAI *a = ai_of(n);
+    if (!a || !is_number(v)) return;
+    a->team = a->team_saved = (int) clamp_d(parse_int0(s, v), 0, 1000);
+}
+// autoTarget: !scriptTarget; writing true lets the AI pick its targets again at once (actionFreq 0)
+static KsValue ai_auto_target(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_bool(!a->script_target) : ks_undef(); }
+static void ai_auto_target_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) s;
+    (void) id;
+    GameAI *a = ai_of(n);
+    if (!a) return;
+    a->script_target = !truthy(v);
+    if (truthy(v)) a->action_freq = 0.0f;
+}
+// target: the target player's id ("" for none or an AI); writing it sets scriptTarget and the player of that id (or none)
+static KsValue ai_target(KsScript *s, void *n, uint32_t id)
+{
+    (void) id;
+    GameAI *a = ai_of(n);
+    if (!a) return ks_undef();
+    if (a->target.kind != AI_TARGET_PLAYER) return ks_str(s, "", 0);
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d", a->target.id);
+    return ks_str(s, buf, strlen(buf));
+}
+static void ai_target_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) s;
+    (void) id;
+    GameAI *a = ai_of(n);
+    Game *game = ks_native_game(n);
+    if (!a || !game) return;
+    a->script_target = 1;
+    memset(&a->target, 0, sizeof(a->target));
+    a->target_uid = -1;
+    const Player *p = ks_game_player_by_id(game, v); // players.list[i].id == v
+    if (p) {
+        a->target.kind = AI_TARGET_PLAYER;
+        a->target.id = p->uid;
+        a->target_uid = p->uid;
+    }
+}
+static KsValue ai_move_to(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    (void) s;
+    GameAI *a = ai_of(n);
+    if (a && is_number(ARG(0)) && is_number(ARG(1)) && is_number(ARG(2))) {
+        a->goal = (vec3) {(float) ARG(0).as.num, (float) ARG(1).as.num, (float) ARG(2).as.num};
+        a->has_goal = 1;
+    }
+    return ks_undef();
+}
+static KsValue ai_clear_move_to(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    (void) s;
+    (void) args;
+    (void) argc;
+    GameAI *a = ai_of(n);
+    if (a) a->has_goal = 0;
+    return ks_undef();
+}
+// v10.0.3 AI parts (deob-10.0.3.js:208461-208507, shared/include/ai_parts.h): server only
+static KsValue ai_solid(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_bool(ai_parts_solid(ks_native_game(n), a)) : ks_undef(); }
+static void ai_solid_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) s;
+    (void) id;
+    GameAI *a = ai_of(n);
+    Game *game = ks_native_game(n);
+    if (!a || !on_server(ref_of(n)) || !a->data.precise) return; // isServer && ai.precise
+    if (truthy(v) && ai_parts_solid(game, a)) ai_parts_set_solid(game, a, 0); // a new snapshot of the pose
+    ai_parts_set_solid(game, a, truthy(v));
+}
+static KsValue ai_body_damage(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; GameAI *a = ai_of(n); return a ? ks_num(ai_parts_body_damage(ks_native_game(n), a)) : ks_undef(); }
+static void ai_body_damage_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) s;
+    (void) id;
+    GameAI *a = ai_of(n);
+    if (a && on_server(ref_of(n)) && is_number(v)) ai_parts_set_body_damage(ks_native_game(n), a, (float) clamp_d(v.as.num, 0, 20));
+}
+static KsValue ai_set_part_damage(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    (void) s;
+    GameAI *a = ai_of(n);
+    char part[AI_PART_NAME_SIZE];
+    if (a && on_server(ref_of(n)) && part_name(ARG(0), part, sizeof(part)) && is_number(ARG(1)))
+        ai_parts_set_part_damage(ks_native_game(n), a, part, (float) clamp_d(ARG(1).as.num, 0, 20));
+    return ks_undef();
+}
+static KsValue ai_glow_part(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    (void) s;
+    GameAI *a = ai_of(n);
+    char part[AI_PART_NAME_SIZE], color[8];
+    if (!a || !on_server(ref_of(n)) || !part_name(ARG(0), part, sizeof(part))) return ks_undef();
+    if (!hex_color(ARG(1), color, sizeof(color))) color[0] = 0;
+    const double intensity = is_number(ARG(2)) ? fixed2(clamp_d(ARG(2).as.num, 0, 1)) : 0;
+    ai_parts_glow_part(ks_native_game(n), a, part, color, intensity);
+    return ks_undef();
+}
+static KsValue ai_set_node_visible(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    (void) s;
+    GameAI *a = ai_of(n);
+    char part[AI_PART_NAME_SIZE];
+    if (a && on_server(ref_of(n)) && part_name(ARG(0), part, sizeof(part))) ai_parts_node_visible(ks_native_game(n), a, part, truthy(ARG(1)));
+    return ks_undef();
+}
+static KsValue ai_get_part_position(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    GameAI *a = ai_of(n);
+    KsValue out = ks_obj_new(s);
+    char part[AI_PART_NAME_SIZE];
+    vec3 p;
+    if (!a || !on_server(ref_of(n)) || !part_name(ARG(0), part, sizeof(part)) || !ai_parts_part_position(ks_native_game(n), a, part, &p)) return out;
+    ks_obj_set(s, out, "x", ks_num(fixed2(p.x)));
+    ks_obj_set(s, out, "y", ks_num(fixed2(p.y)));
+    ks_obj_set(s, out, "z", ks_num(fixed2(p.z)));
+    return out;
 }
 static float *ai_field(void *n, const int which, const int axis)
 {
@@ -728,15 +920,31 @@ static const KsHostClass g_ai_rotation_class = {"rotation", g_ai_rotation_props,
 static KsValue ai_position(KsScript *s, void *n, uint32_t id) { return ai_of(n) ? ks_host_object(s, &g_ai_position_class, n, id) : ks_undef(); }
 static KsValue ai_rotation(KsScript *s, void *n, uint32_t id) { return ai_of(n) ? ks_host_object(s, &g_ai_rotation_class, n, id) : ks_undef(); }
 
+// The 10.0.3 AI wrapper (deob-10.0.3.js:208323-208510), in its order
 static const KsHostProp g_ai_props[] = {
     {"sid", ai_sid, NULL, NULL, 0},
     {"displayName", ai_name, NULL, NULL, 0},
     {"position", ai_position, NULL, NULL, 1},
     {"rotation", ai_rotation, NULL, NULL, 1},
-    {"pathIndex", ai_path_index, NULL, NULL, 0},
+    {"active", ai_active, NULL, NULL, 0},
+    {"pathIndex", ai_path_index, ai_path_index_set, NULL, 0},
     {"behaviour", ai_behaviour, ai_behaviour_set, NULL, 0},
     {"health", ai_health, ai_health_set, NULL, 0},
+    {"maxHealth", ai_max_health, NULL, NULL, 0},
+    {"speed", ai_speed, ai_speed_set, NULL, 0},
+    {"turnSpeed", ai_turn_speed, ai_turn_speed_set, NULL, 0},
+    {"team", ai_team, ai_team_set, NULL, 0},
+    {"autoTarget", ai_auto_target, ai_auto_target_set, NULL, 0},
+    {"target", ai_target, ai_target_set, NULL, 0},
+    {"moveTo", NULL, NULL, ai_move_to, 0},
+    {"clearMoveTo", NULL, NULL, ai_clear_move_to, 0},
     {"playAnim", NULL, NULL, ai_play_anim, 0},
+    {"solid", ai_solid, ai_solid_set, NULL, 0},
+    {"bodyDamage", ai_body_damage, ai_body_damage_set, NULL, 0},
+    {"setPartDamage", NULL, NULL, ai_set_part_damage, 0},
+    {"glowPart", NULL, NULL, ai_glow_part, 0},
+    {"setNodeVisible", NULL, NULL, ai_set_node_visible, 0},
+    {"getPartPosition", NULL, NULL, ai_get_part_position, 0},
 };
 const KsHostClass ks_ai_class = {"AI", g_ai_props, (int) (sizeof(g_ai_props) / sizeof(g_ai_props[0]))};
 
@@ -857,17 +1065,46 @@ static KsValue api_owned_assets(KsScript *s, void *u, const KsValue *args, int a
     return ks_undef();
 }
 
-// AI.spawn(assetID, name, x, y, z, data) (API:3143-3168, options 3.3.3)
+// AI.spawn(assetID, name, x, y, z, data) (v10.0.3 deob-10.0.3.js:211612-211758: every option key of the bundle)
 #define KS_AI_LIMIT 40 // config.aiLimit (CFG:2328)
 
-static double opt_num(KsScript *s, const KsValue data, const char *key, const double lo, const double hi)
+// isNumber(v) ? v : def (the 10.0.3 options read numbers only: a string "5" is 0)
+static double opt_number(KsScript *s, const KsValue data, const char *key, const double def)
 {
     const KsValue v = ks_obj_get(s, data, key);
-    double d = v.tag == KS_NUM ? v.as.num : ks_to_float(v); // missing -> 0, then clamped
-    if (!isfinite(d)) d = 0.0;
-    return d < lo ? lo : d > hi ? hi : d;
+    return is_number(v) ? v.as.num : def;
+}
+// isNumber(v) ? parseInt(v) : def
+static double opt_int(KsScript *s, const KsValue data, const char *key, const double def)
+{
+    const KsValue v = ks_obj_get(s, data, key);
+    return is_number(v) ? (v.as.num < 0 ? ceil(v.as.num) : floor(v.as.num)) : def;
 }
 static int opt_bool(KsScript *s, const KsValue data, const char *key) { return truthy(ks_obj_get(s, data, key)); }
+// v ? clamp(v, lo, hi) : none (the projectile keys: applied only when truthy)
+static int opt_truthy(KsScript *s, const KsValue data, const char *key, const double lo, const double hi, double *out)
+{
+    const KsValue v = ks_obj_get(s, data, key);
+    if (!truthy(v)) return 0;
+    *out = clamp_d(ks_to_float(v), lo, hi);
+    return 1;
+}
+
+// startAnim: a string of at most 32 characters with none outside /[\w:;()?,.|[\] \-+*$@=^!{}]/ (else "")
+static void opt_anim(KsScript *s, const KsValue data, char *out, const size_t size)
+{
+    size_t len = 0;
+    const KsValue v = ks_obj_get(s, data, "animStart");
+    const char *str = v.tag == KS_STR ? ks_str_utf8(v, &len) : NULL;
+    out[0] = 0;
+    if (!str || !len || len > 32 || len >= size) return;
+    for (size_t i = 0; i < len; i++) {
+        const unsigned char c = (unsigned char) str[i];
+        if (!(isalnum(c) || c == '_' || strchr(":;()?,.|[] -+*$@=^!{}", c))) return;
+    }
+    memcpy(out, str, len);
+    out[len] = 0;
+}
 
 static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
 {
@@ -880,31 +1117,79 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     if (!list || alive >= KS_AI_LIMIT) return ks_undef();
 
     KsValue data = ARG(5);
-    if (data.tag != KS_OBJ) data = ks_obj_new(s);
+    if (data.tag != KS_OBJ) data = ks_obj_new(s); // isObject(data) ? data : {}
     GameAIData d;
     memset(&d, 0, sizeof(d));
 #ifdef GAME_AI_HAVE_V7_API
-    game_ai_data_defaults(&d); // AI.init defaults; the option keys below overwrite them like vO445.AI
+    game_ai_data_defaults(&d); // AI.init defaults; the option keys below overwrite them like the 10.0.3 spawn record
 #endif
     snprintf(d.src, sizeof(d.src), "model");
-    char asset[64];
+    char asset[GAME_AI_ASSET_SIZE];
     ks_to_string(s, ARG(0), asset, sizeof(asset));
-    d.asset = atoi(asset);
-    d.health = (float) ks_to_float(ks_obj_get(s, data, "health"));
-    if (d.health <= 0.0f) d.health = 100.0f;
-    d.respawn_t = (float) ks_to_float(ks_obj_get(s, data, "respawnT"));
+    game_ai_data_set_asset(&d, asset); // asset: the id with its letters ("46802q": a GLB with clips)
+    const KsValue respawn_t = ks_obj_get(s, data, "respawnT");
+    d.respawn_t = (float) ks_to_float(respawn_t); // parseFloat(respawnT) || 0
     d.respawn_r = (unsigned char) opt_bool(s, data, "respawnR");
-    d.can_shoot = (unsigned char) opt_bool(s, data, "canShoot");
+    d.targets_ai = (unsigned char) opt_bool(s, data, "targAI");
+    d.targets_players = (unsigned char) opt_bool(s, data, "targPlr");
+    d.friendly = (unsigned char) opt_bool(s, data, "friendly");
+    if (is_number(ks_obj_get(s, data, "team"))) d.team = (int) clamp_d(opt_int(s, data, "team", 0), 0, 1000); // || undefined: 0
     d.can_hit = (unsigned char) opt_bool(s, data, "canMelee");
-    d.always_sync = (unsigned char) opt_bool(s, data, "alwaysSync"); // v10.0.3: synced to every player, whatever its distance
-    d.speed = (float) opt_num(s, data, "speed", 0, 10);
-    d.turn_speed = (float) opt_num(s, data, "turnSpeed", 0, 10);
-    d.gravity = (float) opt_num(s, data, "gravity", 0, 1);
-    d.fire_rate = (int) opt_num(s, data, "fireRate", 200, 10000);
-    d.vision = (int) opt_num(s, data, "visionDis", 1, 1000);
-    d.score = (int) opt_num(s, data, "score", 0, 10000);
-    d.behaviour = (int) opt_num(s, data, "behaviorType", 0, 20);
-    d.m_size = (float) opt_num(s, data, "modelScale", 0.01, 100);
+    d.can_shoot = (unsigned char) opt_bool(s, data, "canShoot");
+    const double model_scale = opt_number(s, data, "modelScale", 0);
+    if (model_scale) d.m_size = (float) (floor(clamp_d(model_scale, 0.01, 100) * 100 + 0.5) / 100); // else mSize || 4
+    d.health = (float) opt_int(s, data, "health", 0); // isNumber ? parseInt : 0 (maxHealth = health || 0)
+    d.speed = (float) clamp_d(opt_number(s, data, "speed", 0), 0, 10);
+    d.turn_speed = (float) clamp_d(opt_number(s, data, "turnSpeed", 0), 0, 10);
+    d.gravity = (float) clamp_d(opt_number(s, data, "gravity", 0), 0, 1);
+    d.roam_time = (float) clamp_d(opt_int(s, data, "roamTime", 0), 1000, 10000);
+    d.roam_radius = (float) clamp_d(opt_int(s, data, "roamRadius", 0), 0, 500);
+    d.chase_distance = (float) clamp_d(opt_int(s, data, "chaseDis", 0), 0, 2000);
+    const double hbh = opt_number(s, data, "hitBoxH", 0), hbw = opt_number(s, data, "hitBoxW", 0);
+    d.hbh = (float) clamp_d(hbh ? hbh : 1, 0.1, 10); // isNumber(v) && parseFloat(v) || 1
+    d.hbw = (float) clamp_d(hbw ? hbw : 1, 0.1, 10);
+    d.fire_rate = (int) clamp_d(opt_int(s, data, "fireRate", 0), 200, 10000);
+    d.shot_spread = (float) clamp_d(opt_int(s, data, "shotSpread", 0), 0, 10);
+    d.shoot_break = (float) clamp_d(opt_int(s, data, "shotBreak", 0), 0, 5000);
+    d.shot_arch_y = (float) clamp_d(opt_int(s, data, "shotArchY", 0), -90, 90);
+    d.shot_off_h = (unsigned char) opt_bool(s, data, "shotOffH");
+    d.shot_delay = (float) clamp_d(opt_int(s, data, "shotDelay", 0), 0, 5000);
+    d.melee_delay = (float) clamp_d(opt_int(s, data, "meleeDelay", 0), 0, 5000);
+    d.melee_shake = (float) clamp_d(opt_int(s, data, "meleeShake", 0), 0, 1);
+    d.shot_shake = (float) clamp_d(opt_int(s, data, "shotShake", 0), 0, 1);
+    d.effect_on_shot = is_number(ks_obj_get(s, data, "shotEffect")) ? (int) clamp_d(opt_int(s, data, "shotEffect", 0), 0, 9) : -1;
+    d.effect_on_hit = is_number(ks_obj_get(s, data, "hitEffect")) ? (int) clamp_d(opt_int(s, data, "hitEffect", 0), 0, 9) : -1;
+    d.crit_dmg = (float) clamp_d(opt_int(s, data, "critDamage", 0), 0, 5);
+    d.hit_rate = (float) clamp_d(opt_int(s, data, "meleeRate", 0), 200, 10000);
+    d.melee_range = (float) clamp_d(opt_int(s, data, "meleeRange", 0), 10, 100);
+    d.melee_damage = (float) clamp_d(opt_int(s, data, "meleeDmg", 0), 1, 200);
+    d.vision = (int) clamp_d(opt_int(s, data, "visionDis", 0), 1, 1000);
+    d.score = (int) clamp_d(opt_int(s, data, "score", 0), 0, 10000);
+    d.behaviour = (int) clamp_d(opt_int(s, data, "behaviorType", 0), 0, 20);
+    d.always_sync = (unsigned char) opt_bool(s, data, "alwaysSync"); // v10.0.3 aSync: AI.sync / playAnim skip the 800 range
+    opt_anim(s, data, d.start_anim, sizeof(d.start_anim));
+    d.anim_speed = (float) opt_number(s, data, "animSpeed", 0);
+    d.m_y_off = (float) clamp_d(opt_number(s, data, "modelOffsetY", 0), -100, 100);
+    d.m_r_off = (float) clamp_d(opt_number(s, data, "modelRotation", 0), 0, 360);
+    d.precise = (unsigned char) opt_bool(s, data, "preciseHits"); // v10.0.3 prc: shots hit the animated model (ai_parts.h)
+    // the projectile (pjA raw, the others only when truthy)
+    const KsValue pj_asset = ks_obj_get(s, data, "projectileAid");
+    if (truthy(pj_asset)) ks_to_string(s, pj_asset, d.pj_asset, sizeof(d.pj_asset));
+    double v;
+    if (opt_truthy(s, data, "projectileDmg", 0, 1000, &v)) d.pj_damage = (float) v;
+    if (opt_truthy(s, data, "projectileSpeed", 0, 20, &v)) d.pj_speed = (float) v;
+    if (opt_truthy(s, data, "projectileGravity", -2, 2, &v)) {
+        d.pj_gravity = (float) (v * 0.0002); // AI.init: pjG * 0.0002
+        d.pj_gravity_set = 1;
+    }
+    d.pj_trans = (unsigned char) opt_bool(s, data, "projectileTransparent");
+    if (opt_truthy(s, data, "projectileSize", 0.1, 10, &v)) d.pj_scale = (float) v;
+    if (opt_truthy(s, data, "projectileMeshScale", 0.01, 10, &v)) d.pj_model_scale = (float) v;
+    if (opt_truthy(s, data, "projectileSpin", 0, 20, &v)) d.pj_spin = (float) v;
+    d.pj_glow = (unsigned char) opt_bool(s, data, "projectileGlow");
+    d.explode = (unsigned char) opt_bool(s, data, "projectileExplode");
+    // Not read (no KN behaviour behind them): hideTag (noTag), canContactHit, boss (bossKills challenges), challengeKey,
+    // reflections (refl), rewardMethod / rewardNode / rewardReq / reward / rewardChance / rewardUnique (skin drops)
     char name[GAME_AI_NAME_SIZE];
     ks_to_string(s, ARG(1), name, sizeof(name));
     const vec3 pos = {(float) ks_to_float(ARG(2)), (float) ks_to_float(ARG(3)), (float) ks_to_float(ARG(4))};
@@ -1016,8 +1301,9 @@ static KsValue api_config_get_match(KsScript *s, void *u, const KsValue *args, i
     ks_obj_set(s, match, "players", ks_num(active));
     ks_obj_set(s, match, "capacity", ks_num(game ? game->config.max_players : 0));
     ks_obj_set(s, match, "teams", ks_num(game ? mode_team_count(game) : 0));
-    // v10.0.3: false during the round countdown (a pre-match wait timer), true once the round has started
-    const int started = game && game->mode && game->mode->started && !mode_match_starting(game);
+    // v10.0.3 started: !game.waitTimers (deob-10.0.3.js:212017): false while any wait timer runs (the countdown, and the
+    // contTime ones too: "race ends in", "Zone closing in"), true once the last is gone (or none ever ran)
+    const int started = !(game && game->mode && game->mode->wait_timer_count > 0);
     ks_obj_set(s, match, "started", ks_bool(started));
     return match;
 }

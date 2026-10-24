@@ -59,6 +59,10 @@ static const Hook server_hooks[] = {
     {"onDepositBoxChange", 4}, // v10.0.2 (objectID, playerID, amount, finalAmount)
     {"onEntitySpawn", 2}, {"onEntityDamage", 3}, {"onEntityDestroyed", 2}, {"onEntityAttach", 2},
     {"onEntityDetach", 2}, {"onEntityEvent", 4}, {"onEntityRemoved", 1},
+    // v10.0.3 (deob-10.0.3.js:206223-206341): onAIDamage(sid, playerId, dmg), onAIPartDamage(sid, part, playerId, dmg),
+    // onAIDeath(sid, name, killerId)
+    {"onAIDamage", 3}, {"onAIPartDamage", 4}, {"onAIDeath", 3},
+    {"onObjectDamage", 4}, {"onObjectDestroyed", 3}, // v10.0.3 damageObject (deob-10.0.3.js:220479-220481)
 };
 
 // v10.0.2 editor template (shared): the entity manager calls both on the authority (ks_entities.c)

@@ -6,6 +6,7 @@
 // teleportFromNode, "mo" / "mf"), object animations ("ana") and the world part of the join sync.
 // Runs on the authority (server / offline sandbox server) and, for prediction, on the client.
 #include <world.h>
+#include <ai_parts.h> // v10.0.3 ai.solid collision tris
 #include <net_ext.h> // NET_SERVER_NAMES_TEXT (world_send_finish_chat)
 #include <object_manager.h>
 #include <account.h>
@@ -352,23 +353,30 @@ int world_pvp_ignores_team(const Player *attacker, const Player *victim) {
 
 // ---------------------------------------------------------------- tris / terrain
 
+static void world_player_tri(Player *player, const float *tri) {
+    vec3 normal;
+    float depth;
+    if (!tri_capsule_collide(tri, player->position, player->scale, player->height, &normal, &depth)) return;
+    if (normal.y > 0.7f) player->on_ground = 1; // manager.setOnGround
+    const float along = normal.x * player->velocity.x + normal.y * player->velocity.y + normal.z * player->velocity.z;
+    player->velocity.x -= normal.x * along; // velocity.addScaledVector(normal, -normal.dot(velocity))
+    player->velocity.y -= normal.y * along;
+    player->velocity.z -= normal.z * along;
+    player->position.x += normal.x * depth;
+    player->position.y += normal.y * depth;
+    player->position.z += normal.z * depth;
+}
+
 void world_player_tris(Player *player) {
-    const Game *game = player->game;
+    Game *game = player->game;
     const Map *map = game->map;
-    if (player->noclip || !map || !map->tris || !map->tri_count) return;
-    for (size_t i = 0; i < map->tri_count; i++) {
-        vec3 normal;
-        float depth;
-        if (!tri_capsule_collide(&map->tris[i * 9], player->position, player->scale, player->height, &normal, &depth)) continue;
-        if (normal.y > 0.7f) player->on_ground = 1; // manager.setOnGround
-        const float along = normal.x * player->velocity.x + normal.y * player->velocity.y + normal.z * player->velocity.z;
-        player->velocity.x -= normal.x * along; // velocity.addScaledVector(normal, -normal.dot(velocity))
-        player->velocity.y -= normal.y * along;
-        player->velocity.z -= normal.z * along;
-        player->position.x += normal.x * depth;
-        player->position.y += normal.y * depth;
-        player->position.z += normal.z * depth;
-    }
+    if (player->noclip || !map) return;
+    for (size_t i = 0; map->tris && i < map->tri_count; i++) world_player_tri(player, &map->tris[i * 9]);
+    // v10.0.3 ai.solid: a solid AI's pose triangles sit in the same quad tree (applySolid -> applyToQuad, deob-10.0.3.js:205440)
+    size_t n = 0;
+    const float *tris;
+    for (int a = 0; (tris = ai_parts_solid_tris(game, a, &n)) != NULL; a++)
+        for (size_t i = 0; i < n; i++) world_player_tri(player, &tris[i * 9]);
 }
 
 int terrain_raycast(const Game *game, const vec3 origin, const vec3 direction, const float max_distance, float *distance) {

@@ -10,11 +10,19 @@
 //   src/libs/particles.js physObj of an AI shot: "orb_0" (or the pjA asset), scale * pjMS (pjSC *
 //                        pjMS for assets), spin * pjS, transparent / additive like stored[1]
 //   src/index.js         gameLoop nameVisRate pass: ai.canBSeen = spectating || canSee == null
+// v10.0.3 AI parts (shared/include/ai_parts.h, deob-10.0.3.js AI.updateParts :205465-205560, showHeld :205454): hidden
+// nodes (setNodeVisible: the node and every mesh under it), glowing parts (glowPart: the emissive of the meshes under the
+// node, pulsing, and an additive halo sprite at the node) and the held clip (playAnim hold: played once, kept on its last
+// frame, no Idle / Move). The node names come from the asset's own file (model.glb, or model.gltf for "g" assets).
+// Deliberate differences of the parts: the halo's size is the meshes' bounding spheres (diameter / sqrt 3), not a Box3;
+// a viewer that joins while a clip is held sees it play once and then hold (heldLate's jump to the end is not done).
 // Intentional differences: FBX AI models ("f") are not supported; a built-in kind whose v7 user
 // asset is missing (Drowned Sailor, Jack O' Lantern, Mirror Image: not in the offline build) draws
 // the v3.1.1 model of that kind (ghost / pumpkin) instead of nothing; map AIs with a missing asset
 // draw nothing, as in v7. Side 1 (back faces only) draws both sides.
+#include <gl.h>
 #include <ai.h>
+#include <ai_parts.h>
 #include <ai_render.h>
 #include <gltf.h>
 #include <spectate.h>
@@ -43,6 +51,14 @@ typedef struct {
     unsigned clip_serial;        // the last GameAI.clip_serial played
     double oneshot_until;        // gltf_clock() until which a one-shot clip blocks the loop clips
     float spin;                  // rAnim accumulated (rad)
+    // v10.0.3 parts: the node names (the asset's file), each mesh's emissive before a glow, the halos
+    AiPartsModel *rig;           // owned: the names / parents of the glTF nodes (node order = the instance's)
+    vec4 *emissive0;             // per gltf mesh: its emissive (glowState mats ec / ei)
+    Mesh *halo[AI_PARTS_MAX];    // per glow slot: the halo sprite (glowState.halo), NULL none
+    char halo_name[AI_PARTS_MAX][AI_PART_NAME_SIZE];
+    float halo_size[AI_PARTS_MAX]; // Box3.setFromObject(node).getSize() max side, at the halo's creation
+    char held_shown[GAME_AI_ANIM_SIZE]; // heldShown
+    unsigned char glowed;        // a glow ran: the emissives are restored when it ends
 } AIMesh;
 
 typedef struct {
@@ -81,6 +97,13 @@ static Geometry *air_obj(const char *rel) {
 }
 
 static void air_drop_mesh(AIMesh *slot) {
+    for (int i = 0; i < AI_PARTS_MAX; i++) {
+        if (!slot->halo[i]) continue;
+        if (g_air.scene) scene_remove_mesh(g_air.scene, slot->halo[i]);
+        mesh_fini(slot->halo[i]);
+    }
+    ai_parts_model_free(slot->rig);
+    free(slot->emissive0);
     if (slot->mesh) {
         if (g_air.scene) scene_remove_mesh(g_air.scene, slot->mesh);
         mesh_fini(slot->mesh); // frees the material; geometry / textures stay in the loader caches
@@ -138,6 +161,19 @@ static int air_load_asset(AIMesh *slot, const GameAI *ai, float *center_y) {
         }
         // startAnim ? playClip(startAnim) : every clip (gltf_instance_create's default)
         gltf_instance_play_clip(slot->gltf, d->start_anim[0] ? d->start_anim : "Idle", 0);
+        // the node names for setNodeVisible / glowPart (getObjectByName): the same file's rig
+        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d->asset, strchr(flags, 'q') ? "glb" : "gltf");
+        char *rig_path = concat(assets_path(), rel);
+        unsigned char *buf = NULL;
+        size_t len = 0;
+        if (rig_path && !read_file(rig_path, &buf, &len)) slot->rig = ai_parts_model_parse(buf, len);
+        free(buf);
+        free(rig_path);
+        slot->emissive0 = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, sizeof(vec4));
+        for (size_t i = 0; slot->emissive0 && i < slot->gltf->mesh_count; i++) {
+            Material *mat = slot->gltf->meshes[i]->material;
+            if (mat && mat->vtable == &basic_material_vtable) slot->emissive0[i] = ((BasicMaterial *) mat)->emissive;
+        }
         return 1;
     }
     if (strchr(flags, 'f')) return 0; // FBX
@@ -263,8 +299,19 @@ static vec3 air_draw_position(const Client *client, const GameAI *ai) {
                    ai->from.z + (ai->position.z - ai->from.z) * t};
 }
 
-static void air_clips(AIMesh *slot, GameAI *ai, const double now) {
+static void air_clips(Client *client, AIMesh *slot, GameAI *ai, const double now) {
     if (!slot->gltf || !ai->data.has_anim) return;
+    const AiParts *parts = ai_parts_of(&client->game, ai, 0);
+    if (parts && parts->held_clip[0]) { // heldClip ? showHeld() : playAnim(didMov ? "Move" : "Idle") (deob-10.0.3.js:205606)
+        if (ai->clip_serial != slot->clip_serial) slot->clip_serial = ai->clip_serial; // the "ana" of the held clip itself
+        if (strcmp(slot->held_shown, parts->held_clip)) { // showHeld: once per held clip, then it clamps on its last frame
+            snprintf(slot->held_shown, sizeof(slot->held_shown), "%s", parts->held_clip);
+            gltf_instance_play_clip(slot->gltf, parts->held_clip, 1);
+        }
+        gltf_instance_update(slot->gltf, now);
+        return;
+    }
+    slot->held_shown[0] = 0; // syncParts: no heldClip -> heldShown = null
     if (ai->clip_serial != slot->clip_serial) { // "ana": once; a local playAnim(ai, clip, reps): reps times
         slot->clip_serial = ai->clip_serial;
         if (ai->clip[0]) {
@@ -280,6 +327,187 @@ static void air_clips(AIMesh *slot, GameAI *ai, const double now) {
     // playClip(name, 0) waits for a running one-shot
     if (!busy) gltf_instance_play_clip(slot->gltf, ai->did_move ? "Move" : "Idle", 0);
     gltf_instance_update(slot->gltf, now);
+}
+
+// ---------------------------------------------------------------- v10.0.3 parts (AI.updateParts)
+
+static unsigned int g_halo_texture; // iîîìïîí: a 64x64 white radial gradient (stops 0: 1, .25: .55, 1: 0)
+static Geometry *g_halo_geometry;   // the XY unit quad of a THREE.Sprite
+
+static unsigned int air_halo_texture(void) {
+    if (g_halo_texture) return g_halo_texture;
+    static unsigned char px[64 * 64 * 4];
+    for (int y = 0; y < 64; y++)
+        for (int x = 0; x < 64; x++) {
+            const float dx = (float) x + 0.5f - 32.0f, dy = (float) y + 0.5f - 32.0f;
+            const float r = sqrtf(dx * dx + dy * dy) / 32.0f;
+            const float a = r <= 0.25f ? 1.0f - r / 0.25f * 0.45f : r < 1.0f ? 0.55f * (1.0f - (r - 0.25f) / 0.75f) : 0.0f;
+            unsigned char *p = &px[(y * 64 + x) * 4];
+            p[0] = p[1] = p[2] = 255;
+            p[3] = (unsigned char) (a * 255.0f + 0.5f);
+        }
+    glGenTextures(1, &g_halo_texture);
+    glBindTexture(GL_TEXTURE_2D, g_halo_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return g_halo_texture;
+}
+
+static Geometry *air_halo_geometry(void) {
+    if (g_halo_geometry) return g_halo_geometry;
+    static const vertex vertices[] = {{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}}, {{0.5f, 0.5f, 0.0f}, {1.0f, 1.0f}},
+                                      {{-0.5f, 0.5f, 0.0f}, {0.0f, 1.0f}}, {{0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}}};
+    static const unsigned int indices[] = {0, 1, 2, 0, 3, 1};
+    Geometry *g = calloc(1, sizeof(Geometry));
+    if (!g) return NULL;
+    unsigned int vbo;
+    glGenVertexArrays(1, &g->vao);
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &g->ebo);
+    glBindVertexArray(g->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+    g->index_count = 6;
+    g->bound_radius = 0.0f; // never culled
+    g_halo_geometry = g;
+    return g;
+}
+
+// mesh i of the instance sits under node `node` (its transform chain passes the node's)
+static int air_mesh_under(const AIMesh *slot, const size_t i, const MeshTransform *node) {
+    int guard = 0;
+    for (const MeshTransform *t = slot->gltf->meshes[i]->transform.parent; t && guard++ < 256; t = t->parent)
+        if (t == node) return 1;
+    return 0;
+}
+
+static const MeshTransform *air_node(const AIMesh *slot, const char *name) { // meshRef.getObjectByName(name)
+    const int index = ai_parts_model_node_find(slot->rig, name);
+    return index >= 0 ? gltf_instance_node(slot->gltf, (size_t) index) : NULL;
+}
+
+static int air_parse_hex(const char *hex, vec3 *out) {
+    vec4 c;
+    if (!hex || !hex[0] || parse_hex_color(hex, &c)) return 0; // "#rgb" / "#rrggbb" (Color.set)
+    *out = (vec3) {c.x, c.y, c.z};
+    return 1;
+}
+
+static void air_parts(Client *client, AIMesh *slot, GameAI *ai, const int visible) {
+    if (!slot->gltf || !slot->rig) return;
+    const AiParts *parts = ai_parts_of(&client->game, ai, 0);
+    // hidden nodes: the node and everything under it (Object3D.visible)
+    for (int h = 0; parts && visible && h < parts->hidden_count; h++) {
+        const MeshTransform *node = air_node(slot, parts->hidden[h]);
+        if (!node) continue;
+        for (size_t i = 0; i < slot->gltf->mesh_count; i++)
+            if (air_mesh_under(slot, i, node)) slot->gltf->meshes[i]->visible = 0;
+    }
+    // glows: partGlow keys, then the glowState keys still fading out (here: halos still shown)
+    if ((!parts || !parts->glow_count) && !slot->glowed) return;
+    slot->glowed = 1;
+    const double t = gltf_clock() * 1000.0; // Date.now()
+    unsigned char lit[256] = {0}; // per mesh: under a glowing node this frame
+    for (int g = 0; parts && g < parts->glow_count; g++) {
+        const AiPartGlow *pg = &parts->glow[g];
+        const MeshTransform *node = air_node(slot, pg->name);
+        int hidden = 0;
+        for (int h = 0; h < parts->hidden_count && !hidden; h++) hidden = !strcmp(parts->hidden[h], pg->name);
+        const float eff = node && !hidden ? (float) pg->intensity : 0.0f; // partGlow && node && node.visible ? [1] : 0
+        const float pulse = 0.75f + (float) sin(t * 0.006 + g) * 0.25f;
+        vec3 color;
+        const int has_color = air_parse_hex(pg->color, &color);
+        float radius = 0.0f;
+        for (size_t i = 0; node && i < slot->gltf->mesh_count && i < sizeof(lit); i++) {
+            if (!air_mesh_under(slot, i, node)) continue;
+            Mesh *m = slot->gltf->meshes[i];
+            if (m->geometry && m->geometry->bound_radius > radius) radius = m->geometry->bound_radius;
+            Material *mat = m->material;
+            if (!mat || mat->vtable != &basic_material_vtable || eff <= 0.0f) continue;
+            BasicMaterial *bm = (BasicMaterial *) mat;
+            const vec4 e0 = slot->emissive0 ? slot->emissive0[i] : (vec4) {0};
+            const float ei = e0.w > 0.0f ? e0.w : 1.0f; // three.js emissiveIntensity (1 for a black emissive)
+            if (has_color) bm->emissive.x = color.x, bm->emissive.y = color.y, bm->emissive.z = color.z;
+            else bm->emissive.x = e0.x, bm->emissive.y = e0.y, bm->emissive.z = e0.z;
+            bm->emissive.w = fmaxf(ei, 0.25f) * (1.0f + eff * 6.0f * pulse);
+            lit[i] = 1;
+        }
+        // the halo: created on the first glow, sized from the node's meshes then, at the node's position
+        int slot_i = -1;
+        for (int k = 0; k < AI_PARTS_MAX && slot_i < 0; k++)
+            if (slot->halo[k] && !strcmp(slot->halo_name[k], pg->name)) slot_i = k;
+        if (slot_i < 0 && eff > 0.0f) {
+            for (int k = 0; k < AI_PARTS_MAX && slot_i < 0; k++)
+                if (!slot->halo[k]) slot_i = k;
+            BasicMaterial *hm = slot_i >= 0 ? basic_material_init() : NULL;
+            Geometry *quad = air_halo_geometry();
+            if (hm && quad) {
+                hm->sprite = 1;
+                hm->unlit = 1;
+                hm->uv_mode = BASIC_UV_MESH;
+                hm->additive_blend = 1;
+                hm->no_depth_write = 1;
+                hm->fog_enabled = 0;
+                hm->double_sided = 1;
+                hm->base.transparent = 1;
+                hm->emissive = (vec4) {0};
+                hm->texture = air_halo_texture();
+                slot->halo[slot_i] = mesh_init(quad, (Material *) hm);
+                if (!slot->halo[slot_i]) material_fini((Material *) hm);
+            } else if (hm) {
+                material_fini((Material *) hm);
+            }
+            if (slot_i >= 0 && slot->halo[slot_i]) {
+                snprintf(slot->halo_name[slot_i], sizeof(slot->halo_name[0]), "%s", pg->name);
+                const vec3 o = transform_point_to(node, (vec3) {0, 0, 0}, NULL), x = transform_point_to(node, (vec3) {1, 0, 0}, NULL);
+                const float scale = sqrtf((x.x - o.x) * (x.x - o.x) + (x.y - o.y) * (x.y - o.y) + (x.z - o.z) * (x.z - o.z));
+                slot->halo_size[slot_i] = 2.0f * radius * scale / sqrtf(3.0f);
+                slot->halo[slot_i]->transform.parent = &slot->container; // this.mesh.add(halo)
+                scene_add_mesh(client->scene, slot->halo[slot_i]);
+            } else {
+                slot_i = -1;
+            }
+        }
+        if (slot_i >= 0) {
+            Mesh *halo = slot->halo[slot_i];
+            halo->visible = visible && eff > 0.0f;
+            if (halo->visible) {
+                halo->transform.position = transform_point_to(node, (vec3) {0, 0, 0}, &slot->container);
+                const float size = slot->halo_size[slot_i] / fmaxf(slot->container.scale.x, 0.001f) * (1.4f + pulse * 0.25f);
+                halo->transform.scale = (vec3) {size, size, 1.0f};
+                BasicMaterial *hm = (BasicMaterial *) halo->material;
+                if (!has_color) color = (vec3) {1.0f, 90.0f / 255.0f, 30.0f / 255.0f}; // || "#ff5a1e"
+                hm->color = (vec4) {color.x, color.y, color.z, fminf(1.0f, eff * pulse)};
+            }
+        }
+    }
+    // the meshes of no glowing node: back to their own emissive; the halos of parts no longer glowing go
+    for (size_t i = 0; slot->emissive0 && i < slot->gltf->mesh_count; i++) {
+        if (i < sizeof(lit) && lit[i]) continue;
+        Material *mat = slot->gltf->meshes[i]->material;
+        if (mat && mat->vtable == &basic_material_vtable) ((BasicMaterial *) mat)->emissive = slot->emissive0[i];
+    }
+    for (int k = 0; k < AI_PARTS_MAX; k++) {
+        if (!slot->halo[k]) continue;
+        int glowing = 0;
+        for (int g = 0; parts && g < parts->glow_count && !glowing; g++) glowing = !strcmp(parts->glow[g].name, slot->halo_name[k]);
+        if (glowing) continue;
+        scene_remove_mesh(client->scene, slot->halo[k]);
+        mesh_fini(slot->halo[k]);
+        slot->halo[k] = NULL; // !partGlow && !halo.visible: delete glowState[name]
+    }
+    if (!parts || !parts->glow_count) slot->glowed = 0;
 }
 
 static void air_update_meshes(Client *client, const float dt_ms) {
@@ -342,7 +570,8 @@ static void air_update_meshes(Client *client, const float dt_ms) {
             const int frame = slot->frame_time > 0.0f ? (int) fmod(now * 1000.0 / slot->frame_time, slot->frames) : ai->frame % slot->frames;
             ((BasicMaterial *) slot->mesh->material)->texture_offset.x = (float) frame;
         }
-        air_clips(slot, ai, now);
+        air_clips(client, slot, ai, now);
+        air_parts(client, slot, ai, visible);
     }
 }
 

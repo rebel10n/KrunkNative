@@ -173,6 +173,17 @@ void ks_game_on_chat_message(Game*, Player*, const char *text);
 void ks_game_on_game_end(Game*);
 // Trigger action 58 (map-logic §3.10): onCustomTrigger(playerID or "NONE", param, value).
 void ks_game_on_custom_trigger(Game*, const char *player_id, const char *param, int value);
+// v10.0.3 AI hooks (server script, authority; deob-10.0.3.js AI.changeHealth :206243-206249, armourHit :206223,
+// AI.kill :206338): onAIDamage(sid, playerId, dmg) for damage that is not a health set, onAIPartDamage(sid,
+// part, playerId, dmg) after it for a preciseHits model hit (dmg 0 for an armour part, part.m 0), and
+// onAIDeath(sid, name, killerId). playerId "" when the source is no player.
+void ks_game_on_ai_damage(Game*, int sid, const Player *doer, double amount);
+void ks_game_on_ai_part_damage(Game*, int sid, const char *part, const Player *doer, double amount);
+void ks_game_on_ai_death(Game*, int sid, const char *name, const Player *killer);
+// v10.0.3 game.damageObject (deob-10.0.3.js:220473-220481): onObjectDamage(sid, interface || 0, playerId, dmg) for a
+// destructible's damage, onObjectDestroyed(sid, interface || 0, playerId) when it breaks (server script).
+void ks_game_on_object_damage(Game*, int sid, int interface_id, const Player *doer, double amount);
+void ks_game_on_object_destroyed(Game*, int sid, int interface_id, const Player *doer);
 
 // Custom sync values of a player (2.6): the [name, value...] array of its registered names
 // whose current wrapper value is num / str / bool, serialised for NET_PACKET_SCRIPT_SYNC.

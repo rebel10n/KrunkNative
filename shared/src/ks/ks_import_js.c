@@ -1201,6 +1201,8 @@ static const HookSig g_server_hooks[] = {
     {"onPlayerLeave", "s"}, {"onGameEnd", ""}, {"onAdFinished", "sb"}, {"onServerClosed", ""},
     {"onDepositBoxChange", "ssnn"}, {"onEntitySpawn", "ss"}, {"onEntityDamage", "ssn"}, {"onEntityDestroyed", "ss"},
     {"onEntityAttach", "ss"}, {"onEntityDetach", "ss"}, {"onEntityEvent", "ssnn"}, {"onEntityRemoved", "s"},
+    {"onAIDamage", "nsn"}, {"onAIPartDamage", "nssn"}, {"onAIDeath", "nss"}, // v10.0.3 (deob-10.0.3.js:206223-206341)
+    {"onObjectDamage", "nnsn"}, {"onObjectDestroyed", "nns"}, // v10.0.3 (deob-10.0.3.js:220479-220481)
 };
 
 static const char *hook_sig(KsSide side, const char *name) {
