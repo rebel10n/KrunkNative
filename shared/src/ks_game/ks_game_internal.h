@@ -36,6 +36,9 @@ typedef struct {                          // buildBody's colObjs entry (deob-10.
     double off[3], size[3];
     char name[16];                        // rec.n when it matches /^\w{1,12}$/ (its skeleton keys <n>_x .. <n>_roll), "" none
     int is_model;                         // rec.aid != null
+    const cJSON *rec;                     // the archetype's part record (c, o)
+    size_t uid;                           // its body: the map object addBlock made (map->objects index), when `object`
+    Object *object;
 } KsEntPart;
 
 typedef struct KsEntity {
@@ -105,7 +108,12 @@ typedef struct {
 // LIVE_OBJECTS (v10 liveObjects, deob-10.0.3.js:212096-212411): the authority's runtime objects, [id, data]
 typedef struct {
     int id;
-    cJSON *data;                        // {type: "asset", aid, x, y, z, s, ry, data: {cpx}} as broadcast in "lo"
+    cJSON *data;                        // {type: "block" | "asset", ...} as broadcast in "lo"
+    size_t uid;                         // its map object (a block's addBlock, a client's asset mesh), when `object`
+    Object *object;
+    float *tris;                        // an asset's cpx triangles (loadTris, :212187), world space, 9 floats each
+    size_t tri_count;
+    int tris_wait;                      // its model is still loading: asked again each update
 } KsLiveObject;
 
 typedef struct {
@@ -122,9 +130,11 @@ typedef struct {
     size_t att_count, att_cap;
     size_t baseline_cursor;             // broadcastBaselines' round robin
     int budget_streak;                  // advance over its 2 ms budget, in a row
-    KsLiveObject *live;                 // LIVE_OBJECTS (the authority)
+    KsLiveObject *live;                 // LIVE_OBJECTS: the authority's, a client's copy of "lo"
     size_t live_count, live_cap;
     int live_next_id;
+    Map *obj_map;                       // the map the bodies / blocks were appended to
+    cJSON *records;                     // the records of those objects (Object.raw points into them)
 } KsEntities;
 
 // The stable `native` of a host wrapper: one per (kind, engine id) for the life of the
@@ -171,6 +181,7 @@ struct KsGame {
     double fixed_delta;        // TIME.fixedDelta (ms)
     const KsHostClass *player_class;
     KsGameAccountFn account;
+    int custom_map_id;         // the hosted published map's id (v10.0.3 customMapData.id), 0 none (ks_game_set_custom_map_id)
 
     KsRef **refs;
     size_t ref_count, ref_cap;

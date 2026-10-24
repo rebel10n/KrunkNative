@@ -526,13 +526,14 @@ static KsValue pl_set_skin(KsScript *s, void *native, const KsValue *args, int a
     (void) argc;
     return ks_undef();
 }
-// giveSkin(id): the six scripting skins (7529, 7530, 7713, 7714, 7715, 7621) to an account in a pub-type game, through
-// sendUserSkin("scripting") (game_give_skin -> kn_brain give_skin). Deliberate difference: 10.0.3 also allows four
-// custom maps by id (157528, 157678, 158102, 158103); KN's server knows no hosted map's custom id. kn_brain skips a skin
-// the account already has (account.hasSkin).
+// giveSkin(id): the six scripting skins (7529, 7530, 7713, 7714, 7715, 7621) to an account, in a pub-type game or on
+// one of four hosted maps (customMapData.id 157528, 157678, 158102, 158103: ks_game_custom_map_id, the brain's map_id
+// of the published map), through sendUserSkin("scripting") (GameHooks.give_skin -> kn_brain give_skin). kn_brain skips
+// a skin the account already has (account.hasSkin).
 static KsValue pl_give_skin(KsScript *s, void *native, const KsValue *args, int argc)
 {
     static const int allowed[] = {7529, 7530, 7713, 7714, 7715, 7621};
+    static const int maps[] = {157528, 157678, 158102, 158103};
     KsRef *r = ref_of(native);
     Player *p = ks_player_of(native);
     if (!p || !on_server(r) || ARG(0).tag != KS_NUM) return ks_undef();
@@ -543,7 +544,11 @@ static KsValue pl_give_skin(KsScript *s, void *native, const KsValue *args, int 
     KsGame *kg = r->kg;
     if (!ok || !kg->account || !kg->account(kg->host_user, p, account, sizeof(account), name, sizeof(name)) || !account[0]) return ks_undef();
     (void) s;
-    game_give_skin(ks_native_game(native), p, (int) id, "scripting");
+    Game *game = ks_native_game(native);
+    int listed = 0;
+    for (size_t i = 0; i < sizeof(maps) / sizeof(maps[0]); i++) listed |= ks_game_custom_map_id(game) == maps[i];
+    if (!game || p->is_bot || !game->hooks.give_skin || !(listed || game_is_pub_type(game))) return ks_undef();
+    game->hooks.give_skin(game, p, (int) id, "scripting");
     return ks_undef();
 }
 static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)

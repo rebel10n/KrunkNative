@@ -196,9 +196,13 @@ Added here:
   - `getSkin(type)`, on both sides: 0 is the current slot's weapon skin, then 1 hat, 15 head, 2 body, 14 back,
     6 waist, 9 pet, 11 wrist, 3 melee, 16 card; any other type is -1.
   - `setSkin`: only the map studio's custom skins, which Box Office games do not have, so nothing passes.
-  - `giveSkin`: the six scripting skins (7529, 7530, 7713, 7714, 7715, 7621) for an account in a pub-type game,
-    through `game_give_skin` and kn_brain. 10.0.3 also allows four custom maps by id; Box Office's server does
-    not know a hosted map's id.
+  - `giveSkin`: the six scripting skins (7529, 7530, 7713, 7714, 7715, 7621) for an account in a pub-type game
+    or on one of four custom maps by `customMapData.id` (157528, 157678, 158102, 158103: :208303), through
+    `GameHooks.give_skin` (server_bin's `accounts_give_skin`, which lets "scripting" through in a custom game) and
+    kn_brain. The id is the published map's brain `map_id`: server_bin asks
+    `/api/map-data` with `meta=1` (`brain_fetch_map_sync_id`, `brain_fetch_map`), keeps it per name
+    (`published_map_id`) and sets it on the KrunkScript game at each round (`ks_server_round_init`,
+    `ks_game_set_custom_map_id`). A cached copy played while the brain is down has no id.
 
 Missing, outside this package:
 
@@ -220,6 +224,10 @@ Missing, outside this package:
   - the wrapper members;
   - the `AI.spawn` clamps;
   - `onObjectDamage` / `onObjectDestroyed`;
-  - `started` with a contTime timer.
+  - `started` with a contTime timer;
+  - `giveSkin`'s skins, and a hosted game's four map ids.
+- `server/tests/published_maps_test.c` covers the kept map ids; `server/tests/published_host_e2e.py` checks that
+  kn_brain gives them to a server_bin fetching a map at startup and for a host request;
+  `services/brain/tests/community_maps_test.py` checks `meta=1`.
 - `shared/tests/ks_vm_test.c` (`test_official_net`) covers the `sd` conversions.
 - `client/tests/krunker_link_test.c` covers `sd` in and out on the official link.

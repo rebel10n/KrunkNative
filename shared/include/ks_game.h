@@ -128,6 +128,10 @@ Game *ks_native_game(void *native);
 // Server host: accountID / accountName of a player (3.2.1, "" for guests and on the client).
 typedef int (*KsGameAccountFn)(void *host_user, const Player*, char *id, size_t id_n, char *name, size_t name_n);
 void ks_game_set_account_fn(Game*, KsGameAccountFn);
+// The hosted published map's id (v10.0.3 customMapData.id; the brain's map_id), 0 for none: player.giveSkin's maps
+// (deob-10.0.3.js:208303). Set by the server host each round.
+void ks_game_set_custom_map_id(Game*, int map_id);
+int ks_game_custom_map_id(const Game*);
 Player *ks_game_player_by_id(Game*, KsValue id);
 Player *ks_game_find_player_str(Game*, const char *id);       // "<uid>" -> Player, NULL none                  // loose `player.id == id` (as strings)
 // Player id string of a player ("" for NULL), as hooks pass it.

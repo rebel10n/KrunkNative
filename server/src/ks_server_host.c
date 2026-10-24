@@ -11,6 +11,7 @@
 #include <ks_net.h>
 #include <server_log.h>
 #include <server_accounts.h>
+#include <published_maps.h> // published_map_id: the hosted map's customMapData.id
 #include <server_sandbox.h>
 #include <ks_storage.h>
 #include <game_config.h> // CONFIG.getHost: game.host (game_host_player)
@@ -1176,6 +1177,9 @@ void ks_server_round_init(void)
 {
     Game *game = &g_server->game;
     if (!game->ready) return;
+    // v10.0.3 customMapData.id (player.giveSkin's maps, deob-10.0.3.js:208303): the hosted published map's brain id
+    const char *published = accounts_published_map();
+    ks_game_set_custom_map_id(game, published ? published_map_id(published) : 0);
     size_t len = 0;
     char *src = ks_game_map_source(game, KS_SIDE_SERVER, &len);
     const uint32_t hash = src ? ks_source_hash(src, len) : 0;

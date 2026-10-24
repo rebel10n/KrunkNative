@@ -80,7 +80,9 @@ into the player's script flags (`KsRef.allow`, created when the game has no scri
 `ks_player_allows` reads. So, as in v10: the script reads the freeze back (`player.defaultMovement` is
 false), a script may turn a flag on again while frozen, an unfreeze turns all four on whatever the script
 had set, and a respawn's reset turns the movement flags on and keeps `disableShooting` / `disableMelee` (`player.init`
-:190737-190740: `ks_ref_respawn_player`); a leave clears them all, so the next player of the uid starts fresh.
+:190737-190740: `ks_ref_respawn_player`). A new Player object of the uid starts fresh, as v10's flags live on the
+object: the flags remember which player (`KsRef.player_no`, the `name_no`) they belong to, and another one's spawn
+or wrapper clears them, whatever removed the old one (a leave, a bot's removal).
 
 ## Differences (deliberate)
 

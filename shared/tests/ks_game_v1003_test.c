@@ -11,6 +11,7 @@
 // ./<build>/ks_game_v1003_test
 #include <ai.h>
 #include <ai_parts.h>
+#include <game_config.h>
 #include <ks_game.h>
 #include <ks_entities.h>
 #include <net_ext.h>
@@ -602,6 +603,21 @@ static void test_ai_wrapper(void) {
     run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n    me.giveSkin(1234);\n"
                       "    me.giveSkin(7529);\n}\n");
     CHECK(g_given_skin == 7529 && !strcmp(g_given_reason, "scripting"), "giveSkin: only the scripting skins, through sendUserSkin (%d)", g_given_skin);
+    // a hosted (not pub-type) game: only the four maps of 10.0.3's list (customMapData.id, deob-10.0.3.js:208303)
+    const int was_sandbox = game.is_sandbox;
+    game.is_sandbox = 0;
+    game_config_host(&game, NULL, 0);
+    CHECK(!game_is_pub_type(&game), "the hosted game is no pub type");
+    g_given_skin = 0;
+    ks_game_set_custom_map_id(&game, 4242);
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n    me.giveSkin(7713);\n}\n");
+    CHECK(g_given_skin == 0, "another hosted map gives nothing");
+    ks_game_set_custom_map_id(&game, 158102);
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n    me.giveSkin(7713);\n}\n");
+    CHECK(g_given_skin == 7713, "map 158102 gives the scripting skin (%d)", g_given_skin);
+    ks_game_set_custom_map_id(&game, 0);
+    game_config_free(&game);
+    game.is_sandbox = was_sandbox;
     game.hooks.give_skin = NULL;
     ks_game_set_account_fn(&game, NULL);
     // player.godMode / speed / aiKills (deob-10.0.3.js:207846-207866, :208133)

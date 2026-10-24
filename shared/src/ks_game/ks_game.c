@@ -387,6 +387,17 @@ const KsHostClass *ks_game_player_class(const Game *game)
     return game && game->ks && game->ks->player_class ? game->ks->player_class : &ks_player_class;
 }
 
+void ks_game_set_custom_map_id(Game *game, const int map_id)
+{
+    KsGame *kg = ks_game_state(game, map_id != 0);
+    if (kg) kg->custom_map_id = map_id;
+}
+
+int ks_game_custom_map_id(const Game *game)
+{
+    return game && game->ks ? game->ks->custom_map_id : 0;
+}
+
 void ks_game_set_account_fn(Game *game, const KsGameAccountFn fn)
 {
     KsGame *kg = ks_game_state(game, fn != NULL);
