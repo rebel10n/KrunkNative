@@ -1,6 +1,7 @@
-// settings_defaults_test: the v10.0.2 defaults that differ on a phone (client/src/ui/ui_settings_defaults.c).
-// Each key of the phone table holds v10's desktop value and its isMobile value; the Mobile rows hold the
-// same value on both platforms; keys outside the table keep the captured default (NULL).
+// settings_defaults_test: the v10.0.3 defaults the captured settings tabs cannot carry
+// (client/src/ui/ui_settings_defaults.c). Each key of the phone table holds v10's desktop value and its
+// isMobile value; the Mobile rows and the run-time controls hold the same value on both platforms; keys
+// outside the table keep the captured default (NULL).
 #include <ui_settings_defaults.h>
 
 #include <stdio.h>
@@ -47,6 +48,14 @@ static const Expect MOBILE[] = {
     {"gradSpeedMbl", "true", "true"},
 };
 
+// Controls v10 fills at run time or never renders in a settings tab: the microphone select's "default"
+// and the hidden Trigger selects' Continuous (Hold) (deob-10.0.3.js:239694, 241139, 241154)
+static const Expect RUNTIME[] = {
+    {"audioInput", "default", "default"},
+    {"scoreBoardTrigger", "1", "1"},
+    {"voiceChatTrigger", "1", "1"},
+};
+
 // Box Office's own default (ui_settings_defaults.c): v10 ships rawMouse off, the Client tab's Raw Input was on
 static const Expect BOX_OFFICE[] = {
     {"rawMouse", "true", "true"},
@@ -74,6 +83,15 @@ int main(void) {
         CHECK(!strcmp(phone, e->phone), "%s phone %s, want %s", e->key, phone, e->phone);
     }
 
+    for (size_t i = 0; i < sizeof(RUNTIME) / sizeof(RUNTIME[0]); i++) {
+        const Expect *e = &RUNTIME[i];
+        const char *desktop = text_of(e->key, 0), *phone = text_of(e->key, 1);
+        CHECK(desktop && phone, "%s: missing from the table", e->key);
+        if (!desktop || !phone) continue;
+        CHECK(!strcmp(desktop, e->desktop), "%s desktop %s, want %s", e->key, desktop, e->desktop);
+        CHECK(!strcmp(phone, e->phone), "%s phone %s, want %s", e->key, phone, e->phone);
+    }
+
     for (size_t i = 0; i < sizeof(BOX_OFFICE) / sizeof(BOX_OFFICE[0]); i++) {
         const Expect *e = &BOX_OFFICE[i];
         const char *desktop = text_of(e->key, 0), *phone = text_of(e->key, 1);
@@ -94,7 +112,7 @@ int main(void) {
     size_t n = 0;
     const UiSettingDefault *table = ui_settings_defaults_table(&n);
     CHECK(table && n == sizeof(PHONE) / sizeof(PHONE[0]) + sizeof(MOBILE) / sizeof(MOBILE[0]) +
-              sizeof(BOX_OFFICE) / sizeof(BOX_OFFICE[0]), "table holds %zu entries", n);
+              sizeof(RUNTIME) / sizeof(RUNTIME[0]) + sizeof(BOX_OFFICE) / sizeof(BOX_OFFICE[0]), "table holds %zu entries", n);
     for (size_t i = 0; table && i < n; i++) {
         const UiSettingDefault *a = &table[i];
         CHECK(a->key && a->desktop && a->phone, "entry %zu is incomplete", i);
