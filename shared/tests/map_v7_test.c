@@ -350,6 +350,10 @@ static void check_all_prefabs_fixture(void) {
         CHECK(!strcmp(z->env.ambient, "#112233") && !strcmp(z->env.fog, "#445566") && z->env.fog_d == 800.0f && z->env.tone_mapping == 4 &&
                   z->env.sky_dome && z->env.amb_ind == 6 && z->env.light_i == 1.3f && !strcmp(z->env.light, "#f2f8fc"),
               "ENVIRONMENT_ZONE data (ambientC / fogC, defaults)");
+        // v10.0.3 addEnvironmentZone (deob-10.0.3.js:185271-185302): sunAngX / lightD parseInt'd, ambientI parseFloat'd
+        CHECK(z->env.sun_ang_x == 45.0f && z->env.light_d == 300.0f && z->env.ambient_i == 0.5f && z->env.sun_ang_y == 54.0f &&
+                  z->env.shadow_r == 1024 && z->env.shadow_d == 1200,
+              "ENVIRONMENT_ZONE parseInt / parseFloat keys");
         const vec3 inside = {z->position.x, z->position.y + 1.0f, z->position.z};
         const vec3 outside = {z->position.x, z->position.y - 1.0f, z->position.z};
         CHECK(world_environment_zone_at(map, inside) == 0 && world_environment_zone_at(map, outside) == -1, "environment zone lookup");

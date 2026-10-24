@@ -621,8 +621,16 @@ static void map_parse_prefab_keys(Object *object, const cJSON *raw_obj, const in
     }
 }
 
+// key == null ? fallback : parseInt(key || 0) (the integer fields of MapManager.addEnvironmentZone)
+static float map_int_or(const cJSON *obj, const char *key, const float fallback) {
+    return map_has(obj, key) ? (float) map_int(obj, key) : fallback;
+}
+
 // render.js initEnvironment keys of the map (map-logic.md §1.1). A missing ambient / light means
 // there is no such light (has_ambient / has_light); the colours keep the editor defaults.
+// A zone's data is MapManager.addEnvironmentZone's (deob-10.0.3.js:185271-185302): every key has a
+// value (these defaults), and lightD / sunAngX / sunAngY / shadowR / shadowD / fogD are parseInt'd
+// (truncated); the map's own keys go to sceneInit as they are (`?? default`, client_apply_map_lighting).
 static void map_parse_environment(MapEnvironment *env, const cJSON *raw, const int zone) {
     env->has_ambient = zone || map_has(raw, "ambient");
     env->has_light = zone || map_has(raw, "light");
@@ -632,12 +640,13 @@ static void map_parse_environment(MapEnvironment *env, const cJSON *raw, const i
     map_color(raw, zone ? "fogC" : "fog", "#8d9aa0", env->fog);
     env->ambient_i = map_float_or(raw, "ambientI", 1.0f);
     env->light_i = map_float_or(raw, "lightI", 1.3f);
-    env->light_d = map_float_or(raw, "lightD", 500.0f);
-    env->sun_ang_x = map_float_or(raw, "sunAngX", 90.0f);
-    env->sun_ang_y = map_float_or(raw, "sunAngY", 54.0f);
-    env->shadow_r = (int) map_float_or(raw, "shadowR", 1024.0f);
-    env->shadow_d = (int) map_float_or(raw, "shadowD", 1200.0f);
-    env->fog_d = map_float_or(raw, "fogD", 2000.0f);
+    float (*const number_or)(const cJSON *, const char *, float) = zone ? map_int_or : map_float_or;
+    env->light_d = number_or(raw, "lightD", 500.0f);
+    env->sun_ang_x = number_or(raw, "sunAngX", 90.0f);
+    env->sun_ang_y = number_or(raw, "sunAngY", 54.0f);
+    env->shadow_r = (int) number_or(raw, "shadowR", 1024.0f);
+    env->shadow_d = (int) number_or(raw, "shadowD", 1200.0f);
+    env->fog_d = number_or(raw, "fogD", 2000.0f);
     env->sky_dome = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "skyDome"));
     env->sky_dome_tex = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "skyDomeTex"));
     map_color(raw, "skyDomeCol0", "#74a4b9", env->sky_dome_col[0]);

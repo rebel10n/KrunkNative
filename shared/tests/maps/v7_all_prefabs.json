@@ -1204,7 +1204,10 @@
    "fogD": 800,
    "toneMapping": 4,
    "skyDome": 1,
-   "ambInd": 6
+   "ambInd": 6,
+   "sunAngX": 45.7,
+   "lightD": "300.9",
+   "ambientI": "0.5"
   },
   {
    "i": 80,
