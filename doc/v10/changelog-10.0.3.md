@@ -38,7 +38,8 @@ official text. Where a bundle item has no official line, it is marked "unlisted"
 | Version | `10.0.3` string; `10.0.1` removed; build hash in asset URLs changed | Yes (version) |
 | Packet trailer `ahNum` step | `this.ahNum = add(this.ahNum, 3)` (`(a + b) & 255`) before every send but `cptR` (`deob-10.0.3.js:111514`, helper 27698); 10.0.2 added `1597` (& 255 = 61, `v10.0.2/game.deob.js:111476`) | Unlisted (wire) |
 
-Removed in 10.0.3 (inferred, unlisted): the `Eterno Simulator` literal in the client, and the
+Removed in 10.0.3: the `Eterno Simulator` literal in the client (confirmed: 10.0.3's ranked pool is
+{2, 4, 11, 14, 17, 42}, `deob-10.0.3.js:19381-19388`, and KN matches it), and (inferred, unlisted) the
 `setTimeout` / `listeners` / `localInspectSound` helper names. The number-literal sets differ in four
 values (`60000000`, `1179937895` added; `0.6075`, `1597` removed). `1597` was 10.0.2's `ahNum` step;
 10.0.3 steps by 3 (row above; a set diff cannot show it, 3 is everywhere), which is KN's
