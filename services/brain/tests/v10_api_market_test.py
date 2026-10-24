@@ -43,6 +43,7 @@ NO_ITEM = 999999
 # one it already owns (1 Year Cape: bought from the Black Market, never again)
 BM_BUY = 1642
 BM_OWNED = 1483
+JUNK_ITEM = 114          # Flame Tamer: Contraband, 5 Junk per quick-sold unit (deob-10.0.3.js:116317, 122619-122632)
 SELLER = "mkt_seller"
 BUYER = "mkt_buyer"
 PAINTER = "mkt_painter"
@@ -410,11 +411,14 @@ def market_scenario(port, path):
           and len(every) >= 2 and every == sorted(every) and [x.get("ski") for x in p1["stats"] + p2.get("stats", [])] == every[:2]
           and (data_of(r3) or {}).get("has_more") is False and (data_of(r3) or {}).get("next_cursor") is None,
           "p1 %s p2 %s every %s" % (json.dumps(p1)[:160], json.dumps(p2)[:120], every))
+    # the owners rows' creator badge: cr from players.creator_badge (deob-10.0.3.js:151912, 123737)
+    seed(path, [("UPDATE players SET creator_badge = 1 WHERE player_id = ?", (b_id,))])
     st, r = http(port, "GET", "/market/items/%d/sales" % ITEM)
     expect_data("130 GET /market/items/{id}/sales", st, r,
                 lambda d: isinstance(d, dict) and d.get("ind") == ITEM and is_int(d.get("onS")) and any(
-                    o.get("nm") == BUYER for o in d.get("owners") or []),
-                "{ind, onS, inC, high, low, owners: [{nm, ct, su, ft}]} (v10.js 26887)")
+                    o.get("nm") == BUYER and o.get("cr") == 1 for o in d.get("owners") or []) and all(
+                    o.get("cr") == 0 for o in d.get("owners") or [] if o.get("nm") != BUYER),
+                "{ind, onS, inC, high, low, owners: [{nm, ct, su, ft, cr}]}: the creator's row cr 1, the others 0 (v10.js 26887)")
     st, r = http(port, "GET", "/market/items/%d/sales" % NO_ITEM)
     expect_not_found("130 GET /market/items/{id}/sales (unknown; deob-10.0.3.js:117384)", st, r, "ITEMS_INVALID_ID")
     st, r = http(port, "GET", "/market/items/%d/sales-statistics?daysback=7" % ITEM)
@@ -482,7 +486,28 @@ def market_scenario(port, path):
 
     # ---- quick sell (after the trades: the seller holds one skin 0 again)
     st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 1, "amount": 0}, s_tok)
-    expect_refusal("135 POST /market/quick-sell (junk mode: not built)", st, r)
+    expect_error("135 POST /market/quick-sell (Junk for an Uncommon: no scrap value)", st, r,
+                 "MARKET_QUICK_SELL_NOT_SELLABLE", 400)
+    # Get Junk (action 1): 2 x 5.00 Junk into the wallet, reason quicksell; data.junk is the balance (deob-10.0.3.js:147736)
+    seed(path, [("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (s_id, JUNK_ITEM)),
+                ("UPDATE players SET player_junk = 25 WHERE player_id = ?", (s_id,)),
+                ("INSERT INTO junk_transactions (account_id, amount, source) VALUES (?, 25, 'test')", (s_id,))])
+    kr0 = query(path, "SELECT player_funds FROM players WHERE player_id = ?", (s_id,))[0][0]
+    st, r = http(port, "POST", "/market/quick-sell", {"item_id": JUNK_ITEM, "action": 1, "amount": 2}, s_tok)
+    expect_data("135 POST /market/quick-sell (Junk, all)", st, r,
+                lambda d: isinstance(d, dict) and d.get("count") == 0 and abs(d.get("junk", 0) - 10.25) < 1e-9
+                and d.get("funds") == kr0 and d.get("kr") == 0 and abs(d.get("jnk", 0) - 10.0) < 1e-9,
+                "{funds unchanged, junk 10.25, count 0, jnk 10}")
+    left = query(path, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (s_id, JUNK_ITEM))
+    bal = query(path, "SELECT player_junk FROM players WHERE player_id = ?", (s_id,))[0][0]
+    rows = query(path, "SELECT amount, source FROM junk_transactions WHERE account_id = ? ORDER BY id", (s_id,))
+    check("135 the Junk quick sell: both units gone, 1025 hundredths, one quicksell ledger row of 1000 (the sum is the balance)",
+          (not left or left[0][0] == 0) and bal == 1025 and rows[-1] == (1000, "quicksell") and sum(a for a, _ in rows) == bal,
+          "left %r balance %r rows %r" % (left, bal, rows))
+    st, r = http(port, "POST", "/market/quick-sell", {"item_id": JUNK_ITEM, "action": 1, "amount": 0}, s_tok)
+    check("135 the Junk quick sell of an item no longer owned is refused, nothing credited",
+          st == 400 and query(path, "SELECT player_junk FROM players WHERE player_id = ?", (s_id,))[0][0] == 1025,
+          "HTTP %d %s" % (st, json.dumps(r)[:160]))
     st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 0, "amount": 0}, s_tok)
     expect_data("135 POST /market/quick-sell (KR, one)", st, r,
                 lambda d: isinstance(d, dict) and d.get("count") == 0 and is_int(d.get("funds")),

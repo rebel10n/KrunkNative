@@ -1401,7 +1401,7 @@ Other labels (request -> reply):
 | `["uli", skin, listingId, uid, {op}]` | `["ulir", "SUCCESS"\|"SOLD"\|null, uid, err]` |
 | `["pi", listingId, uid, {op}]` | `["br", {f, i, sid, m, price} \| null, uid]` (client -> server `pi` is the purchase); the seller gets the "Item sold" mail, `econN` and `ua` |
 | `["fil", n, text, rarities, weapons, types, season, order]` / `["srt", n, text, rarities, ...]` | `["fr", n, listings\|null]` / `["str", n, inventory]` |
-| `["qsi", mode, skin, uid, amount, {op}]` (v7.1.4) / `["qsi", skin, uid, amount]` | `["qsr", {f, c, kr, j, jnk, i: uid} \| null]` (KR = the item's `qsKR`, else `store.rarities[r].sell`; mode 0 KR, 2 destroy; amount 0 one, 1 all but one, 2 all) |
+| `["qsi", mode, skin, uid, amount, {op}]` (v7.1.4) / `["qsi", skin, uid, amount]` | `["qsr", {f, c, kr, j, jnk, sold, i: uid} \| null]` (KR = the item's `qsKR`, else `store.rarities[r].sell`; Junk = v10.0.3's rarity `scrap`, Contraband 5 / Unobtainable 50, 0.01 for `minQuickSell`, into the Junk wallet with reason `quicksell` (doc/v10/junk.md); mode 0 KR, 1 Junk, 2 destroy; amount 0 one, 1 all but one, 2 all; `j` the Junk balance after, `jnk` the Junk given; a noSale Black Market or opensea item is refused in every mode) |
 | `["st", skin, range, captcha]` | `["gd", [{d, f: KR total, t: sales}]]` (range: `config.dataDateRanges` index or days) |
 | `["uml", playerId]` | `["ul", [{sk, skid, kr, c, ms, id}]]` (profile Listings tab) |
 | `["ri", name, id, captcha]` | `["trD", name, id, [myInventory, theirInventory]]` (items `{i, c, nt?}`, `nt` = not tradable) |
@@ -2009,21 +2009,34 @@ matchmaker on `004004` / `004006` and on a refused join key (9.4); `004004` on a
   guest connection takes over (`acc_transfer_host`); with fewer ("Host ended game" chat line,
   v3.1.1 `HOST_ENDED_MESSAGE`), when the lobby empties, or when nobody joins within 60 s, it
   reverts to the public rotation. `passCode` is not enforced (the native JOIN has no password).
-* **Host rights** (checked against v10.0.3, `server/src/votekick.c votekick_handle_admin`): the
-  player list's Kick (`NET_EXT_ADMIN_ACTION` action 0) is the custom game's host's and a
-  moderator's (v10.0.3 shows it for `isHost || canGlobalKick`, deob-10.0.3.js:254169); the kicked
-  player reads "Kicked by host" (`game.kick`, 222586-222588); a DEV cannot be kicked that way.
-  Custom games have no vote kick (v10's Votekick needs `!game.isCustom`, 250341). A DEV kicks and
-  bans through the chat command layer. A host transfer (`acc_transfer_host`) says v10.0.3's lines,
-  "You are now Host!" to the new host and "Host Transfered to {0}" to everyone else
-  (256720-256727), and a game's host passes at most `hostTransferLimit` 5 times (22620,
-  `game.hostTransfers` 215732): past it everyone reads "This server exceeded Host Transfer limit"
-  and the game goes on without a host (inferred: the server code is not in the bundle). Deliberate
-  or open differences from v10.0.3: Ban (action 1) stays a DEV's (a KrunkNative ban is a persistent
-  account ban, v10.0.3's host / moderator ban is that game's only); there is no Transfer Host button
-  (action 8) and no `transferHostOnLeave` setting (v10 default on, 19992-19998): the host passes on
-  leave when two or more players remain. Neither game lets an ordinary host change the settings
-  mid-game (v10's Rehost is staff-only, 129063, 248793-248797).
+* **Host rights** (checked against v10.0.3, `server/src/votekick.c votekick_handle_admin`,
+  `server/src/accounts.c`):
+  * Kick (`NET_EXT_ADMIN_ACTION` action 0) is the custom game's host's and a moderator's (v10.0.3
+    shows it for `isHost || canGlobalKick`, deob-10.0.3.js:254169); the kicked player reads "Kicked
+    by host" (`game.kick`, 222586-222588); a DEV cannot be kicked that way. Custom games have no vote
+    kick (v10's Votekick needs `!game.isCustom`, 250341). A DEV kicks and bans through the chat
+    command layer.
+  * Transfer Host (action 8, the player list's button for the host, 254169, sent with the target's id,
+    254059-254071; forwarded on official games too, `krunker_link.c`): the host hands the game to a
+    signed-in or guest player here (`accounts_transfer_host_to`).
+  * Transfer Host on Leave (`transferHostOnLeave`, Hosting, default on, 19992-19998; `GameConfig
+    .transfer_host_on_leave`): on, a host leaving with two or more players left passes the game to the
+    oldest signed-in or guest player; off (the rule before the setting, v3.1.1 `HOST_ENDED_MESSAGE`),
+    or with fewer players, "Host ended game" and the lobby goes back to the public rotation.
+  * Every transfer says v10.0.3's lines, "You are now Host!" to the new host and "Host Transfered to
+    {0}" to everyone else (256720-256727); a game's host passes at most `hostTransferLimit` 5 times
+    (22620, `game.hostTransfers` 215732): past it everyone reads "This server exceeded Host Transfer
+    limit", a manual transfer is refused (the host stays) and a leaving host leaves the game without
+    one (inferred: the server code is not in the bundle). The host also feeds v10 `game.host`
+    (`acc_sync_game_host`, `game_config_set_host`).
+  * Ban (action 1) stays a DEV's, a deliberate difference: a KrunkNative ban is a persistent account
+    ban across the server, while v10.0.3's host / moderator ban (`isHost || canGlobalBan`) is that
+    game's only, a list KrunkNative does not keep; the host's and the moderator's Ban is refused
+    rather than turned into a server ban.
+  * Neither game lets an ordinary host change the settings mid-game (v10's Rehost is staff-only,
+    129063, 248793-248797).
+  * Tests: `server/tests/votekick_test.c` (section 9, through the test hooks
+    `accounts_host_for_test` / `accounts_tick_custom_for_test`: no brain).
 * **Published (community DB) maps:** `config.customMap` (alias `mapName`) names the map to
   host. A map this server has (its own list incl. custom dirs / the command-line map, then
   a catalogue entry whose name or key is exactly that) is used directly; otherwise

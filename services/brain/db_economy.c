@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "junk.h" /* junk_value: the quick sell's Junk in the reply (doc/v10/junk.md) */
 #include "knsvc/json.h"
 #include "v10_paint.h"
 
@@ -497,14 +498,18 @@ static kn_db_result *run_market_buy(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_MARKET_BUY = {"market_buy", NULL, run_market_buy};
 
-/* $4 skin, $5 mode (0 KR, 2 destroy), $6 amount (0 one item, 1 all but one, 2 all), $7 KR each, $8 the copy id (0 for
- * a stack) -> {c, f, kr, j, jnk, sold}. KR comes from the game (no counterparty). A stack sells its unpainted units only;
- * a painted copy is sold as one unit (amount 0), its paint goes with it (doc/v10/paint-copy.md). */
+/* $4 skin, $5 mode (0 KR, 1 Junk, 2 destroy), $6 amount (0 one item, 1 all but one, 2 all), $7 KR each, $8 the copy id
+ * (0 for a stack), $9 Junk each in hundredths (mode 1) -> {c, f, kr, j, jnk, sold}: j the Junk balance after the sale,
+ * jnk the Junk it gave, both as Junk (v7.1.4 io_qsr). KR and Junk come from the game (no counterparty); the Junk goes
+ * through the wallet (junk_credit, reason "quicksell", doc/v10/junk.md) in this transaction. A stack sells its unpainted
+ * units only; a painted copy is sold as one unit (amount 0), its paint goes with it (doc/v10/paint-copy.md). */
 static kn_db_result *run_quick_sell(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     ECON_OPEN("qsell", "kn_quick_sell");
     const int64_t me_id = PI(0), skin = PI(4), mode = PI(5), sel = PI(6), each = PI(7) > 0 && mode == 0 ? PI(7) : 0, copy = PI(8);
-    if (mode != 0 && mode != 2) return econ_refuse(&x, "Unable to sell");
+    const int64_t junk_each = PI(9) > 0 && mode == 1 ? PI(9) : 0;
+    if (mode != 0 && mode != 1 && mode != 2) return econ_refuse(&x, "Unable to sell");
+    if (mode == 1 && junk_each <= 0) return econ_refuse(&x, "Unable to sell");
     EconPlayer me;
     if (econ_lock(&x, me_id, &me, 0, NULL) < 0 || econ_rate(&x, n, p, "qsell") < 0) return dbx_finish(&x, NULL);
     const char *ref = mode == 2 ? "destroy" : NULL;
@@ -521,13 +526,19 @@ static kn_db_result *run_quick_sell(kn_dbconn *c, int n, const char *const *p) {
         db_add_skin(&x, me_id, skin, -count, "quicksell", ref, NULL);
     }
     if (each > 0) db_add_funds_ex(&x, me_id, count * each, "quicksell", P(4), 0, 0, &funds);
+    int64_t junk = 0;
+    if (junk_each > 0) {
+        if (junk_credit(&x, me_id, count * junk_each, "quicksell", &junk) < 0) return dbx_finish(&x, NULL);
+    } else {
+        junk = junk_balance(&x, me_id);
+    }
     const int64_t cnt = db_unpainted_units(&x, me_id, skin);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "c", (double) cnt);
     cJSON_AddNumberToObject(o, "f", (double) funds);
     cJSON_AddNumberToObject(o, "kr", (double) (count * each));
-    cJSON_AddNumberToObject(o, "j", 0);
-    cJSON_AddNumberToObject(o, "jnk", 0);
+    cJSON_AddNumberToObject(o, "j", junk_value(junk));
+    cJSON_AddNumberToObject(o, "jnk", junk_value(count * junk_each));
     cJSON_AddNumberToObject(o, "sold", (double) count);
     return econ_done(&x, n, p, "qsell", "kn_quick_sell", o);
 }
@@ -587,9 +598,13 @@ static kn_db_result *run_market_item(kn_dbconn *c, int n, const char *const *p) 
                    " (SELECT max(price) FROM market_listings WHERE skin_id = $1 AND sold_at IS NOT NULL) AS high__i,"
                    " (SELECT min(price) FROM market_listings WHERE skin_id = $1 AND sold_at IS NULL AND cancelled_at IS NULL) AS low__i"),
         KN_DB_ARGS(P(0)));
+    /* cr: v10.0.3's owner row creator badge (verified, "Creator": deob-10.0.3.js:146126, 151912), players.creator_badge
+     * (0210_creator_badge, the profile's same badge: db_social.c) */
     cJSON *owners = dbx_rows(&x,
         SQL(.any = "SELECT r.player_name AS nm, i.count AS ct, CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END AS su,"
-                   " r.player_featured AS ft FROM inventory i JOIN player_rows r ON r.player_id = i.account_id"
+                   " r.player_featured AS ft,"
+                   " CASE WHEN (SELECT p.creator_badge FROM players p WHERE p.player_id = r.player_id) > 0 THEN 1 ELSE 0 END AS cr"
+                   " FROM inventory i JOIN player_rows r ON r.player_id = i.account_id"
                    " WHERE i.skin_id = $1 AND i.count > 0 ORDER BY i.count DESC LIMIT 100"),
         KN_DB_ARGS(P(0)));
     if (o) {

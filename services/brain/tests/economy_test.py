@@ -186,6 +186,11 @@ def funds(db, aid):
     return db.one("SELECT player_funds FROM players WHERE player_id = $1", aid)
 
 
+def junk(db, aid):
+    """The Junk wallet's balance in hundredths (doc/v10/junk.md)."""
+    return db.one("SELECT player_junk FROM players WHERE player_id = $1", aid)
+
+
 def count(db, aid, skin):
     return db.one("SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2", aid, skin)
 
@@ -362,7 +367,22 @@ async def scenario(url, db):
         check(r[1] and r[1]["i"] == 55 and r[1]["c"] == 1 and r[1]["f"] == cf + 200 and r[1]["kr"] == 200,
               "quick sell all but one: %r" % (r,))
         r = await c.call("qsr", "qsi", 1, 10, 55, 0, op())
-        check(r[1] is None, "junk mode refused (no junk here)")
+        check(r[1] is None, "junk mode refused for a Legendary: no scrap value (deob-10.0.3.js:116262-116339)")
+        # quick sell for Junk (v10.0.3's Get Junk, action 1): a Contraband gives its scrap, 5.00 Junk each, into the
+        # Junk wallet with one quicksell ledger row (doc/v10/junk.md); no KR moves
+        give(db, C, 114, 2)  # Flame Tamer, contraband
+        cf, cj = funds(db, C), junk(db, C)
+        page = await c.call("0", "r", "market", "inventory", C, names["cat"], None, 0)
+        row = next((x for x in (page[3] if isinstance(page[3], list) else []) if x.get("i") == 114), None)
+        check(row is not None and row.get("qj") == 500 and row.get("qs") == 2500 and "nqv" not in row,
+              "inventory row: 5.00 Junk (qj, hundredths) and 2500 KR per unit: %r" % (row,))
+        r = await c.call("qsr", "qsi", 1, 114, 56, 2, op())
+        check(r[1] and r[1]["i"] == 56 and r[1]["c"] == 0 and r[1]["kr"] == 0 and r[1]["f"] == cf and r[1]["jnk"] == 10
+              and abs(r[1]["j"] - (cj + 1000) / 100.0) < 1e-9 and junk(db, C) == cj + 1000 and count(db, C, 114) == 0,
+              "quick sell all for Junk: 10.00 Junk (j the balance, jnk the gain), no KR: %r" % (r,))
+        check(db.one("SELECT amount FROM junk_transactions WHERE account_id = $1 AND source = 'quicksell'", C) == 1000
+              and db.one("SELECT coalesce(sum(amount), 0) FROM junk_transactions WHERE account_id = $1", C) == junk(db, C),
+              "one quicksell ledger row of 1000 hundredths; the ledger sums to the balance")
         # Black Market (v7.1.4 pbm -> bmr): blackM items for their store funds, if checkReq holds
         cf = funds(db, C)
         r = await c.call(("bmr", "po"), "pbm", 1642, op())  # Nuke Tamer: 3000 KR, stats n >= 1000
@@ -375,6 +395,13 @@ async def scenario(url, db):
         check(po_text(r) == "You already own this item", "black market: once per account")
         r = await c.call(("qsr", "po"), "qsi", 0, 1642, 9, 0, op())
         check(r[0] == "qsr" and r[1] is None and count(db, C, 1642) == 1, "black market items never quick-sell for KR")
+        # Nuke Tamer is noSale && blackM: v10.0.3 neither sells nor destroys it ("This item cannot be sold back for
+        # currency.", deob-10.0.3.js:122609-122617, 147614)
+        cj = junk(db, C)
+        r1 = await c.call(("qsr", "po"), "qsi", 1, 1642, 9, 0, op())
+        r2 = await c.call(("qsr", "po"), "qsi", 2, 1642, 9, 0, op())
+        check(r1[1] is None and r2[1] is None and count(db, C, 1642) == 1 and junk(db, C) == cj,
+              "a noSale black market item: no Junk, no destroy: %r %r" % (r1, r2))
         r = await c.call(("bmr", "po"), "pbm", 1483, op())  # 1 Year Cape: account age
         check(po_text(r) == "Access Denied", "black market: account too young: %r" % (r,))
         r = await c.call(("bmr", "po"), "pbm", 1641, op())  # req disabled

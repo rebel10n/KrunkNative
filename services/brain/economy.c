@@ -31,6 +31,9 @@
 /* store.rarities[] of v7.1.4 src/data/store.js: quick sell KR and trade fee per item */
 static const int k_rarity_sell[] = {1, 3, 10, 100, 500, 2500, 10000, 10};
 static const int k_rarity_trade_fee[] = {5, 5, 5, 10, 10, 25, 200, 500};
+/* v10.0.3's store.rarities[].scrap, the Junk one quick-sold unit gives, in hundredths (doc/v10/junk.md): Contraband 5,
+ * Unobtainable 50, the others none (deob-10.0.3.js:116262-116339) */
+static const int k_rarity_scrap[] = {0, 0, 0, 0, 0, 500, 5000, 0};
 #define RARITIES ((int) (sizeof k_rarity_sell / sizeof k_rarity_sell[0]))
 
 static kn_timer_id s_timer;
@@ -272,6 +275,8 @@ static int item_matches(const MarketCtx *c, int64_t skin_id) {
 }
 
 static int64_t quick_sell_each(const SkinInfo *k);
+static int64_t quick_sell_junk(const SkinInfo *k);
+static int quick_sell_none(const SkinInfo *k);
 
 /* the socket's inventory rows (the market page): a stack keeps {i, s, c} (its sid and the NULL paint columns go); a
  * painted copy keeps its sid and gets its m (doc/v10/paint-copy.md, the same rows as GET /market/inventory) */
@@ -289,7 +294,9 @@ static void shape_inventory(cJSON *rows) {
 
 /* KrunkNative (the v10 inventory cards, v10_market.c): what the client's store table does not say
  * about an owned item, from the server's own skins file: nt = cannot be listed / traded, qs = KR
- * per quick-sold unit (0: none), nqs = noQuickSell (destroy only). */
+ * per quick-sold unit (0: none), qj = Junk per quick-sold unit in hundredths (absent: none), nqs =
+ * noQuickSell (destroy only), nqv = v10.0.3's "cannot be sold back for currency" item (neither sold
+ * nor destroyed: deob-10.0.3.js:122609-122617). */
 static void decorate_inventory(cJSON *rows) {
     cJSON *it;
     cJSON_ArrayForEach(it, rows) {
@@ -297,7 +304,10 @@ static void decorate_inventory(cJSON *rows) {
         if (!k) continue;
         if (!skin_tradable(k)) cJSON_AddNumberToObject(it, "nt", 1);
         cJSON_AddNumberToObject(it, "qs", (double) quick_sell_each(k));
+        const int64_t qj = quick_sell_junk(k);
+        if (qj > 0) cJSON_AddNumberToObject(it, "qj", (double) qj);
         if (k->no_quick_sell) cJSON_AddNumberToObject(it, "nqs", 1);
+        if (quick_sell_none(k)) cJSON_AddNumberToObject(it, "nqv", 1);
     }
 }
 
@@ -339,7 +349,7 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_AddItemToArray(fr, cJSON_CreateString(c->page));
     cJSON_AddItemToArray(fr, cJSON_CreateString(c->sub));
     if (!strcmp(c->page, "itemsales")) {
-        /* io_0 "itemsales": t = {ind, onS, inC, high, low}, r = owners [{nm, ct, su, ft}] */
+        /* io_0 "itemsales": t = {ind, onS, inC, high, low}, r = owners [{nm, ct, su, ft, cr}] */
         cJSON *owners = data ? cJSON_DetachItemFromObject(data, "owners") : NULL;
         cJSON_AddItemToArray(fr, data ? data : cJSON_CreateNull());
         cJSON_AddItemToArray(fr, owners ? owners : cJSON_CreateArray());
@@ -735,22 +745,41 @@ static int64_t quick_sell_each(const SkinInfo *k) {
         each = k->qs_kr > 0 ? k->qs_kr : k_rarity_sell[k->rarity];
         if (k->min_quick_sell && each > 0) each = 5; /* config.minQSKR */
     }
-    if (k->black_m || k->funds > 0) each = 0;
+    if (k->black_m || k->funds > 0 || k->opensea) each = 0; /* opensea: v10.0.3 sells it for nothing (deob-10.0.3.js:122609) */
+    return each;
+}
+
+/* an item v10.0.3 neither sells nor destroys: noSale && blackM, or opensea (its four can- flags are all false,
+ * deob-10.0.3.js:122609-122617; the window says "This item cannot be sold back for currency.", 147614) */
+static int quick_sell_none(const SkinInfo *k) { return (k->no_sale && k->black_m) || k->opensea; }
+
+/* Junk per quick-sold unit, in hundredths: v10.0.3's sell value's junk (deob-10.0.3.js:122619-122632): the rarity's
+ * scrap, none for noQuickSell, 0.01 for a minQuickSell item that has a scrap value. v10's per-item qsJunk override
+ * is not in assets/skins.json (no item carries one), so the rarity's scrap is the whole rule. Unlike the KR, a
+ * Black Market item keeps its Junk (v10 does: only noSale && blackM, or opensea, give nothing). */
+static int64_t quick_sell_junk(const SkinInfo *k) {
+    if (k->no_quick_sell || quick_sell_none(k) || k->rarity < 0 || k->rarity >= RARITIES) return 0;
+    int64_t each = k_rarity_scrap[k->rarity];
+    if (k->min_quick_sell && each > 0) each = 1;
     return each;
 }
 
 /* v7.1.4 ["qsi", mode (0 KR, 1 junk, 2 destroy), skin, uid, amount (0 one, 1 all but one, 2 all), {op}]
  * or the older KrunkNative ["qsi", skin, uid, amount] -> ["qsr", {i: uid, c, f, kr, j, jnk} | null].
- * KR per item: the item's qsKR, else store.rarities[r].sell (5 for minQuickSell items). Junk
- * does not exist here: mode 1 is refused. */
+ * KR per item: the item's qsKR, else store.rarities[r].sell (5 for minQuickSell items). Junk per item:
+ * quick_sell_junk (mode 1, v10.0.3's "Get Junk": quickSellItem({action: 1}), deob-10.0.3.js:147675-147679),
+ * credited to the Junk wallet (doc/v10/junk.md); j is the Junk balance after it, jnk the Junk it gave, both
+ * as Junk (v7.1.4 social.js io_qsr). An item v10 neither sells nor destroys (quick_sell_none) is refused in
+ * every mode. */
 void sh_quick_sell(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     const int v7 = frame_args(f) >= 4;
     const int64_t mode = v7 ? fa_int(f, 1, 0) : 0, id = fa_int(f, v7 ? 2 : 1, -1), uid = fa_int(f, v7 ? 3 : 2, 0);
     const int64_t sel = fa_int(f, v7 ? 4 : 3, 0);
     const SkinInfo *k = acct_skin(id);
-    const int64_t each = k ? quick_sell_each(k) : 0;
-    if (!k || (mode != 0 && mode != 2) || (mode == 0 && (k->no_quick_sell || each <= 0)) || sel < 0 || sel > 2) {
+    const int64_t each = k ? quick_sell_each(k) : 0, junk = k ? quick_sell_junk(k) : 0;
+    if (!k || mode < 0 || mode > 2 || quick_sell_none(k) || (mode == 0 && (k->no_quick_sell || each <= 0)) ||
+        (mode == 1 && junk <= 0) || sel < 0 || sel > 2) {
         social_send_n(s, "qsr", 1, cJSON_CreateNull());
         return;
     }
@@ -759,10 +788,10 @@ void sh_quick_sell(SocialSession *s, const cJSON *f) {
     /* the frame's ext carries "copy" when the sold unit is a painted copy (the official skin_id of a single sale) */
     const cJSON *cv = cJSON_GetObjectItemCaseSensitive(frame_ext(f), "copy");
     const int64_t copy = cJSON_IsNumber(cv) && cv->valuedouble >= V10_COPY_ID_BASE ? (int64_t) cv->valuedouble : 0;
-    char sk[24], md[24], am[24], kr[24], cp[24];
+    char sk[24], md[24], am[24], kr[24], cp[24], jk[24];
     social_call(s, &P_QUICK_SELL,
                 KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(sk, id), acct_itoa(md, mode), acct_itoa(am, sel),
-                           acct_itoa(kr, mode == 0 ? each : 0), acct_itoa(cp, copy)),
+                           acct_itoa(kr, mode == 0 ? each : 0), acct_itoa(cp, copy), acct_itoa(jk, mode == 1 ? junk : 0)),
                 quick_sell_done, ctx_new("qsi", uid, 0));
 }
 

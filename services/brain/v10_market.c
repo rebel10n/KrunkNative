@@ -32,7 +32,7 @@
  *     POST /market/list                economy "li": {cnt, funds, listingId, fee} (128440)
  *     POST /market/purchase            economy "pi": {f, i, sid, m, price} (132836)
  *     POST /market/unlist              economy "uli": {response} (132978)
- *     POST /market/quick-sell          economy "qsi": {funds, junk, count} (131580); mode 1 (junk) REFUSAL
+ *     POST /market/quick-sell          economy "qsi": {funds, junk, count} (131580); action 0 KR, 1 Junk, 2 destroy
  *     GET  /market/black-market        the caller's black-market purchases: [skin index] (skin_transactions) (128486)
  *     GET  /market/black-market/rank   {peak_mmr} from ranked_profiles; null for a guest or no rank (128494)
  *     POST /market/black-market/purchase  economy "pbm": {item, kr, funds} (136215)
@@ -83,7 +83,6 @@
 
 /* the refusals' reasons (the handler's ud) */
 #define WHY_ITEM_STYLE "Item style is not served over HTTP: KrunkNative keeps no per-copy style state"
-#define WHY_JUNK "Junk quick sell is not built yet (doc/v10/junk.md): quick sell mode 1 is refused"
 
 /* the day ranges of v10's sales graphs (v10.js 10075: the range index picks one) */
 static const int k_day_ranges[] = {7, 14, 21, 30, 60, 90, 120};
@@ -1517,7 +1516,7 @@ static void h_market_unlist(kn_http_req *req, void *ud) {
     route_begin(req, 1, 1, step_unlist, reply_unlist, &a, body_of(req));
 }
 
-/* ["qsi", mode, skin, uid, amount, {op}] (mode 0 KR, 2 destroy) -> ["qsr", {c, f, kr, j, jnk, sold} | null] */
+/* ["qsi", mode, skin, uid, amount, {op}] (mode 0 KR, 1 Junk, 2 destroy) -> ["qsr", {c, f, kr, j, jnk, sold} | null] */
 static void step_quick_sell(Op *op) {
     cJSON *f = social_frame("qsi");
     add_int(f, kn_json_int(op->body, "action", 0));
@@ -1541,9 +1540,11 @@ static void reply_quick_sell(Op *op) {
     }
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "funds", (double) kn_json_int(v, "f", 0));
-    cJSON_AddNumberToObject(o, "junk", 0);
+    /* v10.0.3 sets the account's junk to data.junk (deob-10.0.3.js:147686, 147736): the balance after the sale, as Junk */
+    cJSON_AddNumberToObject(o, "junk", kn_json_num(v, "j", 0));
     cJSON_AddNumberToObject(o, "count", (double) kn_json_int(v, "c", 0));
     cJSON_AddNumberToObject(o, "kr", (double) kn_json_int(v, "kr", 0));
+    cJSON_AddNumberToObject(o, "jnk", kn_json_num(v, "jnk", 0));
     cJSON_AddNumberToObject(o, "sold", (double) kn_json_int(v, "sold", 0));
     v10_reply_data(op->req, 200, o);
 }
@@ -1551,11 +1552,6 @@ static void reply_quick_sell(Op *op) {
 static void h_market_quick_sell(kn_http_req *req, void *ud) {
     (void) ud;
     cJSON *body = body_of(req);
-    if (kn_json_int(body, "action", 0) == 1) { /* junk: not built (WHY_JUNK) */
-        cJSON_Delete(body);
-        v10_reply_error(req, 403, "NOT_IMPLEMENTED", WHY_JUNK);
-        return;
-    }
     Args a;
     memset(&a, 0, sizeof a);
     route_begin(req, 1, 1, step_quick_sell, reply_quick_sell, &a, body);
