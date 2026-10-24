@@ -240,6 +240,8 @@ def main():
         a, log_a = server("A", port, ports[0], [spec], cache_a)
         check("A: the map argument is fetched from the brain", wait_for(lambda: "[maps] published map '%s' by %s fetched from the brain" % (good, account) in read(log_a), 20),
               read(log_a)[-600:])
+        fetched = re.search(r"\[maps\] published map '%s' by %s fetched from the brain \(map id (\d+)\)" % (re.escape(good), re.escape(account)), read(log_a))
+        check("A: the brain gives the map's id (meta=1: v10.0.3 customMapData.id)", fetched and int(fetched.group(1)) > 0, read(log_a)[-600:])
         check("A: plays GOOD", loaded_map(log_a) == good, str(loaded_map(log_a)))
         cached = os.path.join(cache_a, "krunknative", "published-maps", "%s~%s.json" % (account.lower(), good.lower()))
         check("A: the checked copy is cached on disk", os.path.exists(cached), cached)

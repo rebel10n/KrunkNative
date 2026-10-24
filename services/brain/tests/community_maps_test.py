@@ -207,6 +207,9 @@ async def scenario(port):
     map_id = row.get("map_id")
     by_id = urllib.request.urlopen(base + "/api/map-data?id=%s" % map_id).read()
     check(json.loads(by_id)["name"] == name, "map-data by id (%s) serves the same map" % map_id)
+    meta = json.loads(urllib.request.urlopen(base + "/api/map-data?name=%s&meta=1" % urllib.parse.quote(name)).read())
+    check(str(meta.get("id")) == str(map_id) and meta.get("map", {}).get("name") == name,
+          "map-data meta=1 wraps the map with its id (a hosting game server's customMapData.id)")
     by_creator = urllib.request.urlopen(base + "/api/map-data?name=%s&creator=%s" % (urllib.parse.quote(name), alice.upper())).read()
     check(json.loads(by_creator)["name"] == name, "map-data with its creator (any case) serves it")
     try:

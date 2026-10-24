@@ -38,6 +38,11 @@ const cJSON *published_map_load(const GsConfig *cfg, const char *name, const cha
 
 // The process's copy when published_map_load already has it (never fetches: safe on the tick).
 const cJSON *published_map_cached(const char *name, const char *creator);
+// The brain's id of a published map (v10.0.3 customMapData.id, KrunkScript player.giveSkin's map list): the latest
+// noted one, else a loaded map's; 0 when unknown (not fetched, or the disk cache's copy was played).
+int published_map_id(const char *name);
+// Notes the id a fetch outside published_map_load gave (a hosted game's map-data frame "id", accounts.c); 0 forgets it.
+void published_map_note_id(const char *name, int map_id);
 
 // The disk cache ($XDG_CACHE_HOME/krunknative/published-maps, else ~/.cache/krunknative/published-maps):
 // store writes a verified map, read returns a copy (caller frees) or NULL.

@@ -762,8 +762,7 @@ void sh_upload_files(SocialSession *s, const cJSON *f) {
 
 /* ------------------------------------------------------------------ published map data for game servers */
 
-static void map_data_done(kn_db_result *res, void *ud) {
-    kn_http_req *req = ud;
+static void map_data_respond(kn_db_result *res, kn_http_req *req, const int meta) {
     if (!kn_db_ok(res)) {
         acct_db_error(res, "map data");
         kn_http_respond_error(req, 500, "database error");
@@ -772,18 +771,37 @@ static void map_data_done(kn_db_result *res, void *ud) {
     } else {
         const char *data = kn_db_get(res, 0, 0);
         kn_http_set_header(req, "Cache-Control", "no-cache");
-        kn_http_respond(req, 200, "application/json", data, strlen(data));
+        if (!meta) {
+            kn_http_respond(req, 200, "application/json", data, strlen(data));
+            return;
+        }
+        // meta=1 (game servers hosting it): {"id": map_id, "map": <the map JSON>}, the map's id being v10.0.3's
+        // customMapData.id (KrunkScript giveSkin's map list, deob-10.0.3.js:208303)
+        const char *id = kn_db_get(res, 0, 1);
+        const size_t n = strlen(data) + 64;
+        char *out = malloc(n);
+        if (!out) {
+            kn_http_respond_error(req, 500, "internal");
+            return;
+        }
+        snprintf(out, n, "{\"id\":%lld,\"map\":%s}", id ? atoll(id) : 0LL, data);
+        kn_http_respond(req, 200, "application/json", out, strlen(out));
+        free(out);
     }
 }
 
-/* GET /api/map-data?name=<map>|id=<map_id>[&creator=<username>] (alias /api/published-map) ->
+static void map_data_done(kn_db_result *res, void *ud) { map_data_respond(res, ud, 0); }
+static void map_data_meta_done(kn_db_result *res, void *ud) { map_data_respond(res, ud, 1); }
+
+/* GET /api/map-data?name=<map>|id=<map_id>[&creator=<username>][&meta=1] (alias /api/published-map) ->
  * the published map JSON (playing / hosting community maps: the client's Play, server_bin's
  * published:<creator>/<name> maps and hosted games); 404 {"error":"not_found"}. creator= keeps
- * the map only when that account published it (case-insensitive). */
+ * the map only when that account published it (case-insensitive). meta=1 wraps it as {"id": map_id, "map": ...}. */
 static void h_map_data(kn_http_req *req, void *ud) {
     (void) ud;
-    char name[64] = "", id[24] = "", creator[64] = "";
+    char name[64] = "", id[24] = "", creator[64] = "", meta[8] = "";
     const int has_name = kn_http_query_get(req, "name", name, sizeof name) > 0;
+    const int with_meta = kn_http_query_get(req, "meta", meta, sizeof meta) > 0 && !strcmp(meta, "1");
     const int has_id = kn_http_query_get(req, "id", id, sizeof id) > 0;
     if (kn_http_query_get(req, "creator", creator, sizeof creator) < 0) creator[0] = 0;
     if (!has_name && !has_id) {
@@ -802,11 +820,11 @@ static void h_map_data(kn_http_req *req, void *ud) {
     }
 #define MAP_DATA_CREATOR " AND ($3 = '' OR EXISTS (SELECT 1 FROM accounts a WHERE a.id = m.creator_id AND lower(a.username) = lower($3)))"
     kn_db_query_sql(g_acct_brain->db,
-                SQL(.pg = "SELECT m.map_data FROM published_maps m WHERE m.deleted_at IS NULL AND "
+                SQL(.pg = "SELECT m.map_data, m.map_id FROM published_maps m WHERE m.deleted_at IS NULL AND "
                           "(($1 <> '' AND lower(m.map_name) = lower($1)) OR ($2::int > 0 AND m.map_id = $2::int))" MAP_DATA_CREATOR,
-                    .any = "SELECT m.map_data FROM published_maps m WHERE m.deleted_at IS NULL AND "
+                    .any = "SELECT m.map_data, m.map_id FROM published_maps m WHERE m.deleted_at IS NULL AND "
                            "(($1 <> '' AND lower(m.map_name) = lower($1)) OR ({int:$2} > 0 AND m.map_id = {int:$2}))" MAP_DATA_CREATOR),
-                KN_DB_ARGS(name, has_id ? id : "0", creator), map_data_done, req);
+                KN_DB_ARGS(name, has_id ? id : "0", creator), with_meta ? map_data_meta_done : map_data_done, req);
 #undef MAP_DATA_CREATOR
 }
 

@@ -1,6 +1,6 @@
 // Published maps as server maps (server/src/published_maps.c): the published:<creator>/<name> spec,
 // v10's checks, the disk cache and the fallback to it, and gameserver.maps with published entries
-// (gs_build_map_list). Linked with the standalone brain stub, so every fetch "fails" like a brain
+// (gs_build_map_list), the noted map ids. Linked with the standalone brain stub, so every fetch "fails" like a brain
 // that cannot be reached: what plays is the disk cache's copy. Run from the repository root:
 //   ./<build>/published_maps_test
 #include <published_maps.h>
@@ -108,6 +108,18 @@ static void test_cache_and_load(void) {
     free((void *) list);
 }
 
+// The brain's map_id (v10.0.3 customMapData.id, KrunkScript giveSkin's maps): a hosted game's fetch notes it
+static void test_map_ids(void) {
+    CHECK(published_map_id("Arena") == 0, "the disk cache's copy has no id");
+    CHECK(published_map_id("Nowhere") == 0 && published_map_id(NULL) == 0, "an unknown map has none");
+    published_map_note_id("Hosted Map", 158102);
+    CHECK(published_map_id("hosted map") == 158102, "a noted id (names case-insensitive)");
+    published_map_note_id("Arena", 157528);
+    CHECK(published_map_id("Arena") == 157528, "a noted id over the loaded copy's");
+    published_map_note_id("Hosted Map", 0);
+    CHECK(published_map_id("Hosted Map") == 0, "a fetch without an id forgets it");
+}
+
 int main(void) {
     char dir[256];
     snprintf(dir, sizeof(dir), "%s/kn-published-maps-test-%d", getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp", (int) getpid());
@@ -115,6 +127,7 @@ int main(void) {
     test_parse();
     test_verify();
     test_cache_and_load();
+    test_map_ids();
     char cmd[300];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
     if (system(cmd)) printf("note: could not remove %s\n", dir);

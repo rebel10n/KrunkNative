@@ -134,6 +134,7 @@ cJSON *published_map_cache_read(const char *name, const char *creator) {
 typedef struct {
     char name[96], creator[64];
     cJSON *map;
+    int map_id;              // the brain's map_id (v10.0.3 customMapData.id), 0 unknown (the disk cache's copy)
 } Loaded;
 
 static Loaded *g_loaded;
@@ -146,7 +147,7 @@ static const cJSON *loaded_find(const char *name, const char *creator) {
     return NULL;
 }
 
-static const cJSON *loaded_keep(const char *name, const char *creator, cJSON *map) {
+static const cJSON *loaded_keep(const char *name, const char *creator, cJSON *map, const int map_id) {
     Loaded *grown = realloc(g_loaded, (g_loaded_count + 1) * sizeof(*grown));
     if (!grown) {
         cJSON_Delete(map);
@@ -157,7 +158,43 @@ static const cJSON *loaded_keep(const char *name, const char *creator, cJSON *ma
     snprintf(l->name, sizeof(l->name), "%s", name);
     snprintf(l->creator, sizeof(l->creator), "%s", creator ? creator : "");
     l->map = map;
+    l->map_id = map_id;
     return map;
+}
+
+// Ids of maps the process did not keep (a hosted game's map, fetched by accounts.c through brain_fetch_map)
+typedef struct {
+    char name[96];
+    int map_id;
+} NotedId;
+
+static NotedId *g_noted;
+static size_t g_noted_count;
+
+void published_map_note_id(const char *name, const int map_id) {
+    if (!name || !*name) return;
+    for (size_t i = 0; i < g_noted_count; i++) {
+        if (!strcasecmp(g_noted[i].name, name)) {
+            if (map_id > 0) server_log("[maps] published map '%s' is map id %d", name, map_id);
+            g_noted[i].map_id = map_id;
+            return;
+        }
+    }
+    if (map_id <= 0) return;
+    server_log("[maps] published map '%s' is map id %d", name, map_id);
+    NotedId *grown = realloc(g_noted, (g_noted_count + 1) * sizeof(*grown));
+    if (!grown) return;
+    g_noted = grown;
+    snprintf(g_noted[g_noted_count].name, sizeof(g_noted[g_noted_count].name), "%s", name);
+    g_noted[g_noted_count++].map_id = map_id;
+}
+
+int published_map_id(const char *name) {
+    for (size_t i = 0; name && *name && i < g_noted_count; i++)
+        if (g_noted[i].map_id > 0 && !strcasecmp(g_noted[i].name, name)) return g_noted[i].map_id; // the latest fetch's
+    for (size_t i = 0; name && *name && i < g_loaded_count; i++)
+        if (!strcasecmp(g_loaded[i].name, name)) return g_loaded[i].map_id; // published names are unique
+    return 0;
 }
 
 const cJSON *published_map_cached(const char *name, const char *creator) {
@@ -175,7 +212,8 @@ const cJSON *published_map_load(const GsConfig *cfg, const char *name, const cha
 
     char fetch_err[160] = "";
     int missing = 0;
-    cJSON *map = brain_fetch_map_sync(cfg, name, creator, timeout_ms, &missing, fetch_err, sizeof(fetch_err));
+    int map_id = 0;
+    cJSON *map = brain_fetch_map_sync_id(cfg, name, creator, timeout_ms, &missing, &map_id, fetch_err, sizeof(fetch_err));
     if (map) {
         const char *invalid = published_map_verify(map);
         if (invalid) {
@@ -186,8 +224,9 @@ const cJSON *published_map_load(const GsConfig *cfg, const char *name, const cha
             return NULL;
         }
         published_map_cache_store(name, creator, map);
-        server_log("[maps] published map '%s'%s%s fetched from the brain", name, creator && creator[0] ? " by " : "", creator ? creator : "");
-        return loaded_keep(name, creator, map);
+        server_log("[maps] published map '%s'%s%s fetched from the brain (map id %d)", name, creator && creator[0] ? " by " : "", creator ? creator : "",
+                   map_id);
+        return loaded_keep(name, creator, map, map_id);
     }
     // the brain could not answer (down, unreachable, no brain configured): the cached copy (it
     // passed the checks when stored). A brain that answered "not found" (deleted, another
@@ -196,7 +235,7 @@ const cJSON *published_map_load(const GsConfig *cfg, const char *name, const cha
     const char *cache_invalid = map ? published_map_verify(map) : NULL;
     if (map && !cache_invalid) {
         server_log_error("[maps] published map '%s': %s; playing the cached copy", name, fetch_err[0] ? fetch_err : "fetch failed");
-        return loaded_keep(name, creator, map);
+        return loaded_keep(name, creator, map, 0);
     }
     cJSON_Delete(map);
     server_log_error("[maps] published map '%s'%s%s unavailable: %s (%s%s)", name, creator && creator[0] ? " by " : "",

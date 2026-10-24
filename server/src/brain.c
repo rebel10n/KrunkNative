@@ -413,10 +413,10 @@ void brain_stop(const int wait_ms) {
 
 
 // ------------------------------------------------------------------ published map fetch
-// GET <brain http>/api/map-data?name=<name> (svc-accounts, doc/backend.md 8.7) on its own
+// GET <brain http>/api/map-data?name=<name>&meta=1 (svc-accounts, doc/backend.md 8.7) on its own
 // thread: plain HTTP/1.1 (TLS is nginx's job), Content-Length or close-delimited body.
 // The result arrives on the main thread as a BRAIN_EV_FRAME
-// {"type":"map-data","rid":n,"ok":bool,"map":{...},"err":"..."}.
+// {"type":"map-data","rid":n,"ok":bool,"map":{...},"id":map_id,"err":"..."} ("id" when the brain gave one).
 
 #include <http_client.h>
 #include <netdb.h>
@@ -449,12 +449,26 @@ static void brain_url_encode(char *out, const size_t size, const char *in) {
     out[n] = 0;
 }
 
-static void brain_fetch_done(const uint32_t rid, cJSON *map, const char *err) {
+// map-data's meta=1 answer {"id": map_id, "map": {...}} (services/brain/creations.c): the map, its id in *map_id (v10.0.3
+// customMapData.id). A brain without meta=1 answers the bare map: kept as it is, id 0.
+static cJSON *brain_map_unwrap(cJSON *body, int *map_id) {
+    if (map_id) *map_id = 0;
+    const cJSON *id = cJSON_GetObjectItem(body, "id");
+    if (!cJSON_IsObject(body) || cJSON_GetArraySize(body) != 2 || !cJSON_IsNumber(id) || !cJSON_IsObject(cJSON_GetObjectItem(body, "map")))
+        return body;
+    if (map_id) *map_id = id->valueint;
+    cJSON *map = cJSON_DetachItemFromObject(body, "map");
+    cJSON_Delete(body);
+    return map;
+}
+
+static void brain_fetch_done(const uint32_t rid, cJSON *map, const int map_id, const char *err) {
     cJSON *frame = cJSON_CreateObject();
     cJSON_AddStringToObject(frame, "type", "map-data");
     cJSON_AddNumberToObject(frame, "rid", rid);
     cJSON_AddBoolToObject(frame, "ok", map != NULL);
     if (map) cJSON_AddItemToObject(frame, "map", map);
+    if (map && map_id > 0) cJSON_AddNumberToObject(frame, "id", map_id); // the published map's id (published_map_note_id)
     else cJSON_AddStringToObject(frame, "err", err ? err : "fetch failed");
     brain_push_event(BRAIN_EV_FRAME, frame);
 }
@@ -509,6 +523,7 @@ static void *brain_fetch_thread(void *arg) {
     if (fd >= 0) close(fd);
 
     cJSON *map = NULL;
+    int map_id = 0;
     if (!err) {
         const char *body = buf ? strstr(buf, "\r\n\r\n") : NULL;
         int status = 0;
@@ -517,7 +532,7 @@ static void *brain_fetch_thread(void *arg) {
         else if (status != 200) err = "map service error";
         else if (strstr(buf, "Transfer-Encoding: chunked") && strstr(buf, "Transfer-Encoding: chunked") < body) err = "chunked responses are not supported";
         else {
-            map = cJSON_Parse(body + 4);
+            map = brain_map_unwrap(cJSON_Parse(body + 4), &map_id);
             if (!cJSON_IsObject(map) || !cJSON_IsArray(cJSON_GetObjectItem(map, "objects"))) {
                 cJSON_Delete(map);
                 map = NULL;
@@ -526,7 +541,7 @@ static void *brain_fetch_thread(void *arg) {
         }
     }
     free(buf);
-    brain_fetch_done(f->rid, map, err);
+    brain_fetch_done(f->rid, map, map_id, err);
     free(f);
     return NULL;
 }
@@ -554,12 +569,13 @@ static void *brain_fetch_https_thread(void *arg) {
     BrainFetchHttps *f = arg;
     HttpResult res;
     cJSON *map = NULL;
+    int map_id = 0;
     const char *err = NULL;
     if (http_request("GET", f->url, NULL, NULL, 10000, BRAIN_MAP_FETCH_MAX, &res) != 0) err = res.error[0] ? res.error : "cannot reach the brain";
     else if (res.status == 404) err = "map not found";
     else if (res.status != 200) err = "map service error";
     else {
-        map = res.body ? cJSON_Parse(res.body) : NULL;
+        map = brain_map_unwrap(res.body ? cJSON_Parse(res.body) : NULL, &map_id);
         if (!cJSON_IsObject(map) || !cJSON_IsArray(cJSON_GetObjectItem(map, "objects"))) {
             cJSON_Delete(map);
             map = NULL;
@@ -569,7 +585,7 @@ static void *brain_fetch_https_thread(void *arg) {
     char err_copy[128];
     snprintf(err_copy, sizeof(err_copy), "%s", err ? err : "");
     http_result_free(&res);
-    brain_fetch_done(f->rid, map, err ? err_copy : NULL);
+    brain_fetch_done(f->rid, map, map_id, err ? err_copy : NULL);
     free(f);
     return NULL;
 }
@@ -583,7 +599,7 @@ int brain_fetch_map(const uint32_t rid, const char *name, const char *creator) {
         char encoded[256], enc_creator[192];
         brain_url_encode(encoded, sizeof(encoded), name);
         brain_url_encode(enc_creator, sizeof(enc_creator), creator ? creator : "");
-        snprintf(f->url, sizeof(f->url), "%s/api/map-data?name=%s%s%s", g_http_base, encoded, enc_creator[0] ? "&creator=" : "", enc_creator);
+        snprintf(f->url, sizeof(f->url), "%s/api/map-data?name=%s%s%s&meta=1", g_http_base, encoded, enc_creator[0] ? "&creator=" : "", enc_creator);
         server_log("[brain] fetching published map '%s' from %s", name, g_http_base);
         pthread_t thread;
         if (pthread_create(&thread, NULL, brain_fetch_https_thread, f)) {
@@ -609,7 +625,7 @@ int brain_fetch_map(const uint32_t rid, const char *name, const char *creator) {
     char encoded[256], enc_creator[192];
     brain_url_encode(encoded, sizeof(encoded), name);
     brain_url_encode(enc_creator, sizeof(enc_creator), creator ? creator : "");
-    snprintf(f->path, sizeof(f->path), "%s/api/map-data?name=%s%s%s", prefix ? prefix : "", encoded, enc_creator[0] ? "&creator=" : "", enc_creator);
+    snprintf(f->path, sizeof(f->path), "%s/api/map-data?name=%s%s%s&meta=1", prefix ? prefix : "", encoded, enc_creator[0] ? "&creator=" : "", enc_creator);
 
     server_log("[brain] fetching published map '%s' from %s", name, g_http_base);
     pthread_t thread;
@@ -638,7 +654,13 @@ static int brain_http_base_of(const GsConfig *cfg, char *out, const size_t size)
 
 cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *creator, const int timeout_ms, int *missing,
                             char *err, const size_t err_size) {
+    return brain_fetch_map_sync_id(cfg, name, creator, timeout_ms, missing, NULL, err, err_size);
+}
+
+cJSON *brain_fetch_map_sync_id(const GsConfig *cfg, const char *name, const char *creator, const int timeout_ms, int *missing,
+                               int *map_id, char *err, const size_t err_size) {
     if (missing) *missing = 0;
+    if (map_id) *map_id = 0;
     char base[GS_STR_LARGE];
     if (!brain_http_base_of(cfg, base, sizeof(base))) {
         snprintf(err, err_size, "no brain configured (gameserver.brain_url or brain_http_url)");
@@ -647,7 +669,8 @@ cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *c
     char enc_name[256], enc_creator[192], url[GS_STR_LARGE + 512];
     brain_url_encode(enc_name, sizeof(enc_name), name);
     brain_url_encode(enc_creator, sizeof(enc_creator), creator ? creator : "");
-    snprintf(url, sizeof(url), "%s/api/map-data?name=%s%s%s", base, enc_name, enc_creator[0] ? "&creator=" : "", enc_creator);
+    snprintf(url, sizeof(url), "%s/api/map-data?name=%s%s%s%s", base, enc_name, enc_creator[0] ? "&creator=" : "", enc_creator,
+             map_id ? "&meta=1" : "");
     server_log("[maps] fetching published map '%s' from %s", name, base);
     HttpResult res;
     cJSON *map = NULL;
@@ -660,6 +683,7 @@ cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *c
         snprintf(err, err_size, "map service error (HTTP %d)", res.status);
     } else {
         map = res.body ? cJSON_Parse(res.body) : NULL;
+        if (map_id) map = brain_map_unwrap(map, map_id); // meta=1: {id, map}
         if (!cJSON_IsObject(map)) {
             cJSON_Delete(map);
             map = NULL;
@@ -700,6 +724,11 @@ cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *c
     if (missing) *missing = 0;
     snprintf(err, err_size, "no brain link in this build");
     return NULL;
+}
+cJSON *brain_fetch_map_sync_id(const GsConfig *cfg, const char *name, const char *creator, const int timeout_ms, int *missing,
+                               int *map_id, char *err, const size_t err_size) {
+    if (map_id) *map_id = 0;
+    return brain_fetch_map_sync(cfg, name, creator, timeout_ms, missing, err, err_size);
 }
 
 int brain_start(const GsConfig *cfg) {
