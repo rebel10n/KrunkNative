@@ -4,14 +4,17 @@
 // JSON (an entity's state, a block's data) travel as JSON text (NetExtJsonChunk slices, net_ext.h).
 // Line numbers: ~/.cache/kn-official/game.deob.js (10.0.3; v10.0.2 has the same entity system).
 //
+// "pz" PLAYER_POSE [sid, pose | 0] (players.setPose deob-10.0.3.js:195354) and init's syncData.plrPose
+// [[sid, pose], ...] (:256989-256993) become NET_EXT_PLAYER_POSE (player_pose_render.c applies them).
+//
 // Not translated (documented gaps):
-//   - "pz" PLAYER_POSE (players.setPose :172087): seat / skeletal poses of a player model; our player
-//     meshes have no pose layer.
 //   - "ee" ENTITY_EVENT is forwarded, but its only consumer in v10 is the map's client / shared
 //     KrunkScript (clientEventQueue -> onEntityEvent hooks), which our client does not run.
 #include "krunker_link_internal.h"
 #include <net_ext.h>
+#include <player_pose.h>
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 static const KrunkerValue *arg(const KrunkerFrame *f, const uint32_t i) { return krunker_frame_arg(f, i); }
@@ -65,6 +68,59 @@ static void emit_moved(KrunkerLink *l, const KrunkerValue *uid, const KrunkerVal
     if (len) krunker_link_emit(l, NET_PACKET_EXT, ext, len);
 }
 
+// The official pose (the server's sanitizePose output, :220978-221034) as a NetPlayerPosePacket; the same
+// limits are applied again (the client's setPose takes the object as it is, a struct cannot)
+static void emit_pose(KrunkerLink *l, const KrunkerValue *sid, const KrunkerValue *pose) {
+    if (!krunker_is(sid, KRUNKER_NUM)) return;
+    NetPlayerPosePacket p;
+    memset(&p, 0, sizeof(p));
+    p.uid = (int32_t) sid->u.num;
+    if (krunker_is(pose, KRUNKER_MAP)) { // pose || 0: anything else clears it
+        const KrunkerValue *v;
+        if ((v = krunker_get(pose, "legs")) && !krunker_is(v, KRUNKER_NIL)) {
+            const double legs = floor(krunker_num(v, 0) + 0.5);
+            p.legs = (uint8_t) (legs < 0 ? 0 : legs > 2 ? 2 : legs);
+            p.has |= PLAYER_POSE_LEGS;
+        }
+        static const struct { const char *key; int bit; size_t offset; } flags[] = {
+            {"weapon", PLAYER_POSE_WEAPON, offsetof(NetPlayerPosePacket, weapon)},
+            {"bob", PLAYER_POSE_BOB, offsetof(NetPlayerPosePacket, bob)},
+            {"faceRide", PLAYER_POSE_FACE_RIDE, offsetof(NetPlayerPosePacket, face_ride)},
+            {"hold", PLAYER_POSE_HOLD, offsetof(NetPlayerPosePacket, hold)},
+            {"holdL", PLAYER_POSE_HOLD_L, offsetof(NetPlayerPosePacket, hold_l)},
+        };
+        for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++) {
+            if (!(v = krunker_get(pose, flags[i].key)) || krunker_is(v, KRUNKER_NIL)) continue;
+            *((uint8_t *) &p + flags[i].offset) = (uint8_t) (krunker_num(v, krunker_is(v, KRUNKER_STR) ? 1 : 0) != 0);
+            p.has |= (uint16_t) flags[i].bit;
+        }
+        static const struct { const char *key; int bit; float max; size_t offset; } numbers[] = {
+            {"legX", PLAYER_POSE_LEG_X, PLAYER_POSE_LEG_X_MAX, offsetof(NetPlayerPosePacket, leg_x)},
+            {"bodyY", PLAYER_POSE_BODY_Y, PLAYER_POSE_BODY_Y_MAX, offsetof(NetPlayerPosePacket, body_y)},
+            {"torsoX", PLAYER_POSE_TORSO_X, PLAYER_POSE_TORSO_X_MAX, offsetof(NetPlayerPosePacket, torso_x)},
+        };
+        for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); i++) {
+            float value;
+            if (!krunker_is(v = krunker_get(pose, numbers[i].key), KRUNKER_NUM) || !player_pose_clamp(v->u.num, numbers[i].max, &value)) continue;
+            memcpy((uint8_t *) &p + numbers[i].offset, &value, sizeof(value));
+            p.has |= (uint16_t) numbers[i].bit;
+        }
+        for (int side = 0; side < 2; side++) {
+            const KrunkerValue *arm = krunker_get(pose, side ? "armR" : "armL");
+            if (!krunker_is(arm, KRUNKER_ARRAY)) continue;
+            float *dst = side ? p.arm_r : p.arm_l;
+            for (uint32_t i = 0; i < 3; i++) {
+                const KrunkerValue *a = krunker_at(arm, i);
+                if (!krunker_is(a, KRUNKER_NUM) || !player_pose_clamp(a->u.num, PLAYER_POSE_ARM_MAX, &dst[i])) dst[i] = 0.0f;
+            }
+            p.has |= side ? PLAYER_POSE_ARM_R : PLAYER_POSE_ARM_L;
+        }
+    }
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(p)];
+    const uint16_t len = net_ext_pack(ext, sizeof(ext), NET_EXT_PLAYER_POSE, &p, sizeof(p));
+    if (len) krunker_link_emit(l, NET_PACKET_EXT, ext, len);
+}
+
 int krunker_link_script_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFrame *f) {
     switch (id) {
         case KRUNKER_S2C_ENTITY_SPAWN: // entities.applySpawn(payload) (:222400)
@@ -94,6 +150,9 @@ int krunker_link_script_frame(KrunkerLink *l, const KrunkerS2C id, const Krunker
         case KRUNKER_S2C_OBJECT_MOVED:
             emit_moved(l, arg(f, 0), arg(f, 1), arg(f, 2), arg(f, 3));
             return 1;
+        case KRUNKER_S2C_PLAYER_POSE: // players.setPose(sid, pose) (:261743, :261943)
+            emit_pose(l, arg(f, 0), arg(f, 1));
+            return 1;
         case KRUNKER_S2C_PLAYER_LOCKS: { // you.disableShooting = !!a, disableMelee = !!b (:220492)
             const NetPlayerLocksPacket p = {(uint8_t) (krunker_num(arg(f, 0), 0) != 0 || (krunker_is(arg(f, 0), KRUNKER_BOOL) && arg(f, 0)->u.boolean)),
                                             (uint8_t) (krunker_num(arg(f, 1), 0) != 0 || (krunker_is(arg(f, 1), KRUNKER_BOOL) && arg(f, 1)->u.boolean))};
@@ -115,6 +174,11 @@ void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f) {
     emit_each(l, NET_EXT_KN_OFFICIAL_LIVE_OBJECT, krunker_get(sync, "lo"));
     emit_each(l, NET_EXT_ENTITY_SPAWN, krunker_get(sync, "ent"));
     emit_each(l, NET_EXT_ENTITY_ATTACH, krunker_get(sync, "entAtt"));
+    const KrunkerValue *poses = krunker_get(sync, "plrPose"); // [[sid, poseData], ...] (:220294-220302)
+    for (uint32_t i = 0; krunker_is(poses, KRUNKER_ARRAY) && i < poses->len; i++) {
+        const KrunkerValue *e = krunker_at(poses, i);
+        if (krunker_is(e, KRUNKER_ARRAY)) emit_pose(l, krunker_at(e, 0), krunker_at(e, 1));
+    }
     const KrunkerValue *chg = krunker_get(sync, "chg");
     for (uint32_t i = 0; krunker_is(chg, KRUNKER_ARRAY) && i < chg->len; i++) {
         const KrunkerValue *c = krunker_at(chg, i);
