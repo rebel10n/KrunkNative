@@ -205,7 +205,9 @@ def assets_dir():
 
 def run_client(name, director_url, finder_url, timeout, assets):
     """client_bin as Krunker Strike, headless, an input script with a time limit; the director (and
-    the finder) from the environment, no account service (mode offline: no prod contact)."""
+    the finder) from the environment, no account service (mode offline: no prod contact). At debug
+    level 2 (KRUNKNATIVE_DEBUG, doc/console.md): the checks read the "[strike] director allocated"
+    (level 1) and "[strike] finder pool" (level 2) lines."""
     cfg = os.path.join(WORK, f"{name}-cfg")
     os.makedirs(cfg, exist_ok=True)
     script = os.path.join(WORK, f"{name}.script")
@@ -217,7 +219,7 @@ def run_client(name, director_url, finder_url, timeout, assets):
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
                 "KRUNKNATIVE_ASSETS_DIR": assets, "KN_FLAVOR": "strike", "KRUNKNATIVE_MODE": "offline",
-                "KRUNKNATIVE_STRIKE_DIRECTOR": director_url, "KRUNKNATIVE_FINDER_URL": finder_url})
+                "KRUNKNATIVE_STRIKE_DIRECTOR": director_url, "KRUNKNATIVE_FINDER_URL": finder_url, "KRUNKNATIVE_DEBUG": "2"})
     log = os.path.join(WORK, f"{name}.log")
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", CLIENT], stdout=out, stderr=subprocess.STDOUT,

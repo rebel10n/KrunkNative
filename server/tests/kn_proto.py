@@ -112,7 +112,7 @@ def spawn_info(payload):
     if len(payload) < struct.calcsize(fmt):
         return None
     v = struct.unpack(fmt, payload[: struct.calcsize(fmt)])
-    return {"uid": v[0], "is_you": v[1], "name": uncstr(v[12]), "cosmetics": list(v[14:21])}
+    return {"uid": v[0], "is_you": v[1], "active": v[2], "name": uncstr(v[12]), "cosmetics": list(v[14:21])}
 
 
 def skins_of(conn, uid):

@@ -176,7 +176,9 @@ def start_node(brain_port, node_id, port, mode, map_name):
 
 
 def connect(rep):
-    """JOIN with a seek reply's ticket; (conn, spawned, error)"""
+    """JOIN with a seek reply's ticket; (conn, spawned, error). Spawned is the joiner's active SPAWN
+    after its ENT: the dead own SPAWN (active 0) that comes with the HELLO, before the ticket is
+    checked (the official join's waiting state, server/src/net.c net_send_join_spawn), is not one."""
     c = kn_proto.Conn("127.0.0.1", int(rep["port"]))
     c.hello()
     c.join(client_key=rep.get("clientId", ""), game_id=rep.get("gameId", ""))
@@ -188,7 +190,7 @@ def connect(rep):
             if t == kn_proto.ERROR:
                 return c, False, kn_proto.error_info(data)
             sp = kn_proto.spawn_info(data) if t == kn_proto.SPAWN else None
-            if sp and sp["is_you"]:
+            if sp and sp["is_you"] and sp["active"]:
                 return c, True, None
         seen = len(c.packets)
     return c, False, None
@@ -276,7 +278,10 @@ def client(name, brain_port, script, relaunch_script=None, cfg=None, extra_env=N
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % STUB_PORT,
-                "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
+                "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io",
+                # the checks read level-1/2 lines ([mm] joining, [controls] F4, [party] ...: doc/console.md);
+                # make mm-token-e2e exports it too (E2E_DEBUG_TARGETS), ctest's brain_mm_token_e2e does not
+                "KRUNKNATIVE_DEBUG": "2"})
     if relaunch_script:
         rpath = os.path.join(WORK, name + "-relaunch.script")
         with open(rpath, "w") as f:
@@ -444,7 +449,10 @@ def client_list_all(port):
 
 def client_official(port, ny):
     """The browser opt-out (KRUNKNATIVE_KRUNKER_JOIN=browser): official lobbies open on krunker.io.
-    The default, in-client, is client_both's and krunker_official_e2e.py's."""
+    The default, in-client, is client_both's and krunker_official_e2e.py's. The seek's region is New
+    York's (KRUNKNATIVE_KRUNKER_REGION, v10's __REGION__): v10.0.3's matchmakerSeek sends one region
+    (deob-10.0.3.js:164880-164902) and F4 picks in it only (krunker_lobbies_pick); the stub has no
+    /ping-list, so the race would fall back to de-fra, where no lobby plays tdm on Sandstorm."""
     hits = len(stub_hits)
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
@@ -453,7 +461,7 @@ def client_official(port, ny):
                     "6500 nodes @rows .kioRow\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n"
                     "6700 call quickJoinRegion %d\n7500 quit\n" % (MODES["b"], SANDSTORM, ny, ny, ny),
-                    extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser"})
+                    extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser", "KRUNKNATIVE_KRUNKER_REGION": "us-nj"})
     finish(p, 60)
     text = read_log(log)
     check("C4: opt-out: F4 with Official opens the matching official lobby in the browser",
@@ -461,7 +469,7 @@ def client_official(port, ny):
           and "open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb" in text, text[-600:])
     check("C4: ... and stays in its KrunkNative game (no new seek)", len(joined(text)) == 1, str(joined(text)))
     check("C4: the Servers window's krunker.io servers line says they open in the browser",
-          re.search(r"@status n=1 .*text=.*KRUNKER\.IO OFFICIAL LOBBIES\s*krunker\.io servers open in your browser", text),
+          re.search(r"@status n=1 .*text=krunker\.io servers open in your browser", text),  # no label (1cf1c0b5c)
           "")
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
     check("C4: the server type only steers the seek: the krunker.io tab is not narrowed (NY's group is found)", ny >= 0, str(ny))
@@ -546,8 +554,9 @@ def client_hoist(port):
 
 
 def client_both(port):
+    # the seek's region is Tokyo's, the lobby's (one region per seek: client_official)
     p, log = client("both", port, '0 play\n300 call setSetting "knSeekServers" "both"\n400 call setSetting "seek_modes" "%d"\n'
-                    "1000 down F4\n1050 up F4\n5000 quit\n" % MODES["kio"])
+                    "1000 down F4\n1050 up F4\n5000 quit\n" % MODES["kio"], extra_env={"KRUNKNATIVE_KRUNKER_REGION": "jb-hnd"})
     finish(p, 60)
     text = read_log(log)
     check("C5: Both: no KrunkNative server plays it -> the official lobby, joined in-client (the default)",
