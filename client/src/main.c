@@ -36,6 +36,7 @@
 #include <shadow.h>
 #include <nav_overlay.h>
 #include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
+#include <env_map.h> // v10.0.3 GLB reflections: getEnvMap (env_map.c)
 #include <ocean.h>
 #include <zombies_render.h> // map-logic WP-H in-world (zombies_render.c)
 #include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
@@ -58,6 +59,7 @@
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
 #include <menu_view.h> // the world behind the menu: menu/death cameras, end slow motion (menu_view.c)
 #include <spectate.h> // Krunker spectating (window.Bf5): cameras, controls, #spectateUI (spectate.c, ui/hud_spectate.c)
+#include <stalker_client.h> // v10 Stalker: the hidden stalker out of the world pass (stalker_render.c)
 #include <hud_map.h>  // WP-E part 2a: minimap + death markers
 #include <gamepad.h> // game controllers: v3.1.1 gamepad.js + the controller half of CONTROLS (gamepad.c)
 #include <ui_mobile.h> // Krunker's #mobileUI touch controls (ui/ui_mobile.c)
@@ -163,8 +165,28 @@ static vec4 json_color_or(const cJSON *json, const vec4 fallback) {
     return fallback;
 }
 
-static float json_float_or(const cJSON *json, const float fallback) {
-    return cJSON_IsNumber(json) ? (float) cJSON_GetNumberValue(json) : fallback;
+// JS `(value ?? fallback)` used as a number (sceneInit's `(map.lightI ?? 1.3) * PI`): undefined / null give the
+// fallback, a number itself, a string Number(string) ("" 0, not numeric NaN), true 1, false 0, anything else NaN.
+static float json_js_number_or(const cJSON *json, const float fallback) {
+    if (!json || cJSON_IsNull(json)) return fallback;
+    if (cJSON_IsNumber(json)) return (float) cJSON_GetNumberValue(json);
+    if (cJSON_IsBool(json)) return cJSON_IsTrue(json) ? 1.0f : 0.0f;
+    if (cJSON_IsString(json)) {
+        const char *text = cJSON_GetStringValue(json);
+        while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+        if (!*text) return 0.0f;
+        char *end = NULL;
+        const float value = strtof(text, &end);
+        while (end && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end++;
+        return end && end != text && !*end ? value : NAN;
+    }
+    return NAN;
+}
+
+// json_js_number_or for a light's intensity or angle: NaN (a non-numeric string) is 0, no NaN light
+static float json_js_finite_or(const cJSON *json, const float fallback) {
+    const float value = json_js_number_or(json, fallback);
+    return isfinite(value) ? value : 0.0f;
 }
 
 static int json_truthy(const cJSON *json) {
@@ -174,15 +196,20 @@ static int json_truthy(const cJSON *json) {
     return 1;
 }
 
-// Krunker v3.1.1 render.js initScene(map, mode); the mode's ambCol / lightCol / fogC /
-// fogD / skyCol win over the map's (Stalker), and skyCol also drops the sky dome:
-//   if (map.ambient) AmbientLight(map.ambient, map.ambientI ?? config.ambIntensity (1))
-//   if (map.light)   DirectionalLight(map.light, map.lightI ?? config.lightIntensity (1.3)),
-//                    position = lightD (500) * (cos v, sin v sin u, sin v cos u),
-//                    u = PI * (sunAngY ?? 54) / -180, v = PI * (sunAngX ?? 90) / -180
-//   scene.fog = new THREE.Fog(map.fog, 1, map.fogD)  (linear smoothstep on view-space depth)
-//   renderer.setClearColor(map.sky)
-// A missing light/ambient means no such light at all (intensity 0), not a default.
+// Krunker v10.0.3 render sceneInit(map, mode) (deob-10.0.3.js:234561-234634, the same rules as
+// v3.1.1 / v7.1.4 initScene); the mode's ambCol / lightCol / fogC / fogD / skyCol win over the map's
+// (Stalker), and skyCol also drops the sky dome:
+//   if (mode.ambCol != null || map.ambient) AmbientLight(ambCol ?? map.ambient, (map.ambientI ?? 1) * PI)
+//   if (mode.lightCol != null || map.light) DirectionalLight(lightCol ?? map.light, (map.lightI ?? 1.3) * PI),
+//       position = (map.lightD ?? 500) * (cos v, sin v sin u, sin v cos u) (500: deob:21136),
+//       u = PI * (sunAngY ?? 54) / -180, v = PI * (sunAngX ?? 90) / -180; shadow mapSize
+//       highResShad ? 4096 : shadowR || 1024, camera.far shadowD || 1200 (deob:21134-21135), bias
+//       -0.0004, normalBias shadowNB (shadow.c)
+//   scene.fog = new THREE.Fog(fogC ?? map.fog, 1, fogD ?? map.fogD)  (smoothstep(1, far, view depth))
+//   renderer.setClearColor(skyCol ?? map.sky)
+// The x PI is Ruleset.light_unit_factor (basic.c). A missing light/ambient means no such light at all
+// (intensity 0), not a default; the ENVIRONMENT_ZONE defaults are MapManager.addEnvironmentZone's
+// (shared/src/map.c), and leaving a zone keeps its lights where the map has none (map_environment.c).
 static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
     if (!map || !map->raw_data) return;
 
@@ -195,25 +222,29 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
     const cJSON *fog_far = cJSON_GetObjectItem(raw, "fogD");
 
     g_render_lighting.ambient_color = json_truthy(ambient) ? json_color_or(ambient, black) : black;
-    g_render_lighting.ambient_intensity = json_truthy(ambient) ? json_float_or(cJSON_GetObjectItem(raw, "ambientI"), 1.0f) : 0.0f;
+    g_render_lighting.ambient_intensity = json_truthy(ambient) ? json_js_finite_or(cJSON_GetObjectItem(raw, "ambientI"), 1.0f) : 0.0f;
     g_render_lighting.light_color = json_truthy(light) ? json_color_or(light, black) : black;
-    g_render_lighting.light_intensity = json_truthy(light) ? json_float_or(cJSON_GetObjectItem(raw, "lightI"), 1.3f) : 0.0f;
+    g_render_lighting.light_intensity = json_truthy(light) ? json_js_finite_or(cJSON_GetObjectItem(raw, "lightI"), 1.3f) : 0.0f;
 
     // setClearColor(undefined) keeps the previous colour.
     g_render_lighting.sky_color = json_color_or(cJSON_GetObjectItem(raw, "sky"), g_render_lighting.sky_color);
     // new THREE.Color(undefined) is white.
     g_render_lighting.fog_color = json_color_or(cJSON_GetObjectItem(raw, "fog"), white);
     g_render_lighting.fog_near = 1.0f;
-    g_render_lighting.fog_far = json_float_or(fog_far, 0.0f);
+    // Fog.far = map.fogD as given (a numeric string works as a number; undefined uploads NaN, null 0)
+    const float fog_far_value = json_js_number_or(fog_far, NAN);
+    g_render_lighting.fog_far = isfinite(fog_far_value) ? fog_far_value : 0.0f;
     // settings "lighting" (restart): 0 = Low swaps map materials for MeshBasicMaterial (unlit,
-    // still fogged); 1 = Normal (Lambert, default); 2 = High (Phong + point lights) is not
-    // ported and renders as Normal.
+    // still fogged); 1 = Normal (Lambert, default); 2 = High (Phong: Blinn-Phong specular, map
+    // point / spot lights); 3 = Physical (GGX, rect-area lights too). basic.frag krunker_direct
+    // (lighting_mode 2 / 3) and basic.c basic_upload_lights draw 2 and 3.
     g_render_lighting.enabled = client_render_settings()->lighting != 0;
-    // Without fogD three.js would upload an undefined fogFar; treat it as no fog.
-    g_render_lighting.fog_enabled = cJSON_IsNumber(fog_far) && g_render_lighting.fog_far > g_render_lighting.fog_near;
+    // Without fogD the fog's far is undefined: smoothstep(1, NaN, depth) is 0 on the GPUs v10 runs on (WGSL / GLSL
+    // clamp of NaN), so no fog; a far at or under the near (1) fogs nothing past the near either.
+    g_render_lighting.fog_enabled = isfinite(fog_far_value) && g_render_lighting.fog_far > g_render_lighting.fog_near;
 
-    const float sun_y = json_float_or(cJSON_GetObjectItem(raw, "sunAngY"), 54.0f);
-    const float sun_x = json_float_or(cJSON_GetObjectItem(raw, "sunAngX"), 90.0f);
+    const float sun_y = json_js_finite_or(cJSON_GetObjectItem(raw, "sunAngY"), 54.0f);
+    const float sun_x = json_js_finite_or(cJSON_GetObjectItem(raw, "sunAngX"), 90.0f);
     const float u = (float) M_PI * (sun_y / -180.0f);
     const float v = (float) M_PI * (sun_x / -180.0f);
 
@@ -238,11 +269,11 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
     const GameModeConfig *mode_config = mode ? &mode->config : NULL;
     if (mode_config && mode_config->has_amb_col) {
         g_render_lighting.ambient_color = hex_to_vec(mode_config->amb_col);
-        if (!json_truthy(ambient)) g_render_lighting.ambient_intensity = json_float_or(cJSON_GetObjectItem(raw, "ambientI"), 1.0f);
+        if (!json_truthy(ambient)) g_render_lighting.ambient_intensity = json_js_finite_or(cJSON_GetObjectItem(raw, "ambientI"), 1.0f);
     }
     if (mode_config && mode_config->has_light_col) {
         g_render_lighting.light_color = hex_to_vec(mode_config->light_col);
-        if (!json_truthy(light)) g_render_lighting.light_intensity = json_float_or(cJSON_GetObjectItem(raw, "lightI"), 1.3f);
+        if (!json_truthy(light)) g_render_lighting.light_intensity = json_js_finite_or(cJSON_GetObjectItem(raw, "lightI"), 1.3f);
     }
     if (mode_config && mode_config->has_fog_col) g_render_lighting.fog_color = hex_to_vec(mode_config->fog_col);
     if (mode_config && mode_config->has_fog_dist) {
@@ -254,7 +285,7 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
 
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
     sky_load(mode_sky ? NULL : raw); // renderer.init: no sky dome when the mode sets skyCol
-    map_environment_map_loaded(map, mode); // v7 toneMapping / outputEncoding / correctLights, ocean, zone -1 (map_environment.c)
+    map_environment_map_loaded(map, mode); // toneMapping / exposure, physical lights, ocean, zone -1, getEnvMap (map_environment.c)
 }
 
 // CONTROLS.skipScroll (index.js b9): an input frame that carried a wheel step swallows the
@@ -1126,6 +1157,7 @@ int main(int argc, char **argv) {
     om_build_fini();    // the Object Manager overlay's GL buffers (om_gizmo.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
+    env_map_fini(); // GLB reflections' getEnvMap table and DFG LUT (env_map.c)
     render_target_fini();
     frame_target_fini();
     html_ui_fini();
@@ -1402,6 +1434,11 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
 
     player->interpolate = 0; // players.js forcePos(): the first state after a spawn snaps
     player->force_pos = 1;
+    // players.add: the player's init clears latestData (deob-10.0.3.js:190610) and the "0" handler hides every other
+    // player until a "k" has it (:258188-258189). Only with a server that marks its syncs (NET_EXT_PLAYER_SYNC): without
+    // the marker nothing would hide it again, so nothing hides it at all.
+    player->sync_seen = 0;
+    player->sync_hidden = (unsigned char) (client->net_player_sync && !packet->is_you);
     client_player_spawned(client, player, packet->is_you);
 }
 
@@ -1413,6 +1450,28 @@ void client_force_player_positions(Client *client) {
     for (size_t i = 0; i < client->game.player_count; i++) {
         Player *player = client->game.players[i];
         if (player && player != client->me) player->force_pos = 1;
+    }
+}
+
+// players.hideAll() (deob-10.0.3.js:194883-194894), the first thing v10's "k" handler does (:258582): every active
+// player gets forcePos unless the previous sync had it, loses latestData, and every other one is hidden; the sync's
+// list shows its players again at once. A player the previous sync left out stays hidden and snaps when one has it.
+// Deliberate: v10 handles one "k" whole, while our STATEs of one sync may reach two frames (UDP: a datagram a packet;
+// the official link queues them one by one). Hiding everyone at the marker would blink every player for that frame,
+// so the marker settles the sync before it instead: a player it never had is hidden now (one send interval later
+// than v10) and snaps when it comes back; a STATE shows its player at once (client_apply_state). The first marker of
+// a server only starts the count.
+void client_players_hide_all(Client *client) {
+    const int first = !client->net_player_sync;
+    client->net_player_sync = 1;
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        Player *player = client->game.players[i];
+        if (!player || !player->active) continue;
+        if (player != client->me && !first && !player->sync_seen) {
+            player->force_pos = 1; // forcePos = !latestData
+            player->sync_hidden = 1;
+        }
+        player->sync_seen = 0;
     }
 }
 
@@ -1485,6 +1544,9 @@ void client_apply_state(Client *client, const NetStatePacket *packet, const int 
     // index.js updatePlayerPositions ("k"): with forcePos the state snaps, otherwise the packet is
     // the target (position, look, step value) that players.js update() reaches in
     // (1000 / sendRateA) * interpolation ms (net_player_apply_state).
+    // This sync has it: drawn again, latestData (deob-10.0.3.js:258592-258599; hidden by client_players_hide_all)
+    player->sync_seen = 1;
+    player->sync_hidden = 0;
     player->send_rate = (float) game_network_data(&client->game)->send_hz; // WP-E: the round's networkData (sendRateA)
     net_player_apply_state(player, packet, version);
 }
@@ -1521,6 +1583,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
     client->net_client_id = init->client_id;
     client->net_server_patch = init->major == NET_PROTOCOL_MAJOR ? init->patch : 0; // WP-C (ENT V8)
+    client->net_player_sync = 0; // the server's next player sync says again whether it marks them (NET_EXT_PLAYER_SYNC)
     social_reset_server(); // WP-E part 2b: v7 social packets after the server's NET_PACKET_SOCIAL_V7
     object_manager_ui_reset(); // KrunkNative Object Manager: this server's caps are asked again
     if (client->map_loaded) client_unload_map(client);
@@ -2163,6 +2226,57 @@ void client_tick(Client *client, const float now, const float delta) {
 // config.dltMx = Math.round(1000 / 30): the longest frame the game loop counts (gameTimeDiff, v10.js:221341)
 #define INPUT_FRAME_MAX_MS 33.0f
 
+// players.hideAll's objInstances.visible = false (client_players_hide_all): a player the server's last marked sync
+// left out is not drawn. Its meshes leave the world scene for the draw (as stalker_render.c / spectate.c do) and come
+// back after it; begin runs before theirs and end after, so a mesh one of them took out too is put back once.
+#define SYNC_HIDDEN_MAX 128
+static struct {
+    int count;
+    const Player *player[SYNC_HIDDEN_MAX];
+    const PlayerMesh *mesh[SYNC_HIDDEN_MAX];
+    size_t loadout_size[SYNC_HIDDEN_MAX];
+} g_sync_hidden;
+
+static int sync_hidden_in_scene(const Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
+    Scene parts = {0, NULL};
+    scene_add_player_mesh(&parts, player_mesh, loadout_size);
+    const Mesh *probe = parts.mesh_count ? parts.meshes[0] : NULL;
+    free(parts.meshes);
+    for (size_t i = 0; probe && i < scene->mesh_count; i++) {
+        if (scene->meshes[i] == probe) return 1;
+    }
+    return 0;
+}
+
+static void sync_hidden_render_begin(Client *client) {
+    g_sync_hidden.count = 0;
+    if (!client->net_player_sync || !client->scene) return;
+    for (size_t i = 0; i < client->game.player_count && g_sync_hidden.count < SYNC_HIDDEN_MAX; i++) {
+        const Player *player = client->game.players[i];
+        if (!player || player == client->me || !player->active || !player->sync_hidden || !player->mesh || player->render_you) continue;
+        const size_t loadout_size = (size_t) player->loadout_size;
+        if (!sync_hidden_in_scene(client->scene, player->mesh, loadout_size)) continue;
+        scene_remove_player_mesh(client->scene, player->mesh, loadout_size);
+        g_sync_hidden.player[g_sync_hidden.count] = player;
+        g_sync_hidden.mesh[g_sync_hidden.count] = player->mesh;
+        g_sync_hidden.loadout_size[g_sync_hidden.count++] = loadout_size;
+    }
+}
+
+static void sync_hidden_render_end(Client *client) {
+    const int count = g_sync_hidden.count;
+    g_sync_hidden.count = 0;
+    for (int k = 0; k < count && client->scene; k++) {
+        for (size_t i = 0; i < client->game.player_count; i++) { // still that player with those meshes, not put back yet
+            const Player *player = client->game.players[i];
+            if (player != g_sync_hidden.player[k] || player->mesh != g_sync_hidden.mesh[k]) continue;
+            if (!sync_hidden_in_scene(client->scene, g_sync_hidden.mesh[k], g_sync_hidden.loadout_size[k]))
+                scene_add_player_mesh(client->scene, (PlayerMesh *) g_sync_hidden.mesh[k], g_sync_hidden.loadout_size[k]);
+            break;
+        }
+    }
+}
+
 static void client_tick_game(Client *client, const float now, const float frame_delta) {
     // deltaMs *= endAnimationTimeLeft / config.endAnim: the round-end slow motion (menu_view.c)
     const float delta = menu_view_world_delta(client, frame_delta);
@@ -2294,7 +2408,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
         const float look_pitch = CLAMP(player_round3(g_look_sent.x), -(float) M_PI / 2.0f, (float) M_PI / 2.0f);
         const int look_sent = fabsf(look_pitch - me->direction.x) <= 1e-5f && fabsf(player_round3(g_look_sent.y) - me->direction.y) <= 1e-5f;
         const int look_shown = g_look_shown_valid && me->direction.x == g_look_shown.x && me->direction.y == g_look_shown.y;
-        if (!g_look_valid || (!look_sent && !look_shown)) {
+        // A movement scheme that turns the body itself (Vehicle, MMORPG, a turn speed below 1) keeps
+        // me->direction off the look by design: v10's camera stays CONTROLS (the mouse) and only the
+        // spawn resets it (client_look_reset), so no resync there.
+        const int look_resync = player_direction_is_look(me) && !look_sent && !look_shown;
+        if (!g_look_valid || look_resync) {
             g_look.x = g_look_sent.x = me->direction.x;
             g_look.y = g_look_sent.y = me->direction.y;
             g_look_valid = 1;
@@ -2410,7 +2528,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         if (!third_person_view(client)) camera_feel_wall_lean(client, frame_delta * 1000.0f); // wallLean roll
         if (third_person_view(client)) {
             third_person_apply_camera(client, g_look, delta); // over the shoulder (third_person.c)
-        } else if (g_look_unsampled) { // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS)
+        } else if (g_look_unsampled || !player_direction_is_look(client->me)) {
+            // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS). A movement scheme
+            // whose body turns on its own (Vehicle, MMORPG, trnSp below 1) shows the mouse look every
+            // frame: v10's camera is CONTROLS, the player's xDire / yDire only pose the model.
             client->camera.rotation.x += player_clamp_pitch(g_look.x) - client->me->direction.x;
             const float yaw = g_look.y - client->me->direction.y;
             client->camera.rotation.y += yaw - 2.0f * (float) M_PI * roundf(yaw / (2.0f * (float) M_PI));
@@ -2452,6 +2573,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
         sky_render(&client->camera); // Krunker's backgroundScene pass: sky dome first (sky.c)
         gpu_timer_mark(GPU_PASS_SKY);
         shadow_begin_world();
+        sync_hidden_render_begin(client); // players.hideAll: a player the last marked sync left out is not drawn (above)
+        stalker_render_begin(client);  // v10 Stalker: a hidden (still) stalker is not drawn (stalker_render.c; before spectate's)
         spectate_render_begin(client); // first-person spectating hides the followed player's model
         // KrunkNative third person: the local (third-person) model is drawn with the world
         Player *tp_me = third_person_draw_model(client) ? client->me : NULL;
@@ -2466,6 +2589,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
             scene_add_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
         }
         spectate_render_end(client);
+        stalker_render_end(client);
+        sync_hidden_render_end(client);
         shadow_end_world();
         gpu_timer_mark(GPU_PASS_WORLD);
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
@@ -2486,6 +2611,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         const int viewmodel = ui_controls_weapon_visible(client) && !client_render_hide_weapon_ads(client) && !third_person_view(client);
         third_person_note_frame(tp_own_model, viewmodel);
         if (viewmodel) {
+            // Fog: v10.0.3 renders the viewmodel as layer 1 of the same scene from fpsCamera (render(scene,
+            // fpsCamera), deob-10.0.3.js:231552-231554), so scene.fog applies at its view depth; neither the
+            // weapon (loadMesh options, deob:194600-194660) nor the arms (genArms getMat, deob:232484) set
+            // noFog. Only the map's weapon pickups do (genWeaponMeshData, map_post.c). fps_scene keeps fog on.
             if (!scenario) shadow_begin_world(); // v3.1.1 arms/weapon receive the sun shadow too
             scene_render(client->fps_scene, &fps_camera);
             if (!scenario) shadow_end_world();
