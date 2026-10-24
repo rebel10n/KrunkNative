@@ -141,7 +141,7 @@ def scenario(brain_url, game_port, smtp, db):
 1400 down ENTER
 1410 up ENTER
 5000 call showWindow 5
-5500 clicksel [onclick*="switchTab(3)"]
+5500 clicksel [onclick*="windows[4].switchTab(2)"]
 6500 vis @sec accEmailNew emailRes
 6600 quit
 """, brain_url, game_port)

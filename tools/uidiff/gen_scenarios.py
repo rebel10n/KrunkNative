@@ -382,11 +382,11 @@ PROFILE_ACCOUNT = {"name": "xXLongPlayerNameXx", "clan": "KRUNK", "score": 12500
 # rows of the General Stats view in #menuWindow's own pixels at 1280x720 (764 px wide there),
 # measured on the 1280 reference; scaled by the window's width at the other sizes
 PROFILE_ROWS = [
-    ("profile-tabs", 8, 58, "home / Friends / Partner / Settings / promo: KrunkNative has no Connections tab "
-                            "(window.canConnectExternalAccounts, Twitch / Metamask)", True),
+    ("profile-tabs", 8, 58, "home / Friends / Settings / Connections: v10.0.3's profileTabs, where v7 has "
+                            "Partner and promo code tabs", True),
     ("account", 62, 160, "Your Account: the picture beside the Name / Clan / Level box (the clipped header of the bug)", False),
     ("stats-header", 224, 68, "Your Stats and the XP bar", False),
-    ("stat-tabs", 292, 36, "the stat tabs: KrunkNative adds Medals (kn_brain medal counts)", True),
+    ("stat-tabs", 292, 36, "the stat tabs: v10.0.3's (Killstreaks, Raids), then KrunkNative's Medals (kn_brain medal counts)", True),
     ("stat-grid", 328, 126, "General Stats: the .pSt cards", False),
     ("logout", 460, 42, "Logout / Logout of all Sessions", False),
 ]
