@@ -26,6 +26,7 @@
 #include <triggers_v7.h>
 #include <net_ext.h> // NET_EXT_VALUE_TEXT: a string "cv" / "gv"
 #include <ui_logic.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -46,6 +47,11 @@ static struct {
     int loop;
 } g_player_sounds[CLIENT_PLAYER_SOUND_MAX];
 static int g_player_sound_count;
+// NET_EXT_PLAYER_SOUND_FALLOFF: data.dist / roll of the next PLAYER_SOUND add of `uid` (valid 0 = none)
+static struct {
+    int valid, uid;
+    float distance, rolloff;
+} g_sound_falloff;
 
 // The map gui elements' visibility (overlay.customGUIs nv), per element of Map.gui in order.
 #define CLIENT_GUI_MAX 256
@@ -217,13 +223,18 @@ static void player_sound(Client *client, const NetPlayerSoundPacket *packet) {
         }
         if (!name[0] || g_player_sound_count >= CLIENT_PLAYER_SOUND_MAX) return;
         const vec3 at = player ? (vec3) {player->position.x, player->position.y + player->height * 0.5f, player->position.z} : (vec3) {0};
-        const int handle = audio_handle_play(name, packet->volume ? packet->volume : 1.0f, packet->loop, packet->rate ? packet->rate : 1.0f, 1, at, 0.0f, 0.0f);
+        // play3D(val, x, y, z, vol, rate, dist, roll): the falloff the EXT ahead of it carried, else the defaults (0)
+        const int falloff = g_sound_falloff.valid && g_sound_falloff.uid == packet->uid;
+        g_sound_falloff.valid = 0;
+        const int handle = audio_handle_play(name, packet->volume ? packet->volume : 1.0f, packet->loop, packet->rate ? packet->rate : 1.0f, 1, at,
+                                             falloff ? g_sound_falloff.distance : 0.0f, falloff ? g_sound_falloff.rolloff : 0.0f);
         g_player_sounds[g_player_sound_count].uid = packet->uid;
         g_player_sounds[g_player_sound_count].loop = packet->loop != 0;
         snprintf(g_player_sounds[g_player_sound_count].name, sizeof(g_player_sounds[0].name), "%s", name);
         g_player_sounds[g_player_sound_count++].handle = handle;
         return;
     }
+    g_sound_falloff.valid = 0;
     for (int i = g_player_sound_count; i-- > 0;) { // removePlayerSound(sid, name, force); uid -1 + force: all
         const int match = (packet->uid < 0 || g_player_sounds[i].uid == packet->uid) && (packet->force || !strcmp(g_player_sounds[i].name, name));
         if (!match) continue;
@@ -358,8 +369,27 @@ int client_triggers_handle_event(Client *client, const int type, const void *pay
     }
 }
 
+void client_triggers_player_sound_falloff(const void *body, const uint16_t length) {
+    NetPlayerSoundFalloffPacket packet;
+    if (length < sizeof(packet)) return;
+    memcpy(&packet, body, sizeof(packet));
+    g_sound_falloff.valid = isfinite(packet.distance) && isfinite(packet.rolloff);
+    g_sound_falloff.uid = packet.uid;
+    g_sound_falloff.distance = packet.distance;
+    g_sound_falloff.rolloff = packet.rolloff;
+}
+
+// updatePlayerSounds (deob-10.0.3.js:220457-220470): each player sound follows its player, at half its height
+static void player_sounds_follow(Client *client) {
+    for (int i = 0; i < g_player_sound_count; i++) {
+        const Player *player = g_player_sounds[i].handle ? game_find_player(&client->game, g_player_sounds[i].uid) : NULL;
+        if (!player) continue;
+        audio_handle_position(g_player_sounds[i].handle, (vec3) {player->position.x, player->position.y + player->height * 0.5f, player->position.z});
+    }
+}
+
 void client_triggers_tick(Client *client) {
-    (void) client;
+    player_sounds_follow(client);
     if (g_scare_video_until && glfwGetTime() >= g_scare_video_until) {
         g_scare_video_until = 0.0;
         const HtmlElem holder = html_dom_by_id("jumpSVIDHolder");

@@ -29,7 +29,12 @@ int game_player_stalker_taunt(Game *game, Player *player, const int index) {
     if (player->taunt_ready_at > 0.0f && game->now < player->taunt_ready_at) return 0;
     player->taunt_ready_at = game->now + STALKER_TAUNT_COOLDOWN;
     // addPlayerSound on the server: a one-shot is broadcast ("asnd") but not kept in playerSounds
-    // (`data.loop || !isServer`, deob-10.0.3.js:220429), so a joiner never hears it again
+    // (`data.loop || !isServer`, deob-10.0.3.js:220429), so a joiner never hears it again. Its dist / roll
+    // go first, in the EXT the PLAYER_SOUND has no room for (net_ext.h NET_EXT_PLAYER_SOUND_FALLOFF).
+    const NetPlayerSoundFalloffPacket falloff = {.uid = player->uid, .distance = STALKER_TAUNT_DISTANCE, .rolloff = STALKER_TAUNT_ROLLOFF};
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(falloff)];
+    const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_PLAYER_SOUND_FALLOFF, &falloff, sizeof(falloff));
+    if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, ext, n);
     NetPlayerSoundPacket packet = {.uid = player->uid, .add = 1, .loop = 0, .volume = STALKER_TAUNT_VOLUME, .rate = STALKER_TAUNT_RATE};
     snprintf(packet.name, sizeof(packet.name), "staunt_%d", index);
     game_send(game, NET_TARGET_ALL, NET_PACKET_PLAYER_SOUND, &packet, sizeof(packet));

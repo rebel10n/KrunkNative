@@ -14,14 +14,15 @@ Stalker (`stalker_v7`) had none of it.
 | piece | file |
 |---|---|
 | `isStalker`, noMovT / isHidden, `game_player_stalker_taunt`, `stalker_send_picked` | `shared/include/stalker.h`, `shared/src/stalker.c` |
-| procInputs hook (outside replays) and the spawn reset | `shared/src/player.c` |
+| procInputs hook (outside replays), the spawn reset, no aim for the stalker | `shared/src/player.c` |
 | STALKER_PICKED from pickStalker | `shared/src/modes/mode_rules.c` (`mode_trigger_pick_stalker`) |
 | a hidden player left out of the state stream; `"stlkrt"` | `server/src/net.c` |
 | HUD, popups, taunt keys | `client/src/ui/hud_stalker.c` (ticked from `hud_ui.c`; keys from `ui_controls.c`; `NET_EXT_STALKER_PICKED` from `net/game_events.c`) |
 | model look (and a rebuild when isStalker flips) | `client/src/stalker_render.c`, `client/src/player_mesh.c`, `client/src/main.c` (before the world pass) |
 | silent steps | `client/src/sound_events.c` |
+| player sounds: the falloff EXT, following their player, finished one-shots dropped | `client/src/map_triggers.c`, `client/src/audio.c` (`audio_handle_position`) |
 | official lobbies | `client/src/net/krunker_link.c` (`"stlkrt"` out; `"stlkpd"` in was already the text popup) |
-| tests | `shared/tests/v10_gameplay_test.c` (`test_stalker_client`) |
+| tests | `shared/tests/v10_gameplay_test.c` (`test_stalker_client`: the hide, the taunt and its falloff, no knife aim, STALKER_PICKED) |
 
 ## Packets
 
@@ -29,7 +30,7 @@ Stalker (`stalker_v7`) had none of it.
 |---|---|---|
 | `STALKER_TAUNT` `"stlkrt"` i (:111022, sent :260109) | `NET_EXT_STALKER_TAUNT` (0x0a10), `NetStalkerTauntPacket {u8 index}` | C -> S |
 | `STALKER_PICKED` `"stlkpd"` (:111363, broadcastEx :217949) | `NET_EXT_STALKER_PICKED` (0x0a11), no body, to everyone but the stalker | S -> C |
-| `"asnd"` sid, `"staunt_" + i`, {vol 1, rate 1, dist 20, roll 1.1} (:198335) | `NET_PACKET_PLAYER_SOUND` add, loop 0 | S -> C |
+| `"asnd"` sid, `"staunt_" + i`, {vol 1, rate 1, dist 20, roll 1.1} (:198335) | `NET_EXT_PLAYER_SOUND_FALLOFF` (0x0a12, `{i32 uid, f32 distance, f32 rolloff}`: 20 / 1.1) then `NET_PACKET_PLAYER_SOUND` add, loop 0 | S -> C |
 
 ## Behaviour
 
@@ -60,19 +61,22 @@ Stalker (`stalker_v7`) had none of it.
   left (`(Math.round(left / 100) / 10).toFixed(1) + "s"`) while it recharges (:261068-261080).
 - **Taunts** (:260106-260110 / :198332-198342): the stalkerTaunt keys (1-6) send `"stlkrt"` i; the
   server plays `staunt_<i>` at the stalker for everyone, 10 s apart (lastTaunt, shared with the prop
-  taunts). A one-shot player sound is not kept for joiners (:220429) and the client drops it once it
-  played (updatePlayerSounds :220465-220467).
+  taunts), with the data's refDistance 20 and rolloffFactor 1.1: `NetPlayerSoundPacket` has no room for
+  them, so `NET_EXT_PLAYER_SOUND_FALLOFF` carries them right before it (the reliable stream keeps the
+  order; a peer without EXT plays the defaults 25 / 1). Every player sound follows its player at half
+  its height while it plays (updatePlayerSounds :220457-220470). A one-shot player sound is not kept
+  for joiners (:220429) and the client drops it once it played (:220465-220467). Official lobbies are
+  unchanged: their `"asnd"` reaches the client as a plain PLAYER_SOUND (default falloff).
 - **Sounds**: a stalker's footsteps, landing and slide are silent (`!isStalker`, :195189, :195226).
-- **Throwing / aiming the knife** is off for the stalker (`!this.isStalker` in procInputs' aim check,
-  :191450): movement's (`shared/src/player.c`), not ported here.
+- **No knife aim**: procInputs' canScope has `!this.isStalker` (:191450), so the stalker's aim key
+  (its leap) never aims the knife; with aimVal never down, the knife is never thrown (:195895) or
+  charged (:191508-191512). An aimed knife comes down when its holder becomes the stalker.
 
 ## Deliberate differences
 
 - v10's taunt guard reads `p && p.active && i >= 0 && i < 6 && !p.lastTaunt || now - p.lastTaunt >= 0`
   (:198333): past the first taunt the active and index checks drop out by precedence. KrunkNative checks
   them on every taunt and takes taunts from the stalker only.
-- `NetPlayerSoundPacket` has no dist / roll: the taunt plays with the client's default 3D distance model
-  (25 / 1) instead of 20 / 1.1, at the stalker's position when it started (v10's follows the player).
 
 ## Assets
 

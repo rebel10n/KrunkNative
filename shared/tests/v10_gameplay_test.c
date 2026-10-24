@@ -20,19 +20,29 @@ static int g_failures, g_checks;
 static int g_scares;
 static int g_sounds, g_picked, g_picked_target; // PLAYER_SOUND adds, NET_EXT_STALKER_PICKED and its target
 static NetPlayerSoundPacket g_sound;
+static int g_falloffs, g_falloff_then_sound; // NET_EXT_PLAYER_SOUND_FALLOFF sent; a PLAYER_SOUND came right after one
+static NetPlayerSoundFalloffPacket g_falloff;
+static int g_last_type;
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
     if (type == NET_PACKET_JUMP_SCARE) g_scares++;
     if (type == NET_PACKET_PLAYER_SOUND && length == sizeof(g_sound)) {
         memcpy(&g_sound, payload, sizeof(g_sound));
         g_sounds++;
+        if (g_last_type == NET_EXT_PLAYER_SOUND_FALLOFF) g_falloff_then_sound++;
     }
-    uint16_t subtype, body_length;
+    uint16_t subtype = 0, body_length;
     const uint8_t *body;
-    if (type == NET_PACKET_EXT && net_ext_unpack(payload, length, &subtype, &body, &body_length) && subtype == NET_EXT_STALKER_PICKED) {
+    const int ext = type == NET_PACKET_EXT && net_ext_unpack(payload, length, &subtype, &body, &body_length);
+    if (ext && subtype == NET_EXT_STALKER_PICKED) {
         g_picked++;
         g_picked_target = uid;
     }
+    if (ext && subtype == NET_EXT_PLAYER_SOUND_FALLOFF && body_length == sizeof(g_falloff)) {
+        memcpy(&g_falloff, body, sizeof(g_falloff));
+        g_falloffs++;
+    }
+    g_last_type = ext ? subtype : -type - 1; // the packet before the next one (EXT subtypes vs plain types)
 }
 
 static const cJSON *g_test_maps[1];
@@ -308,10 +318,38 @@ static void test_stalker_client(void) {
     CHECK(game_player_stalker_taunt(&game, stalker, 2) && g_sounds == 1, "the stalker taunts");
     CHECK(g_sound.add && !g_sound.loop && g_sound.uid == stalker->uid && !strcmp(g_sound.name, "staunt_2") && g_sound.volume == 1.0f,
           "asnd staunt_2 vol 1, a one-shot (%s)", g_sound.name);
+    CHECK(g_falloffs == 1 && g_falloff_then_sound == 1 && g_falloff.uid == stalker->uid && g_falloff.distance == 20.0f &&
+              fabsf(g_falloff.rolloff - 1.1f) < 1e-6f,
+          "its dist 20 / roll 1.1 ride in the EXT right before it (%d, %g, %g)", g_falloff_then_sound, (double) g_falloff.distance,
+          (double) g_falloff.rolloff);
     game.now = 59.0f;
     CHECK(!game_player_stalker_taunt(&game, stalker, 1) && g_sounds == 1, "not again within 10 s");
     game.now = 60.0f;
     CHECK(game_player_stalker_taunt(&game, stalker, 5) && g_sounds == 2 && !strcmp(g_sound.name, "staunt_5"), "again after 10 s");
+
+    // the stalker never aims, so its knife is never thrown or charged (`!this.isStalker` in procInputs' canScope,
+    // deob-10.0.3.js:191450); a Living with a knife still aims (config.throwMel)
+    game.config.throwable_melees = 1;
+    hold(stalker, WEAPON_ID_KNIFE);
+    hold(living, WEAPON_ID_KNIFE);
+    stalker->can_throw = living->can_throw = 1;
+    stalker->aim_val = living->aim_val = 0.0f;
+    stalker->last_stalker_leap = living->last_stalker_leap = game.now; // no leap in the way
+    for (int i = 0; i < 10; i++) {
+        Input aim = idle_input(stalker);
+        aim.scope = 1;
+        player_proc_input(stalker, &aim, 0, 0);
+        aim = idle_input(living);
+        aim.scope = 1;
+        player_proc_input(living, &aim, 0, 0);
+    }
+    CHECK(stalker->aim_val == 0.0f && stalker->can_throw, "the stalker's aim key does not aim its knife (aimVal %g)", (double) stalker->aim_val);
+    CHECK(living->aim_val > 0.0f, "a Living aims its knife (aimVal %g)", (double) living->aim_val);
+    stalker->aim_val = 1.0f; // aimed when it became the stalker: let go at once (`!canScope`)
+    input = idle_input(stalker);
+    input.scope = 1;
+    player_proc_input(stalker, &input, 0, 0);
+    CHECK(stalker->aim_val < 1.0f, "an aimed knife comes down for the stalker (aimVal %g)", (double) stalker->aim_val);
 
     // pickStalker: STALKER_PICKED to everyone but the stalker (broadcastEx, deob-10.0.3.js:217949)
     stalker->team = living->team = 1;
