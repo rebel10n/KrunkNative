@@ -37,6 +37,15 @@ code comment; a deliberate difference from 10.0.3 is documented in code. A comme
 cites only v10.0.2 (`v10:N`) or v7.1.4 is not verified yet: re-check it against `game.deob.js` when
 it is touched.
 
+## KrunkNative additions
+
+Some things are KrunkNative's own, added on top of v10.0.3 on purpose. They are mods, not parity
+gaps, and audits leave them out. One is the Nettspend class: its id is always the last class, after
+v10's `CLASS_COUNT`. The other is the kept v3.1.1 and v1.5.2-era maps (`311_*`, `152_*`).
+`kn-additions.md` lists them, says why they are kept, and says what to migrate if v10's class table
+grows. The KN id ranges above Krunker's tables (weapons from 64, windows from 100, `NET_PACKET_EXT`
+subtypes) follow AGENTS.md.
+
 ## What the target changes
 
 - Identity: the ruleset `version` is `"10.0.3"` (`shared/src/rules/ruleset.c`). The build's client
