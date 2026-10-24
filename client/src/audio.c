@@ -31,7 +31,7 @@
 #define AUDIO_MAX_CLIPS 192
 #define AUDIO_MAX_VOICES 64
 #define AUDIO_MAX_PENDING 64
-#define AUDIO_NAME_MAX 48
+#define AUDIO_NAME_MAX 96 // "asset:skins/<_id>/sound_inspect" (a custom skin's inspect sound) fits
 #define AUDIO_STREAM_BYTES (192 * 1024)
 #ifdef __EMSCRIPTEN__
 #define AUDIO_LOADS_PER_FRAME 1 // every first load is a blocking (asyncify) fetch
@@ -237,10 +237,18 @@ static int sound_is_asset(const char *name) {
     return !strncmp(name, AUDIO_ASSET_PREFIX, sizeof(AUDIO_ASSET_PREFIX) - 1);
 }
 
-// The file of a clip under assets/: sound/<name>.mp3, or user-assets/<id>/sound.mp3.
+// The file of a clip under assets/: sound/<name>.mp3, or user-assets/<id>/sound.mp3; an asset id whose last part is
+// sound* is the file itself (getSound: `/\/sound[^/]*$/.test(src) ? src + ".mp3" : src + "/sound.mp3"`,
+// deob-10.0.3.js:225205): a custom skin's skins/<_id>/sound_swap / sound_inspect (user-assets/skins/<_id>/sound_swap.mp3).
 static void clip_relative_path(const char *name, char *out, const size_t size) {
-    if (sound_is_asset(name)) snprintf(out, size, "user-assets/%s/sound.mp3", name + sizeof(AUDIO_ASSET_PREFIX) - 1);
-    else snprintf(out, size, "sound/%s.mp3", name);
+    if (sound_is_asset(name)) {
+        const char *id = name + sizeof(AUDIO_ASSET_PREFIX) - 1;
+        const char *last = strrchr(id, '/');
+        if (last && !strncmp(last + 1, "sound", 5) && !strchr(last + 1, '/')) snprintf(out, size, "user-assets/%s.mp3", id);
+        else snprintf(out, size, "user-assets/%s/sound.mp3", id);
+    } else {
+        snprintf(out, size, "sound/%s.mp3", name);
+    }
 }
 
 // KrunkNative's own clips (outside Krunker's table): the Nettspend class (client/src/nettspend_audio.c)

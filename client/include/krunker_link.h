@@ -169,6 +169,8 @@ typedef struct {
     cJSON *custom;      // arg 9 .data of a custom game (a JSON string or an object), parsed; NULL otherwise.
                         // io.map takes it (frees or keeps it)
     char custom_id[48]; // arg 9 .id ("" none)
+    cJSON *custom_skins; // arg 9 .customSkins ({id: skin}, the studio's skins, deob-10.0.3.js:256798-256830), as JSON;
+                         // NULL otherwise. io.map takes it like custom
 } KrunkerLinkInit;
 
 typedef struct {

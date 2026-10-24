@@ -87,7 +87,17 @@ typedef struct ViewerSkin {
     int title;           // the title id the item grants (0 none)
     const char *set;     // item set ("vcore"), NULL none
     int set_min;         // setMin: items of the set to own for its bonus
+    // ---- v10.0.3 skin sounds (inspect / swap, deob-10.0.3.js:195531-195540, :198263-198268)
+    const char *insp_s;   // inspS: the sound an inspect plays (VS2_INSP_S_LOOP: inspSLoop), NULL none
+    const char *swap_snd; // swapSnd: the sound a swap to it plays, NULL none
+    float swap_snd_vol;   // swapSndVol, 0 = absent
+    const char *custom_id; // a map studio's custom skin (VIEWER_CUSTOM_SKIN_MIN and up): its _id, the user-asset
+                           // folder skins/<_id>/ of its customSound / customSwapSound / customInspectSound; NULL none
 } ViewerSkin;
+
+// game.customSkins ids start here (deob-10.0.3.js:20133, iïìíiîï = 10000000): a custom game's studio skins (its
+// customsData.customSkins, deob:256798-256830, skinManager.setSkin), defined like an "sdc" (viewer_skin_define)
+#define VIEWER_CUSTOM_SKIN_MIN 10000000
 
 enum {
     VS2_NO_BODY = 1 << 0,        // body: no shirt on the body cube (genBody)
@@ -117,6 +127,10 @@ enum {
     VS2_PAINTABLE = 1 << 24,     // v10 paintTargets: a paint consumable applies to it
     VS2_NO_COMP = 1 << 25,       // noComp (noLegs / noBody / noHead): not in competitive
     VS2_NO_SND = 1 << 26,        // weapon skin noSnd: a remodel (mid) that keeps the weapon's own shot sound
+    VS2_INSP_S_LOOP = 1 << 27,   // inspSLoop: insp_s loops while the inspect lasts
+    VS2_CUSTOM_SOUND = 1 << 28,  // custom skin customSound: the shot plays user asset skins/<_id>/sound.mp3
+    VS2_CUSTOM_SWAP_SOUND = 1 << 29,    // customSwapSound: a swap to it plays skins/<_id>/sound_swap.mp3
+    VS2_CUSTOM_INSPECT_SOUND = 1 << 30, // customInspectSound: an inspect plays skins/<_id>/sound_inspect.mp3
 };
 
 // A dye's colour overrides (players.js generateMeshes): per part up to 4 colours, one picked at
@@ -178,7 +192,8 @@ const ViewerDye *viewer_dye(int index);
 ViewerSkin *viewer_skin_edit(int index);
 ViewerDye *viewer_dye_edit(int index);
 void viewer_skin_edits_clear(void);
-// v10.0.3 "sdc" SKIN_DEFINITION_CHANGED: the store entry the server defined for `index` (0..VIEWER_SKIN_INDEX_MAX),
+// v10.0.3 "sdc" SKIN_DEFINITION_CHANGED: the store entry the server defined for `index` (0..VIEWER_SKIN_INDEX_MAX, or a
+// custom game's studio skin, VIEWER_CUSTOM_SKIN_MIN and up),
 // zeroed when new; viewer_skin() returns it instead of the table row from then on. NULL out of range / out of slots.
 // viewer_skin_define.c fills it from the server's JSON (viewer_skin_define).
 #define VIEWER_SKIN_INDEX_MAX 65535
@@ -210,7 +225,22 @@ int viewer_loadout_skin(int primary, int secondary, int weapon_id);
 // slot wears a remodel: `skin` (its store skin, getSkinForLoadout; NULL none) or else the weapon's altSkin, for that weapon
 // (skin.weapon - 1 == weapon_id), not upgraded, with a mid and without noSnd. 1 when the "_<mid>" was added, 0 otherwise
 // (v10 then plays networkSounds[indexOf(name)]: the caller checks the name is in that table).
+// A custom skin with customSound plays its own user asset instead: out = "asset:skins/<_id>" (audio.c's user-asset name,
+// SOUND.play(..., isAsset), deob:196407), returns 2.
 int viewer_weapon_shot_sound(const char *sound, const ViewerSkin *skin, int weapon_id, int upgraded, int blast, char *out, size_t n);
+// players.getReloadSnd(player, n) (deob-10.0.3.js:198751-198758): "reload_<n>", or with a reloadSnd skin (player.skins[
+// loadoutIndex], NULL none) weapon.sound + ("_<mid>") + "_r_<n>". reload() plays n 1, endReload n "2" (deob:195445, :195465).
+void viewer_skin_reload_sound(const char *weapon_sound, const ViewerSkin *skin, int n, char *out, size_t size);
+// players.getKillSnd's item part (deob-10.0.3.js:198745-198749): a killSnd item of a type (melees) plays the weapon's sound
+// + "_<id>" (id absent: the sound itself); 0 (out "") for any other skin.
+int viewer_skin_kill_sound(const char *weapon_sound, const ViewerSkin *skin, char *out, size_t size);
+// swapWeapon's sound (deob-10.0.3.js:198263-198268) for the skin swapped to (currentSkin / currentMelee; NULL none): its
+// customSwapSound "asset:skins/<_id>/sound_swap" (volume weapon.swapSndVol ?? skin.swapSndVol ?? 1), else weapon.swapSnd ??
+// skin.swapSnd (volume ... ?? 0.05). weapon_swap_vol 0 = absent. 0 (out "") when there is none.
+int viewer_skin_swap_sound(const char *weapon_swap_snd, float weapon_swap_vol, const ViewerSkin *skin, char *out, size_t size, float *volume);
+// wInspect's sound (deob-10.0.3.js:195531-195540) for the inspected skin (currentMelee / currentSkin; NULL none): its
+// customInspectSound "asset:skins/<_id>/sound_inspect", else its inspS; volume 1, *loop = inspSLoop. 0 when none.
+int viewer_skin_inspect_sound(const ViewerSkin *skin, char *out, size_t size, int *loop);
 // The option list of a dropdown, NULL when there is none (e.g. a weapon without skins).
 const ViewerOptionList *viewer_option_list(ViewerListKind kind, int key, int season);
 // "Name [Rarity]" (or "Default") of option i into buf.

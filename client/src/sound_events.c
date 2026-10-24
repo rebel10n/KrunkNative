@@ -62,6 +62,7 @@ typedef struct {
     float last_shell;
     float last_bounce;
     float last_spray; // KrunkNative Piss: the last spray sound (PISS_SOUND_INTERVAL)
+    unsigned char inspecting; // Player.inspecting last seen (the local player's inspect sound)
 } PlayerTrack;
 
 static struct {
@@ -73,14 +74,16 @@ static struct {
     int preloaded;
     float now; // sound_events_tick's clock (the remote Piss spray throttle)
     float plant_tick; // Defuse: interTick, the planter's beep_0 countdown (s)
+    char inspect_sound[96]; // SOUND.localInspectSound: the inspect sound playing, "" none
 } g_sound;
 
-// weapon.sound per weapon (v7.1.4 src/data/weapons.js; Weapon.sound carries the same name), and
-// whether it ejects casings (!nCase). Matched on Weapon.name.
+// weapon.sound per weapon (v7.1.4 src/data/weapons.js; Weapon.sound carries the same name), whether it
+// ejects casings (!nCase) and its swapSnd (the Build Tool's paper_1, deob-10.0.3.js:114368, :201760). Matched on Weapon.name.
 static const struct {
     const char *weapon;
     const char *sound;
     int casings;
+    const char *swap_snd;
 } WEAPON_SOUNDS[] = {
     {"Sniper Rifle", "weapon_1", 1},
     {"Assault Rifle", "weapon_2", 1},
@@ -101,7 +104,7 @@ static const struct {
     {"Bomb", "weapon_18", 0},
     {"Blaster", "weapon_19", 0},
     // v7.1.4 weapons 19-28 (WP-B)
-    {"Build Tool", "weapon_20", 0},
+    {"Build Tool", "weapon_20", 0, "paper_1"},
     {"Grappler", "weapon_21", 1},
     {"Tehchy-9", "weapon_22", 1},
     {"Noob Tube", "weapon_23", 0},
@@ -152,8 +155,25 @@ static int shot_sound(const Player *p, const int blast, char *name, const size_t
     if (entry < 0) return -1;
     if (casings) *casings = WEAPON_SOUNDS[entry].casings;
     const ViewerSkin *skin = viewer_skin(viewer_loadout_skin(p->skins.primary, p->skins.secondary, id));
-    viewer_weapon_shot_sound(upgraded ? "weapon_upgraded" : WEAPON_SOUNDS[entry].sound, skin, id, upgraded, blast, name, n);
+    // 2: a custom skin's customSound, played from its user asset (SOUND.play isAsset, not networkSounds)
+    if (viewer_weapon_shot_sound(upgraded ? "weapon_upgraded" : WEAPON_SOUNDS[entry].sound, skin, id, upgraded, blast, name, n) == 2) return 1;
     return name[0] && network_sound_index(name) >= 0;
+}
+
+// players.currentSkin / currentMelee (deob-10.0.3.js:190469-190496): the melee skin on a melee weapon, else the store skin
+// getSkinForLoadout finds for the held slot (none on an upgraded slot). The swap and inspect sounds read it.
+static const ViewerSkin *current_skin(const Player *p) {
+    if (!p->weapon || !p->loadout || p->loadout_index < 0 || p->loadout_index >= p->loadout_size) return NULL;
+    if (p->weapon->melee) return viewer_skin(p->skins.melee);
+    const int slot = p->loadout_index;
+    if (slot < 8 && (p->upgraded_slots >> slot & 1)) return NULL;
+    return viewer_skin(viewer_loadout_skin(p->skins.primary, p->skins.secondary, p->loadout[slot]));
+}
+
+// getReloadSnd's skin: player.skins[loadoutIndex] (deob-10.0.3.js:198752: by the slot's index, skins[0] / skins[1])
+static const ViewerSkin *slot_index_skin(const Player *p) {
+    const int slot = p->loadout_index;
+    return viewer_skin(slot == 0 ? p->skins.primary : slot == 1 ? p->skins.secondary : -1);
 }
 
 static void play_numbered(const char *prefix, const int min, const int max, const float volume, const float rate) {
@@ -306,6 +326,7 @@ static void track_store(PlayerTrack *track, const Player *player) {
     track->can_throw = player->can_throw;
     track->step_events = player->step_events;
     track->land_events = player->land_events;
+    track->inspecting = player->inspecting;
 }
 
 // Te7: the step phase advances with the distance moved; a step sounds at each +-PI/2.
@@ -397,23 +418,45 @@ static void local_player_events(Client *client, const float now, const float del
         local_shot(track, me, now);
     }
 
-    // reload(): reload_1 when it starts; endReload(): reload_2 when half of it has passed.
+    // reload(): getReloadSnd(player, 1) at 0.25 when it starts; endReload(): getReloadSnd(player, "2") when the timer runs
+    // out (v10.0.3 player.update, deob-10.0.3.js:192306-192308; v7.1.4 played it at half time). getReloadSnd
+    // (:198751-198758): reload_<n>, or a reloadSnd skin's weapon.sound_<mid>_r_<n> (Bondsman, Ad Astra, Monte Carlo...).
     // KrunkNative Nettspend: the Purple Drank's reload is the "pour up" (nettspend_audio.c: the
     // pour, the scream and the line fill the whole reload), no reload_1 / reload_2.
     const int drank = me->loadout && index >= 0 && index < me->loadout_size && nettspend_is_drank(me->loadout[index]);
+    char reload_name[64];
     if (same_weapon && me->reload_timer > 0.0f && track->reload_timer <= 0.0f) {
-        if (!nettspend_audio_reload_start(drank ? me->loadout[index] : -1)) audio_play("reload_1", 0.25f, 0, 1.0f);
+        viewer_skin_reload_sound(me->weapon->sound, slot_index_skin(me), 1, reload_name, sizeof(reload_name));
+        if (!nettspend_audio_reload_start(drank ? me->loadout[index] : -1)) audio_play(reload_name, 0.25f, 0, 1.0f);
+    }
+    if (same_weapon && !drank && track->reload_timer > 0.0f && me->reload_timer <= 0.0f) {
+        viewer_skin_reload_sound(me->weapon->sound, slot_index_skin(me), 2, reload_name, sizeof(reload_name));
+        audio_play(reload_name, 0.25f, 0, 1.0f);
     }
 
-    const float reload_half = me->weapon->reload_time * client->game.config.reload_speed * 0.5f;
-    if (same_weapon && !drank && track->reload_timer >= reload_half && me->reload_timer < reload_half &&
-        (me->reload_timer > 0.0f || (me->ammo && me->ammo[index] == me->weapon->ammo))) {
-        audio_play("reload_2", 0.25f, 0, 1.0f);
+    // Swap (swapWeapon, deob-10.0.3.js:198261-198280): the skin's customSwapSound, else weapon.swapSnd ?? skin.swapSnd (volume
+    // swapSndVol ?? 1 / 0.05); without one, melee_equip when the throwable knife comes out (not while aiming).
+    if (!same_weapon) {
+        const int entry = weapon_entry(me->weapon);
+        char swap_name[96];
+        float swap_volume = 0.05f;
+        const int swap = viewer_skin_swap_sound(entry >= 0 ? WEAPON_SOUNDS[entry].swap_snd : NULL, 0.0f, current_skin(me), swap_name,
+                                                sizeof(swap_name), &swap_volume);
+        if (swap) audio_play(swap_name, swap_volume, 0, 1.0f);
+        else if (me->weapon->melee && me->can_throw && track->aim_val == 0.0f) audio_play("melee_equip", 0.06f, 0, 1.5f);
     }
 
-    // Swap: melee_equip when the throwable knife comes out (not while aiming).
-    if (!same_weapon && me->weapon->melee && me->can_throw && track->aim_val == 0.0f) {
-        audio_play("melee_equip", 0.06f, 0, 1.5f);
+    // Inspect (wInspect / cancelInspect, deob-10.0.3.js:195531-195540, :195578-195584): the inspected skin's
+    // customInspectSound or inspS (volume 1, looping with inspSLoop) as SOUND.localInspectSound, which a cancel stops.
+    // Not ported: a flipAnim melee's melee_equip on inspect (no flipAnim in the store table).
+    if (me->inspecting && !track->inspecting) {
+        if (g_sound.inspect_sound[0]) audio_stop(g_sound.inspect_sound);
+        int loop = 0;
+        if (viewer_skin_inspect_sound(current_skin(me), g_sound.inspect_sound, sizeof(g_sound.inspect_sound), &loop))
+            audio_play(g_sound.inspect_sound, 1.0f, loop, 1.0f);
+    } else if (!me->inspecting && track->inspecting && g_sound.inspect_sound[0]) {
+        audio_stop(g_sound.inspect_sound);
+        g_sound.inspect_sound[0] = 0;
     }
 
     // hvJK5: aim_1 when fully scoped in, aim_0 when leaving full scope (not for melee).
@@ -589,22 +632,23 @@ void sound_events_kill(const int headshot, const Player *killer, const int weapo
         audio_play("headshot_0", 1.0f, 0, 1.0f);
         return;
     }
-    // v7.1.4 getKillSnd: the store skin of the killing weapon (the melee skin for the knife, else the
-    // loadout slot's) with killSnd plays weapon.sound + "_" + id; only typed items (melee, type 3) have one
+    // getKillSnd (deob-10.0.3.js:198732-198750): wId 12 (the Combat Knife) reads the melee skin, any other weapon
+    // player.skins[loadout.indexOf(wId)] (the first slot holding it: skins[0] / skins[1], none past them); a killSnd item
+    // with a type (the melees) plays weaponConfig[wId].sound + "_" + id. The server sends networkSounds.indexOf(it) in
+    // "6" (:198642) and the killer plays it unless it is 0 or -1 (GET_KILL, :259296-259304).
     const Weapon *weapon = killer && killer->game && weapon_index >= 0 && (size_t) weapon_index < killer->game->weapon_count ? killer->game->weapons[weapon_index] : NULL;
     if (!weapon || !weapon->sound) return;
     int skin_index = -1;
-    if (weapon->melee) {
+    if (weapon_index == WEAPON_ID_KNIFE) {
         skin_index = killer->skins.melee;
     } else {
-        for (int slot = 0; slot < killer->loadout_size && slot < 2; slot++) {
-            if (killer->loadout[slot] == weapon_index) skin_index = slot ? killer->skins.secondary : killer->skins.primary;
-        }
+        int slot = -1;
+        for (int i = 0; killer->loadout && i < killer->loadout_size && slot < 0; i++)
+            if (killer->loadout[i] == weapon_index) slot = i;
+        skin_index = slot == 0 ? killer->skins.primary : slot == 1 ? killer->skins.secondary : -1;
     }
-    const ViewerSkin *skin = viewer_skin(skin_index);
-    if (!skin || !(skin->flags2 & VS2_KILL_SND) || !skin->type) return;
-    char name[48];
-    snprintf(name, sizeof(name), "%s_%d", weapon->sound, skin->id);
+    char name[64];
+    if (!viewer_skin_kill_sound(weapon->sound, viewer_skin(skin_index), name, sizeof(name)) || network_sound_index(name) <= 0) return;
     audio_play(name, 1.0f, 0, 1.0f);
 }
 

@@ -28,6 +28,7 @@
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
 #include <quick_play_retry.h> // a Quick Play search's full official game is tried again (kio_retry)
 #include <cJSON.h>
+#include "../viewer/viewer_store.h" // a custom game's studio skins (viewer_skin_define)
 #include <GLFW/glfw3.h> // glfwGetTime: the sync trace's second
 #include <ctype.h>
 #include <stdarg.h>
@@ -476,9 +477,10 @@ static int link_altcha(void *user, const char *alg, const char *challenge, const
 // the older round goes.
 static void link_map(void *user, KrunkerLinkInit *info) {
     (void) user;
-    if (K.map_next_set) cJSON_Delete(K.map_next.custom);
+    if (K.map_next_set) cJSON_Delete(K.map_next.custom), cJSON_Delete(K.map_next.custom_skins);
     K.map_next = *info;
     info->custom = NULL;
+    info->custom_skins = NULL;
     K.map_next_set = 1;
     K.map_gate = 1;
     K.held_count = 0;
@@ -498,8 +500,9 @@ static void kmap_reset(void) {
     if (K.map_req_active) krunker_map_request_cancel(&K.map_req);
     K.map_req_active = 0;
     pthread_mutex_lock(&K.lock);
-    if (K.map_next_set) cJSON_Delete(K.map_next.custom);
+    if (K.map_next_set) cJSON_Delete(K.map_next.custom), cJSON_Delete(K.map_next.custom_skins);
     K.map_next.custom = NULL;
+    K.map_next.custom_skins = NULL;
     K.map_next_set = K.map_gate = 0;
     K.held_count = 0;
     pthread_mutex_unlock(&K.lock);
@@ -525,11 +528,22 @@ static void kmap_tick(Client *client) {
     if (K.map_next_set) {
         next = K.map_next;
         K.map_next.custom = NULL;
+        K.map_next.custom_skins = NULL;
         K.map_next_set = 0;
         have_next = 1;
     }
     pthread_mutex_unlock(&K.lock);
     if (have_next) {
+        // the custom game's studio skins join the store (setCustomSkins + skinManager.setSkin, deob-10.0.3.js:256798-256830):
+        // ids from VIEWER_CUSTOM_SKIN_MIN, objects only
+        int defined = 0;
+        const cJSON *skin;
+        cJSON_ArrayForEach(skin, next.custom_skins) {
+            const double id = skin->string ? strtod(skin->string, NULL) : -1.0;
+            if (id >= VIEWER_CUSTOM_SKIN_MIN && id <= 2147483647.0 && cJSON_IsObject(skin)) defined += viewer_skin_define((int) id, skin);
+        }
+        if (defined) KN_LOG_VERBOSE2("[krunker] %d custom skin%s\n", defined, defined == 1 ? "" : "s");
+        cJSON_Delete(next.custom_skins);
         if (K.map_req_active) krunker_map_request_cancel(&K.map_req);
         krunker_map_request_begin(&K.map_req, next.map_index, next.custom, next.custom_id);
         K.map_init = next.init;

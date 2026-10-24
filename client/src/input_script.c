@@ -110,6 +110,8 @@
 //                                pass drew, wall: the camera sits in a solid box or solid geometry lies between
 //                                the eye and it, rot: the camera's rotation, dir: the player's look, zoom: the
 //                                camera's ADS zoom, aim: aim_val)
+//   100 skindef 10000007 {"name":"x","weapon":6,"_id":"a1","customSound":true}  define store.skins[index] as an "sdc" /
+//                                a custom game's studio skin would (viewer_skin_define; custom skin sound tests)
 //   100 cosm @game               log the store items the menu's class preview and our own player wear
 //                                (hat, body, face, head, back, primary skin, melee: store indices, -1 none)
 //   100 wsel @menu               log what the model build picked on the held slot (weapon, store skin, model /
@@ -263,6 +265,8 @@
 #include <store_spins.h>   // `wheelrar`
 #include <prize_wheel_render.h>
 #include <wars_banners.h>
+#include <cJSON.h>
+#include "viewer/viewer_store.h" // `skindef`: viewer_skin_define
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -364,7 +368,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "rows") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
-            !strcmp(e->cmd, "waitfor") ||
+            !strcmp(e->cmd, "waitfor") || !strcmp(e->cmd, "skindef") ||
             !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "wheelrar") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
@@ -1143,6 +1147,16 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] sync+ t=%.0f unl=%d jug=%d kranked=%.1f share=%d throw=%d loadout=%s\n", g_script.time,
                 me ? me->unlimited_ammo : -1, me ? me->is_juggernaut : -1, me ? me->mode.kranked_timer : 0.0f, me ? me->sharing_is_caring : -1,
                 me ? me->can_throw : -1, loadout);
+    } else if (!strcmp(e->cmd, "skindef")) {
+        // skindef <index> <json>: store.skins[index] = json, as an "sdc" or a custom game's studio skin (index from
+        // VIEWER_CUSTOM_SKIN_MIN, customsData.customSkins) defines it (viewer_skin_define): "[input_script] skindef t=100
+        // 10000007 ok" (custom skin sound tests)
+        char *end = NULL;
+        const long index = strtol(e->arg, &end, 10);
+        cJSON *json = end && end != e->arg ? cJSON_Parse(end) : NULL;
+        const int ok = json && index >= 0 && index <= 2147483647L && viewer_skin_define((int) index, json);
+        cJSON_Delete(json);
+        fprintf(stderr, "[input_script] skindef t=%.0f %ld %s\n", g_script.time, index, ok ? "ok" : "refused");
     } else if (!strcmp(e->cmd, "cosm")) {
         // cosm @label: the store items the menu's class preview and our own (spawned) player wear:
         // "[input_script] cosm t=100 @game who=me hat=111 body=-1 ... primary=-1" ("-" = no such player)

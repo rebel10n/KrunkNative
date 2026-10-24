@@ -27,6 +27,7 @@
 #include <ruleset.h>
 #include <skin_fx.h>
 #include <skin_video.h>
+#include <user_asset_path.h>
 #include "../../client/src/viewer/viewer_store.h"
 #include <math.h>
 #include <stdio.h>
@@ -471,6 +472,64 @@ static void check_shot_sounds(void) {
           viewer_loadout_skin(-1, -1, 5) == -1 && viewer_loadout_skin(0, -1, 5) == -1, "getSkinForLoadout");
 }
 
+// The other v10.0.3 skin sounds: getReloadSnd (deob-10.0.3.js:198751-198758), getKillSnd's item part (:198745-198749),
+// the swap sound (:198263-198268), the inspect sound (:195531-195540), and the user-asset files of a custom skin's sounds.
+static void check_skin_sounds(void) {
+    char name[96];
+    // reload: reload_<n>, a reloadSnd skin weapon.sound + "_<mid>_r_<n>" (by player.skins[loadoutIndex], no weapon test)
+    viewer_skin_reload_sound("weapon_8", NULL, 1, name, sizeof(name));
+    CHECK(!strcmp(name, "reload_1"), "reload: no skin (%s)", name);
+    viewer_skin_reload_sound("weapon_8", viewer_skin(887), 2, name, sizeof(name));
+    CHECK(!strcmp(name, "reload_2"), "reload: a skin without reloadSnd (%s)", name);
+    const struct { int skin; const char *sound; const char *want1, *want2; } reloads[] = {
+        {5684, "weapon_8", "weapon_8_5_r_1", "weapon_8_5_r_2"},     // Bondsman
+        {7096, "weapon_8", "weapon_8_10_r_1", "weapon_8_10_r_2"},   // Ad Astra
+        {7097, "weapon_5", "weapon_5_11_r_1", "weapon_5_11_r_2"},   // Monte Carlo
+        {6908, "weapon_15", "weapon_15_7_r_1", "weapon_15_7_r_2"},  // SuQi Superfan Package
+        {7094, "weapon_31", "weapon_31_1_r_1", "weapon_31_1_r_2"},  // MelodiQ
+    };
+    for (size_t i = 0; i < sizeof(reloads) / sizeof(reloads[0]); i++) {
+        const ViewerSkin *s = viewer_skin(reloads[i].skin);
+        char two[96];
+        viewer_skin_reload_sound(reloads[i].sound, s, 1, name, sizeof(name));
+        viewer_skin_reload_sound(reloads[i].sound, s, 2, two, sizeof(two));
+        char path[160];
+        snprintf(path, sizeof(path), "assets/sound/%s.mp3", name);
+        FILE *f = fopen(path, "rb");
+        if (f) fclose(f);
+        CHECK(s && (s->flags2 & VS2_RELOAD_SND) && !strcmp(name, reloads[i].want1) && !strcmp(two, reloads[i].want2) && f,
+              "reload: skin %d %s / %s (file %s)", reloads[i].skin, name, two, f ? "ok" : "missing");
+    }
+    // kill: a killSnd melee plays "melee_<id>" (the Combat Knife's sound is "melee"); a weapon skin never (no type)
+    CHECK(viewer_skin_kill_sound("melee", viewer_skin(1402), name, sizeof(name)) && !strcmp(name, "melee_12") && network_sound_index(name) > 0,
+          "kill: Heated Crowbar (%s)", name);
+    CHECK(viewer_skin_kill_sound("melee", viewer_skin(4398), name, sizeof(name)) && !strcmp(name, "melee_65") && network_sound_index(name) > 0,
+          "kill: Present Basher (%s)", name);
+    CHECK(!viewer_skin_kill_sound("weapon_6", viewer_skin(887), name, sizeof(name)) && !viewer_skin_kill_sound("melee", NULL, name, sizeof(name)),
+          "kill: a weapon skin, no skin: none");
+    // swap: weapon.swapSnd (the Build Tool's paper_1) ?? skin.swapSnd, volume swapSndVol ?? 0.05
+    float volume = 0.0f;
+    CHECK(viewer_skin_swap_sound("paper_1", 0.0f, NULL, name, sizeof(name), &volume) && !strcmp(name, "paper_1") && volume == 0.05f,
+          "swap: the Build Tool (%s %g)", name, volume);
+    CHECK(viewer_skin_swap_sound(NULL, 0.0f, viewer_skin(7554), name, sizeof(name), &volume) && !strcmp(name, "melee_butterfly_equip") &&
+          volume == 1.0f, "swap: Midnight (%s %g)", name, volume);
+    CHECK(viewer_skin_swap_sound(NULL, 0.0f, viewer_skin(7893), name, sizeof(name), &volume) && !strcmp(name, "melee_dragonbfk_equip") &&
+          volume == 0.05f, "swap: Wrym Crest, no swapSndVol (%s %g)", name, volume);
+    CHECK(!viewer_skin_swap_sound(NULL, 0.0f, viewer_skin(887), name, sizeof(name), &volume), "swap: no swap sound");
+    // inspect: inspS, inspSLoop
+    int loop = 0;
+    CHECK(viewer_skin_inspect_sound(viewer_skin(7094), name, sizeof(name), &loop) && !strcmp(name, "inspect_idol_music_loop") && loop,
+          "inspect: MelodiQ loops (%s)", name);
+    CHECK(viewer_skin_inspect_sound(viewer_skin(7097), name, sizeof(name), &loop) && !strcmp(name, "inspect_monte_carlo_spin") && !loop,
+          "inspect: Monte Carlo (%s)", name);
+    CHECK(!viewer_skin_inspect_sound(viewer_skin(887), name, sizeof(name), &loop), "inspect: none");
+    // a custom skin's sound files are user assets (userAssetsUrl("skins/" + _id + ...), deob:225205)
+    CHECK(user_asset_rel_ok("skins/64f0c1a2b3/sound.mp3") && user_asset_rel_ok("skins/64f0c1a2b3/sound_swap.mp3") &&
+          user_asset_rel_ok("skins/a-b_c/sound_inspect.mp3") && !user_asset_rel_ok("skins/64f0/texture.png") &&
+          !user_asset_rel_ok("skins/../sound.mp3") && !user_asset_rel_ok("skins//sound.mp3") && user_asset_rel_ok("30431/sound.mp3"),
+          "custom skin sounds as user assets");
+}
+
 int main(int argc, char **argv) {
     headless_parse_args(&argc, argv);
     vt_init(&g_geometry_cache);
@@ -512,6 +571,7 @@ int main(int argc, char **argv) {
     check_video_skins();
     check_weapon_remodels();
     check_shot_sounds();
+    check_skin_sounds();
     check_meshopt_models();
     check_material_extras();
 

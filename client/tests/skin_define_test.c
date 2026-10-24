@@ -66,6 +66,33 @@ int main(void) {
     viewer_skin_edits_clear();
     CHECK(viewer_skin(812)->rarity == 2, "edits cleared: the definition again");
 
+    // a custom game's studio skin (customsData.customSkins, ids from 10000000, deob-10.0.3.js:20133, :256798-256830): its
+    // _id names the user-asset folder of its customSound / customSwapSound / customInspectSound (:196407, :198265, :195533)
+    CHECK(!viewer_skin_define_slot(VIEWER_CUSTOM_SKIN_MIN - 1) && viewer_skin_define_slot(VIEWER_CUSTOM_SKIN_MIN + 5) != NULL,
+          "custom skin ids start at VIEWER_CUSTOM_SKIN_MIN");
+    CHECK(define(VIEWER_CUSTOM_SKIN_MIN + 7, "{\"name\":\"Studio Pump\",\"type\":0,\"weapon\":6,\"_id\":\"64f0c1a2b3\",\"customSound\":true,"
+                                             "\"customSwapSound\":true,\"customInspectSound\":true,\"inspSLoop\":true}"), "a custom skin defined");
+    const ViewerSkin *c = viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 7);
+    CHECK(c && c->custom_id && !strcmp(c->custom_id, "64f0c1a2b3") && c->weapon == 6 && c->type == 0 &&
+          (c->flags2 & (VS2_CUSTOM_SOUND | VS2_CUSTOM_SWAP_SOUND | VS2_CUSTOM_INSPECT_SOUND | VS2_INSP_S_LOOP)) ==
+              (VS2_CUSTOM_SOUND | VS2_CUSTOM_SWAP_SOUND | VS2_CUSTOM_INSPECT_SOUND | VS2_INSP_S_LOOP), "the custom skin's _id and sound flags");
+    char name[96];
+    float volume = 0.0f;
+    int loop = 0;
+    CHECK(viewer_loadout_skin(VIEWER_CUSTOM_SKIN_MIN + 7, -1, 5) == VIEWER_CUSTOM_SKIN_MIN + 7, "getSkinForLoadout finds a custom skin");
+    CHECK(viewer_weapon_shot_sound("weapon_6", c, 5, 0, 0, name, sizeof(name)) == 2 && !strcmp(name, "asset:skins/64f0c1a2b3"),
+          "customSound: the shot plays its user asset (%s)", name);
+    CHECK(viewer_weapon_shot_sound("weapon_6", c, 5, 1, 0, name, sizeof(name)) == 0 && !strcmp(name, "weapon_6"), "upgraded: not the custom sound");
+    CHECK(viewer_skin_swap_sound(NULL, 0.0f, c, name, sizeof(name), &volume) && !strcmp(name, "asset:skins/64f0c1a2b3/sound_swap") &&
+          volume == 1.0f, "customSwapSound (%s, %g)", name, volume);
+    CHECK(viewer_skin_inspect_sound(c, name, sizeof(name), &loop) && !strcmp(name, "asset:skins/64f0c1a2b3/sound_inspect") && loop,
+          "customInspectSound, inspSLoop (%s)", name);
+    CHECK(define(VIEWER_CUSTOM_SKIN_MIN + 8, "{\"name\":\"Plain\",\"weapon\":6,\"_id\":12345}") &&
+          !strcmp(viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 8)->custom_id, "12345") &&
+          viewer_weapon_shot_sound("weapon_6", viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 8), 5, 0, 0, name, sizeof(name)) == 0 &&
+          !strcmp(name, "weapon_6") && !viewer_skin_swap_sound(NULL, 0.0f, viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 8), name, sizeof(name), &volume),
+          "a custom skin without its sounds plays the weapon's (a numeric _id as text)");
+
     printf("skin_define_test: %d/%d passed\n", g_checks - g_failures, g_checks);
     return g_failures ? 1 : 0;
 }

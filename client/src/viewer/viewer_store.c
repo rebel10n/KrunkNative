@@ -40,7 +40,7 @@ const ViewerSkin *viewer_skin(const int index) {
 }
 
 ViewerSkin *viewer_skin_define_slot(const int index) {
-    if (index < 0 || index > VIEWER_SKIN_INDEX_MAX) return NULL;
+    if (index < 0 || (index > VIEWER_SKIN_INDEX_MAX && index < VIEWER_CUSTOM_SKIN_MIN)) return NULL;
     for (int i = 0; i < g_defines.count; i++) {
         if (g_defines.skin_index[i] == index) return &g_defines.skin[i];
     }
@@ -159,12 +159,66 @@ int viewer_weapon_shot_sound(const char *sound, const ViewerSkin *skin, const in
         const ViewerAltSkin *alt = viewer_weapon_alt_skin(weapon_id, 0);
         skin = alt ? &alt->skin : NULL;
     }
-    if (upgraded || !skin || skin->weapon - 1 != weapon_id || skin->mid < 0 || (skin->flags2 & VS2_NO_SND)) {
+    if (upgraded || (skin && skin->weapon - 1 != weapon_id)) skin = NULL;
+    // playSound(ae.customSound ? "skins/" + ae._id : indexOf(...), ..., isAsset ae.customSound) (deob:196407)
+    if (skin && (skin->flags2 & VS2_CUSTOM_SOUND) && skin->custom_id) {
+        snprintf(out, n, "asset:skins/%s", skin->custom_id);
+        return 2;
+    }
+    if (!skin || skin->mid < 0 || (skin->flags2 & VS2_NO_SND)) {
         snprintf(out, n, "%s", sound);
         return 0;
     }
     snprintf(out, n, "%s_%d", sound, skin->mid);
     return 1;
+}
+
+void viewer_skin_reload_sound(const char *weapon_sound, const ViewerSkin *skin, const int n, char *out, const size_t size) {
+    if (!out || !size) return;
+    // `var r = "reload"; if (ae && ae.reloadSnd) r = weapon.sound + (ae.mid != null ? "_" + ae.mid : "") + "_r"; r + "_" + n`
+    if (skin && (skin->flags2 & VS2_RELOAD_SND) && weapon_sound && weapon_sound[0]) {
+        if (skin->mid >= 0) snprintf(out, size, "%s_%d_r_%d", weapon_sound, skin->mid, n);
+        else snprintf(out, size, "%s_r_%d", weapon_sound, n);
+    } else {
+        snprintf(out, size, "reload_%d", n);
+    }
+}
+
+int viewer_skin_kill_sound(const char *weapon_sound, const ViewerSkin *skin, char *out, const size_t size) {
+    if (!out || !size) return 0;
+    out[0] = 0;
+    // `if (ae && ae.killSnd && ae.type) return weapon.sound + (ae.id != null ? "_" + ae.id : "")`
+    if (!skin || !(skin->flags2 & VS2_KILL_SND) || !skin->type || !weapon_sound) return 0;
+    if (skin->id >= 0) snprintf(out, size, "%s_%d", weapon_sound, skin->id);
+    else snprintf(out, size, "%s", weapon_sound);
+    return out[0] != 0;
+}
+
+int viewer_skin_swap_sound(const char *weapon_swap_snd, const float weapon_swap_vol, const ViewerSkin *skin, char *out, const size_t size,
+                           float *volume) {
+    if (!out || !size) return 0;
+    out[0] = 0;
+    // `custom = ae.customSwapSound && ae._id; name = custom ? "skins/" + ae._id + "/sound_swap" : weapon.swapSnd ?? ae.swapSnd;
+    //  vol = weapon.swapSndVol ?? ae.swapSndVol; play(name, vol ?? (custom ? 1 : 0.05), false, 1, !!custom)`
+    const int custom = skin && (skin->flags2 & VS2_CUSTOM_SWAP_SOUND) && skin->custom_id;
+    if (custom) snprintf(out, size, "asset:skins/%s/sound_swap", skin->custom_id);
+    else if (weapon_swap_snd && weapon_swap_snd[0]) snprintf(out, size, "%s", weapon_swap_snd);
+    else if (skin && skin->swap_snd && skin->swap_snd[0]) snprintf(out, size, "%s", skin->swap_snd);
+    if (!out[0]) return 0;
+    if (volume) *volume = weapon_swap_vol > 0.0f ? weapon_swap_vol : skin && skin->swap_snd_vol > 0.0f ? skin->swap_snd_vol : custom ? 1.0f : 0.05f;
+    return 1;
+}
+
+int viewer_skin_inspect_sound(const ViewerSkin *skin, char *out, const size_t size, int *loop) {
+    if (!out || !size) return 0;
+    out[0] = 0;
+    if (loop) *loop = skin && (skin->flags2 & VS2_INSP_S_LOOP);
+    if (!skin) return 0;
+    // `if (ae.customInspectSound && ae._id) play("skins/" + ae._id + "/sound_inspect", 1, ae.inspSLoop, 1, true, ...)
+    //  else if (ae.inspS) play(ae.inspS, 1, ae.inspSLoop, 1, null, ...)`
+    if ((skin->flags2 & VS2_CUSTOM_INSPECT_SOUND) && skin->custom_id) snprintf(out, size, "asset:skins/%s/sound_inspect", skin->custom_id);
+    else if (skin->insp_s && skin->insp_s[0]) snprintf(out, size, "%s", skin->insp_s);
+    return out[0] != 0;
 }
 
 const ViewerOptionList *viewer_option_list(const ViewerListKind kind, const int key, const int season) {

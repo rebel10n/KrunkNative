@@ -61,7 +61,8 @@ void asset_fetch_client_init(void) {
     asset_set_fetch_hook(fetch_hook);
 }
 
-// sound/<name>.mp3 -> <name>; user-assets/<id>/sound.mp3 -> asset:<id> (audio.c clip names)
+// sound/<name>.mp3 -> <name>; user-assets/<id>/sound.mp3 -> asset:<id>; user-assets/<id>/sound_<x>.mp3 (a custom skin's
+// sound_swap / sound_inspect) -> asset:<id>/sound_<x> (audio.c clip names)
 static int sound_name(const char *rel, char *out, const size_t n) {
     const size_t len = strlen(rel);
     if (!strncmp(rel, "sound/", 6) && len > 10 && !strcmp(rel + len - 4, ".mp3")) {
@@ -70,6 +71,11 @@ static int sound_name(const char *rel, char *out, const size_t n) {
     }
     if (!strncmp(rel, "user-assets/", 12) && len > 22 && !strcmp(rel + len - 10, "/sound.mp3")) {
         snprintf(out, n, "asset:%.*s", (int) (len - 22), rel + 12);
+        return 1;
+    }
+    const char *last = strrchr(rel, '/');
+    if (!strncmp(rel, "user-assets/", 12) && last && !strncmp(last + 1, "sound_", 6) && len > 16 && !strcmp(rel + len - 4, ".mp3")) {
+        snprintf(out, n, "asset:%.*s", (int) (len - 16), rel + 12);
         return 1;
     }
     return 0;

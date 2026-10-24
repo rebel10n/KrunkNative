@@ -328,6 +328,17 @@ static cJSON *custom_map(const KrunkerValue *custom, char *id, const size_t id_s
     return json;
 }
 
+// init arg 9 .customSkins (deob-10.0.3.js:256798-256830): the custom game's studio skins {id: skin} (ids from 10000000,
+// skinManager.setSkin), as JSON for the client's store (viewer_skin_define); NULL when there are none.
+static cJSON *custom_skins(const KrunkerValue *custom) {
+    const KrunkerValue *skins = krunker_is(custom, KRUNKER_MAP) ? krunker_get(custom, "customSkins") : NULL;
+    if (!krunker_is(skins, KRUNKER_MAP)) return NULL;
+    KrunkerBuf buf = {0};
+    cJSON *json = krunker_value_to_json(skins, &buf) == KRUNKER_PROTO_OK ? cJSON_ParseWithLength((const char *) buf.data, buf.len) : NULL;
+    krunker_buf_free(&buf);
+    return json;
+}
+
 // init [2] eventIndex (game.init, deob-10.0.3.js:219812) for the client's game, after the INIT (which resets it)
 static void emit_event_index(KrunkerLink *l) {
     const NetInitEventPacket ev = {.event_index = l->event_index};
@@ -348,6 +359,7 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     info.map_index = map;
     info.mode_index = mode;
     info.custom = custom_map(arg(f, KRUNKER_MAPS_INIT_CUSTOM_ARG), info.custom_id, sizeof(info.custom_id));
+    info.custom_skins = custom_skins(arg(f, KRUNKER_MAPS_INIT_CUSTOM_ARG));
     // initGame drops our player (you = null) until the new round's "0": no input frame meanwhile, so the
     // last round's player (still alive on our side until INIT reaches the game) sends nothing into this one
     if (l->my_sid >= 0) l->you_gone = 1;
@@ -355,6 +367,7 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     if (map < 0 && !info.custom && !info.custom_id[0]) {
         l->unsupported_map = map;
         note(l, KRUNKER_LINK_EV_UNSUPPORTED, "the server's init names no map");
+        cJSON_Delete(info.custom_skins);
         return;
     }
     l->unsupported_map = -1;
@@ -394,12 +407,13 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     static const uint8_t social = NET_SOCIAL_V7_VERSION;
     if (l->io.map) {
         info.init = init;
-        l->io.map(l->io.user, &info); // takes info.custom
+        l->io.map(l->io.user, &info); // takes info.custom and info.custom_skins
         emit(l, NET_PACKET_SOCIAL_V7, &social, 1);
         emit_event_index(l);
         return;
     }
     cJSON_Delete(info.custom);
+    cJSON_Delete(info.custom_skins);
     emit(l, NET_PACKET_INIT, &init, sizeof(init));
     emit(l, NET_PACKET_SOCIAL_V7, &social, 1);
     emit_event_index(l);

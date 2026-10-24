@@ -137,7 +137,23 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
    and nothing for a name outside networkSounds, as v10's indexOf gives -1 (`viewer_weapon_shot_sound`,
    `client/src/sound_events.c` shot_sound: our shots and other players' on KN servers; on the official link the
    server names the sound in its own "s"). Every networkSounds file is installed but weapon_13, weapon_18,
-   weapon_7_0 and weapon_4_16, which 404 on assets.krunker.io (2026-10-24): nothing new to deploy.
+   weapon_7_0 and weapon_4_16, which 404 on assets.krunker.io (2026-10-24): nothing new to deploy. The other skin
+   sounds (`client/src/sound_events.c`, names from `viewer_store.c`): reload (getReloadSnd, deob:198751-198758: a
+   reloadSnd skin of player.skins[loadoutIndex] plays weapon.sound_<mid>_r_1 / _r_2, else reload_1 / reload_2, the
+   second when the reload ends as 10.0.3's player.update calls endReload, deob:192306-192308, no longer at half time as
+   v7.1.4); the kill sound (getKillSnd, deob:198732-198750: the Combat Knife's melee skin or player.skins[loadout
+   .indexOf(wId)], a killSnd item's weapon.sound_<id> if networkSounds has it, GET_KILL :259296-259304); the swap sound
+   (swapWeapon, deob:198261-198268: customSwapSound, else weapon.swapSnd (the Build Tool's paper_1) ?? skin.swapSnd at
+   swapSndVol ?? 0.05, melee_equip only without one); the inspect sound (wInspect / cancelInspect, deob:195531-195540,
+   :195578-195584: customInspectSound or inspS, looping with inspSLoop, stopped by a cancel). inspS, inspSLoop, swapSnd
+   and swapSndVol are in the store table (generator and sdc parser). A custom game's studio skins (init customsData
+   .customSkins, ids from 10000000, deob:20133, :256798-256830) are defined through the official link
+   (`krunker_link.c` -> `krunker_net.c` -> `viewer_skin_define`) with their `_id`: customSound plays user asset
+   skins/<_id>/sound.mp3 for the shot (deob:196407), customSwapSound / customInspectSound skins/<_id>/sound_swap.mp3 /
+   sound_inspect.mp3 (getSound, deob:225205; `user_asset_path.c` accepts them, `audio.c` names them). Not ported: a
+   flipAnim melee's melee_equip on inspect, and custom skin models / textures (customModel / customTextures: the plain
+   weapon is drawn). Other players' custom shot sounds on the official link need the server's "s" name to fit the sound
+   packet (NET_SOUND_NAME_SIZE).
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
 3. Done: the KrunkScript AI parts, `ai.solid` and the `playAnim` hold (doc/v10/krunkscript-1003.md). Left: the client side
    of `scripts.shared` (local entity simulation needs entity replication first, section 5 there).

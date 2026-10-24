@@ -17,8 +17,23 @@ static int digits(const char *s, const size_t n) {
     return 1;
 }
 
+// A map studio's custom skin's sounds (v10.0.3: the shot "skins/" + _id, the swap ".../sound_swap", the inspect
+// ".../sound_inspect", deob-10.0.3.js:196407, :198265, :195533, played from userAssetsUrl, :225205):
+// skins/<_id>/sound.mp3, sound_swap.mp3, sound_inspect.mp3 (_id: letters, digits, '_' or '-')
+static int custom_skin_sound(const char *rel) {
+    if (strncmp(rel, "skins/", 6) != 0) return 0;
+    const char *id = rel + 6, *slash = strchr(id, '/');
+    if (!slash || slash == id || slash - id > 64) return 0;
+    for (const char *c = id; c < slash; c++) {
+        const int ok = (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || *c == '_' || *c == '-';
+        if (!ok) return 0;
+    }
+    return !strcmp(slash + 1, "sound.mp3") || !strcmp(slash + 1, "sound_swap.mp3") || !strcmp(slash + 1, "sound_inspect.mp3");
+}
+
 int user_asset_rel_ok(const char *rel) {
     if (!rel) return 0;
+    if (custom_skin_sound(rel)) return 1;
     const char *slash = strchr(rel, '/');
     if (!slash) return 0;
     const size_t n = (size_t) (slash - rel);

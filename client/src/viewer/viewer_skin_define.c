@@ -18,6 +18,7 @@ typedef struct {
     int index;
     cJSON *json;
     char tex[32];          // a numeric tex as text
+    char custom_id[32];    // a numeric _id as text
     char *paint_targets;   // paintTargets joined by ","
 } Definition;
 
@@ -143,7 +144,8 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
         {"stepSnd", VS2_STEP_SND}, {"jumpSnd", VS2_JUMP_SND}, {"reloadSnd", VS2_RELOAD_SND}, {"explode", VS2_EXPLODE},
         {"sameEnv", VS2_SAME_ENV}, {"forceAttach", VS2_FORCE_ATTACH}, {"tradable", VS2_TRADABLE},
         {"limitedSpin", VS2_LIMITED_SPIN}, {"premiumSpin", VS2_PREMIUM_SPIN}, {"paintTargets", VS2_PAINTABLE},
-        {"noComp", VS2_NO_COMP}, {"noSnd", VS2_NO_SND},
+        {"noComp", VS2_NO_COMP}, {"noSnd", VS2_NO_SND}, {"inspSLoop", VS2_INSP_S_LOOP}, {"customSound", VS2_CUSTOM_SOUND},
+        {"customSwapSound", VS2_CUSTOM_SWAP_SOUND}, {"customInspectSound", VS2_CUSTOM_INSPECT_SOUND},
     };
     for (size_t i = 0; i < sizeof(flags2) / sizeof(flags2[0]); i++)
         if (truthy(get(j, flags2[i].key))) s->flags2 |= flags2[i].bit;
@@ -183,6 +185,16 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
     s->rot_t = f(j, "rotT"), s->spd = f(j, "spd");
     s->left_hold[0] = f(j, "leftHoldX"), s->left_hold[1] = f(j, "leftHoldY"), s->left_hold[2] = f(j, "leftHoldZ");
     s->right_hold[0] = f(j, "rightHoldX"), s->right_hold[1] = f(j, "rightHoldY"), s->right_hold[2] = f(j, "rightHoldZ");
+    // v10.0.3 skin sounds: inspS / swapSnd / swapSndVol, and a custom skin's _id (its user-asset folder skins/<_id>/)
+    s->insp_s = str(get(j, "inspS"));
+    s->swap_snd = str(get(j, "swapSnd"));
+    s->swap_snd_vol = f(j, "swapSndVol");
+    const cJSON *custom_id = get(j, "_id");
+    if (cJSON_IsString(custom_id) && custom_id->valuestring[0]) s->custom_id = custom_id->valuestring;
+    else if (cJSON_IsNumber(custom_id)) {
+        snprintf(d->custom_id, sizeof(d->custom_id), "%.17g", custom_id->valuedouble);
+        s->custom_id = d->custom_id;
+    }
 }
 
 int viewer_skin_define(const int index, const cJSON *skin) {

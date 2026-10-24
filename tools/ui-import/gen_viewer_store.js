@@ -96,6 +96,7 @@ const rows = store.skins.map((s, i) => {
   flag2(s.reloadSnd, 'VS2_RELOAD_SND'); flag2(s.spraySnd != null, 'VS2_SPRAY_SND'); flag2(s.explode, 'VS2_EXPLODE');
   flag2(s.sameEnv, 'VS2_SAME_ENV'); flag2(truthy(s.forceAttach), 'VS2_FORCE_ATTACH');
   flag2(truthy(s.noSnd), 'VS2_NO_SND'); // a remodel that keeps the weapon's shot sound (v10.0.3 shoot, deob-10.0.3.js:196403)
+  flag2(truthy(s.inspSLoop), 'VS2_INSP_S_LOOP'); // the inspect sound loops (wInspect, deob-10.0.3.js:195536)
   // v10.0.2: the server's tradable bit, limitedSpin (a noSpin item a wheel may still draw),
   // premiumSpin, paint consumables / paintable items, item sets
   flag2(s.tradable, 'VS2_TRADABLE'); flag2(s.limitedSpin, 'VS2_LIMITED_SPIN'); flag2(s.premiumSpin, 'VS2_PREMIUM_SPIN');
@@ -116,6 +117,10 @@ const rows = store.skins.map((s, i) => {
   if (Array.isArray(s.paintTargets)) fields.push(`.paint_targets = ${cstr(s.paintTargets.map(String).join(','))}`);
   if (s.title != null) fields.push(`.title = ${num(s.title, 0)}`);
   if (s.set) fields.push(`.set = ${cstr(s.set)}`, `.set_min = ${num(s.setMin, 0)}`);
+  // v10.0.3 skin sounds: the inspect sound (wInspect, deob-10.0.3.js:195536) and the swap sound (swapWeapon, :198265)
+  if (typeof s.inspS === 'string' && s.inspS) fields.push(`.insp_s = ${cstr(s.inspS)}`);
+  if (typeof s.swapSnd === 'string' && s.swapSnd) fields.push(`.swap_snd = ${cstr(s.swapSnd)}`);
+  if (num(s.swapSndVol, 0)) fields.push(`.swap_snd_vol = ${f(num(s.swapSndVol, 0))}`);
   opt('legLen', 'leg_len', 0); opt('sitOffX', 'sit_off_x', 0); opt('syRot', 'sy_rot', 0); opt('szRot', 'sz_rot', 0);
   opt('glowInt', 'glow_int', 0); opt('minGlo', 'min_glo', 0); opt('rgbS', 'rgb_s', 0); opt('rgbT', 'rgb_t', 0);
   opt('rAnimT', 'r_anim_t', 0); opt('rAnimM', 'r_anim_m', 0); opt('movD', 'mov_d', 0); opt('movE', 'mov_e', 0);
