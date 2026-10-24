@@ -942,6 +942,16 @@ else ()
 
     # navgen_test: the Krunker v7.1.4 generated nav mesh (shared/src/navgen.c) against v7's navgen.ts
     add_executable(navgen_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/navgen_test.c)
+    # prize_wheel_test (v10.0.3 map prize wheels): the spinner list, its GameObject and the type 9 prompt
+    # (shared/src/map_spinners.c, interact.c) and the GL-free canvas layout (client/src/prize_wheel_geom.c)
+    add_executable(prize_wheel_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/prize_wheel_geom.c client/include/prize_wheel_geom.h
+                   client/tests/prize_wheel_test.c)
+    target_include_directories(prize_wheel_test PRIVATE client/include)
+    target_link_libraries(prize_wheel_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(prize_wheel_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME prize_wheel_test COMMAND prize_wheel_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     target_link_libraries(navgen_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(navgen_test PRIVATE ws2_32) # shared/src/net.c
