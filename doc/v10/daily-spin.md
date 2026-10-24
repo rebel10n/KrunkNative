@@ -1,7 +1,7 @@
 # Daily Spin (v10.0.3)
 
 The sidebar's Daily Spin item (`#dailySpinDiv`) as Krunker v10.0.3 has it, and what Krunker
-Box Office does on each server type. Reference: `~/.cache/kn-v103/deob-10.0.3.js` (the readable
+Box Office does on each server type. Reference: `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (the readable
 bundle; line numbers and byte offsets are into that file). `game.js` in
 `~/jails/kru/src/Krunker_v10.0.3/` is the same code string-encoded (its `$dailySpinState`
 block starts at byte 6656308, the `dailySpinDiv` markup at byte 112137), so the deob offsets are

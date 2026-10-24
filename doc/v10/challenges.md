@@ -5,7 +5,7 @@ account's challenges by type. KrunkNative draws it in `client/src/ui/v10_rewards
 `account_ui.c`'s `gen_challenges` is the v7 page's copy and is never reached on the v10 page, because
 `ui_window_generate` asks `v10_rewards_window_gen(33)` first).
 
-Offsets: `deob` is `~/.cache/kn-v103/deob-10.0.3.js` (line numbers, the decoded bundle the repo cites);
+Offsets: `deob` is `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (line numbers, the decoded bundle the repo cites);
 `game.js` is `~/jails/kru/src/Krunker_v10.0.3/game.js` (byte offsets of a greppable token, `grep -b -F`).
 Read-only references; nothing was copied from them.
 
@@ -105,7 +105,7 @@ invent the rows. Box Office keeps the brain's seed until the definitions can be 
 ### 4b. No generator in the v10.0.3 bundle (checked 2026-10-22)
 
 The official map, weapon and ranked rows cannot be generated from the bundle, so Box Office does not generate
-them. What the bundle does carry (deob = `~/.cache/kn-v103/deob-10.0.3.js`):
+them. What the bundle does carry (deob = `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js`):
 
 - Row shape and the check: `checkChallenge` 202974-203022 (`DAT.ky` string or array, `DAT.val`, `DAT.mp`,
   `DAT.wep`, `DAT.cls`, `DAT.uniq`, `DAT.sm`; `PT` 1 = complete; `PV` progress, `SV` start value).

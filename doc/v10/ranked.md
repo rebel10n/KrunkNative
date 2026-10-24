@@ -1,8 +1,8 @@
 # Krunker v10.0.2 ranked
 
-Source: `/home/user/Downloads/v10.0.2.js` (client bundle, `gameVersion` "10.0.1", `clientVersion`
-"10.0.1r1"). Line numbers `v10:N` refer to the identifier-renamed copy `~/.cache/kn-v10/v10.js`
-(same line layout as the original; only `iîïí...` names became `_N`). v7.1.4 refs are
+Source: `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (client bundle, `gameVersion` "10.0.1", `clientVersion`
+"10.0.1r1"). Line numbers `v10:N` are its lines (they were taken from an identifier-renamed copy with
+the same line layout, where `iîïí...` names became `_N`). v7.1.4 refs are
 `/home/user/jails/kru/src/Krunker_v7.1.4/src/...`. The ranked *server* (matchmaker, MMR,
 match creation) is not in the bundle: everything below is what the client and the shared game
 code (the bundle also carries the server-side `Game` class) show. Guesses are marked (guess).

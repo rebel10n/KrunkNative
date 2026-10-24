@@ -10,8 +10,9 @@ Date of this review: 2026-10-21. Base: Krunker v10.0.2 (`doc/v10/`, the referenc
   Krunker's, not KrunkNative's.
 - **Bundle diff (inferred from code).** The v10.0.3 client `game.js` (13.1 MB, single-line, obfuscated)
   and the v10.0.2 client `v10.0.2.js` (13.6 MB) were both run through webcrack (static, no
-  execution). The string literals, object keys, i18n keys and numeric literals of each build were
-  extracted with a Babel parser and compared as sets. Identifiers are mangled per build, so the diff
+  execution): `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` and `deob/v10.0.2/game.deob.js`
+  (decoder `deob/tools/deob.cjs`, see `deob/README.md`). The string literals, object keys, i18n keys
+  and numeric literals of each build were extracted (`deob/tools/extract.js`) and compared as sets. Identifiers are mangled per build, so the diff
   is at the level of strings, keys and numbers, not of code. Items marked "inferred" below come from
   this diff and are not in the official text.
 
@@ -35,10 +36,15 @@ official text. Where a bundle item has no official line, it is marked "unlisted"
 | Profile picture upload | `pfpUploaded`, `setPfpUploaded`, `pfpUrl` | Unlisted |
 | Asset host | `userAssetsBase` / `USER_ASSETS_BASE` added; the `https://assets.krunker.io/p` literal removed | Unlisted (infrastructure) |
 | Version | `10.0.3` string; `10.0.1` removed; build hash in asset URLs changed | Yes (version) |
+| Packet trailer `ahNum` step | `this.ahNum = add(this.ahNum, 3)` (`(a + b) & 255`) before every send but `cptR` (`deob-10.0.3.js:111514`, helper 27698); 10.0.2 added `1597` (& 255 = 61, `v10.0.2/game.deob.js:111476`) | Unlisted (wire) |
 
 Removed in 10.0.3 (inferred, unlisted): the `Eterno Simulator` literal in the client, and the
-`setTimeout` / `listeners` / `localInspectSound` helper names. The number literals changed in two
-places (`60000000`, `1179937895` added; `0.6075`, `1597` removed); these are internal constants.
+`setTimeout` / `listeners` / `localInspectSound` helper names. The number-literal sets differ in four
+values (`60000000`, `1179937895` added; `0.6075`, `1597` removed). `1597` was 10.0.2's `ahNum` step;
+10.0.3 steps by 3 (row above; a set diff cannot show it, 3 is everywhere), which is KN's
+`KRUNKER_AHKEY` 0x3 (`shared/include/krunker_build.h`). `1597334677`, in both builds, is a
+`Math.imul` hash multiplier (`deob-10.0.3.js:59156`), not the key. `60000000` is the asset download
+cap (204238), `1179937895` the GLB magic (204351) and `0.6075` a render-block y offset.
 
 ## Classification and KrunkNative action
 
@@ -79,20 +85,20 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 | player.pose armL and armR now move only their own arm in third person | Bug (KrunkScript pose) | Not ported: KN has no `player.pose`. |
 | Added the Solid Ramp Sides map setting (rampFix) | Feature (map and physics) | **Ported:** map flag `rampFix` (`shared/src/map.c`, `shared/include/shared.h`) and the ramp side block in `shared/src/player.c` (`movement_block_ramp_side`, the check in the ramp branch of `player_do_map_collisions`). Regression test `shared/tests/ramp_fix_test.c` (fails without the port). The editor checkbox (Essential panel, next to Force Old AO, `client/src/editor/editor_gameconfig.c`) and the game option `config.rampFix` (`GameConfig.ramp_fix`, folder Other, `shared/src/game_config.c`) are ported too; `ramp_fix_test` checks the config path. |
 | Added preciseHits for AI (bodyDamage, setPartDamage, glowPart, setNodeVisible, getPartPosition, onAIPartDamage) | Feature (KrunkScript AI) | Not ported: KN's AI is one model with no named parts, and KN has no part hooks or `bodyDamage`. |
-| Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Ported: `AI.spawn` `alwaysSync` (`GameAIData.always_sync`); the AI skips the 800 range of `game_ai_sync` (`shared/src/ai.c`). The official line only names the option; "every player whatever its distance" is read from the name. `ai.solid` and the `hold` option of `ai.playAnim` are not ported: neither exists in v10.0.2 (`~/.cache/kn-v10/v10.js` has no `solid` in JavaScript form and no options object on `ai.playAnim`), and the official line gives no behaviour. v10.0.2's `AI.sync` (`this["sync"]` in v10.js) skips any AI more than 800 from a non-spectating player, sent or not; `alwaysSync` is KN's exemption from that gate, and v10.js has no `alwaysSync`. |
+| Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Ported: `AI.spawn` `alwaysSync` (`GameAIData.always_sync`); the AI skips the 800 range of `game_ai_sync` (`shared/src/ai.c`). The official line only names the option; "every player whatever its distance" is read from the name. `ai.solid` and the `hold` option of `ai.playAnim` are not ported: neither exists in v10.0.2 (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` has no `solid` in JavaScript form and no options object on `ai.playAnim`), and the official line gives no behaviour. v10.0.2's `AI.sync` (`this["sync"]` in v10.js) skips any AI more than 800 from a non-spectating player, sent or not; `alwaysSync` is KN's exemption from that gate, and v10.js has no `alwaysSync`. |
 | Added opt-in environment reflections for GLB materials | Feature (rendering) | Not ported: KN has no GLB material reflections (env maps exist for skins only, `client/src/skin_fx.c`). |
 | Live assets with complex collision now stop shots | Feature (rules) | No change. Shots trace complex-collision objects by their box (`combat_trace`, `shared/src/player.c`), so KN already stops shots at them. Not compared with the v10.0.2 bundle (not on disk). |
 | GAME.CONFIG.getMatch().started is now false during the round countdown | Feature (KrunkScript) | Ported: `CONFIG.getMatch().started` (`shared/src/ks_game/ks_hostobj.c`) is false while a pre-match wait timer runs (the countdown) and true once the round has started. The official line does not define the exact state; this reads "countdown" as the non-contTime wait timers (`mode_match_starting`). v10.0.2's `getMatch` (v10.js) returns only `players`, `capacity` and `teams` (and `null` with no game), so `started` is 10.0.3-only and the reading is inferred. |
 | AI models now load once per game | Internal (performance) | Ignored. |
 | Fixed scene objects stacking up and looped sounds breaking at the next round | Bug (KrunkScript round restart) | Not applicable: the client unloads the script, with its scene objects and sounds, on every round (`ks_client_round` in `client/src/ks/ks_client_host.c`). |
-| Fixed walking AI falling through the floor | Bug (KrunkScript AI) | Fixed in KN (`shared/src/ai.c`, last branch of `ai_collide_map`): an AI already inside a box's height range, more than 3 units under its top, matched no branch and fell forever. Reproduced by `ai_floor_test` (walker spawned 2 and 6 units under a flat floor: y to -100 before). A walker on the floor never fell in five normal cases. v10.0.2's collision rule is the same as KN's before the fix (`collidesAcc` block in `~/.cache/kn-v10/v10.js`), so the fix is KN's own, not a v10.0.2 port. |
+| Fixed walking AI falling through the floor | Bug (KrunkScript AI) | Fixed in KN (`shared/src/ai.c`, last branch of `ai_collide_map`): an AI already inside a box's height range, more than 3 units under its top, matched no branch and fell forever. Reproduced by `ai_floor_test` (walker spawned 2 and 6 units under a flat floor: y to -100 before). A walker on the floor never fell in five normal cases. v10.0.2's collision rule is the same as KN's before the fix (`collidesAcc` block in `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`), so the fix is KN's own, not a v10.0.2 port. |
 
 ### Unlisted bundle items
 
 | Item | Class | KN action |
 |---|---|---|
-| Purchase-progress strings (`purchase.*`, `purchaseWaitLabel`) | Feature (unlisted) | Decision. Needs the official line first. |
-| Skin paint badge markup | Feature (unlisted) | Decision. The 10.0.2 line is the nearer parity item. |
+| Purchase-progress strings (`purchase.*`, `purchaseWaitLabel`) | Feature (unlisted) | Done: the keys are in `ui/i18n/en.json` (10.0.3's English table) and `#purchaseWaitLabel` is in the page and `ui/css/main.css`. Nothing in `client/src/` writes the label yet. |
+| Skin paint badge markup | Feature (unlisted) | **Ported:** `client/src/ui/skin_paint.c` (`skin_paint_badge`, 10.0.3's `skinPaintBadge` / `skinPaintSwatch` markup and the `windows.skins.painted` title, `deob-10.0.3.js:241529`), drawn on owned cards by `ui_loadout.c` and `v10_market.c`; test `client/tests/skin_paint_test.c`. |
 | GLB validation messages, profile picture upload keys, storage queue | Internal or editor (unlisted) | Ignored. |
 | Renewal price text | Feature (unlisted) | Decision (the $4.99 renewal is a 10.0.2 item). |
 | Asset host | Internal | Ignored. |

@@ -1,6 +1,6 @@
 # Krunker v10.0.3: round wins outside best-of, and Battle Pass points per public match
 
-Two rules that `doc/v10/gameplay-1003-audit.md` left open. Reference: `~/jails/kru/src/Krunker_v10.0.3/game.js` (read only). Offsets are in the decoded copy `~/.cache/kn-v103/deob-10.0.3.js` (webcrack; it has no undecoded string-array calls left, so every reference to a name in it is listed here): "deob byte N (line L)" is the UTF-8 byte offset and line. "raw byte N" is the offset in the minified `game.js`. Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/src/data/game.js`) is cited where it has the same code.
+Two rules that `doc/v10/gameplay-1003-audit.md` left open. Reference: `~/jails/kru/src/Krunker_v10.0.3/game.js` (read only). Offsets are in the decoded copy `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (webcrack; it has no undecoded string-array calls left, so every reference to a name in it is listed here): "deob byte N (line L)" is the UTF-8 byte offset and line. "raw byte N" is the offset in the minified `game.js`. Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/src/data/game.js`) is cited where it has the same code.
 
 ## 1. Team round wins outside best-of
 

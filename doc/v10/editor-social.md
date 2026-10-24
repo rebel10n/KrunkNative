@@ -12,7 +12,7 @@ after, and the evidence in the v10 code.
 | E10 | v10 editor bundle `static/editor-BB8B-v0i.js`, webcracked, identifiers renamed | `~/.cache/kn-v10/webcrack/editor/renamed.js` |
 | S10 | v10 hub bundle `static/social-HkHNbDV5.js` | `~/.cache/kn-v10/webcrack/social/renamed.js` |
 | IDX / CFG / CLS | shared chunks `index-ijbf4YAj.js` (editor GUI blueprints, Svelte components), `config-BESDNTCo.js`, `classes-CpVJB-jW.js` | `~/.cache/kn-v10/webcrack/shared/{index,config,classes}/renamed.js` |
-| V10 | the v10 game client (prefab / trigger tables) | `~/.cache/kn-v10/v10.js` (`doc/v10/ui.md`) |
+| V10 | the v10 game client (prefab / trigger tables) | `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (`doc/v10/ui.md`) |
 | v7 | Krunker v7.1.4 | `/home/user/jails/kru/src/Krunker_v7.1.4/` (`src/editor.js` E:, `src/ui/editor.js` UI:, `src/social.js`) |
 
 webcrack: `webcrack` 2.16 from `~/src/kru-deob-1`, run from a private copy with isolated-vm 6.2 for

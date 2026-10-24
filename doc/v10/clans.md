@@ -1,6 +1,6 @@
 # Krunker v10.0.2 clans and Turf Wars (clan wars)
 
-Source and line conventions as in `ranked.md` (`v10:N` = `~/.cache/kn-v10/v10.js`, v7 refs under
+Source and line conventions as in `ranked.md` (`v10:N` = `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`, v7 refs under
 `/home/user/jails/kru/src/Krunker_v7.1.4/src/`). Guesses are marked (guess).
 
 ## Summary of change vs v7.1.4

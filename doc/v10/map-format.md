@@ -1,8 +1,7 @@
 # v10.0.2 map format: changes from v7.1.4
 
-Sources: v10 = `/home/user/Downloads/v10.0.2.js` after the identifier-rename pass
-(`~/.cache/kn-v10/v10.js`; `Lnnnnnn` = line in that renamed file, same line count as the
-original). v7 = `/home/user/jails/kru/src/Krunker_v7.1.4/src/` (`map.js` = `data/map.js`, `MM` =
+Sources: v10 = `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (`Lnnnnnn` = its line; the citations were taken
+from an identifier-renamed copy with the same line layout). v7 = `/home/user/jails/kru/src/Krunker_v7.1.4/src/` (`map.js` = `data/map.js`, `MM` =
 `libs/MapManager.js`, `PF` = `data/prefabs.js`, `TRG` = `data/triggers.js`, `KSA` =
 `libs/createKrunkScriptApiContext.js`, `R` = `libs/render.js`, `CGC` = `data/customGameConfig.js`).
 The parser `this.generate` is L167328-168492 (v7: `map.js:170-1490`).

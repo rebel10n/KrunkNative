@@ -1,7 +1,7 @@
 # v10.0.2 network protocol vs v7.1.4
 
-Sources: `v10.0.2.js` (line numbers refer to the identifier-renamed copy `~/.cache/kn-v10/v10.js`,
-which keeps the original line layout) and the v7.1.4 reference at
+Sources: the v10.0.2 bundle `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (line numbers were taken from an identifier-renamed
+copy with the same line layout, so `_N` names are not in the file) and the v7.1.4 reference at
 `/home/user/jails/kru/src/Krunker_v7.1.4` (`packets.json`, `src/libs/io-client.js`,
 `src/libs/ClientManager.js`, `src/index.js`, `src/data/game.js`). The bundle contains both the
 client and the shared server simulation (`isServer` branches, `game.broadcast(...)`), so
@@ -18,14 +18,18 @@ only as names to map onto new `NET_PACKET_*` types, and for parity in the payloa
 | Socket | `new WebSocket(ws[s]:// + host)`, `binaryType = "arraybuffer"` | same | 98106-98112 |
 | Payload | msgpack `[name, ...args]` | same (`_9203.encode([name].concat(args))`) | 24185-24190 |
 | Trailer | 2 bytes: `ahNum` as 2 nibbles (`encodeShort`) | same (`_9214`: `[n>>4&15, n&15]`) | 24191-24198, 24213 |
-| `ahNum` rotation per send | `ahNum = ahNum + ahk & 255`, `ahk` = `antihackkey.json` = **47** (io-client.js:97) | `ahNum = ahNum + 1597 & 255`, i.e. **+61** per packet; not rotated for `cptR` | 98216 `_34007 != _33976["cptR"] && (this['ahNum'] = _9225(this['ahNum'], 1597))`, `_9225` 24210 |
+| `ahNum` rotation per send | `ahNum = ahNum + ahk & 255`, `ahk` = `antihackkey.json` = **47** (io-client.js:97) | `ahNum = ahNum + 1597 & 255`, i.e. **+61** per packet; not rotated for `cptR`. **v10.0.3: +3** (below) | 98200 `_34007 != _33976["cptR"] && (this['ahNum'] = _9225(this['ahNum'], 1597))`, `_9225` 24210 |
 | Decode | strip last 2 bytes, msgpack decode, `[ahNum, label, args]` | same, plus throws `"Invalid message"` on a non-array | 24200-24209 |
 | Pre-open queue | `sendQueue`, flushed on open | same | 98166-98178 |
 | RPC | `RPC` out / `_0` `_1` in | same, `rpc(name, ...args)` returns a Promise keyed by `rpcCounter` | 98227-98240 |
 | Captcha | `cpt` in, `cptR` out | same (Turnstile site key `0x4AAAAAAD19NTFH3Itq7QOn`, was hCaptcha `c8058d7b-...` in v7 config) | 98124-98131, 16441 |
 
-The only framing change is the anti-hack increment (47 to 1597 & 255 = 61). A server that
-validates `ahNum` has to use the per-version key.
+The only framing change is the anti-hack increment: v7 47, v10.0.2 1597 & 255 = 61, and **v10.0.3
+3** (`deob-10.0.3.js:111514`: `this.ahNum = add(this.ahNum, 3)` with `add` = `(a + b) & 255` at 27698,
+still skipped for `cptR`). KN's `KRUNKER_AHKEY` / `KRUNKER_AHNUM_STEP` are 0x3
+(`shared/include/krunker_build.h`). `1597334677`, a literal in both builds, is a `Math.imul` hash
+multiplier (`deob-10.0.3.js:59156`), not the key. A server that validates `ahNum` has to use the
+per-version key.
 
 ## 2. Handshake / connect URL
 

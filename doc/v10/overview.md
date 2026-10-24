@@ -1,12 +1,12 @@
 # Krunker v10.0.2 client bundle: overview
 
-Source: `~/Downloads/v10.0.2.js` (13 586 176 bytes, 223 181 lines, sha not recorded). It is one
+Source: `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (13 586 176 bytes, 223 181 lines, sha not recorded). It is one
 IIFE (`!function(){'use strict'; ... }(); //# sourceMappingURL=app.js.map`). Identifiers are
 obfuscated (`iîïíîìi`, `IÌíïííí`); strings, property names and numbers are mostly intact (hex
-literals). Never executed. Line numbers below are in the renamed copy
-`~/.cache/kn-v10/v10.js` (made by `~/.cache/kn-v10-tools/rename.py`: identifiers -> `_N`, hex -> decimal,
-`\x20`-style escapes decoded). The line count is the same as the original, so the line numbers also hold
-for the original file.
+literals). Never executed. Line numbers below were taken from a renamed copy (made by
+`~/.cache/kn-v10-tools/rename.py`: identifiers -> `_N`, hex -> decimal, `\x20`-style escapes decoded; not
+kept). Its line count is the original's, so the line numbers hold for this file. The decoded copy is
+`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.deob.js` (other line numbers).
 
 The v7.1.4 reference is `/home/user/jails/kru/src/Krunker_v7.1.4` (readable `src/`, webpack modules
 split into files). "v7 file:line" below refers to that tree.

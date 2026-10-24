@@ -4,8 +4,8 @@ How Krunker's HTTP matchmaker token flow works (static reading, nothing executed
 Krunker Box Office implements the same flow on kn_brain + server_bin, the v10 seek preferences
 (Settings > General > Quickplay), and the native client's list of official krunker.io lobbies.
 
-Citations: `V` = `~/.cache/kn-v10/v10.js` (v10.0.2 client, identifier-renamed, original line
-layout; it labels itself `10.0.1r1`, V:16405-16406), `S` = `~/jails/kru/src/sketch/` (a
+Citations: `V` = `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (v10.0.2 client; the citations were taken from an
+identifier-renamed copy with the same line layout; it labels itself `10.0.1r1`, V:16405-16406), `S` = `~/jails/kru/src/sketch/` (a
 reconstruction of Krunker's WASM loader).
 
 ## 1. Krunker's flow

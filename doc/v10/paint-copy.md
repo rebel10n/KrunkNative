@@ -6,7 +6,7 @@ and what is not verified.
 
 ## Sources and citations
 
-- Readable copy: `~/.cache/kn-v103/deob-10.0.3.js` (the bundle with its string table decoded; the identifiers are still
+- Readable copy: `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (the bundle with its string table decoded; the identifiers are still
   minified). `file:LINE (byte OFFSET)` below is that file: LINE is the line, OFFSET the byte offset of the line's start.
 - Minified original: `~/jails/kru/src/Krunker_v10.0.3/game.js`. Its strings are hex-indexed lookups, so the
   readable anchors are the decoded lines. Byte offset of the paint API definition there: `game.js@2560926`
@@ -114,7 +114,7 @@ it goes, and is gone when the copy is consumed.
 
 ## Pinned lines (byte offsets)
 
-Byte offsets are the start of the line in `~/.cache/kn-v103/deob-10.0.3.js` (`head -n LINE-1 | wc -c`).
+Byte offsets are the start of the line in `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (`head -n LINE-1 | wc -c`).
 
 | line | byte | what it is |
 |---|---|---|

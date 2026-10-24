@@ -1,6 +1,6 @@
 # v10 API inventory (the official client's routes and KrunkNative's answers)
 
-Generated from the v10.0.x client bundle (`~/.cache/kn-v10/v10.js`, read only; line numbers are its lines). The table lists each HTTP route the client calls on the hosts it uses, its caller, and what the brain answers for it before and after this change. The route list was extracted from the REST client classes (`_9997` api.krunker.io base `_7283`, lines 25894-26152; `_10077` gapi.svc.krunker.io base `_7284`, lines 26153-27524) and from the bases used directly (`_7282` matchmaker, `_7285` social, `_7286` editor, `_7289` community, `_7284 + /data/...` XHRs, the legacy `apiRequest` on `_7283` at 131830-131990).
+Generated from the v10.0.x client bundle (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`, read only; line numbers are its lines). The table lists each HTTP route the client calls on the hosts it uses, its caller, and what the brain answers for it before and after this change. The route list was extracted from the REST client classes (`_9997` api.krunker.io base `_7283`, lines 25894-26152; `_10077` gapi.svc.krunker.io base `_7284`, lines 26153-27524) and from the bases used directly (`_7282` matchmaker, `_7285` social, `_7286` editor, `_7289` community, `_7284 + /data/...` XHRs, the legacy `apiRequest` on `_7283` at 131830-131990).
 
 ## States
 
@@ -242,7 +242,7 @@ After this change (the v10 API completion, branch api-full-http): implemented 83
 
 ## Socket tunnel replies (the 45 tunnel rows)
 
-The rows marked `tunnel` are the gapi calls the client sends on the social socket (`["gapi", rid, method, path, body]`, doc/v10/social.md); the HTTP path stays a 404. Each row's source and reply shape are in the table above. Checked against the v10.0.3 consumer (`~/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted, its string-array obfuscation decoded for the read): the gapi path literals (153) and every snake_case field name the consumer regions read are identical to v10.0.2 (`~/.cache/kn-v10/v10.js`), so the v10.0.2 reads hold for 10.0.3. Test: `services/brain/tests/gapi_tunnel_test.py` (`brain_gapi_tunnel`), one check per route.
+The rows marked `tunnel` are the gapi calls the client sends on the social socket (`["gapi", rid, method, path, body]`, doc/v10/social.md); the HTTP path stays a 404. Each row's source and reply shape are in the table above. Checked against the v10.0.3 consumer (`~/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted, its string-array obfuscation decoded for the read): the gapi path literals (153) and every snake_case field name the consumer regions read are identical to v10.0.2 (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`), so the v10.0.2 reads hold for 10.0.3. Test: `services/brain/tests/gapi_tunnel_test.py` (`brain_gapi_tunnel`), one check per route.
 
 Counts: **real data 40** (clans 7, players and social 13, studios 20), **empty by design 1** (212 skins: KrunkNative has no custom skins), **error 4** (110 logo upload: no moderation source, 503 ModerationUnavailable; 213, 214, 215 skins: no custom skins, 404 STUDIO_SKIN_NOT_FOUND).
 

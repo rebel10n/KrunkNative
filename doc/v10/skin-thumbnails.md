@@ -8,7 +8,7 @@ rule the 10.0.3 client applies, where it is in the bundle, and how the brain now
 
 ## The rule
 
-Source: the decoded bundle `~/.cache/kn-v103/deob-10.0.3.js` (a webcrack unminify of
+Source: the decoded bundle `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (a webcrack unminify of
 `~/jails/kru/src/Krunker_v10.0.3/game.js`). Offsets are byte offsets in the decoded file.
 game.js itself is minified: the folder names are in its string table (for example `'weapons/weapon_'`
 at game.js:782959, `'paints/paint_'` at game.js:264433, `'playercards/card_'` at game.js:722984), but

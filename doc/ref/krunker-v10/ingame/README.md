@@ -1,6 +1,6 @@
 # Krunker v10.0.2 in-game references (offline v10 sandbox)
 
-Captured from the OFFLINE v10 sandbox: the pinned v10.0.2 client (`~/.cache/kn-v10/v10.js`) on the
+Captured from the OFFLINE v10 sandbox: the pinned v10.0.2 client (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`) on the
 mirrored krunker.io page in sandboxed headless Chromium, with nothing leaving the machine (fresh
 profile deleted afterwards, the proxy a closed port, every krunker.io request answered from the local
 mirror, no WebSocket, no login). Made with `node tools/uidiff/capture-v10.js` (its header lists the

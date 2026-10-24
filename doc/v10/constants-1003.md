@@ -13,9 +13,9 @@ corrected. No ruleset or movement code changed.
 ## Reference and method
 
 - Official bundle: `~/jails/kru/src/Krunker_v10.0.3/game.js` (minified; read only).
-  Decoded copy `~/.cache/kn-v103/deob-10.0.3.js` (webcrack of the same file, same literals). "deob N"
+  Decoded copy `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (webcrack of the same file, same literals). "deob N"
   is its line N; "min byte N" is the UTF-8 byte offset in the minified file.
-- v10.0.2 readable: `~/.cache/kn-v10/v10.js` ("v10 N"). v7.1.4: `/home/user/jails/kru/src/Krunker_v7.1.4/src/config.js`
+- v10.0.2 (history only): `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` ("v10 N"). v7.1.4: `/home/user/jails/kru/src/Krunker_v7.1.4/src/config.js`
   ("v7 N").
 - Searches: every key name and literal of the ten rows in both 10.0.3 files (`slip`, `terrainSlide`,
   `terrainSlip`, `playerSlipping`, `crchSpd`, `crouchSlow`, `collPad`, `jpC`, `jumpCooldown`, `isRanked`,

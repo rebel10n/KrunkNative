@@ -7,7 +7,7 @@ This file is the contract: the balance, the C API the rest of kn_brain uses, the
 servers call, the account JSON, and every place that earns or spends Junk. Crafting (the Junkyard's
 recipes) is a separate owner and reads this file for the API it uses.
 
-Line references `v10:N` are to `~/.cache/kn-v10/v10.js` (read only). `v7:path:line` refers to
+Line references `v10:N` are to `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (read only). `v7:path:line` refers to
 `/home/user/jails/kru/src/Krunker_v7.1.4/src/`. v7.1.4 keeps the same economy code; v10 only moved
 some of it. Where v10 and v7.1.4 differ, v10 wins.
 

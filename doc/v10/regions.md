@@ -20,7 +20,7 @@ and ping race (`client/src/ui/region_names.c`, `servers_ui.c`, `krunker_lobbies.
 (`services/brain/registry.c`). `shared/tests/krunker_regions_test.c` pins it against the bundle.
 
 Source: the 10.0.3 bundle (`~/jails/kru/src/Krunker_v10.0.3/game.js`, decoded copy
-`~/.cache/kn-v103/deob-10.0.3.js`; read only). v10.0.2 (`~/.cache/kn-v10/v10.js`) has the same
+`~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js`; read only). v10.0.2 (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`) has the same
 values.
 
 | what | deob-10.0.3.js | v10.js (10.0.2) |

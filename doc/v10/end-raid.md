@@ -4,8 +4,8 @@ The end screen's raid promo ("Battle Bosses in Raids!", "Play Now ->") is the ca
 "Play Raid". This note records what v10.0.3 does when the card is clicked, what Box Office did before the
 fix, and what it does now.
 
-Offsets are bytes into the decoded bundle `~/.cache/kn-v103/deob-10.0.3.js` (game.js, deobfuscated; the
-readable 10.0.2 copy is `~/.cache/kn-v10/v10.js`). Identifiers in parentheses are the minified names.
+Offsets are bytes into the decoded bundle `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (game.js, deobfuscated; the
+10.0.2 bundle is `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`). Identifiers in parentheses are the minified names.
 
 ## v10.0.3: the card
 

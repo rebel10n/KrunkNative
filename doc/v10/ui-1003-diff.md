@@ -10,7 +10,7 @@ against the v10.0.2 page that `ui/` was imported from, and what was done about e
   `66887d66…`). `index.html` sha256 `8c2d75a7…`. The tree has no social, editor or viewer pages and
   no window templates.
 - **10.0.2 base**: the live mirror `~/.cache/kn-v10/live/site/public/` (what `ui/` was imported from)
-  and the client bundle `~/Downloads/v10.0.2.js` (sha256 `1e0b968b…`).
+  and the client bundle `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (sha256 `1e0b968b…`).
 - **Official text**: `~/.cache/kn-krunker-changelog-versions.txt` (Krunker's `docs/versions.txt`,
   10.0.3 to 10.0.0; `doc/v10/changelog-10.0.3.md`).
 - **Menu markup**: `tools/ui-import/v10_bundle.js` (the Svelte mounts, component CSS and English
@@ -74,7 +74,7 @@ Limits, stated plainly:
 
 ## Long lists: Load More
 
-Offsets are character offsets in the decoded `~/.cache/kn-v103/deob-10.0.3.js` (the bundle's `game.js`, read only).
+Offsets are character offsets in the decoded `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (the bundle's `game.js`, read only).
 
 - **Create Trade inventory side: no Load More in v10.0.3.** The side's template (`trade-side`,
   `trade-inv-scroll`, a 225 px scroll box) is at 4508584. Its component draws every row of

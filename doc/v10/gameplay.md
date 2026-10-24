@@ -1,11 +1,12 @@
 # v10.0.2 gameplay changes vs v7.1.4
 
 Scope: physics constants, movement, classes, weapons, attachments, streaks/effects, modes, scoring, spawns, hit
-detection. "v10:N" = line N of the renamed bundle `~/.cache/kn-v10/v10.js` (made by
-`~/.cache/kn-v10-tools/rename.py` from `~/Downloads/v10.0.2.js`; the renamer keeps line numbers, so the
-original file has the same lines). "v7 f:N" = `/home/user/jails/kru/src/Krunker_v7.1.4/src/f:N`.
+detection. "v10:N" = line N of the 10.0.2 bundle `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (the citations were taken from an
+identifier-renamed copy, `_N` names, made by `~/.cache/kn-v10-tools/rename.py`; it kept the line layout and is
+not kept itself). "v7 f:N" = `/home/user/jails/kru/src/Krunker_v7.1.4/src/f:N`.
 
-How it was compared (repeatable):
+How it was compared (the tools and raw outputs below were not kept; `~/jails/kru/src/Krunker_v10.0.3/deob/tools/`
+has the 10.0.3 extractors and `deob/tables/` their output):
 
 | tool (`~/.cache/kn-v10-tools/`) | what it does |
 |---|---|
@@ -312,7 +313,9 @@ bots that close in on the Drank, or human play. The 0.8-1.2 KDR band is met by N
 
 ## 6. Modes (v10:104079-105960, list at v10:105413 vs v7 data/modes.js)
 
-Same 37 modes, same order and ids (0 ffa ... 36 imp); no new mode objects. Changes:
+Same 37 modes, same order and ids (0 ffa ... 36 imp); no new mode objects. v10.0.3 has the same 37: the
+list at `deob-10.0.3.js:119360-120099` (34 bhffa and 35 zom are variables defined at 118737 and 119252; every
+object with `id` + `alias` in the bundle is one of the 37, `deob/tables/modes-all-1003.json`). Changes:
 
 | idx | mode | change | evidence |
 |---|---|---|---|
@@ -336,7 +339,7 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 | players.score() | as v10 | unchanged; level-up medal uses `_7340 = 0.03 * sqrt(score)` (v7 `config.levelDiv` path, same) | v10:173662-173704 vs players.js:4085 |
 | pub score cap | 13000 | 13000 | v10:173675 |
 | end-game KR | min(premium ? 40 : 30, floor(score*rewardMlt/100)), x1.5 challenge mode | same, plus floor(2 x reward) when `isRanked` (after the cap, not in challenge mode) | v10:191170-191171 vs game.js:4584-4587 |
-| battle-pass points | +30 if playTime >= half the game | +30 * min(1, floor(playTime/gameTime*10)/10) (proportional in 10% steps), not in raid | v10:191174-191179 vs game.js:4593-4596 |
+| battle-pass points | +30 if playTime >= half the game | +30 * min(1, floor(playTime/gameTime*10)/10) (proportional in 10% steps), not in raid. Behind `!isEmptyLobby`, which nothing clears, so the term never applies (10.0.3 the same, `deob-10.0.3.js:221768`; rules-1003.md section 2) | v10:191174-191179 vs game.js:4593-4596 |
 | team round wins | only counted for best-of games | also counted outside best-of when a team wins (`teamRoundWins[winTeam]++`) | v10:191057-191059 |
 | killstreaks | `mode.noStreaks \|\| config.noStreaks` | also off when `isRanked` (the killer's streak count only; deathStreak still counts, v10:174051) | v10:174076 |
 | class XP | saved in pub games | not saved in ranked (`isPubType() && !isRanked`) | v10:173631 |
@@ -358,8 +361,8 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 
 ## 9. Port status (gameplay)
 
-The target is Krunker v10.0.3 (doc/v10/target.md). The values below are the v10.0.2 spec (doc/v7/decisions.md, user 2026-10-13): everything below is the
-game's one ruleset (`shared/include/ruleset.h`); the v7.1.4 tables and rules are gone.
+The target is Krunker v10.0.3 (doc/v10/target.md). The rows began as the v10.0.2 spec (doc/v7/decisions.md, user 2026-10-13) and are
+re-checked against 10.0.3 in `gameplay-1003-audit.md` and `rules-1003.md`: everything below is the game's one ruleset (`shared/include/ruleset.h`); the v7.1.4 tables and rules are gone.
 
 | item | where | tests |
 |---|---|---|
@@ -369,8 +372,10 @@ game's one ruleset (`shared/include/ruleset.h`); the v7.1.4 tables and rules are
 | modes: Gun Game order, Stalker rework, Raid 25 min, Krank not a party mode | `shared/src/modes/modes.c` (the table), `shared/src/modes/mode_rules.c` / `mode_round.c` (Stalker hooks), `shared/src/player.c` (`movement_stalker`) | ruleset_test, v10_gameplay_test |
 | ranked: x2 KR, no kill streaks, no class XP, needAll 60 s, shutdown 120 s | `Ruleset.ranked`, `Game.is_ranked` (`server/src/accounts.c`), `game_is_ranked`, `rules_reward_mlt` | ruleset_test, v10_gameplay_test |
 | a v10 match on server_bin | `server_bin` (no version choice) | `server/tests/v10_match_e2e.py` |
+| team round wins outside best-of (section 7) | `shared/src/modes/mode_round.c` (`mode_end_game`, the `else` of `if (mode->best_of)`; `deob-10.0.3.js:221597-221605`, rules-1003.md section 1) | modes_test (`test_round_wins_outside_best_of`) |
+| Battle Pass points per public match (section 7) | `bp_match_points` (`shared/src/season.c`), sent for public matches only by `acc_add_progress` (`server/src/accounts.c`); `deob-10.0.3.js:221705-221776`, rules-1003.md section 2 | season_test |
 
-Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), the proportional battle-pass points and team round wins outside best-of (section 7), raid challenges /
+Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), raid challenges /
 `noProfileStats`, the Stalker's render-side changes (model opacity 0.1, hidden after 300 ms still), its HUD
 (leap timer, STALKER_PICKED popup, taunts), event kill pools, `poseData.bodyY`, `markPosition`, and the match-flow
 items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md).

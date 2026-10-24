@@ -4,7 +4,7 @@ Krunker v10's in-game Social hub (`window.openSocial(tab)`, Svelte `_49999` in a
 generic popup), its view stack (player profile, clan view, post detail, compose, follow list,
 gift, report) and the friends event bus, ported to C (`client/src/ui/v10_social.c`) over kn_brain.
 The clan window (13) is `client/src/ui/clan_ui.c` (see clans.md). Line numbers `v10:N` refer to
-`~/.cache/kn-v10/v10.js`.
+`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`.
 
 ## Client
 

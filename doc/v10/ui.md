@@ -1,8 +1,8 @@
 # v10.0.2 UI: menu, HUD, windows, asset URLs
 
-Source: `/home/user/Downloads/v10.0.2.js` (bundle reports `gameVersion '10.0.1'`, `clientVersion '10.0.1r1'`).
-Line numbers `v10:N` refer to the identifier-renamed copy `~/.cache/kn-v10/v10.js`
-(made by `~/.cache/kn-v10-tools/rename.py`, line-for-line identical to the original).
+Source: `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (bundle reports `gameVersion '10.0.1'`, `clientVersion '10.0.1r1'`).
+Line numbers `v10:N` are its lines (they were taken from an identifier-renamed copy made by
+`~/.cache/kn-v10-tools/rename.py`, line-for-line identical to the original; `_N` names are the copy's).
 The v7 references are `/home/user/jails/kru/src/Krunker_v7.1.4/` (`v7:` prefix). The repo
 page is `ui/index.html` and its windows are in `ui/windows/windows.json`. Anything marked
 *(guess)* is inferred, not read directly.

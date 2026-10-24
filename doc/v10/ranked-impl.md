@@ -1,6 +1,6 @@
 # Ranked and clan wars: Krunker v10.0.2 port
 
-Evidence is from `/home/user/Downloads/v10.0.2.js` (strings plus the readable control flow; the
+Evidence is from `~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` (strings plus the readable control flow; the
 byte offsets below are into that file). The ranked *server* (matchmaker, rating, match creation)
 is not in the bundle. Where v10 leaves something server-side, KrunkNative's rule is described and
 marked **(KN)**. The research notes are `doc/v10/ranked.md` and `doc/v10/clans.md`.

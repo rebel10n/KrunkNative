@@ -4,7 +4,7 @@ The friends and presence socket the v10 client opens with `ws?at=<token>` on the
 (`~/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted and webcrack-deobfuscated for reading).
 The client's `onopen` / `onmessage` / `onclose` and its send helper are the only uses of that socket
 in the bundle: the five outbound labels below are the only callers of the send helper, and the
-inbound switch is the one `switch (msg.type)` in `onmessage`. The 10.0.2 bundle (`~/.cache/kn-v10/v10.js`)
+inbound switch is the one `switch (msg.type)` in `onmessage`. The 10.0.2 bundle (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js`)
 has the same switch and the same send sites, so the label set is unchanged from 10.0.2.
 
 The social socket owner's companion, `doc/v10/social-socket-inventory.md`, lists the same frames with
