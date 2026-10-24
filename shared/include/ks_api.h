@@ -279,7 +279,8 @@ enum { KS_API_SIDE_CLIENT = 1, KS_API_SIDE_SERVER = 2, KS_API_SIDE_BOTH = 3 };
     X(PAYMENTS_AUTHORIZESPEND, "PAYMENTS.authorizeSpend", "authorizeSpend", KS_API_PAYMENTS, FN, S, ANY) \
     X(PAYMENTS_TRANSACT, "PAYMENTS.transact", "transact", KS_API_PAYMENTS, FN, S, ANY) \
     X(TRIGGERS_GETBYINTERFACE, "TRIGGERS.getByInterface", "getByInterface", KS_API_TRIGGERS, FN, B, OBJARR) \
-    X(OBJECTS_GETBYINTERFACE, "OBJECTS.getByInterface", "getByInterface", KS_API_OBJECTS, FN, B, OBJARR)
+    X(OBJECTS_GETBYINTERFACE, "OBJECTS.getByInterface", "getByInterface", KS_API_OBJECTS, FN, B, OBJARR) \
+    X(LIVE_OBJECTS_ADDASSET, "LIVE_OBJECTS.addAsset", "addAsset", KS_API_LIVE_OBJECTS, FN, S, OBJ)
 
 typedef enum {
 #define KS_API_X_ENUM(id, path, name, parent, kind, sides, ret) KS_API_##id,
