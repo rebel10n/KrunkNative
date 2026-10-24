@@ -25,8 +25,9 @@ static struct {
     int enabled;  // last screenShake value seen (toggling resets the offsets)
 } g_shake = {.enabled = 1};
 
+// RENDER.shake keeps the larger of the running and the new shake (deob-10.0.3.js:231492)
 void camera_feel_shake(const float amount) {
-    g_shake.amount = amount;
+    if (g_shake.amount < amount) g_shake.amount = amount;
 }
 
 void camera_feel_explosion(const Camera *camera, const vec3 position) {
