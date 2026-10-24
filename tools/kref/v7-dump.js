@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Dump Krunker v7.1.4 data tables (src/data/*.js) as JSON fixtures for the C table tests
-// (shared/tests/weapons_v7_test.c and friends). The v7 tree is read-only: the modules are
+// Dump Krunker v7.1.4 data tables (src/data/*.js) as JSON (shared/tests/data/v7/): the source the v7
+// weapon / class files in shared/src/ were generated from. The tables the tests check are v10.0.3's
+// (shared/tests/weapons_v10_test.c, tools/kref/v10-fixtures.py). The v7 tree is read-only: the modules are
 // required from it under a minimal browser polyfill (they read location / localStorage at
 // load time). Functions (req, anim, onPickup, ...) are dropped by JSON.stringify.
 //
