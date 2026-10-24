@@ -336,6 +336,10 @@ static void test_class_overrides(const cJSON *map) {
     cJSON *plain = cJSON_Parse("{}");
     game_config_apply(&game, plain, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_CUSTOM);
     CHECK(game.weapons[1] == rules_weapon(1) && game.classes[0].health == rules_classes()[0].health && !game.classes[0].ext.set && !game.effects, "overrides reset");
+    // rampFix (v10.0.3 "Solid Ramp Sides", deob-10.0.3.js:20068-20075): def false, defC true (a comp host's default)
+    CHECK(!game.config.ramp_fix, "rampFix: off by default");
+    game_config_apply(&game, plain, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_COMP);
+    CHECK(game.config.ramp_fix, "rampFix: on by default in a comp game (defC)");
     cJSON_Delete(plain);
 
     // config.classes: classes[0] when the pick is not listed

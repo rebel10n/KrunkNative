@@ -125,7 +125,6 @@ static const GameConfigOption k_server_options[] = {
     {"allowSpect", "Spectating", "Other", "Other", GC_BOOL, GC_STORE_BIT, 0, GC_HT(0) | GC_HT(1), .def = 1.0f, .offset = 0, .bit = GC_BIT_ALLOW_SPECTATE},
     {"thirdPerson", "3rd Person", "Other", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_THIRD_PERSON},
     {"nameTags", "Hide Nametags (Enemies)", "Other", NULL, GC_BOOL, GC_STORE_BIT, 0, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_HIDE_NAMETAGS},
-    {"rampFix", "Solid Ramp Sides", "Other", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_RAMP_FIX},
     {"nameTagsFR", "Hide Nametags (Allies)", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 0.0f, .offset = offsetof(GameConfig, hide_nametags_allies)},
     {"kCams", "Kill Cams", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, kill_cams)},
     {"aAnon", "Allow Anonymous", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, allow_anonymous)},
@@ -139,6 +138,8 @@ static const GameConfigOption k_server_options[] = {
     {"noDraws", "No Draws", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, no_draws)},
     {"bstOfR", "Best of", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, best_of)},
     {"headClipFix", "Stop Head Clipping", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_HAS_DEF_C, GC_HT(0) | GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, head_clip_fix)},
+    // v10.0.3 "Solid Ramp Sides" (deob-10.0.3.js:20068-20075): right after headClipFix, hostTypes [0, 1], def false, defC true
+    {"rampFix", "Solid Ramp Sides", "Other", NULL, GC_BOOL, GC_STORE_BIT, GC_HAS_DEF_C, GC_HT(0) | GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = 0, .bit = GC_BIT_RAMP_FIX},
     // a comp host's webhook URL (deob-10.0.3.js:20077-20082). Validated as an input; v10's applyConfig keeps it for a
     // comp game only and takes it out of the config (deob-10.0.3.js:216122-216129), so game_config_write never sends
     // it. The server posts the match_end there (server/src/accounts.c, comp_webhook.h)
