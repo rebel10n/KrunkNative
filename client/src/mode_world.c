@@ -15,6 +15,9 @@
 // v7.1.4 zone walls (MapManager addDominationZone / getZoneDat): addCube(.., 5, ..), so the
 // Domination zones and the CTF flag stands are 5 units tall whatever the zone's height, fogged
 // (no noFog), the stands zone_b_1 / zone_r_1. The 2D markers are client/src/ui/hud_objectives.c.
+// v10.0.3 MapManager.addBombSite (deob-10.0.3.js:184984-185006) + resetSites (:218044-218051): a BOMB_SITE is an
+// objective_b cube without top and bottom at y + 1, its own size, transparent, no depth write, double sided,
+// shadowsR, the default (lit, fogged) material, its texture scrolling at movT 0.00006 / ms, shown in mode.site.
 // Everything is created lazily for the current map + mode and removed on change.
 #include <gl.h>
 #include <mode_world.h>
@@ -30,6 +33,8 @@ Player *client_find_player(Client*, int uid); // client/src/main.c
 #define MODE_WORLD_EMISSIVE_ENEMY 8729652 // getFlagDat "0" / tag emissive (your team's tag)
 #define MODE_WORLD_EMISSIVE_ALLY 4360861  // getFlagDat "1" / tag emissive (enemy tag)
 #define MODE_WORLD_ZONE_HEIGHT 5.0f       // MapManager addDominationZone / getZoneDat addCube height
+#define MODE_WORLD_MAX_SITES 8
+#define MODE_WORLD_SITE_MOVT 0.00006f     // addBombSite movT (texture repeats per ms)
 
 typedef struct {
     Mesh *crystal;
@@ -86,6 +91,7 @@ static struct {
     ModeWorldFlag flags[MODE_MAX_FLAGS];
     ModeWorldTag tags[MODE_MAX_SPAWNABLES];
     Mesh *dom_zones[MODE_MAX_DOM_ZONES];
+    Mesh *sites[MODE_WORLD_MAX_SITES]; // Defuse's bomb sites (addBombSite)
     Geometry *zone_geometry;     // 4 side faces (addCube faces [1, 1, 0, 0, 1, 1])
     unsigned int zone_vbo;
     Geometry *crystal_geometry;
@@ -183,6 +189,7 @@ static void mode_world_clear(void) {
     }
     for (int t = 0; t < MODE_MAX_SPAWNABLES; t++) mode_world_drop_tag(&g_world.tags[t]);
     for (int z = 0; z < MODE_MAX_DOM_ZONES; z++) mode_world_drop_mesh(&g_world.dom_zones[z]);
+    for (int z = 0; z < MODE_WORLD_MAX_SITES; z++) mode_world_drop_mesh(&g_world.sites[z]);
     g_world.flag_count = 0;
     g_world.map = NULL;
     g_world.mode_id = -1;
@@ -216,6 +223,27 @@ static void mode_world_build(Client *client) {
         mesh->transform.scale = (vec3) {zone->half.x * 2.0f, MODE_WORLD_ZONE_HEIGHT, zone->half.z * 2.0f};
         scene_add_mesh(client->scene, mesh);
         g_world.dom_zones[z] = mesh;
+    }
+
+    // Defuse's bomb sites: objective_b side faces from y + 1, the site's own size
+    int sites = 0;
+    for (size_t i = 0; mode->config.site && client->game.map && i < client->game.map->object_count && sites < MODE_WORLD_MAX_SITES; i++) {
+        const Object *site = client->game.map->objects[i];
+        if (!site->bomb_site) continue;
+        Mesh *mesh = mode_world_mesh(mode_world_zone_geometry(), mode_world_texture("objective_b"));
+        if (!mesh) continue;
+        BasicMaterial *material = (BasicMaterial *) mesh->material;
+        material->base.transparent = 1;
+        material->no_depth_write = 1;
+        material->double_sided = 1;
+        material->fog_enabled = 1;     // no noFog
+        material->ambient_enabled = 1; // the default material: lit
+        mesh->no_shadow_receive = 0;   // shadowsR
+        const vec3 size = object_box_size(site);
+        mesh->transform.position = (vec3) {site->position.x, site->position.y + 1.0f, site->position.z};
+        mesh->transform.scale = size;
+        scene_add_mesh(client->scene, mesh);
+        g_world.sites[sites++] = mesh;
     }
 
     if (!mode->config.flags && !mode->config.oneflag) return;
@@ -415,6 +443,11 @@ void mode_world_tick(Client *client) {
     g_world.last_time = now;
 
     mode_world_tick_objectives(client);
+    // the bomb sites' texture scroll: offset.x += movT per ms (render.js movT, wrapped as main.c's texture keys)
+    for (int z = 0; z < MODE_WORLD_MAX_SITES && g_world.sites[z]; z++) {
+        BasicMaterial *material = (BasicMaterial *) g_world.sites[z]->material;
+        material->texture_offset.x = fmodf(material->texture_offset.x + MODE_WORLD_SITE_MOVT * delta_ms, 1.0f);
+    }
     if (g_world.flag_count) mode_world_tick_flags(client, delta_ms);
     mode_world_tick_tags(client, delta_ms);
 }

@@ -20,6 +20,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <network_sounds.h>
+#include <defuse.h> // v10.0.3 Defuse: the bomb sites' prompts, the bomb's drops
 
 int player_collides(Player*, const Object*, float pad); // shared/src/player.c (collidesE)
 int game_object_shootable(const Object*);               // shared/src/player.c (the hitscan object filter)
@@ -103,6 +104,8 @@ static int mode_blocks_pickups(const Game *game, const Player *p) {
 static int site_mode(const Game *game) {
     return game->mode && game->mode->config.site;
 }
+
+static int loadout_index_of(const Player *p, int weapon);
 
 // ---------------------------------------------------------------- pickups (game.updatePickup / resetPickups)
 
@@ -316,6 +319,23 @@ void game_interact_scan(const Game *game, const Player *player, GameInteractScan
         }
     }
 
+    // v10.0.3 player.update's bomb sites (deob-10.0.3.js:192122-192146, shared/src/defuse.c): an attacker on a
+    // site with the bomb in hand gets "Press [M1] to Plant" (3, data 1, priority 1) while it is not planting
+    // (M1 held on the ground: KN reads that as the last tick's making_progress), one carrying it in another
+    // slot "Press [equip] to Equip Bomb" (data 2)
+    if (site_mode(game) && player->team == DEFUSE_ATTACKERS) {
+        const int carries = loadout_index_of(player, DEFUSE_BOMB_WEAPON) >= 0;
+        for (size_t i = 0; (carries || (player->weapon && player->weapon->bomb)) && i < game->map->object_count; i++) {
+            const Object *o = game->map->objects[i];
+            if (!o->bomb_site || !collides_padded(player, o, 0.0f)) continue;
+            if (player->weapon && player->weapon->bomb) {
+                if (!player->making_progress) change_interact(&s, (int) i, GAME_INTERACT_BOMB, DEFUSE_PROMPT_PLANT, 1, 0);
+            } else {
+                change_interact(&s, (int) i, GAME_INTERACT_BOMB, DEFUSE_PROMPT_EQUIP, 1, 0);
+            }
+        }
+    }
+
     if (!mode_blocks_pickups(game, player)) { // (!mode || !mode.noPickups), not an Infected
         const TriggerRuntime *rt = game->trigger_rt;
         for (size_t i = 0; rt && rt->map == game->map && i < rt->object_count; i++) {
@@ -325,6 +345,10 @@ void game_interact_scan(const Game *game, const Player *player, GameInteractScan
             const Weapon *w = weapon_at(game, k->weapon);
             if (k->active && team_allows(game, player, k->team) && (!w || !w->bomb || site_mode(game))) {
                 change_interact(&s, (int) i, GAME_INTERACT_PICKUP, 0, -1, k->no_msg);
+            } else if (!k->active && player->team == DEFUSE_DEFENDERS && w && w->bomb && site_mode(game) && !player->making_progress) {
+                // the planted bomb (an inactive bomb pickup): "Press [M1] to Diffuse" (3, data 3, priority 1) while
+                // the defender is not defusing (deob-10.0.3.js:192159-192170)
+                change_interact(&s, (int) i, GAME_INTERACT_BOMB, DEFUSE_PROMPT_DEFUSE, 1, 0);
             }
         }
     }
@@ -578,8 +602,14 @@ static void use_pickup(Game *game, Player *p, const int uid) {
     const int picked = k->weapon;
     const int picked_ammo = k->ammo;
     int replaced = 0, old = -1;
-    for (int i = 0; i < count; i++) {
+    // KrunkNative difference (Defuse): the Bomb (type 3) never swaps out a weapon of its type (a Boulder secondary,
+    // a Minigun): it is added, its pickup emptied and lastPicked set. v10.0.3 swaps them (deob-10.0.3.js:197045-197063),
+    // which leaves that weapon in the bomb's pickup and no lastPicked[17]: plantBomb's dropWeapon(.., 17, false) then
+    // returns at once, the bomb stays in hand and plantBomb runs again every tick ("Bomb Planted" without end)
+    const int swaps = !(w->bomb && site_mode(game));
+    for (int i = 0; swaps && i < count; i++) {
         const Weapon *have = weapon_at(game, ids[i]);
+
         if (!have || have->type != w->type) continue;
         old = ids[i];
         // v7 removes lastPicked of loadout[0] here, not of the weapon it swaps out (v7 bug, fixed:
@@ -679,35 +709,54 @@ static vec3 drop_position(const Player *p, const int spread) {
                    p->position.z + (float) trigger_rand_int(-spread, spread)};
 }
 
-// players.dropWeapon(player) ("drpw"): a weapon taken from a now-empty pickupRep pickup goes back
-// into it, dropped next to the player; the rest of the loadout re-sorts, slot 0 in hand.
-void game_player_drop_weapon(Game *game, Player *p) {
-    if (!game || !p || !p->active || !game_is_authority(game) || !p->loadout || (game->mode && game->mode->config.no_pickups)) return;
-    if (p->loadout_index < 0 || p->loadout_index >= p->loadout_size) return;
-    if (p->loadout_index >= player_loadout_base(p)) return; // an Object Manager extra weapon (the menu takes it out)
-    const int weapon = p->loadout[p->loadout_index];
+// players.dropWeapon's one-weapon branch (deob-10.0.3.js:197293-197334) for loadout slot `slot`: a weapon taken
+// from a now-empty pickupRep pickup goes back into it, dropped next to the player (+-1, y + 1) with `active`
+// (false: Defuse's planted bomb, game.plantBomb's dropWeapon(player, false, 17, false)); the rest of the
+// loadout re-sorts, slot 0 in hand. Returns the pickup's uid (*at: where it lies now), -1 when the weapon left
+// the loadout with no empty pickup to go back to, -2 when nothing was dropped.
+static int drop_slot(Game *game, Player *p, const int slot, const int active, vec3 *at_out) {
+    const int weapon = p->loadout[slot];
     const Weapon *w = weapon_at(game, weapon);
-    if (!w || w->melee || (site_mode(game) && !w->bomb)) return;
-    if (weapon >= PLAYER_PICKED_MAX || !p->last_picked[weapon]) return;
+    if (!w || w->melee || (site_mode(game) && !w->bomb)) return -2;
+    if (weapon >= PLAYER_PICKED_MAX || !p->last_picked[weapon]) return -2;
+    int ids[NET_LOADOUT_MAX + 1];
+    unsigned int ammo[NET_LOADOUT_MAX + 1];
+    int count = 0;
+    for (int i = 0; i < player_loadout_base(p) && count < NET_LOADOUT_MAX; i++) {
+        if (i == slot) continue;
+        ids[count] = p->loadout[i];
+        ammo[count++] = p->ammo ? p->ammo[i] : 0;
+    }
+    if (!count) return -2;
     const int pickup_uid = p->last_picked[weapon] - 1;
     GamePickup *k = empty_pickup(game, pickup_uid);
     const vec3 at = drop_position(p, 1);
     if (k) {
         remove_picked(p, weapon);
-        pickup_update(game, pickup_uid, weapon, 1, &at, (int) p->ammo[p->loadout_index]);
+        pickup_update(game, pickup_uid, weapon, active, &at, p->ammo ? (int) p->ammo[slot] : -1);
+        if (at_out) *at_out = at;
     }
-    int ids[NET_LOADOUT_MAX + 1];
-    unsigned int ammo[NET_LOADOUT_MAX + 1];
-    int count = 0;
-    for (int i = 0; i < player_loadout_base(p) && count < NET_LOADOUT_MAX; i++) {
-        if (i == p->loadout_index) continue;
-        ids[count] = p->loadout[i];
-        ammo[count++] = p->ammo ? p->ammo[i] : 0;
-    }
-    if (!count) return;
     set_loadout(game, p, ids, ammo, count, 1, -1);
     if (p->loadout_index != 0) player_swap_weapon(p, 0, 1, 0, 0); // loadoutIndex = 0
     if (k) pickup_send(game, NET_TARGET_ALL, pickup_uid);
+    return k ? pickup_uid : -1;
+}
+
+// players.dropWeapon(player) ("drpw"): the weapon in hand (drop_slot).
+void game_player_drop_weapon(Game *game, Player *p) {
+    if (!game || !p || !p->active || !game_is_authority(game) || !p->loadout || (game->mode && game->mode->config.no_pickups)) return;
+    if (p->loadout_index < 0 || p->loadout_index >= p->loadout_size) return;
+    if (p->loadout_index >= player_loadout_base(p)) return; // an Object Manager extra weapon (the menu takes it out)
+    drop_slot(game, p, p->loadout_index, 1, NULL);
+}
+
+// players.dropWeapon(player, false, weapon, active): the slot holding `weapon`, whether the player is alive or
+// not (Defuse: the planter's bomb, a killed carrier's bomb). drop_slot's result.
+int game_player_drop_weapon_id(Game *game, Player *p, const int weapon, const int active, vec3 *at) {
+    if (!game || !p || !game_is_authority(game) || !game->map || !p->loadout || (game->mode && game->mode->config.no_pickups)) return -2;
+    const int slot = loadout_index_of(p, weapon);
+    if (slot < 0 || slot >= player_loadout_base(p)) return -2;
+    return drop_slot(game, p, slot, active, at);
 }
 
 // dropWeapon(player, true) at a death / leave: every weapon from a now-empty pickupRep pickup goes

@@ -8,6 +8,7 @@
 #include <stalker.h> // STALKER_PICKED
 #include <map_catalog.h> // raid.onEnd: game.mapIndex (Bastion)
 #include <game_config.h> // pickSimon: game.host (game_host_player)
+#include <defuse.h>      // def.onKill: the bomb
 #include <math.h>
 #include <string.h>
 
@@ -517,12 +518,11 @@ void mode_kill_kc(Game *game, Player *victim, Player *killer, const int weapon_i
     mode_drop_spawnable(game, victim);
 }
 
-// def: the bomb carrier drops it (bombs / sites are not in KrunkNative's maps; nothing to drop).
+// def.onKill (deob-10.0.3.js:119839-119856): a bomb carrier killed by someone drops the bomb where it died, one
+// that died without a killer sends it back to its pickup (shared/src/defuse.c)
 void mode_kill_def(Game *game, Player *victim, Player *killer, const int weapon_id) {
-    (void) game;
-    (void) victim;
-    (void) killer;
     (void) weapon_id;
+    defuse_on_kill(game, victim, killer);
 }
 
 // shrp.js onKill: killStreak % 2 -> effect 1, % 3 -> effect 2, % 5 -> effect 0 (players.giveEffect)

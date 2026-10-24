@@ -424,11 +424,13 @@ typedef struct {
     unsigned char dont_destroy:1; // a partly picked KR Tag stack stays
 } ModeSpawnable;
 
+// game.activeBomb (game.plantBomb, deob-10.0.3.js:217736-217743): the planted bomb (shared/src/defuse.c)
 typedef struct {
-    float timer;              // seconds until it blows (40 s)
-    int team;
-    vec3 position;
-    unsigned char active:1;
+    float timer;              // time: seconds until it blows (40 s)
+    float tick;               // tick: seconds to the next beep_0 (2 s, faster near the end)
+    int team;                 // the planter's team: everyone active on another team dies when it blows
+    vec3 position;            // the bomb pickup's x, y, z where it was dropped (0 0 0 without one: `x || 0`)
+    unsigned char active:1;   // activeBomb != null
 } ModeBomb;
 
 typedef struct GameMode_t {

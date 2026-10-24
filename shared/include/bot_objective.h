@@ -10,7 +10,9 @@
 //   Domination       capture the zones the team does not own (spread by rank), defend them
 //   Deposit (FFA)    collect KR Tags, deposit them on the active objective
 //   Kill Confirmed   collect tags
-//   Defuse           hold the bomb sites (no plant / defuse natively: see mode_kill_def)
+//   Defuse           attackers take the bomb (the nearest bot), carry it to the nearest site and plant it
+//                    (shared/src/defuse.c), escort / push the sites, guard it once planted; defenders hold
+//                    the sites, then rush the planted bomb and defuse it
 //   lives modes,     elimination: hunt the remaining enemies, regroup when outnumbered
 //   Infected
 //   anything else    no goal (FFA / TDM / Parkour / ...: the Hunt roam)
@@ -34,5 +36,10 @@ vec3 bot_objective_hold_spot(Game*, GameBot*, const Player *self, float dt);
 // Attack: 1 when the objective outweighs chasing `target` (a flag carrier runs home, a holder
 // stays on its point while the enemy is far): *goal is where to walk while fighting.
 int bot_objective_over_combat(Game*, GameBot*, Player *self, const Player *target, float dt, vec3 *goal);
+// Defuse: 1 when the bot stands where it plants (a site, the bomb in hand) or defuses (at the planted bomb):
+// stand still and hold M1 this tick; 2 stand still without M1 (the bomb is coming in hand); 0 neither.
+// *swap: the input[11] code to send (4 equips the bomb, 3 puts a bomb carried in hand away while it is not
+// on a site), 0 none.
+int bot_objective_defuse_hold(Game*, GameBot*, Player *self, int *swap);
 const char *bot_role_name(BotRole);
 const char *bot_goal_name(BotGoalKind);

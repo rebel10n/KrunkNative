@@ -12,6 +12,7 @@
 #include <bot_objective.h>
 #include <bot_sense.h>
 #include <spawnables.h>
+#include <defuse.h>
 #include <pcg_basic.h>
 #include <math.h>
 #include <stdlib.h>
@@ -453,10 +454,43 @@ static int think_tags(Game *game, GameBot *bot, Player *self, BotObjective *o) {
     return 1;
 }
 
-// Defuse: the bomb sites of the map, one per bot by rank. Attackers (team 2) push onto them,
-// defenders (team 1) hold them (no plant / defuse natively: this is where the fights happen).
+// Defuse (shared/src/defuse.c): the bomb is the map's bomb pickup (weapon 17). Attackers (team 2): the carrier
+// takes it to the nearest site and plants it (bot_objective_defuse_hold), the nearest bot goes for a bomb lying
+// on the floor, the others push onto the sites by rank, and once it is planted they guard it. Defenders (team 1)
+// hold the sites by rank, and once it is planted they all go for it and defuse it. A player's HUD shows as much:
+// the attackers' marker over the bomb, everyone's beeps at the planted bomb.
+static int obj_carries_bomb(const Player *p) {
+    for (int i = 0; p->loadout && i < p->loadout_size; i++) {
+        if (p->loadout[i] == DEFUSE_BOMB_WEAPON) return 1;
+    }
+    return 0;
+}
+
+// The bomb's pickup (uid, -1 none) and where it lies; *planted: inactive (on a site), else lying when it holds the bomb.
+static int obj_bomb(const Game *game, vec3 *feet, int *lying, int *planted) {
+    *lying = *planted = 0;
+    for (size_t i = 0; game->map && i < game->map->object_count; i++) {
+        GamePickup k;
+        if (!game->map->objects[i]->pickup || !game_pickup_state(game, (int) i, &k) || k.weapon != DEFUSE_BOMB_WEAPON) continue;
+        *lying = k.active;
+        *planted = !k.active;
+        // a dropped bomb lies at its drop position (y + 1 over the feet), a bomb at home on the map's spot
+        *feet = (vec3) {k.position.x, k.position.y - (k.position.y != k.origin.y ? 1.0f : 0.0f), k.position.z};
+        return (int) i;
+    }
+    return -1;
+}
+
+// lying 2, planted 4, else 0 (carried, or no bomb), + 8 for a bomb this bot holds: a change re-thinks at once
+static int obj_bomb_state(const Game *game, const Player *self) {
+    if (!game->mode || !game->mode->config.site) return 0;
+    vec3 feet;
+    int lying, planted;
+    const int uid = obj_bomb(game, &feet, &lying, &planted);
+    return (uid < 0 ? 0 : lying ? 2 : planted ? 4 : 0) | (obj_carries_bomb(self) ? 8 : 0);
+}
+
 static int think_site(Game *game, GameBot *bot, Player *self, BotObjective *o) {
-    (void) bot;
     const Map *map = game->map;
     const Object *sites[8];
     int n = 0;
@@ -464,11 +498,56 @@ static int think_site(Game *game, GameBot *bot, Player *self, BotObjective *o) {
         if (map->objects[i]->bomb_site) sites[n++] = map->objects[i];
     }
     if (!n) return 0;
+    vec3 bomb_feet = {0.0f, 0.0f, 0.0f};
+    int lying = 0, planted = 0;
+    const int bomb = obj_bomb(game, &bomb_feet, &lying, &planted);
+    o->last_bomb = obj_bomb_state(game, self);
+
+    // the planted bomb: the defenders defuse it (the first one there holds M1, the others stand by it), the
+    // attackers guard it from a few units away
+    if (bomb >= 0 && planted) {
+        const vec3 center = {bomb_feet.x, bomb_feet.y + 2.0f, bomb_feet.z};
+        if (self->team == DEFUSE_DEFENDERS) {
+            o->role = BOT_ROLE_DEFEND;
+            obj_set_goal(o, BOT_GOAL_BOMB, bomb, bomb_feet, 1);
+            obj_set_zone(o, center, (vec3) {6.0f, 4.0f, 3.0f}); // inside the pickup's GameObject (x +- 12, z +- 4)
+            return 1;
+        }
+        o->role = BOT_ROLE_DEFEND;
+        obj_set_goal(o, BOT_GOAL_GUARD, bomb, obj_zone_spot(center, (vec3) {OBJ_GUARD_OFFSET, 2.0f, OBJ_GUARD_OFFSET}, o), 1);
+        vec3 threat;
+        if (obj_threat_point(game, self, &threat)) obj_set_look(o, threat);
+        return 1;
+    }
+
+    // the carrier: the nearest site
+    if (self->team == DEFUSE_ATTACKERS && obj_carries_bomb(self)) {
+        const Object *site = sites[0];
+        for (int s = 1; s < n; s++) {
+            if (obj_d2d(sites[s]->position, self->position) < obj_d2d(site->position, self->position)) site = sites[s];
+        }
+        const vec3 size = object_box_size(site);
+        const vec3 half = {size.x * 0.5f, size.y * 0.5f, size.z * 0.5f};
+        const vec3 center = {site->position.x, site->position.y + half.y, site->position.z};
+        o->role = BOT_ROLE_ATTACK;
+        // the centre of the site, whatever the rank: the plant is the whole job
+        obj_set_goal(o, BOT_GOAL_SITE, (int) (site - map->objects[0]), (vec3) {center.x, center.y - half.y, center.z}, 1);
+        obj_set_zone(o, center, (vec3) {half.x * 0.7f, half.y, half.z * 0.7f});
+        return 1;
+    }
+
+    // a bomb lying on the floor: the nearest attacker bot takes it
+    if (self->team == DEFUSE_ATTACKERS && bomb >= 0 && lying && obj_nearest_bot_is_me(game, bot, self, bomb_feet)) {
+        o->role = BOT_ROLE_ATTACK;
+        obj_set_goal(o, BOT_GOAL_BOMB, bomb, bomb_feet, 0);
+        return 1;
+    }
+
     const Object *site = sites[o->rank % n];
     const vec3 size = object_box_size(site);
     const vec3 half = {size.x * 0.5f, size.y * 0.5f, size.z * 0.5f};
     const vec3 center = {site->position.x, site->position.y + half.y, site->position.z};
-    o->role = self->team == 1 ? BOT_ROLE_DEFEND : BOT_ROLE_ATTACK;
+    o->role = self->team == DEFUSE_DEFENDERS ? BOT_ROLE_DEFEND : BOT_ROLE_ATTACK;
     obj_set_goal(o, BOT_GOAL_SITE, (int) (site - map->objects[0]), obj_zone_spot(center, half, o), 1);
     obj_set_zone(o, center, half);
     vec3 threat;
@@ -533,7 +612,7 @@ int bot_objective_update(Game *game, GameBot *bot, Player *self, const float dt)
         if (o->fail_timer > 0.0f) return 0;
     }
     o->think_timer -= dt;
-    const int changed = o->last_flag != self->mode.flag || o->last_tags != self->mode.dog_tags;
+    const int changed = o->last_flag != self->mode.flag || o->last_tags != self->mode.dog_tags || o->last_bomb != obj_bomb_state(game, self);
     if (o->think_timer <= 0.0f || o->kind == BOT_GOAL_NONE || changed) {
         if (!obj_think(game, bot, self, o)) {
             o->kind = BOT_GOAL_NONE;
@@ -552,6 +631,11 @@ int bot_objective_update(Game *game, GameBot *bot, Player *self, const float dt)
     o->arrived = (unsigned char) obj_arrived(self, o);
     if (o->arrived) o->hold_time += dt;
     else o->hold_time = 0.0f;
+    // Defuse: at the bomb lying on the floor, the attacker takes it (the interact key's "int" 6)
+    if (o->kind == BOT_GOAL_BOMB && self->team == DEFUSE_ATTACKERS && game_player_in_pickup(game, self, o->index)) {
+        GamePickup k;
+        if (game_pickup_state(game, o->index, &k) && k.active && k.weapon == DEFUSE_BOMB_WEAPON) game_player_interact_v7(game, self, GAME_INTERACT_PICKUP, o->index, 0);
+    }
     // the point is contested: an enemy standing in the volume we hold is known to us (the HUD's
     // contested state tells a player as much), wherever we are looking. Without it two holders on one
     // zone could sweep their looks away from each other for good and the zone never fell
@@ -624,7 +708,8 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
     // a flag picked up / tags collected on the way: the goal changes at once (the carrier runs
     // home); otherwise the decision Hunt made stands for the fight
     o->think_timer -= dt;
-    if (o->last_flag != self->mode.flag || o->last_tags != self->mode.dog_tags || (o->kind != BOT_GOAL_NONE && o->think_timer <= -OBJ_THINK_MAX_MS)) {
+    if (o->last_flag != self->mode.flag || o->last_tags != self->mode.dog_tags || o->last_bomb != obj_bomb_state(game, self) ||
+        (o->kind != BOT_GOAL_NONE && o->think_timer <= -OBJ_THINK_MAX_MS)) {
         if (!obj_think(game, bot, self, o)) o->kind = BOT_GOAL_NONE;
     }
     if (o->kind == BOT_GOAL_NONE) return 0;
@@ -650,6 +735,13 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
             if (self->mode.dog_tags < 3 || range <= OBJ_HOLD_FIGHT_RANGE) return 0;
             *goal = o->goal;
             return 1;
+        case BOT_GOAL_BOMB: // Defuse: taking it is on the way (below), defusing / guarding it a hold
+            if (!o->hold) {
+                if (!quiet && range <= OBJ_CHASE_RANGE && !stalled) return 0;
+                *goal = o->goal;
+                return 1;
+            }
+            // fall through
         case BOT_GOAL_HILL: // stay on the point unless the enemy is close
         case BOT_GOAL_ZONE:
         case BOT_GOAL_SITE:
@@ -668,6 +760,23 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
     }
 }
 
+int bot_objective_defuse_hold(Game *game, GameBot *bot, Player *self, int *swap) {
+    (void) bot;
+    *swap = 0;
+    if (!game || !game->mode || !game->mode->config.site || !self || !self->active) return 0;
+    const int in_hand = self->weapon && self->weapon->bomb;
+    if (self->team == DEFUSE_ATTACKERS && obj_carries_bomb(self)) {
+        if (defuse_site_at(game, self) >= 0 && self->on_ground) {
+            if (in_hand) return 1;
+            if (self->swap_timer <= 0.0f) *swap = 4; // swapEquipment: the bomb in hand, then M1
+            return 2;
+        }
+        if (in_hand && self->swap_timer <= 0.0f) *swap = 3; // not on a site: the primary, to fight on the way
+        return 0;
+    }
+    return self->team == DEFUSE_DEFENDERS && defuse_bomb_pickup_at(game, self) >= 0;
+}
+
 const char *bot_role_name(const BotRole role) {
     switch (role) {
         case BOT_ROLE_ATTACK: return "attack";
@@ -678,6 +787,7 @@ const char *bot_role_name(const BotRole role) {
 }
 
 const char *bot_goal_name(const BotGoalKind kind) {
-    static const char *const k_names[] = {"none", "flag", "home", "carrier", "escort", "guard", "kite", "hill", "zone", "tag", "deposit", "site", "hunt", "regroup"};
+    static const char *const k_names[] = {"none", "flag", "home", "carrier", "escort", "guard", "kite", "hill", "zone", "tag", "deposit", "site", "hunt", "regroup",
+                                          "bomb"};
     return kind >= 0 && (size_t) kind < sizeof(k_names) / sizeof(k_names[0]) ? k_names[kind] : "none";
 }

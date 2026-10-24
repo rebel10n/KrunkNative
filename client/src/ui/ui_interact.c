@@ -15,6 +15,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <ui_mobile.h> // the phone prompt: "Tap to ..." and its bottom (v10 updateInteract)
+#include <defuse.h>    // Defuse's prompts (type 3: Plant / Equip Bomb / Diffuse)
 #include <s2c_events.h> // the spectated player's bar ("p")
 #include <spectate.h>
 #include <net_ext.h>    // NET_INTER_BAR_*
@@ -143,6 +144,14 @@ static void build_prompt(const Client *client, char *html, const size_t size) {
         case GAME_INTERACT_TRADE: // "Press [key] to Trade with [NAME]" (updateInteract type 5, :197562)
             trade_ui_prompt(scan.index, key, ui_mobile_active(), html, size);
             break;
+        case GAME_INTERACT_BOMB: { // Defuse (updateInteract type 3, deob-10.0.3.js:197548-197557; shared/src/defuse.c)
+            char equip[64];
+            key_label(UI_CONTROL_EQUIP, equip, sizeof(equip)); // binds.equip
+            if (scan.data == DEFUSE_PROMPT_PLANT) snprintf(html, size, "Press <span style=\"color:%s\">[M1]</span> to Plant", INTERACT_KEY_COLOR);
+            else if (scan.data == DEFUSE_PROMPT_EQUIP) snprintf(html, size, "Press %s to Equip Bomb", equip);
+            else if (scan.data == DEFUSE_PROMPT_DEFUSE) snprintf(html, size, "Press <span style=\"color:%s\">[M1]</span> to Diffuse", INTERACT_KEY_COLOR);
+            break;
+        }
         case GAME_INTERACT_TRIGGER: // getKeyName(10001): "Hold [M1] to <inm || Interact>"
             snprintf(html, size, "Hold <span style=\"color:%s\">[M1]</span> to %s", INTERACT_KEY_COLOR,
                      object && object->interact_msg ? object->interact_msg : "Interact");

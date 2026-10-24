@@ -868,6 +868,13 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(bot_objective_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # defuse_test: v10.0.3 Defuse's bomb (shared/src/defuse.c) on Kanji: taking it, planting, interruptions,
+    # the beeps, the explosion and defuse wins, a carrier's death, and a bot game that plants
+    add_executable(defuse_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/defuse_test.c)
+    target_link_libraries(defuse_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(defuse_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
     # bot_stuck_test: every rotation map's spawns are routable on the nav grid, and six bots on a
     # fixed list of maps and modes never stay stuck (KN_STUCK_ALL=1: every rotation map and mode)
     add_executable(bot_stuck_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_stuck_test.c)

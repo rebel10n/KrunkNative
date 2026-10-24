@@ -15,6 +15,7 @@
 #include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
 #include <cosmetics.h>
 #include <stalker.h> // v10 Stalker: silent steps
+#include <defuse.h>  // v10 Defuse: the planter's beeps
 #include <piss.h> // KrunkNative Piss: PISS_SOUND_INTERVAL
 #include <nettspend_audio.h> // KrunkNative Nettspend: the Drank's pour up, Money Spread's throw, the laced loop
 #include "viewer/viewer_store.h"
@@ -70,6 +71,7 @@ static struct {
     int ambient;            // ambient_N currently looping, 0 = none
     int preloaded;
     float now; // sound_events_tick's clock (the remote Piss spray throttle)
+    float plant_tick; // Defuse: interTick, the planter's beep_0 countdown (s)
 } g_sound;
 
 // weapon.sound per weapon (v7.1.4 src/data/weapons.js; Weapon.sound carries the same name), and
@@ -357,6 +359,7 @@ static void local_player_events(Client *client, const float now, const float del
 
     if (!me || !me->active || !me->weapon || !client->game.ready) {
         track->valid = 0;
+        g_sound.plant_tick = 0.0f; // interTick = 0 on the next life
         return;
     }
 
@@ -449,6 +452,17 @@ static void local_player_events(Client *client, const float now, const float del
 
     // HUD health drop: impact_0.
     if (me->health < track->health) audio_play("impact_0", 0.8f, 0, 1.0f);
+
+    // Defuse: planting (the bomb in hand, M1 held on a site) beeps for the planter every 400 ms: interTick -= delta,
+    // isYou && interTick <= 0 -> 400, SOUND.play("beep_0", 0.1, false, randFloat(0.95, 1)) (deob-10.0.3.js:192129-192133;
+    // interTick starts at 0 each life, :190718). shared/src/defuse.c fills the bar on the same frames.
+    if (me->making_progress && me->weapon->bomb && me->team == DEFUSE_ATTACKERS && defuse_site_at(&client->game, me) >= 0) {
+        g_sound.plant_tick -= delta;
+        if (g_sound.plant_tick <= 0.0f) {
+            g_sound.plant_tick = DEFUSE_PLANT_BEEP;
+            audio_play("beep_0", 0.1f, 0, rand_float(0.95f, 1.0f));
+        }
+    }
 
     track_store(track, me);
 }

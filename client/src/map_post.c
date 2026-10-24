@@ -697,7 +697,11 @@ static void post_pickups_frame(const Game *game) {
         }
         if (!p->mesh) continue;
         p->mesh->transform.position = (vec3) {state.position.x, state.position.y + 1.0f, state.position.z}; // config.pickupOff
-        p->mesh->visible = state.active && state.weapon >= 0;
+        // Defuse's planted bomb is an inactive pickup that stays in sight: updatePickup shows a pickup that holds
+        // a weapon, active or not (`(!bomb || mode.site) && pickup != null`, deob-10.0.3.js:218972)
+        const Weapon *held = state.weapon >= 0 && state.weapon < rules_krunker_weapon_count() ? rules_weapon(state.weapon) : NULL;
+        const int planted = held && held->bomb && game->mode && game->mode->config.site;
+        p->mesh->visible = (state.active || planted) && state.weapon >= 0;
     }
 }
 

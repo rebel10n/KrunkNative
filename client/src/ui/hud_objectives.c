@@ -21,6 +21,12 @@
 //               128; and, while the viewer stands on a zone being captured, captureProg's bar
 //               (320 x 24 at 50 % / 80 %) under "SECURING X" (#fff fill) / "CONTESTING X" (#eb5656).
 //
+//   the bomb  (v10.0.3 deob-10.0.3.js:179681-179698) mode.site, the attackers (team 2) only: every pickup holding
+//               the Bomb (17: lying on the floor, or planted) not around the camera gets textures/marker_0.png at
+//               pickup y + 4, max(0.3, 1 - d / 600) * 40 px wide, with the letter of activeObjective || 0 ("A":
+//               Defuse has none) in 50 px #fff GameFont above it. v10 inherits the last site letter's alpha there;
+//               KN sets the objective opacity as for the others.
+//
 // v7 draws these only with #deathUIHolder hidden and neither #endUI nor #menuHolder up; a marker
 // within 45-55 % x / 40-60 % y of the screen while aiming takes adsObjOpac (0.5) instead of
 // objOpac (1). The viewer's team is the player's, 1 while spectating.
@@ -37,6 +43,7 @@
 #include <nametags.h>
 #include <spectate.h>
 #include <modes.h>
+#include <defuse.h> // the bomb marker (DEFUSE_BOMB_WEAPON, the attackers' team)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,6 +161,56 @@ static void draw_flags(const HoFrame *f, const Client *client, const GameMode *m
         c2d_save(f->c);
         c2d_translate(f->c, x, y);
         c2d_scale(f->c, k, k);
+        c2d_draw_image(f->c, img, -iw / 2.0, -ih / 2.0, iw, ih);
+        c2d_restore(f->c);
+    }
+}
+
+// ------------------------------------------------------------------ the bomb (Defuse)
+
+#define HO_BOMB_UP 4.0f   // v9918.set(x, y + 4, z)
+#define HO_BOMB_SIZE 40.0 // * 40
+static int bomb_marked(const Client *client, const int team) {
+    if (!defuse_enabled(&client->game) || team != DEFUSE_ATTACKERS) return 0; // mode.site && map.manager.sites.length
+    for (size_t i = 0; i < client->game.map->object_count; i++) {
+        GamePickup k;
+        if (client->game.map->objects[i]->pickup && game_pickup_state(&client->game, (int) i, &k) && k.weapon == DEFUSE_BOMB_WEAPON) return 1;
+    }
+    return 0;
+}
+
+static void draw_bomb(const HoFrame *f, const Client *client, const GameMode *mode) {
+    const Map *map = client->game.map;
+    // iìïïïìi[activeObjective || 0]: Defuse's activeObjective is null on the client, so "A" (KN keeps -1 for none)
+    char letter[2] = {(char) ('A' + (mode->active_objective > 0 && mode->active_objective < 26 ? mode->active_objective : 0)), 0};
+    for (size_t i = 0; i < map->object_count; i++) {
+        GamePickup k;
+        if (!map->objects[i]->pickup || !game_pickup_state(&client->game, (int) i, &k) || k.weapon != DEFUSE_BOMB_WEAPON) continue;
+        // the pickup's GameObject (pickupZoneX / Z / H) around the camera: none
+        if (in_box(f->camera->position, (vec3) {k.position.x, k.position.y + 1.0f, k.position.z}, (vec3) {12.0f, 4.0f, 4.0f})) continue;
+        const vec3 p = {k.position.x, k.position.y + HO_BOMB_UP, k.position.z};
+        const vec3 cam = f->camera->position;
+        const float dx = cam.x - p.x, dy = cam.y - p.y, dz = cam.z - p.z;
+        float s = 1.0f - sqrtf(dx * dx + dy * dy + dz * dz) / HO_FADE_DIST;
+        if (s < HO_MIN_SCALE) s = HO_MIN_SCALE;
+        const double size = s * HO_BOMB_SIZE;
+        double fx, fy;
+        if (size < 1.0 || !nametags_project(f->camera, p, &fx, &fy)) continue;
+        C2DImage *img = ho_texture(f->c, "marker_0");
+        if (!img) continue;
+        int iw = 0, ih = 0;
+        c2d_image_size(img, &iw, &ih);
+        if (iw <= 0 || ih <= 0) continue;
+        const double x = fx * f->w, y = fy * f->h, scale = size / iw;
+        ho_alpha(f, x, y);
+        c2d_save(f->c);
+        c2d_translate(f->c, x, y);
+        c2d_scale(f->c, scale, scale);
+        rgb(f->c, 0xffffff, 1);
+        c2d_set_font(f->c, 50, "GameFont");
+        c2d_set_text_align(f->c, C2D_ALIGN_START);
+        c2d_set_text_baseline(f->c, C2D_BASELINE_ALPHABETIC);
+        c2d_fill_text(f->c, letter, -50.0 / 2.0, -50.0 / 2.0 - 40.0, 0, 0); // fillText(letter, -size / 2, -size / 2 - 40)
         c2d_draw_image(f->c, img, -iw / 2.0, -ih / 2.0, iw, ih);
         c2d_restore(f->c);
     }
@@ -390,7 +447,8 @@ void hud_objectives_render(Client *client) {
     const HtmlElem death = html_dom_by_id("deathUIHolder");
     const int shown = mode && client->game.map && !html_ui_is_menu_open() && !hud_ui_end_screen_up() && !(death && html_dom_is_shown(death)) &&
                       ((mode->config.flags || mode->config.oneflag) || (mode->config.objective && mode->objective_count) ||
-                       (mode->config.dom && mode->dom_zone_count) || juggernauts_up(client));
+                       (mode->config.dom && mode->dom_zone_count) || juggernauts_up(client) ||
+                      bomb_marked(client, client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0));
     g_jugg_drawn = 0;
     if (!shown && !g_ho.drawn) return;
 
@@ -421,6 +479,7 @@ void hud_objectives_render(Client *client) {
         if (mode->config.flags || mode->config.oneflag) draw_flags(&f, client, mode, team);
         if (mode->config.objective && mode->objective_count) draw_objectives(&f, client, mode, me);
         if (mode->config.dom && mode->dom_zone_count) draw_dom(&f, mode, me, team);
+        if (bomb_marked(client, team)) draw_bomb(&f, client, mode);
         draw_juggernauts(&f, client, mode, team);
         c2d_restore(c);
         c2d_set_global_alpha(c, 1);

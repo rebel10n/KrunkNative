@@ -2029,6 +2029,18 @@ static void bot_update(Game *game, GameBot *bot, const float dt, const float del
     // locomotion (shared/src/bot_move.c): slide hops where the way is clear, no jumps into
     // ceilings, the crouch for the landing slide
     bot_move_apply(game, bot, self, dt, f.yaw, &f.move, &f.jump, &f.crouch, &f.jump_late);
+    // Defuse (bot_objective.c): planting on a site / defusing at the bomb is standing still with M1 held
+    int defuse_swap = 0;
+    const int defuse_hold = bot_objective_defuse_hold(game, bot, self, &defuse_swap);
+    if (defuse_hold) {
+        f.move = MOVE_NONE;
+        f.jump = f.jump_late = 0;
+        f.crouch = 0;
+        f.shoot = (unsigned char) (defuse_hold == 1);
+        f.swap = defuse_swap; // not bot_weapon_upkeep's "back to the primary"
+    } else if (defuse_swap) {
+        f.swap = defuse_swap;
+    }
 
     if (bot->config.nod_yes) f.pitch = (bot->tick & 1) ? BOT_HALF_PI / 4.0f : -(BOT_HALF_PI / 4.0f);
     if (bot->config.force_crouch) f.crouch = 1;

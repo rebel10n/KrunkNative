@@ -4,6 +4,7 @@
 #include <forfeit.h>  // the team forfeit vote (v10 voteToForfeit)
 #include <net_ext.h> // game_send_hit: NET_EXT_KN_HIT_DAMAGE
 #include <shared.h>
+#include <defuse.h>
 #include <ruleset.h>
 #include <ai.h>
 #include <map_ai.h>
@@ -929,6 +930,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
 
         // v10 game.update: voteToForfeit's timer, the pass check (forfeit.c)
         forfeit_tick(game, delta);
+        defuse_update(game, delta); // game.updateBomb (deob-10.0.3.js:222165): Defuse's planted bomb (defuse.c)
     }
 
     // v7.1.4 game.update order (doc/v7/map-logic.md §2.0): 1 timers, 2 streaks, 3 vote-kick,

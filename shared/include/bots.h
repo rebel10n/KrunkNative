@@ -120,6 +120,7 @@ typedef enum {
     BOT_GOAL_SITE,      // a bomb site
     BOT_GOAL_HUNT,      // elimination: the nearest enemy
     BOT_GOAL_REGROUP,   // elimination, outnumbered: the nearest teammate
+    BOT_GOAL_BOMB,      // Defuse: the bomb to take (attackers), to defuse (defenders) or to guard (attackers, planted)
 } BotGoalKind;
 typedef struct {
     BotRole role;
@@ -139,6 +140,7 @@ typedef struct {
     unsigned char has_wander;
     int rank, team_bots;            // this bot among its team's bots (list order), their count
     int last_flag, last_tags;       // a change re-thinks at once
+    int last_bomb;                  // Defuse: bot_objective.c's bomb state (carried / lying / planted), a change re-thinks
 } BotObjective;
 
 // Navigation counters since the manager was created (shared/include/bot_path.h bot_path_stats,
