@@ -41,6 +41,8 @@ void ks_client_controller(int type, const char *button, int code);
 int  ks_client_pointer_free(void);
 // INPUTS.unlockMouse (until lockMouse or a click on the game view): the controls are off.
 int  ks_client_input_unlocked(void);
+// CAMERA.detach (game.detachedCam) until CAMERA.attach: the script poses the camera (class_camera.c).
+int  ks_client_camera_detached(void);
 
 // ---- events
 void ks_client_player_spawned(Client*, const Player*);              // onPlayerSpawn (any player)

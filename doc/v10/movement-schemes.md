@@ -115,9 +115,10 @@ deob-10.0.3.js:195029) zeroes them (`player_movement_spawn`).
   (deob-10.0.3.js:20162-20168; controls.camType isNormal / isTop / isSideX / isSideZ / isOrto,
   :257869-257873). Only Default's movement reads it (3rd Person without `camRot`, above). The class
   camera itself (offsets, top / side / orthographic views, the free mouse aim of a camera offset
-  without pointer lock, `lockCamP`, `lckCmYR` / `yCmLim` pitch locks) is not drawn by KrunkNative's
-  client yet; the game's `thirdPerson` setting and KrunkNative's own third person ride behind the
-  shoulder with the mouse look, so MMORPG shows the body turning toward its move there.
+  without pointer lock, `lockCamP`, `lckCmYR` / `yCmLim` pitch locks, the game's `thirdPerson`
+  offset) is the client's `client/src/class_camera.c` (its header lists v10's lines and the
+  deliberate differences; `client/tests/class_camera_test.c`). `lockCamP` ("Face Player") turns the
+  camera toward the body's yaw, so a Vehicle or MMORPG class with it gets a chase camera.
 - **KrunkScript.** v10's `onPlayerUpdate` sees `movDir` after `movDrP` (deob-10.0.3.js:191302-191305), and so does
   KrunkNative's (`ks_move_dir_value` in `shared/src/ks_game/ks_game.c`, which also maps our move key to input[4]
   as `(k + 1) % 8`: forward is -PI / 2);

@@ -20,6 +20,7 @@
 #include <game_reload.h> // F5: game_reload_tick
 #include <badges.h> // WP-E part 2c: the custom badge in the class box
 #include <ks_client.h> // ks_client_pointer_free
+#include <class_camera.h> // a class camera's freeMouse: no pointer lock
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <weapons.h>
@@ -295,7 +296,9 @@ void client_pointer_update(Client *client) {
     in.end_up = (unsigned char) hud_ui_end_screen_up();
     in.end_results = (unsigned char) hud_ui_end_screen_interactive();
     in.script_unlock = (unsigned char) ks_client_input_unlocked();
-    in.script_free = (unsigned char) (ks_client_pointer_free() && !ks_client_input_unlocked());
+    // KrunkScript's INPUTS.freeMouse, or a class camera's freeMouse (an offset without camRot or fPLock:
+    // UsePointerLock false, deob-10.0.3.js:257867-257868): the controls on, the cursor free to aim
+    in.script_free = (unsigned char) ((ks_client_pointer_free() && !ks_client_input_unlocked()) || class_camera_wants_free_cursor(client));
     // the security challenge: clicks and typing go to it; a KR charge's #chargeModal (CONTROLS.toggle(false), v10 :257689)
     in.modal = (unsigned char) (krunker_captcha_needs_player() || s2c_ui_charge_modal_open());
     const int had_controls = g_ptr.want.controls;

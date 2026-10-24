@@ -25,7 +25,8 @@
 //     first person (updateAim: 1 + (zoom - 1) * aim * adsFov; toggleAim: a scope's full zoom once
 //     aimed, 172050-172063), a scope shows its overlay and hides the held weapon (toggleAim), and
 //     the crosshair stays while aiming except with a scope (updateCrosshair, 221608).
-// The game's own thirdPerson setting and class camOffX/Y/Z keep v7's camera (not this module).
+// The game's own thirdPerson setting, class camOffX/Y/Z and camTypes other than FPS are v10's class
+// camera (client/include/class_camera.h), not this module.
 #include <client.h>
 
 #define TP_OFFSET_X 5.0f      // config.thrdPX: right

@@ -230,6 +230,7 @@ static KsValue in_enable_default(KsScript *s, void *u, const KsValue *a, int n) 
 // GAME.CAMERA
 
 int ks_input_camera_detached(void) { return g_ksc.loaded && g_in.detached; }
+int ks_client_camera_detached(void) { return ks_input_camera_detached(); }
 
 static KsValue cam_detach(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u; (void) a; (void) n;
