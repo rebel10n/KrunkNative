@@ -107,8 +107,8 @@ const PrefabInfo *prefab_info(int id);
 const PrefabData *prefab_data(int id);
 int prefab_has_flag(int id, PrefabFlag flag);
 int prefab_has_role(int id, unsigned roles); // any of `roles`
-// v7 / v10 name ("CAMERA") or an alias ("SPECTATE_CAM", "BOT" of v3.1.1; "BOT_PATH_NODE", v10's
-// name of 41 TERMINAL); case-sensitive. -1 none.
+// v10 name ("CAMERA", "BOT_PATH_NODE") or an older alias ("SPECTATE_CAM", "BOT" of v3.1.1; "TERMINAL",
+// the v3.1.1 / v7.1.4 name of 41); case-sensitive. -1 none.
 int prefab_id_from_name(const char *name);
 const char *prefab_name(int id); // "CUBE", NULL out of range
 

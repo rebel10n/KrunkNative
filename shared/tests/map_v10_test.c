@@ -58,9 +58,9 @@ static void test_tables(void) {
     CHECK(PREFAB_COUNT == 99 && PREFAB_V7_COUNT == 97 && PREFAB_SCRAPCRATE == 97 && PREFAB_ENTITY == 98, "prefab ids");
     CHECK(PREFAB_TERMINAL == 41 && PREFAB_BOT_PATH_NODE == 41, "41 TERMINAL / BOT_PATH_NODE");
     CHECK(!strcmp(prefab_name(PREFAB_SCRAPCRATE), "SCRAPCRATE") && !strcmp(prefab_name(PREFAB_ENTITY), "ENTITY") &&
-              !strcmp(prefab_name(41), "TERMINAL"), "names");
+              !strcmp(prefab_name(41), "BOT_PATH_NODE"), "names (41 is v10.0.3's BOT_PATH_NODE)");
     CHECK(prefab_id_from_name("BOT_PATH_NODE") == 41 && prefab_id_from_name("TERMINAL") == 41 && prefab_id_from_name("ENTITY") == 98 &&
-              prefab_id_from_name("SCRAPCRATE") == 97, "name lookup and the BOT_PATH_NODE alias");
+              prefab_id_from_name("SCRAPCRATE") == 97, "name lookup and the TERMINAL alias");
     const PrefabData *scrap = prefab_data(PREFAB_SCRAPCRATE), *crate = prefab_data(PREFAB_CRATE);
     CHECK(scrap && scrap->scale == 5.0f && !strcmp(scrap->model, "crate_0") && prefab_has_flag(PREFAB_SCRAPCRATE, PF_HASHEALTH) &&
               prefab_has_flag(PREFAB_SCRAPCRATE, PF_CASTSHADOW) && !prefab_has_flag(PREFAB_SCRAPCRATE, PF_ISPROP) && crate->scale == 6.0f,
@@ -69,6 +69,15 @@ static void test_tables(void) {
               prefab_has_role(PREFAB_BOT_PATH_NODE, PREFAB_R_NO_OBJECT), "runtime roles");
     CHECK(prefab_has_flag(PREFAB_ENTITY, PF_ISENTITY) && prefab_data(PREFAB_ENTITY)->opacity == 0.3f && prefab_data(PREFAB_ENTITY)->line_col == 65484,
           "ENTITY data");
+    // deob-10.0.3.js:174150: BOT_PATH_NODE noCol, noCollision, noTexture, notStyleable, notTechnical, tool, genGeo,
+    // defaultSize [3, 5, 3], lineCol 65535 (v7's TERMINAL cube flags are gone)
+    const PrefabData *node = prefab_data(PREFAB_BOT_PATH_NODE);
+    CHECK(node && prefab_has_flag(41, PF_NOCOL) && prefab_has_flag(41, PF_NOCOLLISION) && prefab_has_flag(41, PF_NOTEXTURE) &&
+              prefab_has_flag(41, PF_NOTSTYLEABLE) && prefab_has_flag(41, PF_NOTTECHNICAL) && prefab_has_flag(41, PF_TOOL) &&
+              prefab_has_flag(41, PF_GENGEO) && !prefab_has_flag(41, PF_HIDEBOUNDINGBOX) && !prefab_has_flag(41, PF_EDITFACES) &&
+              !prefab_has_flag(41, PF_CANINTERFACE) && !prefab_has_flag(41, PF_SCALABLE) && node->line_col == 65535 &&
+              feq(node->default_size[0], 3.0f) && feq(node->default_size[1], 5.0f) && feq(node->default_size[2], 3.0f),
+          "BOT_PATH_NODE data (10.0.3 flags, 3 x 5 x 3)");
     CHECK(prefab_has_flag(PREFAB_CUBE, PF_CANDYNAMIC) && prefab_has_flag(PREFAB_TRIGGER, PF_CANDYNAMIC) &&
               prefab_has_flag(PREFAB_CUSTOM_ASSET, PF_CANDYNAMIC) && !prefab_has_flag(PREFAB_CRATE, PF_CANDYNAMIC), "canDynamic");
     CHECK(!strcmp(g_trigger_v7_conditions[12].name, "Custom Action") && g_trigger_v7_conditions[12].val_count == 1 &&

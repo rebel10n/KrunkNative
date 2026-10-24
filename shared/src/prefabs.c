@@ -76,7 +76,8 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     // v7 builds EVENT objects only on official maps, client-side (prefab localOnly); KN has no
     // event objects and no shipped map has one: never a map object.
     [PREFAB_EVENT] = {G(MODEL), C(NONE), NO_OBJ},
-    // v7 TERMINAL / v10 BOT_PATH_NODE: map.js skips both names (v10 L167396), no object either way
+    // v10.0.3 BOT_PATH_NODE (v7 TERMINAL): map.js skips both names (deob-10.0.3.js:188700), no object either way;
+    // its editor data (noCol, noCollision, tool, ...) is prefab_data.c's row 41 (deob-10.0.3.js:174150)
     [PREFAB_BOT_PATH_NODE] = {G(NONE), C(NONE), NO_OBJ},
     [PREFAB_PREMIUM_ZONE] = {G(NONE), C(FORCED), NOSHOOT | ZONE | BORDER | HP | INC},
     [PREFAB_VERIFIED_ZONE] = {G(NONE), C(FORCED), NOSHOOT | NOWJ | ZONE | BORDER | HP | INC},
@@ -168,7 +169,7 @@ int prefab_id_from_name(const char *name) {
     }
     if (!strcmp(name, "SPECTATE_CAM")) return PREFAB_CAMERA; // v3.1.1 names
     if (!strcmp(name, "BOT")) return PREFAB_AI_SPAWNER;
-    if (!strcmp(name, "BOT_PATH_NODE")) return PREFAB_BOT_PATH_NODE; // v10's name of 41 (v7 table: TERMINAL)
+    if (!strcmp(name, "TERMINAL")) return PREFAB_BOT_PATH_NODE; // v3.1.1 / v7.1.4 name of 41 (v10.0.3: BOT_PATH_NODE)
     return -1;
 }
 
