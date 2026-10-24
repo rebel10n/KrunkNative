@@ -23,6 +23,9 @@ int  v10_login_guest_window(void);       // showWindow(5) for a guest: the modal
 // (account_split.h). 1 shown, 0 not here (the menu page is not up, or the card did not open).
 int  v10_login_use(const char *name, const char *pass);
 void v10_menu_tick(void);                // per frame: the menu's idle state (Popular Now, #activeBuffs, the Store item's badges)
+// isKRSale (deob-10.0.3.js:28530): a Saturday / Sunday (UTC) of an odd ISO week, on the menu's clock (knV10MenuClock,
+// a scenario's pinned Wednesday). The Store item's KR DISCOUNT badge and the Purchase KR tab's 10% Off read it.
+int  v10_menu_kr_sale(void);
 // v10's INIT (g:219154-219156): the Invite button greyed (buttonD) in a ranked match; the Host card greyed for an
 // official game only (v10's second toggle of menuBtnHost overrides the ranked one, so ranked does not grey it).
 void v10_menu_match_gate(int ranked, int official);

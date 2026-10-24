@@ -32,6 +32,8 @@
 #include <store_spins.h> // v10 store.wheels / itemPools
 #include <junk.h>          // the Junk wallet's amounts (doc/v10/junk.md)
 #include <v10_wild_offer.h>
+#include <v10_menu.h>      // v10_menu_kr_sale: the Purchase KR tab's sale weekends
+#include <ks_game.h>       // ks_wall_ms: the Prize Wheels tab's clock
 #include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
 #include <html_dom.h>
 #include <i18n.h>
@@ -1150,11 +1152,21 @@ static void store_purchase(StrBuf *sb) {
 // Premium (svelte-1dbkhl), Purchase KR (svelte-1ko99up) and the Eterno Shop (svelte-gh77t9, its
 // own music). The markup is the components' rendered DOM; the handlers are this file's.
 
-// v10 config.purchases (_7299): KR packages
-static const struct { int val; const char *price, *col, *tag, *tag_col; } k_purchases_v10[] = {
-    {400, "1.29", "#888888", NULL, NULL}, {1250, "2.89", "#b2f251", NULL, NULL}, {3500, "9.99", "#3696f3", NULL, NULL},
-    {8500, "18.99", "#e040fb", NULL, NULL}, {20000, "34.99", "#fa9704", "Popular!", "#ed4242"},
-    {60000, "99.99", "#ee5356", "Best Value!", "#E040FB"},
+// config.purchases (deob-10.0.3.js:116856-116929): the KR packages, price and priceSale (the KR sale weekends'),
+// the Steam prices left out (no Steam build). The last two are onlySpenders: listed for spendingTier 2 only.
+static const struct {
+    int val;
+    const char *price, *price_sale, *col, *tag, *tag_col, *anim;
+    int only_spenders;
+} k_purchases_v10[] = {
+    {400, "1.29", "1.16", "#888888", NULL, NULL, NULL, 0},
+    {1250, "2.89", "2.59", "#b2f251", NULL, NULL, NULL, 0},
+    {3500, "9.99", "8.99", "#3696f3", NULL, NULL, NULL, 0},
+    {8500, "18.99", "17.09", "#e040fb", NULL, NULL, NULL, 0},
+    {20000, "34.99", "31.49", "#fa9704", "Popular!", "#ed4242", NULL, 0},
+    {60000, "99.99", "89.99", "#ee5356", "Best Value!", "#E040FB", NULL, 0},
+    {160000, "249.99", "224.99", "#ee5356", "???", "radial-gradient(#d659c7, #4a59ec)", "goldenKr 5s infinite", 1},
+    {350000, "499.99", "449.99", "#ee5356", "Beyond Belief!", "linear-gradient(9deg, #ffce14, #f30ad6)", "beyondBelief 2s infinite", 1},
 };
 
 static const char *const k_shop_tabs_v10[] = {
@@ -1223,34 +1235,98 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
     sb_append(sb, "</div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" onmousedown=\"playSelect(0.1);windows[13].updateScroll(1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
 }
 
-// Prize Wheels: wheels 0 (Starter) and 2 (Heroic), not hidden, not locked (store.js data; the
-// dated wheels of v10's gapi /data/spins are hidden or over)
-// v10's Prize Wheels tab (deob-10.0.3.js 145133): only wheels 0 and 2, not hidden, not locked, and either
-// live (no dates, or startDate < now <= endDate: iíîíîïî, 28912) or inside the display window
-// (displayDate <= now < startDate and now < endDate, 145133). The Free KR wheel is hidden on every platform.
+// v10's Prize Wheels tab (deob-10.0.3.js:145133-145140): only wheels 0 and 2, not hidden, not the data's `locked`,
+// and either live (no dates, or startDate < now <= endDate: iíîíîïî, 28912) or inside the display window
+// (displayDate <= now < startDate and now < endDate). The Free KR wheel is hidden on mobile only, and is no wheel 0 / 2.
+// (UiWheel.locked also counts the dates, so the display window reads the data's own flag.)
+static int wheel_data_locked(const UiWheel *w) { return w->src ? w->src->locked : w->locked; }
+
+// Date.now(): the millisecond wall clock, so a whole-second startDate is past (now > startDate) the moment it no longer
+// counts down (startDate > now) and the redrawn tab keeps the tile
+static int64_t wheel_now_ms(void) { return (int64_t) ks_wall_ms(); }
+
 static int wheel_listed_v10(const int i, const UiWheel *w) {
     if (i != 0 && i != 2) return 0;
-    if (w->hide || w->locked) return 0;
+    if (w->hide || wheel_data_locked(w)) return 0;
     if (!w->src) return 1;
-    const int64_t now = (int64_t) time(NULL) * 1000;
+    const int64_t now = wheel_now_ms();
     const int64_t s = w->src->start_ms, e = w->src->end_ms, d = w->src->display_ms;
     const int live = (!s || now > s) && (!e || now <= e);
     const int window = d && s && now >= d && now < s && (!e || now < e);
     return live || window;
 }
 
+// a tile before its startDate (startDate > now, deob-10.0.3.js:145211): greyed, no overlay, no click, "Unlocks in"
+static int wheel_pending(const UiWheel *w, const int64_t now) { return w->src && w->src->start_ms > now; }
+
+// windows.store.wheels.unlocksIn with the time to startDate as "HH:MM:SS", the hours mod 24 (deob-10.0.3.js:27382,
+// 145212)
+static void wheel_unlocks_text(const UiWheel *w, const int64_t now, char *out, const size_t n) {
+    const int64_t ms = w->src->start_ms - now;
+    char t[32];
+    snprintf(t, sizeof t, "%02lld:%02lld:%02lld", (long long) (ms / 3600000 % 24), (long long) (ms / 60000 % 60), (long long) (ms / 1000 % 60));
+    const char *const argv[] = {t};
+    i18n_trf(out, n, "windows.store.wheels.unlocksIn", "Unlocks in {0}", 1, argv);
+}
+
+// acc[aReq.ind] for the account fields v10's Account has under those names; 0 when KN keeps no such field (JS: undefined,
+// and `undefined < val` never locks)
+static int account_field(const AccountInfo *acc, const char *ind, double *out) {
+    static const char *const names[] = {"level", "score", "kills", "deaths", "wins", "games", "funds", "timePlayed", "junk", "rankedPoints", "spendingTier"};
+    const double vals[] = {acc->level, acc->score, acc->kills, acc->deaths, acc->wins, acc->games, acc->funds, acc->time_played, acc->junk, acc->ranked_points, acc->spending_tier};
+    for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); k++)
+        if (!strcmp(ind, names[k])) {
+            *out = vals[k];
+            return 1;
+        }
+    return 0;
+}
+
+// priceTxt * multi: a JS number times multi ("Sold Out" * 10 is NaN)
+static void price_times(const char *txt, const int multi, char *out, const size_t n) {
+    char *end = NULL;
+    while (*txt == ' ') txt++;
+    const double v = *txt ? strtod(txt, &end) : 0.0;
+    while (end && *end == ' ') end++;
+    if (*txt && (end == txt || *end)) snprintf(out, n, "NaN");
+    else snprintf(out, n, "%.15g", v * multi);
+}
+
+// the tiles as drawn (store.wheels indices in order, and which count down) for the tab's 1 s clock (wheels_clock_tick)
+#define WHEEL_TILES_MAX 8
+static int g_wheel_tiles[WHEEL_TILES_MAX], g_wheel_tile_pending[WHEEL_TILES_MAX], g_wheel_tile_count;
+
 static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
     int tickets = 0;
     tickets = owned_tickets();
     sb_appendf(sb, "<div class=\"prize-wheels-tab svelte-5s5opu\"><div class=\"prize-wheels-header svelte-5s5opu\"><div class=\"prize-wheels-sub svelte-5s5opu\">%s</div> <div class=\"view-tickets-btn svelte-5s5opu\"><button class=\"main-button svelte-whnh40 main-button-slim\" type=\"button\" onclick=\"playSelect();windows[13].viewTickets()\">%s<span class=\"ticket-count-sep svelte-5s5opu\"></span><span class=\"ticket-count-num svelte-5s5opu\">%d</span></button></div></div> <div class=\"prize-wheel-table svelte-5s5opu\">",
                I18N("windows.store.wheels.sub", "Try your luck and spin for a chance to win some new skins!"), I18N("windows.store.wheels.viewTickets", "View Tickets"), tickets);
+    const int64_t now = wheel_now_ms();
+    g_wheel_tile_count = 0;
     for (int i = 0; i < wheel_count(); i++) {
         const UiWheel *w = wheel_at(i);
         if (!wheel_listed_v10(i, w)) continue;
         const char *col = w->head_col;
+        const int data_locked = wheel_data_locked(w), pending = wheel_pending(w, now);
+        if (g_wheel_tile_count < WHEEL_TILES_MAX) {
+            g_wheel_tiles[g_wheel_tile_count] = i;
+            g_wheel_tile_pending[g_wheel_tile_count++] = pending;
+        }
+        // the tile's state (deob-10.0.3.js:145169-145204): locked for a guest or below a free wheel's minLvl, priced
+        // "Coming Soon" / "Sold Out" / priceT / price; an account short of aReq is locked too, priced aReq.txt
         int locked = !acc || (w->free && acc->level < w->min_lvl);
         int sho_kr = 1;
-        char price[32];
+        char price[64];
+        if (data_locked) snprintf(price, sizeof(price), "Coming Soon");
+        else if (locked) snprintf(price, sizeof(price), "Sold Out");
+        else if (w->price_t) snprintf(price, sizeof(price), "%s", w->price_t);
+        else snprintf(price, sizeof(price), "%d", w->price);
+        double have = 0.0;
+        if (acc && w->src && w->src->a_req && account_field(acc, w->src->a_req_ind, &have) && have < w->src->a_req_val) {
+            locked = 1;
+            sho_kr = 0;
+            if (w->src->a_req_txt[0]) snprintf(price, sizeof(price), "%s", w->src->a_req_txt);
+        }
         if (w->kr) {
             const double ms = account_reward_ms();
             const long long t = ms > 0 ? (long long) ms / 1000 : 0;
@@ -1258,21 +1334,16 @@ static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
             else snprintf(price, sizeof(price), "%s", w->price_t);
             locked = t > 0;
             sho_kr = 0;
-        } else if (locked) {
-            snprintf(price, sizeof(price), "Sold Out");
-        } else if (w->price_t) {
-            snprintf(price, sizeof(price), "%s", w->price_t);
-        } else {
-            snprintf(price, sizeof(price), "%d", w->price);
         }
-        char display[48];
-        snprintf(display, sizeof(display), "%s%s", price, w->price_t || !sho_kr ? "" : " KR");
+        const char *kr_suffix = w->price_t || !sho_kr ? "" : " KR";
+        char display[80];
+        snprintf(display, sizeof(display), "%s%s", price, kr_suffix);
         const int has_ticket = w->ticket >= 0, ticket_only = w->ticket_only;
         char thumb[256] = "", ticket[256] = "";
-        if (!w->kr && acc) wheel_thumb(w, thumb, sizeof(thumb));
+        if (!w->kr && !data_locked && acc) wheel_thumb(w, thumb, sizeof(thumb));
         if (has_ticket) store_skin_preview(w->ticket, ticket, sizeof(ticket));
-        sb_appendf(sb, "<div class=\"shopCard prize-tile svelte-5s5opu%s\" role=\"button\" tabindex=\"0\" style=\"color: %s; --tile-glow: %s47; --tile-shadow: %s73; ", locked ? " makeGray" : "", col, col, col);
-        if (w->kr) {
+        sb_appendf(sb, "<div class=\"shopCard prize-tile svelte-5s5opu%s\" role=\"button\" tabindex=\"0\" style=\"color: %s; --tile-glow: %s47; --tile-shadow: %s73; ", locked || pending ? " makeGray" : "", col, col, col);
+        if (w->kr || data_locked) {
             char vig[256], spin[64], spin_url[256];
             store_asset_url("img/shop/filter/vignette.png", vig, sizeof(vig));
             snprintf(spin, sizeof(spin), "img/shop/spins/%d_0.png", i);
@@ -1280,19 +1351,18 @@ static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
             sb_appendf(sb, "background-image: url(%s), url(%s)", vig, spin_url);
         }
         sb_append(sb, "\" onmouseenter=\"playTick()\"");
-        if (!locked && !(has_ticket && !ticket_only)) {
+        if (!pending && !locked && !(has_ticket && !ticket_only)) {
             if (w->kr) sb_append(sb, " onclick=\"claimReward()\"");
             else if (ticket_only) sb_appendf(sb, " onclick=\"prizeWheel(%d, %d)\"", i, w->ticket);
         }
         sb_append(sb, ">");
-        if ((has_ticket || w->multi) && !ticket_only && acc) {
+        if ((has_ticket || w->multi) && !ticket_only && acc && !pending) {
             sb_append(sb, "<div class=\"shop-action-overlay svelte-5s5opu\">");
             if (w->multi) {
-                char multi[48];
-                if (locked) snprintf(multi, sizeof(multi), "NaN%s", sho_kr && !w->price_t ? " KR" : "");
-                else snprintf(multi, sizeof(multi), "%d%s", w->price * w->multi, sho_kr && !w->price_t ? " KR" : "");
-                sb_appendf(sb, "<div class=\"shop-actions-cell svelte-5s5opu\"><div class=\"shop-sub-action svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d)\" onmouseenter=\"playTick()\">1x Spin <div style=\"color: %s\">%s</div></div> <div class=\"shop-sub-action-sep svelte-5s5opu\" style=\"background: %s\"></div> <div class=\"shop-sub-action svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d, null, %d)\" onmouseenter=\"playTick()\">%dx Spin <div style=\"color: %s\">%s</div></div></div>",
-                           i, col, display, col, i, w->multi, w->multi, col, multi);
+                char multi[64];
+                price_times(price, w->multi, multi, sizeof(multi));
+                sb_appendf(sb, "<div class=\"shop-actions-cell svelte-5s5opu\"><div class=\"shop-sub-action svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d)\" onmouseenter=\"playTick()\">1x Spin <div style=\"color: %s\">%s</div></div> <div class=\"shop-sub-action-sep svelte-5s5opu\" style=\"background: %s\"></div> <div class=\"shop-sub-action svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d, null, %d)\" onmouseenter=\"playTick()\">%dx Spin <div style=\"color: %s\">%s%s</div></div></div>",
+                           i, col, display, col, i, w->multi, w->multi, col, multi, kr_suffix);
             } else {
                 sb_appendf(sb, "<div class=\"shop-action-cell svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d)\" onmouseenter=\"playTick()\">Spend <div style=\"color: %s\">%s</div></div>", i, col, display);
             }
@@ -1301,20 +1371,58 @@ static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
                            col, i, w->ticket, col, ticket, col, owned_count(w->ticket));
             sb_append(sb, "</div>");
         }
+        sb_append(sb, " ");
         if (ticket_only && acc) sb_appendf(sb, "<div class=\"ticket-count ticket-count-corner svelte-5s5opu\" style=\"color: %s\">You have %d</div>", col, owned_count(w->ticket));
         char spin_name[96];
         I18N_F(spin_name, "windows.store.spin", "{0} Spin", w->name);
         sb_appendf(sb, " <div class=\"spin-name svelte-5s5opu\">%s <div class=\"spin-price svelte-5s5opu\" style=\"color: %s !important;\">", spin_name, col);
-        if (ticket_only) sb_appendf(sb, "Redeem <img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\">", ticket);
-        else {
+        if (pending) {
+            char unlocks[96];
+            wheel_unlocks_text(w, now, unlocks, sizeof(unlocks));
+            sb_append(sb, unlocks);
+        } else if (ticket_only) {
+            sb_appendf(sb, "Redeem <img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\">", ticket);
+        } else {
             sb_appendf(sb, "%s ", display);
             if (has_ticket) sb_appendf(sb, "<div class=\"ticket-img-sep svelte-5s5opu\">|</div> <img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\">", ticket);
         }
         sb_append(sb, "</div></div> ");
-        if (!w->kr) sb_appendf(sb, "<div class=\"shop-img svelte-5s5opu\" style=\"background-image: url(%s);\"></div>", thumb);
-        sb_appendf(sb, " <div class=\"shop-img-grad svelte-5s5opu\" style=\"background-image: linear-gradient(transparent, %s30);\"></div> </div>", col);
+        if (!w->kr && !data_locked) sb_appendf(sb, "<div class=\"shop-img svelte-5s5opu\" style=\"background-image: url(%s);\"></div>", thumb);
+        sb_appendf(sb, " <div class=\"shop-img-grad svelte-5s5opu\" style=\"background-image: linear-gradient(transparent, %s30);\"></div> ", col);
+        // the promo badge (promoText, background promoCol || #ff8f00: deob-10.0.3.js:144695, 145357-145365)
+        if (w->src && w->src->promo_text[0]) {
+            sb_appendf(sb, "<div class=\"spin-promo-badge svelte-5s5opu\" style=\"background-color: %s\">", w->src->promo_col[0] ? w->src->promo_col : "#ff8f00");
+            sb_append_esc(sb, w->src->promo_text);
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div>");
     }
     sb_append(sb, "</div></div>");
+}
+
+// The Prize Wheels tab's clock (setInterval 1 s, deob-10.0.3.js:145125-145128): a tile before its startDate counts
+// down in its price line, guests included; once a wheel starts the tab is drawn again (its colour, overlay and
+// click come back, as v10's derived state does). Per frame while the Store shows the tab (store_ui_sub_tab_tick).
+static int64_t g_wheel_clock_s;
+
+static void wheels_clock_tick(void) {
+    const int64_t now = wheel_now_ms();
+    if (now / 1000 == g_wheel_clock_s) return;
+    g_wheel_clock_s = now / 1000;
+    HtmlElem tiles[WHEEL_TILES_MAX];
+    const int n = html_dom_query_all(0, "#menuWindow .prize-tile", tiles, WHEEL_TILES_MAX);
+    for (int k = 0; k < n && k < g_wheel_tile_count; k++) {
+        const UiWheel *w = wheel_at(g_wheel_tiles[k]);
+        if (!w || !g_wheel_tile_pending[k]) continue;
+        if (!wheel_pending(w, now)) {
+            menu_rerender_if_open(14);
+            return;
+        }
+        char text[96];
+        wheel_unlocks_text(w, now, text, sizeof(text));
+        const HtmlElem price = html_dom_query(tiles[k], ".spin-price");
+        if (price) html_dom_set_text(price, text);
+    }
 }
 
 // the price / terms lines under the Premium and Purchase KR tabs (and the tab's closing </div>)
@@ -1343,18 +1451,25 @@ static void v10_store_premium(StrBuf *sb, const AccountInfo *acc) {
     store_legal(sb, "1dbkhl");
 }
 
-static void v10_store_kr(StrBuf *sb) {
+// The Purchase KR tab (svelte-1ko99up, deob-10.0.3.js:145668-145702): every package not hidden, the onlySpenders ones
+// for a spendingTier 2 account; on KR sale weekends (isKRSale, not a Steam build: v10_menu_kr_sale) each card has
+// the "10% Off" tag in #E040FB in place of its own and the priceSale price.
+static void v10_store_kr(StrBuf *sb, const AccountInfo *acc) {
     char vig[256];
     store_asset_url("img/shop/filter/vignette.png", vig, sizeof(vig));
+    const int sale = v10_menu_kr_sale();
     sb_append(sb, "<div class=\"purchase-kr-tab svelte-1ko99up\"><div class=\"purchase-info-table svelte-1ko99up\">");
     for (size_t i = 0; i < sizeof(k_purchases_v10) / sizeof(k_purchases_v10[0]); i++) {
+        if (k_purchases_v10[i].only_spenders && !(acc && acc->spending_tier == 2)) continue;
         char img[48], url[256];
         snprintf(img, sizeof(img), "img/shop/%d.png", (int) i);
         store_asset_url(img, url, sizeof(url));
-        sb_appendf(sb, "<div class=\"shopCard\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick()\" onclick=\"showPurchase(%d)\" style=\"background-image: url(%s), url(%s); border: 4px solid; color: %s\">",
-                   (int) i, vig, url, k_purchases_v10[i].col);
-        if (k_purchases_v10[i].tag) sb_appendf(sb, "<div class=\"shopSale\" style=\"background: %s\">%s</div>", k_purchases_v10[i].tag_col, k_purchases_v10[i].tag);
-        sb_appendf(sb, " %d <span style=\"color: #fff\">KR</span> <div class=\"spinVal\" style=\"color: #fff\">$%s USD</div></div>", k_purchases_v10[i].val, k_purchases_v10[i].price);
+        sb_appendf(sb, "<div class=\"shopCard\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick()\" onclick=\"showPurchase(%d)\" style=\"background-image: url(%s), url(%s); border: 4px solid; color: %s%s%s\">",
+                   (int) i, vig, url, k_purchases_v10[i].col, k_purchases_v10[i].anim ? "; animation: " : "", k_purchases_v10[i].anim ? k_purchases_v10[i].anim : "");
+        if (k_purchases_v10[i].tag || sale)
+            sb_appendf(sb, "<div class=\"shopSale\" style=\"background: %s\">%s</div>", sale ? "#E040FB" : k_purchases_v10[i].tag_col, sale ? "10% Off" : k_purchases_v10[i].tag);
+        sb_appendf(sb, " %d <span style=\"color: #fff\">KR</span> <div class=\"spinVal\" style=\"color: #fff\">$%s USD</div></div>", k_purchases_v10[i].val,
+                   sale ? k_purchases_v10[i].price_sale : k_purchases_v10[i].price);
     }
     sb_append(sb, "</div> ");
     store_legal(sb, "1ko99up");
@@ -1400,7 +1515,7 @@ static char *v10_store_window_gen(void) {
         case 0: v10_store_home(&sb, acc); break;
         case 1: v10_store_wheels(&sb, acc); break;
         case 2: v10_store_premium(&sb, acc); break;
-        case 3: v10_store_kr(&sb); break;
+        case 3: v10_store_kr(&sb, acc); break;
         case 5: // krunker.io: its "limited" display (v10:128293); Box Office: the empty state
             if (kio_store_active()) kio_store_eterno(&sb);
             else v10_store_eterno(&sb);
@@ -1466,6 +1581,12 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         } else {
             store_window_handle("voucherPopup", NULL, 0);
         }
+        return 1;
+    }
+    if (!strcmp(name, "bundlePopup")) { // bundlePopup(true, false, ID): a home-tab bundle card (junk_shop_ui.c), the purchase
+        const int id = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 0;
+        if (kio_store_active()) kio_store_read_only("shop/bundles/purchase");
+        else if (id > 0) junk_shop_bundle_buy(id);
         return 1;
     }
     if (!strcmp(name, "windows.13.premium")) { g_store_tab = 2; menu_show_window(14, 1); return 1; }
@@ -1552,9 +1673,11 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     return -1;
 }
 
-// the home tab's banner rotation (updSubTab): every 3 s while the Store shows tab 0
+// the home tab's banner rotation (updSubTab): every 3 s while the Store shows tab 0; the Prize Wheels tab's clock
 void store_ui_sub_tab_tick(const double delta_ms) {
-    if (g_store_tab != 0 || !menu_window_is_open() || menu_ui()->active_window != 14) return;
+    if (!menu_window_is_open() || menu_ui()->active_window != 14) return;
+    if (g_store_tab == 1) wheels_clock_tick();
+    if (g_store_tab != 0) return;
     if ((g_store_sub_t -= delta_ms) > 0) return;
     g_store_sub_t = 3000.0;
     g_store_sub = (g_store_sub + 1) % 3;

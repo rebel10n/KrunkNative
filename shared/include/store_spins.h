@@ -39,6 +39,11 @@ typedef struct StoreWheel {
     char pools[STORE_WHEEL_SLICES][40];
     char lim_type[24], lim_group[32], tag[24]; // limType / limGroup / tag (spinTag items)
     int64_t start_ms, end_ms, display_ms; // startDate / endDate / displayDate, 0 = none
+    // aReq {ind, val, txt}: an account whose acc[ind] < val sees the wheel locked, priced txt
+    // (the Prize Wheels tab, deob-10.0.3.js:145173-145179). a_req 0 = none.
+    int a_req;
+    char a_req_ind[24], a_req_txt[48];
+    double a_req_val;
 } StoreWheel;
 
 typedef struct StorePool {

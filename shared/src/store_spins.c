@@ -87,6 +87,14 @@ int store_wheel_parse(const cJSON *o, StoreWheel *w) {
     w->start_ms = store_iso_ms(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, "startDate")));
     w->end_ms = store_iso_ms(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, "endDate")));
     w->display_ms = store_iso_ms(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, "displayDate")));
+    const cJSON *req = cJSON_GetObjectItemCaseSensitive(o, "aReq"); // {ind, val, txt} (deob-10.0.3.js:145173)
+    if (cJSON_IsObject(req)) {
+        w->a_req = 1;
+        copy_str(w->a_req_ind, sizeof w->a_req_ind, req, "ind");
+        copy_str(w->a_req_txt, sizeof w->a_req_txt, req, "txt");
+        const cJSON *val = cJSON_GetObjectItemCaseSensitive(req, "val");
+        w->a_req_val = cJSON_IsNumber(val) ? val->valuedouble : 0;
+    }
     return 0;
 }
 

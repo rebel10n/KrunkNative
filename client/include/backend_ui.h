@@ -25,6 +25,7 @@ typedef struct {
     double elo;           // player_elo: the current season's ranked rating
     double junk;          // acc.junk (player_jnk): the krunker.io account's; Box Office accounts have none (0)
     double ranked_points; // acc.rankedPoints (ranked_points): the krunker.io account's (the Ranked window has the Box Office one)
+    int spending_tier;    // acc.spendingTier (spending_tier, setData's [48]): the krunker.io account's; Box Office accounts have none (0)
     int level;
     double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
