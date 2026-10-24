@@ -517,12 +517,79 @@ int world_teleport_object_to_node(Game *game, Object *object, const int node_id)
     return 1;
 }
 
+// v10.0.3 game.moveObject(uid, x, y, z) (deob-10.0.3.js:216882-216946; KrunkScript obj3DServ position setters
+// :208981-208997): a dyn object only; its centre goes to (x, y, z) (moveObj :216842). A solid one carries the players
+// standing on it by its move and pushes the players it runs into by their overlap along the move. changedObjs: home at
+// the round start (resetChangedObjs :216948, world_round_start), "objmv" OBJECT_MOVED to every connection now and to a
+// joiner later (NET_EXT_KN_OFFICIAL_OBJECT_MOVED; client/src/entities.c object_moved applies it). KrunkNative keeps the
+// changed objects in the movedObjs list with node -1 (teleportFromNode leaves them, as it does in v10).
+static void world_send_object_moved(Game *game, const int uid, const int index, const Object *object) {
+    const vec3 s = object_box_size(object);
+    const NetObjectMovedPacket m = {index, object->position.x, object->position.y + s.y * 0.5f, object->position.z};
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(m)];
+    const uint16_t len = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_OBJECT_MOVED, &m, sizeof(m));
+    if (len) game_send(game, uid, NET_PACKET_EXT, ext, len);
+}
+
+int world_move_dyn_object(Game *game, Object *object, const vec3 center) {
+    if (!game || !game->map || !object || !object->dyn) return 0;
+    const int index = world_object_index(game, object);
+    if (index < 0) return 0;
+    const vec3 s = object_box_size(object);
+    const vec3 old = {object->position.x, object->position.y + s.y * 0.5f, object->position.z};
+    if (!world_moved_find(game, index)) {
+        if (game->world.moved_count == game->world.moved_cap) {
+            const size_t cap = game->world.moved_cap ? game->world.moved_cap * 2 : 8;
+            WorldMovedObject *list = realloc(game->world.moved, cap * sizeof(*list));
+            if (!list) return 0;
+            game->world.moved = list;
+            game->world.moved_cap = cap;
+        }
+        WorldMovedObject *moved = &game->world.moved[game->world.moved_count++];
+        moved->object = index;
+        moved->node = -1; // changedObjs, not a teleport
+        moved->origin = object->position;
+    }
+    world_move_object(object, (vec3) {center.x, center.y - s.y * 0.5f, center.z});
+    const vec3 d = {center.x - old.x, center.y - old.y, center.z - old.z};
+    const float dist = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
+    if (object->collision_type != COLLISION_TYPE_NONE && dist > 0.0f) { // isSimpleObjectSolid
+        const vec3 n = {d.x / dist, d.y / dist, d.z / dist};
+        const vec3 lo = {object->position.x - s.x * 0.5f, object->position.y, object->position.z - s.z * 0.5f};
+        const vec3 hi = {object->position.x + s.x * 0.5f, object->position.y + s.y, object->position.z + s.z * 0.5f};
+        for (size_t i = 0; i < game->player_count; i++) {
+            Player *p = game->players[i];
+            if (!p || !p->active) continue;
+            const float r = p->scale;
+            // onTopOf: on the ground at the object's old top within its old x / z extent
+            if (p->on_ground && fabsf(p->position.y - (old.y + s.y * 0.5f)) < 0.6f && fabsf(p->position.x - old.x) <= s.x * 0.5f + r &&
+                fabsf(p->position.z - old.z) <= s.z * 0.5f + r) {
+                p->position.x += d.x;
+                p->position.y += d.y;
+                p->position.z += d.z;
+                continue;
+            }
+            // collidesE(object, scale, -0.001): pushed by the overlap of the boxes along the move
+            const vec3 plo = {p->position.x - r, p->position.y, p->position.z - r}, phi = {p->position.x + r, p->position.y + p->height, p->position.z + r};
+            if (!(phi.x > lo.x && plo.x < hi.x && phi.y > lo.y && plo.y < hi.y && phi.z > lo.z && plo.z < hi.z)) continue;
+            const float ox = hi.x - 0.00001f > plo.x && lo.x + 0.00001f < phi.x ? fminf(phi.x, hi.x) - fmaxf(plo.x, lo.x) : 0.0f;
+            const float oy = hi.y - 0.00001f > plo.y && lo.y + 0.00001f < phi.y ? fminf(phi.y, hi.y) - fmaxf(plo.y, lo.y) : 0.0f;
+            const float oz = hi.z - 0.00001f > plo.z && lo.z + 0.00001f < phi.z ? fminf(phi.z, hi.z) - fmaxf(plo.z, lo.z) : 0.0f;
+            p->position.x += ox * n.x;
+            p->position.y += oy * n.y;
+            p->position.z += oz * n.z;
+        }
+    }
+    if (game_is_authority(game)) world_send_object_moved(game, NET_TARGET_ALL, index, object);
+    return 1;
+}
+
 // game.teleportFromNode(objIndex): back to orgX / orgY / orgZ when it was moved, "mf"
 void world_reset_object_position(Game *game, Object *object) {
     if (!game || !object) return;
     const int index = world_object_index(game, object);
     WorldMovedObject *moved = index >= 0 ? world_moved_find(game, index) : NULL;
-    if (!moved) return;
+    if (!moved || moved->node < 0) return; // a moveObject change is no movedObjs entry
     world_move_object(object, moved->origin);
     *moved = game->world.moved[--game->world.moved_count]; // movedObjs.splice (order is not observable but in the join list)
     if (game_is_authority(game)) world_send_move(game, NET_TARGET_ALL, index, NET_OBJECT_MOVE_FROM_NODE, 0);
@@ -584,8 +651,15 @@ void world_send_state(Game *game, const int uid) {
     if (!game->ready || !game->map || !game_is_authority(game)) return;
     zone_send_state(game, uid); // syncData.zone
     world_send_builds(game, uid); // syncData.dyno
-    for (size_t i = 0; i < game->world.moved_count; i++) // syncData.mov [uid, node, ...]
-        world_send_move(game, uid, game->world.moved[i].object, NET_OBJECT_MOVE_TO_NODE, game->world.moved[i].node);
+    for (size_t i = 0; i < game->world.moved_count; i++) { // syncData.mov [uid, node, ...], syncData.chg (objmv)
+        const WorldMovedObject *m = &game->world.moved[i];
+        const Object *object = world_object_at(game, m->object);
+        if (m->node < 0) {
+            if (object) world_send_object_moved(game, uid, m->object, object);
+        } else {
+            world_send_move(game, uid, m->object, NET_OBJECT_MOVE_TO_NODE, m->node);
+        }
+    }
 }
 
 void world_tick(Game *game, const float delta) {

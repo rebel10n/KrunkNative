@@ -174,6 +174,14 @@ Added here:
 - On the map object wrapper (obj3DServ, :208959-209045): `interface`, `health` (only for destructibles: set on the
   server, clamped to 1..1e6), `destroyed` and `toggleDestructible`. A destroyed object respawns (`"ro"`, onRespawn
   with no player); a standing one is destroyed (`"do"`, onDestroy / onDamage with no player).
+- The map object wrapper's `position` and `scale` read the GameObject's own values: y is the centre and the scale is
+  the half size (:208981-209012). Box Office returned the bottom and the full size. The `position` setters (server)
+  call `game.moveObject` (:216882), which is `world_move_dyn_object` in `shared/src/world.c`:
+  - only a `dyn` object moves;
+  - a solid object carries the players standing on it and pushes the ones it runs into by their overlap;
+  - `"objmv"` goes to every connection, using the client-handled `NET_EXT_KN_OFFICIAL_OBJECT_MOVED` that the official
+    link already emits, and to a joiner later;
+  - the round start puts the object back (`resetChangedObjs`).
 - On the player wrapper: `godMode`, `speed` and `aiKills` (:207846-207866, :208133). `speed` reads
   `speedBoost || 1`; a server write clamps it to 0.1..10 and sends the player `"spb"`.
 - On the client scene object (obj3D, :208565-208600): `intensity` (lights, 0..15), `distance` (point and spot lights,
@@ -183,8 +191,6 @@ Added here:
 Missing, outside this package:
 
 - `LIVE_OBJECTS.addAsset` (:211292) and the live object wrapper (`id`, `delete`).
-- The `position` setters of the map object and trigger wrappers (`game.moveObject`: Box Office's server moves no map
-  object yet).
 - On the player wrapper: `currentSkinIndex`, `giveSkin`, `setSkin` and `getSkin` (store skins, :207943, :208302-208320).
   `player.pose` belongs to `doc/v10/player-pose.md`.
 - The entity wrapper's `attachPlayer`, `updateAttachment` and `detachPlayer`, and the ctx's `peer` / `peers`, all in the

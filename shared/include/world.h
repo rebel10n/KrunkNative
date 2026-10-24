@@ -46,6 +46,9 @@ int tri_capsule_collide(const float tri[9], vec3 feet, float radius, float heigh
 
 // ---- object moves / animation (trigger actions 40-42, 39 / 63; "mo" / "mf" / "ana")
 int world_teleport_object_to_node(Game*, Object*, int node_id); // 0 = no such node
+// v10.0.3 game.moveObject (deob-10.0.3.js:216882): a dyn object's centre to `center`, riders carried, players pushed,
+// "objmv" to everyone (home at the round start). 0 when the object is not dyn.
+int world_move_dyn_object(Game*, Object*, vec3 center);
 void world_reset_object_position(Game*, Object*);
 void world_play_anim(Game*, Object*, const char *clip, int raw);
 

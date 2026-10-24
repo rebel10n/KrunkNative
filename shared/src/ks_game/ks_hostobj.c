@@ -7,6 +7,7 @@
 
 #include <ai.h>
 #include <ai_parts.h>
+#include <world.h> // game.moveObject (obj3DServ position setters)
 #include <modes.h>
 #include <net_ext.h> // "spb" (player.speed)
 #include <game_config.h> // class_overrides: player.assetID (config.aID)
@@ -1008,21 +1009,42 @@ static Object *object_of(void *native)
     return game->map->objects[r->id];
 }
 static KsValue ob_sid(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; return object_of(n) ? ks_num(ref_of(n)->id) : ks_undef(); }
-#define OB_VEC(prefix, field)                                                                                          \
-    static KsValue prefix##_x(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->field.x) : ks_undef(); } \
-    static KsValue prefix##_y(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->field.y) : ks_undef(); } \
-    static KsValue prefix##_z(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->field.z) : ks_undef(); }
-OB_VEC(opos, position)
-OB_VEC(oscale, scale)
-#undef OB_VEC
-static const KsHostProp g_ob_position_props[] = {{"x", opos_x, NULL, NULL, 0}, {"y", opos_y, NULL, NULL, 0}, {"z", opos_z, NULL, NULL, 0}};
+// v10.0.3 obj3DServ position / scale (deob-10.0.3.js:208981-209012): the GameObject's x / y / z (y its centre) and
+// width / height / length (half sizes); KN keeps the bottom centre and the full size
+static vec3 ob_center(const Object *o)
+{
+    const vec3 s = object_box_size(o);
+    return (vec3) {o->position.x, o->position.y + s.y * 0.5f, o->position.z};
+}
+static KsValue opos_x(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(ob_center(o).x) : ks_undef(); }
+static KsValue opos_y(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(ob_center(o).y) : ks_undef(); }
+static KsValue opos_z(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(ob_center(o).z) : ks_undef(); }
+static KsValue oscale_x(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(object_box_size(o).x * 0.5f) : ks_undef(); }
+static KsValue oscale_y(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(object_box_size(o).y * 0.5f) : ks_undef(); }
+static KsValue oscale_z(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(object_box_size(o).z * 0.5f) : ks_undef(); }
+// position.x / y / z = v on the server: game.moveObject(uid, ...) with the other two as they are (a dyn object only)
+static void opos_set(void *n, const int axis, const KsValue v)
+{
+    Object *o = object_of(n);
+    if (!o || !on_server(ref_of(n))) return;
+    vec3 c = ob_center(o);
+    const float f = (float) ks_to_float(v); // moveObj stores the raw value; KN keeps numbers (parseFloat || 0)
+    if (axis == 0) c.x = f;
+    else if (axis == 1) c.y = f;
+    else c.z = f;
+    world_move_dyn_object(ks_native_game(n), o, c);
+}
+static void opos_sx(KsScript *s, void *n, uint32_t id, KsValue v) { (void) s; (void) id; opos_set(n, 0, v); }
+static void opos_sy(KsScript *s, void *n, uint32_t id, KsValue v) { (void) s; (void) id; opos_set(n, 1, v); }
+static void opos_sz(KsScript *s, void *n, uint32_t id, KsValue v) { (void) s; (void) id; opos_set(n, 2, v); }
+static const KsHostProp g_ob_position_props[] = {{"x", opos_x, opos_sx, NULL, 0}, {"y", opos_y, opos_sy, NULL, 0}, {"z", opos_z, opos_sz, NULL, 0}};
 static const KsHostProp g_ob_scale_props[] = {{"x", oscale_x, NULL, NULL, 0}, {"y", oscale_y, NULL, NULL, 0}, {"z", oscale_z, NULL, NULL, 0}};
 static const KsHostClass g_ob_position_class = {"position", g_ob_position_props, 3};
 static const KsHostClass g_ob_scale_class = {"scale", g_ob_scale_props, 3};
 static KsValue ob_position(KsScript *s, void *n, uint32_t id) { return object_of(n) ? ks_host_object(s, &g_ob_position_class, n, id) : ks_undef(); }
 static KsValue ob_scale(KsScript *s, void *n, uint32_t id) { return object_of(n) ? ks_host_object(s, &g_ob_scale_class, n, id) : ks_undef(); }
 // v10.0.3 obj3DServ (deob-10.0.3.js:208959-209045): interface, health (a destructible's: set on the server, 1..1e6),
-// destroyed, toggleDestructible. Not ported: the position setters (game.moveObject: KN's server moves no map object yet).
+// destroyed, toggleDestructible; the position setters above (game.moveObject).
 static KsValue ob_interface(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->interface_id) : ks_undef(); }
 static KsValue ob_health(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->health) : ks_undef(); }
 static void ob_health_set(KsScript *s, void *n, uint32_t id, KsValue v)

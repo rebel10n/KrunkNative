@@ -539,6 +539,34 @@ static void test_ai_wrapper(void) {
               "interface / destroyed / toggleDestructible / health clamp (%s | %s | %s | %s)", g_log_count > 0 ? g_log[0] : "",
               g_log_count > 1 ? g_log[1] : "", g_log_count > 2 ? g_log[2] : "", g_log_count > 3 ? g_log[3] : "");
     }
+    // obj3DServ position / scale (y the centre, half sizes) and the position setters: game.moveObject on a dyn object
+    // (deob-10.0.3.js:208981-209012, :216882): the rider on top moves with it, "objmv" goes out, the round start puts it back
+    if (o) {
+        o->dyn = 1;
+        o->active = 1;
+        const vec3 size = object_box_size(o), bottom = o->position;
+        p->position = (vec3) {bottom.x, bottom.y + size.y, bottom.z};
+        p->on_ground = 1;
+        game.is_local = 0;
+        static int server;
+        game.server = &server;
+        g_sent_count = 0;
+        run_script(&game, "public action start() {\n    obj[] l = GAME.OBJECTS.getByInterface(4);\n    obj o = l[0];\n"
+                          "    GAME.log(\"c \" + toStr(o.position.y) + \" \" + toStr(o.scale.y));\n    o.position.x = o.position.x + 10;\n}\n");
+        char want[96];
+        snprintf(want, sizeof(want), "c %g %g", bottom.y + size.y * 0.5f, size.y * 0.5f);
+        CHECK(logged(want), "position.y is the centre, scale.y the half height (%s / %s)", want, g_log_count ? g_log[0] : "none");
+        CHECK(o->position.x == bottom.x + 10.0f && o->position.y == bottom.y, "position.x = moves the dyn object (%.2f)", o->position.x);
+        CHECK(p->position.x == bottom.x + 10.0f, "the player on top rides along (%.2f)", p->position.x);
+        CHECK(count_sent(NET_PACKET_EXT, NET_TARGET_ALL) == 1, "objmv to everyone (%d)", count_sent(NET_PACKET_EXT, NET_TARGET_ALL));
+        world_round_start(&game);
+        CHECK(o->position.x == bottom.x, "the round start puts it back (%.2f)", o->position.x);
+        o->dyn = 0;
+        run_script(&game, "public action start() {\n    obj[] l = GAME.OBJECTS.getByInterface(4);\n    obj o = l[0];\n    o.position.z = 500;\n}\n");
+        CHECK(o->position.z == bottom.z, "an object that is not dyn does not move");
+        game.is_local = 1;
+        game.server = NULL;
+    }
     // player.godMode / speed / aiKills (deob-10.0.3.js:207846-207866, :208133)
     p->mode.ai_kills = 3;
     g_sent_count = 0;
