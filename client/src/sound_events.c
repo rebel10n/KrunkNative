@@ -14,6 +14,7 @@
 #include <audio.h>
 #include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
 #include <cosmetics.h>
+#include <stalker.h> // v10 Stalker: silent steps
 #include <piss.h> // KrunkNative Piss: PISS_SOUND_INTERVAL
 #include <nettspend_audio.h> // KrunkNative Nettspend: the Drank's pour up, Money Spread's throw, the laced loop
 #include "viewer/viewer_store.h"
@@ -183,33 +184,19 @@ static int map_ambient_index(const Map *map) {
     return index > 0 ? index : 1;
 }
 
-static float json_number(const cJSON *object, const char *key, const float fallback) {
-    const cJSON *item = cJSON_GetObjectItem(object, key);
-    if (cJSON_IsNumber(item)) return (float) item->valuedouble;
-    if (cJSON_IsString(item) && item->valuestring) return strtof(item->valuestring, NULL);
-    return fallback;
-}
-
-// addEmitter (94.js) with the 93.js map fields: es/esa sound, ev volume, er rate, ed
-// distance, ero rolloff, clamped to the emitter* limits of config 1.js.
+// map.js SOUND_EMITTER -> MapManager.addEmitter -> SOUND.play3DL (deob-10.0.3.js:189196-189204,
+// :186572-186580): the sound is config.emitterSounds[es] (v10.0.3's 74; an index past it plays
+// emitterSounds[0]) or the user asset esa ("asset:<id>", user-assets/<id>/sound.mp3), with ev / er /
+// ed / ero under the emitter limits (shared/include/triggers.h trigger_emitter_parse). Old maps'
+// "es" indices are the same list (shared/src/triggers.c). KrunkNative difference: audio.c has one
+// distance model, Howler's inverse; an "edm" of 1 (linear) or 2 (exponential) plays inverse.
 static void map_start_emitters(const Map *map) {
-    static const char *EMITTER_SOUNDS[] = {
-        "nuke_0", "siren_0", "explosion", "fart_0", "taunt_0", "taunt_1", "taunt_2", "taunt_3", "buy_0", "buy_1",
-        "case_0", "case_1", "cheer_0", "reward", "store", "tick_0", "jumpS_0", "cough_1", "cough_2", "taunt_4",
-        "ambient_1", "ambient_2", "ambient_3", "ambient_4", "ambient_5", "ambient_6", "ambient_7", "ambient_8",
-        "beep_0", "bo_plant", "bo_diff", "collect_1", "bounce_0", "headshot_0", "hit_0", "impact_0", "jump_0",
-        "jump_1", "land_0", "punch_0", "punch_1", "slide_0", "spray", "step_0", "step_1", "step_2", "whizz_0",
-        "whizz_1", "gclick_0", "pick_0", "pick_1",
-    };
-    const int emitter_prefab = PREFAB_SOUND_EMITTER;
-
     const cJSON *objects = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "objects") : NULL;
     const cJSON *object;
 
     cJSON_ArrayForEach(object, objects) {
         const cJSON *id = cJSON_GetObjectItem(object, "i");
-        if (!cJSON_IsNumber(id) || id->valueint != emitter_prefab) continue;
-        if (cJSON_GetObjectItem(object, "esa")) continue; // user asset sounds are not available offline
+        if (!cJSON_IsNumber(id) || id->valueint != PREFAB_SOUND_EMITTER) continue;
 
         const cJSON *p = cJSON_GetObjectItem(object, "p");
         if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3) continue;
@@ -220,15 +207,10 @@ static void map_start_emitters(const Map *map) {
             (float) cJSON_GetArrayItem(p, 2)->valuedouble,
         };
 
-        int sound = (int) json_number(object, "es", 0.0f);
-        if (sound < 0 || sound >= (int) (sizeof(EMITTER_SOUNDS) / sizeof(EMITTER_SOUNDS[0]))) sound = 0;
-
-        const float volume = fminf(2.0f, fmaxf(0.05f, json_number(object, "ev", 1.0f)));
-        const float rate = fminf(4.0f, fmaxf(0.5f, json_number(object, "er", 1.0f)));
-        const float dist = fminf(5000.0f, fmaxf(0.0f, json_number(object, "ed", 0.0f)));
-        const float roll = fminf(1.0f, fmaxf(0.0f, json_number(object, "ero", 0.0f)));
-
-        audio_play_3d_loop(EMITTER_SOUNDS[sound], position, volume, rate, dist, roll);
+        TriggerEmitter emitter;
+        if (!trigger_emitter_parse(object, &emitter)) continue;
+        // play3DL's pannerAttr: refDistance dist || 25, rolloffFactor roll || 1 (audio.c applies the defaults to 0)
+        audio_play_3d_loop(emitter.sound, position, emitter.volume, emitter.rate, emitter.distance, emitter.rolloff);
     }
 }
 
@@ -443,7 +425,10 @@ static void local_player_events(Client *client, const float now, const float del
     // hMY7 (landing): step_N at 0.7 per resetStep the simulation counted (player.c), plus
     // slide_0 when the landing starts a slide.
     (void) teleport;
-    if (me->land_events != track->land_events) { // resetStep: getStepSound at (stepSnd ? 0.4 : 1) * 0.7
+    // v10: a stalker lands, slides and steps without a sound (`!player.isStalker`, deob-10.0.3.js:195189,
+    // :195226); everyone else's footsteps stay
+    const int stalker = player_is_stalker(&client->game, me);
+    if (me->land_events != track->land_events && !stalker) { // resetStep: getStepSound at (stepSnd ? 0.4 : 1) * 0.7
         const ViewerSkin *shoes = step_shoes(me);
         if (shoes) {
             char name[32];
@@ -453,11 +438,11 @@ static void local_player_events(Client *client, const float now, const float del
             play_numbered("step_", 0, 2, 0.7f, 1.0f);
         }
     }
-    if (track->can_slide && !me->can_slide && me->crouch_val > 0.0f) audio_play("slide_0", 0.35f, 0, 1.0f);
+    if (track->can_slide && !me->can_slide && me->crouch_val > 0.0f && !stalker) audio_play("slide_0", 0.35f, 0, 1.0f);
 
     // Te7 footsteps: one per playerStep stepDir flip, counted per input by the simulation
     // (player.c player_step), so the cadence is Krunker's exactly at any frame rate.
-    if (me->step_events != track->step_events) {
+    if (me->step_events != track->step_events && !stalker) {
         const float volume = rand_float(0.15f, 0.25f) * (me->crouch_val < 1.0f ? 1.0f : 0.5f);
         play_step(me, 0, volume, me->crouch_val < 1.0f ? 1.0f : 0.8f);
     }
@@ -507,7 +492,7 @@ static void remote_player_events(Client *client, const float delta) {
         const float moved = distance2(player->position, track->position);
         const int grounded = fabsf(player->velocity.y) < 1e-3f;
 
-        if (grounded && moved > 1e-4f && moved < fmaxf(TELEPORT_DISTANCE, TELEPORT_SPEED * delta)) {
+        if (grounded && moved > 1e-4f && moved < fmaxf(TELEPORT_DISTANCE, TELEPORT_SPEED * delta) && !player_is_stalker(&client->game, player)) {
             const int crouched = player->crouch_val >= 1.0f;
             if (step_advance(track, moved * (crouched ? 1.6f : 1.0f)) && !crouched &&
                 distance3(player->position, client->camera.position) <= STEP_RANGE) {
