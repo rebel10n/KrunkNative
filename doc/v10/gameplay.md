@@ -366,7 +366,7 @@ re-checked against 10.0.3 in `gameplay-1003-audit.md` and `rules-1003.md`: every
 
 | item | where | tests |
 |---|---|---|
-| weapon balance (section 5), Boulder 29, Compressor 30, class HP and minRec (section 4), crouchLean 0 (section 1) | `shared/src/rules/v10/` (weapons_rebalance_v10.c, weapons_new_v10.c, classes_v10.c, constants_v10.c) | `weapons_v7_test` (the whole table against `shared/tests/data/v10/`, `tools/kref/v10-fixtures.py`), ruleset_test |
+| weapon balance (section 5), Boulder 29, Compressor 30, class HP and minRec (section 4), crouchLean 0 (section 1) | `shared/src/rules/v10/` (weapons_rebalance_v10.c, weapons_new_v10.c, classes_v10.c, constants_v10.c) | `weapons_v10_test` (the whole tables and the physics constants against `shared/tests/data/v10/`, dumped from deob-10.0.3.js by `tools/kref/v10-fixtures.py`), ruleset_test |
 | Boulder gravMlt, Compressor (noDmg, nonObjImpulse, physPull, rShoot) | `shared/src/player.c` (procInputs gravity / fire input, `combat_fire_ray`) | v10_gameplay_test |
 | posed hit boxes, hurtboxScale (game + class options) | `shared/src/hitboxes.c` (every mode but Prop Hunt), `shared/src/game_config.c` (hurtboxScale rows) | hitboxes_test, combat_test, ruleset_test |
 | modes: Gun Game order, Stalker rework, Raid 25 min, Krank not a party mode | `shared/src/modes/modes.c` (the table), `shared/src/modes/mode_rules.c` / `mode_round.c` (Stalker hooks), `shared/src/player.c` (`movement_stalker`) | ruleset_test, v10_gameplay_test |

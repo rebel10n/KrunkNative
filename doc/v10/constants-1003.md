@@ -172,3 +172,33 @@ Client handler (deob 256734 wrapper, 256748 handler, the packet's positions):
   isOfficial is corrected to `false`.
 - `net-bridge/v10Proxy.test.ts`: the INIT test asserts indices 14 (isOfficial, false) and 15 (isComp,
   false).
+
+## 2026-10-24: the whole constant set against the decoded bundle
+
+The integer constants the 2026-10-22 pass could not read (string-array encoded bundle) were checked against
+`~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` ("deob-10.0.3.js:N"). `tools/kref/v10-fixtures.py` writes
+the config object's scalar keys to `shared/tests/data/v10/config.json`, and `weapons_v10_test` checks
+GameConstants and the limits below against it, so a later bundle or a stray edit shows up as a failure.
+
+| Constant | 10.0.3 (deob-10.0.3.js) | KrunkNative | Result |
+|---|---|---|---|
+| GameConstants (all 71: 64 config keys, the delta pair, grA / arA / crchSpd, the billboard count; body_height derived) | config object :22367-23014; grA / arA / crchSpd defaults :20418, 20438, 20465; config.billboards :20134 | `constants_v10.c` (each line cites its key) | match |
+| Delta floor / ceiling | `Math.max(1 * deltaMlt, Math.min(input[1], dltMx))`, a smaller delta becomes the floor (:191276-191280); dltMx `Math.round(1000 / 30)` (:19242) | `min_delta` 1 ms x deltaMlt (`Ruleset.delta_floor_scaled`), `max_delta` 33 ms | match |
+| chatMaxLength / chatListLength | 70 / 35 (:22470, :22469; the list cap is read at :241757) | `NET_CHAT_MAX_CHARS` 70 (shared.h) | match (the HUD list cap is the client's) |
+| chatInterval | 800 (:22468); no client reader (the client sends every line, :260042-260044) | `NET_CHAT_INTERVAL` 0.8 s, `net_chat_spaced` in io_ct (server/src/net.c) | was missing: wired (a line sooner than 800 ms after the sender's last one is dropped; "/" commands are not paced) |
+| tracerMinDst / tracerMaxDst | 20 / 500 (:22951, :22950; players.shoot :196958, :196980) | `VFX_TRACER_MIN_DST` / `_MAX_DST` (client/src/vfx.c) | match |
+| maxNameLength | 14 (:22725), no reader in the bundle (the account service's rule) | kn_brain `name_max` (default 16, `services/brain/accounts.c`) | differs: left to the brain owner (a registration rule, existing names) |
+| stateHistory | 500 (:22878; storeState drops entries 500 ms old, :193261) | `GAME_STATE_HISTORY` 0.5 s | match |
+| serverTickFrequency / serverTickRate | 30 / 1000 / 30 ms (:22840, :22841, :19241) | server.cfg `tick_rate` default 30 (240 max, a KN option) | match |
+| serverSendFrequency / serverSyncFrequency | 10 / 1 (:22836, :22838) | `NET_STATE_SEND_HZ` 10, `GAME_LAG_COMP_SEND_RATE` 10, `NET_RECON_SEND_HZ` 1 | match |
+| Map limits (name, welcome, objects, collidables, spawns, signs, sign text / font, wheels, leaderboards, AI, entities, archetypes, interfaces, tris, GUI, position range) | validateMap :216477-216697, per-object check :198858, config | `map_validate.h`, `Ruleset.entity_limit` / `archetype_limit` | match |
+| anchorLimit (v7.1.4: 1000) | gone: addMapAnchor takes every anchor (:186497) | the validator's 1000-anchor warning | removed |
+| botLimit | 16 (:22455; addBot stops at 16 pending bots, :187637) | `MAP_V7_BOT_LIMIT` | match |
+| Trigger limits (triggerLimit, triggerActionLimit, interfaceIDMax, teamLimit, custValLimit, emitter volume / rate) | :22958, :22957, :22628, :22893, :22500, :22528-22534 | `triggers.h` | match |
+| config.emitterSounds | 74 entries: v7.1.4's 73 + `scare_1` (:21278) | `g_trigger_emitter_sounds` | was 73: `scare_1` added (an "es" of 73 no longer falls back to 0) |
+| voiceChatMaxLength / voiceRate | 0.65 / 500 (:22994, :22995) | `VOICE_CHAT_MAX_LENGTH`, `VOICE_RATE_MS` | match |
+| voiceChatInterval / voiceDelay | absent | were `VOICE_CHAT_INTERVAL_MS`, `VOICE_DELAY_MS` (read by nothing) | removed |
+| Ranked: reward x2, no streaks, no class XP, needAll 60 s, shutdown 120 s | :221760-221761, :198604, :197794, :219964, :221814-221815 | `ruleset.h` / `ruleset.c` | match (citations updated in ruleset.h) |
+
+Not changed here: config.networkSounds has 399 entries in 10.0.3 (:21141); KrunkNative's
+`g_trigger_network_sounds` keeps v3.1.1's 51 for the v3 BOT "es" index it serves.
