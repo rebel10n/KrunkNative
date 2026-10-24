@@ -16,6 +16,7 @@
 #include "acct_internal.h" /* store_spins_json: the wheels /data/spins packs (store.c) */
 #include "v10_api.h"    /* v10_reply_data: the gapi envelope of the v10 root routes */
 #include "mm_token.h"   /* seek-game validation tokens (doc/v10/matchmaker-token.md) */
+#include "captcha.h"    /* the hosting captcha (doc/v10/captcha.md) */
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -473,9 +474,12 @@ static void h_host_game(kn_http_req *req, void *ud) {
     }
     h->req = req;
     cJSON *body = req->body_len ? kn_http_body_json(req) : NULL;
+    char *body_captcha = NULL; /* the body's captcha (POST): freed by the captcha check below */
     if (body) {
         snprintf(h->region, sizeof(h->region), "%s", kn_json_str(body, "region", ""));
         snprintf(h->flavor, sizeof(h->flavor), "%s", kn_json_str(body, "flavor", ""));
+        const char *bc = kn_json_str(body, "captcha", NULL);
+        if (bc && *bc) body_captcha = strdup(bc);
         cJSON *cfg = cJSON_DetachItemFromObjectCaseSensitive(body, "config");
         h->config = cfg;
         cJSON_Delete(body);
@@ -494,8 +498,31 @@ static void h_host_game(kn_http_req *req, void *ud) {
     if (!cJSON_IsObject(h->config)) {
         cJSON_Delete(h->config);
         free(h);
+        free(body_captcha);
         reply_error(req, 400, "BadRequest");
         return;
+    }
+    /* the hosting captcha: v10.0.3's rpc("bCpt", "hosting") before "custom", whose argument after the config is the solved ALTCHA
+     * (deob-10.0.3.js:133912-133919, 229992-229998). Here ?captcha= (or the body's captcha): the payload of
+     * GET /captcha/challenge?for=hosting (captcha.h). Refused only with captcha.enforce on: CaptchaRequired /
+     * RecaptchaFailed, v10.0.3's matchmaker error names (deob-10.0.3.js:164975-164976) */
+    {
+        char *cap = NULL;
+        if (body_captcha) cap = body_captcha;
+        else {
+            const size_t cap_n = strlen(req->query) + 1;
+            cap = malloc(cap_n);
+            if (cap && kn_http_query_get(req, "captcha", cap, cap_n) <= 0) cap[0] = 0;
+        }
+        CaptchaResult cr;
+        const int pass = captcha_gate(cap && cap[0] ? cap : NULL, "hosting", req->remote_addr, &cr);
+        free(cap);
+        if (!pass) {
+            cJSON_Delete(h->config);
+            free(h);
+            reply_error(req, 400, captcha_refusal_error(cr));
+            return;
+        }
     }
     with_account(req, b, host_with_account, h);
 }

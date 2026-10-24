@@ -106,6 +106,12 @@
     "has_joined_per_min": 1200,
     "check_ip": false
   },
+  "captcha": {
+    "_comment": "Box Office's captcha (services/brain/captcha.h, doc/v10/captcha.md, doc/backend.md 7.10): an ALTCHA proof of work in front of a password sign-in, a registration and a hosted game. GET /captcha/challenge is always served; enforce refuses those flows without a solved one. Keep it false until the clients that solve are what players run (the rollout in doc/backend.md 7.10). The key is derived from brain.join_secret.",
+    "enforce": false,
+    "max_number": 100000,
+    "ttl_s": 300
+  },
   "community": {
     "auth_url": "https://coordinator.krunk.io"
   },

@@ -52,6 +52,7 @@
 #include <time.h>
 
 #include "acct_internal.h"
+#include "captcha.h"
 #include "db_procs.h"
 #include "roles.h"
 #include "v10_api.h"
@@ -325,7 +326,7 @@ static void start_login(kn_http_req *req, const char *name, const char *pass, co
     acct_auth(&rq, on_login, c); /* copies what it keeps */
 }
 
-/* POST /auth/login/username {username, password, a?, b?} and /auth/login/email {email, password, a?} */
+/* POST /auth/login/username {username, password, a?, b?} and /auth/login/email {email, password, a?, b?} */
 static void login_route(kn_http_req *req, int by_email) {
     if (!auth_login_limit(req)) return;
     cJSON *body = kn_http_body_json(req);
@@ -334,6 +335,16 @@ static void login_route(kn_http_req *req, int by_email) {
     if (!name || !*name || !pass || !*pass) {
         cJSON_Delete(body);
         auth_fail(req, 400, "Invalid credentials.");
+        return;
+    }
+    /* "b": v10.0.3's captcha field (loginUsername's 4th argument, the Turnstile token, deob-10.0.3.js:30111-30122,
+     * 130762-130763). Box Office's captcha is an ALTCHA payload (captcha.h): "b" holds it on both routes (v10.0.3's
+     * loginEmail sends none, deob-10.0.3.js:130765: one Box Office account answers both, so both are gated).
+     * Refused only with captcha.enforce on, before the password is hashed: the error text, as the consumer throws it. */
+    CaptchaResult cr;
+    if (!captcha_gate(kn_json_str(body, "b", NULL), "login", req->remote_addr, &cr)) {
+        cJSON_Delete(body);
+        auth_fail(req, 400, captcha_refusal_text(cr));
         return;
     }
     start_login(req, name, pass, NULL, NULL);

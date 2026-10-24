@@ -67,6 +67,7 @@ int brain_module_enabled(const char *name) {
         {"finder", BRAIN_ROLE_FINDER},
         {"releases", BRAIN_ROLE_ALL},  /* latest server release: finder list + matchmaking */
         {"store", BRAIN_ROLE_AUTH | BRAIN_ROLE_COMMUNITY},
+        {"captcha", BRAIN_ROLE_AUTH | BRAIN_ROLE_COMMUNITY}, /* auth.c's and the social socket's sign-ins (captcha.h) */
     };
     for (size_t i = 0; i < sizeof(k_map) / sizeof(k_map[0]); i++) {
         if (!strcmp(k_map[i].name, name)) return (g_roles & k_map[i].roles) != 0;

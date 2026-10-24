@@ -27,6 +27,7 @@
 
 #include "acct_internal.h"
 #include "auth_state.h"
+#include "captcha.h"
 #include "hot.h"
 #include "brain_internal.h"
 #include "roles.h"
@@ -172,6 +173,14 @@ static void password_auth(kn_http_req *req, int action) {
     if (!name || !pass) {
         cJSON_Delete(body);
         reply_err(req, 400, "Invalid credentials.");
+        return;
+    }
+    /* KrunkNative's {captcha}: the ALTCHA payload of GET /captcha/challenge (captcha.h); refused only with
+     * captcha.enforce on, before the password is hashed */
+    CaptchaResult cr;
+    if (!captcha_gate(kn_json_str(body, "captcha", NULL), action == 0 ? "register" : "login", req->remote_addr, &cr)) {
+        cJSON_Delete(body);
+        reply_err(req, 400, captcha_refusal_text(cr));
         return;
     }
     AuthReq *a = auth_req_new(req);

@@ -18,6 +18,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "captcha.h"
 #include "hot.h"
 #include "knsvc/buf.h"
 #include "knsvc/crypto.h"
@@ -622,6 +623,17 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
     } else if (action == 0 && acct_email_required()) {
         send_auth_error(s, "Email Required");
         return;
+    }
+    /* the captcha of a password sign-in or a registration (captcha.h): the frame's 4th element, sendAccountRequest's
+     * captcha slot (KrunkNative: the ALTCHA payload, kn_captcha.c). A saved session's resume (action 1, no password)
+     * has none. Checked before acct_auth hashes the password; refused only with captcha.enforce on. */
+    if (action == 0 || pass) {
+        const cJSON *cap = fa(f, 3);
+        CaptchaResult cr;
+        if (!captcha_gate(cJSON_IsString(cap) ? cap->valuestring : NULL, action == 0 ? "register" : "login", s->ip, &cr)) {
+            send_auth_error(s, captcha_refusal_text(cr));
+            return;
+        }
     }
     AuthWait *w = calloc(1, sizeof *w);
     if (!w) return;

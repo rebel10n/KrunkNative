@@ -16,6 +16,10 @@
     "_comment_store_season": "config.currentSeason of the store table / prize wheels (accounts.store_season, services/brain/store.c): the season their unseasoned items roll. 10 for Krunker v10.0.2.",
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
   },
+  "captcha": {
+    "_comment": "doc/backend.md 7.10: the ALTCHA captcha of sign-in, registration and hosting. enforce stays false until the clients that solve are what players run.",
+    "enforce": {{ kn_brain_captcha_enforce | bool | to_json }}
+  },
   "user_assets": {
     "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host for community maps. The cache lives in the state dir (the release is read-only and replaced). Its proxy: KN_USER_ASSETS_PROXY in {{ kn_etc_dir }}/user-assets.env, written from the krunkbox .env's PROXY (tasks/user_assets_proxy.yml).",
     "cache_dir": "{{ kn_state_dir }}/user-assets"

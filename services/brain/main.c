@@ -19,6 +19,7 @@
 
 #include "brain_internal.h"
 #include "accounts.h"
+#include "captcha.h"
 #include "social_ws.h"
 #include "roles.h"
 #include "finder.h"
@@ -64,6 +65,7 @@ static const BrainModule k_brain_modules[] = {
     {"hot", hot_init, hot_shutdown}, /* optional Redis hot tier (hot.h): before anything listens */
     {"releases", releases_init, releases_shutdown}, /* latest server build (releases.h) */
     {"federation", federation_init, federation_shutdown},
+    {"captcha", captcha_init, NULL}, /* the ALTCHA captcha: captcha.*, GET /captcha/challenge (captcha_http.c) */
     /* svc-accounts modules go here (accounts, social WS) */
     {"accounts", accounts_init, accounts_shutdown},
     {"social-ws", social_ws_init, social_ws_shutdown},
