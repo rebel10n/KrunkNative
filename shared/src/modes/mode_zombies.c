@@ -13,6 +13,7 @@
 #include <zombies.h>
 #include <map_ai.h>
 #include <triggers_v7.h>
+#include <bots.h> // onPreEnd: bots.remove
 #include <ai.h>
 #include <cJSON.h>
 #include <math.h>
@@ -235,9 +236,14 @@ void mode_zombies_on_kill(Game *game, Player *victim, Player *killer, const int 
     }
 }
 
-// zom.js onPreEnd: everyone's score becomes (zWave || 1) * 100; v10.0.3 first gives every player
-// challenges.update("rnd", rounds || 0) (deob-10.0.3.js:119167-119177; "rnd" keeps the highest value)
+// zom.js onPreEnd (deob-10.0.3.js:119167-119178): every bot leaves the game (bots.remove of each, the persistent
+// ones too: their LEAVE, out of the end table), then everyone left gets challenges.update("rnd", rounds || 0)
+// ("rnd" keeps the highest value) and a score of (zWave || 1) * 100.
+// Not ported: onEnd's best-wave call (deob-10.0.3.js:119178-119187: past wave 1 in a pub-type game, DB call 135
+// [4, account.id, zWave] for every account) writes a record of the official database that no 10.0.3 page reads (no
+// leaderboard, profile or end screen shows a Zombies wave) and that kn_brain has no stat for.
 void mode_zombies_on_pre_end(Game *game) {
+    game_bots_remove_all(game);
     const int wave = game->zombies.wave ? game->zombies.wave : 1;
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];

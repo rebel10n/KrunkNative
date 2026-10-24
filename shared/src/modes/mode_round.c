@@ -5,6 +5,7 @@
 #include <ruleset.h>   // game_is_ranked: a ranked match is one round
 #include <ai.h>
 #include <forfeit.h>
+#include <zombies.h>   // warmupReset's resetAmmo: the reserves (finiteAmmo)
 #include <pcg_basic.h>
 #include <limits.h>
 #include <math.h>
@@ -144,12 +145,14 @@ void mode_round_start(Game *game) {
         mode_push_wait_timer(game, &start, 0);
     }
 
-    // warmupTime: "warmup ends " then a 5 s "match starting in " in front (comp: game.isComp)
+    // warmupTime: "warmup ends " then a 5 s "match starting in " in front (comp: game.isComp), the second with the
+    // countdown beeps and the mode's popup (getSnd / getPop, deob-10.0.3.js:220013-220036)
     if (game->config.warmup_time > 0.0f && mode->wait_timer_count + 2 <= MODE_MAX_WAIT_TIMERS) {
         const int comp = cfg_comp(game);
         memmove(&mode->wait_timers[2], &mode->wait_timers[0], (size_t) mode->wait_timer_count * sizeof(ModeWaitTimer));
         mode->wait_timers[0] = (ModeWaitTimer) {.time = game->config.warmup_time * 60.0f, .msg = "warmup ends ", .trigger = mode_trigger_warmup_end, .comp = (unsigned char) comp};
-        mode->wait_timers[1] = (ModeWaitTimer) {.time = 5.0f, .msg = "match starting in ", .trigger = mode_trigger_unlock_move, .comp = (unsigned char) comp};
+        mode->wait_timers[1] = (ModeWaitTimer) {.time = 5.0f, .msg = "match starting in ", .trigger = mode_trigger_unlock_move, .comp = (unsigned char) comp,
+                                                .countdown = 1};
         mode->wait_timer_count += 2;
     }
 
@@ -196,6 +199,19 @@ static void mode_message(Game *game, const char *text) {
     mode_send_message(game, text ? text : "");
 }
 
+// A countdown timer's gmsg extras at its text's whole `second` (ModeWaitTimer.countdown; the client: gmsg's handler,
+// deob-10.0.3.js:258349-258368): getSnd's n for "00:05".."00:01" (cntd_<n> at 0.2 and the big #timerText number),
+// getPop's [mode.name, mode.sub || "Destroy the Enemy"] for "00:00" (textPopup, pop_3). A 5 s timer's first text is
+// "00:04" (the tick that starts it has already taken its delta off), so the warmup's has no cntd_5, as in v10.
+static void mode_wait_countdown(Game *game, const int second) {
+    if (second >= 1 && second <= 5) {
+        mode_send_countdown(game, second);
+    } else if (second == 0 && game->mode && game->mode->config.name) {
+        const char *sub = game->mode->config.sub ? game->mode->config.sub : "Destroy the Enemy";
+        mode_send_text_popup(game, game->mode->config.name, sub);
+    }
+}
+
 // game.update's waitTimers block. Returns 1 when the round clock runs this tick
 // (no waitTimers, or the first one keeps the clock running).
 static int mode_tick_wait(Game *game, const float delta) {
@@ -229,11 +245,13 @@ static int mode_tick_wait(Game *game, const float delta) {
     } else {
         const int second = (int) timer->time;
         if (second != mode->wait_second_sent || mode->waiting_sent) {
+            const int changed = second != mode->wait_second_sent; // v10 sends gmsg when the text changes (lastTimerW)
             mode->wait_second_sent = second;
             char text[NET_GAME_MESSAGE_SIZE], time[16];
             mode_format_time(timer->time, time, sizeof(time));
             snprintf(text, sizeof(text), "%s%s", timer->msg ? timer->msg : "", time);
             mode_message(game, text);
+            if (changed && timer->countdown) mode_wait_countdown(game, second);
         }
     }
 
@@ -405,12 +423,14 @@ int mode_end_game(Game *game) {
             mode_next_objective(game, 0.0f, 1, 0, -1); // nextObjective(null)
         }
 
+        // v10.0.3 endGame's intermission (deob-10.0.3.js:221624-221642): its countdown beeps and the mode's popup
         const ModeWaitTimer intermission = {
             .time = cfg_intermission(game),
             .msg = "intermission ",
             .trigger = mode_intermission_end,
             .comp = 1,
             .dont_wait = 1,
+            .countdown = 1,
         };
         if (mode->wait_timer_count >= MODE_MAX_WAIT_TIMERS) mode->wait_timer_count = MODE_MAX_WAIT_TIMERS - 1;
         memmove(&mode->wait_timers[1], &mode->wait_timers[0], (size_t) mode->wait_timer_count * sizeof(ModeWaitTimer));
@@ -806,10 +826,27 @@ static int game_get_comp_spawn_point(Game *game, const Player *player, vec3 *pos
     return game_get_spawn_point(game, player, position, direction);
 }
 
+// resetPosition's resetAmmo(true) (deob-10.0.3.js:191010-191036, called at :191058): every loadout slot (players.getWeapon:
+// an upgraded slot's entry) back to a full magazine (mode ammoLimit) and full reserves, no fire delay or reload left
+// (reloads 0, reloadTimer 0). Its second argument is not given, so noReload weapons refill too. The owner learns it
+// from the LOADOUT (its ammo) and, with finite ammo, the reserves, as from the Zombies Ammo Cache.
+static void mode_reset_ammo(Game *game, Player *player) {
+    if (!player->loadout || !player->ammo) return;
+    for (int slot = 0; slot < player->loadout_size; slot++) {
+        const Weapon *weapon = player_slot_weapon(player, slot);
+        if (weapon) player->ammo[slot] = (unsigned int) mode_ammo_limit(game, (int) weapon->ammo);
+        if (player->reloads) player->reloads[slot] = 0.0f;
+    }
+    player->reload_timer = 0.0f;
+    zombies_reserves_reset(player);
+    mode_send_loadout(game, player);
+    if (zombies_finite_ammo(player)) zombies_send_reserves(player);
+}
+
 // game.warmupReset (deob-10.0.3.js:217698-217711): every active player goes to its team's comp spawn
-// (resetPosition: the spot, the spawn's direction, no momentum), then the match is IN_PROGRESS. Called when
-// the warmup ends and by Defuse's gameStart. KrunkNative difference: resetPosition's resetAmmo(true) and its
-// movement-state resets (crouch, ladder, wall stick) are not repeated here; the player keeps them.
+// (resetPosition: the spot, the spawn's direction, no momentum) with a full loadout (resetAmmo(true)), then the
+// match is IN_PROGRESS. Called when the warmup ends and by Defuse's gameStart. KrunkNative difference:
+// resetPosition's movement-state resets (crouch, ladder, wall stick) are not repeated here; the player keeps them.
 void mode_warmup_reset(Game *game) {
     if (!game || !game_is_authority(game)) return;
     for (size_t i = 0; i < game->player_count; i++) {
@@ -819,6 +856,7 @@ void mode_warmup_reset(Game *game) {
         if (!player || !player->active || !game_get_comp_spawn_point(game, player, &at, &direction)) continue;
         at.y += 0.01f; // resetPosition: y + 0.01
         game_change_position(game, player, at, 1, 1, 1, direction);
+        mode_reset_ammo(game, player);
     }
     game_set_state(game, GAME_STATE_IN_PROGRESS);
 }

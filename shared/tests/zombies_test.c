@@ -10,6 +10,7 @@
 #include <spawnables.h>
 #include <ai.h>
 #include <map_ai.h>
+#include <bots.h> // the match's end: Zombies removes its bots
 #include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
@@ -729,6 +730,38 @@ static void test_friendly_fire(Game *game) {
     game->config.team_damage[a->team] = 1.0f;
 }
 
+// ------------------------------------------------------------------ the match's end
+
+// v10.0.3 zom.js onPreEnd (deob-10.0.3.js:119167-119178): every bot leaves when the match ends (bots.remove: its
+// LEAVE), before the end table is made, so the END and MODE_END list the players only; they get the wave score.
+static void test_end_bots(Game *game) {
+    printf("the match's end: the bots leave...\n");
+    start(game, MODE_ID_ZOM, 1);
+    Player *a = add_player(game, 1);
+    CHECK(game_bots_add(game, NULL, NULL, 0.0f) && game_bots_add(game, NULL, NULL, 0.0f), "two bots added");
+    if (game->bots && game->bots->count) game->bots->list[0].persistent = 1; // bots.remove takes the persistent ones too
+    tick(game, 1.0f, 0.5f);
+    CHECK(game->player_count == 3 && game_bots_count(game) == 2, "the bots play (%zu players)", game->player_count);
+    int bot_uids[2] = {-1, -1};
+    for (int i = 0; i < 2 && game->bots && i < game->bots->count; i++) bot_uids[i] = game->bots->list[i].player ? game->bots->list[i].player->uid : -1;
+    reset_sent();
+    game->zombies.wave = 3;
+    game_end_round(game);
+    CHECK(game_bots_count(game) == 0 && game->player_count == 1 && game->players[0] == a, "onPreEnd removed every bot (%d left, %zu players)",
+          game_bots_count(game), game->player_count);
+    CHECK(g_count[NET_PACKET_LEAVE] == 2 && bot_uids[0] >= 0 && bot_uids[1] >= 0 && !game_find_player(game, bot_uids[0]) &&
+              !game_find_player(game, bot_uids[1]),
+          "a LEAVE for each bot (%d)", g_count[NET_PACKET_LEAVE]);
+    NetEndPacket end;
+    memcpy(&end, g_last[NET_PACKET_END], sizeof(end));
+    NetModeEndPacket mode_end;
+    memcpy(&mode_end, g_last[NET_PACKET_MODE_END], sizeof(mode_end));
+    CHECK(g_count[NET_PACKET_END] >= 1 && end.board.count == 1 && end.board.entries[0].uid == a->uid && a->score == 300,
+          "the END's table has the player only, with the wave score (%d rows, score %d)", end.board.count, a->score);
+    CHECK(g_count[NET_PACKET_MODE_END] == 1 && mode_end.count == 1 && mode_end.entries[0].uid == a->uid, "MODE_END lists the player only (%d)",
+          mode_end.count);
+}
+
 int main(void) {
     cJSON *map = NULL;
     if (load_json_file("shared/tests/maps/v7_zombies.json", &map) && load_json_file("../shared/tests/maps/v7_zombies.json", &map)) {
@@ -746,6 +779,7 @@ int main(void) {
     test_finite_ammo(&game);
     test_airdrops(&game);
     test_friendly_fire(&game);
+    test_end_bots(&game);
 
     if (g_failures) {
         printf("zombies_test: %d of %d checks failed\n", g_failures, g_checks);

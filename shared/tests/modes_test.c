@@ -12,6 +12,9 @@
 #include <prop_hunt.h>
 #include <social_v7.h> // game_player_is_prop
 #include <game_config.h> // game_config_host: a hosted game keeps its winner
+#include <map_catalog.h> // the official Raid maps (Khepri, Bastion)
+#include <net_ext.h>     // gmsg's countdown (NET_EXT_KN_OFFICIAL_COUNTDOWN)
+#include <ai.h>          // game_ai_free: the Raid maps' AIs
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -801,6 +804,48 @@ static void test_simon_traitor(Game *game) {
     CHECK(ended(game) && end_result_for(innocent->uid) == 1 && end_result_for(traitor->uid) == 0, "traitors out: Innocent win");
 }
 
+// v10.0.3 pickSimon (deob-10.0.3.js:217891-217911): game.host is Simon when it is an active player; a host that is
+// not in the game or not active leaves the pick to chance among the active players
+static void test_simon_host(Game *game) {
+    printf("Running Simon Says host test...\n");
+    for (int host = 1; host <= 3; host++) {
+        start_mode(game, MODE_ID_SIMON);
+        for (int uid = 1; uid <= 3; uid++) add_player(game, uid, 0);
+        game_config_set_host(game, host);
+        CHECK(game_host_player(game) && game_host_player(game)->uid == host, "game.host is player %d", host);
+        tick(game, 10.5f, 0.5f);
+        const Player *simon = first_on_team(game, 2);
+        CHECK(simon && simon->uid == host && simon->max_health == 5000 && team_count(game, 2) == 1, "the host (%d) is Simon (%d)", host,
+              simon ? simon->uid : -1);
+    }
+
+    // a host that is not in the game: a random active player
+    start_mode(game, MODE_ID_SIMON);
+    for (int uid = 1; uid <= 3; uid++) add_player(game, uid, 0);
+    game_config_set_host(game, 9);
+    CHECK(!game_host_player(game), "a host that is not in the game has no player");
+    tick(game, 10.5f, 0.5f);
+    CHECK(team_count(game, 2) == 1 && first_on_team(game, 2)->max_health == 5000, "an absent host: one random Simon");
+
+    // a host that is not active (dead, spectating): never Simon
+    int host_picked = 0;
+    for (int round = 0; round < 12; round++) {
+        start_mode(game, MODE_ID_SIMON);
+        for (int uid = 1; uid <= 4; uid++) add_player(game, uid, 0);
+        game_config_set_host(game, 4);
+        tick(game, 9.5f, 0.5f);
+        game_find_player(game, 4)->active = 0;
+        tick(game, 1.0f, 0.5f);
+        const Player *simon = first_on_team(game, 2);
+        host_picked += simon && simon->uid == 4;
+        CHECK(simon && team_count(game, 2) == 1, "an inactive host: one Simon (round %d)", round);
+    }
+    CHECK(!host_picked, "an inactive host is never Simon (%d)", host_picked);
+
+    game_config_set_host(game, -1);
+    CHECK(!game_host_player(game), "no host after clearing it");
+}
+
 static void test_oinc(Game *game) {
     printf("Running One in the Chamber test...\n");
     start_mode(game, MODE_ID_OINC);
@@ -1290,6 +1335,97 @@ static void test_round_wins_outside_best_of(Game *game) {
           mode->team_round_wins[1], mode->team_round_wins[2]);
     CHECK(!ended(game) && game->round_timer > 59.0f && last_sent(NET_PACKET_TEXT_POPUP, NET_TARGET_ALL) != NULL,
           "1-1 with noDraws: overtime, no match winner yet");
+}
+
+// The gmsg countdowns sent since the last reset (NET_EXT_KN_OFFICIAL_COUNTDOWN), in order; returns how many.
+static int sent_countdowns(int *out, const int max) {
+    int n = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, length = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type != NET_PACKET_EXT || !net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &length)) continue;
+        if (subtype != NET_EXT_KN_OFFICIAL_COUNTDOWN || length != sizeof(NetOfficialCountdownPacket)) continue;
+        NetOfficialCountdownPacket countdown;
+        memcpy(&countdown, body, sizeof(countdown));
+        if (n < max) out[n] = countdown.n;
+        n++;
+    }
+    return n;
+}
+
+static int sent_popup(const char *title, const char *text) {
+    int count = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type != NET_PACKET_TEXT_POPUP) continue;
+        NetTextPopupPacket popup;
+        memcpy(&popup, g_sent[i].payload, sizeof(popup));
+        count += !strcmp(popup.title, title) && !strcmp(popup.text, text);
+    }
+    return count;
+}
+
+// v10.0.3 warmup (deob-10.0.3.js:220009-220044) and round intermission (221624-221642): their countdown timers beep
+// 5..1 (getSnd: gmsg's countdown) and pop [mode.name, mode.sub || "Destroy the Enemy"] at 00:00 (getPop); "warmup ends "
+// has neither. The warmup's end runs warmupReset, whose resetPosition refills the loadout (resetAmmo(true), :191058).
+static void test_warmup_v10(Game *game) {
+    printf("Running v10.0.3 warmup / intermission test...\n");
+    start_mode(game, MODE_ID_TDM);
+    game->config.warmup_time = 3.0f / 60.0f; // warmupTime: 3 s
+    game_start_round(game);
+    GameMode *mode = game->mode;
+    Player *a = add_player(game, 1, 0);
+    add_player(game, 2, 0);
+    CHECK(game->game_state == GAME_STATE_WARMUP && mode->wait_timer_count == 2 && !mode->wait_timers[0].countdown && mode->wait_timers[1].countdown,
+          "warmup: \"warmup ends \" then the counted \"match starting in \"");
+    const Weapon *primary = player_slot_weapon(a, 0);
+    const unsigned int full = (unsigned int) mode_ammo_limit(game, (int) primary->ammo);
+    a->ammo[0] = 1;
+    a->reloads[0] = 0.4f;
+    a->reload_timer = 0.8f;
+    g_sent_count = 0;
+    for (int i = 0; i < 20 && mode->wait_timer_count == 2; i++) tick(game, 0.25f, 0.25f); // "warmup ends " 3 s: warmupReset
+    int counts[16];
+    CHECK(sent_countdowns(counts, 16) == 0 && count_sent(NET_PACKET_TEXT_POPUP) == 0, "\"warmup ends \" neither beeps nor pops");
+    CHECK(a->ammo[0] == full && a->reloads[0] == 0.0f && a->reload_timer == 0.0f && full > 1, "warmupReset refills the magazine (%u of %u)",
+          a->ammo[0], full);
+    const SentPacket *loadout = last_sent(NET_PACKET_LOADOUT, NET_TARGET_ALL);
+    NetLoadoutPacket sent_loadout;
+    memset(&sent_loadout, 0, sizeof(sent_loadout));
+    if (loadout) memcpy(&sent_loadout, loadout->payload, sizeof(sent_loadout));
+    CHECK(loadout && game->move_lock && game->game_state == GAME_STATE_IN_PROGRESS, "the LOADOUT tells the clients, movement locked");
+    int a_loadout = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].type != NET_PACKET_LOADOUT) continue;
+        memcpy(&sent_loadout, g_sent[i].payload, sizeof(sent_loadout));
+        if (sent_loadout.uid == a->uid) a_loadout = sent_loadout.ammo[0] == (int32_t) full;
+    }
+    CHECK(a_loadout, "player 1's LOADOUT carries the full magazine");
+
+    g_sent_count = 0;
+    tick(game, 5.0f, 0.25f); // "match starting in " 5 s: its first text is 00:04 (the starting tick took its delta)
+    const int n = sent_countdowns(counts, 16);
+    CHECK(n == 4 && counts[0] == 4 && counts[1] == 3 && counts[2] == 2 && counts[3] == 1, "match starting in: beeps 4 3 2 1 (%d: %d %d %d %d)", n,
+          counts[0], counts[1], counts[2], counts[3]);
+    CHECK(sent_popup("Team Deathmatch", "Destroy the Enemy") == 1 && !game->move_lock && !mode->wait_timer_count,
+          "00:00 pops the mode's name and \"Destroy the Enemy\", then the match runs");
+
+    // a round's intermission (intermTmr 10 s): 5 4 3 2 1, then Hardpoint's own sub
+    start_mode(game, MODE_ID_POINT);
+    mode = game->mode;
+    game->config.intermission_time = 10.0f;
+    mode->game_rounds = 2;
+    mode->round_count = 1;
+    mode->best_of = 0;
+    add_player(game, 1, 0);
+    add_player(game, 2, 0);
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(mode->wait_timer_count && mode->wait_timers[0].dont_wait && mode->wait_timers[0].countdown, "the intermission counts down");
+    g_sent_count = 0;
+    tick(game, 10.5f, 0.25f);
+    const int m = sent_countdowns(counts, 16);
+    CHECK(m == 5 && counts[0] == 5 && counts[4] == 1, "intermission: beeps 5 .. 1 (%d)", m);
+    CHECK(sent_popup("Hardpoint", "Attack the Objective") == 1, "00:00 pops Hardpoint's sub");
 }
 
 // endGame rounds: best of, intermission (flipped spawns, locked movement), overtime
@@ -1882,6 +2018,100 @@ static void test_raid_v10(Game *game) {
     CHECK(!mode_skip_stat(game, "s") && !mode_no_profile_stats(game), "FFA counts every stat");
 }
 
+// The map indexes of a host config's "maps", in order; returns how many.
+static int config_maps(const cJSON *cfg, int *out, const int max) {
+    int n = 0;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(cfg, "maps")) {
+        if (n < max && cJSON_IsNumber(entry)) out[n++] = entry->valueint;
+    }
+    return n;
+}
+
+// v10.0.3 Raid Server Setup (deob-10.0.3.js:19486-19511): allowedDat maps [18, 29, 31, 35, 43]. A Raid host may pick
+// Khepri (35) and Bastion (43), which host and play Raid as the server sets them up (accounts.c: setupGameConfig, the
+// official map, game_config_host): the map's config, its spawn, the 20 s "starting in ", the run to its end; on
+// Bastion the run challenges wait for the throne ("bthrone", raid.onEnd deob-10.0.3.js:118390-118425).
+static void test_raid_maps_v10(void) {
+    printf("Running v10.0.3 Raid maps test...\n");
+    int maps_out[8];
+    cJSON *request = cJSON_Parse("{\"maps\":[35,43,2,18],\"modes\":[23]}");
+    cJSON *cfg = game_config_setup(GAME_HOST_RAID, request, NULL, 0);
+    int n = config_maps(cfg, maps_out, 8);
+    CHECK(n == 3 && maps_out[0] == 35 && maps_out[1] == 43 && maps_out[2] == 18, "Raid host: Khepri and Bastion allowed, Sandstorm not (%d maps)", n);
+    cJSON_Delete(cfg);
+    cJSON_Delete(request);
+    request = cJSON_Parse("{\"maps\":[29,31]}");
+    cfg = game_config_setup(GAME_HOST_RAID, request, NULL, 0);
+    n = config_maps(cfg, maps_out, 8);
+    CHECK(n == 2 && maps_out[0] == 29 && maps_out[1] == 31, "Raid host: Laboratory and Soul Sanctum");
+    cJSON_Delete(cfg);
+    cJSON_Delete(request);
+
+    static const int raid_maps[] = {35, 43};
+    for (size_t m = 0; m < sizeof(raid_maps) / sizeof(raid_maps[0]); m++) {
+        const int map_index = raid_maps[m];
+        const cJSON *json = map_catalog_official_json(map_index);
+        CHECK(json != NULL, "map %d loads", map_index);
+        if (!json) continue;
+        for (int run = 0; run < 2; run++) { // run 0: a clean solo win; run 1: everyone dies
+            static Game raid;
+            memset(&raid, 0, sizeof(raid));
+            const cJSON **maps = calloc(1, sizeof(cJSON *));
+            int *modes = calloc(1, sizeof(int));
+            maps[0] = json;
+            modes[0] = MODE_ID_RAID;
+            game_configure(&raid, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+            raid.hooks.send = test_send;
+            raid.hooks.progress = test_progress_hook;
+            char text[64];
+            snprintf(text, sizeof(text), "{\"maps\":[%d]}", map_index);
+            request = cJSON_Parse(text);
+            game_config_host(&raid, request, GAME_HOST_RAID);
+            cJSON_Delete(request);
+            g_sent_count = 0;
+            game_init(&raid, 0, 0, 1);
+            CHECK(raid.ready && raid.map && raid.map->spawn_count == 1 && raid.map->object_count > 0 && game_mode_id(&raid) == MODE_ID_RAID &&
+                      map_catalog_map_index_of_json(raid.maps[raid.current_map_index]) == map_index,
+                  "map %d: a Raid game on the map (%zu objects)", map_index, raid.map ? raid.map->object_count : (size_t) 0);
+            CHECK(fabsf(raid.round_timer - 1500.0f) < 0.01f && raid.config.mimic_pubs && game_is_pub_type(&raid),
+                  "map %d: Raid's 25 min clock, a mimicPubs host", map_index);
+            Player *a = add_player(&raid, 1, 0);
+            const Spawn *spawn = raid.map->spawns[0];
+            const float dx = a->position.x - spawn->position.x, dz = a->position.z - spawn->position.z;
+            CHECK(a->active && a->team == 1 && sqrtf(dx * dx + dz * dz) <= spawn->spread + 7.5f && a->mode.lives == 1,
+                  "map %d: the raider spawns at the map's spawn (%.1f from it, spread %.0f), one life", map_index, sqrtf(dx * dx + dz * dz),
+                  spawn->spread);
+            tick(&raid, 20.5f, 0.5f); // "starting in " 20 s
+            CHECK(raid.game_state == GAME_STATE_IN_PROGRESS && !mode_waiting(&raid) && !ended(&raid), "map %d: the run is on", map_index);
+            tick(&raid, 5.0f, 0.5f);
+            CHECK(!ended(&raid) && a->active, "map %d: the raider plays on", map_index);
+            g_prog_count = 0;
+            if (run == 0) {
+                raid.mode->skip = 1; // the End Round trigger with the raider alive and time left
+                tick(&raid, 0.5f, 0.5f);
+                CHECK(ended(&raid) && end_result_for(1) == 1 && prog_has(1, 0, "rsolo", 1, -1), "map %d: a survivor wins the run", map_index);
+                // Bastion's run challenges need the throne first (runProg.bthrone)
+                CHECK(prog_has(1, 0, "rnodmg", 1, -1) == (map_index != 43), "map %d: rnodmg %s", map_index,
+                      map_index == 43 ? "waits for the throne" : "for a clean run");
+            } else {
+                kill(a, NULL, 0);
+                tick(&raid, 0.5f, 0.5f);
+                CHECK(ended(&raid) && end_result_for(1) == 0 && !prog_has(1, 0, "rsolo", 1, -1), "map %d: everyone out, the raid wins", map_index);
+            }
+            free_players(&raid);
+            game_config_free(&raid);
+            game_ai_free(&raid);
+            if (raid.map) map_fini(raid.map);
+            if (raid.mode) mode_fini(raid.mode);
+            free(raid.weapons);
+            free(raid.classes);
+            free(raid.modes);
+            free((void *) raid.maps);
+        }
+    }
+}
+
 // v10.0.3 players.kill / players.score details (deob-10.0.3.js:198485-198540, 197840-197905)
 static void test_kill_rules_v10(Game *game) {
     printf("Running v10.0.3 kill / score rules test...\n");
@@ -2043,6 +2273,7 @@ int main(void) {
     test_boss(&game);
     test_stalker(&game);
     test_simon_traitor(&game);
+    test_simon_host(&game);
     test_oinc(&game);
     test_shrp(&game);
     test_misc(&game);
@@ -2055,6 +2286,7 @@ int main(void) {
     test_modifiers(&game);
     test_rounds(&game);
     test_round_wins_outside_best_of(&game);
+    test_warmup_v10(&game);
     test_spawn_v7(&game);
     test_zombies_raid(&game);
     test_net_v7(&game);
@@ -2064,6 +2296,7 @@ int main(void) {
     test_progression_contexts(&game);
     test_public_winner(&game);
     test_raid_v10(&game);
+    test_raid_maps_v10();
     test_kill_rules_v10(&game);
 
     if (g_failures) {

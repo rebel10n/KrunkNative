@@ -7,6 +7,7 @@
 #include <ai.h>
 #include <stalker.h> // STALKER_PICKED
 #include <map_catalog.h> // raid.onEnd: game.mapIndex (Bastion)
+#include <game_config.h> // pickSimon: game.host (game_host_player)
 #include <math.h>
 #include <string.h>
 
@@ -700,11 +701,13 @@ void mode_trigger_unlock_move(Game *game, const float overflow) {
     mode_unlock_move(game);
 }
 
-// pickSimon: the host when playing, else a random active player; 5000 health.
+// pickSimon (deob-10.0.3.js:217891-217911): the host (game.host, game_host_player) when it is an active player, else
+// a random active player (no random draw when the host plays); 5000 health.
 void mode_trigger_pick_simon(Game *game, const float overflow) {
     (void) overflow;
-    Player *simon;
-    if (pick_random(game, &simon, 1)) {
+    Player *simon = game_host_player(game);
+    if (simon && !simon->active) simon = NULL;
+    if (simon || pick_random(game, &simon, 1)) {
         mode_update_team(game, simon, 2);
         mode_set_role_health(game, simon, 5000);
         simon->mode.no_regen = 0; // pickSimon keeps regen

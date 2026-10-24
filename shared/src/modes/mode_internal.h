@@ -142,6 +142,7 @@ int mode_has_all_zones(const Game*);                     // hasAllZones: the tea
 // ---- packets (mode_net.c); all no-ops without game hooks
 void mode_send_message(Game*, const char *text);         // gmsg to everyone
 void mode_send_message_to(Game*, int uid, const char *text);
+void mode_send_countdown(Game*, int n);                  // gmsg's countdown n (getSnd): cntd_<n> + the big number
 void mode_send_team(Game*, const Player*);
 void mode_send_team_score(Game*, int team);
 void mode_send_flag(Game*, int index);

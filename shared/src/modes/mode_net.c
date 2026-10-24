@@ -3,6 +3,7 @@
 // rds / lkt / tx / krt / chrg / bh / wep / lv / ac / inat / lock / lm / crsp / dsp / end(tms) /
 // am. All leave through game_send (GameHooks.send).
 #include "mode_internal.h"
+#include <net_ext.h> // gmsg's countdown: NET_EXT_KN_OFFICIAL_COUNTDOWN
 #include <math.h>
 #include <string.h>
 
@@ -112,6 +113,15 @@ void mode_send_message_to(Game *game, const int uid, const char *text) {
     memset(&packet, 0, sizeof(packet));
     copy_text(packet.text, sizeof(packet.text), text);
     game_send(game, uid, NET_PACKET_GAME_MESSAGE, &packet, sizeof(packet));
+}
+
+// gmsg's third value (a wait timer's getSnd, deob-10.0.3.js:222041-222048) to everyone: NetGameMessagePacket has no
+// room for it, so it rides the official link's NET_EXT_KN_OFFICIAL_COUNTDOWN (the client plays both the same way)
+void mode_send_countdown(Game *game, const int n) {
+    const NetOfficialCountdownPacket countdown = {.n = n};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(countdown)];
+    const uint16_t length = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_OFFICIAL_COUNTDOWN, &countdown, sizeof(countdown));
+    if (length) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buf, length);
 }
 
 void mode_send_team(Game *game, const Player *player) {

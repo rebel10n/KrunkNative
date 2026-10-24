@@ -127,6 +127,10 @@ typedef struct {
     unsigned char comp:1;    // comp: spawn spread around the comp spawns
     unsigned char cont_time:1; // contTime: the round clock keeps running
     unsigned char dont_wait:1; // dontWait: runs without minPlayers (round intermission)
+    // getSnd + getPop (the warmup's "match starting in " and the round intermission, deob-10.0.3.js:220016-220025,
+    // 221628-221638): at "00:05".."00:01" the gmsg's countdown n (cntd_<n> + the big number), at "00:00" its
+    // popup [mode.name, mode.sub || "Destroy the Enemy"]
+    unsigned char countdown:1;
 } ModeWaitTimer;
 
 typedef struct {

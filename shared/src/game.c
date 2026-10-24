@@ -607,8 +607,21 @@ void game_end_round(Game *game) {
     // left (gameTimerP: a "skip" end keeps it, deob-10.0.3.js:182870-182873, 118375, 118391), so it is cleared after.
     Player *sorted[GAME_LEADERBOARD_MAX];
     ModeWinner winner;
-    const size_t count = game_end_order(game, sorted, &winner);
+    size_t count = game_end_order(game, sorted, &winner);
+    // onPreEnd may take players out: Zombies removes every bot (deob-10.0.3.js:119168-119172) and players.remove splices
+    // them out of the sorted players.list, so the end table has the ones still in the game, in that order. They are
+    // found again by uid (a removed player's Player is freed).
+    int sorted_uids[GAME_LEADERBOARD_MAX];
+    for (size_t i = 0; i < count; i++) sorted_uids[i] = sorted[i]->uid;
+    const int winner_uid = winner.player ? winner.player->uid : -1;
     if (game->mode) mode_on_game_end(game);
+    size_t kept = 0;
+    for (size_t i = 0; i < count; i++) {
+        Player *player = game_find_player(game, sorted_uids[i]);
+        if (player) sorted[kept++] = player;
+    }
+    count = kept;
+    if (winner.player) winner.player = game_find_player(game, winner_uid);
     game->round_timer = 0.0f;
 
     // endGame(): player.reward for every player (hooks.reward: accounts live in the server). The
