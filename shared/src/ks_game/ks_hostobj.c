@@ -761,6 +761,10 @@ KsValue ks_game_wrap_player(KsScript *s, Game *game, const Player *player)
 {
     if (!s || !game || !player) return ks_null();
     KsRef *ref = ks_ref_get(ks_game_state(game, 1), KS_REF_PLAYER, player->uid);
+    if (ref && ref->player_no != player->name_no) { // the uid's state belonged to another Player object: a new player
+        if (ref->player_no) ks_ref_reset_player(ref);
+        ref->player_no = player->name_no;
+    }
     if (!ref) return ks_null();
     return ks_host_object(s, ks_game_player_class(game), ref, (uint32_t) player->uid);
 }

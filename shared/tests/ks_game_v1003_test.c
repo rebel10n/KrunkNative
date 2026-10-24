@@ -636,6 +636,15 @@ static void test_player_flags(void) {
     CHECK(!ks_player_allows(p, KS_PLAYER_CAN_SHOOT) && !ks_player_allows(p, KS_PLAYER_CAN_MELEE), "a respawn keeps disableShooting / disableMelee");
     ks_game_on_player_leave_uid(&game, p->uid);
     CHECK(ks_player_allows(p, KS_PLAYER_CAN_SHOOT) && ks_player_allows(p, KS_PLAYER_CAN_MELEE), "a leave drops them: the next player of the uid is new");
+    // a bot removed without the leave path (game_bots_remove): the next Player object of its uid spawns with fresh flags
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n    me.disableShooting = true;\n}\n");
+    CHECK(!ks_player_allows(p, KS_PLAYER_CAN_SHOOT), "the first player of uid 2 cannot shoot");
+    Player *next = add_player(&game, 2); // another Player object of uid 2 (player_spawn -> ks_game_on_player_spawn)
+    CHECK(ks_player_allows(next, KS_PLAYER_CAN_SHOOT) && ks_player_allows(next, KS_PLAYER_DEFAULT_MOVEMENT), "a new Player of the uid starts fresh");
+    // and its own respawn keeps its lock again
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[1];\n    me.disableMelee = true;\n}\n");
+    ks_game_on_player_spawn(&game, next);
+    CHECK(!ks_player_allows(next, KS_PLAYER_CAN_MELEE), "the new player's respawn keeps its disableMelee");
     ks_game_unload(&game);
     cJSON_Delete(map);
 }

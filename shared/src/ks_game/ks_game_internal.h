@@ -138,6 +138,8 @@ typedef struct KsRef {
     int allow;                 // KS_PLAYER_* bits, all set by default
     uint16_t disabled;         // disableDefault(input) bits (KS_INPUT_*)
     int sync_count;
+    int player_no;             // the Player object the flags belong to (its name_no: unique per game_players_add); another
+                               // object of this uid (a bot removed, a new connection) starts with fresh flags
     char sync[KS_SYNC_MAX_NAMES][KS_SYNC_NAME_MAX * 4 + 1]; // custSync names (<= 20 UTF-16 units)
 } KsRef;
 

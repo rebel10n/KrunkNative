@@ -523,9 +523,17 @@ void ks_game_on_player_spawn(Game *game, Player *player)
 {
     KsGame *kg = game ? game->ks : NULL;
     if (!kg || !player) return;
-    // player.init on the (re)spawn: the movement flags, disabledInputs, custSync; not disableShooting / disableMelee
+    // player.init on the (re)spawn: the movement flags, disabledInputs, custSync; not disableShooting / disableMelee. A
+    // spawn of another Player object of this uid (a removed bot's uid taken again, a reconnect) is a new v10 player: all
+    // of the flags are fresh (whatever path removed the old one: a leave, game_bots_remove, a client's removal)
     KsRef *ref = ks_ref_find(kg, KS_REF_PLAYER, player->uid);
-    if (ref) ks_ref_respawn_player(ref);
+    if (ref && ref->player_no && ref->player_no != player->name_no) {
+        ks_ref_reset_player(ref);
+        ref->player_no = player->name_no;
+    } else if (ref) {
+        ref->player_no = player->name_no; // 0: made for this object before its first spawn (a wrapper, a freeze)
+        ks_ref_respawn_player(ref);
+    }
     if (!game_is_authority(game) || !server_hook(game, "onPlayerSpawn")) return;
     KsScript *s = kg->script;
     KsValue id = id_value(s, player);
