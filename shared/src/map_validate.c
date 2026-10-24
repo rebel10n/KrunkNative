@@ -457,7 +457,7 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
     }
 
     const int collidable_limit = r.opt->featured ? MAP_V7_COLLIDABLE_LIMIT_FEATURED : MAP_V7_COLLIDABLE_LIMIT;
-    int collidable = 0, signs = 0, wheels = 0, leaderboards = 0, ais = 0, bots = 0, anchors = 0;
+    int collidable = 0, signs = 0, wheels = 0, leaderboards = 0, ais = 0, bots = 0;
     InterfaceCount *interfaces = object_count ? calloc((size_t) object_count, sizeof(InterfaceCount)) : NULL;
     int interface_count = 0;
     const cJSON *xyz = cJSON_GetObjectItem(map, "xyz");
@@ -528,12 +528,10 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
         }
         if (prefab_has_flag(prefab, PF_AI) && ++ais > MAP_V7_AI_LIMIT) report(&r, MAP_ISSUE_ERROR, index, -1, "ai_limit", "Too many AI.");
         if (entity_ids && prefab_has_flag(prefab, PF_ISENTITY) && !r.stop) check_entity(&r, object, index, &entities, entity_ids, archetype_ids);
-        // not checked by validateMap: addPendingBots / addMapAnchor stop at the limit
+        // not checked by validateMap: addBot stops at 16 pending bots (deob-10.0.3.js:187637); MAP_ANCHORs
+        // have no limit in v10.0.3 (v7.1.4's anchorLimit 1000 is gone, addMapAnchor :186497)
         if (prefab == 95 /* BOT_SPAWNER */ && ++bots == MAP_V7_BOT_LIMIT + 1) {
             report(&r, MAP_ISSUE_WARNING, index, -1, "bot_limit", "more than %d BOT_SPAWNERs: the rest are not added", MAP_V7_BOT_LIMIT);
-        }
-        if (prefab == 96 /* MAP_ANCHOR */ && ++anchors == MAP_V7_ANCHOR_LIMIT + 1) {
-            report(&r, MAP_ISSUE_WARNING, index, -1, "anchor_limit", "more than %d MAP_ANCHORs: the rest are ignored", MAP_V7_ANCHOR_LIMIT);
         }
         if (prefab == 41 /* TERMINAL / BOT_PATH_NODE */) {
             report(&r, MAP_ISSUE_WARNING, index, -1, "terminal", "BOT_PATH_NODE builds nothing (bots walk \"botPaths\")");

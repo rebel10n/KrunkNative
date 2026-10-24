@@ -22,11 +22,12 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     // on the target's live position (v7 / Strike) rather than the lag-compensated box (KrunkNative's fix).
     unsigned char posed_hitboxes;
     unsigned char hit_zones_live;
-    // procInputs' delta floor is constants->min_delta x config.deltaMlt (v10: 1 * deltaMlt ms) when set,
+    // procInputs' delta floor is constants->min_delta x config.deltaMlt when set (v10.0.3: Math.max(1 * deltaMlt,
+    // Math.min(input[1], dltMx)) ms, and a delta under the floor becomes the floor, deob-10.0.3.js:191276-191280),
     // else the bare constant (v7.1.4 / Strike: 0.1 ms)
     unsigned char delta_floor_scaled;
-    float end_timer;            // config.endTimer: the end screen / map vote, seconds (v10 25, Krunker Strike 30)
-    float end_anim;             // config.endAnim: the round-end slow motion, seconds (v10 5, Krunker Strike 2.5)
+    float end_timer;            // config.endTimer: the end screen / map vote, seconds (v10 25, deob-10.0.3.js:22540; Krunker Strike 30)
+    float end_anim;             // config.endAnim: the round-end slow motion, seconds (v10 5, deob-10.0.3.js:19427, 22537; Krunker Strike 2.5)
     // a projectile's head band is plain headScale (v7 / Krunker Strike projectiles), not headScale x headMlt
     unsigned char projectile_head_plain;
 
@@ -50,17 +51,17 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     // Ranked match rules (doc/v10/gameplay.md section 7, ranked.md): applied while Game.is_ranked
     // (server/src/accounts.c acc_ranked_setup).
     struct {
-        float kr_mlt;               // endGame reward x (v10:191171 `isRanked ? 2 : 1`)
-        unsigned char no_streaks;   // no kill streak count (v10:174076 `|| isRanked`)
-        unsigned char no_class_xp;  // saveClassScores skipped (v10:173631 `isPubType() && !isRanked`)
-        int need_all_ms;            // needAllTimer when ranked (v10:189820 60000; 0 = the server's own)
-        int shutdown_ms;            // shutdown after the end (v10:191217 120000; 0 = the end timer)
+        float kr_mlt;               // endGame reward x (deob-10.0.3.js:221760-221761 `else if (isRanked) reward * 2`)
+        unsigned char no_streaks;   // no kill streak count (deob-10.0.3.js:198604 `&& !isRanked`)
+        unsigned char no_class_xp;  // saveClassScores skipped (deob-10.0.3.js:197794 `isPubType() && !isRanked`)
+        int need_all_ms;            // needAllTimer when ranked (deob-10.0.3.js:219964 60000; 0 = the server's own)
+        int shutdown_ms;            // shutdown after the end (deob-10.0.3.js:221814-221815 120000; 0 = the end timer)
     } ranked;
 
-    int trigger_action_limit;   // config.triggerActionLimit (8)
-    int entity_limit;           // config.entityLimit (64)
-    int archetype_limit;        // config.archetypeLimit (32)
-    float light_unit_factor;    // config.lightIntensityScaling: map light intensity x PI
+    int trigger_action_limit;   // config.triggerActionLimit (8, deob-10.0.3.js:22957)
+    int entity_limit;           // config.entityLimit (64, deob-10.0.3.js:22543; validateMap "Too many entities." :216658)
+    int archetype_limit;        // config.archetypeLimit (32, deob-10.0.3.js:22397; validateMap :216534)
+    float light_unit_factor;    // config.lightIntensityScaling: map light intensity x PI (deob-10.0.3.js:21272, 22682)
     // getPointSpread's spread for a comp spawn (warmup, the intermission; game.js getSpawnPoint useCompSpawns):
     // the point is the spawn itself, rounded to whole units (spread 10 less 10 = 0). v10.0.3: 10 (deob line
     // 217148); v7.1.4: 40 (players up to 30 units off)

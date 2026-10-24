@@ -35,27 +35,28 @@ typedef struct {
     unsigned char first_only;   // stop at the first error (v7's behaviour)
 } MapValidateOptions;
 
-// v7.1.4 limits (config.js:895-944) the validation applies.
-#define MAP_V7_NAME_MAX 16
-#define MAP_V7_WELCOME_MAX 70
-#define MAP_V7_OBJECT_LIMIT 5000
-#define MAP_V7_OBJECT_LIMIT_FEATURED 7500
-#define MAP_V7_COLLIDABLE_LIMIT 4500
-#define MAP_V7_COLLIDABLE_LIMIT_FEATURED 6000
-#define MAP_V7_SPAWN_LIMIT 20
-#define MAP_V7_SIGN_LIMIT 100
-#define MAP_V7_SIGN_TEXT_LIMIT 1500
-#define MAP_V7_SIGN_FONT_MIN 1
-#define MAP_V7_SIGN_FONT_MAX 240
-#define MAP_V7_WHEEL_LIMIT 10
-#define MAP_V7_LEADERBOARD_LIMIT 2
-#define MAP_V7_AI_LIMIT 40
-#define MAP_V7_BOT_LIMIT 16
-#define MAP_V7_ANCHOR_LIMIT 1000
-#define MAP_V7_INTERFACE_LIMIT 30   // objects per interface id
-#define MAP_V7_TRIANGLE_LIMIT 5000  // tris.length / 9
-#define MAP_V7_GUI_LIMIT 80
-#define MAP_V7_POSITION_RANGE 500000.0
+// The limits the validation applies: Krunker v10.0.3's validateMap (deob-10.0.3.js:216477-216697), its
+// per-object check (:198858) and config (:22367-23014), all equal to v7.1.4's (config.js:895-944; hence
+// the names). v7's anchorLimit (1000 MAP_ANCHORs) is gone: 10.0.3 adds every anchor (addMapAnchor, :186497).
+#define MAP_V7_NAME_MAX 16                 // "Map name too long." (:216484)
+#define MAP_V7_WELCOME_MAX 70              // "Welcome Message too Long" (:216516)
+#define MAP_V7_OBJECT_LIMIT 5000           // objectLimit (:22777, "Map exceeds overall object limit." :216609)
+#define MAP_V7_OBJECT_LIMIT_FEATURED 7500  // objectLimitF (:22778)
+#define MAP_V7_COLLIDABLE_LIMIT 4500       // objectColLimit (:22775, :216620)
+#define MAP_V7_COLLIDABLE_LIMIT_FEATURED 6000 // objectColLimitF (:22776)
+#define MAP_V7_SPAWN_LIMIT 20              // spawnLimit (:22865, :216497)
+#define MAP_V7_SIGN_LIMIT 100              // signLimit (:22850, :216641)
+#define MAP_V7_SIGN_TEXT_LIMIT 1500        // signTextLimit (:22851, :216638)
+#define MAP_V7_SIGN_FONT_MIN 1             // signFontMin (:22849, :216644)
+#define MAP_V7_SIGN_FONT_MAX 240           // signFontMax (:22848)
+#define MAP_V7_WHEEL_LIMIT 10              // wheelLimit (:23007, :216648)
+#define MAP_V7_LEADERBOARD_LIMIT 2         // lbLimit (:22668, :216651)
+#define MAP_V7_AI_LIMIT 40                 // aiLimit (:22380, :216654)
+#define MAP_V7_BOT_LIMIT 16                // botLimit (:22455; addBot stops at 16 pending bots, :187637)
+#define MAP_V7_INTERFACE_LIMIT 30          // interfaceLimit, objects per interface id (:22629, :198946)
+#define MAP_V7_TRIANGLE_LIMIT 5000         // triangleLimit: tris.length / 9 (:216488)
+#define MAP_V7_GUI_LIMIT 80                // guiLimit (:22614, :216695)
+#define MAP_V7_POSITION_RANGE 500000.0     // positionRange (:22801, :21274)
 
 // Validates a parsed map document (not modified). Writes up to `max` issues; returns the total
 // number found (errors + warnings, may exceed max). *errors (optional) = the number of errors.

@@ -150,20 +150,21 @@ typedef struct {
 extern const char *const g_trigger_events[TRIGGER_EVENT_COUNT];        // triggers.events
 extern const TriggerActionInfo g_trigger_actions[TRIGGER_ACTION_COUNT];
 
-// config.js limits (v7.1.4)
-#define TRIGGER_LIMIT 30                // config.triggerLimit: onTrigger calls one trigger chain may run (v3.1.1 20)
+// config limits: Krunker v10.0.3's (config deob-10.0.3.js:22367-23014; v7.1.4's values unless noted)
+#define TRIGGER_LIMIT 30                // config.triggerLimit (:22958): onTrigger calls one trigger chain may run (v3.1.1 20)
 #define TRIGGER_TEXT_MAX 70             // addTrigger: longer "tct" texts are dropped
 #define TRIGGER_CONSTANT_MIN (-10000)   // editor "Value" slider
 #define TRIGGER_CONSTANT_MAX 10000
 #define TRIGGER_CONSTANT_EVENT_MAX 10000 // addTrigger: limitMM(constantEvent, 0, 10000)
-#define TRIGGER_INTERFACE_MAX 2000      // config.interfaceIDMax (v7.1.4; v3.1.1 1000)
-#define TRIGGER_TEAM_LIMIT 5            // config.teamLimit (Set Player Team)
+#define TRIGGER_INTERFACE_MAX 2000      // config.interfaceIDMax (:22628, :20135; v3.1.1 1000)
+#define TRIGGER_TEAM_LIMIT 5            // config.teamLimit (:22893; Set Player Team)
 #define TRIGGER_INTERACT_KEY_RADIUS 7.0f // addTrigger: onInteractKey tRadius
-#define TRIGGER_EMITTER_VOLUME_MIN 0.05f
-#define TRIGGER_EMITTER_VOLUME_MAX 2.0f
-#define TRIGGER_EMITTER_RATE_MIN 0.1f   // config.emitterRateMin (v3.1.1 0.5)
-#define TRIGGER_EMITTER_RATE_MAX 4.0f
-#define TRIGGER_EMITTER_SOUND_COUNT 73  // config.emitterSounds (v7.1.4; index 16 is scare_0, v3.1.1 jumpS_0)
+#define TRIGGER_EMITTER_VOLUME_MIN 0.05f // config.emitterVolMin (:22534, :21276)
+#define TRIGGER_EMITTER_VOLUME_MAX 2.0f  // config.emitterVolMax (:22533)
+#define TRIGGER_EMITTER_RATE_MIN 0.1f   // config.emitterRateMin (:22529, :21277; v3.1.1 0.5)
+#define TRIGGER_EMITTER_RATE_MAX 4.0f   // config.emitterRateMax (:22528)
+// config.emitterSounds (:21278, :22532): v10.0.3 appends scare_1 (74; v7.1.4 73; index 16 is scare_0, v3.1.1 jumpS_0)
+#define TRIGGER_EMITTER_SOUND_COUNT 74
 #define TRIGGER_NETWORK_SOUND_COUNT 51
 #define TRIGGER_SOUND_SCAPE_COUNT 14    // config.soundScapes (Change Ambient Sound options)
 
@@ -184,15 +185,15 @@ int trigger_text_valid(const char *text);
 // triggerActionLimit 8 (Ruleset.trigger_action_limit). The tables hold the v10 rows.
 #define TRIGGER_V10_CONDITION_COUNT 13
 #define TRIGGER_V10_ACTION_COUNT 75
-#define TRIGGER_V10_ACTION_LIMIT 8
+#define TRIGGER_V10_ACTION_LIMIT 8      // config.triggerActionLimit (deob-10.0.3.js:22957)
 #define TRIGGER_V10_CONDITION_CUSTOM 12 // mainScript.shouldTrigger(playerId | "NONE", triggerSid, param)
-#define TRIGGER_V7_CHAIN_LIMIT 30       // config.triggerLimit (v3.1.1 20)
-#define TRIGGER_V7_CUSTOM_VALUE_LIMIT 30 // config.custValLimit
+#define TRIGGER_V7_CHAIN_LIMIT 30       // config.triggerLimit (deob-10.0.3.js:22958; v3.1.1 20)
+#define TRIGGER_V7_CUSTOM_VALUE_LIMIT 30 // config.custValLimit (deob-10.0.3.js:22500, :20827)
 #define TRIGGER_V7_KEY_MAX 10           // "tcc" / input condition values: [a-z0-9_]{0,10}
 #define TRIGGER_V7_DELAY_MAX 60.0f      // "tad" seconds (rounded to 0.1)
 #define TRIGGER_V7_COST_MAX 10000       // "tac"
 #define TRIGGER_V7_EMITTER_RATE_MIN 0.1f // config.emitterRateMin (v3.1.1 0.5)
-#define TRIGGER_V7_EMITTER_SOUND_COUNT 73
+#define TRIGGER_V7_EMITTER_SOUND_COUNT TRIGGER_EMITTER_SOUND_COUNT // the "es" index range: v10.0.3's 74
 #define TRIGGER_V7_EVENT_ON_INTERACT_KEY 16
 #define TRIGGER_V7_EVENT_ON_EXIT_OBJECT 23
 #define TRIGGER_V7_USES_MAX 64          // KN: per-player single-use list of one trigger (sup); a full list refuses newcomers

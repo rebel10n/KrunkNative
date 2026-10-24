@@ -30,11 +30,10 @@
 #include <shared.h>
 #include <social.h>
 
-// config.js
-#define VOICE_CHAT_INTERVAL_MS 2000 // config.voiceChatInterval (defined, read by nothing in v3.1.1)
-#define VOICE_CHAT_MAX_LENGTH 0.65f // config.voiceChatMaxLength: clips longer than 1.2x are dropped
-#define VOICE_RATE_MS 500           // config.voiceRate: recorder restart interval
-#define VOICE_DELAY_MS 200          // config.voiceDelay (defined, read by nothing in v3.1.1)
+// config (v10.0.3 keeps two of v3.1.1's four voice keys; voiceChatInterval and voiceDelay, which nothing
+// read, are gone)
+#define VOICE_CHAT_MAX_LENGTH 0.65f // config.voiceChatMaxLength (deob-10.0.3.js:22994): clips longer than 1.2x are dropped
+#define VOICE_RATE_MS 500           // config.voiceRate (deob-10.0.3.js:22995): recorder restart interval
 #define VOICE_BITS_PER_SECOND 6000  // new MediaRecorder(stream, {bitsPerSecond: 6000})
 #define VOICE_OPUS_BITRATE 5000     // what Chrome's encoder gets for it (MediaRecorder.audioBitsPerSecond)
 #define VOICE_SAMPLE_RATE 48000     // Opus / getUserMedia track rate

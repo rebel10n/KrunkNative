@@ -13,6 +13,7 @@
 #include <shared.h>
 #include <prop_hunt.h> // Prop Hunt: the Seeker penalty
 #include <ai.h>
+#include <ks_game.h> // v10.0.3 onObjectDamage / onObjectDestroyed
 #include "modes/mode_internal.h"
 #include "triggers_internal.h"
 #include <math.h>
@@ -59,7 +60,7 @@ const TriggerActionInfo g_trigger_actions[TRIGGER_ACTION_COUNT] = {
 #undef T
 #undef S
 
-// config.emitterSounds (v7.1.4: 73 entries; index 16 changed from v3.1.1's jumpS_0 to scare_0)
+// config.emitterSounds (deob-10.0.3.js:21278: 74 entries, v7.1.4 73 + scare_1; index 16 changed from v3.1.1's jumpS_0 to scare_0)
 const char *const g_trigger_emitter_sounds[TRIGGER_EMITTER_SOUND_COUNT] = {
     "nuke_0", "siren_0", "explosion", "fart_0", "taunt_0", "taunt_1", "taunt_2", "taunt_3", "buy_0", "buy_1",
     "case_0", "case_1", "cheer_0", "reward", "store", "tick_0", "scare_0", "cough_1", "cough_2", "taunt_4",
@@ -69,6 +70,7 @@ const char *const g_trigger_emitter_sounds[TRIGGER_EMITTER_SOUND_COUNT] = {
     "whizz_1", "gclick_0", "pick_0", "pick_1", "build_0", "break_wood", "bhop_check", "bhop_reset", "gong_0",
     "dragon_0", "taunt_5", "spray_1", "stepwo_0", "stepwo_1", "stepwat_0", "stepwat_1", "stepsa_0", "stepsa_1",
     "stepsno_0", "stepsno_1", "stepsno_2", "bounce_1", "zap_0", "jug_0", "crit_0", "melee_equip",
+    "scare_1", // v10.0.3 (deob-10.0.3.js:21278)
 };
 
 const char *const g_trigger_network_sounds[TRIGGER_NETWORK_SOUND_COUNT] = {
@@ -211,6 +213,10 @@ void game_object_hit(Game *game, Object *object, Player *dealer, const float dam
     const int can_damage = damage > 0.0f && (kind != GAME_HIT_PROJECTILE || dealer); // projectile: owner.isPlayer && I > 0
     if (can_damage && !trigger_wait_blocks(game) && object->health) {
         object->health -= damage;
+        // v10.0.3 damageObject (deob-10.0.3.js:220473-220481): the server script's onObjectDamage(sid, interface || 0,
+        // playerId, dmg) after the health drop, onObjectDestroyed(sid, interface || 0, playerId) after onDestroy
+        const int sid = map_object_uid(game, object);
+        ks_game_on_object_damage(game, sid, object->interface_id, dealer, damage);
         if (dealer) {
             const NetHitPacket hit = {.target_uid = -1}; // IO.send(player.id, "4"): hitmarker only
             game_send(game, dealer->uid, NET_PACKET_HIT, &hit, sizeof(hit));
@@ -218,6 +224,7 @@ void game_object_hit(Game *game, Object *object, Player *dealer, const float dam
         if (object->health <= 0.0f) {
             game_destroy_object(game, object, dealer);
             if (event_is(object, TRIGGER_EVENT_ON_DESTROY)) game_on_trigger(game, dealer, object, NULL);
+            ks_game_on_object_destroyed(game, sid, object->interface_id, dealer);
         }
     }
 
