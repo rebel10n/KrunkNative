@@ -14,6 +14,7 @@ at run time.
 | `attach.json` | attachments, 2 entries | 202939-202969 | none |
 | `streaks.json` | streaks, 7 entries | 203338-203521 | 203521-203523: `index` |
 | `aimRecticles.json` | scope overlays, 7 entries | 227658-227679 | none |
+| `config.json` | the frozen config object's scalar keys (365) | 22367-23014 | none (`config.cjs` resolves `var _N = <number>` values; arrays, objects and other references are left out) |
 
 Values the dumper cannot resolve are strings: `"<fn>"` for functions (the Combat Knife's `anim`, effect /
 streak hooks, the Acog's `req`) and `"<expr:Type>"` for other expressions (the `req` gates, which are
@@ -27,7 +28,7 @@ pass. The test compares every resolved field it has a C field for. `tools/strike
 
 The script runs the bundle tree's `tools/extractors/dump2.cjs` (Babel AST walker: object literals,
 `x = {...}, ...` sequences and `h(h(obj, "k", v), ...)` helper chains) on each table's opening line above, then
-applies the post-processing. One table by hand:
+applies the post-processing, and `tools/extractors/config.cjs` for `config.json`. One table by hand:
 
     node --max-old-space-size=8192 deob/tools/extractors/dump2.cjs deob/game.deob.js 112381 weapons.json
 
