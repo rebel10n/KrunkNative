@@ -49,6 +49,7 @@ void hud_ui_hit(Client*, int kill);
 #include <bhop_toast.h>
 #include <v10_notify.h> // S5: chat emoji (v10_emoji_append_chat)
 #include <third_person.h>
+#include <class_camera.h> // v10.0.3 class camera: the crosshair, scope and aim dot rules
 #include <hud_map.h> // part 2a: minimap layout
 #include <render_settings.h>
 #include "../viewer/viewer_store.h" // store.skins: the melee skin icon
@@ -4801,13 +4802,16 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // 95.js hvJK5: #aimRecticle only for `scope` weapons, once fully aimed (jKFi4 == 0);
     // vfx.c hides the muzzle sprite / overlay flash / casings on the same condition.
     // Both are drawn on the overlay canvas by default, which the end screen hides (hideUI).
-    next.scoped = weapon && weapon->scope && me->aim_val >= 1.0f && !ui->ended;
+    // v10.0.3 toggleAim shows the scope only for camType.isNormal (deob-10.0.3.js:195320)
+    const ClassCamera class_cam = class_camera_current(client);
+    const int class_fps = class_cam.type == CLASS_CAMERA_FPS;
+    next.scoped = weapon && weapon->scope && me->aim_val >= 1.0f && !ui->ended && class_fps;
     // 95.js toggleAim: with an attachment (and the normal first-person camera) the reticle image
     // (textures/reticles/reticle_<reticleIndex>.png, drawn centred by 91.js) shows once fully aimed.
     // aiming cancels an inspect in v3.1.1, so the dot never shows during one; keep that explicit.
     // KrunkNative's third person aims behind the shoulder: v10 toggleAim shows the dot there too
     // (v10.js 172054, only camType.isNormal); the host's own thirdPerson keeps v7's rule.
-    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended;
+    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended && class_fps; // isNormal (:195330)
     next.weapon = weapon;
     hud_timer(client, next.timer_text, sizeof(next.timer_text));
     next_extra.spread = (int) lroundf(hud_spread(me));
@@ -4817,6 +4821,10 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // v10 updateCrosshair (v10.js 221608): with a camera offset (thirdPerson) the crosshair stays
     // while aiming, except with a scope (its overlay takes over); so does KrunkNative's third person
     if (third_person_view(client) && !(weapon && weapon->scope)) next_extra.aim_pct = 0;
+    // (thirdPerson || camOffset) & (!scope || noScope) ? 1 : ... * (freeMouse ? 0 : 1) (deob-10.0.3.js:260847): a
+    // class camera's offset keeps it too; a free mouse otherwise hides it
+    if ((class_cam.third_person || class_cam.has_offset) && !(weapon && weapon->scope)) next_extra.aim_pct = 0;
+    else if (class_cam.free_mouse) next_extra.aim_pct = 100;
     next_extra.scoreboard = hud_scoreboard_key(client) && !hud_old_scoreboard(client); // g6: leaderType == 1 only
     hud_loadout(me, &next_extra);
     int ping = client->net_ping_ms >= 0 ? client->net_ping_ms : -1; // Krunker shows "-" for -1
@@ -4919,7 +4927,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
 // punishPlayer(id, action) as the list sends it: the server's chat command for the action (kick
 // "/kick", ban "/ban", kill, tp2 / tpme / bring, "/bring all" for 9); the server checks the rights
 static void plist_punish_send(const int uid, const int action) {
-    if (action == 0 || action == 1) { // Kick / Ban: v10 ADMIN_ACTIONS (the server checks DEV and the target)
+    if (action == 0 || action == 1 || action == 8) { // Kick / Ban / Transfer Host: v10 ADMIN_ACTIONS (the server checks the right)
         if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, uid, action);
         return;
     }
@@ -5003,6 +5011,8 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         // (isHost || canGlobalBan). A KrunkerNative host's ban is not offered: its server's admin ban checks DEV / moderator
         if (kick || krunker_net_is_host()) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
         sb_append(&sb, "</div>");
+        // the host's Transfer Host, in v10.0.3's second table (deob-10.0.3.js:254169: isHost; action 8 with the target)
+        if (host) sb_appendf(&sb, "<div class='takeActionTable'><span onmouseenter='playTick()' class='takeActionBtn enabled' onclick='punishPlayer(\"%d\", 8);clearPops();'>Transfer Host</span></div>", uid);
         char *html = sb_finish(&sb);
         ui_loadout_clear_pops();
         dom_display("popupHolder", "block");
