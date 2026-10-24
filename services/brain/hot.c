@@ -628,7 +628,9 @@ static void on_push(kn_redis *r, const char *channel, const char *payload, size_
 static void on_state(kn_redis *r, int up, void *ud) {
     (void) r;
     Brain *b = ud;
-    if (up) KN_INFO(MOD, "redis %s up: hot tier on", kn_redis_endpoint(g_hot.r));
+    /* NOTICE, the default level: the recovery prints with the WARN "down" line it ends (a connection
+     * established or lost is a level-0 line, doc/console.md) */
+    if (up) KN_NOTICE(MOD, "redis %s up: hot tier on", kn_redis_endpoint(g_hot.r));
     else KN_WARN(MOD, "redis %s down: serving from the database", kn_redis_endpoint(g_hot.r));
     if (b->db && g_hot.pubsub) kn_db_pubsub_transport_up(b->db, up);
     if (up) {
