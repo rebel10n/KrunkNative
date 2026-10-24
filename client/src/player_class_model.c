@@ -331,13 +331,14 @@ void player_class_model_update(Player *player, PlayerClassModel *m, MeshTransfor
         if (m->mdl == 2) anchor->rotation.y -= step_yaw;
         else anchor->rotation.y = 0.0f;
     }
-    if (!m->gltf) return;
-
-    // Vehicle.mov (:19145-19152): the model leans with the turn, about x when mdlDr is not a multiple of 180 (Euler
-    // YXZ), else about z (Euler ZYX, which with rotation.x 0 and rotation.y 0 or PI is XYZ with z * cos(y))
-    if (player_movement_scheme(player) == MOVEMENT_SCHEME_VEHICLE) {
+    // Vehicle.mov (:19145-19152), `if (meshRef)`: a Model's mesh (loadAnimMesh or loadMesh; a sprite has no meshRef)
+    // leans by angVel * vhtL, angVel as that mov found it (MovementSchemeState.lean_ang_vel). mdlDr % 180 != 0: Euler
+    // "YXZ" and rotation.x; else Euler "ZYX" and rotation.z, which with rotation.x 0 and a yaw of 0 or 180 degrees is
+    // the default XYZ with z * cos(yaw). Only where mov runs for the player: our own (replays included); the others'
+    // models never lean on a client, as in v10 (their angVel only reaches their owner, SYNC_PLAYER's sendVals).
+    if (m->mdl == 2 && player_movement_scheme(player) == MOVEMENT_SCHEME_VEHICLE) {
         const ClassOverrides *o = class_of(player);
-        const float lean = player->scheme.ang_vel * o->vehicle_turn_lean;
+        const float lean = player->scheme.lean_ang_vel * o->vehicle_turn_lean;
         const float dir = o->model_dir * (float) M_PI / 180.0f;
         if (fmodf(o->model_dir, 180.0f) != 0.0f) {
             m->holder.rotation_order = ROTATION_ORDER_YXZ;
@@ -347,6 +348,7 @@ void player_class_model_update(Player *player, PlayerClassModel *m, MeshTransfor
             m->holder.rotation = (vec3) {0.0f, dir, lean * cosf(dir)};
         }
     }
+    if (!m->gltf) return;
 
     // players.update (:191184-191187): the frame's own move picks the looping clip
     const vec3 p = player->position;
@@ -403,8 +405,11 @@ void player_class_model_describe(const Player *player, char *out, const size_t n
         return;
     }
     const char *body = m->default_body ? "fallback" : m->mesh || m->gltf ? "model" : "none";
-    snprintf(out, n, "body=%s mdl=%d asset=%s clip=%s%s", body, m->class_mdl, m->asset[0] ? m->asset : "-", m->clip[0] ? m->clip : "-",
-             m->gltf && gltf_instance_clip_running(m->gltf) ? "*" : "");
+    const size_t o = (size_t) snprintf(out, n, "body=%s mdl=%d asset=%s clip=%s%s", body, m->class_mdl, m->asset[0] ? m->asset : "-",
+                                       m->clip[0] ? m->clip : "-", m->gltf && gltf_instance_clip_running(m->gltf) ? "*" : "");
+    // the Vehicle lean (holder rotation x / z, YXZ or the default order)
+    if (o < n && (m->holder.rotation.x != 0.0f || m->holder.rotation.z != 0.0f))
+        snprintf(out + o, n - o, " lean=%.4f,%.4f%s", m->holder.rotation.x, m->holder.rotation.z, m->holder.rotation_order == ROTATION_ORDER_YXZ ? ",YXZ" : "");
 }
 
 int player_class_model_set_asset(Player *player, const char *asset_txt) {

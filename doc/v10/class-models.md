@@ -46,8 +46,10 @@ sides) and the KrunkScript player object (`shared/src/ks_game/ks_hostobj.c`, `cl
 - players.update (:191184-191187): an interpolated player or our own plays `crouchVal ? "Crouch" : moved > 0.1 ?
   "Move" : "Idle"` (playClip with no reps: the looping main clip, which waits while a one-shot runs). `moved` is the
   frame's own move (oldX..z to x..z).
-- Vehicle.mov (:19145-19152): the model leans by `angVel * vhtL`, about x (Euler YXZ) when `mdlDr % 180 != 0`, else
-  about z (Euler ZYX; KN: XYZ with z times cos(mdlDr), the same rotation for a yaw of 0 or 180).
+- Vehicle.mov (:19145-19152): `if (meshRef)` (a Model, OBJ or GLTF; a sprite has none) the model leans by `angVel *
+  vhtL`, angVel as that mov found it before its decay, about x (Euler YXZ) when `mdlDr % 180 != 0`, else about z
+  (Euler ZYX; KN: XYZ with z times cos(mdlDr), the same rotation for a yaw of 0 or 180). Only the side running mov
+  leans a model: a client its own player, replays included (`Player.scheme.lean_ang_vel`, doc/v10/movement-schemes.md).
 - players.shoot (:196426-196427): with `mdl` 2 our own shot has no view recoil, recoil tween or cancelInspect (and v10
   draws no muzzle flash, having no weapon mesh).
 

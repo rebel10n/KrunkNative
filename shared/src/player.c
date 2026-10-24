@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <defuse.h> // v10.0.3 Defuse: the sites / bomb holds of player.update
 #include <prop_hunt.h> // Prop Hunt: the disguise a spawn resets / gives
 #include <player_anim.h> // v10 PLAYER_ANIM: the Jump / Melee clips of an animated class model
 #include <net_ext.h>     // NET_PLAYER_CLIP_*
@@ -1274,6 +1275,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
     }
 
     world_player_colls_end(player);  // WP-B: onExitObject for the objects left this tick
+    defuse_player_collide(player, input, delta, recon); // v10.0.3 Defuse: plant on a site / defuse at the bomb (defuse.c)
     airdrop_player_collide(player, input, delta); // WP-H: the airdrop claim hold (player.js:1718)
     world_player_pvp_zones(player);  // WP-B: noPVP / forcePVP (COLLISION_TYPE_NONE volumes)
 }
@@ -1904,12 +1906,14 @@ static void scheme_srm_mov(Player *player, const Input *raw_input, const int v10
 
 // ---- Vehicle.mov (deob-10.0.3.js:19142-19167): forwardV - reverseV pushes along the heading (accel
 // * 120 per unit), x / z drift with vhdr per 60 fps frame (the exact integral, x speedX / speedZ),
-// and angVel turns the heading with vhaDr. The asset model's roll (meshRef, angVel * vhtL) is the
-// client's (a class "Model" asset; KrunkNative does not draw class assets yet).
+// and angVel turns the heading with vhaDr. Its first step leans the class model by the angVel it finds
+// (`if (meshRef) meshRef.rotation.x / z = angVel * vhtL`, :19145-19152): lean_ang_vel keeps it for the client's
+// model (client/src/player_class_model.c), which draws it from there.
 static void scheme_vehicle_mov(Player *player, const float accel, const double dt_ms) {
     const ClassOverrides *vh = class_overrides(movement_class(player));
     const ClassMovement *knobs = movement_knobs(player);
     MovementSchemeState *s = &player->scheme;
+    s->lean_ang_vel = s->ang_vel; // before this mov's decay (:19148 / :19151 read angVel first)
     const double frames = dt_ms / (1000.0 / 60.0);
     const double drag = movement_js(vh->vehicle_drag), angular_drag = movement_js(vh->vehicle_angular_drag);
     const double push = (double) accel * 120.0 * ((double) s->forward_v - s->reverse_v);
@@ -4261,8 +4265,14 @@ void player_shoot(Player *player) {
 
     // TODO: gamepad rumble?
 
+    // v10.0.3 shoot: our own class model plays "Shoot" (`if (isYou) playClip(player, "Shoot", 1)`, deob-10.0.3.js:196417-196418)
+    if (player->is_you) player_play_clip(player, NET_PLAYER_CLIP_SHOOT);
 #ifdef KRUNKNATIVE_CLIENT
-    if (!game->server) { // the view's lean: not on a server's player (the in-process sandbox server)
+    // the view's lean: not on a server's player (the in-process sandbox server), nor for a class with a Model (mdl 2:
+    // `renderYou && config.mdl !== 2`, deob-10.0.3.js:196426-196427, no recoil, recoil tween or cancelInspect)
+    const ClassConfig *shot_class = game->classes && player->class_index >= 0 && (size_t) player->class_index < game->class_count
+                                        ? &game->classes[player->class_index] : NULL;
+    if (!game->server && class_overrides(shot_class)->model != 2) {
         const float rand_recoil = ((float) pcg32_random() / (float) UINT32_MAX - 0.5f) * 2.0f * (float) M_PI;
 
         player->recoil.x += weapon->recoil_r * sinf(rand_recoil);

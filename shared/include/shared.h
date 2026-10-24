@@ -1215,6 +1215,10 @@ typedef struct {
     float overlay[4];
     // Vehicle (6) sendVals: forwardV (throttle), reverseV (reverse), angVel (steering, rad per frame)
     float forward_v, reverse_v, ang_vel;
+    // Vehicle.mov's first step (deob-10.0.3.js:19145-19152): angVel as mov found it, before its decay, which leans the
+    // class model (meshRef.rotation = angVel * vhtL; client/src/player_class_model.c). Not a sendVal: only the side that
+    // ran mov for the player has it (a client: its own player, reconciliation replays included)
+    float lean_ang_vel;
 } MovementSchemeState;
 
 typedef struct Player_t {

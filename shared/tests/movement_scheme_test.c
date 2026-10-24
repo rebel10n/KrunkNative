@@ -258,6 +258,10 @@ static void test_vehicle(void) {
     ticks(p, 30, K_WD, 0.0f, 0.0f);
     CHECK(p->scheme.ang_vel < 0.0f && p->direction.y < -0.1f && p->position.x > x0, "W+D steers right: angVel < 0, yaw down, drifts +x (angVel %.4f, yaw %.3f)",
           p->scheme.ang_vel, p->direction.y);
+    // Vehicle.mov's lean (deob-10.0.3.js:19145-19152) reads angVel before mov decays it: the decayed angVel is
+    // lean_ang_vel * vhaDr^frames (0.94 per 60 fps frame, 17 ms = 1.02 frames)
+    CHECK(p->scheme.lean_ang_vel < 0.0f && fabsf(p->scheme.ang_vel - p->scheme.lean_ang_vel * powf(0.94f, 1.02f)) < 1e-5f,
+          "the model's lean takes angVel before mov's decay (%.5f, then %.5f)", p->scheme.lean_ang_vel, p->scheme.ang_vel);
 
     Player *r = add_player(&game, 2, 300.0f, 0.0f, -300.0f);
     ticks(r, 60, K_S, 0.0f, 0.0f);
