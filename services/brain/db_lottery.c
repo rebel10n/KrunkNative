@@ -4,12 +4,16 @@
  *
  * A lottery is a sequence of draw windows. Window k ends at k * frequency_h hours + offset_s (UTC),
  * so the open window is the first one that ends after now. A bundle of a cost (cost_quantity of
- * it: skins, KR, Junk hundredths or RP) gives num_entries entries in the open window; the window's
- * draw row is created by its first entry. Once a window's end has passed, the settlement claims the
- * draw (drawn_s, once) and each pool of the lottery pays its winners: one prize per winner, the
- * winning entry drawn at random (so an account with more entries can win more, and can win twice),
- * the prize skin drawn at random from the pool. Prizes are skin grants (db_add_skin, source
- * 'lottery'); the draw, its prizes and the grants are one transaction.
+ * it: skins, KR, Junk hundredths or RP) gives num_entries entries in the open window. The window's
+ * draw row is created by the first view or entry of the window (draw_open), and with it the draw's
+ * prize list: one lottery_prizes row per winner of each pool, a skin of the pool drawn at random,
+ * winner_id NULL until the draw. v10.0.3 shows that list before the draw (current_draw.prizes,
+ * sorted by prize_pool_id: the first is the Grand Prize, the rest the Additional prizes;
+ * deob-10.0.3.js:142922-142960). Once a window's end has passed, the settlement claims the draw
+ * (drawn_s, once) and gives each listed prize to a winning entry drawn at random (so an account with
+ * more entries can win more, and can win twice); a draw nobody entered drops its unwon prizes. A
+ * draw opened before the prize list existed rolls its prizes at the draw, as before. Prizes are skin
+ * grants (db_add_skin, source 'lottery'); the draw, its prizes and the grants are one transaction.
  *
  * Payments: KR through db_add_funds, Junk through junk_spend (reason 'lottery', doc/v10/junk.md),
  * RP through the ranked_points ledger, skins through db_add_skin (-n). A refused payment refuses the
@@ -108,7 +112,49 @@ static int64_t draw_of(Dbx *x, const int64_t lottery, const int64_t ends) {
                    KN_DB_ARGS(I64S(lottery), I64S(ends)), 0);
 }
 
+/* The window's draw row and its prize list (one row per winner of each pool, a skin of the pool at random, no winner
+ * yet). Under the lottery lock; returns the draw id, 0 with dbx_failed on failure. */
+static int64_t draw_open(Dbx *x, const int64_t id, const int64_t starts, const int64_t ends) {
+    const int64_t draw = dbx_insert_id(x, SQL(.pg = "INSERT INTO lottery_draws (lottery_id, starts_s, ends_s, total_entries)"
+                                                    " VALUES ($1, $2, $3, 0) RETURNING id",
+                                              .sqlite = "INSERT INTO lottery_draws (lottery_id, starts_s, ends_s, total_entries)"
+                                                        " VALUES ($1, $2, $3, 0) RETURNING id",
+                                              .mysql = "INSERT INTO lottery_draws (lottery_id, starts_s, ends_s, total_entries)"
+                                                       " VALUES ($1, $2, $3, 0)"),
+                                       KN_DB_ARGS(I64S(id), I64S(starts), I64S(ends)));
+    if (dbx_failed(x) || draw <= 0) return 0;
+    cJSON *pools = dbx_rows(x, SQL(.any = "SELECT pool_id AS pool__i, winners AS winners__i FROM lottery_pools"
+                                          " WHERE lottery_id = $1 ORDER BY pool_id"),
+                            KN_DB_ARGS(I64S(id)));
+    for (int pi = 0; !dbx_failed(x) && pools && pi < cJSON_GetArraySize(pools); pi++) {
+        const int64_t pool = jint(cJSON_GetArrayItem(pools, pi), "pool");
+        const int64_t winners = jint(cJSON_GetArrayItem(pools, pi), "winners");
+        cJSON *skins = dbx_rows(x, SQL(.any = "SELECT skin_id AS skin__i FROM lottery_pool_skins"
+                                              " WHERE lottery_id = $1 AND pool_id = $2 ORDER BY skin_id"),
+                                KN_DB_ARGS(I64S(id), I64S(pool)));
+        const int nskins = cJSON_GetArraySize(skins);
+        for (int64_t w = 0; nskins > 0 && w < winners && !dbx_failed(x); w++) {
+            char skin_text[24];
+            snprintf(skin_text, sizeof skin_text, "%lld",
+                     (long long) jint(cJSON_GetArrayItem(skins, (int) (kn_random_u64() % (uint64_t) nskins)), "skin"));
+            dbx_exec(x, SQL(.any = "INSERT INTO lottery_prizes (draw_id, pool_id, prize_type, prize_ref, prize_quantity)"
+                                   " VALUES ($1, $2, 'skin', $3, 1)"),
+                     KN_DB_ARGS(I64S(draw), I64S(pool), skin_text));
+        }
+        cJSON_Delete(skins);
+    }
+    cJSON_Delete(pools);
+    return dbx_failed(x) ? 0 : draw;
+}
+
 /* ------------------------------------------------------------------ view */
+
+/* the open draw's prize list as v10.0.3's current_draw.prizes: {id, prize_pool_id, prize_type, prize_ref, prize_quantity} */
+static cJSON *open_prizes_of(Dbx *x, const int64_t draw) {
+    return dbx_rows(x, SQL(.any = "SELECT id AS id__i, pool_id AS prize_pool_id__i, prize_type AS prize_type__t, prize_ref AS prize_ref__t,"
+                                  " prize_quantity AS prize_quantity__i FROM lottery_prizes WHERE draw_id = $1 ORDER BY pool_id, id"),
+                    KN_DB_ARGS(I64S(draw)));
+}
 
 /* the draw's prizes as v10's previous_draws[].prizes (a deleted winner's name reads as "") */
 static cJSON *prizes_of(Dbx *x, const int64_t draw) {
@@ -155,7 +201,15 @@ static kn_db_result *run_view(kn_dbconn *c, int n, const char *const *p) {
     int64_t player = 0, total = 0;
     if (L.active) {
         const int64_t end = window_end(now, L.freq_s, L.off_s);
-        const int64_t draw = draw_of(&x, id, end);
+        int64_t draw = draw_of(&x, id, end);
+        if (!draw && !dbx_failed(&x)) { /* the window's first view opens its draw and its prize list (under the lock) */
+            if (lottery_lock(&x, id) == 0) draw = draw_of(&x, id, end);
+            if (!draw && !dbx_failed(&x)) draw = draw_open(&x, id, end - L.freq_s, end);
+        }
+        if (dbx_failed(&x)) {
+            cJSON_Delete(o);
+            return dbx_finish(&x, NULL);
+        }
         if (draw) {
             total = dbx_int(&x, SQL(.any = "SELECT total_entries FROM lottery_draws WHERE id = $1"), KN_DB_ARGS(I64S(draw)), 0);
             player = dbx_int(&x, SQL(.any = "SELECT entries FROM lottery_entries WHERE draw_id = $1 AND account_id = $2"),
@@ -172,6 +226,8 @@ static kn_db_result *run_view(kn_dbconn *c, int n, const char *const *p) {
         cJSON_AddNullToObject(cur, "drawn_at");
         cJSON_AddNumberToObject(cur, "total_entries", (double) total);
         cJSON_AddNumberToObject(cur, "player_entries", (double) player);
+        cJSON *prizes = draw ? open_prizes_of(&x, draw) : NULL;
+        cJSON_AddItemToObject(cur, "prizes", prizes ? prizes : cJSON_CreateArray());
         cJSON_AddItemToObject(o, "current_draw", cur);
     }
     cJSON_AddNumberToObject(o, "player_entries", (double) player);
@@ -302,18 +358,12 @@ static kn_db_result *run_participate(kn_dbconn *c, int n, const char *const *p) 
         return dbx_finish(&x, NULL);
     }
 
-    // the open window's draw, created by its first entry (the lock above makes it one row)
+    // the open window's draw and its prize list, created by its first view or entry (the lock above makes it one row)
     const int64_t end = window_end(now, L.freq_s, L.off_s);
     int64_t draw = draw_of(&x, id, end);
     if (dbx_failed(&x)) return dbx_finish(&x, NULL);
     if (!draw) {
-        draw = dbx_insert_id(&x, SQL(.pg = "INSERT INTO lottery_draws (lottery_id, starts_s, ends_s, total_entries)"
-                                           " VALUES ($1, $2, $3, 0) RETURNING id",
-                                     .sqlite = "INSERT INTO lottery_draws (lottery_id, starts_s, ends_s, total_entries)"
-                                               " VALUES ($1, $2, $3, 0) RETURNING id",
-                                     .mysql = "INSERT INTO lottery_draws (lottery_id, starts_s, ends_s, total_entries)"
-                                              " VALUES ($1, $2, $3, 0)"),
-                             KN_DB_ARGS(I64S(id), I64S(end - L.freq_s), I64S(end)));
+        draw = draw_open(&x, id, end - L.freq_s, end);
         if (dbx_failed(&x) || draw <= 0) return dbx_finish(&x, NULL);
     }
 
@@ -371,8 +421,9 @@ static int64_t ticket_owner(const cJSON *entries, const uint64_t ticket) {
     return 0;
 }
 
-/* Draws one window: 1 when it paid, 0 when it was already drawn or had no entries, -1 on failure. */
-static int draw_one(Dbx *x, const int64_t draw, const int64_t id, const int64_t now) {
+/* Draws one window: 1 when it paid, 0 when it was already drawn or had no entries, -1 on failure. Each prize paid is
+ * appended to wins as {account, lottery, draw, type, ref, quantity} (the "raffle-win" push, lottery.c). */
+static int draw_one(Dbx *x, const int64_t draw, const int64_t id, const int64_t now, cJSON *wins) {
     if (lottery_lock(x, id) < 0) return -1;
     const int64_t claimed = dbx_exec(x, SQL(.any = "UPDATE lottery_draws SET drawn_s = {int:$2} WHERE id = $1 AND drawn_s IS NULL"),
                                      KN_DB_ARGS(I64S(draw), I64S(now)));
@@ -386,16 +437,58 @@ static int draw_one(Dbx *x, const int64_t draw, const int64_t id, const int64_t 
     }
     uint64_t total = 0;
     for (int i = 0; entries && i < cJSON_GetArraySize(entries); i++) total += (uint64_t) jint(cJSON_GetArrayItem(entries, i), "entries");
-    if (total == 0) {
+    if (total == 0) { /* nobody entered: nobody wins the listed prizes */
         cJSON_Delete(entries);
-        return 0;
+        return dbx_exec(x, SQL(.any = "DELETE FROM lottery_prizes WHERE draw_id = $1 AND winner_id IS NULL"), KN_DB_ARGS(I64S(draw))) < 0 ? -1 : 0;
     }
+    char ref[48];
+    snprintf(ref, sizeof ref, "lottery:%lld", (long long) draw);
+    /* the prize list rolled when the draw opened (draw_open): each prize goes to a winning entry */
+    cJSON *listed = dbx_rows(x, SQL(.any = "SELECT id AS id__i, prize_ref AS prize_ref__t FROM lottery_prizes WHERE draw_id = $1 AND winner_id IS NULL"
+                                           " ORDER BY pool_id, id"),
+                             KN_DB_ARGS(I64S(draw)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(listed);
+        cJSON_Delete(entries);
+        return -1;
+    }
+    if (cJSON_GetArraySize(listed) > 0) {
+        int awarded = 0;
+        for (int i = 0; i < cJSON_GetArraySize(listed) && !dbx_failed(x); i++) {
+            const cJSON *pz = cJSON_GetArrayItem(listed, i);
+            const int64_t winner = ticket_owner(entries, kn_random_u64() % total);
+            char *name = dbx_text(x, SQL(.any = "SELECT COALESCE(NULLIF(p.player_alias, ''), a.username) FROM accounts a"
+                                                " LEFT JOIN players p ON p.player_id = a.id WHERE a.id = $1"),
+                                  KN_DB_ARGS(I64S(winner)));
+            if (dbx_exec(x, SQL(.any = "UPDATE lottery_prizes SET winner_id = $2, won_by_name = $3 WHERE id = $1"),
+                         KN_DB_ARGS(I64S(jint(pz, "id")), I64S(winner), name ? name : "")) < 0 ||
+                db_add_skin(x, winner, pint(jtext(pz, "prize_ref")), 1, "lottery", ref, NULL) < 0) {
+                free(name);
+                cJSON_Delete(listed);
+                cJSON_Delete(entries);
+                return -1;
+            }
+            free(name);
+            cJSON *win = cJSON_CreateObject();
+            cJSON_AddNumberToObject(win, "account", (double) winner);
+            cJSON_AddNumberToObject(win, "lottery", (double) id);
+            cJSON_AddNumberToObject(win, "draw", (double) draw);
+            cJSON_AddStringToObject(win, "type", "skin");
+            cJSON_AddStringToObject(win, "ref", jtext(pz, "prize_ref"));
+            cJSON_AddNumberToObject(win, "quantity", 1);
+            cJSON_AddItemToArray(wins, win);
+            awarded++;
+        }
+        cJSON_Delete(listed);
+        cJSON_Delete(entries);
+        return dbx_failed(x) ? -1 : awarded > 0 ? 1 : 0;
+    }
+    cJSON_Delete(listed);
+    /* a draw opened before the prize list existed: its prizes are rolled now */
     cJSON *pools = dbx_rows(x, SQL(.any = "SELECT pool_id AS pool__i, winners AS winners__i FROM lottery_pools"
                                           " WHERE lottery_id = $1 ORDER BY pool_id"),
                             KN_DB_ARGS(I64S(id)));
     int paid = 0;
-    char ref[48];
-    snprintf(ref, sizeof ref, "lottery:%lld", (long long) draw);
     for (int pi = 0; !dbx_failed(x) && pools && pi < cJSON_GetArraySize(pools); pi++) {
         const int64_t pool = jint(cJSON_GetArrayItem(pools, pi), "pool");
         const int64_t winners = jint(cJSON_GetArrayItem(pools, pi), "winners");
@@ -425,6 +518,14 @@ static int draw_one(Dbx *x, const int64_t draw, const int64_t id, const int64_t 
                 cJSON_Delete(entries);
                 return -1;
             }
+            cJSON *win = cJSON_CreateObject();
+            cJSON_AddNumberToObject(win, "account", (double) winner);
+            cJSON_AddNumberToObject(win, "lottery", (double) id);
+            cJSON_AddNumberToObject(win, "draw", (double) draw);
+            cJSON_AddStringToObject(win, "type", "skin");
+            cJSON_AddStringToObject(win, "ref", skin_text);
+            cJSON_AddNumberToObject(win, "quantity", 1);
+            cJSON_AddItemToArray(wins, win);
             paid++;
         }
         cJSON_Delete(skins);
@@ -434,7 +535,8 @@ static int draw_one(Dbx *x, const int64_t draw, const int64_t id, const int64_t 
     return dbx_failed(x) ? -1 : paid > 0 ? 1 : 0;
 }
 
-/* $0 now (epoch seconds) -> {drawn}: settles every window that has ended and has entries */
+/* $0 now (epoch seconds) -> {drawn, wins}: settles every window that has ended and has entries; wins = every prize
+ * paid, in draw order (draw_one) */
 static kn_db_result *run_settle(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t now = PI(0);
@@ -446,16 +548,21 @@ static kn_db_result *run_settle(kn_dbconn *c, int n, const char *const *p) {
         return dbx_finish(&x, NULL);
     }
     int64_t drawn = 0;
+    cJSON *wins = cJSON_CreateArray();
     for (int i = 0; due && i < cJSON_GetArraySize(due); i++) {
         const cJSON *row = cJSON_GetArrayItem(due, i);
-        const int r = draw_one(&x, jint(row, "id"), jint(row, "lottery"), now);
+        const int r = draw_one(&x, jint(row, "id"), jint(row, "lottery"), now, wins);
         if (r < 0) break;
         drawn += r;
     }
     cJSON_Delete(due);
-    if (dbx_failed(&x)) return dbx_finish(&x, NULL);
+    if (dbx_failed(&x)) {
+        cJSON_Delete(wins);
+        return dbx_finish(&x, NULL);
+    }
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "drawn", (double) drawn);
+    cJSON_AddItemToObject(o, "wins", wins);
     return dbx_json(&x, "lottery_settle", o);
 }
 const kn_proc P_LOTTERY_SETTLE = {"lottery_settle", NULL, run_settle};

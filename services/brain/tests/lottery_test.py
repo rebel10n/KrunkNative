@@ -221,6 +221,23 @@ async def scenario(port):
         cur = body.get("data", {}).get("current_draw", {}) if isinstance(body, dict) else {}
         check(status == 200 and body["data"].get("event_ended") is False and cur.get("ends_at", "").endswith("Z")
               and cur.get("player_entries") == 0, "an open event shows its window (ends_at, no entries yet): %s" % cur)
+        # the window's prize list, before anyone entered: current_draw.prizes, one per winner of each pool, sorted by
+        # prize_pool_id (v10.0.3: the first is the Grand Prize, the rest the Additional prizes, deob-10.0.3.js:142922-142960)
+        listed = cur.get("prizes") or []
+        want_n = sum(int(w) for w in query("SELECT winners FROM lottery_pools WHERE lottery_id = %d" % LOTTERY))
+        pool_skins = {}
+        for pool in query("SELECT DISTINCT pool_id FROM lottery_pool_skins WHERE lottery_id = %d" % LOTTERY):
+            pool_skins[int(pool)] = {str(s) for s in query("SELECT skin_id FROM lottery_pool_skins WHERE lottery_id = %d AND pool_id = %s"
+                                                            % (LOTTERY, pool))}
+        check(len(listed) == want_n and want_n > 0
+              and [p.get("prize_pool_id") for p in listed] == sorted(p.get("prize_pool_id") for p in listed)
+              and all(p.get("prize_type") == "skin" and isinstance(p.get("prize_ref"), str) and p.get("prize_quantity") == 1
+                      and p["prize_ref"] in pool_skins.get(p.get("prize_pool_id"), set()) for p in listed),
+              "the open draw lists its %d prizes {prize_pool_id, prize_type skin, prize_ref (a skin of the pool), prize_quantity 1}: %s"
+              % (want_n, listed[:3]))
+        status, body = http(port, "GET", base)
+        again = (body.get("data", {}).get("current_draw", {}) if isinstance(body, dict) else {}).get("prizes") or []
+        check(again == listed, "the prize list is the window's: a second view reads the same prizes")
 
         status, body = http(port, "POST", base + "/participate", {"cost_type": "skin", "cost_ref": "7782", "cost_quantity": 0}, a_tok)
         check(status == 400 and err_of(body) == "Please select at least one item to participate", "zero bundles are refused: %s" % body)
@@ -282,7 +299,7 @@ async def scenario(port):
         query("UPDATE lottery_draws SET starts_s = starts_s - 200000, ends_s = ends_s - 200000"
               " WHERE lottery_id = %d AND drawn_s IS NULL" % LOTTERY)
         deadline = time.time() + 30
-        while time.time() < deadline and one("SELECT COUNT(*) FROM lottery_prizes", 0) < 10:
+        while time.time() < deadline and one("SELECT COUNT(*) FROM lottery_prizes WHERE winner_id IS NOT NULL", 0) < 10:
             time.sleep(0.5)
         prizes_n = one("SELECT COUNT(*) FROM lottery_prizes", 0)
         check(prizes_n == 10, "the draw pays the seeded winners (1 + 9 = 10 prizes): %d" % prizes_n)
@@ -295,14 +312,31 @@ async def scenario(port):
             pools[int(pool)] = {int(s) for s in query("SELECT skin_id FROM lottery_pool_skins WHERE lottery_id = %d AND pool_id = %s"
                                                        % (LOTTERY, pool))}
         prizes = drawn[0].get("prizes", []) if drawn else []
+        check(sorted((p.get("prize_pool_id"), str(p.get("prize_ref"))) for p in prizes)
+              == sorted((p.get("prize_pool_id"), p.get("prize_ref")) for p in listed),
+              "the draw paid the prizes it listed before the draw")
         check(all(p.get("prize_type") == "skin" and int(p.get("prize_ref")) in pools.get(p.get("prize_pool_id"), set()) for p in prizes),
               "every prize is a skin of its own pool")
         check(all(p.get("won_by_name") in (alice, bob) for p in prizes), "every winner is an account with entries")
         check(one("SELECT COUNT(*) FROM skin_transactions WHERE source = 'lottery' AND delta = 1") == 10,
               "each prize is granted once as a skin (10 grant rows, source 'lottery')")
         await asyncio.sleep(3)
-        check(one("SELECT COUNT(*) FROM lottery_prizes", 0) == 10 and one("SELECT COUNT(*) FROM lottery_draws WHERE drawn_s IS NOT NULL") == 1,
-              "a later pass draws nothing again (still one draw, 10 prizes)")
+        check(one("SELECT COUNT(*) FROM lottery_prizes WHERE winner_id IS NOT NULL", 0) == 10
+              and one("SELECT COUNT(*) FROM lottery_draws WHERE drawn_s IS NOT NULL") == 1,
+              "a later pass draws nothing again (still one draw, 10 prizes won)")
+        # the next window was opened by the view above, with its own prize list; nobody enters it: its draw drops them
+        next_open = one("SELECT COUNT(*) FROM lottery_prizes p JOIN lottery_draws d ON d.id = p.draw_id"
+                        " WHERE d.lottery_id = %d AND d.drawn_s IS NULL" % LOTTERY, 0)
+        check(next_open == 10, "the next window lists its prizes as soon as it is viewed (%d)" % next_open)
+        query("UPDATE lottery_draws SET starts_s = starts_s - 200000, ends_s = ends_s - 100000"
+              " WHERE lottery_id = %d AND drawn_s IS NULL" % LOTTERY)
+        deadline = time.time() + 30
+        while time.time() < deadline and one("SELECT COUNT(*) FROM lottery_draws WHERE drawn_s IS NOT NULL", 0) < 2:
+            time.sleep(0.5)
+        check(one("SELECT COUNT(*) FROM lottery_draws WHERE drawn_s IS NOT NULL", 0) == 2
+              and one("SELECT COUNT(*) FROM lottery_prizes WHERE winner_id IS NULL", 0) == 0
+              and one("SELECT COUNT(*) FROM lottery_prizes", 0) == 10,
+              "a draw nobody entered is drawn and drops its unwon prizes (no winner, no grant)")
 
 
 def start_brain(env, log_path, extra):
