@@ -912,6 +912,7 @@ static const LabelClass k_label_class[] = {
     {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
     {"vr", RC_WRITE, ANS_REPLY}, /* v10 REDEEM_VOUCHER (redeem.c): a refusal is answered "vr" with the error */
     {"crft", RC_WRITE, ANS_REPLY}, /* v10 CRAFT_REQUEST (craft.c, the Junkyard): changes the inventory */
+    {"ip", RC_WRITE, ANS_REPLY},   /* the paint picker's item paint (economy.c sh_item_paint): answered "ipr" */
     {"raml", RC_WRITE, ANS_REPLY},
     {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
     {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */
@@ -1048,7 +1049,8 @@ static void answer(SocialSession *s, const cJSON *frame, RateKind kind, int64_t 
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "type", "error");
         cJSON_AddStringToObject(o, "code", refused ? "EB_RATE_LIMITED" : "EB_UNKNOWN_TYPE");
-        cJSON_AddStringToObject(o, "message", msg);
+        /* an unknown type: v10.0.3's own text for EB_UNKNOWN_TYPE (deob-10.0.3.js:229241, errors.eventBus.unknownType) */
+        cJSON_AddStringToObject(o, "message", refused ? msg : "Chat client is out of date. Please refresh.");
         if (refused) cJSON_AddNumberToObject(o, "retry_ms", (double) retry_ms);
         cJSON_AddStringToObject(o, "of", kn_json_str(fa(frame, 1), "type", "")); /* the client fails its oldest message only for msg:send */
         social_send_n(s, "eb", 1, o);

@@ -356,12 +356,12 @@ def run_checks(port, db_path, smtp):
           st == 401 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
     st, body = http(port, "POST", "/account/usernames/reserve", {"username": fresh_user("x")}, token=token_a)
-    check("POST /account/usernames/reserve -> 403 REFUSAL (a paid purchase Box Office does not take) (v10.0.3 decoded 468, 5161; v10.js 26352, 113186)",
-          is_refusal(st, body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("POST /account/usernames/reserve -> 403 ERROR text (a paid purchase Box Office does not take; the consumer prints res.error as is, deob-10.0.3.js:129370-129372, 129635)",
+          st == 403 and is_text_error(body) and "usernames" in body["error"], "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
     st, body = http(port, "POST", "/account/usernames/swap", {"username": fresh_user("y")}, token=token_a)
-    check("POST /account/usernames/swap to a name not owned -> 403 REFUSAL (v10.0.3 decoded 4805, 5161; v10.js 26360, 113199)",
-          is_refusal(st, body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("POST /account/usernames/swap to a name not owned -> 403 ERROR text (the consumer prints res.error as is, deob-10.0.3.js:129388-129389)",
+          st == 403 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
     st, body = http(port, "POST", "/account/usernames/swap", {"username": A}, token=token_a)
     data = body.get("data") if isinstance(body, dict) else None

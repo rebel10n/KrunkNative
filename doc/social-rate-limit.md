@@ -23,7 +23,7 @@ Limits (per connection, per class):
 | --- | --- | --- | --- |
 | `auth` | 0.5 | 10 | `a` (login, register, logout), `2fa`, `a2FA`, `a2FAc`, `d2FA`, `d2FAc`, `cemail`, `emailv`, `emailS`, `rpr`, `rpc`, `rps`, `upp`, `las` |
 | `read` | 50 | 200 | gapi GET (any path), `eb` `friends:list` and `msg:history`, and the socket reads `r`, `sp`, `gfs`, `gfg`, `pst`, `guf`, `grp`, `gps`, `chtb`, `ctd`, `getS`, `ttl`, `dsp`, `krh`, `spinH`, `sst`, `chg`, `mdl`, `bpdl`, `ri`, `ecfg`, `st`, `kml`, `fil`, `uml`, `wo`, `recps` (the Junkyard's recipes) |
-| `write` | 20 | 100 | gapi POST, PUT, DELETE, `eb` `msg:send`, `msg:read` and `game:invite`, and the socket writes `f`, `ps`, `com`, `lps`, `dps`, `ict`, `kr`, `cln`, `clnR`, `clnRA`, `rpt`, `flg`, `ver`, `crt`, `sbdg`, `nme`, `uploadS`, `uploadM`, `uploadMo`, `uploadA`, `edMp`, `ulb`, `fvM`, `ftC`, `delC`, `li`, `uli`, `pi`, `qsi`, `ctr`, `trA`, `trC`, `trCA`, `srt`, `pbm`, `spin`, `fkr`, `clm`, `bdg`, `cbdg`, `bpclm`, `bpclmAll`, `xstbp`, `xstbpl`, `dsl`, `rml`, `raml`, `rqdxp` (the v10 2x XP claim), `wob`, `wor` (the wild offer purchase and refresh), `vr` (the voucher redeem), `crft` (the Junkyard craft); a route the table does not name is a write |
+| `write` | 20 | 100 | gapi POST, PUT, DELETE, `eb` `msg:send`, `msg:read` and `game:invite`, and the socket writes `f`, `ps`, `com`, `lps`, `dps`, `ict`, `kr`, `cln`, `clnR`, `clnRA`, `rpt`, `flg`, `ver`, `crt`, `sbdg`, `nme`, `uploadS`, `uploadM`, `uploadMo`, `uploadA`, `edMp`, `ulb`, `fvM`, `ftC`, `delC`, `li`, `uli`, `pi`, `qsi`, `ctr`, `trA`, `trC`, `trCA`, `srt`, `pbm`, `spin`, `fkr`, `clm`, `bdg`, `cbdg`, `bpclm`, `bpclmAll`, `xstbp`, `xstbpl`, `dsl`, `rml`, `raml`, `rqdxp` (the v10 2x XP claim), `wob`, `wor` (the wild offer purchase and refresh), `vr` (the voucher redeem), `crft` (the Junkyard craft), `ip` (the paint picker's item paint); a route the table does not name is a write |
 | `live` | 2 | 20 | `eb` `presence:ping` |
 | `notice` | 5 | 20 | `sfkr`, `lfkr`, `fkrf`, `unbx`, `vcln`; any label that is no route; an `eb` type the table does not name; a frame without a label |
 
@@ -39,7 +39,7 @@ No inbound frame is dropped without an answer. Which answer a frame gets:
 | --- | --- | --- |
 | gapi request `["gapi", rid, method, path, body]` | its handler's `["gapi", rid, status, ...]` answer (404 `NOT_FOUND` for an unknown path) | `["gapi", rid, 429, {"error": {"code": "RATE_LIMITED", "message": "Rate limited, retry in N ms.", "retry_ms": N}}]`, at once or in order |
 | eb request `["eb", {type, ...}]` with a known type | its handler's answer; `presence:ping` gets `presence:pong` | `["eb", {"type": "error", "code": "EB_RATE_LIMITED", "message": "Rate limited, retry in N ms.", "retry_ms": N, "of": "<type>"}]`, at once or in order; `msg:read` gets the window notice instead |
-| eb request with an unknown type | `["eb", {"type": "error", "code": "EB_UNKNOWN_TYPE", "message": "Unknown event-bus type.", "of": "<type>"}]` | the window notice (eb error, `EB_RATE_LIMITED`, `of` the type) |
+| eb request with an unknown type | `["eb", {"type": "error", "code": "EB_UNKNOWN_TYPE", "message": "Chat client is out of date. Please refresh.", "of": "<type>"}]` (v10.0.3's text for the code) | the window notice (eb error, `EB_RATE_LIMITED`, `of` the type) |
 | `a` (auth request) | the auth answer | `["a", "Rate limited, retry in N ms.", null, null, null, null]`, the auth error shape |
 | other socket request with a known label | its handler's answer (`["po", null, msg]` on an error) | `["po", null, "Rate limited, retry in N ms."]`, the page's error popup |
 | label that is no route | `["po", null, "Unknown request."]` | the window notice: `["po", null, "Rate limited, retry in N ms."]` |
@@ -122,7 +122,13 @@ its usual error.
 
 ## Client
 
-* `client/src/ui/v10_gapi.c`: a 429 is an ordinary gapi error; its message is shown. No retry.
+* `client/src/ui/v10_gapi.c`: a gapi 429 is answered as v10.0.3's gapi wrapper answers any 429,
+  whatever its body: no data and the error string "Rate limit exceeded. Try again later."
+  (deob-10.0.3.js:30051-30057), so the brain's `RATE_LIMITED` message and `retry_ms` are not shown. No
+  retry: 10.0.3's fetch retries only 408, 500, 502, 503, 504, 522 and 524, three times from 300 ms,
+  doubling (deob-10.0.3.js:30003-30016). That retry is not ported to the socket (deliberate): a 5xx on
+  the tunnel is the brain's definitive answer (a database failure, no logo source), not a proxy's
+  transient one, so resending it would only repeat the work.
 * `client/src/ui/v10_social.c`: `EB_RATE_LIMITED` with `of` = `msg:send` fails the oldest pending
   message, as before. With another `of`, it clears the loading flag of that list (`friends:list`
   or `msg:history`) and shows the message, so nothing waits forever. Neither retries by itself.

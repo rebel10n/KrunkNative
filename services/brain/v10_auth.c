@@ -932,7 +932,8 @@ static void swap_who(kn_http_req *req, int64_t id, const char *username, void *u
     if (id <= 0) {
         need_sign_in(req);
     } else if (!s->wanted[0] || strcasecmp(s->wanted, username)) {
-        refuse(req, WHY_SALE);
+        /* a text error: the consumer prints res.error as is (deob-10.0.3.js:129388-129389) */
+        auth_fail(req, 403, WHY_SALE);
     } else {
         cJSON *d = names_data(username);
         cJSON_AddStringToObject(d, "active", username);
@@ -956,9 +957,13 @@ static void h_swap(kn_http_req *req, void *ud) {
     with_who(req, swap_who, s);
 }
 
+/* Refused by design (Box Office sells no usernames), with a text error, not {code, message}: v10.0.3's
+ * reserve handler puts res.error into the status line as it is (deob-10.0.3.js:129370-129372, shown at
+ * 129635 through the text setter at 12049, which renders an object as "[object Object]"). The buy section
+ * that calls it is not gated (deob-10.0.3.js:129578-129612), so the refusal is reachable. */
 static void h_reserve(kn_http_req *req, void *ud) {
     (void) ud;
-    refuse(req, WHY_SALE);
+    auth_fail(req, 403, WHY_SALE);
 }
 
 /* ---------------------------------------------------------------- mail preference and Discord */

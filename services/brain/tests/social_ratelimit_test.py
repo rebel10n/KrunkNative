@@ -210,7 +210,8 @@ async def scenario(port):
     got = [f for f in await m.collect(0.8) if f[0] != "pi" and f[0] != "io-init"]
     malformed = [f for f in got if f[0] == "po" and f[2] == "Malformed request."]
     check(len(malformed) == 4, "four frames without a label: each answered \"Malformed request.\"", got[:6])
-    eb_unknown = [f for f in got if f[0] == "eb" and f[1].get("code") == "EB_UNKNOWN_TYPE"]
+    eb_unknown = [f for f in got if f[0] == "eb" and f[1].get("code") == "EB_UNKNOWN_TYPE"
+                  and f[1].get("message") == "Chat client is out of date. Please refresh."]  # v10.0.3's text (deob-10.0.3.js:229241)
     check(len(eb_unknown) == 1 and eb_unknown[0][1]["of"] == "no:such:type",
           "an unknown eb type: EB_UNKNOWN_TYPE of that type", got[-2:])
     await m.close()
