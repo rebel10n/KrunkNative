@@ -24,12 +24,15 @@
  *     no LIVE badge (KN addition: v10 lists creator events only).
  * No feed and no featured creation answers empty lists (the popup's "No upcoming events").
  *
- * The same file's "gameEvents" are the game's live events (Krunker v10.0.3 game.ongoingEvents, which the
- * official host sets from its events API; doc/v10/kill-pools.md): {id, name, startsAt, endsAt, killPools
- * [{weight, contents [{content_type, content_ref}]}], killPoolsWeight, killPoolsMode, killPoolsIcon}. The
- * ones running now (startsAt <= now < endsAt, no endsAt: open-ended) go to the game servers in the
- * internal WS "welcome" and in a "game-events" push whenever the set changes (internal_ws.c), and their
- * kill pools pay items at the end of public matches (shared/src/kill_pools.c).
+ * The same file's "gameEvents" are the game's live events: Krunker v10.0.3's config.events (doc/v10/events.md:
+ * id, name, startsAt / endsAt for start / end, reveal, imgExt, longDesc, noChallenges, rewards {skins, weights},
+ * rewardChance, eligibleMaps, limitedTimeMode, plus KrunkNative's eventObjects) and game.ongoingEvents (which the
+ * official host sets from its events API; doc/v10/kill-pools.md: killPools [{weight, contents [{content_type,
+ * content_ref}]}], killPoolsWeight, killPoolsMode, killPoolsIcon). The ones running now (startsAt <= now < endsAt,
+ * no endsAt: open-ended) go to the game servers in the internal WS "welcome" and in a "game-events" push whenever
+ * the set changes (internal_ws.c): the round's eventIndex, its limited-time vote, its reward skins, the kill pools
+ * (shared/src/live_events.c, kill_pools.c). GET /data/events serves the clients the same events without the kill
+ * pools, plus the ones that reveal early (the event popup, the Event Challenges cards).
  */
 #include <ctype.h>
 #include <stdio.h>
@@ -403,8 +406,91 @@ static void h_events(kn_http_req *req, void *ud) {
                     KN_DB_ARGS(limit), featured_done, r);
 }
 
-/* The feed's game events running at `now_ms` (unix ms), in v10's fields, soonest start first: a new array. */
-cJSON *community_game_events(const int64_t now_ms) {
+/* A JS-truthy flag of the feed as a JSON bool (absent: left out) */
+static void copy_flag(cJSON *dst, const cJSON *src, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(src, key);
+    if (cJSON_IsBool(v)) cJSON_AddBoolToObject(dst, key, cJSON_IsTrue(v));
+    else if (cJSON_IsNumber(v)) cJSON_AddBoolToObject(dst, key, v->valuedouble != 0.0);
+}
+
+/* The integers of a feed array (skin indexes, map indexes): the others are left out */
+static cJSON *int_list(const cJSON *src, const int max) {
+    cJSON *a = cJSON_CreateArray();
+    const cJSON *v;
+    cJSON_ArrayForEach(v, (cJSON_IsArray(src) ? src : NULL)) {
+        if (cJSON_GetArraySize(a) >= max) break;
+        if (cJSON_IsNumber(v) && v->valuedouble >= 0.0 && v->valuedouble == (double) (int64_t) v->valuedouble)
+            cJSON_AddItemToArray(a, cJSON_CreateNumber(v->valuedouble));
+    }
+    return a;
+}
+
+/* One feed game event in Krunker v10.0.3's config.events fields (shared/include/live_events.h, doc/v10/events.md):
+ * id, name, startsAt / endsAt (config.events start / end), reveal (ms), imgExt, longDesc, noChallenges, rewards
+ * {skins, weights}, rewardChance, eligibleMaps, limitedTimeMode, and KrunkNative's eventObjects (the EVENT prefab
+ * shows in its rounds). For the game servers also its kill pools (ongoingEvents). Text stays text: longDesc is a
+ * string or a list of strings (the popup escapes it; v10 writes it as markup), imgExt a bare extension. */
+static cJSON *game_event_out(const cJSON *e, const int64_t start, const int64_t end, const int servers) {
+    cJSON *o = cJSON_CreateObject();
+    copy_num(o, e, "id");
+    copy_str(o, e, "name");
+    char iso[40];
+    format_iso(start, iso, sizeof iso);
+    cJSON_AddStringToObject(o, "startsAt", iso);
+    if (end >= 0) {
+        format_iso(end, iso, sizeof iso);
+        cJSON_AddStringToObject(o, "endsAt", iso);
+    }
+    const cJSON *reveal = cJSON_GetObjectItem(e, "reveal");
+    if (cJSON_IsNumber(reveal) && reveal->valuedouble > 0.0) cJSON_AddNumberToObject(o, "reveal", reveal->valuedouble);
+    const char *ext = cJSON_GetStringValue(cJSON_GetObjectItem(e, "imgExt"));
+    int ext_ok = ext && ext[0] && strlen(ext) <= 5;
+    for (const char *p = ext; ext_ok && *p; p++) ext_ok = isalnum((unsigned char) *p) != 0;
+    if (ext_ok) cJSON_AddStringToObject(o, "imgExt", ext);
+    const cJSON *desc = cJSON_GetObjectItem(e, "longDesc");
+    if (cJSON_IsString(desc)) cJSON_AddStringToObject(o, "longDesc", desc->valuestring);
+    else if (cJSON_IsArray(desc)) {
+        cJSON *lines = cJSON_AddArrayToObject(o, "longDesc");
+        const cJSON *l;
+        cJSON_ArrayForEach(l, desc) {
+            if (cJSON_IsString(l)) cJSON_AddItemToArray(lines, cJSON_CreateString(l->valuestring));
+        }
+    }
+    copy_flag(o, e, "noChallenges");
+    copy_flag(o, e, "limitedTimeMode");
+    copy_flag(o, e, "eventObjects");
+    const cJSON *rewards = cJSON_GetObjectItem(e, "rewards");
+    if (cJSON_IsObject(rewards)) {
+        cJSON *r = cJSON_AddObjectToObject(o, "rewards");
+        cJSON_AddItemToObject(r, "skins", int_list(cJSON_GetObjectItem(rewards, "skins"), 32));
+        const cJSON *weights = cJSON_GetObjectItem(rewards, "weights");
+        if (cJSON_IsArray(weights)) {
+            cJSON *w = cJSON_AddArrayToObject(r, "weights");
+            const cJSON *v;
+            cJSON_ArrayForEach(v, weights) {
+                if (cJSON_GetArraySize(w) < 7) cJSON_AddItemToArray(w, cJSON_CreateNumber(cJSON_IsNumber(v) && v->valuedouble > 0 ? v->valuedouble : 0));
+            }
+        }
+    }
+    const cJSON *chance = cJSON_GetObjectItem(e, "rewardChance");
+    if (cJSON_IsNumber(chance) && chance->valuedouble > 0.0) cJSON_AddNumberToObject(o, "rewardChance", chance->valuedouble);
+    const cJSON *maps = cJSON_GetObjectItem(e, "eligibleMaps");
+    if (cJSON_IsArray(maps)) cJSON_AddItemToObject(o, "eligibleMaps", int_list(maps, 32));
+    if (servers) {
+        copy_num(o, e, "killPoolsWeight");
+        copy_str(o, e, "killPoolsMode");
+        copy_str(o, e, "killPoolsIcon");
+        const cJSON *pools = cJSON_GetObjectItem(e, "killPools");
+        cJSON_AddItemToObject(o, "killPools", cJSON_IsArray(pools) ? cJSON_Duplicate(pools, 1) : cJSON_CreateArray());
+    }
+    return o;
+}
+
+/* The feed's game events at `now_ms` (unix ms), soonest start first: a new array. servers: the ones running now
+ * (startsAt <= now < endsAt; no endsAt: open-ended), with their kill pools; else (the clients' config.events, GET
+ * /data/events) also the ones not started yet that reveal early (startsAt - now <= reveal, UTILS.getActiveEvent,
+ * deob-10.0.3.js:28758-28775). */
+static cJSON *game_events_list(const int64_t now_ms, const int servers) {
     cJSON *out = cJSON_CreateArray();
     const int64_t now = now_ms / 1000;
     const cJSON *e;
@@ -413,18 +499,11 @@ cJSON *community_game_events(const int64_t now_ms) {
         const int64_t start = parse_iso(cJSON_GetStringValue(cJSON_GetObjectItem(e, "startsAt")));
         const char *ends = cJSON_GetStringValue(cJSON_GetObjectItem(e, "endsAt"));
         const int64_t end = ends && ends[0] ? parse_iso(ends) : -1;
-        if (start < 0 || start > now || (end >= 0 && end <= now)) continue;
-        cJSON *o = cJSON_CreateObject();
-        copy_num(o, e, "id");
-        copy_str(o, e, "name");
-        char iso[40];
-        format_iso(start, iso, sizeof iso);
-        cJSON_AddStringToObject(o, "startsAt", iso);
-        copy_num(o, e, "killPoolsWeight");
-        copy_str(o, e, "killPoolsMode");
-        copy_str(o, e, "killPoolsIcon");
-        const cJSON *pools = cJSON_GetObjectItem(e, "killPools");
-        cJSON_AddItemToObject(o, "killPools", cJSON_IsArray(pools) ? cJSON_Duplicate(pools, 1) : cJSON_CreateArray());
+        const cJSON *reveal = cJSON_GetObjectItem(e, "reveal");
+        const double reveal_ms = !servers && cJSON_IsNumber(reveal) && reveal->valuedouble > 0.0 ? reveal->valuedouble : 0.0;
+        if (start < 0 || (end >= 0 && end <= now)) continue;
+        if (start > now && !(reveal_ms > 0.0 && (double) (start - now) * 1000.0 <= reveal_ms)) continue;
+        cJSON *o = game_event_out(e, start, end, servers);
         /* soonest start first (getKillReward sorts by startsAt as well) */
         int at = 0;
         const cJSON *x;
@@ -437,6 +516,19 @@ cJSON *community_game_events(const int64_t now_ms) {
     return out;
 }
 
+cJSON *community_game_events(const int64_t now_ms) {
+    return game_events_list(now_ms, 1);
+}
+
+/* GET /data/events -> {"data":{"events":[...]}}: the clients' config.events (v10.0.3 bundles the list; KrunkNative's
+ * clients read it here): the popup, the Event Challenges cards, the EVENT prefab's eventObjects. */
+static void h_game_events(kn_http_req *req, void *ud) {
+    (void) ud;
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddItemToObject(data, "events", game_events_list(kn_wall_ms(), 0));
+    reply_data(req, data);
+}
+
 int community_init(Brain *b) {
     C.b = b;
     const char *feed = kn_config_str(b->cfg, "brain.community.feed", "config/community.json");
@@ -447,8 +539,9 @@ int community_init(Brain *b) {
     }
     kn_http_route(b->http, "GET", "/creators/events", h_events, NULL);
     kn_http_route(b->http, "GET", "/social/news", h_news, NULL);
+    kn_http_route(b->http, "GET", "/data/events", h_game_events, NULL);
     feed_reload();
-    KN_INFO(MOD, "community feed on /creators/events, /social/news (%s%s)", C.path[0] ? C.path : "no feed file",
+    KN_INFO(MOD, "community feed on /creators/events, /social/news, /data/events (%s%s)", C.path[0] ? C.path : "no feed file",
             C.feed ? "" : C.path[0] ? ": absent" : "");
     return 0;
 }

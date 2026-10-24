@@ -63,6 +63,9 @@ typedef struct {
 // A uniform double in [0, 1) (Math.random); NULL = pcg32
 typedef double (*KillPoolRandom)(void *user);
 
+// new Date(v).getTime() of a feed date: epoch ms, or an ISO 8601 UTC date ("2026-10-24T18:00:00Z", ".sss" and a
+// space for the T allowed); unreadable or absent: 0 (also live_events.c's start / end)
+double kill_pools_time(const cJSON *v);
 // The events of a JSON array in v10's field names (startsAt: an ISO date or epoch ms). Returns the count.
 int kill_pools_parse(KillPoolEvents *out, const cJSON *events);
 // ongoingEvents.some(e => e.killPools.length > 0): whether endGame draws at all

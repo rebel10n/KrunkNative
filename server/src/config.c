@@ -464,6 +464,7 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         if (gs_item(game, "maxPlayers") && !gs_item(s, "max_players")) cfg->max_players = cfg->game.max_players;
     }
     gs_read_bool(s, "custom_games", &cfg->custom_games);
+    gs_read_int(s, "force_event", &cfg->force_event, 0, 1000000); // v10 forceEvent (live_events_server.c)
     // WP-E server presets: host_type by index or name ("comp", "zombies", "raid", ...)
     const cJSON *host_type = gs_item(s, "host_type");
     if (cJSON_IsString(host_type) && host_type->valuestring[0] && !isdigit((unsigned char) host_type->valuestring[0])) {

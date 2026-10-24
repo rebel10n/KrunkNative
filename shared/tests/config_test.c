@@ -582,6 +582,45 @@ static void test_votes(void) {
         }
     }
 
+    // v10.0.3 live events (genMatchList's event bucket, deob-10.0.3.js:222421-222463): All or Nothing (event 4) and Mag
+    // Dump (event 5) are in Kanji's config.modes; during their event they are possible, and with limitedTimeMode the
+    // event's mode is the first pick (then FFA). Neither is in the server's rotation: the event brings it.
+    static const int k_event_modes[2][2] = {{4, MODE_ID_AON}, {5, MODE_ID_MD}};
+    for (int e = 0; e < 2; e++) {
+        for (int ltm = 1; ltm >= 0; ltm--) {
+            int first = 0, anywhere = 0;
+            for (int round = 0; round < 10; round++) {
+                game.event_index = k_event_modes[e][0];
+                game.event_ltm = (unsigned char) ltm;
+                g_sent_count = 0;
+                game.end_timer = 0.0f;
+                game_end_round(&game);
+                const NetMatchVoteStatePacket *ev = votes_to(NET_TARGET_ALL);
+                if (!ev || !ev->count) continue;
+                first += ev->entries[0].mode_id == k_event_modes[e][1] && ev->entries[0].map_index == 0 &&
+                         ev->count > 1 && ev->entries[1].mode_id == MODE_ID_FFA;
+                for (int i = 0; i < ev->count; i++) anywhere += ev->entries[i].mode_id == k_event_modes[e][1];
+            }
+            if (ltm) CHECK(first == 10, "event %d with limitedTimeMode: mode %d on Kanji first, then FFA (%d / 10)", k_event_modes[e][0], k_event_modes[e][1], first);
+            else CHECK(anywhere == 0, "event %d without limitedTimeMode: the event bucket is not picked (%d)", k_event_modes[e][0], anywhere);
+        }
+    }
+    game.event_index = 5; // another event's mode stays out (Mag Dump's event is 5, All or Nothing's 4)
+    game.event_ltm = 0;
+    int stray = 0;
+    for (int round = 0; round < 10; round++) {
+        g_sent_count = 0;
+        game.end_timer = 0.0f;
+        game_end_round(&game);
+        const NetMatchVoteStatePacket *ev = votes_to(NET_TARGET_ALL);
+        for (int i = 0; ev && i < ev->count; i++) stray += ev->entries[i].mode_id == MODE_ID_AON;
+    }
+    CHECK(!stray, "event 5: All or Nothing (event 4, preventCustomGames) is never possible (%d)", stray);
+    game.event_index = 0;
+    g_sent_count = 0;
+    game.end_timer = 0.0f;
+    game_end_round(&game); // the list the vote checks below use: no event
+
     // votes: toggle, change, tally (ties go to the first), spectators vote too
     const NetMatchVoteStatePacket *v = votes_to(NET_TARGET_ALL);
     NetMatchVoteStatePacket list_now = *v;

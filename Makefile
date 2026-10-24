@@ -390,6 +390,10 @@ guest-ledger-server-e2e: build ## A guest's round on server_bin credits its bala
 kill-pools-server-e2e: build ## v10.0.3 event kill pools on server_bin: the brain's event, one END item per kill for an account, the inventory grant, nothing for a guest (kn_brain on sqlite)
 	timeout 400 $(PYTHON) -I server/tests/kill_pools_server_e2e.py $(DEBUG_DIR)
 
+.PHONY: live-events-e2e
+live-events-e2e: build ## v10.0.3 live events on the client: eventPopup, Event Challenges, the EVENT prefab by forceEvent (server_bin / offline), headless
+	timeout 600 $(PYTHON) -I client/tests/live_events_e2e.py $(DEBUG_DIR)
+
 .PHONY: comp-webhook-e2e
 comp-webhook-e2e: build ## The comp host's webhook on server_bin: one match_end POST (map, teams, players) at a comp match's END, none for a custom game, never sent to clients (kn_brain on sqlite)
 	timeout 400 $(PYTHON) -I server/tests/comp_webhook_e2e.py $(DEBUG_DIR)

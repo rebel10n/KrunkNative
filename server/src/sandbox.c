@@ -217,6 +217,7 @@ int sandbox_start(const SandboxConfig *cfg) {
     g_gs_config.online_mode = 0;
     g_gs_config.earn_kr = 0;
     g_gs_config.enforce_skins = 0;
+    g_gs_config.force_event = cfg->force_event > 0 ? cfg->force_event : 0; // v10's sandbox inits with eventIndex 0 (:261891)
     if (cfg->tick_rate) g_gs_config.tick_rate = cfg->tick_rate;
 
     memset(&g_sandbox_server, 0, sizeof(g_sandbox_server));

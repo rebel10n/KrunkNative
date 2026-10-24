@@ -23,6 +23,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <hud_map.h> // specMiniMap
+#include <live_events_client.h> // "start" spectating hides the EVENT prefab's meshes (event_objects.c)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -145,6 +146,7 @@ void spectate_begin(Client *client) {
     hud_ui_hide_death(client); // toggleGameUI(true): the death card goes away
     hud_spectate_reset();
     client_force_player_positions(client); // resetGameSessionState: no STATE came while we were dead
+    client_event_objects_on_start(client, 1); // "start" spectating: toggleMeshGroup("event_0", false)
     KN_LOG_DEBUG1("[spectate] spectating\n");
 }
 

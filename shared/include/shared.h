@@ -674,6 +674,9 @@ void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scen
 // object->raw points into it), parsed exactly like map_init does with `map`'s ambient setting;
 // not added to the map (no side lists, no dimensions). NULL: not a kept object / out of memory.
 Object *map_object_from_json(const Map *map, const cJSON *raw_obj, int build_meshes);
+// An EVENT prefab object (PREFAB_R_NO_OBJECT: never in map->objects, no uid) parsed the same way, for the client's
+// live-event meshes (client/src/event_objects.c). NULL for any other prefab. Free with map_object_free.
+Object *map_event_object_from_json(const Map *map, const cJSON *raw_obj, int build_meshes);
 // Frees one object made by map_init / map_object_from_json (client: its mesh leaves the scene first).
 void map_object_free(Object *object);
 

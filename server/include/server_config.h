@@ -64,6 +64,9 @@ typedef struct {
     int map_config;
     char game_request[4096];
     int custom_games;                    // accept hosted custom games from the brain
+    // v10 game.forceEvent (deob-10.0.3.js:219747-219750): the live event id every round plays (0 = the brain's
+    // events decide, public rounds only). server/src/live_events_server.c; the offline sandbox: KRUNKNATIVE_EVENT
+    int force_event;
 
     // ---- messages
     char motd[8][NET_CHAT_TEXT_SIZE];    // server chat lines to every joiner

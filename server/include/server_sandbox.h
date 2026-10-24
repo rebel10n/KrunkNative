@@ -25,6 +25,7 @@ typedef struct {
     unsigned short tick_rate; // 0 = 30 (gameserver tick_rate)
     const cJSON *host_request; // Host Game's request (createPrivateRoom), NULL: only the maps' configs
     int host_type;            // its config.hostTypes index (0 = GAME_HOST_CUSTOM)
+    int force_event;          // v10 forceEvent of every round (gameserver.force_event), 0 none: v10's sandbox plays no event
 } SandboxConfig;
 
 int sandbox_start(const SandboxConfig*); // 1 = running (a running sandbox is stopped first)

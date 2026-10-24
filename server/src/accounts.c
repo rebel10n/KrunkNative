@@ -41,6 +41,7 @@
 #include <flavor.h>         // Krunker Strike: auth / commit frames carry the flavor
 #include <junk.h>           // the Junk wallet's amounts (doc/v10/junk.md)
 #include <kill_pools.h>     // v10.0.3 event kill pools (doc/v10/kill-pools.md)
+#include <server_live_events.h> // v10.0.3 live events: eventIndex, limitedTimeMode, the event reward (doc/v10/events.md)
 
 // Krunker Strike: the brain answers a Strike server's auth with the account's Strike inventory,
 // krunkies and level, and files its commits as Strike progress (services/brain/strike_econ.c).
@@ -1194,6 +1195,10 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
     cJSON *medals = cJSON_AddObjectToObject(p, "medals");
     for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
         if (player->medal_counts[i]) cJSON_AddNumberToObject(medals, g_progression_medals[i], player->medal_counts[i]);
+        // endGame's event reward, after the map reward (deob-10.0.3.js:221732-221752): the round's event pays one of its
+        // reward skins the account lacks (server/src/live_events_server.c), in a public-type round
+        const int event_skin = player && flavor_get() == FLAVOR_BASE && game_is_pub_type(g) ? server_events_reward(client, map_index) : -1;
+        if (event_skin >= 0) accounts_give_skin(player, event_skin, "eventreward");
     const Game *game = &g_server->game;
     cJSON_AddNumberToObject(p, "mapIndex", game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
                                               ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1);
@@ -1226,6 +1231,7 @@ static void acc_kill_events_set(const cJSON *events) {
 
 static const KillReward *acc_kill_items(const ClientConnection *client, int *count) {
     for (int i = 0; i < g_kill_item_count; i++) {
+    server_events_set(events); // the same list as config.events: eventIndex, limitedTimeMode, rewards (live_events_server.c)
         if (g_kill_items[i].client_id != client->id) continue;
         *count = g_kill_items[i].count;
         return g_kill_items[i].items;
@@ -1637,9 +1643,11 @@ void accounts_round_changed(void) {
     // v10 updateEventFlags: the class XP flag of this round, fixed at its start (double_xp.h)
     g_acc.class_double = dxp_schedule((int64_t) time(NULL) * 1000).double_class_xp;
     // v10 updateEventIndex (deob-10.0.3.js:219733-219751, at game.init): 0, and in a public round (no host, not
-    // custom / official / comp) the first event of config.events running now. KrunkNative's events are the brain's
-    // gameEvents (g_kill_events, the kill pools' list). INIT carries it (net.c NET_EXT_INIT_EVENT).
-    game->event_index = !g_acc.custom && !game->config.comp ? kill_pools_event_index(&g_kill_events, (double) time(NULL) * 1000.0) : 0;
+    // custom / official / comp) the first event of config.events running now, then forceEvent (gameserver.force_event).
+    // KrunkNative's events are the brain's gameEvents (server/src/live_events_server.c). INIT carries it (net.c
+    // NET_EXT_INIT_EVENT); its limitedTimeMode puts the event's mode first in this round's vote list (game_config.c).
+    game->event_index = server_events_round_index(game, g_acc.custom || game_config_is_custom(game));
+    game->event_ltm = (unsigned char) live_events_limited_time_mode(server_events(), game->event_index);
     const int mode_id = game_mode_id(game);
     game_network_apply(game, g_server->config.tick_rate); // WP-E: the round's networkData (applyNetworking, mode.sendR)
 

@@ -24,7 +24,7 @@ static int64_t kp_days(int64_t y, const int m, const int d) {
 
 // new Date(startsAt).getTime(): epoch ms, or an ISO 8601 UTC date ("2026-10-24T18:00:00Z", ".sss" and a
 // space for the T allowed). Unreadable: 0 (the event sorts first).
-static double kp_time(const cJSON *v) {
+double kill_pools_time(const cJSON *v) {
     if (cJSON_IsNumber(v)) return v->valuedouble;
     const char *s = cJSON_GetStringValue(v);
     int y, mo, d, h = 0, mi = 0, sec = 0, ms = 0;
@@ -63,8 +63,8 @@ int kill_pools_parse(KillPoolEvents *out, const cJSON *events) {
         KillPoolEvent *ev = &out->events[out->count++];
         ev->id = kp_int(cJSON_GetObjectItemCaseSensitive(e, "id"));
         if (ev->id < 0) ev->id = 0;
-        ev->starts_at_ms = kp_time(cJSON_GetObjectItemCaseSensitive(e, "startsAt"));
-        ev->ends_at_ms = kp_time(cJSON_GetObjectItemCaseSensitive(e, "endsAt"));
+        ev->starts_at_ms = kill_pools_time(cJSON_GetObjectItemCaseSensitive(e, "startsAt"));
+        ev->ends_at_ms = kill_pools_time(cJSON_GetObjectItemCaseSensitive(e, "endsAt"));
         ev->weight = kp_num(e, "killPoolsWeight");
         const char *mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "killPoolsMode"));
         ev->dilute = mode && !strcmp(mode, "dilute");

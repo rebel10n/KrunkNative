@@ -31,6 +31,7 @@
 #include <strike_econ.h>  // Krunker Strike: the economy's knStrike* handlers (strike_econ.c)
 #include <paint_picker.h> // the owned card's paint popup (paint_picker_handle)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
+#include <live_events_client.h> // v10.0.3 live events: eventPopup (v10_events.c)
 #include <math.h>
 #include <stdio.h>
 #include <update_ui.h>
@@ -598,6 +599,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     host_flow_ui_handle,       // host_flow_ui.c: the Host Game flow (knHostFlow), every Host Game entry point
     v10_menu_handle,           // v10_menu.c / v10_login.c: the v10 page's menu shell, loginOrRegister
     v10_rewards_handle,        // v10_rewards.c: v10.0.2 signup rewards, windows[32] (before account_ui.c's v7 ones)
+    v10_events_handle,         // v10_events.c: v10.0.3 live events (eventPopup)
     account_ui_handle,         // account_ui.c: Account window, logout, mail, profile
     servers_ui_handle,         // servers_ui.c: Servers / Server Finder / Games / Host / Join
     store_ui_handle,           // store_ui.c: Store (windows[13])

@@ -63,6 +63,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <player_names.h>
+#include <live_events_client.h> // v10.0.3 live events: the round's eventIndex
 
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
 #define RANKED_CHAT_COLOR "#5ce05a" // the ranked UI's green: a ranked queue's notice (NET_CHAT_RANKED)
@@ -1406,6 +1407,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetInitEventPacket ev;
                 memcpy(&ev, body, sizeof(ev));
                 client->game.event_index = ev.event_index;
+                v10_events_want(ev.event_index); // an event the client's list lacks: fetch it (v10_events.c)
             }
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
             else if (subtype == NET_EXT_STALKER_PICKED) hud_stalker_on_picked(client); // "stlkpd": the Living's popup (hud_stalker.c)

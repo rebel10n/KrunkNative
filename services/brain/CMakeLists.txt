@@ -518,6 +518,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kill_pools_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_kill_pools PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;killpools")
+    # v10.0.3 live events (doc/v10/events.md): every config.events field in the welcome / "game-events", GET
+    # /data/events (the running and the revealed events, no kill pools); no database
+    add_test(NAME brain_live_events
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_events_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_live_events PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;events")
     # v10 lottery (lottery.c, 0348_lottery): the guest view, skin / Junk / RP entries, the timer's draw
     add_test(NAME brain_lottery
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py

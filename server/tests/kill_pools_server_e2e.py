@@ -15,6 +15,9 @@ to it. Two loopback connections (the server's own machine: DEV, so /god, /bot, /
   3. the brain's inventory holds that many of skin 5 for A's account, audited as "killpool", and the
      count matches A's committed kills
   4. G, a guest, gets no item (endGame draws for accounts only)
+  5. live events (doc/v10/events.md): a map change starts the first round after the brain's welcome, which plays the
+     event (updateEventIndex; A's NET_EXT_INIT_EVENT 1); the event's reward skin (rewards.skins, rewardChance 100,
+     endGame :221732-221752) lands in A's inventory once, audited as "eventreward"
 Prints PASS/FAIL lines; exit code 0 only when everything passed. 77 = skipped (no server_bin / kn_brain).
 """
 import json
@@ -47,6 +50,7 @@ HELLO_EXT = bytes([1, 4, 2, 1])  # protocol 1.4: NET_PACKET_EXT
 CHAT_SEND, END, EXT = 8, 16, 254
 EXT_RIGHTS, EXT_END_ITEM = 0x8001, 0x8150
 SKIN = 5
+EVENT_SKIN = 7540  # a Rare store skin: the event's rewards.skins (its only candidate, rewardChance 100)
 results = []
 procs = []
 
@@ -175,7 +179,8 @@ def write_feed(path):
     feed = {"news": [], "events": [], "polls": [], "gameEvents": [
         {"id": 1, "name": "e2e event", "startsAt": iso(now - 3600), "endsAt": iso(now + 3600), "killPoolsWeight": 100,
          "killPoolsMode": "add", "killPoolsIcon": "gift",
-         "killPools": [{"weight": 100, "contents": [{"content_type": "skin", "content_ref": str(SKIN)}]}]}]}
+         "killPools": [{"weight": 100, "contents": [{"content_type": "skin", "content_ref": str(SKIN)}]}],
+         "rewards": {"skins": [EVENT_SKIN]}, "rewardChance": 100}]}
     with open(path, "w") as f:
         json.dump(feed, f)
 
@@ -227,6 +232,15 @@ def main():
         check("1: the server takes the brain's running event (kill pools on)",
               wait_for(lambda: "[events] 1 ongoing event(s), kill pools on" in read_log(server_log), 10), read_log(server_log)[-300:])
 
+        # updateEventIndex runs at a round's start (deob-10.0.3.js:219733): the server's first round began before the
+        # brain's welcome, so a new round (a map change by a DEV peer) is the first that plays the event
+        m = Peer(PORT_B)
+        m.say("/map Burg")
+        m.pump(2)
+        m.s.close()
+        check("5: the new round plays the brain's event (eventIndex 1)",
+              wait_for(lambda: re.search(r"Loaded map \d+ mode", read_log(server_log)) is not None, 10), read_log(server_log)[-300:])
+
         st, reg = http(brain_port, "/auth/register", {"username": USER, "password": PW})
         token = reg.get("token", "") if isinstance(reg, dict) else ""
         check("an account registers and gets a session token", st == 200 and bool(token), "HTTP %d" % st)
@@ -266,6 +280,14 @@ def main():
         check("3: audited as killpool", src == [("killpool",)], str(src))
         g_killed = any(t == EXT and b"Killed" in p for t, p in g.packets)
         check("4: G, a guest who killed the bots too, gets no item", g_killed and end_items(g) == [], "killed %s, items %s" % (g_killed, end_items(g)))
+        check("5: the server plays the brain's event as the round's (live events)", "[events] live events: 1" in read_log(server_log),
+              read_log(server_log)[-300:])
+        init_event = [struct.unpack("<i", p[2:6])[0] for t, p in a.packets if t == EXT and len(p) >= 6 and p[:2] == b"\x03\x09"]
+        check("5: A's INIT carried the round's event (NET_EXT_INIT_EVENT 1)", init_event and init_event[-1] == 1, str(init_event))
+        won = wait_for(lambda: (db_rows(db_path, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (account, EVENT_SKIN)) or [[0]])[0][0], 15) or 0
+        esrc = db_rows(db_path, "SELECT DISTINCT source FROM skin_transactions WHERE account_id = ? AND skin_id = ?", (account, EVENT_SKIN))
+        check("5: the event's reward skin in A's inventory, once, audited as eventreward", won == 1 and esrc == [("eventreward",)],
+              "count %s, sources %s" % (won, esrc))
     finally:
         for p in procs:
             if p.poll() is None:

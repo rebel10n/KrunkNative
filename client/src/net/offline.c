@@ -165,6 +165,9 @@ static int offline_begin(Client *client, const int map_index) {
         .mode_id = offline_mode_id(client),
         .host_request = g_host_request,
         .host_type = g_host_type,
+        // KRUNKNATIVE_EVENT=<id>: every offline round plays that live event (v10 forceEvent; scripted runs and
+        // tests, doc/v10/events.md). v10's sandbox plays none, nor does ours without it.
+        .force_event = getenv("KRUNKNATIVE_EVENT") ? atoi(getenv("KRUNKNATIVE_EVENT")) : 0,
     };
     // GAME.STORAGE / Save / Load Data offline go where the client keeps its own data:
     // $XDG_CONFIG_HOME/krunknative natively, localStorage on the web (the page's MEMFS is lost)

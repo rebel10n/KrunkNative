@@ -17,6 +17,7 @@
 #include <krunker_lobbies.h>
 #include <krunker_relay.h>   // the web build reads the bridge's krunker.io relay flag once
 #include <v10_menu.h>
+#include <live_events_client.h> // v10.0.3 live events: the client's config.events (v10_events.c)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,6 +124,7 @@ void backend_frame(Client *client) {
     online_mode_tick(client);
     account_ui_tick(client);
     v10_rewards_tick(); // v10.0.2: the sidebar's Battle Pass item (v10_rewards.c)
+    v10_events_tick();  // v10.0.3: config.events from the brain (v10_events.c)
     servers_ui_tick(client);
     krunker_account_tick();   // the krunker.io account (krunker_account.h): sign-in / refresh answers
     krunker_ranked_tick();    // the Ranked queue socket on krunker.io (krunker_ranked.h): its frames

@@ -1965,22 +1965,33 @@ static void gc_shuffle(int *modes, int *maps, const int n) { // UTILS.yateShuffl
 // offers, in the normal and party buckets, FFA first when the rotation has it. KN servers also
 // configure their mode rotation (game->modes): a pick must be in it, and the map must have the
 // mode's objects (gc_mode_fits). No votes: init picks one of these at random (game_next_match).
+// v10.0.3 adds the event bucket (getPossibleMatches, deob-10.0.3.js:222421-222446): a preventCustomGames mode whose
+// `event` is the round's eventIndex (All or Nothing 4, Mag Dump 5) is possible too, in its own bucket; with FFA in the
+// rotation and an event with limitedTimeMode (Game.event_ltm), its first (shuffled) pair is the first pick
+// (genMatchList :222459-222463). KN: the event's mode needs no place in the server's rotation (game->modes): the
+// event brings it, as on v10's servers, whose rotation is each map's config.modes.
 static void gc_gen_match_list(Game *game, GameConfigState *st) {
     enum { MAX_PAIRS = 512 };
     int normal_mode[MAX_PAIRS], normal_map[MAX_PAIRS], party_mode[MAX_PAIRS], party_map[MAX_PAIRS];
-    int normal = 0, party = 0;
+    int event_mode[MAX_PAIRS], event_map[MAX_PAIRS];
+    int normal = 0, party = 0, events = 0;
     for (size_t i = 0; i < game->map_count; i++) {
         int modes[64];
         const int n = gc_map_modes(game->maps[i], modes, 64);
         const int features = gc_map_features(game->maps[i]);
         for (int k = 0; k < n; k++) {
             const GameModeConfig *mode = gc_mode(modes[k]);
-            if (!mode || mode->prevent_custom || !gc_has_mode(game, modes[k])) continue; // KN has no events (eventIndex 0)
+            if (!mode) continue;
+            // !preventCustomGames || (mode.event != null && eventIndex == mode.event)
+            const int event_mode_now = mode->event > 0 && game->event_index == mode->event;
+            if (mode->prevent_custom && !event_mode_now) continue;
+            if (!event_mode_now && !gc_has_mode(game, modes[k])) continue;
             if (!gc_mode_fits(mode, features)) continue;
             int dup = 0;
-            const int in_party = mode->party;
-            int *bucket_mode = in_party ? party_mode : normal_mode, *bucket_map = in_party ? party_map : normal_map;
-            int *count = in_party ? &party : &normal;
+            const int bucket = mode->party ? 1 : mode->event > 0 ? 2 : 0; // party, else event (mode.event truthy), else normal
+            int *bucket_mode = bucket == 1 ? party_mode : bucket == 2 ? event_mode : normal_mode;
+            int *bucket_map = bucket == 1 ? party_map : bucket == 2 ? event_map : normal_map;
+            int *count = bucket == 1 ? &party : bucket == 2 ? &events : &normal;
             for (int j = 0; j < *count; j++) dup |= bucket_mode[j] == modes[k] && bucket_map[j] == (int) i;
             if (dup || *count >= MAX_PAIRS) continue;
             bucket_mode[*count] = modes[k];
@@ -1990,8 +2001,14 @@ static void gc_gen_match_list(Game *game, GameConfigState *st) {
     }
     gc_shuffle(normal_mode, normal_map, normal);
     gc_shuffle(party_mode, party_map, party);
+    gc_shuffle(event_mode, event_map, events);
 
     int picks = NET_MATCH_PICKS;
+    // limitedTimeMode: the rotation has mode 0 and the round's event is limited-time
+    if (game->event_ltm && events > 0 && gc_has_mode(game, MODE_ID_FFA)) {
+        gc_pick_add(st, event_mode[0], event_map[0]);
+        picks--;
+    }
     if (gc_has_mode(game, MODE_ID_FFA)) {
         for (int j = 0; j < normal; j++) {
             if (normal_mode[j] != MODE_ID_FFA) continue;

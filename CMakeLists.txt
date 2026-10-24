@@ -208,6 +208,7 @@ set(SERVER_CORE_SOURCES
     server/src/published_maps.c   # published:<creator>/<name> maps: v10's checks + the cache (the fetch is brain.c's)
     server/src/game_captcha.c     # the in-game captcha (v10.0.3 "cpt"): asked only with a brain link that enforces it
     server/src/brain_events.c     # v10.0.3 warsClan, map prize wheel spins, unb / lotWin, monetized studio games (kn_brain)
+    server/src/live_events_server.c # v10.0.3 live events: eventIndex, forceEvent, limitedTimeMode, the event reward
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -765,6 +766,14 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(kill_pools_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
     endif ()
+    # live_events_test: v10.0.3 config.events (shared/src/live_events.c): updateEventIndex, getActiveEvent's reveal, the
+    # EVENT prefab's toggle, getItemByWeights and endGame's event reward (doc/v10/events.md)
+    add_executable(live_events_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/live_events_test.c)
+    target_link_libraries(live_events_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(live_events_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
+    add_test(NAME live_events_test COMMAND live_events_test)
     add_test(NAME kill_pools_test COMMAND kill_pools_test)
     add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
     target_link_libraries(zombies_test PRIVATE m)

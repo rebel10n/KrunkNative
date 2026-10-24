@@ -98,6 +98,7 @@
 #include <v10_party.h> // state.gameCode: the server password popup
 #include <console.h> // state.console: ui_console_exec (frame sequences: `kill`, `end`)
 #include <hud_endscreen_v10.h> // the v10 end-of-match components (state.endscreen rewards / rank)
+#include <live_events_client.h> // state.events: v10.0.3 live events (v10_events.c)
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -328,6 +329,7 @@ static void warn_unknown_keys(void) {
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
         "voteKick",   // {target, voter, votes, needed}: a running vote kick's prompt (hud_votekick.c)
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
+        "events",    // v10.0.3 live events {list: config.events, index: the round's eventIndex, now: Date.now ms} (v10_events.c)
         "kioStore", // krunker.io's store answers {limited, ranked} with officialSession (kio_store.c)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
         "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
@@ -1226,6 +1228,11 @@ static int ui_scenario_apply(Client *client) {
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
+    if (st_has("events")) { // v10.0.3 live events without a brain: the list, the round's eventIndex, a fixed clock
+        const cJSON *events = st("events");
+        v10_events_scenario(cJSON_GetObjectItem(events, "list"), obj_num(events, "now", 0.0));
+        client->game.event_index = (int) obj_num(events, "index", 0.0);
+    }
     clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
     if (menu_open) v10_market_scenario(st("market")); // the v10 Market & Trading popup (v10_market.c)
     if (menu_open) v10_wallet_scenario(st("wallet")); // the Wallet and Inventory modal (v10_wallet.c)

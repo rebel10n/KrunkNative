@@ -2091,6 +2091,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             break;
         case NET_PACKET_MATCH_VOTE: { // WP-E "maVote" "mode,map" (end screen; players and spectators)
             NetMatchVotePacket vote;
+                net_send_event_index(client); // init [2] eventIndex likewise (the offline sandbox's INIT beats its HELLO)
             if (packet->length != sizeof(vote) || client->peer_minor < NET_PROTOCOL_MINOR_V7) break;
             memcpy(&vote, packet->payload, sizeof(vote));
             game_vote_match(&g_server->game, client->id, vote.mode_id, vote.map_index);

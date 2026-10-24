@@ -1233,6 +1233,7 @@ void client_load_map(Client *client) {
     zombies_render_load(client->scene, client->game.map); // WP-H machine weapons, beams, airdrops (zombies_render.c)
     prize_wheel_render_load(client->scene, client->game.map); // the prize wheels' canvas planes (prize_wheel_render.c)
     wars_banners_load(client->scene, client->game.map); // the Turf Wars banners' nodes (wars_banners.c)
+    client_event_objects_load(client); // the EVENT prefab's meshes, in the last "start"'s state (event_objects.c)
 }
 
 void client_unload_map(Client *client) {
@@ -1244,6 +1245,7 @@ void client_unload_map(Client *client) {
     zombies_render_unload();
     prize_wheel_render_unload();
     wars_banners_unload();
+    client_event_objects_unload(client); // the EVENT prefab's meshes (event_objects.c)
     map_environment_unload(); // ocean, v7 output state (map_environment.c)
     hud_gui_clear();          // map "gui" elements (ui/hud_gui.c)
 
@@ -1615,7 +1617,6 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     mod_pack_map_loaded(client->game.map ? client->game.map->raw_data : NULL); // the map's modURL resource pack
     client_load_map(client);
     client->map_loaded = client->game.ready;
-    client_event_objects_on_map(client); // the EVENT prefab's meshes keep the last "start"'s state (event_objects.c)
     // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets
     // only exist on servers of protocol minor >= NET_PROTOCOL_MINOR_V7
     ks_client_round(client, init->major == NET_PROTOCOL_MAJOR ? init->minor : 0);

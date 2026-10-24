@@ -678,6 +678,7 @@ static char *gen_challenges(const AccountInfo *acc) {
         }
         sb_append(&sb, "</div>");
         event_section = 1;
+        fprintf(stderr, "[challenges] Event Challenges: %d/%d\n", done, total);
     }
     count("map", NULL, 0, &done, &total);
     header(&sb, NULL, "hed_1", event_section ? 30 : 0, "Map Challenges", done, total, 0, list && done >= total, NULL);

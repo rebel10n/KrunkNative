@@ -1382,6 +1382,17 @@ Object *map_object_from_json(const Map *map, const cJSON *raw_obj, const int bui
     return map_parse_object(raw_obj, NULL, map_no_ambient, v3_planes, slab_undersides, build_meshes, &position, &scale);
 }
 
+Object *map_event_object_from_json(const Map *map, const cJSON *raw_obj, const int build_meshes) {
+    if (!cJSON_IsObject(raw_obj) || map_raw_object_prefab(raw_obj) != PREFAB_EVENT) return NULL;
+    const cJSON *p = cJSON_GetObjectItem(raw_obj, "p"), *s = cJSON_GetObjectItem(raw_obj, "s");
+    if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3 || cJSON_GetArraySize(s) < 3) return NULL;
+    const int map_no_ambient = map && map_flag_is_set(cJSON_GetObjectItem(map->raw_data, "nAmb"));
+    const int v3_planes = map && cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, MAP_KEY_V3_PLANES));
+    const int slab_undersides = map && map->minimap_asset == MAP_SLAB_UNDERSIDE_MMID;
+    vec3 position, scale;
+    return map_parse_object(raw_obj, NULL, map_no_ambient, v3_planes, slab_undersides, build_meshes, &position, &scale);
+}
+
 void map_object_free(Object *object) {
     if (!object) return;
     if (object->tex_anim) free(object->tex_anim);

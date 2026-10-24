@@ -1132,6 +1132,7 @@ routes, in v10's shapes (client: `client/src/ui/v10_news.c`):
 | --- | --- | --- |
 | `GET /creators/events` | `{"data":{"events":[...],"polls":[...]}}`: event `id, player_id, player_name, title, description, banner_url, start_date, duration_hours, ended_at, links [{label, url}], tags`; poll `id, title, description, ends_in` (seconds) and `url` (KN: v10 builds `community.krunker.io/polls/<id>`) | `gapiClient.creators.getUpcomingEvents()` (Community & Events) |
 | `GET /social/news` | `{"data":{"news":["<html>", ...]}}` | `gapiClient.social.getNews()` (the hub's News tab; KN's What's New window shows the items too) |
+| `GET /data/events` | `{"data":{"events":[...]}}`: the feed's `gameEvents` in config.events' fields (below) | v10.0.3's bundled `config.events` (KN: the event popup, Event Challenges, the EVENT prefab) |
 
 Sources, in this order:
 
@@ -1149,12 +1150,18 @@ Sources, in this order:
   (`/social.html?p=map|mod&q=<name>`) links. `start_date` = `ended_at` = the last update, so the
   card shows that date without v10's LIVE badge. Only `http(s)` images become `banner_url`.
 
-The same file's `gameEvents` are the game's live events (Krunker v10.0.3 `ongoingEvents`): `id, name,
-startsAt, endsAt, killPools [{weight, contents [{content_type, content_ref}]}], killPoolsWeight,
-killPoolsMode, killPoolsIcon`. The ones running now (`startsAt` <= now < `endsAt`; no `endsAt`: open
-ended) reach every game server in the internal WS `welcome` (`gameEvents`) and in a `game-events`
-`{events}` push whenever the set changes (checked at each ping); public matches then pay kill pool items,
-committed with the stats as `itemRewards` (doc/v10/kill-pools.md).
+The same file's `gameEvents` are the game's live events, Krunker v10.0.3's `config.events` and `ongoingEvents` in
+one list: `id, name, startsAt, endsAt, reveal` (ms), `imgExt, longDesc` (text, or a list of lines), `noChallenges,
+rewards {skins, weights}, rewardChance, eligibleMaps, limitedTimeMode`, KrunkNative's `eventObjects` (the EVENT
+prefab shows), and the kill pools' `killPools [{weight, contents [{content_type, content_ref}]}], killPoolsWeight,
+killPoolsMode, killPoolsIcon` (doc/v10/events.md, doc/v10/kill-pools.md). The brain copies only well-typed values
+(integer skins / maps, a bare `imgExt`). The ones running now (`startsAt` <= now < `endsAt`; no `endsAt`: open
+ended) reach every game server in the internal WS `welcome` (`gameEvents`) and in a `game-events` `{events}` push
+whenever the set changes (checked at each ping): a public round plays the first as its `eventIndex`, its
+`limitedTimeMode` puts the event's mode first in the vote list, its reward skins and kill pools pay at the end
+(`itemRewards` with the stats). `GET /data/events` serves the clients `{"data":{"events":[...]}}`: the same events
+without the kill pools, plus the ones that reveal early (`startsAt - now <= reveal`): the event popup and the
+Challenges window's Event Challenges. Test: `services/brain/tests/live_events_test.py` (no database).
 
 No file and no featured creation: empty lists (the popup's "No upcoming events"). Streams have no
 source yet (`/api/streams` is v3.1.1's empty placeholder): put them in the feed as events
