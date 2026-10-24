@@ -9,5 +9,5 @@
 
 // 1 when `subtype` is one of the above (handled, whatever its body), 0 otherwise.
 int s2c_events_on_ext(Client *client, uint16_t subtype, const uint8_t *body, uint16_t length);
-// The definitions waiting for the rest of their JSON slices are dropped (a new connection).
+// Drops a definition still waiting for the rest of its JSON slices (the next slice 0 drops it too).
 void s2c_events_reset(void);
