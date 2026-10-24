@@ -5,7 +5,6 @@
 #include <prop_hunt.h> // Prop Hunt: "prp" / "prpR", the prop after a SPAWN
 #include <server.h>
 #include <server_log.h>
-#include <server_sandbox.h>  // sandbox_running(): `class` is offline only (net_chat_host)
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
@@ -1303,8 +1302,8 @@ static void net_chat_om_extras(void *user, const int id) {
     net_keep_om_extras(net_client_by_id(id));
 }
 
-// KrunkNative `class` (offline sandbox only, see net_chat_host): the connection keeps the class and secondary its
-// player has now, for its next spawn, and every client gets the new look and loadout (SPAWN, as a respawn sends it).
+// KrunkNative `class`: the connection keeps the class and secondary its player has now, for its next spawn, and
+// every client gets the new look and loadout (SPAWN, as a respawn sends it).
 static void net_chat_class_switched(void *user, const int id) {
     (void) user;
     ClientConnection *client = net_client_by_id(id);
@@ -1421,9 +1420,7 @@ ChatCommandHost *net_chat_host(void) {
     g_chat_host.om_extras_changed = net_chat_om_extras;
     g_chat_host.keep = net_chat_keep;                 // KrunkNative: cheats / tp from the menu
     g_chat_host.om_request_view = net_chat_om_view;   // KrunkNative: give / spawn from the menu
-    // KrunkNative `class`: the offline sandbox only, until a live server's path is verified (a mid-life switch
-    // sends SPAWN to every client; the online clients' input bookkeeping is not exercised here)
-    g_chat_host.class_switched = sandbox_running() ? net_chat_class_switched : NULL;
+    g_chat_host.class_switched = net_chat_class_switched; // KrunkNative `class` (any game; devs only)
     g_chat_host.kpd_officer = net_chat_kpd_officer;   // KrunkNative: /kpd <account> on|off (kn_brain)
     g_chat_host.kpd_apps = net_chat_kpd_apps;         // KrunkNative: /kpd apps
     return &g_chat_host;

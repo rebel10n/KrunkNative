@@ -16929,3 +16929,9 @@ input[type="search"]::-webkit-search-results-decoration { display: none; }
   width: 1112px;
   height: 512px;
 }
+
+/* Live Streams: the fade-in of a card, the promo and the overlay (v10 transition:fade, 200 ms, linear), animated per element by client/src/ui/v10_menu.c */
+@keyframes kn-stream-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

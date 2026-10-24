@@ -76,12 +76,14 @@ static void on_host_reply(void *ud, const cJSON *reply, const char *err) {
 }
 
 int brain_host_game(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                    const char *account_name, const char *flavor, BrainHostCb cb, void *ud) {
-    return brain_host_game_ex(b, region, config, account_id, account_name, 1, flavor, cb, ud);
+                    const char *account_name, const char *guest_id, const char *flavor, BrainHostCb cb, void *ud) {
+    return brain_host_game_ex(b, region, config, account_id, account_name, guest_id, 1, flavor, cb, ud);
 }
 
+/* guest_id: a guest host's device id (32 hex, the request's guest=); the game server matches it to the
+ * host's connection when the account is 0. Not carried to another brain's node (federation_host_remote). */
 int brain_host_game_ex(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                       const char *account_name, int ticket, const char *flavor, BrainHostCb cb, void *ud) {
+                       const char *account_name, const char *guest_id, int ticket, const char *flavor, BrainHostCb cb, void *ud) {
     if (b->draining) {
         if (cb) cb(ud, "updating", NULL);
         return 0;
@@ -112,6 +114,7 @@ int brain_host_game_ex(Brain *b, const char *region, const cJSON *config, int64_
         cJSON_AddStringToObject(frame, "type", "host");
         cJSON_AddItemToObject(frame, "config", config ? cJSON_Duplicate(config, 1) : cJSON_CreateObject());
         if (account_id > 0) cJSON_AddNumberToObject(frame, "hostAccountId", (double) account_id);
+        else if (guest_id && guest_id[0]) cJSON_AddStringToObject(frame, "hostGuestId", guest_id);
         cJSON_AddStringToObject(frame, "hostName", h->account_name);
         if (internal_ws_request(b, n->node_id, frame, timeout_ms, on_host_reply, h)) host_fail(h, "NoAvailableServers");
         return 0;

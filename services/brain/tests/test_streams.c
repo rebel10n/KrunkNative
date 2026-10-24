@@ -25,7 +25,9 @@ int main(void) {
     /* a populated list: live rows only, valid logins, sorted by viewers (stable), thumbnails filled */
     cJSON *data = cJSON_Parse(k_helix);
     CHECK(data != NULL);
-    cJSON *out = streams_normalise(data);
+    cJSON *featured = cJSON_Parse("[\"ZETA_ONE\"]"); /* streams.featured: case-insensitive */
+    cJSON *campaigns = cJSON_Parse("[{\"game\":{\"name\":\"Krunker\"},\"streamerNames\":[\"big\"]}]");
+    cJSON *out = streams_normalise(data, featured, 1, campaigns);
     CHECK(out != NULL);
     const cJSON *list = cJSON_GetObjectItemCaseSensitive(out, "streams");
     CHECK(cJSON_IsArray(list));
@@ -38,16 +40,24 @@ int main(void) {
     CHECK(a && (int) cJSON_GetObjectItem(a, "viewerCount")->valuedouble == 300);
     CHECK(b && !strcmp(cJSON_GetObjectItem(b, "thumbnailUrl")->valuestring, "https://static-cdn.jtvnw.net/x-440x248.jpg"));
     CHECK(b && !strcmp(cJSON_GetObjectItem(b, "languageCode")->valuestring, "en"));
-    CHECK(cJSON_IsFalse(cJSON_GetObjectItem(out, "promo")));
-    CHECK(cJSON_IsArray(cJSON_GetObjectItem(out, "dropCampaigns")));
+    CHECK(cJSON_IsTrue(cJSON_GetObjectItem(out, "promo")));
+    CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(out, "dropCampaigns")) == 1); /* copied as configured */
+    CHECK(cJSON_IsTrue(cJSON_GetObjectItem(b, "featured")));
+    CHECK(cJSON_IsFalse(cJSON_GetObjectItem(a, "featured")));
+    CHECK(!strcmp(cJSON_GetObjectItem(a, "provider")->valuestring, "twitch"));
+    CHECK(cJSON_GetObjectItem(a, "eventTags") == NULL); /* the official answer carries no eventTags key */
     cJSON_Delete(out);
+    cJSON_Delete(featured);
+    cJSON_Delete(campaigns);
 
     /* no rows / no data: an empty list, the empty state */
-    cJSON *none = streams_normalise(NULL);
+    cJSON *none = streams_normalise(NULL, NULL, 0, NULL);
     CHECK(none && cJSON_GetArraySize(cJSON_GetObjectItem(none, "streams")) == 0);
+    CHECK(cJSON_IsFalse(cJSON_GetObjectItem(none, "promo")));
+    CHECK(cJSON_IsArray(cJSON_GetObjectItem(none, "dropCampaigns")) && cJSON_GetArraySize(cJSON_GetObjectItem(none, "dropCampaigns")) == 0);
     cJSON_Delete(none);
     cJSON *empty = cJSON_Parse("[]");
-    cJSON *none2 = streams_normalise(empty);
+    cJSON *none2 = streams_normalise(empty, NULL, 0, NULL);
     CHECK(none2 && cJSON_GetArraySize(cJSON_GetObjectItem(none2, "streams")) == 0);
     cJSON_Delete(none2);
     cJSON_Delete(empty);

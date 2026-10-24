@@ -459,24 +459,61 @@ static void popular_interval(void *user) {
 // from Twitch's live streams of the Krunker category (streams.c) in v10's {streams, promo, dropCampaigns} shape;
 // api.krunker.io's (krunker_kio_routes.h, v10's own) on a krunker.io Server Type, in an official game (the brain is
 // gated), with a signed-in krunker.io account, or on Both without a brain. The small view (v10's default, _52546)
-// shows the first three cards: a red live dot with the viewer count (formatViewerCount: "1.2K"), the title, the
+// shows the first three cards: a red live dot with the viewer count (formatViewerCount: "1.3K" for 1250), the title, the
 // streamer's name, and a click that opens twitch.tv/<name> (openStream, v10:145133). An answer with no live
-// streams shows v10's text (streamers.none, "No active streams!"). No answer (Box Office with no brain: nobody to
+// streams and no promo hides the overlay (v10's visibility rule). No answer (Box Office with no brain: nobody to
 // ask; the host unreachable) hides the overlay, as v10's error state does.
-#define STREAMS_SHOWN 3
+//
+// The Live Streams panel: a port of v10.0.3's streams-overlay component (the Svelte component that reads
+// /streams/top's {streams, promo, dropCampaigns}). Each rule below cites the component's code in the v10.0.3 bundle
+// (/home/user/jails/kru/src/Krunker_v10.0.3/game.js), read through its own string table: the store, the derived
+// lists, the template conditions and the handlers.
+#define STREAMS_SHOWN 3           // the small view: three cards, or two and the promo (slice(0, 3) / slice(0, min(2, n)))
+#define STREAMS_EXPANDED_MAX 12   // the expanded view: three rows of four (slice(0, 4 * 3 - promo))
+#define STREAMS_COLS 4            // the expanded view's columns (800 px: four 180 px cards)
+#define STREAMS_FULL_ROWS 3       // expanded rows from which the view is full: the rest folds away
+#define STREAMS_KEEP 256          // answers kept (the brain sends at most 100: streams.c STREAMS_MAX_PER_PAGE)
 #define STREAMS_REFRESH_MS 30000.0
 #define STREAMS_NAME_MAX 25
+#define STREAMS_TITLE_MAX 160
+#define STREAMS_THUMB_MAX 320
+#define STREAMS_LANG_MAX 16
+#define STREAMS_FADE_MS 200       // v10's fade transitions: duration 0xc8, linear easing
+#define STREAMS_STAGGER_MS 50     // v10's delay per card: 0x32 * index
+#define STREAMS_REST_STAGGER_MAX 8 // the rest grid staggers its first eight cards only (index < 0x8)
+#define STREAMS_VIEW_KEY "streams-overlay-view-mode"
+#define STREAMS_PROMO_URL "https://twitch.tv/directory/category/krunker"
+enum { STREAMS_SMALL, STREAMS_EXPANDED, STREAMS_CLOSED };
+// v10 keys its each-blocks by index and its if-blocks by presence: an element that was already on screen does not fade
+// in again. These are the blocks that fade: the featured grid's cards and promo, the plain grid's, the rest grid's, the
+// overlay itself, and the promo of each grid.
+enum { SB_FEAT, SB_PLAIN, SB_REST, SB_ROOT, SB_COUNT };
+enum { PB_FEAT, PB_PLAIN, PB_ROW, PB_COUNT };
+
+struct stream_entry {
+    char user[64];
+    char title[STREAMS_TITLE_MAX];
+    char thumb[STREAMS_THUMB_MAX];
+    char lang[STREAMS_LANG_MAX];  // languageCode as sent (the flag's class)
+    int viewers;
+    int featured;                 // featured (truthy in JS), kept first
+    int dropped;                  // a drop campaign names this streamer (hasDropsAvailable)
+    int has_tags;                 // eventTags?.length
+    char *tags;                   // the event tag chips' markup (NULL without tags)
+};
 static struct {
-    int listed;               // 1 = the last answer was a list (the overlay shows), 0 = hidden
-    int count;                // live streams in the answer
-    int n;                    // cards kept (at most STREAMS_SHOWN)
-    char user[STREAMS_SHOWN][64];
-    char title[STREAMS_SHOWN][160];
-    char thumb[STREAMS_SHOWN][320];
-    int viewers[STREAMS_SHOWN];
-    int closed;               // the Hide button (v10's closed view): the cards fold away, the header stays
-    int timer;                // the 30 s interval (html timer id)
-    int override;             // tests: knV10Streams gave the list, the brain is not asked
+    int listed;                   // 1 = the last answer was a list (the overlay may show), 0 = hidden
+    int promo;                    // showPromo: the answer's promo === true
+    int drops;                    // dropCampaigns.length > 0 (the header tag, has-drops)
+    int nfeat;                    // streams the answer marks featured: they lead e[]
+    int n;                        // streams kept: e[0..nfeat) featured, then the rest, by viewers
+    struct stream_entry e[STREAMS_KEEP];
+    int mode;                     // STREAMS_SMALL / STREAMS_EXPANDED / STREAMS_CLOSED
+    int mode_loaded;              // the saved view mode is read once
+    int prev_count[SB_COUNT];     // cards each block showed at the last render (0: the block was not there)
+    int prev_promo[PB_COUNT];     // each grid's promo at the last render
+    int timer;                    // the refresh interval (html timer id)
+    int override;                 // tests: knV10Streams gave the list, the brain is not asked
 } L;
 
 // The card's picture: v10 sets its <img src> to the answer's thumbnailUrl as it is (v10.js:146254). The engine loads an
@@ -484,7 +521,7 @@ static struct {
 // for it. Any other value, or one too long for the card's buffer, shows no picture: the card's grey box, as v10's
 // while an image loads.
 static int streams_picture_ok(const char *url) {
-    if (strlen(url) >= sizeof L.thumb[0]) return 0;
+    if (strlen(url) >= sizeof L.e[0].thumb) return 0;
     return !strncasecmp(url, "https://", 8) || !strncasecmp(url, "http://", 7);
 }
 
@@ -498,94 +535,354 @@ static int streams_login_ok(const char *s) {
     return 1;
 }
 
-// formatViewerCount (v10:146000): from 1000 on, one decimal and K
+// JavaScript truthiness of an answer field (the bundle tests featured with !x and x[...] directly)
+static int streams_truthy(const cJSON *v) {
+    if (!v || cJSON_IsNull(v) || cJSON_IsFalse(v)) return 0;
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0 && v->valuedouble == v->valuedouble;
+    if (cJSON_IsString(v)) return v->valuestring && v->valuestring[0];
+    return 1;
+}
+
+// formatViewerCount (v10.0.3, streams-overlay): from 1000 on, (v / 1000).toFixed(1) + 'K'; below, the number. toFixed
+// rounds the double's exact value to the nearest tenth and a tie up, so the digit after the tenth decides: 5 or more
+// rounds up (printf would round exact ties to even, 1250 -> "1.2K" where the page shows "1.3K").
 static void streams_viewers(char *out, const size_t n, const int v) {
-    if (v >= 1000) snprintf(out, n, "%.1fK", v / 1000.0);
-    else snprintf(out, n, "%d", v);
+    if (v < 1000) {
+        snprintf(out, n, "%d", v);
+        return;
+    }
+    char exact[128];
+    snprintf(exact, sizeof exact, "%.80f", v / 1000.0);
+    const char *p = exact;
+    long long whole = 0;
+    for (; *p && *p != '.'; p++) whole = whole * 10 + (*p - '0');
+    int tenth = 0, hundredth = 0;
+    if (*p == '.') {
+        tenth = p[1] ? p[1] - '0' : 0;
+        hundredth = (p[1] && p[2]) ? p[2] - '0' : 0;
+    }
+    long long tenths = whole * 10 + tenth + (hundredth >= 5);
+    snprintf(out, n, "%lld.%lldK", tenths / 10, tenths % 10);
 }
 
-// v10 sizes the overlay to its cards in the small view (v10.js:146254: 180 px a card, 16 px between, 32 px more for the
-// padding and border). The auto-fill grid then holds exactly those columns, and a card's 1 px border (182 px) has room
-// in the grid's content box. Left at its content's width, the grid is exactly the three 180 px tracks, the cards run
-// past them and the grid's overflow-y: auto (.regular-grid) draws a horizontal scrollbar under the cards. Closed, or
-// with no cards, the overlay is as wide as its content (v10's closed view: width auto).
-static void streams_width(HtmlElem ov) {
-    char px[32] = "";
-    if (!L.closed && L.n > 0) snprintf(px, sizeof px, "%dpx", 180 * L.n + 16 * (L.n - 1) + 32);
-    html_dom_set_style(ov, "width", px);
+// hasDropsAvailable (the bundle's component method): some campaign lists the streamer's login in its streamerNames
+// (case-insensitive; the logins are ASCII, see streams_login_ok)
+static int streams_drop_for(const cJSON *campaigns, const char *user) {
+    const cJSON *c = NULL;
+    cJSON_ArrayForEach(c, campaigns) {
+        const cJSON *names = cJSON_GetObjectItemCaseSensitive(c, "streamerNames");
+        const cJSON *n = NULL;
+        cJSON_ArrayForEach(n, names) {
+            if (cJSON_IsString(n) && !strcasecmp(n->valuestring, user)) return 1;
+        }
+    }
+    return 0;
 }
 
-// The overlay is the page's own (ui/index.html #knStreams: v10's header with the Hide button); its
-// body (the cards, or the empty text) is rebuilt at every answer. No answer: the overlay is hidden.
+// the event tags' chips: one per tag, in the answer's order (the bundle's each over eventTags)
+static char *streams_tags_html(const cJSON *tags) {
+    StrBuf sb = {0};
+    const cJSON *t = NULL;
+    cJSON_ArrayForEach(t, tags) {
+        if (!cJSON_IsString(t)) continue;
+        sb_append(&sb, "<span class=\"event-tag-chip svelte-60shhe\">");
+        sb_append_esc(&sb, t->valuestring);
+        sb_append(&sb, "</span>");
+    }
+    return sb_finish(&sb);
+}
+
+static void streams_clear(void) {
+    for (int i = 0; i < L.n; i++) {
+        free(L.e[i].tags);
+        L.e[i].tags = NULL;
+    }
+    L.n = L.nfeat = 0;
+}
+
+// The view mode (the store, streams-overlay-view-mode): read once, saved on every change as v10 does (expanded is
+// saved as small, so the expanded view is not kept across launches).
+static void streams_mode_load(void) {
+    if (L.mode_loaded) return;
+    L.mode_loaded = 1;
+    char buf[32] = "";
+    L.mode = STREAMS_SMALL;
+    if (html_storage_get(STREAMS_VIEW_KEY, buf, sizeof buf) >= 0) {
+        if (!strcmp(buf, "closed")) L.mode = STREAMS_CLOSED;
+        else if (!strcmp(buf, "expanded")) L.mode = STREAMS_EXPANDED;
+    }
+}
+
+static void streams_mode_set(const int mode) {
+    L.mode = mode;
+    html_storage_set(STREAMS_VIEW_KEY, mode == STREAMS_CLOSED ? "closed" : "small");
+}
+
+// The layout: every rule is v10.0.3's derived store or template condition (streams-overlay, decoded). D = the displayed
+// streams (the featured ones when there are any, else the rest), R = the rest behind the featured ones.
+struct streams_layout {
+    int nd, rest, promo, prom_grid, prom_row, shown, cols, cols_width, rows, full, body, feat, rest_on, max_h;
+};
+static struct streams_layout streams_layout(void) {
+    struct streams_layout y = {0};
+    const int exp = L.mode == STREAMS_EXPANDED, small = L.mode == STREAMS_SMALL, closed = L.mode == STREAMS_CLOSED;
+    const int nd = L.nfeat ? L.nfeat : L.n;
+    const int P = L.listed && L.promo;
+    // promo in the grid: small always, expanded where it fills the row (three cards, or more not a multiple of four)
+    const int prom_vis = P && (small || (exp && (nd == 3 || (nd > 3 && nd % STREAMS_COLS != 0))));
+    const int count = nd + prom_vis;
+    const int rows = exp ? (count + STREAMS_COLS - 1) / STREAMS_COLS : 1;
+    const int full = exp && rows >= STREAMS_FULL_ROWS;
+    y.nd = nd;
+    y.rest = L.n - L.nfeat;
+    y.promo = prom_vis;
+    y.shown = exp ? (nd < STREAMS_EXPANDED_MAX - prom_vis ? nd : STREAMS_EXPANDED_MAX - prom_vis)
+                  : (small && P ? (nd < 2 ? nd : 2) : (nd < STREAMS_SHOWN ? nd : STREAMS_SHOWN));
+    y.prom_grid = prom_vis && (!full || (exp && nd < STREAMS_EXPANDED_MAX));
+    const int grid_cards = y.shown + prom_vis;
+    y.cols = exp ? STREAMS_COLS : (grid_cards < STREAMS_SHOWN ? grid_cards : STREAMS_SHOWN);
+    // the overlay's inline width (small only): the width formula reads the promo only below three streams
+    const int width_cards = nd + (P && nd < STREAMS_SHOWN ? 1 : 0);
+    const int width_cols = exp ? STREAMS_COLS : (width_cards < STREAMS_SHOWN ? width_cards : STREAMS_SHOWN);
+    y.cols_width = width_cols;
+    y.rows = rows;
+    y.full = full;
+    y.body = !closed && (nd > 0 || P);
+    y.feat = !closed && L.nfeat > 0;
+    y.rest_on = exp && !full && L.nfeat > 0 && y.rest > 0;
+    y.prom_row = exp && P && nd > 3 && nd % STREAMS_COLS == 0; // only inside the rest section (v10's row promo)
+    y.max_h = exp && rows >= 2 && !full ? 204 : 408;
+    return y;
+}
+
+// one stream card (v10's .stream-card: the thumbnail with the viewer count, the drop badge, the event tags, the language
+// flag; then the title and the streamer's name). anim = fade in with a delay (ms), else it is already on screen.
+static void streams_card(StrBuf *sb, const int i, const int anim, const int delay) {
+    const struct stream_entry *s = &L.e[i];
+    char count[24];
+    streams_viewers(count, sizeof count, s->viewers);
+    sb_appendf(sb, "<div class=\"stream-card%s svelte-60shhe\" style=\"", s->has_tags ? " has-event" : "");
+    if (anim) sb_appendf(sb, "animation:kn-stream-fade %dms linear %dms both;", STREAMS_FADE_MS, delay);
+    sb_append(sb, "pointer-events:all;cursor:pointer;\" onclick=\"knV10Stream(");
+    sb_appendf(sb, "%d)\"><div class=\"thumbnail svelte-60shhe\">", i);
+    sb_appendf(sb, "<img loading=\"lazy\" decoding=\"async\" class=\"svelte-60shhe\" id=\"knStreamThumb%d\" src=\"", i);
+    sb_append_esc(sb, s->thumb); // the answer's thumbnailUrl (streams_picture_ok), v10's src
+    sb_append(sb, "\" alt=\"");
+    sb_append_esc(sb, s->title);
+    sb_append(sb, "\"> <div class=\"viewer-count svelte-60shhe\"><span class=\"dot svelte-60shhe\"></span> <span class=\"svelte-60shhe\">");
+    sb_append_esc(sb, count);
+    sb_append(sb, " viewers</span></div>");
+    if (s->dropped) {
+        sb_append(sb, "<div class=\"drop-badge svelte-60shhe\"><span class=\"drop-icon svelte-60shhe\" role=\"img\" aria-label=\"🎁\" style=\"display:inline-block;width:17.44px;height:14px;background:url(img/gift-emoji.png) no-repeat center / contain;\"></span> <span class=\"drop-text svelte-60shhe\">DROPS</span></div>");
+    }
+    if (s->has_tags) {
+        // under a drop badge the chips sit 36 px down (v10's .thumbnail:has(.drop-badge) .event-tags-badge)
+        sb_append(sb, s->dropped ? "<div class=\"event-tags-badge svelte-60shhe\" style=\"top:36px;\">"
+                                 : "<div class=\"event-tags-badge svelte-60shhe\">");
+        if (s->tags) sb_append(sb, s->tags);
+        sb_append(sb, "</div>");
+    }
+    // the flag shows for any language but English (v10's languageCode !== 'en' test)
+    if (s->lang[0] && strcasecmp(s->lang, "en") != 0) {
+        sb_append(sb, "<div class=\"language-flag svelte-60shhe\"><div class=\"flag-icon flag-icon-");
+        sb_append_esc(sb, s->lang);
+        sb_append(sb, " svelte-60shhe\"></div></div>");
+    }
+    sb_append(sb, "</div><div class=\"stream-info svelte-60shhe\"><h3 class=\"stream-title svelte-60shhe\">");
+    sb_append_esc(sb, s->title);
+    sb_append(sb, "</h3><p class=\"stream-username svelte-60shhe\">");
+    sb_append_esc(sb, s->user);
+    sb_append(sb, "</p></div></div>");
+}
+
+// v10's promo card (.promo-card): the grey Krunker map, the live icon, the call to stream; a click opens Krunker's
+// Twitch category (openTwitch). The map is the page's img/maps/map_35.png (byte-identical to v10's).
+static void streams_promo(StrBuf *sb, const int anim, const int delay) {
+    sb_append(sb, "<div class=\"stream-card promo-card svelte-60shhe\" style=\"");
+    if (anim) sb_appendf(sb, "animation:kn-stream-fade %dms linear %dms both;", STREAMS_FADE_MS, delay);
+    sb_append(sb, "pointer-events:all;cursor:pointer;\" onclick=\"knV10StreamsPromo()\"><div class=\"thumbnail svelte-60shhe\">"
+                  "<img src=\"img/maps/map_35.png\" alt=\"Stream Krunker\" class=\"grayscale svelte-60shhe\" loading=\"lazy\" decoding=\"async\">"
+                  " <div class=\"live-icon-overlay svelte-60shhe\"><img src=\"img/live-icon.png\" alt=\"Live Icon\" loading=\"eager\" "
+                  "decoding=\"async\" class=\"svelte-60shhe\"></div></div>"
+                  "<div class=\"stream-info svelte-60shhe\"><h3 class=\"stream-title promo-title svelte-60shhe\">Stream Krunker and get featured!</h3></div></div>");
+}
+
+// the header's right side (v10's button-group): Show while closed; else the More / Less toggle (when expanded, or more
+// than three streams, or rest streams in the small view) and Hide
+static void streams_buttons(StrBuf *sb, const struct streams_layout *y) {
+    sb_append(sb, "<div class=\"button-group svelte-60shhe\" id=\"knStreamsButtons\">");
+    if (L.mode == STREAMS_CLOSED) {
+        sb_append(sb, "<button class=\"toggle-button svelte-60shhe\" id=\"knStreamsShow\" onclick=\"knV10StreamsToggle()\">Show</button>");
+    } else {
+        const int more = y->nd > STREAMS_SHOWN || (y->rest > 0 && L.mode == STREAMS_SMALL);
+        if (L.mode == STREAMS_EXPANDED || more) {
+            sb_appendf(sb, "<button class=\"toggle-button svelte-60shhe\" id=\"knStreamsMode\" onclick=\"knV10StreamsMode()\">%s</button>",
+                       L.mode == STREAMS_EXPANDED ? "Less" : "More");
+        }
+        sb_append(sb, "<button class=\"hide-button svelte-60shhe\" id=\"knStreamsHide\" onclick=\"knV10StreamsToggle()\">Hide</button>");
+    }
+    sb_append(sb, "</div>");
+}
+
+// Replaces the element `id` with `html` inserted at the end of `parent` (a fresh copy each render).
+static void streams_replace(const char *parent, const char *id, const char *html) {
+    HtmlElem old = by_id(id);
+    if (old) html_dom_remove(old);
+    HtmlElem p = by_id(parent);
+    if (p && html) html_dom_insert_html(p, HTML_INSERT_BEFORE_END, html);
+}
+
+// The overlay is the page's own (ui/index.html #knStreams: v10's header with the Hide button). Its body and header parts
+// are rebuilt at every answer and every toggle; the overlay is shown while there is a stream or the promo, else hidden.
 static void streams_render(void) {
+    streams_mode_load();
     HtmlElem ov = by_id("knStreams");
     if (!ov) return;
-    if (!L.listed) {
+    const struct streams_layout y = streams_layout();
+    const int visible = L.listed && (y.nd > 0 || (L.promo));
+    int prev_count[SB_COUNT], prev_promo[PB_COUNT];
+    memcpy(prev_count, L.prev_count, sizeof prev_count);
+    memcpy(prev_promo, L.prev_promo, sizeof prev_promo);
+    const int root_fade = visible && !L.prev_count[SB_ROOT];
+    memset(L.prev_count, 0, sizeof L.prev_count);
+    memset(L.prev_promo, 0, sizeof L.prev_promo);
+    if (!visible) {
         set_display(ov, "none");
         return;
     }
     set_display(ov, "");
-    StrBuf sb = {0};
-    sb_append(&sb, "<div class=\"streams-body svelte-60shhe\" id=\"knStreamsBody\">");
-    if (!L.count) {
-        sb_append(&sb, "<div class=\"streams-empty svelte-60shhe\" style=\"padding:8px 4px;font-size:14px;\">");
-        sb_append_esc(&sb, I18N("streamers.none", "No active streams!"));
-        sb_append(&sb, "</div>");
+    L.prev_count[SB_ROOT] = 1;
+    html_dom_set_class(ov, "closed", L.mode == STREAMS_CLOSED);
+    html_dom_set_class(ov, "small", L.mode == STREAMS_SMALL);
+    html_dom_set_class(ov, "expanded", L.mode == STREAMS_EXPANDED);
+    html_dom_set_class(ov, "has-drops", L.drops);
+    if (L.mode == STREAMS_SMALL) {
+        char px[32];
+        snprintf(px, sizeof px, "%dpx", y.body ? 180 * y.cols_width + 16 * (y.cols_width - 1) + 32 : 0);
+        html_dom_set_style(ov, "width", px);
     } else {
-        // v10's markup: no inline columns, the grid's auto-fill 180 px tracks (.regular-grid, svelte.css) fill the overlay
-        sb_append(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\">");
-        for (int i = 0; i < L.n; i++) {
-            char count[24], views[64];
-            streams_viewers(count, sizeof count, L.viewers[i]);
-            I18N_F(views, "streamers.views", "{0} viewers", count);
-            sb_appendf(&sb, "<div class=\"stream-card svelte-60shhe\" style=\"pointer-events:all;cursor:pointer;\" title=\"");
-            sb_append_esc(&sb, L.title[i]);
-            sb_appendf(&sb, "\" onclick=\"knV10Stream(%d)\"><div class=\"thumbnail svelte-60shhe\">"
-                            "<img loading=\"lazy\" decoding=\"async\" class=\"svelte-60shhe\" id=\"knStreamThumb%d\" src=\"", i, i);
-            sb_append_esc(&sb, L.thumb[i]); // the answer's thumbnailUrl (streams_picture_ok), v10's src
-            sb_append(&sb, "\" alt=\"");
-            sb_append_esc(&sb, L.title[i]);
-            sb_append(&sb, "\"> <div class=\"viewer-count svelte-60shhe\"><span class=\"dot svelte-60shhe\"></span> <span class=\"svelte-60shhe\">");
-            sb_append_esc(&sb, views);
-            sb_append(&sb, "</span></div></div><div class=\"stream-info svelte-60shhe\"><h3 class=\"stream-title svelte-60shhe\">");
-            sb_append_esc(&sb, L.title[i]);
-            sb_append(&sb, "</h3><p class=\"stream-username svelte-60shhe\">");
-            sb_append_esc(&sb, L.user[i]);
-            sb_append(&sb, "</p></div></div>");
+        html_dom_set_style(ov, "width", "");
+    }
+    html_dom_set_style(ov, "animation", root_fade ? "kn-stream-fade 200ms linear 0ms both" : "");
+
+    StrBuf sb = {0};
+    if (y.body) {
+        sb_append(&sb, "<div class=\"streams-body svelte-60shhe\" id=\"knStreamsBody\">");
+        if (y.feat) {
+            sb_append(&sb, "<div class=\"featured-section svelte-60shhe\"><div class=\"featured-label svelte-60shhe\">Featured</div>");
+            sb_appendf(&sb, "<div class=\"streams-grid featured-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px);\">", y.cols);
+            for (int i = 0; i < y.shown; i++) {
+                const int anim = i >= prev_count[SB_FEAT];
+                streams_card(&sb, i, anim, STREAMS_STAGGER_MS * i);
+                L.prev_count[SB_FEAT] = i + 1;
+            }
+            if (y.prom_grid) {
+                const int anim = !prev_promo[PB_FEAT];
+                streams_promo(&sb, anim, STREAMS_STAGGER_MS * y.shown);
+                L.prev_promo[PB_FEAT] = 1;
+            }
+            sb_append(&sb, "</div></div>");
+        } else {
+            sb_appendf(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px);\">", y.cols);
+            for (int i = 0; i < y.shown; i++) {
+                const int anim = i >= prev_count[SB_PLAIN];
+                streams_card(&sb, i, anim, STREAMS_STAGGER_MS * i);
+                L.prev_count[SB_PLAIN] = i + 1;
+            }
+            if (y.prom_grid) {
+                const int anim = !prev_promo[PB_PLAIN];
+                streams_promo(&sb, anim, STREAMS_STAGGER_MS * y.shown);
+                L.prev_promo[PB_PLAIN] = 1;
+            }
+            sb_append(&sb, "</div>");
+        }
+        if (y.rest_on) {
+            sb_appendf(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px); max-height: %dpx;\">",
+                       STREAMS_COLS, y.max_h);
+            for (int j = 0; j < y.rest; j++) {
+                const int anim = j >= prev_count[SB_REST];
+                const int delay = j < STREAMS_REST_STAGGER_MAX ? STREAMS_STAGGER_MS * j : 0;
+                streams_card(&sb, L.nfeat + j, anim, delay);
+                L.prev_count[SB_REST] = j + 1;
+            }
+            sb_append(&sb, "</div>");
+            if (y.prom_row) {
+                const int anim = !prev_promo[PB_ROW];
+                streams_promo(&sb, anim, 0);
+                L.prev_promo[PB_ROW] = 1;
+            }
         }
         sb_append(&sb, "</div>");
     }
-    sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
     HtmlElem old = by_id("knStreamsBody");
     if (old) html_dom_remove(old);
     if (html) html_dom_insert_html(ov, HTML_INSERT_BEFORE_END, html);
     free(html);
-    set_display(by_id("knStreamsBody"), L.closed ? "none" : "");
-    streams_width(ov);
-    HtmlElem hide = by_id("knStreamsHide");
-    if (hide) html_dom_set_text(hide, L.closed ? "Show" : "Hide");
+
+    // the header: the drops tag beside the title (dropCampaigns.length > 0), the buttons at the right
+    StrBuf hb = {0};
+    if (L.drops) {
+        sb_append(&hb, "<div class=\"drops-available-tag svelte-60shhe\" id=\"knStreamsDrops\"><span class=\"drops-icon svelte-60shhe\" role=\"img\" aria-label=\"🎁\" style=\"display:inline-block;width:14.95px;height:12px;background:url(img/gift-emoji-12.png) no-repeat center / contain;\"></span> "
+                       "<span class=\"drops-text svelte-60shhe\">DROPS AVAILABLE</span></div>");
+    }
+    char *drops = sb_finish(&hb);
+    streams_replace("knStreamsTitle", "knStreamsDrops", drops);
+    free(drops);
+    StrBuf bb = {0};
+    streams_buttons(&bb, &y);
+    char *buttons = sb_finish(&bb);
+    streams_replace("knStreamsHeader", "knStreamsButtons", buttons);
+    free(buttons);
 }
 
-// an answer: the streams array of /streams/top's data (NULL = no answer: hidden)
-static void streams_apply(const cJSON *streams) {
+// an answer: the whole /streams/top data object (NULL = no answer: hidden). The streams keep the featured ones first, in
+// the answer's order; the rest follow, by viewers, highest first (the bundle's sort: b.viewerCount - a.viewerCount).
+static void streams_apply(const cJSON *data) {
+    streams_mode_load();
+    streams_clear();
+    const cJSON *streams = cJSON_GetObjectItemCaseSensitive(data, "streams");
+    const cJSON *campaigns = cJSON_GetObjectItemCaseSensitive(data, "dropCampaigns");
     L.listed = cJSON_IsArray(streams);
-    L.count = L.n = 0;
+    L.promo = L.listed && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "promo"));
+    L.drops = L.listed && cJSON_IsArray(campaigns) && cJSON_GetArraySize(campaigns) > 0;
     const cJSON *s = NULL;
-    if (L.listed) cJSON_ArrayForEach(s, streams) {
-        const cJSON *u = cJSON_GetObjectItemCaseSensitive(s, "username");
-        if (!cJSON_IsString(u) || !streams_login_ok(u->valuestring)) continue;
-        L.count++;
-        if (L.n >= STREAMS_SHOWN) continue;
-        const cJSON *t = cJSON_GetObjectItemCaseSensitive(s, "title");
-        const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, "viewerCount");
-        const cJSON *th = cJSON_GetObjectItemCaseSensitive(s, "thumbnailUrl");
-        snprintf(L.user[L.n], sizeof L.user[0], "%s", u->valuestring);
-        snprintf(L.title[L.n], sizeof L.title[0], "%s", cJSON_IsString(t) ? t->valuestring : "");
-        const char *picture = cJSON_IsString(th) ? th->valuestring : "";
-        snprintf(L.thumb[L.n], sizeof L.thumb[0], "%s", streams_picture_ok(picture) ? picture : "");
-        L.viewers[L.n] = cJSON_IsNumber(v) && v->valuedouble > 0 ? (int) v->valuedouble : 0;
-        L.n++;
+    for (int pass = 1; L.listed && pass >= 0; pass--) {
+        cJSON_ArrayForEach(s, streams) {
+            if (streams_truthy(cJSON_GetObjectItemCaseSensitive(s, "featured")) != pass) continue;
+            const cJSON *u = cJSON_GetObjectItemCaseSensitive(s, "username");
+            if (!cJSON_IsString(u) || !streams_login_ok(u->valuestring)) continue;
+            if (L.n >= STREAMS_KEEP) continue;
+            struct stream_entry *e = &L.e[L.n];
+            memset(e, 0, sizeof *e);
+            const cJSON *t = cJSON_GetObjectItemCaseSensitive(s, "title");
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, "viewerCount");
+            const cJSON *th = cJSON_GetObjectItemCaseSensitive(s, "thumbnailUrl");
+            const cJSON *lg = cJSON_GetObjectItemCaseSensitive(s, "languageCode");
+            const cJSON *tags = cJSON_GetObjectItemCaseSensitive(s, "eventTags");
+            snprintf(e->user, sizeof e->user, "%s", u->valuestring);
+            snprintf(e->title, sizeof e->title, "%s", cJSON_IsString(t) ? t->valuestring : "");
+            const char *picture = cJSON_IsString(th) ? th->valuestring : "";
+            snprintf(e->thumb, sizeof e->thumb, "%s", streams_picture_ok(picture) ? picture : "");
+            if (cJSON_IsString(lg)) snprintf(e->lang, sizeof e->lang, "%s", lg->valuestring);
+            e->viewers = cJSON_IsNumber(v) && v->valuedouble > 0 ? (int) v->valuedouble : 0;
+            e->featured = pass;
+            e->dropped = streams_drop_for(campaigns, e->user);
+            e->has_tags = cJSON_IsArray(tags) && cJSON_GetArraySize(tags) > 0;
+            e->tags = e->has_tags ? streams_tags_html(tags) : NULL;
+            L.n++;
+            if (pass) L.nfeat++;
+        }
+    }
+    // the regular streams by viewers, highest first, stable (insertion: the list is short and keeps the answer's order)
+    for (int i = L.nfeat + 1; i < L.n; i++) {
+        struct stream_entry tmp = L.e[i];
+        int j = i - 1;
+        while (j >= L.nfeat && L.e[j].viewers < tmp.viewers) {
+            L.e[j + 1] = L.e[j];
+            j--;
+        }
+        L.e[j + 1] = tmp;
     }
     if (v10_menu_page()) streams_render();
 }
@@ -594,14 +891,14 @@ static void streams_body(void *user, const int status, const char *body, size_t 
     (void) user;
     (void) length;
     cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
-    streams_apply(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(res, "data"), "streams"));
+    streams_apply(cJSON_GetObjectItemCaseSensitive(res, "data"));
     cJSON_Delete(res);
 }
 
 // krunker.io's answer ({data: {streams}} parsed by krunker_ranked_request: the data client's envelope)
 static void streams_ranked_body(void *user, const int status, const cJSON *body) {
     (void) user;
-    streams_apply(status == 200 ? cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(body, "data"), "streams") : NULL);
+    streams_apply(status == 200 ? cJSON_GetObjectItemCaseSensitive(body, "data") : NULL);
 }
 
 static void streams_fetch(void) {
@@ -628,7 +925,8 @@ static void streams_fetch(void) {
 static void streams_interval(void *user) {
     (void) user;
     L.timer = html_timer_add(STREAMS_REFRESH_MS, streams_interval, NULL);
-    streams_fetch();
+    streams_mode_load();
+    if (L.mode != STREAMS_CLOSED) streams_fetch(); // v10: setInterval(... "closed" !== mode && fetchTopStreams(), 30 s)
 }
 
 // The Server Type changed (Settings > Quickplay, ui_settings.c store_setting): Popular Now and the Live Streams
@@ -1083,16 +1381,27 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         notifications_switch();
         return 1;
     }
-    if (!strcmp(name, "knV10StreamsToggle")) { // the overlay's Hide / Show (v10's closed view: the header stays)
-        L.closed = !L.closed;
+    if (!strcmp(name, "knV10StreamsMode")) { // More / Less: v10's toggleViewMode (small <-> expanded)
+        streams_mode_load();
+        streams_mode_set(L.mode == STREAMS_SMALL ? STREAMS_EXPANDED : STREAMS_SMALL);
         streams_render();
+        return 1;
+    }
+    if (!strcmp(name, "knV10StreamsToggle")) { // Hide / Show: v10's setViewMode('closed') / setViewMode('small')
+        streams_mode_load();
+        streams_mode_set(L.mode == STREAMS_CLOSED ? STREAMS_SMALL : STREAMS_CLOSED);
+        streams_render();
+        return 1;
+    }
+    if (!strcmp(name, "knV10StreamsPromo")) { // the promo card: openTwitch = window.open("https://twitch.tv/directory/category/krunker")
+        ui_open_external(STREAMS_PROMO_URL);
         return 1;
     }
     if (!strcmp(name, "knV10Stream")) { // a Live Streams card: openStream(username) = window.open("https://twitch.tv/" + username)
         const int i = argc > 0 ? (int) args[0].num : -1;
         if (i < 0 || i >= L.n) return 1;
         char url[128];
-        snprintf(url, sizeof url, "https://twitch.tv/%s", L.user[i]);
+        snprintf(url, sizeof url, "https://twitch.tv/%s", L.e[i].user); // openStream(username)
         ui_open_external(url);
         return 1;
     }
@@ -1101,7 +1410,7 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         L.override = json && *json;
         if (L.override) {
             cJSON *res = cJSON_Parse(json);
-            streams_apply(cJSON_GetObjectItemCaseSensitive(res, "streams"));
+            streams_apply(res);
             cJSON_Delete(res);
         } else {
             streams_fetch();

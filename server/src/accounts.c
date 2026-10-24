@@ -65,6 +65,7 @@ static struct {
     int custom;
     float custom_since;
     int host_account_id;
+    char host_guest[33];       // a guest host's device guest id (32 hex; host_account_id is 0 for a guest)
     char host_name[32];
     int custom_had_players;
     cJSON *pending_host;       // "host" waiting for its published map (/api/map-data)
@@ -1591,7 +1592,9 @@ int accounts_kr_rewards(void) {
 }
 
 int accounts_is_custom_host(const ClientConnection *client) {
-    return g_acc.custom && g_acc.host_account_id && client->acct.account_id == g_acc.host_account_id;
+    if (!g_acc.custom) return 0;
+    if (client->acct.account_id > 0) return g_acc.host_account_id && client->acct.account_id == g_acc.host_account_id;
+    return g_acc.host_guest[0] && client->acct.guest_id[0] && strcmp(client->acct.guest_id, g_acc.host_guest) == 0;
 }
 
 // ------------------------------------------------------------------ clan war (v10 mode.clanWar)
@@ -3107,6 +3110,7 @@ static void acc_revert_custom(const char *why) {
     g_server->game.is_ranked = 0;
     g_acc.custom = 0;
     g_acc.host_account_id = 0;
+    g_acc.host_guest[0] = 0;
     g_acc.published_map[0] = 0;
     memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed));
     g_acc.kr_rewards = 0;
@@ -3344,6 +3348,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     g_acc.custom_had_players = 0;
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");
     g_acc.host_account_id = cJSON_IsNumber(host_id) ? host_id->valueint : 0;
+    snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", acc_str(cJSON_GetObjectItem(frame, "hostGuestId"), ""));
     snprintf(g_acc.host_name, sizeof(g_acc.host_name), "%s", acc_str(cJSON_GetObjectItem(frame, "hostName"), ""));
 
     if (ranked) acc_ranked_setup(config);
@@ -3362,18 +3367,46 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     acc_push_lobby_now();
 }
 
+// The first player in the lobby with an account or a guest id: the next host (v10: a guest can host).
+static ClientConnection *acc_next_host(void) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (client->acct.join_state == SERVER_JOIN_READY && (client->acct.account_id > 0 || client->acct.guest_id[0])) return client;
+    }
+    return NULL;
+}
+
+// The host left and the lobby goes on: `next` hosts from now on (the custom host's rights and cheats follow
+// accounts_is_custom_host; the player list's star and the rights are sent to everyone and to `next`).
+static void acc_transfer_host(ClientConnection *next) {
+    server_log("[brain] custom game: the host left, %s (account %d) hosts now", next->name, next->acct.account_id);
+    g_acc.host_account_id = next->acct.account_id;
+    snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", next->acct.account_id > 0 ? "" : next->acct.guest_id);
+    snprintf(g_acc.host_name, sizeof(g_acc.host_name), "%s", next->name);
+    char message[SERVER_PLAYER_NAME_MAX + 32];
+    snprintf(message, sizeof(message), "%s is the new host", next->name);
+    net_broadcast_chat(NULL, message);
+    acc_broadcast_info(next);
+    accounts_push_rights(next);
+}
+
 static void acc_tick_custom(void) {
     if (!g_acc.custom) return;
     const int players = acc_player_count();
     if (players) g_acc.custom_had_players = 1;
 
-    if (g_acc.host_account_id && g_acc.custom_had_players) {
+    if ((g_acc.host_account_id || g_acc.host_guest[0]) && g_acc.custom_had_players) {
         int host_present = 0;
-        for (size_t i = 0; i < g_server->client_count; i++) host_present |= g_server->clients[i].acct.account_id == g_acc.host_account_id;
+        for (size_t i = 0; i < g_server->client_count; i++) host_present |= accounts_is_custom_host(&g_server->clients[i]);
         if (!host_present) {
-            net_broadcast_chat(NULL, "Host ended game"); // gameserver.ts HOST_ENDED_MESSAGE
-            acc_revert_custom("host left");
-            return;
+            // two or more players still in the lobby: the next signed-in one hosts; otherwise the game shuts down
+            ClientConnection *next = players >= 2 ? acc_next_host() : NULL;
+            if (!next) {
+                net_broadcast_chat(NULL, "Host ended game"); // gameserver.ts HOST_ENDED_MESSAGE
+                acc_revert_custom("host left");
+                return;
+            }
+            acc_transfer_host(next);
         }
     }
     if (!players && (g_acc.custom_had_players || g_server->now - g_acc.custom_since > ACC_HOST_IDLE_REVERT)) acc_revert_custom("lobby empty");

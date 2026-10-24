@@ -146,6 +146,8 @@ int game_class_allowed(const Game*, int class_index);
 int game_class_level_ok(const Game*, int class_index, int level, int dev);
 // setClass: config.classes (classes[0] when not listed), then the mode's classes when forceC.
 int game_config_class_for(const Game*, int class_index);
+// Whether the game's class list offers `class_index` (KrunkNative's own classes: game_class_allowed, not the list).
+int game_class_listed(const Game*, int class_index);
 // The class's ClassOverrides, or the v7 defaults when no cls[id] touched it.
 const ClassOverrides *class_overrides(const ClassConfig*);
 extern const ClassOverrides g_default_class_overrides;

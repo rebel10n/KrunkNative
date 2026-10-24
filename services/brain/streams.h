@@ -26,8 +26,13 @@ void streams_shutdown(struct Brain *b);
 /* A Helix GET /streams "data" array -> v10's /streams/top object: {streams:[...], promo:false,
  * dropCampaigns:[]}. Only type "live" rows are kept, logins that are not Twitch logins are
  * dropped, the thumbnail's {width}x{height} template is filled in, the list is sorted by viewers
- * (descending, stable). NULL data gives an empty list. The caller frees the result. */
-cJSON *streams_normalise(const cJSON *data);
+ * (descending, stable). NULL data gives an empty list. The caller frees the result.
+ *
+ * The three flags krunker.io decides on its side (the live answer of api.krunker.io/streams/top, read
+ * 2026-10-24) come from config here: featured = the logins in streams.featured (case-insensitive) get
+ * "featured": true; promo = streams.promo; dropCampaigns = streams.drop_campaigns, copied as they are
+ * (each {game:{name}, streamerNames:[...]}; a non-array gives []). */
+cJSON *streams_normalise(const cJSON *data, const cJSON *featured, int promo, const cJSON *campaigns);
 
 /* The app access token of POST https://id.twitch.tv/oauth2/token: 1 = read (token, lifetime in
  * seconds), 0 = not an answer with an access_token. */

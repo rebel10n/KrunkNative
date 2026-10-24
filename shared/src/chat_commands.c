@@ -2563,13 +2563,9 @@ static int class_refusal(const Game *game, const Player *player, const ClassConf
         snprintf(out, n, "%s is not in this flavor.", name);
         return 1;
     }
-    if (game->config.class_list_count > 0) {
-        int listed = 0;
-        for (int i = 0; i < game->config.class_list_count; i++) listed |= game->config.class_list[i] == index;
-        if (!listed) {
-            snprintf(out, n, "%s is not in this game's class list.", name);
-            return 1;
-        }
+    if (!game_class_listed(game, index)) {
+        snprintf(out, n, "%s is not in this game's class list.", name);
+        return 1;
     }
     if (game->mode && game->config.force_classes) {
         const GameModeConfig *mode = &game->mode->config;
@@ -2597,7 +2593,7 @@ static void cmd_class(ChatCtx *c) {
         return;
     }
     if (!c->host->class_switched) {
-        reply(c, "class works in the offline sandbox only.");
+        reply(c, "class is not available on this server.");
         return;
     }
     Player *player = c->player;
@@ -2756,7 +2752,7 @@ static const ChatCommand COMMANDS[] = {
     {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},
     {{"spawn", NULL, "<object|entity|npc>", "spawn an Object Manager object, entity or NPC at your crosshair (devs: from the menu too)", CHAT_PERM_ANY}, cmd_spawn},
     // KrunkNative third-person camera: its own rule (third_person_allowed), not the perms gate
-    {{"class", NULL, "<name|id> [secondary]", "switch your class now (dev, offline sandbox): its loadout and health, and the secondary weapon", CHAT_PERM_DEV}, cmd_class},
+    {{"class", NULL, "<name|id> [secondary]", "switch your class now (dev): its loadout and health, and the secondary weapon", CHAT_PERM_DEV}, cmd_class},
     {{"classes", NULL, "", "list classes and primary weapons (the spawned player's is starred)", CHAT_PERM_ANY}, cmd_classes},
     {{"thirdperson", NULL, "[on|off]", "ask for the third-person camera (offline, devs, custom hosts / knTPCam)", CHAT_PERM_ANY}, cmd_third_person},
     {{"ff", NULL, "", "vote to forfeit the match with your team (ranked; one start per game)", CHAT_PERM_ANY}, cmd_ff},

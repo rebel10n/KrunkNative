@@ -47,6 +47,9 @@ typedef struct {
     char api_url[256];
     int64_t cache_ms;
     int timeout_ms;
+    cJSON *featured;        /* streams.featured: logins (a copy; read by the fetch thread too) */
+    int promo;              /* streams.promo */
+    cJSON *campaigns;       /* streams.drop_campaigns (a copy) */
 } Cfg;
 
 static Cfg C;
@@ -88,6 +91,11 @@ static void config_load(const kn_config *cfg) {
     C.cache_ms = kn_config_int(cfg, "streams.cache_s", 30) * 1000;
     if (C.cache_ms < 0) C.cache_ms = 0;
     C.timeout_ms = (int) kn_config_int(cfg, "streams.timeout_ms", 8000);
+    cJSON_Delete(C.featured);
+    C.featured = cJSON_Duplicate(kn_config_get(cfg, "streams.featured"), 1);
+    C.promo = kn_config_bool(cfg, "streams.promo", 1);
+    cJSON_Delete(C.campaigns);
+    C.campaigns = cJSON_Duplicate(kn_config_get(cfg, "streams.drop_campaigns"), 1);
 }
 
 static int configured(void) { return C.enabled && C.client_id[0] && C.client_secret[0]; }
@@ -223,7 +231,7 @@ static void job_fetch(Job *j) {
     if (code == 401) j->token[0] = 0;
     if (code == 200 && b.data) {
         cJSON *root = cJSON_Parse(b.data);
-        j->data = streams_normalise(cJSON_GetObjectItemCaseSensitive(root, "data"));
+        j->data = streams_normalise(cJSON_GetObjectItemCaseSensitive(root, "data"), C.featured, C.promo, C.campaigns);
         cJSON_Delete(root);
         j->ok = j->data != NULL;
     } else {
@@ -363,4 +371,8 @@ void streams_shutdown(Brain *b) {
     }
     cJSON_Delete(S.data);
     S.data = NULL;
+    cJSON_Delete(C.featured);
+    C.featured = NULL;
+    cJSON_Delete(C.campaigns);
+    C.campaigns = NULL;
 }

@@ -4594,6 +4594,9 @@ int servers_ui_host_game(const char *config_json) {
         char tok[256];
         backend_url_encode(tok, sizeof(tok), account_session_token());
         snprintf(path + len, n - (size_t) len, "&token=%s", tok);
+    } else if (v10_rewards_guest_id()[0]) {
+        // a guest hosts too (v10): the device's guest id is the host's identity on the server (32 hex, no escaping)
+        snprintf(path + len, n - (size_t) len, "&guest=%s", v10_rewards_guest_id());
     }
     // a matchmaking action of its own (seek_claim.h): a seek still in flight is overtaken by its lobby. A Quick
     // Play search goes on no more: the player chose a game (the startup seek is not needed either)

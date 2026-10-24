@@ -68,11 +68,20 @@ static void lower_copy(char *out, const size_t cap, const char *in) {
     out[k] = 0;
 }
 
-cJSON *streams_normalise(const cJSON *data) {
+/* streams.featured: a login in the configured list (case-insensitive) */
+static int featured_login(const cJSON *featured, const char *login) {
+    const cJSON *f = NULL;
+    cJSON_ArrayForEach(f, featured) {
+        if (cJSON_IsString(f) && !strcasecmp(f->valuestring, login)) return 1;
+    }
+    return 0;
+}
+
+cJSON *streams_normalise(const cJSON *data, const cJSON *featured, int promo, const cJSON *campaigns) {
     cJSON *out = cJSON_CreateObject();
     cJSON *list = cJSON_AddArrayToObject(out, "streams");
-    cJSON_AddBoolToObject(out, "promo", 0);
-    cJSON_AddItemToObject(out, "dropCampaigns", cJSON_CreateArray());
+    cJSON_AddBoolToObject(out, "promo", promo ? 1 : 0);
+    cJSON_AddItemToObject(out, "dropCampaigns", cJSON_IsArray(campaigns) ? cJSON_Duplicate(campaigns, 1) : cJSON_CreateArray());
 
     /* the kept rows, then sorted by viewers (insertion sort: stable, the list is at most 100) */
     cJSON *rows[100];
@@ -92,13 +101,15 @@ cJSON *streams_normalise(const cJSON *data) {
         const double viewers = cJSON_IsNumber(vc) && vc->valuedouble > 0 ? vc->valuedouble : 0;
 
         cJSON *e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "id", str_of(s, "id", ""));
         cJSON_AddStringToObject(e, "username", login); /* twitch.tv/<username>, the card's link */
         cJSON_AddStringToObject(e, "title", str_of(s, "title", ""));
         cJSON_AddNumberToObject(e, "viewerCount", viewers);
         cJSON_AddStringToObject(e, "thumbnailUrl", thumb);
+        cJSON_AddStringToObject(e, "startedAt", str_of(s, "started_at", ""));
+        cJSON_AddStringToObject(e, "provider", "twitch");
         cJSON_AddStringToObject(e, "languageCode", lang);
-        cJSON_AddItemToObject(e, "eventTags", cJSON_CreateArray());
-        cJSON_AddBoolToObject(e, "featured", 0);
+        cJSON_AddBoolToObject(e, "featured", featured_login(featured, login));
 
         int j = n - 1;
         while (j >= 0 && cJSON_GetObjectItemCaseSensitive(rows[j], "viewerCount")->valuedouble < viewers) {

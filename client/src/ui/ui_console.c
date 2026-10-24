@@ -1532,8 +1532,8 @@ static void cmd_strike_reward(const int argc, char **argv, const char *rest) {
     }
 }
 
-// class <name|id> [secondary] (KrunkNative dev): the server switches a spawned player's class now (the offline
-// sandbox only for now). The line goes out as typed, quotes included, so the server reads a quoted class name
+// class <name|id> [secondary] (KrunkNative dev): the server switches a spawned player's class now (any game).
+// The line goes out as typed, quotes included, so the server reads a quoted class name
 // ("Spray N Pray") as one argument. The server refuses what it may not give and says why.
 static void cmd_class(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv;
@@ -1618,7 +1618,7 @@ static void register_commands(void) {
     register_local("reset_binds", NO_ARGS, "alias for resetbinds", cmd_resetbinds);
     register_local("firstperson", NO_ARGS, "back to the first-person camera", cmd_firstperson);
     register_dev("strike_reward", ARGS(A_STRIKE_REWARD), "a sample Krunker Strike reward screen (battlepass: Awesome! opens the Battle Pass)", cmd_strike_reward);
-    register_dev("class", ARGS(A_CLASS), "switch your class now (offline sandbox): its loadout and health, and the secondary weapon", cmd_class);
+    register_dev("class", ARGS(A_CLASS), "switch your class now: its loadout and health, and the secondary weapon", cmd_class);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)

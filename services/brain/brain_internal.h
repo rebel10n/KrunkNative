@@ -96,7 +96,7 @@ cJSON *brain_seek_reply_ex(Brain *b, MmNode *n, const char *game_id, int64_t acc
  * host, port, region, webUrl, nodeId} without issuing a ticket for the host. flavor: the product
  * flavor pool of the node to host on (registry_flavor_match; NULL = the base game). */
 int brain_host_game_ex(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                       const char *account_name, int ticket, const char *flavor, BrainHostCb cb, void *ud);
+                       const char *account_name, const char *guest_id, int ticket, const char *flavor, BrainHostCb cb, void *ud);
 
 /* ---- ranked (ranked.c, doc/backend.md 6.5) */
 int ranked_init(Brain *b);

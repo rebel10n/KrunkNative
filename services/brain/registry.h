@@ -293,7 +293,7 @@ typedef void (*BrainHostCb)(void *ud, const char *err, const cJSON *reply);
 /* flavor: the host's product flavor pool (?flavor=, the requesting node's; NULL = base): a Strike
  * game is only ever hosted on a Strike node and a Box Office one on a base node. */
 int brain_host_game(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                    const char *account_name, const char *flavor, BrainHostCb cb, void *ud);
+                    const char *account_name, const char *guest_id, const char *flavor, BrainHostCb cb, void *ud);
 /* Players in every live lobby (/api/player-count). */
 int registry_player_count(Brain *b);
 

@@ -442,6 +442,7 @@ typedef struct HostReq {
     kn_http_req *req;
     char region[64];
     char flavor[16]; /* ?flavor= / body flavor: the node's product flavor pool */
+    char guest[33];  /* ?guest=: a guest host's device id (32 lowercase hex); no token */
     cJSON *config;
 } HostReq;
 
@@ -455,7 +456,7 @@ static void on_hosted(void *ud, const char *err, const cJSON *reply) {
 
 static void host_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
     HostReq *h = ctx;
-    brain_host_game(b, h->region, h->config, account_id, name, h->flavor, on_hosted, h);
+    brain_host_game(b, h->region, h->config, account_id, name, account_id > 0 ? NULL : h->guest, h->flavor, on_hosted, h);
 }
 
 static void h_host_game(kn_http_req *req, void *ud) {
@@ -481,6 +482,8 @@ static void h_host_game(kn_http_req *req, void *ud) {
     }
     if (!h->region[0]) kn_http_query_get(req, "region", h->region, sizeof(h->region));
     if (!h->flavor[0]) query_flavor(req, h->flavor, sizeof(h->flavor));
+    kn_http_query_get(req, "guest", h->guest, sizeof(h->guest));
+    if (strlen(h->guest) != 32) h->guest[0] = 0;
     if (!h->config) {
         size_t cap = strlen(req->query) + 1; /* a decoded value is never longer than the raw query */
         char *cfg = malloc(cap);

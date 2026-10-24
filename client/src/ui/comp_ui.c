@@ -7,6 +7,7 @@
 #include <lobby_ui.h>
 #include <player_names.h> // Hide player names (player_names.h)
 #include <comp_lobby.h>
+#include <game_config.h>
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <weapons.h>
@@ -32,13 +33,9 @@ static int comp_menu_on(const Client *client) {
     return client && client->game.config.comp && client->game.config.test_mode;
 }
 
-// Game.config.classes.indexOf(i) >= 0 (an empty list: every class)
+// Game.config.classes.indexOf(i) >= 0 (an empty list: every class; KrunkNative's own classes: game_class_listed)
 static int class_offered(const Game *game, const int index) {
-    if (game->config.class_list_count <= 0) return 1;
-    for (int i = 0; i < game->config.class_list_count; i++) {
-        if (game->config.class_list[i] == index) return 1;
-    }
-    return 0;
+    return game_class_listed(game, index);
 }
 
 static const ClassConfig *class_at(const Game *game, const int index) {

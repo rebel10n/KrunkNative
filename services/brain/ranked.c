@@ -1092,7 +1092,7 @@ static void host_match(const cJSON *m) {
     /* brain.ranked.host_regions maps a ranked region to game-server regions; unmapped = any node
      * (this brain's own first: registry_pick_host_node) */
     /* ranked is Krunker Box Office's: base nodes only (flavor NULL) */
-    brain_host_game_ex(R.b, host_region, cfg, 0, NULL, 0, NULL, on_ranked_hosted, h);
+    brain_host_game_ex(R.b, host_region, cfg, 0, NULL, NULL, 0, NULL, on_ranked_hosted, h);
     cJSON_Delete(cfg);
 }
 

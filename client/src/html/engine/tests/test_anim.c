@@ -2331,8 +2331,9 @@ int main(int argc, char **argv)
     }
     loaded += load_keyframes_text(&g_sys, k_terminal_keyframes);
     printf("keyframes loaded: %d (%d sets)\n", loaded, g_sys.set_count);
-    CHECK(loaded == 40);
-    CHECK(g_sys.set_count == 40);
+    /* 40 sets, plus kn-stream-fade (main.css: the Live Streams card fade-in, v10's transition:fade) */
+    CHECK(loaded == 41);
+    CHECK(g_sys.set_count == 41);
     {   /* v10's Svelte component sheet: only the sets the E1 tests sample are asserted */
         char path[512];
         snprintf(path, sizeof path, "%s/svelte.css", css_dir);

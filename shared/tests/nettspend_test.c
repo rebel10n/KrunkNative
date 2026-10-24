@@ -238,6 +238,15 @@ static void test_gating(const cJSON **maps) {
     game_configure(&plain, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
     CHECK(game_class_allowed(&plain, CLASS_ID_NETTSPEND) && !game_class_allowed(&plain, CLASS_TABLE_COUNT) && game_class_allowed(&plain, 0),
           "game_class_allowed: Krunker's classes always, the Nettspend in a plain game, nothing past the table");
+    // a custom game's host list (Krunker's Triggerman only) still offers the Nettspend; Krunker's classes follow the list
+    plain.config.class_list[0] = 0;
+    plain.config.class_list_count = 1;
+    CHECK(game_class_listed(&plain, CLASS_ID_NETTSPEND) && !game_class_listed(&plain, 7) && game_config_class_for(&plain, CLASS_ID_NETTSPEND) == CLASS_ID_NETTSPEND &&
+              game_config_class_for(&plain, 7) == 0,
+          "a host's class list leaves the Nettspend out of nothing; Krunker's classes follow it");
+    plain.is_official = 1;
+    CHECK(!game_class_listed(&plain, CLASS_ID_NETTSPEND) && game_config_class_for(&plain, CLASS_ID_NETTSPEND) == 0,
+          "an official game: the Nettspend is not listed and falls back to the list's first class");
 }
 
 // The level req (game_config.h game_class_level_ok, v10.0.2 _34270): a KrunkNative lobby (public, custom,

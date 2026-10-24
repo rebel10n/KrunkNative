@@ -1601,11 +1601,20 @@ int game_class_level_ok(const Game *game, const int class_index, const int level
     return level >= classes[class_index].min_rec;
 }
 
-int game_config_class_for(const Game *game, const int class_index) {
-    if (!game || game->config.class_list_count <= 0) return class_index;
+// KrunkNative's own classes (past CLASS_COUNT: the Nettspend) are in every game the gate allows them in, whatever
+// the game's class list says: a custom game's list is the host's, and the host's picker does not know them.
+// Krunker's classes follow the list (an empty list: every class).
+int game_class_listed(const Game *game, const int class_index) {
+    if (class_index >= CLASS_COUNT) return game_class_allowed(game, class_index);
+    if (!game || game->config.class_list_count <= 0) return 1;
     for (int i = 0; i < game->config.class_list_count; i++) {
-        if (game->config.class_list[i] == class_index) return class_index;
+        if (game->config.class_list[i] == class_index) return 1;
     }
+    return 0;
+}
+
+int game_config_class_for(const Game *game, const int class_index) {
+    if (!game || game->config.class_list_count <= 0 || game_class_listed(game, class_index)) return class_index;
     return game->config.class_list[0];
 }
 

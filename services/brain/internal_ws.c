@@ -501,7 +501,7 @@ static void handle_host_request(NodeConn *c, const cJSON *frame) {
     const char *region = kn_json_str(frame, "region", n ? n->region : c->b->region);
     /* a node hosts for its own players: in its own flavor pool */
     brain_host_game(c->b, region, cJSON_GetObjectItemCaseSensitive(frame, "config"),
-                    kn_json_int(frame, "hostAccountId", 0), kn_json_str(frame, "hostName", NULL),
+                    kn_json_int(frame, "hostAccountId", 0), kn_json_str(frame, "hostName", NULL), kn_json_str(frame, "hostGuestId", NULL),
                     n ? registry_node_flavor(n) : NULL, on_host_request_done, r);
 }
 

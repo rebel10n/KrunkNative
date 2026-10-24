@@ -212,6 +212,10 @@
     "enabled": true,
     "cache_s": 30,
     "timeout_ms": 8000,
+    "_flags_comment": "featured: the Twitch logins whose streams the answer marks featured (krunker.io's answer carries the flag; v10 shows them in the Featured section). promo: the promo card (api.krunker.io's answer had promo true on 2026-10-24). drop_campaigns: krunker.io's dropCampaigns, {game:{name}, streamerNames:[...]}, passed through as they are.",
+    "featured": [],
+    "promo": true,
+    "drop_campaigns": [],
     "twitch": {
       "client_id": "",
       "client_secret": "",
