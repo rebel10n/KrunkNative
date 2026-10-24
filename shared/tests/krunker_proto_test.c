@@ -847,6 +847,173 @@ static void test_live_manifest(void) {
     cJSON_Delete(d);
 }
 
+// ---------------------------------------------------------------- v10.0.3 argument shapes
+// Frames shaped as the v10.0.3 server packs them (the shared server simulation in the decoded bundle,
+// cited deob-10.0.3.js:<line>), decoded and read through the compiled build's offsets the way
+// client/src/net/krunker_link.c reads them. doc/v10/net.md §9 keeps the packet-by-packet table.
+
+// "0" ADD_PLAYERS: getPlayerAddData (deob-10.0.3.js:198809) packs 53 values a player; the client walks
+// the list `i += 53` (:258194) and passes [21] (player.propID) as players.add's 25th parameter (:258132,
+// updateProp(player, propID || 1) :195129). [17] is customLoadout, [49] the clan again (players.add's
+// `clan` parameter, overwritten by [11] in the handler).
+static void test_shapes_1003_add(void) {
+    CHECK(KRUNKER_ADD_STRIDE == 53);
+    const KrunkerBuild *b = krunker_build_compiled();
+    // the offsets the link reads, as players.add / the handler's assignments use them (:258132-258150)
+    CHECK(b->add[KRB_ADD_ID] == 0 && b->add[KRB_ADD_SID] == 1 && b->add[KRB_ADD_X] == 2 && b->add[KRB_ADD_Z] == 4);
+    CHECK(b->add[KRB_ADD_NAME] == 5 && b->add[KRB_ADD_CLASS_INDEX] == 6 && b->add[KRB_ADD_HEALTH] == 7);
+    CHECK(b->add[KRB_ADD_MAX_HEALTH] == 8 && b->add[KRB_ADD_TEAM] == 9 && b->add[KRB_ADD_LEVEL] == 10 && b->add[KRB_ADD_CLAN] == 11);
+    CHECK(b->add[KRB_ADD_SEC_INDEX] == 15 && b->add[KRB_ADD_IS_HACKER] == 16 && b->add[KRB_ADD_X_DIRE] == 18);
+    CHECK(b->add[KRB_ADD_ATTACH_INDEX] == 22 && b->add[KRB_ADD_PC_STAT_INDEX] == 23 && b->add[KRB_ADD_ALIAS] == 28);
+    CHECK(b->add[KRB_ADD_ACCID] == 31 && b->add[KRB_ADD_IS_BOT] == 44 && b->add[KRB_ADD_CREATOR_BADGE] == 51 &&
+          b->add[KRB_ADD_TITLE_INDEX] == 52);
+    // 21 (propID) and 17 (customLoadout) are no named field: the link reads propID at 21 itself
+    for (int slot = 0; slot < KRB_ADD_COUNT; slot++) CHECK(b->add[slot] != 21 && b->add[slot] != 17);
+
+    // one Prop Hunt player as the server sends it: rounded position / health, propID 7
+    KrunkerValue e[53];
+    for (int i = 0; i < 53; i++) e[i] = KRUNKER_V_NUM(-1);
+    e[0] = KRUNKER_V_STR("sockB"); e[1] = KRUNKER_V_NUM(7); e[2] = KRUNKER_V_NUM(12); e[3] = KRUNKER_V_NUM(-3);
+    e[4] = KRUNKER_V_NUM(40); e[5] = KRUNKER_V_STR("Guest_7"); e[6] = KRUNKER_V_NUM(2); e[7] = KRUNKER_V_NUM(80);
+    e[8] = KRUNKER_V_NUM(100); e[9] = KRUNKER_V_NUM(1); e[10] = KRUNKER_V_NUM(0); e[11] = KRUNKER_V_NUM(0);
+    e[12] = KRUNKER_V_NUM(0); e[16] = KRUNKER_V_NUM(0); e[17] = KRUNKER_V_NIL; e[18] = KRUNKER_V_NUM(1.5707963267948966);
+    e[21] = KRUNKER_V_NUM(7); e[22] = KRUNKER_V_NUM(0); e[28] = KRUNKER_V_STR("Guest_7"); e[38] = KRUNKER_V_NUM(1.5);
+    e[50] = KRUNKER_V_NIL;
+    const KrunkerValue add[] = {KRUNKER_V_ARRAY(e, 53)};
+    KrunkerBuf buf = {0};
+    KrunkerFrame f;
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_ADD_PLAYERS), add, 1, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, KRUNKER_DECODE_STRICT_TRAILER, &f) == KRUNKER_PROTO_OK);
+    const KrunkerValue *list = krunker_frame_arg(&f, 0);
+    CHECK(krunker_is(list, KRUNKER_ARRAY) && list->len == 53);
+    if (krunker_is(list, KRUNKER_ARRAY) && list->len == 53) {
+        CHECK(!strcmp(krunker_str(krunker_at(list, (uint32_t) b->add[KRB_ADD_ID])), "sockB"));
+        CHECK(krunker_num(krunker_at(list, (uint32_t) b->add[KRB_ADD_SID]), 0) == 7);
+        CHECK(krunker_num(krunker_at(list, (uint32_t) b->add[KRB_ADD_HEALTH]), 0) == 80);
+        CHECK(krunker_num(krunker_at(list, (uint32_t) b->add[KRB_ADD_X_DIRE]), 0) == 1.5707963267948966);
+        CHECK(krunker_num(krunker_at(list, 21), 0) == 7);                       // propID
+        CHECK(krunker_is(krunker_at(list, 17), KRUNKER_NIL));                   // customLoadout null
+        CHECK(krunker_num(krunker_at(list, 38), 0) == 1.5);                     // parseFloat(headMlt): float64
+    }
+    krunker_frame_free(&f);
+    krunker_buf_free(&buf);
+}
+
+// "l" SYNC_PLAYER: syncState (deob-10.0.3.js:222389-222404) pushes the 25 movement values, then custSync
+// ([25], a flat list or 0), the movement scheme's sendVals, then the controlled entity [eid, tick, state] or
+// 0. An inactive player gets a bare 0 (:222407). [1] is Math.round(ping); the handler takes it only when
+// truthy (:258311). [13] onWall is sent as 0 / 1 (`onWall ? 1 : 0`).
+static void test_shapes_1003_sync(void) {
+    const KrunkerBuild *b = krunker_build_compiled();
+    CHECK(KRUNKER_SYNC_SEND_VALS == 26 && b->sync[KRB_SYNC_PROTECTED] == 25);
+    CHECK(b->sync[KRB_SYNC_INPUT_SN] == 0 && b->sync[KRB_SYNC_PING] == 1 && b->sync[KRB_SYNC_VEL_Y] == 5 &&
+          b->sync[KRB_SYNC_VEL_X] == 6 && b->sync[KRB_SYNC_VEL_Z] == 7 && b->sync[KRB_SYNC_ON_WALL] == 13 &&
+          b->sync[KRB_SYNC_GRAPPLE] == 23 && b->sync[KRB_SYNC_CAN_SLIDE_T] == 24);
+    KrunkerValue s[27];
+    for (int i = 0; i < 27; i++) s[i] = KRUNKER_V_NUM(0);
+    s[0] = KRUNKER_V_NUM(412);          // inputSN
+    s[1] = KRUNKER_V_NUM(0);            // ping 0: the handler keeps the last one
+    s[2] = KRUNKER_V_NUM(10.25); s[3] = KRUNKER_V_NUM(4.5); s[4] = KRUNKER_V_NUM(-7.125);
+    s[5] = KRUNKER_V_NUM(-0.0025); s[6] = KRUNKER_V_NUM(0.01); s[7] = KRUNKER_V_NUM(-0.02); // velocity.y, .x, .z
+    s[13] = KRUNKER_V_NUM(1);           // onWall ? 1 : 0
+    s[15] = KRUNKER_V_NUM(1);           // aimVal: 1 = hip fire
+    s[23] = KRUNKER_V_NUM(0);           // grapple || 0
+    s[24] = KRUNKER_V_NUM(350);         // canSlideT (ms)
+    s[25] = KRUNKER_V_NUM(0);           // custSync: none
+    s[26] = KRUNKER_V_NUM(0);           // movSch 0 has no sendVals: the controlled entity, none
+    const KrunkerValue l[] = {KRUNKER_V_ARRAY(s, 27)};
+    KrunkerBuf buf = {0};
+    KrunkerFrame f;
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_SYNC_PLAYER), l, 1, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    const KrunkerValue *a = krunker_frame_arg(&f, 0);
+    CHECK(krunker_is(a, KRUNKER_ARRAY) && a->len == 27);
+    CHECK(krunker_num(krunker_at(a, (uint32_t) b->sync[KRB_SYNC_VEL_Y]), 0) == -0.0025);
+    CHECK(krunker_num(krunker_at(a, (uint32_t) b->sync[KRB_SYNC_PING]), -1) == 0);
+    CHECK(krunker_num(krunker_at(a, (uint32_t) KRUNKER_SYNC_SEND_VALS), -1) == 0);
+    krunker_frame_free(&f);
+    // an inactive player: ["l", 0]
+    const KrunkerValue zero[] = {KRUNKER_V_NUM(0)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_SYNC_PLAYER), zero, 1, &buf) == KRUNKER_PROTO_OK);
+    BYTES_ARE(&buf, 0x92, 0xa1, 'l', 0x00, 0x00, 0x00);
+    krunker_buf_free(&buf);
+}
+
+// "k" UPDATE_PLAYERS [list, sendFrequency, now - startTime]: iïÍíìïî (deob-10.0.3.js:222324) pushes 13 values
+// a player: sid, x / y / z .round(2), Math.round(deg(xDire)), Math.round(deg(yDire)), stepVal, onGround 0 / 1,
+// Math.round(crouchVal), loadoutIndex, aimVal ? 1 : 0, [gx, gy, gz] rounded or 0, Math.round(ping).
+static void test_shapes_1003_k(void) {
+    const KrunkerBuild *b = krunker_build_compiled();
+    CHECK(KRUNKER_K_STRIDE == 13 && b->k[KRB_K_SID] == 0 && b->k[KRB_K_X_DIRE] == 4 && b->k[KRB_K_Y_DIRE] == 5 &&
+          b->k[KRB_K_STEP_VAL] == 6 && b->k[KRB_K_AIM_VAL] == 10 && b->k[KRB_K_GRAPPLE] == 11 && b->k[KRB_K_PING] == 12);
+    const KrunkerValue g[] = {KRUNKER_V_NUM(5), KRUNKER_V_NUM(20), KRUNKER_V_NUM(-3)};
+    const KrunkerValue p[] = {KRUNKER_V_NUM(7), KRUNKER_V_NUM(1.25), KRUNKER_V_NUM(2), KRUNKER_V_NUM(-3.5), KRUNKER_V_NUM(-90),
+                              KRUNKER_V_NUM(12), KRUNKER_V_NUM(0.42), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1),
+                              KRUNKER_V_NUM(0), KRUNKER_V_ARRAY(g, 3), KRUNKER_V_NUM(48)};
+    const KrunkerValue k[] = {KRUNKER_V_ARRAY(p, 13), KRUNKER_V_NUM(10), KRUNKER_V_NUM(123456)};
+    KrunkerBuf buf = {0};
+    KrunkerFrame f;
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_UPDATE_PLAYERS), k, 3, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    CHECK(f.argc == 3 && krunker_num(krunker_frame_arg(&f, 1), 0) == 10 && krunker_num(krunker_frame_arg(&f, 2), 0) == 123456);
+    const KrunkerValue *list = krunker_frame_arg(&f, 0);
+    CHECK(krunker_num(krunker_at(list, (uint32_t) b->k[KRB_K_X_DIRE]), 0) == -90); // degrees, an int
+    CHECK(krunker_at(list, 4) && krunker_at(list, 4)->type == KRUNKER_NUM);
+    CHECK(krunker_is(krunker_at(list, (uint32_t) b->k[KRB_K_GRAPPLE]), KRUNKER_ARRAY));
+    krunker_frame_free(&f);
+    krunker_buf_free(&buf);
+}
+
+// The per-event packets the shape audit corrected, as the 10.0.3 server packs them:
+//   "3" KILL_PLAYER [victim, deaths, killer ? killer.sid : 0, stats, info, hideFeed] (deob-10.0.3.js:198678): no
+//       killer is the number 0, not nil (KN reads it as none)
+//   "bo" BUILD_OBJECT [buildInd, x, y, z, w, h, l, dir, uid] (:216805): dir in radians (rotDir :195816-195825), a
+//       float64 on the wire for PI / 2, PI, -PI / 2
+//   "bh" UPDATE_HEAD_SIZE [sid, mlt, reset] (:259406 -> updateHeadSize :194975)
+//   "a" ACCOUNT_RESPONSE [error, id, username, row, ...] (:244344): row indexed by Account.setData (:128966)
+static void test_shapes_1003_events(void) {
+    const KrunkerBuild *b = krunker_build_compiled();
+    CHECK(b->kill[KRB_KILL_VICTIM] == 0 && b->kill[KRB_KILL_DEATHS] == 1 && b->kill[KRB_KILL_KILLER] == 2 &&
+          b->kill[KRB_KILL_STATS] == 3 && b->kill[KRB_KILL_INFO] == 4 && b->kill[KRB_KILL_HIDE_FEED] == 5);
+    KrunkerBuf buf = {0};
+    KrunkerFrame f;
+    const KrunkerValue kill[] = {KRUNKER_V_NUM(5), KRUNKER_V_NUM(2), KRUNKER_V_NUM(0), KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_NIL,
+                                 KRUNKER_V_BOOL(0)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_KILL_PLAYER), kill, 6, &buf) == KRUNKER_PROTO_OK);
+    BYTES_ARE(&buf, 0x97, 0xa1, '3', 0x05, 0x02, 0x00, 0x90, 0xc0, 0xc2, 0x00, 0x00);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    const KrunkerValue *killer = krunker_frame_arg(&f, (uint32_t) b->kill[KRB_KILL_KILLER]);
+    CHECK(krunker_is(killer, KRUNKER_NUM) && killer->u.num == 0);
+    krunker_frame_free(&f);
+
+    const KrunkerValue bo[] = {KRUNKER_V_NUM(2), KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(-4), KRUNKER_V_NUM(10),
+                               KRUNKER_V_NUM(10), KRUNKER_V_NUM(10), KRUNKER_V_NUM(M_PI), KRUNKER_V_NUM(2001)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_BUILD_OBJECT), bo, 9, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    CHECK(f.argc == 9 && krunker_num(krunker_frame_arg(&f, 7), 0) == M_PI && krunker_num(krunker_frame_arg(&f, 8), 0) == 2001);
+    krunker_frame_free(&f);
+
+    const KrunkerValue bh[] = {KRUNKER_V_NUM(4), KRUNKER_V_NUM(1.6), KRUNKER_V_BOOL(1)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_UPDATE_HEAD_SIZE), bh, 3, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    CHECK(f.argc == 3 && krunker_is(krunker_frame_arg(&f, 2), KRUNKER_BOOL) && krunker_frame_arg(&f, 2)->u.boolean);
+    krunker_frame_free(&f);
+
+    KrunkerValue row[48];
+    for (int i = 0; i < 48; i++) row[i] = KRUNKER_V_NUM(0);
+    row[12] = KRUNKER_V_NUM(1);  // isDev
+    row[18] = KRUNKER_V_NUM(3);  // role
+    row[47] = KRUNKER_V_NUM(55); // rankedPoints
+    const KrunkerValue acc[] = {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("RowPlayer"), KRUNKER_V_ARRAY(row, 48)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_ACCOUNT_RESPONSE), acc, 4, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    const KrunkerValue *r = krunker_frame_arg(&f, 3);
+    CHECK(krunker_num(krunker_at(r, 18), 0) == 3 && krunker_num(krunker_at(r, 12), 0) == 1 && krunker_num(krunker_at(r, 47), 0) == 55);
+    CHECK(krunker_get(r, "player_role") == NULL); // the row is an array: no column names
+    krunker_frame_free(&f);
+    krunker_buf_free(&buf);
+}
+
 int main(void) {
     test_tables();
     test_ahnum();
@@ -859,6 +1026,10 @@ int main(void) {
     test_live_values();
     test_live_refusals();
     test_live_manifest();
+    test_shapes_1003_add();
+    test_shapes_1003_sync();
+    test_shapes_1003_k();
+    test_shapes_1003_events();
     if (g_fail) {
         printf("krunker_proto_test FAILED\n");
         return 1;
