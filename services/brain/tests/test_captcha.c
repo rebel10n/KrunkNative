@@ -108,9 +108,55 @@ int main(void) {
     CHECK(captcha_verify(p, "register", now) == CAPTCHA_OK);
     free(p);
 
-    /* purposes: only the three flows */
-    CHECK(captcha_issue("seek", now) == NULL && captcha_issue("", now) == NULL && captcha_issue(NULL, now) == NULL);
+    /* purposes: the five flows; "game" is not public (only a game server's, captcha_node_op) */
+    CHECK(captcha_issue("chat", now) == NULL && captcha_issue("", now) == NULL && captcha_issue(NULL, now) == NULL);
     CHECK(captcha_purpose_ok("hosting") && !captcha_purpose_ok("Login") && !captcha_purpose_ok("login&for=hosting"));
+    CHECK(captcha_purpose_ok("seek") && captcha_purpose_public("seek") && captcha_purpose_ok("game") && !captcha_purpose_public("game"));
+    p = issue_and_solve("seek", now);
+    CHECK(captcha_verify(p, "seek", now) == CAPTCHA_OK);
+    free(p);
+
+    /* bound to the one challenge handed out (a game server's connection): another of ours is refused, unspent */
+    {
+        char *c1 = captcha_issue("game", now), *c2 = captcha_issue("game", now);
+        cJSON *j1 = cJSON_Parse(c1);
+        char ch1[65];
+        snprintf(ch1, sizeof ch1, "%s", kn_json_str(j1, "challenge", ""));
+        char *p2 = solve(c2, NULL), *p1 = solve(c1, NULL);
+        CHECK(captcha_verify_bound(p2, "game", ch1, now) == CAPTCHA_PURPOSE); /* the other connection's */
+        CHECK(captcha_verify_bound(p1, "game", NULL, now) == CAPTCHA_INVALID);
+        CHECK(captcha_verify_bound(p1, "game", ch1, now) == CAPTCHA_OK);
+        CHECK(captcha_verify_bound(p1, "game", ch1, now) == CAPTCHA_SPENT);
+        CHECK(captcha_verify(p2, "game", now) == CAPTCHA_OK); /* the refusal above spent nothing */
+        free(p1); free(p2); free(c1); free(c2);
+        cJSON_Delete(j1);
+    }
+
+    /* the game server's ops over the internal WS (captcha_node_op) */
+    {
+        cJSON *req = cJSON_Parse("{\"type\":\"captcha\",\"rid\":7,\"op\":\"issue\"}");
+        cJSON *r = captcha_node_op(req);
+        const cJSON *ch = cJSON_GetObjectItemCaseSensitive(r, "challenge");
+        CHECK(!strcmp(kn_json_str(r, "type", ""), "captcha-r") && kn_json_int(r, "rid", 0) == 7 && cJSON_IsObject(ch) &&
+              strstr(kn_json_str(ch, "salt", ""), "&for=game"));
+        char *cj = cJSON_PrintUnformatted(ch), *pl = solve(cj, NULL);
+        cJSON *v = cJSON_CreateObject();
+        cJSON_AddStringToObject(v, "type", "captcha");
+        cJSON_AddNumberToObject(v, "rid", 8);
+        cJSON_AddStringToObject(v, "op", "verify");
+        cJSON_AddStringToObject(v, "payload", pl);
+        cJSON_AddStringToObject(v, "challenge", kn_json_str(ch, "challenge", ""));
+        cJSON *ok = captcha_node_op(v);
+        CHECK(kn_json_int(ok, "rid", 0) == 8 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ok, "ok")) &&
+              !strcmp(kn_json_str(ok, "result", ""), "ok"));
+        cJSON *again = captcha_node_op(v);
+        CHECK(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(again, "ok")) && !strcmp(kn_json_str(again, "result", ""), "already used"));
+        cJSON *bad = cJSON_Parse("{\"type\":\"captcha\",\"rid\":9,\"op\":\"nope\"}");
+        cJSON *rb = captcha_node_op(bad);
+        CHECK(!strcmp(kn_json_str(rb, "error", ""), "BadRequest"));
+        cJSON_Delete(req); cJSON_Delete(r); cJSON_Delete(v); cJSON_Delete(ok); cJSON_Delete(again); cJSON_Delete(bad); cJSON_Delete(rb);
+        free(cj); free(pl);
+    }
 
     /* a known answer (python hashlib / hmac): SHA-256(salt + "4242"), HMAC-SHA256(HMAC(secret, label) hex, challenge) */
     const char *kat_salt = "00112233445566778899aabb?expires=2000000000&for=login";

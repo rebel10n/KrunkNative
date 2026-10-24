@@ -394,6 +394,19 @@ static void h_seek_game(kn_http_req *req, void *ud) {
         reply_error(req, 503, "updating");
         return;
     }
+    /* the seek's captcha: v10.0.3 asks Turnstile when /seek-game answers CaptchaRequired and seeks again with
+     * captchaToken (and a fresh validationToken), at most twice (deob-10.0.3.js:164680-164699, 164897). Box Office's is
+     * an ALTCHA for=seek (captcha.h), asked only with captcha.enforce on, before the validation token is spent. Every
+     * refusal is CaptchaRequired, as Krunker's matchmaker answers a refused token (doc/v10/official-captcha.md). */
+    {
+        char cap[CAPTCHA_PAYLOAD_MAX + 1] = "";
+        if (kn_http_query_get(req, "captchaToken", cap, sizeof(cap)) < 0) cap[0] = 0;
+        CaptchaResult cr;
+        if ((cap[0] || captcha_enforced()) && !captcha_gate(cap[0] ? cap : NULL, "seek", req->remote_addr, &cr)) {
+            reply_error(req, 400, "CaptchaRequired");
+            return;
+        }
+    }
     /* Krunker's ?validationToken= (GET /generate-token): checked and spent before a seat is
      * handed out. Clients from before it send none: accepted until
      * brain.matchmaking.require_validation_token is on (doc/v10/matchmaker-token.md "Rollout"). */
@@ -504,7 +517,7 @@ static void h_host_game(kn_http_req *req, void *ud) {
     }
     /* the hosting captcha: v10.0.3's rpc("bCpt", "hosting") before "custom", whose argument after the config is the solved ALTCHA
      * (deob-10.0.3.js:133912-133919, 229992-229998). Here ?captcha= (or the body's captcha): the payload of
-     * GET /captcha/challenge?for=hosting (captcha.h). Refused only with captcha.enforce on: CaptchaRequired /
+     * GET /mm/captcha?for=hosting (captcha.h). Refused only with captcha.enforce on: CaptchaRequired /
      * RecaptchaFailed, v10.0.3's matchmaker error names (deob-10.0.3.js:164975-164976) */
     {
         char *cap = NULL;

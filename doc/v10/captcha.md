@@ -61,6 +61,8 @@ does not stop a solver that pays that cost. The sign-in's per-IP limits stay in 
 | Sign-in with a password (login card, hub login) | `login` | the social frame `["a", 1, [name, pass, null], <payload>]` (sendAccountRequest's captcha slot) | `social_ws.c` `sh_auth` |
 | Registration | `register` | `["a", 0, [name, pass, ref, email], <payload>]` | `social_ws.c` `sh_auth` |
 | Hosting a game on Box Office servers | `hosting` | `GET /mm/host-game?...&captcha=<payload>` | `public_routes.c` `h_host_game` (also a POST body's `captcha`) |
+| Seeking a game (only after `CaptchaRequired`) | `seek` | `GET /mm/seek-game?...&validationToken=<fresh>&captchaToken=<payload>`, at most twice | `public_routes.c` `h_seek_game` |
+| In the game (the server's `cpt`) | `game` | `NET_EXT_CAPTCHA_ANSWER` [payload] to the game server, which asks the brain | `captcha_node_op` (internal WS), bound to that connection's challenge |
 | HTTP sign-in (tools, the coordinator API) | `login` / `register` | `POST /auth/login`, `/auth/register` `{captcha}` | `auth.c` `password_auth` |
 | v10 HTTP sign-in | `login` | `POST /auth/login/username` and `/auth/login/email` `{b}` (v10.0.3's field) | `v10_auth.c` `login_route` |
 
@@ -69,20 +71,49 @@ resume (`["a", 1, [name, null, token]]`), `/auth/refresh`, the 2FA / code / veri
 first step, the emailed sign-in code, recovery. Deviation: v10.0.3 asks only before a username login; Box Office's one
 login field takes a username or an email, and its registration takes a password, so both are gated.
 
-**Not ported**: the game socket's `cpt` push (Box Office's game servers speak KrunkNative's protocol and never ask; the
-trigger is server-side and unknown) and the seek's `CaptchaRequired` (Box Office's matchmaker never answers it: the
-seek's validation token, [matchmaker-token.md](matchmaker-token.md), is its check). The client already solves the same
-challenge format, so either can be added on the brain's side without a client change of format.
+**The seek** (v10.0.3's retry, :164680-164699): with `captcha.enforce` on, `/mm/seek-game` without an accepted
+`captchaToken` answers `400 {"error":"CaptchaRequired"}`, before the validation token is spent; every refusal is
+`CaptchaRequired`, as Krunker's matchmaker answers a refused token. The client (`servers_ui.c` `on_seek`) then solves
+`for=seek` (`kn_captcha_request`), fetches a fresh validation token and seeks again with `captchaToken`, at most twice;
+no captcha to send ends the seek with its error (the generic "Failed"), as v10.0.3 throws it. With enforcement off
+the brain never asks.
+
+**In the game** (v10.0.3's `cpt` / `cptR`, :111424-111437): with `captcha.enforce` on, the brain's welcome tells its
+game servers (`{"captcha": {"enforce": true}}`) and server_bin (`server/src/game_captcha.c`) asks every player
+connection once its identity has settled: `{"type":"captcha","op":"issue"}` to the brain, `NET_EXT_CAPTCHA`
+[challenge] to the player, its `NET_EXT_CAPTCHA_ANSWER` [payload] back to the brain (`op: verify`, bound to that
+connection's challenge, so another connection's answer is refused). Accepted: an empty `NET_EXT_CAPTCHA_ANSWER` (the
+server's `cptR`). Refused, no answer within 45 s, or a peer without EXT packets: `NET_PACKET_ERROR` "CAPTCHA FAILED"
+(code `004008`), the text v10.0.3 closes with. The game goes on while it is solved (v10.0.3's modal does not stop it
+either). The client (`client/src/net/kn_captcha_game.c`) solves it with `kn_captcha_solve`, nothing shown; one it
+cannot solve closes the connection with "CAPTCHA FAILED" on the error screen, v10.0.3's failure branch
+(:111428-111431). Without a brain link (offline, direct servers) nothing is asked. When v10.0.3's servers send `cpt` is
+their own rule, not in the client: Box Office asks each connection once.
+
+### Official krunker.io servers (the official link)
+
+| 10.0.3 flow | What this client does |
+| --- | --- |
+| `cpt` / `cptR` (ALTCHA) | solved natively in C: on the socket thread natively, in slices of the frame loop on the web (`krunker_link.c` `on_captcha`, `krunker_net.c`); `cptR` goes without the ahNum step (`KRUNKER_AHNUM_EXEMPT`). One it cannot solve (not SHA-256, `maxnumber` over 1e7): the "CAPTCHA FAILED" error and the socket closed (`krunker_link_captcha_failed`), v10.0.3's failure branch. Checked by `krunker_link_test` and `krunker_official_e2e.py` |
+| `/seek-game` `CaptchaRequired` (Turnstile) | retried at most twice with `captchaToken` and a fresh validation token (`krunker_net.c` `on_seek` / `captcha_done`). The token is Cloudflare's: the native client shows krunker.io's own Turnstile widget in a platform webview on a krunker.io page (WebKitGTK, WebView2, WKWebView; a build with `KN_WEBVIEW`), drawn in the game, and the player solves it when Cloudflare asks. Without a webview (or on an `HTML_ENGINE=OFF` build) no token can be had: one seek without it, then the generic failure. The web build renders the widget too, but the sitekey is bound to krunker.io, so on krunk.io it fails (Cloudflare 110200). Details: [official-captcha.md](official-captcha.md) |
+| `loginUsername` `b` (Turnstile) | the krunker.io account's sign-in asks the same widget first (`krunker_account.c` `start_sign_in`), the same limits |
+| `bCpt` before hosting (ALTCHA) | not implemented: the official link has no RPC, so a guest cannot host a krunker.io custom game (`krunker_net_host_block`: `KRUNKER_HOST_GUEST`); a signed-in krunker.io account hosts without it, as v10.0.3 does (`if (account)` at :229989) |
+
+What a native client cannot do: produce a Turnstile token without a browser engine on krunker.io's origin (the
+sitekey is bound to the domain and Cloudflare decides when a human must interact), or verify one (that takes
+krunker.io's secret). It never solves, farms or proxies Turnstile; the player does, in the webview.
 
 ### The brain (`services/brain/captcha.h`)
 
-- `GET /captcha/challenge?for=login|register|hosting` (`captcha_http.c`, AUTH and COMMUNITY roles) answers an ALTCHA
+- `GET /mm/captcha?for=login|register|hosting|seek` (`captcha_http.c`, AUTH and COMMUNITY roles) answers an ALTCHA
   challenge, the JSON an `<altcha-widget challengeurl>` fetches: `{"algorithm":"SHA-256","challenge","maxnumber","salt",
-  "signature"}`. `salt` = 24 random hex digits + `?expires=<unix s>&for=<purpose>`, `challenge` =
+  "signature"}` (`for=game` only for a game server, over the internal WS: `captcha_node_op`). `salt` = 24 random hex
+  digits + `?expires=<unix s>&for=<purpose>`, `challenge` =
   `hex(SHA-256(salt + number))` for a random number in `[0, captcha.max_number]`, `signature` =
   `hex(HMAC-SHA256(key, challenge))`. Another purpose: 400 `BadRequest`; no key: 503 `Unavailable`. No-store, CORS.
   v10.0.3 has no such route (its challenges come from Cloudflare and over the game socket): it is Box Office's, and it is
-  served whether or not enforcement is on.
+  served whether or not enforcement is on. It sits under `/mm/` so that every proxy in front of the brain hands it to a
+  web page (net-bridge `--web`'s `PROXIED_PREFIXES`, the deploy's OpenResty `^/(auth|mm|api|social|ai)/`).
 - **Key**: `HMAC-SHA256(brain.join_secret, "kn-captcha-altcha-v1")`, so any brain of a network verifies what another
   issued, and a captcha signature is never a validation token's or a join ticket's. Issuing stores nothing.
 - **Verify** (`captcha_verify`): SHA-256 only; the hash and the signature (constant time); then, the payload being ours,
@@ -93,13 +124,14 @@ challenge format, so either can be added on the brain's side without a client ch
   (captcha.enforce off: let through)`). On: refused, logged at INFO, answered with v10.0.3's own strings: "Please
   complete the security challenge to continue." (missing, :111601) or "CAPTCHA FAILED" (anything else, :111430) on the
   sign-in routes and the social socket; `CaptchaRequired` / `RecaptchaFailed` (v10.0.3's matchmaker error names,
-  :164975-164976) on `/mm/host-game`, which the client shows as the generic "Failed".
+  :164975-164976) on `/mm/host-game`, which the client shows as the generic "Failed"; always `CaptchaRequired` on
+  `/mm/seek-game` (the client retries); "CAPTCHA FAILED" in the game.
 - Config: `captcha.enforce` (false), `captcha.max_number` (100000; the widget's own default is 1e6; clamped to
   1000..1e7, the client's cap), `captcha.ttl_s` (300, clamped to 10..3600).
 
 ### The client (`client/include/kn_captcha.h`)
 
-- `kn_captcha_request(purpose, done, user)`: `GET <brain>/captcha/challenge?for=<purpose>` (`backend_http_get`, so the
+- `kn_captcha_request(purpose, done, user)`: `GET <brain>/mm/captcha?for=<purpose>` (`backend_http_get`, so the
   same on native and web), then the search in slices of `KN_CAPTCHA_SLICE_MS` (6 ms) per frame from `backend_frame`
   (`kn_captcha_tick`), round robin over the captchas in flight (at most 4), never in one go. With the default
   `max_number` that is about 50 000 hashes: a few frames.
@@ -129,4 +161,14 @@ challenge format, so either can be added on the brain's side without a client ch
   the route, every gated flow over HTTP and the social socket (missing, solved, replayed, another flow's, forged), a
   saved session's resume, host-game, and the shadow log.
 - `client/tests/captcha_e2e.py`: headless client_bin against a brain with `captcha.enforce` on: register and sign in
-  through v10's login popup, and a scripted socket without a captcha refused.
+  through v10's login popup, host a game, and a sign-in without a captcha refused.
+- `server/tests/captcha_game_e2e.py` (CTest `brain_captcha_game_e2e`): kn_brain with `captcha.enforce` on and a
+  brain-linked server_bin: seek-game's `CaptchaRequired` and its solved retry, the in-game `cpt` answered and accepted,
+  a wrong number / another connection's answer / a peer without EXT packets closed with "CAPTCHA FAILED", a headless
+  client_bin seeking at launch (CaptchaRequired, the seek's captcha, the join, the `cpt` answered); enforcement off
+  asks nothing.
+- `krunker_link_test`: an official `cpt` solved (`cptR`, no ahNum step) and the unsolvable ones ending with "CAPTCHA
+  FAILED".
+- `tools/kref/web-session/captcha-e2e.js`: the web build on the web stack (`stack.sh` with
+  `KN_WEB_BRAIN_ARGS="--captcha.enforce=true --debug=2"`): through net-bridge's `/mm` proxy the page solves the seek's
+  captcha after `CaptchaRequired`, answers the node's in-game `cpt`, and signs in after the login captcha.

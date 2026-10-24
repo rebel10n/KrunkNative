@@ -175,7 +175,7 @@ static void password_auth(kn_http_req *req, int action) {
         reply_err(req, 400, "Invalid credentials.");
         return;
     }
-    /* KrunkNative's {captcha}: the ALTCHA payload of GET /captcha/challenge (captcha.h); refused only with
+    /* KrunkNative's {captcha}: the ALTCHA payload of GET /mm/captcha (captcha.h); refused only with
      * captcha.enforce on, before the password is hashed */
     CaptchaResult cr;
     if (!captcha_gate(kn_json_str(body, "captcha", NULL), action == 0 ? "register" : "login", req->remote_addr, &cr)) {

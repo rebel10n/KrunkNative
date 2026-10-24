@@ -774,7 +774,7 @@ brain draining).
 | `GET /mm/generate-token` | Krunker `matchmaker/generate-token` | `text/plain` validation token for the next seek-game (rate-limited: 120/min per address, then 429 `TooManyRequests`) |
 | `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION][&validationToken=T]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl","map"}` |
 | `GET /mm/host-game?region=R&config=JSON[&token=SESSION][&captcha=PAYLOAD]` (also `POST`, JSON body `{region, config, captcha}`) | (game socket `custom` in v3.1.1) | same as seek-game, for a freshly hosted custom lobby; the hosting captcha (7.10) |
-| `GET /captcha/challenge?for=login\|register\|hosting` | (Krunker Box Office; v10.0.3 gets its challenges from Cloudflare and over the game socket) | an ALTCHA challenge `{"algorithm":"SHA-256","challenge","maxnumber","salt","signature"}` (7.10, [v10/captcha.md](v10/captcha.md)); 400 `BadRequest`, 503 `Unavailable` without a key |
+| `GET /mm/captcha?for=login\|register\|hosting` | (Krunker Box Office; v10.0.3 gets its challenges from Cloudflare and over the game socket) | an ALTCHA challenge `{"algorithm":"SHA-256","challenge","maxnumber","salt","signature"}` (7.10, [v10/captcha.md](v10/captcha.md)); 400 `BadRequest`, 503 `Unavailable` without a key |
 | `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
 | `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
 | `GET /api/player-count`, `/social/player-count` | same | `{"playerCount":N}` |
@@ -1733,7 +1733,7 @@ every driver); social labels `a2FA`, `a2FAc`, `d2FA`, `d2FAc`, `2fa` (code), `ce
 
 Box Office's captcha is an ALTCHA proof of work in front of a password sign-in, a registration and a hosted
 game (the spec, every Krunker v10.0.3 call site, and why not Turnstile: [v10/captcha.md](v10/captcha.md)).
-`GET /captcha/challenge?for=login|register|hosting` issues a challenge (stateless: signed with
+`GET /mm/captcha?for=login|register|hosting` issues a challenge (stateless: signed with
 `HMAC-SHA256(brain.join_secret, "kn-captcha-altcha-v1")`, so any brain of the network verifies it); the
 client solves it (`client/src/net/kn_captcha.c`, native and web) and sends the payload in the flow's captcha
 field; the brain checks it at the flow's entry, before the password is hashed: hash, signature, expiry,
@@ -1745,14 +1745,22 @@ purpose, and once per brain (replay).
 | `POST /auth/login`, `/auth/register` | `captcha` | 400 `{"ok":false,"error":"<text>"}` |
 | `POST /auth/login/username`, `/auth/login/email` (v10) | `b` (v10.0.3's) | 400 `{"data":null,"error":"<text>"}` |
 | `/mm/host-game` | `?captcha=` / body `captcha` | 400 `CaptchaRequired` (none) / `RecaptchaFailed` |
+| `/mm/seek-game` (`for=seek`; enforced only) | `?captchaToken=` | 400 `CaptchaRequired` (any refusal): the client solves and retries, at most twice, with a fresh `validationToken` |
+| a game server's player (`for=game`; enforced only) | `NET_EXT_CAPTCHA_ANSWER` | `NET_PACKET_ERROR` "CAPTCHA FAILED" (`004008`) |
 
-`<text>` is v10.0.3's: "Please complete the security challenge to continue." (none) or "CAPTCHA FAILED".
+`<text>` is v10.0.3's: "Please complete the security challenge to continue." (none) or "CAPTCHA FAILED". Turning
+enforcement on also makes every Box Office seek and every game join solve one (a few frames each).
 
 | key | default | meaning |
 | --- | --- | --- |
 | `captcha.enforce` | `false` | refuse the flows above without an accepted payload. Off: everything goes through, and what would be refused is logged at DEBUG (`login from <ip>: captcha missing (captcha.enforce off: let through)`); refusals are INFO |
 | `captcha.max_number` | `100000` | the challenge's `maxnumber` (1000..1e7): a solver tries about half of it (SHA-256s). The ALTCHA widget's default is 1e6 |
 | `captcha.ttl_s` | `300` | a challenge's lifetime (10..3600), in its salt's `expires` |
+
+In-game (v10.0.3's `cpt`): the internal WS `welcome` carries `"captcha": {"enforce": bool}`; a node asks the brain
+`{"type":"captcha","rid","op":"issue"}` -> `{"type":"captcha-r","rid","challenge"}` and
+`{"type":"captcha","rid","op":"verify","payload","challenge"}` -> `{"type":"captcha-r","rid","ok","result"}`
+(server/src/game_captcha.c asks every player connection once, closes a refused or late one).
 
 Ansible: `kn_brain_captcha_enforce` (roles/kn_brain/defaults, `false`) is `captcha.enforce` in the brain's
 config.json. The challenge route is served with enforcement on or off, and the brain logs
@@ -1774,7 +1782,9 @@ config.json. The challenge route is served with enforcement on or off, and the b
    brain: a payload accepted on one brain could be accepted once more on another, each still a proof of work.
 
 Tests: `kn_brain_captcha_test` (unit), `brain_captcha_e2e` (`services/brain/tests/captcha_test.py`),
-`kn_captcha_test` (the client), `client/tests/captcha_e2e.py` (headless client_bin, enforced brain).
+`kn_captcha_test` (the client), `client/tests/captcha_e2e.py` (headless client_bin, enforced brain),
+`brain_captcha_game_e2e` (`server/tests/captcha_game_e2e.py`: the seek's CaptchaRequired and the in-game `cpt` with a
+brain-linked server_bin and client_bin).
 
 ## 8. Game server (`server_bin`): config, brain client, accounts
 
@@ -2373,7 +2383,7 @@ transport is not started until `/mm/seek-game` answers. The hub page (`--hub`,
 | UI | frames |
 | --- | --- |
 | startup / reconnect (`readyLoad`) | storage `krunker_username` + `krunker_token` -> `["a",1,[name,null,token]]` |
-| Register / Login (window 5) | `["a",0,[name,pass,null],captcha]` / `["a",1,[name,pass,null],captcha]` -> `["a",err,id,name,data40,token,info]`; error text in `#accResp`. `captcha`: the solved `GET /captcha/challenge` (7.10, `kn_captcha.c`), null when the brain has none |
+| Register / Login (window 5) | `["a",0,[name,pass,null],captcha]` / `["a",1,[name,pass,null],captcha]` -> `["a",err,id,name,data40,token,info]`; error text in `#accResp`. `captcha`: the solved `GET /mm/captcha` (7.10, `kn_captcha.c`), null when the brain has none |
 | Logout | `["a",-1]`, storage keys cleared |
 | header bar (`cK`) | `#signedInHeaderBar`: name (alias when premium), KR, level, level bar, `#mailCount` (`info.mail_unread`, `["gmc",n]`) |
 | match result | `["ua",data40,info]` push (also `upd`); fallback: a token re-login 3 s after a round ends |

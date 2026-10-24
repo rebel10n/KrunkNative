@@ -12,7 +12,7 @@ set(KN_BRAIN_SOURCES
     public_routes.c
     mm_token.c                      # mm-token: seek-game validation tokens (/generate-token)
     captcha.c                       # captcha: the ALTCHA challenges of sign-in, registration and hosting (pure)
-    captcha_http.c                  # captcha: captcha.* config, GET /captcha/challenge
+    captcha_http.c                  # captcha: captcha.* config, GET /mm/captcha
     host.c
     ranked.c
     ranked_notice.c                 # the queued-for-ranked notice's social frame (pure)
@@ -337,6 +337,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ks_storage_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_ks_storage_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # the captcha on Box Office servers (doc/v10/captcha.md): seek-game's CaptchaRequired and the in-game "cpt"
+        # with captcha.enforce on, through a brain-linked server_bin and a headless client_bin (77 without client_bin)
+        add_test(NAME brain_captcha_game_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/captcha_game_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_captcha_game_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # mm-fill: quick join fills the populated lobby (3 server_bin nodes; sequential seekers
         # inside the lobby-up debounce and concurrent seekers all land together)
         add_test(NAME brain_mm_fill_e2e
@@ -553,7 +559,7 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_account_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_api_account PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
-    # the captcha (captcha.h): GET /captcha/challenge and every flow it gates, captcha.enforce on and off (tests/captcha_test.py)
+    # the captcha (captcha.h): GET /mm/captcha and every flow it gates, captcha.enforce on and off (tests/captcha_test.py)
     add_test(NAME brain_captcha_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/captcha_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})

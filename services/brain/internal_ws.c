@@ -10,6 +10,7 @@
 
 #include "ai.h"
 #include "brain_internal.h"
+#include "captcha.h" /* the nodes' in-game captcha */
 #include "game_presence.h"
 #include "roles.h"
 #include "strike_econ.h"
@@ -572,6 +573,9 @@ static void handle_hello(NodeConn *c, const cJSON *frame) {
     cJSON_AddNumberToObject(w, "ttlMs", s->node_ttl_s * 1000.0);
     /* the live game events (Krunker v10.0.3 ongoingEvents: kill pools, community.c "gameEvents") */
     cJSON_AddItemToObject(w, "gameEvents", community_game_events(kn_wall_ms()));
+    /* captcha.enforce (captcha.h): the node then asks each player its in-game "cpt" (server/src/game_captcha.c) */
+    cJSON *cap = cJSON_AddObjectToObject(w, "captcha");
+    cJSON_AddBoolToObject(cap, "enforce", captcha_enforced());
     send_frame(c, w);
     cJSON_Delete(w);
     federation_node_changed(b, n);
@@ -631,6 +635,12 @@ static void handle_frame(NodeConn *c, const cJSON *frame) {
     }
     if (!strcmp(type, "player-leave")) {
         game_presence_leave(b, n->node_id, kn_json_str(frame, "lobbyId", ""), kn_json_int(frame, "accountId", 0));
+        return;
+    }
+    if (!strcmp(type, "captcha")) { /* the node's in-game captcha: issue / verify (captcha_node_op) */
+        cJSON *reply = captcha_node_op(frame);
+        send_frame(c, reply);
+        cJSON_Delete(reply);
         return;
     }
     if (!strcmp(type, "acct") || !strcmp(type, "db-call")) {

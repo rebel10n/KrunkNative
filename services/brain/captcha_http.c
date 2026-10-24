@@ -2,7 +2,7 @@
  * services/brain/captcha_http.c - the captcha module (captcha.h, doc/v10/captcha.md): the captcha.* config and
  * the challenge route.
  *
- *   GET /captcha/challenge?for=login|register|hosting
+ *   GET /mm/captcha?for=login|register|hosting|seek
  *       -> 200 {"algorithm":"SHA-256","challenge","maxnumber","salt","signature"} (an ALTCHA challenge: what
  *          v10.0.3's "cpt" packet and bCpt answer carry, deob-10.0.3.js:111425, 133914; what an <altcha-widget
  *          challengeurl> fetches)
@@ -11,7 +11,9 @@
  * v10.0.3 has no such HTTP route: its sign-in captcha comes from Cloudflare (Turnstile's api.js,
  * deob-10.0.3.js:130307) and its ALTCHA challenges over the game socket (cpt, bCpt). The route is Box Office's,
  * served whether or not captcha.enforce is on, so clients solve before any brain enforces (the rollout,
- * doc/backend.md 7.10). Issuing is stateless (signed, nothing stored), so it is not rate-limited.
+ * doc/backend.md 7.10). Issuing is stateless (signed, nothing stored), so it is not rate-limited. It sits under /mm/
+ * (next to /mm/generate-token) so that every proxy in front of the brain passes it to a web page: net-bridge --web
+ * (brainProxy.ts PROXIED_PREFIXES) and the deploy's OpenResty (location ^/(auth|mm|api|social|ai)/).
  */
 #include <string.h>
 
@@ -39,7 +41,7 @@ static void h_challenge(kn_http_req *req, void *ud) {
     }
     char purpose[24] = "";
     kn_http_query_get(req, "for", purpose, sizeof purpose);
-    if (!captcha_purpose_ok(purpose)) {
+    if (!captcha_purpose_public(purpose)) {
         challenge_error(req, 400, "BadRequest");
         return;
     }
@@ -74,6 +76,6 @@ int captcha_init(Brain *b) {
         KN_NOTICE("captcha", "captcha challenges issued, not enforced (captcha.enforce off; max_number %ld, ttl %d s)",
                 captcha_max_number(), captcha_ttl());
     }
-    kn_http_route(b->http, NULL, "/captcha/challenge", h_challenge, b);
+    kn_http_route(b->http, NULL, "/mm/captcha", h_challenge, b);
     return 0;
 }

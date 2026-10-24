@@ -10,7 +10,7 @@ challenges are solved here the way the ALTCHA 1.0.6 widget's worker does (libs/a
 whose SHA-256(salt + number) is the challenge, the payload base64(JSON {algorithm, challenge, number, salt,
 signature, took})), which is also what the client's krunker_altcha.c sends (client/tests/kn_captcha_test.c).
 
-  enforce on:   GET /captcha/challenge (shape, CORS, purposes); POST /auth/register and /auth/login {captcha};
+  enforce on:   GET /mm/captcha (shape, CORS, purposes); POST /auth/register and /auth/login {captcha};
                 POST /auth/login/username and /auth/login/email {b} (v10.0.3's field); the social socket's
                 ["a", action, payload, captcha]; GET /mm/host-game ?captcha=. Missing -> refused with v10.0.3's
                 texts / error names, solved -> through, the same payload again (a replay) -> refused, another
@@ -96,7 +96,7 @@ def http(port, method, path, body=None):
 
 
 def challenge(port, purpose):
-    st, body, _ = http(port, "GET", "/captcha/challenge?for=" + purpose)
+    st, body, _ = http(port, "GET", "/mm/captcha?for=" + purpose)
     return body if st == 200 else None
 
 
@@ -133,9 +133,9 @@ def text_error(body):
 # ---- the checks
 
 def challenge_checks(port):
-    st, body, hdrs = http(port, "GET", "/captcha/challenge?for=login")
+    st, body, hdrs = http(port, "GET", "/mm/captcha?for=login")
     keys = sorted(body.keys()) if isinstance(body, dict) else []
-    check("GET /captcha/challenge?for=login -> 200 {algorithm, challenge, maxnumber, salt, signature} (altcha-lib v1)",
+    check("GET /mm/captcha?for=login -> 200 {algorithm, challenge, maxnumber, salt, signature} (altcha-lib v1)",
           st == 200 and keys == ["algorithm", "challenge", "maxnumber", "salt", "signature"] and body["algorithm"] == "SHA-256"
           and re.fullmatch(r"[0-9a-f]{64}", body["challenge"]) and re.fullmatch(r"[0-9a-f]{64}", body["signature"])
           and body["maxnumber"] == 20000, "HTTP %d %s" % (st, json.dumps(body)[:200]))
@@ -144,12 +144,12 @@ def challenge_checks(port):
           body.get("salt") if isinstance(body, dict) else "")
     check("the route answers CORS and no-store", hdrs.get("Access-Control-Allow-Origin") and "no-store" in hdrs.get("Cache-Control", ""),
           repr({k: v for k, v in hdrs.items() if k.lower().startswith(("access", "cache"))}))
-    for purpose in ("register", "hosting"):
-        st, body, _ = http(port, "GET", "/captcha/challenge?for=" + purpose)
-        check("GET /captcha/challenge?for=%s -> 200" % purpose, st == 200 and body["salt"].endswith("&for=" + purpose))
-    for bad in ("", "seek", "login%26for%3Dhosting"):
-        st, body, _ = http(port, "GET", "/captcha/challenge?for=" + bad)
-        check("GET /captcha/challenge?for=%s -> 400 BadRequest" % (bad or "(none)"), st == 400 and text_error(body) == "BadRequest",
+    for purpose in ("register", "hosting", "seek"):
+        st, body, _ = http(port, "GET", "/mm/captcha?for=" + purpose)
+        check("GET /mm/captcha?for=%s -> 200" % purpose, st == 200 and body["salt"].endswith("&for=" + purpose))
+    for bad in ("", "game", "chat", "login%26for%3Dhosting"):  # game: a game server's only (internal WS)
+        st, body, _ = http(port, "GET", "/mm/captcha?for=" + bad)
+        check("GET /mm/captcha?for=%s -> 400 BadRequest" % (bad or "(none)"), st == 400 and text_error(body) == "BadRequest",
               "HTTP %d %s" % (st, json.dumps(body)[:120]))
     a, b = challenge(port, "login"), challenge(port, "login")
     check("every challenge is a new one", a and b and a["challenge"] != b["challenge"] and a["salt"] != b["salt"])

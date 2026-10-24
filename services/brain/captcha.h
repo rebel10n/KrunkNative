@@ -34,6 +34,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "cJSON.h"
+
 #define CAPTCHA_DEFAULT_MAX_NUMBER 100000L /* captcha.max_number: the widget's own default is 1e6 (altcha.1.0.6.min.js) */
 #define CAPTCHA_DEFAULT_TTL_S 300          /* captcha.ttl_s */
 #define CAPTCHA_PAYLOAD_MAX 4096           /* longer payloads are refused unread */
@@ -60,8 +62,11 @@ int captcha_enforced(void); /* captcha.enforce, and a key to issue with */
 long captcha_max_number(void);
 int captcha_ttl(void);
 
-/* A purpose a challenge may be issued for: "login", "register", "hosting". */
+/* A purpose a challenge may be issued for: "login", "register", "hosting", "seek" (seek-game's CaptchaRequired) and
+ * "game" (a game server's in-game "cpt", captcha_node_op only). captcha_purpose_public: the ones
+ * GET /mm/captcha issues (all but "game"). */
 int captcha_purpose_ok(const char *purpose);
+int captcha_purpose_public(const char *purpose);
 
 /* A fresh challenge JSON for purpose (malloc'd), NULL: no key, an unknown purpose, out of memory.
  * now_ms 0 = the wall clock. */
@@ -69,6 +74,8 @@ char *captcha_issue(const char *purpose, int64_t now_ms);
 
 /* Checks payload for purpose and, when it is accepted, spends it. NULL or "" = CAPTCHA_MISSING. */
 CaptchaResult captcha_verify(const char *payload, const char *purpose, int64_t now_ms);
+/* The same, for the one challenge (64 hex) that was handed out: another challenge of ours is CAPTCHA_PURPOSE. */
+CaptchaResult captcha_verify_bound(const char *payload, const char *purpose, const char *challenge, int64_t now_ms);
 const char *captcha_result_name(CaptchaResult r);
 
 /* The text a refused sign-in or registration answers: v10.0.3's own captcha strings
@@ -85,7 +92,11 @@ const char *captcha_refusal_error(CaptchaResult r);
  * captcha_refusal_error of *result. who = the client's address, for the log. */
 int captcha_gate(const char *payload, const char *purpose, const char *who, CaptchaResult *result);
 
-/* The brain module (captcha_http.c): captcha.* config, GET /captcha/challenge?for=<purpose>. */
+/* A game server's request over the internal WS (internal_ws.c): "issue" a for=game challenge or "verify" a payload
+ * bound to the challenge it handed out. Returns the "captcha-r" reply (caller frees). */
+cJSON *captcha_node_op(const cJSON *frame);
+
+/* The brain module (captcha_http.c): captcha.* config, GET /mm/captcha?for=<purpose>. */
 struct Brain;
 int captcha_init(struct Brain *b);
 

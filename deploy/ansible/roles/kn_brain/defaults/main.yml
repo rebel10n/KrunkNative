@@ -52,7 +52,7 @@ kn_brain_ai_upstream_key: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_KEY'
 # market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
 kn_brain_email_require_verified: []
 # captcha.enforce (doc/backend.md 7.10): refuse a password sign-in, a registration or a hosted game without a solved
-# ALTCHA challenge (GET /captcha/challenge, served either way). False until the clients that solve are out: step 4
+# ALTCHA challenge (GET /mm/captcha, served either way). False until the clients that solve are out: step 4
 # of the rollout is setting this true in group_vars and redeploying.
 kn_brain_captcha_enforce: false
 # ffmpeg: the user-asset mirror turns a map's video asset into its frame sidecar (video.mp4.knv,

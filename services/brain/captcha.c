@@ -67,8 +67,14 @@ int captcha_ttl(void) {
 }
 
 int captcha_purpose_ok(const char *purpose) {
-    /* v10.0.3's bCpt names its flow ("hosting", deob-10.0.3.js:229992); the sign-in ones are Box Office's */
-    return purpose && (!strcmp(purpose, "login") || !strcmp(purpose, "register") || !strcmp(purpose, "hosting"));
+    /* v10.0.3's bCpt names its flow ("hosting", deob-10.0.3.js:229992); the others are Box Office's */
+    return purpose && (!strcmp(purpose, "login") || !strcmp(purpose, "register") || !strcmp(purpose, "hosting") ||
+                       !strcmp(purpose, "seek") || !strcmp(purpose, "game"));
+}
+
+int captcha_purpose_public(const char *purpose) {
+    /* "game" is only issued to a game server for one connection (captcha_node_op) */
+    return captcha_purpose_ok(purpose) && strcmp(purpose, "game") != 0;
 }
 
 /* hex(SHA-256(salt + decimal(number))): altcha.1.0.6.min.js kt(salt, number, "SHA-256") */
@@ -146,7 +152,7 @@ static int spend(const char *challenge, int64_t exp_ms, int64_t now_ms) {
     return 0;
 }
 
-static CaptchaResult verify_json(const cJSON *o, const char *purpose, int64_t now_ms) {
+static CaptchaResult verify_json(const cJSON *o, const char *purpose, const char *expect, int64_t now_ms) {
     const char *alg = kn_json_str(o, "algorithm", NULL), *challenge = kn_json_str(o, "challenge", NULL);
     const char *salt = kn_json_str(o, "salt", NULL), *signature = kn_json_str(o, "signature", NULL);
     const cJSON *num = cJSON_GetObjectItemCaseSensitive(o, "number");
@@ -167,10 +173,23 @@ static CaptchaResult verify_json(const cJSON *o, const char *purpose, int64_t no
     if (!end || *end || exp_s <= 0) return CAPTCHA_INVALID;
     if (exp_s * 1000 <= now_ms) return CAPTCHA_EXPIRED;
     if (!salt_param(salt, "for", what, sizeof what) || !purpose || strcmp(what, purpose) != 0) return CAPTCHA_PURPOSE;
+    /* bound to one challenge (the game server's to one connection): another of ours is another flow's */
+    if (expect && !kn_ct_streq(expect, challenge)) return CAPTCHA_PURPOSE;
     return spend(challenge, exp_s * 1000, now_ms) ? CAPTCHA_SPENT : CAPTCHA_OK;
 }
 
+static CaptchaResult verify_payload(const char *payload, const char *purpose, const char *expect, int64_t now_ms);
+
 CaptchaResult captcha_verify(const char *payload, const char *purpose, int64_t now_ms) {
+    return verify_payload(payload, purpose, NULL, now_ms);
+}
+
+CaptchaResult captcha_verify_bound(const char *payload, const char *purpose, const char *challenge, int64_t now_ms) {
+    if (!challenge || strlen(challenge) != 64) return CAPTCHA_INVALID;
+    return verify_payload(payload, purpose, challenge, now_ms);
+}
+
+static CaptchaResult verify_payload(const char *payload, const char *purpose, const char *expect, int64_t now_ms) {
     if (!payload || !*payload) return CAPTCHA_MISSING;
     const size_t len = strlen(payload);
     if (len > CAPTCHA_PAYLOAD_MAX || !g_cap.key[0]) return CAPTCHA_INVALID;
@@ -179,7 +198,7 @@ CaptchaResult captcha_verify(const char *payload, const char *purpose, int64_t n
     const int n = kn_base64_decode(payload, len, raw, sizeof raw);
     if (n <= 0) return CAPTCHA_INVALID;
     cJSON *o = kn_json_parse((const char *) raw, (size_t) n);
-    const CaptchaResult r = cJSON_IsObject(o) ? verify_json(o, purpose, now_ms) : CAPTCHA_INVALID;
+    const CaptchaResult r = cJSON_IsObject(o) ? verify_json(o, purpose, expect, now_ms) : CAPTCHA_INVALID;
     cJSON_Delete(o);
     return r;
 }
@@ -220,4 +239,33 @@ int captcha_gate(const char *payload, const char *purpose, const char *who, Capt
     }
     KN_INFO(MOD, "%s from %s refused: captcha %s", purpose, who ? who : "?", captcha_result_name(r));
     return 0;
+}
+
+/* server_bin's in-game captcha (v10.0.3's "cpt" / "cptR", deob-10.0.3.js:111424-111437) over the internal WS:
+ *   {"type":"captcha","rid","op":"issue"}                       -> {"type":"captcha-r","rid","challenge":{...}}
+ *   {"type":"captcha","rid","op":"verify","payload","challenge"} -> {"type":"captcha-r","rid","ok","result"}
+ * The challenge is for=game; verify binds the payload to the challenge hex the server gave that connection. */
+cJSON *captcha_node_op(const cJSON *frame) {
+    const char *op = kn_json_str(frame, "op", "");
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddStringToObject(r, "type", "captcha-r");
+    const cJSON *rid = cJSON_GetObjectItemCaseSensitive(frame, "rid");
+    if (cJSON_IsNumber(rid)) cJSON_AddNumberToObject(r, "rid", rid->valuedouble);
+    if (!strcmp(op, "issue")) {
+        char *json = captcha_issue("game", 0);
+        cJSON *c = json ? kn_json_parse(json, strlen(json)) : NULL;
+        cJSON_free(json);
+        if (c) cJSON_AddItemToObject(r, "challenge", c);
+        else cJSON_AddStringToObject(r, "error", "Unavailable");
+    } else if (!strcmp(op, "verify")) {
+        const CaptchaResult cr =
+            captcha_verify_bound(kn_json_str(frame, "payload", NULL), "game", kn_json_str(frame, "challenge", NULL), 0);
+        cJSON_AddBoolToObject(r, "ok", cr == CAPTCHA_OK);
+        cJSON_AddStringToObject(r, "result", captcha_result_name(cr));
+        if (cr == CAPTCHA_OK) KN_DEBUG(MOD, "game from node: captcha accepted");
+        else KN_INFO(MOD, "game from node refused: captcha %s", captcha_result_name(cr));
+    } else {
+        cJSON_AddStringToObject(r, "error", "BadRequest");
+    }
+    return r;
 }

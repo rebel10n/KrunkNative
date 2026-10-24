@@ -3,6 +3,8 @@
 #include <server.h>
 #include <server_accounts.h>
 #include <server_trade.h> // trade_tick
+#include <server_captcha.h> // game_captcha_tick
+#include <server_brain_events.h> // brain_events_tick
 #include <bots.h>
 #include <ks_server.h> // KrunkScript server host
 #include <server_config.h> // g_gs_config.shutdown_reason_file
@@ -87,6 +89,8 @@ void server_core_tick(const float now, const float delta, const double tick_wall
     game_tick(&g_server->game, now, delta);
     ks_server_tick(delta); // KrunkScript update() after the game update (GJS:4960), custom sync values
     accounts_tick(now); // brain events, join timeouts, stats commits, lobby pushes
+    game_captcha_tick(now); // the in-game captcha of a brain that enforces it (game_captcha.c)
+    brain_events_tick(now); // map prize wheels' pointers, the brain questions of the round (brain_events.c)
     trade_tick(now, delta); // the live trade: request expiry, "Loading n", the settle (server/src/trade.c)
     net_check_idle_clients(now);
     net_broadcast_states();

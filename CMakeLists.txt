@@ -206,6 +206,8 @@ set(SERVER_CORE_SOURCES
     server/src/trade.c            # the live trade of Trade mode (doc/v10/trade.md): sessions, packets, the brain ops
     server/src/trade_session.c    # ... its state machine (pure, unit-tested by trade_test)
     server/src/published_maps.c   # published:<creator>/<name> maps: v10's checks + the cache (the fetch is brain.c's)
+    server/src/game_captcha.c     # the in-game captcha (v10.0.3 "cpt"): asked only with a brain link that enforces it
+    server/src/brain_events.c     # v10.0.3 warsClan, map prize wheel spins, unb / lotWin, monetized studio games (kn_brain)
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -1205,8 +1207,8 @@ else ()
 
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
-    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/ui/player_names.c
-                   client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
+    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_link_trade.c client/src/ui/player_names.c
+                   client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c shared/src/rules/v10/network_sounds_v10.c
                    shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                    shared/src/season.c shared/src/voice.c shared/src/social.c)
     target_include_directories(krunker_link_test PRIVATE client/include shared/include)
@@ -1294,7 +1296,7 @@ else ()
         add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
                        client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
                        client/src/net/krunker_link_s2c.c
-                       client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c client/src/ui/player_names.c
+                       client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c shared/src/rules/v10/network_sounds_v10.c client/src/ui/player_names.c
                        client/src/ui/quick_play_retry.c
                        shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                        shared/src/season.c shared/src/voice.c shared/src/social.c)
