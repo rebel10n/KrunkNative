@@ -6775,10 +6775,11 @@
    "cat": 0,
    "def": 0,
    "options": [
-    "Normal",
-    "Top Down",
+    "FPS",
+    "3rd Person",
     "Platformer (X)",
-    "Platformer (Z)"
+    "Platformer (Z)",
+    "Orthographic"
    ],
    "select": true
   },

@@ -32,6 +32,9 @@ entity limits are added (V10_LIMITS; webcrack shared/config/renamed.js:7866-7871
 "gameConfig" is the v3.1.1 map-wide "game" panel (tools/editor/v3_game_config.json). v7 replaced it
 with the per-class "cls" config; the editor imports a "game" block into every class and its left
 panel's Game folder writes every class until the v7 Class Config panel lands (doc/v7/editor.md WP4).
+Its camType options are v10.0.3's class list (FPS, 3rd Person, Platformer (X), Platformer (Z),
+Orthographic; deob-10.0.3.js:20162-20168): the values the "game" block's camType copies into a class
+mean those, and v3.1.1's "Normal" / "Top Down" labels are gone from v10.
 """
 
 import json

@@ -114,8 +114,8 @@ const unsigned char editor_texture_variants[EDITOR_TEXTURE_COUNT] = {
 
 // the editor's configuration lists, parsed once by editor_data_json()
 const char editor_data_text[] =
-    "{\"gameConfig\":[{\"name\":\"Type\",\"varN\":\"camType\",\"cat\":0,\"def\":0,\"options\":[\"Normal\",\"Top Down\",\"Platf"
-    "ormer (X)\",\"Platformer (Z)\"],\"select\":true},{\"name\":\"X Offset\",\"varN\":\"camOffX\",\"cat\":0,\"def\":0,\"max"
+    "{\"gameConfig\":[{\"name\":\"Type\",\"varN\":\"camType\",\"cat\":0,\"def\":0,\"options\":[\"FPS\",\"3rd Person\",\"Platf"
+    "ormer (X)\",\"Platformer (Z)\",\"Orthographic\"],\"select\":true},{\"name\":\"X Offset\",\"varN\":\"camOffX\",\"cat\":0,\"def\":0,\"max"
     "\":500,\"min\":0,\"step\":1},{\"name\":\"Y Offset\",\"varN\":\"camOffY\",\"cat\":0,\"def\":0,\"max\":500,\"min\":0,\"step\""
     ":1},{\"name\":\"Z Offset\",\"varN\":\"camOffZ\",\"cat\":0,\"def\":0,\"max\":500,\"min\":0,\"step\":1},{\"name\":\"Enable "
     "Rotation\",\"varN\":\"camRot\",\"cat\":0,\"def\":true,\"bool\":true},{\"name\":\"Model\",\"varN\":\"mdl\",\"cat\":1,\"def\""
