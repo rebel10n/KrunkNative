@@ -55,6 +55,8 @@ ACCOUNTS = {
     "bob": (100, "kn-v10-acct-bob-%d" % os.getpid()),       # ranked: 8 matches
     "carol": (0, "kn-v10-acct-carol-%d" % os.getpid()),     # match_results today: 1200 score
     "dave": (5000, "kn-v10-acct-dave-%d" % os.getpid()),    # the store spin (Starter costs 50 KR)
+    # a 16-character name from before the 14 cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725): it keeps working
+    "longname_legacy1": (0, "kn-v10-acct-long-%d" % os.getpid()),
 }
 IDS = {}
 EP_ALICE = "https://push.example.test/sub/alice-1"
@@ -178,6 +180,11 @@ def is_board(d):
             and [r.get("position") for r in rows] == [1, 2] and d.get("totalPages") == 1)
 
 
+def is_empty_board(d):
+    rows = d.get("leaderboard") if isinstance(d, dict) else None
+    return isinstance(rows, list) and rows == []
+
+
 def is_history(d):
     mh = d.get("matchHistory") if isinstance(d, dict) else None
     ms = mh.get("matches") if isinstance(mh, dict) else None
@@ -210,6 +217,10 @@ def is_me(d):
     return isinstance(d, dict) and d.get("id") == IDS["alice"] and d.get("username") == "alice" and "token" not in d
 
 
+def is_me_long(d):
+    return isinstance(d, dict) and d.get("username") == "longname_legacy1" and d.get("id") == IDS["longname_legacy1"]
+
+
 def is_wallet(d):
     return isinstance(d, dict) and d.get("funds") == ACCOUNTS["alice"][0] and isinstance(d.get("junk"), str)
 
@@ -231,9 +242,10 @@ def is_change_unknown(d):
 
 
 def is_spin(d):
-    return (isinstance(d, dict) and isinstance(d.get("itemIDs"), list) and len(d["itemIDs"]) == 1
-            and d.get("funds") == ACCOUNTS["dave"][0] - 50 and d.get("redeemedTicket") is None
-            and isinstance(d.get("randNums"), list) and len(d["randNums"]) == 1)
+    # the keys v10.0.3's consumer reads: fakeRands, itemIds, funds, usedTicket (deob-10.0.3.js:254636-254638)
+    return (isinstance(d, dict) and isinstance(d.get("itemIds"), list) and len(d["itemIds"]) == 1
+            and d.get("funds") == ACCOUNTS["dave"][0] - 50 and d.get("usedTicket") is None
+            and isinstance(d.get("fakeRands"), list) and len(d["fakeRands"]) == 1)
 
 
 def is_none(d):
@@ -265,6 +277,10 @@ ROUTES = [
      "row 2: signed out (decoded 3734)"),
     ("GET", "/leaderboards/rankings/season/%d/region/%s?limit=10&offset=0" % (SEASON, REGION), None, None, "DATA",
      is_board, "row 3: ranked leaderboard, placed players by conservative rating (decoded 5160; v10.js 25972, 98600)"),
+    ("GET", "/leaderboards/rankings/season/%d?limit=10&offset=0" % SEASON, None, None, "DATA", is_board,
+     "row 3: no /region/ segment is the Global board (the Global tab's region is undefined, deob-10.0.3.js:155825, 29900)"),
+    ("GET", "/leaderboards/rankings/season/%d/region/4?limit=10&offset=0" % SEASON, None, None, "DATA", is_empty_board,
+     "row 3: another region's board has none of the eu players (so the Global case above is not the eu default)"),
     ("POST", "/player-profile/me/claim-milestone/region/%s" % REGION, {}, "alice", "DATA", is_claim,
      "row 4: claim the next ranked milestone, 100 RP (decoded 5160; v10.js 25976, 98741)"),
     ("POST", "/player-profile/me/claim-milestone/region/%s" % REGION, {}, "alice", "DATA", is_claim_again,
@@ -296,6 +312,8 @@ ROUTES = [
     ("GET", "/player/me", None, "alice", "DATA", is_me,
      "row 50: the signed-in account (decoded 5160; v10.js 26312)"),
     ("GET", "/player/me", None, None, "SIGNEDOUT", None, "row 50: signed out (decoded 5160)"),
+    ("GET", "/player/me", None, "longname_legacy1", "DATA", is_me_long,
+     "row 50: a 16-character name made before the 14 cap still resumes (only a new name is capped: no forced renames)"),
     ("GET", "/player/wallet", None, "alice", "DATA", is_wallet,
      "row 51: the KR balance (players.player_funds) and junk (decoded 4527; v10.js 26317)"),
     ("GET", "/player/wallet", None, None, "SIGNEDOUT", None, "row 51: signed out (decoded 4527)"),
@@ -319,7 +337,7 @@ ROUTES = [
 
     # ---- store spin: POST /spins/execute {index, ticket, multi} (decoded 5160; v10.js 27299, no v10 caller)
     ("POST", "/spins/execute", {"index": 0, "ticket": -1, "multi": False}, "dave", "DATA", is_spin,
-     "row 187: the store spin of wheel 0 (Starter, 50 KR), the socket's spin op (decoded 5160; v10.js 27299)"),
+     "row 187: the store spin of wheel 0 (Starter, 50 KR), the socket's spin op (deob-10.0.3.js:31337, consumer 254630-254638)"),
     ("POST", "/spins/execute", {"index": 99999, "ticket": -1, "multi": False}, "dave", "BAD", None,
      "row 187: an index that is not a wheel (decoded 5160)"),
     ("POST", "/spins/execute", {"index": 0, "ticket": -1, "multi": False}, None, "SIGNEDOUT", None,

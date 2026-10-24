@@ -529,7 +529,7 @@ void sh_spin(SocialSession *s, const cJSON *f) {
 /* ------------------------------------------------------------------ POST /spins/execute (v10, HTTP root)
  * The socket's "spin" over HTTP, for v10's POST /spins/execute {index, ticket, multi}: the same pick (spin_pick), the
  * same checks and rolls (spin_rolls) and the same P_SPIN_MULTI transaction, as a chain of plain DB calls. The answer
- * is the socket's reply as the v10 envelope data: {randNums, itemIDs, funds, redeemedTicket}. */
+ * is the socket's reply as the v10 envelope data, under v10.0.3's names: {fakeRands, itemIds, funds, usedTicket}. */
 
 static void http_spin_fail(SpinCtx *c, int status, const char *code, const char *message) {
     v10_reply_error(c->req, status, code, message);
@@ -545,12 +545,14 @@ static void http_spin_done(kn_db_result *res, void *ud) {
         cJSON_AddItemToArray(nums, cJSON_CreateNumber(c->pos[i]));
         cJSON_AddItemToArray(items, cJSON_CreateNumber(c->skin[i]));
     }
+    /* v10.0.3's spins.execute consumer reads data.fakeRands, itemIds, funds, usedTicket (and the optional
+     * instances) and hands them to the spin handler (deob-10.0.3.js:254636-254638) */
     cJSON *d = cJSON_CreateObject();
-    cJSON_AddItemToObject(d, "randNums", nums);
-    cJSON_AddItemToObject(d, "itemIDs", items);
+    cJSON_AddItemToObject(d, "fakeRands", nums);
+    cJSON_AddItemToObject(d, "itemIds", items);
     cJSON_AddNumberToObject(d, "funds", (double) kn_json_int(v, "funds", 0));
-    if (c->ticket >= 0) cJSON_AddNumberToObject(d, "redeemedTicket", c->ticket);
-    else cJSON_AddNullToObject(d, "redeemedTicket");
+    if (c->ticket >= 0) cJSON_AddNumberToObject(d, "usedTicket", c->ticket);
+    else cJSON_AddNullToObject(d, "usedTicket");
     cJSON_Delete(v);
     v10_reply_data(c->req, 200, d);
     free(c);
