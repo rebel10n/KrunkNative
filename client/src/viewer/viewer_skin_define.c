@@ -143,7 +143,7 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
         {"stepSnd", VS2_STEP_SND}, {"jumpSnd", VS2_JUMP_SND}, {"reloadSnd", VS2_RELOAD_SND}, {"explode", VS2_EXPLODE},
         {"sameEnv", VS2_SAME_ENV}, {"forceAttach", VS2_FORCE_ATTACH}, {"tradable", VS2_TRADABLE},
         {"limitedSpin", VS2_LIMITED_SPIN}, {"premiumSpin", VS2_PREMIUM_SPIN}, {"paintTargets", VS2_PAINTABLE},
-        {"noComp", VS2_NO_COMP},
+        {"noComp", VS2_NO_COMP}, {"noSnd", VS2_NO_SND},
     };
     for (size_t i = 0; i < sizeof(flags2) / sizeof(flags2[0]); i++)
         if (truthy(get(j, flags2[i].key))) s->flags2 |= flags2[i].bit;

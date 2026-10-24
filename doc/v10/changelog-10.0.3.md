@@ -130,8 +130,14 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
    KN: `viewer_weapon_alt_skin` (`client/src/viewer/viewer_store.c`), drawn by `player_mesh.c` (first and third
    person, the menu and viewer previews; yOff / zOff / mScl and the charm mount's charmM*Off),
    `zombies_render.c` and `prefab.c` (`prefab_weapon_mesh`, `prefab_pickup_mesh`). Every model and texture is in
-   the v7.1.4 content set, byte-identical to assets.krunker.io (no lock entry, nothing new to deploy). Left: the
-   shot sound "weapon.sound_<mid>" (deob:196399-196405): KN plays no skin shot sound yet, for store skins either.
+   the v7.1.4 content set, byte-identical to assets.krunker.io (no lock entry, nothing new to deploy). The shot sound
+   follows the remodel too (shoot, deob:196392-196405): weapon.sound + "_<mid>" for the remodel a slot wears (its store
+   skin from getSkinForLoadout, deob:190800-190811, else the altSkin) unless noSnd (`VS2_NO_SND`, the store table's 107
+   noSnd items and the Nova Alien), "_blast" for a full charge, "weapon_upgraded" on an upgraded slot (deob:202656),
+   and nothing for a name outside networkSounds, as v10's indexOf gives -1 (`viewer_weapon_shot_sound`,
+   `client/src/sound_events.c` shot_sound: our shots and other players' on KN servers; on the official link the
+   server names the sound in its own "s"). Every networkSounds file is installed but weapon_13, weapon_18,
+   weapon_7_0 and weapon_4_16, which 404 on assets.krunker.io (2026-10-24): nothing new to deploy.
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
 3. Done: the KrunkScript AI parts, `ai.solid` and the `playAnim` hold (doc/v10/krunkscript-1003.md). Left: the client side
    of `scripts.shared` (local entity simulation needs entity replication first, section 5 there).

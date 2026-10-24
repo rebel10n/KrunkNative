@@ -95,6 +95,7 @@ const rows = store.skins.map((s, i) => {
   flag2(s.snd, 'VS2_SND'); flag2(s.killSnd, 'VS2_KILL_SND'); flag2(s.stepSnd, 'VS2_STEP_SND'); flag2(s.jumpSnd, 'VS2_JUMP_SND');
   flag2(s.reloadSnd, 'VS2_RELOAD_SND'); flag2(s.spraySnd != null, 'VS2_SPRAY_SND'); flag2(s.explode, 'VS2_EXPLODE');
   flag2(s.sameEnv, 'VS2_SAME_ENV'); flag2(truthy(s.forceAttach), 'VS2_FORCE_ATTACH');
+  flag2(truthy(s.noSnd), 'VS2_NO_SND'); // a remodel that keeps the weapon's shot sound (v10.0.3 shoot, deob-10.0.3.js:196403)
   // v10.0.2: the server's tradable bit, limitedSpin (a noSpin item a wheel may still draw),
   // premiumSpin, paint consumables / paintable items, item sets
   flag2(s.tradable, 'VS2_TRADABLE'); flag2(s.limitedSpin, 'VS2_LIMITED_SPIN'); flag2(s.premiumSpin, 'VS2_PREMIUM_SPIN');

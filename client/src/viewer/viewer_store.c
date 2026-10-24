@@ -120,9 +120,8 @@ static const ViewerAltSkin k_alt_nova_semi = {
 };
 static const ViewerAltSkin k_alt_nova_uzi = {.skin = {ALT_SKIN("Nova Uzi", 10, 0, 0, 3, VS_BLOCKED)}};
 static const ViewerAltSkin k_alt_nova_alien = {
-    .skin = {ALT_SKIN("Nova Alien", 12, 5, 0, 7, VS_BLOCKED), .y_off = -0.2f, .m_scl = 1.5f},
+    .skin = {ALT_SKIN("Nova Alien", 12, 5, 0, 7, VS_BLOCKED), .y_off = -0.2f, .m_scl = 1.5f, .flags2 = VS2_NO_SND},
     .charm_m = {-0.51f, -0.14f, -1.2500000000000013f},
-    .no_snd = 1,
 };
 static const ViewerAltSkin k_alt_cupids_blaster = {.skin = {ALT_SKIN(NULL, 12, 4, -1, 6, 0)}}; // no name, not blocked
 #undef ALT_SKIN
@@ -135,6 +134,37 @@ const ViewerAltSkin *viewer_weapon_alt_skin(const int weapon_id, const int upgra
         case 11: return upgraded ? &k_alt_cupids_blaster : &k_alt_nova_alien;
         default: return NULL;
     }
+}
+
+int viewer_loadout_skin(const int primary, const int secondary, const int weapon_id) {
+    const int skins[2] = {primary, secondary};
+    for (int i = 0; i < 2; i++) {
+        const ViewerSkin *skin = viewer_skin(skins[i]);
+        if (skin && skin->type == 0 && skin->weapon - 1 == weapon_id) return skins[i];
+    }
+    return -1;
+}
+
+int viewer_weapon_shot_sound(const char *sound, const ViewerSkin *skin, const int weapon_id, const int upgraded, const int blast,
+                             char *out, const size_t n) {
+    if (!out || !n) return 0;
+    out[0] = 0;
+    if (!sound || !sound[0]) return 0;
+    if (blast) {
+        snprintf(out, n, "%s_blast", sound);
+        return 0;
+    }
+    // `if (!ae && weapon.altSkin != null) ae = weapon.altSkin; if (ae && ae.weapon - 1 != loadout[i] || weapon.upgraded) ae = {}`
+    if (!skin) {
+        const ViewerAltSkin *alt = viewer_weapon_alt_skin(weapon_id, 0);
+        skin = alt ? &alt->skin : NULL;
+    }
+    if (upgraded || !skin || skin->weapon - 1 != weapon_id || skin->mid < 0 || (skin->flags2 & VS2_NO_SND)) {
+        snprintf(out, n, "%s", sound);
+        return 0;
+    }
+    snprintf(out, n, "%s_%d", sound, skin->mid);
+    return 1;
 }
 
 const ViewerOptionList *viewer_option_list(const ViewerListKind kind, const int key, const int season) {

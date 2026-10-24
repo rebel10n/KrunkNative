@@ -18,6 +18,7 @@
 #include <defuse.h>  // v10 Defuse: the planter's beeps
 #include <piss.h> // KrunkNative Piss: PISS_SOUND_INTERVAL
 #include <nettspend_audio.h> // KrunkNative Nettspend: the Drank's pour up, Money Spread's throw, the laced loop
+#include <network_sounds.h> // networkSounds: the names a shot may play
 #include "viewer/viewer_store.h"
 #include <math.h>
 #include <pcg_basic.h>
@@ -134,6 +135,25 @@ static int weapon_entry(const Weapon *weapon) {
         if (!strcmp(WEAPON_SOUNDS[i].weapon, weapon->name)) return (int) i;
     }
     return -1;
+}
+
+// shoot()'s sound (deob-10.0.3.js:196392-196405) for the slot `p` holds: weapon.sound ("weapon_upgraded" on a
+// krumMachine-upgraded slot: upgradeWeapons' sound, deob:202656), + "_blast" for a full charge, else + "_<mid>" for the
+// remodel the slot wears, its store skin (getSkinForLoadout) or else the weapon's altSkin, unless noSnd
+// (viewer_weapon_shot_sound). v10 plays networkSounds[indexOf(name)], so a name outside that table plays nothing. -1: no
+// shot sound for this weapon (outside Krunker's table); 0: silent; 1: play `name`. *casings: the weapon's !nCase.
+static int shot_sound(const Player *p, const int blast, char *name, const size_t n, int *casings) {
+    name[0] = 0;
+    if (!p->weapon || !p->loadout || p->loadout_index < 0 || p->loadout_index >= p->loadout_size) return -1;
+    const int slot = p->loadout_index, id = p->loadout[slot];
+    const int upgraded = slot < 8 && (p->upgraded_slots >> slot & 1);
+    const Weapon *base = upgraded && p->game && p->game->weapons && id >= 0 && (size_t) id < p->game->weapon_count ? p->game->weapons[id] : p->weapon;
+    const int entry = weapon_entry(base); // an upgraded entry may carry another name (the AWP Blaster)
+    if (entry < 0) return -1;
+    if (casings) *casings = WEAPON_SOUNDS[entry].casings;
+    const ViewerSkin *skin = viewer_skin(viewer_loadout_skin(p->skins.primary, p->skins.secondary, id));
+    viewer_weapon_shot_sound(upgraded ? "weapon_upgraded" : WEAPON_SOUNDS[entry].sound, skin, id, upgraded, blast, name, n);
+    return name[0] && network_sound_index(name) >= 0;
 }
 
 static void play_numbered(const char *prefix, const int min, const int max, const float volume, const float rate) {
@@ -338,16 +358,15 @@ static void local_shot(PlayerTrack *track, const Player *me, const float now) {
         return;
     }
 
-    const int entry = weapon_entry(weapon);
-    if (entry < 0) return;
+    // shoot(): playSound(fullCharge ? weapon.sound + "_blast" : weapon.sound (+ the remodel's "_<mid>"), 0.85, ..., rate
+    // randFloat(0.9, 1.1)) -> SOUND.play (shot_sound); tryGrapple plays weapon.sound the same way.
+    char name[48];
+    int casings = 0;
+    const int shot = shot_sound(me, me->shot_blast && weapon->full_charge_shot, name, sizeof(name), &casings);
+    if (shot < 0) return;
+    if (shot) audio_play(name, 0.85f, 0, rand_float(0.9f, 1.1f));
 
-    // shoot(): playSound(fullCharge ? weapon.sound + "_blast" : weapon.sound, 0.85, ..., rate
-    // randFloat(0.9, 1.1)) -> SOUND.play; tryGrapple plays weapon.sound the same way.
-    char blast[48];
-    snprintf(blast, sizeof(blast), "%s_blast", WEAPON_SOUNDS[entry].sound);
-    audio_play(me->shot_blast && weapon->full_charge_shot ? blast : WEAPON_SOUNDS[entry].sound, 0.85f, 0, rand_float(0.9f, 1.1f));
-
-    if (WEAPON_SOUNDS[entry].casings && !(weapon->grapple_range > 0.0f) && now - track->last_shell > SHELL_INTERVAL) {
+    if (casings && !(weapon->grapple_range > 0.0f) && now - track->last_shell > SHELL_INTERVAL) {
         track->last_shell = now;
         play_numbered("case_", 0, 1, 0.45f, rand_float(0.8f, 1.3f));
     }
@@ -591,7 +610,8 @@ void sound_events_kill(const int headshot, const Player *killer, const int weapo
 
 void sound_events_remote_shot(Client *client, const Player *shooter, const int blast) {
     // shoot() on the server -> "s" packet -> playerSound -> play3D(weapon.sound, 0.85, rate); a
-    // full-charge shot plays weapon.sound + "_blast" (NetShotPacket.first 2).
+    // full-charge shot plays weapon.sound + "_blast" (NetShotPacket.first 2), a remodel weapon.sound + "_<mid>"
+    // (shot_sound: the shooter's skins and upgrades). The official link's server names it in its own "s" instead.
     if (!shooter || shooter == client->me) return;
     // KrunkNative Nettspend: Money Spread's throw (by weapon id)
     if (shooter->loadout && shooter->loadout_index >= 0 && shooter->loadout_index < shooter->loadout_size &&
@@ -609,11 +629,8 @@ void sound_events_remote_shot(Client *client, const Player *shooter, const int b
         audio_play_3d(stream_sound, shooter->position, 0.22f, rand_float(0.85f, 1.08f), 0.0f, 0.0f);
         return;
     }
-    const int entry = weapon_entry(shooter->weapon);
-    if (entry < 0) return;
     char name[48];
-    snprintf(name, sizeof(name), blast ? "%s_blast" : "%s", WEAPON_SOUNDS[entry].sound);
-    audio_play_3d(name, shooter->position, 0.85f, rand_float(0.9f, 1.1f), 0.0f, 0.0f);
+    if (shot_sound(shooter, blast, name, sizeof(name), NULL) > 0) audio_play_3d(name, shooter->position, 0.85f, rand_float(0.9f, 1.1f), 0.0f, 0.0f);
 }
 
 void sound_events_explosion(const vec3 position) {

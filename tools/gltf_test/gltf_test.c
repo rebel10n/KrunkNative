@@ -12,7 +12,8 @@
 //     them their regular texture (none for a dye, melee_20 for the melee) and no projection;
 //   - v10.0.3 material extras (tools/gltf_test/env_extras.gltf): env (the opt-in reflections) and noFog;
 //   - v10.0.3 weapon altSkin remodels (viewer_weapon_alt_skin): the Nova Pump / Semi / Uzi / Alien and the Cupids
-//     Blaster load their model and texture, and the upgraded ones play the altSkin video on the remodel.
+//     Blaster load their model and texture, and the upgraded ones play the altSkin video on the remodel; the shot
+//     sound a remodel plays (weapon.sound_<mid>, noSnd, upgraded, blast) and getSkinForLoadout.
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -21,6 +22,7 @@
 #include <gltf.h>
 #include <headless.h>
 #include <render_settings.h>
+#include <network_sounds.h>
 #include <pets.h>
 #include <ruleset.h>
 #include <skin_fx.h>
@@ -379,8 +381,9 @@ static void check_weapon_remodels(void) {
               "weapon %d: the item %s", want[i].id, s->name ? s->name : "(no name)");
         CHECK(s->m_scl == want[i].m_scl && s->y_off == want[i].y_off && s->z_off == want[i].z_off && s->x_off == 0.0f,
               "%s: mScl %g yOff %g zOff %g", want[i].model, s->m_scl, s->y_off, s->z_off);
-        CHECK(fabsf(alt->charm_m[0] - want[i].charm_x) < 1e-5f && alt->no_snd == want[i].no_snd, "%s: charmMXOff %g, noSnd %d", want[i].model,
-              alt->charm_m[0], alt->no_snd);
+        const int no_snd = (s->flags2 & VS2_NO_SND) != 0;
+        CHECK(fabsf(alt->charm_m[0] - want[i].charm_x) < 1e-5f && no_snd == want[i].no_snd, "%s: charmMXOff %g, noSnd %d", want[i].model,
+              alt->charm_m[0], no_snd);
         CHECK(!(s->flags2 & (VS2_VIDEO | VS2_PROJECTION)) && (!want[i].upgraded || skin_video_alt_skin(want[i].id) == want[i].video),
               "%s: the video is skin_video_alt_skin's (%d)", want[i].model, want[i].video);
 
@@ -415,6 +418,57 @@ static void check_weapon_remodels(void) {
         mesh_fini(mesh);
     }
     skin_video_clear();
+}
+
+// shoot()'s shot sound (viewer_weapon_shot_sound, deob-10.0.3.js:196392-196405): weapon.sound + "_<mid>" for a remodel (a
+// store skin, else the weapon's altSkin) unless noSnd, "_blast" for a full charge, the plain sound when upgraded; the
+// names are networkSounds entries (deob:21141) and getSkinForLoadout finds the skin made for the weapon (deob:190800).
+static void check_shot_sounds(void) {
+    static const struct {
+        const char *sound;
+        int skin, weapon_id, upgraded, blast;
+        const char *want;
+        int suffixed, id; // network_sound_index(want), -1 = not in the table
+    } cases[] = {
+        {"weapon_6", -1, 5, 0, 0, "weapon_6_0", 1, 24},       // no skin: the Nova Pump altSkin
+        {"weapon_8", -1, 7, 0, 0, "weapon_8_0", 1, 33},       // Nova Semi
+        {"weapon_10", -1, 9, 0, 0, "weapon_10_0", 1, 34},     // Nova Uzi
+        {"weapon_12", -1, 11, 0, 0, "weapon_12", 0, 17},      // Nova Alien: noSnd
+        {"weapon_2", -1, 1, 0, 0, "weapon_2", 0, 7},          // no altSkin
+        {"weapon_upgraded", -1, 5, 1, 0, "weapon_upgraded", 0, -2}, // upgraded: upgradeWeapons' own sound
+        {"weapon_29", -1, 28, 0, 1, "weapon_29_blast", 0, -2},
+        {"weapon_6", 887, 5, 0, 0, "weapon_6_0", 1, 24},      // Roadkill (mid 0)
+        {"weapon_6", 4362, 5, 0, 0, "weapon_6", 0, 11},       // Gold Plated (mid 5, noSnd)
+        {"weapon_1", 0, 0, 0, 0, "weapon_1", 0, 5},           // Arctic Hunt: a texture skin, no remodel, no altSkin
+        {"weapon_6", 0, 5, 0, 0, "weapon_6", 0, 11},          // a skin of another weapon: {} (plain), not the altSkin
+        {"weapon_6", 887, 5, 1, 0, "weapon_6", 0, 11},        // upgraded: no remodel sound
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char name[48];
+        const int suffixed = viewer_weapon_shot_sound(cases[i].sound, viewer_skin(cases[i].skin), cases[i].weapon_id, cases[i].upgraded,
+                                                      cases[i].blast, name, sizeof(name));
+        const int id = network_sound_index(name);
+        CHECK(!strcmp(name, cases[i].want) && suffixed == cases[i].suffixed && (cases[i].id == -2 ? id >= 0 : id == cases[i].id),
+              "shot sound %zu: %s (%d, id %d), want %s", i, name, suffixed, id, cases[i].want);
+    }
+    const ViewerSkin *gold = viewer_skin(4362), *roadkill = viewer_skin(887);
+    CHECK(gold && (gold->flags2 & VS2_NO_SND) && gold->mid == 5 && roadkill && !(roadkill->flags2 & VS2_NO_SND) && roadkill->mid == 0,
+          "the store table's noSnd (Gold Plated 4362) and Roadkill 887");
+    // every store remodel without noSnd names a networkSounds entry (v10.0.2's store: all but the two weapon-30 ones)
+    int remodels = 0, named = 0;
+    for (int i = 0; i < g_viewer_skin_count; i++) {
+        const ViewerSkin *s = &g_viewer_skins[i];
+        if (s->type != 0 || s->mid < 0 || (s->flags2 & VS2_NO_SND) || s->weapon < 1 || s->weapon > 29) continue;
+        char sound[16], name[48];
+        snprintf(sound, sizeof(sound), "weapon_%d", s->weapon);
+        viewer_weapon_shot_sound(sound, s, s->weapon - 1, 0, 0, name, sizeof(name));
+        remodels++;
+        named += network_sound_index(name) >= 0;
+    }
+    CHECK(remodels > 200 && named == remodels, "store remodels' shot sounds in networkSounds: %d of %d", named, remodels);
+    // getSkinForLoadout: the skin made for the slot's weapon, whichever of skins[0] / skins[1] it is
+    CHECK(viewer_loadout_skin(0, 887, 5) == 887 && viewer_loadout_skin(887, 0, 0) == 0 && viewer_loadout_skin(887, 0, 5) == 887 &&
+          viewer_loadout_skin(-1, -1, 5) == -1 && viewer_loadout_skin(0, -1, 5) == -1, "getSkinForLoadout");
 }
 
 int main(int argc, char **argv) {
@@ -457,6 +511,7 @@ int main(int argc, char **argv) {
     check_effects();
     check_video_skins();
     check_weapon_remodels();
+    check_shot_sounds();
     check_meshopt_models();
     check_material_extras();
 
