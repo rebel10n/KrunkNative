@@ -150,6 +150,7 @@ static cJSON *to_tuple(const cJSON *g) {
     copy_key(meta, data, "ds", "ds"); // dedicated 24/7
     copy_key(meta, data, "pw", "pw"); // password
     copy_key(meta, data, "kr", "kr"); // KR badge
+    copy_key(meta, data, "pr", "promoted"); // a promoted server: the star, sorted first (Box Office's pr is a password)
     copy_key(meta, data, "cm", "cm"); // a custom game's map id (the browser's carousel: user-assets m<cm>/thumb.png)
     if (cJSON_IsNumber(left)) cJSON_AddNumberToObject(meta, "timeLeft", left->valuedouble);
     cJSON_AddItemToArray(t, meta);

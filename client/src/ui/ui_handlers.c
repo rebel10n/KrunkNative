@@ -578,7 +578,9 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.7.toggleEffects", h_servers},
     {"updateSliderLabel2", h_servers},
     {"windows.7.presetAction", h_noop},
-    {"windows.7.updateSet", h_noop},  // undefined in Krunker's own JS
+    // updateSet(cost, el) adds a Server Upgrade's KR cost to #hCustCost (deob-10.0.3.js:248477-248482); Box Office
+    // has no server upgrades (40 Player Server, Promote Server) and its setting rows all cost 0, so it stays "None"
+    {"windows.7.updateSet", h_noop},
     {"windows.9.switchTab", h_games_tab},
     {"windows.9.searchMaps", h_servers}, // servers_ui.c: the catalogue / loaded games by name
     {"windows.9.loadMore", h_servers}, // brain: the next /api/maps page (servers_ui.c); offline: one page

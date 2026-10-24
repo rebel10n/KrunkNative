@@ -8,6 +8,7 @@
 #include <game_config.h>
 #include <modes.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,7 +154,9 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
     const cJSON *settings = cJSON_GetObjectItemCaseSensitive(preset, "settings");
     size_t count = 0;
     const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
-    sb_appendf(sb, "<div class='hostTb2%s'><div class='setHed' style='margin-bottom:15px'>Settings</div><div class='setBodH'>", hide_class());
+    // t("windows.host.settings") (deob-10.0.3.js:248977)
+    sb_appendf(sb, "<div class='hostTb2%s'><div class='setHed' style='margin-bottom:15px'>%s</div><div class='setBodH'>", hide_class(),
+               I18N("windows.host.settings", "Server Settings"));
     int open = 1;
     for (size_t k = 0; k < count; k++) {
         const GameConfigOption *o = &options[k];
@@ -208,7 +211,9 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
     StrBuf sb = {0};
     if (tab == HOST_CONFIG_TAB_MODES && choices) {
         const cJSON *modes = cJSON_GetObjectItemCaseSensitive(preset, "modes"), *classes = cJSON_GetObjectItemCaseSensitive(preset, "classes");
-        sb_appendf(&sb, "<div class='hostTb1%s'><div class='setHed' style='margin-bottom:15px;margin-top:30px;'>Game Modes", hide_class());
+        // t("windows.host.modes") / t("windows.host.classes") (deob-10.0.3.js:248848, 248859)
+        sb_appendf(&sb, "<div class='hostTb1%s'><div class='setHed' style='margin-bottom:15px;margin-top:30px;'>%s", hide_class(),
+                   I18N("windows.host.modes", "Select Modes"));
         sb_append(&sb, "<div class='hostToggle' onclick='windows[7].toggle(&quot;gameMode&quot;)'>Toggle</div></div><div style='margin-top:5px'>");
         for (int id = 0; id < MODE_COUNT; id++) {
             const GameModeConfig *mode = mode_config(id);
@@ -217,7 +222,8 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
             sb_appendf(&sb, "<label class='hostOpt' onmouseenter='playTick()'><span class='optName'>%s</span><input id='gameMode%d' type='checkbox'%s><div class='optCheck'></div></label>",
                        mode->name, id, on ? "checked" : "");
         }
-        sb_append(&sb, "</div><div class='setHed' style='margin-bottom:15px;'>Classes<div class='hostToggle' onclick='windows[7].toggle(&quot;gameClass&quot;)'>Toggle</div></div><div style='margin-top:5px'>");
+        sb_appendf(&sb, "</div><div class='setHed' style='margin-bottom:15px;'>%s<div class='hostToggle' onclick='windows[7].toggle(&quot;gameClass&quot;)'>Toggle</div></div><div style='margin-top:5px'>",
+                   I18N("windows.host.classes", "Select Classes"));
         for (int id = 0; id < CLASS_COUNT; id++) {
             const int on = !cJSON_GetArraySize(classes) || preset_has(classes, id);
             sb_appendf(&sb, "<label class='hostOpt' onmouseenter='playTick()'><span class='optName'>%s</span><img loading='lazy' class='optImg' src='textures/classes/icon_%d.png' />"
@@ -235,10 +241,12 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
         }
         settings_rows(&sb, host_type, preset);
     } else if (tab == HOST_CONFIG_TAB_SERVER && choices) {
-        sb_append(&sb, "<div class='setHed' style='margin-bottom:15px;'>Privacy</div><div class='setBodH'><div class='settNameSmall'>Private Server <label class='switch'>"
+        // t("server.config.private") (deob-10.0.3.js:249056)
+        sb_appendf(&sb, "<div class='setHed' style='margin-bottom:15px;'>Privacy</div><div class='setBodH'><div class='settNameSmall'>%s <label class='switch'>"
                        "<input id='makePrivate' type='checkbox'><span class='slider'></span></label></div><div class='settNameSmall'>Server Password<input id='passCode' value='' "
                        "type='text' placeholder='Enter Password'style='border-radius:6px;border:none;background:#eee;padding:6px;padding-bottom:6px;float:right;margin-top:5px;"
-                       "margin-bottom:5px;' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div></div>");
+                       "margin-bottom:5px;' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div></div>",
+                   I18N("server.config.private", "Private"));
     }
     return sb_finish(&sb);
 }

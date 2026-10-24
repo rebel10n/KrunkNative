@@ -1175,8 +1175,11 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
         char bg[256];
         store_asset_url(PANELS[i].bg, bg, sizeof(bg));
         const char *grad = i == 2 ? "linear-gradient(rgb(10 10 10 / 37%), #0000003b)" : "linear-gradient(rgb(0 0 0 / 38%), #00000000, rgb(10 10 10 / 41%))";
-        sb_appendf(sb, "<div class=\"sub-tab-panel svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();%s\" style=\"display: %s; background: %s, url(%s); %s\"><div class=\"sub-tab-dots svelte-lri212\">",
-                   i == 0 ? (acc ? "showWindow(6)" : "showWindow(5)") : PANELS[i].click, g_store_sub == i ? "" : "none", grad, bg, PANELS[i].bg_style);
+        // the Battle Pass and Purchase panels play the select sound first, the Junkyard's only calls craftMenu()
+        // (deob-10.0.3.js:144852-144857, 144871)
+        sb_appendf(sb, "<div class=\"sub-tab-panel svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"%s%s\" style=\"display: %s; background: %s, url(%s); %s\"><div class=\"sub-tab-dots svelte-lri212\">",
+                   i == 2 ? "" : "playSelect();", i == 0 ? (acc ? "showWindow(6)" : "showWindow(5)") : PANELS[i].click,
+                   g_store_sub == i ? "" : "none", grad, bg, PANELS[i].bg_style);
         for (int d = 0; d < 3; d++)
             sb_appendf(sb, "<div class=\"sub-tab-dot svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"event.stopPropagation();windows[13].subTabT=5000;windows[13].subTab=%d;updateWindow(14);\" style=\"background: %s\"></div>",
                        d, d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
@@ -1213,9 +1216,11 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
     sb_appendf(sb, " <div class=\"heroic-spin-name svelte-lri212\">%s <div class=\"heroic-spin-price svelte-lri212\" style=\"color: %s !important;\">%d KR <div class=\"ticket-img-sep svelte-lri212\">|</div> <img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 56px !important;\" src=\"%s\"></div></div> <div class=\"heroic-spin-img svelte-lri212\" style=\"background-image: url(%s);\"></div> <div class=\"heroic-img-grad svelte-lri212\" style=\"margin-left: 0 !important; background-image: linear-gradient(transparent, %s30);\"></div></div> ",
                spin_name, col, hw->price, ticket, thumb, col);
     // bundles (bundleData): the brain's rows (GET /api/shop/bundles, junk_shop_ui.c); the grid is empty while none are published
-    sb_append(sb, "<div class=\"bundle-holder svelte-lri212\"><div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn disabled svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow svelte-lri212\"></div></div></div> <div class=\"bundleCols svelte-lri212\">");
+    // the arrows: mousedown playSelect(0.1) + updateScroll(-1 / 1), the wheel over the columns updateScroll(deltaY > 0 ?
+    // -1 : 1) (deob-10.0.3.js:144614-144619, 144643-144648, 145073, 145095-145097)
+    sb_append(sb, "<div class=\"bundle-holder svelte-lri212\"><div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn disabled svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" onmousedown=\"playSelect(0.1);windows[13].updateScroll(-1)\"><div class=\"bundleSliderArrow svelte-lri212\"></div></div></div> <div class=\"bundleCols svelte-lri212\" onwheel=\"windows[13].updateScrollWheel()\">");
     junk_shop_bundles_render(sb);
-    sb_append(sb, "</div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
+    sb_append(sb, "</div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" onmousedown=\"playSelect(0.1);windows[13].updateScroll(1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
 }
 
 // Prize Wheels: wheels 0 (Starter) and 2 (Heroic), not hidden, not locked (store.js data; the
@@ -1355,8 +1360,7 @@ static void v10_store_kr(StrBuf *sb) {
     store_legal(sb, "1ko99up");
 }
 
-// the Eterno Shop (svelte-gh77t9): its offers come from the shop API, which KrunkNative has not:
-// the header and the component's empty state. The header video (limited_shop_banner.webm) plays
+// the Eterno Shop (svelte-gh77t9): the header, then the shop front under it. The header video (limited_shop_banner.webm) plays
 // natively from its .knv frame sidecar (engine/video.h); its first frame,
 // ui/img/shop/kn_eterno_poster.jpg, stands in as the poster while that is missing or loading
 // (KN addition: v10 has no poster, its browser shows the webm's first frame at once).
@@ -1372,12 +1376,15 @@ static void v10_store_eterno(StrBuf *sb) {
     sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\"%s class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> ",
                poster, vid);
     // the shop front (svelte-1nzacef): the account's wild offer (v10_wild_offer.c) and the Junk-priced products
-    // (junk_shop_ui.c, the brain's display), else the empty state
-    const size_t before = sb->len;
+    // (junk_shop_ui.c, the brain's "limited" display). v10 shows "Loading eterno shop..." with its spinner while
+    // the display loads, "Error: <message>" and a Retry that fetches it again when it fails, and nothing more
+    // when it loads with no product (deob-10.0.3.js:144540-144551, 145746-145757)
     v10_wild_offer_shop(sb);
-    junk_shop_render(sb);
-    if (sb->len == before)
-        sb_append(sb, "<div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>");
+    const int state = junk_shop_render(sb);
+    if (state == 0)
+        sb_append(sb, "<div class=\"loading-container svelte-gh77t9\"><div class=\"loading-spinner svelte-gh77t9\"></div> <div class=\"loading-text svelte-gh77t9\">Loading eterno shop...</div></div>");
+    else if (state < 0)
+        sb_append(sb, "<div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">Error: Failed to load eterno shop</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>");
 }
 
 static char *v10_store_window_gen(void) {
@@ -1513,7 +1520,6 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         free(html);
         return 1;
     }
-    if (!strcmp(name, "windows.13.updateScroll") || !strcmp(name, "windows.13.updateScrollWheel")) return 1;
     if (!strcmp(name, "voucherPopup")) {
         if (kio_store_active()) { // krunker.io: redeeming a voucher changes the account: read-only
             kio_store_read_only("voucher");
@@ -1563,9 +1569,40 @@ void store_ui_sub_tab_tick(const double delta_ms) {
     }
 }
 
+// windows[13].updateScroll(dir, columns): the home tab's bundle slider, columnsToScroll 5 and no wrapAround
+// (deob-10.0.3.js:249986-250008); the arrows go disabled at either end.
+static void bundle_update_scroll(const int dir, const int columns) {
+    const HtmlElem cols = html_dom_query(0, ".bundleCols");
+    HtmlScroll s;
+    if (!cols || !html_dom_get_scroll(cols, &s)) return;
+    const HtmlElem first = html_dom_first_child(cols);
+    const float col_w = first ? html_dom_offset_width(first) : 0.0f; // children[0].scrollWidth
+    const float max_left = (float) (html_dom_child_count(cols) - 1) * col_w - s.client_w;
+    const float left = s.left + (float) dir * (col_w * (float) (columns ? columns : 5));
+    const float right = s.client_w + s.left;
+    const int can_left = !(left <= 0.0f) || dir != -1;
+    const int can_right = !(right >= max_left) || dir != 1;
+    html_dom_set_scroll(cols, left < 0.0f ? 0.0f : left, s.top);
+    HtmlElem btns[2];
+    if (html_dom_query_all(0, ".bundleSliderBtn", btns, 2) == 2) {
+        html_dom_set_class(btns[0], "disabled", !can_left);
+        html_dom_set_class(btns[1], "disabled", !can_right);
+    }
+}
+
 int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) ev;
     if (!name) return -1;
+    if (!strcmp(name, "windows.13.updateScroll")) {
+        const int dir = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        const int columns = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
+        if (dir) bundle_update_scroll(dir, columns);
+        return 1;
+    }
+    if (!strcmp(name, "windows.13.updateScrollWheel")) { // updateScroll(window.event.deltaY > 0 ? -1 : 1)
+        const double dy = ev && ev->value ? strtod(ev->value, NULL) : 0.0;
+        if (dy != 0.0) bundle_update_scroll(dy > 0.0 ? -1 : 1, 0);
+        return 1;
+    }
     if (kio_store_handle(name, ev, args, argc) >= 0) return 1; // knKioShop*: the krunker.io store's cards
     const int r = store_window_handle(name, args, argc);
     if (r >= 0) return r;

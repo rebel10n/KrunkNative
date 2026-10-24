@@ -42,15 +42,30 @@ static void purchase_done(void *user, const int status, const cJSON *json) {
     menu_rerender_if_open(STORE_WINDOW);
 }
 
-void junk_shop_render(StrBuf *sb) {
+// v10_get's completion redraws its popups and views, not the menu windows: while the display loads the open
+// Store is drawn again a moment later, so its "Loading eterno shop..." gives way to the products (or the error)
+static int g_load_timer;
+static void load_poll(void *user) {
+    (void) user;
+    g_load_timer = 0;
+    menu_rerender_if_open(STORE_WINDOW);
+}
+
+int junk_shop_render(StrBuf *sb) {
     char t[256], path[400];
     v10_url_token(t, sizeof t);
     snprintf(path, sizeof path, "/api/shop/displays?tag=limited%s%s", t[0] ? "&token=" : "", t);
     const V10Req *r = v10_get(path, SHOP_TTL_MS);
-    const cJSON *data = r && r->status == 200 && r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
+    if (!r || r->status == 0) {
+        if (!g_load_timer) g_load_timer = html_timer_add(250.0, load_poll, NULL);
+        return 0;
+    }
+    if (r->status != 200) return -1;
+    const cJSON *data = r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
     const cJSON *products = cJSON_IsObject(data) ? cJSON_GetObjectItem(data, "products") : NULL;
-    if (!products || cJSON_GetArraySize(products) == 0) return; // loading, no product, or an error: nothing to draw
+    if (!products || cJSON_GetArraySize(products) == 0) return 1; // no product: nothing to draw
     kio_store_display_html(sb, data);
+    return 1;
 }
 
 // the bundle card's text: the brain's rows are staff data, so the markup is escaped

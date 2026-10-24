@@ -577,6 +577,17 @@ static void fetch_recruit(void) {
 
 // ------------------------------------------------------------------ tab 0 (home)
 
+// Date.toLocaleDateString() en-US of epoch ms: M/D/YYYY (UTC; civil date from days since the epoch)
+static void locale_date(const double ms, char *out, const size_t n) {
+    long long z = (long long) floor(ms / 86400000.0) + 719468;
+    const long long era = (z >= 0 ? z : z - 146096) / 146097;
+    const long long doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    const int day = (int) (doy - (153 * mp + 2) / 5 + 1), mon = (int) (mp < 10 ? mp + 3 : mp - 9);
+    const int year = (int) (yoe + era * 400 + (mon <= 2));
+    snprintf(out, n, "%d/%d/%d", mon, day, year);
+}
+
 // clan-ownership-transfer-banner (_33655, svelte-1xrfe28): the transfer's target only
 static void gen_transfer_banner(StrBuf *sb) {
     const cJSON *t = cJSON_GetObjectItem(g_clan, "ownership_transfer");
@@ -585,7 +596,7 @@ static void gen_transfer_banner(StrBuf *sb) {
         sb_append(sb, "<div class=\"clan-ownership-transfer-banner svelte-1xrfe28\"><p class=\"svelte-1xrfe28\"><span class=\"clan-ownership-transfer-banner__player-name svelte-1xrfe28\">");
         sb_append_esc(sb, jstr(t, "from_player_name"));
         sb_append(sb, "</span> wants to transfer ownership of <span class=\"clan-ownership-transfer-banner__clan-name svelte-1xrfe28\">");
-        sb_append_esc(sb, jstr(t, "clan_name"));
+        sb_append_esc(sb, jstr(g_clan, "clan_name")); // clanData.clan_name (deob-10.0.3.js:110218)
         sb_append(sb, "</span> to you.</p> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"windows[12].transferRespond(1)\">Accept</button> "
                       "<button class=\"main-button svelte-whnh40 main-button-danger\" type=\"button\" onclick=\"windows[12].transferRespond(0)\">Decline</button></div>");
     }
@@ -822,7 +833,8 @@ static void gen_motd(StrBuf *sb) {
         sb_append(sb, "</textarea> <div class=\"motd-actions svelte-15d5v89\">");
         sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-accept main-button-slim%s\" type=\"button\" onclick=\"windows[12].motdSave()\">%s</button> ",
                    S.motd_busy || !S.motd_text[0] ? " main-button-disabled" : "", S.motd_busy == 1 ? "Saving..." : "Save");
-        if (msg[0])
+        // Remove shows while the textarea holds text, saved or typed (deob-10.0.3.js:109519): the text as last read
+        if (S.motd_text[0])
             sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-danger main-button-slim%s\" type=\"button\" onclick=\"windows[12].motdRemove()\">%s</button> ",
                        S.motd_busy ? " main-button-disabled" : "", S.motd_busy == 2 ? "Removing..." : "Remove");
         if (S.motd_saved) sb_append(sb, "<span class=\"motd-saved svelte-15d5v89\">Saved!</span>");
@@ -836,15 +848,8 @@ static void gen_motd(StrBuf *sb) {
     }
     const double at = jnum(S.motd, "set_at");
     if (jstr(S.motd, "set_by_name")[0] && at > 0) {
-        // toLocaleDateString() en-US: M/D/YYYY (UTC; civil date from days since the epoch)
-        long long z = (long long) floor(at / 86400000.0) + 719468;
-        const long long era = (z >= 0 ? z : z - 146096) / 146097;
-        const long long doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        const long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
-        const int day = (int) (doy - (153 * mp + 2) / 5 + 1), mon = (int) (mp < 10 ? mp + 3 : mp - 9);
-        const int year = (int) (yoe + era * 400 + (mon <= 2));
         char d[32];
-        snprintf(d, sizeof(d), "%d/%d/%d", mon, day, year);
+        locale_date(at, d, sizeof(d));
         sb_append(sb, " <div class=\"motd-meta svelte-15d5v89\">Set by ");
         sb_append_esc(sb, jstr(S.motd, "set_by_name"));
         sb_appendf(sb, " on %s</div>", d);
@@ -946,12 +951,14 @@ static void gen_loot(StrBuf *sb) {
         sb_append(sb, "<div class=\"loot-updated-info svelte-1ydnong\">Last updated by <span class=\"loot-updated-name svelte-1ydnong\">");
         sb_append_esc(sb, by);
         sb_append(sb, "</span>");
-        const char *at = jstr(S.loot, "updated_at");
-        if (at[0]) {
-            sb_append(sb, " <span class=\"loot-updated-time svelte-1ydnong\">on ");
-            sb_append_esc(sb, at);
-            sb_append(sb, "</span>");
-        }
+        // "on " + new Date(updated_at).toLocaleDateString() (deob-10.0.3.js:109765): an ISO timestamp's date
+        // (or epoch ms) as M/D/YYYY
+        const cJSON *at = cJSON_GetObjectItem(S.loot, "updated_at");
+        char d[32] = "";
+        int y = 0, m = 0, day = 0;
+        if (cJSON_IsNumber(at) && at->valuedouble > 0) locale_date(at->valuedouble, d, sizeof(d));
+        else if (cJSON_IsString(at) && sscanf(at->valuestring, "%d-%d-%d", &y, &m, &day) == 3) snprintf(d, sizeof(d), "%d/%d/%d", m, day, y);
+        if (d[0]) sb_appendf(sb, " <span class=\"loot-updated-time svelte-1ydnong\">on %s</span>", d);
         sb_append(sb, "</div> ");
     }
     const char *dis = manage ? "" : " disabled";

@@ -191,6 +191,21 @@ static double now_ms(void) {
 }
 
 // _8986: the integer part with a comma every three digits
+// the onclick of a player name (seller, creator, owner): v10 pushes that player's profile view,
+// iïììïíi(profile, {playerName}).push() (deob-10.0.3.js:146097-146111, 151334); here openPlayerProfile (v10_social.c)
+static void sb_profile_click(StrBuf *sb, const char *name) {
+    char buf[128];
+    size_t o = 0;
+    for (const char *p = name; p && *p && o + 3 < sizeof(buf); p++) {
+        if (*p == '\'' || *p == '"' || *p == '\\') buf[o++] = '\\';
+        buf[o++] = *p;
+    }
+    buf[o] = 0;
+    sb_append(sb, " onclick=\"openPlayerProfile(&quot;");
+    sb_append_esc(sb, buf);
+    sb_append(sb, "&quot;)\"");
+}
+
 static void fmt(char *out, const size_t n, const double v) {
     char raw[48];
     snprintf(raw, sizeof(raw), "%.0f", v);
@@ -1608,7 +1623,9 @@ static void owners_list(StrBuf *sb, const int catalog) {
         if (jint(o, "su", 0)) sb_appendf(sb, "<i class=\"material-icons %s premium %s\" title=\"Subscriber\">beenhere</i>", catalog ? "items-detail-owner-badge" : "owner-badge", hash);
         sb_append(sb, " ");
         if (jint(o, "ft", 0)) sb_appendf(sb, "<i class=\"material-icons %s featured %s\" title=\"Featured\">check_circle</i>", catalog ? "items-detail-owner-badge" : "owner-badge", hash);
-        sb_appendf(sb, " <button class=\"%s-name %s\" type=\"button\">", h, hash);
+        sb_appendf(sb, " <button class=\"%s-name %s\" type=\"button\"", h, hash);
+        sb_profile_click(sb, jstr(o, "nm"));
+        sb_append(sb, ">");
         sb_append_esc(sb, jstr(o, "nm"));
         char c[32];
         fmt(c, sizeof(c), jnum(o, "ct"));
@@ -1644,7 +1661,9 @@ static void view_detail(StrBuf *sb) {
             while (*t == ' ') t++;
             if (!*t) continue;
             if (k++) sb_append(sb, ", ");
-            sb_append(sb, "<button type=\"button\" class=\"creator-link svelte-olnzsm\">");
+            sb_append(sb, "<button type=\"button\" class=\"creator-link svelte-olnzsm\"");
+            sb_profile_click(sb, t);
+            sb_append(sb, ">");
             sb_append_esc(sb, t);
             sb_append(sb, "</button>");
         }
@@ -1677,7 +1696,9 @@ static void view_detail(StrBuf *sb) {
                 fmt(p, sizeof(p), jnum(l, "f"));
                 sb_appendf(sb, "<div class=\"listing-item svelte-olnzsm\"><div class=\"listing-info svelte-olnzsm\"><div class=\"listing-price svelte-olnzsm\">%s KR    </div> ", p);
                 if (jstr(l, "p")[0]) {
-                    sb_append(sb, "<div class=\"listing-seller svelte-olnzsm\">Seller:  <button type=\"button\" class=\"seller-link svelte-olnzsm\">");
+                    sb_append(sb, "<div class=\"listing-seller svelte-olnzsm\">Seller:  <button type=\"button\" class=\"seller-link svelte-olnzsm\"");
+                    sb_profile_click(sb, jstr(l, "p"));
+                    sb_append(sb, ">");
                     sb_append_esc(sb, jstr(l, "p"));
                     sb_append(sb, "</button></div>");
                 }
@@ -2538,7 +2559,9 @@ static void catalog_detail(StrBuf *sb) {
         sb_append_esc(sb, s->name && s->name[0] ? s->name : "Unnamed");
         sb_append(sb, "</div> ");
         if (s->creator && s->creator[0]) {
-            sb_append(sb, "<div class=\"items-detail-creator svelte-dmu4q2\">by <button class=\"items-detail-creator-link svelte-dmu4q2\" type=\"button\">");
+            sb_append(sb, "<div class=\"items-detail-creator svelte-dmu4q2\">by <button class=\"items-detail-creator-link svelte-dmu4q2\" type=\"button\"");
+            sb_profile_click(sb, s->creator);
+            sb_append(sb, ">");
             sb_append_esc(sb, s->creator);
             sb_append(sb, "</button> </div>");
         }

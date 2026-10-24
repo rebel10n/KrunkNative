@@ -1396,7 +1396,7 @@ static void gen_progression(StrBuf *sb, const cJSON *profile_res) {
         sb_appendf(sb, "<div class=\"milestone-marker %s %s %s svelte-6hxhl0%s\" style=\"left: %g%%\"%s><div class=\"milestone-line svelte-6hxhl0\"></div> "
                        "<div class=\"milestone-indicator svelte-6hxhl0%s\"><div class=\"milestone-number svelte-6hxhl0\">%d</div> ",
                    achieved ? "achieved" : "", claimed ? "claimed" : "", claimable ? "claimable" : "", i == count - 1 && achieved ? " last-and-achieved" : "",
-                   at * 100.0 / max, claimable ? " onclick=\"playSelect();knRkClaim()\"" : "", achieved ? " reached" : "", at);
+                   at * 100.0 / max, claimable ? " onclick=\"knRkClaim()\"" : "", achieved ? " reached" : "", at);
         if (claimed) sb_append(sb, "<div class=\"milestone-bonus claimed svelte-6hxhl0\">CLAIMED</div>");
         else if (claimable) sb_appendf(sb, "<div class=\"milestone-bonus claimable svelte-6hxhl0\">CLAIM +%d RP</div>", reward);
         else if (achieved) sb_appendf(sb, "<div class=\"milestone-bonus svelte-6hxhl0\">+%d RP</div>", reward);
@@ -1470,18 +1470,24 @@ static void gen_home(StrBuf *sb) {
                    "<span class=\"quick-stat-label svelte-17kea4i\">KD Average</span></div></div></div></div> ",
                rank != RANK_UNRANKED ? ranked_display(v10_num(p, "conservative_rating", 0)) : 0, d.matches, d.win_rate, d.kd);
     gen_progression(sb, r->json);
-    sb_append(sb, " <div class=\"challenges-link svelte-17kea4i\" onclick=\"playSelect(0.1),openRankedChallenges()\" onmouseenter=\"playTick()\"><span class=\"material-icons challenges-link-icon svelte-17kea4i\">"
-                  "emoji_events</span> <span class=\"challenges-link-text svelte-17kea4i\">Ranked Challenges</span> <span class=\"material-icons svelte-17kea4i\">chevron_right</span></div> "
-                  "<div class=\"description-container svelte-17kea4i\"><p class=\"svelte-17kea4i\">Compete in a best of 3 - 4v4 Hardpoint - map pool rotates every season</p> "
-                  "<div class=\"map-carousel-wrapper svelte-17kea4i\">");
+    // the Challenges link opens with no click sound, the milestone claim neither (deob-10.0.3.js:112367, 128357,
+    // 128196-128226); the description takes `expanded` while the progression details are open (128377)
+    sb_appendf(sb, " <div class=\"challenges-link svelte-17kea4i\" onclick=\"openRankedChallenges()\" onmouseenter=\"playTick()\"><span class=\"material-icons challenges-link-icon svelte-17kea4i\">"
+                   "emoji_events</span> <span class=\"challenges-link-text svelte-17kea4i\">%s</span> <span class=\"material-icons svelte-17kea4i\">chevron_right</span></div> "
+                   "<div class=\"description-container svelte-17kea4i%s\"><p class=\"svelte-17kea4i\">Compete in a best of 3 - 4v4 Hardpoint - map pool rotates every season</p> "
+                   "<div class=\"map-carousel-wrapper svelte-17kea4i\">",
+               I18N("windows.chall.ranked", "Ranked Challenges"), R.expanded ? " expanded" : "");
     int maps[RANKED_SEASON_MAPS];
     ranked_season_maps(season, maps);
     sb_appendf(sb, "<div class=\"map-carousel-container svelte-17kea4i\" style=\"--total-maps: %d; --extended-maps: %d;\">", RANKED_SEASON_MAPS, 2 * RANKED_SEASON_MAPS);
     for (int k = 0; k < 2 * RANKED_SEASON_MAPS; k++) { // [...maps, ...maps]: the carousel loops (v10:111965-111969)
-        // v10 lists every pool map alike (no greying, no alt text): the queue's own filter decides what plays
+        // v10 lists every pool map alike (no greying; the map's name as the image's alt, deob-10.0.3.js:128368): the
+        // queue's own filter decides what plays
         const int id = maps[k % RANKED_SEASON_MAPS];
         const char *name = ranked_pool_map_name(id);
-        sb_appendf(sb, "<div class=\"map-card svelte-17kea4i\"><img class=\"map-image svelte-17kea4i\" src=\"./img/maps/map_%d.png\"> <div class=\"map-name svelte-17kea4i\">", id);
+        sb_appendf(sb, "<div class=\"map-card svelte-17kea4i\"><img class=\"map-image svelte-17kea4i\" src=\"./img/maps/map_%d.png\" alt=\"", id);
+        sb_append_esc(sb, name ? name : "");
+        sb_append(sb, "\"> <div class=\"map-name svelte-17kea4i\">");
         sb_append_esc(sb, name ? name : "");
         sb_append(sb, "</div></div>");
     }

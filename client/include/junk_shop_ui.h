@@ -7,8 +7,9 @@
 
 #include <ui_logic.h> // StrBuf
 
-// appends the products under the Eterno Shop's wild offer (store_ui.c v10_store_eterno)
-void junk_shop_render(StrBuf *sb);
+// appends the products under the Eterno Shop's wild offer (store_ui.c v10_store_eterno). Returns the
+// display request's state: 0 loading, 1 loaded (with or without products), -1 failed
+int junk_shop_render(StrBuf *sb);
 // knKioShopBuy on Box Office (kio_store.c): the product's purchase, one unit
 void junk_shop_buy(int product_id);
 // the store home's bundle grid (store_ui.c v10_store_home): the brain's GET /api/shop/bundles rows as v10's bundle
