@@ -273,6 +273,9 @@ booking flow because v10 has none.
   upsets, abandons), decay, seeds, RP, regions, Turf rules and every loot mode; the comp webhook's URL rule,
   address rule and match_end body.
 - `shared/tests/forfeit_test.c`: the forfeit vote, and prepareForfeit's 1 - 0 scores and round wins.
+- `server/tests/comp_webhook_e2e.py` (`make comp-webhook-e2e`, kn_brain on sqlite): a guest-hosted 1v1 comp game on
+  server_bin posts one match_end to a local receiver at its END (map, mode, the host's team names, both players with
+  their keys, no IP or token), no client gets the URL, the log names the host only, a custom game posts nothing.
 - `services/brain/tests/ranked_test.py` (`ctest -R brain_ranked`, postgres + sqlite + redis): the
   live upgrade (a 0204 database with v7 ratings migrated to 0205), the queue on two brains, the
   assignment, rejoin, results, profiles, history, placement, the leaderboard, milestones,
