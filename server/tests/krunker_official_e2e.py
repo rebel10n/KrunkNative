@@ -4718,7 +4718,8 @@ def run_native_webview_interactive():
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port, interactive=True)
     page.start()
-    # the stub's game server sends a "cpt" this client cannot answer: that failure is said in the log and shows nothing
+    # the stub's game server sends a "cpt" this client cannot answer: that failure is said in the log, shows no card, and
+    # ends the session with v10.0.3's "CAPTCHA FAILED" error (its failure branch, deob-10.0.3.js:111428-111431)
     probes = "".join("%d vis @pow knCaptchaHolder knCaptchaWebview instructions\n" % t for t in range(1000, 9801, 400))
     script = "0 boot\n" + probes + "10000 play\n15000 players\n15200 quit\n"
 
@@ -4743,6 +4744,9 @@ def run_native_webview_interactive():
     fail_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work failed (nothing shown)" in l]
     check(f"{label}: a \"cpt\" this client cannot answer is said in the log, after the token, and shows nothing",
           len(fail_i) == 1 and solved and fail_i[0] > solved[0] and "proof of work passed" not in text, [l for l in lines if "proof of work" in l][:4])
+    check(f"{label}: and ends the session with v10.0.3's CAPTCHA FAILED error (the socket closed)",
+          "[krunker] the server ended the session (krunker.io: CAPTCHA FAILED): closing the socket" in text,
+          [l for l in lines if "ended the session" in l or "CAPTCHA" in l][:4])
     after = [m.group(1) for i, l in enumerate(lines) if fail_i and i > fail_i[0]
              for m in [re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)] if m]
     check(f"{label}: no card is drawn after the failed \"cpt\" (the widget holder stays hidden)",

@@ -141,7 +141,7 @@ int main(void) {
         g_done = 0;
         const unsigned id = kn_captcha_request("login", on_done, NULL);
         CHECK(id > 0 && kn_captcha_pending() == 1 && g_requests == 1);
-        CHECK(!strcmp(g_path, "/captcha/challenge?for=login"));
+        CHECK(!strcmp(g_path, "/mm/captcha?for=login"));
         CHECK(g_done == 0); // never from inside the request
         answer(200, challenge);
         CHECK(g_done == 0); // the search runs from the frames
@@ -157,7 +157,7 @@ int main(void) {
             int status;
             const char *body;
         } cases[] = {
-            {404, "{\"error\":\"not_found\",\"path\":\"/captcha/challenge?for=login\"}"},
+            {404, "{\"error\":\"not_found\",\"path\":\"/mm/captcha?for=login\"}"},
             {0, "cannot connect"},
             {503, "{\"success\":false,\"error\":\"Unavailable\"}"},
             {200, "{\"algorithm\":\"SHA-512\",\"challenge\":\"00\",\"salt\":\"x\",\"signature\":\"y\"}"},
@@ -166,7 +166,7 @@ int main(void) {
         for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
             g_done = 0;
             CHECK(kn_captcha_request("register", on_done, NULL) > 0);
-            CHECK(!strcmp(g_path, "/captcha/challenge?for=register"));
+            CHECK(!strcmp(g_path, "/mm/captcha?for=register"));
             answer(cases[i].status, cases[i].body);
             CHECK(g_done == 1 && !g_had_payload && kn_captcha_pending() == 0);
         }
@@ -249,6 +249,31 @@ int main(void) {
         kn_captcha_cancel(id2);
         answer(404, "{}");
         CHECK(g_sends == 0 && kn_captcha_pending() == 0);
+    }
+
+    // 7. a challenge a game server gave (its in-game "cpt", kn_captcha_game.c): no request, solved over frames
+    {
+        char challenge[1024];
+        make_challenge(challenge, sizeof(challenge), "cc?expires=2000000000&for=game", 31337, 50000);
+        g_done = 0;
+        const int requests = g_requests;
+        const unsigned id = kn_captcha_solve("game", challenge, on_done, NULL);
+        CHECK(id > 0 && g_requests == requests && g_done == 0 && kn_captcha_pending() == 1);
+        run_frames(2000);
+        char json[2048];
+        CHECK(g_done == 1 && g_had_payload && b64_decode(g_payload, json, sizeof(json)) > 0 && strstr(json, "\"number\":31337,"));
+        // one it cannot solve here: refused at once (the caller closes with CAPTCHA FAILED), done never called
+        g_done = 0;
+        CHECK(kn_captcha_solve("game", "{\"algorithm\":\"SHA-512\",\"challenge\":\"00\",\"salt\":\"x\"}", on_done, NULL) == 0);
+        CHECK(kn_captcha_solve("game", "not json", on_done, NULL) == 0 && kn_captcha_solve("game", NULL, on_done, NULL) == 0);
+        make_challenge(challenge, sizeof(challenge), "dd", 1, KRUNKER_ALTCHA_MAX_CAP + 1);
+        CHECK(kn_captcha_solve("game", challenge, on_done, NULL) == 0 && g_done == 0 && kn_captcha_pending() == 0);
+        // cancelled while solving: done never called
+        make_challenge(challenge, sizeof(challenge), "ee", 999999, 1000000);
+        const unsigned id2 = kn_captcha_solve("game", challenge, on_done, NULL);
+        kn_captcha_cancel(id2);
+        run_frames(10);
+        CHECK(g_done == 0 && kn_captcha_pending() == 0);
     }
 
     if (g_fail) return 1;

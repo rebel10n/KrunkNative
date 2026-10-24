@@ -1,7 +1,7 @@
 # Official krunker.io games: the matchmaker's captcha
 
-(Box Office's own captcha, on its sign-in, registration and hosting, is an ALTCHA proof of work: [captcha.md](captcha.md),
-which also lists every captcha call site of v10.0.3.)
+(Box Office's own captcha, on its sign-in, registration, hosting, seek and game servers, is an ALTCHA proof of work:
+[captcha.md](captcha.md), which also lists every captcha call site of v10.0.3 and what this client does on krunker.io.)
 
 How Krunker Box Office deals with the Cloudflare Turnstile check that `matchmaker.krunker.io`
 asks for before it seeks a game (`client/include/krunker_captcha.h`, `client/src/ui/krunker_captcha_ui.c`, the
@@ -22,8 +22,9 @@ join's loading spinner is (`#instructions`, hidden while the widget is up), the 
 captcha or a security check: a failed challenge is the generic join failure.
 
 The in-game socket captcha `cpt` is a different thing: an ALTCHA proof of work that `krunker_altcha.c` computes
-(that is how it is meant to be passed). Nothing is shown for it: not while it is computed, and not when it
-fails (the server's own close says so). The log says which.
+(that is how it is meant to be passed). Nothing is shown while it is computed. One this client cannot solve ends the
+session the way v10.0.3's failure branch does (deob-10.0.3.js:111428-111431): the error "CAPTCHA FAILED" on the error
+screen and the socket closed (`krunker_link_captcha_failed`). The log says which.
 
 ## What the live client does (game.deob.js)
 
@@ -157,8 +158,8 @@ is needed: Turnstile's `before-interactive-callback`, no token within 20 s (`KN_
   each token; the stub page never sees a token; nothing of the run (WebKit's processes, Xvfb) is left;
 - native `native-webview-interactive`: the stub widget calls `before-interactive-callback` first: only then is the
   widget shown, in the game (no OS window is mapped), the spinner is hidden while the widget is drawn, the token
-  joins; the stub's game server then sends a `cpt` this client cannot answer (SHA-512): it is said in the log and
-  nothing is drawn;
+  joins; the stub's game server then sends a `cpt` this client cannot answer (SHA-512): it is said in the log,
+  nothing is drawn, and the session ends with "CAPTCHA FAILED";
 - web `web`: the page's request for `api.js` is answered over the DevTools protocol (in the test's own browser
   only) by a stub widget that calls back with a fake token; the widget is drawn in the game, the game runs as
   before, and the `cpt` is answered with nothing shown;

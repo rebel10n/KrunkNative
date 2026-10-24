@@ -5,7 +5,7 @@
 // v10.0.3's invisible ("interaction-only") Turnstile before loginUsername (deob-10.0.3.js:130320-130369, 130762), the
 // sign-in's "Please wait..." and the host's "Creating Game..." stay up until the answer.
 //
-//   1. GET <brain>/captcha/challenge?for=<purpose> -> {algorithm, challenge, maxnumber, salt, signature}
+//   1. GET <brain>/mm/captcha?for=<purpose> -> {algorithm, challenge, maxnumber, salt, signature}
 //   2. the number is searched, KN_CAPTCHA_SLICE_MS of each frame (kn_captcha_tick)
 //   3. done(user, payload): the payload (base64 JSON: the <altcha-widget>'s value, altcha.1.0.6.min.js B()) goes in
 //      the request's captcha field: the social "a" frame's 4th element (sendAccountRequest's captcha slot), the
@@ -23,10 +23,14 @@
 
 typedef void (*KnCaptchaDone)(void *user, const char *payload);
 
-// Starts one for purpose ("login", "register", "hosting"). Its id (> 0); 0 when none could be started (no brain URL,
+// Starts one for purpose ("login", "register", "hosting", "seek"). Its id (> 0); 0 when none could be started (no brain URL,
 // every slot busy): done is then never called. Otherwise done is called exactly once, on the main thread (from
 // backend_poll or kn_captcha_tick, never from inside this call), unless kn_captcha_cancel(id) comes first.
 unsigned kn_captcha_request(const char *purpose, KnCaptchaDone done, void *user);
+// A challenge given by a game server (its in-game "cpt", NET_EXT_CAPTCHA: kn_captcha_game.c) instead of fetched: the
+// same search and done rules. 0 when it cannot be solved here (not SHA-256 ALTCHA, over the cap, malformed) or every
+// slot is busy: done is then never called.
+unsigned kn_captcha_solve(const char *purpose, const char *challenge_json, KnCaptchaDone done, void *user);
 void kn_captcha_cancel(unsigned id); // done is not called; an unknown or finished id is ignored
 void kn_captcha_tick(void);          // once per frame (backend_frame): solves, and gives up past the deadline
 int kn_captcha_pending(void);        // captchas in flight

@@ -333,7 +333,6 @@
  "kn.kio.notReachableNow": "krunker.io is not reachable right now",
  "kn.kio.openedInBrowserOptOut": "krunker.io server {0} opened in your browser (in-client joining is switched off: KRUNKNATIVE_KRUNKER_JOIN=browser)",
  "kn.kio.openedInBrowserWindows": "krunker.io server {0} opened in your browser (this Windows build joins krunker.io servers there for now)",
- "kn.kio.powUnsupported": "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game.",
  "kn.kio.proxyUnreachable": "krunker.io servers unavailable: the proxy {0} did not reach krunker.io (Settings > Client).",
  "kn.kio.registerOnSite": "Create your krunker.io account on krunker.io, then log in here.",
  "kn.kio.serverError": "krunker.io: {0}",

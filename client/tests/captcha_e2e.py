@@ -2,7 +2,7 @@
 """Box Office's captcha from the native client, end to end (doc/v10/captcha.md): a local kn_brain (sqlite, temp dir under
 ~/.cache) with captcha.enforce on, and headless client_bin runs through the menu UI:
 
-  register through v10's login popup -> the client fetches GET /captcha/challenge?for=register, solves it
+  register through v10's login popup -> the client fetches GET /mm/captcha?for=register, solves it
   (client/src/net/kn_captcha.c) and the brain accepts the registration; logout; sign in by username -> the same for
   "login"; Start Game in the Host Game window -> "hosting" (the brain has no game server here: its own answer, not a
   captcha refusal). And what a client from before the captcha gets from that brain: refused, with v10.0.3's text.

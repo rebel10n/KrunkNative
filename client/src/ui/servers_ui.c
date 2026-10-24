@@ -660,6 +660,8 @@ typedef struct SeekReq {
     char *path;   // /mm/seek-game?... without the token
     void *quiet;  // quick join: try the next candidate instead of failing
     int retried;  // a refused token was replaced once
+    int captchas; // CaptchaRequired answers retried (v10.0.3: at most twice)
+    char *captcha; // the solved seek captcha for the next seek (captchaToken), spent by it
     int play;     // v10's autoPlaySearch seek (?play=<map>): no match -> the game list, then the offline game (on_seek)
     int any_game; // no lobby named: a new-game seek (Quick Match, F4, Find Game, the launch seek, a quick join's none)
     int qp;       // a Quick Play search's seek (quick_play_retry.h): its answer is retried, and dropped once stopped
@@ -671,6 +673,7 @@ typedef struct SeekReq {
 static void seek_req_free(SeekReq *r) {
     if (!r) return;
     free(r->path);
+    free(r->captcha);
     free(r);
 }
 
@@ -711,6 +714,29 @@ static void reload_fallback(const char *game_id, const int full) {
 
 static int seek_request_token(SeekReq *r) {
     return backend_http_get("/mm/generate-token", on_token, r);
+}
+
+static void on_seek(void *user, int status, const char *body, size_t length);
+
+// The seek's captcha is done (kn_captcha.h): a fresh validation token, then the same seek with captchaToken (v10.0.3's
+// retry after CaptchaRequired, deob-10.0.3.js:164693-164699). No captcha to send: v10.0.3 throws the seek's error, so
+// the CaptchaRequired answer goes on as the seek's failure (on_seek, no retry left).
+static void seek_captcha_done(void *user, const char *payload) {
+    SeekReq *req = user;
+    if (seek_overtaken(req)) return;
+    if (!payload) {
+        req->captchas = 2;
+        static const char refusal[] = "{\"success\":false,\"error\":\"CaptchaRequired\"}";
+        on_seek(req, 400, refusal, sizeof(refusal) - 1);
+        return;
+    }
+    free(req->captcha);
+    req->captcha = strdup(payload);
+    if (!seek_request_token(req)) {
+        const unsigned action = req->action;
+        seek_req_free(req);
+        seek_unreachable(action);
+    }
 }
 
 static int start_seek(const char *game_id);
@@ -805,6 +831,21 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     }
     cJSON *res = cJSON_Parse(body);
     const char *refused = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
+    if (status == 400 && refused && !strcmp(refused, "CaptchaRequired") && req && req->captchas < 2) {
+        // v10.0.3's seek on CaptchaRequired: at most twice, a captcha, a fresh validation token and the same seek with
+        // captchaToken (deob-10.0.3.js:164680-164699, 164897). Box Office's captcha is the brain's ALTCHA for=seek
+        printf("[mm] seek-game: CaptchaRequired: solving the seek's captcha (attempt %d)\n", req->captchas + 1);
+        req->captchas++;
+        g_seek_inflight = 1;
+        if (qp) quick_play_retry_out();
+        g_rejoin_seek = rejoin;
+        g_reload_seek = reload;
+        g_find_seek = find;
+        g_find_both = find_both;
+        cJSON_Delete(res);
+        if (!kn_captcha_request("seek", seek_captcha_done, req)) seek_captcha_done(req, NULL); // none can start: the failure
+        return;
+    }
     if (status == 403 && token_refusal(refused) && req && !req->retried) {
         // a token spent or expired on the way (a slow link, a brain restart): once more with a
         // fresh one, keeping the seek's state
@@ -1327,6 +1368,19 @@ static void on_token(void *user, const int status, const char *body, const size_
         KN_LOG_VERBOSE2("[mm] validation token (%zu chars)%s\n", len, req->retried ? ", fresh after a refusal" : "");
     } else {
         printf("[mm] no validation token (generate-token HTTP %d): seeking without one\n", status);
+    }
+    if (req->captcha) { // the seek's captcha (seek_captcha_done): captchaToken, after the token as v10.0.3 orders them
+        const char *base = full ? full : path;
+        const size_t cap = strlen(base) + strlen(req->captcha) * 3 + 32;
+        char *with = malloc(cap);
+        if (with) {
+            const int n = snprintf(with, cap, "%s&captchaToken=", base);
+            backend_url_encode(with + n, cap - (size_t) n, req->captcha);
+            free(full);
+            full = with;
+        }
+        free(req->captcha); // single use: spent by this seek
+        req->captcha = NULL;
     }
     if (!backend_http_get(full ? full : path, on_seek, req)) {
         const unsigned action = req->action;

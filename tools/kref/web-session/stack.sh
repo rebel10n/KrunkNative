@@ -7,6 +7,7 @@
 #
 #   KN_WEB_BUILD=<native build dir> KN_WEB_DIST=<web dist dir> tools/kref/web-session/stack.sh [RUN_DIR]
 #
+# KN_WEB_BRAIN_ARGS: more kn_brain flags (word-split), e.g. "--captcha.enforce=true" for captcha-e2e.js.
 # KN_WEB_BUILD must hold services/brain/kn_brain and server_bin (make, or cmake --build ... --target
 # client_bin server_bin kn_brain); KN_WEB_DIST is `make web`'s dist/web (or its build's dist dir).
 # net-bridge/node_modules must exist (make bridge-install). Run from anywhere.
@@ -36,7 +37,7 @@ trap cleanup EXIT
 
 KN_BRAIN_INTERNAL_SECRET="$SECRET" "$B/services/brain/kn_brain" --brain.host=127.0.0.1 --brain.port="$BRAIN" --database.driver=sqlite \
     --database.path="$RUN/brain.db" --migrate --brain.region=local --brain.id=websession \
-    --accounts.signup_rewards.enabled=false --finder.poll_interval_s=1 > "$RUN/brain.log" 2>&1 &
+    --accounts.signup_rewards.enabled=false --finder.poll_interval_s=1 ${KN_WEB_BRAIN_ARGS:-} > "$RUN/brain.log" 2>&1 &
 pids+=($!)
 for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:$BRAIN/mm/status" >/dev/null 2>&1 && break; sleep 0.25; done
 

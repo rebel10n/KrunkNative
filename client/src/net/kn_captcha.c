@@ -120,7 +120,7 @@ static unsigned start(const char *purpose, const KnCaptchaDone done, void *user,
     s->frame_slot = frame_slot;
     s->send = send;
     char path[64];
-    snprintf(path, sizeof(path), "/captcha/challenge?for=%s", purpose);
+    snprintf(path, sizeof(path), "/mm/captcha?for=%s", purpose);
     if (!backend_http_get(path, on_challenge, (void *) (uintptr_t) id)) {
         memset(s, 0, sizeof(*s)); // not queued (the brain gate, out of memory): the caller sends without one
         return 0;
@@ -130,6 +130,37 @@ static unsigned start(const char *purpose, const KnCaptchaDone done, void *user,
 
 unsigned kn_captcha_request(const char *purpose, const KnCaptchaDone done, void *user) {
     return start(purpose, done, user, NULL, 0, NULL);
+}
+
+unsigned kn_captcha_solve(const char *purpose, const char *challenge_json, const KnCaptchaDone done, void *user) {
+    if (!purpose || !purpose[0] || strlen(purpose) >= sizeof(g_slots[0].purpose) || !challenge_json) return 0;
+    Slot *s = NULL;
+    for (int i = 0; i < KN_CAPTCHA_SLOTS && !s; i++) {
+        if (g_slots[i].state == SLOT_FREE) s = &g_slots[i];
+    }
+    if (!s) return 0;
+    cJSON *c = cJSON_Parse(challenge_json);
+    const cJSON *max = cJSON_GetObjectItemCaseSensitive(c, "maxnumber");
+    memset(s, 0, sizeof(*s));
+    const int ok = c && krunker_altcha_begin(&s->a, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c, "algorithm")),
+                                             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c, "challenge")),
+                                             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c, "salt")),
+                                             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c, "signature")),
+                                             cJSON_IsNumber(max) && max->valuedouble >= 1 ? (long) max->valuedouble : 0) == 0;
+    cJSON_Delete(c);
+    if (!ok) {
+        memset(s, 0, sizeof(*s));
+        return 0;
+    }
+    const unsigned id = g_next_id++;
+    if (!g_next_id) g_next_id = 1;
+    s->state = SLOT_SOLVE;
+    s->id = id;
+    snprintf(s->purpose, sizeof(s->purpose), "%s", purpose);
+    s->started_ms = now_ms();
+    s->done = done;
+    s->user = user;
+    return id;
 }
 
 unsigned kn_captcha_send_frame(const char *purpose, cJSON *frame, const int slot, const KnCaptchaSendFrame send) {
