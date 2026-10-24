@@ -158,8 +158,9 @@ int ks_player_allows(const Player*, int what);
 // disableDefault masks are applied to *input. Returns 1 when GAME.DEFAULT.
 // disablePlayerBehaviour is set: the caller skips the default movement / rotation / shooting.
 int ks_game_on_player_update(Game*, Player*, Input *input);
-// player_spawn (both sides): resets the per-player script state; on the authority's server
-// script also fires onPlayerSpawn(id).
+// player_spawn (both sides): v10.0.3 player.init's reset (defaultMovement / Velocity / Rotation on, disabledInputs and
+// custSync cleared; disableShooting / disableMelee kept); on the authority's server script also fires onPlayerSpawn(id).
+// ks_game_on_player_leave(_uid) resets all of the uid's script state (the next player of it is a new object).
 void ks_game_on_player_spawn(Game*, Player*);
 // players.kill (authority): onPlayerDeath(id, killerID); killer may be the victim itself.
 void ks_game_on_player_death(Game*, Player *victim, Player *killer);

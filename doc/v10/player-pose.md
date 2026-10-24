@@ -79,17 +79,14 @@ freeze. KN does the same (`player_apply_freeze`): `Player.frozen` is the freeze 
 into the player's script flags (`KsRef.allow`, created when the game has no script), which
 `ks_player_allows` reads. So, as in v10: the script reads the freeze back (`player.defaultMovement` is
 false), a script may turn a flag on again while frozen, an unfreeze turns all four on whatever the script
-had set, and a respawn's reset turns the movement flags on (`player.reset` :190737-190740).
+had set, and a respawn's reset turns the movement flags on and keeps `disableShooting` / `disableMelee` (`player.init`
+:190737-190740: `ks_ref_respawn_player`); a leave clears them all, so the next player of the uid starts fresh.
 
 ## Differences (deliberate)
 
 - `applyFreezeOthers` has no caller in the bundle (its caller is server-only code); KN reaches it with
   the host / dev chat command `/freezeothers [on|off]` (the caller is the exception).
 - Poses are stored as floats; the getter rounds them back to the 1/1000 `sanitizePose` rounded to.
-- A respawn of a frozen player turns its shooting / melee on too: KN's player script state is reset at
-  every spawn (`ks_ref_reset_player`, all flags), where v10's `player.reset` leaves `disableShooting` /
-  `disableMelee` alone. The script state is kept per uid, not per player object, so keeping those two across
-  a spawn would hand a script's lock to the next player of that uid; that is the KrunkScript port's to change.
 - The KN server sends a posed player's pose after every SPAWN of it (a joiner's `plrPose`); the client
   takes a repeat as the same pose (no new easing).
 

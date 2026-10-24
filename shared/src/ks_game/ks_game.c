@@ -44,6 +44,17 @@ void ks_ref_reset_player(KsRef *ref)
     ref->sync_count = 0;
 }
 
+// v10.0.3 player.init (deob-10.0.3.js:190737-190752, run by players.add on every (re)spawn, :195069): defaultMovement /
+// defaultVelocity / defaultRotation true, disabledInputs {}, custSync emptied. disableShooting / disableMelee belong to
+// the player object and stay (a frozen player who respawns still cannot shoot); they reset only with a new player
+// object (ks_ref_reset_player: a new wrapper, the player's leave).
+static void ks_ref_respawn_player(KsRef *ref)
+{
+    ref->allow |= KS_PLAYER_DEFAULT_MOVEMENT | KS_PLAYER_DEFAULT_VELOCITY | KS_PLAYER_DEFAULT_ROTATION;
+    ref->disabled = 0;
+    ref->sync_count = 0;
+}
+
 KsRef *ks_ref_find(const KsGame *kg, const int kind, const int id)
 {
     if (!kg) return NULL;
@@ -512,9 +523,9 @@ void ks_game_on_player_spawn(Game *game, Player *player)
 {
     KsGame *kg = game ? game->ks : NULL;
     if (!kg || !player) return;
-    // players.js reset (PLJ:458-473): default flags, disabledInputs, custSync
+    // player.init on the (re)spawn: the movement flags, disabledInputs, custSync; not disableShooting / disableMelee
     KsRef *ref = ks_ref_find(kg, KS_REF_PLAYER, player->uid);
-    if (ref) ks_ref_reset_player(ref);
+    if (ref) ks_ref_respawn_player(ref);
     if (!game_is_authority(game) || !server_hook(game, "onPlayerSpawn")) return;
     KsScript *s = kg->script;
     KsValue id = id_value(s, player);
@@ -612,6 +623,9 @@ void ks_game_on_player_leave_uid(Game *game, const int uid)
     // the wrapper's script-added properties go with the player (6.4)
     KsScript *s = ks_game_script(game);
     if (s) ks_host_forget(s, ks_game_player_class(game), (uint32_t) uid);
+    // the player object goes: the next player of this uid starts with v10's fresh flags (a new players.list object)
+    KsRef *ref = game && game->ks ? ks_ref_find(game->ks, KS_REF_PLAYER, uid) : NULL;
+    if (ref) ks_ref_reset_player(ref);
 }
 
 void ks_game_on_player_leave(Game *game, Player *player)

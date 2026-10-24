@@ -378,11 +378,12 @@ static void test_freeze_others(Game *game, Player *a, Player *b, Player *c) {
     // and may turn them on again: defaultMovement = true moves a frozen player in v10
     ks_game_on_chat_message(game, b, "go");
     CHECK(ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && !ks_player_allows(b, KS_PLAYER_CAN_SHOOT), "a script's defaultMovement = true wins over the freeze");
-    // a respawn's reset turns the movement on (player.reset :190737-190739); KN's script state reset also turns
-    // shooting / melee on (ks_ref_reset_player; doc/v10/player-pose.md)
+    // a respawn's reset turns the movement on (player.init :190737-190739) and keeps disableShooting / disableMelee:
+    // a frozen player who respawns still cannot shoot (ks_ref_respawn_player)
     ks_game_on_chat_message(game, b, "stop");
     ks_game_on_player_spawn(game, b);
     CHECK(ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && ks_player_allows(b, KS_PLAYER_DEFAULT_VELOCITY), "a respawn resets the movement flags");
+    CHECK(!ks_player_allows(b, KS_PLAYER_CAN_SHOOT) && !ks_player_allows(b, KS_PLAYER_CAN_MELEE), "a respawn keeps the frozen player's shooting / melee off");
     player_apply_freeze(b, 1); // frozen again for what follows
 
     // the unfrozen get every flag back, whatever the script had set (v10 defaultMovement = !freeze)
