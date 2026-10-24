@@ -1,5 +1,5 @@
 /*
- * services/brain/ranked.c - Krunker v10.0.2 ranked matchmaking and profiles (doc/v10/ranked-impl.md,
+ * services/brain/ranked.c - Krunker v10.0.3 ranked matchmaking and profiles (doc/v10/ranked-impl.md,
  * doc/backend.md 6.5). Replaces the v7.1.4 party queue (/mm/queue/..., which now answers
  * {"status": "ClientOutdated"}).
  *
@@ -136,9 +136,9 @@ static const char *query_region(kn_http_req *req, const char *def) {
     return index >= 0 ? ranked_region_code(index) : NULL;
 }
 
-// KrunkNative plays the ranked pool's maps below mapIndex 32 (Q-MAP, shared/include/ranked.h): Eterno
-// Simulator (39) and Frontier (42) have catalogue entries now, but the matcher does not host them yet.
-static int ranked_map_playable(const int map) { return map >= 0 && map < 32 && map_catalog_official_index(map) >= 0; }
+// A season map the matcher may host: one the map catalogue has (map_catalog_official_index). Every map of
+// 10.0.3's pool has an entry (shared/include/ranked.h), Frontier (42) included, so every season map is played.
+static int ranked_map_playable(const int map) { return map >= 0 && map_catalog_official_index(map) >= 0; }
 
 static void add_season_maps(cJSON *o, const int season) {
     int maps[RANKED_SEASON_MAPS];
@@ -149,7 +149,7 @@ static void add_season_maps(cJSON *o, const int season) {
         cJSON_AddNumberToObject(m, "id", maps[i]);
         const char *name = ranked_pool_map_name(maps[i]);
         cJSON_AddStringToObject(m, "name", name ? name : "");
-        /* Q-MAP: Eterno Simulator (39) and Frontier (42) are listed, not playable yet */
+        /* a map the catalogue lacks would be listed, not played (none of 10.0.3's pool) */
         cJSON_AddBoolToObject(m, "available", ranked_map_playable(maps[i]));
         cJSON_AddItemToArray(a, m);
     }
@@ -794,6 +794,14 @@ static void on_proc_reply(kn_db_result *res, void *ud) {
     if (!kn_db_ok(res)) {
         const char *msg = kn_db_user_message(res);
         if (!msg) log_err("ranked call", res);
+        if (msg && c->v10 && c->shop_id[0]) {
+            /* the v10 purchase's refusal: a text error; v10.0.3 reads data.success, else the top-level string error,
+             * and shows it ("Purchase limit reached", "Rating Required"; deob-10.0.3.js:127078-127101, 127277) */
+            kn_http_set_header(c->req, "Cache-Control", "no-cache, no-store, must-revalidate");
+            v10_reply_text_error(c->req, 400, msg);
+            free(c);
+            return;
+        }
         c->out = cJSON_CreateObject();
         cJSON_AddBoolToObject(c->out, "success", 0);
         cJSON_AddStringToObject(c->out, "error", msg ? msg : "internal");
@@ -1157,7 +1165,7 @@ static void tick(kn_loop *loop, void *ud) {
     ranked_season_maps(season, maps);
     char list[96] = "";
     for (int i = 0; i < RANKED_SEASON_MAPS; i++) {
-        /* Q-MAP: only the playable pool maps are picked */
+        /* only the maps the catalogue has are picked */
         if (!ranked_map_playable(maps[i])) continue;
         const size_t len = strlen(list);
         snprintf(list + len, sizeof list - len, "%s%d", len ? "," : "", maps[i]);
@@ -1267,9 +1275,12 @@ void ranked_v10_profile(kn_http_req *req, const char *season, const char *region
     with_account(req, 1, profile_account, c);
 }
 
-/* GET /leaderboards/rankings/season/:s[/region/:r] (v10.js 25972): the placed players, best rating first */
+/* GET /leaderboards/rankings/season/:s[/region/:r] (v10.js 25972): the placed players, best rating first. No
+ * region segment is the Global board: v10.0.3's Global tab has region undefined (deob-10.0.3.js:155825-155828) and
+ * getLeaderboard then leaves /region/ off (29900), so it is not the query's default region (eu). */
 void ranked_v10_leaderboard(kn_http_req *req, const char *season, const char *region) {
     if (!db_ready()) return refuse(req, 1, 503, "RankedUnavailable");
+    if (!region || !*region) region = "global";
     ReqCtx *c = req_ctx_v10(req, season, region);
     if (!c) return;
     if (c->region_index < 0) {

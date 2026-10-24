@@ -240,11 +240,11 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     check(code == 200 and info.get("season") == SEASON and len(info.get("maps", [])) == 5 and
           any(m["id"] == 2 for m in info.get("maps", [])), "info: season %d, Sandstorm + 4 maps (%s)" % (SEASON, [m["id"] for m in info.get("maps", [])]))
     check([r["code"] for r in info.get("regions", [])] == ["as", "eu", "na"] and info.get("minLevel") == 1, "info: regions as/eu/na, min level")
-    # Q-MAP: KN plays the pool's maps 0..31 only; Eterno Simulator (39) and Frontier (42) are in the
-    # rotation but not playable (catalogue entries now, not hosted), so the list says so and the matcher never hosts them
-    unplayable = sorted(m["id"] for m in info.get("maps", []) if not m["available"])
-    check(all(m["available"] == (m["id"] < 32) for m in info.get("maps", [])) and all(i in (39, 42) for i in unplayable),
-          "maps: the playable ones are listed available, 39 / 42 unavailable (%s)" % unplayable)
+    # 10.0.3's pool (deob-10.0.3.js:19381-19388): 2, 4, 11, 14, 17, 42. Eterno Simulator (39) left it; every pool map,
+    # Frontier included, has a catalogue entry, so every season map is listed available and may be hosted
+    ids = [m["id"] for m in info.get("maps", [])]
+    check(all(m["available"] for m in info.get("maps", [])) and all(i in (2, 4, 11, 14, 17, 42) for i in ids) and 39 not in ids,
+          "maps: every season map is 10.0.3's pool and available, no Eterno Simulator (%s)" % ids)
     code, p0 = profile(pa, alice, season=0, region="na")
     pr = p0.get("profile", {}) if code == 200 else {}
     check(not upgraded or code == 200 and pr.get("wins") == 3 and pr.get("losses") == 1 and abs(pr.get("conservative_rating", 0) - (25 + 300 / 60.0 - 50 / 3.0)) < 1e-6,
