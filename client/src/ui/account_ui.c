@@ -36,6 +36,7 @@
 #elif !defined(__EMSCRIPTEN__)
 #include <unistd.h>
 #endif
+#include <stdint.h> // intptr_t: the email preference's callback argument
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -80,7 +81,15 @@ static int g_restore_sent;       // a token restore is in flight
 static int g_restore_asks;        // asks sent on this socket
 static double g_restore_at;       // glfwGetTime() of the last ask (0 none)
 static double g_restore_retry_at; // a refused ask is asked again at this glfwGetTime() (0 none)
+// windows[4].tabIndex over profileTabs (deob-10.0.3.js:21519): home, Friends, Settings, Connections. v7.1.4's
+// Partner and promo code (vpn_key) tabs are gone from 10.0.3 (the Partner program with them: window 28's gen is empty).
+enum { PROFILE_TAB_HOME, PROFILE_TAB_FRIENDS, PROFILE_TAB_SETTINGS, PROFILE_TAB_CONNECTIONS, PROFILE_TAB_COUNT };
+// The stat tabs: statTabs (deob-10.0.3.js:21520: General Stats, Killstreaks, Other Stats, Class Stats, Raids), then
+// KrunkNative's Medals (kn_brain "mdl", a Box Office account only; doc/v10/kn-additions.md)
+enum { STAT_TAB_RAIDS = 4, STAT_TAB_MEDALS = 5, STAT_TAB_COUNT = 6 };
 static int g_tab_index;          // windows[4].tabIndex
+static int g_promo_emails = -1;  // the email preference v10 caches (iiíììîî.promotional): -1 none stored (null)
+static cJSON *g_raid_stats;      // the Box Office account's raidStats (owned; kn_brain keeps none: a scenario's)
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
 static char g_session_user[ALT_LABEL_MAX]; // the login name g_token belongs to ("" = no session)
@@ -305,6 +314,7 @@ static void kio_build(void) {
     if (a->premium && alias && alias[0]) copy_str(a->alias, sizeof(a->alias), alias);
     a->junk = obj_num("player_jnk");
     a->ranked_points = obj_num("ranked_points");
+    a->spending_tier = (int) obj_num("spending_tier"); // spending_tier || 0 (deob-10.0.3.js:128959): the store's spender-only KR cards
     a->level = progression_level(a->score, RANK_VAR);
     a->level_prog = progression_level_prog(a->score, RANK_VAR);
     // stats: player_stats is JSON text in the object form, an object in setData's
@@ -367,7 +377,8 @@ static void kio_set_data(const cJSON *d) {
                {15, "player_stats"}, {16, "player_hack"}, {17, "player_region"}, {18, "player_role"}, {19, "player_premium"},
                {20, "player_2FA"}, {21, "player_alias"}, {27, "jobrating"}, {28, "jobratingpositive"}, {30, "player_clanrole"},
                {37, "player_jnk"}, {38, "activeChallenges"}, {39, "player_badge"},
-               {47, "ranked_points"}}; // (rankedPoints: setData's [47], v10:112873)
+               {47, "ranked_points"}, {48, "spending_tier"}, // (rankedPoints: setData's [47], v10:112873; spendingTier [48], deob-10.0.3.js:129017)
+               {52, "raidStats"}}; // raidStats: setData's [52] (deob-10.0.3.js:129021; the constructor's is [])
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         const cJSON *v = cJSON_GetArrayItem(d, map[i].slot);
         if (v) obj_set(map[i].key, v);
@@ -1007,6 +1018,9 @@ static void clear_account(void) {
     g_chal_typ[0] = 0;
     cJSON_Delete(g_medal_counts);
     g_medal_counts = NULL;
+    cJSON_Delete(g_raid_stats);
+    g_raid_stats = NULL;
+    g_promo_emails = -1;
     battlepass_ui_reset(); // windows[5].data / account.BP
     memset(&g_email, 0, sizeof(g_email));
 }
@@ -1826,12 +1840,12 @@ static void email_frame(const char *label, const cJSON *frame) {
     if (!g_logged_in) return;
     if (!strcmp(label, "emailS")) {
         email_state(cJSON_GetArrayItem(frame, 1));
-        if (g_tab_index == 3) menu_rerender_if_open(5);
+        if (g_tab_index == PROFILE_TAB_SETTINGS) menu_rerender_if_open(5);
         return;
     }
     const char *err = str_at(frame, 1), *msg = str_at(frame, 2);
     email_state(cJSON_GetArrayItem(frame, 3));
-    if (g_tab_index == 3) menu_rerender_if_open(5);
+    if (g_tab_index == PROFILE_TAB_SETTINGS) menu_rerender_if_open(5);
     email_res(err ? err : msg, err != NULL);
 }
 
@@ -2271,6 +2285,39 @@ static void show_other_signed_in(const char *typed) {
     free(html);
 }
 
+// windows[4].collapseCon(hd) (deob-10.0.3.js:247458-247463): setHed_<x> shows / hides setBod_<x>, and its first
+// child (the plusOrMinus3 chevron) reads keyboard_arrow_down / _right
+static void collapse_con(const HtmlElem hd) {
+    char id[64], body_id[72];
+    if (!hd || html_dom_get_attr(hd, "id", id, sizeof(id)) < 0 || strncmp(id, "setHed_", 7)) return;
+    snprintf(body_id, sizeof(body_id), "setBod_%s", id + 7);
+    const HtmlElem body = html_dom_by_id(body_id), icon = html_dom_first_child(hd);
+    if (!body) return;
+    char display[16] = "";
+    const int closed = html_dom_get_style(body, "display", display, sizeof(display)) >= 0 && !strcmp(display, "none");
+    if (icon) html_dom_set_html(icon, closed ? "keyboard_arrow_down" : "keyboard_arrow_right");
+    html_dom_set_display(body, closed ? "" : "none");
+}
+
+// email.setPreference({promotional, source}) (deob-10.0.3.js:130868-130882): a 200 with data.success caches
+// {chosen: true, promotional}; anything else leaves the cache (togglePromoEmails reads no answer). kn_brain's POST
+// /email/preferences refuses (v10_auth.c: Box Office stores no email preference), so the row stays unchecked
+// the next time the window draws, as v10's does when the call fails.
+static void promo_emails_done(void *user, const int status, const char *body, const size_t len) {
+    const int on = (int) (intptr_t) user;
+    cJSON *j = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "data"), "success"))) g_promo_emails = on;
+    cJSON_Delete(j);
+}
+
+static void promo_emails_set(const int on) {
+    char url[512];
+    snprintf(url, sizeof(url), "%s/email/preferences", backend_url());
+    if (!backend_enabled() || !backend_http_request("POST", url, on ? "{\"promotional\":true,\"source\":\"settings\"}" : "{\"promotional\":false,\"source\":\"settings\"}",
+                                                    promo_emails_done, (void *) (intptr_t) on))
+        printf("[account] togglePromoEmails: no account service\n");
+}
+
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     // No account service, or the probe found none: say why at once. A socket that is still
@@ -2353,7 +2400,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (progress_handle(name, args, argc) >= 0) return 1; // WP-E part 2c: badges, windows[32]
     if (!strcmp(name, "windows.4.switchStat")) { // statTabB<n> shown, statTab<n> active
         const int t = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
-        for (int i = 0; i < 5; i++) { // + KrunkNative's Medals tab (WP-E part 2c)
+        for (int i = 0; i < STAT_TAB_COUNT; i++) { // + KrunkNative's Medals tab (WP-E part 2c)
             char sel[24], id[16];
             snprintf(sel, sizeof(sel), ".statTabB%d", i);
             snprintf(id, sizeof(id), "statTab%d", i);
@@ -2366,6 +2413,25 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "windows.4.switchTab")) {
         g_tab_index = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
         menu_show_window(5, 1); // updateWindow(5)
+        return 1;
+    }
+    if (!strcmp(name, "windows.4.collapseCon")) { // the Connections tab's Discord / Twitch headers
+        HtmlElem hd = argc > 0 && args[0].kind == HTML_ARG_THIS ? (HtmlElem) args[0].num : 0;
+        if (!hd && argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) hd = html_dom_by_id(args[0].str); // a scenario's windowAction: the header's id
+        collapse_con(hd ? hd : ev ? ev->target : 0);
+        return 1;
+    }
+    if (!strcmp(name, "togglePromoEmails")) { // window.togglePromoEmails(on): if (account) setPreference(!!on, "settings")
+        const int on = argc > 0 && args[0].kind == HTML_ARG_THIS_CHECKED ? ev && ev->checked : argc > 0 && args[0].num != 0.0;
+        if (g_logged_in) promo_emails_set(on);
+        return 1;
+    }
+    if (!strcmp(name, "linkTwitchPop") || !strcmp(name, "unlinkTwitchPop")) {
+        // v10 asks "Are you sure you want to link a twitch account?" and YES goes to Twitch's OAuth page
+        // (connectTwitchAcc, deob-10.0.3.js:261960-262004) with Krunker's client id and a ?twitch_auth return.
+        // Box Office has no Twitch linking (no OAuth client, kn_brain stores no twitchId): not available, the
+        // button does nothing (doc/v10/ui.md section 9).
+        printf("[account] %s: Box Office has no Twitch account linking\n", name);
         return 1;
     }
     if (!strcmp(name, "claimReward") && g_logged_in) {
@@ -2606,9 +2672,6 @@ static void pst_num(StrBuf *sb, const char *label, const double v, const int dec
     pst(sb, label, t);
 }
 
-// windows[4].gen() for a signed-in account (the guest form is ui/windows/5.html): the
-// profile tabs of v7.1.4 (home = Your Account + the four stat tabs, Friends, Partner,
-// Settings, Connections, promo codes) and the logout links.
 // windows[4]'s "Your Stats" (the XP bar and the stat tabs) for an account: the Box Office one
 // (g_acc) or the krunker.io one (its "a" / "ua" data from the official game server)
 static double stat_in(const AccountInfo *acc, const char *key) {
@@ -2621,15 +2684,91 @@ static void xp_text(const AccountInfo *acc, char *out, const size_t n) {
     snprintf(out, n, "%d / %d", (int) fmax(acc->score - m, 0), (int) (pow((acc->level + 1) / RANK_VAR, 2) - m));
 }
 
+// a count as JS prints a number ("12", "1.5")
+static void js_number(char *out, const size_t n, const double v) {
+    if (v == floor(v) && fabs(v) < 1e15) snprintf(out, n, "%.0f", v);
+    else snprintf(out, n, "%.15g", v);
+}
+
+// a raid entry's number field; a map_id may come as text
+static double raid_num(const cJSON *entry, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(entry, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsString(v) ? atof(v->valuestring) : 0.0;
+}
+
+// acc.raidStats: the krunker.io account's comes in setData's slot 52 ("ua", kio_set_data). kn_brain keeps no
+// raid clears (leaderboards.c), so a Box Office account has v10's empty list (a scenario's account.raidStats).
+static const cJSON *raid_stats_of(const AccountInfo *acc) {
+    const cJSON *list = acc == &g_kio_acc ? cJSON_GetObjectItemCaseSensitive(g_kio.obj, "raidStats") : g_raid_stats;
+    return cJSON_IsArray(list) ? list : NULL;
+}
+
+// statTabB4, Raids (deob-10.0.3.js:247596-247634): Totals, AI Kills, Boss Kills and Deaths over every entry of
+// raidStats [{map_id, completions, attempts, ai_kills, boss_kills, deaths, best_time}], then one card per Raid map
+// (Tortuga 18, Laboratory 29, Soul Sanctum 31, Khepri 35, Bastion 43; the Raid host's allowedDat). No entry: zeros
+// and a best time of --:--.
+static void raids_html(StrBuf *sb, const cJSON *list) {
+    static const struct {
+        int map;
+        const char *name;
+    } maps[] = {{18, "Tortuga"}, {29, "Laboratory"}, {31, "Soul Sanctum"}, {35, "Khepri"}, {43, "Bastion"}};
+    double done = 0, tries = 0, ai = 0, boss = 0, deaths = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, list) {
+        done += raid_num(e, "completions");
+        tries += raid_num(e, "attempts");
+        ai += raid_num(e, "ai_kills");
+        boss += raid_num(e, "boss_kills");
+        deaths += raid_num(e, "deaths");
+    }
+    char c[32], t[32], line[96];
+    js_number(c, sizeof(c), done);
+    js_number(t, sizeof(t), tries);
+    snprintf(line, sizeof(line), "%s/%s (%.0f%%)", c, t, tries > 0 ? floor(done / tries * 100 + 0.5) : 0.0); // Math.round
+    pst(sb, "Totals", line);
+    pst_num(sb, "AI Kills", ai, 0);
+    pst_num(sb, "Boss Kills", boss, 0);
+    pst_num(sb, "Deaths", deaths, 0);
+    sb_append(sb, "<div style='height:10px'></div>");
+    for (size_t m = 0; m < sizeof(maps) / sizeof(maps[0]); m++) {
+        const cJSON *r = NULL;
+        cJSON_ArrayForEach(e, list) if (raid_num(e, "map_id") == maps[m].map) { // map_id == key (a loose compare)
+            r = e;
+            break;
+        }
+        const double rd = raid_num(r, "completions"), rt = raid_num(r, "attempts");
+        char best[24] = "--:--";
+        const cJSON *bt = cJSON_GetObjectItemCaseSensitive(r, "best_time");
+        if (r && bt && !cJSON_IsNull(bt)) { // floor(ms / 60000) + ":" + ("0" + floor(ms % 60000 / 1000)).slice(-2)
+            const double ms = raid_num(r, "best_time");
+            snprintf(best, sizeof(best), "%.0f:%02d", floor(ms / 60000), (int) floor(fmod(ms, 60000) / 1000));
+        }
+        js_number(c, sizeof(c), rd);
+        js_number(t, sizeof(t), rt);
+        sb_appendf(sb, "<div class='pSt' style='text-align:center;padding:10px;height:100%%;width: 180px;'><div class='pStTitle'>%s</div>"
+                       "<div class='pSt' style='margin:2px 0;'>Completions<strong>%s/%s (%.0f%%)</strong></div>"
+                       "<div class='pSt' style='margin:2px 0;'>Best Time<strong>%s</strong></div>",
+                   maps[m].name, c, t, rt > 0 ? floor(rd / rt * 100 + 0.5) : 0.0, best);
+        const char *const keys[][2] = {{"ai_kills", "AI Kills"}, {"boss_kills", "Boss Kills"}, {"deaths", "Deaths"}};
+        for (int k = 0; k < 3; k++) {
+            comma_float(line, sizeof(line), raid_num(r, keys[k][0]), 0);
+            sb_appendf(sb, "<div class='pSt' style='margin:2px 0;'>%s<strong>%s</strong></div>", keys[k][1], line);
+        }
+        sb_append(sb, "</div>");
+    }
+}
+
 static void stats_html(StrBuf *sb, const AccountInfo *acc, const int kio) {
-    // config.statTabs + KrunkNative's Medals (the account's medal counts, kn_brain "mdl", WP-E part 2c)
-    static const char *const stat_tabs[] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats", "Medals"};
+    // statTabs (deob-10.0.3.js:21520) + KrunkNative's Medals (the account's medal counts, kn_brain "mdl", WP-E part 2c):
+    // a Box Office account's only, krunker.io keeps no medal counts
+    static const char *const stat_tabs[STAT_TAB_COUNT] = {"General Stats", "Killstreaks", "Other Stats", "Class Stats", "Raids", "Medals"};
+    const int tab_count = kio ? STAT_TAB_MEDALS : STAT_TAB_COUNT;
     char a[64];
     sb_append(sb, "<div class='setHed' style='margin-top:10px;margin-bottom:15px;'>Your Stats</div>");
     xp_text(acc, a, sizeof(a));
     sb_appendf(sb, "<div class='xpBar' style='height:31px;line-height:34px;font-size:28px;'><div class='xpBarB' style='width:%.6g%%'></div><span class='xpBarV'>%s</span></div>", acc->level_prog, a);
     sb_append(sb, "<div id='statHolder'><div style='height:15px;'></div><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;'>");
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < tab_count; i++) {
         sb_appendf(sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);windows[4].switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 16px;'onmouseenter='playTick();'>%s</div>",
                    i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
     }
@@ -2700,27 +2839,136 @@ static void stats_html(StrBuf *sb, const AccountInfo *acc, const int kio) {
                    pct, (int) (xp - lo), (int) (hi - lo), level);
     }
     sb_append(sb, "</div><div class='statTabB4 hide'>");
-    if (!kio) { // KrunkNative's medal counts (kn_brain "mdl"): no such data for a krunker.io account
+    raids_html(sb, raid_stats_of(acc));
+    sb_append(sb, "</div>");
+    if (!kio) { // statTabB5: KrunkNative's medal counts (kn_brain "mdl"): no such data for a krunker.io account
+        sb_append(sb, "<div class='statTabB5 hide'>");
         medal_tab_html(sb);
         if (!g_medal_counts) backend_social_send_text("[\"mdl\"]");
+        sb_append(sb, "</div>");
     }
-    sb_append(sb, "</div></div>");
+    sb_append(sb, "</div>");
 }
 
-static char *gen_account(void) {
-    static const char *const tabs[] = {"<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", "Friends", "Partner",
-                                       "Settings", "Connections", "<span class='material-icons' style='color:#96ff50;font-size:42px;vertical-align:bottom'>vpn_key</span>"}; // config.profileTabs
-    // config.statTabs + KrunkNative's Medals (the account's medal counts, kn_brain "mdl", WP-E part 2c)
-    static const char *const stat_tabs[] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats", "Medals"};
-    StrBuf sb = {0};
-    char a[64];
-    sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'>");
-    for (int i = 0; i < 6; i++) {
-        if (i == 4) continue; // window.canConnectExternalAccounts (Twitch / Metamask): not in KrunkNative
-        sb_appendf(&sb, "<div class='bigMenTab%s' style='font-size:16px' onmouseenter='playTick(0.1);' onclick='playSelect();windows[4].switchTab(%d)'>%s</div>", g_tab_index == i ? " bigMenTabA" : "", i, tabs[i]);
+// The Connections tab's Twitch section (deob-10.0.3.js:247697-247750). Box Office has no Twitch link (kn_brain
+// keeps no twitchId; data slot 31 is v7's twitch name), so it is v10's unlinked state: the Link button, whose
+// linkTwitchPop is not available here, and no Claim. "Drops Earned" lists the owned items with `drop`
+// (iììiíîï(account, true): the inventory, every store item for a developer; v10's extra free / creator /
+// streamer items are not drops), by rarity, then season, then index, all descending.
+typedef struct {
+    int ind, rarity, seas;
+} DropItem;
+
+static int drop_cmp(const void *pa, const void *pb) {
+    const DropItem *a = pa, *b = pb;
+    if (a->rarity != b->rarity) return b->rarity - a->rarity;
+    if (a->seas != b->seas) return b->seas - a->seas;
+    return b->ind - a->ind;
+}
+
+static void drops_add(DropItem **items, int *n, int *cap, const int ind) {
+    const ViewerSkin *s = viewer_skin(ind);
+    if (!s || !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(ind), "drop"))) return;
+    if (*n == *cap) {
+        const int grown = *cap ? *cap * 2 : 16;
+        DropItem *more = realloc(*items, (size_t) grown * sizeof(**items));
+        if (!more) return;
+        *items = more;
+        *cap = grown;
     }
+    (*items)[(*n)++] = (DropItem){ind, s->rarity, s->seas ? s->seas : 1};
+}
+
+static void twitch_html(StrBuf *sb) {
+    DropItem *items = NULL;
+    int n = 0, cap = 0;
+    if (g_acc.is_dev) {
+        for (int i = 0; i < g_viewer_skin_count; i++) drops_add(&items, &n, &cap, i);
+    } else {
+        const cJSON *e, *inv = g_acc.data ? cJSON_GetArrayItem(g_acc.data, 10) : NULL; // acc.skins [{ind, cnt}]
+        cJSON_ArrayForEach(e, inv) {
+            const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+            if (cJSON_IsNumber(ind)) drops_add(&items, &n, &cap, ind->valueint);
+        }
+    }
+    if (n > 1) qsort(items, (size_t) n, sizeof(*items), drop_cmp);
+    int frames[16], frame_n = 0; // the sprays' sprite-sheet lengths: one @keyframes sprayAnmD<frames> each
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *s = viewer_skin(items[i].ind);
+        if (s->type != 4 || s->frames <= 0) continue;
+        int k = 0;
+        while (k < frame_n && frames[k] != s->frames) k++;
+        if (k == frame_n && frame_n < (int) (sizeof(frames) / sizeof(frames[0]))) frames[frame_n++] = s->frames;
+    }
+    if (frame_n) { // prepended to the section, as v10 does
+        sb_append(sb, "<style>");
+        for (int k = 0; k < frame_n; k++) sb_appendf(sb, "@keyframes sprayAnmD%d {100%%{background-position:-%dpx}}", frames[k], frames[k] * 68);
+        sb_append(sb, "</style>");
+    }
+    sb_append(sb, "<div class='setHed' id='setHed_twitch' style='margin-top:0px'onclick='window.windows[4].collapseCon(this)'><span class='material-icons plusOrMinus3'>keyboard_arrow_right</span> "
+                  "<img src='./img/connections/twitch.png' style='height: 40px;'></div>");
+    sb_append(sb, "<div class='setBodH' id='setBod_twitch' style='display:none'><div style=\"margin-bottom: 20px;margin-top:10px;text-align: center;color: var(--yellow);font-size: 19px;\">\n\t\t"
+                  "Twitch linking creates a permanent connection to this Krunker account regardless of unlinking</div><div class='settName'>Twitch Account (");
+    const char *twitch = g_acc.data ? cJSON_GetStringValue(cJSON_GetArrayItem(g_acc.data, 31)) : NULL; // acc.twitch || "none"
+    sb_append_esc(sb, twitch && twitch[0] ? twitch : "none");
+    sb_append(sb, ")<div class='lnkTw' onclick='linkTwitchPop();'>Link</div></div>");
+    sb_append(sb, "<div style='margin-top:10px;'>Link <a href='https://www.twitch.tv/directory/game/Krunker' target='_blank' style='color:#6441a5'>Twitch</a> to earn Drops & Items</div>");
+    sb_append(sb, "<div id='skinList' style='text-align: center;'>");
+    if (n) sb_append(sb, "<div class='setHed' style='margin-bottom:20px;'>Drops Earned</div>");
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *s = viewer_skin(items[i].ind);
+        char path[256], url[512];
+        viewer_skin_preview_path(s, path, sizeof(path));
+        html_dom_asset_url(path, url, sizeof(url));
+        const char *color = s->rarity >= 0 && s->rarity < g_viewer_rarity_count ? g_viewer_rarities[s->rarity].color : "#B0B0B0";
+        sb_appendf(sb, "<div class='dItemHolder' style='border: 2px solid %s;' onclick='openSales(%d)'>", color, items[i].ind);
+        if (s->type == 4) {
+            sb_appendf(sb, "<div class='dItemSprayImg' style='background: url(&quot;%s&quot;);", url);
+            if (s->frames > 0) sb_appendf(sb, "animation: sprayAnmD%d %.15gs steps(%d) infinite;", s->frames, 1 + s->frame_t / 1000.0, s->frames);
+            sb_append(sb, "'></div>");
+        } else {
+            sb_appendf(sb, "<img draggable='false' class='dItemImg' loading='lazy' src='%s'>", url);
+        }
+        sb_append(sb, "<div class='tItemN'>");
+        sb_append_esc(sb, s->name ? s->name : "");
+        sb_append(sb, "</div></div>");
+    }
+    sb_append(sb, "</div></div>");
+    free(items);
+}
+
+// The Connections tab (deob-10.0.3.js:247686-247752): the Discord section, then Twitch's. v10 mounts its Discord
+// link component (svelte-17wd35, deob-10.0.3.js:110353-110561) in #discordLinkMount; it asks discord.getStatus()
+// and kn_brain's GET /discord/status answers {linked: false} with no `configured` (v10_auth.c: Box Office has no
+// Discord link), so the component's state is v10's not-configured one: the info line, "Discord Account (none)"
+// with no Link button, and "Discord linking is currently unavailable.". It is drawn in that state at once.
+static void connections_html(StrBuf *sb) {
+    sb_append(sb, "<div class='setHed' id='setHed_discord' style='margin-top:0px'onclick='window.windows[4].collapseCon(this)'><span class='material-icons plusOrMinus3'>keyboard_arrow_right</span> "
+                  "<img src='./img/social/discord.png' style='height: 40px;vertical-align: middle;'> Discord</div><div class='setBodH' id='setBod_discord' style='display:none'><div id='discordLinkMount'>");
+    sb_append(sb, "<div class=\"discordInfo svelte-17wd35\">");
+    sb_append_esc(sb, I18N("discord.info", "Link Discord to get your Krunker roles in the Krunker Discord server and join Discord events."));
+    sb_append(sb, "</div> <div class=\"settName discordRow\"> ");
+    sb_append_esc(sb, I18N("discord.account", "Discord Account"));
+    sb_append(sb, " (");
+    sb_append_esc(sb, I18N("discord.none", "none"));
+    sb_append(sb, ") </div> <div class=\"discordMsg svelte-17wd35\">");
+    sb_append_esc(sb, I18N("discord.result.unavailable", "Discord linking is currently unavailable."));
+    sb_append(sb, "</div></div></div>");
+    twitch_html(sb);
+}
+
+// windows[4].gen() for a signed-in Box Office account (deob-10.0.3.js:247488-247763; a guest gets the login modal,
+// v10_login.c): the profileTabs (home = Your Account + the stat tabs, Friends, Settings, Connections) and the
+// logout links.
+static char *gen_account(void) {
+    static const char *const tabs[PROFILE_TAB_COUNT] = {"<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>",
+                                                        "Friends", "Settings", "Connections"}; // profileTabs (deob-10.0.3.js:21519)
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'>");
+    for (int i = 0; i < PROFILE_TAB_COUNT; i++)
+        sb_appendf(&sb, "<div class='bigMenTab%s' style='font-size:16px' onmouseenter='playTick(0.1);' onclick='playSelect();windows[4].switchTab(%d)'>%s</div>", g_tab_index == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div>");
-    if (g_tab_index == 0) {
+    if (g_tab_index == PROFILE_TAB_HOME) {
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
         sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='knPfpPick();'>");
         sb_append(&sb, I18N("windows.profile.picture", "Change Picture"));
@@ -2750,15 +2998,13 @@ static char *gen_account(void) {
         sb_appendf(&sb, "</a></div><div class='settName'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>",
                    I18N("generic.level", "Level"), g_acc.level);
         stats_html(&sb, &g_acc, 0);
-    } else if (g_tab_index == 1) {
+    } else if (g_tab_index == PROFILE_TAB_FRIENDS) {
         // v10's friends tab: mutual follows from the friends event bus (v10_social.c)
         sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div>");
         char *friends = v10_social_window_friends_html();
         sb_append(&sb, friends ? friends : "<div id='friendList'>Loading Friends...</div>");
         free(friends);
-    } else if (g_tab_index == 2) {
-        sb_append(&sb, "<div class='setHed' style='margin-top:10px;'>Krunker Partner Benefits</div><div class='setBodH'><div class='settName' style='font-size:17px;'>You get <span style='color:#fff !important'>20-40% of Revenue</span> from KR Sales on your Partner Code in the Shop</div><div class='settName' style='font-size:17px;'>You <span style='color:#fff !important;'>earn money</span> when someone Plays your Custom Games/Maps</div><div class='settName' style='font-size:17px;'>Every time a referred player plays the game, you get a <span style='color:#fff !important;'>cut of the Ad Revenue</span></div></div></div><div class='setHed' style='padding-bottom:10px'>Partner Application</div><div class='setBodH' style='padding-top:10px;padding-bottom:10px;'><div style='font-size:19px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom:10px;'>By submitting an Application you agree to the <a href='https://frvr.com/legal/krunker#TermsofService'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:86%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a></div><div id='ctrtRes' style='color:rgba(255,255,255,0.5)'></div></div>");
-    } else if (g_tab_index == 3) {
+    } else if (g_tab_index == PROFILE_TAB_SETTINGS) { // deob-10.0.3.js:247656-247685
         sb_append(&sb, "<div class='setHedS' style='margin-top:10px;'>Account Settings</div>");
         if (g_acc.premium) {
             sb_append(&sb, "<div class='setBodH'><div class='settName'>Display Name<div class='updDisN' onclick='clearName();' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
@@ -2778,20 +3024,33 @@ static char *gen_account(void) {
             sb_appendf(&sb, "<img draggable='false' src='%s' class='customBadge'>", url);
         }
         sb_append(&sb, "</div>");
-        sb_appendf(&sb, "<div class='settName'>Hide Detailed Online Status<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='toggleStatus(this.checked)'%s><span class='slider'></span></label></div></div>", stat_num("hds") ? " checked" : "");
+        sb_appendf(&sb, "<div class='settName'>Hide Detailed Online Status<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='toggleStatus(this.checked)'%s><span class='slider'></span></label></div>", stat_num("hds") ? " checked" : "");
+        // Promotional Emails (deob-10.0.3.js:247677-247678): checked from the cached preference (promo_emails_set)
+        sb_appendf(&sb, "<div class='settName'>%s<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='togglePromoEmails(this.checked)'%s><span class='slider'></span></label><div style='font-size:16px;line-height:1.8;color:rgba(255,255,255,0.4);margin-top:4px'>%s</div></div></div>",
+                   I18N("emailPrefs.settings.label", "Promotional Emails"), g_promo_emails == 1 ? " checked" : "",
+                   I18N("emailPrefs.settings.desc", "Receive news about events, game updates and season releases by email"));
         if (!g_acc.hack) {
             sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>");
             sb_append(&sb, I18N("generic.submit", "Submit"));
             sb_append(&sb, "</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
             // 2FA: v7 offers it from level 20 (or dev / partner / featured); KrunkNative always does
             if (backend_enabled() || g_scenario) email_html(&sb); // KrunkNative email verification (v7.1.4 has none)
-            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div></div>",
+            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div>",
                        g_acc.has_2fa ? "dact2FA()" : "act2FA()", g_acc.has_2fa ? "Disable" : "Enable");
+            // the usernames row (deob-10.0.3.js:247681): Manage opens the usernames popup (v10_misc_popups.c)
+            sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>%s <span style='color:#fff'>",
+                       I18N("account.usernames", "You sign in with your active username:"));
+            sb_append_esc(&sb, player_names_account(g_acc.name));
+            sb_appendf(&sb, "</span><div class='subPassChg' onclick='manageAccNames()' style='float: right;margin-top: -8px;'>%s</div></div></div>",
+                       I18N("account.usernames.button", "Manage"));
         }
+        // Account Privacy: v10 shows "Processing Deletion" with Cancel (requestDeletion(0)) while acc.reqDel is set
+        // (deob-10.0.3.js:247684). kn_brain has no deletion request (no "rqd" route, no player_cancelrequest), so
+        // the account never has one and the row is always v10's Delete Account.
         sb_appendf(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>%s</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>",
                    I18N("account.delete", "You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed."));
-    } else {
-        sb_append(&sb, "<div style='margin-bottom:10px;color:rgba(255,255,255,0.5);'>You have No Promo Codes</div>");
+    } else if (g_tab_index == PROFILE_TAB_CONNECTIONS) {
+        connections_html(&sb);
     }
     sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' onclick='logoutAcc()'>%s</a>",
                I18N("generic.logout", "Logout"));
@@ -3132,7 +3391,7 @@ static void chal_set(cJSON *c, const char *key, const double v) {
 
 // ------------------------------------------------------------------ WP-E part 2c: medal counts
 
-// KrunkNative: the account's medal counts (kn_brain "mdl") as the profile's fifth stat tab
+// KrunkNative: the account's medal counts (kn_brain "mdl") as the profile's last stat tab (STAT_TAB_MEDALS)
 static void medal_tab_html(StrBuf *sb) {
     if (!g_medal_counts) {
         sb_append(sb, "<div class='pSt'>Medals<strong>...</strong></div>");
@@ -3149,7 +3408,7 @@ static void medal_tab_html(StrBuf *sb) {
 }
 
 static void medal_tab_update(void) {
-    HtmlElem tab = html_dom_query(0, ".statTabB4");
+    HtmlElem tab = html_dom_query(0, ".statTabB5");
     if (!tab) return;
     StrBuf sb = {0};
     medal_tab_html(&sb);
@@ -3254,7 +3513,7 @@ static int progress_handle(const char *name, const HtmlArg *args, const int argc
 }
 
 // client_bin --render-scenario (ui_scenario.c): state.account = {name, score, funds, clan, premium,
-// badges [], stats {}, challenges [], medals {}} stands in for a logged-in account, so the
+// spendingTier, badges [], stats {}, challenges [], medals {}, raidStats []} stands in for a logged-in account, so the
 // account windows (Challenges, Account) can be rendered without kn_brain (WP-E part 2c).
 void account_ui_scenario(const cJSON *account) {
     if (!cJSON_IsObject(account)) return;
@@ -3271,6 +3530,7 @@ void account_ui_scenario(const cJSON *account) {
     g_acc.funds = cnum(account, "funds");
     g_acc.junk = cnum(account, "junk");                // the Wallet's Junk card (player_jnk: the krunker.io account's)
     g_acc.ranked_points = cnum(account, "rankedPoints"); // the Wallet's Ranked Points card
+    g_acc.spending_tier = (int) cnum(account, "spendingTier"); // the Purchase KR tab's spender-only cards (store_ui.c)
     g_acc.games = cnum(account, "games"); // the per-match Double XP offer (games % 3, double_xp_offer.c)
     g_acc.premium = cnum(account, "premium") != 0.0;
     g_acc.is_dev = cnum(account, "dev") != 0.0; // the player list's Kick / Ban (punishPopup) need DEV rights
@@ -3282,6 +3542,8 @@ void account_ui_scenario(const cJSON *account) {
     const cJSON *chal = cJSON_GetObjectItem(account, "challenges"), *medals = cJSON_GetObjectItem(account, "medals");
     g_chal = cJSON_IsArray(chal) ? cJSON_Duplicate(chal, 1) : NULL;
     g_medal_counts = cJSON_IsObject(medals) ? cJSON_Duplicate(medals, 1) : NULL;
+    const cJSON *raids = cJSON_GetObjectItem(account, "raidStats"); // acc.raidStats [{map_id, completions, ...}]
+    g_raid_stats = cJSON_IsArray(raids) ? cJSON_Duplicate(raids, 1) : NULL;
     battlepass_ui_scenario(cJSON_GetObjectItem(account, "battlepass")); // {data, progress, tab, end, now}
     const cJSON *skins = cJSON_GetObjectItem(account, "skins");
     if (cJSON_IsArray(skins)) { // the inventory [{ind, cnt}] (data slot 10; funds 5, lastReward 11)
@@ -3310,8 +3572,8 @@ void account_ui_scenario_post(void) {
 }
 
 // windows[4].gen() for the krunker.io account (the active one in an official game): v10's Account
-// window with what krunker.io tells this client about it (name, level, score, KR); its friends,
-// partner, settings and promo tabs are krunker.io's own services, which this client does not
+// window with what krunker.io tells this client about it (name, level, score, KR, raid stats); its friends,
+// settings and connections tabs are krunker.io's own services, which this client does not
 // reach: the window has the home tab only, and Logout signs out of krunker.io.
 static char *gen_kio_account(const AccountInfo *acc) {
     StrBuf sb = {0};
