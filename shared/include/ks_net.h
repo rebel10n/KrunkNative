@@ -12,6 +12,7 @@
 
 #include <shared.h>
 #include <ks.h>
+#include <krunker_proto.h> // KrunkerValue (the official link's msgpack values; types only)
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,6 +62,22 @@ void ks_net_reassembler_free(KsNetReassembler*);
 // 1 when sent, 0 when rejected (encode rules above) or a send failed. *seq advances.
 typedef int (*KsNetSendFn)(void *user, int type, const void *payload, uint16_t len);
 int ks_net_send_msg(KsScript*, uint16_t *seq, const char *id, KsValue data, KsNetSendFn send, void *user);
+
+// The official krunker.io "sd" packets (shared/src/ks/ks_net_official.c; deob-10.0.3.js GAME.NETWORK :209434-209469,
+// onNetworkMessage :241493): [id, data] in msgpack, `data` the script's JS value whose KrunkScript object keys are
+// compiled as "V_" + name. ks_net_body_from_official turns an S2C "sd" into our SCRIPT_MSG body (keys lose "V_",
+// a number id / key becomes its String(); nil, Uint8Array and Date values are null): its length, -1 when the id is
+// longer than KS_NET_ID_MAX or the body over cap. ks_net_body_to_official decodes a SCRIPT_MSG body for the C2S
+// "sd" (keys get "V_", undefined / null are nil) into a value tree owned by `out` (ks_net_official_free); 0 on a
+// bad body.
+typedef struct {
+    KrunkerValue data;
+    void **blocks;       // the tree's allocations
+    size_t block_count, block_cap;
+} KsNetOfficial;
+int ks_net_body_from_official(const KrunkerValue *id, const KrunkerValue *data, uint8_t *body, size_t cap);
+int ks_net_body_to_official(const uint8_t *body, size_t len, char *id, size_t id_cap, KsNetOfficial *out);
+void ks_net_official_free(KsNetOfficial*);
 
 // SCRIPT_LOG payload of one console line (truncated to KS_NET_LOG_TEXT_MAX with "..."):
 // returns the payload length (out >= 1 + KS_NET_LOG_TEXT_MAX bytes).

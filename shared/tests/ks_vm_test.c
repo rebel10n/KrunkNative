@@ -33,6 +33,7 @@
 #include "ks.h"
 #include "ks_api.h"
 #include "ks_import_js.h"
+#include "ks_net.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -665,6 +666,76 @@ static void test_serial(void)
     ks_program_free(prog);
 }
 
+// The official "sd" packets (shared/src/ks/ks_net_official.c, deob-10.0.3.js GAME.NETWORK :209434-209469): a msgpack
+// [id, data] whose KrunkScript keys are "V_" + name, to and from our SCRIPT_MSG body.
+static void test_official_net(void)
+{
+    KsProgram *prog;
+    KsScript *s = empty_script(&prog);
+    CHECK(s != NULL);
+    if (!s) return;
+    // S2C: {V_a: 1, V_b: [true, "x", nil], V_c: {V_d: 2.5}, 7: "seven"} -> data.a, data.b, data.c.d, data["7"]
+    const KrunkerValue list[] = {KRUNKER_V_BOOL(1), KRUNKER_V_STR("x"), KRUNKER_V_NIL};
+    const KrunkerValue inner[] = {KRUNKER_V_STR("V_d"), KRUNKER_V_NUM(2.5)};
+    const KrunkerValue kv[] = {KRUNKER_V_STR("V_a"), KRUNKER_V_NUM(1), KRUNKER_V_STR("V_b"), KRUNKER_V_ARRAY(list, 3),
+                               KRUNKER_V_STR("V_c"), KRUNKER_V_MAP(inner, 1), KRUNKER_V_NUM(7), KRUNKER_V_STR("seven")};
+    const KrunkerValue id = KRUNKER_V_STR("hit"), data = KRUNKER_V_MAP(kv, 4);
+    uint8_t body[512];
+    const int len = ks_net_body_from_official(&id, &data, body, sizeof body);
+    CHECK(len > 0);
+    char got_id[KS_NET_ID_MAX + 1];
+    KsValue v = ks_undef();
+    CHECK(len > 0 && ks_net_decode_msg(s, body, (size_t)len, got_id, sizeof got_id, &v));
+    CHECK(!strcmp(got_id, "hit") && v.tag == KS_OBJ);
+    CHECK(ks_to_number(ks_obj_get(s, v, "a")) == 1);
+    KsValue b = ks_obj_get(s, v, "b");
+    CHECK(ks_arr_len(b) == 3 && ks_arr_get(s, b, 0).tag == KS_BOOL && ks_arr_get(s, b, 2).tag == KS_NULL);
+    CHECK(ks_to_number(ks_obj_get(s, ks_obj_get(s, v, "c"), "d")) == 2.5);
+    size_t sl;
+    const char *sv = ks_str_utf8(ks_obj_get(s, v, "7"), &sl);
+    CHECK(sv && sl == 5 && !memcmp(sv, "seven", 5));
+    CHECK(ks_obj_get(s, v, "V_a").tag == KS_UNDEF); // the prefix is gone
+    // a number id is its String(); an id over KS_NET_ID_MAX is refused
+    const KrunkerValue num_id = KRUNKER_V_NUM(42), nil = KRUNKER_V_NIL;
+    CHECK(ks_net_body_from_official(&num_id, &nil, body, sizeof body) == 4 && body[0] == 2 && body[1] == '4' && body[2] == '2' && body[3] == 1);
+    char long_id[80];
+    memset(long_id, 'i', sizeof long_id - 1);
+    long_id[sizeof long_id - 1] = 0;
+    const KrunkerValue big_id = KRUNKER_V_STR(long_id);
+    CHECK(ks_net_body_from_official(&big_id, &nil, body, sizeof body) == -1);
+
+    // C2S: our {n: 1.5, arr: [true, null, undefined], o: {k: "v"}} -> {V_n: 1.5, V_arr: [true, nil, nil], V_o: {V_k: "v"}}
+    KsValue o = ks_obj_new(s);
+    ks_obj_set(s, o, "n", ks_num(1.5));
+    KsValue a = ks_arr_new(s);
+    ks_arr_push(s, a, ks_bool(1));
+    ks_arr_push(s, a, ks_null());
+    ks_arr_push(s, a, ks_undef());
+    ks_obj_set(s, o, "arr", a);
+    KsValue k = ks_obj_new(s);
+    ks_obj_set(s, k, "k", ks_str(s, "v", 1));
+    ks_obj_set(s, o, "o", k);
+    const int out_len = ks_net_encode_msg(s, "msg", o, body, sizeof body);
+    CHECK(out_len > 0);
+    KsNetOfficial off;
+    char out_id[KS_NET_ID_MAX + 1];
+    CHECK(out_len > 0 && ks_net_body_to_official(body, (size_t)out_len, out_id, sizeof out_id, &off));
+    CHECK(!strcmp(out_id, "msg") && off.data.type == KRUNKER_MAP && off.data.len == 3);
+    if (off.data.type == KRUNKER_MAP && off.data.len == 3) {
+        const KrunkerValue *items = off.data.u.items;
+        CHECK(!strcmp(items[0].u.str, "V_n") && items[1].type == KRUNKER_NUM && items[1].u.num == 1.5);
+        CHECK(!strcmp(items[2].u.str, "V_arr") && items[3].type == KRUNKER_ARRAY && items[3].len == 3);
+        CHECK(items[3].u.items[0].type == KRUNKER_BOOL && items[3].u.items[1].type == KRUNKER_NIL && items[3].u.items[2].type == KRUNKER_NIL);
+        CHECK(!strcmp(items[4].u.str, "V_o") && items[5].type == KRUNKER_MAP && !strcmp(items[5].u.items[0].u.str, "V_k") &&
+              items[5].u.items[1].type == KRUNKER_STR && !strcmp(items[5].u.items[1].u.str, "v"));
+    }
+    ks_net_official_free(&off);
+    // a truncated body decodes to nothing
+    CHECK(!ks_net_body_to_official(body, (size_t)out_len - 1, out_id, sizeof out_id, &off));
+    ks_script_free(s);
+    ks_program_free(prog);
+}
+
 // Heap accounting: cyclic garbage is reclaimed, pinned values survive.
 size_t ks_test_heap_bytes(KsScript *s);
 void ks_gc_collect(KsScript *s);
@@ -957,6 +1028,7 @@ int main(int argc, char **argv)
     test_number_table(dir);
     test_parse();
     test_serial();
+    test_official_net();
     test_gc();
 
     char run_dir[1024];
