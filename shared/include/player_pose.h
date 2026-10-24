@@ -97,3 +97,8 @@ void game_clear_player_poses(struct Game_t *game);
 // frozen live player is held where it stands (changePosition recon + stop, "chgp"). Returns how many
 // players changed. Game.freeze_others keeps the request until the next round's start.
 int game_apply_freeze_others(struct Game_t *game, int freeze, int except_uid);
+// What applyFreezeOthers (:221560-221564) and the client's "frz" (:258510-258518) write on a player:
+// player.freeze (Player.frozen), defaultMovement / defaultVelocity = !freeze and disableShooting /
+// disableMelee = freeze, the script's own flags (its KsRef, created when the game has no script yet).
+// An unfreeze turns all four on whatever the script had set; a respawn's reset turns the movement on.
+void player_apply_freeze(struct Player_t *player, int freeze);

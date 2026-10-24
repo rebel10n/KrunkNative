@@ -4,6 +4,7 @@
 #include <shared.h>
 #include <net_ext.h>
 #include "triggers_internal.h" // trigger_send_change_position ("chgp")
+#include "ks_game/ks_game_internal.h" // the script flags applyFreezeOthers writes (KsRef.allow)
 #include <math.h>
 #include <string.h>
 
@@ -81,14 +82,19 @@ void game_clear_player_poses(Game *game) {
     }
 }
 
+void player_apply_freeze(Player *player, const int freeze) {
+    if (!player) return;
+    player->frozen = (unsigned char) !!freeze; // player.freeze
+    KsRef *ref = ks_ref_get(ks_game_state(player->game, 1), KS_REF_PLAYER, player->uid);
+    if (!ref) return;
+    const int flags = KS_PLAYER_DEFAULT_MOVEMENT | KS_PLAYER_DEFAULT_VELOCITY | KS_PLAYER_CAN_SHOOT | KS_PLAYER_CAN_MELEE;
+    if (freeze) ref->allow &= ~flags;
+    else ref->allow |= flags;
+}
+
 int game_apply_freeze_others(Game *game, const int freeze, const int except_uid) {
-    // applyFreezeOthers (:221547-221573). v10 writes the script-visible flags (defaultMovement /
-    // defaultVelocity = !freeze, disableShooting / disableMelee = freeze); KrunkNative keeps the freeze
-    // apart in Player.frozen (the same flag "frz" sets on the client), which ks_player_allows reads for
-    // exactly those four (ks_game.c). Deliberate difference: an unfreeze here gives back whatever the
-    // script had set before, where v10 turns the four defaults on again.
-    // KN has no spectating players (a spectator is a connection without a player), so the
-    // `spectating` skips of v10 have nothing to skip.
+    // applyFreezeOthers (:221547-221573). KN has no spectating players (a spectator is a connection
+    // without a player), so the `spectating` skips of v10 have nothing to skip.
     if (!game || !game_is_authority(game)) return 0;
     game->freeze_others = (unsigned char) !!freeze;
     int changed = 0;
@@ -96,7 +102,7 @@ int game_apply_freeze_others(Game *game, const int freeze, const int except_uid)
         Player *player = game->players[i];
         if (!player || (except_uid >= 0 && player->uid == except_uid)) continue;
         if (!freeze && !player->frozen) continue;
-        player->frozen = (unsigned char) !!freeze;
+        player_apply_freeze(player, freeze);
         if (freeze && player->active) { // changePosition(p, x, y, z, true, true, undefined, true)
             game_change_position(game, player, player->position, 1, 1, 0, 0);
             trigger_send_change_position(game, player, 1, 1, 0, 0);
