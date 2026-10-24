@@ -18,6 +18,22 @@
 
 static MmSettings g_mm;
 
+size_t brain_utf16_prefix(const char *text, size_t max_units) {
+    size_t units = 0, i = 0;
+    if (!text) return 0;
+    while (text[i]) {
+        const unsigned char c = (unsigned char) text[i];
+        const size_t bytes = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        const size_t w = c >= 0xF0 ? 2 : 1;
+        if (units + w > max_units) break;
+        size_t k = 1;
+        while (k < bytes && text[i + k] && ((unsigned char) text[i + k] & 0xC0) == 0x80) k++;
+        units += w;
+        i += k;
+    }
+    return i;
+}
+
 static void copy_str(char *dst, size_t cap, const char *src) {
     snprintf(dst, cap, "%s", src ? src : "");
 }

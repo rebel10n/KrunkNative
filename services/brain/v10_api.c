@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "acct_internal.h"
 #include <strings.h>
@@ -28,6 +29,7 @@
 #include "map_catalog.h"
 #include "krunker_maps.h"
 #include "v10_pack.h"
+#include "v10_catalog.h"
 #include "v10_skin_still.h"
 #include "v10_skin_thumb.h"
 #include "knsvc/config.h"
@@ -63,6 +65,26 @@ void v10_reply_error(kn_http_req *req, int status, const char *code, const char 
     cJSON_AddItemToObject(o, "error", e);
     brain_reply_json(req, status, o);
     cJSON_Delete(o);
+}
+
+void v10_reply_text_error(kn_http_req *req, int status, const char *message) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNullToObject(o, "data");
+    cJSON_AddStringToObject(o, "error", message);
+    brain_reply_json(req, status, o);
+    cJSON_Delete(o);
+}
+
+void v10_iso_ms(int64_t ms, char *out, size_t cap) {
+    if (!out || !cap) return;
+    out[0] = 0;
+    if (ms <= 0) return;
+    const time_t t = (time_t) (ms / 1000);
+    struct tm tm;
+    if (!gmtime_r(&t, &tm)) return;
+    char base[32];
+    strftime(base, sizeof base, "%Y-%m-%dT%H:%M:%S", &tm);
+    snprintf(out, cap, "%s.%03dZ", base, (int) (ms % 1000));
 }
 
 /* the stem of a v10 file name: "maps/official/00_burg.json" -> "00_burg" */
@@ -114,7 +136,9 @@ static void h_map(kn_http_req *req, void *ud) {
     v10_reply_data(req, 200, cJSON_Duplicate(map, 1));
 }
 
-/* ---- GET /maps/by-name/:name (the official display name, case-insensitive) */
+/* ---- GET /maps/by-name/:name (the official display name, case-insensitive; else a published map's
+ * Map Detail record, v10_catalog.c: the v10.0.3 panel opens community maps by name, deob-10.0.3.js:121118,
+ * from the in-game map label of a map with a creator, 188628-188630) */
 
 static void h_map_by_name(kn_http_req *req, void *ud) {
     (void) ud;
@@ -127,7 +151,7 @@ static void h_map_by_name(kn_http_req *req, void *ud) {
             return;
         }
     }
-    v10_reply_error(req, 404, "MAP_NOT_FOUND", "Map not found");
+    v10_catalog_map_by_name(req, name);
 }
 
 /* ---- GET /titles (assets/titles.json, read once) */

@@ -45,6 +45,7 @@ typedef struct Pending {
     int64_t account;
     int64_t product;
     int64_t quantity;
+    char price_ref[96];      /* a purchase's product_id when it is v10.0.3's price_ref string ("" otherwise) */
     char tag[32];
 } Pending;
 
@@ -79,7 +80,7 @@ static void run_db(Pending *q) {
     } else if (q->purchase) {
         snprintf(prod, sizeof prod, "%lld", (long long) q->product);
         snprintf(qty, sizeof qty, "%lld", (long long) q->quantity);
-        kn_db_call(S.b->db, &P_SHOP_PURCHASE, KN_DB_ARGS(acc, prod, qty), on_db, q);
+        kn_db_call(S.b->db, &P_SHOP_PURCHASE, KN_DB_ARGS(acc, prod, qty, q->price_ref), on_db, q);
     } else {
         kn_db_call(S.b->db, &P_SHOP_DISPLAY, KN_DB_ARGS(q->tag, acc), on_db, q);
     }
@@ -156,6 +157,10 @@ static void h_purchase(kn_http_req *req, void *ud) {
     const cJSON *pid = cJSON_GetObjectItemCaseSensitive(body, "product_id");
     const cJSON *qty = cJSON_GetObjectItemCaseSensitive(body, "quantity");
     q->product = cJSON_IsNumber(pid) ? (int64_t) pid->valuedouble : 0;
+    /* v10.0.3 sends the price's price_ref string as product_id ({display_id, product_id: prices[0].price_ref,
+     * quantity}, deob-10.0.3.js:132049, 132468, 131983); the proc resolves it (P_SHOP_PURCHASE). KN's own store
+     * sends the number (kio_store.c). */
+    if (cJSON_IsString(pid)) snprintf(q->price_ref, sizeof q->price_ref, "%s", pid->valuestring);
     q->quantity = cJSON_IsNumber(qty) ? (int64_t) qty->valuedouble : 1;
     cJSON_Delete(body);
     char token[512];

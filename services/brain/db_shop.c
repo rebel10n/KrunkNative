@@ -394,6 +394,7 @@ static cJSON *official_purchase(Dbx *x, const int64_t account, const int64_t pro
             if (junk_credit(x, account, amount * 100, "shop", &balance) < 0) break;
             cJSON_AddStringToObject(rw, "type", "currency");
             cJSON_AddNumberToObject(rw, "currency_id", 2);
+            cJSON_AddNumberToObject(rw, "currency", 2); /* v10.0.3 reads reward.currency (deob-10.0.3.js:130210-130214) */
             cJSON_AddNumberToObject(rw, "amount", (double) (amount * 100));
         }
         cJSON_AddItemToArray(rewards, rw);
@@ -422,6 +423,22 @@ static kn_db_result *run_purchase(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t account = PI(0), quantity = PI(2);
     int64_t product = PI(1);
+    /* p3: v10.0.3's product_id, the price's price_ref (deob-10.0.3.js:132049): "kn.shop.<display id>" (a Junk shop
+     * product, run_display) or an official product's own ref (shop_official_products.price_ref) */
+    const char *price_ref = P(3) ? P(3) : "";
+    if (product <= 0 && !strncmp(price_ref, "kn.shop.", 8)) {
+        product = strtoll(price_ref + 8, NULL, 10);
+    } else if (product <= 0 && price_ref[0]) {
+        cJSON *hit = dbx_row(&x, SQL(.any = "SELECT id AS id__i FROM shop_official_products WHERE price_ref = $1 AND active = 1"
+                                            " ORDER BY id LIMIT 1"),
+                             KN_DB_ARGS(price_ref));
+        if (dbx_failed(&x)) {
+            cJSON_Delete(hit);
+            return dbx_finish(&x, NULL);
+        }
+        product = hit ? jint(hit, "id") : 0;
+        cJSON_Delete(hit);
+    }
     if (quantity < 1 || quantity > SHOP_MAX_QUANTITY) {
         dbx_refuse(&x, "Invalid quantity.");
         return dbx_finish(&x, NULL);

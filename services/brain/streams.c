@@ -306,8 +306,9 @@ static int start_job(void) {
 }
 
 /* No Twitch source on this server (streams.enabled off, or no client id / secret): the empty list the
- * menu shows as "no live streams", the shape v10 reads (v10.js 145057: data.streams). Not a 503: v10
- * would take a 5xx for an outage, and there is no outage to report here. */
+ * menu shows as "no live streams", the shape v10.0.3 reads (data.streams an array, deob-10.0.3.js:162140;
+ * promo and dropCampaigns are optional there, 162158-162159). Not a 503: v10.0.3 throws on a 5xx
+ * (29806) and shows its error state, and there is no outage to report here. */
 static void reply_empty(kn_http_req *req) {
     cJSON *data = cJSON_CreateObject();
     cJSON_AddItemToObject(data, "streams", cJSON_CreateArray());
@@ -352,7 +353,7 @@ int streams_init(Brain *b) {
         return 0;
     }
     if (!configured()) {
-        KN_INFO(MOD, "Live Streams unconfigured: set KN_STREAMS_TWITCH_CLIENT_ID and KN_STREAMS_TWITCH_CLIENT_SECRET (the route answers 503)");
+        KN_INFO(MOD, "Live Streams unconfigured: set KN_STREAMS_TWITCH_CLIENT_ID and KN_STREAMS_TWITCH_CLIENT_SECRET (the route answers the empty list)");
         return 0;
     }
 #ifndef KN_HAVE_CURL

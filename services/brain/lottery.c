@@ -6,7 +6,8 @@
  *   GET  /api/lottery/:id                  the view. A token (?token= or Bearer) adds the account's own
  *                                          entries; without one the view is the guest's. 400 "lottery not found".
  *   POST /api/lottery/:id/participate      body {cost_type: "skin" | "currency", cost_ref, cost_quantity}
- *                                          (cost_quantity = bundles). Needs a token (401 LoginRequired).
+ *                                          (cost_quantity = the units paid, a multiple of the cost's
+ *                                          cost_quantity, as v10.0.3 sends it). Needs a token (401 LoginRequired).
  *                                          Replies {data: {player_entries, total_entries}}.
  * The timer (brain.lottery.settle_check_ms, default 60 s; brain.lottery.enabled) settles every window that
  * has ended (P_LOTTERY_SETTLE): one draw each, one transaction per pass, never two passes at once.
@@ -172,7 +173,7 @@ static void h_participate(kn_http_req *req, void *ud) {
     cJSON *body = kn_http_body_json(req);
     body_text(body, "cost_type", q->cost_type, sizeof q->cost_type);
     body_text(body, "cost_ref", q->cost_ref, sizeof q->cost_ref);
-    const cJSON *bundles = cJSON_GetObjectItemCaseSensitive(body, "cost_quantity");
+    const cJSON *bundles = cJSON_GetObjectItemCaseSensitive(body, "cost_quantity"); /* the units (db_lottery.c) */
     q->bundles = cJSON_IsNumber(bundles) ? (int64_t) bundles->valuedouble : 0;
     cJSON_Delete(body);
     char token[512];

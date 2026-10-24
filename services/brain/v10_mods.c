@@ -211,14 +211,19 @@ static const kn_proc P_MOD_FLAG = {"mod_flag", NULL, run_flag};
 
 /* ---- mods */
 
-/* p: caller, name: the published mod by name (the list's columns plus the v10 mod view's fields) */
+/* p: caller, name: the published mod by name (the list's columns plus the v10 mod view's fields). The v10.0.3
+ * mod panel reads name, creator_name, featured, version, votes (deob-10.0.3.js:121912), description (121953,
+ * a text node: raw, not the list's HTML-escaped mod_description), created_at and updated_at (121944, 121946,
+ * through the date formatter at 27304). */
 static kn_db_result *run_mod_by_name(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     cJSON *row = dbx_row(&x, SQL(.any = "SELECT d.mod_id AS mod_id__i, {html:d.mod_name} AS mod_name,"
                                         " {html:d.mod_description} AS mod_description, d.mod_info AS mod_info__t,"
                                         " d.mod_image AS mod_image__t, d.mod_url AS mod_url__t, d.mod_votes AS mod_votes__i,"
                                         " d.mod_plays AS mod_pl__i, d.mod_updatecounter AS mod_updatecounter__i,"
-                                        " d.mod_featured AS mod_featured__i, coalesce(a.username, 'Community') AS creatorname__t"
+                                        " d.mod_featured AS mod_featured__i, coalesce(a.username, 'Community') AS creatorname__t,"
+                                        " d.mod_name AS name__t, d.mod_description AS description__t,"
+                                        " {epoch_ms:d.mod_initialdate} AS created__i, {epoch_ms:d.mod_date} AS updated__i"
                                         " FROM published_mods d LEFT JOIN accounts a ON a.id = d.creator_id"
                                         " WHERE lower(d.mod_name) = lower($1) AND d.deleted_at IS NULL"
                                         " ORDER BY d.mod_id LIMIT 1"),
@@ -235,7 +240,7 @@ static kn_db_result *run_mod_by_name(kn_dbconn *c, int n, const char *const *p) 
     const int featured = kn_json_int(row, "mod_featured", 0) != 0;
     cJSON *d = cJSON_CreateObject();
     cJSON_AddNumberToObject(d, "mod_id", (double) kn_json_int(row, "mod_id", 0));
-    cJSON_AddStringToObject(d, "name", kn_json_str(row, "mod_name", ""));
+    cJSON_AddStringToObject(d, "name", kn_json_str(row, "name", ""));
     cJSON_AddStringToObject(d, "mod_name", kn_json_str(row, "mod_name", ""));
     cJSON_AddStringToObject(d, "creator_name", kn_json_str(row, "creatorname", "Community"));
     cJSON_AddStringToObject(d, "creatorname", kn_json_str(row, "creatorname", "Community"));
@@ -244,6 +249,13 @@ static kn_db_result *run_mod_by_name(kn_dbconn *c, int n, const char *const *p) 
     if (kn_json_str(row, "mod_image", "")[0]) cJSON_AddStringToObject(d, "mod_image", kn_json_str(row, "mod_image", ""));
     else cJSON_AddNullToObject(d, "mod_image");
     cJSON_AddNumberToObject(d, "mod_votes", (double) kn_json_int(row, "mod_votes", 0));
+    cJSON_AddNumberToObject(d, "votes", (double) kn_json_int(row, "mod_votes", 0));
+    cJSON_AddStringToObject(d, "description", kn_json_str(row, "description", ""));
+    char when[40];
+    v10_iso_ms(kn_json_int(row, "created", 0), when, sizeof when);
+    cJSON_AddStringToObject(d, "created_at", when);
+    v10_iso_ms(kn_json_int(row, "updated", 0), when, sizeof when);
+    cJSON_AddStringToObject(d, "updated_at", when);
     cJSON_AddNumberToObject(d, "mod_pl", (double) kn_json_int(row, "mod_pl", 0));
     cJSON_AddNumberToObject(d, "mod_updatecounter", (double) kn_json_int(row, "mod_updatecounter", 1));
     cJSON_AddNumberToObject(d, "mod_featured", featured);

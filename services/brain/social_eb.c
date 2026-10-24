@@ -106,6 +106,17 @@ static void eb_error(SocialSession *s, const char *code, const char *message) {
     eb_send(s, o);
 }
 
+/* a game:invite refusal (KN-only type): `of` names it, so the client does not take its EB_TARGET_OFFLINE /
+ * EB_NOT_FRIEND / EB_RATE_LIMITED for a failed msg:send (v10.0.3 fails its oldest pending message on those codes,
+ * deob-10.0.3.js:156838; v10_social.c eb_on_error) */
+static void invite_error(SocialSession *s, const char *code, const char *message) {
+    cJSON *o = eb_obj("error");
+    cJSON_AddStringToObject(o, "code", code);
+    cJSON_AddStringToObject(o, "message", message);
+    cJSON_AddStringToObject(o, "of", "game:invite");
+    eb_send(s, o);
+}
+
 /* the JS string length of UTF-8 text (what v10's canSend measures): a 4-byte sequence is 2 units */
 static size_t utf16_units(const char *text, size_t len) {
     size_t n = 0;
@@ -481,7 +492,7 @@ static void invite_online(void *ud, const int *online, size_t n) {
     SocialSession *s = w->s;
     if (social_open(s)) {
         if (n < 1 || !online[0]) {
-            eb_error(s, "EB_TARGET_OFFLINE", "That friend is offline right now.");
+            invite_error(s, "EB_TARGET_OFFLINE", "That friend is offline right now.");
         } else {
             cJSON *r = eb_obj("game:invite");
             cJSON_AddNumberToObject(r, "from", (double) s->account_id);
@@ -501,11 +512,11 @@ static void invite_online(void *ud, const int *online, size_t n) {
 static void invite_checked(SocialSession *s, kn_db_result *res, void *extra) {
     InviteCtx *x = extra;
     if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
-        eb_error(s, "EB_INVITE_INVALID", kn_db_ok(res) ? "Invite not sent." : acct_db_error(res, "game:invite"));
+        invite_error(s, "EB_INVITE_INVALID", kn_db_ok(res) ? "Invite not sent." : acct_db_error(res, "game:invite"));
         return;
     }
     if (!kn_db_get_int64(res, 0, 0, 0)) {
-        eb_error(s, "EB_NOT_FRIEND", "You can only invite friends.");
+        invite_error(s, "EB_NOT_FRIEND", "You can only invite friends.");
         return;
     }
     InviteWait *w = calloc(1, sizeof *w);
@@ -525,11 +536,11 @@ static void game_invite(SocialSession *s, const cJSON *o) {
         ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ':' || c == '-' || c == '_' || c == '.';
     }
     if (!ok) {
-        eb_error(s, "EB_INVITE_INVALID", "Invalid invite.");
+        invite_error(s, "EB_INVITE_INVALID", "Invalid invite.");
         return;
     }
     if (!invite_rate_ok(s->account_id)) {
-        eb_error(s, "EB_RATE_LIMITED", "You are sending invites too quickly.");
+        invite_error(s, "EB_RATE_LIMITED", "You are sending invites too quickly.");
         return;
     }
     InviteCtx *x = calloc(1, sizeof *x);

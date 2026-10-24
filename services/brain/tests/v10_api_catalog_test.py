@@ -212,8 +212,10 @@ def section_skins(c):
             (76, "POST", "/skins/1/upload", {"type": "thumbnail"}, "upload (consumer v10.js 122084 reads data.asset_path)"),
             (77, "POST", "/skins/1/duplicate", {}, "duplicate (consumer v10.js 122079 reads data.skin)")):
         st, body = http(p, method, path, payload, token=c.tok_a)
-        check("[%d] %s %s -> 403 REFUSAL NOT_IMPLEMENTED: %s (wrapper L5161)" % (row, method, path, label),
-              st == 403 and error_code(body) == "NOT_IMPLEMENTED", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+        # a text error: the Skin Manager service throws new Error(res.error) (deob-10.0.3.js:138943 etc.)
+        check("[%d] %s %s -> 403 refusal, a text error: %s (deob-10.0.3.js:138943, 139265)" % (row, method, path, label),
+              st == 403 and isinstance(body, dict) and body.get("data") is None and isinstance(body.get("error"), str)
+              and "skin" in body["error"].lower(), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
 
 def section_wild(c):
@@ -314,6 +316,24 @@ def section_maps(c):
             (mid, acc, board, score, t))
     path = "/maps/by-name/%s/leaderboard?page=1" % board.replace(" ", "%20")
 
+    # row 88 GET /maps/by-name/{name} for a published map: the v10.0.3 Map Detail record
+    # (deob-10.0.3.js:121106-121532: map_id, creator_name, category, featured, votes, gameplays, created_at,
+    # updated_at, description, funds, leaderboard_type, leaderboard_order)
+    sql("UPDATE published_maps SET map_category = 3, map_votes = 4, map_plays = 9, map_funds = 25,"
+        " map_description = 'Fish & chips', map_initialdate = '2026-03-04 05:06:07.000',"
+        " map_date = '2026-04-05 06:07:08.000' WHERE map_id = ?", (map1,))
+    st, body = http(p, "GET", "/maps/by-name/%s" % board.lower().replace(" ", "%20"))
+    check("[88] GET /maps/by-name/<published map> (any case) -> the Map Detail record (deob-10.0.3.js:121118)",
+          is_data(st, body, {"map_id": map1, "name": board, "creator_name": aname, "category": 3, "featured": False,
+                             "votes": 4, "gameplays": 9, "funds": 25, "description": "Fish & chips",
+                             "created_at": "2026-03-04T05:06:07.000Z", "updated_at": "2026-04-05T06:07:08.000Z",
+                             "leaderboard_type": "score", "leaderboard_order": 1}),
+          "HTTP %d %s" % (st, json.dumps(body)[:300]))
+    sql("UPDATE published_maps SET map_funds = 0 WHERE map_id = ?", (map1,))  # row 95's deposits start from 0
+    st, body = http(p, "GET", "/maps/by-name/no%20such%20map%20here")
+    check("[88] GET /maps/by-name/<neither official nor published> -> 404 MAP_NOT_FOUND (the panel's 'Map not found', 121141)",
+          st == 404 and error_code(body) == "MAP_NOT_FOUND", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
     # row 89 GET /maps/by-name/{name}/leaderboard (consumer v10.js 106970 reads entries, total)
     st, body = http(p, "GET", path)
     check("[89] GET by-name leaderboard, score DESC: the best score per player (wrapper L5161; consumer v10.js 106970 reads entries, total)",
@@ -391,8 +411,8 @@ def section_maps(c):
     check("[96] leaderboard settings by a non-owner -> 404 MAP_NOT_FOUND", st == 404 and error_code(body) == "MAP_NOT_FOUND",
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 1, "custom_type": "", "order": 0}, token=tok_a)
-    check("[96] leaderboard Time, ASC by the owner -> 200 {leaderboard_type: 1, order: 0} (consumer v10.js 106782)",
-          st == 200 and dig(body, "data", "leaderboard_type") == 1 and dig(body, "data", "order") == 0,
+    check("[96] leaderboard Time, ASC by the owner -> 200 {leaderboard_type: \"time\", order: 0} (deob-10.0.3.js:120948 stores it, 121127 compares it with \"time\")",
+          st == 200 and dig(body, "data", "leaderboard_type") == "time" and dig(body, "data", "order") == 0,
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
     check("[96] the LEADERBOARD object carries ldt 1, and the zero order is left out (creations.c ulb)",
           lb_object(map1) == {"i": PREFAB_LEADERBOARD, "p": [0, 0, 0], "s": [1, 1, 1], "ldt": 1}, json.dumps(lb_object(map1)))
@@ -404,7 +424,8 @@ def section_maps(c):
                                          {"position": 2, "player_name": aname, "value": 60000}], "total": 2}),
           "HTTP %d %s" % (st, json.dumps(body)[:240]))
     st, body = http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 0, "custom_type": "kills", "order": 1}, token=tok_a)
-    check("[96] a custom type (kills) is stored", st == 200 and dig(body, "data", "custom_type") == "kills",
+    check("[96] a custom type (kills) is stored, and is the leaderboard_type",
+          st == 200 and dig(body, "data", "custom_type") == "kills" and dig(body, "data", "leaderboard_type") == "kills",
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "GET", path)
     check("[89] a custom leaderboard has no KrunkNative source: empty board", is_data(st, body, {"entries": [], "total": 0}),

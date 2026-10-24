@@ -213,7 +213,8 @@ def http_get(port, path, timeout=20):
 
 def run_brain(env, work, tw, cache_s, tag, more=()):
     log_path = os.path.join(work, "brain-%s.log" % tag)
-    extra = ["--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=streams-%d" % os.getpid(),
+    # --debug: the INFO lines ("Live Streams on") are level 1 since the brain's default log level is NOTICE
+    extra = ["--debug", "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=streams-%d" % os.getpid(),
              "--accounts.email.required=false", "--smtp.host=",
              "--streams.cache_s=%d" % cache_s,
              "--streams.twitch.auth_url=%s/oauth2/token" % tw.url,
@@ -244,7 +245,9 @@ def scenario_live(port, tw, log_path):
         check(s0["viewerCount"] == 300 and s0["title"] == "Parkour", "the viewer count and title come through")
         check(s0["thumbnailUrl"] == "https://static-cdn.jtvnw.net/big-440x248.jpg", "the thumbnail template is filled (%s)" % s0["thumbnailUrl"])
         check(s0["languageCode"] == "de", "the language is lower-cased")
-    check(data.get("promo") is False and data.get("dropCampaigns") == [], "the v10 wrapper has promo and dropCampaigns")
+    # streams.promo defaults to true (api.krunker.io answered promo true on 2026-10-24; v10.0.3 shows the
+    # card for promo === true, deob-10.0.3.js:162158), streams.drop_campaigns to []
+    check(data.get("promo") is True and data.get("dropCampaigns") == [], "the v10 wrapper has promo and dropCampaigns")
     check(SECRET not in body, "the client secret is not in the answer")
     posts = [s for s in tw.seen if s[0] == "POST"]
     check(len(posts) == 1, "one token request so far (%d)" % len(posts))

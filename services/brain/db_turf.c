@@ -594,16 +594,14 @@ static cJSON *view_recruitment(Dbx *x, int64_t page, int64_t limit, const char *
                                           " r.looking_for, r.min_level AS min_level__i, r.min_kd AS min_kd__f, coalesce(l.distribution_mode, 'clan_bank') AS loot_mode,"
                                           " coalesce(l.clan_pct, 0) AS loot_clan_pct__i, coalesce(l.top_player_count, 20) AS loot_top_player_count__i,"
                                           " coalesce(l.top_player_pct, 80) AS loot_top_player_pct__i, coalesce(l.min_games_required, 1) AS loot_min_games__i"
+                                          " , c.clan_logo AS clan_logo__i" /* the logo version, 0 none: drawn when > 0 (deob-10.0.3.js:160977-160979) */
                                           " FROM clan_recruitment r JOIN clans c ON c.clan_id = r.clan_id LEFT JOIN turf_loot_config l ON l.clan_id = r.clan_id"
                                           " WHERE r.is_active = {true} AND ($1 = '' OR r.region = $1) AND ($2 = '' OR r.language = $2)"
                                           " ORDER BY r.updated_at DESC, r.clan_id LIMIT {int:$3} OFFSET {int:$4}"),
                             KN_DB_ARGS(region, lang, I64S(limit), I64S((page - 1) * limit)));
     if (!posts) posts = cJSON_CreateArray();
     cJSON *p;
-    cJSON_ArrayForEach(p, posts) {
-        cJSON_AddNullToObject(p, "clan_logo");
-        cJSON_AddBoolToObject(p, "is_active", 1);
-    }
+    cJSON_ArrayForEach(p, posts) cJSON_AddBoolToObject(p, "is_active", 1);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddItemToObject(o, "posts", posts);
     cJSON_AddNumberToObject(o, "total", (double) total);
@@ -615,10 +613,10 @@ static cJSON *view_recruitment(Dbx *x, int64_t page, int64_t limit, const char *
 /* a clan's post (active or removed), NULL without one */
 static cJSON *recruitment_row(Dbx *x, const char *clan) {
     cJSON *r = dbx_row(x, SQL(.any = "SELECT r.clan_id AS recruitment_id__i, r.clan_id AS clan_id__i, c.clan_name, r.region, r.language, r.description, r.looking_for,"
-                                     " r.min_level AS min_level__i, r.min_kd AS min_kd__f, r.is_active AS is_active__b, {epoch_ms:r.updated_at} AS updated_ms__i"
+                                     " r.min_level AS min_level__i, r.min_kd AS min_kd__f, r.is_active AS is_active__b, {epoch_ms:r.updated_at} AS updated_ms__i,"
+                                     " c.clan_logo AS clan_logo__i"
                                      " FROM clan_recruitment r JOIN clans c ON c.clan_id = r.clan_id WHERE r.clan_id = " CLAN_OF(1)),
                        KN_DB_ARGS(clan));
-    if (r) cJSON_AddNullToObject(r, "clan_logo");
     return r;
 }
 

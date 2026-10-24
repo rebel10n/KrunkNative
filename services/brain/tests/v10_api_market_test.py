@@ -128,8 +128,15 @@ def expect_refusal(label, status, reply):
     expect_error(label, status, reply, "NOT_IMPLEMENTED", 403)
 
 
-def expect_not_found(label, status, reply):
-    expect_error(label, status, reply, "NOT_FOUND", 404)
+def expect_not_found(label, status, reply, code="NOT_FOUND"):
+    expect_error(label, status, reply, code, 404)
+
+
+def expect_text_error(label, status, reply, http_status, message):
+    """{"data": null, "error": "<text>"}: a message with no v10.0.3 code, which its translator shows as it is
+    (deob-10.0.3.js:117409); an unknown code would show "An unexpected error occurred." """
+    ok = status == http_status and isinstance(reply, dict) and reply.get("error") == message and reply.get("data") is None
+    check("%s -> %d text error %r" % (label, http_status, message), ok, "HTTP %d %s" % (status, json.dumps(reply)[:200]))
 
 
 def eq(value):
@@ -242,7 +249,7 @@ def market_scenario(port, path):
 
     # ---- writes, as the seller and the buyer
     st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "price": 0}, b_tok)
-    expect_error("132 POST /market/list (price 0)", st, r, "BAD_REQUEST", 400, "Invalid price")
+    expect_text_error("132 POST /market/list (price 0)", st, r, 400, "Invalid price")
     st, r = http(port, "POST", "/market/list", {"item_id": ITEM_B, "price": 700}, s_tok)
     d = expect_data("132 POST /market/list (skin %d at 700, to unlist)" % ITEM_B, st, r,
                     lambda d: isinstance(d, dict) and is_int(d.get("listingId")) and is_int(d.get("fee")),
@@ -257,9 +264,11 @@ def market_scenario(port, path):
     listing_b = d.get("listingId") if isinstance(d, dict) else 0
 
     st, r = http(port, "POST", "/market/purchase", {"market_id": listing_a}, s_tok)
-    expect_error("133 POST /market/purchase (own listing)", st, r, "BAD_REQUEST", 400, "Cant buy your own item")
+    expect_error("133 POST /market/purchase (own listing; v10.0.3's code, deob-10.0.3.js:117343)", st, r, "MARKET_SELF_PURCHASE", 400,
+                 "Cant buy your own item")
     st, r = http(port, "POST", "/market/purchase", {"market_id": NO_ITEM}, b_tok)
-    expect_error("133 POST /market/purchase (unknown listing)", st, r, "BAD_REQUEST", 400, "Item Unavailable")
+    expect_error("133 POST /market/purchase (unknown listing; v10.0.3's code, deob-10.0.3.js:117342)", st, r, "MARKET_LISTING_GONE", 400,
+                 "Item Unavailable")
     st, r = http(port, "POST", "/market/purchase", {"market_id": listing_a}, b_tok)
     expect_data("133 POST /market/purchase (old listing, buyer)", st, r,
                 lambda d: isinstance(d, dict) and d.get("i") == ITEM and d.get("price") == 500,
@@ -290,7 +299,8 @@ def market_scenario(port, path):
                 "{success} (v10.0.3 5160; v10.js 108339)")
     st, r = http(port, "POST", "/trades/create",
                  {"target_player_id": s_id, "my_offer": [], "their_offer": [], "message": ""}, s_tok)
-    check("152 POST /trades/create (to yourself) -> 400 error", st == 400 and bool(err_of(r).get("message")) and "data" not in r,
+    # "Cant trade with yourself" has no v10.0.3 code: a text error, shown as it is (deob-10.0.3.js:117409)
+    check("152 POST /trades/create (to yourself) -> 400 text error", st == 400 and r.get("error") == "Cant trade with yourself",
           "HTTP %d %s" % (st, json.dumps(r)[:160]))
 
     st, r = http(port, "GET", "/trades/history?offset=0&limit=30&includeOpen=true", None, s_tok)
@@ -307,6 +317,11 @@ def market_scenario(port, path):
                 lambda d: isinstance(d, dict) and isinstance(d.get("my_inventory"), list)
                 and any(it.get("i") == ITEM and it.get("c") == 2 for it in d.get("their_inventory") or []),
                 "{my_inventory, their_inventory} (v10.0.3 5160; v10.js 109226)")
+    # a stack row carries st 1: v10.0.3's trade picker offers a stack only when st === 1, else one copy by its sid
+    # (deob-10.0.3.js:125012, 124726, 125069-125075)
+    expect_data("156 GET /trades/inventory/{id}: the stacks carry st 1", st, r,
+                lambda d: isinstance(d, dict) and all(it.get("st") == 1 for it in d.get("their_inventory") or [] if "sid" not in it)
+                and any(it.get("i") == ITEM and it.get("st") == 1 for it in d.get("their_inventory") or []), "st 1 on every stack row")
     st, r = http(port, "GET", "/trades/inventory/%s" % BUYER, None, s_tok)
     expect_data("156 GET /trades/inventory/{name} (seller reads the buyer)", st, r,
                 lambda d: isinstance(d, dict) and isinstance(d.get("their_inventory"), list), "{my_inventory, their_inventory}")
@@ -315,17 +330,17 @@ def market_scenario(port, path):
                 lambda d: isinstance(d, dict) and d.get("player_id") == b_id and d.get("player_name") == BUYER
                 and "player_score" in d, "{player_id, player_name, player_score} (v10.js 108349)")
     st, r = http(port, "GET", "/trades/player-search?name=nobody_here_x", None, s_tok)
-    expect_not_found("157 GET /trades/player-search (unknown)", st, r)
+    expect_not_found("157 GET /trades/player-search (unknown; deob-10.0.3.js:117356)", st, r, "TRADE_PLAYER_NOT_FOUND")
 
     st, r = http(port, "POST", "/players/%s/gift" % BUYER, {"amount": 50, "message": "hi"}, s_tok)
     expect_data("172 POST /players/{name}/gift (50 KR)", st, r,
                 lambda d: isinstance(d, dict) and d.get("amount") == 50 and is_int(d.get("funds")),
                 "{funds, amount, fee} (v10.0.3 5160; v10.js 109361)")
     st, r = http(port, "POST", "/players/%s/gift" % BUYER, {"amount": 0, "message": ""}, s_tok)
-    expect_error("172 POST /players/{name}/gift (amount 0)", st, r, "BAD_REQUEST", 400, "Invalid amount")
+    expect_text_error("172 POST /players/{name}/gift (amount 0)", st, r, 400, "Invalid amount")
     st, r = http(port, "POST", "/players/%s/verify" % SELLER, {"featured": True}, b_tok)
-    expect_data("169 POST /players/{name}/verify (not a developer: no change)", st, r, lambda d: d is None,
-                "null (v10.0.3 5160; v10.js 109590; the socket answers null)")
+    # an error, not 200 null: v10.0.3 would flip the badge on a null (deob-10.0.3.js:125561-125570)
+    expect_text_error("169 POST /players/{name}/verify (not a developer: no change)", st, r, 403, "Access Denied")
 
     st, r = http(port, "GET", "/players/%s/sales?range=0" % SELLER)
     expect_data("163 GET /players/{name}/sales (seller, today)", st, r,
@@ -348,6 +363,16 @@ def market_scenario(port, path):
                 "{listings: [{marketid, skinindex, funds}], has_more, next_cursor_id} (v10.0.3 5160; v10.js 128405)")
     st, r = http(port, "GET", "/market/listings?items=%d" % ITEM)
     expect_data("126 GET /market/listings?items= (sold skin %d: none open)" % ITEM, st, r,
+                lambda d: isinstance(d, dict) and d.get("listings") == [], "{listings: []}")
+    # item_id: one item's listings (the item sidebar, deob-10.0.3.js:30822-30823, 148938); the card reads listed_time
+    # and seller_id (123698-123701, 151762-151768)
+    st, r = http(port, "GET", "/market/listings?item_id=%d" % ITEM_B)
+    expect_data("126 GET /market/listings?item_id= (skin %d only, listed_time, seller_id)" % ITEM_B, st, r,
+                lambda d: isinstance(d, dict) and d.get("listings") and all(x.get("skinindex") == ITEM_B for x in d["listings"])
+                and all(is_int(x.get("listed_time")) and x["listed_time"] > 0 and x.get("seller_id") == s_id for x in d["listings"]),
+                "{listings: [{skinindex %d, listed_time, seller_id}]}" % ITEM_B)
+    st, r = http(port, "GET", "/market/listings?item_id=%d" % ITEM)
+    expect_data("126 GET /market/listings?item_id= (sold skin %d: none open, not every item's)" % ITEM, st, r,
                 lambda d: isinstance(d, dict) and d.get("listings") == [], "{listings: []}")
     # paging: a second open listing of skin 1 (900), read two rows at a time by price (highest first)
     st, r = http(port, "POST", "/market/list", {"item_id": ITEM_B, "price": 900}, s_tok)
@@ -378,7 +403,7 @@ def market_scenario(port, path):
                     o.get("nm") == BUYER for o in d.get("owners") or []),
                 "{ind, onS, inC, high, low, owners: [{nm, ct, su, ft}]} (v10.js 26887)")
     st, r = http(port, "GET", "/market/items/%d/sales" % NO_ITEM)
-    expect_not_found("130 GET /market/items/{id}/sales (unknown)", st, r)
+    expect_not_found("130 GET /market/items/{id}/sales (unknown; deob-10.0.3.js:117384)", st, r, "ITEMS_INVALID_ID")
     st, r = http(port, "GET", "/market/items/%d/sales-statistics?daysback=7" % ITEM)
     expect_data("131 GET /market/items/{id}/sales-statistics", st, r,
                 lambda d: isinstance(d, list) and sum(int(x.get("t", 0)) for x in d) >= 1 and all(
@@ -386,8 +411,8 @@ def market_scenario(port, path):
     st, r = http(port, "GET", "/market/sales", None, s_tok)
     expect_data("128 GET /market/sales (seller's open listings)", st, r,
                 lambda d: isinstance(d, list) and any(x.get("marketid") == listing_b and x.get("skinindex") == ITEM_B
-                                                      and "seller_id" not in x for x in d),
-                "[{marketid, skinindex, funds}] (v10.0.3 5160; v10.js 134079)")
+                                                      and x.get("seller_id") == s_id and is_int(x.get("listed_time")) for x in d),
+                "[{marketid, skinindex, funds, listed_time, seller_id}] (the card reads listed_time and seller_id, deob-10.0.3.js:146404-146473)")
     st, r = http(port, "GET", "/market/inventory", None, s_tok)
     expect_data("127 GET /market/inventory (seller)", st, r,
                 lambda d: isinstance(d, list) and any(is_int(x.get("i")) and is_int(x.get("cnt")) and x["cnt"] > 0 for x in d),
@@ -411,8 +436,7 @@ def market_scenario(port, path):
     expect_data("137 GET /market/black-market/rank (buyer)", st, r,
                 lambda d: isinstance(d, dict) and d.get("peak_mmr") == 1234, "{peak_mmr} (v10.0.3 5160; v10.js 128494)")
     st, r = http(port, "POST", "/market/black-market/purchase", {"item_index": ITEM}, b_tok)
-    expect_error("138 POST /market/black-market/purchase (not a black-market item)", st, r, "BAD_REQUEST", 400,
-                 "Item Unavailable")
+    expect_text_error("138 POST /market/black-market/purchase (not a black-market item)", st, r, 400, "Item Unavailable")
     st, r = http(port, "POST", "/market/black-market/purchase", {"item_index": BM_BUY}, b_tok)
     expect_data("138 POST /market/black-market/purchase (stats requirement met)", st, r,
                 lambda d: isinstance(d, dict) and d.get("item") == BM_BUY and d.get("kr") == 3000 and is_int(d.get("funds")),
@@ -431,7 +455,7 @@ def market_scenario(port, path):
                 and isinstance(d.get("listings"), list) and d.get("stackable") is False and d.get("wearable") is False,
                 "{stats, owners, sales, listings, stackable, wearable} (v10.0.3 5160; v10.js 128558)")
     st, r = http(port, "GET", "/items/%d/view" % NO_ITEM)
-    expect_not_found("140 GET /items/{id}/view (unknown)", st, r)
+    expect_not_found("140 GET /items/{id}/view (unknown)", st, r, "ITEMS_INVALID_ID")
     st, r = http(port, "GET", "/items/%d/sales?range=0" % ITEM)
     expect_data("141 GET /items/{id}/sales?range=0", st, r,
                 lambda d: isinstance(d, list) and sum(int(x.get("t", 0)) for x in d) >= 1, "[{d, f, t}] (v10.js 129914)")
@@ -494,7 +518,7 @@ def paint_scenario(port, path):
     st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": ITEM_B}, p_tok)
     expect_error("paint: a non-paint is refused", st, r, "ITEM_PAINT_INVALID", 400, "That item is not a paint.")
     st, r = http(port, "POST", "/items/%d/paint" % NO_ITEM, {"item_id": NO_ITEM, "paint_item_id": PAINT_RED}, p_tok)
-    expect_not_found("paint: an unknown item", st, r)
+    expect_not_found("paint: an unknown item", st, r, "ITEMS_INVALID_ID")
     st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED})
     check("paint: a guest is refused (401)", st == 401, "HTTP %d" % st)
 
@@ -640,7 +664,7 @@ def paint_trade_scenario(port, path):
           "HTTP %d %s" % (st, json.dumps(r)[:200]))
     st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "price": 300}, a_tok)
     check("market list: no unpainted unit left is refused (painted copies are not listed as a stack)",
-          st == 400 and err_of(r).get("code") == "BAD_REQUEST" and count(a_id, ITEM) == 1, "HTTP %d %s" % (st, json.dumps(r)[:200]))
+          st == 400 and r.get("error") and count(a_id, ITEM) == 1, "HTTP %d %s" % (st, json.dumps(r)[:200]))
 
     # 3. the buy: the buyer gets a copy with the paint (the old listing: a buy is refused for the grace period)
     seed(path, [("UPDATE market_listings SET created_at = ? WHERE id = ?", (OLD, lid_red))])
@@ -673,6 +697,13 @@ def paint_trade_scenario(port, path):
           st == 200 and is_int(trid), "HTTP %d %s" % (st, json.dumps(r)[:240]))
     check("trade offer: the sender's copy is escrowed (gone from the owner until the offer closes)",
           back_a not in copies(a_id) and count(a_id, ITEM) == 0, "%r" % (copies(a_id),))
+    # the open offer is in the history's open list, unless v10.0.3's include_open=0 (deob-10.0.3.js:31078) asks without it
+    st, r = http(port, "GET", "/trades/history?offset=0&limit=30&include_open=1", None, a_tok)
+    check("trade history include_open=1: the open offer is listed",
+          st == 200 and any(x.get("trid") == trid for x in (data_of(r) or {}).get("open", [])), json.dumps(r)[:200])
+    st, r = http(port, "GET", "/trades/history?offset=0&limit=30&include_open=0", None, a_tok)
+    check("trade history include_open=0: no open list (v10.0.3's query key)",
+          st == 200 and (data_of(r) or {}).get("open") == [], json.dumps(r)[:200])
     st, r = http(port, "GET", "/trades/inventory/%d" % b_id, None, a_tok)
     theirs = (data_of(r) or {}).get("their_inventory") or []
     row = next((x for x in theirs if x.get("sid") == red_b), None)

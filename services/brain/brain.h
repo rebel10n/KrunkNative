@@ -61,4 +61,8 @@ void brain_reply_json(struct kn_http_req *req, int status, const cJSON *json);
 void brain_cors_headers(struct kn_http_req *req);
 void brain_reply_json_raw(struct kn_http_req *req, int status, const cJSON *json);
 
+/* The byte length of the longest prefix of UTF-8 text that is at most max_units UTF-16 units (a JS string's
+ * length, what v10's maxlength measures: a 4-byte sequence is 2 units), never cutting a code point. */
+size_t brain_utf16_prefix(const char *text, size_t max_units);
+
 #endif

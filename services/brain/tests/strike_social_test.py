@@ -207,6 +207,9 @@ async def scenario(names):
     await C.send(["eb", {"type": "game:invite", "to": a_id, "gameId": "STK:l1"}])
     e = await C.eb("error")
     check(e and e["code"] == "EB_NOT_FRIEND", "C (follows A, not followed back) invites A: EB_NOT_FRIEND")
+    # an invite refusal names its request: a msg:send's EB_NOT_FRIEND / EB_TARGET_OFFLINE fails a pending message
+    # in v10.0.3 (deob-10.0.3.js:156838), an invite's must not
+    check(e and e.get("of") == "game:invite", "an invite refusal carries of: game:invite")
     for bad in ({"to": b_id, "gameId": "x y"}, {"to": b_id, "gameId": ""}, {"to": a_id, "gameId": "STK:l1"}, {"to": 0, "gameId": "STK:l1"}):
         await A.send(["eb", dict(type="game:invite", **bad)])
         e = await A.eb("error")
@@ -215,7 +218,7 @@ async def scenario(names):
     await asyncio.sleep(0.5)
     await A.send(["eb", {"type": "game:invite", "to": b_id, "gameId": "STK:l1"}])
     e = await A.eb("error")
-    check(e and e["code"] == "EB_TARGET_OFFLINE", "B offline: EB_TARGET_OFFLINE")
+    check(e and e["code"] == "EB_TARGET_OFFLINE" and e.get("of") == "game:invite", "B offline: EB_TARGET_OFFLINE, of game:invite")
     codes = []
     for i in range(20):
         await A.send(["eb", {"type": "game:invite", "to": b_id, "gameId": "STK:l1"}])

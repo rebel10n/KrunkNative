@@ -55,10 +55,20 @@ static void on_social(void *user, const cJSON *frame) {
         void *u = g_pending[i].user;
         g_pending[i].fn = NULL;
         const cJSON *status = cJSON_GetArrayItem(frame, 2), *payload = cJSON_GetArrayItem(frame, 3);
+        const int st = cJSON_IsNumber(status) ? status->valueint : 200;
+        if (st == 429) {
+            // v10.0.3's gapi wrapper answers any 429 with this string and no data, whatever the body
+            // (deob-10.0.3.js:30051-30057); the brain's {code RATE_LIMITED, message, retry_ms} is not shown.
+            // No retry: 429 is not in the fetch's retry list (deob-10.0.3.js:30004).
+            cJSON *e = cJSON_CreateString("Rate limit exceeded. Try again later.");
+            fn(u, st, NULL, e);
+            cJSON_Delete(e);
+            return;
+        }
         const cJSON *data = cJSON_GetObjectItem(payload, "data"), *error = cJSON_GetObjectItem(payload, "error");
         if (cJSON_IsNull(data)) data = NULL;
         if (cJSON_IsNull(error)) error = NULL;
-        fn(u, cJSON_IsNumber(status) ? status->valueint : 200, data, error);
+        fn(u, st, data, error);
         return;
     }
 }

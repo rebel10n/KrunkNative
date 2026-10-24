@@ -105,10 +105,12 @@ def stored_balance(gid):
     return {"funds": found[0][0], "score": found[0][1]} if found else None
 
 
-def http(port, method, path, body=None):
+def http(port, method, path, body=None, bearer=None):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), data=data, method=method,
-                                 headers={"Content-Type": "application/json"} if data is not None else {})
+    headers = {"Content-Type": "application/json"} if data is not None else {}
+    if bearer:
+        headers["Authorization"] = "Bearer " + bearer
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             status, raw = r.status, r.read()
@@ -196,6 +198,13 @@ async def scenario(port, brain_log):
         st, body = http(port, "GET", "/guest/profile?guest=" + g)
         check("3b: GET reads funds 12 and score 800", st == 200 and profile_of(body) == {"funds": 12, "score": 800},
               "HTTP %d" % st)
+        # v10.0.3's getProfile() is a bare GET whose identity is the Authorization header (deob-10.0.3.js:30306-30309,
+        # interceptor 31666-31672): no ?guest=, the Bearer is the guest id
+        st, body = http(port, "GET", "/guest/profile", bearer=g)
+        check("3c: GET without ?guest= reads the Bearer's balance (v10.0.3's request)",
+              st == 200 and profile_of(body) == {"funds": 12, "score": 800}, "HTTP %d %s" % (st, body))
+        st, body = http(port, "GET", "/guest/profile", bearer="not-a-guest-id")
+        check("3d: a Bearer that is no guest id is 400", is_refusal(st, body), "HTTP %d" % st)
 
         # 4. the same match again is a duplicate and moves nothing
         err, data = await node.op("guest_credit", {"guest": g, "match": M1, "kr": 12, "xp": 800})

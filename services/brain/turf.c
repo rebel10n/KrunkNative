@@ -65,10 +65,14 @@ static int current_day(void) { return T.day_override >= 0 ? T.day_override : tur
 
 static void log_err(const char *what, kn_db_result *res) { KN_WARN(MOD, "%s failed: %s", what, kn_db_error(res)); }
 
+/* {error: {code, message}}: v10.0.3's Turf Wars and recruitment consumers read error.message || their generic text
+ * (deob-10.0.3.js:31705, 31718, 160858, 158670), so a string error would hide the reason; the loot-config readers
+ * take error.message || error (31657) */
 static void reply_error(kn_http_req *req, int status, const char *name) {
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddStringToObject(o, "error", name);
-    cJSON_AddStringToObject(o, "message", name);
+    cJSON *e = cJSON_AddObjectToObject(o, "error");
+    cJSON_AddStringToObject(e, "code", name);
+    cJSON_AddStringToObject(e, "message", name);
     brain_reply_json(req, status, o);
     cJSON_Delete(o);
 }

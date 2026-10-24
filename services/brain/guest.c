@@ -2,7 +2,11 @@
  * services/brain/guest.c - the signed-out guest's balance over HTTP (Krunker v10.0.2; the procs are in
  * db_guest.c, the table in migration 0350_guest_profiles). Routes at the brain's root, as v10 has them:
  *   GET  /guest/profile?guest=<id>     200 {data: {profile: {funds, score}}}. A valid unknown id reads
- *                                      zeros and creates nothing.
+ *                                      zeros and creates nothing. Without ?guest= the id is the bearer
+ *                                      token: v10.0.3's guest.getProfile() is a bare GET (deob-10.0.3.js:
+ *                                      30306-30309) whose only identity is the Authorization header its
+ *                                      interceptor adds (deob-10.0.3.js:31666-31672). KN's client sends
+ *                                      ?guest= (client/src/ui/v10_rewards.c).
  *   POST /guest/claim                  body {"guest": "<id>"} -> 200 {data: {profile: {funds: 0, score: 0}}}
  *                                      (zeroes an existing balance, creates nothing).
  * A missing or bad id (not 32 lowercase hex digits) is 400 {error, message}; without a database 503
@@ -66,9 +70,16 @@ static void h_profile(kn_http_req *req, void *ud) {
         reply_error(req, 503, "GuestUnavailable");
         return;
     }
-    char guest[64];
-    /* -1 absent, -2 too long for the buffer: both fail the 32-digit check below */
-    if (kn_http_query_get(req, "guest", guest, sizeof guest) < 0 || !guest_id_valid(guest)) {
+    char guest[64] = "";
+    /* -1 absent: the bearer token (v10.0.3's request, see the header); -2 too long for the buffer: fails the
+     * 32-digit check below. The consumer applies data.profile only when error is unset (deob-10.0.3.js:
+     * 133742-133748), so a bad id keeps its zeros. */
+    const int q = kn_http_query_get(req, "guest", guest, sizeof guest);
+    if (q == -1) {
+        const char *bearer = kn_http_bearer(req);
+        if (bearer) snprintf(guest, sizeof guest, "%s", bearer);
+    }
+    if (q == -2 || !guest_id_valid(guest)) {
         reply_error(req, 400, "Bad guest id.");
         return;
     }

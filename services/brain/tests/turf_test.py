@@ -261,12 +261,12 @@ def recruitment(port, accs, clan_a, clan_c):
     # v10.0.3: the post's minimum K/D (1.5) applies to every join request and to its approval. K/D is the
     # profile's: lifetime kills / max(deaths, 1). accs[9] has no kills yet (K/D 0): refused by the Apply and by join by name
     code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
-    check(code == 400 and r.get("message") == "Requirements Not Met", "K/D 0 under the post's 1.5: the Apply refused (%s)" % r)
+    check(code == 400 and (r.get("error") or {}).get("message") == "Requirements Not Met", "K/D 0 under the post's 1.5: the Apply refused (%s)" % r)
     r = asyncio.run(join_by_name(port, accs[9], "ccc"))
     check(r[1] == "Requirements Not Met", "K/D 0: the join by name refused (%s)" % (r,))
     check(asyncio.run(add_stats(port, accs[9], 2, 2)) is None, "2 kills, 2 deaths recorded (K/D 1.0)")
     code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
-    check(code == 400 and r.get("message") == "Requirements Not Met", "K/D 1.0 below 1.5: the Apply refused (%s)" % r)
+    check(code == 400 and (r.get("error") or {}).get("message") == "Requirements Not Met", "K/D 1.0 below 1.5: the Apply refused (%s)" % r)
     check(asyncio.run(add_stats(port, accs[9], 1, 0)) is None, "1 more kill recorded (K/D 1.5, the minimum)")
     code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
     check(code == 200 and r["data"]["message"] == "Application sent!", "K/D 1.5, the minimum: a clanless player applies (%s %s)" % (code, r))

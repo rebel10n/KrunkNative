@@ -109,7 +109,9 @@ void sh_comment(SocialSession *s, const cJSON *f) {
         return;
     }
     char text[2048], me[24], pid[24];
-    snprintf(text, sizeof text, "%.*s", g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500, txt);
+    /* the cap counts UTF-16 units (v10.0.3's reply box maxlength 500, deob-10.0.3.js:120813), never a cut code point */
+    const size_t cut = brain_utf16_prefix(txt, (size_t) (g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500));
+    snprintf(text, sizeof text, "%.*s", (int) cut, txt);
     social_query(s,
                  SQL(.any = "INSERT INTO feed_comments (post_id, author_id, body) SELECT id, $1, $3 FROM feed_posts "
                             "WHERE id = $2 AND deleted_at IS NULL"),

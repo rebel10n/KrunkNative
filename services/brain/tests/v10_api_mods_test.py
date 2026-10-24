@@ -150,7 +150,8 @@ def seed(db):
                  (val, name))
     ids = {who: db_q(path, "SELECT id FROM accounts WHERE username = ?", (name,))[0][0] for who, (name, _) in WHO.items()}
     # two mods of the plain player: TestMod stays, DoomedMod is deleted by the test
-    db_x(path, "INSERT INTO published_mods (mod_name, creator_id, mod_info) VALUES ('TestMod', ?, '{}')", (ids["plain"],))
+    db_x(path, "INSERT INTO published_mods (mod_name, creator_id, mod_info, mod_description, mod_votes, mod_initialdate, mod_date)"
+               " VALUES ('TestMod', ?, '{}', 'Tom & Jerry <3', 7, '2026-01-02 03:04:05.000', '2026-02-03 04:05:06.000')", (ids["plain"],))
     db_x(path, "INSERT INTO published_mods (mod_name, creator_id, mod_info) VALUES ('DoomedMod', ?, '{}')", (ids["plain"],))
     now = "strftime('%Y-%m-%d %H:%M:%f', 'now')"
     demos = [
@@ -257,6 +258,11 @@ def scenario(port, db):
     check("174 GET /mods/by-name/{name}: data.mod_id, data.name, data.creator_name, data.featured, data.version (%s, v10.js 27201 read at 107663)" % W,
           s == 200 and d.get("mod_id") == mod_id and d.get("name") == "TestMod" and d.get("creator_name") == WHO["plain"][0]
           and d.get("featured") in (0, False) and d.get("version") is None, brief(s, b))
+    # the v10.0.3 mod panel's other reads: votes (deob-10.0.3.js:121912), description as text (121953: raw, not
+    # HTML-escaped), created_at / updated_at (121944, 121946)
+    check("174 GET /mods/by-name/{name}: data.votes, data.description (raw text), data.created_at, data.updated_at (ISO, UTC) (deob-10.0.3.js:121912-121953)",
+          s == 200 and d.get("votes") == 7 and d.get("description") == "Tom & Jerry <3"
+          and d.get("created_at") == "2026-01-02T03:04:05.000Z" and d.get("updated_at") == "2026-02-03T04:05:06.000Z", brief(s, b))
     s, b = http(port, "GET", "/mods/by-name/NoSuchMod")
     check("174 GET /mods/by-name/{name} unknown name: 404 NOT_FOUND", error_code(s, b, "NOT_FOUND", 404), brief(s, b))
 

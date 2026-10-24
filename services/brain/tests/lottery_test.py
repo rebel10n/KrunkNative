@@ -244,13 +244,17 @@ async def scenario(port):
               " VALUES (%d, 10, 'currency', '2', 500, 10)" % LOTTERY)
         err, _ = await node.op("junk_credit", id=a_id, amount=1000, reason="trigger")
         assert err is None, err
-        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 2}, a_tok)
+        # cost_quantity is the units paid, a multiple of the cost's (v10.0.3: the stepper moves by cost_quantity and the
+        # menu takes the selected units off the balance, deob-10.0.3.js:142871, 142699, 142917)
+        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 750}, a_tok)
+        check(status == 400 and err_of(body) == "Invalid cost", "units that are not a multiple of the cost's (500) are refused: %s %s" % (status, body))
+        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 1000}, a_tok)
         check(status == 200 and body.get("data") == {"player_entries": 22, "total_entries": 22},
-              "two Junk bundles (10.00) give 20 entries: %s %s" % (status, body))
+              "two Junk bundles (1000 hundredths, 10.00) give 20 entries: %s %s" % (status, body))
         check(one("SELECT player_junk FROM players WHERE player_id = %d" % a_id) == 0, "the Junk is spent (balance 0)")
         check(one("SELECT COUNT(*) FROM junk_transactions WHERE account_id = %d AND source = 'lottery' AND amount = -1000" % a_id) == 1,
               "one ledger row of -1000 with reason 'lottery' (junk_spend)")
-        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 1}, a_tok)
+        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 500}, a_tok)
         check(status == 400 and err_of(body) == "Not enough Junk", "an unaffordable Junk entry is refused: %s %s" % (status, body))
         check(one("SELECT entries FROM lottery_entries e JOIN lottery_draws d ON d.id = e.draw_id WHERE e.account_id = %d AND d.lottery_id = %d"
                   % (a_id, LOTTERY)) == 22, "the refused entry adds nothing (still 22 entries)")
@@ -263,13 +267,13 @@ async def scenario(port):
         # a second account: Junk (10 entries) and Ranked Points (5 entries per bundle)
         err, _ = await node.op("junk_credit", id=b_id, amount=500, reason="trigger")
         assert err is None, err
-        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 1}, b_tok)
+        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "2", "cost_quantity": 500}, b_tok)
         check(status == 200 and body.get("data", {}).get("player_entries") == 10 and body["data"].get("total_entries") == 32,
               "a second account's Junk entry: 10 of 32 entries: %s" % body)
         query("INSERT INTO lottery_costs (lottery_id, ord, cost_type, cost_ref, cost_quantity, num_entries)"
               " VALUES (%d, 11, 'currency', '3', 50, 5)" % LOTTERY)
         query("INSERT INTO ranked_points (account_id, balance) VALUES (%d, 100)" % b_id)
-        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "3", "cost_quantity": 1}, b_tok)
+        status, body = http(port, "POST", base + "/participate", {"cost_type": "currency", "cost_ref": "3", "cost_quantity": 50}, b_tok)
         check(status == 200 and body.get("data") == {"player_entries": 15, "total_entries": 37},
               "an RP entry of 0.50 RP's worth (50 RP, 5 entries): %s %s" % (status, body))
         check(one("SELECT balance FROM ranked_points WHERE account_id = %d" % b_id) == 50, "the RP is spent (balance 50)")

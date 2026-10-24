@@ -164,6 +164,7 @@ typedef struct ApiReq {
     int64_t account;
     int category;     /* cat=: a map category index, -1 all */
     int source;       /* source=: SOURCE_* */
+    int window;       /* a search's answer index: the window whose searchResp takes it (0 on /api/search) */
     char val[96];
 } ApiReq;
 
@@ -184,7 +185,7 @@ static void reply_page(ApiReq *a, cJSON *rows, const char *error) {
     const int to = search ? n : from + TAB_PAGE_SIZE;
     for (int i = from; i < n && i < to; i++) cJSON_AddItemToArray(page, cJSON_Duplicate(cJSON_GetArrayItem(rows, i), 1));
     cJSON_AddItemToObject(res, "data", page);
-    cJSON_AddNumberToObject(res, "index", search ? 0 : a->tab);
+    cJSON_AddNumberToObject(res, "index", search ? a->window : a->tab);
     if (!search && a->kind != 2) cJSON_AddNumberToObject(res, "pos", a->pos);
     if (error) cJSON_AddStringToObject(res, "error", error);
     else cJSON_AddNullToObject(res, "error");
@@ -386,6 +387,10 @@ static void h_search(kn_http_req *req, void *ud) {
     const int kind = !strcmp(type, "map") ? 3 : !strcmp(type, "mod") ? 4 : -1;
     ApiReq *a = api_req(req, kind < 0 ? 3 : kind);
     if (!a) return;
+    /* the webhooks' answer goes to windows[resp.index].searchResp (deob-10.0.3.js:255448-255451): the Maps window
+     * is windows[9] (searchMaps 249325, searchResp 249327), the Mods window windows[3] (247230, 247232); index 0 is
+     * the Settings window, which has none. /api/search keeps 0 (KrunkNative's own client reads it). */
+    if (ud) a->window = kind == 3 ? 9 : 3;
     /* v10's Popular Categories cards search with an empty name and a category (mpCat only): the
      * category's maps; an empty name without a category or source finds nothing, as before */
     if (kind < 0 || (!a->val[0] && (kind != 3 || (a->category < 0 && a->source == SOURCE_ALL)))) {

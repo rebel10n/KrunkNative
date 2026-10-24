@@ -245,7 +245,8 @@ async def scenario(port):
 
         err, _ = await node.op("junk_credit", id=a_id, amount=1000, reason="trigger")
         assert err is None, err
-        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": ja, "quantity": 2}, a_tok)
+        # v10.0.3's body: product_id is the price's price_ref string (deob-10.0.3.js:132049), "kn.shop.<display id>"
+        status, body = http(port, "POST", "/api/shop/purchase", {"display_id": ja, "product_id": "kn.shop.%d" % ja, "quantity": 2}, a_tok)
         d = body.get("data", {}) if isinstance(body, dict) else {}
         check(status == 200 and d.get("success") is True and d.get("price_paid") == 500 and d.get("currency_id") == 2
               and d.get("junk") == "5.00" and d.get("rewards") == [{"type": "skin", "skin_id": 7438, "amount": 2}],
@@ -280,6 +281,10 @@ async def scenario(port):
         check(status == 400 and err_of(body) == "Product not found", "a retired product is not sold: %s" % body)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 999999, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Product not found", "an unknown product is refused: %s" % body)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": "kn.shop.%d" % jc, "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Product not found", "a retired product by its price_ref is not sold: %s" % body)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": "io.krunker.no-such-ref", "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Product not found", "an unknown price_ref is refused: %s" % body)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": jb, "quantity": 0}, a_tok)
         check(status == 400 and err_of(body) == "Invalid quantity.", "a zero quantity is refused: %s" % body)
 
@@ -308,6 +313,9 @@ async def scenario(port):
         query("UPDATE players SET player_funds = 0 WHERE player_id = %d" % a_id)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Not enough KR", "an official KR product with no KR is refused: %s %s" % (status, body))
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": "io.krunker.skin7994", "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Not enough KR",
+              "an official product by its price_ref (v10.0.3's product_id) is Hovi (35): %s %s" % (status, body))
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 999, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Product not found", "an unknown low id is refused: %s" % body)
         check(one("SELECT COUNT(*) FROM shop_official_purchases WHERE account_id = %d" % a_id) == 0,
@@ -357,7 +365,7 @@ async def scenario(port):
         jbefore = one("SELECT player_junk FROM players WHERE player_id = %d" % a_id)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 15, "quantity": 2}, a_tok)
         d = body.get("data", {}) if isinstance(body, dict) else {}
-        check(status == 200 and d.get("price_paid") == 4000 and d.get("rewards") == [{"type": "currency", "currency_id": 2, "amount": 20000}],
+        check(status == 200 and d.get("price_paid") == 4000 and d.get("rewards") == [{"type": "currency", "currency_id": 2, "currency": 2, "amount": 20000}],
               "two Junk products cost 4000 KR and grant 200 Junk (20000 hundredths): %s %s" % (status, body))
         check(one("SELECT player_junk FROM players WHERE player_id = %d" % a_id) == jbefore + 20000
               and one("SELECT player_funds FROM players WHERE player_id = %d" % a_id) == 0,

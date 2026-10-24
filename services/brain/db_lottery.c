@@ -250,10 +250,14 @@ static int spend_currency(Dbx *x, const int64_t account, const int64_t currency,
     return -1;
 }
 
-/* {player_entries, total_entries} | refused: the lottery's message (v10's text where it has one) */
+/* {player_entries, total_entries} | refused: the lottery's message (v10's text where it has one). p4 is the body's
+ * cost_quantity: the units paid (skins, KR, ...), a multiple of the cost's cost_quantity. v10.0.3's stepper moves by
+ * cost.cost_quantity and caps at floor(owned / cq) * cq, takes the selected units off the balance and counts
+ * selected * num_entries / cost_quantity entries (deob-10.0.3.js:142871, 142890, 142699, 142917), so the bundles are
+ * units / cq. */
 static kn_db_result *run_participate(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    const int64_t account = PI(0), id = PI(1), bundles = PI(4), now = PI(5);
+    const int64_t account = PI(0), id = PI(1), paid = PI(4), now = PI(5);
     const char *type = P(2) ? P(2) : "", *ref = P(3) ? P(3) : "";
     Lottery L;
     const int found = lottery_load(&x, id, &L);
@@ -262,7 +266,7 @@ static kn_db_result *run_participate(kn_dbconn *c, int n, const char *const *p) 
         dbx_refuse(&x, "lottery not found");
         return dbx_finish(&x, NULL);
     }
-    if (bundles < 1 || bundles > LOTTERY_MAX_BUNDLES) {
+    if (paid < 1) {
         dbx_refuse(&x, "Please select at least one item to participate");
         return dbx_finish(&x, NULL);
     }
@@ -286,10 +290,15 @@ static kn_db_result *run_participate(kn_dbconn *c, int n, const char *const *p) 
         cJSON_Delete(cost);
         return dbx_finish(&x, NULL);
     }
-    const int64_t units = bundles * jint(cost, "cq"), entries = bundles * jint(cost, "ne");
+    const int64_t cq = jint(cost, "cq"), ne = jint(cost, "ne");
     cJSON_Delete(cost);
-    if (units < 1 || entries < 1) {
+    if (cq < 1 || ne < 1 || paid % cq != 0) {
         dbx_refuse(&x, "Invalid cost");
+        return dbx_finish(&x, NULL);
+    }
+    const int64_t bundles = paid / cq, units = paid, entries = bundles * ne;
+    if (bundles > LOTTERY_MAX_BUNDLES) {
+        dbx_refuse(&x, "Please select at least one item to participate");
         return dbx_finish(&x, NULL);
     }
 

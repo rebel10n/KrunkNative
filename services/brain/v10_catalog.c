@@ -164,7 +164,11 @@ static void h_skin_not_found(kn_http_req *req, void *ud) {
     v10_reply_error(req, 404, "NOT_FOUND", "Skin not found");
 }
 
-static void h_refuse(kn_http_req *req, void *ud) { v10_reply_error(req, 403, "NOT_IMPLEMENTED", ud); }
+/* The Skin Manager's writes, refused by design (no Skin Manager, no asset store). A text error: its service
+ * does `throw new Error(res.error)` (deob-10.0.3.js:138943, 138956, 138969, 138982, 139011) and the editor
+ * shows "Failed to save skin: " + message (139265, 139412, 139425), so {code, message} would read
+ * "[object Object]". */
+static void h_refuse(kn_http_req *req, void *ud) { v10_reply_text_error(req, 403, ud); }
 
 /* ---- the wild offer (wild_offer.c's procs; the account and the clock are the same as the social frames') */
 
@@ -374,7 +378,9 @@ static kn_db_result *run_map_lb(kn_dbconn *c, int n, const char *const *p) {
     free(out);
     if (written < 0) return dbx_finish(&x, NULL);
     cJSON *v = cJSON_CreateObject();
-    cJSON_AddNumberToObject(v, "leaderboard_type", (double) type);
+    /* the map record's leaderboard_type: "score", "time" or the custom key, a string (the Map Detail panel
+     * stores data.leaderboard_type into it, deob-10.0.3.js:120948, and compares it with "time" at 121127) */
+    cJSON_AddStringToObject(v, "leaderboard_type", custom[0] ? custom : type ? "time" : "score");
     cJSON_AddNumberToObject(v, "order", (double) order);
     cJSON_AddStringToObject(v, "custom_type", custom);
     return dbx_json(&x, "v10_map_lb", v);
@@ -792,6 +798,75 @@ static void h_map_board(kn_http_req *req, void *ud) {
     char name_arg[160];
     snprintf(name_arg, sizeof name_arg, "%s", b->name);
     kn_db_query_sql(g_b->db, &k_board_settings, KN_DB_ARGS(name_arg), on_board_settings, b);
+}
+
+/* ---- GET /maps/by-name/:name for a published map: the v10.0.3 Map Detail panel's record */
+
+/* The panel (deob-10.0.3.js:121106-121532) reads map_id (thumbnail, every write), creator_name (the owner's
+ * tabs, 121112), category (an index of the category list, 121111 / 21280), featured, votes (121378),
+ * gameplays (121381), created_at / updated_at (121444, 121446, the date formatter at 27304), description
+ * (121448, a text node: raw), funds (121532), leaderboard_type ("score", "time" or the custom key,
+ * 121127-121137) and leaderboard_order (121138). */
+static const kn_sql k_map_detail = {
+    .any = "SELECT d.map_id, d.map_name, coalesce(a.username, ''), d.map_category, d.map_featured, d.map_votes,"
+           " d.map_plays, d.map_funds, d.map_description, {epoch_ms:d.map_initialdate}, {epoch_ms:d.map_date},"
+           " d.map_data FROM published_maps d LEFT JOIN accounts a ON a.id = d.creator_id"
+           " WHERE lower(d.map_name) = lower($1) AND d.deleted_at IS NULL ORDER BY d.map_id LIMIT 1"};
+
+static void on_map_detail(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    if (!kn_db_ok(res)) {
+        v10_reply_error(req, 500, "INTERNAL_ERROR", acct_db_error(res, "map"));
+        return;
+    }
+    if (kn_db_rows(res) < 1) {
+        v10_reply_error(req, 404, "MAP_NOT_FOUND", "Map not found");
+        return;
+    }
+    /* the LEADERBOARD object's settings (creations.c ulb, run_map_lb): ldc the custom key, ldt 1 time, ldo 1 */
+    const char *lb_type = "score";
+    int64_t lb_order = 0;
+    char custom[64] = "";
+    cJSON *map = cJSON_Parse(kn_db_get(res, 0, 11));
+    cJSON *o;
+    const cJSON *objs = map ? cJSON_GetObjectItemCaseSensitive(map, "objects") : NULL;
+    cJSON_ArrayForEach(o, objs) {
+        if (!cJSON_IsObject(o) || kn_json_int(o, "i", -1) != PREFAB_LEADERBOARD) continue;
+        snprintf(custom, sizeof custom, "%s", kn_json_str(o, "ldc", ""));
+        lb_type = custom[0] ? custom : kn_json_int(o, "ldt", 0) == 1 ? "time" : "score";
+        lb_order = kn_json_int(o, "ldo", 0);
+        break;
+    }
+    const int64_t category = kn_db_get_int64(res, 0, 3, 0);
+    char when[40];
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddNumberToObject(d, "map_id", (double) kn_db_get_int64(res, 0, 0, 0));
+    cJSON_AddStringToObject(d, "name", kn_db_get(res, 0, 1));
+    cJSON_AddStringToObject(d, "creator_name", kn_db_get(res, 0, 2));
+    cJSON_AddNumberToObject(d, "category", (double) (category > 0 ? category : 0)); /* -1 (none): "Other" */
+    cJSON_AddBoolToObject(d, "featured", kn_db_get_int64(res, 0, 4, 0) != 0);
+    cJSON_AddNumberToObject(d, "votes", (double) kn_db_get_int64(res, 0, 5, 0));
+    cJSON_AddNumberToObject(d, "gameplays", (double) kn_db_get_int64(res, 0, 6, 0));
+    cJSON_AddNumberToObject(d, "funds", (double) kn_db_get_int64(res, 0, 7, 0));
+    cJSON_AddStringToObject(d, "description", kn_db_get(res, 0, 8));
+    v10_iso_ms(kn_db_get_int64(res, 0, 9, 0), when, sizeof when);
+    cJSON_AddStringToObject(d, "created_at", when);
+    v10_iso_ms(kn_db_get_int64(res, 0, 10, 0), when, sizeof when);
+    cJSON_AddStringToObject(d, "updated_at", when);
+    cJSON_AddStringToObject(d, "leaderboard_type", lb_type);
+    cJSON_AddNumberToObject(d, "leaderboard_order", (double) lb_order);
+    cJSON_Delete(map);
+    v10_reply_data(req, 200, d);
+}
+
+void v10_catalog_map_by_name(kn_http_req *req, const char *name) {
+    if (!g_b || !g_b->db || !name || !*name) {
+        v10_reply_error(req, 404, "MAP_NOT_FOUND", "Map not found");
+        return;
+    }
+    char arg[160];
+    snprintf(arg, sizeof arg, "%s", name);
+    kn_db_query_sql(g_b->db, &k_map_detail, KN_DB_ARGS(arg), on_map_detail, req);
 }
 
 /* ---- the route table */

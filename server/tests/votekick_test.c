@@ -14,9 +14,10 @@
 //   7. a K.P.D officer (a moderator account) joining gets the open case (kpdData sus / caller), a
 //      verdict before kpdWatchTime (10 s) is refused ("kpdf"), then it counts once; nobody else
 //      gets a rated case
-//   8. the player list's Kick / Ban (NET_EXT_ADMIN_ACTION): a non-DEV's request is refused and
+//   8. the player list's Kick / Ban (NET_EXT_ADMIN_ACTION): a plain player's request is refused and
 //      removes nobody; a DEV's kick and ban remove the target, a DEV cannot kick herself, a missing
-//      uid removes nobody; /kick in chat still works
+//      uid removes nobody; /kick in chat still works; a moderator kicks ("Kicked by host", v10.0.3's
+//      canGlobalKick) but cannot ban or kick a DEV
 // Run from the repository root: ./<build>/votekick_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -486,7 +487,8 @@ int main(void) {
     pump(5);
     CHECK(conn(A) && conn(B) && conn(C) && !got_error(B, "Kicked") && !got_error(C, "Banned"),
           "a non-DEV's kick and ban change nothing: Bob and Carol stay");
-    CHECK(got_chat(A, "Only DEV accounts can kick or ban from the player list"), "the refused sender is told why");
+    CHECK(got_chat(B, "Only the host can kick from the player list"), "the refused kick's sender is told why");
+    CHECK(got_chat(A, "Only DEV accounts can ban from the player list"), "the refused ban's sender is told why");
     CHECK(!got_error(A, "Kicked") && conn(A), "a non-DEV is not kicked by another non-DEV's request");
     reset_received();
     conn(A)->acct.flags |= NET_PLAYER_INFO_DEV; // Alice is DEV now (the server re-reads it on every request)
@@ -507,6 +509,27 @@ int main(void) {
         pump(5);
         CHECK(got_error(D, "Banned") && !conn(D), "a DEV's ban from the list bans Dave's connection");
     }
+    // the moderator's kick (v10.0.3 shows Kick for isHost || canGlobalKick, deob-10.0.3.js:254169): Bob and Carol come
+    // back, Bob as a moderator
+    if (B->fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(B->fd);
+    if (C->fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(C->fd);
+    pump(10);
+    join(B);
+    join(C);
+    pump(30);
+    give_account(B, 202, 30, "BobMod");
+    give_account(C, 203, 30, "CarolToo");
+    CHECK(conn(A) && conn(B) && conn(C), "Bob and Carol are back for the moderator case");
+    conn(B)->acct.flags |= NET_PLAYER_INFO_MOD;
+    reset_received();
+    admin_action(B, conn(C)->id, 1); // a moderator's ban: a DEV's here (a KrunkNative ban is an account ban)
+    admin_action(B, conn(A)->id, 0); // a DEV target
+    pump(5);
+    CHECK(conn(C) && got_chat(B, "Only DEV accounts can ban from the player list"), "a moderator's ban is refused: Carol stays");
+    CHECK(conn(A) && got_chat(B, "DEV accounts cannot be kicked"), "a moderator cannot kick a DEV");
+    admin_action(B, conn(C)->id, 0);
+    pump(5);
+    CHECK(got_error(C, "Kicked by host") && !conn(C), "a moderator's kick from the list kicks Carol (\"Kicked by host\", game.kick)");
     conn(A)->acct.flags = 0;
 
     for (int i = 0; i < CLIENTS; i++) {

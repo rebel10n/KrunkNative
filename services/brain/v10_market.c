@@ -13,8 +13,12 @@
  *   answers its empty shape without one (a guest owns nothing); a write needs a login (401). A write loads
  *   the account's email state and passes the socket's feature gate (social_email_gate) before its handler,
  *   as the socket's dispatch does.
- *   A socket error ["po", null, message] becomes {error: {code, message}}: 401 for "Must be logged in",
- *   404 for "Player not found", 400 for the rest, with the socket's message.
+ *   A socket error ["po", null, message] becomes an error with v10.0.3's code for that message (err_reply:
+ *   MARKET_*, TRADE_*, PLAYERS_*, GIFT_*): v10.0.3's translator shows the text of a code it knows and "An
+ *   unexpected error occurred." for any other code (deob-10.0.3.js:117395-117413, codes 117329-117393), so a
+ *   message with no 10.0.3 code is sent as a text error, which it shows as it is. 401 for "Must be logged in",
+ *   404 for "Player not found", 400 for the rest. The paint route keeps {code, message}: its consumer reads
+ *   error.message (deob-10.0.3.js:122139).
  *
  * Routes (method path: answer, v10.js caller line):
  *
@@ -73,6 +77,9 @@
 #include "v10_api.h"
 #include "v10_paint.h"
 
+/* the most item ids a listings request filters on (items= and item_id=) */
+#define MAX_ITEM_IDS 256
+
 /* the refusals' reasons (the handler's ud) */
 #define WHY_ITEM_STYLE "Item style is not served over HTTP: KrunkNative keeps no per-copy style state"
 #define WHY_JUNK "Junk quick sell is not built yet (doc/v10/junk.md): quick sell mode 1 is refused"
@@ -91,7 +98,7 @@ static int item_known(kn_http_req *req) {
         const long long index = strtoll(id, &end, 10);
         if (end && !*end && index >= 0 && acct_skin((int64_t) index)) return 1;
     }
-    v10_reply_error(req, 404, "NOT_FOUND", "Item not found");
+    v10_reply_error(req, 404, "ITEMS_INVALID_ID", "Item not found"); /* "That item could not be found." (deob-10.0.3.js:117384) */
     return 0;
 }
 
@@ -109,9 +116,9 @@ static void query_text(kn_http_req *req, const char *key, char *out, size_t cap)
     if (kn_http_query_get(req, key, out, cap) <= 0) out[0] = 0;
 }
 
-/* "1,3,5" -> up to max ids (the v10 itemIds and the filter lists) */
+/* "1,3,5" -> up to max ids (the v10 itemIds and the filter lists; a search's 200 ids fit) */
 static int csv_ids(kn_http_req *req, const char *key, int64_t *out, int max) {
-    char csv[512];
+    char csv[MAX_ITEM_IDS * 8];
     int n = 0;
     if (kn_http_query_get(req, key, csv, sizeof csv) <= 0) return 0;
     for (char *t = strtok(csv, ","); t && n < max; t = strtok(NULL, ",")) {
@@ -204,10 +211,11 @@ typedef struct Args {
     int include_open;
     unsigned rar, wep, typ;          /* the listing filters (bit masks) */
     int desc;                        /* price_desc */
-    int64_t items[64];
+    int64_t items[MAX_ITEM_IDS];     /* items= (a search sends up to 200, deob-10.0.3.js:149528-149540) and item_id= */
     int nitems;
     char name[64];                   /* a player's name */
     char text[96];                   /* searchTerm */
+    int ectx;                        /* ErrCtx: the codes the route's errors map to */
 } Args;
 
 struct Op {
@@ -256,6 +264,48 @@ static cJSON *op_arg(Op *op, const char *label, int i) {
     return f ? cJSON_GetArrayItem(f, i) : NULL;
 }
 
+/* ---- errors: v10.0.3's codes for the economy's messages */
+
+/* which of v10.0.3's code families a route's errors use */
+typedef enum { ERR_MARKET = 0, ERR_TRADE, ERR_GIFT, ERR_OBJECT } ErrCtx;
+
+/* the 10.0.3 code (deob-10.0.3.js:117329-117393) that says what the economy's message says, or NULL */
+static const char *err_code(const char *msg, int ctx) {
+    static const struct {
+        const char *msg, *code;
+    } k[] = {
+        {"Item Unavailable", "MARKET_LISTING_GONE"},              /* "This listing is no longer available." */
+        {"Listing not found", "MARKET_LISTING_GONE"},
+        {"Cant buy your own item", "MARKET_SELF_PURCHASE"},
+        {"Max Items on Sale", "MARKET_MAX_ITEMS"},
+        {"Item cant be sold.", "MARKET_ITEM_NOT_SELLABLE"},
+        {"Item cant be sold on krunker.", "MARKET_ITEM_NOT_SELLABLE"},
+        {"Item cant be quick sold.", "MARKET_QUICK_SELL_NOT_SELLABLE"},
+        {"Invalid offer", "TRADE_INVALID_OFFER"},                 /* "Your trade offer is empty or invalid." */
+        {"No Items Selected", "TRADE_INVALID_OFFER"},
+        {"Item cant be traded", "TRADE_ITEM_NOT_TRADABLE"},
+        {"Player does not own these items", "TRADE_ITEM_NOT_OWNED"},
+    };
+    if (!msg) return NULL;
+    if (!strcmp(msg, "Not enough KR")) return ctx == ERR_GIFT ? "GIFT_INSUFFICIENT_FUNDS" : "MARKET_INSUFFICIENT_FUNDS";
+    if (!strcmp(msg, "Player not found")) return ctx == ERR_TRADE ? "TRADE_PLAYER_NOT_FOUND" : "PLAYERS_NOT_FOUND";
+    /* 10.0.3's texts name level 10: only that gate maps (accounts.market_min_level / trade_min_level default 10) */
+    if (!strcmp(msg, "Must be level 10")) return ctx == ERR_TRADE ? "TRADE_LEVEL_TOO_LOW" : ctx == ERR_MARKET ? "MARKET_LEVEL_TOO_LOW" : NULL;
+    if (!strcmp(msg, "Slow down") && ctx == ERR_MARKET) return "MARKET_RATE_LIMITED";
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (!strcmp(msg, k[i].msg)) return k[i].code;
+    return NULL;
+}
+
+/* the error reply: {code, message} with the 10.0.3 code; without one a text error, or {code: fallback, message}
+ * on a route whose consumer reads error.message (ERR_OBJECT) */
+static void err_reply(kn_http_req *req, int status, int ctx, const char *fallback, const char *msg) {
+    const char *code = err_code(msg, ctx);
+    if (code) v10_reply_error(req, status, code, msg);
+    else if (ctx == ERR_OBJECT) v10_reply_error(req, status, fallback, msg);
+    else v10_reply_text_error(req, status, msg);
+}
+
 /* ends the request with this error (its reply, not a socket frame) */
 static void op_fail(Op *op, int status, const char *code, const char *msg) {
     op->fail_status = status;
@@ -267,16 +317,17 @@ static void op_fail(Op *op, int status, const char *code, const char *msg) {
 /* the reply of a request that failed: the step's error, or the socket's ["po", null, message]; 1 when so */
 static int op_failed(Op *op) {
     if (op->fail_msg) {
-        v10_reply_error(op->req, op->fail_status, op->fail_code, op->fail_msg);
+        if (op->fail_status >= 500) v10_reply_error(op->req, op->fail_status, op->fail_code, op->fail_msg);
+        else err_reply(op->req, op->fail_status, op->a.ectx, op->fail_code, op->fail_msg);
         return 1;
     }
     const cJSON *po = op_frame(op, "po");
     if (!po) return 0;
     const cJSON *m = cJSON_GetArrayItem(po, 2);
     const char *msg = cJSON_IsString(m) ? m->valuestring : "Error";
-    if (!strcmp(msg, "Must be logged in")) v10_reply_error(op->req, 401, "LOGIN_REQUIRED", msg);
-    else if (!strcmp(msg, "Player not found")) v10_reply_error(op->req, 404, "NOT_FOUND", msg);
-    else v10_reply_error(op->req, 400, "BAD_REQUEST", msg);
+    if (!strcmp(msg, "Must be logged in")) v10_reply_error(op->req, 401, "LOGIN_REQUIRED", msg); /* as pending_open's */
+    else if (!strcmp(msg, "Player not found")) err_reply(op->req, 404, op->a.ectx, "NOT_FOUND", msg);
+    else err_reply(op->req, 400, op->a.ectx, "BAD_REQUEST", msg);
     return 1;
 }
 
@@ -462,6 +513,10 @@ static cJSON *listing_row(const cJSON *r) {
     const cJSON *p = cJSON_GetObjectItemCaseSensitive(r, "p");
     if (cJSON_IsString(p)) cJSON_AddStringToObject(o, "seller_name", p->valuestring);
     cJSON_AddNumberToObject(o, "created_at", (double) kn_json_int(r, "ms", 0));
+    /* the cards read listed_time (deob-10.0.3.js:123698-123701, 151762-151765: new Date(listed_time)) and
+     * seller_id (151768: no Buy on the caller's own listing, 146473) */
+    cJSON_AddNumberToObject(o, "listed_time", (double) kn_json_int(r, "ms", 0));
+    if (cJSON_GetObjectItemCaseSensitive(r, "seller_id")) cJSON_AddNumberToObject(o, "seller_id", (double) kn_json_int(r, "seller_id", 0));
     /* a painted copy's listing carries its paint as m (the official card reads the listing's m as its metadata) */
     cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
     if (m) cJSON_AddItemToObject(o, "m", m);
@@ -663,7 +718,10 @@ static void h_market_listings(kn_http_req *req, void *ud) {
     a.wep = csv_bits(req, "weapons");
     a.typ = csv_bits(req, "types");
     a.season = query_int(req, "season", 0);
-    a.nitems = csv_ids(req, "items", a.items, 64);
+    a.nitems = csv_ids(req, "items", a.items, MAX_ITEM_IDS);
+    /* item_id: one item's listings (the item sidebar, deob-10.0.3.js:30822-30823, 148938, 148954) */
+    const int64_t one = query_int(req, "item_id", -1);
+    if (one >= 0 && a.nitems < MAX_ITEM_IDS) a.items[a.nitems++] = one;
     route_begin(req, 0, 0, step_listings, reply_listings, &a, NULL);
 }
 
@@ -891,8 +949,11 @@ static void h_trades_history(kn_http_req *req, void *ud) {
     if (a.limit > 100) a.limit = 100;
     a.offset = query_int(req, "offset", 0);
     char inc[16];
-    query_text(req, "includeOpen", inc, sizeof inc);
+    /* v10.0.3 sends include_open=0|1 (deob-10.0.3.js:31078); includeOpen is kept for older callers */
+    query_text(req, "include_open", inc, sizeof inc);
+    if (!inc[0]) query_text(req, "includeOpen", inc, sizeof inc);
     a.include_open = strcmp(inc, "false") && strcmp(inc, "0");
+    a.ectx = ERR_TRADE;
     route_begin(req, 0, 0, step_trades_page, reply_trades_history, &a, NULL);
 }
 
@@ -926,14 +987,18 @@ static void step_trade_inv_lookup(Op *op) {
     if (op_query(op, &q_account, 1, p) != 0) op_fail(op, 500, "INTERNAL", "Server error");
 }
 
-/* a trade picker's side: the stacks as they are ({i, c}); a painted copy as the market has it ({i, sid, m}, one unit:
- * c 1) (doc/v10/paint-copy.md) */
+/* a trade picker's side: the stacks as they are ({i, c}) with st 1; a painted copy as the market has it ({i, sid, m,
+ * st 0}, one unit: c 1) (doc/v10/paint-copy.md). The picker treats a row as a stack only when st === 1
+ * (deob-10.0.3.js:125012, 124726); any other row is one copy offered as {i, c: 1, iids: [sid]} (125069-125075). */
 static cJSON *trade_inv_side(const cJSON *side) {
     cJSON *a = cJSON_CreateArray();
     const cJSON *r;
     cJSON_ArrayForEach(r, side) {
         if (kn_json_str(r, "paint_color", "")[0] == '\0' && kn_json_int(r, "paint_shader", -1) < 0) {
-            cJSON_AddItemToArray(a, cJSON_Duplicate(r, 1));
+            cJSON *u = cJSON_Duplicate(r, 1);
+            cJSON_DeleteItemFromObjectCaseSensitive(u, "st");
+            cJSON_AddNumberToObject(u, "st", 1);
+            cJSON_AddItemToArray(a, u);
             continue;
         }
         cJSON *u = copy_inventory_row(r);
@@ -964,6 +1029,7 @@ static void h_trade_inventory(kn_http_req *req, void *ud) {
     char *end = NULL;
     const long long id = strtoll(a.name, &end, 10);
     if (a.name[0] && end && !*end && id > 0) a.id = (int64_t) id;
+    a.ectx = ERR_TRADE;
     route_begin(req, 1, 0, step_trade_inv_lookup, reply_trade_inv, &a, NULL);
 }
 
@@ -1017,7 +1083,7 @@ static void reply_player_search(Op *op) {
         }
     }
     if (!hit) {
-        v10_reply_error(op->req, 404, "NOT_FOUND", "Player not found");
+        err_reply(op->req, 404, ERR_TRADE, "NOT_FOUND", "Player not found"); /* TRADE_PLAYER_NOT_FOUND */
         return;
     }
     v10_reply_data(op->req, 200, cJSON_Duplicate(hit, 1));
@@ -1028,6 +1094,7 @@ static void h_player_search(kn_http_req *req, void *ud) {
     Args a;
     memset(&a, 0, sizeof a);
     query_text(req, "name", a.name, sizeof a.name);
+    a.ectx = ERR_TRADE;
     route_begin(req, 0, 0, step_player_search, reply_player_search, &a, NULL);
 }
 
@@ -1170,7 +1237,7 @@ static void h_item_paint(kn_http_req *req, void *ud) {
     int shader = -1;
     if (!acct_skin(item)) {
         cJSON_Delete(body);
-        v10_reply_error(req, 404, "NOT_FOUND", "Item not found");
+        v10_reply_error(req, 404, "ITEMS_INVALID_ID", "Item not found"); /* as item_known's */
         return;
     }
     if (!v10_paint_of(paint, &color, &shader)) {
@@ -1183,6 +1250,7 @@ static void h_item_paint(kn_http_req *req, void *ud) {
         v10_reply_error(req, 400, "ITEM_PAINT_INVALID", "Paint the copy of that item, or an unpainted one of it.");
         return;
     }
+    a.ectx = ERR_OBJECT;
     route_begin(req, 1, 1, step_item_paint, reply_item_paint, &a, body);
 }
 
@@ -1325,6 +1393,12 @@ static void step_list(Op *op) {
 static void reply_list(Op *op) {
     if (op_failed(op)) return;
     const cJSON *v = op_arg(op, "lir", 1);
+    /* the listing cap: the socket's {response: "MAX"} (io_lir "Max Items on Sale") is an error here; v10.0.3 checks
+     * only res.error and would say "Item listed successfully" (deob-10.0.3.js:122591, 149138) */
+    if (cJSON_IsObject(v) && !strcmp(kn_json_str(v, "response", ""), "MAX")) {
+        err_reply(op->req, 400, ERR_MARKET, "BAD_REQUEST", "Max Items on Sale"); /* MARKET_MAX_ITEMS */
+        return;
+    }
     v10_reply_data(op->req, 200, cJSON_IsObject(v) ? cJSON_Duplicate(v, 1) : cJSON_CreateObject());
 }
 
@@ -1348,7 +1422,7 @@ static void reply_purchase(Op *op) {
     if (op_failed(op)) return;
     const cJSON *v = op_arg(op, "br", 1);
     if (!cJSON_IsObject(v)) {
-        v10_reply_error(op->req, 400, "BAD_REQUEST", "Item Unavailable");
+        err_reply(op->req, 400, ERR_MARKET, "BAD_REQUEST", "Item Unavailable"); /* MARKET_LISTING_GONE */
         return;
     }
     v10_reply_data(op->req, 200, cJSON_Duplicate(v, 1));
@@ -1374,6 +1448,12 @@ static void step_unlist(Op *op) {
 static void reply_unlist(Op *op) {
     if (op_failed(op)) return;
     const cJSON *r = op_arg(op, "ulir", 1);
+    /* a listing sold meanwhile: an error, not 200 {response: "SOLD"}, which v10.0.3 would report as unlisted
+     * (deob-10.0.3.js:149159-149185) */
+    if (cJSON_IsString(r) && !strcmp(r->valuestring, "SOLD")) {
+        v10_reply_error(op->req, 400, "MARKET_ITEM_ALREADY_SOLD", "This item has already been sold.");
+        return;
+    }
     if (cJSON_IsString(r)) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "response", r->valuestring);
@@ -1381,7 +1461,7 @@ static void reply_unlist(Op *op) {
         return;
     }
     const cJSON *m = op_arg(op, "ulir", 3);
-    v10_reply_error(op->req, 400, "BAD_REQUEST", cJSON_IsString(m) ? m->valuestring : "Failed. Try Again");
+    err_reply(op->req, 400, ERR_MARKET, "BAD_REQUEST", cJSON_IsString(m) ? m->valuestring : "Failed. Try Again");
 }
 
 static void h_market_unlist(kn_http_req *req, void *ud) {
@@ -1410,7 +1490,7 @@ static void reply_quick_sell(Op *op) {
     if (op_failed(op)) return;
     const cJSON *v = op_arg(op, "qsr", 1);
     if (!cJSON_IsObject(v)) {
-        v10_reply_error(op->req, 400, "BAD_REQUEST", "Item cant be quick sold.");
+        v10_reply_error(op->req, 400, "MARKET_QUICK_SELL_NOT_SELLABLE", "Item cant be quick sold.");
         return;
     }
     cJSON *o = cJSON_CreateObject();
@@ -1447,7 +1527,7 @@ static void reply_bm_purchase(Op *op) {
     if (op_failed(op)) return;
     const cJSON *v = op_arg(op, "bmr", 1);
     if (!cJSON_IsObject(v)) {
-        v10_reply_error(op->req, 400, "BAD_REQUEST", "Item Unavailable");
+        v10_reply_text_error(op->req, 400, "Item Unavailable"); /* no 10.0.3 code says it: the text, shown as is */
         return;
     }
     cJSON *o = cJSON_CreateObject();
@@ -1488,6 +1568,7 @@ static void h_trade_create(kn_http_req *req, void *ud) {
     (void) ud;
     Args a;
     memset(&a, 0, sizeof a);
+    a.ectx = ERR_TRADE;
     route_begin(req, 1, 1, step_trade_create, reply_trade_result, &a, body_of(req));
 }
 
@@ -1506,6 +1587,7 @@ static void h_trade_accept(kn_http_req *req, void *ud) {
     Args a;
     memset(&a, 0, sizeof a);
     a.id = (int64_t) strtoll(p ? p : "0", NULL, 10);
+    a.ectx = ERR_TRADE;
     route_begin(req, 1, 1, step_trade_accept, reply_trade_result, &a, body_of(req));
 }
 
@@ -1532,6 +1614,7 @@ static void h_trade_cancel(kn_http_req *req, void *ud) {
     Args a;
     memset(&a, 0, sizeof a);
     a.id = (int64_t) strtoll(p ? p : "0", NULL, 10);
+    a.ectx = ERR_TRADE;
     route_begin(req, 1, 1, step_trade_cancel, reply_trade_cancel, &a, body_of(req));
 }
 
@@ -1554,6 +1637,7 @@ static void h_trade_clear(kn_http_req *req, void *ud) {
     (void) ud;
     Args a;
     memset(&a, 0, sizeof a);
+    a.ectx = ERR_TRADE;
     route_begin(req, 1, 1, step_trade_clear, reply_trade_clear, &a, body_of(req));
 }
 
@@ -1581,6 +1665,7 @@ static void h_player_gift(kn_http_req *req, void *ud) {
     Args a;
     memset(&a, 0, sizeof a);
     snprintf(a.name, sizeof a.name, "%s", p ? p : "");
+    a.ectx = ERR_GIFT;
     route_begin(req, 1, 1, step_gift, reply_gift, &a, body_of(req));
 }
 
@@ -1601,7 +1686,9 @@ static void reply_verify(Op *op) {
         v10_reply_data(op->req, 200, o);
         return;
     }
-    v10_reply_data(op->req, 200, NULL); /* nothing changed (the socket's null) */
+    /* nothing changed (the socket's null: no staff right, or no such player): an error, so v10.0.3 does not flip
+     * the badge on screen (it falls back to the requested value on a null data, deob-10.0.3.js:125561-125567) */
+    v10_reply_text_error(op->req, 403, "Access Denied");
 }
 
 static void h_player_verify(kn_http_req *req, void *ud) {

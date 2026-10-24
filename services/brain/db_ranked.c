@@ -627,7 +627,8 @@ static kn_db_result *run_rk_purchase(kn_dbconn *c, int n, const char *const *p) 
                           KN_DB_ARGS(I64S(shop)));
     if (!item || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "gone"))) {
         cJSON_Delete(item);
-        if (!dbx_failed(&x)) dbx_refuse(&x, "Item not available");
+        /* v10.0.3's exact text: on it the shop refetches its list (deob-10.0.3.js:127096) */
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Skin not found or not available");
         return dbx_finish(&x, NULL);
     }
     const int64_t bought = dbx_int(&x, SQL(.any = "SELECT count FROM ranked_shop_purchases WHERE account_id = $1 AND shop_id = {int:$2}"),
