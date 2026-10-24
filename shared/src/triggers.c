@@ -19,6 +19,7 @@
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 const char *const g_trigger_events[TRIGGER_EVENT_COUNT] = {
@@ -72,18 +73,69 @@ const char *const g_trigger_emitter_sounds[TRIGGER_EMITTER_SOUND_COUNT] = {
     "stepsno_0", "stepsno_1", "stepsno_2", "bounce_1", "zap_0", "jug_0", "crit_0", "melee_equip",
     "scare_1", // v10.0.3 (deob-10.0.3.js:21278)
 };
-
-const char *const g_trigger_network_sounds[TRIGGER_NETWORK_SOUND_COUNT] = {
-    "spray", "taunt_0", "taunt_1", "taunt_2", "taunt_3", "weapon_1", "weapon_1_0", "weapon_2", "weapon_3",
-    "weapon_4", "weapon_5", "weapon_6", "weapon_7", "weapon_8", "weapon_9", "weapon_10", "weapon_11",
-    "weapon_12", "weapon_13", "weapon_14", "weapon_15", "weapon_16", "weapon_17", "weapon_18", "weapon_6_0",
-    "weapon_1_2", "weapon_3_0", "weapon_3_2", "taunt_4", "weapon_2_0", "weapon_1_4", "weapon_1_3", "weapon_17",
-    "weapon_8_0", "weapon_10_0", "collect_1", "melee_12", "headshot_0", "weapon_4_0", "melee_14", "beep_0",
-    "bo_plant", "bo_diff", "weapon_1_5", "weapon_19", "melee_19", "jump_0", "jump_1", "step_0", "step_1", "step_2",
-};
+// Old maps keep their "es" picks: v3.1.1's 51 names and v7.1.4's 73 are this list's first 51 / 73
+// with one rename, 16 jumpS_0 -> scare_0 (v3.1.1 shipped no jumpS_0.mp3, so a v3 map's 16 played
+// nothing; v7.1.4 and v10.0.3 play scare_0 for it, as KrunkNative does). config.networkSounds,
+// the list sent as an index, is shared/include/network_sounds.h.
 
 // config.soundScapes {Default: 1, City: 2, ... Festive: 19}: Change Ambient Sound's tc indexes the keys
 const int g_trigger_sound_scapes[TRIGGER_SOUND_SCAPE_COUNT] = {1, 2, 3, 4, 5, 6, 7, 8, 11, 15, 16, 17, 18, 19};
+
+void trigger_sound_name(const int sound, const int asset, char *out, const size_t size) {
+    if (!out || !size) return;
+    if (asset) snprintf(out, size, "asset:%d", sound); // a user asset sound (raw id)
+    else snprintf(out, size, "%s", g_trigger_emitter_sounds[sound >= 0 && sound < TRIGGER_EMITTER_SOUND_COUNT ? sound : 0]);
+}
+
+// JS truthiness / parseInt / parseFloat of a map field (NaN answers 0 with *ok 0)
+static int js_truthy(const cJSON *v) {
+    if (!v || cJSON_IsNull(v) || cJSON_IsFalse(v)) return 0;
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0.0 && !isnan(v->valuedouble);
+    if (cJSON_IsString(v)) return v->valuestring && v->valuestring[0];
+    return 1;
+}
+
+static double js_parse(const cJSON *v, const int integer, int *ok) {
+    *ok = 0;
+    if (cJSON_IsNumber(v) && isfinite(v->valuedouble)) {
+        *ok = 1;
+        return integer ? trunc(v->valuedouble) : v->valuedouble;
+    }
+    if (!cJSON_IsString(v) || !v->valuestring) return 0.0;
+    const char *s = v->valuestring;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+    char *end;
+    const double x = integer ? (double) strtol(s, &end, 10) : strtod(s, &end);
+    *ok = end != s && isfinite(x);
+    return *ok ? x : 0.0;
+}
+
+// parseInt(v) || fallback / parseFloat(v) || fallback
+static double js_number_or(const cJSON *v, const int integer, const double fallback) {
+    int ok;
+    const double x = js_parse(v, integer, &ok);
+    return ok && x != 0.0 ? x : fallback;
+}
+
+static float emitter_limit(const double v, const float min, const float max) { // UTILS.limitMM
+    return (float) (v < min ? min : v > max ? max : v);
+}
+
+int trigger_emitter_parse(const cJSON *object, TriggerEmitter *out) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!cJSON_IsObject(object)) return 0;
+    const cJSON *esa = cJSON_GetObjectItem(object, "esa");
+    const int sound = (int) js_number_or(js_truthy(esa) ? esa : cJSON_GetObjectItem(object, "es"), 1, 0.0); // parseInt(esa || es) || 0
+    out->asset = esa && !cJSON_IsNull(esa);                                                                 // esa != null
+    trigger_sound_name(sound, out->asset, out->sound, sizeof(out->sound));
+    out->volume = emitter_limit(js_number_or(cJSON_GetObjectItem(object, "ev"), 0, 1.0), TRIGGER_EMITTER_VOLUME_MIN, TRIGGER_EMITTER_VOLUME_MAX);
+    out->rate = emitter_limit(js_number_or(cJSON_GetObjectItem(object, "er"), 0, 1.0), TRIGGER_EMITTER_RATE_MIN, TRIGGER_EMITTER_RATE_MAX);
+    out->distance = emitter_limit(js_number_or(cJSON_GetObjectItem(object, "ed"), 1, 0.0), 0.0f, 5000.0f);
+    out->distance_model = (int) emitter_limit(js_number_or(cJSON_GetObjectItem(object, "edm"), 1, 0.0), 0.0f, 2.0f);
+    out->rolloff = emitter_limit(js_number_or(cJSON_GetObjectItem(object, "ero"), 0, 0.0), 0.0f, 1.0f);
+    return 1;
+}
 
 // /[^\w\:\;\(\)\?\,\.\|\[\] \-\+*\$\@\=\^!{}]+/ must not match, and at most 70 characters.
 int trigger_text_valid(const char *text) {

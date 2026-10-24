@@ -15,6 +15,8 @@
 // The runtime lives in shared/src/triggers*.c (authority only: the server and the offline
 // sandbox server); shared/include/triggers_v7.h is its API.
 
+#include <stddef.h>
+
 // triggers.events (index = map key "te")
 typedef enum {
     TRIGGER_EVENT_NONE = -1,           // no / unknown event (te out of 0..31, or an onAI event on a TRIGGER): never fires
@@ -165,12 +167,34 @@ extern const TriggerActionInfo g_trigger_actions[TRIGGER_ACTION_COUNT];
 #define TRIGGER_EMITTER_RATE_MAX 4.0f   // config.emitterRateMax (:22528)
 // config.emitterSounds (:21278, :22532): v10.0.3 appends scare_1 (74; v7.1.4 73; index 16 is scare_0, v3.1.1 jumpS_0)
 #define TRIGGER_EMITTER_SOUND_COUNT 74
-#define TRIGGER_NETWORK_SOUND_COUNT 51
 #define TRIGGER_SOUND_SCAPE_COUNT 14    // config.soundScapes (Change Ambient Sound options)
 
-extern const char *const g_trigger_emitter_sounds[TRIGGER_EMITTER_SOUND_COUNT]; // config.emitterSounds ("es")
-extern const char *const g_trigger_network_sounds[TRIGGER_NETWORK_SOUND_COUNT]; // config.networkSounds (v3 BOT "es")
+// config.emitterSounds ("es" of SOUND_EMITTER, TRIGGER and AI_SPAWNER actions); config.networkSounds,
+// the list sent as an index, is shared/include/network_sounds.h
+extern const char *const g_trigger_emitter_sounds[TRIGGER_EMITTER_SOUND_COUNT];
 extern const int g_trigger_sound_scapes[TRIGGER_SOUND_SCAPE_COUNT];             // config.soundScapes values, key order
+
+// The clip an "es" / "esa" sound reference plays, as client/src/audio.c names clips: "asset:<id>"
+// for a user asset (esa), else config.emitterSounds[es], emitterSounds[0] for an index the list
+// lacks (`assetSnd ? snd : emitterSounds[snd] ? emitterSounds[snd] : emitterSounds[0]`: addEmitter
+// deob-10.0.3.js:186574, addTrigger :186330, addAI :187510).
+#define TRIGGER_SOUND_NAME_SIZE 24 // "asset:" + any int fits; NET_SOUND_NAME_SIZE
+void trigger_sound_name(int sound, int asset, char *out, size_t size);
+
+// A SOUND_EMITTER object: map.js (deob-10.0.3.js:189196-189204) -> MapManager.addEmitter
+// (:186572-186580) -> SOUND.play3DL(snd, x, y, z, vol, rate, dist, roll, assetSnd, distM).
+typedef struct {
+    char sound[TRIGGER_SOUND_NAME_SIZE]; // trigger_sound_name of parseInt(esa || es) || 0
+    unsigned char asset;  // esa != null
+    float volume;         // ev: parseFloat || 1, emitterVolMin..emitterVolMax (0.05..2)
+    float rate;           // er: parseFloat || 1, emitterRateMin..emitterRateMax (0.1..4)
+    float distance;       // ed: parseInt || 0, 0..5000 (play3DL refDistance, 0 = 25)
+    int distance_model;   // edm: parseInt || 0, 0..2 (Howler inverse / linear / exponential, :224689)
+    float rolloff;        // ero: parseFloat || 0, 0..1 (rolloffFactor, 0 = 1)
+} TriggerEmitter;
+struct cJSON;
+// 0 when the object is not a map object (no fields read); every field is defaulted as Krunker does.
+int trigger_emitter_parse(const struct cJSON *object, TriggerEmitter *out);
 
 // "tct" check of addTrigger / addAI: <= 70 characters from [\w:;()?,.|[] -+*$@=^!{}].
 int trigger_text_valid(const char *text);
@@ -233,11 +257,10 @@ typedef struct {
     int constant;            // tc
     int constant_event;      // tce 0..10000: seconds (timer / interact / collision) or the storage threshold
     int interface_target;    // tin, 0 none
-    int sound;               // es: g_trigger_emitter_sounds index (BOT: network sound), esa: asset id
+    int sound;               // es: g_trigger_emitter_sounds index (a BOT's too, as v7.1.4+ read it), esa: asset id
     float volume, rate;      // ev / er (limited to the emitter ranges)
     int emit_from;           // ef: non-zero = play at the player
     unsigned char asset_sound:1;   // esa (user asset sounds are not available natively)
-    unsigned char network_sound:1; // BOT: "sound" indexes config.networkSounds
     unsigned char single_use:1;    // su
     unsigned char self_destruct:1; // sfd (singleUse && canDestroy): Destroy Self after the action
     unsigned char triggered:1;     // fired at least once this round
@@ -269,9 +292,17 @@ typedef struct {
 // actions 37 / 38 and the conditions).
 #define TRIGGER_VALUE_SLOTS (TRIGGER_V7_CUSTOM_VALUE_LIMIT + 1)
 #define TRIGGER_VALUE_KEY_SIZE (TRIGGER_TEXT_MAX + 1)
+// A value is a number or, as v10 keeps it, a string: Load Data's stored value that is not a number
+// (`isNaN(parseFloat(v)) ? v : parseFloat(v)`, deob-10.0.3.js:183563) and an official "cv" / "gv" string. The
+// conditions and getActionValue read `value`, the text's JS Number() (NaN unless blank or numeric: a string against
+// a number compares as that); the HUD shows the text; "Increase" appends to it (JS `+=` on a string). Sizes: any
+// stored value (KS_STORAGE_VALUE_BYTES) whole.
+#define TRIGGER_VALUE_TEXT_SIZE 301
 typedef struct {
     char key[TRIGGER_VALUE_KEY_SIZE];
     double value;
+    unsigned char is_text;               // the value is `text` (UTF-8)
+    char text[TRIGGER_VALUE_TEXT_SIZE];
 } TriggerValue;
 
 typedef struct {
@@ -283,3 +314,10 @@ typedef struct {
 const TriggerValue *trigger_values_find(const TriggerValueSet*, const char *key);
 // The slot of `key`, created with 0 when missing and the set holds <= 30 keys; NULL when full.
 TriggerValue *trigger_values_slot(TriggerValueSet*, const char *key);
+// A slot's value: a number (the text goes), a string (value = its JS Number()), or `+= n` as JS adds (a string
+// gets String(n) appended).
+void trigger_value_set_number(TriggerValue*, double value);
+void trigger_value_set_text(TriggerValue*, const char *text);
+void trigger_value_add(TriggerValue*, double n);
+// JS Number(text): blank -> 0, a whole numeric literal (decimal, exponent, 0x / 0o / 0b, Infinity) -> it, else NaN.
+double trigger_js_number(const char *text);
