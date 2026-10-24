@@ -149,7 +149,7 @@ and libcurl's every connect address must be public (`comp_webhook_ipv4_public` /
 with no proxy and no redirect. The log names the host only (a webhook's secret is in its path). Without
 libcurl, or in the client's offline sandbox, nothing is posted. `KRUNKNATIVE_COMP_WEBHOOK_INSECURE=1` (tests and
 local development) allows `http://` and internal addresses.
-| client | `client/src/ui/ranked_ui.c`, `turf_ui.c`, `clan_ui.c` | window 27 in v10's modal layout; the Turf Wars window (`TURF_WINDOW` = KN 101, a menu button after Ranked); the clan window's Settings tab with Turf Wars Loot Distribution |
+| client | `client/src/ui/ranked_ui.c`, `turf_ui.c`, `clan_ui.c` | the Ranked popup (`openRankedMenu()`: `genericPopup(.., 'rankedMenuModal')`, window 27 an empty slot as in v10); the Turf Wars popup (`openTurfWars()`: `genericPopup(.., 'defaultModal')`, its nav item after Ranked); the clan window's Settings tab with all six v10 sections (logo, banner, MOTD, recruitment, Turf Wars Loot Distribution, ownership transfer) |
 
 ### Routes
 
@@ -236,9 +236,11 @@ booking flow because v10 has none.
   the existing edge relays and the web build, and the native client has no WS client for it.
 - The rating formula, matchmaking, milestones table, RP pool size and abandon rules are
   KrunkNative's (server-side in v10).
-- Ranked is window slot 27 and Turf Wars a KN window (101), not Svelte popups.
-- The clan Settings tab has only the loot distribution. v10's logo moderation, paint banner,
-  MOTD, recruitment board and ownership transfer are not ported.
+- Ranked and Turf Wars are v10's popups (`rankedMenuModal`, `defaultModal`; `ranked_ui.c`, `turf_ui.c`);
+  window 27 stays the empty legacy slot v10 has. (Until 2026-10 they were window 27 and a KN window 101.)
+- The clan Settings tab has v10's six sections (`clan_ui.c`, doc/v10/clans.md): logo upload, paint
+  banner, MOTD, recruitment board, loot distribution and ownership transfer. Deliberate: a pending logo
+  shows as a status, not the picture, and the upload has no preview step (clans.md).
 - Turf Wars draws v10's territory polygons as an SVG. v10's `territory_map.webp` backdrop and its
   `turf/<map>-raised.png` overlays are not shipped.
 - Vote forfeit, reconnect into ranked, the ping marker and the lrmr packet itself are

@@ -71,3 +71,28 @@ older version. AGENTS.md's v10-only rule (no version switches, no older pages or
 retire them, and they load through the v3.1.1 / v7.1.4 map JSON compatibility that AGENTS.md
 requires. `map_catalog_test` loads every one of them. The audit row
 `deob/audit-2026-10-24/v1.5-audit.md` #9 ("retained extra: policy conflict") is settled: keep them.
+
+## The Bhop Mode row (Settings > Controls / Game > Gameplay)
+
+v10.0.3's `SETTINGS.list` (`deob-10.0.3.js:236845-241193`) has no bhop setting; its only `bhop` is the
+Parkour game mode's alias (`deob-10.0.3.js:117747-117749`). The "Bhop Mode" select that heads the
+Gameplay group (the advanced Controls tab and the basic Game tab) is KrunkNative's: the v3.1.1 offline
+build's client mod (`/home/user/jails/kru/src/Krunker_v3.1.1/mod/mods.ts`: BhopMode, BHOP_MODE_NAMES),
+ported 1:1 in `client/src/ui/ui_bhop.c`. Modes: Disabled (default), Slidehop (while moving), Hold
+Jump/Crouch, Always Jump (while moving), Hold Jump. It is stored as knSettings `bhopMode`, toggled by
+the bhop key (`krk_bhop_mode_bind`, KeyB) and `/bhop` (`ui_console.c`), and it only rewrites the input
+frame's jump / crouch slots, so prediction and the server see ordinary inputs. The row is inserted at run
+time (`ui_bhop.c` insert_row), not in the captured `ui/windows/settings-*.html`, so a pixel diff of the
+Controls tab against v10's capture (`settings-advanced-controls`) shows it as an extra row. Kept on
+purpose (2026-10-24).
+
+## The Medals stat tab (Account window)
+
+v10.0.3's Account window (windows[4], `showWindow(5)`) has five stat tabs, `statTabs`: General Stats,
+Killstreaks, Other Stats, Class Stats, Raids (`deob-10.0.3.js:21520`). KrunkNative adds a sixth,
+Medals, after them (`statTab5` / `.statTabB5`, `STAT_TAB_MEDALS` in `client/src/ui/account_ui.c`): the
+account's medal counts (kn_brain's `["mdl"]` answer, one `.pSt` card per medal with a count, or "No medals
+yet"). Only a Box Office account has it; the krunker.io account's window has v10's five tabs (krunker.io
+keeps no medal counts). v10's own tab ids 0-4 are unchanged, so `switchStat(0..4)` are v10's. The
+Account window's main tabs are v10.0.3's `profileTabs` with no KrunkNative tab (v7's Partner and promo
+code tabs were dropped with v10).

@@ -31,6 +31,7 @@
 #include <season.h>
 #include <weapons.h>
 #include <v10_menu.h>
+#include <live_events_client.h> // v10.0.3 config.events: the Event Challenges (v10_events.c)
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -602,9 +603,10 @@ static void cards(StrBuf *sb, const char *type, const char *field, const int val
     sb_append(sb, "</div>");
 }
 
-// windows[32].gen() for a signed-in account (v10.0.2 index.js:214406). v10's Event Challenges
-// need an active config.events entry (UTILS.hasActiveEvents); KrunkNative has none, so the
-// section never shows (as in v10 between events).
+// windows[32].gen() for a signed-in account (v10.0.2 index.js:214406). v10.0.3's Event Challenges
+// (deob-10.0.3.js:250869-250880) show while an event of config.events runs (UTILS.hasActiveEvents; the
+// client's list is kn_brain's, v10_events.c) and the account has "event" challenges (DAT.evt: the event's
+// id, kn_brain's challenges table): a card per event with challenges, its img/events/event_<id> image.
 static char *gen_challenges(const AccountInfo *acc) {
     if (acc->level < MIN_CHAL_LEVEL) return NULL; // the "for Challenges" requirement card (account_ui.c)
     // The account's own list: krunker.io's account.activeChallenges on the official type, kn_brain's
@@ -644,9 +646,41 @@ static char *gen_challenges(const AccountInfo *acc) {
         cards(&sb, "weapon", "wep", g_chal_ind, "Check back later for new challenges!");
         return sb_finish(&sb);
     }
-    // home: Map Challenges
+    if (!strcmp(g_chal_typ, "event")) { // deob-10.0.3.js:250847-250866: the event's name, no "Check back later" line
+        const LiveEvent *e = live_events_find(client_live_events(), g_chal_ind);
+        snprintf(title, sizeof(title), "%s Challenges", e ? e->name : "");
+        count("event", "evt", g_chal_ind, &done, &total);
+        header(&sb, NULL, "hed_1", 0, title, done, total, 1, 0, NULL);
+        sb_append(&sb, ABANDON_MSG);
+        cards(&sb, "event", "evt", g_chal_ind, NULL);
+        return sb_finish(&sb);
+    }
+    // home: Event Challenges (deob-10.0.3.js:250869-250880), then Map Challenges
+    int event_section = 0;
+    count("event", NULL, 0, &done, &total);
+    const LiveEvents *events = client_live_events();
+    if (total && live_events_any_running(events, client_live_events_now_ms())) {
+        header(&sb, NULL, "hed_1", 0, "Event Challenges", done, total, 0, 0, NULL);
+        sb_append(&sb, "<div style=\"margin-top:10px;text-align:center;\">");
+        for (int i = 0; i < events->count; i++) { // config.events order, the events with challenges
+            const LiveEvent *e = &events->events[i];
+            int d, t;
+            count("event", "evt", e->id, &d, &t);
+            if (!t) continue;
+            char path[96], url[256];
+            live_event_image(e, e->id, path, sizeof(path));
+            ui_img_url(path, url, sizeof(url));
+            sb_appendf(&sb, "<div class=\"challMapCrd\" style=\"background-image:url(%s)\" onmouseenter=\"playTick()\" "
+                            "onclick=\"windows[32].openChallengeCat('event',%d);\"><div class=\"challMapCvr\"></div><div class=\"challMapName blackShad\">",
+                       url, e->id);
+            cap_first(&sb, e->name);
+            sb_appendf(&sb, "</div><div class=\"challMapPrg\">%d<span style=\"color:#fff;\">/%d</span></div></div>", d, t);
+        }
+        sb_append(&sb, "</div>");
+        event_section = 1;
+    }
     count("map", NULL, 0, &done, &total);
-    header(&sb, NULL, "hed_1", 0, "Map Challenges", done, total, 0, list && done >= total, NULL);
+    header(&sb, NULL, "hed_1", event_section ? 30 : 0, "Map Challenges", done, total, 0, list && done >= total, NULL);
     sb_append(&sb, "<div style=\"margin-top:10px;text-align:center;\">");
     // Every map of the catalogue, in mapIndex order, on both server types. v10 draws the cards of the maps
     // that have challenges; krunker.io's list has challenges for every map (v10.0.3 "Complete all"), so
@@ -771,7 +805,7 @@ static void bp_item_update(void) {
     char *html = sb_finish(&sb);
     if (!item) {
         html_dom_insert_html(box, HTML_INSERT_AFTER_BEGIN, "<div id=\"knBpItem\" class=\"menuItem bpItem svelte-159x57l\" "
-                                                          "onmouseenter=\"playTick()\" onclick=\"playSelect(0.1);openBattlePass()\"></div>");
+                                                          "onmouseenter=\"playTick()\" onclick=\"playSelect();openBattlePass()\"></div>"); // playSelect(): 0.15 (deob-10.0.3.js:162030-162032)
         item = html_dom_by_id("knBpItem");
     }
     if (item) html_dom_set_html(item, html);

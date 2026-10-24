@@ -245,7 +245,7 @@ static cJSON *host_config(void) {
     else cJSON_AddNullToObject(config, "customMap"); // customMap: the picked map's name || null (deob-10.0.3.js:229831)
     cJSON_AddBoolToObject(config, "krRewards", 0);
     cJSON_AddBoolToObject(config, "defaultSetts", 0);
-    cJSON_AddBoolToObject(config, "share", 0);
+    if (!cJSON_HasObjectItem(config, "share")) cJSON_AddBoolToObject(config, "share", 0); // the Share on Hub row's (ui_host_config_collect)
     host_config_fields(config);
     return config;
 }
@@ -299,9 +299,6 @@ void host_flow_start(void) {
             switch (krunker_net_host_block()) {
             case KRUNKER_HOST_NOT_CONNECTED:
                 set_message(I18N("kn.hostflow.kio.notConnected", "Join a krunker.io game first: a game hosted on krunker.io starts from your official connection."), 1);
-                break;
-            case KRUNKER_HOST_GUEST:
-                set_message(I18N("kn.hostflow.kio.signIn", "Sign in to your krunker.io account to host a game there."), 1);
                 break;
             case KRUNKER_HOST_BUSY:
                 set_message(I18N("kn.hostflow.kio.busy", "krunker.io is still answering the last game. Wait for it, then try again."), 1);

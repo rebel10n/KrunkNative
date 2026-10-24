@@ -1334,9 +1334,10 @@ static void set_click(const char *id, const char *closest, const char *handler) 
 // genericPopup(_49281, 'defaultModal') (v10:147139). The nav item's click is on .menuItem.
 void v10_competitive_setup(void) {
     if (!html_dom_query(0, ".actionCard")) return; // not the v10 page
-    set_click("menuBtnRanked", NULL, "playSelect(0.1);openRankedMenu()");
-    set_click("menuBtnTurfWars", ".menuItem", "playSelect(0.1);openTurfWars()");
-    set_click("menuBtnLeaderboards", ".menuItem", "playSelect(0.1);openLeaderboards()");
+    // playSelect() with no volume (0.15), as every action card and nav item (deob-10.0.3.js:158431-158436)
+    set_click("menuBtnRanked", NULL, "playSelect();openRankedMenu()");
+    set_click("menuBtnTurfWars", ".menuItem", "playSelect();openTurfWars()");
+    set_click("menuBtnLeaderboards", ".menuItem", "playSelect();openLeaderboards()");
     views_render();
 }
 

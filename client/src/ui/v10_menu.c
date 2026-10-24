@@ -156,6 +156,8 @@ static int kr_sale(const double ms) { return weekend(ms, 1, 0); }         // v10
 static int double_class_xp(const double ms) { return weekend(ms, 0, 0); } // v10:24806
 static int double_raid_drops(const double ms) { return weekend(ms, 0, 1); } // v10:24809
 
+int v10_menu_kr_sale(void) { return kr_sale(menu_now_ms()); }
+
 int v10_menu_page(void) { return html_ui_available() && by_id("menuBtnQuickMatch") != 0; }
 
 static void set_display(HtmlElem el, const char *value) {
@@ -163,6 +165,11 @@ static void set_display(HtmlElem el, const char *value) {
 }
 
 // Svelte's __click + mouseenter playTick on a component root (_50466: playSelect, then the action).
+// The click sounds are v10.0.3's: the side-nav items, the action cards, Invite and Join call
+// playSelect() with no volume, 0.15 (deob-10.0.3.js:158419-158436, 158443-158458, 158554-158566,
+// 254013); the header bar's Settings / More Krunker / Inbox play 0.1 (162512-162525); the
+// player header's items (login, signup rewards, profile, KR, Junk, RP, wallet) play none
+// (163104-163112, 163665-163730).
 // Only where nothing set one yet: the other v10 areas (news, rewards, market, social, ...) wire
 // their entry points with the same v10 handler names, so whichever runs first is the same call.
 static void wire(HtmlElem el, const char *onclick) {
@@ -220,23 +227,23 @@ static void header_update(const AccountInfo *acc) {
     if (acc && !in && out) {
         html_dom_insert_html(out, HTML_INSERT_AFTER_END,
             "<div id=\"signedInHeaderBar\" class=\"svelte-da3zva\">"
-            "<div class=\"ph-item svelte-da3zva\" id=\"knV10Profile\" onclick=\"playSelect(0.1),showWindow(5)\" onmouseenter=\"playTick()\">"
+            "<div class=\"ph-item svelte-da3zva\" id=\"knV10Profile\" onclick=\"showWindow(5)\" onmouseenter=\"playTick()\">"
             "<img class=\"ph-avatar svelte-da3zva\" id=\"knV10Avatar\"> <div class=\"ph-info svelte-da3zva\">"
             "<div class=\"ph-name-row svelte-da3zva\"><span class=\"ph-name svelte-da3zva\" id=\"knV10Name\"> </span></div> "
             "<div class=\"ph-level-row svelte-da3zva\"><span class=\"ph-level-badge svelte-da3zva\" id=\"knV10Level\"> </span> "
             "<div class=\"ph-xp-bar svelte-da3zva\"><div class=\"ph-xp-fill svelte-da3zva\" id=\"knV10XpFill\"></div></div></div></div></div> "
             "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
-            "<div class=\"ph-item svelte-da3zva\" onclick=\"playSelect(0.1),windows[13].purchase(1)\" onmouseenter=\"playTick()\">"
+            "<div class=\"ph-item svelte-da3zva\" onclick=\"windows[13].purchase(1)\" onmouseenter=\"playTick()\">"
             "<span class=\"ph-currency-icon svelte-da3zva\" style=\"color:#fbc02d\">KR</span> <span class=\"ph-value svelte-da3zva\" id=\"menuKRCount\"> </span></div> "
             "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
-            "<div class=\"ph-item svelte-da3zva\" onclick=\"playSelect(0.1),windows[13].craftMenu()\" onmouseenter=\"playTick()\">"
+            "<div class=\"ph-item svelte-da3zva\" onclick=\"windows[13].craftMenu()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#cc51f8\">plumbing</span> <span class=\"ph-value svelte-da3zva\" id=\"menuJNKCount\"> </span></div> "
             "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
-            "<div class=\"ph-item svelte-da3zva\" onclick=\"playSelect(0.1),openRankedMenu()\" onmouseenter=\"playTick()\">"
+            "<div class=\"ph-item svelte-da3zva\" onclick=\"openRankedMenu()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#4caf50;margin-top:-4px\">emoji_events</span> <span class=\"ph-value svelte-da3zva\" id=\"menuRPCount\"> </span></div> "
             "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
             // Wallet (_52516: the Wallet and Inventory modal, v10_wallet.c)
-            "<div class=\"ph-item svelte-da3zva\" id=\"knV10WalletBtn\" title=\"Wallet\" onclick=\"playSelect(0.1),knV10Wallet()\" onmouseenter=\"playTick()\">"
+            "<div class=\"ph-item svelte-da3zva\" id=\"knV10WalletBtn\" title=\"Wallet\" onclick=\"knV10Wallet()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons ph-icon svelte-da3zva\">backpack</span></div></div>");
         in = by_id("signedInHeaderBar");
         HtmlElem profile = by_id("knV10Profile");
@@ -1127,8 +1134,8 @@ static void match_info_setup(void) {
         html_dom_set_display(el, "");
         html_dom_append(segs[3], el);
     }
-    wire(by_id("inviteButton"), "playSelect(0.1),copyInviteLink()");
-    wire(by_id("menuBtnJoin"), "playSelect(0.1),openJoinWindow()");
+    wire(by_id("inviteButton"), "playSelect(),copyInviteLink()");
+    wire(by_id("menuBtnJoin"), "playSelect(),openJoinWindow()");
 }
 
 static void nav_setup(void) {
@@ -1138,19 +1145,19 @@ static void nav_setup(void) {
     // the signed-in Guide entry (a plain menuItem, v10:146966), placed where Svelte renders it
     if (guide_card && !by_id("knV10GuideItem"))
         html_dom_insert_html(guide_card, HTML_INSERT_AFTER_END,
-            "<div class=\"menuItem svelte-fgmdj8\" id=\"knV10GuideItem\" style=\"display:none\" onclick=\"playSelect(0.1),openGuide()\" "
+            "<div class=\"menuItem svelte-fgmdj8\" id=\"knV10GuideItem\" style=\"display:none\" onclick=\"playSelect(),openGuide()\" "
             "onmouseenter=\"playTick()\"><span class=\"material-icons-outlined menuItemIcon svelte-fgmdj8\">school</span> "
             "<div class=\"menuItemTitle svelte-fgmdj8\">Guide</div></div>");
-    wire_nav("menuBtnMarket", "playSelect(0.1),openExchange()");
-    wire_nav("menuBtnShop", "playSelect(0.1),showWindow(14)");
-    wire_nav("menuBtnChall", "playSelect(0.1),windows[32].openHome()");
-    wire_nav("menuBtnSocial", "playSelect(0.1),openSocial()");
+    wire_nav("menuBtnMarket", "playSelect(),openExchange()");
+    wire_nav("menuBtnShop", "playSelect(),showWindow(14)");
+    wire_nav("menuBtnChall", "playSelect(),windows[32].openHome()");
+    wire_nav("menuBtnSocial", "playSelect(),openSocial()");
     // Exit (showExit = typeof window.closeClient == "function": the desktop client); its display
     // is the Client settings' exitButton (ui_client_settings.c apply_exit_button)
     HtmlElem holder = by_id("menuItemContainer");
     if (holder && !by_id("clientExit"))
         html_dom_insert_html(holder, HTML_INSERT_BEFORE_END,
-            "<div class=\"menuItem svelte-fgmdj8\" id=\"clientExit\" onclick=\"playSelect(0.1),clientExitPopup()\" onmouseenter=\"playTick()\">"
+            "<div class=\"menuItem svelte-fgmdj8\" id=\"clientExit\" onclick=\"playSelect(),clientExitPopup()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons-outlined menuItemIcon svelte-fgmdj8\">exit_to_app</span> "
             "<div class=\"menuItemTitle svelte-fgmdj8\" id=\"menuBtnExit\">Exit</div></div>");
 }
@@ -1158,7 +1165,7 @@ static void nav_setup(void) {
 static void header_setup(void) {
     HtmlElem login = html_dom_query(0, "#signedOutHeaderBar .ph-login-wrap");
     if (login) html_dom_set_attr(login, "id", "knV10LoginBtn");
-    wire(login, "playSelect(0.1),loginOrRegister()");
+    wire(login, "loginOrRegister()");
     // KrunkNative's Account Manager (alt_manager_ui.c) sits between the guest's Login or Register and
     // Get Signup Rewards, with its neighbours' markup (v10 has no such button): a separator, then the item
     if (login && !by_id("knV10AccountsBtn")) {
@@ -1166,7 +1173,7 @@ static void header_setup(void) {
         account_manager_markup(markup, sizeof(markup), "knV10AccountsBtn");
         html_dom_insert_html(login, HTML_INSERT_AFTER_END, markup);
     }
-    wire(by_id("signupRewardsButton"), "playSelect(0.1),showSignupRewards()");
+    wire(by_id("signupRewardsButton"), "showSignupRewards()");
     HtmlElem items[4];
     const int n = html_dom_query_all(0, "#playerHeaderEl .headerBarRight > .nav-item", items, 4);
     for (int i = 0; i < n; i++) {
@@ -1200,10 +1207,10 @@ void v10_menu_dom_init(void) {
     HtmlElem ranked = by_id("menuBtnRanked");
     if (ranked && !html_dom_query(ranked, ".menuItemRankedLabel"))
         html_dom_insert_html(ranked, HTML_INSERT_BEFORE_END, " <div class=\"menuItemRankedLabel\">2x KR</div>");
-    wire(by_id("menuBtnQuickMatch"), "playSelect(0.1),backToOrigin()");
-    wire(by_id("menuBtnHost"), "playSelect(0.1),showWindow(42)");
-    wire(by_id("menuBtnBrowser"), "playSelect(0.1),showWindow(48)");
-    wire(by_id("menuBtnCustomGames"), "playSelect(0.1),showGames()");
+    wire(by_id("menuBtnQuickMatch"), "playSelect(),backToOrigin()");
+    wire(by_id("menuBtnHost"), "playSelect(),showWindow(42)");
+    wire(by_id("menuBtnBrowser"), "playSelect(),showWindow(48)");
+    wire(by_id("menuBtnCustomGames"), "playSelect(),showGames()");
     match_info_setup();
     nav_setup();
     header_setup();

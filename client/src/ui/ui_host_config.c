@@ -232,6 +232,197 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
     sb_append(sb, "</div>");
 }
 
+// ---------------------------------------------------------------- Host Presets (krk_hostPresets)
+
+static cJSON *read_override(const GameConfigTable table, char letter, int id, const GameConfigOption *o);
+static void matrix_toggle(int *open, const HtmlArg *args, int argc, const char *toggle_id, const char *select_id, const char *prefix,
+                          GameConfigTable table);
+
+#define HOST_PRESETS_KEY "krk_hostPresets"
+#define HOST_PRESETS_MAX (256 * 1024)
+
+static cJSON *presets_load(void) {
+    char *buf = malloc(HOST_PRESETS_MAX);
+    cJSON *all = NULL;
+    if (buf && html_storage_get(HOST_PRESETS_KEY, buf, HOST_PRESETS_MAX) >= 0) all = cJSON_Parse(buf);
+    free(buf);
+    if (!cJSON_IsObject(all)) {
+        cJSON_Delete(all);
+        all = cJSON_CreateObject();
+    }
+    return all;
+}
+
+static void presets_save(const cJSON *all) {
+    char *text = cJSON_PrintUnformatted(all);
+    if (text) html_storage_set(HOST_PRESETS_KEY, text);
+    free(text);
+}
+
+// windows[7].genPresets (deob-10.0.3.js:249224-249238): the name field, the saved presets' select, Delete / Save / Load
+static void presets_html(StrBuf *sb) {
+    cJSON *all = presets_load();
+    sb_appendf(sb, "<div class='setHed' style='margin-bottom:15px;'>%s</div><div class='setBodH' style='padding-top:20px;padding-bottom:15px;'>",
+               I18N("windows.host.preset", "Host Presets"));
+    sb_appendf(sb, "<span class='settNameSmall'><input id='presetName' type='text' class='formInput' placeholder='%s' autocomplete='off' autocorrect='off' "
+                   "autocapitalize='off' spellcheck='false' style='border:none;background:#eee;padding-bottom:6px;float:left;margin-top:5px;margin-bottom:5px;'>"
+                   "<select id='presetSelect' style='border-radius:6px;margin-left:10px;border:none;background:#eee;;padding:6px;padding-bottom:6px;margin-top:5px;margin-bottom:5px;'>"
+                   "<option selected>Select</option>",
+               I18N("windows.host.preset.name", "Preset name"));
+    const cJSON *p;
+    cJSON_ArrayForEach(p, all) {
+        sb_append(sb, "<option>");
+        sb_append_esc(sb, p->string ? p->string : "");
+        sb_append(sb, "</option>");
+    }
+    sb_appendf(sb, "</select><div class='hostPresetBtn' onclick='windows[7].presetAction(2)'>%s</div><div class='hostPresetBtn' onclick='windows[7].presetAction(1)'>%s</div>"
+                   "<div class='hostPresetBtn' onclick='windows[7].presetAction(0)'>%s</div></span></div>",
+               I18N("generic.delete", "Delete"), I18N("generic.save", "Save"), I18N("generic.load", "Load"));
+    cJSON_Delete(all);
+}
+
+// One control into the preset (save) or the preset's value into the control (load), under `key`: a checkbox's
+// .checked, any other control's .value (v10 keeps the DOM values as they are, :249080-249110)
+static void preset_field(const int save, cJSON *preset, const char *key, const HtmlElem el) {
+    if (!el || !key) return;
+    char type[16] = "";
+    const int box = html_dom_get_attr(el, "type", type, sizeof(type)) >= 0 && !strcmp(type, "checkbox");
+    if (save) {
+        cJSON_DeleteItemFromObjectCaseSensitive(preset, key);
+        if (box) {
+            cJSON_AddBoolToObject(preset, key, html_dom_get_checked(el));
+        } else {
+            char value[256];
+            html_dom_get_value(el, value, sizeof(value));
+            cJSON_AddStringToObject(preset, key, value);
+        }
+        return;
+    }
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(preset, key);
+    if (!v) return;
+    if (box) {
+        html_dom_set_checked(el, cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0.0) || (cJSON_IsString(v) && !strcmp(v->valuestring, "true")));
+    } else {
+        char text[256];
+        if (cJSON_IsString(v)) snprintf(text, sizeof(text), "%s", v->valuestring);
+        else js_num(text, sizeof(text), cJSON_GetNumberValue(v));
+        html_dom_set_value(el, text);
+    }
+}
+
+// the checkboxes whose id starts with `prefix` (gameMap / gameMode / gameClass), keyed by their id
+static void preset_boxes(const int save, cJSON *preset, const char *prefix) {
+    char selector[64];
+    snprintf(selector, sizeof(selector), "input[id^='%s']", prefix);
+    HtmlElem *found = malloc(sizeof(HtmlElem) * 512);
+    const int n = found ? html_dom_query_all(0, selector, found, 512) : 0;
+    for (int i = 0; i < n; i++) {
+        char id[48];
+        if (html_dom_get_attr(found[i], "id", id, sizeof(id)) >= 0) preset_field(save, preset, id, found[i]);
+    }
+    free(found);
+}
+
+// a Weapon / Class / Effect matrix: "<varN>_W_<i>" (_C_, _E_) per row; a loaded value off the base opens the matrix
+static int preset_matrix(const int save, cJSON *preset, const GameConfigTable table, const char letter) {
+    size_t count = 0;
+    const GameConfigOption *options = game_config_options(table, &count);
+    int differs = 0;
+    for (int id = 0; id < table_count(table); id++) {
+        for (size_t k = 0; k < count; k++) {
+            const GameConfigOption *o = &options[k];
+            if (!game_config_has_key(table, id, o->var)) continue;
+            char dom_id[64], key[64];
+            snprintf(dom_id, sizeof(dom_id), "custom%c%d%s", letter, id, o->var);
+            snprintf(key, sizeof(key), "%s_%c_%d", o->var, letter, id);
+            const HtmlElem el = html_dom_by_id(dom_id);
+            if (!el) continue;
+            preset_field(save, preset, key, el);
+            if (save || !cJSON_GetObjectItemCaseSensitive(preset, key)) continue;
+            if (o->kind != GC_BOOL && o->kind != GC_INPUT) { // updateSliderLabel2(t, id, k, value)
+                char label[64], text[64];
+                snprintf(label, sizeof(label), "custom%cSet%d_%d", letter, id, (int) k);
+                const HtmlElem l = html_dom_by_id(label);
+                if (l && html_dom_get_value(el, text, sizeof(text)) >= 0) html_dom_set_text(l, text);
+            }
+            cJSON *off = read_override(table, letter, id, o);
+            if (off) differs = 1;
+            cJSON_Delete(off);
+        }
+    }
+    return differs;
+}
+
+// windows[7].presetAction(action): 0 Load, 1 Save, 2 Delete the selected preset (deob-10.0.3.js:249067-249222). v10's
+// commMap, rawMapData and krRewards keys have no field here (no raw game data, no KR rewards toggle); makePrivate does.
+static void preset_action(const int action) {
+    const HtmlElem name_el = html_dom_by_id("presetName"), select_el = html_dom_by_id("presetSelect");
+    char name[96] = "", selected[96] = "";
+    if (name_el) html_dom_get_value(name_el, name, sizeof(name));
+    if (select_el) html_dom_get_value(select_el, selected, sizeof(selected));
+    const int none = !selected[0] || !strcmp(selected, "Select");
+    if ((action == 0 || action == 2) && none) return;
+    cJSON *all = presets_load();
+    const char *key = name[0] ? name : !none ? selected : "Preset1";
+    if (action == 2) {
+        cJSON_DeleteItemFromObjectCaseSensitive(all, selected);
+        presets_save(all);
+    } else {
+        cJSON *preset = action == 1 ? cJSON_CreateObject() : cJSON_GetObjectItemCaseSensitive(all, selected);
+        if (preset) {
+            const int save = action == 1;
+            preset_boxes(save, preset, "gameMap");
+            preset_boxes(save, preset, "gameMode");
+            preset_boxes(save, preset, "gameClass");
+            size_t count = 0;
+            const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
+            for (size_t k = 0; k < count; k++) {
+                char id[48];
+                snprintf(id, sizeof(id), "customS%s", options[k].var);
+                const HtmlElem el = html_dom_by_id(id);
+                if (!el) continue;
+                preset_field(save, preset, options[k].var, el);
+                if (!save && cJSON_GetObjectItemCaseSensitive(preset, options[k].var) && options[k].kind != GC_BOOL && options[k].kind != GC_INPUT) {
+                    char label[32], text[64];
+                    snprintf(label, sizeof(label), "customSet%d", (int) k);
+                    const HtmlElem l = html_dom_by_id(label);
+                    if (l && html_dom_get_value(el, text, sizeof(text)) >= 0) html_dom_set_text(l, text);
+                }
+            }
+            if (preset_matrix(save, preset, GAME_CONFIG_WEAPON, 'W') && !g_wep_conf) {
+                const HtmlArg on = {.kind = HTML_ARG_BOOL, .num = 1};
+                matrix_toggle(&g_wep_conf, &on, 1, "togConfW", "weaponSelect", "weaponConf", GAME_CONFIG_WEAPON);
+            }
+            if (preset_matrix(save, preset, GAME_CONFIG_CLASS, 'C') && !g_cls_conf) {
+                const HtmlArg on = {.kind = HTML_ARG_BOOL, .num = 1};
+                matrix_toggle(&g_cls_conf, &on, 1, "togConfC", "classSelect", "classConf", GAME_CONFIG_CLASS);
+            }
+            if (preset_matrix(save, preset, GAME_CONFIG_EFFECT, 'E') && !g_effect_conf) {
+                const HtmlArg on = {.kind = HTML_ARG_BOOL, .num = 1};
+                matrix_toggle(&g_effect_conf, &on, 1, "togConfE", "effectSelect", "effectConf", GAME_CONFIG_EFFECT);
+            }
+            const HtmlElem priv = html_dom_by_id("makePrivate");
+            if (save) {
+                if (priv && html_dom_get_checked(priv)) cJSON_AddTrueToObject(preset, "makePrivate");
+                cJSON_DeleteItemFromObjectCaseSensitive(all, key);
+                cJSON_AddItemToObject(all, key, preset);
+                presets_save(all);
+            } else if (priv && cJSON_GetObjectItemCaseSensitive(preset, "makePrivate")) {
+                html_dom_set_checked(priv, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(preset, "makePrivate")));
+            }
+        }
+    }
+    cJSON_Delete(all);
+    const HtmlElem holder = html_dom_by_id("hostGamePreset"); // genPresets(): the block again
+    if (holder) {
+        StrBuf sb = {0};
+        presets_html(&sb);
+        char *html = sb_finish(&sb);
+        html_dom_set_html(holder, html ? html : "");
+        free(html);
+    }
+}
+
 static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON *preset) {
     const unsigned int flags = game_host_type_flags(host_type);
     const int choices = !(flags & (GAME_HOST_FLAG_COMP | GAME_HOST_FLAG_RESTRICT));
@@ -269,7 +460,12 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
         settings_rows(&sb, host_type, preset);
     } else if (tab == HOST_CONFIG_TAB_SERVER && choices) {
         g_cost = 0;
-        if (active_account()) { // Server Upgrades: an account's host (deob-10.0.3.js:249047-249053)
+        const AccountInfo *acc = active_account();
+        if (acc && acc->level >= 10) { // Social: Share on Hub, an account of level 10+ (deob-10.0.3.js:249042-249045)
+            sb_append(&sb, "<div class='setHed' style='margin-bottom:15px'>Social</div><div class='setBodH'><div class='settNameSmall'>Share on Hub "
+                           "<label class='switch'><input id='shareToHub' type='checkbox'><span class='slider'></span></label></div></div>");
+        }
+        if (acc) { // Server Upgrades: an account's host (deob-10.0.3.js:249047-249053)
             sb_append(&sb, "<div class='setHed' style='margin-bottom:15px;'>Server Upgrades</div><div class='setBodH'>");
             for (size_t i = 0; i < sizeof(SERVER_UPGRADES) / sizeof(SERVER_UPGRADES[0]); i++)
                 sb_appendf(&sb, "<div class='settNameSmall'>%s <label class='switch'><input id='servUp%s' type='checkbox' onchange='windows[7].updateSet(%d,this)'>"
@@ -283,6 +479,11 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
                        "type='text' placeholder='Enter Password'style='border-radius:6px;border:none;background:#eee;padding:6px;padding-bottom:6px;float:right;margin-top:5px;"
                        "margin-bottom:5px;' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div></div>",
                    I18N("server.config.private", "Private"));
+        // Host Presets (deob-10.0.3.js:249058): hidden only for a community map whose preset forces the defaults,
+        // which Box Office has no map presets for
+        sb_append(&sb, "<div id='hostGamePreset' style='text-align:left;margin-top:20px;margin-bottom:10px;display:block'>");
+        presets_html(&sb);
+        sb_append(&sb, "</div>");
     }
     return sb_finish(&sb);
 }
@@ -356,6 +557,10 @@ int ui_host_config_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
             if (g_cost) snprintf(text, sizeof(text), "%d KR", g_cost);
             if (label) html_dom_set_text(label, g_cost ? text : "None");
         }
+        return 1;
+    }
+    if (!strcmp(name, "windows.7.presetAction")) {
+        preset_action(arg_num(args, argc, 0, -1));
         return 1;
     }
     if (!strcmp(name, "windows.7.toggle")) { // flips every input whose id starts with the prefix
@@ -487,6 +692,7 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
         if (text[0]) cJSON_AddStringToObject(request, "passCode", text);
     }
     cJSON_AddBoolToObject(request, "private", checked("makePrivate"));
+    cJSON_AddBoolToObject(request, "share", checked("shareToHub")); // share: !!shareToHub && checked (deob-10.0.3.js:229827)
     cJSON_AddNumberToObject(request, "override", host_type);
 
     size_t count = 0;
