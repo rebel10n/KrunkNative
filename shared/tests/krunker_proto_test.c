@@ -1014,6 +1014,85 @@ static void test_shapes_1003_events(void) {
     krunker_buf_free(&buf);
 }
 
+// The net.md §9 gaps' wire shapes, as 10.0.3 builds them (the link's translation: client/tests/krunker_link_test.c
+// test_net_gaps_1003).
+static void test_net_gaps_1003(void) {
+    const KrunkerBuild *b = krunker_build_compiled();
+    KrunkerBuf buf = {0};
+    KrunkerFrame f;
+
+    // "l" of an SRM player (syncState :222389-222405): custSync [name, value, ...] at [25], the 6 sendVals (:18684,
+    // tmpVel a {x, y, z} object), the controlled entity last: 33 values, the tail at len - 1
+    KrunkerValue s[33];
+    for (int i = 0; i < 33; i++) s[i] = KRUNKER_V_NUM(0);
+    const KrunkerValue cust[] = {KRUNKER_V_STR("myVal"), KRUNKER_V_NUM(5)};
+    s[25] = KRUNKER_V_ARRAY((KrunkerValue *) cust, 2);
+    const KrunkerValue tmp_vel[] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(0.05), KRUNKER_V_STR("y"), KRUNKER_V_NUM(0), KRUNKER_V_STR("z"), KRUNKER_V_NUM(-0.5)};
+    s[31] = KRUNKER_V_MAP((KrunkerValue *) tmp_vel, 3);
+    const KrunkerValue state[] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(12)};
+    const KrunkerValue controlled[] = {KRUNKER_V_NUM(9), KRUNKER_V_NUM(120), KRUNKER_V_MAP((KrunkerValue *) state, 1)};
+    s[32] = KRUNKER_V_ARRAY((KrunkerValue *) controlled, 3);
+    const KrunkerValue l[] = {KRUNKER_V_ARRAY(s, 33)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_SYNC_PLAYER), l, 1, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    const KrunkerValue *a = krunker_frame_arg(&f, 0);
+    const int cust_at = b->sync[KRB_SYNC_PROTECTED];
+    CHECK(krunker_is(a, KRUNKER_ARRAY) && a->len == 33 && cust_at == 25 && krunker_is(krunker_at(a, 25), KRUNKER_ARRAY));
+    CHECK(a->len - (uint32_t) cust_at - 2 == 6 && krunker_is(krunker_at(a, 31), KRUNKER_MAP) &&
+          krunker_num(krunker_get(krunker_at(a, 31), "z"), 0) == -0.5); // SRM: 6 sendVals, tmpVel the object
+    CHECK(krunker_is(krunker_at(a, a->len - 1), KRUNKER_ARRAY) && krunker_num(krunker_at(krunker_at(a, a->len - 1), 1), 0) == 120);
+    krunker_frame_free(&f);
+
+    // an empty "k" (updateState sends one, :222350): the list is an empty array, still hideAll's trigger (:258582)
+    const KrunkerValue k[] = {KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_NUM(10), KRUNKER_V_NUM(77)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_UPDATE_PLAYERS), k, 3, &buf) == KRUNKER_PROTO_OK);
+    BYTES_ARE(&buf, 0x94, 0xa1, 'k', 0x90, 0x0a, 0x4d, 0x00, 0x00);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    CHECK(krunker_is(krunker_frame_arg(&f, 0), KRUNKER_ARRAY) && krunker_frame_arg(&f, 0)->len == 0);
+    krunker_frame_free(&f);
+
+    // "cv" [key, value]: Load Data keeps a non-number as the string (:183563)
+    const KrunkerValue cv[] = {KRUNKER_V_STR("rank"), KRUNKER_V_STR("Gold")};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_CUSTOM_VAL), cv, 2, &buf) == KRUNKER_PROTO_OK);
+    BYTES_ARE(&buf, 0x93, 0xa2, 'c', 'v', 0xa4, 'r', 'a', 'n', 'k', 0xa4, 'G', 'o', 'l', 'd', 0x00, 0x00);
+    krunker_buf_free(&buf);
+
+    // "krt" [dogTags, depositType || 0] (:176746)
+    const KrunkerValue krt[] = {KRUNKER_V_NUM(4), KRUNKER_V_NUM(2)};
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_UPDATE_KR_TAGS), krt, 2, &buf) == KRUNKER_PROTO_OK);
+    BYTES_ARE(&buf, 0x93, 0xa3, 'k', 'r', 't', 0x04, 0x02, 0x00, 0x00);
+
+    // "0"'s [17] customLoadout: an array (the weapons of updateLoadout, nulls kept) or null (:198810)
+    CHECK(b->add_stride == 53);
+    for (int i = 0; i < KRB_ADD_COUNT; i++) CHECK(b->add[i] != 17 && b->add[i] != 21); // unnamed offsets (customLoadout, propID)
+
+    // init's 22 arguments (:221968): [20] krunkScripts an object, [21] gameState a number
+    KrunkerValue init[22];
+    for (int i = 0; i < 22; i++) init[i] = KRUNKER_V_NIL;
+    init[2] = KRUNKER_V_NUM(3);
+    init[17] = KRUNKER_V_STR("s");
+    init[19] = KRUNKER_V_NUM(240000);
+    init[21] = KRUNKER_V_NUM(2);
+    CHECK(krunker_proto_encode_ah(0, krunker_s2c_wire(KRUNKER_S2C_INIT_GAME), init, 22, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    CHECK(f.argc == 22 && krunker_num(krunker_frame_arg(&f, 2), 0) == 3 && krunker_num(krunker_frame_arg(&f, 19), 0) == 240000 &&
+          krunker_num(krunker_frame_arg(&f, 21), 0) == 2);
+    krunker_frame_free(&f);
+
+    // C2S "custom" [config, captchaRid, rehost]: createPrivateRoom's object always carries customMap / rawMapData /
+    // passCode, null when unused (:229827-229839), and a bool row without its field as 0 (:229834)
+    const KrunkerValue cfg[] = {KRUNKER_V_STR("customMap"), KRUNKER_V_NIL, KRUNKER_V_STR("rawMapData"), KRUNKER_V_NIL,
+                                KRUNKER_V_STR("passCode"), KRUNKER_V_NIL, KRUNKER_V_STR("hpRegen"), KRUNKER_V_NUM(0)};
+    const KrunkerValue custom[] = {KRUNKER_V_MAP((KrunkerValue *) cfg, 4), KRUNKER_V_NIL, KRUNKER_V_BOOL(0)};
+    CHECK(krunker_proto_encode_ah(0, krunker_c2s_wire(KRUNKER_C2S_CUSTOM_SERVER), custom, 3, &buf) == KRUNKER_PROTO_OK);
+    CHECK(krunker_proto_decode(buf.data, buf.len, 0, &f) == KRUNKER_PROTO_OK);
+    const KrunkerValue *c = krunker_frame_arg(&f, 0);
+    CHECK(krunker_is(c, KRUNKER_MAP) && c->len == 4 && krunker_get(c, "customMap") && krunker_is(krunker_get(c, "customMap"), KRUNKER_NIL) &&
+          krunker_is(krunker_get(c, "passCode"), KRUNKER_NIL) && krunker_is(krunker_get(c, "hpRegen"), KRUNKER_NUM));
+    krunker_frame_free(&f);
+    krunker_buf_free(&buf);
+}
+
 int main(void) {
     test_tables();
     test_ahnum();
@@ -1030,6 +1109,7 @@ int main(void) {
     test_shapes_1003_sync();
     test_shapes_1003_k();
     test_shapes_1003_events();
+    test_net_gaps_1003();
     if (g_fail) {
         printf("krunker_proto_test FAILED\n");
         return 1;

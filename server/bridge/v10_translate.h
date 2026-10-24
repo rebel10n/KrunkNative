@@ -35,6 +35,7 @@
 #define V10_IN_GAME_INSTANCE_ID "inst-id"
 #define V10_IN_INIT_GAME "init"
 #define V10_IN_UPDATE_GLOBAL_VALUE "gv"
+#define V10_IN_CUSTOM_VAL "cv" /* deob-10.0.3.js CUSTOM_VAL: you.custVals[key] = value (:258558) */
 #define V10_IN_PLAYER_INTERACTION "inat"
 #define V10_IN_UPD_MATCH_VOTE "mv"
 #define V10_IN_REMOVE_PLAYER "2" /* v10.js 97927 REMOVE_PLAYER, the handler _73270: one sid */

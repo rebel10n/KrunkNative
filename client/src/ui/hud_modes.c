@@ -65,6 +65,7 @@ typedef struct {
     int team_round_wins[MODE_TEAMS];
     int lockout_ms;                 // "lkt"
     int dog_tags;                   // "krt": the local player's KR Tags
+    int deposit_type;               // "krt" depositType: 0 KR Tags (#krTagHolder), 1 gift / 2 event tags (#giftTagHolder)
     char popup_title[NET_MODE_TEXT_SIZE]; // "tx" (Overtime)
     char popup_text[NET_MODE_TEXT_SIZE];
     int popup_seq;
@@ -363,8 +364,9 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
         case NET_PACKET_MODE_COUNTER: {
             V7_READ(NetModeCounterPacket, counter);
             Player *player = client_find_player(client, counter.uid);
-            if (counter.kind == NET_MODE_COUNTER_KR_TAGS) {
-                g_modes.dog_tags = (int) counter.value;
+            if (counter.kind == NET_MODE_COUNTER_KR_TAGS || counter.kind == NET_MODE_COUNTER_GIFT_TAGS || counter.kind == NET_MODE_COUNTER_EVENT_TAGS) {
+                g_modes.dog_tags = (int) counter.value; // "krt": you.dogTags whatever the depositType (deob-10.0.3.js:258908)
+                g_modes.deposit_type = counter.kind == NET_MODE_COUNTER_GIFT_TAGS ? 1 : counter.kind == NET_MODE_COUNTER_EVENT_TAGS ? 2 : 0;
                 if (player) player->mode.dog_tags = (int) counter.value;
             } else if (counter.kind == NET_MODE_COUNTER_CHARGE && player) { // "chrg": the kranked timer (game-overlay)
                 player->mode.is_kranked = counter.value > 0.0f;
@@ -1004,6 +1006,7 @@ const HudModesV7 *hud_modes_v7(void) {
     state.rounds_left = g_modes.rounds_left;
     state.lockout_ms = g_modes.lockout_ms;
     state.dog_tags = g_modes.dog_tags;
+    state.deposit_type = g_modes.deposit_type;
     state.popup_title = g_modes.popup_title;
     state.popup_text = g_modes.popup_text;
     state.popup_seq = g_modes.popup_seq;

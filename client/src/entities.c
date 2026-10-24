@@ -12,8 +12,8 @@
 // Not done (documented): the shared / client KrunkScript hooks (onEntityInit, onEntityEvent,
 // client-side "sim" stepping between baselines: our client runs no shared script, so an entity
 // snaps to each baseline with v10's 100 ms blend), model parts ("aid": hidden collision boxes, no
-// GLTF), pitch / roll of bodies, controlled entities (ctl attachments: the server's pose rules),
-// soft zones. Player poses ("pz", NET_EXT_PLAYER_POSE) are routed to player_pose_render.c, which reads
+// GLTF), pitch / roll of bodies, the local stepping of an entity we control (ctl attachments, controlledByLocal:
+// its pose is the server's, from our "l" tail, NET_EXT_ENTITY_CONTROLLED), soft zones. Player poses ("pz", NET_EXT_PLAYER_POSE) are routed to player_pose_render.c, which reads
 // every player's hard attachment from here (a faceRide pose faces the entity it rides).
 #include <entities.h>
 #include <net_ext.h>
@@ -340,6 +340,19 @@ static void entity_state(Client *client, const cJSON *rec) {
     place_body(client, e, d);
 }
 
+// applyControlledSync (deob-10.0.3.js:213849-213859): the entity we control, from our "l" ([eid, tick, state],
+// NET_EXT_ENTITY_CONTROLLED): the server's state as it is, commitPose and placeBody(e, 0, 0, 0). Unlike a baseline
+// there is no `active` check and no new blend (one under way goes on): the body is at the server's pose at once.
+static void entity_controlled(Client *client, const cJSON *rec) {
+    Entity *e = cJSON_IsArray(rec) ? entity_find((int) cJSON_GetNumberValue(cJSON_GetArrayItem(rec, 0))) : NULL;
+    if (!e) return;
+    const cJSON *state = cJSON_GetArrayItem(rec, 2);
+    cJSON_Delete(e->state);
+    e->state = cJSON_IsObject(state) ? cJSON_Duplicate(state, 1) : cJSON_CreateObject(); // decodeState(s || {})
+    commit_pose(e);
+    place_body(client, e, (vec3) {0.0f, 0.0f, 0.0f});
+}
+
 static void entity_remove(Client *client, const cJSON *rec) {
     Entity *e = cJSON_IsArray(rec) ? entity_find((int) cJSON_GetNumberValue(cJSON_GetArrayItem(rec, 0))) : NULL;
     E.removes++;
@@ -524,6 +537,7 @@ int entities_on_ext(Client *client, const uint16_t subtype, const uint8_t *body,
         case NET_EXT_ENTITY_SPAWN:
         case NET_EXT_ENTITY_REMOVE:
         case NET_EXT_ENTITY_STATE:
+        case NET_EXT_ENTITY_CONTROLLED:
         case NET_EXT_ENTITY_EVENT:
         case NET_EXT_ENTITY_ATTACH:
         case NET_EXT_ENTITY_DETACH:
@@ -541,6 +555,7 @@ int entities_on_ext(Client *client, const uint16_t subtype, const uint8_t *body,
             case NET_EXT_ENTITY_SPAWN: entity_spawn(client, rec); break;
             case NET_EXT_ENTITY_REMOVE: entity_remove(client, rec); break;
             case NET_EXT_ENTITY_STATE: entity_state(client, rec); break;
+            case NET_EXT_ENTITY_CONTROLLED: entity_controlled(client, rec); break; // our "l"'s tail
             case NET_EXT_ENTITY_EVENT: E.events++; break; // v10: clientEventQueue -> the map's client script hooks (not run here)
             case NET_EXT_ENTITY_ATTACH: entity_attach(client, rec, 1); break;
             case NET_EXT_ENTITY_DETACH: entity_attach(client, rec, 0); break;

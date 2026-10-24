@@ -48,6 +48,7 @@ typedef struct {
     int rounds_left;            // -1: no rounds packet yet
     int lockout_ms;
     int dog_tags;
+    int deposit_type;           // "krt" depositType: 0 #krTagHolder, 1 gift / 2 event tags in #giftTagHolder
     const char *popup_title;
     const char *popup_text;
     int popup_seq;              // bumps on every new popup

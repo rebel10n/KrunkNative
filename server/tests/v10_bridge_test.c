@@ -571,6 +571,26 @@ int main(void) {
     CHECK(client_get("gv", 0, &gv) && gv.argc == 2 && is_str(&gv.args[0], "score_limit") && vequal(&gv.args[1], &KRUNKER_V_NUM(2.5)),
           "gv is [score_limit, 2.5]");
     krunker_frame_free(&gv);
+    // a string value (EXT NET_EXT_VALUE_TEXT: type u8, flags u8, key[71], text[301]) is the v10 gv / cv with the string
+    // as it is (v10 stores either, deob-10.0.3.js:257834, :258558)
+    uint8_t vt[2 + 374];
+    memset(vt, 0, sizeof vt);
+    vt[0] = (uint8_t) (NET_EXT_VALUE_TEXT & 0xff);
+    vt[1] = (uint8_t) (NET_EXT_VALUE_TEXT >> 8);
+    vt[2] = NET_PACKET_GLOBAL_VALUE;
+    memcpy(vt + 4, "phase", 5);
+    memcpy(vt + 4 + 71, "Ready", 5);
+    native_send(&g_native, NET_PACKET_EXT, vt, sizeof vt);
+    WAIT_FOR(client_count("gv") == 2);
+    CHECK(client_get("gv", 1, &gv) && gv.argc == 2 && is_str(&gv.args[0], "phase") && is_str(&gv.args[1], "Ready"), "a string gv is [phase, Ready]");
+    krunker_frame_free(&gv);
+    vt[2] = NET_PACKET_CUSTOM_VALUE;
+    memcpy(vt + 4, "rank\0\0", 6);
+    memcpy(vt + 4 + 71, "Gold\0", 6);
+    native_send(&g_native, NET_PACKET_EXT, vt, sizeof vt);
+    WAIT_FOR(client_count("cv") == 1);
+    CHECK(client_get("cv", 0, &gv) && gv.argc == 2 && is_str(&gv.args[0], "rank") && is_str(&gv.args[1], "Gold"), "a string cv is [rank, Gold]");
+    krunker_frame_free(&gv);
 
     // a player sound (add) after the INIT is an asnd: uid, name, {loop, vol, rate}
     uint8_t snd[39];
@@ -851,6 +871,16 @@ int main(void) {
         CHECK(vequal(&kf.args[1], &KRUNKER_V_NUM(10)), "k sendRate 10");
     }
     krunker_frame_free(&kf);
+    // a marked sync with nobody else in it (NET_EXT_PLAYER_SYNC alone): an empty k, v10's hideAll trigger (updateState
+    // sends the empty list, deob-10.0.3.js:222350)
+    {
+        const uint8_t marker[2] = {(uint8_t) (NET_EXT_PLAYER_SYNC & 0xff), (uint8_t) (NET_EXT_PLAYER_SYNC >> 8)};
+        native_send(&g_native, NET_PACKET_EXT, marker, 2);
+        WAIT_FOR(client_count("k") >= 2);
+        KrunkerFrame ke;
+        CHECK(client_get("k", 1, &ke) && ke.argc == 3 && ke.args[0].type == KRUNKER_ARRAY && ke.args[0].len == 0, "a marked sync of nobody: k []");
+        krunker_frame_free(&ke);
+    }
 
     // NET 9 (the v3 chat, game and server lines): a server line (kind 2) and a player line (kind 0), channel -1 (all)
     uint8_t c9[325];
@@ -1320,10 +1350,10 @@ int main(void) {
     NFrame *pong = native_nth(NET_PACKET_PONG, 0);
     CHECK(pong && pong->len == 4 && !memcmp(pong->payload, ping, 4), "PONG echoes the PING");
 
-    // the stop is final: one init, one stop, one gv
+    // the stop is final: one init, one stop, the two gv (a number, a string)
     CHECK(v10_bridge_untranslated("CHEAT") == 1, "one stop at CHEAT borders");
     CHECK(client_count("init") == 2, "two inits: the round's and the next round's");
-    CHECK(client_count("gv") == 1, "one gv");
+    CHECK(client_count("gv") == 2, "two gv");
 
     // close: the client closes and the bridge drops the session
     if (g_client) kn_ws_close(g_client, 1000, "test done");

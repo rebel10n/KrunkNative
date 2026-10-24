@@ -104,6 +104,7 @@ typedef struct V10Session {
     int32_t mode_index;
     V10StateRec *kbatch;     /* the player records of the states in this chunk: one "k" per chunk */
     size_t kn, kcap;
+    int k_marked;            /* the chunk holds a NET_EXT_PLAYER_SYNC: its "k" goes out even with no player (hideAll) */
     int32_t client_id;
     int objective_weapon;
     V10BotEntry *ai_sync;    /* the bot positions of the sync being assembled (AI_SYNC_V7 chunks) */
@@ -681,15 +682,17 @@ static void flush_bot_sync(V10Session *s) {
 }
 
 static void flush_player_states(V10Session *s) {
-    if (s->kn == 0 || s->stopped) {
+    const int marked = s->k_marked;
+    s->k_marked = 0;
+    if ((s->kn == 0 && !marked) || s->stopped) {
         s->kn = 0;
         return;
     }
     V10Out o;
     v10_out_init(&o);
-    KrunkerValue *records = v10_arena(&o, s->kn * sizeof *records);
+    KrunkerValue *records = s->kn ? v10_arena(&o, s->kn * sizeof *records) : NULL;
     for (size_t i = 0; records && i < s->kn; i++) records[i] = v10_state_record(&o, &s->kbatch[i]);
-    if (records) {
+    if (records || !s->kn) { /* a marked sync with nobody in it: the empty list (v10 updateState, deob-10.0.3.js:222350) */
         const KrunkerValue args[3] = {
             KRUNKER_V_ARRAY(records, (uint32_t)s->kn),
             KRUNKER_V_NUM(V10_STATE_SEND_HZ),
@@ -896,6 +899,34 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         finish_out(s, &o, "GLOBAL_VALUE");
         return;
     }
+    /* the player's own custVals: cv [key, value] (v10 CUSTOM_VAL, deob-10.0.3.js:258558) */
+    if (s->init_sent && type == NET_PACKET_CUSTOM_VALUE) {
+        V10GlobalValue cv; /* the same NetValuePacket */
+        if (!v10_parse_global_value(p, n, &cv)) { stop_at(s, "CUSTOM_VALUE", "malformed"); return; }
+        if (cv.key[0] == 0) return;
+        v10_out_init(&o);
+        const KrunkerValue args[2] = {KRUNKER_V_STR(cv.key), KRUNKER_V_NUM(cv.value)};
+        v10_push(&o, V10_IN_CUSTOM_VAL, args, 2);
+        finish_out(s, &o, "CUSTOM_VALUE");
+        return;
+    }
+    /* a string "cv" / "gv" (net_ext.h NetValueTextPacket): v10 takes the string as it is (Load Data's non-number) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_VALUE_TEXT) {
+        if (n < 2 + sizeof(NetValueTextPacket)) { stop_at(s, "EXT VALUE_TEXT", "malformed"); return; }
+        NetValueTextPacket t;
+        memcpy(&t, p + 2, sizeof(t));
+        t.key[sizeof(t.key) - 1] = 0;
+        t.text[sizeof(t.text) - 1] = 0;
+        const int global = t.type == NET_PACKET_GLOBAL_VALUE;
+        if (global && (t.flags & 0x01) && s->global_values_sent) { stop_at(s, "EXT VALUE_TEXT", "reset after values: v10 gv cannot clear"); return; }
+        if (t.key[0] == 0) return;
+        if (global) s->global_values_sent = 1;
+        v10_out_init(&o);
+        const KrunkerValue args[2] = {KRUNKER_V_STR(t.key), KRUNKER_V_STR(t.text)};
+        v10_push(&o, global ? V10_IN_UPDATE_GLOBAL_VALUE : V10_IN_CUSTOM_VAL, args, 2);
+        finish_out(s, &o, "EXT VALUE_TEXT");
+        return;
+    }
     if (s->init_sent && (type == NET_PACKET_MODE_STATE || type == NET_PACKET_OBJECT_STATE)) {
         v10_out_init(&o);
         if (type == NET_PACKET_MODE_STATE) v10_map_mode_state(&o, p, n);
@@ -912,6 +943,12 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         s->ranked = value;
         s->ranked_received = 1;
         try_emit_init(s);
+        return;
+    }
+    /* the start of a player sync (net_ext.h NET_EXT_PLAYER_SYNC): this chunk's "k" goes out even when it lists nobody,
+     * so the v10 client's hideAll runs for it as for the server's own "k" (deob-10.0.3.js:258582) */
+    if (type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_PLAYER_SYNC) {
+        if (s->init_sent) s->k_marked = 1;
         return;
     }
     /* the match phase (0 INITIALIZING .. 5 ENDED, v10's enum): gsc [gameState] (v10.js 218899) */

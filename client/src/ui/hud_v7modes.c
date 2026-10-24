@@ -5,7 +5,10 @@
 //                    spectating; #roundsVal "gamRounds - roundCount / gamRounds" (initGame),
 //                    #roundTSc1 / #roundTSc2 the teams' round wins.
 //   #krTagHolder     io_updateKrTags("krt"): one .killStreakItem with "x<dogTags>", red once
-//                    the carried tags reach mode.tagHoldLimit (textures/sprays/114.png).
+//                    the carried tags reach mode.tagHoldLimit (textures/sprays/114.png); a live
+//                    event's depositType 1 / 2 puts it in #giftTagHolder instead, with
+//                    img/props/prop_60.png / img/events/event_7.png (deob-10.0.3.js:258906-258918;
+//                    the event image is not in ui/img: the count shows without it).
 //   #bhHolder        initGame: inline-block in bighead modes; f2014 sizes its head
 //                    calc(40px * headMlt) from the local player's headMlt.
 //   #speedRunHolder  f1889 + mode.custUI (gameModes/parkour.js, race.js) while game.doLogTime:
@@ -45,7 +48,7 @@ static struct {
     char rounds_val[32];
     int round_wins[2];
     // KR tags
-    int tags_shown, tags, tags_full;
+    int tags_shown, tags, tags_full, tags_type;
     // big head
     int bighead_shown;
     float head_mlt;
@@ -70,12 +73,14 @@ static void v7_class(const char *id, const char *cls) {
 void hud_v7modes_on_init(void) {
     const HtmlElem tags = html_dom_by_id("krTagHolder");
     if (tags) html_dom_set_html(tags, "");
+    const HtmlElem gift = html_dom_by_id("giftTagHolder"); // initGame empties both (deob-10.0.3.js:257091-257092)
+    if (gift) html_dom_set_html(gift, "");
     g_v7.list_built = 0;
     g_v7.own_clock = 0;
     g_v7.seen_has = 0;
     g_v7.timer[0] = 0;
     g_v7.tags_shown = 0;
-    g_v7.tags = g_v7.tags_full = -1;
+    g_v7.tags = g_v7.tags_full = g_v7.tags_type = -1;
     g_v7.head_mlt = -1.0f;
     g_v7.rounds_val[0] = 0;
     g_v7.round_wins[0] = g_v7.round_wins[1] = -1;
@@ -265,6 +270,14 @@ static void tags_tick(const Client *client) {
     const GameMode *mode = client->game.mode;
     const int limit = mode ? mode->config.tag_hold_limit : 0;
     const int tags = hud_modes_v7()->dog_tags;
+    // "krt" depositType (deob-10.0.3.js:258909-258916): 0 #krTagHolder and the spray, 1 / 2 #giftTagHolder and
+    // ["/textures/sprays/114.png", "/img/props/prop_60.png", "/img/events/event_7.png"][type]; the other holder keeps
+    // what it showed. A new type writes its holder afresh.
+    const int type = hud_modes_v7()->deposit_type;
+    if (type != g_v7.tags_type) {
+        g_v7.tags_type = type;
+        g_v7.tags_shown = 0;
+    }
     // "krt" (io_updateKrTags) writes the holder for every mode; the limit only turns the item red. CTF has
     // no tagHoldLimit, and its tags still show (official "krt" from a CTF server).
     if (!g_v7.tags_shown && tags <= 0) return;
@@ -272,12 +285,14 @@ static void tags_tick(const Client *client) {
     if (g_v7.tags_shown && tags == g_v7.tags && full == g_v7.tags_full) return;
     g_v7.tags = tags;
     g_v7.tags_full = full;
-    const HtmlElem holder = html_dom_by_id("krTagHolder");
+    const HtmlElem holder = html_dom_by_id(type ? "giftTagHolder" : "krTagHolder");
     if (!holder) return;
+    static const char *const images[] = {"textures/sprays/114.png", "img/props/prop_60.png", "img/events/event_7.png"};
     const char *color = full ? "rgba(255, 0, 0, 0.5)" : "var(--div-grey)";
     char html[512];
     snprintf(html, sizeof(html), "<div class='killStreakItem'><div class='killStreakItemInner' style=\"background-color:%s\">"
-                                 "<div class='killStreakCnt'>x%d</div><img style='width: 100%%;' src=\"textures/sprays/114.png\"></div></div>", color, tags);
+                                 "<div class='killStreakCnt'>x%d</div><img style='width: 100%%;' src=\"%s\"></div></div>", color, tags,
+             images[type >= 0 && type <= 2 ? type : 1]);
     html_dom_set_html(holder, html);
     g_v7.tags_shown = 1;
 }

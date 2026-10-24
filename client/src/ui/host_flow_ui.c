@@ -185,6 +185,51 @@ static void refresh_command(void) {
     else html_dom_set_text(box, I18N("kn.hostflow.command.error", "Too many settings for one command: remove some overrides."));
 }
 
+// The keys v10's createPrivateRoom object always carries (deob-10.0.3.js:229827-229839), read off the open window:
+// rawMapData (the Raw Game Data field's text, "" when empty; null without the field), passCode (the password field's
+// text; null without it, and in a comp / restricted lobby, whose branch never looks it up: :229813-229817), and every
+// serverConfig row: one without its field is 0 for a bool or an input row (`el ? el.checked : 0`, `el ? value : 0`,
+// :229832-229835; ui_host_config_collect reads the fields that are there). A closed window keeps the rows read last.
+static void host_config_fields(cJSON *config) {
+    if (!page_open()) {
+        if (!cJSON_HasObjectItem(config, "rawMapData")) cJSON_AddNullToObject(config, "rawMapData");
+        if (!cJSON_HasObjectItem(config, "passCode")) cJSON_AddNullToObject(config, "passCode");
+        return;
+    }
+    const size_t raw_size = 1 << 20; // a pasted map
+    char *raw = malloc(raw_size);
+    cJSON_DeleteItemFromObjectCaseSensitive(config, "rawMapData");
+    if (raw && read_field("rawMapData", raw, raw_size)) cJSON_AddStringToObject(config, "rawMapData", raw);
+    else cJSON_AddNullToObject(config, "rawMapData");
+    free(raw);
+    char text[128];
+    const int choices = !(game_host_type_flags(g_flow.host_type) & (GAME_HOST_FLAG_COMP | GAME_HOST_FLAG_RESTRICT));
+    cJSON_DeleteItemFromObjectCaseSensitive(config, "passCode");
+    if (choices && read_field("passCode", text, sizeof(text))) cJSON_AddStringToObject(config, "passCode", text);
+    else cJSON_AddNullToObject(config, "passCode");
+    size_t count = 0;
+    const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
+    for (size_t k = 0; k < count; k++) {
+        if (options[k].kind != GC_BOOL && options[k].kind != GC_INPUT) continue;
+        char id[48];
+        snprintf(id, sizeof(id), "customS%s", options[k].var);
+        if (html_dom_by_id(id)) {
+            // an input row's text as v10 sends it: sanitize (<, >, & and every non-ASCII byte go, :27403-27409)
+            const cJSON *item = cJSON_GetObjectItemCaseSensitive(config, options[k].var);
+            if (options[k].kind == GC_INPUT && cJSON_IsString(item)) {
+                char *w = item->valuestring;
+                for (const char *r = item->valuestring; *r; r++) {
+                    if (*r != '<' && *r != '>' && *r != '&' && !((unsigned char) *r & 0x80)) *w++ = *r;
+                }
+                *w = 0;
+            }
+            continue;
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(config, options[k].var);
+        cJSON_AddNumberToObject(config, options[k].var, 0);
+    }
+}
+
 // The config of a hosting request: v10's createPrivateRoom object, built from the rows (the request), the
 // checked maps (catalogue indices, as v10's maps; none with a community map) and the community map
 // (customMap, v10's name field)
@@ -197,9 +242,11 @@ static cJSON *host_config(void) {
         if (official_hostable(e) && g_flow.maps[e->index]) cJSON_AddItemToArray(maps, cJSON_CreateNumber(e->index));
     }
     if (g_flow.custom_key[0]) cJSON_AddStringToObject(config, "customMap", g_flow.custom_key);
+    else cJSON_AddNullToObject(config, "customMap"); // customMap: the picked map's name || null (deob-10.0.3.js:229831)
     cJSON_AddBoolToObject(config, "krRewards", 0);
     cJSON_AddBoolToObject(config, "defaultSetts", 0);
     cJSON_AddBoolToObject(config, "share", 0);
+    host_config_fields(config);
     return config;
 }
 
