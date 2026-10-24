@@ -124,6 +124,18 @@ int main(void) {
     cls->ext.model = 2;
     CHECK(g_asset_count == 1 && g_sent_count == 0, "uai: nothing for a class without a model (%d)", g_asset_count);
 
+    // inside the spawn's onPlayerSpawn (player_anim_spawning) the swap waits for that player's SPAWN: v10's client drops
+    // a "uai" for a sid it has not added (deob-10.0.3.js:257784)
+    player_anim_spawning(actor, 1);
+    player_update_asset_id(actor, "888g");
+    player_update_asset_id(actor, "999g"); // the latest swap of the spawn
+    player_anim_spawning(actor, 0);
+    CHECK(g_asset_count == 1, "uai inside onPlayerSpawn: not sent before the SPAWN (%d)", g_asset_count);
+    player_anim_spawn_sent(actor);
+    CHECK(g_asset_count == 2 && !strcmp(g_asset[1].p.asset, "999g") && g_asset[1].uid == NET_TARGET_ALL, "uai after the SPAWN: \"999g\" (%d)", g_asset_count);
+    player_anim_spawn_sent(actor);
+    CHECK(g_asset_count == 2, "uai sent once (%d)", g_asset_count);
+
     // an inactive actor, a clip past the list, a non-authority game (a client mirror): nothing
     actor->active = 0;
     player_play_clip(actor, NET_PLAYER_CLIP_JUMP);

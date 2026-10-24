@@ -4,6 +4,7 @@
 // in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <prop_hunt.h> // Prop Hunt: "prp" / "prpR", the prop after a SPAWN
 #include <stalker.h>   // Stalker: "stlkrt", the hidden stalker out of the state stream
+#include <player_anim.h> // the "uai" of a spawn's onPlayerSpawn after its SPAWN
 #include <server.h>
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
@@ -18,6 +19,7 @@
 #include <ks_server.h>       // KrunkScript server host (server/src/ks_server_host.c)
 #include <ks_storage.h>      // WP6: trigger storage / KR reward hooks (server/src/ks_storage.c)
 #include <ks_game.h>
+#include <ks_entities.h>     // v10.0.3 entity replication: a joiner's entSeed / lo / ent / entAtt, the "l" tail
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
@@ -867,6 +869,7 @@ static void net_send_init(ClientConnection *client) {
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     net_comp_lobby_sync(client);  // comp lobby: the connection's entry + the table
     brain_events_send_init(client); // v10 init syncData.warsClan: the Turf Wars clan holding the map
+    ks_entities_send_state(&g_server->game, client->id); // v10 init syncData entSeed / lo / ent / entAtt (after the INIT that resets them)
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
 }
 
@@ -1142,6 +1145,7 @@ static void net_spawn_client(ClientConnection *client) {
     net_mark_client_spawned(client);
     if (first_spawn) net_send_existing_spawns(client);
     net_broadcast_spawn(client->player);
+    player_anim_spawn_sent(client->player); // a class-model swap of its onPlayerSpawn, after the SPAWN (player_anim.h)
     net_resync_live_world(client); // what the live-world filter held back while dead / in the menu
     net_send_kept_cheats(client); // the client's own copy: noclip, unlimited ammo, forcehide (after its SPAWN)
 
@@ -2074,6 +2078,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             }
             if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && g_server->game.ready) {
                 net_send_game_state(client); // its INIT went out first
+                ks_entities_send_state(&g_server->game, client->id); // the entities its INIT's EXTs could not carry yet
                 brain_events_send_init(client); // the map's Turf Wars clan (init syncData.warsClan)
             }
             // the game announcement: a gated join gets it when it settles (accounts.c acc_set_ready);
@@ -2519,6 +2524,9 @@ static void net_send_reconciliation(void) {
             const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_PLAYER_MOVE_VALS, &vals, (uint16_t) sizeof(vals));
             if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
         }
+        // v10 SYNC_PLAYER's controlled entity [eid, tick, state] (deob-10.0.3.js:222404-222405), before the RECON: the
+        // client sets it (applyControlledSync) and replays its inputs on it
+        if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT) ks_entities_send_controlled(&g_server->game, player, client->id);
         // WP-C: the v7 movement locks (and the grapple) only to 1.3.1+ peers (1.3.0 / net-bridge read exactly 58 bytes)
         const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_RECON_PACKET_V3_SIZE : NET_RECON_PACKET_V1_SIZE;
         net_send_packet(client->fd, NET_PACKET_RECON, &packet, size);

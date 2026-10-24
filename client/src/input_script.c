@@ -89,6 +89,14 @@
 //   100 laced 8000               Nettspend: start the laced visuals for 8000 ms as the server's KN_EXT_LACED would
 //                                (nettspend.h); `laced` with no time logs the effect: "[input_script] laced t=100
 //                                intensity=0.83 left=7400 time=0.600"
+//   100 wars 42 NUKE ff3b3b 7    a "warsClan" from the server (NET_EXT_WARS_CLAN through the client's EXT handler): clan id,
+//                                name, banner colour (hex without its '#', which starts a comment; "s3": paint shader 3; "-":
+//                                none), logo version (optional); `wars none` clears it
+//                                (the Turf Wars popup and the map's wars_banner banners, wars_banners.c)
+//   100 spinw 0 37.5 2482        a "spinW" (NET_EXT_SPIN_WHEEL_RESPONSE, not ours): spinner uid, randNum, the item won
+//   100 wheels @label            log the map prize wheels: "[input_script] wheels t=100 @label n=1 planes=1 banners=3
+//                                0:wheel=2,rot=82.47,mlt=1.00,end=0.0/0.0,item=2482,paints=12,tex=1" (prize_wheels.c state,
+//                                tex: the plane has a painted canvas)
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 tpstate                  log the KrunkNative third-person camera of the last frame (third_person.h):
@@ -246,6 +254,10 @@
 #include <ai.h>           // `world`: the AI list
 #include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE; `ranked`: NET_EXT_KN_RANKED_MATCH
 #include <lobby_ui.h>     // `ranked`: comp_ui_round (the comp menu an INIT opens)
+#include <s2c_events.h>   // `wars` / `spinw`: the EXT handler
+#include <prize_wheels.h>  // `wheels`
+#include <prize_wheel_render.h>
+#include <wars_banners.h>
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -348,7 +360,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "rows") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "waitfor") ||
-            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -1029,10 +1041,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
         // models @label: each player's model, "uid:body=..,mdl=..,asset=..,clip=.." (player_class_model_describe)
         char line[4096];
         size_t o = 0;
-        for (size_t i = 0; i < client->game.player_count && o + 160 < sizeof(line); i++) {
+        for (size_t i = 0; i < client->game.player_count && o + 240 < sizeof(line); i++) {
             const Player *p = client->game.players[i];
             if (!p) continue;
-            char model[128];
+            char model[224];
             player_class_model_describe(p, model, sizeof(model));
             for (char *c = model; *c; c++)
                 if (*c == ' ') *c = ',';
@@ -1231,6 +1243,41 @@ static void script_run(Client *client, const ScriptEvent *e) {
         } else {
             fprintf(stderr, "[input_script] pour t=%.0f none\n", g_script.time);
         }
+    } else if (!strcmp(e->cmd, "wars")) {
+        // wars <id> <name> <colour> [logo] | wars none: a "warsClan" through the client's EXT handler (s2c_events.c)
+        NetWarsClanPacket w;
+        memset(&w, 0, sizeof(w));
+        int id = 0;
+        char name[32] = "", color[24] = "", logo[64] = "";
+        if (strcmp(e->arg, "none") != 0 && sscanf(e->arg, "%d %31s %23s %63s", &id, name, color, logo) >= 2) {
+            w.has = 1;
+            w.clan_id = id;
+            snprintf(w.clan_name, sizeof(w.clan_name), "%s", name);
+            // '#' starts a script comment: "ff3b3b" stands for "#ff3b3b" ("s2" is paint shader 2, "-" no colour)
+            const int hex = color[0] && strspn(color, "0123456789abcdefABCDEF") == strlen(color);
+            snprintf(w.banner_color, sizeof(w.banner_color), "%s%s", hex ? "#" : "", strcmp(color, "-") ? color : "");
+            snprintf(w.clan_logo, sizeof(w.clan_logo), "%s", logo);
+        }
+        s2c_events_on_ext(client, NET_EXT_WARS_CLAN, (const uint8_t *) &w, (uint16_t) sizeof(w));
+        fprintf(stderr, "[input_script] wars t=%.0f has=%d id=%d name=%s color=%s logo=%s\n", g_script.time, (int) w.has, w.clan_id,
+                w.clan_name, w.banner_color, w.clan_logo);
+    } else if (!strcmp(e->cmd, "spinw")) {
+        // spinw <uid> <rand> <skin>: a "spinW" for another player (no account change) through the EXT handler
+        const NetSpinWheelPacket w = {.uid = (int32_t) e->v[0], .rand = e->v[1], .skin = (int32_t) e->v[2]};
+        s2c_events_on_ext(client, NET_EXT_SPIN_WHEEL_RESPONSE, (const uint8_t *) &w, (uint16_t) sizeof(w));
+        fprintf(stderr, "[input_script] spinw t=%.0f uid=%d rand=%g skin=%d\n", g_script.time, w.uid, (double) w.rand, w.skin);
+    } else if (!strcmp(e->cmd, "wheels")) {
+        // wheels [@label]: the map prize wheels' spin state and planes, the Turf Wars banners
+        char line[2048];
+        int at = snprintf(line, sizeof(line), "[input_script] wheels t=%.0f %s n=%d planes=%d banners=%d", g_script.time, e->arg,
+                          prize_wheels_count(client), prize_wheel_render_count(), wars_banners_count());
+        for (int i = 0; i < prize_wheels_count(client) && at < (int) sizeof(line) - 160; i++) {
+            const PrizeWheel *w = prize_wheels_get(client, i);
+            at += snprintf(line + at, sizeof(line) - (size_t) at, " %d:wheel=%d,rot=%.2f,mlt=%.2f,end=%.1f/%.1f,item=%d,paints=%u,tex=%d", i, w->wheel,
+                           (double) w->spin_rotation, (double) w->spin_whl_mlt, (double) w->end_anim_val, (double) w->end_anim_target, w->item_id,
+                           w->paints, prize_wheel_render_texture(i) != 0);
+        }
+        fprintf(stderr, "%s\n", line);
     } else if (!strcmp(e->cmd, "laced")) {
         // laced <ms>: the laced visuals start (as the server's KN_EXT_LACED for us); laced: log them
         if (e->v[0] > 0.0f) nettspend_laced_start(e->v[0]);

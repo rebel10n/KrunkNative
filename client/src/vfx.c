@@ -16,6 +16,7 @@
 #include <vfx.h>
 #include <vfx_debris.h> // the debris piece and its pool slot
 #include <third_person.h> // camera_offset_active: no viewmodel muzzle in third person
+#include <class_camera.h> // ... nor with a class camera's third-person model
 #include <projectiles_render.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -24,6 +25,7 @@
 #include <nettspend.h> // Nettspend: the Money Spread's bills, the Drank's pour droplets, the laced clock
 #include <math.h>
 #include <pcg_basic.h>
+#include <player_class_model.h> // a class model has no weapon mesh: no muzzle, casings or own tracer
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -915,9 +917,11 @@ static vec3 muzzle_local(const Player *player, const VfxWeaponFx *fx, const int 
     return v3(x, fx->muz_off_y, -fx->muz_off);
 }
 
+// thirdPerson, KrunkNative's third person, the class camera's offset or a camType but FPS (class_camera.h):
+// the local model is the third-person one, no viewmodel to flash from
 static int camera_offset_active(const Client *client) {
-    const Map *map = client->game.map;
-    return client->game.config.third_person || third_person_model() || (map && (map->config.cam_offset.x || map->config.cam_offset.y || map->config.cam_offset.z));
+    const ClassCamera c = class_camera_current(client);
+    return third_person_model() || class_camera_third_person(&c);
 }
 
 static int project_to_screen(Camera *camera, const vec3 position, vec2 *out) {
@@ -989,6 +993,12 @@ static void local_shot(Client *client, Player *me) {
     if (vfx.log) fprintf(stderr, "[vfx] shot %s scoped=%d\n", money ? "cash" : weapon->src ? weapon->src : "?", scoped); // cash: the drawn stack, whatever the table's src
 
     PlayerArms *arms = held_arms(me);
+    // v10.0.3 class models (config.mdl, player_class_model.h) have no weaponMeshes: shoot draws no muzzle sprites, screen
+    // flash or casings (`renderYou && config.mdl !== 2` and the weapon mesh, deob-10.0.3.js:196426-196484) and no tracer
+    // of its own (`isYou && ... && weaponMeshes[loadoutIndex]`, :196958); the default body's arms are only anchors here
+    const PlayerMesh *me_mesh = me->mesh;
+    const int no_weapon_mesh = me_mesh && player_class_model_replaces_body(me_mesh->class_model);
+    if (vfx.log && no_weapon_mesh) fprintf(stderr, "[vfx] shot: a class model, no muzzle / casings / own tracer\n");
     // v10 players.js: the weapon mesh creates its muzzles at z = -muzOff, y = muzOffY (x 0), so the
     // tracer leaves the barrel even when no flash ever init()s them (muzzleFlash off, nMuz, hidden)
     if (arms && !arms->muzzle_placed) {
@@ -1004,7 +1014,7 @@ static void local_shot(Client *client, Player *me) {
     }
 
     // !isWeaponHidden: showWeapon/Sec/Mel off means no muzzle sprites, overlay flash or casings
-    if (me->render_you && !sprite_model && !money && ui_controls_weapon_visible(client)) {
+    if (me->render_you && !sprite_model && !money && !no_weapon_mesh && ui_controls_weapon_visible(client)) {
         if (vfx.settings.muzzle_flash && !fx->no_muzzle && !camera_offset_active(client)) {
             for (int i = 0; i < muzzle_count; i++) {
                 VfxMuzzle *muzzle = &vfx.muzzles[i];
@@ -1087,7 +1097,7 @@ static void local_shot(Client *client, Player *me) {
             spawn_impact(hit, normal_yaw, normal_pitch);
         }
 
-        if (distance >= VFX_TRACER_MIN_DST && vfx.settings.tracers) {
+        if (distance >= VFX_TRACER_MIN_DST && vfx.settings.tracers && !no_weapon_mesh) {
             // muzzles[i].getWorldPosition(): the barrel tip (placed above, or by the last flash)
             vec3 start;
             const int muzzle = muzzle_count > 1 ? (int) rand_int(0.0f, (float) muzzle_count - 1.0f) : 0;

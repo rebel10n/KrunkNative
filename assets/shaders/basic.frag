@@ -131,6 +131,15 @@ uniform sampler2D paint_mask;
 uniform sampler2D paint_env_map;
 vec3 paint_glow; // the raw shaders' emissive (deob:108752), added to emissive_radiance in main
 
+// v10.0.3 decal (loadMesh's `decal` node, deob-10.0.3.js:232213-232243; the Turf Wars banners' clan logo,
+// client/src/wars_banners.c): in the box |local_pos - decal_position| <= decal_half_scale (the geometry's own
+// space), the albedo becomes mix(albedo, decal.rgb, decal.a), decal sampled at (local.xy - position.xy + half.xy) /
+// (2 half.xy). Over the paint, before the lighting. The map is on unit 12.
+uniform bool decal_enabled;
+uniform sampler2D decal_map;
+uniform vec3 decal_position;
+uniform vec3 decal_half_scale;
+
 // glTF PBR maps (gltf.c, BasicMaterial.metal_rough_texture / normal_texture): metallicRoughness (texture
 // unit 5: G = roughness, B = metalness, times the factors) and the tangent-space normal map (unit 6,
 // normalScale). A material with the metal-roughness map is shaded as three.js MeshStandardMaterial (pbr_*
@@ -142,6 +151,13 @@ uniform float roughness_factor;
 uniform bool use_normal_map;
 uniform sampler2D normal_map;
 uniform float normal_scale;
+// v10.0.3 user-asset companion maps (client/src/player_class_model.c, applyAssetCompanionMaps deob-10.0.3.js:231711):
+// the "s" specularMap (unit 11), whose red is MeshPhongMaterial's specularStrength on the Blinn-Phong direct specular,
+// and maps_flip_v: the normal / specular maps sample at (u, 1 - v), three's flipY false over an OBJ's flipped base map
+uniform bool use_specular_map;
+uniform sampler2D specular_map;
+uniform bool maps_flip_v;
+float specular_strength = 1.0;
 
 // v10.0.3 GLB environment reflections (client/include/env_map.h): a GLB material whose glTF extras carry "env"
 // reflects render.getEnvMap() at envMapIntensity scene_env_intensity (deob-10.0.3.js:233665-233669). scene_env_map
@@ -234,7 +250,7 @@ vec3 krunker_perturb_normal(vec3 n, vec2 uv, vec3 map_n) {
 
 // The normal map's tangent-space normal (normalScale on x / y), for krunker_perturb_normal
 vec3 krunker_normal_map_sample(vec2 uv) {
-    vec3 map_n = texture(normal_map, uv).xyz * 2.0 - 1.0;
+    vec3 map_n = texture(normal_map, maps_flip_v ? vec2(uv.x, 1.0 - uv.y) : uv).xyz * 2.0 - 1.0;
     map_n.xy *= normal_scale;
     return map_n;
 }
@@ -290,7 +306,7 @@ vec3 krunker_direct(vec3 c, vec3 l, vec3 diffuse, vec3 normal, vec3 view_dir) {
     vec3 irradiance = c * dot_nl;
     vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI;
     if (pbr_active) outgoing += irradiance * brdf_ggx_alpha(l, normal, view_dir, pbr_alpha, pbr_f0);
-    else if (lighting_mode == 2) outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir);
+    else if (lighting_mode == 2) outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir) * specular_strength;
     else if (lighting_mode == 3) outgoing += irradiance * brdf_ggx(l, normal, view_dir);
     return outgoing;
 }
@@ -634,6 +650,15 @@ vec3 paint_apply(vec3 base, vec2 uv, vec2 mask_uv) {
     return mix(base, painted, k);
 }
 
+// deob:232218-232236: the decal over the albedo (outside its box the albedo stays)
+vec3 decal_apply(vec3 base) {
+    vec3 d = local_pos - decal_position;
+    if (any(greaterThan(abs(d), decal_half_scale))) return base;
+    vec2 uv = (d.xy + decal_half_scale.xy) / (decal_half_scale.xy * 2.0);
+    vec4 decal = texture(decal_map, uv);
+    return mix(base, decal.rgb, decal.a);
+}
+
 void main() {
     if (clip_enabled && dot(clip_plane.xyz, world_pos) + clip_plane.w < 0.0) discard;
     vec2 scaled_tex_coord;
@@ -660,6 +685,7 @@ void main() {
     paint_glow = vec3(0.0);
     // the shaders and the mask read the geometry uv (TSL uv(), deob:108727 / the paintMaskMap texture node)
     if (paint_enabled) base_color.rgb = paint_apply(base_color.rgb, scaled_tex_coord, scaled_tex_coord);
+    if (decal_enabled) base_color.rgb = decal_apply(base_color.rgb);
 
     emissive_radiance = emissive.rgb * emissive.a;
     if (use_emissive_map) {
@@ -686,6 +712,7 @@ void main() {
         }
 
         vec3 diffuse = albedo;
+        if (use_specular_map) specular_strength = texture(specular_map, maps_flip_v ? vec2(t_tex_coord.x, 1.0 - t_tex_coord.y) : t_tex_coord.xy).r;
         if (use_normal_map) normal = krunker_perturb_normal(normal, t_tex_coord.xy, krunker_normal_map_sample(t_tex_coord.xy));
         float metalness = 0.0, roughness = 1.0;
         if (use_metal_rough_map || use_scene_env) {

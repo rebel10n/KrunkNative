@@ -1,9 +1,11 @@
 // KrunkNative third-person camera (client/include/third_person.h): the console / bind state, the
 // server grant, the local model swap and the camera pose.
 #include <third_person.h>
+#include <class_camera.h>     // the game's / class's own camera offsets
 #include <prop_hunt_client.h> // Prop Hunt: the Prop team's camera
 #include <console.h>
 #include <spectate.h>
+#include <player_class_model.h> // player_class_model_keep
 #include <ui_logic.h>
 #include <math.h>
 #include <stdio.h>
@@ -78,11 +80,11 @@ int third_person_model(void) {
     return g_tp.granted;
 }
 
-// v7's own camera offsets (the game's thirdPerson setting, class camOffX/Y/Z) already build the
-// third-person model; this module stays out of the way there.
+// v10's own camera offsets (the game's thirdPerson setting, class camOffX/Y/Z, a camType other than
+// FPS) are the class camera's (class_camera.h); this module stays out of the way there.
 static int tp_game_offset(const Client *client) {
-    const Map *map = client->game.map;
-    return client->game.config.third_person || (map && (map->config.cam_offset.x || map->config.cam_offset.y || map->config.cam_offset.z));
+    const ClassCamera c = class_camera_current(client);
+    return class_camera_third_person(&c);
 }
 
 // Prop Hunt: the Prop team's camera is always behind the eye (gameLoop :221701), at the distance the
@@ -110,7 +112,9 @@ void third_person_frame(Client *client) {
     const int mode = tp_wanted(client);
     if (g_tp.built_for == me && g_tp.built == mode) return;
     if (g_tp.built_for == me && g_tp.built != -1) {
-        // the model changes: rebuild the local player's meshes (the same path as a loadout change)
+        // the model changes: rebuild the local player's meshes (the same path as a loadout change); KrunkNative's own
+        // rebuild, so a v10.0.3 class model keeps its asset (player_class_model.h)
+        player_class_model_keep(me);
         client_drop_player_mesh(client, me);
         client_add_player_mesh(client, me, 1);
         g_tp.keep = 0.0f;

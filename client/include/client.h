@@ -289,6 +289,11 @@ typedef struct {
     float metalness_factor;   // metallicFactor (1 by glTF default)
     float roughness_factor;   // roughnessFactor (1 by glTF default)
     float normal_scale;       // normalTexture.scale (1 by glTF default)
+    // v10.0.3 user-asset companion maps (applyAssetCompanionMaps, deob-10.0.3.js:231711; player_class_model.c): the
+    // "s" specularMap (unit 11; MeshPhongMaterial's specularStrength is its red), and maps_flip_v: the normal and
+    // specular maps keep three's flipY false over an OBJ's flipped base map, so they sample at (u, 1 - v)
+    unsigned int specular_texture;
+    int maps_flip_v;
 
     // Per-copy paint of a worn store skin (skin_fx_apply_paint): v10.0.3's paint node in basic.frag (paint_apply):
     // the colour paint overlays the albedo, a shader paint draws its graph over it. 0 = unpainted.
@@ -309,6 +314,12 @@ typedef struct {
     // texture_srgb / emissive_srgb: decoded whatever the env (texEncode 1, user_asset.c).
     int gltf_srgb_maps;
     int emissive_srgb;
+    // v10.0.3 decal (loadMesh's `decal` node, deob-10.0.3.js:232213-232243; basic.frag decal_apply): decal_texture over
+    // the albedo in the box |local position - decal_position| <= decal_half_scale (the geometry's own space, unit 12).
+    // 0 = none. The Turf Wars banners' clan logo (wars_banners.c).
+    unsigned int decal_texture;
+    vec3 decal_position;
+    vec3 decal_half_scale;
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -324,6 +335,8 @@ BasicMaterial *basic_material_init();
 #define BASIC_PAINT_ENV_TEXTURE_UNIT 8       // BasicMaterial.paint_env_texture (the metal paints' env map)
 #define BASIC_SCENE_ENV_TEXTURE_UNIT 9       // getEnvMap's filtered PMREM table (env_map.c), scene_env_intensity > 0
 #define BASIC_SCENE_ENV_DFG_TEXTURE_UNIT 10  // three r18x's DFG_LUT (env_map.c)
+#define BASIC_SPECULAR_TEXTURE_UNIT 11       // BasicMaterial.specular_texture (a user asset's "s" specularMap)
+#define BASIC_DECAL_TEXTURE_UNIT 12          // BasicMaterial.decal_texture (v10 decalMap)
 // env_map.c hands basic.c the scene's environment: `env` the 9 x 128 PMREM table, `dfg` the DFG lookup (0, 0: none,
 // GLB reflections off)
 void basic_material_set_scene_env(unsigned int env, unsigned int dfg);

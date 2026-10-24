@@ -19,19 +19,22 @@
 // moved > 0.1 ? "Move" : "Idle" (playClip with no reps: the looping main clip, which waits for a one-shot).
 // Vehicle.mov (:19145-19152): meshRef.rotation x (mdlDr % 180 != 0, order YXZ) or z (order ZYX) = angVel * vhtL.
 //
+// Model builds (player_class_model.h): a build is v10's generateMeshes unless player_class_model_keep() marked it as
+// KrunkNative's own rebuild; a generateMeshes through the model branch takes and clears player.assetTxt (:194265), so a
+// "uai" swap lasts until the next generateMeshes, exactly as in v10: a spawn (players.add, main.c also for a player
+// alive already), a loadout or prop change, another swap. A "uai" for a player this client has not added is dropped
+// (findBySid, :257784); KrunkNative's server sends the swap of a spawn's onPlayerSpawn after that SPAWN (player_anim.c).
+// The companion maps of the asset letters (applyAssetCompanionMaps, :231687-231752; getMat :232132): "n" model_n.png
+// as normalMap (normalScale 1) and "s" model_s.png as specularMap with flipY false (no mapProps), "e" model_e.png as
+// a GLTF material's emissiveMap. A GLTF's MeshStandardMaterial has no specularMap; an OBJ's takes the lighting
+// setting's material (Phong: the specular strength), its emissive keeps loadTexture's flipped map.
+// A missing or broken model or map draws nothing, as v10's loaders leave nothing; while a file downloads nothing is
+// drawn and the model is rebuilt (kept) once it lands.
+//
 // Deliberate differences:
-// - An asset this build cannot draw (an FBX "f" model, as KrunkNative has no FBX loader; a model file missing or
-//   broken) draws the default body (default_body): v10 draws nothing for it (its loader fails), which here would
-//   leave the player invisible for good. While the file downloads nothing is drawn, as in v10, and the model is
-//   rebuilt once it lands (player_class_model_stale).
-// - A "uai" / player.assetID swap lasts until the player dies (client/src/net/game_events.c), not until the next model
-//   build: v10 nulls assetTxt in generateMeshes, so any later regenMeshes (an items or loadout update) brings the
-//   class's aID back, while KrunkNative also rebuilds models for reasons of its own (a skin download, the Stalker
-//   look, the third-person toggle). A swap that reaches a dead player waits for its spawn, as in v10.
-// - A client-side player.assetID (KrunkScript) is drawn at the next model refresh (main.c, every 30 frames), not in
-//   the same frame; "uai" from the server rebuilds at once (s2c_events.c).
-// - Not drawn: the normal / specular companion maps of the n / s letters (BasicMaterial has none for user assets);
-//   the OBJ's emissive map is (user_asset_load).
+// - An FBX ("f") model draws the default body: KrunkNative has no FBX loader (doc/v10/class-models.md: ufbx was
+//   weighed against AGENTS.md's dependency rule and not taken), and an invisible player would be worse.
+// - A missing companion map is not bound (three samples an image-less texture black).
 #include <gl.h>
 #include <player_class_model.h>
 #include <player_anim.h>  // player_class_has_anims
@@ -55,13 +58,6 @@ static const ClassOverrides *class_of(const Player *player) {
     return class_overrides(&game->classes[player->class_index]);
 }
 
-// The asset text the build reads: assetTxt || config.aID || "" (:194230-194231), "" when the class has no model
-static void class_asset_text(const Player *player, char *out, const size_t n) {
-    const ClassOverrides *o = class_of(player);
-    out[0] = 0;
-    if (!o->model) return;
-    snprintf(out, n, "%s", player->asset_txt[0] ? player->asset_txt : o->asset_id);
-}
 
 int player_class_model_replaces_body(const PlayerClassModel *m) {
     return m && !m->default_body;
@@ -114,6 +110,25 @@ static unsigned int class_texture(const char *rel) {
     return texture;
 }
 
+// A companion map (applyAssetCompanionMaps, deob-10.0.3.js:231711-231752): user-assets/<id>/model<suffix>.png, its
+// placeholder while it downloads; 0 when there is none (not bound, see the differences above)
+static unsigned int class_companion_map(const char *id, const char *suffix) {
+    char rel[96];
+    snprintf(rel, sizeof(rel), "user-assets/%s/model%s.png", id, suffix);
+    char *path = concat(assets_path(), rel);
+    if (!path) return 0;
+    FILE *f = ensure_asset_file(path) ? fopen(path, "rb") : NULL;
+    unsigned int texture = 0;
+    if (f) {
+        fclose(f);
+        texture = load_texture(path);
+    } else if (asset_prefetch(path) == 0) {
+        texture = load_texture(path); // still downloading: the placeholder, filled when it lands
+    }
+    free(path);
+    return texture;
+}
+
 static int class_build_sprite(PlayerClassModel *m, const char *asset) {
     // parseInt(asset.replace(/[^\d]/g, "")) || null: the digits as a number, 0 and none are "sprite_0"
     char digits[24];
@@ -158,10 +173,11 @@ static void class_play(PlayerClassModel *m, const char *clip, const int reps) {
     if (g->clip_mode != mode || g->clip != index || g->clip_start != start) snprintf(m->clip, sizeof(m->clip), "%s", clip);
 }
 
-// 1 built, 0 nothing to draw yet (m->pending: the file downloads), -1 this build cannot draw it (the default body)
+// 1 built, 0 nothing to draw (still downloading: m->pending; or never: missing, broken, no id), -1 the default body
+// (an FBX model, which this build cannot draw)
 static int class_build_model(PlayerClassModel *m, const Player *player, const ClassOverrides *o, const char *asset) {
     UserAssetFlags flags;
-    if (!user_asset_parse(asset, &flags)) return -1; // no digits: src "/model" loads nothing
+    if (!user_asset_parse(asset, &flags)) return 0; // no digits: src "/model" loads nothing
     // the conf of generateMeshes reads only g / q / f / e / n / s: no alphaTest ("a"), no lightMap ("l")
     flags.alpha = flags.lightmap = 0;
     const int anim = flags.gltf || flags.glb || flags.fbx;
@@ -170,29 +186,29 @@ static int class_build_model(PlayerClassModel *m, const Player *player, const Cl
     char rel[96];
     snprintf(rel, sizeof(rel), "user-assets/%s/model.%s", flags.id, flags.glb ? "glb" : flags.gltf ? "gltf" : "obj");
     char *path = concat(assets_path(), rel);
-    if (!path) return -1;
+    if (!path) return 0;
     const int state = asset_prefetch(path); // 1 on disk, 0 downloading, -1 failed
-    if (state == 0) {
-        snprintf(m->pending, sizeof(m->pending), "%s", path); // loadAnimMesh / loadMesh: nothing until it loads
-        free(path);
-        return 0;
-    }
+    if (state == 0) snprintf(m->pending, sizeof(m->pending), "%s", path); // loadAnimMesh / loadMesh: nothing until it loads
     free(path);
-    if (state < 0) return -1;
+    if (state <= 0) return 0; // downloading, or the loader's error: an empty meshRef
 
     UserAssetModel model;
-    if (!user_asset_load(&flags, &model)) return -1;
+    if (!user_asset_load(&flags, &model)) return 0;
     const int preview = player->uid == -1; // the menu / viewer model (generateMeshes' third argument)
     const float y = (anim ? 0.0f : CLASS_OBJ_Y) + o->model_y_offset + (preview && o->model_pos_y != 0.0f ? o->model_pos_y : 1.0f);
     const float scale = (o->model_scale != 0.0f ? o->model_scale : 1.0f) * (preview && o->model_pos_scale != 0.0f ? o->model_pos_scale : 1.0f);
     m->holder.position = (vec3) {0.0f, y, 0.0f};
     m->holder.rotation = (vec3) {0.0f, o->model_dir * (float) M_PI / 180.0f, 0.0f};
     m->holder.scale = (vec3) {scale, scale, scale};
+    // the companion maps of "n" / "s" / "e" (the conf's normal, spec and emissive keys)
+    const unsigned int normal_map = flags.normal ? class_companion_map(flags.id, "_n") : 0;
+    const unsigned int specular_map = flags.specular ? class_companion_map(flags.id, "_s") : 0;
 
     if (model.gltf) {
         m->gltf = gltf_instance_create(model.gltf, o->anim_speed != 0.0f ? o->anim_speed : 1.0f); // mixer.timeScale = animS || 1
-        if (!m->gltf) return -1;
+        if (!m->gltf) return 0;
         m->gltf->root.parent = &m->holder;
+        const unsigned int emissive_map = flags.emissive ? class_companion_map(flags.id, "_e") : 0;
         for (size_t i = 0; i < m->gltf->mesh_count; i++) {
             Material *mat = m->gltf->meshes[i]->material;
             if (!mat || mat->vtable != &basic_material_vtable) continue;
@@ -200,6 +216,13 @@ static int class_build_model(PlayerClassModel *m, const Player *player, const Cl
             BasicMaterial *b = (BasicMaterial *) mat;
             b->texture_srgb = b->emissive_srgb = 0;
             b->gltf_srgb_maps = 0;
+            // applyAssetCompanionMaps on every MeshStandardMaterial (:233704): normalMap and emissiveMap replace the
+            // GLTF's own (flipY false is the GLTF's orientation here too); it has no specularMap
+            if (normal_map) {
+                b->normal_texture = normal_map;
+                b->normal_scale = 1.0f;
+            }
+            if (emissive_map) b->emissive_texture = emissive_map;
         }
         // startAnim "Idle" (:194257): playClip("Idle") alone, or no clip at all when the model has none
         gltf_instance_stop_clips(m->gltf);
@@ -209,48 +232,71 @@ static int class_build_model(PlayerClassModel *m, const Player *player, const Cl
     m->mesh = model.mesh;
     m->mesh->transform.parent = &m->holder;
     m->mesh->transform.position.y = -m->mesh->geometry->bound_center[1]; // geometry.translate(0, -boundingBox centre y, 0)
+    // getMat's material (the lighting setting's): normalMap and specularMap from applyAssetCompanionMaps, flipY false
+    // over the OBJ's flipped base map (sampled at 1 - v)
+    BasicMaterial *b = (BasicMaterial *) m->mesh->material;
+    if (normal_map) {
+        b->normal_texture = normal_map;
+        b->normal_scale = 1.0f;
+    }
+    b->specular_texture = specular_map;
+    b->maps_flip_v = normal_map || specular_map;
     return 1;
 }
 
 // ---------------------------------------------------------------- build / free
 
-// "uai" swaps that came before their player (player_class_model_hold_asset)
-#define CLASS_HELD_MAX 16
+// player_class_model_keep: the next build of that player keeps the model's asset and handle
+#define CLASS_KEEP_MAX 16
 static struct {
     int uid;
-    char asset[NET_PLAYER_ASSET_TEXT];
-} g_held[CLASS_HELD_MAX];
-static int g_held_count;
+    char asset[32];
+    unsigned char from_swap;
+    unsigned serial;
+} g_keep[CLASS_KEEP_MAX];
+static int g_keep_count;
+static unsigned g_serial;
 
-void player_class_model_hold_asset(const int uid, const char *asset_txt) {
-    if (!asset_txt || !asset_txt[0]) return;
+void player_class_model_keep(const Player *player) {
+    const PlayerMesh *pm = player ? player->mesh : NULL;
+    const PlayerClassModel *m = pm ? pm->class_model : NULL;
+    if (!m || player->uid == -1) return; // no model: the next build is the same either way
     int slot = 0;
-    while (slot < g_held_count && g_held[slot].uid != uid) slot++;
-    if (slot == g_held_count) {
-        if (g_held_count < CLASS_HELD_MAX) g_held_count++;
-        else slot = (int) ((unsigned) uid % CLASS_HELD_MAX); // full: an old one goes
+    while (slot < g_keep_count && g_keep[slot].uid != player->uid) slot++;
+    if (slot == g_keep_count) {
+        if (g_keep_count < CLASS_KEEP_MAX) g_keep_count++;
+        else slot = (int) ((unsigned) player->uid % CLASS_KEEP_MAX);
     }
-    g_held[slot].uid = uid;
-    snprintf(g_held[slot].asset, sizeof(g_held[slot].asset), "%s", asset_txt);
+    g_keep[slot].uid = player->uid;
+    snprintf(g_keep[slot].asset, sizeof(g_keep[slot].asset), "%s", m->asset);
+    g_keep[slot].from_swap = m->from_swap;
+    g_keep[slot].serial = m->serial;
 }
 
 void player_class_model_reset(void) {
-    g_held_count = 0;
+    g_keep_count = 0;
 }
 
-static void class_take_held(Player *player) {
-    for (int i = 0; i < g_held_count; i++) {
-        if (g_held[i].uid != player->uid) continue;
-        player_class_model_set_asset(player, g_held[i].asset); // updateAssetID's own test (config.mdl)
-        g_held[i] = g_held[--g_held_count];
-        return;
+static int class_take_keep(const Player *player, char *asset, const size_t n, unsigned char *from_swap, unsigned *serial) {
+    for (int i = 0; i < g_keep_count; i++) {
+        if (g_keep[i].uid != player->uid) continue;
+        snprintf(asset, n, "%s", g_keep[i].asset);
+        *from_swap = g_keep[i].from_swap;
+        *serial = g_keep[i].serial;
+        g_keep[i] = g_keep[--g_keep_count];
+        return 1;
     }
+    return 0;
 }
 
 PlayerClassModel *player_class_model_create(Player *player, const int render_you, const int third_person) {
     if (!player || !player->game) return NULL;
-    if (g_held_count && player->uid != -1) class_take_held(player);
     const ClassOverrides *o = class_of(player);
+    // KrunkNative's own rebuild (player_class_model_keep): the asset and handle the model had
+    char kept[32] = "";
+    unsigned char kept_swap = 0;
+    unsigned kept_serial = 0;
+    const int keep = player->uid != -1 && class_take_keep(player, kept, sizeof(kept), &kept_swap, &kept_serial);
     // IÍïíiií (:194099) also counts the class's own camera offset (config.camOffX / Y / Z)
     const int class_camera = o->cam_offset[0] != 0.0f || o->cam_offset[1] != 0.0f || o->cam_offset[2] != 0.0f;
     const int shown = o->model_fp || third_person || class_camera || !render_you;
@@ -261,14 +307,26 @@ PlayerClassModel *player_class_model_create(Player *player, const int render_you
     m->holder.scale = (vec3) {1.0f, 1.0f, 1.0f};
     m->mdl = shown ? o->model : 0;
     m->class_mdl = o->model;
-    class_asset_text(player, m->asset, sizeof(m->asset));
     m->has_anims = (unsigned char) player_class_has_anims(player);
-    if (!shown) return m; // mdlFP off in first person: nothing at all
+    m->serial = keep && kept_serial ? kept_serial : ++g_serial;
+    if (o->model) {
+        if (keep) { // not a generateMeshes: a waiting assetTxt stays waiting
+            snprintf(m->asset, sizeof(m->asset), "%s", kept[0] || kept_swap ? kept : o->asset_id);
+            m->from_swap = kept_swap;
+        } else if (shown && player->asset_txt[0]) { // IIíììiî = assetTxt || aID, then assetTxt = null (:194230, :194265)
+            snprintf(m->asset, sizeof(m->asset), "%s", player->asset_txt);
+            m->from_swap = 1;
+            player->asset_txt[0] = 0;
+        } else {
+            snprintf(m->asset, sizeof(m->asset), "%s", o->asset_id);
+        }
+    }
+    if (!shown) return m; // mdlFP off in first person: nothing at all (assetTxt waits)
 
     int built = 0;
-    if (o->model == 1) built = class_build_sprite(m, m->asset) ? 1 : -1;
+    if (o->model == 1) built = class_build_sprite(m, m->asset);
     else if (o->model == 2) built = class_build_model(m, player, o, m->asset);
-    else built = -1; // an mdl past "Model": none of v10's branches; the default body
+    // an mdl past "Model" (2): neither of v10's branches builds anything, and the default branch is skipped
     if (built < 0) {
         if (m->mesh) mesh_fini(m->mesh);
         if (m->gltf) gltf_instance_fini(m->gltf);
@@ -281,6 +339,7 @@ PlayerClassModel *player_class_model_create(Player *player, const int render_you
 
 void player_class_model_free(PlayerClassModel *m) {
     if (!m) return;
+    ks_scene_class_model_freed(m); // getAsset's handle loses it (ks_scene.c)
     if (m->world && g_pet_world_scene) scene_remove_class_model(g_pet_world_scene, m, 1);
     if (m->mesh) mesh_fini(m->mesh); // its material; the geometry / textures stay in the loader caches
     if (m->gltf) gltf_instance_fini(m->gltf);
@@ -405,11 +464,21 @@ void player_class_model_describe(const Player *player, char *out, const size_t n
         return;
     }
     const char *body = m->default_body ? "fallback" : m->mesh || m->gltf ? "model" : "none";
-    const size_t o = (size_t) snprintf(out, n, "body=%s mdl=%d asset=%s clip=%s%s", body, m->class_mdl, m->asset[0] ? m->asset : "-",
-                                       m->clip[0] ? m->clip : "-", m->gltf && gltf_instance_clip_running(m->gltf) ? "*" : "");
+    const size_t o = (size_t) snprintf(out, n, "body=%s mdl=%d asset=%s clip=%s%s%s", body, m->class_mdl, m->asset[0] ? m->asset : "-",
+                                       m->clip[0] ? m->clip : "-", m->gltf && gltf_instance_clip_running(m->gltf) ? "*" : "",
+                                       m->from_swap ? " swap=1" : "");
+    size_t at = o < n ? o : n;
+    // the companion maps bound (n normal, s specular, e emissive; flip: sampled at 1 - v)
+    const Mesh *first = m->mesh ? m->mesh : m->gltf && m->gltf->mesh_count ? m->gltf->meshes[0] : NULL;
+    const BasicMaterial *b = first && first->material && first->material->vtable == &basic_material_vtable ? (const BasicMaterial *) first->material : NULL;
+    if (b && at < n && (b->normal_texture || b->specular_texture || b->emissive_texture)) {
+        const int w = snprintf(out + at, n - at, " maps=%s%s%s%s", b->normal_texture ? "n" : "", b->specular_texture ? "s" : "",
+                               b->emissive_texture ? "e" : "", b->maps_flip_v ? ",flip" : "");
+        at = w > 0 && at + (size_t) w < n ? at + (size_t) w : n;
+    }
     // the Vehicle lean (holder rotation x / z, YXZ or the default order)
-    if (o < n && (m->holder.rotation.x != 0.0f || m->holder.rotation.z != 0.0f))
-        snprintf(out + o, n - o, " lean=%.4f,%.4f%s", m->holder.rotation.x, m->holder.rotation.z, m->holder.rotation_order == ROTATION_ORDER_YXZ ? ",YXZ" : "");
+    if (at < n && (m->holder.rotation.x != 0.0f || m->holder.rotation.z != 0.0f))
+        snprintf(out + at, n - at, " lean=%.4f,%.4f%s", m->holder.rotation.x, m->holder.rotation.z, m->holder.rotation_order == ROTATION_ORDER_YXZ ? ",YXZ" : "");
 }
 
 int player_class_model_set_asset(Player *player, const char *asset_txt) {
@@ -420,9 +489,32 @@ int player_class_model_set_asset(Player *player, const char *asset_txt) {
 
 int player_class_model_stale(const Player *player, const PlayerClassModel *m) {
     if (!player || !player->mesh) return 0;
-    char want[sizeof(m->asset)];
-    class_asset_text(player, want, sizeof(want));
-    if (strcmp(want, m ? m->asset : "") != 0) return 1;
-    if ((m ? m->class_mdl : 0) != class_of(player)->model) return 1; // the class's Player Type changed (a new config)
-    return m && m->pending[0] && asset_prefetch(m->pending) != 0; // the file arrived (or failed: the default body)
+    const ClassOverrides *o = class_of(player);
+    // an assetTxt set with no regenMeshes after it yet (a client script's player.assetID: ks_client_host.c rebuilds at
+    // once, this catches any other way): the generateMeshes that takes it
+    if (player->active && o->model && player->asset_txt[0] && (!m || m->mdl)) return 1;
+    // KrunkNative only: a model built before its class config came (GAME_CONFIG after the SPAWN) or under an older
+    // one; v10's INIT carries the config before any player is added
+    if ((m ? m->class_mdl : 0) != o->model) return 1;
+    if (m && !m->from_swap && o->model && strcmp(m->asset, o->asset_id) != 0) return 1;
+    // the file arrived (or failed) since the build: the same model again, with it
+    if (m && m->pending[0] && asset_prefetch(m->pending) != 0) return 2;
+    return 0;
+}
+
+int player_class_model_spawn_rebuild(const Player *player) {
+    const PlayerMesh *pm = player ? player->mesh : NULL;
+    const PlayerClassModel *m = pm ? pm->class_model : NULL;
+    return (m && m->from_swap) || (player && player->asset_txt[0] && class_of(player)->model);
+}
+
+PlayerClassModel *player_class_model_find(const Game *game, const int uid, const unsigned serial) {
+    for (size_t i = 0; game && i < game->player_count; i++) {
+        const Player *p = game->players[i];
+        if (!p || p->uid != uid) continue;
+        const PlayerMesh *pm = p->mesh;
+        PlayerClassModel *m = pm ? pm->class_model : NULL;
+        return player_class_model_replaces_body(m) && m->serial == serial ? m : NULL;
+    }
+    return NULL;
 }

@@ -7,6 +7,7 @@
 #include <skin_fx.h>
 #include <skin_video.h> // the upgraded weapons' altSkin video
 #include <third_person.h> // the local third-person model
+#include <class_camera.h> // ... and the class camera's (thirdPerson, a camera offset, a camType but FPS)
 #include <prop_hunt.h> // Prop Hunt: the prop model
 #include <social_v7.h> // game_player_is_prop
 #include <stalker.h> // v10 Stalker: isStalker, the knife texture
@@ -526,15 +527,22 @@ static int skin_texture_exists(const char *key) {
     return file != NULL;
 }
 
-// generateMeshes `ae`: game.store.skins[weapon.melee ? meleeIndex : player.skins[slot]], {} (NULL) when
-// there is none or a weapon skin is for another weapon (ae.weapon - 1 != loadout[slot]).
+// player.getSkinForLoadout(slot) (deob-10.0.3.js:190800-190811): which of player.skins (0 primary, 1 secondary) is the
+// store skin made for the slot's weapon, whatever the slot's index; -1 none.
+static int player_slot_skin_source(const Player *player, const int slot) {
+    const int index = viewer_loadout_skin(player->skins.primary, player->skins.secondary, player->loadout[slot]);
+    return index < 0 ? -1 : index == player->skins.primary ? 0 : 1;
+}
+
+// generateMeshes `ae`: game.store.skins[weapon.melee ? meleeIndex : getSkinForLoadout(slot)], {} (NULL) when
+// there is none for the slot's weapon (ae.weapon - 1 != loadout[slot]).
 static const ViewerSkin *player_slot_skin(const Player *player, const int slot, const Weapon *weapon) {
     if (weapon->melee) {
         const ViewerSkin *skin = viewer_skin(player->skins.melee);
         return skin && skin->type == 3 ? skin : NULL;
     }
-    const ViewerSkin *skin = viewer_skin(slot == 0 ? player->skins.primary : slot == 1 ? player->skins.secondary : -1);
-    return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
+    const int source = player_slot_skin_source(player, slot);
+    return source < 0 ? NULL : viewer_skin(source ? player->skins.secondary : player->skins.primary);
 }
 
 // The item a slot's weapon wears (generateMeshes, deob-10.0.3.js:194480-194486: `if (!ae || weapon.upgraded) ae =
@@ -549,10 +557,12 @@ static const ViewerSkin *player_slot_look(const Player *player, const int slot, 
     return skin ? skin : *alt ? &(*alt)->skin : NULL;
 }
 
-// The SKINS paint of the store skin player_slot_skin returns for this slot (the melee's on a melee weapon).
+// The SKINS paint of the store skin player_slot_skin returns for this slot (the melee's on a melee weapon): the paint of
+// the player.skins entry getSkinForLoadout picked (deob-10.0.3.js:194691).
 static WornSkinPaint player_slot_paint(const Player *player, const int slot, const Weapon *weapon) {
     if (weapon->melee) return player->skin_paints.melee;
-    return slot == 0 ? player->skin_paints.primary : player->skin_paints.secondary;
+    const int source = player_slot_skin_source(player, slot);
+    return (source < 0 ? slot : source) == 0 ? player->skin_paints.primary : player->skin_paints.secondary;
 }
 
 // KrunkNative Piss: the centre of the trigger hand (the arm generate_arms gives the right hold:
@@ -800,10 +810,24 @@ static int gltf_skin_available(const ViewerSkin *skin, const char *model_key) {
 // A weapon skin flagged pending (weapon_skin_pending): its GLTF or OBJ model is on disk now. The generate
 // loop's own test, read from the files, so it asks the same question the build did (gltf_model_load starts the
 // download of a missing GLTF). The player's meshes are then rebuilt (main.c client_refresh_weapon_skins).
-// A v10.0.3 class model that no longer matches the player (a swapped asset, its file arrived) asks for it too.
+// A v10.0.3 class model that no longer matches the player (a waiting assetTxt, its file arrived) asks for it too.
+// Every rebuild this answers is KrunkNative's own (a file that came down) and keeps the class model's asset and handle
+// (player_class_model_keep), except a class model's generateMeshes (stale 1: a waiting assetTxt, a new class config).
+static int player_weapon_skin_files_ready(const Player *player);
 int player_weapon_skin_ready(const Player *player) {
     const PlayerMesh *player_mesh = player->mesh;
-    if (player_mesh && player->game && player_class_model_stale(player, player_mesh->class_model)) return 1;
+    if (!player_mesh || !player->game) return 0;
+    const int class_stale = player_class_model_stale(player, player_mesh->class_model);
+    if (class_stale == 1) return 1;
+    if (class_stale == 2 || player_weapon_skin_files_ready(player)) {
+        player_class_model_keep(player);
+        return 1;
+    }
+    return 0;
+}
+
+static int player_weapon_skin_files_ready(const Player *player) {
+    const PlayerMesh *player_mesh = player->mesh;
     if (!player_mesh || !player_mesh->weapon_skin_pending || !player->game) return 0;
     for (int i = 0; i < player->loadout_size; i++) {
         const Weapon *weapon = player->game->weapons[player->loadout[i]];
@@ -1243,7 +1267,9 @@ void player_generate_meshes(Player *player, const int render_you) {
     // KrunkNative: the local player's model for the third-person camera (third_person.h) is the
     // same third-person model as v7's game.config.thirdPerson builds for renderYou
     const int kn_third_person = render_you && (third_person_model() || prop_hunt_player(player)); // a prop: its own model (Prop Hunt)
-    const int third_person = !render_you || kn_third_person || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+    // generateMeshes' third-person build (deob-10.0.3.js:194102): thirdPerson, the class's camOffX / Y / Z or
+    // !renderYou (renderYou = isYou && camType.isNormal, :190538-190542)
+    const int third_person = !render_you || kn_third_person || class_camera_player_third_person(player);
 
     PlayerMesh *player_mesh = calloc(1, sizeof(PlayerMesh));
     if (!player_mesh) return;
@@ -1502,7 +1528,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                     if (!skin_tex && skin_geo && skin_geo != gltf_empty_geometry() && strcmp(texture, model) != 0) skin_tex = skin_texture(model);
                     const int glow = skin && (skin->flags & (VS_GLOW | VS_SAME_GLOW));
                     if (skin_geo) {
-                        sel_skin = skin && !alt ? (i == 0 ? player->skins.primary : player->skins.secondary) : -1;
+                        sel_skin = skin && !alt ? (player_slot_skin_source(player, i) ? player->skins.secondary : player->skins.primary) : -1;
                         snprintf(sel_model, sizeof(sel_model), "%s", model);
                         snprintf(sel_tex, sizeof(sel_tex), "%s", skin_geo == gltf_empty_geometry() ? "gltf" : skin_tex ? texture : "-");
                     }
@@ -1734,7 +1760,9 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float weapon_ads_off_y = VM_SETTING("weaponADSOffY", settings->weapon_ads_off_y);
 #undef VM_SETTING
 
-    const int third_person = player_mesh->kn_third_person || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+    // updateMsh (deob-10.0.3.js:193600): thirdPerson, a camType but FPS or the player's class camOffX / Y / Z (v10
+    // reads the local controls' camType for every player, KrunkNative the player's own class)
+    const int third_person = player_mesh->kn_third_person || class_camera_player_third_person(player);
     const float aim_val_mlt = animate_aim && player->is_you ? player->aim_val : 0.0f;
     const float aim_mlt = player->weapon->animate_while_aiming ? 0.0f : aim_val_mlt;
     const float anim_mlt = (1.0f - (1.0f - game_constants.aim_anim_mlt) * aim_val_mlt) * game_constants.anim_mlt * weapon_bobbing_mlt;

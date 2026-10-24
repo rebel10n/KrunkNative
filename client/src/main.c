@@ -15,6 +15,7 @@
 #include <hud_social.h> // WP-E: social_reset_server
 #include <camera_feel.h>
 #include <third_person.h>
+#include <class_camera.h> // v10.0.3 class camera: offsets, camTypes, freeMouse aim, the locks
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
 #include <frame_target.h>  // web: the frame draws offscreen, the canvas gets it whole
 #include <html_ui.h>
@@ -40,6 +41,8 @@
 #include <env_map.h> // v10.0.3 GLB reflections: getEnvMap (env_map.c)
 #include <ocean.h>
 #include <zombies_render.h> // map-logic WP-H in-world (zombies_render.c)
+#include <prize_wheel_render.h> // v10.0.3 map prize wheels (prize_wheel_render.c)
+#include <wars_banners.h>      // v10.0.3 Turf Wars map banners (wars_banners.c)
 #include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
 #include <math.h>
 #include <signal.h> // Ctrl+C / SIGTERM: a clean shutdown (install_quit_signals)
@@ -52,6 +55,7 @@
 #include <audio.h>
 #include <gltf.h>     // gltf_model_forget (mod_pack.c hooks)
 #include <mod_pack.h> // map resource packs (mod_pack.c)
+#include <live_events_client.h> // v10.0.3 live events: the EVENT prefab's meshes (event_objects.c)
 #ifndef __EMSCRIPTEN__
 #include <kn_install.h> // kn_console_init: client.exe's output on Windows (launcher/src/install.c)
 #endif
@@ -1227,6 +1231,8 @@ void client_load_map(Client *client) {
     shadow_load_map(client->game.map); // caster/receiver flags + light camera (shadow.c)
     map_post_load(client->scene, client->game.map); // AO planes, noise planes, point lights (map_post.c)
     zombies_render_load(client->scene, client->game.map); // WP-H machine weapons, beams, airdrops (zombies_render.c)
+    prize_wheel_render_load(client->scene, client->game.map); // the prize wheels' canvas planes (prize_wheel_render.c)
+    wars_banners_load(client->scene, client->game.map); // the Turf Wars banners' nodes (wars_banners.c)
 }
 
 void client_unload_map(Client *client) {
@@ -1236,6 +1242,8 @@ void client_unload_map(Client *client) {
     shadow_unload_map();
     map_post_unload(client->scene);
     zombies_render_unload();
+    prize_wheel_render_unload();
+    wars_banners_unload();
     map_environment_unload(); // ocean, v7 output state (map_environment.c)
     hud_gui_clear();          // map "gui" elements (ui/hud_gui.c)
 
@@ -1494,6 +1502,7 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
         client_look_reset();
         menu_view_reset();
         third_person_on_spawn();
+        class_camera_on_spawn(); // player.camChase = null
         client_force_player_positions(client);
         // Our prediction copy has to slide like the server's player (v3.1.1 reads it back from
         // the spawn data, index.js serverSetting.slidCont); the offline sandbox server too.
@@ -1508,6 +1517,7 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
         hud_ui_hide_death(client);
         hud_popups_on_spawn(); // "start": medal queue cleared, overlay.reset()
         spectate_end(client); // playing again ("start" with spectating = false)
+        client_event_objects_on_start(client, 0); // "start": the EVENT prefab's meshes for event 3 (event_objects.c)
         // startGame(): UI.toggleMenu(false) -- e.g. the next round respawning everyone who
         // played while INIT had brought the menu back.
         if (html_ui_available() && html_ui_is_menu_open()) client_set_menu_open(client, 0);
@@ -1605,6 +1615,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     mod_pack_map_loaded(client->game.map ? client->game.map->raw_data : NULL); // the map's modURL resource pack
     client_load_map(client);
     client->map_loaded = client->game.ready;
+    client_event_objects_on_map(client); // the EVENT prefab's meshes keep the last "start"'s state (event_objects.c)
     // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets
     // only exist on servers of protocol minor >= NET_PROTOCOL_MINOR_V7
     ks_client_round(client, init->major == NET_PROTOCOL_MAJOR ? init->minor : 0);
@@ -2421,6 +2432,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
             g_look.x = g_look_sent.x = me->direction.x;
             g_look.y = g_look_sent.y = me->direction.y;
             g_look_valid = 1;
+            class_camera_look_reset(); // the class camera's controls take the new look too (camRot off)
         }
         g_look_shown_valid = 0;
         input.x_dir = g_look.x;
@@ -2464,18 +2476,33 @@ static void client_tick_game(Client *client, const float now, const float frame_
         if (client_round_ended(client) && menu_view_time_scale() <= 0.0f) {
             input = (Input) {.move_dir = -1, .delta = input.delta, .x_dir = input.x_dir, .y_dir = input.y_dir};
         }
+        // v10.0.3 class camera without camRot ("Mouse Rotation"): updateMouseInp never turns the controls
+        // (deob-10.0.3.js:235469), so the mouse, the pad and the scripted look leave the look alone
+        const ClassCamera class_cam = class_camera_current(client);
+        if (!class_cam.rotation) {
+            input.x_dir = g_look.x;
+            input.y_dir = g_look.y;
+        }
         // controls.js: the pitch is clamped and xDr = rotation.y % Math.PI2 before the input
         // frame takes them, so the yaw sent (and predicted) never grows without bound.
         input.x_dir = player_clamp_pitch(input.x_dir);
         input.y_dir = player_wrap_yaw(input.y_dir);
         g_look.x = input.x_dir;
         g_look.y = input.y_dir;
+        // v10.0.3 class camera with freeMouse (3rd Person / Platformer X / Z): the cursor's ray on the aim
+        // plane is the input's look (iíÏìiìî and yDr, deob-10.0.3.js:260650-260685); the controls keep theirs
+        vec2 class_aim;
+        if (class_camera_input_aim(client, g_look, &class_aim)) {
+            input.x_dir = player_clamp_pitch(class_aim.x);
+            input.y_dir = player_wrap_yaw(class_aim.y);
+        }
         // KrunkNative third person sends this look unchanged, as v10's thirdPerson does (the input
         // frame takes CONTROLS yDr/xDr, v10.js 221504): the camera only rides behind the shoulder.
 
         if (input_sampled) {
             g_look_sent.x = input.x_dir; // what me->direction takes (the resync test above)
             g_look_sent.y = input.y_dir;
+            if (class_cam.lock_y_rot != 0.0f) g_look_sent.x = 0.0f; // lckCmYR: procInputs zeroes the pitch (player.c)
             input.seq = client->net_next_input_seq++;
             // input[1] = Math.round(inputFrameDelta * config.deltaMlt) (v10:221748): a time-scaled lobby
             // runs (and sends) every frame scaled; player_proc_input rounds it to whole ms
@@ -2523,16 +2550,23 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // The world on the endAnim-scaled delta; the offline game's round/end clocks on real time.
     game_tick_world(&client->game, now, frame_delta, delta);
     client_recon_after_tick(client); // this input's shot knockback, kept for replays (input.velObj)
+    // v10.0.3 class camera, after procInputs on an input frame: lockCamP's chase of the body's yaw, lckCmYR
+    // and yCmLim set the controls' yaw / pitch (deob-10.0.3.js:260824-260845)
+    if (input_sampled) class_camera_after_input(client, &g_look, delta * 1000.0f);
     ks_client_frame(client, delta, frame_delta); // KrunkScript update(delta) + script scene objects (game.js:4960)
 
     // Krunker poses the camera right after procInputs (index.js gameLoop: rotateCam with
     // recoil/landing bob/shake, moveCam, ADS zoom) and renders in the same frame, so this
     // frame shows this frame's input.
+    class_camera_frame_begin(client); // the perspective projection (the Orthographic camera goes on again below)
     if (client->me && client->me->active) {
         camera_feel_apply(client);
         if (!third_person_view(client)) camera_feel_wall_lean(client, frame_delta * 1000.0f); // wallLean roll
         if (third_person_view(client)) {
             third_person_apply_camera(client, g_look, delta); // over the shoulder (third_person.c)
+        } else if (class_camera_apply(client, g_look)) {
+            // v10.0.3's class camera (class_camera.h): the controls' look with the class's offset, 3rd Person /
+            // Platformer / Orthographic views, the free-mouse lookAt, thirdPerson's (5, 2, 14)
         } else if (g_look_unsampled || !player_direction_is_look(client->me)) {
             // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS). A movement scheme
             // whose body turns on its own (Vehicle, MMORPG, trnSp below 1) shows the mouse look every
@@ -2571,6 +2605,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
         map_post_frame(client->scene, &client->game, &client->camera, delta * 1000.0f); // spin, sign distance, GLTF assets, builds, zone (map_post.c)
         om_interp_frame(client); // Object Manager: others' edits eased, our own carry where it is now (om_interp.c)
         zombies_render_frame(client, delta * 1000.0f); // WP-H: mystery box / krum weapons, beams, airdrops (zombies_render.c)
+        prize_wheel_render_frame(client); // map prize wheels: a new updateSpinners paint (prize_wheel_render.c)
+        wars_banners_frame(client);       // Turf Wars banners: (re)built after a warsClan, the clan logo (wars_banners.c)
         shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
         ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)
         sky_tick(delta * 1000.0f);
@@ -2582,7 +2618,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
         sync_hidden_render_begin(client); // players.hideAll: a player the last marked sync left out is not drawn (above)
         spectate_render_begin(client); // first-person spectating hides the followed player's model
         // KrunkNative third person: the local (third-person) model is drawn with the world
-        Player *tp_me = third_person_draw_model(client) ? client->me : NULL;
+        // ... and so is a class camera's (class_camera.h: thirdPerson, a camera offset, a camType but FPS)
+        Player *tp_me = third_person_draw_model(client) || class_camera_draws_own_model(client) ? client->me : NULL;
         tp_own_model = tp_me != NULL;
         if (tp_me) {
             scene_remove_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
@@ -2611,8 +2648,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         fps_camera.fov = ui_controls_fps_fov();
         // hideADS: no weapon model while fully aimed (render_settings.h)
         // KrunkNative third person (third_person.h): the local model went into the world pass (or is
-        // hidden, camera pulled into the head); never a viewmodel. v7's own thirdPerson keeps this pass.
-        const int viewmodel = ui_controls_weapon_visible(client) && !client_render_hide_weapon_ads(client) && !third_person_view(client);
+        // hidden, camera pulled into the head); never a viewmodel. So is the class camera's third-person
+        // model (thirdPerson, a camera offset, a camType but FPS: layer 0, generateMeshes deob-10.0.3.js:194102).
+        const int viewmodel = ui_controls_weapon_visible(client) && !client_render_hide_weapon_ads(client) && !third_person_view(client) &&
+                              !class_camera_draws_own_model(client);
         third_person_note_frame(tp_own_model, viewmodel);
         if (viewmodel) {
             // Fog: v10.0.3 renders the viewmodel as layer 1 of the same scene from fpsCamera (render(scene,

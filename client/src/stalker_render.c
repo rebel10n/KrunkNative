@@ -10,6 +10,7 @@
 // (NET_EXT_PLAYER_SYNC, main.c client_players_hide_all) keeps its model out of the world pass.
 #include <stalker_client.h>
 #include <stalker.h>
+#include <player_class_model.h> // player_class_model_keep
 
 // ---------------------------------------------------------------- the look
 
@@ -60,6 +61,7 @@ void stalker_render_frame(Client *client) {
         const PlayerMesh *mesh = player ? player->mesh : NULL;
         if (!mesh || !player->active || mesh->stalker == (unsigned char) player_is_stalker(&client->game, player)) continue;
         const int render_you = mesh->render_you;
+        player_class_model_keep(player); // KrunkNative's own rebuild: a class model keeps its asset (player_class_model.h)
         client_drop_player_mesh(client, player);
         client_add_player_mesh(client, player, render_you);
     }

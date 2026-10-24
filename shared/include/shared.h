@@ -1371,8 +1371,8 @@ typedef struct Player_t {
     unsigned char prop_rot_saved_set; // propRotSaved != null
     float prop_rot_saved;         // propRotSaved: the yaw the model keeps while propRot is off
     // v10.0.3 player.assetTxt (players.updateAssetID, deob-10.0.3.js:197964): the class model's asset a "uai"
-    // swapped in (NET_EXT_PLAYER_ASSET_ID), "" = the class's aID. Client only; kept for this life, dropped at the
-    // player's death (client/src/player_class_model.c)
+    // swapped in (NET_EXT_PLAYER_ASSET_ID), "" = none waiting. Client only: the next generateMeshes of the player's
+    // class model takes and clears it (client/src/player_class_model.c)
     char asset_txt[32];
 
     float *ramp_fix;
@@ -2243,6 +2243,9 @@ typedef struct Game_t {
     // gives a public round the first ongoing event's id (server/src/accounts.c, the brain's gameEvents); clients get it
     // with the INIT (NET_EXT_INIT_EVENT)
     int event_index;
+    // the round's event has limitedTimeMode (config.events, shared/include/live_events.h): genMatchList's first vote
+    // pick is the event's mode (deob-10.0.3.js:221830-221832, :222459-222463; game_config.c). Authority only.
+    unsigned char event_ltm;
     GameForfeit forfeit;          // the team forfeit vote (shared/src/forfeit.c)
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
@@ -2443,7 +2446,7 @@ typedef enum {
                                    // the client's prompt, client/src/ui/trade_ui.c; the server's request, server/src/trade.c)
     GAME_INTERACT_PICKUP = 6,      // WEAPON_PICKUP: "Press [key] to <inm || pickup NAME> [price]"
     GAME_INTERACT_KEY = 7,         // onInteractKey trigger: "Press [key] to <inm || Interact> [cost]"
-    GAME_INTERACT_SPINNER = 9,     // PRIZE_WHEEL (KR store wheels: no store natively)
+    GAME_INTERACT_SPINNER = 9,     // PRIZE_WHEEL: "Press [key] to Spin <wheel> [<price> KR]", index = the spinner uid (map_spinners.h)
     GAME_INTERACT_CLAIM = 10,      // airdrop claim (hold interact)
     GAME_INTERACT_SPAWNABLE = 12,  // spawnable pickup message
     GAME_INTERACT_MYSTERY_BOX = 13,

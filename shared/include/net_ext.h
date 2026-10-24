@@ -78,7 +78,7 @@ typedef enum {
     NET_EXT_KPD_RESET = 0x0804,       // "kpdf" S -> C, no body: the officer's verdict is open again (kpdData kept)
     NET_EXT_KPD_DATA = 0x0805,        // startGame kpdData S -> C NetKpdDataPacket: the officer's case in this lobby
     NET_EXT_KPD_RATE = 0x0806,        // "rkpd" C -> S NetKpdRatePacket: the officer's verdict on the case
-    NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: a DEV's kick / ban from the player list
+    NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: the player list's kick / ban / transfer host
     NET_EXT_KPD_APPLY = 0x0808,       // "kpdA" C -> S NetKpdApplyPacket: a K.P.D application (answer: NET_EXT_KPD_RESPONSE code 6)
     NET_EXT_VOTE_FORFEIT_STATE = 0x0809, // "vf" S -> C NetVoteForfeitStatePacket: the ranked forfeit vote (#voteToForfeit)
     NET_EXT_KPD_LIST = 0x080A,        // "kpd" C -> S NetKpdListPacket: the K.P.D window's Demos (tab 4) / Reviewers (tab 5) list
@@ -548,14 +548,16 @@ typedef struct {
 } NetKpdCallPacket;
 
 // NET_EXT_ADMIN_ACTION (C -> S, v10 "ADMIN_ACTIONS" [action, id, extraBan] from the player list's
-// Kick and Ban buttons): action 0 kicks player `uid` (a Game uid), 1 bans it (its account, when it
-// has one, from this server's bans). The server checks the sender is DEV on every request and that
-// the target is a player here other than the sender; the client's own check only shows the button.
+// Kick, Ban and Transfer Host buttons): action 0 kicks player `uid` (a Game uid: a DEV, the custom
+// host or a moderator), 1 bans it (a DEV only: its account, when it has one, from this server's
+// bans), 8 makes it the custom game's host (the host only). The server checks the sender's right on
+// every request and that the target is a player here other than the sender (server/src/votekick.c);
+// the client's own check only shows the button.
 // Other actions (kill, tp2, tpme, ...) stay chat commands. A refused request changes nothing and
 // the sender gets a Server line.
 typedef struct {
     int32_t uid;
-    uint8_t action; // 0 kick, 1 ban
+    uint8_t action; // 0 kick, 1 ban, 8 transfer host (v10.0.3 punishPlayer's action, deob-10.0.3.js:254059-254071)
 } NetAdminActionPacket;
 
 // NET_EXT_KPD_RESPONSE (S -> C, v10 "kpd" [code, message, data]): code 0 answers a call
@@ -832,8 +834,9 @@ typedef struct {
 // players.updateAssetID :197964): `if (config.mdl && assetTxt.length)` the player's next model build loads that asset
 // instead of the class's aID (player.assetTxt, nulled by generateMeshes :194265), and an active player is rebuilt at
 // once (regenMeshes). The authority broadcasts it from updateAssetID (KrunkScript's `player.assetID = ...` setter,
-// :207883-207887; shared/src/player_anim.c player_update_asset_id). The client keeps it for the player's life (one for
-// a dead player waits for its spawn; client/src/player_class_model.c).
+// :207883-207887; shared/src/player_anim.c player_update_asset_id; one made in a spawn's onPlayerSpawn goes out after
+// that SPAWN). The client drops it for a sid it has not added (findBySid) and keeps it in player.assetTxt until the
+// next generateMeshes takes it (client/src/player_class_model.c).
 #define NET_PLAYER_ASSET_TEXT 32
 typedef struct {
     int32_t sid;                       // the player (its uid on the KrunkNative wire)

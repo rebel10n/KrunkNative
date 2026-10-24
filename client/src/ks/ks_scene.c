@@ -32,6 +32,7 @@ enum {
     KSO_SPRITE,     // sprite / mimicSprite: faces the camera
     KSO_MODEL,      // addAsset (GLTF / GLB / OBJ)
     KSO_LIGHT,      // point / spot / dir / rect light
+    KSO_PLAYER_ASSET, // player.getAsset(): a class model's GLTF root, borrowed (player_class_model.h)
 };
 enum { KSL_POINT = 1, KSL_SPOT, KSL_DIR, KSL_RECT };
 enum { KSA_NONE, KSA_PLAYER, KSA_OBJECT, KSA_BONE, KSA_CAMERA };
@@ -72,6 +73,11 @@ typedef struct KsObj3D {
     int attach_uid;
     int attach_point;          // KSP_*: attachTo's 6th argument on a player
     int fps_layer;             // drawn by the viewmodel pass (fps_scene): v10's layers.mask copied from a first-person "handL"
+    // KSO_PLAYER_ASSET: the class model (player uid, PlayerClassModel.serial) whose GLTF root it is; deleted: delete()
+    // took the root off the holder (unseen); unparented: detach() put it in the world
+    int asset_uid;
+    unsigned asset_serial;
+    unsigned char asset_deleted, asset_unparented;
 } KsObj3D;
 
 typedef struct {
@@ -243,6 +249,20 @@ static KsObj3D *obj_find(const uint32_t id) {
     return NULL;
 }
 
+// KSO_PLAYER_ASSET: the class model it is a handle of, while that model is drawn (NULL once rebuilt as another model)
+static PlayerClassModel *obj_borrowed(const KsObj3D *o) {
+    if (o->kind != KSO_PLAYER_ASSET || !g_ksc.client) return NULL;
+    PlayerClassModel *m = player_class_model_find(&g_ksc.client->game, o->asset_uid, o->asset_serial);
+    return m && m->gltf ? m : NULL;
+}
+
+// The GLTF a model object animates (its own) or a player asset's bones live in (the class model's)
+static GltfInstance *obj_gltf(const KsObj3D *o) {
+    if (o->model) return o->model;
+    const PlayerClassModel *m = obj_borrowed(o);
+    return m ? m->gltf : NULL;
+}
+
 static KsObj3D *obj_new(const int kind) {
     if (g_sc.count == g_sc.cap) {
         const int cap = g_sc.cap ? g_sc.cap * 2 : 64;
@@ -285,6 +305,11 @@ static void obj_remove_from_scene(KsObj3D *o) {
 }
 
 static void obj_free(KsObj3D *o) {
+    PlayerClassModel *borrowed = obj_borrowed(o);
+    if (borrowed) { // the class model is the player's: back on its holder, shown
+        borrowed->gltf->root.parent = &borrowed->holder;
+        gltf_instance_set_visible(borrowed->gltf, 1);
+    }
     obj_remove_from_scene(o);
     if (o->mesh) mesh_fini(o->mesh); // frees the material, keeps the geometry
     if (o->own_geometry) geometry_free(o->own_geometry, o->own_vbo);
@@ -1017,8 +1042,20 @@ static void o_set_opacity(KsScript *s, void *native, uint32_t id, KsValue v) {
 }
 static KsValue o_get_texture(KsScript *s, void *native, uint32_t id) { (void) s; (void) id; return ks_num(obj_of(native)->asset); }
 static void o_set_texture(KsScript *s, void *native, uint32_t id, KsValue v) {
-    (void) s; (void) id;
+    (void) id;
     KsObj3D *o = obj_of(native);
+    if (o->kind == KSO_PLAYER_ASSET) { // a GLTF root has no material: data.asset only (deob-10.0.3.js:208637-208650)
+        char buf[32];
+        if (ksc_is_str(v)) {
+            const char *t = ksc_str(s, v, buf, sizeof(buf));
+            int digits = t[0] != 0;
+            for (const char *c = t; *c; c++) digits &= *c >= '0' && *c <= '9';
+            if (digits) o->asset = atoi(t); // /^\d+$/: parseInt
+        } else if (ksc_is_num(v)) {
+            o->asset = (int) v.as.num;
+        }
+        return;
+    }
     if (o->is_model || !o->mesh || !ksc_is_num(v)) return;
     o->asset = (int) v.as.num;
     ((BasicMaterial *) o->mesh->material)->texture = asset_texture(o->asset);
@@ -1125,11 +1162,12 @@ static KsValue bone_value(KsScript *s, uint32_t owner, const char *name);
 // getBone(name): a skinned-mesh bone of a model (RENDER.traverseBones)
 static KsValue o_get_bone(KsScript *s, void *native, const KsValue *a, int n) {
     KsObj3D *o = obj_of(native);
-    if (!ksc_is_str(ksc_arg(a, n, 0)) || !o->model) return ks_undef();
+    GltfInstance *model = obj_gltf(o); // traverseBones(the object, name): a player asset's are the class model's
+    if (!ksc_is_str(ksc_arg(a, n, 0)) || !model) return ks_undef();
     char name[64];
     ksc_str(s, ksc_arg(a, n, 0), name, sizeof(name));
 #ifdef GLTF_HAVE_SCRIPT_API
-    if (!gltf_instance_bone(o->model, name)) return ks_undef();
+    if (!gltf_instance_bone(model, name)) return ks_undef();
     return bone_value(s, o->id, name);
 #else
     return ks_undef();
@@ -1153,6 +1191,7 @@ static KsValue o_update_morph(KsScript *s, void *native, const KsValue *a, int n
 static KsValue o_delete(KsScript *s, void *native, const KsValue *a, int n) {
     (void) s; (void) a; (void) n;
     KsObj3D *o = obj_of(native);
+    if (o->kind == KSO_PLAYER_ASSET) o->asset_deleted = 1; // parent.remove(root): the class model is unseen
     obj_remove_from_scene(o);
     if (o->kind == KSO_LIGHT) {
         o->in_scene = 0;
@@ -1192,6 +1231,7 @@ static KsValue o_attach_to(KsScript *s, void *native, const KsValue *a, int n) {
         o->attach_id = tid;
     }
     o->xf.parent = &o->pivot;
+    o->asset_deleted = 0; // a deleted player asset is added again, under the pivot
     if (ksc_truthy(ksc_arg(a, n, 4))) { // keepWorld: keep the world position (pivot resolved next frame)
         o->xf.position = (vec3) {world.x - o->pivot.position.x, world.y - o->pivot.position.y, world.z - o->pivot.position.z};
     }
@@ -1206,6 +1246,7 @@ static KsValue o_detach(KsScript *s, void *native, const KsValue *a, int n) {
     o->attach = KSA_NONE;
     o->xf.parent = NULL;
     o->pivot.parent = NULL;
+    o->asset_unparented = 1; // scene.add(root): a player asset leaves the player for the world
     if (ksc_truthy(ksc_arg(a, n, 0))) o->xf.position = world;
     return ks_undef();
 }
@@ -1247,7 +1288,8 @@ static KsBone *bone_of(void *native) { return native; }
 static MeshTransform *bone_transform(const KsBone *b) {
 #ifdef GLTF_HAVE_SCRIPT_API
     const KsObj3D *o = obj_find(b->owner);
-    return o && o->model ? gltf_instance_bone(o->model, b->name) : NULL;
+    GltfInstance *model = o ? obj_gltf(o) : NULL;
+    return model ? gltf_instance_bone(model, b->name) : NULL;
 #else
     (void) b;
     return NULL;
@@ -1532,13 +1574,40 @@ void ks_scene_api(KsApiImpl *api) {
 // ---------------------------------------------------------------------------
 // Players' models (player.getAsset / playAnim / stopAnim)
 
-// getAsset(): meshRef.children[0], the class model (config.mdl, player_class_model.h) as an obj3D. Not wired: the
-// drawn model is the player's, not a scene object of this module, so the answer stays undefined (v7's answer
-// without a model).
+// getAsset(): `meshRef && meshRef.children[0] && obj3D(meshRef.children[0])` (deob-10.0.3.js:207888-207892): the class
+// model's GLTF scene root once it loaded (loadAnimMesh's holder has it as its only child; an OBJ's loadMesh has none,
+// a sprite no meshRef), wrapped by obj3D (:208553-208890), one wrapper per root (`_protected ||=`), its data reset to {}
+// on every call. On the root: position / rotation / scale / move / rotate / lookAt / visible / delete / attachTo /
+// detach / getBone act; playAnim, stopAnim, updateMorph and animSpeed do nothing (the holder has the mixer), emissive
+// and opacity have no material (opacity reads 1), texture keeps data.asset. Here a KSO_PLAYER_ASSET object: its xf sits
+// between the holder and the GLTF root (identity at first), bound each frame (ks_scene_frame) while that model lives.
 int ks_scene_player_asset(KsScript *s, const Player *p, KsValue *out) {
-    (void) s; (void) p;
     *out = ks_undef();
-    return 0;
+    const PlayerMesh *pm = p ? p->mesh : NULL;
+    const PlayerClassModel *m = pm ? pm->class_model : NULL;
+    if (!player_class_model_replaces_body(m) || !m->gltf) return 0;
+    KsObj3D *o = NULL;
+    for (int i = 0; i < g_sc.count && !o; i++) {
+        KsObj3D *c = g_sc.objs[i];
+        if (c->kind == KSO_PLAYER_ASSET && c->asset_uid == p->uid && c->asset_serial == m->serial) o = c;
+    }
+    if (!o) {
+        o = obj_new(KSO_PLAYER_ASSET);
+        if (!o) return 0;
+        o->asset_uid = p->uid;
+        o->asset_serial = m->serial;
+        o->xf.parent = (MeshTransform *) &m->holder;
+    }
+    o->asset = 0; // data = {}
+    *out = obj_value(s, o);
+    return 1;
+}
+
+void ks_scene_class_model_freed(const PlayerClassModel *m) {
+    for (int i = 0; m && i < g_sc.count; i++) {
+        KsObj3D *o = g_sc.objs[i];
+        if (o->kind == KSO_PLAYER_ASSET && o->xf.parent == &m->holder) o->xf.parent = NULL; // the holder goes with it
+    }
 }
 
 // playAnim(clip, reps): meshRef.playClip(clip, isNumber(reps) ? reps : 1) on the drawn GLTF class model, with no
@@ -1658,6 +1727,16 @@ void ks_scene_frame(Client *client, const float delta_ms) {
         }
         if (o->model) gltf_instance_update(o->model, gltf_clock());
         if (o->kind == KSO_LIGHT && o->attach) light_sync(o);
+        if (o->kind == KSO_PLAYER_ASSET) { // the class model's GLTF root under this object while that model lives
+            PlayerClassModel *m = obj_borrowed(o);
+            if (m) {
+                m->gltf->root.parent = &o->xf;
+                if (!o->attach && !o->asset_unparented) o->xf.parent = &m->holder;
+                gltf_instance_set_visible(m->gltf, o->visible && !o->asset_deleted);
+            } else if (!o->attach && !o->asset_unparented) {
+                o->xf.parent = NULL;
+            }
+        }
     }
 }
 

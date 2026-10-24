@@ -8,6 +8,7 @@
 #include <ui_logic.h>    // menu_show_speech_bubble, hud_ui_unboxed / raffle_won, s2c_ui_*
 #include <backend_ui.h>  // account_set_funds / account_add_skin ("spinW")
 #include <prize_wheels.h>
+#include <wars_banners.h> // "warsClan": the Turf Wars map banners
 #include <audio.h>
 #include <klog.h>
 #include "../viewer/viewer_store.h" // viewer_skin_define
@@ -34,19 +35,16 @@ static void on_player_anim(Client *client, const uint8_t *body, const uint16_t l
 
 // ---------------------------------------------------------------- "uai" UPDATE_ASSET_ID
 
-// iíiïiiï (:257782-257786) -> players.updateAssetID (:197964-197975): with config.mdl and a non-empty text the player's
-// model takes that asset (player.assetTxt) and an active player is rebuilt at once (regenMeshes)
+// iíiïiiï (:257782-257786): `if (findBySid(sid)) players.updateAssetID` (:197964-197975): with config.mdl and a
+// non-empty text the asset waits in player.assetTxt for the next generateMeshes, and an active player gets it at once
+// (regenMeshes); a player this client has not added drops it (KrunkNative's server sends a spawn's swap after the SPAWN)
 static void on_player_asset_id(Client *client, const uint8_t *body, const uint16_t length) {
     if (length < sizeof(NetPlayerAssetIdPacket)) return;
     NetPlayerAssetIdPacket p;
     memcpy(&p, body, sizeof(p));
     p.asset[sizeof(p.asset) - 1] = 0;
     Player *player = client_find_player(client, p.sid);
-    if (!player) { // before its SPAWN (our server's onPlayerSpawn runs first): its first model takes it
-        player_class_model_hold_asset(p.sid, p.asset);
-        return;
-    }
-    if (!player_class_model_set_asset(player, p.asset)) return;
+    if (!player || !player_class_model_set_asset(player, p.asset)) return;
     KN_LOG_DEBUG1("[anim] player %d asset %s\n", p.sid, p.asset);
     if (!player->active || !player->mesh) return; // a dead player's next spawn builds it
     const int render_you = player->render_you;
@@ -197,6 +195,7 @@ static void on_wars_clan(Client *client, const uint8_t *body, const uint16_t len
     memcpy(&p, body, sizeof(p));
     p.clan_name[sizeof(p.clan_name) - 1] = 0;
     s2c_ui_wars_clan(client, p.has, p.clan_name);
+    wars_banners_set(&p); // territorialWars.setClanInfo's banners
 }
 
 // ---------------------------------------------------------------- "edMp" the editor
@@ -259,10 +258,11 @@ int s2c_events_on_ext(Client *client, const uint16_t subtype, const uint8_t *bod
 }
 
 void s2c_events_on_init(Client *client) {
-    player_class_model_reset(); // "uai" swaps held for players not seen yet
+    player_class_model_reset(); // class model keep requests of the session that ended
     memset(&g_bars, 0, sizeof(g_bars));
     blob_reset();
     prize_wheels_reset();
+    wars_banners_set(NULL); // setClanInfo(null) unless init's syncData has a clan (the EXT after the INIT)
     s2c_ui_on_init(client);
 }
 

@@ -11,6 +11,7 @@
 #include <zombies.h> // map-logic WP-H: finiteAmmo, double points, machines, airdrops
 #include <game_config.h> // WP-E: config.classes, forceC
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
+#include <ks_entities.h> // v10.0.3 entity riders: pinPlayer / stepControlled in procInputs
 #include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
 #include <flavor_rules.h> // product-flavor gates (Krunker Strike: its six classes)
 #include <player_card.h> // WP-E: the death screen's life accuracy
@@ -294,7 +295,9 @@ void player_spawn(Player *player) {
     // A player that reached a check point respawns there (shared/src/world.c).
     if (game_is_authority(player->game)) game_spawn_at_checkpoint(player->game, player);
     world_player_spawned(player->game, player); // WP-B: setInitPos, noPVP / forcePVP off
+    player_anim_spawning(player, 1); // a class-model swap onPlayerSpawn makes goes out after the SPAWN (player_anim.h)
     ks_game_on_player_spawn(player->game, player); // KrunkScript: player script state reset, server onPlayerSpawn
+    player_anim_spawning(player, 0);
     // onPlayerSpawn map triggers: v7.1.4 never dispatches them (a reconstruction gap); KN does, from the
     // authority's spawn (doc/v7/decisions.md "player spawn" trigger event; zombie_high relies on it)
     if (game_is_authority(player->game)) trigger_player_event(player->game, TRIGGER_EVENT_ON_PLAYER_SPAWN, player);
@@ -2296,9 +2299,12 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     player->height_old = player->height; // updateHeight: heightOld
     player_update_height(player);
 
-    const int contact = player->on_ground || player->on_ladder;
+    // v10.0.3 procInputs' rider (deob-10.0.3.js:191612-191621): a hard-attached player steps the entity it controls
+    // (stepControlled with this input), is pinned to it and keeps its old position: no acceleration, on the ground
+    const int riding = player->game && player->game->ks && ks_entities_player_ride(player->game, player, input, recon);
+    const int contact = riding || player->on_ground || player->on_ladder;
 
-    if (!move_lock) {
+    if (!move_lock && !riding) {
         const float dt = delta * 1000.0f;
         const double dt_ms = round((double) delta * 10000.0) / 10.0; // v7's frame in ms (whole ms, or the 0.1 floor)
         // `mode.groundAccel ?? 1` on the ground and in the air (deob-10.0.3.js:191624; Chaos Snipers / Impulsed 2)

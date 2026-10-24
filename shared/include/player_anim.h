@@ -18,3 +18,9 @@ void player_anim_set_replay(int replaying);
 // config.mdl and a non-empty text the authority broadcasts "uai" (NET_EXT_PLAYER_ASSET_ID) and a client swaps its own
 // model's asset (player.assetTxt, client/src/player_class_model.c). Nothing for a class without a model.
 void player_update_asset_id(Player *player, const char *asset_txt);
+// The authority's spawn: player_spawn runs KrunkScript's onPlayerSpawn before the SPAWN is sent, so a swap it makes
+// would reach clients before the player does (v10's client drops a "uai" for a sid it has not added, :257784).
+// player_anim_spawning(player, 1 / 0) brackets the hook; a swap made inside it is held until player_anim_spawn_sent
+// (server/src/net.c, shared/src/bots.c, right after the SPAWN broadcast) sends it.
+void player_anim_spawning(Player *player, int spawning);
+void player_anim_spawn_sent(Player *player);

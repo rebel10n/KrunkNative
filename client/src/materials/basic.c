@@ -165,6 +165,15 @@ U(u_roughness_factor, "roughness_factor");
 U(u_use_normal_map, "use_normal_map");
 U(u_normal_map, "normal_map");
 U(u_normal_scale, "normal_scale");
+// user-asset companion maps (player_class_model.c): the specular map (unit 11) and the OBJ's (u, 1 - v) sampling
+U(u_use_specular_map, "use_specular_map");
+U(u_specular_map, "specular_map");
+U(u_maps_flip_v, "maps_flip_v");
+// v10.0.3 decal (wars_banners.c's clan logo): the decalMap (unit 12) in its local box
+U(u_decal_enabled, "decal_enabled");
+U(u_decal_map, "decal_map");
+U(u_decal_position, "decal_position");
+U(u_decal_half_scale, "decal_half_scale");
 #undef U
 
 // v10.0.3 GLB environment reflections (env_map.h): getEnvMap's PMREM table (unit 9) and the DFG LUT (unit 10)
@@ -482,6 +491,23 @@ void basic_material_update_uniforms(Material *base) {
         gl_uniform_1f(&u_normal_scale, program, material->normal_scale);
         glActiveTexture(GL_TEXTURE0 + BASIC_NORMAL_TEXTURE_UNIT);
         glBindTexture(GL_TEXTURE_2D, material->normal_texture);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    gl_uniform_1i(&u_use_specular_map, program, material->specular_texture != 0);
+    gl_uniform_1i(&u_maps_flip_v, program, material->maps_flip_v);
+    if (material->specular_texture) {
+        gl_uniform_1i(&u_specular_map, program, BASIC_SPECULAR_TEXTURE_UNIT);
+        glActiveTexture(GL_TEXTURE0 + BASIC_SPECULAR_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, material->specular_texture);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    gl_uniform_1i(&u_decal_enabled, program, material->decal_texture != 0);
+    if (material->decal_texture) {
+        gl_uniform_1i(&u_decal_map, program, BASIC_DECAL_TEXTURE_UNIT);
+        gl_uniform_3f(&u_decal_position, program, material->decal_position.x, material->decal_position.y, material->decal_position.z);
+        gl_uniform_3f(&u_decal_half_scale, program, material->decal_half_scale.x, material->decal_half_scale.y, material->decal_half_scale.z);
+        glActiveTexture(GL_TEXTURE0 + BASIC_DECAL_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, material->decal_texture);
         glActiveTexture(GL_TEXTURE0);
     }
 

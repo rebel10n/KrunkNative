@@ -57,6 +57,51 @@ void player_play_clip(Player *player, const int clip) {
     }
 }
 
+// the authority's swaps made inside a spawn's onPlayerSpawn, sent after its SPAWN (player_anim_spawning)
+#define ANIM_SPAWN_HELD_MAX 8
+static struct {
+    const Player *player; // compared, never followed (with uid: a freed player's address may come back)
+    int uid;
+    char asset[NET_PLAYER_ASSET_TEXT];
+} g_spawn_held[ANIM_SPAWN_HELD_MAX];
+static int g_spawn_held_count;
+static Player *g_spawning;
+
+static void send_asset_id(Game *game, const Player *player, const char *asset_txt) {
+    NetPlayerAssetIdPacket p = {.sid = player->uid};
+    snprintf(p.asset, sizeof(p.asset), "%s", asset_txt);
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(p)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_PLAYER_ASSET_ID, &p, sizeof(p));
+    if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buf, n);
+}
+
+static int held_is(const int i, const Player *player) {
+    return g_spawn_held[i].player == player && g_spawn_held[i].uid == player->uid;
+}
+
+void player_anim_spawning(Player *player, const int spawning) {
+    if (spawning) {
+        g_spawning = player;
+        for (int i = 0; i < g_spawn_held_count;) { // a spawn whose SPAWN never went out (refused): its swap goes
+            if (held_is(i, player)) g_spawn_held[i] = g_spawn_held[--g_spawn_held_count];
+            else i++;
+        }
+    } else if (g_spawning == player) {
+        g_spawning = NULL;
+    }
+}
+
+void player_anim_spawn_sent(Player *player) {
+    for (int i = 0; i < g_spawn_held_count;) {
+        if (!held_is(i, player)) {
+            i++;
+            continue;
+        }
+        if (player->game && player->active) send_asset_id(player->game, player, g_spawn_held[i].asset);
+        g_spawn_held[i] = g_spawn_held[--g_spawn_held_count];
+    }
+}
+
 void player_update_asset_id(Player *player, const char *asset_txt) {
     Game *game = player ? player->game : NULL;
     const ClassOverrides *o = player_class(player);
@@ -65,11 +110,19 @@ void player_update_asset_id(Player *player, const char *asset_txt) {
     if (game_is_authority(game)) {
         // isServer: broadcast("uai", sid, assetTxt) (:197968-197970). The server's own regenMeshes builds no model;
         // its side effects there (updateHeadSize, swapWeapon(player, 0, true)) are not repeated.
-        NetPlayerAssetIdPacket p = {.sid = player->uid};
-        snprintf(p.asset, sizeof(p.asset), "%s", asset_txt);
-        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(p)];
-        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_PLAYER_ASSET_ID, &p, sizeof(p));
-        if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buf, n);
+        if (player == g_spawning) { // inside onPlayerSpawn: after the SPAWN (the latest swap of that spawn wins)
+            int slot = 0;
+            while (slot < g_spawn_held_count && !held_is(slot, player)) slot++;
+            if (slot == g_spawn_held_count) {
+                if (g_spawn_held_count == ANIM_SPAWN_HELD_MAX) return;
+                g_spawn_held_count++;
+            }
+            g_spawn_held[slot].player = player;
+            g_spawn_held[slot].uid = player->uid;
+            snprintf(g_spawn_held[slot].asset, sizeof(g_spawn_held[slot].asset), "%s", asset_txt);
+            return;
+        }
+        send_asset_id(game, player, asset_txt);
         return;
     }
 #ifdef KRUNKNATIVE_CLIENT

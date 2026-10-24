@@ -35,6 +35,7 @@
 // - Parsed but without effect natively: voiceChat (no clip), noRecoil, spreadMlt, rangeMlt
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
+#include <player_anim.h> // the "uai" of a spawn's onPlayerSpawn after its SPAWN
 #include <prop_hunt.h> // Prop Hunt: a bot prop's disguise after its SPAWN
 #include <bot_objective.h>
 #include <bot_path.h>
@@ -943,6 +944,7 @@ static int bot_spawn(Game *game, GameBot *bot) {
     bot->pending = 0;
 
     bot_broadcast_spawn(game, p);
+    player_anim_spawn_sent(p); // a class-model swap of its onPlayerSpawn, after the SPAWN (player_anim.h)
     bot_send_info(game, bot, NET_TARGET_ALL);
     if (game->hooks.bot_spawning) game->hooks.bot_spawning(game, p, 1);
     if (first && !bot->joined && bot->config.join_message) bot_server_message(game, p->uid, bot->name, 1);
