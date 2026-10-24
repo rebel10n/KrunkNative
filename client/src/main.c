@@ -59,7 +59,7 @@
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
 #include <menu_view.h> // the world behind the menu: menu/death cameras, end slow motion (menu_view.c)
 #include <spectate.h> // Krunker spectating (window.Bf5): cameras, controls, #spectateUI (spectate.c, ui/hud_spectate.c)
-#include <stalker_client.h> // v10 Stalker: the hidden stalker out of the world pass (stalker_render.c)
+#include <stalker_client.h> // v10 Stalker: the model's look (stalker_render.c)
 #include <hud_map.h>  // WP-E part 2a: minimap + death markers
 #include <gamepad.h> // game controllers: v3.1.1 gamepad.js + the controller half of CONTROLS (gamepad.c)
 #include <ui_mobile.h> // Krunker's #mobileUI touch controls (ui/ui_mobile.c)
@@ -2227,8 +2227,8 @@ void client_tick(Client *client, const float now, const float delta) {
 #define INPUT_FRAME_MAX_MS 33.0f
 
 // players.hideAll's objInstances.visible = false (client_players_hide_all): a player the server's last marked sync
-// left out is not drawn. Its meshes leave the world scene for the draw (as stalker_render.c / spectate.c do) and come
-// back after it; begin runs before theirs and end after, so a mesh one of them took out too is put back once.
+// left out is not drawn. Its meshes leave the world scene for the draw (as spectate.c does) and come back after it;
+// begin runs before spectate's and end after, so a mesh both took out is put back once.
 #define SYNC_HIDDEN_MAX 128
 static struct {
     int count;
@@ -2573,8 +2573,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
         sky_render(&client->camera); // Krunker's backgroundScene pass: sky dome first (sky.c)
         gpu_timer_mark(GPU_PASS_SKY);
         shadow_begin_world();
+        stalker_render_frame(client);  // v10 Stalker: a model whose Stalker look is stale is rebuilt (stalker_render.c), before the passes that take models out
         sync_hidden_render_begin(client); // players.hideAll: a player the last marked sync left out is not drawn (above)
-        stalker_render_begin(client);  // v10 Stalker: a hidden (still) stalker is not drawn (stalker_render.c; before spectate's)
         spectate_render_begin(client); // first-person spectating hides the followed player's model
         // KrunkNative third person: the local (third-person) model is drawn with the world
         Player *tp_me = third_person_draw_model(client) ? client->me : NULL;
@@ -2589,7 +2589,6 @@ static void client_tick_game(Client *client, const float now, const float frame_
             scene_add_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
         }
         spectate_render_end(client);
-        stalker_render_end(client);
         sync_hidden_render_end(client);
         shadow_end_world();
         gpu_timer_mark(GPU_PASS_WORLD);

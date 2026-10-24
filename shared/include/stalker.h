@@ -3,7 +3,7 @@
 // onKill, onMelee, camping) are shared/src/modes/mode_rules.c's, the stalker's moves (leap, wall stick,
 // coyote time) shared/src/player.c's (movement_stalker). Here: isStalker, the 300 ms hide, the taunts and
 // STALKER_PICKED. The client half is client/src/ui/hud_stalker.c (HUD, popups, taunt keys) and
-// client/src/stalker_render.c (the model's look, the hidden stalker left out of the world pass).
+// client/src/stalker_render.c (the model's look); a hidden stalker is left out of the server's player sync.
 //
 // References are deob-10.0.3.js lines (/home/user/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js).
 #include <shared.h>

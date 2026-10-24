@@ -3,8 +3,8 @@
 //   client/src/ui/hud_stalker.c   the HUD: #stalkerControlHolder (leap / stick / taunt keys),
 //                                 #stalkerLivingInfoHolder, the leap timer in #zPerksHolder, #hiddenMsg,
 //                                 the "You are the stalker" / "You are the Living" popups, the taunt keys
-//   client/src/stalker_render.c   the model: opacity 0.1 on the body parts, a still (hidden) remote
-//                                 stalker left out of the world pass, a model rebuilt when isStalker flips
+//   client/src/stalker_render.c   the model: opacity 0.1 on the body parts, a model rebuilt when
+//                                 isStalker flips (a still stalker is hidden by the server's player sync)
 #include <client.h>
 
 // ---- hud_stalker.c
@@ -22,11 +22,5 @@ int hud_stalker_taunt(Client*, int index);
 
 // The opacity half of modelOverrides.Stalker on a freshly built model (player_mesh.c).
 void stalker_render_body_opacity(PlayerMesh*, size_t loadout_size);
-// Around the world pass (main.c): hidden remote stalkers' meshes leave client->scene for the draw and
-// come back after it; models whose Stalker look is stale are rebuilt first.
-void stalker_render_begin(Client*);
-void stalker_render_end(Client*);
-// The client's view of a remote player's isHidden: a v10 stalker whose received velocity has been 0
-// for STALKER_HIDE_TIME (the server leaves it out of the state stream from then on, so it stays so
-// until it moves). The local player: its own predicted is_hidden.
-int stalker_render_hidden(const Client*, const Player*);
+// Before the world pass (main.c): a model whose Stalker look no longer matches isStalker is rebuilt.
+void stalker_render_frame(Client*);

@@ -18,7 +18,7 @@ Stalker (`stalker_v7`) had none of it.
 | STALKER_PICKED from pickStalker | `shared/src/modes/mode_rules.c` (`mode_trigger_pick_stalker`) |
 | a hidden player left out of the state stream; `"stlkrt"` | `server/src/net.c` |
 | HUD, popups, taunt keys | `client/src/ui/hud_stalker.c` (ticked from `hud_ui.c`; keys from `ui_controls.c`; `NET_EXT_STALKER_PICKED` from `net/game_events.c`) |
-| model look, hiding a still remote stalker | `client/src/stalker_render.c`, `client/src/player_mesh.c`, `client/src/main.c` (around the world pass) |
+| model look (and a rebuild when isStalker flips) | `client/src/stalker_render.c`, `client/src/player_mesh.c`, `client/src/main.c` (before the world pass) |
 | silent steps | `client/src/sound_events.c` |
 | official lobbies | `client/src/net/krunker_link.c` (`"stlkrt"` out; `"stlkpd"` in was already the text popup) |
 | tests | `shared/tests/v10_gameplay_test.c` (`test_stalker_client`) |
@@ -37,12 +37,10 @@ Stalker (`stalker_v7`) had none of it.
 - **Hidden after 300 ms** (procInputs :191766-191779, not in replays): `noMovT` adds the frame's delta
   while the velocity is 0 and is reset by any velocity; `isHidden = isStalker && noMovT >= 300 ||
   forceHide`. Player.init resets both (:190674, :190729). The server leaves a hidden player out of
-  every player's `"k"` (:222346, spectators included). v10's client hides every player on each `"k"`
-  and shows the listed ones (players.hideAll, :258580-258588); KrunkNative streams one STATE per player,
-  so the client applies the rule itself to a remote stalker: received velocity 0 and an unchanged
-  received position for 300 ms hides it (official lobbies send no velocity, so the position is what
-  decides there), the next STATE that moves shows it. A hidden stalker's meshes leave the world scene for
-  the draw. The local player's `#hiddenMsg` ("You are hidden") follows its own isHidden.
+  every player's `"k"` (:222346, spectators included), and the client's players.hideAll for that sync
+  (`NET_EXT_PLAYER_SYNC`, `client_players_hide_all` in `client/src/main.c`; official lobbies: the link
+  marks each `"k"` the same way) keeps its model out of the world pass until a sync has it again. The
+  local player's `#hiddenMsg` ("You are hidden") follows its own predicted isHidden.
 - **Model** (`modelOverrides.Stalker`, :118195-118205, applied :194107-194181): noCosmetics (also the
   melee skin), every colour 0 (v10 tests `!== undefined`, so the zeros apply; v7.1.4's truthy test
   skipped them), `opacity: 0.1` with `transparent` on the head, body, legs and arms (first-person arms
@@ -75,8 +73,6 @@ Stalker (`stalker_v7`) had none of it.
   them on every taunt and takes taunts from the stalker only.
 - `NetPlayerSoundPacket` has no dist / roll: the taunt plays with the client's default 3D distance model
   (25 / 1) instead of 20 / 1.1, at the stalker's position when it started (v10's follows the player).
-- forceHide on a non-stalker: the server leaves the player out of the state stream as v10 does, but a
-  KrunkNative client has no hideAll and keeps the player where it was last seen.
 
 ## Assets
 
