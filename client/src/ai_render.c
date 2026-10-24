@@ -58,6 +58,7 @@ typedef struct {
     char halo_name[AI_PARTS_MAX][AI_PART_NAME_SIZE];
     float halo_size[AI_PARTS_MAX]; // Box3.setFromObject(node).getSize() max side, at the halo's creation
     char held_shown[GAME_AI_ANIM_SIZE]; // heldShown
+    char current[GAME_AI_ANIM_SIZE];    // the clip last started (meshRef.currAnim)
     unsigned char glowed;        // a glow ran: the emissives are restored when it ends
 } AIMesh;
 
@@ -301,31 +302,40 @@ static vec3 air_draw_position(const Client *client, const GameAI *ai) {
 
 static void air_clips(Client *client, AIMesh *slot, GameAI *ai, const double now) {
     if (!slot->gltf || !ai->data.has_anim) return;
+    if (ai->clip_serial != slot->clip_serial) { // "ana": once; a local playAnim(ai, clip, reps): reps times
+        slot->clip_serial = ai->clip_serial;
+        if (ai->clip[0]) {
+            gltf_instance_play_clip(slot->gltf, ai->clip, ai->clip_reps);
+            snprintf(slot->current, sizeof(slot->current), "%s", ai->clip); // meshRef.currAnim
+            slot->oneshot_until = now + AI_ONESHOT_FALLBACK;
+        }
+    }
     const AiParts *parts = ai_parts_of(&client->game, ai, 0);
     if (parts && parts->held_clip[0]) { // heldClip ? showHeld() : playAnim(didMov ? "Move" : "Idle") (deob-10.0.3.js:205606)
-        if (ai->clip_serial != slot->clip_serial) slot->clip_serial = ai->clip_serial; // the "ana" of the held clip itself
-        if (strcmp(slot->held_shown, parts->held_clip)) { // showHeld: once per held clip, then it clamps on its last frame
+        // showHeld (:205454): once per held clip; the "ana" that started it is left to run (currAnim is the clip),
+        // any other clip is replaced by it, played once and kept on its last frame
+        if (strcmp(slot->held_shown, parts->held_clip)) {
             snprintf(slot->held_shown, sizeof(slot->held_shown), "%s", parts->held_clip);
-            gltf_instance_play_clip(slot->gltf, parts->held_clip, 1);
+            if (strcmp(slot->current, parts->held_clip)) {
+                gltf_instance_play_clip(slot->gltf, parts->held_clip, 1);
+                snprintf(slot->current, sizeof(slot->current), "%s", parts->held_clip);
+            }
         }
         gltf_instance_update(slot->gltf, now);
         return;
     }
     slot->held_shown[0] = 0; // syncParts: no heldClip -> heldShown = null
-    if (ai->clip_serial != slot->clip_serial) { // "ana": once; a local playAnim(ai, clip, reps): reps times
-        slot->clip_serial = ai->clip_serial;
-        if (ai->clip[0]) {
-            gltf_instance_play_clip(slot->gltf, ai->clip, ai->clip_reps);
-            slot->oneshot_until = now + AI_ONESHOT_FALLBACK;
-        }
-    }
 #ifdef GLTF_HAVE_CLIP_RUNNING
     const int busy = gltf_instance_clip_running(slot->gltf);
 #else
     const int busy = now < slot->oneshot_until;
 #endif
     // playClip(name, 0) waits for a running one-shot
-    if (!busy) gltf_instance_play_clip(slot->gltf, ai->did_move ? "Move" : "Idle", 0);
+    if (!busy) {
+        const char *loop = ai->did_move ? "Move" : "Idle";
+        gltf_instance_play_clip(slot->gltf, loop, 0);
+        snprintf(slot->current, sizeof(slot->current), "%s", loop);
+    }
     gltf_instance_update(slot->gltf, now);
 }
 
