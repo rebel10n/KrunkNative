@@ -1,10 +1,12 @@
-// The team forfeit vote of a ranked match. Krunker v10.0.2: voteToForfeit and forfeitInitiators
-// (game.deob.js startGame :189818), the sync to the team (:186472-186490), updateForfeitVote
-// (:190944-190977: votes pruned to the eligible voters, req = the eligible count, passed when
-// num >= req, stalled with no eligible voter), resolveForfeit (:190986-191000: the team gets "vf"
-// null and commands.forfeit.ended, the rest commands.forfeit.ended.other, then prepareForfeit of
-// the other team), the timer in the update loop (:191439, voteForfeitTimer 60000 and
-// voteForfeitDisconnectGrace 30000 at :20095-20096), and v7's prepareForfeit (v7 game.js:4435).
+// The team forfeit vote of a ranked match. Krunker v10.0.3 (deob-10.0.3.js): voteToForfeit and
+// forfeitInitiators (startGame :219962-219963), the sync to the team (:215238-215257), the eligible
+// voters (:215224-215238: a team player, or one disconnected for at most voteForfeitDisconnectGrace),
+// updateForfeitVote (:221477-221514: votes pruned to the eligible voters, req = the eligible count,
+// passed when num >= req, stalled with no eligible voter), resolveForfeit (:221518-221546: the team
+// gets "vf" null and commands.forfeit.ended, the rest commands.forfeit.ended.other, then
+// prepareForfeit of the other team, :221463-221473), the timer in the update loop (:222156-222163),
+// voteForfeitTimer 60000 and voteForfeitDisconnectGrace 30000 (:19428, :22996-22997). Unchanged from
+// v10.0.2.
 //
 // The start command is not in the v10 bundle (v10's server owns the chat commands). The v10 page
 // tells players "Enter /ff to vote" (ui/index.html voteForfeitKeys), so /ff is the command and
@@ -16,6 +18,7 @@
 #include <shared.h>
 #include <modes.h>
 #include <net_ext.h>
+#include "modes/mode_internal.h" // mode_team_score_add: the "ts" of prepareForfeit
 #include <stdio.h>
 #include <string.h>
 
@@ -152,6 +155,20 @@ static void forfeit_resolve(Game *game) {
         forfeit_say(game, p->uid, p->team == team ? FORFEIT_TEXT_ENDED : FORFEIT_TEXT_ENDED_OTHER);
     }
     f->forced_team = team == 1 ? 2 : 1;
+    // prepareForfeit (deob-10.0.3.js:221463-221473): the winning team's score and round wins become
+    // ceil((bestOf || 1) / 2), the other team's none, and no round is left. bestOf is !!bstOfR (a boolean),
+    // so that is 1 either way: the end screen and the ranked result read 1 - 0.
+    GameMode *mode = game->mode;
+    if (mode) {
+        memset(mode->team_round_wins, 0, sizeof(mode->team_round_wins));
+        mode->team_round_wins[f->forced_team] = 1;
+        mode->has_round_wins = 1;
+        mode->round_count = 0;
+        for (int t = 1; t < MODE_TEAMS; t++) {
+            const int want = t == f->forced_team ? 1 : 0;
+            if (mode->team_scores[t] != want) mode_team_score_add(game, t, want - mode->team_scores[t]);
+        }
+    }
     game_end_round(game);
 }
 

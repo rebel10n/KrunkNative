@@ -1,5 +1,5 @@
 #pragma once
-// The team forfeit vote (Krunker v10.0.2 voteToForfeit; shared/src/forfeit.c). The state is
+// The team forfeit vote (Krunker v10.0.3 voteToForfeit, deob-10.0.3.js:221463-221546; shared/src/forfeit.c). The state is
 // Game.forfeit (shared.h GameForfeit); the packets are NET_EXT_VOTE_FORFEIT (net_ext.h 0x0902).
 #include <stdint.h>
 

@@ -1,10 +1,11 @@
-// forfeit_test: the ranked team forfeit vote (shared/src/forfeit.c; Krunker v10.0.2 voteToForfeit,
-// updateForfeitVote, resolveForfeit, voteForfeitTimer 60 s, voteForfeitDisconnectGrace 30 s). The
-// gates (ranked, a team, IN_PROGRESS), the team-only "vf" packets, the chat lines, a unanimous
-// vote ending the round for the other team (mode_pick_winner), one start per player per game,
+// forfeit_test: the ranked team forfeit vote (shared/src/forfeit.c; Krunker v10.0.3 voteToForfeit,
+// updateForfeitVote, resolveForfeit, prepareForfeit, voteForfeitTimer 60 s, voteForfeitDisconnectGrace 30 s).
+// The gates (ranked, a team, IN_PROGRESS), the team-only "vf" packets, the chat lines, a unanimous
+// vote ending the round for the other team (mode_pick_winner, the 1 - 0 scores), one start per player per game,
 // the 60 s expiry and a leaver's 30 s grace. Run from the repository root.
 #include <shared.h>
 #include <forfeit.h>
+#include <game_config.h>
 #include <modes.h>
 #include <net_ext.h>
 #include <stdio.h>
@@ -45,6 +46,7 @@ static void open_game(Game *game) {
     game_configure(game, NULL, g_test_maps, 1, modes, 1, NULL, 0, NULL, 0);
     game->hooks.send = test_send;
     game_init(game, 0, 0, 1);
+    game_config_host(game, NULL, GAME_HOST_COMP); // a ranked match is a hosted comp game: not a pub type (no empty-lobby winner override)
     game->is_ranked = 1;
     game->now = 0.0f;
     g_sent_count = 0;
@@ -138,8 +140,15 @@ static void test_forfeit(void) {
     forfeit_tick(&game, 1.0f);
     CHECK(game.forfeit.active, "one of two: still running");
 
-    // the second team 1 vote is unanimous: the team forfeits, team 2 wins the round
+    // the second team 1 vote is unanimous: the team forfeits, team 2 wins the round. Team 1 leads on score:
+    // prepareForfeit (deob-10.0.3.js:221463-221473) replaces the scores with 1 for the winner, none for the loser
+    game.mode->team_scores[1] = 120;
+    game.mode->team_scores[2] = 40;
+    game.mode->round_count = 2;
     forfeit_command(&game, p2);
+    CHECK(mode_team_score(&game, 2) == 1 && mode_team_score(&game, 1) == 0 && game.mode->team_round_wins[2] == 1 &&
+          game.mode->team_round_wins[1] == 0 && game.mode->round_count == 0,
+          "prepareForfeit: scores 0 - 1, round wins 0 - 1, no round left (%d - %d)", mode_team_score(&game, 1), mode_team_score(&game, 2));
     CHECK(!game.forfeit.active && game.forfeit.forced_team == 2, "unanimous: the vote passes, team 2 forced");
     CHECK(game.end_timer > 0.0f, "the round is over (end screen running)");
     CHECK(mode_pick_winner(&game).team == 2, "mode_pick_winner gives the round to team 2");
