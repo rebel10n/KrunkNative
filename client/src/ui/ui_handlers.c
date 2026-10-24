@@ -578,7 +578,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.7.changeEffects", h_servers},
     {"windows.7.toggleEffects", h_servers},
     {"updateSliderLabel2", h_servers},
-    {"windows.7.presetAction", h_noop},
+    {"windows.7.presetAction", h_servers}, // Host Presets (ui_host_config.c)
     {"windows.7.updateSet", h_servers}, // the Server Upgrades' cost line (ui_host_config.c)
     {"windows.9.switchTab", h_games_tab},
     {"windows.9.searchMaps", h_servers}, // servers_ui.c: the catalogue / loaded games by name
