@@ -503,6 +503,9 @@ void ks_game_on_player_spawn(Game *game, Player *player)
 
 void ks_game_on_player_death(Game *game, Player *victim, Player *killer)
 {
+    // Deliberate difference: players.kill tests `mainScript.onPlayerSpawn` and then calls onPlayerDeath (deob-10.0.3.js:198710,
+    // the same in v10.0.2), so a script without onPlayerSpawn never gets it and one without onPlayerDeath throws inside the
+    // kill. KN tests the hook it calls.
     if (!victim || !server_hook(game, "onPlayerDeath")) return;
     KsScript *s = game->ks->script;
     KsValue args[2] = {id_value(s, victim), killer ? id_value(s, killer) : ks_str(s, "", 0)};
