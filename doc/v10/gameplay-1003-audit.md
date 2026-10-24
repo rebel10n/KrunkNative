@@ -260,50 +260,50 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 | Infiltrator speed | 1 (shared/src/rules/v10/classes_v10.c:300) | deob byte 4778904 "Infiltrator" speed: 1 | match |
 | Infiltrator wall jump | 0 (shared/src/rules/v10/classes_v10.c:295) | deob byte 4778949 "Infiltrator" wallJ: false | match |
 | Infiltrator wall jumps (max) | 0 (absent; shared/src/rules/v10/classes_v10.c:290) | deob byte 4778967 "Infiltrator" wallJM: 0 | match |
-| Gravity (velocity.y step) (gravity) | 0.15 (shared/src/rules/v10/constants_v10.c:49) | deob byte 828608 (line 22609) gravity: 0.00015 = 0.15 per s | match |
-| Jump velocity (jump_velocity) | 0.072 (shared/src/rules/v10/constants_v10.c:28) | deob byte 829622 (line 22648) jumpVel: 0.072 | match |
-| Jump push (jump_push) | 0.1 (shared/src/rules/v10/constants_v10.c:30) | deob byte 829603 (line 22647) jumpPush: 0.1 | match |
-| Jump height factor when not aiming (0.85) (jump_aim_slow) | 0.85 (shared/src/rules/v10/constants_v10.c:29) | deob byte 822446 (line 22383) aimJumpSlow: 0.85 | match |
-| Crouch cut of the jump (crouch_jump) | 0.25 (shared/src/rules/v10/constants_v10.c:31) | deob byte 825238 (line 22491) crouchJump: 0.25 | match |
-| Crouch speed (crouch_speed) | 7 (shared/src/rules/v10/constants_v10.c:32) | deob byte 825279 (line 22493) crouchSpd: 0.007 = 7 per s | match |
-| Crouch height distance (crouch_distance) | 3 (shared/src/rules/v10/constants_v10.c:48) | deob byte 825220 (line 22490) crouchDst: 3 | match |
-| Crouch lean (crouch_lean) | 0 (shared/src/rules/v10/constants_v10.c:33) | deob byte 825260 (line 22492) crouchLean: 0 | match |
-| Crouch animation (crouch_anim) | 0.8 (shared/src/rules/v10/constants_v10.c:74) | deob byte 825166 (line 22488) crouchAnim: 0.0008 = 0.8 per s | match |
-| Slide time (ms to s) (slide_time) | 0.35 (shared/src/rules/v10/constants_v10.c:60) | deob byte 835377 (line 22855) slideTime: 350 = 0.35 s | match |
-| Slide velocity multiplier (player_slide_velocity_mlt) | 1.2 (shared/src/rules/v10/constants_v10.c:61) | deob byte 833651 (line 22798) playerSlideVelMlt: 1.2 | match |
-| Terrain slide velocity multiplier (player_terrain_slide_velocity_mlt) | 0.4 (shared/src/rules/v10/constants_v10.c:62) | deob byte 833679 (line 22799) playerTerrainSlideVelMlt: 0.4 | match |
-| Player height (player_height) | 11 (shared/src/rules/v10/constants_v10.c:8) | deob byte 833590 (line 22796) playerHeight: 11 | match |
-| Leg height (leg_height) | 4.2 (shared/src/rules/v10/constants_v10.c:9) | deob byte 830612 (line 22677) legHeight: 4.2 | match |
-| Head scale (head_scale) | 2 (shared/src/rules/v10/constants_v10.c:10) | deob byte 828801 (line 22616) headScale: 2 | match |
-| Chest width (chest_width) | 2.6 (shared/src/rules/v10/constants_v10.c:6) | deob byte 824780 (line 22472) chestWidth: 2.6 | match |
-| Chest scale (chest_scale) | 1.3 (shared/src/rules/v10/constants_v10.c:53) | deob byte 824759 (line 22471) chestScale: 1.3 | match |
-| Leg scale (leg_scale) | 1.3 (shared/src/rules/v10/constants_v10.c:54) | deob byte 830641 (line 22678) legScale: 1.3 | match |
-| Camera height (camera_height) | 1.5 (shared/src/rules/v10/constants_v10.c:24) | deob byte 824604 (line 22465) cameraHeight: 1.5 | match |
-| Border height (border_height) | 500 (shared/src/rules/v10/constants_v10.c:23) | deob byte 824315 (line 22454) borderH: 500 | match |
-| Ladder speed (ladder_speed) | 35 (shared/src/rules/v10/constants_v10.c:77) | deob byte 830073 (line 22665) ladderSpeed: 0.035 = 35 per s | match |
-| Ladder decel (ladder_decel) | 0.97 (shared/src/rules/v10/constants_v10.c:47) | deob byte 830020 (line 22663) ladderDecel: 0.97 | match |
-| Ground decel (ground_decel) | 0.99 (shared/src/rules/v10/constants_v10.c:46) | deob byte 828635 (line 22610) groundDecel: 0.99 | match |
-| Air decel (air_decel) | 0.9996 (shared/src/rules/v10/constants_v10.c:45) | deob byte 822506 (line 22386) airDecel: 0.9996 | match |
-| Slide decel (slide_decel) | 0.999 (shared/src/rules/v10/constants_v10.c:44) | deob byte 835354 (line 22854) slideDecel: 0.999 | match |
-| Terrain decel (terrain_decel) | 0.99 (shared/src/rules/v10/constants_v10.c:43) | deob byte 836624 (line 22895) terrainDecel: 0.99 | match |
-| Terrain slide decel (terrain_slide_decel) | 0.9996 (shared/src/rules/v10/constants_v10.c:42) | deob byte 836668 (line 22897) terrainSlideDecel: 0.9996 | match |
-| Minimum decel (min_decel) | 0.0001 (shared/src/rules/v10/constants_v10.c:59) | deob byte 825738 (line 22507) decelMin: 0.0001 | match |
-| Interpolation (interpolation) | 1.1 (shared/src/rules/v10/constants_v10.c:64) | deob byte 829270 (line 22631) interpolation: 1.1 | match |
-| Aim slow (aim_slow) | 0.55 (shared/src/rules/v10/constants_v10.c:37) | deob byte 822469 (line 22384) aimSlow: 0.55 | match |
-| Max frame delta (ms to s) (max_delta) | 0.033 (shared/src/rules/v10/constants_v10.c:27) | deob byte 825995 (line 22516) (Math.round(1000 / 30) = 33 ms) = 0.033 s | match |
+| Gravity (velocity.y step) (gravity) | 0.15 (shared/src/rules/v10/constants_v10.c) | deob byte 828608 (line 22609) gravity: 0.00015 = 0.15 per s | match |
+| Jump velocity (jump_velocity) | 0.072 (shared/src/rules/v10/constants_v10.c) | deob byte 829622 (line 22648) jumpVel: 0.072 | match |
+| Jump push (jump_push) | 0.1 (shared/src/rules/v10/constants_v10.c) | deob byte 829603 (line 22647) jumpPush: 0.1 | match |
+| Jump height factor when not aiming (0.85) (jump_aim_slow) | 0.85 (shared/src/rules/v10/constants_v10.c) | deob byte 822446 (line 22383) aimJumpSlow: 0.85 | match |
+| Crouch cut of the jump (crouch_jump) | 0.25 (shared/src/rules/v10/constants_v10.c) | deob byte 825238 (line 22491) crouchJump: 0.25 | match |
+| Crouch speed (crouch_speed) | 7 (shared/src/rules/v10/constants_v10.c) | deob byte 825279 (line 22493) crouchSpd: 0.007 = 7 per s | match |
+| Crouch height distance (crouch_distance) | 3 (shared/src/rules/v10/constants_v10.c) | deob byte 825220 (line 22490) crouchDst: 3 | match |
+| Crouch lean (crouch_lean) | 0 (shared/src/rules/v10/constants_v10.c) | deob byte 825260 (line 22492) crouchLean: 0 | match |
+| Crouch animation (crouch_anim) | 0.8 (shared/src/rules/v10/constants_v10.c) | deob byte 825166 (line 22488) crouchAnim: 0.0008 = 0.8 per s | match |
+| Slide time (ms to s) (slide_time) | 0.35 (shared/src/rules/v10/constants_v10.c) | deob byte 835377 (line 22855) slideTime: 350 = 0.35 s | match |
+| Slide velocity multiplier (player_slide_velocity_mlt) | 1.2 (shared/src/rules/v10/constants_v10.c) | deob byte 833651 (line 22798) playerSlideVelMlt: 1.2 | match |
+| Terrain slide velocity multiplier (player_terrain_slide_velocity_mlt) | 0.4 (shared/src/rules/v10/constants_v10.c) | deob byte 833679 (line 22799) playerTerrainSlideVelMlt: 0.4 | match |
+| Player height (player_height) | 11 (shared/src/rules/v10/constants_v10.c) | deob byte 833590 (line 22796) playerHeight: 11 | match |
+| Leg height (leg_height) | 4.2 (shared/src/rules/v10/constants_v10.c) | deob byte 830612 (line 22677) legHeight: 4.2 | match |
+| Head scale (head_scale) | 2 (shared/src/rules/v10/constants_v10.c) | deob byte 828801 (line 22616) headScale: 2 | match |
+| Chest width (chest_width) | 2.6 (shared/src/rules/v10/constants_v10.c) | deob byte 824780 (line 22472) chestWidth: 2.6 | match |
+| Chest scale (chest_scale) | 1.3 (shared/src/rules/v10/constants_v10.c) | deob byte 824759 (line 22471) chestScale: 1.3 | match |
+| Leg scale (leg_scale) | 1.3 (shared/src/rules/v10/constants_v10.c) | deob byte 830641 (line 22678) legScale: 1.3 | match |
+| Camera height (camera_height) | 1.5 (shared/src/rules/v10/constants_v10.c) | deob byte 824604 (line 22465) cameraHeight: 1.5 | match |
+| Border height (border_height) | 500 (shared/src/rules/v10/constants_v10.c) | deob byte 824315 (line 22454) borderH: 500 | match |
+| Ladder speed (ladder_speed) | 35 (shared/src/rules/v10/constants_v10.c) | deob byte 830073 (line 22665) ladderSpeed: 0.035 = 35 per s | match |
+| Ladder decel (ladder_decel) | 0.97 (shared/src/rules/v10/constants_v10.c) | deob byte 830020 (line 22663) ladderDecel: 0.97 | match |
+| Ground decel (ground_decel) | 0.99 (shared/src/rules/v10/constants_v10.c) | deob byte 828635 (line 22610) groundDecel: 0.99 | match |
+| Air decel (air_decel) | 0.9996 (shared/src/rules/v10/constants_v10.c) | deob byte 822506 (line 22386) airDecel: 0.9996 | match |
+| Slide decel (slide_decel) | 0.999 (shared/src/rules/v10/constants_v10.c) | deob byte 835354 (line 22854) slideDecel: 0.999 | match |
+| Terrain decel (terrain_decel) | 0.99 (shared/src/rules/v10/constants_v10.c) | deob byte 836624 (line 22895) terrainDecel: 0.99 | match |
+| Terrain slide decel (terrain_slide_decel) | 0.9996 (shared/src/rules/v10/constants_v10.c) | deob byte 836668 (line 22897) terrainSlideDecel: 0.9996 | match |
+| Minimum decel (min_decel) | 0.0001 (shared/src/rules/v10/constants_v10.c) | deob byte 825738 (line 22507) decelMin: 0.0001 | match |
+| Interpolation (interpolation) | 1.1 (shared/src/rules/v10/constants_v10.c) | deob byte 829270 (line 22631) interpolation: 1.1 | match |
+| Aim slow (aim_slow) | 0.55 (shared/src/rules/v10/constants_v10.c) | deob byte 822469 (line 22384) aimSlow: 0.55 | match |
+| Max frame delta (ms to s) (max_delta) | 0.033 (shared/src/rules/v10/constants_v10.c) | deob byte 825995 (line 22516) (Math.round(1000 / 30) = 33 ms) = 0.033 s | match |
 | Ground acceleration (grA 0.042) x10 per s (player_speed 0.42) | 0.042 x 10 = 0.42 per s (shared/src/player.c:1752) | deob byte 771064 (setting def 0.042; line 20415); movement reads config.grA / 100 per ms (deob byte 9213746 (line 191624)) | match |
 | Air acceleration (arA 0.0047) x10 per s (air_speed 0.047) | 0.0047 x 10 = 0.047 per s (shared/src/player.c:1753) | deob byte 771382 (line 20435); movement reads config.arA / 100 per ms (deob byte 9213820 (line 191624)) | match |
-| Booster speed (2 per s) | 2.0 (shared/src/rules/v10/constants_v10.c:76; used at shared/src/player.c:1142) | deob byte 9237488 (line 192003) (0.002 per ms = 2 per s) | match |
-| Player speed constant (player_speed 0.42) | 0.42 (shared/src/rules/v10/constants_v10.c:34); read by Strike and bots only | derived from grA 0.042 / 100 per ms x 1000 (row above) | match |
-| Air speed constant (air_speed 0.047) | 0.047 (shared/src/rules/v10/constants_v10.c:36); read by bots only | derived from arA 0.0047 / 100 per ms x 1000 (row above) | match |
+| Booster speed (2 per s) | 2.0 (shared/src/rules/v10/constants_v10.c; used at shared/src/player.c:1142) | deob byte 9237488 (line 192003) (0.002 per ms = 2 per s) | match |
+| Player speed constant (player_speed 0.42) | 0.42 (shared/src/rules/v10/constants_v10.c); read by Strike and bots only | derived from grA 0.042 / 100 per ms x 1000 (row above) | match |
+| Air speed constant (air_speed 0.047) | 0.047 (shared/src/rules/v10/constants_v10.c); read by bots only | derived from arA 0.0047 / 100 per ms x 1000 (row above) | match |
 | Hit-box broad-phase padding (5) | 5 (shared/src/hitboxes.c:331, 333) | deob byte 828857 (line 22618) hitBoxPad: 5 | match |
 | Speed cap on movement | none (shared/src/player.c has no speed clamp) | deob byte 831987 (line 22733) is the speedrun score-zone display limit (custUI), not a movement cap | match |
-| Slipping speed (slipping_speed 0.3) | 0.3 (shared/src/rules/v10/constants_v10.c:35) | no 10.0.3 key (no slippingSpeed; the only "slipp" text is a tip); v7 config.js:2117 has 0.0003 per ms and no v7 code reads it | not found (dead in 10.0.3 and v7; doc/v10/constants-1003.md 1) |
-| Terrain slide threshold (1.9) | 1.9 (shared/src/rules/v10/constants_v10.c:40) | no 10.0.3 key; the terrain test is y <= height (deob 192234), no slope threshold | not found (dead; constants-1003.md 2) |
-| Terrain slip decel (0.99) | 0.99 (shared/src/rules/v10/constants_v10.c:41) | no 10.0.3 key; the terrain decel that is read is 0.99 (deob 191631) = terrain_decel (constants_v10.c:43) | not found (dead; constants-1003.md 3) |
-| Slipping jump cooldown (0.5 s) | 0.5 (shared/src/rules/v10/constants_v10.c:39) | no 10.0.3 key; the jump sets jumpCooldown = jpC * 0 (deob 195251) = 0, as shared/src/world.c:415 | not found (dead; the behaviour matches; constants-1003.md 4) |
-| Crouch slow (0.3) | 0.3 (shared/src/rules/v10/constants_v10.c:38) | 10.0.3 setting "Crouch Speed" crchSpd, def 0.3 (deob 20462), read at deob 191627 | match (constants-1003.md 5) |
-| Collision padding (1.1) | 1.1 (shared/src/rules/v10/constants_v10.c:75) | deob 21171 var = 1.1, read as the config key collPad (deob 22480) | match (constants-1003.md 6) |
+| Slipping speed (slipping_speed 0.3) | removed 2026-10-24 (was 0.3 in shared/src/rules/v10/constants_v10.c) | no 10.0.3 key (no slippingSpeed; the only "slipp" text is a tip); v7 config.js:2117 has 0.0003 per ms and no v7 code reads it | not found (dead in 10.0.3 and v7; doc/v10/constants-1003.md 1) |
+| Terrain slide threshold (1.9) | removed 2026-10-24 (was 1.9 in shared/src/rules/v10/constants_v10.c) | no 10.0.3 key; the terrain test is y <= height (deob 192234), no slope threshold | not found (dead; constants-1003.md 2) |
+| Terrain slip decel (0.99) | removed 2026-10-24 (was 0.99 in shared/src/rules/v10/constants_v10.c) | no 10.0.3 key; the terrain decel that is read is 0.99 (deob 191631) = terrain_decel (constants_v10.c) | not found (dead; constants-1003.md 3) |
+| Slipping jump cooldown (0.5 s) | removed 2026-10-24 (was 0.5 in shared/src/rules/v10/constants_v10.c) | no 10.0.3 key; the jump sets jumpCooldown = jpC * 0 (deob 195251) = 0, as shared/src/world.c:415 | not found (dead; the behaviour matches; constants-1003.md 4) |
+| Crouch slow (0.3) | 0.3 (shared/src/rules/v10/constants_v10.c) | 10.0.3 setting "Crouch Speed" crchSpd, def 0.3 (deob 20462), read at deob 191627 | match (constants-1003.md 5) |
+| Collision padding (1.1) | 1.1 (shared/src/rules/v10/constants_v10.c) | deob 21171 var = 1.1, read as the config key collPad (deob 22480) | match (constants-1003.md 6) |
 | Jump velocity formula: 0.072 x jumpMlt x attributes.jump x mode.jumpMlt (x mode.jumpVel) | shared/src/player.c:1286 | deob byte 9415374 (line 195256); mode.jumpVel: no 10.0.3 mode sets it (no `jumpVel:` in the mode table), so the factor is 1 | match |
 | Real-movement jump factor 0.92 | shared/src/player.c:1287 | deob byte 9415660 (line 195258) | match |
 | Jump push 0.1 with the same multipliers | shared/src/player.c:1289 | deob byte 9415816 (line 195261) | match |

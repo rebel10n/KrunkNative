@@ -37,8 +37,8 @@ line and is checked against the bundle's config object by `weapons_v10_test` (`s
 | 2 | Terrain slide threshold | removed (was 1.9, `terrain_slide_threshold`) | no `terrainSlideThreshold` key | not found (dead): removed 2026-10-24 |
 | 3 | Terrain slip decel | removed (was 0.99, `terrain_slip_decel`) | no `terrainSlipDecel` key | not found (dead): removed 2026-10-24; the terrain decel that is read matches |
 | 4 | Slipping jump cooldown | removed (was 0.5 s, `player_slipping_jump_cooldown`) | no `playerSlippingJumpCooldown` key; the jump sets the cooldown to 0 | not found (dead): removed 2026-10-24; behaviour matches |
-| 5 | Crouch slow | 0.3 (`constants_v10.c:38`, used `player.c:1757`) | setting `crchSpd`, default 0.3 | match |
-| 6 | Collision padding | 1.1 (`constants_v10.c:75`) | `collPad` = 1.1 | match |
+| 5 | Crouch slow | 0.3 (`constants_v10.c`, used `player.c:1757`) | setting `crchSpd`, default 0.3 | match |
+| 6 | Collision padding | 1.1 (`constants_v10.c`) | `collPad` = 1.1 | match |
 | 7 | Ranked: no kill streaks, no class XP | `ruleset.c:37` `.no_streaks`, `.no_class_xp` | `!isRanked` on streaks and class scores | match |
 | 8 | Map index 0 (Burg) | `krunker_maps.h:23` `X(0, "Burg", ...)` | map 0 is "Burg" | match |
 | 9 | INIT_GAME arguments | `net-bridge/v10Translate.ts:1227-1250` | same positions and values | match (isOfficial corrected, see below) |
@@ -67,7 +67,7 @@ line and is checked against the bundle's config object by `weapons_v10_test` (`s
 ### 3. Terrain slip decel (`terrain_slip_decel` 0.99)
 
 - 10.0.3: no `terrainSlipDecel` key (v7 2125: 0.99, no reader). The decel on terrain is
-  `this.onTerrain ? 0.99` (deob 191631), which is KN's `terrain_decel` (`constants_v10.c:43`, the value
+  `this.onTerrain ? 0.99` (deob 191631), which is KN's `terrain_decel` (`constants_v10.c`, the value
   that is read). That value matches.
 - Removed 2026-10-24.
 
