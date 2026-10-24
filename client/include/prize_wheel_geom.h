@@ -79,6 +79,8 @@ typedef struct {
 #define PRIZE_WHEEL_ITEM_MELEE 3
 
 void prize_wheel_item_pose(float size, float dir, int type, float y_off, float x_off, float scl, float spn_scl, PrizeWheelItemPose *out);
+// meshPrev.getWorldPosition() (:219571): the frame's centre (the wheel's centre) + rotateY(frame_yaw) of meshPrev's position
+void prize_wheel_item_world(const float centre[3], const PrizeWheelItemPose *pose, float out[3]);
 // meshPrev.position.y after a step: orgYP + sin(bobAnim) * 0.55 (:219576)
 float prize_wheel_item_bob(float org_y, float bob_anim);
 

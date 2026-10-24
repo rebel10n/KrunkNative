@@ -74,7 +74,9 @@ Client consumers are in `client/src/net/s2c_events.c`:
   the "Press [G] to Spin <wheel> [<price> KR]" prompt (interact 9, uid = the spinner's place,
   `shared/src/map_spinners.c`) sends `int` 9 and the confirm key `cnfm` 2. At a rarity wheel's stop the won item goes up in
   front of the hub (meshPrev): its store model through `client/src/store_item_model.c` (the viewer's loadMesh /
-  loadAnimMesh code), a spray's plane, bobbing; a dye's preview player is not drawn.
+  loadAnimMesh code), a spray's plane, a dye's class-9 preview player (a client-only render model on a private Game:
+  setClass's loadout, no spawn hooks), bobbing. An Unobtainable (rarity > 5) shakes the screen and explodes at the item
+  (render.shake(0.14), the explosion sound, ExplosionManager.explodeAt(.., 80), :219566-219574).
 - `chreq`, `warsClan` and `edMp` are `client/src/ui/s2c_ui.c`. The charge modal holds the pointer lock off (menu_ui.c).
   The keys answer a request when the vote kick did not take them. The Turf Wars popup is scheduled when we enter (the
   menu closes on a ready game we play or spectate) or when the clan comes while we are in; it shows once per game.
@@ -106,7 +108,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | UPLOAD_PROFILE_RESPONSE | `upPR` | :255687 | profile picture uploaded | KN equivalent | kn_brain |
 | SPIN_RESPONSE | `spin` | :254882 | prize wheel result | KN equivalent | spins are kn_brain's (spin_wheel.c) |
 | SAVE_SPIN_HISTORY | `spinH` | :254698 | spin history popup | KN equivalent | kn_brain |
-| SPIN_WHEEL_RESPONSE | `spinW` | :254991 | a map spinner object's spin: `updateSpinner(uid, ..., skin)`, funds and skin to the spinner | **ported** | `NET_EXT_SPIN_WHEEL_RESPONSE`; `client/src/prize_wheels.c` keeps the map's spinners and their spinInfo, steps them every 50 ms and plays the ticks / reward sounds; ours pays the account. The wheel canvas and the won item's model are `client/src/prize_wheel_render.c` (a dye's preview player is not drawn). KN's server sends it too: interact 9 in reach with the KR offers the spin (`cnfm` [uid, 2]), `cnfm` 2 spins that store wheel through kn_brain's KR wallet (`map_spin`: the KR, the skin and their ledger rows in one transaction) and the stop goes to everyone (server/src/brain_events.c). One spin per wheel at a time (KN: v10 restarts a turning wheel and loses its unbS) |
+| SPIN_WHEEL_RESPONSE | `spinW` | :254991 | a map spinner object's spin: `updateSpinner(uid, ..., skin)`, funds and skin to the spinner | **ported** | `NET_EXT_SPIN_WHEEL_RESPONSE`; `client/src/prize_wheels.c` keeps the map's spinners and their spinInfo, steps them every 50 ms and plays the ticks / reward sounds; ours pays the account. The wheel canvas and the won item's model are `client/src/prize_wheel_render.c` (a won dye: a class-9 preview player wearing it). KN's server sends it too: interact 9 in reach with the KR offers the spin (`cnfm` [uid, 2]), `cnfm` 2 spins that store wheel through kn_brain's KR wallet (`map_spin`: the KR, the skin and their ledger rows in one transaction) and the stop goes to everyone (server/src/brain_events.c). One spin per wheel at a time (KN: v10 restarts a turning wheel and loses its unbS) |
 | SPIN_KR | `spinKR` | :255333 | free KR spin | KN equivalent | kn_brain daily spin |
 | PURCHASE_ERROR | `pErr` | window.purchaseError :243648 | purchase error popup | irrelevant | real money |
 | UNBOX_MESSAGE | `unb` | :254321 | chat line "X unboxed [item]" (showUnboxings) | **ported** | `NET_EXT_UNBOX_MESSAGE` NAMED -> `hud_ui_unboxed` (store names, rarity colours, Free KR items). KN's server sends it too: kn_brain pushes every store and Free KR win (`unbox`, services/brain/node_events.c) to the game server the account plays on, which sends it to everyone for rarity >= 2, else to the unboxer (KN's rule: the map wheel's unbS rule; v10's server is not in the bundle) |
@@ -201,5 +203,3 @@ irrelevant, 5 other agent, 0 open.
 ## Open work
 
 - Class models are drawn (doc/v10/class-models.md); its open items are listed there (the class camera types, getAsset).
-- Drawing what the client now keeps: a won dye's class-9 preview player in front of a prize wheel's hub (it needs a
-  preview player outside the game, as viewer_scene.c's preview_player has).

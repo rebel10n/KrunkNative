@@ -13,9 +13,10 @@
 //   the item    the stop puts the won item up in front of the hub (meshPrev, :219485-219574; prize_wheel_item_pose):
 //               its store model as loadMesh / loadAnimMesh build it (store_item_model.c, the viewer's code: src / texSrc,
 //               glowText / emissive, skin_fx's animations), a spray as createSpray's 9 x 7.2 plane (:232665-232680),
-//               bobbing at each step; updateSpinner's next spin takes it down (:219413-219417)
-// Not drawn: a dye's preview player (type 5: v10 puts a class-9 Player wearing it in meshPrev, :219504-219516; a
-// preview player needs a game of its own, viewer_scene.c's preview_player), an Unobtainable's explosion and shake.
+//               a dye as a class-9 preview Player wearing it (:219504-219516): a client-only render model (its own
+//               private Game, player_switch_class's setClass loadout, no spawn or its hooks), at init(0, 0, -6) in
+//               meshPrev, its primary's geometry hidden; bobbing at each step; updateSpinner's next spin takes it
+//               down (:219413-219417). An Unobtainable's shake and explosion are prize_wheels.c's (at the stop).
 #include <gl.h> // first: glad before any other GL header
 #include <prize_wheel_render.h>
 #include <prize_wheel_geom.h>
@@ -60,10 +61,12 @@ typedef struct {
     StoreItemModel item;
     Mesh *spray;
     int spray_frames, spray_frame_t;
+    Player *dye_player; // a won dye's preview Player (client-only)
 } WheelMesh;
 
 static struct {
     Scene *scene;
+    Map *map;      // the map the planes are of (the dye previews' Game reads its config.model)
     int count;
     WheelMesh wheels[PRIZE_WHEEL_RENDER_MAX];
     Geometry *quad;
@@ -107,6 +110,7 @@ void prize_wheel_render_load(Scene *scene, const Map *map) {
     prize_wheel_render_unload();
     if (!scene || !map) return;
     g_pwr.scene = scene;
+    g_pwr.map = (Map *) map;
     if (!g_pwr.shadow_levels)
         g_pwr.shadow_levels = prize_wheel_shadow_levels(PRIZE_WHEEL_SHADOW_BLUR, PRIZE_WHEEL_SHADOW_STEPS, g_pwr.shadow_grow, g_pwr.shadow_alpha);
     Geometry *quad = quad_geometry();
@@ -164,6 +168,7 @@ void prize_wheel_render_unload(void) {
     }
     g_pwr.count = 0;
     g_pwr.scene = NULL;
+    g_pwr.map = NULL;
 }
 
 int prize_wheel_render_count(void) { return g_pwr.count; }
@@ -313,8 +318,77 @@ static void paint(WheelMesh *wm, const PrizeWheel *w) {
     wm->mesh->visible = 1;
 }
 
+// A private Game for the dye previews: players.setClass's tables (the ruleset) and the current map (generateMeshes
+// reads its config.model; the previews go with the map), no mode, never ticked, so nothing a game player's spawn
+// does (spawn points, mode / KrunkScript / trigger hooks) reaches it. viewer_scene.c gives its preview players one the
+// same way.
+static Game *preview_game(void) {
+    static Game game;
+    static int ready;
+    if (!ready) {
+        game_configure(&game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+        ready = 1;
+    }
+    game.map = g_pwr.map;
+    return &game;
+}
+
+static void dye_player_free(Player *player) {
+    if (!player) return;
+    if (player->mesh) {
+        if (g_pwr.scene) scene_remove_player_mesh(g_pwr.scene, player->mesh, player->loadout_size);
+        player_meshes_fini(player);
+    }
+    free(player->loadout);
+    free(player->ammo);
+    free(player->reloads);
+    free(player->input_queue);
+    free(player);
+}
+
+// The won dye (:219504-219516): new Player(-1), sid -1, init(0, 0, -6, "preview") (z 0, x 0, y -6), skins [-1, -1],
+// dyeIndex = itemID, setClass(game, 9, 2, true) (the Runner, the class lists bypassed), swapWeapon(0), generateMeshes,
+// its objInstances in meshPrev, swapTime 0, weaponMeshes[0] shown with weaponGeos[0] hidden, updateMsh
+static Player *dye_player_new(const int dye, MeshTransform *parent) {
+    if (!g_pwr.map) return NULL;
+    Player *player = player_init(preview_game());
+    if (!player) return NULL;
+    player->uid = -1; // player_update_meshes anchors uid -1 (Krunker's preview sid) at player->position
+    player->skins = PLAYER_SKINS_NONE;
+    player->cosmetics = PLAYER_COSMETICS_NONE;
+    player->cosmetics.dye = dye;
+    player->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    if (!player_switch_class(player, 9, 2)) { // setClass: the loadout only (no spawn point, no spawn hooks)
+        dye_player_free(player);
+        return NULL;
+    }
+    player->active = 1;
+    player->position = player->last_position = (vec3) {0.0f, -6.0f, 0.0f};
+    player->velocity = (vec3) {0};
+    player->direction = (vec2) {0.0f, 0.0f};
+    player_generate_meshes(player, 0); // third person
+    if (!player->mesh) {
+        dye_player_free(player);
+        return NULL;
+    }
+    player_swap_weapon(player, 0, 1, 1, 1);
+    player->swap_timer = 0.0f;
+    player_update_meshes(player, 1);
+    PlayerMesh *mesh = player->mesh;
+    mesh->anchor->parent = parent; // meshPrev.add(objInstances)
+    PlayerArms *arms = mesh->arms && player->loadout_size > 0 ? mesh->arms[0] : NULL;
+    if (arms) { // weaponGeos[0].visible = false: the arms stay, the primary's model goes
+        if (arms->weapon_right) arms->weapon_right->visible = 0;
+        if (arms->weapon_models[0]) gltf_instance_set_visible(arms->weapon_models[0], 0);
+    }
+    scene_add_player_mesh(g_pwr.scene, mesh, player->loadout_size);
+    return player;
+}
+
 // meshPrev removed (updateSpinner, :219413-219417; the map going)
 static void item_down(WheelMesh *wm) {
+    dye_player_free(wm->dye_player);
+    wm->dye_player = NULL;
     if (wm->item.mesh && g_pwr.scene) scene_remove_mesh(g_pwr.scene, wm->item.mesh);
     if (wm->item.model && g_pwr.scene) scene_remove_gltf(g_pwr.scene, wm->item.model);
     store_item_model_fini(&wm->item);
@@ -372,7 +446,11 @@ static void item_up(WheelMesh *wm, const PrizeWheel *w) {
     };
     wm->org_y = pose.position[1];
     wm->item_id = w->item_id;
-    if (item->type == PRIZE_WHEEL_ITEM_DYE) return; // the preview player: not drawn (see the top)
+    if (item->type == PRIZE_WHEEL_ITEM_DYE) {
+        wm->dye_player = dye_player_new(w->item_id, &wm->prev);
+        if (!wm->dye_player) KN_LOG_VERBOSE2("[prize] wheel %d: dye %d has no preview player\n", wm->uid, w->item_id);
+        return;
+    }
     if (item->type == PRIZE_WHEEL_ITEM_SPRAY) {
         wm->spray = spray_plane(item, &wm->prev, pose.item_rot_y);
         wm->spray_frames = item->frames > 0 && item->frame_t > 0 ? item->frames : 0;
@@ -398,6 +476,8 @@ int prize_wheel_render_item(const int uid, vec3 *at) {
         if (wm->item_id < 0) return -1;
         if (at) {
             Mesh *mesh = wm->item.mesh ? wm->item.mesh : wm->spray;
+            const PlayerMesh *dye = wm->dye_player ? wm->dye_player->mesh : NULL;
+            if (!mesh && dye && dye->body && dye->body->mesh_count) mesh = dye->body->meshes[0]; // the dyed body
             if (mesh) {
                 mesh_update_transform_matrix(mesh);
                 *at = (vec3) {mesh->transform_matrix[3], mesh->transform_matrix[7], mesh->transform_matrix[11]}; // row-major (mesh.c)

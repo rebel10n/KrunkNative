@@ -109,6 +109,13 @@ void prize_wheel_item_pose(const float size, const float dir, const int type, co
     o->item_scale = (spn_scl != 0.0f ? spn_scl : scl != 0.0f ? scl : 1.0f) * 2.0f; // (spnScl || scl || 1) * 2
 }
 
+void prize_wheel_item_world(const float centre[3], const PrizeWheelItemPose *p, float out[3]) {
+    const float c = cosf(p->frame_yaw), s = sinf(p->frame_yaw); // three.js rotateY: (x, z) -> (x c + z s, -x s + z c)
+    out[0] = centre[0] + p->position[0] * c + p->position[2] * s;
+    out[1] = centre[1] + p->position[1];
+    out[2] = centre[2] - p->position[0] * s + p->position[2] * c;
+}
+
 float prize_wheel_item_bob(const float org_y, const float bob_anim) {
     return org_y + sinf(bob_anim) * 0.55f;
 }

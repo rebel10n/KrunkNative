@@ -10,8 +10,9 @@
 //              or cheer_0 (>= 1) at 0.1, an explosion (1) above rarity 5, meshPrev (the won item) put up (:219470-219574);
 //              then, while needsUpdate, the canvas is painted (client/src/prize_wheel_render.c) until the won slice
 //              is wide (meshPrev) or the idle wheel has grown in (:219576-219675)
-// meshPrev's model is drawn from item_shown / bob_anim by prize_wheel_render.c. Not ported: the screen shake and the
-// explosion effect of an Unobtainable. A pool wheel (store data with pools and no rarities, like the Starter /
+// meshPrev's model is drawn from item_shown / bob_anim by prize_wheel_render.c. Above rarity 5 (an Unobtainable) the
+// stop also shakes the screen (render.shake(0.14)) and explodes at meshPrev (the explosion sound, ExplosionManager
+// explodeAt(.., 80) with its default 15 small / 8 large pieces, :219566-219574, :225603-225604). A pool wheel (store data with pools and no rarities, like the Starter /
 // Heroic wheels of the 2026-10-13 data, shared/include/store_spins.h) throws in v10 at `wheel.rarities[rarity]`: that
 // step stops there (no sound, no paint, the spinners after it wait for the next step), and the wheel goes on painting
 // its stopped pointer with the SPIN label: the same here.
@@ -21,6 +22,9 @@
 #include <store_spins.h>
 #include <klog.h>
 #include "viewer/viewer_store.h" // store.skins: the item's rarity
+#include <prize_wheel_geom.h> // meshPrev's world position (an Unobtainable's explosion)
+#include <camera_feel.h>      // render.shake
+#include <vfx.h>              // ExplosionManager.explodeAt
 #include <math.h>
 #include <string.h>
 
@@ -99,7 +103,20 @@ int prize_wheels_spin(Client *client, const int uid, const float rand, const int
 
 // The stop (:219477-219572): the won slice widens, the reward sounds, the won item goes up. 0 where v10 throws (no
 // such item, a wheel without rarities): the rest of that step does not run.
-static int stop(PrizeWheel *w) {
+// meshPrev.getWorldPosition() right after the stop put it up (no bob yet): the item's pose in the wheel's frame
+static vec3 item_world(const PrizeWheel *w, const ViewerSkin *item) {
+    const Object *o = g_pw.map && w->object >= 0 && (size_t) w->object < g_pw.map->object_count ? g_pw.map->objects[w->object] : NULL;
+    if (!o) return w->position;
+    const ViewerPreview *preview = viewer_preview(item); // iîIïîïì = item.type ? item : store.getPreview(item)
+    PrizeWheelItemPose pose;
+    prize_wheel_item_pose(o->scale.y, map_spinner_dir(o), item->type, item->type ? item->y_off : preview->y_off,
+                          item->type ? item->x_off : preview->x_off, item->type ? item->scl : preview->scl, item->spn_scl, &pose);
+    float at[3];
+    prize_wheel_item_world((const float[3]) {w->position.x, w->position.y, w->position.z}, &pose, at);
+    return (vec3) {at[0], at[1], at[2]};
+}
+
+static int stop(PrizeWheel *w, Client *client) {
     w->spin_rotation = w->spin_val;
     const ViewerSkin *item = viewer_skin(w->item_id);
     const StoreSpins *spins = store_spins_builtin();
@@ -112,11 +129,17 @@ static int stop(PrizeWheel *w) {
     if (rarity >= 4) audio_play_3d("cheer_1", w->position, 0.1f, 1.0f, 0.0f, 0.0f);
     else if (rarity >= 1) audio_play_3d("cheer_0", w->position, 0.1f, 1.0f, 0.0f, 0.0f);
     w->item_shown = 1; // meshPrev = genObj3D(...) (:219494)
-    if (rarity > 5) audio_play_3d("explosion", w->position, 1.0f, 1.0f, 0.0f, 0.0f);
+    if (rarity > 5) { // an Unobtainable (:219566-219574)
+        camera_feel_shake(0.14f);                    // iíÍïîíí.shake(0.14)
+        const vec3 at = item_world(w, item);         // meshPrev.getWorldPosition()
+        audio_play_3d("explosion", at, 1.0f, 1.0f, 0.0f, 0.0f);
+        vfx_explode_at(client, at, 80.0f, 15, 8);    // explodeAt(x, y, z, 80): smallSpawnCount 15, largeSpawnCount 8
+        KN_LOG_DEBUG1("[prize] item %d: an Unobtainable explodes at %.1f %.1f %.1f\n", w->item_id, (double) at.x, (double) at.y, (double) at.z);
+    }
     return 1;
 }
 
-static void step(const float delta) {
+static void step(const float delta, Client *client) {
     for (int i = 0; i < g_pw.count; i++) {
         PrizeWheel *w = &g_pw.wheels[i];
         if (w->spin_whl_mlt < 1.0f) {
@@ -134,7 +157,7 @@ static void step(const float delta) {
                 w->tick_counter += (float) (M_PI / 1.5);
                 audio_play_3d("tick_0", w->position, 0.2f, 1.0f, 0.0f, 0.0f);
             }
-            if (w->spin_val - w->spin_rotation <= 0.002f && !stop(w)) return; // the throw ends the step (:219482)
+            if (w->spin_val - w->spin_rotation <= 0.002f && !stop(w, client)) return; // the throw ends the step (:219482)
         }
         if (w->item_shown) w->bob_anim += delta * 0.0018f; // meshPrev.position.y = orgYP + sin(bobAnim) * 0.55 (:219576)
         if (!w->needs_update) continue;
@@ -157,7 +180,7 @@ void prize_wheels_tick(Client *client) {
     int steps = 0;
     while (g_pw.carry_s >= PRIZE_WHEELS_STEP_S && steps++ < PRIZE_WHEELS_MAX_STEPS) {
         g_pw.carry_s -= PRIZE_WHEELS_STEP_S;
-        step(PRIZE_WHEELS_STEP_DELTA);
+        step(PRIZE_WHEELS_STEP_DELTA, client);
     }
     if (g_pw.carry_s > PRIZE_WHEELS_STEP_S) g_pw.carry_s = 0.0; // dropped behind: the steps go on from now
 }

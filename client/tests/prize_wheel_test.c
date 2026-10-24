@@ -176,6 +176,12 @@ static void test_item_pose(void) {
     prize_wheel_item_pose(10.0f, 0.0f, 4, 0.0f, 0.0f, 0.0f, 0.0f, &p);
     CHECK(NEAR(p.rotation[1], M_PI / 2.0, 1e-6) && NEAR(p.item_rot_y, M_PI, 1e-6), "a spray: meshPrev turned pi / 2, its plane pi");
     CHECK(NEAR(prize_wheel_item_bob(1.0f, (float) (M_PI / 2.0)), 1.55, 1e-6) && prize_wheel_item_bob(1.0f, 0.0f) == 1.0f, "the bob: sin * 0.55");
+    // meshPrev.getWorldPosition (an Unobtainable's explosion): the weapon skin above on the 16 high wheel at (0, 0, -6), d 2
+    prize_wheel_item_pose(16.0f, 2.0f, 0, -0.6f, -2.0f, 0.0014f, 0.0f, &p);
+    float at[3];
+    prize_wheel_item_world((const float[3]) {0.0f, 8.0f, -6.0f}, &p, at);
+    CHECK(NEAR(at[0], -2.0, 1e-5) && NEAR(at[1], 8.4, 1e-5) && NEAR(at[2], -3.5, 1e-5), "meshPrev in the world: (-2, 8.4, -3.5), got %g %g %g",
+          at[0], at[1], at[2]);
 }
 
 static void free_players(Game *game) {
