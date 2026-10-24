@@ -739,6 +739,17 @@ else ()
     endif ()
     add_test(NAME weapon_req_test COMMAND weapon_req_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+    # network_sounds_test: config.networkSounds of v10.0.3 (shared/include/network_sounds.h) against
+    # shared/tests/data/v10/networkSounds.json (and deob-10.0.3.js when present), the ids the bundle sends,
+    # and every shipped map's trigger / SOUND_EMITTER sounds (the v3.1.1 and v7.1.4 maps among them)
+    add_executable(network_sounds_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/network_sounds_test.c)
+    target_link_libraries(network_sounds_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(network_sounds_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
+    add_test(NAME network_sounds_test COMMAND network_sounds_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+
     # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
     # junk_test: the Junk wallet's amounts (hundredths, the two-place text, parseFloat's reading; doc/v10/junk.md)
     add_executable(junk_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/junk_test.c)

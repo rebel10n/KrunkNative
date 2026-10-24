@@ -253,6 +253,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/editor_bus_test
 	./$(DEBUG_DIR)/editor_serialize_test . --golden doc/ref/krunker-v7.1.4/editor/inspector-edits.json
 	./$(DEBUG_DIR)/weapons_v10_test
+	./$(DEBUG_DIR)/network_sounds_test
 	./$(DEBUG_DIR)/spawn_test
 	./$(DEBUG_DIR)/combat_test
 	./$(DEBUG_DIR)/charge_grapple_test
