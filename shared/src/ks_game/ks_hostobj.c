@@ -1255,6 +1255,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.m_y_off = (float) clamp_d(opt_number(s, data, "modelOffsetY", 0), -100, 100);
     d.m_r_off = (float) clamp_d(opt_number(s, data, "modelRotation", 0), 0, 360);
     d.precise = (unsigned char) opt_bool(s, data, "preciseHits"); // v10.0.3 prc: shots hit the animated model (ai_parts.h)
+    d.refl = (float) clamp_d(opt_number(s, data, "reflections", 0), 0, 4); // isNumber ? limitMM(parseFloat, 0, 4) : 0 (:211721)
     // the projectile (pjA raw, the others only when truthy)
     const KsValue pj_asset = ks_obj_get(s, data, "projectileAid");
     if (truthy(pj_asset)) ks_to_string(s, pj_asset, d.pj_asset, sizeof(d.pj_asset));
@@ -1272,7 +1273,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.pj_glow = (unsigned char) opt_bool(s, data, "projectileGlow");
     d.explode = (unsigned char) opt_bool(s, data, "projectileExplode");
     // Not read (no KN behaviour behind them): hideTag (noTag), canContactHit, boss (bossKills challenges), challengeKey,
-    // reflections (refl), rewardMethod / rewardNode / rewardReq / reward / rewardChance / rewardUnique (skin drops)
+    // rewardMethod / rewardNode / rewardReq / reward / rewardChance / rewardUnique (skin drops)
     char name[GAME_AI_NAME_SIZE];
     ks_to_string(s, ARG(1), name, sizeof(name));
     const vec3 pos = {(float) ks_to_float(ARG(2)), (float) ks_to_float(ARG(3)), (float) ks_to_float(ARG(4))};

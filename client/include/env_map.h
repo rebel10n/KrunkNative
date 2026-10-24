@@ -20,8 +20,8 @@
 //     opted-in material reflects the current one: a model loaded inside an ENVIRONMENT_ZONE reflects
 //     the map's colours, not the zone's.
 //   - The PMREM cube's own texel blur (16 px faces from level 3 on) is not modelled; the GGX cascade is.
-//   - AI.spawn's "reflections" option (refl: metallic materials of an AI's model, deob:211721, 205080)
-//     is not ported: GameAIData and the AI add packet carry no refl.
+// AI.spawn's "reflections" option (refl: metallic materials of an AI's model, deob:211721, 205080) sets the same
+// scene_env_intensity on the AI's model (client/src/ai_render.c air_apply_refl).
 #include <common.h>
 
 // skyDomeInit (deob:231159): skyDomeCols = [col0, col1, col2].filter(Boolean) of the data the dome

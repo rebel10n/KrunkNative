@@ -1448,6 +1448,14 @@ void ai_parts_send(Game *game, const GameAI *ai, const int uid) {
     free(json);
 }
 
+void ai_parts_on_refl(Game *game, const uint8_t *body, const uint16_t length) {
+    NetAIReflPacket p;
+    if (!body || length < sizeof(p)) return;
+    memcpy(&p, body, sizeof(p));
+    GameAI *ai = game_ai_find(game, p.sid);
+    if (ai && isfinite(p.refl)) ai->data.refl = p.refl < 0.0f ? 0.0f : p.refl > 4.0f ? 4.0f : p.refl;
+}
+
 void ai_parts_on_ext(Game *game, const uint8_t *body, const uint16_t length) {
     if (!body || length < sizeof(NetExtJsonChunk)) return;
     AiPartsState *st = state_of(game, 1);

@@ -10,6 +10,7 @@
 //   - init "dyno" with h = 0 keeps y (the build's default height is not known here).
 #include "krunker_link_internal.h"
 #include <ai.h>
+#include <ai_parts.h> // v10.0.3 "aip" / refl (AI_PARTS_EXT_SUBTYPE, AI_REFL_EXT_SUBTYPE)
 #include <modes.h>
 #include <net_ext.h>
 #include <ruleset.h>
@@ -157,6 +158,38 @@ static void ai_sync(KrunkerLink *l, const KrunkerValue *list) {
     if (p.count || p.first) EMIT(NET_PACKET_AI_SYNC_V7, p);
 }
 
+// One EXT of `subtype` (net_ext.h envelope)
+static void ai_emit_ext(KrunkerLink *l, const uint16_t subtype, const void *body, const uint16_t length) {
+    uint8_t buf[NET_EXT_HEADER_SIZE + NET_EXT_BODY_MAX];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), subtype, body, length);
+    if (n) krunker_link_emit(l, NET_PACKET_EXT, buf, n);
+}
+
+// v10.0.3 "aip" AI_PARTS [sid, partGlow, hiddenNodes, heldClip, solidPose] (AI.syncParts deob-10.0.3.js:206506, sent
+// :206566) as our EXT AI_PARTS_EXT_SUBTYPE: the same five values as one JSON record in NetExtJsonChunk slices
+// (ai_parts_on_ext applies it like syncParts)
+static void ai_parts_emit(KrunkerLink *l, const KrunkerValue *sid, const KrunkerValue *glow, const KrunkerValue *hidden,
+                          const KrunkerValue *held, const KrunkerValue *solid) {
+    const KrunkerValue nil = KRUNKER_V_NIL;
+    const KrunkerValue items[5] = {sid ? *sid : nil, glow ? *glow : nil, hidden ? *hidden : nil, held ? *held : nil, solid ? *solid : nil};
+    const KrunkerValue record = KRUNKER_V_ARRAY(items, 5);
+    KrunkerBuf json = {0};
+    if (krunker_value_to_json(&record, &json) != KRUNKER_PROTO_OK || !json.data || !json.len) {
+        krunker_buf_free(&json);
+        return;
+    }
+    const size_t slice = (size_t) NET_EXT_JSON_CHUNK_DATA, parts = (json.len + slice - 1) / slice;
+    for (size_t i = 0; parts <= 255 && i < parts; i++) {
+        uint8_t body[NET_EXT_BODY_MAX];
+        const size_t n = json.len - i * slice < slice ? json.len - i * slice : slice;
+        body[0] = (uint8_t) i;
+        body[1] = (uint8_t) parts;
+        memcpy(body + 2, json.data + i * slice, n);
+        ai_emit_ext(l, AI_PARTS_EXT_SUBTYPE, body, (uint16_t) (2 + n));
+    }
+    krunker_buf_free(&json);
+}
+
 // "aai" C_SPAWN [getData()] = [sid, index, name, x, y, z, dat ? {...} : 0] (AI.cSpawn :179892, getData :179381)
 static void ai_add(KrunkerLink *l, const KrunkerValue *d) {
     if (!krunker_is(d, KRUNKER_ARRAY) || !krunker_is(krunker_at(d, 0), KRUNKER_NUM)) return;
@@ -205,6 +238,15 @@ static void ai_add(KrunkerLink *l, const KrunkerValue *d) {
 #undef F
     }
     EMIT(NET_PACKET_AI_ADD_V7, p);
+    if (!p.has_data) return;
+    // v10.0.3 getData (deob-10.0.3.js:205147-205152): refl, and the parts state pg / hn / hc / sp a late viewer starts with
+    const double refl = num(krunker_get(dat, "refl"), 0);
+    if (refl > 0) {
+        const NetAIReflPacket r = {.sid = p.sid, .refl = (float) (refl > 4 ? 4 : refl)};
+        ai_emit_ext(l, AI_REFL_EXT_SUBTYPE, &r, sizeof(r));
+    }
+    const KrunkerValue *pg = krunker_get(dat, "pg"), *hn = krunker_get(dat, "hn"), *hc = krunker_get(dat, "hc"), *sp = krunker_get(dat, "sp");
+    if (truthy(pg) || truthy(hn) || truthy(hc) || truthy(sp)) ai_parts_emit(l, krunker_at(d, 0), pg, hn, hc, sp);
 }
 
 // ---------------------------------------------------------------- zombies
@@ -432,6 +474,7 @@ int krunker_link_world_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerF
         // AI
         case KRUNKER_S2C_SYNC_ALL_AI: ai_sync(l, arg(f, 0)); return 1;
         case KRUNKER_S2C_C_SPAWN: ai_add(l, arg(f, 0)); return 1;
+        case KRUNKER_S2C_AI_PARTS: ai_parts_emit(l, arg(f, 0), arg(f, 1), arg(f, 2), arg(f, 3), arg(f, 4)); return 1; // "aip"
         case KRUNKER_S2C_REMOVE_BY_SID: {
             const NetAIRemovePacket p = {.sid = (int32_t) num(arg(f, 0), -1)};
             EMIT(NET_PACKET_AI_REMOVE, p);

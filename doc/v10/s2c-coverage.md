@@ -147,7 +147,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | FRIENDS_LIST_RESPONSE | `gfrnd` | :255468 | profile friends list | KN equivalent | kn_brain / event bus |
 | VOTE_MAP | `vm` | window.voteMap :257932 | map up / down vote | KN equivalent | community map votes go through kn_brain |
 | UPDATE_SETTINGS | `loadS` | :244091 | cloud settings import | KN equivalent | settings are local / kn_brain |
-| AI_PARTS | `aip` | AI.syncParts :206506 (sent :206566) | AI part glow, hidden nodes, held clip, solid pose | other agent | KrunkScript AI parts (`shared/src/ai_parts.c`, in progress this round) |
+| AI_PARTS | `aip` | AI.syncParts :206506 (sent :206566) | AI part glow, hidden nodes, held clip, solid pose | **ported** | EXT `AI_PARTS_EXT_SUBTYPE` (0x0c00), one JSON record in `NetExtJsonChunk` slices (krunker_link_world.c `ai_parts_emit`), applied by `ai_parts_on_ext` (shared/src/ai_parts.c, doc/v10/krunkscript-1003.md) |
 | EDIT_MAP | `edMp` | :259803 | opens the editor on a map | **ported** | `NET_EXT_KN_OFFICIAL_EDIT_MAP` (client-local, `NetExtBlobChunk` slices) -> `s2c_ui_edit_map`: col / l false dropped, staged as `mapToEdit`, KN's editor opened (as F6). KN's own `edMp` is kn_brain's social socket (services/brain/creations.c) |
 | LOAD_XSOLLA | `xst` | :242164 | payment widget | irrelevant | real money |
 | SYNC_P_CON_DATA | `cd` | :256533 | the comp lobby table `{key: entry}` | **ported** | `NET_PACKET_COMP_LOBBY` CLEAR + SET per entry; KN's server already sends it (shared/src/comp_lobby.c) |
@@ -188,9 +188,9 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | CHARGE_CONSENT_REQUEST | `chreq` | :257673 (sent :221249) | "This game wants to charge you N KR" modal, 15 s, answer `chrsp` | **ported** | `NET_EXT_CHARGE_CONSENT_REQUEST` -> `s2c_ui_charge_request`: #chargeModal or #chargeConfirm ([1] / [2] = kickVoteY / kickVoteN), closed after 15 s, at init and on leaving; `NET_EXT_CHARGE_CONSENT_RESPONSE` goes out as `chrsp`. KN's server sends none: its `GAME.PAYMENTS.authorizeSpend` answers false first, as v10 does for an unmonetized studio (server/src/ks_server_host.c) |
 | PLAYER_POSE | `pz` | :261743 | `players.setPose` | ported | `NET_EXT_PLAYER_POSE` (krunker_link_script.c, init `plrPose` too; client/src/player_pose_render.c; doc/v10/player-pose.md) |
 
-Totals: 23 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`, `sd`,
-`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`), 10 by name, 36 KN equivalent, 35
-irrelevant, 6 other agent, 0 open.
+Totals: 24 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`, `sd`,
+`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`, `aip`), 10 by name, 36 KN equivalent, 35
+irrelevant, 5 other agent, 0 open.
 
 ## Open work
 

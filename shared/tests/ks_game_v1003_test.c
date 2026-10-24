@@ -551,6 +551,62 @@ static void test_ai_wrapper(void) {
     cJSON_Delete(map);
 }
 
+// ---------------------------------------------------------------- AI.spawn reflections (refl)
+
+// v10.0.3: refl = isNumber(reflections) ? limitMM(parseFloat, 0, 4) : 0 (deob-10.0.3.js:211721), carried by getData's
+// `refl: dat.refl || undefined` (:205147): KN sends EXT AI_REFL after the "aai" of an AI with reflections.
+static int count_ext(const int subtype, const int uid) {
+    int n = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t st, blen;
+        const uint8_t *body;
+        if (g_sent[i].type == NET_PACKET_EXT && g_sent[i].uid == uid && net_ext_unpack(g_sent[i].payload, g_sent[i].length, &st, &body, &blen) &&
+            st == subtype) n++;
+    }
+    return n;
+}
+
+static void test_ai_reflections(void) {
+    printf("Running AI.spawn reflections test...\n");
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    static Game game;
+    game_on(&game, map, MODE_ID_FFA);
+    game.is_local = 1;
+    Player *p = add_player(&game, 2);
+    run_script(&game, "public action start() {\n    GAME.AI.spawn(\"70622q\", \"Shiny\", 0, 0, 0, {reflections: 9});\n"
+                      "    GAME.AI.spawn(\"70622q\", \"Half\", 5, 0, 0, {reflections: 1.5});\n"
+                      "    GAME.AI.spawn(\"70622q\", \"Dull\", 10, 0, 0, {reflections: \"2\"});\n}\n");
+    GameAI *shiny = ai_named(&game, "Shiny"), *half = ai_named(&game, "Half"), *dull = ai_named(&game, "Dull");
+    CHECK(shiny && shiny->data.refl == 4.0f && half && half->data.refl == 1.5f && dull && dull->data.refl == 0.0f,
+          "reflections: clamped to 0..4, numbers only");
+    if (!shiny || !half || !dull) return;
+    // the sync: the reflective AIs' "aai" are followed by EXT AI_REFL, the dull one's is not
+    game.is_local = 0;
+    static int server;
+    game.server = &server;
+    g_sent_count = 0;
+    game_ai_sync(&game);
+    CHECK(count_sent(NET_PACKET_AI_ADD_V7, p->uid) == 3 && count_ext(AI_REFL_EXT_SUBTYPE, p->uid) == 2, "two AI_REFL with three aai (%d)",
+          count_ext(AI_REFL_EXT_SUBTYPE, p->uid));
+    // a mirror applies it
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t st, blen;
+        const uint8_t *body;
+        if (g_sent[i].type != NET_PACKET_EXT || !net_ext_unpack(g_sent[i].payload, g_sent[i].length, &st, &body, &blen) || st != AI_REFL_EXT_SUBTYPE) continue;
+        NetAIReflPacket r;
+        memcpy(&r, body, sizeof(r));
+        if (r.sid != half->sid) continue;
+        const float before = half->data.refl;
+        half->data.refl = 0.0f;
+        ai_parts_on_refl(&game, body, blen);
+        CHECK(half->data.refl == before, "ai_parts_on_refl sets data.refl (%.2f)", half->data.refl);
+    }
+    game.is_local = 1;
+    game.server = NULL;
+    ks_game_unload(&game);
+    cJSON_Delete(map);
+}
+
 // ---------------------------------------------------------------- onPlayerUpdate movDir (movDrP)
 
 // v10.0.3 procInputs (deob-10.0.3.js:191302-191305): movDir = config.movDirs[input[4]] + (config.movDrP || 0) * PI, and
@@ -597,6 +653,7 @@ int main(void) {
     test_ai_parts();
     test_ai_wrapper();
     test_move_dir();
+    test_ai_reflections();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);

@@ -54,12 +54,14 @@ typedef struct {
     // v10.0.3 parts: the node names (the asset's file), each mesh's emissive before a glow, the halos
     AiPartsModel *rig;           // owned: the names / parents of the glTF nodes (node order = the instance's)
     vec4 *emissive0;             // per gltf mesh: its emissive (glowState mats ec / ei)
+    unsigned char *env_extras;   // per gltf mesh: its glTF extras carry env (gltf.c set scene_env_intensity)
     Mesh *halo[AI_PARTS_MAX];    // per glow slot: the halo sprite (glowState.halo), NULL none
     char halo_name[AI_PARTS_MAX][AI_PART_NAME_SIZE];
     float halo_size[AI_PARTS_MAX]; // Box3.setFromObject(node).getSize() max side, at the halo's creation
     char held_shown[GAME_AI_ANIM_SIZE]; // heldShown
     char current[GAME_AI_ANIM_SIZE];    // the clip last started (meshRef.currAnim)
     unsigned char glowed;        // a glow ran: the emissives are restored when it ends
+    float refl;                  // the AI's reflections applied to the model (v10.0.3 refl), -1 not yet
 } AIMesh;
 
 typedef struct {
@@ -105,6 +107,7 @@ static void air_drop_mesh(AIMesh *slot) {
     }
     ai_parts_model_free(slot->rig);
     free(slot->emissive0);
+    free(slot->env_extras);
     if (slot->mesh) {
         if (g_air.scene) scene_remove_mesh(g_air.scene, slot->mesh);
         mesh_fini(slot->mesh); // frees the material; geometry / textures stay in the loader caches
@@ -171,9 +174,12 @@ static int air_load_asset(AIMesh *slot, const GameAI *ai, float *center_y) {
         free(buf);
         free(rig_path);
         slot->emissive0 = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, sizeof(vec4));
-        for (size_t i = 0; slot->emissive0 && i < slot->gltf->mesh_count; i++) {
+        slot->env_extras = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, 1);
+        for (size_t i = 0; slot->emissive0 && slot->env_extras && i < slot->gltf->mesh_count; i++) {
             Material *mat = slot->gltf->meshes[i]->material;
-            if (mat && mat->vtable == &basic_material_vtable) slot->emissive0[i] = ((BasicMaterial *) mat)->emissive;
+            if (!mat || mat->vtable != &basic_material_vtable) continue;
+            slot->emissive0[i] = ((BasicMaterial *) mat)->emissive;
+            slot->env_extras[i] = ((BasicMaterial *) mat)->scene_env_intensity > 0.0f;
         }
         return 1;
     }
@@ -226,6 +232,7 @@ static int air_load_stock(AIMesh *slot, const GameAI *ai, const char *src, const
 static void air_build(Client *client, AIMesh *slot, const GameAI *ai) {
     const GameAIData *d = &ai->data;
     memset(slot, 0, sizeof(*slot));
+    slot->refl = -1.0f;
     slot->sid = ai->sid;
     slot->serial = ai->serial;
     slot->clip_serial = ai->clip_serial;
@@ -520,6 +527,22 @@ static void air_parts(Client *client, AIMesh *slot, GameAI *ai, const int visibl
     if (!parts || !parts->glow_count) slot->glowed = 0;
 }
 
+// v10.0.3 AI.spawn reflections (refl): the model setup gives a material getEnvMap at limitMM(refl, 0, 4) when its glTF
+// extras carry no env and it is metallic (`userData.env || (refl && metalness > 0 ? refl : 0)`, deob-10.0.3.js:233665-233669;
+// conf.refl :205080). The refl may arrive after the model (EXT AI_REFL after the "aai"), so it is applied when it changes.
+static void air_apply_refl(AIMesh *slot, const GameAI *ai) {
+    if (!slot->gltf || slot->refl == ai->data.refl) return;
+    slot->refl = ai->data.refl;
+    const float refl = slot->refl < 0.0f ? 0.0f : slot->refl > 4.0f ? 4.0f : slot->refl;
+    for (size_t i = 0; i < slot->gltf->mesh_count; i++) {
+        Material *mat = slot->gltf->meshes[i]->material;
+        if (!mat || mat->vtable != &basic_material_vtable) continue;
+        BasicMaterial *m = (BasicMaterial *) mat;
+        if ((slot->env_extras && slot->env_extras[i]) || !(m->metalness_factor > 0.0f)) continue; // the extras' env wins; metalness > 0
+        m->scene_env_intensity = refl;
+    }
+}
+
 static void air_update_meshes(Client *client, const float dt_ms) {
     GameAIs *list = client->game.ai;
     const double now = gltf_clock();
@@ -585,6 +608,7 @@ static void air_update_meshes(Client *client, const float dt_ms) {
         }
         air_clips(client, slot, ai, now);
         air_parts(client, slot, ai, visible);
+        air_apply_refl(slot, ai);
     }
 }
 

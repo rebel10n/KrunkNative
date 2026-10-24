@@ -2232,6 +2232,12 @@ static void ai_send_add(Game *game, const int target, const GameAI *ai) {
     NetAIAddV7Packet add7;
     ai_add_packet_v7(ai, &add7);
     game_send(game, target, NET_PACKET_AI_ADD_V7, &add7, sizeof(add7));
+    if (ai->data.refl > 0.0f) { // v10.0.3 getData refl (deob-10.0.3.js:205147): EXT AI_REFL after the "aai"
+        const NetAIReflPacket refl = {.sid = ai->sid, .refl = ai->data.refl};
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(refl)];
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), AI_REFL_EXT_SUBTYPE, &refl, sizeof(refl));
+        if (n) game_send(game, target, NET_PACKET_EXT, buf, n);
+    }
 }
 
 // AI.sync: every active player gets "aai" for AIs in range (800) it has not seen and one "ai"

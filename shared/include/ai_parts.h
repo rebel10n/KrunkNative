@@ -146,6 +146,16 @@ int ai_parts_has_state(Game*, const GameAI*); // what a late viewer must be told
 // 10.0.3 sends pg / hn / hc / sp inside getData ("aai"); KN's fixed "aai" has no room, so a late viewer gets the
 // "aip" right after its "aai" (deliberate). EXT peers only (older peers keep the box hits and no parts).
 #define AI_PARTS_EXT_SUBTYPE 0x0c00
+// getData's `refl: this.dat.refl || undefined` (deob-10.0.3.js:205147): EXT 0x0c01 NetAIReflPacket right after the "aai"
+// of an AI with reflections (the fixed "aai" stays as older peers read it); clients set data.refl (ai_parts_on_refl).
+#define AI_REFL_EXT_SUBTYPE 0x0c01
+#pragma pack(push, 1)
+typedef struct {
+    int32_t sid;
+    float refl;     // 0 < refl <= 4
+} NetAIReflPacket;
+#pragma pack(pop)
+void ai_parts_on_refl(Game*, const uint8_t *body, uint16_t length);
 void ai_parts_send(Game*, const GameAI*, int uid);              // to one connection (uid or NET_TARGET_*)
 void ai_parts_on_ext(Game*, const uint8_t *body, uint16_t length); // a client mirror: assemble and apply
 

@@ -85,9 +85,10 @@ pass:
     same terms. A GLB env material is shaded as MeshStandardMaterial with its factors (as in v10). gltf.c reads
     the extras.
   - Differences (env_map.h): the table is built at map load (a model keeps no load-time snapshot; models loaded
-    inside a zone reflect the map's colours); the PMREM faces' own texel blur is not modelled; AI.spawn's
-    `reflections` (`refl`, `deob:211721`, `deob:205080`) is not ported (GameAIData and the AI add packet carry no
-    `refl`; a packet-shape change).
+    inside a zone reflect the map's colours); the PMREM faces' own texel blur is not modelled.
+  - AI.spawn's `reflections` (`refl`, `deob:211721`, `deob:205080`): ported (doc/v10/krunkscript-1003.md section 3). The
+    AI's metallic materials without an extras `env` get `scene_env_intensity = limitMM(refl, 0, 4)` (`air_apply_refl`,
+    client/src/ai_render.c). `refl` reaches clients in EXT `AI_REFL_EXT_SUBTYPE` after the `"aai"`.
 
 No GLB under assets/ has material extras (checked 2026-10-24), so no shipped item changes look from the
 reflections; the colour-space change brightens every raw GLB texture (v10's look).
@@ -107,4 +108,4 @@ the pickup, not the viewmodel.
 |---|---|---|
 | Fixed a checkered texture appearing on some skies and map assets | the sky dome loads `skyDomeEmisTex` as a user asset (`asset: true`, `deob:223062-223064`); v10.0.2 looked it up under /textures (missing: the checker) | sky.c always reads `user-assets/<id>/texture.png`: nothing to port |
 | Fixed explosions sometimes not showing | `ExplosionManager.mesh.frustumCulled = false` (`deob:225620`): the InstancedMesh was culled by its 1 x 1 x 1 base bounds | vfx.c draws the debris in its batch with no culling: nothing to port |
-| Added opt-in environment reflections for GLB materials | above | ported (except AI `reflections`) |
+| Added opt-in environment reflections for GLB materials | above | ported (AI `reflections` too) |

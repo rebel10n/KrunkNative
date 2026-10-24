@@ -54,6 +54,10 @@ record in `NetExtJsonChunk` slices, sent by `ai_parts_send` and applied by `ai_p
 
 The node names come from the asset's own file: `model.glb`, or `model.gltf` for "g" assets.
 
+On an official lobby, the link (`client/src/net/krunker_link_world.c`) turns the official `"aip"` into the same EXT
+record. It also turns an `"aai"` whose getData carries `pg` / `hn` / `hc` / `sp` into that record, sent after the
+add.
+
 **Deliberate differences, documented in the code.**
 
 - The model is read from `assets_path()`'s `user-assets/<id>/model.glb` through `asset_prefetch`, not fetched from
@@ -107,8 +111,13 @@ is not `behavType`. It is undefined until a script sets it, and `0` freezes the 
 - `health` 0 when absent;
 - the asset keeps its letters, so a `"46802q"` AI has its clips.
 
+`reflections` (:211721) is `limitMM(parseFloat, 0, 4)` of a number. It reaches clients in EXT `AI_REFL_EXT_SUBTYPE`
+(0x0c01), sent after the `"aai"` of an AI with reflections, because getData's `refl` (:205147) does not fit KN's fixed
+`"aai"`. The official link emits the same packet from `dat.refl`. The client gives the model's metallic materials
+without an extras `env` the scene env map at that intensity (`air_apply_refl`, :233665-233669).
+
 These keys are not read, because nothing in Box Office uses them yet: `hideTag`, `canContactHit`, `boss`,
-`challengeKey`, `reflections` and the reward keys.
+`challengeKey` and the reward keys.
 
 ## 4. Other hooks and `getMatch`
 

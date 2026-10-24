@@ -3,6 +3,7 @@
 // -> Krunker frames out (decoded again and checked field by field, ahNum trailers included).
 //   cmake-build-debug/krunker_link_test
 #include <krunker_link.h>
+#include <ai_parts.h>
 #include <krunker_build_live.h>
 #include <krunker_maps.h>
 #include <auth_join.h>
@@ -1161,6 +1162,65 @@ static void test_world(void) {
     }
     clear();
     CHECK(link.unknown_in == 0, "every world packet was handled (%u unknown)", link.unknown_in);
+}
+
+// Defuse on an official server (deob-10.0.3.js game.plantBomb :217725-217747, updateBomb :217779-217806, diffuseBomb
+// :217748-217758, def.onKill :119839-119856; KN's own side: shared/src/defuse.c). The client keeps no bomb state:
+// the plant is the planter's "inat" (the bomb dropped into its pickup, inactive, where it stood), "am" medal 19,
+// "gmsg", "so" bo_plant; then beep_0 at the bomb, "n" 1 and the deaths; a carrier dying without a killer sends the
+// bomb home with an "inat" whose active is null, which v10's own client reads as false (kept: `=== undefined` only
+// defaults an absent argument).
+static void test_defuse(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    clear();
+
+    // the planter (sid 9): loadout [0, 12] in hand 0, the bomb's pickup 41 at the plant spot, inactive
+    const KrunkerValue lo[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(12)};
+    const KrunkerValue at[] = {KRUNKER_V_NUM(179.5), KRUNKER_V_NUM(-138), KRUNKER_V_NUM(-466)};
+    const KrunkerValue medal[] = {KRUNKER_V_NUM(19), KRUNKER_V_NUM(200), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1)};
+    feed(&link, "inat", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_ARRAY(lo, 2), KRUNKER_V_NUM(0), KRUNKER_V_NUM(41), KRUNKER_V_NUM(17),
+                                          KRUNKER_V_NUM(41), KRUNKER_V_BOOL(0), KRUNKER_V_ARRAY(at, 3)}, 8);
+    feed(&link, "am", (KrunkerValue[]) {KRUNKER_V_ARRAY(medal, 4)}, 1);
+    feed(&link, "gmsg", (KrunkerValue[]) {KRUNKER_V_STR("BOMB PLANTED")}, 1);
+    feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_STR("bo_plant"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1)}, 3);
+    feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_STR("beep_0"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(179.5), KRUNKER_V_NUM(-138),
+                                        KRUNKER_V_NUM(-466)}, 6);
+    {
+        READ_IN(NetLoadoutPacket, lp, LOADOUT, 0);
+        READ_IN(NetPickupPacket, pk, PICKUP, 0);
+        READ_IN(NetGameMessagePacket, gm, GAME_MESSAGE, 0);
+        READ_IN(NetSoundPacket, plant, SOUND, 0);
+        READ_IN(NetSoundPacket, beep, SOUND, 1);
+        CHECK(lp_p && lp.uid == 9 && lp.count == 2 && lp.weapons[0] == 0 && lp.loadout_index == 0, "inat: the planter's loadout without the bomb");
+        CHECK(pk_p && pk.uid == 41 && pk.weapon == 17 && !pk.active && pk.moved && pk.position[0] == 179.5f && pk.position[2] == -466.0f,
+              "inat: the planted bomb, inactive where it was planted");
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_KN_OFFICIAL_MEDAL, 0, &len);
+        const NetOfficialMedalPacket *m = k >= 0 ? (const NetOfficialMedalPacket *) ext_body(k, NET_EXT_KN_OFFICIAL_MEDAL, &len) : NULL;
+        CHECK(m && !strcmp(m->text, "Bomb Planted") && !strcmp(m->score, "+200"), "am [19, 200]: Bomb Planted +200");
+        CHECK(gm_p && !strcmp(gm.text, "BOMB PLANTED"), "gmsg BOMB PLANTED");
+        CHECK(plant_p && !strcmp(plant.name, "bo_plant") && plant.uid == -2, "so bo_plant: 2D");
+        CHECK(beep_p && !strcmp(beep.name, "beep_0") && beep.uid == -1 && beep.position[0] == 179.5f && beep.position[1] == -138.0f, "so beep_0: at the bomb");
+    }
+    clear();
+
+    // the blast and a carrier's death without a killer ("inat" -1 ..., active null)
+    feed(&link, "n", (KrunkerValue[]) {KRUNKER_V_NUM(1)}, 1);
+    const KrunkerValue home[] = {KRUNKER_V_NUM(-312), KRUNKER_V_NUM(-140), KRUNKER_V_NUM(-279)};
+    feed(&link, "inat", (KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(41), KRUNKER_V_NUM(17), KRUNKER_V_BOOL(1),
+                                          KRUNKER_V_NIL, KRUNKER_V_ARRAY(home, 3)}, 8);
+    {
+        READ_IN(NetNukePacket, n, NUKE, 0);
+        READ_IN(NetPickupPacket, pk, PICKUP, 0);
+        CHECK(n_p && n.state == 1, "n 1: the blast's flash");
+        CHECK(!find_in(NET_PACKET_LOADOUT, 0), "inat -1: no player's loadout");
+        CHECK(pk_p && pk.uid == 41 && pk.weapon == 17 && !pk.active && pk.moved && pk.position[0] == -312.0f, "inat: the bomb home, active null = inactive");
+    }
+    clear();
+    CHECK(link.unknown_in == 0, "every Defuse packet was handled (%u unknown)", link.unknown_in);
 }
 
 // the last frame the link sent (NULL: none)
@@ -2495,6 +2555,31 @@ static void test_s2c_coverage(void) {
     }
     clear();
 
+    // v10.0.3 AI parts: "aip" [sid, partGlow, hiddenNodes, heldClip, solidPose] (AI.syncParts :206506) as one JSON record
+    // in EXT AI_PARTS_EXT_SUBTYPE; an "aai" whose getData has refl / pg emits AI_REFL and the parts record after it (:205147)
+    {
+        const KrunkerValue glow_pair[] = {KRUNKER_V_STR("#ff0000"), KRUNKER_V_NUM(0.5)};
+        const KrunkerValue glow[] = {KRUNKER_V_STR("Head"), KRUNKER_V_ARRAY(glow_pair, 2)};
+        const KrunkerValue hidden[] = {KRUNKER_V_STR("Arm.L")};
+        feed(&link, "aip", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_MAP(glow, 1), KRUNKER_V_ARRAY(hidden, 1), KRUNKER_V_STR("Melee"), KRUNKER_V_NIL}, 5);
+        const NetPacket *aip = find_in(NET_PACKET_EXT, 0);
+        static const char aip_json[] = "[4,{\"Head\":[\"#ff0000\",0.5]},[\"Arm.L\"],\"Melee\",null]";
+        CHECK(aip && aip->length == 2 + 2 + strlen(aip_json) && aip->payload[0] == 0x00 && aip->payload[1] == 0x0c &&
+              !memcmp(aip->payload + 4, aip_json, strlen(aip_json)), "aip: one AI_PARTS record (%u bytes)", aip ? aip->length : 0);
+        clear();
+        const KrunkerValue dat[] = {KRUNKER_V_STR("refl"), KRUNKER_V_NUM(2.5), KRUNKER_V_STR("hc"), KRUNKER_V_STR("Melee")};
+        const KrunkerValue spawn[] = {KRUNKER_V_NUM(5), KRUNKER_V_NUM(0), KRUNKER_V_STR("Bot"), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+                                      KRUNKER_V_NUM(0), KRUNKER_V_MAP(dat, 2)};
+        feed(&link, "aai", (KrunkerValue[]) {KRUNKER_V_ARRAY(spawn, 7)}, 1);
+        const NetPacket *refl = find_in(NET_PACKET_EXT, 0), *parts = find_in(NET_PACKET_EXT, 1);
+        NetAIReflPacket r = {0};
+        if (refl && refl->length == 2 + sizeof(r)) memcpy(&r, refl->payload + 2, sizeof(r));
+        CHECK(find_in(NET_PACKET_AI_ADD_V7, 0) && refl && refl->payload[0] == 0x01 && refl->payload[1] == 0x0c && r.sid == 5 && r.refl == 2.5f,
+              "aai with refl: AI_REFL after the add (%.2f)", r.refl);
+        CHECK(parts && parts->payload[0] == 0x00 && parts->payload[1] == 0x0c, "aai with hc: the parts record a late viewer starts with");
+        clear();
+    }
+
     // packets ignored on purpose, and those the account frames take by name: handled, not unknown
     const char *const quiet[] = {"spinKR", "vad", "pur", "twitchDropsResponse", "nftR", "dbgp", "debug_rc", "clog", "pir", "ann",
                                  "cntry", "ger", "uf", "bpdl", "chg", "_0"};
@@ -3807,6 +3892,7 @@ int main(void) {
     test_combat();
     test_fx();
     test_world();
+    test_defuse();
     test_rounds();
     test_actions();
     test_hitreg();

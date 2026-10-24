@@ -65,6 +65,8 @@ typedef struct {
     int tex_encode;               // ten
     float m_size;                 // ms (0.01..100), 0 = 4 (mSize || 4)
     float m_y_off, m_r_off;       // myo (-100..100) / mro (degrees)
+    float refl;                   // v10.0.3 AI.spawn reflections (refl, 0..4): the model's metallic materials reflect
+                                  // getEnvMap at this intensity (deob-10.0.3.js:211721, :205080, :233665)
     float hbh, hbw;               // hit box height / width multipliers (0.1..10), 0 = 1
     float tag_scale;              // ains (0..10), 0 = 1
     int lvl;                      // ail (0..999): the nametag level
