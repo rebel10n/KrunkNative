@@ -1644,6 +1644,8 @@ static void register_commands(void) {
     register_server("classes", NO_ARGS, "list classes and primary weapons (the spawned player's is starred)");
     register_server("borders", ARGS(A_ON_OFF), "toggle invisible barriers");
     register_server("forcecol", ARGS(A_ON_OFF), "toggle force collide");
+    // v10.0.3 game.applyFreezeOthers (shared/src/chat_commands.c cmd_freezeothers, shared/src/player_pose.c)
+    register_server("freezeothers", ARGS(A_ON_OFF), "freeze every other player where they stand, or let them go");
     register_server("server", NO_ARGS, "show current map/mode/player/tick info");
     register_server("cycle", NO_ARGS, "cycle to the next map");
     register_server("map", ARGS(A_NAME), "switch map (no arg = show current)");
@@ -2226,7 +2228,7 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         if (arg == 0) for (int i = 0; i < g_con.bind_count; i++) cand_add(c, g_con.binds[i].key, prefix);
     } else if (!strcmp(cmd, "toggle")) {
         if (arg == 0) con_words(c, prefix, WORDS("god", "noclip", "smite", "notarget", "forcehide", "unlimitedammo", "borders", "forcecol", "endless", "bhop"));
-    } else if (cmd_is(cmd, WORDS("borders", "forcecol"))) {
+    } else if (cmd_is(cmd, WORDS("borders", "forcecol", "freezeothers"))) {
         if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (!strcmp(cmd, "bhop")) {
         if (arg == 0) con_words(c, prefix, WORDS("on", "off", "held"));

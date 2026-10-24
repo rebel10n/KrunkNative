@@ -81,8 +81,8 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 | Official 10.0.3 line | Class | KN action |
 |---|---|---|
-| Added player.pose.holdL with a "handL" attach point | Feature (KrunkScript API) | Not ported: KN has no `player.pose` (no hold or split-arm API). |
-| player.pose armL and armR now move only their own arm in third person | Bug (KrunkScript pose) | Not ported: KN has no `player.pose`. |
+| Added player.pose.holdL with a "handL" attach point | Feature (KrunkScript API) | **Ported** with `player.pose` (doc/v10/player-pose.md): `holdL` in the sanitize, the left arm's turn, the "handL" anchor for `attachTo` (`shared/src/ks_game/ks_pose.c`, `client/src/player_pose_render.c`, `client/src/ks/ks_scene.c`). Test `player_pose_test`. |
+| player.pose armL and armR now move only their own arm in third person | Bug (KrunkScript pose) | **Ported:** KN's arms are two pivoted meshes, so armL / armR (or holdL) turn each arm apart, `hold` alone both alike (v10's split / merged arms; doc/v10/player-pose.md). |
 | Added the Solid Ramp Sides map setting (rampFix) | Feature (map and physics) | **Ported:** map flag `rampFix` (`shared/src/map.c`, `shared/include/shared.h`) and the ramp side block in `shared/src/player.c` (`movement_block_ramp_side`, the check in the ramp branch of `player_do_map_collisions`). Regression test `shared/tests/ramp_fix_test.c` (fails without the port). The editor checkbox (Essential panel, next to Force Old AO, `client/src/editor/editor_gameconfig.c`) and the game option `config.rampFix` (`GameConfig.ramp_fix`, folder Other, `shared/src/game_config.c`) are ported too; `ramp_fix_test` checks the config path. |
 | Added preciseHits for AI (bodyDamage, setPartDamage, glowPart, setNodeVisible, getPartPosition, onAIPartDamage) | Feature (KrunkScript AI) | Not ported: KN's AI is one model with no named parts, and KN has no part hooks or `bodyDamage`. |
 | Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Ported: `AI.spawn` `alwaysSync` (`GameAIData.always_sync`); the AI skips the 800 range of `game_ai_sync` (`shared/src/ai.c`). The official line only names the option; "every player whatever its distance" is read from the name. `ai.solid` and the `hold` option of `ai.playAnim` are not ported: neither exists in v10.0.2 (`~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js` has no `solid` in JavaScript form and no options object on `ai.playAnim`), and the official line gives no behaviour. v10.0.2's `AI.sync` (`this["sync"]` in v10.js) skips any AI more than 800 from a non-spectating player, sent or not; `alwaysSync` is KN's exemption from that gate, and v10.js has no `alwaysSync`. |
@@ -125,7 +125,7 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 3. KrunkScript AI: `ai.solid` and the `hold` option of `ai.playAnim` exist in neither v10.0.2 (v10.js) nor the
    official 10.0.3 line, and KN's AI bodies do not block players, so there is no behaviour to port. A spec from
    Krunker is needed. KN's `ai.playAnim` now passes `reps` as v10.0.2 does (`game_ai_play_anim_reps`): the local copy plays the clip reps times; the `ana` packet carries no reps and networked clients play once, as v10.0.2's servAnim does. The AI
-   parts (`preciseHits`, `setPartDamage`, ...) and `player.pose` are not in KN at all.
+   parts (`preciseHits`, `setPartDamage`, ...) are not in KN at all; `player.pose` is ported (doc/v10/player-pose.md).
 4. GLB environment reflections (KN has none).
 5. Done: the Solid Ramp Sides editor checkbox and the `config.rampFix` game option.
 

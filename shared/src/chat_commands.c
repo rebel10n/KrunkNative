@@ -1002,6 +1002,17 @@ static void cmd_borders(ChatCtx *c) {
     broadcast(c, "Borders %s", next ? "ON" : "OFF");
 }
 
+// freezeothers [on|off] (KrunkNative entry point): v10.0.3's game.applyFreezeOthers(freeze, exceptId)
+// (deob-10.0.3.js:221547-221573; player_pose.c) has no caller in the bundle (its caller is server-only code),
+// so the host or a dev reaches it here: every other player is frozen where it stands ("frz"), or let go.
+static void cmd_freezeothers(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV)) return;
+    Game *game = c->host->game;
+    const int next = chat_parse_toggle(c->argc ? c->argv[0] : NULL, game->freeze_others);
+    const int changed = game_apply_freeze_others(game, next, c->player ? c->player->uid : -1);
+    broadcast(c, "Freeze others %s (%d player%s)", next ? "ON" : "OFF", changed, changed == 1 ? "" : "s");
+}
+
 // Solid map objects only: zones and triggers stay walk-through (v3.1.1 also injects
 // hidden colliders for the map JSON's col objects; natively those are the same objects).
 static int force_collide_candidate(const Object *object) {
@@ -2746,6 +2757,7 @@ static const ChatCommand COMMANDS[] = {
     // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
     {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
     {{"bring", NULL, "<player|all|selector> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
+    {{"freezeothers", NULL, "[on|off]", "freeze every other player where they stand, or let them go (v10 applyFreezeOthers)", CHAT_PERM_HOST_DEV}, cmd_freezeothers},
     {{"build_fill", NULL, "[count] [kind 0-3]", "place count player builds in a stack beside you (a placement load test)", CHAT_PERM_HOST_DEV}, cmd_build_fill},
     // KrunkNative Object Manager (its own rules: object_manager_caps)
     {{"give", NULL, "[selector] <weapon|item> [player|selector]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},

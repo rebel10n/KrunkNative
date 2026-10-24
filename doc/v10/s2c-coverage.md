@@ -165,10 +165,10 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | LOTTERY_STARTED | `lotStart` | :255225 | raffle window refresh | KN equivalent | gapi / kn_brain |
 | LOTTERY_ENDED | `lotEnd` | :255230 | raffle window refresh | KN equivalent | gapi / kn_brain |
 | CHARGE_CONSENT_REQUEST | `chreq` | :257673 (sent :221249) | "This game wants to charge you N KR" modal, 15 s, answer `chrsp` | open | EXT 0x0500 / 0x0501 exist with no consumer: KrunkScript KR charges are not ported (doc/v10/net.md section 6). Without an answer the server times out after 15 s and declines |
-| PLAYER_POSE | `pz` | :261743 | `players.setPose` | other agent | poses (`NET_EXT_PLAYER_POSE`, krunker_link_script.c) |
+| PLAYER_POSE | `pz` | :261743 | `players.setPose` | ported | `NET_EXT_PLAYER_POSE` (krunker_link_script.c, init `plrPose` too; client/src/player_pose_render.c; doc/v10/player-pose.md) |
 
-Totals: 11 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`),
-10 by name, 36 KN equivalent, 35 irrelevant, 7 other agent, 11 open.
+Totals: 12 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`),
+10 by name, 36 KN equivalent, 35 irrelevant, 6 other agent, 11 open.
 
 ## Open work
 

@@ -83,7 +83,7 @@ obfuscated). Numeric diff: only differences are the Stalker block below plus a c
 | weapon `rShoot`: primary fire also triggered by the right/aim input (used by Compressor); `shoot()` gets the aim input as its last argument (v10:170139) for `physPull` | v10:170122 `_59781 \|\| this.weapon.rShoot && _59782` | none |
 | `jump()` sets `didStickToWall = true`, counts a skin stat `jumps` | v10:172012-172015 | players.js:1692 |
 | player-player interact range: `getD3D(..y+5.5.., ..y+5.5..) <= 13.2` (v7 used playerHeight/2 and 2.4*scale, same values) | v10:170175 | player.js:1993 |
-| `poseData.bodyY` lowers the eye/hitbox height (emotes/poses) | v10:170861 | none |
+| `poseData.bodyY` lowers the posed model and the local player's eye (emotes/poses); not the server's hit boxes (`updateHeight` reads it only with a renderer) | v10:170861, deob-10.0.3.js:193560-193566 | none (ported: doc/v10/player-pose.md) |
 | `markPosition` (ranked/comp key bind: ping a world position for the team) | v10:170189-170610, bind v10:221125 | none |
 
 Mode fields that are new in v10 movement code: `mode.canSlide(player)` overrides `noSliding` (v10:171971),
@@ -357,7 +357,7 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 | shutdown after end | config.shutdownTimer | 120000 when ranked | v10:191217 |
 | reconnection | — | `allowsReconnection()` = ranked && WARMUP..POST_MATCH | v10:191796 |
 | vote forfeit | exists (game.js:4435, 4880) | voters = team members not bypassed and disconnected <= 30 s (`voteForfeitDisconnectGrace 30000`); `voteForfeitTimer 60000`; win = ceil(bestOf/2) rounds to the other team | v10:186459-186470, 190928-191004 |
-| `freezeOthers` | — | new `applyFreezeOthers` (guess: KrunkScript/host command) | v10:191006 |
+| `freezeOthers` | — | new `applyFreezeOthers(freeze, exceptId)`: everyone but one frozen ("frz", held in place) or let go; no caller in the bundle (server-only code). KN: `game_apply_freeze_others`, `/freezeothers` (doc/v10/player-pose.md) | v10:191006, deob-10.0.3.js:221547-221573 |
 
 ## 9. Port status (gameplay)
 
@@ -377,6 +377,6 @@ re-checked against 10.0.3 in `gameplay-1003-audit.md` and `rules-1003.md`: every
 | a public match has no winner (`winner = -1`) | `mode_public_no_winner` / `ModeWinner.no_one` (`shared/src/modes/mode_round.c`), `game_send_end`; `deob-10.0.3.js:221681`, rules-1003.md section 3 | modes_test (`test_public_winner`), match_test |
 | Raid / Zombies keys: skipStats, noProfileStats, specMaxD, runPeakPlayers, the raid challenges, aik, rnd | `shared/src/modes/modes.c`, `mode_rules.c` (`mode_end_raid`, `mode_update_raid`), `game_inc_stat`, `server/src/accounts.c`, `progression.c` (`lt_off`); rules-1003.md section 4 | modes_test (`test_raid_v10`), season_test |
 
-Not ported yet: `poseData.bodyY`, `markPosition`, and the match-flow
+`poseData.bodyY` and `freezeOthers` are ported with the player poses (doc/v10/player-pose.md). Not ported yet: `markPosition`, and the match-flow
 items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md). The Stalker's
 render side, HUD, taunts and sounds are ported: doc/v10/stalker.md.

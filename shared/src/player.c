@@ -84,7 +84,7 @@ Player *player_init(Game *game) {
 
 void player_update_height(Player *player) {
     float drop = player->crouch_val * game_constants.crouch_distance;
-    // v10 updateHeight (deob-10.0.3.js:193561-193566): on a rendering client the local player's pose bodyY
+    // v10 updateHeight (deob-10.0.3.js:193560-193566): on a rendering client the local player's pose bodyY
     // moves the eye with the posed body (an emote's lowering); render_you is never set on an authority, which
     // like v10's server keeps the plain height (the hit boxes do not follow the pose)
     if (player->render_you && (player->pose.has & PLAYER_POSE_BODY_Y)) drop -= player->pose.body_y;

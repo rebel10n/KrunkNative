@@ -138,6 +138,11 @@ void ks_ref_reset_player(KsRef*);
 // ks_hostobj.c: the shared GAME.* entries filled by ks_game_api_fill
 void ks_hostobj_api_fill(KsApiImpl *api, KsSide side);
 
+// ks_pose.c: player.pose (v10.0.3 deob-10.0.3.js:208220-208231): the host property's getter / setter
+// (the setter only on the server's script), and the sanitizePose conversion both ways
+KsValue ks_player_pose_get(KsScript *s, void *native, uint32_t id);
+void ks_player_pose_set(KsScript *s, void *native, uint32_t id, KsValue v);
+
 // ks_entities.c: the entity manager. ks_entities_round_start (game start: despawns the last round's
 // entities, spawns the map's ENTITY instances on the authority), ks_entities_update (the authority's
 // clock steps, then the queued hooks), ks_entities_reset / free (no hooks), and the GAME.ENTITIES entries.
