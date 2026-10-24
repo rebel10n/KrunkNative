@@ -1335,6 +1335,7 @@ typedef struct Player_t {
     float crouch_val;
     float aim_val;
     float aim_time;
+    unsigned char aim_dir;        // v10.0.3 aimDir: 0 aiming in, 1 letting go of the aim (deob-10.0.3.js:191453, 191465)
 
     int slid_cont;
 

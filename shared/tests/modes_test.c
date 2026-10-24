@@ -1953,6 +1953,41 @@ static void test_kill_rules_v10(Game *game) {
     if (sent) memcpy(&feed, sent->payload, sizeof(feed));
     CHECK(sent && !(feed.fists & NET_KILL_HIDE_FEED), "FFA: the kill shows in the feed");
 
+    // kill medals (deob-10.0.3.js:192560-192594): letting go of the aim is a plain kill, aiming in a Quick Scope;
+    // a flag carrier's death is Snatched
+    for (int dir = 0; dir < 2; dir++) {
+        start_mode(game, MODE_ID_FFA);
+        a = add_player(game, 1, 0);
+        b = add_player(game, 2, 0);
+        a->aim_val = 0.5f; // KN: 0 hip -> 1 aimed
+        a->aim_dir = (unsigned char) dir;
+        g_sent_count = 0;
+        kill(b, a, 0); // the Sniper Rifle (weapon 0, scope)
+        sent = last_sent(NET_PACKET_KILL_MEDALS, 1);
+        NetKillMedalsPacket medals;
+        memset(&medals, 0, sizeof(medals));
+        if (sent) memcpy(&medals, sent->payload, sizeof(medals));
+        int quick = 0, plain = 0;
+        for (int i = 0; i < medals.count; i++) {
+            quick += !strcmp(medals.medals[i].text, "Quick Scope");
+            plain += !medals.medals[i].text[0] && medals.medals[i].score == 50;
+        }
+        CHECK(sent && game->weapons[0]->scope && (dir ? plain && !quick : quick && !plain), "half aimed, aimDir %d: %s", dir, dir ? "a plain 50" : "Quick Scope");
+    }
+    start_mode(game, MODE_ID_FFA);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    b->mode.flag = 1;
+    g_sent_count = 0;
+    kill(b, a, 2);
+    sent = last_sent(NET_PACKET_KILL_MEDALS, 1);
+    NetKillMedalsPacket carried;
+    memset(&carried, 0, sizeof(carried));
+    if (sent) memcpy(&carried, sent->payload, sizeof(carried));
+    int snatched = 0;
+    for (int i = 0; i < carried.count; i++) snatched += !strcmp(carried.medals[i].text, "Snatched") && carried.medals[i].score == 50;
+    CHECK(snatched == 1, "a flag carrier's kill: Snatched 50");
+
     // botsAsAI (Raid): a bot's kill has no killer
     start_mode(game, MODE_ID_RAID);
     a = add_player(game, 1, 0);

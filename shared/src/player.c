@@ -258,6 +258,7 @@ void player_spawn(Player *player) {
     player->air_time = 0.0f;
     player->covered_distance = 0.0f;
     player->aim_time = 0.0f;
+    player->aim_dir = 0; // Player.init aimDir = 0 (deob-10.0.3.js:190608)
 
     player->swap_timer = 0.0f;
     player->slide_timer = 0.0f;
@@ -2198,6 +2199,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
         if (input->scope && player->aim_val < 1.0f && can_scope) {
             player_cancel_inspect(player);
+            player->aim_dir = 0; // aimDir = 0 (deob-10.0.3.js:191453)
             player->aim_val += 1.0f / player->weapon->aim_speed * delta;
             player->aim_val = MIN(1.0f, player->aim_val);
 
@@ -2205,6 +2207,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
                 // TODO: toggle aim (HUD)
             }
         } else if (!can_scope || !input->scope && player->aim_val > 0.0f) {
+            player->aim_dir = 1; // aimDir = 1 (deob-10.0.3.js:191465)
             player->aim_val -= 1.0f / player->weapon->aim_speed * delta;
             player->aim_val = MAX(0.0f, player->aim_val);
 
@@ -3295,7 +3298,8 @@ static int combat_kill_reward(Game *game, Player *killer, Player *victim, const 
 
         if (custom) score += combat_medal(medals, "", custom);   // weapon.kill = ["", N]
         else if (scope && killer->aim_val == 0.0f) score += combat_medal(medals, "No Scope", 100);
-        else if (!scope || (killer->aim_val == 1.0f && killer->aim_time > 0.18f)) score += combat_medal(medals, "", 50);
+        // `!scope || aimVal == 0 && aimTime > 180 || aimDir == 1` (deob-10.0.3.js:192570): letting go of the aim is no Quick Scope
+        else if (!scope || (killer->aim_val == 1.0f && killer->aim_time > 0.18f) || killer->aim_dir == 1) score += combat_medal(medals, "", 50);
         else score += combat_medal(medals, "Quick Scope", 75);
 
         if (info && info->headshot) score += combat_medal(medals, "Headshot", 50);
