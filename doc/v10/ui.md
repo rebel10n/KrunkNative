@@ -340,7 +340,13 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     ("Select Modes", "Select Classes", "Server Settings", "Private"). A comp host has the Team Rosters
     (Team 1 / Team 2 Players, Spectators: `teams` / `specs`), an account's Custom host the Server Upgrades
     (40 Player Server 1000 KR, Promote Server 2500 KR: `maxPS` / `promServ`) with the Server Cost line and
-    v10's "Insufficient Funds" check (deob-10.0.3.js:249026-249053, 229816-229876; no KR is charged).
+    v10's "Insufficient Funds" check (deob-10.0.3.js:249026-249053, 229816-229876; no KR is charged). The
+    Server tab also has Social > Share on Hub for an account of level 10+ (sent as `share`) and the Host
+    Presets block: Load / Save / Delete of the window's maps, modes, classes, server settings, matrices and
+    Private under `krk_hostPresets` (deob-10.0.3.js:249042-249045, 249058-249238).
+  - Menu click sounds: the side-nav items, the action cards, Invite, Join, Guide, Battlepass, Turf Wars,
+    Leaderboards and Exit play `playSelect()` (0.15); the player header's items play none; Settings, More
+    Krunker and Inbox play 0.1 (deob-10.0.3.js:158419-158566, 162030, 162512-162525, 163104-163730).
   - Ranked home: the Challenges link and the milestone claim play no click sound, the description takes
     `expanded` with the progression details, the map cards have the map name as `alt`.
   - Clans: the loot settings' "Last updated ... on" is `toLocaleDateString()` (M/D/YYYY), the ownership
@@ -386,10 +392,9 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     profile").
 - **Known gaps left** (larger ports, not done here): the store's bundle popup (`bundlePopup`, with
   conditional bundles), `showPremiumBenefits()`; the host form's
-  Host Presets and Share on Hub row, the non-Custom host types' banners and map lists, the community-map
-  Select block, `canRehost`; window 5's "Processing Deletion" / Cancel state (`requestDeletion(0)`,
+  non-Custom host types' banners and map lists, the community-map Select block (and with it the presets'
+  commMap key), `canRehost`; window 5's "Processing Deletion" / Cancel state (`requestDeletion(0)`,
   `acc.reqDel`: kn_brain has no deletion request route, and `requestDeletion` has no handler), Twitch
   linking and drop claims, and Account Security's Current Password field (10.0.3 sends `upp` with the
   refresh token instead, deob-10.0.3.js:244645-244650; kn_brain's `upp` checks the old password); the market's Black Market title reward; the profile popup's game and mod cards (v10 opens its map /
-  mod pages, not ported) and 10.0.3's 39 later badges (the badge table is v7.1.4's 29); the menu items play
-  `playSelect(0.1)` where v10 plays `playSelect()`.
+  mod pages, not ported) and 10.0.3's 39 later badges (the badge table is v7.1.4's 29).
