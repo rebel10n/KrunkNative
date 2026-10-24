@@ -104,8 +104,9 @@ int comp_lobby_class_count(const Game *game, const int team, const int class_ind
 
 int comp_lobby_class_limit(const Game *game, const int class_index) {
     if (!game || class_index < 0) return 0;
-    if (class_index >= GAME_CONFIG_CLASS_LIMITS) return game->config.team_size + 1; // KrunkNative: no classLim, the team's size
-    return game->config.class_limits[class_index];
+    // KrunkNative's classes (from KN_CLASS_BASE: the Nettspend) have no classLim: the team's size
+    if (class_index >= KN_CLASS_BASE) return game->config.team_size + 1;
+    return class_index < GAME_CONFIG_CLASS_LIMITS ? game->config.class_limits[class_index] : 0;
 }
 
 int comp_lobby_update(Game *game, const int uid, const char key, const int value) {
@@ -114,10 +115,10 @@ int comp_lobby_update(Game *game, const int uid, const char key, const int value
     const GameConfig *cfg = &game->config;
     if (key == 'c') {
         if (value == entry->class_index) return 0;
-        // any class of the table: Krunker's 16 and KrunkNative's Nettspend (16), open to comp too
+        // any class of the table: Krunker's CLASS_COUNT and KrunkNative's Nettspend (CLASS_ID_NETTSPEND, the last), open to comp too
         if (value < 0 || value >= (int) (game->class_count ? game->class_count : rules_class_count())) return 0;
         // limitClasses: classLim<value> slots per team; a class with no limit is locked. classLim0..15 are
-        // Krunker's; a KrunkNative class past them gets 1 a team (a rankedClasses class's default)
+        // Krunker's; a KrunkNative class past them gets the team's size (comp_lobby_class_limit)
         if (cfg->limit_classes) {
             const int limit = comp_lobby_class_limit(game, value);
             if (!limit) return 0;

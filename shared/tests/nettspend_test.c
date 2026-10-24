@@ -1,7 +1,7 @@
 // KrunkNative Nettspend (doc/v7/decisions.md "Nettspend class", "Purple Drank", "Money Spread";
 // shared/include/drank.h) through procInputs frames (player_proc_input) on an authority game, the
 // way server_bin and the offline sandbox run it:
-//   the tables (ids 67 / 68 after the Physics Gun, class 16 after Krunker's, flags, Object Manager
+//   the tables (ids 67 / 68 after the Physics Gun, the last class after v10's, flags, Object Manager
 //   tiles and `give` names); a Nettspend spawn carries Drank + Money Spread + knife in every lobby
 //   (custom, public, comp) and bots may play it, in every KrunkNative lobby type and mode, and is
 //   refused in an official krunker.io game (game_class_allowed, Game.is_official); the Drank's stream (60 ms, 4 a
@@ -135,11 +135,15 @@ static void test_tables(const Game *game) {
     CHECK(object_manager_give_lookup("68", &id, NULL) == OM_GIVE_WEAPON && id == WEAPON_ID_MONEY_SPREAD, "`give 68` (%d)", id);
 
     const ClassConfig *classes = rules_classes();
-    CHECK(CLASS_COUNT == 16 && CLASS_ID_NETTSPEND == 16 && CLASS_TABLE_COUNT == 17 && rules_class_count() == CLASS_TABLE_COUNT && game->class_count == CLASS_TABLE_COUNT,
-          "class 16 after Krunker's 16 (table %zu, game %zu)", rules_class_count(), game->class_count);
+    // a mod on top of v10: the last class, from KN_CLASS_BASE = v10's CLASS_COUNT (shared.h), so it moves up if v10's table grows
+    CHECK(CLASS_ID_NETTSPEND == KN_CLASS_BASE && KN_CLASS_BASE == CLASS_COUNT && rules_class_count() == CLASS_TABLE_COUNT &&
+              game->class_count == CLASS_TABLE_COUNT && (size_t) CLASS_ID_NETTSPEND == game->class_count - 1,
+          "class %d, the last, after v10's %d (table %zu, game %zu)", CLASS_ID_NETTSPEND, CLASS_COUNT, rules_class_count(), game->class_count);
+    CHECK(CLASS_ID_NETTSPEND == KN_CLASS_NETTSPEND_STORED, "the stored id %d (saved class, presets, the brain's c%d) is the Nettspend's",
+          KN_CLASS_NETTSPEND_STORED, KN_CLASS_NETTSPEND_STORED);
     const ClassConfig *n = &classes[CLASS_ID_NETTSPEND];
-    CHECK(!strcmp(n->name, "Nettspend") && n->icon_index == 16 && n->loadout && n->loadout[0] == WEAPON_ID_DRANK && n->secondary &&
-          n->kn_secondary == WEAPON_ID_MONEY_SPREAD + 1, "the Nettspend: Drank, always the Money Spread, icon 16");
+    CHECK(!strcmp(n->name, "Nettspend") && n->icon_index == CLASS_ID_NETTSPEND && n->loadout && n->loadout[0] == WEAPON_ID_DRANK && n->secondary &&
+          n->kn_secondary == WEAPON_ID_MONEY_SPREAD + 1, "the Nettspend: Drank, always the Money Spread, icon_%d", n->icon_index);
     CHECK(!n->hide && n->health == 100 && n->speed == 1.05f && !n->wall_jump, "open to everyone, a Triggerman baseline");
     int others = 0;
     for (int c = 0; c < CLASS_COUNT; c++) others |= classes[c].kn_secondary;
@@ -306,10 +310,12 @@ static void test_class_spawn(Game *custom, Game *pub) {
 
     // bots: a forced Nettspend bot keeps it, and the random class roll reaches it
     BotAssignments a;
-    char *argv[] = {"class=16", "roam=off"};
+    char class_arg[24];
+    snprintf(class_arg, sizeof(class_arg), "class=%d", CLASS_ID_NETTSPEND);
+    char *argv[] = {class_arg, "roam=off"};
     bot_parse_assignments(2, argv, &a);
     GameBot *bot = !a.error[0] ? game_bots_add(pub, &a, NULL, 0.0f) : NULL;
-    CHECK(bot && bot->class_index == CLASS_ID_NETTSPEND, "a class=16 bot plays the Nettspend (%d, %s)", bot ? bot->class_index : -2, a.error);
+    CHECK(bot && bot->class_index == CLASS_ID_NETTSPEND, "a %s bot plays the Nettspend (%d, %s)", class_arg, bot ? bot->class_index : -2, a.error);
     game_bots_remove_all(pub);
     char *argv2[] = {"roam=off"};
     bot_parse_assignments(1, argv2, &a);

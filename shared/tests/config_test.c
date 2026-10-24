@@ -230,8 +230,6 @@ static void test_validate(void) {
         {"{}", NULL},
         {"{\"modes\":[0,4]}", NULL},
         {"{\"modes\":[99]}", "Invalid Mode in Config."},
-        {"{\"classes\":[16]}", NULL}, // KrunkNative: 16 is the Nettspend (CLASS_TABLE_COUNT 17; v7's 16 classes end at 15)
-        {"{\"classes\":[17]}", "Invalid Class in Config."},
         {"{\"settings\":{\"foo\":1}}", "Invalid Setting in Config."},
         {"{\"settings\":{\"gravMlt\":\"x\"}}", "Invalid Config Value. (Set: Gravity)"},
         {"{\"settings\":{\"maxPlayers\":51}}", "Config Value out of Range. (Set: Players)"},
@@ -247,6 +245,17 @@ static void test_validate(void) {
         cJSON *json = cJSON_Parse(cases[i].json);
         const char *e = game_config_validate(json);
         CHECK(cases[i].error ? (e && !strcmp(e, cases[i].error)) : !e, "validate %s: \"%s\", want \"%s\"", cases[i].json, e ? e : "(ok)", cases[i].error ? cases[i].error : "(ok)");
+        cJSON_Delete(json);
+    }
+    // config.classes: the table's last id is KrunkNative's Nettspend (CLASS_ID_NETTSPEND, after v10's CLASS_COUNT);
+    // one past it is not a class
+    for (int id = CLASS_ID_NETTSPEND; id <= CLASS_TABLE_COUNT; id++) {
+        char text[48];
+        snprintf(text, sizeof(text), "{\"classes\":[%d]}", id);
+        cJSON *json = cJSON_Parse(text);
+        const char *e = game_config_validate(json);
+        const int want_ok = id < CLASS_TABLE_COUNT;
+        CHECK(want_ok ? !e : (e && !strcmp(e, "Invalid Class in Config.")), "validate %s: \"%s\"", text, e ? e : "(ok)");
         cJSON_Delete(json);
     }
     // v7 bug fixed: "Too much data" measures the JSON

@@ -267,11 +267,11 @@ static void header_update(const AccountInfo *acc) {
     if ((el = by_id("knV10Name"))) html_dom_set_text(el, player_names_account(acc->premium && !ui_setting_is_false("premiumBadge") && acc->alias[0] ? acc->alias : acc->name));
     // the picture (v10:209536 _70104, run at sign-in): the menu class's icon, textures/classes/icon_N.png
     // (defaultSrc). KN has no profile.png upload, so a premium account's picture is the class icon too.
-    // Classes past Krunker's icons (KN's Nettspend, 16) keep the stock picture.
+    // Classes past Krunker's icons (KN's own from KN_CLASS_BASE: the Nettspend) keep the stock picture.
     if ((el = by_id("knV10Avatar"))) {
         char src[64];
         const int cls = menu_ui()->client->menu_class_index;
-        if (cls >= 0 && cls <= 15) snprintf(src, sizeof(src), "textures/classes/icon_%d.png", cls);
+        if (cls >= 0 && cls < KN_CLASS_BASE) snprintf(src, sizeof(src), "textures/classes/icon_%d.png", cls);
         else snprintf(src, sizeof(src), "./img/player_pfp.png");
         html_dom_set_attr(el, "src", src);
     }

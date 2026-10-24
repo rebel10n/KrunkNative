@@ -19,8 +19,9 @@ backend with KRUNKNATIVE_AUDIO_LOG so every play is logged):
      appear as unknown item"): the Loadout window, the kill feed after a Drank kill and a Money
      Spread kill (each row with the icon_kn_* art) and the Object Manager's Weapons tiles show the
      real names and art, and the HTML engine misses no Nettspend image (KRUNKNATIVE_HTML_IMAGE_LOG:
-     icon_kn_*, the img/kn previews, the class icon_16).
-The weapon ids are read from shared/include/weapons.h (WEAPON_ID_DRANK / WEAPON_ID_MONEY_SPREAD).
+     icon_kn_*, the img/kn previews, the class icon_<id>).
+The weapon ids are read from shared/include/weapons.h (WEAPON_ID_DRANK / WEAPON_ID_MONEY_SPREAD), the class
+id from shared/include/shared.h (CLASS_ID_NETTSPEND: KN_CLASS_BASE = CLASS_COUNT, the last class).
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -60,7 +61,19 @@ def weapon_ids():
     return ids.get("WEAPON_ID_DRANK", 67), ids.get("WEAPON_ID_MONEY_SPREAD", 68)
 
 
+def nettspend_class_id():
+    """CLASS_ID_NETTSPEND as shared/include/shared.h defines it: KN_CLASS_BASE (v10's CLASS_COUNT) + offset, the last class."""
+    try:
+        src = open("shared/include/shared.h").read()
+    except OSError:
+        return 16
+    count = re.search(r"#define CLASS_COUNT (\d+)", src)
+    offset = re.search(r"#define CLASS_ID_NETTSPEND \(KN_CLASS_BASE \+ (\d+)\)", src)
+    return int(count.group(1)) + int(offset.group(1)) if count and offset else 16
+
+
 DRANK, MONEY = weapon_ids()
+NETTSPEND = nettspend_class_id()
 
 MENU_SCRIPT = """0 menu
 1500 call showWindow 3
@@ -106,7 +119,7 @@ GAME_SCRIPT = """0 menu
 # kills; 8 units away, inside the Money Spread's fan), then opens the Object Manager.
 FEED_SCRIPT = """0 menu
 1500 call showWindow 3
-2500 call selectClass 16
+2500 call selectClass %d
 4300 play
 5500 pose -343 -143 -28 0 0
 5600 con smite
@@ -185,14 +198,14 @@ def nodes_match(log, label):
 
 def kn_image_misses(log):
     """image-miss lines (KRUNKNATIVE_HTML_IMAGE_LOG=1) for the Nettspend art"""
-    return [line for line in log.splitlines() if line.startswith("image-miss") and re.search(r"icon_kn_|img/kn/|classes/icon_16", line)]
+    return [line for line in log.splitlines() if line.startswith("image-miss") and re.search(r"icon_kn_|img/kn/|classes/icon_%d\.png" % NETTSPEND, line)]
 
 
 def menu_scenario():
     log = run("menu", MENU_SCRIPT)
     m = re.search(r"\[input_script\] rects t=\d+ @cards n=(\d+)", log)
     n_cards = int(m.group(1)) if m else 0
-    check("the Class tab lists Krunker's classes plus Nettspend", n_cards >= 17, f"cards={n_cards}")
+    check("the Class tab lists Krunker's classes plus Nettspend", n_cards >= NETTSPEND + 1, f"cards={n_cards}")
     n, name = text_of(log, "lastname")
     check("the last class card is Nettspend", n >= 1 and name == "Nettspend", f"n={n} text={name!r}")
     n, weap = text_of(log, "lastweap")
@@ -251,7 +264,7 @@ def game_scenario():
 
 
 def feed_scenario():
-    log = run("feed", FEED_SCRIPT % (DRANK, MONEY))
+    log = run("feed", FEED_SCRIPT % (NETTSPEND, DRANK, MONEY))
     rows = nodes_match(log, "feeddrank")
     check("a Drank kill's feed row shows the icon_kn_drank art", rows >= 1, f"{rows} rows")
     n, hits = grep_hits(log, "feedunk1")

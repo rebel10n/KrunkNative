@@ -374,9 +374,11 @@ int main(void) {
         game_configure(&game, NULL, &map, 1, NULL, 0, NULL, 0, NULL, 0);
         game_init(&game, 0, -1, 1);
 
-        // Krunker's 16 classes, then the KrunkNative Nettspend (CLASS_TABLE_COUNT; custom games only,
-        // so a public game like this one spawns it as the Triggerman: shared/tests/nettspend_test.c)
+        // v10's 16 classes (CLASS_COUNT), then the KrunkNative Nettspend, the last (CLASS_ID_NETTSPEND = KN_CLASS_BASE,
+        // CLASS_TABLE_COUNT; its spawns in every lobby type: shared/tests/nettspend_test.c)
         CHECK(sizeof(expected_classes) / sizeof(expected_classes[0]) == CLASS_COUNT && game.class_count == CLASS_TABLE_COUNT, "class count %zu", game.class_count);
+        CHECK(game.class_count == (size_t) CLASS_ID_NETTSPEND + 1 && !strcmp(game.classes[CLASS_ID_NETTSPEND].name, "Nettspend"),
+              "the last class is KrunkNative's Nettspend (%d)", CLASS_ID_NETTSPEND);
         CHECK(game.weapon_count == WEAPON_TABLE_COUNT, "weapon count %zu", game.weapon_count);
 
         printf("Spawning %d classes on %s...\n", CLASS_COUNT, maps[m]);

@@ -200,7 +200,7 @@ void comp_ui_round(Client *client) {
     StrBuf sb = {0};
     const int limited = game->config.limit_classes;
     const size_t class_count = game->class_count ? game->class_count : CLASS_COUNT;
-    // KrunkNative's Nettspend (16) is offered too (comp_lobby_class_limit: 1 a team past classLim15)
+    // KrunkNative's Nettspend (CLASS_ID_NETTSPEND, past CLASS_COUNT) is offered too (comp_lobby_class_limit: the team's size)
     for (size_t c = 0; c < class_count; c++) {
         if (!class_offered(game, (int) c)) continue;
         const int limit = comp_lobby_class_limit(game, (int) c);

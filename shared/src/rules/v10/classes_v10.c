@@ -303,20 +303,37 @@ static const ClassConfig infiltrator = {
     .face = 5234,
 };
 
-// KrunkNative Nettspend (CLASS_ID_NETTSPEND 16, doc/v7/decisions.md "Nettspend class"; shared/include/
-// drank.h): not a Krunker class. Purple Drank (WEAPON_ID_DRANK) as the primary, Money Spread
+// ---- KrunkNative's own classes: a mod on top of v10, not part of v10's table ----
+// v10.0.3's classes end at Infiltrator (CLASS_COUNT 16, deob-10.0.3.js:115405-115747). What follows is
+// KrunkNative's (doc/v10/kn-additions.md), always after every Krunker class: its ids start at
+// KN_CLASS_BASE = CLASS_COUNT (shared/include/shared.h), so a longer v10 table moves them up and never
+// overlaps them. Parity audits compare g_classes_v10[0 .. CLASS_COUNT - 1] only.
+//
+// The Nettspend's id is stored as a number: the client's saved class (html storage "classindex",
+// menu_ui.c) and its loadout presets ("classindex", ui_loadout.c), the brain's per-class stats ("c16",
+// services/brain/db_accounts.c), match_results.class_id, the account's "class" / "classIndex"
+// (accounts.c) and mm_ranked_members.class_index (db_mm.c); the class icon is icon_<id>.png. When v10's
+// table grows, this assert stops the build: migrate those (16 -> the new id; a stored 16 then means the
+// new v10 class), rename ui/textures/classes/icon_16.png (tools/nettspend/icons.py) and update
+// KN_CLASS_NETTSPEND_STORED.
+_Static_assert(CLASS_ID_NETTSPEND == KN_CLASS_NETTSPEND_STORED,
+               "the Nettspend's class id moved (v10's class table grew): migrate the stored ids, see classes_v10.c");
+
+// KrunkNative Nettspend (CLASS_ID_NETTSPEND, the last class; doc/v7/decisions.md "Nettspend class";
+// shared/include/drank.h): not a Krunker class. Purple Drank (WEAPON_ID_DRANK) as the primary, Money Spread
 // (WEAPON_ID_MONEY_SPREAD) always as the secondary (kn_secondary: no Select Secondary pick), the
 // knife. A Triggerman baseline (100 health in 6 segments, regen 0.1, speed 1.05, no wall jump,
 // throwChrg 0.8) with the Triggerman's colours in purple and cash green. Open to everyone: every
 // KrunkNative lobby (public, custom, comp, the offline sandbox) and the bots (user, 2026-10-14: "THE
 // NETtspend class should be available to all"); not in an official krunker.io game (game_class_allowed).
-// icon_index 16 = textures/classes/icon_16.png (client asset); no face store item, no speech lines.
+// icon_index = its id: textures/classes/icon_16.png (client asset, next to Krunker's icon_0..15); no face
+// store item. Two speech lines.
 // Balance (KrunkNative, not v10.0.2): the class's table values are unchanged; the Money Spread's
 // weapon entry was rebalanced (kn_money_spread.c; doc/v10/gameplay.md "Nettspend balance"), and the Drank's
 // sip went from 4 to 5 (kn_drank.c, "Nettspend balance" round 2).
 static const ClassConfig nettspend = {
     .name = "Nettspend",
-    .icon_index = 16,
+    .icon_index = CLASS_ID_NETTSPEND,
     .texts = (const char*[]) {"Drank drank drank", "Pour up"},
     .text_count = 2,
     .loadout = (int[]) {WEAPON_ID_DRANK},
@@ -331,7 +348,7 @@ static const ClassConfig nettspend = {
     .throw_charge = 0.8f,
 };
 
-// Krunker's 16 (CLASS_COUNT), then KrunkNative's (CLASS_TABLE_COUNT)
+// v10's 16 (CLASS_COUNT), then KrunkNative's from KN_CLASS_BASE (CLASS_TABLE_COUNT)
 const ClassConfig g_classes_v10[CLASS_TABLE_COUNT] = {
     triggerman, hunter, run_n_gun, spray_n_pray, vince, detective, marksman, rocketeer, agent,
     runner, deagler, bowman, commando, trooper, survivor, infiltrator,

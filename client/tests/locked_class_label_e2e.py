@@ -42,8 +42,8 @@ BOX = re.compile(r"local\(([-\d.]+),([-\d.]+) ([\d.]+)x([\d.]+)\)")
 WORK = tempfile.mkdtemp(prefix="kn-class-label-", dir=os.path.expanduser("~/.cache") if os.path.isdir(os.path.expanduser("~/.cache")) else None)
 results = []
 # the class list an official krunker.io game sends (GAME_CONFIG "classes"): Krunker's 16 classes less the two
-# hidden ones (Deagler 10, Survivor 14), as resetClasses builds it (v10 _64265). KrunkNative's Nettspend (16) is
-# never in it, so it is the list the Nettspend's card must survive (menu_class_listed).
+# hidden ones (Deagler 10, Survivor 14), as resetClasses builds it (v10 _64265). KrunkNative's Nettspend (the last
+# class, CLASS_ID_NETTSPEND past v10's 16) is never in it, so it is the list the Nettspend's card must survive (menu_class_listed).
 OFFICIAL_CLASSES = [i for i in range(16) if i not in (10, 14)]
 
 

@@ -51,8 +51,12 @@ static void test_weapon_ids(void) {
     for (int i = rs->krunker_weapon_count; i < WEAPON_ID_KN_BASE; i++) CHECK(!rs->weapons[i], "id %d is a hole", i);
     CHECK(rs->weapons[WEAPON_ID_TOOL_GUN] == &g_tool_gun && rs->weapons[WEAPON_ID_PISS] == &g_piss && rs->weapons[WEAPON_ID_PHYS_GUN] == &g_phys_gun &&
           rs->weapons[WEAPON_ID_DRANK] == &g_drank && rs->weapons[WEAPON_ID_MONEY_SPREAD] == &g_money_spread, "the KN weapons");
-    CHECK(CLASS_COUNT == 16 && CLASS_ID_NETTSPEND == 16 && CLASS_TABLE_COUNT == 17 && rs->class_count == CLASS_TABLE_COUNT &&
-          !strcmp(rs->classes[CLASS_ID_NETTSPEND].name, "Nettspend"), "Krunker's 16 classes, then the KN Nettspend");
+    // v10.0.3's 16 classes (deob-10.0.3.js:115405-115747), then KrunkNative's from KN_CLASS_BASE: the Nettspend is the last
+    CHECK(CLASS_COUNT == 16 && KN_CLASS_BASE == CLASS_COUNT && CLASS_ID_NETTSPEND == KN_CLASS_BASE && CLASS_TABLE_COUNT == KN_CLASS_BASE + KN_CLASS_COUNT &&
+          rs->class_count == CLASS_TABLE_COUNT && (size_t) CLASS_ID_NETTSPEND == rs->class_count - 1 &&
+          !strcmp(rs->classes[CLASS_ID_NETTSPEND].name, "Nettspend"), "v10's 16 classes, then the KN Nettspend last");
+    CHECK(CLASS_ID_NETTSPEND == KN_CLASS_NETTSPEND_STORED && !strcmp(rs->classes[KN_CLASS_NETTSPEND_STORED].name, "Nettspend"),
+          "a stored Nettspend id (%d) still resolves to it", KN_CLASS_NETTSPEND_STORED);
     CHECK(rules_weapon(-1) == NULL && rules_weapon(WEAPON_TABLE_COUNT) == NULL && rules_weapon(40) == NULL && rules_weapon(1) == rs->weapons[1], "rules_weapon bounds");
     // the remap of ids stored before the seam
     CHECK(weapon_id_from_legacy(29, 29) == WEAPON_ID_TOOL_GUN && weapon_id_from_legacy(30, 29) == WEAPON_ID_PISS && weapon_id_from_legacy(31, 29) == WEAPON_ID_PHYS_GUN,

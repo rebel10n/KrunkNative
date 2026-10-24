@@ -8,7 +8,9 @@
                                                         white silhouettes on transparency like Krunker's
                                                         textures/weapons/icon_<n>.png
   ui/img/death-ui/icon_kn_drank.png, icon_kn_money.png  the same for the death card (./img/death-ui/<stem>.png)
-  ui/textures/classes/icon_16.png                        the Nettspend class icon (ClassConfig.icon_index 16),
+  ui/textures/classes/icon_16.png                        the Nettspend class icon (ClassConfig.icon_index = its
+                                                        class id CLASS_ID_NETTSPEND, the last class: 16 while
+                                                        v10 has 16; classes_v10.c says when it moves),
                                                         8x8 pixel art like textures/classes/icon_<n>.png
   ui/img/kn/preview_drank.png                            the Drank's loadout-tile preview: the white styrofoam
                                                         double cup in colour, 256x256 (the 3D cup's look)
