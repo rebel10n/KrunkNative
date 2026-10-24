@@ -5,7 +5,8 @@
 //   - the NET_EXT_PLAYER_POSE body (NetPlayerPosePacket, "pz" sid, pose | 0) and endGame's clear (:221901);
 //   - the arm targets of hold / holdL (:193375), split arms (:193337), isWeaponModelHidden (:195350);
 //   - updateHeight's bodyY on the rendering client only (:193561-193566);
-//   - game.applyFreezeOthers (:221547-221573) and its reset at startGame (:219811).
+//   - game.applyFreezeOthers (:221547-221573): the script's own flags it writes (an unfreeze turns them all on, a
+//     script or a respawn's reset may turn them on meanwhile), and its reset at startGame (:219811).
 // The scripts run through ks_game_load on a real Game with the server's API table. Run from the repository
 // root: ./<build>/player_pose_test
 #include <ks_game.h>
@@ -137,7 +138,8 @@ static KsHost script_host(const KsSide side) {
 // Loads `src` as the `side` script of `game` and runs its start().
 static void run_script(Game *game, const KsSide side, const char *src) {
     ks_game_unload(game);
-    KsHost host = script_host(side);
+    static KsHost host; // the game keeps a pointer to it: hooks run after this returns
+    host = script_host(side);
     const int rc = ks_game_load(game, side, src, strlen(src), &host, NULL);
     CHECK(rc == 0, "the script compiles and loads (rc %d)", rc);
     g_log_count = 0;
@@ -342,16 +344,26 @@ static void test_body_y(Player *p) {
 
 // ---------------------------------------------------------------- applyFreezeOthers
 
+// The script's own flags: onChatMessage(msg, id) sets them on that player and logs what it reads back
+static const char *k_flags_script =
+    "public action onChatMessage(str msg, str playerID) {\n"
+    "    obj p = GAME.PLAYERS.findByID(playerID);\n"
+    "    if (msg == \"stop\") { p.defaultMovement = false; }\n"
+    "    if (msg == \"go\") { p.defaultMovement = true; }\n"
+    "    GAME.log(toStr p.defaultMovement, toStr p.defaultVelocity, toStr p.disableShooting, toStr p.disableMelee);\n"
+    "}\n";
+
 static void test_freeze_others(Game *game, Player *a, Player *b, Player *c) {
     printf("Running applyFreezeOthers test...\n");
     a->frozen = b->frozen = c->frozen = 0;
+    run_script(game, KS_SIDE_SERVER, k_flags_script);
     b->velocity = (vec3) {3.0f, 1.0f, 2.0f};
     g_sent_count = 0;
     const int frozen = game_apply_freeze_others(game, 1, a->uid);
     CHECK(frozen == 2 && game->freeze_others, "two players frozen, freezeOthers set (%d)", frozen);
     CHECK(!a->frozen && b->frozen && c->frozen, "everyone but the caller (%d %d %d)", a->frozen, b->frozen, c->frozen);
-    CHECK(!ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && !ks_player_allows(b, KS_PLAYER_CAN_SHOOT) && ks_player_allows(a, KS_PLAYER_CAN_SHOOT),
-          "a frozen player has no default movement nor shooting");
+    CHECK(!ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && !ks_player_allows(b, KS_PLAYER_DEFAULT_VELOCITY) && !ks_player_allows(b, KS_PLAYER_CAN_SHOOT) &&
+          !ks_player_allows(b, KS_PLAYER_CAN_MELEE) && ks_player_allows(a, KS_PLAYER_CAN_SHOOT), "a frozen player has no default movement nor shooting");
     CHECK(b->velocity.x == 0.0f && b->velocity.y == 0.0f && b->velocity.z == 0.0f, "changePosition stops it where it stands");
     CHECK(count_sent(NET_PACKET_CHEAT, b->uid) == 1 && count_sent(NET_PACKET_CHEAT, c->uid) == 1 && count_sent(NET_PACKET_CHEAT, a->uid) == 0,
           "each frozen player gets \"frz\"");
@@ -359,17 +371,43 @@ static void test_freeze_others(Game *game, Player *a, Player *b, Player *c) {
           "recon to the player and \"chgp\" to everyone (%d, %d)", count_sent(NET_PACKET_POSITION, b->uid),
           count_sent(NET_PACKET_CHANGE_POSITION, NET_TARGET_ALL));
 
-    c->frozen = 0; // only frozen players are let go
+    // v10 writes the script's own flags (:221561-221564): the script reads them back
+    g_log_count = 0;
+    ks_game_on_chat_message(game, b, "look");
+    CHECK(g_log_count == 1 && !strcmp(g_log[0], "false false true true"), "the script reads the freeze in its flags (%s)", g_log_count ? g_log[0] : "-");
+    // and may turn them on again: defaultMovement = true moves a frozen player in v10
+    ks_game_on_chat_message(game, b, "go");
+    CHECK(ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && !ks_player_allows(b, KS_PLAYER_CAN_SHOOT), "a script's defaultMovement = true wins over the freeze");
+    // a respawn's reset turns the movement on (player.reset :190737-190739); KN's script state reset also turns
+    // shooting / melee on (ks_ref_reset_player; doc/v10/player-pose.md)
+    ks_game_on_chat_message(game, b, "stop");
+    ks_game_on_player_spawn(game, b);
+    CHECK(ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && ks_player_allows(b, KS_PLAYER_DEFAULT_VELOCITY), "a respawn resets the movement flags");
+    player_apply_freeze(b, 1); // frozen again for what follows
+
+    // the unfrozen get every flag back, whatever the script had set (v10 defaultMovement = !freeze)
+    ks_game_on_chat_message(game, c, "stop");
+    CHECK(!ks_player_allows(c, KS_PLAYER_DEFAULT_MOVEMENT), "the script stopped c itself");
+    b->frozen = 0; // only frozen players are let go: b stays as it is
     g_sent_count = 0;
     const int thawed = game_apply_freeze_others(game, 0, -1);
-    CHECK(thawed == 1 && !b->frozen && !game->freeze_others, "unfreeze lets the frozen one go (%d)", thawed);
-    CHECK(count_sent(NET_PACKET_CHEAT, b->uid) == 1 && count_sent(NET_PACKET_CHANGE_POSITION, NET_TARGET_ALL) == 0, "\"frz\" false, no move");
+    CHECK(thawed == 1 && !c->frozen && !game->freeze_others, "unfreeze lets the frozen one go (%d)", thawed);
+    CHECK(ks_player_allows(c, KS_PLAYER_DEFAULT_MOVEMENT) && ks_player_allows(c, KS_PLAYER_DEFAULT_VELOCITY) && ks_player_allows(c, KS_PLAYER_CAN_SHOOT) &&
+          ks_player_allows(c, KS_PLAYER_CAN_MELEE), "unfreezing turns all four flags on, the script's own defaultMovement = false too");
+    CHECK(!ks_player_allows(b, KS_PLAYER_CAN_SHOOT), "a player whose freeze marker is gone is not touched");
+    CHECK(count_sent(NET_PACKET_CHEAT, c->uid) == 1 && count_sent(NET_PACKET_CHANGE_POSITION, NET_TARGET_ALL) == 0, "\"frz\" false, no move");
+
+    // a client's "frz" writes the same (player_apply_freeze: game_events.c)
+    player_apply_freeze(b, 1);
+    CHECK(b->frozen && !ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && !ks_player_allows(b, KS_PLAYER_CAN_MELEE), "\"frz\" true");
+    player_apply_freeze(b, 0);
+    CHECK(!b->frozen && ks_player_allows(b, KS_PLAYER_DEFAULT_MOVEMENT) && ks_player_allows(b, KS_PLAYER_CAN_SHOOT), "\"frz\" false");
 
     game_apply_freeze_others(game, 1, -1);
     CHECK(a->frozen && b->frozen && c->frozen, "no exception: everyone frozen");
     game_start_round(game);
     CHECK(!game->freeze_others, "startGame: freezeOthers = false");
-    a->frozen = b->frozen = c->frozen = 0;
+    game_apply_freeze_others(game, 0, -1);
 }
 
 int main(void) {

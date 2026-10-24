@@ -55,19 +55,41 @@ and a merged turn is both pivots turned by `armR`. `armL` is genArms' side 1 (th
 arm; under the leftHand setting v10 mirrors the whole upper body, KN the arms only, so the turn is
 applied as [x, -y, -z] and a holdL offset's x is negated.
 
+The merged mesh keeps its own transform: with `armR` / `hold` it is put at rest and turned by armR
+(:193428-193434), without either it keeps the turn a previous pose gave it until `resetMergedArms` at the
+pose's end (:195371-195377). KN keeps that transform per weapon slot (`PlayerArms.pose_merged_*`) and puts
+both pivots on it while the arms are not split; the split arms are put at rest and turned every frame.
+
+## Attach points and layers
+
+`attachTo(player, x, y, z, keepWorld, "hands" | "handL")` (:208838-208842) hangs the object on the
+model's hands anchor (in the held weapon at (0, -1.5, 0), turned with armR under a third-person hold; on
+the first-person knife arm at (0.9, -0.95, 0.72)) or its left-hand anchor (the "l" arm's hand, the arm's
+turn undone). `syncHandL` also copies the arm's `layers.mask` onto the anchor and everything under it
+(:193540-193546): on the local first-person model that is layer 1, which only the fpsCamera draws, so an
+object on our own "handL" (or attached to one that is, or to a bone of a model that is) draws in KN's
+viewmodel pass (`client->fps_scene`, `ks_scene.c` `obj_first_person`). `syncHands` copies no layer: a
+"hands" object stays in the world pass, also on the first-person model.
+
+## Freeze flags
+
+`applyFreezeOthers` (:221558-221564) and the client's "frz" (:258510-258518) write `player.freeze` and the
+script's own flags: `defaultMovement` / `defaultVelocity` = !freeze, `disableShooting` / `disableMelee` =
+freeze. KN does the same (`player_apply_freeze`): `Player.frozen` is the freeze marker, the four flags go
+into the player's script flags (`KsRef.allow`, created when the game has no script), which
+`ks_player_allows` reads. So, as in v10: the script reads the freeze back (`player.defaultMovement` is
+false), a script may turn a flag on again while frozen, an unfreeze turns all four on whatever the script
+had set, and a respawn's reset turns the movement flags on (`player.reset` :190737-190740).
+
 ## Differences (deliberate)
 
-- A pose that names no arm leaves KN's arms at rest; v10's merged mesh keeps the last turn a previous
-  pose gave it until the pose ends (`resetMergedArms` only runs without a pose).
-- The "hands" / "handL" anchors are not moved to the first-person render layer (v10 copies the arm's
-  `layers.mask`); an object attached to the local first-person hands draws in the world pass.
-- `applyFreezeOthers` keeps the freeze in `Player.frozen` (the flag "frz" sets on the client;
-  `ks_player_allows` answers 0 for defaultMovement, defaultVelocity, shooting and melee while it is
-  set). v10 writes those script flags directly, so after an unfreeze a script's own
-  `defaultMovement = false` is lost there but kept here.
 - `applyFreezeOthers` has no caller in the bundle (its caller is server-only code); KN reaches it with
   the host / dev chat command `/freezeothers [on|off]` (the caller is the exception).
 - Poses are stored as floats; the getter rounds them back to the 1/1000 `sanitizePose` rounded to.
+- A respawn of a frozen player turns its shooting / melee on too: KN's player script state is reset at
+  every spawn (`ks_ref_reset_player`, all flags), where v10's `player.reset` leaves `disableShooting` /
+  `disableMelee` alone. The script state is kept per uid, not per player object, so keeping those two across
+  a spawn would hand a script's lock to the next player of that uid; that is the KrunkScript port's to change.
 - The KN server sends a posed player's pose after every SPAWN of it (a joiner's `plrPose`); the client
   takes a repeat as the same pose (no new easing).
 
@@ -75,7 +97,11 @@ applied as [x, -y, -z] and a holdL offset's x is negated.
 
 - `player_pose_test` (`shared/tests/player_pose_test.c`): the setter's sanitize (every key, clamps,
   rounding, a string number, NaN items, unknown keys), the getter, clears, the client-side refusal,
-  the packet, endGame's clear, the arm targets, bodyY on the rendering client only, applyFreezeOthers.
+  the packet, endGame's clear, the arm targets, bodyY on the rendering client only, applyFreezeOthers and
+  the flags it writes (read back by the script, turned on by a script, a respawn's reset, an unfreeze, "frz").
+- `client/tests/player_pose_e2e.py BUILD_DIR`: a headless offline client and the input script's `poses`
+  probe: hold turns the merged arms by -0.25, a pose naming no arm keeps that turn, no pose puts them at
+  rest, our own "handL" cube is in the viewmodel pass and the other five in the world pass.
 - A headless offline render: `shared/tests/maps/v10/player_pose.json`, whose server script poses the
   first four bots (hold, holdL, a seat, an emote's lowering) and whose client script hangs a cyan cube
   on each player's "hands" and a red one on "handL". With an input script `0 play`, `300 con bot_stop

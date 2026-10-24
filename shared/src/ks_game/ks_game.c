@@ -728,10 +728,9 @@ int ks_game_rate(Game *game, const char *key, const int limit, const int per_10s
 
 int ks_player_allows(const Player *player, const int what)
 {
-    // Krunker "frz" (setFrozen, game.deob.js:220495) clears exactly these four flags; no script needed
-    if (player && player->frozen &&
-        (what & (KS_PLAYER_DEFAULT_MOVEMENT | KS_PLAYER_DEFAULT_VELOCITY | KS_PLAYER_CAN_SHOOT | KS_PLAYER_CAN_MELEE)))
-        return 0;
+    // Krunker "frz" (setFrozen, deob-10.0.3.js:258510-258518) and applyFreezeOthers (:221558-221564) write the four
+    // flags themselves (player_apply_freeze, player_pose.c: the ref below), so a script or a respawn's reset can
+    // turn them on again as in v10; Player.frozen is only v10's player.freeze marker
     if (player && ((player->lock_shooting && (what & KS_PLAYER_CAN_SHOOT)) || (player->lock_melee && (what & KS_PLAYER_CAN_MELEE))))
         return 0; // "plk" (official lobbies): the server's script locks
     if (!player || !player->game || !player->game->ks) return 1;
