@@ -29,6 +29,13 @@ int krunker_link_prophunt_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFram
 void krunker_link_prophunt_spawned(KrunkerLink *l, int sid, int team, const KrunkerValue *prop_id);
 int krunker_link_prophunt_send(KrunkerLink *l, uint16_t subtype, const uint8_t *body, uint16_t length);
 
+// krunker_link_trade.c: the live trade of Trade mode ("trd" "utrd" "utrdc" "atrd" "tch" -> NET_EXT_TRADE_*, 1 = handled),
+// the "ch" type 3 request line, and our NET_EXT_TRADE_* out as "strd" "trd" "utrd" "utrdc" "atrd" "dtrd" "ctrd" "tct"
+// (-1: another subtype). doc/v10/trade.md.
+int krunker_link_trade_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
+void krunker_link_trade_request_line(KrunkerLink *l, const KrunkerValue *sid);
+int krunker_link_trade_send(KrunkerLink *l, uint16_t subtype, const uint8_t *body, uint16_t length);
+
 // krunker_link_s2c.c: the S2C packets doc/v10/s2c-coverage.md classifies that no other file translates: the
 // player clips ("c"), the menu's speech bubble ("ready" / "sb"), the comp lobby table ("cd" / "cda" / "uid"), store
 // skin definitions ("sdc"), the ranked rating card ("lrmr"), game announcements, the found-junk line ("jnk"), the map

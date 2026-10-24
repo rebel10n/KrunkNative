@@ -338,6 +338,7 @@ static void warn_unknown_keys(void) {
         "kpdPhone", // in game: true = the K.P.D phone up with a call in flight, no request sent (hud_votekick.c)
         "kpdPolice", // the K.P.D popup (shoPolicePop): {tab, list: {code, json}}, the list from the fixture (ui_loadout.c)
         "nametags", // in game: the players' nametags (page elements) drawn over the background (the world is not)
+        "trade",    // the live trade's window state {trader, invs: [mine, theirs], offers: [[[skin, n, copy]], [...]], kr, ready} (trade_ui.c)
         "kpdCase",  // spectating: an officer's case (kpdData) on the first other player, the second its caller (hud_votekick.c)
         "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
@@ -1230,6 +1231,7 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open) v10_wallet_scenario(st("wallet")); // the Wallet and Inventory modal (v10_wallet.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (st_has("kpdPhone")) hud_votekick_scenario_phone(st_bool("kpdPhone", 0)); // after the game's INIT, which ends a call
+    if (st_has("trade")) trade_ui_scenario(st("trade")); // before the window: windows[36] draws this state (trade_ui.c)
     if (menu_open) apply_window(client);
     if (menu_open) apply_kpd_police(client); // after the window: the popup on its tab, the list from the fixture
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)

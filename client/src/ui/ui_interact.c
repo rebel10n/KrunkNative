@@ -92,11 +92,24 @@ static void key_label(const int bind, char *out, const size_t size) {
     snprintf(out, size, "<span style=\"color:%s\">[%s]</span>", INTERACT_KEY_COLOR, key);
 }
 
+// Trade mode's player prompt (v10: changeInteract(me, player, 5, null, 1) for each other player with a level in
+// reach, deob-10.0.3.js:192464-192474; trade_ui.c): priority 1 and after the map's objects, so it wins over every
+// prompt without one and ties with the priority 1 ones (it runs later). lastInteractData = {sid, 5}.
+static void scan_with_trade(const Client *client, GameInteractScan *scan) {
+    game_interact_scan(&client->game, client->me, scan);
+    const int trader = trade_ui_interact_target(client);
+    if (trader < 0) return;
+    scan->type = scan->last_type = GAME_INTERACT_TRADE;
+    scan->index = scan->last_uid = trader;
+    scan->data = 0;
+}
+
 static void build_prompt(const Client *client, char *html, const size_t size) {
     GameInteractScan scan;
-    game_interact_scan(&client->game, client->me, &scan);
+    scan_with_trade(client, &scan);
     const Player *me = client->me;
-    const Object *object = scan.index >= 0 && (size_t) scan.index < client->game.map->object_count ? client->game.map->objects[scan.index] : NULL;
+    const Object *object = scan.type != GAME_INTERACT_TRADE && scan.index >= 0 && (size_t) scan.index < client->game.map->object_count
+                               ? client->game.map->objects[scan.index] : NULL;
     char key[64], tag[160];
     key_label(UI_CONTROL_INTERACT, key, sizeof(key));
     html[0] = 0;
@@ -124,6 +137,9 @@ static void build_prompt(const Client *client, char *html, const size_t size) {
                      INTERACT_NOT_ENOUGH_COLOR, deposited, key, deposit, sec, withdraw);
             break;
         }
+        case GAME_INTERACT_TRADE: // "Press [key] to Trade with [NAME]" (updateInteract type 5, :197562)
+            trade_ui_prompt(scan.index, key, ui_mobile_active(), html, size);
+            break;
         case GAME_INTERACT_TRIGGER: // getKeyName(10001): "Hold [M1] to <inm || Interact>"
             snprintf(html, size, "Hold <span style=\"color:%s\">[M1]</span> to %s", INTERACT_KEY_COLOR,
                      object && object->interact_msg ? object->interact_msg : "Interact");
@@ -302,6 +318,7 @@ void ui_interact_tick(Client *client) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     update_prompt(client);
     update_progress(client);
+    trade_ui_tick(client); // the live trade's window shuts at the death screen / a round switch (trade_ui.c)
 }
 
 void ui_interact_key(Client *client, const int secondary) {
@@ -312,7 +329,7 @@ void ui_interact_key(Client *client, const int secondary) {
         return;
     }
     GameInteractScan scan;
-    game_interact_scan(&client->game, client->me, &scan);
+    scan_with_trade(client, &scan); // a trade prompt sends "int" [5, sid]
     const NetInteractV7Packet packet = {.action = 1, .secondary = (uint8_t) !!secondary, .type = scan.last_type, .uid = scan.last_uid};
     client_net_send(client, NET_PACKET_INTERACT, &packet, sizeof(packet)); // io.send("int" / "intSec", type, id)
 }

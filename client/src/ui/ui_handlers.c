@@ -620,6 +620,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     paint_picker_handle,       // paint_picker.c: the owned card's paint popup (paintOpen, paintPick, paintApply)
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
+    trade_ui_handle,           // trade_ui.c: the live trade (windows[36].*, acceptRequest, requestTrade)
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
     seek_prefs_handle,         // seek_prefs.c: Settings > Quickplay's Seek Modes / Seek Maps switches (knSeekSwitch)
     update_ui_handle,          // update_ui.c: knUpdateNow / knUpdateDownload (the Outdated box)

@@ -560,6 +560,7 @@ static char *gen_42(void) {
     return sb_finish(&out);
 }
 static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (pListKey, hud_ui.c)
+static char *gen_37(void) { return trade_ui_window_gen(); }     // Trading (windows[36], the live trade: trade_ui.c)
 static char *gen_13(void) { return clan_window_gen(); }
 static char *gen_14(void) { return store_window_gen(); } // Store (windows[13], store_ui.c)
 static char *gen_25(void) { return download_window_gen(); } // Download Client: KrunkNative's packages (download_ui.c)
@@ -596,6 +597,7 @@ static const WindowDef WINDOWS[] = {
     {17, gen_17},
     {20, gen_20},
     {23, gen_23},
+    {37, gen_37},
     {26, gen_26},
     {31, gen_31},
     {32, gen_32},

@@ -1331,6 +1331,7 @@ void menu_show_window(int id, const int force) {
         return;
     }
     if (id == 5 && v10_login_guest_window()) return; // v10 windows[4].gen: a guest gets loginOrRegister's modal
+    trade_ui_on_show_window(id); // v10 showWindow: any other window cancels the live trade (trade_ui.c)
     const int was_open = menu_window_is_open();
     const int previous = g_ui.active_window;
     close_window_state();
@@ -1390,6 +1391,7 @@ void menu_toggle_window(const int open) {
 }
 
 void menu_close_window(void) {
+    trade_ui_on_close_window(g_ui.active_window); // windows[36].close: the live trade is canceled (trade_ui.c)
     close_window_state();
     html_dom_set_class(html_dom_root(), "kn-bare-window", 0); // ui_window_post: the Object Manager's bare window
     set_display("windowHolder", "none");

@@ -381,6 +381,18 @@ void hud_ui_damage_number(Client*, float x, float y, float z, double value, int 
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
 void hud_ui_add_server_line(const char *msg, const char *color); // a server line already shown (its names by uid, Hide player names)
+// The live trade of Trade mode (trade_ui.c, doc/v10/trade.md): v10's windows[36] (showWindow(37)), its packets
+// (NET_EXT_TRADE_*), the request line, the player list's requestTrade and the in-world prompt (interact type 5).
+void  trade_ui_on_ext(Client*, uint16_t subtype, const uint8_t *body, uint16_t length);
+char *trade_ui_window_gen(void);        // windows[36].gen: "Error" without a trade
+int   trade_ui_handle(const char *name, const HtmlEvent*, const HtmlArg*, int argc); // windows[36].*, acceptRequest, requestTrade
+void  trade_ui_on_show_window(int id);  // showWindow(id != 37) cancels the trade (deob-10.0.3.js:253813)
+void  trade_ui_on_close_window(int id); // the trade window's close: windows[36].close (cancel)
+int   trade_ui_active(void);
+int   trade_ui_interact_target(const Client*); // the trade prompt's player uid, -1 none
+void  trade_ui_prompt(int uid, const char *key_html, int mobile, char *out, size_t size); // "Press [key] to Trade with [NAME]"
+void  trade_ui_tick(Client*);
+void  trade_ui_scenario(const cJSON *state); // --render-scenario "trade": a session's window without a server
 void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel, int human); // WP-E: a v7 "ch" line on its channel (-1 all); human: Show Player Messages may hide it
 // A game / server line (no sender) on a chat tab (0 global, 1 team; every tab outside team modes, -1 always),
 // in `color` (NULL: the plain style): an official lobby's addChat lines (game_events.c NET_EXT_KN_OFFICIAL_CHAT)
