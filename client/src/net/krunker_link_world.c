@@ -262,6 +262,9 @@ static void loadout(KrunkerLink *l, const int sid, const KrunkerValue *weapons, 
     p.loadout_index = (int32_t) num(index, 0);
     EMIT(NET_PACKET_LOADOUT, p);
 }
+void krunker_link_loadout(KrunkerLink *l, const int sid, const KrunkerValue *weapons, const KrunkerValue *index, const KrunkerValue *ammos) {
+    loadout(l, sid, weapons, index, ammos);
+}
 
 // updatePickup(uid, weapon, orgPickup, active, [x, y, z] | null, ammo) (:189213)
 static void pickup(KrunkerLink *l, const KrunkerValue *uid, const KrunkerValue *weapon, const KrunkerValue *active,
@@ -344,7 +347,25 @@ static void mm_ss(const double ms, char *out, const size_t n) {
     snprintf(out, n, "%02ld:%02ld", (t / 60000) % 60, (t / 1000) % 60);
 }
 
+// "cv" / "gv" (key, value): the value a number or a string (Load Data's non-number, deob-10.0.3.js:183563; the
+// handlers store either, :258558-258560, :257834-257836). A string goes as NET_EXT_VALUE_TEXT, the rest as NetValuePacket.
 static void value(KrunkerLink *l, const int type, const KrunkerValue *key, const KrunkerValue *v, const uint8_t flags) {
+    if (krunker_is(v, KRUNKER_STR)) {
+        NetValueTextPacket t;
+        memset(&t, 0, sizeof(t));
+        t.type = (uint8_t) type;
+        t.flags = flags;
+        text_of(key, t.key, sizeof(t.key));
+        if (!t.key[0] && !(flags & NET_VALUE_RESET)) return;
+        const char *s = krunker_str(v);
+        size_t n = v->len < sizeof(t.text) - 1 ? v->len : sizeof(t.text) - 1;
+        while (n < v->len && n > 0 && ((unsigned char) s[n] & 0xc0) == 0x80) n--; // a cut keeps whole UTF-8 characters
+        memcpy(t.text, s, n);
+        uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(t)];
+        const uint16_t len = net_ext_pack(ext, sizeof(ext), NET_EXT_VALUE_TEXT, &t, (uint16_t) sizeof(t));
+        if (len) krunker_link_emit(l, NET_PACKET_EXT, ext, len);
+        return;
+    }
     NetValuePacket p;
     memset(&p, 0, sizeof(p));
     p.flags = flags;

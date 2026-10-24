@@ -12,6 +12,7 @@
 #include <hud_social.h>
 #include <player_accounts.h>
 #include <backend_ui.h> // active_account: v10 shows Votekick / K.P.D to accounts only; servers_ui_join_game (policeJoin)
+#include <krunker_net.h> // policeJoin's queue hand-off on the official link (krunker_net_join_queue)
 #include <audio.h>
 #include <net_ext.h>
 #include <game_config.h> // game_config_is_custom: v10 isCustom
@@ -655,6 +656,20 @@ static void kpd_call_rows(StrBuf *sb, const cJSON *rows) {
         sb_append_esc(sb, server);
         sb_append(sb, "</span></td><td><span class='policeJoinB' onclick=\"policeJoin('");
         sb_append_esc(sb, gco ? gco : "");
+        // an official call's row also names the game's queue hand-off: policeJoin(gco, tok, hos, por) (deob-10.0.3.js:252979)
+        const char *tok = cJSON_GetStringValue(cJSON_GetObjectItem(r, "tok")), *hos = cJSON_GetStringValue(cJSON_GetObjectItem(r, "hos"));
+        if (tok && tok[0] && hos && hos[0]) {
+            const cJSON *por = cJSON_GetObjectItem(r, "por");
+            char port[16] = "";
+            if (cJSON_IsNumber(por)) snprintf(port, sizeof(port), "%d", (int) por->valuedouble);
+            else if (cJSON_IsString(por)) snprintf(port, sizeof(port), "%s", por->valuestring);
+            sb_append(sb, "','");
+            sb_append_esc(sb, tok);
+            sb_append(sb, "','");
+            sb_append_esc(sb, hos);
+            sb_append(sb, "','");
+            sb_append_esc(sb, port);
+        }
         sb_append(sb, "')\">Join</span></td></tr>");
     }
     free(order);
@@ -1130,9 +1145,14 @@ int hud_votekick_handle(Client *client, const char *name, const HtmlEvent *ev, c
         html_clipboard_write(text);
         return 0; // no context menu
     }
-    if (!strcmp(name, "policeJoin")) { // policeJoin(gameId, ...): the siren, switchServer(id)
+    if (!strcmp(name, "policeJoin")) { // policeJoin(gameId, bpt, host, port): the siren, the game (deob-10.0.3.js:252877-252884)
         audio_play("siren_1", 0.1f, 0, 1.0f);
-        servers_ui_join_game(arg_text(args, argc, 0));
+        // an official call names the queue hand-off: that socket with bpt=, no seek (krunker_net_join_queue); a Box
+        // Office call names the game only: switchServer(id)
+        if (krunker_net_active() && arg_text(args, argc, 1)[0] && arg_text(args, argc, 2)[0])
+            krunker_net_join_queue(client, arg_text(args, argc, 0), arg_text(args, argc, 1), arg_text(args, argc, 2), arg_text(args, argc, 3));
+        else
+            servers_ui_join_game(arg_text(args, argc, 0));
         return 1;
     }
     if (!strcmp(name, "switchKPDTab")) { // switchKPDTab(i): the officers' tab i, showPolicePop() again (ui_loadout.c)

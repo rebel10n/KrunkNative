@@ -308,7 +308,8 @@ static int set_interface_value(Game *game, Player *h, const TriggerSource *j, co
         TriggerValueSet *set = trigger_object_values_mut(game, d, 1);
         TriggerValue *slot = set ? trigger_values_slot(set, key) : NULL;
         if (!slot) return 0; // custValLimit: the whole action stops
-        slot->value = add ? slot->value + a->constant : a->constant;
+        if (add) trigger_value_add(slot, a->constant); // a string value appends (JS +=)
+        else trigger_value_set_number(slot, a->constant);
         const double threshold = d->trig ? d->trig->constant_event : 0;
         fire_if(game, h, d, slot->value == threshold && trigger_has_event(d, TRIGGER_EVENT_ON_CUSTOM_VAL_EQUALS), chain);
         fire_if(game, h, d, slot->value > threshold && trigger_has_event(d, TRIGGER_EVENT_ON_CUSTOM_VAL_GREATER), chain);
@@ -550,10 +551,8 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
         case TRIGGER_ACTION_CHANGE_PLAYER_VALUE: {
             const char *key = action_text(a); // tct reduced to [a-z0-9_]{0,10} (map.c)
             if (!h || !key) break;
-            TriggerValue *slot = trigger_values_slot(&h->custom_values, key);
-            if (!slot) break;
-            slot->value = a->action == TRIGGER_ACTION_SET_PLAYER_VALUE ? a->constant : slot->value + a->constant;
-            player_custom_value_set(game, h, key, slot->value); // send("cv", key, val)
+            if (a->action == TRIGGER_ACTION_SET_PLAYER_VALUE) player_custom_value_set(game, h, key, a->constant); // send("cv", key, val)
+            else player_custom_value_add(game, h, key, a->constant); // custVals[key] += val (a string appends), "cv"
             break;
         }
         case TRIGGER_ACTION_PLAY_ANIMATION: {
@@ -600,7 +599,8 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
             if (!key || !j->object) break; // AIs have no custVals
             TriggerValueSet *set = trigger_object_values_mut(game, j->object, 1);
             TriggerValue *slot = set ? trigger_values_slot(set, key) : NULL;
-            if (slot) slot->value = a->action == TRIGGER_ACTION_SET_TRIGGER_VALUE ? a->constant : slot->value + a->constant; // no events
+            if (slot && a->action == TRIGGER_ACTION_SET_TRIGGER_VALUE) trigger_value_set_number(slot, a->constant); // no events
+            else if (slot) trigger_value_add(slot, a->constant);
             break;
         }
         case TRIGGER_ACTION_CHANGE_CLASS: {
@@ -615,10 +615,9 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
         case TRIGGER_ACTION_SET_GLOBAL_VALUE:
         case TRIGGER_ACTION_CHANGE_GLOBAL_VALUE: {
             const char *key = action_text(a);
-            TriggerRuntime *rt = key ? trigger_runtime(game) : NULL;
-            TriggerValue *slot = rt ? trigger_values_slot(&rt->global_values, key) : NULL;
-            if (!slot) break;
-            trigger_global_value_set(game, key, a->action == TRIGGER_ACTION_SET_GLOBAL_VALUE ? a->constant : slot->value + a->constant); // "gv"
+            if (!key) break;
+            if (a->action == TRIGGER_ACTION_SET_GLOBAL_VALUE) trigger_global_value_set(game, key, a->constant); // "gv"
+            else trigger_global_value_add(game, key, a->constant); // globalVals[key] += val (a string appends), "gv"
             break;
         }
         case TRIGGER_ACTION_STOP_SOUND: {

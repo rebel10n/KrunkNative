@@ -22,6 +22,7 @@
 #include <krunker_map_source.h>
 #include <backend.h>
 #include <html_ui.h>
+#include <html_dom.h> // html_storage_get / set: the socket's saved testCode and display mode (socket_extras)
 #include <ui_logic.h>
 #include <i18n.h> // i18n_trf
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
@@ -100,6 +101,11 @@ static struct {
     // the game socket's host (v10's _6640: isInOtherRankedMatch compares it) and, for a ranked match's join
     // (krunker_net_join_match), the assignment's connection "host[:port]" ("" for a seek)
     char host[256], match[256];
+    // the socket query's extras (krunker_link_socket_query), set when a join starts (main thread): tc= the saved
+    // testCode, dm= the display mode (socket_extras); a queue hand-off's bpt= and port (krunker_net_join_queue: the
+    // socket opens at host:queue_port with gameId + bpt, no seek)
+    char test_code[128], display_mode[32];
+    char bypass[512], queue_host[256], queue_port[16];
     int mm_override;          // KRUNKNATIVE_KRUNKER_MATCHMAKER / ?krunkerMM names another matchmaker
     // the matchmaker refused a seek for its build (InvalidVersion / NoServersMatchQuery): the builds tried
     // this join (a forced refresh, then the compiled one), at most one retry each
@@ -156,7 +162,7 @@ static struct {
     // the player's texts the socket thread needs, looked up on the main thread per join (i18n is the
     // main thread's): {0} placeholders filled with i18n_replace where they are used
     struct {
-        char error[160], pow[200], map[160], closed[160];
+        char error[160], map[160], closed[160];
         char ws_failed[200], ws_denied[200], ws_unreachable[200];
     } tpl;
     volatile int leave_unsupported; // a map nothing can show (kmap_tick, or an init naming none): krunker_net_tick leaves
@@ -202,6 +208,12 @@ static void wipe(void *p, size_t n) {
     volatile unsigned char *v = p;
     while (n--) *v++ = 0;
 }
+
+// krunker_net_join_queue's hand-off, taken by the join it starts (join() copies it into K and wipes it)
+static struct {
+    int set;
+    char bypass[sizeof(K.bypass)], host[sizeof(K.queue_host)], port[sizeof(K.queue_port)];
+} g_queue_next;
 
 // ---------------------------------------------------------------- switches
 
@@ -399,8 +411,8 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
     KN_LOG_VERBOSE2("[krunker] %s%s\n", kind == KRUNKER_LINK_EV_CAPTCHA ? "captcha required " : "", text ? text : "");
     char out[300];
     switch (kind) {
-        case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big)
-            set_popup_notice(1, "%s", K.tpl.pow);
+        case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big): logged by the
+            K.pow_result = 2;         // tick; the link's "CAPTCHA FAILED" error (EV_ERROR, next) ends the session
             break;
         case KRUNKER_LINK_EV_ERROR: // the session is over (v10: the error screen): krunker_net_tick leaves
             snprintf(K.leave_text, sizeof(K.leave_text), "%s", i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
@@ -1438,8 +1450,6 @@ static void fail_unreachable(void) {
 // The texts the socket thread uses (K.tpl), in the page's language at join time (main thread).
 static void load_texts(void) {
     snprintf(K.tpl.error, sizeof(K.tpl.error), "%s", I18N("kn.kio.serverError", "krunker.io: {0}"));
-    snprintf(K.tpl.pow, sizeof(K.tpl.pow), "%s",
-             I18N("kn.kio.powUnsupported", "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game."));
     snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map {0} of this official game could not be loaded ({1}): pick another lobby."));
     snprintf(K.tpl.closed, sizeof(K.tpl.closed), "%s", I18N("kn.kio.sessionClosed", "The krunker.io game server ended this session."));
     snprintf(K.tpl.ws_failed, sizeof(K.tpl.ws_failed), "%s", I18N("kn.kio.gsFailed", "Could not connect to the krunker.io game server: {0}"));
@@ -1488,6 +1498,46 @@ static int http_get(const char *url, BackendHttpFn fn) {
 }
 
 static int stale(void *user) { return (unsigned) (uintptr_t) user != K.generation || K.state == KS_OFF; }
+
+// The game socket's URL at host[:port] (port NULL: none, wss) into K.ws_url, K.ws_log the same without the account's
+// token, K.host = host. The query is v10's (krunker_link_socket_query): clientUID is the key CON_UID gave the session
+// K.link still holds; the link reset that follows forgets it (v10's deleteVal("conUID_") after one use).
+static void socket_url(const char *host, const char *port, const char *game, const char *client_key, const char *bypass) {
+    char con_uid[sizeof(K.link.con_uid)];
+    pthread_mutex_lock(&K.lock);
+    snprintf(con_uid, sizeof(con_uid), "%s", K.link.con_uid);
+    pthread_mutex_unlock(&K.lock);
+    const KrunkerSocketQuery q = {game, client_key, con_uid, bypass, K.test_code, K.access, K.display_mode};
+    char query[sizeof(K.ws_url)], log[sizeof(K.ws_log)];
+    if (!krunker_link_socket_query(&q, query, sizeof(query), log, sizeof(log))) { // (a test code too long: left out)
+        const KrunkerSocketQuery min = {game, client_key, con_uid, bypass, NULL, K.access, K.display_mode};
+        krunker_link_socket_query(&min, query, sizeof(query), log, sizeof(log));
+    }
+    const char *scheme = port && strncmp(K.matchmaker, "https:", 6) ? "ws" : "wss";
+    snprintf(K.ws_url, sizeof(K.ws_url), "%s://%s%s%s/ws?%s", scheme, host, port ? ":" : "", port ? port : "", query);
+    snprintf(K.ws_log, sizeof(K.ws_log), "%s://%s%s%s/ws?%s", scheme, host, port ? ":" : "", port ? port : "", log);
+    snprintf(K.host, sizeof(K.host), "%s", host);
+    wipe(query, sizeof(query)); // (it carried at=)
+}
+
+// tc= and dm= of the next socket (main thread, at a join): v10 reads the page's ?tc= and keeps it (saveVal("testCode"),
+// deob-10.0.3.js:262657-262660; :241468 reads it back on every load), and its display mode is the page's ?displayMode=
+// when it is a known one, else the saved krunker-display-mode (:133524-133553). Natively the page is the environment
+// (KRUNKNATIVE_KRUNKER_TEST_CODE / KRUNKNATIVE_KRUNKER_DISPLAY_MODE); "none" sends no dm.
+static void socket_extras(void) {
+    char v[sizeof(K.test_code)];
+    if (option("KRUNKNATIVE_KRUNKER_TEST_CODE", "tc", v, sizeof(v))) {
+        html_storage_set("testCode", v);
+        snprintf(K.test_code, sizeof(K.test_code), "%s", v);
+    } else if (html_storage_get("testCode", K.test_code, sizeof(K.test_code)) < 0) {
+        K.test_code[0] = 0;
+    }
+    char mode[sizeof(K.display_mode)] = "";
+    if (!option("KRUNKNATIVE_KRUNKER_DISPLAY_MODE", "displayMode", mode, sizeof(mode)) || (strcmp(mode, "none") && strcmp(mode, "gdc-kid"))) {
+        if (html_storage_get("krunker-display-mode", mode, sizeof(mode)) < 0 || (strcmp(mode, "none") && strcmp(mode, "gdc-kid"))) mode[0] = 0;
+    }
+    snprintf(K.display_mode, sizeof(K.display_mode), "%s", strcmp(mode, "none") ? mode : "");
+}
 
 static void on_seek(void *user, int status, const char *body, size_t length);
 static void seek(void);
@@ -1803,18 +1853,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         K.reload = 0;
         snprintf(K.game_id, sizeof(K.game_id), "%s", game);
         recent_lobbies_push(&K.recent, game);
-        char query[600];
-        snprintf(query, sizeof(query), "gameId=%s&clientKey=%s", game, client_id); // no clientUID / bpt / tc / dm
-        if (is_production() || !port_s[0]) {
-            snprintf(K.ws_log, sizeof(K.ws_log), "wss://%s/ws?%s", host, query);
-        } else {
-            snprintf(K.ws_log, sizeof(K.ws_log), "%s://%s:%s/ws?%s", strncmp(K.matchmaker, "https:", 6) ? "ws" : "wss", host, port_s, query);
-        }
-        // the krunker.io account: "at=" + the fresh access token as it is (iîíîiìî :222367, after tc)
-        snprintf(K.ws_url, sizeof(K.ws_url), "%s%s%s", K.ws_log, K.access[0] ? "&at=" : "", K.access);
-        snprintf(K.host, sizeof(K.host), "%s", host);
-        KN_LOG_DEBUG1("[krunker] seek-game: game %s on %s:%s, opening %s%s\n", game, host, port_s, K.ws_log,
-               K.access[0] ? "&at=(the krunker.io account's token)" : "");
+        // v10's connect (deob-10.0.3.js:261655-261677): gameId, clientKey, clientUID, tc, at (the account's fresh access
+        // token as it is), dm; a seek's answer carries no bypassToken (krunker_link_socket_query)
+        socket_url(host, is_production() || !port_s[0] ? NULL : port_s, game, client_id, NULL);
+        KN_LOG_DEBUG1("[krunker] seek-game: game %s on %s:%s, opening %s\n", game, host, port_s, K.ws_log);
         load_ws_texts();
         K.state = KS_CONNECTING;
         kmap_reset();
@@ -1938,6 +1980,23 @@ static void open_match(void) {
     ws_open();
 }
 
+// A queue hand-off's socket (krunker_net_join_queue): queue_host[:queue_port]/ws?gameId=&bpt=... with no seek, as v10's
+// load does with the saved queueHost / queuePort / bpt / gId (deob-10.0.3.js:261510-261526); the same build as a ranked
+// match's (the page's).
+static void open_queue(void) {
+    socket_url(K.queue_host, is_production() || !K.queue_port[0] ? NULL : K.queue_port, K.game_id, NULL, K.bypass);
+    KN_LOG_DEBUG1("[krunker] queue hand-off: opening %s\n", K.ws_log);
+    load_ws_texts();
+    K.state = KS_CONNECTING;
+    kmap_reset();
+    pthread_mutex_lock(&K.lock);
+    krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
+    krunker_link_reset(&K.link);
+    K.link.account = K.access[0] != 0;
+    pthread_mutex_unlock(&K.lock);
+    ws_open();
+}
+
 // The krunker.io account's token for this join (krunker_account_fresh_token): NULL = as a guest.
 // Then the current Krunker build (on_build), then the seek.
 static void on_access(void *user, const char *token) {
@@ -1946,6 +2005,7 @@ static void on_access(void *user, const char *token) {
     if (K.access[0]) KN_LOG_DEBUG1("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
     else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
     if (K.match[0]) return open_match();
+    if (K.bypass[0]) return open_queue();
     K.state = KS_BUILD;
     krunker_build_refresh(build_url(), 0, on_build, user);
 }
@@ -2071,8 +2131,19 @@ static int join(Client *client, const char *game_id, const char *region, const i
     load_texts();
     matchmaker();
     wipe(K.access, sizeof(K.access));
-    if (K.match[0]) { // a ranked match's socket (v10's _33929): no region to resolve, the account's token first
-        KN_LOG_DEBUG1("[krunker] joining the ranked match at %s (game %s)\n", K.match, K.game_id[0] ? K.game_id : "(any)");
+    socket_extras(); // tc= / dm= of this join's socket
+    // a queue hand-off's bypass token and socket (krunker_net_join_queue), for this join only
+    wipe(K.bypass, sizeof(K.bypass));
+    K.queue_host[0] = K.queue_port[0] = 0;
+    if (g_queue_next.set) {
+        snprintf(K.bypass, sizeof(K.bypass), "%s", g_queue_next.bypass);
+        snprintf(K.queue_host, sizeof(K.queue_host), "%s", g_queue_next.host);
+        snprintf(K.queue_port, sizeof(K.queue_port), "%s", g_queue_next.port);
+        wipe(&g_queue_next, sizeof(g_queue_next));
+    }
+    if (K.match[0] || K.bypass[0]) { // a ranked match's socket (v10's _33929) or a queue hand-off: no region, no seek; the token first
+        if (K.match[0]) KN_LOG_DEBUG1("[krunker] joining the ranked match at %s (game %s)\n", K.match, K.game_id[0] ? K.game_id : "(any)");
+        else KN_LOG_DEBUG1("[krunker] joining game %s at %s through its queue hand-off\n", K.game_id, K.queue_host);
         K.state = KS_ACCOUNT;
         krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
         return K.state != KS_CLOSED;
@@ -2090,6 +2161,21 @@ static int join(Client *client, const char *game_id, const char *region, const i
 
 int krunker_net_join(Client *client, const char *game_id, const char *region) {
     return join(client, game_id, region, 0, NULL, 0, NULL);
+}
+
+// K.P.D's policeJoin(gameId, bypassToken, host, port) (deob-10.0.3.js:252877-252884): v10 saves queueHost / queuePort /
+// bpt / gId and reloads; the load connects to queueHost:queuePort with {gameId, bypassToken} and no seek
+// (:261510-261526): bpt= is the socket's bypass token (krunker_link_socket_query). The port only off production, as a
+// seek's (v10 drops it for production hosts, :261678-261680).
+int krunker_net_join_queue(Client *client, const char *game_id, const char *bypass, const char *host, const char *port) {
+    if (!client || !game_id || !game_id[0] || !bypass || !bypass[0] || !host || !host[0]) return 0;
+    char game[sizeof(K.game_id)];
+    snprintf(game, sizeof(game), "%s", game_id);
+    snprintf(g_queue_next.bypass, sizeof(g_queue_next.bypass), "%s", bypass);
+    snprintf(g_queue_next.host, sizeof(g_queue_next.host), "%s", host);
+    snprintf(g_queue_next.port, sizeof(g_queue_next.port), "%s", port ? port : "");
+    g_queue_next.set = 1;
+    return join(client, game, NULL, 0, NULL, 0, NULL);
 }
 
 // v10's joinAssignment (v10:98678) and quickJoinRankedMatch (v10:98729): JOINED_RANK on the open game socket
@@ -2179,6 +2265,7 @@ void krunker_net_leave(Client *client, const char *reason) {
     wipe(K.token, sizeof(K.token));
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
     wipe(K.ws_url, sizeof(K.ws_url)); // (it carried the account's at=)
+    wipe(K.bypass, sizeof(K.bypass)); // a queue hand-off's token is this join's only
     account_frames_drop();
     K.rpc_pending_n = 0; // (the session is over: no rpc answer can come)
 }
@@ -2504,7 +2591,10 @@ void krunker_net_tick(Client *client) {
             pthread_mutex_unlock(&K.lock);
             KN_LOG_VERBOSE2("[krunker] security challenge answered (%s proof of work, number %ld)\n", K.altcha.algorithm, K.altcha.next);
         } else if (rc < 0 && K.state == KS_OPEN) {
-            set_popup_notice(1, "%s", K.tpl.pow);
+            // v10.0.3's failure branch: the error "CAPTCHA FAILED" and the socket closed (deob-10.0.3.js:111428-111431)
+            pthread_mutex_lock(&K.lock);
+            krunker_link_captcha_failed(&K.link);
+            pthread_mutex_unlock(&K.lock);
         }
         free(payload);
     }

@@ -9,6 +9,7 @@
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
 #include <server_trade.h>    // the live trade of Trade mode (NET_EXT_TRADE_*, int [5, sid]; doc/v10/trade.md)
+#include <server_captcha.h>  // the in-game captcha's answer (NET_EXT_CAPTCHA_ANSWER, game_captcha.c)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
 #include <bot_banter.h>      // bot chat through kn_brain (GameHooks.bot_banter)
 #include <ai.h>
@@ -61,6 +62,7 @@ static struct {
     int id;
     int target_uid; // "fpSp": the player it follows, -1 free cam (informational, like the v3.1.1 server)
     float bot_path_at; // KrunkNative: game time of the last NET_EXT_KN_BOT_PATH sent to it (net_broadcast_bot_paths)
+    float sent_bar[NET_INTER_BAR_COUNT]; // the followed player's interact / charge bar as last sent (net_broadcast_inter_progress)
 } g_spectators[NET_MAX_SPECTATORS];
 static int g_spectator_count;
 
@@ -83,6 +85,7 @@ static void net_set_spectating(const ClientConnection *client, const int on) {
         g_spectators[g_spectator_count].id = client->id;
         g_spectators[g_spectator_count].target_uid = -1;
         g_spectators[g_spectator_count].bot_path_at = -1.0f;
+        memset(g_spectators[g_spectator_count].sent_bar, 0, sizeof(g_spectators[g_spectator_count].sent_bar)); // a new client shows none
         g_spectator_count++;
     } else if (!on && index >= 0) {
         g_spectators[index] = g_spectators[--g_spectator_count];
@@ -946,12 +949,33 @@ static void net_broadcast_spawn(const Player *player) {
     }
 }
 
+// v10's "0" carries each player's customLoadout (getPlayerAddData deob-10.0.3.js:198810; players.add dresses the player
+// with it, :195103-195108), so a joiner sees the loadout a keepLoadout mode gave it. Our clients rebuild such a loadout
+// from the Gun Game tier they mirror from LOADOUT packets (mode_gun_loadout), which a joiner never got: its own LOADOUT
+// (the base loadout, its ammo and the tier) follows the player's SPAWN.
+static void net_send_existing_loadout(ClientConnection *client, const Player *player) {
+    const GameMode *mode = g_server->game.mode;
+    if (!player->active || !mode || !(mode->config.weapon_order_size > 0 || mode->config.keep_loadout) || !net_peer_takes(client, NET_PACKET_LOADOUT)) return;
+    NetLoadoutPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.uid = player->uid;
+    packet.count = player_loadout_base(player) < NET_LOADOUT_MAX ? player_loadout_base(player) : NET_LOADOUT_MAX;
+    for (int i = 0; i < packet.count; i++) {
+        packet.weapons[i] = player->loadout[i];
+        packet.ammo[i] = player->ammo ? (int32_t) player->ammo[i] : -1;
+    }
+    packet.loadout_index = player->loadout_index;
+    packet.weapon_tier = player->mode.weapon_tier;
+    if (packet.count) net_send_packet(client->fd, NET_PACKET_LOADOUT, &packet, sizeof(packet));
+}
+
 // Every known player, dead ones too (active = 0): the scoreboard needs their names.
 static void net_send_existing_spawns(ClientConnection *client) {
     for (size_t i = 0; i < g_server->game.player_count; i++) {
         Player *player = g_server->game.players[i];
         if (!player || player == client->player) continue;
         net_send_spawn(client, player, 0);
+        net_send_existing_loadout(client, player); // customLoadout: the mode's loadout of this player (Gun Game's tier)
     }
 }
 
@@ -1046,7 +1070,14 @@ static void net_spawn_client(ClientConnection *client) {
     const CompLobbyEntry *comp = g_server->game.config.comp ? comp_lobby_get(&g_server->game, client->id) : NULL;
     if (comp && comp->team) client->player->team = comp->team;
     if (comp && comp->class_index >= 0) client->player->class_index = comp->class_index;
-    client->player->secondary_index = client->secondary_index;
+    // v10.0.3 updateSecIndex (deob-10.0.3.js:190934-190948): a secondary weapons' req refuses is the Pistol (2). Its level
+    // tail (minRec against account.level, game_weapon_level_ok) is checked here, at every spawn with the account as it is
+    // then (a guest: level 0); player_spawn checks the rest of req (dev, customOnly, noComp)
+    const int picked = client->secondary_index;
+    const Weapon *picked_weapon = g_server->game.weapons && picked >= 0 && (size_t) picked < g_server->game.weapon_count
+                                      ? g_server->game.weapons[picked] : NULL;
+    const int level = client->acct.account_id > 0 ? client->acct.level : 0;
+    client->player->secondary_index = game_weapon_level_ok(&g_server->game, picked_weapon, level, net_client_is_dev(client)) ? picked : WEAPON_ID_PISTOL;
     client->player->cosmetics = client->cosmetics;
     client->player->slid_cont = client->slid_cont; // gameserver.ts: player.slidCont = ent[15]
     client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
@@ -2253,6 +2284,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 game_prop_rotate(&g_server->game, client->player, body[0] != 0);
             else if (subtype == NET_EXT_KN_SWAP_TEAM) net_handle_swap_team(client, body, body_length); // Tap-to-Play Switch Teams
             else if (trade_handle_ext(client, subtype, body, body_length)) net_note_activity(client); // the live trade (trade.c)
+            else if (subtype == NET_EXT_CAPTCHA_ANSWER) game_captcha_on_answer(client, body, body_length); // "cptR" (game_captcha.c)
             else if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket) && client->player) // "stlkrt" i (stalker.h)
                 game_player_stalker_taunt(&g_server->game, client->player, body[0]);
             break;
@@ -2513,12 +2545,47 @@ static void net_broadcast_bot_paths(void) {
     }
 }
 
+// interMProg of a player (player procInputs, deob-10.0.3.js:191508-191541): the charge over the full charge
+// (weapon.chrgTime || throwCharge), 0 without one; the same value the player's own HUD draws (build_ui.c)
+static float net_charge_progress(const Player *p) {
+    if (!p->weapon || g_server->game.config.no_charge_weapons) return 0.0f; // config.chrgWeps
+    const float full = p->weapon->charge_time > 0.0f ? p->weapon->charge_time : p->throw_charge > 0.0f ? p->throw_charge : 0.9f; // config.throwCharge
+    return p->charge_time > 0.0f ? p->charge_time / full : 0.0f;
+}
+
+// v10's server loop (deob-10.0.3.js:222274-222292): an active player's interProg / interMProg, (x || 0).round(3), goes
+// as "p" INTER_PROG / "mp" INTER_M_PROG to every connection whose specStream is that player when it changed: here
+// NET_EXT_PLAYER_INTER_PROG to each spectator following it (NET_PACKET_SPECTATE_TARGET). Deliberate difference: the
+// last value is kept per spectator, not per player, so one that switches to another player gets that one's bars at once.
+static void net_broadcast_inter_progress(void) {
+    for (int i = 0; i < g_spectator_count; i++) {
+        if (g_spectators[i].target_uid < 0) continue;
+        const Player *p = game_find_player(&g_server->game, g_spectators[i].target_uid);
+        if (!p || !p->active) continue;
+        const float value[NET_INTER_BAR_COUNT] = {roundf(p->interact_progress * 1000.0f) / 1000.0f, roundf(net_charge_progress(p) * 1000.0f) / 1000.0f};
+        ClientConnection *client = NULL;
+        for (size_t c = 0; c < g_server->client_count && !client; c++) {
+            if (g_server->clients[c].id == g_spectators[i].id) client = &g_server->clients[c];
+        }
+        if (!client || !net_peer_takes(client, NET_PACKET_EXT)) continue;
+        for (int bar = 0; bar < NET_INTER_BAR_COUNT; bar++) {
+            if (value[bar] == g_spectators[i].sent_bar[bar]) continue;
+            g_spectators[i].sent_bar[bar] = value[bar];
+            const NetInterProgPacket packet = {.bar = (uint8_t) bar, .prog = value[bar]};
+            uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
+            const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_PLAYER_INTER_PROG, &packet, sizeof(packet));
+            if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+        }
+    }
+}
+
 static void net_broadcast_states_tick(void) {
     net_send_pings();
     if (g_server->game.end_timer > 0.0f) return;
     net_send_reconciliation();
     game_sync_grapples(&g_server->game, NET_TARGET_ALL); // the "k" sync's grapple slot
     net_broadcast_bot_paths(); // KrunkNative: the spectated bot's route (throttled per spectator)
+    net_broadcast_inter_progress(); // the followed player's interact / charge bars (v10 "p" / "mp")
 
     static double next_state_at; // gameserver.ts K_PACKET_INTERVAL_MS
     const double state_now = net_time();
@@ -2538,7 +2605,11 @@ static void net_broadcast_states_tick(void) {
         state_players[state_count] = player;
         net_packet_from_player(&states[state_count++], player);
     }
-    if (!state_count) return;
+    // v10's "k" opens with players.hideAll (deob-10.0.3.js:258582): NET_EXT_PLAYER_SYNC heads each EXT peer's sync, an
+    // empty one included (updateState sends "k" with an empty list, :222350), so a player it leaves out (viewDis,
+    // isHidden) is hidden on that client and snaps when it comes back (client_players_hide_all)
+    uint8_t marker[NET_EXT_HEADER_SIZE];
+    const uint16_t marker_len = net_ext_pack(marker, sizeof(marker), NET_EXT_PLAYER_SYNC, NULL, 0);
 
     static NetSendBatch batch; // main thread only
     for (size_t i = 0; i < g_server->client_count; i++) {
@@ -2554,6 +2625,8 @@ static void net_broadcast_states_tick(void) {
         // a peer before 1.4.5 checks the 57-byte STATE exactly: it gets V1 (no step / ground / grapple / ping)
         const uint16_t size = net_peer_has_state_v2(client->peer_minor, client->peer_patch) ? NET_STATE_PACKET_V2_SIZE : NET_STATE_PACKET_V1_SIZE;
         batch.length = 0;
+        if (marker_len && net_peer_takes(client, NET_PACKET_EXT)) net_batch_append(&batch, NET_PACKET_EXT, marker, marker_len);
+        else if (!state_count) continue; // a peer without the marker gets nothing from an empty sync, as before
         for (size_t j = 0; j < state_count; j++) {
             if (!game_network_relevant(&g_server->game, viewer, state_players[j])) continue; // WP-E mode.viewDis
             if (net_batch_append(&batch, NET_PACKET_STATE, &states[j], size)) continue;

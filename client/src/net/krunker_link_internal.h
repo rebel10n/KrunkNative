@@ -13,6 +13,8 @@ int krunker_link_world_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *
 // init's syncData (arg 11) and round wins (arg 3) of those packets for a joiner / a new round
 // (initGame, game.deob.js:219395-219470 and :219535-219540); called by on_init_hud.
 void krunker_link_world_init(KrunkerLink *l, const KrunkerFrame *f);
+// player.updateLoadout(game, index, ..., weapons, ammos) as NET_PACKET_LOADOUT (the "inat" path; "0"'s customLoadout)
+void krunker_link_loadout(KrunkerLink *l, int sid, const KrunkerValue *weapons, const KrunkerValue *index, const KrunkerValue *ammos);
 // krunker_link_lobby.c: the private lobby's password prompt ("code", "codeT", "codeP"). 1 = handled.
 int krunker_link_lobby_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
 
@@ -22,6 +24,8 @@ int krunker_link_lobby_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *
 int krunker_link_script_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
 // init's syncData lo / ent / entAtt / chg (:219478-219496); called by on_init_hud.
 void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f);
+// "l"'s controlled-entity tail [eid, tick, state] (0: none) -> NET_EXT_ENTITY_CONTROLLED; called by on_sync_player.
+void krunker_link_script_controlled(KrunkerLink *l, const KrunkerValue *controlled);
 
 // krunker_link_prophunt.c: Prop Hunt's "up" / "prpR" (1 = handled), the prop a Prop-team player wears
 // from its "0" entry, and our NET_EXT_PROP_PICK / _ROTATE out as "prp" / "prpR" (-1: another subtype).
@@ -39,6 +43,11 @@ int krunker_link_trade_send(KrunkerLink *l, uint16_t subtype, const uint8_t *bod
 // krunker_link_s2c.c: the S2C packets doc/v10/s2c-coverage.md classifies that no other file translates: the
 // player clips ("c"), the menu's speech bubble ("ready" / "sb"), the comp lobby table ("cd" / "cda" / "uid"), store
 // skin definitions ("sdc"), the ranked rating card ("lrmr"), game announcements, the found-junk line ("jnk"), the map
-// script's log ("ksL"), and the packets ignored on purpose (live service / ads / dev tools). 1 = handled (unknown_in
-// does not count it).
+// script's log ("ksL"), the spectated player's bars ("p" / "mp"), the unbox / raffle lines ("unb" / "unbS" / "lotWin"),
+// map prize wheels ("spinW"), KR charge consent ("chreq"), Turf Wars ("warsClan"), the editor handoff ("edMp"), and the
+// packets ignored on purpose (live service / ads / dev tools). 1 = handled (unknown_in does not count it).
 int krunker_link_s2c_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
+// init's syncData.warsClan (:256999), every init; called by on_init_hud.
+void krunker_link_s2c_init(KrunkerLink *l, const KrunkerFrame *f);
+// Our NET_EXT_CHARGE_CONSENT_RESPONSE out as "chrsp" [id(, 1)]; -1: another subtype.
+int krunker_link_s2c_send(KrunkerLink *l, uint16_t subtype, const uint8_t *body, uint16_t length);

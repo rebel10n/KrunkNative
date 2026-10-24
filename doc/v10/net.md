@@ -221,9 +221,10 @@ the same popup, then joins the same game again with the password in its JOIN pac
   `eval`). KN's own protocol does not carry it. The official link answers it as the live client does:
   `client/src/net/krunker_cheat.c` decrypts it and evaluates it in a sandboxed QuickJS
   (`krunker_cheat_qjs.c`: fresh runtime, memory / time caps, no host APIs; the page's eval on the web build).
-- `CHARGE_CONSENT_REQUEST/RESPONSE` is a server-initiated "spend currency?" confirmation
-  (15 s timeout, guess: in-game KrunkScript purchases). Port it only if KrunkScript
-  monetization is ported.
+- `CHARGE_CONSENT_REQUEST/RESPONSE` is a server-initiated "spend currency?" confirmation: a map script's
+  `authorizeSpend` (deob-10.0.3.js:221223, 15 s timeout). The client side is ported for the official link
+  (`#chargeModal` / `#chargeConfirm`, client/src/ui/s2c_ui.c; doc/v10/s2c-coverage.md). KN's own server never
+  asks: its KrunkScript is not monetized, so `authorizeSpend` answers false first (server/src/ks_server_host.c).
 - `sdc` / `swu` / Discord / webpush / FRVR auth are live-service features. They map onto
   kn_brain endpoints if wanted; they are not gameplay.
 - There is no version toggle (v10 only). HELLO / INIT keep their ruleset bytes for wire
@@ -247,9 +248,14 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x0103 | `NET_EXT_ENTITY_EVENT` | `ee` | S to C |
 | 0x0104 | `NET_EXT_ENTITY_ATTACH` | `ea+` | S to C |
 | 0x0105 | `NET_EXT_ENTITY_DETACH` | `ea-` | S to C |
+| 0x0106 | `NET_EXT_ENTITY_CONTROLLED` | `l`'s last element `[eid, tick, state]` (applyControlledSync; the official link) | S to C |
 | 0x0200 | `NET_EXT_PLAYER_POSE` | `pz` (`NetPlayerPosePacket`; our server and the official link, doc/v10/player-pose.md) | S to C |
 | 0x0201 | `NET_EXT_PLAYER_LOCKS` | `plk` | S to C |
 | 0x0204 | `NET_EXT_PLAYER_ANIM` | `c` (`NetPlayerAnimPacket`; KN's server sends it for animated class models, doc/v10/s2c-coverage.md) | S to C |
+| 0x0205 | `NET_EXT_PLAYER_ASSET_ID` | `uai` (`NetPlayerAssetIdPacket`; KrunkScript's `player.assetID`, doc/v10/class-models.md) | S to C |
+| 0x0210 | `NET_EXT_PLAYER_MOVE_VALS` | `l`'s movSch sendVals (`NetPlayerMoveValsPacket`, ahead of the RECON of the same ack) | S to C |
+| 0x0211 | `NET_EXT_PLAYER_SYNC` | `k`'s players.hideAll (no body, ahead of every player sync's STATEs, an empty one too) | S to C |
+| 0x0212 | `NET_EXT_VALUE_TEXT` | `cv` / `gv` with a string value (`NetValueTextPacket`; numbers stay NetValuePacket) | S to C |
 | 0x0300 | `NET_EXT_SKIN_DEFINITION_CHANGED` | `sdc` (`NetExtJsonChunk` + JSON `[skinId, skin]`, doc/v10/s2c-coverage.md) | S to C |
 | 0x0301 | `NET_EXT_SPIN_WHEELS_UPDATED` | `swu` | S to C |
 | 0x0303 | `NET_EXT_SPEECH_BUBBLE` | `sb` (`NetSpeechBubblePacket`, the menu mascot's bubble, doc/v10/s2c-coverage.md) | S to C |
@@ -273,6 +279,8 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x0b13 | `NET_EXT_TRADE_CURRENCY_STATE` | `utrdc` | S to C |
 | 0x0b14 | `NET_EXT_TRADE_RESULT` | `atrd` (chunked JSON) | S to C |
 | 0x0b15 | `NET_EXT_TRADE_CHAT_LINE` | `tch` | S to C |
+| 0x0c00 | `NET_EXT_CAPTCHA` | `cpt` (the ALTCHA challenge JSON, NUL-terminated; doc/v10/captcha.md) | S to C |
+| 0x0c01 | `NET_EXT_CAPTCHA_ANSWER` | `cptR` (C to S: the solved payload; S to C, no body: accepted) | both |
 | 0x8000.. | `NET_EXT_BLOCK_KN` | (KrunkNative-only) | both |
 | 0x8000 | `NET_EXT_KN_ACCOUNT_AUTH` | (KN live sign-in: session token / hasJoined / guest) | C to S |
 | 0x8001 | `NET_EXT_KN_ACCOUNT_RIGHTS` | (KN: account and rights, push + answer) | S to C |
@@ -350,7 +358,7 @@ Status: **OK** = same shape; **fixed** = changed by this audit (tests: `krunker_
 |---|---|---|---|
 | Frame | msgpack `[name, ...args]` + `[ahNum >> 4 & 15, ahNum & 15]`; decode drops the trailer, throws `"Invalid message"` on a non-array | 27673-27705 | OK (`shared/src/krunker_proto.c`) |
 | ahNum | `ahNum = (ahNum + 3) & 255` before every send but `cptR`; 0 after `reset()`; queued frames rotate when flushed | 111508-111525, 111627 | OK (`KRUNKER_AHKEY` 0x3) |
-| Socket URL | `//host[:port]/ws?gameId=&clientKey=` then `clientUID=` (CON_UID's saved id), `bpt=` (a queue hand-off's bypassToken, not a seek result's), `tc=`, `at=` (FRVR token), `dm=` (display mode not "none"); `:port` only for `//ip_` hosts in prod | 261637-261680 | OK for a seek: `gameId`, `clientKey`, `at` (`krunker_net.c` on_seek). gap: no `clientUID` / `bpt` / `tc` / `dm` (no reconnect id, queue hand-off or kid mode) |
+| Socket URL | `//host[:port]/ws?gameId=&clientKey=` then `clientUID=` (CON_UID's saved id), `bpt=` (a queue hand-off's bypassToken, not a seek result's), `tc=`, `at=` (FRVR token), `dm=` (display mode not "none"); `:port` only for `//ip_` hosts in prod | 261637-261680 | **fixed**: every part in v10's order (`krunker_link_socket_query`, `krunker_net.c` socket_url): `clientUID` = the last session's CON_UID key (the link holds it until the next socket's reset: v10's one-use `conUID_`), `bpt` from K.P.D's `policeJoin(gco, tok, hos, por)` (`krunker_net_join_queue`: host:port, no seek, 252877-252884 / 261510-261526), `tc` = `?tc=` / `KRUNKNATIVE_KRUNKER_TEST_CODE`, kept as `testCode` (262657), `dm` = `?displayMode=` / `KRUNKNATIVE_KRUNKER_DISPLAY_MODE` / the saved `krunker-display-mode` when not "none" (133524-133553) |
 | `io-init` | `[socketId]` | 111422-111423 | OK |
 | `load` (S2C) | three args; the handler keeps [1] as the session id its reports carry (229446) and answers C2S `load` with no args | 261386-261396 | OK (the session id is not kept) |
 | `cpt` / `cptR` | `cpt [challenge]`: an ALTCHA challenge object (`altcha-widget challengejson`); `cptR [payload string]`, no ahNum step | 111424-111434, 111559-111618 | OK (`krunker_altcha.c`) |
@@ -381,7 +389,7 @@ gameState. Sender `deob-10.0.3.js:221968` (sandbox 261893), handler 256748-25687
 | [11] | flg / obj / zone (`on_init_hud`), round wins and world sync (`krunker_link_world_init`), live objects / entities (`krunker_link_script_init`) | OK |
 | [12] | `applyNetworking`: `snf || 10`, `tf || 30`, `sf || 1` -> NETWORK_DATA; `aist` / `los` / `adst` are server-side sync periods | OK |
 | [14] [15] [16] | `is_official`, `is_comp`, `is_ranked` | OK |
-| [2] [10] [17]-[21] | event index, map hash, session / round ids, timer (the "t" packet carries it), override scripts, gameState | gap: not read (gameState only logs on `gsc`) |
+| [2] [10] [17]-[21] | event index, map hash, session / round ids, timer (the "t" packet carries it), override scripts, gameState | **fixed**: read into the link (`event_index`, `map_hash`, `session_id`, `round_id`, `game_timer_ms`, `override_scripts`, `game_state`; the init note logs them). Deliberate: [20] is the server's compiled JavaScript of the map's scripts (220169-220187), not run (the client compiles the map's own KrunkScript); [10] is unread by 10.0.3 too; KN has no event table for [2] |
 
 Config keys `applyConfig` reads (216116-216423): `isComp`, `webhook`, `teams` / `specs` / `lockedTeams` (comp
 account teams), `weps` / `cls` / `prks` (custom tables, clamped per option), the 84 serverConfig options
@@ -412,15 +420,15 @@ service).
 | `ccr` | `[nonce, payloadB64, fnv32 hex]` | 255278 | OK (`krunker_cheat.c`) |
 | `cptR` / `joinedRank` / `recps` | `[payload]` / `[]` / `[]` | 111513, 112064, 153042 | OK |
 | `_0` RPC | `[counter, name, ...args]`: `login [token]`, `dsl []` | 111528-111535, 262632, 164136 | OK |
-| `custom` | `[config, captchaRid \| undefined, !!rehost]` | 229990-229996 | OK shape. gap: the live config object always carries `customMap` / `rawMapData` / `passCode` (null when unused) and writes a missing bool row as 0; KN's host UI leaves them out |
+| `custom` | `[config, captchaRid \| undefined, !!rehost]` | 229990-229996 | OK shape. **fixed** (`host_flow_ui.c` host_config_fields): `customMap` (name or null), `rawMapData` / `passCode` (the field's text, null without the field; passCode null in a comp / restricted lobby, 229813-229839) always present, a bool or input row without its field is 0, input rows sanitized (27403) |
 
 ### 9.4 Server to client: core state
 
 | Packet | 10.0.3 shape | deob-10.0.3.js | KN |
 |---|---|---|---|
-| `0` ADD_PLAYERS | `[list, ...]`, 53 values a player (getPlayerAddData): [0] id, [1] sid, [2-4] x y z (rounded), [5] name, [6] classIndex, [7] health (rounded; null: maxHealth), [8] maxHealth, [9] team, [10] level, [11] clan, [12] skins, [16] isHacker, [17] customLoadout, [18] xDire (rad), [21] **propID**, [22] attachIndex, [23] pcStatIndex, [25] featured, [27] premiumT, [28] alias, [31] accid, [44] isBot, [45] busy, [51] creatorBadge, [52] titleIndex | sender 198809-198810, handler 258130-258200, players.add 195042 | **fixed**: [21] propID now dresses a Prop-team spawn (`updateProp(p, propID \|\| 1)`, 195129); was always prop 1. gap: [17] customLoadout (keepLoadout modes) not applied |
-| `k` UPDATE_PLAYERS | `[list, sendFrequency, now - startTime]`, 13 a player: sid, x y z `.round(2)`, deg(xDire) / deg(yDire) rounded, stepVal, onGround 0/1, round(crouchVal), loadoutIndex, aimVal ? 1 : 0, [gx, gy, gz] rounded or 0, round(ping) | sender 222324-222350, handler 258580-258643 | OK. gap: the handler first runs `players.hideAll()` (194883): a player missing from a "k" (past `mode.viewDis`, hidden, a K.P.D suspect) is invisible and snaps (`forcePos`) when it comes back; KN keeps drawing it at its last state (KN's own server has the same gap) |
-| `l` SYNC_PLAYER | `[inputSN, round(ping), x, y, z, vel.y, vel.x, vel.z, xDire, onGround, didJump, didJumpW, wallJumpC, onWall 0/1, onLadder, aimVal, crouchVal, loadoutIndex, slideTimer ms, canSlide, onTerrain, xVelC, zVelC, grapple \|\| 0, canSlideT ms, custSync \|\| 0, ...movSch sendVals, [eid, tick, state] \|\| 0]`, or a bare 0 for an inactive player; always answered with `v` | sender 222389-222407, handler 258239-258330 | OK. **fixed**: [1] ping 0 no longer reports a 0 ms ping (the handler takes it only when truthy, 258311). gap: custSync, sendVals and the controlled-entity tail are not applied |
+| `0` ADD_PLAYERS | `[list, ...]`, 53 values a player (getPlayerAddData): [0] id, [1] sid, [2-4] x y z (rounded), [5] name, [6] classIndex, [7] health (rounded; null: maxHealth), [8] maxHealth, [9] team, [10] level, [11] clan, [12] skins, [16] isHacker, [17] customLoadout, [18] xDire (rad), [21] **propID**, [22] attachIndex, [23] pcStatIndex, [25] featured, [27] premiumT, [28] alias, [31] accid, [44] isBot, [45] busy, [51] creatorBadge, [52] titleIndex | sender 198809-198810, handler 258130-258200, players.add 195042 | **fixed**: [21] propID now dresses a Prop-team spawn (`updateProp(p, propID \|\| 1)`, 195129); was always prop 1. **fixed**: [17] customLoadout -> NET_PACKET_LOADOUT after the SPAWN (updateLoadout, 195103-195108); KN's own server sends a joiner each keepLoadout / Gun Game player's LOADOUT (`net_send_existing_loadout`) |
+| `k` UPDATE_PLAYERS | `[list, sendFrequency, now - startTime]`, 13 a player: sid, x y z `.round(2)`, deg(xDire) / deg(yDire) rounded, stepVal, onGround 0/1, round(crouchVal), loadoutIndex, aimVal ? 1 : 0, [gx, gy, gz] rounded or 0, round(ping) | sender 222324-222350, handler 258580-258643 | **fixed**: `players.hideAll()` (194883) as NET_EXT_PLAYER_SYNC ahead of each sync's STATEs, an empty "k" too: the client hides a player a whole sync left out (model and tag; deliberately at the next marker, one send interval after v10, as our STATEs of one sync may reach two frames) and snaps it when it comes back (`client_players_hide_all`). KN's own server sends the marker before every sync to EXT peers, empty ones included; the v10 bridge turns it into an empty "k" |
+| `l` SYNC_PLAYER | `[inputSN, round(ping), x, y, z, vel.y, vel.x, vel.z, xDire, onGround, didJump, didJumpW, wallJumpC, onWall 0/1, onLadder, aimVal, crouchVal, loadoutIndex, slideTimer ms, canSlide, onTerrain, xVelC, zVelC, grapple \|\| 0, canSlideT ms, custSync \|\| 0, ...movSch sendVals, [eid, tick, state] \|\| 0]`, or a bare 0 for an inactive player; always answered with `v` | sender 222389-222407, handler 258239-258330 | OK. **fixed**: [1] ping 0 no longer reports a 0 ms ping (the handler takes it only when truthy, 258311). **fixed**: custSync -> NET_PACKET_SCRIPT_SYNC, SRM's / Vehicle's sendVals -> NET_EXT_PLAYER_MOVE_VALS before the RECON (the scheme from the count: the tail is always last), the controlled entity -> NET_EXT_ENTITY_CONTROLLED (applyControlledSync, 213849) |
 | `start` START_GAME | `[timer string, team, spectating, challMode, moveLock 0/1, 1, kpdData, classIndex]` | sender 242075, handler 256295 | OK |
 | `f` SYNC_FAILED | `[code]`: clears tmpInpts and the "q" delta bases, resync 1 | 258226-258237 | OK |
 
@@ -437,7 +445,7 @@ service).
 | `ts` / `5` / `6` | `[team, score]` (none: reset) / `[delta, relay, absolute, classIndex]` / `[medals, killSound, totalKills, inc]` | 259141, 259236, 259296 | OK |
 | `7` / `ulb` | flat `[sid, ...leaderStats]*` / `[objSid, [name, value]*]` | 258972, 257831 | OK |
 | `uamo` / `lv` / `st` / `kst` / `wstk` / `am` | `[ammos, reserves]` / `[lives]` / `[streak, cnt]` / `[sid, count]` / `[weapon, count]` / flat `[name \| index, score, sound, count \|\| 1]*` | 258396, 259282, 258864, 258946, 258893, 259312 | OK |
-| `krt` UPDATE_KR_TAGS | `[dogTags, depositType \|\| 0]` (1 = the gift-tag holder) | 258906 | OK; gap: depositType != 0 not shown |
+| `krt` UPDATE_KR_TAGS | `[dogTags, depositType \|\| 0]` (1 = the gift-tag holder) | 258906 | **fixed**: depositType 1 / 2 -> NET_MODE_COUNTER_GIFT_TAGS / _EVENT_TAGS, shown in `#giftTagHolder` with props/prop_60 / events/event_7 (the event image is not in ui/img) |
 | `ufl` / `ufp` / `ufi` | `[uid, x, y, z, carrier \|\| 0]` / `[uid, x, y, z]` / `[team, text]` | 218287, 218401, 259227 | OK |
 | `obj` / `uobj` / `wep` | `[uid, objtvTime ms, initial]` / `[uid, onZone]` / `[weaponId]` | 219218, 219271, 219284 | OK |
 | `rds` / `zn` / `ac` | `[roundCount, noSwitch, winTeam, {team: wins}]` / `[[x, z, sizeX, sizeZ]]` / `[sid, sid2 \| null, text]` | 256671, 219210, 258952 | OK |
@@ -465,7 +473,7 @@ service).
 | `mv` / `sp` / `mpos` | `(vo {socketId: [option, weight]}, mts)` / `(id, sprayIndex, x, y, z, rotY, rotX, rotZ (degrees), dye)` / `(key, {x, y, z})` | 257882, 219706, 262993 | OK |
 | `prc` / `fe` / `skin` / `skinF` / `vc` | `(old, new)` / `(msg?)` / `(index, silent)` / `(socketId, index)` / `(dataURL, alias, sid, channel, volume, isFinal, accountId)` | 258203, 241996, 255281, 255020, 243838 | OK |
 | `bo` BUILD_OBJECT | `[buildInd, x, y, z, w, h, l, dir, uid]`, dir in **radians** (rotDir Left 0, Front PI / 2, Right PI, Back -PI / 2) | 216805, 195816-195825 | **fixed**: the radians were cast to NetBuildPacket's quarter turns (PI became 3, -90 degrees); now rounded to 0..3. init `dyno` shares the path |
-| `cv` / `gv` | `(key, value)`, value a number or a non-numeric string (`isNaN(parseFloat(v)) ? v : parseFloat(v)`) | 258558, 183563 | gap: NetValuePacket is a double, a string arrives as 0 (the same as JS for conditions: `parseInt(v) \|\| undefined`) |
+| `cv` / `gv` | `(key, value)`, value a number or a non-numeric string (`isNaN(parseFloat(v)) ? v : parseFloat(v)`) | 258558, 183563 | **fixed**: a string travels as NET_EXT_VALUE_TEXT (link, KN's server, the bridge's "cv" / "gv"); TriggerValue keeps the text (value = its JS Number() for the conditions), the HUD shows it, an Increase appends (JS `+=`); KN's Load Data keeps a non-number as the string |
 | the rest of `krunker_link_world.c` | `uct` (stride 6), `crsp` (xD degrees), `ai` (stride 9), `aai`, `gt`, `gmsg`, `tx` (`\|\| 28`), `lkt` (MM:SS), the zombie machines, `inat` / `inatA`, `tgui`, `cnfm`, init syncData parts | per handler | OK |
 | `e+` `e-` `es` `ee` `ea+` `ea-` `plk` `objmv` `lo` `slo` | inline handlers / `liveObjects` | 261720-261741, 258504, 212277, 212320, 216882 | OK |
 | `pz` PLAYER_POSE | `[sid, pose \| 0]` (players.setPose) and init syncData `plrPose` | 195354, 256989-256993 | handled since this audit (`krunker_link_script.c`, doc/v10/player-pose.md); not re-audited here |

@@ -7,6 +7,7 @@
 // Run from the repository root: ./<build>/triggers_test
 #include <shared.h>
 #include <triggers_v7.h>
+#include <net_ext.h> // NET_EXT_VALUE_TEXT: a string "cv"
 #include <account.h>
 #include <math.h>
 #include <stdio.h>
@@ -994,13 +995,26 @@ static void test_backend_actions(void) {
     CHECK(g_saves == 4 && g_loads == 1, "no account: no Save / Load Data");
     g_has_account = 1;
 
-    // the Load Data rows: numbers into custVals (+ "cv"), strings skipped, a full set stops the copy
+    // the Load Data rows: numbers into custVals (+ "cv"), a string kept as the string (v10.0.3 `isNaN(parseFloat(v)) ? v :
+    // parseFloat(v)`, deob-10.0.3.js:183563; its "cv" is NET_EXT_VALUE_TEXT), a full set stops the copy
     clear_sent();
     const char *keys[] = {"V_coins", "word", "trig"};
     const char *values[] = {"9", "abc", "2.5"};
     trigger_load_data_apply(&g, a, keys, values, 3);
-    CHECK(cv(a, "V_coins") == 9.0 && cv(a, "trig") == 2.5 && !trigger_values_find(&a->custom_values, "word"), "Load Data rows");
-    CHECK(count_sent(NET_PACKET_CUSTOM_VALUE) == 2, "cv sent per value: %d", count_sent(NET_PACKET_CUSTOM_VALUE));
+    const TriggerValue *word = trigger_values_find(&a->custom_values, "word");
+    CHECK(cv(a, "V_coins") == 9.0 && cv(a, "trig") == 2.5 && word && word->is_text && !strcmp(word->text, "abc") && isnan(word->value),
+          "Load Data rows");
+    CHECK(count_sent(NET_PACKET_CUSTOM_VALUE) == 2 && count_sent(NET_PACKET_EXT) == 1, "cv sent per value: %d + %d text",
+          count_sent(NET_PACKET_CUSTOM_VALUE), count_sent(NET_PACKET_EXT));
+    // Increase Player Value on the string: JS `"abc" += 5` is "abc5" (sent as text again)
+    player_custom_value_add(&g, a, "word", 5);
+    CHECK(word->is_text && !strcmp(word->text, "abc5") && count_sent(NET_PACKET_EXT) == 2, "a string += n appends: %s", word->text);
+    player_custom_value_set(&g, a, "word", 3); // Set: a number again
+    CHECK(!word->is_text && word->value == 3.0, "Set Player Value replaces a string with the number");
+    CHECK(trigger_js_number("  12  ") == 12.0 && trigger_js_number("") == 0.0 && trigger_js_number(" ") == 0.0 &&
+          isnan(trigger_js_number("12abc")) && trigger_js_number("0x10") == 16.0 && isnan(trigger_js_number("-0x10")) &&
+          trigger_js_number("1e3") == 1000.0 && trigger_js_number("-Infinity") < 0 && isnan(trigger_js_number("inf")) &&
+          trigger_js_number(".5") == 0.5 && isnan(trigger_js_number(".")), "JS Number() of a text value");
     for (int i = 0; a->custom_values.count <= TRIGGER_V7_CUSTOM_VALUE_LIMIT; i++) {
         char k[16];
         snprintf(k, sizeof(k), "f%d", i);

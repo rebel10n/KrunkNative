@@ -19,6 +19,7 @@
 #include <krunker_link.h>
 #include <player_names.h> // Hide player names (player_names.h)
 #include "krunker_link_internal.h" // krunker_link_world.c: mode objectives / world objects
+#include <ks_net.h> // GAME.NETWORK "sd" (ks_net_official.c)
 #include <krunker_cheat.h>
 #include <krunker_build_live.h> // the current build's strides, offsets and argument positions
 #include <krunker_altcha.h>
@@ -209,6 +210,31 @@ int krunker_link_inputs_paused(const KrunkerLink *l) { return l->locked || l->yo
 
 int krunker_link_is_host(const KrunkerLink *l) { return l->host_id[0] && l->socket_id[0] && !strcmp(l->host_id, l->socket_id); }
 
+int krunker_link_socket_query(const KrunkerSocketQuery *q, char *url, const size_t url_n, char *log, const size_t log_n) {
+    if (!q || !url || !url_n || !log || !log_n) return 0;
+    const struct { const char *name, *value; int secret; } parts[] = {
+        {"gameId", q->game_id, 0}, {"clientKey", q->client_key, 0}, {"clientUID", q->client_uid, 0}, {"bpt", q->bypass, 0},
+        {"tc", q->test_code, 0},   {"at", q->access, 1},            {"dm", q->display_mode, 0},
+    };
+    size_t u = 0, g = 0;
+    int fits = 1;
+    url[0] = log[0] = 0;
+    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+        if (!parts[i].value || !parts[i].value[0]) continue;
+        const char *sep = u ? "&" : "";
+        const int a = snprintf(url + u, url_n - u, "%s%s=%s", sep, parts[i].name, parts[i].value);
+        const int b = snprintf(log + g, log_n - g, "%s%s=%s", sep, parts[i].name, parts[i].secret ? "(token)" : parts[i].value);
+        if (a < 0 || (size_t) a >= url_n - u || b < 0 || (size_t) b >= log_n - g) {
+            fits = 0;
+            break;
+        }
+        u += (size_t) a;
+        g += (size_t) b;
+    }
+    if (!fits) url[0] = log[0] = 0;
+    return fits;
+}
+
 // ---------------------------------------------------------------- inbound
 
 // A Krunker value as cJSON (NULL: nil / not representable).
@@ -327,6 +353,15 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     l->is_comp = truthy(arg(f, 15));   // initGame iîIiiïï (:219366)
     l->is_ranked = truthy(arg(f, 16)); // iiÎîîíî
     l->is_official = truthy(arg(f, 14)); // iìÎíììì
+    // the rest of init (iïíiïîì deob-10.0.3.js:256748-256858; what each is: krunker_link.h): [2] eventIndex, [10] the
+    // map's hash, [17] sessionId, [18] roundId, [19] gameTimer (ms), [20] the round's scripts, [21] gameState
+    l->event_index = (int) num(arg(f, 2), 0);
+    id_string(arg(f, 10), l->map_hash, sizeof(l->map_hash));
+    id_string(arg(f, 17), l->session_id, sizeof(l->session_id));
+    id_string(arg(f, 18), l->round_id, sizeof(l->round_id));
+    l->game_timer_ms = num(arg(f, 19), 0);
+    l->override_scripts = truthy(arg(f, 20)); // game.overrideScripts: compiled JavaScript, not run here (krunker_link.h)
+    if (krunker_is(arg(f, 21), KRUNKER_NUM)) l->game_state = (int) arg(f, 21)->u.num; // game.gameState (:256857)
     l->vote_count = 0;
     emit_lobby_config(l, f);
     NetInitPacket init;
@@ -342,6 +377,9 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     note(l, KRUNKER_LINK_EV_NOTE, "init: map %d%s%s%s, mode %d, %d config keys, rates snf %d tf %d sf %d", map,
          info.custom_id[0] || info.custom ? " (custom " : "", info.custom_id[0] ? info.custom_id : info.custom ? "inline" : "",
          info.custom_id[0] || info.custom ? ")" : "", mode, l->config_keys, l->send_hz, l->tick_hz, l->sync_hz);
+    note(l, KRUNKER_LINK_EV_NOTE, "init: event %d, map hash %s, session %s, round %s, timer %.0f ms, game state %d%s", l->event_index,
+         l->map_hash[0] ? l->map_hash : "-", l->session_id[0] ? l->session_id : "-", l->round_id[0] ? l->round_id : "-", l->game_timer_ms,
+         l->game_state, l->override_scripts ? ", the server's compiled scripts (not run: the map's KrunkScript is)" : "");
     // after the INIT (the transport holds what follows io.map until it emits it): the official server
     // takes the v7 social shapes, so our chat goes out with its channel ("ct" [tab, msg]), the spray
     // as "spry", the prop taunt as "prpt" (hud_social.c social_server_v7; INIT resets it)
@@ -368,14 +406,19 @@ static void emit_player_info(KrunkerLink *l, KrunkerLinkPlayer *p) {
 
 // ADD_PLAYERS' propID: offset 21 of the 10.0.3 layout (KRUNKER_ADD_PROP_ID_1003, see on_add_players), NULL
 // for a build whose stride is not the 10.0.3 one (its offsets may have moved) or when the entry is shorter.
+// customLoadout at offset 17 the same way (KRUNKER_ADD_CUSTOM_LOADOUT_1003).
 #define KRUNKER_ADD_STRIDE_1003 53
 #define KRUNKER_ADD_PROP_ID_1003 21
-static const KrunkerValue *add_prop_id(const KrunkerBuild *b, const KrunkerValue *e, const uint32_t left) {
-    if (b->add_stride != KRUNKER_ADD_STRIDE_1003 || left <= KRUNKER_ADD_PROP_ID_1003) return NULL;
+#define KRUNKER_ADD_CUSTOM_LOADOUT_1003 17
+static const KrunkerValue *add_unnamed_1003(const KrunkerBuild *b, const KrunkerValue *e, const uint32_t left, const int offset) {
+    if (b->add_stride != KRUNKER_ADD_STRIDE_1003 || left <= (uint32_t) offset) return NULL;
     for (int slot = 0; slot < KRB_ADD_COUNT; slot++) {
-        if (b->add[slot] == KRUNKER_ADD_PROP_ID_1003) return NULL; // a build that put a named field there
+        if (b->add[slot] == offset) return NULL; // a build that put a named field there
     }
-    return &e[KRUNKER_ADD_PROP_ID_1003];
+    return &e[offset];
+}
+static const KrunkerValue *add_prop_id(const KrunkerBuild *b, const KrunkerValue *e, const uint32_t left) {
+    return add_unnamed_1003(b, e, left, KRUNKER_ADD_PROP_ID_1003);
 }
 
 // "0" ADD_PLAYERS: a flat list, 53 (0x35) values per player (game.deob.js:220266-220330); the
@@ -449,6 +492,13 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         }
         emit(l, NET_PACKET_SPAWN, &s, sizeof(s));
         if (p) emit_player_info(l, p); // after SPAWN, as our own server sends it
+        // [17] customLoadout (getPlayerAddData deob-10.0.3.js:198810: the loadout the player's last updateLoadout set since
+        // its reset, :190897, or null; players.add's 29th parameter, :258132): updateLoadout(game, loadoutIndex, false,
+        // customLoadout) dresses the player (:195103-195108), full ammo (an unrestrictedWeapons mode's carried ammo is the
+        // player's own). A null one leaves the class loadout, or the mode's startingLoadout the client applies itself
+        // (mode_gun_loadout). Read at its 10.0.3 offset like propID (add_unnamed_1003).
+        const KrunkerValue *custom_loadout = add_unnamed_1003(b, e, left, KRUNKER_ADD_CUSTOM_LOADOUT_1003);
+        if (krunker_is(custom_loadout, KRUNKER_ARRAY)) krunker_link_loadout(l, s.uid, custom_loadout, NULL, NULL);
         // Prop Hunt: players.add's updateProp(player, propID || 1) for a Prop-team player (krunker_link_prophunt.c).
         // propID is "0" [21] (getPlayerAddData packs player.propID there, deob-10.0.3.js:198810; the handler passes
         // [21] as players.add's 25th parameter, :258132, which calls updateProp(player, it || 1, true), :195129).
@@ -474,6 +524,11 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
     l->sync_known = 1;
     l->last_sync = l->new_sync;
     l->new_sync = link_now_ms(l);
+    // players.hideAll() first (deob-10.0.3.js:258582, an empty or missing list too): NET_EXT_PLAYER_SYNC ahead of the
+    // STATEs, so the client hides a player this "k" leaves out and snaps it when it comes back (client_players_hide_all)
+    uint8_t marker[NET_EXT_HEADER_SIZE];
+    const uint16_t marker_len = net_ext_pack(marker, sizeof(marker), NET_EXT_PLAYER_SYNC, NULL, 0);
+    if (marker_len) emit(l, NET_PACKET_EXT, marker, marker_len);
     const KrunkerValue *list = arg(f, 0);
     if (!krunker_is(list, KRUNKER_ARRAY)) return;
     const uint32_t stride = (uint32_t) b->k_stride;
@@ -520,6 +575,56 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
 // [20] onTerrain [21] xVelC [22] zVelC [23] grapple || null [24] canSlideT (ms). Always answered
 // with PONG "v" (first statement of the handler). Offsets: the current build's (krunker_build_live.h;
 // compiled: KRUNKER_SYNC_*).
+//
+// What follows canSlideT (syncState deob-10.0.3.js:222390-222405; the owner's handler :258281-258299), from `cust`
+// (KRB_SYNC_PROTECTED, [25] in 10.0.3):
+//   [cust]      custSync: a flat [name, value, ...] (the server's checkCustSync of registerSyncValues' names) or 0. The
+//               handler writes each value into the script's player object (_protected) when that already holds a
+//               non-object value there -> NET_PACKET_SCRIPT_SYNC, ks_serialize([name, value, ...]): ks_net_apply_sync
+//               keeps the same rule (the payload our own server sends, server/src/ks_server_host.c)
+//   [cust + 1]  the class movSch's sendVals in order: SRM onGroundFrames, onWallFrames, wishDash, dashTimer,
+//               walldashTimer, tmpVel {x, y, z} (:18684); Vehicle forwardV, reverseV, angVel (:19024); none for the
+//               rest -> NET_EXT_PLAYER_MOVE_VALS ahead of the RECON of the same ack (recon.c writes them before its
+//               replay, as the handler does before replaying tmpInpts)
+//   [last]      the controlled entity [eid, tick, state] or 0, always pushed (:222404-222405) -> NET_EXT_ENTITY_CONTROLLED
+// The link has no class table: the count between them says the scheme (len - cust - 2: 6 with tmpVel an object is SRM,
+// 3 Vehicle), and the client applies them only when its own class has that scheme (player_movement_apply_vals), as the
+// handler reads them by the client's own movSch.
+static void sync_tail(KrunkerLink *l, const KrunkerValue *a, const int cust, const int32_t ack) {
+    if (cust < 0 || (uint32_t) cust >= a->len) return;
+    const KrunkerValue *c = &a->u.items[cust];
+    if (krunker_is(c, KRUNKER_ARRAY) && c->len >= 2) {
+        uint8_t body[NET_MAX_PAYLOAD + 1]; // [0] the empty id's length, then ks_serialize(list)
+        const KrunkerValue no_id = KRUNKER_V_STR("");
+        const int n = ks_net_body_from_official(&no_id, c, body, sizeof(body));
+        if (n > 1) emit(l, NET_PACKET_SCRIPT_SYNC, body + 1, (uint16_t) (n - 1));
+    }
+    if (a->len < (uint32_t) cust + 2) return; // no tail: a build that does not push it
+    const uint32_t last = a->len - 1, count = last - (uint32_t) cust - 1;
+    const KrunkerValue *vals = &a->u.items[cust + 1];
+    NetPlayerMoveValsPacket v;
+    memset(&v, 0, sizeof(v));
+    v.ack_seq = ack;
+    if (count == 6 && krunker_is(&vals[5], KRUNKER_MAP)) { // SRM: tmpVel {x, y, z} becomes three values
+        v.scheme = MOVEMENT_SCHEME_SRM;
+        for (int i = 0; i < 5; i++) v.vals[i] = (float) num(&vals[i], 0);
+        v.vals[5] = (float) num(krunker_get(&vals[5], "x"), 0);
+        v.vals[6] = (float) num(krunker_get(&vals[5], "y"), 0);
+        v.vals[7] = (float) num(krunker_get(&vals[5], "z"), 0);
+        v.count = 8;
+    } else if (count == 3) { // Vehicle
+        v.scheme = MOVEMENT_SCHEME_VEHICLE;
+        for (int i = 0; i < 3; i++) v.vals[i] = (float) num(&vals[i], 0);
+        v.count = 3;
+    }
+    if (v.count) {
+        uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(v)];
+        const uint16_t len = net_ext_pack(ext, sizeof(ext), NET_EXT_PLAYER_MOVE_VALS, &v, (uint16_t) sizeof(v));
+        if (len) emit(l, NET_PACKET_EXT, ext, len);
+    }
+    krunker_link_script_controlled(l, &a->u.items[last]);
+}
+
 static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerBuild *b = krunker_build();
     send_c2s(l, KRUNKER_C2S_PONG, NULL, 0);
@@ -561,6 +666,7 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     }
     const KrunkerValue *ping = A(KRB_SYNC_PING);
 #undef A
+    sync_tail(l, a, b->sync[KRB_SYNC_PROTECTED], r.ack_seq); // custSync, sendVals, the controlled entity (above)
     emit(l, NET_PACKET_RECON, &r, sizeof(r));
     l->syncs++;
     l->last_ack = r.ack_seq;
@@ -728,7 +834,11 @@ static int8_t chat_channel(const KrunkerValue *team) {
 static void on_chat(KrunkerLink *l, const KrunkerFrame *f) {
     const char *text = krunker_str(arg(f, 2));
     const int kind = (int) num(arg(f, 3), 0);
-    if (!text || kind == 3) return;
+    if (kind == 3) { // addChat type 3: "NAME wants to trade [Accept]", the text is the sid (deob-10.0.3.js:259629)
+        krunker_link_trade_request_line(l, arg(f, 2));
+        return;
+    }
+    if (!text) return;
     NetOfficialChatHeader h;
     memset(&h, 0, sizeof(h));
     h.channel = chat_channel(arg(f, 0));
@@ -1172,12 +1282,15 @@ static void on_add_medal(KrunkerLink *l, const KrunkerFrame *f) {
     }
 }
 
-// "krt" UPDATE_KR_TAGS [dogTags, depositType] (iííîïii :220680): our tag count (#krTagHolder). A
-// depositType (gift / event tags, the live client's #giftTagHolder) is not our HUD's: it is not ours
-// to show, so it must not overwrite the KR count.
+// "krt" UPDATE_KR_TAGS [dogTags, depositType || 0] (deob-10.0.3.js:258906-258918): you.dogTags = tags whatever the type;
+// depositType 0 shows them in #krTagHolder (textures/sprays/114), 1 in #giftTagHolder with img/props/prop_60, 2 there
+// with img/events/event_7 (a live event mode's depositType, sent by the server: no 10.0.3 mode table names one).
+// Another type has no image in 10.0.3's list (its holder is the gift one): it shows as 1's.
 static void on_kr_tags(KrunkerLink *l, const KrunkerFrame *f) {
-    if (l->my_sid < 0 || num(arg(f, 1), 0) != 0) return;
-    const NetModeCounterPacket p = {.kind = NET_MODE_COUNTER_KR_TAGS, .uid = l->my_sid, .value = (float) num(arg(f, 0), 0)};
+    if (l->my_sid < 0) return;
+    const double type = num(arg(f, 1), 0);
+    const uint8_t kind = type == 0 ? NET_MODE_COUNTER_KR_TAGS : type == 2 ? NET_MODE_COUNTER_EVENT_TAGS : NET_MODE_COUNTER_GIFT_TAGS;
+    const NetModeCounterPacket p = {.kind = kind, .uid = l->my_sid, .value = (float) num(arg(f, 0), 0)};
     emit(l, NET_PACKET_MODE_COUNTER, &p, sizeof(p));
 }
 
@@ -1605,6 +1718,7 @@ static void on_init_hud(KrunkerLink *l, const KrunkerFrame *f) {
     zone_packet(l, krunker_get(sync, "zone"));
     krunker_link_world_init(l, f); // round wins / roundC / lockT, dest, mov, spwns, pkups, gates, banks, dyno, gbl, doms, zombies
     krunker_link_script_init(l, f);  // live blocks, entities and their attachments, moved objects (krunker_link_script.c)
+    krunker_link_s2c_init(l, f);     // the Turf Wars clan holding the map, or none (krunker_link_s2c.c)
 }
 
 // "cc" CHEAT_CHECK [nonce, unused, ciphertextB64] -> "ccr" [nonce, payloadB64, fnvHex]
@@ -1629,9 +1743,24 @@ static void on_cheat_check(KrunkerLink *l, const KrunkerFrame *f) {
     krunker_ccr_free(&ccr);
 }
 
-// "cpt" [challenge] (game.deob.js:98132): the ALTCHA widget's proof of work, answered as "cptR"
+// v10.0.3's failure branch of the "cpt" callback: _hideCaptcha, the "error" event with "CAPTCHA FAILED", close
+// (deob-10.0.3.js:111428-111431). Here: the NET_PACKET_ERROR and the error event an "error" from the server gives
+// (on_error), so the session ends on the error screen with that text (krunker_net.c leaves and closes the socket).
+void krunker_link_captcha_failed(KrunkerLink *l) {
+    NetErrorPacket e;
+    memset(&e, 0, sizeof(e));
+    snprintf(e.message, sizeof(e.message), "%s", KRUNKER_CAPTCHA_FAILED);
+    snprintf(e.code, sizeof(e.code), "%s", "000000");
+    krunker_link_log_text(l->error_text, sizeof(l->error_text), e.message, strlen(e.message));
+    l->error_seen = 1;
+    emit(l, NET_PACKET_ERROR, &e, sizeof(e));
+    note(l, KRUNKER_LINK_EV_ERROR, "%s", e.message);
+}
+
+// "cpt" [challenge] (deob-10.0.3.js:111424-111435): the ALTCHA widget's proof of work, answered as "cptR"
 // [payload] (krunker_altcha.c). The challenge is an object ({algorithm, challenge, salt, signature,
-// maxnumber}); a JSON string of it is taken too.
+// maxnumber}); a JSON string of it is taken too. One this client cannot solve ends the session the way v10.0.3's
+// failure branch does (krunker_link_captcha_failed).
 static void on_captcha(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *c = arg(f, 0);
     char alg[32] = "", chal[80] = "", salt[512] = "", sig[512] = "";
@@ -1664,6 +1793,7 @@ static void on_captcha(KrunkerLink *l, const KrunkerFrame *f) {
     if (rc != 0 || !payload) {
         free(payload);
         note(l, KRUNKER_LINK_EV_CAPTCHA, "a security challenge (%s) this client cannot answer", alg[0] ? alg : "unknown");
+        krunker_link_captcha_failed(l);
         return;
     }
     const KrunkerValue args[] = {KRUNKER_V_STR(payload)};
@@ -2778,6 +2908,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
             if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f) && !krunker_link_lobby_frame(l, id, &f) &&
                 !krunker_link_script_frame(l, id, &f) && !krunker_link_prophunt_frame(l, id, &f) &&
+                !krunker_link_trade_frame(l, id, &f) && // the live trade (krunker_link_trade.c)
                 !krunker_link_s2c_frame(l, id, &f)) // krunker_link_s2c.c (doc/v10/s2c-coverage.md)
                 l->unknown_in++;
             break;
@@ -3243,12 +3374,52 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             }
             return 0;
         }
+        case NET_PACKET_SCRIPT_MSG: { // GAME.NETWORK.send on the client: ["sd", id, data] (deob-10.0.3.js:209466), data's keys "V_" + name
+            // the KsNetChunkHeader slices of one message, in order (ks_net_reassemble's rules; one official session at a time)
+            static uint8_t body[KS_NET_MAX_BODY + KS_NET_CHUNK_DATA];
+            static size_t body_len;
+            static int next = -1, count;
+            static uint16_t seq;
+            KsNetChunkHeader h;
+            if (length < sizeof(h)) return 0;
+            memcpy(&h, payload, sizeof(h));
+            const size_t n = length - sizeof(h);
+            if (!h.chunk_count || h.chunk >= h.chunk_count || n > (size_t) KS_NET_CHUNK_DATA) return 0;
+            if (h.chunk == 0) {
+                seq = h.msg_seq;
+                count = h.chunk_count;
+                next = 0;
+                body_len = 0;
+            } else if (next != h.chunk || seq != h.msg_seq || count != h.chunk_count) {
+                next = -1;
+                return 0;
+            }
+            if (body_len + n > sizeof(body)) {
+                next = -1;
+                return 0;
+            }
+            memcpy(body + body_len, (const uint8_t *) payload + sizeof(h), n);
+            body_len += n;
+            if (++next < count) return 1; // more slices to come
+            next = -1;
+            char id[KS_NET_ID_MAX + 1];
+            KsNetOfficial data;
+            if (!ks_net_body_to_official(body, body_len, id, sizeof(id), &data)) return 0;
+            const KrunkerValue args[] = {KRUNKER_V_STR(id), data.data};
+            const int sent = send_c2s(l, KRUNKER_C2S_CUSTOM_NETWORK_DATA, args, 2);
+            ks_net_official_free(&data);
+            return sent;
+        }
         case NET_PACKET_EXT: { // the player list's vote kick / K.P.D call, the ping; other subtypes are KrunkNative's
             uint16_t subtype, body_length;
             const uint8_t *body;
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 0;
             const int prop = krunker_link_prophunt_send(l, subtype, body, body_length); // "prp" / "prpR"
             if (prop >= 0) return prop;
+            const int trade = krunker_link_trade_send(l, subtype, body, body_length); // "strd" .. "tct" (krunker_link_trade.c)
+            if (trade >= 0) return trade;
+            const int consent = krunker_link_s2c_send(l, subtype, body, body_length); // "chrsp" (krunker_link_s2c.c)
+            if (consent >= 0) return consent;
             if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket)) { // the stalker's taunt key: ["stlkrt", i] (:260109)
                 const KrunkerValue args[] = {KRUNKER_V_NUM(body[0])};
                 return send_c2s(l, KRUNKER_C2S_STALKER_TAUNT, args, 1);

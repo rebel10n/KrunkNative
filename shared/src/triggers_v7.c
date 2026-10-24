@@ -9,6 +9,7 @@
 #include <shared.h>
 #include "triggers_internal.h"
 #include <ks_storage_data.h> // WP6: Load Data values (parseFloat)
+#include <net_ext.h>          // NET_EXT_VALUE_TEXT: a string "cv" / "gv"
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -34,7 +35,110 @@ TriggerValue *trigger_values_slot(TriggerValueSet *set, const char *key) {
     TriggerValue *slot = &set->values[set->count++];
     snprintf(slot->key, sizeof(slot->key), "%s", key);
     slot->value = 0.0;
+    slot->is_text = 0;
+    slot->text[0] = 0;
     return slot;
+}
+
+_Static_assert(TRIGGER_VALUE_TEXT_SIZE == NET_VALUE_TEXT_SIZE && TRIGGER_VALUE_KEY_SIZE == sizeof(((NetValueTextPacket *) 0)->key),
+               "NetValueTextPacket carries a TriggerValue's key and text whole");
+
+static int js_space(const unsigned char *p, size_t *len) { // a JS WhiteSpace / LineTerminator at p (UTF-8)
+    if (*p == ' ' || (*p >= 0x09 && *p <= 0x0d)) return *len = 1, 1;
+    if (p[0] == 0xc2 && p[1] == 0xa0) return *len = 2, 1;                                             // NBSP
+    if (p[0] == 0xef && p[1] == 0xbb && p[2] == 0xbf) return *len = 3, 1;                             // BOM
+    if (p[0] == 0xe1 && p[1] == 0x9a && p[2] == 0x80) return *len = 3, 1;                             // U+1680
+    if (p[0] == 0xe3 && p[1] == 0x80 && p[2] == 0x80) return *len = 3, 1;                             // U+3000
+    if (p[0] == 0xe2 && p[1] == 0x80 && ((p[2] >= 0x80 && p[2] <= 0x8a) || p[2] == 0xa8 || p[2] == 0xa9 || p[2] == 0xaf))
+        return *len = 3, 1;                                                                             // U+2000-200A, 2028, 2029, 202F
+    if (p[0] == 0xe2 && p[1] == 0x81 && p[2] == 0x9f) return *len = 3, 1;                             // U+205F
+    return 0;
+}
+
+double trigger_js_number(const char *text) {
+    if (!text) return 0.0;
+    const unsigned char *s = (const unsigned char *) text, *e = s + strlen(text);
+    size_t n;
+    while (s < e && js_space(s, &n)) s += n;
+    while (e > s) { // trailing white space: the longest match that ends at e
+        const unsigned char *t = e - 1;
+        while (t > s && (*t & 0xc0) == 0x80) t--;
+        if (!js_space(t, &n) || t + n != e) break;
+        e = t;
+    }
+    if (s == e) return 0.0;
+    const size_t len = (size_t) (e - s);
+    char buf[TRIGGER_VALUE_TEXT_SIZE];
+    if (len >= sizeof(buf)) return NAN;
+    memcpy(buf, s, len);
+    buf[len] = 0;
+    if (len > 2 && buf[0] == '0' && strchr("xXoObB", buf[1])) { // 0x / 0o / 0b: no sign, no fraction
+        const int base = buf[1] == 'x' || buf[1] == 'X' ? 16 : buf[1] == 'o' || buf[1] == 'O' ? 8 : 2;
+        double v = 0.0;
+        for (const char *p = buf + 2; *p; p++) {
+            const int d = *p >= '0' && *p <= '9' ? *p - '0' : *p >= 'a' && *p <= 'f' ? *p - 'a' + 10 : *p >= 'A' && *p <= 'F' ? *p - 'A' + 10 : 99;
+            if (d >= base) return NAN;
+            v = v * base + d;
+        }
+        return v;
+    }
+    const char *p = buf;
+    const int sign = *p == '-' ? -1 : 1;
+    if (*p == '+' || *p == '-') p++;
+    if (!strcmp(p, "Infinity")) return sign * INFINITY;
+    // StrDecimalLiteral: digits [. digits] | . digits, then [eE][+-]digits; nothing else (strtod would take inf / nan / hex)
+    const char *q = p;
+    int digits = 0;
+    while (*q >= '0' && *q <= '9') q++, digits++;
+    if (*q == '.') for (q++; *q >= '0' && *q <= '9'; q++) digits++;
+    if (!digits) return NAN;
+    if (*q == 'e' || *q == 'E') {
+        q++;
+        if (*q == '+' || *q == '-') q++;
+        if (!(*q >= '0' && *q <= '9')) return NAN;
+        while (*q >= '0' && *q <= '9') q++;
+    }
+    if (*q) return NAN;
+    return strtod(buf, NULL);
+}
+
+// JS String(n): the shortest decimal that reads back as n (integers without a fraction)
+static void js_number_string(const double n, char *out, const size_t size) {
+    if (isnan(n)) snprintf(out, size, "NaN");
+    else if (isinf(n)) snprintf(out, size, n > 0 ? "Infinity" : "-Infinity");
+    else if (n == floor(n) && fabs(n) < 1e21) snprintf(out, size, "%.0f", n == 0.0 ? 0.0 : n); // -0 -> "0"
+    else {
+        for (int precision = 1; precision <= 17; precision++) {
+            snprintf(out, size, "%.*g", precision, n);
+            if (strtod(out, NULL) == n) return;
+        }
+    }
+}
+
+void trigger_value_set_number(TriggerValue *v, const double value) {
+    if (!v) return;
+    v->value = value;
+    v->is_text = 0;
+    v->text[0] = 0;
+}
+
+void trigger_value_set_text(TriggerValue *v, const char *text) {
+    if (!v) return;
+    snprintf(v->text, sizeof(v->text), "%s", text ? text : "");
+    v->is_text = 1;
+    v->value = trigger_js_number(v->text);
+}
+
+void trigger_value_add(TriggerValue *v, const double n) {
+    if (!v) return;
+    if (!v->is_text) {
+        v->value += n;
+        return;
+    }
+    char num[40], joined[TRIGGER_VALUE_TEXT_SIZE];
+    js_number_string(n, num, sizeof(num));
+    snprintf(joined, sizeof(joined), "%s%s", v->text, num); // "abc" + 5 -> "abc5" (cut at the size)
+    trigger_value_set_text(v, joined);
 }
 
 // ---------------------------------------------------------------- runtime state
@@ -179,13 +283,41 @@ double trigger_global_value_get(const Game *game, const char *key) {
     return v ? v->value : 0.0;
 }
 
+// A slot as its "cv" / "gv": a number as NetValuePacket, a string as NET_EXT_VALUE_TEXT (to EXT peers: game_send's
+// net_peer_takes; an older peer never had string values)
+void trigger_send_value(Game *game, const int target, const int type, const TriggerValue *v, const int flags) {
+    if (!v) return;
+    if (!v->is_text) {
+        send_value(game, target, type, v->key, v->value, flags);
+        return;
+    }
+    NetValueTextPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.type = (uint8_t) type;
+    packet.flags = (uint8_t) flags;
+    snprintf(packet.key, sizeof(packet.key), "%s", v->key);
+    snprintf(packet.text, sizeof(packet.text), "%s", v->text);
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(packet)];
+    const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_VALUE_TEXT, &packet, (uint16_t) sizeof(packet));
+    if (n) game_send(game, target, NET_PACKET_EXT, ext, n);
+}
+
 void trigger_global_value_set(Game *game, const char *key, const double value) {
     if (!game || !key || !key[0] || !game_is_authority(game)) return;
     TriggerRuntime *rt = trigger_runtime(game);
     TriggerValue *slot = rt ? trigger_values_slot(&rt->global_values, key) : NULL;
     if (!slot) return;
-    slot->value = value;
+    trigger_value_set_number(slot, value);
     send_value(game, NET_TARGET_ALL, NET_PACKET_GLOBAL_VALUE, key, value, 0); // broadcast("gv", key, val)
+}
+
+void trigger_global_value_add(Game *game, const char *key, const double n) {
+    if (!game || !key || !key[0] || !game_is_authority(game)) return;
+    TriggerRuntime *rt = trigger_runtime(game);
+    TriggerValue *slot = rt ? trigger_values_slot(&rt->global_values, key) : NULL;
+    if (!slot) return;
+    trigger_value_add(slot, n); // globalVals[key] += val (a string appends)
+    trigger_send_value(game, NET_TARGET_ALL, NET_PACKET_GLOBAL_VALUE, slot, 0);
 }
 
 const TriggerValueSet *trigger_global_values(const Game *game) {
@@ -197,12 +329,25 @@ void trigger_mirror_global_value(Game *game, const char *key, const double value
     if (!rt) return;
     if (reset) memset(&rt->global_values, 0, sizeof(rt->global_values));
     TriggerValue *slot = key && key[0] ? trigger_values_slot(&rt->global_values, key) : NULL;
-    if (slot) slot->value = value; // io_updateGlobalValue: Game.globalVals[key] = val
+    if (slot) trigger_value_set_number(slot, value); // io_updateGlobalValue: Game.globalVals[key] = val
 }
 
 void trigger_mirror_custom_value(Player *player, const char *key, const double value) {
     TriggerValue *slot = player && key && key[0] ? trigger_values_slot(&player->custom_values, key) : NULL;
-    if (slot) slot->value = value; // io_customVal: tmpPlayer.custVals[key] = val
+    if (slot) trigger_value_set_number(slot, value); // io_customVal: tmpPlayer.custVals[key] = val
+}
+
+void trigger_mirror_global_text(Game *game, const char *key, const char *text, const int reset) {
+    TriggerRuntime *rt = trigger_runtime(game);
+    if (!rt) return;
+    if (reset) memset(&rt->global_values, 0, sizeof(rt->global_values));
+    TriggerValue *slot = key && key[0] ? trigger_values_slot(&rt->global_values, key) : NULL;
+    if (slot) trigger_value_set_text(slot, text); // "gv" with a string (deob-10.0.3.js:257834-257836)
+}
+
+void trigger_mirror_custom_text(Player *player, const char *key, const char *text) {
+    TriggerValue *slot = player && key && key[0] ? trigger_values_slot(&player->custom_values, key) : NULL;
+    if (slot) trigger_value_set_text(slot, text); // "cv" with a string (deob-10.0.3.js:258558-258560)
 }
 
 double player_custom_value_get(const Player *player, const char *key) {
@@ -210,12 +355,21 @@ double player_custom_value_get(const Player *player, const char *key) {
     return v ? v->value : 0.0;
 }
 
+// Load Data's callback (deob-10.0.3.js:183551-183563): custVals[mk] = isNaN(parseFloat(kv)) ? kv : parseFloat(kv), then
+// send("cv", mk, custVals[mk]): a stored value that is not a number is kept as the string
 void trigger_load_data_apply(Game *game, Player *player, const char *const *keys, const char *const *values, const int count) {
     for (int i = 0; game && player && i < count; i++) {
         if (!keys[i] || !keys[i][0]) continue;
         if (!trigger_values_find(&player->custom_values, keys[i]) && player->custom_values.count > TRIGGER_V7_CUSTOM_VALUE_LIMIT) return;
         const double value = ks_storage_parse_number(values[i]);
-        if (value == value) player_custom_value_set(game, player, keys[i], value);
+        if (value == value) {
+            player_custom_value_set(game, player, keys[i], value);
+            continue;
+        }
+        TriggerValue *slot = trigger_values_slot(&player->custom_values, keys[i]);
+        if (!slot) continue;
+        trigger_value_set_text(slot, values[i] ? values[i] : "");
+        if (game_is_authority(game)) trigger_send_value(game, player->uid, NET_PACKET_CUSTOM_VALUE, slot, 0);
     }
 }
 
@@ -223,8 +377,16 @@ void player_custom_value_set(Game *game, Player *player, const char *key, const 
     if (!game || !player || !key || !key[0]) return;
     TriggerValue *slot = trigger_values_slot(&player->custom_values, key);
     if (!slot) return;
-    slot->value = value;
+    trigger_value_set_number(slot, value);
     if (game_is_authority(game)) send_value(game, player->uid, NET_PACKET_CUSTOM_VALUE, key, value, 0); // send("cv", key, val)
+}
+
+void player_custom_value_add(Game *game, Player *player, const char *key, const double n) {
+    if (!game || !player || !key || !key[0]) return;
+    TriggerValue *slot = trigger_values_slot(&player->custom_values, key);
+    if (!slot) return;
+    trigger_value_add(slot, n); // custVals[key] += val (a string appends)
+    if (game_is_authority(game)) trigger_send_value(game, player->uid, NET_PACKET_CUSTOM_VALUE, slot, 0);
 }
 
 // config.playerVals ["health", "maxHealth", "score", "classIndex"]: player[key], NULL = not one
@@ -630,7 +792,7 @@ void trigger_send_join_state(Game *game, const int uid) {
     send_value(game, uid, NET_PACKET_GLOBAL_VALUE, "", 0.0, NET_VALUE_RESET);
     TriggerRuntime *rt = game->trigger_rt;
     for (int i = 0; rt && i < rt->global_values.count; i++) {
-        send_value(game, uid, NET_PACKET_GLOBAL_VALUE, rt->global_values.values[i].key, rt->global_values.values[i].value, 0);
+        trigger_send_value(game, uid, NET_PACKET_GLOBAL_VALUE, &rt->global_values.values[i], 0); // a string as its text
     }
     // "asnd": the playing player sounds (a force-remove with uid -1 clears the client's first)
     NetPlayerSoundPacket clear = {.uid = -1, .add = 0, .force = 1};

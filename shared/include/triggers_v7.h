@@ -64,16 +64,24 @@ double trigger_global_value_get(const Game *game, const char *key);
 void trigger_global_value_set(Game *game, const char *key, double value);
 double player_custom_value_get(const Player *player, const char *key);
 void player_custom_value_set(Game *game, Player *player, const char *key, double value);
+// `+= n` (Increase Player / Global Value): a string value gets String(n) appended, as JS adds (triggers.h)
+void trigger_global_value_add(Game *game, const char *key, double n);
+void player_custom_value_add(Game *game, Player *player, const char *key, double n);
+// One value as "cv" / "gv" to target: a number as NetValuePacket, a string as NET_EXT_VALUE_TEXT (net_ext.h)
+void trigger_send_value(Game *game, int target, int type, const TriggerValue *v, int flags);
 const TriggerValueSet *trigger_global_values(const Game *game); // NULL before the first value
 // The per-round custVals of a map object (interface trigger values), NULL none.
 const TriggerValueSet *trigger_object_values(const Game *game, const Object *object);
 // Client mirrors (no packets): "gv" / the "gbl" join list (reset clears first) and "cv".
 void trigger_mirror_global_value(Game *game, const char *key, double value, int reset);
 void trigger_mirror_custom_value(Player *player, const char *key, double value);
+// The same with a string value (NET_EXT_VALUE_TEXT)
+void trigger_mirror_global_text(Game *game, const char *key, const char *text, int reset);
+void trigger_mirror_custom_text(Player *player, const char *key, const char *text);
 // WP6: the rows of a Load Data (57) request (getStoragePlayer's callback, triggers.js:1357-1371),
 // on the authority: each stored key goes into the player's custVals with parseFloat(value) and a
 // "cv"; a key the set does not have yet needs room (a full set ends the copy, custValLimit).
-// [KN] custVals hold numbers: a value that is not a number is skipped (v7 kept the string).
+// A value that is not a number is kept as the string (v10.0.3, deob-10.0.3.js:183563; NET_EXT_VALUE_TEXT).
 void trigger_load_data_apply(Game *game, Player *player, const char *const *keys, const char *const *values, int count);
 
 // game.addPlayerSound / removePlayerSound (looping sounds that follow a player: Juggernaut,

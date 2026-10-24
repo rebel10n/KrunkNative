@@ -44,6 +44,7 @@
 #include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
 #include <game_config.h>   // game_config_is_custom (the report prompt)
 #include <net_ext.h> // NET_PACKET_EXT (254)
+#include <kn_captcha_game.h> // the in-game captcha of Box Office servers
 #include <render_settings.h> // endMessage, dmgType
 #include <entities.h> // v10 KrunkScript entities / runtime blocks (official lobbies)
 #include <nettspend.h> // Nettspend: the laced post-effect, the Money Spread's bills
@@ -151,6 +152,7 @@ static const char *events_name(const Client *client, const Player *player, char 
 // players.kill(player) on the client: stop simulating and drop the meshes.
 static void events_player_dead(Client *client, Player *player) {
     player->active = 0;
+    player->asset_txt[0] = 0; // a "uai" class-model swap lasts this life (player_class_model.c)
     player->input_queue_size = 0;
     free(player->input_queue);
     player->input_queue = NULL;
@@ -1346,6 +1348,8 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 1;
             // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
+            else if (subtype == NET_EXT_CAPTCHA || subtype == NET_EXT_CAPTCHA_ANSWER) // "cpt" / "cptR" (kn_captcha_game.c)
+                kn_captcha_game_packet(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_INPUTS_DROPPED) client_recon_drop_pending(client); // official "f" (krunker_link.c)
             else if (subtype == NET_EXT_KN_END_TYPE && body_length >= 1) g_end_show_now = body[0] == 1; // official "end" type
             else if (subtype == NET_EXT_GAME_ANNOUNCEMENT) v10_announce_on_packet(body, body_length); // the banner (v10_notify.c)
@@ -1393,8 +1397,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 hud_endscreen_v10_offer_item(item.skin, item.icon); // the Collect Rewards button (hud_endscreen_v10.c)
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
-            else if (s2c_events_on_ext(client, subtype, body, body_length)) {} // "c" / "sb" / "sdc" (s2c_events.c, doc/v10/s2c-coverage.md)
+            else if (s2c_events_on_ext(client, subtype, body, body_length)) {} // "c" "sb" "sdc" "p" "unb" "spinW" "chreq" ... (s2c_events.h)
             else if (subtype == NET_EXT_PLAYER_MOVE_VALS) client_recon_move_vals(client, body, body_length); // the next RECON's scheme sendVals
+            else if (subtype == NET_EXT_PLAYER_SYNC) { // "k": players.hideAll ahead of the sync's STATEs (main.c)
+                if (client->game.ready) client_players_hide_all(client);
+            }
+            else if (subtype == NET_EXT_VALUE_TEXT) client_triggers_value_text(client, body, body_length); // a string "cv" / "gv"
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
             else if (subtype == NET_EXT_STALKER_PICKED) hud_stalker_on_picked(client); // "stlkpd": the Living's popup (hud_stalker.c)
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
@@ -1511,6 +1519,7 @@ void client_game_events_reset(Client *client) {
     hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
     hud_map_on_init(client); // part 2a: overlay.miniMap.reset + overlay.resetAll (no death markers)
     third_person_on_init(client); // the third-person grant is per round: asked again once in game
+    s2c_events_on_init(client); // spectator bars, prize wheels, the charge prompt, the Turf Wars clan (s2c_events.c)
     g_death_info_valid = 0;
 #ifdef HUD_UI_HAVE_HIDE_END_SCREEN
     hud_ui_hide_end_screen(client); // no-op unless the end screen is up
@@ -1624,6 +1633,7 @@ void client_game_events_tick(Client *client) {
     hud_modes_tick(client); // team scores, flags, game message, lives, team pill
     sprays_tick(client);    // framed / moving spray textures
     client_triggers_tick(client); // jump scare timeout
+    s2c_events_tick(client);      // map prize wheels, the Turf Wars popup on entering (s2c_events.c)
     if (!client->net_death_menu_pending) return;
     if (client_death_clock(client) < client->net_death_time + client->net_respawn_delay) return;
 

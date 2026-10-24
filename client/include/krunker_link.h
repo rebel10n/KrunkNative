@@ -37,7 +37,9 @@
 //   pi      []                               answered "po" (:220395)
 //   cc      [nonce, unused, ciphertext]      krunker_cheat_answer -> "ccr" (:218169)
 //   cpt     [challenge]                      the ALTCHA proof of work (krunker_altcha.h) -> "cptR" [payload]
-//                                            (no ahNum step); unsolvable: KRUNKER_LINK_EV_CAPTCHA (:98132)
+//                                            (no ahNum step); unsolvable: KRUNKER_LINK_EV_CAPTCHA, then v10.0.3's
+//                                            "CAPTCHA FAILED" error and close (krunker_link_captcha_failed,
+//                                            deob-10.0.3.js:111424-111437)
 //   error   [message, code]                  NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR
 //   cust    [message, gameId, teams]         the answer to our CUSTOM_SERVER (a hosted custom game): io.custom
 // Movement locks and modifiers of our own player (cluster A of the packet audit):
@@ -343,6 +345,22 @@ typedef struct {
     int round_ended;
     KrunkerLinkRecent recent[KRUNKER_LINK_RECENT];
     unsigned recent_total;
+    // init's arguments past the map and its config (the handler deob-10.0.3.js:256748-256858), kept per round:
+    //   [2]  eventIndex: the round's live event (game.init's eventIndex: map.generate's event meshes, the event banner,
+    //        :219812, :257140); KrunkNative has no event table, it is kept and logged
+    //   [10] the official map's hash (the server's mapHashes[mapIndex], null for a custom map): the 10.0.3 handler
+    //        takes it and never reads it (iiïïììi / iïíiïîì), nor does KrunkNative; kept for the log
+    //   [17] sessionId / [18] roundId: game.sessionId / roundId, which v10 only reports (game_session_id / round_id of
+    //        its analytics, :229467-229472); the init note logs them
+    //   [19] gameTimer: ms left (the analytics' game_seconds_left, :257176-257186); the "t" packet runs the clock
+    //   [20] krunkScripts -> game.overrideScripts: the scripts the client runs instead of the map's (:220169-220172).
+    //        The server sends what it ran, the compiled JavaScript of a non-custom map's scripts (:220173-220187), and
+    //        KrunkNative runs KrunkScript only (the map's own source, ks_client_round): only whether some came is kept
+    //   [21] gameState -> game_state, which "gsc" changes later (game.gameState, :256857; the client reads neither)
+    int event_index;
+    char map_hash[72], session_id[64], round_id[64];
+    double game_timer_ms;
+    int override_scripts;
     // the comp lobby table ("cd" / "cda", krunker_link_s2c.c): v10 keys game.lobbyPlayers by connection (the key the
     // server gave us is CON_UID "uid", kept in con_uid), our comp menu by uid. Each key gets a uid the first time it
     // shows (ours: the INIT's client_id 0, the uid comp_ui.c takes as ours) and keeps it; the entries as last
@@ -366,6 +384,25 @@ int krunker_link_inputs_paused(const KrunkerLink *link);
 // client's isHost (its "uh" handler: host && host == socketId), the player list's staff buttons' host right.
 int krunker_link_is_host(const KrunkerLink *link);
 
+// The game socket's query, as v10's connect builds it (iíîïïîí, deob-10.0.3.js:261655-261677): each part only when
+// set (NULL or ""), in this order:
+//   gameId, clientKey     a seek's answer (a queue hand-off has no clientKey)
+//   clientUID             the key CON_UID ("uid") gave the last session (saveVal("conUID_"), :261633-261636): the
+//                         server knows a reconnecting player by it (lobbyPlayers[clientUID], the comp / ranked lobby,
+//                         :222090); v10 sends it once (deleteVal) on the next connect, whichever game it is
+//   bpt                   a queue hand-off's bypassToken: K.P.D's policeJoin(gameId, token, host, port) (:252877-252884,
+//                         :261517-261526) or the page's ?bpt= / ?qH= / ?qP= / ?gId= (:262645-262656); not a seek's
+//   tc                    the saved testCode (the page's ?tc=, saveVal("testCode"), :241468, :262657-262660)
+//   at                    the krunker.io account's access token
+//   dm                    the display mode when it is not "none" (?displayMode= / the saved krunker-display-mode,
+//                         :133520-133553; "gdc-kid" is the only other mode)
+// No part is encoded (v10 concatenates them as they are). `log` gets the same with the token replaced by "(token)".
+// 1 = both fit.
+typedef struct {
+    const char *game_id, *client_key, *client_uid, *bypass, *test_code, *access, *display_mode;
+} KrunkerSocketQuery;
+int krunker_link_socket_query(const KrunkerSocketQuery *q, char *url, size_t url_n, char *log, size_t log_n);
+
 void krunker_link_init(KrunkerLink *link, const KrunkerLinkIO *io, int64_t ahkey);
 // A new WebSocket: ahNum 0, every per-connection state cleared (the io stays).
 void krunker_link_reset(KrunkerLink *link);
@@ -383,3 +420,7 @@ void krunker_link_mark_sync(KrunkerLink *link, int index);
 void krunker_link_input_fields(const NetInputPacket *in, double v[15]);
 // Encode and send one Krunker packet (wire name + args). 1 = sent.
 int krunker_link_send(KrunkerLink *link, const char *wire, const KrunkerValue *args, size_t argc);
+// A "cpt" this client could not solve (the web's slices, krunker_net.c): v10.0.3's failure branch, the error
+// "CAPTCHA FAILED" (NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR), after which the transport closes the socket.
+#define KRUNKER_CAPTCHA_FAILED "CAPTCHA FAILED" // deob-10.0.3.js:111430
+void krunker_link_captcha_failed(KrunkerLink *link);

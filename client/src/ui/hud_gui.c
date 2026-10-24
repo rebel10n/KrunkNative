@@ -139,10 +139,17 @@ static void gui_value_text(const Client *client, const HudGuiElement *e, char *o
         else if (!strcmp(e->value, "maxHealth")) gui_number(me->max_health, out, size);
         else if (!strcmp(e->value, "score")) gui_number(me->score, out, size);
         else if (!strcmp(e->value, "classIndex")) gui_number(me->class_index, out, size);
-        else gui_number(player_custom_value_get(me, e->value), out, size); // custVals[v] || 0
+        else { // custVals[v] || 0: a string shows as it is ("" is falsy: 0; deob-10.0.3.js:177319, :180099)
+            const TriggerValue *v = trigger_values_find(&me->custom_values, e->value);
+            if (v && v->is_text) snprintf(out, size, "%s", v->text[0] ? v->text : "0");
+            else gui_number(v ? v->value : 0.0, out, size);
+        }
         return;
     }
-    if (client) gui_number(trigger_global_value_get(&client->game, e->value), out, size); // globalVals[v] != null ? : 0
+    if (!client) return;
+    const TriggerValue *g = trigger_values_find(trigger_global_values(&client->game), e->value); // globalVals[v] != null ? : 0
+    if (g && g->is_text) snprintf(out, size, "%s", g->text);
+    else gui_number(g ? g->value : 0.0, out, size);
 }
 
 static HtmlElem gui_holder(void) {

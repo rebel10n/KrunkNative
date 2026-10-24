@@ -1783,6 +1783,36 @@ static void test_script(void) {
         free(lo), free(en), free(at);
     }
     clear();
+    // "pz" [sid, pose | 0] (players.setPose deob-10.0.3.js:195354) and init plrPose [[sid, pose]] -> NET_EXT_PLAYER_POSE
+    {
+        const KrunkerValue arm[] = {KRUNKER_V_NUM(-1.2), KRUNKER_V_NUM(0), KRUNKER_V_NUM(9)};
+        const KrunkerValue pose[] = {KRUNKER_V_STR("legs"), KRUNKER_V_NUM(2), KRUNKER_V_STR("holdL"), KRUNKER_V_NUM(1),
+                                     KRUNKER_V_STR("bodyY"), KRUNKER_V_NUM(-2.5), KRUNKER_V_STR("armL"), KRUNKER_V_ARRAY(arm, 3)};
+        feed(&link, "pz", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_MAP(pose, 4)}, 2);
+        feed(&link, "pz", (KrunkerValue[]) {KRUNKER_V_NUM(8), KRUNKER_V_NUM(0)}, 2);
+        const KrunkerValue entry[] = {KRUNKER_V_NUM(9), KRUNKER_V_MAP(pose, 1)};
+        const KrunkerValue psync[] = {KRUNKER_V_STR("plrPose"), KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(entry, 2)}), 1)};
+        for (int i = 0; i < 12; i++) init[i] = KRUNKER_V_NIL;
+        init[0] = KRUNKER_V_NUM(10);
+        init[1] = KRUNKER_V_NUM(0);
+        init[11] = KRUNKER_V_MAP(psync, 1);
+        feed(&link, "init", init, 12);
+        NetPlayerPosePacket p[3];
+        int got = 0;
+        for (int i = 0; i < 3; i++) {
+            uint16_t len = 0;
+            const int k = find_ext(NET_EXT_PLAYER_POSE, i, &len);
+            const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_PLAYER_POSE, &len) : NULL;
+            if (b && len == sizeof(p[i])) memcpy(&p[got++], b, sizeof(p[i]));
+        }
+        CHECK(got == 3, "pz, pz 0 and init plrPose: three NET_EXT_PLAYER_POSE (%d)", got);
+        CHECK(got == 3 && p[0].uid == 7 && p[0].has == (PLAYER_POSE_LEGS | PLAYER_POSE_HOLD_L | PLAYER_POSE_BODY_Y | PLAYER_POSE_ARM_L) &&
+              p[0].legs == 2 && p[0].hold_l == 1 && p[0].body_y == -2.5f && p[0].arm_l[0] == -1.2f && p[0].arm_l[2] == 3.2f,
+              "pz: the pose's keys, armL clamped to 3.2");
+        CHECK(got == 3 && p[1].uid == 8 && p[1].has == 0, "pz sid, 0: the pose cleared");
+        CHECK(got == 3 && p[2].uid == 9 && p[2].has == PLAYER_POSE_LEGS && p[2].legs == 2, "init plrPose: one pose per entry");
+    }
+    clear();
     CHECK(link.unknown_in == 0, "every script packet was handled (%u unknown)", link.unknown_in);
 }
 
@@ -2273,6 +2303,23 @@ static void test_s2c_coverage(void) {
     CHECK(!find_in(NET_PACKET_EXT, 0) && !net_player_clip_name(9), "c: a clip past the list is dropped");
     clear();
 
+    // "uai" UPDATE_ASSET_ID [sid, assetTxt] (:257784): updateAssetID(findBySid(7), assetTxt += "")
+    feed(&link, "uai", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_STR("11441g")}, 2);
+    NetPlayerAssetIdPacket asset;
+    memset(&asset, 0, sizeof(asset));
+    b = ext_body(0, NET_EXT_PLAYER_ASSET_ID, &len);
+    if (b && len == sizeof(asset)) memcpy(&asset, b, sizeof(asset));
+    CHECK(b && len == sizeof(asset) && asset.sid == 7 && !strcmp(asset.asset, "11441g"), "uai: sid 7 \"11441g\" (%s)", asset.asset);
+    clear();
+    feed(&link, "uai", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(5022)}, 2); // a number: String(5022)
+    b = ext_body(0, NET_EXT_PLAYER_ASSET_ID, &len);
+    if (b && len == sizeof(asset)) memcpy(&asset, b, sizeof(asset));
+    CHECK(b && !strcmp(asset.asset, "5022"), "uai: a number's String() (%s)", asset.asset);
+    clear();
+    feed(&link, "uai", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_STR("")}, 2); // assetTxt.length 0: updateAssetID does nothing
+    CHECK(!find_in(NET_PACKET_EXT, 0), "uai: an empty asset is dropped");
+    clear();
+
     // "ready" [ready] (:261397): io.send("sb", "welc", saved username) (:261464); not ready closes the socket
     feed(&link, "ready", (KrunkerValue[]) {KRUNKER_V_NUM(1)}, 1);
     CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "sb") && g_out[0].argc == 2 &&
@@ -2424,12 +2471,413 @@ static void test_s2c_coverage(void) {
           "ksL: an error line \"score 12  true 0.5\" (%u bytes)", klog ? klog->length : 0);
     clear();
 
+    // "sd" CUSTOM_NETWORK_MESSAGE [id, data] (:241493): onNetworkMessage(id, data) as one NET_PACKET_SCRIPT_MSG whose body is
+    // uint8 id_len, id, ks_serialize(data); the KrunkScript keys lose their "V_" (deob-10.0.3.js:189986)
+    const KrunkerValue sd_list[] = {KRUNKER_V_BOOL(1), KRUNKER_V_STR("x")};
+    const KrunkerValue sd_kv[] = {KRUNKER_V_STR("V_a"), KRUNKER_V_NUM(1), KRUNKER_V_STR("V_b"), KRUNKER_V_ARRAY(sd_list, 2)};
+    feed(&link, "sd", (KrunkerValue[]) {KRUNKER_V_STR("hit"), KRUNKER_V_MAP(sd_kv, 2)}, 2);
+    const NetPacket *sd = find_in(NET_PACKET_SCRIPT_MSG, 0);
+    // header (seq u16, chunk 0, count 1), 3 "hit", obj 2: "a" num 1, "b" arr 2: true, str "x"
+    static const uint8_t sd_body[] = {3, 'h', 'i', 't', 7, 2, 1, 'a', 4, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f, 1, 'b', 6, 2, 3, 5, 1, 'x'};
+    CHECK(sd && sd->length == 4 + sizeof(sd_body) && sd->payload[2] == 0 && sd->payload[3] == 1 && !memcmp(sd->payload + 4, sd_body, sizeof(sd_body)),
+          "sd in: one SCRIPT_MSG with the V_ keys stripped (%u bytes)", sd ? sd->length : 0);
+    clear();
+    // our GAME.NETWORK.send on the client: the SCRIPT_MSG body back to ["sd", id, data] with "V_" + key (:209466)
+    uint8_t sd_out[4 + sizeof(sd_body)] = {0, 0, 0, 1};
+    memcpy(sd_out + 4, sd_body, sizeof(sd_body));
+    CHECK(krunker_link_send_ours(&link, NET_PACKET_SCRIPT_MSG, sd_out, sizeof(sd_out)) && g_out_count == 1, "sd out: sent (%d frames)", g_out_count);
+    if (g_out_count == 1) {
+        const KrunkerValue *oid = krunker_frame_arg(&g_out[0], 0), *odata = krunker_frame_arg(&g_out[0], 1);
+        const KrunkerValue *ob = krunker_get(odata, "V_b");
+        CHECK(!strcmp(g_out[0].name, "sd") && krunker_str(oid) && !strcmp(krunker_str(oid), "hit") && krunker_num(krunker_get(odata, "V_a"), 0) == 1 &&
+              krunker_is(ob, KRUNKER_ARRAY) && ob->len == 2 && krunker_at(ob, 0)->u.boolean && !strcmp(krunker_str(krunker_at(ob, 1)), "x"),
+              "sd out: [\"sd\", \"hit\", {V_a: 1, V_b: [true, \"x\"]}]");
+    }
+    clear();
+
     // packets ignored on purpose, and those the account frames take by name: handled, not unknown
     const char *const quiet[] = {"spinKR", "vad", "pur", "twitchDropsResponse", "nftR", "dbgp", "debug_rc", "clog", "pir", "ann",
                                  "cntry", "ger", "uf", "bpdl", "chg", "_0"};
     for (size_t i = 0; i < sizeof(quiet) / sizeof(quiet[0]); i++) feed(&link, quiet[i], (KrunkerValue[]) {KRUNKER_V_NUM(0)}, 1);
     CHECK(link.unknown_in == 0 && !find_in(NET_PACKET_EXT, 0) && !find_in(NET_PACKET_CHAT, 0), "the ignored packets emit nothing (%u unknown)",
           link.unknown_in);
+    clear();
+}
+
+#define READ_EXT(type, var, subtype, nth) \
+    type var; \
+    memset(&var, 0, sizeof(var)); \
+    uint16_t var##_len = 0; \
+    const int var##_k = find_ext(subtype, nth, &var##_len); \
+    const uint8_t *var##_b = var##_k >= 0 ? ext_body(var##_k, subtype, &var##_len) : NULL; \
+    if (var##_b && var##_len == sizeof(type)) memcpy(&var, var##_b, sizeof(type)); \
+    else var##_b = NULL
+
+// The v10.0.3 S2C follow-ups (krunker_link_s2c.c, doc/v10/s2c-coverage.md), fed in 10.0.3's shapes: the spectated player's
+// bars, the unbox / raffle chat lines, map prize wheels, KR charge consent, Turf Wars and the editor handoff
+static void test_s2c_followups(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    clear();
+    snprintf(link.socket_id, sizeof(link.socket_id), "%s", "sockMe");
+    link.players[0].sid = 4;
+    snprintf(link.players[0].id, sizeof(link.players[0].id), "%s", "sockA");
+    link.players[1].sid = 9;
+    snprintf(link.players[1].id, sizeof(link.players[1].id), "%s", "sockB");
+    link.player_count = 2;
+
+    // "p" INTER_PROG [prog] (:259394) / "mp" INTER_M_PROG [prog] (:259398): the server's (x || 0).round(3) (:222279)
+    feed(&link, "p", (KrunkerValue[]) {KRUNKER_V_NUM(0.425)}, 1);
+    feed(&link, "mp", (KrunkerValue[]) {KRUNKER_V_NUM(1.08)}, 1);
+    feed(&link, "p", (KrunkerValue[]) {KRUNKER_V_NUM(0)}, 1);
+    {
+        READ_EXT(NetInterProgPacket, a, NET_EXT_PLAYER_INTER_PROG, 0);
+        READ_EXT(NetInterProgPacket, m, NET_EXT_PLAYER_INTER_PROG, 1);
+        READ_EXT(NetInterProgPacket, z, NET_EXT_PLAYER_INTER_PROG, 2);
+        CHECK(a_b && a.bar == NET_INTER_BAR_INTERACT && fabsf(a.prog - 0.425f) < 1e-6f, "p: the interact bar at 0.425 (%g)", (double) a.prog);
+        CHECK(m_b && m.bar == NET_INTER_BAR_CHARGE && fabsf(m.prog - 1.08f) < 1e-6f, "mp: the charge bar at 1.08, an over-charge");
+        CHECK(z_b && z.bar == NET_INTER_BAR_INTERACT && z.prog == 0.0f && link.unknown_in == 0, "p 0: the bar hides");
+    }
+    clear();
+
+    // "unb" UNBOX_MESSAGE [name, itemIndex, kr] (:254321): a skin, then a Free KR spin (store.freeKR[2], 20 KR)
+    feed(&link, "unb", (KrunkerValue[]) {KRUNKER_V_STR("Sidney"), KRUNKER_V_NUM(812)}, 2);
+    feed(&link, "unb", (KrunkerValue[]) {KRUNKER_V_STR("Sidney"), KRUNKER_V_NUM(2), KRUNKER_V_NUM(20)}, 3);
+    feed(&link, "unb", (KrunkerValue[]) {KRUNKER_V_STR("Sidney"), KRUNKER_V_NIL}, 2); // store.skins[undefined]: nothing
+    // "unbS" UNBOX_MESSSAGE_S [playerId, skinIndex, false] (:254331; a map wheel's stop :219473): findById
+    feed(&link, "unbS", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_STR("55"), KRUNKER_V_BOOL(0)}, 3);
+    feed(&link, "unbS", (KrunkerValue[]) {KRUNKER_V_STR("sockZ"), KRUNKER_V_NUM(55), KRUNKER_V_BOOL(0)}, 3); // not in this game
+    {
+        READ_EXT(NetUnboxMessagePacket, s, NET_EXT_UNBOX_MESSAGE, 0);
+        READ_EXT(NetUnboxMessagePacket, k, NET_EXT_UNBOX_MESSAGE, 1);
+        READ_EXT(NetUnboxMessagePacket, p, NET_EXT_UNBOX_MESSAGE, 2);
+        uint16_t none_len = 0;
+        CHECK(s_b && s.kind == NET_UNBOX_NAMED && s.uid == -1 && s.item == 812 && s.kr == 0 && !strcmp(s.name, "Sidney"),
+              "unb: Sidney unboxed skin 812 (%d)", s.item);
+        CHECK(k_b && k.kind == NET_UNBOX_NAMED && k.item == 2 && k.kr == 20, "unb: a Free KR spin, freeKR[2] = 20 KR");
+        CHECK(p_b && p.kind == NET_UNBOX_PLAYER && p.uid == 9 && p.item == 55 && find_ext(NET_EXT_UNBOX_MESSAGE, 3, &none_len) < 0,
+              "unbS: player sockB (sid 9) unboxed 55; no item / no player shows nothing");
+    }
+    clear();
+
+    // "lotWin" LOTTERY_PRIZE_WON [lotteryId, entryId, prize {type, ref, quantity}, playerId] (:255154)
+    const KrunkerValue prize_skin[] = {KRUNKER_V_STR("type"), KRUNKER_V_STR("skin"), KRUNKER_V_STR("ref"), KRUNKER_V_STR("812"),
+                                       KRUNKER_V_STR("quantity"), KRUNKER_V_NUM(1)};
+    const KrunkerValue prize_kr[] = {KRUNKER_V_STR("type"), KRUNKER_V_STR("currency"), KRUNKER_V_STR("ref"), KRUNKER_V_NUM(2),
+                                     KRUNKER_V_STR("quantity"), KRUNKER_V_NUM(150)};
+    const KrunkerValue prize_sub[] = {KRUNKER_V_STR("type"), KRUNKER_V_STR("subscription"), KRUNKER_V_STR("ref"), KRUNKER_V_STR("Premium"),
+                                      KRUNKER_V_STR("quantity"), KRUNKER_V_NUM(30)};
+    feed(&link, "lotWin", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(77), KRUNKER_V_MAP(prize_skin, 3), KRUNKER_V_STR("sockA")}, 4);
+    feed(&link, "lotWin", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(78), KRUNKER_V_MAP(prize_kr, 3), KRUNKER_V_STR("sockB")}, 4);
+    feed(&link, "lotWin", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(79), KRUNKER_V_MAP(prize_sub, 3), KRUNKER_V_STR("sockA")}, 4);
+    feed(&link, "lotWin", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(80), KRUNKER_V_MAP(prize_kr, 3), KRUNKER_V_STR("sockZ")}, 4);
+    {
+        READ_EXT(NetLotteryPrizePacket, s, NET_EXT_LOTTERY_PRIZE_WON, 0);
+        READ_EXT(NetLotteryPrizePacket, c, NET_EXT_LOTTERY_PRIZE_WON, 1);
+        READ_EXT(NetLotteryPrizePacket, u, NET_EXT_LOTTERY_PRIZE_WON, 2);
+        uint16_t none_len = 0;
+        CHECK(s_b && s.uid == 4 && s.type == NET_PRIZE_SKIN && !strcmp(s.ref, "812") && s.quantity == 1, "lotWin: sockA won skin 812");
+        CHECK(c_b && c.uid == 9 && c.type == NET_PRIZE_CURRENCY && !strcmp(c.ref, "2") && c.quantity == 150, "lotWin: 150 of currency 2 (Junk)");
+        CHECK(u_b && u.type == NET_PRIZE_SUBSCRIPTION && !strcmp(u.ref, "Premium") && u.quantity == 30 &&
+              find_ext(NET_EXT_LOTTERY_PRIZE_WON, 3, &none_len) < 0, "lotWin: 30 days of Premium; a winner not here shows nothing");
+    }
+    clear();
+
+    // "spinW" SPIN_WHEEL_RESPONSE [socketId, uid, error, randNum, skinIndex, funds] (:254991)
+    feed(&link, "spinW", (KrunkerValue[]) {KRUNKER_V_STR("sockMe"), KRUNKER_V_NUM(1), KRUNKER_V_NIL, KRUNKER_V_NUM(37.5), KRUNKER_V_NUM(812),
+                                           KRUNKER_V_NUM(1450)}, 6);
+    feed(&link, "spinW", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_NUM(0), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(80), KRUNKER_V_NUM(5),
+                                           KRUNKER_V_NUM(99)}, 6);
+    feed(&link, "spinW", (KrunkerValue[]) {KRUNKER_V_STR("sockMe"), KRUNKER_V_NUM(1), KRUNKER_V_STR("Not enough KR")}, 3);
+    {
+        READ_EXT(NetSpinWheelPacket, me, NET_EXT_SPIN_WHEEL_RESPONSE, 0);
+        READ_EXT(NetSpinWheelPacket, them, NET_EXT_SPIN_WHEEL_RESPONSE, 1);
+        uint16_t none_len = 0;
+        CHECK(me_b && me.mine == 1 && me.uid == 1 && me.rand == 37.5f && me.skin == 812 && me.funds == 1450, "spinW: our spin of wheel 1 (812, 1450 KR)");
+        CHECK(them_b && them.mine == 0 && them.uid == 0 && them.rand == 80.0f && them.skin == 5 && find_ext(NET_EXT_SPIN_WHEEL_RESPONSE, 2, &none_len) < 0,
+              "spinW: another player's spin; an error spins nothing");
+    }
+    clear();
+
+    // "chreq" CHARGE_CONSENT_REQUEST [id, amount, modal] (:257673): `if (account)`; then the answer "chrsp" (:257700)
+    feed(&link, "chreq", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(250.9), KRUNKER_V_NUM(1)}, 3);
+    CHECK(!find_in(NET_PACKET_EXT, 0) && link.unknown_in == 0, "chreq: no account, no prompt");
+    snprintf(link.account_name, sizeof(link.account_name), "%s", "Sidney");
+    feed(&link, "chreq", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(250.9), KRUNKER_V_NUM(1)}, 3);
+    feed(&link, "chreq", (KrunkerValue[]) {KRUNKER_V_NUM(8), KRUNKER_V_NUM(10)}, 2);
+    {
+        READ_EXT(NetChargeConsentRequestPacket, m, NET_EXT_CHARGE_CONSENT_REQUEST, 0);
+        READ_EXT(NetChargeConsentRequestPacket, c, NET_EXT_CHARGE_CONSENT_REQUEST, 1);
+        CHECK(m_b && m.id == 7 && m.amount == 250.9 && m.modal == 1, "chreq: request 7, 250.9 KR, the modal card");
+        CHECK(c_b && c.id == 8 && c.amount == 10 && c.modal == 0, "chreq: request 8, the [1] / [2] prompt");
+    }
+    clear();
+    for (int accept = 1; accept >= 0; accept--) {
+        const NetChargeConsentResponsePacket r = {.id = 7, .accept = (uint8_t) accept};
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(r)];
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_CHARGE_CONSENT_RESPONSE, &r, sizeof(r));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "chrsp") &&
+              g_out[0].argc == (uint32_t) (accept ? 2 : 1) && fnum(&g_out[0], 0) == 7 && (!accept || fnum(&g_out[0], 1) == 1),
+              "chrsp: %s", accept ? "[7, 1] accepts" : "[7] declines");
+        clear();
+    }
+
+    // "warsClan" WARS_CLAN [clan_id, clan_name, clan_logo, clan_banner_color] (:255551); ["warsClan", null] clears it
+    feed(&link, "warsClan", (KrunkerValue[]) {KRUNKER_V_NUM(42), KRUNKER_V_STR("NUKE"), KRUNKER_V_NUM(3), KRUNKER_V_STR("#ff3b3b")}, 4);
+    feed(&link, "warsClan", (KrunkerValue[]) {KRUNKER_V_NIL}, 1);
+    {
+        READ_EXT(NetWarsClanPacket, w, NET_EXT_WARS_CLAN, 0);
+        READ_EXT(NetWarsClanPacket, n, NET_EXT_WARS_CLAN, 1);
+        CHECK(w_b && w.has == 1 && w.clan_id == 42 && !strcmp(w.clan_name, "NUKE") && !strcmp(w.clan_logo, "3") && !strcmp(w.banner_color, "#ff3b3b"),
+              "warsClan: NUKE holds the map");
+        CHECK(n_b && n.has == 0, "warsClan null: no clan");
+    }
+    clear();
+    // init's syncData.warsClan (:256999): the clan right after the INIT; an init without one sends none (the INIT clears it)
+    const KrunkerValue wars[] = {KRUNKER_V_STR("clan_id"), KRUNKER_V_NUM(42), KRUNKER_V_STR("clan_name"), KRUNKER_V_STR("NUKE"),
+                                 KRUNKER_V_STR("clan_logo"), KRUNKER_V_NIL, KRUNKER_V_STR("clan_banner_color"), KRUNKER_V_STR("#ff3b3b")};
+    const KrunkerValue wsync[] = {KRUNKER_V_STR("warsClan"), KRUNKER_V_MAP(wars, 4)};
+    KrunkerValue init[12];
+    for (int i = 0; i < 12; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(0);
+    init[11] = KRUNKER_V_MAP(wsync, 1);
+    feed(&link, "init", init, 12);
+    {
+        READ_EXT(NetWarsClanPacket, w, NET_EXT_WARS_CLAN, 0);
+        const NetPacket *ip = find_in(NET_PACKET_INIT, 0);
+        CHECK(w_b && ip && w.has == 1 && !strcmp(w.clan_name, "NUKE") && !w.clan_logo[0] && (const void *) ip < (const void *) find_in(NET_PACKET_EXT, 0),
+              "init syncData.warsClan: NUKE after the INIT");
+    }
+    clear();
+    init[11] = KRUNKER_V_NIL;
+    feed(&link, "init", init, 12);
+    {
+        uint16_t none_len = 0;
+        CHECK(find_in(NET_PACKET_INIT, 0) && find_ext(NET_EXT_WARS_CLAN, 0, &none_len) < 0, "init without warsClan: no clan EXT");
+    }
+    clear();
+
+    // "edMp" EDIT_MAP [mapJson] (:259803): the map JSON in NetExtBlobChunk slices, in order, as sent
+    char map[1400];
+    size_t at = (size_t) snprintf(map, sizeof(map), "{\"name\":\"Burg Edit\",\"objects\":[");
+    for (int i = 0; i < 24; i++)
+        at += (size_t) snprintf(map + at, sizeof(map) - at, "%s{\"p\":[%d,0,0],\"s\":[10,10,10],\"col\":false,\"l\":false}", i ? "," : "", i * 10);
+    snprintf(map + at, sizeof(map) - at, "]}");
+    feed(&link, "edMp", (KrunkerValue[]) {KRUNKER_V_STR(map)}, 1);
+    {
+        char got[sizeof(map) + 1];
+        size_t got_len = 0;
+        int slices = 0, ordered = 1, total = -1;
+        for (int k = 0; find_in(NET_PACKET_EXT, k); k++) {
+            uint16_t blen = 0;
+            const uint8_t *eb = ext_body(k, NET_EXT_KN_OFFICIAL_EDIT_MAP, &blen);
+            if (!eb || blen < sizeof(NetExtBlobChunk)) continue;
+            NetExtBlobChunk h;
+            memcpy(&h, eb, sizeof(h));
+            ordered &= h.part == slices;
+            total = h.parts;
+            if (got_len + blen - sizeof(h) < sizeof(got)) memcpy(got + got_len, eb + sizeof(h), blen - sizeof(h));
+            got_len += blen - sizeof(h);
+            slices++;
+        }
+        got[got_len < sizeof(got) ? got_len : sizeof(got) - 1] = 0;
+        CHECK(slices >= 2 && slices == total && ordered && got_len == strlen(map) && !strcmp(got, map),
+              "edMp: a %zu byte map in %d ordered slices", strlen(map), slices);
+    }
+    clear();
+    feed(&link, "edMp", (KrunkerValue[]) {KRUNKER_V_STR("")}, 1);
+    CHECK(!find_in(NET_PACKET_EXT, 0) && link.unknown_in == 0, "edMp \"\": `if (map)`, nothing");
+    clear();
+}
+
+// The gaps net.md §9 listed after the 10.0.3 shape audit, each in its 10.0.3 shape (deob-10.0.3.js lines in the checks).
+static void test_net_gaps_1003(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+
+    // init's 22 arguments (sender :221968, handler :256748): [2] eventIndex, [10] mapHash, [17] sessionId, [18] roundId,
+    // [19] gameTimer, [20] krunkScripts (compiled: kept as "some came"), [21] gameState
+    KrunkerValue init[22];
+    for (int i = 0; i < 22; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(0);
+    init[2] = KRUNKER_V_NUM(3);
+    init[10] = KRUNKER_V_STR("a1b2c3");
+    init[17] = KRUNKER_V_STR("sess-17");
+    init[18] = KRUNKER_V_STR("round-18");
+    init[19] = KRUNKER_V_NUM(240000);
+    KrunkerValue scripts[2] = {KRUNKER_V_STR("client"), KRUNKER_V_STR("function(){}")};
+    init[20] = KRUNKER_V_MAP(scripts, 1);
+    init[21] = KRUNKER_V_NUM(2);
+    feed(&link, "init", init, 22);
+    CHECK(link.event_index == 3 && !strcmp(link.map_hash, "a1b2c3") && !strcmp(link.session_id, "sess-17") &&
+              !strcmp(link.round_id, "round-18") && link.game_timer_ms == 240000 && link.override_scripts && link.game_state == 2,
+          "init [2] [10] [17]-[21]: event %d hash %s session %s round %s timer %.0f scripts %d state %d", link.event_index, link.map_hash,
+          link.session_id, link.round_id, link.game_timer_ms, link.override_scripts, link.game_state);
+    clear();
+
+    // "0" [17] customLoadout (getPlayerAddData :198810 -> players.add updateLoadout :195103-195108): the player's
+    // LOADOUT after its SPAWN; null leaves the class loadout
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NUM(0);
+    KrunkerValue custom[4] = {KRUNKER_V_NUM(3), KRUNKER_V_NIL, KRUNKER_V_NUM(5), KRUNKER_V_NIL};
+    for (int n = 0; n < 2; n++) {
+        KrunkerValue *e = &add[53 * n];
+        e[0] = KRUNKER_V_STR(n ? "sockA" : "sockB");
+        e[1] = KRUNKER_V_NUM(n ? 2 : 4);
+        e[5] = KRUNKER_V_STR(n ? "Me" : "Other");
+        e[7] = KRUNKER_V_NUM(100);
+        e[8] = KRUNKER_V_NUM(100);
+        e[17] = n ? KRUNKER_V_NIL : KRUNKER_V_ARRAY(custom, 4);
+        e[21] = KRUNKER_V_NUM(1);
+    }
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    {
+        READ_IN(NetLoadoutPacket, lo, LOADOUT, 0);
+        CHECK(lo_p && lo.uid == 4 && lo.count == 2 && lo.weapons[0] == 3 && lo.weapons[1] == 5 && lo.ammo[0] == -1 &&
+                  !find_in(NET_PACKET_LOADOUT, 1),
+              "0 [17] customLoadout [3, null, 5, null]: one LOADOUT (uid %d, %d weapons: %d %d)", lo.uid, lo.count, lo.weapons[0], lo.weapons[1]);
+        CHECK(lo_p && find_in(NET_PACKET_SPAWN, 0) < lo_p, "0: the LOADOUT follows the SPAWN");
+    }
+    clear();
+
+    // "k": players.hideAll first (:258582), an empty list too: NET_EXT_PLAYER_SYNC ahead of the STATEs
+    KrunkerValue k[13];
+    for (int i = 0; i < 13; i++) k[i] = KRUNKER_V_NUM(0);
+    k[0] = KRUNKER_V_NUM(4);
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(k, 13), KRUNKER_V_NUM(10), KRUNKER_V_NUM(5000)}, 3);
+    {
+        uint16_t len = 0;
+        const int marker = find_ext(NET_EXT_PLAYER_SYNC, 0, &len);
+        const NetPacket *state = find_in(NET_PACKET_STATE, 0);
+        CHECK(marker >= 0 && len == 0 && state && find_in(NET_PACKET_EXT, marker) < state, "k: the sync marker, then the STATE");
+    }
+    clear();
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_NUM(10), KRUNKER_V_NUM(5100)}, 3);
+    {
+        uint16_t len = 0;
+        CHECK(find_ext(NET_EXT_PLAYER_SYNC, 0, &len) >= 0 && !find_in(NET_PACKET_STATE, 0), "k []: the marker alone (everyone hidden)");
+    }
+    clear();
+
+    // "l" (syncState :222389-222405): [25] custSync [name, value, ...], SRM's 6 sendVals (tmpVel an object), the
+    // controlled entity [eid, tick, state] last; all ahead of the RECON (the handler applies them before replaying)
+    KrunkerValue l[33];
+    for (int i = 0; i < 33; i++) l[i] = KRUNKER_V_NUM(0);
+    l[0] = KRUNKER_V_NUM(7);
+    l[15] = KRUNKER_V_NUM(1);
+    KrunkerValue cust[4] = {KRUNKER_V_STR("myVal"), KRUNKER_V_NUM(5), KRUNKER_V_STR("myStr"), KRUNKER_V_STR("x")};
+    l[25] = KRUNKER_V_ARRAY(cust, 4);
+    l[26] = KRUNKER_V_NUM(16); // onGroundFrames
+    l[27] = KRUNKER_V_NUM(0);  // onWallFrames
+    l[28] = KRUNKER_V_NUM(300); // wishDash
+    l[29] = KRUNKER_V_NUM(700); // dashTimer
+    l[30] = KRUNKER_V_NUM(0);   // walldashTimer
+    KrunkerValue tmp_vel[6] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(0.05), KRUNKER_V_STR("y"), KRUNKER_V_NUM(-0.01), KRUNKER_V_STR("z"), KRUNKER_V_NUM(0.02)};
+    l[31] = KRUNKER_V_MAP(tmp_vel, 3);
+    KrunkerValue state_kv[2] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(12)};
+    KrunkerValue controlled[3] = {KRUNKER_V_NUM(9), KRUNKER_V_NUM(120), KRUNKER_V_MAP(state_kv, 1)};
+    l[32] = KRUNKER_V_ARRAY(controlled, 3);
+    feed(&link, "l", (KrunkerValue[]) {KRUNKER_V_ARRAY(l, 33)}, 1);
+    {
+        const NetPacket *sync = find_in(NET_PACKET_SCRIPT_SYNC, 0), *recon = find_in(NET_PACKET_RECON, 0);
+        // ks_serialize([...]): an array (6) of 4, a string (5) of 5 "myVal", a number (4)
+        CHECK(sync && sync->length > 9 && sync->payload[0] == 6 && sync->payload[1] == 4 && sync->payload[2] == 5 && sync->payload[3] == 5 &&
+                  !memcmp(sync->payload + 4, "myVal", 5) && sync->payload[9] == 4,
+              "l [25] custSync: SCRIPT_SYNC ks_serialize([name, value, ...]) (%d bytes)", sync ? sync->length : -1);
+        uint16_t len = 0;
+        const int mv = find_ext(NET_EXT_PLAYER_MOVE_VALS, 0, &len);
+        NetPlayerMoveValsPacket v;
+        memset(&v, 0, sizeof(v));
+        const uint8_t *b = mv >= 0 ? ext_body(mv, NET_EXT_PLAYER_MOVE_VALS, &len) : NULL;
+        if (b && len == sizeof(v)) memcpy(&v, b, sizeof(v));
+        CHECK(b && v.ack_seq == 7 && v.scheme == MOVEMENT_SCHEME_SRM && v.count == 8 && v.vals[0] == 16.0f && v.vals[2] == 300.0f &&
+                  v.vals[3] == 700.0f && fabsf(v.vals[5] - 0.05f) < 1e-6f && fabsf(v.vals[6] + 0.01f) < 1e-6f && fabsf(v.vals[7] - 0.02f) < 1e-6f,
+              "l [26..31] SRM sendVals: MOVE_VALS ack %d scheme %d count %d", v.ack_seq, v.scheme, v.count);
+        const int ent = find_ext(NET_EXT_ENTITY_CONTROLLED, 0, &len);
+        const uint8_t *eb = ent >= 0 ? ext_body(ent, NET_EXT_ENTITY_CONTROLLED, &len) : NULL;
+        CHECK(eb && len > sizeof(NetExtJsonChunk) && !strncmp((const char *) eb + sizeof(NetExtJsonChunk), "[9,120,{\"x\":12}]", len - sizeof(NetExtJsonChunk)),
+              "l [32] the controlled entity: ENTITY_CONTROLLED [9,120,{\"x\":12}]");
+        CHECK(recon && sync < recon && mv >= 0 && find_in(NET_PACKET_EXT, mv) < recon && ent >= 0 && find_in(NET_PACKET_EXT, ent) < recon,
+              "l: custSync, sendVals and the entity ahead of the RECON");
+    }
+    clear();
+    // Vehicle: 3 sendVals, no entity (0), no custSync (0)
+    KrunkerValue lv[30];
+    for (int i = 0; i < 30; i++) lv[i] = KRUNKER_V_NUM(0);
+    lv[0] = KRUNKER_V_NUM(8);
+    lv[26] = KRUNKER_V_NUM(0.4);
+    lv[27] = KRUNKER_V_NUM(0);
+    lv[28] = KRUNKER_V_NUM(-0.02);
+    feed(&link, "l", (KrunkerValue[]) {KRUNKER_V_ARRAY(lv, 30)}, 1);
+    {
+        uint16_t len = 0;
+        const int mv = find_ext(NET_EXT_PLAYER_MOVE_VALS, 0, &len);
+        NetPlayerMoveValsPacket v;
+        memset(&v, 0, sizeof(v));
+        const uint8_t *b = mv >= 0 ? ext_body(mv, NET_EXT_PLAYER_MOVE_VALS, &len) : NULL;
+        if (b && len == sizeof(v)) memcpy(&v, b, sizeof(v));
+        CHECK(b && v.ack_seq == 8 && v.scheme == MOVEMENT_SCHEME_VEHICLE && v.count == 3 && fabsf(v.vals[0] - 0.4f) < 1e-6f &&
+                  fabsf(v.vals[2] + 0.02f) < 1e-6f && find_ext(NET_EXT_ENTITY_CONTROLLED, 0, &len) < 0 && !find_in(NET_PACKET_SCRIPT_SYNC, 0),
+              "l Vehicle sendVals (scheme %d count %d), no entity, no custSync", v.scheme, v.count);
+    }
+    clear();
+
+    // "cv" / "gv" (:258558, :257834): a string value (Load Data's non-number) -> NET_EXT_VALUE_TEXT; a number stays NetValuePacket
+    feed(&link, "cv", (KrunkerValue[]) {KRUNKER_V_STR("rank"), KRUNKER_V_STR("Gold")}, 2);
+    feed(&link, "gv", (KrunkerValue[]) {KRUNKER_V_STR("phase"), KRUNKER_V_STR("Ready")}, 2);
+    feed(&link, "cv", (KrunkerValue[]) {KRUNKER_V_STR("coins"), KRUNKER_V_NUM(9)}, 2);
+    {
+        uint16_t len = 0;
+        NetValueTextPacket t0, t1;
+        memset(&t0, 0, sizeof(t0));
+        memset(&t1, 0, sizeof(t1));
+        const int a = find_ext(NET_EXT_VALUE_TEXT, 0, &len);
+        const uint8_t *ba = a >= 0 ? ext_body(a, NET_EXT_VALUE_TEXT, &len) : NULL;
+        if (ba && len == sizeof(t0)) memcpy(&t0, ba, sizeof(t0));
+        const int c = find_ext(NET_EXT_VALUE_TEXT, 1, &len);
+        const uint8_t *bc = c >= 0 ? ext_body(c, NET_EXT_VALUE_TEXT, &len) : NULL;
+        if (bc && len == sizeof(t1)) memcpy(&t1, bc, sizeof(t1));
+        CHECK(ba && t0.type == NET_PACKET_CUSTOM_VALUE && !strcmp(t0.key, "rank") && !strcmp(t0.text, "Gold"), "cv string: VALUE_TEXT (%s = %s)",
+              t0.key, t0.text);
+        CHECK(bc && t1.type == NET_PACKET_GLOBAL_VALUE && !strcmp(t1.key, "phase") && !strcmp(t1.text, "Ready"), "gv string: VALUE_TEXT");
+        READ_IN(NetValuePacket, nv, CUSTOM_VALUE, 0);
+        CHECK(nv_p && !strcmp(nv.key, "coins") && nv.value == 9.0 && !find_in(NET_PACKET_CUSTOM_VALUE, 1), "cv number: NetValuePacket only");
+    }
+    clear();
+
+    // "krt" [dogTags, depositType || 0] (:258906-258918): 0 the KR tags, 1 gift tags, 2 event tags (#giftTagHolder)
+    feed(&link, "krt", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(0)}, 2);
+    feed(&link, "krt", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_NUM(1)}, 2);
+    feed(&link, "krt", (KrunkerValue[]) {KRUNKER_V_NUM(5), KRUNKER_V_NUM(2)}, 2);
+    {
+        READ_IN(NetModeCounterPacket, c0, MODE_COUNTER, 0);
+        READ_IN(NetModeCounterPacket, c1, MODE_COUNTER, 1);
+        READ_IN(NetModeCounterPacket, c2, MODE_COUNTER, 2);
+        CHECK(c0_p && c0.kind == NET_MODE_COUNTER_KR_TAGS && c0.value == 3.0f && c0.uid == 2, "krt type 0: KR tags x3 (kind %d)", c0.kind);
+        CHECK(c1_p && c1.kind == NET_MODE_COUNTER_GIFT_TAGS && c1.value == 4.0f, "krt type 1: gift tags x4 (kind %d)", c1.kind);
+        CHECK(c2_p && c2.kind == NET_MODE_COUNTER_EVENT_TAGS && c2.value == 5.0f, "krt type 2: event tags x5 (kind %d)", c2.kind);
+    }
+    clear();
+
+    // the socket query (iíîïïîí :261655-261677): gameId, clientKey, clientUID, bpt, tc, at, dm, each only when set
+    char url[512], log[512];
+    const KrunkerSocketQuery all = {"NY:abc", "key1", "uid9", "tok7", "t3st", "jwt.a.b", "gdc-kid"};
+    CHECK(krunker_link_socket_query(&all, url, sizeof(url), log, sizeof(log)) &&
+              !strcmp(url, "gameId=NY:abc&clientKey=key1&clientUID=uid9&bpt=tok7&tc=t3st&at=jwt.a.b&dm=gdc-kid") &&
+              !strcmp(log, "gameId=NY:abc&clientKey=key1&clientUID=uid9&bpt=tok7&tc=t3st&at=(token)&dm=gdc-kid"),
+          "socket query, every part: %s", url);
+    const KrunkerSocketQuery seek = {"NY:abc", "key1", "", NULL, "", NULL, ""};
+    CHECK(krunker_link_socket_query(&seek, url, sizeof(url), log, sizeof(log)) && !strcmp(url, "gameId=NY:abc&clientKey=key1") && !strcmp(log, url),
+          "socket query, a guest's seek: %s", url);
+    const KrunkerSocketQuery queue = {"NY:abc", NULL, NULL, "tok7", NULL, NULL, NULL};
+    CHECK(krunker_link_socket_query(&queue, url, sizeof(url), log, sizeof(log)) && !strcmp(url, "gameId=NY:abc&bpt=tok7"),
+          "socket query, a queue hand-off: %s", url);
+    CHECK(!krunker_link_socket_query(&all, url, 20, log, sizeof(log)) && !url[0], "socket query too long: refused, empty");
     clear();
 }
 
@@ -2756,16 +3204,22 @@ int main(void) {
                                     KRUNKER_V_STR("maxnumber"), KRUNKER_V_NUM(1000), KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt)};
         feed(&link, "cpt", (KrunkerValue[]) {KRUNKER_V_MAP(bad, 4)}, 1);
         CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1, "unsolvable cpt: no cptR, a captcha event");
+        // v10.0.3's failure branch: the "CAPTCHA FAILED" error ends the session (deob-10.0.3.js:111428-111431)
+        p = find_in(NET_PACKET_ERROR, 0);
+        CHECK(p && !strcmp(((const NetErrorPacket *) p->payload)->message, "CAPTCHA FAILED") && g_events[KRUNKER_LINK_EV_ERROR] == 1,
+              "unsolvable cpt: the CAPTCHA FAILED error");
         clear();
         const KrunkerValue huge[] = {KRUNKER_V_STR("algorithm"), KRUNKER_V_STR("SHA-256"), KRUNKER_V_STR("challenge"), KRUNKER_V_STR(hex),
                                      KRUNKER_V_STR("maxnumber"), KRUNKER_V_NUM(2e7), KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt)};
         feed(&link, "cpt", (KrunkerValue[]) {KRUNKER_V_MAP(huge, 4)}, 1);
-        CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1, "cpt above the maxnumber cap refused");
+        CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1 && g_events[KRUNKER_LINK_EV_ERROR] == 1,
+              "cpt above the maxnumber cap refused: CAPTCHA FAILED");
         clear();
         const KrunkerValue sha1[] = {KRUNKER_V_STR("algorithm"), KRUNKER_V_STR("SHA-1"), KRUNKER_V_STR("challenge"), KRUNKER_V_STR(hex),
                                      KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt)};
         feed(&link, "cpt", (KrunkerValue[]) {KRUNKER_V_MAP(sha1, 3)}, 1);
-        CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1, "cpt with another algorithm refused");
+        CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1 && g_events[KRUNKER_LINK_EV_ERROR] == 1,
+              "cpt with another algorithm refused: CAPTCHA FAILED");
         clear();
     }
 
@@ -3432,7 +3886,9 @@ int main(void) {
     test_script();
     test_host_flag();
     test_s2c_coverage();
+    test_s2c_followups();
     test_shapes_1003();
+    test_net_gaps_1003();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

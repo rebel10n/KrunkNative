@@ -24,6 +24,7 @@
 #include <shadow.h>
 #include <sound_events.h>
 #include <triggers_v7.h>
+#include <net_ext.h> // NET_EXT_VALUE_TEXT: a string "cv" / "gv"
 #include <ui_logic.h>
 #include <stdio.h>
 #include <string.h>
@@ -42,6 +43,7 @@ static struct {
     int uid;
     char name[NET_SOUND_NAME_SIZE];
     int handle;
+    int loop;
 } g_player_sounds[CLIENT_PLAYER_SOUND_MAX];
 static int g_player_sound_count;
 
@@ -207,10 +209,17 @@ static void player_sound(Client *client, const NetPlayerSoundPacket *packet) {
     snprintf(name, sizeof(name), "%.*s", (int) sizeof(packet->name) - 1, packet->name);
     if (packet->add) { // addPlayerSound: play3DL / play3D at the player
         const Player *player = game_find_player(&client->game, packet->uid);
+        // updatePlayerSounds drops a one-shot once it played (deob-10.0.3.js:220465-220467): the stalker's
+        // taunts and a script's one-shots would otherwise fill the list
+        for (int i = g_player_sound_count; i-- > 0;) {
+            if (g_player_sounds[i].loop || audio_handle_active(g_player_sounds[i].handle)) continue;
+            g_player_sounds[i] = g_player_sounds[--g_player_sound_count];
+        }
         if (!name[0] || g_player_sound_count >= CLIENT_PLAYER_SOUND_MAX) return;
         const vec3 at = player ? (vec3) {player->position.x, player->position.y + player->height * 0.5f, player->position.z} : (vec3) {0};
         const int handle = audio_handle_play(name, packet->volume ? packet->volume : 1.0f, packet->loop, packet->rate ? packet->rate : 1.0f, 1, at, 0.0f, 0.0f);
         g_player_sounds[g_player_sound_count].uid = packet->uid;
+        g_player_sounds[g_player_sound_count].loop = packet->loop != 0;
         snprintf(g_player_sounds[g_player_sound_count].name, sizeof(g_player_sounds[0].name), "%s", name);
         g_player_sounds[g_player_sound_count++].handle = handle;
         return;
@@ -240,6 +249,18 @@ static void change_position_of(Client *client, const NetChangePositionPacket *pa
     type var; \
     if (length != sizeof(type)) return 1; \
     memcpy(&var, payload, sizeof(var))
+
+// "cv" / "gv" with a string value (NET_EXT_VALUE_TEXT): you.custVals[key] = val / globalVals[key] = val as the
+// numbers below (deob-10.0.3.js:258558-258560, :257834-257836), the value kept as the text (triggers.h TriggerValue)
+void client_triggers_value_text(Client *client, const void *body, const uint16_t length) {
+    NetValueTextPacket packet;
+    if (length < sizeof(packet) || client->game.is_local) return;
+    memcpy(&packet, body, sizeof(packet));
+    packet.key[sizeof(packet.key) - 1] = 0;
+    packet.text[sizeof(packet.text) - 1] = 0;
+    if (packet.type == NET_PACKET_CUSTOM_VALUE && client->me) trigger_mirror_custom_text(client->me, packet.key, packet.text);
+    else if (packet.type == NET_PACKET_GLOBAL_VALUE) trigger_mirror_global_text(&client->game, packet.key, packet.text, packet.flags & NET_VALUE_RESET);
+}
 
 int client_triggers_handle_event(Client *client, const int type, const void *payload, const uint16_t length) {
     switch (type) {

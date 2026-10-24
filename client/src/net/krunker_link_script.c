@@ -166,6 +166,13 @@ int krunker_link_script_frame(KrunkerLink *l, const KrunkerS2C id, const Krunker
     }
 }
 
+// "l" SYNC_PLAYER's last element: the entity we control, [eid, tick, encodeState(state)] or 0 (syncState,
+// deob-10.0.3.js:222404-222405), applied by entities.applyControlledSync (:213849-213859: the state and tick as they
+// are, commitPose, placeBody; no blend, unlike a baseline) -> NET_EXT_ENTITY_CONTROLLED (client/src/entities.c)
+void krunker_link_script_controlled(KrunkerLink *l, const KrunkerValue *controlled) {
+    if (krunker_is(controlled, KRUNKER_ARRAY) && controlled->len >= 1) emit_json(l, NET_EXT_ENTITY_CONTROLLED, controlled);
+}
+
 // init's syncData (arg 11) parts of these (:219478-219496): lo (live blocks), ent (entity spawn
 // payloads, applySyncData), entAtt ([sid, eid, opts] attachments), chg ([uid, x, y, z] moved objects)
 void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f) {
