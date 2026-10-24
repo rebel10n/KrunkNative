@@ -86,7 +86,7 @@ static void test_ext(void) {
 }
 
 // ---- v10.0.2 gameplay tables (doc/v10/gameplay.md; the deltas from v7.1.4 only, the whole table
-// is checked against the extracted fixtures by weapons_v7_test) ----
+// is checked against the extracted fixtures by weapons_v10_test) ----
 
 static void test_constants(void) {
     // v10's frozen config object differs from v7.1.4's in crouchLean only (v10:19602 0, v7

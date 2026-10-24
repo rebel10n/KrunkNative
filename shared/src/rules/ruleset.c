@@ -18,7 +18,7 @@ static const Ruleset k_v10 = {
     .constants = &game_constants,
     .posed_hitboxes = 1, // v10.0.2: every mode but Prop Hunt traces the posed boxes (hitboxes.c)
     .hit_zones_live = 0, // KrunkNative measures the zones on the rewound box (player.c combat)
-    .delta_floor_scaled = 1, // procInputs max(1 * deltaMlt, ...) (v10:169582)
+    .delta_floor_scaled = 1, // procInputs max(1 * deltaMlt, ...) (deob-10.0.3.js:191276-191280)
     .end_timer = GAME_END_TIMER, // config.endTimer 25000
     .end_anim = 5.0f,            // config.endAnim 5000
     .weapons = g_weapons_v10,
@@ -32,8 +32,8 @@ static const Ruleset k_v10 = {
     .map_count = MAP_CATALOG_OFFICIAL_COUNT,
     .rotation_maps = g_rotation_maps,
     .rotation_map_count = sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]),
-    // ranked (doc/v10/gameplay.md section 7): x2 KR (v10:191171), no kill streaks (v10:174076), no class
-    // XP (v10:173631), needAllTimer 60000 (v10:189820), shutdownTimer 120000 (v10:191217)
+    // ranked (doc/v10/gameplay.md section 7): x2 KR (deob-10.0.3.js:221760-221761), no kill streaks (:198604),
+    // no class XP (:197794), needAllTimer 60000 (:219964), shutdownTimer 120000 (:221814-221815)
     .ranked = {.kr_mlt = 2.0f, .no_streaks = 1, .no_class_xp = 1, .need_all_ms = 60000, .shutdown_ms = 120000},
     .trigger_action_limit = TRIGGER_V10_ACTION_LIMIT, // config.triggerActionLimit 8 (v7.1.4: 5)
     .entity_limit = 64,           // config.entityLimit

@@ -1,13 +1,13 @@
 #include <shared.h>
 
-// Krunker v10.0.2 classes (doc/v10/gameplay.md section 4; v10.js classConfig v10:101961-102300):
-// the v7.1.4 table (src/data/classes.js) with v10's changes, each marked "v10:N" (line N
-// of the 10.0.2 bundle ~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js at the class entry):
+// Krunker v10.0.3 classes (doc/v10/gameplay.md section 4; classConfig deob-10.0.3.js:115405-115747, the
+// same values as v10.0.2's): the v7.1.4 table (src/data/classes.js) with v10's changes, each marked
+// "deob-10.0.3.js:N" (line N of ~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js):
 //   Run N Gun health 90 -> 100, Spray N Pray 180 -> 170, Agent 110 -> 105;
-//   minRec 1 + req (_34270, the v7 f791 gate) on every class but Triggerman (v7: only Hunter,
-//   Vince, Detective and Bowman). Level 1 is every account's first level, so it gates guests.
-// Order, loadouts, speeds and wall-jump values are v7's (extractor diff ~/.cache/kn-v10/ext/
-// diff-classes.txt; checked against shared/tests/data/v10/classes.json by weapons_v10_test.c).
+//   minRec 1 + req (the v7 f791 gate, e.g. the Hunter's :115441-115442) on every class but Triggerman
+//   (v7: only Hunter, Vince, Detective and Bowman). Level 1 is every account's first level, so it gates guests.
+// Order, loadouts, speeds and wall-jump values are v7's, which v10.0.3 keeps (checked field by field
+// against shared/tests/data/v10/classes.json, the 10.0.3 classConfig, by weapons_v10_test.c).
 // The Stalker rework is a mode change (shared/src/modes/mode_v10.c), not a class.
 
 // From the v7.1.4 classes (src/data/classes.js), generated from shared/tests/data/v7/classes.json
@@ -58,11 +58,11 @@ static const ClassConfig run_n_gun = {
     .wall_jump = 1,
     .wall_jump_max = 2,
     .colors = {0xA77860, 0x3E6382, 0x2F4B63, 0x282828, 0x634732, 0x1A2B3A},
-    .health = 100, // v10:102001 health 90 -> 100
+    .health = 100, // deob-10.0.3.js:115452 health 90 -> 100
     .health_segments = 6,
     .regen = 0.1f,
     .speed = 1.18f,
-    .min_rec = 1, // v10:102001 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115462 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .face = 4546,
 };
@@ -76,11 +76,11 @@ static const ClassConfig spray_n_pray = {
     .secondary = 0,
     .wall_jump = 0,
     .colors = {0xA77860, 0x586849, 0x49563C, 0x282828, 0x282828, 0x303827},
-    .health = 170, // v10:102022 health 180 -> 170
+    .health = 170, // deob-10.0.3.js:115472 health 180 -> 170
     .health_segments = 7,
     .regen = 0.05f,
     .speed = 0.9f,
-    .min_rec = 1, // v10:102022 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115484 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .slide_accel_mlt = 0.98f,
     .face = 4547,
@@ -134,7 +134,7 @@ static const ClassConfig marksman = {
     .health_segments = 6,
     .regen = 0.1f,
     .speed = 1.0f,
-    .min_rec = 1, // v10:102088 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115549 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .face = 4550,
 };
@@ -152,7 +152,7 @@ static const ClassConfig rocketeer = {
     .health_segments = 7,
     .regen = 0.1f,
     .speed = 0.86f,
-    .min_rec = 1, // v10:102109 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115571 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .face = 4551,
 };
@@ -166,11 +166,11 @@ static const ClassConfig agent = {
     .wall_jump = 1,
     .wall_jump_max = 3,
     .colors = {0xA77860, 0x3D3D3D, 0x232323, 0x282828, 0x282828, 0xBFBFBF},
-    .health = 105, // v10:102131 health 110 -> 105
+    .health = 105, // deob-10.0.3.js:115582 health 110 -> 105
     .health_segments = 6,
     .regen = 0.1f,
     .speed = 1.2f,
-    .min_rec = 1, // v10:102131 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115592 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .face = 4552,
 };
@@ -189,7 +189,7 @@ static const ClassConfig runner = {
     .health_segments = 6,
     .regen = 0.2f,
     .speed = 1.0f,
-    .min_rec = 1, // v10:102152 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115614 minRec 1 (+ req)
     .throw_charge = 0.6f,
     .face = 4553,
 };
@@ -208,7 +208,7 @@ static const ClassConfig deagler = {
     .health_segments = 5,
     .regen = 0.1f,
     .speed = 1.0f,
-    .min_rec = 1, // v10:102174 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115637 minRec 1 (+ req)
     .throw_charge = 0.8f,
 };
 
@@ -242,7 +242,7 @@ static const ClassConfig commando = {
     .health_segments = 6,
     .regen = 0.1f,
     .speed = 1.0f,
-    .min_rec = 1, // v10:102218 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115679 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .face = 4555,
 };
@@ -260,7 +260,7 @@ static const ClassConfig trooper = {
     .health_segments = 6,
     .regen = 0.1f,
     .speed = 0.9f,
-    .min_rec = 1, // v10:102239 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115700 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .slide_time_mlt = 1.1f,
     .face = 4556,
@@ -282,7 +282,7 @@ static const ClassConfig survivor = {
     .health_segments = 6,
     .regen = 0.1f,
     .speed = 0.8f,
-    .min_rec = 1, // v10:102260 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115723 minRec 1 (+ req)
     .throw_charge = 0.8f,
 };
 
@@ -298,7 +298,7 @@ static const ClassConfig infiltrator = {
     .health_segments = 5,
     .regen = 0.1f,
     .speed = 1.0f,
-    .min_rec = 1, // v10:102282 minRec 1 (req _34270)
+    .min_rec = 1, // deob-10.0.3.js:115743 minRec 1 (+ req)
     .throw_charge = 0.8f,
     .face = 5234,
 };
