@@ -919,6 +919,8 @@ Brain -> node:
 | `drain` | `reason`, `deadlineMs`? | finish the round, accept no new players, then `lobby-down` + exit/idle |
 | `ranked-result-reply` | `rid`, `ok`, `ratings: [{accountId, name, team, key, old, new, delta, abandoned?}]`, `err`? | |
 | `bot-banter-reply` | `rid`, `ok`, `text`? (one line, <= 70 chars), `err`? ("AI unavailable", "rate limited", the upstream's failure) | the game server filters the text and falls back to a template on `ok: false` or no reply |
+| `unbox` | `accountId`, `item`, `kr`, `rarity` | a store or Free KR spin's win of an account playing on this node (`game_presence`): v10.0.3 `unb` to everyone for rarity >= 2, else to the unboxer (services/brain/node_events.c, server/src/brain_events.c) |
+| `raffle-win` | `accountId`, `lotteryId`, `drawId`, `prize: {type, ref, quantity}` | a lottery prize of an account playing on this node: v10.0.3 `lotWin` (the winner's uid) to everyone there |
 
 ### 5.3 Join tickets
 
@@ -1482,6 +1484,16 @@ servers hosting community maps; 404 `{"error":"not_found"}`.
 | `storage` | `{id, name, map, type: 0-5, scope: 0\|1, data: [[key, value]...]}` | `{rows: [[key, value]...]}` (the touched keys after the operation) |
 | `storage_load` | `{name, map, from?}` | `{rows: [[key, value]...]}` (`from` = another map of the same creator: its global rows) |
 | `map_reward` | `{id, amount, map}` | `{rsp: "Success", funds}` or `{rsp: <refusal>}` |
+| `turf_clan` | `{map}` | the clan holding the map today `{clan_id, clan_name, clan_logo, clan_banner_color}` (yesterday's settled winner) or `null` |
+| `map_spin` | `{id, wheel}` | `{skin, rand, funds, rarity, wheel, price}`: one KR spin of store wheel 0..2 for a map PRIZE_WHEEL, KR and skin in one transaction (`P_SPIN_MULTI`, source `spin`); "Wheel unavailable", "Not enough KR" |
+| `studio_game` | `{map}` | `{map_id, studio_id, monetized}`: whether the published map's studio is approved for monetization |
+| `studio_charge` | `{id, map, amount, key}` | `{success, krBalance, charged, earned, duplicate}`: a consented PAYMENTS charge (ledger source `studio-charge`, ref = key; `studio_charges` row with the studio's 90 %); the key is idempotent; "Monetization is not enabled for this studio", "Not enough KR", "Invalid charge" |
+
+`turf_clan` / `map_spin` / `studio_game` / `studio_charge` and the `unbox` / `raffle-win` pushes (5.2) are what a
+game server needs to send Krunker v10.0.3's `warsClan`, `spinW` / `unbS`, `unb`, `lotWin` and `chreq` the way its
+own server does (services/brain/node_events.h, server/src/brain_events.c, doc/v10/s2c-coverage.md; migration
+`0358_studio_charges`). Tests: `ctest -R brain_node_events` (every driver), `ctest -R brain_events_e2e` (two
+server_bin nodes and raw clients on SQLite).
 
 `storage` / `storage_load` / `map_reward` are KrunkScript's `GAME.STORAGE`, the Save / Load Data
 triggers and `GAME.PAYMENTS.giveKR` / Reward KR of a game server hosting a published map

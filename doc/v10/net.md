@@ -223,8 +223,10 @@ the same popup, then joins the same game again with the password in its JOIN pac
   (`krunker_cheat_qjs.c`: fresh runtime, memory / time caps, no host APIs; the page's eval on the web build).
 - `CHARGE_CONSENT_REQUEST/RESPONSE` is a server-initiated "spend currency?" confirmation: a map script's
   `authorizeSpend` (deob-10.0.3.js:221223, 15 s timeout). The client side is ported for the official link
-  (`#chargeModal` / `#chargeConfirm`, client/src/ui/s2c_ui.c; doc/v10/s2c-coverage.md). KN's own server never
-  asks: its KrunkScript is not monetized, so `authorizeSpend` answers false first (server/src/ks_server_host.c).
+  (`#chargeModal` / `#chargeConfirm`, client/src/ui/s2c_ui.c; doc/v10/s2c-coverage.md). KN's own server asks on a
+  monetized studio game (the hosted published map's studio): `authorizeSpend` / `charge` send
+  `NET_EXT_CHARGE_CONSENT_REQUEST`, the answer grants for 30 s, `transact` / `charge` take the KR through kn_brain's
+  `studio_charge`; elsewhere `authorizeSpend` answers false first, as v10 does (server/src/ks_server_host.c).
 - `sdc` / `swu` / Discord / webpush / FRVR auth are live-service features. They map onto
   kn_brain endpoints if wanted; they are not gameplay.
 - There is no version toggle (v10 only). HELLO / INIT keep their ruleset bytes for wire

@@ -8,6 +8,7 @@
 #include "acct_internal.h"
 #include "hot.h"
 #include "live_trade.h" /* the game server's live trade ops: trade_inventories, live_trade (economy.c) */
+#include "node_events.h" /* the game servers' v10.0.3 event ops: turf_clan, map_spin, studio_game, studio_charge */
 
 #include <ctype.h>
 #include <math.h>
@@ -1353,6 +1354,8 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         acct_change_password(id, kn_json_str(args, "old", NULL), kn_json_str(args, "new", NULL), cb, ud);
         return 0;
     }
+    /* Turf Wars clan, map prize wheel spins, monetized studio games and charges (node_events.c) */
+    if (node_events_op(op, args, cb, ud)) return 0;
     if (!strcmp(op, "stats")) return op_stats(args, cb, ud);
     if (!strcmp(op, "rewards")) return op_rewards(args, cb, ud);
     /* the live trade of Trade mode (economy.c, doc/v10/trade.md): both inventories for the window, the settle */

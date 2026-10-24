@@ -20,6 +20,8 @@ void ks_server_on_leave(ClientConnection*);                         // onPlayerL
 void ks_server_on_disconnect(ClientConnection*);                    // drops the per-connection state
 void ks_server_on_chat(ClientConnection*, const char *text);        // onChatMessage (accepted, not a command)
 void ks_server_on_script_msg(ClientConnection*, const NetPacket*);  // NET_PACKET_SCRIPT_MSG -> onNetworkMessage
+// NET_EXT_CHARGE_CONSENT_RESPONSE "chrsp" [id, accept]: GAME.PAYMENTS' consent (game.resolveChargeConsent)
+void ks_server_charge_response(ClientConnection*, const uint8_t *body, uint16_t length);
 
 // 1 when the connection announced NET_PROTOCOL_MINOR_V7 in its HELLO: it understands the
 // KrunkScript packets (NET_PACKET_BLOCK_KRUNKSCRIPT).

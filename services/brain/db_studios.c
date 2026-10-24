@@ -40,9 +40,12 @@
  * and has_map (a published game in the studio), all of the studio owner. Times are ISO 8601 UTC.
  *
  * Deviations from v10 (KrunkNative takes no payments and has no Skin Manager): an application
- * stays pending until a developer reviews it in the database; KR charged / earned and currency
- * balances are 0 (there are no paid triggers or PAYMENTS currency balances); skins is always empty
- * and studios.c refuses imports (no custom skins exist).
+ * stays pending until a developer reviews it in the database; currency balances are 0 (there are
+ * no PAYMENTS currency balances); skins is always empty and studios.c refuses imports (no custom
+ * skins exist). KR charged / earned are the studio's games' consented charges (0358_studio_charges).
+ *
+ * The game servers' side (P_STUDIO_GAME, P_STUDIO_CHARGE, at the end): whether a hosted published
+ * map is monetized, and the KR of PAYMENTS.charge / transact after the player's consent.
  */
 #include "db_procs.h"
 
@@ -457,9 +460,14 @@ static kn_db_result *op_analytics(Dbx *x, int64_t actor, int64_t studio) {
         cJSON_AddNumberToObject(r, "circulating", 0);
         cJSON_AddNumberToObject(r, "holders", 0);
     }
+    /* the studio's games' charges (0358_studio_charges, P_STUDIO_CHARGE): KR Earned (its share) and Gross spent */
+    const int64_t earned = dbx_int(x, SQL(.any = "SELECT coalesce(sum(earned), 0) FROM studio_charges WHERE studio_id = {int:$1}"),
+                                   KN_DB_ARGS(I64S(studio)), 0);
+    const int64_t charged = dbx_int(x, SQL(.any = "SELECT coalesce(sum(amount), 0) FROM studio_charges WHERE studio_id = {int:$1}"),
+                                    KN_DB_ARGS(I64S(studio)), 0);
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddNumberToObject(o, "kr_earned", 0);
-    cJSON_AddNumberToObject(o, "kr_charged", 0);
+    cJSON_AddNumberToObject(o, "kr_earned", (double) earned);
+    cJSON_AddNumberToObject(o, "kr_charged", (double) charged);
     cJSON_AddItemToObject(o, "currencies", cur ? cur : cJSON_CreateArray());
     return dbx_json(x, "analytics", o);
 }
@@ -662,3 +670,90 @@ static kn_db_result *run_studio(kn_dbconn *c, int n, const char *const *p) {
     return refuse(&x, "STUDIO_NOT_FOUND");
 }
 const kn_proc P_STUDIO = {"studio", NULL, run_studio};
+
+/* ------------------------------------------------------------------ monetized games (game servers)
+ * The game server side of v10.0.3's GAME.PAYMENTS (game.isMonetized / authorizeSpend / transact, deob-10.0.3.js:
+ * 221175-221336): the "studio_game" and "studio_charge" ops of services/brain/studios.c. */
+
+/* the live published map of a name and its studio: {map_id, studio_id, mon} (studio_id 0: in no studio), NULL none */
+static cJSON *game_of(Dbx *x, const char *map) {
+    if (!map || !*map) return NULL;
+    return dbx_row(x, SQL(.any = "SELECT m.map_id AS map_id__i, coalesce(sm.studio_id, 0) AS studio_id__i, coalesce(s.monetization, 0) AS mon__i"
+                                 " FROM published_maps m LEFT JOIN studio_maps sm ON sm.map_id = m.map_id LEFT JOIN studios s ON s.id = sm.studio_id"
+                                 " WHERE lower(m.map_name) = lower($1) AND m.deleted_at IS NULL ORDER BY m.map_id LIMIT 1"),
+                   KN_DB_ARGS(map));
+}
+
+/* (map name) -> {map_id, studio_id, monetized}: game.isMonetized() of a hosted published map, v10's
+ * customMapData.monetization (:221175-221177): the map's studio is approved for monetization (studios.monetization).
+ * map_id 0: no such published map. */
+static kn_db_result *run_studio_game(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *g = game_of(&x, P(0));
+    if (dbx_failed(&x)) return dbx_finish(&x, NULL);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "map_id", g ? jnum(g, "map_id") : 0);
+    cJSON_AddNumberToObject(o, "studio_id", g ? jnum(g, "studio_id") : 0);
+    cJSON_AddBoolToObject(o, "monetized", g && jnum(g, "studio_id") > 0 && jnum(g, "mon") != 0);
+    cJSON_Delete(g);
+    return dbx_json(&x, "studio_game", o);
+}
+const kn_proc P_STUDIO_GAME = {"studio_game", NULL, run_studio_game};
+
+#define STUDIO_CHARGE_MAX 100000   /* authorizeSpend refuses more (:221234) */
+#define STUDIO_SHARE_PCT 90        /* studios.analytics.krHint: "Studios keep 90% of the KR players spend in their games" */
+
+/* (account, map name, amount, key) -> {success, krBalance, charged, earned, duplicate, account}: the KR part of
+ * game.transact after a granted consent (customCurrency.transact(..., kr) -> {success, krBalance}, :221312-221321).
+ * One transaction: the player's KR (db_add_funds, ledger source 'studio-charge', ref = key), the studio_charges row
+ * with the studio's share (STUDIO_SHARE_PCT, rounded down; booked, never paid to an account: KrunkNative pays no
+ * studio out). key is unique: a resent charge replays success with the balance now and takes nothing (duplicate).
+ * Refusals: MONETIZATION_DISABLED (the map is in no monetized studio), STUDIO_CHARGE_INVALID (amount out of
+ * 1..100000, a bad key), "Not enough KR", "Account not found.". account: the account object after the charge (the
+ * caller pushes "ua" with it and drops it from the game server's answer). */
+static kn_db_result *run_studio_charge(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t account = PI(0), amount = PI(2);
+    const char *key = nz(P(3));
+    if (account <= 0) return refuse(&x, "Account not found.");
+    if (amount < 1 || amount > STUDIO_CHARGE_MAX || !key[0] || strlen(key) > 96) return refuse(&x, "STUDIO_CHARGE_INVALID");
+    cJSON *o = cJSON_CreateObject();
+    cJSON *done = dbx_row(&x, SQL(.any = "SELECT amount AS amount__i, earned AS earned__i, account_id AS account__i FROM studio_charges WHERE req_key = $1"),
+                          KN_DB_ARGS(key));
+    if (done) {
+        const int64_t mine = (int64_t) jnum(done, "account") == account;
+        cJSON_AddBoolToObject(o, "success", mine);
+        cJSON_AddNumberToObject(o, "charged", mine ? jnum(done, "amount") : 0);
+        cJSON_AddNumberToObject(o, "earned", mine ? jnum(done, "earned") : 0);
+        cJSON_AddBoolToObject(o, "duplicate", 1);
+        cJSON_Delete(done);
+    } else {
+        cJSON *g = dbx_failed(&x) ? NULL : game_of(&x, P(1));
+        if (!g || jnum(g, "studio_id") <= 0 || jnum(g, "mon") == 0) {
+            cJSON_Delete(g);
+            cJSON_Delete(o);
+            return dbx_failed(&x) ? dbx_finish(&x, NULL) : refuse(&x, "MONETIZATION_DISABLED");
+        }
+        const int64_t earned = amount * STUDIO_SHARE_PCT / 100;
+        if (db_add_funds(&x, account, -amount, "studio-charge", key, NULL) == 0)
+            dbx_exec(&x, SQL(.any = "INSERT INTO studio_charges (req_key, studio_id, map_id, account_id, amount, earned)"
+                                    " VALUES ($1, {int:$2}, {int:$3}, {int:$4}, {int:$5}, {int:$6})"),
+                     KN_DB_ARGS(key, I64S((int64_t) jnum(g, "studio_id")), I64S((int64_t) jnum(g, "map_id")), I64S(account), I64S(amount),
+                                I64S(earned)));
+        cJSON_Delete(g);
+        cJSON_AddBoolToObject(o, "success", 1);
+        cJSON_AddNumberToObject(o, "charged", (double) amount);
+        cJSON_AddNumberToObject(o, "earned", (double) earned);
+        cJSON_AddBoolToObject(o, "duplicate", 0);
+    }
+    if (dbx_failed(&x)) {
+        cJSON_Delete(o);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON_AddNumberToObject(o, "krBalance",
+                            (double) dbx_int(&x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = {int:$1}"), KN_DB_ARGS(I64S(account)), 0));
+    cJSON *acc = db_account_json(&x, account);
+    if (acc) cJSON_AddItemToObject(o, "account", acc);
+    return dbx_json(&x, "studio_charge", o);
+}
+const kn_proc P_STUDIO_CHARGE = {"studio_charge", NULL, run_studio_charge};

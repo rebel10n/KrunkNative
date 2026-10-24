@@ -174,7 +174,7 @@ objects 5000/7500, collidable 4500/6000, signs 100, prize wheels 10, leaderboard
 | LIVE_OBJECTS | new namespace with `addCube(x,y,z,w,h,l,_,opts{opacity, forceTransparency, aid (number = texture, "Nv" = video), color})` -> liveObject (L183345). v7 had `SCENE.addCube` only (KSA:2705, still present in v10 L182990) | |
 | ENTITIES | whole namespace (section 4.3) | |
 | SCENE | `addParticles(x,y,z,opts{texture: id or dust/glow/star/feather, glow, color, ...})`, rate-limited `p_parts` 30 (L182830) | |
-| PAYMENTS | `giveCurrency`, `takeCurrency`, `getCurrencyBalance`, `giveSkin` (skin id >= `customSkinBase` 10000000), `authorizeSpend`; `transact` now returns "Transactions disabled for now" (L182653) | |
+| PAYMENTS | `giveCurrency`, `takeCurrency`, `getCurrencyBalance`, `giveSkin` (skin id >= `customSkinBase` 10000000), `authorizeSpend`; `STORAGE.transact` returns "Transactions disabled for now" (L182653). In 10.0.3 `PAYMENTS.transact` / `charge` spend an `authorizeSpend` consent ("chreq", deob-10.0.3.js:211420-211565; server/src/ks_server_host.c) | |
 | AI | `removeBySid(sid)` (L183649) | `remove` |
 | COOKIES | `removeByKey(key)` (L182677) | `remove` |
 | TRIGGERS / OBJECTS | `getByInterface(id)` (L183707, L183746) | |

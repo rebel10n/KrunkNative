@@ -10,7 +10,8 @@
  *                                          cost_quantity, as v10.0.3 sends it). Needs a token (401 LoginRequired).
  *                                          Replies {data: {player_entries, total_entries}}.
  * The timer (brain.lottery.settle_check_ms, default 60 s; brain.lottery.enabled) settles every window that
- * has ended (P_LOTTERY_SETTLE): one draw each, one transaction per pass, never two passes at once.
+ * has ended (P_LOTTERY_SETTLE): one draw each, one transaction per pass, never two passes at once. Each prize paid
+ * then goes to the game server its winner plays on ("raffle-win", node_events.c: v10's "lotWin" chat line).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@
 
 #include "brain_internal.h"
 #include "db_procs.h"
+#include "node_events.h" /* the winners' "raffle-win" to their game servers */
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/db.h"
@@ -201,6 +203,12 @@ static void settle_done(kn_db_result *res, void *ud) {
     cJSON *o = t ? kn_json_parse(t, strlen(t)) : NULL;
     const int64_t drawn = o ? kn_json_int(o, "drawn", 0) : 0;
     if (drawn > 0) KN_INFO(MOD, "settled %lld lottery draw(s)", (long long) drawn);
+    /* v10 "lotWin" (deob-10.0.3.js:255154): each winner's game server writes "<name> won <prize> in the raffle!" to
+     * its players (node_events.c; the draw's transaction is committed by now) */
+    const cJSON *w;
+    cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(o, "wins"))
+        node_events_raffle_win(kn_json_int(w, "account", 0), kn_json_int(w, "lottery", 0), kn_json_int(w, "draw", 0),
+                               kn_json_str(w, "type", "skin"), kn_json_str(w, "ref", ""), kn_json_num(w, "quantity", 1));
     cJSON_Delete(o);
 }
 

@@ -620,6 +620,29 @@ static cJSON *recruitment_row(Dbx *x, const char *clan) {
     return r;
 }
 
+/* The clan holding a map today: the winner of the last settled day (turf_days of cur - 1, the rule of
+ * view_status) as v10's territorialWars.setClanInfo object {clan_id, clan_name, clan_logo, clan_banner_color}
+ * (deob-10.0.3.js:215092; WARS_CLAN :255551 builds it from those four). clan_logo is the approved logo version
+ * (clans.clan_logo, the decal's assetV; null without one), clan_banner_color the clan's paint ('#rrggbb' or
+ * 's<shader>', null unset). JSON null: nobody holds the map (no settled day, nobody played, not a turf map). */
+static cJSON *view_controller(Dbx *x, int64_t cur, int64_t map) {
+    if (!turf_map_name((int) map)) return cJSON_CreateNull();
+    cJSON *r = dbx_row(x, SQL(.any = "SELECT c.clan_id AS clan_id__i, c.clan_name, c.clan_logo AS logo__i, c.clan_banner_color FROM turf_days d"
+                                     " JOIN clans c ON c.clan_id = d.clan_id WHERE d.day = {int:$1} AND d.map_id = {int:$2}"),
+                       KN_DB_ARGS(I64S(cur - 1), I64S(map)));
+    if (!r) return dbx_failed(x) ? NULL : cJSON_CreateNull();
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "clan_id", jnum(r, "clan_id"));
+    cJSON_AddStringToObject(o, "clan_name", jstr(r, "clan_name"));
+    if (jnum(r, "logo") > 0) cJSON_AddNumberToObject(o, "clan_logo", jnum(r, "logo"));
+    else cJSON_AddNullToObject(o, "clan_logo");
+    const char *color = jstr(r, "clan_banner_color");
+    if (color[0]) cJSON_AddStringToObject(o, "clan_banner_color", color);
+    else cJSON_AddNullToObject(o, "clan_banner_color");
+    cJSON_Delete(r);
+    return o;
+}
+
 /* (view, current_day, a, b, c, d) */
 static kn_db_result *run_turf_view(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -685,6 +708,8 @@ static kn_db_result *run_turf_view(kn_dbconn *c, int n, const char *const *p) {
     } else if (!strcmp(view, "recruitment_of")) { /* (clan) */
         out = recruitment_row(&x, a);
         if (!out && !dbx_failed(&x)) out = cJSON_CreateNull();
+    } else if (!strcmp(view, "controller")) { /* (map): the game servers' "turf_clan" op (turf_clan_op) */
+        out = view_controller(&x, cur, pint(a));
     } else if (!strcmp(view, "my_applications")) { /* (account) */
         cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT clan_id AS clan_id__i FROM clan_requests WHERE account_id = {int:$1}"), KN_DB_ARGS(a));
         out = cJSON_CreateObject();

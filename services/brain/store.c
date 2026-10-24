@@ -10,9 +10,12 @@
  * index order. Wheels: shared/include/store_spins.h (the compiled-in v10 set), replaced by the
  * store_spin_data row when there is one (0118_store_v10: rotate wheels without a release), served
  * as GET /api/data/spins. Charging and granting are one transaction (db_accounts.c
- * P_SPIN_MULTI, 0106_store.sql kn_daily_kr).
+ * P_SPIN_MULTI, 0106_store.sql kn_daily_kr). Game servers spin their map prize wheels through the
+ * "map_spin" op (store_map_spin_op, the same chain as POST /spins/execute), and every store or Free
+ * KR win goes to the game server the account plays on as v10's "unb" (node_events.c).
  */
 #include "acct_internal.h"
+#include "node_events.h" /* "unb" to the unboxer's game server; the game servers' "map_spin" */
 #include "v10_api.h"
 
 #include <stdio.h>
@@ -288,8 +291,19 @@ typedef struct SpinCtx {
     int has_owned;  /* itemsAreUnique / duplicateProtectedPools: owned = the account's items */
     unsigned char owned[OWNED_BITS / 8];
     kn_http_req *req;  /* store_spin_v10 (POST /spins/execute): the request answered when the spin is done */
-    int64_t account;   /* store_spin_v10: the spinning account */
+    int64_t account;   /* store_spin_v10 / store_map_spin_op: the spinning account */
+    AcctReplyFn op_cb; /* store_map_spin_op (a game server's map prize wheel): answered instead of req */
+    void *op_ud;
 } SpinCtx; /* the extra of social_query / social_call: freed after each callback, chained as a copy */
+
+/* A store spin's items to the game server the account plays on (v10 "unb", node_events.c): a Free KR win as its
+ * freeKR index with the KR, a skin with kr 0 */
+static void spin_unboxed(const int64_t account, const SpinCtx *c) {
+    for (int i = 0; i < c->count; i++) {
+        const SkinInfo *k = acct_skin(c->skin[i]);
+        if (k) node_events_unbox(account, c->skin[i], 0, k->rarity);
+    }
+}
 
 static SpinCtx *ctx_copy(const SpinCtx *c) {
     SpinCtx *n = malloc(sizeof *n);
@@ -325,6 +339,7 @@ static void spin_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "spin", 5, cJSON_CreateNull(), pos, skins, cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)),
                   c->ticket >= 0 ? cJSON_CreateNumber(c->ticket) : cJSON_CreateNull());
     cJSON_Delete(v);
+    spin_unboxed(s->account_id, c);
 }
 
 static void free_kr_error(SocialSession *s, const char *err) {
@@ -532,14 +547,35 @@ void sh_spin(SocialSession *s, const cJSON *f) {
  * is the socket's reply as the v10 envelope data, under v10.0.3's names: {fakeRands, itemIds, funds, usedTicket}. */
 
 static void http_spin_fail(SpinCtx *c, int status, const char *code, const char *message) {
-    v10_reply_error(c->req, status, code, message);
+    if (c->op_cb) c->op_cb(c->op_ud, message, NULL); /* a map spin: the game server gets the refusal */
+    else v10_reply_error(c->req, status, code, message);
     free(c);
+}
+
+/* a map prize wheel's spin is done: {skin, rand, funds, rarity, wheel, price} to the game server */
+static void map_spin_done(SpinCtx *c, const cJSON *v) {
+    const SkinInfo *k = acct_skin(c->skin[0]);
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddNumberToObject(d, "skin", c->skin[0]);
+    cJSON_AddNumberToObject(d, "rand", c->pos[0]);
+    cJSON_AddNumberToObject(d, "funds", (double) kn_json_int(v, "funds", 0));
+    cJSON_AddNumberToObject(d, "rarity", k ? k->rarity : 0);
+    cJSON_AddNumberToObject(d, "wheel", c->wheel);
+    cJSON_AddNumberToObject(d, "price", c->price);
+    c->op_cb(c->op_ud, NULL, d);
+    cJSON_Delete(d);
 }
 
 static void http_spin_done(kn_db_result *res, void *ud) {
     SpinCtx *c = ud;
     cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
     if (!v) return http_spin_fail(c, 500, "internal", acct_db_error(res, "spin"));
+    if (c->op_cb) {
+        map_spin_done(c, v);
+        cJSON_Delete(v);
+        free(c);
+        return;
+    }
     cJSON *nums = cJSON_CreateArray(), *items = cJSON_CreateArray();
     for (int i = 0; i < c->count; i++) {
         cJSON_AddItemToArray(nums, cJSON_CreateNumber(c->pos[i]));
@@ -555,6 +591,7 @@ static void http_spin_done(kn_db_result *res, void *ud) {
     else cJSON_AddNullToObject(d, "usedTicket");
     cJSON_Delete(v);
     v10_reply_data(c->req, 200, d);
+    spin_unboxed(c->account, c);
     free(c);
 }
 
@@ -634,6 +671,53 @@ void store_spin_v10(kn_http_req *req, int64_t account, int64_t index, int64_t ti
     http_spin_query_player(c);
 }
 
+/* ------------------------------------------------------------------ map prize wheels (game servers)
+ * "map_spin" {id, wheel} (node_events.h): a map PRIZE_WHEEL's spin. v10.0.3's game server offers it with interact 9
+ * (an active spinner in reach, an account whose funds cover store.wheels[wheel].price: CONFIRM_INTERACTION [uid, 2],
+ * deob-10.0.3.js:197177-197181) and the client confirms with ["cnfm", 2] (:260117); the spin itself is the server's
+ * account code, which is not in the bundle. KrunkNative spins it here as one KR spin of that store wheel: the same
+ * checks (level, funds), roll and P_SPIN_MULTI transaction as a store spin (the KR, the skin and their ledger rows in
+ * one transaction; "Not enough KR" when the balance moved meanwhile), so it shows in the spin history too. The wheel
+ * is the spinner's own (map generate's limitMM(sty, 0, 2), :189053): one the map skips (missing, ticketOnly, hidden,
+ * locked) or that is closed now is "Wheel unavailable". Answer {skin, rand, funds, rarity, wheel, price}: rand is the
+ * pointer's stop, spinW's randNum (updateSpinner :219420). */
+int store_map_spin_op(const cJSON *args, AcctReplyFn cb, void *ud) {
+    const int64_t account = kn_json_int(args, "id", 0), wheel = kn_json_int(args, "wheel", -1);
+    const StoreSpins *sp = spins();
+    const StoreWheel *w = wheel >= 0 && wheel <= 2 && wheel < sp->wheel_count ? &sp->wheels[wheel] : NULL;
+    const char *err = !g_acct_brain || !g_acct_brain->db ? "Accounts are unavailable."
+                      : account <= 0                    ? "Account not found."
+                      : acct_skin_count() <= 0          ? "Error generating item"
+                      : !w || w->kr || w->ticket_only || w->hide || w->locked || !store_wheel_open(w, kn_wall_ms()) ? "Wheel unavailable"
+                                                        : NULL;
+    if (err) {
+        cb(ud, err, NULL);
+        return 0;
+    }
+    SpinCtx *c = calloc(1, sizeof *c);
+    if (!c) {
+        cb(ud, "Server error.", NULL);
+        return -1;
+    }
+    c->op_cb = cb;
+    c->op_ud = ud;
+    c->account = account;
+    c->w = *w;
+    c->wheel = (int) wheel;
+    c->ticket = -1;
+    c->count = 1;
+    c->price = w->price;
+    if (w->items_unique || w->dup_protected) {
+        static const kn_sql q = {.any = "SELECT skin_id FROM inventory WHERE account_id = $1 AND count > 0"};
+        char id[24];
+        if (kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(id, account)), http_spin_owned, c) != 0)
+            http_spin_fail(c, 503, "SpinUnavailable", "Box Office could not spin right now");
+        return 0;
+    }
+    http_spin_query_player(c);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ "spinH" (spin history) */
 
 /* the KR a history row cost: ref "<wheel>:<price>" (v7 / v10 spins), "t<ticket>:0" (tickets) or
@@ -694,6 +778,8 @@ static void free_kr_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "spinKR", 4, cJSON_CreateNumber((double) kn_json_int(v, "lastReward", 0)), cJSON_CreateNumber(c->pos[0]),
                   cJSON_CreateNumber(c->index), cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)));
     cJSON_Delete(v);
+    /* v10 "unb" with kr: store.freeKR[index] ({rarity, kr}; the rarity is the index, client hud_ui_unboxed) */
+    node_events_unbox(s->account_id, c->index, (int) c->kr, c->index);
 }
 
 /* ["fkr"] (v3.1.1: ["fkr", captcha]) -> ["spinKR", lastReward, randNum, freeKRIndex, funds] |

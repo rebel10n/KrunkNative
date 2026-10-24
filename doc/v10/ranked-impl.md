@@ -217,8 +217,9 @@ keeps v10's 1:1 Beta rate for completeness).
 The pool is `brain.turf.kr_per_kill` (1) KR per counted kill. A clan alone on a map gets only its
 60 %; the unpaid shares are not redistributed. The clan-bank share and rounding remainders go to
 `clans.clan_funds`. Each day is settled once by whichever brain sees the day finished first
-(lock + `turf_days`). Map banners (`wars_banner` nodes, `WARS_CLAN`) are not ported: KrunkNative's
-maps carry no such nodes yet.
+(lock + `turf_days`). The clan holding a map today is the settled winner of the day before: the game server
+asks for it (`turf_clan`) at every eligible round start and sends v10's `WARS_CLAN` to everyone and after each
+joiner's INIT (server/src/brain_events.c). KrunkNative's maps carry no `wars_banner` nodes yet for its banners.
 
 ### Clan war games (v10 `mode.clanWar`)
 

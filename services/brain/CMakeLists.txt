@@ -26,6 +26,7 @@ set(KN_BRAIN_SOURCES
     clan_logo.c                     # clan logos (0332_clan_logos): the settings tab's upload, its review, GET /api/clans/<id>/logo
     studios.c                       # v10 Studios: the /studios gapi routes (db_studios.c, 0330_studios)
     game_presence.c                 # v10 presence:game (account -> its game, pushed to friends)
+    node_events.c                   # v10.0.3 game-server events: Turf clan, map wheel spins, studio charges, unb / lotWin pushes
     profiles.c
     leaderboards.c
     social_data.c
@@ -343,6 +344,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/captcha_game_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_captcha_game_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # v10.0.3 warsClan, spinW / unbS, unb, lotWin and chreq from KrunkNative's own server and brain (server/src/brain_events.c,
+        # node_events.c): a hosted monetized published map with a prize wheel, a public Burg lobby, raw clients (SQLite)
+        add_test(NAME brain_events_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/brain_events_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_events_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e;sqlite")
         # mm-fill: quick join fills the populated lobby (3 server_bin nodes; sequential seekers
         # inside the lobby-up debounce and concurrent seekers all land together)
         add_test(NAME brain_mm_fill_e2e
@@ -522,6 +529,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_trade_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_live_trade PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;trade")
+    # the game servers' v10.0.3 events (node_events.c): turf_clan, map_spin, studio_game / studio_charge (0358_studio_charges)
+    # and the unbox / raffle-win pushes to the account's node
+    add_test(NAME brain_node_events
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/node_events_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_node_events PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the signed-out guest's balance (guest.c, db_guest.c, 0350_guest_profiles): the two routes, the credit and claim ops
     add_test(NAME brain_guest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_test.py
@@ -724,6 +737,11 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_live_trade_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_trade_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_node_events_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/node_events_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_node_events_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
         set_tests_properties(brain_live_trade_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;trade;${drv}")
         add_test(NAME brain_shop_${drv}

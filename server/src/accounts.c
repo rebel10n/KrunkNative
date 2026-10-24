@@ -3,6 +3,7 @@
 #include <ruleset.h> // meta.ruleset
 #include <server_accounts.h>
 #include <server_captcha.h> // the in-game captcha: the welcome's flag, the brain's "captcha-r"
+#include <server_brain_events.h> // v10.0.3 warsClan, map prize wheels, unb / lotWin, monetized studio games (brain_events.c)
 #include <server_log.h>
 #include <director_gate.h> // Krunker Strike director tickets
 #include <brain.h>
@@ -1662,6 +1663,7 @@ void accounts_round_changed(void) {
     if (g_acc.round_counter) g_acc.billboard_cycle++; // pickBillboard at every map cycle
     acc_new_match_id();
     acc_turf_round_start();
+    brain_events_round_start(g_turf.eligible ? g_turf.map_index : -1); // the map's Turf Wars clan, spinners, studio game
     g_acc.round_end_seen = 0;
     g_acc.round_committed = 0;
     g_acc.webhook_posted = 0;
@@ -3692,6 +3694,9 @@ static void acc_handle_frame(cJSON *frame) {
     else if (!strcmp(type, "bot-banter-reply")) bot_banter_on_brain_frame(frame); // bot chat (server/src/bot_banter.c)
     else if (!strcmp(type, "game-events")) acc_kill_events_set(cJSON_GetObjectItem(frame, "events")); // ongoingEvents changed
     else if (!strcmp(type, "captcha-r")) game_captcha_on_brain_frame(frame); // the in-game captcha (game_captcha.c)
+    else if (brain_events_on_brain_frame(frame)) {
+        // v10.0.3 warsClan / spinW / chreq answers ("acct-r" of its own rids), the "unbox" / "raffle-win" pushes
+    }
     else if (!strcmp(type, "assign")) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));
@@ -3717,6 +3722,7 @@ static void acc_live_fail_pending(const char *why);
 
 static void acc_link_down(void) {
     ks_storage_link_down(); // their replies never come
+    brain_events_link_down(); // spins, charges and the round's Turf / studio questions (asked again once linked)
     trade_link_down();      // live trades waiting for their inventories end (a settle is resent)
     acc_live_fail_pending("account service unavailable"); // live sign-ins: nothing changes
     // pending auths will never be answered: ticket holders keep the ticket identity,

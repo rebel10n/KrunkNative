@@ -30,6 +30,9 @@
  *   POST /api/clans/:id/apply?token                       a join request (clan_requests)
  * Every payload is v10's (the client reads body.data); :id is a clan id or (KrunkNative) a clan tag
  * / player name. Views are built by P_TURF_VIEW (db_turf.c) on every driver.
+ *
+ * Game servers also ask "turf_clan" {map} (an "acct" op, turf_clan_op): the clan holding the map today
+ * {clan_id, clan_name, clan_logo, clan_banner_color} or null, which they send as v10's WARS_CLAN.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +40,7 @@
 #include <time.h>
 
 #include "brain_internal.h"
+#include "node_events.h" /* turf_clan_op: the game servers' "turf_clan" */
 #include <turf_wars.h>
 #include "knsvc/config.h"
 #include "knsvc/db.h"
@@ -500,6 +504,45 @@ void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud) {
                KN_DB_ARGS(S(current_day()), S(kn_json_int(frame, "mapId", -1)), recs ? recs : "[]", kn_json_str(frame, "matchId", "")),
                on_recorded, r);
     free(recs);
+}
+
+/* The game servers' "turf_clan" op {map} (node_events.h): the clan holding the map today, or JSON null. v10's
+ * territorialWars.setClanInfo runs on the game server (the WARS_CLAN broadcast, deob-10.0.3.js:215092-215098), fed by
+ * a server call that is not in the bundle; KrunkNative's game server asks at each eligible round start
+ * (server/src/brain_events.c). The day is this brain's clock, like the kills it records. */
+typedef struct TurfClanCtx {
+    AcctReplyFn cb;
+    void *ud;
+} TurfClanCtx;
+
+static void on_turf_clan(kn_db_result *res, void *ud) {
+    TurfClanCtx *t = ud;
+    if (!kn_db_ok(res)) {
+        log_err("turf clan", res);
+        t->cb(t->ud, "Turf Wars unavailable.", NULL);
+    } else {
+        const char *text = kn_db_rows(res) > 0 ? kn_db_get(res, 0, 0) : NULL;
+        cJSON *data = text ? kn_json_parse(text, strlen(text)) : NULL;
+        if (!data) data = cJSON_CreateNull();
+        t->cb(t->ud, NULL, data);
+        cJSON_Delete(data);
+    }
+    free(t);
+}
+
+int turf_clan_op(const cJSON *args, AcctReplyFn cb, void *ud) {
+    const int64_t map = kn_json_int(args, "map", -1);
+    TurfClanCtx *t = db_ready() && turf_map_name((int) map) ? calloc(1, sizeof(*t)) : NULL;
+    if (!t) { /* Turf Wars off, no database or not a turf map: nobody holds it */
+        cJSON *none = cJSON_CreateNull();
+        cb(ud, NULL, none);
+        cJSON_Delete(none);
+        return 0;
+    }
+    t->cb = cb;
+    t->ud = ud;
+    kn_db_call(T.b->db, &P_TURF_VIEW, KN_DB_ARGS("controller", S(current_day()), S(map), "", "", ""), on_turf_clan, t);
+    return 0;
 }
 
 static void settle_next(void);

@@ -14,6 +14,8 @@
 #include <server_sandbox.h>
 #include <ks_storage.h>
 #include <game_config.h> // CONFIG.getHost: game.host (game_host_player)
+#include <server_brain_events.h> // GAME.PAYMENTS: game.isMonetized(), the brain's studio_charge
+#include <net_ext.h>             // NET_EXT_CHARGE_CONSENT_REQUEST / _RESPONSE
 #include <pcg_basic.h>
 
 #include <math.h>
@@ -374,8 +376,11 @@ static void lock_drop(const char *key) // f2122
     }
 }
 
+static void pay_reset(void);
+
 static void storage_reset(void)
 {
+    pay_reset(); // GAME.PAYMENTS' waiting consents belong to the old instance too
     g_script_gen++;
     g_lock_count = 0;
 }
@@ -618,10 +623,10 @@ static KsValue pay_give_kr(KsScript *s, void *user, const KsValue *args, int arg
 }
 
 // ------------------------------------------------------------------ GAME.PAYMENTS (v10 L183384-183500)
-// This server has no studio economy: isMonetized() is false, currency and skin grants reach no
-// account service, and game.transact logs "Transactions disabled for now". The calls validate and
-// rate-limit exactly as v10 does (the same messages, the same windows), then answer their callback
-// with success false.
+// Currency and skin grants reach no account service (KrunkNative studios have no PAYMENTS currencies or custom
+// skins): giveCurrency / takeCurrency / getCurrencyBalance / giveSkin validate and rate-limit exactly as v10 does (the
+// same messages, the same windows), then answer their callback with success false. authorizeSpend / charge /
+// transact are v10's KR consent flow on a monetized studio game (below, "GAME.PAYMENTS consent").
 #define KS_CUSTOM_SKIN_BASE 10000000   // v10 customSkinBase (L17249)
 
 // The player an argument names: a player id, or a player host object.
@@ -768,6 +773,248 @@ static KsValue pay_give_skin(KsScript *s, void *user, const KsValue *args, int a
     return ks_undef();
 }
 
+// ------------------------------------------------------------------ GAME.PAYMENTS consent (chreq / chrsp)
+// v10.0.3 game.authorizeSpend / resolveChargeConsent / transact / chargeKR (deob-10.0.3.js:221223-221336) and their
+// script API (:211420-211565). A monetized studio game (game.isMonetized(): the hosted published map's studio,
+// brain_events_monetized) asks the player: CHARGE_CONSENT_REQUEST [id, amount, modal] (NET_EXT_CHARGE_CONSENT_REQUEST),
+// the client answers CHARGE_CONSENT_RESPONSE [id, 1] / [id] (NET_EXT_CHARGE_CONSENT_RESPONSE, ks_server_charge_response).
+// An accepted request becomes grantedAuth {id, val} for 30 s and the callback gets (true, "<id>"); transact(player,
+// items, "<id>") spends it through the brain ("studio_charge": the KR, its ledger row and the studio's share in one
+// transaction, brain_events.c). Unanswered after 15 s, declined, or the player has one pending already: false.
+// KrunkNative difference: studios have no PAYMENTS currencies or custom skins here (db_studios.c), so a transact
+// with currency or skin entries answers false and moves nothing; a KR-only transact (and charge) runs as in v10.
+#define PAY_CONSENT_MS 15000.0   // the pendingAuth timer (:221237-221242)
+#define PAY_GRANT_MS 30000.0     // the grantedAuth timer (:221268-221272)
+#define PAY_AUTH_MAX 100000      // authorizeSpend refuses more (:221234)
+#define PAY_AMOUNT_MAX 1000000   // iíÎiïiì: floor(abs(amount)), 0 outside 1..1000000 (:219757-219766)
+#define PAY_STATES 64
+
+typedef struct {                 // a script callback kept across ticks (pinned while it waits)
+    uint32_t gen;
+    KsScript *script;
+    KsValue cb;                  // KS_FN or undefined
+    char pid[32];                // its first argument: the player's id
+} PayCall;
+
+typedef struct {
+    int used;
+    int conn;                    // ClientConnection.id
+    int pending_id, pending_val; // player.pendingAuth {id, val, callb}
+    double pending_until;
+    int pending_charge;          // chargeKR's: an accepted consent goes on to transact(player, [], id, callb)
+    PayCall pending;
+    int granted_id, granted_val; // player.grantedAuth {id, val}
+    double granted_until;
+    int wait_cur;                // player.waitCur: a transaction in flight (iïIïíiï, :219776-219790)
+} PayState;
+
+static PayState g_pay[PAY_STATES];
+static int g_pay_seq;            // iìÍìiií: the request ids
+
+static PayState *pay_state(const int conn, const int create)
+{
+    for (int i = 0; i < PAY_STATES; i++)
+        if (g_pay[i].used && g_pay[i].conn == conn) return &g_pay[i];
+    if (!create) return NULL;
+    for (int i = 0; i < PAY_STATES; i++) {
+        if (g_pay[i].used) continue;
+        memset(&g_pay[i], 0, sizeof(g_pay[i]));
+        g_pay[i].used = 1;
+        g_pay[i].conn = conn;
+        g_pay[i].pending.cb = ks_undef();
+        return &g_pay[i];
+    }
+    return NULL;
+}
+
+// JavaScript's !!v
+static int pay_truthy(const KsValue v)
+{
+    size_t len = 0;
+    switch (v.tag) {
+        case KS_BOOL: return ks_to_number(v) != 0;
+        case KS_NUM: return v.as.num != 0 && !isnan(v.as.num);
+        case KS_STR: return ks_str_utf8(v, &len) && len > 0;
+        case KS_ARR: case KS_OBJ: case KS_FN: case KS_HOST: return 1;
+        default: return 0;
+    }
+}
+
+static int pay_amount(const KsValue v) // iíÎiïiì
+{
+    if (v.tag != KS_NUM || !isfinite(v.as.num)) return 0;
+    const double a = floor(fabs(v.as.num));
+    return a < 1 || a > PAY_AMOUNT_MAX ? 0 : (int) a;
+}
+
+static void pay_call_set(PayCall *c, KsScript *s, const KsValue cb, const char *pid)
+{
+    c->gen = g_script_gen;
+    c->script = s;
+    c->cb = cb.tag == KS_FN ? cb : ks_undef();
+    snprintf(c->pid, sizeof(c->pid), "%s", pid ? pid : "");
+    if (c->cb.tag == KS_FN) ks_handle_pin(s, c->cb);
+}
+
+// callb(playerId, ok, value): an authorizeSpend callback gets the request id text ("" when refused), a charge /
+// transact one the KR balance (0 when refused). A callback of an unloaded script is dropped.
+static void pay_call_fire(PayCall *c, const int ok, const int auth, const int auth_id, const double balance)
+{
+    KsScript *s = g_server ? ks_game_script(&g_server->game) : NULL;
+    if (c->cb.tag == KS_FN && s && s == c->script && c->gen == g_script_gen) {
+        char id[16] = "";
+        if (auth && ok) snprintf(id, sizeof(id), "%d", auth_id);
+        const KsValue args[3] = {ks_str(s, c->pid, strlen(c->pid)), ks_bool(ok), auth ? ks_str(s, id, strlen(id)) : ks_num(balance)};
+        ks_call_value(s, c->cb, args, 3, NULL);
+        ks_handle_unpin(s, c->cb);
+    }
+    c->cb = ks_undef();
+}
+
+static void pay_pid(Player *player, const KsValue arg, KsScript *s, char *out, const size_t n)
+{
+    out[0] = 0;
+    if (player) ks_player_id(player, out, n);
+    else if (arg.tag == KS_HOST || arg.tag == KS_OBJ) {
+        const KsValue raw = ks_obj_get(s, arg, "id");
+        if (raw.tag != KS_UNDEF && raw.tag != KS_NULL) ks_to_string(s, raw, out, n);
+    }
+}
+
+// grantedAuth spent by transact(..., authId) (iïÌîïìï, :221207-221216): its val when authId names it, else 0
+static int pay_consume(PayState *st, const char *auth_id)
+{
+    if (!st || !st->granted_id || !auth_id || !auth_id[0] || st->granted_id != (int) strtol(auth_id, NULL, 10)) return 0;
+    const int val = st->granted_val;
+    st->granted_id = st->granted_val = 0;
+    return val;
+}
+
+typedef struct {
+    int conn;
+    PayCall call;
+} PayCharge;
+
+static void pay_charge_done(void *user, const int success, const double balance)
+{
+    PayCharge *c = user;
+    PayState *st = pay_state(c->conn, 0);
+    if (st) st->wait_cur = 0; // iìÎiíiì: waitCur = false, then the callback
+    pay_call_fire(&c->call, success, 0, 0, success ? balance : 0.0);
+    free(c);
+}
+
+// game.transact(player, items, authId, callb) (:221289-221327) with items already checked: has_items = a currency
+// entry, bad_items = an entry the game cannot take (a skin that is no custom skin: every skin, here)
+static void pay_transact_run(ClientConnection *client, const int has_items, const int bad_items, const char *auth_id, PayCall *call)
+{
+    PayState *st = client ? pay_state(client->id, 1) : NULL;
+    if (!brain_events_can_charge(client) || bad_items) { // canCustomCurrency (:219754)
+        pay_consume(st, auth_id);
+        pay_call_fire(call, 0, 0, 0, 0.0);
+        return;
+    }
+    const int kr = pay_consume(st, auth_id);
+    if ((kr && !brain_events_monetized()) || has_items || !kr || (st && st->wait_cur)) { // KrunkNative: no studio currencies
+        pay_call_fire(call, 0, 0, 0, 0.0);
+        return;
+    }
+    PayCharge *c = st ? calloc(1, sizeof(*c)) : NULL;
+    if (!c) {
+        pay_call_fire(call, 0, 0, 0, 0.0);
+        return;
+    }
+    c->conn = client->id;
+    c->call = *call;
+    call->cb = ks_undef(); // the pin moves to c
+    st->wait_cur = 1;
+    if (brain_events_studio_charge(client, kr, pay_charge_done, c) != 0) {
+        st->wait_cur = 0;
+        pay_call_fire(&c->call, 0, 0, 0, 0.0);
+        free(c);
+    }
+}
+
+// game.authorizeSpend(player, amount, callb, modal) (:221223-221245); charge = chargeKR's chain (:221329-221336)
+static void pay_authorize(KsScript *s, Player *player, const KsValue amount_arg, const KsValue cb, const char *pid, const int modal, const int charge)
+{
+    ClientConnection *client = client_of_player(player);
+    const int amount = pay_amount(amount_arg);
+    PayCall call;
+    pay_call_set(&call, s, cb, pid);
+    PayState *st = brain_events_can_charge(client) && amount ? pay_state(client->id, 1) : NULL;
+    if (!st || !brain_events_monetized() || amount > PAY_AUTH_MAX || st->pending_id || client->peer_minor < NET_PROTOCOL_MINOR_EXT) {
+        pay_call_fire(&call, 0, !charge, 0, 0.0);
+        return;
+    }
+    st->pending_id = ++g_pay_seq;
+    st->pending_val = amount;
+    st->pending_until = now_ms() + PAY_CONSENT_MS;
+    st->pending_charge = charge;
+    st->pending = call;
+    const NetChargeConsentRequestPacket p = {.amount = amount, .id = st->pending_id, .modal = (uint8_t) (modal ? 1 : 0)};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(p)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_CHARGE_CONSENT_REQUEST, &p, sizeof(p));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n); // send(CHARGE_CONSENT_REQUEST, id, val, modal ? 1 : undefined)
+}
+
+// "chrsp" [id, accept]: game.resolveChargeConsent (:221247-221276)
+void ks_server_charge_response(ClientConnection *client, const uint8_t *body, const uint16_t length)
+{
+    NetChargeConsentResponsePacket r;
+    if (!client || !body || length < sizeof(r)) return;
+    memcpy(&r, body, sizeof(r));
+    PayState *st = pay_state(client->id, 0);
+    if (!st || !st->pending_id || st->pending_id != r.id) return;
+    PayCall call = st->pending;
+    const int id = st->pending_id, val = st->pending_val, charge = st->pending_charge;
+    st->pending_id = st->pending_val = 0;
+    st->pending.cb = ks_undef();
+    if (!r.accept) {
+        pay_call_fire(&call, 0, !charge, 0, 0.0);
+        return;
+    }
+    st->granted_id = id; // replaces an older grant (its timer is cleared)
+    st->granted_val = val;
+    st->granted_until = now_ms() + PAY_GRANT_MS;
+    if (!charge) {
+        pay_call_fire(&call, 1, 1, id, 0.0); // callb(true, "" + id)
+        return;
+    }
+    char auth_id[16];
+    snprintf(auth_id, sizeof(auth_id), "%d", id);
+    pay_transact_run(client, 0, 0, auth_id, &call); // chargeKR: transact(player, [], id, callb)
+}
+
+// the timers of pendingAuth (declines) and grantedAuth (expires); a state with nothing left goes
+static void pay_tick(void)
+{
+    const double now = now_ms();
+    for (int i = 0; i < PAY_STATES; i++) {
+        PayState *st = &g_pay[i];
+        if (!st->used) continue;
+        if (st->pending_id && now >= st->pending_until) {
+            PayCall call = st->pending;
+            const int charge = st->pending_charge;
+            st->pending_id = st->pending_val = 0;
+            st->pending.cb = ks_undef();
+            pay_call_fire(&call, 0, !charge, 0, 0.0);
+        }
+        if (st->granted_id && now >= st->granted_until) st->granted_id = st->granted_val = 0;
+        if (!st->pending_id && !st->granted_id && !st->wait_cur && !client_by_id(st->conn)) st->used = 0;
+    }
+}
+
+// a new script instance (storage_reset): every waiting callback belongs to the old one
+static void pay_reset(void)
+{
+    for (int i = 0; i < PAY_STATES; i++) {
+        g_pay[i].pending_id = g_pay[i].pending_val = 0;
+        g_pay[i].pending.cb = ks_undef();
+        g_pay[i].granted_id = g_pay[i].granted_val = 0;
+    }
+}
+
 static KsValue pay_authorize_spend(KsScript *s, void *user, const KsValue *args, int argc)
 {
     (void) user;
@@ -786,6 +1033,11 @@ static KsValue pay_authorize_spend(KsScript *s, void *user, const KsValue *args,
     if (amount > 0) {
         if (!pay_rate(s, player, "auth", 3)) {
             log_error_text("Calling authorizeSpend too much");
+        } else if (brain_events_monetized()) {
+            char pid[32];
+            pay_pid(player, ARG(0), s, pid, sizeof(pid));
+            pay_authorize(s, player, ARG(1), cb, pid, pay_truthy(ARG(3)), 0); // !!modal
+            return ks_undef();
         } else {
             log_error_text("Monetization is not enabled for this studio");
         }
@@ -808,6 +1060,11 @@ static KsValue pay_charge(KsScript *s, void *user, const KsValue *args, int argc
     if (amount > 0) {
         if (!pay_rate(s, player, "chg", 3)) {
             log_error_text("Calling charge too much");
+        } else if (brain_events_monetized()) {
+            char pid[32];
+            pay_pid(player, ARG(0), s, pid, sizeof(pid));
+            pay_authorize(s, player, ARG(1), cb, pid, 0, 1); // chargeKR (:221329-221336)
+            return ks_undef();
         } else {
             log_error_text("Monetization is not enabled for this studio");
         }
@@ -831,7 +1088,26 @@ static KsValue pay_transact(KsScript *s, void *user, const KsValue *args, int ar
         pay_answer(s, cb, ARG(0), player, 3, pay_zero());
         return ks_undef();
     }
-    log_error_text("Transactions disabled for now"); // game.transact: the callback never runs
+    // the entries game.transact keeps (:221294-221310): a whole non-zero amount up to 1000000, then a custom skin
+    // (any skin id: KrunkNative has no custom skins, so the transaction fails) or a currency
+    int has_items = 0, bad_items = 0;
+    const KsValue items = ARG(1);
+    for (size_t i = 0; items.tag == KS_ARR && i < ks_arr_len(items); i++) {
+        const KsValue it = ks_arr_get(s, items, i);
+        if (it.tag != KS_OBJ) continue;
+        const KsValue a = ks_obj_get(s, it, "amount");
+        const double amount = a.tag == KS_NUM && isfinite(a.as.num) ? trunc(a.as.num) : 0.0;
+        if (amount == 0.0 || fabs(amount) > PAY_AMOUNT_MAX) continue;
+        const KsValue skin = ks_obj_get(s, it, "skin"), currency = ks_obj_get(s, it, "currency");
+        if (skin.tag == KS_NUM) bad_items = 1; // iîIiïïï(skin) == null: no custom skin of that id
+        else if (currency.tag != KS_UNDEF && currency.tag != KS_NULL) has_items = 1;
+    }
+    char auth_id[32] = "", pid[32];
+    if (ARG(2).tag != KS_UNDEF && ARG(2).tag != KS_NULL) ks_to_string(s, ARG(2), auth_id, sizeof(auth_id)); // "" + authId
+    pay_pid(player, ARG(0), s, pid, sizeof(pid));
+    PayCall call;
+    pay_call_set(&call, s, cb, pid);
+    pay_transact_run(client_of_player(player), has_items, bad_items, auth_id, &call);
     return ks_undef();
 }
 
@@ -935,6 +1211,7 @@ void ks_server_tick(const float delta)
 {
     Game *game = &g_server->game;
     ks_storage_poll(); // STORAGE / Save / Load Data completions, the offline store's writes
+    pay_tick(); // GAME.PAYMENTS: unanswered consents decline (15 s), unspent ones expire (30 s)
     for (size_t i = 0; i < g_server->client_count; i++) { // who is in the match (onPlayerLeave on disconnect)
         if (!g_server->clients[i].player) continue;
         KsConn *c = conn_get(g_server->clients[i].id);

@@ -10,6 +10,7 @@
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
 #include <server_trade.h>    // the live trade of Trade mode (NET_EXT_TRADE_*, int [5, sid]; doc/v10/trade.md)
 #include <server_captcha.h>  // the in-game captcha's answer (NET_EXT_CAPTCHA_ANSWER, game_captcha.c)
+#include <server_brain_events.h> // v10.0.3 warsClan after the INIT, map prize wheels ("int" 9, "cnfm" 2)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
 #include <bot_banter.h>      // bot chat through kn_brain (GameHooks.bot_banter)
 #include <ai.h>
@@ -865,6 +866,7 @@ static void net_send_init(ClientConnection *client) {
     net_send_event_index(client);  // v10 INIT eventIndex, likewise
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     net_comp_lobby_sync(client);  // comp lobby: the connection's entry + the table
+    brain_events_send_init(client); // v10 init syncData.warsClan: the Turf Wars clan holding the map
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
 }
 
@@ -2070,7 +2072,10 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 net_send_ranked_match(client); // the ranked flag too: an EXT peer's INIT went out before its HELLO
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }
-            if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && g_server->game.ready) net_send_game_state(client); // its INIT went out first
+            if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && g_server->game.ready) {
+                net_send_game_state(client); // its INIT went out first
+                brain_events_send_init(client); // the map's Turf Wars clan (init syncData.warsClan)
+            }
             // the game announcement: a gated join gets it when it settles (accounts.c acc_set_ready);
             // an ungated one is settled from its connect, before this HELLO named its protocol
             if (client->acct.join_state == SERVER_JOIN_READY) net_send_game_announcement(client);
@@ -2219,6 +2224,8 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 memcpy(&interact, packet->payload, sizeof(interact));
                 if (interact.action == 1 && interact.type == GAME_INTERACT_TRADE && !interact.secondary)
                     trade_handle_interact(client, interact.uid); // "int" [5, sid]: the trade prompt (deob-10.0.3.js:260125)
+                else if (interact.action == 1 && interact.type == GAME_INTERACT_SPINNER && !interact.secondary)
+                    brain_events_spinner_interact(client, interact.uid); // "int" [9, uid]: a map prize wheel (deob-10.0.3.js:197177)
                 else if (interact.action == 1) game_player_interact_v7(&g_server->game, client->player, interact.type, interact.uid, interact.secondary);
                 else if (!net_drop_extra(client, interact.action)) game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
                 break;
@@ -2233,7 +2240,8 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             NetConfirmPacket confirm = {0};
             if (!client->player || !packet->length || packet->length > sizeof(confirm)) break;
             memcpy(&confirm, packet->payload, packet->length);
-            game_player_confirm_interact(&g_server->game, client->player, confirm.kind);
+            if (confirm.kind == 2) brain_events_spinner_confirm(client); // ["cnfm", 2]: the pending prize wheel spin (brain_events.c)
+            else game_player_confirm_interact(&g_server->game, client->player, confirm.kind);
             break;
         }
         case NET_PACKET_PONG:
@@ -2299,6 +2307,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KN_SWAP_TEAM) net_handle_swap_team(client, body, body_length); // Tap-to-Play Switch Teams
             else if (trade_handle_ext(client, subtype, body, body_length)) net_note_activity(client); // the live trade (trade.c)
             else if (subtype == NET_EXT_CAPTCHA_ANSWER) game_captcha_on_answer(client, body, body_length); // "cptR" (game_captcha.c)
+            else if (subtype == NET_EXT_CHARGE_CONSENT_RESPONSE) ks_server_charge_response(client, body, body_length); // "chrsp" (ks_server_host.c)
             else if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket) && client->player) // "stlkrt" i (stalker.h)
                 game_player_stalker_taunt(&g_server->game, client->player, body[0]);
             break;
