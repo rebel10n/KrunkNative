@@ -1188,7 +1188,9 @@ static KrunkerValue json_value(V10Out *o, const cJSON *j, int depth);
 
 void v10_map_recon(V10Out *o, const uint8_t *p, size_t n) { v10_map_recon_controlled(o, p, n, NULL); }
 
-void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON *controlled) {
+void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON *controlled) { v10_map_recon_full(o, p, n, NULL, controlled); }
+
+void v10_map_recon_full(V10Out *o, const uint8_t *p, size_t n, const NetPlayerMoveValsPacket *vals, const cJSON *controlled) {
     if (n != RECON_SIZE) {
         o->stop = "malformed (not the v3 NetReconPacket)";
         return;
@@ -1199,7 +1201,7 @@ void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON
         const KrunkerValue g[4] = {KRUNKER_V_NUM(rd_f32(p, 73)), KRUNKER_V_NUM(rd_f32(p, 77)), KRUNKER_V_NUM(rd_f32(p, 81)), KRUNKER_V_NUM(rd_f32(p, 85))};
         grapple = v10_arr(o, g, 4);
     }
-    KrunkerValue sync[27] = {
+    KrunkerValue sync[26 + 6 + 1] = {
         KRUNKER_V_NUM(rd_i32(p, 0)), /* inputSN (ack_seq) */
         KRUNKER_V_NUM(0), /* ping: not in the packet */
         KRUNKER_V_NUM(rd_f32(p, 4)), KRUNKER_V_NUM(rd_f32(p, 8)), KRUNKER_V_NUM(rd_f32(p, 12)), /* x, y, z */
@@ -1218,10 +1220,20 @@ void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON
         grapple,
         KRUNKER_V_NUM(rd_f32(p, 60) * 1000), /* canSlideT, ms */
         KRUNKER_V_NIL, /* protected */
-        KRUNKER_V_NIL, /* the controlled entity, below */
     };
-    if (controlled) sync[26] = json_value(o, controlled, 0);
-    v10_push(o, V10_IN_SYNC_PLAYER, (KrunkerValue[]){v10_arr(o, sync, controlled ? 27 : 26)}, 1);
+    uint32_t count = 26;
+    if (vals && vals->scheme == MOVEMENT_SCHEME_SRM && vals->count == 8) { /* tmpVel goes as one {x, y, z} */
+        for (int i = 0; i < 5; i++) sync[count++] = KRUNKER_V_NUM(vals->vals[i]);
+        static const char *const xyz[3] = {"x", "y", "z"};
+        const KrunkerValue v3[3] = {KRUNKER_V_NUM(vals->vals[5]), KRUNKER_V_NUM(vals->vals[6]), KRUNKER_V_NUM(vals->vals[7])};
+        sync[count++] = v10_obj(o, xyz, v3, 3);
+    } else if (vals && vals->scheme == MOVEMENT_SCHEME_VEHICLE && vals->count == 3) {
+        for (int i = 0; i < 3; i++) sync[count++] = KRUNKER_V_NUM(vals->vals[i]);
+    } else {
+        vals = NULL;
+    }
+    if (vals || controlled) sync[count++] = controlled ? json_value(o, controlled, 0) : KRUNKER_V_NUM(0); /* the controlled entity || 0 */
+    v10_push(o, V10_IN_SYNC_PLAYER, (KrunkerValue[]){v10_arr(o, sync, count)}, 1);
 }
 
 int v10_entity_subtype(const uint16_t subtype) {

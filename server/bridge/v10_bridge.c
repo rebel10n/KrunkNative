@@ -143,6 +143,8 @@ typedef struct V10Session {
     int has_ent_seed;
     double ent_seed;
     cJSON *controlled;
+    NetPlayerMoveValsPacket move_vals; /* the movement scheme's sendVals for the next RECON of its ack */
+    int has_move_vals;
     char *ent_chunk;
     size_t ent_chunk_len;
     int ent_chunk_next, ent_chunk_parts;
@@ -927,9 +929,16 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->pending_end && type != NET_PACKET_MODE_END) flush_pending_end(s);
     if (s->stopped) return;
     if (s->init_sent && type == NET_PACKET_MAP_INFO) round_restart(s);
-    /* v10.0.3 entities: the match seed after an INIT goes into that init's syncData.entSeed (deob-10.0.3.js:220292); one
-     * after the init was built cannot reach the client (v10 reads it in the init only): its ctx.rand then differs until the
-     * baselines put the entities right. The controlled entity waits for the RECON it precedes ("l"'s tail). */
+    /* SYNC_PLAYER's sendVals (NET_EXT_PLAYER_MOVE_VALS, right before the RECON of the same ack): its "l" carries them */
+    if (type == NET_PACKET_EXT && n >= 2 + sizeof(NetPlayerMoveValsPacket) && rd_u16(p, 0) == NET_EXT_PLAYER_MOVE_VALS) {
+        memcpy(&s->move_vals, p + 2, sizeof(s->move_vals));
+        s->has_move_vals = 1;
+        return;
+    }
+    /* v10.0.3 entities: the match seed after an INIT goes into that init's syncData.entSeed (deob-10.0.3.js:220292). KN's
+     * server sends it ahead of the ranked flag (net.c), the EXT this bridge builds its init on, so it is always in time; a
+     * later one (an older server) cannot reach the client (v10 reads it in the init only): its ctx.rand then differs until
+     * the baselines put the entities right. The controlled entity waits for the RECON it precedes ("l"'s tail). */
     if (type == NET_PACKET_EXT && n >= 2 && (rd_u16(p, 0) == NET_EXT_ENTITY_SEED || rd_u16(p, 0) == NET_EXT_ENTITY_CONTROLLED)) {
         const uint16_t sub = rd_u16(p, 0);
         cJSON *rec = ent_record(s, sub, p + 2, n - 2);
@@ -1273,11 +1282,13 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         finish_out(s, &o, "SHOT");
         return;
     }
-    /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon), with the controlled entity that
-     * came right before it */
+    /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon), with the movement scheme's
+     * sendVals and the controlled entity that came right before it */
     if (s->init_sent && type == NET_PACKET_RECON) {
         v10_out_init(&o);
-        v10_map_recon_controlled(&o, p, n, s->controlled);
+        const int vals = s->has_move_vals && n >= 4 && s->move_vals.ack_seq == rd_i32(p, 0);
+        v10_map_recon_full(&o, p, n, vals ? &s->move_vals : NULL, s->controlled);
+        s->has_move_vals = 0;
         cJSON_Delete(s->controlled);
         s->controlled = NULL;
         finish_out(s, &o, "RECON");

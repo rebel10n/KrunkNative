@@ -527,6 +527,8 @@ int main(void) {
     w_i32(chunk2, 0, (int32_t)config_len); w_i32(chunk2, 4, (int32_t)cut); memcpy(chunk2 + 8, config_text + cut, config_len - cut);
     native_send(&g_native, NET_PACKET_GAME_CONFIG, chunk2, 8 + config_len - cut);
     native_send(&g_native, NET_PACKET_NETWORK_DATA, network, 10);
+    // v10.0.3: the entities' seed, sent ahead of the ranked flag (net.c), goes into the init's syncData.entSeed
+    send_entity_ext(NET_EXT_ENTITY_SEED, "[-12345]");
     const uint8_t ranked_off[3] = {0x50, 0x80, 0};
     native_send(&g_native, NET_PACKET_EXT, ranked_off, 3);
     WAIT_FOR(native_count(NET_PACKET_MAP_REQUEST) == 1);
@@ -557,11 +559,14 @@ int main(void) {
         CHECK(a[6].type == KRUNKER_MAP && a[6].len == 2 && vequal(map_get(&a[6], "hitBoxPad"), &KRUNKER_V_NUM(1)) &&
               vequal(map_get(&a[6], "timeLimit"), &KRUNKER_V_NUM(5)), "init arg 6: the config's settings {hitBoxPad 1, timeLimit 5}");
         CHECK(a[9].type == KRUNKER_MAP && is_str(map_get(&a[9], "data"), map_json_text), "init arg 9: the map JSON text");
+        CHECK(vequal(map_get(&a[11], "entSeed"), &KRUNKER_V_NUM(-12345)) && vequal(map_get(&a[11], "gor"), &KRUNKER_V_NUM(1)),
+              "init arg 11: syncData {gor: 1, entSeed} (deob-10.0.3.js:220292)");
         CHECK(vequal(map_get(&a[12], "snf"), &KRUNKER_V_NUM(10)) && vequal(map_get(&a[12], "tf"), &KRUNKER_V_NUM(30)) &&
               vequal(map_get(&a[12], "sf"), &KRUNKER_V_NUM(1)), "init arg 12: networkData {snf 10, tf 30, sf 1}");
         CHECK(vequal(&a[13], &KRUNKER_V_BOOL(1)), "init arg 13 is true");
         CHECK(vequal(&a[16], &KRUNKER_V_BOOL(0)), "init arg 16 is isRanked");
-        CHECK(a[11].type == KRUNKER_MAP && a[11].len == 1 && vequal(map_get(&a[11], "gor"), &KRUNKER_V_NUM(1)), "init arg 11 is the sync data {gor: 1}");
+        CHECK(a[11].type == KRUNKER_MAP && a[11].len == 2 && vequal(map_get(&a[11], "gor"), &KRUNKER_V_NUM(1)),
+              "init arg 11 is the sync data {gor: 1, entSeed}");
     } else {
         CHECK(0, "the init has 20 arguments");
     }
@@ -1049,6 +1054,24 @@ int main(void) {
               vequal(&lf.args[0].u.items[0], &KRUNKER_V_NUM(4)), "l carries the inputSN as slot 0 (one argument)");
         CHECK(v10_bridge_untranslated("RECON") == 0, "RECON is translated");
         krunker_frame_free(&lf);
+        // v10.0.3: the movement scheme's sendVals of the same ack (NET_EXT_PLAYER_MOVE_VALS) and the controlled entity before
+        // the RECON: "l" carries them after the 26 slots (deob-10.0.3.js:222397-222405), SRM's tmpVel as one {x, y, z}
+        uint8_t mv[2 + sizeof(NetPlayerMoveValsPacket)];
+        NetPlayerMoveValsPacket vals = {.ack_seq = 5, .scheme = MOVEMENT_SCHEME_SRM, .count = 8, .vals = {1, 2, 0, 30, 0, 0.5f, 0.25f, -1}};
+        mv[0] = (uint8_t) (NET_EXT_PLAYER_MOVE_VALS & 0xff);
+        mv[1] = (uint8_t) (NET_EXT_PLAYER_MOVE_VALS >> 8);
+        memcpy(mv + 2, &vals, sizeof(vals));
+        native_send(&g_native, NET_PACKET_EXT, mv, sizeof(mv));
+        send_entity_ext(NET_EXT_ENTITY_CONTROLLED, "[7,40,{\"x\":6}]");
+        w_i32(rc, 0, 5);
+        native_send(&g_native, NET_PACKET_RECON, rc, 89);
+        WAIT_FOR(client_count("l") == 2);
+        CHECK(client_get("l", 1, &lf) && lf.args[0].type == KRUNKER_ARRAY && lf.args[0].len == 33 && vequal(&lf.args[0].u.items[26], &KRUNKER_V_NUM(1)) &&
+                  vequal(&lf.args[0].u.items[29], &KRUNKER_V_NUM(30)) && vequal(map_get(&lf.args[0].u.items[31], "z"), &KRUNKER_V_NUM(-1)) &&
+                  lf.args[0].u.items[32].type == KRUNKER_ARRAY && vequal(&lf.args[0].u.items[32].u.items[1], &KRUNKER_V_NUM(40)),
+              "l: SRM's six sendVals at 26.. (tmpVel {x, y, z}), then the controlled entity (%u slots)", lf.args[0].len);
+        krunker_frame_free(&lf);
+        CHECK(v10_bridge_untranslated("EXT 0x0210") == 0, "NET_EXT_PLAYER_MOVE_VALS is consumed");
     }
 
     // SHOT (21): player 9 fires one ray: the tracer "9" for the observer, its origin is 9's state (1.26, 2, 3, height 9.2);

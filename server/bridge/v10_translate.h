@@ -23,6 +23,7 @@
 #include "cJSON.h"
 #include "krunker_proto.h"
 #include "shared.h" /* NetInputPacket, NET_INPUT_* (the KN input frame) */
+#include "net_ext.h" /* NetPlayerMoveValsPacket (the l sendVals) */
 
 /* ---- v10 labels (v10Translate.ts V10_OUT / V10_IN) */
 #define V10_OUT_LOAD "load"
@@ -318,9 +319,13 @@ void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shoot
 /* RECON (NetReconPacket, 89 bytes): the owner's movement state as the "l" sync array (mapRecon in v10Translate.ts). */
 void v10_map_recon(V10Out *o, const uint8_t *p, size_t n);
 /* The same with SYNC_PLAYER's controlled entity [eid, tick, state] (NET_EXT_ENTITY_CONTROLLED right before the RECON) as
- * the array's last element, at 26 (no movement-scheme sendVals on the bridge; deob-10.0.3.js:222404-222405, the client
- * reads it at 26 + sendVals, :258296). NULL: the plain 26 slots. */
+ * the array's last element, at 26 (no movement-scheme sendVals: v10_map_recon_full below; deob-10.0.3.js:222404-222405,
+ * the client reads it at 26 + sendVals, :258296). NULL: the plain 26 slots. */
 void v10_map_recon_controlled(V10Out *o, const uint8_t *p, size_t n, const cJSON *controlled);
+/* The whole v10.0.3 tail (:222397-222405): after the 26 slots the movement scheme's sendVals (NET_EXT_PLAYER_MOVE_VALS of the
+ * same ack: SRM's onGroundFrames, onWallFrames, wishDash, dashTimer, walldashTimer and tmpVel {x, y, z}; Vehicle's
+ * forwardV, reverseV, angVel), then the controlled entity or 0. vals NULL and controlled NULL: the plain 26 slots. */
+void v10_map_recon_full(V10Out *o, const uint8_t *p, size_t n, const NetPlayerMoveValsPacket *vals, const cJSON *controlled);
 /* v10.0.3 KrunkScript entities and live objects (shared/include/ks_entities.h): one native record of `subtype` (the
  * JSON array of a NET_EXT_ENTITY_* / NET_EXT_KN_OFFICIAL_LIVE_* EXT) as its v10 message, the handlers' arguments
  * (deob-10.0.3.js:261720-261742): "e+" [payload], "e-" eid reason, "es" [[eid, tick, state]], "ee" eid name a b,

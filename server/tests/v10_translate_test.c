@@ -536,6 +536,22 @@ int main(void) {
                       vequal(&slot->u.items[1], &KRUNKER_V_NUM(40)) && slot->u.items[2].type == KRUNKER_MAP,
                   "l: the controlled entity in slot 26");
             v10_out_free(&ro);
+            // the movement schemes' sendVals before it: Vehicle's three numbers at 26..28, the controlled entity || 0 last
+            const NetPlayerMoveValsPacket veh = {.ack_seq = 12, .scheme = MOVEMENT_SCHEME_VEHICLE, .count = 3, .vals = {0.5f, 0.25f, -2}};
+            v10_out_init(&ro);
+            v10_map_recon_full(&ro, rc, 89, &veh, NULL);
+            const KrunkerValue *arr = ro.count == 1 ? &ro.msgs[0].args[0] : NULL;
+            CHECK(arr && arr->len == 30 && vequal(&arr->u.items[26], &KRUNKER_V_NUM(0.5)) && vequal(&arr->u.items[28], &KRUNKER_V_NUM(-2)) &&
+                      vequal(&arr->u.items[29], &KRUNKER_V_NUM(0)),
+                  "l: Vehicle's sendVals, then 0 for no controlled entity");
+            v10_out_free(&ro);
+            const NetPlayerMoveValsPacket srm = {.ack_seq = 12, .scheme = MOVEMENT_SCHEME_SRM, .count = 8, .vals = {1, 2, 0, 30, 0, 0.5f, 0.25f, -1}};
+            v10_out_init(&ro);
+            v10_map_recon_full(&ro, rc, 89, &srm, ctl);
+            arr = ro.count == 1 ? &ro.msgs[0].args[0] : NULL;
+            CHECK(arr && arr->len == 33 && arr->u.items[31].type == KRUNKER_MAP && arr->u.items[31].len == 3 && arr->u.items[32].type == KRUNKER_ARRAY,
+                  "l: SRM's five values, tmpVel {x, y, z}, then the controlled entity");
+            v10_out_free(&ro);
             cJSON_Delete(ctl);
         }
 
