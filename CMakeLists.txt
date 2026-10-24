@@ -1670,6 +1670,13 @@ else ()
         target_include_directories(audio_volume_test PRIVATE client/include client/lib)
         target_link_libraries(audio_volume_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
         add_test(NAME audio_volume_test COMMAND audio_volume_test)
+        # audio_distance_test: the emitters' Howler distance models (inverse / linear / exponential) against the Web Audio
+        # formulas through miniaudio, and audio.c's play3DL loop on the null backend (client/src/audio.c)
+        add_executable(audio_distance_test client/tests/audio_distance_test.c client/src/audio.c client/src/miniaudio.c
+                       ${SHARED_HEADERS} ${SHARED_SOURCES})
+        target_include_directories(audio_distance_test PRIVATE client/include client/lib)
+        target_link_libraries(audio_distance_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
+        add_test(NAME audio_distance_test COMMAND audio_distance_test)
     endif ()
 
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks

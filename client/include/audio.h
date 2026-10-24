@@ -100,8 +100,18 @@ void audio_play(const char *name, float volume, int loop, float rate);
 // volume is multiplied by AUDIO_OTHER_SOUND_MLT like Krunker. ref_distance/rolloff <= 0 use
 // the defaults above.
 void audio_play_3d(const char *name, vec3 position, float volume, float rate, float ref_distance, float rolloff);
-// SOUND.play3DL: positional loop (map sound emitters), no otherSoundMlt.
-void audio_play_3d_loop(const char *name, vec3 position, float volume, float rate, float ref_distance, float rolloff);
+// Howler's pannerAttr distanceModel, the Web Audio PannerNode models (deob-10.0.3.js:224689 ["inverse",
+// "linear", "exponential"]): miniaudio's attenuation models of the same name.
+typedef enum {
+    AUDIO_DISTANCE_INVERSE = 0,
+    AUDIO_DISTANCE_LINEAR = 1,
+    AUDIO_DISTANCE_EXPONENTIAL = 2,
+} AudioDistanceModel;
+// SOUND.play3DL(name, x, y, z, vol, rate, dist, roll, isAsset, distM): positional loop (map sound
+// emitters), no otherSoundMlt; distance_model is distM (AudioDistanceModel, anything else plays
+// inverse). Unlike play(), a loop of the same sound that already plays does not stop a second one.
+void audio_play_3d_loop(const char *name, vec3 position, float volume, float rate, float ref_distance, float rolloff,
+                        int distance_model);
 // SOUND.play3Dv: distance-faded 2D sound, played when 1 - dist/range > 0.1.
 void audio_play_3d_fade(const char *name, vec3 position, float range, float volume, float rate);
 
@@ -120,6 +130,9 @@ void audio_reload_all(void); // F5 (game_reload.c): every sound, as audio_reload
 int  audio_handle_play(const char *name, float volume, int loop, float rate, int positional, vec3 position,
                        float ref_distance, float rolloff);
 void audio_handle_volume(int handle, float volume);
+// The distance model (AudioDistanceModel), refDistance and rolloff the newest positional voice of
+// `name` plays with, as miniaudio holds them; 0 when none plays (audio_distance_test).
+int  audio_voice_distance(const char *name, int *model, float *ref_distance, float *rolloff);
 void audio_handle_rate(int handle, float rate);
 void audio_handle_fade(int handle, float from, float to, float ms);
 void audio_handle_position(int handle, vec3 position); // a positional voice moves (Howl.pos; 2D voices ignore it)

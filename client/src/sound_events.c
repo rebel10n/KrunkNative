@@ -229,9 +229,8 @@ static int map_ambient_index(const Map *map) {
 // map.js SOUND_EMITTER -> MapManager.addEmitter -> SOUND.play3DL (deob-10.0.3.js:189196-189204,
 // :186572-186580): the sound is config.emitterSounds[es] (v10.0.3's 74; an index past it plays
 // emitterSounds[0]) or the user asset esa ("asset:<id>", user-assets/<id>/sound.mp3), with ev / er /
-// ed / ero under the emitter limits (shared/include/triggers.h trigger_emitter_parse). Old maps'
-// "es" indices are the same list (shared/src/triggers.c). KrunkNative difference: audio.c has one
-// distance model, Howler's inverse; an "edm" of 1 (linear) or 2 (exponential) plays inverse.
+// ed / ero / edm under the emitter limits (shared/include/triggers.h trigger_emitter_parse). Old maps'
+// "es" indices are the same list (shared/src/triggers.c).
 static void map_start_emitters(const Map *map) {
     const cJSON *objects = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "objects") : NULL;
     const cJSON *object;
@@ -251,8 +250,9 @@ static void map_start_emitters(const Map *map) {
 
         TriggerEmitter emitter;
         if (!trigger_emitter_parse(object, &emitter)) continue;
-        // play3DL's pannerAttr: refDistance dist || 25, rolloffFactor roll || 1 (audio.c applies the defaults to 0)
-        audio_play_3d_loop(emitter.sound, position, emitter.volume, emitter.rate, emitter.distance, emitter.rolloff);
+        // play3DL's pannerAttr: refDistance dist || 25, rolloffFactor roll || 1 (audio.c applies the defaults to 0),
+        // distanceModel ["inverse", "linear", "exponential"][distM] (deob-10.0.3.js:225418-225421)
+        audio_play_3d_loop(emitter.sound, position, emitter.volume, emitter.rate, emitter.distance, emitter.rolloff, emitter.distance_model);
     }
 }
 

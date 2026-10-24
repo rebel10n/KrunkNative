@@ -9,7 +9,10 @@
 // - sounds missing from soundCats play with a category factor of 1;
 // - play3D: Web Audio PannerNode with the "inverse" distance model, refDistance 25,
 //   rolloffFactor 1, maxDistance 10000 = ma_attenuation_model_inverse with the same values
-//   (panning is miniaudio's, level-matched to an equal-power panner; Howler uses HRTF).
+//   (panning is miniaudio's, level-matched to an equal-power panner; Howler uses HRTF). play3DL
+//   (map sound emitters) takes the emitter's model too: "linear" / "exponential" are
+//   ma_attenuation_model_linear / _exponential, the same formulas (audio_distance_test; miniaudio
+//   also stops the inverse / exponential falloff at maxDistance, which Web Audio does not: 10000 units).
 //
 // Clips are decoded to f32 once (assets/sound/<name>.mp3). Long files (the ambient loops,
 // > AUDIO_STREAM_BYTES of MP3) stay compressed in memory and every voice streams them
@@ -84,6 +87,7 @@ typedef struct {
     int loop;
     vec3 position;
     float volume, rate, ref_distance, rolloff;
+    int distance_model;    // AudioDistanceModel (positional voices)
     uint32_t handle;       // audio_handle_play, 0 = none
 } PendingPlay;
 
@@ -300,7 +304,8 @@ static int clip_find(const char *name, const int create) {
 // the v1.5.6, v3.1.1 or v7.1.4 public/sound trees, and assets.krunker.io/sound/<name>.mp3 answers 404
 // (checked 2026-10-15). Krunker's Howl fails to load them and plays nothing; here they are silent clips:
 // no read, no download, no "missing sound" line on every map load (sound_events.c preloads the Bomb's).
-static const char *const KRUNKER_ABSENT_SOUNDS[] = {"weapon_13", "weapon_18"};
+// config.networkSounds names the Krunker host 404s (assets/README.md, 2026-10-24): silent, as in Krunker
+static const char *const KRUNKER_ABSENT_SOUNDS[] = {"weapon_13", "weapon_18", "weapon_7_0", "weapon_4_16"};
 
 static int sound_never_shipped(const char *name) {
     for (size_t i = 0; i < sizeof(KRUNKER_ABSENT_SOUNDS) / sizeof(KRUNKER_ABSENT_SOUNDS[0]); i++) {
@@ -491,7 +496,10 @@ static void voice_start(const PendingPlay *play) {
 
     if (play->kind != VOICE_2D) {
         ma_sound_set_position(&voice->sound, play->position.x, play->position.y, play->position.z);
-        ma_sound_set_attenuation_model(&voice->sound, ma_attenuation_model_inverse);
+        // Howler pannerAttr distanceModel ["inverse", "linear", "exponential"][distM] (deob-10.0.3.js:224689, :225421)
+        ma_sound_set_attenuation_model(&voice->sound, play->distance_model == AUDIO_DISTANCE_LINEAR      ? ma_attenuation_model_linear
+                                                      : play->distance_model == AUDIO_DISTANCE_EXPONENTIAL ? ma_attenuation_model_exponential
+                                                                                                         : ma_attenuation_model_inverse);
         ma_sound_set_min_distance(&voice->sound, play->ref_distance);
         ma_sound_set_max_distance(&voice->sound, AUDIO_MAX_DISTANCE);
         ma_sound_set_rolloff(&voice->sound, play->rolloff);
@@ -511,8 +519,8 @@ static void voice_start(const PendingPlay *play) {
         if (play->kind != VOICE_2D) {
             const ma_vec3f l = ma_engine_listener_get_position(&g_audio.engine, 0);
             const float dx = play->position.x - l.x, dy = play->position.y - l.y, dz = play->position.z - l.z;
-            printf(" pos=(%.1f,%.1f,%.1f) dist=%.1f ref=%.1f roll=%.2f", play->position.x, play->position.y, play->position.z,
-                   sqrtf(dx * dx + dy * dy + dz * dz), play->ref_distance, play->rolloff);
+            printf(" pos=(%.1f,%.1f,%.1f) dist=%.1f ref=%.1f roll=%.2f model=%d", play->position.x, play->position.y, play->position.z,
+                   sqrtf(dx * dx + dy * dy + dz * dz), play->ref_distance, play->rolloff, play->distance_model);
         }
         printf("\n");
         fflush(stdout);
@@ -532,15 +540,16 @@ static int clip_is_playing(const int clip, const VoiceKind kind) {
 
 static void play_request_handle(const char *name, const VoiceKind kind, const int loop, const vec3 position,
                                 const float volume, const float rate, const float ref_distance, const float rolloff,
-                                const uint32_t handle) {
+                                const int distance_model, const uint32_t handle) {
     if (!g_audio.ready) return;
 
     const int clip = clip_find(name, 1);
     if (clip < 0) return;
     if (g_audio.clips[clip].state == CLIP_FAILED) return;
 
-    // SOUND.play(..., loop): `if (!j || !f.isPlaying)` - a running loop is not restarted.
-    if (loop && clip_is_playing(clip, kind)) return;
+    // SOUND.play(..., loop): `if (!j || !f.isPlaying)` - a running loop is not restarted. play3DL has no
+    // such check (deob-10.0.3.js:225409-225416): two emitters of one sound both play.
+    if (loop && kind != VOICE_3D_LOOP && clip_is_playing(clip, kind)) return;
 
     const PendingPlay play = {
         .clip = clip,
@@ -551,6 +560,8 @@ static void play_request_handle(const char *name, const VoiceKind kind, const in
         .rate = rate > 0.0f ? rate : 1.0f,
         .ref_distance = ref_distance > 0.0f ? ref_distance : AUDIO_REF_DISTANCE,
         .rolloff = rolloff > 0.0f ? rolloff : AUDIO_ROLLOFF,
+        .distance_model = distance_model >= AUDIO_DISTANCE_INVERSE && distance_model <= AUDIO_DISTANCE_EXPONENTIAL ? distance_model
+                                                                                                                 : AUDIO_DISTANCE_INVERSE,
         .handle = handle,
     };
 
@@ -566,7 +577,7 @@ static void play_request_handle(const char *name, const VoiceKind kind, const in
 
 static void play_request(const char *name, const VoiceKind kind, const int loop, const vec3 position,
                          const float volume, const float rate, const float ref_distance, const float rolloff) {
-    play_request_handle(name, kind, loop, position, volume, rate, ref_distance, rolloff, 0);
+    play_request_handle(name, kind, loop, position, volume, rate, ref_distance, rolloff, AUDIO_DISTANCE_INVERSE, 0);
 }
 
 // ---------------------------------------------------------------- capture (debug)
@@ -1019,10 +1030,10 @@ void audio_play_3d(const char *name, const vec3 position, const float volume, co
 }
 
 void audio_play_3d_loop(const char *name, const vec3 position, const float volume, const float rate,
-                        const float ref_distance, const float rolloff) {
+                        const float ref_distance, const float rolloff, const int distance_model) {
     const float v = volume > 0.0f ? volume : 1.0f;
     if (v <= 0.05f) return;
-    play_request(name, VOICE_3D_LOOP, 1, position, v, rate, ref_distance, rolloff);
+    play_request_handle(name, VOICE_3D_LOOP, 1, position, v, rate, ref_distance, rolloff, distance_model, 0);
 }
 
 void audio_play_3d_fade(const char *name, const vec3 position, const float range, const float volume, const float rate) {
@@ -1113,8 +1124,24 @@ int audio_handle_play(const char *name, const float volume, const int loop, cons
     if (!g_audio.ready) return 0;
     if (++g_next_handle == 0 || g_next_handle > 0x7fffffffu) g_next_handle = 1;
     const VoiceKind kind = positional ? (loop ? VOICE_3D_LOOP : VOICE_3D) : VOICE_2D;
-    play_request_handle(name, kind, loop, position, volume, rate > 0.0f ? rate : 1.0f, ref_distance, rolloff, g_next_handle);
+    play_request_handle(name, kind, loop, position, volume, rate > 0.0f ? rate : 1.0f, ref_distance, rolloff, AUDIO_DISTANCE_INVERSE,
+                        g_next_handle);
     return handle_voice((int) g_next_handle) || handle_pending((int) g_next_handle) ? (int) g_next_handle : 0;
+}
+
+int audio_voice_distance(const char *name, int *model, float *ref_distance, float *rolloff) {
+    const int clip = name ? clip_find(name, 0) : -1;
+    for (int i = AUDIO_MAX_VOICES; clip >= 0 && i-- > 0;) {
+        AudioVoice *voice = &g_audio.voices[i];
+        if (!voice->in_use || voice->clip != clip || voice->kind == VOICE_2D) continue;
+        const ma_attenuation_model m = ma_sound_get_attenuation_model(&voice->sound);
+        if (model) *model = m == ma_attenuation_model_linear ? AUDIO_DISTANCE_LINEAR
+                          : m == ma_attenuation_model_exponential ? AUDIO_DISTANCE_EXPONENTIAL : AUDIO_DISTANCE_INVERSE;
+        if (ref_distance) *ref_distance = ma_sound_get_min_distance(&voice->sound);
+        if (rolloff) *rolloff = ma_sound_get_rolloff(&voice->sound);
+        return 1;
+    }
+    return 0;
 }
 
 void audio_handle_volume(const int handle, const float volume) {
