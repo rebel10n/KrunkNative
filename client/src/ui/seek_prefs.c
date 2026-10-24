@@ -352,7 +352,7 @@ static const char *preset_info(const int preset) {
     case SEEK_PRESET_FFA:
         return I18N("kn.quickplay.preset.ffa.info", "Free for All, Classic FFA, Gun Game, Last Man Standing, Kranked FFA and Bighead FFA, on the rotation maps");
     case SEEK_PRESET_RANKED:
-        return I18N("kn.quickplay.preset.ranked.info", "Hardpoint, the mode of Ranked, on the Ranked map pool: Sandstorm, Undergrowth, Industry, Site, Bureau, Eterno Simulator and Frontier");
+        return I18N("kn.quickplay.preset.ranked.info", "Hardpoint, the mode of Ranked, on the Ranked map pool: Sandstorm, Undergrowth, Industry, Site, Bureau and Frontier");
     case SEEK_PRESET_ANY:
         return I18N("kn.quickplay.preset.any.info", "Every mode and every official map: any public lobby");
     default:

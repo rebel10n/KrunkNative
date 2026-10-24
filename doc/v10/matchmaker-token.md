@@ -219,8 +219,8 @@ so uidiff still compares v10's tab):
     (modes 1, 2, 3, 19, 25, 26) on the rotation maps.
   * Free for All: Free for All, Classic FFA, Gun Game, Last Man Standing, Kranked FFA, Bighead FFA (modes
     0, 13, 10, 8, 27, 34) on the rotation maps.
-  * Competitive: Hardpoint, the mode of Ranked, on the Ranked map pool (`g_ranked_map_pool`: maps 2, 4, 11,
-    14, 17, 39, 42).
+  * Competitive: Hardpoint, the mode of Ranked, on the Ranked map pool (`g_ranked_map_pool`, 10.0.3's: maps
+    2, 4, 11, 14, 17, 42).
   * Every mode and map: all 37 modes and all 46 official maps.
   Unit test `seek_filter_test` (the table; a preset's text equals the switches' text for the same choice);
   e2e `v10_settings_e2e.py` run 2d (folded at start, the presets, the header).

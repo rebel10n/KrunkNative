@@ -27,7 +27,7 @@ shape; v10 needs a different contract (below).
 | `currentSeason` | 10 (cosmetic / battle-pass season, not ranked) | cfgdiff | 7 (`config.js`) |
 | `RANKED_ALWAYS_MAP` | 2 (Sandstorm) | `v10:19481`, `_7312 = 2` | new |
 | `RANKED_ROTATION_SLOTS` | 4 | `v10:19482` | new |
-| `rankedMapPoolInfo` | `{2 Sandstorm, 4 Undergrowth, 11 Industry, 14 Site, 17 Bureau, 39 Eterno Simulator, 42 Frontier}` | `v10:16509-16517` | new |
+| `rankedMapPoolInfo` | 10.0.3: `{2 Sandstorm, 4 Undergrowth, 11 Industry, 14 Site, 17 Bureau, 42 Frontier}` (`deob-10.0.3.js:19381-19388`); v10.0.2 also had `39 Eterno Simulator` | `v10:16509-16517` | new |
 | `getRankedMaps` | see "Map pool" | `v10:16518-16533` | new |
 | `rankedClasses` | `[0,1,2,3,4,5,6,8,12,13,15]` | `v10:16550` | same, `config.js:189` |
 | `rankedTimeForFirstConnect` | 60000 | `v10:19915` | new |
@@ -83,11 +83,11 @@ v7.1.4: no ranked season concept (store skins carry `rseas` 1-4 only). KrunkNati
 per-season ratings already (`ranked_ratings.season`, doc/backend.md 6.5); the v10 season number
 is a calendar formula, not `accounts.current_season`.
 
-## Map pool rotation (`getRankedMaps`, `v10:16518-16533`)
+## Map pool rotation (`getRankedMaps`, `v10:16518-16533`, `deob-10.0.3.js:19389-19403`)
 
 ```
 season s = currentRankedSeason
-pool = keys(rankedMapPoolInfo) minus RANKED_ALWAYS_MAP, sorted ascending   // [4,11,14,17,39,42]
+pool = keys(rankedMapPoolInfo) minus RANKED_ALWAYS_MAP, sorted ascending   // 10.0.3: [4,11,14,17,42] (10.0.2: [4,11,14,17,39,42])
 x = (2654435761 * (s + 1)) mod 2^32
 for i in 0..3:  x = (1664525*x + 1013904223) mod 2^32
                 j = i + x mod (len - i);  swap(pool[i], pool[j])           // partial Fisher-Yates
@@ -95,7 +95,8 @@ return sort_asc([2] + pool[0..3])                                           // 5
 ```
 Use exact 32-bit unsigned arithmetic (JS doubles stay exact here since `2654435761*(s+1)` < 2^53).
 The Ranked home tab shows these 5 maps (`img/maps/map_<id>.png`). Note the queue WebSocket
-still sends a fixed `preferredMaps = [0,2,4,11,14,17,42]` (`v10:98375`), not this list.
+still sends a fixed `preferredMaps = [0,2,4,11,14,17,42]` (`v10:98375`, unchanged in `deob-10.0.3.js:111733`), not this list.
+With 10.0.3's five rotating maps a season leaves exactly one out; season 15 (2026-10) is `[2, 4, 11, 17, 42]`.
 
 ## Queue / matchmaking flow (`_34047` MatchmakingService, `v10:98366-98760`)
 
@@ -136,7 +137,7 @@ ranked" exists too. v7.1.4 has the `joinedRank` name in `packets.json:136` only.
 | ping | key `markPosition` (i18n "Ping Position (Ranked Only)") raycasts 1000 units from camera and sends `mpos` [x,y,z]; server relays `mpos` -> `addPingIcon`; also in comp | `v10:170189-170199`, `v10:221125`, `v10:223179` |
 | offers | bundle popups suppressed while ranked | `v10:126427`, `v10:208691` |
 
-### Forfeit vote (`v10:186460-186490`, `v10:190925-191000`, `v10:191439`)
+### Forfeit vote (`v10:186460-186490`, `v10:190925-191000`, `v10:191439`; 10.0.3: `deob-10.0.3.js:215224-215257`, `221463-221546`, `222156-222163`, unchanged)
 
 | item | v10 |
 | --- | --- |
@@ -145,7 +146,7 @@ ranked" exists too. v7.1.4 has the `joinedRank` name in `packets.json:136` only.
 | update | votes pruned to current eligible names; `req = eligible count`; passes when `num >= req` (unanimous); stalls when no eligible voters |
 | timer | expires after `voteForfeitTimer` 60000 -> broadcast `vf` null |
 | packet | `vf (initiator|null, num, req, isStart, initiatorName, ?)` to the team only |
-| resolve | team gets `vf` null + chat `commands.forfeit.ended`, others `commands.forfeit.ended.other`; `prepareForfeit(otherTeam)` (unchanged from v7 `data/game.js:4435`) |
+| resolve | team gets `vf` null + chat `commands.forfeit.ended`, others `commands.forfeit.ended.other`; `prepareForfeit(otherTeam)`: `teamScores = {winner: ceil((bestOf \|\| 1) / 2)}`, the same `teamRoundWins`, `roundCount = 0`, `endGame()`. `bestOf` is `!!bstOfR`, so the winner gets 1 (`deob-10.0.3.js:221463-221473`; KN `forfeit.c`) |
 | messages | `commands.forfeit.next/wait/later/voted/limit` (same strings as v7 i18n 1362-1368) |
 
 The chat command that starts the vote is server code not in the bundle (guess: `/forfeit`,

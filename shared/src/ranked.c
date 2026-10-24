@@ -1,4 +1,4 @@
-// Krunker v10.0.2 ranked rules (shared/include/ranked.h, doc/v10/ranked-impl.md).
+// Krunker v10.0.3 ranked rules (shared/include/ranked.h, doc/v10/ranked-impl.md).
 #include <ranked.h>
 #include <math.h>
 #include <stdlib.h>
@@ -188,9 +188,10 @@ int ranked_season_at(const int64_t unix_s) {
     return 12 * (year - RANKED_SEASON_START_YEAR) + (month - RANKED_SEASON_START_MONTH + 1);
 }
 
-const int g_ranked_map_pool[RANKED_POOL_COUNT] = {2, 4, 11, 14, 17, 39, 42};
-static const char *const k_pool_names[RANKED_POOL_COUNT] = {"Sandstorm", "Undergrowth", "Industry", "Site", "Bureau",
-                                                            "Eterno Simulator", "Frontier"};
+// rankedMapPoolInfo (deob-10.0.3.js:19381-19388): {2 Sandstorm, 4 Undergrowth, 11 Industry, 14 Site, 17 Bureau,
+// 42 Frontier}. 10.0.3 dropped 39 Eterno Simulator (v10.0.2's table had it, "Eterno Simulator left the ranked pool").
+const int g_ranked_map_pool[RANKED_POOL_COUNT] = {2, 4, 11, 14, 17, 42};
+static const char *const k_pool_names[RANKED_POOL_COUNT] = {"Sandstorm", "Undergrowth", "Industry", "Site", "Bureau", "Frontier"};
 
 const char *ranked_pool_map_name(const int map_index) {
     for (int i = 0; i < RANKED_POOL_COUNT; i++) {
@@ -201,6 +202,8 @@ const char *ranked_pool_map_name(const int map_index) {
 
 static int cmp_int(const void *a, const void *b) { return *(const int *) a - *(const int *) b; }
 
+// getRankedMaps (deob-10.0.3.js:19389-19403): Sandstorm, plus the first 4 of the other pool keys after a
+// seeded partial Fisher-Yates, ascending. With 10.0.3's 5 other keys a season leaves exactly one out.
 void ranked_season_maps(const int season, int out[RANKED_SEASON_MAPS]) {
     int pool[RANKED_POOL_COUNT];
     int len = 0;

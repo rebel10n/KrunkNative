@@ -38,7 +38,7 @@
 #define RANKED_TOKEN_MAX 4096            // krunker_account's TOKEN_MAX
 #define RANKED_FRAME_MAX (1024u * 1024u) // one WebSocket message
 #define QUEUE_IO_MS 5000                 // the socket's connect / send / receive bound: a timeout re-checks the stop
-// v10's preferredMaps (v10:98372), joined with commas as v10 does (not encoded)
+// v10's preferredMaps (v10:98372; unchanged in deob-10.0.3.js:111733, Eterno Simulator never in it), joined with commas as v10 does (not encoded)
 #define QUEUE_PREFERRED_MAPS "0,2,4,11,14,17,42"
 
 static void wipe(void *p, size_t n) {

@@ -275,7 +275,10 @@ static void test_presets(void) {
     seek_filter_list_text(p[SEEK_PRESET_FFA].modes, p[SEEK_PRESET_FFA].mode_count, text, sizeof(text));
     CHECK(!strcmp(text, "0,8,10,13,27,34") && p[SEEK_PRESET_FFA].map_count == 0, "ffa: modes \"%s\" (FFA, LMS, Gun Game, Classic FFA, Kranked, Bighead), rotation maps", text);
     seek_filter_list_text(p[SEEK_PRESET_RANKED].modes, p[SEEK_PRESET_RANKED].mode_count, text, sizeof(text));
-    CHECK(!strcmp(text, "2") && p[SEEK_PRESET_RANKED].map_count == 7, "ranked: Hardpoint only (\"%s\"), the 7-map Ranked pool", text);
+    CHECK(!strcmp(text, "2") && p[SEEK_PRESET_RANKED].map_count == RANKED_POOL_COUNT && RANKED_POOL_COUNT == 6,
+          "ranked: Hardpoint only (\"%s\"), the 6-map Ranked pool of 10.0.3", text);
+    seek_filter_list_text(p[SEEK_PRESET_RANKED].maps, p[SEEK_PRESET_RANKED].map_count, text, sizeof(text));
+    CHECK(!strcmp(text, "2,4,11,14,17,42"), "ranked: maps \"%s\" (no Eterno Simulator 39)", text);
     for (int k = 0; k < p[SEEK_PRESET_RANKED].map_count; k++) {
         CHECK(ranked_pool_map_name(p[SEEK_PRESET_RANKED].maps[k]) != NULL, "ranked: map %d is in the Ranked pool", p[SEEK_PRESET_RANKED].maps[k]);
     }

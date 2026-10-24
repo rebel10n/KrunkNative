@@ -1,5 +1,5 @@
 #pragma once
-// Krunker v10.0.2 ranked: the rules shared by the brain (services/brain/ranked.c, the authority),
+// Krunker v10.0.3 ranked: the rules shared by the brain (services/brain/ranked.c, the authority),
 // the client (the Ranked window, client/src/ui/ranked_ui.c) and the tests. doc/v10/ranked-impl.md.
 //
 // v10's client shows a TrueSkill-like rating: profile.conservative_rating, displayed as
@@ -28,19 +28,19 @@ double ranked_delta(double rating, double opponents, double score, int abandoned
 int ranked_rank_index(double rating);
 int ranked_rank_number(double rating);
 
-// ---- v10.0.2
-#define RANKED_MIN_LEVEL 10          // "You must be level 10 or higher to access Ranked Mode."
+// ---- v10.0.3 (deob-10.0.3.js lines; the values v10.0.2 already had are unchanged)
+#define RANKED_MIN_LEVEL 10          // "You must be level 10 or higher to access Ranked Mode." (deob-10.0.3.js:127658-127661)
 #define RANKED_COOLDOWN_MS 1800000   // KrunkNative: abandon queue ban (v10's ERROR COOLDOWN, length server-side)
 #define RANKED_TEAM_SIZE 4           // comp host type overDat (minPlayers 8): 4v4 Hardpoint
-#define RANKED_PLACEMENT_MATCHES 6   // "6 - total_matches games remaining until ranked", minMatchesForPoints 6
-#define RANKED_MAX_MATCHES 100       // "100 matches = 100% conversion rate" (maxMatches 100)
-#define RANKED_DECAY_DAYS 7          // "Your rating will decay after 7+ days of inactivity"
-#define RANKED_TIME_FIRST_CONNECT_MS 60000 // config.rankedTimeForFirstConnect
-#define RANKED_SEASON_START_YEAR 2025
+#define RANKED_PLACEMENT_MATCHES 6   // "6 - total_matches games remaining until ranked", minMatchesForPoints 6 (deob-10.0.3.js:128136, 128162)
+#define RANKED_MAX_MATCHES 100       // "100 matches = 100% conversion rate" (maxMatches 100, deob-10.0.3.js:128161)
+#define RANKED_DECAY_DAYS 7          // "Your rating will decay after 7+ days of inactivity" (deob-10.0.3.js:112366)
+#define RANKED_TIME_FIRST_CONNECT_MS 60000 // config.rankedTimeForFirstConnect (deob-10.0.3.js:22815)
+#define RANKED_SEASON_START_YEAR 2025 // currentRankedSeason (deob-10.0.3.js:19369-19377)
 #define RANKED_SEASON_START_MONTH 8
 #define RANKED_ALWAYS_MAP 2          // Sandstorm
 #define RANKED_ROTATION_SLOTS 4
-#define RANKED_POOL_COUNT 7          // rankedMapPoolInfo
+#define RANKED_POOL_COUNT 6          // rankedMapPoolInfo (deob-10.0.3.js:19381-19388; v10.0.2 had 7, with Eterno Simulator)
 #define RANKED_SEASON_MAPS (RANKED_ROTATION_SLOTS + 1)
 
 // TrueSkill parameters (KrunkNative)
@@ -51,12 +51,13 @@ int ranked_rank_number(double rating);
 #define RANKED_DRAW_Z 0.12566       // draw margin = z * sqrt(players) * beta, z = Phi^-1((0.1 + 1) / 2): 10% draws
 #define RANKED_ABANDON_MU 1.0        // an abandoner also loses 1 mu (100 display points)
 
-// config.rankedClasses: the classes a comp lobby allows (classLim<i> defC 1)
+// config.rankedClasses: the classes a comp lobby allows (classLim<i> defC 1; deob-10.0.3.js:19426, 22813)
 #define RANKED_CLASS_COUNT 11
 extern const int g_ranked_classes[RANKED_CLASS_COUNT];
 int ranked_class_allowed(int class_index);
 
-// Ranks (the v10 enum: Unranked 0, Bronze1 1 ... Kracked 13)
+// Ranks (the v10 enum: Unranked 0, Bronze1 1 ... Kracked 13; deob-10.0.3.js:110781-110801 enum, thresholds and icons,
+// 110840-110867 colours)
 enum {
     RANK_UNRANKED = 0,
     RANK_BRONZE1, RANK_BRONZE2, RANK_BRONZE3,
@@ -96,20 +97,20 @@ RankedSkill ranked_season_seed(const RankedSkill *previous, int v7_elo);
 
 // Seasons: 0 before 2025-08 (the Beta season), else 12 * (year - 2025) + (month - 8 + 1), UTC.
 int ranked_season_at(int64_t unix_s);
-// getRankedMaps(season): Sandstorm + 4 of the pool (seeded LCG, partial Fisher-Yates), ascending.
+// getRankedMaps(season): Sandstorm + 4 of the pool (seeded LCG, partial Fisher-Yates), ascending (deob-10.0.3.js:19389-19403).
 void ranked_season_maps(int season, int out[RANKED_SEASON_MAPS]);
-// rankedMapPoolInfo keys. KrunkNative plays 2, 4, 11, 14, 17 only (KN choice, Q-MAP). Eterno Simulator (39)
-// and Frontier (42) are official Krunker maps with catalogue entries (map_catalog.h: their mapIndex is their
-// index), so they load; the season still lists them and the brain reports them unavailable (ranked.c
-// add_season_maps), and the matcher never hosts them.
+// rankedMapPoolInfo keys, 10.0.3's: 2 Sandstorm, 4 Undergrowth, 11 Industry, 14 Site, 17 Bureau, 42 Frontier.
+// Eterno Simulator (39) left the pool in 10.0.3 (it stays an official map and a comp host map). Every pool map
+// has a catalogue entry (map_catalog.h: the mapIndex is the entry's index), so the brain lists each season map
+// available and the matcher hosts any of them (services/brain/ranked.c ranked_map_playable).
 extern const int g_ranked_map_pool[RANKED_POOL_COUNT];
 const char *ranked_pool_map_name(int map_index);       // rankedMapPoolInfo name, NULL when not in it
 
 // End-of-season Ranked Points (one formula: the Ranked popup's estimate and the brain's payout,
-// v10:112066-112067): 0 below 6 matches (the Beta season too), else floor(display MMR * rate) with
+// deob-10.0.3.js:128161-128176): 0 below 6 matches (the Beta season too), else floor(display MMR * rate) with
 // rate min(matches / 100, 1), and 1 in the Beta season (season 0).
 int64_t ranked_season_points(double conservative, int matches, int season);
-// Per-match Ranked Points: clamp(floor(reward / 2), 0, 60) (v10 game.js endGame, ranked).
+// Per-match Ranked Points: clamp(floor(reward / 2), 0, 60) (endGame, ranked: deob-10.0.3.js:217283-217284).
 int ranked_match_points(int reward);
 
 // Milestones (KrunkNative's table; v10 reads them from the profile response).

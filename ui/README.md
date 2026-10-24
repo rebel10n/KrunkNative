@@ -32,6 +32,7 @@ options: `tools/ui-import/README.md`) and edited since. Which source each file c
 | `windows/versions.txt` | The served `docs/versions.txt` (changelog). |
 | `windows/` (`<n>.html`, `settings-{basic,advanced}-<t>.html`, `controls-<t>.html`, `windows.json`) | **Rendered**: what v10's own client writes into `#menuWindow` for `showWindow(1..54)`, every settings tab of both views and the five Change Controls tabs, captured by `capture_v10_live.js` (offline mode, below) and kept as `tools/ui-import/krunker-windows-v10.json.gz`; split by `tools/ui-import/windows_v10.py` with `windows_v7.py`'s rules (pickers cut to 4 cards, per-weapon setting clones and the host window's big Advanced bodies dropped, Download Client = ours). Window 14 (Store) is v7.1.4's capture (`"from": "v7.1.4"` in windows.json): offline, v10 cannot build the Store without its API. Window 5 (Account) is v10's own, empty: v10 shows a guest its login popup instead (autoWindowClose), and the signed-in Account window is generated (`account_ui.c`). Slots 11, 12, 22, 28, 29 are empty in v10. `2.html` (Servers) and `27.html` (Ranked) are empty on purpose too: v10's `gen()` returns `''` for them and fills the window at run time (`windows[1].genList()`, the ranked popup); KN builds them in `client/src/ui/servers_ui.c` (`servers_window_gen`) and `ranked_ui.c`. The `#classPreviewCanvas` v10 moves into the loadout windows is dropped from the templates (the page keeps the menu's one). |
 | `img/live-icon.png` | Byte copy of the served `https://krunker.io/img/live-icon.png` (77x53 PNG, fetched 2026-10-24; the Live Streams promo card). |
+| `img/stalker_leap.png` | Byte copy of the served `https://krunker.io/img/stalker_leap.png` (128x128 PNG, fetched 2026-10-24; the Stalker's leap item in `#zPerksHolder`, `doc/v10/stalker.md`). |
 | `img/gift-emoji.png`, `img/gift-emoji-12.png` | Ours: U+1F381 rendered by Chromium with the system colour emoji font (Noto Color Emoji) at the badges' sizes (14 px and 12 px CSS, 4x raster), the glyph Chrome draws for the official 🎁 (the engine's symbol subsets have no colour emoji). |
 | `css/krunknative.css`, `css/hud.css`, `css/devconsole.css`, `css/ranked-kn.css`, `js/kn-shim.js`, `js/loader.js` | Ours. |
 | `windows/kn-versions.txt`, `css/kn-v10-news.css` | Ours: Krunker Box Office's changelog, which the What's New window shows (Krunker's `docs/versions.txt` format, newest update first = the version), and the native fill-ins of the What's New / Guide / Community popups (`client/src/ui/v10_news.c`, doc/v10/ui.md). |
@@ -268,8 +269,9 @@ slide_moonlight Corrade, FortniteTiltedT DjDankMeister, Test v e c t o r (2018).
 | `slide_moonlight` | slide_moonlight | `img/maps/community/slide_moonlight.png` | user-assets `m17738/thumb.png` | present |
 | `zombie_high` | Zombie_High | `img/maps/community/zombie_high.png` | user-assets `m148853/thumb.png` | present |
 
-Ranked pool (`shared/src/ranked.c`): `map_2`, `map_4`, `map_11`, `map_14`, `map_17` are v7 (present); `map_39`
-(Eterno Simulator) is v7's file, `map_42` (Frontier) is the live asset host's `img/maps/map_42.png` (both present).
+Ranked pool (`shared/src/ranked.c`, 10.0.3's): `map_2`, `map_4`, `map_11`, `map_14`, `map_17` are v7 (present),
+`map_42` (Frontier) is the live asset host's `img/maps/map_42.png` (present). `map_39` (Eterno Simulator, v7's file)
+left the pool in 10.0.3 and stays as the catalogue entry's picture.
 
 Missing: 25 of the 83 catalogue maps (the 9 `152_` maps, 5 community maps and 11 v10 additions above). Before the
 v10 additions, 14 of the 69 were missing (the 9 `152_` maps and 5 community maps). The `152_` maps are v3.1.1's old_* copies of the v1.5.2 maps; the

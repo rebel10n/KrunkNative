@@ -344,7 +344,7 @@ check(saved_modes == "2,3,4,18,19,25", f"Quickplay: seek_modes persisted as v10'
 # (seek_prefs.c presets_html / apply_preset). A new client on the same settings: the section is folded again
 # (its state is not saved), the presets work while it is folded, the header opens and folds it, and a preset
 # shows its switches. Team = modes 1, 2, 3, 19, 25, 26 on the rotation maps; Competitive = Hardpoint on the
-# Ranked pool (2, 4, 11, 14, 17, 39, 42); Every mode and map = all 37 modes and 46 maps; Krunker rotation = both empty.
+# Ranked pool (2, 4, 11, 14, 17, 42: 10.0.3's, no Eterno Simulator); Every mode and map = all 37 modes and 46 maps; Krunker rotation = both empty.
 script2d = """
 0 menu
 300 call showWindow 1
@@ -362,6 +362,7 @@ script2d = """
 1420 text @teammap5 [id=knSeekMap5]
 1500 clickid knSeekPreset3
 1700 text @ranked39 [id=knSeekMap39]
+1720 text @ranked42 [id=knSeekMap42]
 1750 text @ranked0 [id=knSeekMap0]
 1760 text @ranked17 [id=knSeekMap17]
 1800 text @ranked1 [id=knSeekMode1]
@@ -400,11 +401,11 @@ check(probe(log2d, "teammap5")["checked"] == 0 and probe(log2d, "teammap39")["ch
       "Team preset: the maps stay the rotation (Eterno Simulator, in it, on; Shipment, not in it, off)")
 check("[ui] Quickplay seek_modes=1,2,3,19,25,26\n" in log2d and "[ui] Quickplay seek_maps=(none: the public rotation)\n" in log2d,
       "Team preset saves seek_modes 1,2,3,19,25,26 and the rotation maps, as the switches would")
-check(probe(log2d, "ranked39")["checked"] == 1 and probe(log2d, "ranked17")["checked"] == 1 and probe(log2d, "ranked0")["checked"] == 0
-      and probe(log2d, "ranked1")["checked"] == 0 and probe(log2d, "ranked2")["checked"] == 1,
-      "Competitive: Hardpoint and the Ranked pool (Bureau, Eterno Simulator) on; Burg (the rotation) and Team Deathmatch off")
-check("[ui] Quickplay seek_maps=2,4,11,14,17,39,42\n" in log2d and "[ui] Quickplay seek_modes=2\n" in log2d,
-      "Competitive saves seek_modes 2 and the Ranked pool 2,4,11,14,17,39,42")
+check(probe(log2d, "ranked42")["checked"] == 1 and probe(log2d, "ranked17")["checked"] == 1 and probe(log2d, "ranked0")["checked"] == 0
+      and probe(log2d, "ranked39")["checked"] == 0 and probe(log2d, "ranked1")["checked"] == 0 and probe(log2d, "ranked2")["checked"] == 1,
+      "Competitive: Hardpoint and the Ranked pool (Bureau, Frontier) on; Burg (the rotation), Eterno Simulator (left the pool in 10.0.3) and Team Deathmatch off")
+check("[ui] Quickplay seek_maps=2,4,11,14,17,42\n" in log2d and "[ui] Quickplay seek_modes=2\n" in log2d,
+      "Competitive saves seek_modes 2 and the Ranked pool 2,4,11,14,17,42")
 check(probe(log2d, "any36")["checked"] == 1 and probe(log2d, "any0")["checked"] == 1 and probe(log2d, "any45")["checked"] == 1,
       "Every mode and map: the last mode, the first mode and the last map are on")
 check(probe(log2d, "rot0")["checked"] == 1 and probe(log2d, "rot4")["checked"] == 0 and probe(log2d, "rotmap2")["checked"] == 1
