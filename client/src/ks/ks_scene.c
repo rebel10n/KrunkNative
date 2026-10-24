@@ -71,6 +71,7 @@ typedef struct KsObj3D {
     uint32_t attach_id;
     int attach_uid;
     int attach_point;          // KSP_*: attachTo's 6th argument on a player
+    int fps_layer;             // drawn by the viewmodel pass (fps_scene): v10's layers.mask copied from a first-person "handL"
 } KsObj3D;
 
 typedef struct {
@@ -264,9 +265,11 @@ static KsObj3D *obj_new(const int kind) {
 }
 
 static Scene *world_scene(void) { return g_ksc.client ? g_ksc.client->scene : NULL; }
+// RENDER.scene, or the layer-1 objects the fpsCamera draws (KN's viewmodel scene)
+static Scene *obj_scene(const KsObj3D *o) { return o->fps_layer && g_ksc.client ? g_ksc.client->fps_scene : world_scene(); }
 
 static void obj_add_to_scene(KsObj3D *o) {
-    Scene *scene = world_scene();
+    Scene *scene = obj_scene(o);
     if (!scene || o->in_scene) return;
     if (o->mesh) scene_add_mesh(scene, o->mesh);
     if (o->model) scene_add_gltf(scene, o->model);
@@ -274,7 +277,7 @@ static void obj_add_to_scene(KsObj3D *o) {
 }
 
 static void obj_remove_from_scene(KsObj3D *o) {
-    Scene *scene = world_scene();
+    Scene *scene = obj_scene(o);
     if (!o->in_scene) return;
     if (scene && o->mesh) scene_remove_mesh(scene, o->mesh);
     if (scene && o->model) scene_remove_gltf(scene, o->model);
@@ -1372,7 +1375,10 @@ static KsValue sc_clear(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u; (void) a; (void) n;
     Scene *scene = world_scene();
     if (!scene) return ks_undef();
-    for (int i = 0; i < g_sc.count; i++) g_sc.objs[i]->in_scene = 0;
+    for (int i = 0; i < g_sc.count; i++) { // the viewmodel pass's ones are in the same three.js scene
+        if (g_sc.objs[i]->fps_layer) obj_remove_from_scene(g_sc.objs[i]);
+        g_sc.objs[i]->in_scene = 0;
+    }
     scene->mesh_count = 0;
     return ks_undef();
 }
@@ -1571,6 +1577,51 @@ static MeshTransform *attach_target(const KsObj3D *o) {
     }
 }
 
+// syncHandL's layers.mask (deob-10.0.3.js:193540-193546): an object under a first-person "handL" anchor
+// (attached to it, or to an object or a model bone that is) takes the arm's layer, so the viewmodel pass draws it
+static int obj_first_person(const KsObj3D *o, const int depth) {
+    if (!o->attach || depth > 8) return 0;
+    switch (o->attach) {
+        case KSA_PLAYER: {
+            if (o->attach_point != KSP_HAND_L) return 0;
+            Client *client = g_ksc.client;
+            return player_pose_hand_l_first_person(client ? ks_game_player_by_uid(&client->game, (uint32_t) o->attach_uid) : NULL);
+        }
+        case KSA_OBJECT: {
+            const KsObj3D *t = obj_find(o->attach_id);
+            return t && t != o && obj_first_person(t, depth + 1);
+        }
+        case KSA_BONE:
+            for (int i = 0; i < g_sc.bone_count; i++) {
+                if (g_sc.bones[i].id != o->attach_id) continue;
+                const KsObj3D *owner = obj_find(g_sc.bones[i].owner);
+                return owner && owner != o && obj_first_person(owner, depth + 1);
+            }
+            return 0;
+        default: return 0;
+    }
+}
+
+void ks_scene_attached_layers(int *fps, int *world) {
+    int f = 0, w = 0;
+    for (int i = 0; i < g_sc.count; i++) {
+        const KsObj3D *o = g_sc.objs[i];
+        if (!o->attach || !o->in_scene || o->kind == KSO_LIGHT) continue;
+        if (o->fps_layer) f++;
+        else w++;
+    }
+    if (fps) *fps = f;
+    if (world) *world = w;
+}
+
+static void obj_set_fps_layer(KsObj3D *o, const int fps) {
+    if (o->fps_layer == fps) return;
+    const int shown = o->in_scene;
+    if (shown) obj_remove_from_scene(o);
+    o->fps_layer = fps;
+    if (shown) obj_add_to_scene(o);
+}
+
 void ks_scene_frame(Client *client, const float delta_ms) {
     // the camera as an attach target: position + rotation like the render camera
     g_sc.camera_xf.position = client->camera.position;
@@ -1586,6 +1637,7 @@ void ks_scene_frame(Client *client, const float delta_ms) {
             o->xf.parent = &o->pivot;
             // an object attached under a target that is gone stays where its pivot says
         }
+        if (o->kind != KSO_LIGHT) obj_set_fps_layer(o, obj_first_person(o, 0));
         if (o->kind == KSO_SPRITE && o->mesh) {
             // SpriteMaterial: always faces the camera
             o->mesh->transform.rotation_order = ROTATION_ORDER_YXZ;

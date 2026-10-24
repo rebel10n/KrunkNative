@@ -27,3 +27,10 @@ int player_pose_face_ride_yaw(const Player *player, float *yaw);
 // players.getHands / getHandL: the "hands" / "handL" attach points of the model (NULL without meshes)
 MeshTransform *player_pose_hands_anchor(Player *player);
 MeshTransform *player_pose_hand_l_anchor(Player *player);
+// syncHandL copies the arm's layers.mask onto the "handL" anchor and everything under it (:193540-193546):
+// 1 when that arm is a first-person one (the local first-person model, drawn by the viewmodel pass, fps_scene),
+// so what hangs there is drawn in that pass too. syncHands copies no layer: "hands" stays in the world pass.
+int player_pose_hand_l_first_person(Player *player);
+// One probe record (the input script's `poses`): "has=0x.. hold=y l=x,y,z r=x,y,z merged=x,y,z" (the arm pivots'
+// rotations of the slot in hand, the merged arms' kept rotation); "-" without a model
+void player_pose_describe(const Player *player, char *out, size_t n);

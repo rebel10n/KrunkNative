@@ -20,6 +20,7 @@
 #include <nettspend.h>
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 // ---------------------------------------------------------------- the pose (setPose, pendingPoses)
@@ -76,6 +77,7 @@ static void pose_model_rest(Player *player) {
     for (size_t i = 0; pm->arms && i < (size_t) player->loadout_size; i++) {
         PlayerArms *arms = pm->arms[i];
         if (!arms || arms->melee_pose) continue; // armMeshes: posed again every frame (player_update_melee_arms)
+        arms->pose_merged_position = arms->pose_merged_rotation = (vec3) {0.0f, 0.0f, 0.0f};
         for (int k = 0; k < 2; k++) {
             PlayerArmMesh *arm = k ? arms->right : arms->left;
             if (!arm) continue;
@@ -147,6 +149,21 @@ static void pose_turn(MeshTransform *t, const float r[3], const vec3 c, const fl
     const float px = t->position.x - c.x, py = t->position.y - c.y, pz = t->position.z - c.z;
     t->position = (vec3) {q[0][0] * px + q[0][1] * py + q[0][2] * pz + c.x, q[1][0] * px + q[1][1] * py + q[1][2] * pz + c.y,
                           q[2][0] * px + q[2][1] * py + q[2][2] * pz + c.z};
+    t->rotation = euler_from_mat3(out);
+    t->rotation_order = ROTATION_ORDER_INTRINSIC;
+}
+
+// The node moved by a parent-frame transform M (position pm, rotation rm): p' = Rm p + pm, R' = Rm R. On a node at
+// rest it simply takes M (the merged arms' kept transform onto KN's two pivots).
+static void pose_apply(MeshTransform *t, const vec3 pm, const vec3 rm) {
+    float m[3][3], cur[3][3], out[3][3];
+    mat3_from_euler(m, rm);
+    mat3_from_euler(cur, t->rotation_order == ROTATION_ORDER_INTRINSIC ? t->rotation : (vec3) {0.0f, 0.0f, 0.0f});
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) out[i][j] = m[i][0] * cur[0][j] + m[i][1] * cur[1][j] + m[i][2] * cur[2][j];
+    const vec3 p = t->position;
+    t->position = (vec3) {m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + pm.x, m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + pm.y,
+                          m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + pm.z};
     t->rotation = euler_from_mat3(out);
     t->rotation_order = ROTATION_ORDER_INTRINSIC;
 }
@@ -284,6 +301,26 @@ MeshTransform *player_pose_hand_l_anchor(Player *player) {
     return pm && pm->hand_l_anchor.parent ? &pm->hand_l_anchor : NULL;
 }
 
+void player_pose_describe(const Player *player, char *out, const size_t n) {
+    const PlayerMesh *pm = player ? player->mesh : NULL;
+    const PlayerArms *arms = pm ? held_arms(player) : NULL;
+    if (!pm || !arms || !arms->left || !arms->right) {
+        snprintf(out, n, "has=0x%x -", player ? player->pose.has : 0);
+        return;
+    }
+    const vec3 l = arms->left->pivot.rotation, r = arms->right->pivot.rotation, m = arms->pose_merged_rotation;
+    snprintf(out, n, "has=0x%x hold=%.3f l=%.3f,%.3f,%.3f r=%.3f,%.3f,%.3f merged=%.3f,%.3f,%.3f", player->pose.has, pm->hold.position.y,
+             l.x, l.y, l.z, r.x, r.y, r.z, m.x, m.y, m.z);
+}
+
+int player_pose_hand_l_first_person(Player *player) {
+    PlayerMesh *pm = player ? player->mesh : NULL;
+    if (!pm || !pm->render_you || !pm->hand_l_anchor.parent) return 0;
+    const PlayerArms *arms = held_arms(player);
+    const PlayerArmMesh *arm = arms ? pose_arm(arms, 0, player->left_handed) : NULL;
+    return arm && arm->extender != NULL; // a first-person build's arm (the third-person one has upper / joint)
+}
+
 void player_pose_render(Player *player, const int first_person, const float step_anim) {
     PlayerMesh *pm = player ? player->mesh : NULL;
     if (!pm) return;
@@ -380,12 +417,19 @@ void player_pose_render(Player *player, const int first_person, const float step
                 if (player_pose_splits_arms(pose)) { // setSplitArms(true): each arm its own turn
                     for (int side = 0; side < 2; side++)
                         if (use[side]) pose_turn(&pose_arm(arms, side, player->left_handed)->pivot, lerp[side], shoulder, mirror);
-                } else if (use[1]) { // mergedArmMeshes: both arms by armR
-                    pose_turn(&arms->left->pivot, lerp[1], shoulder, mirror);
-                    pose_turn(&arms->right->pivot, lerp[1], shoulder, mirror);
+                } else {
+                    // mergedArmMeshes[i]: with armR / hold it is put at rest and turned by armR (:193428-193434);
+                    // without, it keeps the transform it had (a previous pose's turn) until resetMergedArms at
+                    // the pose's end. Both of KN's pivots take that kept transform.
+                    if (use[1]) {
+                        MeshTransform merged = {.scale = {1.0f, 1.0f, 1.0f}};
+                        pose_turn(&merged, lerp[1], shoulder, mirror);
+                        arms->pose_merged_position = merged.position;
+                        arms->pose_merged_rotation = merged.rotation;
+                    }
+                    pose_apply(&arms->left->pivot, arms->pose_merged_position, arms->pose_merged_rotation);
+                    pose_apply(&arms->right->pivot, arms->pose_merged_position, arms->pose_merged_rotation);
                 }
-                // KN difference: a pose naming no arm leaves them at rest; v10's merged mesh keeps the last
-                // turn a previous pose gave it until the pose ends (resetMergedArms only runs without a pose).
             }
         }
     }

@@ -53,6 +53,9 @@ void ks_client_div_clicked(const char *id); // onDIVClicked for map GUI elements
 int  ks_client_3d_disabled(void);        // GAME.DEFAULT.disable3D: no world / first-person pass
 int  ks_client_hide_crosshair(void);     // GAME.UI.hideCrosshair
 int  ks_client_players_hidden(void);     // GAME.PLAYERS.disableMeshes
+// Scene objects attached to something, by the pass that draws them: the viewmodel's (a first-person "handL",
+// v10's layer 1) and the world's (the input script's `poses` probe)
+void ks_scene_attached_layers(int *fps, int *world);
 // GAME.INPUTS.disableDefault (game.dontSendInputs): no input frame is predicted or sent.
 int  ks_client_inputs_disabled(void);
 // GAME.DEFAULT.disablePrediction (game.noPred): inputs are sent but neither predicted nor

@@ -111,6 +111,10 @@
 //                                so far; eye: where the first-person camera sits; chase: the death chase camera has a
 //                                killer; keep: the third-person camera's distance). The first 5 finished frames after
 //                                each of our own spawns log the same as "@spawn0".."@spawn4" (client/tests/spawn_camera_e2e.py)
+//   100 poses                    log each player's pose on its model and the attached script objects per pass:
+//                                "[input_script] poses t=100 fps=1 world=3 0*:has=0x20 hold=0.000 l=x,y,z r=x,y,z
+//                                merged=x,y,z ..." (fps / world: attachTo objects the viewmodel / world pass draws;
+//                                l / r: the held slot's arm pivots' rotations; player_pose_render.c)
 //   100 players                  log every player of the session: "[input_script] players t=100 n=2 5:Name@x,y,z
 //                                9:Guest@x,y,z*" (* us, - inactive)
 //   100 models @label            log every player's model (v10.0.3 class models, player_class_model.h): "[input_script]
@@ -236,6 +240,8 @@
 #include <map_post.h>     // `builds`, `placewatch`
 #include <gamepad.h>      // `gpad`
 #include <entities.h>       // `script`: entities / runtime blocks
+#include <player_pose_render.h> // `poses`: the player poses on the models
+#include <ks_client.h>         // `poses`: the attached script objects per pass
 #include <ui_mobile.h>  // `touch`: the phone touch controls
 #include <ai.h>           // `world`: the AI list
 #include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE; `ranked`: NET_EXT_KN_RANKED_MATCH
@@ -1004,6 +1010,21 @@ static void script_run(Client *client, const ScriptEvent *e) {
         }
         line[o] = 0;
         fprintf(stderr, "[input_script] players t=%.0f n=%zu%s\n", g_script.time, client->game.player_count, line);
+    } else if (!strcmp(e->cmd, "poses")) {
+        // poses: each player's pose on its model (player_pose_describe) and the attached script objects per pass
+        char line[4096];
+        size_t o = 0;
+        for (size_t i = 0; i < client->game.player_count && o + 200 < sizeof(line); i++) {
+            const Player *p = client->game.players[i];
+            if (!p) continue;
+            char rec[192];
+            player_pose_describe(p, rec, sizeof(rec));
+            o += (size_t) snprintf(line + o, sizeof(line) - o, " %d%s:%s", p->uid, p == client->me ? "*" : "", rec);
+        }
+        line[o] = 0;
+        int fps = 0, world = 0;
+        ks_scene_attached_layers(&fps, &world);
+        fprintf(stderr, "[input_script] poses t=%.0f fps=%d world=%d%s\n", g_script.time, fps, world, line);
     } else if (!strcmp(e->cmd, "models")) {
         // models @label: each player's model, "uid:body=..,mdl=..,asset=..,clip=.." (player_class_model_describe)
         char line[4096];

@@ -507,6 +507,10 @@ typedef struct {
     // the charm, the wrist item): equal for the menu preview and the viewmodel of the same loadout
     // (the input script's `wsel` probe, server/tests/ui_transitions_e2e.py loadout-images)
     char selection[256];
+    // v10 mergedArmMeshes[i]'s own transform under a pose (player_pose_render.c): the turn armR / hold gave the
+    // merged arms last, kept until a later turn or the pose's end (resetMergedArms); the pivots take it while
+    // the arms are not split
+    vec3 pose_merged_position, pose_merged_rotation;
 } PlayerArms;
 
 typedef struct {
