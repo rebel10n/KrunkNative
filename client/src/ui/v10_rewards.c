@@ -611,7 +611,7 @@ static char *gen_challenges(const AccountInfo *acc) {
     if (acc->level < MIN_CHAL_LEVEL) return NULL; // the "for Challenges" requirement card (account_ui.c)
     // The account's own list: krunker.io's account.activeChallenges on the official type, kn_brain's
     // "chgL" on Box Office. Until it arrives, or when it cannot come, the page is the layout of an empty
-    // list (every catalogue map, no Loading and no error text); the answer re-renders the window.
+    // list (the section headers, no map cards, no Loading and no error text); the answer re-renders the window.
     const cJSON *list = account_challenges();
     if (!list) account_challenges_request();
     else if (cJSON_GetArraySize(list) == 0) return strdup("<span style=\"color: #fff;\">No active challenges.</span>");
@@ -683,15 +683,14 @@ static char *gen_challenges(const AccountInfo *acc) {
     count("map", NULL, 0, &done, &total);
     header(&sb, NULL, "hed_1", event_section ? 30 : 0, "Map Challenges", done, total, 0, list && done >= total, NULL);
     sb_append(&sb, "<div style=\"margin-top:10px;text-align:center;\">");
-    // Every map of the catalogue, in mapIndex order, on both server types. v10 draws the cards of the maps
-    // that have challenges; krunker.io's list has challenges for every map (v10.0.3 "Complete all"), so
-    // on the official type this is v10's grid, and no map can go missing on Box Office either.
+    // The maps in mapIndex order, a card only for a map the account has challenges on: `if (counts["map_" + i])`
+    // (deob-10.0.3.js:250887-250895, the counts from activeChallenges' DAT.mp at 250773-250779)
     for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) { // i: Krunker's mapIndex (the challenge's id)
         const int catalog = map_catalog_official_index(i);
         const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
         int d, t;
         count("map", "mp", i, &d, &t);
-        if (!m) continue;
+        if (!m || !t) continue;
         char path[64], url[256];
         ui_img_url(map_catalog_thumb(m, path, sizeof(path)), url, sizeof(url));
         sb_appendf(&sb, "<div class=\"challMapCrd%s\" style=\"background-image:url(%s)\" onmouseenter=\"playTick()\" "

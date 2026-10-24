@@ -54,21 +54,17 @@ never read on the official type (`g_chal` is only read by the v7 copy in `accoun
 
 ## 3. KrunkNative's layout (v10_rewards.c)
 
-Order, as v10.0.3: Map Challenges header (`hed_1`) -> every map card -> "Complete all" cards (no map) ->
+Order, as v10.0.3: Map Challenges header (`hed_1`) -> a card per map with challenges -> "Complete all" cards (no map) ->
 Weapon Challenges (`hed_2`, margin 30) -> weapon cards -> Nightmare (`hed_4`, margin 30) -> Ranked
 (`challRankedHeadr`, `hed_3`, margin 30) -> ranked cards and note.
 
 Differences from v10.0.3, all intentional and listed here:
 
-1. **Every catalogue map is listed** (v10_rewards.c, the home loop). v10 draws the cards of the maps that have
-   challenges. krunker.io's list has challenges for every map (v10.0.3: "a Complete all challenge for every map"),
-   so on the official type the grid is v10's. On Box Office a map with no challenge shows `0/0` and is not
-   greyed (`chalCardH` needs `total > 0`), so no map can go missing. The Box Office data gap is in section 4.
-2. **No Loading and no error on either type.** A list that has not arrived (no `activeChallenges` yet, or the
+1. **No Loading and no error on either type.** A list that has not arrived (no `activeChallenges` yet, or the
    brain has not answered or cannot be reached) gives the full layout with empty counts, and the answer
    re-renders the open window (`account_ui.c` `a` / `ua` frames, and the existing `chg` / `chgL` handlers).
    "No active challenges." stays for a list that arrived empty, as in v10.
-3. The weapon and map headers are complete only when the list has arrived (`list && done >= total`); with a
+2. The weapon and map headers are complete only when the list has arrived (`list && done >= total`); with a
    list they are v10's rule (`done >= total`, so an empty type is complete, as in v10).
 
 ## 4. Box Office data (kn_brain)
@@ -76,7 +72,8 @@ Differences from v10.0.3, all intentional and listed here:
 The brain's list is its own seed (`services/db/migrations/sqlite/0107_progression.sql:54-80`, 26 rows): map
 challenges for mapIndex 0, 2 and 10 only (Burg, Sandstorm, Kanji), 4 weapon rows, 2 nightmare rows, daily and
 weekly rotation rows, no ranked rows and no "Complete all". So with the same client code, Box Office shows
-every map (with `0/0` for the 43 maps the seed has no challenge for) but not the official set of challenges.
+the cards of those three maps only (v10's filter, `if (counts["map_"+i])`, deob 250890-250897; until 2026-10-24 KN drew
+every catalogue map with `0/0`), and not the official set of challenges.
 
 Making the Box Office set identical to the official one needs krunker.io's challenge definitions (ids, `DAT`,
 `REW`, names, icons, the map / weapon / ranked / complete-all rows). They are server data, not in the client
