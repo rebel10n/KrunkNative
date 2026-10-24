@@ -49,3 +49,6 @@ void vfx_item_effect(vec3 position, int effect);
 void vfx_explosion(Client*, vec3 position, float radius);
 // v10.0.2 ExplosionManager.explodeAt(x, y, z, scale, small, large): debris only (no sound / shake).
 void vfx_explode_at(Client*, vec3 position, float scale, int small, int large);
+// v10.0.3 addTrail(physObj, 1) for a projectile physObj drawn with trails (the Bombardment's bombs):
+// from `start` along `velocity` (units/ms), growing at its speed up to `dst` / 2; Bullet Trails setting.
+void vfx_physobj_trail(vec3 start, vec3 velocity, float dst);

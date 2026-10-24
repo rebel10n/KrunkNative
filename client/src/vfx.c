@@ -33,7 +33,7 @@
 
 #define VFX_MAX_SPRITES 1024
 #define VFX_MAX_BOXES 512 // KN: + the Piss's spray (7 streaks every 55 ms, ~850 ms each, per sprayer)
-#define VFX_MAX_TRAILS 32
+#define VFX_MAX_TRAILS 64 // KN: + a Bombardment's bomb trails (10 every 500 ms, 1250 ms each: about 25 at once)
 #define VFX_MAX_DEBRIS 256
 #define VFX_MAX_AREAS 64
 #define VFX_MAX_DELTA_MS 100.0f
@@ -45,7 +45,8 @@
 // ...and never outlive this, even when no frame drew them (scoped, menu open)
 #define VFX_FLASH_MAX_MS 100.0f
 
-// 1.js
+// config.tracerMinDst / tracerMaxDst (deob-10.0.3.js:22951, 22950): the local player's tracer is drawn
+// from 20 units, its length capped at 500 (players.shoot, deob-10.0.3.js:196958, 196980)
 #define VFX_TRACER_MIN_DST 20.0f
 #define VFX_TRACER_MAX_DST 500.0f
 // 95.js: the hit point is pulled back 0.12 along the ray before effects spawn
@@ -726,6 +727,21 @@ static void spawn_trail(const VfxBox *tracer) {
         trail->scale = VFX_TRAIL_SCALE;
         return;
     }
+}
+
+// addTrail(physObj, 1) of a projectile's physObj (deob-10.0.3.js:234850-234851, :234678-234692): the
+// Bombardment's bombs ("bmb" draws them with trails 1, :259104-259109). The tType 1 trail (:225530-225597):
+// dst = physObj.dst / 2, the physObj's spd and direction, the same box and fade as a bullet trail.
+// Only with Bullet Trails on (showTrails, :237359-237372).
+void vfx_physobj_trail(const vec3 start, const vec3 velocity, const float dst) {
+    if (!vfx.settings.show_trails || dst <= 0.0f) return;
+    VfxBox source;
+    memset(&source, 0, sizeof(source));
+    source.position = start;
+    source.velocity = velocity;
+    source.spd = sqrtf(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+    source.dst = dst / 2.0f;
+    if (source.spd > 0.0f) spawn_trail(&source);
 }
 
 // physObj(..., C[0]): bullet tracer from `start` to `end`; `trail` adds the sniper trail.
@@ -2132,6 +2148,58 @@ static void batch_speed_lines(const Player *me, const int width, const int heigh
     }
 }
 
+// A canvas rect in the overlay's logical (scaled) space as an NDC quad
+static void overlay_rect(const double x, const double y, const double w, const double h, const float scale, const int width, const int height,
+                         const vec4 color) {
+    const float x0 = (float) (x * scale) / (float) width * 2.0f - 1.0f, x1 = (float) ((x + w) * scale) / (float) width * 2.0f - 1.0f;
+    const float y0 = 1.0f - (float) (y * scale) / (float) height * 2.0f, y1 = 1.0f - (float) ((y + h) * scale) / (float) height * 2.0f;
+    batch_screen_rect(x0, y1, x1, y0, color);
+}
+
+// strokeRect(x, y, w, h) at lineWidth 1: the four edges, 1 logical unit wide, centred on the outline
+static void overlay_stroke(const double x, const double y, const double w, const double h, const float scale, const int width, const int height,
+                           const vec4 color) {
+    overlay_rect(x - 0.5, y - 0.5, w + 1.0, 1.0, scale, width, height, color);
+    overlay_rect(x - 0.5, y + h - 0.5, w + 1.0, 1.0, scale, width, height, color);
+    overlay_rect(x - 0.5, y + 0.5, 1.0, h - 1.0, scale, width, height, color);
+    overlay_rect(x + w - 0.5, y + 0.5, 1.0, h - 1.0, scale, width, height, color);
+}
+
+// v10.0.3 drawSRM (deob-10.0.3.js:178673-178719, called right after the speed lines :179129): movement scheme
+// SRM's strafe helper while our player strafes in the air (its overlayInfo, Player.scheme.overlay from
+// SetAccelerationValues, shared/src/player.c srm_overlay). A 24-high bar at the screen's middle: the gain zone
+// (#34FD34, optimal to maximum angle) and the neutral zone (#4C4C4C, minimum to optimal), both outlined in
+// black, shifted by the current angle, and a 2-wide marker at the centre (drawSRM's fillStyle iiiïîíï.marker
+// is undefined, so the marker keeps the neutral grey). AngleDiffToPixelDiff: angle * (width / 2) * 0.5 / PI.
+// The canvas clearRect of the bar's band (it erases the speed lines there) is not mirrored: the speed lines
+// are drawn into the same batch.
+static void batch_srm_overlay(const Player *me, const int width, const int height) {
+    const MovementSchemeState *s = &me->scheme;
+    if (!s->overlay_valid || player_movement_scheme(me) != MOVEMENT_SCHEME_SRM) return;
+    const double c = s->overlay[0], o = s->overlay[1], mi = s->overlay[2], ma = s->overlay[3], shift = -c;
+    const double neutral_x = mi < o ? mi + shift : o + shift, neutral_w = mi < o ? o - mi : mi - o;
+    const double gain_x = o < ma ? o + shift : ma + shift, gain_w = o < ma ? ma - o : o - ma;
+#define SRM_TRUTHY(v) ((v) != 0.0 && !isnan(v)) // JS: 0 and NaN draw nothing
+    if (!SRM_TRUTHY(neutral_x) || !SRM_TRUTHY(neutral_w) || !SRM_TRUTHY(gain_x) || !SRM_TRUTHY(gain_w) || !SRM_TRUTHY(c)) return;
+#undef SRM_TRUTHY
+    const float scale = overlay_scale(width, height);
+    const double w = (double) width / scale, h = (double) height / scale;
+    const double bar_h = 24.0, top = (h - bar_h) / 2.0 - 2.0, hud_scale = 0.5;
+#define SRM_PX(a) (w / 2.0 - 0.5 + (a) * (w / 2.0) * hud_scale / M_PI)
+#define SRM_PW(a) ((a) * (w / 2.0) * hud_scale / M_PI)
+    VfxDrawState state = {0};
+    state.blend = VFX_BLEND_NORMAL;
+    if (!batch_state(state)) return;
+    const vec4 gain = hex_to_vec(0x34fd34), neutral = hex_to_vec(0x4c4c4c), outline = hex_to_vec(0x000000);
+    overlay_rect(SRM_PX(gain_x), top, SRM_PW(gain_w), bar_h, scale, width, height, gain);
+    overlay_stroke(SRM_PX(gain_x), top, SRM_PW(gain_w), bar_h, scale, width, height, outline);
+    overlay_rect(SRM_PX(neutral_x), top, SRM_PW(neutral_w), bar_h, scale, width, height, neutral);
+    overlay_stroke(SRM_PX(neutral_x), top, SRM_PW(neutral_w), bar_h, scale, width, height, outline);
+    overlay_rect(SRM_PX(c + shift) - 0.5, top + bar_h / 2.0, 2.0, bar_h / 2.0, scale, width, height, neutral);
+#undef SRM_PX
+#undef SRM_PW
+}
+
 void vfx_render_screen(Client *client) {
     if (!client->game.ready || !vfx_gl_init()) return;
 
@@ -2149,6 +2217,7 @@ void vfx_render_screen(Client *client) {
     batch_begin();
 
     batch_speed_lines(me, viewport[2], viewport[3]); // first on the overlay canvas, under the flash
+    batch_srm_overlay(me, viewport[2], viewport[3]);  // v10 drawSRM: movement scheme SRM's strafe helper
 
     // 91.js: only with the normal camera
     if (vfx.screen_flash_active && !camera_offset_active(client)) {

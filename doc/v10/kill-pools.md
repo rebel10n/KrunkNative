@@ -55,7 +55,10 @@ The other gates are unchanged from v7: `mode.disabledStreaks` ([4, 5, 6] in the 
    100 bombs over 5 s.
 4. **a bomb** is projectiles.stored[2]: streak_3 model, spd 0.4 x pjSp (randFloat(0.3, 0.7), to 0.001),
    straight down (yD -PI / 2), no gravity, range 1500, dmg 150, explode 150 with eDmg 150, dontPred,
-   info {stk: 3}. Sent as one "bmb" [x, y, z, sid, {pjSp}] list per wave.
+   info {stk: 3}. Sent as one "bmb" [x, y, z, sid, {pjSp}] list per wave; the client draws each bomb
+   with a trail (physObj trails 1, :259104-259109 -> addTrail(physObj, 1) when Bullet Trails is on,
+   :234850-234851): the bullet-trail box (tType 1, :225530-225597), from where the bomb starts, along its
+   fall, growing at its speed up to half its range (750), 0.45 thick, thinning by 0.00036 a ms (1.25 s).
 5. **a hit** on a player (never the caller): 150 damage. A kill carries {stk: 3} (the feed's
    `img/streaks/3.png`), skips the kill rewards, and onKill gives the caller "6" [50, 100, 0, 1] (the
    "Bombed" medal, +100) and score +100. A hit that does not kill (or cannot hurt: a team mate, god
@@ -69,7 +72,9 @@ round and at the end). Differences, documented in the code:
 
 - no "bbm" packet: the start sends the `adrop_0` 2D sound (NET_PACKET_SOUND), which is all the client
   does with "bbm" 0; "bbm" 1 is not sent;
-- each bomb is its own NET_PACKET_PROJECTILE with `.bomb` (no owner on the wire, as "bmb");
+- each bomb is its own NET_PACKET_PROJECTILE with `.bomb` (no owner on the wire, as "bmb"); its trail is
+  `vfx_physobj_trail` (`client/src/vfx.c`, called from `projectiles_render.c`), whose pool grew from 32 to 64
+  trails (a bombardment keeps about 25 alive);
 - a caller who leaves stops the waves and its bombs in the air end (v10 keeps bombing for the departed
   player object; KrunkNative frees the Player);
 - the projectile pool is 192 slots (it was 64): a bombardment keeps up to 100 bombs in the air (a bomb
@@ -106,10 +111,13 @@ KrunkNative:
 | the draw at the end | `server/src/accounts.c` `acc_kill_pools_draw`, at the round's commit (the END is out): public-type games, accounts not hack-flagged, Box Office only (Krunker Strike's items are its own) |
 | the items to the player | `NET_EXT_KN_END_ITEM` (0x8150) `NetEndItemPacket` {skin, icon} per item, after the END; the client holds the ones with an icon for the Collect button (`hud_endscreen_v10_offer_item`) |
 | the grant | the stats commit's `itemRewards` [{id, quantity}]; kn_brain's "stats" op adds them once per match (a duplicate commit adds nothing), at most 30, source "killpool" (`give_skin_n`, `services/brain/accounts.c`, `db_accounts.c`) |
+| tests | kill_pools_test (the draws), brain_kill_pools (`services/brain/tests/kill_pools_test.py`: the welcome / push, the grant), `make kill-pools-server-e2e` (`server/tests/kill_pools_server_e2e.py`: kn_brain + server_bin, an account's kills pay one END item each and land in its inventory, a guest's do not) |
 
 Differences: a noReward mode (Raid) draws nothing (v10 draws and shows items that updateAccounts then
 drops); a K.P.D officer's own account draws (KrunkNative's officers play their own account; kpdData is
-not modelled here); events end at `endsAt` (v10's API decides which events are ongoing).
+not modelled here); events end at `endsAt` (v10's API decides which events are ongoing). An account that
+signs in during a round (a live sign-in) draws from the next round on: the round it joined as a guest is
+not committed to it.
 
 ### A feed entry
 

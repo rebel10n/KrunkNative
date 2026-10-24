@@ -4,7 +4,8 @@
 //   129.js projectiles.stored[0]: the thrown knife (spd 0.38, grav 0.0002, spn 0.035,
 //          scale 1, length 1, linger 5000)
 //   v10 :180041 projectiles.stored[2]: the Bombardment bomb (streak_3, scale 5 x scaleMlt 2, rot PI,
-//          spn 0.008 spun about Y, noLookAt, noFog, no linger; its "pre" hides it)
+//          spn 0.008 spun about Y, noLookAt, noFog, no linger; its "pre" hides it), drawn with a
+//          bullet-style trail (deob-10.0.3.js:259104-259109, vfx_physobj_trail)
 //   27.js  weapon projectile blocks (mat BASIC, colour, scale, length, lookDir, dontPred)
 //   55.js  loadMesh(meshConf, 0, 0, 0, PI / 2, 1, container): the knife model inside the
 //          physObj container, rotation.y = PI / 2, scale 1
@@ -205,6 +206,9 @@ void projectiles_render_server_spawn(Client *client, const NetProjectilePacket *
 
         visual->linked = 1;
         visual->server_id = packet->id;
+        // "bmb" draws each bomb with trails 1 (deob-10.0.3.js:259104-259109): addTrail(physObj, 1), a trail
+        // growing behind the bomb at its speed, up to half its range (:225555-225597; vfx.c)
+        vfx_physobj_trail(position, velocity, packet->range);
         return;
     }
 

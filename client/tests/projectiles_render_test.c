@@ -26,6 +26,14 @@ void material_fini(Material *material) { (void) material; }
 Mesh *mesh_init(Geometry *geometry, Material *material) { (void) geometry; (void) material; return NULL; }
 void mesh_fini(Mesh *mesh) { (void) mesh; }
 void vfx_impact(Client *client, const vec3 position, const float yaw, const float pitch) { (void) client; (void) position; (void) yaw; (void) pitch; }
+// the bomb trails (vfx.c vfx_physobj_trail): the last one asked for
+static int g_trails;
+static vec3 g_trail_start, g_trail_velocity;
+static float g_trail_dst;
+void vfx_physobj_trail(const vec3 start, const vec3 velocity, const float dst) {
+    g_trails++;
+    g_trail_start = start, g_trail_velocity = velocity, g_trail_dst = dst;
+}
 
 static Client g_client;
 static Player g_me;
@@ -129,6 +137,9 @@ static void test_bomb(void) {
     }
     CHECK(bomb && !bomb->knife && bomb->linked && bomb->server_id == 5 && bomb->spd > 0.19f && bomb->spd < 0.21f && bomb->size.x == 10.0f,
           "a bomb spawns linked to its slot, at speed 0.2, scale 10");
+    // "bmb" physObj(..., trails 1) (deob-10.0.3.js:259104-259109): addTrail from the bomb's start, its velocity, its range
+    CHECK(g_trails == 1 && g_trail_start.y == 12.0f && g_trail_start.x == 4.0f && g_trail_velocity.y == -0.2f && g_trail_dst == 1500.0f,
+          "the bomb draws a trail from where it starts, along its fall (%d trails)", g_trails);
 
     ProjectileBox boxes[PROJ_MAX];
     CHECK(projectiles_render_boxes(boxes, PROJ_MAX) == 0, "a bomb is no tracer box");
