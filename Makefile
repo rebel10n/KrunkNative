@@ -800,6 +800,10 @@ command-auth-e2e: build ## Command authorisation (doc/v7/command-auth.md): forge
 live-signin-e2e: build ## Live sign-in: sign in / switch / sign out mid-session upgrades the live connection (DEV rights, Object Manager), forged / throttled / banned refused (local kn_brain on sqlite, headless client)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/live_signin_e2e.py $(DEBUG_DIR)
 
+.PHONY: live-trade-e2e
+live-trade-e2e: build ## Trade mode's live trade: strd / trd, both windows from kn_brain's inventories, utrd / utrdc, READY, Loading 3..1, the brain's one-transaction swap, a cancel (kn_brain on sqlite, server_bin, raw clients)
+	timeout 300 $(PYTHON) -I server/tests/live_trade_e2e.py $(DEBUG_DIR)
+
 .PHONY: votekick-e2e
 votekick-e2e: build ## The player list's vote kick + K.P.D call: vote / kick / voteKickBan, the call recorded in kpd_calls, an officer's verdict (kn_brain on the local PostgreSQL; KN_TEST_DB_DRIVER=sqlite)
 	timeout 300 $(PYTHON) -I server/tests/votekick_e2e.py $(DEBUG_DIR)
