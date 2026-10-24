@@ -479,6 +479,73 @@ static void pl_speed_set(KsScript *s, void *native, uint32_t id, KsValue v)
     if (n) game_send(ks_native_game(native), p->uid, NET_PACKET_EXT, buf_out, n);
 }
 static KsValue pl_ai_kills(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_num(p->mode.ai_kills); }
+
+// v10.0.3 player skins (deob-10.0.3.js:207943, :208302-208320, game.getPlayerSkin :221108, setPlayerSkin :221044).
+// getSkinForLoadout(i) (:190800) is the worn weapon skin of loadout slot i (KN keeps them per slot: PlayerSkins), -1 none.
+static int32_t skin_for_loadout(const Player *p, const int slot)
+{
+    return slot == 0 ? p->skins.primary : slot == 1 ? p->skins.secondary : -1;
+}
+static KsValue skin_value(const int32_t v) { return ks_num(v); } // iíiíííì: KN keeps plain store indices
+// currentSkinIndex: the melee item on a melee weapon, else the slot's weapon skin
+static KsValue pl_current_skin(KsScript *s, void *native, uint32_t id)
+{
+    (void) s;
+    PLAYER_OR(r, ks_undef());
+    (void) r;
+    return skin_value(p->weapon && p->weapon->melee ? p->skins.melee : skin_for_loadout(p, p->loadout_index));
+}
+// getSkin(type): 0 the current slot's weapon skin, 1 hat, 15 head, 2 body, 14 back, 6 waist, 9 pet, 11 wrist, 3 melee,
+// 16 player card; -1 for another type or no player (both sides: game.getPlayerSkin)
+static KsValue pl_get_skin(KsScript *s, void *native, const KsValue *args, int argc)
+{
+    Player *p = ks_player_of(native);
+    if (!p) return ks_num(-1);
+    const int type = parse_int0(s, ARG(0));
+    switch (type) {
+        case 0: return skin_value(skin_for_loadout(p, p->loadout_index));
+        case 1: return skin_value(p->cosmetics.hat);
+        case 15: return skin_value(p->cosmetics_v7.head);
+        case 2: return skin_value(p->cosmetics.body);
+        case 14: return skin_value(p->cosmetics_v7.back);
+        case 6: return skin_value(p->cosmetics.waist);
+        case 9: return skin_value(p->cosmetics_v7.pet);
+        case 11: return skin_value(p->cosmetics_v7.wrist);
+        case 3: return skin_value(p->skins.melee);
+        case 16: return skin_value(p->cosmetics_v7.player_card);
+        default: return ks_num(-1);
+    }
+}
+// setSkin(id): only one of the map studio's custom skins (id >= 10000000 in game.customSkins). KN games have no custom
+// skin table (PAYMENTS.giveSkin answers false: no monetized studios), so no id passes, as in 10.0.3 without one.
+static KsValue pl_set_skin(KsScript *s, void *native, const KsValue *args, int argc)
+{
+    (void) s;
+    (void) native;
+    (void) args;
+    (void) argc;
+    return ks_undef();
+}
+// giveSkin(id): the six scripting skins (7529, 7530, 7713, 7714, 7715, 7621) to an account in a pub-type game, through
+// sendUserSkin("scripting") (game_give_skin -> kn_brain give_skin). Deliberate difference: 10.0.3 also allows four
+// custom maps by id (157528, 157678, 158102, 158103); KN's server knows no hosted map's custom id. kn_brain skips a skin
+// the account already has (account.hasSkin).
+static KsValue pl_give_skin(KsScript *s, void *native, const KsValue *args, int argc)
+{
+    static const int allowed[] = {7529, 7530, 7713, 7714, 7715, 7621};
+    KsRef *r = ref_of(native);
+    Player *p = ks_player_of(native);
+    if (!p || !on_server(r) || ARG(0).tag != KS_NUM) return ks_undef();
+    const double id = ARG(0).as.num;
+    int ok = 0;
+    for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) ok |= id == allowed[i];
+    char account[48] = "", name[48] = "";
+    KsGame *kg = r->kg;
+    if (!ok || !kg->account || !kg->account(kg->host_user, p, account, sizeof(account), name, sizeof(name)) || !account[0]) return ks_undef();
+    (void) s;
+    game_give_skin(ks_native_game(native), p, (int) id, "scripting");
+    return ks_undef();
+}
 static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)
 {
     PLAYER_SET(r);
@@ -661,6 +728,10 @@ static KsValue pl_rotation(KsScript *s, void *n, uint32_t id) { return pl_sub(s,
     {"clearLoadout", NULL, NULL, pl_clear_loadout, 0},                                                                 \
     {"score", pl_score, pl_score_set, NULL, 0},                                                                        \
     {"aiKills", pl_ai_kills, NULL, NULL, 0},                                                                           \
+    {"currentSkinIndex", pl_current_skin, NULL, NULL, 0},                                                              \
+    {"getSkin", NULL, NULL, pl_get_skin, 0},                                                                           \
+    {"setSkin", NULL, NULL, pl_set_skin, 0},                                                                           \
+    {"giveSkin", NULL, NULL, pl_give_skin, 0},                                                                         \
     {"godMode", pl_god_mode, pl_god_mode_set, NULL, 0},                                                                \
     {"speed", pl_speed, pl_speed_set, NULL, 0},                                                                        \
     {"lives", pl_lives, pl_lives_set, NULL, 0},                                                                        \

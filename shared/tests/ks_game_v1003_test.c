@@ -488,6 +488,22 @@ static const char *k_wrapper_script =
     "public action onObjectDamage(num sid, num iface, str doer, num dmg) { GAME.log(\"obj \" + toStr(iface) + \" \" + doer + \" \" + toStr(dmg)); }\n"
     "public action onObjectDestroyed(num sid, num iface, str doer) { GAME.log(\"objgone \" + toStr(iface) + \" \" + doer); }\n";
 
+static int g_given_skin;
+static char g_given_reason[32];
+static void test_give_skin(Game *game, const Player *player, const int skin, const char *reason) {
+    (void) game;
+    (void) player;
+    g_given_skin = skin;
+    snprintf(g_given_reason, sizeof(g_given_reason), "%s", reason ? reason : "");
+}
+static int test_account(void *user, const Player *player, char *id, const size_t id_n, char *name, const size_t name_n) {
+    (void) user;
+    (void) player;
+    snprintf(id, id_n, "5");
+    snprintf(name, name_n, "tester");
+    return 1;
+}
+
 static void test_ai_wrapper(void) {
     printf("Running v10.0.3 AI wrapper / AI.spawn options / object hooks test...\n");
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -567,6 +583,24 @@ static void test_ai_wrapper(void) {
         game.is_local = 1;
         game.server = NULL;
     }
+    // player skins (deob-10.0.3.js:207943, :208302-208320): getSkin by type, currentSkinIndex, setSkin / giveSkin gates
+    p->skins = (PlayerSkins) {812, 900, 3016};
+    p->cosmetics.hat = 77;
+    p->cosmetics_v7.pet = 55;
+    p->loadout_index = 1;
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n"
+                      "    GAME.log(\"s \" + toStr(me.getSkin(0)) + \" \" + toStr(me.getSkin(1)) + \" \" + toStr(me.getSkin(9)) + \" \" +\n"
+                      "        toStr(me.getSkin(3)) + \" \" + toStr(me.getSkin(4)) + \" \" + toStr(me.currentSkinIndex));\n"
+                      "    me.setSkin(10000001);\n    me.giveSkin(7529);\n}\n");
+    CHECK(logged("s 900 77 55 3016 -1 900"), "getSkin / currentSkinIndex (%s)", g_log_count ? g_log[g_log_count - 1] : "none");
+    CHECK(g_given_skin == 0, "giveSkin needs an account");
+    ks_game_set_account_fn(&game, test_account);
+    game.hooks.give_skin = test_give_skin;
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n    me.giveSkin(1234);\n"
+                      "    me.giveSkin(7529);\n}\n");
+    CHECK(g_given_skin == 7529 && !strcmp(g_given_reason, "scripting"), "giveSkin: only the scripting skins, through sendUserSkin (%d)", g_given_skin);
+    game.hooks.give_skin = NULL;
+    ks_game_set_account_fn(&game, NULL);
     // player.godMode / speed / aiKills (deob-10.0.3.js:207846-207866, :208133)
     p->mode.ai_kills = 3;
     g_sent_count = 0;
