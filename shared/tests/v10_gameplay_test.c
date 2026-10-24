@@ -9,6 +9,8 @@
 #include <string.h>
 #include <ruleset.h>
 #include <modes.h>
+#include <stalker.h>
+#include <net_ext.h>
 
 static int g_failures, g_checks;
 #define CHECK(cond, ...) do { g_checks++; \
@@ -16,9 +18,21 @@ static int g_failures, g_checks;
 } while (0)
 
 static int g_scares;
+static int g_sounds, g_picked, g_picked_target; // PLAYER_SOUND adds, NET_EXT_STALKER_PICKED and its target
+static NetPlayerSoundPacket g_sound;
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
-    (void) game; (void) uid; (void) payload; (void) length;
+    (void) game;
     if (type == NET_PACKET_JUMP_SCARE) g_scares++;
+    if (type == NET_PACKET_PLAYER_SOUND && length == sizeof(g_sound)) {
+        memcpy(&g_sound, payload, sizeof(g_sound));
+        g_sounds++;
+    }
+    uint16_t subtype, body_length;
+    const uint8_t *body;
+    if (type == NET_PACKET_EXT && net_ext_unpack(payload, length, &subtype, &body, &body_length) && subtype == NET_EXT_STALKER_PICKED) {
+        g_picked++;
+        g_picked_target = uid;
+    }
 }
 
 static const cJSON *g_test_maps[1];
@@ -240,6 +254,76 @@ static void test_stalker(void) {
     close_game(&game);
 }
 
+// The Stalker outside its rules (shared/src/stalker.c): the 300 ms hide, the taunts and STALKER_PICKED.
+static void test_stalker_client(void) {
+    printf("Stalker hide, taunts, STALKER_PICKED...\n");
+    Game game;
+    open_game(&game);
+    game.mode = mode_init(MODE_ID_STALK);
+    Player *stalker = add_player(&game, 1, 0);
+    Player *living = add_player(&game, 2, 0);
+    stalker->team = 2;
+    living->team = 1;
+    CHECK(player_is_stalker(&game, stalker) && !player_is_stalker(&game, living), "isStalker: teamOptions[team - 1] == Stalker");
+
+    // isStalker && noMovT >= 300 (deob-10.0.3.js:191767-191772): still time adds up, any velocity resets it
+    stalker->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+    stalker->no_move_time = 0.0f;
+    for (int i = 0; i < 18; i++) stalker_update_hidden(stalker, 0.016f);
+    CHECK(!stalker->is_hidden, "still for 288 ms: shown");
+    for (int i = 0; i < 2; i++) stalker_update_hidden(stalker, 0.016f);
+    CHECK(stalker->is_hidden, "still for 320 ms: hidden");
+    stalker->velocity.x = 0.01f;
+    stalker_update_hidden(stalker, 0.016f);
+    CHECK(!stalker->is_hidden && stalker->no_move_time == 0.0f, "moving again: shown");
+    living->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 40; i++) stalker_update_hidden(living, 0.016f);
+    CHECK(!living->is_hidden, "the Living never hide");
+    living->force_hide = 1;
+    stalker_update_hidden(living, 0.016f);
+    CHECK(living->is_hidden, "forceHide hides anyone");
+    living->force_hide = 0;
+
+    // procInputs runs it, not in replays; the stalker stuck to a wall has no velocity (v10:169754-169755)
+    stalker->no_move_time = 0.0f;
+    stalker->is_hidden = 0;
+    stalker->stuck_to_wall = 1;
+    stalker->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+    Input input = idle_input(stalker);
+    input.delta = 0.033f;
+    for (int i = 0; i < 12; i++) player_proc_input(stalker, &input, 1, 0);
+    CHECK(!stalker->is_hidden && stalker->no_move_time == 0.0f, "replays leave noMovT alone");
+    for (int i = 0; i < 12; i++) player_proc_input(stalker, &input, 0, 0);
+    CHECK(stalker->is_hidden, "a stalker stuck to a wall for 396 ms is hidden (noMovT %g)", (double) stalker->no_move_time);
+    stalker->stuck_to_wall = 0;
+    player_spawn(stalker);
+    CHECK(!stalker->is_hidden && stalker->no_move_time == 0.0f, "a spawn resets isHidden / noMovT");
+    stalker->team = 2;
+
+    // "stlkrt" i: staunt_<i> at the stalker for everyone, 10 s apart (deob-10.0.3.js:198332-198342)
+    game.now = 50.0f;
+    g_sounds = 0;
+    CHECK(!game_player_stalker_taunt(&game, living, 0) && !g_sounds, "the Living cannot taunt");
+    CHECK(!game_player_stalker_taunt(&game, stalker, STALKER_TAUNT_COUNT) && !g_sounds, "no taunt past index 5");
+    CHECK(game_player_stalker_taunt(&game, stalker, 2) && g_sounds == 1, "the stalker taunts");
+    CHECK(g_sound.add && !g_sound.loop && g_sound.uid == stalker->uid && !strcmp(g_sound.name, "staunt_2") && g_sound.volume == 1.0f,
+          "asnd staunt_2 vol 1, a one-shot (%s)", g_sound.name);
+    game.now = 59.0f;
+    CHECK(!game_player_stalker_taunt(&game, stalker, 1) && g_sounds == 1, "not again within 10 s");
+    game.now = 60.0f;
+    CHECK(game_player_stalker_taunt(&game, stalker, 5) && g_sounds == 2 && !strcmp(g_sound.name, "staunt_5"), "again after 10 s");
+
+    // pickStalker: STALKER_PICKED to everyone but the stalker (broadcastEx, deob-10.0.3.js:217949)
+    stalker->team = living->team = 1;
+    stalker->active = living->active = 1;
+    g_picked = 0;
+    game.mode->config.wait_timers[0].trigger(&game, 0.0f);
+    Player *picked = stalker->team == 2 ? stalker : living->team == 2 ? living : NULL;
+    CHECK(picked && g_picked == 1 && g_picked_target == NET_TARGET_EXCEPT(picked->uid), "STALKER_PICKED to all but the stalker (%d, %d)",
+          g_picked, g_picked_target);
+    close_game(&game);
+}
+
 static void test_ranked_streaks(void) {
     printf("ranked kill streaks...\n");
     Game game;
@@ -269,6 +353,7 @@ int main(void) {
     test_boulder();
     test_compressor();
     test_stalker();
+    test_stalker_client();
     test_ranked_streaks();
 
     if (g_failures) {

@@ -128,6 +128,8 @@ static const int REQUIRED_S2C[] = {
 static const int OPTIONAL_C2S[] = {
     // social / cosmetic actions (official-ingame-actions): pings, sprays, taunts, the next-map vote, the spectate target
     KRUNKER_C2S_MARK_POSITION, KRUNKER_C2S_SPRAY, KRUNKER_C2S_PROP_HUNT_TAUNT, KRUNKER_C2S_MATCH_VOTE, KRUNKER_C2S_fpSp,
+    // the stalker's taunt keys (shared/include/stalker.h)
+    KRUNKER_C2S_STALKER_TAUNT,
     // Prop Hunt picks and rotation (official-ingame-prophunt)
     KRUNKER_C2S_PICK_PROP, KRUNKER_C2S_PROP_ROTATION,
     // voice chat clips (official-ingame-voice)
