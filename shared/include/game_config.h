@@ -128,6 +128,21 @@ int game_config_is_custom(const Game*);  // hosted / sandbox (isCustom): mts are
 // a noComp weapon not in comp. The Loadout's secondary picker (ui_loadout.c), its secondary fallback and the spawn's
 // secondary (player.c player_build_loadout) read it. The level / premium tail of v10's req stays with the caller.
 int game_weapon_req(const Game*, const Weapon*, int dev);
+// That tail: v10.0.3 weapons' req (deob-10.0.3.js:112377, iíïïïíí(account, game)) ends `isCustom && (!isOfficial ||
+// !isOfficial.restrictSecs) || (!premiumOnly || ...) && (!minRec || account && account.level >= minRec)`. 1 when a
+// `level` account (a guest: 0) may take `weapon`: a dev and a weapon without minRec always, every weapon in a custom
+// game (game_config_is_custom) and in the offline sandbox (its local server never runs updateSecIndex: setClass takes
+// the pick as is, deob-10.0.3.js:245363 / 245878, and the picker opens every secondary, `|| isSandbox` :250275),
+// else level >= minRec. No v10.0.3 weapon has premiumOnly. 10.0.3's server enforces it: Player.updateSecIndex
+// (deob-10.0.3.js:190934-190948, its caller is the server's) makes a refused pick the Pistol (2); KrunkNative's
+// server checks it at every spawn (server/src/net.c), the Select Secondary card locks on it (ui_loadout.c).
+int game_weapon_level_ok(const Game*, const Weapon*, int level, int dev);
+// v10 game.host: the id of the player hosting the custom game (the host's socket id; hasHost, deob-10.0.3.js:215912-
+// 215914; pickSimon :217896; KrunkScript CONFIG.getHost :211983-212002). The server keeps it in step with the custom
+// game's host (server/src/accounts.c: the hosting account, a host transfer, the lobby going public); a uid < 0
+// clears it. None in a public game, the offline sandbox (10.0.3's local server has no host either) or a client's copy.
+void game_config_set_host(Game*, int uid);
+Player *game_host_player(const Game*); // the host's player when it is in this game, NULL none
 void game_config_free(Game*);            // drops the state, the game back on the base tables
 
 // The one class gate of KrunkNative (doc/v7/decisions.md "Nettspend class"): 1 when `class_index` may be

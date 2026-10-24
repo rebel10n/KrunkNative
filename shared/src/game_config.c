@@ -437,7 +437,9 @@ static const GameHostType k_host_types[GAME_HOST_TYPE_COUNT] = {
     [GAME_HOST_ZOMBIES] = {"Zombies Server Setup", GAME_HOST_FLAG_RESTRICT | GAME_HOST_FLAG_SHOW_ALL | GAME_HOST_FLAG_HIDE_HEAD | GAME_HOST_FLAG_NO_CUSTOM_MAP, 0, NULL,
         "{\"private\":true,\"maxPlayers\":4,\"maps\":[27],\"modes\":[35],\"mimicPubs\":true}", "{\"maps\":[27]}"},
     [GAME_HOST_RAID] = {"Raid Server Setup", GAME_HOST_FLAG_RESTRICT | GAME_HOST_FLAG_SHOW_ALL | GAME_HOST_FLAG_HIDE_HEAD | GAME_HOST_FLAG_NO_CUSTOM_MAP, 0, NULL,
-        "{\"private\":true,\"maxPlayers\":8,\"maps\":[18],\"modes\":[23],\"mimicPubs\":true}", "{\"maps\":[18,29,31]}"},
+        // v10.0.3 Raid Server Setup (deob-10.0.3.js:19486-19511): allowedDat maps [18, 29, 31, 35, 43] (Tortuga,
+        // Laboratory, Soul Sanctum, Khepri, Bastion)
+        "{\"private\":true,\"maxPlayers\":8,\"maps\":[18],\"modes\":[23],\"mimicPubs\":true}", "{\"maps\":[18,29,31,35,43]}"},
 };
 
 const char *game_host_type_name(const int host_index) {
@@ -981,6 +983,9 @@ typedef struct GameConfigState {
     int vote_count, vote_cap;
     unsigned char force_set;     // forceMap / forceMode
     int force_mode, force_map;
+
+    unsigned char has_host;      // game.host is set (game_config_set_host)
+    int host_uid;                // game.host: the hosting player's uid (its connection id)
 } GameConfigState;
 
 static const NetNetworkDataPacket k_default_network = {.send_hz = 10, .tick_hz = 30, .sync_hz = 1, .view_distance = 0.0f};
@@ -1565,6 +1570,28 @@ int game_weapon_req(const Game *game, const Weapon *weapon, const int dev) {
     const int custom_ok = !weapon->custom_only || (game_config_is_custom(game) && !comp); // !customOnly || (isCustom && !isComp)
     const int comp_ok = !(weapon->no_comp && comp); // !(noComp && isComp)
     return custom_ok && comp_ok;
+}
+
+int game_weapon_level_ok(const Game *game, const Weapon *weapon, const int level, const int dev) {
+    if (dev || !weapon || weapon->min_rec <= 0) return 1;                     // account.isDev || ... !minRec
+    if (game && (game->is_sandbox || game_config_is_custom(game))) return 1; // isCustom: no level tail
+    return level >= weapon->min_rec;                                          // account && account.level >= minRec
+}
+
+void game_config_set_host(Game *game, const int uid) {
+    if (uid < 0) {
+        if (game && game->config_state) game->config_state->has_host = 0;
+        return;
+    }
+    GameConfigState *st = gc_state(game);
+    if (!st) return;
+    st->has_host = 1;
+    st->host_uid = uid;
+}
+
+Player *game_host_player(const Game *game) {
+    const GameConfigState *st = game ? game->config_state : NULL;
+    return st && st->has_host ? game_find_player((Game *) game, st->host_uid) : NULL;
 }
 
 int game_apply_map_config(Game *game, const Map *map) {

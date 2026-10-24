@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ruleset.h>
+#include <game_config.h> // the secondaries' level req (game_weapon_level_ok)
 
 void player_shoot(Player*); // shared/src/player.c
 void player_do_map_collisions(Player*, const Input*, float move_dir, int can_jump, float delta, int recon); // shared/src/player.c
@@ -1592,6 +1593,37 @@ static void test_chat(void) {
     printf("Chat test %s\n", g_failures != failures ? "FAILED" : "OK");
 }
 
+// v10.0.3 weapons' req, its level tail (deob-10.0.3.js:112377), as the server applies it to a player's secondary at
+// every spawn (updateSecIndex, :190934-190948: a refused pick is the Pistol): a guest (level 0) takes no secondary with
+// minRec in a public game, an account from that level on; a dev, a custom game and the offline sandbox take any.
+static void test_secondary_level(Game *game) {
+    printf("Running secondary level gate test...\n");
+    CHECK(!game_config_is_custom(game) && !game->is_sandbox, "the match game is public");
+    Game custom = {0};
+    game_config_host(&custom, NULL, GAME_HOST_CUSTOM);
+    Game sandbox = {0};
+    sandbox.is_sandbox = 1;
+    int gated = 0, deagle = -1;
+    for (size_t id = 0; id < rules_weapon_count(); id++) {
+        const Weapon *weapon = rules_weapon((int) id);
+        if (!weapon || !weapon->secondary) continue;
+        if (weapon->name && !strcmp(weapon->name, "Desert Eagle")) deagle = weapon->min_rec;
+        if (weapon->min_rec <= 0) {
+            CHECK(game_weapon_level_ok(game, weapon, 0, 0), "%s has no level req", weapon->name);
+            continue;
+        }
+        gated++;
+        CHECK(!game_weapon_level_ok(game, weapon, 0, 0) && !game_weapon_level_ok(game, weapon, weapon->min_rec - 1, 0),
+              "public: %s needs level %d", weapon->name, weapon->min_rec);
+        CHECK(game_weapon_level_ok(game, weapon, weapon->min_rec, 0) && game_weapon_level_ok(game, weapon, 0, 1),
+              "public: %s at level %d, or for a dev", weapon->name, weapon->min_rec);
+        CHECK(game_weapon_level_ok(&custom, weapon, 0, 0) && game_weapon_level_ok(&sandbox, weapon, 0, 0),
+              "a custom game and the sandbox open %s at level 0", weapon->name);
+    }
+    CHECK(gated >= 9 && deagle == 15, "v10.0.3's level-gated secondaries (%d; Desert Eagle minRec %d)", gated, deagle);
+    game_config_free(&custom);
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
@@ -1626,6 +1658,7 @@ int main(void) {
     test_kill_medals(&game);
     test_endless(&game);
     test_round(&game);
+    test_secondary_level(&game);
     test_chat();
 
     if (g_failures) {

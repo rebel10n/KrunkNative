@@ -13,6 +13,7 @@
 #include <server_accounts.h>
 #include <server_sandbox.h>
 #include <ks_storage.h>
+#include <game_config.h> // CONFIG.getHost: game.host (game_host_player)
 #include <pcg_basic.h>
 
 #include <math.h>
@@ -834,11 +835,15 @@ static KsValue pay_transact(KsScript *s, void *user, const KsValue *args, int ar
     return ks_undef();
 }
 
-// CONFIG.getHost: game.host. KN has no hosted custom games on the dedicated server (null);
-// the offline sandbox is hosted by the local player.
+// CONFIG.getHost (deob-10.0.3.js:211983-212002): players.findById(game.host) on the server, null without a host
+// or when the host is not in the game. A custom game's host is game_host_player (server/src/accounts.c keeps
+// game.host). KrunkNative difference: the offline sandbox (no game.host, as 10.0.3's local server) answers with the
+// local player, whose machine hosts it.
 static KsValue cfg_get_host(KsScript *s, void *user, const KsValue *args, int argc)
 {
     (void) user; (void) args; (void) argc;
+    Player *host = game_host_player(game_of(s));
+    if (host) return ks_game_wrap_player(s, game_of(s), host);
     if (!sandbox_running()) return ks_null();
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *client = &g_server->clients[i];

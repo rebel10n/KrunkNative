@@ -427,9 +427,12 @@ int ui_loadout_secondary(const int class_index) {
     const int id = sel(SEL_SECONDARY);
     const LoadoutWeapon *w = weapon_at(id);
     if (!w || !w->secondary) return 2;
-    // v10 updateSecIndex (v10.js:169364): a secondary its req refuses is the Pistol (2), as the spawn keeps it
+    // v10 updateSecIndex (v10.js:169364): a secondary its req refuses is the Pistol (2), as the spawn keeps it; its
+    // level tail too (deob-10.0.3.js:112377, the server's spawn checks it: game_weapon_level_ok), not offline
     const AccountInfo *acc = active_account();
-    if (!game_weapon_req(&menu_ui()->client->game, rules_weapon(id), acc && acc->is_dev)) return 2;
+    const Game *game = &menu_ui()->client->game;
+    if (!game_weapon_req(game, rules_weapon(id), acc && acc->is_dev)) return 2;
+    if (online_mode_online() && !game_weapon_level_ok(game, rules_weapon(id), acc ? acc->level : 0, acc && acc->is_dev)) return 2;
     return id;
 }
 
@@ -1385,8 +1388,9 @@ static char *gen_secondary(void) {
             const LoadoutWeapon *w = weapon_at(i);
             if (!w || !w->secondary || w->min_rec != rec) continue;
             // v10's card (v10.js:214015-214020): a secondary whose req refuses it has no click (customOnly: a custom
-            // game that is not comp, or a dev; noComp: not in comp)
-            const int unlocked = (!w->min_rec || all_skins_unlocked() || (acc && acc->level >= w->min_rec)) &&
+            // game that is not comp, or a dev; noComp: not in comp; minRec: the level, not in a custom game,
+            // game_weapon_level_ok, deob-10.0.3.js:112377)
+            const int unlocked = (all_skins_unlocked() || game_weapon_level_ok(&client->game, rules_weapon(i), acc ? acc->level : 0, dev)) &&
                                  game_weapon_req(&client->game, rules_weapon(i), dev);
             const int skin = has_inventory() ? weapon_skin(i) : -1;
             char img[256];
