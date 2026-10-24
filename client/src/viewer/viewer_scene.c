@@ -36,6 +36,7 @@
 #include <pets.h>
 #include <render_settings.h>
 #include <skin_fx.h>
+#include <store_item_model.h> // a store item's model (the showcase, the cosmetic page)
 #include <fast_obj.h>
 #include <stb_image.h>
 #include <math.h>
@@ -134,13 +135,6 @@ static unsigned int texture_for(const char *key) {
     const unsigned int texture = path ? load_texture(path) : 0;
     free(path);
     return texture;
-}
-
-static Geometry *model_for(const char *key) {
-    char *path = asset("models", key, ".obj");
-    Geometry *geometry = path ? load_obj_model(path, 0) : NULL;
-    free(path);
-    return geometry;
 }
 
 // x of the model's bounding-box centre (loadMesh centerZ: holder.translateZ(center.x * scale))
@@ -568,50 +562,24 @@ void viewer_item_keys(const ViewerSkin *n, char *model, const size_t model_n, ch
 }
 
 // RENDER.loadMesh / loadAnimMesh of a store item into `holder` at `position`, turned rot_y about y,
-// scaled `scale`, with its material options and animations (skin_fx.c); the OBJ falls back to the
-// model's own texture (or none with noTex).
+// scaled `scale`, with its material options and animations (store_item_model.c, skin_fx.c); the OBJ falls
+// back to the model's own texture (or none with noTex), and takes the page's paint (paintTargets items only).
 static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 position, const float rot_y, const float scale,
                        const int glow_text, const int emissive) {
-    char model[128], texture[192];
-    viewer_item_keys(n, model, sizeof(model), texture, sizeof(texture));
-
-    if ((n->flags & VS_HAS_ANIM) && vs.model_count < VIEWER_MAX_ITEMS) {
-        char rel[192];
-        snprintf(rel, sizeof(rel), "models/%s.%s", model, n->file_ext ? n->file_ext : "gltf");
-        char *path = concat(assets_path(), rel);
-        GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), n->anim_s > 0.0f ? n->anim_s : 1.0f) : NULL;
-        free(path);
-        if (instance) {
-            instance->root.position = position;
-            instance->root.rotation.y = rot_y;
-            instance->root.scale = (vec3) {scale, scale, scale};
-            instance->root.parent = holder;
-            skin_fx_apply_gltf(instance, n, model);
-            if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint_gltf(instance, g_viewer.paint, n); // the page's paint params
-            vs.models[vs.model_count++] = instance;
-            scene_add_gltf(vs.scene, instance);
+    StoreItemModel built;
+    if (!store_item_model_build(n, holder, position, rot_y, scale, glow_text, emissive, g_viewer.no_tex, &built)) return;
+    if (built.model) {
+        if (vs.model_count >= VIEWER_MAX_ITEMS) {
+            store_item_model_fini(&built);
             return;
         }
+        if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint_gltf(built.model, g_viewer.paint, n); // the page's paint params
+        vs.models[vs.model_count++] = built.model;
+        scene_add_gltf(vs.scene, built.model);
+        return;
     }
-
-    Geometry *geometry = model_for(model);
-    if (!geometry) return;
-    unsigned int tex = 0;
-    if (!g_viewer.no_tex) {
-        tex = texture[0] ? texture_for(texture) : 0;
-        if (!tex) tex = texture_for(model);
-    }
-    BasicMaterial *material = basic_material_init();
-    if (!material) return;
-    material->texture = tex;
-    Mesh *mesh = mesh_init(geometry, (Material *) material);
-    mesh->transform.position = position;
-    mesh->transform.rotation.y = rot_y;
-    mesh->transform.scale = (vec3) {scale, scale, scale};
-    mesh->transform.parent = holder;
-    skin_fx_apply(mesh, n, texture[0] ? texture : NULL, model, glow_text, emissive);
-    if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
-    item_add(mesh);
+    if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(built.mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
+    item_add(built.mesh);
 }
 
 // player_update_meshes() (third person) poses legs[0..1] / crouched_legs[0..1] without checking

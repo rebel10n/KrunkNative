@@ -3,7 +3,8 @@
 // MapManager.addSpinner deob-10.0.3.js:186539, shared/include/map_spinners.h) and their spinInfo, which "spinW"
 // (SPIN_WHEEL_RESPONSE, NET_EXT_SPIN_WHEEL_RESPONSE) starts (game.updateSpinner :219408) and game.updateSpinners
 // (:219434) runs every 50 ms. The wheel canvas is client/src/prize_wheel_render.c (painted from this state); its ticks
-// and the end's reward / cheer / explosion sounds play at the wheel. The won item's model is not drawn.
+// and the end's reward / cheer / explosion sounds play at the wheel; prize_wheel_render.c also draws the won item's
+// model (meshPrev) from item_shown and bob_anim.
 #include <client.h>
 
 typedef struct {

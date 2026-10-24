@@ -93,3 +93,22 @@ void prize_wheel_plane(const float position[3], const float size, const float di
     centre[2] = position[2];
     *yaw = (float) (M_PI / 2.0 - (double) dir * M_PI / 4.0);
 }
+
+void prize_wheel_item_pose(const float size, const float dir, const int type, const float y_off, const float x_off, const float scl,
+                           const float spn_scl, PrizeWheelItemPose *o) {
+    const float width = size / 4.0f; // the spinner GameObject's w: (sy / 2) / 2 (:186547)
+    o->frame_yaw = (float) (M_PI - (double) dir * M_PI / 4.0); // iíÍíìiï.rotateY(PI - dir * PI / 4) (:219493)
+    o->position[0] = width / 8.0f * -5.0f;                      // meshPrev.position.x = width / 8 * -5 (:219497)
+    o->position[1] = 1.0f + y_off;                              // 1 + (yOff || 0) (:219498)
+    o->position[2] = x_off;                                     // xOff || 0 (:219499)
+    o->rotation[0] = type ? 0.0f : (float) (M_PI / 11.0);       // rotateX(type ? 0 : PI / 11) (:219500)
+    o->rotation[1] = type == PRIZE_WHEEL_ITEM_SPRAY || type == PRIZE_WHEEL_ITEM_DYE ? (float) (M_PI / 2.0) : 0.0f; // (:219501)
+    o->scale = width / 4.0f;                                    // scale.setScalar(width / 4) (:219496)
+    if (type == PRIZE_WHEEL_ITEM_SPRAY) o->item_rot_y = (float) M_PI; // createSpray, rotation.y = PI (:219519)
+    else o->item_rot_y = type && type != PRIZE_WHEEL_ITEM_MELEE ? (float) M_PI : (float) (M_PI / 2.0); // (:219565)
+    o->item_scale = (spn_scl != 0.0f ? spn_scl : scl != 0.0f ? scl : 1.0f) * 2.0f; // (spnScl || scl || 1) * 2
+}
+
+float prize_wheel_item_bob(const float org_y, const float bob_anim) {
+    return org_y + sinf(bob_anim) * 0.55f;
+}

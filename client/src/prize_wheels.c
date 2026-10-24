@@ -10,8 +10,8 @@
 //              or cheer_0 (>= 1) at 0.1, an explosion (1) above rarity 5, meshPrev (the won item) put up (:219470-219574);
 //              then, while needsUpdate, the canvas is painted (client/src/prize_wheel_render.c) until the won slice
 //              is wide (meshPrev) or the idle wheel has grown in (:219576-219675)
-// Not ported: the won item's model above the hub (meshPrev and its bob are kept as state only), the screen shake and
-// the explosion effect of an Unobtainable. A pool wheel (store data with pools and no rarities, like the Starter /
+// meshPrev's model is drawn from item_shown / bob_anim by prize_wheel_render.c. Not ported: the screen shake and the
+// explosion effect of an Unobtainable. A pool wheel (store data with pools and no rarities, like the Starter /
 // Heroic wheels of the 2026-10-13 data, shared/include/store_spins.h) throws in v10 at `wheel.rarities[rarity]`: that
 // step stops there (no sound, no paint, the spinners after it wait for the next step), and the wheel goes on painting
 // its stopped pointer with the SPIN label: the same here.

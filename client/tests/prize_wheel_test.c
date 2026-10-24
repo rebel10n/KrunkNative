@@ -146,6 +146,38 @@ static void test_plane(void) {
     CHECK(NEAR(yaw, 0.0, 1e-6), "d 2: faces +z");
 }
 
+// meshPrev: the won item in front of the hub (:219485-219574)
+static void test_item_pose(void) {
+    PrizeWheelItemPose p;
+    // a weapon skin (type 0) on a 16 high wheel facing +x (d 0): the frame turns PI, so meshPrev's -x is the world's +x,
+    // the canvas side; tipped PI / 11, scaled w / 4 = 1, the model PI / 2 and (scl 0.0014) * 2
+    prize_wheel_item_pose(16.0f, 0.0f, 0, -0.6f, -2.0f, 0.0014f, 0.0f, &p);
+    CHECK(NEAR(p.frame_yaw, M_PI, 1e-6), "the frame: rotateY(pi - 0)");
+    CHECK(NEAR(p.position[0], -2.5, 1e-6) && NEAR(p.position[1], 0.4, 1e-6) && NEAR(p.position[2], -2.0, 1e-6),
+          "meshPrev at (w / 8 * -5, 1 + yOff, xOff) = (-2.5, 0.4, -2)");
+    CHECK(NEAR(p.rotation[0], M_PI / 11.0, 1e-6) && p.rotation[1] == 0.0f && NEAR(p.scale, 1.0, 1e-6), "a weapon tips pi / 11, scale w / 4");
+    CHECK(NEAR(p.item_rot_y, M_PI / 2.0, 1e-6) && NEAR(p.item_scale, 0.0028, 1e-7), "the weapon model: pi / 2, scl * 2");
+    // the frame turned: the item stands on the canvas side of the wheel (the plane's +z, rotateY(pi / 2 - d pi / 4))
+    for (int d = 0; d < 8; d++) {
+        float centre[3], yaw;
+        prize_wheel_plane((const float[3]) {0.0f, 0.0f, 0.0f}, 16.0f, (float) d, centre, &yaw);
+        prize_wheel_item_pose(16.0f, (float) d, 0, 0.0f, 0.0f, 0.0f, 0.0f, &p);
+        const double nx = sin(yaw), nz = cos(yaw); // the canvas' normal: rotateY(yaw) of +z
+        const double ix = cos(p.frame_yaw) * p.position[0], iz = -sin(p.frame_yaw) * p.position[0]; // rotateY of (x, 0, 0)
+        CHECK(ix * nx + iz * nz > 0.0 && NEAR(ix * nx + iz * nz, 2.5, 1e-5), "d %d: the item is 5 / 32 sy in front of the canvas", d);
+    }
+    // a hat (type 1): its own offsets, upright, the model turned PI, spnScl first
+    prize_wheel_item_pose(10.0f, 2.0f, 1, 0.5f, 0.25f, 1.5f, 2.0f, &p);
+    CHECK(p.rotation[0] == 0.0f && p.rotation[1] == 0.0f && NEAR(p.item_rot_y, M_PI, 1e-6) && NEAR(p.item_scale, 4.0, 1e-6),
+          "a cosmetic: upright, pi, spnScl * 2");
+    CHECK(NEAR(p.position[1], 1.5, 1e-6) && NEAR(p.scale, 0.625, 1e-6), "a cosmetic: 1 + its yOff, scale sy / 16");
+    prize_wheel_item_pose(10.0f, 0.0f, 3, 0.0f, 0.0f, 0.0f, 0.0f, &p);
+    CHECK(NEAR(p.item_rot_y, M_PI / 2.0, 1e-6) && NEAR(p.item_scale, 2.0, 1e-6), "a melee: pi / 2, (1) * 2");
+    prize_wheel_item_pose(10.0f, 0.0f, 4, 0.0f, 0.0f, 0.0f, 0.0f, &p);
+    CHECK(NEAR(p.rotation[1], M_PI / 2.0, 1e-6) && NEAR(p.item_rot_y, M_PI, 1e-6), "a spray: meshPrev turned pi / 2, its plane pi");
+    CHECK(NEAR(prize_wheel_item_bob(1.0f, (float) (M_PI / 2.0)), 1.55, 1e-6) && prize_wheel_item_bob(1.0f, 0.0f) == 1.0f, "the bob: sin * 0.55");
+}
+
 static void free_players(Game *game) {
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
@@ -228,6 +260,7 @@ int main(void) {
     test_layout();
     test_shadow();
     test_plane();
+    test_item_pose();
     test_map();
     printf("prize_wheel_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

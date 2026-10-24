@@ -60,6 +60,28 @@ void prize_wheel_layout(const PrizeWheelState *state, PrizeWheelLayout *out);
 // the levels written (<= max).
 int prize_wheel_shadow_levels(double blur, int max, double *grow, double *alpha);
 
+// The won item (meshPrev, :219485-219574): a frame at the wheel's centre turned rotateY(PI - dir * PI / 4), meshPrev in
+// it at (-width / 8 * 5, 1 + yOff, xOff) (width = the spinner's w = sy / 4), rotateX(type ? 0 : PI / 11) then rotateY(PI / 2
+// for a spray or a dye), scaled width / 4; the model in meshPrev turned item_rot_y (type && type != 3 ? PI : PI / 2; a
+// spray's plane PI) and scaled (spnScl || scl || 1) * 2. yOff / xOff / scl are the item's own, a weapon skin's from
+// store.getPreview. Each step bobs meshPrev: y = orgYP + sin(bobAnim) * 0.55.
+typedef struct {
+    float frame_yaw;     // the frame's rotation.y
+    float position[3];   // meshPrev.position in the frame
+    float rotation[2];   // meshPrev.rotation x, y (Euler XYZ: rotateX, then rotateY)
+    float scale;         // meshPrev.scale (all axes)
+    float item_rot_y;    // the model's rotation.y
+    float item_scale;    // the model's scale (all axes); a spray's plane is (9, 7.2, 1) instead
+} PrizeWheelItemPose;
+
+#define PRIZE_WHEEL_ITEM_SPRAY 4 // store type 4: createSpray's plane
+#define PRIZE_WHEEL_ITEM_DYE 5   // store type 5: a class-9 preview player wearing it
+#define PRIZE_WHEEL_ITEM_MELEE 3
+
+void prize_wheel_item_pose(float size, float dir, int type, float y_off, float x_off, float scl, float spn_scl, PrizeWheelItemPose *out);
+// meshPrev.position.y after a step: orgYP + sin(bobAnim) * 0.55 (:219576)
+float prize_wheel_item_bob(float org_y, float bob_anim);
+
 // The plane (the mesh's world transform): render.addSpinner's mesh at the object's bottom centre + sy / 2, rotateY
 // (PI / 2 - dir * PI / 4), scaled sy x sy. *yaw is that rotation.
 void prize_wheel_plane(const float position[3], float size, float dir, float centre[3], float *yaw);

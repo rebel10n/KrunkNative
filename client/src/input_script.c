@@ -94,9 +94,13 @@
 //                                none), logo version (optional); `wars none` clears it
 //                                (the Turf Wars popup and the map's wars_banner banners, wars_banners.c)
 //   100 spinw 0 37.5 2482        a "spinW" (NET_EXT_SPIN_WHEEL_RESPONSE, not ours): spinner uid, randNum, the item won
+//   100 wheelrar 2 0 28 53 13.5 4.46 1 0.04  test only: store wheel 2 draws by rarity with these odds (the compiled-in data
+//                                has only pool wheels among the map wheels 0..2, whose stop throws in v10 before the won
+//                                item goes up; the brain's store_spin_data could serve such a wheel)
 //   100 wheels @label            log the map prize wheels: "[input_script] wheels t=100 @label n=1 planes=1 banners=3
-//                                0:wheel=2,rot=82.47,mlt=1.00,end=0.0/0.0,item=2482,paints=12,tex=1" (prize_wheels.c state,
-//                                tex: the plane has a painted canvas)
+//                                0:wheel=2,rot=82.47,mlt=1.00,end=0.0/0.0,item=2482,paints=12,tex=1,up=-1@0,0,0" (prize_wheels.c
+//                                state, tex: the plane has a painted canvas, up: the won item in front of the hub and its model's
+//                                world position, -1 none)
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 tpstate                  log the KrunkNative third-person camera of the last frame (third_person.h):
@@ -256,6 +260,7 @@
 #include <lobby_ui.h>     // `ranked`: comp_ui_round (the comp menu an INIT opens)
 #include <s2c_events.h>   // `wars` / `spinw`: the EXT handler
 #include <prize_wheels.h>  // `wheels`
+#include <store_spins.h>   // `wheelrar`
 #include <prize_wheel_render.h>
 #include <wars_banners.h>
 #include <GLFW/glfw3.h>
@@ -360,7 +365,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "rows") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "waitfor") ||
-            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "wheelrar") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -1266,6 +1271,24 @@ static void script_run(Client *client, const ScriptEvent *e) {
         const NetSpinWheelPacket w = {.uid = (int32_t) e->v[0], .rand = e->v[1], .skin = (int32_t) e->v[2]};
         s2c_events_on_ext(client, NET_EXT_SPIN_WHEEL_RESPONSE, (const uint8_t *) &w, (uint16_t) sizeof(w));
         fprintf(stderr, "[input_script] spinw t=%.0f uid=%d rand=%g skin=%d\n", g_script.time, w.uid, (double) w.rand, w.skin);
+    } else if (!strcmp(e->cmd, "wheelrar")) {
+        // wheelrar <wheel> <odds...>: store wheel <wheel>'s pools become rarity odds (test only, see the top)
+        const StoreSpins *spins = store_spins_builtin();
+        char args[256];
+        snprintf(args, sizeof(args), "%s", e->arg);
+        char *p = args;
+        const long wheel = strtol(p, &p, 10);
+        if (wheel >= 0 && wheel < spins->wheel_count) {
+            StoreWheel *w = &spins->wheels[wheel];
+            w->pool_count = 0;
+            w->slices = 0;
+            for (char *end; w->slices < STORE_WHEEL_SLICES; p = end) {
+                const double odds = strtod(p, &end);
+                if (end == p) break;
+                w->weights[w->slices++] = odds;
+            }
+            fprintf(stderr, "[input_script] wheelrar t=%.0f wheel=%ld slices=%d\n", g_script.time, wheel, w->slices);
+        }
     } else if (!strcmp(e->cmd, "wheels")) {
         // wheels [@label]: the map prize wheels' spin state and planes, the Turf Wars banners
         char line[2048];
@@ -1273,9 +1296,11 @@ static void script_run(Client *client, const ScriptEvent *e) {
                           prize_wheels_count(client), prize_wheel_render_count(), wars_banners_count());
         for (int i = 0; i < prize_wheels_count(client) && at < (int) sizeof(line) - 160; i++) {
             const PrizeWheel *w = prize_wheels_get(client, i);
-            at += snprintf(line + at, sizeof(line) - (size_t) at, " %d:wheel=%d,rot=%.2f,mlt=%.2f,end=%.1f/%.1f,item=%d,paints=%u,tex=%d", i, w->wheel,
-                           (double) w->spin_rotation, (double) w->spin_whl_mlt, (double) w->end_anim_val, (double) w->end_anim_target, w->item_id,
-                           w->paints, prize_wheel_render_texture(i) != 0);
+            vec3 item_at = {0};
+            const int up = prize_wheel_render_item(i, &item_at);
+            at += snprintf(line + at, sizeof(line) - (size_t) at, " %d:wheel=%d,rot=%.2f,mlt=%.2f,end=%.1f/%.1f,item=%d,paints=%u,tex=%d,up=%d@%.2f,%.2f,%.2f",
+                           i, w->wheel, (double) w->spin_rotation, (double) w->spin_whl_mlt, (double) w->end_anim_val, (double) w->end_anim_target,
+                           w->item_id, w->paints, prize_wheel_render_texture(i) != 0, up, (double) item_at.x, (double) item_at.y, (double) item_at.z);
         }
         fprintf(stderr, "%s\n", line);
     } else if (!strcmp(e->cmd, "laced")) {

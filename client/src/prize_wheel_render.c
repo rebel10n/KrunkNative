@@ -10,7 +10,12 @@
 //               from the second paint on, everything casts it. canvas2d.h has no shadows: each shape is first
 //               stroked black at the levels of prize_wheel_shadow_levels (the blur's coverage outside the shape;
 //               the inner half of each stroke lies under the shape's own fill).
-// Not drawn: the won item's model in front of the hub (meshPrev; its place and bob are prize_wheels.c state).
+//   the item    the stop puts the won item up in front of the hub (meshPrev, :219485-219574; prize_wheel_item_pose):
+//               its store model as loadMesh / loadAnimMesh build it (store_item_model.c, the viewer's code: src / texSrc,
+//               glowText / emissive, skin_fx's animations), a spray as createSpray's 9 x 7.2 plane (:232665-232680),
+//               bobbing at each step; updateSpinner's next spin takes it down (:219413-219417)
+// Not drawn: a dye's preview player (type 5: v10 puts a class-9 Player wearing it in meshPrev, :219504-219516; a
+// preview player needs a game of its own, viewer_scene.c's preview_player), an Unobtainable's explosion and shake.
 #include <gl.h> // first: glad before any other GL header
 #include <prize_wheel_render.h>
 #include <prize_wheel_geom.h>
@@ -19,7 +24,10 @@
 #include <store_spins.h>
 #include <canvas2d.h>
 #include <map_post.h> // prefab_canvas_end: the canvas into a texture
+#include <store_item_model.h> // the won item's model
+#include <gltf.h>
 #include <klog.h>
+#include <render_settings.h>
 #include "viewer/viewer_store.h" // store.rarities: the slices' colours
 #include <math.h>
 #include <stdio.h>
@@ -44,6 +52,14 @@ typedef struct {
     int painted;       // at least one paint
     float last[5];     // the spin state of the last paint, and how many paints in a row repeated it
     int repeats;
+    float size, dir;   // the object's sy and d
+    // the won item: iíÍíìiï (the frame at the wheel's centre) and meshPrev in it, the model or the spray's plane in that
+    MeshTransform frame, prev;
+    int item_id;       // the item up, -1 none
+    float org_y;       // meshPrev.orgYP
+    StoreItemModel item;
+    Mesh *spray;
+    int spray_frames, spray_frame_t;
 } WheelMesh;
 
 static struct {
@@ -122,14 +138,20 @@ void prize_wheel_render_load(Scene *scene, const Map *map) {
         wm->mesh = mesh;
         wm->material = material;
         wm->px = prize_wheel_canvas_px(o->scale.y);
+        wm->size = o->scale.y;
+        wm->dir = map_spinner_dir(o);
+        wm->item_id = -1;
         scene_add_mesh(scene, mesh);
     }
     if (g_pwr.count) KN_LOG_VERBOSE2("[prize] %d prize wheel plane(s)\n", g_pwr.count);
 }
 
+static void item_down(WheelMesh *wm);
+
 void prize_wheel_render_unload(void) {
     for (int i = 0; i < g_pwr.count; i++) {
         WheelMesh *wm = &g_pwr.wheels[i];
+        item_down(wm);
         if (g_pwr.scene) scene_remove_mesh(g_pwr.scene, wm->mesh);
         if (wm->material->texture) {
             gl_release_texture(wm->material->texture);
@@ -291,12 +313,118 @@ static void paint(WheelMesh *wm, const PrizeWheel *w) {
     wm->mesh->visible = 1;
 }
 
+// meshPrev removed (updateSpinner, :219413-219417; the map going)
+static void item_down(WheelMesh *wm) {
+    if (wm->item.mesh && g_pwr.scene) scene_remove_mesh(g_pwr.scene, wm->item.mesh);
+    if (wm->item.model && g_pwr.scene) scene_remove_gltf(g_pwr.scene, wm->item.model);
+    store_item_model_fini(&wm->item);
+    if (wm->spray) {
+        if (g_pwr.scene) scene_remove_mesh(g_pwr.scene, wm->spray);
+        mesh_fini(wm->spray); // the material with it; the quad and the texture are shared
+        wm->spray = NULL;
+    }
+    wm->item_id = -1;
+}
+
+// render.createSpray(item) (:232665-232680): PlaneGeometry(1, 1) scaled (9, 7.2, 1), getMat("sprays/<id>", {transparent,
+// alphaTest 0.2, frames, frameT, side 2}); its rotation.y = PI in meshPrev (:219518-219519)
+static Mesh *spray_plane(const ViewerSkin *item, MeshTransform *parent, const float rot_y) {
+    Geometry *quad = quad_geometry();
+    BasicMaterial *material = quad ? basic_material_init() : NULL;
+    if (!material) return NULL;
+    char rel[64];
+    snprintf(rel, sizeof(rel), "textures/sprays/%d.png", item->id > 0 ? item->id : 0);
+    char *path = concat(assets_path(), rel);
+    material->texture = path ? load_texture(path) : 0; // cached by path (ensure_asset_file on the web)
+    free(path);
+    material->base.transparent = 1;
+    material->alpha_test = 0.2f;
+    material->double_sided = 1;
+    if (item->frames > 0) material->texture_repeat.x = 1.0f / (float) item->frames;
+    Mesh *mesh = mesh_init(quad, (Material *) material);
+    if (!mesh) {
+        material_fini((Material *) material);
+        return NULL;
+    }
+    mesh->transform.rotation.y = rot_y;
+    mesh->transform.scale = (vec3) {9.0f, 7.2f, 1.0f};
+    mesh->transform.parent = parent;
+    return mesh;
+}
+
+// The stop's meshPrev (:219485-219574): the won item in front of the hub
+static void item_up(WheelMesh *wm, const PrizeWheel *w) {
+    item_down(wm);
+    const ViewerSkin *item = viewer_skin(w->item_id);
+    if (!item) return;
+    // iîIïîïì = item.type ? item : store.getPreview(item) (:219489)
+    const ViewerPreview *preview = viewer_preview(item);
+    const float y_off = item->type ? item->y_off : preview->y_off, x_off = item->type ? item->x_off : preview->x_off;
+    const float scl = item->type ? item->scl : preview->scl;
+    PrizeWheelItemPose pose;
+    prize_wheel_item_pose(wm->size, wm->dir, item->type, y_off, x_off, scl, item->spn_scl, &pose);
+    wm->frame = (MeshTransform) {.position = w->position, .rotation = {0.0f, pose.frame_yaw, 0.0f}, .scale = {1.0f, 1.0f, 1.0f}};
+    wm->prev = (MeshTransform) {
+        .parent = &wm->frame,
+        .position = {pose.position[0], pose.position[1], pose.position[2]},
+        .rotation = {pose.rotation[0], pose.rotation[1], 0.0f}, // rotateX, then rotateY: Euler XYZ
+        .scale = {pose.scale, pose.scale, pose.scale},
+    };
+    wm->org_y = pose.position[1];
+    wm->item_id = w->item_id;
+    if (item->type == PRIZE_WHEEL_ITEM_DYE) return; // the preview player: not drawn (see the top)
+    if (item->type == PRIZE_WHEEL_ITEM_SPRAY) {
+        wm->spray = spray_plane(item, &wm->prev, pose.item_rot_y);
+        wm->spray_frames = item->frames > 0 && item->frame_t > 0 ? item->frames : 0;
+        wm->spray_frame_t = item->frame_t;
+        if (wm->spray) scene_add_mesh(g_pwr.scene, wm->spray);
+        return;
+    }
+    // loadMesh / loadAnimMesh({src, texSrc, glowText: glow || sameGlow, emissive: glow || sameGlow ? "#ffffff" : null,
+    // ...}, 0, 0, 0, item_rot_y, item_scale, meshPrev) (:219527-219565)
+    const int glow = (item->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+    if (!store_item_model_build(item, &wm->prev, (vec3) {0.0f, 0.0f, 0.0f}, pose.item_rot_y, pose.item_scale, glow, glow, 0, &wm->item)) {
+        KN_LOG_VERBOSE2("[prize] wheel %d: item %d has no model\n", wm->uid, w->item_id);
+        return;
+    }
+    if (wm->item.mesh) scene_add_mesh(g_pwr.scene, wm->item.mesh);
+    if (wm->item.model) scene_add_gltf(g_pwr.scene, wm->item.model);
+}
+
+int prize_wheel_render_item(const int uid, vec3 *at) {
+    for (int i = 0; i < g_pwr.count; i++) {
+        const WheelMesh *wm = &g_pwr.wheels[i];
+        if (wm->uid != uid) continue;
+        if (wm->item_id < 0) return -1;
+        if (at) {
+            Mesh *mesh = wm->item.mesh ? wm->item.mesh : wm->spray;
+            if (mesh) {
+                mesh_update_transform_matrix(mesh);
+                *at = (vec3) {mesh->transform_matrix[3], mesh->transform_matrix[7], mesh->transform_matrix[11]}; // row-major (mesh.c)
+            } else {
+                *at = wm->frame.position;
+            }
+        }
+        return wm->item_id;
+    }
+    return -1;
+}
+
 void prize_wheel_render_frame(Client *client) {
     if (!client || !g_pwr.count) return;
     for (int i = 0; i < g_pwr.count; i++) {
         WheelMesh *wm = &g_pwr.wheels[i];
         const PrizeWheel *w = prize_wheels_get(client, wm->uid);
         if (!w || w->object != wm->object) continue; // the spin state is still on another map
+        // meshPrev: up at the stop, down at the next spin; its bob follows the steps
+        if (w->item_shown && wm->item_id != w->item_id) item_up(wm, w);
+        else if (!w->item_shown && wm->item_id >= 0) item_down(wm);
+        if (wm->item_id >= 0) {
+            wm->prev.position.y = prize_wheel_item_bob(wm->org_y, w->bob_anim);
+            if (wm->item.model && client_render_settings()->object_anim) gltf_instance_update(wm->item.model, gltf_clock());
+            if (wm->spray && wm->spray_frames && client_render_settings()->texture_anim) // frameMats: a frame every frameT ms
+                ((BasicMaterial *) wm->spray->material)->texture_offset.x = (float) ((long long) (gltf_clock() * 1000.0 / wm->spray_frame_t) % wm->spray_frames);
+        }
         if (w->paints == wm->drawn && wm->painted) continue;
         wm->drawn = w->paints;
         if (!w->paints) continue;
