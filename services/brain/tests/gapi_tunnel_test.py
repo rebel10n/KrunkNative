@@ -176,6 +176,13 @@ async def scenario(port):
     check(st == 200 and e is None and d.get("clan_name") == tag and isinstance(d.get("members"), list), "[124] GET /clans/{id}/profile: clan_name + members list", (st, d, e))
     st, d, e = await C.gapi("GET", "/clans/by-name/%s" % tag)
     check(st == 200 and e is None and d.get("clan_id") == clan and isinstance(d.get("members"), list), "[125] GET /clans/by-name/{name}: the clan profile", (st, e))
+    # clan_logo is the approved logo's version (clan_logo.c), which v10.0.3 shows when truthy and puts in the
+    # image URL as ?v= (deob-10.0.3.js:117225-117227, 31783-31786); 0 means none
+    check(d.get("clan_logo") == 0, "[125] a clan without a logo: clan_logo 0", d.get("clan_logo"))
+    q("UPDATE clans SET clan_logo = 3 WHERE clan_id = ?", clan)
+    st, d, e = await C.gapi("GET", "/clans/%d/profile" % clan)
+    check(st == 200 and (d or {}).get("clan_logo") == 3, "[124] an approved logo: clan_logo is its version (3), not 0", (st, (d or {}).get("clan_logo")))
+    q("UPDATE clans SET clan_logo = 0 WHERE clan_id = ?", clan)
 
     # ---- players and social (13 routes)
     st, d, e = await C.gapi("GET", "/players/%s" % A.name)
@@ -192,6 +199,17 @@ async def scenario(port):
     check(st == 200 and d == {} and e is None, "[170] POST /players/{name}/report -> {}", (st, d, e))
     st, d, e = await B.gapi("GET", "/players/%s/reports" % A.name)
     check(st == 200 and d == [] and e is None, "[171] GET reports, not a moderator: the empty list", (st, d, e))
+    # a moderator reads them: rp_text raw (10.0.3 puts it in a text node, deob-10.0.3.js:126950), rp_date ISO UTC
+    # (new Date(rp_date), 126943)
+    await C.gapi("POST", "/players/%s/report" % A.name, {"reason": 1, "text": "a <b> & 'c'"})
+    q("UPDATE players SET player_moderator = 1 WHERE player_id = ?", B.id)
+    st, d, e = await B.gapi("GET", "/players/%s/reports" % A.name)
+    texts = [r.get("rp_text") for r in d or []]
+    dates = [r.get("rp_date") or "" for r in d or []]
+    check(st == 200 and "a <b> & 'c'" in texts and "probe" in texts, "[171] a moderator's reports: rp_text raw, not HTML-escaped", (st, texts))
+    check(dates and all(len(x) == 24 and x[10] == "T" and x.endswith("Z") for x in dates), "[171] rp_date is ISO UTC", dates)
+    check(all("rp_ms" not in r for r in d or []), "[171] no helper column leaks (rp_ms)", d)
+    q("UPDATE players SET player_moderator = 0 WHERE player_id = ?", B.id)
     st, d, e = await C.gapi("GET", "/social/feed?tab=global")
     check(st == 200 and any(p.get("pid") == pid for p in (d or {}).get("posts", [])), "[179] GET /social/feed?tab=: {posts: [...]}", (st, e))
     st, d, e = await C.gapi("GET", "/social/feed?player_id=%d" % A.id)
@@ -209,6 +227,13 @@ async def scenario(port):
     check(st == 200 and d == {} and e is None, "[184] POST /social/post/{id}/comment -> {}", (st, d, e))
     st, d, e = await C.gapi("GET", "/social/post/%d" % pid)
     check(st == 200 and len(d.get("comments", [])) == 1, "[181] the comment shows in the post's comments", (st, d))
+    # the comment cap counts UTF-16 units (the reply box's maxlength 500, deob-10.0.3.js:120813), never bytes
+    await B.gapi("POST", "/social/post/%d/comment" % pid, {"text": "\U0001F600" * 300})
+    await B.gapi("POST", "/social/post/%d/comment" % pid, {"text": "\u0436" * 600})
+    st, d, e = await C.gapi("GET", "/social/post/%d" % pid)
+    bodies = [c.get("txt") for c in (d or {}).get("comments", [])]
+    check(len(bodies) == 3 and bodies[1] == "\U0001F600" * 250 and bodies[2] == "\u0436" * 500,
+          "[184] a long comment is cut at 500 UTF-16 units (250 emoji, 500 Cyrillic letters)", [len(b or "") for b in bodies])
 
     # ---- studios (24 routes)
     st, d, e = await A.gapi("DELETE", "/studios/%d" % tmp_id)

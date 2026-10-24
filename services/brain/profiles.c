@@ -397,32 +397,28 @@ const char *profile_report_reason(const cJSON *v) {
 /* the reports of a player (v10 GET /players/<name>/reports, socket "grp"): moderators and developers
  * only (an empty list for others). Rows: {rp_id, rp_date, rp_reportername, rp_index (v10's reason
  * index; reasons not in v10's list count as Other), rp_text}, newest first. */
-void profile_reports_query(SocialSession *s, const char *name, SocialDbFn fn, void *extra) {
+void profile_reports_query(SocialSession *s, const char *name, int raw, SocialDbFn fn, void *extra) {
+#define REPORTS_SQL(TEXT, ACCOUNT)                                                                                \
+    "SELECT rp.id AS rp_id, rp.created_at AS rp_date, {epoch_ms:rp.created_at} AS rp_ms__i, a.username AS rp_reportername, " \
+    "CASE rp.reason WHEN 'Hacking' THEN 0 WHEN 'Exploiting' THEN 1 WHEN 'Scamming' THEN 2 "                       \
+    "WHEN 'Harassment' THEN 3 WHEN 'Boosting' THEN 5 WHEN 'Market Manipulation' THEN 6 ELSE 4 END AS rp_index__i, " \
+    TEXT " AS rp_text "                                                                                             \
+    "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "                                               \
+    "WHERE rp.target_id = " ACCOUNT " "                                                                            \
+    "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) " \
+    "ORDER BY rp.id DESC LIMIT 100"
+    static const kn_sql escaped = {.pg = REPORTS_SQL("kn_html(rp.details)", "kn_account_id($1)"),
+                                   .any = REPORTS_SQL("{html:rp.details}", ACCOUNT_ID_OF_1)};
+    static const kn_sql plain = {.pg = REPORTS_SQL("rp.details", "kn_account_id($1)"), .any = REPORTS_SQL("rp.details", ACCOUNT_ID_OF_1)};
+#undef REPORTS_SQL
     char me[24];
-    social_query(s,
-                 SQL(.pg = "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
-                           "CASE rp.reason WHEN 'Hacking' THEN 0 WHEN 'Exploiting' THEN 1 WHEN 'Scamming' THEN 2 "
-                           "WHEN 'Harassment' THEN 3 WHEN 'Boosting' THEN 5 WHEN 'Market Manipulation' THEN 6 ELSE 4 END AS rp_index__i, "
-                           "kn_html(rp.details) AS rp_text "
-                           "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
-                           "WHERE rp.target_id = kn_account_id($1) "
-                           "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
-                           "ORDER BY rp.id DESC LIMIT 100",
-                     .any = "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
-                            "CASE rp.reason WHEN 'Hacking' THEN 0 WHEN 'Exploiting' THEN 1 WHEN 'Scamming' THEN 2 "
-                            "WHEN 'Harassment' THEN 3 WHEN 'Boosting' THEN 5 WHEN 'Market Manipulation' THEN 6 ELSE 4 END AS rp_index__i, "
-                            "{html:rp.details} AS rp_text "
-                            "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
-                            "WHERE rp.target_id = " ACCOUNT_ID_OF_1 " "
-                            "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
-                            "ORDER BY rp.id DESC LIMIT 100"),
-                 KN_DB_ARGS(name ? name : "", social_viewer(s, me)), fn, extra);
+    social_query(s, raw ? &plain : &escaped, KN_DB_ARGS(name ? name : "", social_viewer(s, me)), fn, extra);
 }
 
 /* ["grp", name] -> ["rps", rows] (moderators only) */
 void sh_reports(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
-    profile_reports_query(s, fa_str(f, 1), rows_reply_done, strdup("rps"));
+    profile_reports_query(s, fa_str(f, 1), 0, rows_reply_done, strdup("rps"));
 }
 
 static void report_done(SocialSession *s, kn_db_result *res, void *extra) {

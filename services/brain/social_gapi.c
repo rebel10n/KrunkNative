@@ -39,6 +39,7 @@
 #include "hot.h"
 #include "strike_econ.h"
 #include "studios.h"
+#include "v10_api.h" /* v10_iso_ms */
 #include "knsvc/config.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
@@ -464,11 +465,8 @@ static void social_comment(SocialSession *s, const GapiReq *r, int64_t id) {
     }
     char body[2048], me[24], pid[24];
     const int max = g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500;
-    size_t len = strlen(text);
-    if ((int) len > max) {
-        len = (size_t) max;
-        while (len > 0 && ((unsigned char) text[len] & 0xC0) == 0x80) len--;
-    }
+    /* the cap counts UTF-16 units, as the reply box's maxlength 500 does (deob-10.0.3.js:120813), not bytes */
+    const size_t len = brain_utf16_prefix(text, (size_t) max);
     snprintf(body, sizeof body, "%.*s", (int) len, text);
     social_query(s,
                  SQL(.any = "INSERT INTO feed_comments (post_id, author_id, body) SELECT id, $1, $3 FROM feed_posts "
@@ -700,7 +698,7 @@ static void players_follows(SocialSession *s, const GapiReq *r, const char *name
  * s7 = the member's clan score (KrunkNative keeps no 7-day window per member) */
 #define CLAN_PROFILE_COLS \
     "SELECT c.clan_id AS clan_id__i, c.clan_name, (SELECT username FROM accounts WHERE id = c.clan_playerid) AS creator_name, " \
-    "c.clan_score AS clan_score__i, coalesce(c.clan_discord, '') AS clan_link4 FROM clans c "
+    "c.clan_score AS clan_score__i, coalesce(c.clan_discord, '') AS clan_link4, c.clan_logo AS clan_logo__i FROM clans c "
 
 /* GET /players/<name>/reports (v10 getReports): {data: [{rp_id, rp_date, rp_reportername, rp_index,
  * rp_text}]}; moderators and developers see the reports, others an empty list */
@@ -711,12 +709,23 @@ static void reports_done(SocialSession *s, kn_db_result *res, void *extra) {
         gapi_error(s, c->rid, 500, "PLAYERS_REPORTS_FAILED", "Failed to load reports");
         return;
     }
-    gapi_reply(s, c->rid, kn_db_result_to_json(res));
+    /* rp_date as ISO UTC: v10.0.3 reads it with new Date(rp_date) (deob-10.0.3.js:126943), which takes the SQL
+     * text form without a zone as local time */
+    cJSON *rows = kn_db_result_to_json(res), *row;
+    cJSON_ArrayForEach(row, rows) {
+        char when[40];
+        v10_iso_ms(kn_json_int(row, "rp_ms", 0), when, sizeof when);
+        cJSON_DeleteItemFromObjectCaseSensitive(row, "rp_ms");
+        cJSON_DeleteItemFromObjectCaseSensitive(row, "rp_date");
+        cJSON_AddStringToObject(row, "rp_date", when);
+    }
+    gapi_reply(s, c->rid, rows);
 }
 
 static void players_reports(SocialSession *s, const GapiReq *r, const char *name) {
     if (!need_login(s, r)) return;
-    profile_reports_query(s, name, reports_done, gctx(r, 0, 0, NULL));
+    /* raw rp_text: v10.0.3 puts it in a text node (deob-10.0.3.js:126950) */
+    profile_reports_query(s, name, 1, reports_done, gctx(r, 0, 0, NULL));
 }
 
 static void report_filed_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -764,7 +773,8 @@ static void clan_profile_done(SocialSession *s, kn_db_result *res, void *extra) 
     cJSON *rows = kn_db_result_to_json(res);
     cJSON *clan = cJSON_DetachItemFromArray(rows, 0);
     cJSON_Delete(rows);
-    cJSON_AddNumberToObject(clan, "clan_logo", 0); /* logo version: none (clan_v10.c serves uploads) */
+    /* clan_logo: the approved logo's version (clan_logo.c), 0 for none; v10.0.3 shows the logo only when it is
+     * truthy (deob-10.0.3.js:117225-117227) and puts it in the image URL as ?v= (31783-31786) */
     GCtx *d = calloc(1, sizeof *d);
     if (!d) {
         cJSON_Delete(clan);

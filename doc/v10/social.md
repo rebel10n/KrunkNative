@@ -32,10 +32,19 @@ authenticated social socket, so both ride on it:
 
 * gapi: `["gapi", rid, method, path, body]` -> `["gapi", rid, status, {data} | {error: {code, message}}]`
   (`services/brain/social_gapi.c`, `client/src/ui/v10_gapi.c`). Requests are rate limited per class
-  and connection, a refused one answered with a 429 `RATE_LIMITED` (doc/social-rate-limit.md).
+  and connection, a refused one answered with a 429 `RATE_LIMITED` (doc/social-rate-limit.md); the
+  client takes any 429 as v10.0.3's gapi wrapper does: no data and "Rate limit exceeded. Try again
+  later." (deob-10.0.3.js:30051-30057). The bodies were checked route by route against the 10.0.3
+  call sites and consumers (doc/v10/api-inventory.md, the shape column).
 * event bus: `["eb", {type, ...}]` both ways, v10's objects verbatim (`services/brain/social_eb.c`):
   `friends:list`, `presence:ping/pong/online/offline/game`, `msg:send/sent/recv/read/history`,
-  `msg:history:result`, `unread:summary`, `error` (EB_* codes). Friends are mutual follows (v10's
+  `msg:history:result`, `unread:summary`, `error` (EB_* codes; an unknown type is EB_UNKNOWN_TYPE with
+  10.0.3's "Chat client is out of date. Please refresh."). Checked against 10.0.3 frame by frame
+  (deob-10.0.3.js:156539-157813): every field it reads matches. KrunkNative's `game:invite` (Strike) is
+  not a 10.0.3 type; its refusals carry `of: "game:invite"`, so the client never fails a pending
+  message on them. A message's length is counted in UTF-16 units on both sides, as 10.0.3's
+  `text.length <= 512` (157704-157705); a comment is cut at 500 UTF-16 units (the reply box's
+  maxlength, 120813), not bytes. Friends are mutual follows (v10's
   rule); a follow that makes or breaks a friendship pushes both friends lists. Messages are
   `chat_messages` rows (the hub chat's), online only like v10 (EB_TARGET_OFFLINE). Online = a
   signed-in social socket on any brain (Redis presence, `hot_presence_online`).
@@ -45,9 +54,9 @@ authenticated social socket, so both ride on it:
 * chat bans: a `feature_bans` row with feature `chat` in force (revoked_at NULL, expires_at NULL or
   later) refuses the account's `msg:send` with `EB_MSG_INVALID` ("You are banned from chat."), an
   inline code, so the bubble fails as v10.0.3 expects, and its social chat line `ict` with `chf` false.
-  No KrunkNative route writes that row: `POST /moderation/chat` is refused over HTTP
-  (`v10_market.c`), so staff set it in the database (the same way as the gift, market and trade bans).
-  The v10.0.3 consumer reads `chat_banned` on an account only for the staff button label.
+  Staff write that row with `POST /moderation/chat {player_name, ban}` (`v10_mods.c`, moderation_log);
+  `GET /moderation/chat/:name` reads `chat_banned`, which the v10.0.3 consumer uses for the staff
+  button label (deob-10.0.3.js:126002-126004, 254172-254207).
 
 ## The krunker.io account (official games)
 
@@ -89,3 +98,8 @@ back to the author. News: `accounts.news` (HTML strings).
 * Post types 5 (unboxed item) and 8 (match result) are rendered by the brain only if such posts exist
   (KrunkNative creates none yet).
 * Join in the conversation header calls `v10_party_join_game` (v10-party); without it, nothing.
+* Load earlier messages is the button only: 10.0.3 also loads them when the list is scrolled within
+  80 px of the top (deob-10.0.3.js:157784-157790).
+* Reports: `rp_text` is sent raw on the gapi path (10.0.3 puts it in a text node, deob-10.0.3.js:126950)
+  and the client escapes it; `rp_date` is ISO UTC. The socket's `["grp"]` -> `["rps"]` keeps the
+  HTML-escaped text.
