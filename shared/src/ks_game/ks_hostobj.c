@@ -8,6 +8,8 @@
 #include <ai.h>
 #include <ai_parts.h>
 #include <modes.h>
+#include <net_ext.h> // "spb" (player.speed)
+#include <triggers.h> // TRIGGER_EVENT_* (toggleDestructible)
 #include <weapons.h>
 
 #include <ctype.h>
@@ -439,6 +441,32 @@ static KsValue pl_clear_loadout(KsScript *s, void *native, const KsValue *args, 
 }
 
 static KsValue pl_score(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_num(p->score); }
+// v10.0.3 player.godMode / speed / aiKills (deob-10.0.3.js:207846-207866, :208133). speed is speedBoost || 1; the
+// server's write clamps it to 0.1..10 and tells the player ("spb" speedBoost, silent).
+static KsValue pl_god_mode(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_bool(p->god_mode); }
+static void pl_god_mode_set(KsScript *s, void *native, uint32_t id, KsValue v)
+{
+    (void) s;
+    PLAYER_SET(r);
+    if (on_server(r)) p->god_mode = (unsigned char) truthy(v);
+}
+static KsValue pl_speed(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_num(p->speed_boost ? p->speed_boost : 1.0); }
+static void pl_speed_set(KsScript *s, void *native, uint32_t id, KsValue v)
+{
+    PLAYER_SET(r);
+    if (!on_server(r)) return;
+    char buf[64];
+    ks_to_string(s, v, buf, sizeof(buf));
+    char *end = NULL;
+    const double d = strtod(buf, &end); // parseFloat; isFinite
+    if (end == buf || !isfinite(d)) return;
+    p->speed_boost = (float) fmax(0.1, fmin(d, 10.0));
+    const NetSpeedBoostPacket boost = {.boost = p->speed_boost, .silent = 1};
+    uint8_t buf_out[NET_EXT_HEADER_SIZE + sizeof(boost)];
+    const uint16_t n = net_ext_pack(buf_out, sizeof(buf_out), NET_EXT_PLAYER_SPEED_BOOST, &boost, sizeof(boost));
+    if (n) game_send(ks_native_game(native), p->uid, NET_PACKET_EXT, buf_out, n);
+}
+static KsValue pl_ai_kills(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_num(p->mode.ai_kills); }
 static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)
 {
     PLAYER_SET(r);
@@ -620,6 +648,9 @@ static KsValue pl_rotation(KsScript *s, void *n, uint32_t id) { return pl_sub(s,
     {"removeMelee", NULL, NULL, pl_remove_melee, 0},                                                                   \
     {"clearLoadout", NULL, NULL, pl_clear_loadout, 0},                                                                 \
     {"score", pl_score, pl_score_set, NULL, 0},                                                                        \
+    {"aiKills", pl_ai_kills, NULL, NULL, 0},                                                                           \
+    {"godMode", pl_god_mode, pl_god_mode_set, NULL, 0},                                                                \
+    {"speed", pl_speed, pl_speed_set, NULL, 0},                                                                        \
     {"lives", pl_lives, pl_lives_set, NULL, 0},                                                                        \
     {"rotation", pl_rotation, NULL, NULL, 1},                                                                          \
     {"position", pl_position, NULL, NULL, 1},                                                                          \
@@ -979,12 +1010,53 @@ static const KsHostClass g_ob_position_class = {"position", g_ob_position_props,
 static const KsHostClass g_ob_scale_class = {"scale", g_ob_scale_props, 3};
 static KsValue ob_position(KsScript *s, void *n, uint32_t id) { return object_of(n) ? ks_host_object(s, &g_ob_position_class, n, id) : ks_undef(); }
 static KsValue ob_scale(KsScript *s, void *n, uint32_t id) { return object_of(n) ? ks_host_object(s, &g_ob_scale_class, n, id) : ks_undef(); }
+// v10.0.3 obj3DServ (deob-10.0.3.js:208959-209045): interface, health (a destructible's: set on the server, 1..1e6),
+// destroyed, toggleDestructible. Not ported: the position setters (game.moveObject: KN's server moves no map object yet).
+static KsValue ob_interface(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->interface_id) : ks_undef(); }
+static KsValue ob_health(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_num(o->health) : ks_undef(); }
+static void ob_health_set(KsScript *s, void *n, uint32_t id, KsValue v)
+{
+    (void) id;
+    Object *o = object_of(n);
+    if (!o || !on_server(ref_of(n)) || !o->start_health) return; // isServer && startHealth
+    char buf[64];
+    ks_to_string(s, v, buf, sizeof(buf));
+    char *end = NULL;
+    const double d = strtod(buf, &end); // parseFloat; isFinite
+    if (end == buf || !isfinite(d)) return;
+    o->health = (float) fmax(1.0, fmin(d, 1000000.0));
+}
+static KsValue ob_destroyed(KsScript *s, void *n, uint32_t id) { (void) s; (void) id; Object *o = object_of(n); return o ? ks_bool(o->destroyed) : ks_undef(); }
+// toggleDestructible: a destroyed one respawns ("ro", onRespawn with no player), a standing one is destroyed ("do",
+// onDestroy / onDamage with no player); only destructibles (startHealth || canDest)
+static KsValue ob_toggle_destructible(KsScript *s, void *n, const KsValue *args, int argc)
+{
+    (void) s;
+    (void) args;
+    (void) argc;
+    Object *o = object_of(n);
+    Game *game = ks_native_game(n);
+    if (!o || !game || !on_server(ref_of(n)) || !(o->start_health || o->can_destroy)) return ks_undef();
+    if (o->destroyed) {
+        o->destroyed_by = -1; // onTrigger(null, obj), then destroyedBy = null
+        game_respawn_object(game, o, NULL);
+    } else {
+        game_destroy_object(game, o, NULL);
+        const int event = game_object_event(o);
+        if (event == TRIGGER_EVENT_ON_DESTROY || event == TRIGGER_EVENT_ON_DAMAGE) game_on_trigger(game, NULL, o, NULL);
+    }
+    return ks_undef();
+}
 static const KsHostProp g_object_props[] = {
     {"sid", ob_sid, NULL, NULL, 0},
+    {"interface", ob_interface, NULL, NULL, 0},
+    {"health", ob_health, ob_health_set, NULL, 0},
+    {"destroyed", ob_destroyed, NULL, NULL, 0},
     {"position", ob_position, NULL, NULL, 1},
     {"scale", ob_scale, NULL, NULL, 1},
+    {"toggleDestructible", NULL, NULL, ob_toggle_destructible, 0},
 };
-const KsHostClass ks_map_object_class = {"object", g_object_props, 3};
+const KsHostClass ks_map_object_class = {"object", g_object_props, (int) (sizeof(g_object_props) / sizeof(g_object_props[0]))};
 
 KsValue ks_game_wrap_map_object(KsScript *s, Game *game, const int object_index)
 {

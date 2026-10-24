@@ -699,6 +699,7 @@ void ai_render_projectile_end(Client *client, const NetProjectileEndPacket *pack
 }
 
 void ai_render_tick(Client *client, const float delta) {
+    ai_parts_set_fetch_hook(asset_prefetch); // the AI models of ai_parts.c arrive like any asset (web: in the background)
     const Map *map = client->game.ready ? client->game.map : NULL;
     if (map != g_air.map || (g_air.scene && g_air.scene != client->scene)) {
         ai_render_reset(client);

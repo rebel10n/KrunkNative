@@ -528,7 +528,24 @@ static void test_ai_wrapper(void) {
         g_log_count = 0;
         game_object_hit(&game, o, p, 25.0f, 0, GAME_HIT_SHOT);
         CHECK(logged("obj 4 2 25") && logged("objgone 4 2"), "onObjectDestroyed after the last damage (%d lines)", g_log_count);
+        // obj3DServ: interface, health (startHealth objects, 1..1e6), destroyed, toggleDestructible (deob-10.0.3.js:208959-209045)
+        o->start_health = 30.0f;
+        run_script(&game, "public action start() {\n    obj[] l = GAME.OBJECTS.getByInterface(4);\n    obj o = l[0];\n"
+                          "    GAME.log(\"o \" + toStr(o.interface) + \" \" + toStr(o.destroyed));\n    o.toggleDestructible();\n"
+                          "    GAME.log(\"t \" + toStr(o.destroyed) + \" \" + toStr(o.health));\n    o.health = 5000000;\n"
+                          "    GAME.log(\"h \" + toStr(o.health));\n    o.toggleDestructible();\n    GAME.log(\"d \" + toStr(o.destroyed));\n}\n");
+        CHECK(logged("o 4 true") && logged("t false 30") && logged("h 1000000") && logged("d true"),
+              "interface / destroyed / toggleDestructible / health clamp (%s | %s | %s | %s)", g_log_count > 0 ? g_log[0] : "",
+              g_log_count > 1 ? g_log[1] : "", g_log_count > 2 ? g_log[2] : "", g_log_count > 3 ? g_log[3] : "");
     }
+    // player.godMode / speed / aiKills (deob-10.0.3.js:207846-207866, :208133)
+    p->mode.ai_kills = 3;
+    g_sent_count = 0;
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n"
+                      "    GAME.log(\"p \" + toStr(me.godMode) + \" \" + toStr(me.speed) + \" \" + toStr(me.aiKills));\n"
+                      "    me.godMode = true;\n    me.speed = 50;\n    GAME.log(\"q \" + toStr(me.godMode) + \" \" + toStr(me.speed));\n}\n");
+    CHECK(logged("p false 1 3") && logged("q true 10") && p->god_mode && p->speed_boost == 10.0f, "godMode, speed (speedBoost || 1, 0.1..10), aiKills");
+    CHECK(count_sent(NET_PACKET_EXT, p->uid) == 1, "speed sends the player its speedBoost (spb)");
     ks_game_unload(&game);
     cJSON_Delete(map);
 }

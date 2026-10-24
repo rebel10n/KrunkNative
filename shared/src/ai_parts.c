@@ -3,7 +3,7 @@
 // hit mesh keeps its triangles in floats (the JS Float32Array).
 //
 // Deliberate differences (documented):
-//   - The model is model.glb under assets_path() (asset_prefetch / read_file), not a fetch() of
+//   - The model is model.glb under assets_path() (the fetch hook, then read_file), not a fetch() of
 //     user-assets.krunker.io; a file over 60 MB fails like the JS content-length check.
 //   - The pose is computed per call, not cached per (clip, round(t * 30)) like AI.poseAt (:205263): the
 //     cache only reuses the first pose of each 1/30 s, so a hit differs at most by that sub-frame.
@@ -877,14 +877,19 @@ void ai_parts_model_put(Game *game, const int asset, AiPartsModel *model) {
     st->models[st->model_count++] = (ModelSlot) {asset, model ? AI_PARTS_MODEL_READY : AI_PARTS_MODEL_FAILED, model};
 }
 
-// loadModel (:206431): the model.glb of the asset; asset_prefetch 0 = still arriving (retried next call)
+static int (*g_fetch)(const char *path);
+
+void ai_parts_set_fetch_hook(int (*fetch)(const char *path)) { g_fetch = fetch; }
+
+// loadModel (:206431): the model.glb of the asset; the fetch hook's 0 = still arriving (retried next call). Without a
+// hook (server_bin, kn_brain, tests) the file is read as it is.
 static void slot_try_load(ModelSlot *slot) {
     char *path = NULL;
     char rel[64];
     snprintf(rel, sizeof(rel), "user-assets/%d/model.glb", slot->asset);
     path = concat(assets_path(), rel);
     if (!path) return;
-    const int ready = asset_prefetch(path);
+    const int ready = g_fetch ? g_fetch(path) : 1;
     if (ready < 0) slot->state = AI_PARTS_MODEL_FAILED;
     if (ready <= 0) {
         free(path);

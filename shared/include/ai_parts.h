@@ -13,8 +13,8 @@
 //   :206429-206446  AI manager rigs / hitMeshes / loadModel (user-assets <id>/model.glb, async)
 //   :206452-206468  AI.playAnim: the server's clip state (n, t0, reps, hold) and heldClip
 //   :206506-206568  "aip" AI_PARTS: syncParts (client) and the partsDirty send in AI.sync
-// The model is the asset's model.glb under assets_path() ("user-assets/<id>/model.glb"), asked for with
-// asset_prefetch(): until it arrives (or when it is missing) a precise AI is hit on its box, as in v10.0.3
+// The model is the asset's model.glb under assets_path() ("user-assets/<id>/model.glb"), asked for through the fetch
+// hook (the client's asset_prefetch): until it arrives (or when it is missing) a precise AI is hit on its box, as in v10.0.3
 // while loadModel runs. Clients use the same model for ai.solid (the collision tris of the solid pose).
 #include <ai.h>
 
@@ -93,6 +93,10 @@ void ai_parts_model_pose(const AiPartsModel*, const char *clip, double t, double
 AiPartsModel *ai_parts_model_get(Game*, int asset, int load, int *state);
 // Installs a parsed model for an asset (tests); takes ownership. NULL marks the asset failed.
 void ai_parts_model_put(Game*, int asset, AiPartsModel*);
+// How a model file is asked for before it is read: 1 present, 0 still arriving (asked again later), -1 missing. The
+// client sets asset_prefetch (the web fetches in the background, the native client its asset downloads); without a
+// hook (server_bin, kn_brain, tools, tests) the file is read at once.
+void ai_parts_set_fetch_hook(int (*fetch)(const char *path));
 
 // ---- per AI
 AiParts *ai_parts_of(Game*, const GameAI*, int create); // NULL when the AI has none (create: NULL on OOM)
