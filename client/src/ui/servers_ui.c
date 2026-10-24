@@ -2018,7 +2018,9 @@ static int find_group(ServerGroup *groups, const int count, const char *key) {
 static char g_sort_region[32];
 static int cmp_games_old(const void *a, const void *b) {
     const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
-    return row_players(y) - row_players(x); // (pr ? 1 : 0) first: no priority servers in KrunkNative
+    // (pr ? 1 : 0) first: krunker.io's promoted servers ("promoted", krunker_lobbies.c); Box Office has none
+    const int d = meta_flag(y, "promoted") - meta_flag(x, "promoted");
+    return d ? d : row_players(y) - row_players(x);
 }
 // Custom Games / Official Customs with regionPriority (always on): default region first
 static int cmp_games_region(const void *a, const void *b) {
@@ -2261,9 +2263,17 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     sb_free(&prefix);
     if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
     if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
+    // gameModes[g].doubleXP && !ds && !c (deob-10.0.3.js:246616, 246633)
+    const GameModeConfig *mode = row_mode(t);
+    if (mode && mode->double_xp && !dedicated && !custom)
+        sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--yellow);'>2XP</div> ");
     sb_append_esc(sb, name.data ? name.data : "");
     sb_free(&name);
     if (meta_flag(t, "kr") || meta_flag(t, "earnKR")) sb_append(sb, " <div class='krIcon' style='margin-top:-6px;vertical-align:middle'>KR</div> ");
+    // v10's pr is a promoted server (the host form's Promote Server upgrade): a star (deob-10.0.3.js:246633). A
+    // krunker.io row carries it as "promoted" (krunker_lobbies.c); Box Office's own servers send pr for a password
+    // (server/src/accounts.c), so on them pr is the lock, as pw is
+    if (meta_flag(t, "promoted")) sb_append(sb, " <span class='material-icons' style='margin-top:-6px;color:#FBC02D;vertical-align:middle'>star</span> ");
     if (meta_flag(t, "pw") || meta_flag(t, "pr")) sb_append(sb, " <span class='material-icons' style='margin-top:-6px;color:#FBC02D;vertical-align:middle'>lock</span> ");
     char *badge = servers_ui_entry_badge_html(t); // Outdated / Incompatible (build versions)
     sb_append(sb, badge);

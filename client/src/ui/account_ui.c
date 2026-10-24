@@ -2730,10 +2730,13 @@ static char *gen_account(void) {
         sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
         sb_append(&sb, I18N("generic.name", "Name"));
         if (player_names_hidden()) sb_append(&sb, "<a class='floatR'>"); // no profile link while names are hidden (the real account's)
-        else {
-            sb_append(&sb, "<a href='/social.html?p=profile&q=");
-            sb_append_esc(&sb, g_acc.name);
-            sb_append(&sb, "' class='floatR' target='_blank'>");
+        else { // openPlayerProfile("name"): the player's profile view (deob-10.0.3.js:247528)
+            sb_append(&sb, "<a href='javascript:void(0)' onclick='openPlayerProfile(\"");
+            for (const char *p = g_acc.name; *p; p++) { // the name as a JS string inside the attribute
+                char c[3] = {'\\', *p, 0};
+                sb_append_esc(&sb, *p == '\'' || *p == '"' || *p == '\\' ? c : c + 1);
+            }
+            sb_append(&sb, "\")' class='floatR'>");
         }
         sb_append_esc(&sb, player_names_account(g_acc.name));
         sb_appendf(&sb, "</a></div><div class='settName' style='width:100%%'>%s<a style='float:right'  onclick='showWindow(13)'>", I18N("generic.clan", "Clan"));

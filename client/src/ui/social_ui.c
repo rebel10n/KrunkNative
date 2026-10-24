@@ -667,8 +667,9 @@ static void open_settings(void) {
         append_setting_html(&sb, s);
         sb_append(&sb, "</div>");
     }
-    // openOneTrust(): KrunkNative shows no ads (the button stays, it does nothing)
-    sb_append(&sb, "<div style='background-color: #994cd1!important;font-size: 17px;padding: 5px;border-radius: 4px;text-align: center;margin-top: 10px;color: rgba(255, 255, 255, 1) !important;' onclick='openOneTrust()'>Manage Ad Preferences</div>");
+    // v7.1.4 ends the popup with a "Manage Ad Preferences" button (openOneTrust, the ad consent manager);
+    // Krunker v10.0.3 has no such entry (its English table has no ad-preferences label) and Box Office
+    // shows no ads, so the popup ends with the settings rows.
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
     generic_popup(html, "settingsPop", NULL);
@@ -6394,8 +6395,6 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"featureCreation", h_feature_creation},
     {"deleteCreationConf", h_delete_creation_conf},
     {"deleteCreation", h_delete_creation},
-    {"openOneTrust", h_noop},   // no ads / consent manager in KrunkNative
-    {"closeOneTrust", h_noop},
     {"logBtnFRVR", h_noop},     // analytics
     {"imagePopup", h_noop},     // the custom background collection (krk_custImgs): not ported
 };
