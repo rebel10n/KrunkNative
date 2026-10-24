@@ -937,6 +937,55 @@ static void o_set_visible(KsScript *s, void *native, uint32_t id, KsValue v) {
     o->visible = ksc_truthy(v);
     obj_apply_visible(o);
 }
+// v10.0.3 obj3D intensity / distance / color (deob-10.0.3.js:208565-208600): lights only (0 / "" otherwise); intensity
+// 0..15 (the scene's own units: light_sync scales it), distance 0..1000 on point and spot lights (the others have none)
+static KsValue o_get_intensity(KsScript *s, void *native, uint32_t id) {
+    (void) s;
+    (void) id;
+    const KsObj3D *o = obj_of(native);
+    return ks_num(o->kind == KSO_LIGHT ? o->intensity : 0);
+}
+static void o_set_intensity(KsScript *s, void *native, uint32_t id, KsValue v) {
+    (void) s;
+    (void) id;
+    KsObj3D *o = obj_of(native);
+    if (o->kind != KSO_LIGHT || v.tag != KS_NUM || !isfinite(v.as.num)) return;
+    o->intensity = (float) ksc_clamp(v.as.num, 0, 15);
+    light_sync(o);
+}
+static int light_has_distance(const KsObj3D *o) { return o->kind == KSO_LIGHT && (o->light == KSL_POINT || o->light == KSL_SPOT); }
+static KsValue o_get_distance(KsScript *s, void *native, uint32_t id) {
+    (void) s;
+    (void) id;
+    const KsObj3D *o = obj_of(native);
+    return ks_num(light_has_distance(o) ? o->distance : 0);
+}
+static void o_set_distance(KsScript *s, void *native, uint32_t id, KsValue v) {
+    (void) s;
+    (void) id;
+    KsObj3D *o = obj_of(native);
+    if (!light_has_distance(o) || v.tag != KS_NUM || !isfinite(v.as.num)) return;
+    o->distance = (float) ksc_clamp(v.as.num, 0, 1000);
+    light_sync(o);
+}
+static KsValue o_get_color(KsScript *s, void *native, uint32_t id) {
+    (void) id;
+    const KsObj3D *o = obj_of(native);
+    if (o->kind != KSO_LIGHT) return ks_str(s, "", 0);
+    char hex[8]; // "#" + color.getHexString()
+    const int r = (int) lroundf(fminf(fmaxf(o->light_color.x, 0.0f), 1.0f) * 255.0f), g = (int) lroundf(fminf(fmaxf(o->light_color.y, 0.0f), 1.0f) * 255.0f),
+              b = (int) lroundf(fminf(fmaxf(o->light_color.z, 0.0f), 1.0f) * 255.0f);
+    snprintf(hex, sizeof(hex), "#%02x%02x%02x", r, g, b);
+    return ks_str(s, hex, 7);
+}
+static void o_set_color(KsScript *s, void *native, uint32_t id, KsValue v) {
+    (void) id;
+    KsObj3D *o = obj_of(native);
+    if (o->kind != KSO_LIGHT || !ksc_is_hex(v)) return;
+    const vec4 c = arg_color(s, v, "#ffffff");
+    o->light_color = (vec3) {c.x, c.y, c.z};
+    light_sync(o);
+}
 static KsValue o_get_emissive(KsScript *s, void *native, uint32_t id) { (void) native; (void) id; return ks_str(s, "", 0); }
 static void set_emissive(BasicMaterial *m, void *user) { m->emissive = *(vec4 *) user; }
 static void o_set_emissive(KsScript *s, void *native, uint32_t id, KsValue v) {
@@ -1160,6 +1209,9 @@ static KsValue o_detach(KsScript *s, void *native, const KsValue *a, int n) {
 static const KsHostProp OBJ_PROPS[] = {
     {"id", o_id, NULL, NULL, 0},
     {"visible", o_get_visible, o_set_visible, NULL, 0},
+    {"intensity", o_get_intensity, o_set_intensity, NULL, 0},
+    {"distance", o_get_distance, o_set_distance, NULL, 0},
+    {"color", o_get_color, o_set_color, NULL, 0},
     {"emissive", o_get_emissive, o_set_emissive, NULL, 0},
     {"opacity", o_get_opacity, o_set_opacity, NULL, 0},
     {"texture", o_get_texture, o_set_texture, NULL, 0},

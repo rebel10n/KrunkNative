@@ -160,6 +160,9 @@ Added here:
   with no player); a standing one is destroyed (`"do"`, onDestroy / onDamage with no player).
 - On the player wrapper: `godMode`, `speed` and `aiKills` (:207846-207866, :208133). `speed` reads
   `speedBoost || 1`; a server write clamps it to 0.1..10 and sends the player `"spb"`.
+- On the client scene object (obj3D, :208565-208600): `intensity` (lights, 0..15), `distance` (point and spot lights,
+  0..1000) and `color` (lights, `#rrggbb`), in `client/src/ks/ks_scene.c`. They read 0 / "" on other objects, and
+  a write re-syncs the light. Compile-checked only: the client has no KrunkScript scene test harness.
 
 Missing, outside this package:
 
@@ -168,7 +171,6 @@ Missing, outside this package:
   object yet).
 - On the player wrapper: `currentSkinIndex`, `giveSkin`, `setSkin` and `getSkin` (store skins, :207943, :208302-208320).
   `player.pose` belongs to `doc/v10/player-pose.md`.
-- On the client scene object (obj3D): `intensity`, `distance` and `color` (:208553-208600).
 - The entity wrapper's `attachPlayer`, `updateAttachment` and `detachPlayer`, and the ctx's `peer` / `peers`, all in the
   entities package.
 
