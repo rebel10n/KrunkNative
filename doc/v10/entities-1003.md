@@ -121,14 +121,33 @@ broadcasts it in `"lo"`. The live object wrapper (:209050) has `id` and `delete(
 draws `<aid>/model.glb` at (x, y, z), turned ry and scaled s. In KN that is a spawned CUSTOM_ASSET map object
 whose GLB joins the scene through `user_asset_object_added`.
 
-## 5. Deliberate differences
+## 5. Bodies, blocks and complex collision
 
-- **No server bodies.** The server builds none (buildBody / placeBody / carryPlayers). Its entities collide with the
-  map (collideWorld) and with each other (separateAll), but players cannot stand on them there.
-- **Soft carry at once.** A soft rider's movX / movY / movZ move it immediately. 10.0.3 applies them in pinAllServer
-  right after.
-- **The soft zones' onTopOf** is "a static map object right under the feet", because KN keeps no onTopOf.
-- **The match seed** is the shared script's hash with the map, sent as entSeed, not `Math.random`.
+- **Bodies** (buildBody :212839, placeBody :213050, carryPlayers :213091) are built by the shared manager on both
+  sides: a solid entity's parts are map objects on the server too, and a client also builds the non-solid ones (no
+  collision). A moved solid part takes along the players standing on it and pushes the ones it runs into, so players
+  stand on and collide with entities on the server and the client predicts the same. The server's objects are no
+  Object Manager objects (not `spawned`, `spawn_owner` -77) and leave the map at the next round.
+- **`LIVE_OBJECTS.addCube(x, y, z, w, h, l, _, opts)`** (:211252-211290) keeps the block with v10's props: src `wall_0`
+  or the aid's texture / video, opacity, fTrans and colr. It is a solid server map object (addBlock, :212115); a
+  client's `"lo"` builds the same block.
+- **complexCollision**: addAsset's cpx loads the model's rest triangles (iîiîïîì :204179, 6000 at most,
+  `ai_parts_model_rest_tris`), scaled, turned ry and moved, on both sides, into the player collision
+  (`world_player_tris`; loadTris :212187).
+- **The `lk` yaw lock** (:260606-260640): `entities_ride_look` (from `client/src/main.c`'s input frame) turns the look
+  with a ridden entity and, with `lk`, sets it to the entity's yaw.
+- **The v10 bridge** (`server/bridge/v10_bridge.c`) sends official clients `e+` / `e-` / `es` / `ee` / `ea+` / `ea-` /
+  `lo` / `slo`, held until START, `entSeed` in the init, and the controlled entity as the `l` array's slot 26.
+
+## 6. Deliberate differences
+
+- **Soft carry at once.** A soft rider's movX / movY / movZ, and carryPlayers' moves, move the player immediately.
+  10.0.3 adds them to movX, which pinAllServer or procInputs applies right after. KN has no class hit box pads
+  (hbS / hbH) in carryPlayers.
+- **onTopOf** is measured (grounded, feet at the top, inside the footprint) for carryPlayers and the soft zones,
+  because KN keeps no onTopOf.
+- **The match seed** is the shared script's hash with the map, sent as entSeed, not `Math.random`. On the bridge, a
+  seed that arrives after the init was built is dropped, as 10.0.3 reads it in the init only.
 - **Without `scripts.shared`** a client still places its entities from the baselines. 10.0.3 runs none of the
   entity half of game.update without hooks.
 - **The entity clock** runs on the client's frame clock instead of `Date.now()`, starts over at an INIT, and takes
@@ -137,13 +156,12 @@ whose GLB joins the scene through `user_asset_object_added`.
   (playPartClip) return false.
 - **Pitch and roll** of a body turn its part meshes but not their offsets.
 
-## 6. Not done
+## 7. Not done
 
-- addAsset's `cpx`: the model's triangles in the collision quads and its rayProxy (:212187-212275), on either side.
-- `LIVE_OBJECTS.addCube` is still the server stub (`api_undefined`, `ks_hostobj.c`). Clients draw an official lobby's
-  blocks.
-- The `lk` camera yaw lock (:260606-260633).
-- The KN server's bridge for official clients (`server/bridge/v10_bridge.c`) does not translate the entity EXTs.
+- Shots against entity parts (rayVsPart, :214014) and their damage (`entities.damage` from a hit, :196082). KN's shots
+  ignore dyn objects, so they pass through the parts on both sides.
+- The live assets' rayProxy (shots against a cpx asset, :212244).
+- On the bridge, the `l` slot 26 assumes a movement scheme without sendVals: the bridge sends none.
 
 ## Tests
 
@@ -161,6 +179,9 @@ whose GLB joins the scene through `user_asset_object_added`.
 - `server/tests/ks_server_test.c` (`test_entities`) covers the server host over the sandbox with EXT clients: the
   joiner's state after its HELLO, the spawn / damage / destroyed / hop records, the baselines, `"ea+"`, the pinned
   rider, the asset's `"lo"`, and a late joiner's seed / lo / e+ / ea+.
+- `ks_game_v1003_test` (`test_entity_bodies`) covers a rider carried on the server's body and predicted the same on
+  the client, addCube's record and solid block, a player landing on it, delete(), the asset's triangles on both
+  sides, and a new round taking the server's objects out. `v10_translate_test` and `v10_bridge_test` cover the bridge.
 - Headless offline run: a map with a server script, a shared script and a client script. The server spawns a
   second entity, attaches the player and adds asset 46802. The probe log shows both entities stepping and the
   player pinned at its entity plus (0, 1, 0). It also shows the client's own `"lap"` events and the server's, and the
