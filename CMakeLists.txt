@@ -2013,7 +2013,8 @@ else ()
     # KrunkerBox game server's TCP (knet frames). The C port of net-bridge/v10Proxy.ts and v10Translate.ts;
     # knsvc serves the WebSocket and the codec is the official one (shared/src/krunker_proto.c). Only with knsvc.
     if (TARGET knsvc)
-        set(V10_CODEC_SOURCES shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/progression.c shared/src/season.c)
+        set(V10_CODEC_SOURCES shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/progression.c shared/src/season.c
+            shared/src/rules/v10/network_sounds_v10.c) # the "s" / "so" / "sso" ids (v10_map_sound)
         add_executable(v10_bridge server/bridge/v10_bridge_main.c server/bridge/v10_bridge.c server/bridge/v10_translate.c
             ${V10_CODEC_SOURCES})
         target_include_directories(v10_bridge PRIVATE server/bridge shared/include)

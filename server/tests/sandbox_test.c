@@ -377,6 +377,34 @@ static void test_wpc_peer_mix(void) {
     NetReconPacket recon;
     CHECK(recon_now && net_packet_read_recon(&recon, recon_now, NULL) && recon.ack_seq == 29 && recon.wall_jump_count == 0 &&
           recon.can_slide_timer == 0.0f && (float) (recon.slide_ms / 1000.0) == recon.slide_timer, "RECON V2 movement locks");
+
+    // patch 7 (NET_PROTOCOL_PATCH_SOUND_V2): the sound packets by the receiver's protocol. The current peer gets the
+    // 88-byte SOUND (64-byte names), the 1.3.0 peer the 48-byte V1 and no sound whose name does not fit its 24 bytes
+    const int old_from = old.count, now_from = now.count;
+    game_play_sound(&g_server->game, "inspect_monte_carlo_spin", me_now.uid, (vec3) {0, 0, 0}, 1.0f, 1.0f);
+    game_play_sound(&g_server->game, "taunt_0", me_now.uid, (vec3) {0, 0, 0}, 1.0f, 1.0f);
+    for (int f = 0; f < 5; f++) {
+        pump(&old, 1);
+        pump(&bare, 1);
+        pump(&now, 1);
+    }
+    int now_long = 0, now_short = 0, old_long = 0, old_short = 0, old_v1 = 1;
+    NetSoundPacket sound;
+    for (int i = now_from; i < now.count; i++) {
+        if (now.packets[i].type != NET_PACKET_SOUND || now.packets[i].length != sizeof(NetSoundPacket) ||
+            !net_sound_packet_read(NET_PACKET_SOUND, now.packets[i].payload, now.packets[i].length, &sound)) continue;
+        now_long += !strcmp(sound.name, "inspect_monte_carlo_spin");
+        now_short += !strcmp(sound.name, "taunt_0");
+    }
+    for (int i = old_from; i < old.count; i++) {
+        if (old.packets[i].type != NET_PACKET_SOUND) continue;
+        old_v1 &= old.packets[i].length == NET_SOUND_PACKET_V1_SIZE;
+        if (!net_sound_packet_read(NET_PACKET_SOUND, old.packets[i].payload, old.packets[i].length, &sound)) continue;
+        old_long += !strcmp(sound.name, "inspect_monte_carlo_spin");
+        old_short += !strcmp(sound.name, "taunt_0");
+    }
+    CHECK(now_long == 1 && now_short == 1, "current peer: both sounds as V2 (%d %d)", now_long, now_short);
+    CHECK(old_v1 && old_short == 1 && !old_long, "1.3.0 peer: taunt_0 as V1, not the 24-character name (%d %d)", old_short, old_long);
     CHECK(!old.closed && !bare.closed && !now.closed, "nobody dropped");
     sandbox_stop();
 }

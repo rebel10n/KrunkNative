@@ -31,9 +31,10 @@
 // interact.c).
 //
 // "weapon_17_4" is listed twice (ids 135 and 155): indexOf answers 135, and 155 plays the same file.
-// KrunkNative's own NetSoundPacket carries names (NET_SOUND_NAME_SIZE 24): "inspect_monte_carlo_spin"
-// (24 characters) does not fit, the one name that cannot cross our wire (the official link drops it,
-// client/src/net/krunker_link.c fx_sound_name).
+// KrunkNative's own sound packets carry names, NET_SOUND_NAME_SIZE (64) bytes since protocol patch 7
+// (shared.h NET_PROTOCOL_PATCH_SOUND_V2): every name here fits. A peer from before patch 7 reads 24-byte
+// names, which "inspect_monte_carlo_spin" (24 characters) does not fit: the server does not send it that
+// sound (net_sound_packet_to_v1), the one name such a peer misses.
 #include <stddef.h>
 
 #define NETWORK_SOUND_COUNT 399

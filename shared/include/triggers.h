@@ -178,7 +178,7 @@ extern const int g_trigger_sound_scapes[TRIGGER_SOUND_SCAPE_COUNT];             
 // for a user asset (esa), else config.emitterSounds[es], emitterSounds[0] for an index the list
 // lacks (`assetSnd ? snd : emitterSounds[snd] ? emitterSounds[snd] : emitterSounds[0]`: addEmitter
 // deob-10.0.3.js:186574, addTrigger :186330, addAI :187510).
-#define TRIGGER_SOUND_NAME_SIZE 24 // "asset:" + any int fits; NET_SOUND_NAME_SIZE
+#define TRIGGER_SOUND_NAME_SIZE 24 // "asset:" + any int and every emitterSounds name fit (<= NET_SOUND_NAME_SIZE_V1)
 void trigger_sound_name(int sound, int asset, char *out, size_t size);
 
 // A SOUND_EMITTER object: map.js (deob-10.0.3.js:189196-189204) -> MapManager.addEmitter

@@ -260,6 +260,10 @@ static void change_position_of(Client *client, const NetChangePositionPacket *pa
     type var; \
     if (length != sizeof(type)) return 1; \
     memcpy(&var, payload, sizeof(var))
+// The sound packets: the patch-7 layout or a pre-patch-7 server's V1 (24-byte names, shared.h)
+#define TRIGGERS_READ_SOUND(T, var) \
+    T var; \
+    if (!net_sound_packet_read(type, payload, length, &var)) return 1
 
 // "cv" / "gv" with a string value (NET_EXT_VALUE_TEXT): you.custVals[key] = val / globalVals[key] = val as the
 // numbers below (deob-10.0.3.js:258558-258560, :257834-257836), the value kept as the text (triggers.h TriggerValue)
@@ -293,7 +297,7 @@ int client_triggers_handle_event(Client *client, const int type, const void *pay
             return 1;
         }
         case NET_PACKET_SOUND: {
-            TRIGGERS_READ(NetSoundPacket, packet);
+            TRIGGERS_READ_SOUND(NetSoundPacket, packet);
             play_sound(client, &packet);
             return 1;
         }
@@ -336,13 +340,13 @@ int client_triggers_handle_event(Client *client, const int type, const void *pay
             return 1;
         }
         case NET_PACKET_STOP_SOUND: {
-            TRIGGERS_READ(NetStopSoundPacket, packet);
+            TRIGGERS_READ_SOUND(NetStopSoundPacket, packet);
             packet.name[sizeof(packet.name) - 1] = 0;
             if (!packet.asset && packet.name[0]) audio_stop(packet.name); // SOUND.stop(name) (no asset sounds natively)
             return 1;
         }
         case NET_PACKET_PLAYER_SOUND: {
-            TRIGGERS_READ(NetPlayerSoundPacket, packet);
+            TRIGGERS_READ_SOUND(NetPlayerSoundPacket, packet);
             player_sound(client, &packet);
             return 1;
         }

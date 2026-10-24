@@ -450,6 +450,19 @@ static int net_peer_takes_kill_nuke(const ClientConnection *client) {
     return client->peer_minor > NET_PROTOCOL_MINOR_EXT || client->peer_patch >= NET_PROTOCOL_PATCH_KILL_NUKE;
 }
 
+// A game packet to one connection: the sound packets in their V1 layout (24-byte names) to a peer before patch 7,
+// which never gets a sound whose name does not fit them (net_sound_packet_to_v1).
+static void net_send_game_packet(const ClientConnection *client, const int type, const void *payload, const uint16_t length) {
+    if ((type == NET_PACKET_SOUND || type == NET_PACKET_STOP_SOUND || type == NET_PACKET_PLAYER_SOUND) &&
+        !net_peer_has_sound_v2(client->peer_minor, client->peer_patch)) {
+        uint8_t v1[NET_SOUND_PACKET_V1_MAX];
+        const uint16_t n = net_sound_packet_to_v1(type, payload, length, v1);
+        if (n) net_send_packet(client->fd, (NetPacketType) type, v1, n);
+        return;
+    }
+    net_send_packet(client->fd, (NetPacketType) type, payload, length);
+}
+
 static void net_game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
 
@@ -469,14 +482,14 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
                 net_send_packet(client->fd, (NetPacketType) type, &kill, sizeof(kill));
                 continue;
             }
-            net_send_packet(client->fd, (NetPacketType) type, payload, length);
+            net_send_game_packet(client, type, payload, length);
         }
         return;
     }
 
     ClientConnection *client = net_client_by_id(uid);
     if (client && type == NET_PACKET_END && length == sizeof(NetEndPacket)) accounts_on_end_packet(uid, payload); // didWin for the commit
-    if (client && net_peer_takes(client, type)) net_send_packet(client->fd, (NetPacketType) type, payload, length);
+    if (client && net_peer_takes(client, type)) net_send_game_packet(client, type, payload, length);
 }
 
 static void net_change_map_internal(int map_index, int mode_index, int respawn_joined);

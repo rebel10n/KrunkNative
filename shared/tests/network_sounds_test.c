@@ -175,11 +175,14 @@ static void check_ids(void) {
     int duplicates = 0;
     for (int i = 0; i < NETWORK_SOUND_COUNT; i++) duplicates += network_sound_index(g_network_sounds[i]) != i;
     CHECK(duplicates == 1, "one duplicate name (%d)", duplicates);
-    // NetSoundPacket carries a name: only inspect_monte_carlo_spin does not fit
-    int too_long = 0;
-    for (int i = 0; i < NETWORK_SOUND_COUNT; i++) too_long += strlen(g_network_sounds[i]) >= NET_SOUND_NAME_SIZE;
-    CHECK(too_long == 1 && strlen(network_sound_name(267)) == NET_SOUND_NAME_SIZE, "only id 267 inspect_monte_carlo_spin is past NET_SOUND_NAME_SIZE (%d)",
-          too_long);
+    // the sound packets carry names: every one fits the patch-7 field, only id 267 inspect_monte_carlo_spin is past the V1 one
+    int too_long = 0, past_v1 = 0;
+    for (int i = 0; i < NETWORK_SOUND_COUNT; i++) {
+        too_long += strlen(g_network_sounds[i]) >= NET_SOUND_NAME_SIZE;
+        past_v1 += strlen(g_network_sounds[i]) >= NET_SOUND_NAME_SIZE_V1;
+    }
+    CHECK(!too_long && past_v1 == 1 && strlen(network_sound_name(267)) == NET_SOUND_NAME_SIZE_V1,
+          "every name fits NET_SOUND_NAME_SIZE (%d past it), only 267 is past the V1 field (%d)", too_long, past_v1);
 
     // shoot / tryGrapple: networkSounds.indexOf(weapon.sound) (:196406, :196177): every Krunker gun with a
     // sound has an id (the knife's "melee" is played by the client's swing, not sent)
@@ -189,6 +192,51 @@ static void check_ids(void) {
         if (!w || i >= WEAPON_ID_KN_BASE || w->melee || !w->sound || !w->sound[0]) continue;
         CHECK(network_sound_index(w->sound) >= 0, "weapon %zu %s: its sound %s has an id", i, w->name ? w->name : "?", w->sound);
     }
+}
+
+// The sound packets' patch-7 layout (64-byte names) and the V1 one older peers get (shared.h).
+static void check_wire(void) {
+    printf("Running the sound packets' V1 / V2 layouts...\n");
+    CHECK(!net_peer_has_sound_v2(NET_PROTOCOL_MINOR_EXT, NET_PROTOCOL_PATCH_SOUND_V2 - 1) && net_peer_has_sound_v2(NET_PROTOCOL_MINOR_EXT, 7) &&
+              !net_peer_has_sound_v2(NET_PROTOCOL_MINOR_V7, 9) && net_peer_has_sound_v2(NET_PROTOCOL_MINOR_EXT + 1, 0) &&
+              NET_PROTOCOL_PATCH >= NET_PROTOCOL_PATCH_SOUND_V2,
+          "net_peer_has_sound_v2: 1.4.7 and later");
+    CHECK(sizeof(NetSoundPacket) == 88 && sizeof(NetStopSoundPacket) == 65 && sizeof(NetPlayerSoundPacket) == 79, "V2 sizes %zu %zu %zu",
+          sizeof(NetSoundPacket), sizeof(NetStopSoundPacket), sizeof(NetPlayerSoundPacket));
+
+    uint8_t v1[NET_SOUND_PACKET_V1_MAX];
+    NetSoundPacket s = {.name = "weapon_1", .uid = 7, .position = {1, 2, 3}, .volume = 0.85f, .rate = 1.05f}, back;
+    uint16_t n = net_sound_packet_to_v1(NET_PACKET_SOUND, &s, sizeof(s), v1);
+    int32_t uid;
+    float rate;
+    memcpy(&uid, v1 + 24, 4);
+    memcpy(&rate, v1 + 44, 4);
+    CHECK(n == NET_SOUND_PACKET_V1_SIZE && !strcmp((const char *) v1, "weapon_1") && !v1[23] && uid == 7 && rate == 1.05f,
+          "SOUND V1: name @0 (24), uid @24, rate @44 (%u)", n);
+    memset(&back, 0x55, sizeof(back));
+    CHECK(net_sound_packet_read(NET_PACKET_SOUND, v1, n, &back) && !strcmp(back.name, "weapon_1") && back.uid == 7 && back.position[2] == 3.0f &&
+              back.volume == 0.85f && back.rate == 1.05f && !back.name[NET_SOUND_NAME_SIZE - 1],
+          "SOUND V1 reads back");
+    snprintf(s.name, sizeof(s.name), "%s", network_sound_name(267));
+    CHECK(!net_sound_packet_to_v1(NET_PACKET_SOUND, &s, sizeof(s), v1), "a name past 23 characters is not sent to a V1 peer");
+    CHECK(net_sound_packet_read(NET_PACKET_SOUND, &s, sizeof(s), &back) && !strcmp(back.name, "inspect_monte_carlo_spin"), "SOUND V2 reads");
+
+    NetStopSoundPacket stop = {.name = "asset:30001", .asset = 1}, stop_back;
+    n = net_sound_packet_to_v1(NET_PACKET_STOP_SOUND, &stop, sizeof(stop), v1);
+    CHECK(n == NET_STOP_SOUND_PACKET_V1_SIZE && v1[24] == 1 && net_sound_packet_read(NET_PACKET_STOP_SOUND, v1, n, &stop_back) &&
+              !strcmp(stop_back.name, "asset:30001") && stop_back.asset == 1,
+          "STOP_SOUND V1: name @0, asset @24 (%u)", n);
+
+    NetPlayerSoundPacket ps = {.uid = 3, .add = 1, .force = 0, .loop = 1, .volume = 0.5f, .rate = 1.25f, .name = "jug_0"}, ps_back;
+    n = net_sound_packet_to_v1(NET_PACKET_PLAYER_SOUND, &ps, sizeof(ps), v1);
+    CHECK(n == NET_PLAYER_SOUND_PACKET_V1_SIZE && !strcmp((const char *) v1 + 15, "jug_0") && v1[6] == 1 &&
+              net_sound_packet_read(NET_PACKET_PLAYER_SOUND, v1, n, &ps_back) && ps_back.uid == 3 && ps_back.add == 1 && ps_back.loop == 1 &&
+              ps_back.volume == 0.5f && ps_back.rate == 1.25f && !strcmp(ps_back.name, "jug_0"),
+          "PLAYER_SOUND V1: the name last @15 (%u)", n);
+
+    CHECK(!net_sound_packet_read(NET_PACKET_SOUND, v1, 47, &back) && !net_sound_packet_read(NET_PACKET_CHAT, v1, 48, &back) &&
+              !net_sound_packet_to_v1(NET_PACKET_SOUND, &s, 48, v1) && !net_sound_packet_to_v1(NET_PACKET_SPRAY, &s, sizeof(s), v1),
+          "other lengths and types are refused");
 }
 
 // v3.1.1 and v7.1.4 use the same id space: their lists are prefixes of v10.0.3's.
@@ -391,6 +439,7 @@ int main(void) {
     check_fixture();
     check_bundle();
     check_ids();
+    check_wire();
     check_old_lists();
     check_old_maps();
     printf("network_sounds_test: %d checks, %d failures\n", checks, failures);

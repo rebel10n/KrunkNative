@@ -44,6 +44,9 @@
 #define V10_IN_SHOW_TRACER "9" /* v10.js 97902 SHOW_TRACER, the handler 220548 (_73392) */
 #define V10_IN_SYNC_PLAYER "l" /* v10.js 220091: the owner's movement state, one argument: the 26-slot array */ /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
 #define V10_IN_ADD_PLAYER_SOUND "asnd"
+#define V10_IN_PLAYER_SOUND "s"  /* deob-10.0.3.js PLAYER_SOUND (:111186), the handler :257766: game.playerSound */
+#define V10_IN_PLAY_SOUND "so"   /* PLAY_SOUND (:111196), the handler :257758: mode 1 is a 2D play */
+#define V10_IN_STOP_SOUND "sso"  /* STOP_SOUND (:111197), the handler :257754 */
 #define V10_IN_REMOVE_PLAYER_SOUND "rsnd"
 #define V10_IN_UPDATE_TIMER "t"
 #define V10_IN_GAME_STATE_CHANGED "gsc"
@@ -157,13 +160,39 @@ typedef struct V10GlobalValue {
 } V10GlobalValue;
 int v10_parse_global_value(const uint8_t *p, size_t n, V10GlobalValue *out);
 
+/* The sound packets carry a 64-byte name since protocol patch 7 (shared.h NET_PROTOCOL_PATCH_SOUND_V2), a 24-byte one
+ * before: the bridge announces this build's patch and reads both (an older server sends 24). */
+#define V10_SOUND_NAME_MAX (3 * 64 + 1) /* UTF-8, sanitised */
 typedef struct V10PlayerSound {
     int32_t uid;
     int add, force, loop;
     double volume, rate;
-    char name[100]; /* UTF-8, sanitised: up to 24 bytes raw */
+    char name[V10_SOUND_NAME_MAX];
 } V10PlayerSound;
-int v10_parse_player_sound(const uint8_t *p, size_t n, V10PlayerSound *out);
+int v10_parse_player_sound(const uint8_t *p, size_t n, V10PlayerSound *out); /* 39 or 79 bytes */
+
+/* SOUND (NetSoundPacket, 48 / 88 bytes): game.playSound's "s" / "so" (see v10_map_sound). */
+typedef struct V10Sound {
+    char name[V10_SOUND_NAME_MAX];
+    int32_t uid; /* a player (playerSound sid), -1 at the position, -2 a 2D sound */
+    double position[3];
+    double volume, rate;
+} V10Sound;
+int v10_parse_sound(const uint8_t *p, size_t n, V10Sound *out);
+/* STOP_SOUND (NetStopSoundPacket, 25 / 65 bytes): the trigger's "sso" name (an asset's id digits) and isAsset. */
+typedef struct V10StopSound {
+    char name[V10_SOUND_NAME_MAX];
+    int asset;
+} V10StopSound;
+int v10_parse_stop_sound(const uint8_t *p, size_t n, V10StopSound *out);
+/* SOUND as v10's server sends it (game.playSound, deob-10.0.3.js:216760-216770, sent as networkSounds.indexOf(name)):
+ * uid >= 0 "s" [sound, sid, x, y, z, vol, rate, null, null, false, isAsset] (played at that player), uid -1 the same
+ * with forcePos true (at x y z), uid -2 "so" [sound, vol, 1, 0, 0, 0, rate, null, null, isAsset] (2D). The sound is
+ * its config.networkSounds id (shared/include/network_sounds.h) when the list has the name, a user asset's id with
+ * isAsset for "asset:<id>", else the name (an emitterSounds name: the client plays a string as it is, :257767). */
+void v10_map_sound(V10Out *o, const uint8_t *p, size_t n);
+/* STOP_SOUND: "sso" [sound, isAsset], the sound as v10_map_sound picks it (an asset's id as a number). */
+void v10_map_stop_sound(V10Out *o, const uint8_t *p, size_t n);
 
 typedef struct V10Timer {
     int32_t seconds;

@@ -364,10 +364,11 @@ static void test_voice_channels(void) {
 static int taunt_sounds(const TestClient *c, const char *name) {
     int n = 0;
     for (int i = 0; i < c->count; i++) {
-        if (c->packets[i].type != NET_PACKET_SOUND || c->packets[i].length != sizeof(NetSoundPacket)) continue;
+        // these peers announce 1.3.0 / 1.0.0: the server sends them the V1 layout (shared.h patch 7)
         NetSoundPacket sound;
-        memcpy(&sound, c->packets[i].payload, sizeof(sound));
-        sound.name[sizeof(sound.name) - 1] = 0;
+        if (c->packets[i].type != NET_PACKET_SOUND || c->packets[i].length != NET_SOUND_PACKET_V1_SIZE ||
+            !net_sound_packet_read(NET_PACKET_SOUND, c->packets[i].payload, c->packets[i].length, &sound))
+            continue;
         if (!strcmp(sound.name, name) && fabsf(sound.volume - TAUNT_VOLUME) < 1e-4f && sound.rate >= 0.9f && sound.rate <= 1.0f) n++;
     }
     return n;

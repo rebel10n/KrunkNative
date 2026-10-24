@@ -671,23 +671,32 @@ static void test_fx(void) {
                                        KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 10);
     feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(9001), KRUNKER_V_NUM(7), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1),
                                        KRUNKER_V_NUM(1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 11);
-    int long_index = -1;
+    // the table's longest name (267 inspect_monte_carlo_spin, 24 characters) fits NET_SOUND_NAME_SIZE since patch 7;
+    // a name past it and an unknown index are dropped
+    int longest = 0;
     for (int i = 0; i < krunker_sound_count(); i++) {
-        if (strlen(krunker_sound_name(i)) >= NET_SOUND_NAME_SIZE) long_index = i;
+        if (strlen(krunker_sound_name(i)) > strlen(krunker_sound_name(longest))) longest = i;
     }
-    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(long_index), KRUNKER_V_NUM(7)}, 2);
+    char too_long[NET_SOUND_NAME_SIZE + 8];
+    memset(too_long, 'x', sizeof(too_long) - 1);
+    too_long[sizeof(too_long) - 1] = 0;
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(longest), KRUNKER_V_NUM(7)}, 2);
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_STR(too_long), KRUNKER_V_NUM(7)}, 2);
     feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(100000), KRUNKER_V_NUM(7)}, 2);
     {
         READ_IN(NetSoundPacket, a, SOUND, 0);
         READ_IN(NetSoundPacket, b, SOUND, 1);
         READ_IN(NetSoundPacket, c, SOUND, 2);
+        READ_IN(NetSoundPacket, d, SOUND, 3);
         CHECK(krunker_sound_count() == 399 && !strcmp(krunker_sound_name(0), "spray") && !strcmp(krunker_sound_name(5), "weapon_1"),
               "the official sound table (%d)", krunker_sound_count());
         CHECK(a_p && !strcmp(a.name, "weapon_1") && a.uid == 7 && a.position[2] == 3 && fabsf(a.volume - 0.85f) < 1e-6f &&
               fabsf(a.rate - 1.05f) < 1e-6f, "s: sounds[5] at sid 7 (%s)", a.name);
         CHECK(b_p && !strcmp(b.name, "spray") && b.uid == -1 && b.volume == 1.0f && b.rate == 1.0f, "s: a name, forcePos, vol / rate || 1");
         CHECK(c_p && !strcmp(c.name, "asset:9001"), "s: isAsset (%s)", c.name);
-        CHECK(long_index >= 0 && !find_in(NET_PACKET_SOUND, 3), "s: a name past NET_SOUND_NAME_SIZE and an unknown index are dropped");
+        CHECK(longest == 267 && d_p && !strcmp(d.name, "inspect_monte_carlo_spin") && d.uid == 7, "s: sounds[267], the longest name (%s)",
+              d_p ? d.name : "none");
+        CHECK(!find_in(NET_PACKET_SOUND, 4), "s: a name past NET_SOUND_NAME_SIZE and an unknown index are dropped");
     }
     clear();
 

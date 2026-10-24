@@ -205,6 +205,8 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_GAME_CONFIG: return "GAME_CONFIG";
     case NET_PACKET_GLOBAL_VALUE: return "GLOBAL_VALUE";
     case NET_PACKET_PLAYER_SOUND: return "PLAYER_SOUND";
+    case NET_PACKET_SOUND: return "SOUND";
+    case NET_PACKET_STOP_SOUND: return "STOP_SOUND";
     case NET_PACKET_TIMER: return "TIMER";
     case NET_PACKET_CHEAT: return "CHEAT";
     case NET_PACKET_PICKUP: return "PICKUP";
@@ -1177,6 +1179,16 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             v10_push(&o, V10_IN_ADD_PLAYER_SOUND, args, 3);
         }
         finish_out(s, &o, "PLAYER_SOUND");
+        return;
+    }
+    /* SOUND: game.playSound's "s" at a player or a position, "so" for a 2D sound; STOP_SOUND: the trigger's "sso". The
+     * sound goes by its config.networkSounds id when the list has the name (see v10_map_sound) */
+    if (s->init_sent && (type == NET_PACKET_SOUND || type == NET_PACKET_STOP_SOUND)) {
+        const char *name = type == NET_PACKET_SOUND ? "SOUND" : "STOP_SOUND";
+        v10_out_init(&o);
+        if (type == NET_PACKET_SOUND) v10_map_sound(&o, p, n);
+        else v10_map_stop_sound(&o, p, n);
+        finish_out(s, &o, name);
         return;
     }
     /* LEAVE: another player disconnected: the v10 "2" (see v10_map_leave); its position is no longer a shot's origin */

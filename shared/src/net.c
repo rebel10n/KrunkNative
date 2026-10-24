@@ -245,6 +245,69 @@ int net_peer_has_skin_paint(const int minor, const int patch) {
     return minor > NET_PROTOCOL_MINOR_EXT || (minor == NET_PROTOCOL_MINOR_EXT && patch >= NET_PROTOCOL_PATCH_SKIN_PAINT);
 }
 
+int net_peer_has_sound_v2(const int minor, const int patch) {
+    return minor > NET_PROTOCOL_MINOR_EXT || (minor == NET_PROTOCOL_MINOR_EXT && patch >= NET_PROTOCOL_PATCH_SOUND_V2);
+}
+
+// The sound packets' V1 layouts (before patch 7): the same fields with a 24-byte name. NetSoundPacket and
+// NetStopSoundPacket open with the name, NetPlayerSoundPacket ends with it.
+_Static_assert(sizeof(NetSoundPacket) == NET_SOUND_PACKET_V1_SIZE - NET_SOUND_NAME_SIZE_V1 + NET_SOUND_NAME_SIZE, "NetSoundPacket V2");
+_Static_assert(sizeof(NetStopSoundPacket) == NET_STOP_SOUND_PACKET_V1_SIZE - NET_SOUND_NAME_SIZE_V1 + NET_SOUND_NAME_SIZE, "NetStopSoundPacket V2");
+_Static_assert(sizeof(NetPlayerSoundPacket) == NET_PLAYER_SOUND_PACKET_V1_SIZE - NET_SOUND_NAME_SIZE_V1 + NET_SOUND_NAME_SIZE, "NetPlayerSoundPacket V2");
+_Static_assert(offsetof(NetPlayerSoundPacket, name) == NET_PLAYER_SOUND_PACKET_V1_SIZE - NET_SOUND_NAME_SIZE_V1, "name last");
+
+// The packet's name offset and its V1 / V2 lengths, 0 for a type that is not a sound packet.
+static int sound_layout(const int type, size_t *name_at, uint16_t *v1, uint16_t *v2) {
+    switch (type) {
+        case NET_PACKET_SOUND:
+            *name_at = offsetof(NetSoundPacket, name), *v1 = NET_SOUND_PACKET_V1_SIZE, *v2 = sizeof(NetSoundPacket);
+            return 1;
+        case NET_PACKET_STOP_SOUND:
+            *name_at = offsetof(NetStopSoundPacket, name), *v1 = NET_STOP_SOUND_PACKET_V1_SIZE, *v2 = sizeof(NetStopSoundPacket);
+            return 1;
+        case NET_PACKET_PLAYER_SOUND:
+            *name_at = offsetof(NetPlayerSoundPacket, name), *v1 = NET_PLAYER_SOUND_PACKET_V1_SIZE, *v2 = sizeof(NetPlayerSoundPacket);
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+uint16_t net_sound_packet_to_v1(const int type, const void *payload, const uint16_t length, uint8_t out[NET_SOUND_PACKET_V1_MAX]) {
+    size_t name_at;
+    uint16_t v1, v2;
+    if (!payload || !sound_layout(type, &name_at, &v1, &v2) || length != v2) return 0;
+    const uint8_t *in = payload;
+    const char *name = (const char *) in + name_at;
+    const char *end = memchr(name, 0, NET_SOUND_NAME_SIZE);
+    const size_t n = end ? (size_t) (end - name) : NET_SOUND_NAME_SIZE;
+    if (n >= NET_SOUND_NAME_SIZE_V1) return 0; // a cut name would name another file
+    memset(out, 0, NET_SOUND_PACKET_V1_MAX);
+    memcpy(out, in, name_at);           // the fields before the name
+    memcpy(out + name_at, name, n);     // NUL-padded to 24
+    memcpy(out + name_at + NET_SOUND_NAME_SIZE_V1, in + name_at + NET_SOUND_NAME_SIZE, v2 - name_at - NET_SOUND_NAME_SIZE); // after it
+    return v1;
+}
+
+int net_sound_packet_read(const int type, const void *payload, const uint16_t length, void *out) {
+    size_t name_at;
+    uint16_t v1, v2;
+    if (!payload || !out || !sound_layout(type, &name_at, &v1, &v2) || (length != v1 && length != v2)) return 0;
+    if (length == v2) {
+        memcpy(out, payload, v2);
+        ((char *) out)[name_at + NET_SOUND_NAME_SIZE - 1] = 0;
+        return 1;
+    }
+    const uint8_t *in = payload;
+    uint8_t *o = out;
+    memset(o, 0, v2);
+    memcpy(o, in, name_at);
+    memcpy(o + name_at, in + name_at, NET_SOUND_NAME_SIZE_V1);
+    o[name_at + NET_SOUND_NAME_SIZE_V1 - 1] = 0; // V1 senders end the name within its 24 bytes
+    memcpy(o + name_at + NET_SOUND_NAME_SIZE, in + name_at + NET_SOUND_NAME_SIZE_V1, v1 - name_at - NET_SOUND_NAME_SIZE_V1);
+    return 1;
+}
+
 int net_packet_read_skins(NetSkinsPacketV2 *out, const void *payload, const uint16_t length) {
     if (length != NET_SKINS_PACKET_V1_SIZE && length != NET_SKINS_PACKET_V2_SIZE) return 0;
     memset(out, 0, sizeof(*out));

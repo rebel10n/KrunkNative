@@ -247,6 +247,10 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             T packet; \
             if (length != sizeof(T)) { client_net_log_bad_payload(name, type, payload, length); break; } \
             memcpy(&packet, payload, sizeof(packet))
+// the sound packets: either layout (V1 24-byte names before patch 7, shared.h)
+#define LOG_READ_SOUND(T, name) \
+            T packet; \
+            if (!net_sound_packet_read(type, payload, length, &packet)) { client_net_log_bad_payload(name, type, payload, length); break; }
         case NET_PACKET_CHAT_SEND: {
             char text[NET_CHAT_TEXT_SIZE];
             const size_t n = length < sizeof(text) - 1 ? length : sizeof(text) - 1;
@@ -437,7 +441,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("{\"type\":\"checkpoint\",\"id\":%u,\"reset\":%u}", (unsigned int) type, length ? (unsigned int) ((const uint8_t *) payload)[0] : 0u);
             break;
         case NET_PACKET_SOUND: { // "s"
-            LOG_READ(NetSoundPacket, "sound");
+            LOG_READ_SOUND(NetSoundPacket, "sound");
             packet.name[sizeof(packet.name) - 1] = 0;
             printf("{\"type\":\"sound\",\"id\":%u,\"name\":\"%s\",\"uid\":%d,\"position\":[%g,%g,%g],\"volume\":%g,\"rate\":%g}",
                    (unsigned int) type, packet.name, packet.uid, packet.position[0], packet.position[1], packet.position[2], packet.volume, packet.rate);
@@ -480,13 +484,13 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_STOP_SOUND: { // "sso"
-            LOG_READ(NetStopSoundPacket, "stop_sound");
+            LOG_READ_SOUND(NetStopSoundPacket, "stop_sound");
             packet.name[sizeof(packet.name) - 1] = 0;
             printf("{\"type\":\"stop_sound\",\"id\":%u,\"name\":\"%s\"}", (unsigned int) type, packet.name);
             break;
         }
         case NET_PACKET_PLAYER_SOUND: { // "asnd" / "rsnd"
-            LOG_READ(NetPlayerSoundPacket, "player_sound");
+            LOG_READ_SOUND(NetPlayerSoundPacket, "player_sound");
             packet.name[sizeof(packet.name) - 1] = 0;
             printf("{\"type\":\"player_sound\",\"id\":%u,\"uid\":%d,\"add\":%u,\"name\":\"%s\"}", (unsigned int) type, packet.uid,
                    (unsigned int) packet.add, packet.name);
@@ -604,6 +608,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
 #undef LOG_READ
+#undef LOG_READ_SOUND
         default:
             client_net_log_bad_payload("unknown", type, payload, length);
             break;

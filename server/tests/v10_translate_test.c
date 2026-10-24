@@ -1091,6 +1091,97 @@ int main(void) {
         V10PlayerSound ps;
         CHECK(v10_parse_player_sound(snd, 39, &ps) && ps.uid == 2 && ps.add && ps.loop && !ps.force && ps.volume == 0.5 &&
               ps.rate == 1.25 && !strcmp(ps.name, "footstep"), "PLAYER_SOUND parse");
+        /* patch 7 (shared.h NET_PROTOCOL_PATCH_SOUND_V2): the 64-byte name, which the bridge's own HELLO asks for */
+        uint8_t snd2[79];
+        memset(snd2, 0, sizeof snd2);
+        memcpy(snd2, snd, 15);
+        put_str(snd2, 15, "inspect_monte_carlo_spin", 64);
+        CHECK(v10_parse_player_sound(snd2, 79, &ps) && ps.uid == 2 && ps.add && !strcmp(ps.name, "inspect_monte_carlo_spin"),
+              "PLAYER_SOUND V2 parse (%s)", ps.name);
+        CHECK(!v10_parse_player_sound(snd2, 78, &ps) && !v10_parse_player_sound(snd2, 40, &ps), "PLAYER_SOUND: other lengths");
+        CHECK(sizeof(NetSoundPacket) == 88 && sizeof(NetStopSoundPacket) == 65 && sizeof(NetPlayerSoundPacket) == 79 &&
+                  NET_SOUND_NAME_SIZE == 64 && NET_SOUND_NAME_SIZE_V1 == 24,
+              "the sound packet layouts the bridge reads are shared.h's");
+
+        /* SOUND (NetSoundPacket 88 / 48) -> "s" / "so", the sound as its config.networkSounds id (game.playSound) */
+        {
+            uint8_t so[88];
+            V10Out oo;
+            memset(so, 0, sizeof so);
+            put_str(so, 0, "weapon_1", 64);
+            put_i32(so, 64, 7);
+            put_f32(so, 68, 1.5f); put_f32(so, 72, 2); put_f32(so, 76, -3); put_f32(so, 80, 0.5f); put_f32(so, 84, 1.25f);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, so, 88);
+            MSG_IS(&oo, 0, "s", N(5), N(7), N(1.5), N(2), N(-3), N(0.5), N(1.25), NIL, NIL, B(0), B(0)); /* networkSounds[5] at sid 7 */
+            v10_out_free(&oo);
+            memset(so, 0, 64);
+            put_str(so, 0, "nuke_0", 64); /* an emitterSounds name the network list lacks: sent as the name */
+            put_i32(so, 64, -1);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, so, 88);
+            MSG_IS(&oo, 0, "s", S("nuke_0"), N(0), N(1.5), N(2), N(-3), N(0.5), N(1.25), NIL, NIL, B(1), B(0)); /* forcePos */
+            v10_out_free(&oo);
+            memset(so, 0, 64);
+            put_str(so, 0, "asset:30001", 64);
+            put_i32(so, 64, -2);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, so, 88);
+            MSG_IS(&oo, 0, "so", N(30001), N(0.5), N(1), N(0), N(0), N(0), N(1.25), NIL, NIL, B(1)); /* 2D, a user asset */
+            v10_out_free(&oo);
+            memset(so, 0, 64);
+            put_str(so, 0, "inspect_monte_carlo_spin", 64);
+            put_i32(so, 64, 7);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, so, 88);
+            MSG_IS(&oo, 0, "s", N(267), N(7), N(1.5), N(2), N(-3), N(0.5), N(1.25), NIL, NIL, B(0), B(0)); /* the longest name */
+            v10_out_free(&oo);
+            uint8_t s1[48]; /* a server before patch 7: the 24-byte name */
+            memset(s1, 0, sizeof s1);
+            put_str(s1, 0, "taunt_0", 24);
+            put_i32(s1, 24, 3);
+            put_f32(s1, 40, 0.25f); put_f32(s1, 44, 1);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, s1, 48);
+            MSG_IS(&oo, 0, "s", N(1), N(3), N(0), N(0), N(0), N(0.25), N(1), NIL, NIL, B(0), B(0));
+            v10_out_free(&oo);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, s1, 47);
+            CHECK(stop_has(&oo, "malformed"), "a short SOUND is malformed");
+            v10_out_free(&oo);
+            memset(s1, 0, 24);
+            v10_out_init(&oo);
+            v10_map_sound(&oo, s1, 48);
+            CHECK(!oo.stop && oo.count == 0, "a SOUND without a name plays nothing");
+            v10_out_free(&oo);
+
+            /* STOP_SOUND (NetStopSoundPacket 65 / 25) -> "sso" [sound, isAsset] */
+            uint8_t st[65];
+            memset(st, 0, sizeof st);
+            put_str(st, 0, "30001", 64);
+            st[64] = 1;
+            v10_out_init(&oo);
+            v10_map_stop_sound(&oo, st, 65);
+            MSG_IS(&oo, 0, "sso", N(30001), B(1));
+            v10_out_free(&oo);
+            uint8_t st1[25];
+            memset(st1, 0, sizeof st1);
+            put_str(st1, 0, "scare_0", 24);
+            v10_out_init(&oo);
+            v10_map_stop_sound(&oo, st1, 25);
+            MSG_IS(&oo, 0, "sso", S("scare_0"), B(0));
+            v10_out_free(&oo);
+            memset(st1, 0, 24);
+            put_str(st1, 0, "spray", 24);
+            v10_out_init(&oo);
+            v10_map_stop_sound(&oo, st1, 25);
+            MSG_IS(&oo, 0, "sso", N(0), B(0));
+            v10_out_free(&oo);
+            v10_out_init(&oo);
+            v10_map_stop_sound(&oo, st1, 26);
+            CHECK(stop_has(&oo, "malformed"), "a STOP_SOUND of another length is malformed");
+            v10_out_free(&oo);
+        }
         uint8_t tm[5];
         put_i32(tm, 0, 300); tm[4] = 0;
         V10Timer tt;

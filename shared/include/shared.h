@@ -2763,7 +2763,14 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // A missing patch byte (2-byte HELLO) reads as 0.
 // Patch 2: NetKillPacket.fists carries NET_KILL_NUKE; servers clear it for older peers, which read
 // any non-zero fists as a fists kill.
-#define NET_PROTOCOL_PATCH 6
+#define NET_PROTOCOL_PATCH 7
+// Patch 7: the sound packets (NET_PACKET_SOUND, NET_PACKET_STOP_SOUND, NET_PACKET_PLAYER_SOUND) carry
+// NET_SOUND_NAME_SIZE (64-byte) names: v10.0.3's network sound inspect_monte_carlo_spin needs 25 bytes
+// (shared/include/network_sounds.h), more than the 24 before. A server sends the V1 layouts (24-byte names,
+// net_sound_packet_to_v1) to a peer that announced an older patch and drops a sound whose name does not fit
+// them (a cut name would name another file); readers take both sizes (net_sound_packet_read).
+#define NET_PROTOCOL_PATCH_SOUND_V2 7
+int net_peer_has_sound_v2(int minor, int patch); // the peer's HELLO / INIT minor.patch (same major) takes the V2 sound packets
 // Patch 6: NET_PACKET_SKINS carries each worn skin's paint (NetSkinsPacketV2, 40 bytes). A server sends the
 // 16-byte V1 to a peer that announced an older patch (net_peer_has_skin_paint): an older client's exact-size
 // check accepts only V1, so it never receives V2. Readers of this patch take both sizes (V1 is what bots and
@@ -3376,7 +3383,20 @@ typedef struct {
 } NetCheckpointPacket;
 // ---- end WP-B packets
 
-#define NET_SOUND_NAME_SIZE 24
+// The sound packets' name field (patch 7, NET_PROTOCOL_PATCH_SOUND_V2); NET_SOUND_NAME_SIZE_V1 before it.
+#define NET_SOUND_NAME_SIZE 64
+#define NET_SOUND_NAME_SIZE_V1 24
+#define NET_SOUND_PACKET_V1_SIZE 48        // NetSoundPacket with a 24-byte name
+#define NET_STOP_SOUND_PACKET_V1_SIZE 25   // NetStopSoundPacket
+#define NET_PLAYER_SOUND_PACKET_V1_SIZE 39 // NetPlayerSoundPacket
+#define NET_SOUND_PACKET_V1_MAX NET_SOUND_PACKET_V1_SIZE
+// The V1 bytes of a sound packet (NET_PACKET_SOUND / STOP_SOUND / PLAYER_SOUND, its current struct) for a peer
+// before patch 7, written to `out`: their length, 0 when the name does not fit 24 bytes (nothing is to be sent)
+// or for another type / length.
+uint16_t net_sound_packet_to_v1(int type, const void *payload, uint16_t length, uint8_t out[NET_SOUND_PACKET_V1_MAX]);
+// A sound packet of either layout into its current struct (`out`: the NetSoundPacket / NetStopSoundPacket /
+// NetPlayerSoundPacket of `type`); 0 for another type or length.
+int net_sound_packet_read(int type, const void *payload, uint16_t length, void *out);
 typedef struct {
     char name[NET_SOUND_NAME_SIZE]; // sound name (config.emitterSounds / networkSounds entry)
     int32_t uid;                // playerSound sid: play at that player (-1: at the position)

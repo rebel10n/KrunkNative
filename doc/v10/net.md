@@ -318,6 +318,14 @@ dom_zones index the client mirrors. The same rules apply: the packet has no vers
 server must come from one build. The bridge (`net-bridge/v10Translate.ts`) sends `uct` with each zone's object id as
 v10's uid (`updateDomZone` matches the zone by uid, `v10.js` 188544).
 
+Protocol 1.4.7 (NET_PROTOCOL_PATCH 7): the sound packets (`NetSoundPacket` NET_PACKET_SOUND 102, `NetStopSoundPacket`
+NET_PACKET_STOP_SOUND 124, `NetPlayerSoundPacket` NET_PACKET_PLAYER_SOUND 125) carry a 64-byte name (88 / 65 / 79 bytes), so every
+name of v10.0.3's network sound table fits (`inspect_monte_carlo_spin` needs 25 bytes; shared/include/network_sounds.h) and so do
+skin and asset sound names. The server sends the 24-byte V1 layouts (48 / 25 / 39 bytes, `net_sound_packet_to_v1`) to a peer that
+announced an older patch (`net_peer_has_sound_v2`) and drops a sound whose name does not fit them, since a cut name would name
+another file; readers take both (`net_sound_packet_read`). The C v10 bridge announces patch 7, reads both, and maps SOUND to
+v10's "s" / "so" and STOP_SOUND to "sso" with the networkSounds id (`v10_map_sound`); the TypeScript bridge (1.4.5) gets V1.
+
 Protocol 1.4.6 (NET_PROTOCOL_PATCH 6): `NetSkinsPacketV2` (NET_PACKET_SKINS, 35, 40 bytes) carries the paint of each worn
 skin after the uid and the three store indices: `PlayerSkinPaints` (primary, secondary, melee), each a `SkinPaint` {int32 color
 0xRRGGBB or -1, int32 shader number or -1}. The server sends it only to a peer that announced patch 6
@@ -369,7 +377,7 @@ Status: **OK** = same shape; **fixed** = changed by this audit (tests: `krunker_
 
 KN's own HELLO / INIT never travel to krunker.io. The link answers our client's HELLO with nothing (the
 official socket has no handshake packet) and turns `init` into the INIT our client expects
-(`on_init`): major / minor / patch are this build's `NET_PROTOCOL_*` (1.4.6), so every patch-gated reader
+(`on_init`): major / minor / patch are this build's `NET_PROTOCOL_*` (1.4.7), so every patch-gated reader
 takes the newest layouts; `ruleset` is `NET_INIT_RULESET` (3: v10) with a zero flavor nibble (base; the
 flavor check is skipped for the official link, `client_refuse_wrong_flavor`); `map_index` / `mode_index`
 are init [0] / [1]; `tick_rate` is the networking `tf || 30`; `client_id` 0.

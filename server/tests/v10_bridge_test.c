@@ -613,6 +613,36 @@ int main(void) {
           vequal(&rsnd.args[2], &KRUNKER_V_BOOL(0)), "rsnd is [2, footstep, false]");
     krunker_frame_free(&rsnd);
 
+    // patch 7, which the bridge's HELLO announces: the 64-byte sound names. SOUND is game.playSound's "s" with the
+    // config.networkSounds id (267 inspect_monte_carlo_spin, the name a 24-byte field could not carry), STOP_SOUND an
+    // "sso", PLAYER_SOUND (79 bytes) an asnd
+    uint8_t so[88];
+    memset(so, 0, sizeof so);
+    w_str(so, 0, "inspect_monte_carlo_spin"); w_i32(so, 64, 2); w_f32(so, 80, 0.5f); w_f32(so, 84, 1.0f);
+    native_send(&g_native, NET_PACKET_SOUND, so, 88);
+    WAIT_FOR(client_count("s") == 1);
+    KrunkerFrame sf;
+    CHECK(client_get("s", 0, &sf) && sf.argc == 11 && vequal(&sf.args[0], &KRUNKER_V_NUM(267)) && vequal(&sf.args[1], &KRUNKER_V_NUM(2)) &&
+          vequal(&sf.args[5], &KRUNKER_V_NUM(0.5)) && vequal(&sf.args[9], &KRUNKER_V_BOOL(0)) && vequal(&sf.args[10], &KRUNKER_V_BOOL(0)),
+          "s is [267, 2, x, y, z, 0.5, 1, nil, nil, false, false]");
+    krunker_frame_free(&sf);
+    uint8_t stop65[65];
+    memset(stop65, 0, sizeof stop65);
+    w_str(stop65, 0, "spray");
+    native_send(&g_native, NET_PACKET_STOP_SOUND, stop65, 65);
+    WAIT_FOR(client_count("sso") == 1);
+    KrunkerFrame ssf;
+    CHECK(client_get("sso", 0, &ssf) && ssf.argc == 2 && vequal(&ssf.args[0], &KRUNKER_V_NUM(0)) && vequal(&ssf.args[1], &KRUNKER_V_BOOL(0)),
+          "sso is [0 (spray), false]");
+    krunker_frame_free(&ssf);
+    uint8_t snd2[79];
+    memset(snd2, 0, sizeof snd2);
+    w_i32(snd2, 0, 2); snd2[4] = 1; w_f32(snd2, 7, 1.0f); w_f32(snd2, 11, 1.0f); w_str(snd2, 15, "inspect_monte_carlo_spin");
+    native_send(&g_native, NET_PACKET_PLAYER_SOUND, snd2, 79);
+    WAIT_FOR(client_count("asnd") == 2);
+    CHECK(client_get("asnd", 1, &asnd) && asnd.argc == 3 && is_str(&asnd.args[1], "inspect_monte_carlo_spin"), "a 79-byte PLAYER_SOUND is an asnd");
+    krunker_frame_free(&asnd);
+
     // the round timer is a t [seconds, end]
     uint8_t timer[5];
     w_i32(timer, 0, 300);

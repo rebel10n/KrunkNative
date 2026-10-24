@@ -15,6 +15,7 @@
 
 #include "krunker_maps.h" /* KRUNKER_OFFICIAL_MAPS: the official list an official map's INIT is numbered by */
 #include "progression.h" /* g_progression_medals: the names of the END_MEDALS medals */
+#include "network_sounds.h" /* config.networkSounds: the ids "s" / "so" / "sso" carry */
 #include "shared.h" /* NET_PROTOCOL_MAJOR / MINOR / PATCH, NET_HELLO_RULESETS: the HELLO this bridge sends */
 
 #include <ctype.h>
@@ -624,19 +625,107 @@ int v10_parse_global_value(const uint8_t *p, size_t n, V10GlobalValue *out) {
     return 1;
 }
 
-/* NetPlayerSoundPacket: int32 uid, uint8 add, force, loop, float volume, rate, char name[24]. */
-#define SOUND_NAME_SIZE 24
+/* The sound packets' name field: NET_SOUND_NAME_SIZE (64) since protocol patch 7, NET_SOUND_NAME_SIZE_V1 (24) before
+ * (shared.h). NetPlayerSoundPacket: int32 uid, uint8 add, force, loop, float volume, rate, char name[24 | 64]. */
+static size_t sound_name_size(size_t n, size_t others) {
+    return n == others + NET_SOUND_NAME_SIZE ? NET_SOUND_NAME_SIZE : n == others + NET_SOUND_NAME_SIZE_V1 ? NET_SOUND_NAME_SIZE_V1 : 0;
+}
 
 int v10_parse_player_sound(const uint8_t *p, size_t n, V10PlayerSound *out) {
-    if (n != 15 + SOUND_NAME_SIZE) return 0;
+    const size_t name = sound_name_size(n, 15);
+    if (!name) return 0;
     out->uid = rd_i32(p, 0);
     out->add = p[4] != 0;
     out->force = p[5] != 0;
     out->loop = p[6] != 0;
     out->volume = rd_f32(p, 7);
     out->rate = rd_f32(p, 11);
-    field_copy(p, n, 15, SOUND_NAME_SIZE, out->name);
+    field_copy(p, n, 15, name, out->name);
     return 1;
+}
+
+/* NetSoundPacket: char name[24 | 64], int32 uid, float position[3], float volume, rate. */
+int v10_parse_sound(const uint8_t *p, size_t n, V10Sound *out) {
+    const size_t name = sound_name_size(n, 24);
+    if (!name) return 0;
+    field_copy(p, n, 0, name, out->name);
+    out->uid = rd_i32(p, name);
+    for (int k = 0; k < 3; k++) out->position[k] = rd_f32(p, name + 4 + 4 * (size_t)k);
+    out->volume = rd_f32(p, name + 16);
+    out->rate = rd_f32(p, name + 20);
+    return 1;
+}
+
+/* NetStopSoundPacket: char name[24 | 64], uint8 asset. */
+int v10_parse_stop_sound(const uint8_t *p, size_t n, V10StopSound *out) {
+    const size_t name = sound_name_size(n, 1);
+    if (!name) return 0;
+    field_copy(p, n, 0, name, out->name);
+    out->asset = p[name] != 0;
+    return 1;
+}
+
+/* An all-digit id ("30001"), -1 for anything else. */
+static double sound_digits(const char *s) {
+    if (!s || !*s || strlen(s) > 9) return -1;
+    for (const char *c = s; *c; c++)
+        if (*c < '0' || *c > '9') return -1;
+    return (double)strtol(s, NULL, 10);
+}
+
+/* The sound as v10's server sends it: networkSounds.indexOf(name) when the list has it, a user asset's id (isAsset),
+ * else the name itself (copied into the arena). */
+static KrunkerValue sound_value(V10Out *o, const char *name, int asset_digits, int *is_asset) {
+    *is_asset = 0;
+    if (asset_digits) {
+        const double id = sound_digits(name);
+        if (id >= 0) {
+            *is_asset = 1;
+            return KRUNKER_V_NUM(id);
+        }
+    } else if (!strncmp(name, "asset:", 6) && sound_digits(name + 6) >= 0) { /* audio.c's user asset names */
+        *is_asset = 1;
+        return KRUNKER_V_NUM(sound_digits(name + 6));
+    }
+    const int id = network_sound_index(name);
+    return id >= 0 ? KRUNKER_V_NUM(id) : v10_text(o, (const uint8_t *)name, strlen(name));
+}
+
+void v10_map_sound(V10Out *o, const uint8_t *p, size_t n) {
+    V10Sound snd;
+    if (!v10_parse_sound(p, n, &snd)) {
+        o->stop = "malformed";
+        return;
+    }
+    if (!snd.name[0]) return; /* playSound: nothing to play */
+    int asset;
+    const KrunkerValue sound = sound_value(o, snd.name, 0, &asset);
+    if (snd.uid == -2) { /* "so" mode 1: SOUND.play(sound, vol, false, rate || 1, isAsset) */
+        const KrunkerValue args[10] = {sound, KRUNKER_V_NUM(snd.volume), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+                                       KRUNKER_V_NUM(snd.rate), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(asset)};
+        v10_push(o, V10_IN_PLAY_SOUND, args, 10);
+        return;
+    }
+    /* "s": playerSound at the player (the sid), or forcePos at x y z; no dist / roll in NetSoundPacket (the client's
+     * play3D defaults) */
+    const int force = snd.uid < 0;
+    const KrunkerValue args[11] = {sound, KRUNKER_V_NUM(force ? 0 : snd.uid), KRUNKER_V_NUM(snd.position[0]), KRUNKER_V_NUM(snd.position[1]),
+                                   KRUNKER_V_NUM(snd.position[2]), KRUNKER_V_NUM(snd.volume), KRUNKER_V_NUM(snd.rate), KRUNKER_V_NIL,
+                                   KRUNKER_V_NIL, KRUNKER_V_BOOL(force), KRUNKER_V_BOOL(asset)};
+    v10_push(o, V10_IN_PLAYER_SOUND, args, 11);
+}
+
+void v10_map_stop_sound(V10Out *o, const uint8_t *p, size_t n) {
+    V10StopSound st;
+    if (!v10_parse_stop_sound(p, n, &st)) {
+        o->stop = "malformed";
+        return;
+    }
+    if (!st.name[0]) return;
+    int asset;
+    const KrunkerValue sound = sound_value(o, st.name, st.asset, &asset);
+    const KrunkerValue args[2] = {sound, KRUNKER_V_BOOL(asset)};
+    v10_push(o, V10_IN_STOP_SOUND, args, 2);
 }
 
 int v10_parse_timer(const uint8_t *p, size_t n, V10Timer *out) {
