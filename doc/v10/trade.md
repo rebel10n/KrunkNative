@@ -129,5 +129,7 @@ migration `0357_live_trades`) is the authority on what anyone owns:
 Deliberate differences: the window redraws a side's list from its state instead of v10's in-place DOM edits (same
 markup); the request line is the chat's own row with the [Accept] span appended, `acceptRequest(sid, this)` (C sets "[Accepted]"); the chat and KR inputs
 send on Enter through their own `onkeydown` (v10's page-wide key handler); a spray card shows its first frame
-(no `sprayAnm` keyframes); the search matches name, creator and weapon (v10 also keyW, drops, limT). Premium's
+(no `sprayAnm` keyframes); the search matches name, creator and weapon (v10 also keyW, drops, limT). The window's texts are
+v10's literals ("Your Inventory", "Accept Offer - 10 KR", "wants to trade", ...: no i18n keys in v10); the header
+(`windows.trade.header`) and the success line (`modes.trade.success`) use ui/i18n/en.json's keys. Premium's
 "Reduced Trade Fees & Cooldowns" (`:19349`) has no live-trade numbers in the bundle: not applied.
