@@ -19,6 +19,7 @@
 #include <gltf.h>
 #include <sky.h>
 #include <render_settings.h>
+#include <player_pose_render.h> // attachTo's "hands" / "handL" points (player.pose hold / holdL)
 #include <ui_logic.h>
 #include <cJSON.h>
 #include <stdio.h>
@@ -33,6 +34,9 @@ enum {
 };
 enum { KSL_POINT = 1, KSL_SPOT, KSL_DIR, KSL_RECT };
 enum { KSA_NONE, KSA_PLAYER, KSA_OBJECT, KSA_BONE, KSA_CAMERA };
+// attachTo(player, ..., point): the model's anchor, or v10's getHands ("hands", player.pose.hold) /
+// getHandL ("handL", v10.0.3 player.pose.holdL) anchors (deob-10.0.3.js:208838-208842)
+enum { KSP_ANCHOR, KSP_HANDS, KSP_HAND_L };
 
 typedef struct KsObj3D {
     uint32_t id;
@@ -65,6 +69,7 @@ typedef struct KsObj3D {
     int attach;
     uint32_t attach_id;
     int attach_uid;
+    int attach_point;          // KSP_*: attachTo's 6th argument on a player
 } KsObj3D;
 
 typedef struct {
@@ -1103,8 +1108,9 @@ static KsValue o_delete(KsScript *s, void *native, const KsValue *a, int n) {
     return ks_undef();
 }
 
-// attachTo(target, x, y, z, keepWorld): a pivot at (x, y, z) under a player (target.sid) or a
-// scene object / bone / the camera (target.id). Re-resolved every frame (meshes are rebuilt).
+// attachTo(target, x, y, z, keepWorld, point): a pivot at (x, y, z) under a player (target.sid; point
+// "hands" / "handL": that anchor of its model) or a scene object / bone / the camera (target.id).
+// Re-resolved every frame (meshes are rebuilt).
 static KsValue o_attach_to(KsScript *s, void *native, const KsValue *a, int n) {
     KsObj3D *o = obj_of(native);
     const KsValue target = ksc_arg(a, n, 0);
@@ -1116,6 +1122,10 @@ static KsValue o_attach_to(KsScript *s, void *native, const KsValue *a, int n) {
     if (sid.tag != KS_UNDEF && sid.tag != KS_NULL) {
         o->attach = KSA_PLAYER;
         o->attach_uid = (int) ks_to_number(sid);
+        char point[8] = "";
+        const KsValue p = ksc_arg(a, n, 5);
+        if (ksc_is_str(p)) ksc_str(s, p, point, sizeof(point));
+        o->attach_point = !strcmp(point, "hands") ? KSP_HANDS : !strcmp(point, "handL") ? KSP_HAND_L : KSP_ANCHOR;
     } else {
         const uint32_t tid = (uint32_t) ks_to_number(id);
         if (tid == KSC_CAMERA_OBJECT_ID) o->attach = KSA_CAMERA;
@@ -1495,7 +1505,9 @@ static MeshTransform *attach_target(const KsObj3D *o) {
             Client *client = g_ksc.client;
             Player *p = client ? ks_game_player_by_uid(&client->game, (uint32_t) o->attach_uid) : NULL;
             const PlayerMesh *pm = p ? p->mesh : NULL;
-            return pm ? pm->anchor : NULL;
+            // getHands(player) || objInstances, getHandL(player) || objInstances
+            MeshTransform *point = o->attach_point == KSP_HANDS ? player_pose_hands_anchor(p) : o->attach_point == KSP_HAND_L ? player_pose_hand_l_anchor(p) : NULL;
+            return point ? point : pm ? pm->anchor : NULL;
         }
         default: return NULL;
     }

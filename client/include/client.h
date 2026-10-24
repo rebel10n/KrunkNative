@@ -298,6 +298,17 @@ typedef struct {
     int paint_shader;         // paintShader: 0 Spectrum, 1 Synth, 2 Gold, 3 Silver, 4 Prism, 5 Codefall; -1 the colour paint
     unsigned int paint_mask_texture; // the skin's paintMask (paintMaskMap, unit 7): its red scales the intensity, 0 = none
     unsigned int paint_env_texture;  // the metal shaders' melee_190_env.png (unit 8), 0 = none
+
+    // v10.0.3 GLB environment reflections (env_map.h): envMapIntensity of a GLB material whose glTF extras opt in
+    // ("env", limitMM 0..4, deob-10.0.3.js:233665-233669; gltf.c), 0 = none. The env map is render.getEnvMap's
+    // (basic_material_set_scene_env, units 9 and 10); a material with a skin env_map keeps that one instead.
+    float scene_env_intensity;
+    // v10.0.3 GLB colour spaces (deob:233656-233658): GLTFLoader tags the base colour and emissive maps sRGB, and
+    // Krunker resets every map of the material to encodingTypes[texEncode || 0] (NoColorSpace) unless the asset
+    // has `env` and no texEncode. gltf_srgb_maps: the maps carry GLTFLoader's tag (decoded while env_map is set);
+    // texture_srgb / emissive_srgb: decoded whatever the env (texEncode 1, user_asset.c).
+    int gltf_srgb_maps;
+    int emissive_srgb;
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -311,6 +322,11 @@ BasicMaterial *basic_material_init();
 #define BASIC_NORMAL_TEXTURE_UNIT 6          // BasicMaterial.normal_texture (glTF normalTexture)
 #define BASIC_PAINT_MASK_TEXTURE_UNIT 7      // BasicMaterial.paint_mask_texture (v10 paintMaskMap)
 #define BASIC_PAINT_ENV_TEXTURE_UNIT 8       // BasicMaterial.paint_env_texture (the metal paints' env map)
+#define BASIC_SCENE_ENV_TEXTURE_UNIT 9       // getEnvMap's filtered PMREM table (env_map.c), scene_env_intensity > 0
+#define BASIC_SCENE_ENV_DFG_TEXTURE_UNIT 10  // three r18x's DFG_LUT (env_map.c)
+// env_map.c hands basic.c the scene's environment: `env` the 9 x 128 PMREM table, `dfg` the DFG lookup (0, 0: none,
+// GLB reflections off)
+void basic_material_set_scene_env(unsigned int env, unsigned int dfg);
 #define BASIC_MAX_POINT_LIGHTS 16 // basic.frag MAX_POINT_LIGHTS
 
 // v3.1.1 POINT_LIGHT objects (94.js addPointLight -> THREE.PointLight), lit only with the
@@ -521,6 +537,17 @@ typedef struct {
     // (3, player.height, 0) on the anchor); NULL when none
     struct PlayerPet *pet;
     MeshTransform pet_holder;
+    // v10 meshHoldObj (generateMeshes deob-10.0.3.js:194103-194105): under the anchor, over the body,
+    // the legs and the shoes; a pose's bodyY moves it (player_pose_render.c). Identity otherwise.
+    MeshTransform hold;
+    // v10 players.getHands / getHandL anchors (:193440-193549): what KrunkScript's attachTo(..., "hands" /
+    // "handL") hangs objects on, kept on the held weapon (pose.hold) and the left hand (pose.holdL)
+    MeshTransform hands_anchor, hand_l_anchor;
+    // refreshWeaponVisibility's seatHiddenMeshes (:195396-195410): the weapon meshes a pose hid (weapon 0 /
+    // hold) and their loadout slots, shown again when the pose lets them
+    Mesh *pose_hidden[48];
+    signed char pose_hidden_slot[48];
+    int pose_hidden_count;
     // Prop Hunt: the prop model a Prop-team player wears instead of its body (players.js :171319:
     // "<prefab name>_0" at y scale + CPY, scaled by the prefab's scale), NULL otherwise
     Mesh *prop;
@@ -529,6 +556,9 @@ typedef struct {
     // a weapon skin's model was not on disk when this was built (the plain weapon shows meanwhile):
     // player_weapon_skin_ready() says when to rebuild the player's meshes (client_refresh_weapon_skins)
     int weapon_skin_pending;
+    // built with v10's Stalker look (modelOverrides.Stalker: black, opacity 0.1, the melee_0_5 knife):
+    // stalker_render.c rebuilds the model when the player's isStalker no longer matches it
+    unsigned char stalker;
 } PlayerMesh;
 
 enum {
@@ -1018,6 +1048,7 @@ void client_recon_drop_pending(Client*);                          // Krunker "f"
 #define NET_RECON_CORRECTION_EPS 0.01f // a RECON that moved our player further is a correction (units)
 void client_recon_after_tick(Client*);                            // the frame's shot knockback -> input.velObj
 void client_recon_apply(Client*, const NetReconPacket*);          // "l": snap + replay
+void client_recon_move_vals(Client*, const void *body, size_t length); // NET_EXT_PLAYER_MOVE_VALS: the next RECON's scheme sendVals
 int  client_recon_delay_inbound(Client*, const NetPacket*);       // KRUNKNATIVE_NET_DELAY_MS: 1 = held
 void client_recon_drain_delayed(Client*, void (*)(Client*, const NetPacket*));
 void client_game_events_tick(Client*); // per frame: death delay -> menu, HUD bridge

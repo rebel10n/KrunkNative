@@ -13,9 +13,12 @@
 // client-side "sim" stepping between baselines: our client runs no shared script, so an entity
 // snaps to each baseline with v10's 100 ms blend), model parts ("aid": hidden collision boxes, no
 // GLTF), pitch / roll of bodies, controlled entities (ctl attachments: the server's pose rules),
-// soft zones, player poses ("pz").
+// soft zones. Player poses ("pz", NET_EXT_PLAYER_POSE) are routed to player_pose_render.c, which reads
+// every player's hard attachment from here (a faceRide pose faces the entity it rides).
 #include <entities.h>
 #include <net_ext.h>
+#include <player_pose_render.h> // "pz"
+
 #include <prefabs.h>
 #include <cJSON.h>
 #include <math.h>
@@ -63,6 +66,10 @@ static struct {
     LiveBlock live[LIVE_MAX];
     int live_count;
     int my_attached_eid;     // ea+ for our sid, -1 none (soft attachments do not carry)
+    // every player's hard attachment: v10 player.attachedEnt (applyAttach deob-10.0.3.js:213569-213574), for a
+    // pose's faceRide (player_pose_render.c)
+    struct { int sid, eid; } riders[ENT_MAX];
+    int rider_count;
     cJSON **records;         // the JSON records our objects were built from (Object.raw points into them)
     size_t record_count;
     // the NetExtJsonChunk being assembled
@@ -82,6 +89,7 @@ static void forget_all(void) {
     }
     E.live_count = 0;
     E.my_attached_eid = -1;
+    E.rider_count = 0;
     for (size_t i = 0; i < E.record_count; i++) cJSON_Delete(E.records[i]);
     free(E.records);
     E.records = NULL;
@@ -95,6 +103,7 @@ static void forget_all(void) {
 
 void entities_reset(void) {
     forget_all();
+    player_pose_reset(); // the old session's pending "pz" poses go with its players
     E.spawns = E.removes = E.states = E.events = E.attaches = E.lives = E.moves = 0;
 }
 
@@ -337,24 +346,61 @@ static void entity_remove(Client *client, const cJSON *rec) {
     if (!e) return;
     for (int i = 0; i < e->part_count; i++) retire(client, e->parts[i].uid, e->parts[i].object);
     if (E.my_attached_eid == e->eid) E.my_attached_eid = -1;
+    for (int i = E.rider_count - 1; i >= 0; i--) // detachPlayer for its riders
+        if (E.riders[i].eid == e->eid) E.riders[i] = E.riders[--E.rider_count];
     cJSON_Delete(e->state);
     *e = (Entity) {0};
 }
 
-// applyAttach / applyDetach: only our own hard attachment matters here (it carries our player)
+// player.attachedEnt of `sid`: eid, or -1 to forget it (a detach, a soft attachment)
+static void rider_set(const int sid, const int eid) {
+    int i = 0;
+    while (i < E.rider_count && E.riders[i].sid != sid) i++;
+    if (eid < 0) {
+        if (i < E.rider_count) E.riders[i] = E.riders[--E.rider_count];
+        return;
+    }
+    if (i == E.rider_count) {
+        if (E.rider_count >= ENT_MAX) return;
+        E.rider_count++;
+    }
+    E.riders[i].sid = sid;
+    E.riders[i].eid = eid;
+}
+
+// applyAttach / applyDetach: our own hard attachment carries our player; every player's is kept for faceRide
 static void entity_attach(Client *client, const cJSON *rec, const int attach) {
-    if (!cJSON_IsArray(rec) || !client->me) return;
-    E.attaches++;
+    if (!cJSON_IsArray(rec)) return;
     const int sid = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(rec, 0));
     const int eid = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(rec, 1));
+    const cJSON *opts = cJSON_GetArrayItem(rec, 2), *soft = cJSON_GetObjectItem(opts, "soft");
+    const int is_soft = soft && (cJSON_IsTrue(soft) || (cJSON_IsNumber(soft) && soft->valuedouble != 0));
+    if (!attach) {
+        int i = 0; // detachPlayer: only that entity's
+        while (i < E.rider_count && E.riders[i].sid != sid) i++;
+        if (i < E.rider_count && E.riders[i].eid == eid) rider_set(sid, -1);
+    } else if (entity_find(eid)) { // applyAttach needs the entity
+        rider_set(sid, is_soft ? -1 : eid);
+    }
+    if (!client->me) return;
+    E.attaches++;
     if (sid != (int) client->me->uid) return;
     if (!attach) {
         if (E.my_attached_eid == eid) E.my_attached_eid = -1;
         return;
     }
-    const cJSON *opts = cJSON_GetArrayItem(rec, 2), *soft = cJSON_GetObjectItem(opts, "soft");
-    const int is_soft = soft && (cJSON_IsTrue(soft) || (cJSON_IsNumber(soft) && soft->valuedouble != 0));
     E.my_attached_eid = is_soft || !entity_find(eid) ? -1 : eid;
+}
+
+int entities_player_ride_yaw(const int uid, float *yaw) {
+    for (int i = 0; i < E.rider_count; i++) {
+        if (E.riders[i].sid != uid) continue;
+        const Entity *e = entity_find(E.riders[i].eid);
+        if (!e) return 0;
+        if (yaw) *yaw = e->yaw;
+        return 1;
+    }
+    return 0;
 }
 
 // ---------------------------------------------------------------- live blocks / moved objects
@@ -455,6 +501,9 @@ static cJSON *json_record(const uint16_t subtype, const uint8_t *body, const uin
 
 int entities_on_ext(Client *client, const uint16_t subtype, const uint8_t *body, const uint16_t length) {
     switch (subtype) {
+        case NET_EXT_PLAYER_POSE: // "pz" players.setPose (player_pose_render.c)
+            player_pose_on_ext(client, body, length);
+            return 1;
         case NET_EXT_PLAYER_LOCKS: {
             NetPlayerLocksPacket p;
             if (length < sizeof(p)) return 1;
