@@ -3085,9 +3085,28 @@ static void badge_url(const int index, char *out, const size_t n) {
     html_dom_asset_url(badge_texture(index, tex, sizeof(tex)), out, n); // Game.badges[i].url
 }
 
+// account.hasSkin(skin): the account's skins (data slot 10, [{ind, cnt}])
+static int badge_has_skin(void *ud, const int skin) {
+    (void) ud;
+    const cJSON *skins = g_acc.data ? cJSON_GetArrayItem(g_acc.data, 10) : NULL, *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (cJSON_IsNumber(ind) && ind->valueint == skin) return 1;
+    }
+    return 0;
+}
+
+// claimable && req(account, game) (deob-10.0.3.js:245511-245534): the rules read the account's facts
+// the client has, its badges, skins and Battle Pass (v10's KrunkCup and Season 10 pass badges)
 static int badge_claimable(const int index) {
     const BadgeDef *b = badge_get(index);
-    return b && b->claimable && !account_owns_badge(index) && badge_requirement_met(index, g_acc.stats);
+    if (!b || !b->claimable || account_owns_badge(index)) return 0;
+    int owned[BADGE_COUNT], count = 0;
+    const cJSON *earned = g_logged_in ? g_acc.badges : NULL, *e;
+    cJSON_ArrayForEach(e, earned) if (cJSON_IsNumber(e) && count < BADGE_COUNT) owned[count++] = e->valueint;
+    const SeasonBadgeAccount facts = {.season = SEASON_CURRENT, .now_s = (int64_t) time(NULL), .bp_tier = battlepass_ui_tier(),
+                                      .bpp = battlepass_ui_bpp(), .badges = owned, .badge_count = count, .has_skin = badge_has_skin};
+    return badge_rule_met(index, g_acc.stats, &facts);
 }
 
 // window.selectBadgePop(): the Badge Collection (claimable first, then owned, then the rest;

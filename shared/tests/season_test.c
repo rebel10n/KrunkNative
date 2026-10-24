@@ -152,8 +152,24 @@ static int has_skin(void *ud, const int skin) {
     return g_owned_skins && skin >= 5237 && skin <= 5253;
 }
 
+static int has_cup(void *ud, const int skin) {
+    (void) ud;
+    return skin == 7794; // the World KrunkCup 2026 Bundle's jerseys
+}
+
 static void test_badges(void) {
-    CHECK(BADGE_COUNT == 29 && !strcmp(g_badges[26].name, "Season 7 Founder") && !strcmp(g_badges[28].name, "S7 Badge Master"), "badges.js order");
+    CHECK(BADGE_COUNT == 68 && !strcmp(g_badges[26].name, "Season 7 Founder") && !strcmp(g_badges[28].name, "S7 Badge Master"), "badges.js order");
+    // v10.0.3's later badges (deob-10.0.3.js:116012-116205) after v7.1.4's 29
+    CHECK(!strcmp(g_badges[29].name, "VIP") && g_badges[29].id == 18 && !strcmp(g_badges[35].name, "Master Bug Catcher") && g_badges[35].tex == 5 &&
+              !strcmp(g_badges[60].name, "KrunkCup Badge") && g_badges[60].claimable && !strcmp(g_badges[67].name, "Season 10 Contributor") &&
+              g_badges[67].id == 34 && !g_badges[67].claimable,
+          "v10.0.3 badges 29..67");
+    CHECK(g_badges[1].claimable && g_badges[4].claimable && !g_badges[5].claimable, "Skin Creator I-IV are claimable in v10.0.3");
+    char tex[64];
+    CHECK(!strcmp(badge_texture(28, tex, sizeof(tex)), "textures/badges/badge_17.png"), "a v7.1.4 icon: the asset tree");
+    CHECK(!strcmp(badge_texture(31, tex, sizeof(tex)), "img/badges/badge_19_1.png") && !strcmp(badge_texture(67, tex, sizeof(tex)), "img/badges/badge_34.png"),
+          "a v10 icon: the page tree (ui/img/badges)");
+    CHECK(!strcmp(badge_texture(BADGE_COUNT, tex, sizeof(tex)), "") && !badge_get(BADGE_COUNT), "past the table");
     int owned[4] = {0};
     SeasonBadgeAccount a = {.season = 7, .now_s = g_bp.start_s + 86400, .bp_start_s = g_bp.start_s, .badges = owned, .badge_count = 0};
     CHECK(season_badge_rule(26, &a) == 0, "Founder: no VIP tier");
@@ -183,6 +199,26 @@ static void test_badges(void) {
     cJSON *stats = cJSON_Parse("{\"n\":510}");
     CHECK(badge_rule_met(11, stats, &a) == 1, "Nuclear I through badge_rule_met");
     cJSON_Delete(stats);
+    // Season 10's pass badges (deob-10.0.3.js:116167-116190) and the KrunkCup Badge (:116159-116166)
+    SeasonBadgeAccount s10 = {.season = 10, .bpp = BP_S10_BPP - 1};
+    CHECK(season_badge_rule(61, &s10) == 0 && badge_rule_met(61, NULL, &s10) == 0, "S10 Battle Pass: 24999");
+    s10.bpp = BP_S10_BPP;
+    CHECK(season_badge_rule(61, &s10) == 1 && badge_rule_met(61, NULL, &s10) == 1, "S10 Battle Pass: 25000, no VIP tier needed");
+    s10.bpp = BP_S10_MASTER_BPP;
+    CHECK(season_badge_rule(62, &s10) == 0 && season_badge_rule(63, &s10) == 0, "S10 Supreme / Master need the VIP tier");
+    s10.bp_tier = 1;
+    s10.bpp = BP_S10_SUPREME_BPP;
+    CHECK(season_badge_rule(62, &s10) == 1 && season_badge_rule(63, &s10) == 0, "S10 Supreme at 39000, Master not yet");
+    s10.bpp = BP_S10_MASTER_BPP;
+    CHECK(season_badge_rule(63, &s10) == 1, "S10 Master Battle Pass at 55000");
+    s10.season = 11;
+    CHECK(season_badge_rule(61, &s10) == 0 && season_badge_rule(63, &s10) == 0, "Season 10 badges in season 11");
+    CHECK(season_badge_rule(60, &s10) == -1 && season_badge_rule(64, &s10) == -1, "KrunkCup / Community Event Winner: not season badges");
+    SeasonBadgeAccount cup = {.season = 10};
+    CHECK(badge_rule_met(60, NULL, &cup) == 0 && badge_rule_met(60, NULL, NULL) == 0, "KrunkCup Badge without skin 7794");
+    cup.has_skin = has_cup;
+    CHECK(badge_rule_met(60, NULL, &cup) == 1, "KrunkCup Badge with skin 7794");
+    CHECK(badge_rule_met(1, NULL, &cup) == 0 && badge_rule_met(4, NULL, &cup) == 0, "Skin Creator I-IV: never met on Box Office");
 }
 
 static void test_challenge_contexts(void) {

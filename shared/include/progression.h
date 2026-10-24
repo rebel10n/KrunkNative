@@ -96,12 +96,14 @@ int challenges_finalize(cJSON *active, const cJSON *events, const ChallengeMatch
 // Writes "" when the key has no template.
 void challenge_name(const cJSON *challenge, const char *(*weapon_name)(int index), char *out, size_t size);
 
-// ------------------------------------------------------------------ badges (src/data/badges.js)
+// ------------------------------------------------------------------ badges (v10.0.3 config badges)
 
-// badges[index].claimable && badges[index].req(account) for an account whose stats object is
-// `stats` (account.stats): Nuclear I-IV need stats.n >= 500 / 750 / 1000 / 1500. The season
-// badges (22..28) follow season_badge_rule() (shared/include/season.h) on `season`, the
-// account's Battle Pass and badges; without it (NULL) they are never met.
+// badges[index].claimable && badges[index].req(account) (v10.0.3 config badges, deob-10.0.3.js:115767)
+// for an account whose stats object is `stats` (account.stats): Nuclear I-IV need stats.n >= 500 /
+// 750 / 1000 / 1500. The season badges (22..28, 61..63) follow season_badge_rule()
+// (shared/include/season.h) on `season`, the account's Battle Pass and badges; the KrunkCup Badge (60)
+// needs skin 7794 (season->has_skin). Without `season` (NULL) those are never met. Skin Creator I-IV
+// (1..4) are never met on Box Office (progression.c).
 int badge_rule_met(int index, const cJSON *stats, const SeasonBadgeAccount *season);
 // badge_rule_met(index, stats, NULL)
 int badge_requirement_met(int index, const cJSON *stats);

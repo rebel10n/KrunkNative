@@ -332,6 +332,16 @@ int badge_rule_met(const int index, const cJSON *stats, const SeasonBadgeAccount
     int has = 0;
     const double nukes = field_num(stats, "n", &has);
     switch (index) {
+        // Skin Creator I-IV (deob-10.0.3.js:115771-115840): store skins whose `creators` hold the account's
+        // name, one of them of season 9+, and 50 / 100 / 200 / 300 in all. Never met on Box Office: the
+        // store's creators are krunker.io usernames, and a Box Office username is not that identity (the
+        // name match would hand the badge to whoever registers the name); the brain's store table keeps no
+        // creators either. Still claimable, so a claim is answered "Requirements not met" as in v10.
+        case 1:
+        case 2:
+        case 3:
+        case 4: return 0;
+        case 60: return season && season->has_skin && season->has_skin(season->ud, 7794); // KrunkCup Badge (deob-10.0.3.js:116159-116166)
         case 11: return nukes >= 500;  // Nuclear I
         case 13: return nukes >= 750;  // Nuclear II
         case 14: return nukes >= 1000; // Nuclear III

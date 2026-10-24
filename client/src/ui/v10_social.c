@@ -2079,14 +2079,15 @@ static void sb_profile_creations(StrBuf *sb, View *v) {
         }
         sb_append(sb, "</div>");
         break;
-    case 1: // v10 opens the map's page on a click (_32874, not ported)
+    case 1: { // a click opens the game's page (v10s('pmap'), below)
         if (!counts[1]) {
             sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No maps created.</div>");
             break;
         }
         sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
+        int i = 0;
         cJSON_ArrayForEach(m, maps) {
-            sb_append(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\"><img class=\"profile-detail-creation-thumb svelte-1hghrmf\" loading=\"lazy\"");
+            sb_appendf(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\" onclick=\"v10s('pmap',%d)\"><img class=\"profile-detail-creation-thumb svelte-1hghrmf\" loading=\"lazy\"", i++);
             creation_thumb(sb, "/m%lld/thumb.png", (long long) jnum(m, "mid"));
             sb_append(sb, " alt=\"");
             sb_append_esc(sb, jstr(m, "mna"));
@@ -2097,14 +2098,16 @@ static void sb_profile_creations(StrBuf *sb, View *v) {
         }
         sb_append(sb, "</div>");
         break;
-    case 2: // v10 opens the mod's page on a click (_33240, not ported); a featured mod has the gold star
+    }
+    case 2: { // a click opens the mod's page (v10s('pmod'), below); a featured mod has the gold star
         if (!counts[2]) {
             sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No mods created.</div>");
             break;
         }
         sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
+        int i = 0;
         cJSON_ArrayForEach(m, mods) {
-            sb_append(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\"><div class=\"profile-detail-creation-name svelte-1hghrmf\">");
+            sb_appendf(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\" onclick=\"v10s('pmod',%d)\"><div class=\"profile-detail-creation-name svelte-1hghrmf\">", i++);
             sb_append_esc(sb, jstr(m, "mna"));
             commas(num, sizeof(num), jnum(m, "vte"));
             sb_appendf(sb, "</div> <div class=\"profile-detail-creation-sub svelte-1hghrmf\"><i class=\"material-icons svelte-1hghrmf\">thumb_up</i> %s %s</div></button>", num,
@@ -2112,6 +2115,7 @@ static void sb_profile_creations(StrBuf *sb, View *v) {
         }
         sb_append(sb, "</div>");
         break;
+    }
     default: { // assets: the texture of a plain texture asset (dat.x, not dat.v), else its thumbnail (dat.t)
         if (!counts[3]) {
             sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No assets uploaded.</div>");
@@ -3593,6 +3597,21 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         const int t = (int) arg_num(args, argc, 1, 0);
         v->ctab = t >= 0 && t < 4 ? t : 0;
         render_views();
+    } else if ((!strcmp(op, "pmap") || !strcmp(op, "pmod")) && v && v->type == V_PROFILE && v->data) {
+        // a Games / Mods card (deob-10.0.3.js:126788-126790, 126819-126821): v10 pushes its map page
+        // (_32874, getMapByName(mapName), deob-10.0.3.js:125929-125933, 121064) or mod page (_33240, modName,
+        // :125934-125938, 121847) onto the social modal's stack. Box Office has neither Svelte page: the
+        // card opens the hub's map / mod page of that name (social_ui.c, io_0("map" | "mod")), Box
+        // Office's page for a published game or mod
+        const int is_mod = !strcmp(op, "pmod");
+        const cJSON *item = cJSON_GetArrayItem(cJSON_GetObjectItem(v->data, is_mod ? "mods" : "maps"), (int) arg_num(args, argc, 1, -1));
+        const char *mna = jstr(item, "mna");
+        if (mna && mna[0]) {
+            char enc[200], url[256];
+            backend_url_encode(enc, sizeof(enc), mna);
+            snprintf(url, sizeof(url), "/social.html?p=%s&q=%s", is_mod ? "mod" : "map", enc);
+            ui_open_external(url);
+        }
     } else if (!strcmp(op, "pskin") && v && v->type == V_PROFILE) { // a created skin: its item page (svelte-dmu4q2, deob-10.0.3.js:125918-125922)
         v10_market_wallet_item((int) arg_num(args, argc, 1, -1));
     } else if (!strcmp(op, "btip") && v && v->type == V_PROFILE) { // a badge's tooltip: its name and description (deob-10.0.3.js:125949-125975)

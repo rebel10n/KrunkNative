@@ -294,7 +294,7 @@ static int founder(const SeasonBadgeAccount *a, const int season) {
 }
 
 int season_badge_rule(const int index, const SeasonBadgeAccount *a) {
-    if (index < 22 || index > 28) return -1;
+    if ((index < 22 || index > 28) && (index < 61 || index > 63)) return -1;
     if (!a) return 0;
     switch (index) {
         case 22: return founder(a, 6); // Season 6 Founder
@@ -309,6 +309,12 @@ int season_badge_rule(const int index, const SeasonBadgeAccount *a) {
         case 26: return founder(a, 7);                                                  // Season 7 Founder
         case 27: return a->season == 7 && a->bp_tier >= 1 && a->bpp >= BP_MASTER_BPP; // S7 Battle Pass Master
         case 28: return a->season == 7 && owns(a, 26) && owns(a, 27);                  // S7 Badge Master
+        // v10.0.3 (deob-10.0.3.js:116167-116190) reads account.BP, the running pass, which is Season 10's
+        // there; KrunkNative ties them to season 10 the way the v7 rules above name theirs, so a later
+        // season's pass does not award a Season 10 badge
+        case 61: return a->season == 10 && a->bpp >= BP_S10_BPP;                           // S10 Battle Pass
+        case 62: return a->season == 10 && a->bp_tier >= 1 && a->bpp >= BP_S10_SUPREME_BPP; // S10 Supreme Battle Pass
+        case 63: return a->season == 10 && a->bp_tier >= 1 && a->bpp >= BP_S10_MASTER_BPP;  // S10 Master Battle Pass
         default: return 0;
     }
 }

@@ -97,7 +97,7 @@ v10 fetches it:
   `--:--`, AI Kills, Boss Kills, Deaths; Tortuga / Laboratory / Soul Sanctum / Khepri / Bastion, else
   `Raid <id>`, 125818-125839, 126487-126537).
 * Badges: the `player_badge` indices (`"1,5,9"`, parseInt per part) in badge-table order
-  (`shared/include/badges.h`), each icon with v10's tooltip (name in `#FBC02D`, italic description) on
+  (`shared/include/badges.h`: v10.0.3's 68, deob-10.0.3.js:115767-116206), each icon with v10's tooltip (name in `#FBC02D`, italic description) on
   hover (126663-126693); "No badges earned." without one.
 * Titles: the `GET /titles` rows (`assets/titles.json`, read by `v10_customize.c`) whose id is in
   `player_titles`, in the table's order and tag style, with their description (126694-126721); "No
@@ -107,7 +107,9 @@ v10 fetches it:
   (125848-125858), bordered in their rarity colour; a click opens the skin's item page (the Catalog's
   detail view, `v10_market_wallet_item`). Games / Mods / Assets are the reply's `maps` / `mods` /
   `assets`; a featured mod has the gold star; "No skins created." / "No maps created." / "No mods
-  created." / "No assets uploaded.".
+  created." / "No assets uploaded.". A game or mod card opens its page by name (v10: the map / mod page
+  pushed on the modal's stack, 126790 / 126821 -> 125929-125938): here the hub's map / mod page,
+  `/social.html?p=map|mod&q=<name>` (`social_ui.c`).
 
 The brain's `GET /players/<name>` (`social_gapi.c` over `db_social.c` `P_PROFILE`) carries what these
 read: `player_badge` (the `player_badges` rows), `player_titles` (`""`: Box Office grants no titles
@@ -131,10 +133,10 @@ back to the author. News: `accounts.news` (HTML strings).
 * Profile: match history shows v10's empty state, and so do raid stats and titles on Box Office
   accounts (no raids recorded, no titles granted); the sales chart is a bar strip instead of v10's
   canvas line chart; listings show the skin index instead of its name / thumbnail; Trade dispatches
-  `openTrade` (the economy's flow). The badge table is v7.1.4's 29 entries (`badges.h`): 10.0.3's 39
-  later badges (VIP .. Season 10 Contributor, deob-10.0.3.js:115767-116208) and their icons are not in
-  it, so a krunker.io profile's badges past index 28 are not shown. Game and mod cards do not open
-  v10's map / mod pages (`svelte-1kkpw01` / `svelte-1v2j2f2`, not ported). Box Office games and assets
+  `openTrade` (the economy's flow). The 39 badges v10.0.3 added after v7.1.4's 29 have their icons in
+  the page tree (`ui/img/badges`, v10: the asset host's `textures/badges`). Game and mod cards open the
+  hub's map / mod pages instead of v10's Svelte ones (`svelte-1kkpw01` / `svelte-1v2j2f2`, not
+  ported). Box Office games and assets
   show v10's fallback picture: their ids are not krunker.io user-asset ids.
 * Post types 5 (unboxed item) and 8 (match result) are rendered by the brain only if such posts exist
   (KrunkNative creates none yet).

@@ -34,6 +34,11 @@
 #define BP_LEVELS_MAX 256     // v10 leveldata: levels with their own BPP cost
 #define BP_FOUNDER_DAYS 7     // badges.js "Purchase the Battle Pass in the first week"
 #define BP_MASTER_BPP 15000   // badges.js S6 / S7 Battle Pass Master: BP.tier && bpp >= 15000
+// v10.0.3's Season 10 pass badges (deob-10.0.3.js:116167-116190): S10 Battle Pass BP.bpp >= 25000 (no tier),
+// S10 Supreme Battle Pass and S10 Master Battle Pass BP.tier && bpp >= 39000 / 55000
+#define BP_S10_BPP 25000
+#define BP_S10_SUPREME_BPP 39000
+#define BP_S10_MASTER_BPP 55000
 
 // One reward of itemdata ("id,tier,col,sk" groups, UTILS.arrayChunk(itemdata.split(","), 4)).
 typedef struct {
@@ -164,6 +169,7 @@ typedef struct {
     void *ud;
 } SeasonBadgeAccount;
 
-// Rule of a season badge (index into g_badges: 22..28): -1 when `index` is not a season badge,
-// else 0 / 1. v7's dates are replaced as documented above.
+// Rule of a season badge (index into g_badges: 22..28, and v10.0.3's 61..63): -1 when `index` is not
+// a season badge, else 0 / 1. v7's dates are replaced as documented above. v10.0.3 folds the Season 6 /
+// 7 rules to false (deob-10.0.3.js:115939-116011: its season is 10), which the season checks give too.
 int season_badge_rule(int index, const SeasonBadgeAccount *a);
