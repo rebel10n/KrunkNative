@@ -34,6 +34,11 @@
 #include <follower_counts.h> // a follow moves the author's count on every copy (followers_moved)
 #include <ruleset.h>
 #include <weapons.h>
+#include <badges.h>     // the profile's Badges tab and selected badge (badge_get / badge_texture)
+#include <ranked.h>     // the profile's rank chip (ranked_rank_name / color / icon)
+#include <ui_tooltip.h> // the Badges tab's tooltip
+#include "../viewer/viewer_store.h" // the Creations tab's Skins: the store table and its rarities
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
@@ -107,6 +112,8 @@ typedef struct {
     cJSON *data;         // owned: profile / clan / {post, comments} / follow rows
     // profile
     int tab;             // profile right-side tab
+    int ctab;            // the Creations tab's sub-tab: 0 Skins (v10's default), 1 Games, 2 Mods, 3 Assets
+    int *cskins, ncskins, cskins_ready; // the skins this player created (store indices), found once
     int follow_busy;
     int sales_range;
     cJSON *sales, *listings, *feed, *reports; // owned
@@ -1636,6 +1643,8 @@ static void view_free(View *v) {
     cJSON_Delete(v->reports);
     cJSON_Delete(v->followers);
     cJSON_Delete(v->following);
+    free(v->cskins);
+    if (v->type == V_PROFILE && v->tab == 3) ui_tooltip_cancel(); // its badge tooltip goes with it (deob-10.0.3.js:126018-126020)
     memset(v, 0, sizeof(*v));
 }
 
@@ -1727,6 +1736,11 @@ static void profile_done(const int status, const cJSON *data, const cJSON *error
         snprintf(v->error, sizeof(v->error), "%s", v10_gapi_error_text(error, "Profile not found"));
     } else {
         v->data = cJSON_Duplicate(data, 1);
+        // player_stats is an object or its JSON text (v10 parses the text, deob-10.0.3.js:125746-125761)
+        const cJSON *st = cJSON_GetObjectItem(v->data, "player_stats");
+        cJSON *parsed = cJSON_IsString(st) ? cJSON_Parse(st->valuestring) : NULL;
+        if (cJSON_IsObject(parsed)) cJSON_ReplaceItemInObject(v->data, "player_stats", parsed);
+        else cJSON_Delete(parsed);
         char path[96];
         snprintf(path, sizeof(path), "/social/feed?player_id=%lld&limit=20", (long long) jnum(data, "player_id"));
         v->feed_loading = gapi("GET", path, NULL, profile_feed_done, tag);
@@ -1842,12 +1856,295 @@ static void sb_profile_stats(StrBuf *sb, const cJSON *d) {
     }
     sb_append(sb, "</div> <div class=\"profile-detail-section-header svelte-1hghrmf\">Raids</div> <div class=\"profile-detail-raid-summary svelte-1hghrmf\">"
                   "<div class=\"profile-detail-raid-sum-grid svelte-1hghrmf\">");
-    stat_card(sb, "Completions", "0/0", 0);
-    stat_card(sb, "Completion Rate", "0%", 0);
-    stat_card(sb, "AI Kills", "0", 0);
-    stat_card(sb, "Boss Kills", "0", 0);
-    stat_card(sb, "Deaths", "0", 0);
-    sb_append(sb, "</div> <div class=\"profile-detail-empty svelte-1hghrmf\">No raid data recorded.</div></div>");
+    // raid_stats [{map_id, completions, attempts, best_time (ms), ai_kills, boss_kills, deaths}]: the summary
+    // sums them (deob-10.0.3.js:125818-125839), a row per raid follows (126487-126537)
+    const cJSON *raids = cJSON_GetObjectItem(d, "raid_stats"), *r;
+    double comp = 0, att = 0, aik = 0, bossk = 0, rd = 0;
+    cJSON_ArrayForEach(r, raids) {
+        comp += jnum(r, "completions");
+        att += jnum(r, "attempts");
+        aik += jnum(r, "ai_kills");
+        bossk += jnum(r, "boss_kills");
+        rd += jnum(r, "deaths");
+    }
+    snprintf(v, sizeof(v), "%.0f/%.0f", comp, att); stat_card(sb, "Completions", v, 0);
+    snprintf(v, sizeof(v), "%.0f%%", att > 0 ? floor(comp / att * 100.0 + 0.5) : 0.0); stat_card(sb, "Completion Rate", v, 0); // Math.round
+    fmt_num(v, sizeof(v), aik); stat_card(sb, "AI Kills", v, 0);
+    fmt_num(v, sizeof(v), bossk); stat_card(sb, "Boss Kills", v, 0);
+    fmt_num(v, sizeof(v), rd); stat_card(sb, "Deaths", v, 0);
+    sb_append(sb, "</div> ");
+    if (cJSON_GetArraySize(raids) == 0) {
+        sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No raid data recorded.</div></div>");
+        return;
+    }
+    sb_append(sb, "<div class=\"profile-detail-raid-list svelte-1hghrmf\">");
+    cJSON_ArrayForEach(r, raids) {
+        const int map = (int) jnum(r, "map_id");
+        static const struct { int id; const char *name; } names[] = {{18, "Tortuga"}, {29, "Laboratory"}, {31, "Soul Sanctum"}, {35, "Khepri"}, {43, "Bastion"}};
+        const char *rname = NULL;
+        for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) if (names[i].id == map) rname = names[i].name;
+        char cleared[48], best[32], k[32], bk[32], dd[32];
+        snprintf(cleared, sizeof(cleared), "%.0f/%.0f", jnum(r, "completions"), jnum(r, "attempts"));
+        const double bt = jnum(r, "best_time"); // ms: "M:SS", "--:--" when none
+        const long long secs = (long long) floor(bt / 1000.0);
+        if (bt > 0) snprintf(best, sizeof(best), "%lld:%02lld", secs / 60, secs % 60);
+        else snprintf(best, sizeof(best), "--:--");
+        fmt_num(k, sizeof(k), jnum(r, "ai_kills"));
+        fmt_num(bk, sizeof(bk), jnum(r, "boss_kills"));
+        fmt_num(dd, sizeof(dd), jnum(r, "deaths"));
+        if (rname) sb_appendf(sb, "<div class=\"profile-detail-raid-row svelte-1hghrmf\"><div class=\"profile-detail-raid-name svelte-1hghrmf\">%s</div> ", rname);
+        else sb_appendf(sb, "<div class=\"profile-detail-raid-row svelte-1hghrmf\"><div class=\"profile-detail-raid-name svelte-1hghrmf\">Raid %d</div> ", map);
+        sb_append(sb, "<div class=\"profile-detail-raid-grid svelte-1hghrmf\">");
+        const char *const labels[5] = {"Cleared", "Best Time", "AI Kills", "Boss Kills", "Deaths"}, *const vals[5] = {cleared, best, k, bk, dd};
+        for (int i = 0; i < 5; i++)
+            sb_appendf(sb, "<div class=\"profile-detail-raid-cell svelte-1hghrmf\"><span class=\"svelte-1hghrmf\">%s</span> <b class=\"svelte-1hghrmf\">%s</b></div>%s",
+                       labels[i], vals[i], i < 4 ? " " : "");
+        sb_append(sb, "</div></div>");
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// player_badge / player_titles: "1,5,9", each part parseInt()ed after a trim (deob-10.0.3.js:125762,
+// 125763-125770); NaN parts dropped. A number array is read too.
+#define PROFILE_IDS_MAX 256
+static int profile_ids(const cJSON *v, int *out, const int max) {
+    int n = 0;
+    const cJSON *e;
+    if (cJSON_IsArray(v)) {
+        cJSON_ArrayForEach(e, v) if (cJSON_IsNumber(e) && n < max) out[n++] = (int) e->valuedouble;
+        return n;
+    }
+    for (const char *s = cJSON_GetStringValue(v); s && *s && n < max;) {
+        char *end;
+        const long id = strtol(s, &end, 10); // parseInt: leading blanks skipped, trailing text ignored
+        if (end != s) out[n++] = (int) id;
+        s = strchr(s, ',');
+        if (s) s++;
+    }
+    return n;
+}
+
+static int ids_has(const int *ids, const int n, const int id) {
+    for (int i = 0; i < n; i++) if (ids[i] == id) return 1;
+    return 0;
+}
+
+// the selected badge (deob-10.0.3.js:125736-125745): stats.bdg when the player has that badge, else -1
+static int profile_selected_badge(const cJSON *d) {
+    const cJSON *b = cJSON_GetObjectItem(cJSON_GetObjectItem(d, "player_stats"), "bdg");
+    if (!cJSON_IsNumber(b) || b->valuedouble < 0) return -1;
+    int ids[PROFILE_IDS_MAX];
+    const int n = profile_ids(cJSON_GetObjectItem(d, "player_badge"), ids, PROFILE_IDS_MAX);
+    return ids_has(ids, n, (int) b->valuedouble) && badge_get((int) b->valuedouble) ? (int) b->valuedouble : -1;
+}
+
+static void badge_url(const int index, char *out, const size_t n) { // Game.badges[i].url (the asset host)
+    char tex[96];
+    html_dom_asset_url(badge_texture(index, tex, sizeof(tex)), out, n);
+}
+
+// the skins this player made (deob-10.0.3.js:125848-125858): every store skin whose creators list holds
+// the lower-cased name, or whose creator text does once lower-cased and split on ", "; store order
+static void profile_created_skins(View *v) {
+    if (v->cskins_ready || !v->data) return;
+    v->cskins_ready = 1;
+    char me[64];
+    snprintf(me, sizeof(me), "%s", jstr(v->data, "player_name"));
+    for (char *c = me; *c; c++) *c = (char) tolower((unsigned char) *c);
+    if (!me[0]) return;
+    for (int i = 0; i < g_viewer_skin_count; i++) {
+        const cJSON *j = ui_loadout_skin_json(i), *c;
+        if (!j || !viewer_skin(i)) continue;
+        int mine = 0;
+        cJSON_ArrayForEach(c, cJSON_GetObjectItem(j, "creators")) if (cJSON_IsString(c) && !strcmp(c->valuestring, me)) mine = 1;
+        const char *who = cJSON_GetStringValue(cJSON_GetObjectItem(j, "creator"));
+        for (const char *p = who; !mine && p && *p;) {
+            const char *q = strstr(p, ", ");
+            const size_t len = q ? (size_t) (q - p) : strlen(p);
+            mine = len == strlen(me) && !strncasecmp(p, me, len);
+            p = q ? q + 2 : NULL;
+        }
+        if (!mine) continue;
+        int *grown = realloc(v->cskins, sizeof(int) * (size_t) (v->ncskins + 1));
+        if (!grown) return;
+        v->cskins = grown;
+        v->cskins[v->ncskins++] = i;
+    }
+}
+
+// the Badges tab (deob-10.0.3.js:126663-126693, 125771-125774): the player's badges in badge-table order, a tooltip each
+static void sb_profile_badges(StrBuf *sb, const cJSON *d) {
+    int ids[PROFILE_IDS_MAX];
+    const int n = profile_ids(cJSON_GetObjectItem(d, "player_badge"), ids, PROFILE_IDS_MAX);
+    sb_append(sb, "<div class=\"profile-detail-badges-panel svelte-1hghrmf\">");
+    int shown = 0;
+    for (int i = 0; i < BADGE_COUNT; i++) {
+        const BadgeDef *b = badge_get(i);
+        if (!b || !ids_has(ids, n, i)) continue;
+        if (!shown++) sb_append(sb, "<div class=\"profile-detail-badges-grid svelte-1hghrmf\">");
+        char url[256];
+        badge_url(i, url, sizeof(url));
+        sb_append(sb, "<div class=\"profile-detail-badge-item svelte-1hghrmf\" role=\"img\" aria-label=\"");
+        sb_append_esc(sb, b->name);
+        sb_appendf(sb, "\" onmouseover=\"v10s('btip',%d)\" onmouseout=\"v10s('btipx')\"><img loading=\"lazy\" class=\"svelte-1hghrmf\" src=\"", i);
+        sb_append_esc(sb, url);
+        sb_append(sb, "\" alt=\"");
+        sb_append_esc(sb, b->name);
+        sb_append(sb, "\"></div>");
+    }
+    sb_append(sb, shown ? "</div></div>" : "<div class=\"profile-detail-empty svelte-1hghrmf\">No badges earned.</div></div>");
+}
+
+// the Titles tab (deob-10.0.3.js:126694-126721, 125763-125770): the GET /titles rows whose id is in player_titles, in that
+// table's order, each in its tag style with its description
+static void sb_profile_titles(StrBuf *sb, const cJSON *d) {
+    int ids[PROFILE_IDS_MAX];
+    const int n = profile_ids(cJSON_GetObjectItem(d, "player_titles"), ids, PROFILE_IDS_MAX);
+    sb_append(sb, "<div class=\"profile-detail-badges-panel svelte-1hghrmf\">");
+    int shown = 0;
+    const cJSON *t, *table = n ? v10_customize_titles() : NULL;
+    cJSON_ArrayForEach(t, table) {
+        const cJSON *id = cJSON_GetObjectItem(t, "id");
+        if (!cJSON_IsNumber(id) || !ids_has(ids, n, id->valueint)) continue;
+        if (!shown++) sb_append(sb, "<div class=\"profile-detail-titles-list svelte-1hghrmf\">");
+        sb_append(sb, "<div class=\"profile-detail-title-item svelte-1hghrmf\" style=\"");
+        StrBuf style = {0};
+        v10_customize_title_style(&style, t);
+        char *css = sb_finish(&style);
+        sb_append_esc(sb, css ? css : "");
+        free(css);
+        sb_append(sb, "\"><div class=\"profile-detail-title-name svelte-1hghrmf\">");
+        sb_append_esc(sb, jstr(t, "name"));
+        sb_append(sb, "</div> ");
+        if (jstr(t, "desc")[0]) {
+            sb_append(sb, "<div class=\"profile-detail-title-desc svelte-1hghrmf\">");
+            sb_append_esc(sb, jstr(t, "desc"));
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, shown ? "</div></div>" : "<div class=\"profile-detail-empty svelte-1hghrmf\">No titles earned.</div></div>");
+}
+
+// user-assets thumbnails (v10 _9259 + path): krunker.io's host for a krunker.io account's creations; Box
+// Office creations have no thumbnail there (ids differ), so they get v10's fallback picture
+static void creation_thumb(StrBuf *sb, const char *path_fmt, const long long id) {
+    sb_append(sb, " src=\"");
+    if (kio()) {
+        char url[160], path[64];
+        snprintf(path, sizeof(path), path_fmt, id);
+        snprintf(url, sizeof(url), "https://user-assets.krunker.io%s", path);
+        sb_append_esc(sb, url);
+    } else {
+        sb_append(sb, "./img/noimg.png");
+    }
+    sb_append(sb, "\" onerror=\"this.onerror=null;this.src='./img/noimg.png'\"");
+}
+
+// the Creations tab (deob-10.0.3.js:126722-126880): Skins (n) / Games (n) / Mods (n) / Assets (n), on Skins
+static void sb_profile_creations(StrBuf *sb, View *v) {
+    const cJSON *d = v->data;
+    const cJSON *maps = cJSON_GetObjectItem(d, "maps"), *mods = cJSON_GetObjectItem(d, "mods"), *assets = cJSON_GetObjectItem(d, "assets"), *m;
+    profile_created_skins(v);
+    const int counts[4] = {v->ncskins, cJSON_GetArraySize(maps), cJSON_GetArraySize(mods), cJSON_GetArraySize(assets)};
+    static const char *const labels[4] = {"Skins", "Games", "Mods", "Assets"};
+    sb_append(sb, "<div class=\"profile-detail-creations-panel svelte-1hghrmf\"><div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
+    for (int i = 0; i < 4; i++)
+        sb_appendf(sb, "<div class=\"simple-tab svelte-1oqd18e%s\" role=\"tab\" aria-selected=\"%s\" tabindex=\"0\" id=\"v10sCtab%d\" onmouseenter=\"playTick(0.1)\" "
+                       "onclick=\"playSelect(0.1);v10s('ctab',%d)\"><span class=\"simple-tab-label svelte-1oqd18e\">%s (%d)</span></div>",
+                   v->ctab == i ? " simple-tab-active" : "", v->ctab == i ? "true" : "false", i, i, labels[i], counts[i]);
+    sb_append(sb, "</div> ");
+    char num[32];
+    switch (v->ctab) {
+    case 0: // a card per skin, in its rarity's colour; a click opens its item page (the Catalog's detail view)
+        if (!v->ncskins) {
+            sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No skins created.</div>");
+            break;
+        }
+        sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
+        for (int i = 0; i < v->ncskins; i++) {
+            const ViewerSkin *s = viewer_skin(v->cskins[i]);
+            const int r = s ? s->rarity : 0;
+            const char *col = g_viewer_rarities[r >= 0 && r < g_viewer_rarity_count ? r : 0].color;
+            char url[256];
+            store_skin_preview(v->cskins[i], url, sizeof(url));
+            sb_appendf(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\" style=\"border-color: %s;\" onclick=\"v10s('pskin',%d)\">"
+                           "<img loading=\"lazy\" class=\"svelte-1hghrmf\" src=\"", col ? col : "#B0B0B0", v->cskins[i]);
+            sb_append_esc(sb, url);
+            sb_append(sb, "\" alt=\"");
+            sb_append_esc(sb, s && s->name ? s->name : "");
+            sb_append(sb, "\"> <div class=\"profile-detail-creation-name svelte-1hghrmf\">");
+            sb_append_esc(sb, s && s->name ? s->name : "");
+            sb_append(sb, "</div></button>");
+        }
+        sb_append(sb, "</div>");
+        break;
+    case 1: // v10 opens the map's page on a click (_32874, not ported)
+        if (!counts[1]) {
+            sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No maps created.</div>");
+            break;
+        }
+        sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
+        cJSON_ArrayForEach(m, maps) {
+            sb_append(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\"><img class=\"profile-detail-creation-thumb svelte-1hghrmf\" loading=\"lazy\"");
+            creation_thumb(sb, "/m%lld/thumb.png", (long long) jnum(m, "mid"));
+            sb_append(sb, " alt=\"");
+            sb_append_esc(sb, jstr(m, "mna"));
+            sb_append(sb, "\"> <div class=\"profile-detail-creation-name svelte-1hghrmf\">");
+            sb_append_esc(sb, jstr(m, "mna"));
+            commas(num, sizeof(num), jnum(m, "vte"));
+            sb_appendf(sb, "</div> <div class=\"profile-detail-creation-sub svelte-1hghrmf\"><i class=\"material-icons svelte-1hghrmf\">thumb_up</i> %s</div></button>", num);
+        }
+        sb_append(sb, "</div>");
+        break;
+    case 2: // v10 opens the mod's page on a click (_33240, not ported); a featured mod has the gold star
+        if (!counts[2]) {
+            sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No mods created.</div>");
+            break;
+        }
+        sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
+        cJSON_ArrayForEach(m, mods) {
+            sb_append(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\"><div class=\"profile-detail-creation-name svelte-1hghrmf\">");
+            sb_append_esc(sb, jstr(m, "mna"));
+            commas(num, sizeof(num), jnum(m, "vte"));
+            sb_appendf(sb, "</div> <div class=\"profile-detail-creation-sub svelte-1hghrmf\"><i class=\"material-icons svelte-1hghrmf\">thumb_up</i> %s %s</div></button>", num,
+                       jtrue(m, "ftr") ? "<i class=\"material-icons svelte-1hghrmf\" style=\"color:#ffd042;\">star</i>" : "");
+        }
+        sb_append(sb, "</div>");
+        break;
+    default: { // assets: the texture of a plain texture asset (dat.x, not dat.v), else its thumbnail (dat.t)
+        if (!counts[3]) {
+            sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No assets uploaded.</div>");
+            break;
+        }
+        sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
+        cJSON_ArrayForEach(m, assets) {
+            const cJSON *dv = cJSON_GetObjectItem(m, "dat");
+            cJSON *dat = cJSON_IsString(dv) ? cJSON_Parse(dv->valuestring) : NULL;
+            const cJSON *meta = dat ? dat : dv;
+            const long long id = (long long) jnum(m, "id");
+            sb_append(sb, "<div class=\"profile-detail-creation-card svelte-1hghrmf\"><img class=\"profile-detail-creation-thumb svelte-1hghrmf\" loading=\"lazy\"");
+            if (jtrue(meta, "x") && !jtrue(meta, "v")) creation_thumb(sb, "/%lld/texture.png", id);
+            else if (jtrue(meta, "t")) creation_thumb(sb, "/%lld/thumb.png", id);
+            else sb_append(sb, " src=\"./img/noimg.png\"");
+            cJSON_Delete(dat);
+            sb_append(sb, " alt=\"");
+            sb_append_esc(sb, jstr(m, "nm"));
+            sb_append(sb, "\"> <div class=\"profile-detail-creation-name svelte-1hghrmf\">");
+            sb_append_esc(sb, jstr(m, "nm"));
+            sb_append(sb, "</div> ");
+            if (jtrue(m, "ini")) {
+                char date[32];
+                fmt_date(date, sizeof(date), jstr(m, "ini"));
+                sb_appendf(sb, "<div class=\"profile-detail-creation-sub svelte-1hghrmf\">%s</div>", date);
+            }
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div>");
+        break;
+    }
+    }
+    sb_append(sb, "</div>");
 }
 
 static void sb_profile_right(StrBuf *sb, View *v) {
@@ -1914,30 +2211,9 @@ static void sb_profile_right(StrBuf *sb, View *v) {
         sb_append(sb, "</div>");
         break;
     }
-    case 3: sb_append(sb, "<div class=\"profile-detail-badges-panel svelte-1hghrmf\"><div class=\"profile-detail-empty svelte-1hghrmf\">No badges earned.</div></div>"); break;
-    case 4: sb_append(sb, "<div class=\"profile-detail-badges-panel svelte-1hghrmf\"><div class=\"profile-detail-empty svelte-1hghrmf\">No titles earned.</div></div>"); break;
-    case 5: {
-        const cJSON *maps = cJSON_GetObjectItem(d, "maps"), *mods = cJSON_GetObjectItem(d, "mods"), *assets = cJSON_GetObjectItem(d, "assets");
-        sb_appendf(sb, "<div class=\"profile-detail-creations-panel svelte-1hghrmf\"><div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">"
-                       "<div class=\"simple-tab svelte-1oqd18e simple-tab-active\" role=\"tab\" aria-selected=\"true\" tabindex=\"0\"><span class=\"simple-tab-label svelte-1oqd18e\">Games (%d)</span></div>"
-                       "<div class=\"simple-tab svelte-1oqd18e\" role=\"tab\" aria-selected=\"false\" tabindex=\"0\"><span class=\"simple-tab-label svelte-1oqd18e\">Mods (%d)</span></div>"
-                       "<div class=\"simple-tab svelte-1oqd18e\" role=\"tab\" aria-selected=\"false\" tabindex=\"0\"><span class=\"simple-tab-label svelte-1oqd18e\">Assets (%d)</span></div></div> ",
-                   cJSON_GetArraySize(maps), cJSON_GetArraySize(mods), cJSON_GetArraySize(assets));
-        if (cJSON_GetArraySize(maps) == 0) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No maps created.</div>");
-        else {
-            sb_append(sb, "<div class=\"profile-detail-creation-grid svelte-1hghrmf\">");
-            const cJSON *m;
-            cJSON_ArrayForEach(m, maps) {
-                sb_append(sb, "<button class=\"profile-detail-creation-card svelte-1hghrmf\" type=\"button\"><img class=\"profile-detail-creation-thumb svelte-1hghrmf\" loading=\"lazy\"> "
-                              "<div class=\"profile-detail-creation-name svelte-1hghrmf\">");
-                sb_append_esc(sb, jstr(m, "mna"));
-                sb_appendf(sb, "</div> <div class=\"profile-detail-creation-sub svelte-1hghrmf\"><i class=\"material-icons svelte-1hghrmf\">thumb_up</i> %.0f</div></button>", jnum(m, "vte"));
-            }
-            sb_append(sb, "</div>");
-        }
-        sb_append(sb, "</div>");
-        break;
-    }
+    case 3: sb_profile_badges(sb, d); break;
+    case 4: sb_profile_titles(sb, d); break;
+    case 5: sb_profile_creations(sb, v); break;
     case 6: sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No recent matches.</div>"); break;
     case 7: { // Reports (v10 "Reports", developers and moderators): the reports of this player, newest first
         if (v->reports_loading) sb_append(sb, "<div class=\"profile-detail-loading-inline svelte-1hghrmf\"><i class=\"material-icons spin svelte-1hghrmf\">hourglass_empty</i></div>");
@@ -1993,6 +2269,23 @@ static void sb_profile(StrBuf *sb, View *v) {
     if (jtrue(d, "creator_badge")) sb_append(sb, "<i class=\"material-icons profile-detail-badge-creator svelte-1hghrmf\" title=\"Creator\">verified</i> ");
     if (premium) sb_append(sb, "<i class=\"material-icons profile-detail-badge-premium svelte-1hghrmf\" title=\"Premium\">beenhere</i> ");
     if (jtrue(d, "player_featured")) sb_append(sb, "<i class=\"material-icons profile-detail-badge-featured svelte-1hghrmf\" title=\"Featured\">check_circle</i> ");
+    const int rank = (int) jnum(d, "ranked_rank");
+    if (rank > 0) // the ranked chip (deob-10.0.3.js:126135-126147): the rank's icon and name in its colour
+        sb_appendf(sb, "<span class=\"profile-detail-rank-chip svelte-1hghrmf\" style=\"border-color: %s;\"><img alt=\"Rank\" class=\"profile-detail-rank-icon svelte-1hghrmf\" src=\"./%s\"> "
+                       "<span style=\"color: %s;\">%s</span></span> ",
+                   ranked_rank_color(rank), ranked_rank_icon(rank), ranked_rank_color(rank), ranked_rank_name(rank));
+    const int sel = profile_selected_badge(d);
+    if (sel >= 0) { // the selected badge (deob-10.0.3.js:126148-126156)
+        char url[256];
+        badge_url(sel, url, sizeof(url));
+        sb_append(sb, "<img class=\"profile-detail-selected-badge svelte-1hghrmf\" src=\"");
+        sb_append_esc(sb, url);
+        sb_append(sb, "\" alt=\"");
+        sb_append_esc(sb, badge_get(sel)->name);
+        sb_append(sb, "\" title=\"");
+        sb_append_esc(sb, badge_get(sel)->name);
+        sb_append(sb, "\">");
+    }
     sb_append(sb, "</div> <div class=\"profile-detail-name svelte-1hghrmf\">");
     sb_append_esc(sb, name);
     sb_append(sb, "</div> ");
@@ -2027,6 +2320,12 @@ static void sb_profile(StrBuf *sb, View *v) {
                    "<button class=\"profile-detail-follow-box svelte-1hghrmf\" type=\"button\" onclick=\"v10s('follows',1)\"><div class=\"profile-detail-follow-count svelte-1hghrmf\">%s</div> "
                    "<div class=\"profile-detail-follow-label svelte-1hghrmf\">Following</div></button></div> ",
                lvl, curs, needs, need > 0 ? fmin(100.0, cur / need * 100.0) : 0.0, since, fol, fing);
+    if (jtrue(d, "player_twitchname")) { // the Twitch button (deob-10.0.3.js:126203-126210, 125915-125917): opens twitch.tv/<name>
+        sb_append(sb, "<button class=\"profile-detail-twitch-btn svelte-1hghrmf\" type=\"button\" id=\"v10sProfileTwitch\" onclick=\"v10s('twitch')\">"
+                      "<img src=\"./img/twitch.png\" alt=\"Twitch\" class=\"profile-detail-twitch-img svelte-1hghrmf\"> <span>");
+        sb_append_esc(sb, jstr(d, "player_twitchname"));
+        sb_append(sb, "</span></button> ");
+    }
     sb_append(sb, "<div class=\"profile-detail-actions svelte-1hghrmf\">");
     const AccountInfo *a = actor(); // Follow / Trade / Gift KR / Report
     if (a && strcasecmp(a->name, name) != 0) {
@@ -3286,9 +3585,36 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         view_pop();
     } else if (!strcmp(op, "ptab") && v && v->type == V_PROFILE) {
         v->tab = (int) arg_num(args, argc, 1, 0);
+        if (v->tab != 3) ui_tooltip_cancel(); // leaving Badges drops its tooltip (deob-10.0.3.js:126021-126025)
         if (v->tab == 2 && !v->sales) profile_sales_load(v);
         if (v->tab == 7 && !v->reports && !v->reports_loading && v->data) profile_reports_load(v);
         render_views();
+    } else if (!strcmp(op, "ctab") && v && v->type == V_PROFILE) { // the Creations sub-tabs
+        const int t = (int) arg_num(args, argc, 1, 0);
+        v->ctab = t >= 0 && t < 4 ? t : 0;
+        render_views();
+    } else if (!strcmp(op, "pskin") && v && v->type == V_PROFILE) { // a created skin: its item page (svelte-dmu4q2, deob-10.0.3.js:125918-125922)
+        v10_market_wallet_item((int) arg_num(args, argc, 1, -1));
+    } else if (!strcmp(op, "btip") && v && v->type == V_PROFILE) { // a badge's tooltip: its name and description (deob-10.0.3.js:125949-125975)
+        const BadgeDef *b = badge_get((int) arg_num(args, argc, 1, -1));
+        if (b && ev && ev->target) {
+            StrBuf tip = {0};
+            sb_append(&tip, "<div class='tooltipSub'><span style='color:#FBC02D'>");
+            sb_append_esc(&tip, b->name && b->name[0] ? b->name : "Unknown");
+            sb_append(&tip, "</span></div><div class='tooltipSub' style='font-style:italic;font-size:8px;max-width:300px;'>");
+            sb_append_esc(&tip, b->desc ? b->desc : "");
+            sb_append(&tip, "</div>");
+            char *html = sb_finish(&tip);
+            ui_tooltip_show(ev->target, html);
+            free(html);
+        }
+    } else if (!strcmp(op, "btipx")) {
+        ui_tooltip_cancel();
+    } else if (!strcmp(op, "twitch") && v && v->type == V_PROFILE && v->data) { // window.open("https://twitch.tv/" + name)
+        char enc[160], url[200];
+        backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_twitchname"));
+        snprintf(url, sizeof(url), "https://twitch.tv/%s", enc);
+        if (enc[0]) ui_open_external(url);
     } else if (!strcmp(op, "range") && v && v->type == V_PROFILE) {
         v->sales_range = (int) arg_num(args, argc, 1, 3);
         cJSON_Delete(v->sales);
@@ -3433,7 +3759,7 @@ void v10_social_tick(void) {
 // ------------------------------------------------------------------ --render-scenario: state.social
 
 // {tab, sub, feed:[posts], news:[html], friends:[...], selected, messages:[{text, sent, ts}], status,
-//  search:{q, results}, view:{type:"profile"|"clan"|"post"|"compose", data}}
+//  search:{q, results}, view:{type:"profile"|"clan"|"post"|"compose", data, tab, ctab (the Creations sub-tab)}}
 void v10_social_scenario(const cJSON *st) {
     if (!st) return;
     S.scenario = 1;
@@ -3480,6 +3806,7 @@ void v10_social_scenario(const cJSON *st) {
         View *v = view_push(!strcmp(type, "clan") ? V_CLAN : !strcmp(type, "post") ? V_POST : !strcmp(type, "compose") ? V_COMPOSE : V_PROFILE);
         v->data = cJSON_Duplicate(cJSON_GetObjectItem(view, "data"), 1);
         v->tab = (int) jnum(view, "tab");
+        v->ctab = (int) jnum(view, "ctab"); // the Creations sub-tab (0 Skins)
         if (v->type == V_PROFILE) v->feed = cJSON_CreateArray();
         render_views();
     }

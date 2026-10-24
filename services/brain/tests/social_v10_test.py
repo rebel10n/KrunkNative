@@ -10,7 +10,7 @@ presence:online / offline, msg:send -> msg:sent + msg:recv, EB_NOT_FRIEND / EB_T
 EB_TEXT_TOO_LONG, msg:history paging (oldest first, hasMore), msg:read + unread:summary on login, a switch
 on a signed-in socket (restore of another account, no logout) takes the account left offline for its friends.
 gapi tunnel ["gapi", rid, method, path, body]: /players/search, /players/<name> (follow_state,
-online), /players/<name>/follow, followers / following, /social/post (level gate, giveaway funds
+online, player_badge, player_titles, player_twitchname, ranked_rank), /players/<name>/follow, followers / following, /social/post (level gate, giveaway funds
 and fee, draw), /social/feed tabs, /social/post/<id> (+ comments), vote, comment, /social/news,
 /clans/by-name/<tag>, /clans/<id>/profile, /clans/<id>/apply; the mail of a giveaway win (kml rows as
 Inbox mail); reports by v10's reason index or name (rpt, grp, GET /players/<name>/reports, POST .../report).
@@ -171,6 +171,27 @@ async def scenario(names):
     st, r = await B.gapi("GET", "/players/%s" % an)
     check(st == 200 and r["data"]["player_name"] == an and r["data"]["follow_state"] == 0 and r["data"]["online"] == 1,
           "B opens A's profile: not followed, online")
+    # --- the profile's Badges / Titles tabs, Twitch button and rank chip (v10.0.3 getProfile fields)
+    d = r["data"] if st == 200 else {}
+    check(d.get("player_badge") == "" and d.get("player_titles") == "" and d.get("player_twitchname") is None
+          and d.get("ranked_rank") == 0 and "badges" not in d and "ranked" not in d,
+          "a new profile: player_badge / player_titles \"\", no Twitch name, ranked_rank 0")
+    for badge in (12, 3):
+        q("INSERT INTO player_badges (account_id, badge) VALUES (?, ?)", a_id, badge)
+    q("UPDATE players SET tw_twitchname = ? WHERE player_id = ?", "kn_tw_a", a_id)
+    # season 9 (brain.ranked.season): na placed (6 matches, 1000 + 100 * 3.5 = 1350 Gold 1), eu unplaced
+    # with a higher rating, season 8 higher still: the chip is the running season's placed profile
+    for season, region, cr, wins in ((9, "na", "3.5", 4), (9, "eu", "40", 3), (8, "na", "45", 6)):
+        q("INSERT INTO ranked_profiles (account_id, season, region, cr, wins, losses) VALUES (?, ?, ?, ?, ?, 2)",
+          a_id, season, region, cr, wins)
+    st, r = await B.gapi("GET", "/players/%s" % an)
+    d = r["data"] if st == 200 else {}
+    check(d.get("player_badge") == "3,12" and d.get("player_twitchname") == "kn_tw_a" and d.get("ranked_rank") == 7,
+          "A's profile: player_badge \"3,12\", player_twitchname, ranked_rank 7 (Gold 1) (got %r %r %r)"
+          % (d.get("player_badge"), d.get("player_twitchname"), d.get("ranked_rank")))
+    q("DELETE FROM ranked_profiles WHERE account_id = ? AND season = 9", a_id)
+    st, r = await B.gapi("GET", "/players/%s" % an)
+    check(st == 200 and r["data"]["ranked_rank"] == 0, "only an earlier season's profile: ranked_rank 0 (Unranked)")
     st, r = await B.gapi("POST", "/players/%s/follow" % an, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "B follows A back")
     check(await B.recv_until(lambda f: f[0] == "gmc" and f[1] >= 2, timeout=1.0) is None,
@@ -491,7 +512,8 @@ def main():
         dbcfg = dict(db, name=dbname, search_path=PG["schema"])
     with open(cfg, "w") as f:
         json.dump({"database": dict(dbcfg, migrations_dir=os.path.join(ROOT, "services", "db", "migrations")),
-                   "brain": {"host": "127.0.0.1", "port": PORT, "federation": False, "internal_secret": "sv10-%d" % os.getpid()},
+                   "brain": {"host": "127.0.0.1", "port": PORT, "federation": False, "internal_secret": "sv10-%d" % os.getpid(),
+                             "ranked": {"season": 9}},
                    "accounts": {"free_premium": False, "starting_kr": 0, "login_throttle_s": 0, "password_iterations": 1000,
                                 "news": ["<b>KN news</b>", ""], "giveaway_check_ms": 300,
                                 "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)

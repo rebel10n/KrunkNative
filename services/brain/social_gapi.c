@@ -37,6 +37,7 @@
 #include <string.h>
 
 #include "hot.h"
+#include "ranked.h" /* ranked_rank_of: the profile's ranked_rank */
 #include "strike_econ.h"
 #include "studios.h"
 #include "v10_api.h" /* v10_iso_ms */
@@ -594,9 +595,36 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_AddItemToObject(row, "maps", maps);
     cJSON_AddItemToObject(row, "mods", mods);
     cJSON_AddItemToObject(row, "assets", take(obj, "assets"));
-    cJSON_AddItemToObject(row, "raid_stats", cJSON_CreateArray());
+    cJSON_AddItemToObject(row, "raid_stats", cJSON_CreateArray()); /* Box Office records no raids */
     cJSON_AddItemToObject(row, "match_history", cJSON_CreateArray());
-    if (!cJSON_HasObjectItem(row, "ranked_rank")) cJSON_AddNumberToObject(row, "ranked_rank", 0);
+    /* player_badge: the earned badge indices (player_badges) as v10's "1,5,9" (deob-10.0.3.js:125762) */
+    cJSON *badges = cJSON_DetachItemFromObjectCaseSensitive(row, "badges"), *b;
+    char list[1024] = "";
+    size_t used = 0;
+    cJSON_ArrayForEach(b, badges) {
+        if (!cJSON_IsNumber(b) || used + 16 >= sizeof list) continue;
+        used += (size_t) snprintf(list + used, sizeof list - used, "%s%d", used ? "," : "", (int) b->valuedouble);
+    }
+    cJSON_Delete(badges);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "player_badge");
+    cJSON_AddStringToObject(row, "player_badge", list);
+    /* player_titles (deob-10.0.3.js:125763-125770): Box Office grants no titles yet (sh_titles' list is empty) */
+    if (!cJSON_HasObjectItem(row, "player_titles")) cJSON_AddStringToObject(row, "player_titles", "");
+    /* player_twitchname: the linked Twitch login (players.tw_twitchname), the profile's Twitch button */
+    const char *tw = kn_json_str(row, "tw_twitchname", "");
+    if (!cJSON_HasObjectItem(row, "player_twitchname")) {
+        if (tw[0]) cJSON_AddStringToObject(row, "player_twitchname", tw);
+        else cJSON_AddNullToObject(row, "player_twitchname");
+    }
+    /* ranked_rank (the rank chip, deob-10.0.3.js:126135): the rank of the running season's profile db_social.c
+     * picked (a placed one, the best rated), 0 Unranked when that row is of an earlier season or missing */
+    cJSON *ranked = cJSON_DetachItemFromObjectCaseSensitive(row, "ranked");
+    int rank = 0;
+    if (cJSON_IsObject(ranked) && kn_json_int(ranked, "season", -1) == ranked_season_now())
+        rank = ranked_rank_of(kn_json_num(ranked, "cr", 0), (int) kn_json_int(ranked, "matches", 0));
+    cJSON_Delete(ranked);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "ranked_rank");
+    cJSON_AddNumberToObject(row, "ranked_rank", rank);
     cJSON_Delete(obj);
     ProfileWait *w = calloc(1, sizeof *w);
     if (!w) {

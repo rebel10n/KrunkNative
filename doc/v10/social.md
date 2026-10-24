@@ -85,6 +85,37 @@ v10 fetches it:
   nothing and `v10_gapi` does not send them. The Turf Wars popup's reads stay kn_brain's.
 * tests: `server/tests/krunker_social_e2e.py`.
 
+## Player profile (v10.0.3)
+
+`sb_profile` is 10.0.3's profile popup (`svelte-1hghrmf`, deob-10.0.3.js:125594-126960):
+
+* header: the creator / premium / featured marks, the ranked chip when `ranked_rank` > 0 (the rank's
+  icon, name and colour from `ranked.h`, 126135-126147), the selected badge (`player_stats.bdg` when
+  `player_badge` holds it, 125736-125745), and the Twitch button under the follow counts
+  (`player_twitchname`, opens `https://twitch.tv/<name>`, 126203-126210).
+* Stats: the Raids summary sums `raid_stats` and lists a row per raid (Cleared, Best Time `M:SS` or
+  `--:--`, AI Kills, Boss Kills, Deaths; Tortuga / Laboratory / Soul Sanctum / Khepri / Bastion, else
+  `Raid <id>`, 125818-125839, 126487-126537).
+* Badges: the `player_badge` indices (`"1,5,9"`, parseInt per part) in badge-table order
+  (`shared/include/badges.h`), each icon with v10's tooltip (name in `#FBC02D`, italic description) on
+  hover (126663-126693); "No badges earned." without one.
+* Titles: the `GET /titles` rows (`assets/titles.json`, read by `v10_customize.c`) whose id is in
+  `player_titles`, in the table's order and tag style, with their description (126694-126721); "No
+  titles earned." without one.
+* Creations: Skins (n) / Games (n) / Mods (n) / Assets (n), opening on Skins (126722-126880). Skins are
+  the store skins whose `creators` list, or `creator` text split on `", "`, holds the lower-cased name
+  (125848-125858), bordered in their rarity colour; a click opens the skin's item page (the Catalog's
+  detail view, `v10_market_wallet_item`). Games / Mods / Assets are the reply's `maps` / `mods` /
+  `assets`; a featured mod has the gold star; "No skins created." / "No maps created." / "No mods
+  created." / "No assets uploaded.".
+
+The brain's `GET /players/<name>` (`social_gapi.c` over `db_social.c` `P_PROFILE`) carries what these
+read: `player_badge` (the `player_badges` rows), `player_titles` (`""`: Box Office grants no titles
+yet, as `sh_titles`), `player_twitchname` (`players.tw_twitchname`, null when unset), `ranked_rank`
+(`ranked_rank_of` over the account's newest `ranked_profiles` row, a placed one and the best rated
+first; 0 when that row is not of the running season) and `raid_stats` (`[]`: Box Office records no
+raids). A krunker.io account's profile reads krunker.io's own fields.
+
 ## Giveaways (0112_social_v10)
 
 `POST /social/post {type: 9, text, funds}`: level 20, at least 10 KR, the author pays funds +
@@ -97,9 +128,14 @@ back to the author. News: `accounts.news` (HTML strings).
 
 * No profile pictures, clan logos or emoji skins are hosted: avatars use v10's fallback picture,
   the clan view its shield placeholder, and the DM emoji panel never has candidates (`:` is inserted).
-* Profile: raid stats, match history, badges / titles tabs and ranked rank chip show v10's empty
-  states; the sales chart is a bar strip instead of v10's canvas line chart; listings show the skin
-  index instead of its name / thumbnail; Trade dispatches `openTrade` (the economy's flow).
+* Profile: match history shows v10's empty state, and so do raid stats and titles on Box Office
+  accounts (no raids recorded, no titles granted); the sales chart is a bar strip instead of v10's
+  canvas line chart; listings show the skin index instead of its name / thumbnail; Trade dispatches
+  `openTrade` (the economy's flow). The badge table is v7.1.4's 29 entries (`badges.h`): 10.0.3's 39
+  later badges (VIP .. Season 10 Contributor, deob-10.0.3.js:115767-116208) and their icons are not in
+  it, so a krunker.io profile's badges past index 28 are not shown. Game and mod cards do not open
+  v10's map / mod pages (`svelte-1kkpw01` / `svelte-1v2j2f2`, not ported). Box Office games and assets
+  show v10's fallback picture: their ids are not krunker.io user-asset ids.
 * Post types 5 (unboxed item) and 8 (match result) are rendered by the brain only if such posts exist
   (KrunkNative creates none yet).
 * Join in the conversation header calls `v10_party_join_game` (v10-party); without it, nothing.

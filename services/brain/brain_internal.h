@@ -112,6 +112,8 @@ void ranked_v10_profile(kn_http_req *req, const char *season, const char *region
 void ranked_v10_leaderboard(kn_http_req *req, const char *season, const char *region);
 void ranked_v10_history(kn_http_req *req, const char *season, const char *region);
 void ranked_v10_claim_milestone(kn_http_req *req, const char *region);
+/* the running ranked season (brain.ranked.season, else the calendar's): the profile's rank chip (social_gapi.c) */
+int ranked_season_now(void);
 
 /* ---- v10 lottery (lottery.c, 0348_lottery; db_lottery.c) */
 int lottery_init(Brain *b);

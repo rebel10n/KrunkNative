@@ -97,6 +97,11 @@ static void title_style(StrBuf *out, const cJSON *t) {
     if (outline) sb_append(out, "text-shadow:-1px -1px 0 #ffffff, 1px -1px 0 #ffffff, -1px 1px 0 #ffffff, 1px 1px 0 #ffffff;");
 }
 
+// the player profile's Titles tab (v10_social.c): the same table (the Map _34389, deob-10.0.3.js:116993)
+// and tag style (_34404, deob-10.0.3.js:116983)
+const cJSON *v10_customize_titles(void) { return titles(); }
+void v10_customize_title_style(StrBuf *out, const cJSON *t) { title_style(out, t); }
+
 // titleIndex (getSavedVal("titleIndex") || -1); only a title the player has is worn
 int v10_customize_title(void) {
     char buf[16];

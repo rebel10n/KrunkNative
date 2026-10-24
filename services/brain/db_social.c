@@ -7,6 +7,7 @@
  */
 #include "db_procs.h"
 #include "knsvc/json.h"
+#include "ranked.h" /* RANKED_PLACEMENT_MATCHES: the profile's ranked row */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -503,10 +504,18 @@ const kn_proc P_CHAT_THREAD = {
 
 /* ------------------------------------------------------------------ profile + creations */
 
+#define PROFILE_STR_(x) #x
+#define PROFILE_STR(x) PROFILE_STR_(x)
+
 #define PROFILE_SQL_PG \
     "SELECT jsonb_build_object(" \
     " 'row', to_jsonb(r) - 'clan_role' - 'player_2fa' || jsonb_build_object('player_follow', 0," \
-    "     'creator_badge', (SELECT p.creator_badge FROM players p WHERE p.player_id = r.player_id))," \
+    "     'creator_badge', (SELECT p.creator_badge FROM players p WHERE p.player_id = r.player_id)," \
+    "     'badges', coalesce((SELECT jsonb_agg(pb.badge ORDER BY pb.badge) FROM player_badges pb" \
+    "         WHERE pb.account_id = r.player_id), '[]'::jsonb)," \
+    "     'ranked', (SELECT jsonb_build_object('season', rp.season, 'cr', rp.cr, 'matches', rp.wins + rp.losses + rp.draws)" \
+    "         FROM ranked_profiles rp WHERE rp.account_id = r.player_id" \
+    "         ORDER BY rp.season DESC, (rp.wins + rp.losses + rp.draws >= " PROFILE_STR(RANKED_PLACEMENT_MATCHES) ") DESC, rp.cr DESC LIMIT 1))," \
     " 'games', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
     "     'map_id', m.map_id, 'map_name', kn_html(m.map_name), 'map_date', m.map_date, 'map_info', m.map_info::text," \
     "     'map_votes', m.map_votes, 'creatorname', r.player_name, 'map_image', m.map_image, 'map_player', m.map_plays)" \
@@ -547,6 +556,14 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
     cJSON_Delete(badge_rows);
     cJSON_DeleteItemFromObjectCaseSensitive(row, "badges");
     cJSON_AddItemToObject(row, "badges", badges);
+    /* the latest ranked season's profile, a placed one and the best rated first: social_gapi.c turns
+     * it into v10's ranked_rank (the profile's rank chip) */
+    cJSON *ranked = dbx_row(&x,
+        SQL(.any = "SELECT season AS season__i, cr AS cr__f, wins + losses + draws AS matches__i FROM ranked_profiles"
+                   " WHERE account_id = $1 ORDER BY season DESC, (wins + losses + draws >= " PROFILE_STR(RANKED_PLACEMENT_MATCHES) ") DESC,"
+                   " cr DESC LIMIT 1"),
+        KN_DB_ARGS(id));
+    if (ranked) cJSON_AddItemToObject(row, "ranked", ranked);
     cJSON *games = dbx_rows(&x,
         SQL(.any = "SELECT m.map_id, {html:m.map_name} AS map_name, m.map_date, m.map_info AS map_info__t, m.map_votes,"
                    " $2 AS creatorname, m.map_image, m.map_plays AS map_player FROM published_maps m"

@@ -377,11 +377,19 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     the usernames popup).
   - Social panel: opening it, or switching to a tab, starts that tab afresh as v10's components do
     (Social on Global, Friends with no chat open, no filter, empty draft); the Search tab's scroll is kept.
+  - Player profile popup (`openPlayerProfile`, `v10_social.c`): the Badges tab's grid of the player's
+    badges with their tooltips, the Titles tab's list, the Creations tab's Skins (n) / Games / Mods /
+    Assets sub-tabs (clickable, opening on Skins, a skin opening its item page, 10.0.3's empty texts),
+    the header's rank chip, selected badge and Twitch button, and the Stats tab's per-raid rows with
+    Cleared / Best Time (deob-10.0.3.js:125736-126880). The brain's profile reply gained
+    `player_badge`, `player_titles`, `player_twitchname` and `ranked_rank` (doc/v10/social.md, "Player
+    profile").
 - **Known gaps left** (larger ports, not done here): the store's bundle popup (`bundlePopup`, with
   conditional bundles), `showPremiumBenefits()`; the host form's
   Host Presets and Share on Hub row, the non-Custom host types' banners and map lists, the community-map
   Select block, `canRehost`; window 5's "Processing Deletion" / Cancel state (`requestDeletion(0)`,
   `acc.reqDel`: kn_brain has no deletion request route, and `requestDeletion` has no handler), Twitch
   linking and drop claims, and Account Security's Current Password field (10.0.3 sends `upp` with the
-  refresh token instead, deob-10.0.3.js:244645-244650; kn_brain's `upp` checks the old password); the market's Black Market title reward; the profile popup's Badges, Titles and Skins tabs; the menu items play
+  refresh token instead, deob-10.0.3.js:244645-244650; kn_brain's `upp` checks the old password); the market's Black Market title reward; the profile popup's game and mod cards (v10 opens its map /
+  mod pages, not ported) and 10.0.3's 39 later badges (the badge table is v7.1.4's 29); the menu items play
   `playSelect(0.1)` where v10 plays `playSelect()`.

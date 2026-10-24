@@ -88,6 +88,8 @@ static int current_season(void) {
     return R.season_override >= 0 ? R.season_override : ranked_season_at(kn_wall_ms() / 1000);
 }
 
+int ranked_season_now(void) { return R.b ? current_season() : ranked_season_at(kn_wall_ms() / 1000); } /* before ranked_init: the calendar */
+
 static void log_err(const char *what, kn_db_result *res) { KN_WARN(MOD, "%s failed: %s", what, kn_db_error(res)); }
 
 static void on_ignore(kn_db_result *res, void *ud) {
