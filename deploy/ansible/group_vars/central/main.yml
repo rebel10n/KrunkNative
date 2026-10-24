@@ -16,7 +16,7 @@ kn_release_migrations: true
 kn_brain_current_season: 10
 
 # Staff accounts: highest privilege (developer, which also sets moderator).
-kn_brain_developers: [ading2210, ASA_z3db0y, Joelmatic, butterfly, Krunker, synaptic, "123", jewraper425, rogo]
+kn_brain_developers: [ading2210, ASA_z3db0y, Joelmatic, butterfly, Krunker, synaptic, "123", jewraper425, rogo, iamhim]
 
 # fail2ban (contract vars: group_vars/all.yml): kru's base is ours. Off until the user
 # approves it: Deploy kru runs central.yml on every push, so true applies it there.
