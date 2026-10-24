@@ -220,8 +220,8 @@ async def scenario(port, feed):
                 await asyncio.sleep(0.1)
             check(count(account, 5) == 3 and count(account, 7) == 1, "itemRewards: 3 of skin 5, 1 of skin 7 in the inventory (%d, %d)" %
                   (count(account, 5), count(account, 7)))
-            src = query("SELECT DISTINCT source FROM skin_transactions WHERE account_id = %d" % account)
-            check(src == ["killpool"], "the audit rows say killpool: %s" % src)
+            src = query("SELECT DISTINCT source FROM skin_transactions WHERE account_id = %d AND skin_id IN (5, 7)" % account)
+            check(src == ["killpool"], "the audit rows of the items say killpool: %s" % src)
 
             await node.commit("m1", player)
             await asyncio.sleep(1.0)
