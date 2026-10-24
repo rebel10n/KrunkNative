@@ -3,6 +3,7 @@
 // -> Krunker frames out (decoded again and checked field by field, ahNum trailers included).
 //   cmake-build-debug/krunker_link_test
 #include <krunker_link.h>
+#include <krunker_altcha.h> // krunker_altcha_digest_hex: a SHA-512 challenge
 #include <ai_parts.h>
 #include <krunker_build_live.h>
 #include <krunker_maps.h>
@@ -3325,11 +3326,78 @@ int main(void) {
         CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1 && g_events[KRUNKER_LINK_EV_ERROR] == 1,
               "cpt above the maxnumber cap refused: CAPTCHA FAILED");
         clear();
+        // SHA-512 (the widget's G = SHA-256 / SHA-384 / SHA-512): solved too
+        char hex512[129];
+        krunker_altcha_digest_hex("SHA-512", pre, strlen(pre), hex512);
+        const KrunkerValue chal512[] = {KRUNKER_V_STR("algorithm"), KRUNKER_V_STR("SHA-512"), KRUNKER_V_STR("challenge"), KRUNKER_V_STR(hex512),
+                                        KRUNKER_V_STR("maxnumber"), KRUNKER_V_NUM(5000), KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt),
+                                        KRUNKER_V_STR("signature"), KRUNKER_V_STR("abcdef")};
+        feed(&link, "cpt", (KrunkerValue[]) {KRUNKER_V_MAP(chal512, 5)}, 1);
+        char json512[512] = "";
+        if (g_out_count == 1) b64_decode(krunker_str(krunker_frame_arg(&g_out[0], 0)), json512, sizeof(json512));
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "cptR") && strstr(json512, "\"algorithm\":\"SHA-512\"") &&
+              strstr(json512, "\"number\":1234,") && g_events[KRUNKER_LINK_EV_ERROR] == 0, "a SHA-512 cpt is solved (%s)", json512);
+        clear();
         const KrunkerValue sha1[] = {KRUNKER_V_STR("algorithm"), KRUNKER_V_STR("SHA-1"), KRUNKER_V_STR("challenge"), KRUNKER_V_STR(hex),
                                      KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt)};
         feed(&link, "cpt", (KrunkerValue[]) {KRUNKER_V_MAP(sha1, 3)}, 1);
         CHECK(g_out_count == 0 && g_events[KRUNKER_LINK_EV_CAPTCHA] == 1 && g_events[KRUNKER_LINK_EV_ERROR] == 1,
               "cpt with another algorithm refused: CAPTCHA FAILED");
+        clear();
+
+        // hosting a custom game (createPrivateRoom, deob-10.0.3.js:229989-229998): an account sends "custom" at once; a
+        // guest asks rpc("bCpt", "hosting") (:133912-133919), solves its answer's ALTCHA and sends the answer with "custom"
+        // on a link of its own: its frames do not move the main link's ahNum the later checks follow
+        KrunkerLink hl;
+        krunker_link_init(&hl, &link.io, KRUNKER_AHKEY);
+        const KrunkerValue cfg_kv[] = {KRUNKER_V_STR("maxPlayers"), KRUNKER_V_NUM(8)};
+        const KrunkerValue cfg = KRUNKER_V_MAP(cfg_kv, 1);
+        CHECK(krunker_link_host_custom(&hl, &cfg, 0, 0) == 1 && g_out_count == 1 && !strcmp(g_out[0].name, "custom") &&
+              g_out[0].argc == 3 && krunker_is(krunker_frame_arg(&g_out[0], 1), KRUNKER_NIL) && !hl.host.config,
+              "host (an account): custom [config, nil, false] at once");
+        clear();
+        const unsigned rpc0 = hl.rpc_counter;
+        CHECK(krunker_link_host_custom(&hl, &cfg, 1, 1) == 1 && g_out_count == 1 && !strcmp(g_out[0].name, "_0") &&
+              g_out[0].argc == 3 && krunker_frame_arg(&g_out[0], 0)->u.num == rpc0 &&
+              !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 1)), "bCpt") && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 2)), "hosting"),
+              "host (a guest): rpc [rpcCounter, bCpt, hosting] first");
+        CHECK(krunker_link_host_custom(&hl, &cfg, 0, 1) == 0 && hl.rpc_counter == rpc0 + 1, "a second request while one waits is refused");
+        clear();
+        feed(&hl, "_0", (KrunkerValue[]) {KRUNKER_V_NUM(rpc0 + 9), KRUNKER_V_MAP(chal, 5)}, 2);
+        CHECK(g_out_count == 0 && hl.host.config, "another rpc's answer is not the host's");
+        const unsigned solved = hl.captchas_solved;
+        feed(&hl, "_0", (KrunkerValue[]) {KRUNKER_V_NUM(rpc0), KRUNKER_V_MAP(chal, 5)}, 2);
+        char hjson[512] = "";
+        const KrunkerValue *ans = g_out_count == 1 ? krunker_frame_arg(&g_out[0], 1) : NULL;
+        if (ans && krunker_str(ans)) b64_decode(krunker_str(ans), hjson, sizeof(hjson));
+        const KrunkerValue *hcfg = g_out_count == 1 ? krunker_frame_arg(&g_out[0], 0) : NULL;
+        const KrunkerValue *rehost = g_out_count == 1 ? krunker_frame_arg(&g_out[0], 2) : NULL;
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "custom") && hcfg && krunker_is(hcfg, KRUNKER_MAP) &&
+              krunker_get(hcfg, "maxPlayers") && krunker_get(hcfg, "maxPlayers")->u.num == 8 && strstr(hjson, "\"number\":1234,") && rehost &&
+              krunker_is(rehost, KRUNKER_BOOL) && rehost->u.boolean && hl.captchas_solved == solved + 1 && !hl.host.config,
+              "bCpt answered: custom [config, the solved ALTCHA, rehost] (%s)", hjson);
+        clear();
+        // refused: the rpc's RPC_ERROR, or a challenge this client cannot solve -> no "custom", EV_HOST_FAILED
+        CHECK(krunker_link_host_custom(&hl, &cfg, 0, 1) == 1, "host (a guest) again");
+        feed(&hl, "_1", (KrunkerValue[]) {KRUNKER_V_NUM(rpc0 + 1), KRUNKER_V_STR("nope")}, 2);
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "_0") && g_events[KRUNKER_LINK_EV_HOST_FAILED] == 1 && !hl.host.config,
+              "bCpt refused (_1): no custom, the host's failure (custom.tryagain)");
+        clear();
+        CHECK(krunker_link_host_custom(&hl, &cfg, 0, 1) == 1, "host (a guest) once more");
+        feed(&hl, "_0", (KrunkerValue[]) {KRUNKER_V_NUM(rpc0 + 2), KRUNKER_V_MAP(bad, 4)}, 2);
+        CHECK(g_out_count == 1 && g_events[KRUNKER_LINK_EV_HOST_FAILED] == 1 && !hl.host.config, "an unsolvable bCpt challenge: no custom");
+        clear();
+        // cancelled (the transport's timeout): the late answer sends nothing
+        CHECK(krunker_link_host_custom(&hl, &cfg, 0, 1) == 1, "host (a guest) to cancel");
+        krunker_link_host_cancel(&hl);
+        feed(&hl, "_0", (KrunkerValue[]) {KRUNKER_V_NUM(rpc0 + 3), KRUNKER_V_MAP(chal, 5)}, 2);
+        CHECK(g_out_count == 1 && hl.rpc_counter == rpc0 + 4, "cancelled: the late answer sends no custom; rpc ids count up");
+        clear();
+        // krunker_link_rpc's own shape: ["_0", id, name, args...]
+        const KrunkerValue rargs[] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(2)};
+        CHECK(krunker_link_rpc(&hl, "dsl", rargs, 2) == (int) rpc0 + 4 && g_out_count == 1 && g_out[0].argc == 4 &&
+              !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 1)), "dsl") && krunker_frame_arg(&g_out[0], 3)->u.num == 2,
+              "rpc [id, name, args...]");
         clear();
     }
 

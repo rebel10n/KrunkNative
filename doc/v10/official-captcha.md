@@ -158,8 +158,8 @@ is needed: Turnstile's `before-interactive-callback`, no token within 20 s (`KN_
   each token; the stub page never sees a token; nothing of the run (WebKit's processes, Xvfb) is left;
 - native `native-webview-interactive`: the stub widget calls `before-interactive-callback` first: only then is the
   widget shown, in the game (no OS window is mapped), the spinner is hidden while the widget is drawn, the token
-  joins; the stub's game server then sends a `cpt` this client cannot answer (SHA-512): it is said in the log,
-  nothing is drawn, and the session ends with "CAPTCHA FAILED";
+  joins; the stub's game server then sends a SHA-512 `cpt` (one of the ALTCHA widget's three algorithms): it is solved, its
+  `cptR` is the SHA-512 solution and nothing is drawn;
 - web `web`: the page's request for `api.js` is answered over the DevTools protocol (in the test's own browser
   only) by a stub widget that calls back with a fake token; the widget is drawn in the game, the game runs as
   before, and the `cpt` is answered with nothing shown;

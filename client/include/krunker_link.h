@@ -40,6 +40,8 @@
 //                                            (no ahNum step); unsolvable: KRUNKER_LINK_EV_CAPTCHA, then v10.0.3's
 //                                            "CAPTCHA FAILED" error and close (krunker_link_captcha_failed,
 //                                            deob-10.0.3.js:111424-111437)
+//   _0 / _1 [rpcId, results...]            an rpc's answer (RPC_SUCCESS / RPC_ERROR, :111438-111452): the guest
+//                                            host's bCpt challenge (krunker_link_host_custom), else io.account_frame
 //   error   [message, code]                  NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR
 //   cust    [message, gameId, teams]         the answer to our CUSTOM_SERVER (a hosted custom game): io.custom
 // Movement locks and modifiers of our own player (cluster A of the packet audit):
@@ -158,6 +160,8 @@ typedef enum {
     KRUNKER_LINK_EV_ACCOUNT,    // "a" ACCOUNT_RESPONSE: the game server signed our krunker.io account in
                                 // (text: its name; account_name / account_level of the link)
     KRUNKER_LINK_EV_ACCOUNT_POINTS, // "ua" UPDATE_ACCOUNT: the account row's rankedPoints (account_ranked_points)
+    KRUNKER_LINK_EV_HOST_FAILED,    // krunker_link_host_custom's guest challenge was refused or not solved: no "custom"
+                                    // went (v10.0.3 shows custom.tryagain, deob-10.0.3.js:229994)
 } KrunkerLinkEvent;
 
 // init [mapIndex, modeIndex, eventIndex, ..., customsData] (INIT_GAME, game.deob.js:219289): what the
@@ -185,7 +189,9 @@ typedef struct {
     int (*cheat)(void *user, const char *nonce, const char *ciphertext_b64, KrunkerCcr *out);
     // optional: takes a "cpt" ALTCHA proof of work instead of krunker_altcha_solve: 0 = solved now
     // (*payload_b64 malloc'd, the link sends "cptR"), 1 = the transport answers later itself
-    // (krunker_link_send "cptR"), -1 = refused / unsolvable (KRUNKER_LINK_EV_CAPTCHA)
+    // (krunker_link_send "cptR"), -1 = refused / unsolvable (KRUNKER_LINK_EV_CAPTCHA). The guest host's bCpt
+    // challenge comes through it too, with krunker_link_host_solving() 1: answered later, the transport calls
+    // krunker_link_host_answer instead of sending "cptR"
     int (*altcha)(void *user, const char *algorithm, const char *challenge, const char *salt, const char *signature, long max_number,
                   char **payload_b64);
     // optional: an init's map. Called instead of emitting NET_PACKET_INIT: the transport resolves the map
@@ -319,6 +325,14 @@ typedef struct {
     SocialAssembly voice_out;
     unsigned voice_in, voice_sent; // "vc" clips received / sent
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
+    // socket.rpc's rpcCounter (deob-10.0.3.js:111527): the ids of krunker_link_rpc, every rpc of this socket
+    unsigned rpc_counter;
+    // krunker_link_host_custom's request: its config (the caller's, alive until the request ends), the bCpt rpc id
+    // waiting for its challenge (-1 none), the challenge being solved by the transport
+    struct {
+        const KrunkerValue *config;
+        int rpc_id, rehost, solving;
+    } host;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received
     // the "q" syncTimes (v7.1.4 index.js io_updatePlayers / queueInputFrame, v10.js:221512-221521):
     // the last "k"'s servTim (its arg 2, ms since the round started on the server) and the local clock
@@ -422,6 +436,20 @@ void krunker_link_mark_sync(KrunkerLink *link, int index);
 void krunker_link_input_fields(const NetInputPacket *in, double v[15]);
 // Encode and send one Krunker packet (wire name + args). 1 = sent.
 int krunker_link_send(KrunkerLink *link, const char *wire, const KrunkerValue *args, size_t argc);
+// socket.rpc(name, ...args) (deob-10.0.3.js:111529-111541): ["_0", rpcCounter++, name, args...] (at most 6 args).
+// The rpc id, -1 when not sent. Its answer ["_0" | "_1", rpcId, results...] (:111438-111452) reaches io.account_frame
+// (the transport matches the id), except the guest host's bCpt, which the link takes itself.
+int krunker_link_rpc(KrunkerLink *link, const char *name, const KrunkerValue *args, size_t argc);
+// createPrivateRoom / autoHostMap's request (deob-10.0.3.js:229989-229998, 255893-255897): signed in (guest 0),
+// ["custom", config, nil, rehost] at once; a guest, requestCaptcha("hosting") first (:133912-133919): rpc("bCpt",
+// "hosting"), its answer's ALTCHA solved (io.altcha / krunker_altcha_solve), then ["custom", config, answer, rehost].
+// A refused rpc or an unsolvable challenge: KRUNKER_LINK_EV_HOST_FAILED and no "custom". config is the caller's and
+// must stay valid until the "custom" is sent, the request failed, or krunker_link_host_cancel. 1 = sent (the custom,
+// or the rpc), 0 = not (a request is already waiting, or the send failed).
+int krunker_link_host_custom(KrunkerLink *link, const KrunkerValue *config, int rehost, int guest);
+int krunker_link_host_solving(const KrunkerLink *link);            // the transport is solving the host's challenge
+void krunker_link_host_answer(KrunkerLink *link, const char *payload); // its result (NULL: failed): the "custom" goes
+void krunker_link_host_cancel(KrunkerLink *link);                  // the request ended (its timeout): forget its config
 // A "cpt" this client could not solve (the web's slices, krunker_net.c): v10.0.3's failure branch, the error
 // "CAPTCHA FAILED" (NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR), after which the transport closes the socket.
 #define KRUNKER_CAPTCHA_FAILED "CAPTCHA FAILED" // deob-10.0.3.js:111430

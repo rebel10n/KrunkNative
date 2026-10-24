@@ -195,6 +195,7 @@ void krunker_link_reset(KrunkerLink *l) {
     l->io = io;
     krunker_session_init(&l->codec, ahkey);
     l->my_sid = -1;
+    l->host.rpc_id = -1;
     l->unsupported_map = -1;
     l->game_state = -1;
     l->send_hz = 10; // applyNetworking() defaults until init's networking
@@ -1785,45 +1786,157 @@ void krunker_link_captcha_failed(KrunkerLink *l) {
 // [payload] (krunker_altcha.c). The challenge is an object ({algorithm, challenge, salt, signature,
 // maxnumber}); a JSON string of it is taken too. One this client cannot solve ends the session the way v10.0.3's
 // failure branch does (krunker_link_captcha_failed).
-static void on_captcha(KrunkerLink *l, const KrunkerFrame *f) {
-    const KrunkerValue *c = arg(f, 0);
-    char alg[32] = "", chal[80] = "", salt[512] = "", sig[512] = "";
-    long max = 0;
+// The ALTCHA challenge of a "cpt" or of a bCpt rpc's answer: an object ({algorithm, challenge, salt, signature,
+// maxnumber}), or a JSON string of one
+typedef struct {
+    char alg[32], chal[160], salt[512], sig[512]; // chal: up to SHA-512's 128 hex digits
+    long max;
+} AltchaChallenge;
+
+static void altcha_challenge(const KrunkerValue *c, AltchaChallenge *a) {
+    memset(a, 0, sizeof(*a));
     if (krunker_is(c, KRUNKER_MAP)) {
         const char *v;
-        if ((v = krunker_str(krunker_get(c, "algorithm")))) snprintf(alg, sizeof(alg), "%s", v);
-        if ((v = krunker_str(krunker_get(c, "challenge")))) snprintf(chal, sizeof(chal), "%s", v);
-        if ((v = krunker_str(krunker_get(c, "salt")))) snprintf(salt, sizeof(salt), "%s", v);
-        if ((v = krunker_str(krunker_get(c, "signature")))) snprintf(sig, sizeof(sig), "%s", v);
-        max = (long) num(krunker_get(c, "maxnumber"), num(krunker_get(c, "maxNumber"), 0));
+        if ((v = krunker_str(krunker_get(c, "algorithm")))) snprintf(a->alg, sizeof(a->alg), "%s", v);
+        if ((v = krunker_str(krunker_get(c, "challenge")))) snprintf(a->chal, sizeof(a->chal), "%s", v);
+        if ((v = krunker_str(krunker_get(c, "salt")))) snprintf(a->salt, sizeof(a->salt), "%s", v);
+        if ((v = krunker_str(krunker_get(c, "signature")))) snprintf(a->sig, sizeof(a->sig), "%s", v);
+        a->max = (long) num(krunker_get(c, "maxnumber"), num(krunker_get(c, "maxNumber"), 0));
     } else if (krunker_is(c, KRUNKER_STR)) {
         cJSON *j = cJSON_Parse(krunker_str(c));
         const char *v;
-        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "algorithm")))) snprintf(alg, sizeof(alg), "%s", v);
-        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "challenge")))) snprintf(chal, sizeof(chal), "%s", v);
-        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "salt")))) snprintf(salt, sizeof(salt), "%s", v);
-        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "signature")))) snprintf(sig, sizeof(sig), "%s", v);
+        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "algorithm")))) snprintf(a->alg, sizeof(a->alg), "%s", v);
+        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "challenge")))) snprintf(a->chal, sizeof(a->chal), "%s", v);
+        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "salt")))) snprintf(a->salt, sizeof(a->salt), "%s", v);
+        if ((v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "signature")))) snprintf(a->sig, sizeof(a->sig), "%s", v);
         const cJSON *m = cJSON_GetObjectItemCaseSensitive(j, "maxnumber");
-        if (cJSON_IsNumber(m)) max = (long) m->valuedouble;
+        if (cJSON_IsNumber(m)) a->max = (long) m->valuedouble;
         cJSON_Delete(j);
     }
+}
+
+// the solve: io.altcha (0 now, 1 the transport later, -1 refused) or krunker_altcha_solve (0 / -1)
+static int altcha_solve(KrunkerLink *l, const AltchaChallenge *a, char **payload) {
+    *payload = NULL;
+    return l->io.altcha ? l->io.altcha(l->io.user, a->alg, a->chal, a->salt, a->sig, a->max, payload)
+                        : krunker_altcha_solve(a->alg, a->chal, a->salt, a->sig, a->max, payload);
+}
+
+static void on_captcha(KrunkerLink *l, const KrunkerFrame *f) {
+    AltchaChallenge a;
+    altcha_challenge(arg(f, 0), &a);
     char *payload = NULL;
-    const int rc = l->io.altcha ? l->io.altcha(l->io.user, alg, chal, salt, sig, max, &payload)
-                                : krunker_altcha_solve(alg, chal, salt, sig, max, &payload);
+    const int rc = altcha_solve(l, &a, &payload);
     if (rc == 1) { // the transport solves it in slices and sends "cptR" itself
-        note(l, KRUNKER_LINK_EV_NOTE, "security challenge (%s proof of work, up to %ld): solving", alg, max);
+        note(l, KRUNKER_LINK_EV_NOTE, "security challenge (%s proof of work, up to %ld): solving", a.alg, a.max);
         return;
     }
     if (rc != 0 || !payload) {
         free(payload);
-        note(l, KRUNKER_LINK_EV_CAPTCHA, "a security challenge (%s) this client cannot answer", alg[0] ? alg : "unknown");
+        note(l, KRUNKER_LINK_EV_CAPTCHA, "a security challenge (%s) this client cannot answer", a.alg[0] ? a.alg : "unknown");
         krunker_link_captcha_failed(l);
         return;
     }
     const KrunkerValue args[] = {KRUNKER_V_STR(payload)};
     if (send_c2s(l, KRUNKER_C2S_cptR, args, 1)) l->captchas_solved++;
-    note(l, KRUNKER_LINK_EV_NOTE, "security challenge answered (%s proof of work)", alg);
+    note(l, KRUNKER_LINK_EV_NOTE, "security challenge answered (%s proof of work)", a.alg);
     free(payload);
+}
+
+// ---------------------------------------------------------------- rpc and the guest host's security challenge
+
+// socket.rpc(name, ...args) (deob-10.0.3.js:111529-111541): send(RPC "_0", rpcCounter++, name, ...args); the
+// answer ["_0" | "_1", rpcId, results...] (RPC_SUCCESS / RPC_ERROR, :111438-111452) resolves / rejects the
+// rpc of that id
+int krunker_link_rpc(KrunkerLink *l, const char *name, const KrunkerValue *args, const size_t argc) {
+    if (!name || argc > 6) return -1;
+    KrunkerValue all[8];
+    const int id = (int) l->rpc_counter;
+    all[0] = KRUNKER_V_NUM(id);
+    all[1] = KRUNKER_V_STR(name);
+    for (size_t i = 0; i < argc; i++) all[2 + i] = args[i];
+    if (!send_c2s(l, KRUNKER_C2S_RPC, all, argc + 2)) return -1;
+    l->rpc_counter++;
+    return id;
+}
+
+// the host request ends: its "custom" sent (the answer NULL: an account's, rid nil) or its challenge failed
+static void host_end(KrunkerLink *l) {
+    l->host.rpc_id = -1;
+    l->host.config = NULL;
+    l->host.solving = 0;
+}
+
+static void host_send(KrunkerLink *l, const char *answer) {
+    // send(CUSTOM_SERVER, config, rid, !!rehost) (deob-10.0.3.js:229989-229998): rid the solved ALTCHA, or undefined
+    const KrunkerValue args[3] = {*l->host.config, answer ? KRUNKER_V_STR(answer) : KRUNKER_V_NIL, KRUNKER_V_BOOL(l->host.rehost)};
+    const int sent = send_c2s(l, KRUNKER_C2S_CUSTOM_SERVER, args, 3);
+    host_end(l);
+    if (!sent) note(l, KRUNKER_LINK_EV_HOST_FAILED, "the custom request was not sent");
+}
+
+int krunker_link_host_custom(KrunkerLink *l, const KrunkerValue *config, const int rehost, const int guest) {
+    if (!config || l->host.config) return 0;
+    l->host.config = config;
+    l->host.rehost = rehost != 0;
+    if (!guest) { // signed in: no security challenge (createPrivateRoom's `if (account)`, :229989)
+        const KrunkerValue args[3] = {*config, KRUNKER_V_NIL, KRUNKER_V_BOOL(l->host.rehost)};
+        const int sent = send_c2s(l, KRUNKER_C2S_CUSTOM_SERVER, args, 3);
+        host_end(l);
+        return sent;
+    }
+    // a guest: requestCaptcha("hosting") = rpc("bCpt", "hosting") (:133912-133919, :229992)
+    const KrunkerValue kind[] = {KRUNKER_V_STR("hosting")};
+    l->host.rpc_id = krunker_link_rpc(l, "bCpt", kind, 1);
+    if (l->host.rpc_id < 0) {
+        host_end(l);
+        return 0;
+    }
+    note(l, KRUNKER_LINK_EV_NOTE, "custom game: the guest host's security challenge asked (rpc %d bCpt)", l->host.rpc_id);
+    return 1;
+}
+
+int krunker_link_host_solving(const KrunkerLink *l) { return l->host.config && l->host.solving; }
+
+void krunker_link_host_answer(KrunkerLink *l, const char *payload) {
+    if (!l->host.config || !l->host.solving) return;
+    if (!payload) {
+        host_end(l);
+        note(l, KRUNKER_LINK_EV_HOST_FAILED, "the guest host's security challenge could not be solved");
+        return;
+    }
+    l->captchas_solved++;
+    host_send(l, payload);
+    note(l, KRUNKER_LINK_EV_NOTE, "custom game: the security challenge answered, the request sent");
+}
+
+void krunker_link_host_cancel(KrunkerLink *l) { host_end(l); }
+
+// The bCpt rpc's answer (the RPC_SUCCESS / RPC_ERROR of its id, :111438-111452): resolved with the challenge,
+// showCaptcha solves it and the callback sends "custom" with the answer (:133914-133915, :229993-229996); rejected
+// (or not solvable), the callback's error: custom.tryagain (:229994). 1 = the frame was this rpc's.
+static int host_rpc_answer(KrunkerLink *l, const KrunkerFrame *f, const int ok) {
+    if (!l->host.config || l->host.rpc_id < 0 || l->host.solving || !krunker_is(arg(f, 0), KRUNKER_NUM) ||
+        (int) arg(f, 0)->u.num != l->host.rpc_id)
+        return 0;
+    l->host.rpc_id = -1;
+    if (!ok) {
+        host_end(l);
+        note(l, KRUNKER_LINK_EV_HOST_FAILED, "the server refused the guest host's security challenge (rpc error)");
+        return 1;
+    }
+    AltchaChallenge a;
+    altcha_challenge(arg(f, 1), &a);
+    l->host.solving = 1; // io.altcha may solve it later (krunker_link_host_solving / _answer)
+    char *payload = NULL;
+    const int rc = altcha_solve(l, &a, &payload);
+    if (rc == 1) {
+        note(l, KRUNKER_LINK_EV_NOTE, "custom game: the security challenge (%s, up to %ld): solving", a.alg, a.max);
+        return 1;
+    }
+    krunker_link_host_answer(l, rc == 0 ? payload : NULL);
+    free(payload);
+    return 1;
 }
 
 // "t" UPDATE_TIMER [formatted, state, rawMs] (handler iìíîiïì game.deob.js:220234, server broadcast
@@ -2801,6 +2914,12 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
     l->frames_in++;
     krunker_link_log_text(l->last_recv, sizeof(l->last_recv), f.name, f.name_len);
     record_frame(l, 'R', f.name, f.name_len, f.args, f.argc);
+    const KrunkerS2C rpc_kind = krunker_s2c_lookup(f.name, f.name_len);
+    if ((rpc_kind == KRUNKER_S2C_RPC_SUCCESS || rpc_kind == KRUNKER_S2C_RPC_ERROR) &&
+        host_rpc_answer(l, &f, rpc_kind == KRUNKER_S2C_RPC_SUCCESS)) {
+        krunker_frame_free(&f); // the guest host's bCpt: not an account window's rpc
+        return 1;
+    }
     account_frame(l, &f);
     switch (krunker_s2c_lookup(f.name, f.name_len)) {
         case KRUNKER_S2C_IO_INIT:
@@ -3504,12 +3623,13 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
                 return send_c2s(l, KRUNKER_C2S_RATE_KPD, args, 1);
             }
             if (subtype == NET_EXT_ADMIN_ACTION && body_length >= sizeof(NetAdminActionPacket)) {
-                // the player list's Kick (0) / Ban (1) on an official game: punishPlayer(id, action) sends
-                // ADMIN_ACTIONS [action, id, extraBan] with the target's Game.players id; extraBan is the
-                // developer-only switch (off for everyone else). The server checks the sender's right.
+                // the player list's Kick (0) / Ban (1) / Transfer Host (8) on an official game: punishPlayer(id,
+                // action) sends ADMIN_ACTIONS [action, id, extraBan] with the target's Game.players id
+                // (deob-10.0.3.js:254059-254071); extraBan is the developer-only switch (off for everyone else).
+                // The server checks the sender's right.
                 NetAdminActionPacket a;
                 memcpy(&a, body, sizeof(a));
-                const KrunkerLinkPlayer *p = a.action <= 1 ? player(l, a.uid, 0) : NULL;
+                const KrunkerLinkPlayer *p = a.action <= 1 || a.action == 8 ? player(l, a.uid, 0) : NULL;
                 if (!p || !p->id[0]) return 0;
                 const KrunkerValue args[] = {KRUNKER_V_NUM(a.action), KRUNKER_V_STR(p->id), KRUNKER_V_BOOL(0)};
                 return send_c2s(l, KRUNKER_C2S_ADMIN_ACTIONS, args, 3);

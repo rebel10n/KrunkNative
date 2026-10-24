@@ -338,8 +338,9 @@ CC_CASES = [  # nonce, ciphertext, expected (payload, hash) or None = no ccr
 ALTCHA_SALT, ALTCHA_NUMBER = "e2e-salt?expires=1999999999", 4321
 ALTCHA = {"algorithm": "SHA-256", "challenge": hashlib.sha256((ALTCHA_SALT + str(ALTCHA_NUMBER)).encode()).hexdigest(),
           "maxnumber": 20000, "salt": ALTCHA_SALT, "signature": "e2esig"}
-# a "cpt" in a form krunker_altcha.c does not compute (not SHA-256): the client says it failed
-ALTCHA_UNSOLVABLE = dict(ALTCHA, algorithm="SHA-512", challenge=hashlib.sha512((ALTCHA_SALT + str(ALTCHA_NUMBER)).encode()).hexdigest())
+# a SHA-512 "cpt": one of the ALTCHA 1.0.6 widget's three algorithms (libs/altcha.1.0.6.min.js G = SHA-256 / SHA-384 /
+# SHA-512), so the client solves it as v10.0.3 does (krunker_altcha.c); what it cannot solve is krunker_link_test's
+ALTCHA_SHA512 = dict(ALTCHA, algorithm="SHA-512", challenge=hashlib.sha512((ALTCHA_SALT + str(ALTCHA_NUMBER)).encode()).hexdigest())
 
 
 # ---------------------------------------------------------------- a live Krunker build (krunker_build_fetch.h)
@@ -485,7 +486,7 @@ class Stub:
         self.used_captchas = set()
         self.bad_version_seeks = []  # dataQuery.v values refused as InvalidVersion
         self.captcha_ok = threading.Event()
-        self.cpt = ALTCHA         # the game socket's "cpt" (ALTCHA_UNSOLVABLE: one this client cannot answer)
+        self.cpt = ALTCHA         # the game socket's "cpt" (ALTCHA_SHA512: the widget's SHA-512)
         self.loop = None
         self.httpd = None
         # the Find New Game runs (exclude): several lobbies, seeks without a captcha; seek-game answers
@@ -4723,14 +4724,13 @@ def run_native_webview_interactive():
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port, interactive=True)
     page.start()
-    # the stub's game server sends a "cpt" this client cannot answer: that failure is said in the log, shows no card, and
-    # ends the session with v10.0.3's "CAPTCHA FAILED" error (its failure branch, deob-10.0.3.js:111428-111431)
+    # the stub's game server sends a SHA-512 "cpt" (the widget's G = SHA-256 / SHA-384 / SHA-512): solved, nothing shown
     probes = "".join("%d vis @pow knCaptchaHolder knCaptchaWebview instructions\n" % t for t in range(1000, 9801, 400))
     script = "0 boot\n" + probes + "10000 play\n15000 players\n15200 quit\n"
 
-    def unsolvable(stub):
-        stub.cpt = ALTCHA_UNSOLVABLE
-    stub, lines, log, left, maps, moves = webview_session(label, script, page, False, stub_setup=unsolvable)
+    def sha512(stub):
+        stub.cpt = ALTCHA_SHA512
+    stub, lines, log, left, maps, moves = webview_session(label, script, page, False, stub_setup=sha512)
     text = "\n".join(lines)
     check(f"{label}: no OS window was mapped (the challenge is the widget in the game)", not maps,
           [(m["name"], m["x"], m["y"], m["w"], m["h"]) for m in maps])
@@ -4746,15 +4746,22 @@ def run_native_webview_interactive():
           text.count("[krunker] captcha: solved in the webview") == 1 and "[webview] challenge closed" in text,
           [l for l in lines if "[webview]" in l or "captcha:" in l][:12])
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
-    fail_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work failed (nothing shown)" in l]
-    check(f"{label}: a \"cpt\" this client cannot answer is said in the log, after the token, and shows nothing",
-          len(fail_i) == 1 and solved and fail_i[0] > solved[0] and "proof of work passed" not in text, [l for l in lines if "proof of work" in l][:4])
-    check(f"{label}: and ends the session with v10.0.3's CAPTCHA FAILED error (the socket closed)",
-          "[krunker] the server ended the session (krunker.io: CAPTCHA FAILED): closing the socket" in text,
-          [l for l in lines if "ended the session" in l or "CAPTCHA" in l][:4])
-    after = [m.group(1) for i, l in enumerate(lines) if fail_i and i > fail_i[0]
+    pass_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
+    check(f"{label}: the SHA-512 \"cpt\" is solved after the token, nothing shown, the session goes on",
+          len(pass_i) == 1 and solved and pass_i[0] > solved[0] and "proof of work failed" not in text and "CAPTCHA FAILED" not in text,
+          [l for l in lines if "proof of work" in l or "CAPTCHA" in l][:4])
+    cptr = [f[1] for f in stub.frames if f[0] == "cptR"] if stub else []
+    sol = None
+    if cptr and cptr[0]:
+        try:
+            sol = json.loads(base64.b64decode(cptr[0][0]))
+        except Exception:  # noqa: BLE001
+            sol = cptr[0]
+    check(f"{label}: its \"cptR\" is the SHA-512 solution (the widget's value)", isinstance(sol, dict) and sol.get("algorithm") == "SHA-512" and
+          sol.get("number") == ALTCHA_NUMBER and sol.get("challenge") == ALTCHA_SHA512["challenge"], sol)
+    after = [m.group(1) for i, l in enumerate(lines) if pass_i and i > pass_i[0]
              for m in [re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)] if m]
-    check(f"{label}: no card is drawn after the failed \"cpt\" (the widget holder stays hidden)",
+    check(f"{label}: no card is drawn for the \"cpt\" (the widget holder stays hidden)",
           after and not any("knCaptchaHolder=1" in v for v in after), after[:4])
     # the widget takes the spinner's place: while it is drawn the join's spinner (#instructions) is hidden
     drawn = [v for v in (re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l) for l in lines) if v]

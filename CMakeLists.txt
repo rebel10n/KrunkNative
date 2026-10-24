@@ -1332,7 +1332,7 @@ else ()
     if (NOT WIN32)
         add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
                        client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
-                       client/src/net/krunker_link_s2c.c
+                       client/src/net/krunker_link_s2c.c client/src/net/krunker_link_trade.c shared/src/ks/ks_net_official.c
                        client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c shared/src/rules/v10/network_sounds_v10.c client/src/ui/player_names.c
                        client/src/ui/quick_play_retry.c
                        shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c

@@ -296,7 +296,6 @@
  "kn.hostflow.kio.busy": "krunker.io is still answering the last game. Wait for it, then try again.",
  "kn.hostflow.kio.community": "Community maps are hosted on Box Office servers or on your own server.",
  "kn.hostflow.kio.notConnected": "Join a krunker.io game first: a game hosted on krunker.io starts from your official connection.",
- "kn.hostflow.kio.signIn": "Sign in to your krunker.io account to host a game there.",
  "kn.hostflow.kio.unavailable": "krunker.io servers are unavailable right now. Try again, or host it yourself.",
  "kn.hostflow.kio.web": "Hosting on krunker.io is not available in the browser build",
  "kn.hostflow.practice.none": "Pick a map of the catalogue to play it offline.",

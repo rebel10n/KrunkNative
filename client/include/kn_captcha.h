@@ -28,7 +28,7 @@ typedef void (*KnCaptchaDone)(void *user, const char *payload);
 // backend_poll or kn_captcha_tick, never from inside this call), unless kn_captcha_cancel(id) comes first.
 unsigned kn_captcha_request(const char *purpose, KnCaptchaDone done, void *user);
 // A challenge given by a game server (its in-game "cpt", NET_EXT_CAPTCHA: kn_captcha_game.c) instead of fetched: the
-// same search and done rules. 0 when it cannot be solved here (not SHA-256 ALTCHA, over the cap, malformed) or every
+// same search and done rules. 0 when it cannot be solved here (not SHA-256 / -384 / -512 ALTCHA, over the cap, malformed) or every
 // slot is busy: done is then never called.
 unsigned kn_captcha_solve(const char *purpose, const char *challenge_json, KnCaptchaDone done, void *user);
 void kn_captcha_cancel(unsigned id); // done is not called; an unknown or finished id is ignored

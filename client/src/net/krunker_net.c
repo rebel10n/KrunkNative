@@ -133,7 +133,6 @@ static struct {
     char access[KRUNKER_ACCESS_MAX];
     volatile int account_event; // the socket thread saw "a" ACCOUNT_RESPONSE: krunker_net_tick tells krunker_account
     volatile int points_event;  // the socket thread saw "ua" UPDATE_ACCOUNT's rankedPoints (the same, for the balance)
-    unsigned rpc_counter;        // the socket's rpcCounter (v10:98211)
     // the rpcs sent for the windows (krunker_net_send_account_frame) waiting for their "_0" / "_1" answer:
     // v10's rpcHandlers[id] (deob-10.0.3.js 111537). Main thread only (sent and answered there).
     struct { unsigned id; char name[8]; } rpc_pending[4];
@@ -407,12 +406,17 @@ static void link_send(void *user, const uint8_t *frame, const size_t len);
 
 static void kmap_fail(int index, const char *custom_id, const char *why);
 
+static void host_challenge_failed(void); // K.lock held (below, with the hosting state)
+
 static void link_event(void *user, const KrunkerLinkEvent kind, const char *text) {
     (void) user;
     KN_LOG_VERBOSE2("[krunker] %s%s\n", kind == KRUNKER_LINK_EV_CAPTCHA ? "captcha required " : "", text ? text : "");
     char out[300];
     switch (kind) {
-        case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big): logged by the
+        case KRUNKER_LINK_EV_HOST_FAILED: // the guest host's bCpt was refused or not solved: custom.tryagain
+            host_challenge_failed();
+            break;
+        case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256/384/512, too big): logged by the
             K.pow_result = 2;         // tick; the link's "CAPTCHA FAILED" error (EV_ERROR, next) ends the session
             break;
         case KRUNKER_LINK_EV_ERROR: // the session is over (v10: the error screen): krunker_net_tick leaves
@@ -647,9 +651,9 @@ static void account_frames_tick(void) {
 // for its "_0" / "_1" answer (rpc_answer). Main thread, K.lock held by the caller.
 static int send_rpc(const char *name) {
     if (K.rpc_pending_n >= (int) (sizeof(K.rpc_pending) / sizeof(K.rpc_pending[0]))) return 0;
-    const KrunkerValue args[] = {KRUNKER_V_NUM(K.rpc_counter), KRUNKER_V_STR(name)};
-    if (!krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_RPC), args, 2)) return 0;
-    K.rpc_pending[K.rpc_pending_n].id = K.rpc_counter++;
+    const int id = krunker_link_rpc(&K.link, name, NULL, 0); // the link's rpcCounter (shared with its own bCpt)
+    if (id < 0) return 0;
+    K.rpc_pending[K.rpc_pending_n].id = (unsigned) id;
     snprintf(K.rpc_pending[K.rpc_pending_n].name, sizeof(K.rpc_pending[0].name), "%s", name);
     K.rpc_pending_n++;
     return 1;
@@ -714,7 +718,29 @@ static struct {
     KrunkerHostDoneFn done;
     void *user;
     char game_id[sizeof(K.game_id)], error[256]; // the answer (K.lock)
+    // the request's config as the codec's values (krunker_link_host_custom keeps a pointer to `value` until its
+    // "custom" goes: a guest's waits for the bCpt challenge): the cJSON its strings point into and the slot block
+    cJSON *config;
+    KrunkerValue *pool, value;
 } hosting;
+
+static void hosting_free_config(void) { // K.lock held, or the socket thread gone
+    cJSON_Delete(hosting.config);
+    free(hosting.pool);
+    hosting.config = NULL;
+    hosting.pool = NULL;
+}
+
+// KRUNKER_LINK_EV_HOST_FAILED (the socket thread, or the web's slices; K.lock held): the request's answer is v10.0.3's
+// custom.tryagain (deob-10.0.3.js:229994), delivered by host_custom_tick
+static void host_challenge_failed(void) {
+    if (hosting.active && !hosting.replied) {
+        hosting.replied = 1;
+        hosting.game_id[0] = 0;
+        snprintf(hosting.error, sizeof(hosting.error), "%s", KRUNKER_CUSTOM_TRYAGAIN);
+    }
+    hosting_free_config();
+}
 
 // a game id as krunker.io writes it ("NY:bbbbb"): [A-Za-z0-9:_-] (krunker_lobbies.c id_ok, krunker_net_invite_link)
 static int game_id_ok(const char *id) {
@@ -1876,8 +1902,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         kmap_reset();
         pthread_mutex_lock(&K.lock);
         krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
-        krunker_link_reset(&K.link);
-        K.rpc_counter = 0;
+        krunker_link_reset(&K.link); // (its rpcCounter starts over)
         K.rpc_pending_n = 0; // (a new socket: the old rpcs' answers can no longer come)
         K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
         pthread_mutex_unlock(&K.lock);
@@ -2375,7 +2400,6 @@ static KrunkerValue config_value(const cJSON *j, KrunkerValue **pool) {
 
 KrunkerHostBlock krunker_net_host_block(void) {
     if (K.state != KS_OPEN) return KRUNKER_HOST_NOT_CONNECTED;
-    if (!krunker_account_signed_in()) return KRUNKER_HOST_GUEST; // v10's security challenge (bCpt) is not implemented
     if (hosting.active) return KRUNKER_HOST_BUSY;
     return KRUNKER_HOST_READY;
 }
@@ -2386,12 +2410,6 @@ int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, v
     case KRUNKER_HOST_NOT_CONNECTED:
         printf("[krunker] custom game: no official connection (join an official game first)\n");
         return 0;
-    case KRUNKER_HOST_GUEST:
-        // v10 first asks the socket for a security challenge (rpc "bCpt", the ALTCHA answer as the request's rid);
-        // krunker_link has no rpc, so a guest cannot host on krunker.io yet
-        printf("[krunker] custom game: a guest cannot host on krunker.io yet (security challenge rpc bCpt not implemented);"
-               " sign in to krunker.io\n");
-        return 0;
     case KRUNKER_HOST_BUSY:
         KN_LOG_VERBOSE2("[krunker] custom game: a request is already waiting for krunker.io's answer\n");
         return 0;
@@ -2399,14 +2417,25 @@ int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, v
         break;
     }
     const size_t slots = config_slots(config);
+    cJSON *copy = cJSON_Duplicate(config, 1);
     KrunkerValue *pool = calloc(slots ? slots : 1, sizeof(*pool));
-    if (!pool) return 0;
+    if (!pool || !copy) {
+        free(pool);
+        cJSON_Delete(copy);
+        return 0;
+    }
     KrunkerValue *next = pool;
-    // v10's send(CUSTOM_SERVER, config, rid, rehost): rid is undefined for a signed-in account (nil), rehost false
-    const KrunkerValue args[3] = {config_value(config, &next), KRUNKER_V_NIL, KRUNKER_V_BOOL(0)};
+    // v10's send(CUSTOM_SERVER, config, rid, rehost) (deob-10.0.3.js:229989-229998): rid undefined for a signed-in
+    // account (nil); a guest's is the answer to the bCpt security challenge, asked first (krunker_link_host_custom)
+    const int guest = !krunker_account_signed_in();
     int sent = 0;
     pthread_mutex_lock(&K.lock);
-    if (K.state == KS_OPEN) sent = krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_CUSTOM_SERVER), args, 3);
+    hosting_free_config();
+    hosting.config = copy;
+    hosting.pool = pool;
+    hosting.value = config_value(copy, &next);
+    if (K.state == KS_OPEN) sent = krunker_link_host_custom(&K.link, &hosting.value, 0, guest);
+    if (!sent || !guest) hosting_free_config(); // sent at once (an account) or not at all: the values are done
     if (sent) {
         hosting.active = 1;
         hosting.replied = 0;
@@ -2416,12 +2445,12 @@ int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, v
         hosting.game_id[0] = hosting.error[0] = 0;
     }
     pthread_mutex_unlock(&K.lock);
-    free(pool);
     if (!sent) {
         printf("[krunker] custom game: the request was not sent\n");
         return 0;
     }
-    KN_LOG_VERBOSE2("[krunker] custom game: request sent to krunker.io (%zu config values)\n", slots);
+    KN_LOG_VERBOSE2("[krunker] custom game: request sent to krunker.io (%zu config values%s)\n", slots,
+                    guest ? ", a guest: after the bCpt security challenge" : "");
     return 1;
 }
 
@@ -2442,6 +2471,8 @@ static void host_custom_tick(const double now) {
     void *user = hosting.user;
     hosting.active = 0;
     hosting.done = NULL;
+    krunker_link_host_cancel(&K.link); // a guest's request still waiting for its challenge ends with it
+    hosting_free_config();
     pthread_mutex_unlock(&K.lock);
     if (!replied) printf("[krunker] custom game: no answer from krunker.io\n");
     if (!done) return;
@@ -2502,12 +2533,9 @@ static void on_login_token(void *user, const char *token) {
     pthread_mutex_lock(&K.lock);
     int sent = 0;
     if (!K.link.account_name[0]) {
-        const KrunkerValue args[] = {KRUNKER_V_NUM(K.rpc_counter), KRUNKER_V_STR(krunker_c2s_wire(KRUNKER_C2S_LOGIN)), KRUNKER_V_STR(token)};
-        sent = krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_RPC), args, 3);
-        if (sent) {
-            K.rpc_counter++;
-            snprintf(K.access, sizeof(K.access), "%s", token); // the "a" it answers names this account
-        }
+        const KrunkerValue args[] = {KRUNKER_V_STR(token)};
+        sent = krunker_link_rpc(&K.link, krunker_c2s_wire(KRUNKER_C2S_LOGIN), args, 1) >= 0;
+        if (sent) snprintf(K.access, sizeof(K.access), "%s", token); // the "a" it answers names this account
     }
     pthread_mutex_unlock(&K.lock);
     if (sent) KN_LOG_DEBUG1("[krunker] signed in during the game: the socket logs in with the krunker.io account\n");
@@ -2598,7 +2626,14 @@ void krunker_net_tick(Client *client) {
             K.altcha_pending = K.pow_shown = 0;
             krunker_captcha_pow_end(rc == 1);
         }
-        if (rc == 1) {
+        pthread_mutex_lock(&K.lock);
+        const int for_host = krunker_link_host_solving(&K.link); // the guest host's bCpt, not a "cpt"
+        pthread_mutex_unlock(&K.lock);
+        if (rc != 0 && for_host) {
+            pthread_mutex_lock(&K.lock);
+            krunker_link_host_answer(&K.link, rc == 1 ? payload : NULL); // the "custom" goes (or EV_HOST_FAILED)
+            pthread_mutex_unlock(&K.lock);
+        } else if (rc == 1) {
             const KrunkerValue args[] = {KRUNKER_V_STR(payload)};
             pthread_mutex_lock(&K.lock);
             if (krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_cptR), args, 1)) K.link.captchas_solved++;
@@ -2620,7 +2655,7 @@ void krunker_net_tick(Client *client) {
     K.notice_pending = K.captcha_pending = 0;
     pthread_mutex_unlock(&K.lock);
     if (captcha) {
-        // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the Security Challenge
+        // a "cpt" this client cannot answer (not SHA-256 / -384 / -512, or too big): the Security Challenge
         // modal's passive card shows it failed, the popup says what (the session goes on until the server decides)
         krunker_captcha_pow_end(0);
     }

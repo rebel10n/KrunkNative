@@ -1,7 +1,7 @@
 // krunker_net_host_custom (client/src/net/krunker_net.c): a custom game hosted on krunker.io's official
 // servers. v10's createPrivateRoom (v10.js:198129-198130) sends ["custom", config, rid, rehost] over the
-// official socket (rid nil for a signed-in account; a guest's security-challenge answer is not implemented
-// here), and the reply "cust" [message, gameId, teams] (v10's customRoomResponse, _67341, v10.js:197942)
+// official socket (rid nil for a signed-in account; a guest's is the answer to the security challenge
+// rpc("bCpt", "hosting") asked first, deob-10.0.3.js:229989-229998, 133912-133919), and the reply "cust" [message, gameId, teams] (v10's customRoomResponse, _67341, v10.js:197942)
 // answers it once. The reply goes through krunker_net.c's own socket dispatch (krunker_link_on_frame under
 // K.lock, as ws_thread does) and is delivered by its tick; the clock is fake, so the timeout runs without
 // sleeping. The account and the clock are doubles; nothing opens a socket.
@@ -60,10 +60,14 @@ void krunker_captcha_close(void) { NOT_REACHED(); }
 void krunker_captcha_pow_begin(void) { NOT_REACHED(); }
 void krunker_captcha_pow_end(int solved) { (void) solved; NOT_REACHED(); }
 void krunker_captcha_tick(void) { NOT_REACHED(); }
+// the socket's saved testCode / display mode (socket_extras, html_dom.h): none saved here
+int html_storage_get(const char *key, char *buf, size_t n) { (void) key; if (n) buf[0] = 0; return -1; }
+void html_storage_set(const char *key, const char *value) { (void) key; (void) value; }
 void krunker_ccr_free(KrunkerCcr *out) { (void) out; NOT_REACHED(); }
 int krunker_cheat_answer(const char *nonce, const char *ciphertext_b64, KrunkerCcr *out) { (void) nonce; (void) ciphertext_b64; (void) out; NOT_REACHED(); }
 void krunker_host_url(KrunkerHost host, const char *path, char *out, size_t n) { (void) host; (void) path; (void) out; (void) n; NOT_REACHED(); }
-int krunker_link_prophunt_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f) { (void) l; (void) id; (void) f; NOT_REACHED(); }
+// every frame the link's own switch does not take asks it (an rpc answer that is not the host's: none of its)
+int krunker_link_prophunt_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f) { (void) l; (void) id; (void) f; return 0; }
 void krunker_link_prophunt_spawned(KrunkerLink *l, int sid, int team, const KrunkerValue *prop_id) { (void) l; (void) sid; (void) team; (void) prop_id; NOT_REACHED(); }
 int krunker_link_prophunt_send(KrunkerLink *l, uint16_t subtype, const uint8_t *body, uint16_t length) { (void) l; (void) subtype; (void) body; (void) length; NOT_REACHED(); }
 void krunker_map_request_begin(KrunkerMapRequest *r, int index, cJSON *custom, const char *custom_id) { (void) r; (void) index; (void) custom; (void) custom_id; NOT_REACHED(); }
@@ -124,7 +128,9 @@ static void drain_out(void) {
 
 static void reset_all(void) {
     memset(&g_done, 0, sizeof(g_done));
+    hosting_free_config();
     memset(&hosting, 0, sizeof(hosting));
+    krunker_link_host_cancel(&K.link); // a guest's request of an earlier case
     g_signed_in = 1;
     K.state = KS_OPEN;
     snprintf(K.region, sizeof(K.region), "%s", "de-fra");
@@ -238,7 +244,7 @@ static void test_request_frame(void) {
     cJSON_Delete(cfg);
 }
 
-// the refusals: no official connection, a guest, a config that is not an object, no done, a second request
+// the refusals: no official connection, a config that is not an object, no done, a second request
 static void test_refusals(void) {
     cJSON *cfg = sample_config();
 
@@ -246,12 +252,6 @@ static void test_refusals(void) {
     K.state = KS_OFF;
     CHECK(krunker_net_host_custom(cfg, on_done, NULL) == 0, "no official connection: not sent");
     CHECK(!K.out_head, "nothing left the socket without a connection");
-
-    reset_all();
-    g_signed_in = 0;
-    CHECK(krunker_net_host_custom(cfg, on_done, NULL) == 0, "a guest is refused (the security challenge is not implemented)");
-    CHECK(!K.out_head, "a guest sends nothing");
-    g_signed_in = 1;
 
     reset_all();
     cJSON *list = cJSON_CreateArray();
@@ -333,6 +333,115 @@ static void test_timeout(void) {
     cJSON_Delete(cfg);
 }
 
+// an rpc's answer ["_0" | "_1", rpcId, result] through krunker_link_on_frame under K.lock (ws_thread's dispatch)
+static void deliver_rpc(const char *label, const int id, const KrunkerValue result) {
+    const KrunkerValue args[2] = {KRUNKER_V_NUM(id), result};
+    KrunkerBuf buf = {0};
+    CHECK(krunker_proto_encode_ah(0, label, args, 2, &buf) == KRUNKER_PROTO_OK, "encode the %s frame", label);
+    pthread_mutex_lock(&K.lock);
+    krunker_link_on_frame(&K.link, buf.data, buf.len);
+    pthread_mutex_unlock(&K.lock);
+    krunker_buf_free(&buf);
+}
+
+static int b64v(const char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    return c == '+' ? 62 : c == '/' ? 63 : -1;
+}
+
+static void b64_text(const char *in, const size_t len, char *out, const size_t cap) {
+    size_t o = 0;
+    unsigned acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < len && in[i] != '='; i++) {
+        const int v = b64v(in[i]);
+        if (v < 0) break;
+        acc = acc << 6 | (unsigned) v;
+        bits += 6;
+        if (bits >= 8 && o + 1 < cap) {
+            bits -= 8;
+            out[o++] = (char) (acc >> bits & 0xff);
+        }
+    }
+    out[o] = 0;
+}
+
+// the one frame that left the socket: decoded into f (0 = none / not exactly one)
+static int one_out(KrunkerFrame *f) {
+    if (!K.out_head || K.out_head->next) return 0;
+    return krunker_proto_decode(K.out_head->data, K.out_head->len, 0, f) == KRUNKER_PROTO_OK;
+}
+
+// (f) a guest: v10.0.3's requestCaptcha before createPrivateRoom's send (deob-10.0.3.js:229989-229998, 133912-133919):
+// rpc("bCpt", "hosting") first, its answer's ALTCHA solved, then "custom" [config, the answer, false]; a refused rpc
+// ends the request with custom.tryagain ("Please try again.", :229994) and no "custom"
+static void test_guest(void) {
+    reset_all();
+    g_signed_in = 0;
+    cJSON *cfg = sample_config();
+    CHECK(krunker_net_host_block() == KRUNKER_HOST_READY, "a guest may host (no account needed)");
+    CHECK(krunker_net_host_custom(cfg, on_done, NULL) == 1, "a guest's request is sent");
+    KrunkerFrame f;
+    int id = -1;
+    if (one_out(&f)) {
+        CHECK(f.name_len == 2 && !memcmp(f.name, "_0", 2) && f.argc == 3 && krunker_frame_arg(&f, 0)->type == KRUNKER_NUM &&
+              !strcmp(krunker_str(krunker_frame_arg(&f, 1)), "bCpt") && !strcmp(krunker_str(krunker_frame_arg(&f, 2)), "hosting"),
+              "a guest asks rpc [id, bCpt, hosting] first, no custom yet");
+        id = (int) krunker_frame_arg(&f, 0)->u.num;
+        krunker_frame_free(&f);
+    } else {
+        CHECK(0, "one frame (the rpc) left the socket");
+    }
+    drain_out();
+    // its answer: the ALTCHA challenge (SHA-256 of salt + 777)
+    const char *salt = "guest-salt?expires=2000000000";
+    char pre[96], hex[65];
+    uint8_t digest[32];
+    snprintf(pre, sizeof(pre), "%s%d", salt, 777);
+    kn_sha256_bytes(pre, strlen(pre), digest);
+    kn_sha256_hex(digest, hex);
+    const KrunkerValue chal[] = {KRUNKER_V_STR("algorithm"), KRUNKER_V_STR("SHA-256"), KRUNKER_V_STR("challenge"), KRUNKER_V_STR(hex),
+                                 KRUNKER_V_STR("maxnumber"), KRUNKER_V_NUM(5000), KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt),
+                                 KRUNKER_V_STR("signature"), KRUNKER_V_STR("sig")};
+    deliver_rpc("_0", id + 5, KRUNKER_V_MAP(chal, 5));
+    CHECK(!K.out_head, "another rpc's answer sends nothing");
+    deliver_rpc("_0", id, KRUNKER_V_MAP(chal, 5));
+    if (one_out(&f)) {
+        char json[512] = "";
+        const KrunkerValue *ans = krunker_frame_arg(&f, 1);
+        if (ans && ans->type == KRUNKER_STR) b64_text(ans->u.str, ans->len, json, sizeof(json));
+        CHECK(f.name_len == 6 && !memcmp(f.name, "custom", 6) && f.argc == 3 && same_value(cfg, krunker_frame_arg(&f, 0)) &&
+              strstr(json, "\"number\":777,") && krunker_frame_arg(&f, 2)->type == KRUNKER_BOOL && !krunker_frame_arg(&f, 2)->u.boolean,
+              "the challenge solved: custom [the same config, the ALTCHA answer, false] (%s)", json);
+        krunker_frame_free(&f);
+    } else {
+        CHECK(0, "one frame (the custom) left the socket after the answer");
+    }
+    drain_out();
+    deliver_cust("Game Created", "NY:guest", 1);
+    host_custom_tick(g_now + 0.5);
+    CHECK(g_done.calls == 1 && g_done.game_set && !strcmp(g_done.game, "NY:guest"), "the guest's game is made (%s)", g_done.game);
+
+    // refused: RPC_ERROR -> "Please try again.", no custom
+    reset_all();
+    g_signed_in = 0;
+    CHECK(krunker_net_host_custom(cfg, on_done, NULL) == 1, "a guest's second request");
+    if (one_out(&f)) {
+        id = (int) krunker_frame_arg(&f, 0)->u.num;
+        krunker_frame_free(&f);
+    }
+    drain_out();
+    deliver_rpc("_1", id, KRUNKER_V_STR("nope"));
+    CHECK(!K.out_head, "a refused challenge sends no custom");
+    host_custom_tick(g_now + 0.1);
+    CHECK(g_done.calls == 1 && !g_done.game_set && !strcmp(g_done.error, "Please try again."),
+          "a refused challenge: custom.tryagain at once (%s)", g_done.error);
+    g_signed_in = 1;
+    cJSON_Delete(cfg);
+}
+
 int main(void) {
     link_setup();
     test_request_frame();
@@ -340,6 +449,8 @@ int main(void) {
     test_reply_game();
     test_reply_error();
     test_timeout();
+    test_guest();
+    reset_all();
     drain_out();
     printf("krunker_host_custom_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

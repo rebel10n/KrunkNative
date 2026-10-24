@@ -128,10 +128,40 @@ int main(void) {
               strstr(json, "\"number\":") < strstr(json, "\"salt\":") && strstr(json, "\"signature\":") < strstr(json, "\"took\":"));
         cJSON_Delete(o);
         free(payload);
-        // a number past maxnumber is not found; SHA-512 and a maxnumber over the cap are refused
+        // a number past maxnumber is not found; a SHA-512 challenge of SHA-256's length, SHA-1 and a maxnumber over the
+        // cap are refused
         CHECK(krunker_altcha_solve("SHA-256", ch, salt, sig, 4000, &payload) == -1 && !payload);
         CHECK(krunker_altcha_solve("SHA-512", ch, salt, sig, 5000, &payload) == -1);
+        CHECK(krunker_altcha_solve("SHA-1", ch, salt, sig, 5000, &payload) == -1);
         CHECK(krunker_altcha_solve("SHA-256", ch, salt, sig, KRUNKER_ALTCHA_MAX_CAP + 1, &payload) == -1);
+    }
+
+    // 1b. the widget's other algorithms (altcha.1.0.6.min.js: G = SHA-256 / SHA-384 / SHA-512, any case): known answers
+    //     from python's hashlib (one block, and 200 bytes: two blocks), then the same salt and number solved
+    {
+        const char *salt = "00112233445566778899aabb?expires=2000000000&for=login";
+        const char *k512 = "cd470c614be499f477b82aaa752e1d23963d23444009471f076f80de3c3ab0e39e234cd719ade152eb400bbb2cdf21a916e70accdb7c6a4d1917e60f4a40ad65";
+        const char *k384 = "19ab15d92a7d24a1497e086879b9d6117a9c1d962d049c211a2a9083d07ff2df7b66743841126f41b3f483997975ab40";
+        const char *long512 = "4b11459c33f52a22ee8236782714c150a3b2c60994e9acee17fe68947a3e6789f31e7668394592da7bef827cddca88c4e6f86e4df7ed1ae6cba71f3e98faee9f";
+        char pre[128], hex[129], a200[201];
+        snprintf(pre, sizeof(pre), "%s4242", salt);
+        CHECK(krunker_altcha_digest_hex("SHA-512", pre, strlen(pre), hex) == 0 && !strcmp(hex, k512));
+        CHECK(krunker_altcha_digest_hex("sha-384", pre, strlen(pre), hex) == 0 && !strcmp(hex, k384));
+        memset(a200, 'a', 200);
+        a200[200] = 0;
+        CHECK(krunker_altcha_digest_hex("SHA-512", a200, 200, hex) == 0 && !strcmp(hex, long512));
+        CHECK(krunker_altcha_digest_hex("SHA-1", pre, strlen(pre), hex) == -1);
+        char *payload = NULL;
+        CHECK(krunker_altcha_solve("SHA-512", k512, salt, "s", 5000, &payload) == 0 && payload);
+        char json[2048] = "";
+        if (payload) b64_decode(payload, json, sizeof(json));
+        CHECK(strstr(json, "\"algorithm\":\"SHA-512\"") && strstr(json, "\"number\":4242,"));
+        free(payload);
+        payload = NULL;
+        CHECK(krunker_altcha_solve("SHA-384", k384, salt, "s", 5000, &payload) == 0 && payload);
+        free(payload);
+        payload = NULL;
+        CHECK(krunker_altcha_solve("SHA-384", k512, salt, "s", 5000, &payload) == -1); // a SHA-512 digest is no SHA-384 challenge
     }
 
     // 2. a captcha: the request, then the search over frames, then done with the payload

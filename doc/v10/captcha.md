@@ -94,10 +94,10 @@ their own rule, not in the client: Box Office asks each connection once.
 
 | 10.0.3 flow | What this client does |
 | --- | --- |
-| `cpt` / `cptR` (ALTCHA) | solved natively in C: on the socket thread natively, in slices of the frame loop on the web (`krunker_link.c` `on_captcha`, `krunker_net.c`); `cptR` goes without the ahNum step (`KRUNKER_AHNUM_EXEMPT`). One it cannot solve (not SHA-256, `maxnumber` over 1e7): the "CAPTCHA FAILED" error and the socket closed (`krunker_link_captcha_failed`), v10.0.3's failure branch. Checked by `krunker_link_test` and `krunker_official_e2e.py` |
+| `cpt` / `cptR` (ALTCHA) | solved natively in C: on the socket thread natively, in slices of the frame loop on the web (`krunker_link.c` `on_captcha`, `krunker_net.c`); `cptR` goes without the ahNum step (`KRUNKER_AHNUM_EXEMPT`). The widget's three algorithms are solved (SHA-256, SHA-384, SHA-512, its `G`). One it cannot solve (another algorithm, `maxnumber` over 1e7, no solution): the "CAPTCHA FAILED" error and the socket closed (`krunker_link_captcha_failed`), v10.0.3's failure branch. Checked by `krunker_link_test` and `krunker_official_e2e.py` |
 | `/seek-game` `CaptchaRequired` (Turnstile) | retried at most twice with `captchaToken` and a fresh validation token (`krunker_net.c` `on_seek` / `captcha_done`). The token is Cloudflare's: the native client shows krunker.io's own Turnstile widget in a platform webview on a krunker.io page (WebKitGTK, WebView2, WKWebView; a build with `KN_WEBVIEW`), drawn in the game, and the player solves it when Cloudflare asks. Without a webview (or on an `HTML_ENGINE=OFF` build) no token can be had: one seek without it, then the generic failure. The web build renders the widget too, but the sitekey is bound to krunker.io, so on krunk.io it fails (Cloudflare 110200). Details: [official-captcha.md](official-captcha.md) |
 | `loginUsername` `b` (Turnstile) | the krunker.io account's sign-in asks the same widget first (`krunker_account.c` `start_sign_in`), the same limits |
-| `bCpt` before hosting (ALTCHA) | not implemented: the official link has no RPC, so a guest cannot host a krunker.io custom game (`krunker_net_host_block`: `KRUNKER_HOST_GUEST`); a signed-in krunker.io account hosts without it, as v10.0.3 does (`if (account)` at :229989) |
+| `bCpt` before hosting (ALTCHA) | a guest hosting a krunker.io custom game: v10.0.3's `rpc("bCpt", "hosting")` (`krunker_link_rpc`, the socket's rpcCounter, :111527-111541), its `_0` answer's challenge solved like a `cpt`, then `["custom", config, answer, rehost]` (`krunker_link_host_custom`, :133912-133919, :229989-229998); an `_1` or an unsolvable challenge ends the request with custom.tryagain (:229994). A signed-in krunker.io account sends `custom` at once with a nil answer, as v10.0.3 does (`if (account)` at :229989). Checked by `krunker_link_test` and `krunker_host_custom_test` |
 
 What a native client cannot do: produce a Turnstile token without a browser engine on krunker.io's origin (the
 sitekey is bound to the domain and Cloudflare decides when a human must interact), or verify one (that takes
@@ -136,7 +136,7 @@ krunker.io's secret). It never solves, farms or proxies Turnstile; the player do
   (`kn_captcha_tick`), round robin over the captchas in flight (at most 4), never in one go. With the default
   `max_number` that is about 50 000 hashes: a few frames.
 - `done(user, payload)` once: the payload, or `NULL` when there is none to send (a brain from before the route answers
-  404, an error, no answer, a challenge it refuses: not SHA-256 or over the cap, no solution, 30 s,
+  404, an error, no answer, a challenge it refuses: not SHA-256 / -384 / -512 or over the cap, no solution, 30 s,
   `KN_CAPTCHA_DEADLINE_MS`). The request then goes without one, as v10.0.3 sends `loginUsername` without `b` when
   Turnstile gave none. Old brains keep working with new clients; the brain decides.
 - Nothing is shown: the sign-in's "Please wait..." and the host's "Creating Game..." stay up, as v10.0.3's

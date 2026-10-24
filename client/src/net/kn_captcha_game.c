@@ -58,6 +58,6 @@ void kn_captcha_game_packet(Client *client, const uint16_t subtype, const uint8_
     G.client = client;
     G.seq = session_seq(client);
     G.id = kn_captcha_solve("game", json, on_solved, NULL);
-    if (!G.id) fail(client); // not a challenge this client solves (not SHA-256 ALTCHA, over the cap)
+    if (!G.id) fail(client); // not a challenge this client solves (not SHA-256 / -384 / -512 ALTCHA, over the cap)
     else KN_LOG_DEBUG1("[captcha] game: the server asks a security challenge (solving it, nothing shown)\n");
 }

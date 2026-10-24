@@ -171,16 +171,17 @@ void krunker_net_tick(Client *client);      // main thread, once per frame: noti
 // NULL when the game was made (join it with krunker_net_join(client, game_id, region)); with game_id NULL and
 // error the sentence to show otherwise: the server's refusal, or "Please try again." when no answer comes within
 // the HTTP timeout. region: the official session's region.
-// Returns 0 when the request was not sent and done is not called: no official connection, a signed-out account
-// (v10's guest step, the security challenge "bCpt", is not implemented), a request already waiting, or a config
-// that is not an object. 1 = sent.
+// A guest (no krunker.io account signed in) asks v10.0.3's security challenge first: rpc("bCpt", "hosting"), its
+// ALTCHA solved, then "custom" with the answer (krunker_link_host_custom, deob-10.0.3.js:229989-229998); a refused
+// or unsolvable challenge ends with "Please try again." (custom.tryagain, :229994).
+// Returns 0 when the request was not sent and done is not called: no official connection, a request already
+// waiting, or a config that is not an object. 1 = sent.
 typedef void (*KrunkerHostDoneFn)(void *user, const char *game_id, const char *region, const char *error);
 int krunker_net_host_custom(const cJSON *config, KrunkerHostDoneFn done, void *user);
 // Why krunker_net_host_custom sends nothing now: the window says it instead of failing silently.
 typedef enum {
     KRUNKER_HOST_READY = 0,
     KRUNKER_HOST_NOT_CONNECTED,   // no official krunker.io connection (join a krunker.io game first)
-    KRUNKER_HOST_GUEST,           // signed out: a guest cannot host (the security challenge bCpt is not implemented)
     KRUNKER_HOST_BUSY,            // a request is already waiting for krunker.io's answer
 } KrunkerHostBlock;
 KrunkerHostBlock krunker_net_host_block(void);
