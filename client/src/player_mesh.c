@@ -537,6 +537,18 @@ static const ViewerSkin *player_slot_skin(const Player *player, const int slot, 
     return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
 }
 
+// The item a slot's weapon wears (generateMeshes, deob-10.0.3.js:194480-194486: `if (!ae || weapon.upgraded) ae =
+// weapon.altSkin || {}`): the store skin, unless the slot is krumMachine-upgraded or has none for its weapon; then the
+// altSkin of upgradeWeapons / weapons. *alt is that altSkin when it swaps the model (viewer_weapon_alt_skin: the Nova
+// remodels, the Cupids Blaster), else NULL. NULL when it wears neither: no altSkin, or one that only adds the upgraded
+// video (skin_video_alt_skin), which goes on the plain weapon.
+static const ViewerSkin *player_slot_look(const Player *player, const int slot, const Weapon *weapon, const ViewerAltSkin **alt) {
+    const int upgraded = slot < 8 && (player->upgraded_slots >> slot & 1);
+    const ViewerSkin *skin = upgraded ? NULL : player_slot_skin(player, slot, weapon);
+    *alt = skin ? NULL : viewer_weapon_alt_skin(player->loadout[slot], upgraded);
+    return skin ? skin : *alt ? &(*alt)->skin : NULL;
+}
+
 // The SKINS paint of the store skin player_slot_skin returns for this slot (the melee's on a melee weapon).
 static WornSkinPaint player_slot_paint(const Player *player, const int slot, const Weapon *weapon) {
     if (weapon->melee) return player->skin_paints.melee;
@@ -796,7 +808,8 @@ int player_weapon_skin_ready(const Player *player) {
     for (int i = 0; i < player->loadout_size; i++) {
         const Weapon *weapon = player->game->weapons[player->loadout[i]];
         if (!weapon || !weapon->src || nettspend_weapon_kind(player->loadout[i])) continue;
-        const ViewerSkin *skin = i < 8 && (player->upgraded_slots >> i & 1) ? NULL : player_slot_skin(player, i, weapon); // altSkin
+        const ViewerAltSkin *alt;
+        const ViewerSkin *skin = player_slot_look(player, i, weapon, &alt); // the store skin or the altSkin remodel
         if (!skin) continue;
         char model[128], texture[192];
         weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
@@ -1071,8 +1084,9 @@ static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, con
 
 // The weapon charm (players.js:1262-1291): charms/charm_mount_0 at the weapon's charmM{X,Y,Z}Off
 // (scale charmMScl), and the charm at charm{X,Y,Z}Off + 0.17 y inside it, rotation -PI, scale
-// charmScl, with the charm item's glow / frames / alphaTest. Not on skins with noCharm.
-static void player_generate_charm(PlayerArms *arms, const int weapon_id, const ViewerSkin *weapon_skin, const ViewerSkin *charm) {
+// charmScl, with the charm item's glow / frames / alphaTest. Not on skins with noCharm. An altSkin remodel's own
+// charmM{X,Y,Z}Off moves the mount (`ae.charmMXOff || weapon.charmMXOff`, deob-10.0.3.js:194791).
+static void player_generate_charm(PlayerArms *arms, const int weapon_id, const ViewerSkin *weapon_skin, const ViewerAltSkin *alt, const ViewerSkin *charm) {
     const ViewerCharmMount *mount = viewer_charm_mount(weapon_id);
     if (!mount || !charm || (weapon_skin && (weapon_skin->flags2 & VS2_NO_CHARM))) return;
     Geometry *mount_geo = skin_model("charms/charm_mount_0");
@@ -1082,6 +1096,11 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     mount_mat->base.transparent = 1;
     arms->charm_mount = mesh_init(mount_geo, (Material *) mount_mat);
     arms->charm_mount->transform.position = (vec3) {mount->mount[0], mount->mount[1], mount->mount[2]};
+    if (alt) {
+        if (alt->charm_m[0] != 0.0f) arms->charm_mount->transform.position.x = alt->charm_m[0];
+        if (alt->charm_m[1] != 0.0f) arms->charm_mount->transform.position.y = alt->charm_m[1];
+        if (alt->charm_m[2] != 0.0f) arms->charm_mount->transform.position.z = alt->charm_m[2];
+    }
     arms->charm_mount->transform.rotation.y = (float) M_PI * 0.5f;
     arms->charm_mount->transform.scale = (vec3) {mount->mount_scl, mount->mount_scl, mount->mount_scl};
     arms->charm_mount->transform.parent = &arms->anchor;
@@ -1377,9 +1396,11 @@ void player_generate_meshes(Player *player, const int render_you) {
                 player_mesh->arms[i] = arms;
                 int sel_skin = -1;                        // arms->selection: the store skin worn,
                 char sel_model[128] = "", sel_tex[192] = ""; // the model / texture keys built
+                const ViewerSkin *gun_skin = NULL;        // the gun's store skin or altSkin remodel as drawn (the charm's)
+                const ViewerAltSkin *gun_alt = NULL;
 
                 // generateMeshes: an upgraded slot (krumMachine) wears its upgradeWeapons altSkin instead of the player's
-                // skin (deob-10.0.3.js:194480-194486); KrunkNative draws only its video (skin_video_alt_skin), not a remodel
+                // skin (deob-10.0.3.js:194480-194486): its remodel (player_slot_look) and its video (skin_video_alt_skin)
                 const int upgraded = i < 8 && (player->upgraded_slots >> i & 1);
 
                 // MELEE MESH (the meleeIndex store item, else melee_0)
@@ -1460,8 +1481,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                 // whatever the table's src / stream say (below, next to the hose)
                 const NettspendWeapon kn_kind = nettspend_weapon_kind(player->loadout[i]);
                 if (weapon->src && !kn_kind) {
-                    // player.skins[slot]: remodel / texture, yOff / zOff, mScl and the glow (ai)
-                    const ViewerSkin *skin = upgraded ? NULL : player_slot_skin(player, i, weapon);
+                    // player.skins[slot]: remodel / texture, yOff / zOff, mScl and the glow (ai); without one (or
+                    // upgraded) the weapon's altSkin remodel (the Nova Pump / Semi / Uzi / Alien, the Cupids Blaster)
+                    const ViewerAltSkin *alt;
+                    const ViewerSkin *skin = player_slot_look(player, i, weapon, &alt);
                     char model[128], texture[192];
                     weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
                     // hasAnim: a GLTF remodel, one instance per hand below (empty_geometry marks it)
@@ -1469,14 +1492,17 @@ void player_generate_meshes(Player *player, const int render_you) {
                     if (!skin_geo && skin) { // a remodel this build lacks: the plain weapon
                         player_mesh->weapon_skin_pending = 1; // not on disk yet (or never): rebuilt when it is
                         skin = NULL;
+                        alt = NULL;
                         weapon_skin_keys(weapon, NULL, model, sizeof(model), texture, sizeof(texture));
                         skin_geo = skin_model(model);
                     }
+                    gun_skin = skin;
+                    gun_alt = alt;
                     unsigned int skin_tex = skin_geo && skin_geo != gltf_empty_geometry() ? skin_texture(texture) : 0;
                     if (!skin_tex && skin_geo && skin_geo != gltf_empty_geometry() && strcmp(texture, model) != 0) skin_tex = skin_texture(model);
                     const int glow = skin && (skin->flags & (VS_GLOW | VS_SAME_GLOW));
                     if (skin_geo) {
-                        sel_skin = skin ? (i == 0 ? player->skins.primary : player->skins.secondary) : -1;
+                        sel_skin = skin && !alt ? (i == 0 ? player->skins.primary : player->skins.secondary) : -1;
                         snprintf(sel_model, sizeof(sel_model), "%s", model);
                         snprintf(sel_tex, sizeof(sel_tex), "%s", skin_geo == gltf_empty_geometry() ? "gltf" : skin_tex ? texture : "-");
                     }
@@ -1502,7 +1528,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                                                             (float) (weapon->tint & 255) / 255.0f, 1.0f};
                             }
                             if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
-                            if (skin) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon), skin);
+                            if (skin && !alt) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon), skin); // the store copy's paint
                             if (upgraded) skin_fx_apply_video(weapon_mesh, skin_video_alt_skin(player->loadout[i]), 1, 1); // tFilter Linear
                         }
                         arms->weapon_models[j] = weapon_model;
@@ -1596,7 +1622,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                 // v7.1.4 charm (charms[i], the primary's / secondary's) and the own model's wrist item
                 if (!weapon->melee && i < 2) {
                     const ViewerSkin *charm = player->game->config.no_cosmetics ? NULL : cosmetic_item(player->cosmetics_v7.charms[i], ITEM_CHARM);
-                    player_generate_charm(arms, player->loadout[i], player_slot_skin(player, i, weapon), charm);
+                    player_generate_charm(arms, player->loadout[i], gun_skin, gun_alt, charm);
                 }
                 // v10 generateMeshes builds it on every visible player's left arm (no isYou test: wristMeshes
                 // on each client-side model), so other players wear their wrist item too
