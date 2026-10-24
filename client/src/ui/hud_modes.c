@@ -813,6 +813,11 @@ int hud_modes_end_team_score(const int team) {
     return g_modes.end_valid && (team == 1 || team == 2) ? g_modes.end.team_scores[team - 1] : 0;
 }
 
+int hud_modes_end_winner_team(void) {
+    if (!g_modes.end_valid) return 0;
+    return g_modes.end.winner_team > 0 ? g_modes.end.winner_team : -1;
+}
+
 // The live #endTable's markup (f1917 / v10 showTable with the mode's endStats): the header row and the
 // rows of g_modes.end in the server's endSort order, without the <table> tag (html: size bytes). 0 when
 // there is no MODE_END packet. The end screen writes it into #endTable (hud_modes_end_screen) and the

@@ -688,8 +688,12 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
             if (game->hooks.storage_load && has_account(game, h)) game->hooks.storage_load(game, h);
             break;
         case TRIGGER_ACTION_CHALLENGE: // 62 Give Challenge Progress: (!isSandbox && isPubType && h.account)
-            // challenges.update(game, trigConstTx, parseInt(trigConst || 0), null, h)
-            if (!game->is_sandbox && h && action_text(a) && has_account(game, h)) game_challenge(game, h, a->text, (int) a->constant, -1, -1);
+            // challenges.update(game, trigConstTx, parseInt(trigConst || 0), null, h), then v10.0.3's
+            // `player.runProg[key] = 1` (deob-10.0.3.js:183654-183658; Raid on Bastion reads bthrone)
+            if (!game->is_sandbox && h && action_text(a) && has_account(game, h)) {
+                game_challenge(game, h, a->text, (int) a->constant, -1, -1);
+                if (game_is_pub_type(game)) mode_run_progress(h, a->text);
+            }
             break;
         case TRIGGER_ACTION_CHALLENGE_ALL: // 65 Give Challenge Progress (All): every active player
             if (!game->is_sandbox && h && action_text(a) && has_account(game, h)) {

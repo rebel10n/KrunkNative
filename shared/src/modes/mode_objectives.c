@@ -520,7 +520,7 @@ void mode_tick_conversions(Game *game) {
             if (sqrtf(dx * dx + dy * dy + dz * dz) > radius * 2.4f) continue;
 
             mode_send_action(game, converter, other, mode->config.conv_word ? mode->config.conv_word : "");
-            player_score(converter, 100, 0);
+            player_score(converter, 100, 2); // score(player, 100, 2): an objective score (deob-10.0.3.js:193143)
             converter->mode.convs++;
             mode_update_team(game, other, converter->team);
             if (mode->config.kill_on_convert) player_kill(other, NULL, NULL, 1);

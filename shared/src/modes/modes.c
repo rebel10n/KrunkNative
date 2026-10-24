@@ -81,6 +81,8 @@ static const int k_chs_start[] = {0};
 static const int k_imp_start[] = {5, 22};
 static const int k_zom_start[] = {2};
 static const int k_no_big_streaks[] = {4, 5, 6}; // disabledStreaks
+// v10.0.3 skipStats of Raid and Zombies (deob-10.0.3.js:118449, 119126): hits, shots, crouches, steps
+static const char *const k_skip_run_stats[] = {"h", "s", "crc", "step", NULL};
 
 static const ModeWaitTimer k_wait_hide[] = {
     {.time = 10.0f, .msg = "picking seeker in ", .trigger = mode_trigger_pick_seeker},
@@ -196,9 +198,9 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
     // the v10.0.2 rework (v10:104350-104437): wall jumps (wallJ / wallJM 100 / wallJD 0.2 / wallJV 0.04 /
     // wallJYV 1.2), canSlide = isStalker, onKill (jump scare + heal 50), update (camping turns the Living
     // Dizzy), onMelee as a damage factor, pickStalker health floor(200 + 50 x (players - 1)) and the
-    // stalker's own moves (leap, wall stick, coyote time: shared/src/player.c, stalker_v10). Not ported:
-    // the stalk event / tag ["Event", ...] (menu lists), the Stalker model opacity 0.1 and hiding a still
-    // stalker (render), STALKER_PICKED / the leap HUD timer and stalker taunts (HUD).
+    // stalker's own moves (leap, wall stick, coyote time: shared/src/player.c, stalker_v10). The model
+    // (opacity 0.1, a still stalker hidden), STALKER_PICKED, the leap HUD timer and the taunts:
+    // shared/src/stalker.c and doc/v10/stalker.md. Not ported: the stalk event / tag ["Event", ...] (menu lists).
     [MODE_ID_STALK] = {BASE, .id = MODE_ID_STALK, .key = "stalk", .name = "Stalker", .alias = "stalk",
         .end_stats = k_stats_stalk, .amb_ind = 5, .min_players = 2, .has_fog_dist = 1, .fog_dist = 250.0f,
         .has_fog_col = 1, .fog_col = 1842204, .has_sky_col = 1, .sky_col = 1842204,
@@ -221,9 +223,11 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .on_kill = mode_kill_oinc, .force_spawn = 3.0f, .lives = 3, .health = 10, .force_class = 10,
         .ammo_limit = 1, .has_ammo_limit = 1, .no_reloads = 1, .hide_names = 1, .no_assists = 1, .no_streaks = 1,
         .min_players = 2, .no_pickups = 1},
+    // deob-10.0.3.js:119697-119711; canTrade: the live trade (server/src/trade.c, doc/v10/trade.md), maxNoMov 180000
+    // the server's idle kick for the mode (net.c net_check_idle_clients)
     [MODE_ID_TRADE] = {BASE, .id = MODE_ID_TRADE, .key = "trade", .name = "Trade", .alias = "trade",
         .send_rate = 5, .end_stats = k_stats_trade, .no_client_kick = 1, .can_trade = 1, .friendly = 1, .no_hp_bars = 1,
-        .view_dis = 500.0f, .name_dist = 60, .game_time = 0.0f, .no_minimap = 1},
+        .view_dis = 500.0f, .name_dist = 60, .game_time = 0.0f, .max_no_mov = 180.0f, .no_minimap = 1},
     // kc.js v7: the winner is the team score (confirms) with denies / kills / score tie-breaks
     [MODE_ID_KC] = {BASE, .id = MODE_ID_KC, .key = "kc", .name = "Kill Confirmed", .alias = "kc",
         .end_stats = k_stats_kc, .leader_stats = k_lead_kc, .leader_sort = mode_leader_sort_kc, .end_sort = mode_sort_kc,
@@ -242,13 +246,15 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .dmg_team = 1, .win_condition = mode_win_lives, .condition = mode_cond_teams_alive, WAIT(k_wait_trai),
         .no_reward = 1, .min_players = 3, .on_kill = mode_kill_trai},
     // raid.js v7: hostable again (hostType 4), new winCondition / condition, onEnd times; v10 gameTime
-    // 1500000 (25 min, v10:104536; v7.1.4 360000). Not ported: v10's noProfileStats, runPeakPlayers, the
-    // raid challenges (rnodmg, r1hp, rnogun, rsolo, rsolofull) and onAIDeath "aik" (challenge service).
+    // 1500000 (25 min, v10:104536; v7.1.4 360000). v10.0.3 (deob-10.0.3.js:118355-118457): onEnd's "time" and
+    // run challenges (rnodmg, r1hp, rnogun, rsolo, rsolofull: mode_end_raid), update's runPeakPlayers
+    // (mode_update_raid), onAIDeath "aik" (mode_ai_kill_challenge), noProfileStats, skipStats, specMaxD 25.
     [MODE_ID_RAID] = {BASE, .id = MODE_ID_RAID, .key = "raid", .name = "Raid", .alias = "raid", .event = 0, .party = 1,
         .rand_class_scr = 0.5f, .send_rate = 5, .end_stats = k_stats_raid, .show_ms = 1, .no_regen = 1, .lives = 1,
         .min_players = 1, WAIT(k_wait_raid), .win_condition = mode_win_raid, .condition = mode_cond_raid,
-        .on_end = mode_end_raid, .no_weapons = 1, .friendly = 1, .no_clan = 1, .no_free_cam = 1, .view_dis = 500.0f,
-        .game_time = 1500.0f, .bots_as_ai = 1, .no_assists = 1, .bot_bypass_class = 1, .no_minimap = 1},
+        .on_end = mode_end_raid, .update = mode_update_raid, .no_weapons = 1, .friendly = 1, .no_clan = 1, .no_free_cam = 1,
+        .view_dis = 500.0f, .game_time = 1500.0f, .bots_as_ai = 1, .no_assists = 1, .bot_bypass_class = 1, .no_minimap = 1,
+        .no_profile_stats = 1, .skip_stats = k_skip_run_stats, .spec_max_d = 25.0f},
     [MODE_ID_BLITZ] = {BASE, .id = MODE_ID_BLITZ, .key = "blitz", .name = "Blitz", .alias = "blitz",
         .end_stats = k_stats_blitz, .on_kill = mode_kill_flag, .rush = 1, .flags = 1, .teams = 1, .no_score_c = 1},
     [MODE_ID_DOM] = {BASE, .id = MODE_ID_DOM, .key = "dom", .name = "Domination", .alias = "dom",
@@ -296,7 +302,7 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .no_sliding = 1, .no_streaks = 1, .no_wall_jump = 1, .has_impulse_mlt = 1, .impulse_mlt = 0.0f, .lives = 1,
         .end_stats = k_stats_zom, .leader_stats = k_lead_zom, .send_rate = 5, .min_players = 1, .friendly = 1,
         .view_dis = 500.0f, .no_class_scr = 1, .force_class = 9, .finite_ammo = 1, LOADOUT(starting_loadout, k_zom_start),
-        .no_scr_limit = 1, .unrestricted_weapons = 1, .points_per_hit = 0.085f, .starter_score = 150,
+        .no_scr_limit = 1, .unrestricted_weapons = 1, .points_per_hit = 0.085f, .starter_score = 150, .skip_stats = k_skip_run_stats,
         .game_time = 0.0f, .regen_mlt = 0.1f, .prevent_custom = 1, .force_charge = 1, .force_old_scoreboard = 1, .no_minimap = 1,
         .win_condition = mode_win_team2, .condition = mode_cond_raid, // zom.js: winCondition 2, someone alive
         .game_start = mode_zombies_game_start, .update = mode_zombies_update, .on_kill = mode_zombies_on_kill,
@@ -518,4 +524,24 @@ int mode_streak_disabled(const Game *game, const int streak) {
         if (c->disabled_streaks[i] == streak) return 1;
     }
     return 0;
+}
+
+// game.incStat: `!mode.skipStats || skipStats.indexOf(stat) < 0` (deob-10.0.3.js:217356)
+int mode_skip_stat(const Game *game, const char *key) {
+    const GameModeConfig *c = cfg(game);
+    for (const char *const *k = c && key ? c->skip_stats : NULL; k && *k; k++) {
+        if (!strcmp(*k, key)) return 1;
+    }
+    return 0;
+}
+
+int mode_no_profile_stats(const Game *game) {
+    const GameModeConfig *c = cfg(game);
+    return c && c->no_profile_stats;
+}
+
+// the game start (deob-10.0.3.js:257121): spect.maxD = mode.specMaxD || 160 (config.specMaxD, deob-10.0.3.js:22866)
+float mode_spec_max_d(const Game *game) {
+    const GameModeConfig *c = cfg(game);
+    return c && c->spec_max_d > 0.0f ? c->spec_max_d : 160.0f;
 }

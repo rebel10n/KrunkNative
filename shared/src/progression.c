@@ -113,7 +113,7 @@ static void set_num(cJSON *obj, const char *key, const double v) {
     else cJSON_AddItemToObject(obj, key, n);
 }
 
-// The match filters of checkChallenge (mp, mid, md, cls, ranked).
+// The match filters of checkChallenge (mp, mid, md, cls, ranked, lt).
 static int match_ok(const cJSON *c, const cJSON *dat, const ChallengeMatch *m) {
     int has = 0;
     double v = field_num(dat, "mp", &has);
@@ -126,6 +126,8 @@ static int match_ok(const cJSON *c, const cJSON *dat, const ChallengeMatch *m) {
     if (has && (int) v != m->class_index) return 0;
     const char *type = field_str(c, "T");
     if (type && !strcmp(type, "ranked") && !m->ranked) return 0;
+    // v10.0.3 challenges.update: `!DAT.lt || !game.isRanked && !mode.noProfileStats` (deob-10.0.3.js:202974)
+    if (m->lt_off && field_truthy(dat, "lt")) return 0;
     return 1;
 }
 

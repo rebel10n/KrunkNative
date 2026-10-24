@@ -235,12 +235,15 @@ void mode_zombies_on_kill(Game *game, Player *victim, Player *killer, const int 
     }
 }
 
-// zom.js onPreEnd: everyone's score becomes (zWave || 1) * 100
+// zom.js onPreEnd: everyone's score becomes (zWave || 1) * 100; v10.0.3 first gives every player
+// challenges.update("rnd", rounds || 0) (deob-10.0.3.js:119167-119177; "rnd" keeps the highest value)
 void mode_zombies_on_pre_end(Game *game) {
     const int wave = game->zombies.wave ? game->zombies.wave : 1;
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
-        if (player) player->score = wave * 100;
+        if (!player) continue;
+        game_challenge(game, player, "rnd", player->mode.rounds, -1, -1);
+        player->score = wave * 100;
     }
     zombies_send_end_stats(game); // endStats zombies / rounds (map-logic WP-H client side)
 }
@@ -265,6 +268,7 @@ void mode_zombies_on_ai_death(Game *game, struct GameAI_t *ai, Player *killer) {
     }
     if (k_powerup_counts[tier]) spawnable_drop(game, k_powerups[tier][mode_rand_int(0, k_powerup_counts[tier] - 1)], NULL, 0, ai->position);
     if (rand_percent() >= 99.0f) spawnable_drop(game, SPAWNABLE_PERK_BOTTLE, NULL, 0, ai->position);
+    mode_ai_kill_challenge(game, killer); // v10.0.3: challenges.update("aik", 1, {wep}) (deob-10.0.3.js:119232-119235)
 }
 
 // zom.js onTrigger (action 71): the Zombie Portal at the portal_spawn node, once

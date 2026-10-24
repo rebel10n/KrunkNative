@@ -1489,8 +1489,10 @@ static void test_round(Game *game) {
         NetEndPacket pa, pb;
         memcpy(&pa, end_a->payload, sizeof(pa));
         memcpy(&pb, end_b->payload, sizeof(pb));
-        CHECK(pa.result == 1 && pb.result == 0, "results %d / %d", pa.result, pb.result);
-        CHECK(pa.winner_uid == 1 && pa.next_round == 25, "winner %d next %d", pa.winner_uid, pa.next_round);
+        // a public match has no winner in v10.0.3 (`winner = -1`, deob-10.0.3.js:221681): didWin false for both,
+        // so both END results say defeat (0, not the draw's -1), and there is no winner uid
+        CHECK(pa.result == 0 && pb.result == 0, "public match: results %d / %d (defeat for everyone)", pa.result, pb.result);
+        CHECK(pa.winner_uid == -1 && pa.next_round == 25, "winner %d next %d", pa.winner_uid, pa.next_round);
         CHECK(pa.board.entries[0].uid == 1 && pa.board.entries[1].uid == 2, "end board order");
         // a: min(30, 500/100) + 20 claimed KR = 25; b (guest): 0 even with additionalReward
         CHECK(pa.rewards[0] == 25 && pa.rewards[1] == 0 && pb.rewards[0] == 25, "end reward column %d / %d", pa.rewards[0], pa.rewards[1]);

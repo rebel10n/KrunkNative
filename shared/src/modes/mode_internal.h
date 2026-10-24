@@ -80,6 +80,8 @@ void mode_update_krank(Game*, float delta);
 void mode_collision_king(Game*, Player*);
 void mode_collision_dom(Game*, Player*);
 void mode_end_raid(Game*);                      // raid onEnd: the survivors' times
+void mode_update_raid(Game*, float delta);      // raid update: runPeakPlayers
+void mode_warmup_reset(Game*);                  // game.warmupReset: everyone to its comp spawn (mode_round.c)
 
 // ---- waitTimer triggers
 void mode_trigger_pick_seeker(Game*, float);

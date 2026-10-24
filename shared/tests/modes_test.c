@@ -11,6 +11,7 @@
 #include <progression.h>
 #include <prop_hunt.h>
 #include <social_v7.h> // game_player_is_prop
+#include <game_config.h> // game_config_host: a hosted game keeps its winner
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -94,10 +95,19 @@ static void start_mode_on(Game *game, const int mode_id, const int map) {
     memset(g_respawns, 0, sizeof(g_respawns));
     game_init(game, 0, 0, 1);
     game->now = 0.0f;
+    // v10.0.3 gives a public match no winner (mode_public_no_winner, deob-10.0.3.js:221681): the win rules are
+    // tested in the offline sandbox, which keeps them; test_public_winner (and the account tests) run public games
+    game->is_sandbox = 1;
 }
 
 static void start_mode(Game *game, const int mode_id) {
     start_mode_on(game, mode_id, 0);
+}
+
+// A public game (no host, not the sandbox): v10.0.3's `winner = -1`.
+static void start_public_mode(Game *game, const int mode_id) {
+    start_mode_on(game, mode_id, 0);
+    game->is_sandbox = 0;
 }
 
 static int weapon_exists(const Game *game, const int id) {
@@ -1574,7 +1584,7 @@ static void test_death_info(Game *game) {
 #define PROG_EVENTS_MAX 64
 static struct {
     int uid, stat, value, weapon, streak;
-    char key[8];
+    char key[16];
 } g_prog[PROG_EVENTS_MAX];
 static int g_prog_count;
 
@@ -1604,7 +1614,7 @@ static void test_progression(Game *game) {
     CHECK(PLAYER_MEDAL_SLOTS == PROGRESSION_MEDAL_COUNT && progression_medal_index("Headshot") == 9 && progression_medal_index("Cycled") == 55 &&
           progression_medal_index("Nuke") == -1, "overlay.medalsList");
 
-    start_mode(game, MODE_ID_FFA);
+    start_public_mode(game, MODE_ID_FFA);
     game->hooks.progress = test_progress_hook;
     g_prog_count = 0;
     Player *killer = add_player(game, 1, 0);
@@ -1694,7 +1704,7 @@ static void test_progression(Game *game) {
 // v7.1.4 challenge contexts the 2c port skipped: "uwk" (uniqueWeaponKills), incStat "kjg" / "jgk"
 static void test_progression_contexts(Game *game) {
     printf("Running progression contexts test...\n");
-    start_mode(game, MODE_ID_FFA);
+    start_public_mode(game, MODE_ID_FFA);
     game->hooks.progress = test_progress_hook;
     g_prog_count = 0;
     Player *killer = add_player(game, 1, 0);
@@ -1722,6 +1732,236 @@ static void test_progression_contexts(Game *game) {
     CHECK(prog_has(1, 1, "jgk", 1, -1), "incStat(\"jgk\") for a kill as a Juggernaut");
     killer->is_juggernaut = 0;
     game->hooks.progress = NULL;
+}
+
+
+// v10.0.3 endGame `winner = -1` (deob-10.0.3.js:221681-221683): a public match (no host, or mimicPubs) that is not
+// Raid and not the sandbox has no winner. didWin is false for everyone (END result 0, "def"), MODE_END has no
+// winner team, noDraws plays no overtime; the sandbox, a hosted game and Raid keep the rules' winner.
+static void test_public_winner(Game *game) {
+    printf("Running v10.0.3 public match winner test...\n");
+    start_public_mode(game, MODE_ID_FFA);
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    kill(b, a, 1);
+    CHECK(mode_public_no_winner(game) && mode_pick_winner(game).no_one && !mode_pick_winner(game).player, "FFA in public: winner -1");
+    game->round_timer = 0.5f;
+    tick(game, 1.0f, 0.5f);
+    CHECK(ended(game) && end_result_for(1) == 0 && end_result_for(2) == 0, "public FFA: defeat for the best score too (%d / %d)",
+          end_result_for(1), end_result_for(2));
+    const SentPacket *sent = last_sent(NET_PACKET_END, 1);
+    NetEndPacket end;
+    memset(&end, 0, sizeof(end));
+    if (sent) memcpy(&end, sent->payload, sizeof(end));
+    CHECK(sent && end.winner_uid == -1 && end.board.count == 2 && end.board.entries[0].uid == 1, "no winner uid, the board keeps its order");
+
+    // TDM: no trophy, and noDraws plays no overtime (`!this.winner` is false for -1): a 0 - 0 ends at once, as defeats
+    start_public_mode(game, MODE_ID_TDM);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    kill(b, a, 1);
+    game->mode->need_winner = 1;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    const NetModeEndPacket mode_end = last_end();
+    CHECK(ended(game) && end_result_for(a->uid) == 0 && end_result_for(b->uid) == 0 && mode_end.winner_team == -1,
+          "public TDM: no winner team (%d), defeats (%d / %d)", mode_end.winner_team, end_result_for(a->uid), end_result_for(b->uid));
+    start_public_mode(game, MODE_ID_TDM);
+    add_player(game, 1, 0);
+    add_player(game, 2, 0);
+    game->mode->need_winner = 1;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game) && end_result_for(1) == 0 && end_result_for(2) == 0, "public 0 - 0 with noDraws: no overtime, not a draw (%d)",
+          end_result_for(1));
+
+    // nobody in the game: the rules' winner (players.list.length > 0)
+    start_public_mode(game, MODE_ID_TDM);
+    CHECK(!mode_public_no_winner(game), "an empty public game keeps the rules' winner");
+    // the sandbox keeps the winner
+    start_mode(game, MODE_ID_FFA);
+    add_player(game, 1, 0);
+    CHECK(!mode_public_no_winner(game) && !mode_pick_winner(game).no_one, "the sandbox keeps its winner");
+
+    // Raid keeps its winner: a "skip" end (End Round trigger) with a survivor and time left is the raiders' win
+    start_public_mode(game, MODE_ID_RAID);
+    a = add_player(game, 1, 0);
+    tick(game, 20.5f, 0.5f); // "starting in " 20 s
+    CHECK(!mode_public_no_winner(game), "public Raid keeps its winner");
+    game->mode->skip = 1;
+    tick(game, 0.5f, 0.5f);
+    CHECK(ended(game) && end_result_for(a->uid) == 1 && a->mode.has_timer, "Raid: a survivor with time left wins (%d) and gets a time",
+          end_result_for(a->uid));
+
+    // a hosted game keeps the winner; with mimicPubs it is a public match
+    static Game hosted;
+    memset(&hosted, 0, sizeof(hosted));
+    int *modes = calloc(1, sizeof(int));
+    const cJSON **maps = calloc(1, sizeof(cJSON *));
+    maps[0] = g_test_maps[0];
+    game_configure(&hosted, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    hosted.hooks.send = test_send;
+    game_config_host(&hosted, NULL, GAME_HOST_CUSTOM);
+    game_init(&hosted, 0, 0, 1);
+    add_player(&hosted, 1, 0);
+    CHECK(hosted.ready && !mode_public_no_winner(&hosted) && mode_pick_winner(&hosted).player, "a hosted game keeps its winner");
+    hosted.config.mimic_pubs = 1;
+    CHECK(mode_public_no_winner(&hosted) && mode_pick_winner(&hosted).no_one, "a hosted game with mimicPubs has none");
+    free_players(&hosted);
+    game_config_free(&hosted);
+    if (hosted.map) map_fini(hosted.map);
+    if (hosted.mode) mode_fini(hosted.mode);
+    free(hosted.weapons);
+    free(hosted.classes);
+    free(hosted.modes);
+}
+
+// v10.0.3 Raid (deob-10.0.3.js:118355-118457) and Zombies keys: skipStats, noProfileStats, specMaxD, runPeakPlayers,
+// the onEnd run challenges and onAIDeath "aik"
+static void test_raid_v10(Game *game) {
+    printf("Running v10.0.3 Raid / Zombies keys test...\n");
+    start_public_mode(game, MODE_ID_RAID);
+    CHECK(mode_no_profile_stats(game) && mode_spec_max_d(game) == 25.0f && mode_skip_stat(game, "h") && mode_skip_stat(game, "s") &&
+              mode_skip_stat(game, "crc") && mode_skip_stat(game, "step") && !mode_skip_stat(game, "spry"),
+          "Raid: noProfileStats, specMaxD 25, skipStats h s crc step");
+    game->hooks.progress = test_progress_hook;
+    g_prog_count = 0;
+    Player *a = add_player(game, 1, 0);
+    game_inc_stat(game, a, "s");
+    game_inc_stat(game, a, "spry");
+    CHECK(!prog_has(1, 1, "s", 1, -1) && prog_has(1, 1, "spry", 1, -1), "incStat skips \"s\", keeps \"spry\"");
+    mode_ai_kill_challenge(game, a);
+    CHECK(prog_has(1, 0, "aik", 1, a->loadout[a->loadout_index]), "an AI kill: \"aik\" with the held weapon");
+
+    tick(game, 20.5f, 0.5f); // the run began at the spawn (Player.init); raid.update counted the players since
+    CHECK(a->mode.run_peak_players == 1 && !a->mode.run_shots && a->mode.run_dmg_taken == 0.0f, "one player in the run");
+    g_prog_count = 0;
+    const float left = game->round_timer; // the wait holds the clock: it ran one tick since
+    game->mode->skip = 1; // the End Round trigger
+    tick(game, 0.5f, 0.5f);
+    const int ms = (int) floorf((1500.0f - left) * 1000.0f);
+    CHECK(ended(game) && prog_has(1, 0, "time", ms, -1), "onEnd: \"time\" %d ms", ms);
+    CHECK(prog_has(1, 0, "rnodmg", 1, -1) && prog_has(1, 0, "rnogun", 1, -1) && prog_has(1, 0, "rsolo", 1, -1) &&
+              prog_has(1, 0, "rsolofull", 1, -1) && !prog_has(1, 0, "r1hp", 1, -1),
+          "a clean solo win: rnodmg, rnogun, rsolo, rsolofull (not r1hp)");
+
+    // two players, one hurt at 1 HP who fired: r1hp only; nobody is solo
+    start_public_mode(game, MODE_ID_RAID);
+    game->hooks.progress = test_progress_hook;
+    a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    tick(game, 20.5f, 0.5f);
+    CHECK(a->mode.run_peak_players == 2 && b->mode.run_peak_players == 2, "runPeakPlayers 2");
+    mode_run_shot(game, a);
+    player_change_health(a, NULL, (float) a->max_health - 1.0f, 0);
+    CHECK(a->mode.run_shots == 1 && a->mode.run_dmg_taken == (float) a->max_health - 1.0f && a->health == 1.0f, "runShots / runDmgTaken");
+    g_prog_count = 0;
+    game->mode->skip = 1;
+    tick(game, 0.5f, 0.5f);
+    CHECK(prog_has(1, 0, "r1hp", 1, -1) && !prog_has(1, 0, "rnodmg", 1, -1) && !prog_has(1, 0, "rnogun", 1, -1) && !prog_has(1, 0, "rsolo", 1, -1),
+          "hurt and fired with company: r1hp only");
+    CHECK(prog_has(2, 0, "rnodmg", 1, -1) && !prog_has(2, 0, "rsolo", 1, -1), "the other raider: rnodmg, not solo");
+
+    // everyone out: the raid wins, no run challenges
+    start_public_mode(game, MODE_ID_RAID);
+    game->hooks.progress = test_progress_hook;
+    a = add_player(game, 1, 0);
+    tick(game, 20.5f, 0.5f);
+    g_prog_count = 0;
+    kill(a, NULL, 0);
+    tick(game, 0.5f, 0.5f);
+    CHECK(ended(game) && end_result_for(1) == 0 && !prog_has(1, 0, "rsolo", 1, -1), "a lost run: no challenges");
+    mode_run_progress(a, "bthrone");
+    CHECK(a->mode.run_bthrone, "runProg.bthrone");
+    game->hooks.progress = NULL;
+
+    start_public_mode(game, MODE_ID_ZOM);
+    CHECK(!mode_no_profile_stats(game) && mode_skip_stat(game, "h") && mode_skip_stat(game, "step") && mode_spec_max_d(game) == 160.0f,
+          "Zombies: skipStats, profile stats, specMaxD 160");
+    start_public_mode(game, MODE_ID_FFA);
+    CHECK(!mode_skip_stat(game, "s") && !mode_no_profile_stats(game), "FFA counts every stat");
+}
+
+// v10.0.3 players.kill / players.score details (deob-10.0.3.js:198485-198540, 197840-197905)
+static void test_kill_rules_v10(Game *game) {
+    printf("Running v10.0.3 kill / score rules test...\n");
+    // lives and deaths count once the match runs, contTime timers included (Prop Hunt's taunts)
+    start_mode(game, MODE_ID_PROP);
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    add_player(game, 3, 0);
+    tick(game, 41.0f, 0.5f); // lock seekers (10 s), release seekers (30 s): the taunt timer (contTime) runs
+    CHECK(game->mode->wait_timer_count && game->mode->wait_timers[0].cont_time && !mode_waiting(game), "Prop Hunt: the taunt timer runs the clock");
+    Player *prop = a->team == 1 ? a : b->team == 1 ? b : first_on_team(game, 1);
+    const unsigned deaths = prop ? prop->deaths : 0;
+    if (prop) kill(prop, NULL, 0);
+    CHECK(prop && prop->mode.lives == 0 && prop->deaths == deaths + 1 && !mode_can_spawn(game, prop),
+          "a prop's death during the taunts takes its life (%d) and counts", prop ? prop->mode.lives : -1);
+
+    start_mode(game, MODE_ID_HIDE);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    kill(a, b, 1);
+    CHECK(a->deaths == 0, "a death before the match (\"picking seeker in \") does not count");
+
+    // endGame sorts players.list before winCondition: One in the Chamber's winner has the most lives
+    start_mode(game, MODE_ID_OINC);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    tick(game, 10.5f, 0.5f);
+    a->mode.lives = 1;
+    b->mode.lives = 3;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game) && end_result_for(2) == 1 && end_result_for(1) == 0, "OINC time out: the most lives win, not the first joined (%d / %d)",
+          end_result_for(1), end_result_for(2));
+
+    // the 13000 cap is a pub-type rule and skips devs; doubleXP doubles pub-type scores
+    start_mode(game, MODE_ID_FFA);
+    a = add_player(game, 1, 0);
+    a->score = 12990;
+    player_score(a, 100, 0);
+    CHECK(a->score == 13000, "pub-type cap 13000 (%d)", a->score);
+    a->dev = 1;
+    player_score(a, 100, 0);
+    CHECK(a->score == 13100, "a dev is not capped (%d)", a->score);
+    start_mode(game, MODE_ID_AON);
+    a = add_player(game, 1, 0);
+    const int before = a->score;
+    player_score(a, 50, 0);
+    CHECK(a->score - before == 100 && mode_double_xp(game), "All or Nothing doubleXP: 50 -> 100 (%d)", a->score - before);
+
+    // noKillFeed (Traitor) hides the feed row
+    start_mode(game, MODE_ID_TRAI);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    add_player(game, 3, 0);
+    g_sent_count = 0;
+    kill(a, b, 1);
+    const SentPacket *sent = last_sent(NET_PACKET_KILL, NET_TARGET_ALL);
+    NetKillPacket feed;
+    memset(&feed, 0, sizeof(feed));
+    if (sent) memcpy(&feed, sent->payload, sizeof(feed));
+    CHECK(sent && (feed.fists & NET_KILL_HIDE_FEED), "Traitor: the kill has hideFeed");
+    start_mode(game, MODE_ID_FFA);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    g_sent_count = 0;
+    kill(a, b, 1);
+    sent = last_sent(NET_PACKET_KILL, NET_TARGET_ALL);
+    memset(&feed, 0, sizeof(feed));
+    if (sent) memcpy(&feed, sent->payload, sizeof(feed));
+    CHECK(sent && !(feed.fists & NET_KILL_HIDE_FEED), "FFA: the kill shows in the feed");
+
+    // botsAsAI (Raid): a bot's kill has no killer
+    start_mode(game, MODE_ID_RAID);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    b->is_bot = 1;
+    tick(game, 20.5f, 0.5f);
+    const unsigned bot_kills = b->kills;
+    kill(a, b, 1);
+    CHECK(b->kills == bot_kills && a->last_killer_uid == -1, "Raid: a bot's kill counts for nobody");
 }
 
 int main(void) {
@@ -1776,6 +2016,9 @@ int main(void) {
     test_death_info(&game);
     test_progression(&game);
     test_progression_contexts(&game);
+    test_public_winner(&game);
+    test_raid_v10(&game);
+    test_kill_rules_v10(&game);
 
     if (g_failures) {
         printf("modes_test: %d of %d check(s) failed\n", g_failures, g_checks);

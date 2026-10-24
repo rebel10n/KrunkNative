@@ -68,6 +68,7 @@ typedef struct {
     int mode;        // game.modeIndex
     int class_index; // player.classIndex
     int ranked;      // game.isComp ("ranked" challenges need it)
+    int lt_off;      // game.isRanked or mode.noProfileStats (Raid): DAT.lt challenges do not move (deob-10.0.3.js:202974)
     int quit;        // finalize(quit): a player leaving mid-match keeps only DAT.nem challenges
 } ChallengeMatch;
 

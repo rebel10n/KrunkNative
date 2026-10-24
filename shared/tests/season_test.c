@@ -214,6 +214,25 @@ static void test_challenge_contexts(void) {
     cJSON_Delete(results);
     cJSON_Delete(completed);
     cJSON_Delete(reward);
+
+    // v10.0.3 challenges.update: a DAT.lt challenge moves only `!isRanked && !mode.noProfileStats` (deob-10.0.3.js:202974)
+    const char *lt_json = "[{\"CI\":7,\"T\":\"daily\",\"DAT\":{\"ky\":\"k\",\"val\":5,\"lt\":1},\"REW\":{},\"PV\":0,\"PT\":0},"
+                          " {\"CI\":8,\"T\":\"daily\",\"DAT\":{\"ky\":\"k\",\"val\":5},\"REW\":{},\"PV\":0,\"PT\":0}]";
+    for (int off = 0; off < 2; off++) {
+        active = cJSON_Parse(lt_json);
+        events = cJSON_Parse("[[\"k\",2,-1,-1,-1]]");
+        results = cJSON_CreateArray(), completed = cJSON_CreateArray(), reward = cJSON_CreateObject();
+        const ChallengeMatch lt_match = {.map_index = 0, .map_id = -1, .lt_off = off};
+        challenges_finalize(active, events, &lt_match, results, completed, reward);
+        text = cJSON_PrintUnformatted(results);
+        CHECK(text && !strcmp(text, off ? "[0,8,2]" : "[0,7,2,0,8,2]"), "lt challenges with ltOff %d: %s", off, text ? text : "");
+        free(text);
+        cJSON_Delete(active);
+        cJSON_Delete(events);
+        cJSON_Delete(results);
+        cJSON_Delete(completed);
+        cJSON_Delete(reward);
+    }
 }
 
 int main(void) {

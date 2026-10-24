@@ -34,6 +34,7 @@ int  hud_modes_end_rows(int *uids, int max);
 void hud_modes_end_cell(const Player*, const char *stat, char *out, size_t size);
 int  hud_modes_end_table_html(const Client*, char *html, size_t size); // the live #endTable rows (hud_modes.c); 0 without MODE_END
 int  hud_modes_end_team_score(int team);
+int  hud_modes_end_winner_team(void); // MODE_END's winner team: 1 / 2, -1 none (a draw, FFA, a public match), 0 no MODE_END yet
 // An official "end" row (net_ext.h NET_EXT_KN_OFFICIAL_END_ROW, before its END): #endTable prints it
 // even when its player already left (its name cell), and its "dmg" cell.
 void hud_modes_end_row(const NetOfficialEndRowPacket*);

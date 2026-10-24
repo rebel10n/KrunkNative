@@ -74,9 +74,10 @@ static int cfg_comp(const Game *game) {
 
 // ------------------------------------------------------------------ finishInit
 
-// warmupTime's first timer: warmupReset (players re-placed on their next spawn) + lockMove.
+// warmupTime's first timer: warmupReset + lockMove (deob-10.0.3.js:220036-220044).
 static void mode_trigger_warmup_end(Game *game, const float overflow) {
     (void) overflow;
+    mode_warmup_reset(game);
     mode_lock_move(game);
 }
 
@@ -423,10 +424,11 @@ int mode_end_game(Game *game) {
         return 1;
     }
 
-    // endGame(): needWinner and no winner -> "Overtime", +60 s
+    // endGame(): needWinner and no winner -> "Overtime", +60 s (a public match's winner -1 is a winner here:
+    // `!this.winner` is false for it, deob-10.0.3.js:221684, so it plays no overtime)
     if (mode->need_winner) {
         const ModeWinner winner = mode_pick_winner(game);
-        if (!winner.team && !winner.player) {
+        if (!mode_winner_set(winner)) {
             mode_send_text_popup(game, "Overtime", "+60 Seconds");
             game->round_timer = MODE_OVERTIME;
             mode->skip = 0;
@@ -465,11 +467,33 @@ void mode_sort_players(Game *game, Player **players, const size_t count) {
     }
 }
 
+// v10.0.3 game.isEmptyLobby: the match init sets it true (deob-10.0.3.js:219806) and nothing in the bundle ever
+// clears it (its other two references are reads: the winner override at 221681 and the Battle Pass play term at
+// 221768, which accounts.c keeps off with `.empty_lobby = 1` for the same reason). So it is true for every match.
+#define MODE_EMPTY_LOBBY 1
+
+// v10.0.3 endGame (deob-10.0.3.js:221681-221683): `if (this.isPubType() && this.isEmptyLobby && !this.isSandbox &&
+// this.mode.id !== "raid" && this.players.list.length > 0) this.winner = -1;`, after every winner rule (endIndex,
+// winCondition, getWinTeam, multiWinner, the first player) and so after a forfeit's getWinTeam too. With
+// isEmptyLobby always true: every public match (no host, or mimicPubs: game_is_pub_type) except Raid and the
+// offline sandbox ends with nobody winning. Raid keeps its winner (raid.onEnd's challenges read didWin).
+int mode_public_no_winner(const Game *game) {
+    if (!game || !game->mode || !MODE_EMPTY_LOBBY || game->is_sandbox || !game_is_pub_type(game)) return 0;
+    if (game->mode->config.id == MODE_ID_RAID) return 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i]) return 1; // players.list.length > 0 (bots are in the list too)
+    }
+    return 0;
+}
+
+int mode_winner_set(const ModeWinner winner) {
+    return winner.team || winner.player || winner.no_one;
+}
+
 // endGame() winner: winCondition, else (teams) getWinTeam(), else the first player after sorting.
-ModeWinner mode_pick_winner(Game *game) {
+static ModeWinner mode_rule_winner(Game *game) {
     GameMode *mode = game->mode;
-    ModeWinner winner = {0, NULL};
-    if (!mode) return winner;
+    ModeWinner winner = {0, NULL, 0};
 
     // v10 prepareForfeit: a team forfeit gave the round to the other team (forfeit.c)
     if (forfeit_forced_team(game)) {
@@ -477,7 +501,25 @@ ModeWinner mode_pick_winner(Game *game) {
         return winner;
     }
 
-    if (mode->config.win_condition) return mode->config.win_condition(game);
+    // endGame sorts players.list in place by endSort / orderByScore before winCondition reads it
+    // (deob-10.0.3.js:221647-221650, 221672): One in the Chamber's first player alive and Gun Game's tie at the
+    // top tier are the best ranked ones. KN keeps its join order and lends the winCondition a sorted view.
+    if (mode->config.win_condition) {
+        Player *sorted[GAME_LEADERBOARD_MAX];
+        size_t count = 0;
+        for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
+            if (game->players[i]) sorted[count++] = game->players[i];
+        }
+        mode_sort_players(game, sorted, count);
+        Player **players = game->players;
+        const size_t player_count = game->player_count;
+        game->players = sorted;
+        game->player_count = count;
+        const ModeWinner result = mode->config.win_condition(game);
+        game->players = players;
+        game->player_count = player_count;
+        return result;
+    }
 
     if (mode->config.teams) {
         winner.team = mode_win_team(game, 0);
@@ -492,6 +534,13 @@ ModeWinner mode_pick_winner(Game *game) {
     mode_sort_players(game, sorted, count);
     winner.player = count ? sorted[0] : NULL;
     return winner;
+}
+
+// The rules' winner, then v10.0.3's public-match override (winner -1: no_one).
+ModeWinner mode_pick_winner(Game *game) {
+    if (!game || !game->mode) return (ModeWinner) {0, NULL, 0};
+    if (mode_public_no_winner(game)) return (ModeWinner) {0, NULL, 1};
+    return mode_rule_winner(game);
 }
 
 int mode_team_score(const Game *game, const int team) {
@@ -561,7 +610,9 @@ void mode_player_added(Game *game, Player *player) {
 
 int mode_can_spawn(const Game *game, const Player *player) {
     if (!game->mode || !player) return 1;
-    if (!game->mode->lives || game->mode->wait_timer_count) return 1;
+    // the lives count once the match runs: no wait timers, or the first one keeps the clock running (contTime:
+    // Prop Hunt's taunts, objective rotations), as players.kill takes them (deob-10.0.3.js:198536)
+    if (!game->mode->lives || mode_waiting(game)) return 1;
     return player->mode.lives > 0;
 }
 
@@ -732,6 +783,46 @@ int game_get_spawn_point(Game *game, const Player *player, vec3 *position, int *
     return 1;
 }
 
+// getSpawnPoint(team, player, false, true), forceComp (deob-10.0.3.js:217081-217148): the first comp spawn of the
+// player's (flipped) team, any comp spawn in FFA, never a teamOnly spawn of another team; the spawn itself, or
+// getPointSpread(.., spread + 7) for a spawn with spread (getPointSpread(.., 10), no offset, while the first wait
+// timer is comp). v10 walks the spawns sorted by sight count and falls back to that order's first spawn; KN walks
+// them in map order and falls back to the regular pick (game_get_spawn_point).
+static int game_get_comp_spawn_point(Game *game, const Player *player, vec3 *position, int *direction) {
+    const Map *map = game->map;
+    const GameMode *mode = game->mode;
+    if (!map || !mode) return 0;
+    const int team = player ? player->team : 0;
+    const int spawn_team = mode->flipped_spawns && (team == 1 || team == 2) ? 3 - team : team;
+    const int use_comp = mode->wait_timer_count && mode->wait_timers[0].comp;
+    for (size_t s = 0; s < map->spawn_count; s++) {
+        const Spawn *spawn = map->spawns[s];
+        if (!spawn->comp || (spawn->team_only && spawn->team != spawn_team) || (mode->config.teams && spawn->team != spawn_team)) continue;
+        *position = use_comp ? spawn_point_spread(game, spawn, game_ruleset(game)->comp_spawn_spread)
+                  : spawn->spread > 0.0f ? spawn_point_spread(game, spawn, spawn->spread + 7.0f) : spawn->position;
+        *direction = spawn->direction;
+        return 1;
+    }
+    return game_get_spawn_point(game, player, position, direction);
+}
+
+// game.warmupReset (deob-10.0.3.js:217698-217711): every active player goes to its team's comp spawn
+// (resetPosition: the spot, the spawn's direction, no momentum), then the match is IN_PROGRESS. Called when
+// the warmup ends and by Defuse's gameStart. KrunkNative difference: resetPosition's resetAmmo(true) and its
+// movement-state resets (crouch, ladder, wall stick) are not repeated here; the player keeps them.
+void mode_warmup_reset(Game *game) {
+    if (!game || !game_is_authority(game)) return;
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        vec3 at;
+        int direction = 0;
+        if (!player || !player->active || !game_get_comp_spawn_point(game, player, &at, &direction)) continue;
+        at.y += 0.01f; // resetPosition: y + 0.01
+        game_change_position(game, player, at, 1, 1, 1, direction);
+    }
+    game_set_state(game, GAME_STATE_IN_PROGRESS);
+}
+
 // KrunkNative (the bot fill, shared/src/bots.c bot_quota_tick): would a player added now, on the
 // team players.add gives a teamless newcomer, get a spawn nobody stands on (tier 0 above)? Comp
 // spawns spread every player, a map without spawns has nothing to wait for (both 1); with no spawn
@@ -779,6 +870,10 @@ void mode_player_spawned(Game *game, Player *player) {
     player->mode.flag = 0;
     player->mode.respawn_timer = 0.0f;
     player->mode.dog_tags = 0;          // Player.init
+    player->mode.run_dmg_taken = 0.0f;  // Player.init runDmgTaken / runShots / runPeakPlayers / runProg
+    player->mode.run_shots = 0;         // (deob-10.0.3.js:190648-190651): every spawn starts a new run
+    player->mode.run_peak_players = 0;
+    player->mode.run_bthrone = 0;
     player->mode.on_zone = -1;
     player->mode.has_last_ground = 0;
     mode_apply_outfit(game, player); // the SPAWN that follows carries the outfit
@@ -788,8 +883,9 @@ void mode_on_kill(Game *game, Player *victim, Player *killer, const int weapon_i
     GameMode *mode = game->mode;
     if (!mode || !game_is_authority(game)) return;
 
-    // lives only count once the match started
-    if (victim->mode.lives && !mode->wait_timer_count) {
+    // lives only count once the match started: `lives && (!waitTimers || waitTimers[0].contTime)`
+    // (deob-10.0.3.js:198536; a contTime timer such as Prop Hunt's taunts runs through the match)
+    if (victim->mode.lives && !mode_waiting(game)) {
         victim->mode.lives--;
         mode_send_lives(game, victim);
     }
@@ -828,8 +924,17 @@ int mode_score_scale(const Game *game, const Player *player, int amount, const i
 }
 
 // The 13000 public score cap, off with noScrLimit (returns 0 then)
-int mode_score_cap(const Game *game) {
-    return game && game->mode && game->mode->config.no_scr_limit ? 0 : GAME_SCORE_CAP;
+// players.score: `isPubType() && score > 13000 && !account.isDev && !mode.noScrLimit` (deob-10.0.3.js:197869): a
+// hosted game (without mimicPubs) and a dev account have no cap
+int mode_score_cap(const Game *game, const Player *player) {
+    if (!game || !game_is_pub_type(game) || (player && player->dev)) return 0;
+    return game->mode && game->mode->config.no_scr_limit ? 0 : GAME_SCORE_CAP;
+}
+
+// isDoubleXP = isPubType() && mode.doubleXP (deob-10.0.3.js:219886): players.score doubles every amount
+// (deob-10.0.3.js:197855; All or Nothing, Mag Dump)
+int mode_double_xp(const Game *game) {
+    return game && game->mode && game->mode->config.double_xp && game_is_pub_type(game);
 }
 
 // players.score after the 13000 cap (`amount` is 0 when capped): objectiveScore (objective and

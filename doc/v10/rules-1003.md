@@ -1,6 +1,6 @@
-# Krunker v10.0.3: round wins outside best-of, and Battle Pass points per public match
+# Krunker v10.0.3: round wins outside best-of, Battle Pass points and the winner of a public match, Raid's keys
 
-Two rules that `doc/v10/gameplay-1003-audit.md` left open. Reference: `~/jails/kru/src/Krunker_v10.0.3/game.js` (read only). Offsets are in the decoded copy `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (webcrack; it has no undecoded string-array calls left, so every reference to a name in it is listed here): "deob byte N (line L)" is the UTF-8 byte offset and line. "raw byte N" is the offset in the minified `game.js`. Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/src/data/game.js`) is cited where it has the same code.
+Rules that `doc/v10/gameplay-1003-audit.md` left open. Reference: `~/jails/kru/src/Krunker_v10.0.3/game.js` (read only). Offsets are in the decoded copy `~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js` (webcrack; it has no undecoded string-array calls left, so every reference to a name in it is listed here): "deob byte N (line L)" is the UTF-8 byte offset and line. "raw byte N" is the offset in the minified `game.js`. Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/src/data/game.js`) is cited where it has the same code.
 
 ## 1. Team round wins outside best-of
 
@@ -82,6 +82,60 @@ KrunkNative, now:
 
 Open, not changed:
 
-1. The winner override (deob 221681-221682, `this.winner = -1` for public, non-raid, non-sandbox matches with players, because `isEmptyLobby` is always true): KrunkNative gives public matches a winner. Porting it would change who wins and who gets "w" credit in public games. Needs a decision.
+1. (Ported, section 3: the public-match winner override.)
 2. KrunkNative's `playTime` is the time since the account's first spawn in the match (`match_since`, `server/src/accounts.c:2647`), not 10.0.3's per-player tick from join. The elapsed clock is the current round's `total - round_timer`, not the cumulative `gameTimerP`. Both only matter if the play term is ever switched on.
 3. Challenge rewards (`REW.bpp`) are a separate rule and are unchanged.
+
+## 3. The winner of a public match
+
+**Result: KrunkNative matches 10.0.3 now** (decision: the user asked for v10 parity, 2026-10-24).
+
+10.0.3 `endGame`, after every winner rule (endIndex 3 / 4, `winCondition`, `getWinTeam()`, `multiWinner`, the first player; deob line 221652-221680):
+
+```
+if (this.isPubType() && this.isEmptyLobby && !this.isSandbox && this.mode.id !== "raid" && this.players.list.length > 0) {
+  this.winner = -1;                                             // deob line 221681-221683
+}
+```
+
+`isEmptyLobby` is true for every match (section 2), so the rule is: every public-type match (no host, or a host with `mimicPubs`) that is not Raid and not the sandbox, with anyone in it, ends with `winner = -1`. What -1 does downstream:
+
+| Where | 10.0.3 | Effect |
+|---|---|---|
+| noDraws overtime | `if (this.needWinner && !this.winner && !this.endIndex)` (line 221684) | -1 is truthy: no overtime |
+| didWin | `p.team && p.team == this.winner \|\| p == this.winner \|\| multiWinner && winner.includes(p)` (line 221695) | false for everyone |
+| challenges | `if (p.didWin) challenges.update("w")`; "gp" for everyone (lines 221696-221699) | nobody gets "w" |
+| rewards | KR and BP do not read the winner, except `isOfficial.reward && didWin` (line 221763) | unchanged |
+| END | `send(END_GAME, .., this.winner \|\| endIndex == 3 ? p.didWin : -1, endData, mode.teams && (winner \|\| endIndex == 3) ? winner : -1, ..)` (line 221896) | result false (not the draw's -1), winner team -1 |
+| end screen | `didWin == -1 ? "dra" : didWin ? "vic" : "def"` (line 257370); the team trophy goes to `winTeam == 1 / 2` (line 257452) | everyone sees "def", no trophy |
+| account | `updateAccounts`: `if (p.didWin) account.wins++` (line 217298-217300) | no win |
+| next-map vote | `genMatchList` / `mts` (lines 221827-221850) | unchanged |
+
+Raid keeps its winner because `raid.onEnd` (line 118390) reads `didWin` for its run challenges.
+
+KrunkNative, now:
+
+- `shared/src/modes/mode_round.c`: `mode_public_no_winner` (the condition, with `MODE_EMPTY_LOBBY` 1 for `isEmptyLobby`), `mode_pick_winner` returns `ModeWinner.no_one` for it (`shared/include/modes.h`), and `mode_winner_set` is `this.winner` truthy, so `mode_end_game`'s noDraws overtime does not start.
+- `shared/src/game.c` `game_send_end`: `no_one` gives `didWin` 0 for every player and result 0; `mode_send_end` sends winner team -1. The server's `accounts.c` takes `round_result` from the END, so no "won" and no "w".
+- `client/src/ui/hud_ui.c`: the team trophy comes from MODE_END's winner team (`hud_modes_end_winner_team`), not from our own result, so a public match shows none.
+- The bridge (`server/bridge/v10_translate.c`) already sends winner -1 to official clients.
+- `bot_chat.c` (KrunkNative only) treats `no_one` as a draw for the bots' lines.
+- Tests: `shared/tests/modes_test.c` `test_public_winner` (public FFA / TDM defeats, no overtime, the sandbox, a hosted game, mimicPubs, Raid); the other mode tests run in the sandbox, which keeps the rules' winner. `shared/tests/match_test.c` round test: a public round's END results are 0 / 0.
+
+## 4. Raid and Zombies keys, and the endGame order
+
+10.0.3 Raid (deob line 118351-118457) and Zombies (line 119112-119240):
+
+| Key | 10.0.3 | KrunkNative |
+|---|---|---|
+| `skipStats: ["h", "s", "crc", "step"]` (Raid line 118449, Zombies line 119126) | `incStat` skips the keys (line 217356) | `GameModeConfig.skip_stats`, `mode_skip_stat`, read by `game_inc_stat` |
+| `noProfileStats` (Raid line 118448) | `updateAccounts`: no games / kills / deaths / wins (line 217283); `transferStats` skips `account.stats` (line 217374); `checkLeave` adds no game (line 217391); `challenges.update` skips `DAT.lt` challenges (line 202974, also in ranked) | `server/src/accounts.c` `acc_player_stats` (`profile`), `acc_add_progress` (no "stats", `ltOff`), `shared/src/progression.c` `match_ok` (`ChallengeMatch.lt_off`, from the commit's `ltOff` in `services/brain`) |
+| `specMaxD: 25` (Raid line 118455) | `spect.maxD = mode.specMaxD \|\| 160` (line 257121), the wheel clamps `followDis` (line 235616-235622) | `GameModeConfig.spec_max_d`, `mode_spec_max_d`, `client/src/spectate.c` `spectate_scroll` |
+| `update`: `runPeakPlayers` (line 118426) | the most non-bot players an active raider saw | `mode_update_raid` |
+| `onEnd` (line 118390-118425) | time left: "time" (ms) for the newly timed; winners: "rnodmg", "r1hp", "rnogun" (on Bastion, map 43, only after "bthrone"), "rsolo", "rsolofull" | `mode_end_raid`; `runShots` (line 196342) from `player_shoot`, `runDmgTaken` (line 198005) from `player_change_health`, `runProg` (line 183656) from the Give Challenge Progress action, all reset in `mode_player_spawned` (Player.init, line 190648) |
+| `onAIDeath` "aik" (Raid line 118440, Zombies line 119232) | a player's AI kill, with the held weapon | `mode_ai_kill_challenge` |
+| Zombies `onPreEnd` "rnd" (line 119175) | the waves survived, before the wave score | `mode_zombies_on_pre_end` |
+
+The endGame order matters for Raid: `winCondition` and `onEnd` read `gameTimerP`, the clock left, which a "skip" end (the End Round trigger, line 182870-182873) keeps. KrunkNative's `game_end_round` cleared `round_timer` before picking the winner, so a raid could never be won and its onEnd never ran. It is cleared after `mode_on_game_end` now, and the end order is computed once (10.0.3 sorts before onPreEnd, line 221647, and builds the end table from that order; a second sort put Zombies' end table, where everyone has the same score, back in join order).
+
+Not ported: Zombies' `onPreEnd` bot removal (`bots.remove`, line 119168) and `onEnd`'s best-wave call (`call(135, [4, id, zWave])`, line 119183).

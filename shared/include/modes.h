@@ -110,6 +110,10 @@ typedef float (*ModeMeleeFn)(struct Game_t*, struct Player_t *dealer, struct Pla
 typedef struct {
     int team;
     struct Player_t *player;
+    // v10.0.3 endGame `this.winner = -1` (deob-10.0.3.js:221681-221683, mode_public_no_winner): the match has a
+    // winner value nobody holds. Not a draw: didWin is false for everyone (END result 0, "def"), no team gets the
+    // end-screen trophy (winner team -1), nobody gets a "w" or a win, and noDraws plays no overtime.
+    unsigned char no_one;
 } ModeWinner;
 
 typedef ModeWinner (*ModeWinFn)(const struct Game_t*);
@@ -299,6 +303,7 @@ typedef struct {
     float rand_class_scr;            // randClassScr (class score to a random class; client stats)
     float view_dis;                  // viewDis: server relevance culling distance (0 none, WP-E)
     int name_dist;                   // nameDist (Trade)
+    float max_no_mov;                // maxNoMov (s; Trade 180, deob-10.0.3.js:119709): the server's in-game idle kick for the mode (0 = idle_kick_seconds)
     int prop_switches;               // propSwitches
     const int *disabled_streaks;     // disabledStreaks (streaks.js indices)
     int disabled_streak_count;
@@ -309,6 +314,12 @@ typedef struct {
                                      // coyote time and notWallJ walls; canSlide = isStalker (only it slides)
     unsigned char stalker_v7:1;      // v7.1.4's Stalker (Krunker Strike keeps it, strike_rules.c): pickStalker
                                      // 400 HP, onMelee = the stalker's swing kills and heals it 40 + jump scare
+
+    // ---- Krunker v10.0.3 mode keys (Raid deob-10.0.3.js:118448-118455, Zombies 119126)
+    const char *const *skip_stats;   // skipStats: game.incStat keys this mode does not count (NULL-terminated; NULL none)
+    unsigned char no_profile_stats:1;// noProfileStats: no games / kills / deaths / wins, no account.stats (transferStats),
+                                     // no `lt` challenge progress (updateAccounts, transferStats, checkLeave, challenges.update)
+    float spec_max_d;                // specMaxD: the spectator's follow distance cap (0 = config.specMaxD 160)
 } GameModeConfig;
 
 extern const GameModeConfig g_default_game_mode_config;
@@ -350,6 +361,11 @@ typedef struct {
     // ---- map-logic WP-H: Zombies endStats
     int ai_kills;             // aiKills: AIs this player killed (AI.kill, not silent)
     int rounds;               // rounds: waves that ended while this player was in the game
+    // ---- v10.0.3 Raid run tracking (Player.init resets them each spawn, deob-10.0.3.js:190648-190651; raid.onEnd reads them)
+    float run_dmg_taken;      // runDmgTaken: damage taken this life (players.changeHealth, deob-10.0.3.js:198005-198007)
+    int run_shots;            // runShots: players.shoot calls this life (deob-10.0.3.js:196342)
+    int run_peak_players;     // runPeakPlayers: the most non-bot players seen while active (raid.update)
+    unsigned char run_bthrone:1; // runProg.bthrone: "Give Challenge Progress" with key bthrone this life (Bastion)
 } ModePlayerState;
 
 typedef struct {
@@ -492,6 +508,8 @@ int mode_match_starting(const struct Game_t*);       // a pre-match timer (not c
 // overtime), so the caller must not end it. Called by game.c before game_end_round.
 int mode_end_game(struct Game_t*);
 ModeWinner mode_pick_winner(struct Game_t*);         // endGame(): winner by winCondition / team score / best player
+int mode_public_no_winner(const struct Game_t*);     // v10.0.3: a public match (not Raid, not the sandbox) has no winner
+int mode_winner_set(ModeWinner);                     // `this.winner` truthy: a team, a player or no_one (not a draw)
 void mode_sort_players(struct Game_t*, struct Player_t **players, size_t count); // endSort / orderByScore
 int mode_active_count(const struct Game_t*);
 void mode_on_game_end(struct Game_t*);               // onPreEnd + onEnd hooks (game_end_round)
@@ -506,7 +524,8 @@ int mode_score_gain(const struct Game_t*, int amount, int is_kill); // what play
 // players.score multipliers before anything is added (is_kill: 1 kill reward, 2 objective, 0
 // other): killMlt + player.killMlt, the oneflag carrier multipliers. The amount to use.
 int mode_score_scale(const struct Game_t*, const struct Player_t*, int amount, int is_kill);
-int mode_score_cap(const struct Game_t*);             // 0: no 13000 cap (noScrLimit)
+int mode_score_cap(const struct Game_t*, const struct Player_t*); // 0: no 13000 cap (hosted, a dev, noScrLimit)
+int mode_double_xp(const struct Game_t*);            // isDoubleXP: a pub-type game of a doubleXP mode
 void mode_on_score(struct Game_t*, struct Player_t*, int amount, int is_kill); // objectiveScore + team score
 float mode_melee_damage(struct Game_t*, struct Player_t *dealer, struct Player_t *victim, float damage); // onMelee
 int mode_input_locked(const struct Player_t*);               // lockPlayer
@@ -540,6 +559,16 @@ float mode_explosion_damage_mlt(const struct Game_t*, const struct Player_t *sou
 float mode_explosion_size_mlt(const struct Game_t*); // explSMlt
 float mode_head_mlt(const struct Player_t*);         // player.headMlt (bhffa), 1
 int mode_streak_disabled(const struct Game_t*, int streak); // disabledStreaks
+int mode_skip_stat(const struct Game_t*, const char *key); // skipStats has the incStat key (Raid / Zombies: h, s, crc, step)
+int mode_no_profile_stats(const struct Game_t*);     // noProfileStats (Raid)
+float mode_spec_max_d(const struct Game_t*);         // spect.maxD = mode.specMaxD || 160 (Raid 25)
+// v10.0.3 Raid run tracking (authority): players.shoot runShots, changeHealth runDmgTaken, the "Give Challenge
+// Progress" trigger's runProg[key] (only bthrone is read)
+void mode_run_shot(struct Game_t*, struct Player_t*);
+void mode_run_damage(struct Game_t*, struct Player_t*, float damage);
+void mode_run_progress(struct Player_t*, const char *key);
+// raid.onAIDeath / zom.onAIDeath: challenges.update("aik", 1, {wep: the killer's held weapon}) for a player's kill
+void mode_ai_kill_challenge(struct Game_t*, struct Player_t *killer);
 
 // Client side (mirrors)
 void mode_set_player_loadout(struct Player_t*, const int *weapons, int count, int keep_index); // updateLoadout

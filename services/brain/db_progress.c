@@ -197,7 +197,7 @@ static int claim_has_skin(void *ud, const int skin) {
 }
 
 /* ({id, final, prog: [[key, value, weapon, streak, item]...], medals: {name: count}, mapIndex,
- *   mapId, mode, classIndex, ranked, match, bpp, kills, deaths, score, won, games, timePlayed},
+ *   mapId, mode, classIndex, ranked, ltOff, match, bpp, kills, deaths, score, won, games, timePlayed},
  *   now unix s, season) -> {results, completed, reward {kr, skins, bpp}, newBadges, funds, bp,
  *   bpProgress}. Runs after the match's kn_commit_stats (the badge rules read its stats). */
 static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
@@ -225,6 +225,7 @@ static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
         .mode = (int) jnum(in, "mode"),
         .class_index = (int) jnum(in, "classIndex"),
         .ranked = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(in, "ranked")),
+        .lt_off = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(in, "ltOff")), /* ranked / noProfileStats: no DAT.lt */
         .quit = cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(in, "final")),
     };
     challenges_finalize(active, cJSON_GetObjectItemCaseSensitive(in, "prog"), &match, results, completed, reward);

@@ -28,7 +28,8 @@
 #include <string.h>
 
 #define SPECT_MIN_DIST 10.0f      // config.specMinD
-#define SPECT_MAX_DIST 160.0f     // config.specMaxD (mode.specMaxD overrides it, none in KrunkNative)
+// config.specMaxD 160 is the spectator's follow cap unless the mode sets specMaxD (v10.0.3 Raid 25):
+// spect.maxD = mode.specMaxD || 160 at the game start (deob-10.0.3.js:257121), mode_spec_max_d
 #define SPECT_MIN_SPEED 1.0f
 #define SPECT_MAX_SPEED 10.0f
 #define SPECT_FLY_SPEED 0.04f     // ZZms7: units per ms at speed 1 ...
@@ -417,13 +418,14 @@ int spectate_mouse_press(Client *client, const int which) {
 }
 
 int spectate_scroll(Client *client, const int wheel_up) {
-    (void) client;
     if (!g_spect.active) return 0;
 
     const float step = wheel_up ? 1.0f : -1.0f;
 
     if (g_spect.target_uid >= 0) {
-        g_spect.follow_dist = CLAMP(g_spect.follow_dist - step * 3.0f, SPECT_MIN_DIST, SPECT_MAX_DIST);
+        // the wheel: followDis -= dir * 3, then minD, then maxD (deob-10.0.3.js:235616-235622)
+        const float max_dist = mode_spec_max_d(client ? &client->game : NULL);
+        g_spect.follow_dist = CLAMP(g_spect.follow_dist - step * 3.0f, SPECT_MIN_DIST, max_dist);
     } else {
         g_spect.speed = CLAMP(g_spect.speed + step, SPECT_MIN_SPEED, SPECT_MAX_SPEED);
     }

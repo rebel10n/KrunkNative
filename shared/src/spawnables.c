@@ -437,10 +437,11 @@ void mode_v7_on_trigger(Game *game, Player *player, const int value) {
     if (game->mode->config.id == MODE_ID_ZOM) mode_zombies_on_trigger(game, player, value);
 }
 
-// mode.onAIDeath (AI.kill): Zombies drops and waves
+// mode.onAIDeath (AI.kill): Zombies drops and waves; v10.0.3 Raid's "aik" challenge (deob-10.0.3.js:118440-118447)
 void mode_v7_on_ai_death(Game *game, GameAI *ai, Player *killer) {
     if (!game || !game->mode || !ai || !game_is_authority(game)) return;
     if (game->mode->config.id == MODE_ID_ZOM) mode_zombies_on_ai_death(game, ai, killer);
+    else if (game->mode->config.id == MODE_ID_RAID) mode_ai_kill_challenge(game, killer);
 }
 
 // kc.js onKill: dropSpawnable(0, victim): a tag of the victim's team where it died
