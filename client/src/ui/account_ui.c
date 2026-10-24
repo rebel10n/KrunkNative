@@ -18,6 +18,7 @@
 #include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
+#include <kn_captcha.h> // the sign-in's and the registration's captcha (doc/v10/captcha.md)
 #include <alt_store.h> // the encrypted session vault (client/src/alt/)
 #include <alt_manager_ui.h> // the Account Manager's answers to its Add / switch requests
 #include <account_split.h>   // the account split: a krunker.io login is never sent to kn_brain (and the reverse)
@@ -103,6 +104,7 @@ static struct {
     char addr[256];
 } g_email;
 static double g_auth_sent_at;    // a login/register is waiting for its "a" reply (glfwGetTime), 0 none
+static unsigned g_auth_captcha;  // its captcha in flight (kn_captcha.h), 0 none: the answer's timeout waits for the send
 // player-viewer WP-E part 2c: v7 challenges (windows[32]) and the account's medal counts
 static cJSON *g_chal;            // account.activeChallenges from kn_brain's "chgL" (owned), NULL = not loaded
 static int g_chal_requested;     // a "chg" request is out
@@ -868,10 +870,21 @@ static void rerender_windows(void) {
 
 // ------------------------------------------------------------------ requests
 
+// A sign-in's frame, once its captcha is done: the answer's timeout (AUTH_TIMEOUT_SECONDS) counts from here
+static void send_auth_frame(const cJSON *frame) {
+    g_auth_captcha = 0;
+    backend_social_send(frame);
+    if (g_auth_sent_at > 0) g_auth_sent_at = glfwGetTime();
+}
+
 // sendAccountRequest(action, payload); email: KrunkNative's optional 4th payload element (register)
 static void send_account_request_email(const int action, const char *name, const char *pass, const char *third,
                                        const char *email) {
     if (action >= 0) show_acc_resp(ACC_STR_WAIT);
+    else {
+        kn_captcha_cancel(g_auth_captcha); // a logout drops a sign-in still solving its captcha
+        g_auth_captcha = 0;
+    }
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("a"));
     cJSON_AddItemToArray(frame, cJSON_CreateNumber(action));
@@ -882,7 +895,14 @@ static void send_account_request_email(const int action, const char *name, const
         cJSON_AddItemToArray(payload, third ? cJSON_CreateString(third) : cJSON_CreateNull());
         if (email && email[0]) cJSON_AddItemToArray(payload, cJSON_CreateString(email));
         cJSON_AddItemToArray(frame, payload);
-        cJSON_AddItemToArray(frame, cJSON_CreateNull()); // captcha key (no captcha in KrunkNative)
+        if (action == 0 || pass) {
+            // the captcha key: Box Office's ALTCHA payload for a password sign-in or a registration (kn_captcha.h; v10.0.3
+            // asks Turnstile before every loginUsername, deob-10.0.3.js:130762). A second click sends only the last one
+            kn_captcha_cancel(g_auth_captcha);
+            g_auth_captcha = kn_captcha_send_frame(action == 0 ? "register" : "login", frame, 3, send_auth_frame);
+            return;
+        }
+        cJSON_AddItemToArray(frame, cJSON_CreateNull()); // captcha key: none for a saved session's resume
     }
     backend_social_send(frame);
     cJSON_Delete(frame);
@@ -1901,7 +1921,7 @@ void account_ui_tick(Client *client) {
     }
     reward_end = end_now;
     reward_tick(0);
-    if (g_auth_sent_at > 0 && glfwGetTime() - g_auth_sent_at > AUTH_TIMEOUT_SECONDS) auth_unreachable();
+    if (g_auth_sent_at > 0 && !g_auth_captcha && glfwGetTime() - g_auth_sent_at > AUTH_TIMEOUT_SECONDS) auth_unreachable();
     // the saved session's asks: a refused one is asked again (account_response), an unanswered one after a while
     if (g_restore_retry_at > 0 && glfwGetTime() >= g_restore_retry_at) {
         g_restore_retry_at = 0;

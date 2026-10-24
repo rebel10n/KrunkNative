@@ -19,6 +19,7 @@
 #include <audio.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <kn_captcha.h> // the hub login's captcha (doc/v10/captcha.md)
 #include <krunker_account.h> // krunker_host_url: the data client's webhooks (the hub's maps, mods and search)
 #include <krunker_kio_routes.h> // the webhook groups and URL of those requests (krunker_kio_routes.c)
 #include <weapons.h>
@@ -305,6 +306,9 @@ static void hub_send(cJSON *frame) {
 static cJSON *str_or_null(const char *s) {
     return s && *s ? cJSON_CreateString(s) : cJSON_CreateNull();
 }
+
+// the hub's login frame once its captcha is done (kn_captcha_send_frame keeps and wipes the original)
+static void hub_send_login(const cJSON *frame) { hub_send(cJSON_Duplicate(frame, 1)); }
 
 // ------------------------------------------------------------------ popups
 
@@ -4129,8 +4133,8 @@ H(h_login_acc) {
     cJSON_AddItemToArray(f, cJSON_CreateString("a"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(1));
     cJSON_AddItemToArray(f, creds);
-    cJSON_AddItemToArray(f, cJSON_CreateTrue()); // captcha token
-    hub_send(f);
+    // the captcha token (v7.1.4's hub sent true): Box Office's ALTCHA payload, solved first (kn_captcha.h)
+    kn_captcha_send_frame("login", f, 3, hub_send_login);
     memset(pass, 0, sizeof(pass));
     return 1;
 }

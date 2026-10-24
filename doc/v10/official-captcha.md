@@ -1,5 +1,8 @@
 # Official krunker.io games: the matchmaker's captcha
 
+(Box Office's own captcha, on its sign-in, registration and hosting, is an ALTCHA proof of work: [captcha.md](captcha.md),
+which also lists every captcha call site of v10.0.3.)
+
 How Krunker Box Office deals with the Cloudflare Turnstile check that `matchmaker.krunker.io`
 asks for before it seeks a game (`client/include/krunker_captcha.h`, `client/src/ui/krunker_captcha_ui.c`, the
 challenge webview `client/include/kn_webview.h` / `client/src/ui/kn_webview.c`, the join flow in

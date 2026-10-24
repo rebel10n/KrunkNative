@@ -6,6 +6,7 @@
 #include <v10_social.h>
 #include <backend.h>
 #include "backend_internal.h" // backend_probe_tick (backend_common.c)
+#include <kn_captcha.h>        // Box Office's captcha: kn_captcha_tick
 #include <backend_ui.h>
 #include <strike_director.h> // Krunker Strike: the director matchmakes
 #include <strike_econ.h>     // Krunker Strike: the account's Strike economy state
@@ -117,6 +118,7 @@ int backend_startup(Client *client, const int offline, const int scenario) {
 
 void backend_frame(Client *client) {
     backend_poll();
+    kn_captcha_tick(); // Box Office's captcha: a slice of its proof of work (kn_captcha.h)
     backend_probe_tick(); // the brain probe: a timed-out one counts as failed, a due retry starts
     online_mode_tick(client);
     account_ui_tick(client);

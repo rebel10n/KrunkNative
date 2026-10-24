@@ -1,7 +1,8 @@
 #pragma once
 // The "cpt" socket captcha of official Krunker games: an ALTCHA proof of work (SHA-256 search),
-// solved without a browser (client/src/net/krunker_altcha.c has the format and its sources; the
-// answer's shape is upstream ALTCHA's, an UNVERIFIED assumption: the widget is not in the bundle).
+// solved without a browser (client/src/net/krunker_altcha.c has the format and its sources: the
+// ALTCHA 1.0.6 widget that ships with v10.0.3, libs/altcha.1.0.6.min.js). Box Office's own captcha
+// (kn_captcha.h, the brain's challenges) is solved by the same search.
 // krunker_link hands "cpt" to the transport, which answers "cptR" (no ahNum step): natively on its
 // socket thread, on the web in slices from the frame callback (krunker_net_tick), never in one go
 // on the frame loop.

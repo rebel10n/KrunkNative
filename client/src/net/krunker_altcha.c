@@ -1,17 +1,19 @@
 // The socket captcha of official Krunker games (client/include/krunker_altcha.h).
 //
-// game.deob.js:98132-98143 / 98295-98304: on "cpt" [challenge] the client shows a "Security
+// deob-10.0.3.js:111424-111437 / 111558-111625: on "cpt" [challenge] the client shows a "Security
 // Challenge" modal with an <altcha-widget challengejson="JSON(challenge)">, polls for the widget's
-// hidden input[name='altcha'] and sends its value as "cptR" (the one packet without an ahNum step);
-// "cptR" from the server hides the modal, "error" ends it. The widget itself is the open-source
-// ALTCHA web component, loaded by the page, not part of the bundle: it is a proof of work, no
-// human input. Its algorithm (ALTCHA v1 challenge format, altcha-lib):
+// hidden input[name='altcha'] and sends its value as "cptR" (the one packet without an ahNum step,
+// :111513); "cptR" from the server hides the modal, "error" ends it. The same widget answers
+// rpc("bCpt", "hosting") before a custom game is hosted (:133912-133919). The widget is the
+// open-source ALTCHA web component, which ships with v10.0.3 as libs/altcha.1.0.6.min.js (not in
+// the game bundle): a proof of work, no human input. Its algorithm (ALTCHA v1, checked against that
+// file: the worker's b() search, kn() / kt() and B(), the value):
 //   challenge = {algorithm: "SHA-256", challenge: hex, salt: string, signature: hex, maxnumber?}
-//   find n in [0, maxnumber] with hex(SHA-256(salt + String(n))) == challenge
-//   value = btoa(JSON.stringify({algorithm, challenge, number: n, salt, signature, took: ms}))
-// UNVERIFIED ASSUMPTION: the payload shape is upstream ALTCHA's widget format, not readable in
-// game.deob.js: verify against a real "cpt" before relying on it (gap list in krunker_net.h). The matchmaker's CaptchaRequired is a
-// different captcha (Cloudflare Turnstile, iiïîìïì at :115623) and needs a browser.
+//   find n in [0, maxnumber] (default 1e6) with hex(SHA-256(salt + String(n))) == challenge
+//   value = btoa(JSON.stringify({algorithm, challenge, number: n, salt, signature, test?, took: ms}))
+// (test is only set by the widget's test mode, so it is left out.) The widget also takes SHA-384 /
+// SHA-512; only SHA-256 is solved here. The matchmaker's CaptchaRequired is a different captcha
+// (Cloudflare Turnstile, deob-10.0.3.js:130320-130369) and needs a browser.
 #include <krunker_altcha.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,9 +104,8 @@ int krunker_altcha_begin(KrunkerAltcha *a, const char *algorithm, const char *ch
     return 0;
 }
 
-// The widget's value: btoa(JSON.stringify({algorithm, challenge, number, salt, signature, took})).
-// UNVERIFIED ASSUMPTION: this is upstream ALTCHA's payload (altcha-lib / the altcha web component);
-// game.deob.js only shows that input[name='altcha'].value goes out as "cptR".
+// The widget's value: btoa(JSON.stringify({algorithm, challenge, number, salt, signature, took}))
+// (altcha.1.0.6.min.js B(); deob-10.0.3.js:111609-111612 sends input[name='altcha'].value as "cptR").
 static char *payload(const KrunkerAltcha *a, const long number) {
     const long took = (long) (now_ms() - a->started_ms);
     char al[64], c[80], sa[1100], si[1100];

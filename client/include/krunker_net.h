@@ -79,8 +79,8 @@
 //     the account (krunker_account.h) is the player's own when signed in, a guest's otherwise
 //   - CHEAT_CHECK natively (QuickJS, the CHEAT_CHECK agent's), Windows; on the web a Turnstile token
 //     from krunker.io can only be pasted (a page cannot take the localhost callback)
-//   - the "cpt" answer's payload shape is ALTCHA's widget format, not readable in the bundle: unverified
-//     against a live server
+//   - the "cpt" answer's payload is the ALTCHA 1.0.6 widget's (libs/altcha.1.0.6.min.js B(), shipped with v10.0.3);
+//     not yet checked against a live server's verifier
 //   - a dropped official session does not reconnect by itself (the page's reconnect seeks anew)
 #include <client.h>
 

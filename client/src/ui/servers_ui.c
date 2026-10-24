@@ -46,6 +46,7 @@
 #include <strike_ui.h>       // Krunker Strike's own server password prompt (strike_menu.c)
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
 #include <quick_play_retry.h> // a Quick Play search answered "full" is tried again (quick_play_retry.c)
+#include <kn_captcha.h>      // the hosting captcha (doc/v10/captcha.md)
 #include <v10_studios.h>     // My Games: the Studios row (v10_studios.c)
 #include <flavor.h>
 #include <strings.h>
@@ -4574,8 +4575,8 @@ static void on_host(void *user, const int status, const char *body, const size_t
 }
 
 // Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the
-// request's config (the game is created on a server it finds; "Game Created" then the join). 0 when
-// the brain is not available or the request cannot be sent.
+// request's config (the game is created on a server it finds; "Game Created" then the join), after the
+// hosting captcha (host_captcha_done). 0 when the brain is not available or the request cannot be sent.
 int servers_ui_host_game(const char *config_json) {
     if (backend_available() != 1 || !config_json) return 0;
     if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", servers_ui_auto_region()); // a confirmed race result only
@@ -4583,6 +4584,32 @@ int servers_ui_host_game(const char *config_json) {
     char *path = malloc(n), *enc = malloc(strlen(config_json) * 3 + 1), region[96];
     if (!path || !enc) {
         free(path);
+// A host request waiting for its captcha (kn_captcha.h): the /mm/host-game path and its matchmaking action
+typedef struct {
+    char *path;
+    unsigned action;
+} HostCaptcha;
+
+// The hosting captcha is done: /mm/host-game with &captcha=<payload> (none without one). A request that cannot go
+// now ends like one without an answer (on_host: custom.tryagain), so "Creating Game..." is never left behind.
+static void host_captcha_done(void *user, const char *payload) {
+    HostCaptcha *hc = user;
+    char *path = hc->path;
+    if (payload) {
+        const size_t n = strlen(path) + strlen(payload) * 3 + 16;
+        char *full = malloc(n);
+        if (full) {
+            const int len = snprintf(full, n, "%s&captcha=", path);
+            backend_url_encode(full + len, n - (size_t) len, payload);
+            free(path);
+            path = full;
+        }
+    }
+    if (!backend_http_get(path, on_host, (void *) (uintptr_t) hc->action)) on_host((void *) (uintptr_t) hc->action, 0, NULL, 0);
+    free(path);
+    free(hc);
+}
+
         free(enc);
         return 0;
     }
@@ -4601,7 +4628,18 @@ int servers_ui_host_game(const char *config_json) {
     // a matchmaking action of its own (seek_claim.h): a seek still in flight is overtaken by its lobby. A Quick
     // Play search goes on no more: the player chose a game (the startup seek is not needed either)
     const unsigned action = seek_claim_start(&g_claims);
-    const int ok = backend_http_get(path, on_host, (void *) (uintptr_t) action);
+    // the hosting captcha first (v10.0.3's rpc("bCpt", "hosting") before "custom", deob-10.0.3.js:229992-229998):
+    // the request goes once it is solved (host_captcha_done); a captcha that cannot start: the request at once
+    HostCaptcha *hc = malloc(sizeof(*hc));
+    int ok = 0;
+    if (hc) {
+        hc->path = path;
+        hc->action = action;
+        ok = kn_captcha_request("hosting", host_captcha_done, hc) != 0;
+        if (ok) path = NULL; // the captcha's now
+        else free(hc);
+    }
+    if (!ok) ok = backend_http_get(path, on_host, (void *) (uintptr_t) action);
     if (ok) {
         // "Creating Game..." only while the request is out: on_host's answer or failure replaces it. A request the
         // brain gate refused (0 here) shows nothing: host_flow_start says why, so no spinner is left behind
