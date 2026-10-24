@@ -374,7 +374,9 @@ re-checked against 10.0.3 in `gameplay-1003-audit.md` and `rules-1003.md`: every
 | a v10 match on server_bin | `server_bin` (no version choice) | `server/tests/v10_match_e2e.py` |
 | team round wins outside best-of (section 7) | `shared/src/modes/mode_round.c` (`mode_end_game`, the `else` of `if (mode->best_of)`; `deob-10.0.3.js:221597-221605`, rules-1003.md section 1) | modes_test (`test_round_wins_outside_best_of`) |
 | Battle Pass points per public match (section 7) | `bp_match_points` (`shared/src/season.c`), sent for public matches only by `acc_add_progress` (`server/src/accounts.c`); `deob-10.0.3.js:221705-221776`, rules-1003.md section 2 | season_test |
+| a public match has no winner (`winner = -1`) | `mode_public_no_winner` / `ModeWinner.no_one` (`shared/src/modes/mode_round.c`), `game_send_end`; `deob-10.0.3.js:221681`, rules-1003.md section 3 | modes_test (`test_public_winner`), match_test |
+| Raid / Zombies keys: skipStats, noProfileStats, specMaxD, runPeakPlayers, the raid challenges, aik, rnd | `shared/src/modes/modes.c`, `mode_rules.c` (`mode_end_raid`, `mode_update_raid`), `game_inc_stat`, `server/src/accounts.c`, `progression.c` (`lt_off`); rules-1003.md section 4 | modes_test (`test_raid_v10`), season_test |
 
-Not ported yet: raid challenges / `noProfileStats`, `poseData.bodyY`, `markPosition`, and the match-flow
+Not ported yet: `poseData.bodyY`, `markPosition`, and the match-flow
 items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md). The Stalker's
 render side, HUD, taunts and sounds are ported: doc/v10/stalker.md.
