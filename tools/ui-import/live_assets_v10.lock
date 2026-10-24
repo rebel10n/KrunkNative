@@ -1,5 +1,6 @@
 # Krunker v10 (live client v10.0.2, 2026-10-13) content from the live asset hosts (tools/ui-import/fetch_live_assets.py).
-# root assets = new in v10 (not in v7.1.4); assets-v10 = v10 version of a v7.1.4 file with other content (assets/v10/<path>).
+# root assets = new in v10 (not in v7.1.4); assets-v10 = v10 version of a v7.1.4 file with other content (assets/v10/<path>);
+# assets-aac = an MP4/AAC file the host serves under an .mp3 name, installed transcoded to MP3 at assets/<path>.
 # root ui = page images v10 loads from assets.krunker.io/img/ (ui/img/<path>: the guide popup's img/guide/*, client/src/ui/v10_news.c).
 # Installed by `make assets-import-live`; the store items of assets/skins.json index 6448+ are covered here (see v10_store_assets.js).
 # Krunker Strike brand (doc/v10/krunker-strike.md, flavor-ui): from the live Krunker Strike FRVR site (krunkerstrike.frvr.com,
@@ -2982,3 +2983,13 @@ ui	img/maps/map_41.png	https://assets.krunker.io/img/maps/map_41.png	11e60005ec3
 ui	img/maps/map_43.png	https://assets.krunker.io/img/maps/map_43.png	56cf60386db38f8149d79d9165cbe49766d62fc1fb397371c63f7e2e1df41ea3	18050
 ui	img/maps/map_44.png	https://assets.krunker.io/img/maps/map_44.png	b8aaa7bc845eae0fdd5dff17f56b2fbc5dece20b95965cec7d9bcf264ae4d400	27349
 ui	img/maps/map_45.png	https://assets.krunker.io/img/maps/map_45.png	abc881844f6ba5d44b19ce8aa64b61849fb0172fe24d56d58f31636a14946093	25138
+# sound/*.mp3 (root assets-aac): config.networkSounds names of Krunker v10.0.3 (deob-10.0.3.js:21141, shared/include/
+# network_sounds.h) that assets/sound lacked; assets.krunker.io serves these seven as MP4/AAC under the .mp3 name, so
+# install writes them transcoded to MP3. The list's weapon_13, weapon_18, weapon_7_0 and weapon_4_16 404 there (2026-10-24).
+assets-aac	sound/weapon_15_11.mp3	https://assets.krunker.io/sound/weapon_15_11.mp3	64ba7a09ccd598268f498dd50dc5d3df87c43ae968efaa836f264dad648164f4	115278
+assets-aac	sound/weapon_4_36.mp3	https://assets.krunker.io/sound/weapon_4_36.mp3	95729dbb09a6b15d2cffd2a742806c249bcb1dc17028ffd01b8e75e8426e327d	133120
+assets-aac	sound/weapon_5_17.mp3	https://assets.krunker.io/sound/weapon_5_17.mp3	414b3bce130200b0cb3225df51895f69dcfe4998aacb73de7581c3f22f087786	320704
+assets-aac	sound/weapon_5_20.mp3	https://assets.krunker.io/sound/weapon_5_20.mp3	587f17de14051e0e542f7b422c30b445f15a21398c293270ff2e45992582050c	260396
+assets-aac	sound/weapon_6_21.mp3	https://assets.krunker.io/sound/weapon_6_21.mp3	12927a9812b5666dfdbbf174417602546c5a53f84d674f546c28d3c748358d88	275262
+assets-aac	sound/weapon_8_15.mp3	https://assets.krunker.io/sound/weapon_8_15.mp3	e7e2b41ce668819fdaf6287a7d3c9e1e708df564008542c3ee0bad70b1c65fb9	29980
+assets-aac	sound/weapon_8_17.mp3	https://assets.krunker.io/sound/weapon_8_17.mp3	773cbc44ad5e3a9ad6217ce6612ac62e5c08df4f930b802f7f243aa59a709ec4	70252

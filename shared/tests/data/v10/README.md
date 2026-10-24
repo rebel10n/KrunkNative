@@ -15,6 +15,7 @@ at run time.
 | `streaks.json` | streaks, 7 entries | 203338-203521 | 203521-203523: `index` |
 | `aimRecticles.json` | scope overlays, 7 entries | 227658-227679 | none |
 | `config.json` | the frozen config object's scalar keys (365) | 22367-23014 | none (`config.cjs` resolves `var _N = <number>` values; arrays, objects and other references are left out) |
+| `networkSounds.json` | config.networkSounds, 399 names in id order | 21141 (config key 22774) | none. Written with `shared/src/rules/v10/network_sounds_v10.c` by `tools/krunker/extract_sounds.py` (not the script below), checked by `shared/tests/network_sounds_test.c` |
 
 Values the dumper cannot resolve are strings: `"<fn>"` for functions (the Combat Knife's `anim`, effect /
 streak hooks, the Acog's `req`) and `"<expr:Type>"` for other expressions (the `req` gates, which are

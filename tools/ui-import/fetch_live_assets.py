@@ -13,7 +13,11 @@ models and sounds, HUD images...). The v7 client loads them from its CDNs:
 (``assets`` = assets/, ``ui`` = the page's ui/ tree for ``img/``), path, source URL, sha256 and
 size. ``live_assets_v10.lock`` (``--lock``) pins the Krunker v10 (live client) content the same
 way: files v7.1.4 never had (root ``assets``) and the v10 versions of files whose v7.1.4 copy
-differs (root ``assets-v10`` = ``assets/v10/<path>``: v7 content is never replaced).
+differs (root ``assets-v10`` = ``assets/v10/<path>``: v7 content is never replaced). Root
+``assets-aac`` is a file Krunker's host serves as MP4/AAC under its ``.mp3`` name (v10.0.3's newer
+weapon-skin sounds): the pinned sha256 is the host's bytes, and install writes them transcoded to
+MP3 (ffmpeg libmp3lame, 44.1 kHz, 192 kbit/s) at ``assets/<path>`` like the other sounds, since the
+native audio decoder (miniaudio) reads MP3 / WAV / FLAC only; check then only asks for an MP3 there.
 Installing only ever ADDS files: an existing file is never overwritten (Krunker content
 already in the tree wins, a different hash is reported). ``deploy/ansible`` role ``kn_web``
 (``--tags web_assets``) syncs ``assets/`` to the web asset host and role ``kn_updates`` re-indexes
@@ -272,6 +276,7 @@ def write_lock(path, entries):
 def dest_of(entry, assets, ui):
     # root assets-v10: a Krunker v10 file whose name v7.1.4 already uses with other content
     # (live_assets_v10.lock); it goes to assets/v10/<path> so the v7 file stays as it is
+    # root assets-aac: an MP4/AAC file under an .mp3 name, installed transcoded at assets/<path>
     base = ui if entry["root"] == "ui" else os.path.join(assets, "v10") if entry["root"] == "assets-v10" else assets
     rel = os.path.normpath(entry["path"])
     if rel.startswith("..") or os.path.isabs(rel):
@@ -296,24 +301,51 @@ def webp_sidecar(dest):
         return None
 
 
+def root_selected(root, roots):
+    """--roots: assets-aac files install with the assets root (they land in assets/)."""
+    return root in roots or (root == "assets-aac" and "assets" in roots)
+
+
+def is_mp3(data):
+    return data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0)
+
+
+def transcode_mp3(data):
+    """MP4/AAC bytes -> MP3 (the sound/ tree's format), None when ffmpeg is missing or fails."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src, out = os.path.join(tmp, "in.m4a"), os.path.join(tmp, "out.mp3")
+        with open(src, "wb") as f:
+            f.write(data)
+        try:
+            r = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", src, "-vn", "-map_metadata", "-1",
+                                "-c:a", "libmp3lame", "-ar", "44100", "-b:a", "192k", out], capture_output=True, timeout=120)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode != 0 or not os.path.isfile(out):
+            return None
+        with open(out, "rb") as f:
+            mp3 = f.read()
+        return mp3 if is_mp3(mp3) else None
+
+
 # ---------------------------------------------------------------- commands
 
 def cmd_install(a):
     roots = set(a.roots.split(","))
-    entries = [e for e in read_lock(a.lock) if e["root"] in roots]
+    entries = [e for e in read_lock(a.lock) if root_selected(e["root"], roots)]
     fetcher = None
     added, kept, failed = [], [], []
     for e in entries:
         dest = dest_of(e, a.assets, a.ui)
         if os.path.lexists(dest):
-            if os.path.isfile(dest):
+            if os.path.isfile(dest) and e["root"] != "assets-aac":  # an assets-aac file is the transcoded copy
                 with open(dest, "rb") as f:
                     if sha256(f.read()) != e["sha256"]:
                         kept.append(dest)
             continue
         data = None
         if a.stage:
-            staged = os.path.join(a.stage, "assets" if e["root"] == "assets-v10" else e["root"], e["path"])  # fetch stages by host path
+            staged = os.path.join(a.stage, "assets" if e["root"] in ("assets-v10", "assets-aac") else e["root"], e["path"])  # fetch stages by host path
             if os.path.isfile(staged):
                 with open(staged, "rb") as f:
                     data = f.read()
@@ -331,6 +363,11 @@ def cmd_install(a):
         if a.dry_run:
             added.append(dest)
             continue
+        if e["root"] == "assets-aac":
+            data = transcode_mp3(data)
+            if data is None:
+                failed.append("%s: the MP3 transcode failed (ffmpeg with libmp3lame needed)" % e["path"])
+                continue
         write_atomic(dest, data)
         added.append(dest)
         if dest.endswith(".webp"):
@@ -358,9 +395,10 @@ def cmd_check(a):
             missing += 1
             continue
         with open(dest, "rb") as f:
-            if sha256(f.read()) != e["sha256"]:
-                print("differs", e["root"] + "/" + e["path"])
-                differ += 1
+            data = f.read()
+        if (not is_mp3(data)) if e["root"] == "assets-aac" else sha256(data) != e["sha256"]:
+            print("differs", e["root"] + "/" + e["path"])
+            differ += 1
     print("live assets: %d missing, %d differ" % (missing, differ))
     return 1 if missing else 0
 
@@ -458,8 +496,9 @@ def main():
             p.add_argument("--stage", help="staging tree from `fetch` (<stage>/assets/..., <stage>/ui/...)")
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--roots", default="assets,assets-v10,ui",
-                           help="install roots (comma list): assets = assets/ (untracked game content), assets-v10 = "
-                                "assets/v10/ (v10 versions of v7 files), ui = ui/img (tracked)")
+                           help="install roots (comma list): assets = assets/ (untracked game content, with the "
+                                "assets-aac sounds transcoded to MP3), assets-v10 = assets/v10/ (v10 versions of v7 files), "
+                                "ui = ui/img (tracked)")
     p = sub.add_parser("fetch")
     p.add_argument("--list", required=True, help="TSV: category, path (relative to the asset host)")
     p.add_argument("--stage", required=True)

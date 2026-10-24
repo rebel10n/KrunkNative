@@ -17,6 +17,7 @@
 #include <modes.h>
 #include <ai.h>
 #include <zombies.h> // map-logic WP-H: reserves, perks
+#include <network_sounds.h>
 #include <math.h>
 #include <string.h>
 #include "modes/mode_internal.h"
@@ -177,10 +178,13 @@ static void spawnable_refill_knife(Game *game, Player *player) {
     game_send(game, player->uid, NET_PACKET_REFILL, NULL, 0);
 }
 
-// game.playSound(name, 1.2, sid, x, y, z, true) of the weapon / ammo onPickups (medals.js:293,
-// :332, :359, :384): at the player, the player included
+// game.playSound(networkSounds.indexOf(name), 1.2, sid, x, y, z, true) of the weapon / ammo
+// onPickups (medals.js:293, :332, :359, :384; deob-10.0.3.js:176815-176904): at the player, the
+// player included. A name config.networkSounds lacks is id -1, which plays nothing: the melee
+// pickup's "melee_equip" (:176880) is silent in 10.0.3 (shared/include/network_sounds.h).
 static void spawnable_sound(Game *game, const Player *player, const char *name) {
-    game_play_sound(game, name, player->uid, player->position, 1.2f, 0.0f);
+    const char *sound = network_sound_name(network_sound_index(name));
+    if (sound) game_play_sound(game, sound, player->uid, player->position, 1.2f, 0.0f);
 }
 
 // medals.js onPickup / onCollision of one spawnable for one player (authority)

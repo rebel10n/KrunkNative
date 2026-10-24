@@ -83,6 +83,15 @@ The ~100 references neither host serves (e.g. `sound/weapon_18.mp3`, `land_0`, `
 resource pack (`modURL`, e.g. zombie_high's `user-assets/md23677/mod.zip`) replaces textures,
 models and sounds while that map is loaded (`client/src/mod_pack.c`).
 
+Every name of v10.0.3's network sound table (`config.networkSounds`, 399 names,
+`shared/include/network_sounds.h`) is a `sound/<name>.mp3` here except four the host 404s
+(`weapon_13`, `weapon_18`, `weapon_7_0`, `weapon_4_16`). Seven of v10.0.3's newer weapon-skin
+sounds (`weapon_4_36`, `weapon_5_17`, `weapon_5_20`, `weapon_6_21`, `weapon_8_15`, `weapon_8_17`,
+`weapon_15_11`) are MP4/AAC on the host under their `.mp3` names, which the native decoder
+(miniaudio: MP3 / WAV / FLAC) cannot read: `live_assets_v10.lock` pins them with root `assets-aac`
+(the host's bytes) and the install writes them transcoded to MP3 (ffmpeg libmp3lame, 44.1 kHz,
+192 kbit/s), so they sit in `sound/` like every other clip.
+
 ## Krunker v3.1.1 content (legacy)
 
 The v3.1.1 tree was unpacked from Krunker's `mod.zip`, more specifically:

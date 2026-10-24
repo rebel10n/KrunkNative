@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <network_sounds.h>
 
 int player_collides(Player*, const Object*, float pad); // shared/src/player.c (collidesE)
 int game_object_shootable(const Object*);               // shared/src/player.c (the hitscan object filter)
@@ -244,6 +245,15 @@ static void pickup_update(Game *game, const int uid, const int weapon, const int
     k->active = (unsigned char) !!active;
 }
 
+int game_player_in_object(const Player *player, const Object *object, const float pad) {
+    return player && object && collides_padded(player, object, pad);
+}
+
+int game_player_in_pickup(const Game *game, const Player *player, const int uid) {
+    GamePickup k;
+    return player && game_pickup_state(game, uid, &k) && collides_pickup(player, &k);
+}
+
 int game_pickup_state(const Game *game, const int uid, GamePickup *out) {
     const TriggerRuntime *rt = game ? game->trigger_rt : NULL;
     if (!rt || rt->map != game->map || uid < 0 || (size_t) uid >= rt->object_count || !game->map->objects[uid]->pickup) return 0;
@@ -406,7 +416,10 @@ static void spray_place(Game *game, Player *player, const int skin) {
     game_challenge_item(game, player, "spry", 1, skin);
     char sound[32] = "spray"; // "spray" + (spraySnd ? "_" + spraySnd : "")
     if (item && item->spray_snd) snprintf(sound, sizeof(sound), "spray_%d", item->spray_snd);
-    game_play_sound(game, sound, player->uid, player->position, 0.4f, 0.0f); // playSound(networkSounds, 0.4, sid, .., true)
+    // playSound(networkSounds.indexOf(sound), 0.4, sid, .., true) (deob-10.0.3.js:195672): a spray sound
+    // the list lacks (past "spray_1") is id -1, which plays nothing (shared/include/network_sounds.h)
+    const char *played = network_sound_name(network_sound_index(sound));
+    if (played) game_play_sound(game, played, player->uid, player->position, 0.4f, 0.0f);
 
     const int limit = game_spray_limit(game, player);
     if (player->sprays_placed >= limit || player->sprays_placed < 0) player->sprays_placed = 0;

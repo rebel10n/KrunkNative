@@ -116,8 +116,10 @@ static struct {
     .rate_scale = 1.0f,
 };
 
-// SOUND.soundCats (v10.js:193556), verbatim: the category of every sound Krunker v10.0.2 lists. A sound
-// it does not list plays at volume 1 (getVolume: `soundCats[name] != null ? volumes[cat] : 1`).
+// SOUND.soundCats (v10.js:193556), verbatim: the category of every sound Krunker v10.0.2 lists, unchanged
+// in v10.0.3 (deob-10.0.3.js:224701-225180, the same 478 names and categories). A sound it does not list
+// plays at volume 1 (getVolume: `soundCats[name] != null ? volumes[cat] : 1`, :225230). It is the only
+// per-sound volume the bundle has: config.networkSounds (shared/include/network_sounds.h) is names only.
 static const struct {
     const char *name;
     int category;
