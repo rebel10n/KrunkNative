@@ -6,6 +6,7 @@
 
 #include <ks_import_js.h>
 #include <triggers_v7.h>
+#include <ruleset.h> // rules_classes (movDrP)
 
 #include <math.h>
 #include <stdio.h>
@@ -439,6 +440,26 @@ static int server_hook(const Game *game, const char *hook)
     return ks_game_side(game) == KS_SIDE_SERVER && ks_game_has_hook(game, hook);
 }
 
+// onPlayerUpdate's movDir (deob-10.0.3.js:191302-191305): config.movDirs[input[4]] + (this.config.movDrP || 0) * PI,
+// undefined without a move key. config.movDirs[i] = -PI + (i + 1) * PI / 4 (:19251-19253) and our Input.move_dir k (0
+// forward, clockwise) is the client's input[4] i = (k + 1) % 8: forward is moveDir atan2(-1, 0) = -PI / 2, movDirs[1]
+// (:236111-236121, the send :260696). movDrP is the player's class movement key, read like player.c's movement
+// (float config values as their decimal: round(v * 1e6) / 1e6).
+static KsValue ks_move_dir_value(const Player *player, const int move_dir)
+{
+    if (move_dir < 0 || move_dir > 7) return ks_undef();
+    const int i = (move_dir + 1) % 8;
+    double angle = -M_PI + (double) (i + 1) * M_PI / 4.0;
+    const Game *game = player ? player->game : NULL;
+    const size_t count = game && game->class_count ? game->class_count : CLASS_COUNT;
+    const ClassConfig *classes = game && game->classes ? game->classes : rules_classes();
+    if (player && player->class_index >= 0 && (size_t) player->class_index < count) {
+        const double offset = round((double) classes[player->class_index].movement.move_dir_offset * 1e6) / 1e6;
+        angle += offset * M_PI;
+    }
+    return ks_num(angle);
+}
+
 int ks_game_on_player_update(Game *game, Player *player, Input *in)
 {
     KsGame *kg = game ? game->ks : NULL;
@@ -455,8 +476,7 @@ int ks_game_on_player_update(Game *game, Player *player, Input *in)
         ks_handle_pin(s, inputs);
         ks_obj_set(s, inputs, "mouseY", ks_num(in->x_dir));
         ks_obj_set(s, inputs, "mouseX", ks_num(in->y_dir));
-        // config.movDirs[i] = -PI + (i + 1) * PI / 4; undefined when not moving
-        ks_obj_set(s, inputs, "movDir", in->move_dir >= 0 && in->move_dir <= 7 ? ks_num(-M_PI + (in->move_dir + 1) * M_PI / 4.0) : ks_undef());
+        ks_obj_set(s, inputs, "movDir", ks_move_dir_value(player, in->move_dir));
         ks_obj_set(s, inputs, "lMouse", ks_bool(in->shoot));
         ks_obj_set(s, inputs, "rMouse", ks_bool(in->scope));
         ks_obj_set(s, inputs, "jump", ks_bool(in->jump));

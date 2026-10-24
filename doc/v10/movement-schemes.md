@@ -78,9 +78,14 @@ above `vhtrsh` (or in reverse) D keys (2..4) and A keys (0, 6, 7) change `angVel
 `(trnSp || 1) [* vhtrsv * 10 * (forwardV + reverseV)] * (trnSpd || 1) * 0.004`, mirrored in
 reverse. `mov` pushes `accel * 120 * (forwardV - reverseV)` along the heading, decays x / z with
 `vhdr^f` (position by the exact integral, x `speedX` / `speedZ`), and turns `xDire` by angVel decayed
-with `vhaDr^f`. The mouse never turns a vehicle. The asset model's roll (`meshRef.rotation` =
-`angVel * vhtL`, x or z by `mdlDr`) needs a class "Model" asset (`mdl` 2), which KrunkNative's client
-does not draw yet; `angVel` is kept and synced for it.
+with `vhaDr^f`. The mouse never turns a vehicle. Before all that, `mov` leans the class "Model" asset
+(`mdl` 2, `if (meshRef)`, deob-10.0.3.js:19145-19152) by the angVel it finds: `mdlDr % 180 != 0` sets
+Euler "YXZ" and `rotation.x = angVel * vhtL`, otherwise Euler "ZYX" and `rotation.z`. KrunkNative keeps
+that angVel in `Player.scheme.lean_ang_vel` (shared/src/player.c) and the client draws the lean on the
+class model (client/src/player_class_model.c, doc/v10/class-models.md; ZYX as the default XYZ with
+`z * cos(mdlDr)`, the same rotation for a yaw of 0 or 180 degrees). Like v10 only the side running `mov`
+leans a model: a client its own player (reconciliation replays included), never the others, whose angVel
+reaches only their owner.
 
 ## Sync (sendVals)
 
@@ -90,7 +95,11 @@ walldashTimer, tmpVel; Vehicle: forwardV, reverseV, angVel; deob-10.0.3.js:22239
 owner writes them back before replaying (:258289-258295). KrunkNative's server sends them as
 `NET_EXT_PLAYER_MOVE_VALS` (`NetPlayerMoveValsPacket`, shared/include/net_ext.h) right before each
 RECON of the same ack; the client applies them with that RECON (`client/src/net/recon.c`). Peers
-without EXT keep their own predicted values. `resetMovVals` (spawn and class change,
+without EXT keep their own predicted values. On an official krunker.io server the link does the same
+with "l"'s own values (`krunker_link.c` sync_tail): the six SRM values (tmpVel an `{x, y, z}` object,
+three floats here) or Vehicle's three, read between custSync and the controlled-entity tail, go out as
+the same `NET_EXT_PLAYER_MOVE_VALS` ahead of the RECON (scheme from their count; the client applies
+them only when its class has that scheme). `resetMovVals` (spawn and class change,
 deob-10.0.3.js:195029) zeroes them (`player_movement_spawn`).
 
 ## Camera, third person, KrunkScript
@@ -109,8 +118,9 @@ deob-10.0.3.js:195029) zeroes them (`player_movement_spawn`).
   without pointer lock, `lockCamP`, `lckCmYR` / `yCmLim` pitch locks) is not drawn by KrunkNative's
   client yet; the game's `thirdPerson` setting and KrunkNative's own third person ride behind the
   shoulder with the mouse look, so MMORPG shows the body turning toward its move there.
-- **KrunkScript.** v10's `onPlayerUpdate` sees `movDir` after `movDrP` (deob-10.0.3.js:191302-191305;
-  KrunkNative's `ks_game_on_player_update` still passes it without `movDrP`, a KrunkScript-side gap);
+- **KrunkScript.** v10's `onPlayerUpdate` sees `movDir` after `movDrP` (deob-10.0.3.js:191302-191305), and so does
+  KrunkNative's (`ks_move_dir_value` in `shared/src/ks_game/ks_game.c`, which also maps our move key to input[4]
+  as `(k + 1) % 8`: forward is -PI / 2);
   `disabledInputs.movDir` makes it
   undefined: Default, Dir Only and MMORPG stop, Follow Mouse, Move Right and Fly keep going (they do
   not read it), SRM keeps its keys (`input[4]`) but gets no `wishdir`, and a Vehicle keeps driving

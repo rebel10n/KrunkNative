@@ -119,6 +119,11 @@ These keys are not read, because nothing in Box Office uses them yet: `hideTag`,
 - `alwaysSync` (`aSync`, :204917) is checked twice in 10.0.3: in `AI.sync` (:206576) and in `playAnim`'s `"ana"` loop
   (:206471). Box Office had only the first; the `"ana"` range now honours it too.
 
+- `onPlayerUpdate`'s `inputs.movDir` is `config.movDirs[input[4]] + (movDrP || 0) * PI` (:191302-191305), with the
+  player's class `movDrP`. Our move key k (0 forward, clockwise) is the client's input[4] `(k + 1) % 8`, so forward is
+  -PI / 2 (:236111-236121). Before this fix KN passed `-PI + (k + 1) * PI / 4`, which was a quarter turn off, with no
+  `movDrP`.
+
 ## 5. `scripts.shared`
 
 **10.0.3.** `prepareGame` parses the main script for its side and then `scripts.shared` (`addScripts`, :216431). On

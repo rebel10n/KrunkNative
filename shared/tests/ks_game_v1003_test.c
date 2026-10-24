@@ -13,6 +13,7 @@
 #include <ai_parts.h>
 #include <ks_game.h>
 #include <net_ext.h>
+#include <ruleset.h>
 #include <math.h>
 #include <world.h>
 #include <stdio.h>
@@ -550,6 +551,39 @@ static void test_ai_wrapper(void) {
     cJSON_Delete(map);
 }
 
+// ---------------------------------------------------------------- onPlayerUpdate movDir (movDrP)
+
+// v10.0.3 procInputs (deob-10.0.3.js:191302-191305): movDir = config.movDirs[input[4]] + (config.movDrP || 0) * PI, and
+// forward is input[4] 1 (-PI / 2: CONTROLS.moveDir atan2(-1, 0), :236111-236121)
+static void test_move_dir(void) {
+    printf("Running onPlayerUpdate movDir test...\n");
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    static Game game;
+    game_on(&game, map, MODE_ID_FFA);
+    game.is_local = 1;
+    Player *p = add_player(&game, 2);
+    static ClassConfig classes[CLASS_COUNT];
+    memcpy(classes, rules_classes(), sizeof(classes));
+    game.classes = classes;
+    game.class_count = CLASS_COUNT;
+    p->class_index = 0;
+    run_script(&game, "public action onPlayerUpdate(str id, num delta, obj inputs) {\n"
+                      "    GAME.log(\"dir \" + toStr(inputs.movDir));\n}\n");
+    const char *expect[] = {"dir -1.5707963267948966", "dir 0", "dir undefined", "dir 0", "dir 1.5707963267948966"};
+    Input in;
+    for (int k = 0; k < 5; k++) {
+        if (k == 3) classes[0].movement.move_dir_offset = 0.5f; // movDrP 0.5: + PI / 2
+        memset(&in, 0, sizeof(in));
+        in.delta = 0.016f;
+        in.move_dir = k == 0 || k == 3 ? 0 : k == 1 || k == 4 ? 2 : -1; // forward, right, none
+        g_log_count = 0;
+        ks_game_on_player_update(&game, p, &in);
+        CHECK(g_log_count == 1 && !strcmp(g_log[0], expect[k]), "movDir %d: %s (log %s)", k, expect[k], g_log_count ? g_log[0] : "none");
+    }
+    ks_game_unload(&game);
+    cJSON_Delete(map);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -562,6 +596,7 @@ int main(void) {
     test_play_anim_reps();
     test_ai_parts();
     test_ai_wrapper();
+    test_move_dir();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);
