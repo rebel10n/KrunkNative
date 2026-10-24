@@ -17,7 +17,7 @@ marked **(KN)**. The research notes are `doc/v10/ranked.md` and `doc/v10/clans.m
 | Ranks | 8 numbered | 14: Unranked, Bronze 1-3, Silver 1-3, Gold 1-3, Platinum, Diamond, Master, Kracked; thresholds 0 / 200 / 400 / 700 / 900 / 1100 / 1300 / 1600 / 2000 / 2300 / 3000 / 3300 / 4700, colours and `img/ranked/ranks/rank_*.svg` icons (@4118000) |
 | Placement | none | "N games remaining until ranked" while Unranked: 6 matches |
 | Seasons | `accounts.current_season` (7) | monthly: `12*(Y-2025) + (M-8+1)` UTC, 0 (Beta) before 2025-08 (@601149) |
-| Maps | the comp maps | `getRankedMaps(season)`: Sandstorm always, plus 4 of {Undergrowth 4, Industry 11, Site 14, Bureau 17, Eterno Simulator 39, Frontier 42} by a seeded LCG (@601149) |
+| Maps | the comp maps | `getRankedMaps(season)`: Sandstorm always, plus 4 of {Undergrowth 4, Industry 11, Site 14, Bureau 17, Frontier 42} by a seeded LCG (10.0.3, `deob-10.0.3.js:19381-19403`; 10.0.2 also had Eterno Simulator 39, @601149) |
 | Rewards | none | Ranked Points: per match (`floor(reward/2)` capped 60, game.js endGame @9297902), match-count milestones (`claim-milestone`), the month-end conversion of the best region's rating (rate `min(matches/100, 1)`, 0 below 6 matches, Beta 1:1), an RP shop (`/ranked/shop`, `/ranked/purchase`, `minMMR` / `maxMMR` requirements) |
 | Decay | none | "Your rating will decay after 7+ days of inactivity" |
 | In game | needAll 50 s | needAll / `rankedTimeForFirstConnect` 60 s, `LATEST_RANKED_MMR_CHANGE` "lrmr" ("Rating +N" on the end screen), vote forfeit, reconnects, 2x KR, no streaks, no class XP |
@@ -84,6 +84,71 @@ v10 has no scheduled clan-vs-clan matches. Its clan war is **Turf Wars** (`terri
   push-in window); KrunkNative used to start with the players who were in.
 - KrunkNative choice: the ping (`mpos`, NET_EXT_MARK_POSITION) is relayed to every other connection
   of a ranked or comp game, never echoed to the pinger (v10 draws no local marker either).
+- KrunkNative choice: a ranked match is one round (`mode_end_game`). v10's endGame round logic is not
+  gated on ranked (`deob-10.0.3.js:221574-221646`): a ranked match plays `config.gamRounds` rounds, and
+  that config comes from v10's matchmaker, which is not in the bundle.
+- A team forfeit (`/ff`, `shared/src/forfeit.c`) ends the match like v10's prepareForfeit
+  (`deob-10.0.3.js:221463-221473`): the winning team's score and round wins become 1, the other
+  team's 0, no round is left. The ranked result and the end screen read 1 - 0.
+
+### Checked against v10.0.3 (2026-10-24)
+
+Every rule above was cited from v10.0.2. Re-read in `deob-10.0.3.js` (lines below); all unchanged
+except the pool, which lost Eterno Simulator.
+
+| rule | 10.0.3 | KN |
+| --- | --- | --- |
+| map pool | `rankedMapPoolInfo` {2, 4, 11, 14, 17, 42}, `getRankedMaps` (19381-19403) | `shared/src/ranked.c` (was 7 maps with 39) |
+| seasons | 0 before 2025-08 UTC, then `12 (Y - 2025) + (M - 8 + 1)` (19369-19378) | `ranked_season_at` |
+| KR | `min(premium ? 40 : 30, floor(score * rewardMlt / 100))`, then `challMode` x1.5, else ranked x2 (221756-221762) | `acc_reward`; the challenge-mode x1.5 (which wins over the ranked x2) was missing and is ported |
+| Ranked Points per match | `clamp(floor(reward / 2), 0, 60)`, no profile games / kills / deaths / wins (217283-217296) | `ranked_match_points`, `acc_commit` |
+| kill streaks | none when `isRanked` (198604) | `rules_ranked_no_streaks` |
+| class XP | `classScores && isPubType() && !isRanked` (197794) | `rules_ranked_no_class_xp` |
+| first connect | `needAllTimer = isRanked ? 60000 : ...` (219964), the class check, the 3 s push-in, the cancel texts (222054-222101), `rankedTimeForFirstConnect` 60000 (22815) | `acc_tick_ranked` |
+| end | `endTimer` "inf" for comp, `shutdownTimer` 120000 when ranked (221813-221815) | `ranked.shutdown_ms` |
+| reconnect | `allowsReconnection` WARMUP..POST_MATCH (222632-222634), the lobby player keeps team and class (216026-216033) | `acc_ranked_refusal` |
+| leave | `checkLeave` logs it, the match goes on (217383-217386) | `acc_ranked_on_leave` |
+| forfeit | eligible voters, update, resolve, prepareForfeit, timer 60000, grace 30000 (215224-215257, 221463-221546, 222156-222163, 22996-22997) | `shared/src/forfeit.c`; prepareForfeit's 1 - 0 scores were missing and are ported |
+| ranks | 14, thresholds 0 / 200 / 400 / 700 / 900 / 1100 / 1300 / 1600 / 2000 / 2300 / 3000 / 3300 / 4700, icons (110781-110801), colours (110840-110867), MMR `1000 + Math.round(100 cr)` (110868-110871) | `ranked.c` tables |
+| placement, RP rate | 6 matches, `maxMatches` 100, `minMatchesForPoints` 6, Beta 1:1 (128136, 128161-128176) | `ranked_season_points` |
+| level, decay, classes | level 10 (127658-127661), decay after 7 days (112366), `rankedClasses` (19426) | `ranked.h` |
+| queue | errors INTERNAL_ERROR / NO_RANK_DATA / MIN_LEVEL_REQUIREMENT / COOLDOWN / ALREADY_IN_MATCH (111657-111663), `preferredMaps` [0, 2, 4, 11, 14, 17, 42] (111733), `/v1/matchmaking/queue?token&maps&regions` (111802) | brain long poll (documented deviation); `krunker_ranked.c` |
+| Bureau ranked challenges | retired in 10.0.2 (changelog). Challenge rows are server data, not in the bundle: no Bureau challenge exists in 10.0.3's client, and Box Office's seed has no ranked rows (`doc/v10/challenges.md` 4), so there is nothing to retire | none |
+
+### Comp webhook (host option `webhook`)
+
+The Host Game window's comp option "Webhook" (`deob-10.0.3.js:20077-20082`, host type 1, input of 200). v10's
+`applyConfig` keeps it only for a comp game with a non-empty value and deletes it from the config
+(`deob-10.0.3.js:216122-216129`), so no client receives it; KN's `game_config_write` leaves it out too.
+
+What is posted is Krunker's server code, not in the bundle: the bundle only hands the server the match's stats at
+the match end (`onGameEnd(game, getEndGameStats())`, `deob-10.0.3.js:221913-221914`, once per match: a round
+with rounds left returns before it). The body is the shape receivers of Krunker's comp webhook read (a
+third-party tournament bot's README and handler, read 2026-10-24: `type` "match_end", `map`, `winner`,
+`teams[{team, name, score}]`, `players[{team, name, score, kills, deaths, objective_score, damage_done, ...}]`),
+with the rest of a player's keys taken from getEndGameStats' entries (`deob-10.0.3.js:215345-215364`,
+`215434-215492`, minus the IP, the FRVR id and token):
+
+    {"type": "match_end", "map": "Bureau", "mode": 2, "winner": 2,
+     "teams": [{"team": 1, "name": "Alpha", "score": 1}, {"team": 2, "name": "Bravo", "score": 2}],
+     "players": [{"team": 2, "name": "...", "player_id": 21, "score": 1200, "kills": 12, "deaths": 6, "assists": 0,
+                  "accuracy": 25, "headshots": 3, "damage_done": 1500, "objective_score": 30, "rounds_won": 2,
+                  "victory": 1, "kr": 12}, ...]}
+
+`teams[].score` and `rounds_won` are the teams' round wins; `winner` is getEndGameStats' (more round wins,
+Alpha on a tie, `deob-10.0.3.js:215438-215440`). Players: on team 1 or 2, no AI, highest score first.
+
+Transport (KN, `server/src/comp_webhook.c`, `server/include/server_webhook.h`): `accounts.c` keeps the URL of a
+comp host request (`host_index` 1, ranked included; at most 200 bytes) and, at the first tick after the match's
+END, builds the body (`shared/src/comp_webhook.c`) and hands it to server_bin, which POSTs it as
+`application/json` from a detached worker thread (at most 4 in flight, 5 s connect, 10 s total), so the game
+loop never waits. The URL is a player's, so server_bin only posts to `https://` with a public host
+(`comp_webhook_url_ok`: no user info, no local names, no IPv6 or numeric host forms but a public dotted quad)
+and libcurl's every connect address must be public (`comp_webhook_ipv4_public` / `_ipv6_public` at
+`CURLOPT_OPENSOCKETFUNCTION`: no loopback, private, link-local / metadata, CGNAT or multicast, also after DNS),
+with no proxy and no redirect. The log names the host only (a webhook's secret is in its path). Without
+libcurl, or in the client's offline sandbox, nothing is posted. `KRUNKNATIVE_COMP_WEBHOOK_INSECURE=1` (tests and
+local development) allows `http://` and internal addresses.
 | client | `client/src/ui/ranked_ui.c`, `turf_ui.c`, `clan_ui.c` | window 27 in v10's modal layout; the Turf Wars window (`TURF_WINDOW` = KN 101, a menu button after Ranked); the clan window's Settings tab with Turf Wars Loot Distribution |
 
 ### Routes
@@ -130,8 +195,10 @@ the latest MMR (v7 profile field).
 Every second, the brain holding the lock takes the queue per region. The longest-waiting player
 anchors; players within `rating_window + window_growth * wait` MMR (at most `window_max`) fill
 2 x `team_size`. Teams are a snake draft by mu (1-4 vs 2-3 ...). The map is chosen at random
-from the season's pool that the map catalogue has; Eterno Simulator (39) and Frontier (42) are
-not in KrunkNative's catalogue yet, so they are skipped and listed `available: false`. Hosting
+from the season's 5 maps (10.0.3's pool, `deob-10.0.3.js:19381-19403`). Every pool map has a
+catalogue entry, Frontier (42) included, so all 5 are hosted and listed `available: true`; a map
+without one would be skipped and listed `available: false` (`ranked_map_playable`). Eterno
+Simulator (39) left the pool in 10.0.3 and is no longer listed. Hosting
 uses the existing ranked `host` config (a 4v4 Hardpoint comp lobby; the comp lobby rules are
 unchanged, doc/backend.md 8.6). If hosting fails, the players go back to the queue, held for 10 s.
 
@@ -201,8 +268,11 @@ booking flow because v10 has none.
 
 ## 5. Tests
 
-- `shared/tests/comp_ranked_test.c`: seasons, the map pool, ranks, TrueSkill (symmetry, draws,
-  upsets, abandons), decay, seeds, RP, regions, Turf rules and every loot mode.
+- `shared/tests/comp_ranked_test.c`: seasons, the map pool (10.0.3's seasons 0-4 and 13-15 against node
+  running getRankedMaps; no Eterno Simulator in 20 years of seasons), ranks, TrueSkill (symmetry, draws,
+  upsets, abandons), decay, seeds, RP, regions, Turf rules and every loot mode; the comp webhook's URL rule,
+  address rule and match_end body.
+- `shared/tests/forfeit_test.c`: the forfeit vote, and prepareForfeit's 1 - 0 scores and round wins.
 - `services/brain/tests/ranked_test.py` (`ctest -R brain_ranked`, postgres + sqlite + redis): the
   live upgrade (a 0204 database with v7 ratings migrated to 0205), the queue on two brains, the
   assignment, rejoin, results, profiles, history, placement, the leaderboard, milestones,

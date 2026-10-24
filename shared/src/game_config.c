@@ -139,7 +139,9 @@ static const GameConfigOption k_server_options[] = {
     {"noDraws", "No Draws", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, no_draws)},
     {"bstOfR", "Best of", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, best_of)},
     {"headClipFix", "Stop Head Clipping", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_HAS_DEF_C, GC_HT(0) | GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, head_clip_fix)},
-    // v10.0.2 (CFG:7796): a comp host's webhook URL. Validated as an input and kept in the map; KN posts no webhooks
+    // a comp host's webhook URL (deob-10.0.3.js:20077-20082). Validated as an input; v10's applyConfig keeps it for a
+    // comp game only and takes it out of the config (deob-10.0.3.js:216122-216129), so game_config_write never sends
+    // it. The server posts the match_end there (server/src/accounts.c, comp_webhook.h)
     {"webhook", "Webhook", "Other", NULL, GC_INPUT, GC_STORE_NONE, 0, GC_HT(1), .def_str = "", .len = 200, .offset = 0},
     {"minimaps", "Minimaps", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, minimaps)},
     // KrunkNative addition (not a v7.1.4 serverConfig key): the Object Manager's extra loadout weapons and
@@ -171,8 +173,11 @@ static const GameConfigOption k_server_options[] = {
     {"classLim15", "Infiltrator", "Other", NULL, GC_NUM, GC_STORE_INT, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .min = 0.0f, .max = 20.0f, .step = 1.0f, .offset = offsetof(GameConfig, class_limits[15])},
 };
 
+// classConfig camType (deob-10.0.3.js:20162-20168): the values 0..4 are controls.camType isNormal / isTop /
+// isSideX / isSideZ / isOrto (deob-10.0.3.js:257869-257873); 1 "3rd Person" is v3.1.1's "Top Down" value.
 static const char *const k_cls_camType_options[] = {"FPS", "3rd Person", "Platformer (X)", "Platformer (Z)", "Orthographic"};
 static const char *const k_cls_mdl_options[] = {"Default", "Sprite", "Model"};
+// classConfig movSch (deob-10.0.3.js:20337-20344): the game.movement indexes (MovementScheme, shared.h)
 static const char *const k_cls_movSch_options[] = {"Default", "Follow Mouse", "Move Right", "Fly", "Dir Only", "SRM", "Vehicle", "MMORPG"};
 
 // config.classConfig (79 entries).
@@ -199,14 +204,14 @@ static const GameConfigOption k_class_options[] = {
     {"mdlYO", "Asset Y Offset", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0f, .min = -50.0f, .max = 50.0f, .step = 0.01f, .cat = 1, .offset = offsetof(ClassOverrides, model_y_offset), .bit = 0, .unit = U_SAME},
     {"movSch", "Move Scheme", NULL, NULL, GC_SELECT, GC_STORE_MOVE, GC_HAS_DEF, 0, .def = 0.0f, .options = k_cls_movSch_options, .option_count = 8, .cat = 1, .offset = 0, .bit = CM_SCHEME, .unit = U_SAME},
     {"vhdr", "Drag", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.97f, .min = 0.001f, .max = 0.999f, .step = 0.001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_drag), .bit = 0, .unit = U_SAME},
-    {"vhaDr", "Angular Drag", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.94f, .min = 0.001f, .max = 0.999f, .step = 0.001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_air_drag), .bit = 0, .unit = U_SAME},
-    {"vhtL", "Turn Lean", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = -2.7f, .min = -100.0f, .max = 100.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_tilt), .bit = 0, .unit = U_SAME},
-    {"vhtrsh", "Turn Threshold", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0025f, .min = 0.0f, .max = 0.01f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_turn_h), .bit = 0, .unit = U_SAME},
-    {"vhtrsv", "Turn Conv", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0f, .min = 0.0f, .max = 1.0f, .step = 0.01f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_turn_v), .bit = 0, .unit = U_SAME},
-    {"vhmP", "Max Power", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.12f, .min = 0.0f, .max = 1.0f, .step = 0.001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_move_power), .bit = 0, .unit = U_SAME},
-    {"vhpF", "Power Force", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0012f, .min = 0.0f, .max = 0.1f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_power_f), .bit = 0, .unit = U_SAME},
-    {"vhmR", "Max Reverse", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0375f, .min = 0.0f, .max = 1.0f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_move_rot), .bit = 0, .unit = U_SAME},
-    {"vhrF", "Reverse Force", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0005f, .min = 0.0f, .max = 0.1f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_rot_f), .bit = 0, .unit = U_SAME},
+    {"vhaDr", "Angular Drag", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.94f, .min = 0.001f, .max = 0.999f, .step = 0.001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_angular_drag), .bit = 0, .unit = U_SAME},
+    {"vhtL", "Turn Lean", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = -2.7f, .min = -100.0f, .max = 100.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_turn_lean), .bit = 0, .unit = U_SAME},
+    {"vhtrsh", "Turn Threshold", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0025f, .min = 0.0f, .max = 0.01f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_turn_threshold), .bit = 0, .unit = U_SAME},
+    {"vhtrsv", "Turn Conv", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0f, .min = 0.0f, .max = 1.0f, .step = 0.01f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_turn_conv), .bit = 0, .unit = U_SAME},
+    {"vhmP", "Max Power", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.12f, .min = 0.0f, .max = 1.0f, .step = 0.001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_max_power), .bit = 0, .unit = U_SAME},
+    {"vhpF", "Power Force", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0012f, .min = 0.0f, .max = 0.1f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_power_force), .bit = 0, .unit = U_SAME},
+    {"vhmR", "Max Reverse", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0375f, .min = 0.0f, .max = 1.0f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_max_reverse), .bit = 0, .unit = U_SAME},
+    {"vhrF", "Reverse Force", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 0.0005f, .min = 0.0f, .max = 0.1f, .step = 0.0001f, .cat = 1, .offset = offsetof(ClassOverrides, vehicle_reverse_force), .bit = 0, .unit = U_SAME},
     {"speed", "Speed", NULL, NULL, GC_NUM, GC_STORE_CLS_FLOAT, 0, 0, .def = 0.0f, .min = 0.01f, .max = 5.0f, .step = 0.01f, .cat = 1, .offset = offsetof(ClassConfig, speed), .bit = 0, .unit = U_SAME},
     {"speedX", "Speed X", NULL, NULL, GC_NUM, GC_STORE_MOVE, GC_HAS_DEF, 0, .def = 1.0f, .min = -50.0f, .max = 50.0f, .step = 0.1f, .cat = 1, .offset = 0, .bit = CM_SPEED_X, .unit = U_SAME},
     {"speedY", "Speed Y", NULL, NULL, GC_NUM, GC_STORE_MOVE, GC_HAS_DEF, 0, .def = 1.0f, .min = -50.0f, .max = 50.0f, .step = 0.1f, .cat = 1, .offset = 0, .bit = CM_SPEED_Y, .unit = U_SAME},
@@ -419,11 +424,12 @@ typedef struct {
     const char *allowed_dat; // allowedDat (JSON)
 } GameHostType;
 
-// "maps" are v7 official map indices = KN catalogue indices (map-logic §4.6).
+// "maps" are Krunker mapIndexes (map_catalog_official_json). Comp: deob-10.0.3.js:19442-19455 (overDat; its maps
+// gained 36 Lush, 39 Eterno Simulator and 42 Frontier in v10. A request's maps replace them: game_config_setup).
 static const GameHostType k_host_types[GAME_HOST_TYPE_COUNT] = {
     [GAME_HOST_CUSTOM] = {"Custom Game Setup", 0, 0, NULL, NULL, NULL},
     [GAME_HOST_COMP] = {"Comp Server Setup", GAME_HOST_FLAG_COMP | GAME_HOST_FLAG_SHOW_ALL | GAME_HOST_FLAG_NO_CUSTOM_MAP, 1,
-        "{\"private\":true,\"allowSpect\":true,\"maps\":[0,2,4,5,11,12,14,17,23],\"modes\":[2],\"maxPlayers\":10,"
+        "{\"private\":true,\"allowSpect\":true,\"maps\":[0,2,4,5,11,12,14,17,23,36,39,42],\"modes\":[2],\"maxPlayers\":10,"
         "\"minPlayers\":8,\"fixMov\":true,\"jumpMlt\":1.005,\"slidSpd\":0.97,\"warmupTime\":0.2,\"selTeam\":true,\"throwMel\":false}",
         NULL, NULL},
     [GAME_HOST_RENT] = {"Rent Dedicated Server", GAME_HOST_FLAG_BUY_SERVER | GAME_HOST_FLAG_NO_CUSTOM_MAP, 0, NULL, NULL, NULL},
@@ -710,6 +716,8 @@ cJSON *game_config_write(const GameConfig *g) {
     for (size_t i = 0; i < option_count; i++) {
         const GameConfigOption *o = &options[i];
         if (!strcmp(o->var, "hitBoxPad") && !g->hitbox_pad_set) continue; // the default (comp: defC)
+        // an input KN keeps nowhere (webhook): v10 deletes it from the config (deob-10.0.3.js:216128), and it has no field
+        if (o->kind == GC_INPUT && o->store == GC_STORE_NONE) continue;
         if (o->kind == GC_INPUT) {
             cJSON_AddStringToObject(out, o->var, (const char *) g + o->offset);
         } else if (o->kind == GC_BOOL) {
@@ -1184,9 +1192,9 @@ static void gc_apply_weapons(Game *game, GameConfigState *st, const cJSON *weps)
 
 const ClassOverrides g_default_class_overrides = {
     .set = 0, .cam_type = 0, .ortho_f = 50.0f, .cam_rotation = 1, .model = 0, .model_fp = 1, .anim_speed = 1.0f,
-    .model_scale = 1.0f, .model_pos_scale = 1.0f, .speed_length = 500.0f, .vehicle_drag = 0.97f, .vehicle_air_drag = 0.94f,
-    .vehicle_tilt = -2.7f, .vehicle_turn_h = 0.0025f, .vehicle_turn_v = 0.0f, .vehicle_move_power = 0.12f,
-    .vehicle_power_f = 0.0012f, .vehicle_move_rot = 0.0375f, .vehicle_rot_f = 0.0005f, .jump_cooldown = 1.0f,
+    .model_scale = 1.0f, .model_pos_scale = 1.0f, .speed_length = 500.0f, .vehicle_drag = 0.97f, .vehicle_angular_drag = 0.94f,
+    .vehicle_turn_lean = -2.7f, .vehicle_turn_threshold = 0.0025f, .vehicle_turn_conv = 0.0f, .vehicle_max_power = 0.12f,
+    .vehicle_power_force = 0.0012f, .vehicle_max_reverse = 0.0375f, .vehicle_reverse_force = 0.0005f, .jump_cooldown = 1.0f,
     .can_shoot = 1, .shoot_drag = 1.0f, .hip_fire = 1, .crouch_shoot = 1, .air_shoot = 1, .can_melee = 1,
 };
 
@@ -1590,7 +1598,7 @@ int game_apply_map_config(Game *game, const Map *map) {
 int game_class_allowed(const Game *game, const int class_index) {
     const size_t count = game && game->class_count ? game->class_count : rules_class_count();
     if (class_index < 0 || (size_t) class_index >= count) return 0;
-    return !(class_index >= CLASS_COUNT && game && game->is_official);
+    return !(class_index >= KN_CLASS_BASE && game && game->is_official); // KrunkNative's own: not on official servers
 }
 
 int game_class_level_ok(const Game *game, const int class_index, const int level, const int dev) {
@@ -1601,11 +1609,11 @@ int game_class_level_ok(const Game *game, const int class_index, const int level
     return level >= classes[class_index].min_rec;
 }
 
-// KrunkNative's own classes (past CLASS_COUNT: the Nettspend) are in every game the gate allows them in, whatever
+// KrunkNative's own classes (from KN_CLASS_BASE: the Nettspend) are in every game the gate allows them in, whatever
 // the game's class list says: a custom game's list is the host's, and the host's picker does not know them.
 // Krunker's classes follow the list (an empty list: every class).
 int game_class_listed(const Game *game, const int class_index) {
-    if (class_index >= CLASS_COUNT) return game_class_allowed(game, class_index);
+    if (class_index >= KN_CLASS_BASE) return game_class_allowed(game, class_index);
     if (!game || game->config.class_list_count <= 0) return 1;
     for (int i = 0; i < game->config.class_list_count; i++) {
         if (game->config.class_list[i] == class_index) return 1;

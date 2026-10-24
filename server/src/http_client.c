@@ -80,6 +80,73 @@ int http_request(const char *method, const char *url, const char *content_type, 
     return 0;
 }
 
+typedef struct {
+    HttpAddrCheck check;
+} CurlAddrGate;
+
+// CURLOPT_OPENSOCKETFUNCTION: every address the transfer connects to (after DNS: no rebinding past it)
+static curl_socket_t http_curl_open_checked(void *ud, const curlsocktype purpose, struct curl_sockaddr *address) {
+    const CurlAddrGate *gate = ud;
+    if (purpose != CURLSOCKTYPE_IPCXN || !address) return CURL_SOCKET_BAD;
+    if (gate && gate->check && !gate->check(&address->addr)) return CURL_SOCKET_BAD;
+    return socket(address->family, address->socktype, address->protocol);
+}
+
+int http_post_checked(const char *url, const char *content_type, const char *body, const int connect_ms, const int timeout_ms,
+                      const size_t max_body, const int allow_http, const HttpAddrCheck addr_ok, HttpResult *out) {
+    memset(out, 0, sizeof(*out));
+    if (!url || (strncmp(url, "https://", 8) && (!allow_http || strncmp(url, "http://", 7)))) {
+        snprintf(out->error, sizeof(out->error), "%s", allow_http ? "not an http(s):// URL" : "not an https:// URL");
+        return -1;
+    }
+    pthread_once(&g_curl_once, http_curl_init);
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        snprintf(out->error, sizeof(out->error), "curl init failed");
+        return -1;
+    }
+    CurlSink sink = {out, max_body ? max_body : 65536, 0};
+    CurlAddrGate gate = {addr_ok};
+    struct curl_slist *headers = NULL;
+    char ct[128];
+    if (content_type) {
+        snprintf(ct, sizeof(ct), "Content-Type: %s", content_type);
+        headers = curl_slist_append(headers, ct);
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "krunknative-server_bin");
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, (long) connect_ms);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long) timeout_ms);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_PROXY, ""); // never the environment's proxy: the address gate sees the target
+#if LIBCURL_VERSION_NUM >= 0x075500 // 7.85: CURLOPT_PROTOCOLS_STR
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, allow_http ? "http,https" : "https");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, (long) (allow_http ? CURLPROTO_HTTP | CURLPROTO_HTTPS : CURLPROTO_HTTPS));
+#endif
+    curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION, http_curl_open_checked);
+    curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, &gate);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_curl_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body ? body : "");
+    const CURLcode rc = curl_easy_perform(curl);
+    long status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    if (rc != CURLE_OK) {
+        snprintf(out->error, sizeof(out->error), "%s",
+                 sink.overflow ? "response too large" : rc == CURLE_COULDNT_CONNECT ? "cannot connect (or a non-public address)" : curl_easy_strerror(rc));
+        out->status = 0;
+        return -1;
+    }
+    out->status = (int) status;
+    return 0;
+}
+
 #elif !defined(WIN32)
 #include <netdb.h>
 #include <sys/socket.h>
@@ -168,6 +235,16 @@ int http_request(const char *method, const char *url, const char *content_type, 
     (void) method; (void) url; (void) content_type; (void) body; (void) timeout_ms; (void) max_body;
     memset(out, 0, sizeof(*out));
     snprintf(out->error, sizeof(out->error), "HTTP client needs libcurl on Windows");
+    return -1;
+}
+#endif
+
+#ifndef KRUNKNATIVE_HAVE_CURL
+int http_post_checked(const char *url, const char *content_type, const char *body, const int connect_ms, const int timeout_ms,
+                      const size_t max_body, const int allow_http, const HttpAddrCheck addr_ok, HttpResult *out) {
+    (void) url; (void) content_type; (void) body; (void) connect_ms; (void) timeout_ms; (void) max_body; (void) allow_http; (void) addr_ok;
+    memset(out, 0, sizeof(*out));
+    snprintf(out->error, sizeof(out->error), "the comp webhook needs libcurl");
     return -1;
 }
 #endif

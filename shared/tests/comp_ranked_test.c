@@ -8,6 +8,7 @@
 #include <shared.h>
 #include <game_config.h>
 #include <comp_lobby.h>
+#include <comp_webhook.h>
 #include <ranked.h>
 #include <turf_wars.h>
 #include <math.h>
@@ -67,7 +68,7 @@ static void test_rating(void) {
     CHECK(ok, "config.rankedClasses [0, 1, 2, 3, 4, 5, 6, 8, 12, 13, 15]");
 }
 
-// Krunker v10.0.2 ranked (shared/include/ranked.h): seasons, the map pool, ranks, TrueSkill, RP.
+// Krunker v10.0.3 ranked (shared/include/ranked.h): seasons, the map pool, ranks, TrueSkill, RP.
 static void test_v10(void) {
     printf("Running v10 ranked rules test...\n");
     // currentRankedSeason: 0 before 2025-08 UTC, then monthly
@@ -75,16 +76,25 @@ static void test_v10(void) {
     CHECK(ranked_season_at(1754006400) == 1, "2025-08-01 00:00 UTC is season 1");
     CHECK(ranked_season_at(1760313600) == 3, "2025-10-13 is season 3");
     CHECK(ranked_season_at(1798761600) == 18, "2027-01-01 is season 18");
-    // getRankedMaps: values from an independent port of v10's JS (scripts outside the repo)
-    static const int want[][RANKED_SEASON_MAPS] = {{2, 4, 14, 39, 42}, {2, 4, 14, 39, 42}, {2, 4, 14, 39, 42},
-                                                   {2, 4, 14, 17, 42}, {2, 11, 14, 39, 42}, {2, 4, 14, 17, 39}};
-    static const int seasons[] = {0, 1, 2, 13, 14, 15};
-    for (int i = 0; i < 6; i++) {
+    // getRankedMaps over 10.0.3's rankedMapPoolInfo (deob-10.0.3.js:19381-19403): values from node running
+    // that function as the bundle has it (scripts outside the repo). Season 15 is 2026-10.
+    static const int want[][RANKED_SEASON_MAPS] = {{2, 4, 11, 14, 42}, {2, 4, 11, 14, 17}, {2, 4, 14, 17, 42}, {2, 4, 11, 17, 42},
+                                                   {2, 11, 14, 17, 42}, {2, 4, 11, 14, 17}, {2, 4, 14, 17, 42}, {2, 4, 11, 17, 42}};
+    static const int seasons[] = {0, 1, 2, 3, 4, 13, 14, 15};
+    for (int i = 0; i < 8; i++) {
         int got[RANKED_SEASON_MAPS];
         ranked_season_maps(seasons[i], got);
         CHECK(!memcmp(got, want[i], sizeof(got)), "season %d map pool [%d,%d,%d,%d,%d]", seasons[i], got[0], got[1], got[2], got[3], got[4]);
     }
     CHECK(ranked_pool_map_name(42) && !strcmp(ranked_pool_map_name(42), "Frontier") && !ranked_pool_map_name(0), "rankedMapPoolInfo names");
+    CHECK(RANKED_POOL_COUNT == 6 && !ranked_pool_map_name(39), "10.0.3's pool: Eterno Simulator (39) left it, 6 maps");
+    int eterno = 0;
+    for (int season = 0; season < 240; season++) {
+        int maps[RANKED_SEASON_MAPS];
+        ranked_season_maps(season, maps);
+        for (int k = 0; k < RANKED_SEASON_MAPS; k++) eterno |= maps[k] == 39;
+    }
+    CHECK(!eterno, "no season of the next 20 years lists Eterno Simulator");
     // ranks
     CHECK(ranked_rank_of(10.0, 5) == RANK_UNRANKED, "unranked during the 6 placement matches");
     CHECK(ranked_display(0.0) == 1000 && ranked_display(12.345) == 2235, "display = 1000 + round(100 cr)");
@@ -281,7 +291,7 @@ static void test_comp_lobby(void) {
     CHECK(comp_lobby_class_count(&game, 1, 0) == 1 && comp_lobby_class_count(&game, 2, 0) == 1, "class counts per team");
     CHECK(comp_lobby_spawn_block(&game, 1) == NULL, "team + class: may spawn");
     CHECK(!comp_lobby_update(&game, 1, 'c', 0) && !comp_lobby_update(&game, 1, 'x', 1), "no change / unknown key");
-    // KrunkNative's Nettspend (class 16): past classLim0..15 it has no classLim, so every slot of the team (2 in this 2v2) may take it
+    // KrunkNative's Nettspend (CLASS_ID_NETTSPEND, the last class): past classLim0..15 it has no classLim, so every slot of the team (2 in this 2v2) may take it
     CHECK(comp_lobby_class_limit(&game, CLASS_ID_NETTSPEND) == 2 && comp_lobby_class_limit(&game, 7) == 0, "classLim: the Nettspend a team's size (2), the Rocketeer 0");
     CHECK(comp_lobby_update(&game, 1, 'c', CLASS_ID_NETTSPEND) && comp_lobby_get(&game, 1)->class_index == CLASS_ID_NETTSPEND, "the Nettspend in comp");
     CHECK(comp_lobby_update(&game, 2, 'c', CLASS_ID_NETTSPEND), "a team mate takes it too: no cap below the team's size");
@@ -327,6 +337,91 @@ static void test_comp_lobby(void) {
     CHECK(!pub.comp_lobby && !g_sent_count && comp_lobby_spawn_block(&pub, 1) == NULL, "public games have no lobby table");
 }
 
+// The comp host's webhook (shared/include/comp_webhook.h): the URL rule, the address rule and the match_end body.
+static void test_comp_webhook(void) {
+    printf("Running comp webhook test...\n");
+    static const char *const good[] = {
+        "https://discord.com/api/webhooks/123/abc-DEF_ghi", "https://example.org", "https://hooks.example.org:8443/krunker?x=1",
+        "HTTPS://Bot.Example.com/krunker", "https://8.8.8.8/hook", "https://1.1.1.1:443/", "https://example.com./x",
+    };
+    for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); i++) CHECK(comp_webhook_url_ok(good[i]), "url ok: %s", good[i]);
+    static const char *const bad[] = {
+        "http://discord.com/api/webhooks/1/a", "ftp://example.com/x", "https://", "https:///path", "https://localhost/x",
+        "https://LOCALHOST.:8080/", "https://api.localhost/x", "https://printer.local/x", "https://metadata.google.internal/x",
+        "https://router.lan/", "https://nas.home.arpa/", "https://metadata/computeMetadata", "https://127.0.0.1/x",
+        "https://10.0.0.5/", "https://172.16.0.1/", "https://172.31.255.255/", "https://192.168.1.1/", "https://169.254.169.254/latest",
+        "https://100.64.0.1/", "https://0.0.0.0/", "https://224.0.0.1/", "https://255.255.255.255/", "https://127.1/",
+        "https://2130706433/", "https://0x7f.0.0.1/", "https://0x7f000001/", "https://127.000.000.001/", "https://017700000001/",
+        "https://[::1]/", "https://[2606:4700::1111]/", "https://user:pw@example.com/", "https://example.com@evil.com/",
+        "https://example.com:0/", "https://example.com:65536/", "https://example.com:abc/", "https://exa mple.com/",
+        "https://example.com/a b", "https://example..com/", "https://ex_ample.com/", "https://example.123/", "https://example.com\\@x/",
+        "", NULL,
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) CHECK(!comp_webhook_url_ok(bad[i]), "url refused: %s", bad[i] ? bad[i] : "(null)");
+    char longest[COMP_WEBHOOK_URL_MAX + 2];
+    snprintf(longest, sizeof(longest), "https://example.com/");
+    memset(longest + 20, 'a', COMP_WEBHOOK_URL_MAX - 20);
+    longest[COMP_WEBHOOK_URL_MAX] = 0;
+    CHECK(comp_webhook_url_ok(longest), "200 bytes: ok");
+    longest[COMP_WEBHOOK_URL_MAX] = 'a';
+    longest[COMP_WEBHOOK_URL_MAX + 1] = 0;
+    CHECK(!comp_webhook_url_ok(longest), "201 bytes: refused (the option's input length)");
+
+    CHECK(comp_webhook_ipv4_public(0x08080808u) && comp_webhook_ipv4_public(0xac200001u) && comp_webhook_ipv4_public(0x64800001u),
+          "8.8.8.8, 172.32.0.1, 100.128.0.1 are public");
+    CHECK(!comp_webhook_ipv4_public(0x7f000001u) && !comp_webhook_ipv4_public(0x0a000001u) && !comp_webhook_ipv4_public(0xa9fea9feu) &&
+          !comp_webhook_ipv4_public(0xac1f0001u) && !comp_webhook_ipv4_public(0xc0a80001u) && !comp_webhook_ipv4_public(0x647f0001u) &&
+          !comp_webhook_ipv4_public(0xc0000201u) && !comp_webhook_ipv4_public(0xc6120001u) && !comp_webhook_ipv4_public(0xe0000001u),
+          "loopback, private, link-local, CGNAT, TEST-NET, benchmarking and multicast are not");
+    const uint8_t loop6[16] = {[15] = 1}, any6[16] = {0}, ula[16] = {0xfd, 0x12}, link6[16] = {0xfe, 0x80, [15] = 1};
+    const uint8_t mapped_lo[16] = {[10] = 0xff, [11] = 0xff, [12] = 127, [15] = 1}, mapped_pub[16] = {[10] = 0xff, [11] = 0xff, 8, 8, 8, 8};
+    const uint8_t pub6[16] = {0x26, 0x06, 0x47, 0x00, [15] = 0x11}, doc6[16] = {0x20, 0x01, 0x0d, 0xb8, [15] = 1}, mc6[16] = {0xff, 0x02, [15] = 1};
+    CHECK(!comp_webhook_ipv6_public(loop6) && !comp_webhook_ipv6_public(any6) && !comp_webhook_ipv6_public(ula) &&
+          !comp_webhook_ipv6_public(link6) && !comp_webhook_ipv6_public(mapped_lo) && !comp_webhook_ipv6_public(doc6) &&
+          !comp_webhook_ipv6_public(mc6), "::1, ::, fd00::/8, fe80::/10, ::ffff:127.0.0.1, 2001:db8::/32 and ff02:: are not public");
+    CHECK(comp_webhook_ipv6_public(pub6) && comp_webhook_ipv6_public(mapped_pub), "2606:4700::11 and ::ffff:8.8.8.8 are");
+
+    // the body: two teams, a spectator and a player of no team left out, the players by score
+    const CompWebhookPlayer players[] = {
+        {.team = 1, .name = "alpha1", .player_id = 11, .score = 900, .kills = 10, .deaths = 4, .assists = 2, .damage_done = 1500,
+         .objective_score = 30, .headshots = 3, .shots = 40, .hits = 10, .kr = 12},
+        {.team = 2, .name = "bravo1", .player_id = 21, .score = 1200, .kills = 12, .deaths = 6, .shots = 0, .hits = 0},
+        {.team = 0, .name = "spectator", .player_id = 31, .score = 5000},
+        {.team = 1, .name = "guest", .player_id = 0, .score = 300},
+    };
+    CompWebhookMatch match = {.map = "Bureau", .mode = 2, .team_names = {"TeamA", "TeamB"}, .round_wins = {1, 2},
+                              .players = players, .player_count = 4};
+    CHECK(comp_webhook_winner(&match) == 2, "winner: the team with more round wins");
+    cJSON *body = comp_webhook_payload(&match);
+    const cJSON *teams = cJSON_GetObjectItem(body, "teams"), *list = cJSON_GetObjectItem(body, "players");
+    CHECK(body && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "type")), "match_end") &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "map")), "Bureau") && cJSON_GetObjectItem(body, "winner")->valueint == 2 &&
+          cJSON_GetObjectItem(body, "mode")->valueint == 2, "type match_end, map, mode, winner 2");
+    CHECK(cJSON_GetArraySize(teams) == 2 && cJSON_GetObjectItem(cJSON_GetArrayItem(teams, 0), "team")->valueint == 1 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(teams, 1), "name")), "TeamB") &&
+          cJSON_GetObjectItem(cJSON_GetArrayItem(teams, 1), "score")->valueint == 2, "teams [{1, TeamA, 1}, {2, TeamB, 2}]");
+    CHECK(cJSON_GetArraySize(list) == 3, "the spectator is left out (%d players)", cJSON_GetArraySize(list));
+    const cJSON *top = cJSON_GetArrayItem(list, 0), *second = cJSON_GetArrayItem(list, 1);
+    CHECK(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(top, "name")), "bravo1") && cJSON_GetObjectItem(top, "victory")->valueint == 1 &&
+          cJSON_GetObjectItem(top, "rounds_won")->valueint == 2 && cJSON_GetObjectItem(top, "accuracy")->valuedouble == 0.0,
+          "by score: bravo1 first, a winner, 2 rounds won, accuracy 0 with no shot");
+    CHECK(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(second, "name")), "alpha1") && cJSON_GetObjectItem(second, "player_id")->valueint == 11 &&
+          cJSON_GetObjectItem(second, "kills")->valueint == 10 && cJSON_GetObjectItem(second, "deaths")->valueint == 4 &&
+          cJSON_GetObjectItem(second, "assists")->valueint == 2 && cJSON_GetObjectItem(second, "damage_done")->valueint == 1500 &&
+          cJSON_GetObjectItem(second, "objective_score")->valueint == 30 && cJSON_GetObjectItem(second, "headshots")->valueint == 3 &&
+          cJSON_GetObjectItem(second, "accuracy")->valuedouble == 25.0 && cJSON_GetObjectItem(second, "victory")->valueint == 0 &&
+          cJSON_GetObjectItem(second, "kr")->valueint == 12 && cJSON_GetObjectItem(second, "score")->valueint == 900,
+          "alpha1: every getEndGameStats key, accuracy 10 / 40 = 25");
+    CHECK(!cJSON_GetObjectItem(second, "ip") && !cJSON_GetObjectItem(second, "frvr_token"), "no ip, no token in the body");
+    cJSON_Delete(body);
+    match.round_wins[0] = match.round_wins[1] = 0;
+    match.map = NULL;
+    body = comp_webhook_payload(&match);
+    CHECK(comp_webhook_winner(&match) == 1 && cJSON_GetObjectItem(body, "winner")->valueint == 1 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "map")), "Unknown"), "a tie: Alpha (ON_DRAW_FAVOUR_TEAM); no map: Unknown");
+    cJSON_Delete(body);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     test_rating();
@@ -334,6 +429,7 @@ int main(void) {
     test_turf();
     test_comp_config();
     test_comp_lobby();
+    test_comp_webhook();
     if (g_failures) {
         printf("comp_ranked_test: %d of %d check(s) failed\n", g_failures, g_checks);
         return 1;
