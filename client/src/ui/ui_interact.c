@@ -19,6 +19,9 @@
 #include <s2c_events.h> // the spectated player's bar ("p")
 #include <spectate.h>
 #include <net_ext.h>    // NET_INTER_BAR_*
+#include <map_spinners.h> // map prize wheels (type 9): the spinner's store wheel
+#include <store_spins.h>
+#include <backend_ui.h>   // active_account: window.canAfford
 
 #define INTERACT_KEY_COLOR "#FBC02D"        // COLORS.interactPopup.key
 #define INTERACT_ENOUGH_COLOR "#9eeb56"     // COLORS.interactPopup.enough
@@ -223,6 +226,26 @@ static void build_prompt(const Client *client, char *html, const size_t size) {
             snprintf(html, size, "Hold %s to Claim <span style='color:%s'>%s</span>", key, g_airdrop_rarity_colors[package->rarity], package->name);
             break;
         }
+        case GAME_INTERACT_SPINNER: { // 9, a map prize wheel (updateInteract, deob-10.0.3.js:197590-197598; index = the spinner uid)
+            const int spinner = map_spinner_object(client->game.map, scan.index);
+            const StoreWheel *wheel = spinner >= 0 ? map_spinner_store_wheel(client->game.map->objects[spinner]) : NULL;
+            if (!wheel) break;
+            const int pending = me->pending_spin == scan.index + 1; // pendingSpin == obj.uid
+            char lead[96], confirm_key[32];
+            if (pending) { // binds.confirm
+                ui_controls_key_name(ui_controls_v7_bind("confirm", -1, 0), confirm_key, sizeof(confirm_key));
+                snprintf(lead, sizeof(lead), "Press <span style=\"color:%s\">[%s]</span>", INTERACT_KEY_COLOR, confirm_key);
+            } else {
+                snprintf(lead, sizeof(lead), "Press %s", key);
+            }
+            if (ui_mobile_active()) snprintf(lead, sizeof(lead), "Tap");
+            const AccountInfo *account = active_account();
+            const int afford = account && account->funds >= wheel->price; // window.canAfford(price)
+            // obj.interactMsg || "Spin": the spinner's GameObject carries none (MapManager.addSpinner, :186543-186561)
+            snprintf(html, size, "%s to %s %s <span style='color:%s'>[%d KR]</span>", lead, pending ? "Confirm" : "Spin", wheel->name,
+                     afford ? INTERACT_ENOUGH_COLOR : INTERACT_NOT_ENOUGH_COLOR, wheel->price);
+            break;
+        }
         default:
             break;
     }
@@ -362,9 +385,17 @@ void ui_interact_drop(Client *client) {
 }
 
 int ui_interact_confirm(Client *client) {
-    if (!client || !client->me || !client->me->pending_trigger || !v7_server(client) || html_ui_is_menu_open()) return 0;
-    const NetConfirmPacket packet = {.uid = client->me->pending_trigger - 1, .kind = 0};
-    client_net_send(client, NET_PACKET_CONFIRM_INTERACT, &packet, sizeof(packet)); // io.send("cnfm")
-    client->me->pending_trigger = 0;
+    if (!client || !client->me || (!client->me->pending_trigger && !client->me->pending_spin) || !v7_server(client) || html_ui_is_menu_open())
+        return 0;
+    if (client->me->pending_trigger) {
+        const NetConfirmPacket packet = {.uid = client->me->pending_trigger - 1, .kind = 0};
+        client_net_send(client, NET_PACKET_CONFIRM_INTERACT, &packet, sizeof(packet)); // io.send("cnfm")
+        client->me->pending_trigger = 0;
+    }
+    if (client->me->pending_spin) { // a pending prize wheel spin: send("cnfm", 2) (deob-10.0.3.js:260117-260120)
+        const NetConfirmPacket packet = {.uid = client->me->pending_spin - 1, .kind = 2};
+        client_net_send(client, NET_PACKET_CONFIRM_INTERACT, &packet, sizeof(packet));
+        client->me->pending_spin = 0;
+    }
     return 1;
 }

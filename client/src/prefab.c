@@ -7,8 +7,8 @@
 // Built elsewhere: lights, noise planes, spin, render distance, leaderboard canvases (map_post.c),
 // AO planes (ambient.c), terrain / BR zone (terrain_mesh.c / zone_mesh.c), ocean (ocean.c), sky
 // dome (sky.c), flags / weapon pickups / showcases / bomb sites (mode_world.c and friends),
-// particles (vfx.c), AIs (ai_render.c). Not drawn: PRIZE_WHEEL (v7 paints the store wheel into
-// its canvas every frame, store data KN does not have: documented placeholder, no mesh).
+// particles (vfx.c), AIs (ai_render.c), PRIZE_WHEEL canvases (prize_wheel_render.c: v10.0.3's
+// render.addSpinner, painted from the spin state of prize_wheels.c).
 #include <gl.h>
 #include <client.h>
 #include <render_settings.h>

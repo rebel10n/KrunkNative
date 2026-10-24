@@ -5,6 +5,7 @@
 
 static const char *const k_files[] = {
     "texture.png", "thumb.png", "model.obj", "model.png", "model_e.png", "model_l.png", "model_n.png",
+    "model_p.png", // a paint's mask (paint.mask.src "<asset>/model_p": the Turf Wars banners, deob-10.0.3.js:214990)
     "model.gltf", "model.glb", "sound.mp3", "video.mp4", "data.json", "mod.zip",
     "video.mp4.knv", // not Krunker's: KrunkNative's frames of video.mp4 (knv.h), made by the brain's mirror
 };

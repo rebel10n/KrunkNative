@@ -20,6 +20,7 @@
 // --render-scenario never reaches the network: state.remoteImages {url: file} answers those URLs from
 // local files and every other remote URL is refused (remote_images_scenario).
 #include <cJSON.h>
+#include <stddef.h>
 
 #define REMOTE_IMAGE_MAX_BYTES (2u << 20)
 #define REMOTE_IMAGE_MAX_SIDE 4096
@@ -32,3 +33,6 @@
 void remote_images_init(void);                    // startup: the engine's fetcher (html_ui_set_remote_image_fetcher)
 void remote_images_scenario(const cJSON *map);   // --render-scenario state.remoteImages {url: local file}
 const char *remote_images_cache_dir(void);       // "" when none (web, no HOME)
+// The same fetch for the renderer (wars_banners.c's clan logos): 1 = `path` holds the URL's image now, 0 = it is
+// downloading into `path` (ask again later), -1 = refused or failed (the web: always -1, nothing to read back).
+int remote_images_fetch(const char *url, char *path, size_t cap);

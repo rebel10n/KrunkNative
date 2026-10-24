@@ -6,8 +6,7 @@
 //             (iìîíïìì :257712, called :257109 / :261256)
 //   warsClan  the Turf Wars clan holding the map (territorialWars.setClanInfo) and, once per game, 1 s after we entered,
 //             textPopup("Turf Wars", "Territory controlled by <clan>") (enterGame :242096, iíìïïíì :255551). The
-//             wars_banner map banners setClanInfo also builds (:215041-215088) are not drawn: KrunkNative's maps have no
-//             wars_banner server nodes (doc/v10/ranked-impl.md)
+//             wars_banner map banners setClanInfo also builds (:215041-215088) are client/src/wars_banners.c
 //   edMp      the editor opens a map (iiíïìiì :259803): its objects' col / l false dropped, staged as mapToEdit, the
 //             editor page opened (as F6 does, ui_mod_keys.c)
 #include <ui_logic.h>

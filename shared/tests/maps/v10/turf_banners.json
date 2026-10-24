@@ -1,0 +1,8 @@
+{"name":"Turf Banners","ambient":"#ffffff","light":"#ffffff","sky":"#dce8ed","fog":"#8d9aa0","fogD":4000,"objects":[
+{"p":[0,-10,0],"s":[300,10,300],"c":"#808080"},
+{"p":[0,0,-6],"s":[120,40,4],"c":"#5b6a74"},
+{"p":[-22,7,0],"s":[2,2,2],"i":82,"nt":"wars_banner"},
+{"p":[0,16.5,0],"s":[2,2,2],"i":82,"nt":"wars_banner_jap"},
+{"p":[22,16.5,0],"s":[2,2,2],"i":82,"nt":"wars_banner_def","r":[0,-0.4,0]},
+{"p":[40,7,0],"s":[2,2,2],"i":82,"nt":"spawn_a"}
+],"spawns":[[0,0,55,0,0,0]],"creator":"KrunkNative tests","official":false}

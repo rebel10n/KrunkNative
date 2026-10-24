@@ -260,6 +260,8 @@ static int fetch(const char *url, char *path, const size_t cap) {
 
 void remote_images_init(void) { html_ui_set_remote_image_fetcher(fetch); }
 
+int remote_images_fetch(const char *url, char *path, const size_t cap) { return fetch(url, path, cap); }
+
 void remote_images_scenario(const cJSON *map) {
     cJSON_Delete(R.scenario);
     R.scenario = cJSON_IsObject(map) ? cJSON_Duplicate(map, 1) : NULL;
@@ -271,5 +273,11 @@ void remote_images_scenario(const cJSON *map) {
 const char *remote_images_cache_dir(void) { return ""; }
 void remote_images_init(void) {}
 void remote_images_scenario(const cJSON *map) { (void) map; }
+int remote_images_fetch(const char *url, char *path, const size_t cap) {
+    (void) url;
+    (void) path;
+    (void) cap;
+    return -1;
+}
 
 #endif

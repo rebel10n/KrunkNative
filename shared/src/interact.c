@@ -21,6 +21,7 @@
 #include <ruleset.h>
 #include <network_sounds.h>
 #include <defuse.h> // v10.0.3 Defuse: the bomb sites' prompts, the bomb's drops
+#include <map_spinners.h> // v10.0.3 map prize wheels: their prompt (type 9)
 
 int player_collides(Player*, const Object*, float pad); // shared/src/player.c (collidesE)
 int game_object_shootable(const Object*);               // shared/src/player.c (the hitscan object filter)
@@ -357,6 +358,18 @@ void game_interact_scan(const Game *game, const Player *player, GameInteractScan
     // drop's slot in game->zombies.drops, not a map object
     const int drop = airdrop_interact_prompt(game, player);
     if (drop >= 0) change_interact(&s, drop, GAME_INTERACT_CLAIM, 0, 1, 0);
+
+    // v10.0.3 player.update's spinners (deob-10.0.3.js:192203-192208), after the airdrops: changeInteract(spinner, 9)
+    // for each map prize wheel the player collides with (tRadius 7, no priority). `index` and lastInteractData.id
+    // are the spinner's uid, its place in MapManager.spinners (shared/include/map_spinners.h), not a map object
+    for (size_t i = 0, uid = 0; i < game->map->object_count; i++) {
+        const Object *o = game->map->objects[i];
+        if (map_spinner_wheel(o) < 0) continue;
+        vec3 centre, half;
+        map_spinner_box(o, &centre, &half);
+        if (collides_box(player, centre, half, MAP_SPINNER_TRADIUS)) change_interact(&s, (int) uid, GAME_INTERACT_SPINNER, 0, -1, 0);
+        uid++;
+    }
 }
 
 int game_interact_prompt(const Game *game, const Player *player, int *object_index) {
@@ -609,7 +622,6 @@ static void use_pickup(Game *game, Player *p, const int uid) {
     const int swaps = !(w->bomb && site_mode(game));
     for (int i = 0; swaps && i < count; i++) {
         const Weapon *have = weapon_at(game, ids[i]);
-
         if (!have || have->type != w->type) continue;
         old = ids[i];
         // v7 removes lastPicked of loadout[0] here, not of the weapon it swaps out (v7 bug, fixed:

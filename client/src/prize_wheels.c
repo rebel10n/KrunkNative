@@ -1,24 +1,27 @@
 // v10.0.3 map prize wheels on the client (client/include/prize_wheels.h). Line numbers: deob-10.0.3.js.
 //   the list   map generate (:189053-189066): a PRIZE_WHEEL whose store.wheels[limitMM(parseInt(sty) || 0, 0, 2)] is
 //              missing, ticketOnly, hidden or locked is skipped; the others are MapManager.addSpinner (:186539) in
-//              object order, uid = the spinner's place, the mesh at the object's bottom centre + sy / 2
+//              object order, uid = the spinner's place (shared/include/map_spinners.h), the mesh at the object's
+//              bottom centre + sy / 2
 //   "spinW"    game.updateSpinner(uid, randNum, itemID) (:219408): the pointer heads for 2 pi (randNum / 100 + 13) + pi / 2
 //   the steps  game.updateSpinners(150) every 50 ms (setInterval(updateSpinners(iìiïìíi * 3), iìiïìíi), :262717):
 //              the wheel grows in, the pointer eases 5 % of the way per step with a tick_0 (0.2) every pi / 1.5, and
 //              once within 0.002: endAnimTarget = 100 - wheel.rarities[item.rarity], reward (0.3), cheer_1 (rarity >= 4)
-//              or cheer_0 (>= 1) at 0.1, an explosion (1) above rarity 5 (:219470-219574)
-// Not ported (KrunkNative draws no PRIZE_WHEEL, prefab.c): the canvas wheel, the won item's model above it (meshPrev and
-// its bob), the screen shake and the explosion effect of an Unobtainable. A pool wheel (store data with pools and no
-// rarities, like the Starter / Heroic wheels of the 2026-10-13 data, shared/include/store_spins.h) throws in v10 at
-// `wheel.rarities[rarity]`, so its stop plays nothing: the same here.
+//              or cheer_0 (>= 1) at 0.1, an explosion (1) above rarity 5, meshPrev (the won item) put up (:219470-219574);
+//              then, while needsUpdate, the canvas is painted (client/src/prize_wheel_render.c) until the won slice
+//              is wide (meshPrev) or the idle wheel has grown in (:219576-219675)
+// Not ported: the won item's model above the hub (meshPrev and its bob are kept as state only), the screen shake and
+// the explosion effect of an Unobtainable. A pool wheel (store data with pools and no rarities, like the Starter /
+// Heroic wheels of the 2026-10-13 data, shared/include/store_spins.h) throws in v10 at `wheel.rarities[rarity]`: that
+// step stops there (no sound, no paint, the spinners after it wait for the next step), and the wheel goes on painting
+// its stopped pointer with the SPIN label: the same here.
 #include <prize_wheels.h>
+#include <map_spinners.h>
 #include <audio.h>
 #include <store_spins.h>
 #include <klog.h>
 #include "viewer/viewer_store.h" // store.skins: the item's rarity
-#include <cJSON.h>
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define PRIZE_WHEELS_MAX 64          // map_validate's MAP_V7_WHEEL_LIMIT is far below
@@ -41,30 +44,21 @@ void prize_wheels_reset(void) {
     g_pw.carry_s = 0.0;
 }
 
-static int raw_int(const cJSON *raw, const char *key) { // parseInt(raw[key]) || 0
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(raw, key);
-    if (cJSON_IsNumber(v)) return isfinite(v->valuedouble) ? (int) v->valuedouble : 0;
-    if (cJSON_IsString(v) && v->valuestring) return (int) strtol(v->valuestring, NULL, 10);
-    return 0;
-}
-
 static void build(const Map *map) {
     g_pw.map = map;
     g_pw.count = 0;
-    const StoreSpins *spins = store_spins_builtin();
     for (size_t i = 0; map && i < map->object_count && g_pw.count < PRIZE_WHEELS_MAX; i++) {
         const Object *o = map->objects[i];
-        if (!o || o->prefab != PREFAB_PRIZE_WHEEL || o->spawned || o->dynamic) continue;
-        int sty = raw_int(o->raw, "sty");
-        sty = sty < 0 ? 0 : sty > 2 ? 2 : sty;
-        const StoreWheel *w = sty < spins->wheel_count ? &spins->wheels[sty] : NULL;
-        if (!w || w->ticket_only || w->hide || w->locked) continue;
+        const int sty = map_spinner_wheel(o);
+        if (sty < 0) continue;
         PrizeWheel *p = &g_pw.wheels[g_pw.count++];
         memset(p, 0, sizeof(*p));
         p->object = (int) i;
         p->wheel = sty;
         p->position = (vec3) {o->position.x, o->position.y + o->scale.y / 2.0f, o->position.z};
-        p->item_id = -1;
+        p->item_id = -1; // spinInfo ||= {..., itemID: -1, needsUpdate: true} (:219439-219451)
+        p->won_rarity = -1;
+        p->needs_update = 1;
     }
     if (g_pw.count) KN_LOG_DEBUG1("[prize] %d map prize wheel(s)\n", g_pw.count);
 }
@@ -93,25 +87,33 @@ int prize_wheels_spin(Client *client, const int uid, const float rand, const int
     w->spin_val = (float) (M_PI * 2.0 * (rand / 100.0 + 13.0) + M_PI / 2.0);
     w->tick_counter = 0.0f;
     w->spin_rotation = 0.0f;
+    w->bob_anim = 0.0f;
     w->rand_num = rand;
     w->item_id = skin;
+    w->won_rarity = -1;
+    w->item_shown = 0; // meshPrev removed
+    w->needs_update = 1;
     KN_LOG_DEBUG1("[prize] wheel %d spins to %g: item %d\n", uid, (double) rand, skin);
     return 1;
 }
 
-// The stop (:219477-219572): the won slice widens, the reward sounds
-static void stop(PrizeWheel *w) {
+// The stop (:219477-219572): the won slice widens, the reward sounds, the won item goes up. 0 where v10 throws (no
+// such item, a wheel without rarities): the rest of that step does not run.
+static int stop(PrizeWheel *w) {
     w->spin_rotation = w->spin_val;
     const ViewerSkin *item = viewer_skin(w->item_id);
     const StoreSpins *spins = store_spins_builtin();
     const StoreWheel *wheel = w->wheel < spins->wheel_count ? &spins->wheels[w->wheel] : NULL;
-    if (!item || !wheel || wheel->pool_count > 0) return; // v10 throws on a missing item / a wheel without rarities
+    if (!item || !wheel || wheel->pool_count > 0) return 0; // iiÌiiii.rarity / iìÏîìiì.rarities[...] of undefined
     const int rarity = item->rarity;
     w->end_anim_target = 100.0f - (rarity >= 0 && rarity < wheel->slices ? (float) wheel->weights[rarity] : 0.0f);
+    w->won_rarity = rarity;
     audio_play_3d("reward", w->position, 0.3f, 1.0f, 0.0f, 0.0f);
     if (rarity >= 4) audio_play_3d("cheer_1", w->position, 0.1f, 1.0f, 0.0f, 0.0f);
     else if (rarity >= 1) audio_play_3d("cheer_0", w->position, 0.1f, 1.0f, 0.0f, 0.0f);
+    w->item_shown = 1; // meshPrev = genObj3D(...) (:219494)
     if (rarity > 5) audio_play_3d("explosion", w->position, 1.0f, 1.0f, 0.0f, 0.0f);
+    return 1;
 }
 
 static void step(const float delta) {
@@ -125,14 +127,20 @@ static void step(const float delta) {
             w->end_anim_val += delta * 0.4f;
             if (w->end_anim_val >= w->end_anim_target) w->end_anim_val = w->end_anim_target;
         }
-        if (w->spin_rotation == w->spin_val) continue;
-        w->spin_rotation += (w->spin_val - w->spin_rotation) * 0.05f;
-        w->tick_counter -= (w->spin_val - w->spin_rotation) * 0.05f;
-        if (w->tick_counter <= 0.0f) {
-            w->tick_counter += (float) (M_PI / 1.5);
-            audio_play_3d("tick_0", w->position, 0.2f, 1.0f, 0.0f, 0.0f);
+        if (w->spin_rotation != w->spin_val) {
+            w->spin_rotation += (w->spin_val - w->spin_rotation) * 0.05f;
+            w->tick_counter -= (w->spin_val - w->spin_rotation) * 0.05f;
+            if (w->tick_counter <= 0.0f) {
+                w->tick_counter += (float) (M_PI / 1.5);
+                audio_play_3d("tick_0", w->position, 0.2f, 1.0f, 0.0f, 0.0f);
+            }
+            if (w->spin_val - w->spin_rotation <= 0.002f && !stop(w)) return; // the throw ends the step (:219482)
         }
-        if (w->spin_val - w->spin_rotation <= 0.002f) stop(w);
+        if (w->item_shown) w->bob_anim += delta * 0.0018f; // meshPrev.position.y = orgYP + sin(bobAnim) * 0.55 (:219576)
+        if (!w->needs_update) continue;
+        w->paints++; // the canvas paint (:219577-219668)
+        if (w->item_shown && w->end_anim_val == w->end_anim_target) w->needs_update = 0;
+        if (!w->item_shown && w->item_id == -1 && w->spin_whl_mlt == 1.0f) w->needs_update = 0;
     }
 }
 
