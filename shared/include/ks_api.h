@@ -97,7 +97,7 @@ enum { KS_API_SIDE_CLIENT = 1, KS_API_SIDE_SERVER = 2, KS_API_SIDE_BOTH = 3 };
     X(UTILS_COPYTOCLIPBOARD, "UTILS.copyToClipboard", "copyToClipboard", KS_API_UTILS, FN, C, ANY) \
     X(RAYCAST, "RAYCAST", "RAYCAST", -1, NS, B, ANY) \
     X(RAYCAST_FROM, "RAYCAST.from", "from", KS_API_RAYCAST, FN, B, OBJ) \
-    X(RAYCAST_FROMPLAYER, "RAYCAST.fromPlayer", "fromPlayer", KS_API_RAYCAST, FN, B, ANY) \
+    X(RAYCAST_FROMPLAYER, "RAYCAST.fromPlayer", "fromPlayer", KS_API_RAYCAST, FN, B, OBJ) /* obj (deob-10.0.3.js:207528) */ \
     X(TIME, "TIME", "TIME", -1, NS, B, ANY) \
     X(TIME_NOW, "TIME.now", "now", KS_API_TIME, FN, B, NUM) \
     X(TIME_FIXEDDELTA, "TIME.fixedDelta", "fixedDelta", KS_API_TIME, FN, B, NUM) \

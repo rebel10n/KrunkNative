@@ -155,6 +155,8 @@ into a C2S `sd`. Box Office's own server / client path already matched 10.0.3: t
 
 Added here:
 
+- `RAYCAST.fromPlayer` returns `obj` for the type checker, as in 10.0.3's type table (:207528). It was `any`.
+
 - On the map object wrapper (obj3DServ, :208959-209045): `interface`, `health` (only for destructibles: set on the
   server, clamped to 1..1e6), `destroyed` and `toggleDestructible`. A destroyed object respawns (`"ro"`, onRespawn
   with no player); a standing one is destroyed (`"do"`, onDestroy / onDamage with no player).
