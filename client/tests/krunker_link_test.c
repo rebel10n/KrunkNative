@@ -691,6 +691,14 @@ static void test_fx(void) {
     }
     clear();
 
+    // "s" of a remodel's shot: shoot() names weapon.sound + "_<mid>" (deob-10.0.3.js:196403): the Nova Pump's sounds[24]
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(24), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(0.85)}, 6);
+    {
+        READ_IN(NetSoundPacket, a, SOUND, 0);
+        CHECK(a_p && !strcmp(a.name, "weapon_6_0") && a.uid == 7, "s: a remodel's shot, sounds[24] (%s)", a_p ? a.name : "-");
+    }
+    clear();
+
     // "so" 2D / 3D, "sso"
     feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_STR("cheer_0"), KRUNKER_V_NUM(0.5), KRUNKER_V_NUM(1)}, 3);
     feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_NUM(0.4), KRUNKER_V_NUM(0), KRUNKER_V_NUM(4), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6),
