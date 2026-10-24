@@ -570,6 +570,8 @@ static void handle_hello(NodeConn *c, const cJSON *frame) {
     cJSON_AddNumberToObject(w, "now", (double) kn_wall_ms());
     cJSON_AddNumberToObject(w, "pingIntervalMs", s->ping_interval_s * 1000.0);
     cJSON_AddNumberToObject(w, "ttlMs", s->node_ttl_s * 1000.0);
+    /* the live game events (Krunker v10.0.3 ongoingEvents: kill pools, community.c "gameEvents") */
+    cJSON_AddItemToObject(w, "gameEvents", community_game_events(kn_wall_ms()));
     send_frame(c, w);
     cJSON_Delete(w);
     federation_node_changed(b, n);
@@ -749,6 +751,30 @@ static void internal_ws_handler(kn_http_req *req, void *ud) {
     KN_INFO("internal", "connection from %s", c->remote);
 }
 
+/* The game events running now changed (one started or ended, the feed was edited): "game-events"
+ * {events} to every node, which replaces its ongoingEvents (server/src/accounts.c). Checked each ping. */
+static char *g_game_events_sent;
+
+static void game_events_push(void) {
+    cJSON *events = community_game_events(kn_wall_ms());
+    char *text = cJSON_PrintUnformatted(events);
+    if (!text || (g_game_events_sent && !strcmp(text, g_game_events_sent))) {
+        free(text);
+        cJSON_Delete(events);
+        return;
+    }
+    free(g_game_events_sent);
+    g_game_events_sent = text;
+    const int running = cJSON_GetArraySize(events);
+    cJSON *f = cJSON_CreateObject(); /* (a node the welcome just told gets the same set again: harmless) */
+    cJSON_AddStringToObject(f, "type", "game-events");
+    cJSON_AddItemToObject(f, "events", events);
+    for (NodeConn *c = g_conns; c; c = c->next)
+        if (c->helloed) send_frame(c, f);
+    cJSON_Delete(f);
+    KN_INFO("internal", "game events: %d running", running);
+}
+
 /* Ping every node; close links that sent nothing for node_ttl_s (registry.ts reapStale). */
 static void ping_tick(kn_loop *loop, void *ud) {
     (void) loop;
@@ -783,6 +809,7 @@ static void ping_tick(kn_loop *loop, void *ud) {
         kn_ws_abort(c->ws);
     }
     registry_expire(b->registry, now);
+    game_events_push();
 }
 
 int internal_ws_init(Brain *b) {
@@ -801,6 +828,8 @@ void internal_ws_shutdown(Brain *b) {
     if (g_ping_timer) kn_loop_cancel_timer(b->loop, g_ping_timer);
     g_ping_timer = 0;
     g_shutdown = 1;
+    free(g_game_events_sent);
+    g_game_events_sent = NULL;
     /* going away: nodes keep their lobbies and reconnect (backoff) to the
      * restarted brain; rows expire by TTL if nobody takes them over. */
     for (NodeConn *c = g_conns; c; c = c->next) kn_ws_close(c->ws, KN_WS_CLOSE_GOING_AWAY, "brain shutting down");

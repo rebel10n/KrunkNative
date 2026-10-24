@@ -20,11 +20,15 @@
 #include <turf_wars.h>   // v10 Turf Wars: which kills count
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <server_votekick.h> // vote-kick bans at join, the K.P.D call records (kpd_call / kpd_calls ops)
+#include <server_trade.h>    // the live trade: "trade_inventories" / "live_trade" replies (trade.c)
 #include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
 #include <bots.h>         // game_bots_count (lobby meta "bots")
 #include <flavor_rules.h> // the flavor's lobby config (Krunker Strike)
 #include <modes.h>        // mode_team_score: the ranked result's teamScores
 #include <comp_lobby.h>   // comp_lobby_get / comp_lobby_update: a rejoining roster player keeps its class
+#include <comp_webhook.h> // the comp host's match_end webhook body
+#include <server_webhook.h> // ... and its transport (server_bin: a worker thread; the sandbox: none)
+#include <progression.h>  // progression_medal_index("Headshot"): the webhook's headshots
 #include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
@@ -34,6 +38,7 @@
 #include <time.h>
 #include <flavor.h>         // Krunker Strike: auth / commit frames carry the flavor
 #include <junk.h>           // the Junk wallet's amounts (doc/v10/junk.md)
+#include <kill_pools.h>     // v10.0.3 event kill pools (doc/v10/kill-pools.md)
 
 // Krunker Strike: the brain answers a Strike server's auth with the account's Strike inventory,
 // krunkies and level, and files its commits as Strike progress (services/brain/strike_econ.c).
@@ -72,6 +77,8 @@ static struct {
     uint32_t pending_rid;
     cJSON *hosted_map;         // the fetched published map of the current custom game (owned)
     char published_map[128];   // WP6: config.customMap of the current custom game ("" none)
+    char webhook[COMP_WEBHOOK_URL_MAX + 1]; // the comp host's webhook ("" none): v10 game.webhook
+    int webhook_posted;        // this match's match_end went out
     int kr_rewards;            // WP6: host option krRewards on that published map
 
     // bans file
@@ -121,7 +128,7 @@ typedef struct {
     int shots, hits;           // hitscan rays fired / that hit a player or AI (match_shots / match_hits): accuracy
     float joined_at;           // server time of the first join (time played)
     float time_played;         // seconds in the match (snapshot)
-    int class_index;           // the comp class at the leave (-1 none): kept for a rejoin (v10:187185)
+    int class_index;           // the comp class at the leave (-1 none): kept for a rejoin (deob-10.0.3.js:216026-216033)
 } RankedSlot;
 
 static struct {
@@ -542,25 +549,27 @@ void accounts_send_billboard(ClientConnection *client) {
 
 // ------------------------------------------------------------------ stats commits
 
-// game.js endGame: reward = min(premiumT ? 40 : 30, floor(score * rewardMlt / 100)) for
+// endGame (deob-10.0.3.js:221756-221762): reward = min(premiumT ? 40 : 30, floor(score * rewardMlt / 100)),
+// then floor(x 1.5) for a player in challenge mode, else floor(x 2) in a ranked match, for
 // accounts that are not hack-flagged, none in hosted (custom) games or noReward modes. A guest
 // earns the same (v10's guest profile, config.guestKRCap: the END's reward column is what the
 // guest's client banks as Unclaimed Rewards, client/src/ui/v10_rewards.c); the server keeps none.
 static int acc_reward(const ClientConnection *client, const Player *player) {
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
     // a ranked match is hosted (custom) but pays KR like a public game: v10 endGame's reward x2
-    // (v10:191171) is the ranked branch, so only the custom gate is lifted for it
+    // (deob-10.0.3.js:221760-221761) is the ranked branch, so only the custom gate is lifted for it
     if (!g_gs_config.earn_kr || (g_acc.custom && !g_rk.active) || client->acct.hack) return 0;
     if (mode && mode->no_reward) return 0;
     const double mlt = (mode && mode->reward_mlt ? mode->reward_mlt : 1) * (double) g_gs_config.kr_multiplier;
     const int cap = client->acct.premium ? g_gs_config.kr_cap_premium : g_gs_config.kr_cap;
     const int reward = (int) floor((double) player->score * mlt / 100.0);
     const int capped = reward < 0 ? 0 : reward > cap ? cap : reward;
-    // v10 ranked: floor(2 x reward) after the cap (v10:191171 `isRanked && (reward = floor(2 * reward))`);
-    // rules_reward_mlt is 1 outside ranked and under v7, so this is the plain capped reward there
+    // after the cap: `if (challMode) reward = floor(reward * 1.5); else if (isRanked) reward = floor(reward * 2)`
+    // (deob-10.0.3.js:221758-221762): challenge mode wins over the ranked x2. rules_reward_mlt is 1 outside ranked.
     const float ranked_mlt = rules_reward_mlt(&g_server->game);
-    const int ranked = ranked_mlt != 1.0f ? (int) floor((double) capped * ranked_mlt) : capped;
-    // Claimed KR Packages pay past the cap (game.js:191329 `reward += additionalReward`), accounts only
+    const int ranked = player->chall_mode ? (int) floor((double) capped * 1.5)
+                       : ranked_mlt != 1.0f ? (int) floor((double) capped * ranked_mlt) : capped;
+    // Claimed KR Packages pay past the cap (deob-10.0.3.js:221792 `reward += additionalReward`), accounts only
     return ranked + (player->additional_reward > 0 ? player->additional_reward : 0);
 }
 
@@ -1122,9 +1131,14 @@ static void acc_progress_clear(ServerAccount *a) {
 // count}, player.medals) and the match context of checkChallenge (mapIndex, mapId, ranked).
 static void acc_add_progress(cJSON *p, const ClientConnection *client, const Player *player, const int final, const int won) {
     const ServerAccount *a = &client->acct;
-    cJSON *stats = cJSON_AddObjectToObject(p, "stats");
-    for (int i = 0; i < PROGRESSION_STAT_COUNT; i++)
-        if (a->stat_counts[i]) cJSON_AddNumberToObject(stats, g_progression_stats[i], a->stat_counts[i]);
+    const GameModeConfig *match_mode = mode_config(game_mode_id(&g_server->game));
+    // v10.0.3 transferStats (deob-10.0.3.js:217372-217380): tmpStats reach account.stats only `isPubType() && !isRanked &&
+    // !mode.noProfileStats` (Raid); the tallies are dropped either way
+    if (!(match_mode && match_mode->no_profile_stats) && !g_rk.active) {
+        cJSON *stats = cJSON_AddObjectToObject(p, "stats");
+        for (int i = 0; i < PROGRESSION_STAT_COUNT; i++)
+            if (a->stat_counts[i]) cJSON_AddNumberToObject(stats, g_progression_stats[i], a->stat_counts[i]);
+    }
     cJSON *prog = cJSON_AddArrayToObject(p, "prog");
     for (int i = 0; i < a->tally_count; i++) {
         const ServerChallengeTally *t = &a->tallies[i];
@@ -1181,6 +1195,92 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
     cJSON_AddNumberToObject(p, "mapIndex", game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
                                               ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1);
     cJSON_AddBoolToObject(p, "ranked", game->config.comp); // checkChallenge: T "ranked" needs game.isComp
+    // challenges.update: a DAT.lt challenge moves only `!game.isRanked && !mode.noProfileStats` (deob-10.0.3.js:202974)
+    cJSON_AddBoolToObject(p, "ltOff", g_rk.active || (match_mode && match_mode->no_profile_stats));
+}
+
+// ------------------------------------------------------------------ v10.0.3 event kill pools
+
+// The ongoing events the brain serves ("welcome" gameEvents, "game-events" pushes): v10's
+// game.ongoingEvents, which its host sets from the events API (the bundle only reads it). Empty
+// without a brain: no draws.
+static KillPoolEvents g_kill_events;
+// This round's draws of one connection, filled at the round's commit (acc_commit_round), read by its
+// stats (acc_player_stats) and the end items (NET_EXT_KN_END_ITEM)
+#define ACC_KILL_ITEMS_MAX 64
+static struct {
+    int client_id;
+    int count;
+    KillReward items[KILL_POOL_DRAWS_MAX];
+} g_kill_items[ACC_KILL_ITEMS_MAX];
+static int g_kill_item_count;
+
+static void acc_kill_events_set(const cJSON *events) {
+    const int had = g_kill_events.count;
+    kill_pools_parse(&g_kill_events, events);
+    if (had || g_kill_events.count) server_log("[events] %d ongoing event(s), kill pools %s", g_kill_events.count, kill_pools_any(&g_kill_events) ? "on" : "off");
+}
+
+static const KillReward *acc_kill_items(const ClientConnection *client, int *count) {
+    for (int i = 0; i < g_kill_item_count; i++) {
+        if (g_kill_items[i].client_id != client->id) continue;
+        *count = g_kill_items[i].count;
+        return g_kill_items[i].items;
+    }
+    *count = 0;
+    return NULL;
+}
+
+// endGame (deob-10.0.3.js:221726, :221797-221807): an account that is not hack-flagged (nor a K.P.D
+// officer's watch, kpdData: KrunkNative's officers play their own account) draws getKillReward once per
+// kill, at most 30 times, when an ongoing event has kill pools, in a public-type game. KrunkNative
+// differences: only a game whose items are kept draws (v10 still shows the draws of a noReward mode,
+// Raid, which updateAccounts then drops, :217255), and Krunker Strike never (its items are its own).
+static void acc_kill_pools_draw(ClientConnection *client) {
+    const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
+    if (g_kill_item_count >= ACC_KILL_ITEMS_MAX || !client->player || client->acct.account_id <= 0 || client->acct.hack ||
+        !game_is_pub_type(&g_server->game) || (mode && mode->no_reward) || flavor_get() != FLAVOR_BASE || !kill_pools_any(&g_kill_events))
+        return;
+    KillReward items[KILL_POOL_DRAWS_MAX];
+    const int n = kill_pools_draw_kills(&g_kill_events, client->player->kills, NULL, NULL, items, KILL_POOL_DRAWS_MAX);
+    if (!n) return;
+    g_kill_items[g_kill_item_count].client_id = client->id;
+    g_kill_items[g_kill_item_count].count = n;
+    memcpy(g_kill_items[g_kill_item_count].items, items, sizeof(items[0]) * (size_t) n);
+    g_kill_item_count++;
+    // the END's otherData.items: one NET_EXT_KN_END_ITEM each, after the END (the end screen keeps them)
+    for (int i = 0; i < n && client->peer_minor >= NET_PROTOCOL_MINOR_EXT; i++) {
+        NetEndItemPacket item;
+        memset(&item, 0, sizeof(item));
+        item.skin = items[i].skin;
+        snprintf(item.icon, sizeof(item.icon), "%s", items[i].icon);
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(item)];
+        const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_END_ITEM, &item, sizeof(item));
+        if (len) net_send_packet(client->fd, NET_PACKET_EXT, buf, len);
+    }
+    server_log("[events] %s (account %d): %d kill pool item(s) for %u kill(s)", client->name, client->acct.account_id, n, client->player->kills);
+}
+
+// updateAccounts (deob-10.0.3.js:217260-217282): the items grouped by skin, {id, quantity}; kn_brain's
+// "stats" op adds them to the inventory once per match (services/brain/accounts.c)
+static void acc_add_kill_items(cJSON *p, const ClientConnection *client) {
+    int n;
+    const KillReward *items = acc_kill_items(client, &n);
+    if (!n) return;
+    cJSON *list = cJSON_AddArrayToObject(p, "itemRewards");
+    for (int i = 0; i < n; i++) {
+        int seen = 0, quantity = 0;
+        for (int k = 0; k < n; k++) {
+            if (items[k].skin != items[i].skin) continue;
+            if (k < i) seen = 1;
+            quantity++;
+        }
+        if (seen) continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "id", items[i].skin);
+        cJSON_AddNumberToObject(o, "quantity", quantity);
+        cJSON_AddItemToArray(list, o);
+    }
 }
 
 static cJSON *acc_player_stats(const ClientConnection *client, const int final) {
@@ -1188,27 +1288,31 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
     // updateAccounts: hosted games and noReward modes only add time played
     const int counts = !g_acc.custom && !(mode && mode->no_reward) && !client->acct.hack;
-    // v10 updateAccounts (v10:188166): the score is added outside the ranked branch (v10:188150), so a ranked
+    // v10 updateAccounts (deob-10.0.3.js:217213): the score is added outside the ranked branch (:217302), so a ranked
     // match adds it while its games, kills, deaths and wins stay out (a ranked match is hosted: custom)
     const int ranked_score = g_rk.active && !(mode && mode->no_reward) && !client->acct.hack;
+    // v10.0.3 updateAccounts (deob-10.0.3.js:217283-217296): `if (mode.noProfileStats) ; else if (isRanked) ...; else
+    // {games++, kills, deaths, wins}`: Raid adds no games, kills, deaths or wins, its score (XP) still counts
+    const int profile = counts && !(mode && mode->no_profile_stats);
     const float seconds = client->acct.match_since > 0.0f ? g_server->now - client->acct.match_since : 0.0f;
     const int won = final && client->acct.round_result == 1;
 
     cJSON *p = cJSON_CreateObject();
     cJSON_AddNumberToObject(p, "accountId", client->acct.account_id);
     cJSON_AddStringToObject(p, "name", client->name);
-    cJSON_AddNumberToObject(p, "kills", counts && player ? player->kills : 0);
-    cJSON_AddNumberToObject(p, "deaths", counts && player ? player->deaths : 0);
+    cJSON_AddNumberToObject(p, "kills", profile && player ? player->kills : 0);
+    cJSON_AddNumberToObject(p, "deaths", profile && player ? player->deaths : 0);
     cJSON_AddNumberToObject(p, "score", (counts || ranked_score) && player ? player->score : 0);
-    cJSON_AddBoolToObject(p, "won", counts && won);
+    cJSON_AddBoolToObject(p, "won", profile && won);
     cJSON_AddNumberToObject(p, "timePlayed", (double) (int64_t) (seconds * 1000.0f)); // ms (Krunker timePlayed)
-    cJSON_AddNumberToObject(p, "games", counts && final ? 1 : 0);
+    cJSON_AddNumberToObject(p, "games", profile && final ? 1 : 0);
     cJSON_AddNumberToObject(p, "kr", final && player ? player->reward : 0); // game_end_round -> accounts_reward
     cJSON_AddNumberToObject(p, "xp", counts && player && player->score > 0 ? player->score : 0);
     // v10 saveClassScores only `isPubType() && !isRanked` (v10:173631): no class index, no class XP (db "c<i>")
     const int class_index = rules_ranked_no_class_xp(&g_server->game) ? -1 : player ? player->class_index : client->class_index;
     cJSON_AddNumberToObject(p, "classIndex", class_index);
     if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
+    if (final) acc_add_kill_items(p, client); // v10.0.3 event kill pools
     return p;
 }
 
@@ -1321,6 +1425,50 @@ static void acc_turf_flush(void) {
 
 static void acc_guest_round_credits(void);
 
+// The comp webhook's match_end (comp_webhook.h), the first tick after a comp match's END packets: the map, the
+// teams' round wins and every team player's stats, then server_webhook_post (server_bin: a worker thread with
+// timeouts, so the tick never waits). v10's server posts from onGameEnd (deob-10.0.3.js:221913-221914), which
+// endGame calls once per match (a round with rounds left returns before it, :221606-221646): KN's END is that.
+static void acc_post_webhook(void) {
+    g_acc.webhook_posted = 1;
+    const Game *game = &g_server->game;
+    CompWebhookPlayer players[64];
+    size_t count = 0;
+    const int headshot = progression_medal_index("Headshot");
+    for (size_t i = 0; i < game->player_count && count < sizeof(players) / sizeof(players[0]); i++) {
+        const Player *p = game->players[i];
+        if (!p || p->is_bot || p->team < 1 || p->team > 2) continue; // players.list: no AI, no spectators
+        const ClientConnection *client = acc_client_by_id(p->uid);
+        CompWebhookPlayer *w = &players[count++];
+        memset(w, 0, sizeof(*w));
+        w->team = p->team;
+        w->name = p->name;
+        w->player_id = client ? client->acct.account_id : 0;
+        w->score = p->score;
+        w->kills = (int) p->kills;
+        w->deaths = (int) p->deaths;
+        w->assists = (int) p->assists;
+        w->damage_done = (int) p->damage_dealt;
+        w->objective_score = p->mode.objective_score;
+        w->headshots = headshot >= 0 && headshot < PLAYER_MEDAL_SLOTS ? p->medal_counts[headshot] : 0;
+        w->shots = p->match_shots;
+        w->hits = p->match_hits;
+        w->kr = p->reward;
+    }
+    const CompWebhookMatch match = {
+        .map = game->map ? game->map->name : NULL,
+        .mode = game_mode_id(game),
+        .team_names = {game->config.team_names[1], game->config.team_names[2]},
+        .round_wins = {game->mode ? game->mode->team_round_wins[1] : 0, game->mode ? game->mode->team_round_wins[2] : 0},
+        .players = players,
+        .player_count = count,
+    };
+    cJSON *body = comp_webhook_payload(&match);
+    char *text = body ? cJSON_PrintUnformatted(body) : NULL;
+    cJSON_Delete(body);
+    if (text) server_webhook_post(g_acc.webhook, text);
+}
+
 // Round end (first tick after the END packets): every account that played this round.
 static void acc_commit_round(void) {
     ClientConnection *list[64];
@@ -1329,7 +1477,10 @@ static void acc_commit_round(void) {
         ClientConnection *client = &g_server->clients[i];
         if (acc_should_commit(client) && client->player) list[count++] = client;
     }
+    g_kill_item_count = 0;
+    for (int i = 0; i < count; i++) acc_kill_pools_draw(list[i]); // endGame's itemRewards (the END is out)
     acc_commit(list, count, 1, g_acc.match_id);
+    g_kill_item_count = 0;
     acc_guest_round_credits();
     g_acc.round_committed = 1;
     acc_turf_flush();
@@ -1505,6 +1656,7 @@ void accounts_round_changed(void) {
     acc_turf_round_start();
     g_acc.round_end_seen = 0;
     g_acc.round_committed = 0;
+    g_acc.webhook_posted = 0;
     for (size_t i = 0; i < g_server->client_count; i++) {
         ServerAccount *a = &g_server->clients[i].acct;
         a->match_since = 0.0f;
@@ -1554,7 +1706,7 @@ static void acc_ranked_setup(const cJSON *config) {
     g_rk.team_size = cJSON_IsNumber(size) && size->valueint > 0 ? size->valueint : 1;
     const cJSON *grace = cJSON_GetObjectItem(config, "startGraceS");
     // v10 rankedTimeForFirstConnect 60 s (needAllTimer when ranked)
-    // (the ruleset's ranked.need_all_ms when it sets one: v10:189820 needAllTimer 60000)
+    // (the ruleset's ranked.need_all_ms when it sets one: deob-10.0.3.js:219964 needAllTimer 60000)
     const int need_all_ms = game_ruleset(&g_server->game)->ranked.need_all_ms;
     g_rk.grace = cJSON_IsNumber(grace) && grace->valuedouble > 0.0 ? (float) grace->valuedouble
                                                                      : (need_all_ms > 0 ? need_all_ms : RANKED_TIME_FIRST_CONNECT_MS) / 1000.0f;
@@ -1664,8 +1816,8 @@ int accounts_ranked_lobby_id(const ClientConnection *client) {
 }
 
 // Only the roster plays a ranked lobby. A roster player may come back to its own slot at any time
-// the lobby is open (v10 allowsReconnection, v10:191796: a ranked game in WARMUP..POST_MATCH keeps
-// the lobby player's team and class, v10:187185); anyone else is refused.
+// the lobby is open (v10 allowsReconnection, deob-10.0.3.js:222632-222634: a ranked game in WARMUP..POST_MATCH
+// keeps the lobby player's team and class, :216026-216033); anyone else is refused.
 static const char *acc_ranked_refusal(const ClientConnection *client) {
     if (!g_rk.active) return NULL;
     const RankedSlot *slot = acc_ranked_slot(client->acct.account_id);
@@ -1695,7 +1847,7 @@ static ClientConnection *acc_client_by_account(const int account_id) {
     return NULL;
 }
 
-// A roster player who leaves mid-match does not end it (v10 checkLeave only logs the leave, v10:188210):
+// A roster player who leaves mid-match does not end it (v10 checkLeave only logs the leave, deob-10.0.3.js:217383-217386):
 // the slot is marked left, the team plays short, and the leave counts as an abandon at the result.
 // The comp class is kept for a rejoin (acc_set_ready): accounts_on_disconnect runs before comp_lobby_leave.
 static void acc_ranked_on_leave(const ClientConnection *client) {
@@ -1830,7 +1982,7 @@ static void acc_handle_ranked_reply(const cJSON *frame) {
 
 static void acc_revert_custom(const char *why);
 
-// The roster player is in the match once it has spawned (v10 players.list / activeCount, v10:189820-191413):
+// The roster player is in the match once it has spawned (v10 players.list / activeCount, deob-10.0.3.js:219964-222101):
 // a connected player that has not pressed play is not in yet. The start waits for the whole roster to be in.
 static int acc_ranked_in_match(const RankedSlot *slot) {
     if (!slot->joined || slot->left) return 0;
@@ -1838,7 +1990,7 @@ static int acc_ranked_in_match(const RankedSlot *slot) {
     return client && client->player && client->player->active;
 }
 
-// v10 needAllTimer for ranked (v10:189820 60 s, v10:191376-191413): the roster must be in before the
+// v10 needAllTimer for ranked (deob-10.0.3.js:219964 60 s, :222054-222101): the roster must be in before the
 // first-connect time runs out. When it is not, every connection gets the ERROR (a player with no class: "You
 // failed to select a class", the others "...did not join"), the connections close, and the match ends with
 // no rating (endGame(3)): the brain aborts it, the players are not unqueued by a hold. KrunkNative has no
@@ -1891,7 +2043,7 @@ static void acc_tick_ranked(void) {
             }
         } else if (g_server->now - g_rk.created_at >= g_rk.grace) {
             if (classed >= g_rk.count) {
-                // v10:191377-191395: enough players with a class, so every roster player not in yet is pushed in
+                // deob-10.0.3.js:222058-222086: enough players with a class, so every roster player not in yet is pushed in
                 // (ENTER_GAME to the socket: the forced ENT) and gets 3 s; the match goes on if all are in then
                 int pushed = 0;
                 for (int i = 0; i < g_rk.count; i++) {
@@ -1913,7 +2065,7 @@ static void acc_tick_ranked(void) {
     if (!g_rk.ended && g_acc.round_end_seen) acc_ranked_send_result();
 
     // infEndTimer: no next round; the lobby returns to the public rotation instead (v10: at the
-    // latest shutdownTimer 120000 after the end when ranked, v10:191217, ruleset ranked.shutdown_ms)
+    // latest shutdownTimer 120000 after the end when ranked, deob-10.0.3.js:221814-221815, ruleset ranked.shutdown_ms)
     const int shutdown_ms = game_ruleset(game)->ranked.shutdown_ms;
     const int shutdown = shutdown_ms > 0 && g_server->now - g_rk.ended_at >= shutdown_ms / 1000.0f;
     if (g_rk.ended && (game->end_timer <= 1.0f || !acc_player_count() || shutdown)) {
@@ -3112,6 +3264,7 @@ static void acc_revert_custom(const char *why) {
     g_acc.host_account_id = 0;
     g_acc.host_guest[0] = 0;
     g_acc.published_map[0] = 0;
+    g_acc.webhook[0] = 0;
     memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed));
     g_acc.kr_rewards = 0;
     accounts_configure_public(&g_server->game, g_acc.cli_map);
@@ -3345,6 +3498,12 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     if (custom_map) acc_custom_map_name(config, published, sizeof(published), published_creator, sizeof(published_creator));
     snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published); // the bare name (storage key)
     g_acc.kr_rewards = g_acc.published_map[0] && cJSON_IsTrue(cJSON_GetObjectItem(config, "krRewards"));
+    // v10 applyConfig (deob-10.0.3.js:216122-216129): a comp game (host type 1, ranked too) keeps a non-empty
+    // webhook, any other game none; the match_end goes there at each match end (acc_post_webhook). Longer than
+    // the option's input (200): none.
+    const char *webhook = host_index == GAME_HOST_COMP ? cJSON_GetStringValue(cJSON_GetObjectItem(config, "webhook")) : NULL;
+    snprintf(g_acc.webhook, sizeof(g_acc.webhook), "%s", webhook && strlen(webhook) <= COMP_WEBHOOK_URL_MAX ? webhook : "");
+    g_acc.webhook_posted = 0;
     g_acc.custom_had_players = 0;
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");
     g_acc.host_account_id = cJSON_IsNumber(host_id) ? host_id->valueint : 0;
@@ -3490,6 +3649,7 @@ static void acc_handle_frame(cJSON *frame) {
     else if (!strcmp(type, "ranked-notice")) net_broadcast_ranked_notice(acc_str(cJSON_GetObjectItem(frame, "name"), ""), acc_str(cJSON_GetObjectItem(frame, "template"), "")); // a queue's line
     else if (!strcmp(type, "map-data")) acc_handle_map_data(frame);
     else if (!strcmp(type, "bot-banter-reply")) bot_banter_on_brain_frame(frame); // bot chat (server/src/bot_banter.c)
+    else if (!strcmp(type, "game-events")) acc_kill_events_set(cJSON_GetObjectItem(frame, "events")); // ongoingEvents changed
     else if (!strcmp(type, "assign")) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));
@@ -3504,6 +3664,8 @@ static void acc_handle_frame(cJSON *frame) {
         // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
     } else if (!strcmp(type, "acct-r") && acc_handle_kpd_reply(frame)) {
         // the player list's K.P.D call: the record's id / the officers' lists (votekick.c)
+    } else if (!strcmp(type, "acct-r") && trade_on_brain_frame(frame)) {
+        // the live trade's inventories / settle (server/src/trade.c, doc/v10/trade.md)
     } else if (!strcmp(type, "acct-r") || !strcmp(type, "host-request-reply")) {
         // no game-socket account ops / host requests on the native protocol yet
     }
@@ -3513,6 +3675,7 @@ static void acc_live_fail_pending(const char *why);
 
 static void acc_link_down(void) {
     ks_storage_link_down(); // their replies never come
+    trade_link_down();      // live trades waiting for their inventories end (a settle is resent)
     acc_live_fail_pending("account service unavailable"); // live sign-ins: nothing changes
     // pending auths will never be answered: ticket holders keep the ticket identity,
     // session-only joins become guests (or are refused)
@@ -3582,6 +3745,7 @@ void accounts_tick(const float now) {
             if (!community || !community[0]) community = cJSON_GetStringValue(cJSON_GetObjectItem(ev.frame, "communityName"));
             if (!community || !community[0]) community = cJSON_GetStringValue(cJSON_GetObjectItem(ev.frame, "brainId"));
             snprintf(g_community, sizeof(g_community), "%s", community ? community : "");
+            acc_kill_events_set(cJSON_GetObjectItem(ev.frame, "gameEvents")); // the ongoing events (kill pools)
             acc_send_snapshot();
         }
         else if (ev.kind == BRAIN_EV_LINK_DOWN) acc_link_down();
@@ -3600,6 +3764,7 @@ void accounts_tick(const float now) {
     }
 
     if (g_acc.round_end_seen && !g_acc.round_committed && g_server->game.end_timer > 0.0f) acc_commit_round();
+    if (g_acc.round_end_seen && !g_acc.webhook_posted && g_acc.custom && g_acc.webhook[0]) acc_post_webhook();
     acc_tick_ranked();
     acc_tick_custom();
     acc_kpd_expire(now);

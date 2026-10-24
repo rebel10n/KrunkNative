@@ -404,6 +404,21 @@ static kn_db_result *run_give_skin(kn_dbconn *c, int n, const char *const *p) {
 const kn_proc P_GIVE_SKIN = {"give_skin", "SELECT jsonb_build_object('skin', $2::int, 'count', kn_add_skin($1, $2, 1, $3, NULL))",
                              run_give_skin};
 
+/* give_skin_n (account, skin, quantity, source, ref): `quantity` units at once, the audit row naming `ref`
+ * (a commit's match key: the event kill pools' items, Krunker v10.0.3 updateAccounts {skins: [{id, quantity}]}) */
+static kn_db_result *run_give_skin_n(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    int64_t count = 0;
+    db_add_skin(&x, PI(0), PI(1), PI(2), P(3), P(4), &count);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "skin", (double)PI(1));
+    cJSON_AddNumberToObject(o, "count", (double)count);
+    return dbx_json(&x, "jsonb_build_object", o);
+}
+const kn_proc P_GIVE_SKIN_N = {"give_skin_n",
+                               "SELECT jsonb_build_object('skin', $2::int, 'count', kn_add_skin($1, $2, $3::int, $4, $5))",
+                               run_give_skin_n};
+
 /* atomic ranked update {elo} clamped at 0; no row when the player is unknown */
 static kn_db_result *elo_delta(kn_dbconn *c, int n, const char *const *p, const kn_sql *upd, const kn_sql *get) {
     Dbx x = {c, NULL};

@@ -622,13 +622,25 @@ void hud_endscreen_v10_ranked(const int mmr_change, const int rank, const int rp
     }
 }
 
-int hud_endscreen_v10_offer_skin(const int skin) {
+static int offer(const int skin, const char *icon) {
     if (E.collected || E.item_count >= END_ITEMS_MAX) return 0;
     E.items[E.item_count].skin = skin;
-    snprintf(E.items[E.item_count].icon, sizeof(E.items[E.item_count].icon), "gift");
+    snprintf(E.items[E.item_count].icon, sizeof(E.items[E.item_count].icon), "%s", icon);
     E.item_count++;
     if (E.results && card_present() && !E.btn_mounted) mount_collect(); // it arrived after the results showed
     return 1;
+}
+
+int hud_endscreen_v10_offer_skin(const int skin) { return offer(skin, "gift"); }
+
+int hud_endscreen_v10_offer_item(const int skin, const char *icon) {
+    // `items.some(i => i.r !== undefined)` / filter(t === "skin" && r !== undefined) (deob-10.0.3.js:236769-236771,
+    // :227422): an item without an icon is never offered (the account has it all the same). The icon names
+    // ./img/<icon>.webp in the markup: a plain name only.
+    if (!icon || !icon[0] || skin < 0) return 0;
+    for (const char *c = icon; *c; c++)
+        if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '-')) return 0;
+    return offer(skin, icon);
 }
 
 void hud_endscreen_v10_shown(void) {

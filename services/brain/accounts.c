@@ -781,6 +781,8 @@ typedef struct OpCtx {
     char *pass_old, *pass_new;
     char token[80];
     char *progress; /* WP-E part 2c: the commit's P_PROGRESS payload (op "stats") */
+    char *items;    /* the commit's itemRewards (v10.0.3 event kill pools), JSON, NULL none */
+    char match[160];
 } OpCtx;
 
 static void op_ctx_free(OpCtx *o) {
@@ -794,6 +796,7 @@ static void op_ctx_free(OpCtx *o) {
         free(o->pass_new);
     }
     free(o->progress);
+    free(o->items);
     free(o);
 }
 
@@ -1137,7 +1140,7 @@ static char *progress_payload(const cJSON *a) {
     cJSON *p = cJSON_CreateObject();
     cJSON_AddNumberToObject(p, "id", (double) kn_json_int(a, "id", 0));
     /* + the season part (db_season.c): the match BPP and the season_stats totals */
-    const char *keys[] = {"prog", "medals", "mapIndex", "mapId", "mode", "classIndex", "ranked", "final", "match",
+    const char *keys[] = {"prog", "medals", "mapIndex", "mapId", "mode", "classIndex", "ranked", "ltOff", "final", "match",
                           "bpp", "kills", "deaths", "score", "won", "games", "timePlayed"};
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(a, keys[i]);
@@ -1148,6 +1151,33 @@ static char *progress_payload(const cJSON *a) {
     char *text = kn_json_print(p);
     cJSON_Delete(p);
     return text;
+}
+
+static void kill_item_done(kn_db_result *res, void *ud) {
+    const int64_t id = (int64_t) (intptr_t) ud;
+    if (!kn_db_ok(res)) KN_WARN("accounts", "kill pool item for account %lld: %s", (long long) id, acct_db_error(res, "give_skin_n"));
+}
+
+/* A match's event kill pool items (Krunker v10.0.3 updateAccounts {skins: [{id, quantity}]},
+ * deob-10.0.3.js:217260-217282; the game server drew them, shared/src/kill_pools.c): into the inventory
+ * once (the commit's duplicate check), at most 30 a match (endGame draws once per kill, up to 30). */
+static void kill_items_grant(const int64_t id, const char *items, const char *match) {
+    cJSON *list = items ? cJSON_Parse(items) : NULL;
+    int left = 30;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, list) {
+        const int64_t skin = kn_json_int(it, "id", -1);
+        int64_t quantity = kn_json_int(it, "quantity", 1);
+        if (skin <= 0 || (acct_skin_count() > 0 && skin >= acct_skin_count()) || quantity <= 0) continue;
+        if (quantity > left) quantity = left;
+        if (quantity <= 0) break;
+        left -= (int) quantity;
+        char ids[24], skins[24], q[24];
+        kn_db_call(g_acct_brain->db, &P_GIVE_SKIN_N,
+                   KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(skins, skin), acct_itoa(q, quantity), "killpool", match),
+                   kill_item_done, (void *) (intptr_t) id);
+    }
+    cJSON_Delete(list);
 }
 
 static void op_stats_done(kn_db_result *res, void *ud) {
@@ -1166,11 +1196,17 @@ static void op_stats_done(kn_db_result *res, void *ud) {
     if (!duplicate) social_push_account_update(account); /* live header KR / level */
     char *progress = o->progress;
     o->progress = NULL;
+    char *items = o->items;
+    o->items = NULL;
+    char match[sizeof o->match];
+    snprintf(match, sizeof match, "%s", o->match);
     const int64_t id = o->id;
     op_reply(o, NULL, account);
     cJSON_Delete(account);
     if (progress && !duplicate) progress_run(id, progress); /* WP-E part 2c: challenges, medals, badges */
+    if (items && !duplicate) kill_items_grant(id, items, match);
     free(progress);
+    free(items);
 }
 
 static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
@@ -1182,6 +1218,9 @@ static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
     if (!o) return -1;
     o->id = kn_json_int(args, "id", 0);
     o->progress = progress_payload(args);
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(args, "itemRewards");
+    if (cJSON_IsArray(items) && cJSON_GetArraySize(items) > 0) o->items = kn_json_print(items);
+    snprintf(o->match, sizeof o->match, "%s", kn_json_str(args, "match", ""));
     cJSON *p = stats_args(args);
     char *text = kn_json_print(p);
     cJSON_Delete(p);
@@ -1302,6 +1341,9 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
     }
     if (!strcmp(op, "stats")) return op_stats(args, cb, ud);
     if (!strcmp(op, "rewards")) return op_rewards(args, cb, ud);
+    /* the live trade of Trade mode (economy.c, doc/v10/trade.md): both inventories for the window, the settle */
+    if (!strcmp(op, "trade_inventories")) return econ_live_trade_inventories(args, cb, ud);
+    if (!strcmp(op, "live_trade")) return econ_live_trade(args, cb, ud);
     if (!strcmp(op, "give_skin")) {
         OpCtx *o = op_new(cb, ud, "give_skin");
         if (!o) return -1;

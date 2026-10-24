@@ -773,7 +773,8 @@ brain draining).
 | `GET /streams/thumb?url=` (also `/api/streams/thumb`) | KrunkNative: the Live Streams cards' previews, from before the native engine loaded remote images (client/src/ui/remote_images.c). No client asks it now: a card's `<img src>` is its `thumbnailUrl`, as v10 sets it | `{"success":true,"data":{"url","image":"data:image/jpeg;base64,..."}}`. Only `https://` URLs on `streams.thumbs.hosts` (default `["static-cdn.jtvnw.net"]`) with a plain `.jpg` / `.jpeg` / `.png` path (no query, escapes or dot segments) are fetched: `400 InvalidThumbnail` otherwise. No redirects, at most `streams.thumbs.max_bytes` (256 KiB; `502 ThumbnailTooLarge`), JPEG / PNG only (`502 ThumbnailNotImage`), other failures `502 ThumbnailUnavailable`; answers cached `streams.thumbs.cache_s` (300), failures `streams.thumbs.fail_cache_s` (30), 32 URLs, 4 transfers at once. `streams.thumbs.cdn_url` (tests: a stub CDN) fetches the allowed URL's path from another base. `services/brain/stream_thumbs.c` |
 | `GET /mm/generate-token` | Krunker `matchmaker/generate-token` | `text/plain` validation token for the next seek-game (rate-limited: 120/min per address, then 429 `TooManyRequests`) |
 | `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION][&validationToken=T]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl","map"}` |
-| `GET /mm/host-game?region=R&config=JSON[&token=SESSION]` (also `POST`, JSON body `{region, config}`) | (game socket `custom` in v3.1.1) | same as seek-game, for a freshly hosted custom lobby |
+| `GET /mm/host-game?region=R&config=JSON[&token=SESSION][&captcha=PAYLOAD]` (also `POST`, JSON body `{region, config, captcha}`) | (game socket `custom` in v3.1.1) | same as seek-game, for a freshly hosted custom lobby; the hosting captcha (7.10) |
+| `GET /captcha/challenge?for=login\|register\|hosting` | (Krunker Box Office; v10.0.3 gets its challenges from Cloudflare and over the game socket) | an ALTCHA challenge `{"algorithm":"SHA-256","challenge","maxnumber","salt","signature"}` (7.10, [v10/captcha.md](v10/captcha.md)); 400 `BadRequest`, 503 `Unavailable` without a key |
 | `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
 | `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
 | `GET /api/player-count`, `/social/player-count` | same | `{"playerCount":N}` |
@@ -1146,6 +1147,13 @@ Sources, in this order:
   (`/social.html?p=map|mod&q=<name>`) links. `start_date` = `ended_at` = the last update, so the
   card shows that date without v10's LIVE badge. Only `http(s)` images become `banner_url`.
 
+The same file's `gameEvents` are the game's live events (Krunker v10.0.3 `ongoingEvents`): `id, name,
+startsAt, endsAt, killPools [{weight, contents [{content_type, content_ref}]}], killPoolsWeight,
+killPoolsMode, killPoolsIcon`. The ones running now (`startsAt` <= now < `endsAt`; no `endsAt`: open
+ended) reach every game server in the internal WS `welcome` (`gameEvents`) and in a `game-events`
+`{events}` push whenever the set changes (checked at each ping); public matches then pay kill pool items,
+committed with the stats as `itemRewards` (doc/v10/kill-pools.md).
+
 No file and no featured creation: empty lists (the popup's "No upcoming events"). Streams have no
 source yet (`/api/streams` is v3.1.1's empty placeholder): put them in the feed as events
 (`tags: ["Stream"]`, a Twitch link). Test: `server/tests/v10_news_e2e.py`.
@@ -1318,7 +1326,8 @@ socialURL `<brain>/social`). Frames are arrays `["label", ...args]`:
   recent frame; `?enc=json` makes the greeting JSON too.
 
 On open the brain sends `["pi", null]` (client answers `["po"]`) and
-`["io-init", socketId]` (16 hex). Unknown labels are dropped (socialWs.ts). Each
+`["io-init", socketId]` (16 hex). An unknown label is answered `["po", null, "Unknown request."]`
+(v3.1.1 socialWs.ts dropped it; doc/social-rate-limit.md). Each
 socket's frames run strictly in order: a frame waits until the database work of the
 previous one finished (v3.1.1 ran them on synchronous SQLite), so e.g. `["f", ...]`
 then `["r", "profile", ...]` sees the follow. Errors
@@ -1720,6 +1729,53 @@ Migration and API summary: `0109_account_security` (postgres / sqlite / mysql); 
 every driver); social labels `a2FA`, `a2FAc`, `d2FA`, `d2FAc`, `2fa` (code), `cemail`, `emailv`,
 `emailS`, register's 4th payload element; routes `GET /auth/verify-email`, `GET /api/verify-email`.
 
+### 7.10 Captcha (`captcha.c`, `captcha_http.c`)
+
+Box Office's captcha is an ALTCHA proof of work in front of a password sign-in, a registration and a hosted
+game (the spec, every Krunker v10.0.3 call site, and why not Turnstile: [v10/captcha.md](v10/captcha.md)).
+`GET /captcha/challenge?for=login|register|hosting` issues a challenge (stateless: signed with
+`HMAC-SHA256(brain.join_secret, "kn-captcha-altcha-v1")`, so any brain of the network verifies it); the
+client solves it (`client/src/net/kn_captcha.c`, native and web) and sends the payload in the flow's captcha
+field; the brain checks it at the flow's entry, before the password is hashed: hash, signature, expiry,
+purpose, and once per brain (replay).
+
+| flow | captcha field | refusal (enforced) |
+| --- | --- | --- |
+| social `["a", 1, [name, pass, ...], captcha]` / `["a", 0, ...]` (login / register; not a token resume) | 4th element | `["a", "<text>"]` |
+| `POST /auth/login`, `/auth/register` | `captcha` | 400 `{"ok":false,"error":"<text>"}` |
+| `POST /auth/login/username`, `/auth/login/email` (v10) | `b` (v10.0.3's) | 400 `{"data":null,"error":"<text>"}` |
+| `/mm/host-game` | `?captcha=` / body `captcha` | 400 `CaptchaRequired` (none) / `RecaptchaFailed` |
+
+`<text>` is v10.0.3's: "Please complete the security challenge to continue." (none) or "CAPTCHA FAILED".
+
+| key | default | meaning |
+| --- | --- | --- |
+| `captcha.enforce` | `false` | refuse the flows above without an accepted payload. Off: everything goes through, and what would be refused is logged at DEBUG (`login from <ip>: captcha missing (captcha.enforce off: let through)`); refusals are INFO |
+| `captcha.max_number` | `100000` | the challenge's `maxnumber` (1000..1e7): a solver tries about half of it (SHA-256s). The ALTCHA widget's default is 1e6 |
+| `captcha.ttl_s` | `300` | a challenge's lifetime (10..3600), in its salt's `expires` |
+
+Ansible: `kn_brain_captcha_enforce` (roles/kn_brain/defaults, `false`) is `captcha.enforce` in the brain's
+config.json. The challenge route is served with enforcement on or off, and the brain logs
+`captcha challenges issued, not enforced` or `captcha enforced` at start.
+
+**Rollout** (enforcement never before the clients that solve are what players run):
+
+1. Deploy the brain with this change and `captcha.enforce` false (the default). Every client keeps working:
+   old ones send no captcha and are let through.
+2. Ship the client that solves (native packages, web, launcher channel). A new client against a brain from
+   before step 1 gets 404 from the route and sends no captcha, so the order of 1 and 2 does not break
+   anything; the brain first means the new clients' payloads are checked (and logged) from their first day.
+3. Watch the shadow log: run one brain at `--debug=2` for a while, or count the `captcha missing` lines
+   against `captcha accepted`. Old web tabs reload, the launcher updates the native client (9.8); wait until
+   `missing` is only scripts.
+4. Enforce: `kn_brain_captcha_enforce: true` (group_vars) and redeploy. Challenges issued before the restart
+   stay valid (same key). Roll back by setting it false again.
+5. Every brain of a network runs the same setting and shares `brain.join_secret`. The spent set is per
+   brain: a payload accepted on one brain could be accepted once more on another, each still a proof of work.
+
+Tests: `kn_brain_captcha_test` (unit), `brain_captcha_e2e` (`services/brain/tests/captcha_test.py`),
+`kn_captcha_test` (the client), `client/tests/captcha_e2e.py` (headless client_bin, enforced brain).
+
 ## 8. Game server (`server_bin`): config, brain client, accounts
 
 Owner: gameserver. Code: `server/src/config.c` (config reader),
@@ -1926,10 +1982,23 @@ matchmaker on `004004` / `004006` and on a refused join key (9.4); `004004` on a
   the server is not draining, not hosting already and has no players: `config.maps`
   (catalogue indices or names), `config.modes` (hostable mode ids/aliases) and the
   serverConfig varNs replace the rotation, the lobby restarts (`cs: true`, `i:
-  "<mode>_<map>"`, `earnKR: false`) and `host-reply {ok, lobbyId}` follows. When the
-  host leaves after players joined ("Host ended game" chat line, v3.1.1
-  `HOST_ENDED_MESSAGE`), the lobby empties, or nobody joins within 60 s, it reverts to
-  the public rotation. `passCode` is not enforced (the native JOIN has no password).
+  "<mode>_<map>"`, `earnKR: false`) and `host-reply {ok, lobbyId}` follows. A guest can host
+  (`hostGuestId`). When the host leaves with two or more players left, the oldest signed-in or
+  guest connection takes over (`acc_transfer_host`); with fewer ("Host ended game" chat line,
+  v3.1.1 `HOST_ENDED_MESSAGE`), when the lobby empties, or when nobody joins within 60 s, it
+  reverts to the public rotation. `passCode` is not enforced (the native JOIN has no password).
+* **Host rights** (checked against v10.0.3, `server/src/votekick.c votekick_handle_admin`): the
+  player list's Kick (`NET_EXT_ADMIN_ACTION` action 0) is the custom game's host's and a
+  moderator's (v10.0.3 shows it for `isHost || canGlobalKick`, deob-10.0.3.js:254169); the kicked
+  player reads "Kicked by host" (`game.kick`, 222586-222588); a DEV cannot be kicked that way.
+  Custom games have no vote kick (v10's Votekick needs `!game.isCustom`, 250341). A DEV kicks and
+  bans through the chat command layer. Deliberate or open differences from v10.0.3: Ban (action 1)
+  stays a DEV's (a KrunkNative ban is a persistent account ban, v10.0.3's host / moderator ban is
+  that game's only); there is no Transfer Host button (action 8), no `transferHostOnLeave` setting
+  (v10 default on, 19992-19998), no `hostTransferLimit` of 5 (22620) and no "You are now Host!" /
+  "Host Transfered to {0}" lines (256720-256727): the transfer on leave is KrunkNative's
+  (`acc_transfer_host`, a plain chat line). Neither game lets an ordinary host change the
+  settings mid-game (v10's Rehost is staff-only, 129063, 248793-248797).
 * **Published (community DB) maps:** `config.customMap` (alias `mapName`) names the map to
   host. A map this server has (its own list incl. custom dirs / the command-line map, then
   a catalogue entry whose name or key is exactly that) is used directly; otherwise
@@ -2301,7 +2370,7 @@ transport is not started until `/mm/seek-game` answers. The hub page (`--hub`,
 | UI | frames |
 | --- | --- |
 | startup / reconnect (`readyLoad`) | storage `krunker_username` + `krunker_token` -> `["a",1,[name,null,token]]` |
-| Register / Login (window 5) | `["a",0,[name,pass,null],null]` / `["a",1,[name,pass,null],null]` -> `["a",err,id,name,data40,token,info]`; error text in `#accResp` |
+| Register / Login (window 5) | `["a",0,[name,pass,null],captcha]` / `["a",1,[name,pass,null],captcha]` -> `["a",err,id,name,data40,token,info]`; error text in `#accResp`. `captcha`: the solved `GET /captcha/challenge` (7.10, `kn_captcha.c`), null when the brain has none |
 | Logout | `["a",-1]`, storage keys cleared |
 | header bar (`cK`) | `#signedInHeaderBar`: name (alias when premium), KR, level, level bar, `#mailCount` (`info.mail_unread`, `["gmc",n]`) |
 | match result | `["ua",data40,info]` push (also `upd`); fallback: a token re-login 3 s after a round ends |

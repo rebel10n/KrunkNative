@@ -36,6 +36,10 @@ void hud_endscreen_v10_ranked(int mmr_change, int rank, int rp_change);
 // default of g:195992). Returns 1 when held back for the Collect button, 0 when it should go
 // straight into the Rewards tab (already collected / no results yet is fine: it is held).
 int hud_endscreen_v10_offer_skin(int skin);
+// otherData.items {t: "skin", i, r} of the event kill pools (NET_EXT_KN_END_ITEM; v10.0.3 endGame's
+// itemRewards, deob-10.0.3.js:221797-221807): held for the Collect button with ./img/<icon>.webp, the
+// event's killPoolsIcon. An item without an icon is not offered (v10 shows only items with r).
+int hud_endscreen_v10_offer_item(int skin, const char *icon);
 
 // GUI.endScreen.show() ran (hud_end_card_render): mount the components onto the card.
 void hud_endscreen_v10_shown(void);

@@ -23,6 +23,7 @@
 #include <projectiles_render.h>
 #include <ai.h>        // NET_PACKET_AI_ADD / AI_SYNC: the mirrored Game.ai list
 #include <ai_render.h> // AI shots ("pr" with an AI stored kind)
+#include <ai_parts.h>  // v10.0.3 "aip" (AI parts)
 #include <camera_feel.h>
 #include <spectate.h> // NET_PACKET_SPECTATE -> spectate_begin / spectate_end
 #include <hud_map.h>  // WP-E part 2a: death markers, minimap blips
@@ -1358,6 +1359,8 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect
                 if (client->me) nettspend_audio_on_laced(body, body_length, client->me->uid); // our own laced ambience
+            } else if (subtype >= NET_EXT_TRADE_RESPONSE && subtype <= NET_EXT_TRADE_CHAT_LINE) { // the live trade (trade_ui.c)
+                trade_ui_on_ext(client, subtype, body, body_length);
             } else if (subtype == NET_EXT_VOTE_KICK_STATE && body_length >= sizeof(NetVoteKickStatePacket)) { // "vk" (hud_votekick.c)
                 NetVoteKickStatePacket state;
                 memcpy(&state, body, sizeof(state));
@@ -1482,6 +1485,9 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetOfficialShakePacket shake;
                 memcpy(&shake, body, sizeof(shake));
                 if (isfinite(shake.amount)) camera_feel_shake(shake.amount);
+            }
+            else if (subtype == AI_PARTS_EXT_SUBTYPE) { // v10.0.3 "aip" AI.syncParts: glows, hidden nodes, held clip, solid (ai_parts.h)
+                if (!game_is_authority(&client->game)) ai_parts_on_ext(&client->game, body, body_length);
             }
             else entities_on_ext(client, subtype, body, body_length); // v10 entities, runtime blocks, objmv, plk (entities.c)
             return 1;

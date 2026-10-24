@@ -103,7 +103,7 @@ cJSON *db_player_row(Dbx *x, int64_t id);
 
 /* ---- accounts (db_accounts.c) */
 extern const kn_proc P_LOGIN_SUCCESS, P_LOGIN_FAILED, P_REGISTER, P_REGISTER_PRECHECK, P_LOGIN_LOOKUP,
-    P_SESSION_ACCOUNT, P_SET_PASSWORD, P_SET_ALIAS, P_ACCOUNT_JSON, P_COMMIT_STATS, P_REWARDS, P_GIVE_SKIN,
+    P_SESSION_ACCOUNT, P_SET_PASSWORD, P_SET_ALIAS, P_ACCOUNT_JSON, P_COMMIT_STATS, P_REWARDS, P_GIVE_SKIN, P_GIVE_SKIN_N,
     P_ELO_DELTA_1, P_ELO_DELTA_2, P_ELO_DELTA_4, P_CHALLENGE, P_BAN_CHECK, P_STAFF_DEV, P_STAFF_DEV_BADGES, P_STAFF_MOD,
     P_ENSURE_CENTRAL, P_SPIN_MULTI, P_DAILY_KR, P_CLAIM_DAILY;
 
@@ -123,6 +123,8 @@ extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_MARKET_ITEM, P_TRADE_PAGE,
     P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
     P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT;
+/* the live trade of Trade mode (db_economy.c, 0357_live_trades; doc/v10/trade.md): the game server's window and settle */
+extern const kn_proc P_LIVE_TRADE_OPEN, P_LIVE_TRADE;
 
 /* ---- the Junk wallet (db_junk.c, 0347_junk_wallet; doc/v10/junk.md). Amounts are hundredths. The C
  * API runs inside the caller's transaction: junk_credit / junk_spend write their ledger row with it. */

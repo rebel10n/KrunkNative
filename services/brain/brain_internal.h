@@ -134,6 +134,8 @@ void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
 /* ---- v10 community feed: /creators/events, /social/news (community.c) */
 int community_init(Brain *b);
 void community_shutdown(Brain *b);
+/* the feed's "gameEvents" running at now_ms (unix ms), v10 ongoingEvents fields: a new array (the caller frees) */
+cJSON *community_game_events(int64_t now_ms);
 
 /* ---- public routes (public_routes.c) */
 int public_routes_init(Brain *b);

@@ -23,6 +23,13 @@
  *     start_date is the last update and ended_at is set to it, so v10's card shows that date and
  *     no LIVE badge (KN addition: v10 lists creator events only).
  * No feed and no featured creation answers empty lists (the popup's "No upcoming events").
+ *
+ * The same file's "gameEvents" are the game's live events (Krunker v10.0.3 game.ongoingEvents, which the
+ * official host sets from its events API; doc/v10/kill-pools.md): {id, name, startsAt, endsAt, killPools
+ * [{weight, contents [{content_type, content_ref}]}], killPoolsWeight, killPoolsMode, killPoolsIcon}. The
+ * ones running now (startsAt <= now < endsAt, no endsAt: open-ended) go to the game servers in the
+ * internal WS "welcome" and in a "game-events" push whenever the set changes (internal_ws.c), and their
+ * kill pools pay items at the end of public matches (shared/src/kill_pools.c).
  */
 #include <ctype.h>
 #include <stdio.h>
@@ -51,6 +58,8 @@ static struct {
     int loaded;
     cJSON *feed; /* the parsed file, NULL when absent / invalid */
 } C;
+
+#define GAME_EVENTS_MAX 8 /* KILL_POOL_EVENTS_MAX: what a game server keeps */
 
 /* ------------------------------------------------------------------ time */
 
@@ -394,11 +403,48 @@ static void h_events(kn_http_req *req, void *ud) {
                     KN_DB_ARGS(limit), featured_done, r);
 }
 
+/* The feed's game events running at `now_ms` (unix ms), in v10's fields, soonest start first: a new array. */
+cJSON *community_game_events(const int64_t now_ms) {
+    cJSON *out = cJSON_CreateArray();
+    const int64_t now = now_ms / 1000;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, feed_list("gameEvents")) {
+        if (!cJSON_IsObject(e) || cJSON_GetArraySize(out) >= GAME_EVENTS_MAX) continue;
+        const int64_t start = parse_iso(cJSON_GetStringValue(cJSON_GetObjectItem(e, "startsAt")));
+        const char *ends = cJSON_GetStringValue(cJSON_GetObjectItem(e, "endsAt"));
+        const int64_t end = ends && ends[0] ? parse_iso(ends) : -1;
+        if (start < 0 || start > now || (end >= 0 && end <= now)) continue;
+        cJSON *o = cJSON_CreateObject();
+        copy_num(o, e, "id");
+        copy_str(o, e, "name");
+        char iso[40];
+        format_iso(start, iso, sizeof iso);
+        cJSON_AddStringToObject(o, "startsAt", iso);
+        copy_num(o, e, "killPoolsWeight");
+        copy_str(o, e, "killPoolsMode");
+        copy_str(o, e, "killPoolsIcon");
+        const cJSON *pools = cJSON_GetObjectItem(e, "killPools");
+        cJSON_AddItemToObject(o, "killPools", cJSON_IsArray(pools) ? cJSON_Duplicate(pools, 1) : cJSON_CreateArray());
+        /* soonest start first (getKillReward sorts by startsAt as well) */
+        int at = 0;
+        const cJSON *x;
+        cJSON_ArrayForEach(x, out) {
+            if (parse_iso(cJSON_GetStringValue(cJSON_GetObjectItem(x, "startsAt"))) > start) break;
+            at++;
+        }
+        cJSON_InsertItemInArray(out, at, o);
+    }
+    return out;
+}
+
 int community_init(Brain *b) {
     C.b = b;
-    if (!b->http) return 0;
     const char *feed = kn_config_str(b->cfg, "brain.community.feed", "config/community.json");
     if (feed && feed[0] && !kn_config_resolve_path(b->cfg, feed, C.path, sizeof C.path)) C.path[0] = 0;
+    if (!b->http) {
+        feed_reload(); /* the game events still reach the game servers */
+        return 0;
+    }
     kn_http_route(b->http, "GET", "/creators/events", h_events, NULL);
     kn_http_route(b->http, "GET", "/social/news", h_news, NULL);
     feed_reload();

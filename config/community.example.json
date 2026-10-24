@@ -18,6 +18,22 @@
       "tags": ["Community", "Stream"]
     }
   ],
+  "gameEvents": [
+    {
+      "_comment": "A live event (Krunker v10.0.3 ongoingEvents, doc/v10/kill-pools.md): from startsAt to endsAt, every public match draws its kill pools once per kill (at most 30) for each signed-in player. killPoolsWeight: the event's share of a draw (percent); killPoolsMode: dilute (shrinks earlier events' shares) or add; killPoolsIcon: ui/img/<icon>.webp on the end screen's Collect button. Only skin contents pay.",
+      "id": 1,
+      "name": "Halloween 2026",
+      "startsAt": "2026-10-25T00:00:00Z",
+      "endsAt": "2026-11-02T00:00:00Z",
+      "killPoolsWeight": 5,
+      "killPoolsMode": "dilute",
+      "killPoolsIcon": "gift",
+      "killPools": [
+        {"weight": 90, "contents": [{"content_type": "skin", "content_ref": "1234"}]},
+        {"weight": 10, "contents": [{"content_type": "skin", "content_ref": "1235"}]}
+      ]
+    }
+  ],
   "polls": [
     {
       "id": 1,

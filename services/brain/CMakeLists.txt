@@ -11,6 +11,8 @@ set(KN_BRAIN_SOURCES
     internal_ws.c
     public_routes.c
     mm_token.c                      # mm-token: seek-game validation tokens (/generate-token)
+    captcha.c                       # captcha: the ALTCHA challenges of sign-in, registration and hosting (pure)
+    captcha_http.c                  # captcha: captcha.* config, GET /captcha/challenge
     host.c
     ranked.c
     ranked_notice.c                 # the queued-for-ranked notice's social frame (pure)
@@ -230,6 +232,12 @@ target_include_directories(kn_brain_mm_token_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_link_libraries(kn_brain_mm_token_test PRIVATE knsvc)
 add_test(NAME brain_mm_token COMMAND kn_brain_mm_token_test)
 set_tests_properties(brain_mm_token PROPERTIES LABELS "knsvc;brain")
+# captcha: the ALTCHA challenges' issue, verify, replay and expiry (pure, no DB)
+add_executable(kn_brain_captcha_test tests/test_captcha.c captcha.c)
+target_include_directories(kn_brain_captcha_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_captcha_test PRIVATE knsvc)
+add_test(NAME brain_captcha COMMAND kn_brain_captcha_test)
+set_tests_properties(brain_captcha PROPERTIES LABELS "knsvc;brain")
 
 # coord-auth: auth join records / limiters and the finder table (pure, no DB).
 add_executable(kn_brain_auth_test tests/test_auth_finder.c auth_state.c finder_table.c)
@@ -491,6 +499,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/junk_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_junk PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;junk")
+    # v10.0.3 event kill pools (doc/v10/kill-pools.md): the feed's running gameEvents in the welcome and the
+    # "game-events" push, the commit's itemRewards into the inventory once per match, at most 30
+    add_test(NAME brain_kill_pools
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kill_pools_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_kill_pools PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;killpools")
     # v10 lottery (lottery.c, 0348_lottery): the guest view, skin / Junk / RP entries, the timer's draw
     add_test(NAME brain_lottery
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py
@@ -533,6 +547,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_account_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_api_account PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # the captcha (captcha.h): GET /captcha/challenge and every flow it gates, captcha.enforce on and off (tests/captcha_test.py)
+    add_test(NAME brain_captcha_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/captcha_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_captcha_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # v10 /auth/* routes (v10_auth.c): EMPTY, NOT_FOUND, REFUSAL 403 and the real answers (tests/v10_api_auth_test.py)
     add_test(NAME brain_v10_api_auth
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_auth_test.py
