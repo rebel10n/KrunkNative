@@ -14,6 +14,7 @@
  * server key, so they are still rate limited and recorded but not deduplicated.
  */
 #include "acct_internal.h"
+#include "live_trade.h" /* the game server's live trade ops (doc/v10/trade.md) */
 #include "v10_paint.h"
 
 #include <stdio.h>
@@ -349,7 +350,7 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 #define LISTING_ROWS \
     "SELECT l.skin_id AS i, l.skin_id AS s, l.price AS f, l.id AS m, {epoch_ms:l.created_at} AS ss, {epoch_ms:l.created_at} AS ms," \
-    " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader" \
+    " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.seller_id AS seller_id" \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* A refused query (the db will not take it) gets its reply anyway: the page's own reply with no data, so the
@@ -1088,4 +1089,220 @@ void economy_init(Brain *b) {
 void economy_shutdown(Brain *b) {
     if (s_timer) kn_loop_cancel_timer(b->loop, s_timer);
     s_timer = 0;
+}
+
+/* ------------------------------------------------------------------ live trades (doc/v10/trade.md) */
+
+/* The game server's two ops of a live trade (Trade mode's in-game window, server/src/trade.c). The game server is
+ * trusted to pair two of its signed-in players; what they own and may trade is decided here and in db_economy.c. */
+typedef struct LiveCtx {
+    AcctReplyFn cb;
+    void *ud;
+    int64_t a, b;
+} LiveCtx;
+
+static LiveCtx *live_ctx(AcctReplyFn cb, void *ud, int64_t a, int64_t b) {
+    LiveCtx *l = calloc(1, sizeof *l);
+    if (!l) {
+        cb(ud, "Out of memory.", NULL);
+        return NULL;
+    }
+    l->cb = cb;
+    l->ud = ud;
+    l->a = a;
+    l->b = b;
+    return l;
+}
+
+/* the picker's rows in v10's trade window shape: {i, c} stacks, {i, c: 1, id: copy id, m: {paint | paintShader}} copies
+ * (deob-10.0.3.js:251121-251146), nt: 1 on what cannot be traded (the lock overlay; the game server refuses it) */
+static void live_rows_v10(cJSON *inv) {
+    cJSON *it;
+    cJSON_ArrayForEach(it, inv) {
+        const SkinInfo *k = acct_skin(kn_json_int(it, "i", -1));
+        if (k && !skin_tradable(k)) cJSON_AddNumberToObject(it, "nt", 1);
+        cJSON *sid = cJSON_DetachItemFromObjectCaseSensitive(it, "sid");
+        if (sid) {
+            cJSON_AddItemToObject(it, "id", sid);
+            cJSON *m = v10_paint_meta(kn_json_str(it, "paint_color", ""), (int) kn_json_int(it, "paint_shader", -1));
+            if (m) cJSON_AddItemToObject(it, "m", m);
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_color");
+        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_shader");
+    }
+}
+
+static void live_open_done(kn_db_result *res, void *ud) {
+    LiveCtx *l = ud;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!cJSON_IsObject(v)) {
+        cJSON_Delete(v);
+        l->cb(l->ud, kn_db_ok(res) ? "Trading is unavailable" : acct_db_error(res, "trade_inventories"), NULL);
+        free(l);
+        return;
+    }
+    live_rows_v10(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(v, "a"), "inv"));
+    live_rows_v10(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(v, "b"), "inv"));
+    l->cb(l->ud, NULL, v);
+    cJSON_Delete(v);
+    free(l);
+}
+
+/* trade_inventories {a, b} -> {a: {inv, funds, premium, level, notrade}, b: {...}} */
+int econ_live_trade_inventories(const cJSON *args, AcctReplyFn cb, void *ud) {
+    const int64_t a = kn_json_int(args, "a", 0), b = kn_json_int(args, "b", 0);
+    if (a <= 0 || b <= 0 || a == b) {
+        cb(ud, "Player not found", NULL);
+        return -1;
+    }
+    LiveCtx *l = live_ctx(cb, ud, a, b);
+    if (!l) return -1;
+    char sa[24], sb[24];
+    kn_db_call(g_acct_brain->db, &P_LIVE_TRADE_OPEN, KN_DB_ARGS(acct_itoa(sa, a), acct_itoa(sb, b)), live_open_done, l);
+    return 0;
+}
+
+/* One side from the game server: [[skin, n], [skin, 1, copyId], ...] -> the same, stacks merged per skin, every skin
+ * in the store table and tradable, at most 1000 units a stack; NULL with *err otherwise. */
+static char *live_side_json(const cJSON *v, const char **err) {
+    int64_t skins[64], counts[64], copies[64], copy_skins[64];
+    int n = 0, nc = 0;
+    if (!cJSON_IsArray(v) || cJSON_GetArraySize(v) > 64) {
+        *err = "Your trade offer is empty or invalid.";
+        return NULL;
+    }
+    const cJSON *it;
+    cJSON_ArrayForEach(it, v) {
+        const cJSON *s = cJSON_GetArrayItem(it, 0), *c = cJSON_GetArrayItem(it, 1), *cp = cJSON_GetArrayItem(it, 2);
+        const double sd = cJSON_IsNumber(s) ? s->valuedouble : -1, cd = cJSON_IsNumber(c) ? c->valuedouble : -1;
+        const int64_t skin = sd >= 0 && sd < 1e7 ? (int64_t) sd : -1;
+        const SkinInfo *k = acct_skin(skin);
+        if (!cJSON_IsArray(it) || skin < 0 || cd < 1 || cd > 1000 || (acct_skin_count() > 0 && !k)) {
+            *err = "Your trade offer is empty or invalid.";
+            return NULL;
+        }
+        if (k && !skin_tradable(k)) {
+            *err = "One or more items in this offer cannot be traded."; /* errors.exchange.tradeItemNotTradable */
+            return NULL;
+        }
+        if (cp) {
+            const double copy = cJSON_IsNumber(cp) ? cp->valuedouble : -1;
+            if (copy < V10_COPY_ID_BASE || copy >= 9e15 || cd != 1) {
+                *err = "Your trade offer is empty or invalid.";
+                return NULL;
+            }
+            for (int j = 0; j < nc; j++) {
+                if (copies[j] == (int64_t) copy) {
+                    *err = "Your trade offer is empty or invalid."; /* one copy twice */
+                    return NULL;
+                }
+            }
+            copies[nc] = (int64_t) copy;
+            copy_skins[nc++] = skin;
+            continue;
+        }
+        int j = 0;
+        while (j < n && skins[j] != skin) j++;
+        if (j == n) {
+            skins[n] = skin;
+            counts[n++] = 0;
+        }
+        counts[j] += (int64_t) cd;
+        if (counts[j] > 1000) {
+            *err = "Your trade offer is empty or invalid.";
+            return NULL;
+        }
+    }
+    cJSON *out = cJSON_CreateArray();
+    for (int j = 0; j < n; j++) {
+        cJSON *pair = cJSON_CreateArray();
+        cJSON_AddItemToArray(pair, cJSON_CreateNumber((double) skins[j]));
+        cJSON_AddItemToArray(pair, cJSON_CreateNumber((double) counts[j]));
+        cJSON_AddItemToArray(out, pair);
+    }
+    for (int j = 0; j < nc; j++) {
+        cJSON *triple = cJSON_CreateArray();
+        cJSON_AddItemToArray(triple, cJSON_CreateNumber((double) copy_skins[j]));
+        cJSON_AddItemToArray(triple, cJSON_CreateNumber(1));
+        cJSON_AddItemToArray(triple, cJSON_CreateNumber((double) copies[j]));
+        cJSON_AddItemToArray(out, triple);
+    }
+    char *text = kn_json_print(out);
+    cJSON_Delete(out);
+    return text;
+}
+
+static void live_trade_done(kn_db_result *res, void *ud) {
+    LiveCtx *l = ud;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!cJSON_IsObject(v)) {
+        cJSON_Delete(v);
+        l->cb(l->ud, kn_db_ok(res) ? "Trade failed" : acct_db_error(res, "live_trade"), NULL);
+        free(l);
+        return;
+    }
+    const int replay = kn_json_int(v, "replay", 0) != 0;
+    cJSON_DeleteItemFromObjectCaseSensitive(v, "replay");
+    l->cb(l->ud, NULL, v);
+    cJSON_Delete(v);
+    if (!replay) { /* the header KR and the owned list of both accounts' menus / hubs ("ua") */
+        push_funds(l->a);
+        push_funds(l->b);
+        KN_INFO(MOD, "live trade %lld <-> %lld settled", (long long) l->a, (long long) l->b);
+    }
+    free(l);
+}
+
+/* live_trade {key, a: {id, items, kr}, b: {id, items, kr}, cost} -> {id, a: {funds, removed, added, meta, owned}, b}
+ * (db_economy.c run_live_trade). The levels and limits are the trade offers' (accounts.trade_min_level 10,
+ * trade_max_items 5, trade_max_items_premium 20: v10's tradeMinLvl / tradeMaxOut / tradeMaxOutP). */
+int econ_live_trade(const cJSON *args, AcctReplyFn cb, void *ud) {
+    const char *key = kn_json_str(args, "key", "");
+    const cJSON *sa = cJSON_GetObjectItemCaseSensitive(args, "a"), *sb = cJSON_GetObjectItemCaseSensitive(args, "b");
+    const int64_t a = kn_json_int(sa, "id", 0), b = kn_json_int(sb, "id", 0);
+    const double kra = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(sa, "kr")) ? cJSON_GetObjectItemCaseSensitive(sa, "kr")->valuedouble : 0;
+    const double krb = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(sb, "kr")) ? cJSON_GetObjectItemCaseSensitive(sb, "kr")->valuedouble : 0;
+    const int64_t cost = kn_json_int(args, "cost", 0);
+    if (strncmp(key, "lt:", 3) != 0 || strlen(key) < 8 || strlen(key) > 64) {
+        cb(ud, "Invalid request", NULL);
+        return -1;
+    }
+    if (a <= 0 || b <= 0 || a == b) {
+        cb(ud, "Player not found", NULL);
+        return -1;
+    }
+    const double kr_max = (double) g_acct.trade_kr_max; /* accounts.trade_kr_max (0: KR cannot be traded) */
+    if (!(kra >= 0 && kra <= 1e7) || !(krb >= 0 && krb <= 1e7) || cost < 0 || cost > 1000) {
+        cb(ud, "Invalid amount", NULL);
+        return -1;
+    }
+    if ((kra > kr_max || krb > kr_max) && (kra > 0 || krb > 0)) {
+        cb(ud, kr_max > 0 ? "Invalid amount" : "KR cannot be traded", NULL);
+        return -1;
+    }
+    const char *err = NULL;
+    char *ja = live_side_json(cJSON_GetObjectItemCaseSensitive(sa, "items"), &err);
+    char *jb = ja ? live_side_json(cJSON_GetObjectItemCaseSensitive(sb, "items"), &err) : NULL;
+    if (!ja || !jb) {
+        free(ja);
+        free(jb);
+        cb(ud, err ? err : "Your trade offer is empty or invalid.", NULL);
+        return -1;
+    }
+    LiveCtx *l = live_ctx(cb, ud, a, b);
+    if (!l) {
+        free(ja);
+        free(jb);
+        return -1;
+    }
+    char ia[24], ib[24], ka[24], kb[24], co[24], lvl[24], mx[24], mxp[24], km[24];
+    kn_db_call(g_acct_brain->db, &P_LIVE_TRADE,
+               KN_DB_ARGS(acct_itoa(ia, a), key, "0", "trade", acct_itoa(ib, b), ja, jb, acct_itoa(ka, (int64_t) kra),
+                          acct_itoa(kb, (int64_t) krb), acct_itoa(co, cost), acct_itoa(lvl, g_acct.trade_min_level),
+                          acct_itoa(mx, g_acct.trade_max_items), acct_itoa(mxp, g_acct.trade_max_items_premium),
+                          acct_itoa(km, (int64_t) kr_max)),
+               live_trade_done, l);
+    free(ja);
+    free(jb);
+    return 0;
 }

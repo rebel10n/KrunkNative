@@ -1194,7 +1194,7 @@ const kn_proc P_KR_HISTORY = {"kr_history", NULL, run_kr_history};
 #define LISTING_COLS                                                                                       \
     "SELECT l.skin_id AS i, l.skin_id AS s, l.skin_id AS sk, l.id AS m, l.id AS id, l.price AS f, l.price AS kr," \
     " {epoch_ms:l.created_at} AS ms, {epoch_ms:l.created_at} AS ss, a.username AS p, 1 AS c,"                \
-    " l.paint_color AS paint_color, l.paint_shader AS paint_shader"                                          \
+    " l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.seller_id AS seller_id"                 \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* (player) -> the player's open listings (v7.1.4 "uml" -> "ul": {sk, skid, kr, c, ms, id}) */
@@ -1217,3 +1217,165 @@ static kn_db_result *run_listing(kn_dbconn *c, int n, const char *const *p) {
     return dbx_json(&x, "listing", row);
 }
 const kn_proc P_LISTING = {"listing", NULL, run_listing};
+
+/* ------------------------------------------------------------------ live trades (doc/v10/trade.md) */
+
+/* A side of a live trade, read without locking (the window's snapshot; the settle re-checks everything). */
+static cJSON *live_side(Dbx *x, const char *id) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "inv", inventory_items(x, id));
+    kn_db_result *r = dbx_q(x, SQL(.any = "SELECT player_score, player_notrade, player_premium, player_funds FROM players"
+                                          " WHERE player_id = $1"),
+                            KN_DB_ARGS(id));
+    const int found = r && kn_db_rows(r) > 0;
+    cJSON_AddNumberToObject(o, "funds", found ? (double) kn_db_get_int64(r, 0, 3, 0) : 0);
+    cJSON_AddBoolToObject(o, "premium", found && kn_db_get_int64(r, 0, 2, 0) > 0);
+    cJSON_AddNumberToObject(o, "level", found ? db_level(kn_db_get_int64(r, 0, 0, 0), 0.03) : 0);
+    cJSON_AddBoolToObject(o, "notrade", !found || kn_db_get_int64(r, 0, 1, 0) != 0);
+    kn_db_result_free(r);
+    return o;
+}
+
+/* (a, b) -> {a: {inv, funds, premium, level, notrade}, b: {...}}: the game server's trade window (the "trade_inventories"
+ * op). inv rows are the trade picker's (inventory_items); economy.c gives them v10's shape. */
+static kn_db_result *run_live_trade_open(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "a", live_side(&x, P(0)));
+    cJSON_AddItemToObject(o, "b", live_side(&x, P(1)));
+    return dbx_json(&x, "kn_live_trade_open", o);
+}
+const kn_proc P_LIVE_TRADE_OPEN = {"live_trade_open", NULL, run_live_trade_open};
+
+/* One side's units moving from `from` to `to`: the stacks with db_add_skin (a missing unit refuses everything: "Item
+ * not owned"), a copy with copy_take / copy_give (its paint goes with it, it gets a new copy id). The from side's
+ * removed list and the to side's added list are v10's atrd lists, one entry per unit ("skin" / "skin:copyId",
+ * deob-10.0.3.js:253283-253304); meta holds the new copies' paint. Each unit is a live_trade_items row. */
+static void live_move(Dbx *x, int64_t trade, const char *side, const Counted *c, int k, int64_t from, int64_t to,
+                      cJSON *removed, cJSON *added, cJSON *meta, const char *ref) {
+    char entry[48];
+    for (int i = 0; i < k && !dbx_failed(x); i++) {
+        if (!c[i].copy) {
+            if (db_add_skin(x, from, c[i].skin, -c[i].count, "live-trade", ref, NULL) < 0) return;
+            if (db_add_skin(x, to, c[i].skin, c[i].count, "live-trade", ref, NULL) < 0) return;
+            snprintf(entry, sizeof entry, "%lld", (long long) c[i].skin);
+            for (int64_t u = 0; u < c[i].count && u < 1000; u++) {
+                cJSON_AddItemToArray(removed, cJSON_CreateString(entry));
+                cJSON_AddItemToArray(added, cJSON_CreateString(entry));
+            }
+            dbx_exec(x, SQL(.any = "INSERT INTO live_trade_items (trade_id, side, skin_id, count) VALUES ($1, $2, $3, $4)"),
+                     KN_DB_ARGS(I64S(trade), side, I64S(c[i].skin), I64S(c[i].count)));
+            continue;
+        }
+        CopyPaint paint;
+        int64_t copy = 0;
+        if (copy_take(x, from, c[i].copy, c[i].skin, &paint, "live-trade", ref) < 0) return;
+        if (copy_give(x, to, c[i].skin, &paint, "live-trade", ref, &copy) < 0) return;
+        snprintf(entry, sizeof entry, "%lld:%lld", (long long) c[i].skin, (long long) c[i].copy);
+        cJSON_AddItemToArray(removed, cJSON_CreateString(entry));
+        snprintf(entry, sizeof entry, "%lld:%lld", (long long) c[i].skin, (long long) copy);
+        cJSON_AddItemToArray(added, cJSON_CreateString(entry));
+        char key[24];
+        snprintf(key, sizeof key, "%lld", (long long) copy);
+        cJSON *m = v10_paint_meta(paint.color, (int) paint.shader);
+        cJSON_AddItemToObject(meta, key, m ? m : cJSON_CreateObject());
+        dbx_exec(x, SQL(.any = "INSERT INTO live_trade_items (trade_id, side, skin_id, count, copy_id, new_copy_id)"
+                               " VALUES ($1, $2, $3, 1, $4, $5)"),
+                 KN_DB_ARGS(I64S(trade), side, I64S(c[i].skin), I64S(c[i].copy), I64S(copy)));
+    }
+}
+
+/* [[skin, count after], ...] of the skins a side touched (the game server's ENT ownership bits) */
+static void live_owned(Dbx *x, int64_t acc, const Counted *c1, int k1, const Counted *c2, int k2, cJSON *out) {
+    const Counted *lists[2] = {c1, c2};
+    const int ks[2] = {k1, k2};
+    for (int l = 0; l < 2; l++) {
+        for (int i = 0; i < ks[l] && !dbx_failed(x); i++) {
+            int seen = 0;
+            const cJSON *it;
+            cJSON_ArrayForEach(it, out) seen |= cJSON_GetArrayItem(it, 0)->valuedouble == (double) lists[l][i].skin;
+            if (seen) continue;
+            cJSON *pair = cJSON_CreateArray();
+            cJSON_AddItemToArray(pair, cJSON_CreateNumber((double) lists[l][i].skin));
+            cJSON_AddItemToArray(pair, cJSON_CreateNumber((double) dbx_int(x,
+                SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"),
+                KN_DB_ARGS(I64S(acc), I64S(lists[l][i].skin)), 0)));
+            cJSON_AddItemToArray(out, pair);
+        }
+    }
+}
+
+static int units_of(const Counted *c, int k) { return (int) side_total(c, k); }
+
+/* The "live_trade" op: one live trade settled in one transaction. $0 account a (the actor of the idempotency key),
+ * $1 key (the session's "lt:<hex>"), $2 rate (0), $3 feature ('trade'), $4 account b, $5 a's side, $6 b's side
+ * ([[skin, n]] stacks and [skin, 1, copy] copies, economy.c checked the skins exist and are tradable), $7 a's KR,
+ * $8 b's KR, $9 tradeCost (each side), $10 min level, $11 max units per side, $12 for a premium side, $13 max KR
+ * -> {id, a: {funds, removed, added, meta, owned}, b: {...}}.
+ * Everything is re-checked under the locks (the game server's snapshot may be old): both accounts exist and can trade
+ * (no trade lock, no account ban, no 'trade' feature ban), both are at the level, each side's units fit its owner's
+ * limit, KR givers have no 'gift' ban, each side affords its KR + tradeCost, every unit is still owned (a missing one
+ * refuses the whole trade: nothing moves). KR moves 1:1 (v10 shows the 10 KR cost only, KN: no gift fee on it). A
+ * resent frame replays the stored result (economy_requests); live_trades.req_key is unique as well. */
+static kn_db_result *run_live_trade(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    ECON_OPEN("live", "kn_live_trade");
+    const int64_t a = PI(0), b = PI(4), kra = PI(7), krb = PI(8), cost = PI(9) > 0 ? PI(9) : 0, kr_max = PI(13);
+    Counted ga[TRADE_SIDE_MAX], gb[TRADE_SIDE_MAX];
+    const int ka = parse_side(P(5), ga), kb = parse_side(P(6), gb);
+    if (b <= 0 || b == a) return econ_refuse(&x, "Cant trade with yourself");
+    if (ka < 0 || kb < 0) return econ_refuse(&x, "Your trade offer is empty or invalid.");
+    if (kra < 0 || krb < 0 || (kr_max > 0 && (kra > kr_max || krb > kr_max))) return econ_refuse(&x, "Invalid amount");
+    if (ka + kb == 0 && kra == 0 && krb == 0) return econ_refuse(&x, "Your trade offer is empty or invalid.");
+    EconPlayer pa, pb;
+    if (econ_lock(&x, a, &pa, b, &pb) < 0 || econ_rate(&x, n, p, "live") < 0) return dbx_finish(&x, NULL);
+    if (pa.notrade) return econ_refuse(&x, "Account is trade locked");
+    if (!econ_peer_ok(&x, &pb) || econ_feature_banned(&x, b, "trade")) return econ_refuse(&x, "Player can not trade");
+    if (PI(10) > 0 && (level_of(&pa) < PI(10) || level_of(&pb) < PI(10)))
+        return econ_refuse(&x, "Both players must be level 10 or higher to trade.");
+    const int64_t max_a = pa.premium ? PI(12) : PI(11), max_b = pb.premium ? PI(12) : PI(11);
+    if ((max_a > 0 && units_of(ga, ka) > max_a) || (max_b > 0 && units_of(gb, kb) > max_b))
+        return econ_refuse(&x, "You cannot include that many items in a single trade.");
+    if ((kra > 0 && econ_feature_banned(&x, a, "gift")) || (krb > 0 && econ_feature_banned(&x, b, "gift")))
+        return econ_refuse(&x, "You are banned from using the KR gifts");
+    if (pa.funds < kra + cost || pb.funds < krb + cost) return econ_refuse(&x, "Not enough KR");
+    const int64_t trade = dbx_insert_id(&x,
+        SQL(.pg = "INSERT INTO live_trades (req_key, account_a, account_b, kr_a, kr_b, fee) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            .sqlite = "INSERT INTO live_trades (req_key, account_a, account_b, kr_a, kr_b, fee) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            .mysql = "INSERT INTO live_trades (req_key, account_a, account_b, kr_a, kr_b, fee) VALUES ($1, $2, $3, $4, $5, $6)"),
+        KN_DB_ARGS(P(1), I64S(a), I64S(b), I64S(kra), I64S(krb), I64S(cost)));
+    if (dbx_failed(&x) || trade <= 0) return dbx_finish(&x, NULL);
+    char ref[48];
+    snprintf(ref, sizeof ref, "live:%lld", (long long) trade);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) trade);
+    cJSON *ra = cJSON_AddObjectToObject(o, "a"), *rb = cJSON_AddObjectToObject(o, "b");
+    cJSON *rem_a = cJSON_AddArrayToObject(ra, "removed"), *add_a = cJSON_AddArrayToObject(ra, "added"), *meta_a = cJSON_AddObjectToObject(ra, "meta");
+    cJSON *rem_b = cJSON_AddArrayToObject(rb, "removed"), *add_b = cJSON_AddArrayToObject(rb, "added"), *meta_b = cJSON_AddObjectToObject(rb, "meta");
+    live_move(&x, trade, "a", ga, ka, a, b, rem_a, add_b, meta_b, ref); /* a's units to b */
+    live_move(&x, trade, "b", gb, kb, b, a, rem_b, add_a, meta_a, ref); /* b's units to a */
+    int64_t funds_a = pa.funds, funds_b = pb.funds;
+    if (kra > 0) {
+        db_add_funds_ex(&x, a, -kra, "live-trade-out", ref, b, 0, &funds_a);
+        db_add_funds_ex(&x, b, kra, "live-trade-in", ref, a, 0, &funds_b);
+    }
+    if (krb > 0) {
+        db_add_funds_ex(&x, b, -krb, "live-trade-out", ref, a, 0, &funds_b);
+        db_add_funds_ex(&x, a, krb, "live-trade-in", ref, b, 0, &funds_a);
+    }
+    if (cost > 0) { /* tradeCost (deob-10.0.3.js:22952): "Accept Offer - 10 KR", paid by each side */
+        db_add_funds_ex(&x, a, -cost, "live-trade-fee", ref, b, cost, &funds_a);
+        db_add_funds_ex(&x, b, -cost, "live-trade-fee", ref, a, cost, &funds_b);
+    }
+    if (dbx_failed(&x)) {
+        cJSON_Delete(o);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON_AddNumberToObject(ra, "funds", (double) funds_a);
+    cJSON_AddNumberToObject(rb, "funds", (double) funds_b);
+    live_owned(&x, a, ga, ka, gb, kb, cJSON_AddArrayToObject(ra, "owned"));
+    live_owned(&x, b, ga, ka, gb, kb, cJSON_AddArrayToObject(rb, "owned"));
+    cJSON_AddNumberToObject(o, "peer", (double) b);
+    return econ_done(&x, n, p, "live", "kn_live_trade", o);
+}
+const kn_proc P_LIVE_TRADE = {"live_trade", NULL, run_live_trade};

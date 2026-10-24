@@ -22,6 +22,9 @@
  *                                        -> account + {kr_awarded, duplicate}
  *   rewards  {items:[[id,kr],...]}       -> {funds:[...]}
  *   give_skin {id, skin, source?}        -> {skin, count}
+ *   trade_inventories {a, b}             -> {a: {inv, funds, premium, level, notrade}, b}  (live trade window)
+ *   live_trade {key, a: {id, items, kr}, b, cost} -> {id, a: {funds, removed, added, meta, owned}, b}
+ *                                        (one transaction, key = idempotency; doc/v10/trade.md)
  *   junk_balance {id}                    -> {junk: "12.34"}
  *   junk_credit {id, amount, reason?}    -> {junk, credited}   (amount in hundredths; pushes "uj")
  *   junk_spend {id, amount, reason?}     -> {junk}  | "Not enough Junk"   (pushes "uj")

@@ -50,7 +50,7 @@ v10 adds one bit, `tradable` (`SkinInfo.tradable`, never true where the v7 rule 
 | Cooldowns / rate limits | `saleGrace` only | per-socket token bucket | + **KN** per account and action kind, across sockets and brains (DB-backed) |
 | 2FA / verified email | no economy action asks for either | optional `accounts.email.require_verified` gate | unchanged |
 | Per-feature bans | none | none (only the email gate) | **KN** `feature_bans` (gift / market / trade), checked inside each transaction |
-| Live in-game trade (Trade mode, `windows[36]`, `strd` / `utrd` / `atrd`, `tradeCost` 10) | client only: v7.1.4's game server implements no trade frame | not ported (`hud_ui.c`) | **not done**: needs a game-server trade session + brain settlement; follow-up |
+| Live in-game trade (Trade mode, `windows[36]`, `strd` / `utrd` / `atrd`, `tradeCost` 10) | client only: v7.1.4's game server implements no trade frame | not ported (`hud_ui.c`) | v10.0.3's: the game server's session (`server/src/trade.c`), the brain's one-transaction settle (`live_trade`, `0357_live_trades`), the window (`trade_ui.c`): doc/v10/trade.md |
 | Premium gift (`prm`, `confPremium`) | paid premium days (store purchase, not KR); no server | not ported | not done (real-money store, out of the KR economy) |
 
 ## 2. Rules (defaults = v7.1.4, except the v10.0.2 levels and tradable bit)

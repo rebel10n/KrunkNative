@@ -1582,7 +1582,7 @@ void   player_custom_value_set(Game *game, Player *player, const char *key, doub
 | 15 | stalk | Stalker | +`modelOverrides` (all black, noCosmetics) | 2 | team 2 active | pickStalker 15 s | – | onMelee −40 hp + jumpscare |
 | 16 | king | King of the Hill | **rewritten** | – | score | **random** objective each period | OBJECTIVE | Every 1.5 s, +`objScore` **10** only when **exactly one** player is on the hill (v3: everyone on it, 20). `uobj uid,count`. `collisionCheck` sets `player.onZone`. Kill while on the hill: +50 "Defender" and `player.killMlt += hillMlt 0.05`; kill of someone on the hill: +25 "Attacker". Kill score × (`killMlt` 0.15 + player.killMlt) (`king.js:1-67`, `players.js:4091`). **v3 `noScoreK` removed** |
 | 17 | oinc | One in the Chamber | key renamed | – | last alive | 10 s, then 100 ms | – | forceClass 10, `maxHealth` 10, ammoLimit 1, noReloads, forceSpawn 3, lives 3; rewards on; party |
-| 18 | trade | Trade | changed flags | friendly | – | gameTime 0 | – | `noClientKick` (was noKick), noHPbars, noMinimap, nameDist 60, viewDis 500, maxNoMov 180000 (unused) |
+| 18 | trade | Trade | changed flags | friendly | – | gameTime 0 | – | `noClientKick` (was noKick), noHPbars, noMinimap, nameDist 60, viewDis 500, maxNoMov 180000 (KN: the server's idle kick in the mode; canTrade: the live trade, doc/v10/trade.md) |
 | 19 | kc | Kill Confirmed | +leaderSort | 2 | tagLimit 65 | config | – | Tag model `tag_0` (v3 `krunkie_0`), padMlt 0.8; confirm +25 and team +1, deny +10 (`medals.js:16-53`) |
 | 20 | def | Defuse | same | 2 | bomb / defuse / survivors | comp start 10 s; 1 life | BOMB_SITE, bomb weapon 17 | realMov; the mode's `hitBoxPad` key is unused (the server config `hitBoxPad` applies) |
 | 21 | shrp | Sharp Shooter | **changed** | – | score | weapon rotates every 20 s from `weapons.onlyGoodWeapons` (v3 `onlyWeapons`, `game.js:2918`) | – | NEW `onKill`: killstreak %2 → effect 1, %3 → effect 2, %5 → effect 0 (`shrp.js:16-28`). Streaks on except [4,5,6]; forceClass 9; party |
@@ -2847,7 +2847,7 @@ Copy them from `/home/user/jails/kru/src/Krunker_v7.1.4/public/models/`. Every v
 - The interface-limit error message says 20 while the limit is 30.
 - The `sci` serializer writes `this.sci`.
 - Airdrop streak packages need `mode.disabledStreaks` to exist.
-- AI `airAccel` and the trade `maxNoMov` mode keys have no consumer.
+- AI `airAccel` has no consumer. The trade `maxNoMov` has none in the client either; KrunkNative's server uses it as the mode's in-game idle kick (doc/v10/trade.md).
 
 Quirks that are **not** reproduced:
 - the sandbox `settings` drop (Decision 5);

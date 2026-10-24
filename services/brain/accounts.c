@@ -7,6 +7,7 @@
  */
 #include "acct_internal.h"
 #include "hot.h"
+#include "live_trade.h" /* the game server's live trade ops: trade_inventories, live_trade (economy.c) */
 
 #include <ctype.h>
 #include <math.h>

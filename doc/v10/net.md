@@ -214,7 +214,7 @@ the same popup, then joins the same game again with the password in its JOIN pac
 
 ## 6. Port notes
 
-- Implement: entity packets (with KrunkScript entities), `PLAYER_POSE`, `PLAYER_LOCKS`, the
+- Implement: entity packets (with KrunkScript entities), `PLAYER_LOCKS`, the
   `SYNC_PLAYER` controlled-entity tail, `joinedRank` plus the ranked queue flow (against
   kn_brain, not FRVR), and optionally the event-bus friends/DM service in kn_brain.
 - `CHEAT_CHECK` / `ccr` is a server-pushed code execution channel (XOR-obfuscated JS run through
@@ -247,7 +247,7 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x0103 | `NET_EXT_ENTITY_EVENT` | `ee` | S to C |
 | 0x0104 | `NET_EXT_ENTITY_ATTACH` | `ea+` | S to C |
 | 0x0105 | `NET_EXT_ENTITY_DETACH` | `ea-` | S to C |
-| 0x0200 | `NET_EXT_PLAYER_POSE` | `pz` | S to C |
+| 0x0200 | `NET_EXT_PLAYER_POSE` | `pz` (`NetPlayerPosePacket`; our server and the official link, doc/v10/player-pose.md) | S to C |
 | 0x0201 | `NET_EXT_PLAYER_LOCKS` | `plk` | S to C |
 | 0x0204 | `NET_EXT_PLAYER_ANIM` | `c` (`NetPlayerAnimPacket`; KN's server sends it for animated class models, doc/v10/s2c-coverage.md) | S to C |
 | 0x0300 | `NET_EXT_SKIN_DEFINITION_CHANGED` | `sdc` (`NetExtJsonChunk` + JSON `[skinId, skin]`, doc/v10/s2c-coverage.md) | S to C |
@@ -259,6 +259,20 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x0501 | `NET_EXT_CHARGE_CONSENT_RESPONSE` | `chrsp` | C to S |
 | 0x0600 | `NET_EXT_JOINED_RANK` | `joinedRank` | C to S |
 | 0x0700.. | `NET_EXT_BLOCK_PROTOCOL` | (KN: ruleset / version toggle) | both |
+| 0x0b00 | `NET_EXT_TRADE_REQUEST` | `strd` | C to S |
+| 0x0b01 | `NET_EXT_TRADE_INIT` | `trd` | C to S |
+| 0x0b02 | `NET_EXT_TRADE_UPDATE` | `utrd` | C to S |
+| 0x0b03 | `NET_EXT_TRADE_CURRENCY` | `utrdc` | C to S |
+| 0x0b04 | `NET_EXT_TRADE_ACCEPT` | `atrd` | C to S |
+| 0x0b05 | `NET_EXT_TRADE_DECLINE` | `dtrd` | C to S |
+| 0x0b06 | `NET_EXT_TRADE_CANCEL` | `ctrd` | C to S |
+| 0x0b07 | `NET_EXT_TRADE_CHAT` | `tct` | C to S |
+| 0x0b10 | `NET_EXT_TRADE_RESPONSE` | `trd` (types 0, 2-5) | S to C |
+| 0x0b11 | `NET_EXT_TRADE_OPEN` | `trd` type 1 (chunked JSON invs) | S to C |
+| 0x0b12 | `NET_EXT_TRADE_ITEM` | `utrd` | S to C |
+| 0x0b13 | `NET_EXT_TRADE_CURRENCY_STATE` | `utrdc` | S to C |
+| 0x0b14 | `NET_EXT_TRADE_RESULT` | `atrd` (chunked JSON) | S to C |
+| 0x0b15 | `NET_EXT_TRADE_CHAT_LINE` | `tch` | S to C |
 | 0x8000.. | `NET_EXT_BLOCK_KN` | (KrunkNative-only) | both |
 | 0x8000 | `NET_EXT_KN_ACCOUNT_AUTH` | (KN live sign-in: session token / hasJoined / guest) | C to S |
 | 0x8001 | `NET_EXT_KN_ACCOUNT_RIGHTS` | (KN: account and rights, push + answer) | S to C |

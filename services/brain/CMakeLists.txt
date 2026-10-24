@@ -510,6 +510,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_lottery PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;lottery")
+    # the live trade of Trade mode (doc/v10/trade.md, 0357_live_trades): the game server's trade_inventories / live_trade
+    # ops: the swap in one transaction, replays, ownership, a double spend, funds, levels, bans, limits, the ledger
+    add_test(NAME brain_live_trade
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_trade_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_live_trade PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;trade")
     # the signed-out guest's balance (guest.c, db_guest.c, 0350_guest_profiles): the two routes, the credit and claim ops
     add_test(NAME brain_guest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_test.py
@@ -709,6 +715,11 @@ foreach (drv IN ITEMS sqlite mysql)
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_lottery_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;lottery;${drv}")
+        add_test(NAME brain_live_trade_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_trade_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_live_trade_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;trade;${drv}")
         add_test(NAME brain_shop_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/shop_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
