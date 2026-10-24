@@ -1081,8 +1081,8 @@ v3 already has `ShaderToyMaterial`, pulse, frame, rgb and glow (`v3 src/libs/ren
 | `trans`/`opac`/`alpha`/`side` | 665/15/164/493 | transparent, opacity, alphaTest, DoubleSide | [CLIENT] | present |
 | `shaderNum` (v3 `shaderId`) | 13 (5) | `THREE.ShaderToyMaterial(shaders[n].code)`: a RawShaderMaterial wrapping Shadertoy `mainImage`, uniforms `iTime, iTimeDelta, iResolution (1500 x 1500/aspect), iFrame, iChannel0-3, iChannelResolution, iDate, iMouse`, UV varying `vUv` (`v7 src/133.js:269-340`). 8 shaders, ids 0-7 (`v7 src/data/shaders.js`). v3 had 4 without ids ("Glob" was removed, so indices shifted: v3 Purple Plasma = 3, v7 = 2) | [CLIENT] | missing |
 | `env`/`sameEnv` NEW | 21 | envMap `<tex>_env` (mapping 3), `envMapIntensity = env\|\|3` (`render.js:121-131, 1290-1293`) | [CLIENT] | missing |
-| `video` NEW | 2 (Deep Space dye, Mysterious Orb melee) | `<video>` texture `videos/video_<n>.mp4` (`render.js:1180-1209`) | [CLIENT] | missing |
-| `projection` NEW | 2 | screen-space UVs: patches map/emissive fragment chunks with `vTexCoords` (`render.js:1314-1318`) | [CLIENT] | missing |
+| `video` NEW | 2 (Deep Space dye, Mysterious Orb melee; v10 adds the Glitch dye, video 3) | `<video>` texture `videos/video_<n>.mp4` (`render.js:1180-1209`) | [CLIENT] | present (v10.0.3 port, with the noVideoSkins setting: `client/src/skin_video.c`; natively the `.knv` frame sidecar) |
+| `projection` NEW | 2 | screen-space UVs: patches map/emissive fragment chunks with `vTexCoords` (`render.js:1314-1318`) | [CLIENT] | present (`basic.frag` `projection_uv`, `client/src/skin_fx.c`) |
 | `hasAnim`/`animS`, `fileExt` gltf/glb NEW | 22 (types 0, 3, 11, 14) | `loadAnimMesh` + `AnimationMixer`, `timeScale = animS`, morph targets (`render.js:63-175, 2231`) | [CLIENT] | missing (OBJ only) |
 | `snd`/`killSnd`/`stepSnd`/`jumpSnd`/`reloadSnd`/`spraySnd` NEW (beyond 3 `snd`) | 10/6/5/... | per-skin sounds (`players.js:1597-1636, 2007, 4924, 4937`). Setting `skinVolume` (`settings.js:2945`) | [CLIENT] | missing (`KN client/src/sound_events.c` has no skin sounds) |
 | `explode`/`particle` NEW | 2/2 | weapon-skin kill VFX | [CLIENT] | missing |

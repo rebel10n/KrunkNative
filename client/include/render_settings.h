@@ -47,6 +47,7 @@ typedef struct {
     char bullet_tracer_color[RS_COLOR_MAX];  // bulletTracerCol
     int sniper_flap;         // sniperFlap: scope flap animation on snipers (viewmodel)
     int texture_anim;        // textureAnim: moving/framed textures (main.c client_tick_textures)
+    int no_video_skins;      // noVideoSkins (v10.0.3 "Disable Video Skins", restart): skin videos off (skin_video.h)
     int object_anim;         // objectAnim: liquid wave animation (flag)
     int screen_shake;        // screenShake (camera shake, flag)
     int weapon_shine;        // weaponShine: weapons Phong instead of Lambert (flag)

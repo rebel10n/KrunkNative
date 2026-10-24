@@ -16,6 +16,7 @@
 #include <client_settings.h> // Settings > Client "Resolution" (exclusive fullscreen mode)
 #include <window_state.h>    // the window across F4 / relaunch / restarts
 #include <app_mode.h>        // app_window_has_router: page windows keep no geometry
+#include <skin_video.h>      // noVideoSkins
 #include <ctype.h>
 #include <math.h>
 #include <stddef.h>
@@ -41,7 +42,7 @@ static ClientRenderSettings g_rs = {
     .particles = 1, .particles_dist = 160.0f, .render_dist = 100.0f,
     .shadows = 1, .soft_shadows = 0, .high_res_shadows = 0, .dynamic_shadows = 0, .ambient_shading = 1,
     .show_trails = 1, .your_trails = 1, .muzzle_flash = 1, .bullet_tracers = 1, .bullet_tracer_color = "#ffffdb",
-    .sniper_flap = 0, .texture_anim = 1, .object_anim = 1, .screen_shake = 1, .weapon_shine = 0, .lighting = 1,
+    .sniper_flap = 0, .texture_anim = 1, .no_video_skins = 0, .object_anim = 1, .screen_shake = 1, .weapon_shine = 0, .lighting = 1,
     .hud_health_high = "#9eeb56", .hud_health_low = "#eb5656",
     .speed_lines = 0.6f, .speed_lines_color = "#e6e6e6",
     .show_popup_score = 1, .popup_score_color = "#ffea78", .popup_score_shadow = 0,
@@ -258,6 +259,13 @@ static void apply_show_messages(Client *client) {
 }
 
 // renderDist.set: camera.far = v * 60 (55.js camera: PerspectiveCamera(.., 0.1, 6000)).
+// noVideoSkins (deob-10.0.3.js:237521-237536): set() writes the renderer's flag at once; getMat reads it for every
+// material made after that (skin_video.h), so meshes built before keep their video (the setting's "Restart required")
+static void apply_no_video_skins(Client *client) {
+    (void) client;
+    skin_video_set_disabled(g_rs.no_video_skins);
+}
+
 static void apply_render_dist(Client *client) {
     if (client && g_rs.render_dist > 0.0f) client->camera.far = g_rs.render_dist * 60.0f;
 }
@@ -396,6 +404,7 @@ static const RsEntry RS_TABLE[] = {
     RS_S("bulletTracerCol", bullet_tracer_color, NULL),
     RS_B("sniperFlap", sniper_flap, NULL),
     RS_B("textureAnim", texture_anim, NULL),            // main.c freezes client_tick_textures at frame 0
+    RS_B("noVideoSkins", no_video_skins, apply_no_video_skins), // v10.0.3: skin videos (skin_video.h)
     RS_B("objectAnim", object_anim, NULL),
     RS_B("screenShake", screen_shake, NULL),
     RS_B("weaponShine", weapon_shine, NULL),

@@ -21,8 +21,10 @@
 //     bobs (x / z sin(bob) * 0.1) and turns (y += delta * 0.001); landed (readyClaim) it stops
 //     tilting and switches to the "adrp_1" texture.
 //
-// KN notes: weapons have no altSkin in KN (no mid models, video projection or glow skins), so the
-// upgraded weapon shows its base model. The airdrop overlay icon (game-overlay.js,
+// KN notes: weapons have no altSkin record in KN (no mid models or glow skins), so the upgraded weapon
+// shows its base model, with the altSkin's video (v10.0.3 upgradeWeapons altSkin {projection, video 2},
+// skin_video_alt_skin; deob-10.0.3.js:218796-218845 loadMesh passes video / projection) unless
+// noVideoSkins strips it, and its outline. The airdrop overlay icon (game-overlay.js,
 // /img/streaks/package/<icon>.png, ui/img from tools/ui-import/fetch_live_assets.py) is drawn by
 // client/src/ui/hud_map.c with the death markers. The claim progress is the generic #interactProg bar (ui_interact.c).
 #include <zombies_render.h>
@@ -34,6 +36,8 @@
 #include <math.h>
 #include <string.h>
 #include <ruleset.h>
+#include <skin_fx.h>    // the upgraded weapon's altSkin video
+#include <skin_video.h>
 
 #define ZR_MYSTERY_BOX_OFFSET 10.0f   // config.mysteryBoxOffset
 #define ZR_KRUM_OFFSET 10.0f          // config.krumMachineOffset
@@ -114,6 +118,7 @@ static vec4 zr_hue_color(const float hue) {
 static void zr_drop_mesh(Mesh **mesh) {
     if (!*mesh) return;
     if (g_zr.scene) scene_remove_mesh(g_zr.scene, *mesh);
+    skin_fx_forget(*mesh); // an altSkin video's user
     mesh_fini(*mesh); // the material too; geometry and textures are cached (shared)
     *mesh = NULL;
 }
@@ -226,8 +231,10 @@ static void zr_machine_weapon(const Game *game, ZrMachine *m, const int id, cons
         m->weapon->transform.rotation = (vec3) {r.x, r.y + (float) M_PI / 2.0f, r.z};
         m->weapon->transform.scale = (vec3) {scale, scale, scale};
     }
+    // changeKrumWeapon's upgraded entry: its altSkin video in screen space (tFilter LinearFilter), the outline below
+    if (krum && stage && m->weapon) skin_fx_apply_video(m->weapon, skin_video_alt_skin(id), 1, 1);
     zr_add(m->weapon);
-    if (krum && stage && m->weapon) { // the upgraded altSkin's outline (its video projection texture is not ported)
+    if (krum && stage && m->weapon) { // the upgraded altSkin's outline
         m->weapon_outline = zr_outline(m->weapon, ZR_UPGRADED_OUTLINE, ZR_UPGRADED_OUTLINE_SCALE);
         zr_add(m->weapon_outline);
     }

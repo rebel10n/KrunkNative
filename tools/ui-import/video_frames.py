@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""<video>.knv frame sidecars for the native HTML engine (``make video-frames``).
+"""<video>.knv frame sidecars for the native HTML engine and the video skins (``make video-frames``).
 
 The native engine (client/src/html/engine/video.c) has no video decoder: it plays a ``<video>``
 whose source is ``<name>.mp4`` / ``<name>.webm`` from ``<name>.<ext>.knv`` next to it, a sequence
 of baseline JPEG frames that the stb_image already in the tree decodes, one frame at a time, as
-playback reaches it. The web build plays the real file in the browser and needs no sidecar.
+playback reaches it. The v10.0.3 video skins (client/src/skin_video.c: videos/video_<n>.mp4 in a
+weapon / dye material) play the same way natively. The web build plays the real files in the
+browser and needs no sidecar.
 
 Format (little-endian):
     "KNVF"  u32 version (1)
@@ -15,9 +17,9 @@ Format (little-endian):
     u32 offsets[frame_count + 1]  byte offsets of each JPEG from the file start (last = file size)
     JPEG frames
 
-Every KrunkNative video the v10 page plays is listed in VIDEOS (path under assets/, stored width,
-stored fps, ffmpeg -q:v quality); the sizes keep the sidecars small: frames no larger than the
-page draws them. Re-run after the source videos change:
+Every KrunkNative video the v10 page plays, and every skin video, is listed in VIDEOS (path under
+assets/, stored width, stored fps, ffmpeg -q:v quality); the sizes keep the sidecars small: frames no
+larger than the page draws them. Re-run after the source videos change:
 
     python3 -I tools/ui-import/video_frames.py [--assets DIR] [--check] [path ...]
 
@@ -42,6 +44,13 @@ VIDEOS = (
     ("videos/tutorial/basics.mp4", 700, 15, 5),
     # v10 jumpScare(1) (#jumpSVID, g:222989): 384x480, 1.3 s
     ("scares/1.mp4", 0, 0, 3),
+    # v10.0.3 video skins (getVideo, deob-10.0.3.js:232003-232016), 10 s loops kept at their own size and rate
+    # (a screen-space `projection` skin stretches the frame over the whole view): video_0 the Deep Space dye and
+    # the Mysterious Orb melee (736x336, 30 fps), video_2 the upgraded weapons' altSkin (480x360, 25 fps),
+    # video_3 the Glitch dye (736x336, 30 fps)
+    ("videos/video_0.mp4", 0, 0, 6),
+    ("videos/video_2.mp4", 0, 0, 6),
+    ("videos/video_3.mp4", 0, 0, 6),
 )
 
 

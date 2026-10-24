@@ -6,7 +6,10 @@
 //   - a v7 OBJ pet (pets/pet_0, Ghostie) loads with its material options (frames, glow);
 //   - the hue cycle (UTILS.hexFromHue) and the frames / pulse / rgb animations (skin_fx_tick);
 //   - v7's EXT_meshopt_compression AI / map models (user-assets/<id>/model.glb, gltf_meshopt.c):
-//     each loads with meshes, a sane size, and its clips (when it has any) move it.
+//     each loads with meshes, a sane size, and its clips (when it has any) move it;
+//   - v10.0.3 video skins (skin_video.c): the Glitch / Deep Space dyes and the Mysterious Orb melee show
+//     videos/video_<n>.mp4 (its .knv sidecar) and the frame changes with the clock; noVideoSkins gives
+//     them their regular texture (none for a dye, melee_20 for the melee) and no projection.
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -17,6 +20,7 @@
 #include <render_settings.h>
 #include <pets.h>
 #include <skin_fx.h>
+#include <skin_video.h>
 #include "../../client/src/viewer/viewer_store.h"
 #include <math.h>
 #include <stdio.h>
@@ -199,6 +203,116 @@ static void check_effects(void) {
     pet_free(pet);
 }
 
+// A checksum of a 8x8 grid of the texture's texels (an FBO read-back: no glGetTexImage on GLES), 0 when unreadable.
+static unsigned long video_texture_sum(const unsigned texture, const int w, const int h) {
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    unsigned long sum = 0;
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                unsigned char px[4] = {0};
+                glReadPixels(x * w / 8 + w / 16, y * h / 8 + h / 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+                sum = sum * 31u + px[0] * 65536u + px[1] * 256u + px[2] + 1u;
+            }
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    return sum;
+}
+
+// a single-sided material (a body part's or weapon's), so the projection's DoubleSide shows
+static Mesh *video_mesh(void) {
+    BasicMaterial *material = basic_material_init();
+    material->double_sided = 0;
+    return mesh_init(NULL, (Material *) material);
+}
+
+static void check_video_skins(void) {
+    CHECK(skin_video_alt_skin(0) == 2 && skin_video_alt_skin(28) == 2 && skin_video_alt_skin(11) == -1 && skin_video_alt_skin(17) == -1 &&
+          skin_video_alt_skin(29) == -1, "upgradeWeapons altSkin videos: 0 / 28 video 2, Cupids Blaster 11 and Bomb 17 none");
+    FILE *f = fopen("assets/videos/video_3.mp4.knv", "rb");
+    FILE *g = fopen("assets/videos/video_0.mp4.knv", "rb");
+    if (f) fclose(f);
+    if (g) fclose(g);
+    if (!f || !g) {
+        printf("gltf_test: video skins skipped (no assets/videos/video_{0,3}.mp4.knv: make video-frames)\n");
+        return;
+    }
+    const ViewerSkin *glitch = viewer_skin(7446), *deep_space = viewer_skin(4208), *orb = viewer_skin(4211);
+    CHECK(glitch && glitch->video == 3 && deep_space && deep_space->video == 0 && orb && orb->video == 0, "the video skins of the store table");
+    if (!glitch || !deep_space || !orb) return;
+
+    // playing (noVideoSkins off, its default)
+    skin_video_set_disabled(0);
+    Mesh *dye = video_mesh(), *proj = video_mesh(), *melee = video_mesh();
+    skin_fx_apply_dye(dye, glitch);
+    skin_fx_apply_dye(proj, deep_space);
+    skin_fx_apply(melee, orb, "melee/melee_20_3", "melee/melee_20", 0, 0);
+    const BasicMaterial *dm = (BasicMaterial *) dye->material, *pm = (BasicMaterial *) proj->material, *mm = (BasicMaterial *) melee->material;
+    CHECK(dm->texture != 0 && !dm->projection_uv, "Glitch dye: a video texture, UV-mapped");
+    CHECK(pm->texture != 0 && pm->projection_uv && pm->double_sided, "Deep Space dye: a video texture in screen space, DoubleSide");
+    CHECK(mm->texture == pm->texture && mm->projection_uv && mm->double_sided, "Mysterious Orb: video_0 in screen space (the dye's LinearFilter texture)");
+    int videos = 0, in_use = 0;
+    unsigned uploaded0 = 0, uploaded1 = 0;
+    skin_video_frame(100.0);
+    skin_video_stats(&videos, &in_use, &uploaded0);
+    CHECK(videos == 2 && in_use == 2 && uploaded0 >= 2, "two videos play (%d, %d in use, %u frames)", videos, in_use, uploaded0);
+    const unsigned long glitch0 = video_texture_sum(dm->texture, 736, 336), space0 = video_texture_sum(pm->texture, 736, 336);
+    skin_video_frame(100.5); // frame 15 of 30 fps
+    skin_video_stats(NULL, NULL, &uploaded1);
+    const unsigned long glitch1 = video_texture_sum(dm->texture, 736, 336), space1 = video_texture_sum(pm->texture, 736, 336);
+    CHECK(uploaded1 == uploaded0 + 2, "0.5 s later: one new frame per video (%u -> %u)", uploaded0, uploaded1);
+    CHECK(glitch0 && space0 && glitch0 != glitch1 && space0 != space1, "the texels change with the frame (%lx %lx, %lx %lx)", glitch0, glitch1, space0, space1);
+    skin_video_frame(100.51); // same frame: nothing decoded
+    unsigned uploaded2 = 0;
+    skin_video_stats(NULL, NULL, &uploaded2);
+    CHECK(uploaded2 == uploaded1, "the same frame is not decoded again");
+
+    // the materials go: no video is decoded any more
+    skin_fx_forget(dye);
+    skin_fx_forget(proj);
+    skin_fx_forget(melee);
+    mesh_fini(dye);
+    mesh_fini(proj);
+    mesh_fini(melee);
+    skin_video_stats(NULL, &in_use, NULL);
+    skin_video_frame(101.0);
+    unsigned uploaded3 = 0;
+    skin_video_stats(NULL, NULL, &uploaded3);
+    CHECK(in_use == 0 && uploaded3 == uploaded2, "no user: no decoding (%d in use, %u -> %u)", in_use, uploaded2, uploaded3);
+
+    // noVideoSkins: video, projection and texSrc stripped (deob-10.0.3.js:231704-231710)
+    skin_video_set_disabled(1);
+    dye = video_mesh();
+    proj = video_mesh();
+    melee = video_mesh();
+    skin_fx_apply_dye(dye, glitch);
+    skin_fx_apply_dye(proj, deep_space);
+    skin_fx_apply(melee, orb, "melee/melee_20_3", "melee/melee_20", 0, 0);
+    dm = (BasicMaterial *) dye->material;
+    pm = (BasicMaterial *) proj->material;
+    mm = (BasicMaterial *) melee->material;
+    CHECK(dm->texture == 0 && pm->texture == 0 && !pm->projection_uv && !pm->double_sided, "noVideoSkins: the dyes keep the body's texture, no projection");
+    char *path = concat(assets_path(), "textures/melee/melee_20.png");
+    const unsigned regular = path ? load_texture(path) : 0;
+    free(path);
+    CHECK(regular && mm->texture == regular && !mm->projection_uv, "noVideoSkins: the Mysterious Orb shows melee_20.png, no projection");
+    skin_video_stats(NULL, &in_use, NULL);
+    CHECK(in_use == 0, "noVideoSkins: no video in use");
+    skin_fx_forget(dye);
+    skin_fx_forget(proj);
+    skin_fx_forget(melee);
+    mesh_fini(dye);
+    mesh_fini(proj);
+    mesh_fini(melee);
+    skin_video_set_disabled(0);
+    skin_video_clear();
+}
+
 int main(int argc, char **argv) {
     headless_parse_args(&argc, argv);
     vt_init(&g_geometry_cache);
@@ -237,6 +351,7 @@ int main(int argc, char **argv) {
     check_gltf_pet(2837, "Moonfeather back_103.gltf");
     check_follow();
     check_effects();
+    check_video_skins();
     check_meshopt_models();
 
     glfwDestroyWindow(window);

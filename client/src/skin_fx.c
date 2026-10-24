@@ -1,6 +1,7 @@
 // Krunker v7.1.4 store-item material effects (client/include/skin_fx.h).
 #include <gl.h>
 #include <skin_fx.h>
+#include <skin_video.h>
 #include <gltf.h>
 #include "viewer/viewer_store.h"
 #include <math.h>
@@ -39,6 +40,8 @@ typedef struct {
     float r_anim, r_mlt, r_org, r_bob;
     char r_axis;
     unsigned char r_bob_type;     // rAnimT: bob instead of a spin
+    // video: the id + 1 of the video texture the mesh's material shows (skin_video_release at forget), 0 none
+    int video;
 } SkinFxEntry;
 
 static struct {
@@ -312,6 +315,40 @@ static void fx_use_shadertoy(Mesh *mesh, const ViewerSkin *skin) {
 
 // ---------------------------------------------------------------- applying
 
+// v10.0.3 loadTexture's VideoTexture branch (skin_video.h, deob-10.0.3.js:231859-231889): the video replaces the map
+// (repeat repeatX || 1 is the material's tileS repeat, kept). 0 when noVideoSkins is on or KrunkNative cannot play the
+// video: the caller then does what v10's noVideoSkins strip does (deob:231704-231710): no video, no projection, no
+// texSrc. The mesh is registered so skin_fx_forget lets the video stop decoding.
+static int fx_video(const Mesh *mesh, BasicMaterial *material, const int video, const int linear) {
+    if (video < 0 || skin_video_disabled()) return 0;
+    const unsigned int texture = skin_video_texture(video, linear);
+    if (!texture) return 0;
+    SkinFxEntry *entry = fx_add();
+    if (!entry) {
+        skin_video_release(video);
+        return 0;
+    }
+    entry->mesh = mesh;
+    entry->video = video + 1;
+    material->texture = texture;
+    return 1;
+}
+
+static int fx_skin_video(const ViewerSkin *skin) {
+    return (skin->flags2 & VS2_VIDEO) && skin->video >= 0 ? skin->video : -1;
+}
+
+int skin_fx_apply_video(Mesh *mesh, const int video, const int projection, const int linear) {
+    if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) return 0;
+    BasicMaterial *material = (BasicMaterial *) mesh->material;
+    if (!fx_video(mesh, material, video, linear || projection)) return 0;
+    if (projection) {
+        material->projection_uv = 1;
+        material->double_sided = 1; // getMat's projection branch: side = DoubleSide (deob-10.0.3.js:232264)
+    }
+    return 1;
+}
+
 static void fx_env(BasicMaterial *material, const ViewerSkin *skin, const char *texture_key, const char *model_key) {
     if (skin->env <= 0.0f && !(skin->flags2 & VS2_SAME_ENV)) return;
     // f1117 / getMat: sameEnv: the map itself, else (texSrc || src) + "_env"; envMapIntensity env || 3
@@ -324,6 +361,19 @@ static void fx_env(BasicMaterial *material, const ViewerSkin *skin, const char *
 void skin_fx_apply(Mesh *mesh, const ViewerSkin *skin, const char *texture_key, const char *model_key, const int glow_text, const int emissive) {
     if (!mesh || !skin || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
     BasicMaterial *material = (BasicMaterial *) mesh->material;
+
+    // video (skin_video.h): getMat / loadTexture play videos/video_<n>.mp4 in the map; LinearFilter (the weapon and melee
+    // loadMesh tFilter, deob-10.0.3.js:194628 / :194706, and the VideoTexture's own one with projection: the only video
+    // items, the Mysterious Orb melee and the upgraded weapons, are both). noVideoSkins (or no playable video) strips
+    // video, projection and texSrc (deob:231704-231710): getMat(src) shows the model's own texture, src + ".png".
+    int projection = (skin->flags2 & VS2_PROJECTION) != 0;
+    const int video = fx_skin_video(skin);
+    if (video >= 0 && !fx_video(mesh, material, video, 1)) {
+        projection = 0;
+        texture_key = NULL;
+        const unsigned int regular = model_key ? fx_texture(model_key) : 0;
+        if (regular) material->texture = regular;
+    }
 
     if (skin->color >= 0) material->color = fx_color(skin->color, material->color.w);
     if (skin->opac > 0.0f) {
@@ -353,7 +403,7 @@ void skin_fx_apply(Mesh *mesh, const ViewerSkin *skin, const char *texture_key, 
         material->emissive = fx_color(skin->emiss >= 0 ? skin->emiss : 0xFFFFFF, 1.0f);
         if (skin->glow_int > 0.0f) material->emissive.w = skin->glow_int; // emissInt
     }
-    if (skin->flags2 & VS2_PROJECTION) {
+    if (projection) {
         material->projection_uv = 1;
         material->double_sided = 1; // projection: side = DoubleSide
     }
@@ -361,7 +411,7 @@ void skin_fx_apply(Mesh *mesh, const ViewerSkin *skin, const char *texture_key, 
     fx_register(mesh, NULL, material, &mesh->transform, skin, 1);
 
     if (skin->flags2 & VS2_SHADER) {
-        skin_fx_forget(mesh); // the BasicMaterial goes away (the rAnim spin stays below)
+        skin_fx_forget(mesh); // the BasicMaterial goes away (the rAnim spin stays below; a video's user with it)
         fx_use_shadertoy(mesh, skin);
         fx_register(mesh, NULL, NULL, &mesh->transform, skin, 0);
     }
@@ -398,10 +448,19 @@ void skin_fx_apply_gltf(GltfInstance *model, const ViewerSkin *skin, const char 
 void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     if (!mesh || !dye || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
     BasicMaterial *material = (BasicMaterial *) mesh->material;
+    // video (skin_video.h): the body part's map is the video (getMat "/videos/video_<n>", deob-10.0.3.js:232046-232048);
+    // no tFilter there, so NearestFilter unless projection keeps the VideoTexture's LinearFilter (deob:231863-231866).
+    // noVideoSkins (or no playable video) strips video, projection and texSrc (deob:231704-231710): getMat("default"),
+    // the dye's colours only.
+    const int video = fx_skin_video(dye);
+    const int playing = video >= 0 && fx_video(mesh, material, video, (dye->flags2 & VS2_PROJECTION) != 0);
+    const int projection = (video < 0 || playing) && (dye->flags2 & VS2_PROJECTION);
+    const char *tex = video >= 0 ? NULL : dye->tex; // with a video, texSrc is only loadTexture's cache key
+    if (playing && dye->tile_s > 0.0f) material->texture_repeat = (vec2) {dye->tile_s, dye->tile_s}; // repeatX/Y: tileS
     // genHead / genBody / genLeg / genArms getMat: texSrc = dye.tex, colour, opacity, emissive
     // (glow || sameGlow: emiss || #fff, emissiveMap of that texture), rgb (vertexColors + emissive hue)
-    if (dye->tex && !(dye->flags & VS_TEX_NUM)) {
-        const unsigned int texture = fx_texture(dye->tex);
+    if (tex && !(dye->flags & VS_TEX_NUM)) {
+        const unsigned int texture = fx_texture(tex);
         if (texture) material->texture = texture;
         if (dye->tile_s > 0.0f) material->texture_repeat = (vec2) {dye->tile_s, dye->tile_s};
     }
@@ -415,13 +474,16 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
         material->color.w = dye->opac;
         material->base.transparent = 1;
     }
-    if ((dye->flags & (VS_GLOW | VS_SAME_GLOW)) && dye->tex && !(dye->flags & VS_TEX_NUM)) {
+    if ((dye->flags & (VS_GLOW | VS_SAME_GLOW)) && tex && !(dye->flags & VS_TEX_NUM)) {
         char key[256];
-        snprintf(key, sizeof(key), "%s%s", dye->tex, (dye->flags & VS_SAME_GLOW) ? "" : "_e");
+        snprintf(key, sizeof(key), "%s%s", tex, (dye->flags & VS_SAME_GLOW) ? "" : "_e");
         material->emissive_texture = fx_texture(key); // missing: the colour glows unmapped (as above)
         material->emissive = fx_color(dye->emiss >= 0 ? dye->emiss : 0xFFFFFF, 1.0f);
     }
-    if (dye->flags2 & VS2_PROJECTION) material->projection_uv = 1;
+    if (projection) {
+        material->projection_uv = 1;
+        material->double_sided = 1; // getMat's projection branch: side = DoubleSide (deob-10.0.3.js:232264)
+    }
     if (dye->flags & VS_RGB) {
         material->emissive = (vec4) {1.0f, 0.0f, 0.0f, 1.0f}; // hue 0 until the first tick
         SkinFxEntry *entry = fx_add();
@@ -523,7 +585,9 @@ void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, co
 void skin_fx_forget(const Mesh *mesh) {
     if (!mesh) return;
     for (int i = g_fx.count - 1; i >= 0; i--) {
-        if (g_fx.entries[i].mesh == mesh) g_fx.entries[i] = g_fx.entries[--g_fx.count];
+        if (g_fx.entries[i].mesh != mesh) continue;
+        if (g_fx.entries[i].video) skin_video_release(g_fx.entries[i].video - 1);
+        g_fx.entries[i] = g_fx.entries[--g_fx.count];
     }
 }
 
@@ -538,6 +602,9 @@ void skin_fx_forget_gltf(const GltfInstance *model) {
 
 void skin_fx_tick(const float dt_ms, const int texture_anim, const int basic_lighting) {
     g_shader_frame++;
+    // video textures follow their playback whatever textureAnim says (v10's VideoTexture is not one of the
+    // movTextures / frameMats the setting freezes); gltf_clock: --render-scenario pins it
+    skin_video_frame(gltf_clock());
     if (!texture_anim || dt_ms <= 0.0f) return;
 
     g_fx.puls_val += dt_ms * SKIN_FX_PULSE_SPEED;

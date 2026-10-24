@@ -55,7 +55,7 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 | Official 10.0.3 line | Class | KN action |
 |---|---|---|
-| Added a Disable Video Skins setting (Quality) | Feature | **Not ported.** KN has no video skins: its own notes say the video texture is not ported (`client/src/player_mesh.c` TODO at the skin code, `zombies_render.c` note), so there is no video playback for the toggle to switch off. Adding the toggle now would be a control with no effect. Port it with video skins (see Decision). |
+| Added a Disable Video Skins setting (Quality) | Feature | **Ported, with video skins.** The setting (`settings.quality.noVideoSkins`, Quality, advanced, default off, Performance preset on, "Restart required"; deob-10.0.3.js:237521-237536) is the Render tab's switch (`ui/windows/settings-advanced-3.html`) and reaches `client_render_settings()->no_video_skins` (`client/src/ui/ui_render_settings.c`). As in v10.0.3 it is read when a material is made (getMat's strip, deob:231704-231710): `video`, `projection` and `texSrc` are dropped, so the Mysterious Orb melee shows its model texture (`melee_20.png`), the Deep Space and Glitch dyes only their colours, and the upgraded weapons their base texture; meshes built before a change keep what they had. The video skins themselves are ported in `client/src/skin_video.c` (`client/include/skin_video.h`) and `client/src/skin_fx.c`: `videos/video_<n>.mp4` in the map (getVideo / loadTexture, deob:232003-232016, :231859-231889), screen-space for `projection` (DoubleSide), LinearFilter for weapons, melees and projection, NearestFilter for a UV-mapped dye, one playback per id. The items: Deep Space (dye, video 0, projection), Glitch (dye, video 3), Mysterious Orb (melee, video 0, projection), and the altSkin `{projection, video 2}` of every upgraded weapon but the Cupids Blaster: on the Krum machine (`client/src/zombies_render.c`) and in the hands, where an upgraded slot wears it instead of the player's skin (deob:194480-194486; the upgrade packet rebuilds the model as v10's updateLoadout does, `client/src/net/combat_events.c`). Natively the frames come from `videos/video_<n>.mp4.knv` (JPEG frames, `make video-frames`; no video decoder), on the web from a hidden `<video>` element as in v10. Not ported: the Nova Semi / Nova Uzi remodels two of those altSkins add (KN draws no altSkin remodel; their video lies on the regular model). Tests: `gltf_test` (`check_video_skins`). |
 | Fixed paintable melees showing as the Combat Knife in the loadout | Bug | Not verified. KN's loadout melee icon path (`hud_ui.c`) uses the melee skin id; the loadout preview was not compared. |
 | Fixed explosions sometimes not showing | Bug | Not verified. |
 | Fixed a checkered texture on some skies and map assets | Bug | Not verified. |
@@ -105,6 +105,12 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 ## Ported in this change
 
+- Video skins and the Disable Video Skins setting (`noVideoSkins`): `client/src/skin_video.c`,
+  `client/src/skin_fx.c`, `client/src/ui/ui_render_settings.c`, `client/src/player_mesh.c`,
+  `client/src/zombies_render.c`, `client/src/net/combat_events.c`; the frame
+  sidecars of `videos/video_0.mp4`, `video_2.mp4` and `video_3.mp4` (`tools/ui-import/video_frames.py`;
+  `video_2.mp4` added to `tools/ui-import/live_assets_v10.lock`).
+
 - `rampFix` ("Solid Ramp Sides"): `shared/src/player.c`, `shared/src/map.c`, `shared/include/shared.h`.
   The behaviour is v10.0.3's `blockRampSide`, with `collision_padding` (1.1) as in v10. The
   `config.rampFix` game option is ported too (`GameConfig.ramp_fix`, folder Other).
@@ -113,8 +119,8 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 ## Decisions needed
 
-1. Video skins (a larger feature, KN has none): the Disable Video Skins toggle only makes sense with
-   them.
+1. Done: video skins and the Disable Video Skins setting (see General). Left: the altSkin remodels
+   (Nova Semi / Nova Uzi) of two upgraded weapons.
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
 3. KrunkScript AI: `ai.solid` and the `hold` option of `ai.playAnim` exist in neither v10.0.2 (v10.js) nor the
    official 10.0.3 line, and KN's AI bodies do not block players, so there is no behaviour to port. A spec from

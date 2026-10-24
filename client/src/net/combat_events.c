@@ -141,9 +141,16 @@ int combat_events_handle(Client *client, const int type, const void *payload, co
             COMBAT_READ(NetUpgradesPacket, up);
             Player *player = client_find_player(client, up.uid);
             if (!player) return 1;
+            const unsigned char old_slots = player->upgraded_slots;
             player_set_upgrades(player, up.slots);
             for (int i = 0; i < player->loadout_size && i < NET_LOADOUT_MAX; i++) {
                 if (player->ammo) player->ammo[i] = (unsigned int) up.ammo[i];
+            }
+            // updateLoadout's regenMeshes (deob-10.0.3.js:190854-190899): an upgraded slot wears its altSkin (player_mesh.c)
+            if (old_slots != player->upgraded_slots && player->mesh) {
+                const int render_you = ((const PlayerMesh *) player->mesh)->render_you;
+                client_drop_player_mesh(client, player);
+                client_add_player_mesh(client, player, render_you);
             }
             return 1;
         }

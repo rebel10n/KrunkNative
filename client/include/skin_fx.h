@@ -13,17 +13,19 @@
 //   env / sameEnv     environment map "<tex>_env" (EquirectangularReflection), basic.frag
 //   projection        screen-space texture coordinates (basic.frag)
 //   shaderNum         a ShaderToyMaterial (v7 src/133.js C240, assets/shaders/shadertoy/<n>.glsl)
+//   video             v10.0.3: videos/video_<n>.mp4 in the map (client/include/skin_video.h), unless the
+//                     noVideoSkins setting (Disable Video Skins) strips video, projection and texSrc
 // Animations only run while the textureAnim setting is on (v7 RENDER.textureAnim), like
-// client_tick_textures for map objects. Not ported: `video` textures (no video decoder; the item
-// keeps its model texture) and the per-material three.js texture cache sharing (each mesh
-// animates on its own, in step with the others of the same item).
+// client_tick_textures for map objects (a video plays whatever it says, as v10's VideoTexture). Not
+// ported: the per-material three.js texture cache sharing (each mesh animates on its own, in step
+// with the others of the same item; a video is one texture per id and filter).
 #include <client.h>
 
 struct ViewerSkin;
 struct GltfInstance;
 
 // getMat for a store item on `mesh` (a BasicMaterial mesh): the static options (colour, opacity,
-// side, alphaTest, wireframe, tileS, frames repeat, glow, glowInt, env, projection) and the
+// side, alphaTest, wireframe, tileS, frames repeat, glow, glowInt, env, projection, video) and the
 // animations above. texture_key is texSrc (NULL: none), model_key the model src; the emissive map
 // is (glow_text && texSrc || src) + "_e" (sameGlow: the texture). emissive = (glow || sameGlow) &&
 // !noEmis for most items. shaderNum replaces mesh->material with a ShaderToy material.
@@ -34,8 +36,13 @@ void skin_fx_apply(Mesh *mesh, const struct ViewerSkin *skin, const char *textur
 void skin_fx_apply_gltf(struct GltfInstance *model, const struct ViewerSkin *skin, const char *model_key);
 
 // Body-part materials of a dye (playerMesh.js genHead / genBody / genLeg / genArms getMat): its tex,
-// colour, opacity, glow and rgb (registered like an item; no frames / pulse).
+// colour, opacity, glow and rgb (registered like an item; no frames / pulse), its video and projection.
 void skin_fx_apply_dye(Mesh *mesh, const struct ViewerSkin *dye);
+
+// A video in the map of `mesh` (a BasicMaterial) without a store item: the upgraded weapons' altSkin
+// (skin_video_alt_skin). projection: screen-space UVs, DoubleSide, LinearFilter. 0 when noVideoSkins
+// is on or the video cannot play: the mesh keeps its texture (v10's strip, deob-10.0.3.js:231704-231710).
+int skin_fx_apply_video(Mesh *mesh, int video, int projection, int linear);
 
 // The per-copy paint of a worn skin on its mesh (a BasicMaterial): v10.0.3's paint node (basic.frag paint_apply): the
 // colour paint overlays the albedo, a shader paint (paintShader 0-5) draws its graph. `skin` gives the paintMask
