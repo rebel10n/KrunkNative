@@ -3281,6 +3281,10 @@ static int combat_kill_reward(Game *game, Player *killer, Player *victim, const 
                               NetKillMedalsPacket *medals) {
     int score = 0;
 
+    // a weaponOrder mode (Gun Game), not a streak kill: Humiliation (melee) / Promotion, medals without a score
+    // (deob-10.0.3.js:192525-192532)
+    if (game->mode && game->mode->config.weapon_order_size && !(info && info->streak > 0))
+        combat_medal(medals, weapon && weapon->melee ? "Humiliation" : "Promotion", 0);
     if (game->kill_count <= 1) score += combat_medal(medals, "First Blood", 25);
     if (killer->last_killer_uid >= 0 && killer->last_killer_uid == victim->uid) {
         killer->last_killer_uid = -1;

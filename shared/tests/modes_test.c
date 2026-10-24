@@ -1987,6 +1987,17 @@ static void test_kill_rules_v10(Game *game) {
     int snatched = 0;
     for (int i = 0; i < carried.count; i++) snatched += !strcmp(carried.medals[i].text, "Snatched") && carried.medals[i].score == 50;
     CHECK(snatched == 1, "a flag carrier's kill: Snatched 50");
+    start_mode(game, MODE_ID_GUN);
+    a = add_player(game, 1, 0);
+    b = add_player(game, 2, 0);
+    tick(game, 12.5f, 0.5f);
+    g_sent_count = 0;
+    kill(b, a, a->loadout[a->loadout_index]);
+    sent = last_sent(NET_PACKET_KILL_MEDALS, 1);
+    memset(&carried, 0, sizeof(carried));
+    if (sent) memcpy(&carried, sent->payload, sizeof(carried));
+    CHECK(sent && carried.count >= 1 && !strcmp(carried.medals[0].text, "Promotion") && carried.medals[0].score == 0,
+          "Gun Game: a gun kill is a Promotion (no score)");
 
     // botsAsAI (Raid): a bot's kill has no killer
     start_mode(game, MODE_ID_RAID);
