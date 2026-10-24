@@ -24,6 +24,7 @@
 #define AI_HIT_CHUNK 48           // iîíïíii (:204603)
 #define AI_SOLID_MAX_TRIS 6000    // applySolid: > 6000 sorted by area, cut (:205432)
 #define AI_SOLID_MIN_AREA 0.01    // applySolid: area > 0.01 (:205425)
+#define AI_REST_MAX_TRIS 6000     // liveObjects.loadModel: iîìïiìî(glb, 6000, true) (:212173)
 #define AI_MODEL_MAX_BYTES 60000000 // loadModel: content-length > 60000000 "model too large" (:204239)
 
 // ---------------------------------------------------------------- the model
@@ -75,6 +76,8 @@ struct AiPartsModel {
     Group *groups;
     int group_count;
     int tris;
+    float *rest_tris;          // iîiîïîì: the mesh nodes' triangles at the rest pose (model space, 9 floats each)
+    int rest_count;
 };
 
 typedef struct {
@@ -637,6 +640,70 @@ static void hit_mesh_build(AiPartsModel *m, const cJSON *gltf, const Bin *bin) {
     free(groups);
 }
 
+// iîiîïîì (:204179-204218): every mesh node's triangles (mode TRIANGLES or none) at the rest pose, through its
+// node chain's TRS from the root, in model space; at most `max` triangles (the pushes stop at max * 9 floats). A
+// vertex index past the positions pushes NaN as the JS reads undefined.
+static void rest_tris_build(AiPartsModel *m, const cJSON *gltf, const Bin *bin, const int max) {
+    const cJSON *nodes = cJSON_GetObjectItem(gltf, "nodes"), *meshes = cJSON_GetObjectItem(gltf, "meshes");
+    if (!bin->data || !cJSON_IsArray(nodes) || !m->nodes) return;
+    const size_t limit = (size_t) max * 9;
+    float *out = malloc(limit * sizeof(float));
+    if (!out) return;
+    size_t len = 0;
+    int index = -1;
+    const cJSON *node;
+    cJSON_ArrayForEach(node, nodes) {
+        index++;
+        const cJSON *mesh_index = cJSON_GetObjectItem(node, "mesh");
+        const cJSON *mesh = cJSON_IsNumber(mesh_index) ? cJSON_GetArrayItem(meshes, mesh_index->valueint) : NULL;
+        if (!mesh || index >= m->node_count) continue;
+        int chain[256], depth = 0;
+        for (int k = index; k >= 0 && k < m->node_count && depth < 256; k = m->nodes[k].parent) chain[depth++] = k;
+        static const double zero[3] = {0, 0, 0}, unit_q[4] = {0, 0, 0, 1}, one[3] = {1, 1, 1};
+        double world[16];
+        m4_compose(zero, unit_q, one, world);
+        for (int c = depth - 1; c >= 0; c--) {
+            double local[16];
+            const RigNode *n = &m->nodes[chain[c]];
+            m4_compose(n->t, n->r, n->s, local);
+            m4_mul(world, local, world);
+        }
+        const cJSON *prim;
+        cJSON_ArrayForEach(prim, cJSON_GetObjectItem(mesh, "primitives")) {
+            const cJSON *mode = cJSON_GetObjectItem(prim, "mode");
+            if (has(mode) && num(mode, 4) != 4) continue;
+            int pos_len = 0, idx_len = 0;
+            float *pos = accessor_read(gltf, bin, cJSON_GetObjectItem(cJSON_GetObjectItem(prim, "attributes"), "POSITION"), &pos_len);
+            if (!pos) continue;
+            uint32_t *idx = indices_read(gltf, bin, cJSON_GetObjectItem(prim, "indices"), &idx_len);
+            const int count = idx ? idx_len : pos_len / 3;
+            for (int i = 0; i < count - count % 3 && len < limit; i++) {
+                const long v = idx ? (long) idx[i] : i;
+                if (v * 3 + 2 >= pos_len) {
+                    out[len] = out[len + 1] = out[len + 2] = NAN;
+                } else {
+                    double q[3];
+                    m4_point(world, pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], q);
+                    out[len] = (float) q[0];
+                    out[len + 1] = (float) q[1];
+                    out[len + 2] = (float) q[2];
+                }
+                len += 3;
+            }
+            free(pos);
+            free(idx);
+        }
+    }
+    len -= len % 9;
+    m->rest_tris = out;
+    m->rest_count = (int) (len / 9);
+}
+
+const float *ai_parts_model_rest_tris(const AiPartsModel *m, size_t *count) {
+    if (count) *count = m && m->rest_tris ? (size_t) m->rest_count : 0;
+    return m ? m->rest_tris : NULL;
+}
+
 AiPartsModel *ai_parts_model_parse(const unsigned char *glb, const size_t length) { // iìÏiïìî (:204350)
     if (!glb || length < 12) return NULL;
     const uint32_t magic = (uint32_t) glb[0] | (uint32_t) glb[1] << 8 | (uint32_t) glb[2] << 16 | (uint32_t) glb[3] << 24;
@@ -659,6 +726,7 @@ AiPartsModel *ai_parts_model_parse(const unsigned char *glb, const size_t length
     if (m) {
         rig_build(m, gltf, &bin);
         hit_mesh_build(m, gltf, &bin);
+        rest_tris_build(m, gltf, &bin, AI_REST_MAX_TRIS); // (the live assets' collision, ks_entities.c)
     }
     cJSON_Delete(gltf);
     return m;
@@ -683,6 +751,7 @@ void ai_parts_model_free(AiPartsModel *m) {
     free(m->groups);
     for (int n = 0; m->nodes && n < m->node_count; n++) free(m->nodes[n].name);
     free(m->nodes);
+    free(m->rest_tris);
     free(m);
 }
 

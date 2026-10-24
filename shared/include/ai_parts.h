@@ -83,6 +83,9 @@ int ai_parts_model_node_find(const AiPartsModel*, const char *name); // byName: 
 const char *ai_parts_model_node_name(const AiPartsModel*, int node);
 int ai_parts_model_node_parent(const AiPartsModel*, int node);       // -1 for a root
 int ai_parts_model_hit_tris(const AiPartsModel*);                    // the hit mesh's triangle count
+// iîiîïîì (:204179): the mesh nodes' triangles at the rest pose, model space, 9 floats each, at most 6000 (the cap of
+// liveObjects.loadModel, :212173): a live asset's complexCollision (ks_entities.c). NULL / 0 when it has none.
+const float *ai_parts_model_rest_tris(const AiPartsModel*, size_t *count);
 int ai_parts_model_has_clip(const AiPartsModel*, const char *name);
 float ai_parts_model_clip_duration(const AiPartsModel*, const char *name); // seconds, 0 when missing
 // The model-space matrices (column-major 4x4, out: node_count * 16) of clip `clip` (NULL / unknown: the

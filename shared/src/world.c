@@ -7,6 +7,7 @@
 // Runs on the authority (server / offline sandbox server) and, for prediction, on the client.
 #include <world.h>
 #include <ai_parts.h> // v10.0.3 ai.solid collision tris
+#include <ks_entities.h> // LIVE_OBJECTS assets' complexCollision triangles
 #include <net_ext.h> // NET_SERVER_NAMES_TEXT (world_send_finish_chat)
 #include <object_manager.h>
 #include <account.h>
@@ -376,6 +377,9 @@ void world_player_tris(Player *player) {
     size_t n = 0;
     const float *tris;
     for (int a = 0; (tris = ai_parts_solid_tris(game, a, &n)) != NULL; a++)
+        for (size_t i = 0; i < n; i++) world_player_tri(player, &tris[i * 9]);
+    // v10.0.3 LIVE_OBJECTS.addAsset complexCollision: the asset's loadTris go to the same quads (deob-10.0.3.js:212200)
+    for (int l = 0; (tris = ks_entities_live_tris(game, l, &n)) != NULL; l++)
         for (size_t i = 0; i < n; i++) world_player_tri(player, &tris[i * 9]);
 }
 

@@ -862,6 +862,8 @@ static void forward_records(Game *client, const int skip_states, const double lo
             case NET_EXT_KN_OFFICIAL_LIVE_SYNC:
                 g_seen[subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT ? 0xf0 : 0xf1]++;
                 if (subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT) snprintf(g_last_live, sizeof(g_last_live), "%s", text ? text : "");
+                if (subtype == NET_EXT_KN_OFFICIAL_LIVE_OBJECT) ks_entities_net_live(client, rec);
+                else ks_entities_net_live_sync(client, rec);
                 break;
             default: break;
         }
@@ -1050,6 +1052,191 @@ static void test_entity_replication(void) {
     cJSON_Delete(map);
 }
 
+
+// ---------------------------------------------------------------- v10.0.3 entity bodies, LIVE_OBJECTS.addCube, complexCollision
+
+// the platform: archetype "Deck" (coll 1, one 10 x 1 x 10 part) as entity 9 at (200, 20, 200), speed 3 (k_ent_shared
+// walks x by speed * delta)
+static cJSON *body_map(void) {
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    cJSON *arch = cJSON_CreateObject();
+    cJSON_AddNumberToObject(arch, "id", 2);
+    cJSON_AddStringToObject(arch, "name", "Deck");
+    cJSON_AddNumberToObject(arch, "coll", 1);
+    cJSON *part = cJSON_CreateObject();
+    cJSON_AddItemToObject(part, "p", cJSON_CreateFloatArray((const float[]) {0, 0, 0}, 3));
+    cJSON_AddItemToObject(part, "s", cJSON_CreateFloatArray((const float[]) {10, 1, 10}, 3));
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(arch, "objects"), part);
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(map, "archetypes"), arch);
+    cJSON *inst = cJSON_CreateObject();
+    cJSON_AddNumberToObject(inst, "i", 98);
+    cJSON_AddItemToObject(inst, "p", cJSON_CreateFloatArray((const float[]) {200, 20, 200}, 3));
+    cJSON_AddNumberToObject(inst, "eid", 9);
+    cJSON_AddNumberToObject(inst, "ar", 2);
+    cJSON_AddNumberToObject(cJSON_AddObjectToObject(inst, "sp"), "speed", 3);
+    cJSON_AddItemToArray(cJSON_GetObjectItem(map, "objects"), inst);
+    return map;
+}
+
+static const char *k_body_server =
+    "obj cube = {};\n"
+    "public action onCustomTrigger(str playerID, str customParam, num value) {\n"
+    "    if (customParam == \"cube\") {\n"
+    "        cube = GAME.LIVE_OBJECTS.addCube(-200, 0, -200, 10, 4, 6, 0, {color: \"#f00\", opacity: 0.5, aid: \"123v\"});\n"
+    "        GAME.log(\"cube \" + toStr(cube.id));\n"
+    "    }\n"
+    "    if (customParam == \"gone\") { cube.delete(); }\n"
+    "    if (customParam == \"asset\") {\n"
+    "        obj a = GAME.LIVE_OBJECTS.addAsset(\"46802\", 300, 0, 300, 2, 0, {complexCollision: true});\n"
+    "        GAME.log(\"asset \" + toStr(a.id));\n"
+    "    }\n"
+    "}\n";
+
+static void test_entity_bodies(void) {
+    printf("Running v10.0.3 entity bodies / addCube / complexCollision test...\n");
+    cJSON *map = body_map();
+    static Game server, client;
+    static KsHost shost, chost;
+    static KsApiImpl capi[KS_API_COUNT];
+    game_on(&server, map, MODE_ID_FFA);
+    server.is_local = 1;
+    Player *sp = add_player(&server, 2);
+    shost = server_host();
+    CHECK(ks_game_load(&server, KS_SIDE_SERVER, k_body_server, strlen(k_body_server), &shost, NULL) == 0, "the server script loads (%s)",
+          g_log_count ? g_log[g_log_count - 1] : "");
+    CHECK(ks_game_load_shared(&server, KS_SIDE_SERVER, k_ent_shared, strlen(k_ent_shared), &shost, NULL) == 0, "scripts.shared (server)");
+    game_on(&client, map, MODE_ID_FFA);
+    client.is_local = 0;
+    client.hooks.send = NULL;
+    Player *cp = add_player(&client, 2);
+    cp->is_you = 1;
+    memset(capi, 0, sizeof(capi));
+    ks_game_api_fill(capi, KS_SIDE_CLIENT);
+    chost = (KsHost) {.side = KS_SIDE_CLIENT, .log = host_log, .api = capi};
+    CHECK(ks_game_load_shared(&client, KS_SIDE_CLIENT, k_ent_shared, strlen(k_ent_shared), &chost, NULL) == 0, "scripts.shared (client)");
+    const size_t server_objects = server.map->object_count;
+    g_sent_count = 0;
+    ks_game_start(&server);
+    ks_entities_send_state(&server, 5);
+    forward_records(&client, 1, 0.0);
+
+    // buildBody: the server builds the solid entity's body too (:212845), at the entity's pose
+    const Object *so = ks_entities_part_object(&server, 9, 0), *co = ks_entities_part_object(&client, 9, 0);
+    CHECK(so && so->active && so->collision_type != COLLISION_TYPE_NONE && so->dyn && fabsf(so->position.y - 20.0f) < 1e-4f &&
+              fabsf(so->scale.x - 10.0f) < 1e-4f && server.map->object_count == server_objects + 1,
+          "server body: one dyn, solid 10 x 1 x 10 block at y 20 (%zu objects)", server.map->object_count);
+    CHECK(so && !so->spawned, "the server's body is not an Object Manager object (no joiner gets it as one)");
+    CHECK(co && co->spawned && co->collision_type != COLLISION_TYPE_NONE, "client body: a spawned solid block");
+
+    // a player on each side standing on the deck rides it: the moved part carries it (carryPlayers), it stands on the
+    // part (the player's own collision), and the client's prediction stays where the server puts it
+    sp->position = cp->position = (vec3) {200.0f, 21.0f, 200.0f};
+    sp->last_position = cp->last_position = sp->position;
+    sp->velocity = cp->velocity = (vec3) {0, 0, 0};
+    sp->on_ground = cp->on_ground = 1;
+    const double step = 1000.0 / 60.0;
+    double clock = 1.0;
+    ks_game_update(&server, clock, 1.0);
+    forward_records(&client, 1, clock);
+    ks_entities_client_frame(&client, clock, clock, clock);
+    for (int i = 0; i < 60; i++) {
+        ks_game_update(&server, step, 1.0);
+        clock += step;
+        forward_records(&client, 1, clock); // the client runs on its own steps (no baselines)
+        ks_entities_client_frame(&client, clock, clock, step);
+        Input idle = {.seq = i, .move_dir = -1, .delta = 0.0167f};
+        player_proc_input(sp, &idle, 0, 0);
+        player_proc_input(cp, &idle, 0, 0);
+    }
+    KsEntityView v;
+    CHECK(ks_entities_find(&server, 9, &v) && fabs(v.pose.x - 203.0) < 1e-6, "the deck walked to x 203 (%.4f)", v.pose.x);
+    CHECK(fabsf(sp->position.x - 203.0f) < 0.01f && fabsf(sp->position.y - 21.0f) < 0.01f && sp->on_ground,
+          "server: the rider went along on the deck (%.3f, %.3f, %.3f, ground %d)", sp->position.x, sp->position.y, sp->position.z, sp->on_ground);
+    CHECK(fabsf(cp->position.x - sp->position.x) < 1e-3f && fabsf(cp->position.y - sp->position.y) < 1e-3f &&
+              fabsf(cp->position.z - sp->position.z) < 1e-3f,
+          "client prediction = server (%.4f, %.4f, %.4f / %.4f, %.4f, %.4f)", cp->position.x, cp->position.y, cp->position.z, sp->position.x,
+          sp->position.y, sp->position.z);
+
+    // LIVE_OBJECTS.addCube: the record, a solid server map object (isMapObject), the client's copy; a player lands on it
+    g_log_count = 0;
+    g_sent_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "cube", 0);
+    CHECK(logged("cube 0"), "addCube returns the live object (id 0) (%s)", g_log_count ? g_log[0] : "none");
+    memset(g_seen, 0, sizeof(g_seen));
+    forward_records(&client, 0, clock);
+    CHECK(!strcmp(g_last_live, "[0,{\"type\":\"block\",\"x\":-200,\"y\":0,\"z\":-200,\"w\":10,\"l\":6,\"h\":4,\"s\":[1,1,1,1,1,1],\"data\":"
+                               "{\"src\":\"123/video\",\"scale\":1,\"noGroup\":true,\"opacity\":0.5,\"fTrans\":false,\"video\":123,\"asset\":123,"
+                               "\"colr\":\"#f00\"}}]"),
+          "the block record: %s", g_last_live);
+    const Object *sb = ks_entities_live_object(&server, 0), *cb = ks_entities_live_object(&client, 0);
+    CHECK(sb && sb->collision_type != COLLISION_TYPE_NONE && fabsf(sb->position.x + 200.0f) < 1e-4f && fabsf(sb->scale.y - 4.0f) < 1e-4f &&
+              fabsf(sb->scale.z - 6.0f) < 1e-4f,
+          "server: the block is a solid map object (w 10, h 4, l 6)");
+    CHECK(cb && cb->collision_type != COLLISION_TYPE_NONE, "client: its copy collides too");
+    sp->position = (vec3) {-200.0f, 8.0f, -200.0f};
+    sp->last_position = sp->position;
+    sp->velocity = (vec3) {0, 0, 0};
+    sp->on_ground = 0;
+    for (int i = 0; i < 90; i++) {
+        Input idle = {.seq = 100 + i, .move_dir = -1, .delta = 0.0167f};
+        player_proc_input(sp, &idle, 0, 0);
+    }
+    CHECK(fabsf(sp->position.y - 4.0f) < 0.01f && sp->on_ground, "a player lands on the server's block (y %.3f, ground %d)", sp->position.y,
+          sp->on_ground);
+    g_sent_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "gone", 0);
+    forward_records(&client, 0, clock);
+    CHECK(sb && !sb->active && sb->collision_type == COLLISION_TYPE_NONE && !ks_entities_live_object(&server, 0) && cb && !cb->active,
+          "delete(): the block leaves both sides (\"slo\")");
+
+    // addAsset complexCollision: the model's rest triangles (6000 at most) scaled, turned and moved on both sides
+    unsigned char *glb = NULL;
+    size_t glb_len = 0;
+    if (!read_file("assets/user-assets/46802/model.glb", &glb, &glb_len)) {
+        ai_parts_model_put(&server, PARTS_ASSET, ai_parts_model_parse(glb, glb_len));
+        ai_parts_model_put(&client, PARTS_ASSET, ai_parts_model_parse(glb, glb_len));
+        free(glb);
+    }
+    int state = 0;
+    const AiPartsModel *m = ai_parts_model_get(&server, PARTS_ASSET, 0, &state);
+    size_t rest_n = 0;
+    const float *rest = ai_parts_model_rest_tris(m, &rest_n);
+    CHECK(rest && rest_n > 0 && rest_n <= 6000, "the model's rest triangles (%zu)", rest_n);
+    g_sent_count = 0;
+    ks_game_on_custom_trigger(&server, "2", "asset", 0);
+    forward_records(&client, 0, clock);
+    size_t sn = 0, cn = 0;
+    const float *st = NULL, *ct = NULL;
+    for (int i = 0; i < ks_entities_live_count(&server); i++) {
+        size_t n = 0;
+        const float *t = ks_entities_live_tris(&server, i, &n);
+        if (n) st = t, sn = n;
+    }
+    for (int i = 0; i < ks_entities_live_count(&client); i++) {
+        size_t n = 0;
+        const float *t = ks_entities_live_tris(&client, i, &n);
+        if (n) ct = t, cn = n;
+    }
+    CHECK(st && sn == rest_n && rest && fabsf(st[0] - (300.0f + rest[0] * 2.0f)) < 1e-3f && fabsf(st[1] - rest[1] * 2.0f) < 1e-3f &&
+              fabsf(st[2] - (300.0f + rest[2] * 2.0f)) < 1e-3f,
+          "server: the asset's triangles at (300, 0, 300), scale 2 (%zu)", sn);
+    CHECK(ct && cn == sn && !memcmp(ct, st, sn * 9 * sizeof(float)), "client: the same triangles (%zu)", cn);
+    const Object *ca = NULL;
+    for (int id = 0; id < 4 && !ca; id++) {
+        const Object *o = ks_entities_live_object(&client, id);
+        if (o && o->prefab == PREFAB_CUSTOM_ASSET) ca = o;
+    }
+    CHECK(ca && ca->collision_type == COLLISION_TYPE_NONE && !ks_entities_live_object(&server, 1), "the asset: a client carrier object, none on the server");
+
+    // the next round takes the server's objects out of the map (they are not Object Manager objects)
+    ks_game_start(&server);
+    CHECK(server.map->object_count == server_objects + 1 && ks_entities_part_object(&server, 9, 0),
+          "a new round: the old bodies and blocks are gone, the respawned entity has one (%zu objects)", server.map->object_count);
+    ks_game_unload(&client);
+    ks_game_unload(&server);
+    cJSON_Delete(map);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -1066,6 +1253,7 @@ int main(void) {
     test_ai_reflections();
     test_player_flags();
     test_entity_replication();
+    test_entity_bodies();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);

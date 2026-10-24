@@ -29,5 +29,8 @@ void entities_frame(Client *client, float delta);
 void entities_reset(void);
 // v10 player.attachedEnt: the yaw of the entity player `uid` is hard-attached to; 0 when it rides none
 int entities_player_ride_yaw(int uid, float *yaw);
+// The input look's yaw on a ride (deob-10.0.3.js:260606-260640): riding an entity (hard or soft) turns *yaw with the
+// entity's render yaw; a hard ride with lk sets it to that yaw (lockYaw: the mouse turns nothing). Every input frame.
+void entities_ride_look(Client *client, float *yaw);
 // One line for the input_script `script` probe: entity / block counts and the first entity's pose.
 void entities_describe(const Client *client, char *out, size_t size);

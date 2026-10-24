@@ -67,6 +67,10 @@ void ks_entities_net_detach(Game*, const cJSON *rec);                  // applyD
 void ks_entities_client_frame(Game*, double clock_ms, double local_ms, double delta_ms);
 // A new INIT (client/src/entities.c entities_reset): the copy, its attachments and its queued client events go.
 void ks_entities_client_reset(Game*);
+// syncNewObjects (:212277) for one "lo" [id, data] / syncLiveObjects (:212320) for one "slo" [id, "remove"]: a block's
+// map object (drawn; no collision with noCol), an asset's CUSTOM_ASSET map object (its GLB), a cpx asset's triangles
+void ks_entities_net_live(Game*, const cJSON *rec);
+void ks_entities_net_live_sync(Game*, const cJSON *rec);
 
 // ---------------------------------------------------------------- both sides
 
@@ -77,6 +81,14 @@ int ks_entities_find(const Game*, int eid, KsEntityView *out);          // 0 whe
 int ks_entities_part_pose(const Game*, int eid, int part, KsEntityPose *out, double size[3], int *is_model);
 // The attachment of player `sid` (v10 attachments.get): eid, soft, ctl, lk, nd. 0 none.
 int ks_entities_attachment(const Game*, int sid, int *eid, int *soft, int *ctl, int *lk, int *nd);
+// The body of solid part `part` (buildBody's addBlock: a map object appended after the map's own; a client draws it),
+// NULL when it has none (a non-solid entity on the server, a gone map).
+Object *ks_entities_part_object(const Game*, int eid, int part);
+// LIVE_OBJECTS: the map object of live object `id` (a block, a client's asset carrier), NULL none; the live objects'
+// collision triangles (cpx assets, world space, 9 floats each) by index, NULL past the end (*tri_count 0: none).
+const Object *ks_entities_live_object(const Game*, int id);
+int ks_entities_live_count(const Game*);
+const float *ks_entities_live_tris(const Game*, int i, size_t *tri_count);
 // procInputs' rider (:191612-191621): a hard-attached player steps the entity it controls (stepControlled with
 // the input; `recon` on a replay), is pinned to it (pinPlayer) and keeps its old position. 1 when it rides one:
 // the caller skips the acceleration and treats it as on the ground.

@@ -26,6 +26,8 @@
 #include <ks_entities.h>
 #include <net_ext.h>
 #include <ruleset.h> // game_constants_of: dltMx
+#include <ai_parts.h> // a live asset's model (loadTris)
+#include <prefabs.h> // a live block's texture
 
 #include <math.h>
 #include <stdio.h>
@@ -34,6 +36,9 @@
 
 #define ENT_CTX_EVENT_NAME_MAX KS_ENT_NAME_MAX
 #define LIVE_OBJECTS_MAX 200 // liveObjects.length >= 200: no more (:212117, :212146)
+// spawn_owner of the server's body / live block objects: not `spawned` (world_remove_builds and the Object Manager leave
+// them alone, so no joiner gets them as Object Manager objects); ks_entities_reset takes them out of the map
+#define KS_ENT_OBJECT_OWNER (-77)
 
 extern const KsHostClass ks_entity_class;     // the entity host object (below)
 extern const KsHostClass ks_entity_ctx_class; // the simulateEntity ctx (below)
@@ -454,6 +459,7 @@ static void build_parts(KsEntity *e)
             continue;
         KsEntPart *ep = &e->parts[e->part_count++];
         memset(ep, 0, sizeof(*ep));
+        ep->rec = part;
         const cJSON *p = cJSON_GetObjectItemCaseSensitive(part, "p"), *sz = cJSON_GetObjectItemCaseSensitive(part, "s");
         for (int k = 0; k < 3; k++) {
             const cJSON *pv = cJSON_IsArray(p) ? cJSON_GetArrayItem(p, k) : NULL, *sv = cJSON_IsArray(sz) ? cJSON_GetArrayItem(sz, k) : NULL;
@@ -486,6 +492,191 @@ static KsEntPose part_pose(const KsEntity *e, const KsEntPart *p)
         else *slot[k] = v;
     }
     return o;
+}
+
+
+// ---------------------------------------------------------------------------
+// Bodies (buildBody :212839, placeBody :213050, carryPlayers :213091, removeBody :213020) and the map objects
+
+static KsEntAttach *att_find(KsGame *kg, const int sid);
+
+// Our object still at its uid (the slot may have been replaced, the map changed or freed)
+static Object *our_object(const KsGame *kg, const size_t uid, const Object *object)
+{
+    const Map *map = kg && kg->game ? kg->game->map : NULL;
+    return map && map == kg->ents.obj_map && object && uid < map->object_count && map->objects[uid] == object ? map->objects[uid] : NULL;
+}
+
+// manager.addBlock's object: the record as a map object appended after the map's own (a client builds its mesh, which
+// its map_post shows: `spawned`); NULL on failure. The record is owned by the manager from here on.
+static Object *append_object(KsGame *kg, cJSON *record, size_t *uid)
+{
+    Map *map = kg && kg->game ? kg->game->map : NULL;
+    if (!map || !record) {
+        cJSON_Delete(record);
+        return NULL;
+    }
+    if (kg->ents.obj_map != map) { // the old map's objects went with it: so did the need for their records
+        cJSON_Delete(kg->ents.records);
+        kg->ents.records = NULL;
+        kg->ents.obj_map = map;
+    }
+    if (!kg->ents.records) kg->ents.records = cJSON_CreateArray();
+    if (!kg->ents.records) {
+        cJSON_Delete(record);
+        return NULL;
+    }
+    cJSON_AddItemToArray(kg->ents.records, record);
+    const int client = !server_side(kg);
+    Object *o = map_object_from_json(map, record, client);
+    if (!o) return NULL;
+    Object **grown = realloc(map->objects, (map->object_count + 1) * sizeof(Object *));
+    if (!grown) {
+        map_object_free(o);
+        return NULL;
+    }
+    map->objects = grown;
+    o->spawned = (unsigned char) client;
+    o->spawn_owner = client ? -1 : KS_ENT_OBJECT_OWNER;
+    o->destroyed_by = -1;
+    map->objects[map->object_count] = o;
+    *uid = map->object_count++;
+    return o;
+}
+
+// removeObject: the object stays as an inactive slot (uids never move mid-round), no collision, its mesh hidden
+// (map_post shows a spawned object while it is active)
+static void retire_object(KsGame *kg, const size_t uid, const Object *object)
+{
+    Object *o = our_object(kg, uid, object);
+    if (!o) return;
+    o->active = 0;
+    o->destroyed = 1;
+    o->collision_type = COLLISION_TYPE_NONE;
+}
+
+// The server's objects leave the map at a reset (a new round: world_remove_builds kept them); a client's are freed
+// with its map (spawned objects), so a client only forgets them.
+static void drop_objects(KsGame *kg)
+{
+    Map *map = kg && kg->game ? kg->game->map : NULL;
+    if (server_side(kg) && map && map == kg->ents.obj_map) {
+        size_t kept = 0;
+        for (size_t i = 0; i < map->object_count; i++) {
+            Object *o = map->objects[i];
+            if (o && !o->spawned && o->spawn_owner == KS_ENT_OBJECT_OWNER) map_object_free(o);
+            else map->objects[kept++] = o;
+        }
+        map->object_count = kept;
+    }
+    cJSON_Delete(kg->ents.records);
+    kg->ents.records = NULL;
+    kg->ents.obj_map = NULL;
+}
+
+// buildBody (:212839): a body only when solid (coll > 0) on the server; a client builds every entity's (noCol unless
+// coll > 0). One addBlock per solid part: dyn, noCol, noPCol for coll 2, noVis for a model part ("aid"), the part's
+// colour and opacity.
+static void place_body(KsGame *kg, KsEntity *e, double dx, double dy, double dz);
+
+static void build_body(KsGame *kg, KsEntity *e)
+{
+    const int solid = e->arch->coll > 0;
+    if (!kg->game || !kg->game->map || (!solid && server_side(kg))) return;
+    for (int k = 0; k < e->part_count; k++) {
+        KsEntPart *p = &e->parts[k];
+        double size[3];
+        for (int a = 0; a < 3; a++) size[a] = p->size[a] > 0.0 ? p->size[a] : 0.01; // (a degenerate box still places)
+        cJSON *record = cJSON_CreateObject();
+        if (!record) continue;
+        cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray((const double[]) {e->x + p->off[0], e->y + p->off[1], e->z + p->off[2]}, 3));
+        cJSON_AddItemToObject(record, "s", cJSON_CreateDoubleArray(size, 3));
+        cJSON_AddNumberToObject(record, "dyn", 1);
+        const cJSON *c = cJSON_GetObjectItemCaseSensitive(p->rec, "c"), *op = cJSON_GetObjectItemCaseSensitive(p->rec, "o");
+        if (cJSON_IsString(c)) cJSON_AddStringToObject(record, "c", c->valuestring);
+        if (cJSON_IsNumber(op)) cJSON_AddNumberToObject(record, "o", op->valuedouble);
+        if (!solid) cJSON_AddNumberToObject(record, "col", 1);       // noCol
+        if (p->is_model) cJSON_AddNumberToObject(record, "v", 1);  // noVis: a model part
+        Object *o = append_object(kg, record, &p->uid);
+        if (!o) continue;
+        if (e->arch->coll == 2) o->no_player_col = 1; // noPCol
+        p->object = o;
+    }
+    place_body(kg, e, 0.0, 0.0, 0.0);
+}
+
+static void remove_body(KsGame *kg, KsEntity *e)
+{
+    for (int k = 0; k < e->part_count; k++) {
+        retire_object(kg, e->parts[k].uid, e->parts[k].object);
+        e->parts[k].object = NULL;
+    }
+}
+
+// onTopOf for carryPlayers: grounded, the feet at the part's top (before it moved), inside its footprint. KN keeps no
+// onTopOf, so the stand is measured.
+static int stood_on(const Player *p, const vec3 bottom, const vec3 size)
+{
+    const float r = game_constants.player_scale;
+    return p->on_ground && fabsf(p->position.y - (bottom.y + size.y)) < 0.6f && fabsf(p->position.x - bottom.x) <= size.x * 0.5f + r &&
+           fabsf(p->position.z - bottom.z) <= size.z * 0.5f + r;
+}
+
+// iíïîiìi (:214853): the overlap of two centred spans
+static double span_overlap(const double a, const double ah, const double b, const double bh)
+{
+    return fmax(0.0, fmin(a + ah, b + bh) - fmax(a - ah, b - bh));
+}
+
+// carryPlayers (:213091): a moved solid part takes the players standing on it along, and pushes the ones it now
+// overlaps by their overlap along its motion; not its own riders. A client moves only its own player (the others'
+// movX is never applied there). KN moves them at once (v10 adds movX / movY / movZ, which procInputs applies) and has
+// no class hit box pads (hbS / hbH 0).
+static void carry_players(KsGame *kg, const KsEntity *e, const Object *o, const vec3 was, const vec3 size, const double dx, const double dy,
+                          const double dz)
+{
+    Game *game = kg->game;
+    const double len = sqrt(dx * dx + dy * dy + dz * dz);
+    if (!game || !len) return;
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *p = game->players[i];
+        if (!p || !p->active || (!server_side(kg) && !p->is_you)) continue;
+        const KsEntAttach *a = att_find(kg, p->uid);
+        if (a && a->eid == e->eid) continue;
+        if (stood_on(p, was, size)) {
+            p->position.x += (float) dx;
+            p->position.y += (float) dy;
+            p->position.z += (float) dz;
+            continue;
+        }
+        const double s = p->scale, cy = o->position.y + size.y * 0.5;
+        const int touch = p->position.x - s <= o->position.x + size.x * 0.5 - 0.001 && p->position.x + s >= o->position.x - size.x * 0.5 + 0.001 &&
+                          p->position.z - s <= o->position.z + size.z * 0.5 - 0.001 && p->position.z + s >= o->position.z - size.z * 0.5 + 0.001 &&
+                          p->position.y <= o->position.y + size.y && p->position.y + p->height >= o->position.y;
+        if (!touch) continue;
+        p->position.x += (float) (span_overlap(o->position.x, size.x * 0.5, p->position.x, s) * (dx / len));
+        p->position.y += (float) (span_overlap(cy, size.y * 0.5, p->position.y, p->height) * (dy / len));
+        p->position.z += (float) (span_overlap(o->position.z, size.z * 0.5, p->position.z, s) * (dz / len));
+    }
+}
+
+// placeBody (:213050): every part at the entity's pose (the offset turned by the yaw, the box swapped by |sin| / |cos|);
+// a moved solid part carries players (not for noPCol)
+static void place_body(KsGame *kg, KsEntity *e, const double dx, const double dy, const double dz)
+{
+    const double s = sin(e->yaw), c = cos(e->yaw), as = fabs(s), ac = fabs(c);
+    const int moved = dx || dy || dz;
+    for (int k = 0; k < e->part_count; k++) {
+        KsEntPart *p = &e->parts[k];
+        Object *o = our_object(kg, p->uid, p->object);
+        if (!o) continue;
+        const KsEntPose pp = part_pose(e, p);
+        const double rx = pp.x * c + pp.z * s, rz = -pp.x * s + pp.z * c;
+        const vec3 was = o->position, size_was = object_box_size(o);
+        o->position = (vec3) {(float) (e->x + rx), (float) (e->y + pp.y), (float) (e->z + rz)};
+        o->scale = (vec3) {(float) (p->size[0] * ac + p->size[2] * as), (float) p->size[1], (float) (p->size[0] * as + p->size[2] * ac)};
+        if (moved && e->arch->coll > 0 && !o->no_player_col) carry_players(kg, e, o, was, size_was, dx, dy, dz);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +816,7 @@ static void ent_despawn(KsGame *kg, KsEntity *e, const char *reason)
     }
     e = ent_find(kg, eid);
     if (!e) return;
+    remove_body(kg, e);
     unlink_entity(kg, e);
     e->active = 0;
     ent_free(e);
@@ -724,6 +916,7 @@ static void displace_entity(KsGame *kg, KsEntity *e, const double dx, const doub
     state_set_number(e->state, "z", sz + dz);
     const double ox = e->x, oz = e->z;
     commit_pose(e);
+    place_body(kg, e, e->x - ox, 0.0, e->z - oz);
     carry_soft(kg, e, ox, e->y, oz, e->yaw);
     if (e->controller >= 0) e->ctl_dirty = 1;
     if (broadcast && server_side(kg) && e->controller < 0 && fabs(dx) + fabs(dz) > 0.05) broadcast_baseline(kg, e);
@@ -925,6 +1118,7 @@ static KsEntity *ent_spawn(KsGame *kg, const MapArchetype *arch, int eid, double
         ent_free(e);
         return NULL;
     }
+    build_body(kg, e);
     net_json(kg, NET_TARGET_ALL, NET_EXT_ENTITY_SPAWN, spawn_payload(e));
     KsEntHook *h = queue_push(kg);
     if (h) {
@@ -961,6 +1155,7 @@ static void commit_step(KsGame *kg, KsEntity *e, KsScript *s, const int rc, cons
     e->tick = tick;
     const double ox = e->x, oy = e->y, oz = e->z, oyaw = e->yaw;
     commit_pose(e);
+    place_body(kg, e, e->x - ox, e->y - oy, e->z - oz);
     collide_world(kg, e);
     carry_soft(kg, e, ox, oy, oz, oyaw);
     if (e->controller >= 0) e->ctl_dirty = 1;
@@ -1073,6 +1268,7 @@ static int state_write(KsGame *kg, KsEntity *e, cJSON **items, const char **keys
     e->state = cand;
     const double ox = e->x, oy = e->y, oz = e->z, oyaw = e->yaw;
     commit_pose(e);
+    place_body(kg, e, e->x - ox, e->y - oy, e->z - oz);
     carry_soft(kg, e, ox, oy, oz, oyaw);
     broadcast_baseline(kg, e);
     return 1;
@@ -1338,6 +1534,7 @@ static void drain_queue(KsGame *kg)
 }
 
 static void live_reset(KsGame *kg);
+static void live_poll(KsGame *kg);
 
 void ks_entities_reset(KsGame *kg)
 {
@@ -1356,6 +1553,7 @@ void ks_entities_reset(KsGame *kg)
     ents->clock_ms = 0.0;
     ents->tick = 0;
     live_reset(kg); // liveObjects.resetAll (:219911)
+    drop_objects(kg);
 }
 
 void ks_entities_free(KsGame *kg)
@@ -1404,6 +1602,7 @@ void ks_entities_update(KsGame *kg, const double delta_ms)
     if (!kg) return;
     if (server_side(kg)) {
         kg->ents.clock_ms += delta_ms;
+        live_poll(kg); // a cpx asset whose model was still loading
         ent_advance_to(kg, kg->ents.clock_ms);
         pin_all_server(kg);
         drain_queue(kg);
@@ -1515,6 +1714,7 @@ void ks_entities_net_spawn(Game *game, const cJSON *rec)
         ent_free(e);
         return;
     }
+    build_body(kg, e);
     client_event(kg, KS_ENT_HOOK_SPAWN, eid, arch->name, 0.0, 0.0);
 }
 
@@ -1564,6 +1764,7 @@ void ks_entities_net_baseline(Game *game, const cJSON *rec, const double local_m
             e->blend[2] = -dz;
             e->blend_left = KS_ENT_BLEND_MS;
         }
+        place_body(kg, e, 0.0, 0.0, 0.0);
         push_sim_pose(kg, e);
     } else { // another player's controlled entity: its poses are interpolated (getRenderPose)
         if (e->pose_count == KS_ENT_POSE_BUF) {
@@ -1571,6 +1772,7 @@ void ks_entities_net_baseline(Game *game, const cJSON *rec, const double local_m
             e->pose_count--;
         }
         e->pose_buf[e->pose_count++] = (KsEntPose) {local_ms, e->x, e->y, e->z, e->yaw, e->pitch, e->roll};
+        place_body(kg, e, 0.0, 0.0, 0.0);
     }
 }
 
@@ -1587,6 +1789,7 @@ void ks_entities_net_controlled(Game *game, const cJSON *rec)
     e->state = next;
     e->tick = (int) rec_num(rec, 1, e->tick);
     commit_pose(e);
+    place_body(kg, e, 0.0, 0.0, 0.0);
 }
 
 void ks_entities_net_event(Game *game, const cJSON *rec)
@@ -1775,6 +1978,7 @@ void ks_entities_client_frame(Game *game, const double clock_ms, const double lo
 {
     KsGame *kg = game ? game->ks : NULL;
     if (!kg || server_side(kg)) return;
+    live_poll(kg);
     if (has_hooks(kg)) {
         ent_advance_to(kg, clock_ms);
         drain_queue(kg);
@@ -1877,6 +2081,14 @@ int ks_entities_part_pose(const Game *game, const int eid, const int part, KsEnt
     if (size) memcpy(size, e->parts[part].size, sizeof(e->parts[part].size));
     if (is_model) *is_model = e->parts[part].is_model;
     return 1;
+}
+
+Object *ks_entities_part_object(const Game *game, const int eid, const int part)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    KsEntity *e = ent_find(kg, eid);
+    if (!e || part < 0 || part >= e->part_count) return NULL;
+    return our_object(kg, e->parts[part].uid, e->parts[part].object);
 }
 
 int ks_entities_attachment(const Game *game, const int sid, int *eid, int *soft, int *ctl, int *lk, int *nd)
@@ -2411,11 +2623,20 @@ static const KsHostProp g_ctx_props[] = {
 const KsHostClass ks_entity_ctx_class = {"ctx", g_ctx_props, (int) (sizeof(g_ctx_props) / sizeof(g_ctx_props[0]))};
 
 // ---------------------------------------------------------------------------
-// LIVE_OBJECTS (liveObjects, :212096-212411; the API :211251-211304)
+// LIVE_OBJECTS (liveObjects, :212096-212411; the API :211251-211304), on the authority and as a client's copy of "lo"
+
+static double json_num(const cJSON *v, const double def) { return cJSON_IsNumber(v) ? v->valuedouble : def; }
+
+static void live_free_one(KsGame *kg, KsLiveObject *lo)
+{
+    retire_object(kg, lo->uid, lo->object);
+    cJSON_Delete(lo->data);
+    free(lo->tris);
+}
 
 static void live_reset(KsGame *kg)
 {
-    for (size_t i = 0; i < kg->ents.live_count; i++) cJSON_Delete(kg->ents.live[i].data);
+    for (size_t i = 0; i < kg->ents.live_count; i++) live_free_one(kg, &kg->ents.live[i]);
     kg->ents.live_count = 0; // the ids keep counting (liveObjects.id is never reset)
 }
 
@@ -2433,22 +2654,188 @@ static void live_send_all(KsGame *kg, const int uid)
     for (size_t i = 0; i < kg->ents.live_count; i++) net_json(kg, uid, NET_EXT_KN_OFFICIAL_LIVE_OBJECT, live_record(&kg->ents.live[i]));
 }
 
-// liveObjects.remove(id) (:212361): the object goes and "slo" [[id, "remove"]] is broadcast
-static void live_remove(KsGame *kg, const int id)
+static KsLiveObject *live_find(KsGame *kg, const int id)
 {
-    for (size_t i = 0; i < kg->ents.live_count; i++) {
-        if (kg->ents.live[i].id != id) continue;
-        cJSON_Delete(kg->ents.live[i].data);
-        memmove(&kg->ents.live[i], &kg->ents.live[i + 1], (kg->ents.live_count - i - 1) * sizeof(*kg->ents.live));
-        kg->ents.live_count--;
-        cJSON *rec = cJSON_CreateArray();
-        if (rec) {
-            cJSON_AddItemToArray(rec, cJSON_CreateNumber(id));
-            cJSON_AddItemToArray(rec, cJSON_CreateString("remove"));
-        }
-        net_json(kg, NET_TARGET_ALL, NET_EXT_KN_OFFICIAL_LIVE_SYNC, rec);
+    for (size_t i = 0; kg && i < kg->ents.live_count; i++)
+        if (kg->ents.live[i].id == id) return &kg->ents.live[i];
+    return NULL;
+}
+
+// A texture index from a Krunker src name ("wall_0"), -1 none
+static int texture_of(const char *src)
+{
+    char buf[64];
+    for (int i = 0; src && i < PREFAB_TEXTURE_COUNT; i++)
+        if (prefab_texture_src(i, 0, buf, sizeof(buf)) && !strcmp(buf, src)) return i;
+    return -1;
+}
+
+// loadTris (:212187-212216): the model's rest triangles (6000 at most, ai_parts_model_rest_tris) scaled by s, turned ry and
+// moved to (x, y, z), as the asset's collision triangles (applyToQuad: world_player_tris). A model still loading is asked
+// again each update (the promise's then); a failed one gives none. Not done: the rayProxy of its hit mesh (shots).
+static void live_load_tris(KsGame *kg, KsLiveObject *lo)
+{
+    lo->tris_wait = 0;
+    const char *aid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(lo->data, "aid"));
+    const int asset = aid ? atoi(aid) : 0;
+    if (!kg->game || asset <= 0) return;
+    int state = 0;
+    AiPartsModel *m = ai_parts_model_get(kg->game, asset, 1, &state);
+    if (!m) {
+        lo->tris_wait = state == AI_PARTS_MODEL_LOADING;
         return;
     }
+    size_t n = 0;
+    const float *rest = ai_parts_model_rest_tris(m, &n);
+    if (!rest || !n) return;
+    float *out = malloc(n * 9 * sizeof(float));
+    if (!out) return;
+    const double x = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "x"), 0), y = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "y"), 0);
+    const double z = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "z"), 0), ry = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "ry"), 0);
+    const double sc = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "s"), 0) ? json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "s"), 1) : 1.0;
+    const double c = cos(ry), sn = sin(ry);
+    for (size_t v = 0; v < n * 3; v++) {
+        const double a = rest[v * 3] * sc, b = rest[v * 3 + 2] * sc;
+        out[v * 3] = (float) (x + a * c + b * sn);
+        out[v * 3 + 1] = (float) (y + rest[v * 3 + 1] * sc);
+        out[v * 3 + 2] = (float) (z - a * sn + b * c);
+    }
+    lo->tris = out;
+    lo->tri_count = n;
+}
+
+static void live_poll(KsGame *kg)
+{
+    for (size_t i = 0; i < kg->ents.live_count; i++)
+        if (kg->ents.live[i].tris_wait) live_load_tris(kg, &kg->ents.live[i]);
+}
+
+// One live object on this side (liveObjects.addBlock / addAsset on the authority, syncNewObjects :212277 on a client):
+// a block that collides (isMapObject: !data.noCol) is a map object on the server; a client draws every block
+// (noCol: no collision) and loads an asset's GLB as a CUSTOM_ASSET map object (<aid digits>/model.glb, turned ry,
+// scaled s); a cpx asset loads its collision triangles on both sides.
+static KsLiveObject *live_add(KsGame *kg, const int id, cJSON *data)
+{
+    if (!data) return NULL;
+    if (kg->ents.live_count == kg->ents.live_cap) {
+        const size_t cap = kg->ents.live_cap ? kg->ents.live_cap * 2 : 16;
+        KsLiveObject *grown = realloc(kg->ents.live, cap * sizeof(*grown));
+        if (!grown) {
+            cJSON_Delete(data);
+            return NULL;
+        }
+        kg->ents.live = grown;
+        kg->ents.live_cap = cap;
+    }
+    KsLiveObject *lo = &kg->ents.live[kg->ents.live_count++];
+    *lo = (KsLiveObject) {.id = id, .data = data};
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "type"));
+    const cJSON *props = cJSON_GetObjectItemCaseSensitive(data, "data");
+    const double x = json_num(cJSON_GetObjectItemCaseSensitive(data, "x"), 0), y = json_num(cJSON_GetObjectItemCaseSensitive(data, "y"), 0);
+    const double z = json_num(cJSON_GetObjectItemCaseSensitive(data, "z"), 0);
+    const cJSON *no_col = cJSON_GetObjectItemCaseSensitive(props, "noCol");
+    const int solid = !(no_col && !cJSON_IsFalse(no_col) && !cJSON_IsNull(no_col));
+    cJSON *record = NULL;
+    if (type && !strcmp(type, "block") && (solid || !server_side(kg))) {
+        record = cJSON_CreateObject();
+        const double w = json_num(cJSON_GetObjectItemCaseSensitive(data, "w"), 1), l = json_num(cJSON_GetObjectItemCaseSensitive(data, "l"), 1);
+        const double h = json_num(cJSON_GetObjectItemCaseSensitive(data, "h"), 1);
+        cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray((const double[]) {x, y, z}, 3));
+        cJSON_AddItemToObject(record, "s", cJSON_CreateDoubleArray((const double[]) {w, h, l}, 3));
+        const char *colr = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(props, "colr"));
+        if (!colr) colr = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(props, "color"));
+        if (colr) cJSON_AddStringToObject(record, "c", colr);
+        const int tex = texture_of(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(props, "src")));
+        if (tex >= 0) cJSON_AddNumberToObject(record, "t", tex);
+        const cJSON *opacity = cJSON_GetObjectItemCaseSensitive(props, "opacity");
+        if (cJSON_IsNumber(opacity)) cJSON_AddNumberToObject(record, "o", opacity->valuedouble);
+        if (!solid) cJSON_AddNumberToObject(record, "col", 1);
+    } else if (type && !strcmp(type, "asset") && !server_side(kg)) {
+        const cJSON *ja = cJSON_GetObjectItemCaseSensitive(data, "aid");
+        char aid[48];
+        if (cJSON_IsString(ja)) snprintf(aid, sizeof(aid), "%s", ja->valuestring);
+        else snprintf(aid, sizeof(aid), "%.0f", json_num(ja, 0));
+        size_t n = 0;
+        for (size_t i = 0; aid[i]; i++)
+            if (aid[i] >= '0' && aid[i] <= '9') aid[n++] = aid[i]; // (aid + "").replace(/[^\d]/g, "")
+        aid[n] = 0;
+        if (n) {
+            strcat(aid, "q"); // loadAnimMesh fileExt "glb"
+            const double sc = json_num(cJSON_GetObjectItemCaseSensitive(data, "s"), 0) ? json_num(cJSON_GetObjectItemCaseSensitive(data, "s"), 1) : 1.0;
+            record = cJSON_CreateObject();
+            cJSON_AddNumberToObject(record, "i", PREFAB_CUSTOM_ASSET);
+            cJSON_AddStringToObject(record, "aid", aid);
+            cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray((const double[]) {x, y, z}, 3));
+            cJSON_AddItemToObject(record, "s", cJSON_CreateDoubleArray((const double[]) {1, 1, 1}, 3));
+            cJSON_AddItemToObject(record, "r", cJSON_CreateDoubleArray((const double[]) {0, json_num(cJSON_GetObjectItemCaseSensitive(data, "ry"), 0), 0}, 3));
+            cJSON_AddNumberToObject(record, "ms", sc);
+            cJSON_AddNumberToObject(record, "col", 1);
+        }
+    }
+    if (record) lo->object = append_object(kg, record, &lo->uid);
+    const cJSON *cpx = cJSON_GetObjectItemCaseSensitive(props, "cpx");
+    if (type && !strcmp(type, "asset") && cpx && !cJSON_IsFalse(cpx) && !cJSON_IsNull(cpx)) live_load_tris(kg, lo);
+    return lo;
+}
+
+// liveObjects.remove(id) (:212361) / syncLiveObjects (:212320): the object, its triangles and its map object go; the
+// server broadcasts "slo" [[id, "remove"]]
+static void live_remove(KsGame *kg, const int id)
+{
+    KsLiveObject *lo = live_find(kg, id);
+    if (!lo) return;
+    live_free_one(kg, lo);
+    const size_t i = (size_t) (lo - kg->ents.live);
+    memmove(&kg->ents.live[i], &kg->ents.live[i + 1], (kg->ents.live_count - i - 1) * sizeof(*kg->ents.live));
+    kg->ents.live_count--;
+    if (!server_side(kg)) return;
+    cJSON *rec = cJSON_CreateArray();
+    if (rec) {
+        cJSON_AddItemToArray(rec, cJSON_CreateNumber(id));
+        cJSON_AddItemToArray(rec, cJSON_CreateString("remove"));
+    }
+    net_json(kg, NET_TARGET_ALL, NET_EXT_KN_OFFICIAL_LIVE_SYNC, rec);
+}
+
+void ks_entities_net_live(Game *game, const cJSON *rec)
+{
+    KsGame *kg = client_kg(game);
+    const cJSON *data = cJSON_GetArrayItem(rec, 1);
+    if (!kg || !cJSON_IsArray(rec) || !cJSON_IsObject(data) || !game->map) return;
+    const int id = (int) rec_num(rec, 0, -1);
+    if (live_find(kg, id) || kg->ents.live_count >= LIVE_OBJECTS_MAX) return; // a joiner's init and a broadcast: one
+    live_add(kg, id, cJSON_Duplicate(data, 1));
+}
+
+void ks_entities_net_live_sync(Game *game, const cJSON *rec)
+{
+    KsGame *kg = client_kg(game);
+    const char *op = cJSON_GetStringValue(cJSON_GetArrayItem(rec, 1));
+    if (kg && cJSON_IsArray(rec) && op && !strcmp(op, "remove")) live_remove(kg, (int) rec_num(rec, 0, -1));
+}
+
+const Object *ks_entities_live_object(const Game *game, const int id)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    const KsLiveObject *lo = live_find(kg, id);
+    return lo ? our_object(kg, lo->uid, lo->object) : NULL;
+}
+
+int ks_entities_live_count(const Game *game)
+{
+    return game && game->ks ? (int) game->ks->ents.live_count : 0;
+}
+
+const float *ks_entities_live_tris(const Game *game, const int i, size_t *tri_count)
+{
+    static const float none[1] = {0};
+    const KsGame *kg = game ? game->ks : NULL;
+    if (tri_count) *tri_count = 0;
+    if (!kg || i < 0 || (size_t) i >= kg->ents.live_count) return NULL;
+    const KsLiveObject *lo = &kg->ents.live[i];
+    if (!lo->tris) return none;
+    if (tri_count) *tri_count = lo->tri_count;
+    return lo->tris;
 }
 
 // The live object wrapper (:209050): id, delete()
@@ -2472,12 +2859,24 @@ static const KsHostClass g_live_class = {"liveObject", g_live_props, 2};
 
 static int value_is_number(const KsValue v) { return v.tag == KS_NUM && isfinite(v.as.num); } // iiîiìîî
 
+// The authority keeps `data` as live object liveObjects.id++ (200 at most) and broadcasts it in "lo"; the wrapper,
+// 0 when refused (v10's liveObject(undefined) throws: the API's catch returns 0)
+static KsValue live_publish(KsScript *s, KsGame *kg, cJSON *data)
+{
+    if (!data || kg->ents.live_count >= LIVE_OBJECTS_MAX) {
+        cJSON_Delete(data);
+        return ks_num(0);
+    }
+    KsLiveObject *lo = live_add(kg, kg->ents.live_next_id++, data);
+    if (!lo) return ks_num(0);
+    net_json(kg, NET_TARGET_ALL, NET_EXT_KN_OFFICIAL_LIVE_OBJECT, live_record(lo));
+    KsRef *ref = ks_ref_get(kg, KS_REF_LIVE, lo->id);
+    return ref ? ks_host_object(s, &g_live_class, ref, (uint32_t) lo->id) : ks_num(0);
+}
+
 // addAsset(assetId, x, y, z, scale, rotY, opts) (:211292): the server's; the id's digits, numbers only (else 0 /
 // scale 1), the scale clamped to 0.01..100, opts.complexCollision as data.cpx. liveObjects.addAsset (:212144)
-// keeps {type: "asset", aid, x, y, z, s, ry, data} (200 at most) and broadcasts it in "lo". Returns the wrapper,
-// 0 when refused.
-// Not done: cpx's loadTris (the model's triangles in the server's collision quads, :212187) and its rayProxy:
-// the asset collides with nothing on KN's server; clients draw it (client/src/entities.c).
+// keeps {type: "asset", aid, x, y, z, s, ry, data}.
 static KsValue api_live_add_asset(KsScript *s, void *u, const KsValue *args, int argc)
 {
     KsGame *kg = u;
@@ -2491,14 +2890,6 @@ static KsValue api_live_add_asset(KsScript *s, void *u, const KsValue *args, int
     if (!aid[0]) return ks_undef();
     const KsValue opts = argc > 6 && args[6].tag == KS_OBJ ? args[6] : ks_undef();
     const int cpx = opts.tag == KS_OBJ && value_truthy(ks_obj_get(s, opts, "complexCollision"));
-    if (kg->ents.live_count >= LIVE_OBJECTS_MAX) return ks_num(0);
-    if (kg->ents.live_count == kg->ents.live_cap) {
-        const size_t cap = kg->ents.live_cap ? kg->ents.live_cap * 2 : 16;
-        KsLiveObject *grown = realloc(kg->ents.live, cap * sizeof(*grown));
-        if (!grown) return ks_num(0);
-        kg->ents.live = grown;
-        kg->ents.live_cap = cap;
-    }
     cJSON *data = cJSON_CreateObject(), *inner = cJSON_CreateObject();
     if (!data || !inner) {
         cJSON_Delete(data);
@@ -2519,12 +2910,89 @@ static KsValue api_live_add_asset(KsScript *s, void *u, const KsValue *args, int
     cJSON_AddNumberToObject(data, "ry", ry);
     cJSON_AddBoolToObject(inner, "cpx", cpx);
     cJSON_AddItemToObject(data, "data", inner);
-    KsLiveObject *lo = &kg->ents.live[kg->ents.live_count++];
-    lo->id = kg->ents.live_next_id++;
-    lo->data = data;
-    net_json(kg, NET_TARGET_ALL, NET_EXT_KN_OFFICIAL_LIVE_OBJECT, live_record(lo));
-    KsRef *ref = ks_ref_get(kg, KS_REF_LIVE, lo->id);
-    return ref ? ks_host_object(s, &g_live_class, ref, (uint32_t) lo->id) : ks_num(0);
+    return live_publish(s, kg, data);
+}
+
+// /^#([0-9A-F]{3}){1,2}$/i (iîiïiíì :27469)
+static int hex_colour(const char *c)
+{
+    const size_t n = c ? strlen(c) : 0;
+    if ((n != 4 && n != 7) || c[0] != '#') return 0;
+    for (size_t i = 1; i < n; i++)
+        if (!((c[i] >= '0' && c[i] <= '9') || (c[i] >= 'a' && c[i] <= 'f') || (c[i] >= 'A' && c[i] <= 'F'))) return 0;
+    return 1;
+}
+
+// addCube(x, y, z, w, h, l, _, opts) (:211252-211290): the server's; numbers only (else 0, the sizes 1); the block's
+// props: src wall_0, scale 1, noGroup, opts.opacity (a number, else 1), fTrans = !!forceTransparency, opts.aid's
+// texture or video (src / video / asset), colr = opts.color when a hex colour, else #FFF. liveObjects.addBlock
+// (:212115) keeps {type: "block", x, y, z, w, l, h, s: [1, 1, 1, 1, 1, 1], data: props}; it collides (a server map
+// object) as its props carry no noCol.
+static KsValue api_live_add_cube(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    KsGame *kg = u;
+    if (!kg || !authority(kg)) return ks_undef();
+    const double x = argc > 0 && value_is_number(args[0]) ? args[0].as.num : 0.0;
+    const double y = argc > 1 && value_is_number(args[1]) ? args[1].as.num : 0.0;
+    const double z = argc > 2 && value_is_number(args[2]) ? args[2].as.num : 0.0;
+    const double w = argc > 3 && value_is_number(args[3]) ? args[3].as.num : 1.0;
+    const double h = argc > 4 && value_is_number(args[4]) ? args[4].as.num : 1.0;
+    const double l = argc > 5 && value_is_number(args[5]) ? args[5].as.num : 1.0;
+    const KsValue opts = argc > 7 && args[7].tag == KS_OBJ ? args[7] : ks_undef();
+    cJSON *data = cJSON_CreateObject(), *props = cJSON_CreateObject();
+    if (!data || !props) {
+        cJSON_Delete(data);
+        cJSON_Delete(props);
+        return ks_num(0);
+    }
+    cJSON_AddStringToObject(props, "src", "wall_0");
+    cJSON_AddNumberToObject(props, "scale", 1);
+    cJSON_AddBoolToObject(props, "noGroup", 1);
+    const KsValue opacity = opts.tag == KS_OBJ ? ks_obj_get(s, opts, "opacity") : ks_undef();
+    cJSON_AddNumberToObject(props, "opacity", value_is_number(opacity) ? opacity.as.num : 1.0);
+    cJSON_AddBoolToObject(props, "fTrans", opts.tag == KS_OBJ && value_truthy(ks_obj_get(s, opts, "forceTransparency")));
+    const KsValue aid = opts.tag == KS_OBJ ? ks_obj_get(s, opts, "aid") : ks_undef();
+    if (aid.tag != KS_UNDEF && aid.tag != KS_NULL) {
+        char text[64];
+        ks_to_string(s, aid, text, sizeof(text));
+        char *end = NULL;
+        const long id = strtol(text, &end, 10); // parseInt
+        const int parsed = end != text;
+        // aid != parseInt(aid): a string with more than the number (a numeric string or a number compares equal)
+        const int differs = aid.tag == KS_STR ? !parsed || *end != 0 : aid.tag == KS_NUM && (!parsed || (double) id != aid.as.num);
+        if (differs) {
+            const int video = strchr(text, 'v') != NULL && parsed;
+            char src[48];
+            snprintf(src, sizeof(src), "%ld%s", parsed ? id : 0L, video ? "/video" : "/texture");
+            cJSON_ReplaceItemInObjectCaseSensitive(props, "src", cJSON_CreateString(src));
+            if (video) cJSON_AddNumberToObject(props, "video", (double) id);
+            if (parsed) cJSON_AddNumberToObject(props, "asset", (double) id);
+            else cJSON_AddNullToObject(props, "asset"); // NaN
+        } else if (parsed) {
+            char src[48];
+            snprintf(src, sizeof(src), "%ld/texture", id);
+            cJSON_ReplaceItemInObjectCaseSensitive(props, "src", cJSON_CreateString(src));
+            cJSON_AddNumberToObject(props, "asset", (double) id);
+        }
+    }
+    const KsValue color = opts.tag == KS_OBJ ? ks_obj_get(s, opts, "color") : ks_undef();
+    char colr[16] = "#FFF";
+    if (color.tag == KS_STR) {
+        char text[16];
+        ks_to_string(s, color, text, sizeof(text));
+        if (hex_colour(text)) snprintf(colr, sizeof(colr), "%s", text);
+    }
+    cJSON_AddStringToObject(props, "colr", colr);
+    cJSON_AddStringToObject(data, "type", "block");
+    cJSON_AddNumberToObject(data, "x", x);
+    cJSON_AddNumberToObject(data, "y", y);
+    cJSON_AddNumberToObject(data, "z", z);
+    cJSON_AddNumberToObject(data, "w", w);
+    cJSON_AddNumberToObject(data, "l", l);
+    cJSON_AddNumberToObject(data, "h", h);
+    cJSON_AddItemToObject(data, "s", cJSON_CreateIntArray((const int[]) {1, 1, 1, 1, 1, 1}, 6));
+    cJSON_AddItemToObject(data, "data", props);
+    return live_publish(s, kg, data);
 }
 
 // ---------------------------------------------------------------------------
@@ -2641,5 +3109,6 @@ void ks_entities_api_fill(KsApiImpl *api, const KsSide side)
         api[KS_API_ENTITIES_CLONE].fn = api_ent_clone;
         api[KS_API_ENTITIES_DESPAWN].fn = api_ent_despawn;
         api[KS_API_LIVE_OBJECTS_ADDASSET].fn = api_live_add_asset;
+        api[KS_API_LIVE_OBJECTS_ADDCUBE].fn = api_live_add_cube;
     }
 }

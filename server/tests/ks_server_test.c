@@ -11,6 +11,7 @@
 #include <server.h>
 #include <ks_server.h>
 #include <ks_game.h>
+#include <ks_entities.h>
 #include <ks_net.h>
 #include <triggers_v7.h>
 #include <map_catalog.h>
@@ -698,6 +699,7 @@ static const char *k_entity_server =
     "    GAME.log(\"gone\", toStr notEmpty GAME.ENTITIES.findById(\"10000\"));\n"
     "    bool att = e.attachPlayer(id, {});\n"
     "    obj a = GAME.LIVE_OBJECTS.addAsset(\"46802\", 5, 6, 7, 2, 0, {});\n"
+    "    GAME.LIVE_OBJECTS.addCube(-300, 0, -300, 8, 2, 8, 0, {});\n"
     "    GAME.log(\"attach\", toStr att, \"asset\", toStr a.id);\n"
     "    obj r = GAME.RAYCAST.from(-500, 2, -500, 1, 0, 0, 100);\n"
     "    GAME.log(\"ray\", toStr r.hit, r.type, toStr GAME.UTILS.math.round(r.dist));\n"
@@ -797,10 +799,17 @@ static void test_entities(void)
         if (g_server->game.players[i] && (int) g_server->game.players[i]->uid == a->uid) rider = g_server->game.players[i];
     CHECK(rider && fabsf(rider->position.x - 40.0f) < 1e-3f && fabsf(rider->position.z - 4.0f) < 1e-3f, "replication: the rider is pinned (%.2f, %.2f)",
           rider ? rider->position.x : 0.0f, rider ? rider->position.z : 0.0f);
+    // the server's bodies and blocks (v10.0.3 buildBody / addBlock): entity 7's solid part at its pose, addCube's block
+    CHECK(count_ent(a, "lo [1,{\"type\":\"block\",\"x\":-300,\"y\":0,\"z\":-300,\"w\":8,\"l\":8,\"h\":2") == 1, "replication: addCube's \"lo\"");
+    const Object *body = ks_entities_part_object(&g_server->game, 7, 0), *block = ks_entities_live_object(&g_server->game, 1);
+    CHECK(body && body->collision_type != COLLISION_TYPE_NONE && fabsf(body->position.x - 40.0f) < 1e-3f && fabsf(body->position.y - 2.0f) < 1e-3f,
+          "server: entity 7's body at its pose (%.2f, %.2f)", body ? body->position.x : 0.0f, body ? body->position.y : 0.0f);
+    CHECK(block && block->collision_type != COLLISION_TYPE_NONE && fabsf(block->position.x + 300.0f) < 1e-3f, "server: addCube's block collides");
     // a late joiner gets the state: seed, the live object, the entity, the attachment
     Client *b = connect_client(NET_PROTOCOL_MINOR_EXT);
     pump(5);
-    CHECK(count_ent(b, "seed [") == 1 && count_ent(b, "lo [0,") == 1 && count_ent(b, "e+ [7,1,") == 1 && count_ent(b, att) == 1,
+    CHECK(count_ent(b, "seed [") == 1 && count_ent(b, "lo [0,") == 1 && count_ent(b, "lo [1,") == 1 && count_ent(b, "e+ [7,1,") == 1 &&
+              count_ent(b, att) == 1,
           "replication: a joiner's seed / lo / e+ / ea+ (%d %d %d %d)", count_ent(b, "seed ["), count_ent(b, "lo [0,"), count_ent(b, "e+ [7,1,"),
           count_ent(b, att));
     sandbox_stop();
