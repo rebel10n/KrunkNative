@@ -1322,6 +1322,24 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     cJSON_AddNumberToObject(p, "classIndex", class_index);
     if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
     if (final) acc_add_kill_items(p, client); // v10.0.3 event kill pools
+    // v10.0.3's raid record (services/brain/raids.c, doc/v10/rules-1003.md): one run per player in a public-type
+    // Raid round on an official map. noProfileStats keeps the run out of the profile stats above; the brain's
+    // duplicate check makes it once per match. cleared is the winCondition's didWin, time player.timer (raid.onEnd).
+    if (final && game_mode_id(&g_server->game) == MODE_ID_RAID && game_is_pub_type(&g_server->game)) {
+        const Game *g = &g_server->game;
+        const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
+                                  ? map_catalog_map_index_of_json(g->maps[g->current_map_index])
+                                  : -1;
+        if (map_index >= 0) {
+            cJSON *raid = cJSON_AddObjectToObject(p, "raid");
+            cJSON_AddNumberToObject(raid, "map", map_index);
+            cJSON_AddBoolToObject(raid, "cleared", won);
+            cJSON_AddNumberToObject(raid, "time", won && player && player->mode.has_timer ? (double) (int) (player->mode.timer * 1000.0f) : 0);
+            cJSON_AddNumberToObject(raid, "aiKills", player ? player->mode.ai_kills : 0);
+            cJSON_AddNumberToObject(raid, "bossKills", player ? player->mode.boss_kills : 0);
+            cJSON_AddNumberToObject(raid, "deaths", player ? player->deaths : 0);
+        }
+    }
     return p;
 }
 

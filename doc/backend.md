@@ -1805,6 +1805,37 @@ Tests: `kn_brain_captcha_test` (unit), `brain_captcha_e2e` (`services/brain/test
 `brain_captcha_game_e2e` (`server/tests/captcha_game_e2e.py`: the seek's CaptchaRequired and the in-game `cpt` with a
 brain-linked server_bin and client_bin).
 
+### 7.11 Account lifecycle, Twitch linking and the raid record (`account_life.c`, `raids.c`, 0359 / 0360 / 0361)
+
+v10.0.3's Account window behind kn_brain (deob-10.0.3.js:244591-244763):
+
+- **Password change:** `["upp", new, repeat, sessionToken]` (v10) or `["upp", old, new, repeat]` (v7 hub). The
+  v10 proof is the socket's own session token. Either changes the password once per 30 minutes
+  (`accounts.password_changed_at`), revokes every other session and answers `["upp", "Password updated.", newToken]`.
+- **Deletion:** `["rqd", 1 | 0]` -> `["rqd", ok, error, null, flag]`. A request sets
+  `accounts.delete_requested_at` (`acc.reqDel`, "Processing Deletion") and ends every session; the client logs
+  out, as v10 does. Cancelling clears it. After `accounts.deletion_grace_days` (14) with no login since the
+  request, the hourly sweep (`accounts.deletion_sweep_s`; `accounts.deletion_purge: false` turns it off)
+  deletes the account; references cascade.
+- **Twitch:** `twitchAuth` returns the OAuth authorize URL (single-use state, 10 min), which the client opens
+  in the system browser. The brain is the OAuth client (`streams.twitch.client_id` / `client_secret`;
+  `redirect_uri` defaults to `<brain.public_url>/twitch/callback`). `GET /twitch/callback` exchanges the code
+  on a worker thread, stores the permanent pair (`twitch_links`) and pushes `twitchVerifyResponse`.
+  `removeTwitchLink` clears the account's link (the pair stays, as v10 warns), `getTwitchDrops` answers `[]`
+  (no Box Office drop campaigns). With no Twitch app configured the answer is "Twitch linking is currently
+  unavailable.". The account object gains `reqDel`, `twitchId`, `twitch` (the login) and `raidStats`.
+- **Raid record:** a game server's stats commit may carry `raid: {map, cleared, time, aiKills, bossKills,
+  deaths}` per player (public-type Raid round on an official map; `server/src/accounts.c`). Once per match,
+  `raid_stats` and `raid_stats_monthly` record attempts, completions, best time and the kill counts. Served as
+  `acc.raidStats` (Account window's Raids tab) and `GET /leaderboards/raids/<map>[?sort=completions]` and
+  `/leaderboards/raids/<map>/monthly?month=YYYY-MM[&sort=best_time]`. A boss death (`boss` on the map AI or the
+  AI.spawn option) gives every active non-bot player `bossKills` and the "bk" challenge.
+- **Titles:** a Black Market item with a `title` grants it (`player_titles`, 0361) and the purchase reply names
+  it; `ttl` lists the account's titles and the profile carries `player_titles`.
+
+Tests: `brain_account_life` (`services/brain/tests/account_life_test.py`): the password shapes and clock, the
+deletion request / cancel / sweep, the Twitch handlers with no app, the raid record and its leaderboards.
+
 ## 8. Game server (`server_bin`): config, brain client, accounts
 
 Owner: gameserver. Code: `server/src/config.c` (config reader),
