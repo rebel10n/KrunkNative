@@ -96,3 +96,21 @@ yet"). Only a Box Office account has it; the krunker.io account's window has v10
 keeps no medal counts). v10's own tab ids 0-4 are unchanged, so `switchStat(0..4)` are v10's. The
 Account window's main tabs are v10.0.3's `profileTabs` with no KrunkNative tab (v7's Partner and promo
 code tabs were dropped with v10).
+
+## Intentional fixes where v10.0.3 itself is wrong (user, 2026-10-25)
+
+The user chose "keep the fixes, documented" over copying v10.0.3 bug for bug. These are deliberate
+differences from the bundle, not unported gaps; each is also marked in the code. Audits should leave
+them out of the gap list.
+
+| Behaviour | v10.0.3 | KrunkNative (kept on purpose) | where |
+|---|---|---|---|
+| Zombies Runner count | keeps v7's Runner-count bug | the corrected count (the long-standing documented fix) | `shared/src/modes/` Zombies rules, `zombies_test` |
+| SRM movement keys | one copy of the last keys shared by every player on the server | each player's own last keys | `shared/src/player.c`, `doc/v10/movement-schemes.md` |
+| SRM ramp wall-dash | computes NaN from the player's slope | uses the ramp's slope | `shared/src/player.c`, same doc |
+| Defuse bomb pickup with a same-slot weapon (Boulder, Minigun) | swaps the two, the plant never drops the bomb and "Bomb Planted" fires every tick | the bomb is added to the loadout; only one bomb planted at a time | `shared/src/defuse.c`, `defuse_test` |
+| Multi-round Defuse | the bomb, the defuse count and lives are not reset between rounds | the same missing reset is kept for parity in the single-round flow; multi-round hosted Defuse is the case this affects, so this entry is the one to revisit if it should be fixed instead | `shared/src/defuse.c`, `doc/v10/rules-1003.md` |
+
+Multi-round Defuse is listed separately in the follow-ups because the user picked "keep the fixes"
+for the group while this one is a v10 bug KN currently *copies*. If multi-round Defuse should be
+playable, reset the bomb, the defuse count and lives at round start and delete this row.
