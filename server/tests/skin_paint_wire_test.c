@@ -122,9 +122,10 @@ static void test_painted_skins_reach_joiners(void) {
     load_owner_account();
     CHECK(conn(&g_clients[OWNER])->acct.skin_paint_count == 2, "two painted copies on the owner's account (got %u)", conn(&g_clients[OWNER])->acct.skin_paint_count);
 
-    // a joiner on this build (patch 6) and an older one (patch 5), after the owner's account is known
+    // a joiner on this build and an older one (before paint, patch 5): the patch is not NET_PROTOCOL_PATCH - 1,
+    // which moves with unrelated bumps (patch 7's sound names made the "old" peer a paint-capable patch 6)
     join(&g_clients[JOINER], NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH, PLAYER_SKINS_NONE);
-    join(&g_clients[OLD_JOINER], NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH - 1, PLAYER_SKINS_NONE);
+    join(&g_clients[OLD_JOINER], NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH_SKIN_PAINT - 1, PLAYER_SKINS_NONE);
     pump(60);
 
     const NetPacket *v2 = skins_of(&g_clients[JOINER], (int) owner->uid);
