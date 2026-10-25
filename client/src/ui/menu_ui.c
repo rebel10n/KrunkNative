@@ -578,7 +578,7 @@ void menu_scale_base(void) {
     g_ui.viewport_h = h;
     const double dw = custom * 1700.0, dh = custom * 900.0;
     const double sx = w / dw, sy = h / dh;
-    char value[64], num[32];
+    char value[64];
     // v10 scaleBase also publishes the scale on <body> (--ui-scale / --ui-width / --ui-height):
     // the Svelte view stack (.view-wrapper) scales with it (v10_social.c)
     const HtmlElem body = html_dom_body();
@@ -591,19 +591,15 @@ void menu_scale_base(void) {
         snprintf(value, sizeof(value), "%.3fpx", sy < sx ? dh : h / sx);
         html_dom_set_style(body, "--ui-height", value);
     }
-    // The fit scale is printed to 3 decimals, as window.scaleBase() writes it, but that rounding
-    // can sit a fraction below the exact fit (0.627 for 0.62745). The scaled box is a transformed
-    // layer, and the engine clips everything inside it to its box (box-shadow rings included), so
-    // the box must cover the window at the printed scale: whole CSS px, rounded up. Only what the
-    // box anchors to its far edges moves, by a pixel (the 3D scene showed through the window's
-    // right and bottom strip otherwise).
+    // The fit scale is printed to 3 decimals, as window.scaleBase() writes it, and so are the box's
+    // CSS width and height (deob-10.0.3.js:241726-241731): the design size on the fit axis, the
+    // viewport divided by the fit scale on the other. Rounding the box up to whole CSS px would move
+    // everything anchored to its far edges by ~1 CSS px (the action cards sat 0.6 device px off).
     const double fit = sy < sx ? sy : sx;
     const double scale = round(fit * 1000.0) / 1000.0;
-    fmt_number(num, sizeof(num), ceil(w / scale));
-    snprintf(value, sizeof(value), "%spx", num);
+    snprintf(value, sizeof(value), "%.3fpx", sy < sx ? w / sy : dw);
     html_dom_set_style(base, "width", value);
-    fmt_number(num, sizeof(num), ceil(h / scale));
-    snprintf(value, sizeof(value), "%spx", num);
+    snprintf(value, sizeof(value), "%.3fpx", sy < sx ? dh : h / sx);
     html_dom_set_style(base, "height", value);
     snprintf(value, sizeof(value), "scale(%.3f)", scale);
     html_dom_set_style(base, "transform", value);

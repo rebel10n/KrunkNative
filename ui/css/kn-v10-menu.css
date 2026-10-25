@@ -100,3 +100,16 @@
  * kn-ranked-intro / kn-ranked-outro, which client/src/ui/ranked_ui.c sets only while the overlay
  * mounts or unmounts. A rule on .overlay-container itself would outrank them (two classes against
  * one: the outro ran the intro's keyframes) and restart on every re-render of the popup. */
+
+/* #instructionHolder's 50% shade covers the whole window in Chrome: its compositor covers the
+ * partial device pixels at the scaled #uiBase's far right and bottom edges, while this engine's
+ * rect coverage leaves those lines at the page's own brightness (client/tests/menu_bleed_e2e.py).
+ * One CSS px of transparent border carries the shade over them (0.58 device px at 1280x720): the
+ * border box grows, the padding box the instructions are positioned against does not, so nothing
+ * inside moves. */
+#instructionHolder {
+	right: -1px;
+	bottom: -1px;
+	border-right: 1px solid transparent;
+	border-bottom: 1px solid transparent;
+}
