@@ -452,7 +452,7 @@ ADD_MASK = r"(?:&\s*(?:0xff|0xFF|255)|%\s*(?:256|0x100))"
 
 def extract_ahkey(src):
     cands = []
-    for g in re.finditer(r"""(?:'cptR'|"cptR")""", src):
+    for g in re.finditer(r"""(?:'cptR'|"cptR"|\.cptR\b)""", src):
         win = src[g.end():g.end() + 400]
         m = re.search(r"this\s*" + AHNUM + r"\s*=\s*(" + IDENT + r")\s*\(\s*(?:this\s*" + AHNUM + r"\s*,\s*" +
                       NUMG + r"|" + NUMG + r"\s*,\s*this\s*" + AHNUM + r")\s*\)", win)
@@ -460,7 +460,9 @@ def extract_ahkey(src):
                            r"\s*\)?\s*" + ADD_MASK, win)
         after = src[g.end():g.end() + 1200]
         if not re.search(r"socket" + r"""['"]?\s*\]?\s*""" + r"(?:\[\s*['\"]send['\"]\s*\]|\.\s*send)", after):
-            continue
+            # webcracked 10.0.3: the socket is a mangled local (x.send(...)), not `socket`
+            if not re.search(r"\.\s*send\s*\(|\[\s*['\"]send['\"]\s*]", after):
+                continue
         if m:
             helper = m.group(1)
             val = js_num(m.group(2) or m.group(3))
@@ -615,6 +617,9 @@ JS_GLOBALS = {"Uint8Array", "Array", "Math", "String", "JSON", "Buffer", "undefi
 #   ks[i] = ((nonce.charCodeAt(i % nonce.length) ^ salt[i % salt.length]) + i) & 0xff, i < len
 KS_FORMULA_V1 = ('function(P0,P1)for(varV0=SALT,V1=newUint8Array(P1),V2=0V2<P1V2++)'
                  'V1[V2]=(P0.charCodeAt(V2%P0.length)^V0[V2%V0.length])+V2&255returnV1')
+# Same keystream with the salt and the output array declared in separate `var` statements (webcracked 10.0.3).
+KS_FORMULA_V2 = ('function(P0,P1)varV0=SALTvarV1=newUint8Array(P1)for(varV2=0V2<P1V2++)'
+                 'V1[V2]=(P0.charCodeAt(V2%P0.length)^V0[V2%V0.length])+V2&255returnV1')
 # Handler v1, function (nonce, unused, ciphertextB64), also dropping `var` and `,`:
 #   plain = JSON.parse(utf8decode(b64decode(ciphertext) ^ KS(nonce, n)))
 #   R = (0, eval)(plain), or {r: null, e: {_eval: message || "eval_error"}} when eval throws
@@ -630,6 +635,9 @@ CC_HANDLER_V1 = (
     '(String.fromCharCode.apply(StringV19(V17)))(V0P0)V20=function(V21V22)for(V23=V22+JSON.stringify(V21)V24=2166136261'
     'V25=0V25<V23.lengthV25++)V24=16777619*(V24^=V23.charCodeAt(V25))|0return(V24>>>0).toString(16).padStart(8"0")'
     '(V0P0)V26.send(V27.CHEAT_CHECK_RESPONSEP0V11V20)catch(V28)')
+
+# The same handler with the loop variables declared in separate `var` statements (webcracked 10.0.3).
+CC_HANDLER_V2 = 'function(P0P1P2)tryV0V1=function(V2V3)V4V4="undefined"!=typeofBuffer?newUint8Array(Buffer.from(V2"base64")):newUint8Array(atob(V2).split("").map(function(V5)returnV5.charCodeAt(0)))V6=KS(V3V4.length)V7=newUint8Array(V4.length)for(V8=0V8<V4.lengthV8++)V7[V8]=V4[V8]^V6[V8]V9=newTextDecoder().decode(V7)returnJSON.parse(V9)(P2P0)tryV0=(0eval)(V1)catch(V10)V0=V11:nullV12:V13:V10.message||"eval_error"V14=function(V15V16)V17=JSON.stringify(V15)for(V18=newTextEncoder().encode(V17)V19=KS(V16V18.length)V20=newUint8Array(V18.length)V21=0V21<V18.lengthV21++)V20[V21]=V18[V21]^V19[V21]if("undefined"!=typeofBuffer)returnBuffer.from(V20).toString("base64")elsereturnbtoa(String.fromCharCode.apply(StringV22(V20)))(V0P0)V23=function(V24V25)for(V26=V25+JSON.stringify(V24)V27=2166136261V28=0V28<V26.lengthV28++)V27=(V27^=V26.charCodeAt(V28))*16777619|0return(V27>>>0).toString(16).padStart(8"0")(V0P0)V29.send(V30.CHEAT_CHECK_RESPONSEP0V14V23)catch(V31)'
 
 _TOK = re.compile(r"\s+|(" + STR + r")|(" + NUM + r")|(" + IDENT + r")|(.)", re.S)
 
@@ -678,7 +686,9 @@ def canonical_js(code, names, drop=("{", "}", ";")):
         if v in drop and kind in ("p", "i"):
             continue
         res.append(v)
-    return "".join(res)
+    canon = "".join(res)
+    # `typeof x != "undefined"` and `"undefined" != typeof x` are the same guard (webcrack flips them)
+    return re.sub(r'typeof([A-Za-z_$][\w$]*)!={1,3}"undefined"', r'"undefined"!=typeof\1', canon)
 
 
 def extract_cheat(src):
@@ -769,13 +779,13 @@ def extract_cheat(src):
         if salt_name:
             pre[salt_name] = "SALT"
         canon = canonical_js(ks_src, pre)
-        if canon != KS_FORMULA_V1:
+        if canon not in (KS_FORMULA_V1, KS_FORMULA_V2):
             fail("cheat keystream", "formula shape changed (update krunker_cheat and KS_FORMULA_*):\n  %s\n  "
                  "expected %s" % (canon, KS_FORMULA_V1))
         hpre = {p: "P%d" % i for i, p in enumerate(handler[2])}
         hpre[ks] = "KS"
         hcanon = canonical_js(hsrc, hpre, drop=("{", "}", ";", ",", "var"))
-        if hcanon != CC_HANDLER_V1:
+        if hcanon not in (CC_HANDLER_V1, CC_HANDLER_V2):
             k = next((i for i, (x, y) in enumerate(zip(hcanon, CC_HANDLER_V1)) if x != y),
                      min(len(hcanon), len(CC_HANDLER_V1)))
             fail("cheat handler", "cc handler shape changed (update krunker_cheat and CC_HANDLER_*) at "
@@ -784,7 +794,7 @@ def extract_cheat(src):
         fnv_off = js_num(fo[-1].group(0))
         fnv_prime = js_num(fp[-1].group(0))
         hm = re.search(r"(" + IDENT + r")\s*=\s*" + FNV_PRIME + r"\s*\*\s*\(\s*\1\s*\^=", hsrc) or \
-            re.search(r"(" + IDENT + r")\s*=\s*\(\s*\1\s*\^=[^)]*\)\s*\*\s*" + FNV_PRIME, hsrc)
+            re.search(r"(" + IDENT + r")\s*=\s*\(\s*\1\s*\^=.*?\)\s*\*\s*" + FNV_PRIME, hsrc)
         if re.search(r"Math\s*" + prop("imul") + r"\s*\(", hsrc):
             mul = "imul"
         elif hm:
