@@ -185,7 +185,7 @@ def run_client(port, account, token, good, bad):
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
-                "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % port})
+                "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % port, "KRUNKNATIVE_DEBUG": "1"})
     log = os.path.join(WORK, "client.log")
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(BUILD, "client_bin")], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)

@@ -532,6 +532,27 @@ static int streams_picture_ok(const char *url) {
     return !strncasecmp(url, "https://", 8) || !strncasecmp(url, "http://", 7);
 }
 
+// Twitch's CDN refuses the native media lane on some networks, so a Twitch-hosted thumbnail goes
+// through the brain's /streams/thumb (its allowlist is streams_thumb_url_ok's hosts). Any other host
+// is loaded directly, and with no brain the original URL is kept, as v10's <img src>.
+static void streams_thumb_url(const char *url, char *out, const size_t n) {
+    out[0] = 0;
+    if (!streams_picture_ok(url)) return;
+    const char *scheme = strstr(url, "://");
+    const char *host = scheme ? scheme + 3 : url;
+    const char *slash = strchr(host, '/');
+    const size_t hn = slash ? (size_t) (slash - host) : strlen(host);
+    const int twitch = (hn >= 9 && !strncasecmp(host + hn - 9, "jtvnw.net", 9)) ||
+                       (hn >= 10 && !strncasecmp(host + hn - 10, "twitch.tv", 10));
+    if (!twitch || !backend_url()[0]) {
+        snprintf(out, n, "%s", url);
+        return;
+    }
+    char enc[3 * STREAMS_THUMB_MAX];
+    backend_url_encode(enc, sizeof(enc), url);
+    if (snprintf(out, n, "%s/streams/thumb?url=%s", backend_url(), enc) >= (int) n) out[0] = 0;
+}
+
 // a Twitch login: letters, digits and '_' (the card's link is twitch.tv/<name>)
 static int streams_login_ok(const char *s) {
     const size_t n = strlen(s);
@@ -673,7 +694,7 @@ static void streams_card(StrBuf *sb, const int i, const int anim, const int dela
     sb_append(sb, "pointer-events:all;cursor:pointer;\" onclick=\"knV10Stream(");
     sb_appendf(sb, "%d)\"><div class=\"thumbnail svelte-60shhe\">", i);
     sb_appendf(sb, "<img loading=\"lazy\" decoding=\"async\" class=\"svelte-60shhe\" id=\"knStreamThumb%d\" src=\"", i);
-    sb_append_esc(sb, s->thumb); // the answer's thumbnailUrl (streams_picture_ok), v10's src
+    sb_append_esc(sb, s->thumb); // streams_thumb_url: the answer's thumbnailUrl, or the brain's thumb proxy for Twitch
     sb_append(sb, "\" alt=\"");
     sb_append_esc(sb, s->title);
     sb_append(sb, "\"> <div class=\"viewer-count svelte-60shhe\"><span class=\"dot svelte-60shhe\"></span> <span class=\"svelte-60shhe\">");
@@ -869,8 +890,7 @@ static void streams_apply(const cJSON *data) {
             const cJSON *tags = cJSON_GetObjectItemCaseSensitive(s, "eventTags");
             snprintf(e->user, sizeof e->user, "%s", u->valuestring);
             snprintf(e->title, sizeof e->title, "%s", cJSON_IsString(t) ? t->valuestring : "");
-            const char *picture = cJSON_IsString(th) ? th->valuestring : "";
-            snprintf(e->thumb, sizeof e->thumb, "%s", streams_picture_ok(picture) ? picture : "");
+            streams_thumb_url(cJSON_IsString(th) ? th->valuestring : "", e->thumb, sizeof e->thumb);
             if (cJSON_IsString(lg)) snprintf(e->lang, sizeof e->lang, "%s", lg->valuestring);
             e->viewers = cJSON_IsNumber(v) && v->valuedouble > 0 ? (int) v->valuedouble : 0;
             e->featured = pass;
