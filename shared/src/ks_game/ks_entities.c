@@ -2803,7 +2803,7 @@ static int texture_of(const char *src)
 
 // loadTris (:212187-212216): the model's rest triangles (6000 at most, ai_parts_model_rest_tris) scaled by s, turned ry and
 // moved to (x, y, z), as the asset's collision triangles (applyToQuad: world_player_tris). A model still loading is asked
-// again each update (the promise's then); a failed one gives none. Not done: the rayProxy of its hit mesh (shots).
+// again each update (the promise's then); a failed one gives none. Its rayProxy (shots): ks_entities_live_ray.
 static void live_load_tris(KsGame *kg, KsLiveObject *lo)
 {
     lo->tris_wait = 0;

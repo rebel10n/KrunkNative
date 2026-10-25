@@ -2233,8 +2233,7 @@ Mesh *prefab_build_batch_mesh(Geometry *geometry) {
 Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
     const int prefab = object->prefab;
     const PrefabInfo *info = prefab_info(prefab);
-    // EVENT builds no map object but has a mesh: event_objects.c draws it apart (live events, map_event_object_from_json)
-    if (!info || ((info->roles & PREFAB_R_NO_OBJECT) && prefab != PREFAB_EVENT)) return NULL;
+    if (!info || (info->roles & PREFAB_R_NO_OBJECT)) return NULL;
 
     // noTex / mapDet are restart settings: read once when the map is built
     const ClientRenderSettings *settings = client_render_settings();

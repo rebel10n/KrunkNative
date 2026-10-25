@@ -750,7 +750,6 @@ else ()
     endif ()
     add_test(NAME network_sounds_test COMMAND network_sounds_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-
     # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
     # junk_test: the Junk wallet's amounts (hundredths, the two-place text, parseFloat's reading; doc/v10/junk.md)
     add_executable(junk_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/junk_test.c)
@@ -766,6 +765,7 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(kill_pools_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
     endif ()
+    add_test(NAME kill_pools_test COMMAND kill_pools_test)
     # live_events_test: v10.0.3 config.events (shared/src/live_events.c): updateEventIndex, getActiveEvent's reveal, the
     # EVENT prefab's toggle, getItemByWeights and endGame's event reward (doc/v10/events.md)
     add_executable(live_events_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/live_events_test.c)
@@ -774,7 +774,6 @@ else ()
         target_link_libraries(live_events_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
     endif ()
     add_test(NAME live_events_test COMMAND live_events_test)
-    add_test(NAME kill_pools_test COMMAND kill_pools_test)
     add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
     target_link_libraries(zombies_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -943,6 +942,16 @@ else ()
         target_link_libraries(nav_overlay_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
     add_test(NAME nav_overlay_test COMMAND nav_overlay_test)
+    # prize_wheel_test (v10.0.3 map prize wheels): the spinner list, its GameObject and the type 9 prompt
+    # (shared/src/map_spinners.c, interact.c) and the GL-free canvas layout (client/src/prize_wheel_geom.c)
+    add_executable(prize_wheel_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/prize_wheel_geom.c client/include/prize_wheel_geom.h
+                   client/tests/prize_wheel_test.c)
+    target_include_directories(prize_wheel_test PRIVATE client/include)
+    target_link_libraries(prize_wheel_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(prize_wheel_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME prize_wheel_test COMMAND prize_wheel_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # bot_move_test: bot locomotion (shared/src/bot_move.c): slide hop cadence and speed, no head
     # bumps under ceilings, no hops into walls / off ledges, a long run with the full AI
@@ -962,16 +971,6 @@ else ()
 
     # navgen_test: the Krunker v7.1.4 generated nav mesh (shared/src/navgen.c) against v7's navgen.ts
     add_executable(navgen_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/navgen_test.c)
-    # prize_wheel_test (v10.0.3 map prize wheels): the spinner list, its GameObject and the type 9 prompt
-    # (shared/src/map_spinners.c, interact.c) and the GL-free canvas layout (client/src/prize_wheel_geom.c)
-    add_executable(prize_wheel_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/prize_wheel_geom.c client/include/prize_wheel_geom.h
-                   client/tests/prize_wheel_test.c)
-    target_include_directories(prize_wheel_test PRIVATE client/include)
-    target_link_libraries(prize_wheel_test PRIVATE m)
-    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        target_link_libraries(prize_wheel_test PRIVATE ws2_32) # shared/src/net.c
-    endif ()
-    add_test(NAME prize_wheel_test COMMAND prize_wheel_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     target_link_libraries(navgen_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(navgen_test PRIVATE ws2_32) # shared/src/net.c

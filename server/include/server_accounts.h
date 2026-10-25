@@ -70,6 +70,13 @@ int accounts_ranked_lobby_id(const ClientConnection *client);
 void accounts_notice(ClientConnection*, const char *text);
 // The account hosting the current custom lobby (requirePremiumCheatPerm's custom host).
 int accounts_is_custom_host(const ClientConnection*);
+// v10.0.3 ADMIN_ACTIONS 8 (Transfer Host): the custom host hands the game to `target` (a signed-in or guest player
+// here); 1 when it hosts now, 0 when refused (not the host, no such player, the transfer limit reached).
+int accounts_transfer_host_to(ClientConnection *host, ClientConnection *target);
+// Tests only: `host` hosts a custom game here, as the brain's "host" frame makes it (server/tests/votekick_test.c),
+// and one custom-game tick (the host leaving: transfer or end), which accounts_tick runs only with a brain link.
+void accounts_host_for_test(ClientConnection *host, int transfer_on_leave);
+void accounts_tick_custom_for_test(void);
 // WP6: the published map (config.customMap) the current custom lobby hosts, NULL none:
 // GAME.STORAGE and Save / Load Data need one online (v7 customMap + defaultSetts).
 const char *accounts_published_map(void);

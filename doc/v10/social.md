@@ -112,8 +112,8 @@ v10 fetches it:
   `/social.html?p=map|mod&q=<name>` (`social_ui.c`).
 
 The brain's `GET /players/<name>` (`social_gapi.c` over `db_social.c` `P_PROFILE`) carries what these
-read: `player_badge` (the `player_badges` rows), `player_titles` (`""`: Box Office grants no titles
-yet, as `sh_titles`), `player_twitchname` (`players.tw_twitchname`, null when unset), `ranked_rank`
+read: `player_badge` (the `player_badges` rows), `player_titles` (the `player_titles` rows as `"87,90"`,
+the same list as `sh_titles`: Box Office grants a title with its Black Market item, `0361_player_titles`), `player_twitchname` (`players.tw_twitchname`, null when unset), `ranked_rank`
 (`ranked_rank_of` over the account's newest `ranked_profiles` row, a placed one and the best rated
 first; 0 when that row is not of the running season) and `raid_stats` (`[]`: Box Office records no
 raids). A krunker.io account's profile reads krunker.io's own fields.
@@ -130,8 +130,8 @@ back to the author. News: `accounts.news` (HTML strings).
 
 * No profile pictures, clan logos or emoji skins are hosted: avatars use v10's fallback picture,
   the clan view its shield placeholder, and the DM emoji panel never has candidates (`:` is inserted).
-* Profile: match history shows v10's empty state, and so do raid stats and titles on Box Office
-  accounts (no raids recorded, no titles granted); the sales chart is a bar strip instead of v10's
+* Profile: match history shows v10's empty state, and so do raid stats on Box Office
+  accounts (no raids recorded; titles come only from the Black Market); the sales chart is a bar strip instead of v10's
   canvas line chart; listings show the skin index instead of its name / thumbnail; Trade dispatches
   `openTrade` (the economy's flow). The 39 badges v10.0.3 added after v7.1.4's 29 have their icons in
   the page tree (`ui/img/badges`, v10: the asset host's `textures/badges`). Game and mod cards open the

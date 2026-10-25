@@ -513,6 +513,8 @@ const kn_proc P_CHAT_THREAD = {
     "     'creator_badge', (SELECT p.creator_badge FROM players p WHERE p.player_id = r.player_id)," \
     "     'badges', coalesce((SELECT jsonb_agg(pb.badge ORDER BY pb.badge) FROM player_badges pb" \
     "         WHERE pb.account_id = r.player_id), '[]'::jsonb)," \
+    "     'titles', coalesce((SELECT jsonb_agg(pt.title_id ORDER BY pt.title_id) FROM player_titles pt" \
+    "         WHERE pt.account_id = r.player_id), '[]'::jsonb)," \
     "     'ranked', (SELECT jsonb_build_object('season', rp.season, 'cr', rp.cr, 'matches', rp.wins + rp.losses + rp.draws)" \
     "         FROM ranked_profiles rp WHERE rp.account_id = r.player_id" \
     "         ORDER BY rp.season DESC, (rp.wins + rp.losses + rp.draws >= " PROFILE_STR(RANKED_PLACEMENT_MATCHES) ") DESC, rp.cr DESC LIMIT 1))," \
@@ -556,6 +558,14 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
     cJSON_Delete(badge_rows);
     cJSON_DeleteItemFromObjectCaseSensitive(row, "badges");
     cJSON_AddItemToObject(row, "badges", badges);
+    /* the owned titles (player_titles, 0361): social_gapi.c makes them v10's player_titles "87,90" */
+    cJSON *title_rows = dbx_rows(&x, SQL(.any = "SELECT title_id AS t__i FROM player_titles WHERE account_id = $1 ORDER BY title_id"),
+                                 KN_DB_ARGS(id));
+    cJSON *titles = cJSON_CreateArray();
+    cJSON_ArrayForEach(br, title_rows) cJSON_AddItemToArray(titles, cJSON_CreateNumber((double) kn_json_int(br, "t", -1)));
+    cJSON_Delete(title_rows);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "titles");
+    cJSON_AddItemToObject(row, "titles", titles);
     /* the latest ranked season's profile, a placed one and the best rated first: social_gapi.c turns
      * it into v10's ranked_rank (the profile's rank chip) */
     cJSON *ranked = dbx_row(&x,

@@ -287,6 +287,9 @@ def main():
               "[brain] fetching published map '%s'" % second in read(log_b)
               and os.path.exists(os.path.join(WORK, "cache-b", "krunknative", "published-maps", "~%s.json" % second.lower())),
               read(log_b)[-600:])
+        noted = re.search(r"\[maps\] published map '%s' is map id (\d+)" % re.escape(second), read(log_b))
+        check("B: the host request's fetch gives SECOND's id (the round's KrunkScript customMapData.id)",
+              noted and fetched and int(noted.group(1)) > 0 and noted.group(1) != fetched.group(1), read(log_b)[-600:])
         stop(b)
 
         # C: server.cfg's mapcycle (a missing entry is skipped with a log line)

@@ -77,6 +77,7 @@ static struct {
     char host_name[32];
     int custom_had_players;
     int host_transfers;        // this game's host transfers (v10.0.3 game.hostTransfers, ACC_HOST_TRANSFER_LIMIT)
+    int transfer_on_leave;     // the host request's transferHostOnLeave (default on): the host passes on when it leaves
     cJSON *pending_host;       // "host" waiting for its published map (/api/map-data)
     uint32_t pending_rid;
     cJSON *hosted_map;         // the fetched published map of the current custom game (owned)
@@ -635,7 +636,10 @@ static struct {
 
 void accounts_give_skin(const Player *player, const int skin, const char *reason) {
     const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
-    if (!g_acc.brain || !brain_linked() || !g_gs_config.earn_kr || g_acc.custom || !client || client->acct.account_id <= 0 ||
+    // v10.0.3 KrunkScript player.giveSkin (sendUserSkin "scripting", deob-10.0.3.js:208302-208307) is checked by the
+    // script binding (its six skins, a pub-type game or one of four hosted maps): a custom game may grant those
+    const int scripting = reason && !strcmp(reason, "scripting");
+    if (!g_acc.brain || !brain_linked() || !g_gs_config.earn_kr || (g_acc.custom && !scripting) || !client || client->acct.account_id <= 0 ||
         client->acct.hack || skin <= 0)
         return;
     int slot = -1;
@@ -3392,6 +3396,9 @@ static void acc_handle_map_data(cJSON *frame) {
     char name[96], creator[64];
     acc_custom_map_name(cJSON_GetObjectItem(pending, "config"), name, sizeof(name), creator, sizeof(creator));
     cJSON *map = cJSON_IsTrue(cJSON_GetObjectItem(frame, "ok")) ? cJSON_DetachItemFromObject(frame, "map") : NULL;
+    // the brain's map_id (v10.0.3 customMapData.id: KrunkScript giveSkin's maps, ks_server_round_init); none for a cached copy
+    const cJSON *map_id = cJSON_GetObjectItem(frame, "id");
+    published_map_note_id(name, map && cJSON_IsNumber(map_id) ? map_id->valueint : 0);
     if (!map) {
         const char *err = acc_str(cJSON_GetObjectItem(frame, "err"), "map not found");
         // the brain could not answer (not a 404): the copy cached when it last passed
@@ -3545,6 +3552,10 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     g_acc.webhook_posted = 0;
     g_acc.custom_had_players = 0;
     g_acc.host_transfers = 0;
+    // v10.0.3's Transfer Host on Leave (serverConfig transferHostOnLeave, Hosting, hostTypes 0 and 1, default on:
+    // deob-10.0.3.js:19992-19998), read from the request as krRewards and webhook are (game_config.c validates it)
+    const cJSON *on_leave = cJSON_GetObjectItem(config, "transferHostOnLeave");
+    g_acc.transfer_on_leave = !(cJSON_IsFalse(on_leave) || (cJSON_IsNumber(on_leave) && on_leave->valuedouble == 0.0));
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");
     g_acc.host_account_id = cJSON_IsNumber(host_id) ? host_id->valueint : 0;
     snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", acc_str(cJSON_GetObjectItem(frame, "hostGuestId"), ""));
@@ -3580,22 +3591,26 @@ static ClientConnection *acc_next_host(void) {
 // server's code is not in the bundle; a hostless game is what uh(null) shows the client, 256716-256717).
 #define ACC_HOST_TRANSFER_LIMIT 5
 
-// The host left and the lobby goes on: `next` hosts from now on (the custom host's rights and cheats follow
-// accounts_is_custom_host; the player list's star and the rights are sent to everyone and to `next`). The lines are
-// v10.0.3's on a host change: "You are now Host!" to the new host, "Host Transfered to {0}" to everyone else
-// (deob-10.0.3.js:256720-256727).
-static void acc_transfer_host(ClientConnection *next) {
+// `next` hosts from now on: the host left (leaving 1) or handed the game over from the player list (leaving 0). The
+// custom host's rights and cheats follow accounts_is_custom_host; the player list's star and the rights are sent to
+// everyone and to `next`. The lines are v10.0.3's on a host change: "You are now Host!" to the new host, "Host
+// Transfered to {0}" to everyone else (deob-10.0.3.js:256720-256727). Past the limit a manual transfer is refused (the
+// host stays) and a leaving host leaves the game without one. Returns 1 when `next` hosts.
+static int acc_transfer_host(ClientConnection *next, const int leaving) {
     if (g_acc.host_transfers >= ACC_HOST_TRANSFER_LIMIT) {
-        server_log("[brain] custom game: the host left, the transfer limit (%d) is reached: no host from now on", ACC_HOST_TRANSFER_LIMIT);
-        g_acc.host_account_id = 0;
-        g_acc.host_guest[0] = 0;
-        g_acc.host_name[0] = 0;
+        server_log("[brain] custom game: the host transfer limit (%d) is reached%s", ACC_HOST_TRANSFER_LIMIT,
+                   leaving ? ": no host from now on" : ": the host stays");
+        if (leaving) {
+            g_acc.host_account_id = 0;
+            g_acc.host_guest[0] = 0;
+            g_acc.host_name[0] = 0;
+        }
         net_broadcast_chat(NULL, "This server exceeded Host Transfer limit");
-        return;
+        return 0;
     }
     g_acc.host_transfers++;
-    server_log("[brain] custom game: the host left, %s (account %d) hosts now (transfer %d of %d)", next->name, next->acct.account_id,
-               g_acc.host_transfers, ACC_HOST_TRANSFER_LIMIT);
+    server_log("[brain] custom game: %s, %s (account %d) hosts now (transfer %d of %d)", leaving ? "the host left" : "the host handed over",
+               next->name, next->acct.account_id, g_acc.host_transfers, ACC_HOST_TRANSFER_LIMIT);
     g_acc.host_account_id = next->acct.account_id;
     snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", next->acct.account_id > 0 ? "" : next->acct.guest_id);
     snprintf(g_acc.host_name, sizeof(g_acc.host_name), "%s", next->name);
@@ -3608,6 +3623,30 @@ static void acc_transfer_host(ClientConnection *next) {
     }
     acc_broadcast_info(next);
     accounts_push_rights(next);
+    return 1;
+}
+
+// v10.0.3 ADMIN_ACTIONS 8, the player list's Transfer Host (shown to the host only, deob-10.0.3.js:254169; sent with
+// the target's id, 254059-254071): the custom game's host hands it to another player here who could host (signed in,
+// or a guest: acc_next_host's rule). 1 when the target hosts now.
+int accounts_transfer_host_to(ClientConnection *host, ClientConnection *target) {
+    if (!g_acc.custom || !host || !target || host == target || !accounts_is_custom_host(host)) return 0;
+    if (target->acct.join_state != SERVER_JOIN_READY || (target->acct.account_id <= 0 && !target->acct.guest_id[0])) return 0;
+    return acc_transfer_host(target, 0);
+}
+
+// Tests only (server/tests/votekick_test.c): `host`'s connection hosts a custom game here, as the brain's "host" frame
+// makes it, without a brain or a rotation change, with that transferHostOnLeave. The transfer count starts at 0.
+void accounts_host_for_test(ClientConnection *host, const int transfer_on_leave) {
+    if (!host) return;
+    g_acc.transfer_on_leave = transfer_on_leave;
+    g_acc.custom = 1;
+    g_acc.custom_since = g_server->now;
+    g_acc.custom_had_players = 1;
+    g_acc.host_transfers = 0;
+    g_acc.host_account_id = host->acct.account_id;
+    snprintf(g_acc.host_guest, sizeof(g_acc.host_guest), "%s", host->acct.account_id > 0 ? "" : host->acct.guest_id);
+    snprintf(g_acc.host_name, sizeof(g_acc.host_name), "%s", host->name);
 }
 
 static void acc_tick_custom(void) {
@@ -3619,18 +3658,23 @@ static void acc_tick_custom(void) {
         int host_present = 0;
         for (size_t i = 0; i < g_server->client_count; i++) host_present |= accounts_is_custom_host(&g_server->clients[i]);
         if (!host_present) {
-            // two or more players still in the lobby: the next signed-in one hosts; otherwise the game shuts down
-            ClientConnection *next = players >= 2 ? acc_next_host() : NULL;
+            // v10.0.3's Transfer Host on Leave (transferHostOnLeave, default on, deob-10.0.3.js:19992-19998): on, two or
+            // more players still in the lobby, the next signed-in or guest one hosts; off (the pre-setting rule, v3.1.1
+            // gameserver.ts) or too few players, the game ends
+            ClientConnection *next = g_acc.transfer_on_leave && players >= 2 ? acc_next_host() : NULL;
             if (!next) {
                 net_broadcast_chat(NULL, "Host ended game"); // gameserver.ts HOST_ENDED_MESSAGE
                 acc_revert_custom("host left");
                 return;
             }
-            acc_transfer_host(next);
+            acc_transfer_host(next, 1);
         }
     }
     if (!players && (g_acc.custom_had_players || g_server->now - g_acc.custom_since > ACC_HOST_IDLE_REVERT)) acc_revert_custom("lobby empty");
 }
+
+// Tests only: one custom-game tick (the host leaving), which accounts_tick runs only with a brain link
+void accounts_tick_custom_for_test(void) { acc_tick_custom(); }
 
 // v10 game.host (game_config_set_host): the uid of the custom game's host (accounts_is_custom_host, the first such
 // connection), every tick, so a transfer, the host's sign-in / sign-out and the lobby going public reach the game

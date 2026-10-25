@@ -22,6 +22,9 @@ const struct ViewerSkin *cosmetic_item(int store_index, ItemType type);
 // players.js generateMeshData src / texSrc: "<store.types[assetType || type]><id>" and, with a
 // truthy tex, "<that>_<tex>" (texture = model otherwise). E.g. "hats/hat_12", "body/body_4_1".
 void cosmetic_asset_keys(const struct ViewerSkin *item, char *model, size_t model_n, char *texture, size_t texture_n);
+// The file of a model / texture key: assets/<dir>/<key>.<ext>, or for a user-asset key ("user-assets/skins/<_id>/model", a
+// custom skin's, VIEWER_USER_ASSET_KEY) assets/<key>.<ext>. Caller frees; NULL without memory.
+char *cosmetic_asset_path(const char *dir, const char *key, const char *ext);
 
 // The look the player model wears: each index moves to the slot of its item's type, so v3.1.1
 // placements keep working (a v7 HEAD item in hatIndex, a BACK item in bodyIndex: KrunkNative

@@ -18,6 +18,10 @@
 //      removes nobody; a DEV's kick and ban remove the target, a DEV cannot kick herself, a missing
 //      uid removes nobody; /kick in chat still works; a moderator kicks ("Kicked by host", v10.0.3's
 //      canGlobalKick) but cannot ban or kick a DEV
+//   9. a custom game's host (accounts_host_for_test: no brain): the host kicks ("Kicked by host") but
+//      cannot ban; Transfer Host (action 8) hands it over ("You are now Host!" / "Host Transfered to
+//      {0}"), only the host may; past 5 transfers "This server exceeded Host Transfer limit" and the
+//      host stays; the host leaving passes it on (transferHostOnLeave on) or ends the game (off)
 // Run from the repository root: ./<build>/votekick_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -531,6 +535,71 @@ int main(void) {
     pump(5);
     CHECK(got_error(C, "Kicked by host") && !conn(C), "a moderator's kick from the list kicks Carol (\"Kicked by host\", game.kick)");
     conn(A)->acct.flags = 0;
+
+    // ---- 9. a custom game's host (v10.0.3 isHost: Kick, Transfer Host; deob-10.0.3.js:254169)
+    conn(B)->acct.flags = 0; // Bob is a plain account again
+    if (C->fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(C->fd);
+    if (D->fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(D->fd);
+    pump(10);
+    join(C);
+    join(D);
+    pump(30);
+    give_account(C, 204, 30, "CarolHost");
+    give_account(D, 205, 30, "DaveHost");
+    CHECK(conn(A) && conn(B) && conn(C) && conn(D), "four players for the host case");
+    accounts_host_for_test(conn(B), 1);
+    CHECK(accounts_is_custom_host(conn(B)) && !accounts_is_custom_host(conn(C)), "Bob hosts the custom game (the test hook)");
+    reset_received();
+    admin_action(B, conn(C)->id, 1); // the host's ban: a DEV's in KrunkNative
+    pump(5);
+    CHECK(conn(C) && got_chat(B, "Only DEV accounts can ban from the player list"), "the host's ban is refused (DEV only): Carol stays");
+    admin_action(B, conn(D)->id, 0);
+    pump(5);
+    CHECK(got_error(D, "Kicked by host") && !conn(D), "the host kicks Dave (\"Kicked by host\")");
+    if (D->fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(D->fd);
+    pump(10);
+    join(D);
+    pump(30);
+    give_account(D, 206, 30, "DaveAgain");
+    reset_received();
+    admin_action(C, conn(A)->id, 8); // not the host
+    pump(5);
+    CHECK(got_chat(C, "Only the host can transfer host") && accounts_is_custom_host(conn(B)), "only the host may transfer host");
+    admin_action(B, conn(C)->id, 8);
+    pump(5);
+    CHECK(accounts_is_custom_host(conn(C)) && !accounts_is_custom_host(conn(B)), "Transfer Host makes Carol the host");
+    CHECK(got_chat(C, "You are now Host!") && got_chat(B, "Host Transfered to CarolHost") && got_chat(A, "Host Transfered to CarolHost"),
+          "the new host reads \"You are now Host!\", everyone else \"Host Transfered to CarolHost\"");
+    // four more transfers reach the limit of 5 (hostTransferLimit, deob-10.0.3.js:22620); the sixth is refused
+    TestClient *hosts[2] = {C, B};
+    for (int t = 0; t < 4; t++) {
+        admin_action(hosts[t % 2], conn(hosts[(t + 1) % 2])->id, 8);
+        pump(5);
+    }
+    CHECK(accounts_is_custom_host(conn(C)), "after five transfers Carol hosts");
+    reset_received();
+    admin_action(C, conn(B)->id, 8);
+    pump(5);
+    CHECK(accounts_is_custom_host(conn(C)) && got_chat(A, "This server exceeded Host Transfer limit"),
+          "the sixth transfer is refused: \"This server exceeded Host Transfer limit\", Carol stays the host");
+    // the host leaves: on (transferHostOnLeave's default), with two or more players left, the oldest signed-in player hosts
+    accounts_host_for_test(conn(C), 1);
+    reset_received();
+    sandbox_disconnect(C->fd);
+    C->fd = -1;
+    pump(10);
+    accounts_tick_custom_for_test(); // accounts_tick runs it with a brain link only
+    pump(5);
+    CHECK(accounts_is_custom_host(conn(A)) && got_chat(A, "You are now Host!"), "the host leaves: Alice (the oldest player) hosts now");
+    // off (the pre-setting rule): the host leaving ends the custom game
+    accounts_host_for_test(conn(B), 0);
+    reset_received();
+    sandbox_disconnect(B->fd);
+    B->fd = -1;
+    pump(10);
+    accounts_tick_custom_for_test();
+    pump(5);
+    CHECK(!accounts_is_custom_host(conn(A)) && got_chat(A, "Host ended game"), "transferHostOnLeave off: the host leaving ends the game");
 
     for (int i = 0; i < CLIENTS; i++) {
         if (g_clients[i].fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(g_clients[i].fd);

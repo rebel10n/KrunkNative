@@ -493,22 +493,31 @@ void votekick_handle_kpd_apply(ClientConnection *client, const uint8_t *body, co
     accounts_kpd_apply(client, req.discord, req.reason);
 }
 
-// NET_EXT_ADMIN_ACTION (v10 ADMIN_ACTIONS from the player list's Kick / Ban). The sender's right is checked here from
-// the connection (never from the client's button), then the target is looked up by uid in this game:
+// NET_EXT_ADMIN_ACTION (v10 ADMIN_ACTIONS from the player list). The sender's right is checked here from the
+// connection (never from the client's button), then the target is looked up by uid in this game:
 //   - a DEV kicks or bans through the chat command layer, which checks the same right again;
 //   - the custom game's host kicks (action 0), and so does a moderator: v10.0.3 shows Kick for isHost || canGlobalKick
 //     (a role-2 moderator, deob-10.0.3.js:254169, 129046-129063) and a custom game has no vote kick, so the host is the
 //     one who removes a player (250341). The kicked player reads "Kicked by host" (game.kick, 222586-222588). A DEV
-//     cannot be kicked this way (v10's ADMIN script API refuses DEV targets, 211939).
-// Deliberate differences (doc/backend.md 8.5): Ban (action 1) stays a DEV's (a KrunkNative ban is a persistent account
-// ban; v10.0.3's host / moderator ban is this game's only, a list KrunkNative does not keep), and Transfer Host
-// (action 8) is not taken here (the host passes on leave, accounts.c acc_transfer_host). Anything else is refused with
+//     cannot be kicked this way (v10's ADMIN script API refuses DEV targets, 211939);
+//   - the host's Transfer Host (action 8, shown to the host only, 254169) hands the game to the target
+//     (accounts_transfer_host_to: a signed-in or guest player, within the transfer limit).
+// Deliberate difference (doc/backend.md 8.5): Ban (action 1) stays a DEV's. A KrunkNative ban is a persistent
+// account ban across the server; v10.0.3's host / moderator ban is that game's only, a list KrunkNative does not keep,
+// so the host's and the moderator's Ban is refused rather than turned into a server ban. Anything else is refused with
 // nothing changed.
 void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const uint16_t length) {
     if (!client || length < sizeof(NetAdminActionPacket)) return;
     NetAdminActionPacket req;
     memcpy(&req, body, sizeof(req));
-    if (req.action != 0 && req.action != 1) return; // kill / tp / bring stay chat commands
+    if (req.action != 0 && req.action != 1 && req.action != 8) return; // kill / tp / bring stay chat commands
+    if (req.action == 8) {
+        ClientConnection *target = vk_by_id((int) req.uid);
+        if (!accounts_is_custom_host(client)) vk_chat_to(client, "Only the host can transfer host");
+        else if (!target || target == client || !accounts_transfer_host_to(client, target))
+            server_log("[admin] %s: transfer host to uid %d refused", client->name, (int) req.uid);
+        return;
+    }
     if (net_client_is_dev(client)) {
         chat_command_admin_action(net_chat_host(), client->id, req.uid, req.action == 1); // 0: left, or the sender
         return;

@@ -246,6 +246,7 @@ void ocean_update(Scene *scene, Camera *camera, const float delta_ms) {
     Camera mirror = *camera;
     mirror.position.y = 2.0f * g_ocean.y - camera->position.y;
     mirror.rotation.x = -camera->rotation.x;
+    mirror.rotation.z = -camera->rotation.z; // y -> -y of Rz(z) Ry(y) Rx(x) is Rz(-z) Ry(y) Rx(-x): any roll (class_camera.h)
     mirror.aspect_override = viewport[3] > 0 ? (float) viewport[2] / (float) viewport[3] : 1.0f;
 
     gl_release_texture(g_ocean.color); // last frame's water draw left it on unit 0: not while drawing into it

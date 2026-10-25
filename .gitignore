@@ -70,3 +70,6 @@ perf.data*
 /data/coordinator.db*
 # kn_brain dev runs: the user-asset mirror's cache (user_assets.cache_dir)
 /cache/
+
+# Per-agent and integration build dirs (cmake --preset <p> -B <dir>)
+cmake-build-*/

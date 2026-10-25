@@ -1273,6 +1273,8 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
   (one clan per player, role 0 Recruit .. 3 Commander, clan XP/kills/deaths),
   `clan_requests`, `clan_messages`, `chat_messages`, `feed_posts` / `feed_comments`
   / `feed_likes`, `mail`, `reports`, `moderation_log`.
+* `player_titles` (the v10.0.3 titles an account owns, one row per (account, title) with its `source`
+  and store item `ref`; granted by Black Market items with a `title`): `0361_player_titles.sql`.
 * `player_badges` (earned badges.js indices), `challenges` (v7 challenge definitions: type,
   DAT / REW JSON, icon, name; seeded with a starting set), `player_challenges` (PV / PT per
   account, challenge and period: UTC day / week for daily / weekly), `player_medals` (medal
@@ -1410,6 +1412,8 @@ Other labels (request -> reply):
 | `["pi", listingId, uid, {op}]` | `["br", {f, i, sid, m, price} \| null, uid]` (client -> server `pi` is the purchase); the seller gets the "Item sold" mail, `econN` and `ua` |
 | `["fil", n, text, rarities, weapons, types, season, order]` / `["srt", n, text, rarities, ...]` | `["fr", n, listings\|null]` / `["str", n, inventory]` |
 | `["qsi", mode, skin, uid, amount, {op}]` (v7.1.4) / `["qsi", skin, uid, amount]` | `["qsr", {f, c, kr, j, jnk, sold, i: uid} \| null]` (KR = the item's `qsKR`, else `store.rarities[r].sell`; Junk = v10.0.3's rarity `scrap`, Contraband 5 / Unobtainable 50, 0.01 for `minQuickSell`, into the Junk wallet with reason `quicksell` (doc/v10/junk.md); mode 0 KR, 1 Junk, 2 destroy; amount 0 one, 1 all but one, 2 all; `j` the Junk balance after, `jnk` the Junk given; a noSale Black Market or opensea item is refused in every mode) |
+| `["pbm", skin, {op}]` | `["bmr", {item, kr, f, title?} \| null]`: v7.1.4's Black Market, a `blackM` item for its store `funds` KR if `checkReq` holds (`accAge`, `stats`), once per account ("You already own this item"); an item with a v10.0.3 `title` grants it too (`player_titles`, `0361_player_titles`; the reply's `title`, deob-10.0.3.js:152803-152806). v10's `POST /market/black-market/purchase` answers `{item, kr, funds, title?}` (v10_market.c) |
+| `["ttl"]` | `["ttl", [title id, ...]]`: the account's titles (`acc.titles`, setData slot 55; `player_titles`); the gapi profile's `player_titles` is the same list as `"87,90"` |
 | `["st", skin, range, captcha]` | `["gd", [{d, f: KR total, t: sales}]]` (range: `config.dataDateRanges` index or days) |
 | `["uml", playerId]` | `["ul", [{sk, skid, kr, c, ms, id}]]` (profile Listings tab) |
 | `["ri", name, id, captcha]` | `["trD", name, id, [myInventory, theirInventory]]` (items `{i, c, nt?}`, `nt` = not tradable) |
@@ -1467,7 +1471,9 @@ mod_id}`. `/api/mods` (published mods), `/api/assets?index=&cat=&username=&val=`
 `/api/search?type=map|mod&val=` (`{data, index: 0, error}`), `/api/streams`,
 `/api/prices` (v3.1.1 placeholders), and `GET /api/map-data?name=<map>|id=<map_id>`
 (alias `/api/published-map`): the published map JSON, for clients playing and game
-servers hosting community maps; 404 `{"error":"not_found"}`.
+servers hosting community maps; 404 `{"error":"not_found"}`. `&meta=1` (game servers)
+wraps it as `{"id": <map_id>, "map": <map JSON>}`: the id is v10.0.3's `customMapData.id`,
+which KrunkScript `player.giveSkin` checks (deob-10.0.3.js:208303).
 
 ### 7.6 Internal ops (game servers)
 
@@ -2079,7 +2085,7 @@ matchmaker on `004004` / `004006` and on a refused join key (9.4); `004004` on a
 * **Published (community DB) maps:** `config.customMap` (alias `mapName`) names the map to
   host. A map this server has (its own list incl. custom dirs / the command-line map, then
   a catalogue entry whose name or key is exactly that) is used directly; otherwise
-  server_bin fetches `GET <brain_http_url>/api/map-data?name=<customMap>` (svc-accounts;
+  server_bin fetches `GET <brain_http_url>/api/map-data?name=<customMap>&meta=1` (svc-accounts;
   worker thread, 10 s timeouts, <= 4 MiB, sanitised like v3.1.1 `sanitizeCustomMapJson`)
   and only then answers `host-reply` (404 -> `{"ok":false,"err":"map not found"}`).
   Clients that lack it get it through MAP_INFO / MAP_REQUEST / MAP_DATA as usual; the

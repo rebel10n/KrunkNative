@@ -7,6 +7,7 @@
 #include <ks_client.h>
 #include <ks_overlay.h>
 #include <camera_feel.h>
+#include <class_camera.h> // GAME.CAMERA moves CONTROLS' chain
 #include <html_dom.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -27,10 +28,8 @@ static struct {
     double move_x, move_y;             // RENDER.tmpMouse2 (the last mousemove's movement)
     double last_wx, last_wy;           // previous cursor callback (window coordinates)
     int have_last;
-    // GAME.CAMERA: the controls rig (object position / rotation, pchObjc pitch, camera rotation)
-    int detached;                      // game.detachedCam
-    vec3 rig_pos, rig_rot, inner_rot;
-    float rig_pitch;
+    // GAME.CAMERA: game.detachedCam; the controls chain it moves is the class camera's (class_camera.h)
+    int detached;
     int fov_set;                       // CAMERA.fov changed RENDER.camera.fov (restored on unload)
 } g_in;
 
@@ -232,15 +231,13 @@ static KsValue in_enable_default(KsScript *s, void *u, const KsValue *a, int n) 
 int ks_input_camera_detached(void) { return g_ksc.loaded && g_in.detached; }
 int ks_client_camera_detached(void) { return ks_input_camera_detached(); }
 
+// The camera is CONTROLS.object (position, rotation) > pchObjc > RENDER.camera, the class camera's chain
+// (client/include/class_camera.h). The client script's update runs after the game loop's camera block in
+// v10.0.3 (deob-10.0.3.js:222267-222270), so what it writes shows on this frame, attached or not.
 static KsValue cam_detach(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u; (void) a; (void) n;
-    if (!g_in.detached && g_ksc.client) {
-        // the rig keeps where the camera was
-        g_in.rig_pos = g_ksc.client->camera.position;
-        g_in.rig_rot = (vec3) {0.0f, g_ksc.client->camera.rotation.y, 0.0f};
-        g_in.rig_pitch = g_ksc.client->camera.rotation.x;
-        g_in.inner_rot = (vec3) {0};
-    }
+    // game.detachedCam = true (deob:210534-210538): the chain stays; the camera block stops moving it
+    if (!g_in.detached && g_ksc.client) class_camera_ks_detach(g_ksc.client);
     g_in.detached = 1;
     return ks_undef();
 }
@@ -251,41 +248,28 @@ static KsValue cam_attach(KsScript *s, void *u, const KsValue *a, int n) {
     return ks_undef();
 }
 
-// move(x, y, z): controls.moveCam -> object.position.set
+// move(x, y, z): controls.moveCam -> object.position.set (deob:210544-210551)
 static KsValue cam_move(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u;
-    g_in.rig_pos = (vec3) {(float) ksc_num_or(ksc_arg(a, n, 0), 0), (float) ksc_num_or(ksc_arg(a, n, 1), 0), (float) ksc_num_or(ksc_arg(a, n, 2), 0)};
-    if (g_ksc.client && !g_in.detached) g_ksc.client->camera.position = g_in.rig_pos;
+    const vec3 v = {(float) ksc_num_or(ksc_arg(a, n, 0), 0), (float) ksc_num_or(ksc_arg(a, n, 1), 0), (float) ksc_num_or(ksc_arg(a, n, 2), 0)};
+    class_camera_ks_set_position(g_ksc.client, 7, v);
     return ks_undef();
 }
 
-// rotate(yaw, pitch, roll): RENDER.camera.rotation (y, x, z) inside the rig
+// rotate(a, b, c): controls.rotateCam -> camera.rotation.y = a, .x = b, .z = c (deob:210553-210560, 236102-236106)
 static KsValue cam_rotate(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u;
-    g_in.inner_rot = (vec3) {(float) ksc_num_or(ksc_arg(a, n, 1), 0), (float) ksc_num_or(ksc_arg(a, n, 0), 0), (float) ksc_num_or(ksc_arg(a, n, 2), 0)};
+    const vec3 euler = {(float) ksc_num_or(ksc_arg(a, n, 1), 0), (float) ksc_num_or(ksc_arg(a, n, 0), 0), (float) ksc_num_or(ksc_arg(a, n, 2), 0)};
+    class_camera_ks_rotate(g_ksc.client, euler);
     return ks_undef();
 }
 
-// lookAt(x, y, z): rig yaw / pitch toward the point, camera rotation and offset reset
+// lookAt(x, y, z): object.rotation.y / pchObjc.rotation.x toward the point from object.position, the
+// camera's own rotation and position back to 0 (deob:210561-210577)
 static KsValue cam_look_at(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u;
-    if (!g_ksc.client) return ks_undef();
-    const vec3 from = g_in.detached ? g_in.rig_pos : g_ksc.client->camera.position;
-    const double dx = from.x - ksc_num_or(ksc_arg(a, n, 0), 0);
-    const double dy = from.y - ksc_num_or(ksc_arg(a, n, 1), 0);
-    const double dz = from.z - ksc_num_or(ksc_arg(a, n, 2), 0);
-    const double flat = sqrt(dx * dx + dz * dz);
-    double pitch = -atan2(dy, flat), yaw = -atan2(-dx, dz);
-    if (pitch != pitch) pitch = 0;
-    if (yaw != yaw) yaw = 0;
-    g_in.rig_rot.y = (float) yaw;
-    g_in.rig_pitch = (float) pitch;
-    g_in.inner_rot = (vec3) {0};
-    if (!g_in.detached) {
-        g_ksc.client->camera.rotation.x = (float) pitch;
-        g_ksc.client->camera.rotation.y = (float) yaw;
-        if (g_ksc.client->me) g_ksc.client->me->direction = (vec2) {(float) pitch, (float) yaw};
-    }
+    const vec3 target = {(float) ksc_num_or(ksc_arg(a, n, 0), 0), (float) ksc_num_or(ksc_arg(a, n, 1), 0), (float) ksc_num_or(ksc_arg(a, n, 2), 0)};
+    class_camera_ks_look_at(g_ksc.client, target);
     return ks_undef();
 }
 
@@ -318,26 +302,24 @@ static KsValue cam_env_zone(KsScript *s, void *u, const KsValue *a, int n) {
     return ks_num(-1); // RENDER.lastEnvId: environment zones are not tracked by the KN renderer yet
 }
 
-static vec3 *cam_pos_ref(void) {
-    if (g_in.detached || !g_ksc.client) return &g_in.rig_pos;
-    return &g_ksc.client->camera.position;
+// position.x / y / z: controls.object.position; rotation.x / y / z: controls.object.rotation (deob:210599-210675)
+static vec3 cam_pos_value(void) {
+    return g_ksc.client ? class_camera_ks_position(g_ksc.client) : (vec3) {0};
 }
 
 static vec3 cam_rot_value(void) {
-    if (g_in.detached || !g_ksc.client) return g_in.rig_rot;
-    return (vec3) {0.0f, g_ksc.client->camera.rotation.y, 0.0f}; // object.rotation: the yaw object
+    return g_ksc.client ? class_camera_ks_rotation() : (vec3) {0};
 }
 
-#define CAM_AXIS(name, field)                                                                         \
+#define CAM_AXIS(name, field, bit)                                                                    \
     static KsValue cam_pos_##name(KsScript *s, void *u, const KsValue *a, int n) {                    \
         (void) s; (void) u; (void) a; (void) n;                                                       \
-        return ks_num(cam_pos_ref()->field);                                                          \
+        return ks_num(cam_pos_value().field);                                                         \
     }                                                                                                 \
     static KsValue cam_pos_set_##name(KsScript *s, void *u, const KsValue *a, int n) {                \
         (void) s; (void) u;                                                                           \
         const float v = (float) ksc_float(ksc_arg(a, n, 0));                                          \
-        g_in.rig_pos.field = v;                                                                       \
-        cam_pos_ref()->field = v;                                                                     \
+        class_camera_ks_set_position(g_ksc.client, 1 << (bit), (vec3) {v, v, v});                     \
         return ks_undef();                                                                            \
     }                                                                                                 \
     static KsValue cam_rot_##name(KsScript *s, void *u, const KsValue *a, int n) {                    \
@@ -346,12 +328,12 @@ static vec3 cam_rot_value(void) {
     }                                                                                                 \
     static KsValue cam_rot_set_##name(KsScript *s, void *u, const KsValue *a, int n) {                \
         (void) s; (void) u;                                                                           \
-        g_in.rig_rot.field = (float) ksc_float(ksc_arg(a, n, 0));                                     \
+        class_camera_ks_set_rotation(g_ksc.client, bit, (float) ksc_float(ksc_arg(a, n, 0)));         \
         return ks_undef();                                                                            \
     }
-CAM_AXIS(x, x)
-CAM_AXIS(y, y)
-CAM_AXIS(z, z)
+CAM_AXIS(x, x, 0)
+CAM_AXIS(y, y, 1)
+CAM_AXIS(z, z, 2)
 
 void ks_input_api(KsApiImpl *api) {
     api[KS_API_INPUTS_KEYDOWN].fn = in_key_down;
@@ -381,15 +363,10 @@ void ks_input_api(KsApiImpl *api) {
     api[KS_API_CAMERA_ROTATION_Z] = (KsApiImpl) {cam_rot_z, cam_rot_set_z};
 }
 
-// The detached rig replaces the camera pose the engine computed (index.js skips moveCam /
-// rotateCam while Game.detachedCam). Euler composition as the renderer's camera: yaw, then
-// pitch, then the inner camera rotation.
+// After the camera pose: a detached chain without a camera block this frame (no life) is posed here; the
+// class camera posed it otherwise.
 void ks_input_apply_camera(Client *client) {
-    if (!g_in.detached) return;
-    client->camera.position = g_in.rig_pos;
-    client->camera.rotation.x = g_in.rig_rot.x + g_in.rig_pitch + g_in.inner_rot.x;
-    client->camera.rotation.y = g_in.rig_rot.y + g_in.inner_rot.y;
-    client->camera.rotation.z = g_in.rig_rot.z + g_in.inner_rot.z;
+    if (g_in.detached) class_camera_ks_pose(client);
 }
 
 // ---------------------------------------------------------------------------
