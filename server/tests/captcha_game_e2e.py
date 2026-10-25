@@ -164,19 +164,30 @@ def start_brain(log, extra):
     return p, (int(m.group(1)) if m else None)
 
 
-def start_node(brain_port, node_id, port):
-    log = os.path.join(WORK, node_id + ".log")
-    cfg = os.path.join(WORK, node_id + ".json")
-    with open(cfg, "w") as f:
-        json.dump({"gameserver": {"node_id": node_id, "name": "captcha e2e " + node_id, "region": "local", "listen_port": port,
-                                  "public_host": "127.0.0.1", "brain_url": "ws://127.0.0.1:%d/mm/internal/ws" % brain_port,
-                                  "brain_secret": SECRET, "modes": [0], "maps": ["Burg"], "max_players": 8,
-                                  "idle_kick_seconds": 0, "idle_menu_kick_seconds": 0}}, f)
-    p = subprocess.Popen([os.path.join(BUILD, "server_bin"), "--headless", "--config", cfg, "--cfg", "none"], cwd=ROOT,
-                         stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
-    procs.append(p)
-    wait_for(lambda: "welcomed" in read(log), 20)
-    wait_for(lambda: http(brain_port, "/mm/game-list")[1].get("games") if isinstance(http(brain_port, "/mm/game-list")[1], dict) else None, 20)
+def start_node(brain_port, node_id, port=None):
+    # Pick the port immediately before each launch. A port reserved while the brain and the first
+    # client start is often taken by another test by the time the second node starts; retry a bind
+    # race with a fresh port instead of reporting NoAvailableServers from a dead node.
+    for _ in range(4):
+        if port is None:
+            port = kn_proto.free_ports(1)[0]
+        log = os.path.join(WORK, node_id + ".log")
+        cfg = os.path.join(WORK, node_id + ".json")
+        with open(cfg, "w") as f:
+            json.dump({"gameserver": {"node_id": node_id, "name": "captcha e2e " + node_id, "region": "local", "listen_port": port,
+                                      "public_host": "127.0.0.1", "brain_url": "ws://127.0.0.1:%d/mm/internal/ws" % brain_port,
+                                      "brain_secret": SECRET, "modes": [0], "maps": ["Burg"], "max_players": 8,
+                                      "idle_kick_seconds": 0, "idle_menu_kick_seconds": 0}}, f)
+        p = subprocess.Popen([os.path.join(BUILD, "server_bin"), "--headless", "--config", cfg, "--cfg", "none"], cwd=ROOT,
+                             stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        procs.append(p)
+        wait_for(lambda: "welcomed" in read(log) or "Cannot listen" in read(log), 20)
+        text = read(log)
+        if "Cannot listen" not in text:
+            wait_for(lambda: http(brain_port, "/mm/game-list")[1].get("games") if isinstance(http(brain_port, "/mm/game-list")[1], dict) else None, 20)
+            return p, log
+        stop(p)
+        port = None
     return p, log
 
 
@@ -278,14 +289,14 @@ def main():
         if not os.access(b, os.X_OK):
             print("captcha_game_e2e: no %s: skipped" % b)
             return 77
-    node_port, node2_port, dead_port = kn_proto.free_ports(3)
+    dead_port = kn_proto.free_ports(1)[0]
     try:
         brain_log = os.path.join(WORK, "brain.log")
         brain, brain_port = start_brain(brain_log, ["--captcha.enforce=true"])
         check("kn_brain starts with captcha.enforce on", brain_port is not None and "captcha enforced" in read(brain_log), read(brain_log)[-300:])
         if brain_port is None:
             return 1
-        node, node_log = start_node(brain_port, "CPTA", node_port)
+        node, node_log = start_node(brain_port, "CPTA")
         protocol(brain_port, node_log)
 
         log = client_run(brain_port, dead_port)
@@ -303,7 +314,7 @@ def main():
         # captcha.enforce off (the default): nothing is asked
         brain_log2 = os.path.join(WORK, "brain-off.log")
         brain2, brain_port2 = start_brain(brain_log2, [])
-        node2, node2_log = start_node(brain_port2, "CPTB", node2_port)
+        node2, node2_log = start_node(brain_port2, "CPTB")
         st, rep = seek(brain_port2)
         check("off: seek-game needs no captcha", st == 200 and isinstance(rep, dict) and rep.get("clientId"), "HTTP %d %s" % (st, rep))
         if st == 200:

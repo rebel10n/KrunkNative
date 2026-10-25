@@ -303,8 +303,15 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int rc = 0;
-    for (size_t i = 0; i < BRAIN_MODULE_COUNT; i++) {
+    int rc = kn_http_server_listen(b->http);
+    if (rc) {
+        KN_FATAL("brain", "cannot listen on %s:%d", host, port);
+    } else {
+        /* brain.port=0 is used by tests and local tools: resolve the default public URL before
+         * federation's first heartbeat and any ping-list request (mm_settings_bound). */
+        mm_settings_bound(b);
+    }
+    for (size_t i = 0; !rc && i < BRAIN_MODULE_COUNT; i++) {
         const BrainModule *m = &k_brain_modules[i];
         if (!brain_module_enabled(m->name)) {
             g_inited = i + 1;
@@ -316,10 +323,6 @@ int main(int argc, char **argv) {
             break;
         }
         g_inited = i + 1;
-    }
-    if (!rc && kn_http_server_listen(b->http)) {
-        KN_FATAL("brain", "cannot listen on %s:%d", host, port);
-        rc = 1;
     }
     if (!rc) {
         /* tests parse "listening on http://H:PORT (ws" from this line (brain.port=0): keep the format */

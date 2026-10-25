@@ -95,6 +95,14 @@ const MmSettings *mm_settings(void) {
     return &g_mm;
 }
 
+void mm_settings_bound(Brain *b) {
+    if (kn_config_has(b->cfg, "brain.public_url") || kn_config_int(b->cfg, "brain.port", 5050) != 0) return;
+    char url[256];
+    snprintf(url, sizeof(url), "http://%s:%d", kn_config_str(b->cfg, "brain.host", "127.0.0.1"),
+             kn_http_server_port(b->http));
+    copy_str(g_mm.public_url, sizeof(g_mm.public_url), url);
+}
+
 /* The CORS headers the v3.1.1 deployment's nginx adds to every brain response
  * ("always", ansible/files/nginx/cors.conf). Access-Control-Allow-Origin comes from
  * knsvc (brain.cors_origins) when the request carries an Origin; without one the

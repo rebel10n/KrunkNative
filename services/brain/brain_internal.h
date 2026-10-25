@@ -30,6 +30,10 @@ typedef struct MmSettings {
 } MmSettings;
 
 int mm_settings_load(Brain *b);
+/* After kn_http_server_listen: fill in the default public_url's real port when brain.port=0. An
+ * explicitly configured brain.public_url is never changed. Must run before modules register the
+ * brain in federation, so their first heartbeat and /mm/ping-list do not advertise port zero. */
+void mm_settings_bound(Brain *b);
 const MmSettings *mm_settings(void);
 /* Security (doc/v7/command-auth.md): the Bearer brain.internal_secret gate of /mm/internal/ws and
  * /mm/admin/*. Rate-limited per address; a blank secret refuses everyone; the development default

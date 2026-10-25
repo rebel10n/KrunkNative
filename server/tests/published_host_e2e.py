@@ -112,24 +112,36 @@ async def publish(port, account, mapnames):
 
 
 def server(tag, brain_port, game_port, extra, cache, brain_url=None, cfg_text=None):
-    """One server_bin (brain-linked unless brain_url says otherwise); its log path."""
-    log = os.path.join(WORK, tag + ".log")
-    gs = os.path.join(WORK, tag + ".json")
-    cfg = {"node_id": "PUB" + tag, "name": "published host e2e " + tag, "region": "local", "listen_port": game_port,
-           "public_host": "127.0.0.1", "brain_url": brain_url or "ws://127.0.0.1:%d/mm/internal/ws" % brain_port,
-           "brain_secret": SECRET, "modes": ["ffa"], "max_players": 8, "shutdown_grace": 0, "idle_kick_seconds": 0,
-           "finder_url": "http://127.0.0.1:%d" % brain_port}
-    with open(gs, "w") as f:
-        json.dump({"gameserver": cfg}, f)
-    cfg_arg = "none"
-    if cfg_text:
-        cfg_arg = os.path.join(WORK, tag + ".cfg")
-        with open(cfg_arg, "w") as f:
-            f.write(cfg_text)
-    env = dict(os.environ, XDG_CACHE_HOME=cache)
-    p = subprocess.Popen([os.path.join(BUILD, "server_bin"), "--headless", "--config", gs, "--cfg", cfg_arg] + extra, cwd=ROOT,
-                         stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
-    procs.append(p)
+    """One server_bin (brain-linked unless brain_url says otherwise); its log path.
+
+    The port is chosen immediately before launch and retried on a bind race: these tests start
+    several servers over a few minutes, so an import-time reservation is not enough.
+    """
+    for _ in range(4):
+        if game_port is None:
+            game_port = kn_proto.free_ports(1)[0]
+        log = os.path.join(WORK, tag + ".log")
+        gs = os.path.join(WORK, tag + ".json")
+        cfg = {"node_id": "PUB" + tag, "name": "published host e2e " + tag, "region": "local", "listen_port": game_port,
+               "public_host": "127.0.0.1", "brain_url": brain_url or "ws://127.0.0.1:%d/mm/internal/ws" % brain_port,
+               "brain_secret": SECRET, "modes": ["ffa"], "max_players": 8, "shutdown_grace": 0, "idle_kick_seconds": 0,
+               "finder_url": "http://127.0.0.1:%d" % brain_port}
+        with open(gs, "w") as f:
+            json.dump({"gameserver": cfg}, f)
+        cfg_arg = "none"
+        if cfg_text:
+            cfg_arg = os.path.join(WORK, tag + ".cfg")
+            with open(cfg_arg, "w") as f:
+                f.write(cfg_text)
+        env = dict(os.environ, XDG_CACHE_HOME=cache)
+        p = subprocess.Popen([os.path.join(BUILD, "server_bin"), "--headless", "--config", gs, "--cfg", cfg_arg] + extra, cwd=ROOT,
+                             stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
+        procs.append(p)
+        wait_for(lambda: "Cannot listen" in read(log) or re.search(r"Loaded map .+?, mode", read(log)), 25)
+        if "Cannot listen" not in read(log):
+            return p, log
+        stop(p)
+        game_port = None
     return p, log
 
 
@@ -173,7 +185,7 @@ CLIENT_SCRIPT = """0 menu
 """
 
 
-def run_client(brain_port, account, token, good, spec):
+def run_client(brain_port, account, token, good, spec, game_id=None):
     cfg = os.path.join(WORK, "client-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
     for k, v in (("krunker_username", account), ("krunker_token", token), ("knRuleset", "v10")):
@@ -188,6 +200,11 @@ def run_client(brain_port, account, token, good, spec):
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port})
+    if game_id:
+        # A published map has no official mapIndex, so the default Quickplay dsma filter must not find it
+        # (doc/backend.md: a requested game is never filtered). This test is about hosting and the Host flow,
+        # not Quickplay: join the listed lobby by id instead of relying on the launch's rotation seek.
+        env["KRUNKNATIVE_GAME"] = game_id
     log = os.path.join(WORK, "client.log")
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(BUILD, "client_bin")], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -214,7 +231,7 @@ def main():
     dbcfg = json.loads(r.stdout)
     env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, **{"KN_DATABASE_" + k.upper(): str(v) for k, v in dbcfg.items()})
     brain_log = os.path.join(WORK, "brain.log")
-    ports = kn_proto.free_ports(6)
+    dead = kn_proto.free_ports(1)[0]
     try:
         subprocess.run([os.path.join(BUILD, "services/brain/kn_brain"), "--migrate-only"], cwd=ROOT, env=env, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -237,7 +254,7 @@ def main():
         cache_a = os.path.join(WORK, "cache-a")
 
         # A: the command line's map argument; a client joins it and opens the Host Game flow
-        a, log_a = server("A", port, ports[0], [spec], cache_a)
+        a, log_a = server("A", port, None, [spec], cache_a)
         check("A: the map argument is fetched from the brain", wait_for(lambda: "[maps] published map '%s' by %s fetched from the brain" % (good, account) in read(log_a), 20),
               read(log_a)[-600:])
         fetched = re.search(r"\[maps\] published map '%s' by %s fetched from the brain \(map id (\d+)\)" % (re.escape(good), re.escape(account)), read(log_a))
@@ -246,7 +263,7 @@ def main():
         cached = os.path.join(cache_a, "krunknative", "published-maps", "%s~%s.json" % (account.lower(), good.lower()))
         check("A: the checked copy is cached on disk", os.path.exists(cached), cached)
         check("A: its lobby is listed", wait_for(lambda: len(lobbies(port)) == 1, 20), str(lobbies(port)))
-        text = run_client(port, account, token, good, spec)
+        text = run_client(port, account, token, good, spec, game_id=lobbies(port)[0] if lobbies(port) else None)
         playing = script_line(text, "text", "playing")
         check("the client joined A and plays GOOD", playing.endswith("on " + good), playing)
         check("Games window Host button on GOOD: the Host Game window opens with it", "selectHostMap: %s -> host flow" % good in text)
@@ -258,7 +275,7 @@ def main():
         wait_for(lambda: not lobbies(port), 20)
 
         # B: the flow's --set gameserver.maps=...; then the brain's host request
-        b, log_b = server("B", port, ports[1], ["--set", "gameserver.maps=" + spec], os.path.join(WORK, "cache-b"))
+        b, log_b = server("B", port, None, ["--set", "gameserver.maps=" + spec], os.path.join(WORK, "cache-b"))
         check("B: --set gameserver.maps=%s plays GOOD" % spec, loaded_map(log_b) == good, read(log_b)[-600:])
         check("B: its lobby is listed", wait_for(lambda: len(lobbies(port)) == 1, 20), str(lobbies(port)))
         code, reply = http(port, "/mm/host-game?token=" + token, {"config": {"customMap": "published:%s/Nope%s" % (account, stamp)}})
@@ -274,14 +291,14 @@ def main():
 
         # C: server.cfg's mapcycle (a missing entry is skipped with a log line)
         missing = "published:%s/Nope%s" % (account, stamp)
-        c, log_c = server("C", port, ports[2], [], os.path.join(WORK, "cache-c"), cfg_text="mapcycle %s,%s\n" % (spec, missing))
+        c, log_c = server("C", port, None, [], os.path.join(WORK, "cache-c"), cfg_text="mapcycle %s,%s\n" % (spec, missing))
         check("C: server.cfg mapcycle %s,%s plays GOOD" % (spec, missing), loaded_map(log_c) == good, read(log_c)[-600:])
         check("C: the missing entry is skipped with a log line", "gameserver.maps: published map '%s' skipped (map not found)" % missing in read(log_c),
               read(log_c)[-600:])
         stop(c)
 
         # D: a map the brain does not have
-        d, log_d = server("D", port, ports[3], ["published:%s/Nope%s" % (account, stamp)], os.path.join(WORK, "cache-d"))
+        d, log_d = server("D", port, None, ["published:%s/Nope%s" % (account, stamp)], os.path.join(WORK, "cache-d"))
         played = loaded_map(log_d)
         check("D: a missing published map: a log line, then the configured maps",
               "unavailable: map not found" in read(log_d) and "playing the configured maps instead" in read(log_d) and played and played != good,
@@ -289,8 +306,7 @@ def main():
         stop(d)
 
         # E: the brain cannot be reached; A's disk cache has the map
-        dead = ports[5]
-        e, log_e = server("E", port, ports[4], [spec], cache_a, brain_url="ws://127.0.0.1:%d/mm/internal/ws" % dead)
+        e, log_e = server("E", port, None, [spec], cache_a, brain_url="ws://127.0.0.1:%d/mm/internal/ws" % dead)
         check("E: the brain is unreachable: the cached copy plays",
               loaded_map(log_e) == good and "playing the cached copy" in read(log_e), read(log_e)[-600:])
         stop(e)
