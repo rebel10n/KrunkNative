@@ -1233,7 +1233,7 @@ void client_load_map(Client *client) {
     zombies_render_load(client->scene, client->game.map); // WP-H machine weapons, beams, airdrops (zombies_render.c)
     prize_wheel_render_load(client->scene, client->game.map); // the prize wheels' canvas planes (prize_wheel_render.c)
     wars_banners_load(client->scene, client->game.map); // the Turf Wars banners' nodes (wars_banners.c)
-    client_event_objects_load(client); // the EVENT prefab's meshes, in the last "start"'s state (event_objects.c)
+    client_event_objects_load(client); // the EVENT prefab's objects, in the last "start"'s state (event_objects.c)
 }
 
 void client_unload_map(Client *client) {
