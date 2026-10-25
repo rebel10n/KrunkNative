@@ -18,6 +18,8 @@ set(KN_BRAIN_SOURCES
     ranked_notice.c                 # the queued-for-ranked notice's social frame (pure)
     # svc-accounts sources
     accounts.c
+    account_life.c                # v10.0.3 Account Security / Privacy / Twitch (0359), raids.c's record (0360)
+    raids.c                       # v10.0.3's raid record: stats commits, account raidStats, the raid leaderboards
     social_ws.c
     social_eb.c
     social_gapi.c
@@ -531,6 +533,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/eggs_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_eggs PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;events")
+    # v10.0.3's account lifecycle and raid record (account_life.c, raids.c, 0359 / 0360):
+    # password shapes and clock, deletion request / cancel / sweep, Twitch handlers, the raid record
+    add_test(NAME brain_account_life
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_life_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_account_life PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;accounts")
     # v10 lottery (lottery.c, 0348_lottery): the guest view, skin / Junk / RP entries, the timer's draw
     add_test(NAME brain_lottery
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py

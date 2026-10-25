@@ -6,6 +6,7 @@
  * Protocol: doc/backend.md "Accounts & social socket".
  */
 #include "acct_internal.h"
+#include "raids.h"
 #include "hot.h"
 #include "live_trade.h" /* the game server's live trade ops: trade_inventories, live_trade (economy.c) */
 #include "node_events.h" /* the game servers' v10.0.3 event ops: turf_clan, map_spin, studio_game, studio_charge */
@@ -797,6 +798,7 @@ typedef struct OpCtx {
     char token[80];
     char *progress; /* WP-E part 2c: the commit's P_PROGRESS payload (op "stats") */
     char *items;    /* the commit's itemRewards (v10.0.3 event kill pools), JSON, NULL none */
+    cJSON *raid;    /* the commit's raid run (v10.0.3 raid record, raids.c), NULL none */
     char match[160];
 } OpCtx;
 
@@ -812,6 +814,7 @@ static void op_ctx_free(OpCtx *o) {
     }
     free(o->progress);
     free(o->items);
+    cJSON_Delete(o->raid);
     free(o);
 }
 
@@ -983,6 +986,22 @@ void acct_change_password(int64_t id, const char *old_pass, const char *new_pass
     char ids[24];
     static const kn_sql q = {.any = "SELECT password_hash FROM accounts WHERE id = $1"};
     kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(ids, id)), password_lookup_done, o);
+}
+
+/* Change password with the session's proof instead of the old one (v10.0.3's Account Security: "upp" with the new
+ * password, its repeat and the refresh token, deob-10.0.3.js:244645-244650; social_data.c sh_password checks the token
+ * is the socket's own session). Every other session revoked, one fresh session returned, as acct_change_password. */
+void acct_change_password_session(int64_t id, const char *new_pass, AcctReplyFn cb, void *ud) {
+    const char *err = acct_validate_password(new_pass);
+    if (err) {
+        cb(ud, err, NULL);
+        return;
+    }
+    OpCtx *o = op_new(cb, ud, "password");
+    if (!o) return;
+    o->id = id;
+    o->pass_new = strdup(new_pass);
+    if (!o->pass_new || acct_hash_async(o->pass_new, NULL, password_rehashed, o) != 0) op_reply(o, "Server busy, try again.", NULL);
 }
 
 void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud) {
@@ -1213,6 +1232,8 @@ static void op_stats_done(kn_db_result *res, void *ud) {
     o->progress = NULL;
     char *items = o->items;
     o->items = NULL;
+    cJSON *raid = o->raid;
+    o->raid = NULL;
     char match[sizeof o->match];
     snprintf(match, sizeof match, "%s", o->match);
     const int64_t id = o->id;
@@ -1220,8 +1241,10 @@ static void op_stats_done(kn_db_result *res, void *ud) {
     cJSON_Delete(account);
     if (progress && !duplicate) progress_run(id, progress); /* WP-E part 2c: challenges, medals, badges */
     if (items && !duplicate) kill_items_grant(id, items, match);
+    if (raid && !duplicate) raids_record(id, raid); /* v10.0.3's raid record, once per match (raids.c) */
     free(progress);
     free(items);
+    cJSON_Delete(raid);
 }
 
 static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
@@ -1235,6 +1258,8 @@ static int op_stats(const cJSON *args, AcctReplyFn cb, void *ud) {
     o->progress = progress_payload(args);
     const cJSON *items = cJSON_GetObjectItemCaseSensitive(args, "itemRewards");
     if (cJSON_IsArray(items) && cJSON_GetArraySize(items) > 0) o->items = kn_json_print(items);
+    const cJSON *raid = cJSON_GetObjectItemCaseSensitive(args, "raid");
+    if (cJSON_IsObject(raid)) o->raid = cJSON_Duplicate(raid, 1);
     snprintf(o->match, sizeof o->match, "%s", kn_json_str(args, "match", ""));
     cJSON *p = stats_args(args);
     char *text = kn_json_print(p);
