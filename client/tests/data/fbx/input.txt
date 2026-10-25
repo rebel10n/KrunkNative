@@ -1,0 +1,2 @@
+100 models @fbx
+200 quit

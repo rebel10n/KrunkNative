@@ -1532,6 +1532,10 @@ else ()
             add_test(NAME bp_scenario_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/bp_scenario_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(bp_scenario_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # fbx_class_model_e2e: an FBX class model in an offline third-person game (client/tests/fbx_class_model_e2e.py)
+            add_test(NAME fbx_class_model_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/fbx_class_model_e2e.py
+                     $<TARGET_FILE:client_bin>)
+            set_tests_properties(fbx_class_model_e2e PROPERTIES TIMEOUT 180 LABELS "client;e2e")
         endif ()
     endif ()
 

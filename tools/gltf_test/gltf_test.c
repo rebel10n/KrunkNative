@@ -28,6 +28,7 @@
 #include <ruleset.h>
 #include <skin_fx.h>
 #include <skin_video.h>
+#include <user_asset.h>
 #include <user_asset_path.h>
 #include "../../client/src/viewer/viewer_store.h"
 #include <math.h>
@@ -578,7 +579,8 @@ static void check_custom_skin_assets(void) {
     CHECK(ua && regular && !strcmp(ua + strlen(base), "user-assets/skins/kntestcustom/model.obj") && !strcmp(regular + strlen(base), "models/hats/hat_1.obj"),
           "cosmetic_asset_path (%s, %s)", ua ? ua : "-", regular ? regular : "-");
     CHECK(user_asset_rel_ok("skins/kntestcustom/model.obj") && user_asset_rel_ok("skins/10000009/texture.png") &&
-          user_asset_rel_ok("skins/x/texture_e.png") && user_asset_rel_ok("skins/x/model.glb") && !user_asset_rel_ok("skins/x/model.fbx"),
+          user_asset_rel_ok("skins/x/texture_e.png") && user_asset_rel_ok("skins/x/model.glb") && user_asset_rel_ok("skins/x/model.fbx") &&
+          !user_asset_rel_ok("skins/x/model.exe"),
           "custom skin models and textures are user assets");
     CHECK(viewer_skin(812) && (viewer_skin(812)->flags & VS_FLIP_ANIM) && !(viewer_skin(887)->flags & VS_FLIP_ANIM), "flipAnim: Steelfang 812");
 
@@ -612,6 +614,51 @@ static void check_custom_skin_assets(void) {
     if (skins_dir) remove_dir(skins_dir); // only when the fixture made it (a non-empty folder stays)
     free(skins_dir);
     free(dir), free(src_model), free(src_tex), free(tex_path), free(ua), free(regular);
+}
+
+// FBX class models (client/src/fbx_gltf.c): the ufbx conversion feeds the same glTF path as GLB
+static void check_fbx_models(void) {
+    GltfModel *cube = gltf_model_load("client/tests/data/fbx/cube.fbx");
+    CHECK(cube != NULL, "the FBX cube loads");
+    if (cube) {
+        GltfInstance *inst = gltf_instance_create(cube, 1.0f);
+        CHECK(inst != NULL, "the FBX cube instantiates");
+        if (inst) {
+            CHECK(inst->mesh_count == 1, "the cube has one mesh (got %zu)", inst->mesh_count);
+            CHECK(!gltf_model_animated(cube), "the cube has no clips");
+            CHECK(inst->meshes[0]->geometry->bound_radius > 0.0f, "the cube has bounds");
+            gltf_instance_fini(inst);
+        }
+    }
+    GltfModel *sausage = gltf_model_load("client/tests/data/fbx/sausage.fbx");
+    CHECK(sausage != NULL, "the FBX skinned model loads");
+    if (sausage) {
+        CHECK(gltf_model_animated(sausage), "the skinned FBX has clips");
+        GltfInstance *inst = gltf_instance_create(sausage, 1.0f);
+        CHECK(inst != NULL, "the skinned FBX instantiates");
+        if (inst) {
+            const size_t nodes = gltf_instance_node_count(inst);
+            CHECK(nodes > 2, "the FBX skeleton is in the node list (got %zu)", nodes);
+            MeshTransform *before = calloc(nodes, sizeof(MeshTransform));
+            MeshTransform *after = calloc(nodes, sizeof(MeshTransform));
+            gltf_instance_play_clip(inst, "Skeleton|Spin", 0);
+            gltf_instance_update(inst, 0.0);
+            for (size_t n = 0; n < nodes; n++) {
+                const MeshTransform *t = gltf_instance_node(inst, n);
+                if (t) before[n] = *t;
+            }
+            gltf_instance_update(inst, 0.5);
+            int moved = 0;
+            for (size_t n = 0; n < nodes; n++) {
+                const MeshTransform *t = gltf_instance_node(inst, n);
+                if (t) after[n] = *t;
+                if (memcmp(&before[n], &after[n], sizeof(MeshTransform))) moved = 1;
+            }
+            CHECK(moved, "the baked Spin clip moves the skeleton");
+            free(before); free(after);
+            gltf_instance_fini(inst);
+        }
+    }
 }
 
 int main(int argc, char **argv) {
@@ -657,6 +704,7 @@ int main(int argc, char **argv) {
     check_shot_sounds();
     check_skin_sounds();
     check_custom_skin_assets();
+    check_fbx_models();
     check_meshopt_models();
     check_material_extras();
 

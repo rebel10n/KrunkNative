@@ -6,7 +6,7 @@
 static const char *const k_files[] = {
     "texture.png", "thumb.png", "model.obj", "model.png", "model_e.png", "model_l.png", "model_n.png",
     "model_p.png", // a paint's mask (paint.mask.src "<asset>/model_p": the Turf Wars banners, deob-10.0.3.js:214990)
-    "model.gltf", "model.glb", "sound.mp3", "video.mp4", "data.json", "mod.zip",
+    "model.gltf", "model.glb", "model.fbx", "sound.mp3", "video.mp4", "data.json", "mod.zip",
     "video.mp4.knv", // not Krunker's: KrunkNative's frames of video.mp4 (knv.h), made by the brain's mirror
 };
 
@@ -22,7 +22,7 @@ static int digits(const char *s, const size_t n) {
 // :233093), the texture and its glow map (customTextures texSrc ".../texture" + "_e", :194710, :231924), and the shot /
 // swap / inspect sounds ("skins/" + _id, ".../sound_swap", ".../sound_inspect", :196407, :198265, :195533, :225205)
 static int custom_skin_file(const char *rel) {
-    static const char *const files[] = {"model.obj", "model.gltf", "model.glb", "texture.png", "texture_e.png",
+    static const char *const files[] = {"model.obj", "model.gltf", "model.glb", "model.fbx", "texture.png", "texture_e.png",
                                         "sound.mp3", "sound_swap.mp3", "sound_inspect.mp3"};
     if (strncmp(rel, "skins/", 6) != 0) return 0;
     const char *id = rel + 6, *slash = strchr(id, '/');

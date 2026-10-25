@@ -113,16 +113,21 @@ A class model has no weapon mesh, so our own shot draws no muzzle sprites, scree
 
 ## FBX
 
-v10.0.3 draws an `f` asset with three's FBXLoader. KrunkNative has no FBX loader. ufbx (a single-file C99 loader,
-MIT / public domain) was weighed against AGENTS.md's rule against large external dependencies: it is C and one file
-like cgltf, but about 1.4 MB of source (ufbx.c 1.18 MB + ufbx.h 0.22 MB, five times cgltf.h), and drawing an FBX
-class model would need a second model runtime next to the cgltf-based one in gltf.c (skins, baked clips, materials) or
-an FBX to glTF converter of several hundred lines, with no FBX class model in KrunkNative's content to test against
-(one map object, 30213f, uses an FBX). Not taken: an FBX class model draws the default body instead.
+v10.0.3 draws an `f` asset with three's FBXLoader. KrunkNative loads it with ufbx (vendored at
+`client/lib/ufbx/`, pinned commit and hashes in its README; user decision 2026-10-25).
+`client/src/fbx_gltf.c` converts the scene to an **in-memory GLB**, so `gltf_model_load` and everything
+after it (skins, clips, companion maps, assetID swaps, the Vehicle lean) is the same code as GLB/GLTF.
+Conversion choices: right-handed Y-up metres (ufbx `target_axes` / `target_unit_meters`, transforms
+adjusted), every corner its own vertex, animations baked to 30 fps TRS keys per anim stack with
+constant channels dropped. Images are embedded (FBX embedded content or sibling files).
+A file that genuinely fails to parse still draws nothing, as v10 does.
+
+Tested by `gltf_test`'s `check_fbx_models` (the cube and the two-clip skinned sausage in
+`client/tests/data/fbx/`) and by `client/tests/fbx_class_model_e2e.py` (a third-person offline run on
+`shared/tests/maps/v10/fbx_class_model.json`, desktop GL and ANGLE).
 
 ## Deliberate differences
 
-- An FBX class model draws the default body (see FBX), not nothing.
 - A missing companion map is not bound (three samples an image-less texture black).
 - The server's regenMeshes side effects of a swap (`updateHeadSize`, `swapWeapon(player, 0, true)`) are not repeated.
 - The default body, arms and weapons are still built for a class model and kept out of the scene (like Prop Hunt's

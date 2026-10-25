@@ -174,7 +174,6 @@ static void class_play(PlayerClassModel *m, const char *clip, const int reps) {
 }
 
 // 1 built, 0 nothing to draw (still downloading: m->pending; or never: missing, broken, no id), -1 the default body
-// (an FBX model, which this build cannot draw)
 static int class_build_model(PlayerClassModel *m, const Player *player, const ClassOverrides *o, const char *asset) {
     UserAssetFlags flags;
     if (!user_asset_parse(asset, &flags)) return 0; // no digits: src "/model" loads nothing
@@ -182,9 +181,8 @@ static int class_build_model(PlayerClassModel *m, const Player *player, const Cl
     flags.alpha = flags.lightmap = 0;
     const int anim = flags.gltf || flags.glb || flags.fbx;
     if (flags.gltf || flags.glb) flags.fbx = 0; // fileExt: q ? glb : g ? gltf : f ? fbx
-    if (flags.fbx) return -1;                  // KrunkNative has no FBX loader
     char rel[96];
-    snprintf(rel, sizeof(rel), "user-assets/%s/model.%s", flags.id, flags.glb ? "glb" : flags.gltf ? "gltf" : "obj");
+    snprintf(rel, sizeof(rel), "user-assets/%s/model.%s", flags.id, flags.glb ? "glb" : flags.gltf ? "gltf" : flags.fbx ? "fbx" : "obj");
     char *path = concat(assets_path(), rel);
     if (!path) return 0;
     const int state = asset_prefetch(path); // 1 on disk, 0 downloading, -1 failed

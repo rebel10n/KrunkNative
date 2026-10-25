@@ -12,6 +12,8 @@
 #define CGLTF_IMPLEMENTATION
 #include "../lib/cgltf/cgltf.h"
 
+int fbx_to_glb(const char *path, unsigned char **out, size_t *out_size); // client/src/fbx_gltf.c
+
 #define GLTF_MAX_JOINT_INFLUENCES 4
 
 typedef struct {
@@ -599,7 +601,18 @@ GltfModel *gltf_model_load(const char *path) {
     options.file.read = gltf_read_file;
     options.file.release = gltf_release_file;
     cgltf_data *data = NULL;
-    cgltf_result result = cgltf_parse_file(&options, path, &data);
+    cgltf_result result;
+    const size_t path_len = strlen(path);
+    if (path_len > 4 && !strcasecmp(path + path_len - 4, ".fbx")) {
+        // FBX class models (user assets): converted to a GLB in memory by ufbx (client/src/fbx_gltf.c)
+        unsigned char *glb = NULL;
+        size_t glb_size = 0;
+        if (!fbx_to_glb(path, &glb, &glb_size)) return NULL;
+        result = cgltf_parse(&options, glb, glb_size, &data);
+        free(glb);
+    } else {
+        result = cgltf_parse_file(&options, path, &data);
+    }
     if (result != cgltf_result_success) {
         fprintf(stderr, "gltf: cannot parse %s (cgltf result %d)\n", path, (int) result);
         return NULL;

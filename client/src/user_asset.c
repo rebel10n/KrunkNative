@@ -72,10 +72,10 @@ static unsigned int user_asset_texture(const UserAssetFlags *flags, const char *
 
 int user_asset_load(const UserAssetFlags *flags, UserAssetModel *out) {
     memset(out, 0, sizeof(*out));
-    if (!flags || !flags->id[0] || flags->fbx) return 0;
+    if (!flags || !flags->id[0]) return 0;
 
-    if (flags->gltf || flags->glb) {
-        char *path = user_asset_path(flags, flags->glb ? "model.glb" : "model.gltf");
+    if (flags->gltf || flags->glb || flags->fbx) {
+        char *path = user_asset_path(flags, flags->glb ? "model.glb" : flags->fbx ? "model.fbx" : "model.gltf");
         out->gltf = path ? gltf_model_load(path) : NULL;
         free(path);
         return out->gltf != NULL;

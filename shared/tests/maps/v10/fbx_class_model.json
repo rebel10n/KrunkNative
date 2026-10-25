@@ -1,0 +1,71 @@
+{
+ "name": "fbx class model",
+ "ambient": "#97a0a8",
+ "light": "#f2f8fc",
+ "sky": "#dce8ed",
+ "fog": "#8d9aa0",
+ "fogD": 2000,
+ "camPos": [
+  0,
+  40,
+  -80,
+  false,
+  0,
+  0,
+  0
+ ],
+ "spawns": [
+  [
+   0,
+   0,
+   40,
+   0,
+   0
+  ]
+ ],
+ "objects": [
+  {
+   "p": [
+    0,
+    -2,
+    0
+   ],
+   "s": [
+    300,
+    2,
+    300
+   ],
+   "t": 0,
+   "tv": 3
+  },
+  {
+   "p": [
+    0,
+    0,
+    -40
+   ],
+   "s": [
+    200,
+    40,
+    4
+   ],
+   "t": 0,
+   "tv": 5
+  }
+ ],
+ "scripts": {
+  "server": "\nnum n = 0;\npublic action onPlayerSpawn(str id) {\n    obj p = GAME.PLAYERS.findByID(id);\n    n += 1;\n    if (n == 1) { return; }\n    num k = n - 2;\n    p.position.x = -15 + k * 10;\n    p.position.z = 0;\n    p.position.y = 0;\n    p.rotation.x = 3.14159;\n    if (k == 0) { p.pose = {hold: 1}; }\n    if (k == 1) { p.pose = {holdL: 1}; }\n    if (k == 2) { p.pose = {legs: 2, legX: -1.5, bodyY: -2.5, weapon: 0, armL: num[-0.9, 0, 0], armR: num[-0.9, 0, 0]}; }\n    if (k == 3) { p.pose = {legs: 0, bodyY: -5, armL: num[0.6, 0, 0.9], armR: num[0.6, 0, -0.9], torsoX: -0.3}; }\n    if (k > 3) { p.position.z = -60; }\n}\n",
+  "client": "\nnum done = 0;\npublic action update(num delta) {\n    if (done > 0) { return; }\n    obj[] ps = GAME.PLAYERS.list();\n    if (lengthOf ps < 5) { return; }\n    for (num i = 0; i < lengthOf ps; i++) {\n        obj p = ps[i];\n        obj c = GAME.SCENE.addCube(\"\", \"#ff2222\", 0, 0, 0, 1.4, 1.4, 1.4);\n        c.attachTo(p, 0, 0, 0, false, \"handL\");\n        obj h = GAME.SCENE.addCube(\"\", \"#22ccff\", 0, -1, 0, 2.4, 2.4, 2.4);\n        h.attachTo(p, 0, 0, 0, false, \"hands\");\n    }\n    done = 1;\n    GAME.log(\"attached\", toStr lengthOf ps);\n}\n"
+ },
+ "config": {
+  "cls": {
+   "0": {
+    "mdl": 2,
+    "aID": "999999001f"
+   }
+  },
+  "settings": {
+   "thirdPerson": true
+  }
+ }
+}
