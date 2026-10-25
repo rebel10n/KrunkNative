@@ -1178,6 +1178,7 @@ UI_DIR ?=
 smoke-native: build ## Run the native client offline headless (no window; EGL_DEVICE=nvidia|mesa, UI_DIR=<dir>) and screenshot the menu (/tmp/smoke-native.png)
 	@rm -f /tmp/smoke-native.png
 	@env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
+	  KRUNKNATIVE_DEBUG=2 \
 	  $(if $(UI_DIR),KRUNKNATIVE_UI_DIR=$(UI_DIR),) \
 	  KRUNKNATIVE_SCREENSHOT=/tmp/smoke-native.png KRUNKNATIVE_CAPTURE_FRAMES=60 \
 	  timeout 120 stdbuf -oL $(DEBUG_DIR)/$(CLIENT_BIN) --offline > /tmp/smoke-native.log 2>&1 || { tail -20 /tmp/smoke-native.log; exit 1; }
