@@ -384,7 +384,10 @@ def main():
         cfgx = D("cfg-ux")
         os.makedirs(os.path.join(cfgx, "krunknative"), exist_ok=True)
         for k in ("krunker_username", "krunker_token", "krunker_id"):
-            shutil.copy(os.path.join(cfg, "krunknative", k + ".json"), os.path.join(cfgx, "krunknative", k + ".json"))
+            # the session lives in the alt vault now; the legacy files only exist on older profiles
+            src = os.path.join(cfg, "krunknative", k + ".json")
+            if os.path.exists(src):
+                shutil.copy(src, os.path.join(cfgx, "krunknative", k + ".json"))
         # the session itself moved into the alt vault on the first start (client/src/alt/; headless: file keystore)
         if os.path.isdir(os.path.join(cfg, "krunknative", "alt")):
             shutil.copytree(os.path.join(cfg, "krunknative", "alt"), os.path.join(cfgx, "krunknative", "alt"), dirs_exist_ok=True)

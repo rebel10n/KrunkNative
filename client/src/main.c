@@ -62,6 +62,7 @@
 #include <sound_events.h>
 #include <voice_chat.h> // voice chat: recorder interval, clips, playback (voice.c)
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
+#include <remote_images.h>   // the native engine's <img src="http(s)..."> fetcher (streams thumbnails, clan logos)
 #include <menu_view.h> // the world behind the menu: menu/death cameras, end slow motion (menu_view.c)
 #include <spectate.h> // Krunker spectating (window.Bf5): cameras, controls, #spectateUI (spectate.c, ui/hud_spectate.c)
 #include <stalker_client.h> // v10 Stalker: the model's look (stalker_render.c)
@@ -1041,6 +1042,7 @@ int main(int argc, char **argv) {
         if (html_ui_available() && !html_ui_init(&INSTANCE, ui_dir, fb_width, fb_height)) {
             fprintf(stderr, "HTML UI unavailable, falling back to the built-in menu\n");
         }
+        remote_images_init(); // a no-op on the web (the browser loads remote images itself)
 
         free(ui_dir);
 

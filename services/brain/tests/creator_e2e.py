@@ -15,8 +15,9 @@ KRUNKNATIVE_UI_CMDS:
      whose click opens https://www.youtube.com/watch?v=<id> (KRUNKNATIVE_NO_BROWSER: logged);
      screenshot map-video.png
   3. the main menu signed in as the creator: the menu box has the creator mark
-     (.menuClassPlayerCreator), the Live Streams overlay shows the stub's two live streams and
-     both cards' previews arrive through /streams/thumb as data: URLs; screenshot menu-streams.png
+     (.menuClassPlayerCreator), the Live Streams overlay shows the stub's two live streams plus
+     v10's promo card, and both previews come through the brain's /streams/thumb (the stub CDN);
+     screenshot menu-streams.png
 
 Screenshots stay in the work directory (printed) with KN_KEEP=1. 77 = skip (no client_bin /
 kn_brain / websockets).
@@ -343,14 +344,20 @@ def main():
         client = None
 
         print("3. the main menu: the creator mark and the Live Streams previews:")
+        # no Auto Seek on Launch: this run checks the menu, not a game (a failed seek would cover it
+        # with the disconnect screen and hide #knStreams)
+        os.makedirs(os.path.join(WORK, "menu-cfg", "krunknative"), exist_ok=True)
+        open(os.path.join(WORK, "menu-cfg", "krunknative", "knSeekOnLaunch.json"), "w").write("false")
         client = Client(tgt_n, acc[tgt_n][1], "menu", [])
         n = client.wait_count(".menuClassPlayerCreator", 1, 60.0)
         check(n == 1, "the signed-in creator's menu box has the creator mark (%s)" % n)
         check(client.visible("knStreams", 40.0), "the Live Streams overlay shows")
-        n = client.wait_count(".stream-card", 2, 30.0)
-        check(n == 2, "two live stream cards (%s)" % n)
-        n = client.wait_count("#knStreams img[src^='data:image/jpeg;base64,']", 2, 30.0)
-        check(n == 2, "both cards' previews arrived as data: URLs through /streams/thumb (%s)" % n)
+        n = client.wait_count(".stream-card", 3, 30.0)
+        check(n == 3, "two live stream cards plus v10's promo card (%s)" % n)
+        n = client.wait_count(".promo-card", 1, 5.0)
+        check(n == 1, "one promo card (%s)" % n)
+        n = client.wait_count("#knStreams img[src^='http']", 2, 30.0)
+        check(n == 2, "both cards ask the brain's /streams/thumb for the preview (%s)" % n)
         check(cdn.count("/previews-ttv/live_user_big_streamer-440x248.jpg") >= 1 and
               cdn.count("/previews-ttv/live_user_zeta_one-440x248.jpg") >= 1, "the brain fetched both previews from the (stub) CDN")
         time.sleep(1.0)
