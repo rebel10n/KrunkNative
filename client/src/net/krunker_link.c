@@ -191,6 +191,7 @@ void krunker_link_reset(KrunkerLink *l) {
     const KrunkerLinkIO io = l->io;
     const int64_t ahkey = l->codec.ahkey;
     social_assembly_free(&l->voice_out); // a clip half sent on the old socket
+    map_game_uids_free(&l->uids);        // the old round's object uids (krunker_link_world.c)
     memset(l, 0, sizeof(*l));
     l->io = io;
     krunker_session_init(&l->codec, ahkey);
@@ -3481,6 +3482,7 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             if (in.action == 2) return send_c2s(l, KRUNKER_C2S_DROP_WEAPON, NULL, 0);
             if (in.action != 1) return 0;
             if (length < sizeof(NetInteractV7Packet)) in.type = in.uid = -1; // v3's "int" 1: nothing scanned
+            in.uid = krunker_link_uid_out(l, in.type, in.uid); // a map object's index -> its GameObject uid (krunker_link_world.c)
             const KrunkerValue args[] = {KRUNKER_V_NUM(in.type), KRUNKER_V_NUM(in.uid)};
             return send_c2s(l, in.secondary ? KRUNKER_C2S_SECONDARY_INTERACT : KRUNKER_C2S_INTERACT, args, 2);
         }

@@ -141,6 +141,7 @@
 // Muting is client-side in v10 too (muteUser :217141 only saves mute_chat / mute_voice), and
 // reportPlayer opens the profile: neither has a packet.
 #include <krunker_cheat.h>
+#include <map_game_uids.h> // the official server's object uids (krunker_link_world.c)
 #include <krunker_proto.h>
 #include <social.h> // SocialAssembly: our outbound voice clip ("vc")
 #include <cJSON.h>
@@ -386,6 +387,9 @@ typedef struct {
     NetCompLobbyEntry lobby_entry[KRUNKER_LINK_MAX_PLAYERS];
     uint8_t lobby_live[KRUNKER_LINK_MAX_PLAYERS]; // 1: the key's entry is in the table (a "cda" null removed it)
     int lobby_count;
+    // the round's GameObject uids (krunker_link_world.c, map_game_uids.h): the official server's object uids are v10's
+    // MapManager numbering, the client's map->objects indexes; empty until init's map resolved (then the identity)
+    MapGameUids uids;
 } KrunkerLink;
 
 // Copies `len` bytes of server or wire text into dst (NUL-terminated, at most dst_len - 1 bytes), with every byte
@@ -454,3 +458,11 @@ void krunker_link_host_cancel(KrunkerLink *link);                  // the reques
 // "CAPTCHA FAILED" (NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR), after which the transport closes the socket.
 #define KRUNKER_CAPTCHA_FAILED "CAPTCHA FAILED" // deob-10.0.3.js:111430
 void krunker_link_captcha_failed(KrunkerLink *link);
+
+// The official link's object uids (krunker_link_world.c): io.map resolved init's map: the round's table of v10
+// GameObject uids (map_game_uids_build; the link takes it, NULL / empty: the uids go through as they are). Under the lock.
+void krunker_link_set_uids(KrunkerLink *l, MapGameUids *table);
+// A KrunkNative packet the link made from the official server's frame: a map object's uid becomes its map->objects index
+void krunker_link_uids_in(const KrunkerLink *l, NetPacket *p);
+// An interact's id (lastInteractData {type, id}) for the official server: a map object's index becomes its uid
+int krunker_link_uid_out(const KrunkerLink *l, int type, int uid);
