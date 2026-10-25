@@ -152,6 +152,9 @@ function mapJson(file, mode) {
 function preScript(storage, hang) {
   return `(() => { const s = ${JSON.stringify(storage)};
     try { for (const k in s) localStorage.setItem(k, s[k]); } catch (e) {}
+    // The decrypted v10.0.3 reference leaves this timer helper as a global alias; the offline page
+    // has no wrapper that supplies it. Its call shape (callback, delay) is the browser's setTimeout.
+    if (!window.JfCzGzvGIQB8rrJX) window.JfCzGzvGIQB8rrJX = window.setTimeout.bind(window);
     window.__knMap = s.custMap;
     // hang: a socket that stays CONNECTING (no error, no close): the live menu with no backend stays up
     // instead of the Lost Connection card (v10:11078295), as the desktop menu references were taken
@@ -242,12 +245,19 @@ const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: 
   // funds) and the spin reply (_72243(err, rands, itemIds, funds, usedTicket): the brain's spins.execute)
   + ' login: function () { return _70182.apply(null, arguments); }, spinResult: function () { return _72243.apply(null, arguments); },'
   + ' notify: { store: _40196, push: _40197, dismiss: _40205 }, announce: { store: _33843, set: _70210 } }; };\n';
+// v10.0.3's webcracked bundle uses Unicode local names instead of the old numeric ones. Its client-game
+// object is declared just before tmpPlayer, and the sandbox game and local player are assigned later, so
+// those two are getters. Keep the v10.0.2 hook above for the original captures.
+const SCOPE_ANCHOR_1003 = '  Object.defineProperty(iiïìîii, "tmpPlayer", {';
+const SCOPE_HOOK_1003 = '  window.__knScope = function () { return { get sg() { return iíîiîîì; }, get sp() { return iìíîiíï; },'
+  + ' cg: iiïìîii, me: null, sock: iîiìiîi, ui: null }; };\n';
 let clientJs = null;
 function clientScript() {
   if (clientJs) return clientJs;
   const src = fs.readFileSync(CLIENT_JS, 'utf8');
-  if (!src.includes(SCOPE_ANCHOR)) throw new Error('capture-v10: the scope anchor is not in ' + CLIENT_JS);
-  return (clientJs = Buffer.from(src.replace(SCOPE_ANCHOR, SCOPE_ANCHOR + SCOPE_HOOK)));
+  if (src.includes(SCOPE_ANCHOR)) return (clientJs = Buffer.from(src.replace(SCOPE_ANCHOR, SCOPE_ANCHOR + SCOPE_HOOK)));
+  if (src.includes(SCOPE_ANCHOR_1003)) return (clientJs = Buffer.from(src.replace(SCOPE_ANCHOR_1003, SCOPE_HOOK_1003 + SCOPE_ANCHOR_1003)));
+  throw new Error('capture-v10: no supported scope anchor is in ' + CLIENT_JS);
 }
 const SG = 'window.__knScope().sg', SP = 'window.__knScope().sp', CG = 'window.__knScope().cg';
 
@@ -255,6 +265,9 @@ async function waitSandbox(c) {
   for (let i = 0; i < 60; i++) {
     log('waitSandbox ' + i);
     if (await c.eval(`!!(window.__knScope && ${SG} && /CLICK TO PLAY|TAP TO PLAY/i.test(instructions.innerText))`).catch(() => false)) return 1;
+    if (process.env.KN_CAPTURE_ERRORS && i % 10 === 0) {
+      console.error('[capture-v10] sandbox state: ' + JSON.stringify(await c.eval(`({scope: !!window.__knScope, sg: !!(window.__knScope && ${SG}), text: document.body && document.body.innerText.slice(0, 300), title: document.title})`).catch((e) => String(e))));
+    }
     await sleep(500);
   }
   throw new Error('the v10 sandbox did not start');
@@ -644,7 +657,12 @@ async function openPage(o) {
           responseHeaders: [{ name: 'Content-Type', value: MIME[ext] || 'application/octet-stream' }, { name: 'Access-Control-Allow-Origin', value: '*' }],
           body: meth === 'HEAD' ? '' : body.toString('base64') }).catch(() => {});
       } else if (m.method === 'Runtime.exceptionThrown') {
-        errors.push(((m.params.exceptionDetails || {}).exception || {}).description || (m.params.exceptionDetails || {}).text);
+        const text = ((m.params.exceptionDetails || {}).exception || {}).description || (m.params.exceptionDetails || {}).text;
+        errors.push(text);
+        if (process.env.KN_CAPTURE_ERRORS) console.error('[capture-v10] page error: ' + String(text).split('\n')[0]);
+      } else if (m.method === 'Runtime.consoleAPICalled' && process.env.KN_CAPTURE_ERRORS) {
+        const a = m.params.args || [];
+        console.error('[capture-v10] console.' + m.params.type + ': ' + a.map((x) => x.value || x.description || '').join(' ').slice(0, 500));
       }
     });
     await c.send('Network.enable');

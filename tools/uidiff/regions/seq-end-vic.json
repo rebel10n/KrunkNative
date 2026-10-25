@@ -11,12 +11,7 @@
       "kind": "scene",
       "fuzz": 12,
       "max_pct": 6.0,
-      "note": "the victory title on the overlay canvas",
-      "at": {
-        "200": {
-          "pending": "Reference timing artifact, not a KN bug: the 200 ms reference frame is exactly one vicTitle update ahead (scale 1.5182 / opacity 0.6771 vs KN's 1.6589 / 0.6250), while 100 ms and 300 ms match. KN's formula is identical to v10.0.3's (deob-10.0.3.js:180483-180505). Re-capture the reference and drop this override."
-        }
-      }
+      "note": "the victory title on the overlay canvas; the reference was re-captured from v10.0.3's offline sandbox on 2026-10-25, fixing the extra-rAF 200 ms frame"
     }
   ],
   "timing": [

@@ -118,7 +118,9 @@ module.exports = function (seq, V) {
   });
   // results: v10 builds them (_72911, GUI.endScreen.init) only for a connected socket (v10:219684)
   seq('end-results', {
-    bg: 'checker', drawnOrigin: true, prepare: inGame, times: [0, 2000, 4000, 5000, 5500, 6000, 7000],
+    // Bracket the results transition closely: with only 0 and 2000 ms, its interpolated crossing
+    // moves when the final results' pixels change even though the animation's start has not moved.
+    bg: 'checker', drawnOrigin: true, prepare: inGame, times: [0, 1000, 1200, 1400, 1600, 1800, 2000, 4000, 5000, 5500, 6000, 7000],
     trigger: (c) => evalOk(c, `window.__knScope().sock.connected = true; ${SG}.endGame()`, 'endGame'),
     frameJs: V.PIN_TIMER,
     note: 'The end animation, then the results (tabs, Combat Earnings) with the socket marked connected.',

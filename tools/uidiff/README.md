@@ -456,13 +456,14 @@ and the note says which.
   under the Double XP button when the button is already above it (v10 keeps its 850 px place unless
   the card reaches it), and the END hides `#infoHolder` in game during the title and the results
   (the direct-results path keeps its footer). `seq-end-results` passes, timing 4.7 ms (was 135.9).
-  `seq-end-vic@200` is pending (regions/seq-end-vic.json): the reference frame is exactly one
-  vicTitle update ahead (scale 1.5182 / opacity 0.6771 vs KN's 1.6589 / 0.6250) while 100 ms and
-  300 ms match, so the capture had an extra rAF between 100 and 200. KN's formula is identical to
-  v10.0.3's (deob-10.0.3.js:180483-180505). The 00:20 vs 00:19 countdown at 5000 ms is the same
-  reference-tick artifact (the offline sandbox ticks 16.7 ms per rAF, the scenario 1000/60 ms);
-  at 5500 ms and 7000 ms the countdowns agree. Re-capturing `capture-v10-seq.js` currently fails
-  ("the v10 sandbox did not start"), so the reference could not be regenerated here.
+  The end-vic and end-results references were re-captured on 2026-10-25 from the official v10.0.3
+  sandbox (`KN_V10_PUBLIC=~/jails/kru/src/Krunker_v10.0.3 KN_V10_CLIENT_JS=~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js
+  node tools/uidiff/capture-v10-seq.js --out <dir> end-vic end-results`), after the old mirror and
+  numeric scope hook were found missing. The capture tool now has a v10.0.3 scope hook and supplies
+  the decoded bundle's global timer alias. The 200 ms title is 0.000 % (was a pending extra-rAF
+  reference frame), and title timing is 1.8 ms. End-results captures 1000/1200/1400/1600/1800 ms as
+  well: sparse 0/2000 ms frames made its timing crossing depend on the final results' pixels; with
+  the denser reference it passes at 13.4 ms (reference 656.6 ms, render 643.2 ms).
 - **Battle Pass** (`rewards-bp-home`, `rewards-bp-vip`, `rewards-bp-chal`): fixed (2026-10-25). The
   scenarios already carried the pass (`state.account.battlepass`), but the active-account change
   after the stand-in login wiped it before the window rendered, so every one showed "Loading Battle
