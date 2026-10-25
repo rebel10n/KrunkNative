@@ -33,9 +33,11 @@
 // is missing when it is needed (deleted, removed by a sync, or the same bytes as another path) is
 // linked back from there with no request. Each object is hashed before every use; one that does
 // not match is removed and the file is downloaded again. Filesystems without hard links cache nothing.
-#include <kn_http.h>
 #include <stddef.h>
 #include <stdint.h>
+
+// Only the pointer is used here, so the web build needs no launcher/kn_http.h (native-only transport).
+typedef struct KnHttpSink KnHttpSink;
 
 #define ASSET_FETCH_WORKERS_DEFAULT 2  // downloads in flight
 #define ASSET_FETCH_WORKERS_MAX 4

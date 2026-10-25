@@ -442,6 +442,14 @@ static void test_guest(void) {
     cJSON_Delete(cfg);
 }
 
+// Hosting does not exercise EVENT uid translation (map_game_uids.c needs the map loader) or skin
+// redefinition (the viewer table is client-side); both are no-ops here.
+#include <map_game_uids.h>
+int map_game_uids_build(MapGameUids *out, const cJSON *map_json, int custom) {
+    (void) out; (void) map_json; (void) custom; return 0;
+}
+int viewer_skin_define(const int index, const cJSON *skin) { (void) index; (void) skin; return 0; }
+
 int main(void) {
     link_setup();
     test_request_frame();

@@ -1452,7 +1452,7 @@ else ()
     # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
     add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
-                   client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_sounds.c
+                   client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_sounds.c client/src/net/krunker_link_trade.c shared/src/ks/ks_net_official.c
                    client/src/net/krunker_altcha.c client/src/ui/player_names.c)
     target_include_directories(krunker_sync_test PRIVATE client/include)
     target_link_libraries(krunker_sync_test PRIVATE m)

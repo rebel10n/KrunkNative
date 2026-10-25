@@ -214,6 +214,11 @@ void spectate_focus_player(Client *client, int uid, int quiet_auto) { (void) cli
 static MenuUi g_menu; // the player list is not open (refresh_player_list)
 MenuUi *menu_ui(void) { return &g_menu; }
 void menu_show_window(int id, int force) { (void) id; (void) force; }
+// the official-link queue hand-off is not exercised here (policeJoin's Box Office path is)
+int krunker_net_active(void) { return 0; }
+int krunker_net_join_queue(Client *client, const char *game_id, const char *bypass, const char *host, const char *port) {
+    (void) client; (void) game_id; (void) bypass; (void) host; (void) port; return 0;
+}
 int ui_loadout_kpd_tab(void) { return g_kpd_tab_shown; }
 void ui_loadout_switch_kpd_tab(int tab) { g_kpd_tab_shown = tab; }
 static int g_response_popups, g_demo_off;

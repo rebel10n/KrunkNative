@@ -826,8 +826,10 @@ static Input script_release(const double t) { // W held; jump pressed at 1 s, re
     return in;
 }
 
-int main(void) {
-    // Our tables against the live bundle's (the reference's constants): Triggerman, the AR
+// sdc (skin definition changed) is not exercised here; the viewer table is a client-side store.
+int viewer_skin_define(const int index, const cJSON *skin) { (void) index; (void) skin; return 0; }
+
+int main(void) {    // Our tables against the live bundle's (the reference's constants): Triggerman, the AR
     {
         Sim *sim = calloc(1, sizeof(Sim));
         if (sim && sim_init(sim, 1, 1, 1.2, 0)) {

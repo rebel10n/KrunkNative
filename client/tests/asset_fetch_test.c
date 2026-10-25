@@ -7,6 +7,7 @@
 // (their own origins, user-assets-only mode, 403s, block pages, inside a checkout, beside a manifest),
 // and the content-addressed cache (a missing file restored without a request, damaged objects refetched).
 #include <asset_fetch.h>
+#include <kn_http.h> // KnHttpSink by value in the fake transport
 #include <kn_fs.h>
 #include <kn_update.h>
 

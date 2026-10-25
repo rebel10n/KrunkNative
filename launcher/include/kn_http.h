@@ -14,7 +14,7 @@ void kn_http_free(KnHttp *h);
 // Called with each piece of a 2xx body; return 0 to abort the transfer.
 typedef int (*KnHttpWriteFn)(void *user, const void *data, size_t len);
 
-typedef struct {
+typedef struct KnHttpSink {
     KnHttpWriteFn write;
     void *user;
     volatile int *cancel;     // optional: non-zero aborts

@@ -1,6 +1,7 @@
 // Native on-demand game content fetch (client/include/asset_fetch.h).
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
+#include <kn_http.h>
 
 #include <kn_assets.h>  // KN_ASSETS_OBJECTS: the content-addressed cache
 #include <kn_fs.h>
