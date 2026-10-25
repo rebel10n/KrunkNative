@@ -1245,7 +1245,6 @@ void client_unload_map(Client *client) {
     zombies_render_unload();
     prize_wheel_render_unload();
     wars_banners_unload();
-    client_event_objects_unload(client); // the EVENT prefab's meshes (event_objects.c)
     map_environment_unload(); // ocean, v7 output state (map_environment.c)
     hud_gui_clear();          // map "gui" elements (ui/hud_gui.c)
 
