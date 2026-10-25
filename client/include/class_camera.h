@@ -26,19 +26,18 @@
 // camera goes through walls as v10's does (KrunkNative's own third person, third_person.h, keeps its
 // pull-in).
 //
+// KrunkScript's GAME.CAMERA moves the same chain (CONTROLS.object position / rotation, pchObjc, RENDER.camera;
+// deob:210533-210675); the script's update runs after the camera block (deob:222267-222270), so its writes show
+// on the frame they are made, attached or detached. While detached the camera block leaves the chain alone
+// but still adds camOffX / Y / Z to camera.position every frame (deob:260591-260646), as v10 does.
+//
 // Deliberate differences:
-//   - a detached KrunkScript camera (CAMERA.detach) ignores the class offset: v10 adds camOffX / Y / Z to
-//     camera.position every frame while detached (its reset sits under !detachedCam), so it drifts away;
-//   - the lookAt aims at this frame's eye: v10's runs before moveCam, on the last frame's controls;
-//   - updateCamMouse's result is read every frame from the local player's class, so KrunkScript's
-//     INPUTS.freeMouse applies at once (v10: at the next spawn / class change);
-//   - v10's renderYou is false for camTypes 1-4; KrunkNative keeps render_you (its prediction feel:
-//     the landing bob, the eye height) and only builds the third-person model and draws it with the world;
-//   - updateMsh's third-person test reads each player's own class (v10 the local controls' camType);
-//   - rotateCam's feel and the wall lean's roll are summed into KrunkNative's Euler angles (the roll in
-//     world space, not on the yaw object, so it does not swing an offset camera);
-//   - the controls' yaw / pitch without camRot follow the look's resync (spawn, a teleport's facing,
-//     KrunkScript CAMERA.lookAt), where v10 only resets them on the spawn and lookAt.
+//   - v10's renderYou is false for camTypes 1-4; KrunkNative keeps render_you, which its shared prediction
+//     reads (the landing bob, the eye height of a pose), and only builds the third-person model and draws it
+//     with the world as v10's third-person build does;
+//   - KrunkNative's death and menu cameras (menu_view.c) are not CONTROLS: GAME.CAMERA writes while no life is
+//     on take effect at the next life (object.rotation.x / z, the controls' yaw until the spawn resets it),
+//     and a detach without a life starts from the camera shown.
 #include <client.h>
 
 // camType (deob-10.0.3.js:20162-20169; controls.camType, deob:257869-257873)
@@ -62,6 +61,7 @@ typedef struct {
     vec3 offset;        // camOffX / Y / Z (camera.position += them while has_offset)
     int has_offset;     // CONTROLS.camOffset
     int rotation;       // CONTROLS.camRot: the mouse turns the controls
+    int mouse_look;     // updateMouseInp turns them: camRot && !detachedCam (class_camera_current)
     int free_mouse;     // CONTROLS.freeMouse: no pointer lock, the cursor aims (3rd Person / Platformer)
     float ortho_f;      // orthoF: the Orthographic frustum height
     float face_player;  // lockCamP
@@ -80,20 +80,45 @@ int class_camera_active(const ClassCamera*);
 // thirdPerson, a camera offset or a camType other than FPS (deob:193600, 194102).
 int class_camera_third_person(const ClassCamera*);
 
-// One frame's rig: the controls (object at the eye, yaw object, pitch object) and the camera's local
-// offset before the class's (thirdPerson / the Prop's distance).
+// One frame's rig: CONTROLS.object (at the eye, rotation XYZ: x a KrunkScript tilt, y the yaw, z the wall
+// lean's roll) holding pchObjc (rotation.x, the pitch) holding RENDER.camera (deob-10.0.3.js:235419-235424);
+// the camera's local offset before the class's (thirdPerson / the Prop's distance).
 typedef struct {
     vec3 eye;           // CONTROLS.object.position: x, y + height - cameraHeight, z (moveCam)
     float pitch, yaw;   // pchObjc.rotation.x, object.rotation.y
+    float tilt, roll;   // object.rotation.x (only KrunkScript's CAMERA.rotation.x), object.rotation.z (wallLean)
     vec3 local;         // RENDER.camera.position before the class offset
     int local_offset;   // thirdPerson / the Prop set it (iîÌìïii: the lookAt runs)
     float feel_pitch;   // rotateCam: shakeY + swayY + recoilAnimY * recoilMlt + landBobY * 0.1
     float feel_yaw;     // rotateCam: shakeX + swayX
-    float roll;         // the wall lean (object.rotation.z)
 } ClassCameraRig;
 
-// Pose `camera` (position, rotation, ortho; near / far for the Orthographic one) for that rig.
-// Returns 1 when the camera looks at the eye (lookAt kept: freeMouse with an offset).
+// The whole chain at render time: the rig and RENDER.camera's own position / rotation (local to pchObjc;
+// world coordinates for the Orthographic camera, which has no parent).
+typedef struct {
+    ClassCameraRig rig;
+    vec3 camera_position;
+    float camera_rotation[9];   // row-major
+    int ortho;
+} ClassCameraChain;
+
+// Rotations (row-major 3x3): three's Euler "XYZ" (Rx Ry Rz), products, and the world rotation as
+// KrunkNative's camera angles (camera.c renders Rz(roll) Ry(yaw) Rx(pitch); the smaller-roll solution,
+// the yaw within a turn of `yaw_hint`).
+void class_camera_m3_identity(float m[9]);
+void class_camera_m3_mul(const float a[9], const float b[9], float out[9]);
+void class_camera_euler_xyz(vec3 euler, float m[9]);
+void class_camera_m3_to_camera(const float m[9], float yaw_hint, vec3 *rotation);
+// object x pchObjc
+void class_camera_rig_parent(const ClassCameraRig*, float m[9]);
+// The game loop's writes to RENDER.camera for the rig (deob:260589-260860): its local position (the
+// offsets) and rotation (lookAt with freeMouse, else rotateCam's feel; freeMouse without an offset keeps
+// `keep_rotation`, NULL = none). Returns 1 when it looks at the eye.
+int class_camera_local(const ClassCamera*, const ClassCameraRig*, const float keep_rotation[9], vec3 *position, float rotation[9]);
+// The camera's world position and angles for a chain.
+void class_camera_chain_pose(const ClassCameraChain*, Camera*);
+// class_camera_local + class_camera_chain_pose for one rig, and the Orthographic projection (ortho, near,
+// far; none for the perspective types). Returns 1 when it looks at the eye.
 int class_camera_pose(const ClassCamera*, const ClassCameraRig*, Camera *camera);
 
 // The camera ray through the cursor (ndc: -1..1, y up) on the aim plane: 3rd Person the head plane
@@ -111,27 +136,53 @@ float class_camera_face_player(const ClassCamera*, float *chase, float body_yaw,
 float class_camera_lock_pitch(const ClassCamera*, float pitch);
 
 // ---- client glue (class_camera_client.c)
-// The local player's class camera this frame (the defaults without an active player).
+// The local player's class camera: updateCamMouse's snapshot (our spawn / class change), the game's
+// thirdPerson and mouse_look as of now (the defaults without a player).
 ClassCamera class_camera_current(const Client*);
 // The pointer lock owner: the class camera wants a free cursor (freeMouse).
 int class_camera_wants_free_cursor(const Client*);
 // The local model is the third-person one / drawn in the world pass this frame.
 int class_camera_draws_own_model(const Client*);
-// player_mesh.c's build: the local player's model is the third-person one (thirdPerson, a class
-// camera offset or a camType other than FPS).
+// player_mesh.c's build (generateMeshes, deob:194102): the player's class gives it the third-person model
+// (thirdPerson, a class camera offset or a camType other than FPS).
 int class_camera_player_third_person(const Player*);
-// main.c, before the input frame: the free-mouse aim (the input's look) from the cursor; 0 = none.
+// player_mesh.c's update (updateMsh, deob:193600): thirdPerson, the local controls' camType other than
+// FPS, or the player's own class camera offset.
+int class_camera_mesh_third_person(const Player*);
+// main.c's input stage, before the mouse: a KrunkScript turn of the controls reaches the input look
+// (updateMouseInp takes xDr / yDr from them), the spawn's look reaches the controls.
+void class_camera_controls_take(Client*, vec2 *look);
+// main.c, the look after the mouse: the controls follow it (camRot); the free-mouse aim (the input's
+// look) from the cursor, 0 = none.
 int class_camera_input_aim(Client*, vec2 look, vec2 *aim);
-// main.c, after the tick of a sampled input frame: lockCamP / lckCmYR / yCmLim on the controls' look.
+// main.c, after the tick of a sampled input frame: lockCamP / lckCmYR / yCmLim on the controls, the
+// listener (Howler); `look` follows the controls with camRot.
 void class_camera_after_input(Client*, vec2 *look, float frame_ms);
+// CONTROLS.object.rotation (x the KrunkScript tilt, y the yaw, z the wall lean's roll).
+vec3 class_camera_object_rotation(void);
+// sound_events.c: the listener at the head, facing the controls' look (Howler.pos / orientation on the
+// input frames, deob:260850-260851). 0 = none (no life yet, spectating): the camera's.
+int class_camera_listener(const Client*, vec3 *position, float *yaw, float *pitch);
 // main.c, before the frame's camera is posed: the perspective projection back (class_camera_apply
 // puts the Orthographic one on again while it is wanted).
 void class_camera_frame_begin(Client*);
-// main.c, after camera_feel_apply: pose the camera from the controls' look. Returns 1 when it did
-// (the class camera is active), 0 = the first-person camera stands.
+// main.c, after camera_feel_apply: the camera block's writes, then the chain posed. Returns 1 when it
+// posed the camera, 0 = the first-person camera stands (nothing here differs from it).
 int class_camera_apply(Client*, vec2 look);
-// Our (re)spawn: player.camChase = null (deob:190600), the aim's plane hit forgotten.
+// Our (re)spawn: updateCamMouse again, player.camChase = null (deob:190600), CONTROLS.reset's camera
+// rotation 0, the aim's plane hit forgotten.
 void class_camera_on_spawn(void);
-// The look restarts from the player's (spawn, a teleport's facing: main.c's resync): CONTROLS.reset puts
-// the controls' yaw / pitch there, which a camera without camRot keeps from then on.
+// The look restarts from the player's (the spawn, a forceDir teleport: main.c's resync), which sets
+// object.rotation.y and xDr alike (deob:197756-197758, 258177-258181).
 void class_camera_look_reset(void);
+
+// KrunkScript GAME.CAMERA on the controls (ks_input.c; deob:210533-210675). Its update runs after the
+// camera block in v10, so these write over the block's work of this frame.
+void class_camera_ks_detach(Client*);                     // detach: the chain stays where it is
+vec3 class_camera_ks_position(const Client*);             // position: object.position
+void class_camera_ks_set_position(Client*, int axes, vec3 v); // position.x / y / z (axes 1 / 2 / 4), move()
+vec3 class_camera_ks_rotation(void);                      // rotation: object.rotation
+void class_camera_ks_set_rotation(Client*, int axis, float v); // rotation.x / y / z (0 / 1 / 2)
+void class_camera_ks_rotate(Client*, vec3 euler);         // rotate(): camera.rotation (x, y, z)
+void class_camera_ks_look_at(Client*, vec3 target);       // lookAt(): object / pchObjc toward it, camera 0
+void class_camera_ks_pose(Client*);                       // ks_client_camera: a detached chain without a life

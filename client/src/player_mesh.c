@@ -1762,7 +1762,7 @@ void player_update_meshes(Player *player, const int is_preview) {
 
     // updateMsh (deob-10.0.3.js:193600): thirdPerson, a camType but FPS or the player's class camOffX / Y / Z (v10
     // reads the local controls' camType for every player, KrunkNative the player's own class)
-    const int third_person = player_mesh->kn_third_person || class_camera_player_third_person(player);
+    const int third_person = player_mesh->kn_third_person || class_camera_mesh_third_person(player);
     const float aim_val_mlt = animate_aim && player->is_you ? player->aim_val : 0.0f;
     const float aim_mlt = player->weapon->animate_while_aiming ? 0.0f : aim_val_mlt;
     const float anim_mlt = (1.0f - (1.0f - game_constants.aim_anim_mlt) * aim_val_mlt) * game_constants.anim_mlt * weapon_bobbing_mlt;

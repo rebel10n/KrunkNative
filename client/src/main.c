@@ -2436,6 +2436,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
             class_camera_look_reset(); // the class camera's controls take the new look too (camRot off)
         }
         g_look_shown_valid = 0;
+        class_camera_controls_take(client, &g_look); // a KrunkScript turn of the controls reaches xDr / yDr (updateMouseInp)
         input.x_dir = g_look.x;
         input.y_dir = g_look.y;
         const float om_prev_pitch = input.x_dir, om_prev_yaw = input.y_dir; // the look before this frame's mouse (om_build.c)
@@ -2477,10 +2478,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
         if (client_round_ended(client) && menu_view_time_scale() <= 0.0f) {
             input = (Input) {.move_dir = -1, .delta = input.delta, .x_dir = input.x_dir, .y_dir = input.y_dir};
         }
-        // v10.0.3 class camera without camRot ("Mouse Rotation"): updateMouseInp never turns the controls
-        // (deob-10.0.3.js:235469), so the mouse, the pad and the scripted look leave the look alone
+        // v10.0.3 class camera without camRot ("Mouse Rotation") or with a detached KrunkScript camera:
+        // updateMouseInp never turns the controls (deob-10.0.3.js:235469), so the mouse, the pad and the
+        // scripted look leave the look alone
         const ClassCamera class_cam = class_camera_current(client);
-        if (!class_cam.rotation) {
+        if (!class_cam.mouse_look) {
             input.x_dir = g_look.x;
             input.y_dir = g_look.y;
         }
@@ -2555,6 +2557,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // v10.0.3 class camera, after procInputs on an input frame: lockCamP's chase of the body's yaw, lckCmYR
     // and yCmLim set the controls' yaw / pitch (deob-10.0.3.js:260824-260845)
     if (input_sampled) class_camera_after_input(client, &g_look, delta * 1000.0f);
+    // wallLean: CONTROLS.object.rotation.z, in the camera block before the script's update (deob-10.0.3.js:260862)
+    if (client->me && client->me->active && !third_person_view(client)) camera_feel_wall_lean(client, frame_delta * 1000.0f);
     ks_client_frame(client, delta, frame_delta); // KrunkScript update(delta) + script scene objects (game.js:4960)
 
     // Krunker poses the camera right after procInputs (index.js gameLoop: rotateCam with
@@ -2563,7 +2567,6 @@ static void client_tick_game(Client *client, const float now, const float frame_
     class_camera_frame_begin(client); // the perspective projection (the Orthographic camera goes on again below)
     if (client->me && client->me->active) {
         camera_feel_apply(client);
-        if (!third_person_view(client)) camera_feel_wall_lean(client, frame_delta * 1000.0f); // wallLean roll
         if (third_person_view(client)) {
             third_person_apply_camera(client, g_look, delta); // over the shoulder (third_person.c)
         } else if (class_camera_apply(client, g_look)) {

@@ -7,8 +7,16 @@
 //     plane (Platformer X / Z), a missed plane keeping the last hit
 //   - lockCamP's chase (the wrapped difference), lckCmYR and yCmLim on the controls' pitch
 //   - a map's config.cls reaches ClassOverrides (lckCmYR's value included)
-// GL-free: class_camera.c is included. Run from the repository root.
+//   - the chain is three's (object XYZ > pchObjc > camera XYZ) exactly: the feel, the wall lean's roll in
+//     the yaw object, a KrunkScript tilt, KrunkNative's camera angles (Rz Ry Rx) for any of them
+//   - the controls (class_camera_client.c): KrunkScript's CAMERA.rotation / position / rotate / lookAt
+//     while attached show on the frame they are written (the script's update runs after the camera
+//     block) and the turn reaches the input look through updateMouseInp only with camRot; a detached
+//     camera keeps adding the class offset; the listener sits at the head facing the input look
+// GL-free: class_camera.c and class_camera_client.c are included (their few client calls are stubbed
+// below). Run from the repository root.
 #include "../src/class_camera.c"
+#include "../src/class_camera_client.c"
 #include <game_config.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,10 +31,32 @@ static int g_failures, g_checks;
 static int near_f(const double a, const double b, const double eps) { return fabs(a - b) <= eps; }
 static int near_v(const vec3 a, const vec3 b, const float eps) { return near_f(a.x, b.x, eps) && near_f(a.y, b.y, eps) && near_f(a.z, b.z, eps); }
 
-// The camera's forward vector for KrunkNative's rotation (Rz Ry Rx applied to -Z)
-static vec3 forward(const Camera *c) {
-    const float p = c->rotation.x, y = c->rotation.y;
-    return (vec3) {-sinf(y) * cosf(p), sinf(p), -cosf(y) * cosf(p)};
+// ---- stubs for class_camera_client.c's client calls
+static int g_detached, g_wall_roll_stub_set;
+static float g_wall_roll_stub;
+int ks_client_pointer_free(void) { return 0; }
+int ks_client_input_unlocked(void) { return 0; }
+int ks_client_camera_detached(void) { return g_detached; }
+int ui_mobile_active(void) { return 0; }
+int prop_hunt_me(const Client *client) { (void) client; return 0; }
+float prop_hunt_camera_distance(void) { return 30.0f; }
+int third_person_view(const Client *client) { (void) client; return 0; }
+int spectate_active(void) { return 0; }
+float camera_feel_wall_roll(void) { return g_wall_roll_stub; }
+void camera_feel_set_wall_roll(const float roll) { g_wall_roll_stub = roll; g_wall_roll_stub_set = 1; }
+
+// ---- vectors rotated one axis at a time (right-handed, as three's), independent of the matrices tested
+static vec3 rx(const vec3 v, const float a) { return (vec3) {v.x, cosf(a) * v.y - sinf(a) * v.z, sinf(a) * v.y + cosf(a) * v.z}; }
+static vec3 ry(const vec3 v, const float a) { return (vec3) {cosf(a) * v.x + sinf(a) * v.z, v.y, -sinf(a) * v.x + cosf(a) * v.z}; }
+static vec3 rz(const vec3 v, const float a) { return (vec3) {cosf(a) * v.x - sinf(a) * v.y, sinf(a) * v.x + cosf(a) * v.y, v.z}; }
+
+// KrunkNative's camera (camera.c: world = Rz(z) Ry(y) Rx(x)): its forward (-Z) and up (+Y)
+static vec3 cam_dir(const Camera *c, const vec3 v) { return rz(ry(rx(v, c->rotation.x), c->rotation.y), c->rotation.z); }
+static vec3 forward(const Camera *c) { return cam_dir(c, (vec3) {0.0f, 0.0f, -1.0f}); }
+static vec3 up(const Camera *c) { return cam_dir(c, (vec3) {0.0f, 1.0f, 0.0f}); }
+// three's chain: object Rx(tilt) Ry(yaw) Rz(roll), pchObjc Rx(pitch), camera Rx(cx) Ry(cy) Rz(cz)
+static vec3 chain_dir(const vec3 v, const float tilt, const float yaw, const float roll, const float pitch, const vec3 cr) {
+    return rx(ry(rz(rx(rx(ry(rz(v, cr.z), cr.y), cr.x), pitch), roll), yaw), tilt);
 }
 
 static ClassOverrides cls(const int type, const float ox, const float oy, const float oz, const int rot) {
@@ -80,7 +110,9 @@ static void test_pose(void) {
     CHECK(!class_camera_pose(&c, &r, &cam), "camRot: rotateCam undoes the lookAt");
     // yaw PI/2 faces -X: back (+Z local) is +X
     CHECK(near_v(cam.position, (vec3) {55.0f, 45.0f, 30.0f}, 1e-3f), "offset (0, 25, 45) at yaw PI/2: %.3f %.3f %.3f", cam.position.x, cam.position.y, cam.position.z);
-    CHECK(near_f(cam.rotation.x, 0.01, 1e-6) && near_f(cam.rotation.y, M_PI / 2.0 - 0.02, 1e-6), "the look plus rotateCam's feel");
+    CHECK(near_v(forward(&cam), chain_dir((vec3) {0, 0, -1}, 0, (float) M_PI / 2.0f, 0, 0, (vec3) {0.01f, -0.02f, 0}), 1e-5f) &&
+          near_v(up(&cam), chain_dir((vec3) {0, 1, 0}, 0, (float) M_PI / 2.0f, 0, 0, (vec3) {0.01f, -0.02f, 0}), 1e-5f),
+          "the look, then rotateCam's feel inside it (three's chain)");
     r.pitch = -0.5f;
     class_camera_pose(&c, &r, &cam);
     // pitch swings the offset in the yaw's vertical plane: still at z = eye.z
@@ -92,7 +124,7 @@ static void test_pose(void) {
     c = class_camera_make(&o, 0, 0);
     r = (ClassCameraRig) {.eye = eye, .feel_pitch = 0.3f};
     CHECK(class_camera_pose(&c, &r, &cam), "freeMouse with an offset looks at the eye");
-    CHECK(near_v(cam.position, (vec3) {10.0f, 140.0f, 30.0f}, 1e-4f) && near_f(cam.rotation.x, -M_PI / 2.0, 2e-4) && cam.rotation.y == 0.0f,
+    CHECK(near_v(cam.position, (vec3) {10.0f, 140.0f, 30.0f}, 1e-4f) && near_f(cam.rotation.x, -M_PI / 2.0, 2e-4) && near_f(cam.rotation.y, 0.0, 1e-5),
           "straight down: pos %.2f %.2f %.2f rot %.5f %.5f", cam.position.x, cam.position.y, cam.position.z, cam.rotation.x, cam.rotation.y);
 
     // freeMouse lookAt from an oblique offset: the forward vector points at the eye
@@ -103,12 +135,12 @@ static void test_pose(void) {
     vec3 to = {eye.x - cam.position.x, eye.y - cam.position.y, eye.z - cam.position.z};
     const float len = sqrtf(to.x * to.x + to.y * to.y + to.z * to.z);
     to = (vec3) {to.x / len, to.y / len, to.z / len};
-    CHECK(near_v(forward(&cam), to, 1e-4f) && cam.rotation.z == 0.0f, "lookAt: the camera faces the eye");
+    CHECK(near_v(forward(&cam), to, 1e-4f) && near_f(cam.rotation.z, 0.0, 1e-5), "lookAt: the camera faces the eye, no roll");
 
     // thirdPerson: (5, 2, 14) in the look frame, parallel
     c = class_camera_make(NULL, 1, 0);
     r = (ClassCameraRig) {.eye = eye, .local = {CLASS_CAMERA_TP_X, CLASS_CAMERA_TP_Y, CLASS_CAMERA_TP_Z}, .local_offset = 1};
-    CHECK(!class_camera_pose(&c, &r, &cam) && near_v(cam.position, (vec3) {15.0f, 22.0f, 44.0f}, 1e-4f) && cam.rotation.x == 0.0f && cam.rotation.y == 0.0f,
+    CHECK(!class_camera_pose(&c, &r, &cam) && near_v(cam.position, (vec3) {15.0f, 22.0f, 44.0f}, 1e-4f) && near_f(cam.rotation.x, 0.0, 1e-6) && near_f(cam.rotation.y, 0.0, 1e-6),
           "thirdPerson at yaw 0: right 5, up 2, back 14, looking along the look");
 
     // Orthographic: not in the rig, the offset is a world position; lookAt with freeMouse
@@ -121,7 +153,7 @@ static void test_pose(void) {
     o.cam_rotation = 1;
     c = class_camera_make(&o, 0, 0);
     r.feel_pitch = 0.05f;
-    CHECK(!class_camera_pose(&c, &r, &cam) && cam.rotation.x == 0.05f && cam.rotation.y == 0.0f,
+    CHECK(!class_camera_pose(&c, &r, &cam) && near_f(cam.rotation.x, 0.05, 1e-6) && near_f(cam.rotation.y, 0.0, 1e-6),
           "Orthographic with camRot: rotateCam's feel in world space (the controls never turn it)");
     o = cls(CLASS_CAMERA_FPS, 0, 0, 0, 1);
     c = class_camera_make(&o, 0, 0);
@@ -257,12 +289,209 @@ static void test_config(void) {
     cJSON_Delete(map);
 }
 
+// three's chain composed exactly, and KrunkNative's angles for it
+static void test_chain(void) {
+    // a rotation without roll comes back as exactly its pitch / yaw, the yaw next to the hint
+    const float yaws[] = {0.0f, 1.2f, 2.5f, -2.5f, 3.1f, -1.9f};
+    for (size_t i = 0; i < sizeof(yaws) / sizeof(yaws[0]); i++) {
+        float m[9], p[9];
+        class_camera_euler_xyz((vec3) {0.0f, yaws[i], 0.0f}, m);
+        class_camera_euler_xyz((vec3) {-0.7f, 0.0f, 0.0f}, p);
+        class_camera_m3_mul(m, p, m);
+        vec3 rot;
+        class_camera_m3_to_camera(m, yaws[i], &rot);
+        CHECK(near_f(rot.x, -0.7, 1e-5) && near_f(rot.y, yaws[i], 1e-5) && near_f(rot.z, 0.0, 1e-5),
+              "yaw %.2f pitch -0.7: %.5f %.5f %.5f", yaws[i], rot.x, rot.y, rot.z);
+    }
+    // any chain: KrunkNative's camera shows the same forward and up as three's
+    unsigned seed = 7;
+    for (int i = 0; i < 200; i++) {
+        float v[7];
+        for (int k = 0; k < 7; k++) {
+            seed = seed * 1103515245u + 12345u;
+            v[k] = ((float) ((seed >> 8) & 0xffff) / 65535.0f * 2.0f - 1.0f) * (k == 1 ? 3.1f : 1.4f);
+        }
+        const ClassCameraRig r = {.pitch = v[0], .yaw = v[1], .tilt = v[2] * 0.3f, .roll = v[3] * 0.3f};
+        ClassCameraChain k = {.rig = r};
+        class_camera_euler_xyz((vec3) {v[4] * 0.2f, v[5] * 0.2f, v[6] * 0.2f}, k.camera_rotation);
+        Camera cam = camera0();
+        class_camera_chain_pose(&k, &cam);
+        const vec3 cr = {v[4] * 0.2f, v[5] * 0.2f, v[6] * 0.2f};
+        const vec3 f = chain_dir((vec3) {0, 0, -1}, r.tilt, r.yaw, r.roll, r.pitch, cr), u = chain_dir((vec3) {0, 1, 0}, r.tilt, r.yaw, r.roll, r.pitch, cr);
+        if (!near_v(forward(&cam), f, 2e-5f) || !near_v(up(&cam), u, 2e-5f)) {
+            CHECK(0, "chain %d: forward / up differ from three's", i);
+            break;
+        }
+    }
+    CHECK(1, "200 random chains match three's forward and up");
+    // the wall lean's roll is inside the yaw: looking along -X it rolls the view, it does not pitch it
+    ClassCameraChain k = {.rig = {.yaw = (float) M_PI / 2.0f, .roll = 0.15f}};
+    class_camera_m3_identity(k.camera_rotation);
+    Camera cam = camera0();
+    class_camera_chain_pose(&k, &cam);
+    CHECK(near_v(forward(&cam), (vec3) {-1.0f, 0.0f, 0.0f}, 1e-5f) && near_v(up(&cam), (vec3) {0.0f, cosf(0.15f), sinf(0.15f)}, 1e-5f),
+          "roll 0.15 at yaw PI/2: forward stays -X, up tilts toward +Z");
+}
+
+// a local player of `cls` (NULL = the default class) at the origin, facing yaw `yaw`
+static Client *client_with(const ClassOverrides *cls, const float yaw) {
+    Client *client = calloc(1, sizeof(Client));
+    Player *me = calloc(1, sizeof(Player));
+    client->game.class_count = 1;
+    client->game.classes = calloc(1, sizeof(ClassConfig));
+    if (cls) client->game.classes[0].ext = *cls;
+    me->game = &client->game;
+    me->active = 1;
+    me->height = 11.0f;
+    me->direction = (vec2) {0.0f, yaw};
+    client->me = me;
+    client->camera = camera0();
+    class_camera_on_spawn();
+    return client;
+}
+
+static void client_free(Client *client) {
+    free(client->game.classes);
+    free(client->me);
+    free(client);
+}
+
+// one frame of main.c's camera stages; `ks` runs where the client script's update does; returns
+// class_camera_apply's answer (1: the chain posed the camera)
+static int frame(Client *client, vec2 *look, const float mouse_yaw, const int sampled, void (*ks)(Client*)) {
+    class_camera_controls_take(client, look);
+    const ClassCamera c = class_camera_current(client);
+    if (c.mouse_look) look->y += mouse_yaw;
+    vec2 aim;
+    class_camera_input_aim(client, *look, &aim);
+    if (sampled) {
+        if (!c.free_mouse) client->me->direction = *look; // procInputs: Default with trnSp 1 takes the look
+        class_camera_after_input(client, look, 16.0f);
+    }
+    if (ks) ks(client);
+    class_camera_frame_begin(client);
+    // camera_feel_apply: the eye and the look (no feel here)
+    client->camera.position = (vec3) {0.0f, client->me->height - game_constants.camera_height, 0.0f};
+    client->camera.rotation = (vec3) {client->me->direction.x, client->me->direction.y, 0.0f};
+    const int posed = class_camera_apply(client, *look);
+    if (ks) class_camera_ks_pose(client);
+    return posed;
+}
+
+static void ks_tilt(Client *client) { class_camera_ks_set_rotation(client, 0, 0.3f); }
+static void ks_yaw(Client *client) { class_camera_ks_set_rotation(client, 1, 1.0f); }
+static void ks_rotate(Client *client) { class_camera_ks_rotate(client, (vec3) {0.2f, 0.4f, 0.0f}); }
+static void ks_raise(Client *client) {
+    const vec3 p = class_camera_ks_position(client);
+    CHECK(near_f(p.y, client->me->height - game_constants.camera_height, 1e-5), "position.y reads this frame's eye: %.3f", p.y);
+    class_camera_ks_set_position(client, 2, (vec3) {0.0f, 50.0f, 0.0f});
+    CHECK(near_f(class_camera_ks_position(client).y, 50.0, 1e-6), "position.y reads back the script's 50");
+}
+static void ks_look(Client *client) { class_camera_ks_look_at(client, (vec3) {100.0f, 9.5f, 0.0f}); }
+static void ks_detach(Client *client) { class_camera_ks_detach(client); g_detached = 1; }
+
+static void test_controls(void) {
+    const float eye_y = 11.0f - game_constants.camera_height;
+    // FPS, camRot: a plain frame leaves the first-person camera alone
+    Client *client = client_with(NULL, 0.5f);
+    vec2 look = {0.0f, 0.5f};
+    CHECK(!frame(client, &look, 0.0f, 1, NULL), "a plain FPS frame: the first-person camera stands");
+
+    // CAMERA.rotation.x: object.rotation.x tilts the whole rig from this frame on
+    CHECK(frame(client, &look, 0.0f, 1, ks_tilt), "a tilt: the chain poses the camera");
+    CHECK(near_v(forward(&client->camera), chain_dir((vec3) {0, 0, -1}, 0.3f, 0.5f, 0, 0, (vec3) {0}), 1e-5f), "the tilted rig: Rx(0.3) Ry(0.5)");
+    CHECK(near_f(class_camera_ks_rotation().x, 0.3, 1e-6), "rotation.x reads 0.3");
+    CHECK(frame(client, &look, 0.0f, 1, NULL) && near_v(forward(&client->camera), chain_dir((vec3) {0, 0, -1}, 0.3f, 0.5f, 0, 0, (vec3) {0}), 1e-5f),
+          "the tilt stays (object.rotation.x is never reset)");
+    class_camera_ks_set_rotation(client, 0, 0.0f);
+
+    // CAMERA.rotation.y with camRot: the camera turns this frame, the input look follows at the next updateMouseInp
+    frame(client, &look, 0.0f, 1, ks_yaw);
+    CHECK(near_v(forward(&client->camera), chain_dir((vec3) {0, 0, -1}, 0, 1.0f, 0, 0, (vec3) {0}), 1e-5f) && near_f(look.y, 0.5, 1e-6),
+          "rotation.y 1.0: the camera at once, the input look (xDr) still 0.5");
+    frame(client, &look, 0.1f, 1, NULL);
+    CHECK(near_f(look.y, 1.1, 1e-5), "next frame xDr = object.rotation.y + the mouse: %.4f", look.y);
+    CHECK(near_f(class_camera_ks_rotation().y, 1.1, 1e-5), "rotation.y reads the controls' yaw: %.4f", class_camera_ks_rotation().y);
+    // a full turn of mouse keeps object.rotation.y unwrapped, as three's
+    for (int i = 0; i < 10; i++) frame(client, &look, (float) M_PI * 0.2f, 1, NULL);
+    CHECK(near_f(class_camera_ks_rotation().y, 1.1 + 2.0 * M_PI, 1e-4), "after a full turn rotation.y is %.4f (unwrapped)", class_camera_ks_rotation().y);
+
+    // CAMERA.rotate(a, b, c): camera.rotation for this frame only (rotateCam writes it again next frame)
+    look = (vec2) {0.0f, 0.5f};
+    class_camera_look_reset();
+    frame(client, &look, 0.0f, 1, NULL);
+    CHECK(frame(client, &look, 0.0f, 1, ks_rotate), "rotate(): the chain poses");
+    CHECK(near_v(forward(&client->camera), chain_dir((vec3) {0, 0, -1}, 0, 0.5f, 0, 0, (vec3) {0.2f, 0.4f, 0}), 1e-5f) &&
+          near_v(up(&client->camera), chain_dir((vec3) {0, 1, 0}, 0, 0.5f, 0, 0, (vec3) {0.2f, 0.4f, 0}), 1e-5f),
+          "rotate(): camera.rotation (x 0.2, y 0.4) inside the rig");
+    CHECK(!frame(client, &look, 0.0f, 1, NULL) && near_f(client->camera.rotation.y, 0.5, 1e-6), "the next frame's rotateCam puts the feel back");
+
+    // CAMERA.position.y: object.position for this frame (the next moveCam puts the eye back)
+    frame(client, &look, 0.0f, 1, ks_raise);
+    CHECK(near_f(client->camera.position.y, 50.0, 1e-5), "position.y = 50 shows on this frame: %.3f", client->camera.position.y);
+    frame(client, &look, 0.0f, 1, NULL);
+    CHECK(near_f(client->camera.position.y, eye_y, 1e-5), "and the eye again on the next");
+    client_free(client);
+
+    // camRot off: rotation.y turns the camera, never the input look
+    ClassOverrides o = g_default_class_overrides;
+    o.set = 1;
+    o.cam_rotation = 0;
+    client = client_with(&o, 0.5f);
+    look = (vec2) {0.0f, 0.5f};
+    frame(client, &look, 0.0f, 1, ks_yaw);
+    frame(client, &look, 0.3f, 1, NULL);
+    CHECK(near_f(look.y, 0.5, 1e-6) && near_v(forward(&client->camera), chain_dir((vec3) {0, 0, -1}, 0, 1.0f, 0, 0, (vec3) {0}), 1e-5f),
+          "no camRot: the camera keeps yaw 1.0, the input look 0.5 (no mouse either)");
+    client_free(client);
+
+    // CAMERA.lookAt with a 3rd Person offset: this frame the camera sits at the eye (camera.position 0)
+    // looking at the point; the next frame's camera block puts the offset back, the controls keep the yaw
+    o = g_default_class_overrides;
+    o.set = 1;
+    o.cam_type = CLASS_CAMERA_THIRD;
+    o.cam_offset[1] = 25.0f;
+    o.cam_offset[2] = 45.0f;
+    client = client_with(&o, 0.0f);
+    look = (vec2) {0.0f, 0.0f};
+    frame(client, &look, 0.0f, 1, ks_look);
+    CHECK(near_v(client->camera.position, (vec3) {0.0f, eye_y, 0.0f}, 1e-4f) && near_v(forward(&client->camera), (vec3) {1.0f, 0.0f, 0.0f}, 1e-4f),
+          "lookAt(100, eye, 0): at the eye facing +X");
+    frame(client, &look, 0.0f, 1, NULL);
+    const vec3 back = chain_dir((vec3) {0.0f, 25.0f, 45.0f}, 0, -(float) M_PI / 2.0f, 0, 0, (vec3) {0});
+    CHECK(near_f(look.y, -M_PI / 2.0, 1e-5) && near_v(client->camera.position, (vec3) {back.x, eye_y + back.y, back.z}, 1e-3f),
+          "next frame: xDr took the lookAt's yaw (-PI/2), the offset behind it again");
+
+    // detached: the camera block stops; `+= camOffX / Y / Z` keeps running
+    frame(client, &look, 0.0f, 1, ks_detach);
+    const vec3 before = client->camera.position;
+    frame(client, &look, 0.5f, 1, NULL);
+    frame(client, &look, 0.5f, 1, NULL);
+    const vec3 d = chain_dir((vec3) {0.0f, 50.0f, 90.0f}, 0, -(float) M_PI / 2.0f, 0, 0, (vec3) {0});
+    CHECK(near_v(client->camera.position, (vec3) {before.x + d.x, before.y + d.y, before.z + d.z}, 1e-3f), "two detached frames add the offset twice");
+    CHECK(near_f(look.y, -M_PI / 2.0, 1e-5), "detached: the mouse does not turn the controls");
+    g_detached = 0;
+    client_free(client);
+
+    // Howler: the head, the input look
+    client = client_with(NULL, 0.7f);
+    look = (vec2) {-0.2f, 0.7f};
+    frame(client, &look, 0.0f, 1, NULL);
+    vec3 ear;
+    float ear_yaw, ear_pitch;
+    CHECK(class_camera_listener(client, &ear, &ear_yaw, &ear_pitch) && near_v(ear, (vec3) {0.0f, eye_y, 0.0f}, 1e-5f) && near_f(ear_yaw, 0.7, 1e-6) &&
+          near_f(ear_pitch, atan(-0.2), 1e-6), "listener at the eye, yaw xDr, the vector's yDr as atan(yDr)");
+    client_free(client);
+}
+
 int main(void) {
     test_make();
     test_pose();
     test_free_aim();
     test_locks();
     test_config();
+    test_chain();
+    test_controls();
     printf("class_camera_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

@@ -11,6 +11,7 @@
 // call sites are 2D SOUND.play on the client - jump/land/aim/reload/step sounds are local;
 // other players get positional footsteps (Krunker computes those client-side as well).
 #include <sound_events.h>
+#include <class_camera.h> // the listener at the head
 #include <audio.h>
 #include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
 #include <cosmetics.h>
@@ -618,7 +619,12 @@ void sound_events_tick(Client *client, const float now, const float delta) {
         g_sound.me.valid = 0;
     }
 
-    audio_update(client->camera.position, client->camera.rotation.y, client->camera.rotation.x);
+    // Howler.pos / orientation (deob-10.0.3.js:260850-260851): the head and the controls' look on the input
+    // frames, not wherever a class camera sits (class_camera.h); spectating and before a life, the camera
+    vec3 ear = client->camera.position;
+    float yaw = client->camera.rotation.y, pitch = client->camera.rotation.x;
+    class_camera_listener(client, &ear, &yaw, &pitch);
+    audio_update(ear, yaw, pitch);
 }
 
 void sound_events_hitmarker(void) {

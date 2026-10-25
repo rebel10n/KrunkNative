@@ -37,14 +37,65 @@ int class_camera_third_person(const ClassCamera *c) {
     return c && (c->third_person || c->has_offset || c->type != CLASS_CAMERA_FPS);
 }
 
-// The rig's frame of (pitch, yaw), three.js conventions (object.rotation.y = yaw holds pchObjc with
-// rotation.x = pitch; -Z forward): forward f = (-sin y cos p, sin p, -cos y cos p), right r = (cos y, 0,
-// -sin y), up u = (sin y sin p, cos p, cos y sin p). A local point (x, y, z) is x r + y u - z f.
-static vec3 rig_point(const float pitch, const float yaw, const vec3 local) {
-    const float sp = sinf(pitch), cp = cosf(pitch), sy = sinf(yaw), cy = cosf(yaw);
-    const vec3 f = {-sy * cp, sp, -cy * cp}, r = {cy, 0.0f, -sy}, u = {sy * sp, cp, cy * sp};
-    return (vec3) {r.x * local.x + u.x * local.y - f.x * local.z, r.y * local.x + u.y * local.y - f.y * local.z,
-                   r.z * local.x + u.z * local.y - f.z * local.z};
+// ---- 3x3 rotations, row-major (m[row * 3 + col]), right-handed like three.js
+
+void class_camera_m3_identity(float m[9]) {
+    for (int i = 0; i < 9; i++) m[i] = i % 4 == 0 ? 1.0f : 0.0f;
+}
+
+void class_camera_m3_mul(const float a[9], const float b[9], float out[9]) {
+    float t[9];
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) t[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+    for (int i = 0; i < 9; i++) out[i] = t[i];
+}
+
+static vec3 m3_apply(const float m[9], const vec3 v) {
+    return (vec3) {m[0] * v.x + m[1] * v.y + m[2] * v.z, m[3] * v.x + m[4] * v.y + m[5] * v.z, m[6] * v.x + m[7] * v.y + m[8] * v.z};
+}
+
+static void m3_transpose(const float a[9], float out[9]) {
+    const float t[9] = {a[0], a[3], a[6], a[1], a[4], a[7], a[2], a[5], a[8]};
+    for (int i = 0; i < 9; i++) out[i] = t[i];
+}
+
+// three's Euler with order "XYZ" (every Object3D here): Rx(x) Ry(y) Rz(z)
+void class_camera_euler_xyz(const vec3 e, float m[9]) {
+    const float cx = cosf(e.x), sx = sinf(e.x), cy = cosf(e.y), sy = sinf(e.y), cz = cosf(e.z), sz = sinf(e.z);
+    const float out[9] = {
+        cy * cz, -cy * sz, sy,
+        cx * sz + sx * sy * cz, cx * cz - sx * sy * sz, -sx * cy,
+        sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy,
+    };
+    for (int i = 0; i < 9; i++) m[i] = out[i];
+}
+
+// KrunkNative's camera angles for a world rotation: camera.c renders Rz(z) Ry(y) Rx(x) (x pitch, y yaw,
+// z roll about world Z). Of the two solutions the one with the smaller roll is taken, so a rotation
+// without roll comes back as exactly (pitch, yaw, 0); the yaw is moved by whole turns next to `yaw_hint`.
+// A roll inside the yaw (the wall lean) or a tilt has no such natural angles when the view runs along
+// world X (the order's gimbal): the angles render it exactly but are not a pitch / yaw / roll to read.
+void class_camera_m3_to_camera(const float m[9], const float yaw_hint, vec3 *rotation) {
+    const double sy = fmax(-1.0, fmin(1.0, -(double) m[6]));
+    double y = asin(sy), x, z;
+    const double cy = cos(y);
+    if (cy < 1e-7) { // looking straight up / down the yaw axis: no roll
+        z = 0.0;
+        x = atan2((double) m[1] / sy, (double) m[2] / sy);
+    } else {
+        const double x1 = atan2(m[7], m[8]), z1 = atan2(m[3], m[0]);
+        const double x2 = atan2(-m[7], -m[8]), z2 = atan2(-m[3], -m[0]);
+        if (fabs(z2) < fabs(z1)) {
+            y = M_PI - y;
+            x = x2;
+            z = z2;
+        } else {
+            x = x1;
+            z = z1;
+        }
+    }
+    y += 2.0 * M_PI * round(((double) yaw_hint - y) / (2.0 * M_PI));
+    *rotation = (vec3) {(float) x, (float) y, (float) z};
 }
 
 // Object3D.lookAt for a camera (three's Matrix4.lookAt with up (0, 1, 0)): the world rotation that
@@ -68,42 +119,82 @@ static void look_at(const vec3 from, const vec3 to, float *pitch, float *yaw) {
     *yaw = (float) atan2(-dx, -dz);
 }
 
-int class_camera_pose(const ClassCamera *c, const ClassCameraRig *r, Camera *camera) {
+// CONTROLS.object (rotation XYZ: the KrunkScript tilt, the yaw, the wall lean's roll) holding pchObjc
+// (rotation.x, the pitch): the perspective camera's parent rotation (deob-10.0.3.js:235419-235424)
+void class_camera_rig_parent(const ClassCameraRig *r, float m[9]) {
+    float pitch[9];
+    class_camera_euler_xyz((vec3) {r->tilt, r->yaw, r->roll}, m);
+    class_camera_euler_xyz((vec3) {r->pitch, 0.0f, 0.0f}, pitch);
+    class_camera_m3_mul(m, pitch, m);
+}
+
+int class_camera_local(const ClassCamera *c, const ClassCameraRig *r, const float keep_rotation[9], vec3 *position, float rotation[9]) {
     // camera.position.set(0, 0, 0) / thirdPerson's (5, 2, 14) / the Prop's (0, 0, d), then += camOffX / Y / Z
     // while camOffset (deob-10.0.3.js:260589-260645); iîÌìïii = camOffset || thirdPerson || the Prop
     vec3 local = r->local;
     if (c->has_offset) local = (vec3) {local.x + c->offset.x, local.y + c->offset.y, local.z + c->offset.z};
-    const int offset = c->has_offset || r->local_offset;
+    *position = local;
     // camera.lookAt(eye) when iîÌìïii (deob:260647-260649), but rotateCam after it (deob:260819-260821 on
     // input frames, 260858-260860 otherwise) sets camera.rotation back to the shake / recoil unless
     // freeMouse: a mouse-rotated offset camera looks parallel to the look, a free-mouse one at the eye
-    const int look = offset && c->free_mouse;
-    if (c->type == CLASS_CAMERA_ORTHO) {
-        // the OrthographicCamera is never added to pchObjc (only the perspective one is, deob:235422):
-        // camera.position is world coordinates, its rotation the world rotation (deob:230983, 231404-231410)
-        camera->position = local;
+    const int look = (c->has_offset || r->local_offset) && c->free_mouse;
+    const int ortho = c->type == CLASS_CAMERA_ORTHO;
+    if (look) {
+        // the OrthographicCamera has no parent (only the perspective one is in pchObjc, deob:235422): its
+        // position is the world one; the perspective camera's lookAt keeps the world rotation by undoing
+        // the parents' (Object3D.lookAt)
+        float parent[9];
+        class_camera_rig_parent(r, parent);
+        const vec3 d = m3_apply(parent, local);
+        const vec3 from = ortho ? local : (vec3) {r->eye.x + d.x, r->eye.y + d.y, r->eye.z + d.z};
+        float pitch, yaw, world[9];
+        look_at(from, r->eye, &pitch, &yaw);
+        class_camera_euler_xyz((vec3) {0.0f, yaw, 0.0f}, world);
+        float px[9];
+        class_camera_euler_xyz((vec3) {pitch, 0.0f, 0.0f}, px);
+        class_camera_m3_mul(world, px, world); // Ry(yaw) Rx(pitch)
+        if (ortho) {
+            for (int i = 0; i < 9; i++) rotation[i] = world[i];
+        } else {
+            m3_transpose(parent, parent);
+            class_camera_m3_mul(parent, world, rotation);
+        }
+    } else if (!c->free_mouse) {
+        // rotateCam(shakeX + swayX, shakeY + swayY + recoil + landBob, 0): camera.rotation (y, x, z)
+        class_camera_euler_xyz((vec3) {r->feel_pitch, r->feel_yaw, 0.0f}, rotation);
+    } else if (keep_rotation) { // freeMouse skips rotateCam: the camera keeps its rotation
+        for (int i = 0; i < 9; i++) rotation[i] = keep_rotation[i];
+    } else {
+        class_camera_m3_identity(rotation);
+    }
+    return look;
+}
+
+void class_camera_chain_pose(const ClassCameraChain *k, Camera *camera) {
+    float world[9];
+    if (k->ortho) { // RENDER's OrthographicCamera: no parent
+        camera->position = k->camera_position;
+        for (int i = 0; i < 9; i++) world[i] = k->camera_rotation[i];
+    } else {
+        float parent[9];
+        class_camera_rig_parent(&k->rig, parent);
+        const vec3 d = m3_apply(parent, k->camera_position);
+        camera->position = (vec3) {k->rig.eye.x + d.x, k->rig.eye.y + d.y, k->rig.eye.z + d.z};
+        class_camera_m3_mul(parent, k->camera_rotation, world);
+    }
+    class_camera_m3_to_camera(world, k->rig.yaw, &camera->rotation);
+}
+
+int class_camera_pose(const ClassCamera *c, const ClassCameraRig *r, Camera *camera) {
+    ClassCameraChain k = {.rig = *r, .ortho = c->type == CLASS_CAMERA_ORTHO};
+    const int look = class_camera_local(c, r, NULL, &k.camera_position, k.camera_rotation);
+    class_camera_chain_pose(&k, camera);
+    if (k.ortho) {
         camera->ortho = c->ortho_f * 0.5f; // top = frustumSize / 2, left = -frustumSize * aspect / 2 (deob:231454-231457)
         camera->near = CLASS_CAMERA_ORTHO_NEAR;
         camera->far = CLASS_CAMERA_ORTHO_FAR;
     } else {
-        const vec3 d = rig_point(r->pitch, r->yaw, local);
-        camera->position = (vec3) {r->eye.x + d.x, r->eye.y + d.y, r->eye.z + d.z};
         camera->ortho = 0.0f;
-    }
-    if (look) {
-        look_at(camera->position, r->eye, &camera->rotation.x, &camera->rotation.y);
-        camera->rotation.z = 0.0f; // three's lookAt undoes the parents' rotation, the wall lean's roll too
-    } else if (c->type == CLASS_CAMERA_ORTHO) {
-        // rotateCam's camera.rotation in world space (none with freeMouse: the camera keeps its rotation, 0)
-        camera->rotation.x = c->free_mouse ? 0.0f : r->feel_pitch;
-        camera->rotation.y = c->free_mouse ? 0.0f : r->feel_yaw;
-        camera->rotation.z = 0.0f;
-    } else {
-        // the rig's yaw / pitch, then rotateCam's camera.rotation inside it (KrunkNative sums the Euler
-        // angles as camera_feel_apply does); freeMouse skips rotateCam
-        camera->rotation.x = r->pitch + (c->free_mouse ? 0.0f : r->feel_pitch);
-        camera->rotation.y = r->yaw + (c->free_mouse ? 0.0f : r->feel_yaw);
-        camera->rotation.z = r->roll;
     }
     return look;
 }

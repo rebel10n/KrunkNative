@@ -9,6 +9,8 @@
 #include <camera_feel.h>
 #include <render_settings.h>
 #include <ui_logic.h>
+#include <class_camera.h> // the controls' yaw object (the wall lean's direction)
+#include <ks_client.h>   // a detached camera: no wall lean
 #include <math.h>
 #include <stdlib.h>
 
@@ -81,31 +83,35 @@ static float camera_feel_zoom(const Player *me) {
     return 1.0f + (zoom - 1.0f) * me->aim_val * ads_fov_mlt;
 }
 
-// wallLean / wallLeanMlt (v10.js:221617, the game loop after moveCam): while wall sliding (onWall, the
-// class can wall jump, crouched) the camera rolls towards lean = 0.15 * wallLeanMlt, signed by the wall's
-// side and scaled by the look's component along it, easing in at dt / 30 per ms; off the wall it eases
-// back by 1 / 40 per frame and snaps to 0 under 1e-4. Not with a detached (KrunkScript) camera.
+// wallLean / wallLeanMlt (deob-10.0.3.js:260862-260877, the game loop after moveCam): while wall sliding
+// (onWall, the class can wall jump, crouched) CONTROLS.object.rotation.z eases toward lean = 0.15 *
+// wallLeanMlt, signed by the wall's side and scaled by controls.getWorldDirection() (the yaw object's +Z in
+// world space) along it, at dt / 30 per ms; off the wall it eases back by 1 / 40 per frame and snaps to 0
+// under 1e-4. Only with the setting on and no detached (KrunkScript) camera: otherwise the roll stays as it
+// is (KrunkScript's CAMERA.rotation.z writes it too). The class camera composes it inside the yaw
+// (class_camera.h).
 static float g_wall_roll;
 
 void camera_feel_wall_lean(Client *client, const float delta_ms) {
     const ClientRenderSettings *rs = client_render_settings();
     const Player *me = client->me;
     const float lean = rs->wall_lean ? 0.15f * rs->wall_lean_mlt : 0.0f;
-    if (!me || lean <= 0.0f) {
-        g_wall_roll = 0.0f;
-        return;
-    }
+    if (!me || lean <= 0.0f || ks_client_camera_detached()) return;
     if (me->on_wall && me->wall_jump && me->crouch_val) {
         const int side = me->on_wall == 3 || me->on_wall == 4;
-        const float yaw = me->direction.y, pitch = me->direction.x;
-        const float dir = side ? -sinf(yaw) * cosf(pitch) : -cosf(yaw) * cosf(pitch); // getWorldDirection().x / .z
+        // Rx(tilt) Ry(yaw) Rz(roll) (0, 0, 1) = (sin yaw, -sin tilt cos yaw, cos tilt cos yaw)
+        const vec3 o = class_camera_object_rotation();
+        const float dir = side ? sinf(o.y) : cosf(o.x) * cosf(o.y);
         const float target = (side ? -lean : lean) * (me->on_wall % 2 ? -1.0f : 1.0f) * dir;
         g_wall_roll += fminf(delta_ms, 33.0f) * (target - g_wall_roll) / 30.0f;
     } else {
         g_wall_roll += (0.0f - g_wall_roll) / 40.0f;
         if (fabsf(g_wall_roll) < 0.0001f) g_wall_roll = 0.0f;
     }
-    client->camera.rotation.z = g_wall_roll;
+}
+
+void camera_feel_set_wall_roll(const float roll) {
+    g_wall_roll = roll;
 }
 
 float camera_feel_wall_roll(void) {
@@ -121,6 +127,7 @@ void camera_feel_apply(Client *client) {
 
     client->camera.rotation.x = me->direction.x + g_shake.pitch + me->recoil_anim_y * game_constants.recoil_mlt + me->land_bob_y * 0.1f;
     client->camera.rotation.y = me->direction.y + g_shake.yaw;
+    client->camera.rotation.z = 0.0f; // object.rotation.z (the wall lean, a script's roll): the class camera's chain
 
     client->camera.zoom = camera_feel_zoom(me);
 
