@@ -1648,6 +1648,7 @@ void accounts_round_changed(void) {
     // NET_EXT_INIT_EVENT); its limitedTimeMode puts the event's mode first in this round's vote list (game_config.c).
     game->event_index = server_events_round_index(game, g_acc.custom || game_config_is_custom(game));
     game->event_ltm = (unsigned char) live_events_limited_time_mode(server_events(), game->event_index);
+    server_events_round(game, g_acc.custom || game_config_is_custom(game)); // EVENT objects: inert in a custom game, the egg keys
     const int mode_id = game_mode_id(game);
     game_network_apply(game, g_server->config.tick_rate); // WP-E: the round's networkData (applyNetworking, mode.sendR)
 
@@ -2888,6 +2889,7 @@ void accounts_on_spawn(ClientConnection *client, const int first_spawn) {
 static void acc_revert_custom(const char *why);
 
 void accounts_on_disconnect(ClientConnection *client) {
+    server_events_forget_client(client->id); // tempEggs belong to this connection, not to a later one with the same id
     if (!g_acc.brain) return;
     if (client->acct.join_state == SERVER_JOIN_READY) acc_resume_note(client->acct.ticket_jti, 0);
     acc_ranked_on_leave(client);
@@ -2982,6 +2984,7 @@ static ClientConnection *acc_client_by_live_rid(const uint32_t rid) {
 // a guest identity.
 static void acc_live_leave_account(ClientConnection *client) {
     ServerAccount *a = &client->acct;
+    server_events_forget_client(client->id); // the next account gets a fresh tempEggs session
     if (a->account_id) {
         acc_commit_partial(client);
         if (g_acc.brain) { // presence only: the seat (clientId) stays the connection's
@@ -3721,6 +3724,8 @@ static void acc_handle_frame(cJSON *frame) {
         // the player list's K.P.D call: the record's id / the officers' lists (votekick.c)
     } else if (!strcmp(type, "acct-r") && trade_on_brain_frame(frame)) {
         // the live trade's inventories / settle (server/src/trade.c, doc/v10/trade.md)
+    } else if (!strcmp(type, "acct-r") && server_events_on_brain_frame(frame)) {
+        // the egg hunt's egg_found answers (server/src/live_events_server.c)
     } else if (!strcmp(type, "acct-r") || !strcmp(type, "host-request-reply")) {
         // no game-socket account ops / host requests on the native protocol yet
     }

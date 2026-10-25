@@ -75,6 +75,7 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/turf_wars.c
     # ks-6 (WP6): KrunkScript storage + map KR rewards; the value rules are the game server's
     db_storage.c
+    db_eggs.c          # the egg hunt's finds (Krunker v10.0.3 live event 3, doc/v10/events.md)
     ../../shared/src/ks_storage_data.c
     ../../shared/src/ks/ks_number.c
     ../../shared/src/map_catalog.c  # relative: knsvc_existing() checks paths under this dir
@@ -524,6 +525,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_events_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_live_events PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;events")
+    # the egg hunt's finds (doc/v10/events.md, db_eggs.c, 0363_event_eggs): egg_found's counts, found before, the
+    # completing find; sqlite unless KN_TEST_DB_DRIVER says otherwise
+    add_test(NAME brain_eggs
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/eggs_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_eggs PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;events")
     # v10 lottery (lottery.c, 0348_lottery): the guest view, skin / Junk / RP entries, the timer's draw
     add_test(NAME brain_lottery
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py

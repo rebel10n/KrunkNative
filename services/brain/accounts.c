@@ -1374,6 +1374,15 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
                     op_json_done, o);
         return 0;
     }
+    /* the egg hunt (Krunker v10.0.3 live event 3, db_eggs.c, doc/v10/events.md): a shot or hit on an EVENT object */
+    if (!strcmp(op, "egg_found")) {
+        OpCtx *o = op_new(cb, ud, "egg_found");
+        if (!o) return -1;
+        char total[24];
+        kn_db_call(g_acct_brain->db, &P_EGG_FOUND, KN_DB_ARGS(acct_itoa(ids, id), kn_json_str(args, "key", ""), acct_itoa(total, kn_json_int(args, "total", 187))),
+                   op_json_done, o);
+        return 0;
+    }
     /* the Junk wallet (db_junk.c, doc/v10/junk.md): amounts in hundredths; the game servers' credits
      * (Reward Junk, Junk Packages) and spends. junk_spend refuses "Not enough Junk". */
     if (!strcmp(op, "junk_balance")) {
