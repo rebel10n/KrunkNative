@@ -198,7 +198,7 @@ try:
         check(f"event {event}: server_bin listening", "Listening on port" in read(slog), slog)
         log = run_script(f"online-{event}", ["--connect", f"127.0.0.1:{port}"], script % event, {"KRUNKNATIVE_ASSETS_DIR": assets})
         lines = event_lines(log)
-        check(f"event {event}: the map's EVENT object is built (1 mesh, not a map object)", lines and lines[0][0] == 1, str(lines))
+        check(f"event {event}: the map's EVENT object is built (1 mesh, one map object)", lines and lines[0][0] == 1, str(lines))
         check(f"event {event}: at our spawn it is {'shown' if shown else 'hidden'} (toggleMeshGroup event_0)",
               any(n == 1 and s == shown and e == event and not c for n, s, e, c in lines), str(lines))
         stop(server)

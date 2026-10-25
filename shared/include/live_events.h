@@ -18,6 +18,7 @@
 // field: eventObjects (bool), the EVENT prefab's meshes show during this event too (v10 shows them for event 3
 // only, :256309-256313; that rule stays).
 #include <cJSON.h>
+#include <shared.h> // Map, Object
 
 #define LIVE_EVENTS_MAX 8
 #define LIVE_EVENT_NAME_SIZE 64
@@ -103,3 +104,10 @@ int live_events_reward(const LiveEvent *event, int event_index, int map_index, i
                        int store_count, LiveEventOwns owns, void *owns_user, LiveEventRandom random, void *random_user);
 // the limitedTimeMode of the event `event_index` (genMatchList's event pick, deob-10.0.3.js:221830-221832)
 int live_events_limited_time_mode(const LiveEvents *events, int event_index);
+// A custom game has no EVENT objects (map.generate skips them, deob-10.0.3.js:189737): KrunkNative keeps them in the
+// map (the same uids on both ends) and makes them inactive (no collision, no shot, no mesh). Nothing for another game.
+// Returns the EVENT objects of the map.
+int live_events_map_objects(Map *map, int custom);
+// The egg hunt (game.foundEventItem, deob-10.0.3.js:220700-220728): the event whose EVENT objects are eggs, and the
+// eggs a hunt has (config.easterEggs, :19419, :22520)
+#define LIVE_EVENT_EGGS_TOTAL 187

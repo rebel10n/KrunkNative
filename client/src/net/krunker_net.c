@@ -398,8 +398,10 @@ static void link_emit(void *user, const NetPacket *packet) {
         held_push(packet);
         return;
     }
-    client_net_log_packet("<=", (NetPacketType) packet->type, packet->payload, packet->length);
-    client_net_queue_packet(K.client, packet);
+    NetPacket out = *packet;
+    krunker_link_uids_in(&K.link, &out); // the official server's object uids -> the client's map objects (krunker_link_world.c)
+    client_net_log_packet("<=", (NetPacketType) out.type, out.payload, out.length);
+    client_net_queue_packet(K.client, &out);
 }
 
 static void link_send(void *user, const uint8_t *frame, const size_t len);
@@ -569,6 +571,11 @@ static void kmap_tick(Client *client) {
             client_set_custom_game_id(client, json, K.map_req.custom_id); // GAME.COOKIES' key for this custom game
             pthread_mutex_lock(&K.lock);
             if (!K.map_next_set) { // (a newer init that came meanwhile keeps the gate: its own map is next)
+                // the round's GameObject uids, before the INIT and what was held go out (krunker_link_world.c)
+                MapGameUids uids;
+                const int built = map_game_uids_build(&uids, json, K.link.host_id[0] != 0); // generate's isCustom = !!host
+                krunker_link_set_uids(&K.link, built ? &uids : NULL);
+                KN_LOG_VERBOSE2("[krunker] map %d: %s\n", index, built ? "object uids translated (v10 GameObject numbering)" : "object uids as sent");
                 K.map_init.map_index = slot;
                 NetPacket packet;
                 memset(&packet, 0, sizeof(packet));

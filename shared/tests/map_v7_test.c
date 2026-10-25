@@ -274,17 +274,19 @@ static void check_all_prefabs_fixture(void) {
     CHECK(json != NULL, "v7_all_prefabs.json missing");
     if (!json) return;
     Map *map = map_init_ex(json, 0);
-    CHECK(map && map->object_count == PREFAB_V7_COUNT - 4, "93 map objects (no EVENT, TERMINAL, AI_SPAWNER, BOT_SPAWNER): %zu",
+    // v10.0.3 makes EVENT a GameObject in a public game (deob-10.0.3.js:187029-187059); only TERMINAL,
+    // AI_SPAWNER and BOT_SPAWNER still build no map object in this all-prefabs fixture.
+    CHECK(map && map->object_count == PREFAB_V7_COUNT - 3, "94 map objects (no TERMINAL, AI_SPAWNER, BOT_SPAWNER): %zu",
           map ? map->object_count : 0);
-    if (!map || map->object_count != PREFAB_V7_COUNT - 4) {
+    if (!map || map->object_count != PREFAB_V7_COUNT - 3) {
         cJSON_Delete(json);
         return;
     }
-    // objects in file order, skipping 40, 41, 55, 95
+    // objects in file order, skipping 41, 55, 95
     const Object *by_id[PREFAB_COUNT] = {0};
     for (size_t i = 0; i < map->object_count; i++) by_id[map->objects[i]->prefab] = map->objects[i];
     for (int id = 0; id < PREFAB_V7_COUNT; id++) {
-        const int skipped = id == PREFAB_EVENT || id == PREFAB_TERMINAL || id == PREFAB_AI_SPAWNER || id == PREFAB_BOT_SPAWNER;
+        const int skipped = id == PREFAB_TERMINAL || id == PREFAB_AI_SPAWNER || id == PREFAB_BOT_SPAWNER;
         CHECK(skipped ? !by_id[id] : by_id[id] != NULL, "prefab %d (%s) %s", id, prefab_name(id), skipped ? "built" : "missing");
     }
     CHECK(map->ai_spawner_count == 1 && map->bot_spawner_count == 1, "pending AI / bot records");

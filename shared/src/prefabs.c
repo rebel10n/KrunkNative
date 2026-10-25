@@ -73,9 +73,11 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     [PREFAB_PALLET] = MODEL_PROP,
     [PREFAB_LIQUID] = {G(LIQUID), C(NONE), RENDER | MAPDET | NOWJ},
     [PREFAB_SOUND_EMITTER] = {G(NONE), C(NONE), NOWJ},
-    // v7 builds EVENT objects only on official maps, client-side (prefab localOnly); KN has no
-    // event objects and no shipped map has one: never a map object.
-    [PREFAB_EVENT] = {G(MODEL), C(NONE), NO_OBJ},
+    // v10.0.3 EVENT (the egg hunt's eggs, doc/v10/events.md): map.generate builds it as any model (addMesh: a GameObject
+    // unless noCol, isEvent, deob-10.0.3.js:187021-187059, :189737) except in a custom game, where it is skipped. KN keeps
+    // it a map object in every game (the uids of KN's server and client agree before the client knows the game is
+    // custom) and makes it inert in a custom one (live_events_map_objects: inactive, so no collision, shot or mesh).
+    [PREFAB_EVENT] = MODEL_PROP,
     // v10.0.3 BOT_PATH_NODE (v7 TERMINAL): map.js skips both names (deob-10.0.3.js:188700), no object either way;
     // its editor data (noCol, noCollision, tool, ...) is prefab_data.c's row 41 (deob-10.0.3.js:174150)
     [PREFAB_BOT_PATH_NODE] = {G(NONE), C(NONE), NO_OBJ},

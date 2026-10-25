@@ -242,3 +242,16 @@ int live_events_limited_time_mode(const LiveEvents *events, const int event_inde
     const LiveEvent *e = live_events_find(events, event_index);
     return e && e->limited_time_mode;
 }
+
+int live_events_map_objects(Map *map, const int custom) {
+    int count = 0;
+    for (size_t i = 0; map && i < map->object_count; i++) {
+        Object *object = map->objects[i];
+        if (!object || object->prefab != PREFAB_EVENT) continue;
+        count++;
+        // A custom game's eggs are inert. Restore an ordinary public map object when the same client later
+        // enters a public game with this map; a destroyed or initially inactive object stays inactive.
+        object->active = custom || object->start_closed || object->start_destroyed || object->start_inactive || object->destroyed ? 0 : 1;
+    }
+    return count;
+}

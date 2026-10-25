@@ -42,17 +42,28 @@ get the running ones in the internal WS `welcome` and `game-events` pushes; the 
   `gameserver.force_event` (every round, not one); the offline sandbox's is `KRUNKNATIVE_EVENT=<id>` (v10's sandbox
   inits with eventIndex 0, :261891). The official link forwards init [2].
 - **The EVENT prefab** (prefab 40, `models/event_0.obj`, the egg hunt's eggs): map.generate skips EVENT objects in a
-  custom game (:189737); the others are meshes of the `event_0` group. The "start" handler (:256309-256313) shows the
+  custom game (:189737); in a public game they are ordinary `GameObject`s, with `uid: this.objects.length` when they
+  collide (:187029-187059). Their meshes form the `event_0` group. The "start" handler (:256309-256313) shows the
   group for event 3 unless spectating and hides it for any other event; the renderer keeps a hidden group hidden for
-  the next maps (:234342). KN (`client/src/event_objects.c`): EVENT objects are not map objects (no uid, no
-  collision: `PREFAB_R_NO_OBJECT`), so the client builds their meshes itself when a map loads
-  (`map_event_object_from_json`), none in a custom game (one that turns custom after its INIT hides them), and
-  `client_event_objects_on_start` applies the start rule at our spawn and at spectate_begin. An event with
-  `eventObjects` shows them as event 3 does.
-- Not ported: the egg hunt itself (game.foundEventItem, :220700-220728: a shot or hit on an egg in event 3, the
-  database's egg counts, the `event.easter.*` chat lines, the "eggs" challenge key); the EVENT meshes cast no
-  shadow-map shadow; v10 gives EVENT objects uids in public games (KN's object uids after an EVENT object of an
-  official map would differ from krunker.io's during such an event).
+  the next maps (:234342). KN keeps EVENT objects in `map->objects` on both ends, makes them inert in a custom game
+  (`live_events_map_objects`), and applies the start rule at our spawn and at spectate_begin
+  (`client_event_objects_on_start`). They cast shadows through the ordinary map-model path (`client/src/shadow.c`).
+- **Object ids:** `shared/src/map_game_uids.c` reproduces v10's GameObject numbering (collidable objects, two for a
+  FLAG, EVENT omitted in a custom game). The official link builds that table after `io.map` resolves the map and
+  translates object uids in both directions (`client/src/net/krunker_link_world.c`). Thus an EVENT object inserted
+  before another object does not shift the ids KN assigns to the official server's objects. KN's own server uses
+  `map->objects` indexes on its native wire and uses the same table for egg keys.
+- **The egg hunt** (`game.foundEventItem`, :220700-220728): during event 3, a shot, swing or damaging projectile on an
+  EVENT object sends the finder a hit marker. Once per session per egg, a signed-in, unflagged account asks the brain
+  (`egg_found`, `services/brain/db_eggs.c`, migration `0363_event_eggs`). A new find broadcasts
+  `event.easter.found.new` with the count of 187 and gives the `eggs` challenge +1; the 187th broadcasts
+  `event.easter.completed` and gives +10; an already-found egg sends `event.easter.found.old` only to the finder.
+  Guests and offline players can hit eggs but have no database finds, as in v10. Leaving or changing account clears
+  the session's temporary eggs and pending answers (`server_events_forget_client`).
+- **Tests:** `live_events_test` covers the object lifecycle, hit kinds and the uid table;
+  `services/brain/tests/eggs_test.py` covers new/old/completing finds, per-account isolation and the database rows;
+  `client/tests/live_events_e2e.py` covers the rendered objects. The official-link packet tests are
+  `krunker_link_test`.
 
 ## 3. The client: the popup and Event Challenges
 

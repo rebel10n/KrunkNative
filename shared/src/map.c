@@ -115,7 +115,7 @@ int map_raw_object_kept(const cJSON *raw_obj) {
     const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
     if (!cJSON_IsArray(obj_pos) || cJSON_GetArraySize(obj_pos) < 3 || cJSON_GetArraySize(obj_scale) < 3) return 0;
     // TERMINAL (v7: nothing), AI_SPAWNER (addAI: a pending AI, shared/src/ai.c spawns it at game
-    // init), BOT_SPAWNER (addBot: a pending map bot), EVENT (client-only official event objects)
+    // init), BOT_SPAWNER (addBot: a pending map bot), ENTITY; EVENT is a map object (prefabs.c)
     return !prefab_has_role(map_raw_object_prefab(raw_obj), PREFAB_R_NO_OBJECT);
 }
 
@@ -1375,17 +1375,6 @@ void map_reset(Map *map) {
 
 Object *map_object_from_json(const Map *map, const cJSON *raw_obj, const int build_meshes) {
     if (!cJSON_IsObject(raw_obj) || !map_raw_object_kept(raw_obj)) return NULL;
-    const int map_no_ambient = map && map_flag_is_set(cJSON_GetObjectItem(map->raw_data, "nAmb"));
-    const int v3_planes = map && cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, MAP_KEY_V3_PLANES));
-    const int slab_undersides = map && map->minimap_asset == MAP_SLAB_UNDERSIDE_MMID;
-    vec3 position, scale;
-    return map_parse_object(raw_obj, NULL, map_no_ambient, v3_planes, slab_undersides, build_meshes, &position, &scale);
-}
-
-Object *map_event_object_from_json(const Map *map, const cJSON *raw_obj, const int build_meshes) {
-    if (!cJSON_IsObject(raw_obj) || map_raw_object_prefab(raw_obj) != PREFAB_EVENT) return NULL;
-    const cJSON *p = cJSON_GetObjectItem(raw_obj, "p"), *s = cJSON_GetObjectItem(raw_obj, "s");
-    if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3 || cJSON_GetArraySize(s) < 3) return NULL;
     const int map_no_ambient = map && map_flag_is_set(cJSON_GetObjectItem(map->raw_data, "nAmb"));
     const int v3_planes = map && cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, MAP_KEY_V3_PLANES));
     const int slab_undersides = map && map->minimap_asset == MAP_SLAB_UNDERSIDE_MMID;

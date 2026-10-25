@@ -3,6 +3,7 @@
 // (ClientConnection.transport): TCP sockets (net_tcp.c), UDP peers (net_udp.c) or the
 // in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <prop_hunt.h> // Prop Hunt: "prp" / "prpR", the prop after a SPAWN
+#include <server_live_events.h> // v10.0.3 live events: the egg hunt hook
 #include <stalker.h>   // Stalker: "stlkrt", the hidden stalker out of the state stream
 #include <player_anim.h> // the "uai" of a spawn's onPlayerSpawn after its SPAWN
 #include <server.h>
@@ -2396,6 +2397,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.bot_banter = bot_banter_request;  // bot chat through kn_brain's AI (server/src/bot_banter.c)
     g_server->game.hooks.can_use_skin = net_game_can_use_skin; // players.spray canUseSkin (accounts.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
+    server_events_install_game_hooks(&g_server->game); // v10.0.3 egg hunt: foundEventItem (live_events_server.c)
 }
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.

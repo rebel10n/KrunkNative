@@ -642,7 +642,7 @@ int map_raw_object_prefab(const cJSON *raw_obj);
 // shared/src/map.c explains the v10 reference lines.
 int map_face_mask(const cJSON *raw_faces);
 // 1 when map_init makes a map->objects entry for this raw object: it has p and s arrays and its
-// prefab builds a map object (not TERMINAL, AI_SPAWNER, BOT_SPAWNER or EVENT; prefab_info()
+// prefab builds a map object (not TERMINAL, AI_SPAWNER, BOT_SPAWNER or ENTITY; prefab_info()
 // PREFAB_R_NO_OBJECT). Code pairing raw_data objects with map->objects in order must skip
 // exactly these.
 int map_raw_object_kept(const cJSON *raw_obj);
@@ -674,9 +674,6 @@ void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scen
 // object->raw points into it), parsed exactly like map_init does with `map`'s ambient setting;
 // not added to the map (no side lists, no dimensions). NULL: not a kept object / out of memory.
 Object *map_object_from_json(const Map *map, const cJSON *raw_obj, int build_meshes);
-// An EVENT prefab object (PREFAB_R_NO_OBJECT: never in map->objects, no uid) parsed the same way, for the client's
-// live-event meshes (client/src/event_objects.c). NULL for any other prefab. Free with map_object_free.
-Object *map_event_object_from_json(const Map *map, const cJSON *raw_obj, int build_meshes);
 // Frees one object made by map_init / map_object_from_json (client: its mesh leaves the scene first).
 void map_object_free(Object *object);
 
@@ -2054,6 +2051,10 @@ typedef struct {
     // A bot's chat line naming other players (`names`, the template's "$"s in order), from `speaker` (uid, name) to every
     // player: NET_EXT_KN_CHAT_NAMES to an EXT peer, else the composed NET_PACKET_CHAT line. NULL: game_send_chat_names composes it.
     void (*chat_names)(struct Game_t*, int speaker, const char *speaker_name, int count, const ServerName *names, const char *template);
+    // v10.0.3 game.foundEventItem (deob-10.0.3.js:220700-220728): a shot, swing or damaging projectile of `finder` reached an
+    // EVENT object (an egg; the callers :196105, :196858, :206942). The server runs the egg hunt (server/src/live_events_server.c).
+    // NULL = nothing.
+    void (*event_item)(struct Game_t*, Player *finder, Object *object);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second

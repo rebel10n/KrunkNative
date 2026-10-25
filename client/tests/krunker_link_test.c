@@ -3004,6 +3004,50 @@ static void test_net_gaps_1003(void) {
     clear();
 }
 
+static void test_object_uids(void) {
+    int uid_of_index[] = {10, 11, 12};
+    int index_of_uid[13];
+    for (int i = 0; i < 13; i++) index_of_uid[i] = i >= 10 ? i - 10 : -1;
+    KrunkerLink link = {0};
+    link.uids.uid_of_index = uid_of_index;
+    link.uids.index_count = 3;
+    link.uids.index_of_uid = index_of_uid;
+    link.uids.uid_count = 13;
+    NetObjectStatePacket state = {.uid = 11};
+    NetPacket packet = {0};
+    packet.type = NET_PACKET_OBJECT_STATE;
+    packet.length = sizeof(state);
+    memcpy(packet.payload, &state, sizeof(state));
+    krunker_link_uids_in(&link, &packet);
+    memcpy(&state, packet.payload, sizeof(state));
+    CHECK(state.uid == 1, "official GameObject uid 11 becomes map object index 1 (%d)", state.uid);
+    NetPickupPacket pickup = {.uid = 12};
+    packet = (NetPacket) {0};
+    packet.type = NET_PACKET_PICKUP;
+    packet.length = sizeof(pickup);
+    memcpy(packet.payload, &pickup, sizeof(pickup));
+    krunker_link_uids_in(&link, &packet);
+    memcpy(&pickup, packet.payload, sizeof(pickup));
+    CHECK(pickup.uid == 2 && krunker_link_uid_out(&link, GAME_INTERACT_GATE, 2) == 12,
+          "pickup uids translate both ways (%d / %d)", pickup.uid, krunker_link_uid_out(&link, GAME_INTERACT_GATE, 2));
+    NetConfirmPacket confirm = {.uid = 10, .kind = 0};
+    packet = (NetPacket) {0};
+    packet.type = NET_PACKET_CONFIRM_INTERACT;
+    packet.length = sizeof(confirm);
+    memcpy(packet.payload, &confirm, sizeof(confirm));
+    krunker_link_uids_in(&link, &packet);
+    memcpy(&confirm, packet.payload, sizeof(confirm));
+    CHECK(confirm.uid == 0, "a trigger confirm translates its object uid (%d)", confirm.uid);
+    NetConfirmPacket spin = {.uid = 11, .kind = 2};
+    packet = (NetPacket) {0};
+    packet.type = NET_PACKET_CONFIRM_INTERACT;
+    packet.length = sizeof(spin);
+    memcpy(packet.payload, &spin, sizeof(spin));
+    krunker_link_uids_in(&link, &packet);
+    memcpy(&spin, packet.payload, sizeof(spin));
+    CHECK(spin.uid == 11, "a prize-wheel spinner uid is not a map object uid (%d)", spin.uid);
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -4080,6 +4124,7 @@ int main(void) {
     test_s2c_followups();
     test_shapes_1003();
     test_net_gaps_1003();
+    test_object_uids();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

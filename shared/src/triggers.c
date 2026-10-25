@@ -305,6 +305,10 @@ void game_object_hit(Game *game, Object *object, Player *dealer, const float dam
             break;
     }
     if (fire) game_on_trigger(game, dealer, object, NULL);
+    // an EVENT object (an egg): foundEventItem after the hit's other work, for any shot or swing and a projectile that
+    // does damage (deob-10.0.3.js:196105, :196858, :206942)
+    if (object->prefab == PREFAB_EVENT && dealer && (kind != GAME_HIT_PROJECTILE || damage > 0.0f) && game->hooks.event_item)
+        game->hooks.event_item(game, dealer, object);
 }
 
 // ---------------------------------------------------------------- onTrigger

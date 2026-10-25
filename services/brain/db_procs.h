@@ -139,6 +139,7 @@ extern const kn_proc P_JUNK_CREDIT, P_JUNK_SPEND, P_JUNK_BALANCE;
 
 /* ---- KrunkScript storage and map KR rewards for game servers (db_storage.c) */
 extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
+extern const kn_proc P_EGG_FOUND; /* db_eggs.c: the egg hunt (doc/v10/events.md) */
 
 /* ---- player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c) */
 extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS, P_STAFF_BADGE, P_COUNTRY_FLAG;

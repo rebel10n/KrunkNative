@@ -1,8 +1,11 @@
 // Krunker v10.0.3 live events (shared/src/live_events.c) against config.events' readers in deob-10.0.3.js:
 // updateEventIndex (:219733-219751), UTILS.hasActiveEvents / getActiveEvent (:28747-28775), the start handler's
 // toggleMeshGroup("event_0") (:256309-256313), getItemByWeights (:220754-220806) and endGame's event reward
-// (:221732-221752), with a scripted Math.random. genMatchList's event bucket (:222421-222463) is config_test's.
+// (:221732-221752), with a scripted Math.random; v10's GameObject uids of a map (map_game_uids.c, the official link's
+// object uid translation). genMatchList's event bucket (:222421-222463) is config_test's.
 #include <live_events.h>
+#include <map_game_uids.h>
+#include <prefabs.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,12 +166,135 @@ static void test_reward(void) {
     CHECK(reward(NULL, 8, 2, r1, 3, &used) == -1 && reward(e8, 0, 2, r1, 3, &used) == -1, "no event, no eventIndex: nothing");
 }
 
+
+// an object of prefab `name` at x, with extra JSON fields
+static void uid_obj(char *out, const size_t n, const char *name, const int x, const char *extra) {
+    snprintf(out, n, "{\"p\":[%d,0,0],\"s\":[2,2,2],\"i\":%d%s%s}", x, prefab_id_from_name(name), extra[0] ? "," : "", extra);
+}
+
+static void test_game_uids(void) {
+    // file order: CUBE, CUBE l, CUBE l dyn, PLANE l, FLAG, EVENT, AI_SPAWNER (no map object), POINT_LIGHT, WEAPON_PICKUP l, RAMP
+    static const struct { const char *name, *extra; } objs[] = {
+        {"CUBE", ""}, {"CUBE", "\"l\":1"}, {"CUBE", "\"l\":1,\"dyn\":true"}, {"PLANE", "\"col\":true"}, {"FLAG", ""},
+        {"EVENT", ""}, {"AI_SPAWNER", ""}, {"POINT_LIGHT", ""}, {"WEAPON_PICKUP", "\"l\":1"}, {"RAMP", ""}};
+    char json[4096] = "{\"name\":\"uids\",\"spawns\":[[0,0,0]],\"objects\":[";
+    for (size_t i = 0; i < sizeof(objs) / sizeof(*objs); i++) {
+        char o[160];
+        uid_obj(o, sizeof(o), objs[i].name, (int) i, objs[i].extra);
+        strcat(json, i ? "," : "");
+        strcat(json, o);
+    }
+    strcat(json, "]}");
+    cJSON *map = cJSON_Parse(json);
+    MapGameUids pub, cus;
+    CHECK(map_game_uids_build(&pub, map, 0) && map_game_uids_build(&cus, map, 1), "tables built");
+    // KN indexes: every kept object (AI_SPAWNER is none): 0 CUBE, 1 CUBE l, 2 CUBE l dyn, 3 PLANE col, 4 FLAG, 5 EVENT,
+    // 6 POINT_LIGHT, 7 WEAPON_PICKUP l, 8 RAMP
+    static const int want_pub[] = {0, -1, 1, -1, 2, 4, -1, 5, 6};
+    static const int want_cus[] = {0, -1, 1, -1, 2, -1, -1, 4, 5};
+    CHECK(pub.index_count == 9 && cus.index_count == 9, "nine map objects (AI_SPAWNER makes none): %zu", pub.index_count);
+    int ok_pub = 1, ok_cus = 1;
+    for (int i = 0; i < 9; i++) {
+        ok_pub &= map_game_uid_of_index(&pub, i) == want_pub[i];
+        ok_cus &= map_game_uid_of_index(&cus, i) == want_cus[i];
+    }
+    CHECK(ok_pub, "public game: cube 0, noCol cube none, noCol dyn cube 1, noCol plane none, flag 2 (and 3: its zone), egg 4, "
+                  "light none, noCol pickup 5, ramp 6");
+    CHECK(ok_cus, "custom game: the egg has no GameObject, the pickup is 4, the ramp 5");
+    CHECK(pub.uid_count == 7 && map_game_index_of_uid(&pub, 3) == -1 && map_game_index_of_uid(&pub, 4) == 5 && map_game_index_of_uid(&pub, 6) == 8,
+          "uids back to indexes: the flag's zone (3) has no object, the egg 4 is index 5, the ramp 6 index 8");
+    CHECK(map_game_index_of_uid(&pub, 99) == -1 && map_game_uid_of_index(&pub, 99) == -1, "out of range: -1");
+    const MapGameUids none = {0};
+    CHECK(map_game_index_of_uid(&none, 7) == 7 && map_game_uid_of_index(&none, 7) == 7, "no table: the identity");
+    map_game_uids_free(&pub);
+    map_game_uids_free(&cus);
+    cJSON_Delete(map);
+
+    // the shipped official maps: the translation is a bijection between the indexes with a uid and the uids with an object
+    static const char *const files[] = {"assets/maps/official/10_kanji.json", "assets/maps/official/01_littletown.json",
+                                        "assets/maps/official/02_sandstorm.json"};
+    for (size_t f = 0; f < sizeof(files) / sizeof(*files); f++) {
+        FILE *fp = fopen(files[f], "rb");
+        if (!fp) {
+            printf("skip %s (run from the repository root)\n", files[f]);
+            continue;
+        }
+        static char buf[4 << 20];
+        const size_t len = fread(buf, 1, sizeof(buf) - 1, fp);
+        fclose(fp);
+        buf[len] = 0;
+        cJSON *m = cJSON_Parse(buf);
+        MapGameUids t;
+        const int built = map_game_uids_build(&t, m, 0);
+        int bijective = built, with_uid = 0;
+        for (size_t i = 0; built && i < t.index_count; i++) {
+            const int u = map_game_uid_of_index(&t, (int) i);
+            if (u < 0) continue;
+            with_uid++;
+            bijective &= map_game_index_of_uid(&t, u) == (int) i;
+        }
+        CHECK(built && bijective && with_uid > 0 && (size_t) with_uid < t.index_count,
+              "%s: %zu objects, %d GameObjects (%d uids), the two ways agree", files[f], t.index_count, with_uid, t.uid_count);
+        map_game_uids_free(&t);
+        cJSON_Delete(m);
+    }
+}
+
+static int g_egg_hits;
+static void test_event_item(Game *game, Player *finder, Object *object) {
+    (void) finder;
+    if (object && object->prefab == PREFAB_EVENT) g_egg_hits++;
+}
+
+static void test_egg_objects(void) {
+    cJSON *json = cJSON_Parse("{\"name\":\"eggs\",\"spawns\":[[0,2,0]],\"objects\":["
+                              "{\"p\":[0,0,0],\"s\":[10,2,10]},"
+                              "{\"p\":[4,1,0],\"s\":[2,2,2],\"i\":40}]}");
+    Map *map = json ? map_init_ex(json, 1) : NULL;
+    CHECK(map && map->object_count == 2 && map->objects[1]->prefab == PREFAB_EVENT,
+          "EVENT is a real map object, not a client-only mesh");
+    if (!map) {
+        cJSON_Delete(json);
+        return;
+    }
+    Object *egg = map->objects[1];
+    CHECK(live_events_map_objects(map, 1) == 1 && !egg->active, "a custom game's egg is inert");
+    CHECK(live_events_map_objects(map, 0) == 1 && egg->active, "the same map is solid again in a public game");
+    egg->destroyed = 1;
+    live_events_map_objects(map, 1);
+    live_events_map_objects(map, 0);
+    CHECK(!egg->active, "a destroyed egg is not reactivated by the event visibility pass");
+    egg->destroyed = 0;
+    live_events_map_objects(map, 0);
+    static const cJSON *maps[1];
+    maps[0] = json;
+    Game game = {0};
+    game_configure(&game, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+    game.hooks.event_item = test_event_item;
+    Player finder = {0};
+    finder.uid = 1;
+    Object *shot = game.map && game.map->object_count > 1 ? game.map->objects[1] : NULL;
+    game_object_hit(&game, shot, &finder, 1.0f, 0, GAME_HIT_SHOT);
+    game_object_hit(&game, shot, &finder, 1.0f, 0, GAME_HIT_MELEE);
+    game_object_hit(&game, shot, &finder, 0.0f, 0, GAME_HIT_PROJECTILE);
+    game_object_hit(&game, shot, &finder, 2.0f, 0, GAME_HIT_PROJECTILE);
+    CHECK(g_egg_hits == 3, "shots and swings always find an egg; a projectile must do damage (3 hits): %d", g_egg_hits);
+    map_fini(game.map);
+    free(game.map);
+    map_fini(map);
+    free(map);
+    cJSON_Delete(json);
+}
+
 int main(void) {
     test_parse();
     test_index();
     test_objects();
     test_weights();
     test_reward();
+    test_game_uids();
+    test_egg_objects();
     if (g_failures) {
         printf("live_events_test: %d of %d checks failed\n", g_failures, g_checks);
         return 1;

@@ -629,3 +629,76 @@ void krunker_link_world_init(KrunkerLink *l, const KrunkerFrame *f) {
     v = krunker_get(sync, "pwup"); // [instaKill, fireSale, doublePoints] ms
     for (uint32_t i = 0; krunker_is(v, KRUNKER_ARRAY) && i < v->len; i++) powerup(l, (int) i, krunker_at(v, i));
 }
+
+// ---------------------------------------------------------------- object uids (shared/include/map_game_uids.h)
+
+// A krunker.io server names map objects by their GameObject uids (v10's MapManager numbering: collidable objects only,
+// two for a flag, EVENT objects none in a custom game; doc/v10/events.md); the client's map objects are KrunkNative's
+// map->objects indexes. The transport builds the round's table when io.map resolved init's map (krunker_net.c
+// kmap_tick, krunker_link_set_uids) and passes every packet the link hands the client through krunker_link_uids_in;
+// the interact the link sends goes through krunker_link_uid_out.
+void krunker_link_set_uids(KrunkerLink *l, MapGameUids *table) {
+    map_game_uids_free(&l->uids);
+    if (table) {
+        l->uids = *table;
+        memset(table, 0, sizeof(*table));
+    }
+}
+
+static void patch_uid(void *payload, const size_t offset, const MapGameUids *t) {
+    int32_t uid;
+    memcpy(&uid, (uint8_t *) payload + offset, sizeof(uid));
+    uid = (int32_t) map_game_index_of_uid(t, uid);
+    memcpy((uint8_t *) payload + offset, &uid, sizeof(uid));
+}
+
+void krunker_link_uids_in(const KrunkerLink *l, NetPacket *p) {
+    const MapGameUids *t = &l->uids;
+    if (!t->index_of_uid || !p) return;
+    switch (p->type) {
+        case NET_PACKET_OBJECT_STATE: // "do" / "ro" / "gte" / "bnk" / "tn" / "fn", init's dest / mov
+            if (p->length >= sizeof(NetObjectStatePacket)) patch_uid(p->payload, offsetof(NetObjectStatePacket, uid), t);
+            return;
+        case NET_PACKET_PICKUP: // updatePickup, init's pkups
+            if (p->length >= sizeof(NetPickupPacket)) patch_uid(p->payload, offsetof(NetPickupPacket, uid), t);
+            return;
+        case NET_PACKET_ZOMBIE_MACHINE: // "mybx" / "krm" / the perk machines
+            if (p->length >= sizeof(NetZombieMachinePacket)) patch_uid(p->payload, offsetof(NetZombieMachinePacket, uid), t);
+            return;
+        case NET_PACKET_MYSTERY_BOX_SWITCH:
+            if (p->length >= sizeof(NetMysteryBoxSwitchPacket)) patch_uid(p->payload, offsetof(NetMysteryBoxSwitchPacket, uid), t);
+            return;
+        case NET_PACKET_OBJECT_ANIM: { // "ana" isObj: a map object; else an AI's sid
+            NetObjectAnimPacket a;
+            if (p->length < sizeof(a)) return;
+            memcpy(&a, p->payload, sizeof(a));
+            if (a.is_object) patch_uid(p->payload, offsetof(NetObjectAnimPacket, uid), t);
+            return;
+        }
+        case NET_PACKET_CONFIRM_INTERACT: { // "cnfm": a pending trigger's uid (a prize wheel's is a spinner uid)
+            NetConfirmPacket c;
+            if (p->length < sizeof(c)) return;
+            memcpy(&c, p->payload, sizeof(c));
+            if (c.kind != 2 && c.uid >= 0) patch_uid(p->payload, offsetof(NetConfirmPacket, uid), t);
+            return;
+        }
+        case NET_PACKET_EXT: { // "objmv" / init's chg: NET_EXT_KN_OFFICIAL_OBJECT_MOVED
+            if (p->length < NET_EXT_HEADER_SIZE + sizeof(NetObjectMovedPacket)) return;
+            const uint16_t subtype = (uint16_t) (p->payload[0] | (p->payload[1] << 8));
+            if (subtype == NET_EXT_KN_OFFICIAL_OBJECT_MOVED) patch_uid(p->payload, NET_EXT_HEADER_SIZE + offsetof(NetObjectMovedPacket, uid), t);
+            return;
+        }
+        default:
+            return;
+    }
+}
+
+int krunker_link_uid_out(const KrunkerLink *l, const int type, const int uid) {
+    switch (type) { // lastInteractData {type, id}: the types whose id is a map object
+        case GAME_INTERACT_GATE: case GAME_INTERACT_BANK: case GAME_INTERACT_TRIGGER: case GAME_INTERACT_PICKUP:
+        case GAME_INTERACT_KEY: case GAME_INTERACT_MYSTERY_BOX: case GAME_INTERACT_PERK: case GAME_INTERACT_KRUM:
+            return uid >= 0 ? map_game_uid_of_index(&l->uids, uid) : uid;
+        default:
+            return uid;
+    }
+}

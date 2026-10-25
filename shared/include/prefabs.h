@@ -81,7 +81,7 @@ typedef enum {
 } PrefabCollision;
 
 enum {
-    PREFAB_R_NO_OBJECT = 1 << 0,     // builds no map object (no uid): TERMINAL, AI_SPAWNER, BOT_SPAWNER, EVENT
+    PREFAB_R_NO_OBJECT = 1 << 0,     // builds no map object (no uid): TERMINAL, AI_SPAWNER, BOT_SPAWNER, ENTITY
     PREFAB_R_RENDER_ONLY = 1 << 1,   // client visual only (lights, light bars, sprites, sprays...)
     PREFAB_R_MAP_DETAIL = 1 << 2,    // built only with the client's "map details" setting (mapDet)
     PREFAB_R_EDITOR_ONLY = 1 << 3,   // exported to other keys / not built (SPAWN_POINT, CAMERA_POSITION, PLACEHOLDER)
