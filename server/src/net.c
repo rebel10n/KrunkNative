@@ -2094,6 +2094,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             }
             if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && g_server->game.ready) {
                 net_send_game_state(client); // its INIT went out first
+                net_send_event_index(client); // init [2] eventIndex likewise (the offline sandbox's INIT beats its HELLO)
                 ks_entities_send_state(&g_server->game, client->id); // the entities its INIT's EXTs could not carry yet
                 brain_events_send_init(client); // the map's Turf Wars clan (init syncData.warsClan)
             }
@@ -2107,7 +2108,6 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             break;
         case NET_PACKET_MATCH_VOTE: { // WP-E "maVote" "mode,map" (end screen; players and spectators)
             NetMatchVotePacket vote;
-                net_send_event_index(client); // init [2] eventIndex likewise (the offline sandbox's INIT beats its HELLO)
             if (packet->length != sizeof(vote) || client->peer_minor < NET_PROTOCOL_MINOR_V7) break;
             memcpy(&vote, packet->payload, sizeof(vote));
             game_vote_match(&g_server->game, client->id, vote.mode_id, vote.map_index);

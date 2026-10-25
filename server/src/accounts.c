@@ -1191,14 +1191,14 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
         // (never in a Krunker Strike match: these are Box Office store skins; Strike's items are its own)
         if (reward_skin && player && flavor_get() == FLAVOR_BASE && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1)
             accounts_give_skin(player, reward_skin, "mapreward");
-    }
-    cJSON *medals = cJSON_AddObjectToObject(p, "medals");
-    for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
-        if (player->medal_counts[i]) cJSON_AddNumberToObject(medals, g_progression_medals[i], player->medal_counts[i]);
         // endGame's event reward, after the map reward (deob-10.0.3.js:221732-221752): the round's event pays one of its
         // reward skins the account lacks (server/src/live_events_server.c), in a public-type round
         const int event_skin = player && flavor_get() == FLAVOR_BASE && game_is_pub_type(g) ? server_events_reward(client, map_index) : -1;
         if (event_skin >= 0) accounts_give_skin(player, event_skin, "eventreward");
+    }
+    cJSON *medals = cJSON_AddObjectToObject(p, "medals");
+    for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
+        if (player->medal_counts[i]) cJSON_AddNumberToObject(medals, g_progression_medals[i], player->medal_counts[i]);
     const Game *game = &g_server->game;
     cJSON_AddNumberToObject(p, "mapIndex", game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
                                               ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1);
@@ -1227,11 +1227,11 @@ static void acc_kill_events_set(const cJSON *events) {
     const int had = g_kill_events.count;
     kill_pools_parse(&g_kill_events, events);
     if (had || g_kill_events.count) server_log("[events] %d ongoing event(s), kill pools %s", g_kill_events.count, kill_pools_any(&g_kill_events) ? "on" : "off");
+    server_events_set(events); // the same list as config.events: eventIndex, limitedTimeMode, rewards (live_events_server.c)
 }
 
 static const KillReward *acc_kill_items(const ClientConnection *client, int *count) {
     for (int i = 0; i < g_kill_item_count; i++) {
-    server_events_set(events); // the same list as config.events: eventIndex, limitedTimeMode, rewards (live_events_server.c)
         if (g_kill_items[i].client_id != client->id) continue;
         *count = g_kill_items[i].count;
         return g_kill_items[i].items;
