@@ -224,8 +224,19 @@ def p_streams(status, body):
 
 
 def p_player_count(status, body):
-    ok = status == 200 and isinstance(body, dict) and isinstance(body.get("playerCount"), int)
-    return ok, "playerCount is a number" if ok else "HTTP %d, no playerCount" % status
+    ok = (status == 200 and isinstance(body, dict) and isinstance(body.get("playerCount"), int)
+          and isinstance(body.get("socialPlayerCount"), int) and isinstance(body.get("editorPlayerCount"), int))
+    return ok, "player/social/editor counts are numbers" if ok else "HTTP %d, counts %s" % (status, body)
+
+
+def p_presence(status, body):
+    ok = status == 200 and isinstance(body, dict) and body.get("success") is True
+    return ok, "presence accepted" if ok else "HTTP %d %s" % (status, body)
+
+
+def p_player_count_two_editors(status, body):
+    ok = status == 200 and isinstance(body, dict) and body.get("editorPlayerCount") == 2
+    return ok, "two editor sessions count" if ok else "HTTP %d, editorPlayerCount %s" % (status, body.get("editorPlayerCount"))
 
 
 def p_preset(expect):
@@ -420,6 +431,12 @@ def checks(guest_id):
          "v10.0.3 L4838 /seek-game; v10.js 147591-147612", None),
         ("GET", "/generate-token", None, p_ok,
          "v10.0.3 L5965 /generate-token; v10.js 147556-147561 (fetchValidationToken reads text)", None),
+        ("POST", "/api/editor/presence", {"session": "ed-alias-a"}, p_presence,
+         "the editor window's presence heartbeat (client/src/editor/editor.c): a session is counted for 60 s", None),
+        ("POST", "/api/editor/presence", {"session": "ed-alias-b"}, p_presence,
+         "a second editor window counts as its own session", None),
+        ("GET", "/player-count", None, p_player_count_two_editors,
+         "v10.0.3 L246286-246297 the editor count: both heartbeats are in the answer", None),
         ("GET", "/player-count", None, p_player_count,
          "v10.0.3 L31 /player-count (social host), L6557 (editor host); v10.js 211170-211178", None),
         # creations.c: the legacy map preset and the item prices, from the catalogue and the market sales

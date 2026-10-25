@@ -31,6 +31,7 @@
 #include <sky.h>
 #include <ui_logic.h> // ui_text_input_focused
 #include <backend_ui.h> // account_ui_twofa_handler: the 2FA popup of a password login
+#include <backend.h>    // the editor presence heartbeat (the Servers window's "in Editor" count)
 #include <win_geom.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1574,10 +1575,27 @@ static void run_script_text(const char *text) {
     free(buf);
 }
 
+// The Servers window's "in Editor" count (v10 fetches editor.krunker.io /player-count,
+// deob-10.0.3.js:246286-246297): every editor window heartbeats to the brain every 20 s; the brain counts the
+// sessions it saw in the last 60 s (/api/editor/presence, services/brain/public_routes.c).
+static void editor_presence_tick(const float now) {
+    static double next;
+    static char session[64];
+    if (now < next) return;
+    next = now + 20.0;
+    if (backend_available() != 1) return; // no brain (offline play): nobody to count with
+    if (!session[0]) snprintf(session, sizeof session, "ed-%.0f-%d", (double) now * 1000.0, rand());
+    char url[512], body[128];
+    snprintf(url, sizeof url, "%s/api/editor/presence", backend_url());
+    snprintf(body, sizeof body, "{\"session\":\"%s\"}", session);
+    backend_http_request("POST", url, body, NULL, NULL);
+}
+
 static void page_tick(Client *client, const float now, const float dt) {
     (void) client;
     if (!g_ed.active) return;
     g_ed.now = now;
+    editor_presence_tick(now);
     if (!g_ed.proj) ed_project_new(1);
     ed_bus_poll(); // bus requests run between frames, on whichever project they name
     if (!g_ed.script_done && g_ed.script_at == 0.0) g_ed.script_at = now + 1.0;

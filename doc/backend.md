@@ -777,7 +777,8 @@ brain draining).
 | `GET /mm/captcha?for=login\|register\|hosting` | (Krunker Box Office; v10.0.3 gets its challenges from Cloudflare and over the game socket) | an ALTCHA challenge `{"algorithm":"SHA-256","challenge","maxnumber","salt","signature"}` (7.10, [v10/captcha.md](v10/captcha.md)); 400 `BadRequest`, 503 `Unavailable` without a key |
 | `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
 | `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
-| `GET /api/player-count`, `/social/player-count` | same | `{"playerCount":N}` |
+| `GET /api/player-count`, `/social/player-count` | same | `{"playerCount":N,"socialPlayerCount":N,"editorPlayerCount":N}` players in lobbies, signed-in social sockets here, editor windows seen in the last 60 s |
+| `POST /api/editor/presence` | (Krunker Box Office) | body `{"session":"..."}`: an editor window's heartbeat (every 20 s from `client/src/editor/editor.c`), counted in `editorPlayerCount` for 60 s. v10 reads `editor.krunker.io/player-count` (`deob-10.0.3.js:246286-246297`); per-brain, in memory |
 | `GET /mm/presence` | (Krunker Box Office) | `{"local":N,"global":N\|null,"redis":"off"\|"up"\|"down"}` signed-in social sockets on this brain / on every brain (3.11; `null` without Redis) |
 | `POST /mm/admin/drain?node=ID` | (Krunker Box Office) | Bearer `brain.internal_secret`; see 6.4 |
 

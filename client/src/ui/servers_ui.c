@@ -169,8 +169,10 @@ static cJSON *g_games;           // serverListData (array of tuples, owned)
 static double g_total_players;
 // The footer's other counts, each read from its own website (v10 loadData's fetches, v10:211170): the brain's
 // /api/player-count (krunk.io's "on Social") and krunker.io's social.krunker.io and editor.krunker.io /player-count.
-// A count not read yet (or refused / failed) stays unknown and its span is blank: the brain has no editor count.
-enum { COUNT_BRAIN_SOCIAL = 0, COUNT_KIO_SOCIAL, COUNT_KIO_EDITOR, COUNT_N };
+// A count not read yet (or refused / failed) stays unknown and its span is blank. The brain answers
+// socialPlayerCount (its signed-in social sockets) and editorPlayerCount (editor heartbeats) besides playerCount;
+// an older brain without them falls back to playerCount for the social count and leaves the editor count blank.
+enum { COUNT_BRAIN_SOCIAL = 0, COUNT_KIO_SOCIAL, COUNT_KIO_EDITOR, COUNT_BRAIN_EDITOR, COUNT_N };
 static double g_count[COUNT_N];
 static int g_count_known[COUNT_N];
 static double g_kio_counts_ms = -1e18, g_brain_count_ms = -1e18; // when each was last asked (serverBrowserRate)
@@ -3194,7 +3196,8 @@ static char *gen_list(void) {
     double players = 0;
     const int in_game_known = tab_players(g_server_tab, &players);
     const int social = kio ? COUNT_KIO_SOCIAL : COUNT_BRAIN_SOCIAL;
-    const int editor_known = kio && g_count_known[COUNT_KIO_EDITOR];
+    const int editor = kio ? COUNT_KIO_EDITOR : COUNT_BRAIN_EDITOR;
+    const int editor_known = g_count_known[editor];
     char in_game[64] = "", in_editor[64] = "", on_social[64] = "";
     if (in_game_known) {
         char total[32];
@@ -3202,9 +3205,9 @@ static char *gen_list(void) {
         I18N_F(in_game, "windows.servers.online", "{0} In Game", total);
     }
     if (editor_known) {
-        char editor[32];
-        comma_number(editor, sizeof(editor), g_count[COUNT_KIO_EDITOR]);
-        I18N_F(in_editor, "windows.servers.editor", "{0} in Editor", editor);
+        char editor_num[32];
+        comma_number(editor_num, sizeof(editor_num), g_count[editor]);
+        I18N_F(in_editor, "windows.servers.editor", "{0} in Editor", editor_num);
     }
     if (g_count_known[social]) {
         char count[32];
@@ -3275,6 +3278,15 @@ static void on_player_count(void *user, const int status, const char *body, cons
     (void) length;
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *count = cJSON_GetObjectItem(res, "playerCount");
+    if (which == COUNT_BRAIN_SOCIAL) { // the brain's social and editor counts ride the same answer
+        const cJSON *social = cJSON_GetObjectItem(res, "socialPlayerCount");
+        const cJSON *editor = cJSON_GetObjectItem(res, "editorPlayerCount");
+        if (cJSON_IsNumber(social)) count = social;
+        if (cJSON_IsNumber(editor)) {
+            g_count[COUNT_BRAIN_EDITOR] = editor->valuedouble;
+            g_count_known[COUNT_BRAIN_EDITOR] = 1;
+        }
+    }
     if (cJSON_IsNumber(count)) {
         g_count[which] = count->valuedouble;
         g_count_known[which] = 1;

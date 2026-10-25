@@ -22,6 +22,7 @@
 #include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
+#include "social_ws.h"  /* social_ws_online: the footer's on-Social count */
 
 /* ---- helpers */
 
@@ -542,10 +543,64 @@ static void h_host_game(kn_http_req *req, void *ud) {
 
 /* ---- player counts, status, brains */
 
+/* v10's Servers footer reads social.krunker.io and editor.krunker.io /player-count
+ * (deob-10.0.3.js:246276-246297). Box Office has one brain: /api/player-count keeps playerCount (players in
+ * lobbies) and adds socialPlayerCount (signed-in social sockets here) and editorPlayerCount (editor windows
+ * heartbeating below). Per brain, in memory; a multi-brain deployment would move this to the hot tier. */
+#define EDITOR_PRESENCE_TTL_MS 60000
+#define EDITOR_PRESENCE_MAX 4096
+static struct { char session[64]; int64_t seen_ms; } g_editor_presence[EDITOR_PRESENCE_MAX];
+static size_t g_editor_presence_n;
+
+static void h_editor_presence(kn_http_req *req, void *ud) {
+    (void) ud;
+    cJSON *body = req->body_len ? kn_http_body_json(req) : NULL;
+    const char *session = kn_json_str(body, "session", "");
+    if (!session[0] || strlen(session) > 48) {
+        cJSON_Delete(body);
+        reply_error(req, 400, "InvalidSession");
+        return;
+    }
+    const int64_t now = kn_wall_ms();
+    size_t slot = g_editor_presence_n, oldest = 0;
+    for (size_t i = 0; i < g_editor_presence_n; i++) {
+        if (now - g_editor_presence[i].seen_ms > EDITOR_PRESENCE_TTL_MS) { // expired: reuse
+            slot = i;
+            break;
+        }
+        if (!strcmp(g_editor_presence[i].session, session)) {
+            slot = i;
+            break;
+        }
+        if (g_editor_presence[i].seen_ms < g_editor_presence[oldest].seen_ms) oldest = i;
+    }
+    if (slot == g_editor_presence_n) {
+        if (g_editor_presence_n >= EDITOR_PRESENCE_MAX) slot = oldest;
+        else g_editor_presence_n++;
+    }
+    snprintf(g_editor_presence[slot].session, sizeof(g_editor_presence[slot].session), "%s", session);
+    g_editor_presence[slot].seen_ms = now;
+    cJSON_Delete(body);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "success", 1);
+    brain_reply_json(req, 200, o);
+    cJSON_Delete(o);
+}
+
+static int editor_presence_count(void) {
+    const int64_t now = kn_wall_ms();
+    int n = 0;
+    for (size_t i = 0; i < g_editor_presence_n; i++)
+        if (now - g_editor_presence[i].seen_ms <= EDITOR_PRESENCE_TTL_MS) n++;
+    return n;
+}
+
 static void h_player_count(kn_http_req *req, void *ud) {
     Brain *b = ud;
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "playerCount", registry_player_count(b));
+    cJSON_AddNumberToObject(o, "socialPlayerCount", social_ws_online());
+    cJSON_AddNumberToObject(o, "editorPlayerCount", editor_presence_count());
     brain_reply_json(req, 200, o);
     cJSON_Delete(o);
 }
@@ -731,6 +786,7 @@ int public_routes_init(Brain *b) {
     kn_http_route(b->http, "POST", "/mm/admin/drain", h_admin_drain, b);
     kn_http_route(b->http, "POST", "/mm/admin/rcon", h_admin_rcon, b);
     kn_http_route(b->http, NULL, "/api/player-count", h_player_count, b);
+    kn_http_route(b->http, "POST", "/api/editor/presence", h_editor_presence, b);
     kn_http_route(b->http, NULL, "/social/player-count", h_player_count, b);
     kn_http_route(b->http, NULL, "/mm/player-count", h_player_count, b);
     kn_http_route(b->http, NULL, "/player-count", h_player_count, b); /* v10's social host (v10.js 211170) */

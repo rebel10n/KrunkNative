@@ -55,7 +55,7 @@ class Stub(BaseHTTPRequestHandler):
         elif path == "/mm/game-list":
             body = GAMES
         elif path == "/api/player-count":
-            body = {"playerCount": 14}
+            body = {"playerCount": 14, "socialPlayerCount": 5, "editorPlayerCount": 3}
         else:
             self.send_error(404)
             return
@@ -96,7 +96,7 @@ def grep(log, label):
 
 
 SCRIPT = ("0 boot\n300 call showWindow 2\n"
-          "2500 text @early [id=playerCnt]\n2510 text @early_social [id=socialCnt]\n"
+          "2500 text @early [id=playerCnt]\n2510 text @early_social [id=socialCnt]\n2515 text @early_editor [id=editorCnt]\n"
           "2520 grep @early_rows Chicago [id=serverHolder]\n"
           "3000 quit\n")
 
@@ -121,7 +121,8 @@ def main():
                 "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
     with open(log_path, "w") as out:
         # the menu, no --map (a map start joins a lobby): the account service is the default one (the seam's stub)
-        cmd = [f"{BUILD}/client_bin"]  # boot: the menu page, no map (a map start would join one)
+        # the menu, no --map (a map start joins a lobby): the account service is the default one (the seam's stub)
+        cmd = [f"{BUILD}/client_bin", "--debug"]  # the "brain found" line is debug-level
         if shutil.which("stdbuf"): cmd = ["stdbuf", "-oL"] + cmd  # the log is flushed line by line (a kill keeps it)
         p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -143,7 +144,9 @@ def main():
     _, early = text(log, "@early")
     check(fold(early) == "14 In Game", f"the window generated during the probe fills its In Game from the brain's 14 ({fold(early)!r})")
     _, soc = text(log, "@early_social")
-    check(fold(soc) == "14 on Social", f"krunk.io's on Social is the brain's own /api/player-count, 14 ({fold(soc)!r})")
+    check(fold(soc) == "5 on Social", f"krunk.io's on Social is the brain's socialPlayerCount, 5 ({fold(soc)!r})")
+    _, ed = text(log, "@early_editor")
+    check(fold(ed) == "3 in Editor", f"the editor count comes from the brain's editorPlayerCount, 3 ({fold(ed)!r})")
     check(grep(log, "@early_rows") >= 1, "the window lists the brain's Chitown lobby")
     if failures:
         print(f"server_default_probe_e2e: {len(failures)} failed (log in {WORK})")

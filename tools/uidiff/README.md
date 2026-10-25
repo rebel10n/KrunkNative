@@ -449,8 +449,9 @@ and the note says which.
 
 **Still open, and why**
 - **Server browser** (`kn-servers-official*`, `kn-servers-carousel`): the krunk.io / krunker.io tab
-  bar and the download button are intentional and shift every region; the footer also lacks v10's
-  "0 in Editor" and "0 on Social" counters, which is a real gap to port or to rule out.
+  bar and the download button are intentional and shift every region. The footer's counters are ported
+  (2026-10-25): the brain answers `socialPlayerCount` and `editorPlayerCount` besides `playerCount`,
+  and editor windows heartbeat `/api/editor/presence`; the scenarios' fixed list has no counts to show.
 - **End screens**: at 200 ms the victory title is ~8 % larger than the reference
   (`seq-end-vic@200`), `seq-end-results` counts down 00:20 where the reference has 00:19 and its
   timing entry is 135.9 ms late. Real animation/timing differences in the engine, not baselines.
