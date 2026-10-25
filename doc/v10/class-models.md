@@ -131,10 +131,13 @@ an FBX to glTF converter of several hundred lines, with no FBX class model in Kr
 A missing or broken model draws nothing, as v10's loaders leave nothing; while the file downloads nothing is drawn and
 the model is rebuilt (kept) once it lands.
 
-## Not done
+## Class camera
 
-- The class camera types (`camType`, `camOffX..Z`, `orthoF`, ...): another agent's work. Until then our own model
-  with `mdlFP` on is drawn around KrunkNative's first-person camera, as v10 draws it in first person.
+The class camera types (`camType`, `camOffX..Z`, `orthoF`, the locks and the free-mouse aim) are ported in
+`client/src/class_camera.c` / `class_camera_client.c` (their header lists v10's lines and the deliberate
+differences), including KrunkScript's `GAME.CAMERA` writes attached or detached and the audio listener at
+the player's head. A class with `mdlFP` off draws no first-person model; the third-person model is drawn
+with the world.
 
 ## Checking it
 
