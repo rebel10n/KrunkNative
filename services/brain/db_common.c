@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "account_life.h"
 #include "junk.h"
 #include "knsvc/loop.h"
 #include "v10_paint.h"
@@ -401,6 +402,7 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
         cJSON *owned = data && cJSON_GetArraySize(data) > 10 ? db_owned_skins(x, id) : NULL;
         if (owned) cJSON_ReplaceItemInArray(data, 10, owned);
         else cJSON_Delete(owned);
+        db_account_life_extras(x, id, v); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
         return v;
     }
     cJSON *r = db_player_row(x, id);
@@ -472,5 +474,6 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     cJSON_AddItemToObject(o, "badges", badges);
     /* v10 double XP: the end-screen 2x XP offer and the weekend schedules (kn_account_json's "dxp", 0341_double_xp) */
     cJSON_AddItemToObject(o, "dxp", db_dxp_state(x, id, kn_wall_ms()));
+    db_account_life_extras(x, id, o); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
     return o;
 }

@@ -16,6 +16,12 @@ void host_flow_open_map(int catalog_index);
 // The Games window's Host button on a published map (selectHostMap): the banner's choice
 // (the command's gameserver.maps and the request's customMap are published:<creator>/<name>).
 void host_flow_open_published(const char *name, const char *creator);
+// The Host Presets' commMap key (ui_host_config.c, deob-10.0.3.js:249190-249209): the chosen community map's name,
+// "" when none is chosen (Save stores it only then).
+const char *host_flow_community_name(void);
+// Load of a preset with commMap: the chosen community map becomes the one of that name (the catalogue's community map,
+// else the published map). 0 = not applied: no community map is chosen (v10 throws there), or no such name.
+int host_flow_set_community_name(const char *name);
 // showGames(true): the Games window, to browse and pick a community map (its Host button comes back here)
 void host_flow_browse_community(void);
 // The window's markup for the state (windows[8] / MENU_WINDOW_HOST, servers_ui.c's window table).

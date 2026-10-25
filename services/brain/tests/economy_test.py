@@ -406,6 +406,31 @@ async def scenario(url, db):
         check(po_text(r) == "Access Denied", "black market: account too young: %r" % (r,))
         r = await c.call(("bmr", "po"), "pbm", 1641, op())  # req disabled
         check(r[0] == "bmr" and r[1] is None, "black market: disabled item unavailable")
+        # v10.0.3's title reward (deob-10.0.3.js:152763-152806): an item with a `title` grants it, and the reply names it
+        r = await c.call("ttl", "ttl")
+        check(r[1] == [], "ttl: no titles before: %r" % (r,))
+        r = await c.call("gapi", "gapi", 1, "GET", "/players/" + names["cat"], None)
+        check(r[2] == 200 and r[3]["data"]["player_titles"] == "", "gapi profile: no titles before: %r" % (r[3],))
+        set_player(db, C, funds=funds(db, C) + 10000)
+        cf = funds(db, C)
+        db.q("UPDATE players SET player_stats = $2 WHERE player_id = $1", C, '{"n": 1200, "tmk": 10000}')
+        r = await c.call(("bmr", "po"), "pbm", 1866, op())  # Shuriken: 10000 KR, stats tmk >= 10000, title 91
+        check(r[0] == "bmr" and r[1] and r[1]["item"] == 1866 and r[1].get("title") == 91 and r[1]["f"] == cf - 10000
+              and count(db, C, 1866) == 1, "black market purchase with a title: %r" % (r,))
+        check(db.q("SELECT title_id, source, ref FROM player_titles WHERE account_id = $1", C) == [("91", "blackmarket", "1866")],
+              "player_titles row (0361): title 91 from item 1866")
+        r = await c.call("ttl", "ttl")
+        check(r[1] == [91], "ttl lists the granted title: %r" % (r,))
+        r = await c.call("gapi", "gapi", 2, "GET", "/players/" + names["cat"], None)
+        check(r[2] == 200 and r[3]["data"]["player_titles"] == "91", "gapi profile player_titles: %r" % (r[3]["data"].get("player_titles"),))
+        r = await c.call(("bmr", "po"), "pbm", 1866, op())
+        check(po_text(r) == "You already own this item" and db.one("SELECT count(*) FROM player_titles WHERE account_id = $1", C) == 1,
+              "a title item twice: refused, the title granted once: %r" % (r,))
+        r = await c.call(("bmr", "po"), "pbm", 1642, op())
+        check(r[0] == "po" and db.one("SELECT count(*) FROM player_titles WHERE account_id = $1", C) == 1,
+              "an item without a title grants none")
+        r = await b.call("gapi", "gapi", 3, "GET", "/players/" + names["bob"], None)
+        check(r[3]["data"]["player_titles"] == "", "another account's profile: no titles: %r" % (r[3]["data"].get("player_titles"),))
         # MAX
         give(db, D, 0, 3)
         d = await user(url, names["dan"])

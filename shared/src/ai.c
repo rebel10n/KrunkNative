@@ -326,6 +326,7 @@ static void ai_build_data(const cJSON *o, GameAIData *d, char *name, const size_
     d->score = (int) ai_limit((float) json_int(o, "sp"), 0.0f, 10000.0f);
     // rew / rewm / rewr / rewn: public-game skin rewards (no-op natively, see the header)
     d->behaviour = (int) ai_limit((float) json_int(o, "bh"), 0.0f, 20.0f);
+    d->is_boss = (unsigned char) json_present(o, "boss"); // isBoss (deob-10.0.3.js:204916)
     d->ignore_on_stuck = (unsigned char) json_present(o, "igos");
     d->drift_on_stuck = (unsigned char) json_present(o, "dos");
     d->invincible_on_stuck = (unsigned char) json_present(o, "ivos");
@@ -1087,6 +1088,15 @@ static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
     ai->respawn_timer = 0.0f;
     if (!silent) {
         if (source) source->mode.ai_kills++; // aiKills (Zombies endStats "zombies", map-logic WP-H)
+        // isBoss (deob-10.0.3.js:206316-206324): every active non-bot player gets bossKills and the "bk" challenge
+        if (ai->data.is_boss) {
+            for (size_t i = 0; i < game->player_count; i++) {
+                Player *p = game->players[i];
+                if (!p || p->is_bot || !p->active) continue;
+                p->mode.boss_kills++;
+                game_challenge(game, p, "bk", 1, -1, -1);
+            }
+        }
         ai_emit_sound(game, ai, ai->data.death_sound, 0.0f, NULL);
         ai->respawn_timer = ai->data.respawn_r ? (float) ai_rand_int(100, ai->respawn_t ? (int) ai->respawn_t : 5000) : ai->respawn_t;
         ai_trigger(game, ai, 15, source); // onAIDeath

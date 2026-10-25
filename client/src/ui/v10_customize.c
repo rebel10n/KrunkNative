@@ -71,8 +71,8 @@ static const cJSON *title_get(const int id) { // _34399
     return NULL;
 }
 
-// acc.titles.indexOf(id) >= 0. A guest has none, and so has an account while the brain has no
-// grants for it (sh_titles: nothing grants titles yet)
+// acc.titles.indexOf(id) >= 0. A guest has none; an account has the brain's grants ("ttl": its Black Market
+// titles, kn_brain player_titles)
 static int title_owned(const int id) {
     if (!active_account()) return 0;
     const cJSON *e;
@@ -101,6 +101,19 @@ static void title_style(StrBuf *out, const cJSON *t) {
 // and tag style (_34404, deob-10.0.3.js:116983)
 const cJSON *v10_customize_titles(void) { return titles(); }
 void v10_customize_title_style(StrBuf *out, const cJSON *t) { title_style(out, t); }
+// the Black Market card's title reward (v10_market.c, deob-10.0.3.js:152763-152770: getTitle(item.title))
+const cJSON *v10_customize_title_get(const int id) { return title_get(id); }
+
+// A Black Market purchase whose reply names a title (deob-10.0.3.js:152803-152806): account.titles gains it when it
+// lacks it, then titlesVersion moves (iíïìíïî: the title lists redraw). Without a "ttl" answer yet the list starts
+// with it; the next "ttl" replaces the list with the brain's anyway.
+void v10_customize_title_granted(const int id) {
+    if (id < 0 || title_owned(id)) return;
+    if (!g_owned_titles) g_owned_titles = cJSON_CreateArray();
+    if (g_owned_titles) cJSON_AddItemToArray(g_owned_titles, cJSON_CreateNumber(id));
+    menu_rerender_if_open(TITLE_WINDOW);
+    menu_rerender_if_open(3);
+}
 
 // titleIndex (getSavedVal("titleIndex") || -1); only a title the player has is worn
 int v10_customize_title(void) {

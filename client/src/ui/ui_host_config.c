@@ -10,6 +10,7 @@
 #include <html_ui.h>
 #include <i18n.h>
 #include <backend_ui.h> // active_account(): Server Upgrades for an account, its funds
+#include <host_flow_ui.h> // the Host Presets' commMap: the window's chosen community map
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -354,7 +355,8 @@ static int preset_matrix(const int save, cJSON *preset, const GameConfigTable ta
 }
 
 // windows[7].presetAction(action): 0 Load, 1 Save, 2 Delete the selected preset (deob-10.0.3.js:249067-249222). v10's
-// commMap, rawMapData and krRewards keys have no field here (no raw game data, no KR rewards toggle); makePrivate does.
+// rawMapData and krRewards keys have no field here (no raw game data, no KR rewards toggle); makePrivate does, and
+// commMap is the Host Game window's chosen community map (host_flow_community_name, :249190-249209).
 static void preset_action(const int action) {
     const HtmlElem name_el = html_dom_by_id("presetName"), select_el = html_dom_by_id("presetSelect");
     char name[96] = "", selected[96] = "";
@@ -401,6 +403,12 @@ static void preset_action(const int action) {
                 const HtmlArg on = {.kind = HTML_ARG_BOOL, .num = 1};
                 matrix_toggle(&g_effect_conf, &on, 1, "togConfE", "effectSelect", "effectConf", GAME_CONFIG_EFFECT);
             }
+            // commMap: Save keeps the chosen community map's name, Load makes the map of that name the chosen one (v10
+            // renames its selection, which it hosts by name; with none chosen it throws and keeps the official maps:
+            // host_flow_set_community_name skips it then, and the rest still loads)
+            const cJSON *comm = save ? NULL : cJSON_GetObjectItemCaseSensitive(preset, "commMap");
+            if (save && host_flow_community_name()[0]) cJSON_AddStringToObject(preset, "commMap", host_flow_community_name());
+            else if (cJSON_IsString(comm)) host_flow_set_community_name(comm->valuestring);
             const HtmlElem priv = html_dom_by_id("makePrivate");
             if (save) {
                 if (priv && html_dom_get_checked(priv)) cJSON_AddTrueToObject(preset, "makePrivate");

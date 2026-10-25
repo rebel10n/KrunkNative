@@ -193,6 +193,7 @@ static void skins_load(void) {
                 k->craftable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "craftable"));
                 k->qs_kr = (int) kn_json_int(it, "qsKR", 0);
                 k->funds = kn_json_int(it, "funds", 0);
+                k->title = (int) kn_json_int(it, "title", -1); /* blackM items: the title the purchase grants (deob-10.0.3.js:152763) */
                 const cJSON *rq = cJSON_GetObjectItemCaseSensitive(it, "req"), *ra = cJSON_GetObjectItemCaseSensitive(it, "reqAmount");
                 if (cJSON_IsString(rq)) snprintf(k->req_kind, sizeof k->req_kind, "%s", rq->valuestring);
                 snprintf(k->req_var, sizeof k->req_var, "%s", kn_json_str(it, "reqVar", ""));

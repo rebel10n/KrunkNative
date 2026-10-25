@@ -43,6 +43,8 @@ NO_ITEM = 999999
 # one it already owns (1 Year Cape: bought from the Black Market, never again)
 BM_BUY = 1642
 BM_OWNED = 1483
+# a black-market item with a v10.0.3 title (Shuriken: stats "tmk" >= 10000, 10000 funds, title 91; deob-10.0.3.js:152803)
+BM_TITLE, BM_TITLE_ID = 1866, 91
 JUNK_ITEM = 114          # Flame Tamer: Contraband, 5 Junk per quick-sold unit (deob-10.0.3.js:116317, 122619-122632)
 SELLER = "mkt_seller"
 BUYER = "mkt_buyer"
@@ -209,7 +211,7 @@ def market_scenario(port, path):
         # level 10 (market_min_level) and funds; the buyer's player_stats "n" is the Nuke Tamer requirement
         ("UPDATE players SET player_score = 200000, player_funds = 1000 WHERE player_id = ?", (s_id,)),
         ("UPDATE players SET player_score = 200000, player_funds = 100000, player_stats = ? WHERE player_id = ?",
-         ('{"n": 2000}', b_id)),
+         ('{"n": 2000, "tmk": 10000}', b_id)),
         # the seller holds 2 of skin 0 and 2 of skin 1; one skin 0 is in an old listing (escrowed, not in inventory)
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (s_id, ITEM)),
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (s_id, ITEM_B)),
@@ -456,8 +458,12 @@ def market_scenario(port, path):
     expect_text_error("138 POST /market/black-market/purchase (not a black-market item)", st, r, 400, "Item Unavailable")
     st, r = http(port, "POST", "/market/black-market/purchase", {"item_index": BM_BUY}, b_tok)
     expect_data("138 POST /market/black-market/purchase (stats requirement met)", st, r,
-                lambda d: isinstance(d, dict) and d.get("item") == BM_BUY and d.get("kr") == 3000 and is_int(d.get("funds")),
-                "{item, kr, funds} (v10.0.3 5160; v10.js 136215)")
+                lambda d: isinstance(d, dict) and d.get("item") == BM_BUY and d.get("kr") == 3000 and is_int(d.get("funds"))
+                and "title" not in d, "{item, kr, funds} (v10.0.3 5160; v10.js 136215)")
+    st, r = http(port, "POST", "/market/black-market/purchase", {"item_index": BM_TITLE}, b_tok)
+    expect_data("138 POST /market/black-market/purchase (an item with a title)", st, r,
+                lambda d: isinstance(d, dict) and d.get("item") == BM_TITLE and d.get("title") == BM_TITLE_ID,
+                "{item, kr, funds, title} (deob-10.0.3.js:152803-152806)")
     st, r = http(port, "GET", "/market/black-market", None, b_tok)
     expect_data("136 GET /market/black-market (after the purchase)", st, r,
                 lambda d: isinstance(d, list) and BM_OWNED in d and BM_BUY in d, "owned includes the bought item")

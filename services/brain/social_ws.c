@@ -11,6 +11,7 @@
  * Labels and shapes: doc/backend.md "Accounts & social socket".
  */
 #include "acct_internal.h"
+#include "account_life.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -375,7 +376,8 @@ cJSON *social_account_info(const cJSON *account) {
     const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges",
                           "creator_badge", /* v10's creatorBadge (0210_creator_badge) */
                           "dxp",           /* v10 double XP: the 2x XP offer and the weekend schedules (0341_double_xp) */
-                          "junk"};         /* the Junk wallet's balance, "12.34" (0347_junk_wallet, doc/v10/junk.md) */
+                          "junk",          /* the Junk wallet's balance, "12.34" (0347_junk_wallet, doc/v10/junk.md) */
+                          "reqDel", "twitchId", "twitch", "raidStats"}; /* v10.0.3 setData [29] / [44] / [23] / [52] (account_life.c) */
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(account, keys[i]);
         if (v) cJSON_AddItemToObject(info, keys[i], cJSON_Duplicate(v, 1));
@@ -784,6 +786,11 @@ static const SocialRoute k_routes[] = {
     {"getS", sh_settings_get},
     {"nme", sh_alias},
     {"upp", sh_password},
+    {"rqd", sh_delete_request},         /* v10.0.3 rpc rqd: Request Deletion / Cancel (account_life.c) */
+    {"twitchAuth", sh_twitch_auth},     /* KrunkNative: the Twitch link's OAuth page (account_life.c) */
+    {"removeTwitchLink", sh_twitch_unlink}, /* v10 REMOVE_TWITCH -> "twitchRemoveResponse" */
+    {"getTwitchDrops", sh_twitch_drops},    /* v10 GET_TWITCH_DROPS -> "twitchDropsResponse" */
+    {"verifyTwitch", sh_twitch_verify},     /* v10 VERIFY_TWITCH -> "twitchVerifyResponse" */
     {"kml", sh_mail_list},
     {"rml", sh_mail_read},
     {"raml", sh_mail_read_all},
@@ -884,7 +891,9 @@ static const LabelClass k_label_class[] = {
     {"a2FAc", RC_AUTH, ANS_REPLY}, {"d2FA", RC_AUTH, ANS_REPLY}, {"d2FAc", RC_AUTH, ANS_REPLY},
     {"cemail", RC_AUTH, ANS_REPLY}, {"emailv", RC_AUTH, ANS_REPLY}, {"emailS", RC_AUTH, ANS_REPLY},
     {"rpr", RC_AUTH, ANS_REPLY}, {"rpc", RC_AUTH, ANS_REPLY}, {"rps", RC_AUTH, ANS_REPLY},
-    {"upp", RC_AUTH, ANS_REPLY}, {"las", RC_AUTH, ANS_REPLY},
+    {"upp", RC_AUTH, ANS_REPLY}, {"las", RC_AUTH, ANS_REPLY}, {"rqd", RC_AUTH, ANS_REPLY},
+    {"twitchAuth", RC_AUTH, ANS_REPLY}, {"removeTwitchLink", RC_AUTH, ANS_REPLY}, {"verifyTwitch", RC_AUTH, ANS_REPLY},
+    {"getTwitchDrops", RC_READ, ANS_REPLY},
     {"r", RC_READ, ANS_REPLY}, {"sp", RC_READ, ANS_REPLY}, {"gfs", RC_READ, ANS_REPLY},
     {"gfg", RC_READ, ANS_REPLY}, {"pst", RC_READ, ANS_REPLY}, {"guf", RC_READ, ANS_REPLY},
     {"grp", RC_READ, ANS_REPLY}, {"gps", RC_READ, ANS_REPLY}, {"chtb", RC_READ, ANS_REPLY},

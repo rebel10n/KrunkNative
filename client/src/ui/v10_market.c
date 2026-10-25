@@ -2478,7 +2478,21 @@ static void view_blackm(StrBuf *sb) {
             sb_append_esc(sb, items[k].req_t);
             sb_append(sb, "</div>");
         }
-        sb_append(sb, "  <div class=\"bm-actions svelte-dbcods\">");
+        sb_append(sb, " ");
+        // the title reward: t("blackmarket.titleReward") + " " and the title's name in its tag style, when the item has a
+        // title the titles table knows (getTitle(item.title), deob-10.0.3.js:152763-152770, 152902-152915)
+        const cJSON *title = s->title > 0 ? v10_customize_title_get(s->title) : NULL;
+        const char *title_name = title ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(title, "name")) : NULL;
+        if (title_name) {
+            StrBuf style = {0};
+            v10_customize_title_style(&style, title);
+            char *css = sb_finish(&style);
+            sb_appendf(sb, "<div class=\"bm-title-reward svelte-dbcods\">%s <span style=\"%s\">", I18N("blackmarket.titleReward", "Includes title"), css ? css : "");
+            sb_append_esc(sb, title_name);
+            sb_append(sb, "</span></div>");
+            free(css);
+        }
+        sb_append(sb, " <div class=\"bm-actions svelte-dbcods\">");
         if (owned) sb_append(sb, "<div class=\"bm-action-btn bm-owned-btn svelte-dbcods\">Owned</div>");
         else if (can_buy) sb_appendf(sb, "<div class=\"bm-action-btn bm-purchase-btn svelte-dbcods\" id=\"v10mkBm%d\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" onclick=\"v10mk.bmbuy(%d)\">Purchase</div>", items[k].skin, items[k].skin);
         else sb_appendf(sb, "<div class=\"bm-action-btn bm-locked-btn svelte-dbcods\">%s</div>", !a ? "Login Required" : !req ? "Requirements Not Met" : "Insufficient KR");
@@ -3873,6 +3887,8 @@ static void on_social(void *user, const cJSON *frame) {
         if (cJSON_IsObject(a1)) {
             apply_funds(jnum(a1, "f"));
             account_add_skin(jint(a1, "item", M.sel_skin));
+            // the item's title, granted with it: into account.titles (deob-10.0.3.js:152803-152806)
+            if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(a1, "title"))) v10_customize_title_granted(jint(a1, "title", -1));
             inventory_load();
             bm_note(1, "Item purchased successfully!");
         } else {

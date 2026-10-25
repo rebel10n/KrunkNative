@@ -810,7 +810,8 @@ static void blackm_done(SocialSession *s, kn_db_result *res, void *extra) {
     push_funds(s->account_id);
 }
 
-/* ["pbm", skin, {op}] -> ["bmr", {item, kr, f} | null]: a blackM item for its store `funds` KR */
+/* ["pbm", skin, {op}] -> ["bmr", {item, kr, f[, title]} | null]: a blackM item for its store `funds` KR, with
+ * the item's v10.0.3 `title` granted (run_blackm_buy) */
 void sh_blackm_buy(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     const int64_t id = fa_int(f, 1, -1);
@@ -821,10 +822,11 @@ void sh_blackm_buy(SocialSession *s, const cJSON *f) {
     }
     EconHead h;
     econ_head(&h, s, f, "buy", "market");
-    char sk[24], pr[24], amt[48];
+    char sk[24], pr[24], amt[48], ti[24];
     snprintf(amt, sizeof amt, "%.17g", k->req_amount);
     social_call(s, &P_BLACKM_BUY,
-                KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(sk, id), acct_itoa(pr, k->funds), k->req_kind, k->req_var, amt),
+                KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(sk, id), acct_itoa(pr, k->funds), k->req_kind, k->req_var, amt,
+                           acct_itoa(ti, k->title)),
                 blackm_done, NULL);
 }
 

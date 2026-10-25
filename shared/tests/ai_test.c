@@ -271,7 +271,10 @@ static void test_behaviour(Game *game) {
     g_sent_count = 0;
     const int soul_sid = soul->sid;
     soul->sent_to[soul->sent_count++] = 1; // as if Alice had its "aai"
+    soul->data.is_boss = 1; // a boss's death: every active non-bot player gets bossKills (deob-10.0.3.js:206316-206324)
+    const int boss_before = p->mode.boss_kills;
     game_ai_kill(game, soul, p);
+    CHECK(p->mode.boss_kills == boss_before + 1, "bossKills %d -> %d", boss_before, p->mode.boss_kills);
     const SentPacket *sound = last_sent(NET_PACKET_SOUND);
     CHECK(sound != NULL, "death sound sent");
     if (sound) {

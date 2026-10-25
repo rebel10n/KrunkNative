@@ -14,6 +14,7 @@
 #include "acct_internal.h"
 #include "brain_internal.h"
 #include "hot.h"
+#include "raids.h"
 #include "strike_econ.h"
 
 #include <stdio.h>
@@ -277,8 +278,8 @@ static void player_page(SocialSession *s, const LeaderQuery *q, int64_t region, 
  *        clan_score, member_count})
  *   GET /api/leaderboards/raids/<map>[?sort=completions], /raids/<map>/monthly?month=YYYY-MM
  *   GET /api/leaderboards/krunkcup/teams, /krunkcup/teams/<id>/contributors, /krunkcup/players
- * KrunkNative keeps no raid clear times, inventory values, event finds or KrunkCup teams: those
- * answer an empty list (the popup then says "No data available."). Pages are cached
+ * The raid pages are the raid record's (raids.c, 0360_raid_stats). KrunkNative keeps no inventory values, event finds
+ * or KrunkCup teams: those answer an empty list (the popup then says "No data available."). Pages are cached
  * accounts.leaderboard_cache_s per path, like the socket's. */
 
 typedef struct HttpBoard {
@@ -434,20 +435,46 @@ static void h_http_empty(kn_http_req *req, void *ud) {
     http_reply(req, NULL);
 }
 
+/* v10.0.3 getRaidLeaderboard / getMonthlyRaidLeaderboard (deob-10.0.3.js:31026-31047): the raid record's pages
+ * (raids.c, 0360_raid_stats), {position, player_name, player_clan, best_time, completions} */
+static void raid_board(kn_http_req *req, void *ud, const int monthly) {
+    Brain *b = ud;
+    char sort[16] = "", month[16] = "";
+    kn_http_query_get(req, "sort", sort, sizeof sort);
+    kn_http_query_get(req, "month", month, sizeof month);
+    RaidBoardQuery q;
+    if (raids_board_query(kn_http_param(req, "map"), monthly, month, sort, s_http_limit, &q) != 0) return http_reply(req, NULL);
+    char key[96];
+    snprintf(key, sizeof key, "raids|%s|%s|%s", q.map, monthly ? q.month : "all", sort);
+    const cJSON *hit = http_cached(key);
+    if (hit) return http_reply(req, hit);
+    if (!b->db) return http_reply(req, NULL);
+    HttpBoard *h = calloc(1, sizeof *h);
+    if (!h) return http_reply(req, NULL);
+    h->req = req;
+    snprintf(h->key, sizeof h->key, "%s", key);
+    const kn_sql sql = {.any = q.sql};
+    if (monthly) kn_db_query_sql(b->db, &sql, KN_DB_ARGS(q.map, q.month, q.limit), on_http_board, h);
+    else kn_db_query_sql(b->db, &sql, KN_DB_ARGS(q.map, q.limit), on_http_board, h);
+}
+
+static void h_http_raids(kn_http_req *req, void *ud) { raid_board(req, ud, 0); }
+static void h_http_raids_monthly(kn_http_req *req, void *ud) { raid_board(req, ud, 1); }
+
 int leaderboards_http_init(Brain *b) {
     if (!b->http) return 0;
     s_http_ttl_ms = (int) kn_config_int(b->cfg, "accounts.leaderboard_cache_s", 30) * 1000;
     s_http_limit = (int) kn_config_int(b->cfg, "accounts.page_size", 100);
     if (s_http_limit <= 0 || s_http_limit > 500) s_http_limit = 100;
-    kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map", h_http_empty, b);
-    kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map/monthly", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map", h_http_raids, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map/monthly", h_http_raids_monthly, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams", h_http_empty, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/players", h_http_empty, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/:type", h_http_board, b);
     /* the v10 root paths (v10.js 26995-27040): the stubs before the :type route, as above */
-    kn_http_route(b->http, "GET", "/leaderboards/raids/:map", h_http_empty, b);
-    kn_http_route(b->http, "GET", "/leaderboards/raids/:map/monthly", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/raids/:map", h_http_raids, b);
+    kn_http_route(b->http, "GET", "/leaderboards/raids/:map/monthly", h_http_raids_monthly, b);
     kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams", h_http_empty, b);
     kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
     kn_http_route(b->http, "GET", "/leaderboards/krunkcup/players", h_http_empty, b);

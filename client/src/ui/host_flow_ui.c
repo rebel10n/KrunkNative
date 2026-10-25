@@ -642,6 +642,32 @@ void host_flow_open_published(const char *name, const char *creator) {
     flow_show();
 }
 
+// The Host Presets' commMap (deob-10.0.3.js:249190-249209): v10's chosen custom map is {id, name} and it hosts it by
+// that name (createPrivateRoom customMap = iîîiïii.name, :229835). Save stores the chosen map's name.
+const char *host_flow_community_name(void) { return g_flow.custom_key[0] ? g_flow.custom_name : ""; }
+
+// Load: v10 sets the chosen map's name (and #commMap's text) to the preset's, so the preset's game is the one hosted.
+// With no map chosen v10 has no #commMap and throws there, leaving the official maps the choice: KrunkNative skips
+// the key the same way (0) and still redraws the presets block. Here the name is turned back into what the window
+// hosts: the catalogue's community map of that name, else the published map of that name (published:<name>; the
+// server finds it by name, server/src/accounts.c). The Select banner shows the name.
+int host_flow_set_community_name(const char *name) {
+    if (!g_flow.custom_key[0] || !name || !name[0]) return 0;
+    if (strcmp(name, g_flow.custom_name)) {
+        char key[sizeof(g_flow.custom_key)] = "";
+        for (size_t i = 0; i < map_catalog_count() && !key[0]; i++) {
+            const MapCatalogEntry *e = map_catalog_at(i);
+            if (e && !official_hostable(e) && e->name && !strcmp(e->name, name)) snprintf(key, sizeof(key), "%s", e->key);
+        }
+        if (!key[0] && !community_published_spec(key, sizeof(key), name, NULL)) return 0;
+        snprintf(g_flow.custom_key, sizeof(g_flow.custom_key), "%s", key);
+        snprintf(g_flow.custom_name, sizeof(g_flow.custom_name), "%s", name);
+    }
+    const HtmlElem banner = html_dom_by_id("hostCMapPickT");
+    if (banner) html_dom_set_text(banner, g_flow.custom_name);
+    return 1;
+}
+
 // showGames(true), the banner and the chooser's Community Games card: the Games window browses the
 // community maps (its Host button picks one). The window's values are kept for the way back.
 void host_flow_browse_community(void) {

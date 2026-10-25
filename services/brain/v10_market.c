@@ -35,7 +35,7 @@
  *     POST /market/quick-sell          economy "qsi": {funds, junk, count} (131580); action 0 KR, 1 Junk, 2 destroy
  *     GET  /market/black-market        the caller's black-market purchases: [skin index] (skin_transactions) (128486)
  *     GET  /market/black-market/rank   {peak_mmr} from ranked_profiles; null for a guest or no rank (128494)
- *     POST /market/black-market/purchase  economy "pbm": {item, kr, funds} (136215)
+ *     POST /market/black-market/purchase  economy "pbm": {item, kr, funds[, title]} (136215; title: deob-10.0.3.js:152803)
  *     GET  /market/history             the caller's market history {history, has_more, next_cursor} (131476)
  *
  *   items (26957-26980)
@@ -1557,7 +1557,7 @@ static void h_market_quick_sell(kn_http_req *req, void *ud) {
     route_begin(req, 1, 1, step_quick_sell, reply_quick_sell, &a, body);
 }
 
-/* ["pbm", skin, {op}] -> ["bmr", {item, kr, f} | null] */
+/* ["pbm", skin, {op}] -> ["bmr", {item, kr, f[, title]} | null] */
 static void step_bm_purchase(Op *op) {
     cJSON *f = social_frame("pbm");
     add_int(f, kn_json_int(op->body, "item_index", -1));
@@ -1576,6 +1576,8 @@ static void reply_bm_purchase(Op *op) {
     cJSON_AddNumberToObject(o, "item", (double) kn_json_int(v, "item", -1));
     cJSON_AddNumberToObject(o, "kr", (double) kn_json_int(v, "kr", 0));
     cJSON_AddNumberToObject(o, "funds", (double) kn_json_int(v, "f", 0));
+    /* the item's title, granted with it: the client adds it to account.titles (deob-10.0.3.js:152803-152806) */
+    if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(v, "title"))) cJSON_AddNumberToObject(o, "title", (double) kn_json_int(v, "title", -1));
     v10_reply_data(op->req, 200, o);
 }
 

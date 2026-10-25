@@ -1318,6 +1318,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.targets_ai = (unsigned char) opt_bool(s, data, "targAI");
     d.targets_players = (unsigned char) opt_bool(s, data, "targPlr");
     d.friendly = (unsigned char) opt_bool(s, data, "friendly");
+    d.is_boss = (unsigned char) opt_bool(s, data, "boss"); // AI.spawn isBoss (deob-10.0.3.js:204916)
     if (is_number(ks_obj_get(s, data, "team"))) d.team = (int) clamp_d(opt_int(s, data, "team", 0), 0, 1000); // || undefined: 0
     d.can_hit = (unsigned char) opt_bool(s, data, "canMelee");
     d.can_shoot = (unsigned char) opt_bool(s, data, "canShoot");

@@ -134,6 +134,9 @@
     "alias_max": 14,
     "session_ttl_days": 30,
     "max_sessions": 20,
+    "deletion_grace_days": 14,
+    "deletion_purge": true,
+    "deletion_sweep_s": 3600,
     "starting_kr": 0,
     "free_premium": true,
     "signup_rewards": {"enabled": true, "premium_hours": 24, "sweep_s": 600},
@@ -227,7 +230,10 @@
       "client_secret": "",
       "game": "Krunker",
       "auth_url": "https://id.twitch.tv/oauth2/token",
-      "api_url": "https://api.twitch.tv/helix"
+      "api_url": "https://api.twitch.tv/helix",
+      "authorize_url": "https://id.twitch.tv/oauth2/authorize",
+      "redirect_uri": "",
+      "link_scope": "user_read viewing_activity_read"
     },
     "thumbs": {
       "_comment": "GET /streams/thumb (services/brain/stream_thumbs.c): the cards' previews as data: URLs for the native client. Only https URLs on these hosts; cdn_url empty = fetch them directly.",

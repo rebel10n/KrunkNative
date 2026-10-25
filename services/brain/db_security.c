@@ -399,7 +399,7 @@ static kn_db_result *run_reset_apply(kn_dbconn *c, int n, const char *const *p) 
     if (!row) return dbx_finish(&x, NULL);
     char id[24];
     snprintf(id, sizeof id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "id")));
-    dbx_exec(&x, SQL(.any = "UPDATE accounts SET password_hash = $2 WHERE id = {int:$1}"), KN_DB_ARGS(id, P(1)));
+    dbx_exec(&x, SQL(.any = "UPDATE accounts SET password_hash = $2, password_changed_at = {now} WHERE id = {int:$1}"), KN_DB_ARGS(id, P(1)));
     dbx_exec(&x, SQL(.any = "UPDATE email_tokens SET used_at = {now} WHERE account_id = {int:$1} AND kind = 'reset' AND used_at IS NULL"),
              KN_DB_ARGS(id));
     dbx_exec(&x, SQL(.any = "DELETE FROM sessions WHERE account_id = {int:$1}"), KN_DB_ARGS(id));

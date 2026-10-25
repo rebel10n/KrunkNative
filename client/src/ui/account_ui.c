@@ -89,7 +89,10 @@ enum { PROFILE_TAB_HOME, PROFILE_TAB_FRIENDS, PROFILE_TAB_SETTINGS, PROFILE_TAB_
 enum { STAT_TAB_RAIDS = 4, STAT_TAB_MEDALS = 5, STAT_TAB_COUNT = 6 };
 static int g_tab_index;          // windows[4].tabIndex
 static int g_promo_emails = -1;  // the email preference v10 caches (iiíììîî.promotional): -1 none stored (null)
-static cJSON *g_raid_stats;      // the Box Office account's raidStats (owned; kn_brain keeps none: a scenario's)
+static cJSON *g_raid_stats;      // the Box Office account's raidStats (owned; kn_brain's account info, raids.c)
+static int g_req_del;            // acc.reqDel (v10 player_cancelrequest): "Processing Deletion" (account_life.c)
+static char g_twitch_id[64];     // acc.twitchId (setData [44]): the linked Twitch user id, "" none
+static char g_twitch_name[64];   // acc.twitch (setData [23]): the linked Twitch login, "" none
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
 static char g_session_user[ALT_LABEL_MAX]; // the login name g_token belongs to ("" = no session)
@@ -1020,6 +1023,9 @@ static void clear_account(void) {
     g_medal_counts = NULL;
     cJSON_Delete(g_raid_stats);
     g_raid_stats = NULL;
+    g_req_del = 0;
+    g_twitch_id[0] = 0;
+    g_twitch_name[0] = 0;
     g_promo_emails = -1;
     battlepass_ui_reset(); // windows[5].data / account.BP
     memset(&g_email, 0, sizeof(g_email));
@@ -1074,6 +1080,23 @@ void account_ui_set_funds(const double kr) {
     g_acc.funds = kr;
     mark_header();
     rerender_windows();
+}
+
+// v10.0.3's account extras from kn_brain's account info (account_life.c): reqDel (setData [29]), twitchId ([44]),
+// twitch ([23]) and raidStats ([52]). An info without a key keeps what the account had.
+static void set_life(const cJSON *info) {
+    if (!cJSON_IsObject(info)) return;
+    const cJSON *req = cJSON_GetObjectItem(info, "reqDel");
+    if (req) g_req_del = cJSON_IsTrue(req) || (cJSON_IsNumber(req) && req->valueint != 0);
+    const cJSON *tw = cJSON_GetObjectItem(info, "twitchId");
+    if (tw) copy_str(g_twitch_id, sizeof(g_twitch_id), cJSON_IsString(tw) ? tw->valuestring : "");
+    const cJSON *tn = cJSON_GetObjectItem(info, "twitch");
+    if (tn) copy_str(g_twitch_name, sizeof(g_twitch_name), cJSON_IsString(tn) ? tn->valuestring : "");
+    const cJSON *raids = cJSON_GetObjectItem(info, "raidStats");
+    if (cJSON_IsArray(raids)) {
+        cJSON_Delete(g_raid_stats);
+        g_raid_stats = cJSON_Duplicate(raids, 1);
+    }
 }
 
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
@@ -1171,6 +1194,7 @@ static void account_response(const cJSON *frame) {
         set_badges(info);
         set_dxp(info);
         set_junk(info);
+        set_life(info);
     }
 
     const int have_token = token && token[0];
@@ -1307,6 +1331,7 @@ static void on_social(void *user, const cJSON *frame) {
         set_badges(cJSON_GetArrayItem(frame, 2)); // WP-E part 2c: the info's "badges"
         set_dxp(cJSON_GetArrayItem(frame, 2)); // the info's dxp.offer (double_xp_offer.c)
         set_junk(cJSON_GetArrayItem(frame, 2)); // the info's "junk" (doc/v10/junk.md)
+        set_life(cJSON_GetArrayItem(frame, 2)); // reqDel / twitch / raidStats (account_life.c)
         mark_header();
         rerender_windows();
     } else if (!strcmp(label, "uj") && g_logged_in) { // social_push_junk: ["uj", "12.34"], the wallet's new balance
@@ -1401,6 +1426,45 @@ static void on_social(void *user, const cJSON *frame) {
         }
         HtmlElem res = html_dom_by_id("newPRes");
         if (res) html_dom_set_html(res, str_at(frame, 1) ? str_at(frame, 1) : "");
+    } else if (!strcmp(label, "rqd")) { // deletion request / cancel: [ok, error, null, flag] (account_life.c)
+        const int flag = (int) num_at(frame, 4);
+        if (num_at(frame, 1) != 1.0 && !cJSON_IsTrue(cJSON_GetArrayItem(frame, 1))) {
+            popup_response(0, str_at(frame, 2) ? str_at(frame, 2) : "Server error.", NULL);
+        } else if (flag) {
+            // v10 logs out after a deletion request (deob-10.0.3.js:244613); kn_brain ends every session too
+            account_ui_logout();
+            popup_response(1, NULL, I18N("account.delete.requested", "Deletion requested. You have been logged out."));
+        } else {
+            g_req_del = 0;
+            popup_response(1, NULL, I18N("account.delete.cancelled", "Deletion request cancelled."));
+            rerender_windows();
+        }
+    } else if (!strcmp(label, "twitchAuth")) { // the OAuth page to open, or [null, error]
+        const char *url = str_at(frame, 1);
+        if (url && url[0]) {
+            ui_open_browser(url);
+            popup_response(1, NULL, I18N("account.twitch.browser", "Finish the Twitch link in your browser, then return here."));
+        } else {
+            popup_response(0, str_at(frame, 2) ? str_at(frame, 2) : "Twitch linking is currently unavailable.", NULL);
+        }
+    } else if (!strcmp(label, "twitchVerifyResponse")) { // [error | null, twitchName, twitchId]
+        const char *err = str_at(frame, 1);
+        if (err) {
+            popup_response(0, err, NULL);
+        } else {
+            copy_str(g_twitch_name, sizeof(g_twitch_name), str_at(frame, 2) ? str_at(frame, 2) : "");
+            copy_str(g_twitch_id, sizeof(g_twitch_id), str_at(frame, 3) ? str_at(frame, 3) : "");
+            popup_response(1, NULL, I18N("account.twitch.linked", "Twitch account linked."));
+            rerender_windows();
+        }
+    } else if (!strcmp(label, "twitchRemoveResponse")) {
+        g_twitch_id[0] = 0;
+        g_twitch_name[0] = 0;
+        popup_response(1, NULL, I18N("account.twitch.unlinked", "Twitch account unlinked."));
+        rerender_windows();
+    } else if (!strcmp(label, "twitchDropsResponse")) { // Box Office has no drop campaigns: [] -> "Nothing to Claim"
+        const cJSON *drops = cJSON_GetArrayItem(frame, 1);
+        popup_response(1, NULL, drops && cJSON_GetArraySize(drops) > 0 ? I18N("account.twitch.drops", "Drops claimed.") : I18N("account.twitch.noDrops", "Nothing to Claim"));
     } else if (!strcmp(label, "__close")) {
         g_restore_sent = 0;
         if (g_auth_sent_at > 0) auth_unreachable();
@@ -2285,6 +2349,35 @@ static void show_other_signed_in(const char *typed) {
     free(html);
 }
 
+// ------------------------------------------------------------------ Account Privacy / Twitch (kn_brain account_life.c)
+
+// v10's requestDeletion(flag) -> rpc("rqd", flag) (deob-10.0.3.js:244600). The request itself is confirmed first;
+// cancelling needs none.
+static void deletion_confirmed(const int ok, const char *text, void *user) {
+    (void) text;
+    if (!ok || !g_logged_in) return;
+    char frame[24];
+    snprintf(frame, sizeof frame, "[\"rqd\",%d]", (int) (intptr_t) user);
+    backend_social_send_text(frame);
+}
+
+// v10's connectTwitchAcc: the confirm, then the OAuth page. Here kn_brain is the OAuth client: "twitchAuth"
+// answers the page to open in the system browser (account_life.c), and the callback pushes twitchVerifyResponse.
+static void twitch_link_confirmed(const int ok, const char *text, void *user) {
+    (void) text;
+    (void) user;
+    if (!ok || !g_logged_in) return;
+    backend_social_send_text("[\"twitchAuth\"]");
+}
+
+static void twitch_unlink_confirmed(const int ok, const char *text, void *user) {
+    (void) text;
+    (void) user;
+    if (!ok || !g_logged_in) return;
+    backend_social_send_text("[\"removeTwitchLink\"]");
+}
+
+
 // windows[4].collapseCon(hd) (deob-10.0.3.js:247458-247463): setHed_<x> shows / hides setBod_<x>, and its first
 // child (the plusOrMinus3 chevron) reads keyboard_arrow_down / _right
 static void collapse_con(const HtmlElem hd) {
@@ -2427,11 +2520,27 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "linkTwitchPop") || !strcmp(name, "unlinkTwitchPop")) {
-        // v10 asks "Are you sure you want to link a twitch account?" and YES goes to Twitch's OAuth page
-        // (connectTwitchAcc, deob-10.0.3.js:261960-262004) with Krunker's client id and a ?twitch_auth return.
-        // Box Office has no Twitch linking (no OAuth client, kn_brain stores no twitchId): not available, the
-        // button does nothing (doc/v10/ui.md section 9).
-        printf("[account] %s: Box Office has no Twitch account linking\n", name);
+        // v10 asks "Are you sure you want to link a twitch account?" (connectTwitchAcc, deob-10.0.3.js:261960-262004).
+        // The OAuth page comes from kn_brain (account_life.c); unlink keeps the permanent pair, as v10 warns.
+        if (!g_logged_in) return 1;
+        if (name[1] == 'i') // linkTwitchPop
+            ui_confirm("Are you sure you want to link a twitch account?", twitch_link_confirmed, NULL);
+        else
+            ui_confirm("Unlinking does not allow you to link a seperate twitch account. Unlink?", twitch_unlink_confirmed, NULL);
+        return 1;
+    }
+    if (!strcmp(name, "claimDrops")) { // window.windows[4].claimDrops: Box Office has no Twitch drop campaigns
+        if (g_logged_in) backend_social_send_text("[\"getTwitchDrops\"]");
+        return 1;
+    }
+    if (!strcmp(name, "requestDeletion")) { // window.requestDeletion(flag): v10's rpc("rqd", flag)
+        const int flag = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num != 0 : 1;
+        if (!g_logged_in) return 1;
+        if (flag)
+            ui_confirm(I18N("account.delete.confirm", "Request the deletion of this account and all associated data? You will be logged out."),
+                       deletion_confirmed, (void *) (intptr_t) 1);
+        else
+            deletion_confirmed(1, NULL, (void *) (intptr_t) 0);
         return 1;
     }
     if (!strcmp(name, "claimReward") && g_logged_in) {
@@ -2850,9 +2959,9 @@ static void stats_html(StrBuf *sb, const AccountInfo *acc, const int kio) {
     sb_append(sb, "</div>");
 }
 
-// The Connections tab's Twitch section (deob-10.0.3.js:247697-247750). Box Office has no Twitch link (kn_brain
-// keeps no twitchId; data slot 31 is v7's twitch name), so it is v10's unlinked state: the Link button, whose
-// linkTwitchPop is not available here, and no Claim. "Drops Earned" lists the owned items with `drop`
+// The Connections tab's Twitch section (deob-10.0.3.js:247697-247750). The link runs through kn_brain
+// (account_life.c): twitchAuth returns the OAuth page to open in the browser, twitchVerifyResponse the linked
+// account. "Drops Earned" lists the owned items with `drop`
 // (iììiíîï(account, true): the inventory, every store item for a developer; v10's extra free / creator /
 // streamer items are not drops), by rarity, then season, then index, all descending.
 typedef struct {
@@ -2909,9 +3018,14 @@ static void twitch_html(StrBuf *sb) {
                   "<img src='./img/connections/twitch.png' style='height: 40px;'></div>");
     sb_append(sb, "<div class='setBodH' id='setBod_twitch' style='display:none'><div style=\"margin-bottom: 20px;margin-top:10px;text-align: center;color: var(--yellow);font-size: 19px;\">\n\t\t"
                   "Twitch linking creates a permanent connection to this Krunker account regardless of unlinking</div><div class='settName'>Twitch Account (");
-    const char *twitch = g_acc.data ? cJSON_GetStringValue(cJSON_GetArrayItem(g_acc.data, 31)) : NULL; // acc.twitch || "none"
-    sb_append_esc(sb, twitch && twitch[0] ? twitch : "none");
-    sb_append(sb, ")<div class='lnkTw' onclick='linkTwitchPop();'>Link</div></div>");
+    const char *twitch = g_twitch_name[0] ? g_twitch_name : g_twitch_id; // acc.twitch || acc.twitchId || "none"
+    sb_append_esc(sb, twitch[0] ? twitch : "none");
+    // v10 (deob-10.0.3.js:247700): Claim when linked, Link / Unlink by acc.twitchId
+    if (g_twitch_id[0])
+        sb_append(sb, ")<div class='lnkTw' style='background-color:#4144a5;' onclick='claimDrops();'>Claim</div>"
+                       "<div class='lnkTw' onclick='unlinkTwitchPop();'>Unlink</div></div>");
+    else
+        sb_append(sb, ")<div class='lnkTw' onclick='linkTwitchPop();'>Link</div></div>");
     sb_append(sb, "<div style='margin-top:10px;'>Link <a href='https://www.twitch.tv/directory/game/Krunker' target='_blank' style='color:#6441a5'>Twitch</a> to earn Drops & Items</div>");
     sb_append(sb, "<div id='skinList' style='text-align: center;'>");
     if (n) sb_append(sb, "<div class='setHed' style='margin-bottom:20px;'>Drops Earned</div>");
@@ -3044,11 +3158,15 @@ static char *gen_account(void) {
             sb_appendf(&sb, "</span><div class='subPassChg' onclick='manageAccNames()' style='float: right;margin-top: -8px;'>%s</div></div></div>",
                        I18N("account.usernames.button", "Manage"));
         }
-        // Account Privacy: v10 shows "Processing Deletion" with Cancel (requestDeletion(0)) while acc.reqDel is set
-        // (deob-10.0.3.js:247684). kn_brain has no deletion request (no "rqd" route, no player_cancelrequest), so
-        // the account never has one and the row is always v10's Delete Account.
-        sb_appendf(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>%s</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>",
+        // Account Privacy (deob-10.0.3.js:247684): "Processing Deletion" with Cancel (requestDeletion(0)) while
+        // acc.reqDel is set, else Delete Account with Request Deletion. kn_brain's "rqd" (account_life.c).
+        sb_appendf(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>%s</div><div style='height:10px;'></div><div style='margin-top:10px'>",
                    I18N("account.delete", "You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed."));
+        if (g_req_del)
+            sb_appendf(&sb, "Processing Deletion <a class='menuLink' onclick='requestDeletion(0)' style='float:right;font-size:20px'>%s</a></div></div>",
+                       I18N("generic.cancel", "Cancel"));
+        else
+            sb_append(&sb, "Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>");
     } else if (g_tab_index == PROFILE_TAB_CONNECTIONS) {
         connections_html(&sb);
     }

@@ -544,13 +544,15 @@ static kn_db_result *run_quick_sell(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_QUICK_SELL = {"quick_sell", NULL, run_quick_sell};
 
-/* $4 skin, $5 price, $6 requirement ('' | accAge | stats | accVar), $7 its variable, $8 its amount
- * -> {item, kr, f}. v7.1.4's Black Market (market tab "blackm", pbm -> bmr): a blackM item bought
- * from the game for its store `funds`, if store.checkReq(item, account) holds. */
+/* $4 skin, $5 price, $6 requirement ('' | accAge | stats | accVar), $7 its variable, $8 its amount,
+ * $9 the item's title (-1 none) -> {item, kr, f[, title]}. v7.1.4's Black Market (market tab "blackm",
+ * pbm -> bmr): a blackM item bought from the game for its store `funds`, if store.checkReq(item, account)
+ * holds. v10.0.3: an item with a `title` grants that title with it, and the reply names it
+ * (purchaseBlackMarketItem's `title`, deob-10.0.3.js:152803-152806): a player_titles row (0361), once. */
 static kn_db_result *run_blackm_buy(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     ECON_OPEN("bm", "kn_blackm_buy");
-    const int64_t me_id = PI(0), skin = PI(4), price = PI(5);
+    const int64_t me_id = PI(0), skin = PI(4), price = PI(5), title = P(9) ? PI(9) : -1;
     const char *req = nz(P(6)), *var = nz(P(7)), *amount = P(8);
     const double need = amount ? strtod(amount, NULL) : 0;
     if (skin < 0 || price <= 0) return econ_refuse(&x, "Item Unavailable");
@@ -579,10 +581,14 @@ static kn_db_result *run_blackm_buy(kn_dbconn *c, int n, const char *const *p) {
     int64_t funds = 0;
     db_add_funds_ex(&x, me_id, -price, "blackmarket", P(4), 0, 0, &funds);
     db_add_skin(&x, me_id, skin, 1, "blackmarket", NULL, NULL);
+    if (title >= 0)
+        dbx_exec(&x, SQL(.any = "{insert_ignore} INTO player_titles (account_id, title_id, source, ref) VALUES ($1, {int:$2}, 'blackmarket', {int:$3}) {ignore_conflicts}"),
+                 KN_DB_ARGS(P(0), P(9), P(4)));
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "item", (double) skin);
     cJSON_AddNumberToObject(o, "kr", (double) price);
     cJSON_AddNumberToObject(o, "f", (double) funds);
+    if (title >= 0) cJSON_AddNumberToObject(o, "title", (double) title);
     return econ_done(&x, n, p, "bm", "kn_blackm_buy", o);
 }
 const kn_proc P_BLACKM_BUY = {"blackm_buy", NULL, run_blackm_buy};

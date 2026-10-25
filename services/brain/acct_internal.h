@@ -114,6 +114,8 @@ void acct_ensure_central(int64_t central_id, const char *username, AcctReplyFn c
 void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud);
 /* -> {token}: new session, every other session of the account revoked. */
 void acct_change_password(int64_t id, const char *old_pass, const char *new_pass, AcctReplyFn cb, void *ud);
+/* Same without the old password: the caller checked the session's proof (v10.0.3's "upp", social_data.c). */
+void acct_change_password_session(int64_t id, const char *new_pass, AcctReplyFn cb, void *ud);
 /* Revoke one session token (logout). Fire and forget. */
 void acct_revoke_token(const char *token);
 /* Same; done(ud) once the row is deleted (or failed; also when nothing was sent). */
@@ -127,6 +129,7 @@ typedef struct SkinInfo {
     unsigned char free_item, item_shop, min_quick_sell; /* free, itemShop == 1, minQuickSell (economy.c) */
     int qs_kr;                                   /* qsKR: quick sell KR override (0 none) */
     int64_t funds;                               /* funds: the Black Market price (blackM items) */
+    int title;                                   /* title: the v10.0.3 title its Black Market purchase grants, -1 none */
     char req_kind[12], req_var[16];              /* req ("accAge" | "stats" | "accVar" | "disabled") / reqVar */
     double req_amount;                           /* reqAmount */
     int spin_wheel;                              /* TICKET items: index of its spinWheel (store.c), -1 none */

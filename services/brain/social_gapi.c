@@ -608,8 +608,17 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_Delete(badges);
     cJSON_DeleteItemFromObjectCaseSensitive(row, "player_badge");
     cJSON_AddStringToObject(row, "player_badge", list);
-    /* player_titles (deob-10.0.3.js:125763-125770): Box Office grants no titles yet (sh_titles' list is empty) */
-    if (!cJSON_HasObjectItem(row, "player_titles")) cJSON_AddStringToObject(row, "player_titles", "");
+    /* player_titles (deob-10.0.3.js:125763-125770): the owned titles (player_titles, 0361: the Black Market's) as "87,90" */
+    cJSON *titles = cJSON_DetachItemFromObjectCaseSensitive(row, "titles"), *t;
+    char tlist[512] = "";
+    size_t tused = 0;
+    cJSON_ArrayForEach(t, titles) {
+        if (!cJSON_IsNumber(t) || tused + 16 >= sizeof tlist) continue;
+        tused += (size_t) snprintf(tlist + tused, sizeof tlist - tused, "%s%d", tused ? "," : "", (int) t->valuedouble);
+    }
+    cJSON_Delete(titles);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "player_titles");
+    cJSON_AddStringToObject(row, "player_titles", tlist);
     /* player_twitchname: the linked Twitch login (players.tw_twitchname), the profile's Twitch button */
     const char *tw = kn_json_str(row, "tw_twitchname", "");
     if (!cJSON_HasObjectItem(row, "player_twitchname")) {

@@ -117,6 +117,7 @@ typedef struct {
     int score;                    // sp: killScore
     int projectile;               // v3.1.1 pj (0..5); v7 shoots projectiles.stored[1] with projOb
     int behaviour;                // bh (0..20): 1 Weeping, 2 Lord of Souls, 3 enrage, 4 mirror image, 5 Drowned Sailor
+    unsigned char is_boss;        // boss / isBoss: its death gives every active non-bot player bossKills and "bk"
     int team;                     // tm
     int path_type;                // pht: AI_PATH_*
     int path[GAME_AI_PATH_MAX];   // phi: PATH_NODE nids

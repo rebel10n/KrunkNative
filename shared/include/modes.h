@@ -364,6 +364,7 @@ typedef struct {
     unsigned char has_last_ground:1;
     // ---- map-logic WP-H: Zombies endStats
     int ai_kills;             // aiKills: AIs this player killed (AI.kill, not silent)
+    int boss_kills;           // bossKills: +1 for every active non-bot player when a boss dies (deob-10.0.3.js:206316-206324)
     int rounds;               // rounds: waves that ended while this player was in the game
     // ---- v10.0.3 Raid run tracking (Player.init resets them each spawn, deob-10.0.3.js:190648-190651; raid.onEnd reads them)
     float run_dmg_taken;      // runDmgTaken: damage taken this life (players.changeHealth, deob-10.0.3.js:198005-198007)

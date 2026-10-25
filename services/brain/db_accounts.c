@@ -163,7 +163,7 @@ const kn_proc P_SESSION_ACCOUNT = {"session_account", "SELECT kn_account_json(kn
 /* (id, hash, token, ttl): new hash, every session revoked, one fresh session -> {token}; no row when unknown */
 static kn_db_result *run_set_password(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    int64_t hit = dbx_exec(&x, SQL(.any = "UPDATE accounts SET password_hash = $2 WHERE id = $1"), KN_DB_ARGS(P(0), P(1)));
+    int64_t hit = dbx_exec(&x, SQL(.any = "UPDATE accounts SET password_hash = $2, password_changed_at = {now} WHERE id = $1"), KN_DB_ARGS(P(0), P(1)));
     if (hit <= 0) {
         const char *names[1] = {"jsonb_build_object"};
         const kn_db_type types[1] = {KN_DB_T_JSON};
@@ -179,7 +179,7 @@ static kn_db_result *run_set_password(kn_dbconn *c, int n, const char *const *p)
 }
 const kn_proc P_SET_PASSWORD = {
     "set_password",
-    "WITH u AS (UPDATE accounts SET password_hash = $2 WHERE id = $1 RETURNING id), "
+    "WITH u AS (UPDATE accounts SET password_hash = $2, password_changed_at = now() WHERE id = $1 RETURNING id), "
     "d AS (DELETE FROM sessions WHERE account_id IN (SELECT id FROM u)), "
     "s AS (INSERT INTO sessions (token_hash, account_id, expires_at, origin) "
     "SELECT sha256(convert_to($3, 'UTF8')), id, now() + make_interval(secs => $4), 'password' FROM u) "

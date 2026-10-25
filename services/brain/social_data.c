@@ -17,6 +17,7 @@
 #include <strings.h>
 
 #include "knsvc/config.h"
+#include "knsvc/crypto.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
 
@@ -432,13 +433,25 @@ static void settings_up_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "pRes", 3, cJSON_CreateString("SUCCESS"), cJSON_CreateNull(), cJSON_CreateString("Settings Uploaded"));
 }
 
-/* ["ttl"] -> ["ttl", [id, ...]]: the account's titles (v10 challenges / ranked / Black Market
- * rewards). KrunkNative tracks no title grants yet, so the list is empty: the client shows
- * every title locked with its requirement. */
+static void titles_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    cJSON *ids = cJSON_CreateArray();
+    if (kn_db_ok(res))
+        for (int i = 0; i < kn_db_rows(res); i++) cJSON_AddItemToArray(ids, cJSON_CreateNumber(atoi(kn_db_get(res, i, 0))));
+    else acct_db_error(res, "ttl");
+    social_send_n(s, "ttl", 1, ids);
+}
+
+/* ["ttl"] -> ["ttl", [id, ...]]: the account's titles, v10.0.3's acc.titles (setData slot 55,
+ * deob-10.0.3.js:129024). Box Office grants titles with their Black Market items (player_titles,
+ * 0361; db_economy.c run_blackm_buy), not yet for challenges or ranked: the client shows the others
+ * locked with their requirement. A failed read answers an empty list. */
 void sh_titles(SocialSession *s, const cJSON *f) {
     (void) f;
     if (!social_require_auth(s)) return;
-    social_send_n(s, "ttl", 1, cJSON_CreateArray());
+    static const kn_sql q = {.any = "SELECT title_id FROM player_titles WHERE account_id = $1 ORDER BY title_id"};
+    char me[24];
+    social_query(s, &q, KN_DB_ARGS(acct_itoa(me, s->account_id)), titles_done, NULL);
 }
 
 /* ["uploadS", settings] -> ["pRes", "SUCCESS", null, msg] | ["pRes", null, err] (popupResponse) */
@@ -520,22 +533,64 @@ void sh_alias(SocialSession *s, const cJSON *f) {
     acct_set_alias(s->account_id, fa_str(f, 1), op_wait_done, w);
 }
 
-/* ["upp", old, new, repeat] -> ["upp", msg, newToken?] */
+/* v10.0.3's Account Security: "You can update your password every 30 minutes" (deob-10.0.3.js:247680) */
+#define PASSWORD_CHANGE_EVERY_MS (30 * 60 * 1000)
+
+typedef struct PasswordReq {
+    int has_old;              /* 0: the v10.0.3 shape (the session's proof) */
+    char old_pass[128], new_pass[128];
+} PasswordReq;
+
+static void password_clock_done(SocialSession *s, kn_db_result *res, void *extra) {
+    PasswordReq *r = extra; /* social_query frees it after this */
+    if (!kn_db_ok(res)) {
+        social_send_n(s, "upp", 1, cJSON_CreateString(acct_db_error(res, "upp")));
+    } else if (kn_db_rows(res) > 0 && !kn_db_isnull(res, 0, 0) && (int64_t) kn_wall_ms() - kn_db_get_int64(res, 0, 0, 0) < PASSWORD_CHANGE_EVERY_MS) {
+        social_send_n(s, "upp", 1, cJSON_CreateString("You can update your password every 30 minutes."));
+    } else {
+        OpWait *w = calloc(1, sizeof *w);
+        if (w) {
+            w->s = social_hold(s);
+            w->kind = 1;
+            if (r->has_old) acct_change_password(s->account_id, r->old_pass, r->new_pass, op_wait_done, w);
+            else acct_change_password_session(s->account_id, r->new_pass, op_wait_done, w);
+        }
+    }
+    memset(r, 0, sizeof *r);
+}
+
+/* ["upp", new, repeat, token] (v10.0.3 changePass, deob-10.0.3.js:244645-244650: the new password, its repeat and the
+ * FRVR refresh token; no current password) -> ["upp", msg, newToken?]. The token is the socket's own session token
+ * (KrunkNative's refresh token: proof that this client signed in). ["upp", old, new, repeat] (v7.1.4, the hub page)
+ * still checks the old password. Either changes it once per 30 minutes (accounts.password_changed_at, 0359). */
 void sh_password(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "upp", 1, cJSON_CreateString("Not logged in."));
         return;
     }
-    const char *nw = fa_str(f, 2), *rep = fa_str(f, 3);
+    const char *proof = fa_str(f, 3);
+    const int v10 = proof && s->token[0] && strlen(proof) == strlen(s->token) && kn_ct_streq(proof, s->token);
+    const char *nw = v10 ? fa_str(f, 1) : fa_str(f, 2), *rep = v10 ? fa_str(f, 2) : fa_str(f, 3);
     if (!nw || !rep || strcmp(nw, rep) != 0) {
         social_send_n(s, "upp", 1, cJSON_CreateString("Passwords do not match."));
         return;
     }
-    OpWait *w = calloc(1, sizeof *w);
-    if (!w) return;
-    w->s = social_hold(s);
-    w->kind = 1;
-    acct_change_password(s->account_id, fa_str(f, 1), nw, op_wait_done, w);
+    if (!v10 && !fa_str(f, 1)) {
+        social_send_n(s, "upp", 1, cJSON_CreateString("Incorrect current password."));
+        return;
+    }
+    if (strlen(nw) >= sizeof(((PasswordReq *) 0)->new_pass) || (!v10 && strlen(fa_str(f, 1)) >= sizeof(((PasswordReq *) 0)->old_pass))) {
+        social_send_n(s, "upp", 1, cJSON_CreateString("Password is too long."));
+        return;
+    }
+    PasswordReq *r = calloc(1, sizeof *r);
+    if (!r) return;
+    r->has_old = !v10;
+    snprintf(r->new_pass, sizeof r->new_pass, "%s", nw);
+    if (!v10) snprintf(r->old_pass, sizeof r->old_pass, "%s", fa_str(f, 1));
+    char me[24];
+    social_query(s, SQL(.any = "SELECT {epoch_ms:password_changed_at} FROM accounts WHERE id = $1"), KN_DB_ARGS(me_str(s, me)),
+                 password_clock_done, r);
 }
 
 /* ------------------------------------------------------------------ mail */

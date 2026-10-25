@@ -798,6 +798,8 @@ int   v10_customize_title(void);                 // titleIndex (ENT[35]); -1 non
 void  v10_customize_frame(const cJSON *frame);   // brain "ttl" (the account's titles)
 const cJSON *v10_customize_titles(void);         // GET /titles' rows (assets/titles.json), NULL unreadable
 void  v10_customize_title_style(StrBuf *out, const cJSON *title); // the title tag's style ("color:...;")
+const cJSON *v10_customize_title_get(int id);    // the title row of `id` (_34399 getTitle), NULL unknown / -1
+void  v10_customize_title_granted(int id);       // a purchase brought title `id`: into acc.titles (once), windows redrawn
 void  v10_customize_tick(void);                  // per frame (ui_loadout_tick): the preview column's drag
 // v10_daily_spin.c: the sidebar's Daily Spin (#dailySpinDiv; kn_brain "dsp" progress / "dsl" claim)
 void  v10_daily_spin_frame(const char *label, const cJSON *frame);
