@@ -449,8 +449,10 @@ static void local_player_events(Client *client, const float now, const float del
 
     // Inspect (wInspect / cancelInspect, deob-10.0.3.js:195531-195540, :195578-195584): the inspected skin's
     // customInspectSound or inspS (volume 1, looping with inspSLoop) as SOUND.localInspectSound, which a cancel stops.
-    // Not ported: a flipAnim melee's melee_equip on inspect (no flipAnim in the store table).
+    // A flipAnim melee (68 store knives) spins on inspect: melee_equip at 0.03, rate 1.7 (deob-10.0.3.js:195522-195524).
     if (me->inspecting && !track->inspecting) {
+        const ViewerSkin *melee_skin = me->weapon->melee ? viewer_skin(me->skins.melee) : NULL;
+        if (melee_skin && (melee_skin->flags & VS_FLIP_ANIM)) audio_play("melee_equip", 0.03f, 0, 1.7f);
         if (g_sound.inspect_sound[0]) audio_stop(g_sound.inspect_sound);
         int loop = 0;
         if (viewer_skin_inspect_sound(current_skin(me), g_sound.inspect_sound, sizeof(g_sound.inspect_sound), &loop))
