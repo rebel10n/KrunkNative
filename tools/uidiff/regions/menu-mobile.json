@@ -16,7 +16,8 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 1.0,
-      "note": "#playerHeaderEl: Login or Register, Get Signup Rewards (the phone header bar) The Account Manager (KrunkNative) between them: the strip x 0-300 was pasted from the render on 2026-10-16 (the v10 capture has no such button)."
+      "note": "#playerHeaderEl: Login or Register, Get Signup Rewards (the phone header bar) The Account Manager (KrunkNative) between them: the strip x 0-300 was pasted from the render on 2026-10-16 (the v10 capture has no such button).",
+      "pending": "KrunkNative's Account Manager button sits between 'Login or Register' and 'Get Signup Rewards'; v10 has no such button (main-menu's reference had that strip patched in on 2026-10-16, these were not)."
     },
     {
       "name": "header-right",

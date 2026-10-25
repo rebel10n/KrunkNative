@@ -1610,14 +1610,20 @@ int game_config_is_custom(const Game *game) {
 int game_weapon_req(const Game *game, const Weapon *weapon, const int dev) {
     if (dev || !weapon) return dev;
     const int comp = game && game->config.comp;
-    const int custom_ok = !weapon->custom_only || (game_config_is_custom(game) && !comp); // !customOnly || (isCustom && !isComp)
+    // !customOnly || (isCustom && !isComp): v10's offline sandbox is not a custom game, so a
+    // Customs Only secondary stays locked there, unlike in KN's hosted (offline or online) games.
+    const int custom = game_config_is_custom(game) && !(game && game->is_sandbox);
+    const int custom_ok = !weapon->custom_only || (custom && !comp);
     const int comp_ok = !(weapon->no_comp && comp); // !(noComp && isComp)
     return custom_ok && comp_ok;
 }
 
 int game_weapon_level_ok(const Game *game, const Weapon *weapon, const int level, const int dev) {
     if (dev || !weapon || weapon->min_rec <= 0) return 1;                     // account.isDev || ... !minRec
-    if (game && (game->is_sandbox || game_config_is_custom(game))) return 1; // isCustom: no level tail
+    // v10's req skips the level/premium tail only in a custom game (deob-10.0.3.js:112377), never in
+    // its offline sandbox: the sandbox shows the locks like a public game. (Official restrictSecs is
+    // not modelled; KN's own custom games are never official-restricted.)
+    if (game && game_config_is_custom(game) && !game->is_sandbox) return 1;
     return level >= weapon->min_rec;                                          // account && account.level >= minRec
 }
 

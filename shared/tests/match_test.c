@@ -1617,8 +1617,9 @@ static void test_secondary_level(Game *game) {
               "public: %s needs level %d", weapon->name, weapon->min_rec);
         CHECK(game_weapon_level_ok(game, weapon, weapon->min_rec, 0) && game_weapon_level_ok(game, weapon, 0, 1),
               "public: %s at level %d, or for a dev", weapon->name, weapon->min_rec);
-        CHECK(game_weapon_level_ok(&custom, weapon, 0, 0) && game_weapon_level_ok(&sandbox, weapon, 0, 0),
-              "a custom game and the sandbox open %s at level 0", weapon->name);
+        CHECK(game_weapon_level_ok(&custom, weapon, 0, 0), "a custom game opens %s at level 0", weapon->name);
+        CHECK(!game_weapon_level_ok(&sandbox, weapon, 0, 0) && game_weapon_level_ok(&sandbox, weapon, weapon->min_rec, 0),
+              "the offline sandbox keeps %s's level lock, as v10's does", weapon->name);
     }
     CHECK(gated >= 9 && deagle == 15, "v10.0.3's level-gated secondaries (%d; Desert Eagle minRec %d)", gated, deagle);
     game_config_free(&custom);

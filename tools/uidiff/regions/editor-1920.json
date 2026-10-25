@@ -121,7 +121,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 4.0,
-      "note": "left panel: Essential (map config), editor WP4"
+      "note": "left panel: Essential (map config), editor WP4",
+      "pending": "Intentional native-editor differences: the Solid Ramp Sides row (v10 rampFix), Snapping ON (regions note), and v10.0.3's own script text and the Shared script tab."
     },
     {
       "name": "right-panel",

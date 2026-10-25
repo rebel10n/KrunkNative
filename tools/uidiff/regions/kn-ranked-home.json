@@ -68,7 +68,8 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 8.0,
-      "note": "the season's map pool: the description and the scrolling map carousel (v10's own svelte-17kea4i-infinite-scroll, 25 s, var() in its keyframes, paused at 800 ms like the capture: state.anim_seek)"
+      "note": "the season's map pool: the description and the scrolling map carousel (v10's own svelte-17kea4i-infinite-scroll, 25 s, var() in its keyframes, paused at 800 ms like the capture: state.anim_seek)",
+      "pending": "10.0.3's ranked pool is {2,4,11,14,17,42}: Eterno Simulator out, Frontier in (deob-10.0.3.js:19381-19388). The reference capture predates that, so the carousel cannot match."
     },
     {
       "name": "rk-footer",

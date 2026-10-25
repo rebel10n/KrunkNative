@@ -20,7 +20,8 @@
       "ref_offset": [
         0,
         -1
-      ]
+      ],
+      "pending": "KN removes ads: v10's 'Manage Ads' / 'Manage Ad Preferences' button is gone by design (client/src/ui/ui_windows.c strips it), which also shifts the window's other rows."
     },
     {
       "name": "preset-buttons",
@@ -37,7 +38,8 @@
       "ref_offset": [
         -93,
         -1
-      ]
+      ],
+      "pending": "KN removes ads: v10's 'Manage Ads' / 'Manage Ad Preferences' button is gone by design (client/src/ui/ui_windows.c strips it), which also shifts the window's other rows."
     },
     {
       "name": "tabs",
@@ -54,7 +56,8 @@
       "ref_offset": [
         0,
         -1
-      ]
+      ],
+      "pending": "KN removes ads: v10's 'Manage Ads' / 'Manage Ad Preferences' button is gone by design (client/src/ui/ui_windows.c strips it), which also shifts the window's other rows."
     },
     {
       "name": "body",
@@ -68,7 +71,8 @@
       "note": "settHolder rows (the Gameplay rows sit 1-2 px lower: the window is 3 px shorter)",
       "fuzz": 12,
       "max_pct": 6.0,
-      "skip": false
+      "skip": false,
+      "pending": "The Bhop Mode row is a KrunkNative addition (doc/v10/kn-additions.md); the reference has no such row."
     }
   ]
 }

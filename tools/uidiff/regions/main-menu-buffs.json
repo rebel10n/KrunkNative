@@ -42,7 +42,8 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 6.0,
-      "note": "v10 #playerHeaderEl, as main-menu"
+      "note": "v10 #playerHeaderEl, as main-menu",
+      "pending": "KrunkNative's Account Manager button sits between 'Login or Register' and 'Get Signup Rewards'; v10 has no such button (main-menu's reference had that strip patched in on 2026-10-16, these were not)."
     },
     {
       "name": "side-nav",

@@ -67,7 +67,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 1.0,
-      "note": "Keybinds, Gameplay and its four sensitivities"
+      "note": "Keybinds, Gameplay and its four sensitivities",
+      "pending": "The Bhop Mode row is a KrunkNative addition (doc/v10/kn-additions.md); the reference has no such row."
     },
     {
       "name": "mobile-head",
@@ -80,7 +81,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 8.5,
-      "note": "Mobile header. v10 draws the Gameplay box edge at a fractional y at the phone scale (0.394 uiBase), with anti-aliasing (the rows below sit about 0.5 px lower); the engine snaps it to whole pixels, so the header edges differ"
+      "note": "Mobile header. v10 draws the Gameplay box edge at a fractional y at the phone scale (0.394 uiBase), with anti-aliasing (the rows below sit about 0.5 px lower); the engine snaps it to whole pixels, so the header edges differ",
+      "pending": "KN removes ads: v10's 'Manage Ads' / 'Manage Ad Preferences' button is gone by design (client/src/ui/ui_windows.c strips it), which also shifts the window's other rows."
     },
     {
       "name": "mobile-rows",
@@ -93,7 +95,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 10.5,
-      "note": "Mobile rows at the foot (X Sensitivity): the same half-pixel edge snapping as mobile-head (with a 1 px offset the region is 1.4%)"
+      "note": "Mobile rows at the foot (X Sensitivity): the same half-pixel edge snapping as mobile-head (with a 1 px offset the region is 1.4%)",
+      "pending": "KN removes ads: v10's 'Manage Ads' / 'Manage Ad Preferences' button is gone by design (client/src/ui/ui_windows.c strips it), which also shifts the window's other rows."
     }
   ]
 }

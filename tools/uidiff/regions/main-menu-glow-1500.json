@@ -14,7 +14,8 @@
         36
       ],
       "kind": "text",
-      "note": "Get Signup Rewards with text-shadow 0 0 10.00px rgba(255, 213, 79, 0.500) (rewardsGlow at 1500 ms: 6px/0.3 -> 10px/0.5 by ease-in-out over 1.5 s)"
+      "note": "Get Signup Rewards with text-shadow 0 0 10.00px rgba(255, 213, 79, 0.500) (rewardsGlow at 1500 ms: 6px/0.3 -> 10px/0.5 by ease-in-out over 1.5 s)",
+      "pending": "KrunkNative's Account Manager button sits between 'Login or Register' and 'Get Signup Rewards'; v10 has no such button (main-menu's reference had that strip patched in on 2026-10-16, these were not)."
     }
   ]
 }

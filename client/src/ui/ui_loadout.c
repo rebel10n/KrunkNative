@@ -418,6 +418,8 @@ int ui_loadout_weapon_skin_shown(const int weapon) {
     return pick >= 0 && viewer_skin(pick) ? pick : -1;
 }
 
+static int secondary_req_ok(const Client *client, const Weapon *weapon, const AccountInfo *acc);
+
 // The secondary the player picked (selectedSecondaryIndex, localStorage "secondaryInd",
 // default 2 = Pistol) as a Krunker weapon id; -1 when the class has no secondary slot.
 int ui_loadout_secondary(const int class_index) {
@@ -428,11 +430,9 @@ int ui_loadout_secondary(const int class_index) {
     const LoadoutWeapon *w = weapon_at(id);
     if (!w || !w->secondary) return 2;
     // v10 updateSecIndex (v10.js:169364): a secondary its req refuses is the Pistol (2), as the spawn keeps it; its
-    // level tail too (deob-10.0.3.js:112377, the server's spawn checks it: game_weapon_level_ok), not offline
+    // level tail too (deob-10.0.3.js:112377, the server's spawn checks it: game_weapon_level_ok), online and offline.
     const AccountInfo *acc = active_account();
-    const Game *game = &menu_ui()->client->game;
-    if (!game_weapon_req(game, rules_weapon(id), acc && acc->is_dev)) return 2;
-    if (online_mode_online() && !game_weapon_level_ok(game, rules_weapon(id), acc ? acc->level : 0, acc && acc->is_dev)) return 2;
+    if (!secondary_req_ok(menu_ui()->client, rules_weapon(id), acc)) return 2;
     return id;
 }
 
@@ -541,6 +541,19 @@ static int owned_cmp(const void *pa, const void *pb) {
 
 // Offline mode (online_mode.h): no account, every store skin is unlocked and nothing is saved.
 static int all_skins_unlocked(void) { return !online_mode_online(); }
+
+// v10's secondary req (deob-10.0.3.js:112377): a dev, or customOnly allowed and the level/premium tail
+// skipped in a custom game. Its offline sandbox is not a custom game, so Customs Only and the level
+// locks apply there exactly as in a public game; the client's offline flag stands for is_sandbox, which
+// it never receives (same idiom as hud_votekick.c). game_weapon_level_ok is the server-side twin.
+static int secondary_req_ok(const Client *client, const Weapon *weapon, const AccountInfo *acc) {
+    if (!weapon) return 0;
+    if (acc && acc->is_dev) return 1;
+    if (game_config_is_custom(&client->game) && !client->game.is_sandbox && !client->offline) return 1;
+    if (weapon->custom_only) return 0;
+    if (weapon->no_comp && client->game.config.comp) return 0;
+    return (acc ? acc->level : 0) >= weapon->min_rec;
+}
 
 // The loadout may show and wear store skins: signed in (acc.skins) or offline mode (all of them).
 static int has_inventory(void) { return active_account() || all_skins_unlocked(); }
@@ -1375,11 +1388,10 @@ static char *gen_skins(void) {
 }
 
 // windows[19] Select Secondary: every `secondary` weapon by minRec; locked ones need that
-// level (unlocked offline and in v7's sandbox).
+// level in a public game and in v10's offline sandbox, open in a custom game (secondary_req_ok).
 static char *gen_secondary(void) {
     const AccountInfo *acc = active_account();
     const Client *client = menu_ui()->client;
-    const int dev = acc && acc->is_dev;
     StrBuf out = {0};
     sb_append(&out, "<div class='winBackH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(44)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><div class='winSelH'>Select Secondary</div><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>");
     sb_append(&out, "<div id='skinList'>");
@@ -1389,9 +1401,9 @@ static char *gen_secondary(void) {
             if (!w || !w->secondary || w->min_rec != rec) continue;
             // v10's card (v10.js:214015-214020): a secondary whose req refuses it has no click (customOnly: a custom
             // game that is not comp, or a dev; noComp: not in comp; minRec: the level, not in a custom game,
-            // game_weapon_level_ok, deob-10.0.3.js:112377)
-            const int unlocked = (all_skins_unlocked() || game_weapon_level_ok(&client->game, rules_weapon(i), acc ? acc->level : 0, dev)) &&
-                                 game_weapon_req(&client->game, rules_weapon(i), dev);
+            // game_weapon_level_ok, deob-10.0.3.js:112377). all_skins_unlocked() is about skins, not this level
+            // requirement: the offline sandbox shows the locks like a public game.
+            const int unlocked = secondary_req_ok(client, rules_weapon(i), acc);
             const int skin = has_inventory() ? weapon_skin(i) : -1;
             char img[256];
             if (skin >= 0 && store_skin(skin)) skin_thumb(skin, img, sizeof(img));

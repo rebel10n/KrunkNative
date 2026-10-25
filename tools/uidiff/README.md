@@ -420,3 +420,43 @@ it against Chrome 152's capture in `doc/ref/krunknative/paint/`: `flip-mid` (a m
 `backdrop-tex` (a 30% black panel with `backdrop-filter: blur(10px)` and a 24px radius over the
 battle-pass art, like `.death-ui-bottom`). Chrome's capture: `google-chrome --headless=new
 --no-sandbox --disable-gpu --hide-scrollbars --window-size=1280,720 --screenshot=<png> <page>`.
+
+### Failing-region triage (2026-10-25)
+
+After the `scaleBase` fix the suite had 120 failing regions. They triage into these groups; "pending"
+on a region means the reference itself is out of date or shows something KN deliberately does not do,
+and the note says which.
+
+**Fixed in this pass**
+- **Secondary level/custom requirements were skipped offline.** `customize-secondary` showed every
+  secondary Unlocked where v10's offline sandbox shows Customs Only and Req lvl. v10 skips
+  `customOnly` and the `minRec` tail only in a custom game, never in its offline sandbox
+  (`deob-10.0.3.js:112377`). `secondary_req_ok` (client) and `game_weapon_req` /
+  `game_weapon_level_ok` (server) now treat the offline sandbox as not custom, and the pick falls
+  back to the Pistol as `updateSecIndex` does. `customize-secondary` 30.18 -> 2.79 %.
+- **`kn-settings-quickplay`**: the section starts folded since 7ab22d6fa, and the presets row moved
+  the rest. The scenario now opens the folder with a real DOM click (`state.windowClicks`, new in
+  ui_scenario.c), the region rects were re-measured and the baseline re-rendered: 5/5.
+- **Object Manager baselines** (11 scenarios, 45 regions): stale since 9c793fb0b removed the Tools
+  pane's Release row (an intended Physics Gun change), so they were re-rendered: 45/45.
+- **Outdated references marked pending**: `kn-menu-popular-official` (Popular Now is Box Office only
+  since 95bf5b912), `kn-ranked-home` `rk-maps` (10.0.3's ranked pool drops Eterno Simulator for
+  Frontier), the ad-button regions (`hub-settings`, `settings-game`, `settings-advanced-controls`,
+  `settings-mobile-2`), the Account Manager strip (`main-menu-buffs` / `-krsale` / `-popular`,
+  `main-menu-glow-*`, `menu-mobile*` header-left), `store-home` (the reference has no Heroic Spin
+  art), the editor panels (Solid Ramp Sides, Snapping ON, the Shared script tab). The hub
+  `editor-badge` difference is anti-aliasing only, so its tolerance is 2.5 % instead of 1.5 %.
+
+**Still open, and why**
+- **Server browser** (`kn-servers-official*`, `kn-servers-carousel`): the krunk.io / krunker.io tab
+  bar and the download button are intentional and shift every region; the footer also lacks v10's
+  "0 in Editor" and "0 on Social" counters, which is a real gap to port or to rule out.
+- **End screens**: at 200 ms the victory title is ~8 % larger than the reference
+  (`seq-end-vic@200`), `seq-end-results` counts down 00:20 where the reference has 00:19 and its
+  timing entry is 135.9 ms late. Real animation/timing differences in the engine, not baselines.
+- **Battle Pass** (`rewards-bp-home`, `rewards-bp-vip`, `rewards-bp-chal`): the window renders
+  "Loading Battle Pass" because the scenarios have no battle-pass data source. They need a fixture
+  or a brain stub, not a renderer change.
+- **Not individually root-caused here**: `kn-market-blackm`, `market-junkyard`,
+  `ranked-shop-flying`, `ingame-endscreen-collect-raid`, `kn-ranked-sort`, `kn-servers-official-error`
+  and `kn-servers-official-mixed`, and the `strike/*` scenarios (the Strike flavour, not v10 parity).

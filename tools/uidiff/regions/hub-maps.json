@@ -67,8 +67,8 @@
       ],
       "kind": "image",
       "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "#editrDB"
+      "max_pct": 2.5,
+      "note": "#editrDB (1.98% is anti-aliasing on the badge border, not a content difference)"
     },
     {
       "name": "loading",

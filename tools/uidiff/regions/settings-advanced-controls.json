@@ -68,7 +68,8 @@
       "note": "settHolder rows",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": false
+      "skip": false,
+      "pending": "KN removes ads: v10's 'Manage Ads' / 'Manage Ad Preferences' button is gone by design (client/src/ui/ui_windows.c strips it), which also shifts the window's other rows. The Bhop Mode row is a KrunkNative addition (doc/v10/kn-additions.md); the reference has no such row."
     }
   ]
 }

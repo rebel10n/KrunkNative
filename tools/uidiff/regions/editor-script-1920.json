@@ -7,7 +7,12 @@
   "regions": [
     {
       "name": "toolbar",
-      "rect": [0, 0, 866, 33],
+      "rect": [
+        0,
+        0,
+        866,
+        33
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -15,21 +20,37 @@
     },
     {
       "name": "script-tabs",
-      "rect": [192, 94, 400, 36],
+      "rect": [
+        192,
+        94,
+        400,
+        36
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#tabHolder: Client (selected) / Server, GameFont 12px"
+      "note": "#tabHolder: Client (selected) / Server, GameFont 12px",
+      "pending": "Intentional native-editor differences: the Solid Ramp Sides row (v10 rampFix), Snapping ON (regions note), and v10.0.3's own script text and the Shared script tab."
     },
     {
       "name": "script-strip",
-      "rect": [600, 94, 940, 36],
+      "rect": [
+        600,
+        94,
+        940,
+        36
+      ],
       "kind": "flat",
       "note": "the empty tab strip (KrunkNative's close button sits right of it, at right:150px)"
     },
     {
       "name": "script-label",
-      "rect": [1585, 94, 143, 36],
+      "rect": [
+        1585,
+        94,
+        143,
+        36
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -37,15 +58,26 @@
     },
     {
       "name": "script-gutter",
-      "rect": [192, 130, 50, 656],
+      "rect": [
+        192,
+        130,
+        50,
+        656
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "line numbers and fold markers (CodeMirror measured its gutters at 22px: numbers end at 32px)"
+      "note": "line numbers and fold markers (CodeMirror measured its gutters at 22px: numbers end at 32px)",
+      "pending": "Intentional native-editor differences: the Solid Ramp Sides row (v10 rampFix), Snapping ON (regions note), and v10.0.3's own script text and the Shared script tab."
     },
     {
       "name": "script-code",
-      "rect": [242, 130, 1486, 656],
+      "rect": [
+        242,
+        130,
+        1486,
+        656
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -53,7 +85,12 @@
     },
     {
       "name": "script-compile",
-      "rect": [192, 787, 1536, 57],
+      "rect": [
+        192,
+        787,
+        1536,
+        57
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 4.5,

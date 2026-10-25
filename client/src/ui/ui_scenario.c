@@ -88,6 +88,7 @@
 #include <process.h>
 #endif
 #include "../html/engine/engine.h"
+#include "../html/engine/events.h"
 #include <gltf.h> // gltf_set_clock_override: animated GLTF items follow the pinned clock
 #include <v10_ui.h> // state.leaderboards / state.v10responses
 #include <spectate.h> // state.spectate
@@ -909,6 +910,17 @@ static void apply_window_actions(Client *client) {
         ev.type = "click";
         ev.value = "";
         html_ui_dispatch(name->valuestring, &ev, argc ? args : NULL, argc);
+        run_frames(client, 2);
+    }
+    // state.windowClicks [css selector, ...]: a real DOM click on the first match, so the page's own
+    // onclick runs with its element (a settings folder's collapseFolder needs it: the Quickplay
+    // section starts folded, and a scenario opens it the way a user does).
+    const cJSON *sel;
+    cJSON_ArrayForEach(sel, st("windowClicks")) {
+        if (!cJSON_IsString(sel)) continue;
+        const HtmlElem e = html_dom_query(0, sel->valuestring);
+        if (e && engine_get()) events_click(engine_events(engine_get()), e);
+        else fprintf(stderr, "[scenario] windowClicks: no match for '%s'\n", sel->valuestring);
         run_frames(client, 2);
     }
 }

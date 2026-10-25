@@ -8,9 +8,9 @@
     {
       "name": "quickplay-header",
       "rect": [
-        293,
-        172,
-        694,
+        292,
+        62,
+        695,
         38
       ],
       "kind": "text",
@@ -20,9 +20,9 @@
       "name": "server-and-launch-rows",
       "rect": [
         306,
-        226,
+        158,
         664,
-        130
+        137
       ],
       "kind": "text",
       "note": "Server Type select, krunker.io Region select, Auto Seek on Launch switch (native rows)"
@@ -31,8 +31,8 @@
       "name": "seek-modes-header",
       "rect": [
         307,
-        379,
-        662,
+        312,
+        663,
         38
       ],
       "kind": "text",
@@ -41,10 +41,10 @@
     {
       "name": "seek-modes-note",
       "rect": [
-        320,
-        440,
-        634,
-        30
+        321,
+        370,
+        631,
+        32
       ],
       "kind": "text",
       "note": "the rotation note (the default names)"
@@ -53,9 +53,9 @@
       "name": "mode-switches",
       "rect": [
         315,
-        466,
+        402,
         642,
-        190
+        135
       ],
       "kind": "image",
       "note": "the first mode switches: Free for All, Hardpoint and Capture the Flag on (rotation), Team Deathmatch and Parkour off"
