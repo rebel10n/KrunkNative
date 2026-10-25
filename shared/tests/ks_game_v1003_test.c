@@ -16,6 +16,7 @@
 #include <ks_entities.h>
 #include <net_ext.h>
 #include <ruleset.h>
+#include <weapons.h> // WEAPON_ID_PISTOL
 #include <math.h>
 #include <world.h>
 #include <stdio.h>
@@ -909,6 +910,7 @@ static void test_entity_replication(void) {
     CHECK(ks_game_load_shared(&client, KS_SIDE_CLIENT, k_ent_shared, strlen(k_ent_shared), &chost, NULL) == 0, "scripts.shared loads (client)");
 
     // a joiner's state: entSeed, "e+" (getSyncData, :220283-220292); the broadcast "e+" of the spawn too
+    ks_entities_send_seed(&server, 5); // (net.c sends it ahead of the INIT's other EXTs)
     ks_entities_send_state(&server, 5);
     CHECK(g_sent_count >= 3 && g_sent[g_sent_count - 1].uid == 5, "the joiner's records go to its uid (%d sent)", g_sent_count);
     memset(g_seen, 0, sizeof(g_seen));
@@ -1117,6 +1119,7 @@ static void test_entity_bodies(void) {
     const size_t server_objects = server.map->object_count;
     g_sent_count = 0;
     ks_game_start(&server);
+    ks_entities_send_seed(&server, 5);
     ks_entities_send_state(&server, 5);
     forward_records(&client, 1, 0.0);
 
@@ -1237,6 +1240,148 @@ static void test_entity_bodies(void) {
     cJSON_Delete(map);
 }
 
+
+// ---------------------------------------------------------------- v10.0.3 shots against entity parts, splash, live asset rays
+
+// "Target" (coll 1, hp 100): one 8 x 30 x 8 part 8 to its side; entity 12 at (0, 0, -40) turned PI / 2, so the part
+// stands at (0, -48) (z -52..-44), straight ahead of a player at the origin (yaw 0 looks down -z) only through the yaw
+// (rayVsPart); a pistol's spread stays inside it
+static cJSON *target_map(void) {
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    cJSON *arch = cJSON_CreateObject();
+    cJSON_AddNumberToObject(arch, "id", 3);
+    cJSON_AddStringToObject(arch, "name", "Target");
+    cJSON_AddNumberToObject(arch, "coll", 1);
+    cJSON_AddNumberToObject(arch, "hp", 100);
+    cJSON *part = cJSON_CreateObject();
+    cJSON_AddItemToObject(part, "p", cJSON_CreateFloatArray((const float[]) {8, 0, 0}, 3));
+    cJSON_AddItemToObject(part, "s", cJSON_CreateFloatArray((const float[]) {8, 30, 8}, 3));
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(arch, "objects"), part);
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(map, "archetypes"), arch);
+    cJSON *inst = cJSON_CreateObject();
+    cJSON_AddNumberToObject(inst, "i", 98);
+    cJSON_AddItemToObject(inst, "p", cJSON_CreateFloatArray((const float[]) {0, 0, -40}, 3));
+    cJSON_AddItemToObject(inst, "r", cJSON_CreateFloatArray((const float[]) {0, 1.5707963f, 0}, 3));
+    cJSON_AddNumberToObject(inst, "eid", 12);
+    cJSON_AddNumberToObject(inst, "ar", 3);
+    cJSON_AddItemToArray(cJSON_GetObjectItem(map, "objects"), inst);
+    return map;
+}
+
+static const char *k_target_server =
+    "public action onCustomTrigger(str playerID, str customParam, num value) {\n"
+    "    obj e = GAME.ENTITIES.findById(\"12\");\n"
+    "    num[] behind = num[-30, 0, 0];\n"
+    "    if (customParam == \"ride\") { GAME.log(\"ride \" + toStr(e.attachPlayer(playerID, {o: behind, nd: true}))); }\n"
+    "    if (customParam == \"off\") { GAME.log(\"off \" + toStr(e.detachPlayer(playerID))); }\n"
+    "    if (customParam == \"asset\") { obj a = GAME.LIVE_OBJECTS.addAsset(\"46802\", 0, 0, -20, 5, 0, {complexCollision: true}); }\n"
+    "}\n"
+    "public action onEntityDamage(str id, str playerID, num amount) { GAME.log(\"dmg \" + id + \" \" + playerID + \" \" + toStr(amount)); }\n";
+
+static double ks_entities_hp(const Game *game, const int eid) {
+    KsEntityView v;
+    return ks_entities_find(game, eid, &v) ? v.hp : NAN;
+}
+
+static void shoot_once(Player *p) {
+    p->loadout[0] = WEAPON_ID_PISTOL;
+    p->ammo[0] = 10;
+    player_swap_weapon(p, 0, 1, 1, 0);
+    p->swap_timer = 0.0f;
+    p->reload_timer = 0.0f;
+    p->reloads[0] = 0.0f;
+    p->spread = p->spread_plus = 0.0f; // the last shot's spread and recoil gone: the ray goes straight ahead
+    p->recoil_force = p->recoil_anim = p->recoil_anim_y = 0.0f;
+    p->direction = (vec2) {0.0f, 0.0f};
+    Input in = {.seq = 900, .move_dir = -1, .delta = 0.016f, .x_dir = 0.0f, .y_dir = 0.0f, .shoot = 1};
+    player_proc_input(p, &in, 0, 0);
+    in.shoot = 0; // (a semi-automatic weapon fires again after the release)
+    player_proc_input(p, &in, 0, 0);
+}
+
+static void test_entity_shots(void) {
+    printf("Running v10.0.3 shots against entity parts / splash / live asset rays test...\n");
+    cJSON *map = target_map();
+    static Game game;
+    static KsHost host;
+    game_on(&game, map, MODE_ID_FFA);
+    game.is_local = 1;
+    game.lag_comp = 0;
+    host = server_host();
+    CHECK(ks_game_load(&game, KS_SIDE_SERVER, k_target_server, strlen(k_target_server), &host, NULL) == 0, "the server script loads (%s)",
+          g_log_count ? g_log[g_log_count - 1] : "");
+    CHECK(ks_game_load_shared(&game, KS_SIDE_SERVER, k_ent_shared, strlen(k_ent_shared), &host, NULL) == 0, "scripts.shared loads");
+    ks_game_start(&game);
+    for (size_t i = 0; game.mode && i < game.mode->wait_timer_count; i++) game.mode->wait_timers[i].time = 0.0f;
+    if (game.mode) game.mode->wait_timer_count = 0;
+    Player *p = add_player(&game, 2);
+    p->position = (vec3) {0.0f, 0.0f, 0.0f};
+    p->direction = (vec2) {0.0f, 0.0f};
+    const Object *part = ks_entities_part_object(&game, 12, 0);
+    CHECK(part && fabsf(part->position.x - 8.0f) < 1e-3f, "the body still stands where buildBody put it (the instance's yaw is set after, :212740)");
+
+    // the ray: the part's yawed box at its part pose, not the object's box (rayVsPart, :214014)
+    const vec3 eye = {0.0f, 9.5f, 0.0f}, seg = {0.0f, 0.0f, -100.0f};
+    float t = -1;
+    CHECK(part && ks_entities_object_ray(&game, part, p, eye, seg, &t) && t > 0.435f && t < 0.445f, "rayVsPart: the turned part's face at z -44 (t %.3f)", t);
+    CHECK(part && line_in_rect(eye, seg, part->position, object_box_size(part)) <= 0.0f, "the object's own box (unturned) is not on the line");
+
+    // a pistol shot: entities.damage (onEntityDamage, "_damage") and the shooter's hit marker (DO_DAMAGE)
+    g_log_count = 0;
+    g_sent_count = 0;
+    shoot_once(p);
+    ks_game_update(&game, 16.0, 1.0);
+    const double hp1 = ks_entities_hp(&game, 12);
+    CHECK(hp1 < 100.0 && logged("dmg 12 2 20") == (hp1 == 80.0), "a shot damages the entity (hp %.1f, %s)", hp1, g_log_count ? g_log[0] : "no hook");
+    CHECK(count_sent(NET_PACKET_HIT, 2) >= 1, "DO_DAMAGE: the shooter's hit marker (%d)", count_sent(NET_PACKET_HIT, 2));
+
+    // its nd rider's shots pass through it (shotPassesThrough, :214153); detached, they hit again
+    g_log_count = 0;
+    ks_game_on_custom_trigger(&game, "2", "ride", 0);
+    CHECK(logged("ride true") && fabsf(p->position.z + 10.0f) < 1e-3f, "the shooter rides 30 behind the part's line (%.2f)", p->position.z);
+    shoot_once(p);
+    ks_game_update(&game, 16.0, 1.0);
+    CHECK(ks_entities_hp(&game, 12) == hp1, "nd: the rider's shot passes (hp %.1f)", ks_entities_hp(&game, 12));
+    ks_game_on_custom_trigger(&game, "2", "off", 0);
+    CHECK(logged("off true") && !ks_entities_attachment(&game, 2, NULL, NULL, NULL, NULL, NULL), "detachPlayer");
+    shoot_once(p);
+
+    ks_game_update(&game, 16.0, 1.0);
+    const double hp2 = ks_entities_hp(&game, 12);
+    CHECK(hp2 < hp1, "detached: the shot damages it again (hp %.1f)", hp2);
+
+    // an explosion of a player's: round(damage * (1 - splashDist / radius)) (:217057-217067)
+    game_explosion(&game, (vec3) {0.0f, 1.0f, -38.0f}, 20.0f, 50.0f, p, 0);
+    ks_game_update(&game, 16.0, 1.0);
+    const double hp3 = ks_entities_hp(&game, 12);
+    // the footprint (loadMapData starts its min / max at 0, so it holds the origin: local x 0..12, z -4..4); the point is
+    // 2 from it on the far side of the entity, within its height
+    CHECK(fabs(hp2 - hp3 - round(50.0 * (1.0 - 2.0 / 20.0))) < 1e-9, "splash: %.0f off for splashDist 2 of 20 (hp %.1f -> %.1f)",
+          round(50.0 * 0.9), hp2, hp3);
+
+    // a complexCollision asset between the shooter and the target stops the shot on its model's hit mesh
+    unsigned char *glb = NULL;
+    size_t glb_len = 0;
+    if (!read_file("assets/user-assets/46802/model.glb", &glb, &glb_len)) {
+        ai_parts_model_put(&game, PARTS_ASSET, ai_parts_model_parse(glb, glb_len));
+        free(glb);
+    }
+    ks_game_on_custom_trigger(&game, "2", "asset", 0);
+    float h_hit = -1.0f, lt = 0;
+    for (float h = 0.5f; h < 40.0f && h_hit < 0.0f; h += 0.5f)
+        if (ks_entities_live_ray(&game, (vec3) {0.0f, h, 0.0f}, seg, &lt) && lt < 0.3f) h_hit = h;
+    CHECK(h_hit > 0.0f, "the asset's hit mesh is on the line at some height (y %.1f, t %.3f)", h_hit, lt);
+    CHECK(!ks_entities_live_ray(&game, (vec3) {0.0f, 500.0f, 0.0f}, seg, &lt), "a ray far above misses it");
+    if (h_hit > 0.0f) {
+        p->position = (vec3) {0.0f, h_hit - (p->height - game_constants.camera_height), 0.0f};
+        shoot_once(p);
+        ks_game_update(&game, 16.0, 1.0);
+        CHECK(ks_entities_hp(&game, 12) == hp3, "the asset stops the shot before the entity (hp %.1f)", ks_entities_hp(&game, 12));
+    }
+    ks_game_unload(&game);
+    cJSON_Delete(map);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -1254,6 +1399,7 @@ int main(void) {
     test_player_flags();
     test_entity_replication();
     test_entity_bodies();
+    test_entity_shots();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);

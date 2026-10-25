@@ -1104,6 +1104,18 @@ static float part_mult(const AiPartsModel *m, const AiParts *p, const char *name
     return p ? p->body_dmg : 1.0f;
 }
 
+int ai_parts_model_ray(const AiPartsModel *m, const double origin[3], const double dir[3], double *t_out) { // iïïìîiì at rest
+    if (!m) return 0;
+    double *worlds = pose_alloc(m, NULL, 0.0); // iíîìíïî(rig, null, 0)
+    if (!worlds) return 0;
+    double best = 1;
+    const int g = mesh_hit(m, worlds, origin, dir, NULL, NULL, &best);
+    free(worlds);
+    if (g < 0) return 0;
+    if (t_out) *t_out = best;
+    return 1;
+}
+
 int ai_parts_hit_test(Game *game, GameAI *ai, const vec3 origin, const vec3 delta, float *t_out, char *part, const size_t part_size, float *mult) {
     AiPartsModel *m = ai_parts_hit_model(game, ai);
     if (!m) return 0;

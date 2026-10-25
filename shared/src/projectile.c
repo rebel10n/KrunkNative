@@ -9,6 +9,7 @@
 #include <ai.h>
 #include <hitboxes.h> // v10.0.2 posed hit boxes
 #include <prefabs.h> // prefab_info: geometry of an object hit
+#include <ks_entities.h> // v10.0.3 entity parts / live assets in the cast, the entities' splash
 #include <math.h>
 #include <string.h>
 
@@ -142,6 +143,7 @@ void game_explosion_streak(Game *game, const vec3 position, float radius, float 
                            const int streak) {
     if (!game_is_authority(game) || radius <= 0.0f) return;
     radius *= mode_explosion_size_mlt(game);            // v7 mode.explSMlt (Impulsed 2), before the "ex"
+    const float raw_damage = damage;                    // (v10.0.3's entity splash takes the damage as given)
     if (owner) damage *= player_attr_damage(owner);     // v7 source.attributes.dmg (Strength), players and AIs
 
     const NetExplosionPacket packet = {.position = {roundf(position.x), roundf(position.y), roundf(position.z)}, .radius = roundf(radius)};
@@ -178,6 +180,8 @@ void game_explosion_streak(Game *game, const vec3 position, float radius, float 
         const float falloff = 1.0f - sqrtf(dx * dx + dy * dy + dz * dz) / radius;
         if (falloff > 0.0f) game_ai_damage(game, ai, owner, damage * falloff, 0);
     }
+    // v10.0.3 entities (deob-10.0.3.js:217057-217067): a player's explosion splashes every entity with hp (splashDist)
+    if (owner && game->ks) ks_entities_splash(game, position, radius, raw_damage, owner);
 }
 
 void game_explosion(Game *game, const vec3 position, const float radius, const float damage, Player *owner, const int weapon_index) {
@@ -229,11 +233,20 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         if (!projectile_object_blocks(object)) continue;
         if (game_ai_projectile_skips_objects(game, projectile)) break; // projOb.noObjC (WP-F, shared/src/ai.c)
 
-        const float t = line_in_rect(projectile->position, step, object->position, object_box_size(object));
+        // v10.0.3: an entity part is its yawed box, the owner's nd ride passes (rayVsPart, deob-10.0.3.js:206792-206795)
+        float t;
+        if (!game->ks || !ks_entities_object_ray(game, object, game_find_player(game, projectile->owner_uid), projectile->position, step, &t))
+            t = line_in_rect(projectile->position, step, object->position, object_box_size(object));
         if (t > 0.0f && t <= 1.0f && t < best.t) {
             best = (ProjectileHit) {NULL, NULL, t, (Object *) object};
             *hit_any = 1;
         }
+    }
+    // a complexCollision live asset's hit mesh (rayProxy, :212263) stops the step like the terrain
+    float live_t;
+    if (game->ks && ks_entities_live_ray(game, projectile->position, step, &live_t) && live_t < best.t) {
+        best = (ProjectileHit) {NULL, NULL, live_t};
+        *hit_any = 1;
     }
 
     // WP-B: projectiles.js:215 the terrain stops the step too

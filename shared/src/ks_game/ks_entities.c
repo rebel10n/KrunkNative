@@ -2014,13 +2014,19 @@ void ks_entities_client_reset(Game *game)
 
 static void live_send_all(KsGame *kg, int uid);
 
-void ks_entities_send_state(Game *game, const int uid)
+void ks_entities_send_seed(Game *game, const int uid)
 {
     KsGame *kg = game ? game->ks : NULL;
     if (!kg || !server_side(kg)) return;
     cJSON *seed = cJSON_CreateArray();
     if (seed) cJSON_AddItemToArray(seed, cJSON_CreateNumber((double) (int32_t) kg->ents.seed)); // matchSeed: an int32
     net_json(kg, uid, NET_EXT_ENTITY_SEED, seed);
+}
+
+void ks_entities_send_state(Game *game, const int uid)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    if (!kg || !server_side(kg)) return;
     live_send_all(kg, uid);
     for (size_t i = 0; i < kg->ents.count; i++)
         if (kg->ents.items[i]->active) net_json(kg, uid, NET_EXT_ENTITY_SPAWN, spawn_payload(kg->ents.items[i]));
@@ -2047,6 +2053,7 @@ static void view_of(const KsEntity *e, KsEntityView *out)
     out->pose = (KsEntityPose) {e->x, e->y, e->z, e->yaw, e->pitch, e->roll};
     out->render = e->has_render ? (KsEntityPose) {e->render.x, e->render.y, e->render.z, e->render.yaw, e->render.pitch, e->render.roll} : out->pose;
     out->frozen = e->frozen;
+    out->hp = e->hp;
     out->controller = e->controller;
     out->part_count = e->part_count;
 }
@@ -2123,6 +2130,130 @@ int ks_entities_shot_passes(const Game *game, const Player *shooter, const int e
 {
     const KsEntAttach *a = game && shooter ? att_find(game->ks, shooter->uid) : NULL;
     return a && a->eid == eid && a->nd;
+}
+
+
+// ---------------------------------------------------------------------------
+// Shots and splash (rayVsPart :214014, shotPassesThrough :214153, the hits' entities.damage :196082 / :196830 /
+// :206933, the explosion's splashDist :214135 / :217057-217067)
+
+static double json_num(const cJSON *v, double def);
+
+static KsEntity *part_owner(KsGame *kg, const Object *object, int *part)
+{
+    for (size_t i = 0; kg && object && i < kg->ents.count; i++) {
+        KsEntity *e = kg->ents.items[i];
+        for (int k = 0; k < e->part_count; k++) {
+            if (e->parts[k].object != object || !our_object(kg, e->parts[k].uid, object)) continue;
+            if (part) *part = k;
+            return e;
+        }
+    }
+    return NULL;
+}
+
+int ks_entities_object_ray(Game *game, const Object *object, const Player *shooter, const vec3 origin, const vec3 seg, float *t)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    int k = -1;
+    const KsEntity *e = object && object->dyn ? part_owner(kg, object, &k) : NULL;
+    if (!e) return 0;
+    *t = -1.0f;
+    if (!e->active || (shooter && ks_entities_shot_passes(game, shooter, e->eid))) return 1;
+    const KsEntPart *p = &e->parts[k];
+    const double s = sin(e->yaw), c = cos(e->yaw), dx = origin.x - e->x, dz = origin.z - e->z;
+    const vec3 lo = {(float) (dx * c - dz * s), origin.y, (float) (dx * s + dz * c)};
+    const vec3 ls = {(float) (seg.x * c - seg.z * s), seg.y, (float) (seg.x * s + seg.z * c)};
+    const KsEntPose pp = part_pose(e, p);
+    *t = line_in_rect(lo, ls, (vec3) {(float) pp.x, (float) (e->y + pp.y), (float) pp.z}, (vec3) {(float) p->size[0], (float) p->size[1], (float) p->size[2]});
+    return 1;
+}
+
+int ks_entities_object_damage(Game *game, const Object *object, const Player *dealer, const float damage)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    const KsEntity *e = object && object->dyn ? part_owner(kg, object, NULL) : NULL;
+    if (!e) return 0;
+    if (!server_side(kg) || !(damage > 0.0f)) return 1;
+    char by[24] = "";
+    if (dealer) ks_player_id(dealer, by, sizeof(by));
+    ent_damage(kg, e->eid, damage, by); // (refused for an archetype without hp and for the dealer's own nd ride)
+    if (dealer) { // DO_DAMAGE: the dealer's hit marker, sent after every entities.damage call as v10 does
+        const NetHitPacket hit = {.target_uid = -1};
+        game_send(game, dealer->uid, NET_PACKET_HIT, &hit, sizeof(hit));
+    }
+    return 1;
+}
+
+// A live asset's rayProxy (:212244-212272): its triangles' box, then the model's hit mesh at the rest pose in the
+// asset's frame (moved, turned ry, scaled s)
+int ks_entities_live_ray(Game *game, const vec3 origin, const vec3 seg, float *t_out)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    float best = 2.0f;
+    for (size_t i = 0; kg && i < kg->ents.live_count; i++) {
+        const KsLiveObject *lo = &kg->ents.live[i];
+        if (!lo->tris || !lo->tri_count) continue;
+        float lo_b[3] = {INFINITY, INFINITY, INFINITY}, hi_b[3] = {-INFINITY, -INFINITY, -INFINITY};
+        for (size_t v = 0; v < lo->tri_count * 3; v++)
+            for (int a = 0; a < 3; a++) {
+                const float f = lo->tris[v * 3 + a];
+                if (f < lo_b[a]) lo_b[a] = f;
+                if (f > hi_b[a]) hi_b[a] = f;
+            }
+        const vec3 bottom = {(lo_b[0] + hi_b[0]) * 0.5f, lo_b[1], (lo_b[2] + hi_b[2]) * 0.5f};
+        const float box_t = line_in_rect(origin, seg, bottom, (vec3) {hi_b[0] - lo_b[0], hi_b[1] - lo_b[1], hi_b[2] - lo_b[2]});
+        const int inside = origin.x >= lo_b[0] && origin.x <= hi_b[0] && origin.y >= lo_b[1] && origin.y <= hi_b[1] && origin.z >= lo_b[2] &&
+                           origin.z <= hi_b[2];
+        if (!(box_t > 0.0f && box_t <= 1.0f) && !inside) continue;
+        const char *aid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(lo->data, "aid"));
+        int state = 0;
+        const AiPartsModel *m = aid ? ai_parts_model_get(game, atoi(aid), 0, &state) : NULL;
+        if (!m) continue;
+        const double x = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "x"), 0), y = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "y"), 0);
+        const double z = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "z"), 0), ry = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "ry"), 0);
+        const double sc = json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "s"), 0) ? json_num(cJSON_GetObjectItemCaseSensitive(lo->data, "s"), 1) : 1.0;
+        const double c = cos(ry), sn = sin(ry), ox = origin.x - x, oz = origin.z - z;
+        const double o[3] = {(ox * c - oz * sn) / sc, (origin.y - y) / sc, (ox * sn + oz * c) / sc};
+        const double d[3] = {(seg.x * c - seg.z * sn) / sc, seg.y / sc, (seg.x * sn + seg.z * c) / sc};
+        double t = 0;
+        if (ai_parts_model_ray(m, o, d, &t) && t > 0.0 && t < best) best = (float) t;
+    }
+    if (best > 1.0f) return 0;
+    if (t_out) *t_out = best;
+    return 1;
+}
+
+// splashDist (:214135): from the point to the entity's footprint box (its yawed frame, footCX / CZ / HX / HZ, 0..footH)
+static double splash_dist(const KsEntity *e, const double x, const double y, const double z)
+{
+    const MapArchetype *a = e->arch;
+    const double s = sin(e->yaw), c = cos(e->yaw), dx = x - e->x, dz = z - e->z;
+    const double lx = dx * c - dz * s, lz = dx * s + dz * c;
+    const double cx = fmax(a->foot_cx - a->foot_hx, fmin(lx, a->foot_cx + a->foot_hx));
+    const double cz = fmax(a->foot_cz - a->foot_hz, fmin(lz, a->foot_cz + a->foot_hz));
+    const double cy = fmax(0.0, fmin(y - e->y, a->foot_h));
+    const double ex = lx - cx, ey = y - e->y - cy, ez = lz - cz;
+    return sqrt(ex * ex + ey * ey + ez * ez);
+}
+
+void ks_entities_splash(Game *game, const vec3 at, const float radius, const float damage, const Player *owner)
+{
+    KsGame *kg = game ? game->ks : NULL;
+    if (!kg || !server_side(kg) || !owner || !(radius > 0.0f) || !kg->ents.count) return;
+    char by[24];
+    ks_player_id(owner, by, sizeof(by));
+    const size_t n = kg->ents.count;
+    int *ids = malloc(n * sizeof(*ids));
+    if (!ids) return;
+    for (size_t i = 0; i < n; i++) ids[i] = kg->ents.items[i]->eid; // (a damage may despawn)
+    for (size_t i = 0; i < n; i++) {
+        const KsEntity *e = ent_find(kg, ids[i]);
+        if (!e || !e->active || !(e->arch->hp != 0.0f)) continue;
+        const double f = 1.0 - splash_dist(e, at.x, at.y, at.z) / radius;
+        if (f > 0.0) ent_damage(kg, ids[i], round(damage * f), by);
+    }
+    free(ids);
 }
 
 // ---------------------------------------------------------------------------

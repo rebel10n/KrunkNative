@@ -3110,11 +3110,17 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
         const Object *object = game->map->objects[i];
         if (!combat_object_shootable(object)) continue;
 
-        const float t = line_in_rect(origin, dir, object->position, object_box_size(object));
+        // v10.0.3: an entity part is its yawed box (rayVsPart), its own nd rider's shot passes (deob-10.0.3.js:195986-195989, :196604-196607)
+        float t;
+        if (!game->ks || !ks_entities_object_ray(game, object, shooter, origin, dir, &t)) t = line_in_rect(origin, dir, object->position, object_box_size(object));
         if (t <= 0.0f || t > 1.0f) continue;
 
         hit_list_push(hits, (Hit) {object, NULL, t});
     }
+    // v10.0.3 LIVE_OBJECTS: a complexCollision asset stops the ray on its model's hit mesh (rayProxy.rayDst, :212263): a hit
+    // with no object, player or AI, like the terrain's
+    float live_t;
+    if (game->ks && ks_entities_live_ray(game, origin, dir, &live_t)) hit_list_push(hits, (Hit) {NULL, NULL, live_t});
 
     if (!include_players) return;
 

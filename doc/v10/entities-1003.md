@@ -146,8 +146,7 @@ whose GLB joins the scene through `user_asset_object_added`.
   (hbS / hbH) in carryPlayers.
 - **onTopOf** is measured (grounded, feet at the top, inside the footprint) for carryPlayers and the soft zones,
   because KN keeps no onTopOf.
-- **The match seed** is the shared script's hash with the map, sent as entSeed, not `Math.random`. On the bridge, a
-  seed that arrives after the init was built is dropped, as 10.0.3 reads it in the init only.
+- **The match seed** is the shared script's hash with the map, sent as entSeed, not `Math.random`.
 - **Without `scripts.shared`** a client still places its entities from the baselines. 10.0.3 runs none of the
   entity half of game.update without hooks.
 - **The entity clock** runs on the client's frame clock instead of `Date.now()`, starts over at an INIT, and takes
@@ -156,13 +155,26 @@ whose GLB joins the scene through `user_asset_object_added`.
   (playPartClip) return false.
 - **Pitch and roll** of a body turn its part meshes but not their offsets.
 
-## 7. Not done
+## 7. Shots, splash and the bridge's "l"
 
-- Shots against entity parts: a shot stops at a solid part on both sides as at any block, but it is not 10.0.3's
-  rayVsPart (:214014: the part's yawed box at its part pose, nd riders passing through) and it does not damage the
-  entity (`entities.damage` from a hit, :196082).
-- The live assets' rayProxy (shots against a cpx asset, :212244).
-- On the bridge, the `l` slot 26 assumes a movement scheme without sendVals: the bridge sends none.
+- **Shots against entity parts** (`ks_entities_object_ray`, from `combat_trace` and `projectile_cast`): a part is its
+  yawed box at its part pose (rayVsPart :214014), and its own nd rider's shots, swings and projectiles pass
+  (shotPassesThrough :214153). A hit is `entities.damage(eid, dmg, dealer)` with the dealer's hit marker (DO_DAMAGE)
+  instead of damageObject (`game_object_hit`): a shot always (:196829), a swing or a player's projectile not while a
+  wait timer runs (:196081, :206932).
+- **A player's explosion** splashes every entity with hp: round(damage * (1 - splashDist / radius)) to its footprint
+  (`ks_entities_splash` from `game_explosion_streak`, :214135, :217057-217067).
+- **A complexCollision live asset** stops shots and projectiles on its model's hit mesh at the rest pose
+  (`ks_entities_live_ray`, `ai_parts_model_ray`; rayProxy :212244-212272), as a hit with no object, like the terrain.
+- **The bridge's "l"** carries the movement scheme's sendVals of the same ack after its 26 slots
+  (`NET_EXT_PLAYER_MOVE_VALS`; SRM's five values and tmpVel `{x, y, z}`, Vehicle's three), then the controlled entity
+  or 0 (:222397-222405).
+- **The seed on the bridge**: KN's server sends `entSeed` ahead of the ranked flag (`ks_entities_send_seed` in
+  `server/src/net.c`). The bridge builds its init once that flag is in, so the seed always reaches the init.
+
+## 8. Not done
+
+- The live assets' hit mesh keeps the AI reader's cap (120000 triangles), not loadModel's 6000.
 
 ## Tests
 
@@ -182,7 +194,9 @@ whose GLB joins the scene through `user_asset_object_added`.
   rider, the asset's `"lo"`, and a late joiner's seed / lo / e+ / ea+.
 - `ks_game_v1003_test` (`test_entity_bodies`) covers a rider carried on the server's body and predicted the same on
   the client, addCube's record and solid block, a player landing on it, delete(), the asset's triangles on both
-  sides, and a new round taking the server's objects out. `v10_translate_test` and `v10_bridge_test` cover the bridge.
+  sides, and a new round taking the server's objects out. `test_entity_shots` covers a pistol shot on a turned part
+  (rayVsPart, onEntityDamage, the hit marker), an nd rider's shot passing, splash, and a cpx asset stopping a shot.
+  `v10_translate_test` and `v10_bridge_test` cover the bridge, the sendVals in "l" and the seed in the init.
 - Headless offline run: a map with a server script, a shared script and a client script. The server spawns a
   second entity, attaches the player and adds asset 46802. The probe log shows both entities stepping and the
   player pinned at its entity plus (0, 1, 0). It also shows the client's own `"lap"` events and the server's, and the

@@ -877,6 +877,8 @@ static void net_send_init(ClientConnection *client) {
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
     net_send_game_state(client);  // v10 gameState: a joiner learns the phase now (its names follow it)
+    // v10.0.3 init syncData.entSeed ahead of the ranked flag: the v10 bridge builds its init once that flag is in
+    ks_entities_send_seed(&g_server->game, client->id);
     net_send_ranked_match(client); // v10 INIT isRanked: after the INIT, which resets the client's game
     net_send_event_index(client);  // v10 INIT eventIndex, likewise
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
@@ -2086,6 +2088,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 game_config_send(&g_server->game, client->id);
                 comp_lobby_send_all(&g_server->game, client->id);
                 net_send_social_caps(client);
+                if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT) ks_entities_send_seed(&g_server->game, client->id); // before the flag (above)
                 net_send_ranked_match(client); // the ranked flag too: an EXT peer's INIT went out before its HELLO
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }

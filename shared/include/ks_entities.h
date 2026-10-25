@@ -36,6 +36,7 @@ typedef struct {
     KsEntityPose pose;          // the committed pose (placeBody: the collision boxes)
     KsEntityPose render;        // updateVisuals' renderPose on a client (the meshes); the committed pose until then
     int frozen;
+    double hp;                  // its hp (archetype hp, less the damage taken)
     int controller;             // the controlling player's sid, -1 none
     int part_count;             // solid parts (colObjs), in the archetype's order without the soft ones
 } KsEntityView;
@@ -43,7 +44,9 @@ typedef struct {
 // ---------------------------------------------------------------- the authority (server, offline sandbox)
 
 // What a joiner needs after its INIT (getSyncData's entSeed / lo / ent / entAtt, deob-10.0.3.js:220283-220292,
-// :220401): the seed, every live object, every entity and every attachment, to `uid`.
+// :220401): the seed (ks_entities_send_seed, sent ahead of the INIT's other EXTs so the v10 bridge can put it in its
+// init), then every live object, every entity and every attachment, to `uid`.
+void ks_entities_send_seed(Game*, int uid);
 void ks_entities_send_state(Game*, int uid);
 // SYNC_PLAYER's tail (:222404-222405): the entity `player` controls as NET_EXT_ENTITY_CONTROLLED to `uid`, right
 // before its RECON; nothing when it controls none.
@@ -95,6 +98,19 @@ const float *ks_entities_live_tris(const Game*, int i, size_t *tri_count);
 int ks_entities_player_ride(Game*, Player*, const Input*, int recon);
 // shotPassesThrough (:214153): `shooter` rides entity `eid` with nd (no damage to it)
 int ks_entities_shot_passes(const Game*, const Player *shooter, int eid);
+// A shot / swing / projectile segment (origin + t * seg) against map object `object` as 10.0.3 casts it: an entity part
+// is its yawed box at its part pose (rayVsPart :214014), and its own nd rider's shots pass (*t -1). 1 when `object` is an
+// entity part (*t set: in (0, 1] a hit), 0 when it is not (the caller's own box test).
+int ks_entities_object_ray(Game*, const Object *object, const Player *shooter, vec3 origin, vec3 seg, float *t);
+// A hit on map object `object` (game_object_hit): an entity part's hit is entities.damage(eid, dmg, dealer) on the
+// authority (:196082, :196830, :206933) with the dealer's hit marker (DO_DAMAGE). 1 when `object` is an entity part.
+int ks_entities_object_damage(Game*, const Object *object, const Player *dealer, float damage);
+// A live asset with complexCollision stops a shot / projectile segment on its model's hit mesh (rayProxy, :212244): the
+// nearest t in (0, 1], 0 none.
+int ks_entities_live_ray(Game*, vec3 origin, vec3 seg, float *t);
+// game.explosion (:217057-217067): every entity with hp within the radius of its footprint (splashDist) takes
+// round(damage * (1 - dist / radius)) from the owner, a player.
+void ks_entities_splash(Game*, vec3 at, float radius, float damage, const Player *owner);
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,7 @@
 #include <prop_hunt.h> // Prop Hunt: the Seeker penalty
 #include <ai.h>
 #include <ks_game.h> // v10.0.3 onObjectDamage / onObjectDestroyed
+#include <ks_entities.h> // v10.0.3 entity parts: entities.damage
 #include "modes/mode_internal.h"
 #include "triggers_internal.h"
 #include <math.h>
@@ -260,6 +261,13 @@ void game_set_gate(Game *game, Object *object, const int active) {
 // damage needs a positive amount and no blocking waitTimer; a projectile also needs its owner).
 void game_object_hit(Game *game, Object *object, Player *dealer, const float damage, const int thrown_melee, const int kind) {
     if (!game_is_authority(game) || !object) return;
+    // v10.0.3 entities: a hit on an entity part is entities.damage(eid, dmg, dealer) with the dealer's DO_DAMAGE, not
+    // damageObject (a shot always, :196829; a swing or a player's projectile not while a wait timer runs, :196081, :206932)
+    if (object->dyn && game->ks) {
+        const int waiting = kind != GAME_HIT_SHOT && trigger_wait_blocks(game);
+        const int may = !waiting && (kind != GAME_HIT_PROJECTILE || dealer);
+        if (ks_entities_object_damage(game, object, may ? dealer : NULL, may ? damage : 0.0f)) return;
+    }
     // Prop Hunt: a Seeker's shot or swing on a prop object of the map costs it 10 health (:172554, :173031)
     if (dealer && (kind == GAME_HIT_SHOT || kind == GAME_HIT_MELEE)) game_prop_seeker_hit(game, dealer, object);
     const int can_damage = damage > 0.0f && (kind != GAME_HIT_PROJECTILE || dealer); // projectile: owner.isPlayer && I > 0
