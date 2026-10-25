@@ -13,7 +13,8 @@
 //   - v10.0.3 material extras (tools/gltf_test/env_extras.gltf): env (the opt-in reflections) and noFog;
 //   - v10.0.3 weapon altSkin remodels (viewer_weapon_alt_skin): the Nova Pump / Semi / Uzi / Alien and the Cupids
 //     Blaster load their model and texture, and the upgraded ones play the altSkin video on the remodel; the shot
-//     sound a remodel plays (weapon.sound_<mid>, noSnd, upgraded, blast) and getSkinForLoadout.
+//     sound a remodel plays (weapon.sound_<mid>, noSnd, upgraded, blast) and getSkinForLoadout; a custom studio skin's
+//     model / texture keys and files (user-assets/skins/<_id>/).
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -30,6 +31,12 @@
 #include <user_asset_path.h>
 #include "../../client/src/viewer/viewer_store.h"
 #include <math.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -525,9 +532,86 @@ static void check_skin_sounds(void) {
     CHECK(!viewer_skin_inspect_sound(viewer_skin(887), name, sizeof(name), &loop), "inspect: none");
     // a custom skin's sound files are user assets (userAssetsUrl("skins/" + _id + ...), deob:225205)
     CHECK(user_asset_rel_ok("skins/64f0c1a2b3/sound.mp3") && user_asset_rel_ok("skins/64f0c1a2b3/sound_swap.mp3") &&
-          user_asset_rel_ok("skins/a-b_c/sound_inspect.mp3") && !user_asset_rel_ok("skins/64f0/texture.png") &&
+          user_asset_rel_ok("skins/a-b_c/sound_inspect.mp3") && !user_asset_rel_ok("skins/64f0/thumbnail.png") &&
           !user_asset_rel_ok("skins/../sound.mp3") && !user_asset_rel_ok("skins//sound.mp3") && user_asset_rel_ok("30431/sound.mp3"),
           "custom skin sounds as user assets");
+}
+
+static void make_dir(const char *path) {
+#ifdef _WIN32
+    _mkdir(path);
+#else
+    mkdir(path, 0755);
+#endif
+}
+
+static void remove_dir(const char *path) {
+#ifdef _WIN32
+    _rmdir(path);
+#else
+    rmdir(path);
+#endif
+}
+
+// A custom studio skin's model and texture (deob-10.0.3.js:193943-193944, :194610-194611, :194709-194710): user assets
+// skins/<_id>/model and skins/<_id>/texture (a weapon's texture: skins/<skin index>/texture), loaded from the user-asset
+// tree (cosmetic_asset_path); a fixture copy of a weapon model and texture stands in for the studio's files.
+static void check_custom_skin_assets(void) {
+    ViewerSkin hat = {.name = "Studio Hat", .type = 1, .id = -1, .pat = -1, .mid = -1, .mid_t = -1, .emiss = -1, .color = -1,
+                      .flags = VS_CUSTOM_MODEL | VS_CUSTOM_TEXTURES, .custom_id = "kntestcustom"};
+    char model[128], texture[160];
+    cosmetic_asset_keys(&hat, model, sizeof(model), texture, sizeof(texture));
+    CHECK(!strcmp(model, "user-assets/skins/kntestcustom/model") && !strcmp(texture, "user-assets/skins/kntestcustom/texture"),
+          "custom hat keys (%s, %s)", model, texture);
+    ViewerSkin knife = hat;
+    knife.type = 3;
+    knife.flags = VS_CUSTOM_TEXTURES;
+    viewer_melee_keys(&knife, model, sizeof(model), texture, sizeof(texture));
+    CHECK(!strcmp(model, "melee/melee_0") && !strcmp(texture, "user-assets/skins/kntestcustom/texture"),
+          "custom melee: the knife model, the custom texture (%s, %s)", model, texture);
+    hat.flags = VS_CUSTOM_MODEL;
+    cosmetic_asset_keys(&hat, model, sizeof(model), texture, sizeof(texture));
+    CHECK(!strcmp(texture, "skins/kntestcustom/model"), "custom model without customTextures: src as the texture, from textures/ (%s)", texture);
+    char *ua = cosmetic_asset_path("models", "user-assets/skins/kntestcustom/model", "obj");
+    char *regular = cosmetic_asset_path("models", "hats/hat_1", "obj");
+    const char *base = assets_path();
+    CHECK(ua && regular && !strcmp(ua + strlen(base), "user-assets/skins/kntestcustom/model.obj") && !strcmp(regular + strlen(base), "models/hats/hat_1.obj"),
+          "cosmetic_asset_path (%s, %s)", ua ? ua : "-", regular ? regular : "-");
+    CHECK(user_asset_rel_ok("skins/kntestcustom/model.obj") && user_asset_rel_ok("skins/10000009/texture.png") &&
+          user_asset_rel_ok("skins/x/texture_e.png") && user_asset_rel_ok("skins/x/model.glb") && !user_asset_rel_ok("skins/x/model.fbx"),
+          "custom skin models and textures are user assets");
+    CHECK(viewer_skin(812) && (viewer_skin(812)->flags & VS_FLIP_ANIM) && !(viewer_skin(887)->flags & VS_FLIP_ANIM), "flipAnim: Steelfang 812");
+
+    // the fixture: weapon_12_5.obj and weapon_12_5.png as the custom skin's model and texture
+    char *dir = concat(assets_path(), "user-assets/skins/kntestcustom");
+    char *src_model = concat(assets_path(), "models/weapons/weapon_12_5.obj"), *src_tex = concat(assets_path(), "textures/weapons/weapon_12_5.png");
+    char *tex_path = cosmetic_asset_path("textures", "user-assets/skins/kntestcustom/texture", "png");
+    unsigned char *data = NULL;
+    size_t len = 0;
+    int wrote = 0;
+    if (dir && src_model && src_tex && ua && tex_path) {
+        char *parent = concat(assets_path(), "user-assets/skins");
+        if (parent) make_dir(parent);
+        free(parent);
+        make_dir(dir);
+        FILE *f;
+        if (!read_file(src_model, &data, &len) && (f = fopen(ua, "wb"))) wrote += fwrite(data, 1, len, f) == len, fclose(f);
+        free(data);
+        data = NULL;
+        if (!read_file(src_tex, &data, &len) && (f = fopen(tex_path, "wb"))) wrote += fwrite(data, 1, len, f) == len, fclose(f);
+        free(data);
+    }
+    Geometry *geometry = wrote == 2 ? load_obj_model(ua, 0) : NULL;
+    const unsigned tex = wrote == 2 ? load_texture(tex_path) : 0;
+    CHECK(wrote == 2 && geometry && geometry->index_count > 300 && tex && tex != texture_checker(), "the custom skin's model and texture load (%d)",
+          geometry ? geometry->index_count : -1);
+    if (ua) remove(ua);
+    if (tex_path) remove(tex_path);
+    if (dir) remove_dir(dir);
+    char *skins_dir = concat(assets_path(), "user-assets/skins");
+    if (skins_dir) remove_dir(skins_dir); // only when the fixture made it (a non-empty folder stays)
+    free(skins_dir);
+    free(dir), free(src_model), free(src_tex), free(tex_path), free(ua), free(regular);
 }
 
 int main(int argc, char **argv) {
@@ -572,6 +656,7 @@ int main(int argc, char **argv) {
     check_weapon_remodels();
     check_shot_sounds();
     check_skin_sounds();
+    check_custom_skin_assets();
     check_meshopt_models();
     check_material_extras();
 

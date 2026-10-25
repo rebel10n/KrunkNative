@@ -260,8 +260,14 @@ int viewer_skin_tex_truthy(const ViewerSkin *skin) {
 void viewer_melee_keys(const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
     const int id = skin && skin->id > 0 ? skin->id : 0;
     snprintf(model, model_n, "melee/melee_%d", id);
-    if (skin && (skin->flags & VS_PAT) && skin->tex) snprintf(texture, texture_n, "%s", skin->tex);
+    // a custom skin (generateMeshes' melee, deob-10.0.3.js:194610-194611): customModel src "skins/<_id>/model",
+    // customTextures texSrc "skins/<_id>/texture", user assets (assetModel / assetTex, :194601-194602)
+    const int custom = skin && skin->custom_id;
+    if (custom && (skin->flags & VS_CUSTOM_MODEL)) snprintf(model, model_n, VIEWER_USER_ASSET_KEY "skins/%s/model", skin->custom_id);
+    if (custom && (skin->flags & VS_CUSTOM_TEXTURES)) snprintf(texture, texture_n, VIEWER_USER_ASSET_KEY "skins/%s/texture", skin->custom_id);
+    else if (skin && (skin->flags & VS_PAT) && skin->tex) snprintf(texture, texture_n, "%s", skin->tex);
     else if (skin && viewer_skin_tex_truthy(skin)) snprintf(texture, texture_n, "melee/melee_%d_%s", id, skin->tex);
+    else if (custom && (skin->flags & VS_CUSTOM_MODEL)) snprintf(texture, texture_n, "skins/%s/model", skin->custom_id); // src, from textures/
     else snprintf(texture, texture_n, "%s", model);
 }
 

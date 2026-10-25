@@ -99,6 +99,7 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
         {"glow", VS_GLOW}, {"sameGlow", VS_SAME_GLOW}, {"noEmis", VS_NO_EMIS}, {"trans", VS_TRANS}, {"wire", VS_WIRE},
         {"blocked", VS_BLOCKED}, {"is3D", VS_IS_3D}, {"flip", VS_FLIP}, {"doubleSide", VS_DOUBLE_SIDE}, {"lowR", VS_LOW_R},
         {"noHead", VS_NO_HEAD}, {"noLegs", VS_NO_LEGS}, {"rgb", VS_RGB}, {"noSpin", VS_NO_SPIN}, {"free", VS_FREE},
+        {"customModel", VS_CUSTOM_MODEL}, {"customTextures", VS_CUSTOM_TEXTURES}, {"flipAnim", VS_FLIP_ANIM},
         {"hasAnim", VS_HAS_ANIM},
     };
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++)

@@ -498,27 +498,21 @@ static Mesh *player_prop_mesh(const int prop_id) {
 // ---------------------------------------------------------------- store skins on weapons
 
 static Geometry *skin_model(const char *key) {
-    char rel[192];
-    snprintf(rel, sizeof(rel), "models/%s.obj", key);
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("models", key, "obj"); // a custom skin's key is under user-assets/
     Geometry *geometry = path ? load_obj_model(path, 0) : NULL;
     free(path);
     return geometry;
 }
 
 static unsigned int skin_texture(const char *key) {
-    char rel[256];
-    snprintf(rel, sizeof(rel), "textures/%s.png", key);
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("textures", key, "png");
     const unsigned int texture = path ? load_texture(path) : 0;
     free(path);
     return texture;
 }
 
 static int skin_texture_exists(const char *key) {
-    char rel[256];
-    snprintf(rel, sizeof(rel), "textures/%s.png", key);
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("textures", key, "png");
     if (!path) return 0;
     ensure_asset_file(path);
     FILE *file = fopen(path, "rb");
@@ -532,6 +526,12 @@ static int skin_texture_exists(const char *key) {
 static int player_slot_skin_source(const Player *player, const int slot) {
     const int index = viewer_loadout_skin(player->skins.primary, player->skins.secondary, player->loadout[slot]);
     return index < 0 ? -1 : index == player->skins.primary ? 0 : 1;
+}
+
+// getSkinForLoadout(slot)'s store index, -1 none (a custom skin's texture folder: weapon_skin_keys)
+static int player_slot_skin_index(const Player *player, const int slot) {
+    const int source = player_slot_skin_source(player, slot);
+    return source < 0 ? -1 : source ? player->skins.secondary : player->skins.primary;
 }
 
 // generateMeshes `ae`: game.store.skins[weapon.melee ? meleeIndex : getSkinForLoadout(slot)], {} (NULL) when
@@ -757,12 +757,19 @@ static void fx_gltf_fini(GltfInstance *model) {
 }
 
 // The weapon loadMesh src / texSrc: "weapons/<src>[_<mid>]", then UTILS.getReModel (a remodel), ae.tex,
-// "weapons/skins/<src>_<id>", else the model's own texture.
-static void weapon_skin_keys(const Weapon *weapon, const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
-    if (skin && skin->mid >= 0) snprintf(model, model_n, "weapons/%s_%d", weapon->src, skin->mid);
+// "weapons/skins/<src>_<id>", else the model's own texture. A custom skin (deob-10.0.3.js:194709-194710): customModel src
+// "skins/<_id>/model", customTextures texSrc "skins/<skin index>/texture" (getSkinForLoadout's index, not _id), user
+// assets (assetModel / assetTex, :194700-194701); skin_index -1 = none.
+static void weapon_skin_keys(const Weapon *weapon, const ViewerSkin *skin, const int skin_index, char *model, const size_t model_n, char *texture,
+                             const size_t texture_n) {
+    if (skin && skin->custom_id && (skin->flags & VS_CUSTOM_MODEL)) snprintf(model, model_n, VIEWER_USER_ASSET_KEY "skins/%s/model", skin->custom_id);
+    else if (skin && skin->mid >= 0) snprintf(model, model_n, "weapons/%s_%d", weapon->src, skin->mid);
     else snprintf(model, model_n, "weapons/%s", weapon->src);
 
     if (!skin) snprintf(texture, texture_n, "%s", model);
+    else if ((skin->flags & VS_CUSTOM_TEXTURES) && skin_index >= 0) snprintf(texture, texture_n, VIEWER_USER_ASSET_KEY "skins/%d/texture", skin_index);
+    else if (skin->custom_id && (skin->flags & VS_CUSTOM_MODEL) && skin->mid < 0 && !viewer_skin_tex_truthy(skin) && skin->id < 0)
+        snprintf(texture, texture_n, "skins/%s/model", skin->custom_id); // no texSrc: src from textures/ (getMat, deob:232058)
     else if (skin->mid >= 0) snprintf(texture, texture_n, "weapons/weapon_%d_%d", skin->weapon, skin->mid_t > 0 ? skin->mid_t : skin->mid);
     else if (viewer_skin_tex_truthy(skin)) snprintf(texture, texture_n, "%s", skin->tex);
     else if (skin->id >= 0) snprintf(texture, texture_n, "weapons/skins/%s_%d", weapon->src, skin->id);
@@ -777,9 +784,7 @@ static void weapon_skin_keys(const Weapon *weapon, const ViewerSkin *skin, char 
 static Mesh *gltf_skin_carrier(const ViewerSkin *skin, const char *model_key, GltfInstance **out) {
     *out = NULL;
     if (!skin || !(skin->flags & VS_HAS_ANIM)) return NULL;
-    char rel[192];
-    snprintf(rel, sizeof(rel), "models/%s.%s", model_key, skin->file_ext ? skin->file_ext : "gltf");
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("models", model_key, skin->file_ext ? skin->file_ext : "gltf");
     GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), skin->anim_s) : NULL;
     free(path);
     if (!instance) return NULL;
@@ -799,9 +804,7 @@ static Mesh *gltf_skin_carrier(const ViewerSkin *skin, const char *model_key, Gl
 // hasAnim skin whose GLTF model loads (cached by gltf_model_load)
 static int gltf_skin_available(const ViewerSkin *skin, const char *model_key) {
     if (!skin || !(skin->flags & VS_HAS_ANIM)) return 0;
-    char rel[192];
-    snprintf(rel, sizeof(rel), "models/%s.%s", model_key, skin->file_ext ? skin->file_ext : "gltf");
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("models", model_key, skin->file_ext ? skin->file_ext : "gltf");
     const int ok = path && gltf_model_load(path) != NULL;
     free(path);
     return ok;
@@ -836,11 +839,9 @@ static int player_weapon_skin_files_ready(const Player *player) {
         const ViewerSkin *skin = player_slot_look(player, i, weapon, &alt); // the store skin or the altSkin remodel
         if (!skin) continue;
         char model[128], texture[192];
-        weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
+        weapon_skin_keys(weapon, skin, alt ? -1 : player_slot_skin_index(player, i), model, sizeof(model), texture, sizeof(texture));
         if (gltf_skin_available(skin, model)) return 1;
-        char rel[192], *path;
-        snprintf(rel, sizeof(rel), "models/%s.obj", model);
-        path = concat(assets_path(), rel);
+        char *path = cosmetic_asset_path("models", model, "obj");
         FILE *file = path ? fopen(path, "rb") : NULL;
         if (file) fclose(file);
         free(path);
@@ -990,9 +991,7 @@ static struct GltfInstance *generate_item_model(const ViewerSkin *item, const ve
     if (!(item->flags & VS_HAS_ANIM)) return NULL;
     char model[128], texture[160];
     cosmetic_asset_keys(item, model, sizeof(model), texture, sizeof(texture));
-    char rel[192];
-    snprintf(rel, sizeof(rel), "models/%s.%s", model, item->file_ext ? item->file_ext : "gltf");
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("models", model, item->file_ext ? item->file_ext : "gltf");
     GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), item->anim_s > 0.0f ? item->anim_s : 1.0f) : NULL;
     free(path);
     if (!instance) return NULL;
@@ -1512,14 +1511,14 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const ViewerAltSkin *alt;
                     const ViewerSkin *skin = player_slot_look(player, i, weapon, &alt);
                     char model[128], texture[192];
-                    weapon_skin_keys(weapon, skin, model, sizeof(model), texture, sizeof(texture));
+                    weapon_skin_keys(weapon, skin, alt ? -1 : player_slot_skin_index(player, i), model, sizeof(model), texture, sizeof(texture));
                     // hasAnim: a GLTF remodel, one instance per hand below (empty_geometry marks it)
                     Geometry *skin_geo = gltf_skin_available(skin, model) ? gltf_empty_geometry() : skin_model(model);
                     if (!skin_geo && skin) { // a remodel this build lacks: the plain weapon
                         player_mesh->weapon_skin_pending = 1; // not on disk yet (or never): rebuilt when it is
                         skin = NULL;
                         alt = NULL;
-                        weapon_skin_keys(weapon, NULL, model, sizeof(model), texture, sizeof(texture));
+                        weapon_skin_keys(weapon, NULL, -1, model, sizeof(model), texture, sizeof(texture));
                         skin_geo = skin_model(model);
                     }
                     gun_skin = skin;
@@ -1760,8 +1759,8 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float weapon_ads_off_y = VM_SETTING("weaponADSOffY", settings->weapon_ads_off_y);
 #undef VM_SETTING
 
-    // updateMsh (deob-10.0.3.js:193600): thirdPerson, a camType but FPS or the player's class camOffX / Y / Z (v10
-    // reads the local controls' camType for every player, KrunkNative the player's own class)
+    // updateMsh (deob-10.0.3.js:193600): thirdPerson, the local controls' camType but FPS (for every player) or the
+    // player's own class camOffX / Y / Z
     const int third_person = player_mesh->kn_third_person || class_camera_mesh_third_person(player);
     const float aim_val_mlt = animate_aim && player->is_you ? player->aim_val : 0.0f;
     const float aim_mlt = player->weapon->animate_while_aiming ? 0.0f : aim_val_mlt;

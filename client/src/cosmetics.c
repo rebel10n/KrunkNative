@@ -14,6 +14,19 @@ void cosmetic_asset_keys(const ViewerSkin *item, char *model, const size_t model
     snprintf(model, model_n, "%s%d", prefix, item->id > 0 ? item->id : 0);
     if (viewer_skin_tex_truthy(item)) snprintf(texture, texture_n, "%s_%s", model, item->tex);
     else snprintf(texture, texture_n, "%s", model);
+    // a custom skin (generateMeshData, deob-10.0.3.js:193943-193944): customModel src "skins/<_id>/model", customTextures
+    // texSrc "skins/<_id>/texture", both user assets (assetModel / assetTex, :193975-193976)
+    if (item->custom_id && (item->flags & VS_CUSTOM_MODEL)) snprintf(model, model_n, VIEWER_USER_ASSET_KEY "skins/%s/model", item->custom_id);
+    if (item->custom_id && (item->flags & VS_CUSTOM_TEXTURES)) snprintf(texture, texture_n, VIEWER_USER_ASSET_KEY "skins/%s/texture", item->custom_id);
+    // no texSrc: loadMesh takes src as the texture, and without assetTex from textures/ (getMat, deob:232058, :231924)
+    else if (item->custom_id && (item->flags & VS_CUSTOM_MODEL) && !viewer_skin_tex_truthy(item)) snprintf(texture, texture_n, "skins/%s/model", item->custom_id);
+}
+
+char *cosmetic_asset_path(const char *dir, const char *key, const char *ext) {
+    char rel[320];
+    if (!strncmp(key, VIEWER_USER_ASSET_KEY, sizeof(VIEWER_USER_ASSET_KEY) - 1)) snprintf(rel, sizeof(rel), "%s.%s", key, ext);
+    else snprintf(rel, sizeof(rel), "%s/%s.%s", dir, key, ext);
+    return concat(assets_path(), rel);
 }
 
 int cosmetics_attach_index(const int primary_skin, const int attach_pick) {

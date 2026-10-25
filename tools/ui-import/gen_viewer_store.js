@@ -54,6 +54,7 @@ const rows = store.skins.map((s, i) => {
   // pool of a wheel without limType / limGroup / tag (illicit is v3.1.1's)
   flag(s.limited || s.illicit || s.limT || s.blackM || s.opensea || s.limG, 'VS_NOT_IN_WHEEL');
   flag(s.free, 'VS_FREE'); flag(s.hasAnim, 'VS_HAS_ANIM');
+  flag(truthy(s.flipAnim), 'VS_FLIP_ANIM'); // wInspect's melee_equip (deob-10.0.3.js:195523)
   const fields = [
     `.name = ${cstr(s.name)}`,
     `.type = ${num(s.type, 0)}`, `.weapon = ${num(s.weapon, 0)}`, `.id = ${typeof s.id === 'string' && num(s.id, null) === null ? -1 : num(s.id, -1)}`,

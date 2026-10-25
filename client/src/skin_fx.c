@@ -4,6 +4,7 @@
 #include <skin_video.h>
 #include <gltf.h>
 #include "viewer/viewer_store.h"
+#include <cosmetics.h> // cosmetic_asset_path: a custom skin's user-asset keys
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,9 +54,7 @@ static struct {
 // ---------------------------------------------------------------- helpers
 
 static unsigned int fx_texture(const char *key) {
-    char rel[256];
-    snprintf(rel, sizeof(rel), "textures/%s.png", key);
-    char *path = concat(assets_path(), rel);
+    char *path = cosmetic_asset_path("textures", key, "png"); // a custom skin's "_e" glow map is under user-assets/
     if (!path) return 0;
     ensure_asset_file(path);
     FILE *file = fopen(path, "rb");

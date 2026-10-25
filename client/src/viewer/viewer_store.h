@@ -26,6 +26,9 @@ enum {
     VS_NOT_IN_WHEEL = 1 << 16, // limited / blackM / opensea / limT / limG: never in a prize wheel's pool (getSpnItems)
     VS_FREE = 1 << 17,       // free: labelled "[Free]" instead of its rarity (v7 viewer lists)
     VS_HAS_ANIM = 1 << 18,   // hasAnim: an animated GLTF model "<src>.<file_ext || gltf>" (render.js loadAnimMesh)
+    VS_CUSTOM_MODEL = 1 << 19,    // a custom skin's customModel: its model is user asset skins/<_id>/model (assetModel)
+    VS_CUSTOM_TEXTURES = 1 << 20, // customTextures: its texture is user asset skins/<_id>/texture (assetTex)
+    VS_FLIP_ANIM = 1 << 21,  // flipAnim: a melee that spins on inspect / equip (wInspect's melee_equip, deob-10.0.3.js:195523)
 };
 
 typedef struct ViewerSkin {
@@ -98,6 +101,11 @@ typedef struct ViewerSkin {
 // game.customSkins ids start here (deob-10.0.3.js:20133, iïìíiîï = 10000000): a custom game's studio skins (its
 // customsData.customSkins, deob:256798-256830, skinManager.setSkin), defined like an "sdc" (viewer_skin_define)
 #define VIEWER_CUSTOM_SKIN_MIN 10000000
+// A model / texture key under the user-asset tree instead of models/ / textures/: "user-assets/skins/<folder>/<file>"
+// is assets/user-assets/skins/<folder>/<file>.<ext> (cosmetic_asset_path), Krunker's userAssetsUrl("skins/...") (deob:233093,
+// :231924)
+#define VIEWER_USER_ASSET_KEY "user-assets/"
+
 
 enum {
     VS2_NO_BODY = 1 << 0,        // body: no shirt on the body cube (genBody)

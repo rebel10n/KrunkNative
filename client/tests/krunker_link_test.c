@@ -709,6 +709,18 @@ static void test_fx(void) {
     }
     clear();
 
+    // "s" of another player's custom studio skin shot: playSound("skins/" + _id, ..., isAsset customSound) (deob-10.0.3.js:196407)
+    // names the user asset; the 64-byte sound names carry it (a 24-hex _id: 36 bytes)
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_STR("skins/64f0c1a2b3c4d5e6f7a8b9c0"), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2),
+                                       KRUNKER_V_NUM(3), KRUNKER_V_NUM(0.85), KRUNKER_V_NUM(1.02), KRUNKER_V_NIL, KRUNKER_V_NIL,
+                                       KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 11);
+    {
+        READ_IN(NetSoundPacket, a, SOUND, 0);
+        CHECK(a_p && !strcmp(a.name, "asset:skins/64f0c1a2b3c4d5e6f7a8b9c0") && a.uid == 7 && fabsf(a.volume - 0.85f) < 1e-6f,
+              "s: another player's custom skin shot, the user asset (%s)", a_p ? a.name : "-");
+    }
+    clear();
+
     // "so" 2D / 3D, "sso"
     feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_STR("cheer_0"), KRUNKER_V_NUM(0.5), KRUNKER_V_NUM(1)}, 3);
     feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_NUM(0.4), KRUNKER_V_NUM(0), KRUNKER_V_NUM(4), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6),

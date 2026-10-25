@@ -17,10 +17,13 @@ static int digits(const char *s, const size_t n) {
     return 1;
 }
 
-// A map studio's custom skin's sounds (v10.0.3: the shot "skins/" + _id, the swap ".../sound_swap", the inspect
-// ".../sound_inspect", deob-10.0.3.js:196407, :198265, :195533, played from userAssetsUrl, :225205):
-// skins/<_id>/sound.mp3, sound_swap.mp3, sound_inspect.mp3 (_id: letters, digits, '_' or '-')
-static int custom_skin_sound(const char *rel) {
+// A map studio's custom skin's files under skins/<folder>/ (folder: its _id, or for a weapon's texture its skin index;
+// letters, digits, '_' or '-'): the model (customModel src "skins/" + _id + "/model" + fileExt, deob-10.0.3.js:194709,
+// :233093), the texture and its glow map (customTextures texSrc ".../texture" + "_e", :194710, :231924), and the shot /
+// swap / inspect sounds ("skins/" + _id, ".../sound_swap", ".../sound_inspect", :196407, :198265, :195533, :225205)
+static int custom_skin_file(const char *rel) {
+    static const char *const files[] = {"model.obj", "model.gltf", "model.glb", "texture.png", "texture_e.png",
+                                        "sound.mp3", "sound_swap.mp3", "sound_inspect.mp3"};
     if (strncmp(rel, "skins/", 6) != 0) return 0;
     const char *id = rel + 6, *slash = strchr(id, '/');
     if (!slash || slash == id || slash - id > 64) return 0;
@@ -28,12 +31,14 @@ static int custom_skin_sound(const char *rel) {
         const int ok = (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || *c == '_' || *c == '-';
         if (!ok) return 0;
     }
-    return !strcmp(slash + 1, "sound.mp3") || !strcmp(slash + 1, "sound_swap.mp3") || !strcmp(slash + 1, "sound_inspect.mp3");
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
+        if (!strcmp(slash + 1, files[i])) return 1;
+    return 0;
 }
 
 int user_asset_rel_ok(const char *rel) {
     if (!rel) return 0;
-    if (custom_skin_sound(rel)) return 1;
+    if (custom_skin_file(rel)) return 1;
     const char *slash = strchr(rel, '/');
     if (!slash) return 0;
     const size_t n = (size_t) (slash - rel);

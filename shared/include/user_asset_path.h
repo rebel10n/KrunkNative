@@ -9,7 +9,8 @@
 // loadModPack): texture.png, thumb.png, model.obj / .png / _e.png / _l.png / _n.png / _p.png (a paint mask) / .gltf /
 // .glb, sound.mp3, video.mp4, data.json, mod.zip; and video.mp4.knv, the video's frames in KrunkNative's
 // sidecar format (knv.h), which only the brain's mirror makes (KrunkNative has no video decoder). A map studio's custom
-// skin keeps its sounds under skins/<_id>/: sound.mp3, sound_swap.mp3, sound_inspect.mp3.
+// skin keeps its files under skins/<_id>/ (a weapon's texture under skins/<skin index>/): model.obj / .gltf / .glb,
+// texture.png, texture_e.png, sound.mp3, sound_swap.mp3, sound_inspect.mp3.
 #include <stddef.h>
 
 #define USER_ASSET_HOST_URL "https://user-assets.krunker.io/"

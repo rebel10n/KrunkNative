@@ -93,6 +93,16 @@ int main(void) {
           !strcmp(name, "weapon_6") && !viewer_skin_swap_sound(NULL, 0.0f, viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 8), name, sizeof(name), &volume),
           "a custom skin without its sounds plays the weapon's (a numeric _id as text)");
 
+    // a custom skin's customModel / customTextures (deob-10.0.3.js:194601-194611) and a store knife's flipAnim
+    CHECK(define(VIEWER_CUSTOM_SKIN_MIN + 9, "{\"name\":\"Studio Knife\",\"type\":3,\"_id\":\"k9\",\"customModel\":true,"
+                                             "\"customTextures\":true,\"flipAnim\":true}"), "a custom knife defined");
+    const ViewerSkin *k = viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 9);
+    char model[128], texture[128];
+    viewer_melee_keys(k, model, sizeof(model), texture, sizeof(texture));
+    CHECK(k && (k->flags & (VS_CUSTOM_MODEL | VS_CUSTOM_TEXTURES | VS_FLIP_ANIM)) == (VS_CUSTOM_MODEL | VS_CUSTOM_TEXTURES | VS_FLIP_ANIM) &&
+          !strcmp(model, "user-assets/skins/k9/model") && !strcmp(texture, "user-assets/skins/k9/texture"),
+          "the custom knife's model / texture are its user assets (%s, %s)", model, texture);
+
     printf("skin_define_test: %d/%d passed\n", g_checks - g_failures, g_checks);
     return g_failures ? 1 : 0;
 }
