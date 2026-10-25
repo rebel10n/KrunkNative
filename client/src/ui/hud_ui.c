@@ -3755,7 +3755,8 @@ void hud_ui_end_screen_tab(const char *tab) {
 // f1912 + f1913 + f1915 + f1916: the results after config.endAnim.
 static void hud_end_results(const Client *client) {
     dom_display("endInfo", "block");
-    dom_display("infoHolder", ""); // the results' footer: #infoHolder style="" in the v10 results capture (ingame-endscreen-late)
+    // no infoHolder here: the END's hideUI hid it in game (hud_ui_show_end_screen). The
+    // direct-results path (endscreen.results, ingame-endscreen-late) keeps its own footer.
     dom_style("endUI", "background-color", "transparent");
     dom_display("victorySub", "");              // f1913
     hud_end_title_hide();                       // overlay.vicTitle.show = false
@@ -3880,6 +3881,9 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         hud_endscreen_v10_begin(client, ui->end_start_ms); // showEndScreen: the raid roll and the held items
         dom_style("endUI", "background-color", "");
         hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
+        // UI.showEndScreen -> hideUI(false) -> toggleGameUI(false): infoHolder is hidden in game
+        // (deob-10.0.3.js:180800), during the title and the results alike.
+        if (hud_in_game(client)) dom_display("infoHolder", "none");
         return;
     }
     hud_end_timer_text();

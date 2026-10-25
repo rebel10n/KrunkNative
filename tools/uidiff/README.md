@@ -452,9 +452,17 @@ and the note says which.
   bar and the download button are intentional and shift every region. The footer's counters are ported
   (2026-10-25): the brain answers `socialPlayerCount` and `editorPlayerCount` besides `playerCount`,
   and editor windows heartbeat `/api/editor/presence`; the scenarios' fixed list has no counts to show.
-- **End screens**: at 200 ms the victory title is ~8 % larger than the reference
-  (`seq-end-vic@200`), `seq-end-results` counts down 00:20 where the reference has 00:19 and its
-  timing entry is 135.9 ms late. Real animation/timing differences in the engine, not baselines.
+- **End screens**: fixed 2026-10-25. The signup banner no longer moves down to keep a 42 px gap
+  under the Double XP button when the button is already above it (v10 keeps its 850 px place unless
+  the card reaches it), and the END hides `#infoHolder` in game during the title and the results
+  (the direct-results path keeps its footer). `seq-end-results` passes, timing 4.7 ms (was 135.9).
+  `seq-end-vic@200` is pending (regions/seq-end-vic.json): the reference frame is exactly one
+  vicTitle update ahead (scale 1.5182 / opacity 0.6771 vs KN's 1.6589 / 0.6250) while 100 ms and
+  300 ms match, so the capture had an extra rAF between 100 and 200. KN's formula is identical to
+  v10.0.3's (deob-10.0.3.js:180483-180505). The 00:20 vs 00:19 countdown at 5000 ms is the same
+  reference-tick artifact (the offline sandbox ticks 16.7 ms per rAF, the scenario 1000/60 ms);
+  at 5500 ms and 7000 ms the countdowns agree. Re-capturing `capture-v10-seq.js` currently fails
+  ("the v10 sandbox did not start"), so the reference could not be regenerated here.
 - **Battle Pass** (`rewards-bp-home`, `rewards-bp-vip`, `rewards-bp-chal`): the window renders
   "Loading Battle Pass" because the scenarios have no battle-pass data source. They need a fixture
   or a brain stub, not a renderer change.

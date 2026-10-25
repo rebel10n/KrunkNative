@@ -187,12 +187,17 @@ void hud_v10_end_signup_place(void) {
         if (html_dom_get_rect(btn, &r_btn)) button_bottom = r_btn.y + r_btn.h;
     }
     const double half = html_dom_offset_height(box) / 2.0; // translate(-50%, -50%)
-    // v10's gap under the button, shrunk to fit the window, and never above v10's place
-    double visual = button_bottom + V10_SIGNUP_GAP * scale;
-    if (visual > limit) visual = limit;
-    if (visual < button_bottom) visual = button_bottom;
     const double v10_visual = r_ui.y + (V10_SIGNUP_TOP - half) * scale;
-    if (visual < v10_visual) visual = v10_visual;
+    // v10 leaves the banner at 850 while the button is above it: the 42 px gap is only kept when
+    // the card (the vote cards push it down) would otherwise reach the banner, not whenever the
+    // gap is smaller than that. seq-end-results: the button's bottom is 3 px above the banner and
+    // v10 keeps its place (KN used to move it down by the gap).
+    double visual = v10_visual;
+    if (button_bottom > v10_visual) {
+        visual = button_bottom + V10_SIGNUP_GAP * scale;
+        if (visual > limit) visual = limit;
+        if (visual < button_bottom) visual = button_bottom;
+    }
     const double top = (visual - r_ui.y) / scale + half; // the css top: the box's centre (layout px)
     char css[32];
     snprintf(css, sizeof(css), "%.2fpx", top);
