@@ -463,9 +463,13 @@ and the note says which.
   reference-tick artifact (the offline sandbox ticks 16.7 ms per rAF, the scenario 1000/60 ms);
   at 5500 ms and 7000 ms the countdowns agree. Re-capturing `capture-v10-seq.js` currently fails
   ("the v10 sandbox did not start"), so the reference could not be regenerated here.
-- **Battle Pass** (`rewards-bp-home`, `rewards-bp-vip`, `rewards-bp-chal`): the window renders
-  "Loading Battle Pass" because the scenarios have no battle-pass data source. They need a fixture
-  or a brain stub, not a renderer change.
+- **Battle Pass** (`rewards-bp-home`, `rewards-bp-vip`, `rewards-bp-chal`): fixed (2026-10-25). The
+  scenarios already carried the pass (`state.account.battlepass`), but the active-account change
+  after the stand-in login wiped it before the window rendered, so every one showed "Loading Battle
+  Pass". `battlepass_ui_scenario` now pins its fixture against those resets and re-renders the
+  window; `client/tests/bp_scenario_e2e.py` (ctest `bp_scenario_e2e`) asserts the item count, tier,
+  BPP, claimed cards and tab from the scenario's state line. All 6 regions pass (bp-header 0.699 /
+  0.746, bp-levels 2.068, bp-buttons 3.606 / 3.861, window-body 0.579).
 - **Not individually root-caused here**: `kn-market-blackm`, `market-junkyard`,
   `ranked-shop-flying`, `ingame-endscreen-collect-raid`, `kn-ranked-sort`, `kn-servers-official-error`
   and `kn-servers-official-mixed`, and the `strike/*` scenarios (the Strike flavour, not v10 parity).

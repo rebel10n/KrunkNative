@@ -285,6 +285,7 @@ if (EMSCRIPTEN)
     endif()
 
     add_executable(client ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES}
+        client/lib/ufbx/ufbx.c # FBX class models (client/src/fbx_gltf.c)
         ${SERVER_CORE_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES}) # the offline sandbox server (server_sandbox.h)
     target_compile_definitions(client PRIVATE KRUNKNATIVE_CLIENT)
     target_include_directories(client PRIVATE client/include server/include)
@@ -504,7 +505,8 @@ else ()
     endfunction ()
 
     # CLIENT
-    add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES})
+    add_executable(${CLIENT_BINARY} ${CLIENT_HEADERS} ${CLIENT_SOURCES} ${SHARED_HEADERS} ${SHARED_SOURCES}
+                   client/lib/ufbx/ufbx.c) # FBX class models (client/src/fbx_gltf.c; ufbx lives in client/lib)
     target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_CLIENT)
     target_link_libraries(${CLIENT_BINARY} PRIVATE glfw freetype kn_build_info Threads::Threads m)
     # the offline sandbox server (server_sandbox.h): the server core + its no-network backend
@@ -1524,6 +1526,13 @@ else ()
                      $<TARGET_FILE:assets_bench>)
             set_tests_properties(assets_sync_e2e PROPERTIES TIMEOUT 300)
         endif ()
+        if (UNIX)
+            # bp_scenario_e2e: the Battle Pass window on its --render-scenario fixture (free, VIP with
+            # claimed cards, Challenges), not "Loading Battle Pass" (client/tests/bp_scenario_e2e.py)
+            add_test(NAME bp_scenario_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/bp_scenario_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(bp_scenario_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+        endif ()
     endif ()
 
     # krunker_cheat_test: the official servers' CHEAT_CHECK crypto (keystream, XOR, base64, the
@@ -1909,6 +1918,8 @@ else ()
     add_executable(gltf_test
         tools/gltf_test/gltf_test.c
         client/src/gltf.c
+        client/src/fbx_gltf.c
+        client/lib/ufbx/ufbx.c
         client/src/gltf_meshopt.c
         client/src/pets.c
         client/src/skin_fx.c

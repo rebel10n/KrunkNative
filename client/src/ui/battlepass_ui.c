@@ -30,6 +30,7 @@
 // a "bpdl" unanswered by BP_LOAD_TIMEOUT_S is asked again while the last answer, if any, stays on screen.
 #include <backend.h>
 #include <backend_ui.h>
+#include <klog.h>
 #include <html_dom.h>
 #include <html_ui.h>
 #include <i18n.h>
@@ -43,6 +44,7 @@
 #include "../viewer/viewer_store.h"
 
 static cJSON *g_bp_json;      // windows[5].data (the "bpdl" payload), NULL none
+static int g_bp_scenario_pinned; // --render-scenario: the fixture is the pass; account changes must not clear it
 static BattlePass *g_bp;      // its parse (bp_parse_items)
 static int g_bp_status;       // windows[5].dataStatus: 0 not asked (or not sent yet), 1 in flight, 2 answered
 static int64_t g_bp_asked_s;  // when the "bpdl" in flight was sent (BP_LOAD_TIMEOUT_S ends it)
@@ -90,6 +92,7 @@ static int64_t iso_seconds(const char *s) {
 }
 
 void battlepass_ui_reset(void) {
+    if (g_bp_scenario_pinned) return; // a scenario's stand-in pass is not a real account's data
     cJSON_Delete(g_bp_json);
     g_bp_json = NULL;
     free(g_bp);
@@ -929,6 +932,7 @@ int battlepass_ui_end_html(StrBuf *sb) {
 // --render-scenario (ui_scenario.c): state.battlepass = {data, progress, tab, end} stands in for
 // kn_brain's "bpdl" / "bppd" / "bpEnd".
 void battlepass_ui_scenario(const cJSON *state) {
+    g_bp_scenario_pinned = 0;
     battlepass_ui_reset();
     if (!cJSON_IsObject(state)) return;
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(state, "data");
@@ -941,4 +945,10 @@ void battlepass_ui_scenario(const cJSON *state) {
     g_now_override = (int64_t) jnum(state, "now");
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(state, "end");
     if (cJSON_IsObject(end)) g_end = cJSON_Duplicate(end, 1);
+    // account_ui_scenario runs before the backend's active-account tick notices the stand-in login, whose
+    // active_changed()/clear_account() used to wipe the fixture and leave "Loading Battle Pass" on screen.
+    g_bp_scenario_pinned = 1;
+    KN_LOG_DEBUG1("[scenario] battlepass: items=%d tier=%d bpp=%lld claimed=%s tab=%d\n", g_bp ? g_bp->count : 0,
+                  g_tier, (long long) g_bpp, g_claimed, g_tab);
+    menu_rerender_if_open(BP_WINDOW);
 }
