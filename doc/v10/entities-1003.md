@@ -166,15 +166,14 @@ whose GLB joins the scene through `user_asset_object_added`.
   (`ks_entities_splash` from `game_explosion_streak`, :214135, :217057-217067).
 - **A complexCollision live asset** stops shots and projectiles on its model's hit mesh at the rest pose
   (`ks_entities_live_ray`, `ai_parts_model_ray`; rayProxy :212244-212272), as a hit with no object, like the terrain.
+  That mesh is loadModel's: its first 6000 triangles (iîìïiìî(glb, 6000, true), :212173, :204470), while the AI models
+  keep 120000. The model is read once for both, so each triangle keeps its place in the read and a live ray skips
+  those past 6000.
 - **The bridge's "l"** carries the movement scheme's sendVals of the same ack after its 26 slots
   (`NET_EXT_PLAYER_MOVE_VALS`; SRM's five values and tmpVel `{x, y, z}`, Vehicle's three), then the controlled entity
   or 0 (:222397-222405).
 - **The seed on the bridge**: KN's server sends `entSeed` ahead of the ranked flag (`ks_entities_send_seed` in
   `server/src/net.c`). The bridge builds its init once that flag is in, so the seed always reaches the init.
-
-## 8. Not done
-
-- The live assets' hit mesh keeps the AI reader's cap (120000 triangles), not loadModel's 6000.
 
 ## Tests
 
@@ -195,7 +194,8 @@ whose GLB joins the scene through `user_asset_object_added`.
 - `ks_game_v1003_test` (`test_entity_bodies`) covers a rider carried on the server's body and predicted the same on
   the client, addCube's record and solid block, a player landing on it, delete(), the asset's triangles on both
   sides, and a new round taking the server's objects out. `test_entity_shots` covers a pistol shot on a turned part
-  (rayVsPart, onEntityDamage, the hit marker), an nd rider's shot passing, splash, and a cpx asset stopping a shot.
+  (rayVsPart, onEntityDamage, the hit marker), an nd rider's shot passing, splash, and a cpx asset stopping a shot;
+  `test_live_hit_cap` the 6000-triangle cap of a live asset's hit mesh.
   `v10_translate_test` and `v10_bridge_test` cover the bridge, the sendVals in "l" and the seed in the init.
 - Headless offline run: a map with a server script, a shared script and a client script. The server spawns a
   second entity, attaches the player and adds asset 46802. The probe log shows both entities stepping and the

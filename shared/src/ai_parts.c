@@ -24,7 +24,7 @@
 #define AI_HIT_CHUNK 48           // iîíïíii (:204603)
 #define AI_SOLID_MAX_TRIS 6000    // applySolid: > 6000 sorted by area, cut (:205432)
 #define AI_SOLID_MIN_AREA 0.01    // applySolid: area > 0.01 (:205425)
-#define AI_REST_MAX_TRIS 6000     // liveObjects.loadModel: iîìïiìî(glb, 6000, true) (:212173)
+#define AI_REST_MAX_TRIS 6000     // liveObjects.loadModel: iîìïiìî(glb, 6000, true) (:212173): its tris and its hit mesh
 #define AI_MODEL_MAX_BYTES 60000000 // loadModel: content-length > 60000000 "model too large" (:204239)
 
 // ---------------------------------------------------------------- the model
@@ -62,6 +62,7 @@ typedef struct {
     int node;
     const char *name;
     float *tris;    // 9 floats per triangle
+    int *seq;       // each triangle's place in the reader's walk: under a smaller cap (loadModel's 6000) only seq < cap exist
     int tri_count;
     double min[3], max[3];
     Chunk *chunks;
@@ -458,6 +459,7 @@ void ai_parts_model_pose(const AiPartsModel *m, const char *clip, const double t
 typedef struct {
     int node;
     double *v;      // 9 doubles per triangle (the JS array before the Float32Array copy)
+    int *seq;       // each one's place in the walk (Group.seq)
     int count, cap;
     double min[3], max[3];
 } GroupBuild;
@@ -482,15 +484,19 @@ static GroupBuild *group_for(GroupBuild **groups, int *count, int *cap, const in
     return g;
 }
 
-static int group_push(GroupBuild *g, const double *tri) {
+static int group_push(GroupBuild *g, const double *tri, const int seq) {
     if (g->count == g->cap) {
         const int n = g->cap ? g->cap * 2 : 64;
         double *v = realloc(g->v, (size_t) n * 9 * sizeof(double));
         if (!v) return 0;
         g->v = v;
+        int *s = realloc(g->seq, (size_t) n * sizeof(int));
+        if (!s) return 0;
+        g->seq = s;
         g->cap = n;
     }
     memcpy(&g->v[(size_t) g->count * 9], tri, 9 * sizeof(double));
+    g->seq[g->count] = seq;
     g->count++;
     for (int i = 0; i < 9; i++) { // iìIîîïï (:204481)
         g->min[i % 3] = fmin(g->min[i % 3], tri[i]);
@@ -577,10 +583,10 @@ static void hit_mesh_build(AiPartsModel *m, const cJSON *gltf, const Bin *bin) {
                         tri[k * 3 + 2] = pos[v * 3 + 2];
                     }
                 }
-                total++;
+                const int seq = total++;
                 if (!ok) continue;
                 GroupBuild *g = group_for(&groups, &group_count, &group_cap, group_node);
-                if (g) group_push(g, tri);
+                if (g) group_push(g, tri, seq);
             }
             free(pos);
             free(idx);
@@ -605,7 +611,8 @@ static void hit_mesh_build(AiPartsModel *m, const cJSON *gltf, const Bin *bin) {
             if (b->max[k] - b->min[k] > b->max[axis] - b->min[axis]) axis = k;
         int *order = malloc((b->count ? (size_t) b->count : 1) * sizeof(int));
         g->tris = malloc((b->count ? (size_t) b->count : 1) * 9 * sizeof(float));
-        if (!order || !g->tris) {
+        g->seq = malloc((b->count ? (size_t) b->count : 1) * sizeof(int));
+        if (!order || !g->tris || !g->seq) {
             free(order);
             g->tri_count = 0;
             continue;
@@ -614,8 +621,10 @@ static void hit_mesh_build(AiPartsModel *m, const cJSON *gltf, const Bin *bin) {
         g_sort_axis = axis;
         g_sort_v = b->v;
         qsort(order, (size_t) b->count, sizeof(int), sort_cmp);
-        for (int i = 0; i < b->count; i++)
+        for (int i = 0; i < b->count; i++) {
             for (int e = 0; e < 9; e++) g->tris[i * 9 + e] = (float) b->v[(size_t) order[i] * 9 + (size_t) e];
+            g->seq[i] = b->seq[order[i]];
+        }
         free(order);
         g->chunk_count = (b->count + AI_HIT_CHUNK - 1) / AI_HIT_CHUNK;
         g->chunks = calloc(g->chunk_count ? (size_t) g->chunk_count : 1, sizeof(Chunk));
@@ -636,7 +645,10 @@ static void hit_mesh_build(AiPartsModel *m, const cJSON *gltf, const Bin *bin) {
         }
         if (!g->chunks) g->chunk_count = 0;
     }
-    for (int i = 0; i < group_count; i++) free(groups[i].v);
+    for (int i = 0; i < group_count; i++) {
+        free(groups[i].v);
+        free(groups[i].seq);
+    }
     free(groups);
 }
 
@@ -746,6 +758,7 @@ void ai_parts_model_free(AiPartsModel *m) {
     free(m->clips);
     for (int g = 0; m->groups && g < m->group_count; g++) {
         free(m->groups[g].tris);
+        free(m->groups[g].seq);
         free(m->groups[g].chunks);
     }
     free(m->groups);
@@ -797,8 +810,11 @@ static double ray_box(const double *o, const double *d, const double *lo, const 
 
 typedef int (*HiddenFn)(const AiPartsModel*, const void *user, const char *group_name);
 
-// iïïìîiì: the nearest triangle hit of the posed mesh; returns its group or -1
-static int mesh_hit(const AiPartsModel *m, const double *worlds, const double *origin, const double *dir, HiddenFn hidden, const void *user, double *best_t) {
+// iïïìîiì: the nearest triangle hit of the posed mesh as read with at most `max_tris` triangles (the walk's first
+// max_tris: AI_HIT_MAX_TRIS, all of them, or loadModel's AI_REST_MAX_TRIS; the boxes of the whole mesh only prefilter);
+// returns its group or -1
+static int mesh_hit(const AiPartsModel *m, const double *worlds, const double *origin, const double *dir, HiddenFn hidden, const void *user, const int max_tris,
+                    double *best_t) {
     int best = -1;
     double inv[16], o[3], d[3];
     for (int gi = 0; gi < m->group_count; gi++) {
@@ -815,6 +831,7 @@ static int mesh_hit(const AiPartsModel *m, const double *worlds, const double *o
             const Chunk *ck = &g->chunks[c];
             if (ray_box(o, d, ck->min, ck->max, best >= 0 ? *best_t : 1) < 0) continue;
             for (int e = ck->start; e < ck->end; e += 9) {
+                if (g->seq[e / 9] >= max_tris) continue;
                 const double e1x = (double) v[e + 3] - v[e], e1y = (double) v[e + 4] - v[e + 1], e1z = (double) v[e + 5] - v[e + 2];
                 const double e2x = (double) v[e + 6] - v[e], e2y = (double) v[e + 7] - v[e + 1], e2z = (double) v[e + 8] - v[e + 2];
                 const double px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
@@ -1109,7 +1126,8 @@ int ai_parts_model_ray(const AiPartsModel *m, const double origin[3], const doub
     double *worlds = pose_alloc(m, NULL, 0.0); // iíîìíïî(rig, null, 0)
     if (!worlds) return 0;
     double best = 1;
-    const int g = mesh_hit(m, worlds, origin, dir, NULL, NULL, &best);
+    // loadModel's mesh: iîìïiìî(glb, 6000, true) caps the hit mesh at 6000 too (deob-10.0.3.js:212173, :204462, :204470)
+    const int g = mesh_hit(m, worlds, origin, dir, NULL, NULL, AI_REST_MAX_TRIS, &best);
     free(worlds);
     if (g < 0) return 0;
     if (t_out) *t_out = best;
@@ -1134,7 +1152,7 @@ int ai_parts_hit_test(Game *game, GameAI *ai, const vec3 origin, const vec3 delt
     if (!worlds) return 0;
     AiParts *p = ai_parts_of(game, ai, 0);
     double best = 1;
-    const int g = mesh_hit(m, worlds, o, d, group_hidden, p, &best);
+    const int g = mesh_hit(m, worlds, o, d, group_hidden, p, AI_HIT_MAX_TRIS, &best);
     free(worlds);
     if (g < 0) return 0;
     if (t_out) *t_out = (float) best;

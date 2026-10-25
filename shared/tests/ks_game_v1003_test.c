@@ -1382,6 +1382,62 @@ static void test_entity_shots(void) {
     cJSON_Delete(map);
 }
 
+// A one-node GLB of `count` triangles (no indices), positions 9 floats each
+static unsigned char *glb_of_tris(const float *pos, const int count, size_t *out_len)
+{
+    char json[512];
+    const size_t bin_len = (size_t) count * 9 * sizeof(float);
+    snprintf(json, sizeof(json),
+             "{\"asset\":{\"version\":\"2.0\"},\"nodes\":[{\"name\":\"Root\",\"mesh\":0}],\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+             "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":%d,\"type\":\"VEC3\"}],\"bufferViews\":[{\"buffer\":0,\"byteLength\":%zu}],"
+             "\"buffers\":[{\"byteLength\":%zu}]}",
+             count * 3, bin_len, bin_len);
+    size_t json_len = strlen(json);
+    while (json_len % 4) json[json_len++] = ' ';
+    const size_t total = 12 + 8 + json_len + 8 + bin_len;
+    unsigned char *g = malloc(total);
+    if (!g) return NULL;
+    const uint32_t head[3] = {0x46546C67u, 2, (uint32_t) total}, jc[2] = {(uint32_t) json_len, 0x4E4F534Au}, bc[2] = {(uint32_t) bin_len, 0x004E4942u};
+    memcpy(g, head, 12);
+    memcpy(g + 12, jc, 8);
+    memcpy(g + 20, json, json_len);
+    memcpy(g + 20 + json_len, bc, 8);
+    memcpy(g + 28 + json_len, pos, bin_len);
+    *out_len = total;
+    return g;
+}
+
+static void test_live_hit_cap(void) {
+    printf("Running v10.0.3 live asset hit mesh cap test...\n");
+    // liveObjects.loadModel reads its hit mesh with iîìïiìî(glb, 6000, true) (deob-10.0.3.js:212173, :204470): a live
+    // asset's rayProxy sees the walk's first 6000 triangles; the AI reader keeps 120000 (all 6002 here)
+    enum { N = 6002 };
+    float *pos = malloc((size_t) N * 9 * sizeof(float));
+    CHECK(pos != NULL, "the test triangles");
+    if (!pos) return;
+    for (int i = 0; i < N; i++) { // far-off slivers
+        const float t[9] = {1000, 1000, 1000, 1000.1f, 1000, 1000, 1000, 1000.1f, 1000};
+        memcpy(&pos[i * 9], t, sizeof(t));
+    }
+    const float in_cap[9] = {-5, -5, 0, 5, -5, 0, 0, 5, 0}, past_cap[9] = {45, -5, 0, 55, -5, 0, 50, 5, 0};
+    memcpy(&pos[5999 * 9], in_cap, sizeof(in_cap)); // the 6000th: read
+    memcpy(&pos[6000 * 9], past_cap, sizeof(past_cap)); // the 6001st: past loadModel's cap
+    size_t len = 0;
+    unsigned char *glb = glb_of_tris(pos, N, &len);
+    free(pos);
+    AiPartsModel *m = glb ? ai_parts_model_parse(glb, len) : NULL;
+    free(glb);
+    CHECK(m && ai_parts_model_hit_tris(m) == N, "the AI reader's hit mesh has all %d triangles (%d)", N, ai_parts_model_hit_tris(m));
+    size_t rest = 0;
+    ai_parts_model_rest_tris(m, &rest);
+    CHECK(rest == 6000, "loadModel's tris stop at 6000 (%zu)", rest);
+    double t = 0;
+    const double o1[3] = {0, 0, -10}, o2[3] = {50, 0, -10}, d[3] = {0, 0, 20};
+    CHECK(ai_parts_model_ray(m, o1, d, &t) && fabs(t - 0.5) < 1e-6, "the 6000th triangle stops a live ray (t %.3f)", t);
+    CHECK(!ai_parts_model_ray(m, o2, d, &t), "the 6001st does not: past loadModel's 6000");
+    ai_parts_model_free(m);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -1400,6 +1456,7 @@ int main(void) {
     test_entity_replication();
     test_entity_bodies();
     test_entity_shots();
+    test_live_hit_cap();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);
