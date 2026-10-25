@@ -52,7 +52,6 @@ PW = "pw-brainev-%d" % os.getpid()
 STAMP = os.getpid() % 100000
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-brainev-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
-S_PORT, T_PORT = kn_proto.free_ports(2)
 TURF_DAY = 200
 LOTTERY = 3
 FREE_KR = [5, 10, 20, 500]
@@ -255,15 +254,29 @@ def lobby_of(brain_port, prefix):
 
 
 def start_node(node_id, port, brain_port, extra, args=()):
-    cfg_path = os.path.join(WORK, node_id + ".json")
-    node_config(cfg_path, node_id, port, brain_port, extra)
-    log_path = os.path.join(WORK, node_id + ".log")
-    p = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--config", cfg_path, "--cfg", "none"] + list(args), cwd=ROOT,
-                         stdout=open(log_path, "w"), stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, start_new_session=True)
-    procs.append(p)
-    linked = wait_for(lambda: "welcomed" in read_log(log_path), 20)
-    lobby = wait_for(lambda: lobby_of(brain_port, node_id + ":"), 15)
-    return p, log_path, linked, lobby
+    # the port is picked right before the bind, not at import: a port reserved minutes earlier is
+    # regularly taken by another test's server by the time this one starts (the old flaky "Cannot
+    # listen on port" failures). A bind race still possible: retry with a fresh port.
+    for attempt in range(4):
+        if port is None:
+            port = kn_proto.free_ports(1)[0]
+        cfg_path = os.path.join(WORK, node_id + ".json")
+        node_config(cfg_path, node_id, port, brain_port, extra)
+        log_path = os.path.join(WORK, node_id + ".log")
+        p = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--config", cfg_path, "--cfg", "none"] + list(args), cwd=ROOT,
+                             stdout=open(log_path, "w"), stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, start_new_session=True)
+        procs.append(p)
+        linked = wait_for(lambda: "welcomed" in read_log(log_path), 20)
+        lobby = wait_for(lambda: lobby_of(brain_port, node_id + ":"), 15)
+        if linked and lobby:
+            return p, log_path, linked, lobby, port
+        log = read_log(log_path)
+        if "bind" not in log and "Cannot listen" not in log:
+            return p, log_path, linked, lobby, port
+        p.terminate()
+        p.wait(timeout=10)
+        port = None
+    return p, log_path, linked, lobby, port
 
 
 def skin_rarities():
@@ -290,7 +303,7 @@ def hosted_part(brain_port, db, tok, ids, names, rar):
 
     with open(os.path.join(WORK, "public.json"), "w") as f:
         json.dump(dict(arena, name="BePub%d" % STAMP, scripts={}), f)
-    _, s_log, linked, lobby = start_node("BES", S_PORT, brain_port, {"modes": ["ffa"]}, [os.path.join(WORK, "public.json")])
+    _, s_log, linked, lobby, S_PORT = start_node("BES", None, brain_port, {"modes": ["ffa"]}, [os.path.join(WORK, "public.json")])
     check("node S links to the brain", bool(linked) and bool(lobby), read_log(s_log)[-300:])
     code, host = http(brain_port, "/mm/host-game?token=" + tok["o"], {"config": {"customMap": mapname}})
     check("O hosts the published map", code == 200 and host.get("clientId"), "%s %s" % (code, str(host)[:200]))
@@ -381,7 +394,7 @@ def public_part(brain_port, db, tok, ids, names, rar):
     # yesterday is settled by the brain's own timer at its start (nobody played: no clan); [BEW] is made its winner
     check("the brain settled yesterday", wait_for(lambda: db.one("SELECT count(*) FROM turf_days WHERE day = ? AND map_id = 0", (TURF_DAY - 1,)), 15))
     db.q("UPDATE turf_days SET clan_id = ?, kills = 7, total_kills = 9 WHERE day = ? AND map_id = 0", (clan, TURF_DAY - 1))
-    t, t_log, linked, lobby = start_node("BET", T_PORT, brain_port, {"maps": ["Burg"], "modes": ["ffa"]})
+    t, t_log, linked, lobby, T_PORT = start_node("BET", None, brain_port, {"maps": ["Burg"], "modes": ["ffa"]})
     check("node T (Burg FFA) links to the brain", bool(linked) and bool(lobby), read_log(t_log)[-300:])
     if not lobby:
         return
