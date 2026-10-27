@@ -14,7 +14,7 @@
 //     Guide card, no Turf Wars / Market / Leaderboards; signed in: the Battle Pass / Daily Spin
 //     cards (v10_rewards / v10_customize), a small Guide item while level <= 20, Turf Wars,
 //     Market & Trading, Leaderboards) and the actions of Market & Trading, Store, Challenges,
-//     Social and Exit (the desktop client's, v10 showExit). The Guide card, What's New and
+//     Social and Exit (the desktop client's only, v10 showExit). The Guide card, What's New and
 //     Community & Events are v10_news.c's, Turf Wars / Leaderboards / Ranked v10_competitive.c's
 //   - the header bar (_52526 / _52519, v10:145938-146560): guest "Login or Register" / "Get
 //     Signup Rewards" (KrunkNative's "Account Manager" between them, showWindow(ALT_MANAGER_WINDOW)),
@@ -1172,14 +1172,16 @@ static void nav_setup(void) {
     wire_nav("menuBtnShop", "playSelect(),showWindow(14)");
     wire_nav("menuBtnChall", "playSelect(),windows[32].openHome()");
     wire_nav("menuBtnSocial", "playSelect(),openSocial()");
-    // Exit (showExit = typeof window.closeClient == "function": the desktop client); its display
-    // is the Client settings' exitButton (ui_client_settings.c apply_exit_button)
+    // Exit: the web build has none (Krunker has none on the web). Natively its display is the Client settings'
+    // exitButton (ui_client_settings.c apply_exit_button); v10's showExit gate is deob-10.0.3.js:262620
+#ifndef __EMSCRIPTEN__
     HtmlElem holder = by_id("menuItemContainer");
     if (holder && !by_id("clientExit"))
         html_dom_insert_html(holder, HTML_INSERT_BEFORE_END,
             "<div class=\"menuItem svelte-fgmdj8\" id=\"clientExit\" onclick=\"playSelect(),clientExitPopup()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons-outlined menuItemIcon svelte-fgmdj8\">exit_to_app</span> "
             "<div class=\"menuItemTitle svelte-fgmdj8\" id=\"menuBtnExit\">Exit</div></div>");
+#endif
 }
 
 static void header_setup(void) {

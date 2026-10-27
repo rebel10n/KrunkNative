@@ -20,8 +20,7 @@
 // Exit: Krunker v7.1.4's #clientExit menu item -> clientExitPopup() ("Are you sure you
 // want to close krunker?" YES/NO, the #confPop popup natively) -> closeClient(), which
 // natively ends the main loop (glfwSetWindowShouldClose) so main.c runs its normal
-// shutdown. On the web the same item and confirmation close the tab (window.close(), or the
-// page leaves the game when the browser keeps a tab that a script did not open).
+// shutdown. The web build has no Exit item, so nothing there closes the tab.
 #include <client_settings.h>
 #include "klog.h"
 #include <desktop_notify.h> // the Notifications switch (desktopNotify) drives the desktop notifier
@@ -154,8 +153,8 @@ static const ClientSetting SETTINGS[] = {
     {"priority", "Process Priority", "System", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "Normal",
      "CPU scheduling priority of the client process", PRIORITIES, COUNT(PRIORITIES)},
     // ---- Client (glorp "Exit Button", "Discord Rich Presence", "Resource Swapper"; custom CSS)
-    // Web: the Exit item and its confirmation close the tab (request_close).
-    {"exitButton", "Exit Button", "Interface", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "The Exit item in the menu",
+    // Native only: the web build has no Exit item (v10_menu.c nav_setup).
+    {"exitButton", "Exit Button", "Interface", CS_SWITCH, CS_NATIVE, "true", "The Exit item in the menu",
      NULL, 0, NULL, NULL, "interface"},
     // Web: no Discord IPC from a page; the switch is kept, as native shows it while Discord is not running (nothing).
     {"discordRPC", "Discord Rich Presence", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Show the mode and map you play on your Discord profile"},
@@ -667,7 +666,7 @@ static int app_row(const ClientSetting *s) { return (s->flags & CS_APP) && app_s
 static void apply_exit_button(void) {
     HtmlElem el = html_dom_by_id("clientExit");
     if (!el) return;
-    // v7.1.4 / glorp: document.querySelector("#clientExit").style.display = "flex" (the web: request_close)
+    // v7.1.4 / glorp: document.querySelector("#clientExit").style.display = "flex"
     html_dom_set_display(el, chrome_visible() && cs_bool("exitButton") ? "flex" : "none");
 }
 
@@ -825,17 +824,11 @@ static void apply_discord(void) {
 
 // ---------------------------------------------------------------- restart / exit
 
+// The Exit item's confirmed close (native only: the web build has no Exit item).
 static void request_close(void) {
 #ifndef __EMSCRIPTEN__
     Client *client = g_cs.client ? g_cs.client : menu_ui()->client;
     if (client && client->window) glfwSetWindowShouldClose(client->window, GLFW_TRUE);
-#else
-    // the Exit item's confirmed close: window.close() works for a tab a script opened; any other
-    // tab cannot close itself, so the page leaves Krunker (about:blank) instead
-    EM_ASM({
-        window.close();
-        setTimeout(function () { location.replace('about:blank'); }, 300);
-    });
 #endif
 }
 

@@ -1,6 +1,6 @@
 #pragma once
 // KrunkNative client settings: the Settings window's "Client" tab and the menu's Exit
-// button (client/src/ui/ui_client_settings.c).
+// button, native only (client/src/ui/ui_client_settings.c).
 //
 // References: the Krunker v3.1.1 desktop client (jail Krunker_v3.1.1/main/preload.js +
 // utilities.js: a "Client" tab pushed onto windows[0].tabs whose rows come from

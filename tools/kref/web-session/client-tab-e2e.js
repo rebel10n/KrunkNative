@@ -1,7 +1,7 @@
 'use strict';
 // Web e2e: the settings rows the native Client tab holds that a browser can do live in the game's own
 // tabs (ui_client_settings.c CS_FOLDERS): Display > Interface, Game > Gameplay / Gameplay Privacy. The web build shows no Client tab; the native-only rows
-// (Window Mode, V-Sync, Audio Backend, Process Priority, Discord, Resource Swapper, Proxy) are not on web.
+// (Window Mode, V-Sync, Audio Backend, Process Priority, Discord, Resource Swapper, Proxy, Exit Button) are not on web.
 // A stored value is read (knClient hidePlayerNames), every moved control runs without an exception or
 // console error, and the Sound tab of the advanced view still gains the Audio Output row.
 //   KN_WEB_RUN=<stack run dir> node tools/kref/web-session/client-tab-e2e.js [screenshot.png]
@@ -10,7 +10,7 @@ const { openPage, sleep, stackEnv } = require('./session.js');
 // Folder -> rows it holds, per settings tab, in that order (the folder may hold other rows around them: the
 // basic Gameplay folder gets its Bhop Mode row at run time, first; the rows of the client join at its end).
 const ADVANCED = {
-  Display: { Interface: ['Exit Button', 'Custom CSS', 'Show Game Time'] },
+  Display: { Interface: ['Custom CSS', 'Show Game Time'] },
   Game: {
     Gameplay: ['Auto-restart for updates', 'Start Offline', 'Auto Join', 'Account Mode', 'Account Service URL',
       'Server Finder URL', 'Auto Spectate', 'Always Play HS Sound on Kill', 'Client Folder', 'Clear Cache & Storage',
@@ -27,9 +27,9 @@ const BASIC = {
   },
 };
 // The native-only rows: none of them is generated on the web build.
-const NATIVE_ONLY = ['Window Mode', 'V-Sync', 'Audio Backend', 'Process Priority', 'Discord Rich Presence', 'Resource Swapper', 'Proxy', 'Proxy Scope'];
+const NATIVE_ONLY = ['Window Mode', 'V-Sync', 'Audio Backend', 'Process Priority', 'Discord Rich Presence', 'Resource Swapper', 'Proxy', 'Proxy Scope', 'Exit Button'];
 // The rows that moved out of the Client tab (each one's controls are run below).
-const MOVED = new Set(['Exit Button', 'Custom CSS', 'Show Game Time', 'Auto-restart for updates', 'Start Offline', 'Auto Join',
+const MOVED = new Set(['Custom CSS', 'Show Game Time', 'Auto-restart for updates', 'Start Offline', 'Auto Join',
   'Account Mode', 'Account Service URL', 'Server Finder URL', 'Client Folder', 'Clear Cache & Storage', 'Reset Client Settings',
   'Auto Spectate', 'Always Play HS Sound on Kill', 'Hide player names']);
 // The rows appear in this order (others may sit between them).
