@@ -23,3 +23,7 @@ int qr_encode(const unsigned char *data, size_t len, QrEcc ecc, int mask, QrCode
 // An SVG image of the code (black on white, a 4-module quiet zone, one <path>), as text in out.
 // Returns the length, -1 when cap is too small.
 int qr_svg(const QrCode *qr, char *out, size_t cap);
+
+// QrCode.toDataURL(text): the code (QR_ECC_M, best mask) as a "data:image/svg+xml;base64,..." URL the HTML
+// engine draws (nanosvg). malloc'd (the caller frees); NULL when text does not fit QR_MAX_VERSION.
+char *qr_svg_data_url(const char *text);

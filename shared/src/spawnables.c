@@ -5,8 +5,8 @@
 //
 // KN notes:
 // - Account rewards: Frog and Krunkanium give their skin through game_give_skin (kn_brain, servers
-//   with rewards only); Gift (event rarity tables) and Loot Drop (dropSkin, never dropped here)
-//   pickups only remove the spawnable. Golden Egg needs the Egg Basket melee skin: nobody qualifies.
+//   with rewards only); Loot Drop (game_drop_skin: an AI's v10.0.4 skin reward) gives its itemId the same way; Gift
+//   (event rarity tables) pickups only remove the spawnable. Golden Egg needs the Egg Basket melee skin: nobody qualifies.
 // - v7.1.4 bug fixed: a KR Tag / Diamond Egg stack picked up only partly (tagHoldLimit) was left
 //   inactive but not destroyed (pickupSpawnable sets active = false before onPickup, dontDestroy
 //   then skips the "dsp"), so the rest could never be collected and never despawned. KN keeps
@@ -19,6 +19,7 @@
 #include <zombies.h> // map-logic WP-H: reserves, perks
 #include <network_sounds.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include "modes/mode_internal.h"
 
@@ -108,9 +109,11 @@ int spawnable_drop_ex(Game *game, const int type, Player *owner, const Spawnable
         .data_w = data ? data->w : -1,
         .data_xd = data ? data->xd : 0.0f,
         .data_zd = data ? data->zd : 0.0f,
+        .data_item = data ? data->item : 0,
         .owner_uid = info->player_specific && owner ? owner->uid : -1,
         .active = 1,
     };
+    if (data && data->reason) snprintf(spawnable->data_reason, sizeof(spawnable->data_reason), "%s", data->reason);
     spawnable_half(spawnable);
     mode_send_spawnable(game, slot);
     return spawnable->sid;
@@ -306,7 +309,14 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
         case SPAWNABLE_KRUNKANIUM: // onPickup: giveSkin(4222, "killdrops")
             game_give_skin(game, player, 4222, "killdrops");
             break;
-        default: // Gift, Loot Drop: account rewards (see the header)
+        case SPAWNABLE_LOOT_DROP: // onPickup (deob-10.0.4.js:160448-160451): giveSkin(player, itemId, reason), aim_1 at volume 2
+            if (spawnable->data_item > 0) game_give_skin(game, player, spawnable->data_item, spawnable->data_reason[0] ? spawnable->data_reason : NULL);
+            {
+                const char *sound = network_sound_name(network_sound_index("aim_1"));
+                if (sound) game_play_sound(game, sound, player->uid, player->position, 2.0f, 0.0f);
+            }
+            break;
+        default: // Gift: account rewards (see the header)
             break;
     }
 

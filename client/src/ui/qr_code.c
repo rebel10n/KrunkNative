@@ -4,6 +4,7 @@
 #include "qr_code.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // [ecc][version]: error correction codewords per block, number of blocks (index 0 unused)
@@ -335,4 +336,27 @@ int qr_svg(const QrCode *qr, char *out, const size_t cap) {
     w = snprintf(out + o, cap - o, "'/></svg>");
     if (w < 0 || (size_t) w >= cap - o) return -1;
     return (int) (o + (size_t) w);
+}
+
+char *qr_svg_data_url(const char *text) {
+    static QrCode qr;
+    if (!text || qr_encode((const unsigned char *) text, strlen(text), QR_ECC_M, -1, &qr) != 0) return NULL;
+    static char svg[48 * 1024];
+    const int n = qr_svg(&qr, svg, sizeof(svg));
+    if (n <= 0) return NULL;
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const size_t len = (size_t) n, cap = 32 + (len + 2) / 3 * 4;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+    size_t o = (size_t) snprintf(out, cap, "data:image/svg+xml;base64,");
+    for (size_t i = 0; i < len; i += 3) {
+        const unsigned v = (unsigned char) svg[i] << 16 | (i + 1 < len ? (unsigned char) svg[i + 1] << 8 : 0) |
+                           (i + 2 < len ? (unsigned char) svg[i + 2] : 0);
+        out[o++] = b64[v >> 18 & 63];
+        out[o++] = b64[v >> 12 & 63];
+        out[o++] = i + 1 < len ? b64[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < len ? b64[v & 63] : '=';
+    }
+    out[o] = 0;
+    return out;
 }

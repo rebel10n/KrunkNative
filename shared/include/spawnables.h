@@ -54,11 +54,14 @@ typedef struct {
 
 const SpawnableInfo *spawnable_info(int type); // NULL for an unknown type
 
-// medals.js data ({c, wId, xD, zD}); unset fields: c 0, w -1, xd / zd 0
+// medals.js data ({c, wId, xD, zD}); unset fields: c 0, w -1, xd / zd 0. item / reason: the Loot Drop's {itemId, reason}
+// (game_drop_skin, deob-10.0.4.js:194161-194162), kept on the server for its pickup; item 0 none, reason NULL "raid"
 typedef struct {
     int c;
     int w;
     float xd, zd;
+    int item;
+    const char *reason;
 } SpawnableData;
 
 // game.js spawnable drop ("crsp" type, sid, x, y, z, team, data): KR tags, ammo packs, weapon

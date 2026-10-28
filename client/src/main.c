@@ -107,6 +107,7 @@
 #include <ui_logic.h>
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
+#include <scene_warm.h> // v10.0.4 warmScene: the match-start warm frames
 #endif
 #define SCENARIO_ACTIVE() ui_scenario_active()
 #define SCENARIO_PREVIEW() ui_scenario_draws_preview()
@@ -1182,6 +1183,19 @@ int main(int argc, char **argv) {
 #endif
 }
 
+// KRUNKNATIVE_FRAME_TRACE=N: the work time of the N frames after each client_load_map, one "[frametrace]" line
+// each (the match-start stutter, client_warm_scene); the frame-cap sleep is not counted.
+static int g_frame_trace_left, g_frame_trace_n;
+static void frame_trace_arm(void) {
+    static int n = -1;
+    if (n < 0) {
+        const char *v = getenv("KRUNKNATIVE_FRAME_TRACE");
+        n = v ? atoi(v) : 0;
+    }
+    g_frame_trace_left = n;
+    g_frame_trace_n = 0;
+}
+
 // One main-loop iteration, shared by the native while loop and the emscripten
 // main loop callback: advance time, tick/render (offline included: the sandbox server
 // steps inside the frame, net/offline.c), present and poll input.
@@ -1217,11 +1231,16 @@ void client_frame(Client *client) {
     frame_target_present(client);
     headless_swap_buffers(client->window); // glfwSwapBuffers; headless: the pbuffer flushes (at most 2 frames in flight)
     glfwPollEvents();
+    if (g_frame_trace_left > 0) {
+        g_frame_trace_left--;
+        printf("[frametrace] %d %.2f ms\n", g_frame_trace_n++, (glfwGetTime() - frame_time) * 1000.0);
+    }
     client_render_frame_end(client); // swap interval (vsync), frame cap sleep, FPS count
 }
 
 void client_load_map(Client *client) {
     if (!client->game.map) return;
+    frame_trace_arm();
 
     client_apply_map_lighting(client->game.map, client->game.mode);
 
@@ -1236,6 +1255,7 @@ void client_load_map(Client *client) {
     prize_wheel_render_load(client->scene, client->game.map); // the prize wheels' canvas planes (prize_wheel_render.c)
     wars_banners_load(client->scene, client->game.map); // the Turf Wars banners' nodes (wars_banners.c)
     client_event_objects_load(client); // the EVENT prefab's objects, in the last "start"'s state (event_objects.c)
+    scene_warm_begin(client->scene, glfwGetTime() * 1000.0); // v10.0.4 warmScene: every mesh draws once behind the card
 }
 
 void client_unload_map(Client *client) {
@@ -2631,7 +2651,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
             scene_remove_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
             scene_add_player_mesh(client->scene, tp_me->mesh, tp_me->loadout_size);
         }
+        const int warming = scene_warm_frame(client->scene, glfwGetTime() * 1000.0); // warmScene: culling off this frame
+        if (warming) scene_set_frustum_culling(0);
         scene_render(client->scene, &client->camera);
+        if (warming) scene_set_frustum_culling(1);
         if (tp_me) {
             scene_remove_player_mesh(client->scene, tp_me->mesh, tp_me->loadout_size);
             scene_add_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);

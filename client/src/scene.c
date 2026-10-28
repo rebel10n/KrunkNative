@@ -338,6 +338,10 @@ static int scene_mesh_culled(const Mesh *mesh, const float planes[6][4]) {
     return 0;
 }
 
+// scene_set_frustum_culling: off while the scene warms (scene_warm.c), so every mesh draws once
+static int g_frustum_culling = 1;
+void scene_set_frustum_culling(const int on) { g_frustum_culling = on ? 1 : 0; }
+
 static GlUniform u_transform = GL_UNIFORM_INIT("transform");
 static GlUniform u_camera_world_inverse = GL_UNIFORM_INIT("camera_world_inverse");
 static GlUniform u_camera_projection = GL_UNIFORM_INIT("camera_projection");
@@ -401,7 +405,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     for (size_t i = 0; i < draw_count; i++) {
         const Mesh *mesh = scene->meshes[indices[i]];
         last_transparent = mesh->material->transparent ? 1 : 0;
-        if (scene_mesh_culled(mesh, frustum)) continue;
+        if (g_frustum_culling && scene_mesh_culled(mesh, frustum)) continue;
 
         glBindVertexArray(mesh->geometry->vao);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);

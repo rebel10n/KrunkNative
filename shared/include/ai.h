@@ -8,6 +8,7 @@
 // (client/src/ai_render.c, nametags.c). Times are Krunker milliseconds, distances world units.
 // Map AIs and map bots (BOT_SPAWNER): shared/include/map_ai.h. doc/v7/map-logic.md §2.8, WP-F.
 #include <shared.h>
+#include <raid_drops.h> // RAID_REWARD_MAX, RAID_RARITIES: the AI's skin rewards
 
 #define GAME_AI_HAVE_V7_API 1         // game_ai_data_defaults / remove / set_health / play_anim, path_index
 #define GAME_AI_TEAMS 1               // GameAI.team (tm, forceTeam): v7 team targeting / damage rules
@@ -23,6 +24,7 @@
 #define GAME_AI_PATH_MAX 32           // pathInput node ids ("phi" comma list)
 #define GAME_AI_SENT_MAX 32           // AI.sentTo (player uids)
 #define GAME_AI_IGNORE_MAX 8          // ignoreList (ignoreOnStuck) entries
+#define GAME_AI_DMG_MAX 64            // dmgList (player uids) kept per AI
 #define GAME_AI_PROJECTILE_KINDS 5    // v3.1.1 projectiles.stored (0 = thrown knife, 1..4 = AI shots)
 #define GAME_AI_PATH_TYPES 4          // config.pathTypes: Loop, Do Once, Ping Pong, Random
 #define GAME_AI_MAP_BOT_MAX 16        // v7 config.botLimit: BOT_SPAWNER bots per map (addBot)
@@ -118,6 +120,18 @@ typedef struct {
     int projectile;               // v3.1.1 pj (0..5); v7 shoots projectiles.stored[1] with projOb
     int behaviour;                // bh (0..20): 1 Weeping, 2 Lord of Souls, 3 enrage, 4 mirror image, 5 Drowned Sailor
     unsigned char is_boss;        // boss / isBoss: its death gives every active non-bot player bossKills and "bk"
+    // v10.0.4 skin rewards (AI.init, deob-10.0.4.js:181986-181991; shared/include/raid_drops.h): AI.kill's drop loop in a
+    // pub-type round. Map AIs: rew / rewm / rewr / rewc / rewn (buildAIData :168428-168432, addAI :168538); KrunkScript
+    // AI.spawn: reward / rewardMethod / rewardReq / rewardChance / rewardNode / rewardUnique (:186970-186983).
+    unsigned char has_reward;     // reward is a list (truthy): the loop runs, even when no entry can drop
+    unsigned char reward_unique;  // rewardUnique (AI.spawn only): a given skin skips a player who has it
+    unsigned char has_reward_chance; // rewardChance passed the validator (raid_reward_chance_parse), else store.lootRars
+    int reward_method;            // RAID_METHOD_*: give, drop at the AI, drop at reward_node
+    int reward_req;               // RAID_REQ_*: active players, active damagers, the last hitter
+    int reward_node;              // a PATH_NODE nid (rewardMethod 2)
+    int reward_count;
+    int reward[RAID_REWARD_MAX];  // store skin ids; -n = n empty slots
+    double reward_chance[RAID_RARITIES];
     int team;                     // tm
     int path_type;                // pht: AI_PATH_*
     int path[GAME_AI_PATH_MAX];   // phi: PATH_NODE nids
@@ -207,8 +221,12 @@ typedef struct GameAI_t {
     float force_direction_timer;
     int ignore_uid[GAME_AI_IGNORE_MAX]; // ignoreList: player uid -> ms
     float ignore_timer[GAME_AI_IGNORE_MAX];
-    int last_hit_uid;             // lastHit.doer (player uid, -1 none) for deathY kills
+    int last_hit_uid;             // lastHit.doer (player uid, -1 none) for deathY kills and rewardReq 2
     float last_hit_timer;
+    // dmgList (deob-10.0.4.js:182978): the players (uids) who damaged it since it (re)spawned, added after the death check,
+    // so the killing blow of a player who never hit it before is not in it; rewardReq 1
+    int dmg_list[GAME_AI_DMG_MAX];
+    int dmg_count;
     float vision;
     float chase_distance;
     int frames, frame, last_frame;// v3.1.1 tFrame (texture strip frame)

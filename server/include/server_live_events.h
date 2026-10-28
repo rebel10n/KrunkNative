@@ -17,8 +17,10 @@ int server_events_round_index(const Game *game, int custom);
 int server_events_reward(const ClientConnection *client, int map_index);
 // The round's map is built: a custom game's EVENT objects are inert (live_events_map_objects), the egg keys' uids
 void server_events_round(Game *game, int custom);
-// GameHooks.event_item: the egg hunt (game.foundEventItem)
+// GameHooks.event_item: the egg hunt (game.foundEventItem); GameHooks.skin_rarity / has_skin: v10.0.4 AI skin rewards
 void server_events_install_game_hooks(Game *game);
+// store.skins[skin].rarity (assets/skins.json, loaded once), -1 when `skin` is not a store skin
+int server_store_skin_rarity(int skin);
 // kn_brain's "acct-r" to an "egg_found" request: the lines and the challenge progress. 1 = it was one
 int server_events_on_brain_frame(const cJSON *frame);
 // A connection is leaving or changing account: its tempEggs and pending egg answers belong to that session only.

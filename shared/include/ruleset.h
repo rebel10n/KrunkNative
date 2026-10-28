@@ -1,6 +1,6 @@
 #pragma once
-// Krunker Box Office plays Krunker v10.0.3, the only version it plays (doc/v10/target.md; v10.0.2 is
-// the prior version, kept as a reference). There is no version choice: one Ruleset, the v10
+// Krunker Box Office plays Krunker v10.0.4, the only version it plays (doc/v10/target.md; v10.0.3 and
+// v10.0.2 are the prior versions, kept as references). There is no version choice: one Ruleset, the v10
 // tables in shared/src/rules/v10/, bundles what Krunker's version defines: physics constants, the
 // weapon / class / mode tables, the map catalogue, trigger and entity limits, light units and the
 // ranked rules. A Game keeps a pointer to it (Game.rules); code without a Game reads
@@ -14,7 +14,7 @@
 
 typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     const char *key;     // "v10": the brain lobby meta / hello, the server-info query
-    const char *version; // "10.0.3": what menus and logs show
+    const char *version; // "10.0.4": what menus and logs show
 
     const GameConstants *constants;
     // Hit test: v10.0.2 traces the posed hit boxes (shared/src/hitboxes.c); 0 keeps v7.1.4's padded
@@ -68,7 +68,7 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     float comp_spawn_spread;
 } Ruleset;
 
-// The ruleset: Krunker v10.0.3. Never NULL. Under a flavor with rules (Krunker Strike, flavor.h)
+// The ruleset: Krunker v10.0.4. Never NULL. Under a flavor with rules (Krunker Strike, flavor.h)
 // it is v10's with that flavor's weapon / class / mode tables (strike_rules.h strike_ruleset()).
 const Ruleset *ruleset_current(void);
 // Krunker v10.0.2's own tables, whatever the flavor (what a flavor's tables are built from).

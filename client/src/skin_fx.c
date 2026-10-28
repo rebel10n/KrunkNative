@@ -297,17 +297,80 @@ static void shadertoy_update_uniforms(Material *base) {
 
 static const MaterialVTable shadertoy_material_vtable = {shadertoy_update_uniforms};
 
+// ---------------------------------------------------------------- v10 "custom" skin shaders
+// v10's custom entries (type "custom", deob-10.0.4.js:196092-196150; their TSL builds :91682-93011) work on the mesh's
+// local position, normal and view direction rather than a ShaderToy canvas. The ported ones are GLSL files:
+// assets/shaders/skin_custom.vert + assets/shaders/skin_custom/<n>.frag. Not ported (8-16): the item keeps its material.
+#define SKIN_FX_CUSTOM_MAX 32
+static const int k_custom_ported[] = {17}; // Hollowmere Night (v10.0.4)
+static unsigned int g_custom_programs[SKIN_FX_CUSTOM_MAX];
+static unsigned char g_custom_failed[SKIN_FX_CUSTOM_MAX];
+
+static unsigned int fx_custom_program(const int n) {
+    int ported = 0;
+    for (size_t i = 0; i < sizeof(k_custom_ported) / sizeof(k_custom_ported[0]); i++) ported |= k_custom_ported[i] == n;
+    if (!ported || n < 0 || n >= SKIN_FX_CUSTOM_MAX || g_custom_failed[n]) return 0;
+    if (g_custom_programs[n]) return g_custom_programs[n];
+    char rel[64];
+    snprintf(rel, sizeof(rel), "shaders/skin_custom/%d.frag", n);
+    char *frag_source = fx_read_asset(rel);
+    char *vert_source = fx_read_asset("shaders/skin_custom.vert");
+    unsigned int program = 0;
+    if (frag_source && vert_source) {
+        const char *vert_body = strchr(vert_source, '\n') ? strchr(vert_source, '\n') + 1 : vert_source; // "#version" is ours
+        const char *vert_parts[2] = {k_glsl_header, vert_body};
+        const char *frag_parts[2] = {k_glsl_header, frag_source};
+        const unsigned int vert = fx_compile_stage(GL_VERTEX_SHADER, vert_parts, 2);
+        const unsigned int frag = vert ? fx_compile_stage(GL_FRAGMENT_SHADER, frag_parts, 2) : 0;
+        if (vert && frag) {
+            program = glCreateProgram();
+            glAttachShader(program, vert);
+            glAttachShader(program, frag);
+            glLinkProgram(program);
+            int status;
+            glGetProgramiv(program, GL_LINK_STATUS, &status);
+            if (!status) {
+                char error[512];
+                glGetProgramInfoLog(program, sizeof(error), NULL, error);
+                printf("[skin_fx] custom shader %d link error:\n%s\n", n, error);
+                glDeleteProgram(program);
+                program = 0;
+            }
+        }
+        if (vert) glDeleteShader(vert);
+        if (frag) glDeleteShader(frag);
+    }
+    free(frag_source);
+    free(vert_source);
+    if (!program) g_custom_failed[n] = 1;
+    g_custom_programs[n] = program;
+    return program;
+}
+
+static GlUniform u_custom_time = GL_UNIFORM_INIT("uTime");
+
+static void custom_update_uniforms(Material *base) {
+    ShaderToyMaterial *material = (ShaderToyMaterial *) base;
+    scene_draw_state(!material->double_sided, 0, 1); // side 0 (FrontSide), opaque (:93007-93010)
+    const double now = gltf_clock(); // the material clock, as the ShaderToy ones
+    if (g_shader_clock_start < 0.0) g_shader_clock_start = now;
+    gl_uniform_1f(&u_custom_time, material->base.program, (float) (now - g_shader_clock_start));
+}
+
+static const MaterialVTable custom_material_vtable = {custom_update_uniforms};
+
 // getMat: shaderNum != null && shaders[shaderNum]: a ShaderToyMaterial instead of the item's own
 static void fx_use_shadertoy(Mesh *mesh, const ViewerSkin *skin) {
-    const unsigned int program = fx_shader_program(skin->shader_num);
+    const unsigned int custom = skin->shader_num >= SKIN_FX_SHADER_COUNT ? fx_custom_program(skin->shader_num) : 0;
+    const unsigned int program = custom ? custom : fx_shader_program(skin->shader_num);
     if (!program) return;
     ShaderToyMaterial *material = calloc(1, sizeof(ShaderToyMaterial));
     if (!material) return;
-    material->base.vtable = &shadertoy_material_vtable;
+    material->base.vtable = custom ? &custom_material_vtable : &shadertoy_material_vtable;
     material->base.program = program;
-    material->base.transparent = mesh->material ? mesh->material->transparent : 0;
+    material->base.transparent = custom ? 0 : mesh->material ? mesh->material->transparent : 0;
     material->shader = skin->shader_num;
-    material->double_sided = skin->side == 2;
+    material->double_sided = custom ? 0 : skin->side == 2;
     material_fini(mesh->material);
     mesh->material = (Material *) material;
 }

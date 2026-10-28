@@ -627,6 +627,8 @@ void scene_remove_player_mesh(Scene*, const PlayerMesh*, size_t);
 void scene_add_mesh(Scene*, Mesh*);
 void scene_remove_mesh(Scene*, Mesh*);
 void scene_render(const Scene*, Camera*);
+// 0: scene_render draws every visible mesh, in view or not (scene_warm.c's warm frames); 1 (default): frustum culling.
+void scene_set_frustum_culling(int on);
 // Called by a material's update_uniforms() inside scene_render(): the draw's face culling
 // (back faces, CCW front), additive blending and depth writes. Unset values keep the
 // per-draw defaults (no culling, normal alpha blending, depth writes on); scene_render()

@@ -8,8 +8,9 @@
 // ("asset:<id>" -> assets/user-assets/<id>/sound.mp3). Triggers: trigger_ai_event (WP-C) runs the
 // AI's tas for onAIDeath / onAIDamage / onAIHalfHealth / onAIKillPlayer.
 // Intentional differences (documented where they happen):
-// - Skin rewards (rew / rewm / rewr / rewn) are public-game only in v7 (isPubType): KN has no
-//   inventory economy for them, so they are parsed and ignored (map-logic.md §2.8).
+// - Skin rewards (rew / rewm / rewr / rewc / rewn, AI.spawn reward*): v10.0.4's AI.kill drop loop in a pub-type round
+//   (ai_rewards, shared/include/raid_drops.h). The skins go through game_give_skin / a Loot Drop (kn_brain's give_skin
+//   on servers with rewards; nothing offline), their rarities through GameHooks.skin_rarity.
 // - Players hit AIs at the AI's live position (v7 rewinds AIs by the shooter's ping, posHist).
 // - The built-in kinds' own trigger actions (Jack O' Lantern 62, Mirror Image 65) are backend KR
 //   actions, no-ops without kn_brain (Decision 4): the kinds carry no trigger.
@@ -130,6 +131,42 @@ static int json_int(const cJSON *object, const char *key) {
 
 static float json_float(const cJSON *object, const char *key) {
     return (float) json_number(cJSON_GetObjectItem(object, key), 0);
+}
+
+// JS Number(s) of one comma-separated entry [s, end): trimmed, "" is 0, "0x" hex, anything else not wholly a number NaN
+static double ai_js_number(const char *s, const char *end) {
+    while (s < end && isspace((unsigned char) *s)) s++;
+    while (end > s && isspace((unsigned char) end[-1])) end--;
+    if (s == end) return 0.0;
+    char buf[64];
+    const size_t n = (size_t) (end - s);
+    if (n >= sizeof(buf)) return NAN;
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    char *stop = NULL;
+    if (n > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
+        const double v = (double) strtoull(buf + 2, &stop, 16);
+        return stop > buf + 2 && *stop == 0 ? v : NAN;
+    }
+    const double v = strtod(buf, &stop);
+    return stop > buf && *stop == 0 ? v : NAN;
+}
+
+// rewc: "string" == typeof rewc ? rewc.split(",") : undefined (deob-10.0.4.js:168431), then AI.init's validator
+// (deob-10.0.4.js:181990, :25057): map(Number), finite 0..100, store.rarities entries summing to 100 within 1e-6
+static int ai_reward_chance(const cJSON *rewc, double out[RAID_RARITIES]) {
+    if (!cJSON_IsString(rewc)) return 0;
+    double values[RAID_RARITIES * 4];
+    int n = 0;
+    for (const char *p = cJSON_GetStringValue(rewc);;) {
+        const char *comma = strchr(p, ',');
+        const char *end = comma ? comma : p + strlen(p);
+        if (n < (int) (sizeof(values) / sizeof(values[0]))) values[n++] = ai_js_number(p, end);
+        else return 0; // more entries than any valid list (only RAID_RARITIES of them may survive the filter)
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return raid_reward_chance_parse(values, n, out);
 }
 
 static int json_present(const cJSON *object, const char *key) { // OBJECT.k != null
@@ -324,7 +361,15 @@ static void ai_build_data(const cJSON *o, GameAIData *d, char *name, const size_
     d->melee_hit_sound = json_int(o, "melh");
     d->aggro_sound = json_int(o, "agr");
     d->score = (int) ai_limit((float) json_int(o, "sp"), 0.0f, 10000.0f);
-    // rew / rewm / rewr / rewn: public-game skin rewards (no-op natively, see the header)
+    // v10.0.4 skin rewards (buildAIData deob-10.0.4.js:168428-168432, addAI :168538): rew is the reward list when it is
+    // a string (rew.split(",")), rewm / rewr / rewn parseInt || 0 (not limited on maps), rewc the rarity chances
+    const cJSON *rew = cJSON_GetObjectItem(o, "rew");
+    d->has_reward = (unsigned char) cJSON_IsString(rew);
+    d->reward_count = d->has_reward ? raid_reward_parse_map(cJSON_GetStringValue(rew), d->reward, RAID_REWARD_MAX) : 0;
+    d->reward_method = json_int(o, "rewm");
+    d->reward_req = json_int(o, "rewr");
+    d->reward_node = json_int(o, "rewn");
+    d->has_reward_chance = (unsigned char) ai_reward_chance(cJSON_GetObjectItem(o, "rewc"), d->reward_chance);
     d->behaviour = (int) ai_limit((float) json_int(o, "bh"), 0.0f, 20.0f);
     d->is_boss = (unsigned char) json_present(o, "boss"); // isBoss (deob-10.0.3.js:204916)
     d->ignore_on_stuck = (unsigned char) json_present(o, "igos");
@@ -651,6 +696,7 @@ static void ai_init(GameAI *ai, const vec3 position, const char *name, const int
     ai_clear_target(ai);
     ai->old_target_uid = -1;
     ai->last_hit_uid = -1;
+    ai->dmg_count = 0; // dmgList = [] (deob-10.0.4.js:182210)
     ai->zapped_by = -1;
     ai->vision = z->vision ? (float) z->vision : 120.0f;
     ai->chase_distance = z->chase_distance ? z->chase_distance : 10.0f;
@@ -1078,6 +1124,8 @@ void game_ai_remove(Game *game, GameAI *ai) { // AI.removeFully
     // the slot is dropped at the next tick (ai_compact): callers may hold GameAI pointers (/kill)
 }
 
+static void ai_rewards(Game *game, GameAI *ai); // AI.kill's skin drops (after ai_path_node)
+
 // AI.kill(killer, silent)
 static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
     if (!ai->active) return;
@@ -1105,7 +1153,7 @@ static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
 #endif
         // v10.0.3 KrunkScript onAIDeath(sid, name, killerId) after mode.onAIDeath (deob-10.0.3.js:206338-206341)
         if (game_is_authority(game)) ks_game_on_ai_death(game, ai->sid, ai->name, source);
-        // reward && isPubType(): skin drops (not ported, see the header)
+        if (game_is_authority(game)) ai_rewards(game, ai); // reward && isPubType(): the skin drops (deob-10.0.4.js:183017)
         if (source && ai_player_siphon(source) > 0.0f) player_change_health(source, NULL, -ai_player_siphon(source), 0); // siphon heals
     }
     if (!ai->respawn_timer) game_ai_remove(game, ai);
@@ -1157,6 +1205,10 @@ int game_ai_change_health(Game *game, GameAI *ai, float amount, Player *source, 
     }
     if (source) {
         if (amount < 0.0f) {
+            // dmgList.includes(id) || dmgList.push(id), after the death check (deob-10.0.4.js:182978)
+            int listed = 0;
+            for (int i = 0; i < ai->dmg_count && !listed; i++) listed = ai->dmg_list[i] == source->uid;
+            if (!listed && ai->dmg_count < GAME_AI_DMG_MAX) ai->dmg_list[ai->dmg_count++] = source->uid;
             source->damage_dealt -= amount;
             ai->last_hit_uid = source->uid;
             ai->last_hit_timer = AI_LAST_HIT_MS;
@@ -1446,6 +1498,51 @@ static const Object *ai_path_node(const Game *game, const int nid) { // manager.
     return found;
 }
 
+// Math.random() for getItemByChance (raid_drops.h)
+static double ai_random01(void *user) {
+    (void) user;
+    return ldexp((double) pcg32_random(), -32);
+}
+
+// store.skins[skin].rarity through GameHooks.skin_rarity (-1: not a skin, or no store)
+static int ai_skin_rarity(void *user, const int skin) {
+    return game_skin_rarity(user, skin);
+}
+
+static int ai_damaged_by(const GameAI *ai, const int uid) { // dmgList.includes(player.id)
+    for (int i = 0; i < ai->dmg_count; i++)
+        if (ai->dmg_list[i] == uid) return 1;
+    return 0;
+}
+
+// AI.kill: `if (this.reward && game.isPubType())` (deob-10.0.4.js:183017-183038): every eligible player (rewardReq,
+// raid_reward_eligible) gets getItemByChance(reward, rewardChance) once, twice with isDoubleRaidDrops; a skin (not 0,
+// not an empty slot) is dropped as a Loot Drop at the AI (rewardMethod 1) or at the rewardNode path node (2, when it
+// exists), else given (rewardUnique skips a player who has it). Players are walked in the game's order, as players.list.
+static void ai_rewards(Game *game, GameAI *ai) {
+    const GameAIData *d = &ai->data;
+    if (!d->has_reward || !game_is_pub_type(game)) return;
+    const Object *node = ai_path_node(game, d->reward_node);
+    const int rolls = raid_drop_rolls(game->double_raid_drops);
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *p = game->players[i];
+        if (!p || !raid_reward_eligible(d->reward_req, p->is_bot, p->active, ai_damaged_by(ai, p->uid), ai->last_hit_uid == p->uid)) continue;
+        for (int r = 0; r < rolls; r++) {
+            const int skin = raid_pick_drop(d->reward, d->reward_count, d->has_reward_chance ? d->reward_chance : NULL, ai_skin_rarity, game,
+                                            ai_random01, NULL);
+            if (skin <= 0) continue; // `item && -1 != item`: skin 0, NaN and an empty slot drop nothing
+            if (d->reward_method == RAID_METHOD_DROP_AI) {
+                game_drop_skin(game, p, skin, NULL, ai->position);
+            } else if (d->reward_method == RAID_METHOD_DROP_NODE && node) {
+                game_drop_skin(game, p, skin, NULL, node->position);
+            } else {
+                if (d->reward_unique && game_has_skin(game, p, skin)) continue;
+                game_give_skin(game, p, skin, NULL);
+            }
+        }
+    }
+}
+
 static void ai_advance_path(GameAI *ai) {
     const int n = ai->data.path_count;
     switch (ai->data.path_type) {
@@ -1703,6 +1800,7 @@ static void ai_update(Game *game, const int index, const float q) {
         ai->position = ai->start;
         ai->health = ai->max_health;
         ai->respawn_timer = 0.0f;
+        ai->dmg_count = 0; // dmgList.length = 0 (deob-10.0.4.js:182634)
     }
     if (!ai->active) return;
 

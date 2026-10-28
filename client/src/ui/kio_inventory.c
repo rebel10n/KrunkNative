@@ -185,11 +185,15 @@ typedef struct {
     int *quantity;
     int price, action, from;
     int count;
+    // list: the batches' cursor (market_list_batch): the rows, the row and the units of it already sent
+    MarketListRow *rows;
+    int nrows, row, used;
 } Req;
 
 static void req_free(Req *r) {
     market_picks_free(&r->picks);
     free(r->quantity);
+    free(r->rows);
     free(r);
 }
 
@@ -227,21 +231,26 @@ static void bulk_answer(void *user, const int status, const cJSON *data, const c
 }
 
 static void bulk_next(Req *r) {
-    const int n = r->picks.n;
-    if (r->from >= n) {
-        bulk_done(r, 1, NULL);
-        return;
-    }
     cJSON *body;
     const char *path;
     if (r->kind == 1) {
+        const int n = r->picks.n;
+        if (r->from >= n) {
+            bulk_done(r, 1, NULL);
+            return;
+        }
         r->count = n - r->from < BULK_SELL_CHUNK ? n - r->from : BULK_SELL_CHUNK;
         body = market_quick_sell_body(r->action, &r->picks, r->from, r->count);
         path = "market/quick-sell/bulk";
     } else {
-        r->count = market_list_fit(&r->picks, r->quantity, r->from);
-        if (r->count < 1) r->count = 1;
-        body = market_list_body(&r->picks, r->quantity, r->price, r->from, r->count);
+        // the list run's cursor lives in the batches (market_list_batch); NULL = every row is sent, or no memory
+        int units = 0;
+        body = market_list_batch(r->rows, r->nrows, &r->row, &r->used, &units);
+        if (!body) {
+            const int finished = r->row >= r->nrows;
+            bulk_done(r, finished, finished ? NULL : I18N("generic.error", "Error"));
+            return;
+        }
         path = "market/list/bulk";
     }
     char *text = body ? cJSON_PrintUnformatted(body) : NULL;
@@ -284,6 +293,16 @@ static int start_bulk(const int kind, const int action, const int price, MarketP
         req_free(r);
         if (done) done(user, 0, I18N("generic.error", "Error"));
         return 0;
+    }
+    if (kind == 2) { // one row per pick: a stack lists its quantity, a copy one (the List Items modal, deob-10.0.4.js:131924-131943)
+        r->rows = calloc((size_t) picks.n, sizeof(MarketListRow));
+        if (!r->rows) {
+            req_free(r);
+            if (done) done(user, 0, I18N("generic.error", "Error"));
+            return 0;
+        }
+        r->nrows = picks.n;
+        for (int i = 0; i < picks.n; i++) r->rows[i] = (MarketListRow) {picks.item_ids[i], picks.skin_ids[i], price, r->quantity[i]};
     }
     bulk_next(r);
     return 1;

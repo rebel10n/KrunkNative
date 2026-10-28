@@ -73,6 +73,7 @@ void hud_ui_hit(Client*, int kill);
 #include <console.h>     // ui_console_on_server_line: the official line in the developer console
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
 #include "v10_loading.h" // #loadingBg: the v10.0.4 map card (client/tests/v10_loading_test.c)
+#include <scene_warm.h> // the card waits for the warm frames (scene_warm_active)
 #include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
 #include <candy_heist.h> // Candy Heist: candy_heist_is_mode / candy_heist_candy for the team slot (hud_render_team)
 #include <cJSON.h>
@@ -4757,7 +4758,8 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_net_stats_step(now);
     hud_end_step(client, hud_now_ms(client)); // the HUD clock: the same base as the results' end_start_ms
     hud_endscreen_v10_tick(hud_now_ms(client)); // the Collect countdown and the rewards overlay schedule: the clock of its results (hud_now_ms), not now_f
-    v10_loading_tick(hud_now_ms(client)); // #loadingBg: the hold, the fade (v10_loading.c)
+    // #loadingBg: the hold, the fade (v10_loading.c); not while the scene warms (10.0.4 hides it once !warming, :223011)
+    if (!scene_warm_active()) v10_loading_tick(hud_now_ms(client));
     hud_feed_step(now * 1000.0);
     // game-overlay text popups (client/src/ui/hud_popups.c): drawn while playing (no kill card / menu)
     hud_popups_set_comp(client->game.config.comp);

@@ -1,10 +1,13 @@
 // market_bulk_test: item locks, select-mode picks and the bulk request bodies (client/src/ui/market_bulk.c)
 // against deob-10.0.4.js: the lock sets (:108837-108853, :147254), the lock body (:108862), the quick-sell
-// chunks of 250 (:146851), the buy-multiple body (:132755), and the MARKET_BUSY text (:104255).
+// chunks of 250 (:146851), the bulk list's 100-unit requests that split a row (:131956-131968) and its fee (:132071),
+// the buy-multiple body (:132755) and ladder (:132813, :132827), the quick sell value (:108926-108962), and the
+// MARKET_BUSY text (:104255).
 //   market_bulk_test
 #include <market_bulk.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <cJSON.h>
@@ -99,26 +102,88 @@ static void test_picks(void) {
     cJSON_Delete(rows);
 }
 
+static int item_int(const cJSON *items, const int i, const char *key) {
+    const cJSON *row = cJSON_GetArrayItem(items, i);
+    const cJSON *v = row ? cJSON_GetObjectItem(row, key) : NULL;
+    return v ? v->valueint : -1;
+}
+
 static void test_list(void) {
-    MarketLocks locks = {0};
-    MarketPicks picks = {0};
-    int quantity[8];
-    for (int i = 0; i < 8; i++) {
-        market_picks_toggle(&picks, &locks, 500 + i, 900 + i, 0);
-        quantity[i] = i < 2 ? 60 : 1; // 60 + 60 > 100: the first request takes one stack
-    }
-    CHECK(market_list_fit(&picks, quantity, 0) == 1, "a list request takes picks while their quantity fits 100");
-    CHECK(market_list_fit(&picks, quantity, 1) == 7, "the next request takes the next picks while they fit (%d)", market_list_fit(&picks, quantity, 1));
-    cJSON *body = market_list_body(&picks, quantity, 25, 1, 7);
-    cJSON *items = body ? cJSON_GetObjectItem(body, "items") : NULL;
-    cJSON *row = items ? cJSON_GetArrayItem(items, 0) : NULL;
-    CHECK(items && cJSON_GetArraySize(items) == 7, "the list body holds the rows it covers (%d)", items ? cJSON_GetArraySize(items) : -1);
-    CHECK(row && cJSON_GetObjectItem(row, "item_id")->valueint == 901 && cJSON_GetObjectItem(row, "skin_id")->valueint == 501 &&
-              cJSON_GetObjectItem(row, "price")->valueint == 25 && cJSON_GetObjectItem(row, "quantity")->valueint == 60,
-          "each row is {item_id, skin_id, price, quantity}");
-    cJSON_Delete(body);
-    market_picks_free(&picks);
-    market_locks_free(&locks);
+    // a stack of 150 at 25, a stack of 60 at 7, two copies at 40: 100 units per request, rows split across them
+    const MarketListRow rows[] = {{901, 501, 25, 150}, {902, 502, 7, 60}, {903, 601, 40, 1}, {903, 602, 40, 1}};
+    int row = 0, used = 0, units = 0;
+    cJSON *b1 = market_list_batch(rows, 4, &row, &used, &units);
+    cJSON *i1 = b1 ? cJSON_GetObjectItem(b1, "items") : NULL;
+    CHECK(i1 && cJSON_GetArraySize(i1) == 1 && units == 100 && item_int(i1, 0, "quantity") == 100 && item_int(i1, 0, "skin_id") == 501 &&
+              item_int(i1, 0, "price") == 25 && item_int(i1, 0, "item_id") == 901,
+          "the first request takes 100 of the 150-stack (%d rows, %d units)", i1 ? cJSON_GetArraySize(i1) : -1, units);
+    CHECK(row == 0 && used == 100, "the cursor stays in the stack (%d, %d)", row, used);
+    cJSON *b2 = market_list_batch(rows, 4, &row, &used, &units);
+    cJSON *i2 = b2 ? cJSON_GetObjectItem(b2, "items") : NULL;
+    CHECK(i2 && cJSON_GetArraySize(i2) == 2 && units == 100 && item_int(i2, 0, "quantity") == 50 && item_int(i2, 1, "quantity") == 50 &&
+              item_int(i2, 1, "skin_id") == 502 && item_int(i2, 1, "price") == 7,
+          "the second takes the stack's last 50 and 50 of the next row");
+    cJSON *b3 = market_list_batch(rows, 4, &row, &used, &units);
+    cJSON *i3 = b3 ? cJSON_GetObjectItem(b3, "items") : NULL;
+    CHECK(i3 && cJSON_GetArraySize(i3) == 3 && units == 12 && item_int(i3, 0, "quantity") == 10 && item_int(i3, 1, "skin_id") == 601 &&
+              item_int(i3, 2, "skin_id") == 602 && item_int(i3, 2, "quantity") == 1,
+          "the last request takes the rest (%d rows, %d units)", i3 ? cJSON_GetArraySize(i3) : -1, units);
+    CHECK(market_list_batch(rows, 4, &row, &used, &units) == NULL && units == 0, "then nothing is left");
+    cJSON_Delete(b1);
+    cJSON_Delete(b2);
+    cJSON_Delete(b3);
+
+    const MarketListRow empty[] = {{1, 1, 5, 0}};
+    row = used = 0;
+    CHECK(market_list_batch(empty, 1, &row, &used, &units) == NULL, "a row with no units sends nothing");
+
+    CHECK(market_list_fee(25, 4) == 12 && market_list_fee(10, 3) == 3 && market_list_fee(1, 1) == 1 && market_list_fee(0, 5) == 0,
+          "the fee is quantity * ceil(price / 10) (%ld %ld %ld)", market_list_fee(25, 4), market_list_fee(10, 3), market_list_fee(1, 1));
+}
+
+static void test_ladder(void) {
+    cJSON *data = parse("{\"prices\":[5,6,6,9,120]}");
+    double *p = NULL;
+    const int n = market_ladder_parse(data, &p);
+    CHECK(n == 5 && p && p[0] == 5 && p[4] == 120, "the ladder is data.prices, cheapest first (%d)", n);
+    CHECK(market_ladder_total(p, n, 3) == 17, "three cost the three cheapest (%g)", market_ladder_total(p, n, 3));
+    CHECK(market_ladder_total(p, n, 9) == 146, "a quantity past the ladder takes all of it");
+    CHECK(market_ladder_total(p, n, 0) == 0, "none costs nothing");
+    free(p);
+    cJSON_Delete(data);
+    cJSON *none = parse("{\"prices\":[]}");
+    CHECK(market_ladder_parse(none, &p) == 0 && p == NULL, "an empty ladder");
+    CHECK(market_ladder_parse(NULL, &p) == 0 && p == NULL, "no data");
+    cJSON_Delete(none);
+}
+
+static void test_qs_value(void) {
+    cJSON *legendary = parse("{\"rarity\":3}");
+    MarketQsValue v = market_qs_value(legendary);
+    CHECK(v.kr == 100 && v.junk == 0 && v.can_kr && !v.can_junk && !v.can_destroy && v.can_qs, "a Legendary sells for 100 KR, no Junk");
+    cJSON *contra = parse("{\"rarity\":5}");
+    v = market_qs_value(contra);
+    CHECK(v.kr == 2500 && v.junk == 5 && v.can_kr && v.can_junk, "a Contraband sells for KR or Junk");
+    cJSON *nqs = parse("{\"rarity\":6,\"noQuickSell\":true}");
+    v = market_qs_value(nqs);
+    CHECK(!v.can_kr && !v.can_junk && v.can_destroy && !v.can_qs, "noQuickSell is destroy only");
+    cJSON *bm = parse("{\"rarity\":4,\"noSale\":true,\"blackM\":true}");
+    v = market_qs_value(bm);
+    CHECK(!v.can_kr && !v.can_junk && !v.can_destroy, "a Black Market item that is noSale does none of them");
+    cJSON *min = parse("{\"rarity\":6,\"minQuickSell\":1}");
+    v = market_qs_value(min);
+    CHECK(v.kr == 5 && v.junk == 0.01, "minQuickSell: 5 KR, 0.01 Junk (%g %g)", v.kr, v.junk);
+    cJSON *ovr = parse("{\"rarity\":0,\"qsKR\":7,\"qsJunk\":3}");
+    v = market_qs_value(ovr);
+    CHECK(v.kr == 7 && v.junk == 0, "qsKR overrides a KR value; qsJunk needs a Junk value to override");
+    v = market_qs_value(NULL);
+    CHECK(!v.can_kr && !v.can_junk && !v.can_destroy, "no item, no value");
+    cJSON_Delete(legendary);
+    cJSON_Delete(contra);
+    cJSON_Delete(nqs);
+    cJSON_Delete(bm);
+    cJSON_Delete(min);
+    cJSON_Delete(ovr);
 }
 
 static void test_groups(void) {
@@ -168,6 +233,8 @@ int main(void) {
     test_lock_body();
     test_picks();
     test_list();
+    test_ladder();
+    test_qs_value();
     test_groups();
     test_chunk_limit();
     test_buy_multiple_and_errors();

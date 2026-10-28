@@ -38,6 +38,7 @@
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
 #include <math.h>
+#include <pthread.h> // g_drops_lock (on_skin_reward, krunker_net_take_drop_instance)
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2810,6 +2811,50 @@ static void on_skin_found(KrunkerLink *l, const int sid, const KrunkerValue *ind
     emit(l, NET_PACKET_SKIN_FOUND, &s, sizeof(s));
 }
 
+// v10.0.4: "skin" [skinIndex, silent, iid, {serial}] (sendUserSkin, deob-10.0.4.js:194184-194189): an instance
+// (iid > 0) is kept for the account (krunker_net_take_drop_instance) before the drop's NET_PACKET_SKIN_FOUND goes
+// out, so the main thread's account_add_skin adds it as its own entry (addSkin with the iid, :221926) and the drop can
+// be equipped without a relog; then the card and the line as before. A few at most: drops arrive one by one and are
+// taken the same frame; a full table drops its oldest.
+#define DROP_INSTANCES 8
+static struct {
+    int skin, iid, has_serial;
+    double serial;
+} g_drops[DROP_INSTANCES];
+static int g_drops_next;
+static pthread_mutex_t g_drops_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int krunker_net_take_drop_instance(const int skin_index, int *iid, cJSON **meta) {
+    *iid = 0;
+    *meta = NULL;
+    pthread_mutex_lock(&g_drops_lock);
+    for (int i = 0; i < DROP_INSTANCES; i++) {
+        if (!g_drops[i].iid || g_drops[i].skin != skin_index) continue;
+        *iid = g_drops[i].iid;
+        if (g_drops[i].has_serial && (*meta = cJSON_CreateObject())) cJSON_AddNumberToObject(*meta, "serial", g_drops[i].serial);
+        g_drops[i].iid = 0;
+        break;
+    }
+    pthread_mutex_unlock(&g_drops_lock);
+    return *iid > 0;
+}
+
+static void on_skin_reward(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *index = arg(f, 0), *iid = arg(f, 2), *meta = arg(f, 3);
+    if (krunker_is(index, KRUNKER_NUM) && krunker_is(iid, KRUNKER_NUM) && iid->u.num > 0) {
+        const KrunkerValue *serial = krunker_is(meta, KRUNKER_MAP) ? krunker_get(meta, "serial") : NULL;
+        pthread_mutex_lock(&g_drops_lock);
+        const int slot = g_drops_next;
+        g_drops_next = (g_drops_next + 1) % DROP_INSTANCES;
+        g_drops[slot].skin = (int) index->u.num;
+        g_drops[slot].iid = (int) iid->u.num;
+        g_drops[slot].has_serial = krunker_is(serial, KRUNKER_NUM);
+        g_drops[slot].serial = g_drops[slot].has_serial ? serial->u.num : 0;
+        pthread_mutex_unlock(&g_drops_lock);
+    }
+    on_skin_found(l, l->my_sid, index);
+}
+
 static void on_skin_found_message(KrunkerLink *l, const KrunkerFrame *f) {
     char id[64];
     id_string(arg(f, 0), id, sizeof(id));
@@ -3046,7 +3091,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_VOTE_FORFEIT: on_vote_forfeit(l, &f); break;
         case KRUNKER_S2C_PLAYER_RECONNECTED: on_player_reconnected(l, &f); break;
         case KRUNKER_S2C_FAILED_TO_ENDER: on_failed_to_enter(l, &f); break;
-        case KRUNKER_S2C_SKIN_REWARD: on_skin_found(l, l->my_sid, arg(&f, 0)); break;
+        case KRUNKER_S2C_SKIN_REWARD: on_skin_reward(l, &f); break;
         case KRUNKER_S2C_SKIN_FOUND_MESSAGE: on_skin_found_message(l, &f); break;
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);

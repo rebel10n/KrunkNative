@@ -501,6 +501,21 @@ static void test_give_skin(Game *game, const Player *player, const int skin, con
     g_given_skin = skin;
     snprintf(g_given_reason, sizeof(g_given_reason), "%s", reason ? reason : "");
 }
+static char g_progress_key[40];
+static int g_progress_value, g_progress_max, g_progress_calls;
+static void test_progress(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon,
+                          const int streak, const int item) {
+    (void) game;
+    (void) player;
+    (void) stat;
+    (void) weapon;
+    (void) streak;
+    (void) item;
+    snprintf(g_progress_key, sizeof(g_progress_key), "%s", key ? key : "");
+    g_progress_value = value;
+    if (value > g_progress_max) g_progress_max = value;
+    g_progress_calls++;
+}
 static int test_account(void *user, const Player *player, char *id, const size_t id_n, char *name, const size_t name_n) {
     (void) user;
     (void) player;
@@ -607,6 +622,17 @@ static void test_ai_wrapper(void) {
     // a hosted (not pub-type) game: only the four maps of 10.0.3's list (customMapData.id, deob-10.0.3.js:208303)
     const int was_sandbox = game.is_sandbox;
     game.is_sandbox = 0;
+    // player.trackStat(stat, value), v10.0.4 (deob-10.0.4.js:184292-184314): a pub-type game outside the sandbox, an
+    // account, a \w{1,32} stat, min(parseInt(value) || 0, 1000) >= 1 -> challenges.update(stat, value), returns true
+    game.hooks.progress = test_progress;
+    g_progress_calls = g_progress_max = 0;
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n"
+                      "    GAME.log(\"t \" + toStr(me.trackStat(\"candy\", 5000)) + \" \" + toStr(me.trackStat(\"bad stat\", 3)) + \" \" +\n"
+                      "        toStr(me.trackStat(\"candy\", 0)) + \" \" + toStr(me.trackStat(\"candy\", \"7x\")));\n}\n");
+    CHECK(logged("t true false false true") && g_progress_calls == 2 && g_progress_max == 1000 && !strcmp(g_progress_key, "candy") && g_progress_value == 7,
+          "trackStat: candy 5000 -> 1000 counted, a bad stat and 0 refused, \"7x\" -> 7 (%s, %d calls, %s %d)",
+          g_log_count ? g_log[g_log_count - 1] : "none", g_progress_calls, g_progress_key, g_progress_value);
+    game.hooks.progress = NULL;
     game_config_host(&game, NULL, 0);
     CHECK(!game_is_pub_type(&game), "the hosted game is no pub type");
     g_given_skin = 0;

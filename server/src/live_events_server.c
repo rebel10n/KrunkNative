@@ -127,7 +127,20 @@ int server_events_reward(const ClientConnection *client, const int map_index) {
 static MapGameUids g_uids;
 static int g_uids_map = -2;
 
+// A map object with a skin reward ("rew", an AI_SPAWNER's v10.0.4 reward list)
+static int ev_map_has_rewards(const cJSON *map) {
+    const cJSON *object;
+    cJSON_ArrayForEach(object, cJSON_GetObjectItemCaseSensitive(map, "objects")) {
+        if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(object, "rew"))) return 1;
+    }
+    return 0;
+}
+
 void server_events_round(Game *game, const int custom) {
+    // v10.0.4 AI skin rewards read the store's rarities: load them now, not when the first rewarding AI dies (1.5 MB)
+    if (!g_store_loaded && game && game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count &&
+        ev_map_has_rewards(game->maps[game->current_map_index]))
+        ev_store_load();
     const int eggs = live_events_map_objects(game ? game->map : NULL, custom); // a custom game's are inert
     if (eggs) server_log("[events] %d EVENT object(s)%s", eggs, custom ? " (custom game: inert)" : "");
     map_game_uids_free(&g_uids);
@@ -288,6 +301,24 @@ int server_events_on_brain_frame(const cJSON *frame) {
     return 1;
 }
 
+int server_store_skin_rarity(const int skin) {
+    if (!g_store_loaded) ev_store_load();
+    return skin >= 0 && skin < g_store_count ? g_store[skin].rarity : -1;
+}
+
+static int ev_skin_rarity(const Game *game, const int skin) {
+    (void) game;
+    return server_store_skin_rarity(skin);
+}
+
+static int ev_has_skin(const Game *game, const Player *player, const int skin) {
+    (void) game;
+    return accounts_has_skin(player, skin);
+}
+
 void server_events_install_game_hooks(Game *game) {
-    if (game) game->hooks.event_item = ev_found_item;
+    if (!game) return;
+    game->hooks.event_item = ev_found_item;
+    game->hooks.skin_rarity = ev_skin_rarity; // v10.0.4 AI rewards: getItemByChance's store.skins[i].rarity (shared/src/ai.c)
+    game->hooks.has_skin = ev_has_skin;       // rewardUnique: account.hasSkin
 }

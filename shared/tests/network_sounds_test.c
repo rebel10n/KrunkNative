@@ -3,7 +3,7 @@
 //
 //   - the table against shared/tests/data/v10/networkSounds.json (tools/krunker/extract_sounds.py from
 //     deob-10.0.4.js:18263) and, when the decoded bundle is on this machine, against the bundle itself
-//     (KN_DEOB_1003, default ~/.cache/kn-official/game-10.0.4.deob.js)
+//     (KN_DEOB_1004, default ~/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js)
 //   - the ids the bundle sends by name (its indexOf calls), config.taunts' ids, the weapons' shot sounds
 //   - the id space: v7.1.4's 265 names and v3.1.1's 51 are a prefix (one v3.1.1 slot differs); checked
 //     against those reference trees too when they are present
@@ -110,10 +110,10 @@ static void check_fixture(void) {
 
 static void check_bundle(void) {
     char path[512];
-    const char *env = getenv("KN_DEOB_1003");
+    const char *env = getenv("KN_DEOB_1004");
     const char *home = getenv("HOME");
     if (env && env[0]) snprintf(path, sizeof(path), "%s", env);
-    else snprintf(path, sizeof(path), "%s/.cache/kn-official/game-10.0.4.deob.js", home ? home : "");
+    else snprintf(path, sizeof(path), "%s/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js", home ? home : "");
     int count = 0, line = 0;
     char **names = js_string_array(path, "['spray', \"taunt_0\"", &count, &line);
     if (!names) {

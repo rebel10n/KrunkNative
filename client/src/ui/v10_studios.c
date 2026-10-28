@@ -889,7 +889,10 @@ static void currencies_markup(StrBuf *sb) {
         sb_append(sb, "</button>");
     }
     sb_append(sb, "</div> <div class=\"sd-hint svelte-a9j4oe\">");
-    sb_text(sb, I18N("studios.currencies.hint", "Symbols are 2-4 uppercase letters. KR, JNK and RP are reserved. Up to 5 currencies per studio."));
+    char hint[320]; // 5 published at once, 20 in total (deob-10.0.4.js:139320; the brain's limits, db_studios.c)
+    sb_text(sb, I18N_F(hint, "studios.currencies.hint",
+                       "Symbols are 2-4 uppercase letters. Names and symbols must be unique in the studio and can’t match a Krunker currency (KR, JNK, RP...). Up to {0} published at once, {1} in total.",
+                       "5", "20"));
     sb_append(sb, "</div>");
 }
 

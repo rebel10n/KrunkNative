@@ -18,6 +18,7 @@
 #include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
+#include <krunker_link.h> // krunker_net_take_drop_instance: the drops the game server gave (account_add_skin)
 #include <kn_captcha.h> // the sign-in's and the registration's captcha (doc/v10/captcha.md)
 #include <alt_store.h> // the encrypted session vault (client/src/alt/)
 #include <alt_manager_ui.h> // the Account Manager's answers to its Add / switch requests
@@ -693,6 +694,17 @@ void account_set_funds(const double funds) {
     mark_header();
 }
 
+void account_kio_set_balances(const int has_funds, const double funds, const int has_junk, const double junk) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj) return;
+    cJSON *v = NULL;
+    if (has_funds && (v = cJSON_CreateNumber(funds))) obj_set("player_funds", v);
+    cJSON_Delete(v);
+    v = NULL;
+    if (has_junk && (v = cJSON_CreateNumber(junk))) obj_set("player_jnk", v);
+    cJSON_Delete(v);
+    g_kio.gen++;
+}
+
 int account_add_skin(const int skin_index) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         // the krunker.io account's own (the game socket's "dslr"): v10's account.addSkin(ind) (deob-10.0.3.js
@@ -704,8 +716,23 @@ int account_add_skin(const int skin_index) {
             skins = cJSON_AddArrayToObject(g_kio.obj, "skins");
             if (!skins) return 0;
         }
-        int n = 0;
         cJSON *entry;
+        int iid = 0;
+        cJSON *meta = NULL;
+        if (krunker_net_take_drop_instance(skin_index, &iid, &meta)) {
+            // v10.0.4's addSkin(ind, 1, iid, meta): the instance is its own entry (deob-10.0.4.js:115078-115087), so a
+            // drop is equipped by its id without a relog (the SKIN_REWARD handler, deob-10.0.4.js:221926)
+            entry = cJSON_CreateObject();
+            cJSON_AddNumberToObject(entry, "ind", skin_index);
+            cJSON_AddNumberToObject(entry, "cnt", 1);
+            cJSON_AddNumberToObject(entry, "id", iid);
+            cJSON_AddItemToObject(entry, "m", meta ? meta : cJSON_CreateObject());
+            cJSON_AddNumberToObject(entry, "st", 0);
+            cJSON_AddItemToArray(skins, entry);
+            g_kio.gen++;
+            return 1;
+        }
+        int n = 0;
         cJSON_ArrayForEach(entry, skins) {
             const cJSON *ind = cJSON_GetObjectItemCaseSensitive(entry, "ind");
             if (!cJSON_IsNumber(ind) || ind->valueint != skin_index || cJSON_GetObjectItemCaseSensitive(entry, "id")) continue;
@@ -2430,6 +2457,10 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (name && !strcmp(name, "logoutAcc") && account_backend() == ACCOUNT_BACKEND_KRUNKER) { // also without a brain
         account_ui_logout();
         return 1;
+    }
+    { // Privacy & Age (kid_settings.c): the krunker.io account's k-ID switches, Ask a Parent, Show Code, the parent dialog
+        const int kid = kid_settings_handle(name, args, argc);
+        if (kid >= 0) return kid;
     }
     if (name && !g_logged_in && reset_handle(name)) return 1; // KrunkNative forgot password (works without a brain: says why)
     if (!name || (!backend_enabled() && !g_scenario)) return -1; // g_scenario: --render-scenario's stand-in account

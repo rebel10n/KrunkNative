@@ -4,10 +4,36 @@
 // the end screen runs out) and mode_round.c (IN_PROGRESS when the wait timers drain).
 #include <shared.h>
 #include <net_ext.h>
+#include <raid_drops.h> // v10.0.4 isDoubleRaidDrops
 #include <string.h>
+#include <time.h>
+
+static int64_t (*g_event_clock)(void); // tests: a fixed "now"
+
+void game_set_event_clock(int64_t (*now_ms)(void)) {
+    g_event_clock = now_ms;
+}
+
+static int64_t event_now_ms(void) {
+    if (g_event_clock) return g_event_clock();
+    struct timespec ts;
+    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (int64_t) time(NULL) * 1000;
+}
+
+// updateEventFlags (deob-10.0.4.js:195384-195385): isDoubleRaidDrops = isPubType() && a Saturday or Sunday (UTC). Called at
+// a round's start (startGame, :193368: the INITIALIZING state here) and whenever the state is set to IN_PROGRESS
+// (setGameState, :195391; the wait timers draining, :195001, set it), on the authority only (isServer || sandbox)
+void game_update_event_flags(Game *game) {
+    if (!game || !game_is_authority(game)) return;
+    game->double_raid_drops = (unsigned char) raid_double_drops(game_is_pub_type(game), event_now_ms());
+}
 
 void game_set_state(Game *game, const GameState state) {
-    if (!game || game->game_state == (unsigned char) state) return;
+    if (!game) return;
+    // v10 setGameState: `state === IN_PROGRESS && updateEventFlags()` before the unchanged check; startGame's own call
+    if (state == GAME_STATE_IN_PROGRESS || state == GAME_STATE_INITIALIZING) game_update_event_flags(game);
+    if (game->game_state == (unsigned char) state) return;
     game->game_state = (unsigned char) state;
 
     NetGameStatePacket packet = {.state = (uint8_t) state};

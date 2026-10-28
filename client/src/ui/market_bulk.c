@@ -125,17 +125,13 @@ cJSON *market_quick_sell_body(const int action, const MarketPicks *picks, const 
     return body;
 }
 
-int market_list_fit(const MarketPicks *picks, const int *quantity, const int from) {
-    int total = 0, n = 0;
-    for (int i = from < 0 ? 0 : from; i < picks->n; i++) {
-        if (total + quantity[i] > MARKET_BULK_LIST_CHUNK) break;
-        total += quantity[i];
-        n++;
+cJSON *market_list_batch(const MarketListRow *rows, const int n, int *row, int *used, int *units) {
+    *units = 0;
+    while (*row < n && rows[*row].quantity - *used <= 0) { // an empty row (or a row already sent) is skipped
+        (*row)++;
+        *used = 0;
     }
-    return n;
-}
-
-cJSON *market_list_body(const MarketPicks *picks, const int *quantity, const int price, const int from, const int count) {
+    if (*row >= n) return NULL;
     cJSON *body = cJSON_CreateObject();
     cJSON *items = cJSON_CreateArray();
     if (!body || !items) {
@@ -144,19 +140,102 @@ cJSON *market_list_body(const MarketPicks *picks, const int *quantity, const int
         return NULL;
     }
     cJSON_AddItemToObject(body, "items", items);
-    const int start = from < 0 ? 0 : from;
-    int end = start + count;
-    if (end > picks->n) end = picks->n;
-    for (int i = start; i < end; i++) {
-        cJSON *row = cJSON_CreateObject();
-        if (!row) break;
-        cJSON_AddNumberToObject(row, "item_id", picks->item_ids[i]);
-        cJSON_AddNumberToObject(row, "skin_id", picks->skin_ids[i]);
-        cJSON_AddNumberToObject(row, "price", price);
-        cJSON_AddNumberToObject(row, "quantity", quantity[i]);
-        cJSON_AddItemToArray(items, row);
+    // deob-10.0.4.js:131956-131968: a row's units go out min(left, 100 - batch) at a time; a full batch is sent
+    while (*row < n && *units < MARKET_BULK_LIST_CHUNK) {
+        const MarketListRow *r = &rows[*row];
+        const int left = r->quantity - *used;
+        if (left <= 0) {
+            (*row)++;
+            *used = 0;
+            continue;
+        }
+        const int take = left < MARKET_BULK_LIST_CHUNK - *units ? left : MARKET_BULK_LIST_CHUNK - *units;
+        cJSON *item = cJSON_CreateObject();
+        if (!item) break;
+        cJSON_AddNumberToObject(item, "item_id", r->item_id);
+        cJSON_AddNumberToObject(item, "skin_id", r->skin_id);
+        cJSON_AddNumberToObject(item, "price", r->price);
+        cJSON_AddNumberToObject(item, "quantity", take);
+        cJSON_AddItemToArray(items, item);
+        *units += take;
+        *used += take;
+        if (*used >= r->quantity) {
+            (*row)++;
+            *used = 0;
+        }
     }
     return body;
+}
+
+long market_list_fee(const int price, const int quantity) {
+    if (price < 1 || quantity < 1) return 0;
+    return (long) quantity * (long) ((price + 9) / 10); // ceil(0.1 * price) for an integer price
+}
+
+int market_ladder_parse(const cJSON *data, double **prices) {
+    *prices = NULL;
+    const cJSON *list = data ? cJSON_GetObjectItemCaseSensitive(data, "prices") : NULL;
+    const int n = cJSON_IsArray(list) ? cJSON_GetArraySize(list) : 0;
+    if (n <= 0) return 0;
+    double *out = malloc(sizeof(double) * (size_t) n);
+    if (!out) return 0;
+    int k = 0;
+    for (const cJSON *p = list->child; p; p = p->next)
+        if (cJSON_IsNumber(p)) out[k++] = p->valuedouble;
+    if (!k) {
+        free(out);
+        return 0;
+    }
+    *prices = out;
+    return k;
+}
+
+double market_ladder_total(const double *prices, const int n, int quantity) {
+    if (quantity > n) quantity = n;
+    double total = 0;
+    for (int i = 0; i < quantity; i++) total += prices[i];
+    return total;
+}
+
+// store.rarities' quick sell KR (sell) and Junk (scrap) by rarity (deob-10.0.4.js:103296-103372): Uncommon, Rare,
+// Epic, Legendary, Relic, Contraband, Unobtainable, NFT
+static const double k_rarity_sell[] = {1, 3, 10, 100, 500, 2500, 10000, 10};
+static const double k_rarity_scrap[] = {0, 0, 0, 0, 0, 5, 50, 0};
+#define RARITIES ((int) (sizeof(k_rarity_sell) / sizeof(k_rarity_sell[0])))
+
+static int item_true(const cJSON *item, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(item, key);
+    if (cJSON_IsBool(v)) return cJSON_IsTrue(v);
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0;
+    return cJSON_IsString(v) && v->valuestring[0];
+}
+
+static double item_num(const cJSON *item, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(item, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : 0;
+}
+
+MarketQsValue market_qs_value(const cJSON *item) {
+    MarketQsValue v = {0};
+    // deob-10.0.4.js:108928-108950: no item, or noSale && blackM, or opensea: nothing at all
+    if (!item || (item_true(item, "noSale") && item_true(item, "blackM")) || item_true(item, "opensea")) return v;
+    const int r = (int) item_num(item, "rarity");
+    const int rarity = r >= 0 && r < RARITIES ? r : 0; // rarities[rarity] || rarities[0]
+    const int no_qs = item_true(item, "noQuickSell");
+    double kr = no_qs ? 0 : k_rarity_sell[rarity], junk = no_qs ? 0 : k_rarity_scrap[rarity];
+    if (item_true(item, "minQuickSell")) { // :108952
+        if (kr) kr = 5;
+        if (junk) junk = 0.01;
+    }
+    if (item_num(item, "qsKR") && kr) kr = item_num(item, "qsKR");          // :108953
+    if (item_num(item, "qsJunk") && junk) junk = item_num(item, "qsJunk"); // :108954
+    v.kr = kr;
+    v.junk = junk;
+    v.can_kr = !no_qs && kr > 0;
+    v.can_junk = !no_qs && junk > 0;
+    v.can_destroy = no_qs;
+    v.can_qs = !no_qs && (kr > 0 || junk > 0);
+    return v;
 }
 
 cJSON *market_buy_multiple_body(const int item_id, const int quantity, const double max_total) {

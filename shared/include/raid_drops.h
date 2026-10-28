@@ -12,9 +12,11 @@
  *   - getItemByChance (deob-10.0.4.js:193984): a rarity is drawn from the weights (random(0.0001, 100), the first
  *     rarity whose running total exceeds it; 0 when none does), then one of the boss's reward items of that rarity
  *     is picked at random. A negative reward entry -n is n empty slots (-1). Nothing of that rarity: no drop.
- *   - The boss death loop (deob-10.0.4.js:183020) rolls once per reward per player, twice when the match has
- *     isDoubleRaidDrops, in a public round, for each boss with a reward. The loop has no map test of its own, so
- *     which bosses double is set by their reward config (the changelog names Bastion's Hydra and Catacombs).
+ *   - AI.kill's reward loop (deob-10.0.4.js:183017-183038) runs for any AI with a reward (a boss or not) in a pub-type
+ *     round: each eligible player (rewardReq) gets one getItemByChance, two when the match has isDoubleRaidDrops; a
+ *     skin is given (rewardMethod 0; rewardUnique skips an owner), or dropped as a Loot Drop at the AI (1) or at a path
+ *     node (2). The loop has no map test of its own: every rewarding AI doubles on a double-drop weekend (the changelog
+ *     names Bastion's Hydra and Catacombs, the raids whose bosses have rewards). Wired in shared/src/ai.c.
  *   - isDoubleRaidDrops (deob-10.0.4.js:195385, iiìîíìî at deob-10.0.4.js:24851): a public round on a Saturday or
  *     Sunday (UTC), the same weekend schedule as dxp_schedule (double_xp.h). Set by updateEventFlags.
  */
@@ -51,5 +53,26 @@ int raid_roll_rarity(double roll, const double *weights);
  * and the pick draw from `random` (Math.random()). */
 int raid_pick_drop(const int *reward, int count, const double *weights, int (*rarity_of)(void *user, int skin), void *user,
                    RaidRandom random, void *random_user);
+
+/* ---- the AI's reward fields (the wiring: shared/src/ai.c, AI.kill) */
+#define RAID_REWARD_MAX 64 /* reward entries kept per AI */
+enum { RAID_METHOD_GIVE = 0, RAID_METHOD_DROP_AI = 1, RAID_METHOD_DROP_NODE = 2 };          /* rewardMethod */
+enum { RAID_REQ_ACTIVE = 0, RAID_REQ_DAMAGED = 1, RAID_REQ_LAST_HIT = 2 };                  /* rewardReq */
+
+/* A map AI's "rew" (addAI: isString(rew) ? rew.split(",") : null, deob-10.0.4.js:168538): each entry as getItemByChance's
+ * parseInt reads it (deob-10.0.4.js:193993); an entry parseInt makes NaN contributes nothing and is left out. Returns
+ * the entries kept (at most max). */
+int raid_reward_parse_map(const char *csv, int *out, int max);
+/* KrunkScript AI.spawn's reward (deob-10.0.4.js:186973-186980): split(","), entries matching /^\d+$/ only, each
+ * limit(parseInt(v) || 0, 0, 1e6). Returns the entries kept (at most max); 0 = no reward (an empty list is none). */
+int raid_reward_parse_script(const char *csv, int *out, int max);
+
+/* The reward loop's player test (deob-10.0.4.js:183019): not a bot, and by rewardReq 0 active, 1 active and in the AI's
+ * dmgList, 2 active and the AI's lastHit.doer. */
+int raid_reward_eligible(int req, int is_bot, int active, int damaged, int last_hitter);
+
+/* dropSkin's spread (iîïïîïï(3, 8), deob-10.0.4.js:23809, at :194163-194165): sign(random - 0.5) * (floor(random * 6) + 3),
+ * two draws; 0 when the first draw is exactly 0.5 (Math.sign(0)). */
+int raid_drop_spread(RaidRandom random, void *random_user);
 
 #endif

@@ -1,8 +1,8 @@
-# KrunkNative additions on top of v10.0.3
+# KrunkNative additions on top of v10
 
-Krunker Box Office plays Krunker v10.0.3 (`target.md`). A few things are KrunkNative's own, added on
+Krunker Box Office plays Krunker v10.0.4 (`target.md`). A few things are KrunkNative's own, added on
 top of v10 on purpose. They are mods, not parity gaps: a parity audit compares KN with
-`deob-10.0.3.js` and leaves these out. Each one is also marked at its definition in the code.
+`deob-10.0.4.js` and leaves these out. Each one is also marked at its definition in the code.
 
 ## The Nettspend class
 
@@ -41,7 +41,8 @@ The id is stored as a number in these places:
 | `ui/textures/classes/icon_16.png` (`tools/nettspend/icons.py`) | `icon_index` = the id |
 | wire: SPAWN / ENT class_index, comp lobby `c`, GAME_CONFIG `classes` | both ends build from one table |
 
-The id has been 16 since 2026-10-14, and v10.0.3 still has 16 classes, so nothing is migrated today.
+The id has been 16 since 2026-10-14, and v10.0.4 still has 16 classes (Triggerman to Infiltrator,
+`deob-10.0.4.js:102448`), so nothing is migrated today.
 If v10's table grows, `CLASS_ID_NETTSPEND` no longer equals `KN_CLASS_NETTSPEND_STORED` and a
 `_Static_assert` in `classes_v10.c` stops the build. To fix it, migrate the stored rows and
 settings (16 becomes the new id; a stored 16 then means the new v10 class), rename the icon, and

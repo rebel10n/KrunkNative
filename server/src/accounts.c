@@ -2154,6 +2154,12 @@ int accounts_can_use_skin(const Player *player, const int skin) {
     return client && accounts_owns_skin(client, skin);
 }
 
+int accounts_has_skin(const Player *player, const int skin) {
+    const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!client || client->acct.account_id <= 0 || !client->acct.skins_known || skin < 0 || skin >= ACC_SKIN_MAX) return 0;
+    return (client->acct.skins_owned[skin >> 3] >> (skin & 7)) & 1;
+}
+
 int accounts_filter_cosmetics(const ClientConnection *client, PlayerCosmetics *c, PlayerCosmeticsV7 *v7) {
     int32_t *slots[14] = {&c->hat, &c->body, &c->waist, &c->face, &c->dye};
     int count = 5;

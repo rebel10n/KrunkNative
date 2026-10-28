@@ -425,6 +425,8 @@ typedef struct {
     int data_w;               // data.wId (weapon box), -1 none
     float data_xd;            // data.xD (rotation)
     float data_zd;            // data.zD (pads)
+    int data_item;            // data.itemId (Loot Drop, server only), 0 none
+    char data_reason[16];     // data.reason (Loot Drop, server only), "" = giveSkin's "raid"
     int owner_uid;            // playerSpecific pid, -1 none
     unsigned char active:1;
     unsigned char dont_destroy:1; // a partly picked KR Tag stack stays
@@ -520,7 +522,7 @@ int mode_match_starting(const struct Game_t*);       // a pre-match timer (not c
 // overtime), so the caller must not end it. Called by game.c before game_end_round.
 int mode_end_game(struct Game_t*);
 ModeWinner mode_pick_winner(struct Game_t*);         // endGame(): winner by winCondition / team score / best player
-int mode_public_no_winner(const struct Game_t*);     // v10.0.3: a public match (not Raid, not the sandbox) has no winner
+int mode_public_no_winner(const struct Game_t*);     // a noWinner mode (10.0.4), or a public match (not Raid, not the sandbox): no winner
 int mode_winner_set(ModeWinner);                     // `this.winner` truthy: a team, a player or no_one (not a draw)
 void mode_sort_players(struct Game_t*, struct Player_t **players, size_t count); // endSort / orderByScore
 int mode_active_count(const struct Game_t*);

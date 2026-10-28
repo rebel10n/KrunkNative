@@ -4,7 +4,9 @@
 #include <raid_drops.h>
 #include <double_xp.h> // dxp_schedule: the Saturday / Sunday schedule of isDoubleRaidDrops
 
+#include <limits.h>
 #include <math.h>
+#include <string.h>
 
 // store.lootRars (deob-10.0.4.js:103699): getItemByChance's weights when the boss gives none
 static const double k_loot_rars[RAID_RARITIES] = {0, 0, 70.395, 25.49, 4, 0.105, 0.01};
@@ -77,4 +79,73 @@ int raid_pick_drop(const int *reward, const int count, const double *weights, in
         }
     }
     return -1; // not reached: the pick is one of the len entries counted above
+}
+
+// JS parseInt(s) (no radix) of one comma-separated entry [s, end): leading white space, a sign, "0x" hex, then digits;
+// 0 = NaN (no digit)
+static int js_parse_int(const char *s, const char *end, long long *out) {
+    while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r' || *s == '\v' || *s == '\f')) s++;
+    int neg = 0;
+    if (s < end && (*s == '+' || *s == '-')) neg = *s++ == '-';
+    int base = 10;
+    if (end - s >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        base = 16;
+        s += 2;
+    }
+    long long v = 0;
+    int digits = 0;
+    for (; s < end; s++) {
+        const int c = (unsigned char) *s;
+        const int d = c >= '0' && c <= '9' ? c - '0' : base == 16 && c >= 'a' && c <= 'f' ? c - 'a' + 10 : base == 16 && c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (d < 0) break;
+        if (v < 1000000000000LL) v = v * base + d; // larger than any skin id: kept as is, never a store skin
+        digits++;
+    }
+    if (!digits) return 0;
+    *out = neg ? -v : v;
+    return 1;
+}
+
+int raid_reward_parse_map(const char *csv, int *out, const int max) {
+    if (!csv || !out || max <= 0) return 0;
+    int n = 0;
+    for (const char *p = csv;;) {
+        const char *comma = strchr(p, ',');
+        const char *end = comma ? comma : p + strlen(p);
+        long long v;
+        if (n < max && js_parse_int(p, end, &v)) out[n++] = v > INT_MAX ? INT_MAX : v < -1000000 ? -1000000 : (int) v; // -n: n empty slots
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return n;
+}
+
+int raid_reward_parse_script(const char *csv, int *out, const int max) {
+    if (!csv || !out || max <= 0) return 0;
+    int n = 0;
+    for (const char *p = csv;;) {
+        const char *comma = strchr(p, ',');
+        const char *end = comma ? comma : p + strlen(p);
+        int digits = end > p; // /^\d+$/: one digit or more, nothing else
+        for (const char *q = p; q < end && digits; q++) digits = *q >= '0' && *q <= '9';
+        long long v = 0;
+        if (digits && n < max && js_parse_int(p, end, &v)) out[n++] = v > 1000000 ? 1000000 : (int) v; // limit(parseInt || 0, 0, 1e6)
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return n;
+}
+
+int raid_reward_eligible(const int req, const int is_bot, const int active, const int damaged, const int last_hitter) {
+    if (is_bot) return 0;
+    if (req == RAID_REQ_ACTIVE) return active;
+    if (req == RAID_REQ_DAMAGED) return active && damaged;
+    if (req == RAID_REQ_LAST_HIT) return active && last_hitter;
+    return 1; // no requirement matches another value (rewardReq is limited to 0..2 where it is set)
+}
+
+int raid_drop_spread(RaidRandom random, void *random_user) {
+    const double sign_draw = random(random_user) - 0.5;
+    const int magnitude = (int) floor(random(random_user) * 6) + 3;
+    return sign_draw > 0 ? magnitude : sign_draw < 0 ? -magnitude : 0;
 }

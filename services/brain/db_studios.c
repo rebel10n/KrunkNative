@@ -63,7 +63,10 @@
 /* v10's limits (the window's hints: studios.create.hint, members.hint, currencies.hint) */
 #define STUDIO_OWNED_MAX 3
 #define STUDIO_MEMBERS_MAX 20       /* counting pending invites */
-#define STUDIO_CURRENCIES_MAX 5
+/* v10.0.4: up to 20 currencies in total and 5 published at once (studios.currencies.hint {0}, {1} = 5, 20,
+ * deob-10.0.4.js:139320; the publish button is off at 5 published, :139268). 10.0.3 had 5 in total. */
+#define STUDIO_CURRENCIES_MAX 20
+#define STUDIO_CURRENCIES_PUBLISHED_MAX 5
 /* monetization requirements (studios.monetization.req.*; the ban window, 180 days, is in the SQL)
  * and the wait after a rejection; invites last 14 days ({later:1209600}) */
 #define MON_ACCOUNT_AGE_DAYS 90
@@ -407,6 +410,11 @@ static int currency_ok(const char *name, const char *symbol, int64_t decimals) {
     return strcmp(symbol, "KR") && strcmp(symbol, "JNK") && strcmp(symbol, "RP");
 }
 
+/* the studio's published currencies */
+static int64_t published_count(Dbx *x, int64_t studio) {
+    return dbx_int(x, SQL(.any = "SELECT count(*) FROM studio_currencies WHERE studio_id = {int:$1} AND active = 1"), KN_DB_ARGS(I64S(studio)), 0);
+}
+
 static kn_db_result *op_currency_create(Dbx *x, int64_t actor, int64_t studio, const char *json) {
     const int role = role_of(x, studio, actor);
     if (role <= 0) return refuse(x, "STUDIO_NOT_FOUND");
@@ -422,18 +430,21 @@ static kn_db_result *op_currency_create(Dbx *x, int64_t actor, int64_t studio, c
         return refuse(x, "STUDIO_CURRENCY_LIMIT");
     if (dbx_exists(x, SQL(.any = "SELECT 1 FROM studio_currencies WHERE studio_id = {int:$1} AND symbol = $2"), KN_DB_ARGS(I64S(studio), symbol)))
         return refuse(x, "STUDIO_CURRENCY_TAKEN");
+    // A new currency is published while fewer than 5 are (as every currency was before 10.0.4's cap), else it
+    // starts unpublished: the cap is the window's (:139268) and the bundle does not say what the server does here.
+    const int64_t active = published_count(x, studio) < STUDIO_CURRENCIES_PUBLISHED_MAX;
     const int64_t id = dbx_insert_id(
         x,
-        SQL(.pg = "INSERT INTO studio_currencies (studio_id, name, symbol, decimals) VALUES ($1::int, $2, $3, $4::int) RETURNING id",
-            .sqlite = "INSERT INTO studio_currencies (studio_id, name, symbol, decimals) VALUES ({int:$1}, $2, $3, {int:$4}) RETURNING id",
-            .any = "INSERT INTO studio_currencies (studio_id, name, symbol, decimals) VALUES ({int:$1}, $2, $3, {int:$4})"),
-        KN_DB_ARGS(I64S(studio), name, symbol, I64S(decimals)));
+        SQL(.pg = "INSERT INTO studio_currencies (studio_id, name, symbol, decimals, active) VALUES ($1::int, $2, $3, $4::int, $5::int) RETURNING id",
+            .sqlite = "INSERT INTO studio_currencies (studio_id, name, symbol, decimals, active) VALUES ({int:$1}, $2, $3, {int:$4}, {int:$5}) RETURNING id",
+            .any = "INSERT INTO studio_currencies (studio_id, name, symbol, decimals, active) VALUES ({int:$1}, $2, $3, {int:$4}, {int:$5})"),
+        KN_DB_ARGS(I64S(studio), name, symbol, I64S(decimals), I64S(active)));
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "currency_id", (double) id);
     cJSON_AddStringToObject(o, "name", name);
     cJSON_AddStringToObject(o, "symbol", symbol);
     cJSON_AddNumberToObject(o, "decimals", (double) decimals);
-    cJSON_AddBoolToObject(o, "active", 1);
+    cJSON_AddBoolToObject(o, "active", (int) active);
     return dbx_json(x, "currency", o);
 }
 
@@ -443,6 +454,11 @@ static kn_db_result *op_currency_active(Dbx *x, int64_t actor, int64_t studio, i
     if (role != 1) return refuse(x, "STUDIO_FORBIDDEN");
     if (!dbx_exists(x, SQL(.any = "SELECT 1 FROM studio_currencies WHERE id = {int:$1} AND studio_id = {int:$2}"), KN_DB_ARGS(I64S(currency), I64S(studio))))
         return dbx_failed(x) ? dbx_finish(x, NULL) : refuse(x, "STUDIO_CURRENCY_NOT_FOUND");
+    // 10.0.4: 5 published at once (studios.currencies.publishCap, deob-10.0.4.js:139268); re-publishing a
+    // published currency is not a sixth
+    if (active && !dbx_exists(x, SQL(.any = "SELECT 1 FROM studio_currencies WHERE id = {int:$1} AND active = 1"), KN_DB_ARGS(I64S(currency))) &&
+        published_count(x, studio) >= STUDIO_CURRENCIES_PUBLISHED_MAX)
+        return dbx_failed(x) ? dbx_finish(x, NULL) : refuse(x, "STUDIO_CURRENCY_PUBLISH_CAP");
     dbx_exec(x, SQL(.any = "UPDATE studio_currencies SET active = {int:$2} WHERE id = {int:$1}"), KN_DB_ARGS(I64S(currency), I64S(active)));
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "currency_id", (double) currency);

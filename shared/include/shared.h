@@ -2055,6 +2055,12 @@ typedef struct {
     // EVENT object (an egg; the callers :196105, :196858, :206942). The server runs the egg hunt (server/src/live_events_server.c).
     // NULL = nothing.
     void (*event_item)(struct Game_t*, Player *finder, Object *object);
+    // v10.0.4 raid drops (AI.kill's reward loop, shared/src/ai.c): store.skins[skin].rarity, -1 when `skin` is not a
+    // store skin (the server: assets/skins.json, live_events_server.c). NULL = no store: no reward can drop.
+    int (*skin_rarity)(const struct Game_t*, int skin);
+    // account.hasSkin(skin) for an AI's rewardUnique: 1 when the player's account owns it (the server: the coordinator's
+    // inventory, accounts.c; nothing is known as owned before it arrives). NULL = owns nothing.
+    int (*has_skin)(const struct Game_t*, const Player*, int skin);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2243,6 +2249,9 @@ typedef struct Game_t {
     // v10 game.freezeOthers (deob-10.0.3.js:221548): the last applyFreezeOthers request (player_pose.c),
     // false again at each round's start (:219811)
     unsigned char freeze_others;
+    // v10.0.4 game.isDoubleRaidDrops (updateEventFlags, deob-10.0.4.js:195384-195385): a pub-type round on a Saturday or
+    // Sunday (UTC), set at a round's start and whenever the state turns IN_PROGRESS (game_state.c); AI rewards roll twice
+    unsigned char double_raid_drops;
     // v10 game.eventIndex (init [2]): the live event of this round, 0 none. updateEventIndex (deob-10.0.3.js:219733-219751)
     // gives a public round the first ongoing event's id (server/src/accounts.c, the brain's gameEvents); clients get it
     // with the INIT (NET_EXT_INIT_EVENT)
@@ -2411,6 +2420,13 @@ void game_challenge(Game*, const Player*, const char *key, int value, int weapon
 void game_challenge_item(Game*, const Player*, const char *key, int value, int item);
 // game.giveSkin(player, skin, reason): an account's found skin (GameHooks.give_skin), public games
 void game_give_skin(Game*, const Player*, int skin, const char *reason);
+// v10.0.4 game.dropSkin(player, skin, reason, x, y, z) (deob-10.0.4.js:194155-194168): giveSkin's checks, then a Loot Drop
+// only `player` sees and takes (spawnables.c, its pickup gives the skin) at position +-3..8 on x and z, turned at random
+int game_drop_skin(Game*, Player*, int skin, const char *reason, vec3 position);
+int game_skin_rarity(const Game*, int skin);               // GameHooks.skin_rarity, -1 without it
+int game_has_skin(const Game*, const Player*, int skin);   // GameHooks.has_skin, 0 without it
+void game_update_event_flags(Game*);                       // updateEventFlags: double_raid_drops now (game_state.c)
+void game_set_event_clock(int64_t (*now_ms)(void));        // tests: the clock of updateEventFlags (NULL = the wall clock)
 // game.sendUserJunk(reason, player, junk) (GameHooks.junk_credit): the callers gate the mode
 // (Reward Junk: public, not the sandbox; the airdrop: public lobbies). Bots and no hook do nothing.
 void game_junk_credit(Game*, const Player*, int64_t hundredths, const char *reason);

@@ -160,6 +160,11 @@ int  v10_market_owns_frame(const char *label); // 1 = the open exchange answers 
 void clan_ui_reset(void);                   // account changed: drop clanData
 void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
+// krunker.io: the instance of an item the game server just gave (10.0.4's SKIN_REWARD [skin, silent, iid, meta],
+// deob-10.0.4.js:194184-194189): the next account_add_skin(skin) adds it as v10.0.4's addSkin(skin, 1, iid, meta)
+// does (an entry {ind, cnt: 1, id, m, st: 0}, deob-10.0.4.js:115078-115087, :221926), so it can be equipped at once.
+// krunker.io: the balances a market REST answer carries (data.funds / data.junk), set as the "uf" frame sets them.
+void account_kio_set_balances(int has_funds, double funds, int has_junk, double junk);
 void account_remove_skin(int skin_index);   // acc.removeSkin: -1 of skin (a redeemed spin ticket)
 // A paint applied (paint_picker.c): one paint unit taken, copy_id gets paint m (from_stack: a stack's unit became it)
 void account_paint_applied(int item, int paint, int copy_id, int from_stack, const cJSON *m);

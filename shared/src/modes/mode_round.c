@@ -497,7 +497,10 @@ void mode_sort_players(Game *game, Player **players, const size_t count) {
 // winCondition, getWinTeam, multiWinner, the first player) and so after a forfeit's getWinTeam too. With
 // isEmptyLobby always true: every public match (no host, or mimicPubs: game_is_pub_type) except Raid and the
 // offline sandbox ends with nobody winning. Raid keeps its winner (raid.onEnd's challenges read didWin).
+// v10.0.4 puts `this.mode.noWinner ||` in front (deob-10.0.4.js:194728): a noWinner mode (Candy Heist) has no
+// winner in any lobby, hosted, the sandbox or empty, and its defeat shows ENDED (vic_title_type, :223533-223534).
 int mode_public_no_winner(const Game *game) {
+    if (game && game->mode && game->mode->config.no_winner) return 1;
     if (!game || !game->mode || !MODE_EMPTY_LOBBY || game->is_sandbox || !game_is_pub_type(game)) return 0;
     if (game->mode->config.id == MODE_ID_RAID) return 0;
     for (size_t i = 0; i < game->player_count; i++) {

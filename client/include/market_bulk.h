@@ -17,6 +17,7 @@
 
 #define MARKET_BULK_QUICK_SELL_CHUNK 250 // deob-10.0.4.js:146851 (slice of 0xfa)
 #define MARKET_BULK_LIST_CHUNK 100 // deob-10.0.4.js:131955 (0x64 quantity per request)
+#define MARKET_BUY_MULTI_CHIPS {10, 50, 100} // the quantity chips (deob-10.0.4.js:132805), those below the ladder shown
 
 // The lock state, as the last GET /items/locks answered it.
 typedef struct {
@@ -57,16 +58,39 @@ void market_picks_free(MarketPicks *picks);
 // action: 0 Get KR, 1 Get Junk, 2 Destroy (the single quick-sell's modes, v10_market.c qsi). Caller frees.
 cJSON *market_quick_sell_body(int action, const MarketPicks *picks, int from, int count);
 
-// How many picks from `from` one bulk-list request takes: their quantities total at most 100
-// (deob-10.0.4.js:131955-131963). quantity[i] is pick i's quantity (a stack's count, else 1).
-int market_list_fit(const MarketPicks *picks, const int *quantity, int from);
+// One row of a bulk list (the List Items modal, deob-10.0.4.js:131924-131943): a stack lists `quantity` of its units
+// under its stack id, each copy lists itself (quantity 1); price is the row's group's unit price.
+typedef struct {
+    int item_id, skin_id, price, quantity;
+} MarketListRow;
 
-// The POST /market/list/bulk body for picks [from, from + count): {items:[{item_id, skin_id, price, quantity}]}
-// (deob-10.0.4.js:131978-131985). price is one unit price for every pick. Caller frees.
-cJSON *market_list_body(const MarketPicks *picks, const int *quantity, int price, int from, int count);
+// The next POST /market/list/bulk body {items:[{item_id, skin_id, price, quantity}]} (deob-10.0.4.js:131978-131985):
+// rows from the cursor (*row, *used: the units of rows[*row] already sent) on, totalling at most 100 units, a row
+// split across requests when it does not fit (deob-10.0.4.js:131956-131968). Advances the cursor; *units is the
+// request's total. NULL when every row is sent. Caller frees.
+cJSON *market_list_batch(const MarketListRow *rows, int n, int *row, int *used, int *units);
+
+// The listing fee of `quantity` units at `price` each: quantity * ceil(0.1 * price) (deob-10.0.4.js:132071).
+long market_list_fee(int price, int quantity);
 
 // The POST /market/buy-multiple body: {item_id, quantity, max_total}. Caller frees.
 cJSON *market_buy_multiple_body(int item_id, int quantity, double max_total);
+
+// GET /market/items/<index>/buy-ladder's data.prices (deob-10.0.4.js:132820-132827): the unit prices of the item's
+// listings the account can buy, cheapest first. *prices is malloc'd (NULL when none); returns their number.
+int market_ladder_parse(const cJSON *data, double **prices);
+// The cost of the cheapest `quantity` listings (deob-10.0.4.js:132813), clamped to the ladder.
+double market_ladder_total(const double *prices, int n, int quantity);
+
+// The quick sell value of one item (iîìïìïî, deob-10.0.4.js:108926-108962) from its store entry (skins.json: rarity,
+// noQuickSell, noSale, blackM, opensea, minQuickSell, qsKR, qsJunk) and store.rarities' sell / scrap
+// (deob-10.0.4.js:103296-103372). The bulk sell takes the KR ones as action 0, the Junk ones as 1, the noQuickSell
+// ones as 2 (deob-10.0.4.js:147348-147350, :147352-147356).
+typedef struct {
+    double kr, junk;
+    int can_kr, can_junk, can_destroy, can_qs;
+} MarketQsValue;
+MarketQsValue market_qs_value(const cJSON *item);
 
 // One item of GET /market/inventory: its stack (stack_id, stack_max) and its copies (instances). A stack and
 // the instances of one item can both be there (deob-10.0.4.js:132190-132209).

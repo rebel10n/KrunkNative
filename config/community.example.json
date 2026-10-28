@@ -1,7 +1,7 @@
 {
   "_comment": "kn_brain community feed (services/brain/community.c, doc/backend.md 'Community feed'). Copy to config/community.json (or set brain.community.feed); the brain rereads it when it changes. news: the What's New window and the hub's News tab; events / polls: the menu's Community & Events popup. Dates are UTC ISO 8601. Events past ended_at (else start_date + duration_hours) and polls past ends_at are not served.",
   "news": [
-    {"text": "Krunker Box Office now plays Krunker v10.0.3: Ranked, Turf Wars and the new menu.", "url": "https://krunk.io/", "label": "Play now"},
+    {"text": "Krunker Box Office now plays Krunker v10.0.4: the Candy Heist Halloween event and the map loading screen.", "url": "https://krunk.io/", "label": "Play now"},
     "Server maintenance on Sunday at 10:00 UTC: games restart once."
   ],
   "events": [

@@ -1918,6 +1918,9 @@ static void test_public_winner(Game *game) {
     start_mode(game, MODE_ID_FFA);
     add_player(game, 1, 0);
     CHECK(!mode_public_no_winner(game) && !mode_pick_winner(game).no_one, "the sandbox keeps its winner");
+    // v10.0.4: a noWinner mode (Candy Heist) has no winner anywhere, the sandbox and an empty game too (deob-10.0.4.js:194728)
+    start_mode(game, MODE_ID_CANDY);
+    CHECK(mode_public_no_winner(game) && mode_pick_winner(game).no_one, "Candy Heist (noWinner): no winner, even in the sandbox");
 
     // Raid keeps its winner: a "skip" end (End Round trigger) with a survivor and time left is the raiders' win
     start_public_mode(game, MODE_ID_RAID);

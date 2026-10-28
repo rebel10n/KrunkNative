@@ -120,7 +120,7 @@ def run_mode(alias, mode_id, port):
         with open(log_path, errors="replace") as f:
             text = f.read()
         bad = [line for line in text.splitlines() if "AddressSanitizer" in line or "Segmentation" in line or "assert" in line.lower()]
-        check(f"{alias}: clean log", not bad and "Plays Krunker v10.0.3" in text, bad[0][:200] if bad else "")
+        check(f"{alias}: clean log", not bad and "Plays Krunker v10.0.4" in text, bad[0][:200] if bad else "")
 
 
 def main():

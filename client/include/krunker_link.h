@@ -466,6 +466,12 @@ void krunker_link_set_uids(KrunkerLink *l, MapGameUids *table);
 // message. The UI registers it (kio_store.c) before it sends "vo"; the link layer does not include UI headers.
 typedef void (*KrunkerVoucherFn)(int has_funds, double funds, const char *message);
 void krunker_net_voucher_listen(KrunkerVoucherFn fn);
+// Our SKIN_REWARD's instance (v10.0.4: "skin" [skinIndex, silent, iid, {serial}], deob-10.0.4.js:194184-194189): the
+// socket thread keeps it (under its own lock) before the drop's NET_PACKET_SKIN_FOUND goes out, and the main thread's
+// account_add_skin(skin) (account_ui.c) takes it, so the account adds the instance as its own entry (v10.0.4's addSkin
+// with the iid, :221926) and the drop can be equipped without a relog. 1 = an instance of skin_index was waiting:
+// *iid is its id, *meta a new {serial} object or NULL (the caller frees it).
+int krunker_net_take_drop_instance(int skin_index, int *iid, cJSON **meta);
 // A KrunkNative packet the link made from the official server's frame: a map object's uid becomes its map->objects index
 void krunker_link_uids_in(const KrunkerLink *l, NetPacket *p);
 // An interact's id (lastInteractData {type, id}) for the official server: a map object's index becomes its uid

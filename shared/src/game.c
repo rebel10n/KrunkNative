@@ -14,6 +14,7 @@
 #include <triggers_v7.h>
 #include <ks_game.h> // KrunkScript hook points (onGameEnd, TIME.freeze)
 #include <spawnables.h>
+#include <raid_drops.h>  // v10.0.4 dropSkin's spread
 #include <game_config.h> // WP-E: v7 custom game config, map config, match votes
 #include <zombies.h> // map-logic WP-H: machines, power-ups, airdrops
 #include <comp_lobby.h> // v7 comp lobby (lobbyPlayers)
@@ -379,6 +380,40 @@ void game_challenge(Game *game, const Player *player, const char *key, const int
 void game_give_skin(Game *game, const Player *player, const int skin, const char *reason) {
     if (!game || !player || player->is_bot || skin <= 0 || !game->hooks.give_skin || !game_is_authority(game) || !game_is_pub_type(game)) return;
     game->hooks.give_skin(game, player, skin, reason ? reason : "raid");
+}
+
+int game_skin_rarity(const Game *game, const int skin) {
+    return game && game->hooks.skin_rarity && skin >= 0 ? game->hooks.skin_rarity(game, skin) : -1;
+}
+
+int game_has_skin(const Game *game, const Player *player, const int skin) {
+    return game && player && game->hooks.has_skin && skin >= 0 ? game->hooks.has_skin(game, player, skin) : 0;
+}
+
+static double game_random01(void *user) { // Math.random()
+    (void) user;
+    return ldexp((double) pcg32_random(), -32);
+}
+
+int game_drop_skin(Game *game, Player *player, const int skin, const char *reason, const vec3 position) {
+    // dropSkin (deob-10.0.4.js:194155-194168): the server (the Game's serverIO: not the sandbox, which has none), a store
+    // skin, an account not flagged hack, and giveSkin's reward gate (a pub-type round here, as game_give_skin); the Loot
+    // Drop's pickup gives it (spawnables.c)
+    if (!game || !player || player->is_bot || skin <= 0 || !game->hooks.give_skin || !game_is_authority(game) || game->is_sandbox ||
+        !game_is_pub_type(game) || !player->has_account || game_skin_rarity(game, skin) < 0)
+        return -1;
+    AccountInfo account;
+    if (game_account_info(game, player, &account) && account.hacker) return -1;
+    // data {itemId, reason, xD: degToRad(randInt(0, 360))}, then x / z + iîïïîïï(3, 8): the draws in the bundle's order
+    const SpawnableData data = {
+        .w = -1,
+        .xd = (float) ((double) (int) floor(game_random01(NULL) * 361.0) * (M_PI / 180.0)),
+        .item = skin,
+        .reason = reason,
+    };
+    const float dx = (float) raid_drop_spread(game_random01, NULL);
+    const float dz = (float) raid_drop_spread(game_random01, NULL);
+    return spawnable_drop_ex(game, SPAWNABLE_LOOT_DROP, player, &data, (vec3) {position.x + dx, position.y, position.z + dz});
 }
 
 void game_junk_credit(Game *game, const Player *player, const int64_t hundredths, const char *reason) {

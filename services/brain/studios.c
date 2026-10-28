@@ -67,7 +67,8 @@ static const struct {
     {"STUDIO_MAP_TAKEN", 409, "A game can only belong to one studio at a time."},
     {"STUDIO_MAP_NOT_ASSIGNED", 404, "That game is not in this studio."},
     {"STUDIO_CURRENCY_INVALID", 400, "Symbols are 2-4 uppercase letters. KR, JNK and RP are reserved."},
-    {"STUDIO_CURRENCY_LIMIT", 400, "Up to 5 currencies per studio."},
+    {"STUDIO_CURRENCY_LIMIT", 400, "Up to 20 currencies per studio."},
+    {"STUDIO_CURRENCY_PUBLISH_CAP", 400, "Unpublish a currency first. Up to 5 can be published."}, /* studios.currencies.publishCap */
     {"STUDIO_CURRENCY_TAKEN", 409, "This studio already has a currency with that symbol."},
     {"STUDIO_CURRENCY_NOT_FOUND", 404, "Currency not found."},
     {"STUDIO_SKIN_NOT_FOUND", 404, "Skin not found."},

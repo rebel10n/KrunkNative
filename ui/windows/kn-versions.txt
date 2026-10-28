@@ -3,6 +3,24 @@
  - read by client/src/ui/v10_news.c, in Krunker's docs/versions.txt format: "== UPDATE x.y.z ==" starts an update,
  - "* Name" a group, "- text" a change, "@url" an image; the first update is the current version
 
+ == UPDATE 10.0.4 ==
+ * Candy Heist
+ - Added the Candy Heist Halloween event on its own map: collect candy, bank it at the Cauldron and avoid the Hollowmen
+ * General
+ - Added a map loading screen
+ - Added an Interact button on mobile
+ - Added a Privacy & Age section to profile Settings
+ - Matches with no winner now end with ENDED instead of DEFEAT
+ - Fixed some Shotgun skins not showing in item previews
+ * krunker.io accounts
+ - Buy from the krunker.io store, spin, redeem vouchers and send gifts from Box Office
+ - Lock items, and quick-sell or list many at once from the inventory
+ - List, buy, unlist and quick-sell on the market, and trade with other krunker.io players
+ * KrunkScript & Editor
+ - Studios can now publish, unpublish and edit currencies
+ - Setting a player's score now only counts the difference toward score challenges
+ - Improved the third-person arm for player.pose.holdL
+
  == UPDATE 10.0.3 ==
  * General
  - Added a Disable Video Skins setting (Quality)

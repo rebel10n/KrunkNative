@@ -551,6 +551,50 @@ static KsValue pl_give_skin(KsScript *s, void *native, const KsValue *args, int 
     game->hooks.give_skin(game, p, (int) id, "scripting");
     return ks_undef();
 }
+// parseInt(v) || 0 of trackStat's value: a number truncated, a string's leading integer, anything else 0
+static long track_stat_int(const KsValue v)
+{
+    if (v.tag == KS_NUM) return isfinite(v.as.num) ? (long) fmax(fmin(trunc(v.as.num), 1e9), -1e9) : 0;
+    if (v.tag != KS_STR) return 0;
+    size_t n = 0;
+    const char *t = ks_str_utf8(v, &n);
+    char buf[32];
+    if (!t) return 0;
+    n = n < sizeof(buf) - 1 ? n : sizeof(buf) - 1;
+    memcpy(buf, t, n);
+    buf[n] = 0;
+    return strtol(buf, NULL, 10);
+}
+// player.trackStat(stat, value), v10.0.4 (deob-10.0.4.js:184292-184314): on the server, outside the sandbox, in a
+// public-type game, for a player with an account, a /^\w{1,32}$/ stat and min(parseInt(value) || 0, 1000) >= 1:
+// challenges.update(stat, value) (Candy Heist's candy challenges; map 46's server script banks candy with it). true
+// when counted. Its other half, the "candy" counter skins (countSkinStat + SKIN_STAT, :184308-184311: the Hollowman's
+// Staff's count), needs counter skins (attach type 1, :172726-172735; the digit mesh, :204425-204500), not in KN yet.
+static KsValue pl_track_stat(KsScript *s, void *native, const KsValue *args, int argc)
+{
+    (void) s;
+    KsRef *r = ref_of(native);
+    Player *p = ks_player_of(native);
+    Game *game = ks_native_game(native);
+    if (!p || !game || !on_server(r) || game->is_sandbox || !game_is_pub_type(game)) return ks_bool(0);
+    char account[48] = "", name[48] = "";
+    KsGame *kg = r->kg;
+    if (!kg->account || !kg->account(kg->host_user, p, account, sizeof(account), name, sizeof(name)) || !account[0]) return ks_bool(0);
+    size_t n = 0;
+    const char *stat = ARG(0).tag == KS_STR ? ks_str_utf8(ARG(0), &n) : NULL;
+    if (!stat || n < 1 || n > 32) return ks_bool(0);
+    for (size_t i = 0; i < n; i++) {
+        if (!isalnum((unsigned char) stat[i]) && stat[i] != '_') return ks_bool(0);
+    }
+    long value = track_stat_int(ARG(1));
+    if (value > 1000) value = 1000;
+    if (value < 1) return ks_bool(0);
+    char key[33];
+    memcpy(key, stat, n);
+    key[n] = 0;
+    game_challenge(game, p, key, (int) value, -1, -1);
+    return ks_bool(1);
+}
 static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)
 {
     PLAYER_SET(r);
@@ -762,9 +806,8 @@ static const KsHostProp g_player_all_props[] = {
     {"getAsset", NULL, NULL, pl_noop, 0},
     {"playAnim", NULL, NULL, pl_noop, 0},
     {"stopAnim", NULL, NULL, pl_noop, 0},
-    // Candy Heist's candy challenges: the account's stat (deob-10.0.4.js:184293-184306, official public games only).
-    // Native games keep no account stats here, so it does nothing (map 46's server script calls it, bank and staff)
-    {"trackStat", NULL, NULL, pl_noop, 0},
+    // Candy Heist's candy challenges (pl_track_stat, deob-10.0.4.js:184292-184314; map 46's server script)
+    {"trackStat", NULL, NULL, pl_track_stat, 0},
 };
 const KsHostClass ks_player_class = {"player", g_player_all_props, (int) (sizeof(g_player_all_props) / sizeof(g_player_all_props[0]))};
 
@@ -1365,6 +1408,25 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.m_r_off = (float) clamp_d(opt_number(s, data, "modelRotation", 0), 0, 360);
     d.precise = (unsigned char) opt_bool(s, data, "preciseHits"); // v10.0.3 prc: shots hit the animated model (ai_parts.h)
     d.refl = (float) clamp_d(opt_number(s, data, "reflections", 0), 0, 4); // isNumber ? limitMM(parseFloat, 0, 4) : 0 (:211721)
+    // v10.0.4 skin rewards (deob-10.0.4.js:186970-186983; AI.kill's drop loop, shared/src/ai.c)
+    d.reward_method = (int) clamp_d(opt_int(s, data, "rewardMethod", 0), 0, 2);
+    d.reward_node = (int) opt_int(s, data, "rewardNode", 0);
+    d.reward_req = (int) clamp_d(opt_int(s, data, "rewardReq", 0), 0, 2);
+    const KsValue reward = ks_obj_get(s, data, "reward"); // a string: its /^\d+$/ entries, 0..1e6; an empty list is none
+    if (reward.tag == KS_STR) {
+        char csv[1024];
+        ks_to_string(s, reward, csv, sizeof(csv));
+        d.reward_count = raid_reward_parse_script(csv, d.reward, RAID_REWARD_MAX);
+        d.has_reward = (unsigned char) (d.reward_count > 0);
+    }
+    const KsValue chance = ks_obj_get(s, data, "rewardChance"); // Array.isArray, map(Number), the validator (:25057)
+    if (chance.tag == KS_ARR && ks_arr_len(chance) <= RAID_RARITIES * 4) {
+        double values[RAID_RARITIES * 4];
+        const int n = (int) ks_arr_len(chance);
+        for (int i = 0; i < n; i++) values[i] = ks_to_number(ks_arr_get(s, chance, (size_t) i));
+        d.has_reward_chance = (unsigned char) raid_reward_chance_parse(values, n, d.reward_chance);
+    }
+    d.reward_unique = (unsigned char) opt_bool(s, data, "rewardUnique");
     // the projectile (pjA raw, the others only when truthy)
     const KsValue pj_asset = ks_obj_get(s, data, "projectileAid");
     if (truthy(pj_asset)) ks_to_string(s, pj_asset, d.pj_asset, sizeof(d.pj_asset));
@@ -1498,6 +1560,8 @@ static KsValue api_config_get_match(KsScript *s, void *u, const KsValue *args, i
     // contTime ones too: "race ends in", "Zone closing in"), true once the last is gone (or none ever ran)
     const int started = !(game && game->mode && game->mode->wait_timer_count > 0);
     ks_obj_set(s, match, "started", ks_bool(started));
+    // v10.0.4 doubleRaidDrops: !!game.isDoubleRaidDrops (deob-10.0.4.js:187204; false on a client, as the bundle's)
+    ks_obj_set(s, match, "doubleRaidDrops", ks_bool(game && game->double_raid_drops));
     return match;
 }
 

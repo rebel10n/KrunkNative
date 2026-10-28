@@ -101,6 +101,9 @@ int accounts_info_tags(char tags[][24], int max); // ranked / custom / draining 
 int accounts_owns_skin(const ClientConnection*, int skin);
 // The same for the connection playing `player` (GameHooks.can_use_skin: players.spray); 0 for bots.
 int accounts_can_use_skin(const Player*, int skin);
+// v10.0.4 account.hasSkin for an AI's rewardUnique (GameHooks.has_skin): 1 when the coordinator's inventory lists `skin`
+// for the connection playing `player` (whatever the enforcement setting; nothing before the inventory is known).
+int accounts_has_skin(const Player*, int skin);
 // Clears cosmetics the player does not own (ENT). Returns how many were stripped.
 int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*, PlayerCosmeticsV7*); // unowned slots -> -1 (+ the premium hat/head, body/back rule)
 // Same for the weapon skins and the melee skin (ENT ent[2] / ent[9]).
