@@ -76,7 +76,7 @@ static inline int player_pose_clamp(const double value, const float max, float *
 }
 
 // The pose's arm target for side 0 (left) / 1 (right): the given armL / armR, else hold's
-// [-0.25, 0, 0], else holdL's left [-1.2, 0, -0.6] (third person; :193375, IIïiîîi / IIìiïïï.tp), else 0
+// [-0.25, 0, 0], else holdL's left [-1.4, 0.28, -0.38] (third person; 10.0.4 deob-10.0.4.js:172918, was [-1.2, 0, -0.6] in 10.0.3), else 0
 void player_pose_arm_target(const PlayerPose *pose, int side, float out[3]);
 // applyPose's IÎíïíîí: the arms move apart (armL, armR or holdL), each about its own shoulder
 int player_pose_splits_arms(const PlayerPose *pose);

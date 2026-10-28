@@ -720,16 +720,50 @@ static void spin_finished(const int next) {
 }
 
 // spinButton.onclick: ["spin", wheel, ticket, multi] or the Free KR wheel's ["fkr"]
+// The answer of a krunker.io spin (kio_store_spin, deob-10.0.4.js:221350): its data as the spin frame
+// ["spin", error, fakeRands, itemIds, funds, usedTicket] that spin_response reads.
+static cJSON *kio_or_null(const cJSON *v) { return v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull(); }
+
+static void kio_spin_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user;
+    (void) status;
+    (void) code;
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString("spin"));
+    if (message || !data) {
+        cJSON_AddItemToArray(frame, cJSON_CreateString(message ? message : "Spin Error 3"));
+    } else {
+        cJSON_AddItemToArray(frame, cJSON_CreateNull());
+        cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "fakeRands")));
+        cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "itemIds")));
+        cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "funds")));
+        cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "usedTicket")));
+    }
+    spin_response(frame);
+    cJSON_Delete(frame);
+}
+
 static void spin_button_click(void) {
     g_spin_button_time = store_now();
     const AccountInfo *acc = active_account();
     if (!g_cur || !acc || g_spinning || !g_can_spin) return;
-    if (kio_store_active()) { // read-only: a krunker.io account's spin (v10: io.send over the game socket) is never sent
-        kio_store_read_only(g_cur->kr ? "the Free KR spin" : "spin");
-        return;
-    }
     if (g_spin_ticket < 0 && acc->funds < g_cur->price) {
         spin_error("Spin Error 9");
+        return;
+    }
+    if (kio_store_active()) {
+        if (g_cur->kr) { // the Free KR wheel's spin is an ad (AD_FINISHED over the game socket): not built yet
+            kio_store_unwired("the Free KR spin");
+            return;
+        }
+        // POST spins/execute (deob-10.0.4.js:221350): the wheel's index and the ticket, -1 for null; the ticket count
+        // is checked by the server
+        g_spinning = 1;
+        g_can_spin = 0;
+        set_html("spinHeader", "");
+        set_html("spinCost", I18N("windows.store.purchasing", "Purchasing..."));
+        audio_play("buy_1", 0.1f, 0, 1.0f);
+        kio_store_spin(g_spin_index, g_spin_ticket, g_multi, kio_spin_answer, NULL);
         return;
     }
     g_spinning = 1;
@@ -1585,7 +1619,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     }
     if (!strcmp(name, "bundlePopup")) { // bundlePopup(true, false, ID): a home-tab bundle card (junk_shop_ui.c), the purchase
         const int id = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 0;
-        if (kio_store_active()) kio_store_read_only("shop/bundles/purchase");
+        if (kio_store_active()) kio_store_unwired("shop/bundles/purchase");
         else if (id > 0) junk_shop_bundle_buy(id);
         return 1;
     }
@@ -1611,7 +1645,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         return 1;
     }
     if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // payments: none
-        if (kio_store_active() && strcmp(name, "showPremiumBenefits")) kio_store_read_only("directPurchase"); // krunker.io: read-only
+        if (kio_store_active() && strcmp(name, "showPremiumBenefits")) kio_store_unwired("directPurchase"); // krunker.io: not built yet
         else if (!active_account()) menu_show_window(5, 1);
         else if (!strcmp(name, "showPremiumBenefits")) menu_show_window(36, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
@@ -1642,12 +1676,12 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         return 1;
     }
     if (!strcmp(name, "voucherPopup")) {
-        if (kio_store_active()) { // krunker.io: redeeming a voucher changes the account: read-only
-            kio_store_read_only("voucher");
-            return 1;
-        }
         if (!active_account()) {
             menu_show_window(5, 1);
+            return 1;
+        }
+        if (kio_store_active()) { // krunker.io: the code goes over the game socket as "vo" (kio_store_redeem_prompt)
+            kio_store_redeem_prompt();
             return 1;
         }
         char pop[512];
@@ -1657,7 +1691,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         return 1;
     }
     if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // no payments in KrunkNative
-        if (kio_store_active()) kio_store_read_only(name); // krunker.io's checkout: read-only
+        if (kio_store_active()) kio_store_unwired(name); // krunker.io's checkout: not built yet
         else if (!active_account()) menu_show_window(5, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;

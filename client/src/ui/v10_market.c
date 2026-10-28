@@ -46,7 +46,10 @@
 #include <ui_logic.h>
 #include <weapons.h>
 #include <v10_ui.h>
-#include <kio_store.h> // krunker.io active: the market's writes are read-only
+#include <kio_store.h> // krunker.io active: the store's and the market's writes go to krunker.io (kio_store_write)
+#include <kio_trade.h> // krunker.io's trades: the create body and the trade paths (deob-10.0.4.js:27162-27193)
+#include <backend.h> // backend_url_encode: the player search's name
+#include <kio_inventory.h> // krunker.io active: the official inventory's stack ids (quick sell, list)
 #include <v10_social.h> // krunker.io active: the listings are v10's gapi reads (kio_browse_load)
 #include <app_mode.h>
 #include <cJSON.h>
@@ -845,9 +848,41 @@ static void inventory_load(void) {
     M.inv_loading = 1;
     if (!request_page("market", "inventory", -1)) M.inv_loading = 0;
 }
+// krunker.io's own sales (GET market/sales: getSales, deob-10.0.4.js:26947, loader :108894). A row {marketid,
+// skinindex, funds, listed_time} is what the sale card reads (funds = the price, listed_time = its age:
+// deob-10.0.4.js:131055-131062); KN's sale row is {m, i, f, ms}. Unlist sends m (deob-10.0.4.js:134112).
+static void kio_sales_done(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user;
+    (void) status;
+    (void) code;
+    M.sales_loading = 0;
+    if (message || !cJSON_IsArray(data)) return; // an error keeps the rows we have
+    cJSON *rows = cJSON_CreateArray();
+    const int n = cJSON_GetArraySize(data);
+    for (int k = 0; k < n; k++) {
+        const cJSON *r = cJSON_GetArrayItem(data, k);
+        const cJSON *m = r ? cJSON_GetObjectItemCaseSensitive(r, "marketid") : NULL;
+        const cJSON *s = r ? cJSON_GetObjectItemCaseSensitive(r, "skinindex") : NULL;
+        if (!cJSON_IsNumber(m) || !cJSON_IsNumber(s)) continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "m", m->valuedouble);
+        cJSON_AddNumberToObject(o, "i", s->valuedouble);
+        cJSON_AddNumberToObject(o, "f", jnum(r, "funds"));
+        cJSON_AddNumberToObject(o, "ms", jnum(r, "listed_time"));
+        cJSON_AddItemToArray(rows, o);
+    }
+    cJSON_Delete(M.sales);
+    M.sales = rows;
+    render_both();
+}
+
 static void sales_load(void) {
     if (!logged_in() || M.sales_loading) return;
     M.sales_loading = 1;
+    if (kio_store_active()) {
+        if (!kio_store_write("GET", "market/sales", NULL, kio_sales_done, NULL)) M.sales_loading = 0;
+        return;
+    }
     if (!request_page("market", "sales", -1)) M.sales_loading = 0;
 }
 static void history_load(void) {
@@ -2024,7 +2059,7 @@ static void trade_units_free(TradeUnit *u, const int n) {
 
 // _46462: the trade item grid (svelte-z9tzua), compact. A painted copy's unit carries the PaintedBadge in its
 // trade-item-paint (v10.0.3 deob:148092 markup; the badge with offset 0, size 18 at deob:148216-148221).
-static void trade_grid(StrBuf *sb, const TradeUnit *items, const int n, const double kr, const int fill) {
+static void trade_grid(StrBuf *sb, const TradeUnit *items, const int n, const double cur[3], const int fill) {
     sb_append(sb, "<div class=\"trade-item-grid svelte-z9tzua compact\">");
     for (int k = 0; k < n; k++) {
         const ViewerSkin *s = skin(items[k].index);
@@ -2046,10 +2081,13 @@ static void trade_grid(StrBuf *sb, const TradeUnit *items, const int n, const do
     sb_append(sb, " ");
     for (int k = 0; k < empty; k++) sb_append(sb, "<div class=\"trade-item trade-item-empty svelte-z9tzua\" aria-hidden=\"true\"></div>");
     sb_append(sb, " ");
-    if (kr > 0) {
+    // the side's currency lines, one per currency with an amount: "+amt NAME" (deob-10.0.4.js:133113-133117, :133246)
+    static const char *const names[3] = {"KR", "JNK", "RP"};
+    for (int k = 0; k < 3; k++) {
+        if (cur[k] <= 0) continue;
         char n2[32];
-        fmt(n2, sizeof(n2), kr);
-        sb_appendf(sb, "<div class=\"trade-currency-line svelte-z9tzua\"><span class=\"trade-currency-item svelte-z9tzua\">+%s KR</span></div>", n2);
+        fmt(n2, sizeof(n2), cur[k]);
+        sb_appendf(sb, "<div class=\"trade-currency-line svelte-z9tzua\"><span class=\"trade-currency-item svelte-z9tzua\">+%s %s</span></div>", n2, names[k]);
     }
     sb_append(sb, " </div>");
 }
@@ -2061,9 +2099,12 @@ static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
     TradeUnit yours[256], theirs[256];
     const int ny = trade_side_units(t, mine ? "sksell" : "skbuy", mine ? "copies_s" : "copies_r", yours, 256);
     const int nt = trade_side_units(t, mine ? "skbuy" : "sksell", mine ? "copies_r" : "copies_s", theirs, 256);
-    const double ykr = jnum(t, mine ? "krsell" : "krbuy"), tkr = jnum(t, mine ? "krbuy" : "krsell");
+    // KR, JNK, RP of each side (kio_trade_row's fields, deob-10.0.4.js:133113-133117)
+    const double ycur[3] = {jnum(t, mine ? "krsell" : "krbuy"), jnum(t, mine ? "jnsell" : "jnbuy"), jnum(t, mine ? "rpsell" : "rpbuy")};
+    const double tcur[3] = {jnum(t, mine ? "krbuy" : "krsell"), jnum(t, mine ? "jnbuy" : "jnsell"), jnum(t, mine ? "rpbuy" : "rpsell")};
     const char *name = jstr(t, mine ? "buyer" : "player");
-    const int scam_give = section == 0 && (ny > 0 || ykr > 0) && nt == 0 && tkr <= 0, scam_get = section == 0 && ny == 0 && nt > 0;
+    // the scam flags are KR-based, as before the JNK / RP rows (the bundle's scam-get counts items only; scam-give is unverified for JNK / RP)
+    const int scam_give = section == 0 && (ny > 0 || ycur[0] > 0) && nt == 0 && tcur[0] <= 0, scam_get = section == 0 && ny == 0 && nt > 0;
     const char *msg = jstr(t, "message");
     sb_appendf(sb, "<div class=\"offer-holder svelte-1agthf7%s%s\" id=\"v10mkOffer%d\"><div class=\"offer-top svelte-1agthf7\"><div class=\"offer-from svelte-1agthf7\">",
                scam_give ? " scam-give" : "", scam_get ? " scam-get" : "", trid);
@@ -2106,12 +2147,12 @@ static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
     fmt(v1, sizeof(v1), yv);
     fmt(v2, sizeof(v2), tv);
     sb_appendf(sb, "</div> <div class=\"offer-items-row svelte-1agthf7\"><div class=\"offer-contents svelte-1agthf7\"><div class=\"offer-contents-label svelte-1agthf7\">Your Items [%d]</div> ", ny);
-    trade_grid(sb, yours, ny, ykr, fill);
+    trade_grid(sb, yours, ny, ycur, fill);
     sb_appendf(sb, " <div class=\"offer-est svelte-1agthf7\">~%s KR</div></div> <div class=\"offer-swap svelte-1agthf7\"><span class=\"material-icons svelte-1agthf7\">swap_horiz</span></div> "
                    "<div class=\"offer-contents svelte-1agthf7\"><div class=\"offer-contents-label svelte-1agthf7\">", v1);
     sb_append_esc(sb, name);
     sb_appendf(sb, "'s Items [%d]</div> ", nt);
-    trade_grid(sb, theirs, nt, tkr, fill);
+    trade_grid(sb, theirs, nt, tcur, fill);
     sb_appendf(sb, " <div class=\"offer-est svelte-1agthf7\">~%s KR</div></div></div> ", v2);
     if (msg[0]) {
         sb_append(sb, "<div class=\"offer-message svelte-1agthf7\">\"");
@@ -2123,10 +2164,19 @@ static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
     trade_units_free(theirs, nt);
 }
 
+static void kio_trades_answer(void *user, int status, const cJSON *data, const char *code, const char *message);
+
 static void trades_load(void) {
     if (!logged_in() || M.trades_loading) return;
     M.trades_loading = 1;
     M.lost &= ~LOST_TRADES;
+    if (kio_store_active()) { // krunker.io: the official trades (GET trades/history, the rows of kio_trades_answer)
+        if (!kio_store_write("GET", "trades/history?offset=0&limit=30", NULL, kio_trades_answer, NULL)) {
+            M.trades_loading = 0;
+            M.lost |= LOST_TRADES;
+        }
+        return;
+    }
     if (!request_page("market", "trades", -1)) {
         M.trades_loading = 0;
         M.lost |= LOST_TRADES;
@@ -3101,6 +3151,10 @@ static void bm_note(const int ok, const char *msg) {
     render_content();
 }
 
+static void kio_trade_search(const char *name); // krunker.io: the official player search (the "spR" reply)
+static void kio_trade_inventories(int target_id); // krunker.io: the official trade inventories (the "trD" reply)
+static void kio_create_trade(void); // krunker.io: the official create (POST trades/create, the "trR" reply)
+
 static void search_fire(void *user) {
     if ((int) (intptr_t) user != M.search_timer) return;
     char t[64];
@@ -3135,6 +3189,7 @@ static void start_search(const char *name) {
     M.start_err[0] = 0;
     M.pending = ACT_SEARCH;
     if (M.modal == MODAL_START) render_modal();
+    if (kio_store_active()) { kio_trade_search(t); return; } // krunker.io: the official player search
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("sp"));
     cJSON_AddItemToArray(f, cJSON_CreateString(t));
@@ -3165,6 +3220,11 @@ static void open_create_trade(const int id, const char *name) {
     cJSON_Delete(M.ct_inv);
     M.ct_inv = NULL;
     M.pending = ACT_TRADE_INV;
+    if (kio_store_active()) { // krunker.io: GET trades/inventory/<id> (the "trD" reply)
+        kio_trade_inventories(id);
+        render_modal();
+        return;
+    }
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("ri"));
     cJSON_AddItemToArray(f, cJSON_CreateString(name));
@@ -3176,18 +3236,266 @@ static void open_create_trade(const int id, const char *name) {
     render_modal();
 }
 
-// krunker.io is the active backend: market purchases, listings, quick sells, the Black Market and
-// trades change a real krunker.io account, which this client never does (kio_store.h): the market's
-// error modal says so and nothing is sent. 1 = refused.
+// krunker.io is the active backend: the actions not yet sent to krunker.io (the Black Market, trades)
+// are refused: the market's error modal says so and nothing is sent. 1 = refused.
 static int kio_refused(const char *what) {
     if (!kio_store_active()) return 0;
-    printf("[kio-store] read-only: market %s not sent to krunker.io\n", what);
+    printf("[kio-store] market %s not sent to krunker.io yet\n", what);
     M.modal = MODAL_NONE;
-    show_error(kio_store_read_only_text());
+    show_error(kio_store_unwired_text());
     return 1;
 }
 
+// krunker.io's single market actions go through kio_store_write: market.purchaseItem {market_id} (deob-10.0.4.js:133950),
+// listItem {item_id, price} (:108919), quickSellItem {item_id, action, amount, skin_id} (:132491), their paths at
+// :26980-26998. The answer goes to the economy's own reply handlers (on_social "br" / "lir" / "qsr"; "po" for a
+// failure), so the state changes and messages are the economy's. A painted copy goes as skin_id = its official
+// instance id (kio_copy_sid), only when that pairing is certain; otherwise it is refused.
+static void on_social(void *user, const cJSON *frame);
+
+static void kio_reply(const char *label, cJSON *a1, cJSON *a2) {
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString(label));
+    cJSON_AddItemToArray(f, a1);
+    if (a2) cJSON_AddItemToArray(f, a2);
+    on_social(NULL, f);
+    cJSON_Delete(f);
+}
+
+// user packs the pending act (high) and the quick-sell action (low): act * 16 + action
+static void kio_act_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) status;
+    (void) code;
+    const int packed = (int) (intptr_t) user, act = packed / 16, action = packed % 16;
+    if (message) {
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(message));
+        return;
+    }
+    const cJSON *fv = data ? cJSON_GetObjectItemCaseSensitive(data, "funds") : NULL;
+    const cJSON *cv = data ? cJSON_GetObjectItemCaseSensitive(data, "count") : NULL;
+    if (act == ACT_BUY) { // "br" applies "f" unconditionally: keep the account's funds when the answer has none
+        cJSON *o = cJSON_CreateObject();
+        const AccountInfo *a = acc();
+        cJSON_AddNumberToObject(o, "f", cJSON_IsNumber(fv) ? fv->valuedouble : a ? a->funds : 0);
+        kio_reply("br", o, NULL);
+    } else if (act == ACT_LIST) {
+        cJSON *o = cJSON_CreateObject();
+        if (cJSON_IsNumber(fv)) cJSON_AddNumberToObject(o, "funds", fv->valuedouble);
+        kio_reply("lir", o, NULL);
+    } else if (act == ACT_UNLIST) { // the economy's unlist reply: SUCCESS (deob-10.0.4.js:134112-134130)
+        kio_reply("ulir", cJSON_CreateString("SUCCESS"), NULL);
+    } else if (act == ACT_CREATE || act == ACT_ACCEPT || act == ACT_DECLINE || act == ACT_CANCEL) { // "trR": the trade's answer (the object is the success, funds in it)
+        cJSON *o = cJSON_CreateObject();
+        if (cJSON_IsNumber(fv)) cJSON_AddNumberToObject(o, "funds", fv->valuedouble);
+        kio_reply("trR", o, NULL);
+    } else if (act == ACT_DECLINE_ALL) { // "pRes": the declined-all answer (SUCCESS / ERROR)
+        kio_reply("pRes", cJSON_CreateString("SUCCESS"), NULL);
+    } else { // ACT_QS: the stack's count left (the economy's "c"), funds, and the sale's kind (kr / jnk) as "qsr" reads them
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "c", cJSON_IsNumber(cv) ? cv->valueint : 0);
+        if (cJSON_IsNumber(fv)) cJSON_AddNumberToObject(o, "f", fv->valuedouble);
+        cJSON_AddNumberToObject(o, "kr", action == 0 ? 1 : 0);
+        cJSON_AddNumberToObject(o, "jnk", action == 1 ? 1 : 0);
+        kio_reply("qsr", o, NULL);
+    }
+}
+
+static void kio_act_send(const int act, const int action, const char *method, const char *path, cJSON *body) {
+    char *text = body ? cJSON_PrintUnformatted(body) : NULL;
+    cJSON_Delete(body);
+    const int packed = act * 16 + action;
+    const int sent = (text || !body) && kio_store_write(method, path, text, kio_act_answer, (void *) (intptr_t) packed);
+    free(text);
+    if (!sent) kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(I18N("generic.error", "Error")));
+}
+
+// A painted copy's official id on krunker.io (the bundle's instanceId, sent as skin_id: deob-10.0.4.js:108919-108921,
+// :132491). The pairing is certain only when the copy's paint matches exactly one copy of the item in KN's inventory
+// and exactly one copy of it in the official one (kio_inventory_copy_for_paint; each side's paint is its metadata,
+// deob-10.0.4.js:131126, :106577-106578). 0 when the paint is missing or either side has none or several: the
+// caller refuses.
+static int kio_copy_sid(const int index, const int sid) {
+    const cJSON *mine = inv_unit(index, sid);
+    cJSON *meta = mine ? row_meta(mine) : NULL;
+    char *key = market_paint_key(meta);
+    cJSON_Delete(meta);
+    if (!key) return 0;
+    int kn = 0;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, M.inv) {
+        if (jint(r, "i", -1) != index || !row_is_copy(r)) continue;
+        cJSON *m = row_meta(r);
+        char *k = market_paint_key(m);
+        cJSON_Delete(m);
+        if (k && !strcmp(k, key)) kn++;
+        free(k);
+    }
+    const int skin = kn == 1 ? kio_inventory_copy_for_paint(index, key) : 0;
+    free(key);
+    return skin;
+}
+
+// krunker.io's trade calls (deob-10.0.4.js:27162-27193, the trades API). The player search returns one row
+// (deob-10.0.4.js:110474-110485) that the "spR" reply reads by name, as the brain's list does; the inventories
+// (GET trades/inventory/<id>, deob-10.0.4.js:111361-111366) are the "trD" reply's [mine, theirs]; the create is POST
+// trades/create (kio_create_trade). Accept and cancel stay refused on krunker.io: the trade list is still the brain's,
+// so its ids are not the official trades' (kio_trade.h).
+// GET trades/history (deob-10.0.4.js:27155, the trades page's first load: offset 0, limit 30, open included; the
+// wrapper returns the data, :110451-110461). The rows become the native trade rows (kio_trade_row): the list is
+// [open, completed], as the brain's "trades" reply is.
+static void kio_trades_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user;
+    (void) status;
+    (void) code;
+    M.trades_loading = 0;
+    if (message || !cJSON_IsObject(data)) {
+        M.lost |= LOST_TRADES;
+        render_both();
+        return;
+    }
+    cJSON *open = cJSON_CreateArray(), *done = cJSON_CreateArray();
+    const cJSON *r;
+    cJSON_ArrayForEach(r, cJSON_GetObjectItemCaseSensitive(data, "open")) cJSON_AddItemToArray(open, kio_trade_row(r));
+    cJSON_ArrayForEach(r, cJSON_GetObjectItemCaseSensitive(data, "completed")) cJSON_AddItemToArray(done, kio_trade_row(r));
+    cJSON_Delete(M.trades);
+    M.trades = cJSON_CreateArray();
+    cJSON_AddItemToArray(M.trades, open);
+    cJSON_AddItemToArray(M.trades, done);
+    M.trades_loaded = 1;
+    M.lost &= ~LOST_TRADES;
+    render_both();
+}
+
+static void kio_trade_search_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user;
+    (void) status;
+    (void) code;
+    if (message || !data) {
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(message ? message : "Player not found"));
+        return;
+    }
+    cJSON *rows = cJSON_CreateArray(); // the "spR" reply reads a list of rows
+    cJSON_AddItemToArray(rows, cJSON_Duplicate(data, 1));
+    kio_reply("spR", rows, NULL);
+}
+
+static void kio_trade_search(const char *name) {
+    char enc[128], path[192];
+    backend_url_encode(enc, sizeof(enc), name);
+    snprintf(path, sizeof(path), "trades/player-search?name=%s", enc);
+    if (!kio_store_write("GET", path, NULL, kio_trade_search_answer, NULL))
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(I18N("generic.error", "Error")));
+}
+
+static void kio_trade_inv_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user;
+    (void) status;
+    (void) code;
+    if (message || !data) {
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(message ? message : "Failed to load inventories"));
+        return;
+    }
+    const cJSON *mine = cJSON_GetObjectItemCaseSensitive(data, "my_inventory");
+    const cJSON *theirs = cJSON_GetObjectItemCaseSensitive(data, "their_inventory");
+    cJSON *inv = cJSON_CreateArray(); // [mine, theirs], the "trD" reply's third element
+    cJSON_AddItemToArray(inv, cJSON_IsArray(mine) ? cJSON_Duplicate(mine, 1) : cJSON_CreateArray());
+    cJSON_AddItemToArray(inv, cJSON_IsArray(theirs) ? cJSON_Duplicate(theirs, 1) : cJSON_CreateArray());
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("trD"));
+    cJSON_AddItemToArray(f, cJSON_CreateNull());
+    cJSON_AddItemToArray(f, cJSON_CreateNull());
+    cJSON_AddItemToArray(f, inv);
+    on_social(NULL, f);
+    cJSON_Delete(f);
+}
+
+static void kio_trade_inventories(const int target_id) {
+    char path[64];
+    kio_trade_path(path, sizeof(path), "inventory", target_id);
+    if (!kio_store_write("GET", path, NULL, kio_trade_inv_answer, NULL))
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(I18N("kn.mk.inventoriesFailed", "Couldn't load the inventories. Try again.")));
+}
+
+// A painted copy is refused: its official instance id is not mapped to KrunkNative's copy id yet.
+static void kio_create_trade(void) {
+    int copies = 0;
+    cJSON *mine = kio_trade_offer(M.ct_sel[0], M.ct_n[0], &copies);
+    cJSON *theirs = kio_trade_offer(M.ct_sel[1], M.ct_n[1], &copies);
+    if (copies) {
+        cJSON_Delete(mine);
+        cJSON_Delete(theirs);
+        M.pending = ACT_NONE;
+        M.ct_submitting = 0;
+        snprintf(M.ct_err, sizeof(M.ct_err), "Painted copies can't be traded on krunker.io yet");
+        return;
+    }
+    kio_act_send(ACT_CREATE, 0, "POST", "trades/create", kio_trade_create_body(M.ct_target_id, mine, theirs, M.ct_msg));
+}
+
+// Quick Sell on krunker.io: action 0 Get KR, 1 Get Junk, 2 Destroy (deob-10.0.4.js:132491). A stack's official id is
+// its row in the official inventory (kio_inventory_groups); a painted copy's is kio_copy_sid. KN's skin index is the item.
+static void kio_quick_sell(const int action) {
+    if (!kio_inventory_ready()) {
+        snprintf(M.qs_err, sizeof(M.qs_err), "%s", kio_inventory_gate_text());
+        return;
+    }
+    int skin = 0;
+    if (M.sel_sid >= COPY_ID_BASE) {
+        skin = kio_copy_sid(M.sel_skin, M.sel_sid);
+        if (!skin) {
+            snprintf(M.qs_err, sizeof(M.qs_err), "This painted copy can't be matched to a single krunker.io copy, so it can't be quick-sold there");
+            return;
+        }
+    } else {
+        int n = 0;
+        const MarketGroup *groups = kio_inventory_groups(&n);
+        for (int i = 0; i < n; i++) if (groups[i].item == M.sel_skin && groups[i].stack_id > 0) skin = groups[i].stack_id;
+    }
+    if (!skin) {
+        snprintf(M.qs_err, sizeof(M.qs_err), "This item is not in your krunker.io inventory");
+        return;
+    }
+    M.busy = 1;
+    M.qs_err[0] = 0;
+    M.pending = ACT_QS;
+    cJSON *b = cJSON_CreateObject();
+    cJSON_AddNumberToObject(b, "item_id", M.sel_skin);
+    cJSON_AddNumberToObject(b, "action", action);
+    cJSON_AddNumberToObject(b, "amount", M.sel_count > 1 ? M.qs_mode : 0);
+    cJSON_AddNumberToObject(b, "skin_id", skin);
+    kio_act_send(ACT_QS, action, "POST", "market/quick-sell", b);
+}
+
+// The official trade on the list with this trid carries a currency this client cannot show (kio_trade_row's other_cur,
+// a cid outside KR / JNK / RP): its accept is refused. JNK and RP are shown, so they no longer refuse.
+static int kio_trade_other_cur(const int trid) {
+    for (int side = 0; side < 2; side++) {
+        const cJSON *t;
+        cJSON_ArrayForEach(t, cJSON_GetArrayItem(M.trades, side))
+            if (jint(t, "trid", 0) == trid) return jint(t, "other_cur", 0);
+    }
+    return 0;
+}
+
+// The official accept or cancel of a listed trade (POST trades/<trid>/accept, deob-10.0.4.js:27173; cancel :27178).
+// A decline of an incoming offer is the cancel too (:137030). The trid is the official id from kio_trades_answer.
+static void kio_trade_action(const int id, const int act) {
+    if (act == ACT_ACCEPT && kio_trade_other_cur(id)) {
+        show_error("This trade has a currency this client can't show yet. Accept it on krunker.io.");
+        return;
+    }
+    char path[64];
+    kio_trade_path(path, sizeof(path), act == ACT_ACCEPT ? "accept" : "cancel", id);
+    M.actioning = id;
+    M.pending = act;
+    kio_act_send(act, 0, "POST", path, NULL);
+}
+
 static void trade_action(const char *label, const int id, const int act) {
+    if (kio_store_active()) {
+        kio_trade_action(id, act);
+        return;
+    }
     if (kio_refused(label)) return;
     char key[48];
     double v[2] = {id, 1};
@@ -3204,13 +3512,21 @@ static void trade_action(const char *label, const int id, const int act) {
 }
 
 static void confirm_modal(void) {
-    if (M.modal != MODAL_NONE && M.modal != MODAL_START && kio_refused("action")) return;
+    if (M.modal != MODAL_NONE && M.modal != MODAL_START && M.modal != MODAL_PURCHASE && M.modal != MODAL_LIST && M.modal != MODAL_UNLIST
+        && M.modal != MODAL_DECLINE_ALL && M.modal != MODAL_TRADE_CONFIRM && kio_refused("action")) return;
     const AccountInfo *a = acc();
     switch (M.modal) {
         case MODAL_PURCHASE: {
             if (M.busy) return;
             M.busy = 1;
             M.pending = ACT_BUY;
+            if (kio_store_active()) { // deob-10.0.4.js:133950: the listing's official marketid
+                cJSON *b = cJSON_CreateObject();
+                cJSON_AddNumberToObject(b, "market_id", M.sel_listing);
+                kio_act_send(ACT_BUY, 0, "POST", "market/purchase", b);
+                render_both();
+                break;
+            }
             char key[48];
             snprintf(key, sizeof(key), "buy-%d", M.sel_listing);
             const double v[2] = {M.sel_listing, 0};
@@ -3242,6 +3558,26 @@ static void confirm_modal(void) {
                 show_error("Price cannot exceed 10,000,000 KR");
                 return;
             }
+            if (kio_store_active()) { // deob-10.0.4.js:108919: listItem {item_id, price, skin_id?}: a stack has no skin_id
+                int skin = 0;
+                if (M.sel_sid >= COPY_ID_BASE) {
+                    skin = kio_copy_sid(M.sel_skin, M.sel_sid);
+                    if (!skin) {
+                        show_error("This painted copy can't be matched to a single krunker.io copy, so it can't be listed there");
+                        return;
+                    }
+                }
+                M.busy = 1;
+                M.pending = ACT_LIST;
+                M.sel_price = (int) p;
+                cJSON *b = cJSON_CreateObject();
+                cJSON_AddNumberToObject(b, "item_id", M.sel_skin);
+                if (skin) cJSON_AddNumberToObject(b, "skin_id", skin);
+                cJSON_AddNumberToObject(b, "price", (double) p);
+                kio_act_send(ACT_LIST, 0, "POST", "market/list", b);
+                render_both();
+                break;
+            }
             M.busy = 1;
             M.pending = ACT_LIST;
             M.sel_price = (int) p;
@@ -3254,6 +3590,15 @@ static void confirm_modal(void) {
         }
         case MODAL_UNLIST: {
             if (M.busy) return;
+            if (kio_store_active()) { // deob-10.0.4.js:134112: unlistItem {market_id} (POST market/unlist, :26992)
+                M.busy = 1;
+                M.pending = ACT_UNLIST;
+                cJSON *b = cJSON_CreateObject();
+                cJSON_AddNumberToObject(b, "market_id", M.sel_listing);
+                kio_act_send(ACT_UNLIST, 0, "POST", "market/unlist", b);
+                render_both();
+                break;
+            }
             M.busy = 1;
             M.pending = ACT_UNLIST;
             char key[48];
@@ -3278,7 +3623,8 @@ static void confirm_modal(void) {
             if (M.actioning) return;
             M.actioning = -1;
             M.pending = ACT_DECLINE_ALL;
-            send_econ("trCA", 0, NULL, M.op);
+            if (kio_store_active()) kio_act_send(ACT_DECLINE_ALL, 0, "POST", "trades/decline-all", NULL); // deob-10.0.4.js:27182
+            else send_econ("trCA", 0, NULL, M.op);
             render_both();
             break;
         }
@@ -3286,7 +3632,8 @@ static void confirm_modal(void) {
             M.modal = MODAL_NONE;
             M.ct_submitting = 1;
             M.pending = ACT_CREATE;
-            send_frame(econ_offer_frame(M.ct_target_id, M.ct_sel[0], M.ct_n[0], M.ct_sel[1], M.ct_n[1], M.ct_msg, 0, 0, M.op));
+            if (kio_store_active()) kio_create_trade();
+            else send_frame(econ_offer_frame(M.ct_target_id, M.ct_sel[0], M.ct_n[0], M.ct_sel[1], M.ct_n[1], M.ct_msg, 0, 0, M.op));
             render_modal();
             break;
         }
@@ -3507,7 +3854,12 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         M.qs_mode = atoi(arg_s(ev, args, argc, 0));
         render_modal();
     } else if (!strcmp(h, "qsgo")) {
-        if (M.busy || kio_refused("quick-sell")) return 1;
+        if (M.busy) return 1;
+        if (kio_store_active()) { // krunker.io: the official quick sell (kio_quick_sell, deob-10.0.4.js:132491)
+            kio_quick_sell(a0 >= 0 && a0 <= 2 ? (int) a0 : 0);
+            render_modal();
+            return 1;
+        }
         M.busy = 1;
         M.qs_err[0] = 0;
         M.pending = ACT_QS;
@@ -3846,7 +4198,7 @@ static void on_social(void *user, const cJSON *frame) {
         M.modal = MODAL_NONE;
         const char *res = cJSON_GetStringValue(a1);
         if (res && !strcmp(res, "SUCCESS")) {
-            account_add_skin(M.sel_skin);
+            if (!kio_store_active()) account_add_skin(M.sel_skin); // krunker.io's inventory is the official one (ranked_ui.c g_buy_kio)
             market_reload_after();
             notify(1, "Item unlisted successfully");
         } else {

@@ -1,5 +1,5 @@
 #pragma once
-// config.networkSounds, Krunker v10.0.3 (deob-10.0.3.js:21141; the config key :22774): the sound
+// config.networkSounds, Krunker v10.0.4 (deob-10.0.4.js:18263; the config key :19904): the sound
 // list Krunker puts on the wire as an index. The server sends `networkSounds.indexOf(name)`: "s"
 // PLAYER_SOUND / "so" PLAY_SOUND / "sso" STOP_SOUND from game.playSound / playerSound (:216763,
 // :197936 getSoundIndex), the "6" GET_KILL kill sound (:198642), config.taunts' id (:21244,

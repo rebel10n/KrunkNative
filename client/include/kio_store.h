@@ -7,10 +7,10 @@
 //                              with the shop store _38905; the Eterno Shop tab loads "limited"
 //                              (v10:128305) and renders it with the shop front _43892 (v10:126863)
 //   ranked.getShop()           GET ranked/shop               v10:26380, _37760 (v10:111020): data.skins
-// Strictly read-only: nothing that spends KR / RP / JNK or changes the account (purchases, gifts,
-// spins, vouchers, ranked purchases, market listings and trades) is sent to krunker.io from this
-// client; those buttons keep v10's guest behaviour (loginOrRegister) and otherwise say so
-// (kio_store_read_only). Box Office (krunker.io not active) is untouched by all of it.
+// Official: the account actions (store purchases, ranked purchases, KR gifts, trades, item locks, the market)
+// are sent to krunker.io with the account's Bearer token through kio_store_write, as v10 sends them
+// (deob-10.0.4.js:26150 iìîííìì; the request shapes cite at each caller). A guest gets v10's loginOrRegister
+// (the purchase buttons). Box Office (krunker.io not active) is untouched by all of it.
 #include <ui_logic.h> // StrBuf
 #include <html_dom.h>
 #include <cJSON.h>
@@ -27,10 +27,29 @@ const struct V10Req *kio_store_ranked_shop(void);
 // The brain's Junk-priced display (junk_shop_ui.c) in the shop's markup: the display's "products" map is read
 // from it. Gift buttons are left out; a card's BUY is junk_shop_buy on Box Office.
 void kio_store_display_html(StrBuf *sb, const cJSON *display);
-// A krunker.io purchase / spin / redeem / trade button in krunker.io mode: v10's own guest behaviour
-// (loginOrRegister) for a guest, else the read-only notice (v10's error io-popup). Nothing is sent.
-void kio_store_read_only(const char *what); // what: the request it stands for (logged)
-const char *kio_store_read_only_text(void); // the notice's text (windows with their own error modal)
+// An answer of a krunker.io write: data is the answer's data (NULL when there is none, e.g. 204), and
+// code / message the error (NULL on success). A {code, message} error's code is its i18n key (iíìïïïì,
+// deob-10.0.4.js:104310); the callee copies what it keeps, data is freed after the call.
+typedef void (*KioWriteFn)(void *user, int status, const cJSON *data, const char *code, const char *message);
+// A krunker.io request with the account's Bearer token (krunker_account_api, KRUNKER_SVC_API). fn runs once,
+// also when the request is refused at once (status -1). Returns 1 when the request started.
+int kio_store_write(const char *method, const char *path, const char *body, KioWriteFn fn, void *user);
+// Buys one product of a display (shop.purchaseProduct, deob-10.0.4.js:116077, quantity 1). gift_to: the
+// recipient for a gift (:117751), NULL for the account itself. A guest gets loginOrRegister instead. 1 = sent.
+int kio_store_buy(int display_id, int product_id, const char *gift_to);
+// Spins a store wheel: POST spins/execute {index, ticket, multi, from: 0} (deob-10.0.4.js:27413; the spin button
+// :221350). index / ticket are -1 for null (a TICKET item's spin has no wheel). fn gets the answer's data
+// (fakeRands, itemIds, funds, usedTicket) or the error, as kio_store_write does. 1 = sent.
+int kio_store_spin(int index, int ticket, int multi, KioWriteFn fn, void *user);
+// Redeem Keys (the shop's tab 4, voucherPopup deob-10.0.4.js:221051): asks for a KR code and sends it over the game
+// socket as "vo" [code]. The account's own sign-in rule applies (a guest gets loginOrRegister).
+void kio_store_redeem_prompt(void);
+// The game socket's "vr" answer (REDEEM_VOUCHER_RESPONSE, deob-10.0.4.js:221042): funds when has_funds, and the
+// message, shown with its HTML stripped.
+void kio_store_voucher_answer(int has_funds, double funds, const char *message);
+// A krunker.io action KrunkNative does not send yet: the notice says so (never a read-only refusal).
+void kio_store_unwired(const char *what); // what: the request it stands for (logged)
+const char *kio_store_unwired_text(void); // the notice's text
 // --render-scenario: state.kioStore {limited: <display>, ranked: {skins}} as krunker.io's answers
 void kio_store_scenario(const cJSON *state);
 int  kio_store_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // knKioShop*; -1 = not ours

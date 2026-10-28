@@ -6855,14 +6855,144 @@ input:hover + .hostMapImg {
 
 /* Use https://compress-or-die.com/jpg-process and coyp data URI in to `background-image` */
 #loadingBg {
+	--load-accent: #fff;
 	position: fixed;
 	left: -16px;
 	right: -16px;
 	top: -16px;
 	bottom: -16px;
+	z-index: 2;
+	overflow: hidden;
+	background-color: #0b0b10;
 	background-size: cover;
 	background-position: center;
 	pointer-events: none;
+	animation: loadingMapIn 0.3s ease-out;
+	transition: opacity 0.3s ease-in;
+}
+/* v10.0.4 map loading card (deob-10.0.4.js:223011-223041): the fade and the map card. The card's
+   thumbnail is --load-bg; client/src/ui/v10_loading.c sets it and the thumbnail, text and accent. */
+#loadingBg.loadingOut {
+	opacity: 0;
+}
+#loadingMapBg {
+	position: absolute;
+	inset: 0;
+	animation: loadingMapZoom 9s ease-out forwards;
+}
+/* the blur sits on a child: blurring the zooming layer itself showed the thumbnail's pixels */
+#loadingMapBg::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background-image: var(--load-bg);
+	background-size: cover;
+	background-position: center;
+	filter: blur(22px) brightness(0.55) saturate(1.2);
+}
+#loadingMapShade {
+	position: absolute;
+	inset: 0;
+	background:
+		linear-gradient(to top, rgba(8, 8, 12, 0.97) 0%, rgba(8, 8, 12, 0.75) 32%, rgba(8, 8, 12, 0.15) 75%),
+		radial-gradient(ellipse at center, transparent 45%, rgba(0, 0, 0, 0.65) 100%);
+}
+#loadingMapCard {
+	position: absolute;
+	left: 8vh;
+	bottom: 14vh;
+	color: #fff;
+	animation: loadingMapRise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#loadingMapThumb {
+	display: block;
+	width: 42vh;
+	height: 16.8vh;
+	margin-bottom: 3vh;
+	object-fit: cover;
+	border: 0.4vh solid #fff;
+	box-shadow:
+		0 1.2vh 4vh rgba(0, 0, 0, 0.6),
+		0 0 0 0.4vh rgba(0, 0, 0, 0.35);
+}
+#loadingMapNext {
+	margin-bottom: 3.5vh;
+	font-size: 2.2vh;
+	line-height: 1.8;
+	letter-spacing: 0.4vh;
+	color: rgba(255, 255, 255, 0.55);
+}
+#loadingMapName {
+	font-size: 11vh;
+	line-height: 1.15;
+	text-transform: uppercase;
+	text-shadow: 0 0.7vh 0 rgba(0, 0, 0, 0.55);
+}
+#loadingMapMode {
+	display: inline-block;
+	margin-top: 2.2vh;
+	padding: 0 1.6vh;
+	font-size: 2.8vh;
+	line-height: 1.8;
+	color: #121216;
+	background: var(--load-accent);
+	box-shadow: 0 0 3vh color-mix(in srgb, var(--load-accent) 45%, transparent);
+}
+#loadingMapText {
+	position: absolute;
+	right: 8vh;
+	bottom: 14vh;
+	font-size: 2.6vh;
+	line-height: 1.8;
+	letter-spacing: 0.3vh;
+	color: rgba(255, 255, 255, 0.7);
+}
+#loadingMapText::after {
+	content: '';
+	display: inline-block;
+	width: 3ch;
+	text-align: left;
+	animation: loadingMapDots 1.2s steps(4) infinite;
+}
+#loadingMapBar {
+	position: absolute;
+	left: 8vh;
+	right: 8vh;
+	bottom: calc(16px + 8vh);
+	height: 0.6vh;
+	overflow: hidden;
+	background: rgba(255, 255, 255, 0.14);
+}
+#loadingMapBar div {
+	position: absolute;
+	top: 0;
+	width: 30%;
+	height: 100%;
+	background: linear-gradient(90deg, transparent, var(--load-accent) 30%, var(--load-accent) 70%, transparent);
+	box-shadow: 0 0 2vh var(--load-accent);
+	animation: loadingMapSlide 1.4s ease-in-out infinite;
+}
+@keyframes loadingMapIn {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes loadingMapZoom {
+	from { transform: scale(1.15); }
+	to { transform: scale(1.28); }
+}
+@keyframes loadingMapRise {
+	from { opacity: 0; transform: translateY(3vh); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes loadingMapSlide {
+	from { left: -30%; }
+	to { left: 100%; }
+}
+@keyframes loadingMapDots {
+	0% { content: ''; }
+	25% { content: '.'; }
+	50% { content: '..'; }
+	75% { content: '...'; }
 }
 
 .unbind {
@@ -7018,6 +7148,20 @@ input:hover + .hostMapImg {
 	z-index: 9999999;
 	background-size: cover;
 	background-image: url(../img/mobile/icon_7.png);
+}
+
+/* shown on maps with a script (they use the interact key, G on desktop); ui_mobile.c sets display */
+#mobileInteract {
+	display: none;
+	position: absolute;
+	width: 50px;
+	height: 50px;
+	pointer-events: all;
+	cursor: pointer;
+	padding: 5px;
+	z-index: 9999999;
+	background-size: cover;
+	background-image: url(../img/mobile/interact.png);
 }
 
 #networkLag {
@@ -16935,3 +17079,32 @@ input[type="search"]::-webkit-search-results-decoration { display: none; }
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Privacy & Age (Krunker v10.0.4): the k-ID section of Account Settings, from the kid component's
+   styles (deob-10.0.4.js:97480-97760); the section's markup is built in client/src/ui/kid_settings.c */
+.kidInfo {margin-top:5px;font-size:18px;line-height:1.8;}
+#menuWindow .kidInfo {color:rgba(255, 255, 255, 0.4);}
+.kidMeta {display:block;}
+.kidValue {color:#fff;}
+#menuWindow .kidNote {color:var(--yellow);}
+.kidState {float:right;font-size:18px;line-height:1.8;color:rgba(255, 255, 255, 0.8);}
+.kidOff {color:rgba(255, 255, 255, 0.4);}
+.kidBtn {width:auto;padding-left:12px;padding-right:12px;margin-left:12px;}
+.kidBusy {opacity:0.6;pointer-events:none;}
+.kidLocked {pointer-events:none;}
+.kidDesc {clear:both;font-size:16px;line-height:1.8;margin-top:4px;}
+#menuWindow .kidDesc {color:rgba(255, 255, 255, 0.4);}
+.kidMsg {margin-top:10px;font-size:18px;line-height:1.8;}
+#menuWindow .kidMsg {color:var(--yellow);}
+#menuWindow .kidOk {color:#57f287;}
+/* krunker.io inventory (client/src/ui/v10_wallet.c official_*): select bar, row picks and locks */
+.wallet-bulkbar {display:flex;align-items:center;gap:10px;margin:4px 0 8px;}
+.wallet-select-btn {width:auto;padding:4px 12px;}
+.wallet-count {font-size:18px;color:rgba(255,255,255,0.8);}
+.wallet-price {width:110px;}
+.wallet-item {position:relative;}
+.wallet-pick, .wallet-lock {position:absolute;width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.82);border:1px solid rgba(255,255,255,0.2);border-radius:4px;cursor:pointer;}
+.wallet-pick {top:6px;left:6px;}
+.wallet-pick.is-on {background:#2f7d32;}
+.wallet-lock {top:6px;right:6px;}
+.wallet-item.is-locked .wallet-lock {background:#8a5a00;}

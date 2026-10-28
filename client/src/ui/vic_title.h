@@ -25,6 +25,8 @@ void vic_title_init(VicTitle *t);
 int vic_title_frame(VicTitle *t, int show, double dt_ms, double *alpha, double *scale);
 
 // io_gameEnd: overlay.vicTitle.type = didWin == -1 ? "dra" : didWin ? "vic" : "def" (also the
-// img/<type>.png of #victorySub). The title itself runs for all three (vicTitle.show = true
-// unless endIndex == 3, the needAll forfeit, which our "end" packet does not carry).
-const char *vic_title_type(int did_win);
+// img/<type>.png of #victorySub). v10.0.4 adds "end" (ENDED, img/end.png): a defeat in a mode with
+// noWinner (deob-10.0.4.js:223533-223534). no_winner = the match's game.mode.noWinner. The title itself
+// runs for all four (vicTitle.show = true unless endIndex == 3, the needAll forfeit, which our "end"
+// packet does not carry).
+const char *vic_title_type(int did_win, int no_winner);

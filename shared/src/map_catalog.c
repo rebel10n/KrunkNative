@@ -146,12 +146,14 @@ static const MapCatalogEntry k_catalog[] = {
     OFFICIAL_PIC("bastion", "Bastion", 43, 0, "43_bastion", "img/maps/map_43.png"),
     OFFICIAL_PIC("piazza", "Piazza", 44, 1, "44_piazza", "img/maps/map_44.png"),
     OFFICIAL_PIC("barnyard", "Barnyard", 45, 1, "45_barnyard", "img/maps/map_45.png"),
+    // Candy Heist (v10.0.4 event map, eligibleMaps [46]): not in the public rotation (rotation 0)
+    OFFICIAL_PIC("candy_heist", "Candy Heist", 46, 0, "46_candy_heist", "img/maps/map_46.png"),
 };
 
 #define CATALOG_COUNT (sizeof(k_catalog) / sizeof(k_catalog[0]))
 
 // the official maps, by mapIndex (the v10.0.2 list): one entry each
-_Static_assert(MAP_CATALOG_OFFICIAL_COUNT == KRUNKER_OFFICIAL_MAP_COUNT, "MAP_CATALOG_OFFICIAL_COUNT is the v10.0.2 official list");
+_Static_assert(MAP_CATALOG_OFFICIAL_COUNT == KRUNKER_OFFICIAL_MAP_COUNT, "MAP_CATALOG_OFFICIAL_COUNT is the official list (krunker_maps.h)");
 
 static cJSON *g_catalog_json[CATALOG_COUNT];
 static unsigned char g_catalog_failed[CATALOG_COUNT];

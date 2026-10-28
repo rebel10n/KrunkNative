@@ -6,7 +6,7 @@
  * fetches the list (GET <API><LIST_PATH>) at startup and each map's JSON on demand (GET
  * <API><MAP_PATH><index>, {"data": map}); a custom game sends its map inline in init arg 9.
  * Every map is shipped in assets/ (FILE, pinned by sha256 in tools/krunker/maps.lock.json);
- * the list was fetched 2026-10-15T03:13:01Z from https://gapi.svc.krunker.io/maps.
+ * the list was fetched 2026-10-28T03:28:50Z from https://gapi.svc.krunker.io/maps.
  */
 #ifndef KRUNKER_MAPS_H
 #define KRUNKER_MAPS_H
@@ -16,7 +16,7 @@
 #define KRUNKER_MAPS_LIST_PATH "/maps"                      /* api.maps.getMaps */
 #define KRUNKER_MAP_PATH "/maps/"                           /* api.maps.getMap: + the map index */
 #define KRUNKER_MAPS_INIT_CUSTOM_ARG 9                      /* init: {data, id, creator, ...} of a custom game */
-#define KRUNKER_OFFICIAL_MAP_COUNT 46
+#define KRUNKER_OFFICIAL_MAP_COUNT 47
 
 /* X(index, name (the list's), file (assets-relative), objects) */
 #define KRUNKER_OFFICIAL_MAPS(X) \
@@ -66,6 +66,7 @@
     X(43, "Bastion", "maps/official/43_bastion.json", 2926) \
     X(44, "Piazza", "maps/official/44_piazza.json", 2028) \
     X(45, "Barnyard", "maps/official/45_barnyard.json", 1683) \
+    X(46, "Candy Heist", "maps/official/46_candy_heist.json", 2811) \
 
 
 #endif /* KRUNKER_MAPS_H */

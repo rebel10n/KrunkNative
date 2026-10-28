@@ -50,6 +50,7 @@
 #include <progression.h> // WP-E part 2c: v7 level progress, challenge names
 #include <junk.h>        // the Junk wallet's amounts (doc/v10/junk.md)
 #include <badges.h>      // WP-E part 2c: badges.js
+#include <kid_settings.h> // Privacy & Age (v10.0.4): the k-ID section of Account Settings
 #include <map_catalog.h> // WP-E part 2c: the Map Challenges cards
 #include <weapons.h>
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
@@ -1217,6 +1218,7 @@ static void account_response(const cJSON *frame) {
 static void end_session(void) {
     send_account_request(-1, NULL, NULL, NULL);
     show_acc_resp(NULL);
+    kid_settings_clear(); // the k-ID answer is this account's: the next sign-in asks again
     alt_store_kn_sign_out(); // the listed account stays listed, it is just not the one resumed at start
     clear_session();
     g_tab_index = 0;
@@ -3119,6 +3121,7 @@ static char *gen_account(void) {
         sb_append(&sb, friends ? friends : "<div id='friendList'>Loading Friends...</div>");
         free(friends);
     } else if (g_tab_index == PROFILE_TAB_SETTINGS) { // deob-10.0.3.js:247656-247685
+        kid_settings_refresh(rerender_windows); // GET /account/kid once; the answer re-renders this tab
         sb_append(&sb, "<div class='setHedS' style='margin-top:10px;'>Account Settings</div>");
         if (g_acc.premium) {
             sb_append(&sb, "<div class='setBodH'><div class='settName'>Display Name<div class='updDisN' onclick='clearName();' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
@@ -3158,6 +3161,8 @@ static char *gen_account(void) {
             sb_appendf(&sb, "</span><div class='subPassChg' onclick='manageAccNames()' style='float: right;margin-top: -8px;'>%s</div></div></div>",
                        I18N("account.usernames.button", "Manage"));
         }
+        // Privacy & Age (deob-10.0.4.js:216008-216011): the kid section mounts between Account Security and Account Privacy
+        kid_settings_html(&sb);
         // Account Privacy (deob-10.0.3.js:247684): "Processing Deletion" with Cancel (requestDeletion(0)) while
         // acc.reqDel is set, else Delete Account with Request Deletion. kn_brain's "rqd" (account_life.c).
         sb_appendf(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>%s</div><div style='height:10px;'></div><div style='margin-top:10px'>",

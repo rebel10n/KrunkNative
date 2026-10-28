@@ -792,9 +792,11 @@ else ()
     # strike_rules_test: Krunker Strike's rules (strike_rules.h) against tools/strike/strike_data.json
     # strike_economy_test: Krunker Strike's economy (strike_economy.h): catalogue, wheel odds, XP curve
     # flavor_storage_test: each flavor's native storage directory (Box Office unchanged, Strike its own)
+    # raid_drops_test: Krunker v10.0.4 raid boss drops (shared/include/raid_drops.h): AI rarity chances, double drops, getItemByChance
+    # candy_heist_test: Krunker v10.0.4 Candy Heist (shared/include/candy_heist.h): the candy count, the mode 37 config, the event defaults
     # krunker_regions_test: the Krunker v10.0.3 region table (shared/src/krunker_regions.c): the dropdown's order,
     #   dedicated-only ids, names, the nearest-region rule (lowest ping, then great circle) and getRegion's ping URL
-    foreach (wpb_test weapons_v10_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test)
+    foreach (wpb_test weapons_v10_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test raid_drops_test candy_heist_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -1113,6 +1115,8 @@ else ()
     endif ()
 
     add_test(NAME strike_economy_test COMMAND strike_economy_test)
+    add_test(NAME raid_drops_test COMMAND raid_drops_test)
+    add_test(NAME candy_heist_test COMMAND candy_heist_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # strike_maps_test: the Krunker Strike map pool (strike_maps.h): FRVR's seven map files load,
     # validate and play, and the catalogue swaps them in only under FLAVOR_STRIKE
@@ -1578,7 +1582,25 @@ else ()
     add_executable(vic_title_test client/tests/vic_title_test.c client/src/ui/vic_title.c)
     target_include_directories(vic_title_test PRIVATE client/src/ui)
     target_link_libraries(vic_title_test PRIVATE cJSON m)
+
+    # v10_loading_test: the v10.0.4 map card's hold / fade and its DOM writes (client/src/ui/v10_loading.c,
+    # deob-10.0.4.js:223011-223041), the DOM ops stubbed in the test
+    add_executable(v10_loading_test client/tests/v10_loading_test.c client/src/ui/v10_loading.c)
+    target_include_directories(v10_loading_test PRIVATE client/include client/src/ui)
+    add_test(NAME v10_loading_test COMMAND v10_loading_test)
     add_test(NAME vic_title_test COMMAND vic_title_test ${CMAKE_SOURCE_DIR})
+
+    # market_bulk_test: item locks, select-mode picks and the bulk market bodies (client/src/ui/market_bulk.c),
+    # deob-10.0.4.js:108837-108866, :146851, :132755, :104255
+    add_executable(market_bulk_test client/tests/market_bulk_test.c client/src/ui/market_bulk.c)
+    target_include_directories(market_bulk_test PRIVATE client/include)
+    target_link_libraries(market_bulk_test PRIVATE cJSON m)
+    add_test(NAME market_bulk_test COMMAND market_bulk_test)
+    # kio_trade_test: the krunker.io trade bodies and paths (client/src/ui/kio_trade.c; the offer serializer, deob-10.0.4.js:111287)
+    add_executable(kio_trade_test client/tests/kio_trade_test.c client/src/ui/kio_trade.c)
+    target_include_directories(kio_trade_test PRIVATE client/include shared/include)
+    target_link_libraries(kio_trade_test PRIVATE cJSON m)
+    add_test(NAME kio_trade_test COMMAND kio_trade_test)
 
     # hud_format_test: the HUD's number text (client/src/ui/hud_format.c) for the damage numbers, the health bar and
     # the K/D ratio: two decimals at most, no exponent, no double noise (client/tests/hud_format_test.c)

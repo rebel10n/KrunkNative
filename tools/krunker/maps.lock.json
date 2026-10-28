@@ -3,9 +3,9 @@
  "comment": "Krunker's official map list and every map's JSON (tools/krunker/fetch_maps.py); shared/include/krunker_maps.h is generated from this file (make krunker-build)",
  "api": "https://gapi.svc.krunker.io",
  "list_url": "https://gapi.svc.krunker.io/maps",
- "list_sha256": "686d43a071aaf462ef3e39acdaff2df32fdcbb4396ca6def898dea15cff8a75c",
- "list_bytes": 1279,
- "fetched": "2026-10-15T03:13:01Z",
+ "list_sha256": "287586423ceba0e8ca327f72a2714d2335cf5ba39f0182ae541fa1ad19c50898",
+ "list_bytes": 1310,
+ "fetched": "2026-10-28T03:28:50Z",
  "maps": [
   {
    "index": 0,
@@ -604,6 +604,19 @@
    "sha256": "bf3bc1bdeb2dfbe438ed076c496c7330665fb83d0f3aaba541f644a4921fef4a",
    "bytes": 122281,
    "objects": 1683
+  },
+  {
+   "index": 46,
+   "name": "Candy Heist",
+   "id": 46,
+   "map_name": "Candy Heist",
+   "file": "maps/official/46_candy_heist.json",
+   "url": "https://gapi.svc.krunker.io/maps/46",
+   "response_sha256": "9dbbee3db5b35d8d1f22a265ff9536ecfa47e906771127ed1ec9d19685dc8a7a",
+   "response_bytes": 494372,
+   "sha256": "60165ee49cf22bf8a907d5e4a23b64fddfbddd3c786067bb5432a38013f7c4b4",
+   "bytes": 494363,
+   "objects": 2811
   }
  ]
 }

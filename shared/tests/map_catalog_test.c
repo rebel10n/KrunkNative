@@ -181,8 +181,8 @@ static void test_game_init_all(void) {
 int main(const int argc, char **argv) {
     const int verbose = argc > 1 && !strcmp(argv[1], "-v");
     const size_t count = map_catalog_count();
-    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 46 && count == 46 + 13 + 15 + 9,
-          "catalogue has %zu maps: 46 official + 13 community + 15 311_ + 9 152_", count);
+    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 47 && count == 47 + 13 + 15 + 9,
+          "catalogue has %zu maps: 47 official + 13 community + 15 311_ + 9 152_", count);
 
     // official maps: one entry per mapIndex 0..45 (the v10.0.2 list), at the v7 positions 0..31 and
     // appended at 69..82; keys unique; community maps in readdir order, then the v3.1.1 official maps
@@ -190,7 +190,7 @@ int main(const int argc, char **argv) {
     int official_seen[MAP_CATALOG_OFFICIAL_COUNT] = {0};
     for (size_t i = 0; i < count; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        const int official_pos = i < 32 || (i >= 69 && i < 83);
+        const int official_pos = i < 32 || (i >= 69 && i < 84); // 69..83: the appended official maps (82 Barnyard, 83 Candy Heist)
         CHECK(official_pos == (e->source == MAP_SOURCE_OFFICIAL), "%s: position %zu of the wrong source", e->key, i);
         if (e->source == MAP_SOURCE_OFFICIAL) {
             CHECK(e->index >= 0 && e->index < MAP_CATALOG_OFFICIAL_COUNT && e->hostable, "%s mapIndex %d", e->key, e->index);
@@ -228,7 +228,7 @@ int main(const int argc, char **argv) {
         const int at = map_catalog_official_index(i);
         CHECK(at >= 0 && map_catalog_map_index((size_t) at) == i && map_catalog_official_json(i) == map_catalog_json((size_t) at), "official %d", i);
     }
-    CHECK(map_catalog_official_index(32) == 69 && map_catalog_official_index(45) == 82 && map_catalog_official_index(46) == -1 &&
+    CHECK(map_catalog_official_index(32) == 69 && map_catalog_official_index(45) == 82 && map_catalog_official_index(46) >= 0 &&
           map_catalog_official_index(-1) == -1 && map_catalog_map_index(32) == -1 && map_catalog_map_index(69) == 32 &&
           map_catalog_map_index(31) == 31 && map_catalog_map_index(33) == -1, "official mapIndex <-> catalogue index");
     CHECK(map_catalog_map_index_of_json(map_catalog_official_json(38)) == 38 && map_catalog_map_index_of_json(map_catalog_json(43)) == -1,
@@ -359,11 +359,12 @@ int main(const int argc, char **argv) {
     CHECK(map_catalog_resolve("nosuchmap", cands, 8, &cand_n) == -1 && cand_n == 0, "resolve nosuchmap");
     CHECK(map_catalog_resolve("\"\"", NULL, 0, NULL) == -1, "resolve empty quotes");
 
-    // Games window tabs: Featured = the 46 official maps (mapIndex order); Popular / New = those, then the rest
+    // Games window tabs: Featured = the 47 official maps (mapIndex order); Popular / New = those, then the rest
     int tab[128];
-    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[46] == map_catalog_index_of_key("311_soul_sanctum"), "popular");
-    CHECK(map_catalog_games_tab(1, tab, 128) == 46 && tab[0] == 0 && tab[31] == 31 && tab[45] == map_catalog_index_of_key("barnyard"), "featured");
-    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[46] == map_catalog_index_of_key("311_subzero"), "new");
+    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[47] == map_catalog_index_of_key("311_soul_sanctum"), "popular");
+    CHECK(map_catalog_games_tab(1, tab, 128) == 47 && tab[0] == 0 && tab[31] == 31 && tab[45] == map_catalog_index_of_key("barnyard") &&
+          tab[46] == map_catalog_index_of_key("candy_heist"), "featured");
+    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[47] == map_catalog_index_of_key("311_subzero"), "new");
     CHECK(map_catalog_games_tab(3, tab, 128) == 0, "favorites");
     CHECK(map_catalog_games_tab(4, tab, 128) == count, "mine");
     // every map the menu lists has a thumbnail file that loads (the Games / Host / Ranked / challenge

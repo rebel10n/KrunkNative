@@ -27,6 +27,8 @@ int vic_title_frame(VicTitle *t, const int show, const double dt_ms, double *alp
     return 1;
 }
 
-const char *vic_title_type(const int did_win) {
-    return did_win == -1 ? "dra" : did_win ? "vic" : "def";
+// v10.0.4 (deob-10.0.4.js:223534): `var type = -1 == didWin ? "dra" : didWin ? "vic" : noWinnerEnd ? "end" : "def"`,
+// noWinnerEnd = !didWin && game.mode.noWinner (:223533; Candy Heist, deob-10.0.4.js:105921): ENDED, not DEFEAT.
+const char *vic_title_type(const int did_win, const int no_winner) {
+    return did_win == -1 ? "dra" : did_win ? "vic" : no_winner ? "end" : "def";
 }

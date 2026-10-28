@@ -191,6 +191,7 @@ static void fire_if(Game *game, Player *h, Object *d, const int fire, int chain)
 
 // players.score(h, v, 0, true): Set Player Score (no "5"; the public score cap)
 static void set_score(Game *game, Player *h, int value) {
+    const int before = h->score;
     h->score = value;
     if (h->score > GAME_SCORE_CAP) {
         h->score = GAME_SCORE_CAP;
@@ -198,6 +199,8 @@ static void set_score(Game *game, Player *h, int value) {
     }
     mode_on_score(game, h, value, 0);
     game->leaders_dirty = 1;
+    // challenges.update(game, "score", max(0, score - before)): a set counts only what it added (deob-10.0.4.js:175948)
+    if (h->score > before) game_challenge(game, h, "score", h->score - before, -1, -1);
 }
 
 static void round_time(Game *game, const int value) {

@@ -9,9 +9,9 @@
 #include <string.h>
 
 void player_pose_arm_target(const PlayerPose *pose, const int side, float out[3]) {
-    // applyPose (:193375): pose[armL / armR] || (hold ? [-0.25, 0, 0] : holdL && left ? tp [-1.2, 0, -0.6] : [0, 0, 0])
+    // applyPose (deob-10.0.4.js:172945): pose[armL / armR] || (hold ? [-0.25, 0, 0] : holdL && left ? tp : [0, 0, 0])
     static const float hold[3] = {-0.25f, 0.0f, 0.0f};     // IIïiîîi (:193330)
-    static const float hold_l[3] = {-1.2f, 0.0f, -0.6f};   // IIìiïïï.tp (:193331-193334)
+    static const float hold_l[3] = {-1.4f, 0.28f, -0.38f}; // IÍïìîïî.tp (deob-10.0.4.js:172918; 10.0.3 was [-1.2, 0, -0.6])
     const float *src = NULL;
     if (side == 0 && (pose->has & PLAYER_POSE_ARM_L)) src = pose->arm_l;
     else if (side == 1 && (pose->has & PLAYER_POSE_ARM_R)) src = pose->arm_r;

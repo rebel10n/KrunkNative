@@ -197,7 +197,7 @@ static void test_table(void) {
         "Race", "Last Man Standing", "Simon Says", "Gun Game", "Prop Hunt", "Boss Hunt", "Classic FFA", "Deposit",
         "Stalker", "King of the Hill", "One in the Chamber", "Trade", "Kill Confirmed", "Defuse", "Sharp Shooter",
         "Traitor", "Raid", "Blitz", "Domination", "Squad Deathmatch", "Kranked FFA", "Team Defender", "Deposit FFA",
-        "Carrier", "All or Nothing", "Mag Dump", "Chaos Snipers", "Bighead FFA", "Zombies", "Impulsed",
+        "Carrier", "All or Nothing", "Mag Dump", "Chaos Snipers", "Bighead FFA", "Zombies", "Impulsed", "Candy Heist",
     };
     static const char *const keys[MODE_V7_TABLE_SIZE] = {
         "ffa", "tdm", "point", "ctf", "bhop", "hide", "infect", "race", "lms", "simon", "gun", "prop", "boss", "clas",
@@ -207,7 +207,7 @@ static void test_table(void) {
 
     int count = 0;
     const GameModeConfig *modes = mode_list(&count);
-    CHECK(count == 37 && mode_count() == 37 && MODE_V7_TABLE_SIZE == 37, "v7.1.4 has 37 modes (%d)", count);
+    CHECK(count == 38 && mode_count() == 38 && MODE_V7_TABLE_SIZE == 37 && MODE_ID_CANDY == 37, "v7.1.4 has 37 modes + candy (%d)", count);
     for (int i = 0; i < count; i++) {
         CHECK(modes[i].id == i && modes[i].name && !strcmp(modes[i].name, names[i]), "mode %d is %s (%s)", i, names[i], modes[i].name);
         if (i < MODE_V7_TABLE_SIZE) CHECK(modes[i].key && !strcmp(modes[i].key, keys[i]), "mode %d key %s", i, keys[i]);
@@ -215,9 +215,9 @@ static void test_table(void) {
 
     CHECK(mode_find("tdm") == MODE_ID_TDM && mode_find("Capture the Flag") == MODE_ID_CTF && mode_find("19") == MODE_ID_KC, "mode_find");
     CHECK(mode_find("ranked") == -1 && mode_find("nope") == -1 && mode_find("dom") == 25, "mode_find: no ranked mode / unknown / dom");
-    CHECK(MODE_ID_CLAS == 13 && MODE_ID_DEPO == 14 && MODE_ID_RESERVED_RANKED_37 == 37 && MODE_ID_RESERVED_RANKED_38 == 38 &&
-          !mode_config(MODE_ID_RESERVED_RANKED_37) && !mode_config(MODE_ID_RESERVED_RANKED_38) && !mode_hostable(37) && !mode_hostable(38),
-          "v7 ids 13 / 14; 37 / 38 reserved for ranked, no mode");
+    CHECK(MODE_ID_CLAS == 13 && MODE_ID_DEPO == 14 && MODE_ID_RESERVED_RANKED_38 == 38 && !mode_config(MODE_ID_RESERVED_RANKED_38) &&
+          !mode_hostable(37) && !mode_hostable(38),
+          "v7 ids 13 / 14; 38 reserved for ranked; 37 is candy (not hostable)");
     CHECK(g_rotation_modes[0] == 0 && g_rotation_modes[1] == 2 && g_rotation_modes[2] == 3 && g_rotation_modes[3] == 19 &&
           g_rotation_modes[4] == 25, "rotationModes [0, 2, 3, 19, 25]");
     CHECK(mode_hostable(MODE_ID_RAID) && mode_hostable(MODE_ID_GUN) &&

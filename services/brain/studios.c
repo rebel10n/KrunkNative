@@ -17,6 +17,7 @@
  *   DELETE /studios/<id>/maps/<map id>              removeStudioMap
  *   POST   /studios/<id>/currencies {name, symbol, decimals}  createStudioCurrency
  *   POST   /studios/<id>/currencies/<cid>/publish | /unpublish
+ *   POST   /studios/<id>/currencies/<cid>/edit {name, symbol, decimals}  editStudioCurrency
  *   GET    /studios/<id>/analytics                  getStudioAnalytics
  *   GET    /studios/<id>/skins                      getStudioSkins        []
  *   POST   /studios/<id>/skins/import {custom_skin_id}         refused: KrunkNative has no custom skins
@@ -191,6 +192,15 @@ int studios_gapi(SocialSession *s, const GapiReq *r) {
         free(text);
     } else if (gapi_is(r, "POST", "/studios/:id/currencies/:cid/publish") || gapi_is(r, "POST", "/studios/:id/currencies/:cid/unpublish")) {
         call(s, r, "currency_active", r->seg[1], is_id(r->seg[3]) ? r->seg[3] : "0", strcmp(r->seg[4], "publish") ? "0" : "1");
+    } else if (gapi_is(r, "POST", "/studios/:id/currencies/:cid/edit")) {
+        cJSON *c = cJSON_CreateObject();
+        cJSON_AddStringToObject(c, "name", kn_json_str(r->body, "name", ""));
+        cJSON_AddStringToObject(c, "symbol", kn_json_str(r->body, "symbol", ""));
+        cJSON_AddNumberToObject(c, "decimals", (double) kn_json_int(r->body, "decimals", -1));
+        char *text = cJSON_PrintUnformatted(c);
+        cJSON_Delete(c);
+        call(s, r, "currency_edit", r->seg[1], is_id(r->seg[3]) ? r->seg[3] : "0", text ? text : "{}");
+        free(text);
     } else if (gapi_is(r, "GET", "/studios/:id/analytics")) {
         call(s, r, "analytics", r->seg[1], NULL, NULL);
     } else if (gapi_is(r, "GET", "/studios/:id/skins")) {

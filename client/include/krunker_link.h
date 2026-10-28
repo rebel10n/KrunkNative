@@ -462,6 +462,10 @@ void krunker_link_captcha_failed(KrunkerLink *link);
 // The official link's object uids (krunker_link_world.c): io.map resolved init's map: the round's table of v10
 // GameObject uids (map_game_uids_build; the link takes it, NULL / empty: the uids go through as they are). Under the lock.
 void krunker_link_set_uids(KrunkerLink *l, MapGameUids *table);
+// The answer to our REDEEM_VOUCHER ("vo" -> "vr", deob-10.0.4.js:221042): funds (has_funds 0 = null) and the
+// message. The UI registers it (kio_store.c) before it sends "vo"; the link layer does not include UI headers.
+typedef void (*KrunkerVoucherFn)(int has_funds, double funds, const char *message);
+void krunker_net_voucher_listen(KrunkerVoucherFn fn);
 // A KrunkNative packet the link made from the official server's frame: a map object's uid becomes its map->objects index
 void krunker_link_uids_in(const KrunkerLink *l, NetPacket *p);
 // An interact's id (lastInteractData {type, id}) for the official server: a map object's index becomes its uid

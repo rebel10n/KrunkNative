@@ -557,6 +557,7 @@ static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)
     if (!on_server(r) || !is_number(v)) return;
     // players.score(player, parseInt(v) || 0, 0, true): sets the score
     int value = parse_int0(s, v);
+    const int before = p->score;
     p->score = value;
     if (p->score > GAME_SCORE_CAP) {
         p->score = GAME_SCORE_CAP;
@@ -566,6 +567,8 @@ static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)
     const NetScorePacket packet = {.delta = value, .score = p->score};
     game_send(p->game, p->uid, NET_PACKET_SCORE, &packet, sizeof(packet));
     p->game->leaders_dirty = 1;
+    // challenges.update(game, "score", max(0, score - before)): a set counts only what it added (deob-10.0.4.js:175948)
+    if (p->score > before) game_challenge(p->game, p, "score", p->score - before, -1, -1);
 }
 
 static KsValue pl_lives(KsScript *s, void *native, uint32_t id) { (void) s; PLAYER_OR(r, ks_undef()); (void) r; return ks_num(p->mode.lives > 0 ? p->mode.lives : 0); }
@@ -759,6 +762,9 @@ static const KsHostProp g_player_all_props[] = {
     {"getAsset", NULL, NULL, pl_noop, 0},
     {"playAnim", NULL, NULL, pl_noop, 0},
     {"stopAnim", NULL, NULL, pl_noop, 0},
+    // Candy Heist's candy challenges: the account's stat (deob-10.0.4.js:184293-184306, official public games only).
+    // Native games keep no account stats here, so it does nothing (map 46's server script calls it, bank and staff)
+    {"trackStat", NULL, NULL, pl_noop, 0},
 };
 const KsHostClass ks_player_class = {"player", g_player_all_props, (int) (sizeof(g_player_all_props) / sizeof(g_player_all_props[0]))};
 

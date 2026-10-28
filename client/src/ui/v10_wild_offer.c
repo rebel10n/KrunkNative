@@ -28,6 +28,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <ks_game.h> // ks_wall_ms
+#include <kio_store.h> // krunker.io's shop/wild-offer routes (kio_store_write), when krunker.io is the active account
 #include "../viewer/viewer_store.h"
 #include <math.h>
 #include <stdio.h>
@@ -241,11 +242,15 @@ static void item_view(void) {
 
 // ------------------------------------------------------------------ actions
 
+static void offer_fetch(void);   // "wo" to the brain, or krunker.io's shop/wild-offer (below)
+static void purchase_send(void); // "wob" to the brain, or krunker.io's shop/wild-offer/purchase
+static void refresh_send(void);  // "wor" to the brain, or krunker.io's shop/wild-offer/refresh
+
 static void ask(const int notify) {
     if (W.scenario || !active_account()) return;
     W.asking = 1;
     W.notify_next = W.notify_next || notify;
-    account_send_frame("wo");
+    offer_fetch();
 }
 
 static void rerender(void) {
@@ -277,10 +282,10 @@ static void confirm_closed(const int accepted, void *user) {
     if (!accepted || !W.offer) return;
     if (what == CONFIRM_BUY) {
         W.purchasing = 1;
-        send_with_id("wob");
+        purchase_send();
     } else if (what == CONFIRM_REFRESH) {
         W.refreshing = 1;
-        send_with_id("wor");
+        refresh_send();
     }
     rerender();
 }
@@ -400,6 +405,97 @@ int v10_wild_offer_frame(const char *label, const cJSON *frame) {
         return 1;
     }
     return 0;
+}
+
+// krunker.io's answers (kio_store_write: data, or the message), in the brain's frame shapes, so the frame
+// handlers above apply them unchanged: [label, reply] or [label, null, err]. reply is consumed.
+static void frame_from_kio(const char *label, cJSON *reply, const char *err) {
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString(label));
+    cJSON_AddItemToArray(frame, reply ? reply : cJSON_CreateNull());
+    if (err) cJSON_AddItemToArray(frame, cJSON_CreateString(err));
+    v10_wild_offer_frame(label, frame);
+    cJSON_Delete(frame);
+}
+
+// GET shop/wild-offer (deob-10.0.4.js:128801-128806): {offer} | {error}; a failed request keeps the offer and
+// the store's error, as the bundle's throw does
+static void offer_answered(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user; (void) status; (void) code; (void) message;
+    if (!data) {
+        W.asking = W.notify_next = 0;
+        rerender();
+        return;
+    }
+    const cJSON *error = cJSON_GetObjectItem(data, "error"); // a JSON null is no error (the bundle's truthy check)
+    const cJSON *offer = error && !cJSON_IsNull(error) ? NULL : cJSON_GetObjectItem(data, "offer");
+    frame_from_kio("wo", cJSON_IsObject(offer) ? cJSON_Duplicate(offer, 1) : NULL, NULL);
+}
+
+// POST shop/wild-offer/purchase (deob-10.0.4.js:128719-128732): no data or !success throws the message; the
+// kr rewards add to the wallet when the answer carries no funds
+static void purchase_answered(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user; (void) status; (void) code;
+    const char *m = data ? v10_str(data, "message") : message;
+    if (!data || !cJSON_IsTrue(cJSON_GetObjectItem(data, "success"))) {
+        frame_from_kio("wob", NULL, m && m[0] ? m : "Purchase failed");
+        return;
+    }
+    cJSON *reply = cJSON_Duplicate(data, 1);
+    if (!cJSON_IsNumber(cJSON_GetObjectItem(reply, "funds"))) {
+        const AccountInfo *a = active_account();
+        double funds = a ? a->funds : 0;
+        cJSON *rw;
+        cJSON_ArrayForEach(rw, cJSON_GetObjectItem(reply, "rewards")) {
+            if (!strcmp(v10_str(rw, "type"), "currency") && !strcmp(v10_str(rw, "currency"), "kr")) funds += v10_num(rw, "amount", 0);
+        }
+        cJSON_AddNumberToObject(reply, "funds", funds);
+    }
+    frame_from_kio("wob", reply, NULL);
+}
+
+// POST shop/wild-offer/refresh (deob-10.0.4.js:128840-128847): no data or !success throws the message; the
+// wallet loses the refresh_cost (funds -= refresh_cost)
+static void refresh_answered(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user; (void) status; (void) code;
+    const char *m = data ? v10_str(data, "message") : message;
+    if (!data || !cJSON_IsTrue(cJSON_GetObjectItem(data, "success"))) {
+        frame_from_kio("wor", NULL, m && m[0] ? m : "Refresh failed");
+        return;
+    }
+    cJSON *reply = cJSON_Duplicate(data, 1);
+    const AccountInfo *a = active_account();
+    cJSON_DeleteItemFromObject(reply, "funds");
+    cJSON_AddNumberToObject(reply, "funds", (a ? a->funds : 0) - v10_num(data, "refresh_cost", 0));
+    frame_from_kio("wor", reply, NULL);
+}
+
+static void offer_fetch(void) {
+    if (!kio_store_active()) {
+        account_send_frame("wo");
+        return;
+    }
+    kio_store_write("GET", "shop/wild-offer", NULL, offer_answered, NULL);
+}
+
+static void purchase_send(void) {
+    if (!kio_store_active()) {
+        send_with_id("wob");
+        return;
+    }
+    char body[48];
+    snprintf(body, sizeof(body), "{\"offer_id\":%d}", offer_id(W.offer)); // deob-10.0.4.js:128715-128718
+    kio_store_write("POST", "shop/wild-offer/purchase", body, purchase_answered, NULL);
+}
+
+static void refresh_send(void) {
+    if (!kio_store_active()) {
+        send_with_id("wor");
+        return;
+    }
+    char body[48];
+    snprintf(body, sizeof(body), "{\"offer_id\":%d}", offer_id(W.offer)); // deob-10.0.4.js:128836-128839
+    kio_store_write("POST", "shop/wild-offer/refresh", body, refresh_answered, NULL);
 }
 
 void v10_wild_offer_tick(const Client *client) {

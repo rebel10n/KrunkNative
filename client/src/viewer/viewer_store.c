@@ -246,10 +246,15 @@ int viewer_option_value(const ViewerOptionList *list, const int i) {
 const ViewerPreview *viewer_preview(const ViewerSkin *skin) {
     static const ViewerPreview none;
     if (!skin) return &none;
-    if (skin->mid >= 0)
+    // getPreview (deob-10.0.4.js:103681): <weapon>_<mid>, then <weapon>_m, then the weapon's own preview
+    if (skin->mid >= 0) {
         for (int i = 0; i < g_viewer_preview_remodel_count; i++)
             if (g_viewer_preview_remodels[i].weapon == skin->weapon && g_viewer_preview_remodels[i].mid == skin->mid)
                 return &g_viewer_preview_remodels[i].preview;
+        for (int i = 0; i < g_viewer_preview_remodel_count; i++)
+            if (g_viewer_preview_remodels[i].weapon == skin->weapon && g_viewer_preview_remodels[i].mid == VIEWER_PREVIEW_MID_ANY)
+                return &g_viewer_preview_remodels[i].preview;
+    }
     return skin->weapon >= 0 && skin->weapon < VIEWER_PREVIEW_SLOTS ? &g_viewer_previews[skin->weapon] : &none;
 }
 

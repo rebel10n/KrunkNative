@@ -62,6 +62,7 @@ static struct {
     int skin_busy[4];
     char cur_name[64], cur_symbol[16];
     int cur_decimals, cur_creating;
+    int64_t cur_edit;        // the currency the form edits (0: it creates one)
     cJSON *mon;              // getStudioMonetization
     char mon_error[MSG];
     int mon_cancelling;
@@ -379,6 +380,7 @@ static void on_answer(void *user, const int status, const cJSON *data, const cJS
             if (r->flag & AF_CURRENCY) {
                 S.cur_name[0] = S.cur_symbol[0] = 0;
                 S.cur_decimals = 0;
+                S.cur_edit = 0;
             }
             load_studio();
         } else {
@@ -816,6 +818,14 @@ static void skins_markup(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
+// Currencies the studio publishes: the Publish toggle stops at 5 (studios.currencies.publishCap, deob-10.0.4.js:139268).
+static int published_currencies(void) {
+    int n = 0;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies")) n += (int) jnum(c, "active") != 0;
+    return n;
+}
+
 static void currencies_markup(StrBuf *sb) {
     char buf[MSG];
     const cJSON *list = cJSON_GetObjectItem(S.studio, "currencies");
@@ -836,7 +846,19 @@ static void currencies_markup(StrBuf *sb) {
             snprintf(d, sizeof(d), "%d", (int) jnum(c, "decimals"));
             I18N_F(buf, "studios.currencies.decimals", "{0} decimals", d);
             sb_text(sb, buf);
-            sb_append(sb, "</span></div>");
+            sb_append(sb, "</span>");
+            if (is_owner()) {
+                const int64_t cid = (int64_t) jnum(c, "currency_id");
+                const int live = (int) jnum(c, "active") != 0;
+                const int capped = !live && published_currencies() >= 5;
+                sb_appendf(sb, " <button type=\"button\" class=\"sd-mini svelte-a9j4oe\" onclick=\"knStudios('curedit',%lld)\">", (long long) cid);
+                sb_text(sb, I18N("studios.currencies.edit", "Edit"));
+                sb_append(sb, "</button> ");
+                sb_appendf(sb, "<button type=\"button\" class=\"sd-mini svelte-a9j4oe\" onclick=\"knStudios('curtoggle',%lld)\"%s>", (long long) cid, capped ? " disabled" : "");
+                sb_text(sb, live ? I18N("studios.currencies.unpublish", "Unpublish") : I18N("studios.currencies.publish", "Publish"));
+                sb_append(sb, "</button>");
+            }
+            sb_append(sb, "</div>");
         }
         sb_append(sb, "</div>");
     }
@@ -857,10 +879,16 @@ static void currencies_markup(StrBuf *sb) {
     sb_append(sb, "</span> <select class=\"sd-input svelte-a9j4oe\" id=\"knStCurDecimals\" onchange=\"knStudios('input','curdec')\">");
     for (int d = 0; d <= 2; d++) sb_appendf(sb, "<option value=\"%d\"%s>%d</option>", d, S.cur_decimals == d ? " selected" : "", d);
     sb_appendf(sb, "</select></label> <button class=\"sd-primary svelte-a9j4oe\" type=\"button\" id=\"knStCurCreate\" onclick=\"knStudios('currency')\"%s>"
-                   "<i class=\"material-icons svelte-a9j4oe\">add</i> ",
-               S.cur_creating || !currency_ok() ? " disabled" : "");
-    sb_text(sb, I18N("studios.currencies.create", "Create"));
-    sb_append(sb, "</button></div> <div class=\"sd-hint svelte-a9j4oe\">");
+                   "<i class=\"material-icons svelte-a9j4oe\">%s</i> ",
+               S.cur_creating || !currency_ok() ? " disabled" : "", S.cur_edit ? "save" : "add");
+    sb_text(sb, S.cur_edit ? I18N("studios.currencies.save", "Save") : I18N("studios.currencies.create", "Create"));
+    sb_append(sb, "</button>");
+    if (S.cur_edit) {
+        sb_append(sb, " <button class=\"sd-mini svelte-a9j4oe\" type=\"button\" onclick=\"knStudios('curcancel')\">");
+        sb_text(sb, I18N("studios.currencies.cancel", "Cancel"));
+        sb_append(sb, "</button>");
+    }
+    sb_append(sb, "</div> <div class=\"sd-hint svelte-a9j4oe\">");
     sb_text(sb, I18N("studios.currencies.hint", "Symbols are 2-4 uppercase letters. KR, JNK and RP are reserved. Up to 5 currencies per studio."));
     sb_append(sb, "</div>");
 }
@@ -1150,6 +1178,7 @@ static void studio_reset(void) {
     S.sd_error[0] = S.sd_success[0] = S.mon_error[0] = S.an_error[0] = S.dlg_error[0] = 0;
     S.invite_name[0] = S.map_sel[0] = S.cur_name[0] = S.cur_symbol[0] = S.desc[0] = 0;
     S.cur_decimals = 0;
+    S.cur_edit = 0;
     S.tab = TAB_MEMBERS;
     memset(S.skin_busy, 0, sizeof(S.skin_busy));
 }
@@ -1396,6 +1425,32 @@ static void do_invite(void) { // _48561
     action("POST", path, body, AF_INVITE_NAME, buf, I18N("studios.error.addMember", "Failed to invite that player."));
 }
 
+// The row's Edit: the form takes the currency's name, symbol and decimals, and Save edits it (do_currency).
+static void currency_edit_start(const int64_t cid) {
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies")) {
+        if ((int64_t) jnum(c, "currency_id") != cid) continue;
+        snprintf(S.cur_name, sizeof(S.cur_name), "%s", jstr(c, "name"));
+        snprintf(S.cur_symbol, sizeof(S.cur_symbol), "%s", jstr(c, "symbol"));
+        S.cur_decimals = (int) jnum(c, "decimals");
+        S.cur_edit = cid;
+    }
+    S.sd_error[0] = S.sd_success[0] = 0;
+}
+
+// The row's Publish / Unpublish (op_currency_active): publishing stops at 5 (published_currencies).
+static void currency_toggle(const int64_t cid) {
+    const cJSON *c;
+    int live = 0;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies"))
+        if ((int64_t) jnum(c, "currency_id") == cid) live = (int) jnum(c, "active") != 0;
+    if (!live && published_currencies() >= 5) return;
+    char path[96];
+    snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/%s", (long long) S.sid, (long long) cid, live ? "unpublish" : "publish");
+    if (live) action("POST", path, NULL, 0, I18N("studios.currencies.unpublished", "Currency unpublished."), I18N("studios.error.toggleCurrency", "Failed to update that currency."));
+    else action("POST", path, NULL, 0, I18N("studios.currencies.publishedMsg", "Currency published."), I18N("studios.error.toggleCurrency", "Failed to update that currency."));
+}
+
 static void do_currency(void) { // _48364
     if (!currency_ok() || S.cur_creating) return;
     char name[64], sym[16], path[64];
@@ -1406,6 +1461,11 @@ static void do_currency(void) { // _48364
     cJSON_AddStringToObject(body, "name", name);
     cJSON_AddStringToObject(body, "symbol", sym);
     cJSON_AddNumberToObject(body, "decimals", S.cur_decimals);
+    if (S.cur_edit) {
+        snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/edit", (long long) S.sid, (long long) S.cur_edit);
+        action("POST", path, body, AF_CURRENCY, I18N("studios.currencies.edited", "Currency updated."), I18N("studios.error.editCurrency", "Failed to update that currency."));
+        return;
+    }
     snprintf(path, sizeof(path), "/studios/%lld/currencies", (long long) S.sid);
     action("POST", path, body, AF_CURRENCY, I18N("studios.currencies.created", "Currency created."), I18N("studios.error.createCurrency", "Failed to create that currency."));
 }
@@ -1562,6 +1622,17 @@ int v10_studios_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
         return 1;
     } else if (!strcmp(op, "currency")) {
         do_currency();
+        return 1;
+    } else if (!strcmp(op, "curedit")) {
+        currency_edit_start(a1);
+        return 1;
+    } else if (!strcmp(op, "curtoggle")) {
+        currency_toggle(a1);
+        return 1;
+    } else if (!strcmp(op, "curcancel")) {
+        S.cur_edit = 0;
+        S.cur_name[0] = S.cur_symbol[0] = 0;
+        S.cur_decimals = 0;
         return 1;
     } else if (!strcmp(op, "skin")) { // _48551
         const cJSON *k;

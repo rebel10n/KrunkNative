@@ -450,6 +450,34 @@ static kn_db_result *op_currency_active(Dbx *x, int64_t actor, int64_t studio, i
     return dbx_json(x, "currency", o);
 }
 
+// Edit a currency's name, symbol and decimals (the Edit dialog, deob-10.0.4.js:138692-138732). Its ID stays
+// the same, so scripts that use it keep working; publishing is op_currency_active's.
+static kn_db_result *op_currency_edit(Dbx *x, int64_t actor, int64_t studio, int64_t currency, const char *json) {
+    const int role = role_of(x, studio, actor);
+    if (role <= 0) return refuse(x, "STUDIO_NOT_FOUND");
+    if (role != 1) return refuse(x, "STUDIO_FORBIDDEN");
+    cJSON *in = cJSON_Parse(nz(json));
+    char name[64], symbol[16];
+    snprintf(name, sizeof name, "%s", jstr(in, "name"));
+    snprintf(symbol, sizeof symbol, "%s", jstr(in, "symbol"));
+    const int64_t decimals = (int64_t) jnum(in, "decimals");
+    cJSON_Delete(in);
+    if (!currency_ok(name, symbol, decimals)) return refuse(x, "STUDIO_CURRENCY_INVALID");
+    if (!dbx_exists(x, SQL(.any = "SELECT 1 FROM studio_currencies WHERE id = {int:$1} AND studio_id = {int:$2}"), KN_DB_ARGS(I64S(currency), I64S(studio))))
+        return dbx_failed(x) ? dbx_finish(x, NULL) : refuse(x, "STUDIO_CURRENCY_NOT_FOUND");
+    if (dbx_exists(x, SQL(.any = "SELECT 1 FROM studio_currencies WHERE studio_id = {int:$1} AND symbol = $2 AND id <> {int:$3}"),
+                   KN_DB_ARGS(I64S(studio), symbol, I64S(currency))))
+        return refuse(x, "STUDIO_CURRENCY_TAKEN");
+    dbx_exec(x, SQL(.any = "UPDATE studio_currencies SET name = $2, symbol = $3, decimals = {int:$4} WHERE id = {int:$1}"),
+             KN_DB_ARGS(I64S(currency), name, symbol, I64S(decimals)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "currency_id", (double) currency);
+    cJSON_AddStringToObject(o, "name", name);
+    cJSON_AddStringToObject(o, "symbol", symbol);
+    cJSON_AddNumberToObject(o, "decimals", (double) decimals);
+    return dbx_json(x, "currency", o);
+}
+
 static kn_db_result *op_analytics(Dbx *x, int64_t actor, int64_t studio) {
     if (role_of(x, studio, actor) <= 0) return refuse(x, "STUDIO_NOT_FOUND");
     cJSON *cur = dbx_rows(x, SQL(.any = "SELECT id AS currency_id__i, name AS name__t, symbol AS symbol__t FROM studio_currencies"
@@ -662,6 +690,7 @@ static kn_db_result *run_studio(kn_dbconn *c, int n, const char *const *p) {
     if (!strcmp(op, "map_remove")) return op_map_remove(&x, actor, a, PI(3));
     if (!strcmp(op, "currency_create")) return op_currency_create(&x, actor, a, P(3));
     if (!strcmp(op, "currency_active")) return op_currency_active(&x, actor, a, PI(3), PI(4) != 0);
+    if (!strcmp(op, "currency_edit")) return op_currency_edit(&x, actor, a, PI(3), nz(P(4)));
     if (!strcmp(op, "analytics")) return op_analytics(&x, actor, a);
     if (!strcmp(op, "skins")) return op_skins(&x, actor, a);
     if (!strcmp(op, "monetization")) return op_monetization(&x, actor, a);

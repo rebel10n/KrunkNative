@@ -6,9 +6,9 @@
 A scratch sqlite database (db_scratch.py), kn_brain --migrate-only, then kn_brain on an ephemeral port.
 Stdlib only. One check per route, each printing PASS or FAIL:
 
-  GET /maps                  {data: 46 official rows in mapIndex order} (v10.js 26581, 222889)
+  GET /maps                  {data: 47 official rows in mapIndex order} (v10.js 26581, 222889)
   GET /maps/0                {data: the Burg map JSON, its objects as in assets/maps/official} (26586)
-  GET /maps/46, /maps/x      404 {error: {code: MAP_NOT_FOUND}} (no such official map)
+  GET /maps/47, /maps/x      404 {error: {code: MAP_NOT_FOUND}} (no such official map)
   GET /maps/by-name/burg     {data: the Burg map} case-insensitive (26592); unknown name 404
   GET /titles                {data: the 111 titles of assets/titles.json} (27518, 103393)
   GET /data/skins            the packed table of assets/skins.json; decoded with a port of v10.js
@@ -250,13 +250,13 @@ def main():
         if port is None:
             return 1
 
-        # /maps: the 46 official rows, mapIndex order, names and file stems as the v10 list shows them
+        # /maps: the 47 official rows, mapIndex order, names and file stems as the v10 list shows them
         status, maps = jget(port, "/maps")
         rows = maps.get("data") if isinstance(maps, dict) else None
         check("GET /maps is 200 with {data: list} (v10.js 26581)",
               status == 200 and isinstance(rows, list) and maps.get("error") is None, "status %s" % status)
-        check("GET /maps lists 46 official maps in mapIndex order",
-              isinstance(rows, list) and len(rows) == 46 and [r.get("index") for r in rows] == list(range(46)))
+        check("GET /maps lists 47 official maps in mapIndex order",
+              isinstance(rows, list) and len(rows) == 47 and [r.get("index") for r in rows] == list(range(47)))
         check("GET /maps row 0 is Burg with fileName 00_burg and creatorname Krunker",
               isinstance(rows, list) and rows and rows[0].get("name") == "Burg"
               and rows[0].get("fileName") == "00_burg" and rows[0].get("creatorname") == "Krunker")
@@ -270,8 +270,14 @@ def main():
         check("GET /maps/0 has the objects of assets/maps/official/00_burg.json",
               isinstance(data, dict) and isinstance(data.get("objects"), list)
               and len(data["objects"]) == len(file_map.get("objects", [])) == 1627)
-        status, body = jget(port, "/maps/46")
-        check("GET /maps/46 is 404 MAP_NOT_FOUND (no official map 46)",
+        status, candy = jget(port, "/maps/46")
+        candy_data = candy.get("data") if isinstance(candy, dict) else None
+        candy_file = load_json("assets/maps/official/46_candy_heist.json")
+        check("GET /maps/46 is 200 with the Candy Heist map JSON (v10.0.4)",
+              status == 200 and isinstance(candy_data, dict) and len(candy_data.get("objects", [])) == len(candy_file.get("objects", [])),
+              "status %s" % status)
+        status, body = jget(port, "/maps/47")
+        check("GET /maps/47 is 404 MAP_NOT_FOUND (no official map 47)",
               status == 404 and isinstance(body, dict) and body.get("error", {}).get("code") == "MAP_NOT_FOUND",
               "status %s" % status)
         status, body = jget(port, "/maps/x")

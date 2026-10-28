@@ -8116,9 +8116,10 @@ const ViewerPreview g_viewer_previews[VIEWER_PREVIEW_SLOTS] = {
     [29] = {.set = 1, .x_off = -2.0f, .y_off = -2.6f, .z_rota = 0.2f, .scl = 0.001376794727638135f, .x_rot = 0.0f},
 };
 
-// store.previews["<weapon>_<mid>"]: a remodel's own offsets (v10 getPreview)
+// store.previews["<weapon>_<mid>"] / ["<weapon>_m"]: a remodel's own offsets (v10.0.4 getPreview, deob-10.0.4.js:103411-103420).
+// v10.0.3 keyed this as "6_0"; v10.0.4 has only "6_m", which every Shotgun remodel (Nova Pump, mid 0) falls back to.
 const ViewerPreviewRemodel g_viewer_preview_remodels[] = {
-    {6, 0, {.set = 1, .x_off = -1.0f, .y_off = -1.1f, .z_rota = 0.0f, .scl = 1.2f, .x_rot = 0.0f}},
+    {6, VIEWER_PREVIEW_MID_ANY, {.set = 1, .x_off = -1.0f, .y_off = -1.1f, .z_rota = 0.0f, .scl = 1.2f, .x_rot = 0.0f}},
 };
 const int g_viewer_preview_remodel_count = 1;
 

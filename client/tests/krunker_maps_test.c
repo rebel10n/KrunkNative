@@ -77,7 +77,7 @@ static void test_table(void) {
     CHECK(krunker_official_map_count() == KRUNKER_OFFICIAL_MAP_COUNT && KRUNKER_OFFICIAL_MAP_COUNT >= 46,
           "the official list has %d maps", KRUNKER_OFFICIAL_MAP_COUNT);
     CHECK(!strcmp(krunker_official_map_name(43), "Bastion"), "map 43 is Bastion (%s)", krunker_official_map_name(43));
-    CHECK(!strcmp(krunker_official_map_name(KRUNKER_OFFICIAL_MAP_COUNT - 1), "Barnyard"), "the highest map is Barnyard (%s)",
+    CHECK(!strcmp(krunker_official_map_name(KRUNKER_OFFICIAL_MAP_COUNT - 1), "Candy Heist"), "the highest map is Candy Heist (%s)",
           krunker_official_map_name(KRUNKER_OFFICIAL_MAP_COUNT - 1));
     CHECK(!krunker_official_map_name(KRUNKER_OFFICIAL_MAP_COUNT) && !krunker_official_map_name(-1) && !krunker_official_map_file(-1),
           "outside the table: NULL");

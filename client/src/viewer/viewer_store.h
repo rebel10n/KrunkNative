@@ -157,7 +157,10 @@ typedef struct { int set; float mount[3], mount_scl, offset[3], scl; } ViewerCha
 
 typedef struct { const char *name; const char *color; } ViewerRarity;
 typedef struct { int set; float x_off, y_off, z_rota, scl, x_rot; } ViewerPreview;
-typedef struct { int weapon, mid; ViewerPreview preview; } ViewerPreviewRemodel; // store.previews["<weapon>_<mid>"]
+// store.previews["<weapon>_<mid>"]; mid VIEWER_PREVIEW_MID_ANY is the store.previews["<weapon>_m"] fallback that
+// any remodel of the weapon uses when its own key is absent (v10.0.4 getPreview, deob-10.0.4.js:103681).
+#define VIEWER_PREVIEW_MID_ANY (-2)
+typedef struct { int weapon, mid; ViewerPreview preview; } ViewerPreviewRemodel;
 typedef struct { int id; int col; const char *name; } ViewerSkinColor;
 
 typedef enum { VIEWER_LIST_TYPE, VIEWER_LIST_MELEE, VIEWER_LIST_WEAPON } ViewerListKind;

@@ -622,7 +622,7 @@ typedef struct {
 } Map;
 
 extern const MapConfig g_default_map_config;
-extern const cJSON *g_maps[46];           // the official maps by mapIndex (MAP_CATALOG_OFFICIAL_COUNT = KRUNKER_OFFICIAL_MAP_COUNT)
+extern const cJSON *g_maps[47];           // the official maps by mapIndex (MAP_CATALOG_OFFICIAL_COUNT = KRUNKER_OFFICIAL_MAP_COUNT)
 extern const int g_rotation_maps[34];     // v10.0.2 rotationMaps (v10.js:167210)
 
 void load_default_maps();

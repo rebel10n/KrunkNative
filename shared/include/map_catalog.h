@@ -54,7 +54,7 @@ typedef struct {
 
 // Krunker's official maps: mapIndex 0..MAP_CATALOG_OFFICIAL_COUNT-1 (= KRUNKER_OFFICIAL_MAP_COUNT, krunker_maps.h).
 // The catalogue has one entry for each of them; their catalogue indices are not contiguous.
-#define MAP_CATALOG_OFFICIAL_COUNT 46
+#define MAP_CATALOG_OFFICIAL_COUNT 47
 
 size_t map_catalog_count(void);
 const MapCatalogEntry *map_catalog_at(size_t index); // NULL out of range

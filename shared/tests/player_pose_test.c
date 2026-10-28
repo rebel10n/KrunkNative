@@ -251,7 +251,7 @@ static void test_rules(void) {
     pose.has = PLAYER_POSE_HOLD_L;
     pose.hold_l = 1;
     player_pose_arm_target(&pose, 0, t);
-    CHECK(near(t[0], -1.2f) && t[1] == 0.0f && near(t[2], -0.6f), "holdL: the left arm to [-1.2, 0, -0.6]");
+    CHECK(near(t[0], -1.4f) && near(t[1], 0.28f) && near(t[2], -0.38f), "holdL: the left arm to [-1.4, 0.28, -0.38] (10.0.4)");
     player_pose_arm_target(&pose, 1, t);
     CHECK(t[0] == 0.0f && t[1] == 0.0f && t[2] == 0.0f, "holdL: the right arm stays");
     CHECK(!player_pose_hides_weapon(&pose) && player_pose_splits_arms(&pose), "holdL keeps the weapon and splits the arms");

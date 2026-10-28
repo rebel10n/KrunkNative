@@ -3,7 +3,7 @@
  *
  * Build constants of the official Krunker client bundle the krunker_proto codec speaks to.
  * Source: https://kru.eli.gift/game.deob.js
- * sha256: f8be7893f18c441a1723035e9761ac30550678dc57d670efb67900308fef04cc (13674377 bytes)
+ * sha256: c70d8bdd083300140eaeabacda85e33d3e777481cf6d84c7510a8994603af01f (13859828 bytes)
  */
 #ifndef KRUNKER_BUILD_H
 #define KRUNKER_BUILD_H
@@ -11,13 +11,13 @@
 /* Bumped when this header's C interface changes; consumers: #if KRUNKER_BUILD_SCHEMA != N #error */
 #define KRUNKER_BUILD_SCHEMA 1
 #define KRUNKER_BUILD_SOURCE_URL "https://kru.eli.gift/game.deob.js"
-#define KRUNKER_BUILD_SOURCE_SHA256 "f8be7893f18c441a1723035e9761ac30550678dc57d670efb67900308fef04cc"
+#define KRUNKER_BUILD_SOURCE_SHA256 "c70d8bdd083300140eaeabacda85e33d3e777481cf6d84c7510a8994603af01f"
 
 /* Every frame is msgpack([name, ...args]) + 2 trailer bytes {ahNum >> 4 & 0xf, ahNum & 0xf}.
  * Before every send except packet cptR: ahNum = (ahNum + KRUNKER_AHKEY) & 0xff, ahNum
  * starting at 0, so only KRUNKER_AHNUM_STEP (the low byte) matters. */
-#define KRUNKER_AHKEY 0x3u
-#define KRUNKER_AHNUM_STEP 0x03u
+#define KRUNKER_AHKEY 0x2bu
+#define KRUNKER_AHNUM_STEP 0x2bu
 /* The packet sent without the step (the Turnstile captcha reply), as name / wire / enum. */
 #define KRUNKER_AHNUM_EXEMPT_NAME "cptR"
 #define KRUNKER_AHNUM_EXEMPT_WIRE "cptR"
@@ -25,8 +25,8 @@
 
 /* Echoed to the matchmaker (seek-game) and the game server. buildVersion is also the
  * dataQuery's "v". */
-#define KRUNKER_CLIENT_VERSION "10.0.3r1"
-#define KRUNKER_BUILD_VERSION "1S33onJJF2kbSB7HgXe6QQTHTaVjqoIV"
+#define KRUNKER_CLIENT_VERSION "10.0.4r1"
+#define KRUNKER_BUILD_VERSION "DV6B3wX1sg41pVR92UCbVWEpILgvBHbR"
 #define KRUNKER_CLIENT_REVISION "1"
 #define KRUNKER_MATCHMAKER_URL "https://matchmaker.krunker.io"
 #define KRUNKER_API_URL "https://api.krunker.io"
@@ -581,7 +581,7 @@ typedef enum {
     KRUNKER_C2S_COUNT
 } KrunkerC2S;
 
-/* Packet names, server -> client (263). X(ident, "wire", "KrunkerName") */
+/* Packet names, server -> client (264). X(ident, "wire", "KrunkerName") */
 #define KRUNKER_S2C_PACKETS(X_) \
     X_(RPC_SUCCESS, "_0", "RPC_SUCCESS") \
     X_(RPC_ERROR, "_1", "RPC_ERROR") \
@@ -630,6 +630,7 @@ typedef enum {
     X_(SAVE_SPIN_HISTORY, "spinH", "SAVE_SPIN_HISTORY") \
     X_(SPIN_WHEEL_RESPONSE, "spinW", "SPIN_WHEEL_RESPONSE") \
     X_(SKIN_REWARD, "skin", "SKIN_REWARD") \
+    X_(SKIN_STAT, "sks", "SKIN_STAT") \
     X_(SKIN_FOUND_MESSAGE, "skinF", "SKIN_FOUND_MESSAGE") \
     X_(SPIN_KR, "spinKR", "SPIN_KR") \
     X_(TEAM_SCORE, "ts", "TEAM_SCORE") \
@@ -895,6 +896,7 @@ typedef enum {
     KRUNKER_S2C_SAVE_SPIN_HISTORY,
     KRUNKER_S2C_SPIN_WHEEL_RESPONSE,
     KRUNKER_S2C_SKIN_REWARD,
+    KRUNKER_S2C_SKIN_STAT,
     KRUNKER_S2C_SKIN_FOUND_MESSAGE,
     KRUNKER_S2C_SPIN_KR,
     KRUNKER_S2C_TEAM_SCORE,

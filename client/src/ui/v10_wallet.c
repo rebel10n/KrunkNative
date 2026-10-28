@@ -31,6 +31,9 @@
 //     item has no KR value (its inventory row decides, as the market's own grid)
 #include <v10_wallet.h>
 #include <v10_ui.h>
+#include <kio_inventory.h>
+#include <kio_store.h>
+#include <market_bulk.h>
 #include <backend_ui.h>
 #include <i18n.h>
 #include <html_ui.h>
@@ -53,6 +56,13 @@ static struct {
     int skins, copies, id;
     double kr, junk, rp;
 } W;
+
+// the krunker.io side (kio_inventory.h): the select-mode picks, the bulk sell in flight, the load's error text
+static MarketPicks W_picks;
+static int W_select;
+static int W_busy;
+static int W_price;   // the bulk list's unit price, as typed (0: none)
+static char W_inv_err[160];
 
 // ---------------------------------------------------------------- the account
 
@@ -179,7 +189,92 @@ static void tile(StrBuf *sb, const WalletStack *s) {
     sb_append(sb, "</div>");
 }
 
+// ---------------------------------------------------------------- the krunker.io inventory (kio_inventory.h)
+
+static int picked_row(const MarketGroup *g, const int copy) {
+    const int skin = copy < 0 ? g->stack_id : g->instances[copy];
+    for (int i = 0; i < W_picks.n; i++)
+        if (W_picks.skin_ids[i] == skin && W_picks.item_ids[i] == g->item) return 1;
+    return 0;
+}
+
+// one row of the official inventory: a stack (copy -1, with its count) or one copy. Its lock and, in select
+// mode, its pick name the official ids (gi = the group, copy = the copy or -1 for the stack).
+static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, const int copy) {
+    const MarketGroup *g = &groups[gi];
+    const int stack = copy < 0;
+    const int locked = kio_inventory_locked(g, copy);
+    const int on = W_select && picked_row(g, copy);
+    char onclick[64];
+    snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", g->item);
+    sb_appendf(sb, "<div class=\"wallet-item svelte-l0gwpc%s%s\">", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "");
+    v10_market_card(sb, g->item, 128, 128, "top-center", onclick, NULL);
+    if (W_select)
+        sb_appendf(sb, "<button type=\"button\" class=\"wallet-pick%s\" onclick=\"knV10WalletPick(%d,%d)\"><i class=\"material-icons\">%s</i></button>",
+                   on ? " is-on" : "", gi, copy, on ? "check_box" : "check_box_outline_blank");
+    sb_appendf(sb, "<button type=\"button\" class=\"wallet-lock\" onclick=\"knV10WalletLock(%d,%d)\" aria-label=\"", gi, copy);
+    sb_append_esc(sb, locked ? I18N("kn.inv.unlock", "Unlock") : I18N("kn.inv.lock", "Lock"));
+    sb_appendf(sb, "\"><i class=\"material-icons\">%s</i></button>", locked ? "lock" : "lock_open");
+    if (stack && g->stack_max > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-l0gwpc\" aria-hidden=\"true\">\xc3\x97%d</div>", g->stack_max);
+    sb_append(sb, "</div>");
+}
+
+// the select bar: Select / Cancel, and while selecting the count and the bulk Quick Sell
+static void official_bar(StrBuf *sb) {
+    sb_append(sb, "<div class=\"wallet-bulkbar svelte-l0gwpc\">");
+    sb_append(sb, "<button type=\"button\" class=\"wallet-select-btn svelte-l0gwpc\" onclick=\"knV10WalletSelect()\">");
+    sb_append_esc(sb, W_select ? I18N("kn.inv.cancel", "Cancel") : I18N("kn.inv.select", "Select"));
+    sb_append(sb, "</button>");
+    if (W_select) {
+        sb_appendf(sb, "<span class=\"wallet-count svelte-l0gwpc\">%d</span>", W_picks.n);
+        sb_appendf(sb, "<button type=\"button\" class=\"wallet-select-btn svelte-l0gwpc\"%s onclick=\"knV10WalletBulkSell()\">", W_busy ? " disabled" : "");
+        sb_append_esc(sb, I18N("kn.inv.quickSellSelected", "Quick sell selected"));
+        sb_append(sb, "</button>");
+        sb_appendf(sb, "<input type=\"number\" min=\"1\" class=\"wallet-price svelte-l0gwpc\" aria-label=\"");
+        sb_append_esc(sb, I18N("kn.inv.price", "Price per item"));
+        sb_appendf(sb, "\" value=\"%d\" onchange=\"knV10WalletPrice(this.value)\">", W_price > 0 ? W_price : 0);
+        sb_appendf(sb, "<button type=\"button\" class=\"wallet-select-btn svelte-l0gwpc\"%s onclick=\"knV10WalletBulkList()\">", W_busy ? " disabled" : "");
+        sb_append_esc(sb, I18N("kn.inv.listSelected", "List selected"));
+        sb_append(sb, "</button>");
+    }
+    sb_append(sb, "</div>");
+}
+
+static void official_grid(StrBuf *sb) {
+    int n = 0;
+    const MarketGroup *groups = kio_inventory_groups(&n);
+    official_bar(sb);
+    sb_append(sb, "<div class=\"items-grid svelte-l0gwpc\" id=\"knV10WalletGrid\">");
+    int drawn = 0;
+    for (int gi = 0; groups && gi < n; gi++) {
+        if (groups[gi].stack_id) {
+            if (drawn < W.shown) official_tile(sb, groups, gi, -1);
+            drawn++;
+        }
+        for (int c = 0; c < groups[gi].n_instances; c++) {
+            if (drawn < W.shown) official_tile(sb, groups, gi, c);
+            drawn++;
+        }
+    }
+    if (drawn > W.shown) {
+        sb_append(sb, "<div class=\"wallet-items-sentinel svelte-l0gwpc\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
+        sb_append_esc(sb, I18N("kn.wallet.loadMore", "Load More"));
+        sb_append(sb, "</button></div>");
+    }
+    if (!drawn) {
+        sb_append(sb, "<div class=\"empty-state svelte-l0gwpc\" id=\"knV10WalletEmpty\"><p class=\"svelte-l0gwpc\">");
+        if (kio_inventory_ready()) sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
+        else sb_append_esc(sb, W_inv_err[0] ? W_inv_err : kio_inventory_gate_text());
+        sb_append(sb, "</p></div>");
+    }
+    sb_append(sb, "</div>");
+}
+
 static void grid(StrBuf *sb, const AccountInfo *a) {
+    if (kio_store_active()) {
+        official_grid(sb);
+        return;
+    }
     const int cap = stack_count(a) > 0 ? stack_count(a) : 1;
     WalletStack *list = calloc((size_t) cap, sizeof(*list));
     const int n = list ? stacks_of(a, list, cap) : 0;
@@ -241,6 +336,27 @@ static void refresh(void) {
     free(html);
 }
 
+// the callbacks of the krunker.io writes and the load: the modal redraws when they end
+static void inventory_loaded(void *user, const int ok, const char *message) {
+    (void) user;
+    W_inv_err[0] = 0;
+    if (!ok && message) snprintf(W_inv_err, sizeof(W_inv_err), "%s", message);
+    refresh();
+}
+
+static void lock_done(void *user, const int ok, const char *message) {
+    (void) user;
+    if (!ok) v10_view_push(v10_io_error(I18N("kn.inv.lockFailedTitle", "Lock"), message ? message : I18N("generic.error", "Error")), NULL, NULL, NULL);
+    refresh();
+}
+
+static void bulk_done(void *user, const int ok, const char *message) {
+    (void) user;
+    W_busy = 0;
+    if (!ok && message) v10_view_push(v10_io_error(I18N("kn.inv.quickSellFailedTitle", "Quick sell"), message), NULL, NULL, NULL);
+    refresh();
+}
+
 static void open_modal(void) {
     const AccountInfo *a = account();
     if (!a) { // v10 shows the Wallet to an account only: a guest gets the login modal
@@ -255,6 +371,7 @@ static void open_modal(void) {
     remember(a);
     v10_view_push(markup(), refresh, closed, NULL);
     W.depth = v10_view_depth();
+    if (kio_store_active() && !kio_inventory_ready() && !kio_inventory_loading()) kio_inventory_load(inventory_loaded, NULL);
 }
 
 // the modal left the stack (Escape, a backdrop tap, Catalog, an account change): its market views go too
@@ -263,6 +380,8 @@ static void closed(const int accepted, void *user) {
     (void) user;
     W.open = 0;
     W.depth = 0;
+    W_select = 0;
+    market_picks_free(&W_picks);
     v10_market_wallet_release();
 }
 
@@ -305,6 +424,55 @@ int v10_wallet_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         html_ui_dispatch("prizeWheel", NULL, pw, 2);
         return 1;
     }
+    if (!strcmp(name, "knV10WalletSelect")) {
+        W_select = !W_select;
+        if (!W_select) market_picks_free(&W_picks);
+        refresh();
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletPick") || !strcmp(name, "knV10WalletLock")) {
+        int n = 0;
+        const MarketGroup *groups = kio_inventory_groups(&n);
+        const int gi = arg_int(args, argc, 0), copy = arg_int(args, argc, 1);
+        if (!groups || gi < 0 || gi >= n || copy >= groups[gi].n_instances) return 1;
+        const MarketGroup *g = &groups[gi];
+        if (!strcmp(name, "knV10WalletPick")) {
+            const int skin = copy < 0 ? g->stack_id : g->instances[copy];
+            market_picks_toggle(&W_picks, kio_inventory_locks(), skin, g->item, copy < 0);
+            refresh();
+            return 1;
+        }
+        kio_inventory_set_lock(g, copy, !kio_inventory_locked(g, copy), lock_done, NULL);
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletBulkSell")) {
+        if (W_busy) return 1;
+        W_busy = 1;
+        const MarketPicks picks = W_picks; // the run owns the picks from here
+        memset(&W_picks, 0, sizeof(W_picks));
+        W_select = 0;
+        kio_inventory_bulk_sell(0, picks, bulk_done, NULL); // 0: Get KR, the single quick-sell's first mode
+        refresh();
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletPrice")) {
+        W_price = arg_int(args, argc, 0);
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletBulkList")) {
+        if (W_busy) return 1;
+        if (W_price < 1) {
+            v10_view_push(v10_io_error(I18N("kn.inv.listFailedTitle", "List"), I18N("kn.inv.priceNeeded", "Enter a price per item first.")), NULL, NULL, NULL);
+            return 1;
+        }
+        W_busy = 1;
+        const MarketPicks picks = W_picks; // the run owns the picks from here
+        memset(&W_picks, 0, sizeof(W_picks));
+        W_select = 0;
+        kio_inventory_bulk_list(W_price, picks, bulk_done, NULL);
+        refresh();
+        return 1;
+    }
     if (!strcmp(name, "knV10WalletMore")) {
         W.shown += WALLET_PAGE;
         refresh();
@@ -332,6 +500,11 @@ void v10_wallet_tick(void) {
 }
 
 void v10_wallet_account_changed(void) {
+    kio_inventory_clear();
+    market_picks_free(&W_picks);
+    W_select = 0;
+    W_busy = 0;
+    W_inv_err[0] = 0;
     if (!W.open) return;
     const AccountInfo *a = account();
     if (!a || a->id != W.account_id || (int) account_backend() != W.backend) v10_view_clear();

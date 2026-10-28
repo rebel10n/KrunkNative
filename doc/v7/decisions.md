@@ -55,7 +55,7 @@ editor.md, player-viewer.md (this directory).
 
 | Ids | Owner |
 |---|---|
-| 36 | core block (1-39, grows upward): 36 BILLBOARD_IMAGE (server.cfg billboard_image, "Billboard ads"); 37-39 free |
+| 36 | core block (1-39, grows upward): 36 BILLBOARD_IMAGE (server.cfg billboard_image, "Billboard ads"); 37 = Candy Heist (v10.0.4 mode index 37, deob-10.0.4.js:222239; map 46 config.modes [37]); 38-39 free |
 | 120-169, 180-189 | map-logic.md packages (C triggers, B world, D modes, G zombies, E AI, A lobby), as in map-logic.md §5.3 |
 | 170-176 | player-viewer WP-B: 170 EFFECT, 171 STREAK, 172 USE_STREAK, 173 NUKE, 174 JUGGERNAUT, 175 STREAK_SLOTS, 176 reserved (bbm) |
 | 177-179 | map-logic package H: AIRDROP |

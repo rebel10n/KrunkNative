@@ -667,13 +667,16 @@ static int send_rpc(const char *name) {
 }
 
 // The windows' requests over the game socket while the krunker.io account is the active one (v10
-// sends them there: _33978.send(...)). Read-only requests, and the one claim v10 makes from the menu
-// (the Daily Spin's: it grants the account its ticket, doc/v10/daily-spin.md); nothing that spends KR.
+// sends them there: _33978.send(...)). The reads, the claims v10 makes from the menu (the Daily Spin's: it grants
+// the account its ticket, doc/v10/daily-spin.md) and the voucher redeem (it grants KR). Nothing that spends KR here:
+// purchases and spins go through the krunker.io API (kio_store_write).
 //   ["bpdl"]          DATA_LOADED: the battle pass's data (answered "bpdl" / "bppd"; v10:209854, 212301)
 //   ["vcln"]          OPEN_CLAN_TAB (v10:213455)
 //   ["cln", 3, value] the Clans window's sendReq(3): the player's clan page (v10:213459-213462, answered
 //                     "cln" -> clanData, v10:213437); every other "cln" action (create, join, leave,
 //                     kick, roles, funds, discord) is refused
+//   ["vo", code]      REDEEM_VOUCHER (v10 sends it straight, deob-10.0.4.js:221047): grants KR, answered "vr"
+//                     [funds | null, message] (kio_store_voucher_answer)
 //   ["dsl"]           the Daily Spin claim, sent as v10's rpc(DAILY_SPIN_CLAIM) = ["_0", rpcId, "dsl"]
 //                     (deob-10.0.3.js 164136, rpc 111529-111540); answered ["_0", "dsl"] / ["_1", "dsl", err]
 //                     (rpc_answer) and, on success, the push ["dslr", {ticketId}] (111361, 261748-261756)
@@ -690,6 +693,7 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     int ok = 0;
     if ((!strcmp(name, "bpdl") || !strcmp(name, "vcln")) && n == 0) ok = 1;
     if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
+    if (!strcmp(name, "vo") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1))) ok = 1;
     if (!ok) return 0;
     KrunkerValue args[2];
     char text[2][128];

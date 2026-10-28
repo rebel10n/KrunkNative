@@ -19,13 +19,16 @@
 // Not drawn: the "wild-offer" display node (the account's Wild Offer, v10's svelte-m5s1iy card), whose
 // data only comes with a signed-in krunker.io account's display.
 //
-// Read-only (kio_store.h): BUY, gift, the dynamic BUY and every other krunker.io purchase never send
-// shop/purchase (v10 _38968 / the gift's purchaseProduct) or showPurchase's payment; they give v10's
-// guest behaviour (loginOrRegister) or the read-only notice.
+// Writes (kio_store.h): BUY, the currency / badge cards and a virtual gift send shop/purchase (kio_store_buy, v10
+// _38968 / deob-10.0.4.js:116077); a store wheel's spin is spins/execute (kio_store_spin, :27413); the Redeem Keys
+// code is the game socket's "vo" (kio_store_redeem_prompt). Real-money gifts and bundles are the payment provider's
+// checkout, which KrunkNative does not run. A guest gets v10's loginOrRegister.
 #include <kio_store.h>
 #include "klog.h"
 #include <junk_shop_ui.h>
 #include <krunker_account.h>
+#include <krunker_net.h> // krunker_net_send_account_frame ("vo", the voucher redeem)
+#include <krunker_link.h> // krunker_net_voucher_listen (the "vr" answer)
 #include <backend_ui.h>
 #include <v10_ui.h>
 #include <v10_menu.h>
@@ -211,20 +214,163 @@ const V10Req *kio_store_ranked_shop(void) {
     return s ? &s->req : &none; // _37760: any failure is an empty shop
 }
 
-// ------------------------------------------------------------------ read-only
+// ------------------------------------------------------------------ krunker.io writes
 
-const char *kio_store_read_only_text(void) {
-    return I18N("kn.kio.store.readOnly",
-                "Box Office shows your krunker.io account's store but never buys, spins, redeems or trades for it. Do that on krunker.io itself.");
+typedef struct {
+    KioWriteFn fn;
+    void *user;
+} KioWrite;
+
+// v10's answer handling (iìîííìì, deob-10.0.4.js:26150): status < 200 or >= 500 throws (Server error); 429
+// is the rate limit; 204 / 304 carry no data; else {data, error}, the error a {code, message} or a string.
+static void write_done(void *user, const int status, const cJSON *res) {
+    KioWrite *w = user;
+    const KioWriteFn fn = w->fn;
+    void *u = w->user;
+    free(w);
+    const cJSON *data = NULL, *error = NULL;
+    const char *code = NULL, *message = NULL;
+    if (status <= 0) message = "Failed to fetch"; // fetch's TypeError
+    else if (status < 200 || status >= 500) message = "Server error";
+    else if (status == 429) message = "Rate limit exceeded. Try again later.";
+    else if (status == 204 || status == 304) {}
+    else if (res) {
+        data = cJSON_GetObjectItem(res, "data");
+        error = cJSON_GetObjectItem(res, "error");
+        if (cJSON_IsObject(error)) {
+            const cJSON *c = cJSON_GetObjectItem(error, "code"), *m = cJSON_GetObjectItem(error, "message");
+            code = cJSON_IsString(c) ? c->valuestring : NULL;
+            message = cJSON_IsString(m) ? m->valuestring : NULL;
+            if (!code && !message) message = "An unknown error occurred."; // iíìïïïì's fallback (:104318)
+        } else if (cJSON_IsString(error)) message = error->valuestring;
+    }
+    fn(u, status, data, code, message);
 }
 
-void kio_store_read_only(const char *what) {
-    printf("[kio-store] read-only: %s not sent to krunker.io\n", what ? what : "action");
+int kio_store_write(const char *method, const char *path, const char *body, const KioWriteFn fn, void *user) {
+    KioWrite *w = calloc(1, sizeof(*w));
+    if (!w) {
+        fn(user, -1, NULL, NULL, "Failed to fetch");
+        return 0;
+    }
+    w->fn = fn;
+    w->user = user;
+    if (!krunker_account_api(method, KRUNKER_SVC_API, path, body, write_done, w)) {
+        free(w);
+        fn(user, -1, NULL, NULL, "Failed to fetch");
+        return 0;
+    }
+    return 1;
+}
+
+// shop.purchaseProduct's answer: data is the purchase (truthy on success), else the error is shown (v10's
+// Purchase failed fallback). A bought display is fetched again (v10 refreshes the shop after a purchase).
+static void buy_done(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) user;
+    (void) status;
+    if (message || !data) {
+        printf("[kio-store] purchase failed: %s\n", code ? code : message ? message : "no data");
+        v10_view_push(v10_io_error(I18N("kn.kio.store.buyFailedTitle", "krunker.io Store"),
+                                   message ? message : I18N("kn.kio.store.buyFailed", "Purchase failed")), NULL, NULL, NULL);
+        return;
+    }
+    Slot *s = slot_find(DISPLAY_LIMITED);
+    if (s && !s->inflight) slot_clear(s);
+    menu_rerender_if_open(14);
+}
+
+int kio_store_buy(const int display_id, const int product_id, const char *gift_to) {
+    if (!active_account()) { // v10: a guest's purchase button is loginOrRegister()
+        v10_menu_handle("loginOrRegister", NULL, NULL, 0);
+        return 0;
+    }
+    cJSON *b = cJSON_CreateObject();
+    cJSON_AddNumberToObject(b, "display_id", display_id);
+    cJSON_AddNumberToObject(b, "product_id", product_id);
+    cJSON_AddNumberToObject(b, "quantity", 1);
+    if (gift_to) cJSON_AddStringToObject(b, "gift_to", gift_to);
+    char *body = cJSON_PrintUnformatted(b);
+    cJSON_Delete(b);
+    const int sent = kio_store_write("POST", "shop/purchase", body, buy_done, NULL);
+    free(body);
+    return sent;
+}
+
+// POST spins/execute {index, ticket, multi, from: 0} (deob-10.0.4.js:27413; the spin button :221350). index and ticket
+// are null when -1: a TICKET item's spin has no wheel. The answer's data is fakeRands, itemIds, funds, usedTicket.
+int kio_store_spin(const int index, const int ticket, const int multi, const KioWriteFn fn, void *user) {
+    cJSON *b = cJSON_CreateObject();
+    if (index >= 0) cJSON_AddNumberToObject(b, "index", index);
+    else cJSON_AddNullToObject(b, "index");
+    if (ticket >= 0) cJSON_AddNumberToObject(b, "ticket", ticket);
+    else cJSON_AddNullToObject(b, "ticket");
+    cJSON_AddBoolToObject(b, "multi", multi != 0);
+    cJSON_AddNumberToObject(b, "from", 0);
+    char *body = cJSON_PrintUnformatted(b);
+    cJSON_Delete(b);
+    const int sent = kio_store_write("POST", "spins/execute", body, fn, user);
+    free(body);
+    return sent;
+}
+
+// Redeem Keys: the KR code goes over the game socket as "vo" [code] (v10 sends it straight, deob-10.0.4.js:221047).
+static void voucher_answered(const int accepted, const char *text, void *user) {
+    (void) user;
+    if (!accepted || !text || !text[0]) return;
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString("vo"));
+    cJSON_AddItemToArray(frame, cJSON_CreateString(text));
+    const int sent = krunker_net_send_account_frame(frame);
+    cJSON_Delete(frame);
+    if (!sent) // not connected: the answer never comes, so say so now
+        v10_view_push(v10_io_error(I18N("kn.kio.store.redeemTitle", "Redeem Keys"),
+                                   I18N("kn.kio.store.redeemOffline", "Not connected to krunker.io. Try again in a moment.")), NULL, NULL, NULL);
+}
+
+void kio_store_redeem_prompt(void) {
+    if (!active_account()) { // v10: a guest is sent to the login window (voucherPopup, deob-10.0.4.js:221055)
+        v10_menu_handle("loginOrRegister", NULL, NULL, 0);
+        return;
+    }
+    krunker_net_voucher_listen(kio_store_voucher_answer); // the "vr" answer comes back to whoever sent "vo"
+    ui_prompt(I18N("windows.store.voucherinfo", "Enter KR Code"), voucher_answered, NULL);
+}
+
+// The text of the answer, its HTML tags removed (v10 sets it as innerHTML, deob-10.0.4.js:221042).
+static char *strip_tags(const char *s) {
+    char *out = malloc(strlen(s) + 1);
+    if (!out) return NULL;
+    size_t n = 0;
+    int in_tag = 0;
+    for (; *s; s++) {
+        if (*s == '<') in_tag = 1;
+        else if (*s == '>') in_tag = 0;
+        else if (!in_tag) out[n++] = *s;
+    }
+    out[n] = 0;
+    return out;
+}
+
+void kio_store_voucher_answer(const int has_funds, const double funds, const char *message) {
+    if (has_funds) account_set_funds(funds);
+    if (!message || !message[0]) return;
+    char *text = strip_tags(message);
+    if (!text) return;
+    v10_view_push(v10_io_error(I18N("kn.kio.store.redeemTitle", "Redeem Keys"), text), NULL, NULL, NULL);
+    free(text);
+}
+
+void kio_store_unwired(const char *what) {
+    printf("[kio-store] not sent to krunker.io yet: %s\n", what ? what : "action");
     if (!active_account()) { // v10: a guest's purchase button is loginOrRegister()
         v10_menu_handle("loginOrRegister", NULL, NULL, 0);
         return;
     }
-    v10_view_push(v10_io_error(I18N("kn.kio.store.readOnlyTitle", "krunker.io Store"), kio_store_read_only_text()), NULL, NULL, NULL);
+    v10_view_push(v10_io_error(I18N("kn.kio.store.unwiredTitle", "krunker.io Store"), kio_store_unwired_text()), NULL, NULL, NULL);
+}
+
+const char *kio_store_unwired_text(void) {
+    return I18N("kn.kio.store.unwired", "This krunker.io action is not in KrunkNative yet. Do it on krunker.io for now.");
 }
 
 // ------------------------------------------------------------------ the display / product adapter
@@ -714,8 +860,75 @@ static void open_item(const int display_id) {
         item_view_html(&sb, &it);
         v10_view_push(sb_finish(&sb), NULL, NULL, NULL);
     } else if ((!strcmp(it.ctype, "currency") || !strcmp(it.ctype, "badge")) && !it.sold && !it.expired) {
-        kio_store_read_only("shop/purchase"); // v10: currency / badge cards buy at once (_39604)
+        kio_store_buy(it.display_id, it.product_id, NULL); // v10: currency / badge cards buy at once (_39604)
     }
+}
+
+// ------------------------------------------------------------------ gifts (windows.store.gift, deob-10.0.4.js:117700-117750)
+
+// A gift of a virtual (KR) product: the recipient's name, a confirm, then shop/purchase with gift_to. The name is
+// trimmed (giftPlayerName.trim()); the level gate is v10's social.market.req (level 10).
+typedef struct {
+    int display_id, product_id;
+    double amount;
+    char product[128], currency[16], name[64], question[256];
+} GiftOrder;
+
+static void gift_confirmed(const int accepted, const char *text, void *user) {
+    GiftOrder *g = user;
+    (void) text;
+    if (accepted) kio_store_buy(g->display_id, g->product_id, g->name);
+    free(g);
+}
+
+static void gift_named(const int accepted, const char *text, void *user) {
+    GiftOrder *g = user;
+    if (!accepted || !text) {
+        free(g);
+        return;
+    }
+    while (*text == ' ' || *text == '\t') text++;
+    const size_t len = strlen(text);
+    size_t end = len;
+    while (end > 0 && (text[end - 1] == ' ' || text[end - 1] == '\t')) end--;
+    if (end == 0) {
+        free(g);
+        return;
+    }
+    snprintf(g->name, sizeof(g->name), "%.*s", (int) (end < sizeof(g->name) - 1 ? end : sizeof(g->name) - 1), text);
+    snprintf(g->question, sizeof(g->question), "Send %s to %s for %.0f %s?", g->product, g->name, g->amount, g->currency);
+    ui_confirm(g->question, gift_confirmed, g);
+}
+
+static void kio_store_gift(const int display_id, const int product_id) {
+    if (!active_account()) { // v10: a guest's gift button is loginOrRegister()
+        v10_menu_handle("loginOrRegister", NULL, NULL, 0);
+        return;
+    }
+    const cJSON *display, *product;
+    if (!lookup(display_id, &display, &product)) return;
+    const ShopItem it = shop_item(display, product);
+    if (!it.price || strcmp(it.ptype, "virtual")) { // a real-money gift: giftProduct's payment provider checkout
+        v10_view_push(v10_io_error(I18N("kn.kio.store.unwiredTitle", "krunker.io Store"),
+                                   I18N("kn.kio.store.giftPayment", "Real-money gifts are paid through krunker.io's checkout, which KrunkNative does not run yet.")),
+                      NULL, NULL, NULL);
+        return;
+    }
+    const AccountInfo *acc = active_account();
+    if (acc->level < 10) { // social.market.req: virtual items are gifted from level 10 (deob-10.0.4.js:117707)
+        v10_view_push(v10_io_error(I18N("kn.kio.store.unwiredTitle", "krunker.io Store"),
+                                   I18N("kn.kio.store.giftLevel", "Virtual items can be gifted from level 10.")), NULL, NULL, NULL);
+        return;
+    }
+    GiftOrder *g = calloc(1, sizeof(*g));
+    if (!g) return;
+    g->display_id = display_id;
+    g->product_id = product_id;
+    snprintf(g->product, sizeof(g->product), "%s", it.name ? it.name : "");
+    const cJSON *virt = cJSON_GetObjectItem(it.price, "virtual");
+    g->amount = v10_num(virt, "amount", 0);
+    snprintf(g->currency, sizeof(g->currency), "%s", v10_str(virt, "currency"));
+    ui_prompt(I18N("windows.store.gift.name", "Player name"), gift_named, g);
 }
 
 // ------------------------------------------------------------------ --render-scenario
@@ -752,13 +965,14 @@ static double arg_num(const HtmlEvent *ev, const HtmlArg *args, const int argc, 
 int kio_store_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name || strncmp(name, "knKioShop", 9)) return -1;
     const char *h = name + 9;
-    if (!strcmp(h, "Buy")) { // _39604 / the dynamic card's _39732 / _39737: shop/purchase or showPurchase: never sent
+    if (!strcmp(h, "Buy")) { // _39604 / the dynamic card's _39732 / _39737: shop/purchase (knKioShopBuy(display, product))
         html_ui_stop_propagation();
-        if (kio_store_active()) kio_store_read_only("shop/purchase");
-        else junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product (knKioShopBuy(display, product))
-    } else if (!strcmp(h, "Gift")) { // _39563: shop/purchase {gift_to} or giftProduct: never sent
+        if (kio_store_active()) kio_store_buy((int) arg_num(ev, args, argc, 0), (int) arg_num(ev, args, argc, 1), NULL);
+        else junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product
+    } else if (!strcmp(h, "Gift")) { // _39563: the name prompt, then shop/purchase {gift_to} (kio_store_gift)
         html_ui_stop_propagation();
-        kio_store_read_only("shop/purchase (gift)");
+        if (kio_store_active()) kio_store_gift((int) arg_num(ev, args, argc, 0), (int) arg_num(ev, args, argc, 1));
+        else kio_store_unwired("shop/purchase (gift)");
     } else if (!strcmp(h, "Item")) {
         open_item((int) arg_num(ev, args, argc, 0));
     } else if (!strcmp(h, "Qty")) { // the quantity slider (_39728: clamped to the display's range)

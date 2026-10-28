@@ -5,13 +5,14 @@
 // the server sends in "init". The function hooks (conditions, winConditions, waitTimer triggers, onKill, update,
 // collisionCheck, gameStart, endSort) live in mode_rules.c, mode_objectives.c, mode_dom.c,
 // mode_deposit.c and mode_zombies.c; this file holds the data and the mode-key accessors.
-// v7 has no ranked mode: ids 37 / 38 stay reserved for ranked (modes.h, doc/v7/decisions.md "Ranked").
+// v7 has no ranked mode: id 38 stays reserved for ranked (modes.h, doc/v7/decisions.md "Ranked"); id 37 is Candy Heist (v10.0.4).
 #include <shared.h>
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 
 #include "mode_internal.h"
+#include <candy_heist.h>  // CANDY_HEIST_* (the mode's key, name, class, time and event)
 #include <prop_hunt.h>
 #include <ruleset.h>
 #include <flavor_rules.h> // flavor_mode_allowed: the modes a flavor offers (Krunker Strike)
@@ -55,6 +56,7 @@ static const char *const k_stats_depo[] = {"sid", "name", "score", "kills", "dea
 static const char *const k_stats_depoffa[] = {"sid", "name", "score", "kills", "deaths", "deposits", "reward", NULL};
 static const char *const k_stats_md[] = {"sid", "name", "score", "kills", "deaths", "pickups", "reward", NULL};
 static const char *const k_stats_zom[] = {"sid", "name", "score", "zombies", "downs", "rounds", "reward", NULL};
+static const char *const k_stats_candy[] = {"sid", "name", "candy", "reward", NULL}; // endStats (deob-10.0.4.js:105919)
 
 // leaderStats
 static const char *const k_lead_skd[] = {"score", "kills", "deaths", NULL};
@@ -70,6 +72,7 @@ static const char *const k_lead_obj[] = {"objective", "score", NULL};
 static const char *const k_lead_depoffa[] = {"deposits", "kills", "score", NULL};
 static const char *const k_lead_md[] = {"score", "kills", "pickups", NULL};
 static const char *const k_lead_zom[] = {"points", "zombies", "downs", "dmg", NULL};
+static const char *const k_lead_candy[] = {"candy", NULL}; // leaderStats (deob-10.0.4.js:105920)
 
 // gun.js weaponOrder (v3.1.1 [2,16,10,4,11,5,3,9,1,14,6,0,7,8,13,15,12]: adds 27, 21, 18, 22, drops 15)
 // v10:105580: v7.1.4's order with 28 (Charge Rifle) after 0 (Sniper)
@@ -312,6 +315,12 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .expl_mlt = 5.0f, .expl_size_mlt = 2.0f, .grav_mlt = 1.05f, .has_impulse_mlt = 1, .impulse_mlt = 3.0f,
         .non_obj_impulse = 1, CHAOS_MOVEMENT, .no_scr_limit = 1, LOADOUT(starting_loadout, k_imp_start),
         STREAKS_OFF(k_no_big_streaks), .prevent_custom = 1, .on_kill = mode_kill_imp},
+    // Candy Heist (v10.0.4, deob-10.0.4.js:105905-105929): the mode's static config. Its map logic (the Hollowmen,
+    // door knocks, the Cauldron bank, the Hollowman's Staff counter) is map 46's KrunkScript, not code here.
+    [MODE_ID_CANDY] = {BASE, .id = MODE_ID_CANDY, .key = CANDY_HEIST_MODE_KEY, .name = CANDY_HEIST_MODE_NAME,
+        .alias = CANDY_HEIST_MODE_KEY, .end_stats = k_stats_candy, .leader_stats = k_lead_candy,
+        .game_time = (float) CANDY_HEIST_GAME_TIME, .force_class = CANDY_HEIST_CLASS, .no_pickups = 1, .no_scr_limit = 1,
+        .no_score_xp = 1, .no_profile_stats = 1, .no_winner = 1, .prevent_custom = 1, .event = CANDY_HEIST_EVENT_ID},
 };
 
 int mode_count(void) {

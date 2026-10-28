@@ -57,13 +57,16 @@ typedef enum {
     MODE_ID_BHFFA,         // Bighead FFA
     MODE_ID_ZOM,           // Zombies (economy, waves: map-logic WP-H stage 2, mode_zombies.c)
     MODE_ID_IMP,           // Impulsed
-    MODE_V7_TABLE_SIZE,    // 37: gameModes.js
-    MODE_COUNT = MODE_V7_TABLE_SIZE
+    MODE_V7_TABLE_SIZE = 37, // 37: gameModes.js (v7 ends at Impulsed)
+    // Candy Heist (v10.0.4 event mode, deob-10.0.4.js:105905-105929). Id 37 is the server's numbering: the
+    // official map 46 (Candy Heist, assets/maps/official/46_candy_heist.json) lists config.modes [37]. It sits
+    // after the v7 table, so mode_hostable() (id < MODE_V7_TABLE_SIZE) keeps it out of custom games.
+    MODE_ID_CANDY = 37,
+    MODE_COUNT = MODE_ID_CANDY + 1
 } GameModeId;
 
-// Reserved for ranked (doc/v7/decisions.md "Ranked"): KrunkNative's former Ranked modes. No table
-// entry, never assigned to another mode; mode_config() returns NULL for them.
-#define MODE_ID_RESERVED_RANKED_37 37
+// Reserved for ranked (doc/v7/decisions.md "Ranked"): KrunkNative's former Ranked mode. No table entry, never
+// assigned to another mode; mode_config() returns NULL for it. 37 was reserved too until Candy Heist took it.
 #define MODE_ID_RESERVED_RANKED_38 38
 
 // sdm multiTeam: team 0 (none / FFA) plus teams 1..5 (players.js setTeam, nameTeam1..5, t1..5Dmg)
@@ -158,6 +161,7 @@ typedef struct {
     unsigned char obj_weapon:1;      // objWep
     unsigned char no_score_c:1;      // noScoreC: player score does not feed the team score
     unsigned char no_score_k:1;      // noScoreK: kill rewards give no score
+    unsigned char no_winner:1;       // noWinner (deob-10.0.4.js:105921, Candy Heist): a defeat ends as "end" (ENDED)
     unsigned char no_kick:1;
     unsigned char no_reward:1;
     unsigned char no_assists:1;
@@ -321,6 +325,7 @@ typedef struct {
 
     // ---- Krunker v10.0.3 mode keys (Raid deob-10.0.3.js:118448-118455, Zombies 119126)
     const char *const *skip_stats;   // skipStats: game.incStat keys this mode does not count (NULL-terminated; NULL none)
+    unsigned char no_score_xp:1;     // noScoreXP (deob-10.0.4.js:105917, Candy Heist): no score XP
     unsigned char no_profile_stats:1;// noProfileStats: no games / kills / deaths / wins, no account.stats (transferStats),
                                      // no `lt` challenge progress (updateAccounts, transferStats, checkLeave, challenges.update)
     float spec_max_d;                // specMaxD: the spectator's follow distance cap (0 = config.specMaxD 160)

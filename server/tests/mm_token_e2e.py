@@ -427,7 +427,7 @@ def client_list_all(port):
     seen, ny_at = {}, {}
     for label, setup in (("list-none", ""), ("list-restricted", restricted)):
         p, log = client(label, port, "0 play\n" + setup + "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n"
-                        "5800 text @head .setHed\n" + reads + end)
+                        "5800 text @head .setHed\n5850 waitfor [id=serverHolder] .kioHed\n" + reads + end)
         finish(p, 90)
         text = read_log(log)
         rows = [int(x) for x in re.findall(r"nodes t=\d+ @kio1_\d+ elements=\d+ match=(\d+)", text)]
@@ -457,7 +457,7 @@ def client_official(port, ny):
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
                     "1000 down F4\n1050 up F4\n4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @status [id=kioStatus]\n"
-                    "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(%d,\"]\n6200 call setExpandedRegion %d\n"
+                    "6100 text @head .setHed\n6120 waitfor [id=serverHolder] .kioHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(%d,\"]\n6200 call setExpandedRegion %d\n"
                     "6500 nodes @rows .kioRow\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n"
                     "6700 call quickJoinRegion %d\n7500 quit\n" % (MODES["b"], SANDSTORM, ny, ny, ny),
@@ -492,7 +492,7 @@ def client_quick_join(port, ny):
     (NY:bbbbb; the full NY:ccccc is skipped) is joined through krunker_net, not in the browser."""
     p, log = client("quickjoin", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
-                    "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @head .setHed\n6100 call setExpandedRegion %d\n"
+                    "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @head .setHed\n6050 waitfor [id=serverHolder] .kioHed\n6100 call setExpandedRegion %d\n"
                     "6300 nodes @rows .kioRow\n6400 call quickJoinRegion %d\n7500 quit\n" % (MODES["b"], SANDSTORM, ny, ny))
     finish(p, 60)
     text = read_log(log)
@@ -506,7 +506,7 @@ def client_hoist(port):
     in its groups (kio_group: Official Customs, Custom Games, then the regions), and never on krunk.io's tab, which
     holds Box Office's groups only. SV:cust1, a krunker.io custom game, is in 'Custom Games' on krunker.io's tab."""
     # krunk.io's tab (the default: no official game): every group opened in turn, no krunker.io row in any
-    steps = "0 play\n4000 call showWindow 2\n6000 text @head0 .setHed\n"
+    steps = "0 play\n4000 call showWindow 2\n6000 text @head0 .setHed\n6050 waitfor [id=serverHolder] .setHed\n"
     for i in range(4):  # Box Office's regions (the test list has 3)
         t = 6100 + 200 * i
         steps += "%d call setExpandedRegion %d\n%d nodes @krows0_%d [id=serverHolder] .kioRow\n" % (t, i, t + 60, i)
@@ -519,7 +519,7 @@ def client_hoist(port):
     krows = [int(x) for x in re.findall(r"nodes t=\d+ @krows0_\d+ elements=\d+ match=(\d+)", text)]
     check("C7: krunk.io's tab: no krunker.io row in its groups", krows and sum(krows) == 0, str(krows))
     # krunker.io's tab: its groups in list order; the custom game is in one group, which holds only krunker.io rows
-    steps = "0 play\n4000 call showWindow 2\n5800 call windows.1.switchTab 1\n6000 text @head .setHed\n"
+    steps = "0 play\n4000 call showWindow 2\n5800 call windows.1.switchTab 1\n6000 text @head .setHed\n6050 waitfor [id=serverHolder] .kioHed\n"
     groups = 8
     for i in range(groups):
         t = 6100 + 200 * i
@@ -542,7 +542,7 @@ def client_hoist(port):
               rows and krows and rows.group(1) == krows.group(1) == "1", "%s / %s" % (rows.group(0) if rows else "", krows.group(0) if krows else ""))
     # the Legacy Browser setting no longer changes the groups: the krunker.io tab reads the same with it off
     p, log = client("hoist-modes", port, '0 play\n300 call setSetting "oldBrowser" "false"\n4000 call showWindow 2\n'
-                    "6000 call windows.1.switchTab 1\n6100 text @head .setHed\n6200 call setExpandedRegion 0\n"
+                    "6000 call windows.1.switchTab 1\n6100 text @head .setHed\n6120 waitfor [id=serverHolder] .kioHed\n6200 call setExpandedRegion 0\n"
                     "6300 nodes @rows .kioRow\n7500 quit\n")
     finish(p, 60)
     text = read_log(log)

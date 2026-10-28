@@ -392,6 +392,7 @@ static KsValue d_disable_3d(KsScript *s, void *u, const KsValue *a, int n) {
     return ks_undef();
 }
 
+int ks_client_has_main_script(void) { return ksc_script() != NULL; }
 int ks_client_3d_disabled(void) { return ksc_script() && ks_game_flag(ksc_game(), KS_FLAG_DISABLE_3D); }
 int ks_client_no_prediction(void) { return ksc_script() && ks_game_flag(ksc_game(), KS_FLAG_NO_PREDICTION); }
 

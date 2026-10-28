@@ -27,6 +27,7 @@
 #include <ui_mobile.h>
 #include "klog.h"
 #include <ui_logic.h>
+#include <ks_client.h>
 #include <html_ui.h>
 #include <spectate.h>
 #include <math.h>
@@ -51,6 +52,7 @@
 typedef enum {
     MB_UI = -1,
     MB_JUMP, MB_CROUCH, MB_ESC, MB_SHOOT, MB_AIMSHOOT, MB_SCOPE, MB_RELOAD, MB_SWAP, MB_KSWAP,
+    MB_INTERACT, // v10.0.4 mobileInteract (deob-10.0.4.js:19127): shown only while a map has a script
     MB_COUNT,
     MB_JOYSTICK = 100,
     MB_PROMPT = 101,     // #interactMsg (the gate prompt): v10's ontouchstart = pressButton(interact)
@@ -58,7 +60,7 @@ typedef enum {
 
 static const char *const BUTTON_IDS[MB_COUNT] = {
     "mobileJump", "mobileCrouch", "mobileEsc", "mobileShoot", "mobileAimShoot", "mobileScope", "mobileReload", "mobileSwap",
-    "mobileKSwap",
+    "mobileKSwap", "mobileInteract",
 };
 
 // G.mobileControlPositions (v10 iiììïîì): fractions of #mobileUI; NAN = not set.
@@ -74,11 +76,13 @@ static const ControlPosition POSITIONS[] = {
     {"mobileReload", NAN, 0.73f, 0.27f},
     {"mobileSwap", 0.0f, 0.85f, 0.0f},
     {"mobileKSwap", 0.0f, 0.65f, 0.0f},
+    {"mobileInteract", NAN, 0.52f, 0.27f}, // deob-10.0.4.js:19127 (mobileControlPositions)
 };
 // The JS doubles the fractions above stand for (0.69 * 100 = 68.99999999999999 in JS).
 static const double POSITION_VALUES[][3] = {
     {0.2, 0.69, NAN}, {NAN, 0.5, 0.02}, {NAN, 0.82, 0.15}, {0.18, 0.01, NAN}, {0.03, 0.28, NAN},
     {NAN, 0.56, 0.13}, {NAN, 0.35, 0.11}, {NAN, 0.73, 0.27}, {0.0, 0.85, 0.0}, {0.0, 0.65, 0.0},
+    {NAN, 0.52, 0.27},
 };
 
 typedef struct {
@@ -92,6 +96,7 @@ static struct {
     int mobile;              // CONTROLS.isMobile
     int dom_ready;           // positions applied, joystick built, listeners registered
     int visible;             // #mobileUI display (-1 unknown)
+    int interact_shown;      // #mobileInteract display: a map script is loaded (-1 unknown)
     Client *client;
 
     HtmlElem ui, zone, nipple, back, front;
@@ -117,7 +122,7 @@ static struct {
     int already_aim, shoot_on_up, ready_to_shoot;
     int auto_fire_timer;         // setInterval(aj.rate) chain, 0 none
     int auto_fire_rate_ms;
-} g_mb = {.visible = -1};
+} g_mb = {.visible = -1, .interact_shown = -1};
 
 // ---------------------------------------------------------------- detection
 
@@ -291,6 +296,7 @@ static void button_down(const int b) {
         case MB_RELOAD: set_transform(b, "scale(1.1)"); key(UI_CONTROL_RELOAD, 1); break;
         case MB_SWAP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_SWAP, 1); break;
         case MB_KSWAP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_MELEE, 1); break; // binds.melee
+        case MB_INTERACT: set_transform(b, "scale(1.1)"); key(UI_CONTROL_INTERACT, 1); break; // deob-10.0.4.js:19127 handler
         case MB_PROMPT: key(UI_CONTROL_INTERACT, 1); break;
         default: break;
     }
@@ -323,6 +329,7 @@ static void button_up(const int b) {
         case MB_RELOAD: set_transform(b, "scale(1)"); key(UI_CONTROL_RELOAD, 0); break;
         case MB_SWAP: set_transform(b, "scale(1)"); key(UI_CONTROL_SWAP, 0); break;
         case MB_KSWAP: set_transform(b, "scale(1)"); key(UI_CONTROL_MELEE, 0); break;
+        case MB_INTERACT: set_transform(b, "scale(1)"); key(UI_CONTROL_INTERACT, 0); break;
         case MB_PROMPT: key(UI_CONTROL_INTERACT, 0); break;
         default: break;
     }
@@ -672,6 +679,13 @@ void ui_mobile_tick(Client *client) {
         g_mb.visible = visible;
         html_dom_set_display(g_mb.ui, visible ? "block" : "none");
         if (!visible) release_all();
+    }
+    // #mobileInteract: `mainScript ? "block" : "none"` (deob-10.0.4.js:223129, set as the game starts).
+    // Only maps with a KrunkScript show it; it sits inside #mobileUI, so the HUD toggle hides it too.
+    const int interact = client && ks_client_has_main_script();
+    if (interact != g_mb.interact_shown) {
+        g_mb.interact_shown = interact;
+        if (g_mb.buttons[MB_INTERACT]) html_dom_set_display(g_mb.buttons[MB_INTERACT], interact ? "block" : "none");
     }
 }
 

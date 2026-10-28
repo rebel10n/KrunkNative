@@ -452,6 +452,19 @@ static void on_lottery_won(KrunkerLink *l, const KrunkerFrame *f) {
 
 // "spinW" [socketId, uid, error, randNum, skinIndex, funds] (iiîïiiì): `if (!error)`; ours (socketId == our socket's
 // id) gives the account the skin and its KR (the client checks it has an account); every client spins the wheel.
+// "vr" [funds | null, message] (REDEEM_VOUCHER_RESPONSE, deob-10.0.4.js:221042 iííìïíï): the funds are set and the
+// message handed to the UI's listener (krunker_net_voucher_listen). Our own redeem only: the answer comes to whoever sent "vo".
+static KrunkerVoucherFn g_voucher_fn;
+
+void krunker_net_voucher_listen(KrunkerVoucherFn fn) { g_voucher_fn = fn; }
+
+static void on_redeem_voucher(const KrunkerFrame *f) {
+    const double funds = krunker_num(arg(f, 0), NAN);
+    char message[1024];
+    key_string(arg(f, 1), message, sizeof(message));
+    if (g_voucher_fn) g_voucher_fn(!isnan(funds), funds, message);
+}
+
 static void on_spin_wheel(KrunkerLink *l, const KrunkerFrame *f) {
     if (truthy(arg(f, 2))) return;
     char socket[64];
@@ -564,6 +577,7 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_UNBOX_MESSSAGE_S: on_unbox_player(l, f); return 1;
         case KRUNKER_S2C_LOTTERY_PRIZE_WON: on_lottery_won(l, f); return 1;
         case KRUNKER_S2C_SPIN_WHEEL_RESPONSE: on_spin_wheel(l, f); return 1;
+        case KRUNKER_S2C_REDEEM_VOUCHER_RESPONSE: on_redeem_voucher(f); return 1;
         case KRUNKER_S2C_CHARGE_CONSENT_REQUEST: on_charge_request(l, f); return 1;
         case KRUNKER_S2C_WARS_CLAN: on_wars_clan(l, f); return 1;
         case KRUNKER_S2C_EDIT_MAP: on_edit_map(l, f); return 1;
@@ -586,7 +600,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         // (kn_brain serves them), the developer debug views, and packets whose v10 handler is empty
         case KRUNKER_S2C_FORCE_PING:              // no handler registered in 10.0.3
         case KRUNKER_S2C_GAME_INSTANCE_ID:        // the menu's region label of the game id we joined (the seek knows it)
-        case KRUNKER_S2C_REDEEM_VOUCHER_RESPONSE:
         case KRUNKER_S2C_ADD_MAIL:
         case KRUNKER_S2C_OPEN_MAIL:
         case KRUNKER_S2C_UPDATE_MAIL:

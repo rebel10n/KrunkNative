@@ -114,8 +114,11 @@ int main(int argc, char **argv) {
     CHECK(t.opacity == 0.0 && t.scale == 2.5 && t.decrement == 0.01, "hidden: reset");
 
     // io_gameEnd's type for every result: the draw (didWin -1, e.g. a TDM tie) has its title too
-    CHECK(!strcmp(vic_title_type(1), "vic") && !strcmp(vic_title_type(0), "def") && !strcmp(vic_title_type(-1), "dra"),
-          "vicTitle.type: %s %s %s", vic_title_type(1), vic_title_type(0), vic_title_type(-1));
+    CHECK(!strcmp(vic_title_type(1, 0), "vic") && !strcmp(vic_title_type(0, 0), "def") && !strcmp(vic_title_type(-1, 0), "dra"),
+          "vicTitle.type: %s %s %s", vic_title_type(1, 0), vic_title_type(0, 0), vic_title_type(-1, 0));
+    // v10.0.4: a defeat in a noWinner mode (Candy Heist) is ENDED; a win or a draw keeps its own title
+    CHECK(!strcmp(vic_title_type(0, 1), "end") && !strcmp(vic_title_type(1, 1), "vic") && !strcmp(vic_title_type(-1, 1), "dra"),
+          "vicTitle.type noWinner: %s %s %s", vic_title_type(0, 1), vic_title_type(1, 1), vic_title_type(-1, 1));
 
     cJSON_Delete(root);
     free(text);

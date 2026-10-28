@@ -748,7 +748,16 @@ static KsNode *parse_statement_inner(KsFront *f) {
         TRY(n = node_at(f, KS_S_ADDTO, t));
         next(f);
         TRY(n->u.addto.target = parse_unary(f));
-        TRY(n->u.addto.value = parse_expr(f));
+        // `addTo toastT (now + 3800);` parses the target as the call toastT(now + 3800): with nothing after it, the
+        // call's one argument is the value (the official map scripts write it so; `addTo (T) x v` is a cast, not a call)
+        if (n->u.addto.target->kind == KS_E_CALL && !n->u.addto.target->parens && at(f, TK_SEMI) &&
+            n->u.addto.target->u.call.args.count == 1) {
+            KsNode *call = n->u.addto.target;
+            n->u.addto.value = call->u.call.args.items[0];
+            n->u.addto.target = call->u.call.callee;
+        } else {
+            TRY(n->u.addto.value = parse_expr(f));
+        }
         if (!expect(f, TK_SEMI)) return NULL;
         return finish(f, n);
     case TK_REMOVE: {

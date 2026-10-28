@@ -46,7 +46,7 @@ if not DB and DRIVER == "postgres":
     sys.exit(77)
 SCHEMA = "kn_test_cm_%d" % os.getpid()
 FAILS = []
-OFFICIAL_COUNT = 46  # map_catalog.h MAP_CATALOG_OFFICIAL_COUNT (Krunker's official list)
+OFFICIAL_COUNT = 47  # map_catalog.h MAP_CATALOG_OFFICIAL_COUNT (Krunker's official list; 46 = Candy Heist, v10.0.4)
 CATEGORY_PARKOUR = 1  # map_catalog.c map_category_name: "Parkour"
 
 

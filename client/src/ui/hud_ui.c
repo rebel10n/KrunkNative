@@ -72,7 +72,9 @@ void hud_ui_hit(Client*, int kill);
 #include <i18n.h>        // hud_ui_add_official_name_line: the official line's template
 #include <console.h>     // ui_console_on_server_line: the official line in the developer console
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
+#include "v10_loading.h" // #loadingBg: the v10.0.4 map card (client/tests/v10_loading_test.c)
 #include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
+#include <candy_heist.h> // Candy Heist: candy_heist_is_mode / candy_heist_candy for the team slot (hud_render_team)
 #include <cJSON.h>
 #include <limits.h>
 #include <ctype.h>
@@ -2899,6 +2901,14 @@ static void hud_render_class(const int class_index) {
 // teams, else "Team" + the team's name in its mode colour.
 static void hud_render_team(const Client *client) {
     const GameMode *mode = client->game.mode;
+    if (mode && candy_heist_is_mode(mode->config.key)) { // Candy Heist: the candy count in the team slot (the score / 10)
+        char count[16];
+        snprintf(count, sizeof(count), "%d", candy_heist_candy(client->me ? (double) client->me->score : 0.0));
+        dom_text("bottomLeftTeamType", "Candy");
+        dom_text("bottomLeftTeamName", count);
+        dom_style("bottomLeftTeamName", "color", "#ffb347");
+        return;
+    }
     const int teams = mode && (mode->config.teams || mode->config.team_options[0]);
     const int team = client->me ? client->me->team : 0;
     const char *name = "";
@@ -3041,6 +3051,7 @@ static double hud_now_ms(const Client *client);
 static const Weapon *hud_weapon_by_name(const Game *game, const char *name);
 
 static int g_end_result;        // io_gameEnd: 1 victory, 0 defeat, -1 draw
+static int g_end_no_winner;     // the match's mode.noWinner: a defeat is "end" (ENDED), deob-10.0.4.js:223533
 static char g_end_timer[32];    // "Next Round in <time>" (i18n timer.end)
 static int g_end_clock_state;    // an official "t" state (hud_ui_set_end_clock_state): 2 Match Over, 3 Match Abandoned, else 0
 
@@ -3359,7 +3370,9 @@ static void hud_end_screen_dom(const int start) {
     // end animation (the animated title itself is overlay.vicTitle, #knVicTitle here)
     const HtmlElem sub = html_dom_by_id("victorySub");
     if (sub) {
-        html_dom_set_attr(sub, "src", g_end_result < 0 ? "./img/dra.png" : g_end_result ? "./img/vic.png" : "./img/def.png");
+        char src[32];
+        snprintf(src, sizeof(src), "./img/%s.png", vic_title_type(g_end_result, g_end_no_winner)); // io_gameEnd: victorySub.src
+        html_dom_set_attr(sub, "src", src);
         html_dom_set_display(sub, g_hud_ui.end_phase == 2 ? "" : "none");
     }
     if (g_hud_ui.end_phase == 2) dom_display("endInfo", "block");
@@ -3397,7 +3410,7 @@ int hud_ui_project(const Client *client, const float x, const float y, const flo
 // canvas, at page ready: game-overlay.js loads the three images at startup and only draws one
 // once it isReady, so on the web they must not start loading at the END (behind a CDN round
 // trip the whole zoom ran before the image arrived). One <img> per type, the shown one by display.
-static const char *const END_TITLE_TYPES[3] = {"vic", "def", "dra"};
+static const char *const END_TITLE_TYPES[4] = {"vic", "def", "dra", "end"}; // "end": v10.0.4 ENDED (img/end.png)
 
 static HtmlElem hud_end_title(void) {
     HudUi *ui = &g_hud_ui;
@@ -3410,7 +3423,7 @@ static HtmlElem hud_end_title(void) {
         size_t len = 0;
         hb_append(html, sizeof(html), &len, "<div id='knVicTitle' style='position:absolute;left:0;top:0;width:100%%;height:100%%;z-index:1;"
                                             "pointer-events:none;background-color:rgba(0,0,0,0.33);display:none'>");
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             hb_append(html, sizeof(html), &len, "<img id='knVicTitle_%s' src='./img/%s.png' style='position:absolute;left:50%%;top:50%%;"
                                                 "transform:translate(-50%%,-50%%);display:none'>", END_TITLE_TYPES[i], END_TITLE_TYPES[i]);
         }
@@ -3446,9 +3459,9 @@ static void hud_end_title_frame(const int show, const double dt_ms) {
     html_dom_viewport(&vw, &vh, &dpr);
     const float base_h = hud_ui_height();
     const double c7 = base_h > 0.0f && vh > 0.0f ? vh / base_h : 1.0;
-    const char *type_name = vic_title_type(g_end_result < 0 ? -1 : g_end_result); // io_gameEnd: vicTitle.type
+    const char *type_name = vic_title_type(g_end_result < 0 ? -1 : g_end_result, g_end_no_winner); // io_gameEnd: vicTitle.type
     int type = 0;
-    while (type < 2 && strcmp(END_TITLE_TYPES[type], type_name)) type++;
+    while (type < 3 && strcmp(END_TITLE_TYPES[type], type_name)) type++;
     // over an open menu (a dead player's death menu covers the page at its round end) the title goes above
     // #menuHolder (z-index 10): the animation shows there too. Otherwise it stays under the HUD as v10's canvas
     const int over_menu = html_ui_is_menu_open();
@@ -3458,7 +3471,7 @@ static void hud_end_title_frame(const int show, const double dt_ms) {
     html_dom_set_style(title, "z-index", over_menu ? "11" : "1");
     snprintf(ui->end_title_key, sizeof(ui->end_title_key), "%s", key);
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         char id[32];
         snprintf(id, sizeof(id), "knVicTitle_%s", END_TITLE_TYPES[i]);
         const HtmlElem img = html_dom_by_id(id);
@@ -3854,6 +3867,7 @@ void hud_ui_show_end_title(Client *client, const int result) {
     HudUi *ui = &g_hud_ui;
     if (ui->ended) return; // the end screen runs its own title
     g_end_result = result;
+    g_end_no_winner = client && client->game.mode && client->game.mode->config.no_winner;
     ui->end_title_only = 1;
     ui->end_start_ms = hud_now_ms(client);
 }
@@ -3862,6 +3876,7 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
     if (!html_ui_available() || !html_ui_is_ready()) return;
     HudUi *ui = &g_hud_ui;
     g_end_result = result;
+    g_end_no_winner = client && client->game.mode && client->game.mode->config.no_winner;
     snprintf(g_end_timer, sizeof(g_end_timer), "%s", next_round ? next_round : "");
     ui->end_title_only = 0; // the full end screen runs the title (hud_end_step)
     if (!ui->ended) {
@@ -4594,6 +4609,29 @@ void hud_ui_on_init(Client *client) {
     g_hud_ui.round_switch = 0; // a new round: no Switching Sides any more
     hud_ui_relayout();
     hud_ui_on_config(client);
+    hud_ui_map_loading_begin(client); // the map is loaded now (main.c: client_load_map before hud_ui_on_init)
+}
+
+// v10.0.4 #loadingBg for the match's map (v10_loading.c): the thumbnail is the page's img/maps/map_<index>.png,
+// none for a custom map and for map 0 unless it is Burg (deob-10.0.4.js:223018-223019); the accent is the mode's
+// tag[1] in v10, which KrunkNative's mode table does not carry yet, so every mode gets #fff.
+void hud_ui_map_loading_begin(Client *client) {
+    if (!client || !client->game.ready) return;
+    const int index = client->game.current_map_index;
+    const cJSON *raw = client->game.map ? client->game.map->raw_data : NULL;
+    const cJSON *name_item = raw ? cJSON_GetObjectItem(raw, "name") : NULL;
+    const char *map_name = cJSON_IsString(name_item) ? cJSON_GetStringValue(name_item) : "";
+    // deob-10.0.4.js:223018: no thumbnail for a custom map (index < 0) or map 0 unless it is Burg
+    const int no_thumb = index < 0 || (index == 0 && strcmp(map_name, "Burg") != 0);
+    char thumb[64];
+    if (!no_thumb) snprintf(thumb, sizeof(thumb), "./img/maps/map_%d.png", index);
+    const V10LoadingMap map = {
+        .map_thumb = no_thumb ? NULL : thumb,
+        .map_name = map_name,
+        .mode_name = client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : NULL,
+        .accent = NULL,
+    };
+    v10_loading_begin(&map, hud_now_ms(client));
 }
 
 void hud_ui_on_config(Client *client) {
@@ -4719,6 +4757,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_net_stats_step(now);
     hud_end_step(client, hud_now_ms(client)); // the HUD clock: the same base as the results' end_start_ms
     hud_endscreen_v10_tick(hud_now_ms(client)); // the Collect countdown and the rewards overlay schedule: the clock of its results (hud_now_ms), not now_f
+    v10_loading_tick(hud_now_ms(client)); // #loadingBg: the hold, the fade (v10_loading.c)
     hud_feed_step(now * 1000.0);
     // game-overlay text popups (client/src/ui/hud_popups.c): drawn while playing (no kill card / menu)
     hud_popups_set_comp(client->game.config.comp);

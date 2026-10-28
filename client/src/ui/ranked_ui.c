@@ -1314,8 +1314,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         return 1;
     } else if (!strcmp(name, "knRkBuy")) {
         html_ui_stop_propagation();
-        if (kio_store_active()) kio_store_read_only("ranked/purchase"); // krunker.io: RP purchases are never sent
-        else if (ranked_active_backend() != RANKED_BACKEND_NONE) buy(arg0);
+        if (ranked_active_backend() != RANKED_BACKEND_NONE) buy(arg0); // krunker.io: confirm_closed sends /ranked/purchase (purchaseSkin, v10:111039)
         return 1;
     } else if (!strcmp(name, "knRkShare")) { // ShareButton's click (v10:103485): the link, then "Copied!" for 1.5 s
         html_ui_stop_propagation();
