@@ -209,6 +209,7 @@ set(SERVER_CORE_SOURCES
     server/src/game_captcha.c     # the in-game captcha (v10.0.3 "cpt"): asked only with a brain link that enforces it
     server/src/brain_events.c     # v10.0.3 warsClan, map prize wheel spins, unb / lotWin, monetized studio games (kn_brain)
     server/src/live_events_server.c # v10.0.3 live events: eventIndex, forceEvent, limitedTimeMode, the event reward
+    server/src/skin_counters_server.c # v10.0.4 counter skins: countSkinStat on the authority, the SKINS' counter bases
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -303,6 +304,8 @@ if (EMSCRIPTEN)
     # `--target lexbor` checks it builds with emcc.
     add_subdirectory(client/lib/lexbor EXCLUDE_FROM_ALL)
     krunknative_add_html_sources(client ENGINE SOURCES html_ui.c html_dom_core.c web_dom.c)
+    # The engine's WebP decoder (simplewebp, no other engine dependency) for glTF EXT_texture_webp (client/src/gltf.c)
+    krunknative_add_html_sources(client SOURCES engine/webp.c)
 
     # Link flags:
     #   USE_GLFW/WEBGL2            GLFW port on top of a WebGL2 (GLES 3.0) context. No FULL_ES3: its
@@ -793,10 +796,12 @@ else ()
     # strike_economy_test: Krunker Strike's economy (strike_economy.h): catalogue, wheel odds, XP curve
     # flavor_storage_test: each flavor's native storage directory (Box Office unchanged, Strike its own)
     # raid_drops_test: Krunker v10.0.4 raid boss drops (shared/include/raid_drops.h): AI rarity chances, double drops, getItemByChance
+    # raid_wiring_test: the raid drops in a real Game (ai.c ai_rewards, game_drop_skin, the Loot Drop, updateEventFlags,
+    #   creditChallengeKill, KrunkScript AI.spawn rewards / challengeKey and getMatch().doubleRaidDrops)
     # candy_heist_test: Krunker v10.0.4 Candy Heist (shared/include/candy_heist.h): the candy count, the mode 37 config, the event defaults
     # krunker_regions_test: the Krunker v10.0.3 region table (shared/src/krunker_regions.c): the dropdown's order,
     #   dedicated-only ids, names, the nearest-region rule (lowest ping, then great circle) and getRegion's ping URL
-    foreach (wpb_test weapons_v10_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test raid_drops_test candy_heist_test)
+    foreach (wpb_test weapons_v10_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test raid_drops_test raid_wiring_test candy_heist_test skin_stat_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -1021,6 +1026,15 @@ else ()
     endif ()
     # trade_test (doc/v10/trade.md): the live trade's state machine (trade_session.c) and its server flow over the sandbox
     # (requests, the inventories, utrd / utrdc / atrd, the countdown, the settle, cancel / leave) with the brain frames faked
+    # skin_counters_test: Krunker v10.0.4 counter skins on the server (server/src/skin_counters_server.c): the bases, countSkinStat
+    #   on the worn counter, takeSkinStats (run from the repository root: assets/skins.json)
+    add_executable(skin_counters_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/skin_counters_test.c)
+    target_link_libraries(skin_counters_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(skin_counters_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME skin_counters_test COMMAND skin_counters_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     add_executable(trade_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/trade_test.c)
     target_link_libraries(trade_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -1116,6 +1130,8 @@ else ()
 
     add_test(NAME strike_economy_test COMMAND strike_economy_test)
     add_test(NAME raid_drops_test COMMAND raid_drops_test)
+    add_test(NAME raid_wiring_test COMMAND raid_wiring_test)
+    add_test(NAME skin_stat_test COMMAND skin_stat_test) # v10.0.4 counter skins: countSkinStat on the authority
     add_test(NAME candy_heist_test COMMAND candy_heist_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # strike_maps_test: the Krunker Strike map pool (strike_maps.h): FRVR's seven map files load,
@@ -1339,7 +1355,7 @@ else ()
                        client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
                        client/src/net/krunker_link_s2c.c client/src/net/krunker_link_trade.c shared/src/ks/ks_net_official.c
                        client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c shared/src/rules/v10/network_sounds_v10.c client/src/ui/player_names.c
-                       client/src/ui/quick_play_retry.c
+                       client/src/ui/quick_play_retry.c client/src/net/krunker_checkout.c
                        shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                        shared/src/season.c shared/src/voice.c shared/src/social.c)
         # the headers krunker_net.c includes (client.h: freetype; GLFW for glfwGetTime, which the test defines itself)
@@ -1590,6 +1606,17 @@ else ()
     add_test(NAME v10_loading_test COMMAND v10_loading_test)
     add_test(NAME vic_title_test COMMAND vic_title_test ${CMAKE_SOURCE_DIR})
 
+    # scene_warm_test: the match-start warm's stop rule (client/src/scene_warm.c, v10.0.4 warmScene
+    # deob-10.0.4.js:204997-205054); `off`: KRUNKNATIVE_SCENE_WARM=0
+    add_executable(scene_warm_test client/tests/scene_warm_test.c client/src/scene_warm.c)
+    target_include_directories(scene_warm_test PRIVATE client/include)
+    add_test(NAME scene_warm_test COMMAND scene_warm_test)
+    add_test(NAME scene_warm_off_test COMMAND scene_warm_test off)
+
+    # skin_counter_test: the v10.0.4 counter skins' digit / icon pixels (client/src/skin_counter.c in SKIN_COUNTER_PURE, no GL)
+    add_executable(skin_counter_test client/tests/skin_counter_test.c)
+    add_test(NAME skin_counter_test COMMAND skin_counter_test)
+
     # market_bulk_test: item locks, select-mode picks and the bulk market bodies (client/src/ui/market_bulk.c),
     # deob-10.0.4.js:108837-108866, :146851, :132755, :104255
     add_executable(market_bulk_test client/tests/market_bulk_test.c client/src/ui/market_bulk.c)
@@ -1608,6 +1635,12 @@ else ()
     target_include_directories(kio_checkout_stripe_test PRIVATE client/include shared/include)
     target_link_libraries(kio_checkout_stripe_test PRIVATE cJSON m)
     add_test(NAME kio_checkout_stripe_test COMMAND kio_checkout_stripe_test)
+    # kio_checkout_test: the real-money purchase's game-socket frames and their allowlist shapes, the S2C labels,
+    # PayStation's page, the log's URL redaction, the catalog spec and the browser wait (client/src/net/krunker_checkout.c)
+    add_executable(kio_checkout_test client/tests/kio_checkout_test.c client/src/net/krunker_checkout.c)
+    target_include_directories(kio_checkout_test PRIVATE client/include shared/include)
+    target_link_libraries(kio_checkout_test PRIVATE cJSON m)
+    add_test(NAME kio_checkout_test COMMAND kio_checkout_test)
 
     # hud_format_test: the HUD's number text (client/src/ui/hud_format.c) for the damage numbers, the health bar and
     # the K/D ratio: two decimals at most, no exponent, no double noise (client/tests/hud_format_test.c)

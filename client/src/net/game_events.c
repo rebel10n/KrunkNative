@@ -28,6 +28,7 @@
 #include <spectate.h> // NET_PACKET_SPECTATE -> spectate_begin / spectate_end
 #include <hud_map.h>  // WP-E part 2a: death markers, minimap blips
 #include <hud_endscreen_v10.h> // NET_EXT_LATEST_RANKED_MMR_CHANGE: the end screen's rank card (lrmr)
+#include <skin_counter.h>      // v10.0.4 counter skins: kills / hits / AI kills / SKIN_STAT counted on the client
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
@@ -1020,6 +1021,18 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_KILL: {
             EVENTS_READ(NetKillPacket, kill);
             if (client->game.ready) {
+                // v10.0.4 countSkinKill on the client (deob-10.0.4.js:175903-175908): not a streak kill; the killer's
+                // "kills", a headshot's "hskills", on info.wId else its held weapon
+                const Player *killer = kill.killer_uid != kill.victim_uid ? events_find_player(client, kill.killer_uid) : NULL;
+                if (killer && NET_KILL_STREAK(kill.fists) < 0) {
+                    const int weapon = kill.weapon_index >= 0 ? kill.weapon_index
+                                       : killer->loadout && killer->loadout_index >= 0 && killer->loadout_index < killer->loadout_size
+                                           ? killer->loadout[killer->loadout_index] : -2;
+                    if (weapon >= 0) {
+                        skin_counter_count_player(killer, weapon, "kills", 1);
+                        if (kill.headshot) skin_counter_count_player(killer, weapon, "hskills", 1);
+                    }
+                }
                 events_kill(client, &kill);
                 // KrunkScript onPlayerDeath(id, killerID or ""), index.js:15238-15240
                 ks_client_player_killed(client, kill.victim_uid, events_find_player(client, kill.killer_uid) ? kill.killer_uid : -1);
@@ -1037,6 +1050,18 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         }
         case NET_PACKET_HIT: {
             EVENTS_READ(NetHitPacket, hit);
+            // v10.0.4 DO_DAMAGE (iïiïiîi, deob-10.0.4.js:225009-225011): you, active, a weapon: an AI hit that killed counts
+            // "aikills", else a damaging hit "hits" and a crit "headshots", on the held weapon
+            const Player *me = client->me;
+            if (me && me->active && me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size) {
+                const int held = me->loadout[me->loadout_index];
+                if (hit.ai) {
+                    if (hit.kill) skin_counter_count_player(me, held, "aikills", 1);
+                } else if (hit.damage > 0) {
+                    skin_counter_count_player(me, held, "hits", 1);
+                    if (hit.crit) skin_counter_count_player(me, held, "headshots", 1);
+                }
+            }
             sound_events_hitmarker();     // gF: hit_0
             hud_ui_hit(client, hit.kill); // gF -> aV.showHit(isKill)
             const double damage = events_hit_damage(&hit);
@@ -1395,6 +1420,24 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&item, body, sizeof(item));
                 item.icon[sizeof(item.icon) - 1] = 0;
                 hud_endscreen_v10_offer_item(item.skin, item.icon); // the Collect Rewards button (hud_endscreen_v10.c)
+            } else if (subtype == NET_EXT_KN_SKIN_COPIES && body_length >= sizeof(NetSkinCopiesPacket)) { // worn copies' stat / seed
+                NetSkinCopiesPacket copies;
+                memcpy(&copies, body, sizeof(copies));
+                const Player *p = events_find_player(client, copies.uid);
+                if (p) {
+                    const int32_t worn[3] = {p->skins.primary, p->skins.secondary, p->skins.melee};
+                    for (int k = 0; k < 3; k++) {
+                        if (worn[k] < 0) continue;
+                        skin_counter_set_base(copies.uid, worn[k], copies.base[k]);
+                        skin_counter_set_seed(copies.uid, worn[k], copies.seed[k]);
+                    }
+                }
+            } else if (subtype == NET_EXT_KN_SKIN_STAT && body_length >= sizeof(NetSkinStatPacket)) { // "sks" SKIN_STAT
+                NetSkinStatPacket sks;
+                memcpy(&sks, body, sizeof(sks));
+                static const char *const stats[SKIN_STAT_COUNT] = SKIN_STATS;
+                // iiîíiíi (deob-10.0.4.js:221919-221923): countSkinStat(you, weapon, stat, amount)
+                if (sks.stat < SKIN_STAT_COUNT) skin_counter_count_player(client->me, sks.weapon, stats[sks.stat], sks.amount);
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (s2c_events_on_ext(client, subtype, body, body_length)) {} // "c" "sb" "sdc" "p" "unb" "spinW" "chreq" ... (s2c_events.h)

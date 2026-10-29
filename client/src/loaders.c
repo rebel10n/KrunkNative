@@ -307,6 +307,45 @@ GlyphCacheEntry *load_glyph(const char c) {
     return entry;
 }
 
+void geometry_compute_normals(const vertex *vertices, const size_t vertex_count, const unsigned int *indices, const size_t index_count,
+                              float *out) {
+    memset(out, 0, vertex_count * 3 * sizeof(float));
+    for (size_t t = 0; t + 2 < index_count; t += 3) {
+        const unsigned int a = indices[t], b = indices[t + 1], c = indices[t + 2];
+        if (a >= vertex_count || b >= vertex_count || c >= vertex_count) continue;
+        const vec3 pa = vertices[a].position, pb = vertices[b].position, pc = vertices[c].position;
+        const float e1x = pb.x - pa.x, e1y = pb.y - pa.y, e1z = pb.z - pa.z;
+        const float e2x = pc.x - pa.x, e2y = pc.y - pa.y, e2z = pc.z - pa.z;
+        // cb x ab as three.js (the face's counter-clockwise normal, its length twice the area: area-weighted)
+        const float nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+        const unsigned int v[3] = {a, b, c};
+        for (int k = 0; k < 3; k++) {
+            out[v[k] * 3] += nx;
+            out[v[k] * 3 + 1] += ny;
+            out[v[k] * 3 + 2] += nz;
+        }
+    }
+    for (size_t i = 0; i < vertex_count; i++) {
+        float *n = &out[i * 3];
+        const float len = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (len > 0.0f) {
+            n[0] /= len;
+            n[1] /= len;
+            n[2] /= len;
+        }
+    }
+}
+
+void geometry_bind_normals(const float *normals, const size_t vertex_count) {
+    if (!normals || !vertex_count) return;
+    unsigned int vbo;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (vertex_count * 3 * sizeof(float)), normals, GL_STATIC_DRAW);
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), NULL);
+    glEnableVertexAttribArray(3);
+}
+
 void geometry_set_bounds(Geometry *geometry, const vertex *vertices, const size_t vertex_count) {
     if (!geometry || !vertices || !vertex_count) return;
 
@@ -431,6 +470,8 @@ Geometry *load_obj_model(char *path, const int transform_y) {
 
     vertex vertices[vertex_count];
     unsigned int indices[index_count];
+    // each corner's vn index (0 = none, fast_obj's reserved slot): the vertex normals of attribute 3
+    unsigned int *corner_normal = vertex_count ? calloc(vertex_count, sizeof(unsigned int)) : NULL;
 
     for (size_t f = 0; f < mesh->face_count; f++) {
         const unsigned int fv = mesh->face_vertices[f];
@@ -480,6 +521,10 @@ Geometry *load_obj_model(char *path, const int transform_y) {
 
         vertices[anchor_idx] = v0;
         vertices[prev_idx] = v1;
+        if (corner_normal) {
+            corner_normal[anchor_idx] = anchor.n;
+            corner_normal[prev_idx] = prev.n;
+        }
 
         for (size_t v = 2; v < fv; v++) {
             const fastObjIndex current = mesh->indices[idx++];
@@ -501,6 +546,7 @@ Geometry *load_obj_model(char *path, const int transform_y) {
             if (v2.position.z > bounds_max.z) bounds_max.z = v2.position.z;
 
             vertices[current_idx] = v2;
+            if (corner_normal) corner_normal[current_idx] = current.n;
 
             indices[alloc_index_count++] = anchor_idx;
             indices[alloc_index_count++] = prev_idx;
@@ -537,6 +583,21 @@ Geometry *load_obj_model(char *path, const int transform_y) {
 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
+
+    // attribute 3: the file's vn, else the face normal (three.js OBJLoader keeps vn and computes the rest:
+    // computeVertexNormals on its non-indexed corners is the face normal)
+    float *normals = alloc_vertex_count ? malloc(alloc_vertex_count * 3 * sizeof(float)) : NULL;
+    if (normals && corner_normal) {
+        geometry_compute_normals(vertices, alloc_vertex_count, indices, alloc_index_count, normals);
+        for (size_t i = 0; i < alloc_vertex_count; i++) {
+            const unsigned int n = corner_normal[i];
+            if (!n || n >= mesh->normal_count) continue;
+            memcpy(&normals[i * 3], &mesh->normals[n * 3], 3 * sizeof(float));
+        }
+        geometry_bind_normals(normals, alloc_vertex_count);
+    }
+    free(normals);
+    free(corner_normal);
 
     geometry->index_count = (int) alloc_index_count;
     if (alloc_index_count) { // the wireframe edges come from this list (geometry_wire_ebo)

@@ -34,6 +34,8 @@
 #include <kio_inventory.h>
 #include <kio_store.h>
 #include <market_bulk.h>
+#include <v10_bulk.h> // the bulk quick-sell confirm (deob-10.0.4.js:146908-147037)
+#include <inv_source.h> // the active account's inventory: krunker.io's (kio_inventory) or Box Office's (bo_inventory)
 #include <backend_ui.h>
 #include <i18n.h>
 #include <html_ui.h>
@@ -61,7 +63,6 @@ static struct {
 static MarketPicks W_picks;
 static int W_select;
 static int W_busy;
-static int W_price;   // the bulk list's unit price, as typed (0: none)
 static char W_inv_err[160];
 
 // ---------------------------------------------------------------- the account
@@ -191,6 +192,39 @@ static void tile(StrBuf *sb, const WalletStack *s) {
 
 // ---------------------------------------------------------------- the krunker.io inventory (kio_inventory.h)
 
+// ---- the Keep options (iíiiììi, deob-10.0.4.js:108967-108975; localStorage "bulkSellKeep", :147278-147287, :147309-147313)
+
+static MarketKeep W_keep;
+static int W_keep_loaded, W_keep_open;
+
+static MarketKeep *keep_opts(void) {
+    if (!W_keep_loaded) {
+        char buf[256];
+        W_keep = market_keep_parse(html_storage_get("bulkSellKeep", buf, sizeof(buf)) >= 0 ? buf : NULL);
+        W_keep_loaded = 1;
+    }
+    return &W_keep;
+}
+
+static void keep_save(void) {
+    char *json = market_keep_json(keep_opts());
+    if (json) html_storage_set("bulkSellKeep", json);
+    free(json);
+}
+
+// IÌïîîîï (deob-10.0.4.js:147289-147306) for one row: a krunker.io stackable row is "stack" (the bundle bulk-sells
+// copies only). A Box Office stack is N plain copies (bo_inventory.c), so it is pickable: its reasons are the item's
+// (locked, equipped, rarity). Listed units are out of the inventory (the brain's escrow; krunker.io's rows), so none here.
+static int row_reason(const MarketGroup *g, const int copy) {
+    const MarketQsValue v = market_qs_value(ui_loadout_skin_json(g->item));
+    const ViewerSkin *k = viewer_skin(g->item);
+    return market_keep_reason(keep_opts(), copy < 0 && inv_official(), v.can_qs || v.can_destroy, 0, inv_locked(g, copy),
+                              ui_loadout_wears(g->item), k ? k->rarity : 0, copy >= 0 && g->metas ? &g->metas[copy] : NULL);
+}
+
+// IÍïiïïí: a reason that keeps the unit for its own sake (not stack / unsellable): the per-item count's slots go to these first
+static int kept_reason(const int r) { return r != MARKET_KEEP_NONE && r != MARKET_KEEP_STACK && r != MARKET_KEEP_UNSELLABLE; }
+
 static int picked_row(const MarketGroup *g, const int copy) {
     const int skin = copy < 0 ? g->stack_id : g->instances[copy];
     for (int i = 0; i < W_picks.n; i++)
@@ -203,13 +237,23 @@ static int picked_row(const MarketGroup *g, const int copy) {
 static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, const int copy) {
     const MarketGroup *g = &groups[gi];
     const int stack = copy < 0;
-    const int locked = kio_inventory_locked(g, copy);
+    const int locked = inv_locked(g, copy);
     const int on = W_select && picked_row(g, copy);
+    const int reason = W_select ? row_reason(g, copy) : MARKET_KEEP_NONE;
     char onclick[64];
     snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", g->item);
-    sb_appendf(sb, "<div class=\"wallet-item svelte-l0gwpc%s%s\">", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "");
+    sb_appendf(sb, "<div class=\"wallet-item svelte-l0gwpc%s%s%s%s\"", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "",
+               on ? " bulk-selected svelte-1wcm5z8" : "", reason != MARKET_KEEP_NONE ? " bulk-dim svelte-1wcm5z8" : "");
+    if (market_keep_reason_name(reason)) { // its keep reason on hover (wallet.bulk.keep.reason.*, deob-10.0.4.js:147624)
+        char key[64];
+        snprintf(key, sizeof(key), "wallet.bulk.keep.reason.%s", market_keep_reason_name(reason));
+        sb_append(sb, " title=\"");
+        sb_append_esc(sb, i18n_t(key));
+        sb_append(sb, "\"");
+    }
+    sb_append(sb, ">");
     v10_market_card(sb, g->item, 128, 128, "top-center", onclick, NULL);
-    if (W_select)
+    if (W_select && (reason == MARKET_KEEP_NONE || on))
         sb_appendf(sb, "<button type=\"button\" class=\"wallet-pick%s\" onclick=\"knV10WalletPick(%d,%d)\"><i class=\"material-icons\">%s</i></button>",
                    on ? " is-on" : "", gi, copy, on ? "check_box" : "check_box_outline_blank");
     sb_appendf(sb, "<button type=\"button\" class=\"wallet-lock\" onclick=\"knV10WalletLock(%d,%d)\" aria-label=\"", gi, copy);
@@ -219,31 +263,123 @@ static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, c
     sb_append(sb, "</div>");
 }
 
-// the select bar: Select / Cancel, and while selecting the count and the bulk Quick Sell
-static void official_bar(StrBuf *sb) {
+// the select toggle (wallet.bulk.select / done, deob-10.0.4.js:147549) over the grid
+static void official_toolbar(StrBuf *sb) {
     sb_append(sb, "<div class=\"wallet-bulkbar svelte-l0gwpc\">");
-    sb_append(sb, "<button type=\"button\" class=\"wallet-select-btn svelte-l0gwpc\" onclick=\"knV10WalletSelect()\">");
-    sb_append_esc(sb, W_select ? I18N("kn.inv.cancel", "Cancel") : I18N("kn.inv.select", "Select"));
-    sb_append(sb, "</button>");
-    if (W_select) {
-        sb_appendf(sb, "<span class=\"wallet-count svelte-l0gwpc\">%d</span>", W_picks.n);
-        sb_appendf(sb, "<button type=\"button\" class=\"wallet-select-btn svelte-l0gwpc\"%s onclick=\"knV10WalletBulkSell()\">", W_busy ? " disabled" : "");
-        sb_append_esc(sb, I18N("kn.inv.quickSellSelected", "Quick sell selected"));
-        sb_append(sb, "</button>");
-        sb_appendf(sb, "<input type=\"number\" min=\"1\" class=\"wallet-price svelte-l0gwpc\" aria-label=\"");
-        sb_append_esc(sb, I18N("kn.inv.price", "Price per item"));
-        sb_appendf(sb, "\" value=\"%d\" onchange=\"knV10WalletPrice(this.value)\">", W_price > 0 ? W_price : 0);
-        sb_appendf(sb, "<button type=\"button\" class=\"wallet-select-btn svelte-l0gwpc\"%s onclick=\"knV10WalletBulkList()\">", W_busy ? " disabled" : "");
-        sb_append_esc(sb, I18N("kn.inv.listSelected", "List selected"));
-        sb_append(sb, "</button>");
+    sb_appendf(sb, "<button type=\"button\" class=\"bulk-btn svelte-1wcm5z8%s\" onclick=\"knV10WalletSelect()\">", W_select ? " active" : "");
+    sb_append_esc(sb, W_select ? I18N("wallet.bulk.done", "Done") : I18N("wallet.bulk.select", "Select"));
+    sb_append(sb, "</button></div>");
+}
+
+// iíiîìïí (deob-10.0.4.js:24597-24606, the tiers :16481-16497): the wear's name, e.g. "Flawless"
+static const char *wear_name(const double wear) {
+    static const double max[] = {0.1, 0.3, 0.6, 1};
+    static const char *const keys[] = {"wear_flawless", "wear_tested", "wear_trashed", "wear_wrecked"};
+    for (int i = 0; i < 4; i++)
+        if (wear < max[i]) return i18n_t(keys[i]);
+    return i18n_t(keys[3]);
+}
+
+// the Keep options panel (iìiiiìi, deob-10.0.4.js:147151, wired :147810-147871): the per-item count, painted, equipped,
+// the serial and wear sliders, the rarity and Reset
+static void keep_panel(StrBuf *sb) {
+    const MarketKeep *k = keep_opts();
+    char val[64];
+    sb_append(sb, "<div class=\"bulk-keep-panel svelte-1wcm5z8\"><label class=\"bulk-opt svelte-1wcm5z8\">");
+    sb_appendf(sb, "<input type=\"checkbox\" class=\"svelte-1wcm5z8\"%s onchange=\"knV10WalletKeep('perItem',this.checked)\"> <span class=\"svelte-1wcm5z8\">",
+               k->per_item ? " checked" : "");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.perItem", "Keep at least this many of each item (the best ones)"));
+    sb_appendf(sb, "</span> <input type=\"number\" class=\"bulk-num svelte-1wcm5z8\" min=\"1\" max=\"99\" value=\"%d\"%s onchange=\"knV10WalletKeep('perItemCount',this.value)\"></label> ",
+               k->per_item_count, k->per_item ? "" : " disabled");
+    sb_appendf(sb, "<label class=\"bulk-opt svelte-1wcm5z8\"><input type=\"checkbox\" class=\"svelte-1wcm5z8\"%s onchange=\"knV10WalletKeep('painted',this.checked)\"> <span class=\"svelte-1wcm5z8\">",
+               k->painted ? " checked" : "");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.painted", "Keep painted and customized items"));
+    sb_appendf(sb, "</span></label> <label class=\"bulk-opt svelte-1wcm5z8\"><input type=\"checkbox\" class=\"svelte-1wcm5z8\"%s onchange=\"knV10WalletKeep('equipped',this.checked)\"> <span class=\"svelte-1wcm5z8\">",
+               k->equipped ? " checked" : "");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.equipped", "Keep equipped items"));
+    sb_append(sb, "</span></label> <label class=\"bulk-opt svelte-1wcm5z8\"><span class=\"svelte-1wcm5z8\">");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.serial", "Keep serials up to"));
+    if (k->serial_max > 0) snprintf(val, sizeof(val), "#%d", k->serial_max); // :147834
+    else snprintf(val, sizeof(val), "%s", I18N("wallet.bulk.keep.off", "Off"));
+    sb_appendf(sb, "</span> <input type=\"range\" min=\"0\" max=\"1000\" step=\"10\" class=\"svelte-1wcm5z8\" value=\"%d\" onchange=\"knV10WalletKeep('serialMax',this.value)\"> "
+                   "<span class=\"bulk-opt-val svelte-1wcm5z8\">",
+               k->serial_max);
+    sb_append_esc(sb, val);
+    sb_append(sb, "</span></label> <label class=\"bulk-opt svelte-1wcm5z8\"><span class=\"svelte-1wcm5z8\">");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.wear", "Keep wear below"));
+    if (k->wear_max > 0) snprintf(val, sizeof(val), "%.2f (%s)", k->wear_max, wear_name(k->wear_max - 0.0001)); // :147840-147842
+    else snprintf(val, sizeof(val), "%s", I18N("wallet.bulk.keep.off", "Off"));
+    sb_appendf(sb, "</span> <input type=\"range\" min=\"0\" max=\"1\" step=\"0.01\" class=\"svelte-1wcm5z8\" value=\"%.2f\" onchange=\"knV10WalletKeep('wearMax',this.value)\"> "
+                   "<span class=\"bulk-opt-val svelte-1wcm5z8\">",
+               k->wear_max);
+    sb_append_esc(sb, val);
+    sb_append(sb, "</span></label> <label class=\"bulk-opt svelte-1wcm5z8\"><span class=\"svelte-1wcm5z8\">");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.rarity", "Keep rarity"));
+    sb_append(sb, "</span> <select class=\"bulk-select svelte-1wcm5z8\" onchange=\"knV10WalletKeep('minRarity',this.value)\"><option class=\"svelte-1wcm5z8\" value=\"-1\">");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.off", "Off"));
+    sb_append(sb, "</option>");
+    for (int r = 0; r < g_viewer_rarity_count; r++) { // :147855-147860: "<rarity> and up"
+        char line[96];
+        sb_appendf(sb, "<option class=\"svelte-1wcm5z8\" value=\"%d\"%s>", r, k->min_rarity == r ? " selected" : "");
+        sb_append_esc(sb, I18N_F(line, "wallet.bulk.keep.rarityAndUp", "{0} and up", g_viewer_rarities[r].name ? g_viewer_rarities[r].name : ""));
+        sb_append(sb, "</option>");
     }
-    sb_append(sb, "</div>");
+    sb_append(sb, "</select></label> <button type=\"button\" class=\"bulk-btn svelte-1wcm5z8\" onclick=\"knV10WalletKeep('reset',0)\">");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.reset", "Reset"));
+    sb_append(sb, "</button></div>");
+}
+
+// the bulk bar while selecting (iîíîìïi, deob-10.0.4.js:147160, wired :147877-147925): the count, what the KR and Junk
+// picks pay, Select all / Clear, then Sell for KR (n), Sell for Junk (n) and Destroy (n) when any pick only destroys
+static void official_bulkbar(StrBuf *sb) {
+    if (!W_select) return;
+    int n_kr = 0, n_junk = 0, n_destroy = 0;
+    double kr = 0, junk = 0;
+    v10_bulk_sums(&W_picks, &n_kr, &n_junk, &n_destroy, &kr, &junk);
+    char num[48], line[96];
+    snprintf(num, sizeof(num), "%d", W_picks.n);
+    sb_append(sb, "<div class=\"bulk-bar svelte-1wcm5z8\">");
+    if (W_keep_open) keep_panel(sb);
+    sb_append(sb, "<div class=\"bulk-bar-actions svelte-1wcm5z8\"><span class=\"bulk-count svelte-1wcm5z8\">");
+    sb_append_esc(sb, I18N_F(line, "wallet.bulk.selected", "{0} selected", num));
+    sb_append(sb, "</span> ");
+    if (n_kr) {
+        v10_fmt_int(num, sizeof(num), kr);
+        sb_appendf(sb, "<span class=\"bulk-sum svelte-1wcm5z8\">%s KR</span> ", num);
+    }
+    if (n_junk) {
+        snprintf(num, sizeof(num), "%.2f", junk);
+        sb_appendf(sb, "<span class=\"bulk-sum svelte-1wcm5z8\">%s JNK</span> ", num);
+    }
+    sb_appendf(sb, "<button type=\"button\" class=\"bulk-btn svelte-1wcm5z8\"%s onclick=\"knV10WalletSelectAll()\">", W_busy ? " disabled" : "");
+    sb_append_esc(sb, I18N("wallet.bulk.selectAll", "Select all"));
+    sb_appendf(sb, "</button> <button type=\"button\" class=\"bulk-btn svelte-1wcm5z8\"%s onclick=\"knV10WalletClear()\">", W_picks.n ? "" : " disabled");
+    sb_append_esc(sb, I18N("wallet.bulk.clear", "Clear"));
+    sb_appendf(sb, "</button> <button type=\"button\" class=\"bulk-btn svelte-1wcm5z8%s\" onclick=\"knV10WalletKeepToggle()\"><i class=\"material-icons svelte-1wcm5z8\">tune</i> ",
+               W_keep_open ? " active" : "");
+    sb_append_esc(sb, I18N("wallet.bulk.keep.title", "Keep options"));
+    sb_append(sb, "</button> <span class=\"bulk-spacer svelte-1wcm5z8\"></span> ");
+    snprintf(num, sizeof(num), "%d", n_kr);
+    sb_appendf(sb, "<button type=\"button\" class=\"bulk-btn bulk-kr svelte-1wcm5z8\"%s onclick=\"knV10WalletBulkSell(0)\">", n_kr && !W_busy ? "" : " disabled");
+    sb_append_esc(sb, I18N("wallet.bulk.sellKR", "Sell for KR"));
+    sb_appendf(sb, " (%s)</button> ", num);
+    snprintf(num, sizeof(num), "%d", n_junk);
+    sb_appendf(sb, "<button type=\"button\" class=\"bulk-btn bulk-junk svelte-1wcm5z8\"%s onclick=\"knV10WalletBulkSell(1)\">", n_junk && !W_busy ? "" : " disabled");
+    sb_append_esc(sb, I18N("wallet.bulk.sellJunk", "Sell for Junk"));
+    sb_appendf(sb, " (%s)</button> ", num);
+    if (n_destroy) {
+        snprintf(num, sizeof(num), "%d", n_destroy);
+        sb_appendf(sb, "<button type=\"button\" class=\"bulk-btn bulk-destroy svelte-1wcm5z8\"%s onclick=\"knV10WalletBulkSell(2)\">", W_busy ? " disabled" : "");
+        sb_append_esc(sb, I18N("wallet.bulk.destroy", "Destroy"));
+        sb_appendf(sb, " (%s)</button>", num);
+    }
+    sb_append(sb, "</div></div>");
 }
 
 static void official_grid(StrBuf *sb) {
     int n = 0;
-    const MarketGroup *groups = kio_inventory_groups(&n);
-    official_bar(sb);
+    const MarketGroup *groups = inv_groups(&n);
+    official_toolbar(sb);
     sb_append(sb, "<div class=\"items-grid svelte-l0gwpc\" id=\"knV10WalletGrid\">");
     int drawn = 0;
     for (int gi = 0; groups && gi < n; gi++) {
@@ -263,18 +399,21 @@ static void official_grid(StrBuf *sb) {
     }
     if (!drawn) {
         sb_append(sb, "<div class=\"empty-state svelte-l0gwpc\" id=\"knV10WalletEmpty\"><p class=\"svelte-l0gwpc\">");
-        if (kio_inventory_ready()) sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
-        else sb_append_esc(sb, W_inv_err[0] ? W_inv_err : kio_inventory_gate_text());
+        if (inv_ready()) sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
+        else sb_append_esc(sb, W_inv_err[0] ? W_inv_err : inv_gate_text());
         sb_append(sb, "</p></div>");
     }
     sb_append(sb, "</div>");
+    official_bulkbar(sb);
 }
 
 static void grid(StrBuf *sb, const AccountInfo *a) {
-    if (kio_store_active()) {
+    // krunker.io: the official inventory's tiles; Box Office while selecting: its rows as the same tiles (bo_inventory.c)
+    if (kio_store_active() || W_select) {
         official_grid(sb);
         return;
     }
+    official_toolbar(sb); // Box Office: Select (the bulk actions and the locks of v10.0.4)
     const int cap = stack_count(a) > 0 ? stack_count(a) : 1;
     WalletStack *list = calloc((size_t) cap, sizeof(*list));
     const int n = list ? stacks_of(a, list, cap) : 0;
@@ -350,10 +489,15 @@ static void lock_done(void *user, const int ok, const char *message) {
     refresh();
 }
 
+// the bulk overlay ended (v10_bulk.c): a sale clears the picks (deob-10.0.4.js:147363); a cancel keeps them
 static void bulk_done(void *user, const int ok, const char *message) {
     (void) user;
+    (void) message; // the overlay showed the error itself
     W_busy = 0;
-    if (!ok && message) v10_view_push(v10_io_error(I18N("kn.inv.quickSellFailedTitle", "Quick sell"), message), NULL, NULL, NULL);
+    if (ok) {
+        market_picks_free(&W_picks);
+        W_select = 0;
+    }
     refresh();
 }
 
@@ -371,7 +515,7 @@ static void open_modal(void) {
     remember(a);
     v10_view_push(markup(), refresh, closed, NULL);
     W.depth = v10_view_depth();
-    if (kio_store_active() && !kio_inventory_ready() && !kio_inventory_loading()) kio_inventory_load(inventory_loaded, NULL);
+    if (kio_store_active() && !inv_ready() && !inv_loading()) inv_load(inventory_loaded, NULL);
 }
 
 // the modal left the stack (Escape, a backdrop tap, Catalog, an account change): its market views go too
@@ -383,6 +527,82 @@ static void closed(const int accepted, void *user) {
     W_select = 0;
     market_picks_free(&W_picks);
     v10_market_wallet_release();
+}
+
+// ---------------------------------------------------------------- the Keep options' effect on the picks
+
+typedef struct {
+    int copy, reason, serial, idx;
+    double wear;
+} KeepUnit;
+
+// deob-10.0.4.js:147086-147097: the units with a reason first (they take the per-item slots), then the lowest wear,
+// then the lowest serial (none: wear 1, serial Infinity)
+static int cmp_keep_units(const void *pa, const void *pb) {
+    const KeepUnit *a = pa, *b = pb;
+    const int ka = kept_reason(a->reason) ? 0 : 1, kb = kept_reason(b->reason) ? 0 : 1;
+    if (ka != kb) return ka - kb;
+    if (a->wear != b->wear) return a->wear < b->wear ? -1 : 1;
+    if (a->serial != b->serial) return a->serial < b->serial ? -1 : 1;
+    return a->idx - b->idx;
+}
+
+// Select all (iìïïìïî, deob-10.0.4.js:147077-147101): per item, the best per-item count stay, the rest without a
+// reason are picked. A Box Office stack's units are its group's plain copies: the picked stack keeps the units that
+// fall in the kept slots (MarketPicks.keeps).
+static void select_all(void) {
+    market_picks_free(&W_picks);
+    int n = 0;
+    const MarketGroup *groups = inv_groups(&n);
+    const MarketKeep *k = keep_opts();
+    const int per = k->per_item ? (k->per_item_count > 0 ? k->per_item_count : 0) : 0;
+    for (int gi = 0; groups && gi < n; gi++) {
+        const MarketGroup *g = &groups[gi];
+        int stack_units = g->stack_id ? (g->stack_max > 0 ? g->stack_max : 1) : 0;
+        if (stack_units > 10000) stack_units = 10000;
+        const int total = g->n_instances + stack_units;
+        KeepUnit *u = total ? calloc((size_t) total, sizeof(*u)) : NULL;
+        if (!u) continue;
+        int m = 0;
+        for (int c = 0; c < g->n_instances; c++) {
+            const MarketCopyMeta *meta = g->metas ? &g->metas[c] : NULL;
+            u[m] = (KeepUnit) {c, row_reason(g, c), meta && meta->serial > 0 ? meta->serial : 0x7fffffff, m, meta && meta->wear >= 0 ? meta->wear : 1};
+            m++;
+        }
+        const int stack_reason = g->stack_id ? row_reason(g, -1) : MARKET_KEEP_NONE;
+        for (int i = 0; i < stack_units; i++, m++) u[m] = (KeepUnit) {-1, stack_reason, 0x7fffffff, m, 1};
+        qsort(u, (size_t) m, sizeof(*u), cmp_keep_units);
+        int stack_sell = 0;
+        for (int i = per; i < m; i++) {
+            if (u[i].reason != MARKET_KEEP_NONE) continue;
+            if (u[i].copy >= 0) market_picks_toggle(&W_picks, inv_locks(), g->instances[u[i].copy], g->item, 0);
+            else stack_sell++;
+        }
+        if (stack_sell > 0 && market_picks_toggle(&W_picks, inv_locks(), g->stack_id, g->item, 1))
+            market_picks_set_keep(&W_picks, W_picks.n - 1, stack_units - stack_sell);
+        free(u);
+    }
+}
+
+// deob-10.0.4.js:147317-147321: a changed option drops the picks it now keeps
+static void prune_kept_picks(void) {
+    int n = 0;
+    const MarketGroup *groups = inv_groups(&n);
+    for (int gi = 0; groups && gi < n; gi++) {
+        const MarketGroup *g = &groups[gi];
+        if (g->stack_id && picked_row(g, -1) && row_reason(g, -1) != MARKET_KEEP_NONE)
+            market_picks_toggle(&W_picks, NULL, g->stack_id, g->item, 1);
+        for (int c = 0; c < g->n_instances; c++)
+            if (picked_row(g, c) && row_reason(g, c) != MARKET_KEEP_NONE) market_picks_toggle(&W_picks, NULL, g->instances[c], g->item, 0);
+    }
+}
+
+static double arg_num(const HtmlArg *args, const int argc, const int i) {
+    if (!args || i >= argc) return 0;
+    if (args[i].kind == HTML_ARG_NUM || args[i].kind == HTML_ARG_BOOL) return args[i].num;
+    if (!args[i].str) return 0;
+    if (!strcmp(args[i].str, "true")) return 1;
+    return atof(args[i].str);
 }
 
 // ---------------------------------------------------------------- handlers
@@ -427,49 +647,63 @@ int v10_wallet_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "knV10WalletSelect")) {
         W_select = !W_select;
         if (!W_select) market_picks_free(&W_picks);
+        else if (!inv_ready() && !inv_loading()) inv_load(inventory_loaded, NULL); // the locks (Box Office: "ilk")
         refresh();
         return 1;
     }
     if (!strcmp(name, "knV10WalletPick") || !strcmp(name, "knV10WalletLock")) {
         int n = 0;
-        const MarketGroup *groups = kio_inventory_groups(&n);
+        const MarketGroup *groups = inv_groups(&n);
         const int gi = arg_int(args, argc, 0), copy = arg_int(args, argc, 1);
         if (!groups || gi < 0 || gi >= n || copy >= groups[gi].n_instances) return 1;
         const MarketGroup *g = &groups[gi];
         if (!strcmp(name, "knV10WalletPick")) {
             const int skin = copy < 0 ? g->stack_id : g->instances[copy];
-            market_picks_toggle(&W_picks, kio_inventory_locks(), skin, g->item, copy < 0);
+            if (!picked_row(g, copy) && row_reason(g, copy) != MARKET_KEEP_NONE) return 1; // a kept unit is not picked
+            market_picks_toggle(&W_picks, inv_locks(), skin, g->item, copy < 0);
             refresh();
             return 1;
         }
-        kio_inventory_set_lock(g, copy, !kio_inventory_locked(g, copy), lock_done, NULL);
+        inv_set_lock(g, copy, !inv_locked(g, copy), lock_done, NULL);
         return 1;
     }
-    if (!strcmp(name, "knV10WalletBulkSell")) {
+    if (!strcmp(name, "knV10WalletBulkSell")) { // IÌîiiiï(action) (deob-10.0.4.js:147352): the picks the action takes
         if (W_busy) return 1;
-        W_busy = 1;
-        const MarketPicks picks = W_picks; // the run owns the picks from here
-        memset(&W_picks, 0, sizeof(W_picks));
-        W_select = 0;
-        kio_inventory_bulk_sell(0, picks, bulk_done, NULL); // 0: Get KR, the single quick-sell's first mode
-        refresh();
-        return 1;
-    }
-    if (!strcmp(name, "knV10WalletPrice")) {
-        W_price = arg_int(args, argc, 0);
-        return 1;
-    }
-    if (!strcmp(name, "knV10WalletBulkList")) {
-        if (W_busy) return 1;
-        if (W_price < 1) {
-            v10_view_push(v10_io_error(I18N("kn.inv.listFailedTitle", "List"), I18N("kn.inv.priceNeeded", "Enter a price per item first.")), NULL, NULL, NULL);
+        const int action = arg_int(args, argc, 0);
+        MarketPicks take = v10_bulk_filter(&W_picks, action >= 0 && action <= 2 ? action : 0);
+        if (take.n == 0) {
+            market_picks_free(&take);
             return 1;
         }
         W_busy = 1;
-        const MarketPicks picks = W_picks; // the run owns the picks from here
-        memset(&W_picks, 0, sizeof(W_picks));
-        W_select = 0;
-        kio_inventory_bulk_list(W_price, picks, bulk_done, NULL);
+        v10_bulk_sell_open(action >= 0 && action <= 2 ? action : 0, take, bulk_done, NULL);
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletSelectAll") || !strcmp(name, "knV10WalletClear")) {
+        market_picks_free(&W_picks);
+        if (!strcmp(name, "knV10WalletSelectAll")) select_all(); // iìïïìïî (deob-10.0.4.js:147896): with the Keep options
+        refresh();
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletKeepToggle")) { // the tune button (deob-10.0.4.js:147900-147903)
+        W_keep_open = !W_keep_open;
+        refresh();
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletKeep")) { // a Keep option changed: saved, and the picks it now keeps dropped
+        MarketKeep *k = keep_opts();
+        const char *field = args && argc > 0 && args[0].str ? args[0].str : "";
+        const double v = arg_num(args, argc, 1);
+        if (!strcmp(field, "perItem")) k->per_item = v != 0;
+        else if (!strcmp(field, "perItemCount")) k->per_item_count = v < 1 ? 1 : v > 99 ? 99 : (int) v;
+        else if (!strcmp(field, "painted")) k->painted = v != 0;
+        else if (!strcmp(field, "equipped")) k->equipped = v != 0;
+        else if (!strcmp(field, "serialMax")) k->serial_max = v < 0 ? 0 : v > 1000 ? 1000 : (int) v;
+        else if (!strcmp(field, "wearMax")) k->wear_max = v < 0 ? 0 : v > 1 ? 1 : v;
+        else if (!strcmp(field, "minRarity")) k->min_rarity = (int) v;
+        else if (!strcmp(field, "reset")) *k = (MarketKeep) MARKET_KEEP_DEFAULTS; // :147862-147864
+        keep_save();
+        prune_kept_picks();
         refresh();
         return 1;
     }
@@ -490,6 +724,7 @@ int v10_wallet_key(const int key) {
 
 // per menu frame: the figures moved (a sale, a purchase, funds) redraw the modal
 void v10_wallet_tick(void) {
+    v10_bulk_tick(); // a bulk run's progress bar
     if (!W.open) return;
     const AccountInfo *a = account();
     if (!a || a->id != W.account_id) {
@@ -501,6 +736,7 @@ void v10_wallet_tick(void) {
 
 void v10_wallet_account_changed(void) {
     kio_inventory_clear();
+    bo_inventory_clear();
     market_picks_free(&W_picks);
     W_select = 0;
     W_busy = 0;
@@ -516,4 +752,11 @@ void v10_wallet_scenario(const cJSON *state) {
     if (!cJSON_IsObject(state) || !cJSON_IsTrue(cJSON_GetObjectItem(state, "open"))) return;
     if (!account()) return;
     open_modal();
+    // select: true opens select mode (the account's rows as tiles), keep: true its Keep options panel (no locks loaded)
+    if (cJSON_IsTrue(cJSON_GetObjectItem(state, "select"))) {
+        W_select = 1;
+        W_keep_open = cJSON_IsTrue(cJSON_GetObjectItem(state, "keep"));
+        if (cJSON_IsTrue(cJSON_GetObjectItem(state, "selectAll"))) select_all();
+        refresh();
+    }
 }

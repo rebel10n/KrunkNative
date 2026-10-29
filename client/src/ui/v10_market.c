@@ -50,6 +50,8 @@
 #include <kio_trade.h> // krunker.io's trades: the create body and the trade paths (deob-10.0.4.js:27162-27193)
 #include <backend.h> // backend_url_encode: the player search's name
 #include <kio_inventory.h> // krunker.io active: the official inventory's stack ids (quick sell, list)
+#include <v10_bulk.h>      // List Items (both accounts) and Buy Multiple (krunker.io) (deob-10.0.4.js:131877-132185, :132755-132945)
+#include <inv_source.h>    // the select mode's inventory: krunker.io's official one or the Box Office account's
 #include <v10_social.h> // krunker.io active: the listings are v10's gapi reads (kio_browse_load)
 #include <app_mode.h>
 #include <cJSON.h>
@@ -182,6 +184,11 @@ static struct {
     // Guide
     int gtab;
 } M = {.days = 30, .crange = 3, .detail = -1, .cdetail = -1, .data_item = -1};
+
+// The inventory's select mode (the market inventory's bulk list, deob-10.0.4.js:132150-132220, :134940-135290): the
+// picks are the ids of the tiles' units as the active account's inventory names them (bulk_official)
+static int g_bsel;
+static MarketPicks g_bpicks;
 
 // ------------------------------------------------------------------ helpers
 
@@ -1245,7 +1252,38 @@ static TileList inventory_list(void) {
 // paint-icon template deob:147316, shown when the item has paintTargets and the row a sid: deob:150226-150228;
 // aria-label "Paint <name>"), and the Quick sell button ("Quick sell <name>"). List and Quick sell act on the
 // row's unit: a painted copy by its copy id, a stack by its store index.
+static int kio_copy_sid(int index, int sid);
+
+// krunker.io: a tile's unit as the official inventory names it: a stack by its group's stack id, a painted copy by its
+// one matching instance (kio_copy_sid). 0 when the official inventory has no such unit (the tile can't be picked).
+static int bulk_official(const int index, const int sid, int *stackable) {
+    *stackable = 0;
+    if (!inv_ready()) return 0;
+    int n = 0;
+    const MarketGroup *g = inv_groups(&n);
+    if (sid >= COPY_ID_BASE) {
+        if (kio_store_active()) return kio_copy_sid(index, sid); // krunker.io: the one official copy with this paint
+        for (int k = 0; g && k < n; k++) // Box Office: the copy is its own unit (bo_inventory.c)
+            for (int c = 0; g[k].item == index && c < g[k].n_instances; c++)
+                if (g[k].instances[c] == sid) return sid;
+        return 0;
+    }
+    for (int k = 0; g && k < n; k++)
+        if (g[k].item == index && g[k].stack_id > 0) {
+            *stackable = 1;
+            return g[k].stack_id;
+        }
+    return 0;
+}
+
+static int bulk_picked(const int official, const int index) {
+    for (int k = 0; official && k < g_bpicks.n; k++)
+        if (g_bpicks.skin_ids[k] == official && g_bpicks.item_ids[k] == index) return 1;
+    return 0;
+}
+
 static void inventory_grid(StrBuf *sb, const TileList *l) {
+    const int selecting = g_bsel && logged_in();
     sb_append(sb, "<div class=\"market-grid svelte-18k2d4k\" id=\"v10mkGrid\">");
     for (int k = 0; k < l->n && k < M.gshown; k++) {
         const int i = l->t[k].index;
@@ -1254,7 +1292,17 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         const int sid = r ? row_sid(r) : 0;
         const int sellable = cnt > 0 && r && !jint(r, "nt", 0);
         const ViewerSkin *s = skin(i);
-        sb_appendf(sb, "<div class=\"item-wrapper svelte-18k2d4k%s\">", M.detail == i ? " selected" : "");
+        int stackable = 0;
+        const int official = selecting && sellable ? bulk_official(i, sid, &stackable) : 0;
+        const int locked = official && market_locks_has(inv_locks(), official, i, stackable);
+        const int picked = bulk_picked(official, i);
+        sb_appendf(sb, "<div class=\"item-wrapper svelte-18k2d4k%s%s%s\">", M.detail == i ? " selected" : "",
+                   selecting && picked ? " bulk-selected svelte-1wcm5z8" : "", selecting && (!official || locked) ? " bulk-dim svelte-1wcm5z8" : "");
+        if (selecting && official && !locked) // the tile's check (iìíìîîí, deob-10.0.4.js:131902)
+            sb_appendf(sb, "<button type=\"button\" class=\"bulk-check bulk-check-btn svelte-1wcm5z8\" onclick=\"v10mk.bpick(%d,%d)\"><i class=\"material-icons svelte-1wcm5z8\">%s</i></button> ",
+                       i, sid, picked ? "check_box" : "check_box_outline_blank");
+        else if (selecting && locked)
+            sb_append(sb, "<div class=\"bulk-lock svelte-1wcm5z8\"><i class=\"material-icons svelte-1wcm5z8\">lock</i></div> ");
         const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid};
         market_card(sb, i, &o);
         sb_append(sb, " ");
@@ -1286,9 +1334,29 @@ static void view_inventory(StrBuf *sb) {
     const FilterView v = {.title = "Inventory", .count = l.n, .default_sort = "rarity", .search_in_header = 0, .season = 1, .sort_select = 1,
                           .wear = 1, .checkboxes = 31};
     filter_header(sb, &M.f, &v);
+    if (logged_in()) { // the select toggle (iïìîîíì, deob-10.0.4.js:132220; icon / label :135282, :134945)
+        sb_appendf(sb, " <div class=\"bulk-toolbar svelte-jskst\"><button type=\"button\" class=\"bulk-btn svelte-jskst%s\" onclick=\"v10mk.bsel()\"><i class=\"material-icons svelte-jskst\">%s</i> ",
+                   g_bsel ? " active" : "", g_bsel ? "done" : "checklist");
+        sb_append_esc(sb, g_bsel ? I18N("wallet.bulk.done", "Done") : I18N("market.listMulti.select", "Select"));
+        sb_append(sb, "</button></div>");
+    }
     sb_append(sb, " <div id=\"v10mkGridHolder\">");
     inventory_grid(sb, &l);
     sb_append(sb, "</div>");
+    if (logged_in() && g_bsel) { // the bulk bar (iíîiïìï, deob-10.0.4.js:132219, wired :135257-135278)
+        char num[24], line[96];
+        snprintf(num, sizeof(num), "%d", g_bpicks.n);
+        sb_append(sb, " <div class=\"bulk-bar svelte-jskst\"><span class=\"bulk-count svelte-jskst\">");
+        sb_append_esc(sb, I18N_F(line, "wallet.bulk.selected", "{0} selected", num));
+        sb_append(sb, "</span> <button type=\"button\" class=\"bulk-btn svelte-jskst\" onclick=\"v10mk.ball()\">");
+        sb_append_esc(sb, I18N("wallet.bulk.selectAll", "Select all"));
+        sb_appendf(sb, "</button> <button type=\"button\" class=\"bulk-btn svelte-jskst\"%s onclick=\"v10mk.bclr()\">", g_bpicks.n ? "" : " disabled");
+        sb_append_esc(sb, I18N("wallet.bulk.clear", "Clear"));
+        sb_appendf(sb, "</button> <span class=\"bulk-spacer svelte-jskst\"></span> <button type=\"button\" class=\"bulk-btn bulk-list svelte-jskst\"%s onclick=\"v10mk.blist()\">",
+                   g_bpicks.n ? "" : " disabled");
+        sb_append_esc(sb, I18N_F(line, "market.listMulti.open", "List selected ({0})", num));
+        sb_append(sb, "</button></div>");
+    }
     free(l.t);
 }
 
@@ -1686,8 +1754,17 @@ static void view_detail(StrBuf *sb) {
     const cJSON *r = inv_row(M.detail);
     const int can_list = owned > 0 && !skin_bound(s) && !(r && jint(r, "nt", 0));
     sb_append(sb, "<div class=\"item-detail-container svelte-olnzsm\"><div class=\"item-detail-header svelte-olnzsm\"><button class=\"back-button svelte-olnzsm\" aria-label=\"Back\" onclick=\"v10mk.back()\">"
-                  "<i class=\"material-icons svelte-olnzsm\">arrow_back</i></button> <h3 class=\"item-detail-title svelte-olnzsm\">Listing Details</h3></div> "
-                  "<div class=\"content-row svelte-olnzsm\"><div class=\"item-showcase-section svelte-olnzsm\"><div class=\"showcase-container svelte-olnzsm\">");
+                  "<i class=\"material-icons svelte-olnzsm\">arrow_back</i></button> <h3 class=\"item-detail-title svelte-olnzsm\">Listing Details</h3>");
+    // krunker.io: Buy multiple (deob-10.0.4.js:136328-136345: an account and some listings; the accept slim button with
+    // the cart, iïíîîiì :130763) opens the buy ladder (v10_bulk.c)
+    if (kio_store_active() && acc() && rows_count(M.dlist) > 0) {
+        sb_appendf(sb, " <div class=\"buy-multiple-container svelte-kcz1lc\"><button class=\"main-button svelte-whnh40 main-button-accept main-button-slim%s\" type=\"button\"%s%s>"
+                       "<i class=\"material-icons\">shopping_cart</i> ",
+                   M.busy ? " main-button-disabled" : "", M.busy ? " disabled" : "", M.busy ? "" : " onclick=\"v10mk.bbuy()\"");
+        sb_append_esc(sb, I18N("market.buyMulti.open", "Buy multiple"));
+        sb_append(sb, "</button></div>");
+    }
+    sb_append(sb, "</div> <div class=\"content-row svelte-olnzsm\"><div class=\"item-showcase-section svelte-olnzsm\"><div class=\"showcase-container svelte-olnzsm\">");
     item_card(sb, s, "370px", 1, NULL, 0);
     if (owned > 0) sb_appendf(sb, "<div class=\"item-ownership-overlay svelte-olnzsm\"><div class=\"ownership-count svelte-olnzsm\">%d owned</div></div>", owned);
     sb_append(sb, "</div></div> <div class=\"item-info-section svelte-olnzsm\"><div class=\"item-creator svelte-olnzsm\">by  ");
@@ -2356,6 +2433,7 @@ static void ct_inv_card(StrBuf *sb, const int pos, void *user) {
 
 // Per frame (menu_ui.c): the open Create Trade lists follow their scroll positions (ui_vgrid.h).
 void v10_market_tick(void) {
+    v10_bulk_tick(); // List Items' progress bar over the market
     if (!M.ct_open) return;
     vgrid_tick(&M.ct_grid[0]);
     vgrid_tick(&M.ct_grid[1]);
@@ -3397,9 +3475,9 @@ static void kio_trade_inv_answer(void *user, const int status, const cJSON *data
     }
     const cJSON *mine = cJSON_GetObjectItemCaseSensitive(data, "my_inventory");
     const cJSON *theirs = cJSON_GetObjectItemCaseSensitive(data, "their_inventory");
-    cJSON *inv = cJSON_CreateArray(); // [mine, theirs], the "trD" reply's third element
-    cJSON_AddItemToArray(inv, cJSON_IsArray(mine) ? cJSON_Duplicate(mine, 1) : cJSON_CreateArray());
-    cJSON_AddItemToArray(inv, cJSON_IsArray(theirs) ? cJSON_Duplicate(theirs, 1) : cJSON_CreateArray());
+    cJSON *inv = cJSON_CreateArray(); // [mine, theirs], the "trD" reply's third element, as the window's rows
+    cJSON_AddItemToArray(inv, kio_trade_inventory(mine));
+    cJSON_AddItemToArray(inv, kio_trade_inventory(theirs));
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("trD"));
     cJSON_AddItemToArray(f, cJSON_CreateNull());
@@ -3416,19 +3494,11 @@ static void kio_trade_inventories(const int target_id) {
         kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(I18N("kn.mk.inventoriesFailed", "Couldn't load the inventories. Try again.")));
 }
 
-// A painted copy is refused: its official instance id is not mapped to KrunkNative's copy id yet.
+// The offers come from the official trade inventories (kio_trade_inventory), so a copy's sid is its official instance
+// id: {i, c: 1, iids: [sid]} (deob-10.0.4.js:111258-111262, serialized :111287-111297).
 static void kio_create_trade(void) {
-    int copies = 0;
-    cJSON *mine = kio_trade_offer(M.ct_sel[0], M.ct_n[0], &copies);
-    cJSON *theirs = kio_trade_offer(M.ct_sel[1], M.ct_n[1], &copies);
-    if (copies) {
-        cJSON_Delete(mine);
-        cJSON_Delete(theirs);
-        M.pending = ACT_NONE;
-        M.ct_submitting = 0;
-        snprintf(M.ct_err, sizeof(M.ct_err), "Painted copies can't be traded on krunker.io yet");
-        return;
-    }
+    cJSON *mine = kio_trade_offer(M.ct_sel[0], M.ct_n[0], NULL);
+    cJSON *theirs = kio_trade_offer(M.ct_sel[1], M.ct_n[1], NULL);
     kio_act_send(ACT_CREATE, 0, "POST", "trades/create", kio_trade_create_body(M.ct_target_id, mine, theirs, M.ct_msg));
 }
 
@@ -3644,6 +3714,27 @@ static void confirm_modal(void) {
 
 // ------------------------------------------------------------------ page handlers
 
+// krunker.io: the official inventory loaded for select mode: the tiles can be picked now
+static void bulk_inventory_loaded(void *user, const int ok, const char *message) {
+    (void) user;
+    (void) ok;
+    (void) message;
+    if (M.open) render_content();
+}
+
+// List Items or Buy Multiple ended (v10_bulk.c): a list leaves select mode with the picks gone (onBulkListed,
+// deob-10.0.4.js:132214); a buy reloads the listings; a cancel changes nothing
+static void bulk_market_done(void *user, const int ok, const char *message) {
+    (void) user;
+    (void) message;
+    if (!ok || !M.open) return;
+    g_bsel = 0;
+    market_picks_free(&g_bpicks);
+    inventory_load();
+    if (M.detail >= 0) detail_listings_load();
+    render_content();
+}
+
 static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     const char *h = name + 6; // after "v10mk."
     const int a0 = (int) arg_n(args, argc, 0, 0), a1 = (int) arg_n(args, argc, 1, 0), a2 = (int) arg_n(args, argc, 2, 0);
@@ -3739,6 +3830,38 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         M.f.search[0] = M.last_search[0] = 0; // v10: a sort change clears the search
         browse_load();
         render_content();
+    } else if (!strcmp(h, "bsel")) { // krunker.io: the inventory's select mode (iìíiiíí, deob-10.0.4.js:132186-132189)
+        g_bsel = !g_bsel;
+        market_picks_free(&g_bpicks);
+        if (g_bsel && !inv_ready() && !inv_loading()) inv_load(bulk_inventory_loaded, NULL);
+        render_content();
+    } else if (!strcmp(h, "bpick")) {
+        int stackable = 0;
+        const int official = bulk_official(a0, a1, &stackable);
+        if (official) market_picks_toggle(&g_bpicks, inv_locks(), official, a0, stackable);
+        render_content();
+    } else if (!strcmp(h, "ball") || !strcmp(h, "bclr")) { // iiîïìîi: every tile the filters show (deob-10.0.4.js:132181-132185)
+        market_picks_free(&g_bpicks);
+        if (!strcmp(h, "ball")) {
+            TileList l = inventory_list();
+            for (int k = 0; k < l.n; k++) {
+                const cJSON *r = l.t[k].row;
+                if (!r || jint(r, "c", 1) <= 0 || jint(r, "nt", 0)) continue;
+                int stackable = 0;
+                const int official = bulk_official(l.t[k].index, row_sid(r), &stackable);
+                if (official && !bulk_picked(official, l.t[k].index)) market_picks_toggle(&g_bpicks, inv_locks(), official, l.t[k].index, stackable);
+            }
+            free(l.t);
+        }
+        render_content();
+    } else if (!strcmp(h, "blist")) { // iiîïííi: the picks' groups into List Items (deob-10.0.4.js:132190-132213)
+        if (g_bpicks.n) {
+            const MarketPicks picks = g_bpicks; // the modal owns them
+            memset(&g_bpicks, 0, sizeof(g_bpicks));
+            v10_bulk_list_open(picks, bulk_market_done, NULL);
+        }
+    } else if (!strcmp(h, "bbuy")) { // onBuyMultiple: the open listing's item
+        if (M.detail >= 0) v10_bulk_buy_open(M.detail, bulk_market_done, NULL);
     } else if (!strcmp(h, "more")) {
         if (M.tab == TAB_CATALOG) M.cshown += PAGE;
         else if (M.mtab == MT_BROWSE) M.bshown += LISTING_PAGE;

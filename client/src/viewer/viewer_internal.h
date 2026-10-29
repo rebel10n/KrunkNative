@@ -23,6 +23,7 @@ typedef struct {
     int showcase;        // P: showcase=<store index>, -1 = none
     int showcase_set;
     WornSkinPaint paint; // v10.0.3 paint=<rrggbb> / paintShader=<n> (deob-10.0.3.js:123160-123173): the shown copy's paint
+    int seed;            // v10.0.4 seed=<n> (deob-10.0.4.js:109446): the shown copy's seed (skin_fx_copy_seed), 0 none
     int auto_render;     // D: params.has("auto")
     int no_tex;          // B: params.has("noTex")
     int no_bg;           // N: params.has("nobg")

@@ -21,6 +21,13 @@ typedef struct {
 // The hold a map load gets: 0 for the session's first load, V10_LOADING_HOLD_MS after.
 double v10_loading_hold_ms(int loads_before);
 
+// --load-accent for a mode: mode.tag[1] when the mode has a tag and the game is not custom, else "#fff"
+// (deob-10.0.4.js:223040). The tags of the mode list (deob-10.0.4.js:105931-106488): Party #ffac00 (Gun Game,
+// Classic FFA, One in the Chamber, Sharp Shooter, Deposit FFA, Chaos Snipers, Bighead FFA, Impulsed), Event
+// #d95487 (Stalker, Raid, All or Nothing, Mag Dump), Candy Heist #ff8a1a; KrunkNative's mode ids are that list's
+// indices (shared/include/modes.h). An unknown or negative mode id: "#fff".
+const char *v10_loading_mode_accent(int mode_id, int is_custom);
+
 // A map load begins (the INIT of a match): counts it, shows the card when it is not the first, and schedules
 // the hide at now + hold. A newer load replaces an older one's schedule (the generation check, :223011-223013).
 void v10_loading_begin(const V10LoadingMap *map, double now_ms);

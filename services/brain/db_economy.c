@@ -208,6 +208,13 @@ static kn_db_result *econ_done(Dbx *x, int n, const char *const *p, const char *
 
 static int level_of(const EconPlayer *pl) { return db_level(pl->score, 0.03); }
 
+/* 1 when the account locked this unit (item_locks, migration 0364): a painted copy by its copy id, a stack's unpainted
+ * units by the item's row (copy_id 0). Read inside the action's transaction, after econ_lock. */
+static int econ_locked(Dbx *x, int64_t acc, int64_t skin, int64_t copy) {
+    return dbx_exists(x, SQL(.any = "SELECT 1 FROM item_locks WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                      KN_DB_ARGS(I64S(acc), I64S(skin), I64S(copy >= V10_COPY_ID_BASE ? copy : 0)));
+}
+
 static int refuse_level(Dbx *x, int64_t need) {
     char msg[64];
     snprintf(msg, sizeof msg, "Must be level %lld", (long long) need);
@@ -291,6 +298,7 @@ static kn_db_result *run_market_list(kn_dbconn *c, int n, const char *const *p) 
         refuse_level(&x, PI(10));
         return dbx_finish(&x, NULL);
     }
+    if (econ_locked(&x, seller, skin, copy)) return econ_refuse(&x, "That item is locked.");
     cJSON *o = cJSON_CreateObject();
     if (PI(9) > 0 && dbx_int(&x, SQL(.any = "SELECT count(*) FROM market_listings WHERE seller_id = $1"
                                             " AND sold_at IS NULL AND cancelled_at IS NULL"),
@@ -331,6 +339,106 @@ static kn_db_result *run_market_list(kn_dbconn *c, int n, const char *const *p) 
     return econ_done(&x, n, p, "list", "kn_market_list", o);
 }
 const kn_proc P_MARKET_LIST = {"market_list", NULL, run_market_list};
+
+/* v10.0.4's bulk list (POST market/list/bulk, deob-10.0.4.js:131978-132019) for a Box Office account. $4 the rows as JSON
+ * [[skin, copy, price, quantity, refusal], ...] (at most 100 units), $5 fee %, $6 fee bypass, $7 sale max, $8 max listings,
+ * $9 min level -> {listed, funds, results: [{item_id, skin_id, error?}]}. One transaction and one key for the frame, the
+ * players row locked and rated ("list") once; each unit is listed as run_market_list lists it (the fee per listing, the
+ * item in escrow, a painted copy with its paint). A row's own trouble (the store refuses it, a lock, not owned, the
+ * listing limit) is its result's error, not the frame's: krunker.io's answer has a result per row. */
+static kn_db_result *run_market_list_bulk(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    ECON_OPEN("list", "kn_market_list_bulk");
+    const int64_t seller = PI(0), pct = PI(5) > 0 ? PI(5) : 0;
+    cJSON *rows = P(4) ? cJSON_Parse(P(4)) : NULL;
+    int units = 0;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) units += (int) cJSON_GetNumberValue(cJSON_GetArrayItem(r, 3));
+    if (!cJSON_IsArray(rows) || units < 1 || units > 100) {
+        cJSON_Delete(rows);
+        return econ_refuse(&x, "Invalid request");
+    }
+    EconPlayer me;
+    if (econ_lock(&x, seller, &me, 0, NULL) < 0 || econ_rate(&x, n, p, "list") < 0) {
+        cJSON_Delete(rows);
+        return dbx_finish(&x, NULL);
+    }
+    if (me.notrade) {
+        cJSON_Delete(rows);
+        return econ_refuse(&x, "Account is trade locked");
+    }
+    if (PI(9) > 0 && level_of(&me) < PI(9)) {
+        cJSON_Delete(rows);
+        refuse_level(&x, PI(9));
+        return dbx_finish(&x, NULL);
+    }
+    int64_t open = PI(8) > 0 ? dbx_int(&x, SQL(.any = "SELECT count(*) FROM market_listings WHERE seller_id = $1"
+                                                      " AND sold_at IS NULL AND cancelled_at IS NULL"),
+                                       KN_DB_ARGS(P(0)), 0)
+                             : 0;
+    cJSON *o = cJSON_CreateObject(), *results = cJSON_AddArrayToObject(o, "results");
+    int64_t listed = 0, funds = me.funds;
+    cJSON_ArrayForEach(r, rows) {
+        if (dbx_failed(&x)) break;
+        const int64_t skin = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(r, 0)), copy = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(r, 1));
+        const int64_t price = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(r, 2));
+        const int64_t qty = copy >= V10_COPY_ID_BASE ? 1 : (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(r, 3));
+        const char *why = cJSON_GetStringValue(cJSON_GetArrayItem(r, 4));
+        cJSON *res = cJSON_CreateObject();
+        cJSON_AddNumberToObject(res, "item_id", (double) skin);
+        cJSON_AddNumberToObject(res, "skin_id", (double) (copy >= V10_COPY_ID_BASE ? copy : skin));
+        cJSON_AddItemToArray(results, res);
+        if (!why || !*why) {
+            if (price < 1 || (PI(7) > 0 && price > PI(7)) || qty < 1) why = "Invalid price";
+            else if (econ_locked(&x, seller, skin, copy)) why = "That item is locked.";
+            else if (copy >= V10_COPY_ID_BASE ? !dbx_exists(&x, SQL(.any = "SELECT 1 FROM skin_copies WHERE copy_id = $1 AND account_id = $2 AND skin_id = $3"),
+                                                            KN_DB_ARGS(I64S(copy), I64S(seller), I64S(skin)))
+                                              : db_unpainted_units(&x, seller, skin) < qty)
+                why = "Item not owned";
+        }
+        for (int64_t k = 0; (!why || !*why) && k < qty && !dbx_failed(&x); k++) {
+            if (PI(8) > 0 && open >= PI(8)) {
+                why = "Max Items on Sale"; /* io_lir's MAX */
+                break;
+            }
+            const int64_t fee = price <= PI(6) ? 0 : price * pct / 100; /* floor, as run_market_list */
+            if (funds < fee) { /* the fee is paid when listing: a row the balance can't pay is its own error */
+                why = "Not enough KR";
+                break;
+            }
+            char ref[48];
+            const int64_t listing = dbx_insert_id(&x, SQL(.pg = "INSERT INTO market_listings (seller_id, skin_id, price) VALUES ($1, $2, $3) RETURNING id",
+                                                          .sqlite = "INSERT INTO market_listings (seller_id, skin_id, price) VALUES ($1, $2, $3) RETURNING id",
+                                                          .mysql = "INSERT INTO market_listings (seller_id, skin_id, price) VALUES ($1, $2, $3)"),
+                                                  KN_DB_ARGS(P(0), I64S(skin), I64S(price)));
+            snprintf(ref, sizeof ref, "list:%lld", (long long) listing);
+            if (copy >= V10_COPY_ID_BASE) {
+                CopyPaint paint;
+                if (copy_take(&x, seller, copy, skin, &paint, "market", ref) < 0) break;
+                const char *color, *shader;
+                char shader_t[24];
+                paint_cols(&paint, &color, &shader, shader_t);
+                dbx_exec(&x, SQL(.any = "UPDATE market_listings SET paint_color = $2, paint_shader = $3 WHERE id = $1"),
+                         KN_DB_ARGS(I64S(listing), color, shader));
+            } else if (db_add_skin(&x, seller, skin, -1, "market", ref, NULL) < 0) {
+                break;
+            }
+            db_add_funds_ex(&x, seller, -fee, "market-fee", I64S(listing), 0, fee, &funds);
+            open++;
+            listed++;
+        }
+        if (why && *why) cJSON_AddStringToObject(res, "error", why);
+    }
+    cJSON_Delete(rows);
+    if (dbx_failed(&x)) {
+        cJSON_Delete(o);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON_AddNumberToObject(o, "listed", (double) listed);
+    cJSON_AddNumberToObject(o, "funds", (double) funds);
+    return econ_done(&x, n, p, "list", "kn_market_list_bulk", o);
+}
+const kn_proc P_MARKET_LIST_BULK = {"market_list_bulk", NULL, run_market_list_bulk};
 
 /* (actor, copy id or the stack's store index, item store index, paint store index, paint colour ("" for a
  * shader), paint shader (-1 for a colour)) -> {copy_id, item_id, paint_item_id, m, count}: v10.0.3's setPaint
@@ -512,6 +620,7 @@ static kn_db_result *run_quick_sell(kn_dbconn *c, int n, const char *const *p) {
     if (mode == 1 && junk_each <= 0) return econ_refuse(&x, "Unable to sell");
     EconPlayer me;
     if (econ_lock(&x, me_id, &me, 0, NULL) < 0 || econ_rate(&x, n, p, "qsell") < 0) return dbx_finish(&x, NULL);
+    if (econ_locked(&x, me_id, skin, copy)) return econ_refuse(&x, "That item is locked.");
     const char *ref = mode == 2 ? "destroy" : NULL;
     int64_t count = 0, funds = me.funds;
     if (copy >= V10_COPY_ID_BASE) {
@@ -543,6 +652,134 @@ static kn_db_result *run_quick_sell(kn_dbconn *c, int n, const char *const *p) {
     return econ_done(&x, n, p, "qsell", "kn_quick_sell", o);
 }
 const kn_proc P_QUICK_SELL = {"quick_sell", NULL, run_quick_sell};
+
+/* v10.0.4's bulk quick sell (POST market/quick-sell/bulk, deob-10.0.4.js:146851-146866) for a Box Office account.
+ * $4 action (0 KR, 1 Junk, 2 destroy), $5 the units as JSON [[skin, copy, kr each, junk each (hundredths), takes, keep], ...] (at most
+ * 250: the client's chunk) -> {sold: [ids], skipped: [ids], funds, junk}. One transaction and one key for the chunk, the
+ * players row locked once (econ_lock) and rated once ("qsell"), each unit as run_quick_sell does it: a copy as one unit
+ * (its paint goes), a stack its unpainted units less keep. A unit that is locked, not owned or that the action does not take is
+ * skipped (its id in skipped, as krunker.io's answer), not an error. An id is the copy id, or the store index for a stack. */
+static kn_db_result *run_quick_sell_bulk(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    ECON_OPEN("qsell", "kn_quick_sell_bulk");
+    const int64_t me_id = PI(0), mode = PI(4);
+    if (mode != 0 && mode != 1 && mode != 2) return econ_refuse(&x, "Unable to sell");
+    cJSON *units = P(5) ? cJSON_Parse(P(5)) : NULL;
+    if (!cJSON_IsArray(units) || cJSON_GetArraySize(units) > 250) {
+        cJSON_Delete(units);
+        return econ_refuse(&x, "Invalid request");
+    }
+    EconPlayer me;
+    if (econ_lock(&x, me_id, &me, 0, NULL) < 0 || econ_rate(&x, n, p, "qsell") < 0) {
+        cJSON_Delete(units);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON *o = cJSON_CreateObject(), *sold = cJSON_AddArrayToObject(o, "sold"), *skipped = cJSON_AddArrayToObject(o, "skipped");
+    int64_t funds = me.funds, kr_total = 0, junk_total = 0;
+    const char *ref = mode == 2 ? "destroy" : NULL;
+    const cJSON *u;
+    cJSON_ArrayForEach(u, units) {
+        if (dbx_failed(&x)) break;
+        const int64_t skin = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(u, 0)), copy = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(u, 1));
+        const int64_t each = mode == 0 ? (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(u, 2)) : 0;
+        const int64_t junk_each = mode == 1 ? (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(u, 3)) : 0;
+        const int64_t id = copy >= V10_COPY_ID_BASE ? copy : skin;
+        int take = cJSON_GetNumberValue(cJSON_GetArrayItem(u, 4)) != 0 && ((mode == 0 && each > 0) || (mode == 1 && junk_each > 0) || mode == 2);
+        if (take && econ_locked(&x, me_id, skin, copy)) take = 0;
+        int64_t count = 0;
+        if (take && copy >= V10_COPY_ID_BASE) {
+            if (dbx_exists(&x, SQL(.any = "SELECT 1 FROM skin_copies WHERE copy_id = $1 AND account_id = $2 AND skin_id = $3"),
+                           KN_DB_ARGS(I64S(copy), I64S(me_id), I64S(skin)))) {
+                CopyPaint paint;
+                if (copy_take(&x, me_id, copy, skin, &paint, "quicksell", ref) < 0) break;
+                count = 1;
+            }
+        } else if (take) {
+            const int64_t keep = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(u, 5));
+            count = db_unpainted_units(&x, me_id, skin) - (keep > 0 ? keep : 0); /* the units the Keep options keep stay */
+            if (count > 0 && db_add_skin(&x, me_id, skin, -count, "quicksell", ref, NULL) < 0) break;
+        }
+        if (count <= 0) {
+            cJSON_AddItemToArray(skipped, cJSON_CreateNumber((double) id));
+            continue;
+        }
+        kr_total += count * each;
+        junk_total += count * junk_each;
+        cJSON_AddItemToArray(sold, cJSON_CreateNumber((double) id));
+    }
+    cJSON_Delete(units);
+    if (dbx_failed(&x)) {
+        cJSON_Delete(o);
+        return dbx_finish(&x, NULL);
+    }
+    if (kr_total > 0) db_add_funds_ex(&x, me_id, kr_total, "quicksell", "bulk", 0, 0, &funds);
+    int64_t junk = 0;
+    if (junk_total > 0) {
+        if (junk_credit(&x, me_id, junk_total, "quicksell", &junk) < 0) {
+            cJSON_Delete(o);
+            return dbx_finish(&x, NULL);
+        }
+    } else {
+        junk = junk_balance(&x, me_id);
+    }
+    cJSON_AddNumberToObject(o, "funds", (double) funds);
+    cJSON_AddNumberToObject(o, "junk", junk_value(junk));
+    return econ_done(&x, n, p, "qsell", "kn_quick_sell_bulk", o);
+}
+const kn_proc P_QUICK_SELL_BULK = {"quick_sell_bulk", NULL, run_quick_sell_bulk};
+
+/* The account's item locks (GET items/locks' data.locks, deob-10.0.4.js:108837-108853): $1 account -> {locks: [{skin_id,
+ * item_id, stack}]}: a copy's skin_id is its copy id, a stack's the store index (stack true), as the client's
+ * market_locks_apply reads krunker.io's rows. */
+static kn_db_result *run_item_locks(kn_dbconn *c, int n, const char *const *p) {
+    (void) n;
+    Dbx x = {c, NULL};
+    kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT skin_id, copy_id FROM item_locks WHERE account_id = $1 ORDER BY locked_at"),
+                            KN_DB_ARGS(P(0)));
+    if (!r) return dbx_finish(&x, NULL);
+    cJSON *o = cJSON_CreateObject(), *locks = cJSON_AddArrayToObject(o, "locks");
+    for (int i = 0; i < kn_db_rows(r); i++) {
+        const int64_t skin = kn_db_get_int64(r, i, 0, 0), copy = kn_db_get_int64(r, i, 1, 0);
+        cJSON *row = cJSON_CreateObject();
+        cJSON_AddNumberToObject(row, "skin_id", (double) (copy >= V10_COPY_ID_BASE ? copy : skin));
+        cJSON_AddNumberToObject(row, "item_id", (double) skin);
+        cJSON_AddBoolToObject(row, "stack", copy < V10_COPY_ID_BASE);
+        cJSON_AddItemToArray(locks, row);
+    }
+    kn_db_result_free(r);
+    return dbx_json(&x, "kn_item_locks", o);
+}
+const kn_proc P_ITEM_LOCKS = {"item_locks", NULL, run_item_locks};
+
+/* POST items/locks (deob-10.0.4.js:108862: {skin_id} for a copy, {item_id} for a stack, locked): $1 account, $2 item, $3 copy
+ * (0 for the stack), $4 1 lock / 0 unlock -> {locked}. A copy must be the account's; a stack must have unpainted units. */
+static kn_db_result *run_item_lock(kn_dbconn *c, int n, const char *const *p) {
+    (void) n;
+    Dbx x = {c, NULL};
+    const int64_t acc = PI(0), skin = PI(1), copy = PI(2) >= V10_COPY_ID_BASE ? PI(2) : 0, locked = PI(3) ? 1 : 0;
+    if (acc <= 0) {
+        dbx_refuse(&x, "Must be logged in");
+        return dbx_finish(&x, NULL);
+    }
+    if (locked) {
+        const int owned = copy ? dbx_exists(&x, SQL(.any = "SELECT 1 FROM skin_copies WHERE copy_id = $1 AND account_id = $2 AND skin_id = $3"),
+                                            KN_DB_ARGS(I64S(copy), I64S(acc), I64S(skin)))
+                               : db_unpainted_units(&x, acc, skin) > 0;
+        if (!owned) {
+            dbx_refuse(&x, "Item not owned");
+            return dbx_finish(&x, NULL);
+        }
+        dbx_exec(&x, SQL(.any = "{insert_ignore} INTO item_locks (account_id, skin_id, copy_id) VALUES ($1, $2, $3) {ignore_conflicts}"),
+                 KN_DB_ARGS(I64S(acc), I64S(skin), I64S(copy)));
+    } else {
+        dbx_exec(&x, SQL(.any = "DELETE FROM item_locks WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                 KN_DB_ARGS(I64S(acc), I64S(skin), I64S(copy)));
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "locked", locked);
+    return dbx_finish(&x, dbx_json(&x, "kn_item_lock", o));
+}
+const kn_proc P_ITEM_LOCK = {"item_lock", NULL, run_item_lock};
 
 /* $4 skin, $5 price, $6 requirement ('' | accAge | stats | accVar), $7 its variable, $8 its amount,
  * $9 the item's title (-1 none) -> {item, kr, f[, title]}. v7.1.4's Black Market (market tab "blackm",
@@ -939,6 +1176,9 @@ static kn_db_result *run_trade_create(kn_dbconn *c, int n, const char *const *p)
     if (PI(15) > 0 && dbx_int(&x, SQL(.any = "SELECT count(*) FROM trades WHERE sender_id = $1 AND status = 'open'"),
                               KN_DB_ARGS(P(0)), 0) >= PI(15))
         return econ_refuse(&x, "Too many open offers");
+    /* a unit the sender locked is not offered (v10.0.4's item locks; deob-10.0.4.js:108837-108862) */
+    for (int i = 0; i < kg; i++)
+        if (econ_locked(&x, sender, give[i].skin, give[i].copy)) return econ_refuse(&x, "That item is locked.");
     /* the receiver's side is checked now (it is moved, and locked, only when they accept): a stack by its unpainted
      * units, a painted copy by its copy row */
     for (int i = 0; i < kt; i++) {

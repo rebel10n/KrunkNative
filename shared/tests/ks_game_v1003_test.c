@@ -632,6 +632,16 @@ static void test_ai_wrapper(void) {
     CHECK(logged("t true false false true") && g_progress_calls == 2 && g_progress_max == 1000 && !strcmp(g_progress_key, "candy") && g_progress_value == 7,
           "trackStat: candy 5000 -> 1000 counted, a bad stat and 0 refused, \"7x\" -> 7 (%s, %d calls, %s %d)",
           g_log_count ? g_log[g_log_count - 1] : "none", g_progress_calls, g_progress_key, g_progress_value);
+    // player.score = v, v10.0.4 (players.score(p, v, 0, true), deob-10.0.4.js:175915, :175948): a set counts only what it
+    // added toward the "score" challenges, max(0, score - before): 0 -> 100 counts 100, 100 -> 40 nothing, 40 -> 70 counts 30
+    p->score = 0;
+    g_progress_calls = g_progress_max = g_progress_value = 0;
+    g_progress_key[0] = 0;
+    run_script(&game, "public action start() {\n    obj[] l = GAME.PLAYERS.list();\n    obj me = l[0];\n"
+                      "    me.score = 100;\n    me.score = 40;\n    me.score = 70;\n}\n");
+    CHECK(p->score == 70 && g_progress_calls == 2 && g_progress_max == 100 && g_progress_value == 30 && !strcmp(g_progress_key, "score"),
+          "score sets count the difference: 0 -> 100 -> 40 -> 70 gives +100 and +30 (score %d, %d calls, max %d, last %s %d)",
+          p->score, g_progress_calls, g_progress_max, g_progress_key, g_progress_value);
     game.hooks.progress = NULL;
     game_config_host(&game, NULL, 0);
     CHECK(!game_is_pub_type(&game), "the hosted game is no pub type");

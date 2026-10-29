@@ -57,8 +57,8 @@ def spawn_health(payload):
     import struct
     if len(payload) < 22:
         return None
-    uid, is_you, _active, cls, _team, _health, max_health = struct.unpack("<iBBiifi", payload[:22])
-    return {"uid": uid, "is_you": is_you, "class": cls, "max_health": max_health}
+    uid, is_you, active, cls, _team, _health, max_health = struct.unpack("<iBBiifi", payload[:22])
+    return {"uid": uid, "is_you": is_you, "active": active, "class": cls, "max_health": max_health}
 
 
 def run_mode(alias, mode_id, port):
@@ -91,7 +91,9 @@ def run_mode(alias, mode_id, port):
         types = {}
         for t, _ in conn.packets:
             types[t] = types.get(t, 0) + 1
-        mine = [s for s in (spawn_health(p) for t, p in conn.packets if t == SPAWN) if s and s["is_you"]]
+        # the joiner's own dead SPAWN at join (active 0, net_send_join_spawn, as the official join does) comes first;
+        # the class and HP are the first live spawn's, after the ENT
+        mine = [s for s in (spawn_health(p) for t, p in conn.packets if t == SPAWN) if s and s["is_you"] and s["active"]]
         detail = f"spawns {types.get(SPAWN, 0)} states {types.get(STATE, 0)} kills {types.get(KILL, 0)}"
         if alias in NO_WEAPONS:
             # noWeap modes force class 9 (Runner, 120 HP in v7 and v10)

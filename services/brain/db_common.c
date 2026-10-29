@@ -389,7 +389,61 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         cJSON_AddItemToArray(rows, c);
     }
     cJSON_Delete(copies);
+    /* v10.0.4 counter skins: a counter skin's stat is its copy's m[stat] (deob-10.0.4.js:172726-172728); Box Office keeps it
+     * per store index (skin_stats, 0365), so the first entry of that index carries it */
+    cJSON *counts = dbx_rows(x, SQL(.any = "SELECT skin_id AS ind, stat, count FROM skin_stats WHERE account_id = $1 AND count > 0"),
+                             KN_DB_ARGS(I64S(id)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(counts);
+        cJSON_Delete(rows);
+        return NULL;
+    }
+    cJSON_ArrayForEach(row, counts) {
+        const int64_t ind = kn_json_int(row, "ind", -1);
+        const char *stat = kn_json_str(row, "stat", "");
+        if (ind < 0 || !*stat) continue;
+        cJSON *entry;
+        cJSON_ArrayForEach(entry, rows) {
+            if (kn_json_int(entry, "ind", -2) != ind) continue;
+            cJSON *m = cJSON_GetObjectItemCaseSensitive(entry, "m");
+            if (!cJSON_IsObject(m)) {
+                cJSON_DeleteItemFromObjectCaseSensitive(entry, "m");
+                m = cJSON_AddObjectToObject(entry, "m");
+            }
+            if (m) {
+                cJSON_DeleteItemFromObjectCaseSensitive(m, stat);
+                cJSON_AddNumberToObject(m, stat, (double) kn_json_int(row, "count", 0));
+            }
+            break;
+        }
+    }
+    cJSON_Delete(counts);
     return rows;
+}
+
+/* chat_banned: a staff chat ban in force (feature_bans 'chat', v10_mods.c). Game servers refuse the player's chat lines
+ * but not the forfeit vote (v10.0.4 "Chat-restricted players can now vote to forfeit"; server/src/net.c). */
+static void db_account_chat_ban(Dbx *x, const int64_t id, cJSON *o) {
+    if (!o) return;
+    const int banned = dbx_exists(x, SQL(.any = "SELECT 1 FROM feature_bans WHERE account_id = {int:$1} AND feature = 'chat'"
+                                                " AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > {now})"),
+                                  KN_DB_ARGS(I64S(id)));
+    cJSON_DeleteItemFromObjectCaseSensitive(o, "chat_banned");
+    cJSON_AddBoolToObject(o, "chat_banned", banned);
+}
+
+/* PostgreSQL's kn_account_json (and the functions that return it, e.g. kn_commit_stats) builds the account in SQL; what
+ * the other drivers' C adds is added here: the owned list (the SQL's data[10] counts every unit; painted copies apart,
+ * counter skins' m[stat]), reqDel / twitchId / raidStats and chat_banned. Every account a PostgreSQL proc hands out goes
+ * through this (db_accounts.c: session_account, account_json, commit_stats). */
+void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
+    if (!v || id <= 0) return;
+    cJSON *data = cJSON_GetObjectItemCaseSensitive(v, "data");
+    cJSON *owned = data && cJSON_GetArraySize(data) > 10 ? db_owned_skins(x, id) : NULL;
+    if (owned) cJSON_ReplaceItemInArray(data, 10, owned);
+    else cJSON_Delete(owned);
+    db_account_life_extras(x, id, v); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
+    db_account_chat_ban(x, id, v);
 }
 
 cJSON *db_account_json(Dbx *x, int64_t id) {
@@ -397,12 +451,7 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
         char *s = dbx_text(x, SQL(.pg = "SELECT kn_account_json($1::int)::text"), KN_DB_ARGS(I64S(id)));
         cJSON *v = s ? cJSON_Parse(s) : NULL;
         free(s);
-        /* the SQL's data[10] counts every unit: the owned list (painted copies apart) is built here, for every driver */
-        cJSON *data = v ? cJSON_GetObjectItemCaseSensitive(v, "data") : NULL;
-        cJSON *owned = data && cJSON_GetArraySize(data) > 10 ? db_owned_skins(x, id) : NULL;
-        if (owned) cJSON_ReplaceItemInArray(data, 10, owned);
-        else cJSON_Delete(owned);
-        db_account_life_extras(x, id, v); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
+        db_account_pg_finish(x, id, v);
         return v;
     }
     cJSON *r = db_player_row(x, id);
@@ -475,5 +524,6 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     /* v10 double XP: the end-screen 2x XP offer and the weekend schedules (kn_account_json's "dxp", 0341_double_xp) */
     cJSON_AddItemToObject(o, "dxp", db_dxp_state(x, id, kn_wall_ms()));
     db_account_life_extras(x, id, o); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
+    db_account_chat_ban(x, id, o);
     return o;
 }

@@ -574,11 +574,13 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
             return;
         }
         if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint_gltf(built.model, g_viewer.paint, n); // the page's paint params
+        skin_fx_set_seed(built.model, NULL, g_viewer.seed);
         vs.models[vs.model_count++] = built.model;
         scene_add_gltf(vs.scene, built.model);
         return;
     }
     if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(built.mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
+    skin_fx_set_seed(NULL, built.mesh, g_viewer.seed);
     item_add(built.mesh);
 }
 
@@ -1055,10 +1057,12 @@ void vscene_build_showcase(int index) {
         item_build(t, frame, at, (float) M_PI / 2.0f, scale, (t->flags & VS_GLOW) != 0, glow);
     } else {
         // any other model at the holder's origin, turned (type && !melee ? PI : PI / 4) + xRot, scale
-        // (spnScl || scl || 1) * 2; glowText = emissive = glow || sameGlow (emissive #fff)
+        // (spnScl || scl || f(item)) * 2, f = a waist's sclMlt * 1.35, else 1 (v10.0.4's viewer, viewer-qL7oV8YJ.js decoded
+        // :6583-6589, :6943: "Improved the size of waist items in item previews"); glowText = emissive = glow || sameGlow
         const int glow = (t->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
+        const float fallback = t->type == ITEM_WAIST && t->scl_mlt ? t->scl_mlt * 1.35f : 1.0f;
         item_build(t, holder, (vec3) {0}, (t->type && t->type != ITEM_MELEE ? (float) M_PI : (float) M_PI / 4.0f) + x_rot,
-                   (t->spn_scl ? t->spn_scl : n_scl ? n_scl : 1.0f) * 2.0f, glow, glow);
+                   (t->spn_scl ? t->spn_scl : n_scl ? n_scl : fallback) * 2.0f, glow, glow);
     }
 
     camera_place((vec3) {12.0f, 0.0f, 0.0f}, look);

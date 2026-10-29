@@ -1290,6 +1290,9 @@ void player_jump(Player *player) {
     if ((player->weapon && player->weapon->no_jump) || player->was_stop_crouch) return;
 
     Game *game = player->game;
+    // v10.0.4 jump: countSkinStat(player, weapon.id, "jumps") (deob-10.0.4.js:174219-174221)
+    if (player->loadout && player->loadout_index >= 0 && player->loadout_index < player->loadout_size)
+        game_count_skin_stat(game, player, player->loadout[player->loadout_index], "jumps", 1);
     const MovementModeKeys mode_keys = movement_mode(player);
     const MovementModeKeys *mode = &mode_keys;
 
@@ -1327,12 +1330,14 @@ static void movement_try_jump(Player *player, const int jump, const int recon) {
     if (player->game->config.auto_jump && jump) {
         player_jump(player);
         if (!recon && player->render_you && !blocked) player_feel_jump(player);
+        if (!recon && !blocked) player->jump_events++;
         return;
     }
     if (player->did_jump && !jump) player->did_jump = 0;
     if (!player->did_jump && jump) {
         player_jump(player);
         if (!recon && player->render_you && !blocked) player_feel_jump(player);
+        if (!recon && !blocked) player->jump_events++;
     }
 }
 
@@ -3441,6 +3446,12 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
             .kill = (uint8_t) (victim->health - damage <= 0.0f),
         };
         game_send_hit(game, dealer->uid, &hit, damage);
+        // v10.0.4 changeHealth: a player's damaging hit counts "hits", a crit "headshots" on its weapon (deob-10.0.4.js:176019-176023)
+        if (dealer->weapon) {
+            const int weapon_id = combat_weapon_index(dealer);
+            game_count_skin_stat(game, dealer, weapon_id, "hits", 1);
+            if (crit) game_count_skin_stat(game, dealer, weapon_id, "headshots", 1);
+        }
     }
 
     if (damage > 0.0f) victim->hit_timer = GAME_REGEN_DELAY;
@@ -3556,6 +3567,12 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         player->last_killer_uid = killer->uid;
         killer->kills++;
         if (killer->active) killer->life_kills++; // WP-E: killsL
+        // v10.0.4 countSkinKill (deob-10.0.4.js:175903-175908): not a streak kill; "kills", and "hskills" for a headshot,
+        // on info.wId else the held weapon
+        if (!(kill_info && kill_info->streak)) {
+            game_count_skin_stat(game, killer, weapon_index, "kills", 1);
+            if (kill_info && kill_info->headshot) game_count_skin_stat(game, killer, weapon_index, "hskills", 1);
+        }
 
         if (streaks && !rules_ranked_no_streaks(game)) { // v10: no kill streaks in ranked (v10:174076)
             killer->streak++;
@@ -3730,8 +3747,12 @@ void player_melee(Player *player) {
     for (size_t i = 0; i < hits.count && damage > 0.0f; i++) {
         Player *victim = hits.items[i].player;
         // G.ai: !waitTimers; v10.0.3 part ? dmg * part.m, part.m 0 = armourHit (deob-10.0.3.js:196062-196079)
-        if (hits.items[i].ai && !mode_waiting(game))
-            game_ai_damage_part(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0, NAN, -1, 0, &hits.items[i].part);
+        if (hits.items[i].ai && !mode_waiting(game)) {
+            // meleeHit = true unless the part is armour (part && !part.m: armourHit), deob-10.0.4.js:174752
+            const GameAIHitPart *part = &hits.items[i].part;
+            if (hits.items[i].ai->active && !hits.items[i].ai->invincible && !(part->has_part && !part->mult)) hits.items[i].ai->melee_hit = 1;
+            game_ai_damage_part(game, hits.items[i].ai, player, player->smite ? 10000.0f : damage, 0, NAN, -1, 0, part);
+        }
         // G.obj: destructible health and onMelee / onDamage / onPunch triggers
         if (hits.items[i].object) game_object_hit(game, (Object *) hits.items[i].object, player, player->smite ? 10000.0f : damage, 0, GAME_HIT_MELEE);
         if (hits.items[i].object) zombies_melee_object(game, player, hits.items[i].object); // WP-H: share a ready box
@@ -4226,10 +4247,11 @@ void player_shoot(Player *player) {
     if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
     player->fire_count++; // players.js shoot: input.syncTime = true (the official "q" syncTimes)
     mode_run_shot(player->game, player); // v10.0.3 shoot: runShots++ (deob-10.0.3.js:196342; Raid's "rnogun")
-    // TODO: increase shots stat
     Game *game = player->game;
     const Weapon *weapon = player->weapon;
     const int weapon_id = combat_weapon_index(player);
+    // v10.0.4 shoot: `noDmg || countSkinStat(player, weapon.id, "shots")` (deob-10.0.4.js:174925-174928)
+    if (!(weapon && weapon->no_dmg)) game_count_skin_stat(game, player, weapon_id, "shots", 1);
     const int full = player->full_charge; // procInputs: shoot(..., fullCharge)
     player->shot_blast = (unsigned char) !!full;
     const int charging = !game->config.no_charge_weapons;

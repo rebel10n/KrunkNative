@@ -141,6 +141,10 @@ static void record_frame(KrunkerLink *l, const char dir, const char *name, const
     int cut = 0;
     const size_t cap = sizeof(r->args) - 1; // the NUL
     r->args[0] = 0;
+    if (name_len == 3 && !memcmp(name, "xst", 3) && dir == 'R') { // LOAD_XSOLLA's PayStation token: never kept
+        snprintf(r->args, sizeof(r->args), "(token)");
+        return;
+    }
     for (; args && i < argc && !cut; i++) {
         KrunkerBuf buf = {0};
         if (krunker_value_to_json(&args[i], &buf) == KRUNKER_PROTO_OK && buf.data) {
@@ -2912,8 +2916,11 @@ static int send_voice(KrunkerLink *l, const void *payload, const uint16_t length
 // are the rpc answers RPC_SUCCESS / RPC_ERROR [rpcId, results...] (v10.0.3 deob 111117-111118, parsed
 // 111438-111452; krunker_net.c names the rpc they answer), "dslr" the Daily Spin claim's ticket (111361).
 static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
+    // vr: the voucher redeem's answer; xst ... uprm: the real-money purchase's, abd / gbdr: the bundle store's data
+    // (krunker_checkout.h), all for the main thread
     static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln", "ub", "chlR",
-                                        "chgC", "_0", "_1", "dslr"}; // (chgC: CHALLENGE_COMPLETED, for account_ui.c's challenge capture)
+                                        "chgC", "_0", "_1", "dslr", // (chgC: CHALLENGE_COMPLETED, for account_ui.c's challenge capture)
+                                        "vr", "xst", "pur", "ppr", "purprm", "purb", "purbp", "purbpl", "pErr", "uprm", "abd", "gbdr"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strlen(names[i]) != f->name_len || memcmp(names[i], f->name, f->name_len)) continue;
         *argc = i == 0 && f->argc > 4 ? 4 : (uint32_t) f->argc;

@@ -510,6 +510,12 @@ if (Python3_FOUND)
     add_test(NAME brain_economy
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    # v10.0.4's bulk quick sell / bulk list / item locks for a Box Office account (economy.c "qsb" / "lib" / "ilk" / "ils",
+    # migration 0364_item_locks): KR / Junk / destroy, per-row errors, the fee per listing, locks refused on every path
+    add_test(NAME brain_bulk_market
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/bulk_market_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_bulk_market PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy")
     # the Junk wallet (doc/v10/junk.md): credit, spend, "Not enough Junk", the social "uj" push, parallel spends
     add_test(NAME brain_junk
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/junk_test.py

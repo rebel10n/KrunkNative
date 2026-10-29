@@ -30,6 +30,7 @@
 // a "bpdl" unanswered by BP_LOAD_TIMEOUT_S is asked again while the last answer, if any, stays on screen.
 #include <backend.h>
 #include <backend_ui.h>
+#include <kio_checkout.h> // the official pass's purchases (xstbp / xstbpl): the payment provider's checkout
 #include <klog.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -668,10 +669,8 @@ static void purchase_error(const cJSON *err) {
     if (r) html_dom_set_display(r, "block");
 }
 
-// The official krunker.io account's purchases (xstbp, xstbpl, the gift) are refused here, never sent: v10 sends them to
-// Xsolla / Steam for real money, and this client cannot complete one. The refusal is v10's own purchase error
-// (purchaseError with no text: "Purchase Error", index.js:243651), so the window never waits for an answer.
-static void purchase_refused(void) { purchase_error(NULL); }
+// The official krunker.io account's purchases (xstbp, xstbpl, the gift) go through kio_checkout.c: the payment provider's
+// page in the system browser, the answers ("purbp" / "purbpl") back to battlepass_ui_frame.
 
 // The official account's claims (bpclm, bpclmAll) are refused the same way: a claim changes the krunker.io account
 static int claim_refused(void) {
@@ -734,9 +733,9 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         const HtmlElem in = html_dom_by_id("giftPlayerName");
         if (in) html_dom_get_value(in, who, sizeof who);
         if (!who[0] || !active_account()) return 1;
-        if (official()) { // refused (see purchase_refused): the form closes with v10's purchase error
+        if (official()) { // the payment provider's checkout: selectBPTier(el, 1, _, name) -> "xstbp" (deob-10.0.4.js:212948-212966)
             ui_loadout_clear_pops();
-            account_popup(0, NULL, "Purchase Error");
+            kio_checkout_bp_tier(1, who);
             return 1;
         }
         StrBuf sb = {0};
@@ -762,14 +761,14 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         char frame[64];
         snprintf(frame, sizeof frame, "[\"xstbp\",%d,null]", arg_num(args, argc, 1, 1)); // io.send("xstbp", tier, creatorCode)
         if (active_account()) {
-            if (official()) purchase_refused();
+            if (official()) kio_checkout_bp_tier(arg_num(args, argc, 1, 1), NULL); // "xstbp" (:212959), the checkout
             else backend_social_send_text(frame);
         }
     } else if (!strcmp(name, "skipLevels") || !strcmp(name, "windows.5.skipLevels")) {
         char frame[48];
         snprintf(frame, sizeof frame, "[\"xstbpl\",%d]", skip_count()); // io.send("xstbpl", levels)
         if (active_account() && html_dom_by_id("bp-skip-num")) {
-            if (official()) purchase_refused();
+            if (official()) kio_checkout_bp_levels(skip_count()); // "xstbpl" (:213007), the checkout
             else backend_social_send_text(frame);
         }
     } else if (!strcmp(name, "creatorCodeAction") && arg_num(args, argc, 1, 0) == 3) { // the purchase popup's creator code

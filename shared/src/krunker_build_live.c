@@ -154,6 +154,8 @@ static const int OPTIONAL_C2S[] = {
     -1,
 };
 static const int OPTIONAL_S2C[] = {
+    // v10.0.4 counter skins: a copy's stat count (SKIN_STAT "sks", deob-10.0.4.js:184311); without it the counters stand still
+    KRUNKER_S2C_SKIN_STAT,
     // official HUD feedback (official-cd): feeds, medals, scores, leader boards, tags, pings
     KRUNKER_S2C_ACTION_FEED, KRUNKER_S2C_ADD_CHATI18N, KRUNKER_S2C_ADD_MEDAL, KRUNKER_S2C_GET_ASSIST, KRUNKER_S2C_GET_KILL,
     KRUNKER_S2C_GET_SCORE, KRUNKER_S2C_KILL_STREAK_M, KRUNKER_S2C_TEAM_SCORE, KRUNKER_S2C_UPDATE_FLAG_INFO,

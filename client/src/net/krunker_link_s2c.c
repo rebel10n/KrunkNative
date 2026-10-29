@@ -256,6 +256,18 @@ static void on_con_uid(KrunkerLink *l, const KrunkerFrame *f) {
 
 // ---------------------------------------------------------------- store / live service
 
+// "sks" SKIN_STAT [weapon, stat, amount] (deob-10.0.4.js:184311): the server counted a server-only stat (candy) on your
+// counter skin; the client's countSkinStat(you, weapon, stat, amount) (iiîíiíi, :221919-221923), as NET_EXT_KN_SKIN_STAT.
+static void on_skin_stat(KrunkerLink *l, const KrunkerFrame *f) {
+    char stat[24];
+    key_string(arg(f, 1), stat, sizeof(stat));
+    const int index = skin_stat_index(stat);
+    const double weapon = krunker_num(arg(f, 0), -1), amount = krunker_num(arg(f, 2), 1);
+    if (index < 0 || weapon < 0 || weapon > 1e6) return;
+    const NetSkinStatPacket body = {.weapon = (int32_t) weapon, .amount = amount >= 1 && amount <= 1e6 ? (int32_t) amount : 1, .stat = (uint8_t) index};
+    emit_ext(l, NET_EXT_KN_SKIN_STAT, &body, sizeof(body));
+}
+
 // "sdc" [{skinId, skin}] (:261708-261714): `if (skin && typeof skinId == "number")` store.skins[skinId] = skin, then
 // the store's own setup of an entry (iîíììïî :116530). The record goes to the client whole, as JSON [skinId, skin].
 static void on_skin_definition(KrunkerLink *l, const KrunkerFrame *f) {
@@ -452,19 +464,6 @@ static void on_lottery_won(KrunkerLink *l, const KrunkerFrame *f) {
 
 // "spinW" [socketId, uid, error, randNum, skinIndex, funds] (iiîïiiì): `if (!error)`; ours (socketId == our socket's
 // id) gives the account the skin and its KR (the client checks it has an account); every client spins the wheel.
-// "vr" [funds | null, message] (REDEEM_VOUCHER_RESPONSE, deob-10.0.4.js:221042 iííìïíï): the funds are set and the
-// message handed to the UI's listener (krunker_net_voucher_listen). Our own redeem only: the answer comes to whoever sent "vo".
-static KrunkerVoucherFn g_voucher_fn;
-
-void krunker_net_voucher_listen(KrunkerVoucherFn fn) { g_voucher_fn = fn; }
-
-static void on_redeem_voucher(const KrunkerFrame *f) {
-    const double funds = krunker_num(arg(f, 0), NAN);
-    char message[1024];
-    key_string(arg(f, 1), message, sizeof(message));
-    if (g_voucher_fn) g_voucher_fn(!isnan(funds), funds, message);
-}
-
 static void on_spin_wheel(KrunkerLink *l, const KrunkerFrame *f) {
     if (truthy(arg(f, 2))) return;
     char socket[64];
@@ -566,6 +565,7 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_SYNC_P_CON_OBJ: on_lobby_entry(l, f); return 1;
         case KRUNKER_S2C_CON_UID: on_con_uid(l, f); return 1;
         case KRUNKER_S2C_SKIN_DEFINITION_CHANGED: on_skin_definition(l, f); return 1;
+        case KRUNKER_S2C_SKIN_STAT: on_skin_stat(l, f); return 1;
         case KRUNKER_S2C_LATEST_RANKED_MMR_CHANGE: on_ranked_mmr(l, f); return 1;
         case KRUNKER_S2C_GAME_ANNOUNCEMENT: on_game_announcement(l, f); return 1;
         case KRUNKER_S2C_FOUND_JUNK: on_found_junk(l, f); return 1;
@@ -577,7 +577,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_UNBOX_MESSSAGE_S: on_unbox_player(l, f); return 1;
         case KRUNKER_S2C_LOTTERY_PRIZE_WON: on_lottery_won(l, f); return 1;
         case KRUNKER_S2C_SPIN_WHEEL_RESPONSE: on_spin_wheel(l, f); return 1;
-        case KRUNKER_S2C_REDEEM_VOUCHER_RESPONSE: on_redeem_voucher(f); return 1;
         case KRUNKER_S2C_CHARGE_CONSENT_REQUEST: on_charge_request(l, f); return 1;
         case KRUNKER_S2C_WARS_CLAN: on_wars_clan(l, f); return 1;
         case KRUNKER_S2C_EDIT_MAP: on_edit_map(l, f); return 1;
@@ -593,6 +592,20 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_DATA_LOADED:
         case KRUNKER_S2C_SYNC_BP_PROG:
         case KRUNKER_S2C_DAILY_SPIN_CLAIM_RESPONSE:
+        // "vr" (REDEEM_VOUCHER_RESPONSE, deob-10.0.4.js:221042) and the real-money purchase's answers (krunker_checkout.h):
+        // the main thread's (krunker_net.c account_frames_tick -> kio_store.c / kio_checkout.c)
+        case KRUNKER_S2C_REDEEM_VOUCHER_RESPONSE:
+        case KRUNKER_S2C_LOAD_XSOLLA:
+        case KRUNKER_S2C_PURCHASE_RESPONSE:
+        case KRUNKER_S2C_PURCHASE_PRODUCT_RESPONSE:
+        case KRUNKER_S2C_PURCHASE_PREMIUM_RESPONSE:
+        case KRUNKER_S2C_PURCHASE_BUNDLE_RESPONSE:
+        case KRUNKER_S2C_UPDATE_PREMIUM_AMOUNT:
+        case KRUNKER_S2C_PURCHASE_RESPONSE_2:
+        case KRUNKER_S2C_PURCHASE_LEVEL_RESPONSE:
+        case KRUNKER_S2C_PURCHASE_ERROR:
+        case KRUNKER_S2C_AVAILABLE_BUNDLE_DATA:
+        case KRUNKER_S2C_ALL_BUNDLE_DATA:
             return 1;
 
         // Ignored on purpose (doc/v10/s2c-coverage.md, "irrelevant" and "KN equivalent" rows): real-money store and
@@ -603,19 +616,8 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_ADD_MAIL:
         case KRUNKER_S2C_OPEN_MAIL:
         case KRUNKER_S2C_UPDATE_MAIL:
-        case KRUNKER_S2C_PURCHASE_RESPONSE:
-        case KRUNKER_S2C_PURCHASE_PRODUCT_RESPONSE:
-        case KRUNKER_S2C_PURCHASE_PREMIUM_RESPONSE:
-        case KRUNKER_S2C_PURCHASE_BUNDLE_RESPONSE:
-        case KRUNKER_S2C_UPDATE_PREMIUM_AMOUNT:
-        case KRUNKER_S2C_PURCHASE_RESPONSE_2:
-        case KRUNKER_S2C_PURCHASE_LEVEL_RESPONSE:
         case KRUNKER_S2C_CLAIM_ITEM_RESPONSE:
-        case KRUNKER_S2C_PURCHASE_ERROR:
-        case KRUNKER_S2C_LOAD_XSOLLA:
         case KRUNKER_S2C_SURVEY_BUNDLE_RESPONSE:
-        case KRUNKER_S2C_AVAILABLE_BUNDLE_DATA:
-        case KRUNKER_S2C_ALL_BUNDLE_DATA:
         case KRUNKER_S2C_POPUP_REGISTER_REWARDS:
         case KRUNKER_S2C_CLAN_LEAVE_RESPONSE:
         case KRUNKER_S2C_UPLOAD_RESPONSE:

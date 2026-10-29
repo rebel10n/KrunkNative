@@ -8,6 +8,7 @@
 // through the knDialog(1|0) handler; #popupBack / clearPops() cancels. Links open in
 // the system browser (xdg-open / open / ShellExecute), http(s) only.
 #include <ui_logic.h>
+#include <krunker_checkout.h> // krunker_checkout_log_url: what the browser-open log may show
 #include <app_mode.h>
 #include <audio.h>
 #include <ctype.h>
@@ -70,24 +71,24 @@ void ui_open_external(const char *url) {
 // The system browser, never the client's own pages: a krunker.io/?game= link is an official
 // lobby (krunker_lobbies.c), which app_route_url would take for this client's game page.
 void ui_open_browser(const char *url) {
-    char resolved[UI_URL_MAX];
+    char resolved[UI_URL_MAX], logged[UI_URL_MAX];
     if (!ui_resolve_external_url(url, resolved, sizeof(resolved))) {
-        menu_log("link not opened (not http/https): %s", url ? url : "");
+        krunker_checkout_log_url(url, logged, sizeof(logged));
+        menu_log("link not opened (not http/https): %s", logged);
         return;
     }
 #ifdef __EMSCRIPTEN__
     EM_ASM({ try { (window.knRealOpen || window.open)(UTF8ToString($0), '_blank'); } catch (e) {} }, resolved);
 #else
-    // KRUNKNATIVE_NO_BROWSER=1 (headless test runs): log only. The log stops at a fragment: it may
-    // carry a one-time secret (the captcha callback's #kn-captcha=, krunker_captcha_ui.c).
-    const int shown = (int) strcspn(resolved, "#");
-    const char *frag = resolved[shown] ? "#(not logged)" : "";
+    // KRUNKNATIVE_NO_BROWSER=1 (headless test runs): log only. The log drops a fragment (the captcha callback's
+    // #kn-captcha=, krunker_captcha_ui.c) and secret query values (PayStation's ?access_token=, kio_checkout.c).
+    krunker_checkout_log_url(resolved, logged, sizeof(logged));
     const char *off = getenv("KRUNKNATIVE_NO_BROWSER");
     if (off && *off && strcmp(off, "0")) {
-        menu_log("open (disabled by KRUNKNATIVE_NO_BROWSER): %.*s%s", shown, resolved, frag);
+        menu_log("open (disabled by KRUNKNATIVE_NO_BROWSER): %s", logged);
         return;
     }
-    menu_log("open in browser: %.*s%s", shown, resolved, frag);
+    menu_log("open in browser: %s", logged);
 #if defined(_WIN32)
     ShellExecuteA(NULL, "open", resolved, NULL, NULL, SW_SHOWNORMAL);
 #else

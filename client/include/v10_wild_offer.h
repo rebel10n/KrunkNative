@@ -13,3 +13,4 @@ int  v10_wild_offer_frame(const char *label, const cJSON *frame); // "wo" / "wob
 void v10_wild_offer_shop(StrBuf *sb);            // the shop front's wild offer item (nothing without an offer)
 int  v10_wild_offer_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // knWo*; -1 not ours
 void v10_wild_offer_scenario(const cJSON *state); // --render-scenario state.wildOffer {offer, now, notify, view}
+void v10_wild_offer_purchased(void);             // a real-money offer was paid (kio_checkout.c): it is spent, the next fetched

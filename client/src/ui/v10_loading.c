@@ -8,10 +8,12 @@
 // The page does not have the last five yet: until it does, the calls find no element and write nothing.
 #include "v10_loading.h"
 
+#include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
 
 #include "html_dom.h"
+#include "i18n.h"
 
 static int g_loads;          // loads begun this session (iíîíïiì, :223024)
 static int g_visible;        // the card is on screen
@@ -20,6 +22,20 @@ static double g_gone_at = -1.0;   // the card goes display none at this time; -1
 
 double v10_loading_hold_ms(const int loads_before) {
     return loads_before > 0 ? V10_LOADING_HOLD_MS : 0.0;
+}
+
+// mode.tag[1] by mode index (deob-10.0.4.js:105931-106488); NULL: the mode has no tag
+static const char *const MODE_TAG_COLOR[] = {
+    [10] = "#ffac00", [13] = "#ffac00", [15] = "#d95487", [17] = "#ffac00", [21] = "#ffac00",
+    [23] = "#d95487", [29] = "#ffac00", [31] = "#d95487", [32] = "#d95487", [33] = "#ffac00",
+    [34] = "#ffac00", [36] = "#ffac00", [37] = "#ff8a1a",
+};
+#define MODE_TAG_COUNT ((int) (sizeof MODE_TAG_COLOR / sizeof MODE_TAG_COLOR[0]))
+
+const char *v10_loading_mode_accent(const int mode_id, const int is_custom) {
+    // deob-10.0.4.js:223040: mode && mode.tag && !isCustom ? mode.tag[1] : "#fff"
+    if (is_custom || mode_id < 0 || mode_id >= MODE_TAG_COUNT || !MODE_TAG_COLOR[mode_id]) return "#fff";
+    return MODE_TAG_COLOR[mode_id];
 }
 
 static void set_display_by_id(const char *id, const char *value) {
@@ -55,7 +71,7 @@ void v10_loading_begin(const V10LoadingMap *map, const double now_ms) {
     if (!map) map = &none;
 
     write_thumb(map->map_thumb);
-    set_text_by_id("loadingMapNext", "UP NEXT");
+    set_text_by_id("loadingMapNext", I18N("generic.loading.nextMap", "UP NEXT")); // :223035
     set_text_by_id("loadingMapName", map->map_name ? map->map_name : "");
     set_text_by_id("loadingMapMode", map->mode_name ? map->mode_name : "");
     set_display_by_id("loadingMapMode", map->mode_name ? "" : "none");
@@ -65,7 +81,11 @@ void v10_loading_begin(const V10LoadingMap *map, const double now_ms) {
         html_dom_set_class(bg, "loadingOut", 0); // loadingBg.classList.remove("loadingOut") (:223039)
         html_dom_set_display(bg, "block");
     }
-    set_text_by_id("loadingMapText", "LOADING");
+    // t("generic.loading.simple").toUpperCase() (:223041); ASCII letters only, as the tables' Latin strings need
+    char loading[64];
+    snprintf(loading, sizeof(loading), "%s", I18N("generic.loading.simple", "Loading"));
+    for (char *c = loading; *c; c++) *c = (char) toupper((unsigned char) *c);
+    set_text_by_id("loadingMapText", loading);
     g_visible = 1;
 }
 

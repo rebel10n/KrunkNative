@@ -801,6 +801,10 @@ static const SocialRoute k_routes[] = {
     {"fil", sh_market_filter},
     {"srt", sh_inventory_sort},
     {"qsi", sh_quick_sell},
+    {"qsb", sh_quick_sell_bulk},        /* v10.0.4 bulk quick sell -> "qsbr" (economy.c) */
+    {"lib", sh_market_list_bulk},       /* v10.0.4 bulk list -> "libr" (economy.c) */
+    {"ilk", sh_item_locks},             /* v10.0.4 item locks -> "ilkr" (economy.c) */
+    {"ils", sh_item_lock},              /* v10.0.4 lock / unlock an item -> "ilsr" (economy.c) */
     {"st", sh_item_stats},
     {"ri", sh_trade_inv},
     {"ctr", sh_trade_create},
@@ -922,6 +926,8 @@ static const LabelClass k_label_class[] = {
     {"vr", RC_WRITE, ANS_REPLY}, /* v10 REDEEM_VOUCHER (redeem.c): a refusal is answered "vr" with the error */
     {"crft", RC_WRITE, ANS_REPLY}, /* v10 CRAFT_REQUEST (craft.c, the Junkyard): changes the inventory */
     {"ip", RC_WRITE, ANS_REPLY},   /* the paint picker's item paint (economy.c sh_item_paint): answered "ipr" */
+    /* v10.0.4 bulk market and item locks (economy.c): the writes as their single-item frames (qsi, li), the lock list a read */
+    {"qsb", RC_WRITE, ANS_REPLY}, {"lib", RC_WRITE, ANS_REPLY}, {"ils", RC_WRITE, ANS_REPLY}, {"ilk", RC_READ, ANS_REPLY},
     {"raml", RC_WRITE, ANS_REPLY},
     {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
     {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */

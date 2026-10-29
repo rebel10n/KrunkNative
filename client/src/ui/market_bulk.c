@@ -43,6 +43,7 @@ void market_locks_apply(MarketLocks *locks, const cJSON *rows) {
 }
 
 int market_locks_has(const MarketLocks *locks, const int skin_id, const int item_id, const int stackable) {
+    if (!locks) return 0; // no lock sets: nothing is locked
     if (list_has(locks->skin_ids, locks->skin_n, skin_id)) return 1;
     return stackable && list_has(locks->item_ids, locks->item_n, item_id);
 }
@@ -73,8 +74,15 @@ static int picks_reserve(MarketPicks *picks) {
     int *items = realloc(picks->item_ids, sizeof(int) * (size_t) next);
     if (!items) return 0;
     picks->item_ids = items;
+    int *keeps = realloc(picks->keeps, sizeof(int) * (size_t) next);
+    if (!keeps) return 0;
+    picks->keeps = keeps;
     picks->cap = next;
     return 1;
+}
+
+void market_picks_set_keep(MarketPicks *picks, const int i, const int keep) {
+    if (picks && picks->keeps && i >= 0 && i < picks->n) picks->keeps[i] = keep > 0 ? keep : 0;
 }
 
 int market_picks_toggle(MarketPicks *picks, const MarketLocks *locks, const int skin_id, const int item_id,
@@ -84,6 +92,7 @@ int market_picks_toggle(MarketPicks *picks, const MarketLocks *locks, const int 
             const size_t rest = sizeof(int) * (size_t) (picks->n - i - 1);
             memmove(picks->skin_ids + i, picks->skin_ids + i + 1, rest);
             memmove(picks->item_ids + i, picks->item_ids + i + 1, rest);
+            if (picks->keeps) memmove(picks->keeps + i, picks->keeps + i + 1, rest);
             picks->n--;
             return 0;
         }
@@ -92,6 +101,7 @@ int market_picks_toggle(MarketPicks *picks, const MarketLocks *locks, const int 
     if (!picks_reserve(picks)) return 0;
     picks->skin_ids[picks->n] = skin_id;
     picks->item_ids[picks->n] = item_id;
+    picks->keeps[picks->n] = 0;
     picks->n++;
     return 1;
 }
@@ -99,6 +109,7 @@ int market_picks_toggle(MarketPicks *picks, const MarketLocks *locks, const int 
 void market_picks_free(MarketPicks *picks) {
     free(picks->skin_ids);
     free(picks->item_ids);
+    free(picks->keeps);
     memset(picks, 0, sizeof(*picks));
 }
 
@@ -293,17 +304,20 @@ char *market_paint_key(const cJSON *meta) {
     return key;
 }
 
-static void group_add_instance(MarketGroup *g, const int id, char *paint) {
+static void group_add_instance(MarketGroup *g, const int id, char *paint, const MarketCopyMeta meta) {
     int *grown = realloc(g->instances, sizeof(int) * (size_t) (g->n_instances + 1));
     if (grown) g->instances = grown;
     char **paints = realloc(g->paints, sizeof(char *) * (size_t) (g->n_instances + 1));
     if (paints) g->paints = paints;
-    if (!grown || !paints) {
+    MarketCopyMeta *metas = realloc(g->metas, sizeof(MarketCopyMeta) * (size_t) (g->n_instances + 1));
+    if (metas) g->metas = metas;
+    if (!grown || !paints || !metas) {
         free(paint);
         return;
     }
     g->instances[g->n_instances] = id;
     g->paints[g->n_instances] = paint;
+    g->metas[g->n_instances] = meta;
     g->n_instances++;
 }
 
@@ -311,9 +325,80 @@ void market_group_clear(MarketGroup *g) {
     for (int i = 0; i < g->n_instances; i++) free(g->paints[i]);
     free(g->paints);
     free(g->instances);
+    free(g->metas);
     g->paints = NULL;
     g->instances = NULL;
+    g->metas = NULL;
     g->n_instances = 0;
+}
+
+MarketCopyMeta market_copy_meta(const cJSON *meta) {
+    MarketCopyMeta m = {-1, 0, 0};
+    if (!cJSON_IsObject(meta)) return m;
+    const cJSON *wear = cJSON_GetObjectItemCaseSensitive(meta, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(meta, "serial"), *e;
+    if (cJSON_IsNumber(wear)) m.wear = wear->valuedouble;
+    if (cJSON_IsNumber(serial)) m.serial = serial->valueint;
+    // iíìîìíi = {wear, serial, style}: any other key customizes the copy (deob-10.0.4.js:108963, :147302-147304)
+    cJSON_ArrayForEach(e, meta) if (e->string && strcmp(e->string, "wear") && strcmp(e->string, "serial") && strcmp(e->string, "style")) m.custom = 1;
+    return m;
+}
+
+static MarketCopyMeta row_meta(const cJSON *row) {
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(row, "m");
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring[0] ? cJSON_Parse(m->valuestring) : NULL;
+    const MarketCopyMeta out = market_copy_meta(parsed ? parsed : m);
+    cJSON_Delete(parsed);
+    return out;
+}
+
+int market_keep_reason(const MarketKeep *k, const int stack, const int sellable, const int listed, const int locked, const int equipped,
+                       const int rarity, const MarketCopyMeta *meta) {
+    if (stack) return MARKET_KEEP_STACK;               // no instanceId (:147290-147292)
+    if (!sellable) return MARKET_KEEP_UNSELLABLE;      // neither canQuickSell nor canDestroy (:147294)
+    if (listed) return MARKET_KEEP_LISTED;
+    if (locked) return MARKET_KEEP_LOCKED;
+    if (k->equipped && equipped) return MARKET_KEEP_EQUIPPED;
+    if (k->min_rarity >= 0 && rarity >= k->min_rarity) return MARKET_KEEP_RARITY;
+    if (!meta) return MARKET_KEEP_NONE;
+    if (k->painted && meta->custom) return MARKET_KEEP_PAINTED;
+    if (k->serial_max > 0 && meta->serial >= 1 && meta->serial <= k->serial_max) return MARKET_KEEP_SERIAL;
+    if (k->wear_max > 0 && meta->wear >= 0 && meta->wear < k->wear_max) return MARKET_KEEP_WEAR;
+    return MARKET_KEEP_NONE;
+}
+
+const char *market_keep_reason_name(const int reason) {
+    static const char *const names[] = {NULL, NULL, NULL, "listed", "locked", "equipped", "rarity", "painted", "serial", "wear"};
+    return reason >= 0 && reason < (int) (sizeof(names) / sizeof(names[0])) ? names[reason] : NULL;
+}
+
+char *market_keep_json(const MarketKeep *k) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "perItem", k->per_item);
+    cJSON_AddNumberToObject(o, "perItemCount", k->per_item_count);
+    cJSON_AddBoolToObject(o, "painted", k->painted);
+    cJSON_AddBoolToObject(o, "equipped", k->equipped);
+    cJSON_AddNumberToObject(o, "serialMax", k->serial_max);
+    cJSON_AddNumberToObject(o, "wearMax", k->wear_max);
+    cJSON_AddNumberToObject(o, "minRarity", k->min_rarity);
+    char *text = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    return text;
+}
+
+// the stored options over the defaults (deob-10.0.4.js:147278-147287: Object.assign({}, defaults, stored))
+MarketKeep market_keep_parse(const char *json) {
+    MarketKeep k = MARKET_KEEP_DEFAULTS;
+    cJSON *o = json ? cJSON_Parse(json) : NULL;
+    const cJSON *v;
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "perItem")) && cJSON_IsBool(v)) k.per_item = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "perItemCount")) && cJSON_IsNumber(v)) k.per_item_count = v->valueint;
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "painted")) && cJSON_IsBool(v)) k.painted = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "equipped")) && cJSON_IsBool(v)) k.equipped = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "serialMax")) && cJSON_IsNumber(v)) k.serial_max = v->valueint;
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "wearMax")) && cJSON_IsNumber(v)) k.wear_max = v->valuedouble;
+    if ((v = cJSON_GetObjectItemCaseSensitive(o, "minRarity")) && cJSON_IsNumber(v)) k.min_rarity = v->valueint;
+    cJSON_Delete(o);
+    return k;
 }
 
 int market_groups_parse(const cJSON *rows, MarketGroup **out, int *n) {
@@ -337,7 +422,7 @@ int market_groups_parse(const cJSON *rows, MarketGroup **out, int *n) {
             g->stack_id = sid->valueint;
             g->stack_max = cJSON_IsNumber(cnt) ? cnt->valueint : 1;
         } else {
-            group_add_instance(g, sid->valueint, row_paint_key(row));
+            group_add_instance(g, sid->valueint, row_paint_key(row), row_meta(row));
         }
     }
     return 0;

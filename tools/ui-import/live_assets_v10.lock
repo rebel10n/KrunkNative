@@ -9,6 +9,24 @@
 # palette / curtain colours in ui/css/krunknative.css come from it): assets/index-ANyEo1zZ.css
 # https://krunkerstrike.frvr.com/assets/index-ANyEo1zZ.css sha256 874fc89ce2a3a4b9998429b77e304398da6416885c1a721022ed2a58a4172a8d size 591463.
 # root	path	url	sha256	size
+# img/backgrounds/gamecats/c_N.png: the Custom Games window's Popular Categories tiles (config.mapCatsP i, v10:216390) and the Host
+# window's Community Games card (one of c_0/2/4/6/10/13, v10:215179); the imported page only had c_1.png
+# user-assets/707/model.obj + model.png: the Krunker Strike Habitat map's asset 707 (aid "707t", assets/maps/strike/habitat.json);
+# the 2026-10-15 per-map audit (doc/asset-audit.md) found it missing. user-assets.krunker.io answers 403 to direct requests
+# now: fetched with KN_FETCH_PROXY (fetch_live_assets.py fetch).
+# textures/previews/weapons/weapon_30.png / weapon_31.png: v10's Boulder (29) and Compressor (30) previews in the Customize
+# secondary picker; img/mouse/10002.png: the middle mouse button of Settings > Controls (ui_controls.c). Missing per the
+# 2026-10-15 audit (doc/asset-audit.md: every uidiff scenario rendered against the launcher's content).
+# img/lottery_bg*.webp: the raffle window's theme backgrounds (svelte-1rj22es .lottery-window.theme-christmas / easter /
+# neutral ::before, v10:125584; css/svelte.css). The bundle injects that CSS into the page, so they load from the page's own
+# origin (krunker.io/img/, assets.krunker.io answers 404); fetched through KN_FETCH_PROXY (direct requests get a 403 challenge)
+# img/templates/<icon>.png, img/templates/scripts/<i>.png and img/editor-models/<src>[_<i>].png: the editor's Templates window
+# tiles (editor_panels.c templ_pairs: 29 game templates by icon, 18 KrunkScript templates) and the Inspector's model variant
+# list (editor_inspector.c view_model_list, prefabVariants). assets.krunker.io also 404s on antenna_0[_1-3] and event_0[_1-5]
+# (the ANTENNA / EVENT variants), so those tiles stay as broken as on the live editor.
+# sound/*.mp3 (root assets-aac): config.networkSounds names of Krunker v10.0.3 (deob-10.0.3.js:21141, shared/include/
+# network_sounds.h) that assets/sound lacked; assets.krunker.io serves these seven as MP4/AAC under the .mp3 name, so
+# install writes them transcoded to MP3. The list's weapon_13, weapon_18, weapon_7_0 and weapon_4_16 404 there (2026-10-24).
 assets	models/body/body_265.glb	https://assets.krunker.io/models/body/body_265.glb	e343d6da219de4bb18b04a11cb5f821a994ffe7b51ec6be22e54e9ab922fb71c	596344
 assets	models/body/body_267.glb	https://assets.krunker.io/models/body/body_267.glb	64258be58f40a6582bd3012cb7354498973b8e439e4c6af2ec1628745d364e11	114052
 assets	models/body/body_269.glb	https://assets.krunker.io/models/body/body_269.glb	e69910023b3936bfb9f1025f0d777c9ff88168f7ebd9bf79953c3b66d76f8291	394536
@@ -2837,8 +2855,6 @@ ui	img/menu-bg/2.png	https://assets.krunker.io/img/menu-bg/2.png	b9724e704b16f69
 ui	img/menu-bg/3.png	https://assets.krunker.io/img/menu-bg/3.png	2a06f688113fad814662a8aae0ab3916f216b7933c961ee51ba196cdd93bfed8	245004
 ui	img/menu-bg/8.png	https://assets.krunker.io/img/menu-bg/8.png	b85ce5b5302c17daeef770ea51c4aba913432f17909aec3664d77bd51067fac3	122073
 ui	img/menu-bg/9.png	https://assets.krunker.io/img/menu-bg/9.png	2498cb0d6336aef22935f3777180332034a039c57cb9e6a032f494b6dc8362be	1330788
-# img/backgrounds/gamecats/c_N.png: the Custom Games window's Popular Categories tiles (config.mapCatsP i, v10:216390) and the Host
-# window's Community Games card (one of c_0/2/4/6/10/13, v10:215179); the imported page only had c_1.png
 ui	img/backgrounds/gamecats/c_0.png	https://assets.krunker.io/img/backgrounds/gamecats/c_0.png	eaa9b7f6da2924cc87fc3212bbe17c496e3726d993bbee701192742b186d845c	17156
 ui	img/backgrounds/gamecats/c_2.png	https://assets.krunker.io/img/backgrounds/gamecats/c_2.png	2e75336f5bdf94120670b46f08ce2f0ee0139778e01751ed41303d576903cf4f	33065
 ui	img/backgrounds/gamecats/c_3.png	https://assets.krunker.io/img/backgrounds/gamecats/c_3.png	df919cbf7d58792ff85fdb27ab036140eaca4898d9135c89beafc79e4e2a7640	19609
@@ -2852,27 +2868,14 @@ ui	img/backgrounds/gamecats/c_10.png	https://assets.krunker.io/img/backgrounds/g
 ui	img/backgrounds/gamecats/c_11.png	https://assets.krunker.io/img/backgrounds/gamecats/c_11.png	ba66728d6b92173a1ddd8e4d0d2397b7b253b93575de8f68d73fc263a454cc44	39243
 ui	img/backgrounds/gamecats/c_12.png	https://assets.krunker.io/img/backgrounds/gamecats/c_12.png	874146440050733e96b107014a26cb7bdab4f4e4ea3b6ce89c31dedea195fecc	43473
 ui	img/backgrounds/gamecats/c_13.png	https://assets.krunker.io/img/backgrounds/gamecats/c_13.png	732f2992aa5f9d079ec52e414425751080d0b766c5b3ff04b05ac875b86a6e69	26861
-# user-assets/707/model.obj + model.png: the Krunker Strike Habitat map's asset 707 (aid "707t", assets/maps/strike/habitat.json);
-# the 2026-10-15 per-map audit (doc/asset-audit.md) found it missing. user-assets.krunker.io answers 403 to direct requests
-# now: fetched with KN_FETCH_PROXY (fetch_live_assets.py fetch).
 assets	user-assets/707/model.obj	https://user-assets.krunker.io/707/model.obj	a3d64ea7a4609f15993b2de81f4d8eaa572c63b454e876d956f4ded317bfa756	2755
 assets	user-assets/707/model.png	https://user-assets.krunker.io/707/model.png	25ac70d29f2b92112b3415e953f4d77ef33d1944e7200986c3262e05434041fc	1508
-# textures/previews/weapons/weapon_30.png / weapon_31.png: v10's Boulder (29) and Compressor (30) previews in the Customize
-# secondary picker; img/mouse/10002.png: the middle mouse button of Settings > Controls (ui_controls.c). Missing per the
-# 2026-10-15 audit (doc/asset-audit.md: every uidiff scenario rendered against the launcher's content).
 assets	textures/previews/weapons/weapon_30.png	https://assets.krunker.io/textures/previews/weapons/weapon_30.png	2a0f5a5428050c0b14eaba3a4c21be4d4c23c31675d5b036472efb7b52532ac5	32167
 assets	textures/previews/weapons/weapon_31.png	https://assets.krunker.io/textures/previews/weapons/weapon_31.png	63fe4d282a92c899615a32457cae7eec289e2bd42570be700ecdc36be6ec207d	32039
 ui	img/mouse/10002.png	https://assets.krunker.io/img/mouse/10002.png	c85d64a5732cdbb179169184b35af4e9402234dbc820edcc95b1c4a972fb8661	2266
-# img/lottery_bg*.webp: the raffle window's theme backgrounds (svelte-1rj22es .lottery-window.theme-christmas / easter /
-# neutral ::before, v10:125584; css/svelte.css). The bundle injects that CSS into the page, so they load from the page's own
-# origin (krunker.io/img/, assets.krunker.io answers 404); fetched through KN_FETCH_PROXY (direct requests get a 403 challenge)
 ui	img/lottery_bg.webp	https://krunker.io/img/lottery_bg.webp	93f409a7533fd6fc80759f22e3f212ce29e4af3701727210ada24a32a462cee3	181414
 ui	img/lottery_bg_easter.webp	https://krunker.io/img/lottery_bg_easter.webp	556ec4d434b15e68a78a7ba75ba43595de7157ad87d576010e61b5d79f9d5b5a	221912
 ui	img/lottery_bg_neutral.webp	https://krunker.io/img/lottery_bg_neutral.webp	2046ddd50fee35996220656e22ce07bbfd71767afe7122326faaad54933b146c	75822
-# img/templates/<icon>.png, img/templates/scripts/<i>.png and img/editor-models/<src>[_<i>].png: the editor's Templates window
-# tiles (editor_panels.c templ_pairs: 29 game templates by icon, 18 KrunkScript templates) and the Inspector's model variant
-# list (editor_inspector.c view_model_list, prefabVariants). assets.krunker.io also 404s on antenna_0[_1-3] and event_0[_1-5]
-# (the ANTENNA / EVENT variants), so those tiles stay as broken as on the live editor.
 ui	img/editor-models/acidbarrel_0.png	https://assets.krunker.io/img/editor-models/acidbarrel_0.png	a8520185cf352b52c4fa2c527ef81018cf5d910169ec426c0da42dd96a2b9189	96249
 ui	img/editor-models/acidbarrel_0_1.png	https://assets.krunker.io/img/editor-models/acidbarrel_0_1.png	9100a8545c982f02dbdd19faa2e5dfe68da01aaaa099dca21c48b3c15d9c7d0c	105672
 ui	img/editor-models/barrel_0.png	https://assets.krunker.io/img/editor-models/barrel_0.png	3eddf9c8f56ad0c35fe072ff0b57ebc89ee0d6c742bf9f5a004ef0fe975a9845	127718
@@ -2983,9 +2986,6 @@ ui	img/maps/map_41.png	https://assets.krunker.io/img/maps/map_41.png	11e60005ec3
 ui	img/maps/map_43.png	https://assets.krunker.io/img/maps/map_43.png	56cf60386db38f8149d79d9165cbe49766d62fc1fb397371c63f7e2e1df41ea3	18050
 ui	img/maps/map_44.png	https://assets.krunker.io/img/maps/map_44.png	b8aaa7bc845eae0fdd5dff17f56b2fbc5dece20b95965cec7d9bcf264ae4d400	27349
 ui	img/maps/map_45.png	https://assets.krunker.io/img/maps/map_45.png	abc881844f6ba5d44b19ce8aa64b61849fb0172fe24d56d58f31636a14946093	25138
-# sound/*.mp3 (root assets-aac): config.networkSounds names of Krunker v10.0.3 (deob-10.0.3.js:21141, shared/include/
-# network_sounds.h) that assets/sound lacked; assets.krunker.io serves these seven as MP4/AAC under the .mp3 name, so
-# install writes them transcoded to MP3. The list's weapon_13, weapon_18, weapon_7_0 and weapon_4_16 404 there (2026-10-24).
 assets-aac	sound/weapon_15_11.mp3	https://assets.krunker.io/sound/weapon_15_11.mp3	64ba7a09ccd598268f498dd50dc5d3df87c43ae968efaa836f264dad648164f4	115278
 assets-aac	sound/weapon_4_36.mp3	https://assets.krunker.io/sound/weapon_4_36.mp3	95729dbb09a6b15d2cffd2a742806c249bcb1dc17028ffd01b8e75e8426e327d	133120
 assets-aac	sound/weapon_5_17.mp3	https://assets.krunker.io/sound/weapon_5_17.mp3	414b3bce130200b0cb3225df51895f69dcfe4998aacb73de7581c3f22f087786	320704
@@ -2993,3 +2993,23 @@ assets-aac	sound/weapon_5_20.mp3	https://assets.krunker.io/sound/weapon_5_20.mp3
 assets-aac	sound/weapon_6_21.mp3	https://assets.krunker.io/sound/weapon_6_21.mp3	12927a9812b5666dfdbbf174417602546c5a53f84d674f546c28d3c748358d88	275262
 assets-aac	sound/weapon_8_15.mp3	https://assets.krunker.io/sound/weapon_8_15.mp3	e7e2b41ce668819fdaf6287a7d3c9e1e708df564008542c3ee0bad70b1c65fb9	29980
 assets-aac	sound/weapon_8_17.mp3	https://assets.krunker.io/sound/weapon_8_17.mp3	773cbc44ad5e3a9ad6217ce6612ac62e5c08df4f930b802f7f243aa59a709ec4	70252
+assets	models/charms/charm_39.obj	https://assets.krunker.io/models/charms/charm_39.obj	b3164a6ded807c2465da2ffb416531f1ba37c4600421e661736542d300fa7fa9	92064
+assets	models/hats/hat_540.obj	https://assets.krunker.io/models/hats/hat_540.obj	326fd27f2dbfdc5a3f78fab449cb275e4afcce622201bba168a4680305de9f28	6294
+assets	models/hats/hat_541.obj	https://assets.krunker.io/models/hats/hat_541.obj	001732b6b3fa94baa472b009cc102d15ae04a231c80edc6278cf0d68dd53d147	45921
+assets	models/melee/melee_213.obj	https://assets.krunker.io/models/melee/melee_213.obj	3d9ceb2c90122b512035f10ddd1c4487e94c73eb03eed47dc80f5363cf23c40a	65298
+assets	models/pets/pet_26.glb	https://assets.krunker.io/models/pets/pet_26.glb	41f0a8d5869e705f866e28788adfe0e8e96068b0a68b4c1222708502c27f6cd6	415488
+assets	textures/charms/charm_39.png	https://assets.krunker.io/textures/charms/charm_39.png	0984913c99f181a92db847941ea6bea251abb52453822191317a52a7845b375d	62654
+assets	textures/charms/charm_39_e.png	https://assets.krunker.io/textures/charms/charm_39_e.png	3dc1a6a327eb9a56ba9494b34e403876b7fac5430519bbe5dc6a11997bfe3e1f	9201
+assets	textures/hats/hat_540.png	https://assets.krunker.io/textures/hats/hat_540.png	5e9cea26c72be42a8b6a966fdcc9441c9bdaa6ffa566b286b86cae01a820126b	77866
+assets	textures/hats/hat_541.png	https://assets.krunker.io/textures/hats/hat_541.png	9f5a9773542663d3df874152b92ac9fbb3ca3e9e57ca7f05d48e98491bd2ab8a	151446
+assets	textures/hats/hat_541_e.png	https://assets.krunker.io/textures/hats/hat_541_e.png	905f0e7519908491c95ea4a469a4fea3c873f38ee7dc59b366628d5a72cda635	2984
+assets	textures/melee/icon_213.png	https://assets.krunker.io/textures/melee/icon_213.png	ab081791055550df08aa55f64889849b7bcc06e762698f93f7df72d778245f55	5142
+assets	textures/melee/melee_213.png	https://assets.krunker.io/textures/melee/melee_213.png	ca3fb02eb02f941799e1f182b3e91d1dea44c0983dc5b12abcd5a62aaf048146	390879
+assets	textures/melee/melee_213_e.png	https://assets.krunker.io/textures/melee/melee_213_e.png	40a466f06792d2a36c8f150cc261a5e990f74073d43bb195cdf1562cb59ef814	5405
+assets	textures/previews/cosmetics/12_39.png	https://assets.krunker.io/textures/previews/cosmetics/12_39.png	0dcb6b62cd1c9e63199b10a35790f9343c846128fab42d76bfe48d80754b1f7d	28593
+assets	textures/previews/cosmetics/1_540.png	https://assets.krunker.io/textures/previews/cosmetics/1_540.png	d52c504894478c67c892c160e259a2d87499225da2ac26770fad0a9ca784dce0	20255
+assets	textures/previews/cosmetics/1_541.png	https://assets.krunker.io/textures/previews/cosmetics/1_541.png	034c715e06bbda3a96951575a896cf30f8c8affd4a9ecc484f0a03d4d87510de	37614
+assets	textures/previews/cosmetics/9_26.png	https://assets.krunker.io/textures/previews/cosmetics/9_26.png	bac16bb7c48d0accac8fee034ac07312ebe742a0d4a9b834f68d9fd6167918eb	25999
+assets	textures/previews/melee/melee_213.png	https://assets.krunker.io/textures/previews/melee/melee_213.png	261387b0f8e345a7f6e8a586db02ccdce51053a21eb1d6df8a21c434ca011341	17167
+assets	textures/previews/weapons/weapon_1_537.png	https://assets.krunker.io/textures/previews/weapons/weapon_1_537.png	79cabc38ddd601c180ebf99676c4d034515502f59550bcfd1cfd6e8e88a9b261	21669
+assets	textures/previews/weapons/weapon_2_566.png	https://assets.krunker.io/textures/previews/weapons/weapon_2_566.png	9b3d064829ab2e7be29893d65fcc349d7bdd3e7e1c151916e734415d5b1b3ae3	23716

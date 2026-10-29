@@ -32,6 +32,21 @@ int  kio_inventory_copy_for_paint(int item, const char *key);
 int  kio_inventory_bulk_sell(int action, MarketPicks picks, KioInvDone done, void *user);
 // Bulk list of picks at one unit price; each stack lists its whole count. Takes ownership of picks. 1 = sent.
 int  kio_inventory_bulk_list(int price, MarketPicks picks, KioInvDone done, void *user);
+// Bulk list of rows, each with its own price and quantity (the List Items modal, deob-10.0.4.js:131924-131943).
+// The rows are copied. 1 = sent.
+int  kio_inventory_bulk_list_rows(const MarketListRow *rows, int n, KioInvDone done, void *user);
+
+// The last bulk run's figures, from its answers (valid once done ran): a sell's sold / skipped counts and its KR and
+// Junk gains (deob-10.0.4.js:146862-146866), a list's listed count and the first failed row's text (:131995-132019).
+typedef struct {
+    int sold, skipped, listed;
+    double kr_gained, junk_gained;
+    double funds_before, junk_before;
+    char error[160];
+} KioBulkResult;
+const KioBulkResult *kio_inventory_bulk_result(void);
+// The run's progress: units (a sell's items, a list's units) answered so far, out of total.
+void kio_inventory_bulk_progress(int *done, int *total);
 
 // The notice for an action refused because the inventory is not loaded.
 const char *kio_inventory_gate_text(void);

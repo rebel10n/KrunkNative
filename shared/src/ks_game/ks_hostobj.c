@@ -568,8 +568,9 @@ static long track_stat_int(const KsValue v)
 // player.trackStat(stat, value), v10.0.4 (deob-10.0.4.js:184292-184314): on the server, outside the sandbox, in a
 // public-type game, for a player with an account, a /^\w{1,32}$/ stat and min(parseInt(value) || 0, 1000) >= 1:
 // challenges.update(stat, value) (Candy Heist's candy challenges; map 46's server script banks candy with it). true
-// when counted. Its other half, the "candy" counter skins (countSkinStat + SKIN_STAT, :184308-184311: the Hollowman's
-// Staff's count), needs counter skins (attach type 1, :172726-172735; the digit mesh, :204425-204500), not in KN yet.
+// when counted. Its other half: a server-only stat ("candy") is counted on every counter skin the player wears for it
+// and sent to the owner as SKIN_STAT (countSkinStat + SKIN_STAT, :184308-184311: the Hollowman's Staff's count):
+// game_count_skin_stat with weapon -1 (the server's skin_stat hook does both).
 static KsValue pl_track_stat(KsScript *s, void *native, const KsValue *args, int argc)
 {
     (void) s;
@@ -593,6 +594,7 @@ static KsValue pl_track_stat(KsScript *s, void *native, const KsValue *args, int
     memcpy(key, stat, n);
     key[n] = 0;
     game_challenge(game, p, key, (int) value, -1, -1);
+    if (skin_stat_server_only(key)) game_count_skin_stat(game, p, -1, key, (int) value); // iíìïiíi.includes(stat)
     return ks_bool(1);
 }
 static void pl_score_set(KsScript *s, void *native, uint32_t id, KsValue v)
@@ -1368,6 +1370,10 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.targets_players = (unsigned char) opt_bool(s, data, "targPlr");
     d.friendly = (unsigned char) opt_bool(s, data, "friendly");
     d.is_boss = (unsigned char) opt_bool(s, data, "boss"); // AI.spawn isBoss (deob-10.0.3.js:204916)
+    // chKey = isString(challengeKey) ? challengeKey.slice(0, 32) (deob-10.0.4.js:186960); KN slices 32 bytes, not UTF-16
+    // units: challengeKey keeps [a-z0-9] only, so a non-ASCII key differs at most in what the filter drops anyway
+    const KsValue ch_key = ks_obj_get(s, data, "challengeKey");
+    if (ch_key.tag == KS_STR) ks_to_string(s, ch_key, d.ch_key, sizeof(d.ch_key));
     if (is_number(ks_obj_get(s, data, "team"))) d.team = (int) clamp_d(opt_int(s, data, "team", 0), 0, 1000); // || undefined: 0
     d.can_hit = (unsigned char) opt_bool(s, data, "canMelee");
     d.can_shoot = (unsigned char) opt_bool(s, data, "canShoot");
@@ -1443,8 +1449,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     if (opt_truthy(s, data, "projectileSpin", 0, 20, &v)) d.pj_spin = (float) v;
     d.pj_glow = (unsigned char) opt_bool(s, data, "projectileGlow");
     d.explode = (unsigned char) opt_bool(s, data, "projectileExplode");
-    // Not read (no KN behaviour behind them): hideTag (noTag), canContactHit, boss (bossKills challenges), challengeKey,
-    // rewardMethod / rewardNode / rewardReq / reward / rewardChance / rewardUnique (skin drops)
+    // Not read (no KN behaviour behind them): hideTag (noTag), canContactHit
     char name[GAME_AI_NAME_SIZE];
     ks_to_string(s, ARG(1), name, sizeof(name));
     const vec3 pos = {(float) ks_to_float(ARG(2)), (float) ks_to_float(ARG(3)), (float) ks_to_float(ARG(4))};

@@ -15,7 +15,7 @@
 //     then the success popup "Wild Offer Purchased!" / "Awesome!", the skin added, the offer gone
 //     and fetched again without a notification; refresh (iíïìíïí, g:128255): its confirm ("Get a New
 //     Wild Offer!", "Tired of this offer? Refresh!", "Get New Offer!"), then "Wild Offer Refreshed!".
-// KrunkNative: KR (virtual) offers only (no payments: v10's real-money ones go to showPurchase);
+// A real-money offer (price_type "real") on krunker.io goes to the payment provider's checkout (kio_checkout.c);
 // the Store's shop front holds only the wild offer (v10's other shop displays come from its shop
 // API: KrunkNative has none), on the Eterno Shop tab above its empty state.
 #include <v10_wild_offer.h>
@@ -29,6 +29,7 @@
 #include <html_ui.h>
 #include <ks_game.h> // ks_wall_ms
 #include <kio_store.h> // krunker.io's shop/wild-offer routes (kio_store_write), when krunker.io is the active account
+#include <kio_checkout.h> // a real-money offer's checkout (showPurchase("wildoffer:" + id))
 #include "../viewer/viewer_store.h"
 #include <math.h>
 #include <stdio.h>
@@ -537,11 +538,22 @@ int v10_wild_offer_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
         return 1;
     }
     if (!strcmp(name, "knWoView")) item_view();
+    else if (!strcmp(name, "knWoBuy") && !W.purchasing && kio_store_active() && !strcmp(v10_str(W.offer, "price_type"), "real"))
+        kio_checkout_wild_offer(offer_id(W.offer)); // a real-money offer: showPurchase("wildoffer:" + id) (deob-10.0.4.js:129219)
     else if (!strcmp(name, "knWoBuy") && !W.purchasing)
         confirm(CONFIRM_BUY, price_of(W.offer, "price"), "Confirm purchase?", "Are you sure you want to purchase this item?", "Buy");
     else if (!strcmp(name, "knWoRefresh") && !W.refreshing)
         confirm(CONFIRM_REFRESH, v10_num(W.offer, "refresh_cost", 300), "Get a New Wild Offer!", "Tired of this offer? Refresh!", "Get New Offer!");
     return 1;
+}
+
+// A real-money offer paid through the checkout (kio_checkout.c, "ppr" for "wildoffer:<id>", deob-10.0.4.js:212241): the
+// offer is spent, as after "wob": gone, and the next one fetched without a notification
+void v10_wild_offer_purchased(void) {
+    dismiss_notification();
+    set_offer(NULL);
+    ask(0);
+    rerender();
 }
 
 // --render-scenario state.wildOffer: {offer: {...}, now: epoch ms, notify: bool, view: bool} (the brain's "wo" reply)

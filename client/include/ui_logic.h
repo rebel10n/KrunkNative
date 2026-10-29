@@ -696,6 +696,7 @@ void ui_loadout_select_stat(int index);         // selectStat
 void ui_loadout_skin_selector(int weapon, int secondary); // skinSelector
 void ui_loadout_select_skin(int index, int weapon); // selectSkin
 const cJSON *ui_loadout_skin_json(int index);        // the store item's JSON (skins.json), NULL when unknown
+int ui_loadout_wears(int index);                     // a cosmetic slot or a weapon's saved skin is this store index
 void ui_loadout_owned_changed(void);                 // the owned list changed: the open skin / item choosers list it again
 void ui_loadout_action(int action);              // windows[2].action
 void ui_loadout_tick(void);                      // the open picker's virtual card grid follows the scroll (ui_vgrid.h)

@@ -5,6 +5,7 @@
 #include <gltf.h>
 #include "viewer/viewer_store.h"
 #include <cosmetics.h> // cosmetic_asset_path: a custom skin's user-asset keys
+#include <cJSON.h>     // customShaderInfo (ViewerSkin.shader_info)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -298,18 +299,55 @@ static void shadertoy_update_uniforms(Material *base) {
 static const MaterialVTable shadertoy_material_vtable = {shadertoy_update_uniforms};
 
 // ---------------------------------------------------------------- v10 "custom" skin shaders
-// v10's custom entries (type "custom", deob-10.0.4.js:196092-196150; their TSL builds :91682-93011) work on the mesh's
-// local position, normal and view direction rather than a ShaderToy canvas. The ported ones are GLSL files:
-// assets/shaders/skin_custom.vert + assets/shaders/skin_custom/<n>.frag. Not ported (8-16): the item keeps its material.
+// v10's custom entries (type "custom", deob-10.0.4.js:195962-196150; their TSL twins :92213-93011) are ported as GLSL files:
+// assets/shaders/skin_custom.vert + assets/shaders/skin_custom/<n>.frag (8-17). A skin draws one only through its
+// customShaderInfo (getMat, :203447-203475: a custom shader with no customShaderInfo keeps the item's own material): "*" or
+// the entry whose shaderNum is the skin's on an OBJ item, per part (the glTF node name, "*" / applyToAll = every mesh) on a
+// model (:204930-204986). Each material is the bundle's custom-shader class (:156038-156076: transparent, DoubleSide, normal
+// blending, no fog) with its build's overrides, its uniforms (the shader's defaults or the named preset of
+// shaderArgs.uniforms, then an object shaderArgs.uniforms over them, :156052) and the part's matArgs (side / transparent /
+// depthWrite, :204969-204983).
+#define SKIN_FX_CUSTOM_FIRST 8
+#define SKIN_FX_CUSTOM_LAST 17
 #define SKIN_FX_CUSTOM_MAX 32
-static const int k_custom_ported[] = {17}; // Hollowmere Night (v10.0.4)
+#define SKIN_FX_CUSTOM_UNIFORMS 12
+#define SKIN_FX_SKYLINE_MAX 48 // 17.frag KN_SKYLINE_MAX
+#define SKIN_FX_SHOCK_SECONDS 0.75 // shader 14's pulse, sin(min(t / 0.75, 1) * PI) (deob-10.0.4.js:92705-92711)
+#define SKIN_FX_SHOCK_ARCS 4        // shader 14 keeps four arcs, one per shot (deob-10.0.4.js:92686-92688)
+
+typedef struct {
+    char name[24];
+    int count; // 1-4 floats
+    float v[4];
+    GlUniform handle;
+} CustomUniform;
+
+typedef struct {
+    ShaderToyMaterial st; // base / shader / double_sided (the ShaderToy fields, so skin_fx_tick's casts stay valid)
+    int cull_back;        // side 0 (FrontSide)
+    int depth_write;
+    int displace;                     // skin_custom.vert uDisplace: 1 shader 9 with uWobble, 2 shader 10 with uWarp
+    int seeded;                       // shader 15 (seeded, deob-10.0.4.js:92858)
+    float seed;                       // args.seed: skin_fx_seed_mix of the copy's seed, 0 none
+    int shot_pulse;                   // shader 14 (shotPulse, deob-10.0.4.js:92676)
+    int pulse_pending;                // a shot since the last draw (the bundle's uShock >= 1, :92695)
+    int arcs_active;                  // an arc played at the last draw (the bundle's iIîîiîî, :92692)
+    double arc_clock;                 // gltf_clock() of the last draw
+    float arc_age[SKIN_FX_SHOCK_ARCS];   // seconds since the arc's shot, < 0 free (:92688)
+    float arc_time[SKIN_FX_SHOCK_ARCS];  // the arc's own animation time, random(0..1) at the shot + age (arcs.time, :92686)
+    float arc_shock[SKIN_FX_SHOCK_ARCS]; // sin(min(age / 0.75, 1) * PI) (arcs.shock, :92705-92711)
+    int uniform_count;
+    CustomUniform uniforms[SKIN_FX_CUSTOM_UNIFORMS];
+    int skyline_count; // shader 17's args.skyline (0: its default)
+    float skyline[SKIN_FX_SKYLINE_MAX * 2];
+    float moon[3], scale;
+} CustomMaterial;
+
 static unsigned int g_custom_programs[SKIN_FX_CUSTOM_MAX];
 static unsigned char g_custom_failed[SKIN_FX_CUSTOM_MAX];
 
 static unsigned int fx_custom_program(const int n) {
-    int ported = 0;
-    for (size_t i = 0; i < sizeof(k_custom_ported) / sizeof(k_custom_ported[0]); i++) ported |= k_custom_ported[i] == n;
-    if (!ported || n < 0 || n >= SKIN_FX_CUSTOM_MAX || g_custom_failed[n]) return 0;
+    if (n < SKIN_FX_CUSTOM_FIRST || n > SKIN_FX_CUSTOM_LAST || g_custom_failed[n]) return 0;
     if (g_custom_programs[n]) return g_custom_programs[n];
     char rel[64];
     snprintf(rel, sizeof(rel), "shaders/skin_custom/%d.frag", n);
@@ -347,32 +385,370 @@ static unsigned int fx_custom_program(const int n) {
     return program;
 }
 
-static GlUniform u_custom_time = GL_UNIFORM_INIT("uTime");
+static CustomUniform *custom_uniform(CustomMaterial *m, const char *name) {
+    for (int i = 0; i < m->uniform_count; i++)
+        if (!strcmp(m->uniforms[i].name, name)) return &m->uniforms[i];
+    if (m->uniform_count >= SKIN_FX_CUSTOM_UNIFORMS || strlen(name) >= sizeof(m->uniforms[0].name)) return NULL;
+    CustomUniform *u = &m->uniforms[m->uniform_count++];
+    memset(u, 0, sizeof(*u));
+    snprintf(u->name, sizeof(u->name), "%s", name);
+    return u;
+}
+
+static void custom_set(CustomMaterial *m, const char *name, const int count, const float a, const float b, const float c) {
+    CustomUniform *u = custom_uniform(m, name);
+    if (!u) return;
+    u->count = count;
+    u->v[0] = a;
+    u->v[1] = b;
+    u->v[2] = c;
+}
+
+static void custom_set_hex(CustomMaterial *m, const char *name, const int hex) {
+    custom_set(m, name, 3, (float) ((hex >> 16) & 255) / 255.0f, (float) ((hex >> 8) & 255) / 255.0f, (float) (hex & 255) / 255.0f);
+}
+
+// The shader's uniforms (the table's `uniforms`, a preset name for 9 / 10, deob-10.0.4.js:195971-196100)
+static void custom_defaults(CustomMaterial *m, const int n, const char *preset) {
+    const int is = preset != NULL;
+    switch (n) {
+    case 9: // GasFresnal: "main" / "blackhole" (deob-10.0.4.js:92257-92316; no preset: no uniforms, the shader's zeros)
+        if (is && !strcmp(preset, "main")) {
+            custom_set_hex(m, "uBase", 0x1d0033);
+            custom_set_hex(m, "uAccent", 0x5b5cc2);
+            custom_set(m, "uScale", 1, 500.0f, 0, 0);
+            custom_set(m, "uPower", 1, 1.0f, 0, 0);
+            custom_set(m, "uWobble", 1, 1.0f, 0, 0);
+            custom_set(m, "uStars", 1, 1.0f, 0, 0);
+        } else if (is && !strcmp(preset, "blackhole")) {
+            custom_set_hex(m, "uBase", 0x2b0025);
+            custom_set_hex(m, "uAccent", 0xd926d9);
+            custom_set(m, "uScale", 1, 200.0f, 0, 0);
+            custom_set(m, "uPower", 1, 0.8f, 0, 0);
+            custom_set(m, "uWobble", 1, 0.0f, 0, 0);
+            custom_set(m, "uStars", 1, 0.0f, 0, 0);
+        }
+        break;
+    case 10: // AngelSheel: main / accent / melee_main / melee_accent = (uDisplacement, uWarp), uScale 1000 (:92375-92394)
+        if (is) {
+            const int main = !strcmp(preset, "main"), accent = !strcmp(preset, "accent");
+            const int melee_main = !strcmp(preset, "melee_main"), melee_accent = !strcmp(preset, "melee_accent");
+            if (main || accent || melee_main || melee_accent) {
+                custom_set(m, "uScale", 1, 1000.0f, 0, 0);
+                custom_set(m, "uDisplacement", 1, main || accent ? 0.15f : 0.02f, 0, 0);
+                custom_set(m, "uWarp", 1, main || melee_main ? 1.0f : 0.0f, 0, 0);
+            }
+        }
+        break;
+    case 11: // the halftone's defaults (uColor only comes from shaderArgs)
+        custom_set_hex(m, "uLightColor", 0xfef8c8);
+        custom_set(m, "uResolution", 2, 1000.0f, 500.0f, 0);
+        custom_set_hex(m, "uShadowColor", 0x9217a4);
+        custom_set(m, "uLightIntensity", 1, 1.0f, 0, 0);
+        custom_set(m, "uLightRepetitions", 1, 100.0f, 0, 0);
+        custom_set(m, "uShadowRepetitions", 1, 100.0f, 0, 0);
+        break;
+    default:
+        break;
+    }
+}
+
+static int custom_hex(const cJSON *v) {
+    if (cJSON_IsNumber(v)) return (int) v->valuedouble;
+    if (cJSON_IsString(v) && v->valuestring[0] == '#') return (int) strtol(v->valuestring + 1, NULL, 16);
+    return -1;
+}
+
+// An object shaderArgs.uniforms over the defaults (iìîïïîî, deob-10.0.4.js:95760-95775: color, vec2-4, bool, number)
+static void custom_uniforms_object(CustomMaterial *m, const cJSON *uniforms) {
+    const cJSON *u;
+    cJSON_ArrayForEach(u, uniforms) {
+        const cJSON *value = cJSON_IsObject(u) && cJSON_GetObjectItem(u, "value") ? cJSON_GetObjectItem(u, "value") : u;
+        const cJSON *type = cJSON_IsObject(u) ? cJSON_GetObjectItem(u, "type") : NULL;
+        if (cJSON_IsString(type) && !strcmp(type->valuestring, "color")) {
+            const int hex = custom_hex(value);
+            if (hex >= 0) custom_set_hex(m, u->string, hex);
+        } else if (cJSON_IsArray(value)) {
+            float f[3] = {0, 0, 0};
+            const int count = cJSON_GetArraySize(value) < 3 ? cJSON_GetArraySize(value) : 3;
+            for (int i = 0; i < count; i++) f[i] = (float) cJSON_GetArrayItem(value, i)->valuedouble;
+            if (count >= 2) custom_set(m, u->string, count, f[0], f[1], f[2]);
+        } else if (cJSON_IsBool(value)) {
+            custom_set(m, u->string, 1, cJSON_IsTrue(value) ? 1.0f : 0.0f, 0, 0);
+        } else if (cJSON_IsNumber(value)) {
+            custom_set(m, u->string, 1, (float) value->valuedouble, 0, 0);
+        }
+    }
+}
+
+// shader 17's args (deob-10.0.4.js:92963-92979): skyline points, moon (x, y, radius), scale; else the build's defaults
+static void custom_hollowmere_args(CustomMaterial *m, const cJSON *args) {
+    static const float k_skyline[] = {-4.95f, -1.0f, -2.35f, -0.38f, -2.35f, -0.4f, 0.75f, -0.4f, 0.75f, -0.36f, 2.5f, -0.36f, 2.5f, -0.16f};
+    const cJSON *skyline = cJSON_GetObjectItem(args, "skyline"), *moon = cJSON_GetObjectItem(args, "moon"), *scale = cJSON_GetObjectItem(args, "scale");
+    m->skyline_count = 0;
+    if (cJSON_IsArray(skyline) && cJSON_GetArraySize(skyline) >= 2) {
+        const cJSON *pt;
+        cJSON_ArrayForEach(pt, skyline) {
+            if (m->skyline_count >= SKIN_FX_SKYLINE_MAX || !cJSON_IsArray(pt) || cJSON_GetArraySize(pt) < 2) continue;
+            m->skyline[m->skyline_count * 2] = (float) cJSON_GetArrayItem(pt, 0)->valuedouble;
+            m->skyline[m->skyline_count * 2 + 1] = (float) cJSON_GetArrayItem(pt, 1)->valuedouble;
+            m->skyline_count++;
+        }
+    }
+    if (m->skyline_count < 2) {
+        m->skyline_count = (int) (sizeof(k_skyline) / sizeof(k_skyline[0]) / 2);
+        memcpy(m->skyline, k_skyline, sizeof(k_skyline));
+    }
+    m->moon[0] = -3.75f;
+    m->moon[1] = -0.12f;
+    m->moon[2] = 0.24f;
+    for (int i = 0; cJSON_IsArray(moon) && i < 3 && i < cJSON_GetArraySize(moon); i++) m->moon[i] = (float) cJSON_GetArrayItem(moon, i)->valuedouble;
+    m->scale = cJSON_IsNumber(scale) && scale->valuedouble > 0.0 ? (float) scale->valuedouble : 0.001f;
+}
+
+static GlUniform u_custom_skyline = GL_UNIFORM_INIT("uSkyline");
+static GlUniform u_custom_skyline_count = GL_UNIFORM_INIT("uSkylineCount");
+static GlUniform u_custom_moon = GL_UNIFORM_INIT("uMoon");
+static GlUniform u_custom_scale = GL_UNIFORM_INIT("uScale");
+static GlUniform u_custom_arc_time = GL_UNIFORM_INIT("uArcTime");
+static GlUniform u_custom_arc_shock = GL_UNIFORM_INIT("uArcShock");
+static GlUniform u_custom_time = GL_UNIFORM_INIT("time");
+static GlUniform u_custom_displace = GL_UNIFORM_INIT("uDisplace");
+static GlUniform u_custom_seed = GL_UNIFORM_INIT("uSeed");
+static GlUniform u_custom_utime = GL_UNIFORM_INIT("uTime");
+
+// shader 14's arcs (onObjectUpdate, deob-10.0.4.js:92689-92717): a shot takes a free arc (else the oldest) with a random
+// start time; each draw advances every playing arc by the time since the last draw (0 when none played then), its shock
+// following sin(min(age / 0.75, 1) * PI) until 0.75 s.
+static void custom_arcs_step(CustomMaterial *m, const double now) {
+    const float dt = m->arcs_active ? (float) (now - m->arc_clock) : 0.0f;
+    m->arc_clock = now;
+    if (m->pulse_pending) {
+        m->pulse_pending = 0;
+        int slot = -1;
+        for (int i = 0; i < SKIN_FX_SHOCK_ARCS && slot < 0; i++)
+            if (m->arc_age[i] < 0.0f) slot = i;
+        if (slot < 0) {
+            slot = 0;
+            for (int i = 1; i < SKIN_FX_SHOCK_ARCS; i++)
+                if (m->arc_age[i] > m->arc_age[slot]) slot = i;
+        }
+        m->arc_age[slot] = 0.0f;
+        m->arc_time[slot] = (float) rand() / (float) RAND_MAX;
+    }
+    int active = 0;
+    for (int i = 0; i < SKIN_FX_SHOCK_ARCS; i++) {
+        if (m->arc_age[i] < 0.0f) continue;
+        m->arc_age[i] += dt;
+        m->arc_time[i] += dt;
+        const float k = m->arc_age[i] / (float) SKIN_FX_SHOCK_SECONDS < 1.0f ? m->arc_age[i] / (float) SKIN_FX_SHOCK_SECONDS : 1.0f;
+        m->arc_shock[i] = (float) sin(k * 3.14159265358979);
+        if (k >= 1.0f) {
+            m->arc_age[i] = -1.0f;
+            m->arc_shock[i] = 0.0f;
+        } else {
+            active = 1;
+        }
+    }
+    m->arcs_active = active;
+}
 
 static void custom_update_uniforms(Material *base) {
-    ShaderToyMaterial *material = (ShaderToyMaterial *) base;
-    scene_draw_state(!material->double_sided, 0, 1); // side 0 (FrontSide), opaque (:93007-93010)
-    const double now = gltf_clock(); // the material clock, as the ShaderToy ones
+    CustomMaterial *m = (CustomMaterial *) base;
+    const unsigned int program = m->st.base.program;
+    scene_draw_state(m->cull_back, 0, m->depth_write);
+    const double now = gltf_clock(); // the material clock, as the ShaderToy ones (the TSL `time`)
     if (g_shader_clock_start < 0.0) g_shader_clock_start = now;
-    gl_uniform_1f(&u_custom_time, material->base.program, (float) (now - g_shader_clock_start));
+    const float t = (float) (now - g_shader_clock_start);
+    gl_uniform_1f(&u_custom_time, program, t);
+    gl_uniform_1f(&u_custom_utime, program, t);
+    gl_uniform_1i(&u_custom_displace, program, m->displace);
+    if (m->seeded) gl_uniform_1f(&u_custom_seed, program, m->seed);
+    for (int i = 0; i < m->uniform_count; i++) {
+        CustomUniform *u = &m->uniforms[i];
+        u->handle.name = u->name;
+        if (u->count == 1) gl_uniform_1f(&u->handle, program, u->v[0]);
+        else if (u->count == 2) gl_uniform_2f(&u->handle, program, u->v[0], u->v[1]);
+        else gl_uniform_3f(&u->handle, program, u->v[0], u->v[1], u->v[2]);
+    }
+    if (m->st.shader == 17) {
+        const int at = gl_uniform_location(&u_custom_skyline, program);
+        if (at >= 0) glUniform2fv(at, m->skyline_count, m->skyline); // per material (8074 / 8075 differ): no value cache
+        gl_uniform_1i(&u_custom_skyline_count, program, m->skyline_count);
+        gl_uniform_3f(&u_custom_moon, program, m->moon[0], m->moon[1], m->moon[2]);
+        gl_uniform_1f(&u_custom_scale, program, m->scale);
+    }
+    if (m->shot_pulse) {
+        custom_arcs_step(m, now);
+        int at = gl_uniform_location(&u_custom_arc_time, program);
+        if (at >= 0) glUniform1fv(at, SKIN_FX_SHOCK_ARCS, m->arc_time); // per material: no value cache
+        at = gl_uniform_location(&u_custom_arc_shock, program);
+        if (at >= 0) glUniform1fv(at, SKIN_FX_SHOCK_ARCS, m->arc_shock);
+    }
 }
 
 static const MaterialVTable custom_material_vtable = {custom_update_uniforms};
 
-// getMat: shaderNum != null && shaders[shaderNum]: a ShaderToyMaterial instead of the item's own
+// A custom-shader material for shader n with this customShaderInfo entry (its shaderArgs / matArgs), or NULL
+static CustomMaterial *custom_material(const int n, const cJSON *entry) {
+    const unsigned int program = fx_custom_program(n);
+    if (!program) return NULL;
+    CustomMaterial *m = calloc(1, sizeof(CustomMaterial));
+    if (!m) return NULL;
+    m->st.base.vtable = &custom_material_vtable;
+    m->st.base.program = program;
+    m->st.shader = n;
+    // the class (deob-10.0.4.js:156044-156049): transparent, DoubleSide; the builds' overrides (:92846-92848, :92920-92921,
+    // :92956, :93006-93007): 14 side 0, 15 side 0 opaque, 16 opaque, 17 side 0 opaque
+    m->st.base.transparent = !(n == 15 || n == 16 || n == 17);
+    m->cull_back = n == 14 || n == 15 || n == 17;
+    m->depth_write = 1;
+    m->shot_pulse = n == 14;
+    m->seeded = n == 15;
+    for (int i = 0; i < SKIN_FX_SHOCK_ARCS; i++) m->arc_age[i] = -1.0f;
+    const cJSON *args = cJSON_GetObjectItem(entry, "shaderArgs");
+    const cJSON *uniforms = cJSON_GetObjectItem(args, "uniforms");
+    custom_defaults(m, n, cJSON_IsString(uniforms) ? uniforms->valuestring : NULL);
+    if (cJSON_IsObject(uniforms)) custom_uniforms_object(m, uniforms);
+    if (n == 17) custom_hollowmere_args(m, args);
+    // the positionNode of 9 / 10 (deob-10.0.4.js:92332-92337, :92402-92407): select(uWobble / uWarp, displaced, positionLocal)
+    const CustomUniform *wobble = NULL;
+    for (int i = 0; i < m->uniform_count; i++)
+        if (!strcmp(m->uniforms[i].name, n == 9 ? "uWobble" : "uWarp")) wobble = &m->uniforms[i];
+    m->displace = (n == 9 || n == 10) && wobble && wobble->v[0] > 0.5f ? (n == 9 ? 1 : 2) : 0;
+    const cJSON *mat = cJSON_GetObjectItem(entry, "matArgs");
+    const cJSON *side = cJSON_GetObjectItem(mat, "side"), *transparent = cJSON_GetObjectItem(mat, "transparent"), *depth = cJSON_GetObjectItem(mat, "depthWrite");
+    if (cJSON_IsNumber(side)) m->cull_back = side->valueint == 0;
+    if (cJSON_IsBool(transparent)) m->st.base.transparent = cJSON_IsTrue(transparent);
+    if (cJSON_IsBool(depth)) m->depth_write = cJSON_IsTrue(depth);
+    return m;
+}
+
+// applyToAll (the table's, deob-10.0.4.js:196115 / :196135): 13 and 15 go on every mesh of the model
+static int custom_apply_to_all(const int n) { return n == 13 || n == 15; }
+
+// The customShaderInfo entry for an OBJ item: "*", else the one whose shaderNum is the skin's (deob-10.0.4.js:203459-203461)
+static const cJSON *custom_entry(const cJSON *info, const int shader_num) {
+    const cJSON *star = cJSON_GetObjectItem(info, "*");
+    if (cJSON_IsObject(star)) return star;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, info) {
+        const cJSON *num = cJSON_GetObjectItem(e, "shaderNum");
+        if (cJSON_IsNumber(num) && num->valueint == shader_num) return e;
+    }
+    return NULL;
+}
+
+static void custom_replace(Mesh *mesh, CustomMaterial *m) {
+    skin_fx_forget(mesh);
+    material_fini(mesh->material);
+    mesh->material = (Material *) m;
+}
+
+// getMat: shaderNum != null && shaders[shaderNum]: a ShaderToyMaterial instead of the item's own (0-7); a custom shader
+// (8-17) only with the skin's customShaderInfo
 static void fx_use_shadertoy(Mesh *mesh, const ViewerSkin *skin) {
-    const unsigned int custom = skin->shader_num >= SKIN_FX_SHADER_COUNT ? fx_custom_program(skin->shader_num) : 0;
-    const unsigned int program = custom ? custom : fx_shader_program(skin->shader_num);
+    if (skin->shader_num >= SKIN_FX_CUSTOM_FIRST) {
+        cJSON *info = skin->shader_info ? cJSON_Parse(skin->shader_info) : NULL;
+        const cJSON *entry = info ? custom_entry(info, skin->shader_num) : NULL;
+        CustomMaterial *m = entry ? custom_material(skin->shader_num, entry) : NULL;
+        cJSON_Delete(info);
+        if (!m) return;
+        custom_replace(mesh, m);
+        return;
+    }
+    const unsigned int program = fx_shader_program(skin->shader_num);
     if (!program) return;
     ShaderToyMaterial *material = calloc(1, sizeof(ShaderToyMaterial));
     if (!material) return;
-    material->base.vtable = custom ? &custom_material_vtable : &shadertoy_material_vtable;
+    material->base.vtable = &shadertoy_material_vtable;
     material->base.program = program;
-    material->base.transparent = custom ? 0 : mesh->material ? mesh->material->transparent : 0;
+    material->base.transparent = mesh->material ? mesh->material->transparent : 0;
     material->shader = skin->shader_num;
-    material->double_sided = custom ? 0 : skin->side == 2;
+    material->double_sided = skin->side == 2;
     material_fini(mesh->material);
     mesh->material = (Material *) material;
+}
+
+// A model's customShaderInfo (deob-10.0.4.js:204930-204986): each part's custom shader on the mesh of that glTF node name
+// ("*" / applyToAll: every mesh), then its matArgs on that mesh
+static void fx_custom_gltf(GltfInstance *model, const ViewerSkin *skin) {
+    cJSON *info = skin->shader_info ? cJSON_Parse(skin->shader_info) : NULL;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, info) {
+        const char *part = entry->string;
+        const cJSON *num = cJSON_GetObjectItem(entry, "shaderNum");
+        const int n = cJSON_IsNumber(num) ? num->valueint : -1;
+        const int all = !strcmp(part, "*") || custom_apply_to_all(n);
+        for (size_t i = 0; i < model->mesh_count; i++) {
+            Mesh *mesh = model->meshes[i];
+            if (!mesh || !mesh->material) continue;
+            const int named = !strcmp(gltf_instance_mesh_name(model, i), part);
+            if (n >= SKIN_FX_CUSTOM_FIRST && (all || named)) {
+                CustomMaterial *m = custom_material(n, entry);
+                if (!m) continue;
+                custom_replace(mesh, m);
+            }
+            // matArgs on the named part's material (its own or the custom one above); refreshTextures re-reads the map,
+            // which KN's per-instance BasicMaterial already holds
+            const cJSON *mat = named ? cJSON_GetObjectItem(entry, "matArgs") : NULL;
+            if (!mat || mesh->material->vtable != &basic_material_vtable) continue;
+            BasicMaterial *basic = (BasicMaterial *) mesh->material;
+            const cJSON *side = cJSON_GetObjectItem(mat, "side"), *transparent = cJSON_GetObjectItem(mat, "transparent"), *depth = cJSON_GetObjectItem(mat, "depthWrite");
+            if (cJSON_IsNumber(side)) basic->double_sided = side->valueint == 2;
+            if (cJSON_IsBool(transparent)) basic->base.transparent = cJSON_IsTrue(transparent);
+            if (cJSON_IsBool(depth)) basic->no_depth_write = !cJSON_IsTrue(depth);
+        }
+    }
+    cJSON_Delete(info);
+}
+
+// pulseShotShaders (deob-10.0.4.js:174911-174919): a shot starts the pulse of every shotPulse material of the weapon
+static void fx_pulse_mesh(const Mesh *mesh, const double now) {
+    if (!mesh || !mesh->material || mesh->material->vtable != &custom_material_vtable) return;
+    CustomMaterial *m = (CustomMaterial *) mesh->material;
+    (void) now;
+    if (m->shot_pulse) m->pulse_pending = 1;
+}
+
+// lowbias32 (iîììììî, deob-10.0.4.js:24336-24343)
+static uint32_t fx_seed_hash(uint32_t x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+int skin_fx_copy_seed(const int copy_id, const int has_meta_seed, const double meta_seed) {
+    if (has_meta_seed) { // (floor(seed) % 1e6 + 1e6) % 1e6
+        const double f = fmod(floor(meta_seed), 1000000.0);
+        return (int) fmod(f + 1000000.0, 1000000.0);
+    }
+    return copy_id ? (int) (fx_seed_hash((uint32_t) copy_id) % 1000000u) : 0;
+}
+
+float skin_fx_seed_mix(const int seed) {
+    return seed ? (float) ((double) fx_seed_hash((uint32_t) seed) / 4294967296.0) : 0.0f;
+}
+
+static void fx_seed_mesh(Mesh *mesh, const float seed) {
+    if (!mesh || !mesh->material || mesh->material->vtable != &custom_material_vtable) return;
+    CustomMaterial *m = (CustomMaterial *) mesh->material;
+    if (m->seeded) m->seed = seed;
+}
+
+void skin_fx_set_seed(struct GltfInstance *model, Mesh *mesh, const int seed) {
+    const float mixed = skin_fx_seed_mix(seed);
+    for (size_t i = 0; model && i < model->mesh_count; i++) fx_seed_mesh(model->meshes[i], mixed);
+    fx_seed_mesh(mesh, mixed);
+}
+
+void skin_fx_shot_pulse(const struct GltfInstance *model, const Mesh *mesh) {
+    const double now = gltf_clock();
+    for (size_t i = 0; model && i < model->mesh_count; i++) fx_pulse_mesh(model->meshes[i], now);
+    fx_pulse_mesh(mesh, now);
 }
 
 // ---------------------------------------------------------------- applying
@@ -481,6 +857,7 @@ void skin_fx_apply(Mesh *mesh, const ViewerSkin *skin, const char *texture_key, 
 
 void skin_fx_apply_gltf(GltfInstance *model, const ViewerSkin *skin, const char *model_key) {
     if (!model || !skin) return;
+    if (skin->shader_info) fx_custom_gltf(model, skin); // first: the effect entries below hold only the BasicMaterials left
     for (size_t i = 0; i < model->mesh_count; i++) {
         Mesh *mesh = model->meshes[i];
         if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) continue;
@@ -509,6 +886,12 @@ void skin_fx_apply_gltf(GltfInstance *model, const ViewerSkin *skin, const char 
 
 void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     if (!mesh || !dye || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
+    // the body parts' getMat takes the dye's shaderNum and customShaderInfo (deob-10.0.4.js:173555-173556): a custom
+    // shader (the Ghillie Suit's 16) replaces the part's material
+    if ((dye->flags2 & VS2_SHADER) && dye->shader_num >= SKIN_FX_CUSTOM_FIRST && dye->shader_info) {
+        fx_use_shadertoy(mesh, dye);
+        if (mesh->material->vtable != &basic_material_vtable) return;
+    }
     BasicMaterial *material = (BasicMaterial *) mesh->material;
     // video (skin_video.h): the body part's map is the video (getMat "/videos/video_<n>", deob-10.0.3.js:232046-232048);
     // no tFilter there, so NearestFilter unless projection keeps the VideoTexture's LinearFilter (deob:231863-231866).

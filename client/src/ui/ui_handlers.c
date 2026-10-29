@@ -2,8 +2,8 @@
 // markup of Krunker v7.1.4 (ui/windows), with the bodies v7's src/index.js gives them, plus
 // the KrunkNative-only names C writes (knRetry, knHostOffline, knDialog, knClient*). Names
 // owned by one module (settings, controls, loadout, HUD, account, store, servers, ranked,
-// clans) are answered by that module's *_handle() through h_fallback. Analytics / ad /
-// payment hooks (logBtnFRVR, XsollaPopup, ...) are no-ops. Also installs the non-inline
+// clans) are answered by that module's *_handle() through h_fallback. Analytics / ad hooks
+// (logBtnFRVR, ...) are no-ops; the payment ones are kio_checkout.c's. Also installs the non-inline
 // listeners (setupDom's addEventListener calls).
 #include <v10_menu.h>
 #include "klog.h"
@@ -12,6 +12,7 @@
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
 #include <v10_wallet.h> // v10 Wallet and Inventory (v10_wallet.c)
+#include <v10_bulk.h>   // the bulk market overlays (v10_bulk.c)
 #include <seek_prefs.h> // seek_prefs_handle
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
@@ -25,6 +26,7 @@
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
+#include <kio_checkout.h> // XsollaPopup / purchaseCancel: the real-money checkout (kio_checkout.c)
 #include <alt_manager_ui.h> // the saved accounts window (alt_manager_ui.c)
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
@@ -456,11 +458,11 @@ H(h_set_spect) {
     menu_update_instructions();
     return 1;
 }
-// purchaseCancel(): closePurchaseSelector()
-H(h_purchase_cancel) {
-    UNUSED;
-    HtmlElem el = html_dom_by_id("purchaseHolder");
-    if (el) html_dom_set_display(el, "none");
+// XsollaPopup(a, b) / purchaseCancel(): the purchase selector's (kio_checkout.c: krunker.io's real-money checkout; Box
+// Office: XsollaPopup does nothing and purchaseCancel closes the selector)
+H(h_checkout) {
+    (void) user;
+    kio_checkout_handle(html_ui_current_handler(), ev, args, argc);
     return 1;
 }
 // window.canShowExternalLinks (`canShowExternalLinks ? openTab(terms) : showWindow(47)`):
@@ -490,11 +492,11 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"SOUND.play", ui_sound_play},
     // analytics, ads, payments, FTUE: nothing in KrunkNative
     {"logBtnFRVR", h_noop},
-    {"XsollaPopup", h_noop},
+    {"XsollaPopup", h_checkout},
     {"dropsPopup", h_noop},
     {"abTestsPopup", h_noop}, // its footer link is dropped by tools/ui-import (index_page.py)
     {"expertMode", h_noop},
-    {"purchaseCancel", h_purchase_cancel},
+    {"purchaseCancel", h_checkout},
     // v7 menu chrome
     {"closWind", h_close_wind},
     {"showGames", h_show_games},
@@ -617,6 +619,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_daily_spin_handle,     // v10_daily_spin.c: the sidebar's Daily Spin
     v10_wild_offer_handle,     // v10_wild_offer.c: v10 Wild Offers (knWo*)
     v10_wallet_handle,         // v10_wallet.c: v10 Wallet and Inventory (knV10Wallet*)
+    v10_bulk_handle,           // v10_bulk.c: bulk quick-sell, List Items, Buy Multiple (knV10Bulk*)
     paint_picker_handle,       // paint_picker.c: the owned card's paint popup (paintOpen, paintPick, paintApply)
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen

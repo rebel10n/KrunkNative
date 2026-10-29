@@ -122,6 +122,17 @@ const rows = store.skins.map((s, i) => {
   if (typeof s.inspS === 'string' && s.inspS) fields.push(`.insp_s = ${cstr(s.inspS)}`);
   if (typeof s.swapSnd === 'string' && s.swapSnd) fields.push(`.swap_snd = ${cstr(s.swapSnd)}`);
   if (num(s.swapSndVol, 0)) fields.push(`.swap_snd_vol = ${f(num(s.swapSndVol, 0))}`);
+  // v10.0.4 customShaderInfo (getMat / the per-part apply, deob-10.0.4.js:203447-203475, :204930-204986), kept as JSON
+  if (s.customShaderInfo && typeof s.customShaderInfo === 'object') fields.push(`.shader_info = ${cstr(JSON.stringify(s.customShaderInfo))}`);
+  // v10.0.4 attach type 1: the stat counter on the weapon (deob-10.0.4.js:172728-172740, digits :204425-204500)
+  if (s.attach && s.attach.type === 1) {
+    const a = s.attach, rot = Array.isArray(a.rot) ? a.rot : [0, 0, 0];
+    const col = typeof a.color === 'string' && /^#[0-9a-f]{6}$/i.test(a.color) ? '0x' + a.color.slice(1) : '-1';
+    fields.push(`.counter_digits = ${num(a.digits, 1) | 0}`, `.counter_pos = {${f(num(a.x, 0))}, ${f(num(a.y, 0))}, ${f(num(a.z, 0))}}`,
+      `.counter_rot = {${f(num(rot[0], 0))}, ${f(num(rot[1], 0))}, ${f(num(rot[2], 0))}}`, `.counter_scl = ${f(num(a.scl, 1))}`,
+      `.counter_color = ${col}`);
+    if (typeof a.stat === 'string' && a.stat) fields.push(`.counter_stat = ${cstr(a.stat)}`);
+  }
   opt('legLen', 'leg_len', 0); opt('sitOffX', 'sit_off_x', 0); opt('syRot', 'sy_rot', 0); opt('szRot', 'sz_rot', 0);
   opt('glowInt', 'glow_int', 0); opt('minGlo', 'min_glo', 0); opt('rgbS', 'rgb_s', 0); opt('rgbT', 'rgb_t', 0);
   opt('rAnimT', 'r_anim_t', 0); opt('rAnimM', 'r_anim_m', 0); opt('movD', 'mov_d', 0); opt('movE', 'mov_e', 0);

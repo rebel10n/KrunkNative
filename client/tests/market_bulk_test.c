@@ -228,7 +228,63 @@ static void test_buy_multiple_and_errors(void) {
     CHECK(market_error_key(NULL) == NULL, "no code, no key");
 }
 
+// the wallet's Keep options (deob-10.0.4.js:108967-108975, :147289-147306) and the picks' keep counts
+static void test_keep(void) {
+    cJSON *meta = cJSON_Parse("{\"wear\":0.05,\"serial\":12}");
+    MarketCopyMeta m = market_copy_meta(meta);
+    CHECK(m.wear == 0.05 && m.serial == 12 && !m.custom, "wear and serial read, not customized");
+    cJSON_Delete(meta);
+    meta = cJSON_Parse("{\"wear\":0.5,\"paint\":\"#ff0000\"}");
+    m = market_copy_meta(meta);
+    CHECK(m.custom && m.serial == 0, "a paint customizes the copy");
+    cJSON_Delete(meta);
+    const MarketCopyMeta none = market_copy_meta(NULL);
+    CHECK(none.wear < 0 && none.serial == 0 && !none.custom, "no metadata: no wear, no serial");
+
+    const MarketKeep k = MARKET_KEEP_DEFAULTS;
+    const MarketCopyMeta painted = {0.5, 0, 1}, low_serial = {0.5, 40, 0}, good_wear = {0.05, 0, 0}, plain = {0.5, 0, 0};
+    CHECK(market_keep_reason(&k, 1, 1, 0, 0, 0, 0, NULL) == MARKET_KEEP_STACK, "a krunker.io stackable row: stack");
+    CHECK(market_keep_reason(&k, 0, 0, 0, 0, 0, 0, &plain) == MARKET_KEEP_UNSELLABLE, "neither quick-sellable nor destroyable");
+    CHECK(market_keep_reason(&k, 0, 1, 1, 1, 1, 0, &plain) == MARKET_KEEP_LISTED, "listed before locked");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 1, 1, 0, &plain) == MARKET_KEEP_LOCKED, "locked before equipped");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 1, 0, &plain) == MARKET_KEEP_EQUIPPED, "equipped kept by default");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 0, 6, &plain) == MARKET_KEEP_NONE, "rarity off by default (-1)");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 0, 0, &painted) == MARKET_KEEP_PAINTED, "painted kept by default");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 0, 0, &low_serial) == MARKET_KEEP_SERIAL, "serial 40 <= 100 kept");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 0, 0, &good_wear) == MARKET_KEEP_WEAR, "wear 0.05 < 0.1 kept");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 0, 0, &plain) == MARKET_KEEP_NONE, "a plain copy can be picked");
+    CHECK(market_keep_reason(&k, 0, 1, 0, 0, 0, 0, NULL) == MARKET_KEEP_NONE, "a Box Office stack unit (no metadata) can be picked");
+    MarketKeep r = k;
+    r.min_rarity = 4;
+    r.equipped = 0;
+    CHECK(market_keep_reason(&r, 0, 1, 0, 0, 1, 5, &plain) == MARKET_KEEP_RARITY, "rarity 5 >= 4 kept, equipped off");
+    CHECK(!strcmp(market_keep_reason_name(MARKET_KEEP_WEAR), "wear") && !market_keep_reason_name(MARKET_KEEP_STACK), "reason names");
+
+    MarketKeep custom = k;
+    custom.per_item_count = 3;
+    custom.wear_max = 0.3;
+    custom.min_rarity = 2;
+    char *json = market_keep_json(&custom);
+    const MarketKeep back = market_keep_parse(json);
+    CHECK(back.per_item_count == 3 && back.wear_max == 0.3 && back.min_rarity == 2 && back.painted, "the options round-trip (%s)", json);
+    free(json);
+    const MarketKeep partial = market_keep_parse("{\"serialMax\":0}");
+    CHECK(partial.serial_max == 0 && partial.per_item_count == 1 && partial.wear_max == 0.1, "a missing field keeps its default");
+    const MarketKeep junk = market_keep_parse("not json");
+    CHECK(junk.per_item && junk.serial_max == 100, "unreadable storage: the defaults");
+
+    MarketPicks picks = {0};
+    market_picks_toggle(&picks, NULL, 5, 5, 1);
+    market_picks_toggle(&picks, NULL, 1000007, 5, 0);
+    market_picks_set_keep(&picks, 0, 2);
+    CHECK(picks.keeps[0] == 2 && picks.keeps[1] == 0, "a stack pick keeps 2 units, a copy none");
+    market_picks_toggle(&picks, NULL, 5, 5, 1); // removed: the copy's keep moves down with it
+    CHECK(picks.n == 1 && picks.skin_ids[0] == 1000007 && picks.keeps[0] == 0, "removing a pick moves the keeps too");
+    market_picks_free(&picks);
+}
+
 int main(void) {
+    test_keep();
     test_locks();
     test_lock_body();
     test_picks();

@@ -2800,6 +2800,16 @@ const ChatCommandInfo *chat_command_find(const char *name) {
 
 // io_ct: `if (safe.startsWith("/"))`: parts = safe.slice(1).split(" "), cmds[parts[0].toLowerCase()].
 // (v3.1.1 HTML-escapes the text first; native chat is escaped by the client that shows it.)
+int chat_command_is_forfeit(const char *text) {
+    if (!text || text[0] != '/') return 0;
+    char name[32];
+    size_t n = 0;
+    for (const char *p = text + 1; *p && *p != ' ' && n + 1 < sizeof(name); p++) name[n++] = (char) tolower((unsigned char) *p);
+    name[n] = 0;
+    const ChatCommand *command = find_command(name);
+    return command && command->run == cmd_ff;
+}
+
 int chat_command_handle(ChatCommandHost *host, const int sender_id, const char *text) {
     if (!host || !host->game || !text || text[0] != '/') return 0;
 

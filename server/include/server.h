@@ -53,6 +53,16 @@ typedef struct {
     WornSkinPaint paint;
 } ServerSkinPaint;
 
+// v10.0.4 counter skins (server/src/skin_counters_server.c): a counter skin the account owns, its copy's stat (m[stat],
+// the counter's base) and what this match counted on it (skinStats, deob-10.0.4.js:175891-175893; saved with the commit)
+#define SERVER_SKIN_COUNTER_MAX 32
+typedef struct {
+    int32_t skin;    // store.skins index
+    int32_t stat;    // index in SKIN_STATS (shared.h)
+    int64_t base;    // the copy's stat when the account was read
+    int64_t pending; // counted since the last commit
+} ServerSkinCounter;
+
 // WP-E part 2c: one challenges.update tally (shared/include/progression.h)
 typedef struct {
     char key[24];              // v7 keys, or a map's own ("Give Challenge Progress" triggers)
@@ -71,6 +81,7 @@ typedef struct {
     unsigned char flags;       // NET_PLAYER_INFO_*
     unsigned char hack:1;      // account.hack: no rewards / stats (game.js)
     unsigned char premium:1;
+    unsigned char chat_banned:1; // account.chat_banned (kn_brain feature_bans 'chat'): no chat lines, the forfeit vote still works
     int funds;
     char guest_id[33];         // NET_EXT_KN_GUEST_ID: the menu's guest id (32 lowercase hex), "" none; its unclaimed rewards
 
@@ -97,6 +108,15 @@ typedef struct {
     // list: the official plain-index rule, doc/v10/paint-copy.md section 6). Sent with the owner's SKINS (V2).
     uint16_t skin_paint_count;
     ServerSkinPaint skin_paints[SERVER_SKIN_PAINT_MAX];
+    // the account's counter skins (accounts_load_skins), counted by the game's skin_stat hook
+    uint16_t skin_counter_count;
+    ServerSkinCounter skin_counters[SERVER_SKIN_COUNTER_MAX];
+    // the seed of the account's copies, one per store index (the first copy of that index with an id or a meta seed:
+    // skin_copy_seed), for the seeded custom shader 15 (deob-10.0.4.js:24344-24353). Sent in NET_EXT_KN_SKIN_COPIES.
+    uint16_t skin_seed_count;
+    struct {
+        int32_t skin, seed;
+    } skin_seeds[SERVER_SKIN_PAINT_MAX];
     int badge;                        // badgeIndex (v7 account stats.bdg, badges.js), -1 none
     // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
     // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value

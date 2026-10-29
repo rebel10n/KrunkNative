@@ -287,6 +287,15 @@ def brain_case(port, version):
     return len(news2)
 
 
+def changelog_tab():
+    """What View All Updates shows (v10_news.c): the updates of kn-versions.txt grouped by their version's first
+    number, the newest major's tab open. Returns (updates in that tab, number of tabs)."""
+    with open(os.path.join(ROOT, "ui", "windows", "kn-versions.txt")) as f:
+        titles = re.findall(r"^\s*== ((?:UPDATE|UPADTE|INITIAL|TRICKSHOT)\b.*?) ==", f.read(), re.M)
+    majors = [int(m.group(0)) for m in (re.search(r"\d+", t) for t in titles) if m]
+    return (majors.count(max(majors)), len(set(majors))) if majors else (0, 0)
+
+
 def client_case(port, user, token, version, news_count):
     text, cfg = client("player", port, SCRIPT.format(shots=WORK), {"krunker_username": user, "krunker_token": token})
     m = vis(text, "menu")
@@ -316,8 +325,9 @@ def client_case(port, user, token, version, news_count):
     check("2: What's New opens windows[34] with the version header", nodes(text, "whatsnew") == 1
           and "handler showWindow(35)" in text, str(nodes(text, "whatsnew")))
     check("2: the brain's news as cards", nodes(text, "news") == news_count, "%d of %d" % (nodes(text, "news"), news_count))
-    check("2: View All Updates: every update, the v1.x tab", nodes(text, "all") == 3 and nodes(text, "tabs") == 1,
-          "%d %d" % (nodes(text, "all"), nodes(text, "tabs")))
+    shown, tabs = changelog_tab()
+    check("2: View All Updates: the newest major's updates, one tab per major (kn-versions.txt: %d, %d)" % (shown, tabs),
+          nodes(text, "all") == shown and nodes(text, "tabs") == tabs, "%d %d" % (nodes(text, "all"), nodes(text, "tabs")))
     check("2: ... and the What's New item is gone", vis(text, "adgone").get("updateAd") == "0", str(vis(text, "adgone")))
     seen = read_log(os.path.join(cfg, "krunknative", "lastViewedUpdate.json"))
     check("2: lastViewedUpdate saved", seen == version, repr(seen))

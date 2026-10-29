@@ -94,6 +94,8 @@ int db_add_funds_ex(Dbx *x, int64_t id, int64_t amount, const char *source, cons
                     int64_t counterparty, int64_t fee, int64_t *funds);
 /* kn_account_json (NULL when the account does not exist) */
 cJSON *db_account_json(Dbx *x, int64_t id);
+/* PostgreSQL: what C adds to an account its SQL functions built (the owned list, life extras, chat_banned) */
+void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v);
 /* the owned list (data[10]): unpainted units per skin, then one row per painted copy (doc/v10/paint-copy.md) */
 cJSON *db_owned_skins(Dbx *x, int64_t id);
 /* kn_account_id(name): 0 when unknown */
@@ -120,7 +122,7 @@ extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS
     P_KPD_DEMOS, P_KPD_REVIEWERS;
 
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
-extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_MARKET_ITEM, P_TRADE_PAGE,
+extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_QUICK_SELL_BULK, P_MARKET_LIST_BULK, P_ITEM_LOCKS, P_ITEM_LOCK, P_MARKET_ITEM, P_TRADE_PAGE,
     P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
     P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT;
 /* the live trade of Trade mode (db_economy.c, 0357_live_trades; doc/v10/trade.md): the game server's window and settle */

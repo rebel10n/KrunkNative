@@ -4,6 +4,7 @@
 // in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <prop_hunt.h> // Prop Hunt: "prp" / "prpR", the prop after a SPAWN
 #include <server_live_events.h> // v10.0.3 live events: the egg hunt hook
+#include <server_skin_counters.h> // v10.0.4 counter skins: countSkinStat, the SKINS' counter bases
 #include <stalker.h>   // Stalker: "stlkrt", the hidden stalker out of the state stream
 #include <player_anim.h> // the "uai" of a spawn's onPlayerSpawn after its SPAWN
 #include <server.h>
@@ -914,8 +915,10 @@ static void net_send_skins(ClientConnection *client, const Player *player) {
         return;
     }
     NetSkinsPacketV2 skins = {.uid = player->uid, .skins = player->skins};
-    accounts_skin_paints(net_client_of_player(player), &player->skins, &skins.paints);
+    const ClientConnection *owner = net_client_of_player(player);
+    accounts_skin_paints(owner, &player->skins, &skins.paints);
     net_send_packet(client->fd, NET_PACKET_SKINS, &skins, NET_SKINS_PACKET_V2_SIZE);
+    skin_counters_send(client, owner, player); // v10.0.4: each worn counter skin's stat (generateMeshes' counter base)
 }
 
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
@@ -1729,6 +1732,14 @@ static int net_handle_chat(ClientConnection *client, const char *payload, const 
     char text[NET_CHAT_TEXT_SIZE];
     if (!net_chat_sanitize(text, sizeof(text), payload, length)) return 1;
 
+    // a chat-restricted account (kn_brain's staff chat ban, account.chat_banned) sends no chat lines and runs no
+    // commands, except the forfeit vote: v10.0.4 "Chat-restricted players can now vote to forfeit"
+    if (client->acct.chat_banned && !chat_command_is_forfeit(text)) {
+        server_log("[chat] %s: dropped, chat restricted", client->name);
+        accounts_notice(client, "Your chat is restricted. You can still vote to forfeit with /ff.");
+        return 1;
+    }
+
     if (chat_command_handle(net_chat_host(), client->id, text)) { // "/" commands answer the sender only
         server_log("[cmd] %s: %s", client->name, text);
         return 1;
@@ -2398,6 +2409,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.can_use_skin = net_game_can_use_skin; // players.spray canUseSkin (accounts.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
     server_events_install_game_hooks(&g_server->game); // v10.0.3 egg hunt: foundEventItem (live_events_server.c)
+    skin_counters_install_game_hooks(&g_server->game); // v10.0.4 counter skins: countSkinStat (skin_counters_server.c)
 }
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.

@@ -25,6 +25,13 @@ static double fixed_random(void *user) {
     return fixed_value;
 }
 
+static double g_seq[4];
+static int g_seq_at;
+static double seq_random(void *user) {
+    (void) user;
+    return g_seq[g_seq_at++ & 3];
+}
+
 static int rarity_of_skin(void *user, const int skin) {
     const int *rarities = user;
     return skin >= 0 && skin < 16 ? rarities[skin] : -1;
@@ -94,6 +101,41 @@ int main(void) {
     static const int reward_empty[] = {-3};
     CHECK(raid_pick_drop(reward_empty, 1, all_common, rarity_of_skin, (void *) rarities, fixed_random, NULL) == -1,
           "empty slots drop nothing");
+
+    // a map AI's rew (deob-10.0.4.js:168538, read by parseInt at :193993): "12a" is 12, " 7" is 7, "-3" is 3 empty slots,
+    // "abc" and "" are NaN (left out), "0x1f" is 31 (parseInt without a radix reads hex)
+    int rew[RAID_REWARD_MAX];
+    int n = raid_reward_parse_map("12a, 7,-3,abc,,0x1f", rew, RAID_REWARD_MAX);
+    CHECK(n == 4 && rew[0] == 12 && rew[1] == 7 && rew[2] == -3 && rew[3] == 31, "rew as parseInt reads it (%d: %d %d %d %d)", n, rew[0],
+          n > 1 ? rew[1] : 0, n > 2 ? rew[2] : 0, n > 3 ? rew[3] : 0);
+    CHECK(raid_reward_parse_map("", rew, RAID_REWARD_MAX) == 0 && raid_reward_parse_map(NULL, rew, RAID_REWARD_MAX) == 0, "no entries");
+    CHECK(raid_reward_parse_map("1,2,3", rew, 2) == 2, "at most max entries");
+
+    // KrunkScript AI.spawn's reward (:186973-186980): /^\d+$/ entries only, limit(parseInt || 0, 0, 1e6)
+    n = raid_reward_parse_script("5,12a, 7,-3,2000000,0", rew, RAID_REWARD_MAX);
+    CHECK(n == 3 && rew[0] == 5 && rew[1] == 1000000 && rew[2] == 0, "reward keeps /^\\d+$/ entries, limited to 1e6 (%d: %d %d %d)", n,
+          rew[0], n > 1 ? rew[1] : 0, n > 2 ? rew[2] : 0);
+    CHECK(raid_reward_parse_script("x,y", rew, RAID_REWARD_MAX) == 0, "a reward with no digit entry is none");
+
+    // the loop's player test (:183019): bots never; 0 active, 1 active damager, 2 active last hitter; another rewardReq (a
+    // map's unclamped rewr) passes every test
+    CHECK(!raid_reward_eligible(RAID_REQ_ACTIVE, 1, 1, 1, 1), "a bot is never eligible");
+    CHECK(raid_reward_eligible(RAID_REQ_ACTIVE, 0, 1, 0, 0) && !raid_reward_eligible(RAID_REQ_ACTIVE, 0, 0, 1, 1), "0: active");
+    CHECK(raid_reward_eligible(RAID_REQ_DAMAGED, 0, 1, 1, 0) && !raid_reward_eligible(RAID_REQ_DAMAGED, 0, 1, 0, 1) &&
+              !raid_reward_eligible(RAID_REQ_DAMAGED, 0, 0, 1, 0), "1: active and in dmgList");
+    CHECK(raid_reward_eligible(RAID_REQ_LAST_HIT, 0, 1, 0, 1) && !raid_reward_eligible(RAID_REQ_LAST_HIT, 0, 1, 1, 0) &&
+              !raid_reward_eligible(RAID_REQ_LAST_HIT, 0, 0, 0, 1), "2: active and lastHit.doer");
+    CHECK(raid_reward_eligible(5, 0, 0, 0, 0), "rewardReq 5: no test applies (an inactive player passes, as in the bundle)");
+
+    // dropSkin's spread iîïïîïï(3, 8) (:23809): sign(r1 - 0.5) * (floor(r2 * 6) + 3)
+    static const double draws[][3] = {{0.9, 0.0, 3}, {0.9, 0.999, 8}, {0.1, 0.5, -6}, {0.5, 0.7, 0}};
+    for (size_t i = 0; i < sizeof(draws) / sizeof(draws[0]); i++) {
+        g_seq[0] = draws[i][0];
+        g_seq[1] = draws[i][1];
+        g_seq_at = 0;
+        const int spread = raid_drop_spread(seq_random, NULL);
+        CHECK(spread == (int) draws[i][2], "spread for draws %.3f %.3f is %d, got %d", draws[i][0], draws[i][1], (int) draws[i][2], spread);
+    }
 
     if (g_fail) {
         fprintf(stderr, "raid_drops_test: %d failure(s)\n", g_fail);

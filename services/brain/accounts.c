@@ -1094,6 +1094,9 @@ static cJSON *stats_args(const cJSON *a) {
         }
         cJSON_AddItemToObject(p, "stats", clean);
     }
+    /* v10.0.4 counter skins: the server's takeSkinStats rows (kn_commit_stats checks each: commit_skin_stats) */
+    const cJSON *skin_stats = cJSON_GetObjectItemCaseSensitive(a, "skinStats");
+    if (cJSON_IsArray(skin_stats)) cJSON_AddItemToObject(p, "skinStats", cJSON_Duplicate(skin_stats, 1));
     return p;
 }
 

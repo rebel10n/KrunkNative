@@ -20,8 +20,8 @@
 static int g_fail;
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #c); g_fail = 1; } } while (0)
 
-/* the official table's size (data/skins.jspck, 10.0.3) */
-#define OFFICIAL_SKINS 8069
+/* the official table's size (data/skins.jspck, 10.0.4: 10.0.3's 8069 plus the Candy Heist drops) */
+#define OFFICIAL_SKINS 8076
 
 struct pinned {
     const char *record;

@@ -18,6 +18,7 @@
 #include <seek_filter.h> // SEEK_LOBBY_* (the lobby flags of seek_prefs_lobby_ok)
 #include <krunker_lobbies.h> // krunker_seek_region: the region a seek looks in (the ping race)
 #include <krunker_account.h>
+#include <krunker_checkout.h> // the real-money purchase's frames (krunker_net_send_account_frame) and answers
 #include <ranked_route.h> // a ranked match's socket URL and host (v10's joinAssignment, ranked_ui.c)
 #include <krunker_map_source.h>
 #include <backend.h>
@@ -612,8 +613,24 @@ static void link_account_frame(void *user, const char *json, const size_t len) {
     K.acct_q[K.acct_n++] = copy;
 }
 
-static KrunkerNetAccountFn g_acct_fn;
+static KrunkerNetAccountFn g_acct_fn, g_checkout_fn;
+static KrunkerVoucherFn g_voucher_fn;
 void krunker_net_account_listen(const KrunkerNetAccountFn fn) { g_acct_fn = fn; }
+void krunker_net_checkout_listen(const KrunkerNetAccountFn fn) { g_checkout_fn = fn; }
+void krunker_net_voucher_listen(const KrunkerVoucherFn fn) { g_voucher_fn = fn; }
+
+// "vr" [funds | null, message] (iííìïíï, deob-10.0.4.js:221042): the funds are set and the message shown (the listener)
+static void voucher_answer(const cJSON *frame) {
+    if (!g_voucher_fn) return;
+    const cJSON *funds = cJSON_GetArrayItem(frame, 1), *msg = cJSON_GetArrayItem(frame, 2);
+    const char *text = cJSON_GetStringValue(msg);
+    char num[64];
+    if (!text && cJSON_IsNumber(msg)) { // `${msg}`
+        snprintf(num, sizeof(num), "%g", msg->valuedouble);
+        text = num;
+    }
+    g_voucher_fn(cJSON_IsNumber(funds), cJSON_IsNumber(funds) ? funds->valuedouble : 0, text ? text : "");
+}
 
 static void account_frames_drop(void) {
     pthread_mutex_lock(&K.lock);
@@ -648,7 +665,14 @@ static void account_frames_tick(void) {
     for (int i = 0; i < n; i++) {
         cJSON *frame = cJSON_Parse(q[i]);
         const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
-        if (label && g_acct_fn && K.state != KS_OFF && rpc_answer(frame, label)) g_acct_fn(label, frame);
+        if (!label || K.state == KS_OFF) {
+        } else if (!strcmp(label, "vr")) {
+            voucher_answer(frame);
+        } else if (krunker_checkout_label(label)) {
+            if (g_checkout_fn) g_checkout_fn(label, frame);
+        } else if (g_acct_fn && rpc_answer(frame, label)) {
+            g_acct_fn(label, frame);
+        }
         cJSON_Delete(frame);
         free(q[i]);
     }
@@ -668,8 +692,11 @@ static int send_rpc(const char *name) {
 
 // The windows' requests over the game socket while the krunker.io account is the active one (v10
 // sends them there: _33978.send(...)). The reads, the claims v10 makes from the menu (the Daily Spin's: it grants
-// the account its ticket, doc/v10/daily-spin.md) and the voucher redeem (it grants KR). Nothing that spends KR here:
-// purchases and spins go through the krunker.io API (kio_store_write).
+// the account its ticket, doc/v10/daily-spin.md), the voucher redeem (it grants KR) and the real-money purchases'
+// Xsolla requests (kio_checkout.c; the shapes: krunker_checkout_frame_ok). KR purchases and spins go through the
+// krunker.io API (kio_store_write).
+//   ["xst" | "xpurchase" | "xstb" | "xstp" | "xstbp" | "xstbpl", ...]  a purchase's PayStation token, answered
+//                     "xst" [token, sandbox]; ["xsin", invoice] a payment done (krunker_checkout.h)
 //   ["bpdl"]          DATA_LOADED: the battle pass's data (answered "bpdl" / "bppd"; v10:209854, 212301)
 //   ["vcln"]          OPEN_CLAN_TAB (v10:213455)
 //   ["cln", 3, value] the Clans window's sendReq(3): the player's clan page (v10:213459-213462, answered
@@ -694,9 +721,10 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     if ((!strcmp(name, "bpdl") || !strcmp(name, "vcln")) && n == 0) ok = 1;
     if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
     if (!strcmp(name, "vo") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1))) ok = 1;
-    if (!ok) return 0;
-    KrunkerValue args[2];
-    char text[2][128];
+    if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)
+    if (!ok || n > 10) return 0;
+    KrunkerValue args[10];
+    char text[10][128];
     for (int i = 0; i < n; i++) {
         const cJSON *v = cJSON_GetArrayItem(frame, i + 1);
         if (cJSON_IsNumber(v)) args[i] = KRUNKER_V_NUM(v->valuedouble);

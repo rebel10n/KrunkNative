@@ -390,6 +390,11 @@ int game_has_skin(const Game *game, const Player *player, const int skin) {
     return game && player && game->hooks.has_skin && skin >= 0 ? game->hooks.has_skin(game, player, skin) : 0;
 }
 
+void game_count_skin_stat(Game *game, Player *player, const int weapon_id, const char *stat, const int amount) {
+    if (!game || !player || !game->hooks.skin_stat || skin_stat_index(stat) < 0 || !game_is_authority(game)) return;
+    game->hooks.skin_stat(game, player, weapon_id, stat, amount > 0 ? amount : 1);
+}
+
 static double game_random01(void *user) { // Math.random()
     (void) user;
     return ldexp((double) pcg32_random(), -32);

@@ -149,6 +149,13 @@ void krunker_net_account_signed_in(void);
 // data, as v10 keeps it).
 typedef void (*KrunkerNetAccountFn)(const char *label, const cJSON *frame);
 void krunker_net_account_listen(KrunkerNetAccountFn fn);
+// The real-money purchase's answers (krunker_checkout_label: "xst", "pur", "ppr", "purprm", "purb", "purbp", "purbpl",
+// "pErr", "uprm"), as the account frames, on the main thread: kio_checkout.c's (they never reach the account listener).
+void krunker_net_checkout_listen(KrunkerNetAccountFn fn);
+// The answer to our REDEEM_VOUCHER ("vo" -> "vr" [funds | null, message], deob-10.0.4.js:221042), on the main thread:
+// funds (has_funds 0 = null) and the message. The UI registers it (kio_store.c) before it sends "vo".
+typedef void (*KrunkerVoucherFn)(int has_funds, double funds, const char *message);
+void krunker_net_voucher_listen(KrunkerVoucherFn fn);
 // A window's request over the game socket for the krunker.io account, as the frame the window would
 // send kn_brain: the read-only ones (["bpdl"], ["vcln"], ["cln", 3, value]) and the Daily Spin claim
 // (["dsl"], sent as v10's rpc(DAILY_SPIN_CLAIM)); 0 = not sent (not open, or anything else: nothing

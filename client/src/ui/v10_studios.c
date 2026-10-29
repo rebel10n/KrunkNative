@@ -855,7 +855,8 @@ static void currencies_markup(StrBuf *sb) {
                 sb_text(sb, I18N("studios.currencies.edit", "Edit"));
                 sb_append(sb, "</button> ");
                 sb_appendf(sb, "<button type=\"button\" class=\"sd-mini svelte-a9j4oe\" onclick=\"knStudios('curtoggle',%lld)\"%s>", (long long) cid, capped ? " disabled" : "");
-                sb_text(sb, live ? I18N("studios.currencies.unpublish", "Unpublish") : I18N("studios.currencies.publish", "Publish"));
+                // the row button's label is the skins' (deob-10.0.4.js:139270)
+                sb_text(sb, live ? I18N("studios.skins.unpublish", "Unpublish") : I18N("studios.skins.publish", "Publish"));
                 sb_append(sb, "</button>");
             }
             sb_append(sb, "</div>");
@@ -885,7 +886,7 @@ static void currencies_markup(StrBuf *sb) {
     sb_append(sb, "</button>");
     if (S.cur_edit) {
         sb_append(sb, " <button class=\"sd-mini svelte-a9j4oe\" type=\"button\" onclick=\"knStudios('curcancel')\">");
-        sb_text(sb, I18N("studios.currencies.cancel", "Cancel"));
+        sb_text(sb, I18N("studios.transfer.cancel", "Cancel")); // the edit dialog's cancelButton (deob-10.0.4.js:138722)
         sb_append(sb, "</button>");
     }
     sb_append(sb, "</div> <div class=\"sd-hint svelte-a9j4oe\">");
@@ -1445,13 +1446,19 @@ static void currency_edit_start(const int64_t cid) {
 static void currency_toggle(const int64_t cid) {
     const cJSON *c;
     int live = 0;
+    const char *name = "";
     cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies"))
-        if ((int64_t) jnum(c, "currency_id") == cid) live = (int) jnum(c, "active") != 0;
+        if ((int64_t) jnum(c, "currency_id") == cid) {
+            live = (int) jnum(c, "active") != 0;
+            name = jstr(c, "name");
+        }
     if (!live && published_currencies() >= 5) return;
     char path[96];
     snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/%s", (long long) S.sid, (long long) cid, live ? "unpublish" : "publish");
-    if (live) action("POST", path, NULL, 0, I18N("studios.currencies.unpublished", "Currency unpublished."), I18N("studios.error.toggleCurrency", "Failed to update that currency."));
-    else action("POST", path, NULL, 0, I18N("studios.currencies.publishedMsg", "Currency published."), I18N("studios.error.toggleCurrency", "Failed to update that currency."));
+    char ok[160]; // "{0} unpublished." / "{0} published." with the currency's name (deob-10.0.4.js:138685)
+    if (live) I18N_F(ok, "studios.currencies.unpublished", "{0} unpublished.", name);
+    else I18N_F(ok, "studios.currencies.publishedMsg", "{0} published.", name);
+    action("POST", path, NULL, 0, ok, I18N("studios.error.toggleCurrency", "Failed to update that currency."));
 }
 
 static void do_currency(void) { // _48364
@@ -1466,7 +1473,9 @@ static void do_currency(void) { // _48364
     cJSON_AddNumberToObject(body, "decimals", S.cur_decimals);
     if (S.cur_edit) {
         snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/edit", (long long) S.sid, (long long) S.cur_edit);
-        action("POST", path, body, AF_CURRENCY, I18N("studios.currencies.edited", "Currency updated."), I18N("studios.error.editCurrency", "Failed to update that currency."));
+        char ok[160]; // "Updated {0} ({1})." with the new name and symbol (deob-10.0.4.js:138732)
+        I18N_F(ok, "studios.currencies.edited", "Updated {0} ({1}).", name, sym);
+        action("POST", path, body, AF_CURRENCY, ok, I18N("studios.error.editCurrency", "Failed to update that currency."));
         return;
     }
     snprintf(path, sizeof(path), "/studios/%lld/currencies", (long long) S.sid);

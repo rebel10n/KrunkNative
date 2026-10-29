@@ -693,6 +693,9 @@ static void state_from_params(void) {
     }
     const int shader = js_parse_int(viewer_param_get("paintShader"), &ok);
     if (ok && g_viewer.paint.color < 0) g_viewer.paint.shader = shader;
+    // the shown copy's seed (v10.0.4 "&seed=" + its seed, deob-10.0.4.js:109446): the seeded custom shaders' look
+    const int seed = js_parse_int(viewer_param_get("seed"), &ok);
+    g_viewer.seed = ok && seed > 0 ? seed : 0;
     const char *dev = viewer_param_get("dev");
     g_viewer.dev = dev != NULL;
     g_viewer.hi_quality = g_viewer.cosmetic_set || (dev && *dev); // isNumber(C) || params.get("dev")

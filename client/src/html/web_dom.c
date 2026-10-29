@@ -22,6 +22,7 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <ui_logic.h>
+#include <kio_checkout.h> // kio_checkout_window_focused (the page's focus)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1397,6 +1398,18 @@ EMSCRIPTEN_KEEPALIVE int kn_ui_key_prevent(void) {
     return ui_controls_take_game_key();
 }
 
+// The page got the focus back (window focus, or document visibilitychange to visible; installed once by
+// html_ui_backend_init): kio_checkout_window_focused (a payment waiting for the provider's tab reads the account again)
+EM_JS(void, kn_js_focus_listen, (void), {
+    if (window.__knFocusListen) return;
+    window.__knFocusListen = 1;
+    var back = function () { if (!document.visibilityState || document.visibilityState === 'visible') _kn_ui_window_focused(); };
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', back);
+});
+
+EMSCRIPTEN_KEEPALIVE void kn_ui_window_focused(void) { kio_checkout_window_focused(); }
+
 EMSCRIPTEN_KEEPALIVE void kn_ui_resize_observed(const int id) {
     if (id <= 0) return;
     for (int i = 0; i < g_resize_queue_count; i++) {
@@ -1869,6 +1882,7 @@ int html_ui_backend_init(const char *ui_dir, const int width, const int height) 
     }
     // kn-shim.js installs the page's handler globals and listeners now.
     if (!kn_js_activate()) fprintf(stderr, "[ui] web_dom: knActivate() failed (Module._kn_ui_event not exported?); page events will not reach C\n");
+    kn_js_focus_listen();
     g_web_ready = 1;
     g_pending_resize = 1;  // fired from the first update so listeners registered after init see it
     g_selftest_pending = kn_js_selftest_requested();

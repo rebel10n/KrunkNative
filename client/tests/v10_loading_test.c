@@ -40,12 +40,33 @@ void html_dom_set_style(HtmlElem el, const char *prop, const char *value) {
     else if (!strcmp(prop, "--load-accent")) snprintf(els[el - 1].load_accent, sizeof els[0].load_accent, "%s", value);
 }
 
+// the loader's strings (I18N): the English given next to the key, as i18n_tr does without a table
+const char *i18n_tr(const char *key, const char *english) {
+    (void) key;
+    return english;
+}
+
 static void reset_els(void) {
     memset(els, 0, sizeof els);
     v10_loading_reset();
 }
 
 int main(void) {
+    // --load-accent: mode.tag[1] unless the game is custom (deob-10.0.4.js:223040; tags :105931-106488)
+    static const int party[] = {10, 13, 17, 21, 29, 33, 34, 36}, event[] = {15, 23, 31, 32};
+    for (size_t i = 0; i < sizeof party / sizeof party[0]; i++)
+        CHECK(!strcmp(v10_loading_mode_accent(party[i], 0), "#ffac00"), "Party mode %d: %s", party[i], v10_loading_mode_accent(party[i], 0));
+    for (size_t i = 0; i < sizeof event / sizeof event[0]; i++)
+        CHECK(!strcmp(v10_loading_mode_accent(event[i], 0), "#d95487"), "Event mode %d: %s", event[i], v10_loading_mode_accent(event[i], 0));
+    CHECK(!strcmp(v10_loading_mode_accent(37, 0), "#ff8a1a"), "Candy Heist: %s", v10_loading_mode_accent(37, 0));
+    static const int plain[] = {0, 1, 2, 9, 11, 12, 14, 16, 22, 35};
+    for (size_t i = 0; i < sizeof plain / sizeof plain[0]; i++)
+        CHECK(!strcmp(v10_loading_mode_accent(plain[i], 0), "#fff"), "untagged mode %d: %s", plain[i], v10_loading_mode_accent(plain[i], 0));
+    CHECK(!strcmp(v10_loading_mode_accent(37, 1), "#fff") && !strcmp(v10_loading_mode_accent(10, 1), "#fff"),
+          "a custom game: #fff (%s, %s)", v10_loading_mode_accent(37, 1), v10_loading_mode_accent(10, 1));
+    CHECK(!strcmp(v10_loading_mode_accent(-1, 0), "#fff") && !strcmp(v10_loading_mode_accent(38, 0), "#fff") &&
+          !strcmp(v10_loading_mode_accent(1000, 0), "#fff"), "out of range: #fff");
+
     // loadInTime: none for the session's first load, 2000 ms after (deob-10.0.4.js:16549, :223025)
     CHECK(v10_loading_hold_ms(0) == 0.0 && v10_loading_hold_ms(1) == 2000.0 && v10_loading_hold_ms(7) == 2000.0,
           "hold: %g %g %g", v10_loading_hold_ms(0), v10_loading_hold_ms(1), v10_loading_hold_ms(7));
@@ -89,6 +110,12 @@ int main(void) {
     CHECK(!els[0].loading_out, "a newer load is held for its own 2000 ms (fading at 8000, not 7000)");
     v10_loading_tick(8000.0);
     CHECK(els[0].loading_out, "fades at its own deadline");
+
+    // the mode's accent reaches --load-accent (a Candy Heist load)
+    V10LoadingMap candy = {.map_thumb = "./img/maps/map_46.png", .map_name = "Candy Heist", .mode_name = "Candy Heist",
+                           .accent = v10_loading_mode_accent(37, 0)};
+    v10_loading_begin(&candy, 9000.0);
+    CHECK(!strcmp(els[0].load_accent, "#ff8a1a"), "Candy Heist --load-accent: %s", els[0].load_accent);
 
     printf("v10_loading_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

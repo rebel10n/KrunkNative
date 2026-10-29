@@ -795,6 +795,165 @@ void sh_quick_sell(SocialSession *s, const cJSON *f) {
                 quick_sell_done, ctx_new("qsi", uid, 0));
 }
 
+/* ------------------------------------------------------------------ v10.0.4 bulk actions and item locks */
+
+static void quick_sell_bulk_done(SocialSession *s, kn_db_result *res, void *extra) {
+    Ctx *c = extra;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!v || !cJSON_IsObject(v)) {
+        cJSON_Delete(v);
+        social_send_n(s, "qsbr", 3, cJSON_CreateNull(), cJSON_CreateNumber((double) c->a),
+                      cJSON_CreateString(kn_db_ok(res) ? "Failed to quick sell items" : acct_db_error(res, "qsb")));
+        return;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(v, "replay");
+    social_send_n(s, "qsbr", 2, v, cJSON_CreateNumber((double) c->a));
+    push_funds(s->account_id);
+}
+
+/* v10.0.4's bulk quick sell (POST market/quick-sell/bulk {action, items: [{skin_id, item_id}]}, deob-10.0.4.js:146851-146866)
+ * for a Box Office account: ["qsb", action (0 KR, 1 Junk, 2 destroy), [[item, unit, keep], ...], uid, {op}] -> ["qsbr", {sold, skipped,
+ * funds, junk}, uid] | ["qsbr", null, uid, error]. A unit is a painted copy's id, or the store index for a stack (its
+ * unpainted units less keep). At most 250 units a frame (the client's chunk). Each unit's KR and Junk are sh_quick_sell's rules
+ * (quick_sell_each / quick_sell_junk); a unit the action does not take is skipped (run_quick_sell_bulk). */
+void sh_quick_sell_bulk(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    const int64_t mode = fa_int(f, 1, -1), uid = fa_int(f, 3, 0);
+    const cJSON *items = fa(f, 2);
+    if (mode < 0 || mode > 2 || !cJSON_IsArray(items) || cJSON_GetArraySize(items) < 1 || cJSON_GetArraySize(items) > 250) {
+        social_send_n(s, "qsbr", 3, cJSON_CreateNull(), cJSON_CreateNumber((double) uid), cJSON_CreateString("Invalid request"));
+        return;
+    }
+    cJSON *units = cJSON_CreateArray();
+    const cJSON *it;
+    cJSON_ArrayForEach(it, items) {
+        const int64_t skin = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 0)), unit = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 1));
+        const SkinInfo *k = acct_skin(skin);
+        const int none = !k || quick_sell_none(k);
+        const int64_t each = none || k->no_quick_sell ? 0 : quick_sell_each(k), junk = none ? 0 : quick_sell_junk(k);
+        /* destroy takes the noQuickSell items (v10's canDestroy, deob-10.0.4.js:147350); KR / Junk the ones with a value */
+        const int takes = mode == 0 ? each > 0 : mode == 1 ? junk > 0 : k && !none && k->no_quick_sell;
+        cJSON *u = cJSON_CreateArray();
+        cJSON_AddItemToArray(u, cJSON_CreateNumber((double) skin));
+        cJSON_AddItemToArray(u, cJSON_CreateNumber((double) (unit >= V10_COPY_ID_BASE ? unit : 0)));
+        cJSON_AddItemToArray(u, cJSON_CreateNumber((double) (takes && mode == 0 ? each : 0)));
+        cJSON_AddItemToArray(u, cJSON_CreateNumber((double) (takes && mode == 1 ? junk : 0)));
+        cJSON_AddItemToArray(u, cJSON_CreateNumber(takes ? 1 : 0)); /* a unit the action does not take: the proc skips it */
+        /* a stack's units to keep (the wallet's Keep options, "keep at least N of each item", deob-10.0.4.js:147083) */
+        const double keep = cJSON_GetNumberValue(cJSON_GetArrayItem(it, 2));
+        cJSON_AddItemToArray(u, cJSON_CreateNumber(keep > 0 && keep < 1e9 ? (int64_t) keep : 0));
+        cJSON_AddItemToArray(units, u);
+    }
+    char *json = kn_json_print(units);
+    cJSON_Delete(units);
+    EconHead h;
+    econ_head(&h, s, f, "qsell", "market");
+    char md[24];
+    social_call(s, &P_QUICK_SELL_BULK, KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(md, mode), json ? json : "[]"),
+                quick_sell_bulk_done, ctx_new("qsb", uid, 0));
+    free(json);
+}
+
+static void list_bulk_done(SocialSession *s, kn_db_result *res, void *extra) {
+    Ctx *c = extra;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!v || !cJSON_IsObject(v)) {
+        cJSON_Delete(v);
+        social_send_n(s, "libr", 3, cJSON_CreateNull(), cJSON_CreateNumber((double) c->a),
+                      cJSON_CreateString(kn_db_ok(res) ? "Failed to list items" : acct_db_error(res, "lib")));
+        return;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(v, "replay");
+    social_send_n(s, "libr", 2, v, cJSON_CreateNumber((double) c->a));
+    push_funds(s->account_id);
+}
+
+/* v10.0.4's bulk list (POST market/list/bulk {items: [{item_id, skin_id, price, quantity}]}, deob-10.0.4.js:131978-132019) for a
+ * Box Office account: ["lib", [[item, unit, price, quantity], ...], uid, {op}] -> ["libr", {listed, funds, results: [{item_id,
+ * skin_id, error?, code?}]}, uid] | ["libr", null, uid, error]. A unit is a painted copy's id (quantity 1) or the store index
+ * for a stack's units; at most 100 units a frame (the client's batches). Each unit is listed as "li" lists it
+ * (run_market_list_bulk: the same fee, limits and escrow, one transaction for the frame). */
+void sh_market_list_bulk(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    const int64_t uid = fa_int(f, 2, 0);
+    const cJSON *items = fa(f, 1);
+    int units = 0;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, items) units += (int) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 3));
+    if (!cJSON_IsArray(items) || cJSON_GetArraySize(items) < 1 || units < 1 || units > 100) {
+        social_send_n(s, "libr", 3, cJSON_CreateNull(), cJSON_CreateNumber((double) uid), cJSON_CreateString("Invalid request"));
+        return;
+    }
+    /* each row's refusal by the store rules (skin_unlistable) and the price range, decided here; the proc does the rest */
+    cJSON *rows = cJSON_CreateArray();
+    cJSON_ArrayForEach(it, items) {
+        const int64_t skin = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 0)), unit = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 1));
+        const double price = cJSON_GetNumberValue(cJSON_GetArrayItem(it, 2));
+        const int64_t qty = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 3));
+        const char *why = acct_skin_count() > 0 ? skin_unlistable(acct_skin(skin)) : NULL;
+        if (!why && !(price >= 1 && price <= (double) g_acct.sale_max && price == (double) (int64_t) price)) why = "Invalid price";
+        cJSON *r = cJSON_CreateArray();
+        cJSON_AddItemToArray(r, cJSON_CreateNumber((double) skin));
+        cJSON_AddItemToArray(r, cJSON_CreateNumber((double) (unit >= V10_COPY_ID_BASE ? unit : 0)));
+        cJSON_AddItemToArray(r, cJSON_CreateNumber(price));
+        cJSON_AddItemToArray(r, cJSON_CreateNumber((double) (unit >= V10_COPY_ID_BASE ? 1 : qty)));
+        cJSON_AddItemToArray(r, cJSON_CreateString(why ? why : ""));
+        cJSON_AddItemToArray(rows, r);
+    }
+    char *json = kn_json_print(rows);
+    cJSON_Delete(rows);
+    EconHead h;
+    econ_head(&h, s, f, "list", "market");
+    char fee[24], byp[24], mx[24], ml[24], lvl[24];
+    social_call(s, &P_MARKET_LIST_BULK,
+                KN_DB_ARGS(h.me, h.key, h.rate, h.feature, json ? json : "[]", acct_itoa(fee, g_acct.market_fee_percent),
+                           acct_itoa(byp, g_acct.market_fee_bypass), acct_itoa(mx, g_acct.sale_max), acct_itoa(ml, g_acct.max_listings),
+                           acct_itoa(lvl, g_acct.market_min_level)),
+                list_bulk_done, ctx_new("lib", uid, 0));
+    free(json);
+}
+
+static void item_locks_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!kn_db_ok(res)) acct_db_error(res, "ilk");
+    social_send_n(s, "ilkr", 1, v ? v : cJSON_CreateNull());
+}
+
+/* GET items/locks (deob-10.0.4.js:108837-108853) for a Box Office account: ["ilk"] -> ["ilkr", {locks: [{skin_id, item_id,
+ * stack}]} | null] */
+void sh_item_locks(SocialSession *s, const cJSON *f) {
+    (void) f;
+    if (!social_require_auth(s)) return;
+    char me[24];
+    me_str(s, me);
+    social_call(s, &P_ITEM_LOCKS, KN_DB_ARGS(me), item_locks_done, NULL);
+}
+
+static void item_lock_done(SocialSession *s, kn_db_result *res, void *extra) {
+    Ctx *c = extra;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!v) {
+        social_send_n(s, "ilsr", 3, cJSON_CreateNull(), cJSON_CreateNumber((double) c->a),
+                      cJSON_CreateString(kn_db_ok(res) ? "Failed to update the lock" : acct_db_error(res, "ils")));
+        return;
+    }
+    social_send_n(s, "ilsr", 2, v, cJSON_CreateNumber((double) c->a));
+}
+
+/* POST items/locks (deob-10.0.4.js:108862) for a Box Office account: ["ils", item, unit, locked, uid] -> ["ilsr", {locked}, uid]
+ * | ["ilsr", null, uid, error]. unit: a painted copy's id, or the store index (or 0) for the stack. */
+void sh_item_lock(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    char me[24], sk[24], cp[24], lk[24];
+    me_str(s, me);
+    const int64_t unit = fa_int(f, 2, 0);
+    social_call(s, &P_ITEM_LOCK,
+                KN_DB_ARGS(me, acct_itoa(sk, fa_int(f, 1, -1)), acct_itoa(cp, unit >= V10_COPY_ID_BASE ? unit : 0),
+                           acct_itoa(lk, fa_int(f, 3, 0) ? 1 : 0)),
+                item_lock_done, ctx_new("ils", fa_int(f, 4, 0), 0));
+}
+
 static void blackm_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
     cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;

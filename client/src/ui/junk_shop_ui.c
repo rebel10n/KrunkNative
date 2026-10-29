@@ -6,6 +6,7 @@
 #include <junk_shop_ui.h>
 #include "klog.h"
 #include <kio_store.h>
+#include <kio_checkout.h> // kio_checkout_bundles: krunker.io's own bundle rows
 #include <backend_ui.h>
 #include <v10_ui.h>
 #include <v10_menu.h>
@@ -207,16 +208,21 @@ static void bundle_card(StrBuf *sb, const cJSON *b, const int id) {
 // brain sends the account's OWNED with its token. Box Office has no conditional bundles (v10's come with the account's
 // bundle-availability push, 242876), so the brain's rows are the list.
 void junk_shop_bundles_render(StrBuf *sb) {
-    char t[256], path[320];
-    v10_url_token(t, sizeof t);
-    snprintf(path, sizeof path, "/api/shop/bundles%s%s", t[0] ? "?token=" : "", t);
-    const V10Req *r = v10_get(path, BUNDLES_TTL_MS);
-    if (!r || r->status == 0) { // loading
-        if (!g_bundles_timer) g_bundles_timer = html_timer_add(250.0, bundles_poll, NULL);
-        return;
+    const cJSON *data;
+    if (kio_store_active()) { // krunker.io: the official store's bundles, as its game server pushed them (kio_checkout.c)
+        data = kio_checkout_bundles();
+    } else {
+        char t[256], path[320];
+        v10_url_token(t, sizeof t);
+        snprintf(path, sizeof path, "/api/shop/bundles%s%s", t[0] ? "?token=" : "", t);
+        const V10Req *r = v10_get(path, BUNDLES_TTL_MS);
+        if (!r || r->status == 0) { // loading
+            if (!g_bundles_timer) g_bundles_timer = html_timer_add(250.0, bundles_poll, NULL);
+            return;
+        }
+        data = r->status == 200 && r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
     }
-    const cJSON *data = r->status == 200 && r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
-    if (!cJSON_IsArray(data)) return; // an error: nothing to draw
+    if (!cJSON_IsArray(data)) return; // an error, or no official data yet: nothing to draw
     const cJSON *list[BUNDLES_MAX];
     const int n = bundles_ordered(data, list, BUNDLES_MAX);
     for (int i = 0; i < n; i++) {

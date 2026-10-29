@@ -27,6 +27,9 @@
 #include <v10_ui.h>
 #include <audio.h>
 #include "../viewer/viewer_store.h"
+#include <game_config.h> // game_config_is_custom (showRaidPromo's !isCustom)
+#include <raid_drops.h>  // raid_double_drops (isDoubleRaidDrops)
+#include <ks_game.h>     // ks_wall_ms: the UTC clock of the weekend rule
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -599,10 +602,15 @@ void hud_endscreen_v10_begin(const Client *client, const double now_ms) {
     E.results = 0; // the card renders at the END too: the button waits for the results (autoCollectTime)
     E.auto_at_ms = 0.0;
     const Game *game = client ? &client->game : NULL;
-    // g:191404: 0x17 !== modeIndex && !isCustom && isPubType() && Math.random() < 0.5
-    E.show_raid = game && game_mode_id(game) != RAID_MODE_INDEX && game_is_pub_type(game) && (rand() & 1);
+    // END_GAME's otherData (deob-10.0.4.js:194894-194895): showRaidPromo = 0x17 !== modeIndex && !isCustom && isPubType()
+    // && Math.random() < 0.5, isDoubleRaidDrops = the round's flag (updateEventFlags); the promo's isDouble (:207036-207043)
+    E.show_raid = game && game_mode_id(game) != RAID_MODE_INDEX && !game_config_is_custom(game) && game_is_pub_type(game) && (rand() & 1);
     if (E.force_raid >= 0) E.show_raid = E.force_raid; // --render-scenario state.raidPromo: the capture's roll
-    E.double_raid = 0; // isDoubleRaidDrops: a weekend event KrunkNative has no calendar for
+    // The server rolls both and sends them; KN's END has no field for them, so the client takes the round's flag where it
+    // is the authority (offline / sandbox: game_update_event_flags set it) and else applies the same rule
+    // (raid_double_drops: a public round on a Saturday or Sunday, UTC), which differs only when the clocks disagree
+    E.double_raid = game && (game_is_authority(game) ? game->double_raid_drops
+                                                     : raid_double_drops(game_is_pub_type(game), (int64_t) ks_wall_ms()));
 }
 
 void hud_endscreen_v10_results(const double now_ms) {

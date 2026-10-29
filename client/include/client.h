@@ -496,6 +496,8 @@ typedef struct {
     // v7 hasAnim weapon / melee skins: the GLTF remodel (gltf.h) of weapon_right [0] / weapon_left [1],
     // parented to that mesh, which is then an empty carrier (its pose and visibility drive the model)
     struct GltfInstance *weapon_models[2];
+    // v10.0.4 counter skins (skin_counter.h): the stat counter on weapon_right's skin, NULL none
+    struct SkinCounter *counter;
 
     int melee_pose;   // first-person melee: arms are posed per arm (pivots) and the melee mesh hangs off the right pivot
     vec3 melee_position; // first-person melee mesh hold (weaponGeos xP/yP/zP incl. the skin's sxOff/syOff/szOff)
@@ -1120,6 +1122,13 @@ int geometry_cache_reload_all(void);
 // Fills geometry->bound_center/bound_radius from its local vertices (loaders.c); geometry
 // whose vertices move in the shader (liquid waves) must leave the radius at 0.
 void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count);
+// Vertex normals (attribute 3, skin_custom.vert v_normal: the custom skin shaders' displacement along normalLocal,
+// deob-10.0.4.js:92334-92336 / :92404-92406). geometry_compute_normals: three.js computeVertexNormals for an indexed
+// list (area-weighted face normals summed per vertex, normalised; out = 3 floats a vertex). geometry_bind_normals: a
+// buffer of them on attribute 3 of the bound VAO (owned by that VAO's geometry, like its position buffer). Geometry
+// without it reads attribute 3 as (0, 0, 0): no displacement.
+void geometry_compute_normals(const vertex *vertices, size_t vertex_count, const unsigned int *indices, size_t index_count, float *out);
+void geometry_bind_normals(const float *normals, size_t vertex_count);
 // The GL_LINES edge buffer of an OBJ model (wireframe materials: weapon and other skins),
 // built from tri_indices on first use. Returns 0 when there is none. Does not change any VAO
 // state: the caller binds the returned buffer for its draw and rebinds geometry->ebo after.

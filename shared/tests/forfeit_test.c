@@ -4,6 +4,7 @@
 // vote ending the round for the other team (mode_pick_winner, the 1 - 0 scores), one start per player per game,
 // the 60 s expiry and a leaver's 30 s grace. Run from the repository root.
 #include <shared.h>
+#include <chat_commands.h> // chat_command_is_forfeit
 #include <forfeit.h>
 #include <game_config.h>
 #include <modes.h>
@@ -195,8 +196,26 @@ static void test_forfeit(void) {
     close_game(&game);
 }
 
+// v10.0.4 "Chat-restricted players can now vote to forfeit": the one line a chat-restricted account may still send
+// (server/src/net.c net_handle_chat) is the forfeit vote, by name and alias, any case, with or without arguments.
+static void test_forfeit_command_names(void) {
+    printf("Running the chat-restricted forfeit command test...\n");
+    CHECK(chat_command_is_forfeit("/ff"), "/ff");
+    CHECK(chat_command_is_forfeit("/forfeit"), "/forfeit");
+    CHECK(chat_command_is_forfeit("/FF"), "/FF (case)");
+    CHECK(chat_command_is_forfeit("/ff yes"), "/ff with an argument");
+    CHECK(!chat_command_is_forfeit("ff"), "ff without the slash is chat");
+    CHECK(!chat_command_is_forfeit("/f"), "/f");
+    CHECK(!chat_command_is_forfeit("/ffa"), "/ffa");
+    CHECK(!chat_command_is_forfeit("/c"), "another command");
+    CHECK(!chat_command_is_forfeit("hello /ff"), "/ff inside a chat line");
+    CHECK(!chat_command_is_forfeit(""), "empty");
+    CHECK(!chat_command_is_forfeit(NULL), "NULL");
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    test_forfeit_command_names();
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
         printf("Failed to load assets/maps/311_sandstorm.json (run from the repository root)\n");

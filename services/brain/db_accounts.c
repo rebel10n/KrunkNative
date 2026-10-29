@@ -148,6 +148,10 @@ const kn_proc P_LOGIN_LOOKUP = {"login_lookup", "SELECT * FROM kn_login_lookup($
 /* kn_account_json(kn_session_account(token, ttl)): sliding expiry, NULL when unknown */
 static kn_db_result *run_session_account(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (dbx_is_pg(&x)) { /* PostgreSQL's own kn_session_account slides the expiry; db_account_json finishes the account */
+        const int64_t id = dbx_int(&x, SQL(.pg = "SELECT kn_session_account($1, $2::bigint)"), KN_DB_ARGS(P(0), P(1)), 0);
+        return dbx_json(&x, "kn_account_json", id > 0 ? db_account_json(&x, id) : NULL);
+    }
     int64_t hit = dbx_exec(&x,
         SQL(.any = "UPDATE sessions SET last_seen_at = {now}, expires_at = {greatest:expires_at, {later:$2}}"
                    " WHERE token_hash = {hash:$1} AND expires_at > {now}"),
@@ -157,8 +161,10 @@ static kn_db_result *run_session_account(kn_dbconn *c, int n, const char *const 
                          : 0;
     return dbx_json(&x, "kn_account_json", id > 0 ? db_account_json(&x, id) : NULL);
 }
-const kn_proc P_SESSION_ACCOUNT = {"session_account", "SELECT kn_account_json(kn_session_account($1, $2))",
-                                   run_session_account};
+/* .pg NULL here and in P_ACCOUNT_JSON: on PostgreSQL the runners call its SQL functions, then add what only C adds
+ * (db_account_pg_finish: chat_banned, the owned list with counter stats, the life extras), which a bare
+ * "SELECT kn_account_json(...)" would drop. These are the accounts the game servers read. */
+const kn_proc P_SESSION_ACCOUNT = {"session_account", NULL, run_session_account};
 
 /* (id, hash, token, ttl): new hash, every session revoked, one fresh session -> {token}; no row when unknown */
 static kn_db_result *run_set_password(kn_dbconn *c, int n, const char *const *p) {
@@ -216,7 +222,7 @@ static kn_db_result *run_account_json(kn_dbconn *c, int n, const char *const *p)
     Dbx x = {c, NULL};
     return dbx_json(&x, "kn_account_json", db_account_json(&x, PI(0)));
 }
-const kn_proc P_ACCOUNT_JSON = {"account_json", "SELECT kn_account_json($1)", run_account_json};
+const kn_proc P_ACCOUNT_JSON = {"account_json", NULL, run_account_json};
 
 /* ------------------------------------------------------------------ stats, rewards, ops */
 
@@ -256,9 +262,44 @@ static const char *jstr(const cJSON *o, const char *k, char buf[64]) {
 
 static int64_t clamp0(int64_t v) { return v < 0 ? 0 : v; }
 
+/* v10.0.4 counter skins: the game server's takeSkinStats rows [{skin, stat, count}] (deob-10.0.4.js:191561-191585) added
+ * to the account's skin_stats (0365), once per (match, account) like the rest of the commit. A row counts only a known stat
+ * (SKIN_STATS, shared.h) on a skin the account owns, at most 100000 per match (a match cannot reach it honestly). */
+static void commit_skin_stats(Dbx *x, int64_t id, const cJSON *rows) {
+    static const char *const stats[] = {"kills", "hskills", "aikills", "headshots", "hits", "shots", "jumps", "candy"};
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        const int64_t skin = jint(r, "skin", -1), count = jint(r, "count", 0);
+        const cJSON *st = cJSON_GetObjectItemCaseSensitive(r, "stat");
+        const char *stat = cJSON_IsString(st) ? st->valuestring : NULL;
+        int known = 0;
+        for (size_t i = 0; stat && i < sizeof(stats) / sizeof(stats[0]); i++) known |= !strcmp(stats[i], stat);
+        if (!known || skin < 0 || count < 1 || count > 100000) continue;
+        if (!dbx_exists(x, SQL(.any = "SELECT 1 FROM inventory WHERE account_id = $1 AND skin_id = $2 AND count > 0"),
+                        KN_DB_ARGS(I64S(id), I64S(skin))))
+            continue;
+        dbx_exec(x,
+            SQL(.sqlite = "INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES ($1, $2, $3, $4)"
+                          " ON CONFLICT (account_id, skin_id, stat) DO UPDATE SET count = count + excluded.count",
+                .mysql = "INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES ($1, $2, $3, $4)"
+                         " ON DUPLICATE KEY UPDATE count = count + VALUES(count)",
+                .pg = "INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES ($1::int, $2::int, $3, $4::bigint)"
+                      " ON CONFLICT (account_id, skin_id, stat) DO UPDATE SET count = skin_stats.count + EXCLUDED.count"),
+            4, (const char *const[]){I64S(id), I64S(skin), stat, I64S(count)});
+    }
+}
+
 /* kn_commit_stats(p json, max_kr): idempotent per (match, account) */
 static kn_db_result *run_commit_stats(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (dbx_is_pg(&x)) {
+        /* the commit is PostgreSQL's own function (atomic, 0341 / 0365); its account then gets what C adds */
+        char *s = dbx_text(&x, SQL(.pg = "SELECT kn_commit_stats($1::jsonb, $2::int)::text"), KN_DB_ARGS(P(0), P(1)));
+        cJSON *v = s ? cJSON_Parse(s) : NULL;
+        free(s);
+        db_account_pg_finish(&x, jint(v, "id", 0), v);
+        return dbx_json(&x, "kn_commit_stats", v);
+    }
     cJSON *in = P(0) ? cJSON_Parse(P(0)) : NULL;
     int64_t id = jint(in, "id", 0);
     if (!in || id <= 0 || !dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)))) {
@@ -354,6 +395,7 @@ static kn_db_result *run_commit_stats(kn_dbconn *c, int n, const char *const *p)
     }
     /* v10's end-screen 2x XP offer: the match just played, when it counted and was not competitive */
     db_dxp_record_match(&x, id, games > 0 && !comp, xp);
+    commit_skin_stats(&x, id, cJSON_GetObjectItemCaseSensitive(in, "skinStats"));
     cJSON_Delete(in);
     cJSON *a = db_account_json(&x, id);
     if (a) {
@@ -362,7 +404,8 @@ static kn_db_result *run_commit_stats(kn_dbconn *c, int n, const char *const *p)
     }
     return dbx_json(&x, "kn_commit_stats", a);
 }
-const kn_proc P_COMMIT_STATS = {"commit_stats", "SELECT kn_commit_stats($1::jsonb, $2)", run_commit_stats};
+/* .pg NULL: PostgreSQL runs run_commit_stats too, which calls kn_commit_stats and finishes its account (chat_banned, ...) */
+const kn_proc P_COMMIT_STATS = {"commit_stats", NULL, run_commit_stats};
 
 /* (ids json, krs json) -> {funds:[...]} for the ids that exist, in order */
 static kn_db_result *run_rewards(kn_dbconn *c, int n, const char *const *p) {

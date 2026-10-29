@@ -7,9 +7,14 @@
 #include <stddef.h>
 
 // The offer as the bundle serializes it (deob-10.0.4.js:111287-111297): {i, c} per stack, {i, c, iids: [sid]} per
-// painted copy. *copies counts the copy units: the caller refuses an offer with copies, because the official
-// instance ids of a copy are not mapped to KrunkNative's copy ids yet. Returns a new array (cJSON_Delete it).
+// copy. The units come from the official trade inventories (kio_trade_inventory), so a copy's sid is its official
+// instance id. *copies (may be NULL) counts the copy units. Returns a new array (cJSON_Delete it).
 cJSON *kio_trade_offer(const EconTradeItem *items, int n, int *copies);
+
+// One side of GET trades/inventory/<id> (my_inventory / their_inventory: rows {i, st, sid, cnt | c, m, nt},
+// deob-10.0.4.js:111208-111262) as the rows the Create Trade window reads: a stack (st 1) is {i, c: its count} with no
+// sid; any other row is one copy {i, c: 1, sid: its instance id, m}. nt is kept. Returns a new array (cJSON_Delete it).
+cJSON *kio_trade_inventory(const cJSON *official);
 
 // POST trades/create's body {target_player_id, my_offer, their_offer, message} (deob-10.0.4.js:111326-111331).
 // Takes ownership of my_offer and their_offer; returns a new object (cJSON_Delete it).

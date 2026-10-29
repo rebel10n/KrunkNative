@@ -1108,6 +1108,9 @@ static void ai_send_hit(Game *game, const GameAI *ai, const Player *dealer, cons
         .ai = 1,
     };
     game_send_hit(game, dealer->uid, &hit, damage); // game.showHit(player, ai, dmg, crit, true)
+    // v10.0.4 showHit: the hit that killed an AI counts "aikills" on the dealer's weapon (deob-10.0.4.js:191488-191489)
+    if (!ai->active && dealer->weapon && dealer->loadout && dealer->loadout_index >= 0 && dealer->loadout_index < dealer->loadout_size)
+        game_count_skin_stat(game, (Player *) dealer, dealer->loadout[dealer->loadout_index], "aikills", 1);
 }
 
 void game_ai_remove(Game *game, GameAI *ai) { // AI.removeFully
@@ -1125,8 +1128,42 @@ void game_ai_remove(Game *game, GameAI *ai) { // AI.removeFully
 }
 
 static void ai_rewards(Game *game, GameAI *ai); // AI.kill's skin drops (after ai_path_node)
+static int ai_damaged_by(const GameAI *ai, int uid); // dmgList.includes (with ai_rewards)
 
 // AI.kill(killer, silent)
+// AI.init's challengeKey (deob-10.0.4.js:181957-181960): "ai_" + (dat.chKey || name) lowercased with [^a-z0-9] removed,
+// null (0) when nothing is left
+int ai_challenge_key(const GameAI *ai, char *out, const size_t n) {
+    const char *src = ai->data.ch_key[0] ? ai->data.ch_key : ai->name;
+    size_t len = 0;
+    if (n < 4) return 0;
+    memcpy(out, "ai_", 3);
+    for (const char *c = src; *c && 3 + len + 1 < n; c++) {
+        const char lower = (char) tolower((unsigned char) *c);
+        if ((lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9')) out[3 + len++] = lower;
+    }
+    out[3 + len] = 0;
+    return len > 0;
+}
+
+// creditChallengeKill (deob-10.0.4.js:182984-182995, the same in v10.0.3): the killer's challenge (wep 12 after a melee
+// hit, else the held weapon), then for a boss or a rewarding AI every other active non-bot player in dmgList (no wep)
+static void ai_credit_challenge_kill(Game *game, const GameAI *ai, const Player *source) {
+    char key[GAME_AI_NAME_SIZE + 4];
+    if (!ai_challenge_key(ai, key, sizeof(key))) return;
+    if (source) {
+        const int held = source->loadout && source->loadout_index >= 0 && source->loadout_index < source->loadout_size
+                             ? source->loadout[source->loadout_index] : -1;
+        game_challenge(game, source, key, 1, ai->melee_hit ? 12 : held, -1);
+    }
+    if (!ai->data.is_boss && !ai->data.has_reward) return;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *p = game->players[i];
+        if (!p || p == source || p->is_bot || !p->active || !ai_damaged_by(ai, p->uid)) continue;
+        game_challenge(game, p, key, 1, -1, -1);
+    }
+}
+
 static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
     if (!ai->active) return;
     ai->active = 0;
@@ -1136,6 +1173,7 @@ static void ai_kill(Game *game, GameAI *ai, Player *source, const int silent) {
     ai->respawn_timer = 0.0f;
     if (!silent) {
         if (source) source->mode.ai_kills++; // aiKills (Zombies endStats "zombies", map-logic WP-H)
+        if (game_is_authority(game)) ai_credit_challenge_kill(game, ai, source); // challengeKey && creditChallengeKill (:183004)
         // isBoss (deob-10.0.3.js:206316-206324): every active non-bot player gets bossKills and the "bk" challenge
         if (ai->data.is_boss) {
             for (size_t i = 0; i < game->player_count; i++) {

@@ -44,6 +44,7 @@ cJSON *market_lock_body(int skin_id, int item_id, int locked);
 typedef struct {
     int *skin_ids;
     int *item_ids;
+    int *keeps; // a Box Office stack's units to keep (the Keep options' per-item count); 0 = sell / list them all
     int n;
     int cap;
 } MarketPicks;
@@ -53,6 +54,8 @@ typedef struct {
 int market_picks_toggle(MarketPicks *picks, const MarketLocks *locks, int skin_id, int item_id, int stackable);
 // Frees the picks.
 void market_picks_free(MarketPicks *picks);
+// Sets pick i's keep count (MarketPicks.keeps).
+void market_picks_set_keep(MarketPicks *picks, int i, int keep);
 
 // The POST /market/quick-sell/bulk body for picks [from, from + count): {action, items:[{skin_id, item_id}]}.
 // action: 0 Get KR, 1 Get Junk, 2 Destroy (the single quick-sell's modes, v10_market.c qsi). Caller frees.
@@ -100,8 +103,39 @@ typedef struct {
     int stack_max;  // the stack's count
     int *instances; // each copy's id (its skin_id in a bulk request)
     char **paints;  // each copy's paint key (market_paint_key), NULL when unpainted; parallel to instances
+    struct MarketCopyMeta *metas; // each copy's wear / serial / customized (market_copy_meta); parallel to instances
     int n_instances;
 } MarketGroup;
+
+// A copy's metadata as the Keep options read it (deob-10.0.4.js:147296-147305): wear (-1 none), serial (0 none) and
+// whether it is customized (a key other than wear / serial / style: a paint, a style).
+typedef struct MarketCopyMeta {
+    double wear;
+    int serial;
+    int custom;
+} MarketCopyMeta;
+MarketCopyMeta market_copy_meta(const cJSON *meta);
+
+// The wallet's Keep options (iíiiììi, deob-10.0.4.js:108967-108975; localStorage "bulkSellKeep"): keep the best
+// per_item_count of each item, painted / equipped units, serials up to serial_max (0 off), wear below wear_max (0 off),
+// rarities from min_rarity up (-1 off).
+typedef struct {
+    int per_item, per_item_count, painted, equipped, serial_max;
+    double wear_max;
+    int min_rarity;
+} MarketKeep;
+#define MARKET_KEEP_DEFAULTS {1, 1, 1, 1, 100, 0.1, -1}
+enum { MARKET_KEEP_NONE, MARKET_KEEP_STACK, MARKET_KEEP_UNSELLABLE, MARKET_KEEP_LISTED, MARKET_KEEP_LOCKED, MARKET_KEEP_EQUIPPED,
+       MARKET_KEEP_RARITY, MARKET_KEEP_PAINTED, MARKET_KEEP_SERIAL, MARKET_KEEP_WEAR };
+// IÌïîîîï (deob-10.0.4.js:147289-147306): why a unit is kept out of the bulk picks (MARKET_KEEP_NONE: it can be picked).
+// meta: NULL for a stack unit (stack: a krunker.io stackable row, which the bundle never bulk-sells).
+int market_keep_reason(const MarketKeep *k, int stack, int sellable, int listed, int locked, int equipped, int rarity,
+                       const MarketCopyMeta *meta);
+// The reason's key under wallet.bulk.keep.reason.* ("locked", ...), NULL for none / stack / unsellable.
+const char *market_keep_reason_name(int reason);
+// The Keep options as JSON for storage, and back (a missing field keeps its default).
+char *market_keep_json(const MarketKeep *k);
+MarketKeep market_keep_parse(const char *json);
 
 // The paint a copy's metadata (deob-10.0.4.js:106577-106578: metadata.paint, the colour with its '#' dropped, and
 // metadata.paintShader) as the key a match compares. malloc'd; NULL when the copy is unpainted.

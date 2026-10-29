@@ -2,6 +2,7 @@
 // (server/include/server_accounts.h, doc/backend.md section 8).
 #include <ruleset.h> // meta.ruleset
 #include <server_accounts.h>
+#include <server_skin_counters.h> // v10.0.4 counter skins: the owned list's stats, takeSkinStats at the commit
 #include <server_captcha.h> // the in-game captcha: the welcome's flag, the brain's "captcha-r"
 #include <server_brain_events.h> // v10.0.3 warsClan, map prize wheels, unb / lotWin, monetized studio games (brain_events.c)
 #include <server_log.h>
@@ -1326,6 +1327,10 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     cJSON_AddNumberToObject(p, "classIndex", class_index);
     if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
     if (final) acc_add_kill_items(p, client); // v10.0.3 event kill pools
+    // v10.0.4 takeSkinStats (deob-10.0.4.js:191561-191585): the counter skins' counts, saved for an account (not a
+    // hacker, not a K.P.D game) in a public-type game; endGame (:191612) and a leave (saveSkinStats) take them
+    cJSON *skin_stats = skin_counters_take(client, client->acct.account_id > 0 && !client->acct.hack && game_is_pub_type(&g_server->game));
+    if (skin_stats) cJSON_AddItemToObject(p, "skinStats", skin_stats);
     // v10.0.3's raid record (services/brain/raids.c, doc/v10/rules-1003.md): one run per player in a public-type
     // Raid round on an official map. noProfileStats keeps the run out of the profile stats above; the brain's
     // duplicate check makes it once per match. cleared is the winCondition's didWin, time player.timer (raid.onEnd).
@@ -2246,6 +2251,7 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
             client->acct.skin_paints[client->acct.skin_paint_count++] = (ServerSkinPaint) {skin, paint};
         }
     }
+    skin_counters_load(client, skins); // v10.0.4 counter skins: each one's copy stat m[stat]
     if (client->acct.skins_known) server_log("%s owns %d skin(s) on this network", client->name, count);
 }
 
@@ -2791,6 +2797,7 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     client->acct.funds = cJSON_IsNumber(funds) ? funds->valueint : 0;
     client->acct.premium = acc_truthy(cJSON_GetObjectItem(account, "premium"));
     client->acct.hack = acc_truthy(cJSON_GetObjectItem(account, "hack"));
+    client->acct.chat_banned = acc_truthy(cJSON_GetObjectItem(account, "chat_banned"));
     client->acct.flags = 0;
     if (client->acct.premium) client->acct.flags |= NET_PLAYER_INFO_PREMIUM;
     if (acc_truthy(cJSON_GetObjectItem(account, "featured"))) client->acct.flags |= NET_PLAYER_INFO_VERIFIED;

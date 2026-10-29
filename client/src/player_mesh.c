@@ -5,6 +5,8 @@
 #include <render_settings.h>
 #include <ui_logic.h> // ui_setting_weapon_float: vmSetts Per Weapon
 #include <skin_fx.h>
+#include <skin_counter.h> // v10.0.4 counter skins on the weapon
+#include <backend_ui.h>   // account_skin_stat: your krunker.io copy's counter base
 #include <skin_video.h> // the upgraded weapons' altSkin video
 #include <third_person.h> // the local third-person model
 #include <class_camera.h> // ... and the class camera's (thirdPerson, a camera offset, a camType but FPS)
@@ -850,6 +852,29 @@ static int player_weapon_skin_files_ready(const Player *player) {
     return 0;
 }
 
+// The worn copy's seed (getMat's seeded shader 15, deob-10.0.4.js:203448 / :203463): you on krunker.io, your own account's
+// copy; everyone on Box Office, the server's NET_EXT_KN_SKIN_COPIES. 0 = none (a stack, a shop copy).
+static int player_copy_seed(const Player *player, const int store) {
+    if (store < 0) return 0;
+    const int own = player->is_you ? account_skin_seed(store) : -1;
+    return own >= 0 ? own : skin_counter_seed(player->uid, store);
+}
+
+// generateMeshes' counter attach (deob-10.0.4.js:172723-172737): a counter skin's stat counter on the weapon mesh, showing
+// the copy's stat (base: NET_EXT_KN_SKIN_COPIES / the account's copy meta, skin_counter_base) plus this match's
+// counterLive count.
+static void player_attach_counter(const Player *player, PlayerArms *arms, const int slot, const ViewerSkin *skin, Mesh *weapon_mesh) {
+    if (!skin || skin->counter_digits <= 0 || arms->counter || !weapon_mesh) return;
+    const Weapon *weapon = player->game ? player->game->weapons[player->loadout[slot]] : NULL;
+    const int store = weapon && weapon->melee ? player->skins.melee : player_slot_skin_index(player, slot);
+    const char *stat = skin->counter_stat ? skin->counter_stat : "kills";
+    const long live = skin_counter_live(player->uid, player->loadout[slot], stat);
+    // you on krunker.io: the account's own copy (its m[stat]); everyone on Box Office: the server's NET_EXT_KN_SKIN_COPIES
+    const long own = player->is_you ? account_skin_stat(store, stat) : -1;
+    const long base = own >= 0 ? own : skin_counter_base(player->uid, store);
+    arms->counter = skin_counter_create(skin, base + live, &weapon_mesh->transform);
+}
+
 // The GLTF remodels follow their carrier's visibility and advance their clips.
 static void player_weapon_models_update(const PlayerMesh *player_mesh, const int loadout_size) {
     if (!player_mesh->arms) return;
@@ -864,6 +889,7 @@ static void player_weapon_models_update(const PlayerMesh *player_mesh, const int
             gltf_instance_set_visible(model, carrier->visible);
             gltf_instance_update(model, now);
         }
+        if (arms->counter) skin_counter_set_visible(arms->counter, arms->weapon_right ? arms->weapon_right->visible : 0);
         // charm and wrist follow the weapon / arm visibility
         const Mesh *shown = arms->weapon_right ? arms->weapon_right : arms->left && arms->left->lower && arms->left->lower->mesh_count ? arms->left->lower->meshes[0] : NULL;
         const int visible = shown ? shown->visible : 0;
@@ -1143,8 +1169,9 @@ static void dye_color_cube(ColorCube *cube, const ViewerSkin *dye) {
 // The dye's genHead / genBody / genLeg / genArms options, video and projection included (v10.0.3: the Deep Space and
 // Glitch dyes play videos/video_<n>.mp4 on every body part and the first-person arms, deob-10.0.3.js:194337-194581)
 static void player_dye_meshes(PlayerMesh *player_mesh, const size_t loadout_size, const ViewerSkin *dye) {
+    // v10.0.4: a dye whose only effect is a custom shader (the Ghillie Suit's 16, its customShaderInfo) still applies
     if (!(dye->flags & VS_RGB) && dye->color < 0 && dye->opac <= 0.0f && !(dye->tex && !(dye->flags & VS_TEX_NUM)) &&
-        !(dye->flags2 & (VS2_PROJECTION | VS2_VIDEO)))
+        !(dye->flags2 & (VS2_PROJECTION | VS2_VIDEO)) && !((dye->flags2 & VS2_SHADER) && dye->shader_info))
         return;
     dye_color_cube(player_mesh->head, dye);
     dye_color_cube(player_mesh->body, dye);
@@ -1499,6 +1526,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                         melee->transform.scale.x = melee->transform.scale.y = melee->transform.scale.z = melee_scale;
 
                         arms->weapon_right = melee;
+                        player_attach_counter(player, arms, i, skin, melee);
+                        if (skin) skin_fx_set_seed(melee_model, melee, player_copy_seed(player, player->skins.melee));
                     }
                 }
 
@@ -1572,6 +1601,8 @@ void player_generate_meshes(Player *player, const int render_you) {
 
                         if (j) arms->weapon_left = weapon_mesh;
                         else arms->weapon_right = weapon_mesh;
+                        if (!j && !alt) player_attach_counter(player, arms, i, skin, weapon_mesh);
+                        if (skin && !alt) skin_fx_set_seed(weapon_model, weapon_mesh, player_copy_seed(player, player_slot_skin_index(player, i)));
 
                         if (!weapon->akimbo) break;
                     }
@@ -2081,6 +2112,7 @@ void player_meshes_fini(Player *player) {
             if (arms->weapon_right) fx_mesh_fini(arms->weapon_right);
             if (arms->weapon_left) fx_mesh_fini(arms->weapon_left);
             for (int k = 0; k < 2; k++) fx_gltf_fini(arms->weapon_models[k]);
+            skin_counter_fini(arms->counter);
             if (arms->charm) fx_mesh_fini(arms->charm);
             if (arms->charm_mount) fx_mesh_fini(arms->charm_mount);
             if (arms->wrist) fx_mesh_fini(arms->wrist);

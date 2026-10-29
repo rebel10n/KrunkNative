@@ -194,7 +194,31 @@ typedef enum {
     NET_EXT_KN_RANKED_NOTICE = 0x8142, // S -> C NetRankedNoticePacket: the brain's "queued for ranked" line, the player apart from the text
     // 0x8150 v10.0.3 event kill pools (shared/include/kill_pools.h, doc/v10/kill-pools.md): the END's otherData.items
     NET_EXT_KN_END_ITEM = 0x8150, // S -> C NetEndItemPacket, one per item the match paid, right after the END
+    // 0x8160 v10.0.4 counter skins (client/include/skin_counter.h, server/src/skin_counters_server.c)
+    NET_EXT_KN_SKIN_COPIES = 0x8160, // S -> C NetSkinCopiesPacket, right after a player's SKINS: each worn copy's stat and seed
+    NET_EXT_KN_SKIN_STAT = 0x8161,     // S -> C NetSkinStatPacket: "sks" SKIN_STAT, a server-only stat counted for you
 } NetExtSubtype;
+
+// NET_EXT_KN_SKIN_COPIES (S -> C): what player `uid`'s worn copies carry, in PlayerSkins order (primary, secondary, melee):
+// base, a counter skin's copy stat, generateMeshes' counter base m[stat] (deob-10.0.4.js:172726-172728), -1 = no counter
+// skin on that slot; seed, the copy's seed for the seeded custom shader 15 (iîîíïiï, :24344-24353: skin_copy_seed), 0 none.
+// Sent after every SKINS that has either, so a client sees it before the SPAWN builds the meshes.
+typedef struct {
+    int32_t uid;
+    int32_t base[3];
+    int32_t seed[3];
+} NetSkinCopiesPacket;
+_Static_assert(sizeof(NetSkinCopiesPacket) == 28, "NetSkinCopiesPacket: the wire body is 28 bytes");
+
+// NET_EXT_KN_SKIN_STAT (S -> C, to the counting player only): SKIN_STAT "sks" [weapon, stat, amount] (deob-10.0.4.js:184311),
+// handled as countSkinStat(you, weapon, stat, amount) (:221919-221923). stat: the index in SKIN_STATS (shared.h).
+typedef struct {
+    int32_t weapon;
+    int32_t amount;
+    uint8_t stat;
+    uint8_t pad[3];
+} NetSkinStatPacket;
+_Static_assert(sizeof(NetSkinStatPacket) == 12, "NetSkinStatPacket: the wire body is 12 bytes");
 
 // NET_EXT_KN_END_ITEM (S -> C): one of the items a public match paid this player from the ongoing events'
 // kill pools (v10.0.3 endGame's itemRewards, sent as the END's otherData.items {t: "skin", i, r},

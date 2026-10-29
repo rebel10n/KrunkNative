@@ -142,7 +142,10 @@ static int send_json(const StripeState st, const KrunkerService svc, const char 
 // Answer checks for a request of the current purchase. 0 = ignore (an older purchase's answer).
 static int current(const void *user) { return (unsigned) (uintptr_t) user == S.gen && S.st != ST_IDLE; }
 
-int kio_checkout_stripe_available(void) { return 0; }
+// iiìîiíï (deob-10.0.4.js:212398-212400): canShowStripe && !steam && FRVR.iap && stripeEnabled. canShowStripe is
+// !isMsPwa && !isSteamClient && !isEpicClient (index.html) and stripeEnabled is on (:16476): none of those builds is
+// this client's, so Stripe is offered whenever the krunker.io account is signed in (FRVR's iap needs its token).
+int kio_checkout_stripe_available(void) { return signed_in_fn && signed_in_fn(); }
 
 int kio_checkout_stripe_begin(const cJSON *body, const KioStripeDone done, void *user) {
     if (S.st != ST_IDLE) {

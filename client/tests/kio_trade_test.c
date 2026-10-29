@@ -1,4 +1,4 @@
-// kio_trade: the offer serializer, the create body and the trade paths (client/src/ui/kio_trade.c).
+// kio_trade: the offer serializer, the trade inventory rows, the create body and the trade paths (client/src/ui/kio_trade.c).
 #include <kio_trade.h>
 #include <stdio.h>
 #include <string.h>
@@ -103,6 +103,28 @@ int main(void) {
     CHECK(!strcmp(path, "trades/12/cancel"), "cancel path (%s)", path);
     kio_trade_path(path, sizeof(path), "inventory", 42);
     CHECK(!strcmp(path, "trades/inventory/42"), "inventory path (%s)", path);
+
+    // the official trade inventory rows (deob-10.0.4.js:111208-111262): a stack (st 1) is {i, c: cnt} with no sid,
+    // a copy {i, c: 1, sid, m}; the copy's sid is the official instance id the offer sends as iids
+    cJSON *official_inv = cJSON_Parse("[{\"i\":3,\"st\":1,\"sid\":900,\"cnt\":4},{\"i\":3,\"st\":0,\"sid\":5501,\"m\":{\"paint\":\"ff0000\"}},"
+                                  "{\"i\":8,\"st\":1,\"sid\":901,\"c\":2,\"nt\":1},{\"st\":1,\"cnt\":3}]");
+    cJSON *rows = kio_trade_inventory(official_inv);
+    CHECK(cJSON_GetArraySize(rows) == 3, "a row without an item index is dropped (%d rows)", cJSON_GetArraySize(rows));
+    const cJSON *stack = cJSON_GetArrayItem(rows, 0), *copy = cJSON_GetArrayItem(rows, 1), *other = cJSON_GetArrayItem(rows, 2);
+    CHECK(cJSON_GetObjectItem(stack, "c")->valueint == 4 && !cJSON_GetObjectItem(stack, "sid"), "a stack takes cnt and loses its sid");
+    CHECK(cJSON_GetObjectItem(copy, "c")->valueint == 1 && cJSON_GetObjectItem(copy, "sid")->valueint == 5501, "a copy is one unit with its instance id");
+    CHECK(cJSON_IsObject(cJSON_GetObjectItem(copy, "m")), "a copy keeps its metadata (its paint)");
+    CHECK(cJSON_GetObjectItem(other, "c")->valueint == 2 && cJSON_GetObjectItem(other, "nt")->valueint == 1, "a stack with c and nt keeps both");
+    const EconTradeItem picked[1] = {{.i = 3, .c = 1, .sid = 5501}};
+    cJSON *painted = kio_trade_offer(picked, 1, NULL);
+    const cJSON *pids = cJSON_GetObjectItem(cJSON_GetArrayItem(painted, 0), "iids");
+    CHECK(cJSON_GetArrayItem(pids, 0)->valueint == 5501, "a picked copy is offered by its instance id");
+    cJSON_Delete(painted);
+    cJSON_Delete(rows);
+    cJSON_Delete(official_inv);
+    cJSON *none_rows = kio_trade_inventory(NULL);
+    CHECK(cJSON_IsArray(none_rows) && cJSON_GetArraySize(none_rows) == 0, "no inventory, no rows");
+    cJSON_Delete(none_rows);
 
     if (failures) {
         printf("kio_trade_test: %d failures\n", failures);

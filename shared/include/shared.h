@@ -1,6 +1,7 @@
 #pragma once
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h> // skin_stat_index (inline)
 #include <stddef.h> // offsetof (NET_ENT_PACKET_V3_SIZE)
 #include <modes.h>
 #include <weapons.h>
@@ -1458,6 +1459,8 @@ typedef struct Player_t {
     // playerStep step (stepDir flip) and per resetStep landing with a vertical speed.
     unsigned short step_events;
     unsigned short land_events;
+    unsigned short jump_events;   // a jump that was not blocked, outside a recon replay: the client's "jumps" counter skin
+                                  // (countSkinStat's client branch, deob-10.0.4.js:174219-174221, :175895)
 
     vec3 bob_anim;
     vec3 lean_anim;
@@ -2061,6 +2064,11 @@ typedef struct {
     // account.hasSkin(skin) for an AI's rewardUnique: 1 when the player's account owns it (the server: the coordinator's
     // inventory, accounts.c; nothing is known as owned before it arrives). NULL = owns nothing.
     int (*has_skin)(const struct Game_t*, const Player*, int skin);
+    // v10.0.4 countSkinStat on the authority (deob-10.0.4.js:175889-175893): `stat` (one of SKIN_STATS) happened `amount`
+    // times with weapon `weapon_id` of `player`, -1 = every counter skin the player wears for that stat (trackStat's
+    // candy loop, :184308-184311). The server counts it on the counter skin worn on that weapon and saves it with the
+    // match (server/src/skin_counters_server.c). NULL = nothing counted.
+    void (*skin_stat)(struct Game_t*, Player *player, int weapon_id, const char *stat, int amount);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2425,6 +2433,37 @@ void game_give_skin(Game*, const Player*, int skin, const char *reason);
 int game_drop_skin(Game*, Player*, int skin, const char *reason, vec3 position);
 int game_skin_rarity(const Game*, int skin);               // GameHooks.skin_rarity, -1 without it
 int game_has_skin(const Game*, const Player*, int skin);   // GameHooks.has_skin, 0 without it
+// v10.0.4 counter skins: the stats a counter can count (iiiîìïî, deob-10.0.4.js:106489) and the ones only the server knows,
+// sent to the owner as SKIN_STAT (iíìïiíi, :106490)
+#define SKIN_STATS {"kills", "hskills", "aikills", "headshots", "hits", "shots", "jumps", "candy"}
+#define SKIN_STAT_COUNT 8
+static inline int skin_stat_index(const char *stat) { // the index in SKIN_STATS, -1 none (inline: the link test has no game.c)
+    static const char *const stats[SKIN_STAT_COUNT] = SKIN_STATS;
+    for (int i = 0; stat && i < SKIN_STAT_COUNT; i++)
+        if (!strcmp(stats[i], stat)) return i;
+    return -1;
+}
+static inline int skin_stat_server_only(const char *stat) { return stat && !strcmp(stat, "candy"); } // 1 for "candy"
+// iîîíïiï (deob-10.0.4.js:24344-24353): a copy's seed for the seeded custom shader 15: its meta seed, (floor(seed) % 1e6 +
+// 1e6) % 1e6, when it has one, else its instance id mixed (lowbias32, :24336-24342) % 1e6; 0 = no copy (a stack, a shop
+// preview). client/src/skin_fx.c skin_fx_copy_seed is the same; the server sends it in NET_EXT_KN_SKIN_COPIES.
+static inline int32_t skin_copy_seed(const int64_t copy_id, const int has_meta_seed, const double meta_seed) {
+    if (has_meta_seed) {
+        int64_t i = (int64_t) meta_seed;
+        if ((double) i > meta_seed) i--; // floor
+        return (int32_t) (((i % 1000000) + 1000000) % 1000000);
+    }
+    if (!copy_id) return 0;
+    uint32_t x = (uint32_t) copy_id;
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return (int32_t) (x % 1000000u);
+}
+// countSkinStat on the authority: GameHooks.skin_stat when set (amount < 1 counts 1: `iíIïíïi || 1`, :175890)
+void game_count_skin_stat(Game*, Player*, int weapon_id, const char *stat, int amount);
 void game_update_event_flags(Game*);                       // updateEventFlags: double_raid_drops now (game_state.c)
 void game_set_event_clock(int64_t (*now_ms)(void));        // tests: the clock of updateEventFlags (NULL = the wall clock)
 // game.sendUserJunk(reason, player, junk) (GameHooks.junk_credit): the callers gate the mode

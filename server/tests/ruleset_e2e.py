@@ -109,7 +109,9 @@ def run_client(name, args, script):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL", "KRUNKNATIVE_UI_DIR")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": "640x360"})
+                "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
+                # the console's lines ("unknown command: ruleset") reach the log at level 2 only (klog.h, 5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2"})
     log = os.path.join(WORK, f"{name}.log")
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,

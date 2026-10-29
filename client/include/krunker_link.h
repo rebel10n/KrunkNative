@@ -462,10 +462,6 @@ void krunker_link_captcha_failed(KrunkerLink *link);
 // The official link's object uids (krunker_link_world.c): io.map resolved init's map: the round's table of v10
 // GameObject uids (map_game_uids_build; the link takes it, NULL / empty: the uids go through as they are). Under the lock.
 void krunker_link_set_uids(KrunkerLink *l, MapGameUids *table);
-// The answer to our REDEEM_VOUCHER ("vo" -> "vr", deob-10.0.4.js:221042): funds (has_funds 0 = null) and the
-// message. The UI registers it (kio_store.c) before it sends "vo"; the link layer does not include UI headers.
-typedef void (*KrunkerVoucherFn)(int has_funds, double funds, const char *message);
-void krunker_net_voucher_listen(KrunkerVoucherFn fn);
 // Our SKIN_REWARD's instance (v10.0.4: "skin" [skinIndex, silent, iid, {serial}], deob-10.0.4.js:194184-194189): the
 // socket thread keeps it (under its own lock) before the drop's NET_PACKET_SKIN_FOUND goes out, and the main thread's
 // account_add_skin(skin) (account_ui.c) takes it, so the account adds the instance as its own entry (v10.0.4's addSkin

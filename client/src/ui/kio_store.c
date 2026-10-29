@@ -27,8 +27,8 @@
 #include "klog.h"
 #include <junk_shop_ui.h>
 #include <krunker_account.h>
-#include <krunker_net.h> // krunker_net_send_account_frame ("vo", the voucher redeem)
-#include <krunker_link.h> // krunker_net_voucher_listen (the "vr" answer)
+#include <krunker_net.h> // krunker_net_send_account_frame ("vo", the voucher redeem), krunker_net_voucher_listen ("vr")
+#include <kio_checkout.h> // real-priced products: the payment provider's checkout
 #include <backend_ui.h>
 #include <v10_ui.h>
 #include <v10_menu.h>
@@ -333,7 +333,7 @@ void kio_store_redeem_prompt(void) {
         return;
     }
     krunker_net_voucher_listen(kio_store_voucher_answer); // the "vr" answer comes back to whoever sent "vo"
-    ui_prompt(I18N("windows.store.voucherinfo", "Enter KR Code"), voucher_answered, NULL);
+    ui_prompt(I18N("windows.store.voucherinfo", "Redeem Vouchers from certain Streams & Game Events"), voucher_answered, NULL); // deob-10.0.4.js:221053
 }
 
 // The text of the answer, its HTML tags removed (v10 sets it as innerHTML, deob-10.0.4.js:221042).
@@ -810,6 +810,18 @@ static int lookup(const int display_id, const cJSON **display, const cJSON **pro
     return *display && cJSON_IsObject(*product);
 }
 
+// A real-priced product's buy (_39604: "real" === price.type -> showPurchase("catalog:{display}|price_ref"),
+// deob-10.0.4.js:117792-117793 / :118194): the payment provider's checkout (kio_checkout.c). 1 = it was one.
+static int buy_real(const int display_id, const int qty) {
+    const cJSON *display, *product;
+    if (!lookup(display_id, &display, &product)) return 0;
+    const ShopItem it = shop_item(display, product);
+    if (!it.price || strcmp(it.ptype, "real")) return 0;
+    const char *ref = v10_str(it.price, "price_ref");
+    if (ref[0]) kio_checkout_catalog(ref, it.name, it.display_id, qty >= 1 ? qty : 1);
+    return 1;
+}
+
 static const char *item_type(const ViewerSkin *vs) {
     static const char *const types[] = {NULL, "Hat Item", "Body Item", "Melee Item", "Spray Item", "Dye Item", "Waist Item", "Face Item", "Shoe Item", "Pet Item",
                                         "Collectible Item", "Wrist Item", "Charm Item", "Spin Ticket Item", "Back Item", "Head Item", "Player Card"};
@@ -860,7 +872,7 @@ static void open_item(const int display_id) {
         item_view_html(&sb, &it);
         v10_view_push(sb_finish(&sb), NULL, NULL, NULL);
     } else if ((!strcmp(it.ctype, "currency") || !strcmp(it.ctype, "badge")) && !it.sold && !it.expired) {
-        kio_store_buy(it.display_id, it.product_id, NULL); // v10: currency / badge cards buy at once (_39604)
+        if (!buy_real(it.display_id, 1)) kio_store_buy(it.display_id, it.product_id, NULL); // v10: currency / badge cards buy at once (_39604)
     }
 }
 
@@ -872,6 +884,8 @@ typedef struct {
     int display_id, product_id;
     double amount;
     char product[128], currency[16], name[64], question[256];
+    int real;           // a real-priced product: giftProduct(price_ref, display, name) (deob-10.0.4.js:117734-117735)
+    char price_ref[96];
 } GiftOrder;
 
 static void gift_confirmed(const int accepted, const char *text, void *user) {
@@ -896,6 +910,11 @@ static void gift_named(const int accepted, const char *text, void *user) {
         return;
     }
     snprintf(g->name, sizeof(g->name), "%.*s", (int) (end < sizeof(g->name) - 1 ? end : sizeof(g->name) - 1), text);
+    if (g->real) { // the payment provider's checkout (kio_checkout.c), no confirm (deob-10.0.4.js:117734-117735)
+        kio_checkout_gift(g->price_ref, g->product, g->display_id, g->name);
+        free(g);
+        return;
+    }
     snprintf(g->question, sizeof(g->question), "Send %s to %s for %.0f %s?", g->product, g->name, g->amount, g->currency);
     ui_confirm(g->question, gift_confirmed, g);
 }
@@ -908,12 +927,20 @@ static void kio_store_gift(const int display_id, const int product_id) {
     const cJSON *display, *product;
     if (!lookup(display_id, &display, &product)) return;
     const ShopItem it = shop_item(display, product);
-    if (!it.price || strcmp(it.ptype, "virtual")) { // a real-money gift: giftProduct's payment provider checkout
-        v10_view_push(v10_io_error(I18N("kn.kio.store.unwiredTitle", "krunker.io Store"),
-                                   I18N("kn.kio.store.giftPayment", "Real-money gifts are paid through krunker.io's checkout, which KrunkNative does not run yet.")),
-                      NULL, NULL, NULL);
+    if (it.price && !strcmp(it.ptype, "real")) { // a real-money gift: the name, then giftProduct's checkout (no level gate)
+        const char *ref = v10_str(it.price, "price_ref");
+        if (!ref[0]) return;
+        GiftOrder *g = calloc(1, sizeof(*g));
+        if (!g) return;
+        g->real = 1;
+        g->display_id = display_id;
+        g->product_id = product_id;
+        snprintf(g->product, sizeof(g->product), "%s", it.name ? it.name : "");
+        snprintf(g->price_ref, sizeof(g->price_ref), "%s", ref);
+        ui_prompt(I18N("windows.store.gift.name", "Player Name"), gift_named, g);
         return;
     }
+    if (!it.price || strcmp(it.ptype, "virtual")) return; // free / ads products are not gifted (_39588)
     const AccountInfo *acc = active_account();
     if (acc->level < 10) { // social.market.req: virtual items are gifted from level 10 (deob-10.0.4.js:117707)
         v10_view_push(v10_io_error(I18N("kn.kio.store.unwiredTitle", "krunker.io Store"),
@@ -928,7 +955,7 @@ static void kio_store_gift(const int display_id, const int product_id) {
     const cJSON *virt = cJSON_GetObjectItem(it.price, "virtual");
     g->amount = v10_num(virt, "amount", 0);
     snprintf(g->currency, sizeof(g->currency), "%s", v10_str(virt, "currency"));
-    ui_prompt(I18N("windows.store.gift.name", "Player name"), gift_named, g);
+    ui_prompt(I18N("windows.store.gift.name", "Player Name"), gift_named, g);
 }
 
 // ------------------------------------------------------------------ --render-scenario
@@ -967,8 +994,10 @@ int kio_store_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     const char *h = name + 9;
     if (!strcmp(h, "Buy")) { // _39604 / the dynamic card's _39732 / _39737: shop/purchase (knKioShopBuy(display, product))
         html_ui_stop_propagation();
-        if (kio_store_active()) kio_store_buy((int) arg_num(ev, args, argc, 0), (int) arg_num(ev, args, argc, 1), NULL);
-        else junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product
+        const int display = (int) arg_num(ev, args, argc, 0);
+        if (!kio_store_active()) junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product
+        else if (!active_account()) v10_menu_handle("loginOrRegister", NULL, NULL, 0);
+        else if (!buy_real(display, qty_of(display, 1))) kio_store_buy(display, (int) arg_num(ev, args, argc, 1), NULL);
     } else if (!strcmp(h, "Gift")) { // _39563: the name prompt, then shop/purchase {gift_to} (kio_store_gift)
         html_ui_stop_propagation();
         if (kio_store_active()) kio_store_gift((int) arg_num(ev, args, argc, 0), (int) arg_num(ev, args, argc, 1));

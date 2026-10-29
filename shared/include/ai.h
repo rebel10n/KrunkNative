@@ -120,6 +120,9 @@ typedef struct {
     int projectile;               // v3.1.1 pj (0..5); v7 shoots projectiles.stored[1] with projOb
     int behaviour;                // bh (0..20): 1 Weeping, 2 Lord of Souls, 3 enrage, 4 mirror image, 5 Drowned Sailor
     unsigned char is_boss;        // boss / isBoss: its death gives every active non-bot player bossKills and "bk"
+    // AI.spawn's challengeKey (dat.chKey = String(challengeKey).slice(0, 32), deob-10.0.4.js:186960); "" = the AI's name
+    // (AI.init's challengeKey, :181957-181960; ai_challenge_key)
+    char ch_key[33];
     // v10.0.4 skin rewards (AI.init, deob-10.0.4.js:181986-181991; shared/include/raid_drops.h): AI.kill's drop loop in a
     // pub-type round. Map AIs: rew / rewm / rewr / rewc / rewn (buildAIData :168428-168432, addAI :168538); KrunkScript
     // AI.spawn: reward / rewardMethod / rewardReq / rewardChance / rewardNode / rewardUnique (:186970-186983).
@@ -178,6 +181,7 @@ typedef struct GameAI_t {
     unsigned char can_be_seen:1;  // client: Game.canSee(player, ai) == null (gameLoop nameVisRate pass)
     unsigned char sent_non_players:1; // "aai" went to the connections without a player
     unsigned char did_move:1;     // didMov: moved >= 0.1 this update (sync, Move / Idle clip)
+    unsigned char melee_hit:1;    // meleeHit: a player's melee damaged it (deob-10.0.4.js:174752; never cleared, as the bundle's)
     unsigned char on_ground:1;
     unsigned char invincible:1;   // invincibleOnStuck
     unsigned char perm_invincible:1;
@@ -445,6 +449,8 @@ int game_ai_change_health(Game*, GameAI*, float amount, Player *source, int forc
 int game_ai_change_health_by_ai(Game*, GameAI*, float amount, GameAI *source);
 void game_ai_set_health(Game*, GameAI*, float value);   // KrunkScript health =: changeHealth(v, null, false, true)
 void game_ai_kill(Game*, GameAI*, Player *source);      // AI.kill (onAIDeath, mode.onAIDeath, respawn or removal)
+// AI.init's challengeKey: "ai_" + (data.ch_key || name) lowercased, [^a-z0-9] removed; 0 when that is empty (null)
+int ai_challenge_key(const GameAI*, char *out, size_t n);
 void game_ai_remove(Game*, GameAI*);                    // AI.removeFully: "rai" to every viewer, dropped
 void game_ai_force_team(Game*, GameAI*, int team, float ms, float chance); // AI.forceTeam
 void game_ai_give_effect(Game*, GameAI*, int effect, int count);           // AI.giveEffect

@@ -73,6 +73,7 @@ void hud_ui_hit(Client*, int kill);
 #include <console.h>     // ui_console_on_server_line: the official line in the developer console
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
 #include "v10_loading.h" // #loadingBg: the v10.0.4 map card (client/tests/v10_loading_test.c)
+#include <game_config.h> // game_config_is_custom: the card's accent is #fff in a custom game
 #include <scene_warm.h> // the card waits for the warm frames (scene_warm_active)
 #include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
 #include <candy_heist.h> // Candy Heist: candy_heist_is_mode / candy_heist_candy for the team slot (hud_render_team)
@@ -4615,7 +4616,7 @@ void hud_ui_on_init(Client *client) {
 
 // v10.0.4 #loadingBg for the match's map (v10_loading.c): the thumbnail is the page's img/maps/map_<index>.png,
 // none for a custom map and for map 0 unless it is Burg (deob-10.0.4.js:223018-223019); the accent is the mode's
-// tag[1] in v10, which KrunkNative's mode table does not carry yet, so every mode gets #fff.
+// tag[1], #fff in a custom game (v10_loading_mode_accent, deob-10.0.4.js:223040).
 void hud_ui_map_loading_begin(Client *client) {
     if (!client || !client->game.ready) return;
     const int index = client->game.current_map_index;
@@ -4630,7 +4631,8 @@ void hud_ui_map_loading_begin(Client *client) {
         .map_thumb = no_thumb ? NULL : thumb,
         .map_name = map_name,
         .mode_name = client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : NULL,
-        .accent = NULL,
+        .accent = v10_loading_mode_accent(client->game.mode ? (int) client->game.mode->config.id : -1,
+                                          game_config_is_custom(&client->game)),
     };
     v10_loading_begin(&map, hud_now_ms(client));
 }

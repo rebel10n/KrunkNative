@@ -68,8 +68,10 @@ verified yet: re-check it against the target bundle when it is touched.
     score challenges, a better third-person arm for `player.pose.holdL`.
 - Real-money checkout (doc/v7/decisions.md): C drives the purchase (the game socket's `xst` /
   `xpurchase` / `xsin`, FRVR's iap requests); the payment provider's own hosted page opens in the
-  system browser, never krunker.io's page or the JS game. NOT WIRED YET: real-money purchases do
-  not complete in KrunkNative (doc/v10/checkout-browser.md, doc/v10/checkout-stripe.md).
+  system browser, never krunker.io's page or the JS game. The provider credits the account; the
+  client waits for the server's answer or a funds increase (client/src/ui/kio_checkout.c,
+  kio_checkout_stripe.c; doc/v10/checkout-browser.md, doc/v10/checkout-stripe.md). Tested against
+  fakes only: no live payment has gone through it yet.
 
 ## KrunkNative additions
 

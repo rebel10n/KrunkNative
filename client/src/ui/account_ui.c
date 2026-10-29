@@ -705,6 +705,43 @@ void account_kio_set_balances(const int has_funds, const double funds, const int
     g_kio.gen++;
 }
 
+long account_skin_stat(const int skin, const char *stat) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj || !stat || skin < 0) return -1;
+    const cJSON *skins = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins"), *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (!cJSON_IsNumber(ind) || ind->valueint != skin) continue;
+        const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m");
+        cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL; // a JSON-string m
+        if (parsed) m = parsed;
+        const cJSON *v = cJSON_IsObject(m) ? cJSON_GetObjectItemCaseSensitive(m, stat) : NULL;
+        const long n = cJSON_IsNumber(v) && v->valuedouble >= 0 ? (long) v->valuedouble : -1;
+        cJSON_Delete(parsed);
+        if (n >= 0) return n; // the first entry of that index with a count (the plain-index rule, as the paint)
+    }
+    return -1;
+}
+
+int account_skin_seed(const int skin) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj || skin < 0) return -1;
+    const cJSON *skins = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins"), *e;
+    int found = 0;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (!cJSON_IsNumber(ind) || ind->valueint != skin) continue;
+        found = 1;
+        const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m"), *id = cJSON_GetObjectItemCaseSensitive(e, "id");
+        cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+        if (parsed) m = parsed;
+        const cJSON *seed = cJSON_IsObject(m) ? cJSON_GetObjectItemCaseSensitive(m, "seed") : NULL;
+        const int32_t s = skin_copy_seed(cJSON_IsNumber(id) ? (int64_t) id->valuedouble : 0, cJSON_IsNumber(seed),
+                                         cJSON_IsNumber(seed) ? seed->valuedouble : 0.0);
+        cJSON_Delete(parsed);
+        if (s) return s; // the first copy of that index with a seed (the plain-index rule, as the paint)
+    }
+    return found ? 0 : -1;
+}
+
 int account_add_skin(const int skin_index) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         // the krunker.io account's own (the game socket's "dslr"): v10's account.addSkin(ind) (deob-10.0.3.js
@@ -1462,17 +1499,17 @@ static void on_social(void *user, const cJSON *frame) {
         } else if (flag) {
             // v10 logs out after a deletion request (deob-10.0.3.js:244613); kn_brain ends every session too
             account_ui_logout();
-            popup_response(1, NULL, I18N("account.delete.requested", "Deletion requested. You have been logged out."));
+            popup_response(1, NULL, I18N("kn.account.delete.requested", "Deletion requested. You have been logged out."));
         } else {
             g_req_del = 0;
-            popup_response(1, NULL, I18N("account.delete.cancelled", "Deletion request cancelled."));
+            popup_response(1, NULL, I18N("kn.account.delete.cancelled", "Deletion request cancelled."));
             rerender_windows();
         }
     } else if (!strcmp(label, "twitchAuth")) { // the OAuth page to open, or [null, error]
         const char *url = str_at(frame, 1);
         if (url && url[0]) {
             ui_open_browser(url);
-            popup_response(1, NULL, I18N("account.twitch.browser", "Finish the Twitch link in your browser, then return here."));
+            popup_response(1, NULL, I18N("kn.account.twitch.browser", "Finish the Twitch link in your browser, then return here."));
         } else {
             popup_response(0, str_at(frame, 2) ? str_at(frame, 2) : "Twitch linking is currently unavailable.", NULL);
         }
@@ -1483,17 +1520,17 @@ static void on_social(void *user, const cJSON *frame) {
         } else {
             copy_str(g_twitch_name, sizeof(g_twitch_name), str_at(frame, 2) ? str_at(frame, 2) : "");
             copy_str(g_twitch_id, sizeof(g_twitch_id), str_at(frame, 3) ? str_at(frame, 3) : "");
-            popup_response(1, NULL, I18N("account.twitch.linked", "Twitch account linked."));
+            popup_response(1, NULL, I18N("kn.account.twitch.linked", "Twitch account linked."));
             rerender_windows();
         }
     } else if (!strcmp(label, "twitchRemoveResponse")) {
         g_twitch_id[0] = 0;
         g_twitch_name[0] = 0;
-        popup_response(1, NULL, I18N("account.twitch.unlinked", "Twitch account unlinked."));
+        popup_response(1, NULL, I18N("kn.account.twitch.unlinked", "Twitch account unlinked."));
         rerender_windows();
     } else if (!strcmp(label, "twitchDropsResponse")) { // Box Office has no drop campaigns: [] -> "Nothing to Claim"
         const cJSON *drops = cJSON_GetArrayItem(frame, 1);
-        popup_response(1, NULL, drops && cJSON_GetArraySize(drops) > 0 ? I18N("account.twitch.drops", "Drops claimed.") : I18N("account.twitch.noDrops", "Nothing to Claim"));
+        popup_response(1, NULL, drops && cJSON_GetArraySize(drops) > 0 ? I18N("kn.account.twitch.drops", "Drops claimed.") : I18N("kn.account.twitch.noDrops", "Nothing to Claim"));
     } else if (!strcmp(label, "__close")) {
         g_restore_sent = 0;
         if (g_auth_sent_at > 0) auth_unreachable();
@@ -2570,7 +2607,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         const int flag = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num != 0 : 1;
         if (!g_logged_in) return 1;
         if (flag)
-            ui_confirm(I18N("account.delete.confirm", "Request the deletion of this account and all associated data? You will be logged out."),
+            ui_confirm(I18N("kn.account.delete.confirm", "Request the deletion of this account and all associated data? You will be logged out."),
                        deletion_confirmed, (void *) (intptr_t) 1);
         else
             deletion_confirmed(1, NULL, (void *) (intptr_t) 0);

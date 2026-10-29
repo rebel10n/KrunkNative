@@ -5,11 +5,32 @@
 
  == UPDATE 10.0.4 ==
  * Candy Heist
- - Added the Candy Heist map to the official list
+ - Added the Candy Heist map and mode: collect candy, bank it at the Cauldron and avoid the Hollowmen
+ - The Hollowman's Staff counts the candy you bank
  * General
- - Matches with no winner now end with ENDED instead of DEFEAT
+ - Added a map loading screen
+ - Reduced stutter when a match starts
+ - Added an Interact button on mobile
+ - Added a Privacy & Age section to profile Settings
+ - Matches played alone now end with ENDED instead of DEFEAT
+ - Chat-restricted players can now vote to forfeit
+ - Item drops can be equipped without relogging
+ - Counter skins now show their counts, and skins with custom shaders now render
+ - Fixed some Shotgun skins not showing in item previews
+ - Improved the size of waist items in item previews
+ * Store
+ - Buy KR, bundles, premium and battle pass tiers with card (Xsolla or Stripe), and gift them
+ * Inventory & Market
+ - Added item locks to protect items from quick-sell, listing and trades
+ - Added Select mode to the inventory to quick-sell many items at once, with Keep options
+ - Added Select mode to the market inventory to list many items at once
+ - Added Buy multiple to listings
+ * Raids
+ - Raid bosses drop their rewards, with double drops on double drop weekends
  * KrunkScript & Editor
+ - Added AI Rarity Chances and doubleRaidDrops to GAME.CONFIG.getMatch()
  - Studios can now publish, unpublish and edit currencies
+ - Setting a player's score now only counts the difference toward score challenges
  - Improved the third-person arm for player.pose.holdL
 
  == UPDATE 10.0.3 ==

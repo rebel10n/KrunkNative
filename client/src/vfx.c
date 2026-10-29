@@ -26,6 +26,8 @@
 #include <math.h>
 #include <pcg_basic.h>
 #include <player_class_model.h> // a class model has no weapon mesh: no muzzle, casings or own tracer
+#include <skin_fx.h>   // skin_fx_shot_pulse: the shotPulse skin shaders on the shooter's weapon
+#include <skin_counter.h> // countSkinStat "shots": the shooter's counter skin
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -896,6 +898,16 @@ static PlayerArms *held_arms(const Player *player) {
     return mesh->arms[player->loadout_index];
 }
 
+// shoot (deob-10.0.4.js:174911-174928): pulseShotShaders on every shooter's held weapon (its models and meshes), and
+// countSkinStat(player, weapon.id, "shots") on its counter skin
+static void pulse_shot_shaders(const Player *player) {
+    const PlayerArms *arms = held_arms(player);
+    if (!arms) return;
+    for (int k = 0; k < 2; k++) skin_fx_shot_pulse(arms->weapon_models[k], k ? arms->weapon_left : arms->weapon_right);
+    if (arms->counter && player->loadout_index >= 0 && player->loadout_index < player->loadout_size)
+        skin_counter_count_stat(arms->counter, player->uid, player->loadout[player->loadout_index], "shots", 1);
+}
+
 // World position of a point given relative to the held weapon's arm anchor (Krunker's
 // per-weapon container `ac`, which parents the muzzle sprites and casing anchors).
 static int arms_point(const Player *player, const vec3 local, vec3 *out) {
@@ -973,6 +985,7 @@ static void local_stream_shot(Client *client, Player *me) {
 
 static void local_shot(Client *client, Player *me) {
     const Weapon *weapon = me->weapon;
+    pulse_shot_shaders(me);
     if (weapon && weapon->stream) {
         local_stream_shot(client, me);
         return;
@@ -1176,6 +1189,7 @@ static void detect_local_projectile(Client *client) {
 void vfx_remote_shot(Client *client, const Player *shooter, const vec3 hit, const int has_normal, const float normal_yaw,
                      const float normal_pitch, const int trail) {
     if (!shooter) return;
+    pulse_shot_shaders(shooter);
     if (vfx.log) {
         fprintf(stderr, "[vfx] remote shot from %.1f %.1f %.1f to %.1f %.1f %.1f\n", shooter->position.x, shooter->position.y,
                 shooter->position.z, hit.x, hit.y, hit.z);
@@ -1463,6 +1477,7 @@ void vfx_update(Client *client, const float delta) {
     if (map != vfx.map || client->game.current_map_index != vfx.map_index) {
         if (vfx.log) fprintf(stderr, "[vfx] reset: map %p -> %p index %d -> %d\n", vfx.map, (const void *) map, vfx.map_index, client->game.current_map_index);
         vfx_reset();
+        skin_counter_reset_live(); // a new map, a new match: counterLive starts again (deob-10.0.4.js:170932)
         vfx.map = map;
         vfx.map_index = client->game.current_map_index;
         build_areas(map);
@@ -1471,6 +1486,7 @@ void vfx_update(Client *client, const float delta) {
     const float dt = fminf(fmaxf(delta, 0.0f) * 1000.0f, VFX_MAX_DELTA_MS) * vfx.time_scale;
     vfx.time_ms += dt;
     vfx.frame_ms = dt;
+    skin_counter_frame(client->me); // the local player's jumps on its "jumps" counter (deob-10.0.4.js:174219-174221)
 
     // The one-frame muzzle sprites / overlay flash age before this frame's shot can re-arm them.
     for (int i = 0; i < 2; i++) {

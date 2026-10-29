@@ -160,6 +160,13 @@ int  v10_market_owns_frame(const char *label); // 1 = the open exchange answers 
 void clan_ui_reset(void);                   // account changed: drop clanData
 void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
+// v10.0.4 counter skins: the signed-in krunker.io account's copy of store skin `skin`: its m[stat] (the counter's base,
+// generateMeshes, deob-10.0.4.js:172727-172728), -1 when it has none or krunker.io is not the account (Box Office's comes
+// from the server, NET_EXT_KN_SKIN_COPIES)
+long account_skin_stat(int skin, const char *stat);
+// ... and that copy's seed for the seeded custom shader 15 (skin_copy_seed of its m.seed or id, deob-10.0.4.js:24344-24353),
+// -1 when krunker.io is not the account or it owns no copy of the skin
+int account_skin_seed(int skin);
 // krunker.io: the instance of an item the game server just gave (10.0.4's SKIN_REWARD [skin, silent, iid, meta],
 // deob-10.0.4.js:194184-194189): the next account_add_skin(skin) adds it as v10.0.4's addSkin(skin, 1, iid, meta)
 // does (an entry {ind, cnt: 1, id, m, st: 0}, deob-10.0.4.js:115078-115087, :221926), so it can be equipped at once.
@@ -182,6 +189,9 @@ void store_ui_account_changed(void);        // a login / logout: the spin histor
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
 void store_ui_scenario_wheel(int index, int multi); // --render-scenario state.spin(+spinMulti): prizeWheel(index, null, multi) with noAnim
 void store_ui_scenario_result(const cJSON *result); // state.spinResult {rand, item}: the spin's reply, the spin skipped
+int  store_ui_kr_pack_val(int index);              // store.purchases[index].val (the KR of a pack), 0 out of range
+int  store_ui_premium_days(int index);             // store.premium[index].val (its days), 0 out of range
+const char *store_ui_premium_price(int index);     // its price in USD ("4.99"), NULL out of range
 
 // ---- servers_ui.c (ClientManager + windows[1])
 void servers_ui_init(Client*, int brain_mode); // brain_mode: matchmake at startup instead of the default server

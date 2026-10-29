@@ -351,6 +351,10 @@ void sh_market_filter(SocialSession *s, const cJSON *f); /* "fil" */
 void sh_inventory_sort(SocialSession *s, const cJSON *f); /* "srt" */
 void sh_market_stats_http(SocialSession *s, const cJSON *f); /* v10 GET /market/stats (economy.c) */
 void sh_quick_sell(SocialSession *s, const cJSON *f);  /* "qsi" */
+void sh_quick_sell_bulk(SocialSession *s, const cJSON *f);  /* "qsb" */
+void sh_market_list_bulk(SocialSession *s, const cJSON *f); /* "lib" */
+void sh_item_locks(SocialSession *s, const cJSON *f);       /* "ilk" */
+void sh_item_lock(SocialSession *s, const cJSON *f);        /* "ils" */
 void sh_item_stats(SocialSession *s, const cJSON *f);  /* "st" */
 void sh_trade_inv(SocialSession *s, const cJSON *f);   /* "ri" */
 void sh_trade_create(SocialSession *s, const cJSON *f);/* "ctr" */

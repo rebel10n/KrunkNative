@@ -96,6 +96,13 @@ typedef struct ViewerSkin {
     float swap_snd_vol;   // swapSndVol, 0 = absent
     const char *custom_id; // a map studio's custom skin (VIEWER_CUSTOM_SKIN_MIN and up): its _id, the user-asset
                            // folder skins/<_id>/ of its customSound / customSwapSound / customInspectSound; NULL none
+    // ---- v10.0.4 (skin_fx.c, skin_counter.c)
+    const char *shader_info; // customShaderInfo as compact JSON ({part | "*": {shaderNum, shaderArgs, matArgs}}), NULL none
+                             // (getMat / the per-part apply, deob-10.0.4.js:203447-203475, :204930-204986)
+    int counter_digits;      // attach type 1 (a stat counter on the weapon, deob-10.0.4.js:172728-172740): digits, 0 none
+    float counter_pos[3], counter_rot[3], counter_scl; // attach x / y / z, rot, scl
+    int counter_color;       // attach color, -1 = the default
+    const char *counter_stat; // attach stat (deob-10.0.4.js:106489-106492), NULL = "kills"
 } ViewerSkin;
 
 // game.customSkins ids start here (deob-10.0.3.js:20133, iïìíiîï = 10000000): a custom game's studio skins (its

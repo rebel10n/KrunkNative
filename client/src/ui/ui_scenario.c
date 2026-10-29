@@ -49,6 +49,7 @@
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
 #include <v10_wallet.h> // state.wallet (v10_wallet.c)
+#include <v10_bulk.h>   // state.bulk (v10_bulk.c)
 #include <ui_mobile.h> // state.mobile (ui_mobile_force)
 #include <v10_notify.h> // S5: state.notify
 #include <hud_modes.h>
@@ -1248,6 +1249,7 @@ static int ui_scenario_apply(Client *client) {
     clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
     if (menu_open) v10_market_scenario(st("market")); // the v10 Market & Trading popup (v10_market.c)
     if (menu_open) v10_wallet_scenario(st("wallet")); // the Wallet and Inventory modal (v10_wallet.c)
+    if (menu_open) v10_bulk_scenario(st("bulk"));     // the bulk market overlays (v10_bulk.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (st_has("kpdPhone")) hud_votekick_scenario_phone(st_bool("kpdPhone", 0)); // after the game's INIT, which ends a call
     if (st_has("trade")) trade_ui_scenario(st("trade")); // before the window: windows[36] draws this state (trade_ui.c)

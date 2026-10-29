@@ -72,6 +72,7 @@
 #include <app_mode.h> // game / social hub / editor / viewer pages (app_mode.c)
 #include <viewer_embed.h> // the store item view's 3D showcase (viewer/viewer.c)
 #include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
+#include <kio_checkout.h> // kio_checkout_window_focused: a payment waiting for the browser
 #include <startup_banner.h> // startup log: build, platform, GL (startup_banner.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
 #include <gl_driver_env.h> // NVIDIA + V-Sync off: relaunch once with __GL_SYNC_TO_VBLANK=0 (gl_driver_relaunch.c)
@@ -1184,8 +1185,10 @@ int main(int argc, char **argv) {
 }
 
 // KRUNKNATIVE_FRAME_TRACE=N: the work time of the N frames after each client_load_map, one "[frametrace]" line
-// each (the match-start stutter, client_warm_scene); the frame-cap sleep is not counted.
+// each (the match-start stutter, scene_warm.h): "<frame> <work ms> t=<ms since the load> warm=<0|1>"; the
+// frame-cap sleep is not counted.
 static int g_frame_trace_left, g_frame_trace_n;
+static double g_frame_trace_load;
 static void frame_trace_arm(void) {
     static int n = -1;
     if (n < 0) {
@@ -1194,6 +1197,7 @@ static void frame_trace_arm(void) {
     }
     g_frame_trace_left = n;
     g_frame_trace_n = 0;
+    g_frame_trace_load = glfwGetTime();
 }
 
 // One main-loop iteration, shared by the native while loop and the emscripten
@@ -1233,7 +1237,9 @@ void client_frame(Client *client) {
     glfwPollEvents();
     if (g_frame_trace_left > 0) {
         g_frame_trace_left--;
-        printf("[frametrace] %d %.2f ms\n", g_frame_trace_n++, (glfwGetTime() - frame_time) * 1000.0);
+        // stderr: in order with the input script's probes (stdout to a file is buffered)
+        fprintf(stderr, "[frametrace] %d %.2f ms t=%.0f warm=%d\n", g_frame_trace_n++, (glfwGetTime() - frame_time) * 1000.0,
+                (frame_time - g_frame_trace_load) * 1000.0, scene_warm_active());
     }
     client_render_frame_end(client); // swap interval (vsync), frame cap sleep, FPS count
 }
@@ -1255,6 +1261,7 @@ void client_load_map(Client *client) {
     prize_wheel_render_load(client->scene, client->game.map); // the prize wheels' canvas planes (prize_wheel_render.c)
     wars_banners_load(client->scene, client->game.map); // the Turf Wars banners' nodes (wars_banners.c)
     client_event_objects_load(client); // the EVENT prefab's objects, in the last "start"'s state (event_objects.c)
+    scene_warm_preload(client->game.map); // the map's AI models load now, not when the AIs first sync (scene_warm_preload.c)
     scene_warm_begin(client->scene, glfwGetTime() * 1000.0); // v10.0.4 warmScene: every mesh draws once behind the card
 }
 
@@ -2024,6 +2031,7 @@ static int strike_page_typing(void) {
 
 static void window_focus_callback(GLFWwindow *window, const int focused) {
     client_window_focus_changed(glfwGetWindowUserPointer(window), focused);
+    if (focused) kio_checkout_window_focused(); // back from the browser: a waiting payment reads the account again
 }
 
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {

@@ -698,6 +698,21 @@ static int weapon_skin(const int weapon) {
     return cJSON_IsNumber(v) ? v->valueint : -1;
 }
 
+// The loadout wears this store index: a cosmetic slot or a weapon's saved skin (the wallet's "Keep equipped items",
+// deob-10.0.4.js:147054-147072, :147296). KrunkNative's slots hold plain indices: a painted copy is worn as the first
+// owned copy of its index (ui_loadout_skin_paint).
+int ui_loadout_wears(const int index) {
+    if (index < 0) return 0;
+    static const int slots[] = {SEL_DYE, SEL_FACE, SEL_SHOE, SEL_MELEE, SEL_BODY, SEL_BACK, SEL_HAT, SEL_HEAD, SEL_CARD,
+                                SEL_WAIST, SEL_PET, SEL_WRIST, SEL_SPRAY};
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++)
+        if (sel(slots[i]) == index) return 1;
+    weapon_skin(0); // the "skins" cache
+    const cJSON *v;
+    cJSON_ArrayForEach(v, g_skins_cache) if (cJSON_IsNumber(v) && v->valueint == index) return 1;
+    return 0;
+}
+
 // genLoadouts(true): the preset row (#loadoutHolder content).
 static void gen_loadouts(StrBuf *out) {
     sb_append(out, "<span class='settNameSmall' style='margin:0;margin-bottom:5px;border-bottom: unset;'><input id='loadoutName' type='text' class='formInput' placeholder='Loadout name' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' style='border:none;background:#eee;padding-bottom:6px;float:left;margin-top:5px;margin-bottom:5px;'><select id='loadoutSelect'><option selected>Select</option>");

@@ -846,8 +846,16 @@ nuke-e2e: build ## The Nuke on server_bin: a guest's 25 kills, key 3 through a h
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I server/tests/nuke_e2e.py $(DEBUG_DIR)
 
 .PHONY: ruleset-e2e
-ruleset-e2e: build ## Krunker v10.0.3 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
+ruleset-e2e: build ## Krunker v10.0.4 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
 	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
+
+.PHONY: chat-restrict-e2e
+chat-restrict-e2e: build ## A chat-restricted Box Office player can still start and cast a forfeit vote (/ff), and chat stays blocked (brain + server_bin)
+	timeout 300 $(PYTHON) -I server/tests/chat_restrict_e2e.py $(DEBUG_DIR)
+
+.PHONY: solo-ended-e2e
+solo-ended-e2e: build ## A match played alone in a no-winner mode (Candy Heist) ends ENDED: result 0, winner -1
+	timeout 300 $(PYTHON) -I server/tests/solo_ended_e2e.py $(DEBUG_DIR)
 
 .PHONY: v10-settings-e2e
 v10-settings-e2e: build ## v10 Settings: one setting per tab applied + persisted, search, presets, export, keybind rebinding, sandbox bind, reset (headless; EGL_DEVICE=...)

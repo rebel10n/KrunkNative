@@ -148,7 +148,9 @@ run_client() { # name mode port token
         printf '%s' "$4" >"$cfg/krunknative/krunker_token.json"
     fi
     printf '0 play\n6000 quit\n' >"$WORK/$1.script"
-    (cd "$ROOT" && exec env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_EGL_DEVICE=mesa \
+    # KRUNKNATIVE_DEBUG=2: the lines checked below ([account] logged in as, [auth] joining as, [mode] offline) are
+    # debug-level since 5f55eef1 (klog.h KN_LOG_DEBUG1 / KN_LOG_VERBOSE2)
+    (cd "$ROOT" && exec env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_EGL_DEVICE=mesa KRUNKNATIVE_DEBUG=2 \
         KRUNKNATIVE_AUDIO=0 XDG_CONFIG_HOME="$cfg" XDG_STATE_HOME="$cfg" KRUNKNATIVE_INPUT_SCRIPT="$WORK/$1.script" \
         KRUNKNATIVE_FIXED_DELTA=33 KRUNKNATIVE_WINDOW_SIZE=640x360 \
         timeout 60 stdbuf -oL "$CLIENT" --mode "$2" --brain "$CENTRAL" --finder "$FINDER/servers" --connect "127.0.0.1:$3") \

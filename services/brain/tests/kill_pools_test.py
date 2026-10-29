@@ -239,6 +239,33 @@ async def scenario(port, feed):
                   "a match's items stop at 30 (25 + 5), skin 0 and a negative quantity are skipped (%d, %d, %d)" %
                   (count(account, 5), count(account, 7), count(account, 9)))
 
+            # v10.0.4 counter skins (db_accounts.c commit_skin_stats, 0365): the server's takeSkinStats rows add to the
+            # account's skin_stats, once per match, on an owned skin and a known stat
+            query("INSERT INTO inventory (account_id, skin_id, count) VALUES (%d, 7939, 1)" % account)
+            stats = [{"skin": 7939, "stat": "jumps", "count": 4}, {"skin": 7939, "stat": "dances", "count": 5},
+                     {"skin": 7937, "stat": "kills", "count": 2}, {"skin": 7939, "stat": "kills", "count": 0}]
+            await node.commit("m3", dict(player, itemRewards=[], skinStats=stats))
+
+            def skin_stat(skin, stat):
+                rows = query("SELECT count FROM skin_stats WHERE account_id = %d AND skin_id = %d AND stat = '%s'" % (account, skin, stat))
+                return int(rows[0]) if rows else 0
+            for _ in range(50):
+                if skin_stat(7939, "jumps") == 4:
+                    break
+                await asyncio.sleep(0.1)
+            check(skin_stat(7939, "jumps") == 4, "skinStats: 4 jumps on the owned counter skin (%d)" % skin_stat(7939, "jumps"))
+            check(skin_stat(7939, "dances") == 0 and skin_stat(7937, "kills") == 0 and skin_stat(7939, "kills") == 0,
+                  "an unknown stat, a skin not owned and a count below 1 are skipped")
+            await node.commit("m3", dict(player, itemRewards=[], skinStats=stats))
+            await asyncio.sleep(0.5)
+            check(skin_stat(7939, "jumps") == 4, "the same match again adds nothing (%d)" % skin_stat(7939, "jumps"))
+            await node.commit("m4", dict(player, itemRewards=[], skinStats=[{"skin": 7939, "stat": "jumps", "count": 3}]))
+            for _ in range(50):
+                if skin_stat(7939, "jumps") == 7:
+                    break
+                await asyncio.sleep(0.1)
+            check(skin_stat(7939, "jumps") == 7, "a second match adds to it (%d)" % skin_stat(7939, "jumps"))
+
 
 def start_brain(env, log_path, extra):
     with open(log_path, "a") as log:

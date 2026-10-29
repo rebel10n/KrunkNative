@@ -63,3 +63,15 @@ void skin_fx_tick(float dt_ms, int texture_anim, int basic_lighting);
 
 // UTILS.hexFromHue(hue): the 0xRRGGBB of a hue in degrees (0-360)
 int skin_fx_hex_from_hue(int hue);
+
+// pulseShotShaders (deob-10.0.4.js:174911-174919): a shot starts the pulse of the shotPulse custom shaders (14, "Shock")
+// on the weapon's model / mesh (either may be NULL). Shader 14's parts show only while their pulse plays.
+void skin_fx_shot_pulse(const struct GltfInstance *model, const Mesh *mesh);
+
+// The seeded custom shaders (15, "Sketch") vary by the owned copy (deob-10.0.4.js:24344-24353, getMat :203448 / :203463).
+// skin_fx_copy_seed: a copy's seed (iîîíïiï): its meta seed (floor(seed) mod 1e6) when it has one, else its instance id
+// mixed (lowbias32 mod 1e6), 0 = no copy (shop previews). skin_fx_seed_mix: that seed into [0, 1) (iîíîìíi, 0 stays 0).
+// skin_fx_set_seed: the seed (skin_fx_copy_seed's) of the seeded custom materials on the model / mesh (either may be NULL).
+int skin_fx_copy_seed(int copy_id, int has_meta_seed, double meta_seed);
+float skin_fx_seed_mix(int seed);
+void skin_fx_set_seed(struct GltfInstance *model, Mesh *mesh, int seed);

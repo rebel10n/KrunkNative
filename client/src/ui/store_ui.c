@@ -35,6 +35,7 @@
 #include <v10_menu.h>      // v10_menu_kr_sale: the Purchase KR tab's sale weekends
 #include <ks_game.h>       // ks_wall_ms: the Prize Wheels tab's clock
 #include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
+#include <kio_checkout.h>  // krunker.io's real-money purchases (showPurchase, premiumPopup, directPurchase, bundles)
 #include <html_dom.h>
 #include <i18n.h>
 #include <time.h>
@@ -1203,6 +1204,20 @@ static const struct {
     {350000, "499.99", "449.99", "#ee5356", "Beyond Belief!", "linear-gradient(9deg, #ffce14, #f30ad6)", "beyondBelief 2s infinite", 1},
 };
 
+// store.purchases[index].val and store.premium[index] (deob-10.0.4.js:103749-103796, the same tables as k_purchases_v10 /
+// k_premium) for the checkout (kio_checkout.c): 0 / NULL out of range
+int store_ui_kr_pack_val(const int index) {
+    return index >= 0 && index < (int) (sizeof(k_purchases_v10) / sizeof(k_purchases_v10[0])) ? k_purchases_v10[index].val : 0;
+}
+
+int store_ui_premium_days(const int index) {
+    return index >= 0 && index < (int) (sizeof(k_premium) / sizeof(k_premium[0])) ? k_premium[index].days : 0;
+}
+
+const char *store_ui_premium_price(const int index) {
+    return index >= 0 && index < (int) (sizeof(k_premium) / sizeof(k_premium[0])) ? k_premium[index].price : NULL;
+}
+
 static const char *const k_shop_tabs_v10[] = {
     "<span class=\"material-icons\" style=\"color:#fbc02d;font-size:42px;vertical-align:bottom\">home</span>", "Prize Wheels", "Premium",
     "Purchase <span style=\"color:#fbc02d\">KR</span>", "Redeem Keys", "Eterno Shop",
@@ -1619,7 +1634,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     }
     if (!strcmp(name, "bundlePopup")) { // bundlePopup(true, false, ID): a home-tab bundle card (junk_shop_ui.c), the purchase
         const int id = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 0;
-        if (kio_store_active()) kio_store_unwired("shop/bundles/purchase");
+        if (kio_store_active()) kio_checkout_bundle_popup(id); // the bundle's BUY / GIFT popup (deob-10.0.4.js:212740-212935)
         else if (id > 0) junk_shop_bundle_buy(id);
         return 1;
     }
@@ -1644,8 +1659,8 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         html_ui_dispatch("openExchange", NULL, &tab, 1);
         return 1;
     }
-    if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // payments: none
-        if (kio_store_active() && strcmp(name, "showPremiumBenefits")) kio_store_unwired("directPurchase"); // krunker.io: not built yet
+    if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // Box Office: no payments
+        if (kio_store_active() && strcmp(name, "showPremiumBenefits")) kio_checkout_kr_pack_direct(argc > 0 ? a0 : 0); // :217616-217619
         else if (!active_account()) menu_show_window(5, 1);
         else if (!strcmp(name, "showPremiumBenefits")) menu_show_window(36, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
@@ -1690,9 +1705,17 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         generic_popup(pop, "vouchPop");
         return 1;
     }
-    if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // no payments in KrunkNative
-        if (kio_store_active()) kio_store_unwired(name); // krunker.io's checkout: not built yet
-        else if (!active_account()) menu_show_window(5, 1);
+    if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // Box Office: no payments
+        if (kio_store_active()) { // krunker.io: the payment provider's checkout (kio_checkout.c)
+            const char *s = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
+            const int qty = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 1;
+            if (!strcmp(name, "premiumPopup")) kio_checkout_premium_popup(a0); // :220470-220482
+            else if (s && !strncmp(s, "catalog:", 8)) kio_checkout_catalog_ref(s, qty); // showPurchase("catalog:{display}|ref", _, qty)
+            else if (s && !strncmp(s, "wildoffer:", 10)) kio_checkout_wild_offer(atoi(s + 10)); // :213091
+            else kio_checkout_kr_pack(a0); // showPurchase(index): a KR pack (:213019-213056)
+            return 1;
+        }
+        if (!active_account()) menu_show_window(5, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
     }
@@ -1749,6 +1772,8 @@ static void bundle_update_scroll(const int dir, const int columns) {
 
 int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
+    const int checkout = kio_checkout_handle(name, ev, args, argc); // the purchase selector, StripePopup, premium, ...
+    if (checkout >= 0) return checkout;
     if (!strcmp(name, "windows.13.updateScroll")) {
         const int dir = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
         const int columns = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
@@ -1959,6 +1984,7 @@ static void spin_hole(const int on, const float cx, const float cy, const float 
 // (spinRotation -> spinVal, a tick_0 every PI / 1.5), the button/text sizes, the canvas
 // (handed to spin_wheel.c as g_wheel_draw) and the item + name card fly-in.
 void store_ui_tick(void) {
+    kio_checkout_tick(); // the real-money checkout's wait (the account's funds) and Stripe's poll
     if (g_eterno_music && (!menu_window_is_open() || menu_ui()->active_window != 14 || g_store_tab != 5)) eterno_music(0);
     const double now = store_now();
     double delta_ms = g_wheel.last_time > 0 ? (now - g_wheel.last_time) * 1000.0 : 0.0;

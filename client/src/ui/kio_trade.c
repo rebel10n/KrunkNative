@@ -22,6 +22,30 @@ cJSON *kio_trade_offer(const EconTradeItem *items, const int n, int *copies) {
     return offer;
 }
 
+cJSON *kio_trade_inventory(const cJSON *official) {
+    cJSON *rows = cJSON_CreateArray();
+    const cJSON *r;
+    cJSON_ArrayForEach(r, official) {
+        const cJSON *i = cJSON_GetObjectItemCaseSensitive(r, "i");
+        if (!cJSON_IsNumber(i)) continue;
+        const cJSON *st = cJSON_GetObjectItemCaseSensitive(r, "st"), *sid = cJSON_GetObjectItemCaseSensitive(r, "sid");
+        const cJSON *cnt = cJSON_GetObjectItemCaseSensitive(r, "cnt"), *c = cJSON_GetObjectItemCaseSensitive(r, "c");
+        const cJSON *nt = cJSON_GetObjectItemCaseSensitive(r, "nt"), *m = cJSON_GetObjectItemCaseSensitive(r, "m");
+        cJSON *row = cJSON_CreateObject();
+        cJSON_AddNumberToObject(row, "i", i->valuedouble);
+        if (cJSON_IsNumber(st) && st->valueint == 1) { // iIîííïï: a stack, cnt || c (deob-10.0.4.js:111228)
+            cJSON_AddNumberToObject(row, "c", cJSON_IsNumber(cnt) ? cnt->valuedouble : cJSON_IsNumber(c) ? c->valuedouble : 0);
+        } else { // one copy, offered once as {i, c: 1, iids: [sid]} (:111258-111262)
+            cJSON_AddNumberToObject(row, "c", 1);
+            if (cJSON_IsNumber(sid)) cJSON_AddNumberToObject(row, "sid", sid->valuedouble);
+            if (m && !cJSON_IsNull(m)) cJSON_AddItemToObject(row, "m", cJSON_Duplicate(m, 1));
+        }
+        if (cJSON_IsNumber(nt) || cJSON_IsBool(nt)) cJSON_AddItemToObject(row, "nt", cJSON_Duplicate(nt, 1));
+        cJSON_AddItemToArray(rows, row);
+    }
+    return rows;
+}
+
 cJSON *kio_trade_create_body(const int target_player_id, cJSON *my_offer, cJSON *their_offer, const char *message) {
     cJSON *body = cJSON_CreateObject();
     cJSON_AddNumberToObject(body, "target_player_id", target_player_id);

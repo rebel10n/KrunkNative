@@ -4,6 +4,7 @@
 #include <kio_inventory.h>
 
 #include <kio_store.h>
+#include <backend_ui.h> // active_account, account_kio_set_balances: a run's balances
 #include <i18n.h>
 #include "../viewer/viewer_store.h"
 
@@ -199,6 +200,20 @@ static void req_free(Req *r) {
 
 static int in_gen(const Req *r) { return r->gen == I.gen; }
 
+// the last bulk run's figures (kio_inventory_bulk_result / _progress): what the answers said
+static KioBulkResult g_result;
+static int g_progress, g_total;
+
+// a run starts: its units to send, and the balances its gains are counted from (deob-10.0.4.js:146845: funds, junk)
+static void result_reset(const int total) {
+    memset(&g_result, 0, sizeof(g_result));
+    const AccountInfo *a = active_account();
+    g_result.funds_before = a ? a->funds : 0;
+    g_result.junk_before = a ? a->junk : 0;
+    g_progress = 0;
+    g_total = total;
+}
+
 static void bulk_next(Req *r);
 
 // the run ends: a success reloads the official inventory first, so done sees the account's new rows
@@ -225,7 +240,38 @@ static void bulk_answer(void *user, const int status, const cJSON *data, const c
         bulk_done(r, 0, error_text(code, message));
         return;
     }
-    (void) data; // the sold / listed counts are the answer's; the reload shows the result
+    // the answer's figures (deob-10.0.4.js:146862-146866 for a sell: sold / skipped ids, funds and junk after it;
+    // :131995-132019 for a list: listed, funds, results[].error), and the new balances on the account
+    const cJSON *funds = cJSON_GetObjectItemCaseSensitive(data, "funds"), *junk = cJSON_GetObjectItemCaseSensitive(data, "junk");
+    if (r->kind == 1) {
+        const cJSON *sold = cJSON_GetObjectItemCaseSensitive(data, "sold"), *skipped = cJSON_GetObjectItemCaseSensitive(data, "skipped");
+        g_result.sold += cJSON_IsArray(sold) ? cJSON_GetArraySize(sold) : 0;
+        g_result.skipped += cJSON_IsArray(skipped) ? cJSON_GetArraySize(skipped) : 0;
+        if (cJSON_IsNumber(funds)) g_result.kr_gained = funds->valuedouble - g_result.funds_before;
+        if (cJSON_IsNumber(junk)) g_result.junk_gained = junk->valuedouble - g_result.junk_before;
+        g_progress += r->count;
+    } else {
+        const cJSON *listed = cJSON_GetObjectItemCaseSensitive(data, "listed"), *results = cJSON_GetObjectItemCaseSensitive(data, "results"), *e;
+        if (cJSON_IsNumber(listed)) g_result.listed += listed->valueint;
+        int failed = 0;
+        cJSON_ArrayForEach(e, results) {
+            const char *err = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "error"));
+            if (!err || !err[0]) continue;
+            failed++;
+            if (!g_result.error[0]) {
+                const char *text = error_text(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "code")), err);
+                snprintf(g_result.error, sizeof(g_result.error), "%s", text ? text : err);
+            }
+        }
+        g_progress = g_progress + r->count;
+        if (failed) { // a batch with failed rows ends the run, as the bundle's loop does (:132020-132022)
+            account_kio_set_balances(cJSON_IsNumber(funds), cJSON_IsNumber(funds) ? funds->valuedouble : 0, 0, 0);
+            bulk_done(r, 1, NULL);
+            return;
+        }
+    }
+    account_kio_set_balances(cJSON_IsNumber(funds), cJSON_IsNumber(funds) ? funds->valuedouble : 0, cJSON_IsNumber(junk),
+                             cJSON_IsNumber(junk) ? junk->valuedouble : 0);
     r->from += r->count;
     bulk_next(r);
 }
@@ -251,6 +297,7 @@ static void bulk_next(Req *r) {
             bulk_done(r, finished, finished ? NULL : I18N("generic.error", "Error"));
             return;
         }
+        r->count = units; // the batch's units: the progress the answer adds
         path = "market/list/bulk";
     }
     char *text = body ? cJSON_PrintUnformatted(body) : NULL;
@@ -287,6 +334,7 @@ static int start_bulk(const int kind, const int action, const int price, MarketP
     r->action = action;
     r->price = price;
     r->picks = picks;
+    result_reset(picks.n);
     r->quantity = calloc((size_t) picks.n, sizeof(int));
     for (int i = 0; r->quantity && i < picks.n; i++) r->quantity[i] = quantity_of(I.groups, I.n, picks.skin_ids[i], picks.item_ids[i]);
     if (!r->quantity) {
@@ -314,6 +362,41 @@ int kio_inventory_bulk_sell(const int action, MarketPicks picks, KioInvDone done
 
 int kio_inventory_bulk_list(const int price, MarketPicks picks, KioInvDone done, void *user) {
     return start_bulk(2, 0, price, picks, done, user);
+}
+
+// The List Items modal's rows: each its own price and quantity (deob-10.0.4.js:131924-131943). Copied.
+int kio_inventory_bulk_list_rows(const MarketListRow *rows, const int n, KioInvDone done, void *user) {
+    int units = 0;
+    for (int i = 0; i < n; i++) units += rows[i].quantity > 0 ? rows[i].quantity : 0;
+    if (!kio_inventory_ready() || n <= 0 || units <= 0) {
+        if (done) done(user, 0, n <= 0 || units <= 0 ? I18N("kn.inv.noneSelected", "Select some items first.") : kio_inventory_gate_text());
+        return 0;
+    }
+    Req *r = calloc(1, sizeof(*r));
+    MarketListRow *copy = r ? malloc(sizeof(MarketListRow) * (size_t) n) : NULL;
+    if (!r || !copy) {
+        free(r);
+        free(copy);
+        if (done) done(user, 0, I18N("generic.error", "Error"));
+        return 0;
+    }
+    memcpy(copy, rows, sizeof(MarketListRow) * (size_t) n);
+    r->gen = I.gen;
+    r->done = done;
+    r->user = user;
+    r->kind = 2;
+    r->rows = copy;
+    r->nrows = n;
+    result_reset(units);
+    bulk_next(r);
+    return 1;
+}
+
+const KioBulkResult *kio_inventory_bulk_result(void) { return &g_result; }
+
+void kio_inventory_bulk_progress(int *done, int *total) {
+    *done = g_progress < g_total ? g_progress : g_total;
+    *total = g_total;
 }
 
 // a lock write's answer: the locks are read again, done runs once they are applied

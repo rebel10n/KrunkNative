@@ -107,6 +107,9 @@ typedef struct ChatCommandHost {
 // io_ct after the burst limit: 1 when `text` was a known "/" command (handled, not
 // broadcast), 0 when it is ordinary chat (unknown commands included).
 int chat_command_handle(ChatCommandHost*, int sender_id, const char *text);
+// 1 when `text` is the forfeit vote command (/ff or /forfeit, any case, with or without arguments). A chat-restricted
+// account's lines are refused except this one (v10.0.4 "Chat-restricted players can now vote to forfeit").
+int chat_command_is_forfeit(const char *text);
 // NET_EXT_ADMIN_ACTION (the player list's Kick / Ban): /kick or /ban (ban 1) of the player with
 // Game uid target_uid, as sender_id. The DEV permission is checked again here. 1 = removed.
 int chat_command_admin_action(ChatCommandHost*, int sender_id, int target_uid, int ban);

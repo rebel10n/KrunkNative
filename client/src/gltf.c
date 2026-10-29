@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stb_image.h>
+#ifdef KRUNKNATIVE_HTML_ENGINE
+#include "html/engine/webp.h" // EXT_texture_webp (gltf_decode_image)
+#endif
 
 #define CGLTF_IMPLEMENTATION
 #include "../lib/cgltf/cgltf.h"
@@ -45,6 +48,7 @@ typedef struct {
     Geometry *geometry;       // static primitives: shared by every instance
     unsigned int ebo;         // dynamic primitives: shared index buffer
     unsigned int color_vbo;   // COLOR_0 (vec3, attribute 2, three.js vertexColors), 0 = none
+    unsigned int normal_vbo;  // NORMAL, else computed (vec3, attribute 3: the custom skin shaders' normalLocal), 0 = none
     int index_count;
     // dynamic (morph targets or skin): the CPU data an instance re-evaluates
     int dynamic;
@@ -255,18 +259,39 @@ static GLint gl_wrap(const int wrap) {
 // are flipped at load, so both kinds sample alike). No sRGB decode at upload: v10.0.3 keeps
 // GLTFLoader's sRGB tag only for an asset with env (BasicMaterial.gltf_srgb_maps, decoded when
 // sampled). Sampler filters as three.js: default LINEAR_MIPMAP_LINEAR / LINEAR.
+// An embedded image as RGBA, bottom row first (as stbi with its vertical flip): PNG / JPEG through stb_image, WebP
+// (EXT_texture_webp, three.js GLTFLoader's) through the HTML engine's simplewebp decoder (html/engine/webp.h; a build
+// without the engine has none: NULL, the checker). Freed with stbi_image_free (free()).
+static unsigned char *gltf_decode_image(const unsigned char *bytes, const size_t size, int *width, int *height, int *channels) {
+#ifdef KRUNKNATIVE_HTML_ENGINE
+    if (webp_is_webp(bytes, size)) {
+        unsigned char *rgba = webp_decode_rgba(bytes, size, width, height);
+        if (!rgba) return NULL;
+        const size_t row = (size_t) *width * 4;
+        unsigned char *tmp = malloc(row);
+        for (int y = 0; tmp && y < *height / 2; y++) { // top row first -> bottom row first
+            unsigned char *a = rgba + (size_t) y * row, *b = rgba + (size_t) (*height - 1 - y) * row;
+            memcpy(tmp, a, row);
+            memcpy(a, b, row);
+            memcpy(b, tmp, row);
+        }
+        free(tmp);
+        *channels = 4;
+        return rgba;
+    }
+#endif
+    stbi_set_flip_vertically_on_load_thread(1);
+    unsigned char *pixels = stbi_load_from_memory(bytes, (int) size, width, height, channels, 4);
+    stbi_set_flip_vertically_on_load_thread(0);
+    return pixels;
+}
+
 static unsigned int gltf_texture(GltfModel *model, const int index, const int sampler_index) {
     if (index < 0 || (size_t) index >= model->data->images_count) return 0;
     if (model->texture_tried[index]) return model->textures[index];
     model->texture_tried[index] = 1;
 
     const cgltf_image *image = &model->data->images[index];
-    const char *mime = image->mime_type ? image->mime_type : "";
-    if (strstr(mime, "webp") || (image->uri && strstr(image->uri, ".webp"))) {
-        fprintf(stderr, "gltf: %s: image %d is WebP (EXT_texture_webp), not supported\n", model->path, index);
-        model->textures[index] = texture_checker();
-        return model->textures[index];
-    }
 
     unsigned char *pixels = NULL;
     int width = 0, height = 0, channels = 0;
@@ -274,11 +299,7 @@ static unsigned int gltf_texture(GltfModel *model, const int index, const int sa
 
     if (image->buffer_view) {
         const unsigned char *bytes = cgltf_buffer_view_data(image->buffer_view);
-        if (bytes) {
-            stbi_set_flip_vertically_on_load_thread(1);
-            pixels = stbi_load_from_memory(bytes, (int) image->buffer_view->size, &width, &height, &channels, 4);
-            stbi_set_flip_vertically_on_load_thread(0);
-        }
+        if (bytes) pixels = gltf_decode_image(bytes, image->buffer_view->size, &width, &height, &channels);
     } else if (image->uri && !strncmp(image->uri, "data:", 5)) {
         const char *comma = strchr(image->uri, ',');
         if (comma && strstr(image->uri, ";base64")) {
@@ -289,9 +310,7 @@ static unsigned int gltf_texture(GltfModel *model, const int index, const int sa
             void *bytes = NULL;
             cgltf_options options = {0};
             if (cgltf_load_buffer_base64(&options, size, comma + 1, &bytes) == cgltf_result_success) {
-                stbi_set_flip_vertically_on_load_thread(1);
-                pixels = stbi_load_from_memory(bytes, (int) size, &width, &height, &channels, 4);
-                stbi_set_flip_vertically_on_load_thread(0);
+                pixels = gltf_decode_image(bytes, size, &width, &height, &channels);
                 free(bytes);
             }
         }
@@ -421,6 +440,14 @@ static void bind_color_attribute(const unsigned int vbo) {
     glEnableVertexAttribArray(2);
 }
 
+// attribute 3 = skin_custom.vert v_normal (client.h geometry_bind_normals), in the bound VAO
+static void bind_normal_attribute(const unsigned int vbo) {
+    if (!vbo) return;
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), NULL);
+    glEnableVertexAttribArray(3);
+}
+
 static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_primitive *prim, GltfPrimitive *out) {
     const cgltf_data *data = model->data;
     memset(out, 0, sizeof(*out));
@@ -433,7 +460,7 @@ static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_
         return 0;
     }
 
-    const cgltf_accessor *position = NULL, *texcoord = NULL, *joints = NULL, *weights = NULL, *color = NULL;
+    const cgltf_accessor *position = NULL, *texcoord = NULL, *joints = NULL, *weights = NULL, *color = NULL, *normal = NULL;
     for (size_t i = 0; i < prim->attributes_count; i++) {
         const cgltf_attribute *a = &prim->attributes[i];
         if (a->type == cgltf_attribute_type_position) position = a->data;
@@ -441,6 +468,7 @@ static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_
         else if (a->type == cgltf_attribute_type_joints && a->index == 0) joints = a->data;
         else if (a->type == cgltf_attribute_type_weights && a->index == 0) weights = a->data;
         else if (a->type == cgltf_attribute_type_color && a->index == 0) color = a->data;
+        else if (a->type == cgltf_attribute_type_normal) normal = a->data;
     }
     if (!position || !position->count) return 0;
 
@@ -472,6 +500,20 @@ static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_
     for (size_t i = 0; i < index_count; i++) {
         const size_t idx = prim->indices ? cgltf_accessor_read_index(prim->indices, i) : i;
         indices[i] = idx < count ? (unsigned int) idx : 0;
+    }
+
+    // vertex normals (attribute 3): the file's NORMAL, else three.js GLTFLoader's computeVertexNormals
+    float *normals = malloc(count * 3 * sizeof(float));
+    if (normals) {
+        if (normal && normal->count >= count) {
+            for (size_t i = 0; i < count; i++) cgltf_accessor_read_float(normal, i, &normals[i * 3], 3);
+        } else {
+            geometry_compute_normals(vertices, count, indices, index_count, normals);
+        }
+        glGenBuffers(1, &out->normal_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, out->normal_vbo);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (count * 3 * sizeof(float)), normals, GL_STATIC_DRAW);
+        free(normals);
     }
 
     // morph targets (positions only)
@@ -552,6 +594,7 @@ static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
         bind_color_attribute(out->color_vbo);
+        bind_normal_attribute(out->normal_vbo);
         glBindVertexArray(0);
         geometry->index_count = (int) index_count;
         geometry_set_bounds(geometry, vertices, count);
@@ -577,6 +620,9 @@ static int extension_supported(const char *name) {
                                             "EXT_meshopt_compression"};
     for (size_t i = 0; i < sizeof(supported) / sizeof(supported[0]); i++)
         if (!strcmp(name, supported[i])) return 1;
+#ifdef KRUNKNATIVE_HTML_ENGINE
+    if (!strcmp(name, "EXT_texture_webp")) return 1; // gltf_decode_image (the engine's simplewebp)
+#endif
     return 0;
 }
 
@@ -949,6 +995,7 @@ GltfInstance *gltf_instance_create(GltfModel *model, const float time_scale) {
             glEnableVertexAttribArray(0);
             glEnableVertexAttribArray(1);
             bind_color_attribute(prim->color_vbo);
+            bind_normal_attribute(prim->normal_vbo);
             glBindVertexArray(0);
             geometry->ebo = prim->ebo;
             geometry->index_count = prim->index_count;
