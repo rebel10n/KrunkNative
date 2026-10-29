@@ -57,6 +57,7 @@
 #define KRUNKER_ACCOUNT_DEFAULT_AUTH "https://crucible.frvr.com/v1/auth"
 #define KRUNKER_ACCOUNT_DEFAULT_SOCIAL "https://social.krunker.io"           // v10 SOCIAL_URI
 #define KRUNKER_ACCOUNT_DEFAULT_EVENT_BUS "wss://event-bus.svc.krunker.io"   // v10 EVENT_BUS_URI (friends)
+#define KRUNKER_ACCOUNT_DEFAULT_CRUCIBLE_IAP "https://crucible.frvr.com/v1/iap" // FRVR's iap wallet (the SDK's iap base, sdk:4779)
 #define KRUNKER_ACCOUNT_DEFAULT_EDITOR "https://editor.krunker.io"           // v10 EDITOR_URI (the Servers footer's "in Editor")
 #define KRUNKER_ACCOUNT_REFRESH_MARGIN_S 60
 
@@ -146,6 +147,7 @@ typedef enum {
     KRUNKER_SVC_EVENT_BUS, // event-bus.svc.krunker.io: the friends socket (/ws?at=<token>)
     KRUNKER_SVC_DATA,      // api.krunker.io (v10 API_URI, the data client): /daily-spin/progress ({data, error} answers)
     KRUNKER_SVC_EDITOR,    // editor.krunker.io (v10 EDITOR_URI): /player-count, the Servers footer's "in Editor"
+    KRUNKER_SVC_CRUCIBLE,  // crucible.frvr.com/v1/iap: FRVR's iap wallet (the Stripe payment, doc/v10/checkout-stripe.md)
 } KrunkerService;
 void krunker_service_url(KrunkerService svc, const char *path, char *out, size_t n);
 // The answer on the main thread: status 0 = unreachable / timed out; res = the parsed JSON body

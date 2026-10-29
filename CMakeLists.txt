@@ -1602,6 +1602,13 @@ else ()
     target_link_libraries(kio_trade_test PRIVATE cJSON m)
     add_test(NAME kio_trade_test COMMAND kio_trade_test)
 
+    # kio_checkout_stripe_test: the Stripe purchase path's sequence, bodies, poll timer, limits and URL redaction against
+    # fake hooks, no network (client/src/ui/kio_checkout_stripe.c is included by the test)
+    add_executable(kio_checkout_stripe_test client/tests/kio_checkout_stripe_test.c)
+    target_include_directories(kio_checkout_stripe_test PRIVATE client/include shared/include)
+    target_link_libraries(kio_checkout_stripe_test PRIVATE cJSON m)
+    add_test(NAME kio_checkout_stripe_test COMMAND kio_checkout_stripe_test)
+
     # hud_format_test: the HUD's number text (client/src/ui/hud_format.c) for the damage numbers, the health bar and
     # the K/D ratio: two decimals at most, no exponent, no double noise (client/tests/hud_format_test.c)
     add_executable(hud_format_test client/tests/hud_format_test.c client/src/ui/hud_format.c)

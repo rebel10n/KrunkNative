@@ -28,3 +28,6 @@ int kio_checkout_stripe_begin(const cJSON *body, KioStripeDone done, void *user)
 void kio_checkout_stripe_tick(void);
 // Ends a running purchase without calling done (the player left the store, the account changed).
 void kio_checkout_stripe_close(void);
+// The log form of a URL: its scheme and host, and "/..." when there is a path or query (a session's URL and its
+// tokens never reach the log). 1 = written to out; 0 = not a URL.
+int kio_stripe_redact(const char *url, char *out, size_t n);

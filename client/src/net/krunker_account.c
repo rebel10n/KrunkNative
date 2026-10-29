@@ -175,6 +175,9 @@ void krunker_service_url(const KrunkerService svc, const char *path, char *out, 
         case KRUNKER_SVC_EVENT_BUS: endpoint("KRUNKNATIVE_KRUNKER_EVENT_BUS", "krunkerEventBus", KRUNKER_ACCOUNT_DEFAULT_EVENT_BUS, base, sizeof(base)); break;
         case KRUNKER_SVC_DATA: data_client_base(base, sizeof(base)); break;
         case KRUNKER_SVC_EDITOR: endpoint("KRUNKNATIVE_KRUNKER_EDITOR", "krunkerEditor", KRUNKER_ACCOUNT_DEFAULT_EDITOR, base, sizeof(base)); break;
+        case KRUNKER_SVC_CRUCIBLE:
+            endpoint("KRUNKNATIVE_KRUNKER_CRUCIBLE_IAP", "krunkerCrucibleIap", KRUNKER_ACCOUNT_DEFAULT_CRUCIBLE_IAP, base, sizeof(base));
+            break;
         default: endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_API, base, sizeof(base)); break;
     }
     // the API client joins base and path with one '/' (v10:27526)
