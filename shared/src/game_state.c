@@ -5,8 +5,8 @@
 #include <shared.h>
 #include <net_ext.h>
 #include <raid_drops.h> // v10.0.4 isDoubleRaidDrops
+#include <ks_game.h>    // ks_wall_ms (the wall clock for the event flags)
 #include <string.h>
-#include <time.h>
 
 static int64_t (*g_event_clock)(void); // tests: a fixed "now"
 
@@ -16,9 +16,7 @@ void game_set_event_clock(int64_t (*now_ms)(void)) {
 
 static int64_t event_now_ms(void) {
     if (g_event_clock) return g_event_clock();
-    struct timespec ts;
-    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-    return (int64_t) time(NULL) * 1000;
+    return (int64_t) ks_wall_ms(); // the shared wall clock (ks_game.c), portable to MinGW
 }
 
 // updateEventFlags (deob-10.0.4.js:195384-195385): isDoubleRaidDrops = isPubType() && a Saturday or Sunday (UTC). Called at
