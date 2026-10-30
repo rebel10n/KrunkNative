@@ -104,11 +104,11 @@
 // `--render-scenario` (tools/uidiff, client/src/ui/ui_scenario.c): native engine builds only.
 #include <entities.h> // v10 KrunkScript entities / runtime blocks (official lobbies), web builds too
 #include <player_names.h> // Hide player names: the game-leave and SPAWN hooks, web builds too
+#include <scene_warm.h> // v10.0.4 warmScene: the match-start warm frames, web builds too
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 #include <ui_logic.h>
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
-#include <scene_warm.h> // v10.0.4 warmScene: the match-start warm frames
 #endif
 #define SCENARIO_ACTIVE() ui_scenario_active()
 #define SCENARIO_PREVIEW() ui_scenario_draws_preview()
