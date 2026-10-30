@@ -1140,15 +1140,16 @@ static void net_spawn_client(ClientConnection *client) {
     const ObjectManagerPerms om_perms = net_om_perms(client);
     // the Build Tool's cost waiver follows the Object Manager's spawn right (shared.h build_free)
     client->player->build_free = (object_manager_caps(&g_server->game, &om_perms) & OM_CAP_SPAWN) != 0;
+    const int had_extras = client->player->extra_weapon_count > 0;
     if (!object_manager_keep_extras(&g_server->game, &om_perms)) {
-        const int had = client->player->extra_weapon_count > 0;
         client->om_extra_count = 0;
         player_set_extra_weapons(client->player, NULL, 0);
-        if (had) object_manager_send_extras(&g_server->game, client->player, NET_TARGET_ALL);
     } else { // (the Tool Gun only while this player may spawn: a host who handed over the game loses it)
         client->om_extra_count = object_manager_filter_extras(&g_server->game, &om_perms, client->om_extras, client->om_extra_count);
         player_set_extra_weapons(client->player, client->om_extras, client->om_extra_count);
     }
+    // emptied here: net_send_spawn only sends a non-empty list, so the clients' copies are cleared before the SPAWN
+    if (had_extras && !client->player->extra_weapon_count) object_manager_send_extras(&g_server->game, client->player, NET_TARGET_ALL);
     player_spawn(client->player);
     // KrunkNative: what commands set while this connection was not spawned in (god, noclip ... from the
     // menu, a menu `tp`), and cheats that outlive a map change's new Player
@@ -1337,6 +1338,17 @@ static void net_om_request_view(ClientConnection *client, const NetSpawnReqPacke
     object_manager_menu_view(&g_server->game, client->player, &client->keep, client->id, &view);
     object_manager_request_view(&g_server->game, &view, req, &perms, client->om_extras, &client->om_extra_count, result);
     if (client->player) player_set_extra_weapons(client->player, client->om_extras, client->om_extra_count); // (a dead Player: the list only)
+    const int weapons = req->action == OM_ACTION_ADD_WEAPON || req->action == OM_ACTION_REMOVE_WEAPON || req->action == OM_ACTION_CLEAR_WEAPONS;
+    if (!weapons || result->status != OM_STATUS_OK) return;
+    // the clients' copies follow the list (the window's LOADOUT marks, the slots the next SPAWN builds): a
+    // removal while dead is never re-sent at the spawn, which only sends a non-empty list
+    if (client->player) {
+        object_manager_send_extras(&g_server->game, client->player, NET_TARGET_ALL);
+    } else {
+        NetLoadoutExtraPacket extra = {.uid = client->id};
+        for (int i = 0; i < client->om_extra_count && i < PLAYER_EXTRA_WEAPONS_MAX; i++) extra.weapons[extra.count++] = (uint8_t) client->om_extras[i];
+        net_send_packet(client->fd, NET_PACKET_LOADOUT_EXTRA, &extra, sizeof(extra));
+    }
 }
 
 static void net_handle_object_manager(ClientConnection *client, const NetSpawnReqPacket *req) {
