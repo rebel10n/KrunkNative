@@ -4407,6 +4407,7 @@ static void on_play_fetched(void *user, const cJSON *map, const char *error) {
     }
     if (!g_client->offline) client_net_disconnect(g_client, "Offline", "000000");
     menu_show_window(MENU_WINDOW_NONE, 0);
+    menu_host_switch(map); // v10's Play ends the page: the spinner, not the map card
     if (local_game_host_custom(g_client, map)) KN_LOG_DEBUG1("[mm] playing published map %s offline\n", g_play_name);
     else ui_alert(I18N("kn.games.loadFailed", "Failed to load the game."));
 }
@@ -4463,6 +4464,7 @@ static void on_play_list(void *user, const int status, const char *body, const s
             const int slot = map_catalog_slot(&g_client->game.maps, &g_client->game.map_count, (size_t) index);
             if (slot >= 0) {
                 menu_select_map(slot);
+                menu_host_switch(g_client->game.maps[slot]); // v10's Play ends the page: the spinner, not the map card
                 local_game_host(g_client, slot, g_client->net_mode_index);
                 menu_host_offline();
             }

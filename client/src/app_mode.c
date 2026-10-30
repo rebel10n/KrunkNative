@@ -209,6 +209,7 @@ static void test_map_host(Client *client) {
     // Krunker reloads the game tab on the map (a fresh menu): no menu window stays open
     if (menu_window_is_open()) menu_close_window();
 #ifdef LOCAL_GAME_HAVE_HOST_CUSTOM
+    menu_host_switch(map); // the reloaded tab's curtain and ring, not the map card
     if (!local_game_host_custom(client, map)) fprintf(stderr, "[app] test map: hosting failed\n");
     else fprintf(stderr, "[app] test map hosted in this window\n");
 #else

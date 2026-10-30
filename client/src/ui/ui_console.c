@@ -1348,6 +1348,10 @@ static void leave_online(Client *client) {
 void ui_console_go_offline(Client *client, const int catalog_index, const char *command) {
     nav_overlay_map_switch(); // runOfflineSandbox: clearNavOverlayForMapSwitch + scheduleNavOverlayRebuild
     if (!client->offline) leave_online(client);
+    if (client->offline && catalog_index >= 0) { // the running offline game reloads at once: a fresh page first
+        const int slot = map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) catalog_index);
+        if (slot >= 0) menu_host_switch(client->game.maps[slot]);
+    }
     if (catalog_index >= 0 && local_game_pick_map(client, catalog_index) < 0) {
         appendf(COL_ERROR, "%s failed: map %s could not be loaded", command, map_catalog_at((size_t) catalog_index)->key);
         return;

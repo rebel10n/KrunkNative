@@ -166,8 +166,12 @@ void community_host_slot(Client *client, const int slot, const int mode) {
     if (mode >= 0) client->net_mode_index = mode; // local_game_start reads it (Krunker mode id)
     // Krunker creates a new room: a running offline game reloads on the picked map and mode;
     // otherwise the offline game starts directly on it (offline_start_map).
-    if (client->offline && slot >= 0) local_game_host(client, slot, client->net_mode_index);
-    else if (slot >= 0) client->offline_start_map = client->game.maps[slot];
+    if (client->offline && slot >= 0) {
+        menu_host_switch(client->game.maps[slot]); // a new room: v10's fresh page (the spinner, not the map card)
+        local_game_host(client, slot, client->net_mode_index);
+    } else if (slot >= 0) {
+        client->offline_start_map = client->game.maps[slot];
+    }
     menu_host_offline();
     client->offline_start_map = NULL; // not consumed when a server connection took the request
 }

@@ -134,6 +134,7 @@ int  menu_can_play(void);                        // connected and the map is in:
 void menu_play_when_ready(void);                 // play once the map is in (reconnects first when down)
 void menu_play_cancel(void);                     // a play waiting for its connection is dropped (Lost Connection)
 void menu_host_offline(void);                    // hostOffline
+void menu_host_switch(const cJSON *map);         // a running local game reloads on another (a fresh page): call before the reload
 void menu_retry_connect(void);                   // retryConnect
 void menu_show_connecting(void);                 // the loading spinner for a reconnect / retry (the page's map)
 void menu_show_connecting_map(const char *map);  // the spinner for a server switch to the game on `map` ("" / NULL: not known)

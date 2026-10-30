@@ -1626,6 +1626,21 @@ void menu_host_offline(void) {
     menu_request_play(1);
 }
 
+// A running local game switching to another one in place: Host Game (play offline, a catalogue or community map),
+// playing a map from the server list, a published map, the editor's Test Map, the console's offline / play. v10 opens
+// each on a fresh page (?host= / ?play=, the test tab: g:197836, g:218512-14), so the curtain with "Hosting <map> ..."
+// and its ring, never the map card, which shows only on a map load that is not the page's first: a map change inside
+// the same game (deob-10.0.5.js:224307-224331). Called BEFORE the reload: the in-process server answers at once
+// (offline_sync), so the reload's INIT must land on the fresh page and lift the curtain (menu_boot_arm keeps the game
+// it waits past). menu_host_offline after it leaves the curtain alone (the game is connected).
+void menu_host_switch(const cJSON *map) {
+    if (!g_ui.dom_ready) return;
+    menu_load_gam_set(LOAD_GAM_HOSTING, cjson_map_name(map));
+    if (!g_load_gam_map[0]) g_load_gam = LOAD_GAM_NONE;
+    menu_boot_arm(0);
+    menu_update_instructions();
+}
+
 // The loading spinner for a reconnect / retry to the page's own game: v10's "Loading <map> ..." with
 // the curtain until its INIT. A server switch names the target's map (menu_show_connecting_map).
 void menu_show_connecting(void) {

@@ -848,6 +848,10 @@ nuke-e2e: build ## The Nuke on server_bin: a guest's 25 kills, key 3 through a h
 ruleset-e2e: build ## Krunker v10.0.4 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
 	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
 
+.PHONY: loading-switch-e2e
+loading-switch-e2e: build ## The map card vs v10's page loads: none at launch or on a Host Game switch of the local game (the spinner curtain), the card on an in-game map change (headless)
+	timeout 600 $(PYTHON) -I client/tests/loading_switch_e2e.py $(DEBUG_DIR)
+
 .PHONY: chat-restrict-e2e
 chat-restrict-e2e: build ## A chat-restricted Box Office player can still start and cast a forfeit vote (/ff), and chat stays blocked (brain + server_bin)
 	timeout 300 $(PYTHON) -I server/tests/chat_restrict_e2e.py $(DEBUG_DIR)
