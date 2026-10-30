@@ -29,6 +29,7 @@
 #include <ui_host_config.h>
 #include <ui_logic.h>
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +63,54 @@ static int official_hostable(const MapCatalogEntry *e) {
     return e && e->source == MAP_SOURCE_OFFICIAL && e->hostable && e->index >= 0 && e->index < FLOW_MAP_MAX;
 }
 
+// config.hostTypes' window fields (deob-10.0.5.js:16551-16631; the config itself is shared/src/game_config.c):
+// mapH (the Select tab's map heading), allMaps (the maps listed, by lowercase name; NULL every map), topHedr
+// (the Select banner; NULL the template's Browse Community Games) and disTabs (bit n: tab n greyed out).
+typedef struct {
+    const char *map_heading;
+    const char *const *all_maps;
+    const char *banner;
+    unsigned int dis_tabs;
+} HostWindowType;
+
+static const char *const k_comp_maps[] = {"burg", "sandstorm", "undergrowth", "shipment", "industry", "lumber", "site",
+                                          "bureau", "atomic", "lush", "eterno simulator", "frontier", NULL};
+static const char *const k_zombies_maps[] = {"facility", NULL};
+static const char *const k_raid_maps[] = {"tortuga", "laboratory", "soul sanctum", "khepri", "bastion", NULL};
+
+#define HOST_BANNER(img, text) \
+    "<div id=\"hostCMapPickr\" style=\"background-image:linear-gradient(to right, #000000a8, #00000000),url(" img ");\">" \
+    "<div id=\"hostCMapPickT\">" text "</div></div>"
+
+static const HostWindowType k_host_window[GAME_HOST_TYPE_COUNT] = {
+    // Comp: deob-10.0.5.js:16559-16564
+    [GAME_HOST_COMP] = {NULL, k_comp_maps, HOST_BANNER("img/backgrounds/gamecats/c_1.png", "Dedicated comp &amp; tournament server"),
+                        1u << 1 | 1u << 3},
+    // Zombies: deob-10.0.5.js:16589-16594
+    [GAME_HOST_ZOMBIES] = {"Zombies Maps", k_zombies_maps, HOST_BANNER("img/backgrounds/server_zombies.png", "Dedicated Zombies server"),
+                           1u << 1 | 1u << 2 | 1u << 3},
+    // Raid: deob-10.0.5.js:16611-16616
+    [GAME_HOST_RAID] = {"Raid Maps", k_raid_maps, HOST_BANNER("img/backgrounds/server_raids.png", "Dedicated Raid server"),
+                        1u << 1 | 1u << 2 | 1u << 3},
+};
+
+static const HostWindowType *host_window(void) {
+    return g_flow.host_type >= 0 && g_flow.host_type < GAME_HOST_TYPE_COUNT ? &k_host_window[g_flow.host_type] : &k_host_window[0];
+}
+
+// A Krunker map the window lists (deob-10.0.5.js:218128-218130: allMaps.indexOf(name.toLowerCase()) < 0 skips it)
+static int listed_map(const MapCatalogEntry *e) {
+    if (!official_hostable(e)) return 0;
+    const char *const *names = host_window()->all_maps;
+    if (!names) return 1;
+    for (; *names; names++) {
+        const char *a = *names, *b = e->name ? e->name : "";
+        while (*a && *b && *a == (char) tolower((unsigned char) *b)) a++, b++;
+        if (!*a && !*b) return 1;
+    }
+    return 0;
+}
+
 // The last step's backend: the window's (the Servers tab it opened from), else the Server Type setting (krunker.io's
 // hosting for krunker.io, Box Office's brain otherwise), or krunker.io's while an official game is the session
 // (host_route.h: the rule, tested by host_route_test)
@@ -90,7 +139,7 @@ static int sync_page(char *err, const size_t err_size) {
     if (!page_open()) return 1;
     for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (!official_hostable(e)) continue;
+        if (!listed_map(e)) continue;
         char id[24];
         snprintf(id, sizeof(id), "gameMap%d", e->index);
         const HtmlElem box = html_dom_by_id(id);
@@ -152,7 +201,7 @@ static void maps_text(char *out, const size_t size) {
     size_t n = 0;
     for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (!official_hostable(e) || !g_flow.maps[e->index]) continue;
+        if (!listed_map(e) || !g_flow.maps[e->index]) continue;
         n += (size_t) snprintf(out + n, size > n ? size - n : 0, "%s%s", n ? "," : "", e->key);
     }
 }
@@ -239,7 +288,7 @@ static cJSON *host_config(void) {
     cJSON *maps = cJSON_AddArrayToObject(config, "maps");
     for (size_t i = 0; i < map_catalog_count() && !g_flow.custom_key[0]; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (official_hostable(e) && g_flow.maps[e->index]) cJSON_AddItemToArray(maps, cJSON_CreateNumber(e->index));
+        if (listed_map(e) && g_flow.maps[e->index]) cJSON_AddItemToArray(maps, cJSON_CreateNumber(e->index));
     }
     if (g_flow.custom_key[0]) cJSON_AddStringToObject(config, "customMap", g_flow.custom_key);
     else cJSON_AddNullToObject(config, "customMap"); // customMap: the picked map's name || null (deob-10.0.3.js:229831)
@@ -331,7 +380,7 @@ static int practice_catalog_index(void) {
     if (g_flow.custom_key[0]) return map_catalog_index_of_key(g_flow.custom_key);
     for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (official_hostable(e) && g_flow.maps[e->index]) return (int) i;
+        if (listed_map(e) && g_flow.maps[e->index]) return (int) i;
     }
     return -1;
 }
@@ -396,7 +445,7 @@ static void practice(void) {
 static void append_map_cards(StrBuf *sb) {
     for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (!official_hostable(e)) continue;
+        if (!listed_map(e)) continue;
         char thumb[48] = "";
         sb_append(sb, "<label class=\"hostMap\"><div class=\"hostMapName blackShad\">");
         sb_append_esc(sb, e->name);
@@ -428,13 +477,15 @@ static char *command_html(const int shown) {
     return sb_finish(&sb);
 }
 
-// The v10 tab bar: Select, Game Settings, Advanced, Server (windows[7].switchTab) and Start Game, the choice
+// The v10 tab bar: Select, Game Settings, Advanced, Server (windows[7].switchTab) and Start Game, the choice.
+// The host type's disTabs are bigMenTabDis (greyed, pointer-events:none; deob-10.0.5.js:218023, :218112).
 static void append_tabs(StrBuf *sb, const int active) {
     static const char *const names[] = {"Select", "Game Settings", "Advanced", "Server"};
+    const unsigned int dis = host_window()->dis_tabs;
     sb_append(sb, "<div class=\"bigMenTabs\" style=\"margin-top:30px !important;margin-left:0px;\">");
     for (int t = 0; t < 4; t++) {
         sb_appendf(sb, "<div id=\"hstTab%d\" class=\"bigMenTab%s\" onclick=\"playSelect();windows[7].switchTab(%d)\" onmouseenter=\"playTick(0.1);\">%s</div>",
-                   t, t == active ? " bigMenTabA" : "", t, names[t]);
+                   t, t == active ? " bigMenTabA" : dis & 1u << t ? " bigMenTabDis" : "", t, names[t]);
     }
     // v10.0.2's startServBtn (captured host window): a button of the tab row, no tab of its own
     sb_appendf(sb, "<div class=\"bigMenTab\" id=\"startServBtn\" style=\"background:#4582d1!important;border-top-right-radius:6px;border-bottom-right-radius:6px;\" "
@@ -535,8 +586,24 @@ char *host_flow_window_gen(void) {
         html = splice(html, (size_t) (a - html), (size_t) (b + strlen(end_marker) - html), bar);
         free(bar);
     }
-    // Select: the community banner names the chosen community map; the raw game data is not hostable
-    if (g_flow.custom_name[0]) {
+    // Select: a dedicated host type's banner (topHedr) replaces the community one, which names the chosen
+    // community map; the raw game data is not hostable
+    if (host_window()->banner && !g_flow.custom_name[0]) {
+        const char *pick = strstr(html, "<div id=\"hostCMapPickr\"");
+        const char *end = pick ? div_end(pick) : NULL;
+        if (end) html = splice(html, (size_t) (pick - html), (size_t) (end - html), host_window()->banner);
+    } else if (!g_flow.custom_name[0]) {
+        // Custom's topHedr: gamecats/c_<[4, 8, 9, 11, 13][randInt(0, 4)]> (deob-10.0.5.js:16552-16555). The captured
+        // template froze c_9; scenario renders keep it.
+        static const int cats[] = {4, 8, 9, 11, 13};
+        int cat = cats[rand() % 5];
+#ifdef UI_SCENARIO_SUPPORTED
+        if (ui_scenario_active()) cat = 9;
+#endif
+        char img[40];
+        snprintf(img, sizeof(img), "gamecats/c_%d.png", cat);
+        html = replace_once(html, "gamecats/c_9.png", img);
+    } else {
         StrBuf name = {0};
         sb_append_esc(&name, g_flow.custom_name);
         char *esc = sb_finish(&name);
@@ -560,6 +627,12 @@ char *host_flow_window_gen(void) {
             char *list = sb_finish(&cards);
             html = splice(html, (size_t) (m + strlen(anchor) - html), (size_t) (n - html), list ? list : "");
             free(list);
+        }
+        // mapH || "Default Krunker Maps" (deob-10.0.5.js:218125)
+        if (host_window()->map_heading) {
+            char heading[64];
+            snprintf(heading, sizeof(heading), ">%s</div>", host_window()->map_heading);
+            html = replace_once(html, ">Default Krunker Maps</div>", heading);
         }
     }
     if (g_flow.step != 0) html = replace_once(html, "<div class=\"hostTb0\">", "<div class=\"hostTb0 hide\">");

@@ -2355,9 +2355,16 @@ the active backend (`krunker_net_active()`: the official krunker.io connection):
 
 The Select tab's checkboxes are Krunker's own maps (catalogue `hostable`). A community map is chosen in the
 Games window (v10's Browse Community Games banner, the Games window's Host button) and replaces them.
-Raw game data, Social (share on hub), Server Upgrades, Host Presets and Rehost are not in the window: the
-server cannot take the first, and the rest need accounts and features KrunkNative does not have. The menu's
-Host Game button is shown; the chooser is v10's.
+The window follows the host type the chooser opened (`openHostWindow(false, type)`, config.hostTypes,
+deob-10.0.5.js:16551-16631): Comp, Zombies and Raid list only their maps (`allMaps`: Comp's 12, Zombies'
+Facility, Raid's Tortuga, Laboratory, Soul Sanctum, Khepri and Bastion) under their heading (`mapH`), show
+their own banner instead of Browse Community Games (`topHedr`) and grey out tabs (`disTabs`: Comp Game
+Settings and Server, Zombies and Raid Game Settings, Advanced and Server). Their forced config is the
+server's (`game_config_setup`, `shared/src/game_config.c`). Rent Dedicated Server (type 2) has no entry point
+in 10.0.5 and is not ported. Social (share on hub), Server Upgrades and Host Presets are shown as v10 shows
+them (`client/src/ui/ui_host_config.c`; none for Comp / Zombies / Raid). Raw game data and Rehost are not
+in the window: the server cannot take the first, and the second needs a krunker.io account feature. The
+menu's Host Game button is shown; the chooser is v10's.
 
 ### 8.12 Build version and outdated servers
 

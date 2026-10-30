@@ -1,0 +1,30 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 8,
+    "windowActions": [
+      [
+        "openHostWindow",
+        false,
+        3
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "v10 Zombies Server Setup (openHostWindow(false, 3), hostTypes[3] deob-10.0.5.js:16587-16608): the 'Dedicated Zombies server' banner (topHedr), 'Zombies Maps' listing Facility only (mapH, allMaps), Game Settings / Advanced / Server greyed out (disTabs [1,2,3])"
+}
