@@ -4,7 +4,8 @@
 // spaces the bundle's TSL builds use: uv, positionLocal, normalLocal, the world and view positions, the clip position
 // (shader 8's vPos) and the part's scale (13 / 16: length of the model matrix's columns). The normal comes from attribute 3
 // (the model's own normals, client.h geometry_bind_normals); geometry without them reads (0, 0, 0), and the fragment
-// stages derive the face normal from the positions (dFdx / dFdy) where they need one.
+// stages derive the face normal from the positions (dFdx / dFdy) where they need one. vNormalView is normalView (the
+// normal matrix, inverse transpose of the model-view, times normalLocal; (0, 0, 0) without normals), for 18.
 // uDisplace moves the vertex along normalLocal as the TSL positionNode of 9 and 10 (:92332-92337, :92402-92407):
 //   1 (9, GasFresnal, uWobble): position + normal * (cnoise(-(uv * uScale) + time / 2) + cnoise(uv * uScale + time / 2)) / 100
 //   2 (10, AngelSheel, uWarp):  position + normal * cnoise(uv * uScale + time) * uDisplacement
@@ -19,6 +20,7 @@ out vec3 vView;   // positionView
 out vec3 vWorld;  // (modelMatrix * position).xyz
 out vec4 vClip;   // projectionMatrix * modelViewMatrix * position
 out vec3 vScale;  // length(modelMatrix[0..2].xyz)
+out vec3 vNormalView; // normalView, unnormalised ((0, 0, 0) without a normal attribute)
 
 uniform mat4 transform;
 uniform mat4 camera_world_inverse;
@@ -79,6 +81,7 @@ void main() {
     vec4 view = camera_world_inverse * world;
     vView = view.xyz;
     vScale = vec3(length(transform[0].xyz), length(transform[1].xyz), length(transform[2].xyz));
+    vNormalView = dot(v_normal, v_normal) > 0.0 ? transpose(inverse(mat3(camera_world_inverse * transform))) * v_normal : vec3(0.0);
     gl_Position = camera_projection * view;
     vClip = gl_Position;
 }

@@ -6,6 +6,8 @@
 #include "viewer/viewer_store.h"
 #include <cosmetics.h> // cosmetic_asset_path: a custom skin's user-asset keys
 #include <cJSON.h>     // customShaderInfo (ViewerSkin.shader_info)
+#include <client.h>    // g_render_lighting: shader 18's Lambert
+#include <ruleset.h>   // light_unit_factor (as basic.c)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -300,17 +302,21 @@ static const MaterialVTable shadertoy_material_vtable = {shadertoy_update_unifor
 
 // ---------------------------------------------------------------- v10 "custom" skin shaders
 // v10's custom entries (type "custom", deob-10.0.4.js:195962-196150; their TSL twins :92213-93011) are ported as GLSL files:
-// assets/shaders/skin_custom.vert + assets/shaders/skin_custom/<n>.frag (8-17). A skin draws one only through its
+// assets/shaders/skin_custom.vert + assets/shaders/skin_custom/<n>.frag (8-18). A skin draws one only through its
 // customShaderInfo (getMat, :203447-203475: a custom shader with no customShaderInfo keeps the item's own material): "*" or
 // the entry whose shaderNum is the skin's on an OBJ item, per part (the glTF node name, "*" / applyToAll = every mesh) on a
 // model (:204930-204986). Each material is the bundle's custom-shader class (:156038-156076: transparent, DoubleSide, normal
 // blending, no fog) with its build's overrides, its uniforms (the shader's defaults or the named preset of
 // shaderArgs.uniforms, then an object shaderArgs.uniforms over them, :156052) and the part's matArgs (side / transparent /
 // depthWrite, :204969-204983).
+// v10.0.5 adds the "graph" entries (deob-10.0.5.js:196197-197438, the first is 18 "Ametwista"): a node graph the bundle
+// compiles to a lit / unlit node material (iiïîiîì, :95805-95835), ported here as 18.frag. getMat takes a graph shader
+// from the skin's shaderNum alone (customShaderInfo optional: its entry's shaderArgs, :204743-204760), a model's parts
+// from customShaderInfo as the custom ones (:206222-206243); shaderArgs.params sets the graph's params by name (:94816).
 #define SKIN_FX_CUSTOM_FIRST 8
-#define SKIN_FX_CUSTOM_LAST 17
+#define SKIN_FX_CUSTOM_LAST 18
 #define SKIN_FX_CUSTOM_MAX 32
-#define SKIN_FX_CUSTOM_UNIFORMS 12
+#define SKIN_FX_CUSTOM_UNIFORMS 24 // 18 has 18 params
 #define SKIN_FX_SKYLINE_MAX 48 // 17.frag KN_SKYLINE_MAX
 #define SKIN_FX_SHOCK_SECONDS 0.75 // shader 14's pulse, sin(min(t / 0.75, 1) * PI) (deob-10.0.4.js:92705-92711)
 #define SKIN_FX_SHOCK_ARCS 4        // shader 14 keeps four arcs, one per shot (deob-10.0.4.js:92686-92688)
@@ -448,8 +454,77 @@ static void custom_defaults(CustomMaterial *m, const int n, const char *preset) 
         custom_set(m, "uLightRepetitions", 1, 100.0f, 0, 0);
         custom_set(m, "uShadowRepetitions", 1, 100.0f, 0, 0);
         break;
+    case 18: // Ametwista's params (deob-10.0.5.js:196207-196411)
+        custom_set(m, "stockX", 1, -7.4f, 0, 0);
+        custom_set(m, "muzzleX", 1, 12.2f, 0, 0);
+        custom_set_hex(m, "deepColor", 0x160826);
+        custom_set_hex(m, "midColor", 0x6e35d9);
+        custom_set_hex(m, "lightColor", 0xf1e6ff);
+        custom_set(m, "crystalScale", 1, 1.8f, 0, 0);
+        custom_set(m, "facetDepth", 1, 0.5f, 0, 0);
+        custom_set(m, "glintAmt", 1, 0.9f, 0, 0);
+        custom_set(m, "sparkleRate", 1, 0.05f, 0, 0);
+        custom_set(m, "glowAmt", 1, 0.7f, 0, 0);
+        custom_set(m, "blinkSpeed", 1, 0.6f, 0, 0);
+        custom_set_hex(m, "sparkleColor", 0xa970ff);
+        custom_set_hex(m, "outlineColor", 0xff5ce1);
+        custom_set(m, "outlineAmt", 1, 1.2f, 0, 0);
+        custom_set(m, "outlineSpeed", 1, 0.4f, 0, 0);
+        custom_set(m, "outlineCount", 1, 1.0f, 0, 0);
+        custom_set(m, "bottomY", 1, -3.8f, 0, 0);
+        custom_set(m, "topY", 1, 1.4f, 0, 0);
+        break;
     default:
         break;
+    }
+}
+
+// Shader 18's float params' ranges (deob-10.0.5.js:196207-196411): an override is clamped to them (iîïïìîî, :94780-94783)
+typedef struct {
+    const char *name;
+    float min, max;
+} GraphRange;
+
+static const GraphRange k_ametwista_ranges[] = {
+    {"stockX", -30.0f, 0.0f}, {"muzzleX", 0.0f, 30.0f}, {"crystalScale", 0.5f, 6.0f}, {"facetDepth", 0.0f, 1.0f},
+    {"glintAmt", 0.0f, 4.0f}, {"sparkleRate", 0.0f, 0.5f}, {"glowAmt", 0.0f, 3.0f}, {"blinkSpeed", 0.1f, 3.0f},
+    {"outlineAmt", 0.0f, 4.0f}, {"outlineSpeed", 0.0f, 2.0f}, {"outlineCount", 0.5f, 5.0f}, {"bottomY", -15.0f, 0.0f},
+    {"topY", 0.0f, 15.0f},
+};
+
+// shaderArgs.params over a graph's defaults (the param node, deob-10.0.5.js:95064-95100): only the graph's own params,
+// a colour as "#rrggbb" or [r, g, b], a float as a finite number clamped to the param's range
+static void custom_graph_params(CustomMaterial *m, const cJSON *params) {
+    const cJSON *p;
+    cJSON_ArrayForEach(p, params) {
+        if (!p->string) continue;
+        CustomUniform *u = NULL;
+        for (int i = 0; i < m->uniform_count; i++)
+            if (!strcmp(m->uniforms[i].name, p->string)) u = &m->uniforms[i];
+        if (!u) continue;
+        if (u->count == 3) {
+            if (cJSON_IsString(p) && strlen(p->valuestring) == 7 && p->valuestring[0] == '#' &&
+                strspn(p->valuestring + 1, "0123456789abcdefABCDEF") == 6) {
+                custom_set_hex(m, p->string, (int) strtol(p->valuestring + 1, NULL, 16));
+            } else if (cJSON_IsArray(p) && cJSON_GetArraySize(p) == 3) {
+                float f[3];
+                int ok = 1;
+                for (int i = 0; i < 3; i++) {
+                    const cJSON *c = cJSON_GetArrayItem(p, i);
+                    ok = ok && cJSON_IsNumber(c) && isfinite(c->valuedouble);
+                    f[i] = ok ? (float) c->valuedouble : 0.0f;
+                }
+                if (ok) custom_set(m, p->string, 3, f[0], f[1], f[2]);
+            }
+        } else if (u->count == 1 && cJSON_IsNumber(p) && isfinite(p->valuedouble)) {
+            float v = (float) p->valuedouble;
+            for (size_t i = 0; i < sizeof(k_ametwista_ranges) / sizeof(k_ametwista_ranges[0]); i++) {
+                if (strcmp(k_ametwista_ranges[i].name, p->string)) continue;
+                if (v < k_ametwista_ranges[i].min) v = k_ametwista_ranges[i].min;
+                if (v > k_ametwista_ranges[i].max) v = k_ametwista_ranges[i].max;
+            }
+            u->v[0] = v;
+        }
     }
 }
 
@@ -516,6 +591,15 @@ static GlUniform u_custom_time = GL_UNIFORM_INIT("time");
 static GlUniform u_custom_displace = GL_UNIFORM_INIT("uDisplace");
 static GlUniform u_custom_seed = GL_UNIFORM_INIT("uSeed");
 static GlUniform u_custom_utime = GL_UNIFORM_INIT("uTime");
+static GlUniform u_custom_ambient_color = GL_UNIFORM_INIT("ambient_color");
+static GlUniform u_custom_light_color = GL_UNIFORM_INIT("light_color");
+static GlUniform u_custom_light_direction = GL_UNIFORM_INIT("light_direction");
+static GlUniform u_custom_ambient_intensity = GL_UNIFORM_INIT("ambient_intensity");
+static GlUniform u_custom_light_intensity = GL_UNIFORM_INIT("light_intensity");
+static GlUniform u_custom_correct_lights = GL_UNIFORM_INIT("correct_lights");
+
+// A graph shader (v10.0.5 "type": "graph", iíiîïìî, deob-10.0.5.js:95865-95867)
+static int custom_is_graph(const int n) { return n == 18; }
 
 // shader 14's arcs (onObjectUpdate, deob-10.0.4.js:92689-92717): a shot takes a free arc (else the oldest) with a random
 // start time; each draw advances every playing arc by the time since the last draw (0 when none played then), its shock
@@ -578,6 +662,15 @@ static void custom_update_uniforms(Material *base) {
         gl_uniform_3f(&u_custom_moon, program, m->moon[0], m->moon[1], m->moon[2]);
         gl_uniform_1f(&u_custom_scale, program, m->scale);
     }
+    if (custom_is_graph(m->st.shader)) { // a lit graph: basic.c's scene lighting (ambient and the sun)
+        const float units = ruleset_current()->light_unit_factor;
+        gl_uniform_3f(&u_custom_ambient_color, program, g_render_lighting.ambient_color.x, g_render_lighting.ambient_color.y, g_render_lighting.ambient_color.z);
+        gl_uniform_3f(&u_custom_light_color, program, g_render_lighting.light_color.x, g_render_lighting.light_color.y, g_render_lighting.light_color.z);
+        gl_uniform_3f(&u_custom_light_direction, program, g_render_lighting.light_direction.x, g_render_lighting.light_direction.y, g_render_lighting.light_direction.z);
+        gl_uniform_1f(&u_custom_ambient_intensity, program, g_render_lighting.ambient_intensity * units);
+        gl_uniform_1f(&u_custom_light_intensity, program, g_render_lighting.light_intensity * units);
+        gl_uniform_1i(&u_custom_correct_lights, program, g_render_lighting.correct_lights);
+    }
     if (m->shot_pulse) {
         custom_arcs_step(m, now);
         int at = gl_uniform_location(&u_custom_arc_time, program);
@@ -600,8 +693,9 @@ static CustomMaterial *custom_material(const int n, const cJSON *entry) {
     m->st.shader = n;
     // the class (deob-10.0.4.js:156044-156049): transparent, DoubleSide; the builds' overrides (:92846-92848, :92920-92921,
     // :92956, :93006-93007): 14 side 0, 15 side 0 opaque, 16 opaque, 17 side 0 opaque
-    m->st.base.transparent = !(n == 15 || n == 16 || n == 17);
-    m->cull_back = n == 14 || n == 15 || n == 17;
+    // 18 (a graph): its output node's settings, lit / side front / normal blending / depthWrite / opaque (:197240, :95831-95834)
+    m->st.base.transparent = !(n == 15 || n == 16 || n == 17 || n == 18);
+    m->cull_back = n == 14 || n == 15 || n == 17 || n == 18;
     m->depth_write = 1;
     m->shot_pulse = n == 14;
     m->seeded = n == 15;
@@ -609,7 +703,8 @@ static CustomMaterial *custom_material(const int n, const cJSON *entry) {
     const cJSON *args = cJSON_GetObjectItem(entry, "shaderArgs");
     const cJSON *uniforms = cJSON_GetObjectItem(args, "uniforms");
     custom_defaults(m, n, cJSON_IsString(uniforms) ? uniforms->valuestring : NULL);
-    if (cJSON_IsObject(uniforms)) custom_uniforms_object(m, uniforms);
+    if (custom_is_graph(n)) custom_graph_params(m, cJSON_GetObjectItem(args, "params"));
+    else if (cJSON_IsObject(uniforms)) custom_uniforms_object(m, uniforms);
     if (n == 17) custom_hollowmere_args(m, args);
     // the positionNode of 9 / 10 (deob-10.0.4.js:92332-92337, :92402-92407): select(uWobble / uWarp, displaced, positionLocal)
     const CustomUniform *wobble = NULL;
@@ -646,12 +741,13 @@ static void custom_replace(Mesh *mesh, CustomMaterial *m) {
 }
 
 // getMat: shaderNum != null && shaders[shaderNum]: a ShaderToyMaterial instead of the item's own (0-7); a custom shader
-// (8-17) only with the skin's customShaderInfo
+// (8-17) only with the skin's customShaderInfo; a graph shader (18) with or without it (deob-10.0.5.js:204743-204760)
 static void fx_use_shadertoy(Mesh *mesh, const ViewerSkin *skin) {
     if (skin->shader_num >= SKIN_FX_CUSTOM_FIRST) {
         cJSON *info = skin->shader_info ? cJSON_Parse(skin->shader_info) : NULL;
         const cJSON *entry = info ? custom_entry(info, skin->shader_num) : NULL;
-        CustomMaterial *m = entry ? custom_material(skin->shader_num, entry) : NULL;
+        const int graph = custom_is_graph(skin->shader_num);
+        CustomMaterial *m = entry || graph ? custom_material(skin->shader_num, entry) : NULL;
         cJSON_Delete(info);
         if (!m) return;
         custom_replace(mesh, m);
@@ -888,7 +984,7 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     if (!mesh || !dye || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
     // the body parts' getMat takes the dye's shaderNum and customShaderInfo (deob-10.0.4.js:173555-173556): a custom
     // shader (the Ghillie Suit's 16) replaces the part's material
-    if ((dye->flags2 & VS2_SHADER) && dye->shader_num >= SKIN_FX_CUSTOM_FIRST && dye->shader_info) {
+    if ((dye->flags2 & VS2_SHADER) && dye->shader_num >= SKIN_FX_CUSTOM_FIRST && (dye->shader_info || custom_is_graph(dye->shader_num))) {
         fx_use_shadertoy(mesh, dye);
         if (mesh->material->vtable != &basic_material_vtable) return;
     }
