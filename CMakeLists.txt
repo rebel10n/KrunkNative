@@ -1180,7 +1180,7 @@ else ()
         target_link_libraries(movement_scheme_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
-    # atomic_sign_test: Atomic's object 833 (an invisible sign) is walk-through, and a player at its spot falls
+    # atomic_sign_test: no SIGN collides (v10.0.4 noCol): Atomic object 833 and Site object 995 are walk-through, players at their spots fall
     add_executable(atomic_sign_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/atomic_sign_test.c)
     target_link_libraries(atomic_sign_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

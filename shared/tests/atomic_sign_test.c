@@ -4,6 +4,12 @@
 // addObject reads as noCol = l || col), so the sign loads walk-through. Object indices are unchanged:
 // the record stays at index 833 (uids are indices, and nothing references it).
 // Fail-before: the player stands at feet height 64.11 on the sign; after the fix he falls.
+// Site's object 995 (a SIGN "A3", bv 1, p [-224.76, 49.97, -295.22], size [68, 1, 29]) was the same bug
+// without the "l" patch: a player stood on it at (-192.641708, 50.970001, -305.877716). The cause is the
+// prefab: v10.0.4's SIGN is noCol (deob-10.0.4.js:157294) and addCanvas only builds the client plane, no
+// GameObject (:168134-168137), so no sign in any map collides. Fail-before: feet stay at 50.97.
+// Kanji's object 1914 (SIGN "Arbiter HQ", bv 1, p [-50, -139, -70], size [30, 1, 8]) likewise held a player
+// at (-38.588814, -138, -71.775948).
 // Run from the repository root: ./<build>/atomic_sign_test
 #include <world.h>
 #include <math.h>
@@ -96,6 +102,52 @@ int main(void) {
     for (int i = 0; i < 240; i++) frame(p, 0);
     CHECK(p->position.y < start_y - 1.0f,
           "the player falls at (-86.117088, 64.110001, 143.965744): feet y %.3f after 4 s, from %.3f", p->position.y, start_y);
+
+
+    // Site: object 995, a sign without "l", is walk-through by its prefab, and a player at its spot falls
+    json = load_map("assets/maps/official/14_site.json");
+    game_on(&game, json);
+    CHECK(game.ready && game.map, "Site loads");
+    if (game.ready && game.map) {
+        const Object *sign = game.map->object_count > 995 ? game.map->objects[995] : NULL;
+        CHECK(sign && sign->prefab == PREFAB_SIGN && !cJSON_GetObjectItem(sign->raw, "l"),
+              "Site object 995 is the SIGN without \"l\"");
+        CHECK(sign && sign->collision_type == COLLISION_TYPE_NONE,
+              "Site object 995 (the sign) has no collision body (type %d)", sign ? (int) sign->collision_type : -1);
+        for (size_t i = 0; i < game.map->object_count; i++) {
+            const Object *o = game.map->objects[i];
+            if (o && o->prefab == PREFAB_SIGN) CHECK(o->collision_type == COLLISION_TYPE_NONE, "Site sign %zu collides", i);
+        }
+
+        Player *q = add_player(&game, 2);
+        q->position = (vec3) {-192.641708f, 50.970001f, -305.877716f};
+        q->last_position = q->position;
+        q->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+        const float site_y = q->position.y;
+        for (int i = 0; i < 240; i++) frame(q, 0);
+        CHECK(q->position.y < site_y - 1.0f,
+              "the player falls at (-192.641708, 50.970001, -305.877716): feet y %.3f after 4 s, from %.3f", q->position.y, site_y);
+    }
+
+    // Kanji: object 1914, the "Arbiter HQ" sign, is walk-through and a player at its spot falls
+    json = load_map("assets/maps/official/10_kanji.json");
+    game_on(&game, json);
+    CHECK(game.ready && game.map, "Kanji loads");
+    if (game.ready && game.map) {
+        const Object *sign = game.map->object_count > 1914 ? game.map->objects[1914] : NULL;
+        CHECK(sign && sign->prefab == PREFAB_SIGN, "Kanji object 1914 is the SIGN");
+        CHECK(sign && sign->collision_type == COLLISION_TYPE_NONE,
+              "Kanji object 1914 (the sign) has no collision body (type %d)", sign ? (int) sign->collision_type : -1);
+
+        Player *k = add_player(&game, 3);
+        k->position = (vec3) {-38.588814f, -138.0f, -71.775948f};
+        k->last_position = k->position;
+        k->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+        const float kanji_y = k->position.y;
+        for (int i = 0; i < 240; i++) frame(k, 0);
+        CHECK(k->position.y < kanji_y - 1.0f,
+              "the player falls at (-38.588814, -138, -71.775948): feet y %.3f after 4 s, from %.3f", k->position.y, kanji_y);
+    }
 
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

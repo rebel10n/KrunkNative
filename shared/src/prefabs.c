@@ -63,7 +63,9 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     [PREFAB_TELEPORTER] = {G(NONE), C(FORCED), NOSHOOT | NOWJ | ZONE},
     [PREFAB_TEDDY] = MODEL_PROP,
     [PREFAB_TRIGGER] = {G(CUBE), C(FORCED), HP | INC},
-    [PREFAB_SIGN] = {G(CANVAS), C(OPTIONAL), NOWJ},
+    // v10.0.4 SIGN: noCol (deob-10.0.4.js:157294; forceCollision there is never read) and addCanvas builds only the
+    // client plane, no GameObject (:168134-168137): a sign never collides, "l" or not
+    [PREFAB_SIGN] = {G(CANVAS), C(NONE), RENDER | NOWJ},
     [PREFAB_DEPOSIT_BOX] = {G(CUBE), C(FORCED), INC | BORDER},
     [PREFAB_LIGHT_CONE] = {G(CYLINDER), C(NONE), RENDER | MAPDET | NOWJ},
     [PREFAB_CAMERA] = {G(NONE), C(NONE), NOWJ},
