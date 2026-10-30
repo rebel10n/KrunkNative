@@ -20,9 +20,9 @@ from kn_proto.free_ports().
      restarted server's lobby and is back in the game (with the setting on, the default, the
      client restarts itself and rejoins instead: server/tests/auto_restart_e2e.py)
   5. client_bin: the server is killed (-9: no message), restarted after the ticket expired; the
-     client shows the transport's reason ("Disconnected: the server closed the connection"),
-     holds the transport (the old ticket is never resent), rejoins through the matchmaker with a
-     fresh ticket for the restarted server's lobby and is back in the game
+     client shows the transport's reason on v10's Lost Connection screen and does not rejoin on a
+     timer (dd41178a: v10 ends a lost session at once; Find Game there is a fresh seek), and the
+     old ticket never reaches the restarted server
   6. client_bin against a server whose join_secret is wrong: every ticket is refused ("Invalid
      join key"); the client rejoins once, then shows "Could not rejoin: ... again"
   0. (first) resuming: a transport reconnect re-sends the seek ticket after it expired (the edges'
@@ -111,7 +111,9 @@ class Node:
         gs = os.path.join(WORK, "gs%d.json" % Node.count)
         cfg = {"node_id": "RRJ", "name": "rejoin e2e", "region": "local", "listen_port": GAME_PORT,
                "public_host": "127.0.0.1", "brain_url": "ws://127.0.0.1:%d/mm/internal/ws" % brain_port,
-               "brain_secret": SECRET, "modes": ["ffa"], "max_players": 6, "shutdown_grace": 1,
+               # a public rotation map: the client's default Quickplay seek (seek_prefs) asks for those only, and a
+               # random start map outside it (Barnyard) answered NoMatchingServers now and then
+               "brain_secret": SECRET, "modes": ["ffa"], "maps": ["Sandstorm"], "max_players": 6, "shutdown_grace": 1,
                "idle_kick_seconds": 0, "shutdown_reason_file": REASON_FILE}
         if join_secret:
             cfg["join_secret"] = join_secret
@@ -199,7 +201,9 @@ def connect_spawn(rep, session=""):
             if t == kn_proto.ERROR:
                 return c, False, kn_proto.error_info(data)
             sp = kn_proto.spawn_info(data) if t == kn_proto.SPAWN else None
-            if sp and sp["is_you"]:
+            # a live SPAWN only: the server sends the joiner a dead SPAWN right after INIT (6a8ce3e4, v10's
+            # join spawn), before a ticket check that refuses it can answer
+            if sp and sp["is_you"] and sp["active"]:
                 return c, True, None
         seen = len(c.packets)
     return c, False, None
@@ -298,7 +302,9 @@ def client(name, brain_port, script, client_settings=None):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, name + "-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
-                "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp"})
+                "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
+                # the [mm] rejoin / joining lines checked below are debug-level since 5f55eef1 (klog.h KN_LOG_DEBUG1)
+                "KRUNKNATIVE_DEBUG": "2"})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
     procs.append(p)
@@ -375,21 +381,22 @@ def client_key_expired(brain_port, node):
     node2 = Node(brain_port)
     finish(p, 60)
     text = read_log(log)
+    # v10 ends a lost session at once (dd41178a, servers_ui.c connection_dropped; deob-10.0.3.js:111477, 261682-261688):
+    # the Lost Connection screen with the transport's reason, no rejoin on a timer; Find Game there is a fresh seek
     check("5: the client shows the transport's reason (no server ERROR)",
           re.search(r"disconnected from server: the (server closed the connection|connection was reset)", text) is not None
-          and "rejoining %s through the matchmaker" % old in text, text[-600:])
+          and "[mm] connection lost (" in text, text[-600:])
+    check("5: the Lost Connection screen shows", "[ui log] error screen: Lost connection to the server" in text, text[-600:])
     check("5: the old ticket never reached the restarted server", "Join key" not in node2.text(), node2.text()[-400:])
-    check("5: it rejoined with a fresh ticket for the restarted server's lobby",
-          re.search(r"\[mm\] rejoin: %s with a fresh join ticket" % re.escape(node2.game or "-"), text) is not None, text[-600:])
     js = joined(text)
-    check("5: joined the restarted server's lobby", len(js) >= 2 and js[0] == old and js[-1] == node2.game, str(js))
-    st = states(text)
-    check("5: back in the game", len(st) >= 2 and in_game(st[-1]), str(st))
+    check("5: no rejoin on a timer (v10)", "[mm] rejoin:" not in text and "rejoining " not in text and js == [old],
+          "%s %s" % (js, text[-300:]))
     node2.stop()
 
 
 def client_key_refused_twice(brain_port):
     node = Node(brain_port, join_secret="not-the-brain-secret-%d" % os.getpid())
+    check("6: node linked, lobby listed", node.linked and node.game, "%s %s" % (node.game, node.text()[-300:]))
     p, log = client("refused", brain_port, "0 play\n1000 quit\n")
     wait_for(lambda: "[mm] rejoin failed" in read_log(log), 30)
     finish(p, 1)

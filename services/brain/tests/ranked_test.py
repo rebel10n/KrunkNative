@@ -450,19 +450,17 @@ def main():
                         shutil.copy(os.path.join(src, dialect, f), os.path.join(old, dialect, f))
             subprocess.run([BRAIN, "--migrate-only", "--database.migrations_dir=" + old], cwd=ROOT, env=env, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            procs, logs = start_brains(work, env, [("rank-v7-%d" % os.getpid(), "us-nj", ["--brain.ranked.enabled=false"])])
-            port = bound_port(logs[0], procs[0])
+            # the v7 account, registered as a v7 brain did: the v7 schema's own kn_register (0103), session included.
+            # Not through today's brain: a brain always serves a migrated schema (kn-brain.service --migrate), and its
+            # account code reads tables v7 has not got (skin_copies, 0353)
             stamp = str(int(time.time()) % 100000)
-            seeded["accs"] = [asyncio.run(register(port, "v7r%s" % stamp))]
-            procs[0].terminate()
-            procs[0].wait(5)
+            name, token = "v7r%s" % stamp, "v7tok-%d-%s" % (os.getpid(), stamp)
+            reg = json.loads(psql("SELECT kn_register('%s', 'v7-seed-no-login', '127.0.0.1', '', 0, 0, '%s', 86400, 'ranked-test')"
+                                  % (name, token)))
+            seeded["accs"] = [{"id": reg["id"], "name": name, "token": token}]
             acc = seeded["accs"][0]["id"]
             psql("INSERT INTO ranked_ratings (account_id, season, rating, peak, games, wins, losses) VALUES (%d, 6, 120, 150, 2, 1, 1),"
                  " (%d, 7, 300, 310, 2, 2, 0)" % (acc, acc))
-            with open(logs[0]) as f:
-                v7log = f.read()
-            if re.search(LOG_ERROR_RE, v7log):
-                check(False, "the v7-era brain logged errors")
         subprocess.run([BRAIN, "--migrate-only", "--database.migrations_dir=" + os.path.join(ROOT, "services", "db", "migrations")], cwd=ROOT,
                        env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if DRIVER != "postgres":

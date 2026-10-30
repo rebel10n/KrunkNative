@@ -173,7 +173,10 @@ def client(name, brain_port, flavor, assets, other_game, secs=150):
                 "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port, "KRUNKNATIVE_ASSETS_DIR": assets,
-                "KRUNKNATIVE_KRUNKER_MATCHMAKER": "off"})
+                "KRUNKNATIVE_KRUNKER_MATCHMAKER": "off",
+                # the lines checked below ([mm] joining / connect / game list, [finder] GET) are debug-level since
+                # 5f55eef1 (klog.h KN_LOG_DEBUG1 / KN_LOG_VERBOSE2)
+                "KRUNKNATIVE_DEBUG": "2"})
     if flavor:
         env["KN_FLAVOR"] = flavor
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),

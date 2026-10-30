@@ -38,7 +38,9 @@
 
 #include "cJSON.h"
 
-#define MAX_TABLES 128
+/* the schema had 140 tables in 0365; 128 here silently left the rest (trades onwards) uncopied. More than this is
+ * refused (load_tables), never truncated. */
+#define MAX_TABLES 512
 #define MAX_COLS 64
 
 typedef enum { T_TEXT, T_INT, T_FLOAT, T_BOOL, T_TS, T_DATE, T_JSON, T_BYTEA } ctype;
@@ -313,6 +315,11 @@ static int load_tables(kn_dbconn *src, kn_dbconn *dst) {
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
         "AND name NOT IN ('kn_migrations', 'kn_pubsub') ORDER BY name", 0, NULL);
     if (!kn_db_ok(r)) return fail(r, "list sqlite tables");
+    if (kn_db_rows(r) > MAX_TABLES) {
+        fprintf(stderr, "kn_dbcopy: %d tables, more than MAX_TABLES (%d): refusing a partial copy\n", kn_db_rows(r), MAX_TABLES);
+        kn_db_result_free(r);
+        return -1;
+    }
     for (int i = 0; i < kn_db_rows(r) && g_n < MAX_TABLES; i++) {
         Table *t = &g_t[g_n];
         memset(t, 0, sizeof *t);

@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "knsvc/crypto.h"
+#include "knsvc/json.h" /* kn_json_int: the account id of a PostgreSQL function's answer (pg_account_call) */
 
 #define P(i) (n > (i) ? p[i] : NULL)
 #define PI(i) pint(P(i))
@@ -23,6 +24,17 @@
 static int64_t pint(const char *s) { return s ? strtoll(s, NULL, 10) : 0; }
 
 /* ------------------------------------------------------------------ login / register / sessions */
+
+/* PostgreSQL: run one of its account functions (kn_login_success, kn_register, kn_set_alias: each returns
+ * kn_account_json), then add what C adds to an account (db_account_pg_finish: reqDel / raidStats / twitchId,
+ * chat_banned, the owned list with counter stats). The function's own SQL stays the transaction's work. */
+static kn_db_result *pg_account_call(Dbx *x, const char *name, const kn_sql *q, int np, const char *const *pp) {
+    char *s = dbx_text(x, q, np, pp);
+    cJSON *v = s ? cJSON_Parse(s) : NULL;
+    free(s);
+    db_account_pg_finish(x, kn_json_int(v, "id", 0), v);
+    return dbx_json(x, name, v);
+}
 
 /* kn_login_success: new session (token NULL = none), audit row, optional rehash. */
 static kn_db_result *login_success(Dbx *x, const char *id, const char *ip, const char *via, const char *token,
@@ -44,10 +56,14 @@ static kn_db_result *login_success(Dbx *x, const char *id, const char *ip, const
 
 static kn_db_result *run_login_success(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (dbx_is_pg(&x))
+        return pg_account_call(&x, "kn_login_success", SQL(.pg = "SELECT kn_login_success($1, $2, $3, $4, $5, $6, $7)::text"),
+                               KN_DB_ARGS(P(0), P(1), P(2), P(3), P(4), P(5), P(6)));
     return login_success(&x, P(0), P(1), P(2), P(3), P(4), P(5), P(6));
 }
-const kn_proc P_LOGIN_SUCCESS = {"login_success", "SELECT kn_login_success($1, $2, $3, $4, $5, $6, $7)",
-                                 run_login_success};
+/* .pg NULL here, in P_REGISTER and in P_SET_ALIAS: the runners call the PostgreSQL function and finish its account
+ * (pg_account_call); a bare "SELECT kn_login_success(...)" dropped what C adds (reqDel, chat_banned, counter stats) */
+const kn_proc P_LOGIN_SUCCESS = {"login_success", NULL, run_login_success};
 
 static kn_db_result *run_login_failed(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -67,6 +83,9 @@ const kn_proc P_LOGIN_FAILED = {"login_failed", "SELECT kn_login_failed($1, $2)"
 /* (name, hash, ip, ref, starting_kr, premium, token, ttl, origin) */
 static kn_db_result *run_register(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (dbx_is_pg(&x))
+        return pg_account_call(&x, "kn_register", SQL(.pg = "SELECT kn_register($1, $2, $3, $4, $5, $6, $7, $8, $9)::text"),
+                               KN_DB_ARGS(P(0), P(1), P(2), P(3), P(4), P(5), P(6), P(7), P(8)));
     if (dbx_exists(&x, SQL(.any = "SELECT 1 FROM accounts WHERE lower(username) = lower($1)"), KN_DB_ARGS(P(0))))
         return dbx_finish(&x, kn_db_result_user_error("Username already taken."));
     const char *ref = P(3) && *P(3) ? P(3) : NULL;
@@ -82,7 +101,7 @@ static kn_db_result *run_register(kn_dbconn *c, int n, const char *const *p) {
     if (dbx_failed(&x)) return dbx_finish(&x, NULL);
     return login_success(&x, I64S(id), P(2), "register", P(6), P(7), P(8), NULL);
 }
-const kn_proc P_REGISTER = {"register", "SELECT kn_register($1, $2, $3, $4, $5, $6, $7, $8, $9)", run_register};
+const kn_proc P_REGISTER = {"register", NULL, run_register};
 
 /* (name, ip, per_ip_hour, email | NULL) -> taken, banned, limited, email_taken (another account
  * has the email: one account per address, the login modal signs in with it; 0122_email_login) */
@@ -194,6 +213,8 @@ const kn_proc P_SET_PASSWORD = {
 
 static kn_db_result *run_set_alias(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (dbx_is_pg(&x))
+        return pg_account_call(&x, "kn_set_alias", SQL(.pg = "SELECT kn_set_alias($1, $2)::text"), KN_DB_ARGS(P(0), P(1)));
     kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT player_alias FROM players WHERE player_id = $1 {for_update}"),
                             KN_DB_ARGS(P(0)));
     if (!r) return dbx_finish(&x, NULL);
@@ -216,7 +237,7 @@ static kn_db_result *run_set_alias(kn_dbconn *c, int n, const char *const *p) {
     free(old);
     return dbx_json(&x, "kn_set_alias", db_account_json(&x, PI(0)));
 }
-const kn_proc P_SET_ALIAS = {"set_alias", "SELECT kn_set_alias($1, $2)", run_set_alias};
+const kn_proc P_SET_ALIAS = {"set_alias", NULL, run_set_alias};
 
 static kn_db_result *run_account_json(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};

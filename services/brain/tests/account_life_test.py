@@ -67,7 +67,8 @@ def query(sql):
         finally:
             con.close()
     get = lambda k, d: os.environ.get("KN_DATABASE_" + k.upper(), str(DBCFG.get(k, d)))
-    env = dict(os.environ, PGPASSWORD=get("password", ""))
+    # the scratch database is a schema (db_scratch.py): without its search_path every statement hit the wrong one
+    env = dict(os.environ, PGPASSWORD=get("password", ""), PGOPTIONS="-c search_path=" + str(DBCFG.get("search_path", "public")))
     r = subprocess.run(["psql", "-h", get("host", "127.0.0.1"), "-p", get("port", 5432), "-U", get("user", "krunknative"),
                         "-d", DBCFG["name"], "-v", "ON_ERROR_STOP=1", "-qAt", "-c", sql],
                        env=env, capture_output=True, timeout=30)
