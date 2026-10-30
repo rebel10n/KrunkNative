@@ -1220,7 +1220,8 @@ else ()
     target_link_libraries(editor_serialize_test PRIVATE cJSON m)
     enable_testing()
     add_test(NAME editor_serialize_test COMMAND editor_serialize_test ${CMAKE_SOURCE_DIR}
-             --golden ${CMAKE_SOURCE_DIR}/doc/ref/krunker-v7.1.4/editor/inspector-edits.json) # WP3: the inspector edits
+             --golden ${CMAKE_SOURCE_DIR}/doc/ref/krunker-v7.1.4/editor/inspector-edits.json # WP3: the inspector edits
+             --maps ${CMAKE_SOURCE_DIR}/assets/maps/official) # v10.0.5: the official maps' "tris" survive import + export
 
     # editor_export_test (doc/v7/editor.md WP6): File > Export GLTF / Export MTL
     # (client/src/editor/editor_export.c, GL-free) against goldens and read back with fast_obj / cgltf

@@ -375,6 +375,10 @@ cJSON *ed_copy_group(EditorObject *e);             // copyGroup: sets g_ed.copy 
 void ed_paste_objects(EditorObject *e);
 int ed_is_grouped(uint32_t uuid);
 void ed_fix_hitbox(EditorObject *e);               // editor_quickgui.c: fixHitbox (Shift+F)
+// editor_collision.c (v10.0.5): convertToCollisionMesh (NULL: the selection), and an asset object's model bounds at
+// mSize (Fit Collision To Model; 0 when the model's triangles are unknown: an OBJ asset, or not on disk)
+void ed_convert_to_collision_mesh(EditorObject *o);
+int ed_asset_model_size(const EditorObject *o, double size[3]);
 void ed_group_stop(int all);
 void ed_groups_sync(void);                         // updateGroups: members follow their placeholder
 EditorGroup *ed_group_of(const EditorObject *owner);

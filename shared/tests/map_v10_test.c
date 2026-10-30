@@ -55,7 +55,8 @@ static int feq(const float a, const float b) { return fabsf(a - b) < 1e-4f; }
 
 static void test_tables(void) {
     printf("Running v10 tables...\n");
-    CHECK(PREFAB_COUNT == 99 && PREFAB_V7_COUNT == 97 && PREFAB_SCRAPCRATE == 97 && PREFAB_ENTITY == 98, "prefab ids");
+    CHECK(PREFAB_COUNT == 100 && PREFAB_V7_COUNT == 97 && PREFAB_SCRAPCRATE == 97 && PREFAB_ENTITY == 98 && PREFAB_COLLISION_MESH == 99,
+          "prefab ids");
     CHECK(PREFAB_TERMINAL == 41 && PREFAB_BOT_PATH_NODE == 41, "41 TERMINAL / BOT_PATH_NODE");
     CHECK(!strcmp(prefab_name(PREFAB_SCRAPCRATE), "SCRAPCRATE") && !strcmp(prefab_name(PREFAB_ENTITY), "ENTITY") &&
               !strcmp(prefab_name(41), "BOT_PATH_NODE"), "names (41 is v10.0.3's BOT_PATH_NODE)");
@@ -69,6 +70,15 @@ static void test_tables(void) {
               prefab_has_role(PREFAB_BOT_PATH_NODE, PREFAB_R_NO_OBJECT), "runtime roles");
     CHECK(prefab_has_flag(PREFAB_ENTITY, PF_ISENTITY) && prefab_data(PREFAB_ENTITY)->opacity == 0.3f && prefab_data(PREFAB_ENTITY)->line_col == 65484,
           "ENTITY data");
+    // deob-10.0.5.js:158847-158862: COLLISION_MESH (cube_0, defaultSize [1, 1, 1], scalable, noTexture, noExport, tool,
+    // transparent, doubleSide, opacity 0.35, lineCol 0xff00ff, noMinimap); no map object (it ships as "tris")
+    const PrefabData *cm = prefab_data(PREFAB_COLLISION_MESH);
+    CHECK(cm && !strcmp(cm->name, "COLLISION_MESH") && prefab_id_from_name("COLLISION_MESH") == 99 && cm->opacity == 0.35f &&
+              cm->line_col == 0xff00ff && cm->default_size[0] == 1.0f && cm->default_size[1] == 1.0f && cm->default_size[2] == 1.0f &&
+              prefab_has_flag(99, PF_SCALABLE) && prefab_has_flag(99, PF_NOTEXTURE) && prefab_has_flag(99, PF_NOEXPORT) &&
+              prefab_has_flag(99, PF_TOOL) && prefab_has_flag(99, PF_TRANSPARENT) && prefab_has_flag(99, PF_DOUBLESIDE) &&
+              prefab_has_flag(99, PF_NOMINIMAP) && prefab_has_flag(99, PF_GENGEO) && prefab_has_role(99, PREFAB_R_NO_OBJECT),
+          "COLLISION_MESH data and role");
     // deob-10.0.3.js:174150: BOT_PATH_NODE noCol, noCollision, noTexture, notStyleable, notTechnical, tool, genGeo,
     // defaultSize [3, 5, 3], lineCol 65535 (v7's TERMINAL cube flags are gone)
     const PrefabData *node = prefab_data(PREFAB_BOT_PATH_NODE);
@@ -165,6 +175,20 @@ static void test_parse_v10(void) {
     cJSON_Delete(json);
 }
 
+// v10.0.5 COLLISION_MESH: the game never builds the object (game.js reads no "cmt"); its triangles come as the map's
+// "tris" (the editor's export, editor-10.0.5.js:16454-16460), which collide like any baked triangle
+static void test_collision_mesh(void) {
+    printf("Running v10.0.5 collision meshes...\n");
+    cJSON *json = cJSON_Parse("{\"name\":\"cm\",\"spawns\":[[0,0,0]],\"objects\":[{\"i\":0,\"p\":[0,-1,0],\"s\":[50,1,50]},"
+                              "{\"i\":99,\"p\":[30,0,0],\"s\":[20,10,20],\"cmt\":[-10,0,-10,10,10,-10,10,10,10]}],"
+                              "\"tris\":[20,0,-10,40,10,-10,40,10,10,20,0,-10,40,10,10,20,0,10]}");
+    Map *map = json ? map_init_ex(json, 0) : NULL;
+    CHECK(map && map->object_count == 1 && count_prefab(map, PREFAB_COLLISION_MESH) == 0, "a saved COLLISION_MESH builds no map object");
+    CHECK(map && map->tri_count == 2, "the map's tris load (%zu)", map ? map->tri_count : 0);
+    free_map(map);
+    cJSON_Delete(json);
+}
+
 // ---------------------------------------------------------------- validation
 
 static size_t errors_of(const char *json_text, char *first, const size_t size) {
@@ -196,7 +220,9 @@ static void expect_valid(const char *json) {
 static void test_validation(void) {
     printf("Running v10 validation...\n");
     expect_valid(V_HEAD "\"objects\":[" V_CUBE ",{\"i\":97,\"p\":[0,0,0],\"s\":[5,5,5]}]}");
-    expect_error(V_HEAD "\"objects\":[{\"i\":99,\"p\":[0,0,0],\"s\":[5,5,5]}]}", "Invalid Object.");
+    // deob-10.0.5.js:191206: prefabs[i] must exist; 99 is v10.0.5's COLLISION_MESH, 100 is past the table
+    expect_valid(V_HEAD "\"objects\":[" V_CUBE ",{\"i\":99,\"p\":[0,0,0],\"s\":[5,5,5],\"cmt\":[0,0,0,1,0,0,0,1,0]}]}");
+    expect_error(V_HEAD "\"objects\":[{\"i\":100,\"p\":[0,0,0],\"s\":[5,5,5]}]}", "Invalid Object.");
     expect_error(V_HEAD "\"archetypes\":5,\"objects\":[" V_CUBE "]}", "Archetype list error.");
     expect_error(V_HEAD "\"archetypes\":[{\"id\":0,\"objects\":[" V_CUBE "]}],\"objects\":[" V_CUBE "]}", "Archetype id error.");
     expect_error(V_HEAD "\"archetypes\":[{\"id\":4,\"objects\":[" V_CUBE "]},{\"id\":4,\"objects\":[" V_CUBE "]}],\"objects\":[" V_CUBE "]}",
@@ -399,6 +425,7 @@ static void test_light_units(void) {
 int main(void) {
     test_tables();
     test_parse_v10();
+    test_collision_mesh();
     test_validation();
     test_triggers();
     test_bot_paths();

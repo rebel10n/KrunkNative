@@ -291,6 +291,7 @@ const PrefabData g_prefab_data[PREFAB_TABLE_COUNT] = {
     [96] = {"MAP_ANCHOR", "check_0", NULL, {1.0f, 500.0f, 1.0f}, 1, 1.0f, 16711680, 1.0f, NULL, 0, 0, NULL, {0x0004800040000000ull, 0x0000000014000880ull}},
     [97] = {"SCRAPCRATE", "crate_0", "crate_0", {10.0f, 10.0f, 10.0f}, 2, 5.0f, -1, 1.0f, NULL, 0, 0, NULL, {0x0012011921803800ull, 0x0000000000820000ull}},
     [98] = {"ENTITY", "cube_0", NULL, {10.0f, 10.0f, 10.0f}, 1, 1.0f, 65484, 0.3f, NULL, 0, 0, NULL, {0x0004001000000000ull, 0x0000000114040400ull}},
+    [99] = {"COLLISION_MESH", "cube_0", NULL, {1.0f, 1.0f, 1.0f}, 1, 1.0f, 16711935, 0.35f, NULL, 0, 0, NULL, {0x0004000040000000ull, 0x00000000140404c0ull}},
 };
 
 const PrefabTextureData g_prefab_textures[PREFAB_TEXTURE_COUNT] = {

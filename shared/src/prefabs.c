@@ -146,6 +146,10 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     // 5); ENTITY builds no map object, map.c keeps it as an entity instance (Map.entity_instances)
     [PREFAB_SCRAPCRATE] = MODEL_PROP,
     [PREFAB_ENTITY] = {G(NONE), C(NONE), NO_OBJ},
+    // v10.0.5 COLLISION_MESH (deob-10.0.5.js:158847-158862): a tool, noExport. Its triangles reach the game only
+    // as the map's "tris" (the editor's export, editor-10.0.5.js:16454-16460), which map.c loads as cpx collision;
+    // game.js reads no "cmt", so a saved object of it builds nothing here
+    [PREFAB_COLLISION_MESH] = {G(NONE), C(NONE), NO_OBJ},
 };
 
 const PrefabInfo *prefab_info(const int id) {

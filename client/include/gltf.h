@@ -62,6 +62,10 @@ typedef struct GltfInstance {
 // NULL when the file is missing or cannot be used. Models stay cached for the process.
 GltfModel *gltf_model_load(const char *path);
 int gltf_model_animated(const GltfModel*); // has animations (clips)
+// The triangles of the model's scene (the meshes an instance draws) at the rest pose, in model space (each node's
+// world transform; skins and morphs not applied), 9 floats each, malloc'd into *out; the count (0: none, *out NULL).
+// The map editor's collision tools (editor_collision.c) read a model with it.
+size_t gltf_model_triangles(const GltfModel*, float **out);
 // The file behind `path` changed (a resource pack came or went, mod_pack.c): the next
 // gltf_model_load(path) parses it again; instances keep the model they were made from.
 void gltf_model_forget(const char *path);

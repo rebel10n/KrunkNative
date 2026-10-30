@@ -8,7 +8,7 @@ node and prints them as JSON; this script writes
 
 - shared/include/prefab_flags.h: PrefabFlag, one bit index per boolean property of the v7
   prefab table (the editor flags: editFaces, canInterface, noCol, ...), and
-- shared/src/prefab_data.c: g_prefab_data[99] (name, src, model, default size, scale, line
+- shared/src/prefab_data.c: g_prefab_data[100] (name, src, model, default size, scale, line
   colour, opacity, edCat, texRange, variants, flag bits) and g_prefab_textures[20] (name,
   alias, src, variants).
 
@@ -35,7 +35,7 @@ NON_FLAGS = {"id", "name", "src", "defaultSize", "scale", "lineCol", "opacity", 
 
 # Krunker v10.0.2 additions (doc/v10/map-format.md §1, §5), transcribed by hand from the v10
 # client bundle (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js is obfuscated and never executed): prefabs 97 SCRAPCRATE
-# (L156724) and 98 ENTITY (L156744), the canDynamic flag of CUBE / TRIGGER / CUSTOM_ASSET (editor
+# (L156724) and 98 ENTITY (L156744) (and v10.0.5's 99 COLLISION_MESH), the canDynamic flag of CUBE / TRIGGER / CUSTOM_ASSET (editor
 # metadata for the "dyn" key), condition 12 "Custom Action" (L162580) and actions 72-74 (L163648).
 # The v7 rows keep their v7 values, except id 41: Krunker v10.0.3 replaced v7's TERMINAL with
 # BOT_PATH_NODE (deob-10.0.3.js:174150-174164), so the v10 row below replaces it (TERMINAL stays a name
@@ -50,6 +50,12 @@ V10_PREFABS = [
     {"id": 98, "name": "ENTITY", "src": "cube_0", "has_genGeo": True, "defaultSize": [10, 10, 10], "isEntity": True,
      "scalable": True, "editColor": True, "noTexture": True, "tool": True, "transparent": True, "opacity": 0.3,
      "lineCol": 65484},
+    # Krunker v10.0.5: 99 COLLISION_MESH (deob-10.0.5.js:158847-158862), the editor's collision-only triangle
+    # mesh (genGeo generateCollisionMesh :159520). noExport: the published map holds its triangles in "tris"
+    # (editor-10.0.5.js:16454-16460), never the object.
+    {"id": 99, "name": "COLLISION_MESH", "src": "cube_0", "has_genGeo": True, "defaultSize": [1, 1, 1],
+     "scalable": True, "noTexture": True, "noExport": True, "tool": True, "transparent": True, "doubleSide": True,
+     "opacity": 0.35, "lineCol": 16711935, "noMinimap": True},
 ]
 # deob-10.0.3.js:174150 BOT_PATH_NODE (genGeo: generateOcta, "#00ffff"); hideBoundingBox false sets no flag
 V10_BOT_PATH_NODE = {"id": 41, "name": "BOT_PATH_NODE", "src": "cube_0", "noCol": True, "has_genGeo": True,
@@ -267,8 +273,8 @@ def main():
     with open(os.path.join(REPO, "shared", "src", "prefab_data.c"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
     write_triggers(data["triggers"])
-    if len(prefabs) != 99 or len(textures) != 20:
-        print("warning: %d prefabs, %d textures (prefabs.h expects 99 / 20)" % (len(prefabs), len(textures)))
+    if len(prefabs) != 100 or len(textures) != 20:
+        print("warning: %d prefabs, %d textures (prefabs.h expects 100 / 20)" % (len(prefabs), len(textures)))
     print("wrote shared/src/prefab_data.c (%d prefabs, %d textures, %d flags)" % (len(prefabs), len(textures), len(flags)))
     return 0
 

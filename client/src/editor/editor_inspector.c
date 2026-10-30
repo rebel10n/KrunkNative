@@ -337,6 +337,23 @@ static void group_custom_in(void *user, const char *value) {
 
 static void act_group_custom(EdCtl *c) { (void) c; ed_prompt("Input value", "", group_custom_in, NULL); }
 static void act_group_reflect(EdCtl *c) { (void) c; ed_group_reflect(); } // advancedOptions.groupReflect
+// v10.0.5 Fit Collision To Model (index-10.0.5.js:16109-16120): fixedSize = null; size = defaultSize (the model's
+// bounds, 2 decimals). KrunkNative knows a GLB asset's bounds (ed_asset_model_size); for other models it keeps the size.
+static void act_collision_fit(EdCtl *c) {
+    (void) c;
+    EditorObject *o = g_ed.proj->selected;
+    double size[3];
+    if (!o || !ed_asset_model_size(o, size)) {
+        editor_message("The model's size is not known");
+        return;
+    }
+    cJSON *v = cJSON_CreateDoubleArray(size, 3);
+    ed_prop_set(o, "size", v);
+    cJSON_Delete(v);
+    ed_obj_rebuild(o);
+    ed_mark_changed();
+    g_ed.dirty_panel = 1; // updateObjConfigGUI
+}
 static void on_group_texture(EdCtl *c, const cJSON *v) { (void) c; ed_group_edit("texture", v); } // editGroup("texture", value)
 static void act_texture_list(EdCtl *c) { (void) c; editor_texture_list(); }                        // viewTextureList
 static void act_model_list(EdCtl *c);                                                              // viewModelList
@@ -628,6 +645,11 @@ static void build_transform(const EditorPrefab *pf, const int group) {
     v3("Position", "pos", NULL);
     if (!(pf->flags & EP_NOROTATION)) v3("Rotation", "rot", NULL);
     if ((pf->flags & EP_SCALABLE) && !prop_truthy(O, "assetID")) v3("Size", "size", on_size);
+    if (!strcmp(pf->name, "CUSTOM_ASSET") && prop_truthy(O, "assetID") && !group) {
+        // v10.0.5 (index-10.0.5.js:16094-16120): the asset's collision box, kept as its "s"
+        v3("Collision Size", "size", NULL);
+        ed_gui_button(B, "Fit Collision To Model", act_collision_fit); // line "wide"
+    }
     if (group) {
         static const EdOption dirs[] = {{"X", 0, NULL}, {"Y", 1, NULL}, {"Z", 2, NULL}};
         fold("Reflect", 1, 0, 0, "transform.reflect");

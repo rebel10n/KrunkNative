@@ -10,6 +10,7 @@
 // the CPU in world space every frame. GL state is set explicitly and restored (depth test,
 // depth mask, blend, cull) around the pass.
 #include "editor_internal.h"
+#include "editor_model.h"
 #include <gl.h>
 #include <math.h>
 #include <stdlib.h>
@@ -356,6 +357,28 @@ static void draw_object_boxes(void) {
     g_box_batch_count = 0;
 }
 
+// v10.0.5 COLLISION_MESH (generateCollisionMesh, deob-10.0.5.js:159520-159534): collTris * size / collBase around the
+// bounding mesh, which sits at p + R * (0, s.y / 2, 0) with the geometry s.y / 2 lower: p + R * (cmt * s / collBase)
+static void push_collision_mesh(const EditorObject *o) {
+    const cJSON *cmt = cJSON_GetObjectItemCaseSensitive(o->data, "cmt");
+    if (cJSON_GetArraySize(cmt) < 9) return;
+    double base[3];
+    ed_model_collision_base(cmt, base);
+    const vec3 p = ed_obj_vec(o, "p", v3(0, 0, 0)), s = ed_obj_vec(o, "s", v3((float) base[0], (float) base[1], (float) base[2]));
+    float rm[9];
+    ed_euler_matrix(ed_obj_vec(o, "r", v3(0, 0, 0)), rm);
+    const float k[3] = {s.x / (float) base[0], s.y / (float) base[1], s.z / (float) base[2]};
+    float v[3];
+    int i = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cmt) {
+        v[i] = (float) cJSON_GetNumberValue(e) * k[i];
+        if (++i < 3) continue;
+        i = 0;
+        vb_push(&g_tris, vadd(p, rmul(rm, v3(v[0], v[1], v[2]))));
+    }
+}
+
 static void draw_tool_volumes(void) {
     // tool / zone prefabs: their generated cube at prefab.opacity in the line colour (the
     // game hides them; the editor shows where they are)
@@ -367,6 +390,12 @@ static void draw_tool_volumes(void) {
         // faint zone volumes (objectives 0.2, score/death/... zones 0.3, pickups 0.1)
         if (o->mesh || o->helper || !(p->flags & EP_GENGEO) || p->opacity >= 1.0f || p->opacity < 0.01f) continue;
         if (ed_json_path(o->data, "v")) continue;
+        if (!strcmp(p->name, "COLLISION_MESH")) {
+            push_collision_mesh(o);
+            // generateCollisionMesh's vertex colours (1, 0.25, 1) at the prefab's opacity 0.35, both sides
+            flush(&g_tris, GL_TRIANGLES, (vec4) {1.0f, 0.25f, 1.0f, p->opacity}, 1);
+            continue;
+        }
         float m[16];
         ed_obj_world_box(o, m);
         push_box_tris(&g_tris, m);

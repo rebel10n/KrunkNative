@@ -25,6 +25,7 @@
 enum {
     QG_DUPLICATE, QG_DELETE, QG_GROUP_CREATE, QG_GROUP_STOP, QG_GROUP_COPY, QG_GROUP_PASTE,
     QG_FIX_HITBOX, QG_REPLACE_JSON, QG_REPLACE_FILE, QG_TEXTAREA,
+    QG_COLLISION_MESH, // v10.0.5 (index-10.0.5.js:22059-22066)
 };
 
 static HtmlElem g_qs;              // div.qs_main (0 until first use)
@@ -173,7 +174,8 @@ static void qs_build(EdBuf *b, const char *json) {
     qs_item(b, "Copy", QG_GROUP_COPY); edb_add(b, "\n");
     qs_item(b, "Paste", QG_GROUP_PASTE);
     edb_add(b, "</div></div>\n<hr>\n");
-    qs_item(b, "Fix Hitbox", QG_FIX_HITBOX); edb_add(b, "\n<hr>\n");
+    qs_item(b, "Fix Hitbox", QG_FIX_HITBOX); edb_add(b, "\n");
+    qs_item(b, "Convert to Collision Mesh", QG_COLLISION_MESH); edb_add(b, "\n<hr>\n"); // v10.0.5: rule1, fixHitbox, collisionMesh, rule2
     qs_menu_begin(b, "Replace");
     qs_item(b, "JSON", QG_REPLACE_JSON); edb_add(b, "\n");
     qs_item(b, "File", QG_REPLACE_FILE);
@@ -337,6 +339,7 @@ static int h_qs_action(void *user, const HtmlEvent *ev, const HtmlArg *args, con
         case QG_GROUP_COPY: ed_copy_objects(0, 0, o); break;
         case QG_GROUP_PASTE: ed_paste_objects(o); break;
         case QG_FIX_HITBOX: ed_fix_hitbox(o); break;
+        case QG_COLLISION_MESH: ed_convert_to_collision_mesh(o); break; // convertToCollisionMesh(quickGUI.obj)
         case QG_REPLACE_JSON: replace_into(0, o); break;
         case QG_REPLACE_FILE: replace_into(1, o); break;
         default: break;

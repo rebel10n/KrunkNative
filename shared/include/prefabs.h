@@ -1,5 +1,5 @@
 #pragma once
-// Krunker v7.1.4 prefab and texture tables (+ the v10.0.2 prefabs 97-98) (doc/v7/map-logic.md §1.4, §1.5.1), shared by the map
+// Krunker v7.1.4 prefab and texture tables (+ the v10.0.2 prefabs 97-98, v10.0.5's 99) (doc/v7/map-logic.md §1.4, §1.5.1), shared by the map
 // loader (shared/src/map.c), validation (map_validate.h), the server, the client renderer and the
 // editor tables (tools/editor/gen_editor_data.py).
 //
@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <prefab_flags.h>
 
-#define PREFAB_TABLE_COUNT 99  // == PREFAB_COUNT (shared.h Prefab): v7.1.4 0-96 + v10.0.2 97-98
+#define PREFAB_TABLE_COUNT 100 // == PREFAB_COUNT (shared.h Prefab): v7.1.4 0-96 + v10.0.2 97-98 + v10.0.5 99
 #define PREFAB_TEXTURE_COUNT 20
 
 typedef struct {

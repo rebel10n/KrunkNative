@@ -14,7 +14,8 @@ KrunkScript `shared` script, and `GAME.ENTITIES`.
 
 ## 1. Prefab table (PF vs L154335-156758)
 
-v7 has 97 prefabs (0-96). v10 has 99 (0-98). Textures 0-19 (WALL..SNOW, L154019) are unchanged.
+v7 has 97 prefabs (0-96). v10 has 99 (0-98); v10.0.5 adds 99 COLLISION_MESH (100). Textures 0-19 (WALL..SNOW,
+L154019) are unchanged.
 
 | id | v7.1.4 | v10.0.2 | v10 evidence | notes | implemented (KN) |
 |---|---|---|---|---|---|
@@ -23,6 +24,7 @@ v7 has 97 prefabs (0-96). v10 has 99 (0-98). Textures 0-19 (WALL..SNOW, L154019)
 | 42-96 | same | same | | | yes |
 | **97** | - | **SCRAPCRATE** | L156724: crate_0.obj/crate_0.png, `scale 5`, `hasHealth`, `canInterface`, `canWallJump`, `canGrapple`, `canImpulse`, `editBulletCol`, `editAICol`, `stepSrc`, shadows | Loader has no special branch, so it is a generic prop (same path as CRATE, `scale` 5 vs CRATE 6). Scrap is also a currency (L102865 `'scrap': 5`). Guess: tied to the scrap/quick-sell economy, not gameplay. | yes: `PREFAB_SCRAPCRATE`, a MODEL_PROP (crate_0, scale 5), v10 dialect only |
 | **98** | - | **ENTITY** | L156744: `isEntity`, `scalable`, `tool`, `transparent`, `opacity 0.3`, `lineCol 65484`, `defaultSize [10,10,10]` | An entity instance placement (section 4). No map object is built (L167403 `if ("ENTITY" != _) {...} else { entityInstances.push }`). | yes: `PREFAB_ENTITY`, no map object; kept in `Map.entity_instances` for the entities package (TODO) |
+| **99** | - | **COLLISION_MESH** (v10.0.5) | deob-10.0.5.js:158847-158862: cube_0, genGeo `generateCollisionMesh` (:159520), `defaultSize [1,1,1]`, `scalable`, `noTexture`, `noExport`, `tool`, `transparent`, `doubleSide`, `opacity 0.35`, `lineCol 0xff00ff`, `noMinimap` | The editor's collision-only triangles: `cmt` (9 numbers a triangle, local to `p`, the bottom centre) stretched by `s` / collBase (cmt's extent, at least 0.1). Saved projects keep the object; the published map has none (noExport) and holds its triangles in the top-level `tris` (editor-10.0.5.js:16347-16356, 16454-16460). Importing a map turns the `tris` no `cpx` object bakes into collision meshes (importOrphanTris, :16713-16792). game.js reads no `cmt`. | yes: `PREFAB_COLLISION_MESH`, no map object (its `tris` collide as before); the editor side is client/src/editor (editor_model.c, editor_collision.c) |
 
 New prefab flag `canDynamic: true` on CUBE (L154373), TRIGGER (L155203) and CUSTOM_ASSET (L155540).
 It is editor metadata that allows the per-object `dyn` key (section 2).

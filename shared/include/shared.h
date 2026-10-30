@@ -88,7 +88,7 @@ extern const GameConstants game_constants;
 
 // Krunker v7.1.4 data/prefabs.js prefab ids (map object "i"; doc/v7/map-logic.md §1.4).
 // Ids 0-59 keep their v3.1.1 index; 33 and 55 were renamed (the v3 names stay as aliases);
-// 60-96 are new; v10.0.2 adds 97-98 and renames 41 (doc/v10/map-format.md §1). The per-prefab data is shared/include/prefabs.h (g_prefab_data, prefab_info).
+// 60-96 are new; v10.0.2 adds 97-98 and renames 41, v10.0.5 adds 99 (doc/v10/map-format.md §1). The per-prefab data is shared/include/prefabs.h (g_prefab_data, prefab_info).
 typedef enum {
     PREFAB_CUBE,
     PREFAB_CRATE,
@@ -190,7 +190,8 @@ typedef enum {
     PREFAB_V7_COUNT,            // 97: the v7.1.4 table ended here
     PREFAB_SCRAPCRATE = PREFAB_V7_COUNT, // 97 (v10.0.2): a generic model prop like CRATE (scale 5)
     PREFAB_ENTITY,              // 98 (v10.0.2): an entity instance (Map.entity_instances), no map object
-    PREFAB_COUNT,               // 99: every id of v10.0.2's table
+    PREFAB_COLLISION_MESH,      // 99 (v10.0.5): the editor's collision-only triangle mesh, published as "tris"
+    PREFAB_COUNT,               // 100: every id of v10.0.5's table
     PREFAB_TERMINAL = PREFAB_BOT_PATH_NODE, // v3.1.1 / v7.1.4 name of 41
     PREFAB_SPECTATE_CAM = PREFAB_CAMERA,  // v3.1.1 name of 33
     PREFAB_BOT = PREFAB_AI_SPAWNER,       // v3.1.1 name of 55

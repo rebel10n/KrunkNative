@@ -446,6 +446,24 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
         default_size[0] += spread;
         default_size[2] += spread;
     }
+    // v10.0.5 COLLISION_MESH (editor-10.0.5.js:7394-7408): collTris = p.cmt when it is an array of whole triangles
+    // (parseFloat || 0 each), else []; collBase = its extent per axis (at least 0.1); without an "s" array the
+    // size is collBase
+    cJSON *coll_tris = NULL;
+    if (IS("COLLISION_MESH")) {
+        const cJSON *cmt = G(p, "cmt");
+        coll_tris = cJSON_CreateArray();
+        if (cJSON_IsArray(cmt) && cJSON_GetArraySize(cmt) % 9 == 0) {
+            const cJSON *e;
+            cJSON_ArrayForEach(e, cmt) {
+                const double v = js_parse_float(e);
+                cJSON_AddItemToArray(coll_tris, cJSON_CreateNumber(num_truthy(v) ? v : 0));
+            }
+        }
+        double base[3];
+        ed_model_collision_base(coll_tris, base);
+        for (int k = 0; k < 3; k++) default_size[k] = base[k];
+    }
 
     // ---- serialize: p, s, i
     const cJSON *pos = G(p, "p");
@@ -835,6 +853,7 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
         const double item = pi_or(p, "skin", 0);
         if (IS("SHOWCASE") && num_truthy(item)) put_num(out, "skin", item);
     }
+    if (coll_tris) put(out, "cmt", coll_tris); // v10.0.5 serialize: cmt = this.collTris (editor-10.0.5.js:8318-8320)
     const double intensity = pf_or(p, "li", 1);
     const double distance = js_null(p, "lds") ? 50 : pf_or(p, "lds", 0);
     const double decay = pf_or(p, "ld", 1);
@@ -1306,8 +1325,10 @@ static double vec_at(const cJSON *a, const int k, const double fallback) {
     return cJSON_IsNumber(v) ? v->valuedouble : fallback;
 }
 
-int ed_model_object_tris(const cJSON *obj, const int prefab, cJSON *tris) {
-    if (prefab < 0 || prefab >= EDITOR_PREFAB_COUNT || !tris) return 0;
+// The generated geometry of obj in world space, unrounded: 9 doubles per triangle in *out (malloc'd; NULL when none).
+static int object_world_tris(const cJSON *obj, const int prefab, double **out) {
+    *out = NULL;
+    if (prefab < 0 || prefab >= EDITOR_PREFAB_COUNT) return 0;
     const char *name = editor_prefabs[prefab].name;
     const cJSON *s = G(obj, "s");
     const double w = vec_at(s, 0, 1), h = vec_at(s, 1, 1), d = vec_at(s, 2, 1);
@@ -1340,13 +1361,278 @@ int ed_model_object_tris(const cJSON *obj, const int prefab, cJSON *tris) {
     const double m[9] = {1 - (yy + zz), xy - wz, xz + wy, xy + wz, 1 - (xx + zz), yz - wx, xz - wy, yz + wx, 1 - (xx + yy)};
     const double oy = h / 2;
     const double px = vec_at(p, 0, 0) + m[1] * oy, py = vec_at(p, 1, 0) + m[4] * oy, pz = vec_at(p, 2, 0) + m[7] * oy;
+    double *world = t.n ? malloc((size_t) t.n * 3 * sizeof(double)) : NULL;
+    if (!world) {
+        free(t.v);
+        return 0;
+    }
     for (int i = 0; i < t.n; i++) {
         const double x = t.v[i * 3], y = t.v[i * 3 + 1], z = t.v[i * 3 + 2];
-        const double wv[3] = {m[0] * x + m[1] * y + m[2] * z + px, m[3] * x + m[4] * y + m[5] * z + py, m[6] * x + m[7] * y + m[8] * z + pz};
-        for (int k = 0; k < 3; k++) cJSON_AddItemToArray(tris, cJSON_CreateNumber(isfinite(wv[k]) ? floor(wv[k] + 0.5) : 0));
+        world[i * 3] = m[0] * x + m[1] * y + m[2] * z + px;
+        world[i * 3 + 1] = m[3] * x + m[4] * y + m[5] * z + py;
+        world[i * 3 + 2] = m[6] * x + m[7] * y + m[8] * z + pz;
     }
     free(t.v);
+    *out = world;
     return t.n / 3;
+}
+
+int ed_model_object_tris(const cJSON *obj, const int prefab, cJSON *tris) {
+    if (!tris) return 0;
+    double *w;
+    const int n = object_world_tris(obj, prefab, &w);
+    for (int i = 0; i < n * 9; i++) cJSON_AddItemToArray(tris, cJSON_CreateNumber(isfinite(w[i]) ? floor(w[i] + 0.5) : 0));
+    free(w);
+    return n;
+}
+
+int ed_model_object_world_tris(const cJSON *obj, const int prefab, double **out) { return object_world_tris(obj, prefab, out); }
+
+// ---------------------------------------------------------------------------
+// v10.0.5 COLLISION_MESH: collision-only triangles, local to "p" (the bottom centre), stretched by s / collBase
+
+static double round2(const double v) { return isfinite(v) ? floor(v * 100 + 0.5) / 100 : 0; } // Math.round(v * 100) / 100
+
+void ed_model_collision_base(const cJSON *cmt, double base[3]) {
+    // collBase: max - min of collTris per axis, at least 0.1 (`Math.max(max - min, 0.1) || 0.1`; no triangles: -inf -> 0.1)
+    for (int k = 0; k < 3; k++) {
+        double lo = INFINITY, hi = -INFINITY;
+        int i = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, cmt) {
+            if (i++ % 3 != k) continue;
+            const double v = cJSON_IsNumber(e) ? e->valuedouble : 0;
+            lo = fmin(lo, v);
+            hi = fmax(hi, v);
+        }
+        const double d = fmax(hi - lo, 0.1);
+        base[k] = isfinite(d) && d != 0 ? d : 0.1;
+    }
+}
+
+int ed_model_collision_mesh_tris(const cJSON *obj, cJSON *tris) {
+    // getMapExport's iiïîïií (editor-10.0.5.js:16347-16356): every cmt vertex scaled by size / collBase, turned by the
+    // bounding mesh's quaternion, moved by p, rounded to 2 decimals
+    const cJSON *cmt = G(obj, "cmt");
+    const int n = cJSON_GetArraySize(cmt);
+    if (!tris || n < 9 || n % 9) return 0;
+    double base[3];
+    ed_model_collision_base(cmt, base);
+    const cJSON *p = G(obj, "p"), *s = G(obj, "s"), *r = G(obj, "r");
+    double sc[3];
+    for (int k = 0; k < 3; k++) sc[k] = vec_at(s, k, base[k]) / base[k];
+    // the Euler XYZ rotation as a matrix (THREE.Matrix4.makeRotationFromEuler, rows; applyQuaternion of the same turn)
+    const double rx = vec_at(r, 0, 0), ry = vec_at(r, 1, 0), rz = vec_at(r, 2, 0);
+    const double a = cos(rx), b = sin(rx), c = cos(ry), d = sin(ry), ce = cos(rz), f = sin(rz);
+    const double ae = a * ce, af = a * f, be = b * ce, bf = b * f;
+    const double rm[9] = {c * ce, -c * f, d, af + be * d, ae - bf * d, -b * c, bf - ae * d, be + af * d, a * c};
+    const double px = vec_at(p, 0, 0), py = vec_at(p, 1, 0), pz = vec_at(p, 2, 0);
+    double v[3];
+    int k = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cmt) {
+        v[k] = (cJSON_IsNumber(e) ? e->valuedouble : 0) * sc[k];
+        if (++k < 3) continue;
+        k = 0;
+        cJSON_AddItemToArray(tris, cJSON_CreateNumber(round2(rm[0] * v[0] + rm[1] * v[1] + rm[2] * v[2] + px)));
+        cJSON_AddItemToArray(tris, cJSON_CreateNumber(round2(rm[3] * v[0] + rm[4] * v[1] + rm[5] * v[2] + py)));
+        cJSON_AddItemToArray(tris, cJSON_CreateNumber(round2(rm[6] * v[0] + rm[7] * v[1] + rm[8] * v[2] + pz)));
+    }
+    return n / 9;
+}
+
+cJSON *ed_model_collision_mesh_new(const double *tris, const int *starts, const int count) {
+    // iïiìíïî (editor-10.0.5.js:16771-16792): the triangles at `starts` (offsets into tris, 9 values each) as one
+    // COLLISION_MESH: p = (centre x, bottom y, centre z) of their bounds, cmt = each vertex - p, both rounded to 2 decimals
+    if (!tris || !starts || count <= 0) return NULL;
+    double lo[3] = {INFINITY, INFINITY, INFINITY}, hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+    for (int t = 0; t < count; t++) {
+        for (int k = 0; k < 9; k++) {
+            lo[k % 3] = fmin(lo[k % 3], tris[starts[t] + k]);
+            hi[k % 3] = fmax(hi[k % 3], tris[starts[t] + k]);
+        }
+    }
+    const double p[3] = {round2((lo[0] + hi[0]) / 2), round2(lo[1]), round2((lo[2] + hi[2]) / 2)};
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddNumberToObject(d, "i", prefab_by_name("COLLISION_MESH"));
+    cJSON *pa = cJSON_AddArrayToObject(d, "p");
+    for (int k = 0; k < 3; k++) cJSON_AddItemToArray(pa, cJSON_CreateNumber(p[k]));
+    cJSON *cmt = cJSON_AddArrayToObject(d, "cmt");
+    for (int t = 0; t < count; t++) {
+        for (int k = 0; k < 9; k++) cJSON_AddItemToArray(cmt, cJSON_CreateNumber(round2(tris[starts[t] + k] - p[k % 3])));
+    }
+    cJSON *obj = ed_model_object(d, ED_MODEL_EXACT_TRANSFORM); // ObjectInstance.deserialize({i, p, cmt})
+    cJSON_Delete(d);
+    return obj;
+}
+
+// String.join of one value as importOrphanTris keys it (a number prints as JS does)
+static void tri_value_key(const cJSON *v, char *out, const size_t n) {
+    char buf[64];
+    const char *s = cJSON_IsNumber(v) ? NULL : js_str(v, buf, sizeof(buf));
+    if (cJSON_IsNumber(v)) js_num_str(v->valuedouble, out, n);
+    else snprintf(out, n, "%s", s ? s : "");
+}
+
+// a string -> int map (open addressing, FNV-1a) for importOrphanTris' vertex keys
+typedef struct {
+    char **keys;
+    int *vals;
+    size_t cap;
+} KeyMap;
+
+static size_t key_hash(const char *s) {
+    size_t h = 2166136261u;
+    for (; *s; s++) h = (h ^ (unsigned char) *s) * 16777619u;
+    return h;
+}
+
+static int *keymap_slot(KeyMap *m, const char *key, int *found) {
+    size_t i = key_hash(key) & (m->cap - 1);
+    while (m->keys[i] && strcmp(m->keys[i], key)) i = (i + 1) & (m->cap - 1);
+    *found = m->keys[i] != NULL;
+    if (!*found) m->keys[i] = (char *) key; // the caller owns `key` from here
+    return &m->vals[i];
+}
+
+static int str_cmp(const void *a, const void *b) { return strcmp(*(char *const *) a, *(char *const *) b); }
+
+static char *tri_key(const cJSON *const *vals, const int from, const int len) {
+    char buf[1024] = "", one[64];
+    for (int k = 0; k < len; k++) {
+        tri_value_key(vals[from + k], one, sizeof(one));
+        if (k) strncat(buf, ",", sizeof(buf) - strlen(buf) - 1);
+        strncat(buf, one, sizeof(buf) - strlen(buf) - 1);
+    }
+    return strdup(buf);
+}
+
+static int sorted_has(char *const *keys, const int n, const char *key) {
+    return n > 0 && bsearch(&key, keys, (size_t) n, sizeof(char *), str_cmp) != NULL;
+}
+
+int ed_model_import_orphan_tris(const cJSON *map_tris, cJSON *objects) {
+    // importOrphanTris (editor-10.0.5.js:16713-16770): the map's "tris" that no complexColl object of the import
+    // bakes again (getMapExport compares them as "a,b,...,i" strings) become COLLISION_MESH objects, one per group of
+    // triangles that share a vertex ("x,y,z"; union-find), in the order their groups are first met. KrunkNative: the
+    // known set is what ed_model_object_tris bakes, i.e. what ed_model_export writes back; a CUSTOM_ASSET's cpx
+    // triangles (Krunker bakes them from the loaded model) are not known here, so they come back as collision meshes
+    // and the export still holds them.
+    const int n = cJSON_GetArraySize(map_tris);
+    if (!objects || !n || n % 9) return 0;
+    const cJSON **vals = malloc((size_t) n * sizeof(*vals));
+    if (!vals) return 0;
+    {
+        int i = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, map_tris) vals[i++] = e;
+    }
+    // the triangles the complexColl objects bake
+    cJSON *known_tris = cJSON_CreateArray();
+    const cJSON *o;
+    cJSON_ArrayForEach(o, objects) {
+        const int prefab = ed_model_prefab(o);
+        if (prefab >= 0 && editor_prefab_has(prefab, EP_CANCOMPLEXCOLL) && G(o, "cpx")) ed_model_object_tris(o, prefab, known_tris);
+    }
+    const int nk = cJSON_GetArraySize(known_tris) / 9;
+    char **known = nk ? calloc((size_t) nk, sizeof(char *)) : NULL;
+    {
+        const cJSON **kv = nk ? malloc((size_t) nk * 9 * sizeof(*kv)) : NULL;
+        int i = 0;
+        const cJSON *e;
+        if (kv) cJSON_ArrayForEach(e, known_tris) if (i < nk * 9) kv[i++] = e;
+        for (int t = 0; kv && known && t < nk; t++) known[t] = tri_key(kv, t * 9, 9);
+        free(kv);
+    }
+    if (known) qsort(known, (size_t) nk, sizeof(char *), str_cmp);
+    cJSON_Delete(known_tris);
+    // the orphans, in map order
+    int *orphan = malloc((size_t) (n / 9) * sizeof(int)), no = 0;
+    for (int t = 0; orphan && t < n / 9; t++) {
+        char *key = tri_key(vals, t * 9, 9);
+        if (!known || !sorted_has(known, nk, key)) orphan[no++] = t * 9;
+        free(key);
+    }
+    for (int t = 0; known && t < nk; t++) free(known[t]);
+    free(known);
+    int made = 0;
+    if (no) {
+        // union-find over shared vertices: each vertex key remembers the first orphan that had it
+        int *parent = malloc((size_t) no * sizeof(int));
+        KeyMap vk = {0};
+        vk.cap = 16;
+        while (vk.cap < (size_t) no * 6) vk.cap <<= 1; // 3 vertices per triangle, at most half full
+        vk.keys = calloc(vk.cap, sizeof(char *));
+        vk.vals = calloc(vk.cap, sizeof(int));
+        double *num = malloc((size_t) n * sizeof(double));
+        if (parent && vk.keys && vk.vals && num) {
+            for (int i = 0; i < n; i++) num[i] = js_number(vals[i]);
+            for (int i = 0; i < no; i++) parent[i] = i;
+            for (int i = 0; i < no; i++) {
+                for (int v = 0; v < 9; v += 3) {
+                    char *key = tri_key(vals, orphan[i] + v, 3);
+                    int found;
+                    int *owner = key ? keymap_slot(&vk, key, &found) : NULL;
+                    if (!owner) continue;
+                    if (found) {
+                        // iîìiïïî[find(i)] = find(seen), find with path halving
+                        int a = i, b = *owner;
+                        while (parent[a] != a) a = parent[a] = parent[parent[a]];
+                        while (parent[b] != b) b = parent[b] = parent[parent[b]];
+                        parent[a] = b;
+                        free(key);
+                    } else {
+                        *owner = i;
+                    }
+                }
+            }
+            // groups keyed by their root, in first-seen order
+            int *root = malloc((size_t) no * sizeof(int)), *order = malloc((size_t) no * sizeof(int)), *starts = malloc((size_t) no * sizeof(int));
+            int *group_of = malloc((size_t) no * sizeof(int)), *first = malloc((size_t) no * sizeof(int)), *next = malloc((size_t) no * sizeof(int));
+            int ng = 0;
+            const int ok = root && order && starts && group_of && first && next;
+            for (int i = 0; ok && i < no; i++) group_of[i] = -1;
+            for (int i = 0; ok && i < no; i++) {
+                int a = i;
+                while (parent[a] != a) a = parent[a] = parent[parent[a]];
+                root[i] = a;
+                if (group_of[a] < 0) {
+                    group_of[a] = ng;
+                    first[ng] = -1;
+                    order[ng++] = a;
+                }
+            }
+            // each group's members in map order (a linked list per group, built backwards)
+            for (int i = no - 1; ok && i >= 0; i--) {
+                const int g = group_of[root[i]];
+                next[i] = first[g];
+                first[g] = i;
+            }
+            for (int g = 0; ok && g < ng; g++) {
+                int c = 0;
+                for (int i = first[g]; i >= 0; i = next[i]) starts[c++] = orphan[i];
+                cJSON *mesh = ed_model_collision_mesh_new(num, starts, c);
+                if (mesh) {
+                    cJSON_AddItemToArray(objects, mesh);
+                    made++;
+                }
+            }
+            free(root);
+            free(order);
+            free(starts);
+            free(group_of);
+            free(first);
+            free(next);
+        }
+        for (size_t j = 0; vk.keys && j < vk.cap; j++) free(vk.keys[j]);
+        free(parent);
+        free(vk.keys);
+        free(vk.vals);
+        free(num);
+    }
+    free(orphan);
+    free(vals);
+    return made;
 }
 
 // ---------------------------------------------------------------------------
@@ -1990,6 +2276,12 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
         cJSON_AddItemToArray(objects, v);
     }
     cJSON_Delete(sizes);
+    // v10.0.5: the COLLISION_MESHes (noExport, skipped above) as world triangles after the complexColl ones
+    // (getMapExport, editor-10.0.5.js:16454-16460)
+    for (size_t i = 0; !raw && !(flags & ED_EXPORT_NO_TRIS) && i < n; i++) {
+        if (objs[i].prefab >= 0 && objs[i].prefab < EDITOR_PREFAB_COUNT && objs[i].data && !strcmp(editor_prefabs[objs[i].prefab].name, "COLLISION_MESH"))
+            ed_model_collision_mesh_tris(objs[i].data, tris);
+    }
 
     cJSON *out = cJSON_CreateObject();
     const cJSON *it;
@@ -2333,6 +2625,10 @@ int ed_model_import(const cJSON *doc, EdMapState *st, cJSON **objects_out, const
             group++;
         }
     }
+    // v10.0.5 importMap: the "tris" no object bakes again become COLLISION_MESH objects once the objects are loaded
+    // (editor-10.0.5.js:17190-17194, importOrphanTris)
+    const cJSON *map_tris = G(map, "tris");
+    if (cJSON_IsArray(map_tris)) ed_model_import_orphan_tris(map_tris, objects);
     const cJSON *config = G(map, "config");
     if (js_truthy(config)) import_config(st, config);
     const cJSON *game = G(map, "game");

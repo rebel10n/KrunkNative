@@ -83,6 +83,7 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | Feature | v10 | Before | After |
 |---|---|---|---|
 | Prefabs 97 SCRAPCRATE, 98 ENTITY; 41 BOT_PATH_NODE (v7 TERMINAL) | V10 L156724, L156744, L155465 | dropped on import (id ≥ 97 invalid) | **done** (`gen_editor_data.py` + the shared appendix of `tools/maps/gen_prefab_data.py`) |
+| v10.0.5 collision meshes: prefab 99 COLLISION_MESH, the custom asset's Collision Size / Fit Collision To Model, the object menu's Convert to Collision Mesh, map `tris` kept on import (importOrphanTris) and export | deob-10.0.5.js:158847, editor-10.0.5.js:7394-7408, 16347-16356, 16713-16825; index-10.0.5.js:16094-16120, 22059-22066 | the imported `tris` of models KN cannot rebuild were dropped on export; no Collision Size, no Convert | **done** (editor_model.c, editor_collision.c, editor_inspector.c, editor_quickgui.c, editor_render.c; editor_serialize_test, map_v10_test) |
 | Conditions 13 (+ Custom Action), actions 75 (+ Spawn / Despawn Entity, Set Entity Value) | V10 L162580, L163648-163700 | 12 / 72 | **done** |
 | triggerActionLimit 8; entityLimit 64, archetypeLimit 32, archetypeObjectLimit 40 | CFG:7866-7871 | 5, none | **done** |
 | botPaths import (a BOT_PATH_NODE per point, `bng/bn/bnn/bnr`) and export (grouped, sorted by `bn`) | E10:17046-17064, 16405-16420, 8038-8043 | dropped | **done** (`editor_model.c`, `editor_serialize_test` v10_checks) |

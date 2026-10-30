@@ -102,6 +102,9 @@ const EditorPrefab editor_prefabs[EDITOR_PREFAB_COUNT] = {
     {"MAP_ANCHOR", "Map Anchor", {1.0f, 500.0f, 1.0f}, 1, 1.0f, 16711680, 1.0f, 0, 0, NULL, EP_GENGEO | EP_TOOL | EP_NOTSTYLEABLE | EP_FORCECOLLISION | EP_DOUBLESIDE | EP_TRANSPARENT | EP_NOMINIMAP},
     {"SCRAPCRATE", "Scrapcrate", {10.0f, 10.0f, 10.0f}, 2, 5.0f, -1, 1.0f, 0, 0, NULL, EP_HASHEALTH | EP_EDITCOLOR | EP_EDITOPAC | EP_CANINTERFACE | EP_CANWALLJUMP | EP_GEN | EP_DONTROUND | EP_CANGRAPPLE | EP_CANIMPULSE | EP_CASTSHADOW | EP_EDITAICOL | EP_EDITBULLETCOL | EP_RECEIVESHADOW | EP_STEPSRC},
     {"ENTITY", "Entity", {10.0f, 10.0f, 10.0f}, 1, 1.0f, 65484, 0.3f, 0, 0, NULL, EP_SCALABLE | EP_EDITCOLOR | EP_GENGEO | EP_TOOL | EP_TRANSPARENT | EP_NOTEXTURE | EP_ISENTITY},
+    // v10.0.5 COLLISION_MESH (deob-10.0.5.js:158847-158862), added by hand: gen_editor_data.py no longer runs (its
+    // v10.0.2 editor bundle input is gone and its prefab-41 check fails at HEAD); tools/maps/gen_prefab_data.py has the row
+    {"COLLISION_MESH", "Collision Mesh", {1.0f, 1.0f, 1.0f}, 1, 1.0f, 16711935, 0.35f, 0, 0, NULL, EP_SCALABLE | EP_GENGEO | EP_TOOL | EP_NOEXPORT | EP_DOUBLESIDE | EP_TRANSPARENT | EP_NOTEXTURE | EP_NOMINIMAP},
 };
 
 const char *const editor_textures[EDITOR_TEXTURE_COUNT] = {

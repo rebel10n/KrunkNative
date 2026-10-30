@@ -300,7 +300,10 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
             }
             ed_obj_set_vec(o, "r", v);
         } else if (!strcmp(prop, "size")) {
-            if (!editor_prefab_has(prefab, EP_SCALABLE)) return;
+            // v10.0.5: an asset object's Collision Size / Fit Collision To Model write its size too
+            // (index-10.0.5.js:16094-16120), though CUSTOM_ASSET is not scalable
+            const int asset = prefab == ED_PREFAB_CUSTOM_ASSET && cJSON_GetObjectItemCaseSensitive(d, "aid");
+            if (!editor_prefab_has(prefab, EP_SCALABLE) && !asset) return;
             ed_obj_set_vec(o, "s", v);
         } else if (!strcmp(prop, "lightTarget")) {
             cJSON_DeleteItemFromObjectCaseSensitive(d, "lt");
@@ -347,9 +350,16 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
     }
     if (!strcmp(prop, "mSize")) {
         // TransformControls modelScale clamps to 0.01..100; serialize writes it rounded to 2 decimals
+        const double before = ed_json_num(d, "ms", editor_prefabs[prefab].scale);
         cJSON_DeleteItemFromObjectCaseSensitive(d, "ms");
         const double v = value_num(value);
         if (v != editor_prefabs[prefab].scale) cJSON_AddNumberToObject(d, "ms", v);
+        // v10.0.5: an asset's collision size follows its model scale (fixedSize *= mSize / fixedSizeM,
+        // editor-10.0.5.js:8878-8882; without a fixed size it is the model's bounds at the new scale)
+        cJSON *s = cJSON_GetObjectItemCaseSensitive(d, "s");
+        if (cJSON_GetObjectItemCaseSensitive(d, "aid") && cJSON_IsArray(s) && before > 0 && v > 0 && v != before) {
+            for (cJSON *e = s->child; e; e = e->next) if (cJSON_IsNumber(e)) cJSON_SetNumberValue(e, e->valuedouble * v / before);
+        }
         obj_normalize(o);
         return;
     }

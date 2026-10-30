@@ -751,6 +751,150 @@ static void v10_checks(void) {
     cJSON_Delete(doc);
 }
 
+// ---------------------------------------------------------------- v10.0.5 COLLISION_MESH (prefab 99)
+
+static int dbl_cmp9(const void *a, const void *b) {
+    const double *x = a, *y = b;
+    for (int k = 0; k < 9; k++) if (x[k] != y[k]) return x[k] < y[k] ? -1 : 1;
+    return 0;
+}
+
+// the triangles of `tris` as sorted 9-double rows (exact values, unlike tri_list)
+static double *tri_rows(const cJSON *tris, int *n) {
+    *n = cJSON_GetArraySize(tris) / 9;
+    double *t = calloc((size_t) (*n ? *n : 1) * 9, sizeof(double));
+    int i = 0;
+    const cJSON *v;
+    cJSON_ArrayForEach(v, tris) if (i < *n * 9) t[i++] = cJSON_GetNumberValue(v);
+    qsort(t, (size_t) *n, 9 * sizeof(double), dbl_cmp9);
+    return t;
+}
+
+static int count_prefab(const cJSON *objects, const char *name, const cJSON **first) {
+    int n = 0;
+    const cJSON *o;
+    cJSON_ArrayForEach(o, objects) {
+        const int prefab = ed_model_prefab(o);
+        if (prefab < 0 || strcmp(editor_prefabs[prefab].name, name)) continue;
+        if (!n && first) *first = o;
+        n++;
+    }
+    return n;
+}
+
+static void collision_mesh_checks(const char *repo) {
+    printf("Running v10.0.5 collision meshes...\n");
+    CHECK(EDITOR_PREFAB_COUNT == 100 && !strcmp(editor_prefabs[99].name, "COLLISION_MESH") && editor_prefab_has(99, EP_NOEXPORT) &&
+              editor_prefab_has(99, EP_TOOL) && editor_prefab_has(99, EP_SCALABLE) && editor_prefabs[99].line_col == 0xff00ff &&
+              editor_prefabs[99].opacity == 0.35f,
+          "prefab 99 COLLISION_MESH (deob-10.0.5.js:158847-158862)");
+    // deserialize (editor-10.0.5.js:7394-7408): cmt kept, collBase its extent, size = collBase without "s"
+    cJSON *in = cJSON_Parse("{\"i\":99,\"p\":[1,2,3],\"cmt\":[0,0,0,4,0,0,0,2,\"6\"]}");
+    cJSON *o = ed_model_object(in, ED_MODEL_EXACT_TRANSFORM);
+    const cJSON *s = cJSON_GetObjectItemCaseSensitive(o, "s"), *cmt = cJSON_GetObjectItemCaseSensitive(o, "cmt");
+    CHECK(o && cJSON_GetArraySize(cmt) == 9 && cJSON_GetNumberValue(cJSON_GetArrayItem(cmt, 8)) == 6 &&
+              cJSON_GetNumberValue(cJSON_GetArrayItem(s, 0)) == 4 && cJSON_GetNumberValue(cJSON_GetArrayItem(s, 1)) == 2 &&
+              cJSON_GetNumberValue(cJSON_GetArrayItem(s, 2)) == 6,
+          "COLLISION_MESH: cmt parsed (parseFloat), size = collBase [4, 2, 6]");
+    // export (iiïîïií, :16347-16356): cmt * s / collBase, turned by r, + p, rounded to 2 decimals
+    cJSON *tris = cJSON_CreateArray();
+    cJSON_ReplaceItemInObjectCaseSensitive(o, "s", cJSON_Parse("[8,2,3]"));
+    CHECK(ed_model_collision_mesh_tris(o, tris) == 1 && cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 3)) == 9 &&
+              cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 7)) == 4 && cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 8)) == 6,
+          "COLLISION_MESH tris stretch by s / collBase from p (bottom centre)");
+    cJSON_Delete(tris);
+    tris = cJSON_CreateArray();
+    cJSON_ReplaceItemInObjectCaseSensitive(o, "s", cJSON_Parse("[4,2,6]"));
+    cJSON_AddItemToObject(o, "r", cJSON_Parse("[0,1.5707963267948966,0]"));
+    ed_model_collision_mesh_tris(o, tris); // (4, 0, 0) turned 90 degrees about y: (0, 0, -4)
+    CHECK(cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 3)) == 1 && cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 5)) == -1,
+          "COLLISION_MESH tris turn with r (got %g, %g)", cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 3)),
+          cJSON_GetNumberValue(cJSON_GetArrayItem(tris, 5)));
+    cJSON_Delete(tris);
+    cJSON_Delete(o);
+    cJSON_Delete(in);
+    in = cJSON_Parse("{\"i\":99,\"p\":[0,0,0],\"cmt\":[1,2,3,4]}");
+    o = ed_model_object(in, 0);
+    s = cJSON_GetObjectItemCaseSensitive(o, "s");
+    CHECK(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(o, "cmt")) == 0 && cJSON_GetNumberValue(cJSON_GetArrayItem(s, 0)) == 0.1,
+          "cmt that is not whole triangles is dropped; collBase 0.1");
+    cJSON_Delete(o);
+    cJSON_Delete(in);
+
+    // importOrphanTris (:16713-16770): a cpx CUBE's baked tris stay its own; the rest group by shared vertices
+    cJSON *cube = cJSON_Parse("{\"i\":0,\"p\":[0,0,0],\"s\":[10,10,10],\"cpx\":1}");
+    cJSON *baked = cJSON_CreateArray();
+    ed_model_object_tris(cube, 0, baked);
+    cJSON *map = cJSON_CreateObject();
+    cJSON *objs = cJSON_AddArrayToObject(map, "objects");
+    cJSON_AddItemToArray(objs, cube);
+    cJSON *mt = cJSON_AddArrayToObject(map, "tris");
+    const cJSON *e;
+    cJSON_ArrayForEach(e, baked) cJSON_AddItemToArray(mt, cJSON_Duplicate(e, 1));
+    // group A: two triangles sharing (100, 0, 0); group B: one triangle apart
+    static const double extra[27] = {90, 0, 0, 100, 0, 0, 90, 5, 0, 100, 0, 0, 110, 0, 0, 100, 5, 0.5, -50, 1, -50, -40, 1, -50, -50, 1.25, -40};
+    for (int k = 0; k < 27; k++) cJSON_AddItemToArray(mt, cJSON_CreateNumber(extra[k]));
+    EdMapState st;
+    ed_model_map_init(&st);
+    cJSON *objects = NULL;
+    CHECK(ed_model_import(map, &st, &objects, NULL), "orphan map imports");
+    const cJSON *mesh = NULL;
+    const int meshes = count_prefab(objects, "COLLISION_MESH", &mesh);
+    const cJSON *mp = cJSON_GetObjectItemCaseSensitive(mesh, "p");
+    CHECK(meshes == 2 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(mesh, "cmt")) == 18 &&
+              cJSON_GetNumberValue(cJSON_GetArrayItem(mp, 0)) == 100 && cJSON_GetNumberValue(cJSON_GetArrayItem(mp, 1)) == 0 &&
+              cJSON_GetNumberValue(cJSON_GetArrayItem(mp, 2)) == 0.25,
+          "2 collision meshes (the cube's tris are not orphans); the first at its bounds' bottom centre (100, 0, 0.25)");
+    {
+        int n;
+        EdModelObj *list = model_objs(objects, &n);
+        cJSON *out = ed_model_export(&st, list, (size_t) n, 0);
+        int na, nb;
+        double *a = tri_rows(mt, &na), *b = tri_rows(cJSON_GetObjectItemCaseSensitive(out, "tris"), &nb);
+        CHECK(na == nb && !memcmp(a, b, (size_t) na * 9 * sizeof(double)), "export: the same tris, exactly (%d -> %d)", na, nb);
+        CHECK(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(out, "objects")) == 1, "export: the meshes are noExport (1 object)");
+        free(a);
+        free(b);
+        cJSON_Delete(out);
+        out = ed_model_export(&st, list, (size_t) n, ED_EXPORT_RAW);
+        int raw_meshes = count_prefab(cJSON_GetObjectItemCaseSensitive(out, "objects"), "COLLISION_MESH", NULL);
+        CHECK(raw_meshes == 2 && !cJSON_GetObjectItemCaseSensitive(out, "tris"), "save form: the meshes stay objects with cmt, no tris");
+        // a saved map loads its meshes back and finds no new orphans
+        cJSON *objects2 = NULL;
+        EdMapState st2;
+        ed_model_map_init(&st2);
+        ed_model_import(out, &st2, &objects2, NULL);
+        CHECK(count_prefab(objects2, "COLLISION_MESH", NULL) == 2, "a saved map reloads its 2 meshes");
+        cJSON_Delete(objects2);
+        ed_model_map_free(&st2);
+        cJSON_Delete(out);
+        free(list);
+    }
+    cJSON_Delete(objects);
+    ed_model_map_free(&st);
+    cJSON_Delete(baked);
+    cJSON_Delete(map);
+
+    // Candy Heist (no cpx object: every map triangle is an orphan): import + export keeps them exactly
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/assets/maps/official/46_candy_heist.json", repo);
+    cJSON *doc = read_json(path);
+    const cJSON *src = cJSON_GetObjectItemCaseSensitive(doc, "map");
+    if (!cJSON_IsObject(src)) src = doc;
+    if (cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(src, "tris"))) {
+        cJSON *out = export_of(doc, NULL, NULL);
+        int na, nb;
+        double *a = tri_rows(cJSON_GetObjectItemCaseSensitive(src, "tris"), &na), *b = tri_rows(cJSON_GetObjectItemCaseSensitive(out, "tris"), &nb);
+        CHECK(na == nb && !memcmp(a, b, (size_t) na * 9 * sizeof(double)), "Candy Heist: import + export keeps its %d map triangles (got %d)", na, nb);
+        free(a);
+        free(b);
+        cJSON_Delete(out);
+    } else {
+        CHECK(0, "Candy Heist has no tris to check (%s)", path);
+    }
+    cJSON_Delete(doc);
+}
+
 int main(int argc, char **argv) {
     const char *repo = argc > 1 ? argv[1] : ".";
     char path[1024];
@@ -763,6 +907,7 @@ int main(int argc, char **argv) {
     logic_cases(repo);
     template_tas(repo);
     script_checks();
+    collision_mesh_checks(repo);
     static const char *const dirs[2] = {"assets/maps", "assets/maps/custom"}; // v7's maps + 311_ / 152_, community
     for (int i = 0; i < 2; i++) {
         snprintf(path, sizeof(path), "%s/%s", repo, dirs[i]);

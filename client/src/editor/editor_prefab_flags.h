@@ -4,7 +4,7 @@
 
 __extension__ typedef unsigned __int128 EditorPrefabFlags;
 
-#define EDITOR_PREFAB_COUNT 99
+#define EDITOR_PREFAB_COUNT 100
 #define EDITOR_TEXTURE_COUNT 20
 
 #define EP_EDITFACES              ((EditorPrefabFlags) 1 << 0)

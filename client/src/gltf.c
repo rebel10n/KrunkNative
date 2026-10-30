@@ -775,6 +775,49 @@ void gltf_model_forget_all(void) {
         if (!m->shadowed && !m->is_override) m->shadowed = 1;
 }
 
+size_t gltf_model_triangles(const GltfModel *model, float **out) {
+    *out = NULL;
+    if (!model || !model->data) return 0;
+    const cgltf_data *data = model->data;
+    size_t count = 0, cap = 0;
+    float *tris = NULL;
+    for (size_t n = 0; n < data->nodes_count; n++) {
+        const cgltf_node *node = &data->nodes[n];
+        if (!node->mesh || !model->in_scene[n]) continue;
+        float world[16]; // column-major
+        cgltf_node_transform_world(node, world);
+        for (size_t p = 0; p < node->mesh->primitives_count; p++) {
+            const cgltf_primitive *prim = &node->mesh->primitives[p];
+            const cgltf_accessor *pos = NULL;
+            for (size_t a = 0; a < prim->attributes_count; a++)
+                if (prim->attributes[a].type == cgltf_attribute_type_position) pos = prim->attributes[a].data;
+            if (prim->type != cgltf_primitive_type_triangles || !pos) continue;
+            const size_t verts = prim->indices ? prim->indices->count : pos->count;
+            for (size_t v = 0; v + 2 < verts; v += 3) {
+                if (count == cap) {
+                    cap = cap ? cap * 2 : 256;
+                    float *grown = realloc(tris, cap * 9 * sizeof(float));
+                    if (!grown) {
+                        free(tris);
+                        return 0;
+                    }
+                    tris = grown;
+                }
+                for (int k = 0; k < 3; k++) {
+                    const size_t idx = prim->indices ? cgltf_accessor_read_index(prim->indices, v + (size_t) k) : v + (size_t) k;
+                    float l[3] = {0, 0, 0};
+                    cgltf_accessor_read_float(pos, idx, l, 3); // quantized / normalized as the loader reads them
+                    float *o = &tris[count * 9 + (size_t) k * 3];
+                    for (int r = 0; r < 3; r++) o[r] = world[r] * l[0] + world[4 + r] * l[1] + world[8 + r] * l[2] + world[12 + r];
+                }
+                count++;
+            }
+        }
+    }
+    *out = tris;
+    return count;
+}
+
 int gltf_model_animated(const GltfModel *model) {
     return model && model->data && model->data->animations_count > 0;
 }

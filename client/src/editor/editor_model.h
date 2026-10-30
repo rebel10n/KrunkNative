@@ -103,6 +103,21 @@ int ed_model_action_set(cJSON **data, int prefab, int index, const char *key, co
 // to tris (9 numbers each, rounded to integers). Returns the triangles added; 0 for prefabs
 // whose geometry needs a model (CUSTOM_ASSET).
 int ed_model_object_tris(const cJSON *obj, int prefab, cJSON *tris);
+// The same geometry unrounded (9 doubles per triangle, malloc'd into *out, NULL when none): Convert to Collision Mesh.
+int ed_model_object_world_tris(const cJSON *obj, int prefab, double **out);
+
+// ---- v10.0.5 COLLISION_MESH (prefab 99): collision-only triangles "cmt", local to "p" (the bottom centre) and
+// stretched by s / collBase. The editor saves it as an object; the published map holds its triangles in "tris".
+// collBase: the extent of cmt per axis, at least 0.1 (editor-10.0.5.js:7396-7404).
+void ed_model_collision_base(const cJSON *cmt, double base[3]);
+// The object's world triangles (getMapExport's iiïîïií, rounded to 2 decimals) appended to tris; the count.
+int ed_model_collision_mesh_tris(const cJSON *obj, cJSON *tris);
+// A COLLISION_MESH object (the ed_model_object form) of the `count` triangles at offsets `starts` of tris
+// (9 doubles each, world space): iïiìíïî, editor-10.0.5.js:16771-16792. NULL when there are none.
+cJSON *ed_model_collision_mesh_new(const double *tris, const int *starts, int count);
+// importOrphanTris: appends to `objects` (an import's object list) a COLLISION_MESH per connected group of the map's
+// "tris" that no "cpx" object of the list bakes; the number added. ed_model_import calls it.
+int ed_model_import_orphan_tris(const cJSON *map_tris, cJSON *objects);
 
 // ---- JSON.stringify output (Number#toString numbers, JSON.stringify string escapes), malloc'd
 char *ed_model_print(const cJSON *item);

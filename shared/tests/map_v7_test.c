@@ -490,7 +490,8 @@ static void check_validation(void) {
     expect_generated(1, "{\"i\":29,\"p\":[0,0,0],\"s\":[1,1,1],\"tct\":\"<b>\"}", "Illegal characters in Trigger Message", 0);
     expect_generated(1, "{\"i\":96,\"p\":[0,0,0],\"s\":[1,1,1]}", NULL, 0);
     expect_generated(1, "{\"i\":97,\"p\":[0,0,0],\"s\":[1,1,1]}", NULL, 0); // v10's SCRAPCRATE
-    expect_generated(1, "{\"i\":99,\"p\":[0,0,0],\"s\":[1,1,1]}", "Invalid Object.", 0);
+    expect_generated(1, "{\"i\":99,\"p\":[0,0,0],\"s\":[1,1,1]}", NULL, 0); // v10.0.5's COLLISION_MESH (deob-10.0.5.js:191206)
+    expect_generated(1, "{\"i\":100,\"p\":[0,0,0],\"s\":[1,1,1]}", "Invalid Object.", 0);
     expect_generated(1, "{\"i\":0,\"id\":120,\"p\":[0,0,0],\"s\":[1,1,1]}", "Object ID error.", 0);
 
     char *text = map_prepare_custom_text("{\"name\":\"a(b)\"}");
@@ -510,7 +511,7 @@ static void check_validation(void) {
 
 static void check_tables(void) {
     printf("Running tables...\n");
-    CHECK(PREFAB_V7_COUNT == 97 && PREFAB_COUNT == 99 && PREFAB_TEXTURE_COUNT == 20, "97 v7 prefabs (99 with v10's), 20 textures");
+    CHECK(PREFAB_V7_COUNT == 97 && PREFAB_COUNT == 100 && PREFAB_TEXTURE_COUNT == 20, "97 v7 prefabs (100 with v10's), 20 textures");
     CHECK(!strcmp(prefab_name(PREFAB_CAMERA), "CAMERA") && !strcmp(prefab_name(PREFAB_AI_SPAWNER), "AI_SPAWNER") &&
               !strcmp(prefab_name(PREFAB_MAP_ANCHOR), "MAP_ANCHOR") && !strcmp(prefab_name(PREFAB_KNIGHT), "KNIGHT"),
           "enum order matches v7 prefabs.js");
