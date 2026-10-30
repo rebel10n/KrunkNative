@@ -42,7 +42,6 @@
 #include <math.h>
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
-#include <desktop_notify.h> // the same items on the desktop, when the Notifications switch is on
 #include <krunker_account.h> // the krunker.io account: the event bus's fresh token, its URL
 #include <krunker_eb.h>      // krunker.io's friends event bus socket
 #include <client.h>          // the match's players (dm_chat_name)
@@ -670,23 +669,11 @@ static void eb_on_friends(const cJSON *o) {
 }
 
 // ------------------------------------------------------------------ notifications
-// The notification center (v10_notify.c) carries v10's set only (Wild Offer, Survey, Register): the
-// event bus's news is not in it. A direct message shows in the game chat and the Friends tab's unread
-// badge; a follow not followed back is a Followers entry in the Inbox (windows[29], the mail count).
-// KrunkNative's desktop notifier (desktop_notify.c) still posts a follow and a message that is not on
-// screen to the OS.
-
-// A follow (kn_brain's friend:request: a follow not followed back) and its acceptance: the OS
-// notification only; the menu shows them as the Inbox's Followers entry.
-static void notify_friend(const cJSON *o, const int accepted) {
-    const char *name = jstr(o, "name");
-    if (!name[0]) return;
-    char text[192];
-    if (accepted) I18N_F(text, "kn.notify.friendAccepted", "{0} followed you back. You are now friends.", name);
-    else I18N_F(text, "kn.notify.friendRequest", "{0} followed you. Follow them back to become friends.", name);
-    const char *title = accepted ? I18N("kn.notify.friendAcceptedTitle", "Friend Added") : I18N("kn.notify.friendRequestTitle", "Friend Request");
-    desktop_notify_item(title, text);
-}
+// As in v10 (deob-10.0.5.js:141290-141400, the event bus's onmessage switch), the event bus's news never
+// reaches the notification center (v10_notify.c: Register, Wild Offer, Survey only). A direct message is a
+// game chat line and the Friends tab's unread badge; a follow not followed back is a Followers entry in the
+// Inbox (windows[29], the mail count). kn_brain's friend:request / friend:accepted have no case there and
+// are ignored here too.
 
 static void dm_chat_line(const char *text) {
     // v10 _69625(-1, null, text, 2, "#5ce05a"): an in-game system chat line
@@ -709,11 +696,6 @@ static void eb_on_recv(const cJSON *o) {
     char shown[PLAYER_NAME_SIZE];
     snprintf(line, sizeof(line), "[DM from %s]: %s", dm_chat_name(from, name[0] ? name : "Unknown", shown, sizeof(shown)), jstr(o, "text"));
     dm_chat_line(line); // v10 _49706 listeners: every new message, on any page (the chat list keeps it for the game)
-    if (!(S.open && S.tab == TAB_FRIENDS && S.selected == from)) { // KrunkNative: not on screen: the OS notification
-        char title[96];
-        I18N_F(title, "kn.notify.dmTitle", "Message from {0}", name[0] ? name : "Unknown");
-        desktop_notify_item(title, jstr(o, "text"));
-    }
 }
 
 static void eb_on_sent(const cJSON *o) {
@@ -886,9 +868,7 @@ static void eb_dispatch(const cJSON *o) {
     else if (!strcmp(type, "presence:offline")) eb_on_presence(o, 0);
     else if (!strcmp(type, "presence:game")) eb_on_game(o);
     else if (!strcmp(type, "error")) eb_on_error(o);
-    else if (!strcmp(type, "friend:request")) notify_friend(o, 0); // KrunkNative (kn_brain social_eb.c): the OS notification; the menu's is the Inbox's Followers entry
-    else if (!strcmp(type, "friend:accepted")) notify_friend(o, 1);
-    else return; // presence:pong, ranked:queued (no notice on the menu)
+    else return; // presence:pong, ranked:queued, friend:request / friend:accepted (no case in v10)
     if (!strcmp(type, "friends:list") || !strncmp(type, "presence:", 9)) menu_rerender_if_open(5); // window 5's Friends tab
     // an open conversation reads what arrives (v10: msg:read whenever its length changes)
     if (S.open && S.tab == TAB_FRIENDS && S.selected && !strcmp(type, "msg:recv") &&

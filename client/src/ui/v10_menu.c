@@ -48,9 +48,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <account_split.h> // the krunker.io identity a streams read may carry (account_split.h)
-#include <client_settings.h>
-#include <desktop_notify.h>
-#include <web_push.h> // the web build's Notifications switch (Web Push, web_push.c)
+#include <web_push.h> // the Notifications switch (Web Push, web_push.c)
 #include <i18n.h>
 #include <krunker_account.h>
 #include <krunker_net.h>
@@ -1300,14 +1298,11 @@ static void more_krunker(void) {
 
 // The Notifications toggle (webpush-container, _52289). Expanded, it shows the Notifications switch and what
 // the switch can do on this system. Each expand writes the content again, so it always shows the stored state.
-// Native: the desktop notifications switch (client settings desktopNotify, default on; desktop_notify.c posts
-// the centre's friend requests, messages, Wild Offers and surveys). Web: the Web Push switch (web_push.c: the
-// browser subscription, recorded with the brain for a signed-in account); a browser without the Push API keeps
-// v10's "not supported" line.
+// The Web Push switch (web_push.c: the browser subscription, recorded with the brain for a signed-in account);
+// a browser without the Push API, and the native build (no Web Push), keep v10's "not supported" line.
 static void notifications_render(const HtmlElem content) {
     int on;
     char caption[256];
-#ifdef __EMSCRIPTEN__
     if (!web_push_supported()) {
         html_dom_set_html(content, "<div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
                                    "Push notifications are not supported in your browser.</p></div>");
@@ -1315,10 +1310,6 @@ static void notifications_render(const HtmlElem content) {
     }
     on = web_push_on();
     snprintf(caption, sizeof(caption), "%s", web_push_status());
-#else
-    on = client_settings_desktop_notify();
-    desktop_notify_caption(on, desktop_notify_available(), caption, sizeof(caption));
-#endif
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"webpush-message svelte-5kyah8\"><label class=\"switch\" style=\"margin-right:10px\">"
                    "<input type=\"checkbox\" id=\"knDesktopNotify\" onclick=\"knV10DesktopNotify()\"");
@@ -1367,13 +1358,9 @@ static void notifications_toggle(void) {
 #endif
 }
 
-// The switch (knV10DesktopNotify): flips the stored choice (desktopNotify; web: Web Push) and writes the caption again.
+// The switch (knV10DesktopNotify): flips the Web Push choice and writes the caption again.
 static void notifications_switch(void) {
-#ifdef __EMSCRIPTEN__
     web_push_set(!web_push_on());
-#else
-    client_settings_set_desktop_notify(!client_settings_desktop_notify());
-#endif
     HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
     HtmlElem content = box ? notifications_content(box) : 0;
     if (content) notifications_render(content);

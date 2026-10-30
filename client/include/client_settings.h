@@ -43,10 +43,6 @@ int  client_settings_game_time(void);
 // "Hide player names" (Client tab, knClient hidePlayerNames, default off): every other player shows as
 // Player_<n>, the local one as Player, and no clan tag or profile picture (client/include/player_names.h).
 int  client_settings_hide_player_names(void);
-// The Notifications switch (v10_menu.c): desktop notifications for the notification centre's items
-// (desktop_notify.c). knClient "desktopNotify", default on; the setter also updates the notifier.
-int  client_settings_desktop_notify(void);
-void client_settings_set_desktop_notify(int on);
 // "Auto-restart for updates" (default on, game_reload.h): the client restarts itself (the web
 // page reloads) when the server stops for an update or a newer client is ready to run.
 int  client_settings_auto_restart(void);

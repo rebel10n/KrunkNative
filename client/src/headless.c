@@ -31,9 +31,9 @@ int headless_parse_args(int *argc, char **argv) {
         if (!strcmp(argv[i], "--headless")) {
             g_headless = 1;
 #ifdef _WIN32
-            _putenv_s("KRUNKNATIVE_HEADLESS", "1"); // the same as the variable: desktop_notify.c posts nothing
+            _putenv_s("KRUNKNATIVE_HEADLESS", "1"); // the same as the variable
 #else
-            setenv("KRUNKNATIVE_HEADLESS", "1", 1); // the same as the variable: desktop_notify.c posts nothing
+            setenv("KRUNKNATIVE_HEADLESS", "1", 1); // the same as the variable
 #endif
             continue;
         }
