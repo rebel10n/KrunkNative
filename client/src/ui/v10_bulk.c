@@ -7,7 +7,7 @@
 #include <v10_bulk.h>
 #include <inv_source.h> // the active account's inventory: krunker.io's or Box Office's
 #include <v10_ui.h>
-#include <v10_notify.h>
+#include <v10_wallet.h> // the inventory's notification list (the quick-sell results)
 #include <kio_store.h>
 #include <backend_ui.h>
 #include <economy_client.h> // econ_rarity_sell: a listing's minimum price
@@ -307,12 +307,14 @@ static void sell_markup(StrBuf *sb) {
 
 static int g_run_action; // the sell run's action, for its result (the overlay may be gone by then)
 
-// the run ended: the result as a notification (deob-10.0.4.js:147365-147369), then the overlay closes
+// the run ended: the result in the inventory's notification list (deob-10.0.5.js:147362-147370: success
+// "wallet.bulk.result.*", then error "wallet.bulk.result.skipped" when some were skipped), then the overlay
+// closes. A failure is withAwait's error: the overlay's, or the io error popup once the overlay is gone.
 static void sell_done(void *user, const int ok, const char *message) {
     (void) user;
     if (!ok) {
         if (B.kind == OV_SELL) fail(message);
-        else v10_notify_push(I18N("kn.inv.quickSellFailedTitle", "Quick sell"), message ? message : I18N("generic.error", "Error"), V10_NOTIFY_DEFAULT_MS);
+        else v10_view_push(v10_io_error(I18N("kn.inv.quickSellFailedTitle", "Quick sell"), message ? message : I18N("generic.error", "Error")), NULL, NULL, NULL);
         return;
     }
     const KioBulkResult *r = inv_bulk_result();
@@ -326,11 +328,10 @@ static void sell_done(void *user, const int ok, const char *message) {
         fmt_int(b, sizeof(b), r->kr_gained);
         I18N_F(text, "wallet.bulk.result.kr", "Sold {0} for {1} KR", a, b);
     }
-    v10_notify_push(I18N("kn.inv.quickSellFailedTitle", "Quick sell"), text, V10_NOTIFY_DEFAULT_MS);
+    v10_wallet_note(1, text);
     if (r->skipped) {
         snprintf(a, sizeof(a), "%d", r->skipped);
-        v10_notify_push(I18N("kn.inv.quickSellFailedTitle", "Quick sell"),
-                        I18N_F(text, "wallet.bulk.result.skipped", "Skipped {0} (listed or no longer available)", a), V10_NOTIFY_DEFAULT_MS);
+        v10_wallet_note(0, I18N_F(text, "wallet.bulk.result.skipped", "Skipped {0} (listed or no longer available)", a));
     }
     finish_ok();
 }
@@ -482,18 +483,20 @@ static void list_markup(StrBuf *sb) {
     sb_append(sb, "</button></div></div></div>");
 }
 
+// the run ended: the exchange's notification list (deob-10.0.5.js:133978-133982: success "market.listMulti.done"
+// when any was listed, then each error as an error entry)
 static void list_done(void *user, const int ok, const char *message) {
     (void) user;
     if (!ok) {
         if (B.kind == OV_LIST) fail(message);
-        else v10_notify_push(I18N("market.listMulti.title", "List Items"), message ? message : I18N("generic.error", "Error"), V10_NOTIFY_DEFAULT_MS);
+        else v10_market_note(0, message ? message : I18N("generic.error", "Error"));
         return;
     }
     const KioBulkResult *r = inv_bulk_result();
     char a[24], text[160];
     snprintf(a, sizeof(a), "%d", r->listed);
-    v10_notify_push(I18N("market.listMulti.title", "List Items"), I18N_F(text, "market.listMulti.done", "Listed {0} items", a), V10_NOTIFY_DEFAULT_MS);
-    if (r->error[0]) v10_notify_push(I18N("market.listMulti.title", "List Items"), r->error, V10_NOTIFY_DEFAULT_MS);
+    if (r->listed > 0) v10_market_note(1, I18N_F(text, "market.listMulti.done", "Listed {0} items", a));
+    if (r->error[0]) v10_market_note(0, r->error);
     finish_ok();
 }
 
@@ -699,7 +702,7 @@ static void buy_answer(void *user, const int status, const cJSON *data, const ch
     char a[24], b[32], text[160];
     snprintf(a, sizeof(a), "%d", cJSON_IsNumber(bought) ? bought->valueint : 0);
     fmt_int(b, sizeof(b), cJSON_IsNumber(spent) ? spent->valuedouble : 0);
-    v10_notify_push(I18N("market.buyMulti.title", "Buy Multiple"), I18N_F(text, "market.buyMulti.done", "Bought {0} for {1} KR", a, b), V10_NOTIFY_DEFAULT_MS);
+    v10_market_note(1, I18N_F(text, "market.buyMulti.done", "Bought {0} for {1} KR", a, b)); // deob-10.0.5.js:133996
     finish_ok();
 }
 

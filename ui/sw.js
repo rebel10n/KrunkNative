@@ -1,5 +1,5 @@
 // Krunker Box Office's service worker (web build): it shows the brain's Web Push messages as notifications.
-// Served at /sw.js (the page registers it from client/src/html/web_dom.c; the menu's Notifications switch is
+// Served at /sw.js (the page registers it from client/src/html/web_dom.c; the menu's Notifications panel is
 // client/src/ui/web_push.c). Glue only: no game or UI logic lives here.
 //
 // A push carries JSON {title, text, tag, url}; an empty or unreadable payload still shows a notification.

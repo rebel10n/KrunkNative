@@ -491,6 +491,8 @@ void html_clipboard_read(const HtmlClipboardFn fn, void *user) {
 
 int html_push_supported(void) { return 0; }
 
+int html_push_permission(void) { return 0; }
+
 void html_push_subscribe(const char *vapid_public_key_b64url, const HtmlPushFn fn, void *user) {
     (void) vapid_public_key_b64url;
     if (fn) fn(user, NULL);

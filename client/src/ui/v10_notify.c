@@ -1,4 +1,4 @@
-// Krunker v10.0.2's chat-column widgets (client/include/v10_notify.h): the notification center,
+// Krunker v10's chat-column widgets (client/include/v10_notify.h; checked against v10.0.5 for the center): the notification center,
 // the game announcement banner and the emoji panel, with their markup copied from v10's Svelte
 // templates (the svelte-nrigjp / -16a8kon / -1m80xxc / -13g6jqo classes of ui/css/svelte.css) and
 // driven over html_dom.h, so the native engine and the web DOM run the same code.
@@ -29,17 +29,17 @@
 //   Chat lines show every ":name:" as the emoji's 64 px <img>.
 //
 // KrunkNative differences (intentional):
-//  - text notifications are dismissed by a click on them (v10's only expire; its component ones,
-//    Register / Wild Offer / Survey, have their own close button), running the source's action
-//    first, if it has one. Items carry ids knNotif<N> / knNotifBar<N>,
-//    the panel knEmojiPanel / knEmoji<i> (no style; tests and the click handler).
+//  - items carry ids knNotif<N> / knNotifBar<N>, the panel knEmojiPanel / knEmoji<i> (no style; tests
+//    and the click handler).
 //  - v10 evaluates the emoji query on keyup; here once per frame when #chatInput's value or caret
 //    changed (the same result, up to a key's hold time earlier).
 //  - the chat key with the panel open and no emoji listed sends the message (v10 throws on
 //    filtered[selected][0] and the key does nothing: a line ending in ':' could not be sent).
-//  - the sources: the same as v10's (Register, Wild Offer and Survey). KrunkNative pushes no text
-//    notification here: its system messages are ui_notify.c's generic toast, a follow and a gift /
-//    sale are Inbox mail (windows[29], the unread count), a message is in the chat and the Friends tab.
+//  - the sources: v10's three components (deob-10.0.5.js:119524 Register, :128819 Wild Offer, :215361
+//    Survey; v10_misc_popups.c, v10_wild_offer.c), plus KrunkNative's crash-report notice (crash_report.c,
+//    a text item: the reporter is KrunkNative infrastructure). As in v10, a follow and a gift / sale are
+//    Inbox mail (windows[29], the unread count), a message is a chat line and the Friends tab's badge, and
+//    the bulk market tools' results go to the inventory's / exchange's own notification lists.
 #include <v10_notify.h>
 #include "klog.h"
 #include <html_ui.h>
@@ -72,8 +72,6 @@ typedef struct {
     double pinned_pct;  // scenario: the bar frozen at this width, no expiry (< 0 = live)
     int expired;        // .expired on the bar
     int mounted;        // the item is in the page
-    V10NotifyClick on_click;
-    void *user;
     char *html;         // a component notification's markup (v10_notify_push_html), else NULL
 } Notif;
 
@@ -89,7 +87,7 @@ static struct {
     double now;            // last HUD clock ms (ui_notify_tick), < 0 before the first frame
     unsigned page_serial;  // the page the items are mounted in
     int hidden;            // the center's .hidden as written (-1 unknown)
-    int handlers;          // knNotifyClick / selectEmoji added
+    int handlers;          // selectEmoji / knAnnounceQueue added
     // game announcement
     char announce[NET_GAME_ANNOUNCEMENT_TEXT];
     int ranked_on;         // the store's ranked-queue action
@@ -148,14 +146,13 @@ static void page_check(void) {
 static void item_html(StrBuf *sb, const Notif *n) {
     char item[32], bar[32];
     notif_ids(n, item, sizeof(item), bar, sizeof(bar));
-    // iîíííïï "<div class=notification-item><!> <!></div>" with iîiîiíì (text) and, duration > 0,
-    // iíîïíiï (the expiration bar); onclick / id: KrunkNative
-    if (n->html) { // a component (iíiìïïi({content}): Wild Offer, ...): its own controls, no click to dismiss
-        sb_appendf(sb, "<div class=\"notification-item svelte-nrigjp\" id=\"%s\">", item);
+    // "<div class=notification-item><!> <!></div>" (deob-10.0.5.js:202378-202379) with the text or the
+    // component and, duration > 0, the expiration bar; the id is KrunkNative's (tests, the bar's refresh)
+    sb_appendf(sb, "<div class=\"notification-item svelte-nrigjp\" id=\"%s\">", item);
+    if (n->html) { // a component (Register, Wild Offer, Survey): its own controls, if any
         sb_append(sb, n->html);
         sb_append(sb, " ");
     } else {
-        sb_appendf(sb, "<div class=\"notification-item svelte-nrigjp\" id=\"%s\" onclick=\"knNotifyClick(%d)\">", item, n->id);
         sb_append(sb, "<div class=\"text-notification svelte-nrigjp\"><h3 class=\"notification-title svelte-nrigjp\">");
         esc_into(sb, n->title);
         sb_append(sb, "</h3> <p class=\"notification-text svelte-nrigjp\">");
@@ -210,7 +207,7 @@ static void remove_at(const int i, const char *why) {
     N.count--;
 }
 
-int v10_notify_push_ex(const char *title, const char *content, const double duration_ms, const V10NotifyClick on_click, void *user) {
+int v10_notify_push(const char *title, const char *content, const double duration_ms) {
     if (N.count == NOTIFY_MAX) remove_at(0, "dropped"); // the oldest goes (v10's list is unbounded)
     Notif *n = &N.items[N.count++];
     memset(n, 0, sizeof(*n));
@@ -221,8 +218,6 @@ int v10_notify_push_ex(const char *title, const char *content, const double dura
     n->shown_at = N.now >= 0.0 ? N.now : -1.0; // Date.now()
     n->next_bar = n->shown_at + NOTIFY_BAR_MS;
     n->pinned_pct = -1.0;
-    n->on_click = on_click;
-    n->user = user;
     if (html_ui_available() && html_ui_is_ready()) {
         page_check();
         mount_items();
@@ -231,7 +226,7 @@ int v10_notify_push_ex(const char *title, const char *content, const double dura
 }
 
 int v10_notify_push_html(const char *title, const char *html, const double duration_ms) {
-    const int id = v10_notify_push_ex(title, "", duration_ms, NULL, NULL);
+    const int id = v10_notify_push(title, "", duration_ms);
     const int i = find(id);
     if (i < 0) return id;
     Notif *n = &N.items[i];
@@ -242,10 +237,6 @@ int v10_notify_push_html(const char *title, const char *html, const double durat
     n->html = strdup(html ? html : "");
     if (html_ui_available() && html_ui_is_ready()) mount_items();
     return id;
-}
-
-int v10_notify_push(const char *title, const char *content, const double duration_ms) {
-    return v10_notify_push_ex(title, content, duration_ms, NULL, NULL);
 }
 
 void v10_notify_dismiss(const int id) { remove_at(find(id), "dismiss"); }
@@ -268,16 +259,6 @@ int v10_notify_visible(void) {
     if (!html_ui_available() || !html_ui_is_ready()) return 0;
     const HtmlElem holder = html_dom_by_id("chatHolder");
     return holder && center_el() && html_dom_is_shown(holder) && !center_hidden();
-}
-
-static void notify_click(const int id) {
-    const int i = find(id);
-    if (i < 0) return;
-    const V10NotifyClick cb = N.items[i].on_click;
-    void *user = N.items[i].user;
-    KN_LOG_VERBOSE2("[notify] click #%d\n", id);
-    if (cb) cb(user);
-    v10_notify_dismiss(id); // the callback may have dismissed it already: unknown ids are ignored
 }
 
 static void tick_center(void) {
@@ -713,13 +694,6 @@ void v10_emoji_append_chat(char *buf, const size_t size, size_t *len, const char
 
 // ------------------------------------------------------------------ handlers, frame, scenario
 
-static int h_notify_click(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user;
-    (void) ev;
-    if (argc > 0 && args[0].kind == HTML_ARG_NUM) notify_click((int) args[0].num);
-    return 1;
-}
-
 static int h_select_emoji(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user;
     (void) ev;
@@ -738,7 +712,6 @@ static int h_announce_queue(void *user, const HtmlEvent *ev, const HtmlArg *args
 
 int v10_notify_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
-    if (!strcmp(name, "knNotifyClick")) return h_notify_click(NULL, ev, args, argc);
     if (!strcmp(name, "selectEmoji")) return h_select_emoji(NULL, ev, args, argc);
     if (!strcmp(name, "knAnnounceQueue")) return h_announce_queue(NULL, ev, args, argc);
     return -1;
@@ -749,7 +722,6 @@ void v10_notify_tick(const double now_ms) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     if (!N.handlers) {
         N.handlers = 1;
-        html_ui_add_handler("knNotifyClick", h_notify_click);
         html_ui_add_handler("selectEmoji", h_select_emoji);
         html_ui_add_handler("knAnnounceQueue", h_announce_queue);
     }
@@ -773,7 +745,6 @@ void v10_notify_scenario(const cJSON *state) {
     if (!cJSON_IsObject(state)) return;
     if (!N.handlers) {
         N.handlers = 1;
-        html_ui_add_handler("knNotifyClick", h_notify_click);
         html_ui_add_handler("selectEmoji", h_select_emoji);
         html_ui_add_handler("knAnnounceQueue", h_announce_queue);
     }

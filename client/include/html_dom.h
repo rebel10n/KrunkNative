@@ -219,6 +219,7 @@ void html_clipboard_read(HtmlClipboardFn fn, void *user);
 // fn runs at once with NULL, html_push_supported() is 0.
 typedef void (*HtmlPushFn)(void *user, const char *subscription_json);
 int  html_push_supported(void);                                        // 1: a secure context with the Push API
+int  html_push_permission(void);                                       // Notification.permission: 1 granted, -1 denied, 0 default
 void html_push_subscribe(const char *vapid_public_key_b64url, HtmlPushFn fn, void *user);
 void html_push_unsubscribe(HtmlPushFn fn, void *user);                 // fn gets the subscription it removed (NULL: none)
 

@@ -1563,7 +1563,12 @@ EM_JS(void, kn_js_push_subscribe, (void *req, const char *key), {
     }
     var b64 = UTF8ToString(key).replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
-    navigator.serviceWorker.register('sw.js').then(function () {
+    // Krunker v10 (deob-10.0.5.js:148642): Notification.requestPermission() first; not granted ends it
+    var asked = typeof Notification !== 'undefined' && Notification.requestPermission ? Notification.requestPermission() : Promise.resolve('granted');
+    Promise.resolve(asked).then(function (perm) {
+        if (perm !== 'granted') throw new Error('permission');
+        return navigator.serviceWorker.register('sw.js');
+    }).then(function () {
         return navigator.serviceWorker.ready;
     }).then(function (reg) {
         return reg.pushManager.getSubscription().then(function (sub) {
@@ -1604,7 +1609,14 @@ EM_JS(void, kn_js_push_unsubscribe, (void *req), {
     });
 });
 
+EM_JS(int, kn_js_push_permission, (void), {
+    if (typeof Notification === 'undefined') return 0;
+    return Notification.permission === 'granted' ? 1 : Notification.permission === 'denied' ? -1 : 0;
+});
+
 int html_push_supported(void) { return kn_js_push_supported(); }
+
+int html_push_permission(void) { return kn_js_push_permission(); }
 
 void html_push_subscribe(const char *vapid_public_key_b64url, const HtmlPushFn fn, void *user) {
     PushReq *req = calloc(1, sizeof(*req));

@@ -6,6 +6,9 @@
 //                   Backend: none. kn_brain has no survey route and the servers never send GAME_SURVEY, so it
 //                   shows only when v10_misc_survey_show() is called (e2e, scenarios); answering would be the
 //                   SURVEY_ANSWER rpc, which nothing answers, so the buttons stay inert.
+//   register        svelte-t1w66d (deob-10.0.5.js:119367-119384), the guest "Join Krunker!" notification item, pushed
+//                   45-60 s after start when signed out, at most once per 2 h (registerNotificationLastShown,
+//                   :119385, :119514-119529), 15 s with the expiration bar; no controls.
 //   mission briefing  svelte-1849bws (v10:118656-118790), the guest "Operation: Ghost Recruit" modal in the view
 //                   stack: 30 s timeout, KRUNKIES / XP earned (capacity warnings at 20 KR / 2500 XP), ABORT,
 //                   DEPLOY NOW (-> loginOrRegister(true)). v10.0.2's manager (v10:118812) has config.enabled
@@ -31,6 +34,8 @@
 // state.community.popups (v10_misc_popups_scenario).
 #include <v10_misc_popups.h>
 #include <v10_ui.h>
+#include <v10_notify.h>
+#include "klog.h"
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -247,6 +252,69 @@ static void survey_tick(void) {
         SV.expired = 1;
         html_dom_set_class(wrap, "expired", 1);
     }
+}
+
+// ================================================================== register notification
+
+// v10's guest prompt in the notification center (deob-10.0.5.js:119514-119529): one setTimeout(45 s + 15 s *
+// random) from the bundle's load. Then, when there is no account ($accountStore null, :27865) and the saved
+// registerNotificationLastShown (:119385) is absent or 2 h (0x6ddd00) old, it saves Date.now() and pushes
+// {title: "Register", content: the svelte-t1w66d component} for 15 s (0x3a98). The component (:119367-119384) has
+// no controls: the item expires with its bar.
+#define REG_SHOWN_KEY "registerNotificationLastShown"
+#define REG_DELAY_MS 45000.0      // 0xafc8
+#define REG_DELAY_RAND_MS 15000.0 // 0x3a98 * Math.random()
+#define REG_EVERY_MS 7200000.0    // 0x6ddd00
+#define REG_DURATION_MS 15000.0   // duration: 0x3a98
+
+static struct {
+    int armed;
+    int id;
+} RG;
+
+static double epoch_ms(void) { return now_s() * 1e3; }
+
+static char *register_html(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"register-notification svelte-t1w66d\"><div class=\"notification-header svelte-t1w66d\">"
+                   "<div class=\"notification-icon material-icons svelte-t1w66d\">group</div> "
+                   "<div class=\"notification-title svelte-t1w66d\">Join Krunker!</div></div> "
+                   "<div class=\"notification-content svelte-t1w66d\"><p class=\"notification-message svelte-t1w66d\">");
+    sb_append_esc(&sb, tr("generic.tips.register", "Register an account and level up to access all of krunkers features"));
+    sb_append(&sb, "</p> <div class=\"benefits-list svelte-t1w66d\">"
+                   "<div class=\"benefit-item svelte-t1w66d\"><span class=\"benefit-icon material-icons svelte-t1w66d\" style=\"color: #3b82f6;\">palette</span> "
+                   "<span class=\"benefit-text svelte-t1w66d\">14 Free Cosmetics</span></div> "
+                   "<div class=\"benefit-item svelte-t1w66d\"><span class=\"benefit-icon material-icons svelte-t1w66d\" style=\"color: #f59e0b;\">diamond</span> "
+                   "<span class=\"benefit-text svelte-t1w66d\">24h Premium Account</span></div> "
+                   "<div class=\"benefit-item svelte-t1w66d\"><span class=\"benefit-icon material-icons svelte-t1w66d\" style=\"color: #10b981;\">done</span> "
+                   "<span class=\"benefit-text svelte-t1w66d\">Access All Features</span></div></div></div></div>");
+    return sb_finish(&sb);
+}
+
+static void register_push(void) {
+    char *html = register_html();
+    RG.id = v10_notify_push_html("Register", html, REG_DURATION_MS);
+    free(html);
+    KN_LOG_DEBUG1("[notify] register prompt #%d\n", RG.id);
+}
+
+static void register_fire(void *user) {
+    (void) user;
+    if (G.scenario || active_account()) return; // iîîïiîï(accountStore) ||
+    char saved[32] = "";
+    const double last = html_storage_get(REG_SHOWN_KEY, saved, sizeof(saved)) >= 0 ? strtod(saved, NULL) : 0.0; // parseInt(.., 10)
+    const double now = epoch_ms();
+    if (last > 0.0 && now - last < REG_EVERY_MS) return;
+    char v[32];
+    snprintf(v, sizeof(v), "%.0f", now); // Date.now().toString()
+    html_storage_set(REG_SHOWN_KEY, v);
+    register_push();
+}
+
+static void register_arm(void) {
+    if (RG.armed) return; // once per run: v10's setTimeout runs once, when the bundle loads
+    RG.armed = 1;
+    html_timer_add(REG_DELAY_MS + REG_DELAY_RAND_MS * ((double) rand() / ((double) RAND_MAX + 1.0)), register_fire, NULL);
 }
 
 // ================================================================== mission briefing
@@ -1115,7 +1183,9 @@ static void close_all(void) {
 }
 
 static void open_by_name(const char *what) {
-    if (!strcmp(what, "survey")) {
+    if (!strcmp(what, "register")) {
+        register_push();
+    } else if (!strcmp(what, "survey")) {
         cJSON *s = cJSON_CreateObject();
         cJSON_AddStringToObject(s, "surveyId", "kn-demo");
         cJSON_AddStringToObject(s, "question", "How is your Krunker Box Office experience so far?");
@@ -1149,6 +1219,7 @@ void v10_misc_popups_setup(void) {
     }
     // GDC 2025 display mode: the intro for a guest (v10:222205 showingDisplayIntro, :223353 mount)
     if (!G.scenario && !active_account() && display_mode_kid()) kid_open();
+    if (!G.scenario) register_arm();
 }
 
 void v10_misc_popups_tick(void) {
@@ -1282,7 +1353,7 @@ int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
     return -1;
 }
 
-// state.community.popups: {open: "survey"|"hook"|"kid"|"lottery"|"premium"|"usernames", lottery: <the brain's
+// state.community.popups: {open: "register"|"survey"|"hook"|"kid"|"lottery"|"premium"|"usernames", lottery: <the brain's
 // answer>, survey: {...}, hook: {kr, score, secs}, premium: {shop, subscriptions, error}, usernames: {names}}
 void v10_misc_popups_scenario(const cJSON *p) {
     if (!cJSON_IsObject(p)) return;
@@ -1331,6 +1402,8 @@ void v10_misc_popups_scenario(const cJSON *p) {
         v10_view_push(un_html(), un_render, un_close, NULL);
     } else if (!strcmp(open, "lottery")) {
         lot_open(lot ? (int) v10_num(lot, "id", 3) : 3);
+    } else if (!strcmp(open, "register")) {
+        register_push();
     } else {
         open_by_name(open);
     }

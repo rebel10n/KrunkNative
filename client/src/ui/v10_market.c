@@ -1081,6 +1081,8 @@ static void notify(const int ok, const char *msg) {
     render_notes();
 }
 
+void v10_market_note(const int ok, const char *msg) { notify(ok, msg); }
+
 static void notes_html(StrBuf *sb) {
     sb_append(sb, "<div class=\"notification-list svelte-ekpmow\">");
     for (int i = 0; i < M.nnotes; i++) {

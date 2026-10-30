@@ -1,8 +1,9 @@
-// Web Push state of the web build's Notifications switch (web_push.h). The browser side is html_dom.h's
-// html_push_subscribe / html_push_unsubscribe (web_dom.c, ui/sw.js); the brain side is the three
-// /api/push routes (services/brain/push.c). Every answer carries the generation it was asked in: a later
-// set / refresh makes it stale, and a stale answer changes nothing (except removing a subscription that
-// the switch no longer wants).
+// Web Push stores of the menu's Notifications panel (web_push.h). The browser side is html_dom.h's
+// html_push_subscribe / html_push_unsubscribe / html_push_permission (web_dom.c, ui/sw.js); the brain side
+// is the three /api/push routes (services/brain/push.c). The flows are v10's subscribe / unsubscribe
+// (deob-10.0.5.js:148636-148707). Every answer carries the generation it was asked in: a later subscribe /
+// unsubscribe makes it stale, and a stale answer changes nothing (except removing a browser subscription
+// that is no longer wanted).
 #include <web_push.h>
 
 #include <stdio.h>
@@ -14,17 +15,17 @@
 #include <cJSON.h>
 #include <html_dom.h>
 
-#define WEB_PUSH_KEY "knWebPush"                 // "1" when the switch is on (a per-browser convenience)
+#define WEB_PUSH_KEY "knWebPush"                 // "1" after a successful subscribe (per browser)
 #define WEB_PUSH_VAPID_PATH "/api/push/vapid-key"
 #define WEB_PUSH_SUBSCRIBE_PATH "/api/push/subscribe"
 #define WEB_PUSH_UNSUBSCRIBE_PATH "/api/push/unsubscribe"
-
-enum { WP_OK, WP_NO_SERVER, WP_FAILED }; // the last answer that failed (WP_NO_SERVER: vapid-key 404)
+#define WEB_PUSH_SUBSCRIBE_FAILED "Failed to subscribe to notifications" // v10's subscribe catch (:148674)
 
 static struct {
     int loaded;
-    int on;
-    int failure;
+    int subscribed;
+    int loading;
+    const char *error;
     unsigned gen;
     WebPushChangedFn changed;
 } W;
@@ -41,12 +42,19 @@ static void load(void) {
     if (W.loaded) return;
     W.loaded = 1;
     char buf[8] = {0};
-    W.on = html_storage_get(WEB_PUSH_KEY, buf, sizeof(buf)) == 1 && buf[0] == '1';
+    W.subscribed = html_storage_get(WEB_PUSH_KEY, buf, sizeof(buf)) == 1 && buf[0] == '1';
 }
 
-static void store(const int on) {
-    W.on = on;
+static void set_subscribed(const int on) {
+    W.subscribed = on;
     html_storage_set(WEB_PUSH_KEY, on ? "1" : "0");
+}
+
+// v10's finally: loading off, the error (NULL: none), the panel redrawn
+static void finish(const char *error) {
+    W.loading = 0;
+    W.error = error;
+    changed();
 }
 
 // signed in to a Box Office account: the brain records subscriptions only for an account (a guest has none)
@@ -54,8 +62,14 @@ static int signed_in(void) {
     return backend_enabled() && active_account() && account_session_token()[0];
 }
 
+static PushOp *op_new(void) {
+    PushOp *op = calloc(1, sizeof(*op));
+    if (op) op->gen = W.gen;
+    return op;
+}
+
 // POST backend_url() + path with body (owned, freed here). 0 when it could not be sent.
-static int post(const char *path, cJSON *body, const BackendHttpFn fn) {
+static int post(const char *path, cJSON *body, const BackendHttpFn fn, void *user) {
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     if (!json) return 0;
@@ -64,28 +78,37 @@ static int post(const char *path, cJSON *body, const BackendHttpFn fn) {
     int sent = 0;
     if (url) {
         snprintf(url, n, "%s%s", backend_url(), path);
-        sent = backend_http_request("POST", url, json, fn, NULL);
+        sent = backend_http_request("POST", url, json, fn, user);
     }
     free(url);
     free(json);
     return sent;
 }
 
-static void on_unsubscribe_posted(void *user, int status, const char *body, size_t length) {
+static void on_brain_unsubscribed(void *user, int status, const char *body, size_t length) {
     (void) user;
+    (void) status; // the browser has let go already; a row that stays is replaced by the next subscribe
     (void) body;
     (void) length;
-    (void) status; // the browser has let go already; a brain row that stays is removed on the next off
 }
 
-static void on_subscribe_posted(void *user, int status, const char *body, size_t length) {
-    (void) user;
-    (void) body;
-    (void) length;
-    if (status < 200 || status >= 300) {
-        W.failure = WP_FAILED;
-        changed();
+// the browser removed its subscription (json, NULL: there was none): the brain forgets that endpoint too
+static void forget(const char *json) {
+    if (!json || !signed_in()) return;
+    cJSON *sub = cJSON_Parse(json);
+    const cJSON *endpoint = sub ? cJSON_GetObjectItemCaseSensitive(sub, "endpoint") : NULL;
+    if (cJSON_IsString(endpoint)) {
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddStringToObject(body, "token", account_session_token());
+        cJSON_AddStringToObject(body, "endpoint", endpoint->valuestring);
+        post(WEB_PUSH_UNSUBSCRIBE_PATH, body, on_brain_unsubscribed, NULL);
     }
+    cJSON_Delete(sub);
+}
+
+static void on_dropped(void *user, const char *json) {
+    (void) user;
+    (void) json; // a subscription the brain did not take: nothing to forget there
 }
 
 // the subscription JSON (from the browser) as the brain's body: {token, endpoint, keys: {p256dh, auth}}
@@ -109,124 +132,116 @@ static cJSON *subscribe_body(const char *json, const char *token) {
     return body;
 }
 
-// the browser removed its subscription (json, NULL: there was none): the brain forgets that endpoint too
-static void on_unsubscribed(void *user, const char *json) {
-    (void) user;
-    if (!json || !signed_in()) return;
-    cJSON *sub = cJSON_Parse(json);
-    const cJSON *endpoint = sub ? cJSON_GetObjectItemCaseSensitive(sub, "endpoint") : NULL;
-    if (cJSON_IsString(endpoint)) {
-        cJSON *body = cJSON_CreateObject();
-        cJSON_AddStringToObject(body, "token", account_session_token());
-        cJSON_AddStringToObject(body, "endpoint", endpoint->valuestring);
-        post(WEB_PUSH_UNSUBSCRIBE_PATH, body, on_unsubscribe_posted);
-    }
-    cJSON_Delete(sub);
-}
-
-// the browser's subscription (json, NULL: refused, unsupported or failed)
-static void on_subscribed(void *user, const char *json) {
+// the brain's answer to the subscription: success subscribes; otherwise v10 lets the browser's subscription go
+// and ends without an error (:148665-148671)
+static void on_brain_subscribed(void *user, int status, const char *body, size_t length) {
     PushOp *op = user;
+    (void) body;
+    (void) length;
     const int current = op->gen == W.gen;
     free(op);
-    if (!current) {
-        // turned off since: the browser's subscription must not outlive the switch
-        if (json && !W.on) html_push_unsubscribe(on_unsubscribed, NULL);
+    if (!current) return;
+    if (status >= 200 && status < 300) {
+        set_subscribed(1);
+    } else {
+        html_push_unsubscribe(on_dropped, NULL);
+    }
+    finish(NULL);
+}
+
+// the browser's subscription (json, NULL: permission not granted, unsupported or failed)
+static void on_subscribed(void *user, const char *json) {
+    PushOp *op = user;
+    if (op->gen != W.gen) {
+        free(op);
+        if (json && !W.subscribed) html_push_unsubscribe(on_dropped, NULL); // unwanted since
         return;
     }
     if (!json) {
-        W.failure = WP_FAILED;
-        store(0);
-        changed();
+        free(op);
+        // v10: a permission that is not granted ends the subscribe without an error (:148643-148649); any other
+        // failure is the catch's
+        finish(html_push_permission() == 1 ? WEB_PUSH_SUBSCRIBE_FAILED : NULL);
         return;
     }
-    W.failure = WP_OK;
-    if (signed_in()) {
-        cJSON *body = subscribe_body(json, account_session_token());
-        if (body && !post(WEB_PUSH_SUBSCRIBE_PATH, body, on_subscribe_posted)) {
-            W.failure = WP_FAILED;
-        }
+    cJSON *body = signed_in() ? subscribe_body(json, account_session_token()) : NULL;
+    if (!body || !post(WEB_PUSH_SUBSCRIBE_PATH, body, on_brain_subscribed, op)) {
+        // a guest (the brain records none) or a request that could not be sent: v10's refused subscription
+        free(op);
+        html_push_unsubscribe(on_dropped, NULL);
+        finish(NULL);
     }
-    changed();
 }
 
-// the brain's VAPID public key: the browser subscribes with it
+// the brain's VAPID public key: the browser subscribes with it (v10 has it in its config)
 static void on_vapid_key(void *user, int status, const char *body, size_t length) {
     PushOp *op = user;
     if (op->gen != W.gen) {
         free(op);
         return;
     }
-    if (status == 404) { // no VAPID key on this server
-        W.failure = WP_NO_SERVER;
-        store(0);
-        free(op);
-        changed();
-        return;
-    }
     cJSON *o = status == 200 && body && length ? cJSON_ParseWithLength(body, length) : NULL;
     const cJSON *key = o ? cJSON_GetObjectItemCaseSensitive(o, "publicKey") : NULL;
-    if (!cJSON_IsString(key) || !key->valuestring[0]) {
+    if (!cJSON_IsString(key) || !key->valuestring[0]) { // no key (404: none on this server): subscribing throws
         cJSON_Delete(o);
-        W.failure = WP_FAILED;
-        store(0);
         free(op);
-        changed();
+        finish(WEB_PUSH_SUBSCRIBE_FAILED);
         return;
     }
-    html_push_subscribe(key->valuestring, on_subscribed, op); // exactly one answer: on_subscribed frees op
+    html_push_subscribe(key->valuestring, on_subscribed, op); // exactly one answer: on_subscribed owns op
     cJSON_Delete(o);
-}
-
-// (a new generation) fetch the key, then subscribe; every older answer is stale from here on
-static void subscribe_now(void) {
-    PushOp *op = calloc(1, sizeof(*op));
-    if (!op) return;
-    op->gen = ++W.gen;
-    if (!backend_http_get(WEB_PUSH_VAPID_PATH, on_vapid_key, op)) {
-        free(op);
-        W.failure = WP_FAILED;
-        store(0);
-        changed();
-    }
 }
 
 int web_push_supported(void) { return html_push_supported(); }
 
-int web_push_on(void) {
+int web_push_denied(void) { return web_push_supported() && html_push_permission() < 0; }
+
+int web_push_subscribed(void) {
     load();
-    return web_push_supported() && W.on;
+    return web_push_supported() && W.subscribed;
 }
 
-void web_push_set(const int on) {
-    if (!web_push_supported()) return;
+int web_push_loading(void) { return W.loading; }
+
+const char *web_push_error(void) { return W.error; }
+
+void web_push_subscribe(void) {
+    if (!web_push_supported() || W.loading) return;
     load();
-    W.gen++; // whatever was in flight for the other state is stale now
-    W.failure = WP_OK;
-    if (on) {
-        store(1);
-        subscribe_now();
-        changed();
-    } else {
-        store(0);
-        html_push_unsubscribe(on_unsubscribed, NULL);
-        changed();
+    W.gen++; // whatever was in flight is stale now
+    W.loading = 1;
+    W.error = NULL;
+    changed();
+    PushOp *op = op_new();
+    if (!op || !backend_http_get(WEB_PUSH_VAPID_PATH, on_vapid_key, op)) {
+        free(op);
+        finish(WEB_PUSH_SUBSCRIBE_FAILED);
     }
 }
 
-void web_push_refresh(void) {
-    if (!web_push_on()) return;
-    subscribe_now();
+static void on_unsubscribed(void *user, const char *json) {
+    PushOp *op = user;
+    const int current = op->gen == W.gen;
+    free(op);
+    forget(json);
+    if (!current) return;
+    set_subscribed(0);
+    finish(NULL);
 }
 
-const char *web_push_status(void) {
-    if (!web_push_supported()) return "Push notifications are not supported in your browser.";
+void web_push_unsubscribe(void) {
+    if (!web_push_supported() || W.loading) return;
     load();
-    if (W.failure == WP_NO_SERVER) return "Push is not set up on this server";
-    if (W.failure == WP_FAILED) return "Push notifications could not be turned on in this browser.";
-    if (!W.on) return "Push notifications are off";
-    if (!signed_in()) return "Sign in to get push notifications";
-    return "Push notifications are on in this browser";
+    W.gen++;
+    W.loading = 1;
+    W.error = NULL;
+    changed();
+    PushOp *op = op_new();
+    if (!op) {
+        finish("Failed to unsubscribe from notifications"); // v10's unsubscribe catch (:148701)
+        return;
+    }
+    html_push_unsubscribe(on_unsubscribed, op);
 }
 
 void web_push_set_listener(const WebPushChangedFn fn) { W.changed = fn; }

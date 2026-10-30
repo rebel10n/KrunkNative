@@ -12,3 +12,6 @@ int  v10_wallet_key(int key);                  // Escape with the modal up: the 
 void v10_wallet_tick(void);                    // per menu frame: the account's funds / skins changed, redraw
 void v10_wallet_account_changed(void);         // the active account changed: the modal leaves the stack
 void v10_wallet_scenario(const cJSON *state);  // --render-scenario state.wallet: {open: true}
+// the inventory's notification list (svelte-ekpmow, deob-10.0.5.js:130812-130832): ok = success, else error;
+// each entry goes after 4 s (the quick-sell results, :147226-147236, :147369-147370)
+void v10_wallet_note(int ok, const char *msg);

@@ -19,16 +19,12 @@
 #define V10_NOTIFY_DEFAULT_MS 4000.0 // iíiìïïi: options.duration ?? 4000
 
 // ---- notification center
-// A click on a text notification (KrunkNative: v10's text ones have no control, its component
-// ones a close button). The notification is dismissed after the callback.
-typedef void (*V10NotifyClick)(void *user);
-// A text notification (title + content, both plain text). duration_ms <= 0: no countdown bar and
-// no expiry (v10: duration > 0 shows the bar and arms the removal). Returns its id (> 0).
+// A text notification (title + content, both plain text; no control, as v10's). duration_ms <= 0: no
+// countdown bar and no expiry (v10: duration > 0 shows the bar and arms the removal). Returns its id (> 0).
 int v10_notify_push(const char *title, const char *content, double duration_ms);
-int v10_notify_push_ex(const char *title, const char *content, double duration_ms, V10NotifyClick on_click, void *user);
-// A component notification (v10 iíiìïïi({title, content: Component, props})): `html` is the
-// component's markup inside the .notification-item (it brings its own close control, which calls
-// v10_notify_dismiss); title is for the log. Returns its id.
+// A component notification (v10 push({title, content: Component, props}), deob-10.0.5.js:119343):
+// `html` is the component's markup inside the .notification-item (its controls, if any, call
+// v10_notify_dismiss: v10's onDismiss); title is for the log. Returns its id.
 int v10_notify_push_html(const char *title, const char *html, double duration_ms);
 void v10_notify_dismiss(int id); // iïïiïíï(id); unknown ids are ignored
 void v10_notify_clear(void);
@@ -61,5 +57,5 @@ void v10_notify_tick(double now_ms); // every frame (ui_notify_tick): bars, expi
 // --render-scenario state.notify: {notifications: [{title, text, duration, remainingPct}],
 // announcement: "message", emoji: {query, selected}, chat: "text", tip: {...}} (ui_scenario.c)
 void v10_notify_scenario(const cJSON *state);
-// Inline handlers of the widgets (knNotifyClick, selectEmoji); -1 = not ours.
+// Inline handlers of the widgets (selectEmoji, knAnnounceQueue); -1 = not ours.
 int v10_notify_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

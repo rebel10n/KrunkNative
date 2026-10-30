@@ -48,7 +48,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <account_split.h> // the krunker.io identity a streams read may carry (account_split.h)
-#include <web_push.h> // the Notifications switch (Web Push, web_push.c)
+#include <web_push.h> // the Notifications panel's Web Push stores (web_push.c)
 #include <i18n.h>
 #include <krunker_account.h>
 #include <krunker_net.h>
@@ -170,6 +170,8 @@ static void set_display(HtmlElem el, const char *value) {
 // (163104-163112, 163665-163730).
 // Only where nothing set one yet: the other v10 areas (news, rewards, market, social, ...) wire
 // their entry points with the same v10 handler names, so whichever runs first is the same call.
+static void notifications_redraw(void);
+
 static void wire(HtmlElem el, const char *onclick) {
     char have[8] = "";
     if (!el || html_dom_get_attr(el, "onclick", have, sizeof(have)) > 0) return;
@@ -1208,7 +1210,9 @@ static void header_setup(void) {
             wire(items[i], "playSelect(0.1),showMoreKrunker()");
         }
     }
-    wire(html_dom_query(0, "#playerHeaderEl .webpush-container"), "knV10Notifications()");
+    wire(html_dom_query(0, "#playerHeaderEl .webpush-container"), "knV10Notifications(0)");
+    web_push_set_listener(notifications_redraw);
+    notifications_redraw(); // the header as v10 mounts it (the bell only for a subscribed browser)
 }
 
 // v10's INIT (g:219154-219156): inviteButton's buttonD (greyed, no pointer events) in a ranked match. menuBtnHost gets
@@ -1296,27 +1300,61 @@ static void more_krunker(void) {
     free(html);
 }
 
-// The Notifications toggle (webpush-container, _52289). Expanded, it shows the Notifications switch and what
-// the switch can do on this system. Each expand writes the content again, so it always shows the stored state.
-// The Web Push switch (web_push.c: the browser subscription, recorded with the brain for a signed-in account);
-// a browser without the Push API, and the native build (no Web Push), keep v10's "not supported" line.
-static void notifications_render(const HtmlElem content) {
-    int on;
-    char caption[256];
-    if (!web_push_supported()) {
-        html_dom_set_html(content, "<div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
-                                   "Push notifications are not supported in your browser.</p></div>");
-        return;
-    }
-    on = web_push_on();
-    snprintf(caption, sizeof(caption), "%s", web_push_status());
+// The Notifications panel: v10's webpush component (svelte-5kyah8, deob-10.0.5.js:146795-146806, its logic
+// :148622-148860) in #playerHeaderEl's .webpush-container, over web_push.c's stores. The header shows the title
+// and the details toggle (\u25b6 / \u25bc) unless the player is subscribed and the panel is collapsed (sub-not-expanded:
+// the bell only). Expanded, .webpush-content shows, in v10's order: not supported (native builds: no Push API);
+// else the controls: blocked (permission denied), Enable Notifications ("Subscribing..." while loading) with
+// v10's description, or Notifications enabled. with Disable ("Unsubscribing..."); then the error, if any.
+// A click on the header toggles; a click elsewhere on the collapsed container expands it (both stop there).
+static void notifications_header(const HtmlElem box) {
+    const int sub_collapsed = web_push_subscribed() && !V.notif_open; // isSubscribed && !expanded
+    html_dom_set_class(box, "not-expanded", !V.notif_open);
+    html_dom_set_class(box, "sub-not-expanded", sub_collapsed);
+    HtmlElem header = html_dom_query(box, ".webpush-header");
+    if (!header) return;
     StrBuf sb = {0};
-    sb_append(&sb, "<div class=\"webpush-message svelte-5kyah8\"><label class=\"switch\" style=\"margin-right:10px\">"
-                   "<input type=\"checkbox\" id=\"knDesktopNotify\" onclick=\"knV10DesktopNotify()\"");
-    if (on) sb_append(&sb, " checked=\"\"");
-    sb_append(&sb, "><span class=\"slider\"><span class=\"grooves\"></span></span></label><p class=\"svelte-5kyah8\">");
-    sb_append_esc(&sb, caption);
-    sb_append(&sb, "</p></div>");
+    sb_append(&sb, "<span class=\"webpush-title svelte-5kyah8\"><span class=\"material-icons bell-icon svelte-5kyah8\">notifications</span> ");
+    if (!sub_collapsed) sb_append(&sb, "Notifications");
+    sb_append(&sb, "</span> ");
+    if (!sub_collapsed)
+        sb_appendf(&sb, "<button class=\"webpush-details-toggle svelte-5kyah8\">%s</button>", V.notif_open ? "\xE2\x96\xBC" : "\xE2\x96\xB6");
+    char *html = sb_finish(&sb);
+    html_dom_set_html(header, html);
+    free(html);
+    html_dom_set_attr(header, "onclick", "knV10Notifications(1)");
+}
+
+static void notifications_render(const HtmlElem content) {
+    StrBuf sb = {0};
+    if (!web_push_supported()) {
+        sb_append(&sb, "<div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
+                       "Push notifications are not supported in your browser.</p></div>");
+    } else {
+        const int loading = web_push_loading();
+        sb_append(&sb, "<div class=\"webpush-controls svelte-5kyah8\">");
+        if (web_push_denied()) {
+            sb_append(&sb, "<div class=\"webpush-message blocked svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
+                           "To enable notifications, go to browser settings.</p></div>");
+        } else if (!web_push_subscribed()) { // supported && !subscribed && permission !== "denied"
+            sb_appendf(&sb, "<button class=\"webpush-btn subscribe svelte-5kyah8\" onclick=\"knV10WebPush(1)\"%s>%s</button> "
+                            "<p class=\"webpush-description svelte-5kyah8\">Get notified about game updates, events, and promotions!</p>",
+                       loading ? " disabled=\"\"" : "", loading ? "Subscribing..." : "Enable Notifications");
+        } else {
+            sb_appendf(&sb, "<div class=\"webpush-subscribed svelte-5kyah8\"><p class=\"webpush-status svelte-5kyah8\">"
+                            "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"checkmark-icon svelte-5kyah8\" viewBox=\"0 0 24 24\" fill=\"currentColor\">"
+                            "<path d=\"M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z\" class=\"svelte-5kyah8\"></path></svg> Notifications enabled.</p> "
+                            "<button class=\"webpush-btn unsubscribe svelte-5kyah8\" onclick=\"knV10WebPush(0)\"%s>%s</button></div>",
+                       loading ? " disabled=\"\"" : "", loading ? "Unsubscribing..." : "Disable");
+        }
+        sb_append(&sb, "</div>");
+    }
+    const char *error = web_push_error();
+    if (error) {
+        sb_append(&sb, " <div class=\"webpush-error svelte-5kyah8\"><p class=\"svelte-5kyah8\">");
+        sb_append_esc(&sb, error);
+        sb_append(&sb, "</p></div>");
+    }
     char *html = sb_finish(&sb);
     html_dom_set_html(content, html);
     free(html);
@@ -1331,39 +1369,23 @@ static HtmlElem notifications_content(const HtmlElem box) {
     return content;
 }
 
-#ifdef __EMSCRIPTEN__
-// A Web Push answer changed the caption: redraw it while the panel is open.
+// the header, and the content while expanded (a store changed or the panel opened / closed)
 static void notifications_redraw(void) {
     HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
-    if (!box || !V.notif_open) return;
-    notifications_render(notifications_content(box));
-}
-#endif
-
-static void notifications_toggle(void) {
-    HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
     if (!box) return;
-    V.notif_open = !V.notif_open;
-    html_dom_set_class(box, "not-expanded", !V.notif_open);
-    HtmlElem toggle = html_dom_query(box, ".webpush-details-toggle");
-    if (toggle) html_dom_set_text(toggle, V.notif_open ? "\xE2\x96\xBC" : "\xE2\x96\xB6"); // ▼ / ▶
+    notifications_header(box);
     HtmlElem content = notifications_content(box);
     if (V.notif_open) notifications_render(content);
     set_display(content, V.notif_open ? "" : "none");
-#ifdef __EMSCRIPTEN__
-    if (V.notif_open) {
-        web_push_set_listener(notifications_redraw); // an answer from the brain / the browser redraws the caption
-        web_push_refresh();                          // records the subscription again (a sign-in since the switch)
-    }
-#endif
 }
 
-// The switch (knV10DesktopNotify): flips the Web Push choice and writes the caption again.
-static void notifications_switch(void) {
-    web_push_set(!web_push_on());
-    HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
-    HtmlElem content = box ? notifications_content(box) : 0;
-    if (content) notifications_render(content);
+// knV10Notifications(1): the header's click (expanded = !expanded); knV10Notifications(0): the container's
+// (expands a collapsed panel only)
+static void notifications_click(const int header) {
+    html_ui_stop_propagation();
+    if (!header && V.notif_open) return;
+    V.notif_open = !V.notif_open;
+    notifications_redraw();
 }
 
 // backToOrigin(false, {exclude: ?game}): Quick Match. A new matchmaker seek that leaves this lobby
@@ -1390,11 +1412,13 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         return 1;
     }
     if (!strcmp(name, "knV10Notifications")) {
-        notifications_toggle();
+        notifications_click(argc > 0 && args[0].kind == HTML_ARG_NUM && args[0].num != 0.0);
         return 1;
     }
-    if (!strcmp(name, "knV10DesktopNotify")) {
-        notifications_switch();
+    if (!strcmp(name, "knV10WebPush")) { // Enable Notifications (1) / Disable (0)
+        html_ui_stop_propagation();
+        if (argc > 0 && args[0].kind == HTML_ARG_NUM && args[0].num != 0.0) web_push_subscribe();
+        else web_push_unsubscribe();
         return 1;
     }
     if (!strcmp(name, "knV10StreamsMode")) { // More / Less: v10's toggleViewMode (small <-> expanded)

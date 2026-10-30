@@ -360,7 +360,8 @@ static int64_t bus_account(void) {
 
 // v10 _34422: staff clan tags are gold
 static const char *clan_color(const char *tag, const char *fallback) {
-    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl"};
+    // deob-10.0.5.js:103946 (10.0.5 adds "nv")
+    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl", "nv"};
     char low[16];
     size_t i = 0;
     for (; tag && tag[i] && i + 1 < sizeof(low); i++) low[i] = (char) (tag[i] >= 'A' && tag[i] <= 'Z' ? tag[i] + 32 : tag[i]);

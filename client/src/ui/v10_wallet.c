@@ -40,6 +40,7 @@
 #include <i18n.h>
 #include <html_ui.h>
 #include "../viewer/viewer_store.h"
+#include <stdint.h> // intptr_t: a note's id as the timer's user
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +59,16 @@ static struct {
     int skins, copies, id;
     double kr, junk, rp;
 } W;
+
+// the inventory's notification list (v10_wallet_note): v10's notifications store of the inventory, each removed
+// 4 s (0xfa0) after it was added (deob-10.0.5.js:147225-147236)
+#define WALLET_NOTE_MS 4000.0
+#define WALLET_NOTE_MAX 8
+static struct {
+    int id, ok;
+    char msg[200];
+} W_notes[WALLET_NOTE_MAX];
+static int W_nnotes, W_note_seq;
 
 // the krunker.io side (kio_inventory.h): the select-mode picks, the bulk sell in flight, the load's error text
 static MarketPicks W_picks;
@@ -434,6 +445,54 @@ static void grid(StrBuf *sb, const AccountInfo *a) {
 }
 
 // the whole modal (.wallet-root) for the active account
+// svelte-ekpmow (deob-10.0.5.js:130812-130832): "notification-item <type>", check_circle / error, the message
+static void notes_html(StrBuf *sb) {
+    sb_append(sb, "<div class=\"notification-list svelte-ekpmow\" id=\"knV10WalletNotes\">");
+    for (int i = 0; i < W_nnotes; i++) {
+        sb_appendf(sb, "<div class=\"notification-item %s svelte-ekpmow\"><i class=\"material-icons notification-icon svelte-ekpmow\">%s</i> "
+                       "<span class=\"notification-message svelte-ekpmow\">",
+                   W_notes[i].ok ? "success" : "error", W_notes[i].ok ? "check_circle" : "error");
+        sb_append_esc(sb, W_notes[i].msg);
+        sb_append(sb, "</span></div>");
+    }
+    sb_append(sb, "</div>");
+}
+
+static void render_notes(void) {
+    const HtmlElem old = html_dom_by_id("knV10WalletNotes");
+    if (!old) return;
+    StrBuf sb = {0};
+    notes_html(&sb);
+    char *html = sb_finish(&sb);
+    html_dom_insert_html(old, HTML_INSERT_BEFORE_BEGIN, html);
+    html_dom_remove(old);
+    free(html);
+}
+
+static void note_expire(void *user) {
+    const int id = (int) (intptr_t) user;
+    for (int i = 0; i < W_nnotes; i++) {
+        if (W_notes[i].id != id) continue;
+        memmove(&W_notes[i], &W_notes[i + 1], sizeof(W_notes[0]) * (size_t) (W_nnotes - i - 1));
+        W_nnotes--;
+        break;
+    }
+    render_notes();
+}
+
+void v10_wallet_note(const int ok, const char *msg) {
+    if (W_nnotes == WALLET_NOTE_MAX) { // v10's list is unbounded; the oldest goes here
+        memmove(&W_notes[0], &W_notes[1], sizeof(W_notes[0]) * (size_t) (W_nnotes - 1));
+        W_nnotes--;
+    }
+    W_notes[W_nnotes].id = ++W_note_seq;
+    W_notes[W_nnotes].ok = ok != 0;
+    snprintf(W_notes[W_nnotes].msg, sizeof(W_notes[0].msg), "%s", msg ? msg : "");
+    html_timer_add(WALLET_NOTE_MS, note_expire, (void *) (intptr_t) W_notes[W_nnotes].id);
+    W_nnotes++;
+    render_notes();
+}
+
 static char *markup(void) {
     const AccountInfo *a = account();
     StrBuf sb = {0};
@@ -449,7 +508,9 @@ static char *markup(void) {
     sb_append(&sb, "<div class=\"wallet-body svelte-l0gwpc\">");
     currencies(&sb, a);
     grid(&sb, a);
-    sb_append(&sb, "</div></div>");
+    sb_append(&sb, "</div>");
+    notes_html(&sb);
+    sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
 
