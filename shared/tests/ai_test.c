@@ -374,6 +374,85 @@ static void test_sync(Game *game) {
     game->player_count = 0;
 }
 
+// A player sees an AI only once it was sent the AI's "aai": AI.sync keeps sentTo, an unbounded list of the player
+// ids it went to (deob-10.0.5.js:183213). KN's sent_to held 32 uids and never forgot one, so on a busy server a
+// long-lived AI (a map NPC, a boss) filled up with players who had left: every later player got the "aai" and then
+// an "ai" list without the AI, every tick (hidden), and never saw it. A 40-player lobby (maxPS) overflowed it too.
+static int synced_to(const int uid, const int sid) {
+    for (int i = 0; i < g_sent_count; i++) {
+        if (g_sent[i].uid != uid || g_sent[i].type != NET_PACKET_AI_SYNC_V7) continue;
+        NetAISyncV7Packet s;
+        memset(&s, 0, sizeof(s));
+        memcpy(&s, g_sent[i].payload, g_sent[i].length);
+        for (int k = 0; k < s.count; k++) if (s.entries[k].sid == sid) return 1;
+    }
+    return 0;
+}
+
+static void drop_player(Game *game, Player *p) {
+    game_player_left(game, p);
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i] != p) continue;
+        game->players[i] = game->players[--game->player_count];
+        break;
+    }
+    free(p->loadout); // as the server's LEAVE frees it
+    free(p->ammo);
+    free(p->reloads);
+    free(p->input_queue);
+    free(p);
+}
+
+static void test_sync_churn(Game *game) {
+    printf("Running AI sync churn test...\n");
+    game->is_local = 0;
+    static int server;
+    game->server = &server;
+    GameAI *ai = &game->ai->ais[0];
+    const int sid = ai->sid;
+    const vec3 at = ai->position;
+    for (int i = 0; i < game->ai->count; i++) game->ai->ais[i].sent_count = 0;
+
+    // 40 players come near the AI one after another, see it, and leave
+    for (int uid = 100; uid < 140; uid++) {
+        Player *p = add_player(game, uid, "Passer");
+        place(p, at.x, at.y, at.z);
+        g_sent_count = 0;
+        game_ai_sync(game);
+        game_ai_sync(game);
+        CHECK(synced_to(uid, sid), "player %d (one of 40 passing through) sees the AI", uid);
+        drop_player(game, p);
+    }
+    // a newcomer after them
+    Player *late = add_player(game, 200, "Late");
+    place(late, at.x, at.y, at.z);
+    g_sent_count = 0;
+    game_ai_sync(game);
+    CHECK(count_sent(NET_PACKET_AI_ADD_V7, 200) >= 1, "the newcomer gets the AI's aai");
+    g_sent_count = 0;
+    game_ai_sync(game);
+    CHECK(count_sent(NET_PACKET_AI_ADD_V7, 200) == 0 && synced_to(200, sid), "...once, then the AI is in its ai list");
+    drop_player(game, late);
+
+    // a full 40-player lobby (maxPS) around the AI: every one of them sees it
+    Player *crowd[40];
+    for (int i = 0; i < 40; i++) {
+        crowd[i] = add_player(game, 300 + i, "Crowd");
+        place(crowd[i], at.x, at.y, at.z);
+    }
+    g_sent_count = 0;
+    game_ai_sync(game);
+    g_sent_count = 0;
+    game_ai_sync(game);
+    int seen = 0;
+    for (int i = 0; i < 40; i++) seen += synced_to(300 + i, sid);
+    CHECK(seen == 40, "all 40 players of a full lobby see the AI (%d)", seen);
+    for (int i = 0; i < 40; i++) drop_player(game, crowd[i]);
+
+    game->server = NULL;
+    game->is_local = 1;
+}
+
 // ---------------------------------------------------------------- chat commands
 
 static int peer_count(void *user) { (void) user; return 1; }
@@ -740,6 +819,7 @@ int main(void) {
     game_init(&game, 1, -1, 1);
     test_behaviour(&game);
     test_sync(&game);
+    test_sync_churn(&game);
     test_chat(&game);
     test_traitor(&game);
 

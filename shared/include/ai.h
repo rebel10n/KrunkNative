@@ -22,7 +22,7 @@
 #define GAME_AI_ASSET_SIZE 16         // "aid" with its flag letters ("46544e", "50572q")
 #define GAME_AI_ANIM_SIZE 33          // startAnim (<= 32) / clip names
 #define GAME_AI_PATH_MAX 32           // pathInput node ids ("phi" comma list)
-#define GAME_AI_SENT_MAX 32           // AI.sentTo (player uids)
+#define GAME_AI_SENT_MAX 64           // AI.sentTo (player uids): above a 40-player lobby (maxPS); departed uids are pruned
 #define GAME_AI_IGNORE_MAX 8          // ignoreList (ignoreOnStuck) entries
 #define GAME_AI_DMG_MAX 64            // dmgList (player uids) kept per AI
 #define GAME_AI_PROJECTILE_KINDS 5    // v3.1.1 projectiles.stored (0 = thrown knife, 1..4 = AI shots)

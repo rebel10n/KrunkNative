@@ -2335,9 +2335,20 @@ static void ai_sync_entry_v7(const GameAI *ai, NetAISyncV7Entry *out) {
     out->team = (int16_t) ai->team;
 }
 
-static int ai_sent_to(GameAI *ai, const int uid) {
+// AI.sync's sentTo (deob-10.0.5.js:183213): 1 when the player already had the AI's "aai", else records it (the caller
+// sends the "aai" now). v10's list is unbounded; KN's holds GAME_AI_SENT_MAX uids, so a full list first forgets the
+// players who have left (uids are connection ids, never reused). Not recording a player would hide the AI from it
+// for good: its "aai" every tick, each followed by an "ai" list without the AI (syncAll hides what is not listed).
+static int ai_sent_to(Game *game, GameAI *ai, const int uid) {
     for (int i = 0; i < ai->sent_count; i++) {
         if (ai->sent_to[i] == uid) return 1;
+    }
+    if (ai->sent_count >= GAME_AI_SENT_MAX) {
+        int kept = 0;
+        for (int i = 0; i < ai->sent_count; i++) {
+            if (game_find_player(game, ai->sent_to[i])) ai->sent_to[kept++] = ai->sent_to[i];
+        }
+        ai->sent_count = kept;
     }
     if (ai->sent_count < GAME_AI_SENT_MAX) ai->sent_to[ai->sent_count++] = uid;
     return 0;
@@ -2413,7 +2424,7 @@ void game_ai_sync(Game *game) {
             GameAI *ai = &list->ais[i];
             // alwaysSync (AI.spawn, v10.0.3) skips the range: the AI is synced to every player
             if (!ai->active || ai->removed || (!ai->data.always_sync && ai_d3d(player->position, ai->position) > GAME_AI_SYNC_RANGE)) continue;
-            if (ai_sent_to(ai, player->uid)) {
+            if (ai_sent_to(game, ai, player->uid)) {
                 ai_sync_entry(ai, &entries[count]);
                 ai_sync_entry_v7(ai, &entries7[count]);
                 count++;
