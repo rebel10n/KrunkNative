@@ -3,6 +3,21 @@
  - read by client/src/ui/v10_news.c, in Krunker's docs/versions.txt format: "== UPDATE x.y.z ==" starts an update,
  - "* Name" a group, "- text" a change, "@url" an image; the first update is the current version
 
+ == UPDATE 10.0.5 ==
+ * General
+ - Added the 71 November spin items to the item list (they join the spins when Krunker's November spins start)
+ - Added the 4 Ametwista Twitch drops with their custom shader, and the Deathweaver item
+ - Added a Register reminder for guests, as on Krunker
+ * Notifications
+ - The Notifications panel now matches Krunker's
+ - Follows and messages no longer pop up desktop notifications; they stay in the Inbox and the chat
+ - Quick-sell, List and Buy multiple results show in their own windows, as on Krunker
+ * Editor
+ - Added a Collision Size field for custom assets, with Fit Collision To Model
+ - Added Convert to Collision Mesh to the right-click menu
+ - Collision triangles on imported maps can now be selected, moved and deleted
+ - Fixed map collision being lost when importing and exporting maps
+
  == UPDATE 10.0.4 ==
  * Candy Heist
  - Added the Candy Heist map and mode: collect candy, bank it at the Cauldron and avoid the Hollowmen
@@ -20,6 +35,7 @@
  - Improved the size of waist items in item previews
  * Store
  - Buy KR, bundles, premium and battle pass tiers with card (Xsolla or Stripe), and gift them
+ - Get the Free KR spin from Box Office: a placeholder ad plays, then the official spin runs
  * Inventory & Market
  - Added item locks to protect items from quick-sell, listing and trades
  - Added Select mode to the inventory to quick-sell many items at once, with Keep options
