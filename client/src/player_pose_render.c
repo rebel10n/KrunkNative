@@ -44,6 +44,11 @@ static int pending_find(const int uid) {
 
 static void pending_drop(const int i) { g_pending[i] = g_pending[--g_pending_count]; }
 
+void player_pose_forget(const int uid) {
+    const int i = pending_find(uid);
+    if (i >= 0) pending_drop(i);
+}
+
 // The packet as a pose: the keys it names, numbers kept to sanitizePose's limits (our server sends them
 // sanitized; this keeps a stray peer's from turning a model inside out)
 static void pose_from_packet(PlayerPose *pose, const NetPlayerPosePacket *p) {

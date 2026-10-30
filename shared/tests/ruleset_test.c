@@ -18,7 +18,7 @@ static int g_checks, g_failures;
 
 static void test_lookup(void) {
     const Ruleset *v10 = ruleset_current();
-    CHECK(v10 && !strcmp(v10->key, "v10") && !strcmp(v10->version, "10.0.4"), "the v10 ruleset");
+    CHECK(v10 && !strcmp(v10->key, "v10") && !strcmp(v10->version, "10.0.5"), "the v10 ruleset");
     CHECK(&game_constants == v10->constants, "game_constants is the ruleset's");
     CHECK(v10->trigger_action_limit == 8 && v10->entity_limit == 64 && v10->archetype_limit == 32, "trigger action / entity / archetype limits");
     CHECK(fabsf(v10->light_unit_factor - (float) M_PI) < 1e-6f, "light unit factor");

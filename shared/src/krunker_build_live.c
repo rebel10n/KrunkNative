@@ -321,7 +321,7 @@ static int u32_of(const cJSON *v, uint32_t *out) {
     return 1;
 }
 
-// "10.0.4r1": digits.digits.digits, an optional rN
+// "10.0.5r1": digits.digits.digits, an optional rN
 static int version_ok(const char *s) {
     int parts = 0;
     const char *p = s;

@@ -1,9 +1,9 @@
-// network_sounds_test: config.networkSounds of Krunker v10.0.4 (shared/include/network_sounds.h) and the
+// network_sounds_test: config.networkSounds of Krunker v10.0.5 (shared/include/network_sounds.h) and the
 // sound references old maps hold.
 //
 //   - the table against shared/tests/data/v10/networkSounds.json (tools/krunker/extract_sounds.py from
-//     deob-10.0.4.js:18263) and, when the decoded bundle is on this machine, against the bundle itself
-//     (KN_DEOB_1004, default ~/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js)
+//     deob-10.0.5.js:18263) and, when the decoded bundle is on this machine, against the bundle itself
+//     (KN_DEOB_1005, default ~/jails/kru/src/Krunker_v10.0.5/deob/game.deob.js)
 //   - the ids the bundle sends by name (its indexOf calls), config.taunts' ids, the weapons' shot sounds
 //   - the id space: v7.1.4's 265 names and v3.1.1's 51 are a prefix (one v3.1.1 slot differs); checked
 //     against those reference trees too when they are present
@@ -63,7 +63,7 @@ static char **js_string_array(const char *path, const char *anchor, int *count, 
     char *p = strchr(at, '[') + 1;
     while (*p) {
         while (*p == ' ' || *p == ',' || *p == '\n') p++;
-        if (*p != '"' && *p != '\'') break; // the 10.0.4 bundle mixes single and double quotes
+        if (*p != '"' && *p != '\'') break; // the 10.0.4/10.0.5 bundles mix single and double quotes
         const char quote = *p;
         char *end = strchr(p + 1, quote);
         if (!end) break;
@@ -92,7 +92,7 @@ static void check_fixture(void) {
     if (!fixture) return;
     const cJSON *list = cJSON_GetObjectItem(fixture, "networkSounds");
     const cJSON *source = cJSON_GetObjectItem(fixture, "source");
-    CHECK(cJSON_IsString(source) && !strcmp(source->valuestring, "deob-10.0.4.js:18263"), "the fixture is deob-10.0.4.js:18263's (%s)",
+    CHECK(cJSON_IsString(source) && !strcmp(source->valuestring, "deob-10.0.5.js:18263"), "the fixture is deob-10.0.5.js:18263's (%s)",
           cJSON_IsString(source) ? source->valuestring : "?");
     CHECK(cJSON_GetArraySize(list) == NETWORK_SOUND_COUNT, "%d names in the fixture, %d in the table", cJSON_GetArraySize(list), NETWORK_SOUND_COUNT);
     int id = 0, differ = 0;
@@ -110,16 +110,21 @@ static void check_fixture(void) {
 
 static void check_bundle(void) {
     char path[512];
-    const char *env = getenv("KN_DEOB_1004");
+    const char *env = getenv("KN_DEOB_1005");
     const char *home = getenv("HOME");
     if (env && env[0]) snprintf(path, sizeof(path), "%s", env);
-    else snprintf(path, sizeof(path), "%s/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js", home ? home : "");
+    else snprintf(path, sizeof(path), "%s/jails/kru/src/Krunker_v10.0.5/deob/game.deob.js", home ? home : "");
     int count = 0, line = 0;
-    char **names = js_string_array(path, "['spray', \"taunt_0\"", &count, &line);
-    if (!names) {
-        printf("Skipping the deob-10.0.4.js check (no %s)\n", path);
+    FILE *probe = fopen(path, "rb");
+    if (!probe) {
+        printf("Skipping the deob-10.0.5.js check (no %s)\n", path);
         return;
     }
+    fclose(probe);
+    // the decoder's quote style changes between builds (10.0.4 opened with 'spray', 10.0.5 with "spray")
+    char **names = js_string_array(path, "[\"spray\", \"taunt_0\"", &count, &line);
+    CHECK(names != NULL, "config.networkSounds' literal is in %s", path);
+    if (!names) return;
     printf("Running the table against %s...\n", path);
     CHECK(line == 18263, "config.networkSounds opens on line %d (the citations say :18263)", line);
     CHECK(count == NETWORK_SOUND_COUNT, "the bundle lists %d names", count);

@@ -123,7 +123,8 @@ static const char *map_name(const int map) {
 
 // _34422: staff clan tags are gold, the rest the given colour
 static const char *clan_color(const char *tag, const char *def) {
-    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl"};
+    // deob-10.0.5.js:103946 (10.0.5 adds "nv")
+    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl", "nv"};
     for (size_t i = 0; tag && i < sizeof(gold) / sizeof(gold[0]); i++) {
         if (strlen(tag) == strlen(gold[i])) {
             int same = 1;

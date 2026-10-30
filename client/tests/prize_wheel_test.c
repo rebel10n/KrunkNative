@@ -65,9 +65,14 @@ static void test_layout(void) {
     const StoreSpins *spins = store_spins_builtin();
     CHECK(spins->wheel_count >= 4, "the compiled-in wheels");
     if (spins->wheel_count < 4) return;
-    const StoreWheel *heroic = &spins->wheels[2], *ultra = &spins->wheels[3];
+    CHECK(spins->wheel_count >= 5, "the Xmas Comm. wheel");
+    if (spins->wheel_count < 5) return;
+    const StoreWheel *heroic = &spins->wheels[2], *ultra = &spins->wheels[3], *xmas = &spins->wheels[4];
     CHECK(heroic->pool_count == 6 && !strcmp(heroic->name, "Heroic"), "wheel 2 is the Heroic pool wheel");
-    CHECK(ultra->pool_count == 0 && ultra->slices == 7, "wheel 3 (Ultra) draws by rarity");
+    // gapi /data/spins of 2026-10-30 (v10.0.5): Ultra draws from six pools like Heroic (it drew by rarity before);
+    // Xmas Comm. is the rarity wheel the stop animation is checked on
+    CHECK(ultra->pool_count == 6 && !strcmp(ultra->name, "Ultra"), "wheel 3 (Ultra) is a pool wheel");
+    CHECK(xmas->pool_count == 0 && xmas->slices == 7 && !strcmp(xmas->name, "Xmas Comm."), "wheel 4 (Xmas Comm.) draws by rarity");
 
     // the idle Heroic wheel: a white disc of 768 / 2 * 0.95, six pool slices in a full turn, the SPIN label
     PrizeWheelState s = wheel_state(heroic, 768);
@@ -98,12 +103,12 @@ static void test_layout(void) {
         CHECK(got == want, "roll %g: the pointer is over slice %d, the roll's slice is %d", rolls[i], got, want);
     }
 
-    // a rarity wheel's stop (Ultra, an Epic): endAnimTarget = 100 - 53; while it widens the slices still fill the
+    // a rarity wheel's stop (Xmas Comm., an Epic): endAnimTarget = 100 - 35; while it widens the slices still fill the
     // wheel, the pointer shrinks; at the end the Epic slice is the whole wheel and the pointer is gone
-    s = wheel_state(ultra, 768);
+    s = wheel_state(xmas, 768);
     CHECK(s.count == 8 && s.weight_count == 7, "store.rarities.length slices, seven of them weighted");
     s.won_rarity = 2;
-    s.end_anim_target = 100.0f - (float) ultra->weights[2];
+    s.end_anim_target = 100.0f - (float) xmas->weights[2];
     s.end_anim_val = s.end_anim_target / 2.0f;
     prize_wheel_layout(&s, &l);
     total = 0.0;
@@ -111,7 +116,7 @@ static void test_layout(void) {
     CHECK(NEAR(total, M_PI * 2.0, 1e-5), "half widened: still a full wheel (%g)", total);
     CHECK(l.slices[7].sweep == 0.0, "the 8th rarity (NFT) has no weight: not drawn");
     CHECK(NEAR(l.pointer[1][0], 0.6 * 364.8 * 0.5, 1e-4), "the pointer at half its width");
-    const double mid = M_PI * 2.0 * (0.0 + 28.0 + 53.0 / 2.0) / 100.0;
+    const double mid = M_PI * 2.0 * (0.0 + 48.0 + 35.0 / 2.0) / 100.0;
     CHECK(NEAR(l.turn, fmod(mid * 0.5, M_PI * 2.0) - M_PI * 0.5, 1e-9), "the turn: 2 pi * the won slice's middle * done - pi * done");
     s.end_anim_val = s.end_anim_target;
     prize_wheel_layout(&s, &l);

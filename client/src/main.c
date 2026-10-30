@@ -44,6 +44,7 @@
 #include <prize_wheel_render.h> // v10.0.3 map prize wheels (prize_wheel_render.c)
 #include <wars_banners.h>      // v10.0.3 Turf Wars map banners (wars_banners.c)
 #include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
+#include <player_pose_render.h> // player_pose_forget on LEAVE (player_pose_render.c)
 #include <math.h>
 #include <signal.h> // Ctrl+C / SIGTERM: a clean shutdown (install_quit_signals)
 #include <stdio.h>
@@ -104,7 +105,7 @@
 // `--render-scenario` (tools/uidiff, client/src/ui/ui_scenario.c): native engine builds only.
 #include <entities.h> // v10 KrunkScript entities / runtime blocks (official lobbies), web builds too
 #include <player_names.h> // Hide player names: the game-leave and SPAWN hooks, web builds too
-#include <scene_warm.h> // v10.0.4 warmScene: the match-start warm frames, web builds too
+#include <scene_warm.h> // v10.0.4 warmScene: the match-start warm frames, every build
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 #include <ui_logic.h>
 #ifndef __EMSCRIPTEN__
@@ -1559,6 +1560,7 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
 
 // LEAVE (Krunker "2"): the player disconnected; forget it entirely.
 static void client_remove_player(Client *client, const int uid) {
+    player_pose_forget(uid); // players.remove deletes pendingPoses[sid] first (deob-10.0.5.js:174098)
     for (size_t i = 0; i < client->game.player_count; i++) {
         Player *player = client->game.players[i];
         if (!player || player->uid != uid) continue;

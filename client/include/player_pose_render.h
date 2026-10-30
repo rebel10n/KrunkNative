@@ -15,6 +15,9 @@ void player_pose_on_ext(Client *client, const uint8_t *body, uint16_t length);
 void player_pose_client_set(Player *player, const PlayerPose *pose);
 // A new INIT: the pending poses are forgotten with the old session's players
 void player_pose_reset(void);
+// players.remove(sid): a pose still pending for that player goes with it (deob-10.0.5.js:174098, new in
+// 10.0.5: a later player with the same sid took it over, holding the Candy Heist arm pose)
+void player_pose_forget(int uid);
 
 // The pose on `player`'s model this frame (player_update_meshes, after the movement's own pose of the
 // legs, arms and upper body; before the charm / GLTF visibility pass). first_person: renderYou && not a

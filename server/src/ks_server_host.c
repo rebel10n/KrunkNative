@@ -1187,6 +1187,8 @@ void ks_server_round_init(void)
     size_t shared_len = 0;
     char *shared = ks_game_map_source(game, KS_SIDE_SHARED, &shared_len);
     const uint32_t shared_hash = shared ? ks_source_hash(shared, shared_len) : 0;
+    // A map without scripts hashes 0, so the previous map's scripts go: what v10.0.5 added to Game.init
+    // (customsData || customMapData || mainScript = sharedScript = null, deob-10.0.5.js:193594)
     if (hash != ks_game_source_hash(game)) {
         ks_game_unload(game); // onServerClosed of the previous map's script (and the shared script)
         storage_reset(); // pending STORAGE callbacks (onServerClosed's too) belong to the old instance

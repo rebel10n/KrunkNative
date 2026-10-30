@@ -78,6 +78,9 @@ static void check_melee(const ViewerSkin *skin, const char *label) {
     }
     snprintf(rel, sizeof(rel), "models/%s.obj", model);
     CHECK(asset_exists(rel), "%s: missing model %s\n", label, rel);
+    // a graph shader skin (18, Ametwista) is its graph's material only and never loads its tex (getMat,
+    // deob-10.0.5.js:204755-204758): assets.krunker.io has no melee_3_164.png either
+    if (skin && (skin->flags2 & VS2_SHADER) && skin->shader_num == 18) return;
     snprintf(rel, sizeof(rel), "textures/%s.png", texture);
     if (!no_official_texture(rel)) CHECK(asset_exists(rel), "%s: missing texture %s\n", label, rel);
 }

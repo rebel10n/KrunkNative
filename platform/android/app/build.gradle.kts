@@ -41,7 +41,7 @@ android {
         // CI: versionCode = commit time in minutes (monotonic, so every build installs over the
         // previous one), versionName = Krunker's version (the changelog's newest update)
         versionCode = prop("krunknative.versionCode", "1").toInt()
-        versionName = prop("krunknative.versionName", "10.0.4")
+        versionName = prop("krunknative.versionName", "10.0.5")
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
         buildConfigField("String", "WS_URL", quoted(prop("krunknative.wsUrl")))
         buildConfigField("String", "ASSET_BASE_URL", quoted(prop("krunknative.assetBaseUrl")))

@@ -7,14 +7,14 @@
 #include <strike_rules.h>
 #include <triggers.h>
 
-// The ruleset (shared/include/ruleset.h): Krunker v10.0.4, the only version it plays (doc/v10/target.md). Its tables are in
+// The ruleset (shared/include/ruleset.h): Krunker v10.0.5, the only version it plays (doc/v10/target.md). Its tables are in
 // rules/v10/ (doc/v10/*.md). TODO(v10-maps): the map catalogue is v7.1.4's 32 official maps.
 extern const Weapon *const g_weapons_v10[WEAPON_TABLE_COUNT];
 extern const ClassConfig g_classes_v10[CLASS_TABLE_COUNT];
 
 static const Ruleset k_v10 = {
     .key = "v10",
-    .version = "10.0.4",
+    .version = "10.0.5",
     .constants = &game_constants,
     .posed_hitboxes = 1, // v10.0.2: every mode but Prop Hunt traces the posed boxes (hitboxes.c)
     .hit_zones_live = 0, // KrunkNative measures the zones on the rewound box (player.c combat)

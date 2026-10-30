@@ -1,6 +1,6 @@
 {
- "source": "deob-10.0.4.js:18263",
- "sha256": "c70d8bdd083300140eaeabacda85e33d3e777481cf6d84c7510a8994603af01f",
+ "source": "deob-10.0.5.js:18263",
+ "sha256": "613b1ab34ee670479e7351ffe5d5f0ec9b0c3ccaa47780d9705eb3ea44294396",
  "networkSounds": [
   "spray",
   "taunt_0",
@@ -400,6 +400,8 @@
   "weapon_8_17",
   "weapon_22_5",
   "weapon_1_52",
-  "weapon_4_36"
+  "weapon_4_36",
+  "weapon_4_37",
+  "weapon_2_37"
  ]
 }

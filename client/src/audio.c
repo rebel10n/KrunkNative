@@ -121,7 +121,8 @@ static struct {
 };
 
 // SOUND.soundCats (v10.js:193556), verbatim: the category of every sound Krunker v10.0.2 lists, unchanged
-// in v10.0.3 (deob-10.0.3.js:224701-225180, the same 478 names and categories). A sound it does not list
+// in v10.0.3 (deob-10.0.3.js:224701-225180, the same 478 names and categories); v10.0.5 adds weapon_4_37 and
+// weapon_2_37 at category 3 (deob-10.0.5.js:198498-198979, 480 names, :198862-198863). A sound it does not list
 // plays at volume 1 (getVolume: `soundCats[name] != null ? volumes[cat] : 1`, :225230). It is the only
 // per-sound volume the bundle has: config.networkSounds (shared/include/network_sounds.h) is names only.
 static const struct {
@@ -196,7 +197,8 @@ static const struct {
     {"weapon_1_49", 3}, {"weapon_4_32", 3}, {"weapon_1_50", 3}, {"weapon_4_33", 3}, {"weapon_7_19", 3},
     {"weapon_17_8", 3}, {"weapon_19_8", 3}, {"weapon_11_12", 3}, {"weapon_5_20", 3}, {"weapon_6_21", 3},
     {"weapon_3_14", 3}, {"weapon_15_11", 3}, {"weapon_8_17", 3}, {"weapon_22_5", 3}, {"weapon_1_52", 3},
-    {"weapon_4_36", 3}, {"melee_dragonbfk_inspect", 3}, {"melee_dragonbfk_equip", 3}, {"vcoreintial", 3},
+    {"weapon_4_36", 3}, {"weapon_4_37", 3}, {"weapon_2_37", 3}, {"melee_dragonbfk_inspect", 3},
+    {"melee_dragonbfk_equip", 3}, {"vcoreintial", 3},
     {"vcoreblasterinspect", 3}, {"vcoredeagleinspect", 3}, {"vcoreaxeinspect", 3}, {"fart_0", 4}, {"headshot_0", 4},
     {"hit_0", 4}, {"impact_0", 4}, {"jump_0", 4}, {"jump_1", 4}, {"land_0", 4}, {"punch_0", 4}, {"punch_1", 4},
     {"slide_0", 4}, {"spray", 4}, {"step_0", 4}, {"step_1", 4}, {"step_2", 4}, {"taunt_0", 4}, {"taunt_1", 4},

@@ -16,6 +16,7 @@
 #include <social_v7.h>
 #include <ai.h> // test_fx / test_world: the AI packets
 #include <krunker_sounds.h>
+#include <network_sounds.h> // NETWORK_SOUND_COUNT: config.networkSounds (401 names in v10.0.5)
 #include <progression.h> // test_rounds: overlay.medalsList
 #include <cJSON.h>
 #include <math.h>
@@ -689,7 +690,7 @@ static void test_fx(void) {
         READ_IN(NetSoundPacket, b, SOUND, 1);
         READ_IN(NetSoundPacket, c, SOUND, 2);
         READ_IN(NetSoundPacket, d, SOUND, 3);
-        CHECK(krunker_sound_count() == 399 && !strcmp(krunker_sound_name(0), "spray") && !strcmp(krunker_sound_name(5), "weapon_1"),
+        CHECK(krunker_sound_count() == NETWORK_SOUND_COUNT && !strcmp(krunker_sound_name(0), "spray") && !strcmp(krunker_sound_name(5), "weapon_1"),
               "the official sound table (%d)", krunker_sound_count());
         CHECK(a_p && !strcmp(a.name, "weapon_1") && a.uid == 7 && a.position[2] == 3 && fabsf(a.volume - 0.85f) < 1e-6f &&
               fabsf(a.rate - 1.05f) < 1e-6f, "s: sounds[5] at sid 7 (%s)", a.name);

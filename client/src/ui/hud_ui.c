@@ -817,7 +817,8 @@ static void hud_plist_clan(StrBuf *sb, const char *clan) {
     if (!clan || !clan[0]) return;
     // v10 COLORS.getClanCol(clan, "#353535") (game.deob.js:4306488): the staff clans are #FBC02D, any
     // other clan (VIP, CMD, ...) the #353535 default. The list is lowercased in v10.
-    static const char *const staff[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl"};
+    // deob-10.0.5.js:103946 (10.0.5 adds "nv")
+    static const char *const staff[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl", "nv"};
     int gold = 0;
     char low[32];
     size_t i;

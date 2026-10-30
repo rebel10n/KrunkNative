@@ -1188,7 +1188,8 @@ static void menu_update_info_holder(void) {
 
 // v10 getClanCol (game.deob.js iïïìíìi): these clans' tags are gold, the others take the default.
 static const char *menu_clan_colour(const char *clan) {
-    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl"};
+    // deob-10.0.5.js:103946 (10.0.5 adds "nv")
+    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl", "nv"};
     for (size_t i = 0; i < sizeof(gold) / sizeof(gold[0]); i++) {
         if (!strcasecmp(clan, gold[i])) return "#FBC02D";
     }

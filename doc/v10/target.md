@@ -1,17 +1,22 @@
-# Krunker v10.0.4: the target
+# Krunker v10.0.5: the target
 
-Krunker Box Office plays **Krunker v10.0.4**, the latest v10 build. It is the target of the
-client, the server, the ruleset identity and the UI work (set by the user, 2026-10-28: "the game is
-now 10.0.4. we need parity with the recent features"; v10.0.3 was the target from 2026-10-21).
+Krunker Box Office plays **Krunker v10.0.5**, the latest v10 build. It is the target of the
+client, the server, the ruleset identity and the UI work (set by the user, 2026-10-29: "we need to
+update the entire client to v10.0.5 and pull in any new features"; v10.0.4 was the target from
+2026-10-28, v10.0.3 from 2026-10-21).
 
 ## Reference bundles
 
-- **Target: v10.0.4. Read `~/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js`.** It is kru's
-  decoded copy of the live bundle (`https://kru.eli.gift/game.deob.js`, last-modified 2026-10-28
-  02:37 UTC), byte for byte; its `README.md` gives the sha256. Strings are inlined and the file is
-  pretty-printed; identifiers stay mangled. Cite it as `deob-10.0.4.js:<line>`. It was decoded by
-  kru's pipeline, not by `deob.cjs`, so its line numbers are not comparable with 10.0.3's file. Its
-  version literal is `"10.0.4"` (:16403).
+- **Target: v10.0.5. Read `~/jails/kru/src/Krunker_v10.0.5/deob/game.deob.js`.** It is kru's
+  decoded copy of the live bundle (`https://kru.eli.gift/game.deob.js`, last-modified 2026-10-29
+  16:40 UTC), byte for byte; its `README.md` gives the sha256. Strings are inlined and the file is
+  pretty-printed; identifiers stay mangled. Cite it as `deob-10.0.5.js:<line>`. Its version literal
+  is `"10.0.5"` (:16403).
+- **v10.0.4: history.** `~/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js`, decoded the same way
+  (last-modified 2026-10-28 02:37 UTC). The code ported 2026-10-28..29 cites it as
+  `deob-10.0.4.js:<line>`. Both builds mangle names and escape strings differently, so compare them
+  after normalising both (mangled names, quote styles, `\xNN` escapes, hex numbers): the two files
+  then differ in 62 places (below).
 - **v10.0.3: history.** `~/jails/kru/src/Krunker_v10.0.3/deob/` (read only; its `README.md` lists
   every file). `deob/game.deob.js` is 10.0.3's `game.js` through webcrack (~263k lines); the code
   ported before 2026-10-28 cites it as `deob-10.0.3.js:<line>` (or `deob:<line>`). Those citations
@@ -39,6 +44,41 @@ and UI. There is no "unchanged since" fallback. A ported value cites its `deob-1
 a code comment (code ported before 2026-10-28: `deob-10.0.3.js`); a deliberate difference from the
 target is documented in code. A comment or spec that cites only v10.0.2 (`v10:N`) or v7.1.4 is not
 verified yet: re-check it against the target bundle when it is touched.
+
+## 10.0.5 (2026-10-29)
+
+- Build: `clientVersion` `10.0.5r1` (deob-10.0.5.js:16403-16404), `buildVersion`
+  `BMXeeCoe7d0j5zNh4KE3IsWuyP5twK9g` (:19598), ahNum step `0x25` (:98685; 10.0.4: `0x2b`). The packet
+  tables, the cheat check and the per-player layouts are unchanged (`make krunker-build`); the
+  krunker-build workflow had already published the document to `dl.krunk.io` (2026-10-29 16:52 UTC).
+- Every change the normalised diff shows:
+  - config.networkSounds gains `weapon_4_37` and `weapon_2_37` (:18263, 401 names) and SOUND.soundCats
+    lists both at category 3 (:198862-198863); the clips are pinned in `live_assets_v10.lock`.
+  - getClanCol's gold staff clans gain `nv` (:103946).
+  - players.clear() and players.remove(sid) drop the pending poses (:174025, :174098): a later player
+    with the same sid no longer takes over a pose (the changelog's "holding their arm like the Candy
+    Heist pose"). KN already forgot them on INIT; `player_pose_forget` does it on LEAVE.
+  - Game.init drops mainScript / sharedScript on a map without customs data (:193594). KN already
+    unloads on a script-hash change (a map without scripts hashes 0; `ks_server_round_init`) and
+    the client unloads every round.
+  - The editor's COLLISION_MESH prefab and generateCollisionMesh (:158847-158862, :159520-159534).
+  - Custom skin shader 18 "Ametwista", the first one stored as a node graph (`"type": "graph"`,
+    :196197-197428; its serialisation :197431-197438).
+  - Not ported (no KN counterpart): the WebGPU `isUnfilterable` cache (:195781-195787), the FBX
+    binary magic fix (:151282; KN reads FBX through ufbx), the skin-reward callback's restructure
+    (:194207-194233, same behaviour), the renamed mangled fields and the `?v=` asset hashes.
+- Store data (not in the bundle: gapi `/data/skins` and `/data/spins`, 2026-10-30): 76 new items
+  (8152), among them the 4 Ametwista Twitch drops (shader 18), Deathweaver (Item Shop) and the
+  November spin items, and one new item pool (`s10UltraPoolRare`, 2 items, on the Ultra wheel). The
+  November items are in no pool yet: Krunker's spins change on November 1, so `make store-import` has to
+  run again with that day's `/data/spins`. `make store-import` regenerated `assets/skins.json`,
+  `viewer_store_table.c` and `store_spins_table.c`; their 101 asset files are pinned in
+  `live_assets_v10.lock`.
+- Changelog (krunker.io/docs/versions.txt, "UPDATE 10.0.5"): 71 November spin items (from November
+  1), 4 Twitch drops, 1 Eterno Shop item, the Candy Heist arm pose fix, WebGPU map textures, faster
+  trade history, a quick-sell fix, and the editor's Collision Size field for custom assets, Convert
+  to Collision Mesh, selectable collision triangles on imported maps and collision kept through
+  import / export.
 
 ## 10.0.4 (2026-10-28)
 
@@ -84,18 +124,18 @@ subtypes) follow AGENTS.md.
 
 ## What the target changes
 
-- Identity: the ruleset `version` is `"10.0.4"` (`shared/src/rules/ruleset.c`). The build's client
-  version is `10.0.4r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
-  logs `[client] Krunker v10.0.4` and the server `Plays Krunker v10.0.4`. The Android and iOS
-  version fallbacks and the example news item name 10.0.4.
-- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.4 (CI's shipped version,
+- Identity: the ruleset `version` is `"10.0.5"` (`shared/src/rules/ruleset.c`). The build's client
+  version is `10.0.5r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
+  logs `[client] Krunker v10.0.5` and the server `Plays Krunker v10.0.5`. The Android and iOS
+  version fallbacks name 10.0.5.
+- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.5 (CI's shipped version,
   `tools/release/version-meta.sh`), and the What's New tile shows the newest entry.
 
 ## What it does not change
 
 - The HELLO / INIT ruleset bytes (HELLO bit 2, INIT ruleset 3) and KN's own packet layouts (wire
-  compatibility). `changelog-10.0.3.md` lists what 10.0.3 changed; the 10.0.4 section above lists
-  10.0.4's.
+  compatibility). `changelog-10.0.3.md` lists what 10.0.3 changed; the 10.0.4 and 10.0.5 sections above list
+  theirs.
 - `doc/ref/krunker-v10.0.2/` and `doc/ref/krunker-v10/` are captures of the 10.0.2 page. The
   uidiff scenarios refer to them by path.
 - `ui/` is the v10.0.2 page import, edited by hand for parity since. It is regenerated from a newer

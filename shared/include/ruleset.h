@@ -1,5 +1,5 @@
 #pragma once
-// Krunker Box Office plays Krunker v10.0.4, the only version it plays (doc/v10/target.md; v10.0.3 and
+// Krunker Box Office plays Krunker v10.0.5, the only version it plays (doc/v10/target.md; v10.0.4, v10.0.3 and
 // v10.0.2 are the prior versions, kept as references). There is no version choice: one Ruleset, the v10
 // tables in shared/src/rules/v10/, bundles what Krunker's version defines: physics constants, the
 // weapon / class / mode tables, the map catalogue, trigger and entity limits, light units and the
@@ -14,7 +14,7 @@
 
 typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     const char *key;     // "v10": the brain lobby meta / hello, the server-info query
-    const char *version; // "10.0.4": what menus and logs show
+    const char *version; // "10.0.5": what menus and logs show
 
     const GameConstants *constants;
     // Hit test: v10.0.2 traces the posed hit boxes (shared/src/hitboxes.c); 0 keeps v7.1.4's padded
