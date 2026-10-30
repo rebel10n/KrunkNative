@@ -72,33 +72,25 @@ Cause: a failed seek falls back to the offline sandbox (on_play_list 4330-4351, 
 4389), and with no backend the handler starts the offline game directly (ui_handlers.c:277). The mode id is
 right (`MODE_ID_RAID` is 23). `client/src/net/offline.c` is the sandbox engine only; the callers start it.
 
-## Box Office after the fix
+## Box Office after the fix (2026-10-22)
 
-- The card's click calls `servers_ui_play_raid("Tortuga")` (`ui_handlers.c` `h_play_raid`, one call).
-- `servers_ui_play_raid` (`client/src/ui/servers_ui.c`, after `servers_ui_play_map`) picks the matchmaker by
-  the Server Type (`seek_prefs_servers()`, Quickplay's setting):
-  - krunker.io: `open_server_window(2)`, Find Game's Raids (the v10 path above).
-  - Box Office and Both: `/mm/game-list?hostname=krunknative` with `g_play_raid` set. `on_play_list` joins a
-    Raid lobby on Tortuga by its id (`switch_server`, the seek by id). Both then asks krunker.io's Raids when
-    the Box Office list has none.
-  - no brain (or the list is refused at once): the no-lobby path.
-- No lobby: `raid_no_lobby` shows v10's "Couldnt find any" (`kn.finder.none`, the text of v10's
-  `iíìîíîï` at 12858248) and prints `[mm] raid play: no Raid lobby on Tortuga: Couldnt find any`.
-- The offline sandbox is not started by the card. Offline starts only when the player picks it (the
-  console's `offline`, the offline button, Host Game without a server).
+The card sought a public Raid lobby on Tortuga through the Server Type's matchmaker (`servers_ui_play_raid`,
+`knPlayRaid`), and showed v10's "Couldnt find any" with none, because the client could not host a room then.
 
-Intentional difference from v10: v10's card opens the Raid Server Setup (a private room). Box Office has no
-client-side room host (doc/backend.md 8.11), so the card seeks a public Raid lobby instead, as the user asked.
+## Box Office now (2026-10-30): v10's card
+
+Client hosting works (doc/backend.md 8.11: Start Game on Box Office servers or krunker.io), so the card is v10's
+again: `onclick="openHostWindow(false, 4)"` (`hud_endscreen_v10.c` `mount_raid`; deob-10.0.5.js:200914-200916).
+It opens the Host Game window's Raid type (`host_flow_ui.c`): the Raid Server Setup, whose Select tab lists
+the Raid maps (allMaps, deob-10.0.5.js:16612) and whose Start Game creates the room. The lobby seek
+(`servers_ui_play_raid`, `raid_no_lobby`, `knPlayRaid`) is gone. The card still never starts the offline game:
+offline is only the player's own pick (the window's "Play this map offline", the console's `offline`).
 
 ## Tests
 
 `make raid-play-e2e` (`client/tests/raid_play_e2e.py`, stub brain, krunker.io off, no asset fetch):
 
-- C0: the card's onclick is `knPlayRaid()` and it no longer opens the Raid Server Setup.
-- C1: the brain lists no Raid on Tortuga: the game list is asked, no lobby is sought or joined, "Couldnt find
-  any" shows, the log has the no-lobby line, and the console status shows no Raid on Tortuga (no offline game).
-- C2: a Raid lobby on Tortuga with room: its seek goes out and the client joins it, with no message.
-- C3: no brain at all (the brain URL refuses): "Couldnt find any" shows and no offline game starts.
-
-Before the fix C1 and C3 fail (the sandbox loads `Tortuga (34), mode Raid (23)`); C2 passes. After the fix all
-15 checks pass.
+- C0: the card's onclick is `openHostWindow(false, 4)`.
+- C1: with a Raid lobby on Tortuga listed, the click opens the Raid Server Setup (its title) with the five Raid
+  maps, no "Couldnt find any", no lobby is sought or joined, and no offline game starts.
+- C2: no brain at all: the setup opens the same way and no offline game starts.

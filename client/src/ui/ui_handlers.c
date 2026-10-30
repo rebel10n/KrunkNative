@@ -268,19 +268,6 @@ H(h_play_map) {
     return 1;
 }
 
-// The end screen's raid promo "Play Raid" (hud_endscreen_v10.c). v10's card opens the Raid Server
-// Setup (openHostWindow(false, 4)): forceDat maps [18] Tortuga, modes [23] Raid, 8 players, and
-// Create Game makes a private room. KrunkNative hosts nothing from the client (doc/backend.md 8.11),
-// so the card seeks a public Raid lobby on Tortuga through the Server Type's matchmaker
-// (servers_ui_play_raid), and v10's "Couldnt find any" when there is none. Never the offline game.
-// doc/v10/end-raid.md has v10's card and its offsets.
-#define RAID_PLAY_MAP "Tortuga"
-H(h_play_raid) {
-    UNUSED;
-    servers_ui_play_raid(RAID_PLAY_MAP);
-    return 1;
-}
-
 // selectHostMap(name, modURL, id, creator): Krunker remembers the community game for the
 // Host Game window (selectedCustomMapId). KrunkNative opens the Host Game flow at its Mode step with
 // that map chosen: a catalogue map at once; a published map (kn_brain) once its copy is downloaded
@@ -516,7 +503,6 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"joinGame", h_join_game},
     {"createPrivateRoom", h_create_private_room},
     {"playMap", h_play_map},
-    {"knPlayRaid", h_play_raid},
     {"selectHostMap", h_select_host_map},
     {"knHostMap", h_kn_host_map},
     {"knRetry", h_kn_retry},

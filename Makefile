@@ -913,7 +913,7 @@ quickplay-retry-e2e: build ## Quick Play retries a full lobby until the player i
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/quickplay_retry_e2e.py $(DEBUG_DIR)
 
 .PHONY: raid-play-e2e
-raid-play-e2e: build ## The end screen's Play Raid seeks a Raid lobby on Tortuga through the Server Type's matchmaker (a stub brain): no Raid lobby or no brain shows v10's "Couldnt find any", never the offline game (headless; EGL_DEVICE=...)
+raid-play-e2e: build ## The end screen's Play Raid opens v10's Raid Server Setup (openHostWindow(false, 4)): the Raid maps, never a lobby seek or the offline game (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/raid_play_e2e.py $(DEBUG_DIR)
 
 .PHONY: seek-servers-migrate-e2e

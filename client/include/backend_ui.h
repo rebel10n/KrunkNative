@@ -290,9 +290,6 @@ int  servers_ui_host_game(const char *config_json); // Start Game on Box Office 
 // playMap(name): join a brain lobby on that map, else host it (brain); a published map that
 // is not in the catalogue is fetched (/api/map-data) and played offline otherwise. 1 = handled.
 int  servers_ui_play_map(const char *name, int catalogue);
-// The end screen's raid promo "Play Raid" (h_play_raid): a public Raid lobby on that map through the Server
-// Type's matchmaker. Nothing found: v10's "Couldnt find any". Never the offline sandbox.
-void servers_ui_play_raid(const char *name);
 void servers_ui_query(const char *query);   // the game page's ?play= / ?game= (acted on in tick)
 void servers_ui_redirect(const char *game_id, const char *host, int port, const char *reason); // NET_PACKET_REDIRECT
 void servers_ui_join_ticket(const char *host, int port, const char *game_id, const char *ticket, const char *web_url);

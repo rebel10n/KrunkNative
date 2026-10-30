@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""The end screen's raid promo "Play Raid" seeks a public Raid lobby and never starts the offline game
-(client/src/ui/ui_handlers.c h_play_raid -> servers_ui.c servers_ui_play_raid).
+"""The end screen's raid promo "Play Raid" opens v10's Raid Server Setup
+(client/src/ui/hud_endscreen_v10.c mount_raid -> openHostWindow(false, 4) -> host_flow_ui.c).
 
   python3 -I client/tests/raid_play_e2e.py BUILD_DIR      (run from the repository root)
 
-v10's card ("Battle Bosses in Raids!", Play Now ->) opens the Raid Server Setup (openHostWindow(false, 4)),
-which makes a private room. KrunkNative hosts nothing from the client, so Play Raid asks the Server Type's
-matchmaker for a Raid lobby on Tortuga (mode 23). Nothing found, or no brain: v10's "Couldnt find any", and
-the offline game does not start. A stub brain answers the game list and seeks; krunker.io is off
+v10's card ("Battle Bosses in Raids!", Play Now ->) calls openHostWindow(false, 4) (deob-10.0.5.js:200914-200916):
+the Host Game window's Raid type, whose Select tab lists the Raid maps (allMaps: Tortuga, Laboratory, Soul
+Sanctum, Khepri, Bastion; deob-10.0.5.js:16612). The player creates the room from there. The card never seeks a
+lobby and never starts the offline game. A stub brain answers the game list and seeks; krunker.io is off
 (KRUNKNATIVE_KRUNKER_MATCHMAKER=off) and no asset fetch goes out. Nothing reaches production.
 
   C0 the raid end-screen scenario (tools/uidiff/scenarios/ingame-endscreen-collect-raid.json, raid: 1) dumps a
-     card whose onclick is knPlayRaid() and no longer opens the Raid Server Setup
-  C1 no Raid lobby on Tortuga (the brain's list has a Raid on another map and a Tortuga match of another
-     mode): the game list is asked, nothing is seeked, v10's "Couldnt find any" shows, the menu stays open
-     (no offline game)
-  C2 a Raid lobby on Tortuga with room: the seek for that lobby goes out and the client joins it; no message
-  C3 no brain at all (the brain URL refuses): v10's "Couldnt find any", the menu stays open (no offline game)
+     card whose onclick is openHostWindow(false, 4)
+  C1 with a Raid lobby on Tortuga listed by the brain: the click opens the Raid Server Setup with the five Raid
+     maps; no lobby is sought or joined (the server browser's own game-list refresh is not the card's),
+     the offline game does not start
+  C2 no brain at all (the brain URL refuses): the Raid Server Setup opens the same way, no offline game
 
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device.
 """
@@ -42,14 +41,14 @@ results = []
 
 RAID_LOBBY = "LOCAL:raidA"  # a Raid on Tortuga with room (C2)
 MODE_RAID = 23
-MODE_COMP = 0
 
 # (time ms, command). The boot (the launch seek is refused: no lobby at all, so the error screen), the card's
-# handler, then the probes: the host setup, the popup, the game state and the console status (a Raid on Tortuga
-# in the status is the offline game).
+# click (its onclick, openHostWindow(false, 4)), then the probes: the window's title, its map cards, the popup and
+# the console status (a Raid on Tortuga in the status is the offline game).
 SCRIPT = """
 0 boot
-3000 call knPlayRaid
+3000 call openHostWindow 0 4
+3500 grep @title Raid [id=hostHeader]
 3500 nodes @setup .hostMap
 7000 grep @pop Couldnt [id=genericPop]
 7000 con status
@@ -124,9 +123,6 @@ class Brain:
 
     def seeks(self):
         return [q for p, q in self.log if p == "/seek-game"]
-
-    def game_lists(self):
-        return [q for p, q in self.log if p == "/game-list"]
 
     def close(self):
         self.httpd.shutdown()
@@ -204,9 +200,18 @@ def offline_raid_started(lines):
     return bool(st) and re.search(r"map Tortuga \(\d+\) \| mode raid \(23\)", st[-1]) is not None
 
 
-def setup_opened(lines):
+def setup_maps(lines):
+    """The map cards of the open Host Game window (the `nodes @setup .hostMap` probe), None when it did not run."""
     setup = [l for l in lines if "[input_script] nodes" in l and "@setup" in l]
-    return bool(setup) and " match=0" not in setup[-1]
+    m = re.search(r" match=(\d+)", setup[-1]) if setup else None
+    return int(m.group(1)) if m else None
+
+
+def check_setup(label, lines):
+    check(f"{label} the Raid Server Setup opens (its title)", (probe_hits(lines, "@title") or 0) >= 1,
+          f"grep hits {probe_hits(lines, '@title')}")
+    check(f"{label} it lists the five Raid maps", setup_maps(lines) == 5, f"cards {setup_maps(lines)}")
+    check(f"{label} no \"Couldnt find any\"", (probe_hits(lines, "@pop") or 0) == 0)
 
 
 def main():
@@ -214,42 +219,22 @@ def main():
     if doc is not None:
         m = re.search(r'<div class="crStat raidPromo"[^>]*onclick="([^"]*)"', doc)
         action = m.group(1) if m else ""
-        check("C0 the raid promo card's Play Now calls knPlayRaid()", action == "knPlayRaid()", repr(action))
-        check("C0 the card no longer opens the Raid Server Setup (openHostWindow)", "openHostWindow" not in (m.group(0) if m else ""))
+        check("C0 the raid promo card's Play Now calls openHostWindow(false, 4)", action == "openHostWindow(false, 4)", repr(action))
 
-    # C1: the brain lists no Raid on Tortuga: a Raid on Laboratory and a Tortuga match of another mode
-    brain = Brain(free_port())
-    brain.games = [row("LOCAL:labraid", "local", 2, 8, MODE_RAID, "Laboratory"),
-                   row("LOCAL:tortcomp", "local", 3, 8, MODE_COMP, "Tortuga")]
-    lines, log = run_client("c1", f"http://127.0.0.1:{brain.port}")
-    check("C1 Play Raid asks the brain's game list (hostname krunknative)",
-          any(q.get("hostname") == "krunknative" for q in brain.game_lists()), f"{len(brain.game_lists())} list requests")
-    check("C1 no lobby is sought or joined (the launch seek has no lobby id)",
-          not any(q.get("game") for q in brain.seeks()) and not joined(lines), brain.seeks())
-    check("C1 v10's \"Couldnt find any\" shows", (probe_hits(lines, "@pop") or 0) >= 1,
-          f"grep hits {probe_hits(lines, '@pop')}")
-    check("C1 the Raid play ran its no-lobby path (the log line)", any("[mm] raid play: no Raid lobby on Tortuga" in l for l in lines), log)
-    check("C1 the offline Raid does not start (no Raid on Tortuga in the console status)", not offline_raid_started(lines), log)
-    check("C1 the Raid Server Setup does not open", not setup_opened(lines))
-    brain.close()
-
-    # C2: a Raid lobby on Tortuga with room is listed: the client seeks it
+    # C1: a Raid lobby on Tortuga with room is listed: the card still opens the setup, as v10's does
     brain = Brain(free_port())
     brain.games = [row(RAID_LOBBY, "local", 2, 8, MODE_RAID, "Tortuga")]
-    lines, log = run_client("c2", f"http://127.0.0.1:{brain.port}")
-    check("C2 the Raid lobby on Tortuga is sought (its seek goes out)",
-          any(q.get("game") == RAID_LOBBY for q in brain.seeks()), brain.seeks())
-    check("C2 the client joins it", any(f"[mm] joining {RAID_LOBBY}" in l for l in lines), log)
-    check("C2 no \"Couldnt find any\" when a lobby is found", (probe_hits(lines, "@pop") or 0) == 0)
-    check("C2 the offline Raid does not start", not offline_raid_started(lines), log)
+    lines, log = run_client("c1", f"http://127.0.0.1:{brain.port}")
+    check_setup("C1", lines)
+    check("C1 no lobby is sought or joined (the launch seek has no lobby id)",
+          not any(q.get("game") for q in brain.seeks()) and not joined(lines), brain.seeks())
+    check("C1 the offline Raid does not start (no Raid on Tortuga in the console status)", not offline_raid_started(lines), log)
     brain.close()
 
-    # C3: no brain at all: the brain URL refuses the connection
-    lines, log = run_client("c3", f"http://127.0.0.1:{free_port()}")
-    check("C3 v10's \"Couldnt find any\" shows with no brain", (probe_hits(lines, "@pop") or 0) >= 1,
-          f"grep hits {probe_hits(lines, '@pop')}")
-    check("C3 the offline Raid does not start (no Raid on Tortuga in the console status)", not offline_raid_started(lines), log)
-    check("C3 the Raid Server Setup does not open", not setup_opened(lines))
+    # C2: no brain at all: the brain URL refuses the connection
+    lines, log = run_client("c2", f"http://127.0.0.1:{free_port()}")
+    check_setup("C2", lines)
+    check("C2 the offline Raid does not start (no Raid on Tortuga in the console status)", not offline_raid_started(lines), log)
 
     print(f"\n{sum(results)}/{len(results)} passed  (work: {WORK})")
     return all(results)

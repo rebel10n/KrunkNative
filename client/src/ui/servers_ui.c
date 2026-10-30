@@ -4396,14 +4396,6 @@ int servers_ui_host_type(void) {
 // (GET /api/map-data) and played in the offline game when no brain lobby can host them.
 static char g_play_name[96];
 static int g_play_catalogue;
-static int g_play_raid;      // the end card's Play Raid (servers_ui_play_raid): a Raid lobby or v10's message, never offline
-
-// a lobby row's Krunker mode id (meta "mode", else "g", as row_mode); -1 none
-static int row_mode_id(const cJSON *t) {
-    const cJSON *m = cJSON_GetObjectItem(meta_of(t), "mode");
-    if (!cJSON_IsNumber(m)) m = cJSON_GetObjectItem(meta_of(t), "g");
-    return cJSON_IsNumber(m) ? m->valueint : -1;
-}
 
 // a published map from kn_brain (community_fetch: downloaded once, checked like v10's
 // prepareGame + validateMap): the offline game hosts it, like the editor's Test Map
@@ -4432,19 +4424,6 @@ static int official_map_index(const char *name) {
     return -1;
 }
 
-// The Raid play found no Box Office Raid on its map (or the brain refused the list): Both asks krunker.io's Raids
-// (Find Game's, openServerWindow 2); the other types show v10's "Couldnt find any" (krunker_lobbies.c finder_none).
-// Never the offline game: a player who wants offline picks it.
-static void raid_no_lobby(void) {
-    if (seek_prefs_servers() == SEEK_SERVERS_BOTH && krunker_lobbies_enabled()) {
-        open_server_window(2);
-        return;
-    }
-    printf("[mm] raid play: no Raid lobby on %s: Couldnt find any\n", g_play_name);
-    ui_loadout_clear_pops();
-    ui_error_popup(I18N("kn.finder.none", "Couldnt find any")); // v10: iïîïiïì(null, "Couldnt find any")
-}
-
 static void on_play_list(void *user, const int status, const char *body, const size_t length) {
     const unsigned action = (unsigned) (uintptr_t) user; // the play's matchmaking action (seek_claim.h)
     (void) length;
@@ -4460,7 +4439,6 @@ static void on_play_list(void *user, const int status, const char *body, const s
         const char *map = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "map"));
         const char *custom = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "m"));
         if (meta_flag(t, "pr") || tuple_int(t, 2) >= tuple_int(t, 3)) continue;
-        if (g_play_raid && row_mode_id(t) != MODE_ID_RAID) continue; // a Raid play joins a Raid lobby
         if ((map && !strcmp(map, g_play_name)) || (custom && !strcmp(custom, g_play_name))) {
             found = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
             break;
@@ -4471,8 +4449,6 @@ static void on_play_list(void *user, const int status, const char *body, const s
         g_carry_action = action; // the seek to the lobby it names is the play's
         switch_server(found);
         g_carry_action = 0;
-    } else if (g_play_raid) {
-        raid_no_lobby(); // no Box Office Raid: Both asks krunker.io's Raids, else v10's message (never offline)
     } else if (g_play_catalogue) {
         // no server runs it: practice it offline (the client never hosts; doc/backend.md 8.7). The
         // lobby this client is joined to is left first (the console's `offline <map>`): v10's Play
@@ -4503,7 +4479,6 @@ int servers_ui_play_map(const char *name, const int catalogue) {
     if (!name || !name[0] || backend_available() != 1) return 0;
     snprintf(g_play_name, sizeof(g_play_name), "%s", name);
     g_play_catalogue = catalogue;
-    g_play_raid = 0;
     // v10 ?play=<map> (playMap, v10.js:222040-222051): a matchmaker seek for that map in any region, the
     // map as its dataQuery (`i`; the brain matches the map's index, dsma), autoChangeGame false. No lobby
     // plays it: the game list, then the offline game on it (on_seek -> on_play_list). Community maps (not one of
@@ -4529,29 +4504,6 @@ int servers_ui_play_map(const char *name, const int catalogue) {
     if (catalogue) return 0; // the offline game hosts catalogue maps itself
     fetch_map_data(name);
     return 1;
-}
-
-// The end screen's raid promo "Play Raid" (ui_handlers.c h_play_raid). v10's card opens the Raid Server Setup
-// (openHostWindow(false, 4)), which makes a private room; a KrunkNative client hosts nothing. So the card seeks a
-// public Raid lobby on the map through the Server Type's matchmaker (Quickplay's setting, seek_prefs_servers):
-// Box Office: the brain's game list, a Raid lobby of that map (mode 23), joined as a play's seek is; krunker.io:
-// Find Game's Raids (openServerWindow 2); Both: Box Office, then krunker.io. No lobby: v10's message.
-// The offline sandbox is never started here: offline starts only when the player picks it.
-void servers_ui_play_raid(const char *name) {
-    if (!name || !name[0]) return;
-    snprintf(g_play_name, sizeof(g_play_name), "%s", name);
-    g_play_catalogue = 0;
-    g_play_raid = 1;
-    if (seek_prefs_servers() == SEEK_SERVERS_OFFICIAL) {
-        open_server_window(2);
-        return;
-    }
-    // the brain's game list (a krunker.io session gives way first, as playMap does)
-    if (g_brain_mode && backend_available() == 1) {
-        if (!g_client->offline) krunker_gives_way("play raid");
-        if (mm_get("/mm/game-list?hostname=krunknative", on_play_list, (void *) (uintptr_t) seek_claim_start(&g_claims))) return;
-    }
-    raid_no_lobby(); // no brain to ask, or it refused the list at once
 }
 
 // the game page's ?play=<name> / ?game=<id> (hub links, feed "Join Now!", web start URL)

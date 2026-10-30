@@ -2343,12 +2343,11 @@ the active backend (`krunker_net_active()`: the official krunker.io connection):
   request is v10's createPrivateRoom object (`krunker_net_host_custom`, `client/src/net/krunker_net.c`):
   the `custom` packet over the official socket, answered by `cust` (v10.js:198129, :197942). The game
   joins on the reply. A community map is not sent here (krunker.io does not know it).
-- **Box Office servers** (otherwise): the brain would host the game. The same object goes to
-  `GET /mm/host-game?region=R&config=JSON` (`servers_ui_host_game`, section 8.5 of this document): the
-  brain finds a server with capacity, and the client joins. A community map is its `customMap`. The client
-  call is off by default (`servers_ui_host_game` returns 0 unless `KRUNKNATIVE_ALLOW_CLIENT_HOST=1`, the
-  policy of sections 6.3 and 8.7), so the button reports that Box Office is unavailable and points to the
-  dedicated server.
+- **Box Office servers** (otherwise): the brain hosts the game. The same object goes to
+  `GET /mm/host-game?region=R&config=JSON` (`servers_ui_host_game`, section 8.5 of this document), after
+  the hosting captcha (v10's `bCpt` "hosting"): the brain finds a server with capacity, and the client
+  joins. A community map is its `customMap`. Guests host too (`&guest=`, v10). The end screen's raid promo
+  opens this window on the Raid type, as v10's does (doc/v10/end-raid.md).
 - **Host it yourself** (always): the server_bin command for the settings (`shared/src/host_command.c`), the
   Dedicated Server window (section 8.7), and Play this map offline (KrunkNative only: the embedded offline
   game on the chosen map, the catalogue map or the published one, checked like v10).

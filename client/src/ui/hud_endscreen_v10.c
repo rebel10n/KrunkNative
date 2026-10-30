@@ -184,8 +184,8 @@ static void mount_other_earnings(void) {
     html_dom_set_html(holder, html);
 }
 
-// #raidPromoContainer (g:195990). v10's card opens the Raid Server Setup (openHostWindow(false, 4));
-// KrunkNative starts the raid instead (knPlayRaid, ui_handlers.c): the client hosts nothing.
+// #raidPromoContainer (g:195990). The card opens the Raid Server Setup: openHostWindow(false, 4)
+// (deob-10.0.5.js:200914-200916), the Host Game window's Raid type (host_flow_ui.c).
 static void mount_raid(void) {
     const HtmlElem holder = by_id("raidPromoContainer");
     if (!holder) return;
@@ -194,7 +194,7 @@ static void mount_raid(void) {
     if (E.show_raid)
         snprintf(html, sizeof(html),
                  "<div class=\"crStat raidPromo\" style=\"display: flex; align-items: center; justify-content: center; padding: 10px 15px; cursor: pointer;\" "
-                 "onclick=\"knPlayRaid()\"><div class=\"crVal\" style=\"color: %s; font-size: 13px;\">%s "
+                 "onclick=\"openHostWindow(false, 4)\"><div class=\"crVal\" style=\"color: %s; font-size: 13px;\">%s "
                  "<span style=\"font-size: 11px; opacity: 0.8; margin-left: 5px;color: gold;\">Play Now &rarr;</span></div></div>",
                  E.double_raid ? "#FFD700" : "#d95487", E.double_raid ? "2x Raid Drops This Weekend!" : "Battle Bosses in Raids!");
     html_dom_set_html(holder, html);
