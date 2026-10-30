@@ -51,6 +51,7 @@
 #include <online_mode.h> // live sign-in: the session's rights end with it
 #include <audio.h> // the auto-respawn countdown's tick_0
 #include <nettspend.h>   // the Nettspend's weapon previews
+#include "v10_loading.h" // #loadingBg: a switch in place is a fresh page for the map card
 #include <krunker_captcha.h> // krunker_captcha_needs_player: the security challenge frees the pointer
 
 #ifdef __EMSCRIPTEN__
@@ -733,11 +734,14 @@ static const char *connect_error_text(const char *error) {
 // The page boots with #instructionsFadeBG (main.css: #222, opacity 1, `transition: opacity 0.7s
 // ease-in-out`) over the menu and #instructions holding index.html's own loading ring (scale
 // 1.4) and #loadGamNm. v10 leaves both until the game's INIT, which sets the curtain's opacity
-// to 0 (g:219640, the 0.7 s fade) and hides #loadingBg (g:219397); INIT's updatePlayInstructions()
+// to 0 (g:219640, the 0.7 s fade); INIT's updatePlayInstructions()
 // replaces the ring and #loadGamNm with CLICK TO PLAY. Nothing raises the curtain again: every
 // later join is a page load in v10 (switchGame / backToOrigin navigate), so KrunkNative, which
 // switches games in place, raises it again (at once, like a fresh page) when it leaves for
 // another game: menu_show_connecting, menu_host_offline. The web build reloads anyway.
+// #loadingBg is not part of the curtain since v10.0.4: it is the map card (v10_loading.c), display none in main.css
+// until a map load that is not the page's first shows it (deob-10.0.5.js:224307-224331). Raising the curtain is a
+// fresh page for it too (v10_loading_page_reset), so the game the switch lands on shows no card, as in v10.
 static int g_boot_curtain = 1; // #instructionsFadeBG is up, waiting for an INIT
 static int g_boot_settled;     // ... and has been drawn once at opacity 1 (the fade's start value)
 // The game it waits past: an in-place switch (menu_show_connecting, menu_host_offline) lifts the
@@ -806,7 +810,7 @@ static void menu_boot_arm(const int any) {
     g_boot_mode = !any && g_ui.client ? (const void *) g_ui.client->game.mode : NULL;
     set_style("instructionsFadeBG", "transition", "opacity 0.001s");
     set_style("instructionsFadeBG", "opacity", "1");
-    set_display("loadingBg", "");
+    v10_loading_page_reset();
     g_ui.last_instructions[0] = 0;
 }
 
@@ -828,7 +832,6 @@ static void menu_boot_tick(void) {
     g_boot_curtain = 0;
     set_style("instructionsFadeBG", "transition", ""); // main.css: opacity 0.7s ease-in-out
     set_style("instructionsFadeBG", "opacity", "0");
-    set_display("loadingBg", "none");
     menu_update_instructions();
 }
 
@@ -1857,8 +1860,8 @@ static int scenario_on(void) {
 // The inline state v7.1.4's client leaves on its static page once loaded, connected and
 // on the menu (DOM of the real page, tools/uidiff/capture-v7.js), minus the HUD's (hud_ui.c).
 static void setup_dom(void) {
-    // #loadingBg and #instructionsFadeBG stay as the page boots them until the first INIT
-    // (menu_boot_tick); v10 never touches #loadingBg1 (empty, like #loadingBg)
+    // #instructionsFadeBG stays as the page boots it until the first INIT (menu_boot_tick); v10 never touches
+    // #loadingBg1 (empty); #loadingBg is the map card (v10_loading.c)
     set_display("loadingBg1", "none");
     set_display("consentBlock", "none");
     // ads: none in KrunkNative, as v10 with !window.canShowAds or premium (v10.js:219405): so no

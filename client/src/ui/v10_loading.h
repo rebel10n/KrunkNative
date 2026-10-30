@@ -35,6 +35,10 @@ void v10_loading_begin(const V10LoadingMap *map, double now_ms);
 // Per frame: starts the fade when the hold is over, and removes the card after the fade.
 void v10_loading_tick(double now_ms);
 
+// A fresh page (KrunkNative switches games in place where v10 loads a new page: menu_ui.c menu_boot_arm): the card
+// goes and the next map load is the session's first again, so it shows no card (iîiìîiî++ > 0, :224313).
+void v10_loading_page_reset(void);
+
 // Test hooks: the state the page would show.
 int v10_loading_visible(void);
 void v10_loading_reset(void);

@@ -6856,6 +6856,7 @@ input:hover + .hostMapImg {
 /* Use https://compress-or-die.com/jpg-process and coyp data URI in to `background-image` */
 #loadingBg {
 	--load-accent: #fff;
+	display: none; /* v10.0.4+: the card shows only when a map load sets it (v10_loading.c); the live main.css */
 	position: fixed;
 	left: -16px;
 	right: -16px;

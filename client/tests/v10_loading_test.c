@@ -117,6 +117,15 @@ int main(void) {
     v10_loading_begin(&candy, 9000.0);
     CHECK(!strcmp(els[0].load_accent, "#ff8a1a"), "Candy Heist --load-accent: %s", els[0].load_accent);
 
+    // a switch in place (menu_ui.c menu_boot_arm) is a fresh page: the card goes at once and the game it lands on is
+    // the page's first load, which shows no card (v10 loads a new page there: iîiìîiî starts at 0, deob-10.0.5.js:224313)
+    v10_loading_page_reset();
+    CHECK(!v10_loading_visible() && !strcmp(els[0].display, "none"), "page reset: the card is gone");
+    v10_loading_begin(&next, 10000.0);
+    CHECK(!v10_loading_visible() && !strcmp(els[0].display, "none"), "the first load after a page reset shows no card");
+    v10_loading_begin(&candy, 11000.0);
+    CHECK(v10_loading_visible() && !strcmp(els[0].display, "block"), "the next game after it shows the card");
+
     printf("v10_loading_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

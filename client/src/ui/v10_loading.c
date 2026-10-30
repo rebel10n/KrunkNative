@@ -108,6 +108,11 @@ int v10_loading_visible(void) {
     return g_visible;
 }
 
+void v10_loading_page_reset(void) {
+    v10_loading_reset();
+    set_display_by_id("loadingBg", "none");
+}
+
 void v10_loading_reset(void) {
     g_loads = 0;
     g_visible = 0;
