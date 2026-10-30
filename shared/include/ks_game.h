@@ -189,6 +189,9 @@ void ks_game_on_ai_death(Game*, int sid, const char *name, const Player *killer)
 // destructible's damage, onObjectDestroyed(sid, interface || 0, playerId) when it breaks (server script).
 void ks_game_on_object_damage(Game*, int sid, int interface_id, const Player *doer, double amount);
 void ks_game_on_object_destroyed(Game*, int sid, int interface_id, const Player *doer);
+// v10 onAdFinished(playerID, success) (server script): the player's CUSTOM_VIDEO_AD answer, 3 completed (true) or
+// -1 failed (false) (forceVideoAd, deob-10.0.4.js:226675-226692; KrunkNative's placeholder ad, client/include/kn_ad.h).
+void ks_game_on_ad_finished(Game*, const Player *player, int success);
 
 // Custom sync values of a player (2.6): the [name, value...] array of its registered names
 // whose current wrapper value is num / str / bool, serialised for NET_PACKET_SCRIPT_SYNC.

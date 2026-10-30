@@ -24,6 +24,7 @@
 #include <backend_ui.h>
 #include <client.h>
 #include <double_xp_offer.h>
+#include <kn_ad.h> // the Double XP button's rewarded ad (the placeholder)
 #include <v10_ui.h>
 #include <audio.h>
 #include "../viewer/viewer_store.h"
@@ -321,10 +322,17 @@ const char *hud_endscreen_v10_end_button_html(const Client *client) {
     return html;
 }
 
-// The Double XP click: v10's showDoubleXPRewardedAd -> claimDoubleXpReward (games % 3, with an account)
+// showRewardedAd's callback (onExit, watched or not): claimDoubleXpReward (games % 3, with an account)
+static void double_xp_after_ad(void *user) {
+    (void) user;
+    double_xp_end_claim(double_xp_done, NULL);
+}
+
+// The Double XP click: v10's showDoubleXPRewardedAd (deob-10.0.5.js:227983-227991) -> a rewarded ad (KrunkNative's
+// placeholder, kn_ad.h) -> claimDoubleXpReward (:227961-227963) once it is closed
 static int h_double_xp(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) ev; (void) args; (void) argc;
-    double_xp_end_claim(double_xp_done, NULL);
+    kn_ad_show_rewarded(double_xp_after_ad, NULL);
     return 1;
 }
 

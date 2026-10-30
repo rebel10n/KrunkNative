@@ -35,5 +35,9 @@ void double_xp_claim(DoubleXpDoneFn done, void *user);
 // Box Office's end-card claim (hud_endscreen_v10.c): ["rqdxp"] on the social socket when the account's games is a
 // multiple of 3 above zero, whatever the offer says (v10's claimDoubleXpReward). done as double_xp_claim.
 void double_xp_end_claim(DoubleXpDoneFn done, void *user);
+// The krunker.io account sends ["rqdxp"] on the official game socket instead (deob-10.0.5.js:227961-227963) and its
+// answer "rrqdxp" (RECIEVE_DOUBLE_XP, :227958) comes back through account_ui.c's kio frames: handed in here.
+struct cJSON;
+void double_xp_offer_answer(const struct cJSON *frame);
 
 #endif

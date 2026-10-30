@@ -631,6 +631,16 @@ void ks_game_on_object_destroyed(Game *game, const int sid, const int interface_
     ks_handle_unpin(s, args[2]);
 }
 
+void ks_game_on_ad_finished(Game *game, const Player *player, const int success)
+{
+    if (!player || !server_hook(game, "onAdFinished")) return;
+    KsScript *s = game->ks->script;
+    KsValue args[2] = {id_value(s, player), ks_bool(success != 0)};
+    ks_handle_pin(s, args[0]);
+    ks_game_call(game, "onAdFinished", args, 2);
+    ks_handle_unpin(s, args[0]);
+}
+
 void ks_game_on_player_leave_uid(Game *game, const int uid)
 {
     if (server_hook(game, "onPlayerLeave")) {

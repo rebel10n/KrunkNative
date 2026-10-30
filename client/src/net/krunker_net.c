@@ -719,6 +719,18 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     }
     int ok = 0;
     if ((!strcmp(name, "bpdl") || !strcmp(name, "vcln")) && n == 0) ok = 1;
+    // the ad-gated claims, sent after KrunkNative's placeholder ad (kn_ad.h, doc/v10/ads.md): the Free KR wheel's
+    // AD_STARTED / AD_LOADED / AD_FAILED / AD_FINISHED (sfkr / lfkr / fkrf / fkr, answered "spinKR", deob-10.0.5.js:222644),
+    // the end screen's 2x XP (rqdxp, answered "rrqdxp", :227961-227963), a battle pass card (bpclm [id], answered "bpclmr",
+    // :217588-217593) and a video ad's CUSTOM_VIDEO_AD state (vad [1 | 2 | 3 | -1], :227964-227981)
+    if ((!strcmp(name, "sfkr") || !strcmp(name, "lfkr") || !strcmp(name, "fkrf") || !strcmp(name, "fkr") || !strcmp(name, "rqdxp") ||
+         !strcmp(name, "bpclmAll")) && n == 0)
+        ok = 1;
+    if (!strcmp(name, "bpclm") && n == 1 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1))) ok = 1;
+    if (!strcmp(name, "vad") && n == 1 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1))) {
+        const int s = cJSON_GetArrayItem(frame, 1)->valueint;
+        ok = s == 1 || s == 2 || s == 3 || s == -1;
+    }
     if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
     if (!strcmp(name, "vo") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1))) ok = 1;
     if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)

@@ -933,3 +933,9 @@ html.kn-bare-window #instructions {
   margin: 0 0 8px;
   text-align: right;
 }
+
+/* KrunkNative's placeholder ad (client/src/ui/kn_ad.c, doc/v10/ads.md): #genericPop.loadingPop.knAdPop, where v10 plays
+   an FRVR ad. The Continue button (#confirmBtn) waits for the countdown. */
+#genericPop.knAdPop { width: 520px; text-align: center; }
+#genericPop.knAdPop .knAdBody { font-family: "GameFont", sans-serif; }
+#genericPop.knAdPop #confirmBtn.knAdWait { opacity: 0.4; pointer-events: none; cursor: default; }

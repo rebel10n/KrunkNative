@@ -197,7 +197,16 @@ typedef enum {
     // 0x8160 v10.0.4 counter skins (client/include/skin_counter.h, server/src/skin_counters_server.c)
     NET_EXT_KN_SKIN_COPIES = 0x8160, // S -> C NetSkinCopiesPacket, right after a player's SKINS: each worn copy's stat and seed
     NET_EXT_KN_SKIN_STAT = 0x8161,     // S -> C NetSkinStatPacket: "sks" SKIN_STAT, a server-only stat counted for you
+    // 0x8170 v10 video ads (client/include/kn_ad.h: the placeholder ad, doc/v10/ads.md)
+    NET_EXT_KN_VIDEO_AD = 0x8170, // S -> C no body: FORCE_VIDEO_AD "vad"; C -> S NetVideoAdPacket: CUSTOM_VIDEO_AD "vad" [state]
 } NetExtSubtype;
+
+// NET_EXT_KN_VIDEO_AD (C -> S): forceVideoAd's CUSTOM_VIDEO_AD states (deob-10.0.4.js:226675-226692): 1 asked, 2 shown,
+// 3 completed, -1 failed. The server fires KrunkScript's onAdFinished(playerID, success) on 3 (true) and -1 (false).
+typedef struct {
+    int32_t state;
+} NetVideoAdPacket;
+_Static_assert(sizeof(NetVideoAdPacket) == 4, "NetVideoAdPacket: the wire body is 4 bytes");
 
 // NET_EXT_KN_SKIN_COPIES (S -> C): what player `uid`'s worn copies carry, in PlayerSkins order (primary, secondary, melee):
 // base, a counter skin's copy stat, generateMeshes' counter base m[stat] (deob-10.0.4.js:172726-172728), -1 = no counter

@@ -126,7 +126,7 @@ typedef enum {
     TRIGGER_ACTION_GIVE_EFFECT = 64,           // "Give Effect"
     TRIGGER_ACTION_CHALLENGE_ALL = 65,         // "Give Challenge Progress (All)" (backend, devOnly)
     TRIGGER_ACTION_RANDOM_EFFECT = 66,         // "Give Random Effect"
-    TRIGGER_ACTION_VIDEO_AD = 67,              // "Play Video Ad" (no ads natively)
+    TRIGGER_ACTION_VIDEO_AD = 67,              // "Play Video Ad": FORCE_VIDEO_AD, the placeholder ad (doc/v10/ads.md)
     TRIGGER_ACTION_DROP_POWERUP = 68,          // "Drop Powerup" (devOnly, zombies)
     TRIGGER_ACTION_SPAWN_BOT = 69,             // "Spawn Bot at Node" (devOnly)
     TRIGGER_ACTION_FORCE_AI_TARGET = 70,       // "Force AI Target"

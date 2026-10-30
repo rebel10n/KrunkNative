@@ -36,6 +36,7 @@
 #include <ks_game.h>       // ks_wall_ms: the Prize Wheels tab's clock
 #include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
 #include <kio_checkout.h>  // krunker.io's real-money purchases (showPurchase, premiumPopup, directPurchase, bundles)
+#include <krunker_net.h>   // the krunker.io account's Free KR spin (AD_FINISHED "fkr") on the official game socket
 #include <html_dom.h>
 #include <i18n.h>
 #include <time.h>
@@ -753,8 +754,20 @@ static void spin_button_click(void) {
         return;
     }
     if (kio_store_active()) {
-        if (g_cur->kr) { // the Free KR wheel's spin is an ad (AD_FINISHED over the game socket): not built yet
-            kio_store_unwired("the Free KR spin");
+        if (g_cur->kr) { // the Free KR wheel (after claimReward's ad): AD_FINISHED "fkr" on the game socket, answered "spinKR"
+            cJSON *fkr = cJSON_CreateArray(); // (deob-10.0.5.js:222644, :222655)
+            cJSON_AddItemToArray(fkr, cJSON_CreateString("fkr"));
+            const int sent = krunker_net_send_account_frame(fkr);
+            cJSON_Delete(fkr);
+            if (!sent) {
+                spin_error("Spin Error 3");
+                return;
+            }
+            g_spinning = 1;
+            g_can_spin = 0;
+            set_html("spinHeader", "");
+            set_html("spinCost", I18N("windows.store.purchasing", "Purchasing..."));
+            audio_play("buy_1", 0.1f, 0, 1.0f);
             return;
         }
         // POST spins/execute (deob-10.0.4.js:221350): the wheel's index and the ticket, -1 for null; the ticket count
@@ -2177,5 +2190,5 @@ void store_ui_frame(const cJSON *frame) {
     else if (!strcmp(label, "spinH")) history_response(frame);
 }
 
-// claimReward(): the Free KR wheel once its timer ran out (v7.1.4 shows an ad first)
+// claimReward(): the Free KR wheel once its timer ran out and its ad (the placeholder, account_ui.c) was watched
 void store_ui_free_kr_wheel(void) { prize_wheel(free_kr_wheel(), -1, 0, 0, 0); }

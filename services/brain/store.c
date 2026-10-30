@@ -231,8 +231,8 @@ int acct_skin_count(void) {
 
 static double roll100(void) { return (double) (kn_random_u64() % 1000000ULL) / 10000.0; }
 
-/* config.rewardTime: 12 h in v7.1.4 (v3.1.1: 6 h) */
-static int64_t reward_time_ms(void) { return kn_config_int(g_acct_brain->cfg, "accounts.reward_time_s", 43200) * 1000; }
+/* config.rewardTime 0x36ee80: 1 h (deob-10.0.5.js:19957; 12 h in v7.1.4, 6 h in v3.1.1) */
+static int64_t reward_time_ms(void) { return kn_config_int(g_acct_brain->cfg, "accounts.reward_time_s", 3600) * 1000; }
 
 /* store.getSpnItems(wheel, rarity, account, wheel.season || config.currentSeason, wheel.bigRar)
  * of a rarity wheel (v10.js:103197). bigRar is applied to rolls of that rarity and above (the

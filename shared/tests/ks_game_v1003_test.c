@@ -632,6 +632,19 @@ static void test_ai_wrapper(void) {
     CHECK(logged("t true false false true") && g_progress_calls == 2 && g_progress_max == 1000 && !strcmp(g_progress_key, "candy") && g_progress_value == 7,
           "trackStat: candy 5000 -> 1000 counted, a bad stat and 0 refused, \"7x\" -> 7 (%s, %d calls, %s %d)",
           g_log_count ? g_log[g_log_count - 1] : "none", g_progress_calls, g_progress_key, g_progress_value);
+    // onAdFinished(playerID, success) (forceVideoAd's CUSTOM_VIDEO_AD 3 / -1, deob-10.0.5.js:227964-227981): the server
+    // script hears the player's (placeholder) video ad; KrunkNative's ks_game_on_ad_finished
+    run_script(&game, "public action start() {\n}\npublic action onAdFinished(str playerID, bool success) {\n"
+                      "    GAME.log(\"ad \" + playerID + \" \" + toStr(success));\n}\n");
+    ks_game_on_ad_finished(&game, p, 1);
+    ks_game_on_ad_finished(&game, p, 0);
+    {
+        char yes[48], no[48];
+        snprintf(yes, sizeof yes, "ad %d true", p->uid);
+        snprintf(no, sizeof no, "ad %d false", p->uid);
+        CHECK(logged(yes) && logged(no), "onAdFinished(playerID, success) for a completed and a failed ad (%s)",
+              g_log_count ? g_log[g_log_count - 1] : "none");
+    }
     // player.score = v, v10.0.4 (players.score(p, v, 0, true), deob-10.0.4.js:175915, :175948): a set counts only what it
     // added toward the "score" challenges, max(0, score - before): 0 -> 100 counts 100, 100 -> 40 nothing, 40 -> 70 counts 30
     p->score = 0;

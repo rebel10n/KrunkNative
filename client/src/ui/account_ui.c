@@ -62,12 +62,15 @@
 #include <online_mode.h>  // auth_unreachable: offline mode
 #include <krunker_account.h> // the krunker.io account: the active one in an official game
 #include <krunker_net.h>     // krunker_net_active(): an official game is being joined or played
+#include <kn_ad.h>           // the placeholder ad: the Free KR card's (claimReward) (doc/v10/ads.md)
+#include <video_ad.h>        // FORCE_VIDEO_AD on an official game: the placeholder video ad
+#include <double_xp_offer.h> // the end screen's 2x XP answer on the krunker.io game socket ("rrqdxp")
 #include <app_backend.h>     // app_backend_official_session(): the router's / a child window's official connection
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT I18N("generic.wait", "Please wait...") // v7 showAccountResponse(i18n.t("generic.wait"))
 #define REWARD_MIN_LVL 1             // the Free KR wheel's minLvl (v3.1.1's daily reward: config.rewardMinLvl 5)
-#define REWARD_TIME_MS 43200000.0    // config.rewardTime (12 h in v7.1.4)
+#define REWARD_TIME_MS 3600000.0     // config.rewardTime 0x36ee80 (1 h, deob-10.0.5.js:19957; 12 h in v7.1.4)
 
 static Client *g_client;
 static AccountInfo g_acc;
@@ -543,8 +546,18 @@ static void kio_frame(const char *label, const cJSON *frame) {
         g_kio.gen++;
     } else if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
         return; // (the battle pass / clan / challenge answers belong to the krunker.io account's windows)
-    } else if (!strcmp(label, "bpdl") || !strcmp(label, "bppd") || !strcmp(label, "bpEnd")) { // the pass, its progress, the end's tmpBPData ("end" [6], krunker_link.c)
+    } else if (!strcmp(label, "bpdl") || !strcmp(label, "bppd") || !strcmp(label, "bpEnd") || !strcmp(label, "bpclmr")) {
+        // the pass, its progress, the end's tmpBPData ("end" [6], krunker_link.c), a card's claim (claimItemRes, :217560)
         battlepass_ui_frame(label, frame);
+    } else if (!strcmp(label, "spinKR")) { // SPIN_KR: the Free KR wheel's prize (iïiiîïì: lastReward, rand, index, funds, err)
+        const cJSON *last = cJSON_GetArrayItem(frame, 1), *funds = cJSON_GetArrayItem(frame, 4);
+        if (cJSON_IsNumber(last)) obj_set("player_lastreward", last);
+        if (cJSON_IsNumber(funds)) account_kio_set_balances(1, funds->valuedouble, 0, 0);
+        store_ui_frame(frame);
+    } else if (!strcmp(label, "rrqdxp")) { // RECIEVE_DOUBLE_XP: the end screen's 2x XP (deob-10.0.5.js:227958)
+        double_xp_offer_answer(frame);
+    } else if (!strcmp(label, "vad")) { // FORCE_VIDEO_AD: forceVideoAd (:227964-227981), the placeholder ad
+        client_video_ad_force(); // its CUSTOM_VIDEO_AD states back on the game socket (video_ad.c)
     } else if (!strcmp(label, "cln")) {
         clan_ui_frame(frame);
     } else if (!strcmp(label, "dslr")) { // DAILY_SPIN_CLAIM_RESPONSE [{ticketId}] (v10_daily_spin.c)
@@ -1554,8 +1567,14 @@ void account_ui_init(Client *client) {
 // Store's "Free KR Spin" card (store_ui.c), a countdown until it can be claimed. KrunkNative
 // also wants one finished match this session (no ads to watch). ms left, 0 = claimable, -1 = none.
 double account_reward_ms(void) {
-    if (!g_logged_in || g_acc.level < REWARD_MIN_LVL) return -1.0;
-    const double last = g_acc.data ? num_at(g_acc.data, 11) : 0.0;
+    double last;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the krunker.io account's lastReward (player_lastreward, :114909)
+        if (!g_kio.obj) return -1.0;
+        last = obj_num("player_lastreward");
+    } else {
+        if (!g_logged_in || g_acc.level < REWARD_MIN_LVL) return -1.0;
+        last = g_acc.data ? num_at(g_acc.data, 11) : 0.0;
+    }
     const double db = REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last);
     return db > 0 ? db : 0.0;
 }
@@ -2477,6 +2496,34 @@ static void promo_emails_set(const int on) {
         printf("[account] togglePromoEmails: no account service\n");
 }
 
+// ---- the Free KR card's ad (claimReward): its AD_STARTED / AD_LOADED / AD_FAILED to the account's own socket (the krunker.io
+// game socket, or kn_brain's social socket, which takes them as no-ops), then the wheel
+static void free_kr_ad_frame(const char *label) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        cJSON *frame = cJSON_CreateArray();
+        cJSON_AddItemToArray(frame, cJSON_CreateString(label));
+        krunker_net_send_account_frame(frame);
+        cJSON_Delete(frame);
+        return;
+    }
+    char text[24];
+    snprintf(text, sizeof text, "[\"%s\"]", label);
+    backend_social_send_text(text);
+}
+static void free_kr_ad_shown(void *user) {
+    (void) user;
+    free_kr_ad_frame("lfkr");
+}
+static void free_kr_ad_done(void *user) {
+    (void) user;
+    store_ui_free_kr_wheel(); // prizeWheel(4): its spin sends "fkr"
+}
+static void free_kr_ad_error(void *user, const char *error) {
+    (void) user;
+    (void) error; // "skipped": v7 shows nothing for it (the only error the placeholder has)
+    free_kr_ad_frame("fkrf");
+}
+
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     // No account service, or the probe found none: say why at once. A socket that is still
@@ -2613,15 +2660,15 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             deletion_confirmed(1, NULL, (void *) (intptr_t) 0);
         return 1;
     }
-    if (!strcmp(name, "claimReward") && g_logged_in) {
-        // v7.1.4 plays an ad, then opens the Free KR wheel (prizeWheel(4)) whose spin asks the
-        // brain (["fkr"]); KrunkNative has no ads: the wheel opens once the timer ran out and a
-        // match was played this session
-        const double last = g_acc.data ? num_at(g_acc.data, 11) : 0.0;
-        if (g_reward_played && REWARD_TIME_MS - ((double) time(NULL) * 1000.0 - last) <= 0) {
-            ui_loadout_clear_pops();
-            store_ui_free_kr_wheel();
-        }
+    if (!strcmp(name, "claimReward")) {
+        // The Free KR card (window.claimReward, deob-10.0.5.js:129955; v10 calls it but no longer defines it, so this is
+        // v7.1.4's, index.js:3168-3192): "sfkr", an ad (onShow "lfkr", onError "fkrf"), then the Free KR wheel
+        // (prizeWheel(4)) whose spin sends "fkr" (AD_FINISHED, :222644). The ad is KrunkNative's placeholder (kn_ad.h).
+        if (account_reward_ms() != 0.0) return 1; // no account, or the timer has not run out (vLN01713 > 0)
+        ui_loadout_clear_pops();
+        free_kr_ad_frame("sfkr");
+        const KnAdRequest ad = {.on_show = free_kr_ad_shown, .on_complete = free_kr_ad_done, .on_error = free_kr_ad_error};
+        kn_ad_show(&ad);
         return 1;
     }
     if (!strcmp(name, "windows.29.switchTab")) {

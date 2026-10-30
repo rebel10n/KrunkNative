@@ -187,7 +187,7 @@
     "current_season": 10,
     "store_season": 10,
     "store_reload_ms": 60000,
-    "reward_time_s": 43200,
+    "reward_time_s": 3600,
     "reward_min_level": 5,
     "daily_reward_kr": 50,
     "skins_file": "assets/skins.json",

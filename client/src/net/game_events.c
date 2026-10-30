@@ -65,6 +65,7 @@
 #include <ruleset.h>
 #include <player_names.h>
 #include <live_events_client.h> // v10.0.3 live events: the round's eventIndex
+#include <video_ad.h>           // FORCE_VIDEO_AD: the placeholder video ad (kn_ad.h)
 
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
 #define RANKED_CHAT_COLOR "#5ce05a" // the ranked UI's green: a ranked queue's notice (NET_CHAT_RANKED)
@@ -1438,6 +1439,8 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 static const char *const stats[SKIN_STAT_COUNT] = SKIN_STATS;
                 // iiîíiíi (deob-10.0.4.js:221919-221923): countSkinStat(you, weapon, stat, amount)
                 if (sks.stat < SKIN_STAT_COUNT) skin_counter_count_player(client->me, sks.weapon, stats[sks.stat], sks.amount);
+            } else if (subtype == NET_EXT_KN_VIDEO_AD) { // FORCE_VIDEO_AD "vad": forceVideoAd (deob-10.0.5.js:227964-227981)
+                client_video_ad_force();
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (s2c_events_on_ext(client, subtype, body, body_length)) {} // "c" "sb" "sdc" "p" "unb" "spinW" "chreq" ... (s2c_events.h)

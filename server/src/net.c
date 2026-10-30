@@ -2041,6 +2041,25 @@ static int net_packet_is_activity(const uint8_t type) {
     }
 }
 
+// v10 FORCE_VIDEO_AD "vad" (the trigger action "Play Video Ad"): the player's client plays its video ad (forceVideoAd,
+// deob-10.0.4.js:226675-226692; KrunkNative's placeholder ad) and answers with CUSTOM_VIDEO_AD states.
+static void net_game_video_ad(Game *game, Player *player) {
+    (void) game;
+    ClientConnection *client = net_client_of_player(player);
+    if (!client || client->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    uint8_t buf[NET_EXT_HEADER_SIZE];
+    const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_VIDEO_AD, NULL, 0);
+    if (len) net_send_packet(client->fd, NET_PACKET_EXT, buf, len);
+}
+
+// CUSTOM_VIDEO_AD "vad" [state] (NET_EXT_KN_VIDEO_AD): 3 completed / -1 failed fire onAdFinished(playerID, success)
+static void net_handle_video_ad(ClientConnection *client, const uint8_t *body, const uint16_t body_length) {
+    if (!client->player || body_length < sizeof(NetVideoAdPacket)) return;
+    NetVideoAdPacket p;
+    memcpy(&p, body, sizeof(p));
+    if (p.state == 3 || p.state == -1) ks_game_on_ad_finished(&g_server->game, client->player, p.state == 3);
+}
+
 // v10 ping (NET_EXT_MARK_POSITION, "mpos"): tmpPlayer.markPosition (:170189) sends the camera ray's
 // first hit when the game is ranked or comp (:221125) and the player is alive. Every other connection
 // gets it as addPingIcon(key, position) (:160954) with key = the pinging connection's id. Nothing is
@@ -2332,6 +2351,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KPD_APPLY) votekick_handle_kpd_apply(client, body, body_length); // "kpdA" (votekick.c)
             else if (subtype == NET_EXT_KPD_LIST) votekick_handle_kpd_list(client, body, body_length);   // "kpd" tab 4 / 5 (votekick.c)
             else if (subtype == NET_EXT_MARK_POSITION) net_handle_mark_position(client, body, body_length); // "mpos": a ranked / comp ping
+            else if (subtype == NET_EXT_KN_VIDEO_AD) net_handle_video_ad(client, body, body_length);       // "vad" CUSTOM_VIDEO_AD
             else if (subtype == NET_EXT_PROP_PICK && body_length >= sizeof(NetPropPickPacket) && client->player) { // "prp" (prop_hunt.h)
                 NetPropPickPacket pick;
                 memcpy(&pick, body, sizeof(pick));
@@ -2410,6 +2430,7 @@ void net_install_game_hooks(void) {
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
     server_events_install_game_hooks(&g_server->game); // v10.0.3 egg hunt: foundEventItem (live_events_server.c)
     skin_counters_install_game_hooks(&g_server->game); // v10.0.4 counter skins: countSkinStat (skin_counters_server.c)
+    g_server->game.hooks.video_ad = net_game_video_ad;   // v10 FORCE_VIDEO_AD "vad" (the trigger action Play Video Ad)
 }
 
 // kickIdleSocket: ["error", "Kicked for inactivity", "000005"], then close.

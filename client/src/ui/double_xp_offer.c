@@ -5,6 +5,7 @@
 
 #include <backend.h>
 #include <backend_ui.h>
+#include <krunker_net.h> // krunker_net_send_account_frame: the krunker.io account's claim (official game socket)
 #include <html_ui.h>
 
 #include <cJSON.h>
@@ -77,12 +78,15 @@ static void on_social(void *user, const cJSON *frame) {
     finish(DOUBLE_XP_GRANTED);
 }
 
-// ["rqdxp"] on the social socket
+void double_xp_offer_answer(const cJSON *frame) { on_social(NULL, frame); }
+
+// ["rqdxp"] on the social socket (the krunker.io account: on the official game socket, deob-10.0.5.js:227961-227963)
 static void send_claim(void) {
-    if (!g_listening) g_listening = backend_social_listen(on_social, NULL) ? 1 : 0;
+    const int official = account_backend() == ACCOUNT_BACKEND_KRUNKER;
+    if (!official && !g_listening) g_listening = backend_social_listen(on_social, NULL) ? 1 : 0;
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("rqdxp"));
-    const int sent = g_listening && backend_social_send(frame);
+    const int sent = official ? krunker_net_send_account_frame(frame) : g_listening && backend_social_send(frame);
     cJSON_Delete(frame);
     if (!sent) {
         finish(DOUBLE_XP_ERROR);
@@ -94,7 +98,7 @@ static void send_claim(void) {
 // The claim of either button. done runs once, when rrqdxp is answered, or at once when nothing is sent.
 static void start_claim(DoubleXpDoneFn done, void *user, const double games) {
     KN_LOG_DEBUG1("[double_xp] rqdxp at games %.0f\n", games);
-    if (backend_available() != 1) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER && backend_available() != 1) {
         done(user, DOUBLE_XP_ERROR);
         return;
     }

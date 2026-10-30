@@ -1,6 +1,6 @@
 // Krunker Strike's banner ad slot (client/include/strike_banner_ad.h). The slot shows the match's
-// Double XP state and its click claims it through double_xp_offer.h (double_xp_claim: ["rqdxp"] at once,
-// no ad). Its status line says what is on: "2x XP" once the match is doubled, and why there is no
+// Double XP state and its click plays the placeholder ad (kn_ad.h), then claims it through double_xp_offer.h
+// (double_xp_claim: ["rqdxp"]). Its status line says what is on: "2x XP" once the match is doubled, and why there is no
 // offer. The weekend schedules (2x class XP, 2x raid drops) are not on the banner yet: dxp-client exports
 // no accessor for them. Guests are asked to sign in; nothing is watched and nothing is requested for them.
 #include <strike_banner_ad.h>
@@ -8,6 +8,7 @@
 
 #include <backend_ui.h>
 #include <double_xp_offer.h>
+#include <kn_ad.h> // the banner's ad: the placeholder
 
 #include <stdio.h>
 #include <string.h>
@@ -73,6 +74,12 @@ static void on_claim(void *user, const DoubleXpResult result) {
     refresh();
 }
 
+// the banner's ad has been watched (KrunkNative's placeholder, kn_ad.h): the claim
+static void after_ad(void *user) {
+    (void) user;
+    double_xp_claim(on_claim, NULL);
+}
+
 void strike_banner_ad_claim(void) {
     g_slot.error = 0;
     if (!active_account()) { // a guest has no account to claim for: nothing is requested
@@ -80,5 +87,9 @@ void strike_banner_ad_claim(void) {
         refresh();
         return;
     }
-    double_xp_claim(on_claim, NULL);
+    if (!double_xp_offer_open()) { // no offer: the claim says so at once, no ad
+        double_xp_claim(on_claim, NULL);
+        return;
+    }
+    kn_ad_show_rewarded(after_ad, NULL); // "Watch an ad for Double XP": the placeholder ad, then the claim
 }

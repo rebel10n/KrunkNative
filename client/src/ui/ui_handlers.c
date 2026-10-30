@@ -27,6 +27,7 @@
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
 #include <kio_checkout.h> // XsollaPopup / purchaseCancel: the real-money checkout (kio_checkout.c)
+#include <kn_ad.h>        // the placeholder ad (kn_ad.c, doc/v10/ads.md)
 #include <alt_manager_ui.h> // the saved accounts window (alt_manager_ui.c)
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
@@ -584,6 +585,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
 // handler result (0 = `return false` cancels the default action).
 typedef int (*UiModuleHandler)(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
 static const UiModuleHandler MODULE_HANDLERS[] = {
+    kn_ad_handle,              // kn_ad.c: the placeholder ad's Continue / close (knAdContinue, knAdClose)
     host_flow_ui_handle,       // host_flow_ui.c: the Host Game flow (knHostFlow), every Host Game entry point
     v10_menu_handle,           // v10_menu.c / v10_login.c: the v10 page's menu shell, loginOrRegister
     v10_rewards_handle,        // v10_rewards.c: v10.0.2 signup rewards, windows[32] (before account_ui.c's v7 ones)

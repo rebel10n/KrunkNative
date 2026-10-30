@@ -592,8 +592,12 @@ async def scenario(base, internal_url, secret):
         check(all(x["fds"] == 0 for x in h[10:15]) and h[15]["fds"] == 50, "the tickets' items cost no KR: %r" % h[10:16])
         r = await c.call("spinH", "spinH", 20)
         check(len(r[1]) == 6, "spin history paging (offset 20)")
+        # the Free KR card's ad (claimReward: AD_STARTED, AD_LOADED around KrunkNative's placeholder ad, doc/v10/ads.md):
+        # taken without an answer, and the wheel's "fkr" still pays
+        await c.send("sfkr")
+        await c.send("lfkr")
         r = await c.call("spinKR", "fkr")
-        check(r[1] > 0 and 0 <= r[3] <= 3 and r[4] - 1450 == [5, 10, 20, 500][r[3]], "Free KR wheel: %r" % r)
+        check(r[1] > 0 and 0 <= r[3] <= 3 and r[4] - 1450 == [5, 10, 20, 500][r[3]], "Free KR wheel after its ad: %r" % r)
         r = await c.call("spinKR", "fkr")
         check(r[5] == "Reward not ready yet", "Free KR once per rewardTime")
         r = await c.call("pRes", "clm")

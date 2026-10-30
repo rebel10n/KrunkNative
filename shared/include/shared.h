@@ -2069,6 +2069,10 @@ typedef struct {
     // candy loop, :184308-184311). The server counts it on the counter skin worn on that weapon and saves it with the
     // match (server/src/skin_counters_server.c). NULL = nothing counted.
     void (*skin_stat)(struct Game_t*, Player *player, int weapon_id, const char *stat, int amount);
+    // v10 FORCE_VIDEO_AD "vad" (the trigger action "Play Video Ad", 67): tell `player`'s client to play a video ad
+    // (its forceVideoAd, deob-10.0.4.js:226675-226692; KrunkNative plays the placeholder ad, client/include/kn_ad.h).
+    // The client answers with CUSTOM_VIDEO_AD states; 3 / -1 fire KrunkScript's onAdFinished. NULL = nothing sent.
+    void (*video_ad)(struct Game_t*, Player *player);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second

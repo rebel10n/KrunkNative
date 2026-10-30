@@ -32,6 +32,9 @@
 #include <backend_ui.h>
 #include <kio_checkout.h> // the official pass's purchases (xstbp / xstbpl): the payment provider's checkout
 #include <klog.h>
+#include <kn_ad.h>      // freeclaimItem's rewarded ad (the placeholder)
+#include <krunker_net.h> // the krunker.io account's claims on the official game socket
+#include <stdint.h>
 #include <html_dom.h>
 #include <html_ui.h>
 #include <i18n.h>
@@ -672,22 +675,34 @@ static void purchase_error(const cJSON *err) {
 // The official krunker.io account's purchases (xstbp, xstbpl, the gift) go through kio_checkout.c: the payment provider's
 // page in the system browser, the answers ("purbp" / "purbpl") back to battlepass_ui_frame.
 
-// The official account's claims (bpclm, bpclmAll) are refused the same way: a claim changes the krunker.io account
-static int claim_refused(void) {
-    account_popup(0, NULL, "Claiming a reward is not sent to krunker.io from Krunker Box Office.");
-    return 1;
+static void loading_popup(const char *text) { account_popup(2, NULL, text); } // io_loadingPopup
+
+// A claim ("bpclm" [id], "bpclmAll"): on kn_brain's social socket, or for the krunker.io account on the official game
+// socket (deob-10.0.5.js:217588-217600), answered "bpclmr" (claimItemRes) either way
+static void send_claim(const int id) {
+    loading_popup("Claiming...");
+    if (official()) {
+        cJSON *frame = cJSON_CreateArray();
+        cJSON_AddItemToArray(frame, cJSON_CreateString(id >= 0 ? "bpclm" : "bpclmAll"));
+        if (id >= 0) cJSON_AddItemToArray(frame, cJSON_CreateNumber(id));
+        krunker_net_send_account_frame(frame);
+        cJSON_Delete(frame);
+        return;
+    }
+    char frame[48];
+    if (id >= 0) snprintf(frame, sizeof frame, "[\"bpclm\",%d]", id);
+    else snprintf(frame, sizeof frame, "[\"bpclmAll\"]");
+    backend_social_send_text(frame);
 }
 
-static void loading_popup(const char *text) { account_popup(2, NULL, text); } // io_loadingPopup
+// freeclaimItem's rewarded ad has closed (showRewardedAd(cb): cb on exit): the claim
+static void free_claim_after_ad(void *user) { send_claim((int) (intptr_t) user); }
 
 // Claims one card (windows[5].claimItem, io.send("bpclm", id)): the answer is "bpclmr" (battlepass_ui_frame).
 // Strike's Rewards tab calls it; the loading popup is the same as the menu's.
 void battlepass_ui_claim(const int id) {
     if (!active_account()) return;
-    char frame[48];
-    loading_popup("Claiming...");
-    snprintf(frame, sizeof frame, "[\"bpclm\",%d]", id);
-    backend_social_send_text(frame);
+    send_claim(id);
 }
 
 // ------------------------------------------------------------------ handlers
@@ -712,13 +727,12 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     } else if (!strcmp(name, "windows.5.showBalloon") || !strcmp(name, "windows.5.hideBalloon")) {
         const HtmlElem b = html_dom_query(0, ".bpInfoBalloon");
         if (b) html_dom_set_display(b, !strcmp(name, "windows.5.showBalloon") ? "block" : "none");
-    } else if (!strcmp(name, "windows.5.claimItem") || !strcmp(name, "windows.5.freeclaimItem")) {
-        if (!active_account()) return 1;
-        if (official()) return claim_refused();
-        char frame[48];
-        loading_popup("Claiming...");
-        snprintf(frame, sizeof frame, "[\"bpclm\",%d]", arg_num(args, argc, 0, -1));
-        backend_social_send_text(frame);
+    } else if (!strcmp(name, "windows.5.claimItem")) {
+        if (active_account()) send_claim(arg_num(args, argc, 0, -1));
+    } else if (!strcmp(name, "windows.5.freeclaimItem")) {
+        // a free card without the VIP tier: showRewardedAd, then the claim (deob-10.0.5.js:217588-217593); the ad is
+        // KrunkNative's placeholder (kn_ad.h)
+        if (active_account()) kn_ad_show_rewarded(free_claim_after_ad, (void *) (intptr_t) arg_num(args, argc, 0, -1));
     } else if (!strcmp(name, "windows.5.purchasePop")) {
         if (active_account()) purchase_pop();
         else menu_show_window(5, 1);
@@ -749,10 +763,7 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         loading_popup("Please Wait...");
         backend_social_send_text(frame);
     } else if (!strcmp(name, "windows.5.claimAllItems")) { // v10 BP_CLAIM_ALL (no button on v10.0.2's page)
-        if (!active_account()) return 1;
-        if (official()) return claim_refused();
-        loading_popup("Claiming...");
-        backend_social_send_text("[\"bpclmAll\"]");
+        if (active_account()) send_claim(-1);
     } else if (!strcmp(name, "windows.5.skipLevelPop")) {
         if (active_account()) skip_level_pop();
     } else if (!strcmp(name, "windows.5.increaseSkip")) {

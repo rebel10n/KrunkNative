@@ -595,6 +595,11 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         // "vr" (REDEEM_VOUCHER_RESPONSE, deob-10.0.4.js:221042) and the real-money purchase's answers (krunker_checkout.h):
         // the main thread's (krunker_net.c account_frames_tick -> kio_store.c / kio_checkout.c)
         case KRUNKER_S2C_REDEEM_VOUCHER_RESPONSE:
+        // the ad-gated answers and FORCE_VIDEO_AD (kn_ad.h, doc/v10/ads.md): account_ui.c's kio_frame
+        case KRUNKER_S2C_SPIN_KR:
+        case KRUNKER_S2C_RECIEVE_DOUBLE_XP:
+        case KRUNKER_S2C_CLAIM_ITEM_RESPONSE:
+        case KRUNKER_S2C_FORCE_VIDEO_AD:
         case KRUNKER_S2C_LOAD_XSOLLA:
         case KRUNKER_S2C_PURCHASE_RESPONSE:
         case KRUNKER_S2C_PURCHASE_PRODUCT_RESPONSE:
@@ -616,7 +621,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_ADD_MAIL:
         case KRUNKER_S2C_OPEN_MAIL:
         case KRUNKER_S2C_UPDATE_MAIL:
-        case KRUNKER_S2C_CLAIM_ITEM_RESPONSE:
         case KRUNKER_S2C_SURVEY_BUNDLE_RESPONSE:
         case KRUNKER_S2C_POPUP_REGISTER_REWARDS:
         case KRUNKER_S2C_CLAN_LEAVE_RESPONSE:
@@ -624,7 +628,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_UPLOAD_PROFILE_RESPONSE:
         case KRUNKER_S2C_SPIN_RESPONSE:
         case KRUNKER_S2C_SAVE_SPIN_HISTORY:
-        case KRUNKER_S2C_SPIN_KR:
         case KRUNKER_S2C_SPIN_WHEELS_UPDATED:
         case KRUNKER_S2C_SET_DEBUG:
         case KRUNKER_S2C_SET_EXPERIMENTAL:
@@ -657,13 +660,11 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_DEBUG_COMPLEX_HITBOX:
         case KRUNKER_S2C_ADD_HITBOX_HELPER:
         case KRUNKER_S2C_DEBUG_RAYCAST:
-        case KRUNKER_S2C_FORCE_VIDEO_AD:
         case KRUNKER_S2C_OPEN_METAMASK_AUTH:
         case KRUNKER_S2C_METAMASK_LINK_RESPONSE:
         case KRUNKER_S2C_METAMASK_UNLINK_RESPONSE:
         case KRUNKER_S2C_BOTS_POPUP:
         case KRUNKER_S2C_UPDATE_COUNTRY:
-        case KRUNKER_S2C_RECIEVE_DOUBLE_XP:
         case KRUNKER_S2C_GAME_SURVEY:
         case KRUNKER_S2C_GUEST_EARNED_REWARDS:    // the krunker.io guest's FRVR profile, not our kn_brain guest's
         case KRUNKER_S2C_UPDATE_LOTTERY_ENTRIES:

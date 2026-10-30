@@ -733,8 +733,10 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
         case TRIGGER_ACTION_REWARD_JUNK:
             reward_junk(game, h, a);
             break;
+        case TRIGGER_ACTION_VIDEO_AD: // "vad" FORCE_VIDEO_AD to the triggering player (deob-10.0.4.js:226151 -> forceVideoAd)
+            if (h && !game_player_is_bot(game, h) && game->hooks.video_ad) game->hooks.video_ad(game, (Player *) h);
+            break;
         case TRIGGER_ACTION_REWARD_SKIN:    // public games only
-        case TRIGGER_ACTION_VIDEO_AD:       // "vad": no ads natively
         default:
             break;
     }

@@ -1613,6 +1613,12 @@ else ()
     add_test(NAME scene_warm_test COMMAND scene_warm_test)
     add_test(NAME scene_warm_off_test COMMAND scene_warm_test off)
 
+    # kn_ad_test: the placeholder ad's flow (client/src/ui/kn_ad_flow.c: v10's showAd rules and forceVideoAd's gap,
+    # deob-10.0.5.js:227964-228031; doc/v10/ads.md)
+    add_executable(kn_ad_test client/tests/kn_ad_test.c client/src/ui/kn_ad_flow.c)
+    target_include_directories(kn_ad_test PRIVATE client/include)
+    add_test(NAME kn_ad_test COMMAND kn_ad_test)
+
     # skin_counter_test: the v10.0.4 counter skins' digit / icon pixels (client/src/skin_counter.c in SKIN_COUNTER_PURE, no GL)
     add_executable(skin_counter_test client/tests/skin_counter_test.c)
     add_test(NAME skin_counter_test COMMAND skin_counter_test)

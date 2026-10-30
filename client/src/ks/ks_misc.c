@@ -6,6 +6,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <ui_mobile.h>
+#include <video_ad.h> // GAME.ADS.playVideo: the placeholder video ad
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -277,6 +278,14 @@ static KsValue noop(KsScript *s, void *u, const KsValue *a, int n) {
     return ks_undef();
 }
 
+// GAME.ADS.playVideo() (deob-10.0.5.js:187152-187155: `isServer || window.forceVideoAd()`): the placeholder video ad; the
+// game server's script hears onAdFinished(playerID, success) (client/src/net/video_ad.c)
+static KsValue ads_play_video(KsScript *s, void *u, const KsValue *a, int n) {
+    (void) s; (void) u; (void) a; (void) n;
+    client_video_ad_force();
+    return ks_undef();
+}
+
 static KsValue u_copy(KsScript *s, void *u, const KsValue *a, int n) {
     (void) u;
     char text[4096];
@@ -299,7 +308,7 @@ void ks_misc_api(KsApiImpl *api) {
     api[KS_API_CHANGEGAME].fn = g_change_game;
     api[KS_API_MODS_LOAD].fn = md_load;
     api[KS_API_MODS_RESET].fn = noop;
-    api[KS_API_ADS_PLAYVIDEO].fn = noop; // no ads: onAdFinished never fires
+    api[KS_API_ADS_PLAYVIDEO].fn = ads_play_video; // the placeholder ad, then onAdFinished on the server
     api[KS_API_UTILS_COPYTOCLIPBOARD].fn = u_copy;
 }
 
