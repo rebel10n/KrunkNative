@@ -157,6 +157,12 @@
       if (!isField(e.target)) return;
       e.stopPropagation();
       if ((e.key === 'Enter' || e.keyCode === 13) && e.target.id) knListen(e.target.id, 'keyup', e.target, e);
+      // The propagation stop above also keeps the field's own inline onkeyup from running (the item
+      // searches: onkeyup='searchItems(this)', windows[36].searchItems): run it here, as the browser
+      // would have, like the keydown listener below does for onkeydown.
+      if (typeof e.target.onkeyup === 'function') {
+        try { e.target.onkeyup.call(e.target, e); } catch (x) { console.error('[kn] onkeyup failed', x); }
+      }
     }, true);
     // Escape/Enter anywhere else: C decides (close window / toggle menu / ...).
     global.addEventListener('keydown', function (e) {
