@@ -187,7 +187,14 @@ for (const f of pageFiles) {
 
 // ---------------------------------------------------------------- maps (KN catalogue = v7 public/maps + custom)
 const mapFiles = [];
-for (const d of [KN + '/assets/maps', KN + '/assets/maps/custom']) for (const f of fs.readdirSync(d)) if (f.endsWith('.json')) mapFiles.push(path.join(d, f));
+// every map JSON under assets/maps, at any depth (official/ holds v10's 47 official maps, custom/ the community ones)
+(function walkMaps(d) {
+  for (const f of fs.readdirSync(d).sort()) {
+    const p = path.join(d, f);
+    if (fs.statSync(p).isDirectory()) walkMaps(p);
+    else if (f.endsWith('.json')) mapFiles.push(p);
+  }
+})(KN + '/assets/maps');
 const prefabByIdx = prefabs.prefabs;
 const texByIdx = prefabs.textures;
 const SOUND_KEYS = ['esa', 'idl', 'dth', 'atk', 'atkh', 'mel', 'melh', 'agr'];
