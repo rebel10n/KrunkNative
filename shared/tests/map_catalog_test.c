@@ -238,9 +238,9 @@ int main(const int argc, char **argv) {
     if (verbose) printf("catalogue:\n");
     for (size_t i = 0; i < count; i++) test_entry(i, verbose);
 
-    // rotation == v10.0.2 rotationMaps (v10.js:167210) == g_rotation_maps
+    // rotation == rotationMaps (deob-10.0.6.js:169385) == g_rotation_maps
     static const int k_v10_rotation[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28,
-    32, 33, 34, 36, 37, 39, 40, 42, 44, 45};
+    32, 33, 34, 36, 37, 39, 42, 44, 45, 46};
     int rotation[64];
     const size_t rotation_count = map_catalog_rotation(rotation, 64);
     CHECK(rotation_count == sizeof(k_v10_rotation) / sizeof(k_v10_rotation[0]) &&

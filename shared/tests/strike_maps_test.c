@@ -132,8 +132,8 @@ static void test_base(void) {
     const size_t n = map_catalog_rotation(rotation, 64);
     // map_catalog_rotation returns catalogue positions; the maps are v10 mapIndexes (g_rotation_maps)
     CHECK(n == 34 && map_catalog_map_index((size_t) rotation[0]) == 0 && map_catalog_map_index((size_t) rotation[23]) == 28 &&
-          map_catalog_map_index((size_t) rotation[24]) == 32 && map_catalog_map_index((size_t) rotation[33]) == 45,
-          "base rotation: %zu maps (v10 rotationMaps)", n);
+          map_catalog_map_index((size_t) rotation[24]) == 32 && map_catalog_map_index((size_t) rotation[33]) == 46,
+          "base rotation: %zu maps (v10 rotationMaps, deob-10.0.6.js:169385)", n);
     const cJSON *habitat = map_catalog_json(22);
     CHECK(habitat && raw_count(habitat, "objects") == 1374, "base Habitat is habitat_v2 (%d objects)", habitat ? raw_count(habitat, "objects") : -1);
 }

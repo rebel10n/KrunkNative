@@ -6,7 +6,7 @@
  * fetches the list (GET <API><LIST_PATH>) at startup and each map's JSON on demand (GET
  * <API><MAP_PATH><index>, {"data": map}); a custom game sends its map inline in init arg 9.
  * Every map is shipped in assets/ (FILE, pinned by sha256 in tools/krunker/maps.lock.json);
- * the list was fetched 2026-10-28T03:28:50Z from https://gapi.svc.krunker.io/maps.
+ * the list was fetched 2026-10-31T02:05:12Z from https://gapi.svc.krunker.io/maps.
  */
 #ifndef KRUNKER_MAPS_H
 #define KRUNKER_MAPS_H

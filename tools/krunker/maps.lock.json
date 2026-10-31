@@ -5,7 +5,7 @@
  "list_url": "https://gapi.svc.krunker.io/maps",
  "list_sha256": "287586423ceba0e8ca327f72a2714d2335cf5ba39f0182ae541fa1ad19c50898",
  "list_bytes": 1310,
- "fetched": "2026-10-28T03:28:50Z",
+ "fetched": "2026-10-31T02:05:12Z",
  "maps": [
   {
    "index": 0,
@@ -248,10 +248,10 @@
    "map_name": "Tortuga",
    "file": "maps/official/18_tortuga.json",
    "url": "https://gapi.svc.krunker.io/maps/18",
-   "response_sha256": "fd9ddd5582d474ab72bda6889a1d485177f07ce33b1be02ab898f821aab735d6",
-   "response_bytes": 137584,
-   "sha256": "8f18591b5f86cc2b78e1678f4bf7f467174a17177dda373564972ab2a861b4ac",
-   "bytes": 137575,
+   "response_sha256": "2e6f26d7c73375438edd6ab43fe4142d3e88bdf54d78ffc3a71a46681f245c42",
+   "response_bytes": 137622,
+   "sha256": "2f4f4a2f4557c38fb81a34304e727168a7156d46d87de5cf20ca0cdb4ee816f7",
+   "bytes": 137613,
    "objects": 1809
   },
   {
@@ -315,8 +315,8 @@
    "url": "https://gapi.svc.krunker.io/maps/23",
    "response_sha256": "bd9219e49b2b0a7ea083e7c83a10a94e5b0f504e632f98b181a60bc833265c8f",
    "response_bytes": 101060,
-   "sha256": "3017f8794e362a6d86c4ccc253aebf068878a23743ae5d1080a78d5dc39c8af7",
-   "bytes": 101057,
+   "sha256": "6e41d7a96e758653f305b05864275227d5bae113d580025754de82dd53777813",
+   "bytes": 101051,
    "objects": 1252
   },
   {
@@ -391,10 +391,10 @@
    "map_name": "Laboratory",
    "file": "maps/official/29_laboratory.json",
    "url": "https://gapi.svc.krunker.io/maps/29",
-   "response_sha256": "64d04a9dbc507b1cc26c6b7abfe56307b96aebda74dacaeb727b823fb5194fe6",
-   "response_bytes": 305948,
-   "sha256": "31f3520f9fcff964d5e776595b8fee04b1462e565734deff9b0c845063815bdc",
-   "bytes": 305939,
+   "response_sha256": "1d82c97c39a89fa23933f7104ec97f8190a2d97264c3f6f3e6ec1ecdced1cc6f",
+   "response_bytes": 306024,
+   "sha256": "1aefe4ae25825780072f846f717c2e21e640c44ecf7c9ad29b99b594249db805",
+   "bytes": 306015,
    "objects": 1297
   },
   {
@@ -417,10 +417,10 @@
    "map_name": "Soul Sanctum",
    "file": "maps/official/31_soul_sanctum.json",
    "url": "https://gapi.svc.krunker.io/maps/31",
-   "response_sha256": "9743e668d0264f097bfdd38fae55888902b535fca5b0b3a25cb36ee442de8a06",
-   "response_bytes": 94981,
-   "sha256": "ab2a6909f1cd5b43c96a20ae2167fa39aa3536cbf0d0bab8fdda9e87a8a92278",
-   "bytes": 94972,
+   "response_sha256": "669bedd3e482093fbef19ea2680a6e6454cb7e11ffb6d43af30ae7d4d693ffd4",
+   "response_bytes": 95057,
+   "sha256": "4e4067af4580fe673a29e86bba2696c90b55cd9c28950b2d5b977ddbec19eab5",
+   "bytes": 95048,
    "objects": 1416
   },
   {
@@ -469,10 +469,10 @@
    "map_name": "Khepri",
    "file": "maps/official/35_khepri.json",
    "url": "https://gapi.svc.krunker.io/maps/35",
-   "response_sha256": "922c8f5900411e9cf58c7c0497d1f068c33441a04ab046d0fcbc9e34f8f2597b",
-   "response_bytes": 320451,
-   "sha256": "1cce6ff006496efb083bff71456b16d6049db8fc00ac36c5f4122023e2a6158f",
-   "bytes": 320442,
+   "response_sha256": "7927d619bb8308f47ff100b8d7fd80756a0e35710f3e0586e6d4f21d4e97e309",
+   "response_bytes": 320524,
+   "sha256": "dd29695ad0f14f93c89afb7ca788ebeafbe75d42a8f90668f1cf8cf57df5152a",
+   "bytes": 320515,
    "objects": 2260
   },
   {
@@ -573,10 +573,10 @@
    "map_name": "Bastion",
    "file": "maps/official/43_bastion.json",
    "url": "https://gapi.svc.krunker.io/maps/43",
-   "response_sha256": "90d10570ee9fc587278ca522b726cc4224c3ef548a743c4bc3524524a913072d",
-   "response_bytes": 309351,
-   "sha256": "fa476e95488a958e13a00f1b2d7987ed7c8c34141641e588c7486a4f4d5fe590",
-   "bytes": 309342,
+   "response_sha256": "82fe4d5ff66851767de0828a9abf0d48d57d7fe552fd4f1b99f58eedc4ecc489",
+   "response_bytes": 309999,
+   "sha256": "9a46020807ba2d5143335f7aea1e59efd799308ffd96e220d01fd81f0e5d0d5f",
+   "bytes": 309990,
    "objects": 2926
   },
   {
