@@ -16,7 +16,8 @@
  *   2. the cache, user_assets.cache_dir (default cache/user-assets): what an earlier request fetched;
  *   3. user_assets.upstream (default Krunker's host) through a proxy when one is set (curl syntax:
  *      KN_USER_ASSETS_PROXY, which the deploy writes from the krunkbox .env's PROXY on kru, else
- *      user_assets.proxy, else KN_FETCH_PROXY; none = direct), written into
+ *      user_assets.proxy, else KN_FETCH_PROXY; none = direct; a comma-separated list is tried in
+ *      order, the next one when a proxy fails or the host blocks it), written into
  *      the cache and answered. An upstream 404 is remembered for user_assets.fail_cache_s (404),
  *      other failures answer 502 and are remembered for a few seconds.
  * At most UA_FETCHES transfers run at once; requests for a path being fetched wait for that fetch.
@@ -66,7 +67,7 @@
 static struct {
     int enabled;
     char upstream[256];
-    char proxy[256];
+    char proxy[1024]; /* one proxy or a comma-separated list (fetch_upstream tries them in order) */
     char cache_dir[1024];
     char tree_dir[1024];
     int64_t fail_ms, error_ms;
@@ -223,11 +224,10 @@ static int progress_cb(void *ud, curl_off_t dl, curl_off_t dt, curl_off_t ul, cu
 }
 #endif
 
-/* upstream <rel> into *data / *len: 200, 404 (the host has no such file) or 502 */
-static int fetch_upstream(const char *rel, unsigned char **data, size_t *len) {
-    *data = NULL;
-    *len = 0;
 #ifdef KN_HAVE_CURL
+/* one try of upstream <rel> through `proxy` (NULL / "" = direct): 200, 404 (the host has no such file),
+   403 / 5xx as the host answered, or 502 when the transfer failed (the proxy among other things) */
+static int fetch_upstream_via(const char *rel, const char *proxy, unsigned char **data, size_t *len) {
     char url[512];
     snprintf(url, sizeof(url), "%s%s", C.upstream, rel);
     CURL *c = curl_easy_init();
@@ -248,7 +248,7 @@ static int fetch_upstream(const char *rel, unsigned char **data, size_t *len) {
     curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long) C.timeout_ms);
     curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, progress_cb);
     curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
-    if (C.proxy[0]) curl_easy_setopt(c, CURLOPT_PROXY, C.proxy);
+    if (proxy && *proxy) curl_easy_setopt(c, CURLOPT_PROXY, proxy);
     long code = 0;
     const CURLcode rc = curl_easy_perform(c);
     if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
@@ -264,9 +264,35 @@ static int fetch_upstream(const char *rel, unsigned char **data, size_t *len) {
     else if (b.too_large) snprintf(why, sizeof(why), "larger than %zu bytes", b.max);
     else if (code != 200) snprintf(why, sizeof(why), "HTTP %ld", code);
     else snprintf(why, sizeof(why), "not a %s", strrchr(rel, '/') + 1);
-    KN_WARN(MOD, "%s: %s", url, why);
+    KN_WARN(MOD, "%s: %s%s", url, why, proxy && *proxy ? " (through a proxy)" : "");
     free(b.data);
-    return rc == CURLE_OK && code == 404 ? 404 : 502;
+    if (rc != CURLE_OK || b.too_large) return 502;
+    return code == 404 || code == 403 || code >= 500 ? (int) code : 502;
+}
+#endif
+
+/* upstream <rel> into *data / *len: 200, 404 (the host has no such file) or 502. C.proxy may list
+   several proxies ("http://a:1,http://b:2", as the krunkbox .env's PROXY does): each is tried in turn
+   until one gets an answer from the host (200 / 404); a proxy that fails or is blocked (403 / 5xx)
+   passes the request to the next one. */
+static int fetch_upstream(const char *rel, unsigned char **data, size_t *len) {
+    *data = NULL;
+    *len = 0;
+#ifdef KN_HAVE_CURL
+    if (!C.proxy[0]) {
+        const int r = fetch_upstream_via(rel, NULL, data, len);
+        return r == 200 || r == 404 ? r : 502;
+    }
+    char list[sizeof(C.proxy)];
+    snprintf(list, sizeof(list), "%s", C.proxy);
+    char *save = NULL;
+    for (char *p = strtok_r(list, ",", &save); p; p = strtok_r(NULL, ",", &save)) {
+        while (*p == ' ') p++;
+        if (!*p) continue;
+        const int r = fetch_upstream_via(rel, p, data, len);
+        if (r == 200 || r == 404) return r;
+    }
+    return 502;
 #else
     (void) rel;
     return 502;

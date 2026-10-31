@@ -16,7 +16,8 @@ block page), a body over the size cap and a redirect (never followed) answer 502
 user_assets.enabled=false answers 503. Proxy: with user_assets.upstream on a host name only a stub
 forward proxy knows, KN_USER_ASSETS_PROXY (what the deploy writes from the krunkbox .env) and, without
 it, KN_FETCH_PROXY (the local-run convention) send the fetch through the proxy (absolute-URI GET);
-with neither the fetch fails (502). Video frames: <id>/video.mp4.knv is the host's video.mp4 (a 2 s clip
+with neither the fetch fails (502); a comma-separated list is tried in order (a dead first proxy passes the
+fetch to the next). Video frames: <id>/video.mp4.knv is the host's video.mp4 (a 2 s clip
 made here with ffmpeg) as a frame sidecar (shared/include/knv.h: KNVF header, 15 fps, JPEG frames),
 cached (a second ask and the mp4 make no upstream request); an id without a video answers 404; with
 user_assets.ffmpeg missing it answers 404 (the clients then show texture.png). Skipped without ffmpeg.
@@ -306,6 +307,19 @@ def main():
             check(proxy.seen[before:] == ["http://upstream.invalid/7282/model.obj"], "%s: the proxy saw the request (%s)" % (var, proxy.seen[before:]))
             proc.terminate()
             proc.wait(10)
+        # kru's PROXY is a list ("http://127.0.0.1:8888,http://user:pass@gw...:9999"); its first entry
+        # failing (a name that does not resolve, as on 2026-10-31) passes the fetch to the next one
+        print("a proxy list, its first entry dead (KN_USER_ASSETS_PROXY):")
+        listed = "http://proxy-down.invalid:9," + proxy.url
+        proc, log_path = run_brain(dict(env, KN_USER_ASSETS_PROXY=listed), work, host, "proxylist", upstream="http://upstream.invalid/",
+                                   cache="cache-proxylist")
+        procs.append(proc)
+        before = len(proxy.seen)
+        st, body, _ = get(bound_port(log_path, proc), "/api/user-assets/7282/model.obj", timeout=60)
+        check(st == 200 and body == OBJ, "a list: fetched through its second proxy (%d)" % st)
+        check(proxy.seen[before:] == ["http://upstream.invalid/7282/model.obj"], "a list: the live proxy saw the request (%s)" % proxy.seen[before:])
+        proc.terminate()
+        proc.wait(10)
         print("no proxy, the same unreachable upstream:")
         proc, log_path = run_brain(env, work, host, "noproxy", upstream="http://upstream.invalid/", cache="cache-noproxy")
         procs.append(proc)
