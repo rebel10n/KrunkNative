@@ -185,6 +185,7 @@ are silent, so the four timer and class names above were also needed as `registe
 | Quick join (region fix) | index.ts (mod) `quickJoinRegion`, index.ts:116 | servers_ui.c:4 (quick join through seek) | native | have (read; the populated-only filter is not in KN's seek path) |
 | Settings rows (dev console, offline, binds) | mods.ts:775-846 | ui_mods.c | native | have (read) |
 | Notify toast | notify.ts | ui_notify.c | native | have (read) |
+| Elapsed timer (top-right HH:MM:SS) | notify.ts | hud_ui.c `hud_gametime_step`, game_time.c (the Game Time tile, Settings > Client > Game > Show Game Time; signed in: the account's time played) | native + web | have (account-level) |
 | Mod packs (canLoadMods, zip) | mods.ts (Mods window) | ui_mods.h `loadModPack`; krunkscript.md:1273 | native | have, partial (resource packs where allowed) |
 | Third-person client toggle | devConsole.ts:2674 `runClientThirdPersonCommand` | third_person.c, ui_console.c:1509 | native | have |
 | Sandbox noclip reset guard | mods.ts:163-288 | none needed | n/a | n/a: a v7 sandbox-server workaround; KN's offline sandbox has no carried-over noclip |

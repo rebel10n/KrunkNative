@@ -146,7 +146,7 @@ they do not show up in `getElementById` greps. v10 HUD additions:
 
 | Element | What | Where |
 |---|---|---|
-| Game time tile `#gameTimeCount` | the last tile of `.topRightCounters` (a `statIcon` with a timer icon): the time this device has spent in games, v7.1.4's readable format (`2h 14m 33s`, `UTILS.getReadableTime(ms, true)`), ticking once a second | `client/src/ui/hud_ui.c` (`hud_gametime_step`), `client/src/ui/game_time.c`, `ui/css/hud.css` |
+| Game time tile `#gameTimeCount` | the last tile of `.topRightCounters` (a `statIcon` with a timer icon): the v7.1.4 mod build's elapsed timer (`Krunker_v7.1.4/mod/notify.ts`: `HH:MM:SS`, counting each second in a game, not over the menus or the end screen). Signed in: the account's time played (`players.player_timeplayed`, the profile's Time Played, which the game servers add every match to) plus the play since the client last got it, the same on every device; a guest: this device's count (`knGameTime`) | `client/src/ui/hud_ui.c` (`hud_gametime_step`), `client/src/ui/game_time.c`, `ui/css/hud.css` |
 | Setting "Show Game Time" | Settings > Client > Game, default **off**. v10 has no such setting or tile: an intentional difference, not a parity gap. It only shows the tile; the time is counted either way, so the total is complete when it is turned on | `client/src/ui/ui_client_settings.c` (`gameTime` row), `client/include/client_settings.h` |
 
 What the tile counts and where it lives (KrunkNative decisions):

@@ -129,7 +129,7 @@
  "kn.client.exitButton.name": "Exit Button",
  "kn.client.finderUrl.info": "Public server list; empty = https://matchmaker.krunk.io/servers, off = none",
  "kn.client.finderUrl.name": "Server Finder URL",
- "kn.client.gameTime.info": "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike",
+ "kn.client.gameTime.info": "Show the time you have played in games in the top right of the game screen (hh:mm:ss). Signed in, it is your account's time played, the same on every device; as a guest, this device's",
  "kn.client.gameTime.name": "Show Game Time",
  "kn.client.hsSound.name": "Always Play HS Sound on Kill",
  "kn.client.openConfig.button": "Open",

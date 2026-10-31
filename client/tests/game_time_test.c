@@ -107,10 +107,36 @@ static void count_tests(void) {
     CHECK(fabs(game_time_ms(&t) - 4000.0) < 0.01, "a gap between games is not counted: %.1f ms", game_time_ms(&t));
 }
 
+static void clock_tests(void) {
+    char out[32];
+    game_time_clock(out, sizeof(out), 0.0);
+    CHECK(!strcmp(out, "00:00:00"), "clock(0) = '%s'", out);
+    game_time_clock(out, sizeof(out), 3723999.0);
+    CHECK(!strcmp(out, "01:02:03"), "clock(1 h 2 m 3.999 s) = '%s' (notify.ts formatTimer)", out);
+    game_time_clock(out, sizeof(out), 123.0 * 3600000.0 + 4 * 60000.0 + 5000.0);
+    CHECK(!strcmp(out, "123:04:05"), "clock past 99 h = '%s'", out);
+    game_time_clock(out, sizeof(out), -5.0);
+    CHECK(!strcmp(out, "00:00:00"), "clock(negative) = '%s'", out);
+}
+
+static void account_tests(void) {
+    GameTimeAccount a = {0};
+    // signed in with 2 h on the account: shown as is, then the play counted on top
+    CHECK(game_time_account_step(&a, 7, 7200000.0, 0.0) == 7200000.0, "the account's time played");
+    for (int i = 0; i < 60; i++) game_time_account_step(&a, 7, 7200000.0, 1000.0);
+    CHECK(game_time_account_step(&a, 7, 7200000.0, 0.0) == 7260000.0, "+ the 60 s counted since");
+    // the match ends and the server sends the account with it added: shown once, not twice
+    CHECK(game_time_account_step(&a, 7, 7262000.0, 0.0) == 7262000.0, "a new server value replaces the extra count");
+    // another account signs in: its own time
+    CHECK(game_time_account_step(&a, 9, 100000.0, 500.0) == 100500.0, "another account starts from its own time");
+}
+
 int main(void) {
     format_tests();
     store_tests();
     count_tests();
+    clock_tests();
+    account_tests();
     printf("game_time_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

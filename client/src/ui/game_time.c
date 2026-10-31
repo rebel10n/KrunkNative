@@ -44,6 +44,23 @@ static void append_part(char *out, const size_t n, const char *fmt, const long l
     if (len + 1 < n) snprintf(out + len, n - len, fmt, v);
 }
 
+void game_time_clock(char *out, const size_t n, const double ms) {
+    if (!n) return;
+    const long long s = (long long) floor((ms > 0.0 ? ms : 0.0) / 1000.0);
+    snprintf(out, n, "%02lld:%02lld:%02lld", s / 3600, s % 3600 / 60, s % 60);
+}
+
+double game_time_account_step(GameTimeAccount *a, const int id, const double played_ms, const double counted_ms) {
+    const double played = played_ms > 0.0 ? played_ms : 0.0;
+    if (a->id != id || a->base_ms != played) { // another account, or the server added a match: count from it
+        a->id = id;
+        a->base_ms = played;
+        a->extra_ms = 0.0;
+    }
+    if (counted_ms > 0.0) a->extra_ms += counted_ms;
+    return a->base_ms + a->extra_ms;
+}
+
 void game_time_readable(char *out, const size_t n, const double ms) {
     if (!n) return;
     out[0] = 0;

@@ -204,9 +204,9 @@ static const ClientSetting SETTINGS[] = {
      NULL, 0, NULL, NULL, "gameplay"},
     {"hsSound", "Always Play HS Sound on Kill", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "",
      NULL, 0, NULL, NULL, "gameplay"},
-    // KrunkNative only (v10 has no game time): the top-right tile of the time this device has played (game_time.h)
+    // the v7.1.4 mod build's elapsed timer (mod/notify.ts; v10 has none): the top-right tile, the account's time played when signed in (game_time.h)
     {"gameTime", "Show Game Time", "Interface", CS_SWITCH, CS_NATIVE | CS_WEB, "false",
-     "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike",
+     "Show the time you have played in games in the top right of the game screen (hh:mm:ss). Signed in, it is your account's time played, the same on every device; as a guest, this device's",
      NULL, 0, NULL, NULL, "interface"},
     // ---- Game > Gameplay: Storage (glorp "Clear Cache & Storage"; the v3.1.1 client's Clear Cache / Reset Addons)
     // Web: a page cannot open a folder; Open tells where the client's files are (the browser's storage).
@@ -257,7 +257,7 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.hsSound.name", "Always Play HS Sound on Kill")
 //   I18N("kn.client.gameTime.name", "Show Game Time")
 //   I18N("kn.settings.hidePlayerNames", "Hide player names")
-//   I18N("kn.client.gameTime.info", "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike")
+//   I18N("kn.client.gameTime.info", "Show the time you have played in games in the top right of the game screen (hh:mm:ss). Signed in, it is your account's time played, the same on every device; as a guest, this device's")
 //   I18N("kn.client.openConfig.name", "Client Folder")  I18N("kn.client.openConfig.info", "Settings, swapper and custom.css")  I18N("kn.client.openConfig.button", "Open")
 //   I18N("kn.client.clearCache.name", "Clear Cache & Storage")  I18N("kn.client.clearCache.button", "Clear Now")
 //   I18N("kn.client.clearCache.info", "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept")

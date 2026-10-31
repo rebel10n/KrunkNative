@@ -89,7 +89,7 @@ void hud_ui_hit(Client*, int kill);
 #include <ruleset.h>
 #include <hud_v10.h>
 #include <hud_modes.h> // hud_modes_end_table_html: the live #endTable rows (hud_end_leaderboard_html)
-#include <game_time.h>   // the top-right game time tile (hud_gametime_step): the device's own total
+#include <game_time.h>   // the top-right game time tile (hud_gametime_step): the v7 mod timer
 #include <client_settings.h> // client_settings_game_time: Display > Interface > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
 #include <player_names.h>  // Hide player names: the names, clans and the local player shown (player_names.h)
@@ -268,8 +268,9 @@ typedef struct {
 
 static unsigned g_combat_hash; // hud_combat_step: FNV-1a of the last written perks / streaks state, 0 = rewrite
 
-// The top-right game time tile (#gameTimeCount, hud_gametime_step): the time this device has played.
+// The top-right game time tile (#gameTimeCount, hud_gametime_step): the v7.1.4 mod timer; a signed-in account's time played, else this device's.
 static GameTime g_game_time;
+static GameTimeAccount g_gt_account; // a signed-in account's time: its time played + the play since (game_time.h)
 static int g_gt_loaded;          // the stored total is read (the first HUD frame)
 static int g_gt_shown = -1;      // #gameTimeCount's display last written (-1 never)
 static long long g_gt_sec = -1;  // the seconds last written to #gameTimeVal
@@ -4116,12 +4117,15 @@ static void hud_minimap_layout(void) {
     dom_display("timerHolder", "block");
 }
 
-// The game time tile: the last stat tile of .topRightCounters (statIcon, like the kill / death / score
-// tiles). Opt-in: the "Show Game Time" setting (default off, KrunkNative only: v10 has no such
-// setting, doc/v10/). It shows the time this device has spent in games (game_time.c), for guests and
-// signed-in accounts alike; nothing of it comes from or goes to the account. The total is counted whether
-// or not the tile is shown, and stored under "knGameTime" (html_storage: native files, web localStorage)
-// every GAME_TIME_FLUSH_MS of play, when a game ends and at exit (hud_ui_game_time_flush).
+// The game time tile: the v7.1.4 mod build's elapsed timer (Krunker_v7.1.4/mod/notify.ts: HH:MM:SS, counting
+// each second in a game, not on the menus), as the last stat tile of .topRightCounters (statIcon, like the
+// kill / death / score tiles). Opt-in: the "Show Game Time" setting (default off; v10 has no such setting,
+// doc/v10/). notify.ts keeps the count in localStorage, so it is the device's; here a signed-in account shows
+// the account's own time instead: its time played (players.player_timeplayed, which the game servers add
+// every match to; the same number as the profile's Time Played) plus the play since the client last got it
+// (game_time_account_step), on every device it signs in on. A guest shows the device's count, which is kept
+// whether or not the tile is shown and stored under "knGameTime" (html_storage: native files, web
+// localStorage) every GAME_TIME_FLUSH_MS of play, when a game ends and at exit (hud_ui_game_time_flush).
 static void hud_gametime_store(void) {
     char text[32];
     if (game_time_store(&g_game_time, text, sizeof(text))) html_storage_set("knGameTime", text);
@@ -4141,7 +4145,12 @@ static void hud_gametime_step(const Client *client, const int shown, const doubl
     // them); counted while it is on screen (not over the ESC menu, not on the end screen)
     const int session = client->in_game && client->me;
     const int counting = session && shown && !client_round_ended(client);
+    const double before = game_time_ms(&g_game_time);
     if (game_time_step(&g_game_time, session, counting, now_ms)) hud_gametime_store();
+    const double counted = game_time_ms(&g_game_time) - before; // this frame's play (a store keeps the total)
+    const AccountInfo *acc = active_account();
+    const double shown_ms = acc && acc->id > 0 ? game_time_account_step(&g_gt_account, acc->id, acc->time_played, counted)
+                                               : game_time_ms(&g_game_time);
 
     if (!html_dom_by_id("gameTimeCount")) {
         const HtmlElem counters = html_dom_query(0, ".topRightCounters");
@@ -4150,9 +4159,9 @@ static void hud_gametime_step(const Client *client, const int shown, const doubl
         html_dom_insert_html(counters, HTML_INSERT_BEFORE_END,
                              "<div id=\"gameTimeCount\" class=\"statIcon\" style=\"display:none\"><div class=\"greyInner\">"
                              "<i class=\"material-icons\" style=\"color:#fff;font-size:24px\">timer</i> "
-                             "<span id=\"gameTimeVal\">0m 0s</span></div></div>");
+                             "<span id=\"gameTimeVal\">00:00:00</span></div></div>");
         g_gt_shown = -1;
-        g_gt_sec = -1; // the new element still says "0m 0s": write the count at the next change
+        g_gt_sec = -1; // the new element still says "00:00:00": write the count at the next change
     }
     const int want = client_settings_game_time() && shown && session;
     if (want != g_gt_shown) {
@@ -4161,10 +4170,10 @@ static void hud_gametime_step(const Client *client, const int shown, const doubl
         g_gt_shown = want;
     }
     if (!want) return;
-    const long long sec = (long long) floor(game_time_ms(&g_game_time) / 1000.0);
+    const long long sec = (long long) floor(shown_ms / 1000.0);
     if (sec != g_gt_sec) {
         char text[48];
-        game_time_readable(text, sizeof(text), (double) sec * 1000.0);
+        game_time_clock(text, sizeof(text), (double) sec * 1000.0);
         dom_text("gameTimeVal", text);
         g_gt_sec = sec;
     }

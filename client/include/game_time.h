@@ -39,3 +39,21 @@ int game_time_store(GameTime *t, char *out, size_t n);
 // UTILS.getReadableTime(ms, true) of v7.1.4 (src/libs/utils.js): "1y 2d 3h 4m 5s", the years, days
 // and hours only when non-zero, minutes and seconds always ("0m 5s"), no trailing space.
 void game_time_readable(char *out, size_t n, double ms);
+
+// The v7.1.4 mod build's elapsed timer text (Krunker_v7.1.4/mod/notify.ts formatTimer): "HH:MM:SS", the
+// hours padded to two digits and growing past 99 ("123:04:05").
+void game_time_clock(char *out, size_t n, double ms);
+
+// A signed-in account's time: the account's time played as the server last sent it (players.player_timeplayed,
+// which the game servers add every match to) plus the play this client counted since then. A new value from
+// the server (the match was added) or another account starts the extra count again, so a match is never
+// counted twice.
+typedef struct GameTimeAccount {
+    int id;          // the account the base belongs to (0 = none yet)
+    double base_ms;  // its time played as last sent
+    double extra_ms; // play counted since
+} GameTimeAccount;
+
+// One HUD frame: `id` / `played_ms` the signed-in account and its time played, `counted_ms` the play
+// counted this frame. Returns the time to show (ms).
+double game_time_account_step(GameTimeAccount *a, int id, double played_ms, double counted_ms);
