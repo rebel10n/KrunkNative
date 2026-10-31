@@ -5,7 +5,7 @@
  * pat, mid, midT, prevExt and texExt (deob-10.0.3.js: path builder 1051172, store loop 4804884; the rule and
  * its offsets are in doc/v10/skin-thumbnails.md). The path is under /textures/ and the client prefixes the
  * asset host, so the table carries "/textures/previews/melee/melee_20_3.png" and the like. The official
- * table gives a thumbnail to all 8152 records (2026-10-30); v10_skin_thumbs does the same for assets/skins.json.
+ * table gives a thumbnail to all 8153 records (2026-10-30, v10.0.6); v10_skin_thumbs does the same for assets/skins.json.
  */
 #ifndef KN_BRAIN_V10_SKIN_THUMB_H
 #define KN_BRAIN_V10_SKIN_THUMB_H

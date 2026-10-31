@@ -2,7 +2,7 @@
 // Checks client/src/viewer/viewer_store_table.c and shared/src/store_spins_table.c
 // (gen_viewer_store.js), the client's store table that the player model, the store / inventory UI
 // and the viewer read (doc/v7/player-viewer.md WP-F), and the v10 prize wheels kn_brain rolls:
-//   - 8152 skins (the live table of v10.0.5, 2026-10-30) in v10's 19 item types, with v10's per-type counts;
+//   - 8153 skins (the live table of v10.0.6, 2026-10-30: Scarecrow Peg added) in v10's 19 item types, with v10's per-type counts;
 //   - index stability: every store index of v7.1.4's 6448 skins keeps its item (id, weapon, type,
 //     tex / mid; names too except one v10 rename) so owned inventory rows keep their meaning, and
 //     every index of v3.1.1's 1917 keeps its item and type, except v7's HAT 1 -> HEAD 15 and
@@ -41,11 +41,11 @@ const cname = (row) => {
 };
 
 // ---- counts
-check(rows.length === 8152, `8152 skins (${rows.length})`);
+check(rows.length === 8153, `8153 skins (${rows.length})`);
 check(rows.every((r, i) => r.index === i), 'rows are in store-index order');
-check(/const int g_viewer_skin_count = 8152;/.test(c), 'g_viewer_skin_count 8152');
+check(/const int g_viewer_skin_count = 8153;/.test(c), 'g_viewer_skin_count 8153');
 check(/const int g_viewer_current_season = 10;/.test(c), 'config.currentSeason 10');
-const V10_COUNTS = { 0: 4833, 1: 312, 2: 181, 3: 405, 4: 556, 5: 45, 6: 104, 7: 668, 8: 87, 9: 27, 10: 31, 11: 13, 12: 49, 13: 22, 14: 277, 15: 410, 16: 85, 17: 28, 18: 19 };
+const V10_COUNTS = { 0: 4833, 1: 312, 2: 181, 3: 405, 4: 556, 5: 45, 6: 104, 7: 668, 8: 88, 9: 27, 10: 31, 11: 13, 12: 49, 13: 22, 14: 277, 15: 410, 16: 85, 17: 28, 18: 19 };
 const byType = {};
 for (const r of rows) { const t = int(r, 'type', 0); byType[t] = (byType[t] || 0) + 1; }
 check(Object.keys(byType).length === 19, `19 item types (${Object.keys(byType).length})`);
@@ -135,10 +135,10 @@ for (const [t, id] of [[8067, 0], [8068, 1], [7993, 2]]) check(skinsNow[t].type 
 const s10 = Object.keys(spins.itemPools).filter((k) => k.startsWith('s10Pool'));
 check(s10.length === 7, `7 s10Pool pools (${s10.length})`);
 const s10items = s10.flatMap((k) => spins.itemPools[k].items);
-check(s10items.every((i) => i >= 6448 && i < 8152 && skinsNow[i]), `every s10Pool item is a v10 store item (${s10items.length})`);
+check(s10items.every((i) => i >= 6448 && i < 8153 && skinsNow[i]), `every s10Pool item is a v10 store item (${s10items.length})`);
 check(s10.every((k) => spins.itemPools[k].items.every((i) => skinsNow[i].rarity === ['Uncommon', 'Rare', 'Epic', 'Legendary', 'Relic', 'Contraband', 'Unobtainable'].indexOf(spins.itemPools[k].name))),
   "an s10Pool's items have its rarity");
-check(Object.values(spins.itemPools).every((p) => p.items.every((i) => i >= 0 && i < 8152)), 'every pool item is in the table');
+check(Object.values(spins.itemPools).every((p) => p.items.every((i) => i >= 0 && i < 8153)), 'every pool item is in the table');
 
 console.log(failures ? `test_gen_viewer_store: ${failures} of ${checks} checks failed` : `test_gen_viewer_store: OK (${checks} checks)`);
 process.exit(failures ? 1 : 0);

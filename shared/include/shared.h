@@ -1231,6 +1231,7 @@ typedef struct Player_t {
 
     unsigned char is_you:1;
     unsigned char render_you:1;
+    unsigned char own_copies:1; // client: a preview model wearing the account's own copies (the menu's, deob-10.0.6.js:216225)
     unsigned char left_handed:1;
 
     unsigned char active:1;

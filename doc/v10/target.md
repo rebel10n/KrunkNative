@@ -1,17 +1,22 @@
-# Krunker v10.0.5: the target
+# Krunker v10.0.6: the target
 
-Krunker Box Office plays **Krunker v10.0.5**, the latest v10 build. It is the target of the
-client, the server, the ruleset identity and the UI work (set by the user, 2026-10-29: "we need to
-update the entire client to v10.0.5 and pull in any new features"; v10.0.4 was the target from
-2026-10-28, v10.0.3 from 2026-10-21).
+Krunker Box Office plays **Krunker v10.0.6**, the latest v10 build. It is the target of the
+client, the server, the ruleset identity and the UI work (set by the user, 2026-10-30: "lets update
+to v10.0.6 now"; v10.0.5 was the target from 2026-10-29, v10.0.4 from 2026-10-28, v10.0.3 from
+2026-10-21).
 
 ## Reference bundles
 
-- **Target: v10.0.5. Read `~/jails/kru/src/Krunker_v10.0.5/deob/game.deob.js`.** It is kru's
-  decoded copy of the live bundle (`https://kru.eli.gift/game.deob.js`, last-modified 2026-10-29
+- **Target: v10.0.6. Read `~/jails/kru/src/Krunker_v10.0.6/deob/game.deob.js`.** It is kru's
+  decoded copy of the live bundle (`https://kru.eli.gift/game.deob.js`, last-modified 2026-10-30
   16:40 UTC), byte for byte; its `README.md` gives the sha256. Strings are inlined and the file is
-  pretty-printed; identifiers stay mangled. Cite it as `deob-10.0.5.js:<line>`. Its version literal
-  is `"10.0.5"` (:16403).
+  pretty-printed; identifiers stay mangled. Cite it as `deob-10.0.6.js:<line>`. Its version literal
+  is `"10.0.6"` (:16403).
+- **v10.0.5: history.** `~/jails/kru/src/Krunker_v10.0.5/deob/` (last-modified 2026-10-29 16:40 UTC),
+  decoded the same way; the code ported 2026-10-29..30 cites it as `deob-10.0.5.js:<line>`. Its
+  `tools/normalize.py` rewrites the build-to-build noise (mangled names, quote styles, `\xNN` escapes,
+  hex numbers) and keeps the line layout, so `diff -a` of two normalised builds lists the real
+  changes (10.0.5 to 10.0.6: 59 hunks, below).
 - **v10.0.4: history.** `~/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js`, decoded the same way
   (last-modified 2026-10-28 02:37 UTC). The code ported 2026-10-28..29 cites it as
   `deob-10.0.4.js:<line>`. Both builds mangle names and escape strings differently, so compare them
@@ -40,10 +45,37 @@ update the entire client to v10.0.5 and pull in any new features"; v10.0.4 was t
 
 Every value and rule is checked against the target bundle directly (user, 2026-10-24, once the whole
 bundle was decoded): weapon, class and mode stats, physics, map fields, object flags, packet shapes
-and UI. There is no "unchanged since" fallback. A ported value cites its `deob-10.0.4.js:<line>` in
-a code comment (code ported before 2026-10-28: `deob-10.0.3.js`); a deliberate difference from the
+and UI. There is no "unchanged since" fallback. A ported value cites its `deob-10.0.6.js:<line>` in
+a code comment (code ported before 2026-10-30: `deob-10.0.5.js` / `deob-10.0.4.js`, before 2026-10-28:
+`deob-10.0.3.js`); a deliberate difference from the
 target is documented in code. A comment or spec that cites only v10.0.2 (`v10:N`) or v7.1.4 is not
 verified yet: re-check it against the target bundle when it is touched.
+
+## 10.0.6 (2026-10-30)
+
+- Build: `clientVersion` `10.0.6r1` (deob-10.0.6.js:16403-16404); `buildVersion`
+  `BMXeeCoe7d0j5zNh4KE3IsWuyP5twK9g`, the ahNum step `0x25`, the packet tables, the cheat check and the
+  per-player layouts are unchanged from 10.0.5 (`make krunker-build`). config.networkSounds is the same
+  401 names (:18263). The page's build tag is `1qcEh` (the `i18n/*.js` and `maps/*.json` `?v=`, :202628,
+  :228306; 10.0.5: `UVmCA`).
+- Every change the normalised diff shows:
+  - Store: a purchase's `purchase_count` update builds new shop / child / product objects and sets the
+    shop again (:115985-116026), so a limited item shows sold out right after it is bought; the Stripe
+    claim's `alreadyClaimed` answer updates the display's count and shows the success text instead of
+    granting again (:213769-213790): "limited items sometimes being purchasable more than once".
+  - Wear on cosmetics: a typed (non-weapon) item with `wear` gets a `<type path><id>_wear` map
+    (:173413-173419, and the inspect preview :222884-222893), the "wear and paint on some cosmetics
+    from November spin".
+  - Hub messages: a message from someone not in the list adds them online with the unread count and the
+    last message (:141342-141364), opening a conversation clears its unread count (:141569-141572), and
+    the friend list no longer pushes a friend twice (:141258-141265).
+  - Not ported (no KN counterpart): three.js node materials pinning their references in `buildAsync`
+    (:195832-195854, WebGPU), the editor asset's `fileExt` rewrite (:125150, same behaviour),
+    restructured analytics / gtag calls, renamed mangled fields.
+- Store data (gapi `/data/skins`, not the bundle): the new skin Scarecrow Peg.
+- Changelog (krunker.io/docs/versions.txt, "UPDATE 10.0.6"): wear and paint on some November spin
+  cosmetics, the new skin Scarecrow Peg, limited items shown sold out right after buying, and limited
+  items no longer purchasable more than once.
 
 ## 10.0.5 (2026-10-29)
 
@@ -124,18 +156,18 @@ subtypes) follow AGENTS.md.
 
 ## What the target changes
 
-- Identity: the ruleset `version` is `"10.0.5"` (`shared/src/rules/ruleset.c`). The build's client
-  version is `10.0.5r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
-  logs `[client] Krunker v10.0.5` and the server `Plays Krunker v10.0.5`. The Android and iOS
-  version fallbacks name 10.0.5.
-- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.5 (CI's shipped version,
+- Identity: the ruleset `version` is `"10.0.6"` (`shared/src/rules/ruleset.c`). The build's client
+  version is `10.0.6r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
+  logs `[client] Krunker v10.0.6` and the server `Plays Krunker v10.0.6`. The Android and iOS
+  version fallbacks name 10.0.6.
+- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.6 (CI's shipped version,
   `tools/release/version-meta.sh`), and the What's New tile shows the newest entry.
 
 ## What it does not change
 
 - The HELLO / INIT ruleset bytes (HELLO bit 2, INIT ruleset 3) and KN's own packet layouts (wire
-  compatibility). `changelog-10.0.3.md` lists what 10.0.3 changed; the 10.0.4 and 10.0.5 sections above list
-  theirs.
+  compatibility). `changelog-10.0.3.md` lists what 10.0.3 changed; the 10.0.4, 10.0.5 and 10.0.6 sections above
+  list theirs.
 - `doc/ref/krunker-v10.0.2/` and `doc/ref/krunker-v10/` are captures of the 10.0.2 page. The
   uidiff scenarios refer to them by path.
 - `ui/` is the v10.0.2 page import, edited by hand for parity since. It is regenerated from a newer

@@ -303,6 +303,11 @@ typedef struct {
     int paint_shader;         // paintShader: 0 Spectrum, 1 Synth, 2 Gold, 3 Silver, 4 Prism, 5 Codefall; -1 the colour paint
     unsigned int paint_mask_texture; // the skin's paintMask (paintMaskMap, unit 7): its red scales the intensity, 0 = none
     unsigned int paint_env_texture;  // the metal shaders' melee_190_env.png (unit 8), 0 = none
+    // Per-copy wear of a worn store skin (skin_fx_apply_wear): v10's wearMap node (deob-10.0.6.js:95705-95722, applied at
+    // :204868 before the paint): the map's r / g / b / a masks rust / dirt / grime / scratches, each scaled by a
+    // normalised sigmoid of wear_level (basic.frag wear_apply). 0 = no wear.
+    unsigned int wear_texture;       // <store.types[assetType || type]><id>_wear (wearMap, unit 13), 0 = none
+    float wear_level;                // the copy's m.wear (0 = new)
 
     // v10.0.3 GLB environment reflections (env_map.h): envMapIntensity of a GLB material whose glTF extras opt in
     // ("env", limitMM 0..4, deob-10.0.3.js:233665-233669; gltf.c), 0 = none. The env map is render.getEnvMap's
@@ -337,6 +342,7 @@ BasicMaterial *basic_material_init();
 #define BASIC_SCENE_ENV_DFG_TEXTURE_UNIT 10  // three r18x's DFG_LUT (env_map.c)
 #define BASIC_SPECULAR_TEXTURE_UNIT 11       // BasicMaterial.specular_texture (a user asset's "s" specularMap)
 #define BASIC_DECAL_TEXTURE_UNIT 12          // BasicMaterial.decal_texture (v10 decalMap)
+#define BASIC_WEAR_TEXTURE_UNIT 13           // BasicMaterial.wear_texture (v10 wearMap)
 // env_map.c hands basic.c the scene's environment: `env` the 9 x 128 PMREM table, `dfg` the DFG lookup (0, 0: none,
 // GLB reflections off)
 void basic_material_set_scene_env(unsigned int env, unsigned int dfg);

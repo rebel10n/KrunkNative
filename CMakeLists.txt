@@ -1630,6 +1630,18 @@ else ()
     target_include_directories(kio_trade_test PRIVATE client/include shared/include)
     target_link_libraries(kio_trade_test PRIVATE cJSON m)
     add_test(NAME kio_trade_test COMMAND kio_trade_test)
+    # shop_counts_test: a display's purchase counts after a purchase (client/src/ui/shop_counts.c; updateDisplayPurchaseCount,
+    # deob-10.0.6.js:115979-116030)
+    add_executable(shop_counts_test client/tests/shop_counts_test.c client/src/ui/shop_counts.c)
+    target_include_directories(shop_counts_test PRIVATE client/include)
+    target_link_libraries(shop_counts_test PRIVATE cJSON m)
+    add_test(NAME shop_counts_test COMMAND shop_counts_test)
+    # social_list_test: the hub's friends pages, msg:recv's entry and the read conversation (client/src/ui/social_list.c;
+    # deob-10.0.6.js:141245-141372, 141567-141575)
+    add_executable(social_list_test client/tests/social_list_test.c client/src/ui/social_list.c)
+    target_include_directories(social_list_test PRIVATE client/include)
+    target_link_libraries(social_list_test PRIVATE cJSON m)
+    add_test(NAME social_list_test COMMAND social_list_test)
 
     # kio_checkout_stripe_test: the Stripe purchase path's sequence, bodies, poll timer, limits and URL redaction against
     # fake hooks, no network (client/src/ui/kio_checkout_stripe.c is included by the test)

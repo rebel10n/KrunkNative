@@ -696,6 +696,11 @@ static void state_from_params(void) {
     // the shown copy's seed (v10.0.4 "&seed=" + its seed, deob-10.0.4.js:109446): the seeded custom shaders' look
     const int seed = js_parse_int(viewer_param_get("seed"), &ok);
     g_viewer.seed = ok && seed > 0 ? seed : 0;
+    // the shown copy's wear (v10.0.6 "&wear=" + m.wear, deob-10.0.6.js:221934): a typed item's wearMap at that level
+    const char *wear = viewer_param_get("wear");
+    char *wear_end = NULL;
+    const double wear_value = wear && *wear ? strtod(wear, &wear_end) : -1.0;
+    g_viewer.wear = wear_end && *wear_end == '\0' && wear_value >= 0.0 ? wear_value : -1.0;
     const char *dev = viewer_param_get("dev");
     g_viewer.dev = dev != NULL;
     g_viewer.hi_quality = g_viewer.cosmetic_set || (dev && *dev); // isNumber(C) || params.get("dev")
@@ -902,6 +907,7 @@ const AppPage *viewer_app_page(void) {
 static struct {
     int active;
     int index;
+    char query[192]; // the iframe's query: the shown copy's wear / paint / seed with the index
 } g_embed;
 
 void viewer_embed_fini(void) {
@@ -912,21 +918,23 @@ void viewer_embed_fini(void) {
     memset(&g_embed, 0, sizeof(g_embed));
 }
 
-// the iframe of #itemViewPop that shows viewer.html?...showcase=<i>: its store index, -1 = none
-static HtmlElem embed_frame(int *index) {
+// the iframe of #itemViewPop that shows viewer.html?...showcase=<i>: its store index, -1 = none, and its query
+static HtmlElem embed_frame(int *index, char *query_out, const size_t query_n) {
     *index = -1;
+    query_out[0] = '\0';
     const HtmlElem pop = html_dom_by_id("itemViewPop");
     char display[16] = "";
     if (!pop) return 0;
     html_dom_get_style(pop, "display", display, sizeof(display));
     if (!strcmp(display, "none") || !display[0]) return 0;
     const HtmlElem frame = html_dom_query(pop, "iframe");
-    char src[160];
+    char src[224];
     if (!frame || html_dom_get_attr(frame, "src", src, sizeof(src)) < 0 || !strstr(src, "viewer.html")) return 0;
     const char *query = strchr(src, '?');
     const char *showcase = query ? strstr(query, "showcase=") : NULL;
     if (!showcase) return 0;
     *index = atoi(showcase + 9);
+    snprintf(query_out, query_n, "%s", query + 1);
     return frame;
 }
 
@@ -938,22 +946,23 @@ void viewer_embed_frame(Client *client, const float delta) {
 #else
     if (g_ui.entered || !client || !client->window) return; // the viewer page owns the scene
     int index = -1;
-    const HtmlElem frame = embed_frame(&index);
+    char query[sizeof(g_embed.query)];
+    const HtmlElem frame = embed_frame(&index, query, sizeof(query));
     HtmlRect rect = {0};
     if (!frame || !html_dom_get_rect(frame, &rect) || rect.w < 1.0f || rect.h < 1.0f) {
         viewer_embed_fini();
         return;
     }
-    if (g_embed.active && g_embed.index != index) viewer_embed_fini();
+    if (g_embed.active && (g_embed.index != index || strcmp(g_embed.query, query) != 0)) viewer_embed_fini();
     if (!g_embed.active) {
-        char query[64];
-        snprintf(query, sizeof(query), "nobg&showcase=%d", index);
+        // the iframe's own query (nobg&showcase=<i> and the copy's &wear= / &paint= / &seed=, deob-10.0.6.js:221934)
         memset(&g_viewer, 0, sizeof(g_viewer));
         g_viewer.client = client;
         params_parse(query);
         state_from_params();
         g_embed.active = 1;
         g_embed.index = index;
+        snprintf(g_embed.query, sizeof(g_embed.query), "%s", query);
         if (!vscene_init()) {
             viewer_embed_fini();
             return;

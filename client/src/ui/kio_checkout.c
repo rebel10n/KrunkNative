@@ -389,7 +389,8 @@ static void xsolla_popup(const double method, const char *flag) {
 // ---------------------------------------------------------------- Stripe (kio_checkout_stripe.h)
 
 static void success_kr(const char *provider, const cJSON *funds, int pack);
-static void success_product(const char *provider, const char *product_id, const char *name, const char *gift);
+static void success_product(const char *provider, const char *product_id, const char *name, const char *gift, int display_id);
+static void claimed_again(const char *product_id, const char *name, const char *gift, int display_id);
 static void success_premium(int premium, const char *gift);
 static void success_bundle(int bundle, const cJSON *funds, const cJSON *junk, int gifted, const char *gift);
 
@@ -406,9 +407,12 @@ static void stripe_done(void *user, const int outcome, const cJSON *claim, const
                        cJSON_GetStringValue(cJSON_GetObjectItem(claim, "giftName")) != NULL, cJSON_GetStringValue(cJSON_GetObjectItem(claim, "giftName")));
     else if (cJSON_GetObjectItem(claim, "premium") && !cJSON_IsNull(cJSON_GetObjectItem(claim, "premium")))
         success_premium((int) cJSON_GetNumberValue(cJSON_GetObjectItem(claim, "premium")), cJSON_GetStringValue(cJSON_GetObjectItem(claim, "giftName")));
+    else if (cJSON_IsTrue(cJSON_GetObjectItem(claim, "alreadyClaimed"))) // v10.0.6 (:213778-213790): shown, not granted again
+        claimed_again(cJSON_GetStringValue(cJSON_GetObjectItem(claim, "productId")), cJSON_GetStringValue(cJSON_GetObjectItem(claim, "productName")),
+                      cJSON_GetStringValue(cJSON_GetObjectItem(claim, "giftName")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(claim, "displayId")));
     else
         success_product("stripe", cJSON_GetStringValue(cJSON_GetObjectItem(claim, "productId")), cJSON_GetStringValue(cJSON_GetObjectItem(claim, "productName")),
-                        cJSON_GetStringValue(cJSON_GetObjectItem(claim, "giftName")));
+                        cJSON_GetStringValue(cJSON_GetObjectItem(claim, "giftName")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(claim, "displayId")));
     free(p);
 }
 
@@ -707,9 +711,9 @@ static void success_kr(const char *provider, const cJSON *funds, const int pack)
     after_success();
 }
 
-static void success_product(const char *provider, const char *product_id, const char *name, const char *gift) { // iîíïíïí (:212198-212245)
+// The success line of a product purchase (iîíïíïí :212198-212245; the alreadyClaimed claim the same, deob-10.0.6.js:213784-213789)
+static void product_message(const char *pid, const char *name, const char *gift) {
     char text[256];
-    const char *pid = product_id ? product_id : "";
     if (!strncmp(pid, "username-renew:", 15)) { // the renewal's days: v10's second argument, not sent with the answer here
         I18N_F(text, "account.usernames.renew.success", "{0} renewed for {1} days", name ? name : "", "");
         io_popup("SUCCESS", NULL, text);
@@ -723,9 +727,32 @@ static void success_product(const char *provider, const char *product_id, const 
         I18N_F(text, "shop.popup.success", "{0} purchased successfully!", name ? name : "");
         io_popup("SUCCESS", NULL, text);
     }
+}
+
+// A display purchase counts on the display at once, unless it was a gift (:213596, :213783: !giftName && displayId > 0)
+static void count_display(const char *gift, const int display_id) {
+    if ((!gift || !gift[0]) && display_id > 0) kio_store_display_purchased(display_id);
+}
+
+static void success_product(const char *provider, const char *product_id, const char *name, const char *gift, const int display_id) {
+    const char *pid = product_id ? product_id : "";
+    count_display(gift, display_id); // updateDisplayPurchaseCount before the result (deob-10.0.6.js:213596)
+    product_message(pid, name, gift);
     if (strstr(pid, "wildoffer:")) v10_wild_offer_purchased(); // the offer is spent (:212235)
     printf("[checkout] %s purchase of %s done%s%s\n", provider ? provider : "?", pid, gift && gift[0] ? " as a gift to " : "", gift && gift[0] ? gift : "");
     after_success();
+}
+
+// A Stripe claim answered alreadyClaimed (v10.0.6, deob-10.0.6.js:213778-213790): the purchase was granted before (an
+// earlier claim of the same payment), so nothing is granted again: the waiting ends (iíìiiìï :213729), the display counts
+// it and the result line shows; with no product name nothing is shown.
+static void claimed_again(const char *product_id, const char *name, const char *gift, const int display_id) {
+    browser_end();
+    purchase_load_done();
+    if (!name || !name[0]) return;
+    count_display(gift, display_id);
+    product_message(product_id ? product_id : "", name, gift);
+    printf("[checkout] stripe claim of %s was already granted\n", product_id ? product_id : "?");
 }
 
 static void success_premium(const int premium, const char *gift) { // iîiiïíí (:212263-212281)
@@ -807,10 +834,10 @@ static void frame_listen(const char *label, const cJSON *frame) {
             snprintf(id, sizeof(id), "kr_%d", kr_pack_val(arg_int(frame, 4)));
             purchase_error(arg_str(frame, 1), err_text(arg(frame, 2)), id);
         } else success_kr(arg_str(frame, 1), arg(frame, 3), arg_int(frame, 4));
-    } else if (!strcmp(label, "ppr")) { // [provider, err, productId, name, count, items, premiumT, sub, price, cur, txn, ext, giftName]
+    } else if (!strcmp(label, "ppr")) { // [provider, err, productId, name, displayId, items, premiumT, sub, price, cur, txn, ext, giftName]
         browser_end();
         if (err_set(arg(frame, 2))) purchase_error(arg_str(frame, 1), err_text(arg(frame, 2)), arg_str(frame, 3));
-        else success_product(arg_str(frame, 1), arg_str(frame, 3), arg_str(frame, 4), arg_str(frame, 13));
+        else success_product(arg_str(frame, 1), arg_str(frame, 3), arg_str(frame, 4), arg_str(frame, 13), arg_int(frame, 5));
     } else if (!strcmp(label, "purprm")) { // [provider, err, premium, premiumT, price, cur, txn, ext, _, giftName]
         browser_end();
         if (err_set(arg(frame, 2))) {

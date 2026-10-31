@@ -8089,11 +8089,11 @@ const ViewerSkin g_viewer_skins[] = {
     /* 8083 */ {.name = "Jack-O'-Bone", .type = 12, .weapon = 0, .id = 40, .rarity = 4, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_GLOW | VS_TRANS, .creator = "tpercs, creshortv", .alpha = 0.01f, .emiss = -1, .color = -1, .side = 2, .puls_t = 0.0015f, .flags2 = VS2_TRADABLE},
     /* 8084 */ {.name = "Marrow", .type = 0, .weapon = 2, .id = -1, .rarity = 5, .seas = 10, .tex = NULL, .pat = -1, .mid = 37, .mid_t = 568, .flags = VS_GLOW, .creator = "Devil, CreshorTV, tpercs", .emiss = -1, .color = -1, .puls_t = 0.0015f, .flags2 = VS2_TRADABLE, .counter_digits = 5, .counter_pos = {-0.154f, -0.732f, 0.897f}, .counter_rot = {0.0f, -1.571f, 0.0f}, .counter_scl = 0.165f, .counter_color = 0x9b866d, .left_hold = {0.0f, -0.57f, 0.0f}, .right_hold = {0.0f, -1.0f, -1.4f}},
     /* 8085 */ {.name = "Trick 'n Treat", .type = 9, .weapon = 0, .id = 27, .rarity = 5, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_HAS_ANIM, .creator = "Devil, tpercs, Mooga", .file_ext = "glb", .anim_s = 1.0f, .emiss = -1, .color = -1, .side = 2, .flags2 = VS2_TRADABLE | VS2_PAINTABLE, .paint_mask = "pets/pet_27_p"},
-    /* 8086 */ {.name = "Chomps", .type = 15, .weapon = 0, .id = 545, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_NO_COMP},
-    /* 8087 */ {.name = "Dizzy", .type = 15, .weapon = 0, .id = 546, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_NO_COMP},
-    /* 8088 */ {.name = "Boohoo", .type = 15, .weapon = 0, .id = 547, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_NO_COMP},
-    /* 8089 */ {.name = "Boo", .type = 2, .weapon = 0, .id = 340, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = 0, .creator = "Devil, tpercs, quexx27", .x_off = -0.5f, .y_off = -1.0f, .scl = 0.6f, .x_rot = 3.141592653589793f, .scl_mlt = 0.4761f, .sit_off = -0.4806f, .prev_rot = -0.1f, .opacity = 0.8f, .emiss = -1, .color = -1, .flags2 = VS2_NO_BODY | VS2_TRADABLE | VS2_NO_COMP},
-    /* 8090 */ {.name = "Scarecrow Body", .type = 2, .weapon = 0, .id = 341, .rarity = 4, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = 0, .creator = "Devil, tpercs, quexx27", .x_off = -0.5f, .y_off = -1.0f, .scl = 3.0f, .x_rot = 3.141592653589793f, .scl_mlt = 1.75f, .sit_off = -0.32f, .sit_off_z = 0.14f, .prev_rot = -0.1f, .opacity = 0.8f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_PAINTABLE | VS2_NO_COMP, .paint_mask = "body/body_322_p"},
+    /* 8086 */ {.name = "Chomps", .type = 15, .weapon = 0, .id = 545, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_PAINTABLE | VS2_NO_COMP, .paint_mask = "hats/hat_545_p"},
+    /* 8087 */ {.name = "Dizzy", .type = 15, .weapon = 0, .id = 546, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_PAINTABLE | VS2_NO_COMP, .paint_mask = "hats/hat_546_p"},
+    /* 8088 */ {.name = "Boohoo", .type = 15, .weapon = 0, .id = 547, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_PAINTABLE | VS2_NO_COMP, .paint_mask = "hats/hat_547_p"},
+    /* 8089 */ {.name = "Boo", .type = 2, .weapon = 0, .id = 340, .rarity = 3, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = 0, .creator = "Devil, tpercs, quexx27", .x_off = -0.5f, .y_off = -1.0f, .scl = 0.6f, .x_rot = 3.141592653589793f, .scl_mlt = 0.4761f, .sit_off = -0.4806f, .prev_rot = -0.1f, .opacity = 0.8f, .emiss = -1, .color = -1, .flags2 = VS2_NO_BODY | VS2_TRADABLE | VS2_PAINTABLE | VS2_NO_COMP, .paint_mask = "body/body_340_p"},
+    /* 8090 */ {.name = "Scarecrow Body", .type = 2, .weapon = 0, .id = 341, .rarity = 4, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = 0, .creator = "Devil, tpercs, quexx27", .x_off = -0.5f, .y_off = -1.0f, .scl = 3.0f, .x_rot = 3.141592653589793f, .scl_mlt = 1.75f, .sit_off = -0.32f, .sit_off_z = 0.14f, .prev_rot = -0.1f, .opacity = 0.8f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_NO_COMP},
     /* 8091 */ {.name = "Scarecrow Head", .type = 15, .weapon = 0, .id = 548, .rarity = 4, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_NO_HEAD, .creator = "Devil, tpercs, quexx27", .asset_type = 1, .scl_mlt = 0.4835f, .sit_off = 0.9827f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE | VS2_NO_COMP},
     /* 8092 */ {.name = "Haunted Soul", .type = 7, .weapon = 0, .id = 0, .rarity = 4, .seas = 10, .tex = "648", .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_TRANS | VS_TEX_NUM, .creator = "creshorTV", .x_off = 1.6f, .y_off = -0.7f, .x_rot = -0.5f, .sit_off = 1.0f, .sit_off_z = 0.005f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE},
     /* 8093 */ {.name = "Spooked", .type = 7, .weapon = 0, .id = 0, .rarity = 4, .seas = 10, .tex = "649", .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_TRANS | VS_TEX_NUM, .creator = "creshorTV", .x_off = 1.6f, .y_off = -0.7f, .x_rot = -0.5f, .sit_off = 1.0f, .sit_off_z = 0.005f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE},
@@ -8155,8 +8155,9 @@ const ViewerSkin g_viewer_skins[] = {
     /* 8149 */ {.name = "Rarity R", .type = 0, .weapon = 19, .id = 134, .rarity = 1, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = 0, .creator = "Mooga", .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE},
     /* 8150 */ {.name = "Rarity R", .type = 0, .weapon = 5, .id = 394, .rarity = 1, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = 0, .creator = "Mooga", .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE},
     /* 8151 */ {.name = "Rarity R", .type = 0, .weapon = 6, .id = -1, .rarity = 1, .seas = 10, .tex = NULL, .pat = -1, .mid = 0, .mid_t = 367, .flags = 0, .creator = "Mooga", .y_off = -0.5f, .z_off = 0.28f, .m_scl = 1.0f, .scl = 0.9f, .emiss = -1, .color = -1, .flags2 = VS2_TRADABLE},
+    /* 8152 */ {.name = "Scarecrow Peg", .type = 8, .weapon = 0, .id = 74, .rarity = 4, .seas = 10, .tex = NULL, .pat = -1, .mid = -1, .mid_t = -1, .flags = VS_GLOW, .creator = "Devil, tpercs, quexx27", .x_off = 1.0f, .y_off = -3.0f, .emiss = -1, .color = -1, .puls_t = 0.0015f, .flags2 = VS2_RANDOM_LEG | VS2_TRADABLE, .leg_len = 0.22f},
 };
-const int g_viewer_skin_count = 8152;
+const int g_viewer_skin_count = 8153;
 
 // store.rarities: name, colour
 const ViewerRarity g_viewer_rarities[] = {
@@ -8353,7 +8354,7 @@ static const short list_51[] = {-1, -1, 6291, 6291, 5957, 5957, 5951, 5951, 5950
 static const short list_52[] = {-1, -1, 7125, 7125, 7251, 7251, 7039, 7039, 7027, 7027, 7110, 7110, 7109, 7109, 7108, 7108, 7107, 7107, 7087, 7087, 7074, 7074, 7053, 7053, 7030, 7030, 7029, 7029, 7253, 7253, 7028, 7028};
 static const short list_53[] = {-1, -1, 7663, 7663, 7766, 7766, 7733, 7733, 7732, 7732, 7880, 7880, 7877, 7877, 7769, 7769, 7667, 7667, 7665, 7665, 7875, 7875, 7801, 7801, 7800, 7800, 7770, 7770, 7768, 7768, 7731, 7731, 7668, 7668, 7661, 7661, 7544, 7544, 7353, 7353, 7814, 7814, 7813, 7813, 7662, 7662};
 static const short list_54[] = {-1, -1, 8026, 8026, 7910, 7910, 7909, 7909, 8027, 8027, 8095, 8095, 8094, 8094, 8093, 8093, 8092, 8092, 8010, 8010, 7991, 7991, 7990, 7990, 7912, 7912, 7963, 7963, 7913, 7913};
-static const short list_55[] = {-1, -1, 8048, 8048, 8034, 8034, 8042, 8042, 8022, 8022, 7984, 7984, 7797, 7797, 7557, 7557, 7749, 7749, 7695, 7695, 7565, 7565, 7492, 7492, 7818, 7818, 7206, 7206, 7169, 7169, 7265, 7265, 7184, 7184, 7089, 7089, 7214, 7214, 7198, 7198, 7145, 7145, 7138, 7138, 7131, 7131, 6984, 6984, 7038, 7038, 7065, 7065, 6320, 6320, 6335, 6335, 6304, 6304, 6300, 6300, 6875, 6875, 6871, 6871, 6824, 6824, 6415, 6415, 6336, 6336, 6333, 6333, 5927, 5927, 5919, 5919, 6371, 6371, 6432, 6432, 6337, 6337, 6334, 6334, 5709, 5709, 5811, 5811, 5704, 5704, 5332, 5332, 5331, 5331, 5894, 5894, 5886, 5886, 5873, 5873, 5708, 5708, 5707, 5707, 5706, 5706, 5703, 5703, 5275, 5275, 5851, 5851, 5705, 5705, 5227, 5227, 4723, 4723, 4722, 4722, 4721, 4721, 4720, 4720, 4205, 4205, 4623, 4623, 4804, 4804, 4593, 4593, 4592, 4592, 4568, 4568, 4295, 4295, 4724, 4724, 4383, 4383, 4210, 4210, 4902, 4902, 4333, 4333, 2086, 2086, 2085, 2085, 3183, 3183, 2939, 2939, 2938, 2938, 2860, 2860, 3193, 3193, 2950, 2950, 2552, 2552, 2084, 2084, 2083, 2083, 3181, 3181, 3182, 3182};
+static const short list_55[] = {-1, -1, 8048, 8048, 8034, 8034, 8152, 8152, 8042, 8042, 8022, 8022, 7984, 7984, 7797, 7797, 7557, 7557, 7749, 7749, 7695, 7695, 7565, 7565, 7492, 7492, 7818, 7818, 7206, 7206, 7169, 7169, 7265, 7265, 7184, 7184, 7089, 7089, 7214, 7214, 7198, 7198, 7145, 7145, 7138, 7138, 7131, 7131, 6984, 6984, 7038, 7038, 7065, 7065, 6320, 6320, 6335, 6335, 6304, 6304, 6300, 6300, 6875, 6875, 6871, 6871, 6824, 6824, 6415, 6415, 6336, 6336, 6333, 6333, 5927, 5927, 5919, 5919, 6371, 6371, 6432, 6432, 6337, 6337, 6334, 6334, 5709, 5709, 5811, 5811, 5704, 5704, 5332, 5332, 5331, 5331, 5894, 5894, 5886, 5886, 5873, 5873, 5708, 5708, 5707, 5707, 5706, 5706, 5703, 5703, 5275, 5275, 5851, 5851, 5705, 5705, 5227, 5227, 4723, 4723, 4722, 4722, 4721, 4721, 4720, 4720, 4205, 4205, 4623, 4623, 4804, 4804, 4593, 4593, 4592, 4592, 4568, 4568, 4295, 4295, 4724, 4724, 4383, 4383, 4210, 4210, 4902, 4902, 4333, 4333, 2086, 2086, 2085, 2085, 3183, 3183, 2939, 2939, 2938, 2938, 2860, 2860, 3193, 3193, 2950, 2950, 2552, 2552, 2084, 2084, 2083, 2083, 3181, 3181, 3182, 3182};
 static const short list_56[] = {-1, -1};
 static const short list_57[] = {-1, -1};
 static const short list_58[] = {-1, -1};
@@ -8363,7 +8364,7 @@ static const short list_61[] = {-1, -1, 5709, 5709, 5811, 5811, 5704, 5704, 5332
 static const short list_62[] = {-1, -1, 6320, 6320, 6335, 6335, 6304, 6304, 6300, 6300, 6875, 6875, 6871, 6871, 6824, 6824, 6415, 6415, 6336, 6336, 6333, 6333, 5927, 5927, 5919, 5919, 6371, 6371, 6432, 6432, 6337, 6337, 6334, 6334};
 static const short list_63[] = {-1, -1, 7206, 7206, 7169, 7169, 7265, 7265, 7184, 7184, 7089, 7089, 7214, 7214, 7198, 7198, 7145, 7145, 7138, 7138, 7131, 7131, 6984, 6984, 7038, 7038, 7065, 7065};
 static const short list_64[] = {-1, -1, 7797, 7797, 7557, 7557, 7749, 7749, 7695, 7695, 7565, 7565, 7492, 7492, 7818, 7818};
-static const short list_65[] = {-1, -1, 8048, 8048, 8034, 8034, 8042, 8042, 8022, 8022, 7984, 7984};
+static const short list_65[] = {-1, -1, 8048, 8048, 8034, 8034, 8152, 8152, 8042, 8042, 8022, 8022, 7984, 7984};
 static const short list_66[] = {-1, -1, 8085, 8085, 8073, 8073, 7980, 7980, 7791, 7791, 7774, 7774, 7746, 7746, 7714, 7714, 7512, 7512, 7225, 7225, 7151, 7151, 7150, 7150, 7149, 7149, 7059, 7059, 6886, 6886, 6317, 6317, 2965, 2965, 5837, 5837, 5727, 5727, 5850, 5850, 4792, 4792, 4206, 4206, 4195, 4195, 2964, 2964, 3149, 3149};
 static const short list_67[] = {-1, -1};
 static const short list_68[] = {-1, -1};
@@ -8740,7 +8741,7 @@ const ViewerOptionList g_viewer_lists[] = {
     {VIEWER_LIST_TYPE, 7, 8, 16, list_52},
     {VIEWER_LIST_TYPE, 7, 9, 23, list_53},
     {VIEWER_LIST_TYPE, 7, 10, 15, list_54},
-    {VIEWER_LIST_TYPE, 8, 0, 87, list_55},
+    {VIEWER_LIST_TYPE, 8, 0, 88, list_55},
     {VIEWER_LIST_TYPE, 8, 1, 1, list_56},
     {VIEWER_LIST_TYPE, 8, 2, 1, list_57},
     {VIEWER_LIST_TYPE, 8, 3, 1, list_58},
@@ -8750,7 +8751,7 @@ const ViewerOptionList g_viewer_lists[] = {
     {VIEWER_LIST_TYPE, 8, 7, 17, list_62},
     {VIEWER_LIST_TYPE, 8, 8, 14, list_63},
     {VIEWER_LIST_TYPE, 8, 9, 8, list_64},
-    {VIEWER_LIST_TYPE, 8, 10, 6, list_65},
+    {VIEWER_LIST_TYPE, 8, 10, 7, list_65},
     {VIEWER_LIST_TYPE, 9, 0, 25, list_66},
     {VIEWER_LIST_TYPE, 9, 1, 1, list_67},
     {VIEWER_LIST_TYPE, 9, 2, 1, list_68},

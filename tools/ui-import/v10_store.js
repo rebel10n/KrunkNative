@@ -6,8 +6,8 @@
 // (v10.js:28030 `GET <gapi>/data/skins`, a jspck text) and the prize wheels and their item pools
 // the same way (v10.js:102788 `GET <gapi>/data/spins`). Both responses are jspck (the packer of
 // v7.1.4's src/shim/jspck.js, which unpacks them byte-exactly):
-//   skins: ~/.cache/kn-v10/live/api/skins.jspck (live, 2026-10-30, v10.0.5; 8152 items), KN_V10_SKINS=
-//   spins: tools/ui-import/v10_spins.jspck (live, 2026-10-30, v10.0.5; 14 wheels, 43 pools), KN_V10_SPINS=
+//   skins: ~/.cache/kn-v10/live/api/skins.jspck (live, 2026-10-30, v10.0.6; 8153 items), KN_V10_SKINS=
+//   spins: tools/ui-import/v10_spins.jspck (live, 2026-10-30, v10.0.5 = v10.0.6; 14 wheels, 43 pools), KN_V10_SPINS=
 // Used by v10_skins.js (assets/skins.json) and gen_viewer_store.js (viewer_store_table.c and
 // shared/src/store_spins_table.c).
 'use strict';
@@ -20,7 +20,7 @@ const V7_JSPCK = '/home/user/jails/kru/src/Krunker_v7.1.4/src/shim/jspck.js';
 const V10_SKINS = process.env.KN_V10_SKINS || path.join(os.homedir(), '.cache/kn-v10/live/api/skins.jspck');
 const V10_SPINS = process.env.KN_V10_SPINS || path.join(__dirname, 'v10_spins.jspck');
 // sha256 of the pinned live responses (a different file is reported, not refused)
-const V10_SKINS_SHA256 = 'c361e31d430aa48843e9969d8ca0100c304a8befd91df16559bcc8cf8f2c13ad';
+const V10_SKINS_SHA256 = '13a559b7dbdcd2e94e8bfd7cfadf89b452871ed0046da70c6d3130b24eed3bf1';
 const V10_SPINS_SHA256 = '1e35774dee2656ad4b78f5352c9f3ef39553089723f315927bfd8546cdab4479';
 
 // itemTypes (v10.js:20116): v7's 17 plus EMOJI 17 and PAINT 18

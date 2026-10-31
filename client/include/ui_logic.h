@@ -726,7 +726,8 @@ void ui_loadout_look(int class_index, int for_ent, LoadoutLook *out);
 // WORN_SKIN_PAINT_NONE. The local player's and the preview's model read it (the official reads its own $account.skins).
 int ui_loadout_skin_paint(int index, WornSkinPaint *out);
 void ui_loadout_skin_paints(const PlayerSkins *skins, PlayerSkinPaints *out);
-// The item view's viewer URL tail for that paint ("&paint=rrggbb" / "&paintShader=n", v10 deob:123160-123173), "" none.
+// The item view's viewer URL tail for the owned copy: "&wear=w" (deob-10.0.6.js:221934) then its paint ("&paint=rrggbb" /
+// "&paintShader=n", v10 deob:123160-123173), "" none.
 void ui_loadout_paint_query(int index, char *out, size_t n);
 // The class's level req for this client (ui_loadout.c): 1 open, 0 locked. Only an official krunker.io game
 // (Game.is_official) locks by level; the Change Loadout cards and the join's class (client_enter_game) use it.

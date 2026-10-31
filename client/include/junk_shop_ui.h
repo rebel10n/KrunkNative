@@ -10,8 +10,9 @@
 // appends the products under the Eterno Shop's wild offer (store_ui.c v10_store_eterno). Returns the
 // display request's state: 0 loading, 1 loaded (with or without products), -1 failed
 int junk_shop_render(StrBuf *sb);
-// knKioShopBuy on Box Office (kio_store.c): the product's purchase, one unit
-void junk_shop_buy(int product_id);
+// knKioShopBuy on Box Office (kio_store.c): the product's purchase, one unit; an accepted one counts on the card of
+// display_id at once (updateDisplayPurchaseCount, deob-10.0.6.js:115979-116030)
+void junk_shop_buy(int display_id, int product_id);
 // the store home's bundle grid (store_ui.c v10_store_home): the brain's GET /api/shop/bundles rows as v10's bundle
 // cards in v10's order (svelte-lri212, deob-10.0.3.js:144642, 144811-144823); nothing is drawn while they load or
 // when none are published

@@ -563,7 +563,8 @@ void viewer_item_keys(const ViewerSkin *n, char *model, const size_t model_n, ch
 
 // RENDER.loadMesh / loadAnimMesh of a store item into `holder` at `position`, turned rot_y about y,
 // scaled `scale`, with its material options and animations (store_item_model.c, skin_fx.c); the OBJ falls
-// back to the model's own texture (or none with noTex), and takes the page's paint (paintTargets items only).
+// back to the model's own texture (or none with noTex), and takes the page's wear (typed items, the item preview's
+// deob-10.0.6.js:222889-222893) and paint (paintTargets items only).
 static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 position, const float rot_y, const float scale,
                        const int glow_text, const int emissive) {
     StoreItemModel built;
@@ -573,12 +574,14 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
             store_item_model_fini(&built);
             return;
         }
+        skin_fx_apply_wear_gltf(built.model, n, g_viewer.wear); // the page's wear param
         if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint_gltf(built.model, g_viewer.paint, n); // the page's paint params
         skin_fx_set_seed(built.model, NULL, g_viewer.seed);
         vs.models[vs.model_count++] = built.model;
         scene_add_gltf(vs.scene, built.model);
         return;
     }
+    skin_fx_apply_wear(built.mesh, n, g_viewer.wear); // the page's wear param
     if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(built.mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
     skin_fx_set_seed(NULL, built.mesh, g_viewer.seed);
     item_add(built.mesh);

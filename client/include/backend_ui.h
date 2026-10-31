@@ -168,6 +168,9 @@ long account_skin_stat(int skin, const char *stat);
 // ... and that copy's seed for the seeded custom shader 15 (skin_copy_seed of its m.seed or id, deob-10.0.4.js:24344-24353),
 // -1 when krunker.io is not the account or it owns no copy of the skin
 int account_skin_seed(int skin);
+// ... and that copy's wear (its m.wear: v10.0.6's wearMap level, deob-10.0.6.js:173414-173419), -1 when krunker.io is
+// not the account or no copy of the skin has one (Box Office copies have no wear)
+double account_skin_wear(int skin);
 // krunker.io: the instance of an item the game server just gave (10.0.4's SKIN_REWARD [skin, silent, iid, meta],
 // deob-10.0.4.js:194184-194189): the next account_add_skin(skin) adds it as v10.0.4's addSkin(skin, 1, iid, meta)
 // does (an entry {ind, cnt: 1, id, m, st: 0}, deob-10.0.4.js:115078-115087, :221926), so it can be equipped at once.

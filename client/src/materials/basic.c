@@ -154,6 +154,10 @@ U(u_paint_time, "paint_time");
 U(u_paint_mask_enabled, "paint_mask_enabled");
 U(u_paint_mask, "paint_mask");
 U(u_paint_env_map, "paint_env_map");
+// Per-copy wear (skin_fx_apply_wear): v10's wearMap node (basic.frag wear_apply)
+U(u_wear_enabled, "wear_enabled");
+U(u_wear_level, "wear_level");
+U(u_wear_map, "wear_map");
 #undef U
 
 // glTF PBR maps (gltf.c): metallicRoughness (texture unit 5) and normal (unit 6) textures
@@ -456,6 +460,16 @@ void basic_material_update_uniforms(Material *base) {
             glBindTexture(GL_TEXTURE_2D, material->paint_env_texture);
             glActiveTexture(GL_TEXTURE0);
         }
+    }
+
+    // Per-copy wear: the wearMap's masks before the paint (deob-10.0.6.js:204868; basic.frag wear_apply)
+    gl_uniform_1i(&u_wear_enabled, program, material->wear_texture != 0);
+    if (material->wear_texture) {
+        gl_uniform_1f(&u_wear_level, program, material->wear_level);
+        gl_uniform_1i(&u_wear_map, program, BASIC_WEAR_TEXTURE_UNIT);
+        glActiveTexture(GL_TEXTURE0 + BASIC_WEAR_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, material->wear_texture);
+        glActiveTexture(GL_TEXTURE0);
     }
 
     // v10.0.3 GLB environment reflections: only "if (!material.envMap)" (deob:233666), so a skin env map wins

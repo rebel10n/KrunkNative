@@ -5559,7 +5559,7 @@ H(h_view_item) {
     else if (sk->flags & VS_BLOCKED) sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
     if (sk->type == 16) sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url); // PLAYER_CARD thumbnail
     else {
-        char paint[32]; // the account's own painted copy on the showcase (v10's instance → viewer URL, deob:123160-123173)
+        char paint[80]; // the account's own worn / painted copy on the showcase (v10's instance → viewer URL, deob-10.0.6.js:221934)
         ui_loadout_paint_query(index, paint, sizeof(paint));
         sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d%s'></iframe>", index, paint);
     }

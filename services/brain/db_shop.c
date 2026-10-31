@@ -310,6 +310,11 @@ const kn_proc P_SHOP_DISPLAY = {"shop_display", NULL, run_display};
  * a badge is refused before anything moves: Box Office has no payment and no badge grant. The limits (per_user or
  * global) count the purchase rows. Returns the reply JSON, or NULL with the refusal recorded. */
 static cJSON *official_purchase(Dbx *x, const int64_t account, const int64_t product, const int64_t quantity) {
+    // the product row lock, first: two purchases of a limited product queue here, so the second counts the first's row
+    // (v10.0.6 "Fixed limited items sometimes being purchasable more than once"; the Junk products' run_purchase does
+    // the same). Without it both read the same count and both pass the limit.
+    if (dbx_exec(x, SQL(.any = "UPDATE shop_official_products SET active = active WHERE id = $1"), KN_DB_ARGS(I64S(product))) < 0)
+        return NULL;
     cJSON *row = dbx_row(x, SQL(.any = "SELECT price_type, price_amount AS amount__i, price_currency_id AS cur__i,"
                                        " purchase_limit AS limit__i, purchase_limit_scope, active AS active__i"
                                        " FROM shop_official_products WHERE id = $1"),

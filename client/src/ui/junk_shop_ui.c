@@ -14,6 +14,7 @@
 #include <i18n.h>
 #include <html_dom.h>
 #include <store_spins.h> // store_iso_ms: a bundle's DATE
+#include <shop_counts.h>
 #include "../viewer/viewer_store.h" // the bundle's skins and their rarity colours
 
 #include <ctype.h>
@@ -26,11 +27,29 @@
 #define SHOP_TTL_MS 60000 // the display's cache (v10's shop store keeps it until a purchase)
 #define STORE_WINDOW 14    // windows[13] / the Store: menu_rerender_if_open(14)
 
+// the cached "limited" display of the signed-in account (junk_shop_render's request): its data is the shop
+static cJSON *cached_display(void) {
+    char t[256], path[400];
+    v10_url_token(t, sizeof t);
+    snprintf(path, sizeof path, "/api/shop/displays?tag=limited%s%s", t[0] ? "&token=" : "", t);
+    const V10Req *r = v10_get(path, 0); // ttl 0: what is cached, never a refetch
+    return r && r->status == 200 && r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
+}
+
+typedef struct {
+    int display, product;
+} Purchase;
+
 static void purchase_done(void *user, const int status, const cJSON *json) {
-    const int product = (int) (intptr_t) user;
-    v10_expire("/api/shop/displays"); // the purchase count and the limit read again
+    const Purchase p = *(Purchase *) user;
+    free(user);
+    const int product = p.product;
     const cJSON *data = json ? cJSON_GetObjectItem(json, "data") : NULL;
     if (status == 200 && cJSON_IsObject(data)) {
+        // updateDisplayPurchaseCount (deob-10.0.6.js:115979-116030, called at :116095): the bought card and its
+        // product count the purchase at once, as the krunker.io store does (kio_store_display_purchased), so a
+        // limited card reads sold out without reading the display again
+        if (p.display > 0) shop_display_purchased(cached_display(), p.display);
         const cJSON *junk = cJSON_GetObjectItem(data, "junk");
         if (cJSON_IsString(junk)) account_ui_set_junk(junk->valuestring);
         const cJSON *kr = cJSON_GetObjectItem(data, "kr");
@@ -263,14 +282,18 @@ void junk_shop_bundle_buy(const int bundle_id) {
     v10_send("POST", path, body, bundle_purchase_done, (void *) (intptr_t) bundle_id);
 }
 
-void junk_shop_buy(const int product_id) {
+void junk_shop_buy(const int display_id, const int product_id) {
     if (!active_account()) {
         v10_menu_handle("loginOrRegister", NULL, NULL, 0);
         return;
     }
+    Purchase *p = malloc(sizeof(*p));
+    if (!p) return;
+    p->display = display_id;
+    p->product = product_id;
     char t[256], path[320], body[64];
     v10_url_token(t, sizeof t);
     snprintf(path, sizeof path, "/api/shop/purchase?token=%s", t);
     snprintf(body, sizeof body, "{\"product_id\":%d,\"quantity\":1}", product_id);
-    v10_send("POST", path, body, purchase_done, (void *) (intptr_t) product_id);
+    v10_send("POST", path, body, purchase_done, p); // purchase_done frees p
 }

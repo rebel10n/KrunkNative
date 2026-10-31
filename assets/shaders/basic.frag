@@ -131,6 +131,14 @@ uniform sampler2D paint_mask;
 uniform sampler2D paint_env_map;
 vec3 paint_glow; // the raw shaders' emissive (deob:108752), added to emissive_radiance in main
 
+// v10.0.6 wear (loadMesh's `wear`: the wearMap node, deob-10.0.6.js:95692-95722, applied at :204868 after the overlay,
+// before the paint): f(L, mid, k, max) = clamp((s(L) - s(0)) / (s(1) - s(0)), 0, 1) * max, s(x) = 1 / (1 + exp(-k (x - mid)));
+// rgb = mix(rgb, scratches, min(map.a * f(L, 0.5, 1, 1), 1)), then dirt by g (0.33, 5.5, 0.9), grime by b (0.2, 7, 1),
+// rust by r (0.5, 8, 1). The map is data (no sRGB), on unit 13; the geometry uv.
+uniform bool wear_enabled;
+uniform float wear_level;
+uniform sampler2D wear_map;
+
 // v10.0.3 decal (loadMesh's `decal` node, deob-10.0.3.js:232213-232243; the Turf Wars banners' clan logo,
 // client/src/wars_banners.c): in the box |local_pos - decal_position| <= decal_half_scale (the geometry's own
 // space), the albedo becomes mix(albedo, decal.rgb, decal.a), decal sampled at (local.xy - position.xy + half.xy) /
@@ -509,6 +517,26 @@ float krunker_ramp_strip(float across) {
     return RAMP_SHADE_ALPHA[clamp(int(u * 32.0), 0, 31)] / 255.0;
 }
 
+// ---- the wear (the uniforms above): v10.0.6's wearMap node (deob-10.0.6.js:95692-95722)
+float wear_curve(float level, float mid, float k, float top) {
+    float s = 1.0 / (1.0 + exp(-k * (level - mid)));
+    float s0 = 1.0 / (1.0 + exp(-k * (0.0 - mid)));
+    float s1 = 1.0 / (1.0 + exp(-k * (1.0 - mid)));
+    return clamp((s - s0) / (s1 - s0), 0.0, 1.0) * top;
+}
+
+vec3 wear_apply(vec3 base, vec2 uv) {
+    vec4 m = texture(wear_map, uv);
+    float rust = min(m.r * wear_curve(wear_level, 0.5, 8.0, 1.0), 1.0);
+    float dirt = min(m.g * wear_curve(wear_level, 0.33, 5.5, 0.9), 1.0);
+    float grime = min(m.b * wear_curve(wear_level, 0.2, 7.0, 1.0), 1.0);
+    float scratch = min(m.a * wear_curve(wear_level, 0.5, 1.0, 1.0), 1.0);
+    vec3 c = mix(base, vec3(0.325, 0.302, 0.294), scratch);
+    c = mix(c, vec3(0.122, 0.078, 0.039), dirt);
+    c = mix(c, vec3(0.129, 0.129, 0.129), grime);
+    return mix(c, vec3(0.22, 0.098, 0.039), rust);
+}
+
 // ---- the paint (the uniforms above): v10.0.3's paint node, ported from its TSL graphs
 const vec3 PAINT_LUMA = vec3(0.299, 0.587, 0.114);
 
@@ -684,6 +712,7 @@ void main() {
     if (base_color.a < alpha_test) discard;
     paint_glow = vec3(0.0);
     // the shaders and the mask read the geometry uv (TSL uv(), deob:108727 / the paintMaskMap texture node)
+    if (wear_enabled) base_color.rgb = wear_apply(base_color.rgb, scaled_tex_coord);
     if (paint_enabled) base_color.rgb = paint_apply(base_color.rgb, scaled_tex_coord, scaled_tex_coord);
     if (decal_enabled) base_color.rgb = decal_apply(base_color.rgb);
 

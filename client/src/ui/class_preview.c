@@ -194,6 +194,7 @@ static Player *preview_player_new(Client *client, Scene *scene) {
     if (!player) return NULL;
 
     player->uid = -1; // player_update_meshes() anchors uid -1 (Krunker's preview sid) at player->position
+    player->own_copies = 1; // <slot>Metadata = the account's selected copy's (deob-10.0.6.js:216225): their wear
     player->class_index = client->menu_class_index;
     const LoadoutLook look = preview_look(player->class_index);
     preview_look_apply(player, &look, preview_head_mlt(client));

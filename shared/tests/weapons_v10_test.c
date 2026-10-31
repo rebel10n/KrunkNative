@@ -376,7 +376,7 @@ static void check_config(const cJSON *config) {
 int main(int argc, char **argv) {
     (void) argc;
     (void) argv;
-    CHECK(!strcmp(ruleset_current()->version, "10.0.5") && ruleset_current()->ranked.kr_mlt == 2.0f, "the v10 ruleset's ranked rules");
+    CHECK(!strcmp(ruleset_current()->version, "10.0.6") && ruleset_current()->ranked.kr_mlt == 2.0f, "the v10 ruleset's ranked rules");
     const int weapon_count = rules_krunker_weapon_count(); // 31: Boulder and Compressor included
     cJSON *weapons = load_fixture("weapons");
     cJSON *classes = load_fixture("classes");

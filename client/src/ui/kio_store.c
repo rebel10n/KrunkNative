@@ -24,6 +24,7 @@
 // code is the game socket's "vo" (kio_store_redeem_prompt). Real-money gifts and bundles are the payment provider's
 // checkout, which KrunkNative does not run. A guest gets v10's loginOrRegister.
 #include <kio_store.h>
+#include <shop_counts.h> // v10.0.6 updateDisplayPurchaseCount: a bought limited card reads sold out at once
 #include "klog.h"
 #include <junk_shop_ui.h>
 #include <krunker_account.h>
@@ -263,20 +264,31 @@ int kio_store_write(const char *method, const char *path, const char *body, cons
     return 1;
 }
 
-// shop.purchaseProduct's answer: data is the purchase (truthy on success), else the error is shown (v10's
-// Purchase failed fallback). A bought display is fetched again (v10 refreshes the shop after a purchase).
+static int lookup(int display_id, const cJSON **display, const cJSON **product);
+
+void kio_store_display_purchased(const int display_id) {
+    Slot *s = slot_find(DISPLAY_LIMITED);
+    if (s && s->req.json && shop_display_purchased(s->req.json, display_id)) menu_rerender_if_open(14);
+}
+
+// shop.purchaseProduct's answer (deob-10.0.6.js:116088-116095, the gift :117765-117774): data.success, else data.message
+// or the error is shown (v10's Purchase failed fallback). A counted purchase bumps the display's counts at once
+// (updateDisplayPurchaseCount, v10.0.6), so a limited card reads sold out right away, with no refetch.
 static void buy_done(void *user, const int status, const cJSON *data, const char *code, const char *message) {
-    (void) user;
     (void) status;
-    if (message || !data) {
+    const intptr_t packed = (intptr_t) user;
+    const int display_id = (int) (packed >> 1), counts = (int) (packed & 1);
+    const cJSON *ok = data ? cJSON_GetObjectItem(data, "success") : NULL;
+    const int refused = ok && !cJSON_IsTrue(ok); // !data.success: data.message (:116091-116093)
+    if (refused && !message && v10_str(data, "message")[0]) message = v10_str(data, "message");
+    if (message || !data || refused) {
         printf("[kio-store] purchase failed: %s\n", code ? code : message ? message : "no data");
         v10_view_push(v10_io_error(I18N("kn.kio.store.buyFailedTitle", "krunker.io Store"),
                                    message ? message : I18N("kn.kio.store.buyFailed", "Purchase failed")), NULL, NULL, NULL);
         return;
     }
-    Slot *s = slot_find(DISPLAY_LIMITED);
-    if (s && !s->inflight) slot_clear(s);
-    menu_rerender_if_open(14);
+    if (counts && display_id > 0) kio_store_display_purchased(display_id);
+    else menu_rerender_if_open(14);
 }
 
 int kio_store_buy(const int display_id, const int product_id, const char *gift_to) {
@@ -284,6 +296,12 @@ int kio_store_buy(const int display_id, const int product_id, const char *gift_t
         v10_menu_handle("loginOrRegister", NULL, NULL, 0);
         return 0;
     }
+    // a gift counts only on a "product" display whose limit is global (deob-10.0.6.js:117701, :117774)
+    const cJSON *display = NULL, *product = NULL;
+    int counts = !gift_to;
+    if (gift_to && lookup(display_id, &display, &product))
+        counts = shop_purchase_counts(v10_str(display, "type"), v10_str(product, "purchase_limit_scope"), 1);
+    void *user = (void *) (((intptr_t) (display_id > 0 ? display_id : 0) << 1) | (intptr_t) (counts != 0));
     cJSON *b = cJSON_CreateObject();
     cJSON_AddNumberToObject(b, "display_id", display_id);
     cJSON_AddNumberToObject(b, "product_id", product_id);
@@ -291,7 +309,7 @@ int kio_store_buy(const int display_id, const int product_id, const char *gift_t
     if (gift_to) cJSON_AddStringToObject(b, "gift_to", gift_to);
     char *body = cJSON_PrintUnformatted(b);
     cJSON_Delete(b);
-    const int sent = kio_store_write("POST", "shop/purchase", body, buy_done, NULL);
+    const int sent = kio_store_write("POST", "shop/purchase", body, buy_done, user);
     free(body);
     return sent;
 }
@@ -995,7 +1013,7 @@ int kio_store_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     if (!strcmp(h, "Buy")) { // _39604 / the dynamic card's _39732 / _39737: shop/purchase (knKioShopBuy(display, product))
         html_ui_stop_propagation();
         const int display = (int) arg_num(ev, args, argc, 0);
-        if (!kio_store_active()) junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product
+        if (!kio_store_active()) junk_shop_buy(display, (int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product
         else if (!active_account()) v10_menu_handle("loginOrRegister", NULL, NULL, 0);
         else if (!buy_real(display, qty_of(display, 1))) kio_store_buy(display, (int) arg_num(ev, args, argc, 1), NULL);
     } else if (!strcmp(h, "Gift")) { // _39563: the name prompt, then shop/purchase {gift_to} (kio_store_gift)

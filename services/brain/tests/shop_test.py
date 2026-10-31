@@ -15,6 +15,7 @@ per-account purchase limit counts quantities across purchases; an inactive produ
 an unknown product are refused; the account's ledger rows sum to its balance.
 """
 import asyncio
+import concurrent.futures
 import json
 import os
 import re
@@ -356,6 +357,18 @@ async def scenario(port):
         check(status == 400 and err_of(body) == "Purchase limit reached", "Hovi's per-user limit of 1 refuses a second: %s" % body)
         status, body = http(port, "GET", "/api/shop/displays?tag=limited", token=a_tok)
         check(status == 200 and body["data"]["products"]["35"]["purchase_count"] == 1, "the display counts the one Hovi")
+
+        # v10.0.6 "Fixed limited items sometimes being purchasable more than once": purchases of a limit-1 product sent
+        # at the same time queue on the product row, so exactly one passes the limit and the KR is debited once
+        query("UPDATE players SET player_funds = 1000 WHERE player_id = %d" % b_id)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            racing = list(pool.map(lambda _: http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, b_tok), range(4)))
+        won = [r for r in racing if r[0] == 200 and isinstance(r[1], dict) and r[1].get("data", {}).get("success") is True]
+        lost = [r for r in racing if r[0] == 400 and err_of(r[1]) == "Purchase limit reached"]
+        check(len(won) == 1 and len(lost) == 3, "four simultaneous purchases of a limit-1 product: one passes, three hit the limit: %s" % racing)
+        check(one("SELECT COUNT(*) FROM shop_official_purchases WHERE account_id = %d AND product_id = 35" % b_id) == 1
+              and one("SELECT player_funds FROM players WHERE player_id = %d" % b_id) == 900,
+              "one purchase row and one 100 KR debit for the race")
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 26, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Payment is not available on Box Office",
               "a USD product (Sandstorm OTs-14 Groza, 2.99, not listed) is refused, nothing written: %s %s" % (status, body))

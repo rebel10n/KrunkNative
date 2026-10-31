@@ -296,9 +296,9 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
 }
 
 {
-  // config.networkSounds (networkSounds.ts, generated with the C table): the fixture the C test reads, deob-10.0.5.js:18263
+  // config.networkSounds (networkSounds.ts, generated with the C table): the fixture the C test reads, deob-10.0.6.js:18263
   const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "shared", "tests", "data", "v10", "networkSounds.json"), "utf8"));
-  assert.strictEqual(fixture.source, "deob-10.0.5.js:18263");
+  assert.strictEqual(fixture.source, "deob-10.0.6.js:18263");
   assert.deepStrictEqual([...NETWORK_SOUNDS], fixture.networkSounds, "networkSounds.ts is the fixture's table");
   assert.strictEqual(NETWORK_SOUNDS.length, 401);
   assert.deepStrictEqual([networkSoundIndex("spray"), networkSoundIndex("weapon_1"), networkSoundIndex("weapon_17_4"),

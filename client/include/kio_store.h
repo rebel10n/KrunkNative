@@ -37,6 +37,10 @@ int kio_store_write(const char *method, const char *path, const char *body, KioW
 // Buys one product of a display (shop.purchaseProduct, deob-10.0.4.js:116077, quantity 1). gift_to: the
 // recipient for a gift (:117751), NULL for the account itself. A guest gets loginOrRegister instead. 1 = sent.
 int kio_store_buy(int display_id, int product_id, const char *gift_to);
+// updateDisplayPurchaseCount (deob-10.0.6.js:115979-116030): the "limited" display's node and its product count one more
+// purchase now, so a bought limited card reads sold out at once (the store re-renders when it is open). Also called for
+// the checkout's paid catalogue purchases and a Stripe claim answered alreadyClaimed (kio_checkout.c).
+void kio_store_display_purchased(int display_id);
 // Spins a store wheel: POST spins/execute {index, ticket, multi, from: 0} (deob-10.0.4.js:27413; the spin button
 // :221350). index / ticket are -1 for null (a TICKET item's spin has no wheel). fn gets the answer's data
 // (fakeRands, itemIds, funds, usedTicket) or the error, as kio_store_write does. 1 = sent.

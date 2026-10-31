@@ -755,6 +755,23 @@ int account_skin_seed(const int skin) {
     return found ? 0 : -1;
 }
 
+double account_skin_wear(const int skin) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj || skin < 0) return -1.0;
+    const cJSON *skins = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins"), *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (!cJSON_IsNumber(ind) || ind->valueint != skin) continue;
+        const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m");
+        cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+        if (parsed) m = parsed;
+        const cJSON *wear = cJSON_IsObject(m) ? cJSON_GetObjectItemCaseSensitive(m, "wear") : NULL;
+        const double w = cJSON_IsNumber(wear) && wear->valuedouble >= 0.0 ? wear->valuedouble : -1.0;
+        cJSON_Delete(parsed);
+        if (w >= 0.0) return w; // the first copy of that index with a wear (the plain-index rule, as the paint)
+    }
+    return -1.0;
+}
+
 int account_add_skin(const int skin_index) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         // the krunker.io account's own (the game socket's "dslr"): v10's account.addSkin(ind) (deob-10.0.3.js

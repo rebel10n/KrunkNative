@@ -32,6 +32,7 @@
 #include <v10_social.h>
 #include <v10_ui.h>
 #include <follower_counts.h> // a follow moves the author's count on every copy (followers_moved)
+#include <social_list.h>     // friends:list pages without duplicates, msg:recv's entry, the read conversation
 #include <ruleset.h>
 #include <weapons.h>
 #include <badges.h>     // the profile's Badges tab and selected badge (badge_get / badge_texture)
@@ -489,6 +490,24 @@ static struct {
     char name[32];
 } g_unread_extra[32];
 
+// the g_unread_extra slot of a peer, -1 when it has none
+static int extra_slot(const int64_t id) {
+    for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
+        if (id && g_unread_extra[i].id == id) return (int) i;
+    return -1;
+}
+
+// a peer outside the list keeps its unread count (and name) in a slot; with every slot taken the count is dropped
+static void extra_count(const int64_t id, const char *name, const int n) {
+    int slot = extra_slot(id);
+    for (size_t i = 0; slot < 0 && i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
+        if (!g_unread_extra[i].id) slot = (int) i;
+    if (slot < 0) return;
+    g_unread_extra[slot].id = id;
+    g_unread_extra[slot].n = n;
+    if (name && name[0] && name != g_unread_extra[slot].name) snprintf(g_unread_extra[slot].name, sizeof(g_unread_extra[slot].name), "%s", name);
+}
+
 int v10_social_unread_total(void) {
     int total = 0;
     const cJSON *f;
@@ -627,46 +646,45 @@ static void eb_load_more(void) {
     eb_send_type("friends:list", "offset", S.friends_next);
 }
 
+// a friend that joined the list: an unread:summary that came first keeps its count, and the conversation is seeded
+// with the last message
+static void friend_joined(cJSON *f) {
+    const int64_t id = (int64_t) jnum(f, "id");
+    for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++) {
+        if (g_unread_extra[i].id == id && g_unread_extra[i].n > (int) jnum(f, "unread")) {
+            cJSON_DeleteItemFromObject(f, "unread");
+            cJSON_AddNumberToObject(f, "unread", g_unread_extra[i].n);
+        }
+        if (g_unread_extra[i].id == id) g_unread_extra[i].id = 0;
+    }
+    if (jnum(f, "lastId") > 0 && jstr(f, "lastText")[0]) {
+        Conv *c = conv_get(id, 1);
+        if (c && c->n == 0) {
+            Msg *m = conv_insert(c, 0);
+            if (m) {
+                m->server_id = (int64_t) jnum(f, "lastId");
+                m->sent = jtrue(f, "lastFromMe");
+                m->text = strdup(jstr(f, "lastText"));
+                m->ts = jnum(f, "lastTs");
+                m->status = MSG_DELIVERED;
+            }
+        }
+    }
+}
+
 static void eb_on_friends(const cJSON *o) {
     S.friends_loading = 0;
     const cJSON *list = cJSON_GetObjectItem(o, "friends");
     const int offset = (int) jnum(o, "offset");
-    if (offset == 0 || !S.friends) {
+    if (offset == 0 || !S.friends) { // the first page replaces the list (deob-10.0.6.js:141251)
         cJSON_Delete(S.friends);
         S.friends = cJSON_CreateArray();
     }
-    const cJSON *f;
-    int count = 0;
-    cJSON_ArrayForEach(f, list) {
-        cJSON *copy = cJSON_Duplicate(f, 1);
-        const int64_t id = (int64_t) jnum(f, "id");
-        // an unread:summary that came first keeps its count
-        for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++) {
-            if (g_unread_extra[i].id == id && g_unread_extra[i].n > (int) jnum(f, "unread")) {
-                cJSON_DeleteItemFromObject(copy, "unread");
-                cJSON_AddNumberToObject(copy, "unread", g_unread_extra[i].n);
-            }
-            if (g_unread_extra[i].id == id) g_unread_extra[i].id = 0;
-        }
-        cJSON_AddItemToArray(S.friends, copy);
-        count++;
-        // seed the conversation with the last message
-        if (jnum(f, "lastId") > 0 && jstr(f, "lastText")[0]) {
-            Conv *c = conv_get(id, 1);
-            if (c && c->n == 0) {
-                Msg *m = conv_insert(c, 0);
-                if (m) {
-                    m->server_id = (int64_t) jnum(f, "lastId");
-                    m->sent = jtrue(f, "lastFromMe");
-                    m->text = strdup(jstr(f, "lastText"));
-                    m->ts = jnum(f, "lastTs");
-                    m->status = MSG_DELIVERED;
-                }
-            }
-        }
-    }
+    // a page adds only the friends the list does not have yet (:141252-141265: some(id) || push); they are its tail
+    const int before = cJSON_GetArraySize(S.friends), added = social_friends_merge(S.friends, list);
+    for (int i = before; i < before + added; i++) friend_joined(cJSON_GetArrayItem(S.friends, i));
     S.friends_more = jtrue(o, "hasMore");
-    S.friends_next = offset + count;
+    S.friends_next = offset + cJSON_GetArraySize(list); // the next page follows the whole page
 }
 
 // ------------------------------------------------------------------ notifications
@@ -691,9 +709,19 @@ static void eb_on_recv(const cJSON *o) {
     m->text = strdup(jstr(o, "text"));
     m->ts = jnum(o, "ts");
     m->status = MSG_DELIVERED;
-    set_unread(from, unread_of(from) + 1);
+    // the sender's entry takes the message as its last one, and a sender not in the list joins it at the top when its
+    // name is known (deob-10.0.6.js:141342-141364); one without a name keeps its count with the summary's
+    const int extra = extra_slot(from);
+    const char *sent_name = jstr(o, "name");
+    const char *known = sent_name[0] ? sent_name : extra >= 0 ? g_unread_extra[extra].name : "";
+    const int unread = (friend_by_id(from) ? unread_of(from) : extra >= 0 ? g_unread_extra[extra].n : 0) + 1;
+    if (social_dm_received(S.friends, from, known, unread, id, jstr(o, "text"), m->ts)) {
+        if (extra >= 0) g_unread_extra[extra].id = 0;
+    } else {
+        extra_count(from, known, unread);
+    }
     char line[MSG_TEXT + 96];
-    const char *name = friend_name(from);
+    const char *name = friend_name(from)[0] ? friend_name(from) : known;
     char shown[PLAYER_NAME_SIZE];
     snprintf(line, sizeof(line), "[DM from %s]: %s", dm_chat_name(from, name[0] ? name : "Unknown", shown, sizeof(shown)), jstr(o, "text"));
     dm_chat_line(line); // v10 _49706 listeners: every new message, on any page (the chat list keeps it for the game)
@@ -965,7 +993,7 @@ void v10_social_account_changed(void) {
 
 static void conv_open(const int64_t peer) {
     S.selected = peer;
-    set_unread(peer, 0);
+    social_conversation_read(S.friends, peer); // iìiíiíï (deob-10.0.6.js:141567-141575): unread 0, then msg:read
     for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
         if (g_unread_extra[i].id == peer) g_unread_extra[i].id = 0;
     eb_send_type("msg:read", "peer", (double) peer);

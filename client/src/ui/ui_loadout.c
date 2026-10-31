@@ -403,14 +403,22 @@ void ui_loadout_skin_paints(const PlayerSkins *skins, PlayerSkinPaints *out) {
     ui_loadout_skin_paint(skins->melee, &out->melee);
 }
 
-// The item view's viewer URL tail for an index the account has a painted copy of (v10.0.3's instance → viewer URL,
-// deob-10.0.3.js:123160-123173: "&paint=<rrggbb>" or "&paintShader=<n>"); "" otherwise.
+// The item view's viewer URL tail for an index the account has a copy of (v10's instance → viewer URL, deob-10.0.6.js:
+// 221934): "&wear=<w>" for a worn copy (krunker.io's m.wear), then "&paint=<rrggbb>" or "&paintShader=<n>"
+// (deob-10.0.3.js:123160-123173) for a painted one; "" otherwise.
 void ui_loadout_paint_query(const int index, char *out, const size_t n) {
-    WornSkinPaint paint;
     out[0] = '\0';
+    size_t len = 0;
+    const double wear = account_skin_wear(index);
+    if (wear >= 0.0) {
+        const int w = snprintf(out, n, "&wear=%.15g", wear);
+        len = w > 0 && (size_t) w < n ? (size_t) w : 0;
+        out[len] = '\0';
+    }
+    WornSkinPaint paint;
     if (!ui_loadout_skin_paint(index, &paint)) return;
-    if (paint.color >= 0) snprintf(out, n, "&paint=%06x", paint.color & 0xFFFFFF);
-    else if (paint.shader >= 0) snprintf(out, n, "&paintShader=%d", paint.shader);
+    if (paint.color >= 0) snprintf(out + len, n - len, "&paint=%06x", paint.color & 0xFFFFFF);
+    else if (paint.shader >= 0) snprintf(out + len, n - len, "&paintShader=%d", paint.shader);
 }
 
 int ui_loadout_weapon_skin_shown(const int weapon) {
@@ -2331,7 +2339,7 @@ static void view_item(const int index, const int mode) {
         html_dom_asset_url(path, url, sizeof(url));
         sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url);
     } else {
-        char paint[32]; // the owned copy's paint on the showcase (v10's instance → viewer URL, deob:123160-123173)
+        char paint[80]; // the owned copy's wear and paint on the showcase (v10's instance → viewer URL, deob-10.0.6.js:221934)
         ui_loadout_paint_query(index, paint, sizeof(paint));
         sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d%s'></iframe>", index, paint);
     }

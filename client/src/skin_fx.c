@@ -1123,6 +1123,61 @@ void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, co
     }
 }
 
+// ---------------------------------------------------------------- wear (v10.0.6)
+
+int skin_fx_wear_key(const ViewerSkin *skin, char *out, const size_t n) {
+    if (!out || !n) return 0;
+    out[0] = 0;
+    // deob-10.0.6.js:222889: a typed item (type > 0); a weapon skin's is weapons/<src>[_mid]_wear (:222885), not drawn
+    if (!skin || skin->type <= 0 || skin->id < 0) return 0;
+    const int t = skin->asset_type > 0 ? skin->asset_type : skin->type;
+    if (t < 0 || t >= g_viewer_type_count) return 0;
+    const int w = snprintf(out, n, "%s%d_wear", g_viewer_types[t], skin->id);
+    return w > 0 && (size_t) w < n;
+}
+
+static void fx_wear_material(BasicMaterial *material, const unsigned int texture, const double wear) {
+    material->wear_texture = texture;
+    material->wear_level = (float) wear;
+}
+
+// one map per key, loaded once (a worn item's meshes and every player wearing it share it)
+static unsigned int fx_wear_texture(const char *key) {
+    static struct {
+        char key[96];
+        unsigned int texture;
+    } cache[64];
+    static int count;
+    for (int i = 0; i < count; i++)
+        if (!strcmp(cache[i].key, key)) return cache[i].texture;
+    const unsigned int texture = fx_texture(key); // 0 when the host has no such map: no wear drawn
+    if (count < (int) (sizeof(cache) / sizeof(cache[0]))) {
+        snprintf(cache[count].key, sizeof(cache[count].key), "%s", key);
+        cache[count++].texture = texture;
+    }
+    return texture;
+}
+
+void skin_fx_apply_wear(Mesh *mesh, const ViewerSkin *skin, const double wear) {
+    if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable || wear < 0.0) return;
+    char key[96];
+    if (!skin_fx_wear_key(skin, key, sizeof(key))) return;
+    const unsigned int texture = fx_wear_texture(key);
+    if (texture) fx_wear_material((BasicMaterial *) mesh->material, texture, wear);
+}
+
+void skin_fx_apply_wear_gltf(GltfInstance *model, const ViewerSkin *skin, const double wear) {
+    if (!model || wear < 0.0) return;
+    char key[96];
+    if (!skin_fx_wear_key(skin, key, sizeof(key))) return;
+    const unsigned int texture = fx_wear_texture(key);
+    if (!texture) return;
+    for (size_t i = 0; i < model->mesh_count; i++) {
+        Mesh *mesh = model->meshes[i];
+        if (mesh && mesh->material && mesh->material->vtable == &basic_material_vtable) fx_wear_material((BasicMaterial *) mesh->material, texture, wear);
+    }
+}
+
 void skin_fx_forget(const Mesh *mesh) {
     if (!mesh) return;
     for (int i = g_fx.count - 1; i >= 0; i--) {

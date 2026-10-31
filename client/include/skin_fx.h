@@ -52,6 +52,16 @@ void skin_fx_apply_paint(Mesh *mesh, WornSkinPaint paint, const struct ViewerSki
 // is true (deob-10.0.3.js:233833-233837). The GLTF meshes carry no names here, so every mesh is painted.
 void skin_fx_apply_paint_gltf(struct GltfInstance *model, WornSkinPaint paint, const struct ViewerSkin *skin);
 
+// The per-copy wear of a worn typed item (v10.0.6): the wearMap <store.types[assetType || type]><id>_wear at level
+// `wear` (the copy's m.wear): a cosmetic's (generateMeshData, deob-10.0.6.js:173414-173419, which skips customTextures
+// items: the caller's test), a melee's (melee/melee_<id>_wear, :173870-173875) and the item preview's (:222889-222893).
+// v10 draws it under the paint (:204868, basic.frag). wear < 0 = no wear: the mesh is left as it is, and so is it
+// when the host has no such map.
+void skin_fx_apply_wear(Mesh *mesh, const struct ViewerSkin *skin, double wear);
+void skin_fx_apply_wear_gltf(struct GltfInstance *model, const struct ViewerSkin *skin, double wear);
+// The wearMap key (a textures/ key, no extension) of a typed item, or 0 when it has none (a weapon skin, no type).
+int skin_fx_wear_key(const struct ViewerSkin *skin, char *out, size_t n);
+
 // Drop a mesh's / model's registrations: call before freeing it (mesh_fini / gltf_instance_fini).
 void skin_fx_forget(const Mesh *mesh);
 void skin_fx_forget_gltf(const struct GltfInstance *model);

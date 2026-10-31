@@ -59,7 +59,7 @@ typedef enum { KRB_BOMB_LIST, KRB_BOMB_COUNT } KrunkerBombArg; // SHOW_BOMBARDME
 
 typedef struct KrunkerBuild {
     int live;                    // 0: the compiled krunker_build.h, 1: a parsed document
-    char client_version[32];     // "10.0.5r1" (logs, the error texts)
+    char client_version[32];     // "10.0.6r1" (logs, the error texts)
     char build_version[64];      // seek-game's dataQuery.v: what the matchmaker matches servers by
     char source_sha256[65];      // the bundle the values came from ("" when the document has none)
     int64_t ahkey;               // KRUNKER_AHKEY

@@ -3,7 +3,7 @@
  *
  * Build constants of the official Krunker client bundle the krunker_proto codec speaks to.
  * Source: https://kru.eli.gift/game.deob.js
- * sha256: 613b1ab34ee670479e7351ffe5d5f0ec9b0c3ccaa47780d9705eb3ea44294396 (13891628 bytes)
+ * sha256: c3d0d3004141485891f712f5eee0a84eee9b7ebc99dc778d44489af65b2cec28 (13909446 bytes)
  */
 #ifndef KRUNKER_BUILD_H
 #define KRUNKER_BUILD_H
@@ -11,7 +11,7 @@
 /* Bumped when this header's C interface changes; consumers: #if KRUNKER_BUILD_SCHEMA != N #error */
 #define KRUNKER_BUILD_SCHEMA 1
 #define KRUNKER_BUILD_SOURCE_URL "https://kru.eli.gift/game.deob.js"
-#define KRUNKER_BUILD_SOURCE_SHA256 "613b1ab34ee670479e7351ffe5d5f0ec9b0c3ccaa47780d9705eb3ea44294396"
+#define KRUNKER_BUILD_SOURCE_SHA256 "c3d0d3004141485891f712f5eee0a84eee9b7ebc99dc778d44489af65b2cec28"
 
 /* Every frame is msgpack([name, ...args]) + 2 trailer bytes {ahNum >> 4 & 0xf, ahNum & 0xf}.
  * Before every send except packet cptR: ahNum = (ahNum + KRUNKER_AHKEY) & 0xff, ahNum
@@ -25,7 +25,7 @@
 
 /* Echoed to the matchmaker (seek-game) and the game server. buildVersion is also the
  * dataQuery's "v". */
-#define KRUNKER_CLIENT_VERSION "10.0.5r1"
+#define KRUNKER_CLIENT_VERSION "10.0.6r1"
 #define KRUNKER_BUILD_VERSION "BMXeeCoe7d0j5zNh4KE3IsWuyP5twK9g"
 #define KRUNKER_CLIENT_REVISION "1"
 #define KRUNKER_MATCHMAKER_URL "https://matchmaker.krunker.io"

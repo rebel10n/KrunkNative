@@ -9,7 +9,7 @@
  *
  * Part 2 runs the whole assets/skins.json table (KN_SKINS_JSON) through the still pass and the thumbnail
  * pass and checks that every record has a thumbnail equal to its rule path, and that the count of records
- * with one is the table's count, which is the official table's 8152 records. */
+ * with one is the table's count, which is the official table's 8153 records. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,9 +20,9 @@
 static int g_fail;
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #c); g_fail = 1; } } while (0)
 
-/* the official table's size (data/skins.jspck, 10.0.5 on 2026-10-30: 10.0.4's 8076 plus the November items, the
- * Ametwista Twitch drops and Deathweaver) */
-#define OFFICIAL_SKINS 8152
+/* the official table's size (data/skins.jspck, 10.0.6 on 2026-10-30: 10.0.4's 8076 plus the November items, the
+ * Ametwista Twitch drops and Deathweaver (10.0.5), and Scarecrow Peg (10.0.6)) */
+#define OFFICIAL_SKINS 8153
 
 struct pinned {
     const char *record;

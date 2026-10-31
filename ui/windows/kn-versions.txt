@@ -3,6 +3,17 @@
  - read by client/src/ui/v10_news.c, in Krunker's docs/versions.txt format: "== UPDATE x.y.z ==" starts an update,
  - "* Name" a group, "- text" a change, "@url" an image; the first update is the current version
 
+ == UPDATE 10.0.6 ==
+ * General
+ - Added wear to some cosmetics from the November spin, shown in game and in item previews
+ - Added the new skin Scarecrow Peg
+ * Store
+ - Limited items now show as sold out right after you buy them
+ - Fixed limited items sometimes being purchasable more than once
+ * Social
+ - A message from someone new now opens a conversation with them in your Inbox
+ - Opening a conversation marks it as read
+
  == UPDATE 10.0.5 ==
  * General
  - Added the 71 November spin items to the item list (they join the spins when Krunker's November spins start)
