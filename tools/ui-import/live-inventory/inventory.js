@@ -254,6 +254,20 @@ for (const f of mapFiles) {
     for (const mm of t.matchAll(/(?:addAsset|addCustomAsset|loadAsset)\s*\(\s*"?(\d{2,7}[a-z]*)"?/g)) assetModel(mm[1], s + ' KrunkScript addAsset', 'ks-asset');
     for (const mm of t.matchAll(/(?:play2D|play3D|playSound|SOUND\.play)\s*\(\s*"?(\d{2,7})"?/g)) add('ks-asset', `user-assets/${mm[1]}/sound.mp3`, s + ' KrunkScript sound');
     for (const mm of t.matchAll(/(?:addImage|addSprite|drawImage|setTexture|texture)\s*\(\s*"?(\d{2,7})"?/g)) add('ks-asset', `user-assets/${mm[1]}/texture.png`, s + ' KrunkScript image');
+    // ids kept in a constant / array and passed on through it (Candy Heist: num[] SND_ID = num[71359, ...];
+    // GAME.SOUND.play2D(SND_ID[i], ...)): the declaration's name says what they are
+    // (and str ones: Candy Heist's server script, str HOLLOW_AID = "71319q": an asset id with its model flags)
+    for (const mm of t.matchAll(/\b(?:num|str)(?:\[\])?\s+([A-Za-z_]\w*)\s*=\s*(?:(?:num|str)\s*\[([^\]]*)\]|"?(\d{2,7}[a-z]*)"?)/g)) {
+      const name = mm[1];
+      const kind = /snd|sound|sfx|audio|music/i.test(name) ? 'sound' : /tex|img|image|icon|sprite/i.test(name) ? 'texture'
+        : /mdl|model|mesh|asset|aid/i.test(name) ? 'model' : null;
+      if (!kind) continue;
+      for (const id of (mm[2] || mm[3] || '').match(/\b\d{2,7}[a-z]*\b/g) || []) {
+        if (kind === 'sound') add('ks-asset', `user-assets/${id.replace(/\D+$/, '')}/sound.mp3`, s + ' KrunkScript ' + name);
+        else if (kind === 'texture') add('ks-asset', `user-assets/${id.replace(/\D+$/, '')}/texture.png`, s + ' KrunkScript ' + name);
+        else assetModel(id, s + ' KrunkScript ' + name, 'ks-asset');
+      }
+    }
   }
 }
 

@@ -30,7 +30,7 @@ usage:
       sha256, else downloaded and verified); prints every file added
   python3 -I tools/ui-import/fetch_live_assets.py check [--lock F] [--assets DIR] [--ui DIR]
       list pinned files that are missing (exit 1) or differ in the tree
-  python3 -I tools/ui-import/fetch_live_assets.py fetch --list missing.tsv --stage DIR [--manifest F] [--write-lock F]
+  python3 -I tools/ui-import/fetch_live_assets.py fetch --list missing.tsv --stage DIR [--manifest F] [--write-lock F | --merge-lock F]
       download the paths of an inventory TSV (category, path[, source]) into a staging tree,
       validate them and record url / HTTP status / sha256 / size per file (inventory tooling)
 
@@ -49,6 +49,7 @@ import io
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -97,6 +99,28 @@ def _ffprobe_ok(data, want):
     return r.returncode == 0 and any(w in names for w in want)
 
 
+def png_without_bad_ancillary(data):
+    """The PNG without its ancillary chunks whose CRC is wrong; None when a critical chunk (IHDR, PLTE,
+    IDAT, IEND) is broken, the chunks run past the data or nothing was dropped."""
+    out, i, dropped = [data[:8]], 8, False
+    while i + 12 <= len(data):
+        n, kind = struct.unpack(">I4s", data[i:i + 8])
+        end = i + 12 + n
+        if end > len(data):
+            return None
+        good = zlib.crc32(data[i + 4:i + 8 + n]) & 0xffffffff == struct.unpack(">I", data[i + 8 + n:end])[0]
+        if good:
+            out.append(data[i:end])
+        elif kind[0] & 0x20:  # lower-case first letter: ancillary
+            dropped = True
+        else:
+            return None
+        i = end
+        if kind == b"IEND":
+            return b"".join(out) if dropped else None
+    return None
+
+
 def validate(path, data):
     """(ok, note): the bytes are a decodable file of the type the extension promises."""
     ext = os.path.splitext(path)[1].lower()
@@ -117,7 +141,15 @@ def validate(path, data):
         except ImportError:
             return magic, "magic only (no Pillow)"
         except Exception as e:  # noqa: BLE001 - any decoder failure means a bad file
-            return False, "undecodable image: %s" % e
+            fixed = png_without_bad_ancillary(data) if ext == ".png" and magic else None
+            if fixed is None:
+                return False, "undecodable image: %s" % e
+            try: # Krunker's file has a broken optional chunk (a bad iCCP CRC): browsers and stb_image skip it
+                with Image.open(io.BytesIO(fixed)) as im:
+                    im.load()
+                    return True, "%dx%d %s (an ancillary chunk with a bad CRC, ignored as browsers do)" % (im.width, im.height, im.mode)
+            except Exception:  # noqa: BLE001
+                return False, "undecodable image: %s" % e
         return True, size if magic else size + " (extension/format mismatch)"
     if ext == ".svg":
         return (b"<svg" in data[:4096].lower()), "svg"
@@ -266,9 +298,22 @@ def read_lock(path):
     return entries
 
 
-def write_lock(path, entries):
+def lock_header(path):
+    """The leading comment lines of an existing lock (its own description), else LOCK_HEADER."""
+    if not os.path.exists(path):
+        return LOCK_HEADER
+    lines = []
+    with open(path, encoding="utf8") as f:
+        for line in f:
+            if not line.startswith("#"):
+                break
+            lines.append(line)
+    return "".join(lines) or LOCK_HEADER
+
+
+def write_lock(path, entries, header=LOCK_HEADER):
     with open(path, "w", encoding="utf8") as f:
-        f.write(LOCK_HEADER)
+        f.write(header)
         for e in sorted(entries, key=lambda e: (e["root"], e["path"])):
             f.write("%s\t%s\t%s\t%s\t%d\n" % (e["root"], e["path"], e["url"], e["sha256"], e["size"]))
 
@@ -470,7 +515,7 @@ def cmd_fetch(a):
     if abort.is_set():
         print("ABORTED: the asset host refused 12 requests in a row (WAF?)", file=sys.stderr)
         return 2
-    if a.write_lock and a.manifest:
+    if (a.write_lock or a.merge_lock) and a.manifest:
         entries = {}
         with open(a.manifest, encoding="utf8") as f:
             for line in f:
@@ -479,8 +524,17 @@ def cmd_fetch(a):
                 cat, path, status, url, digest, size, valid, _ = line.rstrip("\n").split("\t", 7)
                 if status == "200" and valid == "1":
                     entries[path] = {"root": root_of(path), "path": path, "url": url, "sha256": digest, "size": int(size)}
-        write_lock(a.write_lock, entries.values())
-        print("wrote %s (%d files)" % (a.write_lock, len(entries)))
+        if a.write_lock:
+            write_lock(a.write_lock, entries.values())
+            print("wrote %s (%d files)" % (a.write_lock, len(entries)))
+        if a.merge_lock:
+            # add the new files to an existing lock: its entries (and their roots: assets-v10, assets-aac) stay
+            have = {e["path"]: e for e in (read_lock(a.merge_lock) if os.path.exists(a.merge_lock) else [])}
+            added = [e for p, e in entries.items() if p not in have]
+            for e in added:
+                have[e["path"]] = e
+            write_lock(a.merge_lock, have.values(), lock_header(a.merge_lock))
+            print("%s: %d files added (%d in all)" % (a.merge_lock, len(added), len(have)))
     return 0
 
 
@@ -504,6 +558,7 @@ def main():
     p.add_argument("--stage", required=True)
     p.add_argument("--manifest", help="append url / status / sha256 / size per file (TSV)")
     p.add_argument("--write-lock", help="write a lock file from the manifest's valid 200s")
+    p.add_argument("--merge-lock", help="add the manifest's valid 200s that a lock lacks to that lock (kept otherwise)")
     p.add_argument("--refetch", action="store_true", help="ignore paths the manifest already answered")
     a = ap.parse_args()
     return {"install": cmd_install, "check": cmd_check, "fetch": cmd_fetch}[a.cmd](a)

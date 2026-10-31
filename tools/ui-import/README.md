@@ -115,6 +115,17 @@ stay under `ui/img` (menu import above); `assets/` is game content only.
 
 ### Krunker live asset hosts (files the v7.1.4 tree lacks)
 
+**`make assets-sync` is the one command for "every asset the game references"** (`sync_live_assets.py`):
+it installs both locks, runs the inventories (`live-inventory/inventory.js`: v7.1.4's data tables and
+every map under `assets/maps`, official/ and custom/, including their KrunkScript's asset ids;
+`v10_store_assets.js`: every store item), fetches what the tree lacks from Krunker's hosts, adds the
+valid files to `live_assets_v10.lock`, installs them and records the paths Krunker answers 404 for in
+`live_assets_absent.tsv` (not asked again; delete a line to retry). Exit 1 = a fetch failed: run it
+again. Run it after every map refetch (`tools/krunker/fetch_maps.py`) and store import, then ship the
+tree (`deploy/ansible` `central.yml -e kn_web_sync_assets=true`). A user asset still missing from the
+content set is never fatal: the clients fall back to the brain's mirror of Krunker's user-asset host
+(`services/brain/user_assets.c`).
+
 `fetch_live_assets.py` (`make assets-import-live`, `make assets-check-live`) installs the files
 pinned in `live_assets.lock` (root `assets` -> `assets/`, root `ui` -> `ui/img`; path, source URL,
 sha256, size) that are missing from the tree, downloading them from `assets.krunker.io` /

@@ -503,7 +503,7 @@ ui-import: ## Regenerate ui/ from the Krunker v10 live site mirror (page, window
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: gun-unequip-test mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test account-manager-test asset-fetch-test console-settings-test crash-capture-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web menu-bleed-test class-preview-test user-assets-test
+.PHONY: gun-unequip-test mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-sync assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test account-manager-test asset-fetch-test console-settings-test crash-capture-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web menu-bleed-test class-preview-test user-assets-test
 assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
@@ -526,6 +526,9 @@ store-check: ## Drift check of the v10 store table, its generated C tables and t
 assets-import-live: ## Add the files the Krunker content set lacks from the live asset hosts (tools/ui-import/live_assets.lock, then live_assets_v10.lock: the v10 items' files; KN_FETCH_PROXY=, never overwrites)
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --assets assets --ui ui
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --lock tools/ui-import/live_assets_v10.lock --roots assets --assets assets --ui ui
+
+assets-sync: ## EVERY asset the game references in assets/: inventories every map (official/ + custom/, their KrunkScript) and the v10 store, fetches what the tree lacks from Krunker's hosts, pins it in live_assets_v10.lock and installs it (KN_FETCH_PROXY, default the local proxy; 404s go to live_assets_absent.tsv). Then ship the tree: deploy/ansible central.yml -e kn_web_sync_assets=true
+	KN_FETCH_PROXY=$${KN_FETCH_PROXY:-http://127.0.0.1:8888} $(PYTHON) -I tools/ui-import/sync_live_assets.py $(ARGS)
 
 assets-check-live: ## List both locks' files missing from (exit 1) or differing in assets/ and ui/img
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --assets assets --ui ui
