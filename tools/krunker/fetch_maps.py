@@ -182,7 +182,8 @@ def cmd_fetch(a):
         spath = os.path.join(stage, "map_%d.json" % index)
         prev = old_maps.get(index)
         raw = None
-        if not a.refresh and prev and prev.get("name") == name and (only is None or index not in only):
+        # --refresh refetches what --only names (everything without --only); the rest comes from the stage
+        if prev and prev.get("name") == name and (only is not None and index not in only or only is None and not a.refresh):
             raw = staged(spath, prev.get("response_sha256"))
         if raw is None and only is not None and index not in only and prev:
             raise SystemExit("map %d: --only skips it but its staged response is missing or stale" % index)
@@ -264,7 +265,7 @@ def main(argv=None):
     fa = sub.add_parser("fetch")
     fa.add_argument("--api", default=DEFAULT_API)
     fa.add_argument("--delay", type=float, default=2.0, help="seconds between requests (default 2)")
-    fa.add_argument("--refresh", action="store_true", help="download every map again (default: reuse the stage)")
+    fa.add_argument("--refresh", action="store_true", help="download every map again, or only the --only maps (default: reuse the stage)")
     fa.add_argument("--only", help="comma-separated indices to download again (the rest from the stage)")
     fa.add_argument("--stage", help="raw response directory (default $XDG_CACHE_HOME/krunknative/krunker-maps)")
     sub.add_parser("verify")
