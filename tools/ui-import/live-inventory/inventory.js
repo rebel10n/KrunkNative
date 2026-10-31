@@ -252,6 +252,8 @@ for (const f of mapFiles) {
   for (const code of Object.values(m.scripts || {})) {
     let t = String(code); try { const b = Buffer.from(t, 'base64').toString('utf8'); if (/GAME\.|num |str /.test(b)) t = b; } catch (e) { }
     for (const mm of t.matchAll(/(?:addAsset|addCustomAsset|loadAsset)\s*\(\s*"?(\d{2,7}[a-z]*)"?/g)) assetModel(mm[1], s + ' KrunkScript addAsset', 'ks-asset');
+    // GAME.AI.spawn(assetID, name, x, ...) (Slide Moonlight's drop: GAME.AI.spawn("63258", ...))
+    for (const mm of t.matchAll(/AI\.spawn\s*\(\s*"?(\d{2,7}[a-z]*)"?/g)) assetModel(mm[1], s + ' KrunkScript AI.spawn', 'ks-asset');
     for (const mm of t.matchAll(/(?:play2D|play3D|playSound|SOUND\.play)\s*\(\s*"?(\d{2,7})"?/g)) add('ks-asset', `user-assets/${mm[1]}/sound.mp3`, s + ' KrunkScript sound');
     for (const mm of t.matchAll(/(?:addImage|addSprite|drawImage|setTexture|texture)\s*\(\s*"?(\d{2,7})"?/g)) add('ks-asset', `user-assets/${mm[1]}/texture.png`, s + ' KrunkScript image');
     // ids kept in a constant / array and passed on through it (Candy Heist: num[] SND_ID = num[71359, ...];
