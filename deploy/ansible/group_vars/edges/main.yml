@@ -3,7 +3,9 @@
 # here. The host firewall is shared with abulxt (block at the end of this file).
 kn_release_bins: [server_bin]
 kn_release_migrations: false
-kn_release_assets: [maps]
+# skins.json: server_bin's store data (game_spray_pick's sprays, bots' store items); without it every spray
+# is the default 2482 ("sprays: cannot read ./assets/skins.json")
+kn_release_assets: [maps, skins.json]
 
 # Game ports, shared by kn_gameserver (instances) and edge_firewall (nftables):
 #   count = vcpus - 1 (one core left for the host's other services), at least 1;
