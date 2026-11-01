@@ -89,6 +89,7 @@ void hud_ui_hit(Client*, int kill);
 #include <ruleset.h>
 #include <hud_v10.h>
 #include <hud_modes.h> // hud_modes_end_table_html: the live #endTable rows (hud_end_leaderboard_html)
+#include <map_catalog.h> // map_catalog_map_index_of_json: the loading card's map picture
 #include <game_time.h>   // the top-right game time tile (hud_gametime_step): the v7 mod timer
 #include <client_settings.h> // client_settings_game_time: Display > Interface > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
@@ -4624,13 +4625,17 @@ void hud_ui_on_init(Client *client) {
     hud_ui_map_loading_begin(client); // the map is loaded now (main.c: client_load_map before hud_ui_on_init)
 }
 
-// v10.0.4 #loadingBg for the match's map (v10_loading.c): the thumbnail is the page's img/maps/map_<index>.png,
+// v10.0.4 #loadingBg for the match's map (v10_loading.c): the thumbnail is the page's img/maps/map_<mapIndex>.png,
 // none for a custom map and for map 0 unless it is Burg (deob-10.0.4.js:223018-223019); the accent is the mode's
-// tag[1], #fff in a custom game (v10_loading_mode_accent, deob-10.0.4.js:223040).
+// tag[1], #fff in a custom game (v10_loading_mode_accent, deob-10.0.4.js:223040). The mapIndex is Krunker's
+// (map_catalog_map_index_of_json), not current_map_index: that is the position in the server's own map list
+// (game->maps, e.g. the rotation 0, 1, 2, 3, 4, 6, ...), which pictured Freight as Shipment and so on.
 void hud_ui_map_loading_begin(Client *client) {
     if (!client || !client->game.ready) return;
-    const int index = client->game.current_map_index;
+    const int slot = client->game.current_map_index;
+    const cJSON *listed = slot >= 0 && (size_t) slot < client->game.map_count ? client->game.maps[slot] : NULL;
     const cJSON *raw = client->game.map ? client->game.map->raw_data : NULL;
+    const int index = map_catalog_map_index_of_json(listed ? listed : raw); // -1: a custom or community map
     const cJSON *name_item = raw ? cJSON_GetObjectItem(raw, "name") : NULL;
     const char *map_name = cJSON_IsString(name_item) ? cJSON_GetStringValue(name_item) : "";
     // deob-10.0.4.js:223018: no thumbnail for a custom map (index < 0) or map 0 unless it is Burg

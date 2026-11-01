@@ -364,6 +364,21 @@ int map_catalog_find(const char *query) {
     return alias_index(query, 1); // "newtown", the v3.1.1 stem no v7 map is named after
 }
 
+// The official maps' names as Krunker's list gives them (krunker_maps.h), by mapIndex
+#define OFFICIAL_LIST_NAME(index_, name_, file_, objects_) name_,
+static const char *const k_official_list_name[] = {KRUNKER_OFFICIAL_MAPS(OFFICIAL_LIST_NAME)};
+
+int map_catalog_find_official_name(const char *name) {
+    if (!name) return -1;
+    while (*name == ' ') name++;
+    if (!*name) return -1;
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
+        const int at = map_catalog_official_index(i);
+        if (at >= 0 && (!strcasecmp_ascii(k_catalog[at].name, name) || !strcasecmp_ascii(k_official_list_name[i], name))) return at;
+    }
+    return map_catalog_find(name);
+}
+
 // lowercase letters and digits only: "Soul Sanctum" == "soul_sanctum" == "\"soul sanctum\""
 static void resolve_normalize(const char *in, char *out, const size_t size) {
     size_t n = 0;

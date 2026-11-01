@@ -248,6 +248,11 @@ int main(const int argc, char **argv) {
     for (size_t i = 0; i < rotation_count; i++) {
         const int map = map_catalog_map_index((size_t) rotation[i]); // catalogue position -> mapIndex
         CHECK(map == g_rotation_maps[i] && map == k_v10_rotation[i], "rotation[%zu] = map %d", i, map);
+        // the loading card's picture (hud_ui_map_loading_begin): a server's current_map_index is the slot in its own
+        // list (rotation[i]), the picture is map_<mapIndex>.png of the slot's JSON, never map_<slot>.png
+        const cJSON *json = map_catalog_json((size_t) rotation[i]);
+        CHECK(json && map_catalog_map_index_of_json(json) == g_rotation_maps[i], "rotation slot %zu's JSON is map %d (got %d)", i,
+              g_rotation_maps[i], json ? map_catalog_map_index_of_json(json) : -2);
     }
     load_default_maps();
     for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) CHECK(g_maps[i] && g_maps[i] == map_catalog_official_json(i), "g_maps[%d]", i);
@@ -389,6 +394,29 @@ int main(const int argc, char **argv) {
         const int id = i < RANKED_POOL_COUNT ? g_ranked_map_pool[i] : RANKED_ALWAYS_MAP;
         snprintf(path, sizeof(path), "ui/img/maps/map_%d.png", id);
         CHECK(png_loads(path), "ranked map %d: %s does not load", id, path);
+    }
+
+    // a card that finds its map by name (the server list, the end screen's map vote, mapThumb) shows
+    // that map's own picture: every official map's names (the list's, the catalogue's, its JSON's) find the official
+    // entry (map_catalog_find_official_name), never a community map or an old alias of the same name (Krunk_Plaza,
+    // eterno_jump, Old_Burg); map_catalog_find (the console's /map) keeps its own precedence
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
+        const int at = map_catalog_official_index(i);
+        const MapCatalogEntry *own = at >= 0 ? map_catalog_at((size_t) at) : NULL;
+        const cJSON *json = map_catalog_official_json(i);
+        const cJSON *jname = json ? cJSON_GetObjectItem(json, "name") : NULL;
+        const char *names[3] = {official_name[i], own ? own->name : NULL, cJSON_IsString(jname) ? jname->valuestring : NULL};
+        for (int k = 0; k < 3; k++) {
+            if (!names[k]) continue;
+            const int found = map_catalog_find_official_name(names[k]);
+            const MapCatalogEntry *e = found >= 0 ? map_catalog_at((size_t) found) : NULL;
+            char want[64], got[64];
+            const char *w = own ? map_catalog_thumb(own, want, sizeof(want)) : NULL;
+            const char *g = e ? map_catalog_thumb(e, got, sizeof(got)) : NULL;
+            CHECK(e && map_catalog_map_index((size_t) found) == i && w && g && !strcmp(w, g),
+                  "map %d by name '%s' (%s): finds %s (map %d), picture %s, want %s", i, names[k], k == 0 ? "list" : k == 1 ? "catalogue" : "json",
+                  e ? e->key : "nothing", e ? map_catalog_map_index((size_t) found) : -1, g ? g : "none", w ? w : "none");
+        }
     }
 
     // map_catalog_slot: find-or-append

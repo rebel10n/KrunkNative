@@ -80,6 +80,13 @@ int map_catalog_load_file(const char *path, cJSON **out);
 // or an old key ("v3_burg", "old_burg"); "newtown" (311_newtown) only when nothing else matches. Returns the catalogue index, -1 = no match.
 int map_catalog_find(const char *query);
 
+// A map card's lookup by the map's name (the server list, the end screen's map vote, mapThumb): the official map
+// with exactly that name (its catalogue or Krunker list name, case-insensitive) first, else map_catalog_find. v10
+// pictures a map by its mapIndex (img/maps/map_<map>.png, deob-10.0.6.js:110200, :114100, :219844), and some
+// official names are also community keys or old aliases (Krunk_Plaza, eterno_jump, Old_Burg -> old_burg), which
+// map_catalog_find resolves to the community / v1.5.2 entry and so to another picture.
+int map_catalog_find_official_name(const char *name);
+
 // Console lookup (client dev console `map`, server_bin `map`/`changelevel`); not a v3.1.1
 // port. Surrounding quotes and whitespace are stripped and names compare case-insensitively
 // on their letters and digits only, so "Soul Sanctum", "soul_sanctum" and "soulsanctum" are

@@ -407,7 +407,7 @@ const char *ui_controls_tab_name(const int tab) {
 // mapThumb(): the official map's public/img/maps card, else img/noimg.png (map_image "").
 const char *ui_map_thumb(const char *name) {
     static char thumb[48];
-    const int index = name ? map_catalog_find(name) : -1;
+    const int index = name ? map_catalog_find_official_name(name) : -1; // the official map of that name first
     const char *src = index >= 0 && !strcmp(map_catalog_at((size_t) index)->name, name)
                           ? map_catalog_thumb(map_catalog_at((size_t) index), thumb, sizeof(thumb)) : NULL;
     return src ? src : "img/noimg.png";

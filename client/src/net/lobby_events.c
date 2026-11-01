@@ -110,7 +110,7 @@ char *lobby_vote_cards_html(void) {
         memcpy(name, e->map_name, sizeof(name));
         name[sizeof(name) - 1] = 0;
         escape(esc, sizeof(esc), name);
-        const int found = name[0] ? map_catalog_find(name) : -1;
+        const int found = name[0] ? map_catalog_find_official_name(name) : -1; // the official map's picture (map_<mapIndex>)
         const MapCatalogEntry *entry = found >= 0 ? map_catalog_at((size_t) found) : NULL;
         char path[96];
         if (entry && map_catalog_thumb(entry, path, sizeof(path))) snprintf(thumb, sizeof(thumb), "%s", path);

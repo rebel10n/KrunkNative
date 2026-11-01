@@ -4118,7 +4118,7 @@ static void card_from_brain(GameCard *c, const cJSON *r) {
     c->updates = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "map_updatecounter"));
     if (c->updates != c->updates) c->updates = 0;
     // KrunkNative: the official maps' own thumbnail (v7's listMaps gives them a map_image too)
-    const int index = !c->image || !c->image[0] ? map_catalog_find(c->name) : -1;
+    const int index = !c->image || !c->image[0] ? map_catalog_find_official_name(c->name) : -1; // its picture is its mapIndex's
     static char thumb[8][48];
     static int next;
     if (index >= 0 && !strcmp(map_catalog_at((size_t) index)->name, c->name) && map_catalog_thumb(map_catalog_at((size_t) index), thumb[next], sizeof(thumb[0]))) {
