@@ -958,6 +958,10 @@ void kio_checkout_window_focused(void) {
 }
 
 void kio_checkout_tick(void) {
+    // listening from the first frame: krunker.io's game server pushes the store's bundle rows ("abd", "gbdr") when the
+    // game is joined, unasked; registered only at the first purchase request, the listener missed them and the store
+    // home's bundle row (the starter packs) stayed empty
+    listen_once();
     kio_checkout_stripe_tick();
     if (!K.browser || !K.watch) return;
     const AccountInfo *acc = official() ? active_account() : NULL;

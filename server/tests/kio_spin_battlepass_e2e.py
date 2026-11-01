@@ -27,6 +27,9 @@ to krunker.io and joins an official game as that account (account_unify_e2e's st
           (migration 0355_season_10, SEASON_CURRENT 10: "Season 10 Battle Pass", 80 levels), never "No Battle
           Pass Found" or "Loading Battle Pass" (before: the brain seeded Season 7 only, so a brain on v10.0.3's
           season 10 answered null and the window said No Battle Pass Found)
+  bundles the game server pushes the store's bundle rows on the join ("abd"), unasked: the store home's bundle row shows
+          the starter pack (before: the checkout listener was only registered at the first purchase request, so the
+          push was dropped and the row stayed empty)
   locked  krunker.io's progress is 0/5000 (not unlocked): a click does what v10.0.3 does, nothing. No popup,
           no "Play more" text, no "dsl", and the item is still 0/5000 (before: the popup said Play more to
           unlock the daily spin)
@@ -45,7 +48,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import account_unify_e2e as au  # noqa: E402  (its stubs, sign-in steps and client runner)
 
-MODES = os.environ.get("KIO_MODES", "spin,claim,claimerr,nopass,silent,locked,menu").split(",")  # KIO_MODES=locked runs one mode
+MODES = os.environ.get("KIO_MODES", "spin,claim,claimerr,nopass,silent,locked,menu,bundles").split(",")  # KIO_MODES=locked runs one mode
 AU_SCRIPT = au.script  # account_unify's steps 1-3 (run_client takes its script from au.script, replaced per mode)
 SPIN_DATA = {"score": 5000, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}  # FREE SPIN
 ZERO_DATA = {"score": 0, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}     # 0/5000
@@ -58,6 +61,17 @@ CLICK_MODES = ("claim", "claimerr", "locked")  # the modes that click the item (
 
 async def answer_null_pass(send, msg):  # "bpdl" with no pass (the season has none)
     await send("bpdl", None)
+
+
+# krunker.io's game server pushes the store's bundle rows unasked when the game is joined ("abd", ALL_BUNDLE_DATA
+# [rows], deob-10.0.6.js:98524): a starter pack, as the store home's bundle row shows it
+BUNDLE_ROWS = [{"ID": 41, "NAME": "KioStarter Pack", "PRICE": 4.99, "ORIGINAL_PRICE": 9.99, "DISCOUNT_PCT": 50, "SKINS": "1,2",
+                "EXPIRY": None, "INFO": "", "FUNDS": 600, "JUNK": 0, "PREMIUM": 0, "EVENT_NAME": None, "EVENT_ENDS_AT": None,
+                "DATE": "2026-10-01T00:00:00.000Z"}]
+
+
+async def push_bundles(send, msg):  # after the client's "en": the server's "abd", before any purchase request
+    await send("abd", BUNDLE_ROWS)
 
 
 async def never_answers(send, msg):  # the game server does not answer "bpdl"
@@ -109,6 +123,13 @@ def script(mode, shots):
                   "42700 text @kbpbot .bpBotH",  # the window's button bar: Purchase / Gift / Skip (battlepass_ui.c)
                   "43000 quit"]
         return "\n".join(lines) + "\n"
+    if mode == "bundles":  # the store's home tab: the bundle row holds the pushed starter pack (no purchase was asked)
+        lines += ["40300 call closWind",
+                  "40400 call showWindow 14",
+                  "41400 text @bundles .bundle-holder",
+                  "41450 shot " + shots["store"],
+                  "41600 quit"]
+        return "\n".join(lines) + "\n"
     if mode in CLICK_MODES:  # the click: the popup, the item and the wheel around it (locked: v10 does nothing)
         lines += ["40300 call closWind",
                   "40350 vis @prepop popupHolder",
@@ -132,13 +153,16 @@ def run_mode(port, mode):
     stub.account_data = [dict(au.KIO_DATA)]
     stub.claims = []  # the rpc ids of the "dsl" claims the game socket received
     stub.daily_spin = {"spin": SPIN_DATA, "claim": SPIN_DATA, "claimerr": SPIN_DATA, "nopass": None, "silent": ZERO_DATA,
-                       "locked": ZERO_DATA, "menu": ZERO_DATA}[mode]
+                       "locked": ZERO_DATA, "menu": ZERO_DATA, "bundles": ZERO_DATA}[mode]
     stub.frame_handlers = {"bpdl": {"spin": au.answer_bpdl, "claim": au.answer_bpdl, "claimerr": au.answer_bpdl,
-                                    "nopass": answer_null_pass, "silent": never_answers, "locked": au.answer_bpdl, "menu": au.answer_bpdl}[mode]}
+                                    "nopass": answer_null_pass, "silent": never_answers, "locked": au.answer_bpdl, "menu": au.answer_bpdl,
+                                    "bundles": au.answer_bpdl}[mode]}
+    if mode == "bundles":
+        stub.frame_handlers["en"] = push_bundles
     if mode in ("claim", "claimerr"):  # the rpc frame is "_0" (RPC), the claim its third item
         stub.frame_handlers["_0"] = rpc_answer(stub, mode == "claim")
     au.WORK = tempfile.mkdtemp(prefix="kn-kiospin-%s-" % mode, dir=au.CACHE if os.path.isdir(au.CACHE) else None)
-    shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("bp", "item", "click", "menu")}
+    shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("bp", "item", "click", "menu", "store")}
     au.script = lambda: script(mode, shots)
     stub.start()
     try:
@@ -153,6 +177,13 @@ def checks(mode, text, stub, shots):
     item = au.text_of(text, "dsitem")
     gets = [r for r in stub.requests if r[0] == "GET" and r[1] == "/api/daily-spin/progress"]
     print("  [%s] Battle Pass: %r | item: %r" % (mode, bp[:80], item[:80]))
+    if mode == "bundles":
+        bundles = au.text_of(text, "bundles")
+        print("  [bundles] bundle row: %r" % bundles[:160])
+        au.check("bundles: the store home's bundle row shows the starter pack krunker.io pushed on the join (no purchase asked first)",
+                 "KioStarter Pack" in bundles, bundles[:300] or "(empty)")
+        au.check("bundles: its price is the row's (BUY $4.99)", "4.99" in bundles, bundles[:300])
+        return
     if mode == "spin":
         au.check("spin: the Daily Spin's progress is asked of api.krunker.io with the account's token",
                  bool(gets) and gets[0][3].get("authorization", "").startswith("Bearer "), [r[:2] for r in stub.requests][-12:])
