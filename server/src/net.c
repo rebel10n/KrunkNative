@@ -10,6 +10,7 @@
 #include <server.h>
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
+#include <account.h>         // AccountInfo (GameHooks.account_info)
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
 #include <server_trade.h>    // the live trade of Trade mode (NET_EXT_TRADE_*, int [5, sid]; doc/v10/trade.md)
 #include <server_captcha.h>  // the in-game captcha's answer (NET_EXT_CAPTCHA_ANSWER, game_captcha.c)
@@ -519,6 +520,13 @@ static int net_game_reward(Game *game, const Player *player) {
 static int net_game_can_use_skin(const Game *game, const Player *player, const int skin) {
     (void) game;
     return accounts_can_use_skin(player, skin);
+}
+
+// GameHooks.account_info: the account's premium / verified flags (accounts.c); without it every player
+// read as a guest, so the spray wheel's pick fell back to the equipped spray (players.spray).
+static int net_game_account_info(const Game *game, const Player *player, AccountInfo *out) {
+    (void) game;
+    return accounts_account_info(player, out);
 }
 
 // GameHooks.progress (WP-E part 2c): v7 incStat / challenge events of account players (accounts.c).
@@ -2439,6 +2447,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
     g_server->game.hooks.bot_banter = bot_banter_request;  // bot chat through kn_brain's AI (server/src/bot_banter.c)
     g_server->game.hooks.can_use_skin = net_game_can_use_skin; // players.spray canUseSkin (accounts.c)
+    g_server->game.hooks.account_info = net_game_account_info; // premium / verified (accounts.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
     server_events_install_game_hooks(&g_server->game); // v10.0.3 egg hunt: foundEventItem (live_events_server.c)
     skin_counters_install_game_hooks(&g_server->game); // v10.0.4 counter skins: countSkinStat (skin_counters_server.c)

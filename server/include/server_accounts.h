@@ -101,6 +101,10 @@ int accounts_info_tags(char tags[][24], int max); // ranked / custom / draining 
 int accounts_owns_skin(const ClientConnection*, int skin);
 // The same for the connection playing `player` (GameHooks.can_use_skin: players.spray); 0 for bots.
 int accounts_can_use_skin(const Player*, int skin);
+// GameHooks.account_info for the connection playing `player`: has_account as Player.has_account, plus the
+// account's premium / verified flags (the spray wheel's pick, premium / verified zones); 0 for bots.
+struct AccountInfo_t;
+int accounts_account_info(const Player*, struct AccountInfo_t *out);
 // v10.0.4 account.hasSkin for an AI's rewardUnique (GameHooks.has_skin): 1 when the coordinator's inventory lists `skin`
 // for the connection playing `player` (whatever the enforcement setting; nothing before the inventory is known).
 int accounts_has_skin(const Player*, int skin);

@@ -2,6 +2,7 @@
 // (server/include/server_accounts.h, doc/backend.md section 8).
 #include <ruleset.h> // meta.ruleset
 #include <server_accounts.h>
+#include <account.h> // AccountInfo (GameHooks.account_info)
 #include <server_skin_counters.h> // v10.0.4 counter skins: the owned list's stats, takeSkinStats at the commit
 #include <server_captcha.h> // the in-game captcha: the welcome's flag, the brain's "captcha-r"
 #include <server_brain_events.h> // v10.0.3 warsClan, map prize wheels, unb / lotWin, monetized studio games (brain_events.c)
@@ -2157,6 +2158,18 @@ int accounts_owns_skin(const ClientConnection *client, const int skin) {
 int accounts_can_use_skin(const Player *player, const int skin) {
     const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
     return client && accounts_owns_skin(client, skin);
+}
+
+int accounts_account_info(const Player *player, AccountInfo *out) {
+    const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!client || !out) return 0;
+    // has_account stays Player.has_account (what trigger_account read before this hook existed); level, KR and
+    // the rest stay 0 as they did, so only the premium / verified gates change: players.spray's
+    // (isSandbox || account.premiumT > 0) wheel pick and maxSpraysP / maxSpraysF (shared/src/social_v7.c).
+    out->has_account = player->has_account;
+    out->premium = client->acct.premium ? 1 : 0;
+    out->verified = (client->acct.flags & NET_PLAYER_INFO_VERIFIED) ? 1 : 0;
+    return 1;
 }
 
 int accounts_has_skin(const Player *player, const int skin) {
