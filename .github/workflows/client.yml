@@ -85,7 +85,7 @@ jobs:
           echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
 
   # The Linux client per arch on Ubuntu 22.04 (tools/release/build-client-linux.sh dynamic), natively on an
-  # x86_64 and an arm64 runner: distro OpenSSL 3 (libssl3), glibc 2.35+, and WebKitGTK bundled (lib/,
+  # x86_64 and an arm64 runner: OpenSSL 3 bundled (Fedora 45+ ships OpenSSL 4), glibc 2.35+, and WebKitGTK bundled (lib/,
   # libexec/, tools/release/bundle-webkit.sh) so the captcha webview works with no install. Every Linux
   # client archive is this build; there is no polyfilled client (the server has one: release.yml).
   linux:

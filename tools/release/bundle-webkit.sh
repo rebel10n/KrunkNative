@@ -39,11 +39,13 @@ if readelf -d "$bin" | grep RUNPATH | grep -q '\$ORIGIN/lib\]'; then
     exit 1
 fi
 
-# Never bundled: the player's system provides them. The C library and loader, the C++ runtime, zlib and
-# OpenSSL (the dynamic package's Depends), the GPU stack (GL, EGL, GBM, DRM, Vulkan: they must match the
+# Never bundled: the player's system provides them. The C library and loader, the C++ runtime, zlib, the GPU stack (GL, EGL, GBM, DRM, Vulkan: they must match the
 # player's driver), the display and input stack (X11, XCB, Wayland, xkbcommon), audio, D-Bus, udev and
 # systemd. A bundled copy would shadow the player's own in every library that loads it.
-EXCLUDE='^(ld-linux|linux-vdso|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libutil\.so|libresolv\.so|libmvec\.so|libanl\.so|libnss_|libcrypt\.so|libgcc_s\.so|libstdc\+\+\.so|libz\.so|libssl\.so|libcrypto\.so|libEGL|libGL|libOpenGL|libGLES|libgbm\.so|libdrm|libvulkan|libglapi|libLLVM|libnvidia|libX|libxcb|libxkbcommon|libwayland|libxshmfence|libasound|libpulse|libdbus-1|libudev|libsystemd)'
+# OpenSSL 3 (libssl.so.3 / libcrypto.so.3) IS bundled: Fedora 45 moved to OpenSSL 4 (libcrypto.so.4), and
+# the 3.x sonames only come with the optional openssl3-libs compat package, so a stock install could not
+# start client_bin / server_bin (2026-11-04, the Client workflow's Fedora 45 compat check).
+EXCLUDE='^(ld-linux|linux-vdso|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libutil\.so|libresolv\.so|libmvec\.so|libanl\.so|libnss_|libcrypt\.so|libgcc_s\.so|libstdc\+\+\.so|libz\.so|libEGL|libGL|libOpenGL|libGLES|libgbm\.so|libdrm|libvulkan|libglapi|libLLVM|libnvidia|libX|libxcb|libxkbcommon|libwayland|libxshmfence|libasound|libpulse|libdbus-1|libudev|libsystemd)'
 
 declare -A libs=() # the name the loader asks for -> the file it resolves to on this host
 add_deps() { # add_deps <ELF file>: its ldd closure, minus EXCLUDE
@@ -75,6 +77,12 @@ tls="$(find "$(pkg-config --variable=giomoduledir gio-2.0)" -maxdepth 1 -name li
 [ -n "$tls" ] || { echo "bundle-webkit: glib-networking's libgiognutls.so is not installed (https in WebKit)" >&2; exit 1; }
 
 add_deps "$bin"
+# server_bin (beside client_bin) links OpenSSL too: its closure joins lib/ and it gets the same RUNPATH
+server="$bindir/server_bin"
+[ -f "$server" ] && add_deps "$server"
+# the launcher (BoxOffice, kn_launcher) too; package-client.sh puts it in the install root, above runtime/
+launcher="$bindir/BoxOffice"
+[ -f "$launcher" ] && add_deps "$launcher"
 add_deps "$helpers/WebKitWebProcess"
 add_deps "$helpers/WebKitNetworkProcess"
 [ -f "$helpers/WebKitGPUProcess" ] && add_deps "$helpers/WebKitGPUProcess"
@@ -121,13 +129,16 @@ cp -L "$tls" "$bindir/lib/gio/modules/libgiognutls.so"
 # the bundle (or client_bin) needs directly. A library's own host dependencies are not listed: they are
 # its business, not the package's
 {
-    for f in "$bin" "$bindir"/lib/*.so* "$bindir"/lib/gio/modules/*.so "$bindir"/libexec/webkit2gtk-4.1/*; do
+    for f in "$bin" ${server:+"$server"} ${launcher:+"$launcher"} "$bindir"/lib/*.so* "$bindir"/lib/gio/modules/*.so "$bindir"/libexec/webkit2gtk-4.1/*; do
         if [ -f "$f" ] && [ ! -L "$f" ]; then readelf -d "$f" 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'; fi
     done
 } | { grep -E "$EXCLUDE" || true; } | LC_ALL=C sort -u > "$bindir/host-libs.txt"
 
 # RUNPATH: client_bin finds lib/, the libraries find each other, the helpers and the TLS module find lib/
 patchelf --set-rpath '$ORIGIN/lib' "$bin"
+[ -f "$server" ] && patchelf --set-rpath '$ORIGIN/lib' "$server"
+# the launcher: runtime/lib in the package (install root), lib/ beside it in this bin dir
+[ -f "$launcher" ] && patchelf --set-rpath '$ORIGIN/runtime/lib:$ORIGIN/lib' "$launcher"
 for f in "$bindir"/lib/*.so*; do
     if [ -f "$f" ] && [ ! -L "$f" ]; then patchelf --set-rpath '$ORIGIN' "$f"; fi
 done
@@ -142,6 +153,12 @@ if grep -q 'not found' <<< "$resolved"; then
     exit 1
 fi
 webkit_now="$(sed -n 's|^[[:space:]]*libwebkit2gtk-4\.1\.so\.0 => \(/[^[:space:]]*\).*|\1|p' <<< "$resolved")"
+for so in libssl.so.3 libcrypto.so.3; do # the bundled OpenSSL 3, not the host's (see EXCLUDE)
+    for b in "$bin" ${server:+"$server"} ${launcher:+"$launcher"}; do
+        at="$(env -u LD_LIBRARY_PATH ldd "$b" | sed -n "s|^[[:space:]]*$so => \(/[^[:space:]]*\).*|\1|p")"
+        case "$at" in ""|"$bindir/lib/"*) ;; *) echo "bundle-webkit: $(basename "$b") would load $so from $at, not the bundle" >&2; exit 1 ;; esac
+    done
+done
 case "$webkit_now" in
     "$bindir/lib/"*) ;;
     *) echo "bundle-webkit: client_bin would load webkit2gtk from $webkit_now, not the bundle" >&2; exit 1 ;;

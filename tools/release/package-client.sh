@@ -173,9 +173,9 @@ Third-party components compiled into the binaries, with their licenses in runtim
 Windows packages contain the MinGW-w64 runtime (statically linked: ZPL / MIT / GPL with
 the GCC runtime library exception). macOS packages bundle ANGLE (libEGL, libGLESv2:
 BSD 3-Clause, https://chromium.googlesource.com/angle/angle/+/HEAD/LICENSE) and may bundle
-Homebrew's OpenSSL (Apache License 2.0). The Linux packages link OpenSSL 3 statically
-(Apache License 2.0, https://www.openssl.org/source/license.html) and are patched by
-polyfill-glibc (https://github.com/corsix/polyfill-glibc, MIT, its polyfill code is license-waived).
+Homebrew's OpenSSL (Apache License 2.0). The Linux client packages bundle OpenSSL 3
+(runtime/lib/, Apache License 2.0, https://www.openssl.org/source/license.html); polyfilled
+Linux builds link it statically and are patched by polyfill-glibc (https://github.com/corsix/polyfill-glibc, MIT, its polyfill code is license-waived).
 NOTICE
     if [ -d "$bindir/lib" ]; then
         # the Linux client's WebKitGTK (lib/, libexec/; tools/release/bundle-webkit.sh)
@@ -198,7 +198,7 @@ NOTICE
 readme() { # readme <file>: README.txt at the top of the package
     local file="$1" run runtime_line
     case "$platform" in
-        linux-*) runtime_line="Linux with glibc ${glibc_min:-2.35}+, OpenSSL 3 (libssl3) and OpenGL 4.5 drivers (Mesa 20.3+, NVIDIA, AMD)" ;;
+        linux-*) runtime_line="Linux with glibc ${glibc_min:-2.35}+ and OpenGL 4.5 drivers (Mesa 20.3+, NVIDIA, AMD)" ;;
         windows-*) runtime_line="Windows 10+ x64 with OpenGL 4.5 drivers" ;;
         macos-*) runtime_line="macOS 11+ ($platform), rendering through Metal (ANGLE)" ;;
     esac
@@ -238,7 +238,7 @@ Unpack the zip into a folder of its own." ;;
         if [ "$os" = macos ]; then echo "  BoxOffice.app        the launcher: start this"; else echo "  $launcher_name            the launcher: start this"; fi
         echo "  runtime/             the game, the dedicated server, the menu (ui/), assets/ and licences"
         echo "  runtime/$client      the game itself (runtime/$server is the dedicated server: --help lists its flags)"
-        echo "  runtime/host-libs.txt the system libraries it loads (a desktop Linux install has them: GL, X11, OpenSSL 3, zlib)"
+        echo "  runtime/host-libs.txt the system libraries it loads (a desktop Linux install has them: GL, X11, zlib; OpenSSL 3 is bundled in runtime/lib/)"
         echo "  LICENSE-NOTICE.txt   third-party licences; SHA256SUMS: checksums of every file in this package"
         echo
         echo "To host a game, use the server packages instead of this one:"

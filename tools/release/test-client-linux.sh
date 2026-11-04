@@ -108,7 +108,7 @@ while read -r so; do
     case "$so" in ld-linux*) continue ;; esac # the loader is the image's own
     grep -qxF "$so" <<< "$provided" || gaps="$gaps $so[host-libs.txt]"
 done < "$root/runtime/host-libs.txt"
-for b in "$root/runtime/client_bin" "$root/runtime/server_bin" "$root/runtime/libexec/webkit2gtk-4.1/WebKitWebProcess"; do
+for b in "$root/runtime/client_bin" "$root/runtime/server_bin" "$root/BoxOffice" "$root/runtime/libexec/webkit2gtk-4.1/WebKitWebProcess"; do
     [ -f "$b" ] || continue
     gaps="$gaps $(env -u LD_LIBRARY_PATH ldd "$b" | sed -n 's/^[[:space:]]*\([^[:space:]]*\) => not found.*/\1/p' | sed "s/\$/[$(basename "$b")]/")"
 done

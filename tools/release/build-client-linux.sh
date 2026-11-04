@@ -3,8 +3,8 @@
 # then tools/release/package-client.sh). Run it on Ubuntu 22.04 (glibc 2.35), natively (CI runners
 # ubuntu-22.04 / ubuntu-22.04-arm) or in an ubuntu:22.04 container (--docker), amd64 or aarch64:
 #
-#   dynamic     the distro build: links the system OpenSSL 3 (libssl3: security updates come from
-#               the distro) and needs glibc >= 2.35. Bundles WebKitGTK for the captcha webview
+#   dynamic     the distro build: links OpenSSL 3 dynamically and bundles the build host's copy in
+#               lib/ (Fedora 45+ ships OpenSSL 4) and needs glibc >= 2.35. Bundles WebKitGTK for the captcha webview
 #               (tools/release/bundle-webkit.sh: lib/, libexec/). Client packages: BoxOffice-linux-<arch>.
 #   polyfilled  for old and new distros alike (fastfetch's "-polyfilled"): OpenSSL static too
 #               (libssl.a), then polyfill-glibc --target-glibc=2.17 rewrites the newer glibc symbol
@@ -160,11 +160,11 @@ fi
 if [ "$variant" = dynamic ]; then flags+=(-DKN_WEBVIEW=ON); else flags+=(-DKN_WEBVIEW=OFF); fi
 libcrypt_a="$(gcc -print-file-name=libcrypt.a)"
 if [ -f "$libcrypt_a" ]; then flags+=("-DKN_LIBCRYPT=$libcrypt_a"); else flags+=(-DKN_LIBCRYPT=KN_LIBCRYPT-NOTFOUND); fi
-if [ "$variant" = polyfilled ]; then
-    # KRUNKNATIVE_TLS_STATIC: backend_native.c skips the foreign distro's openssl.cnf and finds
-    # the CA bundle itself (a static libssl only knows the build host's OPENSSLDIR)
-    flags+=(-DOPENSSL_USE_STATIC_LIBS=TRUE -DKRUNKNATIVE_TLS_STATIC=ON)
-fi
+# KRUNKNATIVE_TLS_STATIC: http_conn.c skips the foreign distro's openssl.cnf and finds the CA bundle
+# itself. Both variants ship OpenSSL that only knows the build host's OPENSSLDIR (Ubuntu's /usr/lib/ssl):
+# polyfilled links it statically, dynamic bundles libssl.so.3 / libcrypto.so.3 in lib/ (bundle-webkit.sh)
+if [ "$variant" = polyfilled ]; then flags+=(-DOPENSSL_USE_STATIC_LIBS=TRUE); fi
+flags+=(-DKRUNKNATIVE_TLS_STATIC=ON)
 # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
 cmake -S "$repo" -B "$build" -G Ninja "${flags[@]}" ${KN_CMAKE_ARGS:-} > "$build/configure.log" || { cat "$build/configure.log" >&2; exit 1; }
 grep -E 'GL backend|OpenSSL|libssl|Headless|Webview' "$build/configure.log" || true
