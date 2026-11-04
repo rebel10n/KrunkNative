@@ -6,6 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+// setenv / unsetenv are POSIX; MinGW (the Windows CI build) has only _putenv_s, where an empty value removes the variable
+#ifdef _WIN32
+static void test_setenv(const char *name, const char *value) { _putenv_s(name, value); }
+static void test_unsetenv(const char *name) { _putenv_s(name, ""); }
+#else
+static void test_setenv(const char *name, const char *value) { setenv(name, value, 1); }
+static void test_unsetenv(const char *name) { unsetenv(name); }
+#endif
+
 static int g_checks, g_fails;
 #define CHECK(cond, ...)                                                                   \
     do {                                                                                   \
@@ -69,7 +78,7 @@ static void test_reload(void) {
 }
 
 static void test_off(void) {
-    setenv("KRUNKNATIVE_SCENE_WARM", "0", 1);
+    test_setenv("KRUNKNATIVE_SCENE_WARM", "0");
     CHECK(!scene_warm_enabled(), "KRUNKNATIVE_SCENE_WARM=0 turns it off");
     scene_warm_begin_count(10, 0.0);
     CHECK(!scene_warm_active(), "no warm after a load");
@@ -80,7 +89,7 @@ int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "off")) {
         test_off();
     } else {
-        unsetenv("KRUNKNATIVE_SCENE_WARM");
+        test_unsetenv("KRUNKNATIVE_SCENE_WARM");
         CHECK(scene_warm_enabled(), "on by default");
         CHECK(!scene_warm_frame_count(3, 16.0), "nothing warms before a load");
         test_stable();
