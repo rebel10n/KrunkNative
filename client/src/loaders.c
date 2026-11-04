@@ -125,6 +125,7 @@ int texture_placeholders_check(void) {
             g_active_texture = pending.texture;
             glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, checker_pixels());
+            glGenerateMipmap(GL_TEXTURE_2D); // a new size: rt_filtering.c's mipmapped min filter needs the chain (GL_NEAREST ignores it)
             given_up++;
         }
         free(pending.path);
@@ -412,9 +413,42 @@ void geometry_free_wire(Geometry *geometry) {
     if (!geometry) return;
     if (geometry->wire_ebo) glDeleteBuffers(1, &geometry->wire_ebo);
     free(geometry->tri_indices);
+    free(geometry->tri_positions);
     geometry->wire_ebo = 0;
     geometry->wire_index_count = 0;
     geometry->tri_indices = NULL;
+    geometry->tri_positions = NULL;
+    geometry->tri_vertex_count = 0;
+}
+
+void geometry_set_triangles(Geometry *geometry, const float *positions, const int vertex_count, const int stride_floats,
+                            const unsigned int *indices, const int index_count) {
+    if (!geometry) return;
+    free(geometry->tri_positions);
+    free(geometry->tri_indices);
+    geometry->tri_positions = NULL;
+    geometry->tri_indices = NULL;
+    geometry->tri_vertex_count = 0;
+    if (!positions || vertex_count <= 0 || index_count < 3 || stride_floats < 3) return;
+
+    float *pos = malloc((size_t) vertex_count * 3 * sizeof(float));
+    unsigned int *idx = malloc((size_t) index_count * sizeof(unsigned int));
+    if (!pos || !idx) {
+        free(pos);
+        free(idx);
+        return;
+    }
+    for (int i = 0; i < vertex_count; i++) memcpy(&pos[i * 3], &positions[(size_t) i * (size_t) stride_floats], 3 * sizeof(float));
+    if (indices) memcpy(idx, indices, (size_t) index_count * sizeof(unsigned int));
+    else for (int i = 0; i < index_count; i++) idx[i] = (unsigned int) i;
+    geometry->tri_positions = pos;
+    geometry->tri_indices = idx;
+    geometry->tri_vertex_count = vertex_count;
+    geometry->tri_epoch++; // rt_scene.c: refit / rebuild the BLAS
+    // the wireframe edge buffer was built from the old list
+    if (geometry->wire_ebo) glDeleteBuffers(1, &geometry->wire_ebo);
+    geometry->wire_ebo = 0;
+    geometry->wire_index_count = 0;
 }
 
 Geometry *load_obj_model(char *path, const int transform_y) {
@@ -600,10 +634,8 @@ Geometry *load_obj_model(char *path, const int transform_y) {
     free(corner_normal);
 
     geometry->index_count = (int) alloc_index_count;
-    if (alloc_index_count) { // the wireframe edges come from this list (geometry_wire_ebo)
-        geometry->tri_indices = malloc(alloc_index_count * sizeof(unsigned int));
-        if (geometry->tri_indices) memcpy(geometry->tri_indices, indices, alloc_index_count * sizeof(unsigned int));
-    }
+    // the wireframe edges (geometry_wire_ebo) and the ray tracer's BLAS (rt.h) come from this list
+    geometry_set_triangles(geometry, (const float *) vertices, (int) alloc_vertex_count, 5, indices, (int) alloc_index_count);
     fast_obj_destroy(mesh);
 
     const size_t path_length = strlen(path);
@@ -701,6 +733,9 @@ Geometry *create_cube_geo() {
     glEnableVertexAttribArray(1);
 
     geometry->index_count = sizeof(cube_indices) / sizeof(cube_indices[0]);
+    // rt.h RT_INST_BOX: the unit cube's local extents are x, z in [-0.5, 0.5], y in [0, 1]
+    geometry_set_triangles(geometry, (const float *) cube_vertices, (int) (sizeof(cube_vertices) / sizeof(cube_vertices[0])), 5,
+                           cube_indices, geometry->index_count);
 
     geometry_set_unit_bounds(geometry);
     g_cube_geometry = geometry;
@@ -788,6 +823,7 @@ Geometry *create_hose_geo(const float radius, const float length, const int side
     glEnableVertexAttribArray(1);
     geometry->index_count = (int) k;
     geometry_set_bounds(geometry, v, nv);
+    geometry_set_triangles(geometry, (const float *) v, (int) nv, 5, idx, (int) k);
     free(v);
     free(idx);
 
@@ -832,6 +868,9 @@ Geometry *create_plane_geo() {
     glEnableVertexAttribArray(1);
 
     geometry->index_count = sizeof(plane_indices) / sizeof(plane_indices[0]);
+    // rt.h RT_INST_PLANE: the unit plane is the y = 1 face, x, z in [-0.5, 0.5] (normal +y)
+    geometry_set_triangles(geometry, (const float *) plane_vertices, (int) (sizeof(plane_vertices) / sizeof(plane_vertices[0])), 5,
+                           plane_indices, geometry->index_count);
 
     geometry_set_unit_bounds(geometry);
     g_plane_geometry = geometry;
@@ -903,6 +942,11 @@ Geometry *create_ramp_geo() {
     glEnableVertexAttribArray(1);
 
     geometry->index_count = sizeof(indices) / sizeof(indices[0]);
+    // rt.h RT_INST_RAMP: the unit wedge spans x, z in [-0.5, 0.5], y in [0, 1]; its slope is the plane
+    // y = 0.5 - z (y 0 at z = +0.5, y 1 at z = -0.5), closed by the bottom, the back (z = -0.5) and two
+    // triangular sides (x = +-0.5)
+    geometry_set_triangles(geometry, (const float *) vertices, (int) (sizeof(vertices) / sizeof(vertices[0])), 5,
+                           indices, geometry->index_count);
 
     geometry_set_unit_bounds(geometry);
     g_ramp_geometry = geometry;

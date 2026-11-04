@@ -3,7 +3,7 @@
 //
 // Design
 // - One program (assets/shaders/html_ui.{vert,frag}), one vertex format
-//   (GlbVertex), one VAO, streaming VBO/IBO orphaned per frame.
+//   (GlbVertex), one VAO, streaming VBO/IBO re-specified per batch (flush).
 // - Geometry is transformed on the CPU: CSS px -> current transform ->
 //   device px (x device scale) -> target px (minus the render target origin).
 // - SDF primitives carry their local position in `uv` (local CSS px x device
@@ -178,6 +178,7 @@ struct GlBackend {
     int fb_w, fb_h;
     float scale;
     GLint window_fbo;
+    int window_stencil_clean; /* the window target's stencil was cleared this frame (window_stencil_clear) */
     int cull_was_on;
     GLint blend_eq_rgb, blend_eq_a; /* the client's blend equation, given back at glb_end */
     Target target;
@@ -200,7 +201,6 @@ struct GlBackend {
     int nv, cap_v;
     uint32_t *idx;
     int ni, cap_i;
-    size_t vbo_cap, vbo_off, ibo_cap, ibo_off;
     GLuint batch_tex;
     int batch_nearest;
     GLuint bound_tex;
@@ -319,25 +319,15 @@ static void flush(GlBackend *b) {
     const size_t vbytes = (size_t) b->nv * sizeof(GlbVertex);
     const size_t ibytes = (size_t) b->ni * sizeof(uint32_t);
 
+    // Each batch re-specifies both buffers with its own data (glBufferData: the driver hands
+    // out fresh storage and copies on the CPU) instead of glBufferSubData at a running offset
+    // into one orphaned buffer: on NVIDIA every mid-buffer update of a buffer the GPU may still
+    // read was a copy on the GPU timeline, ~3 us each, and the in-game HUD's ~30 batches made
+    // them most of the page pass (0.19 of 0.21 ms at 1080p). Indices stay 0-based.
     glBindBuffer(GL_ARRAY_BUFFER, b->vbo);
-    if (b->vbo_off + vbytes > b->vbo_cap) {
-        while (b->vbo_cap < vbytes) b->vbo_cap *= 2;
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) b->vbo_cap, NULL, GL_STREAM_DRAW); // orphan
-        b->vbo_off = 0;
-    }
-
-    const uint32_t base = (uint32_t) (b->vbo_off / sizeof(GlbVertex));
-    for (int i = 0; i < b->ni; i++) b->idx[i] += base;
-
-    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr) b->vbo_off, (GLsizeiptr) vbytes, b->verts);
-
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) vbytes, b->verts, GL_STREAM_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, b->ibo);
-    if (b->ibo_off + ibytes > b->ibo_cap) {
-        while (b->ibo_cap < ibytes) b->ibo_cap *= 2;
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) b->ibo_cap, NULL, GL_STREAM_DRAW);
-        b->ibo_off = 0;
-    }
-    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, (GLintptr) b->ibo_off, (GLsizeiptr) ibytes, b->idx);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) ibytes, b->idx, GL_STREAM_DRAW);
 
     if (b->batch_tex && b->bound_tex != b->batch_tex) {
         glBindTexture(GL_TEXTURE_2D, b->batch_tex);
@@ -362,11 +352,9 @@ static void flush(GlBackend *b) {
         b->up_poly_evenodd = b->clip.poly_evenodd;
         memcpy(b->up_poly, b->clip.poly, (size_t) b->clip.poly_n * 4 * sizeof(float));
     }
-    glDrawElements(GL_TRIANGLES, b->ni, GL_UNSIGNED_INT, (const void *) (uintptr_t) b->ibo_off);
+    glDrawElements(GL_TRIANGLES, b->ni, GL_UNSIGNED_INT, NULL);
     stats_draw(b, b->nv);
 
-    b->vbo_off += vbytes;
-    b->ibo_off += ibytes;
     b->nv = b->ni = 0;
     b->batch_tex = 0;
     b->batch_nearest = -1;
@@ -1395,8 +1383,28 @@ static void emit_clip_shape(GlBackend *b, const ClipFrame *f) {
 
 // Draws the frame's shape into the stencil buffer, incrementing where it passes
 // the current test, then raises the reference.
+// Stencil clips count up from 0 (clip.stencil_ref), so the window target's stencil must start at
+// 0. Nothing else in the client writes or clears it (the scene clears colour + depth only) and
+// its initial contents are undefined: on NVIDIA it is non-zero (llvmpipe happens to start at 0),
+// which failed the GL_EQUAL 0 test of the first stencil clip and dropped everything inside nested
+// rounded clips (class cards, attachment/reticle previews). Every stencil test of a frame follows
+// a stencil_push on the same target (stencil_ref > 0 is only ever set there; offscreen entries
+// clear their own in begin_offscreen), so clearing the whole window stencil before the frame's
+// first push on it gives the same values as clearing it in glb_begin. The scissor is off for
+// the clear (glClear honours it) and put back after.
+static void window_stencil_clear(GlBackend *b) {
+    if (b->target.entry >= 0 || b->window_stencil_clean) return;
+    b->window_stencil_clean = 1;
+    glDisable(GL_SCISSOR_TEST);
+    glStencilMask(0xFF);
+    glClearStencil(0);
+    glClear(GL_STENCIL_BUFFER_BIT);
+    if (b->clip.scissor_on) glEnable(GL_SCISSOR_TEST);
+}
+
 static void stencil_push(GlBackend *b, ClipFrame *f) {
     flush(b);
+    window_stencil_clear(b);
     glEnable(GL_STENCIL_TEST);
     glStencilFunc(GL_EQUAL, b->clip.stencil_ref, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
@@ -2190,10 +2198,9 @@ GlBackend *glb_create(void) {
     glBindBuffer(GL_ARRAY_BUFFER, b->vbo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, b->ibo);
 
-    b->vbo_cap = 256 * 1024;
-    b->ibo_cap = 64 * 1024;
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) b->vbo_cap, NULL, GL_STREAM_DRAW);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) b->ibo_cap, NULL, GL_STREAM_DRAW);
+    // storage is (re)specified per batch by flush()
+    glBufferData(GL_ARRAY_BUFFER, 256 * 1024, NULL, GL_STREAM_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, 64 * 1024, NULL, GL_STREAM_DRAW);
 
     const GLsizei stride = sizeof(GlbVertex);
     glEnableVertexAttribArray(0); glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void *) offsetof(GlbVertex, x));
@@ -2302,10 +2309,6 @@ void glb_begin(GlBackend *b, int fb_w, int fb_h, float device_scale) {
     glBindBuffer(GL_ARRAY_BUFFER, b->vbo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, b->ibo);
 
-    // orphan the streaming buffers
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) b->vbo_cap, NULL, GL_STREAM_DRAW);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) b->ibo_cap, NULL, GL_STREAM_DRAW);
-    b->vbo_off = b->ibo_off = 0;
     b->nv = b->ni = 0;
     b->batch_tex = 0;
     b->batch_nearest = -1;
@@ -2325,14 +2328,10 @@ void glb_begin(GlBackend *b, int fb_w, int fb_h, float device_scale) {
     glDisable(GL_STENCIL_TEST);
     glStencilMask(0xFF);
     glColorMask(1, 1, 1, 1);
-    // Stencil clips count up from 0 (clip.stencil_ref), so the window target's
-    // stencil must start at 0. Nothing else in the client writes or clears it
-    // (the scene clears colour + depth only) and its initial contents are
-    // undefined: on NVIDIA it is non-zero (llvmpipe happens to start at 0), which
-    // failed the GL_EQUAL 0 test of the first stencil clip and dropped everything
-    // inside nested rounded clips (class cards, attachment/reticle previews).
-    glClearStencil(0);
-    glClear(GL_STENCIL_BUFFER_BIT);
+    // The window target's stencil is cleared lazily, by the frame's first stencil clip on it
+    // (window_stencil_clear): most frames (the in-game HUD) use none, and a full-window clear
+    // of the packed depth/stencil buffer was the largest single GPU cost of the page pass.
+    b->window_stencil_clean = 0;
     b->stencil_pass = 0;
     glUniform1i(b->loc_stencil_pass, 0);
 

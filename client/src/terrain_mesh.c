@@ -346,9 +346,11 @@ static Mesh *terrain_upload(TerrainPart *part, const TerrainBuf *b) {
     glBindVertexArray(0);
     geometry_set_bounds(g, b->v, b->nv);
     g->index_count = (int) b->ni;
+    geometry_set_triangles(g, (const float *) b->v, (int) b->nv, 5, b->i, (int) b->ni); // rt.h
     BasicMaterial *m = basic_material_init();
     if (!m) {
         glDeleteVertexArrays(1, &g->vao);
+        geometry_free_wire(g);
         free(g);
         return NULL;
     }
@@ -366,6 +368,7 @@ static void terrain_part_drop(TerrainPart *part) {
     glDeleteBuffers(1, &g->ebo);
     glDeleteBuffers(1, &part->vbo);
     glDeleteBuffers(1, &part->cbo);
+    geometry_free_wire(g);
     free(g);
     mesh_fini(part->mesh);
     memset(part, 0, sizeof(*part));

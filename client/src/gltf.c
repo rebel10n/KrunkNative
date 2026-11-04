@@ -1,6 +1,7 @@
 // GLTF 2.0 / GLB models on cgltf (client/include/gltf.h has the scope and the limits).
 #include <gl.h>
 #include <client.h>
+#include <rt.h> // rt_materials_hint_*: Box Office material classes
 #include <gltf.h>
 #include <gltf_meshopt.h>
 #include <math.h>
@@ -54,6 +55,7 @@ typedef struct {
     int dynamic;
     vertex *base;             // positions + UVs
     size_t vertex_count;
+    unsigned int *indices;    // the index list (rt.h: every instance geometry's geometry_set_triangles)
     float *morph;             // morph_count * vertex_count * 3 position deltas
     int morph_count;
     unsigned short *joints;   // vertex_count * 4
@@ -568,6 +570,8 @@ static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_
     if (out->dynamic) {
         out->base = vertices;
         out->vertex_count = count;
+        out->indices = indices;
+        indices = NULL; // kept with the primitive
         glGenBuffers(1, &out->ebo);
         glBindVertexArray(0);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, out->ebo);
@@ -598,6 +602,7 @@ static int load_primitive(GltfModel *model, const cgltf_node *node, const cgltf_
         glBindVertexArray(0);
         geometry->index_count = (int) index_count;
         geometry_set_bounds(geometry, vertices, count);
+        geometry_set_triangles(geometry, (const float *) vertices, (int) count, 5, indices, (int) index_count); // rt.h
         out->geometry = geometry;
         free(vertices);
     }
@@ -889,6 +894,7 @@ static Mesh *instance_mesh(const GltfModel *model, const GltfPrimitive *prim, Ge
     BasicMaterial *material = basic_material_init();
     if (!material) return NULL;
     material->double_sided = 0;
+    if (model->path) rt_materials_hint_model(material, model->path); // rt.h material classes
     if (prim->material >= 0 && (size_t) prim->material < model->material_count) {
         const GltfMaterial *m = &model->materials[prim->material];
         material->color = m->color;
@@ -969,6 +975,13 @@ static void dynamic_upload(GltfInstance *instance, GltfDynamicPrimitive *d) {
 
     glBindBuffer(GL_ARRAY_BUFFER, d->vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr) (count * sizeof(vertex)), d->scratch);
+
+    // rt.h: the tracer's CPU copy follows the pose (rt_scene.c refits the BLAS when tri_epoch moved)
+    Geometry *geometry = d->mesh ? d->mesh->geometry : NULL;
+    if (geometry && geometry->tri_positions && (size_t) geometry->tri_vertex_count == count) {
+        for (size_t i = 0; i < count; i++) memcpy(&geometry->tri_positions[i * 3], &d->scratch[i].position, 3 * sizeof(float));
+        geometry->tri_epoch++;
+    }
 }
 
 GltfInstance *gltf_instance_create(GltfModel *model, const float time_scale) {
@@ -1043,6 +1056,8 @@ GltfInstance *gltf_instance_create(GltfModel *model, const float time_scale) {
             geometry->ebo = prim->ebo;
             geometry->index_count = prim->index_count;
             geometry->bound_radius = 0.0f; // deforms: never frustum-culled
+            // rt.h: the bind pose; a skinned refit from d->scratch is phase 6 of doc/raytracing-plan.md
+            geometry_set_triangles(geometry, (const float *) prim->base, (int) prim->vertex_count, 5, prim->indices, prim->index_count);
             mesh = instance_mesh(model, prim, geometry);
             if (!mesh) {
                 glDeleteVertexArrays(1, &geometry->vao);
@@ -1351,6 +1366,7 @@ void gltf_instance_fini(GltfInstance *instance) {
         GltfDynamicPrimitive *d = &instance->dynamic[i];
         if (d->mesh && d->mesh->geometry) {
             glDeleteVertexArrays(1, &d->mesh->geometry->vao); // the EBO is the model's
+            geometry_free_wire(d->mesh->geometry);
             free(d->mesh->geometry);
             d->mesh->geometry = NULL;
         }

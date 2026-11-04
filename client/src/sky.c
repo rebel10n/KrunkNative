@@ -22,6 +22,7 @@
 #include <client.h>
 #include <sky.h>
 #include <render_settings.h>
+#include <rt.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -255,13 +256,22 @@ void sky_load(const cJSON *map_raw) {
     sky.enabled = sky.index_count > 0;
 }
 
+int sky_dome_gradient(vec3 stops[3]) {
+    if (!sky.enabled) return 0;
+    if (sky.textured) return -1;
+    for (int i = 0; i < 3; i++) stops[i] = sky.stops[i];
+    return 1;
+}
+
 void sky_tick(const float delta) {
+    sky_physical_frame(delta); // Box Office physical sky constants (sky_physical.c; nothing while rtSky is off)
     // render.js render(): movTextures only advance while the textureAnim setting is on.
     if (!sky.enabled || !sky.textured || sky.mov_speed == 0.0f || !client_render_settings()->texture_anim) return;
     sky.tex_offset = fmodf(sky.tex_offset + sky.mov_speed * delta, 1.0f);
 }
 
 void sky_render(Camera *camera) {
+    if (sky_physical_render(camera)) return; // Box Office rtSky replaces the dome / clear colour (sky_physical.c)
     if (!sky.enabled) return;
 
     int viewport[4];
@@ -295,6 +305,7 @@ void sky_render(Camera *camera) {
     glUniform3f(glGetUniformLocation(sky.program, "end_color"), sky.stops[2].x, sky.stops[2].y, sky.stops[2].z);
     glUniform1i(glGetUniformLocation(sky.program, "tone_mapping"), g_render_lighting.tone_mapping);
     glUniform1f(glGetUniformLocation(sky.program, "tone_mapping_exposure"), g_render_lighting.tone_mapping_exposure);
+    glUniform1f(glGetUniformLocation(sky.program, "cine_exposure"), rt_grade_exposure()); // Cinematic curve (rt_grade.c), 0 off
 
     if (sky.textured) {
         glActiveTexture(GL_TEXTURE0);
@@ -326,6 +337,7 @@ void sky_render(Camera *camera) {
 }
 
 void sky_fini(void) {
+    sky_physical_fini();
     if (sky.vao) glDeleteVertexArrays(1, &sky.vao);
     if (sky.vbo) glDeleteBuffers(1, &sky.vbo);
     if (sky.ebo) glDeleteBuffers(1, &sky.ebo);

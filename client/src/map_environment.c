@@ -153,6 +153,9 @@ static void env_apply_zone(const Map *map, const int index) {
         const char *const colors[3] = {env->sky_dome_col[0], env->sky_dome_col[1], env->sky_dome_col[2]};
         env_map_note_sky_dome(colors, 3);
     }
+    // getEnvMap for the zone's colours (env_map.h: opted-in materials reflect the current table; the Box Office
+    // sky ambient reads it too, so a zone's sky must be in it)
+    env_map_update(&l->fog_color);
     shadow_set_normal_bias(env->shadow_nb); // a zone's data has no shadowNB: 0
     shadow_environment(env->shadow_r, env->shadow_d, env->light_d);
     g_env_sun_zone = index;

@@ -7,6 +7,7 @@
 // per frame (render_target.c, main.c); the rest are kept in ClientRenderSettings for the
 // system that draws the thing (HUD, VFX, viewmodel), see the report table in the header.
 #include <render_settings.h>
+#include <rt.h> // RT_MODE_* (the rtMode range)
 #include "klog.h"
 #include <ui_logic.h>
 #include <html_dom.h>
@@ -87,10 +88,52 @@ static ClientRenderSettings g_rs = {
     // (no cap) under the browser's requestAnimationFrame, which always runs at the display rate, so
     // swap interval 1 is what v10 does natively. updateRate stays 0 like v10's.
     .vsync = 1, .window_mode = RS_WINDOWED,
+    // Ray tracing off: the default frame is Krunker's (rt.h); the other values are what rtMode > 0 starts with
+    .rt_mode = RT_MODE_OFF, .rt_scale = 0.5f, .rt_samples = 2, .rt_denoise = 1, .rt_sun_radius = 0.5f, .rt_local_lights = 0, .rt_taa = 0, .rt_shafts = 0, .rt_bloom = 0, .rt_sky = 0, .rt_sharpen = 0, .rt_preset = 0,
 };
 
-const ClientRenderSettings *client_render_settings(void) {
+// The Cinematic preset's view of the settings (render_settings.h client_render_settings): rebuilt when the stored
+// values change (g_rs_epoch) or the preset turns on; g_rs itself is never written by the preset.
+static ClientRenderSettings g_rs_effective;
+static unsigned g_rs_epoch = 1, g_rs_effective_epoch;
+
+const ClientRenderSettings *client_render_settings_stored(void) {
     return &g_rs;
+}
+
+const ClientRenderSettings *client_render_settings(void) {
+    // rt_supported_cached: no GL call here (this runs from settings code too); the preset applies once the tracer's
+    // first frame found the context capable, like every other rt effect
+    if (g_rs.rt_preset != 1 || g_rs.rt_mode <= RT_MODE_OFF || !rt_supported_cached()) return &g_rs;
+    if (g_rs_effective_epoch != g_rs_epoch) {
+        // dev tuning knobs (doc/raytracing.md "Cinematic preset"): KRUNKNATIVE_RT_CINE_RES / _SCALE override the
+        // preset's scene resolution and RT scale, KRUNKNATIVE_RT_CINE_NO="shafts,bloom,local,taa,sky,sharpen"
+        // leaves those pieces at the stored values (cost A/B)
+        static int knobs_read;
+        static float knob_res, knob_scale;
+        static char knob_no[96];
+        if (!knobs_read) {
+            const char *r = getenv("KRUNKNATIVE_RT_CINE_RES"), *sc = getenv("KRUNKNATIVE_RT_CINE_SCALE"), *no = getenv("KRUNKNATIVE_RT_CINE_NO");
+            knob_res = r ? (float) atof(r) : 0.0f;
+            knob_scale = sc ? (float) atof(sc) : 0.0f;
+            snprintf(knob_no, sizeof(knob_no), "%s", no ? no : "");
+            knobs_read = 1;
+        }
+        g_rs_effective = g_rs;
+        g_rs_effective.rt_mode = RT_MODE_REFLECTIONS;
+        g_rs_effective.rt_scale = knob_scale >= 0.25f && knob_scale <= 1.0f ? knob_scale : RT_CINE_RT_SCALE;
+        g_rs_effective.rt_samples = 2;
+        g_rs_effective.rt_denoise = 1;
+        if (!strstr(knob_no, "local")) g_rs_effective.rt_local_lights = 1;
+        if (!strstr(knob_no, "taa")) g_rs_effective.rt_taa = 1;
+        if (!strstr(knob_no, "bloom")) g_rs_effective.rt_bloom = 1;
+        if (!strstr(knob_no, "sky")) g_rs_effective.rt_sky = 1;
+        if (!strstr(knob_no, "shafts")) g_rs_effective.rt_shafts = 1;
+        if (!strstr(knob_no, "sharpen")) g_rs_effective.rt_sharpen = 1;
+        g_rs_effective.resolution = knob_res >= 0.1f && knob_res <= 2.0f ? knob_res : RT_CINE_RESOLUTION;
+        g_rs_effective_epoch = g_rs_epoch;
+    }
+    return &g_rs_effective;
 }
 
 // ---------------------------------------------------------------- parsing
@@ -223,6 +266,12 @@ static int g_window_mode_applied = RS_WINDOWED;
 static float g_resolution_override = 0.0f; // KRUNKNATIVE_RESOLUTION
 static int g_frame_cap_override = -1;      // KRUNKNATIVE_FRAME_CAP (0 = uncapped); -1 = the store's
 static int g_vsync_override = -1;          // KRUNKNATIVE_VSYNC; -1 = the store's
+static int g_rt_shafts_override = -1;      // KRUNKNATIVE_RT_SHAFTS; -1 = the store's
+static int g_rt_sky_override = -1;         // KRUNKNATIVE_RT_SKY; -1 = the store's
+static int g_rt_sharpen_override = -1;     // KRUNKNATIVE_RT_SHARPEN; -1 = the store's
+static int g_rt_mode_override = -1;        // KRUNKNATIVE_RT; -1 = the store's
+static float g_rt_scale_override = 0.0f;   // KRUNKNATIVE_RT_SCALE; 0 = the store's
+static int g_rt_preset_override = -1;      // KRUNKNATIVE_RT_PRESET (custom / cinematic); -1 = the store's
 static int g_fullscreen_kind = RS_FULLSCREEN; // F11 target: the last non-windowed mode chosen
 static int g_initialized;         // client_render_settings_init ran (not in --render-scenario runs)
 static int g_fps_log;             // KRUNKNATIVE_FPS_LOG
@@ -563,6 +612,19 @@ static const RsEntry RS_TABLE[] = {
     // ---- KrunkNative-only
     RS_B("vsync", vsync, mark_swap),
     RS_I("windowMode", window_mode, apply_window_mode),
+    // ---- Ray tracing (rt.h; read by client/src/rt/ each frame, so no hook)
+    RS_I("rtMode", rt_mode, NULL),
+    RS_F("rtScale", rt_scale, NULL),
+    RS_I("rtSamples", rt_samples, NULL),
+    RS_B("rtDenoise", rt_denoise, NULL),
+    RS_F("rtSunRadius", rt_sun_radius, NULL),
+    RS_B("rtLocalLights", rt_local_lights, NULL),
+    RS_B("rtTaa", rt_taa, NULL),
+    RS_B("rtShafts", rt_shafts, NULL),
+    RS_B("rtBloom", rt_bloom, NULL),
+    RS_B("rtSky", rt_sky, NULL),
+    RS_I("rtSharpen", rt_sharpen, NULL),
+    RS_I("rtPreset", rt_preset, NULL),
 };
 
 static const RsEntry *find_entry(const char *key) {
@@ -601,6 +663,28 @@ int client_apply_render_setting(Client *client, const char *key, const char *val
     // The KRUNKNATIVE_* overrides beat the store (a saved updateRate / vsync) for the whole run
     if (!strcmp(key, "updateRate") && g_frame_cap_override >= 0) g_rs.frame_cap = g_frame_cap_override;
     if (!strcmp(key, "vsync") && g_vsync_override >= 0) g_rs.vsync = g_vsync_override;
+    if (!strcmp(key, "rtMode")) {
+        if (g_rt_mode_override >= 0) g_rs.rt_mode = g_rt_mode_override;
+        if (g_rs.rt_mode < RT_MODE_OFF || g_rs.rt_mode > RT_MODE_REFLECTIONS) g_rs.rt_mode = RT_MODE_OFF;
+    }
+    if (!strcmp(key, "rtScale")) {
+        if (g_rt_scale_override > 0.0f) g_rs.rt_scale = g_rt_scale_override;
+        if (g_rs.rt_scale < 0.25f) g_rs.rt_scale = 0.25f;
+        if (g_rs.rt_scale > 1.0f) g_rs.rt_scale = 1.0f;
+    }
+    if (!strcmp(key, "rtShafts") && g_rt_shafts_override >= 0) g_rs.rt_shafts = g_rt_shafts_override;
+    if (!strcmp(key, "rtSky") && g_rt_sky_override >= 0) g_rs.rt_sky = g_rt_sky_override;
+    if (!strcmp(key, "rtSharpen")) {
+        if (g_rt_sharpen_override >= 0) g_rs.rt_sharpen = g_rt_sharpen_override;
+        g_rs.rt_sharpen = g_rs.rt_sharpen < 0 ? 0 : g_rs.rt_sharpen > 3 ? 3 : g_rs.rt_sharpen;
+    }
+    if (!strcmp(key, "rtPreset")) {
+        if (g_rt_preset_override >= 0) g_rs.rt_preset = g_rt_preset_override;
+        g_rs.rt_preset = g_rs.rt_preset == 1 ? 1 : 0;
+    }
+    g_rs_epoch++; // client_render_settings(): the preset's copy follows the stored values
+    if (!strcmp(key, "rtSamples")) g_rs.rt_samples = g_rs.rt_samples < 1 ? 1 : g_rs.rt_samples > 8 ? 8 : g_rs.rt_samples;
+    if (!strcmp(key, "rtSunRadius")) g_rs.rt_sun_radius = g_rs.rt_sun_radius < 0.0f ? 0.0f : g_rs.rt_sun_radius > 2.0f ? 2.0f : g_rs.rt_sun_radius;
     if (!strcmp(key, "resolution")) {
         if (g_resolution_override > 0.0f) g_rs.resolution = g_resolution_override;
         if (g_rs.resolution < 0.1f) g_rs.resolution = 0.1f;
@@ -630,6 +714,19 @@ void client_render_settings_init(Client *client) {
     else if (headless_enabled()) g_headless_cap = KN_HEADLESS_FRAME_CAP;
     const char *vsync = getenv("KRUNKNATIVE_VSYNC");
     if (vsync && *vsync) g_rs.vsync = g_vsync_override = parse_bool(vsync);
+    const char *rt = getenv("KRUNKNATIVE_RT"); // the ray tracing mode (rt.h RT_MODE_*) for the run, headless tests
+    if (rt && parse_number(rt, &d) && d >= RT_MODE_OFF && d <= RT_MODE_REFLECTIONS) g_rs.rt_mode = g_rt_mode_override = (int) d;
+    const char *rt_scale = getenv("KRUNKNATIVE_RT_SCALE");
+    if (rt_scale && parse_number(rt_scale, &d) && d >= 0.25 && d <= 1.0) g_rs.rt_scale = g_rt_scale_override = (float) d;
+    const char *rt_shafts = getenv("KRUNKNATIVE_RT_SHAFTS"); // volumetric sun shafts for the run (headless tests)
+    if (rt_shafts && *rt_shafts) g_rs.rt_shafts = g_rt_shafts_override = parse_bool(rt_shafts);
+    const char *rt_sky = getenv("KRUNKNATIVE_RT_SKY"); // the physical sky for the run (headless tests)
+    if (rt_sky && *rt_sky) g_rs.rt_sky = g_rt_sky_override = parse_bool(rt_sky);
+    const char *rt_sharpen = getenv("KRUNKNATIVE_RT_SHARPEN"); // the upscaler / sharpening level 0..3 for the run (headless tests)
+    if (rt_sharpen && parse_number(rt_sharpen, &d) && d >= 0.0 && d <= 3.0) g_rs.rt_sharpen = g_rt_sharpen_override = (int) d;
+    const char *rt_preset = getenv("KRUNKNATIVE_RT_PRESET"); // custom / cinematic (or 0 / 1) for the run (headless tests)
+    if (rt_preset && *rt_preset) g_rs.rt_preset = g_rt_preset_override = (!strcmp(rt_preset, "cinematic") || !strcmp(rt_preset, "1")) ? 1 : 0;
+    g_rs_epoch++;
     const char *fps_log = getenv("KRUNKNATIVE_FPS_LOG"); // "[render] fps N" once a second (stderr)
     g_fps_log = fps_log && *fps_log && strcmp(fps_log, "0");
     g_initialized = 1;

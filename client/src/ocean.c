@@ -200,6 +200,7 @@ void ocean_load(const Map *map) {
             glEnableVertexAttribArray(1);
             glBindVertexArray(0);
             plane->index_count = 6; // bound_radius 0: never frustum culled
+            geometry_set_triangles(plane, (const float *) vertices, 4, 5, indices, 6); // rt.h
         }
     }
     if (!plane) return;

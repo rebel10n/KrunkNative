@@ -231,6 +231,7 @@ static void part_free(CounterPart *part) {
     if (geometry) {
         glDeleteVertexArrays(1, &geometry->vao);
         glDeleteBuffers(1, &geometry->ebo);
+        geometry_free_wire(geometry);
         free(geometry);
     }
     if (part->vbo) glDeleteBuffers(1, &part->vbo);
@@ -261,6 +262,7 @@ static int part_upload(SkinCounter *c, CounterPart *part, Builder *b, const int 
     glBindVertexArray(0);
     geometry->index_count = (int) b->ni;
     geometry_set_bounds(geometry, b->v, b->nv);
+    geometry_set_triangles(geometry, (const float *) b->v, (int) b->nv, 5, b->idx, (int) b->ni); // rt.h
 
     material->double_sided = 0;
     if (group == COUNTER_GROUPS - 1) { // lit: colour * (1 - lit) = black, emissive = glow * lit (deob-10.0.4.js:204479-204480)
@@ -275,6 +277,7 @@ static int part_upload(SkinCounter *c, CounterPart *part, Builder *b, const int 
         glDeleteVertexArrays(1, &geometry->vao);
         glDeleteBuffers(1, &geometry->ebo);
         glDeleteBuffers(1, &part->vbo);
+        geometry_free_wire(geometry);
         free(geometry);
         part->vbo = 0;
         return 0;

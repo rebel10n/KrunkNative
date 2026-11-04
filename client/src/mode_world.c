@@ -154,6 +154,7 @@ static Geometry *mode_world_zone_geometry(void) {
     glBindVertexArray(0);
 
     geometry->index_count = (int) (sizeof(indices) / sizeof(indices[0]));
+    geometry_set_triangles(geometry, vertices, (int) (sizeof(vertices) / sizeof(vertices[0]) / 5), 5, indices, geometry->index_count); // rt.h (5 floats a vertex)
     g_world.zone_geometry = geometry;
     return geometry;
 }

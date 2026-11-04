@@ -33,5 +33,17 @@ void env_map_note_sky_dome(const char *const *colors, int count);
 // colours. Rebuilds the filtered table when they changed and hands it to basic.c.
 void env_map_update(const vec4 *fog_color);
 
+// Box Office rtSky (sky_physical.c): rebuilds the table when the physical sky turned on / off or changed, with the
+// last env_map_update fog. Called every frame by sky_physical_frame; a no-op when nothing changed.
+void env_map_refresh(void);
+
 // Frees the GL textures (client shutdown).
 void env_map_fini(void);
+
+// Box Office sky-dome ambient (rt.h RT_EFFECT_SKY_AMBIENT, basic.c): the table's roughest level is the
+// cosine-weighted sky radiance about a normal; env_map_sky_up gives it for the upward normal (linear rgb,
+// 0 = no table yet) so basic.c can match its luminance to Krunker's constant ambient. env_map_has_dome:
+// the current table was painted from sky dome colours (else from the fog colour alone, and basic.frag
+// blends the map's sky_color / fog instead).
+int env_map_sky_up(float rgb[3]);
+int env_map_has_dome(void);

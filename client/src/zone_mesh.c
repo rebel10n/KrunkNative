@@ -88,6 +88,7 @@ void zone_mesh_load(Scene *scene, const Map *map) {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long) ni * (long) sizeof(unsigned int), idx, GL_STATIC_DRAW);
     glBindVertexArray(0);
     g->index_count = ni; // bound_radius 0: never frustum culled (it is scaled every frame)
+    geometry_set_triangles(g, (const float *) v, (int) nv, 5, idx, (int) ni); // rt.h
 
     char *path = concat(assets_path(), "textures/zone_0.png");
     m->texture = path ? load_texture(path) : 0;
@@ -124,6 +125,7 @@ void zone_mesh_unload(void) {
         glDeleteBuffers(1, &g->ebo);
         glDeleteBuffers(1, &g_zone.vbo);
         glDeleteBuffers(1, &g_zone.cbo);
+        geometry_free_wire(g);
         free(g);
         mesh_fini(g_zone.mesh);
     }

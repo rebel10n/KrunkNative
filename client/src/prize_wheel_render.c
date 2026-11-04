@@ -102,6 +102,7 @@ static Geometry *quad_geometry(void) {
     glBindVertexArray(0);
     geometry->index_count = (int) (sizeof(indices) / sizeof(indices[0]));
     geometry->bound_radius = 0.7072f; // the unit quad's half diagonal (frustum culling)
+    geometry_set_triangles(geometry, vertices, 4, 5, indices, geometry->index_count); // rt.h
     g_pwr.quad = geometry;
     return geometry;
 }

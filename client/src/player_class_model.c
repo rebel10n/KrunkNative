@@ -90,6 +90,7 @@ static Geometry *class_sprite_geometry(void) {
     glBindVertexArray(0);
     g->index_count = 6;
     g->bound_radius = 0.0f; // never culled (the sprite is laid out in view space)
+    geometry_set_triangles(g, (const float *) vertices, 4, 5, indices, 6); // rt.h
     g_sprite_geometry = g;
     return g;
 }

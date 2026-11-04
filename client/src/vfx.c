@@ -28,6 +28,7 @@
 #include <player_class_model.h> // a class model has no weapon mesh: no muzzle, casings or own tracer
 #include <skin_fx.h>   // skin_fx_shot_pulse: the shotPulse skin shaders on the shooter's weapon
 #include <skin_counter.h> // countSkinStat "shots": the shooter's counter skin
+#include <rt.h>           // Box Office RT muzzle-flash / explosion lights (RT_FLASH_*, rt_supported)
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -864,7 +865,103 @@ static void spawn_debris(const vec3 position, const float seed, const float size
     debris->size = rank * size_range + size_min;
 }
 
+// ---------------------------------------------------------------- Box Office RT flash lights (rt.h RT_FLASH_*)
+// Muzzle flashes and explosions as brief forward point lights while ray tracing is on (rt_mode >= 1). Not
+// Krunker: with rt_mode 0 nothing is added, so the frame stays Krunker's. Each light owns a forward-light slot
+// (basic_lights_add, BasicLight.transient) from its spawn until it has faded.
+
+typedef struct {
+    int handle;            // basic_lights_add handle, 0 = free
+    vec3 position, color;
+    float peak, range, life, age; // intensity at age 0, cutoff (units), lifetime and age (ms)
+    int shown;             // updated at least once: drawn at peak in the frame it was spawned for
+} VfxFlashLight;
+
+static VfxFlashLight g_flash_lights[RT_FLASH_MAX];
+static int g_flash_disabled = -1; // KRUNKNATIVE_RT_NO_FLASH_LIGHT
+
+static int flash_lights_enabled(void) {
+    if (g_flash_disabled < 0) {
+        const char *env = getenv("KRUNKNATIVE_RT_NO_FLASH_LIGHT");
+        g_flash_disabled = env && *env && *env != '0';
+    }
+    return !g_flash_disabled && client_render_settings()->rt_mode > 0 && rt_supported();
+}
+
+static void flash_light_free(VfxFlashLight *light) {
+    if (light->handle) basic_lights_remove(light->handle);
+    memset(light, 0, sizeof(*light));
+}
+
+static void flash_lights_clear(void) {
+    for (int i = 0; i < RT_FLASH_MAX; i++) flash_light_free(&g_flash_lights[i]);
+}
+
+// The light's intensity now: peak * (1 - age / life). On maps with physical light units (correctLights:
+// 1 / d^2 falloff, basic.frag distance_attenuation) it is scaled so the light matches the legacy
+// (1 - d / range)^2 falloff at RT_FLASH_PHYS_REF units, so a flash looks alike on both kinds of map.
+static float flash_light_intensity(const VfxFlashLight *light) {
+    float intensity = light->peak * (1.0f - light->age / light->life);
+    if (g_render_lighting.correct_lights) {
+        const float r = 1.0f - RT_FLASH_PHYS_REF / light->range;
+        intensity *= RT_FLASH_PHYS_REF * RT_FLASH_PHYS_REF * (r > 0.0f ? r * r : 0.0f);
+    }
+    return intensity;
+}
+
+static BasicLight flash_light_basic(const VfxFlashLight *light) {
+    return (BasicLight) {
+        .type = BASIC_LIGHT_POINT, .visible = 1, .color = light->color, .intensity = flash_light_intensity(light),
+        .distance = light->range, .decay = 2.0f, .position = light->position, .transient = 1,
+    };
+}
+
+static void flash_light_spawn(const vec3 position, const int hex, const float peak, const float range, const float life) {
+    if (!flash_lights_enabled()) return;
+    VfxFlashLight *slot = NULL;
+    for (int i = 0; i < RT_FLASH_MAX && !slot; i++) if (!g_flash_lights[i].handle) slot = &g_flash_lights[i];
+    if (!slot) { // all busy: the oldest gives way
+        slot = &g_flash_lights[0];
+        for (int i = 1; i < RT_FLASH_MAX; i++) if (g_flash_lights[i].age > slot->age) slot = &g_flash_lights[i];
+        flash_light_free(slot);
+    }
+    VfxFlashLight light = {
+        .position = position,
+        .color = {(float) ((hex >> 16) & 255) / 255.0f, (float) ((hex >> 8) & 255) / 255.0f, (float) (hex & 255) / 255.0f},
+        .peak = peak, .range = range, .life = life,
+    };
+    const BasicLight basic = flash_light_basic(&light);
+    light.handle = basic_lights_add(&basic);
+    if (!light.handle) return; // the forward list is full (map lights): no flash light
+    *slot = light;
+    if (vfx.log) fprintf(stderr, "[vfx] flash light %.1f %.1f %.1f peak %.2f range %.0f\n", position.x, position.y, position.z, peak, range);
+}
+
+// End of vfx_update: lights drawn last frame age by dt, faded ones free their slot; a light spawned since
+// (this update's local shot, a remote shot between frames) is drawn at its peak first.
+static void flash_lights_update(const float dt) {
+    const int on = flash_lights_enabled();
+    for (int i = 0; i < RT_FLASH_MAX; i++) {
+        VfxFlashLight *light = &g_flash_lights[i];
+        if (!light->handle) continue;
+        if (!on) {
+            flash_light_free(light);
+            continue;
+        }
+        if (light->shown) light->age += dt;
+        light->shown = 1;
+        if (light->age >= light->life) {
+            flash_light_free(light);
+            continue;
+        }
+        const BasicLight basic = flash_light_basic(light);
+        basic_lights_update(light->handle, &basic);
+        if (vfx.log) fprintf(stderr, "[vfx] flash light %d age %.1f intensity %.3f\n", light->handle, light->age, basic.intensity);
+    }
+}
+
 void vfx_explosion(Client *client, const vec3 position, const float radius) {
+    if (radius > 0.0f) flash_light_spawn(position, RT_EXPLOSION_COLOR, RT_EXPLOSION_INTENSITY, fmaxf(RT_EXPLOSION_RANGE, radius * 1.5f), RT_EXPLOSION_LIFE_MS);
     vfx_explode_at(client, position, radius * VFX_EXPLOSION_SCALE, VFX_EXPLOSION_SMALL, VFX_EXPLOSION_LARGE);
 }
 
@@ -1066,6 +1163,19 @@ static void local_shot(Client *client, Player *me) {
         }
     }
 
+    // Box Office RT muzzle-flash light (rt.h RT_FLASH_*): just ahead of the first-person barrel tip, else of the eye
+    if (vfx.settings.muzzle_flash && !fx->no_muzzle && !money) {
+        const vec3 aim = direction_from_angles(me->direction.y, me->direction.x);
+        vec3 tip;
+        const int viewmodel = me->render_you && !sprite_model && !no_weapon_mesh && !camera_offset_active(client) && ui_controls_weapon_visible(client);
+        if (!viewmodel || !arms_point(me, muzzle_local(me, fx, 0), &tip)) {
+            tip = v3(me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z);
+            tip = v3_add(tip, v3_scale(aim, 1.5f));
+        }
+        if (vfx.log) fprintf(stderr, "[vfx] flash from %s: feet %.2f %.2f %.2f height %.2f tip %.2f %.2f %.2f\n", viewmodel ? "barrel" : "eye", me->position.x, me->position.y, me->position.z, me->height, tip.x, tip.y, tip.z);
+        flash_light_spawn(v3_add(tip, v3_scale(aim, RT_FLASH_FORWARD)), RT_FLASH_COLOR, RT_FLASH_INTENSITY, RT_FLASH_RANGE, RT_FLASH_LIFE_MS);
+    }
+
     if (me->render_you && !vfx.settings.your_trails && !fx->phys_pow) return;
 
     const float eye_y = me->position.y + me->height - game_constants.camera_height;
@@ -1199,6 +1309,17 @@ void vfx_remote_shot(Client *client, const Player *shooter, const vec3 hit, cons
         const vec3 start = {shooter->position.x, shooter->position.y + shooter->height - game_constants.camera_height -
                             shooter->crouch_val * game_constants.crouch_distance, shooter->position.z};
         spawn_tracer(start, hit, v3_length(v3_sub(hit, start)), trail);
+    }
+
+    // Box Office RT muzzle-flash light (rt.h RT_FLASH_*): ahead of the shooter's eye, along the shot
+    const Weapon *weapon = shooter->weapon;
+    if (vfx.settings.muzzle_flash && weapon && !weapon->melee && !weapon_fx(weapon)->no_muzzle) {
+        const vec3 eye = {shooter->position.x, shooter->position.y + shooter->height - game_constants.camera_height -
+                          shooter->crouch_val * game_constants.crouch_distance, shooter->position.z};
+        const vec3 to_hit = v3_sub(hit, eye);
+        const float length = v3_length(to_hit);
+        const vec3 aim = length > 1e-3f ? v3_scale(to_hit, 1.0f / length) : direction_from_angles(shooter->direction.y, shooter->direction.x);
+        flash_light_spawn(v3_add(eye, v3_scale(aim, 1.5f + RT_FLASH_FORWARD)), RT_FLASH_COLOR, RT_FLASH_INTENSITY, RT_FLASH_RANGE, RT_FLASH_LIFE_MS);
     }
 
     // v10.0.2 SHOW_TRACER (v10.js:220581): the impact only when the hit point is within 200 units of us
@@ -1440,6 +1561,7 @@ void vfx_reset(void) {
     memset(vfx.speed_lines, 0, sizeof(vfx.speed_lines));
     vfx.area_count = 0;
     vfx.screen_flash_active = 0;
+    flash_lights_clear(); // Box Office RT flash lights
     vfx.me = NULL;
     vfx.proj_me = NULL;
     projectiles_render_reset();
@@ -1519,6 +1641,7 @@ void vfx_update(Client *client, const float delta) {
     projectiles_render_update(client, dt);
     update_trails(dt);
     update_debris(dt);
+    flash_lights_update(dt); // Box Office RT flash lights: after this update's shots
 }
 
 // ---------------------------------------------------------------- GL

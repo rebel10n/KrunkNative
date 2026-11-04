@@ -2,6 +2,18 @@
 #include <math.h>
 #include <string.h>
 
+static float g_jitter_x, g_jitter_y; // camera_set_jitter (TAA): NDC offset of the perspective projection
+
+void camera_set_jitter(const float ndc_x, const float ndc_y) {
+    g_jitter_x = ndc_x;
+    g_jitter_y = ndc_y;
+}
+
+void camera_get_jitter(float *ndc_x, float *ndc_y) {
+    if (ndc_x) *ndc_x = g_jitter_x;
+    if (ndc_y) *ndc_y = g_jitter_y;
+}
+
 void camera_update_projection_matrix(Camera *camera, float aspect) {
     if (camera->aspect_override > 0.0f) aspect = camera->aspect_override; // map-G: ocean mirror pass
     if (camera->ortho > 0.0f) {
@@ -24,9 +36,11 @@ void camera_update_projection_matrix(Camera *camera, float aspect) {
     const float A = -(camera->far + camera->near) / (camera->far - camera->near);
     const float B = camera->near * (A - 1);
 
+    // TAA jitter: row 0 / 1, column 2 of the row-major matrix scale z (= -w after the divide), so
+    // -j there shifts the NDC x / y by +j for every depth (camera_set_jitter; 0 without TAA)
     const float matrix[] = {
-        camera->near / half_width, 0.0f, 0.0f, 0.0f,
-        0.0f, camera->near / half_height, 0.0f, 0.0f,
+        camera->near / half_width, 0.0f, -g_jitter_x, 0.0f,
+        0.0f, camera->near / half_height, -g_jitter_y, 0.0f,
         0.0f, 0.0f, A, B,
         0.0f, 0.0f, -1.0f, 0.0f,
     };
@@ -69,4 +83,4 @@ void camera_update_world_inverse_matrix(Camera *camera) {
     float tmp1[16];
     mat4x4(rotate_y_matrix, tmp, tmp1);
     mat4x4(rotate_x_matrix, tmp1, camera->world_inverse_matrix);
-}
+}

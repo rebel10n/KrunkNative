@@ -14,7 +14,7 @@
 #define GT_MARKS (GPU_PASS_COUNT + 1)
 
 static const char *const PASS_NAME[GPU_PASS_COUNT] = {
-    "clear", "pre", "sky", "world", "vfx", "viewmodel", "post", "hud", "preview", "page",
+    "clear", "pre", "sky", "rt", "world", "vfx", "viewmodel", "post", "hud", "preview", "page",
 };
 
 typedef struct {

@@ -2,6 +2,7 @@
 #include <gl.h>
 #include <client.h>
 #include <env_map.h>
+#include <sky.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -13,7 +14,7 @@
 
 static unsigned int g_env_texture;   // ENV_LEVELS x ENV_ROWS RGBA16F, linear radiance (unit BASIC_SCENE_ENV_TEXTURE_UNIT)
 static unsigned int g_dfg_texture;   // 16 x 16 RG16F DFG_LUT (unit BASIC_SCENE_ENV_DFG_TEXTURE_UNIT)
-static char g_env_key[32];           // getEnvMap's cache key: top + mid + fog hex (deob:231126)
+static char g_env_key[128];           // getEnvMap's cache key: top + mid + fog hex (deob:231126); rtSky: sky_physical_key()
 static char g_dome_colors[3][8];     // skyDomeCols as "#rrggbb"
 static int g_dome_count;
 
@@ -54,6 +55,7 @@ static const uint16_t env_dfg_lut[512] = {
 };
 
 typedef struct { float r, g, b; } EnvRgb; // THREE.Color channels 0..1 (ColorManagement is off: raw sRGB values)
+static EnvRgb g_env_rough_up;             // the roughest level towards +y (env_map_sky_up), valid while g_env_texture is
 
 // new THREE.Color("#hex") with ColorManagement off (no sRGB conversion, deob:34566); an unparsable colour stays white
 static EnvRgb env_color(const char *hex) {
@@ -231,26 +233,91 @@ void env_map_note_sky_dome(const char *const *colors, const int count) {
     }
 }
 
+// Box Office physical sky (rtSky, sky_physical.c): level 0 is getEnvMap's own rows (env_paint: the v10 tints the
+// sky ambient and the GLB env reflections are tuned for) modulated per elevation by how the physical sky differs
+// from the authored gradient there (rt_sky.glsl psky_base averaged over the azimuth vs psky_authored): its
+// luminance ratio (the sun's glow, clamped 0.5..2) and half its hue shift, so the lighting takes the drawn sky's
+// tint without changing Krunker's exposure.
+static float env_lum(const float c[3]) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
+
+static void env_paint_physical(const char *top, const char *mid, const char *fog, EnvRgb rows[ENV_ROWS]) {
+    env_paint(top, mid, fog, rows);
+    for (int j = 0; j < ENV_ROWS; j++) {
+        const float y = sinf((((float) j + 0.5f) / (float) ENV_ROWS - 0.5f) * (float) M_PI), r = sqrtf(fmaxf(0.0f, 1.0f - y * y));
+        float p[3] = {0.0f, 0.0f, 0.0f}, a[3];
+        for (int k = 0; k < 32; k++) {
+            const float t = (float) k * (float) (2.0 * M_PI / 32.0);
+            const float d[3] = {r * cosf(t), y, r * sinf(t)};
+            float c[3];
+            sky_physical_base(d, c);
+            for (int i = 0; i < 3; i++) p[i] += c[i] / 32.0f;
+        }
+        const float d0[3] = {r, y, 0.0f};
+        sky_physical_authored(d0, a);
+        const float lp = env_lum(p), la = env_lum(a);
+        float ratio = la > 1e-4f ? lp / la : 1.0f;
+        ratio = ratio < 0.5f ? 0.5f : ratio > 2.0f ? 2.0f : ratio;
+        float shift[3];
+        for (int i = 0; i < 3; i++) {
+            const float cp = lp > 1e-4f ? p[i] / lp : 1.0f, ca = la > 1e-4f ? a[i] / la : 1.0f;
+            float h = ca > 1e-3f ? cp / ca : 1.0f;
+            h = h < 0.5f ? 0.5f : h > 2.0f ? 2.0f : h;
+            shift[i] = ratio * (1.0f + (h - 1.0f) * 0.5f);
+        }
+        rows[j].r *= shift[0];
+        rows[j].g *= shift[1];
+        rows[j].b *= shift[2];
+    }
+}
+
+static int g_env_last_has_fog; // the last env_map_update argument (env_map_refresh rebuilds with it)
+static vec4 g_env_last_fog;
+
 void env_map_update(const vec4 *fog_color) {
+    g_env_last_has_fog = fog_color != NULL;
+    if (fog_color) g_env_last_fog = *fog_color;
     // var fog = scene && scene.fog ? "#" + scene.fog.color.getHexString() : "#8899aa"
     char fog[8] = "#8899aa";
     if (fog_color) env_hex((EnvRgb) {fog_color->x, fog_color->y, fog_color->z}, fog);
     // top = cols[1] || cols[0] || fog, mid = cols[0] || fog (deob:231124-231125)
     const char *top = g_dome_count > 1 ? g_dome_colors[1] : g_dome_count ? g_dome_colors[0] : fog;
     const char *mid = g_dome_count ? g_dome_colors[0] : fog;
-    char key[32];
-    snprintf(key, sizeof(key), "%s%s%s", top, mid, fog);
+    char key[sizeof(g_env_key)];
+    const int physical = sky_physical_active();
+    if (physical) snprintf(key, sizeof(key), "%s", sky_physical_key());
+    else snprintf(key, sizeof(key), "%s%s%s", top, mid, fog);
     if (g_env_texture && !strcmp(key, g_env_key)) return;
 
     static EnvRgb levels[ENV_LEVELS][ENV_ROWS];
-    env_paint(top, mid, fog, levels[0]);
+    if (physical) env_paint_physical(top, mid, fog, levels[0]);
+    else env_paint(top, mid, fog, levels[0]);
     for (int i = 1; i < ENV_LEVELS; i++) {
         const float r = (float) i / (float) (ENV_LEVELS - 1), r_prev = (float) (i - 1) / (float) (ENV_LEVELS - 1);
         env_ggx_level(levels[i - 1], levels[i], sqrtf(r * r - r_prev * r_prev) * (r * 1.25f));
     }
     env_upload(levels);
+    g_env_rough_up = env_level_at(levels[ENV_LEVELS - 1], 1.0f);
     snprintf(g_env_key, sizeof(g_env_key), "%s", key);
     basic_material_set_scene_env(g_env_texture, g_dfg_texture);
+}
+
+void env_map_refresh(void) {
+    if (!g_env_texture) return; // no map loaded yet: map_environment.c builds it
+    const int physical = sky_physical_active();
+    if (physical ? !strcmp(sky_physical_key(), g_env_key) : g_env_key[0] != 'P') return;
+    env_map_update(g_env_last_has_fog ? &g_env_last_fog : NULL);
+}
+
+int env_map_sky_up(float rgb[3]) {
+    if (!g_env_texture) return 0;
+    rgb[0] = g_env_rough_up.r;
+    rgb[1] = g_env_rough_up.g;
+    rgb[2] = g_env_rough_up.b;
+    return 1;
+}
+
+int env_map_has_dome(void) {
+    return g_dome_count > 0;
 }
 
 void env_map_fini(void) {

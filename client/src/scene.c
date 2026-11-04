@@ -4,6 +4,7 @@
 #include <pets.h>
 #include <player_class_model.h>
 #include <shadow.h>
+#include <rt.h> // rt_apply_mesh_uniforms: the ray-traced result of the world pass
 #include <skin_counter.h> // the arms' counter skin meshes
 #include <math.h>
 #include <stdlib.h>
@@ -396,6 +397,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     sort_scene = scene;
     if (transparent_count > 1) qsort(transparent, transparent_count, sizeof(size_t), scene_depth_sort);
     memcpy(&indices[draw_count], transparent, transparent_count * sizeof(size_t));
+    const size_t opaque_count = draw_count; // Box Office RT water / glass: the opaque frame is copied here (rt.h)
     draw_count += transparent_count;
 
     int last_transparent = -1; // GL_BLEND as the last visible mesh leaves it, culled or not
@@ -405,14 +407,23 @@ void scene_render(const Scene *scene, Camera *camera) {
     unsigned int camera_programs[16];
     int camera_program_count = 0;
 
+    // the VAO (and with it the element buffer) only changes between draws of different geometry: consecutive map
+    // cubes share g_cube_geometry's. Hooks that bind another VAO restore the one they found (rt_masks.c, rt_normals.c);
+    // the water copy below may not, so the tracking restarts after it.
+    unsigned int vao_bound = 0;
     for (size_t i = 0; i < draw_count; i++) {
+        if (i == opaque_count) { rt_water_copy_scene(scene); vao_bound = 0; } // the first transparent draw: refraction source (no-op unless traced water / glass is in view)
         const Mesh *mesh = scene->meshes[indices[i]];
         last_transparent = mesh->material->transparent ? 1 : 0;
         if (g_frustum_culling && scene_mesh_culled(mesh, frustum)) continue;
 
-        glBindVertexArray(mesh->geometry->vao);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
+        if (mesh->geometry->vao != vao_bound || !vao_bound) {
+            glBindVertexArray(mesh->geometry->vao);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
+            vao_bound = mesh->geometry->vao;
+        }
 
+        basic_material_select_program(mesh->material); // basic.frag's KN_RT variant (traced passes only)
         const unsigned int program = mesh->material->program;
         if (g_active_shader != program) {
             glUseProgram(program);
@@ -425,6 +436,7 @@ void scene_render(const Scene *scene, Camera *camera) {
         material_update_uniforms(mesh->material);
         scene_apply_draw_state();
         shadow_apply_mesh_uniforms(mesh); // sun shadow receiver uniforms (shadow.c)
+        rt_apply_mesh_uniforms(mesh);     // Box Office ray tracing: rt_effects for this draw (rt.h)
 
         gl_uniform_mat4(&u_transform, program, GL_TRUE, mesh->transform_matrix);
         int camera_set = 0;

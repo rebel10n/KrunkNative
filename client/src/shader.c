@@ -39,6 +39,70 @@ static unsigned char *shader_source_for_webgl(unsigned char *source) {
 }
 #endif
 
+// `#include "name.glsl"` at the start of a line pulls in assets/shaders/name.glsl (the shader's own
+// directory, one level, no nesting: an included file's includes are left as they are and fail to
+// compile, which is the signal). The ray tracer's rt_*.frag share their traversal through
+// rt_common.glsl this way. Returns a new buffer (the source is freed) or the source unchanged.
+static unsigned char *shader_resolve_includes(unsigned char *source, const char *shader_path) {
+    static const char directive[] = "#include \"";
+    const char *at = strstr((const char *) source, directive);
+    if (!at) return source;
+
+    const char *slash = strrchr(shader_path, '/');
+    const size_t dir_length = slash ? (size_t) (slash - shader_path + 1) : 0;
+
+    size_t out_cap = strlen((const char *) source) + 1, out_length = 0;
+    unsigned char *out = malloc(out_cap);
+    if (!out) return source;
+    const char *cursor = (const char *) source;
+    while (at) {
+        if (at != (const char *) source && at[-1] != '\n') { // only at the start of a line
+            at = strstr(at + 1, directive);
+            continue;
+        }
+        const char *name = at + sizeof(directive) - 1;
+        const char *name_end = strchr(name, '"');
+        const char *line_end = strchr(at, '\n');
+        if (!name_end || !line_end || name_end > line_end) break;
+
+        char *path = malloc(dir_length + (size_t) (name_end - name) + 1);
+        if (!path) break;
+        memcpy(path, shader_path, dir_length);
+        memcpy(path + dir_length, name, (size_t) (name_end - name));
+        path[dir_length + (size_t) (name_end - name)] = 0;
+        unsigned char *included = NULL;
+        size_t included_length = 0;
+        if (read_file(path, &included, &included_length)) printf("shader include not found: %s (in %s)\n", path, shader_path);
+        free(path);
+
+        const size_t before = (size_t) (at - cursor);
+        const size_t need = out_length + before + included_length + 2;
+        if (need > out_cap) {
+            unsigned char *grown = realloc(out, need);
+            if (!grown) { free(included); break; }
+            out = grown;
+            out_cap = need;
+        }
+        memcpy(out + out_length, cursor, before);
+        out_length += before;
+        if (included) {
+            memcpy(out + out_length, included, included_length);
+            out_length += included_length;
+            free(included);
+        }
+        out[out_length++] = '\n';
+        cursor = line_end + 1;
+        at = strstr(cursor, directive);
+    }
+    const size_t rest = strlen(cursor);
+    unsigned char *grown = realloc(out, out_length + rest + 1);
+    if (!grown) { free(out); return source; }
+    out = grown;
+    memcpy(out + out_length, cursor, rest + 1);
+    free(source);
+    return out;
+}
+
 #ifdef __EMSCRIPTEN__
 // The renderer's shaders are compiled one by one at startup; on the web download the whole
 // set in one parallel batch first instead of one blocking round trip per file.
@@ -51,6 +115,17 @@ static void shader_prefetch_all(void) {
         "basic.vert", "basic.frag", "quad.vert", "quad.frag", "text.frag", "sky.vert", "sky.frag",
         "scene_composite.vert", "scene_composite.frag", "laced.frag", "shadow.vert", "shadow.frag", "vfx.vert", "vfx.frag",
         "line.vert", "line.frag", // LineMaterial (show_navmeshes): compiled later, from the frame loop
+        // Box Office ray tracing (rt.h): compiled when rtMode is first turned on
+        "rt_common.glsl", "rt_prepass.vert", "rt_prepass.frag", "rt_trace.frag", "rt_denoise.frag", "rt_debug.frag",
+        "rt_reflect.frag", "rt_refl_denoise.frag", "rt_atlas.frag", // reflections (phase 4)
+        "rt_taa.frag", // temporal anti-aliasing (render_target.c)
+        "rt_bloom.frag", // bloom (rtBloom, render_target.c)
+        "rt_upscale.frag", "rt_sharpen.frag", // edge-adaptive upscale + sharpening (rtSharpen, render_target.c)
+        "rt_gi.frag", "rt_gi_denoise.frag", // one-bounce GI
+        "rt_shafts.frag", "rt_shafts_denoise.frag", "rt_shafts_composite.frag", // volumetric sun shafts (rtShafts)
+        "rt_sky.glsl", "rt_sky.frag", // physical sky (rtSky; basic.frag includes rt_sky.glsl too)
+        "rt_grade.glsl", // Cinematic grade (scene_composite.frag / rt_sharpen.frag include it)
+        "rt_mask_classify.frag", "rt_mask_filter.frag", // per-weapon part masks (rt_masks.c)
     };
     char *paths[sizeof(names) / sizeof(names[0])];
     size_t count = 0;
@@ -67,7 +142,30 @@ static void shader_prefetch_all(void) {
 }
 #endif
 
+// Inserts `defines` (whole lines, e.g. "#define KN_RT 0\n") right after the version line of `source`, which
+// must stay the first line. Returns a new buffer (the source is freed) or the source unchanged.
+static unsigned char *shader_inject_defines(unsigned char *source, const char *defines) {
+    if (!defines || !*defines) return source;
+    const char *line_end = strchr((const char *) source, '\n');
+    if (!line_end) return source;
+    const size_t head = (size_t) (line_end - (const char *) source) + 1;
+    const size_t length = strlen((const char *) source), extra = strlen(defines);
+    unsigned char *out = malloc(length + extra + 1);
+    if (!out) return source;
+    memcpy(out, source, head);
+    memcpy(out + head, defines, extra);
+    memcpy(out + head + extra, source + head, length - head + 1);
+    free(source);
+    return out;
+}
+
 unsigned int shader_compile(const char *vertex_shader_path, const char *fragment_shader_path) {
+    return shader_compile_defines(vertex_shader_path, fragment_shader_path, NULL);
+}
+
+// shader_compile with `defines` injected after the version line of both stages (compile-time variants of one
+// source: materials/basic.c's KN_RT programs).
+unsigned int shader_compile_defines(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
 #ifdef __EMSCRIPTEN__
     shader_prefetch_all();
 #endif
@@ -82,10 +180,14 @@ unsigned int shader_compile(const char *vertex_shader_path, const char *fragment
         read_file(fragment_shader_path, &fragment_shader, &fragment_shader_length)
     ) return 0;
 
+    vertex_shader = shader_resolve_includes(vertex_shader, vertex_shader_path);
+    fragment_shader = shader_resolve_includes(fragment_shader, fragment_shader_path);
 #if defined(KN_GLES) || defined(__APPLE__)
     vertex_shader = shader_source_for_webgl(vertex_shader);
     fragment_shader = shader_source_for_webgl(fragment_shader);
 #endif
+    vertex_shader = shader_inject_defines(vertex_shader, defines);
+    fragment_shader = shader_inject_defines(fragment_shader, defines);
 
     const unsigned int vert = glCreateShader(GL_VERTEX_SHADER);
     const unsigned int frag = glCreateShader(GL_FRAGMENT_SHADER);

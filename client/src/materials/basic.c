@@ -1,6 +1,9 @@
 #include <gl.h>
 #include <client.h>
 #include <render_settings.h>
+#include <rt.h> // rt_world_effects: RT AO replaces the ambient_0/1 planes
+#include <env_map.h> // env_map_sky_up / env_map_has_dome: the sky-dome ambient
+#include <sky.h>     // sky_physical_*: the Box Office rtSky (fog tint, the PMREM table it paints)
 #include <ruleset.h> // light_unit_factor: v10 PI (THREE r186 light units)
 #include <gltf.h>    // gltf_clock: the paint shaders' time
 #include <GLFW/glfw3.h>
@@ -9,7 +12,45 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static unsigned int shader_program = 0;
+static unsigned int shader_program = 0; // the Krunker variant (KN_RT 0): every material's program between draws
+
+// basic.frag's compile-time variants (the header of basic.frag): [0] Krunker's path, every Box Office ray-tracing
+// block compiled out; [1] ray tracing without the Cinematic-only blocks; [2] everything. A draw inside the traced
+// world / viewmodel pass (rt_world_effects() != 0) takes [1] or [2] (rt_cinematic()), every other draw [0]: the gate
+// uniforms basic.c and rt_pass.c set are all 0 outside those passes, so [0] renders the same while carrying none of
+// the ray-tracing code (register pressure, uniforms). [1] / [2] are compiled the first time a traced pass needs them;
+// one that fails to compile falls back to the full program, then to [0].
+static unsigned int g_basic_variants[3];
+static unsigned char g_basic_variant_tried[3];
+static const char *const BASIC_VARIANT_DEFINES[3] = {
+    "#define KN_RT 0\n#define KN_RT_CINE 0\n",
+    "#define KN_RT 1\n#define KN_RT_CINE 0\n",
+    "#define KN_RT 1\n#define KN_RT_CINE 1\n",
+};
+
+static unsigned int basic_variant_program(const int variant) {
+    if (!g_basic_variant_tried[variant]) {
+        g_basic_variant_tried[variant] = 1;
+        char *vert_shader = concat(assets_path(), "shaders/basic.vert");
+        char *frag_shader = concat(assets_path(), "shaders/basic.frag");
+        g_basic_variants[variant] = shader_compile_defines(vert_shader, frag_shader, BASIC_VARIANT_DEFINES[variant]);
+        free(vert_shader);
+        free(frag_shader);
+        if (!g_basic_variants[variant]) fprintf(stderr, "basic.frag: variant %d failed to compile\n", variant);
+    }
+    return g_basic_variants[variant];
+}
+
+void basic_material_select_program(Material *base) {
+    if (!base || base->vtable != &basic_material_vtable || !shader_program) return;
+    unsigned int program = shader_program;
+    if (rt_world_effects()) {
+        program = basic_variant_program(rt_cinematic() ? 2 : 1);
+        if (!program) program = basic_variant_program(2);
+        if (!program) program = shader_program;
+    }
+    base->program = program;
+}
 
 // ---- map-G: the forward light list (client.h BasicLight). Slot i is used when
 // g_lights_used[i]; handles are slot + 1. The v3.1.1 basic_material_set_point_lights() set is
@@ -54,6 +95,21 @@ void basic_lights_remove(const int handle) {
     g_lights_used[handle - 1] = 0;
     g_lights_legacy[handle - 1] = 0;
     g_lights_gen++;
+}
+
+// The lights basic_upload_lights() sends for the `lighting` setting, in slot order: out[i] is
+// basic.frag's light i (lt_* [i]). The ray tracer (rt_pass.c) traces shadow rays to a subset of
+// these and hands basic.frag their visibility by that slot index, so the two must agree.
+int basic_lights_list(BasicLight *out, const int max, const int lighting) {
+    const int overridden = g_lights_override_count >= 0;
+    int count = 0;
+    for (int i = 0; i < (overridden ? g_lights_override_count : BASIC_MAX_LIGHTS) && lighting > 0 && count < max; i++) {
+        const BasicLight *light = overridden ? &g_lights_override[i] : &g_lights[i];
+        if ((!overridden && !g_lights_used[i]) || !light->visible) continue;
+        if (light->type == BASIC_LIGHT_RECT && lighting != 3) continue; // as basic_upload_lights
+        out[count++] = *light;
+    }
+    return count;
 }
 
 static float g_clip_plane[4];
@@ -166,6 +222,19 @@ U(u_use_metal_rough_map, "use_metal_rough_map");
 U(u_metal_rough_map, "metal_rough_map");
 U(u_metalness_factor, "metalness_factor");
 U(u_roughness_factor, "roughness_factor");
+// Box Office material classes (rt.h RT_EFFECT_MATERIALS)
+U(u_rt_mat_enabled, "rt_mat_enabled");
+U(u_rt_mat_metalness, "rt_mat_metalness");
+U(u_rt_mat_roughness, "rt_mat_roughness");
+U(u_rt_mat_reflect, "rt_mat_reflect");
+U(u_rt_mat_f0, "rt_mat_f0");
+U(u_rt_cine, "rt_cine");                       // Cinematic surface detail (rt.h rt_cinematic)
+U(u_rt_cine_detail, "rt_cine_detail");
+U(u_rt_cine_untextured, "rt_cine_untextured");
+U(u_rt_cine_cavity, "rt_cine_cavity");
+U(u_rt_filmic, "rt_filmic");       // basic.frag krunker_filmic_shoulder (any rtMode > 0)
+U(u_rt_bloom_out, "rt_bloom_out"); // basic.frag: alpha = 1 + bloom weight (rtBloom, render_target.c)
+U(u_rt_bloom_scale, "rt_bloom_scale"); // basic.frag: RT_VM_BLOOM_SCALE for the viewmodel, else 1
 U(u_use_normal_map, "use_normal_map");
 U(u_normal_map, "normal_map");
 U(u_normal_scale, "normal_scale");
@@ -187,9 +256,26 @@ U(u_scene_env_map, "scene_env_map");
 U(u_scene_env_dfg, "scene_env_dfg");
 U(u_scene_env_intensity, "scene_env_intensity");
 U(u_emissive_srgb, "emissive_srgb");
+// Box Office sky-dome ambient (rt.h RT_EFFECT_SKY_AMBIENT): basic.frag krunker_ambient_irradiance
+U(u_sky_ambient_mode, "sky_ambient_mode");   // 0 constant ambient, 1 the PMREM table (unit 9), 2 sky_color / fog blend
+U(u_sky_ambient_scale, "sky_ambient_scale"); // luminance match (basic_sky_ambient_scale)
+U(u_sky_color, "sky_color");
 #undef U
 
 static unsigned int g_scene_env_texture, g_scene_env_dfg;
+
+// Sky ambient energy match: the scale that makes the sky irradiance of an upward normal as bright (Rec. 709
+// luminance) as Krunker's AmbientLight, ambient_color * ambientI (* light units; the shader's legacy PI applies
+// to both), so turning the effect on changes the hue and direction dependence of the indirect light, not the
+// exposure of open ground. `up` is the sky radiance the shader will sample for n = +y.
+static float basic_sky_ambient_scale(const float up[3], const float light_units) {
+    const vec4 a = g_render_lighting.ambient_color;
+    const float ai = g_render_lighting.ambient_intensity * light_units;
+    const float target = (0.2126f * a.x + 0.7152f * a.y + 0.0722f * a.z) * ai;
+    const float sky = 0.2126f * up[0] + 0.7152f * up[1] + 0.0722f * up[2];
+    if (sky <= 1e-5f) return 0.0f;
+    return target / sky;
+}
 
 void basic_material_set_scene_env(const unsigned int env, const unsigned int dfg) {
     g_scene_env_texture = env;
@@ -334,8 +420,11 @@ void basic_material_update_uniforms(Material *base) {
     gl_uniform_1i(&u_use_color_gradient, program, material->use_color_gradient);
     gl_uniform_4f(&u_color_bottom, program, material->color_bottom.x, material->color_bottom.y, material->color_bottom.z, material->color_bottom.w);
     gl_uniform_1i(&u_use_vertex_color, program, material->use_vertex_color);
-    // ambientShading off: 134.js toggleMeshGroup("ambient_0"/"ambient_1", false) hides the AO planes
-    gl_uniform_1f(&u_alpha_test, program, material->ambient_group && !render_settings->ambient_shading ? 2.0f : material->alpha_test);
+    // ambientShading off: 134.js toggleMeshGroup("ambient_0"/"ambient_1", false) hides the AO planes.
+    // Box Office RT AO (rt.h RT_EFFECT_AO) hides them too: the traced occlusion replaces them, so
+    // the corners are not darkened twice.
+    const int hide_ao_planes = material->ambient_group && (!render_settings->ambient_shading || (rt_world_effects() & RT_EFFECT_AO));
+    gl_uniform_1f(&u_alpha_test, program, hide_ao_planes ? 2.0f : material->alpha_test);
     // ambientShading: 134.js toggleMeshGroup("ambient_1") shows/hides the ramp edge strips
     gl_uniform_1f(&u_ramp_shade_width, program, render_settings->ambient_shading ? material->ramp_shade_width : 0.0f);
     gl_uniform_1i(&u_unlit, program, material->unlit);
@@ -475,6 +564,35 @@ void basic_material_update_uniforms(Material *base) {
     // v10.0.3 GLB environment reflections: only "if (!material.envMap)" (deob:233666), so a skin env map wins
     const int scene_env = material->scene_env_intensity > 0.0f && !material->env_map && g_scene_env_texture && g_scene_env_dfg;
     gl_uniform_1i(&u_use_scene_env, program, scene_env);
+    // Box Office sky-dome ambient (rt.h RT_EFFECT_SKY_AMBIENT): lit, non-unlit materials read the sky's
+    // irradiance instead of the constant AmbientLight. Mode 1 samples the PMREM table (also used by scene_env, same
+    // unit); mode 2 (no sky dome: the table was painted from the fog alone) blends the map's sky_color and fog in
+    // the shader. Light maps and `ambient_enabled` keep their own paths (basic.frag).
+    // The Krunker variant of basic.frag (KN_RT 0, basic_material_select_program) has none of the Box Office
+    // ray-tracing uniforms: their uploads (cache lookups that would find no location) are skipped for it.
+    const int rt_program = program != shader_program;
+    int sky_ambient_mode = 0;
+    if (rt_program && (rt_world_effects() & RT_EFFECT_SKY_AMBIENT) && !material->unlit) {
+        float up[3];
+        if ((env_map_has_dome() || sky_physical_active()) && g_scene_env_texture && env_map_sky_up(up)) { // rtSky paints the table too
+            sky_ambient_mode = 1;
+        } else {
+            up[0] = g_render_lighting.sky_color.x; up[1] = g_render_lighting.sky_color.y; up[2] = g_render_lighting.sky_color.z;
+            sky_ambient_mode = 2;
+        }
+        gl_uniform_1f(&u_sky_ambient_scale, program, basic_sky_ambient_scale(up, light_units));
+        gl_uniform_3f(&u_sky_color, program, g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z);
+        if (sky_ambient_mode == 1 && !scene_env) {
+            gl_uniform_1i(&u_scene_env_map, program, BASIC_SCENE_ENV_TEXTURE_UNIT);
+            glActiveTexture(GL_TEXTURE0 + BASIC_SCENE_ENV_TEXTURE_UNIT);
+            glBindTexture(GL_TEXTURE_2D, g_scene_env_texture);
+            glActiveTexture(GL_TEXTURE0);
+        }
+    }
+    if (rt_program) {
+        gl_uniform_1i(&u_sky_ambient_mode, program, sky_ambient_mode);
+        sky_physical_uniforms(program, rt_world_effects() != 0); // rtSky's aerial fog tint (psky_on 0 outside the traced passes)
+    }
     if (scene_env) {
         gl_uniform_1i(&u_scene_env_map, program, BASIC_SCENE_ENV_TEXTURE_UNIT);
         gl_uniform_1i(&u_scene_env_dfg, program, BASIC_SCENE_ENV_DFG_TEXTURE_UNIT);
@@ -499,12 +617,72 @@ void basic_material_update_uniforms(Material *base) {
         glBindTexture(GL_TEXTURE_2D, material->metal_rough_texture);
         glActiveTexture(GL_TEXTURE0);
     }
-    gl_uniform_1i(&u_use_normal_map, program, material->normal_texture != 0);
-    if (material->normal_texture) {
+    // Box Office tone mapping and bloom (doc/raytracing.md "Tone mapping and bloom"): the filmic shoulder replaces
+    // the None / Linear curve for every draw of the traced world and the viewmodel (transparent ones too, so glass
+    // keeps the same highlights); opaque draws also write the bloom weight into the half-float scene target's
+    // alpha while render_target.c runs bloom. KRUNKNATIVE_RT_NO_FILMIC=1 (dev) keeps Krunker's curve for A/B.
+    static int no_filmic = -1;
+    if (no_filmic < 0) { const char *v = getenv("KRUNKNATIVE_RT_NO_FILMIC"); no_filmic = v && *v && *v != '0'; }
+    const int rt_traced_draw = rt_world_effects() != 0;
+    if (rt_program) {
+        gl_uniform_1i(&u_rt_filmic, program, rt_traced_draw && !no_filmic);
+        gl_uniform_1i(&u_rt_bloom_out, program, rt_traced_draw && !material->base.transparent && render_target_bloom_active());
+        gl_uniform_1f(&u_rt_bloom_scale, program, rt_viewmodel_drawing() ? RT_VM_BLOOM_SCALE : 1.0f);
+    }
+
+    // Box Office material classes (rt.h "material classes", rt_materials.c): resolved on demand for the world draw
+    // while RT_EFFECT_MATERIALS is set; basic.frag then runs its PBR branch with the class factors. The DFG LUT
+    // is bound for a reflective class (the traced reflection's weighting) when scene_env did not bind it already.
+    int rt_mat = 0;
+    if (rt_program && (rt_world_effects() & RT_EFFECT_MATERIALS)) {
+        rt_materials_resolve((BasicMaterial *) material); // a resolution cache on the material, not a draw-state change
+        rt_mat = material->rt_class != NULL;
+    }
+    if (rt_program) gl_uniform_1i(&u_rt_mat_enabled, program, rt_mat);
+    if (rt_mat) {
+        gl_uniform_1f(&u_rt_mat_metalness, program, material->rt_metalness);
+        gl_uniform_1f(&u_rt_mat_roughness, program, material->rt_roughness);
+        gl_uniform_1f(&u_rt_mat_reflect, program, material->rt_reflect);
+        gl_uniform_1f(&u_rt_mat_f0, program, material->rt_f0);
+        if (!scene_env && g_scene_env_dfg) { // the class specular (traced or sky fallback) needs the DFG LUT
+            gl_uniform_1i(&u_scene_env_dfg, program, BASIC_SCENE_ENV_DFG_TEXTURE_UNIT);
+            glActiveTexture(GL_TEXTURE0 + BASIC_SCENE_ENV_DFG_TEXTURE_UNIT);
+            glBindTexture(GL_TEXTURE_2D, g_scene_env_dfg);
+            glActiveTexture(GL_TEXTURE0);
+        }
+    }
+    unsigned int normal_texture = material->normal_texture;
+    float normal_scale = material->normal_scale;
+    // Box Office generated relief (rt.h "generated normal maps", rt_normals.c): a classed material without a normal
+    // map of its own takes the map built from its base texture, at the class's `bump` strength. Not for materials
+    // whose companion maps sample flipped (maps_flip_v: the generated map shares the base texture's layout).
+    int rt_bump_generated = 0;
+    if (rt_mat && !normal_texture && !material->maps_flip_v) {
+        normal_texture = rt_normals_material((BasicMaterial *) material);
+        normal_scale = material->rt_bump;
+        rt_bump_generated = normal_texture != 0;
+    }
+    // Box Office Cinematic preset (rt.h rt_cinematic, doc/raytracing.md "Cinematic preset", surface detail): a classed
+    // material reads as its material on purpose. The generated relief doubles (capped so pixel-art stays relief, not
+    // noise) and its cavity darkens seams; basic.frag adds procedural micro-detail on map cubes by the class's
+    // `detail`, per-object colour variation, wider bevels with contact creases and glossier metal / plastic.
+    static int no_cine_detail = -1; // KRUNKNATIVE_RT_NO_DETAIL=1 (dev): the preset without its surface detail, for A/B
+    if (no_cine_detail < 0) { const char *v = getenv("KRUNKNATIVE_RT_NO_DETAIL"); no_cine_detail = v && *v && *v != '0'; }
+    const int rt_cine = rt_mat && !no_cine_detail && rt_cinematic();
+    if (rt_cine && rt_bump_generated) normal_scale = fminf(normal_scale * 2.0f, 1.6f);
+    if (rt_program) gl_uniform_1i(&u_rt_cine, program, rt_cine);
+    if (rt_cine) {
+        const RtMaterialClass *cls = (const RtMaterialClass *) material->rt_class;
+        gl_uniform_1i(&u_rt_cine_detail, program, cls ? cls->detail : 0);
+        gl_uniform_1i(&u_rt_cine_untextured, program, material->texture == 0);
+        gl_uniform_1i(&u_rt_cine_cavity, program, rt_bump_generated);
+    }
+    gl_uniform_1i(&u_use_normal_map, program, normal_texture != 0);
+    if (normal_texture) {
         gl_uniform_1i(&u_normal_map, program, BASIC_NORMAL_TEXTURE_UNIT);
-        gl_uniform_1f(&u_normal_scale, program, material->normal_scale);
+        gl_uniform_1f(&u_normal_scale, program, normal_scale);
         glActiveTexture(GL_TEXTURE0 + BASIC_NORMAL_TEXTURE_UNIT);
-        glBindTexture(GL_TEXTURE_2D, material->normal_texture);
+        glBindTexture(GL_TEXTURE_2D, normal_texture);
         glActiveTexture(GL_TEXTURE0);
     }
     gl_uniform_1i(&u_use_specular_map, program, material->specular_texture != 0);
@@ -565,15 +743,7 @@ BasicMaterial *basic_material_init() {
     material->fog_enabled = 1;
     material->flat_normal.y = 1.0f;
 
-    if (!shader_program) {
-        char *vert_shader = concat(assets_path(), "shaders/basic.vert");
-        char *frag_shader = concat(assets_path(), "shaders/basic.frag");
-
-        shader_program = shader_compile(vert_shader, frag_shader);
-
-        free(vert_shader);
-        free(frag_shader);
-    }
+    if (!shader_program) shader_program = basic_variant_program(0);
 
     if (!shader_program) {
         free(material);

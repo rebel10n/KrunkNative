@@ -257,6 +257,37 @@ static void shadow_add_caster(Mesh *mesh, const int double_sided) {
     shadow.caster_count++;
 }
 
+// shadow_mesh_casts: every map-object mesh with its cast flag, sorted by pointer (shadow_load_map)
+typedef struct {
+    const Mesh *mesh;
+    unsigned char casts;
+} MapMeshCast;
+static MapMeshCast *g_map_mesh_casts;
+static size_t g_map_mesh_cast_count, g_map_mesh_cast_cap;
+
+static int map_mesh_cast_cmp(const void *a, const void *b) {
+    const Mesh *ma = ((const MapMeshCast *) a)->mesh, *mb = ((const MapMeshCast *) b)->mesh;
+    return ma < mb ? -1 : ma > mb;
+}
+
+static void map_mesh_cast_add(const Mesh *mesh, const int casts) {
+    if (g_map_mesh_cast_count == g_map_mesh_cast_cap) {
+        const size_t cap = g_map_mesh_cast_cap ? g_map_mesh_cast_cap * 2 : 1024;
+        MapMeshCast *grown = realloc(g_map_mesh_casts, cap * sizeof(MapMeshCast));
+        if (!grown) return;
+        g_map_mesh_casts = grown;
+        g_map_mesh_cast_cap = cap;
+    }
+    g_map_mesh_casts[g_map_mesh_cast_count++] = (MapMeshCast) {mesh, (unsigned char) (casts ? 1 : 0)};
+}
+
+int shadow_mesh_casts(const Mesh *mesh) {
+    const MapMeshCast key = {mesh, 0};
+    const MapMeshCast *found = g_map_mesh_cast_count
+        ? bsearch(&key, g_map_mesh_casts, g_map_mesh_cast_count, sizeof(MapMeshCast), map_mesh_cast_cmp) : NULL;
+    return found ? found->casts : -1;
+}
+
 static const cJSON *g_shadow_raw; // the loaded map's JSON (shadow_environment)
 
 // The light camera of the sun (map-G: shared by the map load and the environment zones).
@@ -320,7 +351,9 @@ void shadow_load_map(const Map *map) {
         shadow_prefab_flags(object, mesh, &cast, &receive, &double_sided);
         mesh->no_shadow_receive = !receive;
         if (cast && mesh->visible) shadow_add_caster(mesh, double_sided);
+        map_mesh_cast_add(mesh, cast);
     }
+    if (g_map_mesh_cast_count) qsort(g_map_mesh_casts, g_map_mesh_cast_count, sizeof(MapMeshCast), map_mesh_cast_cmp);
 
     g_shadow_raw = raw;
     g_shadow_normal_bias = map->env.shadow_nb;
@@ -342,6 +375,7 @@ void shadow_environment(const int shadow_r, const int shadow_d, const float ligh
 void shadow_unload_map(void) {
     g_shadow_raw = NULL;
     shadow.caster_count = 0;
+    g_map_mesh_cast_count = 0;
     shadow.enabled = 0;
     shadow.dirty = 0;
 }
@@ -492,6 +526,9 @@ void shadow_apply_mesh_uniforms(const Mesh *mesh) {
 }
 
 void shadow_fini(void) {
+    free(g_map_mesh_casts);
+    g_map_mesh_casts = NULL;
+    g_map_mesh_cast_count = g_map_mesh_cast_cap = 0;
     if (shadow.fbo) glDeleteFramebuffers(1, &shadow.fbo);
     if (shadow.depth_texture) glDeleteTextures(1, &shadow.depth_texture);
     if (shadow.program) glDeleteProgram(shadow.program);
@@ -499,4 +536,12 @@ void shadow_fini(void) {
     free(shadow.casters);
     free(shadow.caster_double_sided);
     memset(&shadow, 0, sizeof(shadow));
+}
+
+int shadow_sun_map(unsigned int *texture, float matrix[16], float *bias) {
+    if (!shadow.world_active || !shadow.depth_texture) return 0;
+    *texture = shadow.depth_texture;
+    memcpy(matrix, shadow.shadow_matrix, sizeof(shadow.shadow_matrix));
+    *bias = SHADOW_BIAS;
+    return 1;
 }

@@ -17,6 +17,12 @@
 // Readers: the renderer (this file, main.c, render_target.c) and other client systems
 // (HUD, VFX, viewmodel, sky) read client_render_settings() each frame; nothing here is
 // shared game state.
+//
+// Ray tracing (rt_*): Krunker Box Office-only keys (rtMode, rtScale, rtSamples, rtDenoise,
+// rtSunRadius, rtLocalLights, rtTaa; doc/raytracing-plan.md, client/include/rt.h), stored in the game
+// store like vsync / windowMode and shown in the Render tab's Ray Tracing folder
+// (ui_client_settings.c). rtMode defaults to 0 so the default frame stays Krunker's;
+// KRUNKNATIVE_RT=<mode> and KRUNKNATIVE_RT_SCALE=<f> override the store for the run.
 #include <client.h>
 
 #define RS_COLOR_MAX 16   // "#rrggbb" (Krunker colour inputs)
@@ -150,9 +156,30 @@ typedef struct {
     // ---- KrunkNative-only (no v3.1.1 row; persisted in the same store)
     int vsync;               // "vsync": swap interval 1 natively (the browser always paces to the display)
     int window_mode;         // "windowMode": RS_WINDOWED / RS_FULLSCREEN / RS_BORDERLESS (native)
+    // ---- Ray tracing (Box Office-only, client/include/rt.h; the Render tab's Ray Tracing folder,
+    // ui_client_settings.c). rt_mode 0 (the default) runs none of it: the frame is Krunker's own.
+    int rt_mode;             // "rtMode": RT_MODE_OFF / SHADOWS / AO / REFLECTIONS (0..3)
+    float rt_scale;          // "rtScale": RT target size as a fraction of the scene resolution (0.25..1)
+    int rt_samples;          // "rtSamples": AO rays per pixel (1..8)
+    int rt_denoise;          // "rtDenoise": temporal + spatial denoiser
+    float rt_sun_radius;     // "rtSunRadius": the sun's angular radius in degrees (0 = hard shadows, ..2)
+    int rt_local_lights;     // "rtLocalLights": shadow rays to the forward point / spot lights
+    int rt_taa;              // "rtTaa": temporal anti-aliasing of the scene frame (render_target.c; needs the RT prepass's motion vectors)
+    int rt_shafts;           // "rtShafts": volumetric sun shafts through the map's fog (rt_pass.c rt_shafts_*, rtMode >= 1)
+    int rt_sky;              // "rtSky": physical sky (sky_physical.c, rt_sky.glsl: atmosphere, sun disk, clouds, aerial fog tint), rtMode >= 1
+    int rt_bloom;            // "rtBloom": bloom of emissive and over-bright surfaces (render_target.c, rt_bloom.frag; rtMode >= 1)
+    int rt_sharpen;          // "rtSharpen": 0 off, 1 low, 2 medium, 3 high: edge-adaptive upscale + contrast-adaptive sharpening
+                             // of the scene target instead of the bilinear stretch (render_target.c, rt_upscale / rt_sharpen.frag; rtMode >= 1)
+    int rt_preset;           // "rtPreset": 0 Custom (the rows above as stored), 1 Cinematic (rt.h rt_cinematic: a look-first preset)
 } ClientRenderSettings;
 
+// The settings in effect this frame. With the Cinematic ray-tracing preset active (rtPreset 1, rtMode > 0 and a
+// supported tracer: rt.h rt_cinematic) this is a copy of the stored values with the preset's implied ones applied
+// (rtMode 3, rtScale RT_CINE_RT_SCALE, rtSamples 2, rtLocalLights / rtTaa / rtBloom / rtSky / rtShafts on, rtSharpen Low and
+// resolution RT_CINE_RESOLUTION, rt.h); the stored values are never overwritten, so Custom returns to them. Every renderer reader uses
+// this; client_render_settings_stored() is the store's own values (settings UI, the rt_cinematic test itself).
 const ClientRenderSettings *client_render_settings(void);
+const ClientRenderSettings *client_render_settings_stored(void);
 
 // A localized image setting's path (custom_damage, ...: ui/-relative) as a file the GL loaders can open
 // (the ui/ directory or KRUNKNATIVE_UI_DIR). 0 for "" or a remote URL (the web keeps those for the DOM).
@@ -226,3 +253,8 @@ void render_target_end(Client *client);
 void render_target_fini(void);
 // Size of the last scene target (0 x 0 when the default framebuffer was used).
 void render_target_size(int *width, int *height);
+// Bloom (Box Office-only rtBloom, rtMode >= 1; render_target.c): 1 between render_target_begin and
+// render_target_end while the scene target is the half-float HDR one that carries the bloom weight in alpha.
+// basic.c then has opaque basic.frag fragments write alpha = 1 + weight (rt_bloom_out); end() extracts
+// rgb * weight + max(rgb - 1, 0), blurs it down a mip chain and adds it in the composite.
+int render_target_bloom_active(void);

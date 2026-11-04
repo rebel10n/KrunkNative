@@ -1,0 +1,7 @@
+{
+  "_doc": "Per-texture overrides for weapon_masks.py (see its header): rules replace the default rule list, rects force a class inside a UV rectangle (0..1, top-left origin), default is the class for unmatched / transparent texels, values sets (G roughness, B metalness) per class. Keys are texture base names or globs.",
+  "melee_0": {
+    "_note": "Combat Knife: the wrapped green grip (bottom right of the sheet) is rubber, not plastic; the blade and guard stay metal",
+    "rects": [{"class": "polymer", "uv": [0.46, 0.6, 1.0, 1.0]}]
+  }
+}

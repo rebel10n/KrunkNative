@@ -45,6 +45,8 @@
 #include <game_reload.h> // `reload`: F5's full reload
 #include <strike_ui.h>   // strike_reward: a sample Krunker Strike reward (strike_reward.c)
 #include <spectate.h>    // pos while spectating: the followed player or the free camera
+#include <rt.h>          // rt_debug / rt_mode: Box Office ray tracing (client/src/rt/)
+#include <render_settings.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -454,6 +456,9 @@ static const ConArg A_GIVE[] = {{"weapon|item", ARG_STRING, 0}, {"player", ARG_S
 static const ConArg A_CLASS[] = {{"name|id", ARG_STRING, 0}, {"secondary", ARG_STRING, 1}};
 static const ConArg A_TIME[] = {{"MM:SS", ARG_STRING, 0}};
 static const ConArg A_STRIKE_REWARD[] = {{"kind", ARG_STRING, 0}};
+// Box Office ray tracing (rt.h): the debug blit and the live rtMode setting
+static const ConArg A_RT_DEBUG[] = {{"bvh|normals|visibility|history|ao|local|refl|motion|gi|off", ARG_STRING, 0}};
+static const ConArg A_RT_MODE[] = {{"0-3", ARG_NUMBER, 1}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -1489,6 +1494,45 @@ static void cmd_ping_local(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Ping: %dms", client && client->net_ping_ms > 0 ? client->net_ping_ms : 0);
 }
 
+// rt_debug <bvh|normals|visibility|history|ao|local|refl|motion|gi|off>: blit a ray tracing intermediate over the frame (rt.h rt_debug_set)
+static void cmd_rt_debug(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    static const char *const WHAT[] = {"bvh", "normals", "visibility", "history", "ao", "local", "refl", "motion", "gi", "off", NULL};
+    int known = 0;
+    for (const char *const *w = WHAT; argc && *w && !known; w++) known = !strcmp(argv[0], *w);
+    if (!known) {
+        appendf(COL_ERROR, "rt_debug: bvh, normals, visibility, history, ao, local, refl, motion, gi or off");
+        return;
+    }
+    rt_debug_set(argv[0]);
+    appendf(COL_INFO, "rt_debug %s", argv[0]);
+}
+
+// rt_materials_reload: re-read assets/materials/rt_materials.json (rt.h "material classes") so the table can be edited live
+static void cmd_rt_materials_reload(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    if (rt_materials_load()) appendf(COL_INFO, "rt_materials_reload: table reloaded (classes re-resolve on the next draw)");
+    else appendf(COL_ERROR, "rt_materials_reload: assets/materials/rt_materials.json did not load (see the log)");
+}
+
+// rt_mode [0-3]: show or set the Ray Tracing setting (rtMode: 0 off, 1 shadows, 2 + AO, 3 + reflections) through
+// the settings store, so the Settings window's row follows (render_settings.h rt_mode)
+static void cmd_rt_mode(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    static const char *const NAMES[] = {"off", "shadows", "shadows + AO", "shadows + AO + reflections"};
+    if (argc) {
+        const int mode = atoi(argv[0]);
+        if (mode < RT_MODE_OFF || mode > RT_MODE_REFLECTIONS || !isdigit((unsigned char) argv[0][0])) {
+            appendf(COL_ERROR, "rt_mode: 0 (off), 1 (shadows), 2 (shadows + AO) or 3 (shadows + AO + reflections)");
+            return;
+        }
+        ui_settings_set_string("rtMode", argv[0]);
+    }
+    const int mode = client_render_settings()->rt_mode;
+    appendf(COL_INFO, "rt_mode %d (%s)%s", mode, NAMES[mode < 0 || mode > 3 ? 0 : mode],
+            mode != RT_MODE_OFF && !rt_supported() ? " - the tracer is not available on this build, drawing Krunker's frame" : "");
+}
+
 // show_navmeshes [off]: "off", "0" or "clear" clears, anything else builds (registerLocal
 // "show_navmeshes", nav_overlay.c)
 static void cmd_show_navmeshes(const int argc, char **argv, const char *rest) {
@@ -1625,6 +1669,9 @@ static void register_commands(void) {
     register_dev("class", ARGS(A_CLASS), "switch your class now: its loadout and health, and the secondary weapon", cmd_class);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
+    register_dev("rt_debug", ARGS(A_RT_DEBUG), "overlay a ray tracing intermediate: bvh, normals, visibility, history, ao, local, refl, motion, gi (off to clear)", cmd_rt_debug);
+    register_dev("rt_materials_reload", NULL, 0, "re-read assets/materials/rt_materials.json (ray-tracing material classes)", cmd_rt_materials_reload);
+    register_dev("rt_mode", ARGS(A_RT_MODE), "show or set Ray Tracing: 0 off (Krunker's frame), 1 shadows, 2 + AO, 3 + reflections", cmd_rt_mode);
     // Server commands (mirror server/packetHandlers.ts cmds table)
     register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
     register_server("ungod", ARGS(A_TARGET), "turn god mode off (self, target or selector)");
@@ -2240,6 +2287,10 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
     } else if (!strcmp(cmd, "show_navmeshes")) {
         if (arg == 0) con_words(c, prefix, ON_OFF);
+    } else if (!strcmp(cmd, "rt_debug")) {
+        if (arg == 0) con_words(c, prefix, WORDS("bvh", "normals", "visibility", "history", "ao", "local", "refl", "motion", "gi", "off"));
+    } else if (!strcmp(cmd, "rt_mode")) {
+        if (arg == 0) con_words(c, prefix, WORDS("0", "1", "2", "3"));
     } else if (cmd_is(cmd, WORDS("bot_mimic", "bot_stop"))) {
         if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (!strcmp(cmd, "bot_difficulty")) {

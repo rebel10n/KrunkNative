@@ -1,4 +1,15 @@
 #version 450 core
+// Compile-time variants (materials/basic.c basic_material_select_program; shader.c injects the defines after the
+// version line): KN_RT 0 is Krunker's own path with every Box Office ray-tracing block compiled out (the program of
+// every draw outside the traced world / viewmodel passes, and of everything at rtMode 0); KN_RT 1 keeps them, and
+// KN_RT_CINE 0 drops the Cinematic-only ones. The gate uniforms become constants, so the dead branches and the
+// uniforms only they read are removed by the compiler; the live arithmetic is the same.
+#ifndef KN_RT
+#define KN_RT 1
+#endif
+#ifndef KN_RT_CINE
+#define KN_RT_CINE 1
+#endif
 out vec4 frag_color;
 
 in vec2 tex_coord;
@@ -47,6 +58,50 @@ uniform float shadow_bias;
 uniform float shadow_normal_bias; // v10 shadowNB: world units along the normal (0 = v7: the vertex shadow_coord)
 uniform mat4 shadow_matrix;       // world -> [0,1] shadow coords (also in basic.vert)
 uniform sampler2D shadow_map;
+// Box Office ray tracing (client/include/rt.h, rt_pass.c): rt_effects bits RT_EFFECT_* (0 = Krunker's
+// own path, the default), rt_result the denoised trace of this frame at RT resolution (R sun
+// visibility, G ambient occlusion) read at this fragment: gl_FragCoord * rt_inv_viewport.
+// RT_EFFECT_AO (bit 2) scales the indirect light only (the ambient / light-map irradiance of
+// krunker_lambert and the scene-env irradiance): the direct sun, the lights and emissive stay.
+#if KN_RT
+uniform int rt_effects;
+#else
+const int rt_effects = 0;
+#endif
+uniform vec2 rt_inv_viewport;
+// Box Office sky-dome ambient (RT_EFFECT_SKY_AMBIENT, bit 64; basic.c): krunker_ambient_irradiance
+#if KN_RT
+uniform int sky_ambient_mode;    // 0 Krunker's constant AmbientLight, 1 the PMREM table along the normal, 2 sky_color / fog blend
+uniform float sky_ambient_scale; // luminance match for an upward normal (basic.c basic_sky_ambient_scale)
+#else
+const int sky_ambient_mode = 0;
+uniform float sky_ambient_scale;
+#endif
+uniform vec3 sky_color;          // the map's sky colour (mode 2, maps without a sky dome)
+uniform sampler2D rt_result;
+uniform sampler2D rt_refl; // RT_EFFECT_REFLECTIONS (4): the traced reflection radiance of this pixel (rt_reflect.frag), same lookup
+// RT_EFFECT_GI (32): the denoised one-bounce radiance of this pixel (rt_gi.frag, rt.h): one cosine-weighted
+// sample's radiance L estimates the bounce irradiance G = PI * L. krunker_gi_irradiance composes it with the
+// ambient irradiance (Krunker's constant one, or the sky-dome one of bit 64): the ambient's luminance is the
+// floor, G tints it (rt_gi_tint) and raises it where G is brighter (formula in rt.h).
+uniform sampler2D rt_gi;
+uniform float rt_gi_tint;
+// RT_EFFECT_MATERIALS (128, rt.h "material classes"): the material's Box Office class factors (rt_materials.c).
+// With rt_mat_enabled the PBR branch below runs with them (GGX specular, F0 = mix(0.04, albedo, metalness)),
+// whatever the lighting setting, and a class with rt_mat_reflect > 0 adds the traced reflection (rt_refl)
+// with three's DFG weighting. A part mask on metal_rough_map multiplies them. Without the bit: unchanged.
+uniform bool rt_mat_enabled;
+uniform float rt_mat_metalness;
+uniform float rt_mat_roughness;
+uniform float rt_mat_reflect;
+uniform float rt_mat_f0; // a metal's minimum F0 (rt.h RtMaterialClass.f0): black-painted gun textures still read as metal
+// RT_EFFECT_LOCAL_LIGHTS (bit 8, rt.h phase 5): rt_local holds the traced visibility of up to 8 point /
+// spot lights of the list below, two per channel at 12 bits (rt.h packing), nearest-sampled at
+// rt_local_size; rt_local_index maps a light slot to its traced index (-1: untraced, visibility 1).
+#define RT_LOCAL_MAX 8
+uniform sampler2D rt_local;
+uniform vec2 rt_local_size;
+uniform int rt_local_index[16]; // MAX_LIGHTS
 
 uniform mat3 tex_transform;
 uniform sampler2D tex;
@@ -59,6 +114,7 @@ uniform sampler2D tex;
 // (sprites) is never lit.
 uniform int lighting_mode;
 uniform vec3 camera_position;
+#include "rt_sky.glsl" // Box Office rtSky: psky_fog_color (krunker_fog's aerial perspective); psky_on 0 = Krunker's fog
 
 // Forward light list (basic.c basic_upload_lights, client.h BasicLight), three.js r150 lights:
 // lt_type 0 point, 1 spot, 2 directional, 3 rect-area. lt_color is colour * intensity *
@@ -193,8 +249,289 @@ const float RECIPROCAL_PI = 0.3183098861837907;
 // three.js r150 getShadow() for BasicShadowMap: one nearest-texel compare, lit outside the
 // shadow camera frustum.
 // three r186 normalBias: shadowWorldPosition = worldPosition + shadowWorldNormal * normalBias.
+vec3 krunker_rt_gi() {
+    if ((rt_effects & 32) == 0) return vec3(0.0); // RT_EFFECT_GI
+    return texture(rt_gi, gl_FragCoord.xy * rt_inv_viewport).rgb;
+}
+
+// The indirect irradiance under RT_EFFECT_GI (rt.h): Krunker's maps are lit for their ambient, so one bounce never
+// darkens below it; it tints it and brightens it where the bounce exceeds it.
+vec3 krunker_gi_irradiance(vec3 ambient) {
+    const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
+    vec3 g = krunker_rt_gi() * PI;
+    float la = dot(ambient, LUM), lg = dot(g, LUM);
+    if (la <= 1e-5) return ambient + g; // a map without ambient: the bounce is all the indirect light
+    vec3 t = vec3(1.0);
+    if (lg > 1e-5) t = mix(vec3(1.0), clamp((g / lg) / max(ambient / la, vec3(1e-3)), 0.0, 4.0), rt_gi_tint);
+    vec3 tinted = ambient * t;
+    tinted *= la / max(dot(tinted, LUM), 1e-5); // the tint alone keeps the luminance
+    return tinted * max(1.0, lg / la);
+}
+
+// Box Office bevelled cube edges (rt.h RT_EFFECT_BEVEL, rt_pass.c rt_apply_mesh_uniforms): a shading-only round
+// bevel on Krunker's map boxes. rt_bevel_faces is the cube's face mask (map_face_mask bits 0 +x, 1 -x, 2 +y, 3 -y,
+// 4 +z, 5 -z; 0 = not a bevelled cube). The unit cube spans x, z in [-0.5, 0.5], y in [0, 1] (loaders.c), and the
+// map transform is translate * rotate * scale, so the world size of local axis i is |transform[i].xyz| and a local
+// normal maps to the world as transform * (n / scale^2) (= R * S^-1 n, the inverse transpose). The face is the local
+// axis the geometric normal is closest to; within `width` world units of each of its four edges the normal tilts
+// toward the neighbour face (linearly up to the 45-degree bisector at the edge), unless the map masked that face out
+// (the box touches another object there: no visible edge). The bevel is a rotation of the geometric normal, added to
+// the incoming (possibly normal-mapped) normal so surface detail survives.
+uniform mat4 transform; // also in basic.vert
+uniform int rt_bevel_faces;
+uniform float rt_bevel_width;
+uniform float rt_bevel_face_fraction;
+// Cinematic preset surface detail (basic.c, rt.h rt_cinematic): rt_cine 1 for a classed material's draw while the
+// preset is on; rt_cine_detail its class's RT_DETAIL_* kind; rt_cine_untextured 1 for a flat-colour material (the
+// detail and the colour variation are full strength there, a third on textured ones); rt_cine_cavity 1 when the
+// normal map is the generated one, whose alpha holds a cavity term (rt_bump.frag).
+#if KN_RT && KN_RT_CINE
+uniform bool rt_cine;
+#else
+const bool rt_cine = false;
+#endif
+uniform int rt_cine_detail;
+uniform bool rt_cine_untextured;
+uniform bool rt_cine_cavity;
+
+vec3 krunker_rt_bevel(vec3 n) {
+    if ((rt_effects & 1024) == 0 || rt_bevel_faces == 0) return n; // RT_EFFECT_BEVEL
+    vec3 g = normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+    mat3 m = mat3(transform);
+    vec3 scale = vec3(length(m[0]), length(m[1]), length(m[2]));
+    if (min(scale.x, min(scale.y, scale.z)) < 1e-4) return n;
+    vec3 gloc = transpose(m) * g; // the local direction of the geometric normal (M^T n_w is parallel to n_l for TRS)
+    vec3 ag = abs(gloc);
+    int f = ag.x >= ag.y && ag.x >= ag.z ? 0 : (ag.y >= ag.z ? 1 : 2);
+    vec3 d = local_pos - vec3(0.0, 0.5, 0.0); // from the cube's centre, components in [-0.5, 0.5]
+    float facing = gloc[f] * d[f] >= 0.0 ? 1.0 : -1.0; // -1: an inside (back) face of a double-sided / BackSide box
+    vec3 nl = vec3(0.0);
+    nl[f] = d[f] >= 0.0 ? 1.0 : -1.0;
+    int ua = f == 0 ? 1 : 0;
+    int va = f == 2 ? 1 : 2;
+    float width = rt_cine ? min(max(rt_bevel_width, 1.0), 0.3 * min(scale[ua], scale[va])) // Cinematic: wider
+                          : min(rt_bevel_width, rt_bevel_face_fraction * min(scale[ua], scale[va]));
+    if (width < 1e-3) return n;
+    vec3 bent = nl;
+    for (int k = 0; k < 2; k++) {
+        int a = k == 0 ? ua : va;
+        float side = d[a] >= 0.0 ? 1.0 : -1.0;
+        int bit = a * 2 + (side > 0.0 ? 0 : 1); // map_face_mask: +x 0, -x 1, +y 2, -y 3, +z 4, -z 5
+        if ((rt_bevel_faces & (1 << bit)) == 0) continue;
+        float dist = (0.5 - abs(d[a])) * scale[a]; // world units to that edge
+        float t = clamp(1.0 - dist / width, 0.0, 1.0);
+        bent[a] += side * t;
+    }
+    if (bent == nl) return n;
+    vec3 b = normalize(m * (bent / (scale * scale))) * facing;
+    vec3 g_out = normalize(m * (nl / (scale * scale))) * facing; // the flat face normal on the same footing as b
+    return normalize(n + (b - g_out));
+}
+
+// ---- Cinematic surface detail (rt_cine). All of it works in world units on the face of a map cube (the same face
+// frame as krunker_rt_bevel), so a field of stacked blocks reads as one continuous material rather than one fill.
+
+float rt_hash12(vec2 p) { // Dave Hoskins' hash without sine (precision-stable for map coordinates of a few thousand)
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float rt_vnoise(vec2 p) { // value noise, smooth, 0..1
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = rt_hash12(i), b = rt_hash12(i + vec2(1.0, 0.0));
+    float c = rt_hash12(i + vec2(0.0, 1.0)), d = rt_hash12(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// An octave of `period` world units fades out before it would alias: its features under ~4 pixels vanish.
+float rt_octave_fade(float period, float footprint) {
+    return 1.0 - smoothstep(0.12 * period, 0.35 * period, footprint);
+}
+
+// rt_vnoise at three points at once (the height and its two finite-difference neighbours): a point in the same
+// lattice cell as the first reuses its four corner hashes. Each component is exactly rt_vnoise of its own point.
+vec3 rt_vnoise3(vec2 q0, vec2 q1, vec2 q2) {
+    vec2 i0 = floor(q0);
+    float a = rt_hash12(i0), b = rt_hash12(i0 + vec2(1.0, 0.0));
+    float c = rt_hash12(i0 + vec2(0.0, 1.0)), d = rt_hash12(i0 + vec2(1.0, 1.0));
+    vec2 f = q0 - i0;
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    vec3 r;
+    r.x = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    vec2 i1 = floor(q1);
+    if (i1 == i0) {
+        f = q1 - i1; u = f * f * (3.0 - 2.0 * f);
+        r.y = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    } else {
+        r.y = rt_vnoise(q1);
+    }
+    vec2 i2 = floor(q2);
+    if (i2 == i0) {
+        f = q2 - i2; u = f * f * (3.0 - 2.0 * f);
+        r.z = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    } else {
+        r.z = rt_vnoise(q2);
+    }
+    return r;
+}
+
+// The material's height at the face points p0 (the fragment) and p1, p2 (its finite-difference neighbours; world
+// units, .x along the face's longer side): 0.5 = level. `fade` holds the octaves' rt_octave_fade weights; an octave
+// whose weight is 0 adds exactly 0, so it is not evaluated (most of a frame is far enough that the fine octaves have
+// faded out). Each component is the same arithmetic as one point evaluated on its own.
+vec3 rt_detail_height3(vec2 p0, vec2 p1, vec2 p2, vec3 fade, int kind) {
+    vec3 h = vec3(0.5);
+    if (kind == 1) { // stone: faint broad mottling, slab-scale pitting, a fine grain. The broad (7-unit) octave is
+                     // kept weak: at 0.55 it read as room-sized dirt stains on Kanji's floors under Cinematic.
+        if (fade.x > 0.0) h += (rt_vnoise3(p0 / 7.0, p1 / 7.0, p2 / 7.0) - 0.5) * 0.12 * fade.x;
+        if (fade.y > 0.0) h += (rt_vnoise3(p0 / 1.7 + 11.0, p1 / 1.7 + 11.0, p2 / 1.7 + 11.0) - 0.5) * 0.30 * fade.y;
+        if (fade.z > 0.0) h += (rt_vnoise3(p0 * 2.5 + 23.0, p1 * 2.5 + 23.0, p2 * 2.5 + 23.0) - 0.5) * 0.22 * fade.z;
+        return h;
+    }
+    if (kind == 2) { // metal: brushed streaks along the long side (long, thin cells)
+        if (fade.x <= 0.0) return h;
+        vec3 streak = rt_vnoise3(vec2(p0.x * 0.12, p0.y * 9.0), vec2(p1.x * 0.12, p1.y * 9.0), vec2(p2.x * 0.12, p2.y * 9.0)) * 0.7
+                    + rt_vnoise3(vec2(p0.x * 0.4 + 5.0, p0.y * 3.0), vec2(p1.x * 0.4 + 5.0, p1.y * 3.0), vec2(p2.x * 0.4 + 5.0, p2.y * 3.0)) * 0.3;
+        return 0.5 + (streak - 0.5) * fade.x;
+    }
+    if (kind == 3) { // wood: grain lines along the long side, warped
+        if (fade.x > 0.0) {
+            vec3 warp = rt_vnoise3(p0 * vec2(0.06, 0.35), p1 * vec2(0.06, 0.35), p2 * vec2(0.06, 0.35)) * 3.0;
+            vec3 rings = 0.5 + 0.5 * sin((vec3(p0.y, p1.y, p2.y) + warp) * 5.0);
+            h += (rings - 0.5) * 0.8 * fade.x;
+        }
+        if (fade.y > 0.0) h += (rt_vnoise3(vec2(p0.x * 0.3, p0.y * 12.0), vec2(p1.x * 0.3, p1.y * 12.0), vec2(p2.x * 0.3, p2.y * 12.0)) - 0.5) * 0.3 * fade.y;
+        return h;
+    }
+    return h;
+}
+
+// Albedo variation, a bumped normal and a roughness offset for a map cube's face (rt_cine; rt_bevel_faces != 0 marks
+// a map cube). Returns the roughness offset (metal streaks vary the gloss).
+float krunker_rt_detail(inout vec3 albedo, inout vec3 normal) {
+    if (!rt_cine || rt_bevel_faces == 0) return 0.0;
+    mat3 m = mat3(transform);
+    vec3 scale = vec3(length(m[0]), length(m[1]), length(m[2]));
+    if (min(scale.x, min(scale.y, scale.z)) < 1e-4) return 0.0;
+    float strength = rt_cine_untextured ? 1.0 : 0.35;
+
+    // per-object colour variation: +/-4 % brightness hashed by the object's position (a flat field of equal
+    // blocks stops reading as one fill)
+    float obj = rt_hash12(transform[3].xz * 0.37 + transform[3].y * 1.31);
+    albedo *= 1.0 + (obj - 0.5) * 0.08 * strength;
+
+    if (rt_cine_detail == 0) return 0.0;
+    vec3 g = normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+    vec3 gloc = transpose(m) * g;
+    vec3 ag = abs(gloc);
+    int f = ag.x >= ag.y && ag.x >= ag.z ? 0 : (ag.y >= ag.z ? 1 : 2);
+    int ua = f == 0 ? 1 : 0;
+    int va = f == 2 ? 1 : 2;
+    if (scale[va] > scale[ua]) { int t = ua; ua = va; va = t; } // .x runs along the face's longer side
+    vec3 tu = normalize(m[ua]), tv = normalize(m[va]);
+    vec2 p = vec2(dot(world_pos, tu), dot(world_pos, tv));
+    float footprint = max(length(fwidth(p)), 1e-4);
+    int kind = rt_cine_detail;
+
+    // the octaves' fade weights, once (rt_detail_height skips an octave that has faded out entirely)
+    vec3 fade = kind == 1 ? vec3(rt_octave_fade(7.0, footprint), rt_octave_fade(1.7, footprint), rt_octave_fade(0.4, footprint))
+              : kind == 2 ? vec3(rt_octave_fade(0.11, footprint), 0.0, 0.0)
+                          : vec3(rt_octave_fade(1.25, footprint), rt_octave_fade(0.08, footprint), 0.0);
+    float e = 0.15;
+    vec3 hs = rt_detail_height3(p, p + vec2(e, 0.0), p + vec2(0.0, e), fade, kind);
+    float h = hs.x, hx = hs.y, hy = hs.z;
+    // slope gain per class; stone 0.45 bent the normal of slab-scale noise enough that grazing (moon / sun) light
+    // drew diagonal streaks across Kanji's flat floors: stone reads through its albedo grain, the relief stays faint
+    float amp = (kind == 1 ? 0.1 : kind == 2 ? 0.05 : 0.18) * strength;
+    vec3 grad = (tu * (hx - h) + tv * (hy - h)) / e;
+    normal = normalize(normal - grad * amp);
+
+    float tint = kind == 1 ? 0.22 : kind == 2 ? 0.10 : 0.30; // albedo contrast per class (stone 0.32 read as dirt)
+    albedo *= 1.0 + (h - 0.5) * tint * strength;
+    return kind == 2 ? (h - 0.5) * 0.25 * strength : 0.0;
+}
+
+// Contact creases: a cube face darkens within ~0.6 units of an edge where the map masked the neighbour face (the
+// box meets another object there: a concave corner the bevel leaves sharp).
+float krunker_rt_crease() {
+    if (!rt_cine || rt_bevel_faces == 0) return 1.0;
+    mat3 m = mat3(transform);
+    vec3 scale = vec3(length(m[0]), length(m[1]), length(m[2]));
+    if (min(scale.x, min(scale.y, scale.z)) < 1e-4) return 1.0;
+    vec3 gloc = transpose(m) * normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+    vec3 ag = abs(gloc);
+    int f = ag.x >= ag.y && ag.x >= ag.z ? 0 : (ag.y >= ag.z ? 1 : 2);
+    vec3 d = local_pos - vec3(0.0, 0.5, 0.0);
+    int ua = f == 0 ? 1 : 0;
+    int va = f == 2 ? 1 : 2;
+    float occ = 1.0;
+    for (int k = 0; k < 2; k++) {
+        int a = k == 0 ? ua : va;
+        float side = d[a] >= 0.0 ? 1.0 : -1.0;
+        int bit = a * 2 + (side > 0.0 ? 0 : 1);
+        if ((rt_bevel_faces & (1 << bit)) != 0) continue; // an open edge: the bevel's, not a crease
+        float dist = (0.5 - abs(d[a])) * scale[a];
+        occ *= 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.6, dist));
+    }
+    return occ;
+}
+
+// The generated relief's cavity (rt_bump.frag alpha): seams and mortar below their neighbourhood darken.
+float krunker_rt_cavity(vec2 uv) {
+    if (!rt_cine || !rt_cine_cavity || !use_normal_map) return 1.0;
+    float c = texture(normal_map, maps_flip_v ? vec2(uv.x, 1.0 - uv.y) : uv).a;
+    return 1.0 - 0.45 * clamp((0.5 - c) * 2.0, 0.0, 1.0);
+}
+
+float krunker_rt_ao() {
+    if ((rt_effects & 2) == 0) return 1.0; // RT_EFFECT_AO
+    return texture(rt_result, gl_FragCoord.xy * rt_inv_viewport).g;
+}
+
+// One traced light's visibility out of a packed rt_local texel (rt.h: channel = hi * 4096 + lo, 12 bits each)
+float krunker_rt_local_unpack(vec4 texel, int traced) {
+    float channel = traced < 2 ? texel.x : traced < 4 ? texel.y : traced < 6 ? texel.z : texel.w;
+    float hi = floor(channel / 4096.0);
+    return ((traced & 1) == 0 ? hi : channel - hi * 4096.0) / 4095.0;
+}
+
+// The traced shadow of light slot `slot` at this fragment (1 without RT_EFFECT_LOCAL_LIGHTS or for a
+// light that was not traced). The packed target cannot be filtered by the sampler, so the four
+// nearest texels are unpacked and blended by hand (the same bilinear footprint rt_result gets).
+// The four texels are fetched once per fragment (the first traced light of the loop) and unpacked per light.
+bool rt_local_fetched = false;
+vec4 rt_local_t00, rt_local_t10, rt_local_t01, rt_local_t11;
+vec2 rt_local_f;
+
+float krunker_rt_local(int slot) {
+    if ((rt_effects & 8) == 0) return 1.0; // RT_EFFECT_LOCAL_LIGHTS
+    int traced = rt_local_index[slot];
+    if (traced < 0) return 1.0;
+    if (!rt_local_fetched) {
+        rt_local_fetched = true;
+        vec2 at = gl_FragCoord.xy * rt_inv_viewport * rt_local_size - 0.5;
+        vec2 base = floor(at);
+        rt_local_f = at - base;
+        ivec2 i0 = ivec2(base);
+        ivec2 size = ivec2(rt_local_size) - 1;
+        rt_local_t00 = texelFetch(rt_local, clamp(i0, ivec2(0), size), 0);
+        rt_local_t10 = texelFetch(rt_local, clamp(i0 + ivec2(1, 0), ivec2(0), size), 0);
+        rt_local_t01 = texelFetch(rt_local, clamp(i0 + ivec2(0, 1), ivec2(0), size), 0);
+        rt_local_t11 = texelFetch(rt_local, clamp(i0 + ivec2(1, 1), ivec2(0), size), 0);
+    }
+    float v00 = krunker_rt_local_unpack(rt_local_t00, traced);
+    float v10 = krunker_rt_local_unpack(rt_local_t10, traced);
+    float v01 = krunker_rt_local_unpack(rt_local_t01, traced);
+    float v11 = krunker_rt_local_unpack(rt_local_t11, traced);
+    return mix(mix(v00, v10, rt_local_f.x), mix(v01, v11, rt_local_f.x), rt_local_f.y);
+}
+
 float krunker_shadow_mask(vec3 normal) {
     if (!shadow_enabled) return 1.0;
+    if ((rt_effects & 1) != 0) return texture(rt_result, gl_FragCoord.xy * rt_inv_viewport).r; // RT_EFFECT_SHADOWS
     vec4 sc = shadow_normal_bias > 0.0 ? shadow_matrix * vec4(world_pos + normal * shadow_normal_bias, 1.0) : shadow_coord;
     vec3 coord = sc.xyz / sc.w;
     coord.z += shadow_bias;
@@ -319,14 +656,221 @@ vec3 krunker_direct(vec3 c, vec3 l, vec3 diffuse, vec3 normal, vec3 view_dir) {
     return outgoing;
 }
 
+vec3 krunker_scene_env_sample(vec3 dir, float roughness); // below
+void krunker_multiscatter(vec3 f0, vec2 dfg, out vec3 single_scatter, out vec3 multi_scatter); // below
+
+// The indirect (ambient) irradiance at a surface with `normal`: Krunker's AmbientLight, ambient * ambientI (* PI
+// with legacy lights), the same from every direction. With the Box Office sky-dome ambient (rt_effects bit 64,
+// sky_ambient_mode > 0) it is the sky's cosine-weighted radiance about the normal instead, times
+// sky_ambient_scale so an upward normal keeps the AmbientLight's luminance (basic.c): up faces see the dome's
+// top colour, walls the horizon / fog colour, undersides the darkened fog (env_map.c paints the gradient's
+// bottom as fog * 0.25, which stands in for a ground tint). Mode 1 reads the PMREM table's roughest level
+// (env_map.h; a cosine-lobe filtered sky), mode 2 (no dome) blends sky_color above the horizon and fog below,
+// down to fog * 0.25, the same shape as the painted gradient. Light maps are added by the caller as before.
+vec3 krunker_ambient_irradiance(vec3 normal) {
+    float light_scale = correct_lights ? 1.0 : PI;
+    vec3 flat_ambient = ambient_color.rgb * ambient_intensity * light_scale;
+    if ((rt_effects & 64) == 0 || sky_ambient_mode == 0) return flat_ambient;
+    vec3 sky;
+    if (sky_ambient_mode == 1) {
+        sky = krunker_scene_env_sample(normal, 1.0);
+    } else {
+        float t = clamp(normal.y, -1.0, 1.0);
+        sky = t >= 0.0 ? mix(fog_color.rgb, sky_color, t) : mix(fog_color.rgb, fog_color.rgb * 0.25, -t);
+    }
+    return sky * sky_ambient_scale * light_scale;
+}
+
+// Box Office material classes (RT_EFFECT_MATERIALS): the indirect specular of a classed material, three's
+// indirectSpecular weighting (DFG, F0 = mix(0.04, albedo, metalness); krunker_scene_env) over
+//   - the traced reflection of this pixel (rt_reflect.frag) when the class reflects and the pass ran, else
+//   - the sky: the PMREM table along the reflection vector at the material's roughness (the sky-ambient path's
+//     table on unit 9), or the sky_color / fog blend without a dome, or Krunker's flat ambient without the sky
+//     ambient at all. Scaled like krunker_ambient_irradiance (sky_ambient_scale * light_scale, / PI since the
+//     ambient there is an irradiance and this is a radiance), so a rough metal keeps the energy a Lambert
+//     surface of the same albedo would have had instead of going black: diffuse lost (1 - metalness) and the
+//     specular lobe gets it back from the same sky. The irradiance term of krunker_scene_env is left out:
+//     the ambient / GI of krunker_lambert already carry the diffuse part.
+// Box Office specular occlusion of the sky reflection (rt.h "specular occlusion"): the sky radiance is scaled by
+// a sky visibility and the occluded part becomes the radiance of the shaded surroundings, half the flat
+// ambient (an albedo-0.5 surface lit by it) or the pixel's GI bounce, so a metal under a roof reflects warm
+// dark walls the way the traced reflection does, not the open sky and not black.
+//   AO traced (rt_effects & 2): Lagarde's so = saturate(pow(NdotV + ao, exp2(-16 roughness - 1)) - 1 + ao)
+//   RT_EFFECT_SKY_VIS (8192, rtMode 1, world): rt_result.g is a traced sky visibility
+//   RT_EFFECT_SKY_PROBE (16384, the viewmodel): the camera's ambient cube of sky visibilities (rt_pass.c
+//   sky_probe_update), weighted by the squared components of the reflection direction
+uniform vec3 rt_sky_probe_pos; // visibility along +x, +y, +z
+uniform vec3 rt_sky_probe_neg; // along -x, -y, -z
+vec3 krunker_rt_spec_occlusion(vec3 sky_radiance, vec3 n, vec3 v, float r) {
+    float so = 1.0;
+    if ((rt_effects & 2) != 0) {
+        float ao = texture(rt_result, gl_FragCoord.xy * rt_inv_viewport).g;
+        float ndv = clamp(dot(n, v), 0.0, 1.0);
+        so = clamp(pow(ndv + ao, exp2(-16.0 * r - 1.0)) - 1.0 + ao, 0.0, 1.0);
+    } else if ((rt_effects & 8192) != 0) {
+        so = texture(rt_result, gl_FragCoord.xy * rt_inv_viewport).g;
+    } else if ((rt_effects & 16384) != 0) {
+        vec3 d = reflect(-v, n);
+        vec3 w = d * d; // sums to 1
+        vec3 vis = mix(rt_sky_probe_neg, rt_sky_probe_pos, step(0.0, d));
+        so = clamp(dot(w, vis), 0.0, 1.0);
+    }
+    if (so >= 1.0) return sky_radiance;
+    float light_scale = correct_lights ? 1.0 : PI;
+    vec3 occluded = (rt_effects & 32) != 0 ? krunker_rt_gi() : ambient_color.rgb * ambient_intensity * light_scale * RECIPROCAL_PI * 0.5;
+    return mix(occluded, sky_radiance, so);
+}
+
+vec3 krunker_rt_mat_specular(vec3 albedo, float metalness, float roughness, vec3 n) {
+    float r = clamp(max(roughness, 0.0525), 0.0, 1.0);
+    vec3 v = normalize(camera_position - world_pos);
+    vec2 dfg = texture(scene_env_dfg, vec2(r, clamp(dot(n, v), 0.0, 1.0))).rg;
+    vec3 single_d, multi_d, single_m, multi_m;
+    krunker_multiscatter(vec3(0.04), dfg, single_d, multi_d);
+    krunker_multiscatter(albedo, dfg, single_m, multi_m);
+    vec3 weight = mix(single_d, single_m, metalness);
+    // The sky estimate is always computed: it is the whole answer without a traced reflection, and the fill
+    // where the traced one has no data (see below).
+    vec3 radiance;
+    {
+        float light_scale = correct_lights ? 1.0 : PI;
+        vec3 dir = normalize(mix(reflect(-v, n), n, r * r * r * r));
+        vec3 sky;
+        if ((rt_effects & 64) == 0 || sky_ambient_mode == 0) {
+            sky = ambient_color.rgb * ambient_intensity; // no sky ambient: the flat AmbientLight from every direction
+            radiance = sky * light_scale * RECIPROCAL_PI;
+        } else {
+            if (sky_ambient_mode == 1) {
+                sky = krunker_scene_env_sample(dir, r);
+            } else {
+                float t = clamp(dir.y, -1.0, 1.0);
+                sky = t >= 0.0 ? mix(fog_color.rgb, sky_color, t) : mix(fog_color.rgb, fog_color.rgb * 0.25, -t);
+            }
+            radiance = sky * sky_ambient_scale * light_scale * RECIPROCAL_PI;
+        }
+    }
+    if (rt_mat_reflect > 0.0 && (rt_effects & 4) != 0) {
+        // The traced reflection. Its alpha is >= 1 where the reflect pass traced the pixel (the denoiser keeps the
+        // history length there) and 0 where it skipped it (no reflective material in its prepass, outside the
+        // viewmodel's scissor, a disocclusion before the history fills): there the sky estimate stands in instead
+        // of black. Bilinear filtering blends the two at the edges of the traced region.
+        vec4 traced = texture(rt_refl, gl_FragCoord.xy * rt_inv_viewport);
+        radiance = mix(krunker_rt_spec_occlusion(radiance, n, v, r), traced.rgb, clamp(traced.a, 0.0, 1.0));
+    } else {
+        radiance = krunker_rt_spec_occlusion(radiance, n, v, r);
+    }
+    // The class's `reflect` gates whether a traced ray is spent on the pixel; it does not dim the incoming light
+    // (the DFG weight already says how much the surface reflects). Above 1 it is an exposure boost of the shiny
+    // classes (chrome, gold, glass, water), applied alike to the traced and the sky radiance so rtMode 1 and 3 agree.
+    return radiance * weight * max(rt_mat_reflect, 1.0);
+}
+
+// Box Office RT water and glass (rt.h "water and glass", RT_EFFECT_WATER on a transparent water / glass class draw):
+// a fresnel blend of a reflection and the refracted opaque frame behind the surface, composited by the shader itself
+// (main's tail) since the refracted texel is not the one under the fragment.
+uniform int rt_water_kind;            // 1 water, 2 glass / window
+uniform bool rt_water_copy;           // rt_water_scene holds this frame's opaque world
+uniform bool rt_water_traced;         // rt_refl holds the surface's traced reflection (rtMode 3)
+uniform sampler2D rt_water_scene;     // the opaque frame (rt_pass.c rt_water_copy_scene)
+uniform sampler2D rt_water_depth;     // the world prepass depth (RT resolution, rt_inv_viewport lookups)
+uniform vec2 rt_water_inv_size;       // 1 / the copy's size
+uniform vec2 rt_water_depth_ab;       // the camera projection's A, B: view depth = B / (ndc z + A)
+uniform float rt_water_refract;       // screen offset per unit of wave-normal deviation (fraction of the view height)
+uniform float rt_water_absorb_depth;  // water depth that mostly turns the view through it into the water colour
+uniform mat4 camera_world_inverse;    // (also in basic.vert) the view rotation for the refraction offset
+bool rt_water_out = false;
+float rt_water_w = 1.0;
+vec2 rt_water_uv = vec2(0.0);
+
+float krunker_rt_water_view_depth(vec2 uv) {
+    float ndc = texture(rt_water_depth, uv).r * 2.0 - 1.0;
+    return rt_water_depth_ab.y / (ndc + rt_water_depth_ab.x);
+}
+
+// The sky radiance along `dir` at roughness r, as krunker_rt_mat_specular estimates it
+vec3 krunker_rt_water_sky(vec3 dir, float r) {
+    float light_scale = correct_lights ? 1.0 : PI;
+    if ((rt_effects & 64) == 0 || sky_ambient_mode == 0) return ambient_color.rgb * ambient_intensity * light_scale * RECIPROCAL_PI;
+    vec3 sky;
+    if (sky_ambient_mode == 1) {
+        sky = krunker_scene_env_sample(dir, r);
+    } else {
+        float t = clamp(dir.y, -1.0, 1.0);
+        sky = t >= 0.0 ? mix(fog_color.rgb, sky_color, t) : mix(fog_color.rgb, fog_color.rgb * 0.25, -t);
+    }
+    return sky * sky_ambient_scale * light_scale * RECIPROCAL_PI;
+}
+
+// `base`: the lit surface (rgb) and its authored opacity (a). Leaves the reflection + water body colour in base.rgb and
+// the coverage w in base.a; main's tail fogs / tone maps it and blends it over the refracted copy.
+void krunker_rt_water(inout vec4 base, vec3 n, float roughness) {
+    bool water = rt_water_kind == 1;
+    vec3 v = normalize(camera_position - world_pos);
+    float ndv = clamp(dot(n, v), 0.0, 1.0);
+    vec2 depth_uv = gl_FragCoord.xy * rt_inv_viewport;
+    // refraction: the wave normal's tilt from a flat surface, in view space (glass panes are flat: no offset)
+    vec2 offset = vec2(0.0);
+    if (water) {
+        mat3 view_rotation = mat3(camera_world_inverse);
+        vec3 tilt = view_rotation * n - view_rotation * vec3(0.0, n.y >= 0.0 ? 1.0 : -1.0, 0.0);
+        offset = tilt.xy * rt_water_refract * vec2(rt_inv_viewport.x / rt_inv_viewport.y, 1.0);
+    }
+    float behind = krunker_rt_water_view_depth(depth_uv + offset);
+    if (behind < view_depth) { // the offset lands on something in front of the water: no refraction there
+        offset = vec2(0.0);
+        behind = krunker_rt_water_view_depth(depth_uv);
+    }
+    float thickness = max(behind - view_depth, 0.0);
+    float body = water ? max(base.a, 1.0 - exp(-thickness / rt_water_absorb_depth)) : base.a;
+    float f0 = water ? 0.02 : 0.04;
+    float fresnel = f0 + (1.0 - f0) * pow(1.0 - ndv, 5.0);
+    float r = clamp(max(roughness, 0.0525), 0.0, 1.0);
+    vec3 refl = krunker_rt_spec_occlusion(krunker_rt_water_sky(reflect(-v, n), r), n, v, r);
+    if (rt_water_traced) {
+        vec4 traced = texture(rt_refl, depth_uv + offset * 0.5); // the wave wobble on the reflection too
+        refl = mix(refl, traced.rgb, clamp(traced.a, 0.0, 1.0));
+    }
+    refl *= max(rt_mat_reflect, 1.0); // the shiny classes' exposure boost, as krunker_rt_mat_specular
+    float w = fresnel + (1.0 - fresnel) * body;
+    base.rgb = (fresnel * refl + (1.0 - fresnel) * body * base.rgb) / max(w, 1e-4);
+    base.a = w;
+    rt_water_out = true;
+    rt_water_w = w;
+    rt_water_uv = gl_FragCoord.xy * rt_water_inv_size + offset;
+}
+
+// Box Office Cinematic preset (RT_EFFECT_CINEMATIC 65536, rt.h "Cinematic lighting", rt_pass.c cine_uniforms): the
+// look-first balance. The ambient (directional sky ambient when bit 64 is on) is kept only at rt_cine_fill, the GI
+// bounce is added at its real brightness (no ambient floor: krunker_gi_irradiance is Krunker-matched), AO darkens
+// both, the sun is rt_cine_sun (map colour x strength x warmth) and krunker_tone_map applies rt_cine_exposure.
+uniform float rt_cine_fill;
+uniform vec3 rt_cine_sun;
+uniform float rt_cine_exposure;
+bool krunker_cine() { return KN_RT_CINE != 0 && (rt_effects & 65536) != 0; }
+
 vec3 krunker_lambert(vec3 diffuse, vec3 normal) {
     float light_scale = correct_lights ? 1.0 : PI;
     vec3 view_dir = normalize(camera_position - world_pos);
-    // AmbientLight + the map's sun (skyLight, the only shadow caster)
-    vec3 irradiance = ambient_color.rgb * ambient_intensity * light_scale;
+    // AmbientLight (or the Box Office sky ambient) + the map's sun (skyLight, the only shadow caster)
+    vec3 irradiance = krunker_ambient_irradiance(normal);
+    if (krunker_cine()) {
+        // the fill takes the map's authored ambient hue: the physical sky's blue turned warm maps (Sandstorm's pink-orange
+        // ambient) cold; only its luminance follows the directional sky ambient (up brighter than down)
+        const vec3 LUMC = vec3(0.2126, 0.7152, 0.0722);
+        vec3 authored = ambient_color.rgb * ambient_intensity * light_scale;
+        float la = dot(authored, LUMC), ls = dot(irradiance, LUMC);
+        if (la > 1e-5) irradiance = authored * (ls / la);
+        irradiance *= rt_cine_fill;
+        if ((rt_effects & 32) != 0) irradiance += krunker_rt_gi() * PI; // the bounce, as it is
+    } else if ((rt_effects & 32) != 0) irradiance = krunker_gi_irradiance(irradiance); // RT_EFFECT_GI (rt.h)
     if (use_light_map) irradiance += texture(light_map, tex_coord).rgb * light_map_intensity;
+    // Box Office RT AO (1.0 unless RT_EFFECT_AO). Cinematic softens it (ao^0.6): in a small room every AO ray hits,
+    // and with the reduced fill and the curve's toe full-strength AO crushed interiors to near black
+    float ao = krunker_rt_ao();
+    irradiance *= krunker_cine() ? pow(ao, 0.6) : ao;
     vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI + emissive_radiance;
     vec3 sun = light_color.rgb * light_intensity * light_scale * krunker_shadow_mask(normal); // getShadow scales the light
+    if (krunker_cine()) sun *= rt_cine_sun;
     outgoing += krunker_direct(sun, normalize(light_direction), diffuse, normal, view_dir);
 
     for (int i = 0; i < point_light_count && i < MAX_LIGHTS; i++) {
@@ -355,6 +899,7 @@ vec3 krunker_lambert(vec3 diffuse, vec3 normal) {
                 c *= smoothstep(params.z, params.w, angle_cos); // getSpotAttenuation
             }
             c *= distance_attenuation(d, params.x, params.y);
+            c *= krunker_rt_local(i); // Box Office RT local light shadow (1.0 unless RT_EFFECT_LOCAL_LIGHTS)
         }
         outgoing += krunker_direct(c, l, diffuse, normal, view_dir);
     }
@@ -400,8 +945,10 @@ vec3 krunker_scene_env(vec3 albedo, float metalness, float roughness, vec3 n) {
     float r = clamp(max(roughness, 0.0525), 0.0, 1.0);
     vec3 v = normalize(camera_position - world_pos);
     vec3 dir = normalize(mix(reflect(-v, n), n, r * r * r * r));
-    vec3 radiance = krunker_scene_env_sample(dir, r) * scene_env_intensity;
-    vec3 irradiance = krunker_scene_env_sample(n, 1.0) * scene_env_intensity; // iblIrradiance / PI
+    // Box Office RT reflections: the traced radiance along the reflection replaces the PMREM sample (the DFG /
+    // F0 weighting below stays, so the energy matches three's indirectSpecular)
+    vec3 radiance = ((rt_effects & 4) != 0 ? texture(rt_refl, gl_FragCoord.xy * rt_inv_viewport).rgb : krunker_scene_env_sample(dir, r)) * scene_env_intensity;
+    vec3 irradiance = krunker_scene_env_sample(n, 1.0) * scene_env_intensity * krunker_rt_ao(); // iblIrradiance / PI
     vec2 dfg = texture(scene_env_dfg, vec2(r, clamp(dot(n, v), 0.0, 1.0))).rg;
     vec3 single_d, multi_d, single_m, multi_m;
     krunker_multiscatter(vec3(0.04), dfg, single_d, multi_d);
@@ -411,8 +958,78 @@ vec3 krunker_scene_env(vec3 albedo, float metalness, float roughness, vec3 n) {
     return specular + diffuse;
 }
 
+// Box Office filmic shoulder (doc/raytracing.md "Tone mapping and bloom"; rt_filmic, any rtMode > 0, for maps
+// whose own tone mapping is None or Linear, i.e. every shipped map). Krunker's frames are graded with no curve
+// (values are display values), so a full ACES curve would re-grade every map (white walls 0.9 -> 0.74 at
+// exposure 1). The shoulder leaves everything below RT_FILMIC_KNEE untouched and rolls the rest off
+// exponentially toward 1 with slope 1 at the knee, so traced highlights (GGX sun lobes on metal, emissive,
+// bright sand at a high lightI) compress instead of clipping. It runs on the brightest channel and scales the
+// colour by it, which keeps the hue (a clipped orange no longer turns yellow), then desaturates what lies far
+// above 1 toward white as film does. Maps with Reinhard / Cineon / ACES keep their own curve.
+const float RT_FILMIC_KNEE = 0.8;
+#if KN_RT
+uniform bool rt_filmic;
+#else
+const bool rt_filmic = false;
+#endif
+vec3 krunker_filmic_shoulder(vec3 color) {
+    float m = max(max(color.r, color.g), color.b);
+    if (m <= RT_FILMIC_KNEE) return color;
+    float range = 1.0 - RT_FILMIC_KNEE;
+    float shoulder = RT_FILMIC_KNEE + range * (1.0 - exp(-(m - RT_FILMIC_KNEE) / range));
+    vec3 c = color * (shoulder / m);
+    float over = clamp((m - 1.0) * 0.25, 0.0, 0.5); // half-way to white by 3x over
+    return mix(c, vec3(shoulder), over);
+}
+
+// Bloom weight (Box Office rtBloom, render_target.c / rt_bloom.frag): while rt_bloom_out is set (opaque
+// draws into the half-float scene target), alpha = 1 + weight, where weight is how far the colour went above 1
+// before the tone curve plus the material's emissive glow (dim emissive tints stay out of it), faded by fog.
+#if KN_RT
+uniform bool rt_bloom_out;
+uniform float rt_bloom_scale; // RT_VM_BLOOM_SCALE for the first-person viewmodel (rt.h), else 1
+#else
+const bool rt_bloom_out = false;
+const float rt_bloom_scale = 1.0;
+#endif
+const float RT_BLOOM_WEIGHT_MAX = 4.0; // rt.h RT_BLOOM_WEIGHT_MAX
+const float RT_CINE_SPEC_BLOOM = 0.35; // rt.h RT_CINE_SPEC_BLOOM
+float krunker_bloom_weight(vec3 color, vec3 emissive, float fog_amount) {
+    float over = max(max(max(color.r, color.g), color.b) - 1.0, 0.0);
+    float glow = smoothstep(0.25, 1.0, max(max(emissive.r, emissive.g), emissive.b));
+    // Capped (a glint never outweighs a sign) and scrubbed: an unbounded weight from one hot specular texel spread by
+    // the bloom chain into a screen-sized blob, and a NaN would poison every mip of the chain.
+    // Cinematic's low bloom knee would make every hot specular highlight (a gun's sun glint) glow like a light:
+    // there non-emissive over-brightness blooms at RT_CINE_SPEC_BLOOM, so mostly emissives and the sun bloom
+    if (rt_cine) over *= RT_CINE_SPEC_BLOOM;
+    float w = (min(over, RT_BLOOM_WEIGHT_MAX) + glow) * (1.0 - fog_amount) * rt_bloom_scale;
+    return isnan(w) || isinf(w) ? 0.0 : w;
+}
+
+// Cinematic tone curve (rt.h "Cinematic colour pipeline", rt_grade.c): three.js's ACES fit (tone_mapping 4's,
+// below) at RT_CINE_EXPOSURE on top of the preset's exposure, for maps whose own curve is None / Linear. Deeper
+// blacks, a soft highlight roll-off and the film-like saturation the flat Krunker curve lacks.
+const float RT_CINE_CURVE_EXPOSURE = 1.05; // rt.h RT_CINE_EXPOSURE
+vec3 krunker_cine_curve(vec3 color) {
+    const mat3 aces_input = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+    const mat3 aces_output = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+    vec3 x = color * RT_CINE_CURVE_EXPOSURE;
+    vec3 c = aces_input * (x / 0.6);
+    vec3 a = c * (c + 0.0245786) - 0.000090537;
+    vec3 b = c * (0.983729 * c + 0.4329510) + 0.238081;
+    vec3 per_channel = clamp(aces_output * (a / b), 0.0, 1.0);
+    // ACES per channel drifts bright warm colours (sunlit sand, yellow neon) toward white: keep 60 % of the
+    // hue-preserving version (the input's ratios scaled to the curve's peak)
+    float m = max(max(x.r, x.g), x.b);
+    vec3 hue_kept = m > 1e-4 ? x * (max(max(per_channel.r, per_channel.g), per_channel.b) / m) : per_channel;
+    return clamp(mix(per_channel, hue_kept, 0.6), 0.0, 1.0);
+}
+
 // three.js r150 tonemapping_pars_fragment (renderer.toneMapping, toneMappingExposure)
 vec3 krunker_tone_map(vec3 color) {
+    if (krunker_cine()) color *= rt_cine_exposure; // the Cinematic preset's per-map exposure (rt_pass.c cine_exposure)
+    if (krunker_cine() && tone_mapping <= 1) return krunker_cine_curve(tone_mapping == 1 ? tone_mapping_exposure * color : color);
+    if (rt_filmic && tone_mapping <= 1) return krunker_filmic_shoulder(tone_mapping == 1 ? tone_mapping_exposure * color : color);
     if (tone_mapping == 1) return tone_mapping_exposure * color;
     if (tone_mapping == 2) {
         color *= tone_mapping_exposure;
@@ -448,7 +1065,12 @@ vec3 srgb_to_linear(vec3 v) {
 // THREE.Fog(color, 1, fogD): fogFactor = smoothstep(near, far, -mvPosition.z).
 vec3 krunker_fog(vec3 color) {
     float fog_amount = smoothstep(fog_near, fog_far, view_depth);
-    return mix(color, fog_color.rgb, fog_amount);
+    vec3 fog_rgb = fog_color.rgb;
+    // Box Office rtSky aerial perspective (rt_sky.glsl): the fog brightens / warms towards the sun
+#if KN_RT
+    if (psky_on != 0) fog_rgb = psky_fog_color(normalize(world_pos - camera_position), fog_rgb);
+#endif
+    return mix(color, fog_rgb, fog_amount);
 }
 
 // Krunker 31.js texture mapping. Every face is a THREE.PlaneGeometry(1, 1) rotated into
@@ -740,25 +1362,49 @@ void main() {
             normal = normalize(cross(dx, dy));
         }
 
+        float rt_detail_rough = krunker_rt_detail(albedo, normal); // Cinematic surface detail (0 / no-op without rt_cine)
+        if (rt_cine) albedo *= krunker_rt_crease() * krunker_rt_cavity(t_tex_coord.xy);
         vec3 diffuse = albedo;
         if (use_specular_map) specular_strength = texture(specular_map, maps_flip_v ? vec2(t_tex_coord.x, 1.0 - t_tex_coord.y) : t_tex_coord.xy).r;
         if (use_normal_map) normal = krunker_perturb_normal(normal, t_tex_coord.xy, krunker_normal_map_sample(t_tex_coord.xy));
+        normal = krunker_rt_bevel(normal); // Box Office RT bevelled cube edges (no-op unless RT_EFFECT_BEVEL on a map cube)
         float metalness = 0.0, roughness = 1.0;
-        if (use_metal_rough_map || use_scene_env) {
+        bool rt_mat_active = (rt_effects & 128) != 0 && rt_mat_enabled; // RT_EFFECT_MATERIALS: a Box Office class
+        bool rt_water_on = (rt_effects & 32768) != 0 && rt_water_kind > 0 && rt_mat_active; // RT_EFFECT_WATER (rt.h)
+        if (use_metal_rough_map || use_scene_env || rt_mat_active) {
             // MeshStandardMaterial: diffuse = albedo * (1 - metalness), specular F0 = mix(0.04, albedo, metalness),
             // alpha = roughness^2; roughness is clamped as three.js does (0.04 minimum). A GLB env material is
             // shaded so with its factors alone too (v10's GLB materials are MeshStandardMaterial).
             vec3 mr = use_metal_rough_map ? texture(metal_rough_map, t_tex_coord.xy).rgb : vec3(1.0);
-            roughness = clamp(roughness_factor * mr.g, 0.04, 1.0);
-            metalness = clamp(metalness_factor * mr.b, 0.0, 1.0);
+            float mf = rt_mat_active ? rt_mat_metalness : metalness_factor;
+            float rf = rt_mat_active ? rt_mat_roughness : roughness_factor;
+            // A Box Office part mask (use_metal_rough_map with a class: rt_masks.c) stores absolute roughness, metal
+            // parts at 90/255 (rt_masks.c CLASS_VALUES). The class roughness is meant for the metal parts, so the mask
+            // is normalised to it; multiplying the two made the gun's metal a near-mirror (0.5 x 0.35 = 0.18, 0.06
+            // under Cinematic) whose sun highlight bloomed into a white blob.
+            float mask_scale = rt_mat_active && use_metal_rough_map ? 255.0 / 90.0 : 1.0;
+            roughness = clamp(rf * mr.g * mask_scale, 0.04, 1.0);
+            metalness = clamp(mf * mr.b, 0.0, 1.0);
+            if (rt_cine) { // Cinematic: smooth plastic / painted surfaces a step glossier; rough stays matte. Metal keeps
+                // its class roughness (plus the brushed variation): a step glossier turned the first-person gun's
+                // panels into sun mirrors that clipped to white (2x Custom's white area in the receiver crop)
+                if (metalness >= 0.5) roughness = clamp(roughness + rt_detail_rough, 0.06, 1.0);
+                else if (roughness < 0.6) roughness = clamp(roughness - 0.1 + rt_detail_rough, 0.06, 1.0);
+            }
             pbr_active = true;
             pbr_alpha = roughness * roughness;
-            pbr_f0 = mix(vec3(0.04), albedo, metalness);
+            // Box Office classes: the sun / point lights are analytic points, so a near-mirror class gives a GGX peak in
+            // the thousands; floor the alpha of the direct lobe (roughness 0.12) like Filament's minimum roughness.
+            if (rt_mat_active && !rt_water_on) pbr_alpha = max(pbr_alpha, 0.0144); // water / glass keep their sharp sun glint
+            vec3 metal_f0 = rt_mat_active ? max(albedo, vec3(rt_mat_f0)) : albedo;
+            pbr_f0 = mix(vec3(0.04), metal_f0, metalness);
             diffuse = albedo * (1.0 - metalness);
         }
 
         base_color.rgb = krunker_lambert(diffuse, normal);
         if (use_scene_env) base_color.rgb += krunker_scene_env(albedo, metalness, roughness, normal);
+        else if (rt_mat_active && !rt_water_on) base_color.rgb += krunker_rt_mat_specular(max(albedo, vec3(rt_mat_f0)), metalness, roughness, normal);
+        if (rt_water_on) krunker_rt_water(base_color, normal, roughness); // Box Office RT water / glass (rt.h)
     }
 
     if (use_env_map) {
@@ -767,8 +1413,15 @@ void main() {
         if (use_normal_map) n = krunker_perturb_normal(n, t_tex_coord.xy, krunker_normal_map_sample(t_tex_coord.xy));
         vec3 r = reflect(normalize(world_pos - camera_position), n);
         vec2 env_uv = vec2(atan(r.z, r.x) * 0.15915494309189535 + 0.5, asin(clamp(r.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
-        base_color.rgb = albedo * texture(env_map, env_uv).rgb * env_map_intensity + emissive_radiance;
+        // Box Office RT reflections: the traced radiance instead of the skin's equirect env map
+        vec3 env_radiance = (rt_effects & 4) != 0 ? texture(rt_refl, gl_FragCoord.xy * rt_inv_viewport).rgb : texture(env_map, env_uv).rgb;
+        base_color.rgb = albedo * env_radiance * env_map_intensity + emissive_radiance;
     }
+
+    // Box Office RT (dev only, KRUNKNATIVE_RT_FORCE_REFL): RT_EFFECT_FORCE_REFL (16) blends the traced reflection into
+    // every lit surface so the effect can be looked at on maps without reflective materials
+    if ((rt_effects & 16) != 0 && lighting_enabled && !basic_material && !use_env_map)
+        base_color.rgb = mix(base_color.rgb, texture(rt_refl, gl_FragCoord.xy * rt_inv_viewport).rgb, 0.35);
 
     // v10.0.3 fragment tail (three r18x): the material's setupOutput fogs (deob-10.0.3.js:68245-68253), then the
     // renderer's output (getOutput, deob:67960-67961) tone maps it; no output encoding (ColorManagement off, see
@@ -787,6 +1440,19 @@ void main() {
         base_color.rgb = mix(base_color.rgb, strip, krunker_ramp_strip(-across));
     }
 
+    float bloom_weight = 0.0;
+    if (rt_bloom_out) {
+        vec3 pre = tone_mapping == 1 ? tone_mapping_exposure * base_color.rgb : base_color.rgb;
+        float fog_amount = fog_enabled && material_fog_enabled ? smoothstep(fog_near, fog_far, view_depth) : 0.0;
+        bloom_weight = krunker_bloom_weight(pre, emissive_radiance, fog_amount);
+    }
     base_color.rgb = krunker_tone_map(base_color.rgb);
     frag_color = base_color;
+    if (rt_bloom_out) frag_color = vec4(min(base_color.rgb, vec3(1.0)), 1.0 + bloom_weight); // opaque: no blend reads it
+    // Box Office RT water / glass: the surface over the refracted opaque frame (alpha 1: the blend is done here), or,
+    // without this frame's copy, the coverage as alpha for the hardware blend (krunker_rt_water)
+    if (rt_water_out && !rt_bloom_out) {
+        frag_color = rt_water_copy ? vec4(mix(texture(rt_water_scene, rt_water_uv).rgb, base_color.rgb, rt_water_w), 1.0)
+                                   : vec4(base_color.rgb, rt_water_w);
+    }
 }

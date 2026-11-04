@@ -39,6 +39,11 @@ static ClientRenderSettings g_settings;
 const ClientRenderSettings *client_render_settings(void) { return &g_settings; }
 void scene_draw_state(int cull_back, int additive_blend, int depth_write) { (void) cull_back; (void) additive_blend; (void) depth_write; }
 void scene_draw_cull_front(void) {}
+// sky.c's Box Office physical sky hooks (client/src/sky_physical.c is not linked: rtSky stays off here)
+void sky_physical_frame(float delta_ms) { (void) delta_ms; }
+int sky_physical_render(Camera *camera) { (void) camera; return 0; }
+void sky_physical_fini(void) {}
+float rt_grade_exposure(void) { return 0.0f; } // sky.c: the Cinematic curve (rt_grade.c), off here
 
 // True when the asset file exists under assets_path() (the tree may not ship every texture).
 static int asset_exists(const char *relative) {

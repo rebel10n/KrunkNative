@@ -110,6 +110,13 @@ typedef struct {
 } ClientSetting;
 
 static const CsOption WINDOW_MODES[] = {{"0", "Windowed"}, {"2", "Borderless"}, {"1", "Fullscreen"}};
+// Ray tracing (client/include/rt.h RT_MODE_*, render_settings.h rt_*): Box Office-only, Off = Krunker's own look
+static const CsOption RT_MODES[] = {{"0", "Off"}, {"1", "Shadows"}, {"2", "Shadows + AO"}, {"3", "Shadows + AO + Reflections"}};
+static const CsOption RT_SCALES[] = {{"0.25", "25%"}, {"0.5", "50%"}, {"0.75", "75%"}, {"1", "100%"}};
+static const CsOption RT_SAMPLES[] = {{"1", "1"}, {"2", "2"}, {"4", "4"}, {"8", "8"}};
+static const CsOption RT_SHARPEN_LEVELS[] = {{"0", "Off"}, {"1", "Low"}, {"2", "Medium"}, {"3", "High"}};
+static const CsOption RT_PRESETS[] = {{"0", "Custom"}, {"1", "Cinematic"}};
+static const CsOption RT_SUN_RADII[] = {{"0", "Hard"}, {"0.25", "0.25°"}, {"0.5", "0.5°"}, {"1", "1°"}, {"2", "2°"}};
 // online_mode.h: accounts at the account service, or guest with every skin and nothing saved
 static const CsOption ACCOUNT_MODES[] = {{"online", "Online"}, {"offline", "Offline"}};
 
@@ -217,6 +224,36 @@ static const ClientSetting SETTINGS[] = {
      NULL, 0, "Clear Now", "clearCache", "gameplay"},
     {"resetClient", "Reset Client Settings", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB | CS_APP, "", "",
      NULL, 0, "Reset", "resetClient", "gameplay"},
+    // ---- Render > Ray Tracing (Box Office-only; doc/raytracing.md, client/include/rt.h). Game settings
+    // (CS_GAME: setSetting -> client_apply_render_setting, render_settings.h rt_*) in a folder of the game's own
+    // Render tab on both platforms. rtMode Off (the default) draws Krunker's own frame.
+    {"rtMode", "Ray Tracing", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0",
+     "Box Office-only ray-traced lighting: soft sun shadows, ambient occlusion, reflections (reflections cost only where reflective materials are on screen). Off is Krunker's own look",
+     RT_MODES, COUNT(RT_MODES), NULL, NULL, "raytracing"},
+    {"rtScale", "Ray Tracing Resolution", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0.5",
+     "Size of the ray-traced buffers as a share of the scene resolution; 50% is the budget at 1080p, 100% costs about three times as much", RT_SCALES, COUNT(RT_SCALES), NULL, NULL, "raytracing"},
+    {"rtSamples", "Ray Tracing Samples", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "2",
+     "Ambient occlusion rays per pixel each frame: 2 is the budget at 1080p, 4 roughly doubles the AO cost", RT_SAMPLES, COUNT(RT_SAMPLES), NULL, NULL, "raytracing"},
+    {"rtDenoise", "Ray Tracing Denoiser", "Ray Tracing", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "true",
+     "Accumulate the traced result over frames and blur the remaining noise", NULL, 0, NULL, NULL, "raytracing"},
+    {"rtSunRadius", "Ray Traced Sun Size", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0.5",
+     "Angular radius of the sun for the traced shadows: Hard is sharp everywhere, larger softens shadows with distance", RT_SUN_RADII, COUNT(RT_SUN_RADII), NULL, NULL, "raytracing"},
+    {"rtLocalLights", "Ray Traced Light Shadows", "Ray Tracing", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "false",
+     "Shadow rays to the map's point and spot lights, about 1 ms more at 1080p (Box Office-only)", NULL, 0, NULL, NULL, "raytracing"},
+    {"rtTaa", "Temporal Anti-Aliasing", "Ray Tracing", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "false",
+     "Smooths edges over frames with the tracer's motion vectors; with ray tracing Off it still runs the RT prepass (Box Office-only)", NULL, 0, NULL, NULL, "raytracing"},
+    {"rtShafts", "Volumetric Sun Shafts", "Ray Tracing", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "false",
+     "Light shafts and shadowed haze in the map's fog, traced toward the sun; about 1 ms at 1080p, needs Ray Tracing on (Box Office-only)", NULL, 0, NULL, NULL, "raytracing"},
+    {"rtBloom", "Bloom", "Ray Tracing", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "false",
+     "Glow around neon, emissive objects and the brightest highlights; about 0.3 ms at 1080p, needs Ray Tracing on (Box Office-only)", NULL, 0, NULL, NULL, "raytracing"},
+    {"rtSky", "Physical Sky", "Ray Tracing", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "false",
+     "An atmospheric sky with a sun disk, soft clouds and sun-tinted distance haze, keeping the map's own colours and mood; under 0.3 ms, needs Ray Tracing on (Box Office-only)", NULL, 0, NULL, NULL, "raytracing"},
+    {"rtSharpen", "Upscaling Sharpness", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0",
+     "Edge-aware upscaling and sharpening of the scene (rendered at the Resolution setting, 60% by default) instead of a soft stretch; also sharpens after TAA. Needs Ray Tracing on (Box Office-only)",
+     RT_SHARPEN_LEVELS, COUNT(RT_SHARPEN_LEVELS), NULL, NULL, "raytracing"},
+    {"rtPreset", "Ray Tracing Preset", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0",
+     "Cinematic turns every ray-traced effect on at full resolution and lights for looks (deep shadows, strong sun, graded colour) instead of matching Krunker's flat lighting; heavier on the GPU. Custom uses the rows above. Needs Ray Tracing on (Box Office-only)",
+     RT_PRESETS, COUNT(RT_PRESETS), NULL, NULL, "raytracing"},
 };
 
 // ---- localisation. The tab's strings are Krunker Box Office's own: kn.client.<row>.name / .info /
@@ -266,7 +303,27 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("settings.client.resetSettings", "Reset Client Settings")  I18N("settings.reset", "Reset")
 //   I18N("kn.client.cat.display", "Display")  I18N("kn.client.cat.system", "System")  I18N("kn.client.cat.client", "Client")
 //   I18N("kn.client.cat.startup", "Startup")  I18N("kn.client.cat.account", "Account")  I18N("kn.client.cat.privacy", "Privacy")
-//   I18N("kn.client.cat.storage", "Storage")
+//   I18N("kn.client.cat.storage", "Storage")  I18N("kn.client.cat.raytracing", "Ray Tracing")  I18N("kn.client.rt.header", "Ray Tracing")
+//   I18N("kn.client.rtMode.name", "Ray Tracing")
+//   I18N("kn.client.rtMode.info", "Box Office-only ray-traced lighting: soft sun shadows, ambient occlusion, reflections (reflections cost only where reflective materials are on screen). Off is Krunker's own look")
+//   I18N("kn.client.rtMode.opt.0", "Off")  I18N("kn.client.rtMode.opt.1", "Shadows")  I18N("kn.client.rtMode.opt.2", "Shadows + AO")  I18N("kn.client.rtMode.opt.3", "Shadows + AO + Reflections")
+//   I18N("kn.client.rtScale.name", "Ray Tracing Resolution")  I18N("kn.client.rtScale.info", "Size of the ray-traced buffers as a share of the scene resolution; 50% is the budget at 1080p, 100% costs about three times as much")
+//   I18N("kn.client.rtScale.opt.0.25", "25%")  I18N("kn.client.rtScale.opt.0.5", "50%")  I18N("kn.client.rtScale.opt.0.75", "75%")  I18N("kn.client.rtScale.opt.1", "100%")
+//   I18N("kn.client.rtSamples.name", "Ray Tracing Samples")  I18N("kn.client.rtSamples.info", "Ambient occlusion rays per pixel each frame: 2 is the budget at 1080p, 4 roughly doubles the AO cost")
+//   I18N("kn.client.rtSamples.opt.1", "1")  I18N("kn.client.rtSamples.opt.2", "2")  I18N("kn.client.rtSamples.opt.4", "4")  I18N("kn.client.rtSamples.opt.8", "8")
+//   I18N("kn.client.rtDenoise.name", "Ray Tracing Denoiser")  I18N("kn.client.rtDenoise.info", "Accumulate the traced result over frames and blur the remaining noise")
+//   I18N("kn.client.rtSunRadius.name", "Ray Traced Sun Size")
+//   I18N("kn.client.rtSunRadius.info", "Angular radius of the sun for the traced shadows: Hard is sharp everywhere, larger softens shadows with distance")
+//   I18N("kn.client.rtSunRadius.opt.0", "Hard")  I18N("kn.client.rtSunRadius.opt.0.25", "0.25°")  I18N("kn.client.rtSunRadius.opt.0.5", "0.5°")  I18N("kn.client.rtSunRadius.opt.1", "1°")  I18N("kn.client.rtSunRadius.opt.2", "2°")
+//   I18N("kn.client.rtLocalLights.name", "Ray Traced Light Shadows")  I18N("kn.client.rtLocalLights.info", "Shadow rays to the map's point and spot lights, about 1 ms more at 1080p (Box Office-only)")
+//   I18N("kn.client.rtSky.name", "Physical Sky")  I18N("kn.client.rtSky.info", "An atmospheric sky with a sun disk, soft clouds and sun-tinted distance haze, keeping the map's own colours and mood; under 0.3 ms, needs Ray Tracing on (Box Office-only)")
+//   I18N("kn.client.rtTaa.name", "Temporal Anti-Aliasing")  I18N("kn.client.rtTaa.info", "Smooths edges over frames with the tracer's motion vectors; with ray tracing Off it still runs the RT prepass (Box Office-only)")
+//   I18N("kn.client.rtBloom.name", "Bloom")  I18N("kn.client.rtBloom.info", "Glow around neon, emissive objects and the brightest highlights; about 0.3 ms at 1080p, needs Ray Tracing on (Box Office-only)")
+//   I18N("kn.client.rtSharpen.name", "Upscaling Sharpness")  I18N("kn.client.rtSharpen.info", "Edge-aware upscaling and sharpening of the scene (rendered at the Resolution setting, 60% by default) instead of a soft stretch; also sharpens after TAA. Needs Ray Tracing on (Box Office-only)")
+//   I18N("kn.client.rtSharpen.opt.0", "Off")  I18N("kn.client.rtSharpen.opt.1", "Low")  I18N("kn.client.rtSharpen.opt.2", "Medium")  I18N("kn.client.rtSharpen.opt.3", "High")
+//   I18N("kn.client.rtPreset.name", "Ray Tracing Preset")  I18N("kn.client.rtPreset.info", "Cinematic turns every ray-traced effect on at full resolution and lights for looks (deep shadows, strong sun, graded colour) instead of matching Krunker's flat lighting; heavier on the GPU. Custom uses the rows above. Needs Ray Tracing on (Box Office-only)")
+//   I18N("kn.client.rtPreset.opt.0", "Custom")  I18N("kn.client.rtPreset.opt.1", "Cinematic")
+//   I18N("kn.client.rtShafts.name", "Volumetric Sun Shafts")  I18N("kn.client.rtShafts.info", "Light shafts and shadowed haze in the map's fog, traced toward the sun; about 1 ms at 1080p, needs Ray Tracing on (Box Office-only)")
 //   I18N("settings.network.header", "Network")
 //   I18N("settings.interface.header", "Interface")  I18N("settings.gameplay.header", "Gameplay")  I18N("settings.gameprivacy.header", "Gameplay Privacy")
 //   I18N("generic.default", "Default")  I18N("kn.client.requiresRestart", "Requires Restart")
@@ -286,6 +343,9 @@ static const struct { const char *folder, *anchor, *join, *id, *key, *english, *
     {"interface", "interface", "interface", "knInterface", "settings.interface.header", "Interface", NULL},
     {"gameplay", "viewmodel", "gameplay", "knGameplay", "settings.gameplay.header", "Gameplay", "viewmodel"},
     {"privacy", "viewmodel", "gameprivacy", "knPrivacy", "settings.gameprivacy.header", "Gameplay Privacy", NULL},
+    // Render > Ray Tracing: a new folder of the tab with the Quality folder (the basic view's Render tab and the
+    // advanced view's), before Post Processing where the tab has it (advanced), else after the last folder.
+    {"raytracing", "quality", NULL, "knRayTracing", "kn.client.rt.header", "Ray Tracing", "post"},
 };
 
 // i18n_tr("kn.client.<id>.<field>", english); `field` may be "opt.<value>" (non-alphanumerics dropped)

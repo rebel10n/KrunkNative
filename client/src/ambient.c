@@ -692,6 +692,7 @@ static Mesh *ao_build_mesh(const AoBuild *build, const int texture, unsigned int
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     geometry->index_count = (int) (quads * 6);
+    geometry_set_triangles(geometry, (const float *) vertices, (int) (quads * 4), 5, indices, (int) (quads * 6)); // rt.h
 
     free(vertices);
     free(indices);
@@ -762,6 +763,7 @@ void ambient_unload_map(Scene *scene) {
         g_ambient_vbos[i] = 0;
         glDeleteBuffers(1, &geometry->ebo);
         glDeleteVertexArrays(1, &geometry->vao);
+        geometry_free_wire(geometry);
         free(geometry);
 
         mesh_fini(mesh);

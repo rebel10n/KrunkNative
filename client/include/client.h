@@ -40,6 +40,14 @@ typedef struct {
     // which has no wireframe edges and keeps the desktop polygon-mode wireframe. Freed, with
     // wire_ebo, by geometry_free_wire.
     unsigned int *tri_indices;
+    // Ray tracing (rt.h): CPU copy of the triangle vertex positions (xyz per vertex, tri_vertex_count of
+    // them), indexed by tri_indices (index_count indices); NULL = not traceable. Set by
+    // geometry_set_triangles at every world-geometry creation site, kept for the geometry's life.
+    float *tri_positions;
+    int tri_vertex_count;
+    // Bumped whenever tri_positions changes (geometry_set_triangles, a skinned glTF pose in gltf.c): the
+    // tracer refits that geometry's BVH (rt_scene.c) instead of rebuilding it.
+    unsigned tri_epoch;
 } Geometry;
 
 #define NAME geometry_cache_map
@@ -123,6 +131,11 @@ typedef struct {
 } Camera;
 
 void camera_update_projection_matrix(Camera*, float);
+// TAA (render_target.c rtTaa): a sub-pixel offset in NDC units added to every perspective projection
+// built after it (the RT prepass, the world and first-person draws of the frame share it); (0, 0) = none.
+// render_target_begin sets the frame's sample, render_target_end clears it before the HUD / previews.
+void camera_set_jitter(float ndc_x, float ndc_y);
+void camera_get_jitter(float *ndc_x, float *ndc_y);
 void camera_update_world_inverse_matrix(Camera*);
 
 typedef struct {
@@ -147,6 +160,7 @@ struct Material {
 };
 
 unsigned int shader_compile(const char*, const char*);
+unsigned int shader_compile_defines(const char*, const char*, const char *defines); // `defines` after the version line
 void material_update_uniforms(Material*);
 void material_fini(Material*);
 
@@ -325,10 +339,34 @@ typedef struct {
     unsigned int decal_texture;
     vec3 decal_position;
     vec3 decal_half_scale;
+
+    // Box Office ray-tracing material class (rt.h "material classes", rt_materials.c): resolved on demand from the
+    // texture's cached path, the hints below and the paint; cached against rt_resolved_texture / rt_resolved_paint.
+    // rt_class NULL = no class (Krunker's own shading). rt_mask 1: metal_rough_texture is a Box Office part mask
+    // (not a glTF map), so the class factors multiply it.
+    const void *rt_class;
+    float rt_metalness, rt_roughness, rt_reflect, rt_f0;
+    float rt_bump;                 // the class's relief strength (rt_normals.c: the generated normal map's normal_scale)
+    unsigned int rt_bump_texture;  // rt_normals_material's cache: the generated normal map (0 = none / pending) ...
+    unsigned int rt_bump_source;   // ... built for this base texture ...
+    unsigned rt_bump_epoch;        // ... in this rt_normals.c epoch (0 = never resolved)
+    unsigned int rt_resolved_texture;
+    int rt_resolved_paint;         // paint shader the class was resolved with (-2 = never resolved)
+    unsigned rt_resolved_epoch;    // rt_materials.c table epoch of the resolution (a reload re-resolves)
+    int rt_mask;
+    char rt_hint_model[96];        // model path relative to assets ("" = none)
+    int rt_hint_weapon;            // weapon id + 1 (0 = none)
+    int rt_hint_part;              // RT_PART_* (0 = none)
+    // Box Office RT bevel (rt.h RT_EFFECT_BEVEL): the Krunker face mask (map_face_mask bits: 0 +x, 1 -x, 2 +y,
+    // 3 -y, 4 +z, 5 -z) of a map cube built by prefab_build_cube; 0 = not a bevelled cube
+    int rt_bevel_faces;
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
 BasicMaterial *basic_material_init();
+// Picks basic.frag's compile-time variant for this draw (materials/basic.c): scene_render calls it before using
+// material->program. No-op for other material types.
+void basic_material_select_program(Material*);
 
 // Texture unit of BasicMaterial.emissive_texture (unit 0: base map, 1: shadow map).
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2
@@ -388,6 +426,9 @@ typedef struct {
     vec3 target;      // spot / directional: aimed from position at target
     float width, height; // rect full size
     vec3 rotation;    // rect: rotateY(rotation.y) rotateX(rotation.x) rotateZ(rotation.z) (render.js addRectAreaLight)
+    // Box Office ray tracing: a short-lived light (vfx.c muzzle flash / explosion lights, rt.h RT_FLASH_*). The RT
+    // local-light shadows trace it every frame with no history, after the map's lights (rt_pass.c select_local_lights).
+    unsigned char transient;
 } BasicLight;
 
 int basic_lights_add(const BasicLight *light);              // handle > 0, 0 = list full
@@ -399,6 +440,9 @@ void basic_lights_update(int handle, const BasicLight *light);
 // BASIC_MAX_LIGHTS) instead of the registered map lights; count < 0 goes back to the list.
 void basic_lights_override(const BasicLight *lights, int count);
 void basic_lights_remove(int handle);
+// The lights a BasicMaterial draw gets for the `lighting` setting, in basic.frag slot order (up to
+// `max`, BASIC_MAX_LIGHTS at most); the ray tracer's local light shadows (rt_pass.c) use the slots.
+int basic_lights_list(BasicLight *out, int max, int lighting);
 
 typedef enum {
     ROTATION_ORDER_INTRINSIC,
@@ -1128,6 +1172,12 @@ int geometry_cache_reload_all(void);
 // Fills geometry->bound_center/bound_radius from its local vertices (loaders.c); geometry
 // whose vertices move in the shader (liquid waves) must leave the radius at 0.
 void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count);
+// Ray tracing (rt.h): keeps a CPU copy of the triangle list. `positions` are vertex_count vertices,
+// stride_floats floats apart (5 for the interleaved `vertex`, 3 for bare xyz); `indices` are index_count
+// triangle corners (NULL: 0..index_count-1). Replaces tri_positions / tri_indices (freed with the
+// geometry: geometry_free_wire). Not for GL_LINES geometry.
+void geometry_set_triangles(Geometry *geometry, const float *positions, int vertex_count, int stride_floats,
+                            const unsigned int *indices, int index_count);
 // Vertex normals (attribute 3, skin_custom.vert v_normal: the custom skin shaders' displacement along normalLocal,
 // deob-10.0.4.js:92334-92336 / :92404-92406). geometry_compute_normals: three.js computeVertexNormals for an indexed
 // list (area-weighted face normals summed per vertex, normalised; out = 3 floats a vertex). geometry_bind_normals: a

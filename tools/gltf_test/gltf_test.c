@@ -60,6 +60,17 @@ void scene_add_mesh(Scene *scene, Mesh *mesh) { (void) scene; (void) mesh; }
 void scene_remove_mesh(Scene *scene, Mesh *mesh) { (void) scene; (void) mesh; }
 static ClientRenderSettings g_settings;
 const ClientRenderSettings *client_render_settings(void) { return &g_settings; }
+int rt_world_effects(void) { return 0; } // rt.h: no ray tracing in the tool (basic.c)
+int rt_viewmodel_drawing(void) { return 0; }
+int rt_cinematic(void) { return 0; } // rt.h: no Cinematic preset in the tool (basic.c)
+int render_target_bloom_active(void) { return 0; } // render_settings.h: no scene target in the tool (basic.c)
+int env_map_sky_up(float rgb[3]) { (void) rgb; return 0; } // env_map.h: no sky ambient in the tool (basic.c)
+int env_map_has_dome(void) { return 0; }
+int sky_physical_active(void) { return 0; } // sky.h: the Box Office rtSky is off in the tool (basic.c)
+void sky_physical_uniforms(unsigned int program, int on) { (void) program; (void) on; }
+void rt_materials_resolve(BasicMaterial *material) { (void) material; } // rt.h material classes: none in the tool (basic.c, gltf.c)
+unsigned int rt_normals_material(BasicMaterial *material) { (void) material; return 0; } // rt.h generated normal maps: none in the tool (basic.c)
+void rt_materials_hint_model(BasicMaterial *material, const char *model_path) { (void) material; (void) model_path; }
 void scene_draw_state(int cull_back, int additive_blend, int depth_write) { (void) cull_back; (void) additive_blend; (void) depth_write; }
 void scene_draw_cull_front(void) {}
 

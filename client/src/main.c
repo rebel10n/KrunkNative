@@ -36,6 +36,8 @@
 #include <map_post.h>
 #include <sky.h>
 #include <shadow.h>
+#include <rt.h> // --rt-selftest: the ray tracer's CPU BVH against brute force (client/src/rt/rt_selftest.c)
+#include <rt.h> // Box Office ray tracing: rt_frame / rt_begin_world / rt_end_world (client/src/rt/)
 #include <nav_overlay.h>
 #include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
 #include <env_map.h> // v10.0.3 GLB reflections: getEnvMap (env_map.c)
@@ -350,8 +352,9 @@ static void print_usage_to(FILE *out, const char *program) {
                  KN_DEBUG_USAGE
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
                  "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
+                 "       %s --rt-selftest <map.json>   (ray tracer: CPU BVH vs brute force on that map, headless)\n"
                  "       %s --help | -h | --version | --voice-info   (--voice-info: the linked Opus version)\n",
-            program, program, program, program);
+            program, program, program, program, program);
     editor_usage(out); // client/src/editor/editor_bus_link.c
 }
 
@@ -543,6 +546,12 @@ EMSCRIPTEN_KEEPALIVE const char *kn_look_probe(void) {
 
 #endif
 
+// --rt-selftest <map.json>: once the offline map is loaded and drawn, rt_selftest() runs on the world
+// scene and the client exits with its code (rt.h)
+static const char *g_rt_selftest_path;
+static int g_rt_selftest_code;
+static int g_rt_selftest_frames;
+
 #ifndef __EMSCRIPTEN__
 // Ctrl+C / SIGTERM / SIGHUP (native): the handler only records the signal; the main loop sees it
 // and leaves through the normal shutdown below it (window state, net thread, audio, GL, Discord),
@@ -622,6 +631,10 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
         } else if (!strcmp(argv[i], "--render-scenario") && i + 2 < argc) {
             *scenario = argv[++i];
             *scenario_out = argv[++i];
+        } else if (!strcmp(argv[i], "--rt-selftest") && i + 1 < argc) {
+            g_rt_selftest_path = argv[++i]; // an offline game on that map, then rt_selftest() (client_frame)
+            *map_path = g_rt_selftest_path;
+            *offline = 1;
         } else if (argv[i][0] == '-') {
             print_usage(argv[0]);
             return 0;
@@ -1166,6 +1179,7 @@ int main(int argc, char **argv) {
     nav_overlay_fini(); // show_navmeshes: waits for a running build, GL buffers, the line program
     om_build_fini();    // the Object Manager overlay's GL buffers (om_gizmo.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
+    rt_fini();     // ray tracing targets, programs, BVH tables (rt.h)
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
     env_map_fini(); // GLB reflections' getEnvMap table and DFG LUT (env_map.c)
     render_target_fini();
@@ -1181,7 +1195,7 @@ int main(int argc, char **argv) {
     client_settings_exit(); // Discord RPC close; relaunch when a "*" setting asked for a restart
     crash_report_shutdown(); // the watchdog ends with the process (a hang in the teardown above is still a freeze)
 
-    return 0;
+    return g_rt_selftest_code; // 0, or --rt-selftest's result
 #endif
 }
 
@@ -1271,6 +1285,7 @@ void client_unload_map(Client *client) {
     object_manager_restore_map(&client->game); // the Object Manager's map edits: the map's own objects (and meshes) back first
 
     shadow_unload_map();
+    rt_unload_map(); // denoiser history, BLAS cache (rt.h)
     map_post_unload(client->scene);
     zombies_render_unload();
     prize_wheel_render_unload();
@@ -2268,6 +2283,12 @@ void client_tick(Client *client, const float now, const float delta) {
     gpu_timer_mark(GPU_PASS_PAGE);
     input_script_frame_presented(client); // `frames`: every finished frame (input_script.c)
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame
+    if (g_rt_selftest_path && app_mode() == APP_MODE_GAME && client->game.ready && client->map_loaded && ++g_rt_selftest_frames >= 3) {
+        g_rt_selftest_code = rt_selftest(client->scene, g_rt_selftest_path); // the world scene as this frame drew it
+        g_rt_selftest_path = NULL;
+        fflush(stdout);
+        glfwSetWindowShouldClose(client->window, GLFW_TRUE);
+    }
     gpu_timer_frame_end();
 }
 
@@ -2661,6 +2682,16 @@ static void client_tick_game(Client *client, const float now, const float frame_
             scene_remove_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
             scene_add_player_mesh(client->scene, tp_me->mesh, tp_me->loadout_size);
         }
+        // Box Office ray tracing: BVH, prepass, trace, denoise (rt.h; nothing with rtMode 0). After the hides
+        // and the third-person swap above, so it traces exactly the meshes scene_render is about to draw
+        // (the own model in third person, not a sync-hidden or spectated player); it draws into its own
+        // targets and restores the scene target, so the sky already drawn is untouched.
+        // ... and the local player's own shadow in first person (rt_self.c): a caster-only puppet while the own
+        // model is not in the world pass (not third person / class camera), the player is alive and not spectating
+        rt_set_self_caster(client->me, client->me && client->me->active && !tp_me && !spectate_active());
+        rt_frame(client->scene, &client->camera);
+        gpu_timer_mark(GPU_PASS_RT);
+        rt_begin_world(); // the world scene reads the ray-traced result (rt.h); the fps scene does not
         const int warming = scene_warm_frame(client->scene, glfwGetTime() * 1000.0); // warmScene: culling off this frame
         if (warming) scene_set_frustum_culling(0);
         scene_render(client->scene, &client->camera);
@@ -2671,8 +2702,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
         }
         spectate_render_end(client);
         sync_hidden_render_end(client);
+        rt_end_world();
         shadow_end_world();
         gpu_timer_mark(GPU_PASS_WORLD);
+        rt_shafts_composite(); // rtShafts: the traced sun shafts over the world, before its effects and the viewmodel (rt_pass.c)
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
         nav_overlay_render(client); // show_navmeshes: nav areas + connections, over the world (nav_overlay.c)
         om_build_render(client);    // Object Manager: the Physics Gun's beam, the btools' box and handles (om_build.c)
@@ -2698,9 +2731,20 @@ static void client_tick_game(Client *client, const float now, const float frame_
             // weapon (loadMesh options, deob:194600-194660) nor the arms (genArms getMat, deob:232484) set
             // noFog. Only the map's weapon pickups do (genWeaponMeshData, map_post.c). fps_scene keeps fog on.
             if (!scenario) shadow_begin_world(); // v3.1.1 arms/weapon receive the sun shadow too
+            // rtTaa (render_target.c): the viewmodel is drawn without the sub-pixel jitter. rt_taa.frag takes its
+            // pixels as they are (no motion vectors: any history lagged behind the bob / sway), so a jittered weapon
+            // would shimmer; unjittered it is stable. 0 without TAA (no change).
+            float jitter_x, jitter_y;
+            camera_get_jitter(&jitter_x, &jitter_y);
+            camera_set_jitter(0.0f, 0.0f);
+            // Box Office ray tracing (rt.h): the weapon / arms reflect the world and take its bounce
+            if (!scenario) rt_viewmodel_frame(client->fps_scene, &fps_camera);
+            if (!scenario) rt_begin_viewmodel();
             scene_render(client->fps_scene, &fps_camera);
+            if (!scenario) rt_end_viewmodel();
             if (!scenario) shadow_end_world();
             if (!scenario) vfx_render_fps(client, &fps_camera); // first-person muzzle flash
+            camera_set_jitter(jitter_x, jitter_y);
         }
     }
 

@@ -32,3 +32,11 @@ void shadow_end_world(void);
 // Per-draw receiver uniforms for `mesh` (no-op for programs without them).
 void shadow_apply_mesh_uniforms(const Mesh *mesh);
 void shadow_fini(void);
+// rt_scene.c: the sun shadow pass's casting rule for a mesh: 1 = a map-object mesh that casts
+// (shadow_prefab_flags), 0 = a map-object mesh that does not, -1 = not a map object (players, pets,
+// builds, script objects: the ray tracer makes those casters itself unless transparent). O(log n).
+int shadow_mesh_casts(const Mesh *mesh);
+// Ray tracing (rt_pass.c): the sun shadow map of the world pass in progress, for a cheap sun visibility at GI and
+// reflection hits (rt_gi.frag / rt_reflect.frag): 1 with its depth texture, world -> [0,1] matrix (row-major, as
+// shadow_matrix) and depth bias, 0 when no map is active this frame (shadows off, no sun shadow on the map).
+int shadow_sun_map(unsigned int *texture, float matrix[16], float *bias);

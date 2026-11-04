@@ -1,4 +1,5 @@
 #include <client.h>
+#include <rt.h> // rt_materials_hint_*: Box Office material classes
 #include <cosmetics.h>
 #include <gltf.h>
 #include <nettspend.h> // the Drank's cup / pour-up and the Money Spread's cash stack
@@ -80,6 +81,7 @@ ColorCube *generate_color_cube_at(const float width, const float height, const f
 
         Geometry *geo = create_cube_geo();
         BasicMaterial *material = basic_material_init();
+        rt_materials_hint_part(material, RT_PART_BODY); // rt.h material classes (body / head / leg cubes)
 
         Mesh *mesh = mesh_init(geo, (Material *) material);
 
@@ -137,6 +139,8 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     if (third_person) {
         BasicMaterial *upper_material = basic_material_init();
         BasicMaterial *joint_material = basic_material_init();
+        rt_materials_hint_part(upper_material, RT_PART_ARMS); // rt.h material classes
+        rt_materials_hint_part(joint_material, RT_PART_ARMS);
 
         upper_material->color = joint_material->color = krunker_get_color(shirt_color);
 
@@ -165,6 +169,7 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     } else {
         BasicMaterial *material = basic_material_init();
         material->color = krunker_get_color(shirt_color);
+        rt_materials_hint_part(material, RT_PART_ARMS); // rt.h material classes
 
         arm->extender = mesh_init(create_cube_geo(), (Material *) material);
         arm->extender->transform.parent = &arm->anchor;
@@ -297,6 +302,8 @@ PlayerCrouchedLeg *generate_crouched_leg(const int is_left, const int pants_colo
 
     BasicMaterial *upper_material = basic_material_init();
     BasicMaterial *joint_material = basic_material_init();
+    rt_materials_hint_part(upper_material, RT_PART_LEGS); // rt.h material classes
+    rt_materials_hint_part(joint_material, RT_PART_LEGS);
 
     upper_material->color = joint_material->color = krunker_get_color(pants_color);
 
@@ -452,6 +459,7 @@ static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachme
     BasicMaterial *material = basic_material_init();
     material->texture = texture_id;
     material->base.transparent = 1;
+    rt_materials_hint_model(material, model); // rt.h material classes
 
     Mesh *mesh = mesh_init(geometry, (Material *) material);
     mesh->transform.position.x = 0.0f;
@@ -483,6 +491,7 @@ static Mesh *player_prop_mesh(const int prop_id) {
     if (!geometry) return NULL;
     BasicMaterial *material = basic_material_init();
     if (!material) return NULL;
+    rt_materials_hint_model(material, rel); // rt.h material classes ("models/<src>.obj")
     snprintf(rel, sizeof(rel), "textures/%s.png", src);
     path = concat(assets_path(), rel);
     if (path) ensure_asset_file(path);
@@ -1020,6 +1029,7 @@ static Mesh *generate_item_mesh(const ViewerSkin *item, const vec3 at, const vec
 
     BasicMaterial *material = basic_material_init();
     material->texture = texture_id;
+    rt_materials_hint_part(material, RT_PART_COSMETIC); // rt.h material classes
     Mesh *mesh = mesh_init(geometry, (Material *) material);
     mesh->transform.position = at;
     mesh->transform.rotation = rotation;
@@ -1513,6 +1523,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *melee_mat = basic_material_init();
                             melee = mesh_init(melee_geo, (Material *) melee_mat);
                             melee_mat->texture = melee_texture;
+                            rt_mask_apply(melee_mat, model); // rt_masks.c (rtMode > 0)
+                            rt_materials_hint_weapon(melee_mat, player->loadout[i]); // rt.h material classes
                         }
                         arms->weapon_models[0] = melee_model;
                         if (skin && !melee_carrier) {
@@ -1606,6 +1618,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
                             weapon_mat->texture = weapon_tex;
+                            rt_mask_apply(weapon_mat, model); // rt_masks.c: the model's metal / roughness parts (rtMode > 0)
+                            rt_materials_hint_weapon(weapon_mat, player->loadout[i]); // rt.h material classes
                             if (weapon->tint) { // KrunkNative weapons (the Tool Gun): a colour over the reused model
                                 weapon_mat->color = (vec4) {(float) ((weapon->tint >> 16) & 255) / 255.0f, (float) ((weapon->tint >> 8) & 255) / 255.0f,
                                                             (float) (weapon->tint & 255) / 255.0f, 1.0f};

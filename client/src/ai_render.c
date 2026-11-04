@@ -397,6 +397,7 @@ static Geometry *air_halo_geometry(void) {
     glBindVertexArray(0);
     g->index_count = 6;
     g->bound_radius = 0.0f; // never culled
+    geometry_set_triangles(g, (const float *) vertices, 4, 5, indices, 6); // rt.h
     g_halo_geometry = g;
     return g;
 }

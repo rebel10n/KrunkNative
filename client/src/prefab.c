@@ -11,6 +11,7 @@
 // render.addSpinner, painted from the spin state of prize_wheels.c).
 #include <gl.h>
 #include <client.h>
+#include <rt.h> // rt_materials_hint_*: Box Office material classes
 #include <render_settings.h>
 #include <prefabs.h>
 #include <canvas2d.h>
@@ -117,6 +118,7 @@ static Geometry *prefab_upload_geo(const vertex *vertices, const int vertex_coun
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, (long) vertex_count * (long) sizeof(vertex), vertices, GL_STATIC_DRAW);
     geometry_set_bounds(geometry, vertices, (size_t) vertex_count);
+    geometry_set_triangles(geometry, (const float *) vertices, vertex_count, 5, indices, index_count); // rt.h
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long) index_count * (long) sizeof(unsigned int), indices, GL_STATIC_DRAW);
 
@@ -361,6 +363,7 @@ static Geometry *prefab_cube_geo(const int face_mask) {
     glEnableVertexAttribArray(1);
 
     geometry->index_count = (int) index_count;
+    geometry_set_triangles(geometry, (const float *) vertices, (int) (sizeof(vertices) / sizeof(vertices[0])), 5, indices, (int) index_count); // rt.h
     if (face_mask >= 0 && face_mask < 64) cached[face_mask] = geometry;
     return geometry;
 }
@@ -442,6 +445,7 @@ static Geometry *prefab_sphere_geo() {
     glEnableVertexAttribArray(1);
 
     geometry->index_count = index_count;
+    geometry_set_triangles(geometry, (const float *) vertices, vertex_count, 5, indices, index_count); // rt.h
     cached = geometry;
 
     free(vertices);
@@ -1197,6 +1201,8 @@ static Mesh *prefab_model_mesh(const char *model, const char *texture, const int
     if (!material) return NULL;
     Mesh *mesh = mesh_init(geometry, (Material *) material);
     material->texture = no_textures ? 0 : prefab_load_texture_src(texture);
+    rt_materials_hint_model(material, model_path); // rt.h material classes
+    rt_mask_apply(material, model); // rt_masks.c: a weapon pickup's metal / roughness parts (rtMode > 0; no-op without a mask)
     return mesh;
 }
 
@@ -1487,6 +1493,7 @@ static Mesh *prefab_build_cube(Object *object, const cJSON *raw_obj, const Prefa
     prefab_apply_transparency(material, object, st, link_depth_always);
     prefab_apply_side(material, side);
     prefab_apply_lighting_controls(material, object);
+    material->rt_bevel_faces = face_mask & 0x3f; // Box Office RT bevel (rt.h RT_EFFECT_BEVEL): read only while ray tracing
     return mesh;
 }
 

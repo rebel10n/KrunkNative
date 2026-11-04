@@ -12,6 +12,8 @@ typedef enum {
     GPU_PASS_CLEAR,      // the frame's clear (client_tick)
     GPU_PASS_PRE,        // render target clear, the static shadow map (after a map load), ocean mirror
     GPU_PASS_SKY,        // sky dome
+    GPU_PASS_RT,         // ray tracing: BVH upload, prepass, trace, denoise (rt.h; nothing with rtMode 0); after the
+                         // world's hides / third-person swap, before the world scene draw (main.c)
     GPU_PASS_WORLD,      // the world scene
     GPU_PASS_VFX,        // tracers, impacts, particles, nav / Object Manager overlays
     GPU_PASS_VIEWMODEL,  // the first-person scene

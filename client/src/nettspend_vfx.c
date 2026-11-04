@@ -170,6 +170,7 @@ static Geometry *gb_upload(GeoBuilder *b) {
         glBindVertexArray(0);
         geometry->index_count = (int) b->ni;
         geometry_set_bounds(geometry, b->v, b->nv);
+        geometry_set_triangles(geometry, (const float *) b->v, (int) b->nv, 5, b->idx, (int) b->ni); // rt.h
     }
     free(b->v);
     free(b->c);

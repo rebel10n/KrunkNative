@@ -108,6 +108,55 @@ the shared GPU is larger than the change; the CPU sample counts above are the re
 World captures of Kanji and Sandstorm from the 4 fixed cameras match the old build pixel for pixel
 except the ad billboard (a random image).
 
+## Round 3 (2026-11-03): CPU side of the ray-traced frame
+
+Release client, 1920x1080 headless window, RTX 2070 SUPER, `KRUNKNATIVE_GPU_TIMING=1` cpu columns, Kanji pinned
+pose, every timing run under the shared GPU lock (seven forks shared the GPU; the CPU numbers still carry their
+build load, so read the ratios, not the last digit). `perf` cannot attribute this frame: about half the samples are
+the NVIDIA driver spinning in `clock_gettime` on the frame fence (GPU-bound, as in round 1), and neither frame
+pointers nor DWARF unwind through the stripped driver. The breakdown below came from temporary `glfwGetTime`
+sub-timers inside `rt_frame` and `scene_render` (removed again).
+
+Inside `rt_frame`, before (Kanji, mode 2-3): prepass submission 0.20 ms, `rt_scene_build` 0.12 ms, the viewmodel
+sky probe 0.05 ms, the emissive light list 0.045 ms; the passes themselves (uniforms + fullscreen draws) 0.01-0.04
+ms each. In `scene_render` the per-draw RT hook (`rt_apply_mesh_uniforms`) is only ~0.02 ms a frame; the material
+uniforms (`basic.c`, ~0.13 ms) dominate the world pass's CPU.
+
+Fixed:
+
+1. **The RT prepass is frustum-culled** (`rt_pass.c` `prepass`): every traced instance was drawn into the prepass
+   targets, on screen or not (~1700 draws on Kanji). Its world box is now tested against the frame's six planes;
+   an instance wholly outside covers no prepass pixel, so the targets are unchanged (A/B capture within run-to-run
+   noise). Culling, winding, the dynamic flag, the material triple and the VAO are only sent when they differ from
+   the previous draw's. 0.20 -> 0.055 ms.
+2. **`rt_scene_build` skips the state hash** (`rt_scene.c`): a per-position slot cache (the scene keeps its mesh
+   order) turns the per-mesh `Mesh*` hash lookup into a pointer compare; it forgets its indices whenever they
+   change (state sweep, owner reset). 0.12 -> 0.055 ms.
+3. **The emissive light list keeps the best 64 with a bounded heap** instead of sorting every emitter (~770 on
+   Kanji) each frame; ties keep instance order, so the list equals the old stable-sort one (checked against
+   glibc `qsort` on 3000 random sets with ties). 0.045 -> 0.015 ms.
+4. **The viewmodel sky probe traces 2 of its 6 axes a frame**, round robin (`RT_SKY_PROBE_PER_FRAME`), with the
+   blend raised so each axis keeps the same time constant (1 - (1 - 0.15)^3). 48 -> 16 CPU rays, 0.048 -> 0.016 ms.
+5. **`scene_render` binds a VAO only when the geometry changes** (consecutive map cubes share one); the tracking
+   restarts after the water copy, the one in-loop hook that may draw.
+
+cpu column totals (ms), Kanji, locked runs, before -> after:
+
+| mode | before | after | `rt` column before -> after |
+|---|---|---|---|
+| 0 | 0.75 | 0.34 | - |
+| 1 | 0.86 | 0.56 | 0.38 -> 0.14 |
+| 2 | 1.24 | 0.69 | 0.53 -> 0.20 |
+| 3 | 1.33 | 0.81 | 0.58 -> 0.24 |
+| Cinematic | 1.33 | 0.87 | 0.54 -> 0.24 |
+
+Mode 0's world column moved with the machine's load (the mode-0 path changed only by the VAO skip); the mode-0
+frame is pixel-identical to HEAD (Kanji pinned capture, 0-6 px run-to-run noise as before).
+
+Left: the "preview" cpu column (0.03-0.05 ms) is not the class preview in game: it is the frame's sound, voice,
+menu and HUD ticks between the game tick and the page (`client_menu_tick` and friends); the "pre" column grows
+with RT on (0.05 -> ~0.1 ms) and was not broken down.
+
 ## Left
 
 - The HTML HUD composite: measure on an idle GPU before changing glb_submit.

@@ -145,6 +145,7 @@ static Geometry *post_noise_geometry(const Object *object, const double noise, c
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
         geometry->index_count = index_count;
+        geometry_set_triangles(geometry, (const float *) vertices, vertex_count, 5, indices, index_count); // rt.h
     }
 
     free(vertices);
@@ -455,6 +456,7 @@ static void post_builds_clear(void) {
     }
     if (g_batch.geometry.vao) glDeleteVertexArrays(1, &g_batch.geometry.vao);
     if (g_batch.geometry.ebo) glDeleteBuffers(1, &g_batch.geometry.ebo);
+    geometry_free_wire(&g_batch.geometry);
     if (g_batch.vbo) glDeleteBuffers(1, &g_batch.vbo);
     free(g_batch.vertices);
     memset(&g_batch, 0, sizeof(g_batch));
@@ -540,6 +542,7 @@ static void post_batch_upload(Scene *scene) {
     }
     glBindVertexArray(g_batch.geometry.vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_batch.vbo);
+    const int changed = g_batch.realloc || g_batch.dirty_lo < g_batch.dirty_hi;
     if (g_batch.realloc) {
         glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (g_batch.capacity * BUILD_SLOT_FLOATS * sizeof(float)), g_batch.vertices, GL_DYNAMIC_DRAW);
         static const unsigned int pattern[BUILD_SLOT_INDICES] = {
@@ -565,6 +568,20 @@ static void post_batch_upload(Scene *scene) {
     g_batch.dirty_lo = g_batch.dirty_hi = 0;
     g_batch.geometry.index_count = (int) (g_build_count * BUILD_SLOT_INDICES);
     g_batch.mesh->visible = g_build_count > 0;
+    if (changed && g_build_count) { // rt.h: the CPU triangle list follows the buffers (the same slot pattern)
+        static const unsigned int pattern[BUILD_SLOT_INDICES] = {
+            0, 1, 2, 0, 3, 1, 4, 5, 6, 4, 7, 5, 8, 9, 10, 8, 11, 9, 12, 13, 14, 12, 15, 13, 16, 17, 18, 16, 19, 17, 20, 21, 22, 20, 23, 21,
+        };
+        unsigned int *indices = malloc(g_build_count * BUILD_SLOT_INDICES * sizeof(unsigned int));
+        if (indices) {
+            for (size_t s = 0; s < g_build_count; s++) {
+                for (int k = 0; k < BUILD_SLOT_INDICES; k++) indices[s * BUILD_SLOT_INDICES + k] = (unsigned int) (s * PREFAB_BUILD_VERTICES) + pattern[k];
+            }
+            geometry_set_triangles(&g_batch.geometry, g_batch.vertices, (int) (g_build_count * PREFAB_BUILD_VERTICES), PREFAB_BUILD_FLOATS,
+                                   indices, (int) (g_build_count * BUILD_SLOT_INDICES));
+            free(indices);
+        }
+    }
 }
 
 // Every frame: a slot for each build (a new one when a build is new or was replaced at its uid),
