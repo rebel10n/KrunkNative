@@ -535,10 +535,14 @@ jobs:
         working-directory: net-bridge
         run: npm ci
 
-      # client/tests/melee_assets_test checks the melee models and textures the client loads. They are
-      # downloaded game content (gitignored, not in the checkout): fetch the melee part from the download host.
-      - name: Melee game content
-        run: python3 -I tools/assets/fetch_content.py assets --only models/melee/ --only textures/melee/ --only textures/weapons/pat/
+      # client/tests/melee_assets_test checks the melee models and textures the client loads, and
+      # shared/tests/ks_game_v1003_test (AI parts, entity bodies, live asset hit meshes) loads the skinned GLB
+      # of user asset 46802. Both are downloaded game content (gitignored, not in the checkout): fetch them
+      # from the download host.
+      - name: Test game content
+        run: >-
+          python3 -I tools/assets/fetch_content.py assets --only models/melee/ --only textures/melee/
+          --only textures/weapons/pat/ --only user-assets/46802/
 
       - name: make check
         run: make check
