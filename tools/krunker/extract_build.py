@@ -639,6 +639,20 @@ CC_HANDLER_V1 = (
 # The same handler with the loop variables declared in separate `var` statements (webcracked 10.0.3).
 CC_HANDLER_V2 = 'function(P0P1P2)tryV0V1=function(V2V3)V4V4="undefined"!=typeofBuffer?newUint8Array(Buffer.from(V2"base64")):newUint8Array(atob(V2).split("").map(function(V5)returnV5.charCodeAt(0)))V6=KS(V3V4.length)V7=newUint8Array(V4.length)for(V8=0V8<V4.lengthV8++)V7[V8]=V4[V8]^V6[V8]V9=newTextDecoder().decode(V7)returnJSON.parse(V9)(P2P0)tryV0=(0eval)(V1)catch(V10)V0=V11:nullV12:V13:V10.message||"eval_error"V14=function(V15V16)V17=JSON.stringify(V15)for(V18=newTextEncoder().encode(V17)V19=KS(V16V18.length)V20=newUint8Array(V18.length)V21=0V21<V18.lengthV21++)V20[V21]=V18[V21]^V19[V21]if("undefined"!=typeofBuffer)returnBuffer.from(V20).toString("base64")elsereturnbtoa(String.fromCharCode.apply(StringV22(V20)))(V0P0)V23=function(V24V25)for(V26=V25+JSON.stringify(V24)V27=2166136261V28=0V28<V26.lengthV28++)V27=(V27^=V26.charCodeAt(V28))*16777619|0return(V27>>>0).toString(16).padStart(8"0")(V0P0)V29.send(V30.CHEAT_CHECK_RESPONSEP0V14V23)catch(V31)'
 
+# Handler v3 (live since 2026-11-04): v1 with the response bytes spread straight into
+# String.fromCharCode (`btoa(String.fromCharCode(...bytes))`) instead of `.apply(String, toArray(bytes))`;
+# the same bytes, so the same base64.
+CC_HANDLER_V3 = (
+    'function(P0P1P2)tryV0V1=function(V2V3)V4V4="undefined"!=typeofBuffer?newUint8Array(Buffer.from(V2"base64"))'
+    ':newUint8Array(atob(V2).split("").map(function(V5)returnV5.charCodeAt(0)))for(V6=KS(V3V4.length)V7=newUint8Array'
+    '(V4.length)V8=0V8<V4.lengthV8++)V7[V8]=V4[V8]^V6[V8]V9=newTextDecoder().decode(V7)returnJSON.parse(V9)(P2P0)'
+    'tryV0=(0eval)(V1)catch(V10)V0="r":null"e":"_eval":V10.message||"eval_error"V11=function(V12V13)for(V14=JSON.'
+    'stringify(V12)V15=newTextEncoder().encode(V14)V16=KS(V13V15.length)V17=newUint8Array(V15.length)V18=0V18<V15.'
+    'lengthV18++)V17[V18]=V15[V18]^V16[V18]return"undefined"!=typeofBuffer?Buffer.from(V17).toString("base64"):btoa'
+    '(String.fromCharCode(...V17))(V0P0)V19=function(V20V21)for(V22=V21+JSON.stringify(V20)V23=2166136261'
+    'V24=0V24<V22.lengthV24++)V23=16777619*(V23^=V22.charCodeAt(V24))|0return(V23>>>0).toString(16).padStart(8"0")'
+    '(V0P0)V25.send(V26.CHEAT_CHECK_RESPONSEP0V11V19)catch(V27)')
+
 _TOK = re.compile(r"\s+|(" + STR + r")|(" + NUM + r")|(" + IDENT + r")|(.)", re.S)
 
 
@@ -672,8 +686,8 @@ def canonical_js(code, names, drop=("{", "}", ";")):
     nloc = 0
     res = []
     for j, (kind, v) in enumerate(out):
-        if kind == "i" and j and out[j - 1] == ("p", "."):
-            kind = "prop"
+        if kind == "i" and j and out[j - 1] == ("p", ".") and out[max(0, j - 3):j] != [("p", ".")] * 3:
+            kind = "prop"  # x.name; `...name` is a spread of an identifier, not a property
         if kind == "i" and j == 1 and out[0] == ("i", "function"):
             continue  # the function's own (garbled) name
         if kind == "i" and v not in JS_GLOBALS:
@@ -785,7 +799,7 @@ def extract_cheat(src):
         hpre = {p: "P%d" % i for i, p in enumerate(handler[2])}
         hpre[ks] = "KS"
         hcanon = canonical_js(hsrc, hpre, drop=("{", "}", ";", ",", "var"))
-        if hcanon not in (CC_HANDLER_V1, CC_HANDLER_V2):
+        if hcanon not in (CC_HANDLER_V1, CC_HANDLER_V2, CC_HANDLER_V3):
             k = next((i for i, (x, y) in enumerate(zip(hcanon, CC_HANDLER_V1)) if x != y),
                      min(len(hcanon), len(CC_HANDLER_V1)))
             fail("cheat handler", "cc handler shape changed (update krunker_cheat and CC_HANDLER_*) at "
