@@ -9,8 +9,8 @@
 // deob-10.0.3.js:236852; ui_client_settings.c fills that row and servers_ui.c reads only a saved
 // value). 10.0.3 changed no default over 10.0.2: it only added noVideoSkins (false, in the capture).
 //
-// Only v10 values belong here. The KrunkNative Beautiful preset (ui_settings.c BEAUTIFUL) is not a
-// v10 setting, and it is hidden on phones (sync_preset_boxes), as v10 has four presets.
+// Only v10 values belong here. The KrunkNative Beautiful and Ray Traced presets (ui_settings.c
+// KN_PRESETS) are not v10 settings, and they are hidden on phones (sync_preset_boxes), as v10 has four presets.
 #include <ui_settings_defaults.h>
 
 #include <string.h>

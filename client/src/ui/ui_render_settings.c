@@ -36,9 +36,14 @@
 #endif
 
 // 134.js defaults (`val`), colours from 13.js (COLORS).
+// The rows the Cinematic preset (client_render_settings) replaces only while they are at their default
+#define RS_DEFAULT_RESOLUTION 0.6f
+#define RS_DEFAULT_RT_SCALE 0.5f
+#define RS_DEFAULT_RT_SAMPLES 2
+#define RS_DEFAULT_RT_SHARPEN 0
 static ClientRenderSettings g_rs = {
     // Render
-    .resolution = 0.6f, .frame_cap = 0, .anti_alias = 0, .post_processing = 1,
+    .resolution = RS_DEFAULT_RESOLUTION, .frame_cap = 0, .anti_alias = 0, .post_processing = 1,
     .low_spec = 0, .no_textures = 0, .map_details = 1,
     .particles = 1, .particles_dist = 160.0f, .render_dist = 100.0f,
     .shadows = 1, .soft_shadows = 0, .high_res_shadows = 0, .dynamic_shadows = 0, .ambient_shading = 1,
@@ -89,7 +94,7 @@ static ClientRenderSettings g_rs = {
     // swap interval 1 is what v10 does natively. updateRate stays 0 like v10's.
     .vsync = 1, .window_mode = RS_WINDOWED,
     // Ray tracing off: the default frame is Krunker's (rt.h); the other values are what rtMode > 0 starts with
-    .rt_mode = RT_MODE_OFF, .rt_scale = 0.5f, .rt_samples = 2, .rt_denoise = 1, .rt_sun_radius = 0.5f, .rt_local_lights = 0, .rt_taa = 0, .rt_shafts = 0, .rt_bloom = 0, .rt_sky = 0, .rt_sharpen = 0, .rt_preset = 0,
+    .rt_mode = RT_MODE_OFF, .rt_scale = RS_DEFAULT_RT_SCALE, .rt_samples = RS_DEFAULT_RT_SAMPLES, .rt_denoise = 1, .rt_sun_radius = 0.5f, .rt_local_lights = 0, .rt_taa = 0, .rt_shafts = 0, .rt_bloom = 0, .rt_sky = 0, .rt_sharpen = RS_DEFAULT_RT_SHARPEN, .rt_preset = 0,
 };
 
 // The Cinematic preset's view of the settings (render_settings.h client_render_settings): rebuilt when the stored
@@ -121,16 +126,22 @@ const ClientRenderSettings *client_render_settings(void) {
         }
         g_rs_effective = g_rs;
         g_rs_effective.rt_mode = RT_MODE_REFLECTIONS;
-        g_rs_effective.rt_scale = knob_scale >= 0.25f && knob_scale <= 1.0f ? knob_scale : RT_CINE_RT_SCALE;
-        g_rs_effective.rt_samples = 2;
         g_rs_effective.rt_denoise = 1;
+        // The budget rows (rtScale, rtSamples, rtSharpen, the scene resolution): a row still at its default takes
+        // the preset's budget value; a row the player changed keeps the player's value (the Ray Traced settings
+        // preset, ui_settings.c RT_MAX, sets every row to its maximum and the Cinematic look on top; before, the
+        // preset lowered them back to its budget). The dev knobs override either.
+        if (knob_scale >= 0.25f && knob_scale <= 1.0f) g_rs_effective.rt_scale = knob_scale;
+        else if (g_rs.rt_scale == RS_DEFAULT_RT_SCALE) g_rs_effective.rt_scale = RT_CINE_RT_SCALE;
+        if (g_rs.rt_samples == RS_DEFAULT_RT_SAMPLES) g_rs_effective.rt_samples = 2;
         if (!strstr(knob_no, "local")) g_rs_effective.rt_local_lights = 1;
         if (!strstr(knob_no, "taa")) g_rs_effective.rt_taa = 1;
         if (!strstr(knob_no, "bloom")) g_rs_effective.rt_bloom = 1;
         if (!strstr(knob_no, "sky")) g_rs_effective.rt_sky = 1;
         if (!strstr(knob_no, "shafts")) g_rs_effective.rt_shafts = 1;
-        if (!strstr(knob_no, "sharpen")) g_rs_effective.rt_sharpen = 1;
-        g_rs_effective.resolution = knob_res >= 0.1f && knob_res <= 2.0f ? knob_res : RT_CINE_RESOLUTION;
+        if (!strstr(knob_no, "sharpen") && g_rs.rt_sharpen == RS_DEFAULT_RT_SHARPEN) g_rs_effective.rt_sharpen = 1;
+        if (knob_res >= 0.1f && knob_res <= 2.0f) g_rs_effective.resolution = knob_res;
+        else if (g_rs.resolution == RS_DEFAULT_RESOLUTION) g_rs_effective.resolution = RT_CINE_RESOLUTION;
         g_rs_effective_epoch = g_rs_epoch;
     }
     return &g_rs_effective;

@@ -252,7 +252,7 @@ static const ClientSetting SETTINGS[] = {
      "Edge-aware upscaling and sharpening of the scene (rendered at the Resolution setting, 60% by default) instead of a soft stretch; also sharpens after TAA. Needs Ray Tracing on (Box Office-only)",
      RT_SHARPEN_LEVELS, COUNT(RT_SHARPEN_LEVELS), NULL, NULL, "raytracing"},
     {"rtPreset", "Ray Tracing Preset", "Ray Tracing", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0",
-     "Cinematic turns every ray-traced effect on at full resolution and lights for looks (deep shadows, strong sun, graded colour) instead of matching Krunker's flat lighting; heavier on the GPU. Custom uses the rows above. Needs Ray Tracing on (Box Office-only)",
+     "Cinematic turns every ray-traced effect on and lights for looks (deep shadows, strong sun, graded colour) instead of matching Krunker's flat lighting; rows above left at their default take its own budget values, rows you changed keep yours; heavier on the GPU. Custom uses the rows above as they are. Needs Ray Tracing on (Box Office-only)",
      RT_PRESETS, COUNT(RT_PRESETS), NULL, NULL, "raytracing"},
 };
 
@@ -321,7 +321,7 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.rtBloom.name", "Bloom")  I18N("kn.client.rtBloom.info", "Glow around neon, emissive objects and the brightest highlights; about 0.3 ms at 1080p, needs Ray Tracing on (Box Office-only)")
 //   I18N("kn.client.rtSharpen.name", "Upscaling Sharpness")  I18N("kn.client.rtSharpen.info", "Edge-aware upscaling and sharpening of the scene (rendered at the Resolution setting, 60% by default) instead of a soft stretch; also sharpens after TAA. Needs Ray Tracing on (Box Office-only)")
 //   I18N("kn.client.rtSharpen.opt.0", "Off")  I18N("kn.client.rtSharpen.opt.1", "Low")  I18N("kn.client.rtSharpen.opt.2", "Medium")  I18N("kn.client.rtSharpen.opt.3", "High")
-//   I18N("kn.client.rtPreset.name", "Ray Tracing Preset")  I18N("kn.client.rtPreset.info", "Cinematic turns every ray-traced effect on at full resolution and lights for looks (deep shadows, strong sun, graded colour) instead of matching Krunker's flat lighting; heavier on the GPU. Custom uses the rows above. Needs Ray Tracing on (Box Office-only)")
+//   I18N("kn.client.rtPreset.name", "Ray Tracing Preset")  I18N("kn.client.rtPreset.info", "Cinematic turns every ray-traced effect on and lights for looks (deep shadows, strong sun, graded colour) instead of matching Krunker's flat lighting; rows above left at their default take its own budget values, rows you changed keep yours; heavier on the GPU. Custom uses the rows above as they are. Needs Ray Tracing on (Box Office-only)")
 //   I18N("kn.client.rtPreset.opt.0", "Custom")  I18N("kn.client.rtPreset.opt.1", "Cinematic")
 //   I18N("kn.client.rtShafts.name", "Volumetric Sun Shafts")  I18N("kn.client.rtShafts.info", "Light shafts and shadowed haze in the map's fog, traced toward the sun; about 1 ms at 1080p, needs Ray Tracing on (Box Office-only)")
 //   I18N("settings.network.header", "Network")

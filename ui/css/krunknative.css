@@ -140,12 +140,12 @@ html.kn-preview-bg #canvas {
 }
 
 /* Settings > General preset boxes: v7's four .setSugBox2 (279px + 4px borders + 10px margin)
- * fill the row; KrunkNative adds a fifth, Beautiful (ui_settings.c sync_preset_boxes), so the
- * five share the same row width: 5 x (219 + 8 + 10) = 1185px, v7's 4 x (279 + 8 + 10) = 1188px. */
+ * fill the row; KrunkNative adds Beautiful and Ray Traced (ui_settings.c sync_preset_boxes), so
+ * the six share the same row width: 6 x (180 + 8 + 10) = 1188px, v7's 4 x (279 + 8 + 10) = 1188px. */
 .setSugBox2 {
-  width: 219px;
+  width: 180px;
 }
-/* A phone (ui_settings.c sync_preset_boxes) has v10's four boxes and no Beautiful one: they keep
+/* A phone (ui_settings.c sync_preset_boxes) has v10's four boxes and no KN ones: they keep
  * v7's 279px. */
 .setSugBox2.knFour {
   width: 279px;

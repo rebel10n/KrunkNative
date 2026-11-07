@@ -806,8 +806,13 @@ it stops matching Krunker's brightness. `rt_cinematic()` (rt.h) is 1 when it is 
 above 0 and the tracer is supported; `rtMode` 0 still runs none of it.
 
 **Implied settings.** `client_render_settings()` returns the settings in effect: under the preset a copy of the
-stored values with rtMode 3, `rtScale` `RT_CINE_RT_SCALE` (0.4), `rtSamples` 2, `rtLocalLights`, `rtTaa`,
-`rtBloom`, `rtSky`, `rtShafts` on, `rtSharpen` Low and scene resolution `RT_CINE_RESOLUTION` (0.6). The store is
+stored values with rtMode 3, `rtLocalLights`, `rtTaa`, `rtBloom`, `rtSky`, `rtShafts` on, and, for the budget
+rows still at their default, `rtScale` `RT_CINE_RT_SCALE` (0.4), `rtSamples` 2, `rtSharpen` Low and scene
+resolution `RT_CINE_RESOLUTION` (0.6). A budget row the player changed keeps the player's value (before 2026-11-06
+the preset lowered it back to the budget): the **Ray Traced settings preset** (Settings > General, index 5,
+`KN_PRESETS` in ui_settings.c) is Beautiful plus every Ray Tracing row at its maximum (rtMode 3, 100 %, 8 samples,
+denoiser, 2° sun, light shadows, TAA, shafts, bloom, sky, High sharpening) with Cinematic on top, so it runs the
+look at full resolution; the **Beautiful** preset sets rtMode 0 and rtPreset Custom (Krunker's frame). The store is
 never written, so Custom returns to the player's own rows; `client_render_settings_stored()` reads the store. Dev
 tuning knobs: `KRUNKNATIVE_RT_CINE_RES`, `KRUNKNATIVE_RT_CINE_SCALE`, `KRUNKNATIVE_RT_CINE_NO=shafts,bloom,local,taa,sky,sharpen`.
 

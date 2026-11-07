@@ -8,7 +8,7 @@
 // work).
 #include <ui_logic.h>
 #include "klog.h"
-#include <ui_mobile.h> // the phone defaults (collect_defaults) and the Beautiful preset's phone hiding
+#include <ui_mobile.h> // the phone defaults (collect_defaults) and the KN presets' phone hiding
 #include <ui_settings_defaults.h> // v10's phone and desktop defaults (ui_settings_defaults.c)
 #include <audio.h>
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
@@ -638,13 +638,24 @@ static const SettingPreset PRESETS[] = {
     {"noVideoSkins", NULL, "true"},
 };
 
-// KrunkNative addition: the "Beautiful" preset (index 4: a fifth .setSugBox2 "Highest graphics
-// quality" after Performance, and an option of #settingsPreset; v7.1.4 has Default / Pro /
-// Performance / Custom only, doc/v7/decisions.md). Like Pro/Performance it sets these keys and
-// every other setting to its default, and it persists the same way (preIndex = 4; leaving
-// Custom saves krk_customPre, going back to Custom restores it). This table is the one place
-// its values live. Each is the top of what v7's settings list offers (settings.js), checked
-// against what KrunkNative renders (render_settings.h):
+// KrunkNative addition: two quality presets after v10's four (doc/v7/decisions.md "Settings presets"):
+//   4 "Beautiful"  the highest quality of Krunker's own settings, ray tracing off (rtMode 0, rtPreset Custom:
+//                  the frame is Krunker's, doc/raytracing.md)
+//   5 "Ray Traced" Beautiful plus every row of the Render tab's Ray Tracing folder (ui_client_settings.c,
+//                  Box Office-only) at its maximum: rtMode 3 (Shadows + AO + Reflections), 100 % resolution,
+//                  8 samples, the denoiser, the softest sun (2 degrees), light shadows, TAA, sun shafts, bloom,
+//                  the physical sky, High sharpening and the Cinematic look (rtPreset 1; it keeps these rows,
+//                  client_render_settings() in ui_render_settings.c)
+// Each is a .setSugBox2 after Performance and an option of #settingsPreset (sync_preset_boxes /
+// sync_preset_select; a phone has v10's four presets only). Like Pro / Performance a preset sets its keys
+// and every other setting to its default, and it persists the same way (preIndex = 4 / 5; leaving Custom
+// saves krk_customPre, going back to Custom restores it). The Ray Tracing rows are generated, not scraped,
+// so they are not in g_defaults: listing them here (RT_MAX) is what makes each_setting visit them, so that
+// Beautiful, Default, Pro and Performance reset them to their defaults (ray tracing off) instead of
+// keeping the player's values. These tables are the one place the presets' values live.
+//
+// QUALITY: the top of what v7's settings list offers (settings.js), checked against what KrunkNative
+// renders (render_settings.h):
 //   resolution 1        the scene FBO at the window's own size (dpr x 1 on the web): the
 //                       slider goes to 2 (supersampling), but the user asked for 1.0 (2x
 //                       costs four times the fill rate for little gain); antiAlias smooths
@@ -668,7 +679,11 @@ static const SettingPreset PRESETS[] = {
 // screenShake, showSpdLines, aspectRatio (window), saturationn/hue/vignette/menu filters
 // (colour grading is taste, the defaults are the maps' intended colours), HUD/viewmodel,
 // and the KrunkNative-only vsync/windowMode (device choices, not quality).
-static const struct { const char *key, *value; } BEAUTIFUL[] = {
+typedef struct {
+    const char *key, *value;
+} KnPresetValue;
+
+static const KnPresetValue QUALITY[] = {
     {"resolution", "1"}, {"updateRate", "0"}, {"antiAlias", "true"}, {"postProcessing", "true"},
     {"lowSpec", "false"}, {"noTex", "false"}, {"mapDet", "true"}, {"particles", "true"},
     {"particlesDist", "1000"}, {"renderDist", "100"}, {"reflection", "6"}, {"shadows", "true"},
@@ -678,13 +693,56 @@ static const struct { const char *key, *value; } BEAUTIFUL[] = {
     {"lighting", "3"}, {"useDamageOverlay", "true"}, {"bulletCasings", "true"}, {"impactHoles", "true"},
     {"showExplo", "true"},
 };
-#define PRESET_BEAUTIFUL 4
+// Ray tracing off: Krunker's own frame (the other rt* rows go to their defaults through RT_MAX's keys)
+static const KnPresetValue RT_OFF[] = {{"rtMode", "0"}, {"rtPreset", "0"}};
+// Every Ray Tracing row at its maximum (the option tables of ui_client_settings.c: RT_MODES, RT_SCALES,
+// RT_SAMPLES, RT_SUN_RADII, RT_SHARPEN_LEVELS, RT_PRESETS)
+static const KnPresetValue RT_MAX[] = {
+    {"rtMode", "3"}, {"rtScale", "1"}, {"rtSamples", "8"}, {"rtDenoise", "true"}, {"rtSunRadius", "2"},
+    {"rtLocalLights", "true"}, {"rtTaa", "true"}, {"rtShafts", "true"}, {"rtBloom", "true"}, {"rtSky", "true"},
+    {"rtSharpen", "3"}, {"rtPreset", "1"},
+};
 
-static const char *beautiful_value(const char *key) {
-    for (size_t i = 0; i < sizeof(BEAUTIFUL) / sizeof(BEAUTIFUL[0]); i++) {
-        if (!strcmp(BEAUTIFUL[i].key, key)) return BEAUTIFUL[i].value;
+typedef struct {
+    const char *name_key, *name, *info_key, *info; // I18N of the box / option and its tooltip
+    const KnPresetValue *tables[2];
+    size_t counts[2];
+} KnPreset;
+
+#define PRESET_KN_BASE 4 // preIndex of the first KN preset (v10: 0 Default, 1 Pro, 2 Custom, 3 Performance)
+// The strings of the table below, for tools/i18n-import/i18n_lint.py:
+//   I18N("kn.settings.preset.beautiful", "Beautiful")  I18N("kn.settings.preset.beautifulInfo", "Highest graphics quality, no ray tracing")
+//   I18N("kn.settings.preset.raytraced", "Ray Traced")  I18N("kn.settings.preset.raytracedInfo", "Beautiful plus every ray tracing setting at its maximum")
+static const KnPreset KN_PRESETS[] = {
+    {"kn.settings.preset.beautiful", "Beautiful", "kn.settings.preset.beautifulInfo", "Highest graphics quality, no ray tracing",
+     {QUALITY, RT_OFF}, {sizeof(QUALITY) / sizeof(QUALITY[0]), sizeof(RT_OFF) / sizeof(RT_OFF[0])}},
+    {"kn.settings.preset.raytraced", "Ray Traced", "kn.settings.preset.raytracedInfo", "Beautiful plus every ray tracing setting at its maximum",
+     {QUALITY, RT_MAX}, {sizeof(QUALITY) / sizeof(QUALITY[0]), sizeof(RT_MAX) / sizeof(RT_MAX[0])}},
+};
+#define PRESET_KN_COUNT ((int) (sizeof(KN_PRESETS) / sizeof(KN_PRESETS[0])))
+
+static int is_kn_preset(const int index) {
+    return index >= PRESET_KN_BASE && index < PRESET_KN_BASE + PRESET_KN_COUNT;
+}
+
+// The value a KN preset gives `key` (JSON text), NULL = the default.
+static const char *kn_preset_value(const int index, const char *key) {
+    if (!is_kn_preset(index)) return NULL;
+    const KnPreset *p = &KN_PRESETS[index - PRESET_KN_BASE];
+    for (size_t t = 0; t < 2; t++) {
+        for (size_t i = 0; i < p->counts[t]; i++) {
+            if (!strcmp(p->tables[t][i].key, key)) return p->tables[t][i].value;
+        }
     }
     return NULL;
+}
+
+// 1 when some KN preset sets `key` (a setting the presets know even when the page does not)
+static int kn_preset_key(const char *key) {
+    for (int i = 0; i < PRESET_KN_COUNT; i++) {
+        if (kn_preset_value(PRESET_KN_BASE + i, key)) return 1;
+    }
+    return 0;
 }
 
 static const SettingPreset *preset_for(const char *key) {
@@ -717,8 +775,26 @@ static void each_setting(SettingVisit fn, void *user) {
     for (size_t i = 0; i < sizeof(PRESETS) / sizeof(PRESETS[0]); i++) {
         if (!cJSON_GetObjectItem(g_defaults, PRESETS[i].key)) fn(PRESETS[i].key, NULL, user);
     }
-    for (size_t i = 0; i < sizeof(BEAUTIFUL) / sizeof(BEAUTIFUL[0]); i++) {
-        if (!cJSON_GetObjectItem(g_defaults, BEAUTIFUL[i].key) && !preset_for(BEAUTIFUL[i].key)) fn(BEAUTIFUL[i].key, NULL, user);
+    for (int p = 0; p < PRESET_KN_COUNT; p++) {
+        const KnPreset *kp = &KN_PRESETS[p];
+        for (size_t t = 0; t < 2; t++) {
+            for (size_t i = 0; i < kp->counts[t]; i++) {
+                const char *key = kp->tables[t][i].key;
+                if (cJSON_GetObjectItem(g_defaults, key) || preset_for(key)) continue;
+                // once: a key of several KN tables (rtMode in RT_OFF and RT_MAX) is visited on its first table
+                int seen = 0;
+                for (int q = 0; q <= p && !seen; q++) {
+                    const KnPreset *kq = &KN_PRESETS[q];
+                    for (size_t u = 0; u < 2 && !seen; u++) {
+                        const size_t end = (q == p && u == t) ? i : kq->counts[u];
+                        for (size_t j = 0; j < end; j++) {
+                            if (!strcmp(kq->tables[u][j].key, key)) { seen = 1; break; }
+                        }
+                    }
+                }
+                if (!seen) fn(key, NULL, user);
+            }
+        }
     }
 }
 
@@ -744,7 +820,7 @@ static void preset_visit(const char *key, const cJSON *def, void *user) {
     }
     if (r->from == 2 && val) cJSON_AddItemToObject(r->custom, key, cJSON_Duplicate(val, 1));
     const SettingPreset *p = preset_for(key);
-    const char *lit = r->target == PRESET_BEAUTIFUL ? beautiful_value(key) : p ? (r->target == 1 ? p->pro : p->perf) : NULL;
+    const char *lit = is_kn_preset(r->target) ? kn_preset_value(r->target, key) : p ? (r->target == 1 ? p->pro : p->perf) : NULL;
     cJSON *pv = lit ? cJSON_Parse(lit) : NULL;
     if (pv) batch_set(key, pv);
     else if (def) batch_set(key, def);
@@ -753,12 +829,12 @@ static void preset_visit(const char *key, const cJSON *def, void *user) {
 }
 
 // selectSettingPre(hj, hk, hl) after the confirm: hj 0 Default, 1 Pro, 3 Performance,
-// 2 Custom (restores what was saved in krk_customPre when leaving Custom).
+// 2 Custom (restores what was saved in krk_customPre when leaving Custom), 4 / 5 KN_PRESETS.
 static void preset_apply(const int target, const int keep_custom, const int silent) {
     const int from = preset_index();
     if (from == target) return;
     g_save_batch++;
-    if (target == 0 || target == 1 || target == 3 || target == PRESET_BEAUTIFUL) {
+    if (target == 0 || target == 1 || target == 3 || is_kn_preset(target)) {
         PresetRun r = {target, from, cJSON_CreateObject()};
         each_setting(preset_visit, &r);
         if (from == 2) {
@@ -773,7 +849,7 @@ static void preset_apply(const int target, const int keep_custom, const int sile
             cJSON *saved = cJSON_Parse(buf);
             const cJSON *item;
             cJSON_ArrayForEach(item, saved) {
-                if (item->string && (cJSON_GetObjectItem(g_defaults, item->string) || preset_for(item->string))) batch_set(item->string, item);
+                if (item->string && (cJSON_GetObjectItem(g_defaults, item->string) || preset_for(item->string) || kn_preset_key(item->string))) batch_set(item->string, item);
             }
             cJSON_Delete(saved);
         }
@@ -788,17 +864,22 @@ static void preset_apply(const int target, const int keep_custom, const int sile
 }
 
 // The preset <select> shows the current preset (the static capture says Custom), with
-// KrunkNative's Beautiful option added after Performance.
+// KrunkNative's Beautiful and Ray Traced options added after Performance (before Custom).
 static void sync_preset_select(void) {
     HtmlElem sel = html_dom_by_id("settingsPreset");
     if (!sel) return;
-    // a phone has v10's four presets (no Beautiful option)
-    if (!ui_mobile_active() && !html_dom_query(sel, "option[value=\"4\"]")) {
-        HtmlElem custom = html_dom_query(sel, "option[value=\"2\"]");
-        char option[128];
-        snprintf(option, sizeof(option), "<option value=\"4\">%s</option>", I18N("kn.settings.preset.beautiful", "Beautiful"));
-        if (custom) html_dom_insert_html(custom, HTML_INSERT_BEFORE_BEGIN, option);
-        else html_dom_insert_html(sel, HTML_INSERT_BEFORE_END, option);
+    // a phone has v10's four presets (no KN options)
+    if (!ui_mobile_active()) {
+        for (int i = 0; i < PRESET_KN_COUNT; i++) {
+            char value_sel[32], option[160];
+            snprintf(value_sel, sizeof(value_sel), "option[value=\"%d\"]", PRESET_KN_BASE + i);
+            if (html_dom_query(sel, value_sel)) continue;
+            const KnPreset *p = &KN_PRESETS[i];
+            snprintf(option, sizeof(option), "<option value=\"%d\">%s</option>", PRESET_KN_BASE + i, i18n_tr(p->name_key, p->name));
+            HtmlElem custom = html_dom_query(sel, "option[value=\"2\"]");
+            if (custom) html_dom_insert_html(custom, HTML_INSERT_BEFORE_BEGIN, option);
+            else html_dom_insert_html(sel, HTML_INSERT_BEFORE_END, option);
+        }
     }
     char idx[16];
     snprintf(idx, sizeof(idx), "%d", preset_index());
@@ -900,10 +981,10 @@ static void audio_input_options(const HtmlElem select) {
 }
 
 // The General tab's preset boxes (v7 windows[0] tabIndex 0: setSugBox2 Default / Pro /
-// Performance / Custom, each with its .setSugInf tooltip) get KrunkNative's Beautiful box
-// after Performance, in the same markup, so it is clicked and hovered like the others. Added
-// here rather than in ui/windows (a re-import of the v7 templates would drop it); the five
-// boxes share the row (css/krunknative.css narrows .setSugBox2). A phone has no Beautiful box: v10
+// Performance / Custom, each with its .setSugInf tooltip) get KrunkNative's Beautiful and Ray Traced
+// boxes after Performance, in the same markup, so they are clicked and hovered like the others. Added
+// here rather than in ui/windows (a re-import of the v7 templates would drop them); the six
+// boxes share the row (css/krunknative.css narrows .setSugBox2). A phone has no KN boxes: v10
 // shows its four boxes at v7's width (the knFour class, krunknative.css), so none is added there.
 static void sync_preset_boxes(const HtmlElem root) {
     if (ui_mobile_active()) {
@@ -913,14 +994,24 @@ static void sync_preset_boxes(const HtmlElem root) {
         free(boxes);
         return;
     }
-    if (html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(4)\"]")) return;
-    const HtmlElem perf = html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(3)\"]");
-    if (!perf) return;
-    char box[512];
-    snprintf(box, sizeof(box), "<div class=\"setSugBox2\" onclick=\"selectSettingPre(4)\">%s<div class=\"segSugIH\">"
-                               "<div class=\"setSugInf\">%s</div></div></div>",
-             I18N("kn.settings.preset.beautiful", "Beautiful"), I18N("kn.settings.preset.beautifulInfo", "Highest graphics quality"));
-    html_dom_insert_html(perf, HTML_INSERT_AFTER_END, box);
+    HtmlElem after = html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(3)\"]");
+    if (!after) return;
+    for (int i = 0; i < PRESET_KN_COUNT; i++) {
+        char sel[64], box[512];
+        snprintf(sel, sizeof(sel), ".setSugBox2[onclick=\"selectSettingPre(%d)\"]", PRESET_KN_BASE + i);
+        HtmlElem have = html_dom_query(root, sel);
+        if (have) {
+            after = have;
+            continue;
+        }
+        const KnPreset *p = &KN_PRESETS[i];
+        snprintf(box, sizeof(box), "<div class=\"setSugBox2\" onclick=\"selectSettingPre(%d)\">%s<div class=\"segSugIH\">"
+                                   "<div class=\"setSugInf\">%s</div></div></div>",
+                 PRESET_KN_BASE + i, i18n_tr(p->name_key, p->name), i18n_tr(p->info_key, p->info));
+        html_dom_insert_html(after, HTML_INSERT_AFTER_END, box);
+        after = html_dom_query(root, sel);
+        if (!after) return;
+    }
 }
 
 // One control of a per-weapon row rewritten to edit "<key>_<weapon>": its id (slid_<key>,

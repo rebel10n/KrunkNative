@@ -8,7 +8,8 @@ Headless client_bin runs (offline Kanji, private XDG_CONFIG_HOME):
   1. a fresh store paces with vsync on (the native default); KRUNKNATIVE_VSYNC=0 turns it off.
   2. KRUNKNATIVE_FRAME_CAP beats a saved updateRate for the whole run (before, the saved value
      replaced it as soon as the page pushed the stored settings).
-  3. selectSettingPre(4) (Beautiful) stores resolution 1, not 2.
+  3. selectSettingPre(4) (Beautiful) stores resolution 1, not 2, and turns a stored rtMode 3 off;
+     selectSettingPre(5) (Ray Traced) stores Beautiful's keys plus every Ray Tracing row at its maximum.
   4. SIGINT and SIGTERM end the client through its normal shutdown: exit code 0, a
      "[client] SIG...: shutting down" line, no crash.
   5. a windowed run (xvfb-run, a private X server; needs xvfb-run) with vsync off and no frame cap
@@ -67,6 +68,7 @@ def env_for(name, script=None, extra=None):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg_dir(name),
                 "XDG_STATE_HOME": os.path.join(WORK, name, "state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_FPS_LOG": "1",
+                "KRUNKNATIVE_DEBUG": "2",  # the "[ui] setting ..." lines are level-2 (klog.h)
                 "KRUNKNATIVE_WINDOW_SIZE": "640x360"})
     if script is not None:
         path = os.path.join(WORK, name, "input.script")
@@ -145,7 +147,9 @@ def main():
         saved = {}
     check("the saved updateRate stays in the store", saved.get("updateRate") == 30, str(saved.get("updateRate")))
 
-    # 3. Beautiful preset: resolution 1
+    # 3. Beautiful preset: resolution 1, and ray tracing off (the rt* rows are generated, not scraped: before,
+    #    a preset kept the player's rtMode)
+    write_store("beautiful", "knSettings", json.dumps({"rtMode": 3, "rtScale": 1, "rtBloom": True}))
     code, text = run("beautiful", "0 menu\n800 call selectSettingPre 4\n1800 quit\n")
     try:
         stored = json.loads(read_store("beautiful", "knSettings") or "{}")
@@ -156,6 +160,24 @@ def main():
     check("Beautiful still stores its quality keys (antiAlias, lighting 3)",
           stored.get("antiAlias") is True and stored.get("lighting") == 3, f"antiAlias={stored.get('antiAlias')!r} lighting={stored.get('lighting')!r}")
     check("the client applied resolution=1", re.search(r"\[ui\] setting resolution=1\b", text), "no [ui] setting resolution=1")
+    check("Beautiful turns ray tracing off (rtMode 0, rtPreset 0, the other rt rows at their defaults)",
+          stored.get("rtMode") == 0 and stored.get("rtPreset") == 0 and "rtScale" not in stored and "rtBloom" not in stored,
+          f"rtMode={stored.get('rtMode')!r} rtPreset={stored.get('rtPreset')!r} rtScale={stored.get('rtScale')!r} rtBloom={stored.get('rtBloom')!r}")
+
+    # 3b. Ray Traced preset: Beautiful's keys plus every Ray Tracing row at its maximum
+    code, text = run("raytraced", "0 menu\n800 call selectSettingPre 5\n1800 quit\n")
+    try:
+        stored = json.loads(read_store("raytraced", "knSettings") or "{}")
+    except ValueError:
+        stored = {}
+    check("Ray Traced is the selected preset", read_store("raytraced", "preIndex") in ("5", '"5"'), str(read_store("raytraced", "preIndex")))
+    check("Ray Traced stores Beautiful's quality keys (resolution 1, antiAlias, lighting 3)",
+          stored.get("resolution") == 1 and stored.get("antiAlias") is True and stored.get("lighting") == 3,
+          f"resolution={stored.get('resolution')!r} antiAlias={stored.get('antiAlias')!r} lighting={stored.get('lighting')!r}")
+    rt_max = {"rtMode": 3, "rtScale": 1, "rtSamples": 8, "rtDenoise": True, "rtSunRadius": 2, "rtLocalLights": True,
+              "rtTaa": True, "rtShafts": True, "rtBloom": True, "rtSky": True, "rtSharpen": 3, "rtPreset": 1}
+    wrong = {k: stored.get(k) for k, v in rt_max.items() if stored.get(k) != v}
+    check("Ray Traced stores every Ray Tracing row at its maximum", not wrong, str(wrong))
 
     # 4. SIGINT / SIGTERM: the normal shutdown, exit 0
     for sig in (signal.SIGINT, signal.SIGTERM):

@@ -329,10 +329,12 @@ int rt_supported(void);
 // rt_supported()'s answer without any GL call: 0 until the first rt_frame checked the context (settings code).
 int rt_supported_cached(void);
 // The look-first Cinematic preset (rtPreset 1, doc/raytracing.md "Cinematic preset"): 1 when it is selected, the
-// stored rtMode is > 0 and the tracer is supported. It implies rtMode 3's effects, rtScale 1, rtSamples 2,
-// rtLocalLights / rtTaa / rtBloom / rtSky / rtShafts on, rtSharpen Low and resolution RT_CINE_RESOLUTION (applied through
-// client_render_settings(), never written to the store), and gates the look changes (deep shadows, sun, GI /
-// AO / exposure balance, grading, surface detail strength) that break Krunker's brightness on purpose.
+// stored rtMode is > 0 and the tracer is supported. It implies rtMode 3's effects, rtLocalLights / rtTaa / rtBloom /
+// rtSky / rtShafts on, and for the rows still at their default rtScale RT_CINE_RT_SCALE, rtSamples 2, rtSharpen Low
+// and resolution RT_CINE_RESOLUTION (rows the player changed keep their value: the Ray Traced settings preset has
+// them at their maximum; applied through client_render_settings(), never written to the store), and gates the look
+// changes (deep shadows, sun, GI / AO / exposure balance, grading, surface detail strength) that break Krunker's
+// brightness on purpose.
 int rt_cinematic(void);
 // `client_bin --rt-selftest <map.json>` (main.c, once the offline map is loaded and drawn): builds the
 // scene over `scene` (the world scene), fires random rays, BVH vs brute force; returns the exit code.
