@@ -296,6 +296,7 @@ static void client_apply_map_lighting(const Map *map, const GameMode *mode) {
 
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
     sky_load(mode_sky ? NULL : raw); // renderer.init: no sky dome when the mode sets skyCol
+    sky_physical_set_map(map); // rtSky: the sun the map draws itself, after the light direction above (sky_physical.c)
     map_environment_map_loaded(map, mode); // toneMapping / exposure, physical lights, ocean, zone -1, getEnvMap (map_environment.c)
 }
 

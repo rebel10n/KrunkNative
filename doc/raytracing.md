@@ -665,10 +665,19 @@ refracted view of the scene behind them (rt.h "water and glass", rt_pass.c `wate
 `rt_sky.frag` (shared math in `rt_sky.glsl`, CPU side in `client/src/sky_physical.c`), called first from
 `sky_render`. A map with a textured `skyDomeTex` dome keeps Krunker's picture.
 
-- **Atmosphere:** Rayleigh single scattering with horizon whitening, a limb-darkened sun disk along
-  `g_render_lighting.light_direction` (so it matches the shadows) of radius max(`rtSunRadius`, 0.4 degrees), a
-  sharp Henyey-Greenstein aureole (g 0.95), a drifting fbm cloud layer that advances with `textureAnim`, and
-  faint stars on night maps.
+- **Atmosphere:** Rayleigh single scattering with horizon whitening, a limb-darkened sun disk of radius
+  max(`rtSunRadius`, 0.4 degrees), a sharp Henyey-Greenstein aureole (g 0.95), a drifting fbm cloud layer that
+  advances with `textureAnim`, and faint stars on night maps. The disk, the aureole, the Mie lobe, the clouds'
+  forward brightening and the fog tint point along `psky_disk`; elevation terms (air mass, day factor, sun
+  colour) use `psky_sun` = `g_render_lighting.light_direction`, which the shadows and the shafts keep.
+- **The map's own sun:** many Krunker maps draw their sun themselves as LIGHT_CONE prefabs parked high above the
+  playable area (Burg: three stacked 1 400 units out; Oasis, Evacuation, Lumber, Habitat, Facility, Lagoon,
+  Tortuga, Citadel). With the disk on the light direction the player saw two suns, 15 degrees apart on Burg.
+  `sky_physical_set_map` (called after the map lighting) takes the light cones 200 units above the 99th
+  percentile of the other objects' heights, picks the one nearest the light direction from the map's centre when
+  it is within 40 degrees (Kanji's lanterns and Erupt's volcano glow are not), averages the cones within 5 degrees
+  of it, and `psky_disk` then points at that position from the camera each frame, so the disk and aureole sit on
+  the authored glow. Otherwise `psky_disk` is `psky_sun`.
 - **Map mood:** brightness always follows the map's authored gradient. A day factor from the authored mean
   luminance and the sun's elevation decides the hue: night maps (Kanji: 0.12) keep their authored hue and only
   gain the glow and stars; day maps (Sandstorm, Burg: 1.0) take the atmosphere's hue, except that the authored hue's
@@ -686,8 +695,9 @@ refracted view of the scene behind them (rt.h "water and glass", rt_pass.c `wate
   misses keep the old brightness and take the new hue.
 - **Cost:** the sky pass goes from 0.011 to 0.057 ms at 1080p. Mean frame brightness at mode 2 moves -1.0 to
   -3.0 % (Sandstorm, Kanji, Burg).
-- **Limit:** the sun glow of the volumetric shafts (`rt_shafts.frag`) uses its own phase function; it points
-  the same way but is not tied to the sky's aureole.
+- **Limit:** the sun glow of the volumetric shafts (`rt_shafts.frag`) uses its own phase function along the
+  light direction (the way it marches); it is not tied to the sky's aureole, so on a map with its own sun it is a
+  broad brightening a few degrees from the disk.
 
 ## Volumetric sun shafts (`rtShafts`)
 

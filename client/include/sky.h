@@ -27,6 +27,9 @@ int sky_dome_gradient(vec3 stops[3]);
 // Per-frame constants (sky_tick calls it): active with rtMode > 0, rtSky on, the tracer supported and no
 // textured dome. Everything below is a no-op / 0 while inactive.
 void sky_physical_frame(float delta_ms);
+// The loaded map (client_apply_map_lighting, after the lighting): finds the sun the map draws itself (LIGHT_CONE
+// prefabs parked in its sky) so the physical sky's disk sits on it instead of next to it; NULL clears it.
+void sky_physical_set_map(const Map *map);
 int sky_physical_active(void);
 // The env table's cache key for the current physical sky ("" while inactive; env_map.c).
 const char *sky_physical_key(void);

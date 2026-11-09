@@ -7,10 +7,12 @@
 // or the clear colour), and the analytic single-scattering atmosphere (Rayleigh + Mie, air-mass optical depth)
 // only shapes it: on a day map (psky_day 1) the colour comes mostly from the scattering at the authored
 // brightness; on a night map (psky_day 0) the authored hue stays and the scattering only modulates brightness
-// (a moon glow), with faint stars. Clouds are a drifting fbm layer, the sun (or moon) a limb-darkened disk in the
-// shadow direction. psky_on 0 (the uniform's default) leaves every caller on its old path.
+// (a moon glow), with faint stars. Clouds are a drifting fbm layer, the sun (or moon) a limb-darkened disk towards
+// psky_disk: the shadow direction, or the sun the map draws itself (sky_physical_set_map) so there is one sun, not two. psky_on 0 (the uniform's default) leaves every caller on its old path.
 uniform int psky_on;
-uniform vec3 psky_sun;           // normalised, towards the sun (g_render_lighting.light_direction)
+uniform vec3 psky_sun;           // normalised, towards the sun (g_render_lighting.light_direction): elevation terms
+uniform vec3 psky_disk;          // normalised, towards the visible sun: psky_sun, or the map's own sun glow seen from the
+                                 // camera (sky_physical.c psky_update_disk); every direction-dependent term uses it
 uniform vec3 psky_sun_color;     // the sun after the atmosphere, luminance 1 (reddens at low elevation)
 uniform vec3 psky_stop_top;      // the authored gradient: zenith, horizon, nadir
 uniform vec3 psky_stop_mid;
@@ -44,7 +46,7 @@ vec3 psky_scatter(vec3 d) {
     vec3 beta = rayleigh + vec3(mie);
     float mu = max(d.y, 0.0);
     vec3 sun_t = exp(-beta * psky_airmass(psky_sun.y));
-    float c = dot(d, psky_sun);
+    float c = dot(d, psky_disk);
     float pr = 0.0596831 * (1.0 + c * c);
     const float g = 0.76;
     float pm = 0.0795775 * (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5);
@@ -62,7 +64,7 @@ vec3 psky_chroma(vec3 c) {
 // smoothly (x / (1 + x)), so it falls off over a few degrees instead of clipping a wide plateau.
 float psky_glow(vec3 d, float k) {
     const float g = 0.95;
-    float c = dot(d, psky_sun);
+    float c = dot(d, psky_disk);
     float hg = 0.0795775 * (1.0 - g * g) / pow(max(1.0 + g * g - 2.0 * g * c, 1e-6), 1.5) * 12.566371;
     float x = k * (psky_cine != 0 ? 2.5 : 1.0) * max(hg - 1.0, 0.0);
     return 1.0 + (psky_cine != 0 ? 0.6 : 0.35) * x / (1.0 + x);
@@ -140,7 +142,7 @@ vec3 psky_radiance(vec3 d, int with_disk) {
     if (d.y > 0.0 && psky_clouds > 0.0) {
         vec2 p = d.xz / (d.y + 0.08) * 1.6 + vec2(psky_time * 0.010, psky_time * 0.004);
         cover = (psky_cine != 0 ? psky_fbm_cover(p, 0.45, 0.74) : psky_fbm_cover(p, 0.52, 0.78)) * smoothstep(0.02, 0.25, d.y) * psky_clouds;
-        float forward = pow(max(dot(d, psky_sun), 0.0), 8.0);
+        float forward = pow(max(dot(d, psky_disk), 0.0), 8.0);
         vec3 lit = vec3(psky_lum(a) + 0.15) * mix(vec3(1.0), psky_sun_color, 0.5) * 1.15;
         vec3 cloud = mix(a * 0.85, lit, psky_day) * (0.85 + 0.3 * forward);
         col = mix(col, cloud, cover * (psky_cine != 0 ? 0.85 : 0.7));
@@ -152,7 +154,7 @@ vec3 psky_radiance(vec3 d, int with_disk) {
         col += vec3(0.6) * star * (1.0 - psky_day) * smoothstep(0.05, 0.3, d.y) * (1.0 - cover);
     }
     if (with_disk != 0 && psky_sun.y > -0.05) {
-        float c = dot(d, psky_sun);
+        float c = dot(d, psky_disk);
         float span = 1.0 - psky_disk_cos;
         if (c > psky_disk_cos - span * 0.2) {
             float r2 = clamp((1.0 - c) / span, 0.0, 1.0);
@@ -168,7 +170,7 @@ vec3 psky_radiance(vec3 d, int with_disk) {
 // Aerial perspective for krunker_fog: the fog brightens and warms towards the sun (Mie forward scattering) and
 // dims slightly away from it; normalised so the mean over all directions stays about 1.
 vec3 psky_fog_color(vec3 d, vec3 fog) {
-    float c = dot(d, psky_sun);
+    float c = dot(d, psky_disk);
     const float g = 0.6;
     float hg = 0.0795775 * (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5) * 12.566371;
     float k = mix(0.12, 0.45, psky_day);

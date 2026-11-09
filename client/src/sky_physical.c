@@ -23,6 +23,9 @@
 typedef struct {
     int active;
     float sun[3], sun_color[3];
+    float disk[3];              // towards the visible sun (rt_sky.glsl psky_disk): sun, or the authored sun seen from the camera
+    int authored;               // the map draws its own sun (sky_physical_set_map)
+    float authored_pos[3];      // ... at this point (the centre of its light cones)
     float stops[3][3];          // top, mid, bottom
     float avg, day, disk_cos, time;
     char key[128];              // the env table's cache key (env_map.c)
@@ -115,6 +118,84 @@ const char *sky_physical_key(void) {
     return g_psky.active ? g_psky.key : "";
 }
 
+static int psky_compare_float(const void *a, const void *b) {
+    const float x = *(const float *) a, y = *(const float *) b;
+    return x < y ? -1 : x > y;
+}
+
+// Krunker maps draw their own sun: LIGHT_CONE prefabs parked far above and outside the playable map (Burg: three
+// stacked at y 1215..1257, 1 400 units out, the glow players see in its sky; Oasis, Evacuation, Lumber, Habitat,
+// Facility, Lagoon, Tortuga and Citadel likewise). Krunker's frame shows that glow and no other sun, so the physical
+// sky's disk and aureole go there (psky_disk, found per frame from the camera: the cones sit at a finite distance),
+// else the disk hangs next to the authored sun, 15 degrees off on Burg, and the player sees two suns. Candidates are
+// the light cones 200 units above the 99th percentile of the other objects' heights; the one nearest the map's light
+// direction as seen from the map's centre wins when it is within 40 degrees of it (Kanji's lanterns at 56 degrees
+// and more and Erupt's volcano glow at 55 are not suns), and the cones within 5 degrees of it (a stack) are
+// averaged. The lighting stays on light_direction: the shadows, the shafts' march, the day factor, the sun colour
+// and this file's C mirror of the sky (the PMREM table), whose few-degree aureole hardly registers in those rows.
+void sky_physical_set_map(const Map *map) {
+    g_psky.authored = 0;
+    if (!map || !map->objects || map->object_count == 0) return;
+    float *heights = malloc(map->object_count * sizeof(float));
+    if (!heights) return;
+    size_t others = 0;
+    float lo[3] = {INFINITY, INFINITY, INFINITY}, hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+    for (size_t i = 0; i < map->object_count; i++) {
+        const Object *o = map->objects[i];
+        if (!o || o->prefab == PREFAB_LIGHT_CONE) continue;
+        heights[others++] = o->position.y;
+        const float p[3] = {o->position.x, o->position.y, o->position.z};
+        for (int k = 0; k < 3; k++) { lo[k] = fminf(lo[k], p[k]); hi[k] = fmaxf(hi[k], p[k]); }
+    }
+    if (others == 0) { free(heights); return; }
+    qsort(heights, others, sizeof(float), psky_compare_float);
+    const float top = heights[(size_t) ((float) (others - 1) * 0.99f)] + 200.0f;
+    free(heights);
+    const float centre[3] = {(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
+    const vec3 l = g_render_lighting.light_direction;
+    const float light_length = sqrtf(l.x * l.x + l.y * l.y + l.z * l.z);
+    if (light_length <= 0.0f) return;
+    const float light[3] = {l.x / light_length, l.y / light_length, l.z / light_length};
+    float best[3] = {0.0f, 0.0f, 0.0f}, best_dot = cosf(40.0f * (float) M_PI / 180.0f);
+    float sum[3] = {0.0f, 0.0f, 0.0f};
+    int found = 0, count = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < map->object_count; i++) {
+            const Object *o = map->objects[i];
+            if (!o || o->prefab != PREFAB_LIGHT_CONE || o->position.y <= top) continue;
+            const float p[3] = {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}; // the cone's centre
+            float d[3] = {p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]};
+            const float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            if (len <= 0.0f) continue;
+            for (int k = 0; k < 3; k++) d[k] /= len;
+            if (pass == 0) {
+                const float dot = d[0] * light[0] + d[1] * light[1] + d[2] * light[2];
+                if (dot > best_dot) { best_dot = dot; memcpy(best, d, sizeof(best)); found = 1; }
+            } else if (d[0] * best[0] + d[1] * best[1] + d[2] * best[2] >= cosf(5.0f * (float) M_PI / 180.0f)) {
+                for (int k = 0; k < 3; k++) sum[k] += p[k];
+                count++;
+            }
+        }
+        if (!found) return;
+    }
+    if (count == 0) return;
+    for (int k = 0; k < 3; k++) g_psky.authored_pos[k] = sum[k] / (float) count;
+    g_psky.authored = 1;
+    fprintf(stderr, "[rt] physical sky: the map draws its own sun (%d light cone%s at %.0f, %.0f, %.0f; %.0f degrees from the light): the disk follows it\n",
+            count, count == 1 ? "" : "s", g_psky.authored_pos[0], g_psky.authored_pos[1], g_psky.authored_pos[2],
+            acosf(fminf(best_dot, 1.0f)) * 180.0f / (float) M_PI);
+}
+
+// psky_disk for this frame: the authored sun seen from `eye`, else the light direction
+static void psky_update_disk(const vec3 eye) {
+    memcpy(g_psky.disk, g_psky.sun, sizeof(g_psky.disk));
+    if (!g_psky.authored) return;
+    const float d[3] = {g_psky.authored_pos[0] - eye.x, g_psky.authored_pos[1] - eye.y, g_psky.authored_pos[2] - eye.z};
+    const float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (len < 1.0f) return;
+    for (int k = 0; k < 3; k++) g_psky.disk[k] = d[k] / len;
+}
+
 void sky_physical_frame(const float delta_ms) {
     const ClientRenderSettings *s = client_render_settings();
     vec3 stops[3];
@@ -140,6 +221,7 @@ void sky_physical_frame(const float delta_ms) {
     float length = sqrtf(sun.x * sun.x + sun.y * sun.y + sun.z * sun.z);
     if (length <= 0.0f) { sun = (vec3) {0.3f, 0.8f, 0.5f}; length = sqrtf(0.98f); }
     g_psky.sun[0] = sun.x / length; g_psky.sun[1] = sun.y / length; g_psky.sun[2] = sun.z / length;
+    memcpy(g_psky.disk, g_psky.sun, sizeof(g_psky.disk)); // until sky_physical_render sees the camera
 
     // the authored gradient's mean over the upper hemisphere (uniform in solid angle: y uniform in [0, 1]) sets
     // the day factor; the stops / sun decide it, so it is recomputed only when the key changes
@@ -210,6 +292,7 @@ int sky_physical_sun_color(float out[3]) {
 static GlUniform u_on = GL_UNIFORM_INIT("psky_on");
 static GlUniform u_sun = GL_UNIFORM_INIT("psky_sun");
 static GlUniform u_sun_color = GL_UNIFORM_INIT("psky_sun_color");
+static GlUniform u_disk = GL_UNIFORM_INIT("psky_disk");
 static GlUniform u_top = GL_UNIFORM_INIT("psky_stop_top");
 static GlUniform u_mid = GL_UNIFORM_INIT("psky_stop_mid");
 static GlUniform u_bottom = GL_UNIFORM_INIT("psky_stop_bottom");
@@ -226,6 +309,7 @@ void sky_physical_uniforms(const unsigned int program, const int on) {
     if (!enabled) return;
     gl_uniform_3f(&u_sun, program, g_psky.sun[0], g_psky.sun[1], g_psky.sun[2]);
     gl_uniform_3f(&u_sun_color, program, g_psky.sun_color[0], g_psky.sun_color[1], g_psky.sun_color[2]);
+    gl_uniform_3f(&u_disk, program, g_psky.disk[0], g_psky.disk[1], g_psky.disk[2]);
     gl_uniform_3f(&u_top, program, g_psky.stops[0][0], g_psky.stops[0][1], g_psky.stops[0][2]);
     gl_uniform_3f(&u_mid, program, g_psky.stops[1][0], g_psky.stops[1][1], g_psky.stops[1][2]);
     gl_uniform_3f(&u_bottom, program, g_psky.stops[2][0], g_psky.stops[2][1], g_psky.stops[2][2]);
@@ -293,6 +377,7 @@ int sky_physical_render(Camera *camera) {
     gl_uniform_1i(&u_tone, g_psky_program, g_render_lighting.tone_mapping);
     gl_uniform_1f(&u_exposure, g_psky_program, g_render_lighting.tone_mapping_exposure);
     glUniform1f(glGetUniformLocation(g_psky_program, "cine_exposure"), rt_grade_exposure()); // Cinematic curve, 0 off
+    psky_update_disk(camera->position); // the sky pass runs first in the frame: the RT passes and krunker_fog reuse it
     sky_physical_uniforms(g_psky_program, 1);
 
     glDisable(GL_DEPTH_TEST);
@@ -314,4 +399,5 @@ void sky_physical_fini(void) {
     g_psky_vao = g_psky_program = 0;
     g_psky_failed = 0;
     g_psky.key[0] = 0;
+    g_psky.authored = 0;
 }
