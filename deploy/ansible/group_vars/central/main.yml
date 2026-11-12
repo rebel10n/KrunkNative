@@ -41,6 +41,22 @@ kn_edge_origin_hosts:
   coordinator: "coordinator.{{ kn_domain }}"
   matchmaker: "matchmaker.{{ kn_domain }}"
   play: "play.{{ kn_domain }}"
+# Who may connect. Overrides the role default (the /24s of group 'edges'), which still lists only
+# the old VPSs: since 2026-11-12 byod.abstracteducation.loan answers with abulxt's wisp boxes
+# (abulxt deploy/ansible inventory [wisp_edge]) and they relay these names here. The old VPSs stay
+# until they are cancelled. Whole /24s, as before. Drop this override, and the old /24s with it,
+# once group 'edges' holds the wisp boxes (abulxt docs/handoff-krunk-to-wisp-cloud.md section 3).
+kn_edge_origin_allow:
+  - 185.101.138.0/24   # wisp-iev  (Kyiv; its subnet is the .128/25)
+  - 45.92.71.0/24      # wisp-mia  (Miami)
+  - 5.188.120.0/24     # wisp-jnb  (Johannesburg)
+  - 92.38.186.0/24     # wisp-ams  (Amsterdam)
+  - 5.188.124.0/24     # wisp-mnz  (Manassas, VM on meal; the same /24 as kru and amph)
+  - 92.38.149.0/24     # old: clara
+  - 92.223.30.0/24     # old: angeles
+  - 2.56.222.0/24      # old: chitown
+  - 45.82.161.0/24     # old: ashburn (sends from .85)
+  - 127.0.0.1
 
 # redis-tier (doc/backend.md 3.11, deploy/README.md "Database cutover"): our own PostgreSQL cluster
 # (127.0.0.1:5434) and Redis (127.0.0.1:6380) on kru, and the coordinator moved from coord.db to
