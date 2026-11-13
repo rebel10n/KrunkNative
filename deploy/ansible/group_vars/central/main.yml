@@ -46,16 +46,13 @@ kn_edge_origin_hosts:
 # cancelled. Whole /24s, as before. Overrides the role default (the /24s of group 'edges'), and stays:
 # the relays are not in this inventory, and our game servers (edges_kn) never connect here directly
 # (they reach coordinator./matchmaker.krunk.io through the relays). At the cutover, delete the four
-# "old:" lines together with group edges_old (inventory/hosts.yml).
+# "old:" line together with group edges_old (inventory/hosts.yml) when ashburn goes.
 kn_edge_origin_allow:
   - 185.101.138.0/24   # wisp-iev  (Kyiv; its subnet is the .128/25)
   - 45.92.71.0/24      # wisp-mia  (Miami)
   - 5.188.120.0/24     # wisp-jnb  (Johannesburg)
   - 92.38.186.0/24     # wisp-ams  (Amsterdam)
   - 5.188.124.0/24     # wisp-mnz  (Manassas, VM on meal; the same /24 as kru and amph)
-  - 92.38.149.0/24     # old: clara
-  - 92.223.30.0/24     # old: angeles
-  - 2.56.222.0/24      # old: chitown
   - 45.82.161.0/24     # old: ashburn (sends from .85)
   - 127.0.0.1
 

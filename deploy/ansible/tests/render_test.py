@@ -32,14 +32,19 @@ ANSIBLE = os.path.dirname(HERE)
 results = []
 
 # (inventory host, vcpus, MemTotal MB). vcpus as the live instance counts say (README "Edge
-# firewall": clara / chitown / ashburn 21015-21017, angeles 21015-21025); memory: a test value.
+# firewall": kn-mia / kn-iev / ashburn 21015-21017); memory: a test value. Since clara, angeles
+# and chitown left (2026-11-13) no edge has 8+ vcpus, so the 2-Strike path is not rendered here.
+def edge_of(host):
+    """kn_edge_name of an inventory host: com.clara -> clara, kn-mia -> mia."""
+    return host.split(".", 1)[1] if "." in host else host.split("-", 1)[1]
+
+
 HOSTS = {
-    "com.clara": (4, 3915),
-    "com.angeles": (12, 7940),
-    "com.chitown": (4, 3915),
+    "kn-mia": (4, 3915),
+    "kn-iev": (4, 3915),
     "amph.ashburn": (4, 3915),
 }
-TIGHT = ("com.clara", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
+TIGHT = ("amph.ashburn", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
 SECRET = "render-test-internal-secret-0123456789"
 
 PLAYBOOK = """
@@ -149,7 +154,7 @@ def render(work, hosts):
 def check_host(out, host, vcpus, mem):
     d = os.path.join(out, host)
     plan = json.loads(read(os.path.join(d, "plan.json")) or "{}")
-    edge = host.split(".", 1)[1]
+    edge = edge_of(host)
     bo = max(vcpus - 1, 1)
     planned = 2 if vcpus >= 8 else 1
     fit = max((mem - 1024 - bo * 160) // 256, 0)
@@ -213,12 +218,12 @@ def main():
         plans = {h: check_host(out, h, v, m) for h, (v, m) in HOSTS.items()}
         targets = json.loads(read(os.path.join(out, "bridge-targets.json")) or "[]")
         for host in HOSTS:
-            edge = host.split(".", 1)[1]
+            edge = edge_of(host)
             check(f"net-bridge allows {edge}-1.krunk.io:21115-21118 (Strike) and still {edge}-1..11:21015-21025",
                   f"{edge}-1.krunk.io:21115-21118" in targets and f"{edge}-11.krunk.io:21015-21025" in targets
                   and f"{edge}-1.krunk.io:21015-21025" in targets, targets)
         total = sum(p.get("strike", 0) for p in plans.values())
-        print("plan: " + "; ".join(f"{h.split('.', 1)[1]} {p.get('bo')} Box Office + {p.get('strike')} Strike" for h, p in plans.items())
+        print("plan: " + "; ".join(f"{edge_of(h)} {p.get('bo')} Box Office + {p.get('strike')} Strike" for h, p in plans.items())
               + f" ({total} Strike lobbies)", flush=True)
         # a host whose memory cannot hold a Strike instance next to its Box Office servers starts none
         host, vcpus, mem = TIGHT

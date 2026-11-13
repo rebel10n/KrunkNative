@@ -26,24 +26,6 @@ Host kn-iev
 
 # --- Edges, old (inventory group edges_old): G-Core VPSs, also run the abulxt relays: never
 # touch their services. Removed after the cutover to edges_kn.
-# Santa Clara, US - Debian 11, 4 vCPU
-Host com.clara
-  HostName 92.38.149.24
-  User root
-  IdentityFile ~/.ssh/desktop_ed25519
-
-# Los Angeles, US - Debian 13, 12 vCPU
-Host com.angeles
-  HostName 92.223.30.23
-  User root
-  IdentityFile ~/.ssh/desktop_ed25519
-
-# Chicago, US - Debian 13, 4 vCPU
-Host com.chitown
-  HostName 2.56.222.45
-  User root
-  IdentityFile ~/.ssh/desktop_ed25519
-
 # Ashburn, US - Debian 12, 4 vCPU
 Host amph.ashburn
   HostName 45.82.161.87

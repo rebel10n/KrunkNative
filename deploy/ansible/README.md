@@ -106,9 +106,9 @@ CI: `.github/workflows/deploy-kru.yml` (manual dispatch on main) builds and runs
 secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS`. That includes `kn_bridge` (the bundle is
 built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped without CF secrets).
 
-`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` or e.g. `chitown,clara`,
+`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` or e.g. `mia,iev`,
 `dry_run` = `--check --diff`) builds server_bin for bullseye/bookworm/trixie and runs
-`edges.yml --tags release,gameserver`, chitown first, the others only once chitown-1 answers the
+`edges.yml --tags release,gameserver`, the canary (mia) first, the others only once mia-1 answers the
 server-info query again. It restarts the game servers only when server_bin, its data or its
 config changed (below, "Restarts"), draining them. Secrets: `EDGES_SSH_KEY`
 (a CI-only ed25519 key, private half in `~/.config/kn-secrets/github-ci/edges_ci_ed25519`; in each
@@ -471,9 +471,8 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
 
 This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
-also uses, so the open range always matches the instances (today clara/chitown/ashburn
-21015-21017, angeles 21015-21025), then `kn_strike_port_range` for the Krunker Strike
-instances (21115, angeles 21115-21116). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
+also uses, so the open range always matches the instances (today kn-mia / kn-iev / ashburn
+21015-21017), then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
 (and 21115).
 
 Safe apply (`roles/edge_firewall/tasks/apply.yml`), only when a rendered file changed: the files are
