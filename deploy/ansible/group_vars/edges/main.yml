@@ -1,6 +1,10 @@
 # Edges: server_bin instances only. The hosts also run abulxt's relays (nginx on
 # 80/443/8080, wispurr on loopback :6001, OpenResty): nothing of theirs is managed
 # here. The host firewall is shared with abulxt (block at the end of this file).
+# Explicit, though ssh_config says User root too: synchronize (kn_release) builds its rsync
+# destination from ansible_user, and on a retry without it fell back to the controller's user
+# (runner@ in CI), whose failed logins got the GitHub runner banned by fail2ban (kn-mia, 2026-11-13).
+ansible_user: root
 kn_release_bins: [server_bin]
 kn_release_migrations: false
 # skins.json: server_bin's store data (game_spray_pick's sprays, bots' store items); without it every spray

@@ -38,6 +38,13 @@
     group: root
     mode: "0755"
 
+# synchronize runs rsync on both ends; the Debian cloud image of the kn-<site> VMs ships without it.
+- name: rsync on the target (synchronize below)
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+    install_recommends: false
+
 - name: Binaries ({{ kn_build_codename }} build)
   register: kn_release_bin_sync
   ansible.posix.synchronize:
