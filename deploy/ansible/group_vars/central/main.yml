@@ -42,18 +42,16 @@ kn_edge_origin_hosts:
   matchmaker: "matchmaker.{{ kn_domain }}"
   play: "play.{{ kn_domain }}"
 # Who may connect: the relays, i.e. abulxt's wisp boxes (abulxt deploy/ansible inventory [wisp_edge];
-# byod.abstracteducation.loan answers with them since 2026-11-12), plus the old VPSs until they are
-# cancelled. Whole /24s, as before. Overrides the role default (the /24s of group 'edges'), and stays:
-# the relays are not in this inventory, and our game servers (edges_kn) never connect here directly
-# (they reach coordinator./matchmaker.krunk.io through the relays). At the cutover, delete the four
-# "old:" line together with group edges_old (inventory/hosts.yml) when ashburn goes.
+# byod.abstracteducation.loan answers with them since 2026-11-12). Whole /24s, as before. Overrides
+# the role default (the /24s of group 'edges'), and stays: the relays are not in this inventory, and
+# our game servers (edges_kn) never connect here directly (they reach coordinator./matchmaker.krunk.io
+# through the relays). The old VPSs' lines went with them (cancelled 2026-11-13).
 kn_edge_origin_allow:
   - 185.101.138.0/24   # wisp-iev  (Kyiv; its subnet is the .128/25)
   - 45.92.71.0/24      # wisp-mia  (Miami)
   - 5.188.120.0/24     # wisp-jnb  (Johannesburg)
   - 92.38.186.0/24     # wisp-ams  (Amsterdam)
   - 5.188.124.0/24     # wisp-mnz  (Manassas, VM on meal; the same /24 as kru and amph)
-  - 45.82.161.0/24     # old: ashburn (sends from .85)
   - 127.0.0.1
 
 # redis-tier (doc/backend.md 3.11, deploy/README.md "Database cutover"): our own PostgreSQL cluster

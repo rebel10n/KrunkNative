@@ -121,8 +121,8 @@ config is `ssh_config` with kru -> `KRU_HOST:KRU_PORT` and the edges -> the CI k
 the `krunknative-github-ci-edges` line on the edges and the secret.
 
 Edge groups (`inventory/hosts.yml`): `edges` = `edges_kn` (the dedicated `kn-<site>` VMs on the wisp
-Proxmox hosts; this repo owns their firewall and fail2ban base, `group_vars/edges_kn/main.yml`) +
-`edges_old` (the four G-Core VPSs shared with abulxt, removed after the cutover). A new VM needs, before
+Proxmox hosts; this repo owns their firewall and fail2ban base, `group_vars/edges_kn/main.yml`).
+The old G-Core VPSs shared with abulxt (`edges_old`) were cancelled 2026-11-13. A new VM needs, before
 Deploy edges can reach it: its address in `ssh_config` (HostName) and as `kn_public_ip` (unset = left out
 of kru's net-bridge / kn-rtc allowlists, and `edges.yml` stops at `kn_gameserver`), the CI key line
 above in root's `authorized_keys`, its host key in `EDGES_KNOWN_HOSTS` (keyed by that HostName), its
@@ -471,7 +471,7 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
 
 This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
-also uses, so the open range always matches the instances (today kn-mia / kn-iev / ashburn
+also uses, so the open range always matches the instances (today kn-mia / kn-iev
 21015-21017), then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
 (and 21115).
 

@@ -23,11 +23,3 @@ Host kn-iev
   User root
   # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
   IdentityFile ~/.ssh/id_ed25519
-
-# --- Edges, old (inventory group edges_old): G-Core VPSs, also run the abulxt relays: never
-# touch their services. Removed after the cutover to edges_kn.
-# Ashburn, US - Debian 12, 4 vCPU
-Host amph.ashburn
-  HostName 45.82.161.87
-  User root
-  IdentityFile ~/.ssh/desktop_ed25519
