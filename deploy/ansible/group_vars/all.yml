@@ -72,10 +72,8 @@ fail2ban_ignoreip:
   - 5.188.124.57
   # meal, the Proxmox host
   - 5.188.124.253
-  # edges' primary addresses (clara, angeles, chitown, ashburn)
-  - 92.38.149.24
-  - 92.223.30.23
-  - 2.56.222.45
+  # ashburn's primary address (clara, angeles and chitown left with their VPSs, 2026-11-13:
+  # their addresses go back to G-Core, never exempt them)
   - 45.82.161.87
   # private ranges: meal's LAN 172.16.5.0/24 (kru, amph ens20), docker bridges
   - 10.0.0.0/8
