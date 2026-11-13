@@ -898,6 +898,8 @@ static const struct {
     {"VA", "us-nj"},    /* Ashburn, Virginia: New York is the nearest pinged */
     {"KV", "de-fra"},   /* Kyiv, Ukraine: no Ukrainian or Polish id is pinged (pol is a name only); Frankfurt is the nearest pinged */
     {"MI", "us-fl"},    /* Miami, Florida: v10 names it (a name only, never pinged), so it is also listed under an alias */
+    {"AM", "de-fra"},   /* Amsterdam: nl-ams is a name only; Frankfurt (~360 km) is the nearest pinged */
+    {"JN", "af-ct"},    /* Johannesburg: v10 names South Africa (af-ct, a name only), so it is also listed under an alias */
 };
 
 /* A second id a node is also listed under, for a primary the official client never pings (a name-only id):
@@ -906,7 +908,8 @@ static const struct {
 static const struct {
     const char *kn, *v10;
 } k_v10_aliases[] = {
-    {"MI", "us-nj"}, /* Miami: New York is the nearest pinged by latency (about 30 ms, Dallas about the same) */
+    {"MI", "us-nj"},  /* Miami: New York is the nearest pinged by latency (about 30 ms, Dallas about the same) */
+    {"JN", "me-bhn"}, /* Johannesburg: Middle East (Bahrain ~6,350 km) is the nearest pinged; Mumbai ~6,900, Frankfurt ~8,650 */
 };
 
 const char *registry_v10_region(const char *kn_region) {

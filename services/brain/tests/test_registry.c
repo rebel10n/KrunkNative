@@ -217,6 +217,11 @@ static void kyiv_miami_checks(void) {
     CHECK(registry_v10_region("MI") && !strcmp(registry_v10_region("MI"), "us-fl"));
     CHECK(registry_v10_alias("MI") && !strcmp(registry_v10_alias("MI"), "us-nj"));
     CHECK(!registry_v10_alias("KV") && !registry_v10_alias("CH") && !registry_v10_alias(NULL));
+    /* Amsterdam (AM) and Johannesburg (JN), 2026-11-13: AM shares de-fra with Kyiv; JN is af-ct (South Africa, a
+     * name only) with the pinged alias me-bhn, as Miami */
+    CHECK(registry_v10_region("AM") && !strcmp(registry_v10_region("AM"), "de-fra") && !registry_v10_alias("AM"));
+    CHECK(registry_v10_region("JN") && !strcmp(registry_v10_region("JN"), "af-ct"));
+    CHECK(registry_v10_alias("JN") && !strcmp(registry_v10_alias("JN"), "me-bhn"));
     CHECK(krunker_region("us-fl") && !krunker_region_pinged("us-fl") && krunker_region_pinged("us-nj"));
 
     /* with the old fleet still up: us-nj is CH's (the alias stays out), us-fl is Miami's own */

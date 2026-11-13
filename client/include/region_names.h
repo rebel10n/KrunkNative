@@ -7,7 +7,7 @@
 //
 // The brain lists each KrunkNative edge region under a v10.0.2 region id (services/brain/registry.c
 // registry_v10_region; doc/v10/regions.md), and the client seeks with the id its list gave it. The lobby rows
-// keep the edge's own code (tuple[1]: SV, LA, CH, VA, KV, MI, local), which region_id_of maps to that id. The pickers
+// keep the edge's own code (tuple[1]: SV, LA, CH, VA, KV, MI, AM, JN, local), which region_id_of maps to that id. The pickers
 // show the v10 name of the id (what v10 players see) with the KrunkNative places it holds in brackets.
 
 typedef struct {

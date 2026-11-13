@@ -19,6 +19,10 @@ static const RegionEdge k_edges[] = {
     // v10 names us-fl but never pings it; the brain also lists Miami under us-nj for official clients only
     // (registry_v10_alias: the native client asks with ?aliases=0)
     {"MI", "MI", "Miami, Florida", "Miami", "us-fl"},
+    {"AM", "AM", "Amsterdam, Netherlands", "Amsterdam", "de-fra"}, // nl-ams is a name only: Frankfurt is the nearest
+    // v10 names af-ct (South Africa) but never pings it; the brain also lists Johannesburg under me-bhn for
+    // official clients only (as Miami)
+    {"JN", "JN", "Johannesburg, South Africa", "Johannesburg", "af-ct"},
     {"local", "LO", "Local", "Local", "local"},
 };
 
