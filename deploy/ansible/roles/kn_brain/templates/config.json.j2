@@ -14,6 +14,8 @@
     "current_season": {{ kn_brain_current_season | int }},
     "store_season": {{ kn_brain_store_season | default(kn_brain_current_season) | int }},
     "_comment_store_season": "config.currentSeason of the store table / prize wheels (accounts.store_season, services/brain/store.c): the season their unseasoned items roll. 10 for Krunker v10.0.2.",
+    "_comment_region_index": "accounts.region_index (services/brain/accounts.c): a match's game region -> its config.socialRegions index, the leaderboard region filter.",
+    "region_index": {{ kn_brain_region_index | to_json }},
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
   },
   "captcha": {

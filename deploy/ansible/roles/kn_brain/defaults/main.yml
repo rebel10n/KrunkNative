@@ -48,6 +48,24 @@ kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default(
 # kept otherwise. Without it the /ai routes answer 503 (the editor shows "AI unavailable").
 kn_brain_ai_upstream_url: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_URL') }}"
 kn_brain_ai_upstream_key: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_KEY') }}"
+# accounts.region_index: each game region (registry.c code or ping id) -> its config.socialRegions
+# index (0 = all, services/brain/leaderboards.c), the leaderboard region filter.
+# Same map as config/config.example.json; a region missing here gets no index.
+kn_brain_region_index:
+  local: 0
+  au-syd: 1
+  sgp: 2
+  jb-hnd: 2
+  blr: 2
+  de-fra: 3
+  SV: 4
+  LA: 4
+  CH: 4
+  VA: 4
+  KV: 3
+  MI: 4
+  AM: 3
+  JN: 3
 # accounts.email.require_verified: social features that need a verified email (chat, post, gift,
 # market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
 kn_brain_email_require_verified: []
