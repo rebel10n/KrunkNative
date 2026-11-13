@@ -32,16 +32,24 @@ ANSIBLE = os.path.dirname(HERE)
 results = []
 
 # (inventory host, vcpus, MemTotal MB). vcpus as the live instance counts say (README "Edge
-# firewall": kn-mia / kn-iev 21015-21017); memory: a test value. Since the old VPSs left
+# firewall": every kn-<site> 21015-21017); memory: a test value. Since the old VPSs left
 # (2026-11-13) no edge has 8+ vcpus, so the 2-Strike path is not rendered here.
+EDGE_NAMES = {"kn-mnz": "ashburn"}  # inventory/hosts.yml kn_edge_name where it is not the host's suffix
+
+
 def edge_of(host):
-    """kn_edge_name of an inventory host: com.clara -> clara, kn-mia -> mia."""
+    """kn_edge_name of an inventory host: com.clara -> clara, kn-mia -> mia, kn-mnz -> ashburn."""
+    if host in EDGE_NAMES:
+        return EDGE_NAMES[host]
     return host.split(".", 1)[1] if "." in host else host.split("-", 1)[1]
 
 
 HOSTS = {
     "kn-mia": (4, 3915),
     "kn-iev": (4, 3915),
+    "kn-mnz": (4, 3915),
+    "kn-jnb": (4, 3915),
+    "kn-ams": (4, 3915),
 }
 TIGHT = ("kn-iev", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
 SECRET = "render-test-internal-secret-0123456789"

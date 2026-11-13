@@ -1,7 +1,7 @@
 name: Deploy edges
 
 # After every successful Deploy kru on main (workflow_run), or by hand: builds server_bin for the
-# edges' Debian releases (deploy/ansible/build.sh: trixie = kn-mia, kn-iev;
+# edges' Debian releases (deploy/ansible/build.sh: trixie = every kn-<site> VM;
 # bullseye and bookworm are built still, unused since the old VPSs left) and runs deploy/ansible/edges.yml (by default the edge infra:
 # firewall, fail2ban (on the kn-<site> VMs, group edges_kn, this repo owns the base), user, release, gameserver; DNS needs a token with Zone DNS:Edit), the canary (mia) first: the rest only after
 # its instance 1 answers the server-info query again. The game servers restart only when
@@ -31,7 +31,7 @@ on:
         type: string
         default: firewall,fail2ban,user,release,gameserver
       hosts:
-        description: "Edges: all (the live ones: mia,iev), or a comma list of those (the canary goes first)"
+        description: "Edges: all (the live ones: mia,iev,ashburn,ams,jnb), or a comma list of those (the canary goes first)"
         type: string
         default: all
       dry_run:
@@ -75,15 +75,16 @@ jobs:
 
       # edge name -> inventory host (deploy/ansible/inventory/hosts.yml). live = what "all" (and every
       # Deploy kru run) deploys, canary = the edge that goes first. Since the cutover (2026-11-13) the
-      # new VMs (edges_kn: mia, iev) are live with mia as the canary; the old VPSs are gone.
+      # new VMs (edges_kn) are live with mia as the canary; the old VPSs are gone. Since 2026-11-13 every
+      # wisp site has one: mia, iev, ashburn (kn-mnz, on meal), ams, jnb.
       - name: Hosts
         id: plan
         env:
           HOSTS: ${{ inputs.hosts || 'all' }}
         run: |
           set -euo pipefail
-          declare -A inv=([mia]=kn-mia [iev]=kn-iev)
-          live="mia,iev" canary=mia
+          declare -A inv=([mia]=kn-mia [iev]=kn-iev [ashburn]=kn-mnz [ams]=kn-ams [jnb]=kn-jnb)
+          live="mia,iev,ashburn,ams,jnb" canary=mia
           sel="$(tr -d ' ' <<< "$HOSTS" | tr '[:upper:]' '[:lower:]')"
           [ "$sel" = all ] && sel="$live"
           first="" first_edge="" rest="" edges=""

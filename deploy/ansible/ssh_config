@@ -23,3 +23,24 @@ Host kn-iev
   User root
   # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
   IdentityFile ~/.ssh/id_ed25519
+
+# Ashburn/Manassas, US (VM 123 on meal)
+Host kn-mnz
+  HostName 5.188.124.94
+  User root
+  # abulxt's pve_edge_vm (kn-mnz: cloud-init on meal) installs the controller's id_ed25519.pub
+  IdentityFile ~/.ssh/id_ed25519
+
+# Johannesburg, ZA
+Host kn-jnb
+  HostName 5.188.120.31
+  User root
+  # abulxt's pve_edge_vm (kn-mnz: cloud-init on meal) installs the controller's id_ed25519.pub
+  IdentityFile ~/.ssh/id_ed25519
+
+# Amsterdam, NL
+Host kn-ams
+  HostName 92.38.186.100
+  User root
+  # abulxt's pve_edge_vm (kn-mnz: cloud-init on meal) installs the controller's id_ed25519.pub
+  IdentityFile ~/.ssh/id_ed25519

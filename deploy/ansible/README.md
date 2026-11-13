@@ -471,7 +471,7 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
 
 This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
-also uses, so the open range always matches the instances (today kn-mia / kn-iev
+also uses, so the open range always matches the instances (today every kn-<site> VM
 21015-21017), then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
 (and 21115).
 

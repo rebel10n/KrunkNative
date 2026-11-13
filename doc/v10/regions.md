@@ -2,7 +2,7 @@
 
 The brain's `GET /mm/ping-list` (and `/ping-list`) answers `{region: "host[:port]"}`. The
 official v10 client only pings region ids of its own list, so its keys must be v10 ids.
-KrunkNative's region codes (`SV`, `LA`, `CH`, `VA`, `KV`, `MI`, from the inventory's
+KrunkNative's region codes (`SV`, `LA`, `CH`, `VA`, `KV`, `MI`, `AM`, `JN`, from the inventory's
 `kn_gameserver_region`, `deploy/ansible/inventory/hosts.yml`) are not among them.
 
 krunk.io has fewer regions than Krunker (two: Silicon Valley and New York, plus `local` on a
@@ -178,6 +178,9 @@ nearest to its real location:
 | `amph.ashburn` | `VA` | Ashburn, VA | `us-nj` | ~350 km | no Virginia id; New York is the nearest pinged id (us-ga, a name only, is ~850 km) |
 | `kn-iev` | `KV` | Kyiv, Ukraine | `de-fra` | ~1,550 km | see below: no Ukrainian id; `pol` (Warsaw, ~690 km) is a name only; Frankfurt is the nearest pinged id (me-bhn ~3,200 km) |
 | `kn-mia` | `MI` | Miami, FL | `us-fl`, alias `us-nj` | 0 / ~1,760 km | see below: `us-fl` (Miami) is a name only, so the official client never pings it; the alias `us-nj` is listed for it while no node of its own holds `us-nj` |
+| `kn-mnz` | `VA` | Ashburn/Manassas, VA | `us-nj` | ~350 km | as `amph.ashburn` before it (2026-11-13: a VM on meal) |
+| `kn-ams` | `AM` | Amsterdam, NL | `de-fra` | ~360 km | `nl-ams` (Amsterdam) is a name only; Frankfurt is the nearest pinged id. Shares `de-fra` with Kyiv |
+| `kn-jnb` | `JN` | Johannesburg, ZA | `af-ct`, alias `me-bhn` | ~1,270 / ~6,350 km | see below: `af-ct` (South Africa) is a name only; the alias `me-bhn` is the nearest pinged id |
 | (dev / offline) | `local` | this machine | `local` | - | the non-production list is `["local"]` |
 
 A node whose region is already a pinged v10 id (`de-fra`, `us-nj`, `local`, as the federation test
@@ -249,6 +252,23 @@ Tests:
   - `de-fra` finding Kyiv unrouted, and `gb-lon` / `me-bhn` routed to it
   - `us-fl`, `MI` and `us-nj` finding Miami
   - routing by a ping measured under the alias
+
+## Ashburn, Amsterdam (`AM`) and Johannesburg (`JN`)
+
+Decided by the user on 2026-11-13, with a kn VM on every wisp site: `kn-mnz` (Ashburn/Manassas,
+`VA`, as before), `kn-ams` and `kn-jnb`. The new codes are in every table, as `KV` / `MI` are, with
+`accounts.region_index` 3 (eu) for both (v10 files `af-ct` under eu).
+
+- **`VA` holds `us-nj` again.** Miami's alias `us-nj` is left out of the ping list while a node holds
+  it as its own, so official clients measure Ashburn under New York and Miami only as `us-fl`.
+- **`AM` -> `de-fra` (Frankfurt, ~360 km).** Kyiv and Amsterdam share the id: one ping host (the first
+  live node, or `brain.regions[].ping_host`), and both take Frankfurt seeks.
+- **`JN` -> `af-ct` (South Africa), alias `me-bhn` (Middle East).** Like Miami: v10 names `af-ct` but
+  never pings it. Great circle from Johannesburg: Bahrain ~6,350 km, Mumbai ~6,900 km, Frankfurt
+  ~8,650 km. The alias is listed while no node holds `me-bhn`, so official clients measure
+  Johannesburg there, and a Middle East seek finds it.
+- Tests: `region_names_test` (ids, names, the picker: `us-fl`, `af-ct`, then `local` after v10's
+  dropdown) and `test_registry.c` (`AM` / `JN` ids and the `JN` alias).
 
 ## Readers of the shape
 
