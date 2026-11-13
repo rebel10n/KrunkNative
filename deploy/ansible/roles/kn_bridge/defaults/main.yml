@@ -24,7 +24,11 @@ kn_bridge_node_dir: "{{ kn_bridge_node_root }}/node-v{{ kn_bridge_node_version }
 # no loopback, no default target, so the bridge is not an open TCP proxy.
 kn_bridge_target_port_lo: 21015
 kn_bridge_target_port_hi: 21025
-kn_bridge_edge_hosts: "{{ groups['edges'] | default([]) }}"
+# Edges without a kn_public_ip yet (a new VM whose address is still undecided, inventory/hosts.yml)
+# are left out until they get one.
+kn_bridge_edge_hosts: >-
+  {{ groups['edges'] | default([]) | map('extract', hostvars) | selectattr('kn_public_ip', 'defined')
+     | map(attribute='inventory_hostname') | list }}
 # Krunker Strike servers on the edges (role kn_gameserver tasks/strike.yml): the web Strike app
 # reaches them at <edge>-1.krunk.io / the edge IP on kn_strike_first_port .. +kn_strike_port_span-1
 # (group_vars/all.yml). false = Box Office targets only.

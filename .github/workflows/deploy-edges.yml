@@ -3,7 +3,8 @@ name: Deploy edges
 # After every successful Deploy kru on main (workflow_run), or by hand: builds server_bin for the
 # edges' Debian releases (deploy/ansible/build.sh: bullseye = clara, bookworm = ashburn,
 # trixie = angeles + chitown) and runs deploy/ansible/edges.yml (by default the edge infra:
-# firewall, fail2ban (this repo's drop-ins only; abulxt owns the base), user, release, gameserver; DNS needs a token with Zone DNS:Edit), chitown first: the rest only after
+# firewall, fail2ban (on the old VPSs this repo's drop-ins only, abulxt owns the base; on the kn-<site>
+# VMs, group edges_kn, this repo owns the base), user, release, gameserver; DNS needs a token with Zone DNS:Edit), chitown first: the rest only after
 # chitown's instance 1 answers the server-info query again. The game servers restart only when
 # server_bin, its data or its config changed: server_bin is reproducible and stamped with the last
 # commit that changed the service sources (tools/release/version-meta.sh --server), and the release
@@ -15,8 +16,8 @@ name: Deploy edges
 # are touched (no DNS here).
 #
 # Secrets: EDGES_SSH_KEY (CI-only ed25519, comment krunknative-github-ci-edges, in each edge's
-#          root authorized_keys with no-agent/X11/port-forwarding), EDGES_KNOWN_HOSTS (the edges'
-#          host keys), and KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS: kn_gameserver reads the
+#          root authorized_keys with no-agent/X11/port-forwarding; the kn-<site> VMs too),
+#          EDGES_KNOWN_HOSTS (the edges' host keys, by the HostName in deploy/ansible/ssh_config), and KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS: kn_gameserver reads the
 #          coordinator secrets (KN_BRAIN_INTERNAL_SECRET / JOIN_SECRET) from kru's
 #          /etc/krunknative/secrets.env at deploy time (slurp, no_log) into the 0640 server-<n>.cfg.
 on:
@@ -31,7 +32,7 @@ on:
         type: string
         default: firewall,fail2ban,user,release,gameserver
       hosts:
-        description: "Edges: all, or a comma list of chitown,clara,angeles,ashburn (chitown always goes first)"
+        description: "Edges: all (the live ones: chitown,clara,angeles,ashburn), or a comma list of those and mia,iev (the canary goes first)"
         type: string
         default: all
       dry_run:
@@ -57,6 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       first: ${{ steps.plan.outputs.first }}
+      canary: ${{ steps.plan.outputs.canary }}
       rest: ${{ steps.plan.outputs.rest }}
       edges: ${{ steps.plan.outputs.edges }}
       cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
@@ -72,26 +74,31 @@ jobs:
         id: meta
         run: tools/release/version-meta.sh --server "$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
 
-      # edge name -> inventory host (deploy/ansible/inventory/hosts.yml)
+      # edge name -> inventory host (deploy/ansible/inventory/hosts.yml). live = what "all" (and every
+      # Deploy kru run) deploys, canary = the edge that goes first. The new VMs (edges_kn: mia, iev) are
+      # only deployed when named (Deploy edges by hand, hosts: mia,iev) until the cutover; then move
+      # them into live (canary = one of them) and drop the old four (edges_old) from both lists.
       - name: Hosts
         id: plan
         env:
           HOSTS: ${{ inputs.hosts || 'all' }}
         run: |
           set -euo pipefail
-          declare -A inv=([chitown]=com.chitown [clara]=com.clara [angeles]=com.angeles [ashburn]=amph.ashburn)
+          declare -A inv=([chitown]=com.chitown [clara]=com.clara [angeles]=com.angeles [ashburn]=amph.ashburn
+                          [mia]=kn-mia [iev]=kn-iev)
+          live="chitown,clara,angeles,ashburn" canary=chitown
           sel="$(tr -d ' ' <<< "$HOSTS" | tr '[:upper:]' '[:lower:]')"
-          [ "$sel" = all ] && sel="chitown,clara,angeles,ashburn"
-          first="" rest="" edges=""
+          [ "$sel" = all ] && sel="$live"
+          first="" first_edge="" rest="" edges=""
           IFS=, read -r -a names <<< "$sel"
           for n in "${names[@]}"; do
-            [ -n "${inv[$n]:-}" ] || { echo "::error::unknown edge '$n' (chitown clara angeles ashburn)"; exit 1; }
+            [ -n "${inv[$n]:-}" ] || { echo "::error::unknown edge '$n' (${!inv[*]})"; exit 1; }
             [[ ",$edges," == *",$n,"* ]] && continue
             edges="${edges:+$edges,}$n"
-            if [ "$n" = chitown ]; then first="${inv[$n]}"; else rest="${rest:+$rest,}${inv[$n]}"; fi
+            if [ "$n" = "$canary" ]; then first="${inv[$n]}" first_edge="$n"; else rest="${rest:+$rest,}${inv[$n]}"; fi
           done
           [ -n "$edges" ] || { echo "::error::no edges selected"; exit 1; }
-          { echo "first=$first"; echo "rest=$rest"; echo "edges=$edges"; } | tee -a "$GITHUB_OUTPUT"
+          { echo "first=$first"; echo "canary=$first_edge"; echo "rest=$rest"; echo "edges=$edges"; } | tee -a "$GITHUB_OUTPUT"
 
   build:
     name: server_bin (Debian ${{ matrix.codename }})
@@ -128,6 +135,7 @@ jobs:
     timeout-minutes: 45
     env:
       FIRST: ${{ needs.plan.outputs.first }}
+      CANARY: ${{ needs.plan.outputs.canary }}
       REST: ${{ needs.plan.outputs.rest }}
       EDGES: ${{ needs.plan.outputs.edges }}
       COMMIT12: ${{ needs.plan.outputs.commit12 }}
@@ -229,7 +237,7 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/edge-health.sh"
 
-      - name: Deploy chitown first
+      - name: Deploy the canary first
         if: env.FIRST != ''
         working-directory: deploy/ansible
         run: |
@@ -237,9 +245,9 @@ jobs:
           check=(); [ "$DRY_RUN" = true ] && check=(--check --diff)
           ansible-playbook edges.yml --tags "$TAGS" --limit "$FIRST" "${check[@]}"
 
-      - name: chitown health
+      - name: Canary health
         if: env.FIRST != ''
-        run: '"$RUNNER_TEMP/edge-health.sh" chitown'
+        run: '"$RUNNER_TEMP/edge-health.sh" "$CANARY"'
 
       - name: Deploy the other edges
         if: env.REST != ''

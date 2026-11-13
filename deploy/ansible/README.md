@@ -120,6 +120,16 @@ installed next to the other keys, the old file kept as `authorized_keys.bak.krun
 config is `ssh_config` with kru -> `KRU_HOST:KRU_PORT` and the edges -> the CI key. Revoke: delete
 the `krunknative-github-ci-edges` line on the edges and the secret.
 
+Edge groups (`inventory/hosts.yml`): `edges` = `edges_kn` (the dedicated `kn-<site>` VMs on the wisp
+Proxmox hosts; this repo owns their firewall and fail2ban base, `group_vars/edges_kn/main.yml`) +
+`edges_old` (the four G-Core VPSs shared with abulxt, removed after the cutover). A new VM needs, before
+Deploy edges can reach it: its address in `ssh_config` (HostName) and as `kn_public_ip` (unset = left out
+of kru's net-bridge / kn-rtc allowlists, and `edges.yml` stops at `kn_gameserver`), the CI key line
+above in root's `authorized_keys`, its host key in `EDGES_KNOWN_HOSTS` (keyed by that HostName), its
+`<edge>-<n>.krunk.io` records, and its name in the workflow's `live` list (until then it deploys only
+when named in `hosts`). Its `kn_gameserver_count` stays at most 11 while `kn_bridge_target_port_hi` /
+`kn_rtc_target_port_hi` are 21025.
+
 Release builds (`.github/workflows/release.yml`) use the same `build.sh` (bookworm + bullseye,
 `TARGETS=server_bin`); `KN_CMAKE_ARGS` passes the build version (`tools/release/version-meta.sh
 --server`: the last commit that changed the service sources, with its time as the build time).
@@ -444,8 +454,9 @@ Both repos call the role the same way: directly from their playbooks (`firewall.
 and their full edge play with tag `firewall`), with all inputs in group_vars, the same
 `edge_firewall_*` variables in the same order (this repo: `group_vars/edges/main.yml`):
 
-- `edge_firewall_own_base`: render the base `/etc/nftables.conf`. Exactly one repo sets true
-  (now abulxt). Base: `flush ruleset`; `table inet filter` with interval sets `tcp_accept` /
+- `edge_firewall_own_base`: render the base `/etc/nftables.conf`. Exactly one repo sets true per
+  host (abulxt on the old VPSs, `edges_old`; this repo on its own `kn-<site>` VMs, `edges_kn`, where
+  abulxt runs nothing). Base: `flush ruleset`; `table inet filter` with interval sets `tcp_accept` /
   `udp_accept`; input policy drop (lo, established/related, icmp + ipv6-icmp, tcp
   `edge_firewall_ssh_port` 22, `@tcp_accept`, `@udp_accept`); forward drop; output accept;
   then `include "/etc/nftables.d/*.nft"`. `edge_firewall_owner` fills its `# Owner:` line.
@@ -508,8 +519,8 @@ re-stamped with `roles/fail2ban/check-vendored.sh --stamp` after an edit, then c
 roles/fail2ban/check-vendored.sh ~/jails/unblocker/src/abulxt/deploy/ansible/roles/fail2ban
 ```
 
-Per host exactly one repo owns the base (`fail2ban_own_base: true`): abulxt on the edges and
-amph, Krunker Box Office on kru. Both repos set the same `fail2ban_*` variables in the same order
+Per host exactly one repo owns the base (`fail2ban_own_base: true`): abulxt on the old edges
+(`edges_old`) and amph, Krunker Box Office on kru and on its own `kn-<site>` VMs (`edges_kn`). Both repos set the same `fail2ban_*` variables in the same order
 (this repo: `group_vars/all.yml`; kru's ownership, approval gate and sshd settings in `group_vars/central/main.yml`), and keep `fail2ban_ignoreip` identical.
 
 - Base (owner only): `/etc/fail2ban/jail.local` with `[DEFAULT]` ignoreip (127.0.0.1/8, ::1,

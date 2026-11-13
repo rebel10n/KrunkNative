@@ -1,0 +1,23 @@
+# Dedicated KrunkNative edge VMs (kn-<site>, inventory group edges_kn, a child of `edges`):
+# everything in group_vars/edges/main.yml applies (game ports, Strike, the firewall drop-in);
+# this file only overrides what differs because KrunkNative is the only tenant here.
+# The old VPSs (edges_old) keep abulxt as the base owner (group_vars/edges/main.yml, all.yml).
+
+# --- Host firewall (edge-firewall-contract v1, README "Edge firewall") ---
+# We own the base /etc/nftables.conf here: input policy drop; lo, established, icmp, tcp
+# edge_firewall_ssh_port (22, open to every source, so CI's GitHub runners and the operator get in
+# with their keys), then our drop-in (60-krunknative.nft, the game ports). abulxt has no edge_firewall
+# on these VMs, so nothing to hand over. A first apply replaces whatever /etc/nftables.conf the
+# image shipped (kept as /etc/nftables.conf.<pid>.<date>@<time>~, rollback timer armed).
+edge_firewall_own_base: true
+edge_firewall_owner: "krunknative (inputs: deploy/ansible group_vars/edges/main.yml, group_vars/edges_kn/main.yml)"
+
+# --- fail2ban (fail2ban-contract v1, README "fail2ban") ---
+# We own the base here (jail.local: sshd + recidive, fail2ban_ignoreip from group_vars/all.yml +
+# the VM's own addresses). CI logs in with a key, which never counts in mode normal. The sshd
+# settings the edges and kru use (scanners fill sshd's default MaxStartups 10:30:100).
+fail2ban_own_base: true
+fail2ban_owner: "krunknative (inputs: deploy/ansible group_vars/all.yml, group_vars/edges_kn/main.yml)"
+fail2ban_sshd_settings:
+  MaxStartups: "50:30:200"
+  LoginGraceTime: 30

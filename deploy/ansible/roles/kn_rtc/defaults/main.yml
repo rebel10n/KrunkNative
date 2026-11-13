@@ -24,7 +24,11 @@ kn_rtc_binary: "{{ kn_artifact_root }}/kn-rtc/kn-rtc"
 # (<edge>-<n>.krunk.io and each edge's kn_public_ip, ports lo..hi). No loopback, no default.
 kn_rtc_target_port_lo: 21015
 kn_rtc_target_port_hi: 21025
-kn_rtc_edge_hosts: "{{ groups['edges'] | default([]) }}"
+# Edges without a kn_public_ip yet (a new VM whose address is still undecided, inventory/hosts.yml)
+# are left out until they get one.
+kn_rtc_edge_hosts: >-
+  {{ groups['edges'] | default([]) | map('extract', hostvars) | selectattr('kn_public_ip', 'defined')
+     | map(attribute='inventory_hostname') | list }}
 
 # Abuse limits (net-bridge/rtc/main.go). A session is closed when the edge sends nothing for
 # the idle timeout, or when ICE + DTLS + the data channel are not up within the connect timeout.

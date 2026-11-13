@@ -1,6 +1,7 @@
 # fail2ban only: the vendored fail2ban role (fail2ban-contract v1, README.md "fail2ban").
-# Inputs: group_vars/all.yml (+ group_vars/central/main.yml: kru's base is ours; on the
-# edges abulxt owns the base and this repo adds drop-ins only).
+# Inputs: group_vars/all.yml (+ group_vars/central/main.yml: kru's base is ours;
+# group_vars/edges_kn/main.yml: the kn-<site> VMs' base is ours; on the old VPSs, edges_old,
+# abulxt owns the base and this repo adds drop-ins only).
 # Same role in abulxt (playbooks/fail2ban.yml).
 #   ansible-playbook fail2ban.yml --check --diff [--limit <host>]
 - name: fail2ban

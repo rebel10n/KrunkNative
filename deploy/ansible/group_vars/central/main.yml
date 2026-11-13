@@ -41,11 +41,12 @@ kn_edge_origin_hosts:
   coordinator: "coordinator.{{ kn_domain }}"
   matchmaker: "matchmaker.{{ kn_domain }}"
   play: "play.{{ kn_domain }}"
-# Who may connect. Overrides the role default (the /24s of group 'edges'), which still lists only
-# the old VPSs: since 2026-11-12 byod.abstracteducation.loan answers with abulxt's wisp boxes
-# (abulxt deploy/ansible inventory [wisp_edge]) and they relay these names here. The old VPSs stay
-# until they are cancelled. Whole /24s, as before. Drop this override, and the old /24s with it,
-# once group 'edges' holds the wisp boxes (abulxt docs/handoff-krunk-to-wisp-cloud.md section 3).
+# Who may connect: the relays, i.e. abulxt's wisp boxes (abulxt deploy/ansible inventory [wisp_edge];
+# byod.abstracteducation.loan answers with them since 2026-11-12), plus the old VPSs until they are
+# cancelled. Whole /24s, as before. Overrides the role default (the /24s of group 'edges'), and stays:
+# the relays are not in this inventory, and our game servers (edges_kn) never connect here directly
+# (they reach coordinator./matchmaker.krunk.io through the relays). At the cutover, delete the four
+# "old:" lines together with group edges_old (inventory/hosts.yml).
 kn_edge_origin_allow:
   - 185.101.138.0/24   # wisp-iev  (Kyiv; its subnet is the .128/25)
   - 45.92.71.0/24      # wisp-mia  (Miami)

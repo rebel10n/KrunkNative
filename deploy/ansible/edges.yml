@@ -2,7 +2,8 @@
 # which are kept by hand at Spaceship: role kn_dns_check).
 # edge_firewall runs first: the vendored host-firewall role opens the game ports
 # (edge-firewall-contract v1, README "Edge firewall"; firewall.yml runs it alone). fail2ban
-# follows (fail2ban-contract v1, README "fail2ban"): abulxt owns the base, this repo adds drop-ins.
+# follows (fail2ban-contract v1, README "fail2ban"). Base of both: abulxt on the old VPSs (edges_old,
+# this repo adds drop-ins), this repo on the kn-<site> VMs (edges_kn, group_vars/edges_kn/main.yml).
 # Units run while kn_gameserver_enabled is true (group_vars/edges/main.yml; live since 2026-10-11).
 - name: KrunkNative edges (dedicated servers)
   hosts: edges

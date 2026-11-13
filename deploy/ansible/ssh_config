@@ -7,7 +7,25 @@ Host kru
   HostName 172.16.5.47
   User root
 
-# --- Edges (G-Core, also run the abulxt relays: never touch their services) ---
+# --- Edges, new: dedicated KrunkNative VMs on the wisp Proxmox hosts (inventory group edges_kn).
+# KrunkNative is the only tenant and owns the firewall + fail2ban base. HostName: the VM's address
+# (kn_public_ip in inventory/hosts.yml; built 2026-11-12 by abulxt's pve_edge_vm, VM 110).
+# Miami, US
+Host kn-mia
+  HostName 45.92.71.48
+  User root
+  # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
+  IdentityFile ~/.ssh/id_ed25519
+
+# Kyiv, UA
+Host kn-iev
+  HostName 185.101.138.155
+  User root
+  # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
+  IdentityFile ~/.ssh/id_ed25519
+
+# --- Edges, old (inventory group edges_old): G-Core VPSs, also run the abulxt relays: never
+# touch their services. Removed after the cutover to edges_kn.
 # Santa Clara, US - Debian 11, 4 vCPU
 Host com.clara
   HostName 92.38.149.24
