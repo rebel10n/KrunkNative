@@ -610,7 +610,9 @@ static int lobby_outdated(const MmLobby *l, const MmPickQuery *q) {
 static int region_eq(const MmNode *n, const char *region) {
     if (!region || !*region || !strcmp(n->region, region)) return 1;
     const char *v10 = registry_v10_region(n->region);
-    return v10 && !strcmp(v10, region);
+    if (v10 && !strcmp(v10, region)) return 1;
+    const char *alias = registry_v10_alias(n->region);
+    return alias && !strcmp(alias, region);
 }
 
 int registry_region_hosted(const Registry *r, const char *region, const char *flavor) {
@@ -645,6 +647,9 @@ int registry_route_region(const Registry *r, const char *region, const char *fla
         hosted[n] = id;
         const cJSON *p = cJSON_IsObject(pings) ? cJSON_GetObjectItemCaseSensitive(pings, id) : NULL;
         if (!p && cJSON_IsObject(pings)) p = cJSON_GetObjectItemCaseSensitive(pings, node->region);
+        /* the official client pings the alias (us-nj for Miami), never the name-only primary (us-fl) */
+        const char *alias = registry_v10_alias(node->region);
+        if (!p && alias && cJSON_IsObject(pings)) p = cJSON_GetObjectItemCaseSensitive(pings, alias);
         ms[n] = cJSON_IsNumber(p) ? p->valuedouble : -1;
         if (ms[n] >= 0) measured = 1;
         n++;
@@ -891,6 +896,17 @@ static const struct {
     {"LA", "us-ca-sv"}, /* Los Angeles: us-ca-la is not pinged; Silicon Valley is the nearest */
     {"CH", "us-nj"},    /* Chicago: us-il is dedicated-only; New York is the nearest pinged */
     {"VA", "us-nj"},    /* Ashburn, Virginia: New York is the nearest pinged */
+    {"KV", "de-fra"},   /* Kyiv, Ukraine: no Ukrainian or Polish id is pinged (pol is a name only); Frankfurt is the nearest pinged */
+    {"MI", "us-fl"},    /* Miami, Florida: v10 names it (a name only, never pinged), so it is also listed under an alias */
+};
+
+/* A second id a node is also listed under, for a primary the official client never pings (a name-only id):
+ * without it no official client would measure the node. Listed only while no node of its own holds the alias
+ * (registry_ping_list), and a seek in the alias reaches the node (region_eq). */
+static const struct {
+    const char *kn, *v10;
+} k_v10_aliases[] = {
+    {"MI", "us-nj"}, /* Miami: New York is the nearest pinged by latency (about 30 ms, Dallas about the same) */
 };
 
 const char *registry_v10_region(const char *kn_region) {
@@ -902,7 +918,34 @@ const char *registry_v10_region(const char *kn_region) {
     return krunker_region_pinged(kn_region) ? krunker_region(kn_region)->id : NULL;
 }
 
-cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *regions, const char *public_url) {
+const char *registry_v10_alias(const char *kn_region) {
+    if (!kn_region || !*kn_region) return NULL;
+    for (size_t i = 0; i < sizeof(k_v10_aliases) / sizeof(k_v10_aliases[0]); i++) {
+        if (!strcmp(kn_region, k_v10_aliases[i].kn)) return k_v10_aliases[i].v10;
+    }
+    return NULL;
+}
+
+/* The ping host of node n listed as `id`: brain.regions[] ping_host (by `id`, then by the node's code), else
+ * the owning brain's public URL (public_url when that brain is not listed). */
+static void ping_host_of(const Registry *r, const MmNode *n, const char *id, const cJSON *regions, const char *public_url,
+                         char *host, size_t cap) {
+    const cJSON *rc = ping_region_conf(regions, id);
+    if (!rc) rc = ping_region_conf(regions, n->region);
+    const char *ping = kn_json_str(rc, "ping_host", NULL);
+    if (ping && *ping) {
+        snprintf(host, cap, "%s", ping);
+        return;
+    }
+    const char *url = public_url ? public_url : "";
+    for (size_t k = 0; k < r->brain_count; k++) {
+        if (!strcmp(r->brains[k].brain_id, n->brain_id) && r->brains[k].public_url[0]) url = r->brains[k].public_url;
+    }
+    url_to_ping_host(url, host, cap);
+}
+
+cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *regions, const char *public_url,
+                          int aliases) {
     cJSON *o = cJSON_CreateObject();
     for (size_t i = 0; i < r->node_count; i++) {
         const MmNode *n = r->nodes[i];
@@ -910,20 +953,19 @@ cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *re
         if (!id || !*id || cJSON_GetObjectItemCaseSensitive(o, id)) continue;
         if (!registry_flavor_match(registry_node_flavor(n), flavor)) continue;
         char host[300] = "";
-        const cJSON *rc = ping_region_conf(regions, id);
-        if (!rc) rc = ping_region_conf(regions, n->region);
-        const char *ping = kn_json_str(rc, "ping_host", NULL);
-        if (ping && *ping) {
-            snprintf(host, sizeof(host), "%s", ping);
-        } else {
-            const char *url = public_url ? public_url : "";
-            for (size_t k = 0; k < r->brain_count; k++) {
-                if (!strcmp(r->brains[k].brain_id, n->brain_id) && r->brains[k].public_url[0])
-                    url = r->brains[k].public_url;
-            }
-            url_to_ping_host(url, host, sizeof(host));
-        }
+        ping_host_of(r, n, id, regions, public_url, host, sizeof(host));
         cJSON_AddStringToObject(o, id, host);
+    }
+    /* aliases after every primary: an id a node holds as its own is never taken over. The host is the node's
+     * own (by its primary id, then its code), not the alias id's brain.regions[] entry. */
+    for (size_t i = 0; aliases && i < r->node_count; i++) {
+        const MmNode *n = r->nodes[i];
+        const char *alias = registry_v10_alias(n->region), *id = registry_v10_region(n->region);
+        if (!alias || !id || cJSON_GetObjectItemCaseSensitive(o, alias)) continue;
+        if (!registry_flavor_match(registry_node_flavor(n), flavor)) continue;
+        char host[300] = "";
+        ping_host_of(r, n, id, regions, public_url, host, sizeof(host));
+        cJSON_AddStringToObject(o, alias, host);
     }
     return o;
 }

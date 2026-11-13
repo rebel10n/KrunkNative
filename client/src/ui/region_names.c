@@ -15,6 +15,10 @@ static const RegionEdge k_edges[] = {
     {"LA", "LA", "Los Angeles", "Los Angeles", "us-ca-sv"},
     {"CH", "CH", "Chicago", "Chicago", "us-nj"},
     {"VA", "VA", "Ashburn, Virginia", "Ashburn", "us-nj"},
+    {"KV", "KV", "Kyiv, Ukraine", "Kyiv", "de-fra"}, // no Ukrainian id is pinged: Frankfurt is the nearest
+    // v10 names us-fl but never pings it; the brain also lists Miami under us-nj for official clients only
+    // (registry_v10_alias: the native client asks with ?aliases=0)
+    {"MI", "MI", "Miami, Florida", "Miami", "us-fl"},
     {"local", "LO", "Local", "Local", "local"},
 };
 

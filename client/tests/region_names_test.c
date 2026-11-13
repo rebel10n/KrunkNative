@@ -3,7 +3,8 @@
 //   cmake-build-debug/region_names_test
 #include <region_names.h>
 
-#include <krunker_build.h> // KRUNKER_REGIONS: v10's dropdown, the order the picker must keep
+#include <krunker_build.h>   // KRUNKER_REGIONS: v10's dropdown, the order the picker must keep
+#include <krunker_regions.h> // krunker_region / krunker_region_pinged: every edge's id must be one v10 knows
 
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,9 @@ static void test_ids(void) {
     CHECK(!strcmp(region_id_of("LA"), "us-ca-sv"), "LA -> us-ca-sv: got %s", region_id_of("LA"));
     CHECK(!strcmp(region_id_of("CH"), "us-nj"), "CH -> us-nj: got %s", region_id_of("CH"));
     CHECK(!strcmp(region_id_of("VA"), "us-nj"), "VA -> us-nj: got %s", region_id_of("VA"));
+    // Kyiv under Frankfurt, Miami under its own name-only id (doc/v10/regions.md "Kyiv and Miami")
+    CHECK(!strcmp(region_id_of("KV"), "de-fra"), "KV -> de-fra: got %s", region_id_of("KV"));
+    CHECK(!strcmp(region_id_of("MI"), "us-fl"), "MI -> us-fl: got %s", region_id_of("MI"));
     CHECK(!strcmp(region_id_of("local"), "local"), "local -> local: got %s", region_id_of("local"));
     // a v10 id is itself; an unknown code is itself (the brain does not list it, so it never comes back)
     CHECK(!strcmp(region_id_of("us-nj"), "us-nj"), "us-nj stays: got %s", region_id_of("us-nj"));
@@ -25,6 +29,20 @@ static void test_ids(void) {
     // the KrunkNative names stay with their codes
     CHECK(region_edge("SV") && !strcmp(region_edge("SV")->name, "Santa Clara"), "SV is Santa Clara");
     CHECK(region_edge("VA") && !strcmp(region_edge("VA")->name, "Ashburn, Virginia"), "VA is Ashburn, Virginia");
+    CHECK(region_edge("KV") && !strcmp(region_edge("KV")->name, "Kyiv, Ukraine") && !strcmp(region_edge("KV")->code, "KV") &&
+              !strcmp(region_edge("KV")->city, "Kyiv"),
+          "KV is Kyiv, Ukraine");
+    CHECK(region_edge("MI") && !strcmp(region_edge("MI")->name, "Miami, Florida") && !strcmp(region_edge("MI")->code, "MI") &&
+              !strcmp(region_edge("MI")->city, "Miami"),
+          "MI is Miami, Florida");
+    // every edge is listed under an id v10 knows: one it pings, or Miami's name-only us-fl (the brain lists
+    // Miami under the pinged alias us-nj too, services/brain/registry.c registry_v10_alias)
+    for (size_t i = 0; i < region_edge_count(); i++) {
+        const char *id = region_edge_at(i)->v10;
+        CHECK(krunker_region_pinged(id) || (!strcmp(region_edge_at(i)->kn, "MI") && krunker_region(id)),
+              "%s's id %s is pinged", region_edge_at(i)->kn, id);
+    }
+    CHECK(region_v10_name("us-fl") && !strcmp(region_v10_name("us-fl"), "Miami"), "us-fl is Miami");
     CHECK(region_edge("us-nj") == NULL, "a v10 id is no edge code");
 }
 
@@ -35,22 +53,25 @@ static void test_names(void) {
     CHECK(!strcmp(region_v10_name("us-tx"), "Dallas"), "us-tx is Dallas");
     CHECK(region_v10_name("zz-unknown") == NULL, "an unknown id has no v10 name");
     CHECK(region_hosted("us-ca-sv") && region_hosted("us-nj") && region_hosted("local"), "the edges' ids are hosted");
-    CHECK(!region_hosted("de-fra") && !region_hosted("SV") && !region_hosted("") && !region_hosted(NULL), "other ids are not");
+    CHECK(region_hosted("de-fra"), "de-fra is hosted (KV, Kyiv)");
+    CHECK(region_hosted("us-fl"), "us-fl is hosted (MI, Miami)");
+    CHECK(!region_hosted("au-syd") && !region_hosted("us-tx") && !region_hosted("SV") && !region_hosted("") && !region_hosted(NULL), "other ids are not");
 }
 
 // The Default Region picker's values: the whole Krunker v10 dropdown (availableRegions, KRUNKER_REGIONS in its
-// order), then local, then anything else the brain lists; the same list whatever the Server Type (the brain's
+// order), then the edges' ids it lacks (us-fl, Miami; then local), then anything else the brain lists; the same list whatever the Server Type (the brain's
 // list on Box Office, no list on krunker.io or offline). Before: only the ids the brain listed (Silicon Valley,
 // New York, Local).
 static void picker(const char *const *listed, const size_t listed_n, const char *what) {
     static const char *const want[] = {KRUNKER_REGIONS};
     const char *ids[64];
     const size_t n = region_picker_ids(listed, listed_n, ids, 64);
-    CHECK(n >= KRUNKER_REGION_COUNT + 1, "%s: %zu ids, want the %d v10 regions and local at least", what, n, KRUNKER_REGION_COUNT);
+    CHECK(n >= KRUNKER_REGION_COUNT + 2, "%s: %zu ids, want the %d v10 regions, us-fl and local at least", what, n, KRUNKER_REGION_COUNT);
     for (size_t i = 0; i < sizeof(want) / sizeof(want[0]) && i < n; i++) {
         CHECK(!strcmp(ids[i], want[i]), "%s: ids[%zu] = %s, want %s (v10's order)", what, i, ids[i], want[i]);
     }
-    CHECK(n > KRUNKER_REGION_COUNT && !strcmp(ids[KRUNKER_REGION_COUNT], "local"), "%s: local follows the v10 list", what);
+    CHECK(n > KRUNKER_REGION_COUNT && !strcmp(ids[KRUNKER_REGION_COUNT], "us-fl"), "%s: Miami follows the v10 list", what);
+    CHECK(n > KRUNKER_REGION_COUNT + 1 && !strcmp(ids[KRUNKER_REGION_COUNT + 1], "local"), "%s: local follows Miami", what);
     for (size_t i = 0; i < listed_n; i++) {
         int found = 0;
         for (size_t k = 0; k < n; k++) found |= !strcmp(ids[k], listed[i]);
@@ -60,7 +81,7 @@ static void picker(const char *const *listed, const size_t listed_n, const char 
         for (size_t k = i + 1; k < n; k++) CHECK(strcmp(ids[i], ids[k]), "%s: %s is offered once", what, ids[i]);
     }
     // every v10 dropdown id has a label a v10 player knows
-    for (size_t i = 0; i < n; i++) CHECK(region_v10_name(ids[i]) != NULL || i >= KRUNKER_REGION_COUNT + 1, "%s: %s has a v10 name", what, ids[i]);
+    for (size_t i = 0; i < n; i++) CHECK(region_v10_name(ids[i]) != NULL || i >= KRUNKER_REGION_COUNT + 2, "%s: %s has a v10 name", what, ids[i]);
 }
 
 static void test_picker(void) {
@@ -71,7 +92,7 @@ static void test_picker(void) {
     picker(odd_list, 2, "a brain listing Iowa");
     const char *ids[64];
     const size_t n = region_picker_ids(odd_list, 2, ids, 64);
-    CHECK(n == KRUNKER_REGION_COUNT + 2 && !strcmp(ids[n - 1], "iow"), "Iowa is offered last: got %zu ids, last %s", n, n ? ids[n - 1] : "");
+    CHECK(n == KRUNKER_REGION_COUNT + 3 && !strcmp(ids[n - 1], "iow"), "Iowa is offered last: got %zu ids, last %s", n, n ? ids[n - 1] : "");
     // a small out is never overrun
     const char *two[2];
     CHECK(region_picker_ids(brain_list, 3, two, 2) == 2 && !strcmp(two[0], "de-fra") && !strcmp(two[1], "us-ca-sv"), "max caps the ids");
@@ -87,6 +108,7 @@ static void test_labels(void) {
     // the v10 name alone, never the edge places in brackets (the user: the labels got too long)
     label("us-ca-sv", "Silicon Valley");
     label("us-nj", "New York");
+    label("us-fl", "Miami");
     char out[160];
     region_picker_label("us-ca-sv", out, sizeof(out));
     CHECK(!strchr(out, '('), "no parenthesis in a region label");

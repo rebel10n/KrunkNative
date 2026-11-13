@@ -58,7 +58,7 @@ static void ping_list_checks(void) {
     add_node(p, "ASHBURN1", "VA", 0);
     add_node(p, "FRANK1", "de-fra", 0); /* a v10 id as the region (the federation test's node): listed as itself */
     add_node(p, "NOWHERE1", "XX", 0);   /* no v10 region stands for it: not listed */
-    cJSON *o = registry_ping_list(p, NULL, NULL, "http://brain.example:6767");
+    cJSON *o = registry_ping_list(p, NULL, NULL, "http://brain.example:6767", 1);
     CHECK(o != NULL);
     if (!o) {
         registry_free(p);
@@ -79,7 +79,7 @@ static void ping_list_checks(void) {
 
     /* brain.regions[] ping_host: by the v10 id, else by the KrunkNative code */
     cJSON *regions = cJSON_Parse("[{\"id\":\"us-nj\",\"ping_host\":\"ny.example:6767\"},{\"id\":\"SV\",\"ping_host\":\"sv.example\"}]");
-    cJSON *o2 = registry_ping_list(p, NULL, regions, "http://brain.example:6767");
+    cJSON *o2 = registry_ping_list(p, NULL, regions, "http://brain.example:6767", 1);
     host = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o2, "us-nj"));
     CHECK(host && !strcmp(host, "ny.example:6767"));
     host = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o2, "us-ca-sv"));
@@ -205,9 +205,102 @@ static void seek_region_checks(void) {
     }
 }
 
+static const char *ping_key(const cJSON *o, const char *id) {
+    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, id));
+}
+
+/* Kyiv (KV) and Miami (MI) (doc/v10/regions.md "Kyiv and Miami"). KV is listed under de-fra: a de-fra seek finds
+ * Kyiv instead of being routed across the Atlantic. MI is listed under us-fl (v10 names it Miami but never pings
+ * it) and under the alias us-nj while no node of its own holds us-nj, so official clients still measure it. */
+static void kyiv_miami_checks(void) {
+    CHECK(registry_v10_region("KV") && !strcmp(registry_v10_region("KV"), "de-fra"));
+    CHECK(registry_v10_region("MI") && !strcmp(registry_v10_region("MI"), "us-fl"));
+    CHECK(registry_v10_alias("MI") && !strcmp(registry_v10_alias("MI"), "us-nj"));
+    CHECK(!registry_v10_alias("KV") && !registry_v10_alias("CH") && !registry_v10_alias(NULL));
+    CHECK(krunker_region("us-fl") && !krunker_region_pinged("us-fl") && krunker_region_pinged("us-nj"));
+
+    /* with the old fleet still up: us-nj is CH's (the alias stays out), us-fl is Miami's own */
+    Registry *s = edges_registry();
+    MmNode *kyiv = add_node(s, "KYIV1", "KV", 1), *miami = add_node(s, "MIAMI1", "MI", 1);
+    kyiv->max_lobbies = miami->max_lobbies = 4;
+    add_lobby(s, kyiv, "eeeee", 3, 8, 0, "1.0");
+    add_lobby(s, miami, "fffff", 3, 8, 0, "1.0");
+
+    cJSON *regions = cJSON_Parse("[{\"id\":\"MI\",\"ping_host\":\"mia.example\"}]");
+    cJSON *o = registry_ping_list(s, NULL, regions, "http://brain.example:6767", 1);
+    CHECK(o && cJSON_GetArraySize(o) == 4); /* us-ca-sv, us-nj, de-fra, us-fl */
+    CHECK(o && !cJSON_GetObjectItemCaseSensitive(o, "KV") && !cJSON_GetObjectItemCaseSensitive(o, "MI"));
+    CHECK(o && ping_key(o, "us-fl") && !strcmp(ping_key(o, "us-fl"), "mia.example"));
+    CHECK(o && ping_key(o, "us-nj") && !strcmp(ping_key(o, "us-nj"), "brain.example:6767")); /* CH's, not Miami's */
+    cJSON_Delete(o);
+
+    CHECK(registry_region_hosted(s, "de-fra", NULL) && registry_region_hosted(s, "KV", NULL));
+    CHECK(registry_region_hosted(s, "MI", NULL) && registry_region_hosted(s, "us-fl", NULL));
+    MmPolicy p = {.cross_region = 0, .default_max_players = 8};
+    static const struct {
+        const char *region, *node_a, *node_b;
+        int routed;
+    } seeks[] = {
+        {"KV", "KYIV1", "", 0},
+        {"de-fra", "KYIV1", "", 0}, /* hosted now: Frankfurt is Kyiv's id */
+        {"gb-lon", "KYIV1", "", 1}, /* unhosted Europe: nearest hosted is de-fra (Kyiv), no longer New York */
+        {"me-bhn", "KYIV1", "", 1},
+        {"MI", "MIAMI1", "", 0},
+        {"us-fl", "MIAMI1", "", 0},
+        {"brz", "MIAMI1", "", 1},   /* Brazil: Miami is nearer than New York */
+    };
+    for (size_t i = 0; i < sizeof(seeks) / sizeof(seeks[0]); i++) {
+        MmPick pick;
+        MmPickQuery q = {.region = seeks[i].region, .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        const MmPickError e = registry_pick(s, &p, &q, &pick);
+        CHECK(e == MM_PICK_OK && node_is(pick.node, seeks[i].node_a, seeks[i].node_b));
+        if (e == MM_PICK_OK && !node_is(pick.node, seeks[i].node_a, seeks[i].node_b))
+            fprintf(stderr, "  seek %s found %s\n", seeks[i].region, pick.node ? pick.node->node_id : "(none)");
+        CHECK(e == MM_PICK_OK && pick.routed == seeks[i].routed);
+    }
+    /* us-nj is CH's and VA's, and Miami's alias: a New York seek may land on any of the three */
+    {
+        MmPick pick;
+        MmPickQuery q = {.region = "us-nj", .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_OK && !pick.routed &&
+              (node_is(pick.node, "CHITOWN1", "ASHBURN1") || node_is(pick.node, "MIAMI1", NULL)));
+    }
+    registry_free(s);
+
+    /* after the cutover, Miami and Kyiv alone: Miami also holds us-nj, with its own host */
+    s = registry_new();
+    add_node(s, "MIAMI1", "MI", 0);
+    add_node(s, "KYIV1", "KV", 0);
+    cJSON *ny = cJSON_Parse("[{\"id\":\"us-nj\",\"ping_host\":\"ny.example\"},{\"id\":\"MI\",\"ping_host\":\"mia.example\"}]");
+    o = registry_ping_list(s, NULL, ny, "http://brain.example:6767", 1);
+    CHECK(o && cJSON_GetArraySize(o) == 3); /* us-fl, de-fra, then the alias us-nj */
+    CHECK(o && ping_key(o, "us-fl") && !strcmp(ping_key(o, "us-fl"), "mia.example"));
+    CHECK(o && ping_key(o, "us-nj") && !strcmp(ping_key(o, "us-nj"), "mia.example")); /* Miami's, not us-nj's entry */
+    CHECK(o && o->child && !strcmp(o->child->string, "us-fl")); /* the primary first */
+    cJSON_Delete(o);
+    o = registry_ping_list(s, NULL, ny, "http://brain.example:6767", 0); /* the native client: no alias */
+    CHECK(o && cJSON_GetArraySize(o) == 2 && !cJSON_GetObjectItemCaseSensitive(o, "us-nj"));
+    cJSON_Delete(o);
+    cJSON_Delete(ny);
+
+    CHECK(registry_region_hosted(s, "us-nj", NULL)); /* the official client's New York seek finds Miami */
+    char out[32];
+    CHECK(registry_route_region(s, "us-nj", NULL, NULL, out, sizeof(out)) == 0 && !strcmp(out, "us-nj"));
+    /* an official client measured Miami under the alias: a Singapore seek (unhosted) goes to the lower ping */
+    cJSON *pings = cJSON_Parse("{\"us-nj\":40,\"de-fra\":190}");
+    CHECK(registry_route_region(s, "sgp", NULL, pings, out, sizeof(out)) == 1 && !strcmp(out, "us-fl"));
+    cJSON_Delete(pings);
+    pings = cJSON_Parse("{\"us-nj\":240,\"de-fra\":60}");
+    CHECK(registry_route_region(s, "sgp", NULL, pings, out, sizeof(out)) == 1 && !strcmp(out, "de-fra"));
+    cJSON_Delete(pings);
+    registry_free(s);
+    cJSON_Delete(regions);
+}
+
 int main(void) {
     ping_list_checks();
     seek_region_checks();
+    kyiv_miami_checks();
     Registry *r = registry_new();
     MmPolicy p = {.cross_region = 1, .default_max_players = 8};
     MmPick pick;

@@ -7,7 +7,7 @@
 //
 // The brain lists each KrunkNative edge region under a v10.0.2 region id (services/brain/registry.c
 // registry_v10_region; doc/v10/regions.md), and the client seeks with the id its list gave it. The lobby rows
-// keep the edge's own code (tuple[1]: SV, LA, CH, VA, local), which region_id_of maps to that id. The pickers
+// keep the edge's own code (tuple[1]: SV, LA, CH, VA, KV, MI, local), which region_id_of maps to that id. The pickers
 // show the v10 name of the id (what v10 players see) with the KrunkNative places it holds in brackets.
 
 typedef struct {
@@ -37,7 +37,7 @@ int region_hosted(const char *id);
 
 // The <option> values of the region pickers (Settings > Default Region; the same list whatever the Server
 // Type): every id of v10's Default Region dropdown (availableRegions, krunker_regions.h) in v10's order, then
-// the ids of KrunkNative's edges it lacks (local), then any other id the matchmaker's ping list names
+// the ids of KrunkNative's edges it lacks (us-fl for Miami, local), then any other id the matchmaker's ping list names
 // (`listed`, listed_n ids), each once. Writes at most `max` ids to out; returns the count.
 size_t region_picker_ids(const char *const *listed, size_t listed_n, const char **out, size_t max);
 

@@ -2,7 +2,7 @@
 
 The brain's `GET /mm/ping-list` (and `/ping-list`) answers `{region: "host[:port]"}`. The
 official v10 client only pings region ids of its own list, so its keys must be v10 ids.
-KrunkNative's region codes (`SV`, `LA`, `CH`, `VA`, from the inventory's
+KrunkNative's region codes (`SV`, `LA`, `CH`, `VA`, `KV`, `MI`, from the inventory's
 `kn_gameserver_region`, `deploy/ansible/inventory/hosts.yml`) are not among them.
 
 krunk.io has fewer regions than Krunker (two: Silicon Valley and New York, plus `local` on a
@@ -176,13 +176,15 @@ nearest to its real location:
 | `com.angeles` | `LA` | Los Angeles, CA | `us-ca-sv` | ~500 km | `us-ca-la` is not pinged; Silicon Valley is next (us-tx is ~2,000 km) |
 | `com.chitown` | `CH` | Chicago, IL | `us-nj` | ~1,150 km | `us-il` is dedicated-only; New York is the nearest pinged id (us-tx ~1,300 km) |
 | `amph.ashburn` | `VA` | Ashburn, VA | `us-nj` | ~350 km | no Virginia id; New York is the nearest pinged id (us-ga, a name only, is ~850 km) |
+| `kn-iev` | `KV` | Kyiv, Ukraine | `de-fra` | ~1,550 km | see below: no Ukrainian id; `pol` (Warsaw, ~690 km) is a name only; Frankfurt is the nearest pinged id (me-bhn ~3,200 km) |
+| `kn-mia` | `MI` | Miami, FL | `us-fl`, alias `us-nj` | 0 / ~1,760 km | see below: `us-fl` (Miami) is a name only, so the official client never pings it; the alias `us-nj` is listed for it while no node of its own holds `us-nj` |
 | (dev / offline) | `local` | this machine | `local` | - | the non-production list is `["local"]` |
 
 A node whose region is already a pinged v10 id (`de-fra`, `us-nj`, `local`, as the federation test
 and the example config use) is listed under that id. Any other code is not listed
 (`registry_v10_region` returns NULL, the node is skipped; it is still a node a seek can be routed
-to). The mapping is in `services/brain/registry.c` (`k_v10_regions`) and
-`net-bridge/publicRoutes.ts` (`V10_REGION_IDS`); keep them the same.
+to). The mapping is in `services/brain/registry.c` (`k_v10_regions`, aliases in `k_v10_aliases`) and
+`net-bridge/publicRoutes.ts` (`V10_REGION_IDS`, `V10_REGION_ALIASES`); keep them the same.
 
 - **Two nodes share an id.** `us-ca-sv` is listed for `SV` and `LA`; `us-nj` for `CH` and
   `VA`. The object can hold one key per id and the client pings one host per region, so the
@@ -196,6 +198,57 @@ to). The mapping is in `services/brain/registry.c` (`k_v10_regions`) and
   operator can point `us-nj` at a specific host.
 - **Ping host.** Without a `ping_host` the host is the owning brain's public URL (`/ping` is
   served there), as before.
+
+## Kyiv (`KV`) and Miami (`MI`)
+
+Decided by the user on 2026-11-12. The sites are `kn-iev` (Kyiv, Ukraine) and `kn-mia` (Miami,
+Florida). Their codes are in every table: `registry.c` `k_v10_regions`, `region_names.c` `k_edges`,
+`net-bridge/publicRoutes.ts` `V10_REGION_IDS`, and `config/config.example.json`
+`accounts.region_index` (`KV` 3 eu, `MI` 4 na).
+
+The official client pings only the **pinged** ids (`krunker_region_pinged`): `de-fra`, `us-ca-sv`,
+`au-syd`, `jb-hnd`, `sgp`, `us-nj`, `as-mb`, `us-tx`, `brz`, `me-bhn`, plus `sss` (beta host only)
+and `local` (dev host only). `getRegion` skips any other key. `us-fl` (Miami), `pol` (Warsaw) and
+`us-ga` (Atlanta) are names only. `us-il` and `gb-lon` are dedicated-only.
+
+**`KV` -> `de-fra` (Frankfurt).** Great circle from Kyiv: Frankfurt ~1,550 km, Bahrain (`me-bhn`)
+~3,200 km, Mumbai ~5,100 km, New York ~7,500 km. Frankfurt is the only sensible pinged id.
+- Once a `KV` node registers, `de-fra` is hosted, so a Frankfurt seek lands in Kyiv instead of
+  being routed to New York.
+- Unhosted European, Middle East, Mumbai and South Africa ids (`gb-lon`, `me-bhn`, `as-mb`,
+  `af-ct`, ...) are routed to it by great circle too.
+
+**`MI` -> `us-fl` (Miami), with the alias `us-nj` (New York).** v10 has a name for `us-fl`
+("Miami") but never pings it, so Miami gets a second key (`registry_v10_alias`, `k_v10_aliases`).
+- **The ping list.** Every node's primary id comes first. Then each alias is added, with that
+  node's own ping host, only when no node holds the id as its own. The host is looked up as for
+  the primary (`brain.regions[]` by the primary id, then by the code), never the alias id's entry.
+  While `CH` / `VA` still run, `us-nj` stays theirs and official clients don't measure Miami on
+  its own. After the cutover `us-nj` points at Miami.
+- **Seeks.** A seek in `us-fl`, `MI` or the alias `us-nj` finds the Miami node (`region_eq`).
+  When the request names an unhosted region, `registry_route_region` reads the client's
+  measurement of Miami under the alias too. A routed seek answers `us-fl`, which v10 shows as
+  "Miami". Brazil, by great circle, now goes to Miami.
+- **The native client** asks with `?aliases=0` (`servers_ui.c`, both `/mm/ping-list` calls), so
+  its ping race and its lobby rows see only `us-fl` and never label Miami "New York". Its
+  Default Region picker offers `us-fl` after v10's dropdown (`region_picker_ids`: an edge id the
+  dropdown lacks), labelled "Miami". Clients built before this change see the alias too. Their
+  race may then name Miami "New York", which routes to the same place.
+- Why not plain `us-nj` or `us-tx`: `us-nj` would hide Miami behind New York for every client.
+  `us-tx` would show it as "Dallas" and route Texas players ~1,800 km under their own region's
+  name. Great circle: Miami - New York ~1,760 km, Miami - Dallas ~1,790 km. Latency (estimates):
+  ~30 ms to each.
+
+Tests:
+- `client/tests/region_names_test.c`: `test_ids` (`KV` -> `de-fra`, `MI` -> `us-fl`, every
+  edge id is pinged or is Miami's name-only id) and the picker order (v10's dropdown, `us-fl`,
+  `local`).
+- `services/brain/tests/test_registry.c`: `kyiv_miami_checks`. It covers:
+  - the ping list with and without `CH` / `VA`, and with `aliases` off
+  - the alias host
+  - `de-fra` finding Kyiv unrouted, and `gb-lon` / `me-bhn` routed to it
+  - `us-fl`, `MI` and `us-nj` finding Miami
+  - routing by a ping measured under the alias
 
 ## Readers of the shape
 

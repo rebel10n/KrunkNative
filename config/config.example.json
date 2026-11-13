@@ -158,7 +158,9 @@
       "SV": 4,
       "LA": 4,
       "CH": 4,
-      "VA": 4
+      "VA": 4,
+      "KV": 3,
+      "MI": 4
     },
     "rank_var": 0.03,
     "trade_min_level": 10,

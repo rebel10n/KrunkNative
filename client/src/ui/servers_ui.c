@@ -1608,7 +1608,7 @@ static int start_seek(const char *game_id) {
         ps->action = action;
     }
     g_ping_pending++;
-    if (!ps || (game_id && game_id[0] && !ps->game) || !mm_get("/mm/ping-list", on_ping_list, ps)) {
+    if (!ps || (game_id && game_id[0] && !ps->game) || !mm_get("/mm/ping-list?aliases=0", on_ping_list, ps)) {
         g_ping_pending--;
         ping_seek_free(ps);
         g_find_seek = g_find_both = 0;
@@ -3368,7 +3368,7 @@ char *servers_window_gen(const int id, const char **header) {
         return gen_list();
     }
     g_last_load_ms = now_ms();
-    mm_get("/mm/ping-list", on_row_ping_list, NULL); // v10 loadData's getRegionPing: the rows' ping icons
+    mm_get("/mm/ping-list?aliases=0", on_row_ping_list, NULL); // v10 loadData's getRegionPing: the rows' ping icons
     return loading_html();
 }
 

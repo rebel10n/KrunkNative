@@ -51,6 +51,11 @@ V10_REGION_IDS.set("SV", "us-ca-sv");
 V10_REGION_IDS.set("LA", "us-ca-sv");
 V10_REGION_IDS.set("CH", "us-nj");
 V10_REGION_IDS.set("VA", "us-nj");
+V10_REGION_IDS.set("KV", "de-fra");
+V10_REGION_IDS.set("MI", "us-fl"); // v10 names Miami but never pings it: the alias below makes it measurable
+// A second id a code is also listed under (registry_v10_alias), left out when the native client asks
+// with ?aliases=0 so its ping race never names Miami "New York".
+const V10_REGION_ALIASES = new Map<string, string>([["MI", "us-nj"]]);
 const MAX_PLAYERS = Number.parseInt(process.env.KRUNK_NATIVE_MAX_PLAYERS || "8", 10) || 8;
 
 function makeId(length: number): string {
@@ -185,7 +190,10 @@ export function handle(
         ? `${endpoint.host}:${endpoint.port}`
         : endpoint.host;
       const listed = V10_REGION_IDS.get(REGION_ID);
-      return writeJson(res, 200, listed ? { [listed]: value } : {});
+      const alias = params.get("aliases") === "0" ? undefined : V10_REGION_ALIASES.get(REGION_ID);
+      const body: Record<string, string> = listed ? { [listed]: value } : {};
+      if (listed && alias && alias !== listed) body[alias] = value;
+      return writeJson(res, 200, body);
     }
 
     case "/api/maps": {

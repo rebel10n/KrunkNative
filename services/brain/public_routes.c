@@ -112,7 +112,10 @@ static void h_ping_list(kn_http_req *req, void *ud) {
     Brain *b = ud;
     char flavor[16];
     query_flavor(req, flavor, sizeof(flavor)); /* the regions where the app's own servers run */
-    cJSON *o = registry_ping_list(b->registry, flavor, mm_settings()->regions, mm_settings()->public_url);
+    char aliases[4] = "";
+    kn_http_query_get(req, "aliases", aliases, sizeof(aliases)); /* the native client: ?aliases=0 */
+    cJSON *o = registry_ping_list(b->registry, flavor, mm_settings()->regions, mm_settings()->public_url,
+                                  strcmp(aliases, "0") != 0);
     brain_reply_json(req, 200, o);
     cJSON_Delete(o);
 }

@@ -306,7 +306,10 @@ cJSON *registry_lobby_tuple(const Registry *r, const MmLobby *l, int64_t now_ms)
 /* ---- regions (doc/v10/regions.md) */
 /* The v10 region id a node's region code (MmNode.region, a KrunkNative code) is listed under; NULL = none. */
 const char *registry_v10_region(const char *kn_region);
-/* 1 when some node of the flavor pool serves `region` (region_eq: its KN code or its v10 id). */
+/* The second v10 id a node's region code is also listed under (NULL = none): a primary the official client never
+ * pings (us-fl, a name only) gets a pinged alias (us-nj) so official clients still measure and reach the node. */
+const char *registry_v10_alias(const char *kn_region);
+/* 1 when some node of the flavor pool serves `region` (region_eq: its KN code, its v10 id or its alias). */
 int registry_region_hosted(const Registry *r, const char *region, const char *flavor);
 /* The region a seek or host in `region` is made in (written to out, cap bytes): `region` itself when a node of
  * the pool serves it (or it is NULL / ""), else the nearest hosted v10 id (krunker_regions.h
@@ -317,7 +320,10 @@ int registry_route_region(const Registry *r, const char *region, const char *fla
 /* The /mm/ping-list object (caller frees): {v10 region id: "host[:port]"}, one ping host per listed
  * region of the flavor pool (registry_flavor_match). A host is brain.regions[] ping_host (looked up by
  * the v10 id, then by the KrunkNative code), else the owning brain's public URL (public_url when that
- * brain is not listed). Of the nodes sharing an id the first in registry order gives the host. */
-cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *regions, const char *public_url);
+ * brain is not listed). Of the nodes sharing an id the first in registry order gives the host. With `aliases`,
+ * each node's registry_v10_alias is listed too, with the node's own host, when no node holds that id as its
+ * own; the native client asks without them (?aliases=0) so its ping race never names Miami "New York". */
+cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *regions, const char *public_url,
+                          int aliases);
 
 #endif

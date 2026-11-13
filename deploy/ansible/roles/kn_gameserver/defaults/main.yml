@@ -12,8 +12,8 @@ kn_gameserver_enabled: false
 # (e.g. if its game ports cannot be opened). edge_firewall opens them on every edge.
 kn_gameserver_ports_open: true
 kn_gameserver_name_prefix: "Krunker Box Office {{ kn_edge_name | capitalize }}"
-# Region id = the 2-letter code the client shows (SV LA CH VA: client/src/ui/servers_ui.c
-# k_regions; accounts.region_index); per host in the inventory.
+# Region id = the 2-letter code the client shows (SV LA CH VA KV MI: client/src/ui/region_names.c
+# k_edges, services/brain/registry.c k_v10_regions; accounts.region_index); per host in the inventory.
 kn_gameserver_region: local
 kn_gameserver_max_players: 8
 # server.cfg modes: "rotation" (Krunker's public modes: ffa, point, ctf, kc, dom) or a list of
