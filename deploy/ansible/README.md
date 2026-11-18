@@ -98,7 +98,7 @@ need a verified email.
 
 Switches: `kn_coordinator_db` (`sqlite` | `none` | `postgres`; sqlite falls back to `--no-db`
 while the shipped kn_brain has no SQLite store; postgres = [Database cutover](#database-cutover-postgresql--redis-on-kru)),
-`kn_postgres_enabled` / `kn_redis_enabled` (roles default off; on for kru in `group_vars/central`), `kn_gameserver_enabled` (edges stay down until
+`kn_postgres_enabled` / `kn_redis_enabled` (roles default off; off for kru too since its database and Redis moved to terp.db on 2026-11-17, `group_vars/central`), `kn_gameserver_enabled` (edges stay down until
 true), `kn_gameserver_ports_open` (escape hatch, true everywhere: edge_firewall opens the ports),
 `edge_firewall_own_base` (see below).
 
@@ -271,6 +271,11 @@ curl -fsSI https://dl.krunk.io/assets/version.txt; curl -fsSI https://dl.krunk.i
 then set `kn_dl_origin_enabled: true` in group_vars (Deploy kru runs central.yml on every push).
 
 ## Database cutover (PostgreSQL + Redis on kru)
+
+Since 2026-11-17 kru's coordinator database and Redis are on terp.db (infra `docs/terp-db.md`), the local
+cluster and kn-redis stopped and kept as the rollback; `group_vars/central/main.yml` now has
+`kn_postgres_enabled: false` and `kn_redis_enabled: false`, so neither role nor the cutover runs and a
+deploy leaves `coord-db.env`, `redis.env` and those units alone. What follows describes the local setup.
 
 `doc/backend.md` 3.11 has the design (what Redis holds, failure modes, security, the measurements
 and the load test). `group_vars/central/main.yml` sets `kn_postgres_enabled: true`,
