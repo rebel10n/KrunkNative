@@ -2,22 +2,13 @@
 #   {{ kn_rtc_base }}/kn-rtc        static Go binary (built on the controller)
 #   {{ kn_etc_dir }}/rtc.env        listen addresses, allowlist, limits
 #   kn-rtc.service                  user {{ kn_user }}, http 127.0.0.1:{{ kn_rtc_http_port }}, udp {{ kn_rtc_public_ip }}:{{ kn_rtc_ice_port }}
+#   (kn_rtc_nat_enabled, nat.yml)   the public address on lo + the NAT table, for a host behind NAT
 #
 # Host firewall: kru's nftables ruleset is Debian's default (input policy accept, not managed
 # here), so udp {{ kn_rtc_ice_port }} needs no rule; the gateway binds only that one port.
 
 - name: Gateway allowlist (edge game servers by name and IP)
-  ansible.builtin.set_fact:
-    kn_rtc_targets: >-
-      {%- set out = [] -%}
-      {%- set ports = kn_rtc_target_port_lo ~ '-' ~ kn_rtc_target_port_hi -%}
-      {%- for h in kn_rtc_edge_hosts -%}
-        {%- for n in range(1, (kn_rtc_target_port_hi | int) - (kn_rtc_target_port_lo | int) + 2) -%}
-          {%- set _ = out.append(hostvars[h].kn_edge_name ~ '-' ~ n ~ '.' ~ kn_domain ~ ':' ~ ports) -%}
-        {%- endfor -%}
-        {%- set _ = out.append(hostvars[h].kn_public_ip ~ ':' ~ ports) -%}
-      {%- endfor -%}
-      {{ out }}
+  ansible.builtin.include_tasks: targets.yml
 
 - name: The allowlist is not empty
   ansible.builtin.assert:
@@ -25,12 +16,18 @@
     fail_msg: "No edges in the inventory: the gateway would have nothing to connect to."
     quiet: true
 
+# Behind NAT (kru on divide): the public address goes on lo first, with the NAT table (nat.yml,
+# which checks the address itself: the facts were gathered before it was there on a fresh host).
+- name: Public address on lo and the NAT table (kn_rtc_nat_enabled)
+  ansible.builtin.include_tasks: nat.yml
+  when: kn_rtc_nat_enabled | bool
+
 - name: The ICE address is on this host
   ansible.builtin.assert:
     that: kn_rtc_public_ip in ansible_all_ipv4_addresses
     fail_msg: "{{ kn_rtc_public_ip }} is not an address of {{ inventory_hostname }} ({{ ansible_all_ipv4_addresses }}): set kn_rtc_public_ip."
     quiet: true
-  when: ansible_all_ipv4_addresses is defined
+  when: ansible_all_ipv4_addresses is defined and not (kn_rtc_nat_enabled | bool)
 
 # Static and reproducible (-trimpath, empty build id, -buildvcs=false): an unchanged source gives
 # a byte-identical binary (no copy, no restart). Without -buildvcs=false a build inside a git

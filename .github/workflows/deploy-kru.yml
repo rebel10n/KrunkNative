@@ -7,6 +7,9 @@ name: Deploy kru
 # (asset origins, ...) are repository variables, deploy/pages/site.sh; pages.yml republishes
 # this build with changed ones, without a build.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
+#          DIVIDE_SSH_KEY, DIVIDE_KNOWN_HOSTS (kru is CT 120 on the Proxmox host divide, reached only
+#          through it: inventory group divide, ProxyJump divide; KRU_HOST is kru's LAN address
+#          172.16.5.47; deploy/ansible/README.md "CI"),
 #          optional KN_SMTP_HOST, KN_SMTP_PORT, KN_SMTP_TLS, KN_SMTP_USER, KN_SMTP_PASSWORD, KN_SMTP_FROM
 #          (kn_brain's outbound mail -> /etc/krunknative/smtp.env; deploy/ansible/README.md),
 #          optional KN_AI_UPSTREAM_URL, KN_AI_UPSTREAM_KEY (the editor AI's provider -> /etc/krunknative/ai.env).
@@ -113,16 +116,32 @@ jobs:
           echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
           go version
 
+      # ci_config: deploy/ansible/ssh_config with divide -> its CI key (the jump in front of kru,
+      # -o ProxyJump=divide from inventory group divide; ssh passes -F on to the jump) and the
+      # host keys checked everywhere. The kru connection itself takes -i id_kru and KRU_HOST below.
       - name: SSH setup
         env:
           KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
           KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
+          DIVIDE_SSH_KEY: ${{ secrets.DIVIDE_SSH_KEY }}
+          DIVIDE_KNOWN_HOSTS: ${{ secrets.DIVIDE_KNOWN_HOSTS }}
         run: |
+          set -euo pipefail
+          if [ -z "$KRU_SSH_KEY" ] || [ -z "$DIVIDE_SSH_KEY" ] || [ -z "$DIVIDE_KNOWN_HOSTS" ]; then
+            echo "::error::missing KRU_SSH_KEY / DIVIDE_SSH_KEY / DIVIDE_KNOWN_HOSTS secret"; exit 1
+          fi
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru
-          chmod 600 ~/.ssh/id_kru
-          printf '%s\n' "$KRU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          (umask 077; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru; printf '%s\n' "$DIVIDE_SSH_KEY" > ~/.ssh/id_divide)
+          printf '%s\n%s\n' "$KRU_KNOWN_HOSTS" "$DIVIDE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+          awk '
+            $1 == "Host" { host = $2 }
+            host == "divide" && $1 == "IdentityFile" { print "  IdentityFile ~/.ssh/id_divide"; print "  IdentitiesOnly yes"; next }
+            $1 == "IdentityFile" { next }
+            { print }
+            END { print ""; print "Host *"; print "  StrictHostKeyChecking yes"; print "  UserKnownHostsFile ~/.ssh/known_hosts" }' \
+            deploy/ansible/ssh_config > ~/.ssh/ci_config
+          chmod 600 ~/.ssh/ci_config
 
       # Assets are only in the checkout as the tracked subset (maps, shaders, skins):
       # the 1.5 GB content tree already on kru is left as is (kn_web_sync_assets=false).
@@ -140,8 +159,8 @@ jobs:
           KN_AI_UPSTREAM_URL: ${{ secrets.KN_AI_UPSTREAM_URL }}
           KN_AI_UPSTREAM_KEY: ${{ secrets.KN_AI_UPSTREAM_KEY }}
         run: |
-          # Overrides ansible.cfg's `-F ssh_config` (the runner has no host aliases).
-          export ANSIBLE_SSH_ARGS="-F /dev/null -i $HOME/.ssh/id_kru -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ControlMaster=auto -o ControlPersist=60s"
+          # Overrides ansible.cfg's `-F ssh_config`: ci_config (above) holds the jump host divide.
+          export ANSIBLE_SSH_ARGS="-F $HOME/.ssh/ci_config -i $HOME/.ssh/id_kru -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ControlMaster=auto -o ControlPersist=60s"
           ansible-playbook central.yml \
             -e "ansible_host=$KRU_HOST" -e "ansible_port=${KRU_PORT:-22}" \
             -e kn_web_sync_assets=false -e "kn_release_id=${GITHUB_SHA::12}"
@@ -174,7 +193,7 @@ jobs:
 
       - name: Cleanup key
         if: always()
-        run: rm -f ~/.ssh/id_kru
+        run: rm -f ~/.ssh/id_kru ~/.ssh/id_divide ~/.ssh/ci_config
 
   # The front end on GitHub Pages (deploy/pages/README.md "GitHub Pages"): publishes the artifact the
   # deploy job staged. Needs Pages enabled with build_type=workflow and GH_PAGES=1.

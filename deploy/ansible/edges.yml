@@ -4,13 +4,43 @@
 # (edge-firewall-contract v1, README "Edge firewall"; firewall.yml runs it alone). fail2ban
 # follows (fail2ban-contract v1, README "fail2ban"). Base of both: abulxt on the old VPSs (edges_old,
 # this repo adds drop-ins), this repo on the kn-<site> VMs (edges_kn, group_vars/edges_kn/main.yml).
+# Neither runs on divide's guests (kn-mnz): kn_host_firewall false, group_vars/divide/main.yml
+# (pve-firewall on divide, never in-guest rules).
 # Units run while kn_gameserver_enabled is true (group_vars/edges/main.yml; live since 2026-10-11).
 - name: KrunkNative edges (dedicated servers)
   hosts: edges
   become: false
+  pre_tasks:
+    # A host behind NAT (kn_forwarded_ports, inventory: kn-mnz on divide) gets traffic only on the
+    # ports the NAT forwards: refuse a Box Office or Strike count whose ports are not all among them.
+    - name: Game ports are all forwarded by the NAT in front of the host
+      vars:
+        kn_needed_ports: >-
+          {%- set out = [] -%}
+          {%- for r in [kn_gameserver_port_range] + ([kn_strike_port_range] if (kn_strike_count | int) > 0 else []) -%}
+            {%- set ab = (r | string).split('-') -%}
+            {%- set _ = out.extend(range(ab[0] | int, (ab[-1] | int) + 1)) -%}
+          {%- endfor -%}
+          {{ out }}
+        kn_open_ports: >-
+          {%- set out = [] -%}
+          {%- for r in kn_forwarded_ports | default([]) -%}
+            {%- set ab = (r | string).split('-') -%}
+            {%- set _ = out.extend(range(ab[0] | int, (ab[-1] | int) + 1)) -%}
+          {%- endfor -%}
+          {{ out }}
+      ansible.builtin.assert:
+        that: kn_needed_ports | difference(kn_open_ports) | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} would listen on {{ kn_needed_ports | difference(kn_open_ports) | join(', ') }},
+          which the NAT in front of it does not forward (kn_forwarded_ports {{ kn_forwarded_ports }}): change
+          the forwards (divide: nft forwards + /etc/pve/firewall/<vmid>.fw) and kn_forwarded_ports first.
+        quiet: true
+      when: kn_forwarded_ports is defined
+      tags: [always]
   roles:
-    - { role: edge_firewall, tags: [firewall] }
-    - { role: fail2ban, tags: [fail2ban] }
+    - { role: edge_firewall, tags: [firewall], when: kn_host_firewall | default(true) | bool }
+    - { role: fail2ban, tags: [fail2ban], when: kn_host_firewall | default(true) | bool }
     - { role: kn_user, tags: [user, gameserver] }
     - { role: kn_release, tags: [release, gameserver] }
     - { role: kn_gameserver, tags: [gameserver] }

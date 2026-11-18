@@ -24,7 +24,11 @@ server {
     access_log /var/log/nginx/krunknative-edge-origin.log kn_edge_origin;
 
 {% for net in kn_edge_origin_allow %}
+{%   if net is mapping %}
+    {{ '%-24s# %s' | format('allow ' ~ net.net ~ ';', net.comment) }}
+{%   else %}
     allow {{ net }};
+{%   endif %}
 {% endfor %}
     deny all;
 

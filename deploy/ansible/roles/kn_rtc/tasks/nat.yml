@@ -1,0 +1,59 @@
+# kn_rtc_nat_enabled (defaults/main.yml "Behind NAT"): the host has no public address of its own
+# (kru, CT 120 on divide). These were made by hand on kru on 2026-11-16/17 and are kept under the
+# same names, so a deploy reproduces them instead of ignoring or replacing them:
+#   {{ kn_rtc_nat_file }}   table ip {{ kn_rtc_nat_table }}: udp {{ kn_rtc_ice_port }} from {{ kn_rtc_nat_lan_if }} -> {{ kn_rtc_public_ip }},
+#                           and the hairpin to edges behind the same NAT (kn_rtc_nat_edges)
+#   {{ kn_rtc_nat_unit }}.service   puts {{ kn_rtc_public_ip }}/32 on lo and loads that file, before kn-rtc
+# NAT only (no filter chain): the guest's firewall is the Proxmox host's. Re-applying is atomic
+# (the file deletes and recreates its own table in one nft transaction; conntrack keeps the flows).
+- name: Directory of the nftables drop-ins
+  ansible.builtin.file:
+    path: "{{ kn_rtc_nat_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: NAT table ({{ kn_rtc_nat_table }})
+  ansible.builtin.template:
+    src: kn-rtc-nat.nft.j2
+    dest: "{{ kn_rtc_nat_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
+  notify: Apply kn_rtc NAT
+
+- name: Public address unit ({{ kn_rtc_nat_unit }})
+  ansible.builtin.template:
+    src: kn-rtc-nat.service.j2
+    dest: "/etc/systemd/system/{{ kn_rtc_nat_unit }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply kn_rtc NAT
+
+- name: Enable {{ kn_rtc_nat_unit }}
+  ansible.builtin.systemd_service:
+    name: "{{ kn_rtc_nat_unit }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  # --check on a fresh host: the unit file above was not really written.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Apply a changed NAT now (before kn-rtc binds the address)
+  ansible.builtin.meta: flush_handlers
+
+- name: The ICE address is on lo
+  ansible.builtin.command: ip -4 -o addr show dev lo to {{ kn_rtc_public_ip }}/32
+  register: kn_rtc_nat_addr
+  changed_when: false
+  check_mode: false
+
+- name: The ICE address is on this host
+  ansible.builtin.assert:
+    that: kn_rtc_nat_addr.stdout | length > 0
+    fail_msg: "{{ kn_rtc_public_ip }} is not on lo of {{ inventory_hostname }}: see systemctl status {{ kn_rtc_nat_unit }}."
+    quiet: true
+  when: not ansible_check_mode

@@ -1,0 +1,23 @@
+# {{ ansible_managed }} (deploy/ansible role kn_rtc, tasks/nat.yml). Loaded by {{ kn_rtc_nat_unit }}.service.
+table ip {{ kn_rtc_nat_table }}
+delete table ip {{ kn_rtc_nat_table }}
+table ip {{ kn_rtc_nat_table }} {
+	chain prerouting {
+		type nat hook prerouting priority dstnat; policy accept;
+		iifname "{{ kn_rtc_nat_lan_if }}" udp dport {{ kn_rtc_ice_port }} dnat to {{ kn_rtc_public_ip }}
+	}
+	# This guest holds {{ kn_rtc_nat_gateway }}'s public address on lo (for kn-rtc ICE), so its own connections to the
+	# game servers by their public name would land on itself. Send them straight to kn on the LAN.
+	chain output {
+		type nat hook output priority -100; policy accept;
+{% for h in kn_rtc_nat_edges %}
+		ip daddr {{ kn_rtc_public_ip }} meta l4proto { tcp, udp } th dport { {{ hostvars[h].kn_forwarded_ports | join(', ') }} } dnat to {{ hostvars[h].kn_listen_ip }}
+{% endfor %}
+	}
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+{% for h in kn_rtc_nat_edges %}
+		oifname "{{ kn_rtc_nat_lan_if }}" ip daddr {{ hostvars[h].kn_listen_ip }} masquerade
+{% endfor %}
+	}
+}

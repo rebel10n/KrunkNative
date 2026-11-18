@@ -1,10 +1,11 @@
 # Host firewall only: the vendored edge_firewall role (edge-firewall-contract v1,
 # README.md "Edge firewall"). Inputs: group_vars/edges/main.yml (+ group_vars/edges_kn/main.yml:
-# the base is ours on the kn-<site> VMs).
+# the base is ours on the kn-<site> VMs). Skipped on divide's guests (kn-mnz): kn_host_firewall
+# false (group_vars/divide/main.yml), they are firewalled by divide's pve-firewall.
 # Same playbook in abulxt (playbooks/firewall.yml) and KrunkNative (firewall.yml).
 #   ansible-playbook firewall.yml --check --diff [--limit <host>]
 - name: Edge host firewall
   hosts: edges
   gather_facts: true
   roles:
-    - { role: edge_firewall, tags: [firewall] }
+    - { role: edge_firewall, tags: [firewall], when: kn_host_firewall | default(true) | bool }

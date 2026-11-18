@@ -1,0 +1,23 @@
+# Guests of the Proxmox host divide (inventory group divide: kru = CT 120, kn-mnz = CT 203).
+# Only what the group changes; the hosts keep their vars in central / edges_kn. None of these names
+# is set by another group, so group precedence (divide vs edges / edges_kn) never decides them.
+
+# --- SSH: through divide ---
+# The guests have only vmbr1 addresses (172.16.5.0/24, NAT behind 91.199.82.174), so every
+# connection jumps through divide's root (ssh_config Host divide). ansible_ssh_common_args reaches
+# ssh and synchronize's rsync (use_ssh_args) alike. -e kn_ssh_jump= connects directly (a
+# controller on that LAN or the admin VPN) and renders ProxyJump=none.
+# CI: the jump's key is DIVIDE_SSH_KEY, in divide's root authorized_keys restricted to
+# port-forwarding to 172.16.5.47:22 and 172.16.5.94:22 (deploy/ansible/README.md "CI").
+kn_ssh_jump: divide
+ansible_ssh_common_args: "-o ProxyJump={{ kn_ssh_jump | default('', true) or 'none' }}"
+
+# --- No in-guest firewall, no fail2ban ---
+# divide's guests are firewalled by divide's pve-firewall (/etc/pve/firewall/<vmid>.fw: 120.fw lets
+# the edge CT 201 in on 80/443 and udp 21100; 203.fw the game ports 21015-21017 + 21115), never by
+# rules inside the guest (the user's standing rule for divide). sshd there is reachable only from
+# divide itself and the admin VPN (pve-firewall group base), so fail2ban inside would only ever see
+# those. kn_host_firewall false skips the vendored edge_firewall and fail2ban roles for these hosts
+# in edges.yml, firewall.yml, fail2ban.yml and central.yml (the playbooks' `when:`), whatever
+# edge_firewall_manage / fail2ban_manage say. Never set it true here.
+kn_host_firewall: false

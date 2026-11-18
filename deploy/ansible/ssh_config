@@ -1,8 +1,18 @@
 # Host aliases for deploy/ansible (ansible.cfg passes -F ssh_config).
-# CI overrides kru with KRU_HOST/KRU_PORT (inventory/hosts.yml) and its own key.
+# CI overrides kru with KRU_HOST/KRU_PORT (inventory/hosts.yml) and its own key, divide with
+# DIVIDE_SSH_KEY and the edges with EDGES_SSH_KEY (.github/workflows/deploy-*.yml).
 
-# Central node: Debian 12 LXC, root. 172.16.5.47 is the LAN address; the public one
-# is 5.188.124.56 (GitHub-hosted runners must use that).
+# divide: the Proxmox host of kru (CT 120) and kn-mnz (CT 203) since 2026-11-16. Its only public
+# address; the guests are on its NAT bridge vmbr1 (172.16.5.0/24) and every connection to them
+# jumps through here (-o ProxyJump=divide from inventory group divide, kn_ssh_jump). ssh passes
+# this file (-F) on to the jump, so this block applies there too.
+Host divide
+  HostName 91.199.82.174
+  User root
+  IdentityFile ~/.ssh/desktop_ed25519
+
+# Central node: Debian 12 LXC (CT 120 on divide), root. Only a LAN address (no public one of its
+# own since meal; 91.199.82.174 on its lo is for kn-rtc ICE only): reached through divide.
 Host kru
   HostName 172.16.5.47
   User root
@@ -24,23 +34,24 @@ Host kn-iev
   # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
   IdentityFile ~/.ssh/id_ed25519
 
-# Ashburn/Manassas, US (VM 123 on meal)
+# Ashburn/Manassas, US: CT 203 "kn" on divide (VM 123 on meal until 2026-11-16). LAN address only,
+# reached through divide (inventory group divide).
 Host kn-mnz
-  HostName 5.188.124.94
+  HostName 172.16.5.94
   User root
-  # abulxt's pve_edge_vm (kn-mnz: cloud-init on meal) installs the controller's id_ed25519.pub
-  IdentityFile ~/.ssh/id_ed25519
+  # CT 203 trusts divide's admin keys (divide.desktop), not the id_ed25519 of the wisp kn VMs
+  IdentityFile ~/.ssh/desktop_ed25519
 
 # Johannesburg, ZA
 Host kn-jnb
   HostName 5.188.120.31
   User root
-  # abulxt's pve_edge_vm (kn-mnz: cloud-init on meal) installs the controller's id_ed25519.pub
+  # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
   IdentityFile ~/.ssh/id_ed25519
 
 # Amsterdam, NL
 Host kn-ams
   HostName 92.38.186.100
   User root
-  # abulxt's pve_edge_vm (kn-mnz: cloud-init on meal) installs the controller's id_ed25519.pub
+  # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
   IdentityFile ~/.ssh/id_ed25519

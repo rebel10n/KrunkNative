@@ -19,6 +19,10 @@ name: Deploy edges
 #          EDGES_KNOWN_HOSTS (the edges' host keys, by the HostName in deploy/ansible/ssh_config), and KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS: kn_gameserver reads the
 #          coordinator secrets (KN_BRAIN_INTERNAL_SECRET / JOIN_SECRET) from kru's
 #          /etc/krunknative/secrets.env at deploy time (slurp, no_log) into the 0640 server-<n>.cfg.
+#          DIVIDE_SSH_KEY, DIVIDE_KNOWN_HOSTS: kru (CT 120) and kn-mnz (CT 203, ashburn) are guests of
+#          the Proxmox host divide, reached through it (inventory group divide, ProxyJump divide);
+#          kn-mnz takes EDGES_SSH_KEY like the other edges, its host key in EDGES_KNOWN_HOSTS by
+#          its HostName 172.16.5.94.
 on:
   workflow_run:
     workflows: ["Deploy kru"]
@@ -76,7 +80,7 @@ jobs:
       # edge name -> inventory host (deploy/ansible/inventory/hosts.yml). live = what "all" (and every
       # Deploy kru run) deploys, canary = the edge that goes first. Since the cutover (2026-11-13) the
       # new VMs (edges_kn) are live with mia as the canary; the old VPSs are gone. Since 2026-11-13 every
-      # wisp site has one: mia, iev, ashburn (kn-mnz, on meal), ams, jnb.
+      # wisp site has one: mia, iev, ashburn (kn-mnz, CT 203 on divide since 2026-11-16), ams, jnb.
       - name: Hosts
         id: plan
         env:
@@ -165,7 +169,8 @@ jobs:
           ls -la dist/deploy/*/bin
 
       # Keys and host keys come only from secrets (never echoed). ci_config is deploy/ansible/ssh_config
-      # with kru -> KRU_HOST:KRU_PORT + its key and the edges -> the CI edge key.
+      # with kru -> KRU_HOST:KRU_PORT + its key, divide (the jump in front of kru and kn-mnz) -> its CI
+      # key and the edges -> the CI edge key.
       - name: SSH setup
         env:
           EDGES_SSH_KEY: ${{ secrets.EDGES_SSH_KEY }}
@@ -174,20 +179,28 @@ jobs:
           KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
           KRU_HOST: ${{ secrets.KRU_HOST }}
           KRU_PORT: ${{ secrets.KRU_PORT }}
+          DIVIDE_SSH_KEY: ${{ secrets.DIVIDE_SSH_KEY }}
+          DIVIDE_KNOWN_HOSTS: ${{ secrets.DIVIDE_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          if [ -z "$EDGES_SSH_KEY" ] || [ -z "$EDGES_KNOWN_HOSTS" ] || [ -z "$KRU_SSH_KEY" ] || [ -z "$KRU_HOST" ]; then
-            echo "::error::missing EDGES_SSH_KEY / EDGES_KNOWN_HOSTS / KRU_SSH_KEY / KRU_HOST secret"; exit 1
+          if [ -z "$EDGES_SSH_KEY" ] || [ -z "$EDGES_KNOWN_HOSTS" ] || [ -z "$KRU_SSH_KEY" ] || [ -z "$KRU_HOST" ] \
+             || [ -z "$DIVIDE_SSH_KEY" ] || [ -z "$DIVIDE_KNOWN_HOSTS" ]; then
+            echo "::error::missing EDGES_SSH_KEY / EDGES_KNOWN_HOSTS / KRU_SSH_KEY / KRU_HOST / DIVIDE_SSH_KEY / DIVIDE_KNOWN_HOSTS secret"; exit 1
           fi
           install -d -m 700 ~/.ssh
-          (umask 077; printf '%s\n' "$EDGES_SSH_KEY" > ~/.ssh/id_edges; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru)
-          printf '%s\n%s\n' "$KRU_KNOWN_HOSTS" "$EDGES_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          (umask 077; printf '%s\n' "$EDGES_SSH_KEY" > ~/.ssh/id_edges; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru
+           printf '%s\n' "$DIVIDE_SSH_KEY" > ~/.ssh/id_divide)
+          printf '%s\n%s\n%s\n' "$KRU_KNOWN_HOSTS" "$EDGES_KNOWN_HOSTS" "$DIVIDE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+          # ssh passes -F ci_config on to the ProxyJump (divide), so its block applies there too
           awk -v kh="$KRU_HOST" -v kp="${KRU_PORT:-22}" '
             $1 == "Host" { host = $2 }
             host == "kru" && $1 == "HostName" { print "  HostName " kh; print "  Port " kp; print "  IdentityFile ~/.ssh/id_kru"; print "  IdentitiesOnly yes"; next }
+            host == "divide" && $1 == "IdentityFile" { print "  IdentityFile ~/.ssh/id_divide"; print "  IdentitiesOnly yes"; next }
             $1 == "IdentityFile" { print "  IdentityFile ~/.ssh/id_edges"; print "  IdentitiesOnly yes"; next }
-            { print }' deploy/ansible/ssh_config > ~/.ssh/ci_config
+            { print }
+            END { print ""; print "Host *"; print "  StrictHostKeyChecking yes"; print "  UserKnownHostsFile ~/.ssh/known_hosts" }' \
+            deploy/ansible/ssh_config > ~/.ssh/ci_config
           chmod 600 ~/.ssh/ci_config
           echo "ANSIBLE_SSH_ARGS=-F $HOME/.ssh/ci_config -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ControlMaster=auto -o ControlPersist=60s" >> "$GITHUB_ENV"
 
@@ -263,4 +276,4 @@ jobs:
 
       - name: Cleanup keys
         if: always()
-        run: rm -f ~/.ssh/id_edges ~/.ssh/id_kru ~/.ssh/ci_config
+        run: rm -f ~/.ssh/id_edges ~/.ssh/id_kru ~/.ssh/id_divide ~/.ssh/ci_config

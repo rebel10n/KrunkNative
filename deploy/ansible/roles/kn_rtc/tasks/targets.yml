@@ -1,0 +1,18 @@
+# kn_rtc_targets (KRUNK_NATIVE_TARGETS, defaults/main.yml "Allowlist"): the edge game servers by
+# name and IP (kn_public_ip, then kn_listen_ip for an edge behind NAT). Pure set_fact, like
+# kn_bridge's targets.yml: deploy/ansible/tests/render_test.py evaluates it against the inventory.
+- name: Gateway allowlist (edge game servers by name and IP)
+  ansible.builtin.set_fact:
+    kn_rtc_targets: >-
+      {%- set out = [] -%}
+      {%- set ports = kn_rtc_target_port_lo ~ '-' ~ kn_rtc_target_port_hi -%}
+      {%- for h in kn_rtc_edge_hosts -%}
+        {%- for n in range(1, (kn_rtc_target_port_hi | int) - (kn_rtc_target_port_lo | int) + 2) -%}
+          {%- set _ = out.append(hostvars[h].kn_edge_name ~ '-' ~ n ~ '.' ~ kn_domain ~ ':' ~ ports) -%}
+        {%- endfor -%}
+        {%- set _ = out.append(hostvars[h].kn_public_ip ~ ':' ~ ports) -%}
+        {%- if hostvars[h].kn_listen_ip | default(hostvars[h].kn_public_ip) != hostvars[h].kn_public_ip -%}
+          {%- set _ = out.append(hostvars[h].kn_listen_ip ~ ':' ~ ports) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}

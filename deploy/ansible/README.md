@@ -103,7 +103,8 @@ true), `kn_gameserver_ports_open` (escape hatch, true everywhere: edge_firewall 
 `edge_firewall_own_base` (see below).
 
 CI: `.github/workflows/deploy-kru.yml` (manual dispatch on main) builds and runs `central.yml` with
-secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS`. That includes `kn_bridge` (the bundle is
+secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS DIVIDE_SSH_KEY DIVIDE_KNOWN_HOSTS` (below,
+"Through divide"). That includes `kn_bridge` (the bundle is
 built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped without CF secrets).
 
 `.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` or e.g. `mia,iev`,
@@ -117,11 +118,31 @@ edge's root `authorized_keys` as
 installed next to the other keys, the old file kept as `authorized_keys.bak.krunknative-ci.<time>`),
 `EDGES_KNOWN_HOSTS` (the edges' host keys) and the `KRU_*` ones: the coordinator secrets for
 `server-<n>.cfg` are read from kru's `secrets.env` at deploy time, as locally. The runner's ssh
-config is `ssh_config` with kru -> `KRU_HOST:KRU_PORT` and the edges -> the CI key. Revoke: delete
-the `krunknative-github-ci-edges` line on the edges and the secret.
+config is `ssh_config` with kru -> `KRU_HOST:KRU_PORT`, divide -> `DIVIDE_SSH_KEY` and the edges ->
+the CI key. Revoke: delete the `krunknative-github-ci-edges` line on the edges and the secret.
+
+Through divide: kru (CT 120, 172.16.5.47) and kn-mnz (CT 203, 172.16.5.94) are guests of the Proxmox
+host divide (91.199.82.174, its only public address) since 2026-11-16, on its NAT bridge vmbr1. Inventory
+group `divide` (`group_vars/divide/main.yml`) sets `kn_ssh_jump: divide`, which becomes
+`ansible_ssh_common_args: -o ProxyJump=divide` (also used by synchronize's rsync); `ssh_config` has
+`Host divide`, and ssh hands `-F` on to the jump. `-e kn_ssh_jump=` connects directly (a controller on
+that LAN or the admin VPN). In CI the jump uses its own key, `DIVIDE_SSH_KEY` (a CI-only ed25519, comment
+`krunknative-ci@rebel10n/KrunkNative`), whose public half is in divide's root `authorized_keys` as
+`restrict,port-forwarding,command="/bin/false",permitopen="172.16.5.47:22",permitopen="172.16.5.94:22" ssh-ed25519 ... krunknative-ci@rebel10n/KrunkNative`
+(nothing but those two forwards), and `DIVIDE_KNOWN_HOSTS` holds divide's host keys for
+`91.199.82.174`. `KRU_HOST` is kru's LAN address `172.16.5.47` (`KRU_PORT` 22) and `KRU_KNOWN_HOSTS`
+its host keys under that address; `EDGES_KNOWN_HOSTS` has kn-mnz's under `172.16.5.94`, and kn-mnz's
+root `authorized_keys` needs the `krunknative-github-ci-edges` line like every edge. Revoke: delete the
+divide line and the secret.
 
 Edge groups (`inventory/hosts.yml`): `edges` = `edges_kn` (the dedicated `kn-<site>` VMs on the wisp
-Proxmox hosts; this repo owns their firewall and fail2ban base, `group_vars/edges_kn/main.yml`).
+Proxmox hosts; this repo owns their firewall and fail2ban base, `group_vars/edges_kn/main.yml`; and
+kn-mnz, CT 203 on divide, group `divide`: no in-guest firewall or fail2ban, see [Edge firewall](#edge-firewall)).
+kn-mnz is behind divide's NAT: `kn_public_ip` 91.199.82.174 (the `ashburn-<n>.krunk.io` A records),
+`kn_listen_ip` 172.16.5.94 (what the game sockets bind and the gateways also allow), and
+`kn_forwarded_ports` (21015-21017, 21115: what divide DNATs to it). `edges.yml` refuses a
+`kn_gameserver_count` or Strike count with a port outside `kn_forwarded_ports`: raise them only together
+with divide's forwards and `/etc/pve/firewall/203.fw` (infra's side).
 The old G-Core VPSs shared with abulxt (`edges_old`) were cancelled 2026-11-13. A new VM needs, before
 Deploy edges can reach it: its address in `ssh_config` (HostName) and as `kn_public_ip` (unset = left out
 of kru's net-bridge / kn-rtc allowlists, and `edges.yml` stops at `kn_gameserver`), the CI key line
@@ -174,9 +195,11 @@ front end (`krunk.io`, `www.`) and the game servers (`<edge>-<n>.krunk.io`) are 
 ```
 browser -> edge :443 (Let's Encrypt on demand, shared Redis on amph; abulxt edge_relay
            conf.d/20-krunkio.conf, assets. cached there)
-        -> https://5.188.124.56:443, SNI kn-origin.krunk.io (the host nginx; meal's firewall
-           passes 22/80/443 to kru, so no new port): pinned self-signed certificate, edge /24s
-           only, X-KN-Edge-Token, else 403
+        -> https://<kru>:443, SNI kn-origin.krunk.io (the host nginx): pinned self-signed
+           certificate, the allowed relays only (kn_edge_origin_allow), X-KN-Edge-Token, else 403.
+           Since 2026-11-16 (kru on divide) the relay that reaches it is divide's edge CT 201
+           (172.16.5.10, infra's edge_relay) on the LAN: divide's :443 goes to that CT, and kru's
+           pve-firewall (divide 120.fw) lets only it in on 80/443
         -> OpenResty 127.0.0.1:8086 (role openresty): Host -> the static site / :8082 / :8083 /
            :8084 (/rtc -> :8085), client address from X-Real-IP (also passed on as
            CF-Connecting-IP, which kn-bridge and kn-rtc read)
@@ -201,7 +224,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 
 `origin.crt` is abulxt's `roles/edge_relay/files/krunkio-origin.crt`, `token` its vaulted
 `krunkio_origin_token`: rotate both repos together. Logs: `/var/log/nginx/krunknative-edge-origin.log`
 (browser address, edge, host). The rtc media path does not change: ICE/DTLS goes straight to
-`5.188.124.56:21100/udp`, only the `/rtc` signaling POST goes through the edges.
+`91.199.82.174:21100/udp` (divide DNATs it to kru), only the `/rtc` signaling POST goes through the edges.
 
 DNS: the krunk.io zone is on Spaceship (`launch1`/`launch2.spaceship.net`, since 2026-10-13) and
 every record is kept by hand in Spaceship's DNS panel; nothing in this repository writes DNS or
@@ -219,7 +242,9 @@ project (`assets.krunk.io`) 302s `/updates/*` and excluded prefixes (deploy/asse
 `download`). The launcher's default updates URL is `https://dl.krunk.io/updates/client/latest.json`.
 
 ```
-client -> dl.krunk.io (A record at Spaceship: 5.188.124.56, kru's public IP; meal passes 80/443)
+client -> dl.krunk.io (A record at Spaceship: 91.199.82.174, divide; 5.188.124.56 on meal before)
+       -> divide's edge CT 201 (infra's edge_relay): terminates TLS with its own on-demand
+          certificate, proxies to kru 172.16.5.47:443 with SNI dl.krunk.io
        -> host nginx :443, Let's Encrypt certificate (certbot --webroot on :80, renewed by
           certbot's timer, deploy hook reloads nginx); GET/HEAD/OPTIONS only; client in X-Real-IP
        -> OpenResty 127.0.0.1:8087 (role openresty, the static_site with CORS): /assets/, /updates/
@@ -233,10 +258,12 @@ servers do not change): first the :80 server (the ACME challenge from
 reload, the previous file back if it fails. Log: `/var/log/nginx/krunknative-dl.log`.
 `kn_dl_origin_enabled: false` (`group_vars/central/main.yml`) removes the vhost and the 8087
 listener. Turn it on only after the A record resolves (the first run asks Let's Encrypt; a failure
-stops the play):
+stops the play). On divide, :80 for dl.krunk.io reaches the edge CT's own ACME handler, not kru, so
+kru's webroot renewal cannot answer the challenge; the edge does not verify kru's certificate, so
+an expired one there does not break the site (kru's current one: valid to 2027-01-12):
 
 ```sh
-dig +short dl.krunk.io @launch1.spaceship.net   # 5.188.124.56
+dig +short dl.krunk.io @launch1.spaceship.net   # 91.199.82.174
 ansible-playbook central.yml --tags openresty,dl_origin -e kn_dl_origin_enabled=true
 curl -fsSI https://dl.krunk.io/assets/version.txt; curl -fsSI https://dl.krunk.io/updates/client/latest.json
 ```
@@ -358,7 +385,8 @@ ssh kru journalctl -u kn-bridge -f          # one line per session: client IP ->
 curl https://play.krunk.io/healthz           # {"ok":true,"sessions":..,"nativeConnected":..}
 ```
 
-The edges see every bridged player as kru's address (5.188.124.56): their server_bin only honours
+The edges see every bridged player as kru's address (91.199.82.174, divide's masquerade; kn-mnz on
+divide's LAN sees 172.16.5.47): their server_bin only honours
 the bridge's FORWARDED frame from loopback, so the bridge sends it only to loopback targets. An
 IP ban on an edge would therefore hit all web players; ban by account instead.
 
@@ -372,10 +400,17 @@ port. Role `kn_rtc` (tag `rtc`; `kn_rtc_enabled: false` stops and disables the u
 - Signaling: `POST https://play.krunk.io/rtc?target=<edge>-<n>.krunk.io:<port>` with the SDP
   offer, answered with the SDP answer. The request goes abulxt edge -> kru's OpenResty
   (`/rtc` on `play.krunk.io`) -> `127.0.0.1:8085` ([Edge origin](#edge-origin-abulxts-edges-instead-of-cloudflare)).
-- Media: ICE-lite plus DTLS/SCTP straight to `5.188.124.56:21100/udp` (`kn_rtc_public_ip`,
+- Media: ICE-lite plus DTLS/SCTP straight to `91.199.82.174:21100/udp` (`kn_rtc_public_ip`,
   `kn_rtc_ice_port`). This is one UDP port for every session (ICE UDP mux), bound to that
   address only. The role asserts that the address is on the host. No certificate is needed and
   no STUN/TURN: the gateway has a public address, and browsers behind any NAT reach it.
+- Behind divide's NAT (`kn_rtc_nat_enabled`, `tasks/nat.yml`; made by hand on 2026-11-16/17 and
+  rendered by the role since, under the same names): `kru-public-ip.service` puts 91.199.82.174/32 on
+  kru's lo and loads `/etc/nftables.d/kru-rtc.nft` (table `ip krurtc`, NAT chains only), which DNATs
+  the udp 21100 divide forwards to kru onto that address, and, since kru now holds the address the
+  `ashburn-<n>.krunk.io` names point at, sends kru's own connections to kn-mnz's
+  `kn_forwarded_ports` straight to 172.16.5.94 (masqueraded). kru's `/etc/nftables.conf` does not
+  include `/etc/nftables.d`; that unit is what loads it.
 - `kn-rtc.service`: user `kn`, kn_brain hardening, plus `AF_NETLINK` (pion lists the
   interfaces). The static binary is built on the controller (`go build`, CGO off, reproducible)
   into `/opt/krunknative-rtc/kn-rtc`. Settings are in `/etc/krunknative/rtc.env` (root:kn 0640,
@@ -386,9 +421,10 @@ port. Role `kn_rtc` (tag `rtc`; `kn_rtc_enabled: false` stops and disables the u
   limited to `kn_web_origins`.
 - Host firewall: kru's nftables is Debian's default accept-all ruleset (not managed here), so
   no rule is needed on the host.
-- Upstream firewall: kru is CT 120 on the Proxmox host `meal`, whose PVE firewall rejects
-  inbound by default. `/etc/pve/firewall/120.fw` carries `IN ACCEPT -p udp -dport 21100`
-  (added 2026-10-11, not managed here). Moving the port means changing that rule too. To
+- Upstream firewall: kru is CT 120 on the Proxmox host divide (meal until 2026-11-16), whose
+  pve-firewall drops inbound by default. divide DNATs 91.199.82.174:21100/udp to kru and
+  `/etc/pve/firewall/120.fw` carries `IN ACCEPT -p udp -dport 21100` (infra's, not managed
+  here). Moving the port means changing both. To
   check from outside, send UDP to another port and watch `nstat -az UdpNoPorts` on kru.
 
 ```sh
@@ -468,6 +504,11 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
   an empty list renders no line.
 - `edge_firewall_manage` (role off when false), `edge_firewall_ssh_port`,
   `edge_firewall_rollback_seconds`.
+
+Not on divide's guests (kn-mnz, CT 203; inventory group `divide`): divide's pve-firewall is their
+firewall (`/etc/pve/firewall/203.fw` opens 21015-21017 and 21115, tcp + udp; infra's side), never
+rules inside the guest, so `kn_host_firewall: false` (`group_vars/divide/main.yml`) makes
+`edges.yml` and `firewall.yml` skip edge_firewall there (the role's files are untouched).
 
 This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
@@ -584,11 +625,9 @@ repos together, run the new owner first (only `# Owner:` lines change), then the
 (no change).
 
 This repo: on the edges the role only adds drop-ins (none today), so `edges.yml` and the
-Deploy edges workflow (tag `fail2ban`) change nothing there. On kru it owns the base but stays
-off (`fail2ban_manage: false` in `group_vars/central/main.yml`) until the user approves it,
-because Deploy kru runs `central.yml` on every push. First apply by hand, then set it true:
-
-```sh
-ansible-playbook fail2ban.yml --limit kru -e fail2ban_manage=true --check --diff
-ansible-playbook fail2ban.yml --limit kru -e fail2ban_manage=true
-```
+Deploy edges workflow (tag `fail2ban`) change nothing there. Not on divide's guests (kru and kn-mnz,
+inventory group `divide`): they are firewalled by divide's pve-firewall, never from inside, and
+their sshd is reachable only from divide and the admin VPN, so `kn_host_firewall: false`
+(`group_vars/divide/main.yml`) makes `central.yml`, `edges.yml`, `fail2ban.yml` and `firewall.yml`
+skip the fail2ban and edge_firewall roles there, whatever `fail2ban_manage` / `edge_firewall_manage`
+say (kru also keeps `fail2ban_manage: false`).

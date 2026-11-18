@@ -5,16 +5,18 @@
 # straight to {{ kn_rtc_public_ip }}:{{ kn_rtc_ice_port }}/udp (one port, ICE UDP mux, ICE-lite),
 # and every DataChannel message is relayed 1:1 to the edge game server's UDP port.
 # false: the unit is stopped + disabled and the tunnel left alone. UDP {{ kn_rtc_ice_port }} must reach kru
-# from the internet: it passes kru's Proxmox CT firewall (host meal, /etc/pve/firewall/120.fw,
-# `IN ACCEPT -p udp -dport 21100`), kru's own nftables accepts everything.
+# from the internet: divide DNATs 91.199.82.174:21100/udp to kru (CT 120) and kru's Proxmox CT
+# firewall passes it (divide /etc/pve/firewall/120.fw, `IN ACCEPT -p udp -dport 21100`; neither
+# managed here); kru's own nftables accepts everything.
 kn_rtc_enabled: true
 kn_rtc_hostname: "play.{{ kn_domain }}"   # shared with kn_bridge (path rule before its hostname rule)
 kn_rtc_path: /rtc
 kn_rtc_http_host: 127.0.0.1
 kn_rtc_http_port: 8085
-# The one UDP port browsers reach. kru has its public address on eth1 (no NAT), so the gateway
-# binds exactly that address and advertises it as its only host candidate.
-kn_rtc_public_ip: 5.188.124.56
+# The one UDP port browsers reach. The gateway binds exactly this address and advertises it as its
+# only host candidate. kru (CT 120 on divide since 2026-11-16; 5.188.124.56 on meal before) has no
+# public address of its own: this is divide's, held on kru's lo (kn_rtc_nat_enabled below).
+kn_rtc_public_ip: 91.199.82.174
 kn_rtc_ice_port: 21100
 kn_rtc_base: /opt/krunknative-rtc
 # Static Go binary built on the controller (go build, toolchain from net-bridge/rtc/go.mod).
@@ -41,3 +43,20 @@ kn_rtc_client_ip_header: cf-connecting-ip
 # Page origins allowed to POST offers (CORS): the Pages front end.
 kn_rtc_origins: "{{ kn_web_origins }}"
 
+# Behind NAT (tasks/nat.yml; true for kru in group_vars/central/main.yml): kn_rtc_public_ip lives on lo
+# (unit kn_rtc_nat_unit), and table ip kn_rtc_nat_table (kn_rtc_nat_file) DNATs udp kn_rtc_ice_port
+# arriving on kn_rtc_nat_lan_if to it. Because kru then holds the public address itself, its own
+# connections to an edge with the same kn_public_ip (kn-mnz: ashburn-<n>.krunk.io = 91.199.82.174)
+# would land on kru: the output chain sends that edge's kn_forwarded_ports to its kn_listen_ip on the
+# LAN (masqueraded). The names are the ones made by hand on kru (2026-11-16), kept so nothing is
+# duplicated. false: nothing of it is touched.
+kn_rtc_nat_enabled: false
+kn_rtc_nat_gateway: divide
+kn_rtc_nat_unit: kru-public-ip
+kn_rtc_nat_file: /etc/nftables.d/kru-rtc.nft
+kn_rtc_nat_table: krurtc
+kn_rtc_nat_lan_if: eth0
+kn_rtc_nat_edges: >-
+  {{ groups['edges'] | default([]) | map('extract', hostvars) | selectattr('kn_public_ip', 'defined')
+     | selectattr('kn_public_ip', 'equalto', kn_rtc_public_ip) | selectattr('kn_listen_ip', 'defined')
+     | selectattr('kn_forwarded_ports', 'defined') | map(attribute='inventory_hostname') | list }}

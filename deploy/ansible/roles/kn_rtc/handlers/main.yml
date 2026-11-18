@@ -28,3 +28,11 @@
     path: "{{ kn_gateway_stop_reason_file }}"
     state: absent
   listen: Restart kn_rtc
+
+# tasks/nat.yml: re-runs the oneshot unit (ip addr replace + nft -f, both idempotent and atomic).
+- name: Apply kn_rtc NAT
+  ansible.builtin.systemd_service:
+    name: "{{ kn_rtc_nat_unit }}"
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

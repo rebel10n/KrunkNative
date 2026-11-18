@@ -15,7 +15,10 @@ are what they were:
     reason paths); kn-strike@.service: --flavor strike, MemoryHigh / MemoryMax, a lower CPUWeight;
   - server-<n>.cfg / kn-gameserver@.service carry nothing of Strike, one per vcpu - 1 as before;
   - ports never overlap; the firewall drop-in opens both ranges; net-bridge allows the Strike span;
-  - ansible-playbook --syntax-check of edges.yml and central.yml.
+  - an edge behind NAT (kn_listen_ip: kn-mnz on divide) binds its LAN address, both gateways allow it
+    by public and LAN address, and kru's kn_rtc NAT (kru-rtc.nft, kru-public-ip.service) hairpins its
+    forwarded ports; divide's guests skip the in-guest firewall and fail2ban (kn_host_firewall);
+  - ansible-playbook --syntax-check of edges.yml, central.yml, firewall.yml and fail2ban.yml.
 Prints PASS/FAIL lines; exit 0 only when every check passed, 0 with "skipped" when ansible-playbook
 is not installed.
 """
@@ -51,6 +54,11 @@ HOSTS = {
     "kn-jnb": (4, 3915),
     "kn-ams": (4, 3915),
 }
+# inventory/hosts.yml kn_public_ip, and kn_listen_ip where the host is behind NAT (kn-mnz: CT 203 on divide)
+PUBLIC = {"kn-mia": "45.92.71.48", "kn-iev": "185.101.138.155", "kn-mnz": "91.199.82.174",
+          "kn-jnb": "5.188.120.31", "kn-ams": "92.38.186.100"}
+NAT_LISTEN = {"kn-mnz": "172.16.5.94"}
+DIVIDE = ("kru", "kn-mnz")  # inventory group divide: no in-guest firewall / fail2ban
 TIGHT = ("kn-iev", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
 SECRET = "render-test-internal-secret-0123456789"
 
@@ -99,6 +107,17 @@ PLAYBOOK = """
         tasks_from: targets.yml
         public: true
     - ansible.builtin.copy: {dest: "%(out)s/bridge-targets.json", content: "{{ kn_bridge_targets | to_json }}", mode: "0644"}
+    - ansible.builtin.include_role:
+        name: kn_rtc
+        tasks_from: targets.yml
+        public: true
+    - ansible.builtin.copy: {dest: "%(out)s/rtc-targets.json", content: "{{ kn_rtc_targets | to_json }}", mode: "0644"}
+    - ansible.builtin.template: {src: "%(roles)s/kn_rtc/templates/kn-rtc-nat.nft.j2", dest: "%(out)s/kru-rtc.nft", mode: "0644"}
+    - ansible.builtin.template: {src: "%(roles)s/kn_rtc/templates/kn-rtc-nat.service.j2", dest: "%(out)s/kru-public-ip.service", mode: "0644"}
+    - ansible.builtin.copy:
+        dest: "%(out)s/hostvars.json"
+        mode: "0644"
+        content: "{{ dict(groups['all'] | zip(groups['all'] | map('extract', hostvars, 'kn_host_firewall') | map('default', true))) | to_json }}"
 """
 
 
@@ -206,6 +225,10 @@ def check_host(out, host, vcpus, mem):
     bunit = read(os.path.join(d, "kn-gameserver@.service"))
     check(f"{edge}: kn-gameserver@.service is the Box Office unit", "--flavor" not in bunit and "MemoryMax" not in bunit
           and "CPUWeight=80" in bunit and "/server-%i.cfg" in bunit, bunit)
+    listen = cfg_value(read(os.path.join(d, "server-1.cfg")), "listen_host")
+    want_listen = NAT_LISTEN.get(host, PUBLIC.get(host))
+    check(f"{edge}: game sockets bind {want_listen}", listen == want_listen
+          and all(cfg_value(read(os.path.join(d, f)), "listen_host") == want_listen for f in bo_cfgs + st_cfgs), listen)
     nft = read(os.path.join(d, "60-krunknative.nft"))
     want_tcp = plan.get("bo_ports", "?") + (", " + plan.get("strike_ports", "?") if plan.get("strike_planned") else "")
     check(f"{edge}: firewall drop-in opens {want_tcp} (tcp + udp)",
@@ -229,6 +252,23 @@ def main():
             check(f"net-bridge allows {edge}-1.krunk.io:21115-21118 (Strike) and still {edge}-1..11:21015-21025",
                   f"{edge}-1.krunk.io:21115-21118" in targets and f"{edge}-11.krunk.io:21015-21025" in targets
                   and f"{edge}-1.krunk.io:21015-21025" in targets, targets)
+        rtc = json.loads(read(os.path.join(out, "rtc-targets.json")) or "[]")
+        for host, ip in PUBLIC.items():
+            ips = [ip] + ([NAT_LISTEN[host]] if host in NAT_LISTEN else [])
+            check(f"{edge_of(host)}: net-bridge and kn-rtc allow {', '.join(ips)}",
+                  all(f"{a}:21015-21025" in targets and f"{a}:21115-21118" in targets and f"{a}:21015-21025" in rtc for a in ips)
+                  and not any(t.startswith("5.188.124.94:") for t in targets + rtc), (targets, rtc))
+        nft = read(os.path.join(out, "kru-rtc.nft"))
+        check("kru-rtc.nft: ICE DNAT to 91.199.82.174, hairpin of kn-mnz's forwarded ports to 172.16.5.94",
+              'iifname "eth0" udp dport 21100 dnat to 91.199.82.174' in nft
+              and "ip daddr 91.199.82.174 meta l4proto { tcp, udp } th dport { 21015-21017, 21115 } dnat to 172.16.5.94" in nft
+              and 'oifname "eth0" ip daddr 172.16.5.94 masquerade' in nft and "delete table ip krurtc" in nft, nft)
+        unit = read(os.path.join(out, "kru-public-ip.service"))
+        check("kru-public-ip.service: 91.199.82.174/32 on lo, then the NAT table, before kn-rtc",
+              "ip addr replace 91.199.82.174/32 dev lo; nft -f /etc/nftables.d/kru-rtc.nft" in unit and "Before=kn-rtc.service" in unit, unit)
+        fw = json.loads(read(os.path.join(out, "hostvars.json")) or "{}")
+        check("divide's guests skip edge_firewall / fail2ban (kn_host_firewall false), the others do not",
+              all(fw.get(h) is False for h in DIVIDE) and all(fw.get(h) is True for h in PUBLIC if h not in DIVIDE), fw)
         total = sum(p.get("strike", 0) for p in plans.values())
         print("plan: " + "; ".join(f"{edge_of(h)} {p.get('bo')} Box Office + {p.get('strike')} Strike" for h, p in plans.items())
               + f" ({total} Strike lobbies)", flush=True)
@@ -241,7 +281,7 @@ def main():
         posix = subprocess.run(["ansible-doc", "-t", "module", "ansible.posix.synchronize"], capture_output=True).returncode == 0
         if not posix:
             print("syntax-check skipped: the ansible.posix collection is not installed (deploy/ansible/requirements.yml)")
-        for book in ("edges.yml", "central.yml") if posix else ():
+        for book in ("edges.yml", "central.yml", "firewall.yml", "fail2ban.yml") if posix else ():
             r = subprocess.run(["ansible-playbook", "--syntax-check", book], cwd=ANSIBLE, capture_output=True, text=True,
                                env=dict(os.environ, ANSIBLE_LOCAL_TEMP=os.path.join(work, "tmp")))
             check(f"ansible-playbook --syntax-check {book}", r.returncode == 0, (r.stdout + r.stderr)[-1500:])

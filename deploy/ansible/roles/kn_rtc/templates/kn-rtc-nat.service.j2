@@ -1,0 +1,11 @@
+# {{ ansible_managed }} (deploy/ansible role kn_rtc, tasks/nat.yml)
+[Unit]
+Description=Hold {{ kn_rtc_nat_gateway }}'s public IP on lo for kn-rtc ICE (NAT on {{ kn_rtc_nat_gateway }})
+Before=kn-rtc.service
+After=network.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'ip addr replace {{ kn_rtc_public_ip }}/32 dev lo; nft -f {{ kn_rtc_nat_file }}'
+[Install]
+WantedBy=multi-user.target
