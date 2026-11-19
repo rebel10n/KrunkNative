@@ -192,10 +192,15 @@ int kn_winhttp_request(const char *method, const char *url, const char *json_bod
 }
 
 int kn_winhttp_request_bytes(const char *method, const char *url, const char *content_type, const void *req_body, const size_t req_len,
-                             const int timeout_ms, char **body, size_t *length, char *err, const size_t errn) {
-    wchar_t headers[160];
-    swprintf(headers, sizeof(headers) / sizeof(headers[0]), L"Accept: application/json\r\nContent-Type: %hs\r\n", content_type);
-    return winhttp_send(method, url, headers, req_body, req_len, timeout_ms, body, length, err, errn);
+                             const char *bearer, const int timeout_ms, char **body, size_t *length, char *err, const size_t errn) {
+    wchar_t headers[512];
+    swprintf(headers, sizeof(headers) / sizeof(headers[0]), L"Accept: application/json\r\n%hs%hs%hs%hs%hs",
+             content_type && content_type[0] ? "Content-Type: " : "", content_type && content_type[0] ? content_type : "",
+             content_type && content_type[0] ? "\r\n" : "", bearer && bearer[0] ? "Authorization: Bearer " : "",
+             bearer && bearer[0] ? bearer : "");
+    if (bearer && bearer[0]) wcsncat(headers, L"\r\n", sizeof(headers) / sizeof(headers[0]) - wcslen(headers) - 1);
+    return winhttp_send(method, url, headers, content_type && content_type[0] ? req_body : NULL, content_type && content_type[0] ? req_len : 0,
+                        timeout_ms, body, length, err, errn);
 }
 
 int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, const int timeout_ms,

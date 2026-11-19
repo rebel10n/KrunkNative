@@ -88,9 +88,11 @@ def glb():
     return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
 
 
-def http(method, path, body=None):
-    req = urllib.request.Request("http://127.0.0.1:%d%s" % (PORT, path), data=body, method=method,
-                                 headers={"Content-Type": "application/octet-stream"} if body is not None else {})
+def http(method, path, body=None, token=None):
+    headers = {"Content-Type": "application/octet-stream"} if body is not None else {}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (PORT, path), data=body, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.status, r.read(), dict(r.headers)
@@ -148,7 +150,14 @@ class Sock:
         await self.send(["a", 0, [name, "social_pass_1", None]])
         f = await self.recv_until(lambda f: f[0] == "a")
         assert f and f[1] is None, f
+        self.token = f[5]
         return f
+
+    async def gapi(self, method, path):
+        self.rid = getattr(self, "rid", 0) + 1
+        await self.send(["gapi", self.rid, method, path, None])
+        f = await self.recv_until(lambda f: f[0] == "gapi" and f[1] == self.rid)
+        return (f[2], (f[3] or {}).get("data")) if f else (0, None)
 
     async def upload_a(self, name, cat, sizes, mtype=None, code=None, data="", priv=False, uvc=None):
         await self.send(["uploadA", name, "", cat, priv, data, sizes, mtype, code, uvc])
@@ -158,9 +167,9 @@ class Sock:
         await self.ws.close()
 
 
-def listing(user=""):
-    path = "/api/assets?index=0&cat=-1" + ("&username=" + user if user else "")
-    st, body, _ = http("GET", path)
+def listing(user="", token=None, route="/api/assets"):
+    path = route + "?index=0&cat=-1" + ("&username=" + user if user else "")
+    st, body, _ = http("GET", path, token=token)
     return body.decode(errors="replace")
 
 
@@ -308,8 +317,28 @@ async def scenario(names):
     send_file(fid8, "texture", tex)
     st, body = done(fid8)
     check(st == 200, "a private texture: %d" % st)
-    check("Secret" not in listing(), "left out of the listing")
-    check("Secret" in listing(names[0]), "listed on the creator's My Assets tab (username)")
+    check("Secret" not in listing(), "left out of the listing (guest)")
+    check("Secret" not in listing(names[0]), "left out of the owner's username filter without the owner's session (guest)")
+    check("Secret" in listing(names[0], sock.token), "listed on My Assets with the owner's session (Authorization: Bearer)")
+    check("Secret" in listing(names[0], sock.token, "/webhooks/general/assets/list"), "... and on v10's webhook route")
+    check("Secret" not in listing(names[0], "0" * 64), "an unknown token lists like a guest")
+    other = await Sock().open()
+    await other.register(names[1])
+    check("Secret" not in listing(names[0], other.token), "another account's session naming the owner: not listed")
+    check("Secret" not in listing("", other.token), "another account's session: not listed")
+    st, got, _ = http("GET", "/api/user-assets/%d/texture.png" % json.loads(body)["id"])
+    check(st == 200 and got == tex, "its files still load by id (maps that use it; Krunker loads them without credentials)")
+    for who, s_, want in (("the owner", sock, True), ("another account", other, False)):
+        st, d = await s_.gapi("GET", "/players/%s" % names[0])
+        mine = [x.get("nm") for x in (d or {}).get("assets", [])]
+        check(st == 200 and ("Secret" in mine) == want and "Brick wall" in mine,
+              "profile seen by %s: Private %s: %d %r" % (who, "listed" if want else "left out", st, mine))
+    guest = await Sock().open()
+    st, d = await guest.gapi("GET", "/players/%s" % names[0])
+    mine = [x.get("nm") for x in (d or {}).get("assets", [])]
+    check(st != 200 or "Secret" not in mine, "profile seen by a guest: Private left out: %d %r" % (st, mine))
+    await guest.close()
+    await other.close()
     await sock.close()
 
 
@@ -374,7 +403,7 @@ def main():
             time.sleep(0.1)
         check(up, "kn_brain is up (%s)" % DRIVER)
         stamp = str(int(time.time()) % 100000)
-        asyncio.run(scenario(["upl%s" % stamp]))
+        asyncio.run(scenario(["upl%s" % stamp, "upo%s" % stamp]))
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()

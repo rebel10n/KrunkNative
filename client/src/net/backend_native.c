@@ -84,6 +84,7 @@ typedef struct HttpJob {
     char *body;     // request body (JSON), NULL = none; replaced by the response body
     size_t body_len; // with ctype: the request body's length (raw bytes, backend_http_post_bytes)
     char ctype[64];  // the request body's Content-Type when it is not JSON ("" = JSON text)
+    char bearer[192]; // "Authorization: Bearer <bearer>" ("" = none; backend_http_get_auth)
     BackendHttpFn fn;
     void *user;
     int status;
@@ -213,8 +214,9 @@ static void http_run(HttpJob *job) {
     job->status = 0;
     char *resp = NULL;
     size_t len = 0;
-    const int status = job->ctype[0] ? kn_winhttp_request_bytes(job->method, job->url, job->ctype, req_body, job->body_len, job->timeout_ms,
-                                                                &resp, &len, job->err, sizeof(job->err))
+    const int status = job->ctype[0] || job->bearer[0]
+                           ? kn_winhttp_request_bytes(job->method, job->url, job->ctype, req_body, job->body_len, job->bearer,
+                                                      job->timeout_ms, &resp, &len, job->err, sizeof(job->err))
                                      : kn_winhttp_request(job->method, job->url, req_body, job->timeout_ms, &resp, &len, job->err, sizeof(job->err));
     free(req_body);
     job->body = resp;
@@ -252,6 +254,10 @@ static void http_run(HttpJob *job) {
     snprintf(head, sizeof(head), " HTTP/1.1\r\nHost: %s%s%s\r\nUser-Agent: KrunkNative\r\nAccept: application/json\r\nConnection: close\r\n",
              a.host, default_port ? "" : ":", default_port ? "" : a.port);
     bytes_push(&req, head, strlen(head));
+    if (job->bearer[0]) {
+        snprintf(head, sizeof(head), "Authorization: Bearer %s\r\n", job->bearer);
+        bytes_push(&req, head, strlen(head));
+    }
     if (req_body) {
         snprintf(head, sizeof(head), "Content-Type: %s\r\nContent-Length: %zu\r\n", job->ctype[0] ? job->ctype : "application/json", body_len);
         bytes_push(&req, head, strlen(head));
@@ -474,6 +480,53 @@ int backend_http_request(const char *method, const char *url, const char *json_b
     return http_queue(method && method[0] ? method : "GET", url, json_body, fn, user);
 }
 
+// a filled job to the lane's queue (its worker started if it is not up yet): backend_http_get_auth, backend_http_post_bytes
+static int http_job_queue(const int lane, HttpJob *job) {
+    pthread_mutex_lock(&g_lock);
+    if (!g_http_thread_up[lane]) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, http_thread, (void *) (intptr_t) lane) == 0) {
+            pthread_detach(t);
+            g_http_thread_up[lane] = 1;
+        }
+    }
+    QUEUE_PUSH(g_http_pending[lane], job);
+    pthread_cond_broadcast(&g_http_cond[lane]);
+    pthread_mutex_unlock(&g_lock);
+    return 1;
+}
+
+// a session token as a header value: the characters tokens use, nothing that could end the header line
+static int bearer_ok(const char *t) {
+    if (!t || !t[0] || strlen(t) >= sizeof(((HttpJob *) 0)->bearer)) return 0;
+    for (const char *c = t; *c; c++)
+        if (!((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || strchr("-._~+/=", *c))) return 0;
+    return 1;
+}
+
+int backend_http_get_auth(const char *path, const char *bearer, const BackendHttpFn fn, void *user) {
+    if (!bearer_ok(bearer)) return backend_http_get(path, fn, user);
+    if (!backend_enabled() || !path || backend_brain_refuses_path()) return 0;
+    char url[2048];
+    pthread_mutex_lock(&g_lock);
+    const int n = snprintf(url, sizeof(url), "%s%s", backend_url(), path);
+    pthread_mutex_unlock(&g_lock);
+    if (n <= 0 || (size_t) n >= sizeof(url)) return 0;
+    HttpJob *job = calloc(1, sizeof(*job));
+    if (!job) return 0;
+    job->timeout_ms = BACKEND_HTTP_TIMEOUT_MS;
+    snprintf(job->method, sizeof(job->method), "GET");
+    snprintf(job->bearer, sizeof(job->bearer), "%s", bearer);
+    job->url = strdup(url);
+    job->fn = fn;
+    job->user = user;
+    if (!job->url) {
+        free(job);
+        return 0;
+    }
+    return http_job_queue(HTTP_LANE_BRAIN, job);
+}
+
 int backend_http_post_bytes(const char *url, const char *content_type, const void *data, const size_t len, const int timeout_ms,
                             const BackendHttpFn fn, void *user) {
     if (!url || !url[0] || !content_type || !content_type[0] || backend_brain_refuses_url(url)) return 0;
@@ -495,18 +548,7 @@ int backend_http_post_bytes(const char *url, const char *content_type, const voi
     }
     if (len) memcpy(job->body, data, len);
     job->body[len] = 0;
-    pthread_mutex_lock(&g_lock);
-    if (!g_http_thread_up[HTTP_LANE_BRAIN]) {
-        pthread_t t;
-        if (pthread_create(&t, NULL, http_thread, (void *) (intptr_t) HTTP_LANE_BRAIN) == 0) {
-            pthread_detach(t);
-            g_http_thread_up[HTTP_LANE_BRAIN] = 1;
-        }
-    }
-    QUEUE_PUSH(g_http_pending[HTTP_LANE_BRAIN], job);
-    pthread_cond_broadcast(&g_http_cond[HTTP_LANE_BRAIN]);
-    pthread_mutex_unlock(&g_lock);
-    return 1;
+    return http_job_queue(HTTP_LANE_BRAIN, job);
 }
 
 // ------------------------------------------------------------------ social socket

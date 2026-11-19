@@ -61,6 +61,9 @@ int backend_http_get(const char *path, BackendHttpFn fn, void *user);
 int backend_http_request(const char *method, const char *url, const char *json_body, BackendHttpFn fn, void *user);
 // A POST of raw bytes (len of them) with Content-Type content_type to any absolute URL (the editor's asset upload chunks,
 // editor_net.c): data is copied. timeout_ms <= 0 = BACKEND_HTTP_TIMEOUT_MS (8 s). Same callback rules as above; not retried.
+// GET path from the brain with "Authorization: Bearer <bearer>" (the account's session token: the editor's My Assets list, whose
+// Private assets the brain lists to their owner only). bearer NULL / "" = backend_http_get. Same callback rules.
+int backend_http_get_auth(const char *path, const char *bearer, BackendHttpFn fn, void *user);
 int backend_http_post_bytes(const char *url, const char *content_type, const void *data, size_t len, int timeout_ms, BackendHttpFn fn,
                             void *user);
 // The brain gate (account_ui.c registers it): while it answers 1 the brain is not the active backend

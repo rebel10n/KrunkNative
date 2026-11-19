@@ -597,7 +597,10 @@ static int request(const int w, const int tab, const int search, const char *pat
     Req *r = calloc(1, sizeof(*r));
     if (!r) return 0;
     *r = (Req) {w, tab, search, g_win[w].gen};
-    if (!backend_http_get(path, on_http, r)) {
+    // My Assets with the account's session (a deliberate difference: Krunker's listAssets is a bare fetch,
+    // deob-10.0.7.js:133159, 133252): the brain lists a Private asset to its signed-in owner only, not to whoever names them
+    const int mine = !search && tab == ASSET_TAB_MINE && w != LW_MODS && w != LW_MAPS;
+    if (!(mine ? backend_http_get_auth(path, account_session_token(), on_http, r) : backend_http_get(path, on_http, r))) {
         free(r);
         return 0;
     }

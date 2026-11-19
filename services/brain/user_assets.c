@@ -24,7 +24,11 @@
  * Responses carry Cache-Control: public (a week): Krunker never changes a published file in place.
  *
  * A Box Office asset (an id from USER_ASSET_KN_ID_BASE, published with the editor's Publish Asset: asset_upload.c) is
- * answered from uploads.dir only, with Cache-Control: no-cache (an update replaces its files in place).
+ * answered from uploads.dir only, with Cache-Control: no-cache (an update replaces its files in place). A Private one too,
+ * to anyone, by id: Krunker loads an asset's files by id with no credentials for every player of a map that uses it (the
+ * model: a bare fetch of <user-assets host>/<id>/model.glb, deob-10.0.7.js:181755-181764, host :16430; a texture: an image
+ * src of /<id>/texture.png, :160800, :161497), so Private only keeps it out of other players' lists (creations.c
+ * h_assets, db_social.c profile), not out of the maps it is placed in.
  *
  * <id>/video.mp4.knv is not on Krunker's host: it is the asset's video.mp4 (fetched as above) as
  * KrunkNative's frame sidecar (shared/include/knv.h: JPEG frames, user_assets.video_width wide at most,

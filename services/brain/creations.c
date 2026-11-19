@@ -345,6 +345,42 @@ static void h_mods(kn_http_req *req, void *ud) {
     if (a) run(a);
 }
 
+/* GET /api/assets (and v10's /webhooks/general/assets/list): one page of published assets. A Private asset
+ * (asset_upload.c, the popup's Private switch) is listed to its signed-in owner only: the request's session token
+ * (Authorization: Bearer, the editor's My Assets tab: editor_net.c request) resolved to the account, never the username
+ * filter alone. Krunker's listAssets is a bare fetch with no credentials (deob-10.0.7.js:133159-133172, 133252-133257;
+ * editor-10.0.7.js:11175), so whatever its server does it cannot be an owner check; this one is. A Private asset's
+ * files still load by id for everyone (user_assets.c): a map that uses one needs them, as on Krunker. */
+typedef struct {
+    ApiReq *a;
+    char pat[200], cat[24], user[64];
+} AssetsQuery;
+
+static void assets_query(AssetsQuery *q, const int64_t viewer) {
+    char me[24];
+    snprintf(me, sizeof me, "%lld", (long long) (viewer > 0 ? viewer : 0));
+    kn_db_query_sql(g_acct_brain->db,
+                SQL(.pg = "SELECT x.id, kn_html(x.name) AS nm, x.data::text AS dat, x.created_at AS ini, a.username AS plrn, "
+                          "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
+                          "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name ILIKE '%' || $1 || '%') "
+                          "AND ($2::int < 0 OR x.category = $2::int) AND ($3 = '' OR lower(a.username) = lower($3)) "
+                          "AND (NOT x.is_private OR x.creator_id = $4::bigint) "
+                          "ORDER BY x.id DESC LIMIT 500",
+                    .any = "SELECT x.id, {html:x.name} AS nm, x.data AS dat__t, x.created_at AS ini, a.username AS plrn, "
+                           "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
+                           "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name {ilike} '%' || $1 || '%' ESCAPE '\\') "
+                           "AND ({int:$2} < 0 OR x.category = {int:$2}) AND ($3 = '' OR lower(a.username) = lower($3)) "
+                           "AND (x.is_private = 0 OR x.creator_id = {int:$4}) "
+                           "ORDER BY x.id DESC LIMIT 500"),
+                KN_DB_ARGS(q->pat, q->cat, q->user, me), db_rows_done, q->a);
+    free(q);
+}
+
+/* the session's account (an unknown or expired token lists like a guest: public assets only) */
+static void assets_viewer(void *ud, const char *err, const cJSON *acc) {
+    assets_query(ud, acc && !err ? kn_json_int(acc, "id", 0) : 0);
+}
+
 static void h_assets(kn_http_req *req, void *ud) {
     (void) ud;
     ApiReq *a = api_req(req, 2);
@@ -354,30 +390,29 @@ static void h_assets(kn_http_req *req, void *ud) {
         run(a);
         return;
     }
-    /* a Private asset (asset_upload.c, the popup's Private switch) is listed on its creator's My Assets tab only (the
-     * tab that sends username, config.assetTabs sendUser); its id still works in maps, as on Krunker */
-    char pat[200] = "", cat[24], user[64] = "";
-    kn_http_query_get(req, "username", user, sizeof user);
-    size_t o = 0;
-    for (const char *p = a->val; *p && o + 2 < sizeof pat; p++) {
-        if (*p == '%' || *p == '_' || *p == '\\') pat[o++] = '\\';
-        pat[o++] = *p;
+    AssetsQuery *q = calloc(1, sizeof *q);
+    if (!q) {
+        run(a);
+        return;
     }
-    pat[o] = 0;
-    kn_db_query_sql(g_acct_brain->db,
-                SQL(.pg = "SELECT x.id, kn_html(x.name) AS nm, x.data::text AS dat, x.created_at AS ini, a.username AS plrn, "
-                          "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
-                          "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name ILIKE '%' || $1 || '%') "
-                          "AND ($2::int < 0 OR x.category = $2::int) AND ($3 = '' OR lower(a.username) = lower($3)) "
-                          "AND (NOT x.is_private OR $3 <> '') "
-                          "ORDER BY x.id DESC LIMIT 500",
-                    .any = "SELECT x.id, {html:x.name} AS nm, x.data AS dat__t, x.created_at AS ini, a.username AS plrn, "
-                           "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
-                           "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name {ilike} '%' || $1 || '%' ESCAPE '\\') "
-                           "AND ({int:$2} < 0 OR x.category = {int:$2}) AND ($3 = '' OR lower(a.username) = lower($3)) "
-                           "AND (x.is_private = 0 OR $3 <> '') "
-                           "ORDER BY x.id DESC LIMIT 500"),
-                KN_DB_ARGS(pat, acct_itoa(cat, a->tab), user), db_rows_done, a);
+    q->a = a;
+    kn_http_query_get(req, "username", q->user, sizeof q->user);
+    size_t o = 0;
+    for (const char *p = a->val; *p && o + 2 < sizeof q->pat; p++) {
+        if (*p == '%' || *p == '_' || *p == '\\') q->pat[o++] = '\\';
+        q->pat[o++] = *p;
+    }
+    q->pat[o] = 0;
+    acct_itoa(q->cat, a->tab);
+    const char *token = kn_http_bearer(req);
+    if (!token || !token[0]) {
+        assets_query(q, 0);
+        return;
+    }
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "token", token);
+    accounts_internal_call(g_acct_brain, "token", args, assets_viewer, q); /* calls assets_viewer exactly once */
+    cJSON_Delete(args);
 }
 
 /* the type a route names: the v10 webhooks /webhooks/general/{maps,mods}/search (v10.js 131908, 131928)

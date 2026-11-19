@@ -82,8 +82,12 @@ async def register(port, name):
 def seed_assets(dbcfg, account_id):
     """Two published assets of the account, inserted directly (asset ids below Box Office's own): a model with a
     thumbnail flag and a sound. False when this driver cannot be written from here."""
-    sql = ("INSERT INTO published_assets (creator_id, name, category, data, size_kb) VALUES "
-           "(%d, 'Zed model', 3, '{\"t\":1}', 1500), (%d, 'Alpha sound', 17, '{\"u\":1}', 42)" % (account_id, account_id))
+    return db_exec(dbcfg, "INSERT INTO published_assets (creator_id, name, category, data, size_kb) VALUES "
+                   "(%d, 'Zed model', 3, '{\"t\":1}', 1500), (%d, 'Alpha sound', 17, '{\"u\":1}', 42)" % (account_id, account_id))
+
+
+def db_exec(dbcfg, sql):
+    """One statement on the scratch database. False when this driver cannot be written from here."""
     if dbcfg.get("driver") == "sqlite":
         import sqlite3
         con = sqlite3.connect(dbcfg["path"])
@@ -236,8 +240,12 @@ def main():
             return 1
         map_id = mine[0]["map_id"]
 
-        # ---- run 2: My Games, load in editor, leaderboard, asset selection, delete
-        s = ["window:14", "wait:3", "dump:window:%s" % D("w14.txt"),
+        # ---- run 2: My Assets with the session (the sound made Private: only its signed-in owner's list has it), My Games,
+        # load in editor, leaderboard, asset selection, delete
+        private = bool(mine_a) and db_exec(dbcfg, "UPDATE published_assets SET is_private = %s WHERE id = %d"
+                                           % ("TRUE" if dbcfg.get("driver") == "postgres" else "1", int(mine_a[0]["id"])))
+        s = ["window:2", "wait:2", "ui:windows[1].switchTab(1)", "wait:3", "dump:window:%s" % D("w2mine.txt"), "closewindow",
+             "window:14", "wait:3", "dump:window:%s" % D("w14.txt"),
              "net:edit:%s:%d:0" % (mapname, map_id), "dump:popup:%s" % D("edit.txt"),
              "net:load:%s" % mapname, "wait:3", "objdump:%s" % D("loaded.txt"),
              "net:lb:%d" % map_id, "wait:10", "dump:popup:%s" % D("lb.txt"),
@@ -245,6 +253,10 @@ def main():
              "net:select:12345:0:createObjects", "objdump:%s" % D("custom.txt"),
              "net:delete:%d:0" % map_id, "wait:3", "dump:popup:%s" % D("delete.txt")]
         log2 = editor(port, cfg, s, "run2")
+        w2m = read(D("w2mine.txt"))
+        check("My Assets with the account's session lists its Private sound", private and "Ed6Snd" + stamp in w2m, w2m[-600:])
+        check("... which no list without the session has", private and "Ed6Snd" + stamp not in json.dumps(
+            api(port, "/api/assets?index=1&cat=-1&username=%s" % account)), "")
         w14 = read(D("w14.txt"))
         check("My Games (window 14) lists the published map", "H Maps" in w14 and mapname in w14, w14 + log2[-600:])
         e = read(D("edit.txt"))

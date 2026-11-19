@@ -157,10 +157,16 @@ EM_JS(void, backend_web_fetch, (const char *method, const char *url, const char 
     });
 });
 
-// backend_http_post_bytes: the same fetch with a raw body (a copy of len bytes at data) and its Content-Type
-EM_JS(void, backend_web_fetch_bytes, (const char *url, const char *ctype, const void *data, int len, void *req, int timeout_ms), {
-    var opts = { method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': UTF8ToString(ctype) },
-                 body: HEAPU8.slice(data, data + len) };
+// backend_http_post_bytes / backend_http_get_auth: the same fetch with a raw body (a copy of len bytes at data) and its
+// Content-Type (ctype NULL = no body), and "Authorization: Bearer <bearer>" when bearer is set
+EM_JS(void, backend_web_fetch_bytes, (const char *method, const char *url, const char *ctype, const void *data, int len,
+                                      const char *bearer, void *req, int timeout_ms), {
+    var opts = { method: UTF8ToString(method), headers: { 'Accept': 'application/json' } };
+    if (ctype) {
+        opts.headers['Content-Type'] = UTF8ToString(ctype);
+        opts.body = HEAPU8.slice(data, data + len);
+    }
+    if (bearer) opts.headers['Authorization'] = 'Bearer ' + UTF8ToString(bearer);
     var ctl = timeout_ms > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timedOut = false, settled = false, timer = 0;
     if (ctl) {
@@ -189,7 +195,7 @@ int backend_http_post_bytes(const char *url, const char *content_type, const voi
     req->fn = fn;
     req->user = user;
     req->call = call_label("POST", url);
-    backend_web_fetch_bytes(url, content_type, data, (int) len, req, timeout_ms > 0 ? timeout_ms : BACKEND_HTTP_TIMEOUT_MS);
+    backend_web_fetch_bytes("POST", url, content_type, data, (int) len, NULL, req, timeout_ms > 0 ? timeout_ms : BACKEND_HTTP_TIMEOUT_MS);
     return 1;
 }
 
@@ -232,6 +238,28 @@ int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
     const int ok = backend_http_request("GET", url, NULL, fn, user);
     free(url);
     return ok;
+}
+
+int backend_http_get_auth(const char *path, const char *bearer, const BackendHttpFn fn, void *user) {
+    if (!bearer || !bearer[0]) return backend_http_get(path, fn, user);
+    for (const char *c = bearer; *c; c++) // a session token's characters only: nothing a header value cannot hold
+        if (!((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || strchr("-._~+/=", *c)))
+            return backend_http_get(path, fn, user);
+    if (!backend_enabled() || !path || backend_brain_refuses_path()) return 0;
+    const size_t n = strlen(backend_url()) + strlen(path) + 1;
+    char *url = malloc(n);
+    WebReq *req = url ? calloc(1, sizeof(*req)) : NULL;
+    if (!req) {
+        free(url);
+        return 0;
+    }
+    snprintf(url, n, "%s%s", backend_url(), path);
+    req->fn = fn;
+    req->user = user;
+    req->call = call_label("GET", url);
+    backend_web_fetch_bytes("GET", url, NULL, NULL, 0, bearer, req, BACKEND_HTTP_TIMEOUT_MS);
+    free(url);
+    return 1;
 }
 
 // The web build has one brain lane (fetch): the probe is an ordinary GET.
