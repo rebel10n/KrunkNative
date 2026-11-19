@@ -17,6 +17,7 @@ static int g_fail, g_pass;
 #define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
 static const ViewerSkin *skin_at(const int i) { return i >= 0 && i < SKINS ? &g_skins[i] : NULL; }
+static const char *weapon_name_at(const int w) { return w == 2 ? "Zweihander" : NULL; }
 
 static int ci_has(const char *hay, const char *needle) { // a plain reference match for the expectations
     const size_t n = strlen(needle);
@@ -114,6 +115,16 @@ int main(void) {
     CHECK(total == 1 && drawn == 1 && rows[0].skin == 2, "a name inside the search matches (%d rows)", total);
     drawn = market_trade_list_select(skin_at, inv, NULL, "zzz-no-such-skin", 0, LIMIT, rows, &total);
     CHECK(total == 0 && drawn == 0, "no match: nothing drawn");
+
+    // v10.0.7: the search also matches a skin's weapon name (deob-10.0.7.js:111394)
+    g_skins[5].weapon = 3; // weapon index 2
+    market_trade_list_set_weapon_name(weapon_name_at);
+    drawn = market_trade_list_select(skin_at, inv, NULL, "zweihander", 0, LIMIT, rows, &total);
+    CHECK(total == 1 && drawn == 1 && rows[0].skin == 5, "a weapon name matches its skins (%d rows)", total);
+    market_trade_list_set_weapon_name(NULL);
+    drawn = market_trade_list_select(skin_at, inv, NULL, "zweihander", 0, LIMIT, rows, &total);
+    CHECK(total == 0, "no weapon names given: the weapon is not searched (%d rows)", total);
+    g_skins[5].weapon = 0;
 
     // the page never exceeds its limit, and a limit above the matches draws them all
     for (int limit = 1; limit <= 500; limit *= 5) {

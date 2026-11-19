@@ -22,6 +22,17 @@ static int row_int(const cJSON *o, const char *k, const int def) {
     return def;
 }
 
+static const char *(*g_weapon_name)(int weapon_index);
+
+void market_trade_list_set_weapon_name(const char *(*name)(int weapon_index)) { g_weapon_name = name; }
+
+// the query against the item: its name, either way round, else its weapon's name (weapon - 1 into the weapon list)
+static int search_matches(const ViewerSkin *s, const char *search) {
+    if (market_text_contains(s->name, search) || (s->name && market_text_contains(search, s->name))) return 1;
+    const char *weapon = s->weapon > 0 && g_weapon_name ? g_weapon_name(s->weapon - 1) : NULL;
+    return weapon && weapon[0] && market_text_contains(weapon, search);
+}
+
 static int cmp_int(const void *pa, const void *pb) {
     const int a = *(const int *) pa, b = *(const int *) pb;
     return (a > b) - (a < b);
@@ -76,7 +87,7 @@ int market_trade_list_select(const struct ViewerSkin *(*skin)(int index), const 
         const ViewerSkin *s = i >= 0 ? skin(i) : NULL;
         if (!s || count <= 0) continue;
         if (missing && owned && bsearch(&i, owned, (size_t) nowned, sizeof(*owned), cmp_int)) continue;
-        if (search && search[0] && !market_text_contains(s->name, search) && !(s->name && market_text_contains(search, s->name))) continue;
+        if (search && search[0] && !search_matches(s, search)) continue;
         // a painted copy row carries its copy id as sid (a stack none); the row goes with it for its paint
         kept[nkept++] = (KeptRow) {{i, count, row_int(r, "nt", 0), row_int(r, "sid", 0), r}, s->rarity, s->seas ? s->seas : 1};
     }

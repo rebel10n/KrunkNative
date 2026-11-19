@@ -1863,6 +1863,18 @@ void clan_ui_frame(const cJSON *frame) {
         g_clan = cJSON_Duplicate(data, 1);
         if (!cJSON_GetObjectItem(g_clan, "members")) cJSON_AddItemToObject(g_clan, "members", cJSON_CreateArray());
         if (!cJSON_GetObjectItem(g_clan, "requests")) cJSON_AddItemToObject(g_clan, "requests", cJSON_CreateArray());
+        // an answer without the clan's id (a new clan's create answer) asks for the clan, so the logo upload and the other
+        // id-keyed calls work at once (v10.0.7: clan_id || sendReq(3), deob-10.0.7.js:220509: "uploading a clan logo right
+        // after creating a clan")
+        if (!clan_id() && !g_req_sent && !g_scenario) {
+            g_req_sent = 1;
+            if (send_cln(3, NULL, NULL)) {
+                html_timer_cancel(g_clan_timer);
+                g_clan_timer = html_timer_add(CLAN_WAIT_MS, clan_expired, NULL);
+            } else {
+                g_req_sent = 0;
+            }
+        }
         menu_rerender_if_open(13);
     }
 }

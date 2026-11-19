@@ -85,6 +85,7 @@ typedef struct {
     double ts;           // ms
     int status;
     char error[96];
+    char via[32];        // v10.0.7 message 'via' (deob-10.0.7.js:141520, :141585, :141653): shown as "via {0}" (dm.via)
 } Msg;
 
 typedef struct {
@@ -490,6 +491,35 @@ static struct {
     char name[32];
 } g_unread_extra[32];
 
+// the names v10.0.7 knows DM senders by (deob-10.0.7.js:141346 iíïiiîi): every friend a friends:list page names
+// (:141454-141463, new in 10.0.7), a msg:recv's name (:141523) and an unread:summary's (:141615); cleared with the bus
+// (:141899). A message's sender is its friend entry's name, else this, else "Unknown" (:141552), so a friend outside the
+// loaded list (a later page, a list reloaded since) is no longer "DM from Unknown" on their first message.
+static struct {
+    int64_t id;
+    char name[32];
+} g_dm_names[256];
+static int g_dm_names_next;
+
+static const char *dm_name_get(const int64_t id) {
+    for (size_t i = 0; id && i < sizeof(g_dm_names) / sizeof(g_dm_names[0]); i++)
+        if (g_dm_names[i].id == id) return g_dm_names[i].name;
+    return "";
+}
+
+static void dm_name_set(const int64_t id, const char *name) {
+    if (!id || !name || !name[0]) return;
+    size_t slot = sizeof(g_dm_names) / sizeof(g_dm_names[0]);
+    for (size_t i = 0; i < sizeof(g_dm_names) / sizeof(g_dm_names[0]); i++)
+        if (g_dm_names[i].id == id) slot = i;
+    if (slot == sizeof(g_dm_names) / sizeof(g_dm_names[0])) { // a new one takes the oldest slot when the table is full
+        slot = (size_t) g_dm_names_next;
+        g_dm_names_next = (g_dm_names_next + 1) % (int) (sizeof(g_dm_names) / sizeof(g_dm_names[0]));
+    }
+    g_dm_names[slot].id = id;
+    snprintf(g_dm_names[slot].name, sizeof(g_dm_names[slot].name), "%s", name);
+}
+
 // the g_unread_extra slot of a peer, -1 when it has none
 static int extra_slot(const int64_t id) {
     for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
@@ -624,6 +654,8 @@ static void eb_reset(void) {
     S.friends_more = S.friends_loading = S.friends_next = 0;
     convs_clear();
     memset(g_unread_extra, 0, sizeof(g_unread_extra));
+    memset(g_dm_names, 0, sizeof(g_dm_names));
+    g_dm_names_next = 0;
     S.selected = 0;
     S.eb_status = EB_DISCONNECTED;
     S.eb_error[0] = 0;
@@ -685,6 +717,8 @@ static void eb_on_friends(const cJSON *o) {
     for (int i = before; i < before + added; i++) friend_joined(cJSON_GetArrayItem(S.friends, i));
     S.friends_more = jtrue(o, "hasMore");
     S.friends_next = offset + cJSON_GetArraySize(list); // the next page follows the whole page
+    const cJSON *f;
+    cJSON_ArrayForEach(f, list) dm_name_set((int64_t) jnum(f, "id"), jstr(f, "name")); // deob-10.0.7.js:141454-141463
 }
 
 // ------------------------------------------------------------------ notifications
@@ -709,11 +743,14 @@ static void eb_on_recv(const cJSON *o) {
     m->text = strdup(jstr(o, "text"));
     m->ts = jnum(o, "ts");
     m->status = MSG_DELIVERED;
+    snprintf(m->via, sizeof(m->via), "%s", jstr(o, "via"));
     // the sender's entry takes the message as its last one, and a sender not in the list joins it at the top when its
     // name is known (deob-10.0.6.js:141342-141364); one without a name keeps its count with the summary's
     const int extra = extra_slot(from);
     const char *sent_name = jstr(o, "name");
-    const char *known = sent_name[0] ? sent_name : extra >= 0 ? g_unread_extra[extra].name : "";
+    dm_name_set(from, sent_name); // deob-10.0.7.js:141523
+    const char *mapped = dm_name_get(from);
+    const char *known = sent_name[0] ? sent_name : mapped[0] ? mapped : extra >= 0 ? g_unread_extra[extra].name : "";
     const int unread = (friend_by_id(from) ? unread_of(from) : extra >= 0 ? g_unread_extra[extra].n : 0) + 1;
     if (social_dm_received(S.friends, from, known, unread, id, jstr(o, "text"), m->ts)) {
         if (extra >= 0) g_unread_extra[extra].id = 0;
@@ -723,7 +760,11 @@ static void eb_on_recv(const cJSON *o) {
     char line[MSG_TEXT + 96];
     const char *name = friend_name(from)[0] ? friend_name(from) : known;
     char shown[PLAYER_NAME_SIZE];
-    snprintf(line, sizeof(line), "[DM from %s]: %s", dm_chat_name(from, name[0] ? name : "Unknown", shown, sizeof(shown)), jstr(o, "text"));
+    // "[DM from <name>]" or, for a message with a via, "[DM from <name> via <via>]" (deob-10.0.7.js:228062-228064)
+    const char *who = dm_chat_name(from, name[0] ? name : "Unknown", shown, sizeof(shown));
+    char via[96] = "";
+    if (m->via[0]) I18N_FMT(via, "dm.via", m->via);
+    snprintf(line, sizeof(line), "[DM from %s%s%s]: %s", who, via[0] ? " " : "", via, jstr(o, "text"));
     dm_chat_line(line); // v10 _49706 listeners: every new message, on any page (the chat list keeps it for the game)
 }
 
@@ -739,6 +780,32 @@ static void eb_on_sent(const cJSON *o) {
         c->msgs[i].server_id = (int64_t) jnum(o, "id");
         break;
     }
+}
+
+// msg:echo (new in 10.0.7, deob-10.0.7.js:141565-141585): a message this account sent from another session joins the
+// conversation as sent (once: a known server id is skipped) and becomes the friend's last message
+static void eb_on_echo(const cJSON *o) {
+    const int64_t to = (int64_t) jnum(o, "to"), id = (int64_t) jnum(o, "id");
+    Conv *c = conv_get(to, 1);
+    if (!c || (id && conv_has_server(c, id))) return;
+    Msg *m = conv_insert(c, c->n);
+    if (!m) return;
+    m->server_id = id;
+    m->sent = 1;
+    m->text = strdup(jstr(o, "text"));
+    m->ts = jnum(o, "ts");
+    m->status = MSG_DELIVERED;
+    snprintf(m->via, sizeof(m->via), "%s", jstr(o, "via"));
+    cJSON *f = friend_by_id(to);
+    if (!f) return;
+    cJSON_DeleteItemFromObject(f, "lastId");
+    cJSON_AddNumberToObject(f, "lastId", (double) id);
+    cJSON_DeleteItemFromObject(f, "lastText");
+    cJSON_AddStringToObject(f, "lastText", jstr(o, "text"));
+    cJSON_DeleteItemFromObject(f, "lastTs");
+    cJSON_AddNumberToObject(f, "lastTs", jnum(o, "ts"));
+    cJSON_DeleteItemFromObject(f, "lastFromMe");
+    cJSON_AddBoolToObject(f, "lastFromMe", 1);
 }
 
 static void eb_on_unread_summary(const cJSON *o) {
@@ -761,6 +828,7 @@ static void eb_on_unread_summary(const cJSON *o) {
             snprintf(g_unread_extra[slot].name, sizeof(g_unread_extra[slot].name), "%s", jstr(e, "name"));
             slot++;
         }
+        dm_name_set(id, jstr(e, "name")); // deob-10.0.7.js:141615
         char line[160];
         const char *name = jstr(e, "name");
         char shown[PLAYER_NAME_SIZE];
@@ -789,6 +857,7 @@ static void eb_on_history(const cJSON *o) {
         x->text = strdup(jstr(m, "text"));
         x->ts = jnum(m, "ts");
         x->status = MSG_DELIVERED;
+        snprintf(x->via, sizeof(x->via), "%s", jstr(m, "via")); // deob-10.0.7.js:141653
     }
     c->initialised = 1;
     c->loading = 0;
@@ -891,6 +960,7 @@ static void eb_dispatch(const cJSON *o) {
     if (!strcmp(type, "friends:list")) eb_on_friends(o);
     else if (!strcmp(type, "msg:recv")) eb_on_recv(o);
     else if (!strcmp(type, "msg:sent")) eb_on_sent(o);
+    else if (!strcmp(type, "msg:echo")) eb_on_echo(o);
     else if (!strcmp(type, "unread:summary")) eb_on_unread_summary(o);
     else if (!strcmp(type, "msg:history:result")) eb_on_history(o);
     else if (!strcmp(type, "presence:online")) eb_on_presence(o, 1);
@@ -991,13 +1061,51 @@ void v10_social_account_changed(void) {
     S.news.loaded = 0;
 }
 
+// The conversation's drafts (deob-10.0.7.js:142054 iiîïíîï, a Map for the page's life): leaving a conversation (another
+// friend, the tab or the hub closing) keeps a non-empty draft under its friend and drops an empty one, and opening a friend
+// starts from theirs (the effect keyed on the friend's id, :142508-142522). 10.0.6 keyed it on the friend object, so a
+// message that updated the entry cleared the input ("chat draft being cleared when a message arrives").
+static struct {
+    int64_t peer;
+    char *text;
+} g_drafts[64];
+
+static void draft_save(const int64_t peer) {
+    if (!peer) return;
+    int slot = -1, free_slot = -1;
+    for (int i = 0; i < (int) (sizeof(g_drafts) / sizeof(g_drafts[0])); i++) {
+        if (g_drafts[i].peer == peer) slot = i;
+        else if (!g_drafts[i].peer && free_slot < 0) free_slot = i;
+    }
+    if (!S.compose[0]) { // map.delete
+        if (slot >= 0) {
+            free(g_drafts[slot].text);
+            g_drafts[slot].text = NULL;
+            g_drafts[slot].peer = 0;
+        }
+        return;
+    }
+    if (slot < 0) slot = free_slot;
+    if (slot < 0) return; // (64 kept drafts: a further one is not kept)
+    free(g_drafts[slot].text);
+    g_drafts[slot].text = strdup(S.compose);
+    g_drafts[slot].peer = g_drafts[slot].text ? peer : 0;
+}
+
+static void draft_load(const int64_t peer) {
+    S.compose[0] = 0;
+    for (size_t i = 0; peer && i < sizeof(g_drafts) / sizeof(g_drafts[0]); i++)
+        if (g_drafts[i].peer == peer && g_drafts[i].text) snprintf(S.compose, sizeof(S.compose), "%s", g_drafts[i].text);
+}
+
 static void conv_open(const int64_t peer) {
+    if (S.selected && S.selected != peer) draft_save(S.selected);
     S.selected = peer;
     social_conversation_read(S.friends, peer); // iìiíiíï (deob-10.0.6.js:141567-141575): unread 0, then msg:read
     for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
         if (g_unread_extra[i].id == peer) g_unread_extra[i].id = 0;
     eb_send_type("msg:read", "peer", (double) peer);
-    S.compose[0] = 0;
+    draft_load(peer);
     Conv *c = conv_get(peer, 1);
     if (c && !c->initialised && !c->loading) {
         c->loading = 1;
@@ -1484,19 +1592,27 @@ static void sb_conversation(StrBuf *sb) {
             char full[64], clock[32];
             fmt_full(full, sizeof(full), m->ts);
             fmt_clock(clock, sizeof(clock), m->ts);
-            sb_appendf(sb, "<div class=\"bubble-row svelte-jj9ljg %s\" title=\"%s\"><div class=\"bubble svelte-jj9ljg%s%s\"><div class=\"bubble-text svelte-jj9ljg\">",
+            sb_appendf(sb, "<div class=\"bubble-row svelte-1xnnwk9 %s\" title=\"%s\"><div class=\"bubble svelte-1xnnwk9%s%s\"><div class=\"bubble-text svelte-1xnnwk9\">",
                        m->sent ? "sent" : "received", full, m->status == MSG_PENDING ? " pending" : "", m->status == MSG_FAILED ? " failed" : "");
             sb_append_esc(sb, m->text ? m->text : ""); // :emoji: codes stay text (no emoji skins are served)
-            sb_appendf(sb, "</div> <div class=\"bubble-meta svelte-jj9ljg\"><span class=\"bubble-time svelte-jj9ljg\">%s</span> ", clock);
-            if (m->status == MSG_PENDING) sb_append(sb, "<i class=\"material-icons bubble-status-icon svelte-jj9ljg\" title=\"Sending…\">schedule</i>");
+            sb_append(sb, "</div> <div class=\"bubble-meta svelte-1xnnwk9\">");
+            if (m->via[0]) { // deob-10.0.7.js:142037, :142780-142786
+                char via[96];
+                I18N_FMT(via, "dm.via", m->via);
+                sb_append(sb, "<span class=\"bubble-via svelte-1xnnwk9\">");
+                sb_append_esc(sb, via);
+                sb_append(sb, "</span> ");
+            }
+            sb_appendf(sb, "<span class=\"bubble-time svelte-1xnnwk9\">%s</span> ", clock);
+            if (m->status == MSG_PENDING) sb_append(sb, "<i class=\"material-icons bubble-status-icon svelte-1xnnwk9\" title=\"Sending…\">schedule</i>");
             else if (m->status == MSG_FAILED) {
-                sb_append(sb, "<i class=\"material-icons bubble-status-icon bubble-status-failed svelte-jj9ljg\" title=\"");
+                sb_append(sb, "<i class=\"material-icons bubble-status-icon bubble-status-failed svelte-1xnnwk9\" title=\"");
                 sb_append_esc(sb, m->error[0] ? m->error : "Failed");
                 sb_append(sb, "\">error_outline</i>");
-            } else if (m->sent) sb_append(sb, "<i class=\"material-icons bubble-status-icon bubble-status-ok svelte-jj9ljg\" title=\"Delivered\">done</i>");
+            } else if (m->sent) sb_append(sb, "<i class=\"material-icons bubble-status-icon bubble-status-ok svelte-1xnnwk9\" title=\"Delivered\">done</i>");
             sb_append(sb, "</div> ");
             if (m->status == MSG_FAILED && m->error[0]) {
-                sb_append(sb, "<div class=\"bubble-error svelte-jj9ljg\">");
+                sb_append(sb, "<div class=\"bubble-error svelte-1xnnwk9\">");
                 sb_append_esc(sb, m->error);
                 sb_append(sb, "</div>");
             }
@@ -1730,7 +1846,7 @@ static void profile_reports_done(const int status, const cJSON *data, const cJSO
 
 static void profile_reports_load(View *v) {
     char enc[160], path[200];
-    backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_name"));
+    backend_path_segment(enc, sizeof(enc), jstr(v->data, "player_name"));
     snprintf(path, sizeof(path), "/players/%s/reports", enc);
     v->reports_loading = gapi("GET", path, NULL, profile_reports_done, view_tag(v));
     if (!v->reports_loading) v->reports = cJSON_CreateArray();
@@ -1764,7 +1880,7 @@ static void open_profile(const char *name) {
     v->loading = 1;
     v->sales_range = 3;
     char enc[160], path[200];
-    backend_url_encode(enc, sizeof(enc), name);
+    backend_path_segment(enc, sizeof(enc), name);
     snprintf(path, sizeof(path), "/players/%s", enc);
     if (!gapi("GET", path, NULL, profile_done, view_tag(v)) && !S.scenario) {
         v->loading = 0;
@@ -2632,7 +2748,7 @@ static void open_follows(const char *name, const int tab, const double followers
     cJSON_AddNumberToObject(v->data, "followers", followers);
     cJSON_AddNumberToObject(v->data, "following", following);
     char enc[160], path[200];
-    backend_url_encode(enc, sizeof(enc), name);
+    backend_path_segment(enc, sizeof(enc), name);
     snprintf(path, sizeof(path), "/players/%s/followers", enc);
     gapi("GET", path, NULL, follows_done, view_tag(v));
     snprintf(path, sizeof(path), "/players/%s/following", enc);
@@ -2889,6 +3005,7 @@ static void mount_tab(const int tab) {
         S.sub = 0;
         S.social_query[0] = 0;
     } else if (tab == TAB_FRIENDS) {
+        draft_save(S.selected);
         S.selected = 0;
         S.friend_filter[0] = 0;
         S.compose[0] = 0;
@@ -3063,7 +3180,7 @@ static void post_follow(const int64_t pid) {
     cJSON *body = cJSON_CreateObject();
     cJSON_AddTrueToObject(body, "follow");
     char enc[96], path[160];
-    backend_url_encode(enc, sizeof(enc), jstr(copies[0], "pln"));
+    backend_path_segment(enc, sizeof(enc), jstr(copies[0], "pln"));
     snprintf(path, sizeof(path), "/players/%s/follow", enc);
     if (!gapi("POST", path, body, post_follow_done, (intptr_t) pid)) post_follow_done(0, NULL, NULL, (intptr_t) pid);
     cJSON_Delete(body);
@@ -3088,7 +3205,7 @@ static void profile_follow(View *v) {
     cJSON *body = cJSON_CreateObject();
     cJSON_AddBoolToObject(body, "follow", now);
     char enc[96], path[160];
-    backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_name"));
+    backend_path_segment(enc, sizeof(enc), jstr(v->data, "player_name"));
     snprintf(path, sizeof(path), "/players/%s/follow", enc);
     if (!gapi("POST", path, body, profile_follow_done, view_tag(v))) profile_follow_done(0, NULL, NULL, view_tag(v));
     cJSON_Delete(body);
@@ -3112,7 +3229,7 @@ static void follow_row(View *v, const char *name) {
         cJSON *body = cJSON_CreateObject();
         cJSON_AddBoolToObject(body, "follow", now);
         char enc[96], path[160];
-        backend_url_encode(enc, sizeof(enc), name);
+        backend_path_segment(enc, sizeof(enc), name);
         snprintf(path, sizeof(path), "/players/%s/follow", enc);
         gapi("POST", path, body, follow_row_done, view_tag(v));
         cJSON_Delete(body);
@@ -3198,7 +3315,10 @@ static void create_done(const int status, const cJSON *data, const cJSON *error,
         cJSON_InsertItemInArray(S.feeds[i].posts, 0, cJSON_Duplicate(p, 1));
     }
     cJSON_Delete(p);
+    // a giveaway's answer carries the new balance: kn_brain's player_funds, krunker.io's funds (v10.0.7 sets it on the
+    // account in place, deob-10.0.7.js:142224-142231: "KR not updating in game after ... giveaway actions")
     if (giveaway && cJSON_IsNumber(cJSON_GetObjectItem(data, "player_funds"))) account_set_funds(jnum(data, "player_funds"));
+    else if (giveaway && cJSON_IsNumber(cJSON_GetObjectItem(data, "funds"))) account_set_funds(jnum(data, "funds"));
     g_compose_text[0] = 0;
     view_pop();
     if (S.open) render();
@@ -3341,7 +3461,7 @@ static void profile_sales_load(View *v) {
     v->listings_loading = 1;
     if (kio()) {
         char enc[160], path[220];
-        backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_name"));
+        backend_path_segment(enc, sizeof(enc), jstr(v->data, "player_name"));
         snprintf(path, sizeof(path), "/players/%s/sales?range=%d", enc, v->sales_range);
         if (!gapi("GET", path, NULL, kio_sales_done, view_tag(v))) kio_sales_done(0, NULL, NULL, view_tag(v));
         snprintf(path, sizeof(path), "/players/%s/listings", enc);
@@ -3376,6 +3496,7 @@ static void ignore_answer(void *user, const int status, const cJSON *data, const
 #define NULL_GAPI ignore_answer
 
 static void hub_closed(void) {
+    if (S.open && S.tab == TAB_FRIENDS) draft_save(S.selected); // the conversation unmounts with the hub
     S.open = 0;
     g_generation++;
     for (int i = 0; i < FEED_TABS; i++) S.feeds[i].loading = 0;
@@ -3406,7 +3527,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             cJSON *body = cJSON_CreateObject();
             cJSON_AddFalseToObject(body, "follow");
             char enc[96], path[160];
-            backend_url_encode(enc, sizeof(enc), who);
+            backend_path_segment(enc, sizeof(enc), who);
             snprintf(path, sizeof(path), "/players/%s/follow", enc);
             v10_gapi("POST", path, body, NULL_GAPI, NULL);
             cJSON_Delete(body);
@@ -3419,7 +3540,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             cJSON *body = cJSON_CreateObject();
             cJSON_AddTrueToObject(body, "follow");
             char enc[96], path[160];
-            backend_url_encode(enc, sizeof(enc), who);
+            backend_path_segment(enc, sizeof(enc), who);
             snprintf(path, sizeof(path), "/players/%s/follow", enc);
             v10_gapi("POST", path, body, NULL_GAPI, NULL);
             cJSON_Delete(body);
@@ -3519,6 +3640,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         html_ui_stop_propagation();
     } else if (!strcmp(op, "noop")) {
     } else if (!strcmp(op, "tab")) {
+        if (S.tab == TAB_FRIENDS) draft_save(S.selected); // the conversation unmounts (deob-10.0.7.js:142519-142521)
         S.tab = (int) arg_num(args, argc, 1, 0);
         mount_tab(S.tab);
         if (S.tab == TAB_SOCIAL) feeds_load(1); // the panes mount again

@@ -1406,6 +1406,8 @@ static void redeem_voucher_frame(const cJSON *frame) {
     if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
 }
 
+static void twitch_reconnect_confirmed(int ok, const char *text, void *user); // (the Twitch handlers below)
+
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
     const char *label = str_at(frame, 0);
@@ -1559,8 +1561,16 @@ static void on_social(void *user, const cJSON *frame) {
         popup_response(1, NULL, I18N("kn.account.twitch.unlinked", "Twitch account unlinked."));
         rerender_windows();
     } else if (!strcmp(label, "twitchDropsResponse")) { // Box Office has no drop campaigns: [] -> "Nothing to Claim"
+        // [drops, reconnect]: v10.0.7's dropsLoaded(drops, reconnect) (deob-10.0.7.js:218880, :225177-225178): no drops and an
+        // expired Twitch link ask to reconnect it (genericPopup of the link component with the twitch.reconnect keys, :218910-218924)
         const cJSON *drops = cJSON_GetArrayItem(frame, 1);
-        popup_response(1, NULL, drops && cJSON_GetArraySize(drops) > 0 ? I18N("kn.account.twitch.drops", "Drops claimed.") : I18N("kn.account.twitch.noDrops", "Nothing to Claim"));
+        const int any = drops && cJSON_GetArraySize(drops) > 0;
+        if (!any && cJSON_IsTrue(cJSON_GetArrayItem(frame, 2))) {
+            ui_confirm_labeled(I18N("twitch.reconnect", "Your Twitch connection expired, please reconnect to receive drops."),
+                               I18N("twitch.reconnect.confirm", "Reconnect"), I18N("twitch.reconnect.decline", "Later"), twitch_reconnect_confirmed, NULL);
+        } else {
+            popup_response(1, NULL, any ? I18N("kn.account.twitch.drops", "Drops claimed.") : I18N("kn.account.twitch.noDrops", "Nothing to Claim"));
+        }
     } else if (!strcmp(label, "__close")) {
         g_restore_sent = 0;
         if (g_auth_sent_at > 0) auth_unreachable();
@@ -2472,6 +2482,15 @@ static void twitch_link_confirmed(const int ok, const char *text, void *user) {
     backend_social_send_text("[\"twitchAuth\"]");
 }
 
+// v10.0.7's reconnect popup's Reconnect: connectTwitchAcc(true), the OAuth page with force_verify (deob-10.0.7.js:218917,
+// :229547-229551); kn_brain adds it for ["twitchAuth", true] (account_life.c)
+static void twitch_reconnect_confirmed(const int ok, const char *text, void *user) {
+    (void) text;
+    (void) user;
+    if (!ok || !g_logged_in) return;
+    backend_social_send_text("[\"twitchAuth\",true]");
+}
+
 static void twitch_unlink_confirmed(const int ok, const char *text, void *user) {
     (void) text;
     (void) user;
@@ -3021,7 +3040,8 @@ static void stats_html(StrBuf *sb, const AccountInfo *acc, const int kio) {
     snprintf(a, sizeof(a), "%d", acc->level);
     pst(sb, "LVL", a);
     pst_num(sb, "KR", acc->funds, 0);
-    pst_num(sb, "Junk", acc->junk, 0); // acc.junk (the krunker.io account's player_jnk; Box Office accounts have none)
+    // acc.junk with two decimals (v10.0.7: (parseFloat(junk) || 0).toFixed(2), deob-10.0.7.js:218993)
+    pst_num(sb, "Junk", acc->junk, 2); // acc.junk (the krunker.io account's player_jnk; Box Office accounts have none)
     pst(sb, "Inventory", " ~0");
     pst_num(sb, I18N("generic.score", "Score"), acc->score, 0);
     pst_num(sb, "SPK", acc->score / fmax(acc->kills, 1), 2);
@@ -3185,6 +3205,11 @@ static void twitch_html(StrBuf *sb) {
     free(items);
 }
 
+// v10.0.7 adds a third section, "Connected apps" (deob-10.0.7.js:219140-219142, :219174; the component :97493-97673 over
+// the oauth API :27656-27696: GET /account/apps, DELETE /account/apps/<id>, /activity): the third-party apps signed in
+// with "Login with Krunker". Not ported: kn_brain is no OAuth provider, so no app can sign in with a Box Office account
+// and the list could only ever be empty, and a krunker.io account's apps are krunker.io's to revoke (KrunkNative makes
+// only reads of krunker.io's gapi, v10_gapi.c kio_readable). The consent pages (oauth.*) are krunker.io's own site.
 // The Connections tab (deob-10.0.3.js:247686-247752): the Discord section, then Twitch's. v10 mounts its Discord
 // link component (svelte-17wd35, deob-10.0.3.js:110353-110561) in #discordLinkMount; it asks discord.getStatus()
 // and kn_brain's GET /discord/status answers {linked: false} with no `configured` (v10_auth.c: Box Office has no

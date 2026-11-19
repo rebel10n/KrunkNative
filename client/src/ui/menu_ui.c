@@ -158,6 +158,8 @@ int menu_window_is_open(void) {
     return inline_style_is(by_id("windowHolder"), "display", "block");
 }
 
+int menu_open_window_id(void) { return menu_window_is_open() ? g_ui.active_window : 0; }
+
 void menu_log(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

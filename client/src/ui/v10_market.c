@@ -2409,6 +2409,12 @@ static void ct_rows_free(void) {
     }
 }
 
+// a weapon index's name for the Create Trade search (market_trade_list.c)
+static const char *trade_weapon_name(const int weapon_index) {
+    const Weapon *w = rules_weapon(weapon_index);
+    return w ? w->name : NULL;
+}
+
 static void ct_rows_select(const int side) {
     const cJSON *inv = cJSON_GetArrayItem(M.ct_inv, side), *other = cJSON_GetArrayItem(M.ct_inv, !side);
     free(M.ct_rows[side]);
@@ -2419,6 +2425,7 @@ static void ct_rows_select(const int side) {
     TradeListRow *rows = calloc((size_t) cap, sizeof(*rows));
     if (!rows) return;
     int total = 0;
+    market_trade_list_set_weapon_name(trade_weapon_name); // the search's weapon names (deob-10.0.7.js:111394)
     market_trade_list_select(skin, inv, M.ct_missing ? other : NULL, M.ct_search[side], M.ct_missing, cap, rows, &total);
     M.ct_rows[side] = rows;
     M.ct_nrows[side] = total;
@@ -2946,12 +2953,12 @@ static void render(void) {
     const HtmlElem pop = el("genericPop");
     if (!pop) return;
     StrBuf sb = {0};
-    sb_append(&sb, "<div class=\"exchange-root svelte-1s37jef\" id=\"v10mkRoot\"><div class=\"exchange-sidebar svelte-1s37jef\">");
+    sb_append(&sb, "<div class=\"exchange-root svelte-1i76mhh\" id=\"v10mkRoot\"><div class=\"exchange-sidebar svelte-1i76mhh\">");
     for (int i = 0; i < TAB_COUNT; i++)
         sb_appendf(&sb, "<div class=\"sidebar-tab svelte-berov0%s\" id=\"v10mkSide%d\" role=\"tab\" tabindex=\"0\" aria-selected=\"%s\" onmouseenter=\"playTick(0.1)\" onclick=\"playSelect(0.1),v10mk.side(%d)\">"
                         "<i class=\"material-icons sidebar-tab-icon svelte-berov0\">%s</i> <span class=\"sidebar-tab-label svelte-berov0\">%s</span> </div>",
                    M.tab == i ? " active" : "", i, M.tab == i ? "true" : "false", i, k_side[i].icon, k_side[i].label);
-    sb_append(&sb, "</div> <div class=\"window-container svelte-623zut\"><div class=\"exchange-content svelte-1s37jef\" id=\"v10mkContent\">");
+    sb_append(&sb, "</div> <div class=\"window-container svelte-623zut\"><div class=\"exchange-content svelte-1i76mhh\" id=\"v10mkContent\">");
     content_html(&sb);
     sb_append(&sb, "</div></div><div id=\"v10mkModal\">");
     modal_layer_html(&sb);

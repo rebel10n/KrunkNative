@@ -5,6 +5,7 @@
 #include <backend.h>
 #include "klog.h"
 #include "backend_internal.h"
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -266,6 +267,45 @@ static int send_frame(const cJSON *frame, const int session) {
 
 int backend_social_send(const cJSON *frame) { return send_frame(frame, 0); }
 int backend_social_send_session(const cJSON *frame) { return send_frame(frame, 1); }
+
+// One URL path segment, as v10.0.7's player / studio-member / chat-ban paths build it (deob-10.0.7.js:26198-26202,
+// used at :27209-27304 and :27568): a name that is ".", ".." or "search" (any case) has every character written as
+// "%25" + its hex code, so the server reads a literal name and not a dot segment or the /players/search route;
+// anything else is encodeURIComponent (unreserved: A-Z a-z 0-9 - _ . ! ~ * ' ( )). 10.0.6 used encodeURIComponent
+// alone, which broke the profiles of players with those names ("profiles of players with some special characters").
+void backend_path_segment(char *out, const size_t n, const char *s) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t o = 0;
+    if (!n) return;
+    out[0] = 0;
+    if (!s) return;
+    const int dots = !strcmp(s, ".") || !strcmp(s, "..");
+    int search = strlen(s) == 6;
+    for (int i = 0; search && i < 6; i++) search = tolower((unsigned char) s[i]) == "search"[i];
+    if (dots || search) {
+        for (; *s && o + 6 < n; s++) {
+            const unsigned char c = (unsigned char) *s;
+            out[o++] = '%';
+            out[o++] = '2';
+            out[o++] = '5';
+            out[o++] = hex[c >> 4];
+            out[o++] = hex[c & 15];
+        }
+        out[o] = 0;
+        return;
+    }
+    for (; *s && o + 4 < n; s++) {
+        const unsigned char c = (unsigned char) *s;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr("-_.!~*'()", c)) {
+            out[o++] = (char) c;
+        } else {
+            out[o++] = '%';
+            out[o++] = hex[c >> 4];
+            out[o++] = hex[c & 15];
+        }
+    }
+    out[o] = 0;
+}
 
 void backend_url_encode(char *out, const size_t n, const char *s) {
     static const char hex[] = "0123456789ABCDEF";

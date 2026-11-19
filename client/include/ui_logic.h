@@ -117,6 +117,7 @@ void menu_update_top_bar(void);                  // updateTopBar
 void menu_update_class_box(void);                // updateClassBox
 void menu_show_speech_bubble(const char *text, double ms); // showSpeechBubble (2,100 ms default)
 void menu_show_window(int id, int force);        // showWindow
+int menu_open_window_id(void);                  // the window shown in #windowHolder, 0 when none is
 void menu_toggle_window(int open);               // UI.toggleWindow
 void menu_close_window(void);                    // closeWindow
 void menu_rerender_if_open(int id);              // rerenderIfOpen
@@ -762,6 +763,7 @@ void ui_games_switch_tab(int tab);               // ui_windows.c: windows[9].swi
 #define UI_SETTINGS_IMPORT_MAX 32768
 typedef void (*UiDialogFn)(int accepted, const char *text, void *user);
 void ui_confirm(const char *text, UiDialogFn fn, void *user);
+void ui_confirm_labeled(const char *text, const char *yes, const char *no, UiDialogFn fn, void *user); // own button labels
 void ui_prompt(const char *text, UiDialogFn fn, void *user);
 void ui_alert(const char *text);
 void ui_loading_popup(const char *text);        // v10's waiting popup (genericPopup, "loadingPop": the ring over the text), closed by ui_loadout_clear_pops

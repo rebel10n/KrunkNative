@@ -20,7 +20,8 @@
  *   "/?twitch_auth&code=..." to send VERIFY_TWITCH(code). KrunkNative has no page origin to come back to (the native
  *   client), so the brain is the OAuth client, with the Twitch app of the Live Streams (streams.twitch.client_id /
  *   client_secret):
- *   ["twitchAuth"]  -> ["twitchAuth", url] (the authorize page, a single-use state of 10 minutes; the client opens it
+ *   ["twitchAuth", force?] -> ["twitchAuth", url] (the authorize page, a single-use state of 10 minutes; the client opens it
+ *                   in the browser; force true adds &force_verify=true, v10.0.7's reconnect: connectTwitchAcc(true))
  *                   in the browser), or ["twitchAuth", null, error]: "Twitch linking is currently unavailable." when no
  *                   client id / secret is configured (the account stays v10's "Twitch Account (none)").
  *   GET /twitch/callback?code&state  (the app's redirect URI, streams.twitch.redirect_uri, default
@@ -30,7 +31,8 @@
  *                   says the outcome. Neither token is kept (KrunkNative claims no drops with them).
  *   ["removeTwitchLink"] -> ["twitchRemoveResponse"]: tw_userid / tw_twitchname cleared.
  *   ["getTwitchDrops"]   -> ["twitchDropsResponse", []]: Box Office has no Twitch drop campaigns (v10: "Nothing to
- *                   Claim").
+ *                   Claim"). v10.0.7's answer also carries a reconnect flag (the stored Twitch link expired); the brain
+ *                   keeps no Twitch token, so it never sends one.
  *   ["verifyTwitch", code] -> ["twitchVerifyResponse", "Twitch linking is currently unavailable."]: the code of a
  *                   redirect to a page is never valid here (the redirect URI is the brain's).
  *   The pair is permanent (twitch_links): an account keeps its Twitch user and a Twitch user its account after an
@@ -325,6 +327,7 @@ static void url_append_escaped(char *out, const size_t n, const char *s) {
 
 typedef struct TwitchAuthCtx {
     char state[40];
+    int force; /* ["twitchAuth", true]: v10.0.7's connectTwitchAcc(true), the reconnect (deob-10.0.7.js:229550) */
 } TwitchAuthCtx;
 
 static void twitch_state_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -340,19 +343,19 @@ static void twitch_state_done(SocialSession *s, kn_db_result *res, void *extra) 
     url_append_escaped(url, sizeof url, L.scope);
     snprintf(url + strlen(url), sizeof url - strlen(url), "&redirect_uri=");
     url_append_escaped(url, sizeof url, L.redirect_uri);
-    snprintf(url + strlen(url), sizeof url - strlen(url), "&state=%s", c->state);
+    snprintf(url + strlen(url), sizeof url - strlen(url), "&state=%s%s", c->state, c->force ? "&force_verify=true" : "");
     social_send_n(s, "twitchAuth", 1, cJSON_CreateString(url));
 }
 
-/* ["twitchAuth"] -> ["twitchAuth", url] | ["twitchAuth", null, error] */
+/* ["twitchAuth", force?] -> ["twitchAuth", url] | ["twitchAuth", null, error] */
 void sh_twitch_auth(SocialSession *s, const cJSON *f) {
-    (void) f;
     if (!social_require_auth(s)) return;
     if (!twitch_configured()) {
         social_send_n(s, "twitchAuth", 2, cJSON_CreateNull(), cJSON_CreateString(TWITCH_UNAVAILABLE));
         return;
     }
     TwitchAuthCtx *c = calloc(1, sizeof *c);
+    if (c) c->force = cJSON_IsTrue(cJSON_GetArrayItem(f, 1));
     if (!c || kn_random_hex(c->state, sizeof c->state, 16) != 0) {
         free(c);
         social_send_n(s, "twitchAuth", 2, cJSON_CreateNull(), cJSON_CreateString("Server error."));

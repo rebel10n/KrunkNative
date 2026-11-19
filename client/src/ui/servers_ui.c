@@ -3608,6 +3608,8 @@ static void games_load_more(const HtmlEvent *ev);
 
 static void games_search(const HtmlArg *args, int argc);
 
+static void fav_toggle(const char *id_text); // (the Custom Games favourites, below)
+
 int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
     if (!strcmp(name, "downloadServer")) { // the latest server build (servers_ui_open_download)
@@ -3696,9 +3698,18 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         host_flow_switch_tab(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
         return 1;
     }
-    if (!strcmp(name, "favoriteM") || !strcmp(name, "windows.9.searchMaps")) {
-        if (name[0] == 'w') games_search(args, argc);
-        return 1; // favoriteM: favourites need an account API the brain does not have
+    if (!strcmp(name, "favoriteM")) { // favoriteM(0, this, id): kn_brain's fvM (creations.c); krunker.io's is not sent
+        if (argc > 2 && args[0].kind == HTML_ARG_NUM && (int) args[0].num == 0) {
+            char id[32];
+            if (args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof(id), "%.0f", args[2].num);
+            else snprintf(id, sizeof(id), "%s", args[2].kind == HTML_ARG_STR && args[2].str ? args[2].str : "");
+            fav_toggle(id);
+        }
+        return 1;
+    }
+    if (!strcmp(name, "windows.9.searchMaps")) {
+        games_search(args, argc);
+        return 1;
     }
     if (!strcmp(name, "checkedSwitchServer") || !strcmp(name, "switchServer")) {
         const char *id = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
@@ -3834,6 +3845,67 @@ int servers_games_tab_rows(const int tab, const cJSON **rows) {
     if (!g_games_tabs[tab].rows) return 0;
     *rows = g_games_tabs[tab].rows;
     return 1;
+}
+
+// ---- favourites (v10.0.7: "Favoriting a map now shows it in the Favorites tab", "Favorite stars now show correctly on
+// every tab"). v10.0.7 keeps the account's favourite ids per kind (deob-10.0.7.js:228171-228207): loaded once from the
+// Favorites tab's first page, with the toggles made meanwhile laid over it, and a card's star is its row's fav, the tab's,
+// or that set (:223451-223452). favoriteM (:228227-228245) sends FAVORITE_MAPMOD, writes the set and drops the Favorites
+// tab's cached list unless a page of it is loading, so the tab lists the change the next time it is shown. The window
+// is generated from the caches on every render here, so a star follows the set without v10's DOM pass (:228209-228217).
+#define GAMES_FAV_DATA 3 // the brain's / catalogue's Favorites index (k_games_tabs "Favorites")
+static struct {
+    int64_t id;
+    int fav;
+} g_fav_edits[128]; // the session's toggles (v10's edits / ids[id] = bool)
+static int g_fav_edit_n;
+
+static void fav_edits_sync(void) { // the edits are the account's: a source change (games_source_sync) clears them
+    static int backend = -1, account = -1;
+    if (backend == g_games_key.backend && account == g_games_key.account) return;
+    backend = g_games_key.backend;
+    account = g_games_key.account;
+    g_fav_edit_n = 0;
+}
+
+// -1 unknown, else 0 / 1: a toggle of this session, else the loaded Favorites rows
+static int fav_known(const char *id_text) {
+    const int64_t id = strtoll(id_text, NULL, 10);
+    if (id <= 0) return -1;
+    fav_edits_sync();
+    for (int i = 0; i < g_fav_edit_n; i++)
+        if (g_fav_edits[i].id == id) return g_fav_edits[i].fav;
+    const cJSON *rows = g_games_tabs[GAMES_FAV_DATA].rows, *r;
+    if (!rows) return -1;
+    cJSON_ArrayForEach(r, rows) {
+        const cJSON *mid = cJSON_GetObjectItem(r, "map_id");
+        if (cJSON_IsNumber(mid) && (int64_t) mid->valuedouble == id) return 1;
+    }
+    return 0;
+}
+
+static void fav_toggle(const char *id_text) {
+    const int64_t id = strtoll(id_text, NULL, 10);
+    const AccountInfo *acc = active_account();
+    if (id <= 0 || !acc) return; // v10: if (account)
+    fav_edits_sync();
+    const int now = fav_known(id_text) != 1; // the star's sel class: set = not favourited yet
+    char frame[96];
+    snprintf(frame, sizeof(frame), "[\"fvM\",%lld,0,%d]", (long long) id, now); // FAVORITE_MAPMOD (creations.c sh_fav_creation)
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) backend_social_send_text(frame);
+    int slot = -1;
+    for (int i = 0; i < g_fav_edit_n; i++)
+        if (g_fav_edits[i].id == id) slot = i;
+    if (slot < 0 && g_fav_edit_n < (int) (sizeof(g_fav_edits) / sizeof(g_fav_edits[0]))) slot = g_fav_edit_n++;
+    if (slot >= 0) {
+        g_fav_edits[slot].id = id;
+        g_fav_edits[slot].fav = now;
+    }
+    if (!g_games_tabs[GAMES_FAV_DATA].waiting) { // delete listData[favTab] unless waiting
+        cJSON_Delete(g_games_tabs[GAMES_FAV_DATA].rows);
+        memset(&g_games_tabs[GAMES_FAV_DATA], 0, sizeof(g_games_tabs[GAMES_FAV_DATA]));
+    }
+    menu_rerender_if_open(10);
 }
 
 int servers_games_tab_more(const int tab) {
@@ -4042,7 +4114,8 @@ static void format_num_yt(char *out, const size_t n, const double v) {
 
 // f1825(data, "map", tabIndex) for one row
 static void games_card(StrBuf *sb, const GameCard *c, const int tab) {
-    const int fav = c->fav || k_games_tabs[tab].fav;
+    const int known = fav_known(c->id);
+    const int fav = known >= 0 ? known : c->fav || k_games_tabs[tab].fav; // deob-10.0.7.js:223451-223452
     char plays[32], online[32];
     format_num_yt(plays, sizeof(plays), c->plays);
     snprintf(online, sizeof(online), "%d", games_map_players(c->name));

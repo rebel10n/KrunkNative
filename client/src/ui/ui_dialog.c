@@ -215,6 +215,18 @@ void ui_confirm(const char *text, UiDialogFn fn, void *user) {
 #endif
 }
 
+// a confirm with its own button labels (v10's genericPopup confirm components: confirmKey / declineKey)
+void ui_confirm_labeled(const char *text, const char *yes, const char *no, UiDialogFn fn, void *user) {
+#ifdef __EMSCRIPTEN__
+    (void) yes;
+    (void) no;
+    ui_confirm(text, fn, user);
+#else
+    dialog_begin(0, fn, user);
+    dialog_show(text ? text : "", NULL, yes ? yes : I18N("kn.dialog.yes", "YES"), no ? no : I18N("kn.dialog.no", "NO"));
+#endif
+}
+
 void ui_prompt(const char *text, UiDialogFn fn, void *user) {
 #ifdef __EMSCRIPTEN__
     char *answer = (char *) (intptr_t) EM_ASM_INT({

@@ -178,6 +178,10 @@ static int g_spin_ticket = -1;    // v11656: the TICKET item a spin redeems, -1 
 static int g_multi;               // v11658: wheel.multi for an Nx spin, 0 single
 static int g_spinning, g_can_spin, g_can_respin, g_can_equip; // v11655 / v11659 / v11660 / v11661
 static double g_spin_button_time; // spinButton click (stopPropagation: spinUI ignores it)
+// the window the spin screen closes back to (v10.0.7, deob-10.0.7.js:224203, :224295, :224510): the one open when a
+// non-KR wheel opened, 0 (the menu) when none was; 10.0.6 always opened the Store (showWindow(14)), so closing the daily
+// spin wheel from the menu landed in the Store ("Closing the daily spin wheel now returns to the menu")
+static int g_spin_return_window;
 
 #define SPIN_ITEMS 16 // pointers / items of one spin (wheel.multi is 10)
 
@@ -388,6 +392,11 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     const UiWheel *w = wheel >= 0 ? wheel_at(wheel) : skin >= 0 ? ticket_wheel(skin) : NULL;
     if (!w) return;
     if (!wheel_at(wheel)) wheel = -1;
+    if (!w->kr) { // a respin (spinUI already shown) keeps the window it would return to
+        HtmlElem shown = html_dom_by_id("spinUI");
+        char d[16] = "";
+        if (!shown || html_dom_get_style(shown, "display", d, sizeof(d)) < 0 || strcmp(d, "block")) g_spin_return_window = menu_open_window_id();
+    }
     g_cur = w;
     g_multi = multi && w->multi ? w->multi : 0;
     set_display("spinAgainBtn", w->free ? "none" : "");
@@ -1830,7 +1839,7 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     }
     if (!strcmp(name, "knSpinUI")) { // spinUI.onclick: closes the wheel at any time
         if (store_now() - g_spin_button_time < 0.05) return 1; // a button's click bubbling up
-        menu_show_window(14, 0);
+        if (g_spin_return_window) menu_show_window(g_spin_return_window, 0); // V && showWindow(V) (deob-10.0.7.js:224510)
         toggle_menu_hider(1);
         spin_wheel_confetti_reset();
         backend_social_send_text("[\"unbx\"]");

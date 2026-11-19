@@ -1232,7 +1232,7 @@ static void open_studio(const int64_t id) {
     load_studio();
     if (me()[0]) {
         char path[96], enc[64];
-        backend_url_encode(enc, sizeof(enc), me());
+        backend_path_segment(enc, sizeof(enc), me());
         snprintf(path, sizeof(path), "/players/%s", enc);
         send_req("GET", path, NULL, R_MY_MAPS, S.sd_gen, 0, 0, NULL, NULL);
     }
@@ -1286,7 +1286,7 @@ static void confirm_closed(const int accepted, void *user) {
             break;
         case CONFIRM_LEAVE:
         case CONFIRM_REMOVE:
-            backend_url_encode(enc, sizeof(enc), S.confirm_name);
+            backend_path_segment(enc, sizeof(enc), S.confirm_name);
             snprintf(path, sizeof(path), "/studios/%lld/members/%s", (long long) S.sid, enc);
             set_msg(fail, I18N("studios.error.removeMember", "Failed to remove that member."));
             if (kind == CONFIRM_LEAVE) {

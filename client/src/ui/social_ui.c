@@ -4425,8 +4425,11 @@ H(h_list_confirmed) {
 H(h_unlist_item) {
     UNUSED;
     const double v[3] = {arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0), arg_n(args, argc, 2, 0)};
+    // a fresh key per attempt (as listing has): a fixed "uli-<market id>" made an unlist tried again right after a failed
+    // one replay that failure from kn_brain's economy_requests (v10.0.7: "Fixed unlisting or listing again right after a
+    // Krunker Hub listing failing")
     char key[48];
-    snprintf(key, sizeof(key), "uli-%.0f", v[1]);
+    econ_new_op(key, sizeof(key), "uli");
     send_econ("uli", 3, v, key);
     io_wait(I18N("social.market.unlisting", "Unlisting Item..."));
     return 1;

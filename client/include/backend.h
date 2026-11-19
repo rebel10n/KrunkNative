@@ -130,3 +130,4 @@ void backend_social_unlisten(BackendSocialFn fn, void *user);
 
 // Helpers shared by the native/web halves (backend_common.c).
 void backend_url_encode(char *out, size_t n, const char *s); // application/x-www-form-urlencoded value
+void backend_path_segment(char *out, size_t n, const char *s); // one URL path segment (v10.0.7's player-name paths)

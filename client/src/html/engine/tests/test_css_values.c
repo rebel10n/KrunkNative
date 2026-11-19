@@ -1120,6 +1120,11 @@ static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
         if ((tl > 4 && (kn_str_ieq(tv, 4, "min(") || kn_str_ieq(tv, 4, "max("))) || (tl > 6 && kn_str_ieq(tv, 6, "clamp("))) return 1;
         if (tl > 2 && kn_str_ieq(tv + tl - 2, 2, "ch")) return 1;
     }
+    /* the same for offsets: v10.0.7's .exchangeModal / .socialModal `left: max(50%, calc(... min(...)))` (mixed px / %
+     * arguments; the rule's own `left: 50%` applies) */
+    if (kn_str_ieq(name, nl, "left") || kn_str_ieq(name, nl, "right") || kn_str_ieq(name, nl, "top") || kn_str_ieq(name, nl, "bottom")) {
+        if ((tl > 4 && (kn_str_ieq(tv, 4, "min(") || kn_str_ieq(tv, 4, "max("))) || (tl > 6 && kn_str_ieq(tv, 6, "clamp("))) return 1;
+    }
     if (kn_str_ieq(name, nl, "background-image") || kn_str_ieq(name, nl, "background")) {
         /* a gradient with two-position colour stops (`#hex 0 11px`) */
         for (size_t k = 0; k + 9 <= tl; k++) if (kn_str_ieq(tv + k, 9, "gradient(")) return 1;
