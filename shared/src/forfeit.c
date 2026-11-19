@@ -28,6 +28,7 @@
 #define FORFEIT_TEXT_LIMIT "You can only start one vote per game"     // commands.forfeit.limit
 #define FORFEIT_TEXT_ENDED "Forfeiting Game"                          // commands.forfeit.ended
 #define FORFEIT_TEXT_ENDED_OTHER "Other Team Forfeited"               // commands.forfeit.ended.other
+#define FORFEIT_TEXT_OVER "The match is already over"                 // commands.forfeit.over (v10.0.7, deob-10.0.7.js:204284)
 #define FORFEIT_TEXT_RANKED "Forfeit votes are for ranked matches"    // KN: not in v10's strings
 #define FORFEIT_TEXT_OTHER_TEAM "A forfeit vote is already running for the other team" // KN
 
@@ -149,6 +150,10 @@ static void forfeit_resolve(Game *game) {
     forfeit_packet(&none, f, 0);
     none.active = 0;
     forfeit_send_team(game, &none);
+    // v10.0.7: a vote that passes once the match is over (gameState >= POST_MATCH) only clears the team's vote:
+    // no "ended" lines, no prepareForfeit, no second endGame (deob-10.0.7.js:194906-194916, :194969-194996;
+    // "Fixed ranked matches sometimes being saved twice")
+    if (game->game_state >= GAME_STATE_POST_MATCH) return;
     for (size_t i = 0; i < game->player_count; i++) {
         const Player *p = game->players[i];
         if (!p) continue;
@@ -239,6 +244,12 @@ void forfeit_command(Game *game, const Player *sender) {
     }
     if (sender->team <= 0) {
         forfeit_say(game, uid, FORFEIT_TEXT_NEXT);
+        return;
+    }
+    // v10.0.7 commands.forfeit.over (deob-10.0.7.js:204284; the command handler is the official server's): no vote
+    // once the match is over (gameState >= POST_MATCH), the other side of "a forfeit after the end does nothing"
+    if (game->game_state >= GAME_STATE_POST_MATCH) {
+        forfeit_say(game, uid, FORFEIT_TEXT_OVER);
         return;
     }
     if (game->game_state != GAME_STATE_IN_PROGRESS) {

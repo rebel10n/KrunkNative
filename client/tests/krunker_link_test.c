@@ -3636,7 +3636,26 @@ int main(void) {
         CHECK(p && net_ext_unpack(p->payload, p->length, &subtype, &drop_body, &body_length) && subtype == NET_EXT_KN_INPUTS_DROPPED && body_length == 0 &&
               link.sync_failed == 1, "SYNC_FAILED drops the pending inputs (NET_EXT_KN_INPUTS_DROPPED)");
     }
+    CHECK(!find_in(NET_PACKET_CHAT, 0), "no Input Failed line in the first 5 s (game.now - 0 < 5000)");
     clear();
+    { // "Input Failed <code>" (deob-10.0.7.js:227210-227212): at most one per 5 s, never for 6 / 7 / 8 (v10.0.7)
+        link.io.now_ms = fake_now_ms;
+        const struct { double at; int code; int line; } fs[] = {{60000, 3, 1}, {61000, 3, 0}, {67000, 8, 0}, {68000, 6, 0}, {73000, 4, 1}};
+        for (size_t i = 0; i < sizeof(fs) / sizeof(fs[0]); i++) {
+            g_clock_ms = fs[i].at;
+            feed(&link, "f", (KrunkerValue[]) {KRUNKER_V_NUM(fs[i].code)}, 1);
+            const NetPacket *c = find_in(NET_PACKET_CHAT, 0);
+            char want[32];
+            snprintf(want, sizeof(want), "Input Failed %d", fs[i].code);
+            const NetChatPacket *chat = c ? (const NetChatPacket *) c->payload : NULL;
+            CHECK(fs[i].line ? chat && chat->uid == -1 && chat->kind == NET_CHAT_SERVER && !strcmp(chat->text, want) : !c,
+                  "\"f\" %d at %.0f ms: %s", fs[i].code, fs[i].at, fs[i].line ? want : "no line");
+            clear();
+        }
+        link.io.now_ms = NULL;
+        krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch)); // the resync window those "f"s asked for
+        clear();
+    }
     // start (startGame, game.deob.js:218971-218974): the encoder forgets what it sent, so the next window
     // repeats every field with absolute angles (resync 0), though nothing changed since the last one
     feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("3:00")}, 1);

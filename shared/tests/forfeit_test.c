@@ -193,6 +193,32 @@ static void test_forfeit(void) {
     forfeit_tick(&game, 1.0f);
     CHECK(!game.forfeit.active && game.forfeit.forced_team == 1, "p3 gone 31 s: req 1, p4 alone passes (team 1 forced)");
 
+    // v10.0.7: a vote that passes after the match is over only clears the team's vote (deob-10.0.7.js:194906-194996):
+    // no lines, no prepareForfeit, no second endGame (the match saved twice)
+    game.end_timer = 0.0f;
+    forfeit_round_start(&game);
+    game_set_state(&game, GAME_STATE_IN_PROGRESS);
+    game.now = 200.0f;
+    forfeit_command(&game, p1);
+    CHECK(game.forfeit.active && game.forfeit.team == 1 && game.forfeit.req == 2, "p1 opens team 1's vote");
+    game.mode->team_scores[1] = 7;
+    game.mode->team_scores[2] = 3;
+    game_set_state(&game, GAME_STATE_POST_MATCH);
+    const float end_timer = game.end_timer;
+    g_sent_count = 0;
+    remove_player(&game, 2); // p2 drops without a grace entry: req becomes 1, the next update passes it post-match
+    forfeit_tick(&game, 1.0f);
+    CHECK(!game.forfeit.active && game.forfeit.forced_team == 0, "post-match: the vote closes, no team forced");
+    CHECK(vf_count(1, 0) >= 1, "post-match: vf null to team 1");
+    CHECK(!strstr(chat_to(1), "Forfeiting") && !strstr(chat_to(3), "Forfeited"), "post-match: no ended lines");
+    CHECK(mode_team_score(&game, 1) == 7 && mode_team_score(&game, 2) == 3 && game.end_timer == end_timer,
+          "post-match: the scores stay, no second end (%d - %d)", mode_team_score(&game, 1), mode_team_score(&game, 2));
+    forfeit_command(&game, p3); // v10.0.7 commands.forfeit.over: no vote once the match is over
+    CHECK(!game.forfeit.active && !strcmp(chat_to(3), "The match is already over"), "post-match /ff: \"%s\"", chat_to(3));
+    game_set_state(&game, GAME_STATE_ENDED);
+    forfeit_command(&game, p4);
+    CHECK(!game.forfeit.active && !strcmp(chat_to(4), "The match is already over"), "ended /ff: \"%s\"", chat_to(4));
+
     close_game(&game);
 }
 

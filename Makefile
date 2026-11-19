@@ -233,6 +233,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/melee_assets_test
 	./$(DEBUG_DIR)/skin_paint_wire_test
 	./$(DEBUG_DIR)/lagcomp_test
+	./$(DEBUG_DIR)/input_bank_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
 	./$(DEBUG_DIR)/map_drop_test

@@ -424,9 +424,20 @@ static kn_db_result *run_rk_match_finish(kn_dbconn *c, int n, const char *const 
         return dbx_json(&x, "finish", out);
     }
     char *stored = cJSON_PrintUnformatted(result);
-    dbx_exec(&x, SQL(.any = "UPDATE mm_ranked_matches SET status = 'done', finished_at = {now}, result = $2 WHERE match_id = $1 AND status = 'live'"),
-             KN_DB_ARGS(P(0), nz(stored)));
+    /* The close is the gate, not the SELECT above: a second result for the match (a resend, a forfeit after the end)
+     * that raced this one past the SELECT waits on the row lock, then matches no 'live' row. Only the result that
+     * closed the match rates, records and bans, so a match is saved once and its abandoners get one cooldown
+     * (v10.0.7: "Fixed ranked matches sometimes being saved twice", "Players now get at most one cooldown penalty
+     * per ranked match"; Krunker's matchmaker is not in the bundle) */
+    const int64_t closed = dbx_exec(&x, SQL(.any = "UPDATE mm_ranked_matches SET status = 'done', finished_at = {now}, result = $2"
+                                                   " WHERE match_id = $1 AND status = 'live'"),
+                                    KN_DB_ARGS(P(0), nz(stored)));
     free(stored);
+    if (closed != 1) {
+        cJSON_Delete(match);
+        cJSON_Delete(result);
+        return dbx_json(&x, "finish", out);
+    }
     char region[16];
     snprintf(region, sizeof region, "%s", jstr(match, "region"));
     const int season = (int) jnum(match, "season");

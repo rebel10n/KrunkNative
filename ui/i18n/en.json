@@ -1846,6 +1846,7 @@
  "commands.forfeit.limit": "You can only start one vote per game",
  "commands.forfeit.ended": "Forfeiting Game",
  "commands.forfeit.ended.other": "Other Team Forfeited",
+ "commands.forfeit.over": "The match is already over",
  "commands.freezeothers.on": "Froze {0} player(s). New spawns will be frozen.",
  "commands.freezeothers.off": "Unfroze {0} player(s). New spawns will move freely.",
  "server.message.join": "{0} joined the game",

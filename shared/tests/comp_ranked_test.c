@@ -312,6 +312,44 @@ static void test_comp_lobby(void) {
     comp_lobby_join(&game, 1, &a);
     CHECK(comp_lobby_get(&game, 1)->active && g_sent_count >= 2 && g_sent[0].packet.op == NET_COMP_LOBBY_CLEAR, "rejoin");
 
+    // v10.0.7 lobbyPayload (deob-10.0.7.js:190976-190995): an anonymous entry goes out without i / v / cl / l / f,
+    // and every entry does while the ranked names are in use; the table keeps them
+    {
+        CompLobbyEntry *stored = (CompLobbyEntry *) comp_lobby_get(&game, 1);
+        stored->verified = 1;
+        snprintf(stored->clan, sizeof(stored->clan), "KN");
+        g_sent_count = 0;
+        comp_lobby_set_anon(&game, 1, 1);
+        const NetCompLobbyEntry *out = g_sent_count == 1 ? &g_sent[0].packet.entry : NULL;
+        CHECK(out && g_sent[0].uid == NET_TARGET_ALL && g_sent[0].packet.op == NET_COMP_LOBBY_SET && out->uid == 1 && out->account_id == 0 &&
+                  out->level == 0 && out->verified == 0 && !out->clan[0] && out->flag == -1 && !strcmp(out->name, "alpha"),
+              "anonMode: \"cda\" without i / v / cl / l / f, the name kept");
+        CHECK(stored->account_id == 11 && stored->level == 30 && stored->verified && !strcmp(stored->clan, "KN"), "the table keeps the identity");
+        g_sent_count = 0;
+        comp_lobby_set_anon(&game, 1, 1);
+        CHECK(g_sent_count == 0, "no change: nothing sent");
+        comp_lobby_set_anon(&game, 1, 0);
+        CHECK(g_sent_count == 1 && g_sent[0].packet.entry.account_id == 11 && g_sent[0].packet.entry.level == 30, "anonMode off: the identity again");
+        game.is_ranked = 1;
+        game_set_state(&game, GAME_STATE_WARMUP);
+        g_sent_count = 0;
+        comp_lobby_send_all(&game, 5);
+        int blank = 1, sets = 0;
+        for (int i = 0; i < g_sent_count; i++) {
+            if (g_sent[i].packet.op != NET_COMP_LOBBY_SET) continue;
+            sets++;
+            blank &= g_sent[i].packet.entry.account_id == 0 && g_sent[i].packet.entry.level == 0 && g_sent[i].packet.entry.flag == -1;
+        }
+        CHECK(sets > 0 && blank, "ranked warmup (isUsingRankedNames): every entry blanked (%d)", sets);
+        game_set_state(&game, GAME_STATE_IN_PROGRESS);
+        g_sent_count = 0;
+        comp_lobby_send_all(&game, 5);
+        int shown = 0;
+        for (int i = 0; i < g_sent_count; i++) shown += g_sent[i].packet.op == NET_COMP_LOBBY_SET && g_sent[i].packet.entry.account_id == 11;
+        CHECK(shown == 1, "in progress: the identities are sent");
+        game.is_ranked = 0;
+    }
+
     // a client mirrors the table from the packets
     Game client;
     memset(&client, 0, sizeof(client));

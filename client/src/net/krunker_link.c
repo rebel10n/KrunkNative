@@ -3016,7 +3016,21 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
             uint8_t ext[NET_EXT_HEADER_SIZE];
             const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_INPUTS_DROPPED, NULL, 0);
             if (n) emit(l, NET_PACKET_EXT, ext, n);
-            note(l, KRUNKER_LINK_EV_NOTE, "input sync failed (%d): pending inputs dropped", (int) num(arg(&f, 0), -1));
+            const int code = (int) num(arg(&f, 0), -1);
+            note(l, KRUNKER_LINK_EV_NOTE, "input sync failed (%d): pending inputs dropped", code);
+            // addChat(-1, null, "Input Failed " + code, 2) unless the code is 6, 7 or (v10.0.7) 8 or the last
+            // "f" came under 5 s ago; the time is kept for every "f" (deob-10.0.7.js:227210-227212, 10.0.6 :225466
+            // without 8: "Fixed players sometimes being kicked with Input Failed after a server hiccup")
+            const double now = link_now_ms(l);
+            if (code != 6 && code != 7 && code != 8 && now - l->sync_failed_ms >= 5000.0) {
+                NetChatPacket chat;
+                memset(&chat, 0, sizeof(chat));
+                chat.uid = -1;
+                chat.kind = NET_CHAT_SERVER;
+                snprintf(chat.text, sizeof(chat.text), "Input Failed %d", code);
+                emit(l, NET_PACKET_CHAT, &chat, sizeof(chat));
+            }
+            l->sync_failed_ms = now;
             break;
         }
         // movement locks / buffs of our player (packet-audit cluster A)

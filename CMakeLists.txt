@@ -830,6 +830,13 @@ else ()
         target_link_libraries(lagcomp_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # input_bank_test: v10.0.7 inputBank (lag-switch bursts capped, honest frames and server stalls untouched)
+    add_executable(input_bank_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/input_bank_test.c)
+    target_link_libraries(input_bank_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(input_bank_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # modes_test: every v3.1.1 game mode (scoring, objectives, picks, lives, win rules) with simulated players
     add_executable(modes_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/modes_test.c)
     target_link_libraries(modes_test PRIVATE m)

@@ -534,6 +534,9 @@ int mode_can_spawn(const struct Game_t*, const struct Player_t*); // lives left 
 void mode_player_spawned(struct Game_t*, struct Player_t*);  // setClass overrides applied: loadout + spawn point
 void mode_player_left(struct Game_t*, struct Player_t*);     // drop its flag
 void mode_on_kill(struct Game_t*, struct Player_t *victim, struct Player_t *killer, int weapon_id);
+// v10.0.7 isGunGamePromotion(player, info): the kill was made with the weapon the player holds as its tier
+// weapon (no wId, or wId == loadout[0]); a later kill of the same shot is not a promotion (deob-10.0.7.js:193169-193171)
+int mode_gun_game_promotion(const struct Player_t *killer, int weapon_id);
 int mode_score_gain(const struct Game_t*, int amount, int is_kill); // what players.score adds (noScoreK)
 // players.score multipliers before anything is added (is_kill: 1 kill reward, 2 objective, 0
 // other): killMlt + player.killMlt, the oneflag carrier multipliers. The amount to use.

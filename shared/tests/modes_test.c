@@ -2231,6 +2231,25 @@ static void test_kill_rules_v10(Game *game) {
     if (sent) memcpy(&carried, sent->payload, sizeof(carried));
     CHECK(sent && carried.count >= 1 && !strcmp(carried.medals[0].text, "Promotion") && carried.medals[0].score == 0,
           "Gun Game: a gun kill is a Promotion (no score)");
+    { // v10.0.7 isGunGamePromotion: one shot, two kills: one Promotion and one tier (deob-10.0.7.js:172641, :193169-193187)
+        Player *c = add_player(game, 3, 0);
+        tick(game, 0.5f, 0.5f);
+        const int shot_weapon = a->loadout[0];
+        const int tier = a->mode.weapon_tier;
+        int promotions = 0;
+        for (int k = 0; k < 2; k++) {
+            g_sent_count = 0;
+            kill(k ? c : b, a, shot_weapon); // both kills credit the weapon that fired
+            sent = last_sent(NET_PACKET_KILL_MEDALS, 1);
+            memset(&carried, 0, sizeof(carried));
+            if (sent) memcpy(&carried, sent->payload, sizeof(carried));
+            for (int i = 0; i < carried.count; i++) promotions += !strcmp(carried.medals[i].text, "Promotion");
+        }
+        CHECK(promotions == 1, "Gun Game: a two-kill shot gives one Promotion medal (%d)", promotions);
+        CHECK(a->mode.weapon_tier == tier + 1, "Gun Game: a two-kill shot promotes once (tier %d -> %d)", tier, a->mode.weapon_tier);
+        CHECK(mode_gun_game_promotion(a, -1) && mode_gun_game_promotion(a, a->loadout[0]) && !mode_gun_game_promotion(a, shot_weapon),
+              "isGunGamePromotion: no wId or the held tier weapon");
+    }
 
     // botsAsAI (Raid): a bot's kill has no killer
     start_mode(game, MODE_ID_RAID);

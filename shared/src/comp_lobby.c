@@ -2,6 +2,7 @@
 // updLobbyP, canSpawn.
 #include <comp_lobby.h>
 #include <ruleset.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,11 +24,32 @@ const CompLobbyEntry *comp_lobby_get(const Game *game, const int uid) {
     return find(game, uid);
 }
 
+// v10.0.7 lobbyPayload (deob-10.0.7.js:190976-190995; the "cd" / "cda" sends :191028, :195796): every lobby record
+// leaves without its "an" (the anonymous name), takes n = an when anonymous and the ranked names are not in use,
+// and goes out with i 0, v 0, cl 0, l 0 and f -1 when anonymous or while they are (isUsingRankedNames :195820:
+// ranked, gameState <= WARMUP; game_names_masked). "Anonymous players now stay anonymous on the team panel". The
+// official server sets "an"; ours has no anonymous alias (an anonMode player keeps its name in game too,
+// server/src/accounts.c acc_fill_info), so the name stays and only the identity is blanked.
+static CompLobbyEntry lobby_payload(const Game *game, const CompLobbyEntry *entry) {
+    CompLobbyEntry out = *entry;
+    const CompLobby *l = game->comp_lobby;
+    const ptrdiff_t index = l ? entry - l->entries : -1;
+    const int anon = l && index >= 0 && index < l->count && l->anon[index];
+    if (anon || game_names_masked(game)) {
+        out.account_id = 0;
+        out.verified = 0;
+        out.clan[0] = 0;
+        out.level = 0;
+        out.flag = -1;
+    }
+    return out;
+}
+
 static void send_entry(Game *game, const int target, const NetCompLobbyOp op, const CompLobbyEntry *entry) {
     NetCompLobbyPacket packet;
     memset(&packet, 0, sizeof(packet));
     packet.op = (uint8_t) op;
-    if (entry) packet.entry = *entry;
+    if (entry) packet.entry = op == NET_COMP_LOBBY_SET ? lobby_payload(game, entry) : *entry;
     game_send(game, target, NET_PACKET_COMP_LOBBY, &packet, sizeof(packet));
 }
 
@@ -47,6 +69,7 @@ void comp_lobby_join(Game *game, const int uid, const CompLobbyEntry *identity) 
     if (!entry) {
         CompLobby *l = lobby(game);
         if (!l || l->count >= COMP_LOBBY_MAX) return;
+        l->anon[l->count] = 0;
         entry = &l->entries[l->count++];
         memset(entry, 0, sizeof(*entry));
         entry->uid = uid;
@@ -73,6 +96,15 @@ void comp_lobby_join(Game *game, const int uid, const CompLobbyEntry *identity) 
     } else {
         send_entry(game, NET_TARGET_ALL, NET_COMP_LOBBY_SET, entry);
     }
+}
+
+void comp_lobby_set_anon(Game *game, const int uid, const int anon) {
+    CompLobbyEntry *entry = find(game, uid);
+    if (!entry || !game->config.comp) return;
+    uint8_t *flag = &game->comp_lobby->anon[entry - game->comp_lobby->entries];
+    if (*flag == (uint8_t) !!anon) return;
+    *flag = (uint8_t) !!anon;
+    if (entry->active) send_entry(game, NET_TARGET_ALL, NET_COMP_LOBBY_SET, entry);
 }
 
 void comp_lobby_leave(Game *game, const int uid) {

@@ -2204,6 +2204,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             client->attach_index = ent.attach_index >= -1 && ent.attach_index < 256 ? ent.attach_index : DEFAULT_ATTACHMENT_INDEX;
             client->chall_mode = ent.chall_mode;
             client->anon_mode = ent.anon_mode;
+            comp_lobby_set_anon(&g_server->game, client->id, client->anon_mode); // v10.0.7 lobbyPayload: the team panel
             client->cosmetics_v7 = ent.cosmetics_v7; // WP-F (ENT V9)
             client->show_badges = ent.show_badges;
 
@@ -2411,6 +2412,9 @@ void net_poll_clients(void) {
 static void net_game_state_changed(Game *game, const GameState state) {
     (void) state;
     if (!game->is_ranked) return;
+    // v10.0.7: broadcast(SYNC_P_CON_DATA, lobbyPayloadAll()) on the phase change (deob-10.0.7.js:195796): the team
+    // panel's identities come in once the ranked names are no longer in use (comp_lobby.c lobby_payload)
+    comp_lobby_send_all(game, NET_TARGET_ALL);
     for (size_t r = 0; r < g_server->client_count; r++) {
         ClientConnection *to = &g_server->clients[r];
         if (to->peer_minor < NET_PROTOCOL_MINOR_EXT) continue;

@@ -989,6 +989,8 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
 
+        // v10.0.7 inputBank: the real tick time (not slow motion's world_delta), deltaMlt-scaled like input[1]
+        if (authority) player_input_bank_tick(player, delta * game->config.delta_mlt);
         player_update(player, world_delta * game->config.delta_mlt);
         if (authority && player->om_held) object_manager_hold_tick(game, player); // KrunkNative: a dev's Physics Gun holds it
 

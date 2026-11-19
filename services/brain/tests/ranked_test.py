@@ -170,11 +170,11 @@ class FakeNode:
 
     async def _request(self, frame):
         self.rid += 1
-        frame["rid"] = self.rid
+        rid = frame["rid"] = self.rid  # its own rid: requests may run concurrently
         await self.ws.send(json.dumps(frame))
         for _ in range(150):
-            if self.rid in self.replies:
-                return self.replies.pop(self.rid)
+            if rid in self.replies:
+                return self.replies.pop(rid)
             await asyncio.sleep(0.1)
         return None
 
@@ -339,7 +339,13 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     print("== abandon -> cooldown")
     keys, states = await full_match(pa, pb, accs, node)
     lobby, cfg = node.hosted[-1]
-    r = await node.request(result_frame(cfg, lobby, -1, abandoned=[alice["id"]]))
+    # v10.0.7: the same result twice at once (a resend racing the first): one save, one cooldown penalty
+    both = await asyncio.gather(node._request(result_frame(cfg, lobby, -1, abandoned=[alice["id"]])),
+                                node._request(result_frame(cfg, lobby, -1, abandoned=[alice["id"]])))
+    await node.done(lobby)
+    rated = [x for x in both if x and x.get("ratings")]
+    check(len(rated) == 1, "a result sent twice at once is saved once (%d rated replies)" % len(rated))
+    r = rated[0] if rated else None
     ra = [x for x in (r or {}).get("ratings", []) if x["name"] == alice["name"]]
     check(ra and ra[0].get("abandoned") and ra[0]["delta"] < 0 and ra[0]["rp"] == 0, "abandoner: rating down, no RP (%s)" % ra)
     jb = queue(pb, alice)

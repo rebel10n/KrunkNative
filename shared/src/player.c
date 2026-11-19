@@ -206,6 +206,8 @@ void player_spawn(Player *player) {
     // A new life: no input processed yet (gameserver.ts addPlayer / respawn: _lastDecodedSN = -1,
     // inputSN 0 = no "l" until procInputs drained one); the client restarts its counter at 0.
     player->input_seq = -1;
+    player->input_bank = 0.0; // v10.0.7: inputBankAt = 0 with inputSN / inputs / inputFreq (deob-10.0.7.js:171542-171545)
+    player->input_bank_at = 0.0;
     player->recon_snap = 0;
     player->has_shot_vel_obj = 0;
     player->state_history_count = 0; // players.js init: this.stateHistory.length = 0
@@ -3308,10 +3310,13 @@ static int combat_kill_reward(Game *game, Player *killer, Player *victim, const 
                               NetKillMedalsPacket *medals) {
     int score = 0;
 
-    // a weaponOrder mode (Gun Game), not a streak kill: Humiliation (melee) / Promotion, medals without a score
-    // (deob-10.0.3.js:192525-192532)
-    if (game->mode && game->mode->config.weapon_order_size && !(info && info->streak > 0))
-        combat_medal(medals, weapon && weapon->melee ? "Humiliation" : "Promotion", 0);
+    // a weaponOrder mode (Gun Game), not a streak kill: Humiliation (melee) / Promotion, medals without a score;
+    // v10.0.7: Promotion only for a promotion kill (isGunGamePromotion, deob-10.0.7.js:172641): one per promotion
+    // on a multi-kill shot
+    if (game->mode && game->mode->config.weapon_order_size && !(info && info->streak > 0)) {
+        if (weapon && weapon->melee) combat_medal(medals, "Humiliation", 0);
+        else if (mode_gun_game_promotion(killer, info ? info->weapon_id : -1)) combat_medal(medals, "Promotion", 0);
+    }
     if (game->kill_count <= 1) score += combat_medal(medals, "First Blood", 25);
     if (killer->last_killer_uid >= 0 && killer->last_killer_uid == victim->uid) {
         killer->last_killer_uid = -1;
@@ -4474,6 +4479,47 @@ float player_lerp_angle(float a, float b, const float t) {
     return v >= 0.0f && v <= pi2 ? v : fmodf(v, pi2);
 }
 
+// v10.0.7 "Fixed lag switching letting players teleport" (changelog). The bundle only carries the
+// player's inputBank / inputBankAt fields (deob-10.0.7.js:171267-171268, :171545: zeroed with the
+// input stream at every spawn); the official server that reads them is not shipped, so this rule is
+// KrunkNative's reconstruction of what the fields name: the input time the authority may simulate.
+// Every tick the bank is capped at PLAYER_INPUT_BANK_MAX, then gains the tick's real elapsed time
+// (deltaMlt-scaled like input[1]). A drained network frame spends its delta; the part that does not
+// fit is not simulated (the frame runs with what is left, so its look, swaps and shots still apply).
+// A client that holds its frames back and sends them in one burst (a lag switch) moves at most
+// PLAYER_INPUT_BANK_MAX of them; a jittery link or a TCP retransmit shorter than that loses nothing.
+// The cap applies before the tick's own time is added, so a stalled server tick (a "server hiccup")
+// still covers every frame queued during it. A frame is charged what procInputs simulates (input[1]
+// rounded to whole ms, the integer ms of the Krunker wire), which at a locked or very high frame rate
+// sums to more than real time (16.67 ms frames run as 17 ms; 1.5 ms ones as 2 ms), so the bank fills at
+// PLAYER_INPUT_BANK_RATE times real time: a client sending honest frames never runs it dry.
+#define PLAYER_INPUT_BANK_MAX 0.5  // s: the most held-back input time one burst may still move
+#define PLAYER_INPUT_BANK_RATE 1.5 // refill per real second
+#define PLAYER_INPUT_BANK_EPSILON 1e-4
+
+void player_input_bank_tick(Player *player, const float delta) {
+    if (!player || !player->active || !player->game || !game_is_authority(player->game)) return;
+    const double now = player->game->state_now;
+    if (player->input_bank_at <= 0.0) player->input_bank = 0.0; // a new life starts empty (inputBankAt = 0)
+    player->input_bank = MIN(player->input_bank, PLAYER_INPUT_BANK_MAX) + (delta > 0.0f ? delta * PLAYER_INPUT_BANK_RATE : 0.0);
+    player->input_bank_at = now > 0.0 ? now : 1e-9;
+}
+
+// The delta this network frame may still simulate (the authority's input bank); other frames as sent.
+static Input player_input_bank_spend(Player *player, const Input *frame) {
+    Input out = *frame;
+    if (!player->game || !game_is_authority(player->game) || frame->received <= 0.0 || player->input_bank_at <= 0.0) return out;
+    const float sent = frame->delta > 0.0f && isfinite(frame->delta) ? roundf(frame->delta * 1000.0f) / 1000.0f : 0.0f;
+    const double want = MIN(MAX(sent, 0.001f), game_constants.max_delta); // as procInputs runs it (min 1 ms)
+    if (want <= player->input_bank + PLAYER_INPUT_BANK_EPSILON) {
+        player->input_bank = MAX(0.0, player->input_bank - want);
+        return out;
+    }
+    out.delta = (float) MAX(0.0, player->input_bank); // procInputs floors it at min_delta
+    player->input_bank = 0.0;
+    return out;
+}
+
 // procInputs every queued network frame (the tick, and gameserver.ts io_int before its action).
 void player_drain_inputs(Player *player) {
     if (!player->active || !player->input_queue_size) return;
@@ -4488,7 +4534,8 @@ void player_drain_inputs(Player *player) {
     for (size_t i = 0; i < count && player->active; i++) {
         player->input_arrival = queue[i].arrival; // anchored lag compensation: this input's shots
         player->input_running = queue[i];
-        player_proc_input(player, &queue[i], 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
+        const Input frame = player_input_bank_spend(player, &queue[i]); // v10.0.7 inputBank (lag switch)
+        player_proc_input(player, &frame, 0, player->game->move_lock || mode_input_locked(player)); // lockMove / lockPlayer
         player->input_seq = queue[i].seq;
     }
     player->input_arrival = 0.0;

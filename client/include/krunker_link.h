@@ -335,6 +335,7 @@ typedef struct {
         int rpc_id, rehost, solving;
     } host;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received
+    double sync_failed_ms;          // link clock of the last "f" (the "Input Failed" line's 5 s gate, deob-10.0.7.js:227209-227212)
     // the "q" syncTimes (v7.1.4 index.js io_updatePlayers / queueInputFrame, v10.js:221512-221521):
     // the last "k"'s servTim (its arg 2, ms since the round started on the server) and the local clock
     // (ms) of the last two "k"s, and per window frame the servTim + fraction of the frames that fired

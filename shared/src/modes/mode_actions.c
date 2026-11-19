@@ -187,8 +187,18 @@ static int mode_order_index(const GameModeConfig *config, const int weapon_id) {
     return -1;
 }
 
-// increaseWeapon(player, info): the weapon after the one that got the kill.
+// isGunGamePromotion (deob-10.0.7.js:193169-193171): !info || null == info.wId || info.wId == player.loadout[0].
+// weapon_id -1 stands for no wId. v10.0.7 "Fixed Gun Game giving two Promotion medals for one promotion on
+// multi-kill shots": the first kill of a shot promotes, so the next kill's weapon is no longer loadout[0].
+int mode_gun_game_promotion(const Player *killer, const int weapon_id) {
+    if (weapon_id < 0) return 1;
+    return killer && killer->loadout_size && killer->loadout[0] == weapon_id;
+}
+
+// increaseWeapon(player, info): the weapon after the one that got the kill, only for a promotion kill
+// (v10.0.7: if (this.isGunGamePromotion(player, info)) { ... }, deob-10.0.7.js:193172-193187).
 void mode_increase_weapon(Game *game, Player *player, const int weapon_id) {
+    if (!mode_gun_game_promotion(player, weapon_id)) return;
     const GameModeConfig *config = &game->mode->config;
     const int current = weapon_id >= 0 ? weapon_id : (player->loadout_size ? player->loadout[0] : -1);
     const int index = mode_order_index(config, current);

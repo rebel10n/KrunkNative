@@ -1311,6 +1311,10 @@ typedef struct Player_t {
     unsigned int fire_count;      // shoot / melee started (players.js: input.syncTime): the official "q" syncTimes
 
     int input_seq;                // inputSN: the last input procInputs ran (-1 after a spawn: none this life)
+    // v10.0.7 inputBank / inputBankAt (deob-10.0.7.js:171267-171268, :171545 reset at spawn): the input
+    // time (s, deltaMlt-scaled) the authority may still simulate for this player (player_input_bank_tick).
+    double input_bank;
+    double input_bank_at;         // Game.state_now of the last refill, 0 = none this life
     // Reconciliation (net-recon): recon_snap asks the server for a NET_RECON_SEQ_ALL "l" this
     // tick (io_tp's lastSNBySocketId override). shot_vel_obj is the client's input.velObj: the
     // physPow knockback of this input's shot, copied onto the pending input for replays.
@@ -1674,6 +1678,7 @@ void player_score(Player*, int, int); // player, amount, is_kill_reward
 void player_queue_input(Player*, const Input*);
 int player_accept_input(Player*, Input*); // a network frame: v3.1.1 inputDecode checks (finite, delta clamp, seq floor, 240 cap); 1 = queued
 void player_drain_inputs(Player*);         // procInputs every queued frame now (player_update; io_int before its action)
+void player_input_bank_tick(Player*, float delta); // v10.0.7 inputBank: the authority's per-tick input-time refill (player.c)
 void player_proc_input(Player*, const Input*, int, int);
 float player_round3(float v); // JS v.round(3); procInputs rounds delta (ms), yaw and pitch (0.001 rad)
 float player_wrap_yaw(float yaw); // controls.js xDr = rotation.y % Math.PI2: (-2pi, 2pi), non-finite -> 0

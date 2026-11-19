@@ -13,8 +13,8 @@
 //
 // Deliberate differences (documented): model parts ("aid") are hidden collision boxes (no GLTF part models,
 // so playPartClip has nothing to play); a body's pitch / roll turn its part meshes but not their offsets;
-// soft zones carry nothing on a client but its own player (the shared manager); the entity clock is reset at
-// an INIT and runs on the client's frame clock instead of Date.now(). Player poses ("pz",
+// soft zones carry nothing on a client but its own player (the shared manager); the entity clock runs on the
+// client's frame clock instead of Date.now() (it is reset at every INIT, as v10.0.7's finishInit does). Player poses ("pz",
 // NET_EXT_PLAYER_POSE) are routed to player_pose_render.c, which reads every player's hard attachment from
 // here (a faceRide pose faces the entity it rides).
 #include <entities.h>
@@ -58,7 +58,8 @@ void entities_reset(void) {
     E.chunk_next = E.chunk_parts = 0;
     if (E.game) ks_entities_client_reset(E.game); // the shared copy, its bodies and live objects (freed with the map)
     player_pose_reset(); // the old session's pending "pz" poses go with its players
-    E.sample_head = E.sample_count = 0; // KN: a new INIT starts the entity clock over (v10 keeps its samples)
+    E.sample_head = E.sample_count = 0; // a new INIT (every round) starts the entity clock over: v10.0.7 finishInit
+    // entityClock.reset() (deob-10.0.7.js:193742), "Fixed moving map objects like elevators jittering from the second round on"
     E.clock_synced = 0;
     E.clock_offset = 0.0;
     E.look_eid = -1;

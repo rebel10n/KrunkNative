@@ -18,6 +18,7 @@ typedef NetCompLobbyEntry CompLobbyEntry;
 
 typedef struct CompLobby_t {
     CompLobbyEntry entries[COMP_LOBBY_MAX];
+    uint8_t anon[COMP_LOBBY_MAX]; // authority only, never sent: the entry's player plays in anonMode (lobbyPayload)
     int count;
 } CompLobby;
 
@@ -38,6 +39,9 @@ void comp_lobby_set_team(Game*, int uid, int team);
 const char *comp_lobby_spawn_block(const Game*, int uid);
 // The whole table ("cd") to `uid`, or NET_TARGET_ALL.
 void comp_lobby_send_all(Game*, int uid);
+// v10.0.7 lobbyPayload: `uid` plays in anonMode (ENT); a change re-sends its entry. An anonymous entry, and
+// every entry while the ranked names are in use (game_names_masked), goes out without i / v / cl / l / f.
+void comp_lobby_set_anon(Game*, int uid, int anon);
 // Client: apply a NET_COMP_LOBBY packet to the mirrored table.
 void comp_lobby_apply(Game*, const NetCompLobbyPacket*);
 // Count of active entries on `team` with class `class_index` (the comp menu's "n/limit").
