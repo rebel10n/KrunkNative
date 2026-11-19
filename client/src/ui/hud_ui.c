@@ -4618,11 +4618,16 @@ static void hud_round_page(Client *client) {
     if (client->game.config.comp && g_chat_channel != CHAT_CHANNEL_TEAM) hud_switch_chat();
 }
 
+static int g_loading_begun_at_init; // hud_ui_map_loading_begin_init ran for the INIT being applied
+
 void hud_ui_on_init(Client *client) {
     g_hud_ui.round_switch = 0; // a new round: no Switching Sides any more
     hud_ui_relayout();
     hud_ui_on_config(client);
-    hud_ui_map_loading_begin(client); // the map is loaded now (main.c: client_load_map before hud_ui_on_init)
+    // the card began at the INIT itself (hud_ui_map_loading_begin_init, before the map built) unless that INIT named no
+    // map; then it begins now, for the map game_init picked
+    if (!g_loading_begun_at_init) hud_ui_map_loading_begin(client);
+    g_loading_begun_at_init = 0;
 }
 
 // v10.0.4 #loadingBg for the match's map (v10_loading.c): the thumbnail is the page's img/maps/map_<mapIndex>.png,
@@ -4630,11 +4635,26 @@ void hud_ui_on_init(Client *client) {
 // tag[1], #fff in a custom game (v10_loading_mode_accent, deob-10.0.4.js:223040). The mapIndex is Krunker's
 // (map_catalog_map_index_of_json), not current_map_index: that is the position in the server's own map list
 // (game->maps, e.g. the rotation 0, 1, 2, 3, 4, 6, ...), which pictured Freight as Shipment and so on.
+static void loading_begin(Client *client, const int slot, const cJSON *raw, const GameModeConfig *mode);
+
 void hud_ui_map_loading_begin(Client *client) {
     if (!client || !client->game.ready) return;
-    const int slot = client->game.current_map_index;
+    loading_begin(client, client->game.current_map_index, client->game.map ? client->game.map->raw_data : NULL,
+                  client->game.mode ? &client->game.mode->config : NULL);
+}
+
+// deob-10.0.7.js:226146-226165: the card begins at the INIT, before the map loads (its getMap / build), from the INIT's
+// map index and mode: the map JSON of the client's list and the Krunker mode id's config. 0 when the INIT names no map
+// (game_init then picks one: hud_ui_on_init begins the card after the load, as before).
+int hud_ui_map_loading_begin_init(Client *client, const int map_index, const int mode_id) {
+    if (!client || map_index < 0 || (size_t) map_index >= client->game.map_count || !client->game.maps) return 0;
+    loading_begin(client, map_index, client->game.maps[map_index], mode_config(mode_id));
+    g_loading_begun_at_init = 1;
+    return 1;
+}
+
+static void loading_begin(Client *client, const int slot, const cJSON *raw, const GameModeConfig *mode) {
     const cJSON *listed = slot >= 0 && (size_t) slot < client->game.map_count ? client->game.maps[slot] : NULL;
-    const cJSON *raw = client->game.map ? client->game.map->raw_data : NULL;
     const int index = map_catalog_map_index_of_json(listed ? listed : raw); // -1: a custom or community map
     const cJSON *name_item = raw ? cJSON_GetObjectItem(raw, "name") : NULL;
     const char *map_name = cJSON_IsString(name_item) ? cJSON_GetStringValue(name_item) : "";
@@ -4645,9 +4665,8 @@ void hud_ui_map_loading_begin(Client *client) {
     const V10LoadingMap map = {
         .map_thumb = no_thumb ? NULL : thumb,
         .map_name = map_name,
-        .mode_name = client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : NULL,
-        .accent = v10_loading_mode_accent(client->game.mode ? (int) client->game.mode->config.id : -1,
-                                          game_config_is_custom(&client->game)),
+        .mode_name = mode && mode->name ? mode->name : NULL,
+        .accent = v10_loading_mode_accent(mode ? (int) mode->id : -1, game_config_is_custom(&client->game)),
     };
     v10_loading_begin(&map, hud_now_ms(client));
 }

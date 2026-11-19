@@ -275,6 +275,51 @@ static void prewarm_start(const int index) {
     free(frag);
 }
 
+static int env_on(const char *name) {
+    const char *v = getenv(name);
+    return v && *v && *v != '0';
+}
+
+// A program another file compiles on its first use (render_target.c, rt_atlas.c, rt_masks.c, rt_normals.c,
+// sky_physical.c and the shafts below): started here, its shader_compile call takes it over (shader.c
+// shader_async_find matches the same paths). A program whose setting is turned off before its first use keeps its
+// async slot for the session; nothing else is lost.
+static void prewarm_path(const char *vert_name, const char *frag_name) {
+    char *vert = concat(assets_path(), vert_name);
+    char *frag = concat(assets_path(), frag_name);
+    if (vert && frag) shader_compile_async(vert, frag, NULL);
+    free(vert);
+    free(frag);
+}
+
+// The first-use programs under the settings in effect (client_render_settings: the Cinematic preset's implied rows
+// count) and the same conditions as their call sites: rtTaa / rtBloom / rtSharpen (render_target.c), rtShafts
+// (shafts_ready), rtSky (sky_physical_render), the reflections' texture atlas (rt_atlas.c atlas_ready), the
+// per-weapon part masks (rt_masks.c gpu_ready) and the generated relief normal maps (rt_normals.c gpu_ready).
+static void prewarm_first_use(const int units) {
+    const ClientRenderSettings *e = client_render_settings();
+    if (e->rt_mode <= RT_MODE_OFF) return;
+    if (e->rt_taa) prewarm_path("shaders/scene_composite.vert", "shaders/rt_taa.frag");
+    if (e->rt_bloom) prewarm_path("shaders/scene_composite.vert", "shaders/rt_bloom.frag");
+    if (e->rt_sharpen > 0) {
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_upscale.frag");
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_sharpen.frag");
+    }
+    if (e->rt_shafts) {
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_shafts.frag");
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_shafts_denoise.frag");
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_shafts_composite.frag");
+    }
+    if (e->rt_sky) prewarm_path("shaders/scene_composite.vert", "shaders/rt_sky.frag");
+    if (e->rt_mode >= RT_MODE_REFLECTIONS && units >= RT_REFL_TEXTURE_UNIT + 1)
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_atlas.frag");
+    if (!env_on("KRUNKNATIVE_RT_NO_MASKS") && !env_on("KRUNKNATIVE_RT_MASK_CPU")) {
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_mask_classify.frag");
+        prewarm_path("shaders/scene_composite.vert", "shaders/rt_mask_filter.frag");
+    }
+    if (!env_on("KRUNKNATIVE_RT_NO_BUMP")) prewarm_path("shaders/scene_composite.vert", "shaders/rt_bump.frag");
+}
+
 void rt_prewarm_tick(void) {
     static int started;
     if (started) return;
@@ -299,6 +344,7 @@ void rt_prewarm_tick(void) {
         prewarm_start(7);
     }
     basic_material_prewarm_rt(s->rt_preset == 1 ? 2 : 1); // the world pass's basic.frag variant (rt_cinematic)
+    prewarm_first_use(units);
     printf("[rt] prewarm: the ray tracing shaders compile on the driver's threads\n");
 }
 

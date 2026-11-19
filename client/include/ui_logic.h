@@ -332,6 +332,7 @@ void hud_ui_relayout(void);
 // relayout above) and f1904(Game.isComp) (the comp lobby's menu or the default one).
 void hud_ui_on_init(Client*);
 void hud_ui_map_loading_begin(Client*); // v10.0.4 #loadingBg: this match's map card (hud_ui.c)
+int hud_ui_map_loading_begin_init(Client*, int map_index, int mode_id); // the same at the INIT, before the load (0: no map named)
 void hud_ui_on_config(Client*); // a GAME_CONFIG applied (it may follow the INIT): f1904 again with it
 // The in-match gates of a ranked lobby (v10 INIT g:219154-219156 and g:219431): every INIT (hud_round_page)
 // and the server's NET_EXT_KN_RANKED_MATCH (net/game_events.c), after game.is_ranked is set.

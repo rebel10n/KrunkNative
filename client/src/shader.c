@@ -193,10 +193,10 @@ int shader_parallel_compile(void) {
 // One program between shader_compile_start and shader_compile_end: its stages stay alive for their info logs.
 typedef struct {
     unsigned int program, vert, frag;
-    char *vertex_path, *fragment_path;
+    char *vertex_path, *fragment_path, *defines; // defines: "" for none (the adoption key, shader_compile_defines)
 } ShaderJob;
 
-#define SHADER_ASYNC_MAX 16
+#define SHADER_ASYNC_MAX 32 // rt_prewarm_tick's programs (at most ~22) and basic.frag's RT variant
 static ShaderJob g_async[SHADER_ASYNC_MAX]; // started by shader_compile_async, not finished yet
 
 // Reads, rewrites and hands both stages and the link to GL, without asking for any status (a parallel-compile
@@ -246,11 +246,41 @@ static int shader_compile_start(ShaderJob *job, const char *vertex_shader_path, 
 
     job->vertex_path = strdup(vertex_shader_path);
     job->fragment_path = strdup(fragment_shader_path);
+    job->defines = strdup(defines ? defines : "");
     return 1;
 }
 
+// KRUNKNATIVE_SHADER_TRACE=1: one "[shader]" line per finished program: how long the finish waited, and whether the
+// program was started earlier on the driver's threads (prewarm) or compiled here (first use). Load-stall A/B.
+static int shader_trace_on(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("KRUNKNATIVE_SHADER_TRACE");
+        v = e && *e && *e != '0';
+    }
+    return v;
+}
+
+static unsigned int shader_compile_end_inner(ShaderJob *job);
+
 // The job's statuses (waiting for the compile when it has not finished) and logs; the program, or 0 on an error.
+static unsigned int shader_compile_end_timed(ShaderJob *job, const char *how) {
+    if (!shader_trace_on()) return shader_compile_end_inner(job);
+    char name[160];
+    const char *frag = job->fragment_path ? strrchr(job->fragment_path, '/') : NULL;
+    snprintf(name, sizeof(name), "%s%s%s", frag ? frag + 1 : "?", job->defines && *job->defines ? " +" : "",
+             job->defines && *job->defines ? "defines" : "");
+    const double t0 = glfwGetTime();
+    const unsigned int program = shader_compile_end_inner(job);
+    fprintf(stderr, "[shader] %-28s %8.1f ms %s\n", name, (glfwGetTime() - t0) * 1000.0, how);
+    return program;
+}
+
 static unsigned int shader_compile_end(ShaderJob *job) {
+    return shader_compile_end_timed(job, "prewarmed");
+}
+
+static unsigned int shader_compile_end_inner(ShaderJob *job) {
     int status;
     char error[512];
     const char *vertex_path = job->vertex_path ? job->vertex_path : "?";
@@ -290,6 +320,7 @@ static unsigned int shader_compile_end(ShaderJob *job) {
 
     free(job->vertex_path);
     free(job->fragment_path);
+    free(job->defines);
     memset(job, 0, sizeof(*job));
     if (program) gl_uniform_forget_program(program); // GL may hand out the id of a deleted program again
     return program;
@@ -301,13 +332,31 @@ unsigned int shader_compile(const char *vertex_shader_path, const char *fragment
 
 // shader_compile with `defines` injected after the version line of both stages (compile-time variants of one
 // source: materials/basic.c's KN_RT programs).
+// A program shader_compile_async already started with the same sources and defines is taken over instead of compiled
+// again (rt_prewarm_tick starts the tracer's first-use programs this way: TAA, bloom, shafts, sharpen, atlas, masks,
+// bump, the physical sky), so the call sites keep calling shader_compile.
+static ShaderJob *shader_async_find(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
+    if (!defines) defines = "";
+    for (int i = 0; i < SHADER_ASYNC_MAX; i++) {
+        const ShaderJob *job = &g_async[i];
+        if (!job->program || !job->vertex_path || !job->fragment_path || !job->defines) continue;
+        if (!strcmp(job->vertex_path, vertex_shader_path) && !strcmp(job->fragment_path, fragment_shader_path) && !strcmp(job->defines, defines))
+            return &g_async[i];
+    }
+    return NULL;
+}
+
 unsigned int shader_compile_defines(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
+    ShaderJob *started = shader_async_find(vertex_shader_path, fragment_shader_path, defines);
+    if (started) return shader_compile_end(started); // waits only for what the driver has not finished
     ShaderJob job;
     if (!shader_compile_start(&job, vertex_shader_path, fragment_shader_path, defines)) return 0;
-    return shader_compile_end(&job);
+    return shader_compile_end_timed(&job, "first use");
 }
 
 unsigned int shader_compile_async(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
+    const ShaderJob *started = shader_async_find(vertex_shader_path, fragment_shader_path, defines);
+    if (started) return started->program; // already on the driver's threads
     for (int i = 0; i < SHADER_ASYNC_MAX; i++) {
         if (g_async[i].program) continue;
         return shader_compile_start(&g_async[i], vertex_shader_path, fragment_shader_path, defines) ? g_async[i].program : 0;

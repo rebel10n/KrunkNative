@@ -1200,6 +1200,9 @@ int main(int argc, char **argv) {
 #endif
 }
 
+static unsigned long g_frames_presented; // client_frame's presented frames (client_init_defer_tick)
+static void map_mark_built(const cJSON *map); // client_init_begin's didLoad set (below)
+
 // KRUNKNATIVE_FRAME_TRACE=N: the work time of the N frames after each client_load_map, one "[frametrace]" line
 // each (the match-start stutter, scene_warm.h): "<frame> <work ms> t=<ms since the load> warm=<0|1>"; the
 // frame-cap sleep is not counted.
@@ -1250,6 +1253,7 @@ void client_frame(Client *client) {
     gamepad_frame(client, 1); // the gamepad loop after the game frame (its rAF is registered after the game's)
     frame_target_present(client);
     headless_swap_buffers(client->window); // glfwSwapBuffers; headless: the pbuffer flushes (at most 2 frames in flight)
+    g_frames_presented++; // client_init_defer_tick: a held INIT waits for one
     glfwPollEvents();
     if (g_frame_trace_left > 0) {
         g_frame_trace_left--;
@@ -1664,6 +1668,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     client->game.is_ranked = 0; // the server's NET_EXT_KN_RANKED_MATCH follows this INIT (game_events.c)
     client->game.event_index = 0; // its NET_EXT_INIT_EVENT too (a server without it plays no event)
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
+    if (client->game.ready && client->game.map) map_mark_built(client->game.map->raw_data); // didLoad (client_init_begin)
     mod_pack_map_loaded(client->game.map ? client->game.map->raw_data : NULL); // the map's modURL resource pack
     client_load_map(client);
     client->map_loaded = client->game.ready;
@@ -1671,6 +1676,107 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     // only exist on servers of protocol minor >= NET_PROTOCOL_MINOR_V7
     ks_client_round(client, init->major == NET_PROTOCOL_MAJOR ? init->minor : 0);
     hud_ui_on_init(client); // the HUD per the new round's state, the comp lobby's menu or the default one
+}
+
+// ---- INIT: the card first, then the load (deob-10.0.7.js:226141-226171)
+// Krunker begins the loading card at the INIT, then builds the map at once only when that map was loaded before in the
+// session (didLoad); otherwise it first fetches it (getMap(...).then), so the page paints the card, or the boot curtain
+// on the session's first load, before the build. KN builds in the frame that receives the INIT, so the first load (an
+// instant offline / direct-connect INIT at startup included) presented nothing until the whole load frame ended: the
+// blank window. client_init_begin follows Krunker's rule: a map not built this session holds its INIT (and every
+// map-bound packet after it: client_map_hold's queue, as for a streamed map) until one frame has been presented with
+// the page up, then client_init_defer_tick applies it. KRUNKNATIVE_INIT_DEFER=0 applies every INIT at once (A/B).
+#define INIT_DEFER_PAGE_WAIT 3.0 // seconds a held INIT waits for the page (an HTML-less build waits for one frame only)
+#define INIT_BUILT_MAX 128       // maps remembered as built (the client's map list entries, by pointer)
+
+static const cJSON *g_built_maps[INIT_BUILT_MAX];
+static int g_built_map_count;
+static int g_init_held;                   // client_init_begin holds an INIT in client->net_map_init
+static unsigned long g_init_held_frame;   // g_frames_presented when it was held
+static double g_init_held_at;
+static unsigned g_init_held_session;      // client->net_session_seq when it was held
+
+static int map_built_before(const cJSON *map) {
+    for (int i = 0; i < g_built_map_count; i++) if (g_built_maps[i] == map) return 1;
+    return 0;
+}
+
+static void map_mark_built(const cJSON *map) {
+    if (!map || map_built_before(map)) return;
+    if (g_built_map_count < INIT_BUILT_MAX) g_built_maps[g_built_map_count++] = map;
+}
+
+static int init_defer_enabled(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("KRUNKNATIVE_INIT_DEFER");
+        v = !(e && !strcmp(e, "0"));
+    }
+    return v;
+}
+
+static void client_init_begin(Client *client, const NetInitPacket *init) {
+    hud_ui_map_loading_begin_init(client, init->map_index, init->mode_index); // :226146-226165, before the load
+    const int named = init->map_index >= 0 && (size_t) init->map_index < client->game.map_count && client->game.maps;
+    if (!init_defer_enabled() || client->net_map_wait || (named && map_built_before(client->game.maps[init->map_index]))) {
+        client_apply_init(client, init); // didLoad: the build follows in the same frame (:226166)
+        return;
+    }
+    client->net_map_init = *init;
+    client->net_map_wait = 1; // client_map_hold queues what follows
+    client->net_map_wait_since = glfwGetTime();
+    client->net_map_ready = 0;
+    g_init_held = 1;
+    g_init_held_frame = g_frames_presented;
+    g_init_held_at = glfwGetTime();
+    pthread_mutex_lock(&client->net_lock);
+    g_init_held_session = client->net_session_seq;
+    pthread_mutex_unlock(&client->net_lock);
+}
+
+// client_tick_net, before the frame's packets: a held INIT is applied once a frame has been presented since it came
+// (and the page is up, or INIT_DEFER_PAGE_WAIT has passed), then what waited for it is replayed in order.
+static void client_handle_net_packet(Client *client, const NetPacket *packet);
+static void client_init_defer_tick(Client *client) {
+    if (!g_init_held) return;
+    if (!client->net_map_wait) { // the hold ended elsewhere (client_map_hold's timeout applied it)
+        g_init_held = 0;
+        return;
+    }
+    pthread_mutex_lock(&client->net_lock);
+    const unsigned session = client->net_session_seq;
+    pthread_mutex_unlock(&client->net_lock);
+    if (session != g_init_held_session) { // another session connected meanwhile: its own INIT follows, this one is stale
+        g_init_held = 0;
+        client->net_map_wait = 0;
+        free(client->net_map_held);
+        client->net_map_held = NULL;
+        client->net_map_held_count = 0;
+        return;
+    }
+    if (g_frames_presented == g_init_held_frame) return;
+    const int page_up = !html_ui_available() || html_ui_is_ready();
+    if (!page_up && glfwGetTime() - g_init_held_at < INIT_DEFER_PAGE_WAIT) return;
+    g_init_held = 0;
+    client->net_map_wait = 0;
+    client->net_map_ready = 1;
+    NetInitPacket init;
+    NetPacket *held = NULL;
+    size_t held_count = 0;
+    if (!client_map_take_ready(client, &init, &held, &held_count)) return;
+    printf("[init] held %.0f ms (%lu frame(s) presented) before the map load, %zu packet(s) waited\n",
+           (glfwGetTime() - g_init_held_at) * 1000.0, g_frames_presented - g_init_held_frame, held_count);
+    client_apply_init(client, &init);
+    for (size_t i = 0; i < held_count; i++) client_handle_net_packet(client, &held[i]);
+    free(held);
+    if (client->offline && !client->game.ready) { // offline_begin's check, for the INIT it left held
+        fprintf(stderr, "offline: could not load a map\n");
+        local_game_stop(client);
+    }
+}
+
+int client_init_pending(const Client *client) {
+    return g_init_held && client->net_map_wait;
 }
 
 static void client_handle_net_packet(Client *client, const NetPacket *packet) {
@@ -1692,7 +1798,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             if (session != last_session_seq && !client->offline) client_leave_game(client);
             last_session_seq = session;
             menu_idle_reset(); // v7 io_init: CONTROLS.idleTimer = 0 (a map change restarts the menu idle kick)
-            if (client_map_prepare_init(client, &init)) client_apply_init(client, &init);
+            if (client_map_prepare_init(client, &init)) client_init_begin(client, &init);
             break;
         }
         case NET_PACKET_SPAWN: {
@@ -1750,6 +1856,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
 }
 
 void client_tick_net(Client *client) {
+    client_init_defer_tick(client); // a held INIT first: the packets after it were queued behind it
     pthread_mutex_lock(&client->net_lock);
 
     const size_t packet_count = client->net_packet_count;

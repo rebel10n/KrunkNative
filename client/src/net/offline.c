@@ -186,14 +186,15 @@ static int offline_begin(Client *client, const int map_index) {
         local_game_stop(client);
         return 0;
     }
-    offline_sync(client); // INIT: the map loads now
-    if (!game->ready) {
+    offline_sync(client); // INIT: the map loads now, or on the next presented frame (a map not built yet: client_init_pending)
+    if (!game->ready && !client_init_pending(client)) {
         fprintf(stderr, "offline: could not load a map\n");
         local_game_stop(client);
         return 0;
     }
 
-    printf("offline: playing map %d, mode %d on the sandbox server\n", game->current_map_index, game_mode_id(game));
+    if (game->ready) printf("offline: playing map %d, mode %d on the sandbox server\n", game->current_map_index, game_mode_id(game));
+    else printf("offline: joined the sandbox server, map %d loads after the next frame\n", client->net_map_init.map_index);
     return 1;
 }
 

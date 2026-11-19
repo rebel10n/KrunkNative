@@ -947,6 +947,29 @@ SUPER with the Ray Traced preset and a shader cache that missed (any client upda
 parallel compile prewarms nothing (starting there would only move the stall onto a menu frame).
 `KRUNKNATIVE_RT_PREWARM=0` turns it off for A/B.
 
+The programs other files compile on their first use start there too, under the settings in effect
+(`client_render_settings`, so the Cinematic preset's implied rows count) and their call sites' own conditions:
+`rtTaa` (rt_taa), `rtBloom` (rt_bloom), `rtSharpen` (rt_upscale + rt_sharpen), `rtShafts` (the three shaft
+programs), `rtSky` (rt_sky), reflections (rt_atlas), the weapon part masks (rt_mask_classify / rt_mask_filter,
+unless `KRUNKNATIVE_RT_NO_MASKS` / `_MASK_CPU`) and the relief normal maps (rt_bump, unless `KRUNKNATIVE_RT_NO_BUMP`).
+Their call sites are unchanged: `shader_compile_defines` takes over a job `shader_compile_async` already started
+with the same paths and defines (shader.c `shader_async_find`). A program whose setting is switched off before its
+first use keeps its async slot (32) for the session. `KRUNKNATIVE_SHADER_TRACE=1` logs each finished program, how
+long its finish waited and whether it was prewarmed or compiled on first use. Measuring the prewarm needs a GPU
+driver: llvmpipe reports every program compiled at once and JITs it at its first draw, so its waits read 0 ms.
+
+The load itself is held behind a presented frame (main.c `client_init_begin`, deob-10.0.7.js:226141-226171): Krunker
+begins the loading card at INIT and builds the map in the same task only when that map was loaded before in the
+session (`didLoad`); otherwise it fetches it first, so the page paints the card (the boot curtain on the first
+load) before the build. KN now does the same: an INIT for a map not built this session is held, with every
+map-bound packet after it (`client_map_hold`'s queue), until a frame has been presented with the page up (at most
+3 s), and the card begins at the INIT from its map and mode (`hud_ui_map_loading_begin_init`). Before this the
+session's first load, an instant offline or direct-connect INIT included, presented nothing until the load frame
+ended: a headless llvmpipe start with the Ray Traced settings and Mesa's shader cache off showed its first frame
+2.1-2.4 s after launch instead of 11.8-14.8 s (Sandstorm, Kanji, Burg), and with default settings 0.6-0.8 s
+instead of 1.1-1.4 s, with the time to the settled frame unchanged. `KRUNKNATIVE_INIT_DEFER=0` applies every INIT at
+once (A/B).
+
 Console (developer commands): `rt_debug <bvh|normals|visibility|history|ao|local|refl|motion|gi|off>`
 blits that intermediate over the frame; `rt_mode [0-3]` shows or sets `rtMode` through the settings
 store so the Settings row follows; `rt_materials_reload` re-reads the material table. `KRUNKNATIVE_GPU_TIMING=1` prints the `rt` pass (GPU and CPU).
