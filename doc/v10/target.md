@@ -1,22 +1,29 @@
-# Krunker v10.0.6: the target
+# Krunker v10.0.7: the target
 
-Krunker Box Office plays **Krunker v10.0.6**, the latest v10 build. It is the target of the
-client, the server, the ruleset identity and the UI work (set by the user, 2026-10-30: "lets update
-to v10.0.6 now"; v10.0.5 was the target from 2026-10-29, v10.0.4 from 2026-10-28, v10.0.3 from
-2026-10-21).
+Krunker Box Office plays **Krunker v10.0.7**, the latest v10 build. It is the target of the
+client, the server, the ruleset identity and the UI work (set by the user, 2026-11-19: "update
+KrunkNative to the latest version of the game"; v10.0.6 was the target from 2026-10-30, v10.0.5 from
+2026-10-29, v10.0.4 from 2026-10-28, v10.0.3 from 2026-10-21).
 
 ## Reference bundles
 
-- **Target: v10.0.6. Read `~/jails/kru/src/Krunker_v10.0.6/deob/game.deob.js`.** It is kru's
-  decoded copy of the live bundle (`https://kru.eli.gift/game.deob.js`, last-modified 2026-10-30
-  16:40 UTC), byte for byte; its `README.md` gives the sha256. Strings are inlined and the file is
-  pretty-printed; identifiers stay mangled. Cite it as `deob-10.0.6.js:<line>`. Its version literal
-  is `"10.0.6"` (:16403).
+- **Target: v10.0.7. Read `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js`.** It is kru's
+  decoded copy of the live bundle (`/home/kru/krunkbox/bin/game.deob.js` on kru, mtime 2026-11-16
+  19:18 UTC; the page build tag `5fHFc` matched krunker.io on 2026-11-19), byte for byte; its
+  `README.md` gives the sha256. Strings are inlined and the file is pretty-printed; identifiers stay
+  mangled. Cite it as `deob-10.0.7.js:<line>`. Its version literal is `"10.0.7"` (:16392).
+  `deob/game.webcrack.js` is the same build's `game.min.js` through our own decoder (below), a
+  cross-check; `../live/` keeps kru's raw artifacts (game.min.js, game.debug.js, index.html,
+  skins.jspck) and `../versions.txt` the changelog as fetched. `https://kru.eli.gift/game.deob.js`,
+  where earlier builds were fetched, no longer resolves (2026-11-19).
+- **v10.0.6: history.** `~/jails/kru/src/Krunker_v10.0.6/deob/game.deob.js` (last-modified
+  2026-10-30 16:40 UTC), decoded the same way; the code ported 2026-10-30..11-18 cites it as
+  `deob-10.0.6.js:<line>`.
 - **v10.0.5: history.** `~/jails/kru/src/Krunker_v10.0.5/deob/` (last-modified 2026-10-29 16:40 UTC),
   decoded the same way; the code ported 2026-10-29..30 cites it as `deob-10.0.5.js:<line>`. Its
   `tools/normalize.py` rewrites the build-to-build noise (mangled names, quote styles, `\xNN` escapes,
   hex numbers) and keeps the line layout, so `diff -a` of two normalised builds lists the real
-  changes (10.0.5 to 10.0.6: 59 hunks, below).
+  changes (10.0.6 to 10.0.7: 523 hunks, 10.0.5 to 10.0.6: 59, below).
 - **v10.0.4: history.** `~/jails/kru/src/Krunker_v10.0.4/deob/game.deob.js`, decoded the same way
   (last-modified 2026-10-28 02:37 UTC). The code ported 2026-10-28..29 cites it as
   `deob-10.0.4.js:<line>`. Both builds mangle names and escape strings differently, so compare them
@@ -45,11 +52,158 @@ to v10.0.6 now"; v10.0.5 was the target from 2026-10-29, v10.0.4 from 2026-10-28
 
 Every value and rule is checked against the target bundle directly (user, 2026-10-24, once the whole
 bundle was decoded): weapon, class and mode stats, physics, map fields, object flags, packet shapes
-and UI. There is no "unchanged since" fallback. A ported value cites its `deob-10.0.6.js:<line>` in
-a code comment (code ported before 2026-10-30: `deob-10.0.5.js` / `deob-10.0.4.js`, before 2026-10-28:
-`deob-10.0.3.js`); a deliberate difference from the
-target is documented in code. A comment or spec that cites only v10.0.2 (`v10:N`) or v7.1.4 is not
-verified yet: re-check it against the target bundle when it is touched.
+and UI. There is no "unchanged since" fallback. A ported value cites its `deob-10.0.7.js:<line>` in
+a code comment (code ported before 2026-11-19: `deob-10.0.6.js`, before 2026-10-30: `deob-10.0.5.js` /
+`deob-10.0.4.js`, before 2026-10-28: `deob-10.0.3.js`; re-check those against 10.0.7 when the code is
+touched); a deliberate difference from the target is documented in code. A comment or spec that
+cites only v10.0.2 (`v10:N`) or v7.1.4 is not verified yet: re-check it against the target bundle when
+it is touched.
+
+## 10.0.7 (2026-11-16)
+
+- Build: `clientVersion` `10.0.7r1`; `buildVersion` `7ccZCb5K8H21WeQNwr1szD2woJ2CP1WI` (deob-10.0.7.js:19598,
+  :20148); the ahNum key is `0x43e1`, so the step is `0xe1` (:98877, the add helper :24246; 10.0.6: `0x25`).
+  The packet tables (c2s 138 / s2c 264), the cheat check (salt `KRUNK3R_AC`, FNV double) and the per-player
+  layouts are unchanged (`make krunker-build`); config.networkSounds is the same 401 names, now at :18260.
+  The page's build tag is `5fHFc` (:204288, :230107; 10.0.6: `1qcEh`).
+- The normalised diff has 523 hunks. 313 are transpiler noise: 10.0.7 is emitted with native spread
+  (`f(...a)`, `[...a]`) and object-spread helpers instead of `apply` / `concat` / `Object.assign`, plus
+  optional-chain rewrites and renamed mangled fields (`Wamjfa` -> `W1lotf`, `Mss3ih` -> `Bum0tq`). The rest,
+  grouped by the changelog (krunker.io/docs/versions.txt, "UPDATE 10.0.7"), follows; the KrunkNative
+  code that ports an item cites its lines.
+
+### General
+- "Reduced the stutter when an enemy first comes on screen": a player added that is not you is
+  prewarmed (:174280, :174456 `prewarm(objInstances)`); prewarm (:207778-207798) queues the object,
+  compileAsync runs for it while its geometry / textures are still loading (prewarmAll, prewarmSince,
+  10000 ms cap), the queue drains inside a per-frame time budget (:206033-206067); textures count as
+  pending per material (`userData.texPending`, :206177-206178, :206240, :206360-206400) and texture
+  uploads are queued while `uploadBudget` is on (:206223-206228, set when warm-up ends :208124, flushed
+  :208072).
+- "Fixed lag switching letting players teleport": NOT in game.js beyond two new player fields,
+  `inputBank` / `inputBankAt` (:171267-171268, reset :171545). The rule is server-only: KN's server
+  must bound how much input time a player can bank after a silence (design it, document as intentional).
+- "players sometimes kicked with Input Failed after a server hiccup": the client's `f` handler
+  (input reset, :227210-227211; registered at :229495) no longer prints "Input Failed <n>" for the new
+  reason 8 (6 and 7 were already silent). Server side: a hiccup sends reason 8 (resync) instead of
+  failing the player.
+- "KR not updating in game after market, trade and giveaway actions": the account store's funds /
+  skins / junk are updated in place instead of copied (:107782, :111531, :132203-132206, :132756-132759,
+  :132976-132977, :137208, :137716, :147156-147158); a giveaway post's `funds` updates the store
+  (:142216-142234).
+- "Junk not being added when bought on newer accounts": `junk = parseFloat(player_jnk) || 0`
+  (:115130; player_jnk arrives as a string); profile Junk `(parseFloat(junk) || 0).toFixed(2)` (:218993).
+- "Gun Game giving two Promotion medals for one promotion on multi-kill shots": isGunGamePromotion
+  (:193169-193171): only a kill with the current loadout[0] weapon (or no wId) promotes; the promotion
+  and the Promotion medal both check it (:172641, :193173-193188).
+- "moving map objects like elevators jittering from the second round on": finishInit resets the
+  entityClock with the rest of the round state (:193742; the clock :190779).
+- "Random secondary skin always using the default skin after a reload":
+  `parseInt(getSavedVal("secondaryInd") || 2)` (:217276; the saved value is a string).
+- "Ametwista skins showing black" / "some textures rendering wrong with WebGPU": the crystal skin
+  node graph (:196569-199154) drops its worley / split / noise3 nodes for hand-built cell hashing
+  (c7_f1 / c7_f2 / c7_id from kBig / kOff / kHash / kSpread), two range params widened (0 -> 15,
+  0 -> -15 at :196569, :196582) and modelScale becomes an `objScale` float param (0.0005..20, default
+  0.00229, :196778-196785). Check whether KN renders this graph at all.
+- "guests getting an error when clicking Double XP on the end screen": `lastDoubleAttempt` only
+  when there is an account (:229879).
+- "Closing the daily spin wheel now returns to the menu": the spin close goes back to the window
+  that was open only when there was one (:224295, :224510 `V && showWindow(V)`, was showWindow(14));
+  a KR spin no longer sends AD_FINISHED from the spin path (:224287, :224477-224506).
+- "profiles of players with some special characters": a path-segment encoder (:26198-26202:
+  `.`, `..` and `search` percent-encoded, else encodeURIComponent) for /players/<name>/* ,
+  /moderation/chat/<name>, /studios/<id>/members/<name> (:27209-27568).
+- Not located in game.js (backend / matchmaker): "items sometimes being unusable without a game
+  reload", "double raid drops sometimes being lost".
+
+### Ranked
+- "ranked matches sometimes being saved twice": a forfeit after the match reached POST_MATCH does
+  nothing (prepareForfeit :194906-194916; the vote handler :194969-194995 only clears the vote then),
+  so endGame cannot run twice; new string commands.forfeit.over "The match is already over".
+- "Anonymous players now stay anonymous on the team panel": the lobby payload
+  (lobbyPayload / lobbyPayloadAll, :190976-190995) drops `an`, shows `an` as the name unless ranked
+  names are on, and zeroes i / v / cl / l and sets f -1 for anonymous players; SYNC_P_CON_DATA /
+  SYNC_P_CON_OBJ send it (:191028, :195796). The players.add data hides four more fields of anonymous
+  players from others (:176753).
+- Not in game.js (backend / matchmaker / shop data): one cooldown penalty per match, NO GAMES
+  AVAILABLE on joining as a match starts, the Ranked Shop's Universal Spin Ticket.
+
+### Inventory & Market
+- "exchange and social windows not fitting with UI Scaling off": exchange sidebar max-height
+  (:133915-133919, svelte-1i76mhh). "market tabs going off screen at high UI Scale": not in the
+  bundle's svelte CSS; check the live css/*.css (build 5fHFc) against ui/css.
+- "Trade item search now matches weapon names": the item filter also matches the item's weapon
+  name (:111394).
+- Not located in game.js: Hub inventory listing / unlist-relist fixes (backend).
+
+### Social
+- "first DM from some friends showing as DM from Unknown": a message from someone not in the list
+  (10.0.6 :141342-141364) plus the new `msg:echo` (:141564-141585): your own message sent from another
+  client (an OAuth app) is added to the thread as sent; messages carry `via` (:141519-141520,
+  :141652-141653), shown as "via {0}" in the bubble (:142037-142045, :142780-142786) and the in-game
+  chat line "[DM from X via app]" (:228062-228063).
+- "chat draft being cleared when a message arrives": per-friend drafts in a Map, restored on open
+  and saved on close (:142053-142054, :142508-142521).
+- "clan feed tab erroring for guests and players without a clan": the clan data path only
+  requests (sendReq 3) when there is a clan_id (:220509).
+- Not located: clan logo upload right after creating a clan (backend).
+
+### Maps
+- "Favoriting a map now shows it in the Favorites tab" / "Favorite stars now show correctly on every
+  tab": per-account favourite id sets for maps and mods (:228176-228217), toggling one updates the set
+  and drops the cached Favorites list (:228237-228244), stars recomputed on every tab
+  (:223451-223452); the list fill only writes into the tab that is showing (:218783-218795 mods,
+  :220328-220339 maps).
+
+### Twitch
+- "If your Twitch link has expired, claiming drops now asks you to reconnect it": claim with an
+  expired link opens a popup (twitch.reconnect / .confirm / .decline, :218914-218927; popup keys
+  :97248-97268), confirm reconnects with `force_verify=true` (:229550); the OAuth return strips
+  twitch_auth / code / scope / state / error params from the URL and sends VERIFY_TWITCH once
+  (:216806-216878); the success toast / window 5 only when canShowTwitch (:229146, :229271-229282).
+
+### Editor
+- Not in game.js (the editor bundle): duplicated object's asset ID -> collision size, retrying a
+  failed custom asset upload.
+
+### KrunkScript
+- "Script-spawned AIs now see 120 units by default (visionDis)": visDis default 120, was 0 (:187284).
+- "AI part names now work the same in glowPart, getPartPosition and setPartDamage, and can contain
+  spaces and colons": one part-name key (:181588-181590: whitespace -> `_`, strip `[ ] . : /`) used for
+  the node map (:181930-181933), partDmg (:182571-182574), glow / position lookups (:182593, :182608,
+  :182707, :182724, :182805); the KS name check allows `: / [ ]` and space (:185581).
+- "getPartPosition now works for AIs spawned without preciseHits": the model is loaded by assetID
+  when none is attached (:182723-182724).
+- "AI glow keeps its color and its halo looks smoother": glow keeps the base colour (color *=
+  1 - 0.75 g, emissive default #ff5a1e, intensity ei + g^2, :182865-182872), halo radius from the
+  box, pulled toward the camera, opacity 0.8 g^2 (:182883-182897), the halo sprite a 128 px DataTexture
+  with a pow 2.2 falloff and mipmaps instead of a 64 px canvas gradient (:182249-182264).
+
+### Login with Krunker
+- "Login with Krunker" / "Connected apps": the account API's oauth section (:27656-27696:
+  authorize/info, authorize, /account/apps, revoke, actions/<id> approve (twofa_code) / deny,
+  activity), Settings' Connected apps section (:97493-97673 component, mounted :219140-219142, header
+  :219174), 87 new en strings (oauth.*, settings.apps.*) in :204284. The consent page itself is not in
+  game.js.
+
+### Not in the changelog (game differences)
+- Discord unlink answers DISCORD_DELETION_PENDING -> "deletion_pending" state with
+  discord.result.deletion_pending (:97384).
+- Discord items: rarity colour "Discord" #5865f2 (:103481); an item with `discord` is
+  noSale / noSpin / limited / noQuickSell with limT "Discord" (:103761).
+- JNK amounts show exactly two decimals (toFixed(2) without parseFloat: :147275, :147640, :147994,
+  :148158, profile :218993).
+- windows[9] (maps) ignores an empty playerData object (:220294).
+- DM `via` / msg:echo (above).
+- config: beta hosts (beta.krunker.io / *.beta.krunker.io) switch assetsURL / userAssetsURL;
+  new config keys assetsURL, userAssetsURL, badgePermIds (default [47707163], was a constant :115065),
+  betaStorage, restrictBypassHosts (:16428-16438, :19574-20118; host check :229209-229211); two new beta
+  flags krunker_gateway_beta / krunker_matchmaker_beta (:16401); user-asset URLs go through one helper
+  (:24286-24300, :124438, :125946, :126152, :126536, :139353). Production hosts unchanged.
+
+### Not ported (no KN counterpart)
+- The logger stops printing to the console (:28569-28602).
+- three.js / TSL node internals (WebGPU), analytics / gtag rewrites, the transpiler noise above.
 
 ## 10.0.6 (2026-10-30)
 
@@ -156,18 +310,18 @@ subtypes) follow AGENTS.md.
 
 ## What the target changes
 
-- Identity: the ruleset `version` is `"10.0.6"` (`shared/src/rules/ruleset.c`). The build's client
-  version is `10.0.6r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
-  logs `[client] Krunker v10.0.6` and the server `Plays Krunker v10.0.6`. The Android and iOS
-  version fallbacks name 10.0.6.
-- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.6 (CI's shipped version,
+- Identity: the ruleset `version` is `"10.0.7"` (`shared/src/rules/ruleset.c`). The build's client
+  version is `10.0.7r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
+  logs `[client] Krunker v10.0.7` and the server `Plays Krunker v10.0.7`. The Android and iOS
+  version fallbacks name 10.0.7.
+- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.7 (CI's shipped version,
   `tools/release/version-meta.sh`), and the What's New tile shows the newest entry.
 
 ## What it does not change
 
 - The HELLO / INIT ruleset bytes (HELLO bit 2, INIT ruleset 3) and KN's own packet layouts (wire
-  compatibility). `changelog-10.0.3.md` lists what 10.0.3 changed; the 10.0.4, 10.0.5 and 10.0.6 sections above
-  list theirs.
+  compatibility). `changelog-10.0.3.md` lists what 10.0.3 changed; the 10.0.4, 10.0.5, 10.0.6 and 10.0.7 sections
+  above list theirs.
 - `doc/ref/krunker-v10.0.2/` and `doc/ref/krunker-v10/` are captures of the 10.0.2 page. The
   uidiff scenarios refer to them by path.
 - `ui/` is the v10.0.2 page import, edited by hand for parity since. It is regenerated from a newer

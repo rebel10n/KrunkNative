@@ -3,6 +3,10 @@
  - read by client/src/ui/v10_news.c, in Krunker's docs/versions.txt format: "== UPDATE x.y.z ==" starts an update,
  - "* Name" a group, "- text" a change, "@url" an image; the first update is the current version
 
+ == UPDATE 10.0.7 ==
+ * General
+ - Updated to Krunker's 10.0.7 game build, so joining Krunker's servers keeps working
+
  == UPDATE 10.0.6 ==
  * General
  - Added wear to some cosmetics from the November spin, shown in game and in item previews

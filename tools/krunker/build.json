@@ -2,17 +2,18 @@
  "generator_rev": 4,
  "schema": 1,
  "source": {
-  "url": "https://kru.eli.gift/game.deob.js",
-  "sha256": "c3d0d3004141485891f712f5eee0a84eee9b7ebc99dc778d44489af65b2cec28",
-  "bytes": 13909446
+  "url": null,
+  "sha256": "dc2c506a0b13883e34b9d058dbf5626331796dd1fa9fe0b77e342a688cc97af0",
+  "bytes": 13934544,
+  "file": "game.deob.js"
  },
- "ahkey": 37,
- "ahkey_hex": "0x25",
- "ahnum_step": 37,
+ "ahkey": 17377,
+ "ahkey_hex": "0x43e1",
+ "ahnum_step": 225,
  "ahkey_form": "helper",
  "ahnum_trailer": "nibbles",
- "client_version": "10.0.6r1",
- "build_version": "BMXeeCoe7d0j5zNh4KE3IsWuyP5twK9g",
+ "client_version": "10.0.7r1",
+ "build_version": "7ccZCb5K8H21WeQNwr1szD2woJ2CP1WI",
  "ahnum_exempt": {
   "name": "cptR",
   "wire": "cptR"
@@ -2179,10 +2180,10 @@
    }
   }
  },
- "cheat_keystream_js": "function iïîíiíî(iíÏiîîï, iiÌíìîí) {\n    for (var iiÎíiíí = iïíïíîï, iíÎîìîì = new Uint8Array(iiÌíìîí), iiÎiíïi = 0x0; iiÎiíïi < iiÌíìîí; iiÎiíïi++) {\n      iíÎîìîì[iiÎiíïi] = (iíÏiîîï['charCodeAt'](iiÎiíïi % iíÏiîîï[\"length\"]) ^ iiÎíiíí[iiÎiíïi % iiÎíiíí[\"length\"]]) + iiÎiíïi & 0xff;\n    }\n    return iíÎîìîì;\n  }",
- "cheat_salt_js": "var iïíïíîï = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];",
- "cheat_keystream_standalone_js": "(function () {\n  var iïíïíîï = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];\n  return function iïîíiíî(iíÏiîîï, iiÌíìîí) {\n    for (var iiÎíiíí = iïíïíîï, iíÎîìîì = new Uint8Array(iiÌíìîí), iiÎiíïi = 0x0; iiÎiíïi < iiÌíìîí; iiÎiíïi++) {\n      iíÎîìîì[iiÎiíïi] = (iíÏiîîï['charCodeAt'](iiÎiíïi % iíÏiîîï[\"length\"]) ^ iiÎíiíí[iiÎiíïi % iiÎíiíí[\"length\"]]) + iiÎiíïi & 0xff;\n    }\n    return iíÎîìîì;\n  };\n})()",
- "cheat_handler_js": "function iíìíïii(iïÏíïïï, iîÏîiiï, iiÍììíi) {\n    try {\n      var iîÏîîïi;\n      var iîÌìïîî = function (iiÏíiii, iíÌíííî) {\n        var iíÎïîìi;\n        iíÎïîìi = \"undefined\" != typeof Buffer ? new Uint8Array(Buffer[\"from\"](iiÏíiii, 'base64')) : new Uint8Array(atob(iiÏíiii)[\"split\"]('')[\"map\"](function (iîÏìiiî) {\n          return iîÏìiiî[\"charCodeAt\"](0x0);\n        }));\n        for (var iiÏïìii = iïîíiíî(iíÌíííî, iíÎïîìi['length']), iîÌiïii = new Uint8Array(iíÎïîìi['length']), iiIììíì = 0x0; iiIììíì < iíÎïîìi['length']; iiIììíì++) {\n          iîÌiïii[iiIììíì] = iíÎïîìi[iiIììíì] ^ iiÏïìii[iiIììíì];\n        }\n        var iìÎììîî = new TextDecoder()[\"decode\"](iîÌiïii);\n        return JSON['parse'](iìÎììîî);\n      }(iiÍììíi, iïÏíïïï);\n      try {\n        iîÏîîïi = (0x0, eval)(iîÌìïîî);\n      } catch (iìÏìííî) {\n        iîÏîîïi = {\n          'r': null,\n          'e': {\n            '_eval': iìÏìííî[\"message\"] || 'eval_error'\n          }\n        };\n      }\n      var iîIîîïí = function (iìÏîiiì, iîIîíìi) {\n        for (var iìIïiìi = JSON['stringify'](iìÏîiiì), iìÎìíiî = new TextEncoder()['encode'](iìIïiìi), iiIiïìî = iïîíiíî(iîIîíìi, iìÎìíiî[\"length\"]), iìÏiïíì = new Uint8Array(iìÎìíiî[\"length\"]), iìIîiîì = 0x0; iìIîiîì < iìÎìíiî[\"length\"]; iìIîiîì++) {\n          iìÏiïíì[iìIîiîì] = iìÎìíiî[iìIîiîì] ^ iiIiïìî[iìIîiîì];\n        }\n        return 'undefined' != typeof Buffer ? Buffer[\"from\"](iìÏiïíì)['toString'](\"base64\") : btoa(String[\"fromCharCode\"][\"apply\"](String, iïîîííi(iìÏiïíì)));\n      }(iîÏîîïi, iïÏíïïï);\n      var iiÍiîîí = function (iîÎíïií, iïIiîiî) {\n        for (var iìÌîîîì = iïIiîiî + JSON[\"stringify\"](iîÎíïií), iìÏìîìî = 0x811c9dc5, iiÎîìïî = 0x0; iiÎîìïî < iìÌîîîì[\"length\"]; iiÎîìïî++) {\n          iìÏìîìî = 0x1000193 * (iìÏìîìî ^= iìÌîîîì[\"charCodeAt\"](iiÎîìïî)) | 0x0;\n        }\n        return (iìÏìîìî >>> 0x0)['toString'](0x10)[\"padStart\"](0x8, '0');\n      }(iîÏîîïi, iïÏíïïï);\n      iîíiíìí['send'](iiíiiîi[\"CHEAT_CHECK_RESPONSE\"], iïÏíïïï, iîIîîïí, iiÍiîîí);\n    } catch (iîÌíïìí) {}\n  }",
+ "cheat_keystream_js": "function iìíïîïï(iiÍííií, iîÎïiii) {\n    for (var iìÏïîîî = iîîïiîì, iìÏîìîì = new Uint8Array(iîÎïiii), iïIîîîî = 0x0; iïIîîîî < iîÎïiii; iïIîîîî++) {\n      iìÏîìîì[iïIîîîî] = (iiÍííií[\"charCodeAt\"](iïIîîîî % iiÍííií['length']) ^ iìÏïîîî[iïIîîîî % iìÏïîîî[\"length\"]]) + iïIîîîî & 0xff;\n    }\n    return iìÏîìîì;\n  }",
+ "cheat_salt_js": "var iîîïiîì = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];",
+ "cheat_keystream_standalone_js": "(function () {\n  var iîîïiîì = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];\n  return function iìíïîïï(iiÍííií, iîÎïiii) {\n    for (var iìÏïîîî = iîîïiîì, iìÏîìîì = new Uint8Array(iîÎïiii), iïIîîîî = 0x0; iïIîîîî < iîÎïiii; iïIîîîî++) {\n      iìÏîìîì[iïIîîîî] = (iiÍííií[\"charCodeAt\"](iïIîîîî % iiÍííií['length']) ^ iìÏïîîî[iïIîîîî % iìÏïîîî[\"length\"]]) + iïIîîîî & 0xff;\n    }\n    return iìÏîìîì;\n  };\n})()",
+ "cheat_handler_js": "function iïîìïìî(iîIíìîi, iiÎìîïï, iîÎiîïí) {\n    try {\n      var iìIïííi;\n      var iîÍìîíí = function (iiÍîîii, iíÍiîíí) {\n        var iìÌïìíí;\n        iìÌïìíí = 'undefined' != typeof Buffer ? new Uint8Array(Buffer[\"from\"](iiÍîîii, \"base64\")) : new Uint8Array(atob(iiÍîîii)[\"split\"]('')['map'](function (iìÎiiîî) {\n          return iìÎiiîî[\"charCodeAt\"](0x0);\n        }));\n        for (var iiÎìîîì = iìíïîïï(iíÍiîíí, iìÌïìíí[\"length\"]), iìÌïííí = new Uint8Array(iìÌïìíí[\"length\"]), iîIíïïï = 0x0; iîIíïïï < iìÌïìíí['length']; iîIíïïï++) {\n          iìÌïííí[iîIíïïï] = iìÌïìíí[iîIíïïï] ^ iiÎìîîì[iîIíïïï];\n        }\n        var iíIïïíi = new TextDecoder()[\"decode\"](iìÌïííí);\n        return JSON[\"parse\"](iíIïïíi);\n      }(iîÎiîïí, iîIíìîi);\n      try {\n        iìIïííi = (0x0, eval)(iîÍìîíí);\n      } catch (iîÌìiiî) {\n        iìIïííi = {\n          'r': null,\n          'e': {\n            '_eval': iîÌìiiî[\"message\"] || \"eval_error\"\n          }\n        };\n      }\n      var iíIiïií = function (iìÌìììï, iiÎïìïí) {\n        for (var iiIíîiì = JSON[\"stringify\"](iìÌìììï), iîÌîìîî = new TextEncoder()[\"encode\"](iiIíîiì), iîÎíìii = iìíïîïï(iiÎïìïí, iîÌîìîî[\"length\"]), iiÎîìîï = new Uint8Array(iîÌîìîî[\"length\"]), iíIîiiï = 0x0; iíIîiiï < iîÌîìîî[\"length\"]; iíIîiiï++) {\n          iiÎîìîï[iíIîiiï] = iîÌîìîî[iíIîiiï] ^ iîÎíìii[iíIîiiï];\n        }\n        return \"undefined\" != typeof Buffer ? Buffer[\"from\"](iiÎîìîï)[\"toString\"](\"base64\") : btoa(String[\"fromCharCode\"](...iiÎîìîï));\n      }(iìIïííi, iîIíìîi);\n      var iîÌïïíî = function (iìÎíìii, iíÍîîîi) {\n        for (var iíÏïìií = iíÍîîîi + JSON[\"stringify\"](iìÎíìii), iíÍìiìï = 0x811c9dc5, iïÌíïîi = 0x0; iïÌíïîi < iíÏïìií[\"length\"]; iïÌíïîi++) {\n          iíÍìiìï = 0x1000193 * (iíÍìiìï ^= iíÏïìií['charCodeAt'](iïÌíïîi)) | 0x0;\n        }\n        return (iíÍìiìï >>> 0x0)['toString'](0x10)[\"padStart\"](0x8, '0');\n      }(iìIïííi, iîIíìîi);\n      iîíìiìï[\"send\"](iíîïîíï[\"CHEAT_CHECK_RESPONSE\"], iîIíìîi, iíIiïií, iîÌïïíî);\n    } catch (iìIïiîï) {}\n  }",
  "extras": {
   "matchmaker_url": "https://matchmaker.krunker.io",
   "api_url": "https://api.krunker.io",
@@ -2225,7 +2226,7 @@
   "custom_inline_arg": 9,
   "static_file": {
    "prefix": "maps/",
-   "suffix": ".json?v=1qcEh"
+   "suffix": ".json?v=5fHFc"
   },
   "ftue": {
    "name": "Mini Industry",

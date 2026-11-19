@@ -2,22 +2,22 @@
  * Regenerate: make krunker-build      Check: make krunker-build-check
  *
  * Build constants of the official Krunker client bundle the krunker_proto codec speaks to.
- * Source: https://kru.eli.gift/game.deob.js
- * sha256: c3d0d3004141485891f712f5eee0a84eee9b7ebc99dc778d44489af65b2cec28 (13909446 bytes)
+ * Source: game.deob.js
+ * sha256: dc2c506a0b13883e34b9d058dbf5626331796dd1fa9fe0b77e342a688cc97af0 (13934544 bytes)
  */
 #ifndef KRUNKER_BUILD_H
 #define KRUNKER_BUILD_H
 
 /* Bumped when this header's C interface changes; consumers: #if KRUNKER_BUILD_SCHEMA != N #error */
 #define KRUNKER_BUILD_SCHEMA 1
-#define KRUNKER_BUILD_SOURCE_URL "https://kru.eli.gift/game.deob.js"
-#define KRUNKER_BUILD_SOURCE_SHA256 "c3d0d3004141485891f712f5eee0a84eee9b7ebc99dc778d44489af65b2cec28"
+#define KRUNKER_BUILD_SOURCE_URL ""
+#define KRUNKER_BUILD_SOURCE_SHA256 "dc2c506a0b13883e34b9d058dbf5626331796dd1fa9fe0b77e342a688cc97af0"
 
 /* Every frame is msgpack([name, ...args]) + 2 trailer bytes {ahNum >> 4 & 0xf, ahNum & 0xf}.
  * Before every send except packet cptR: ahNum = (ahNum + KRUNKER_AHKEY) & 0xff, ahNum
  * starting at 0, so only KRUNKER_AHNUM_STEP (the low byte) matters. */
-#define KRUNKER_AHKEY 0x25u
-#define KRUNKER_AHNUM_STEP 0x25u
+#define KRUNKER_AHKEY 0x43e1u
+#define KRUNKER_AHNUM_STEP 0xe1u
 /* The packet sent without the step (the Turnstile captcha reply), as name / wire / enum. */
 #define KRUNKER_AHNUM_EXEMPT_NAME "cptR"
 #define KRUNKER_AHNUM_EXEMPT_WIRE "cptR"
@@ -25,8 +25,8 @@
 
 /* Echoed to the matchmaker (seek-game) and the game server. buildVersion is also the
  * dataQuery's "v". */
-#define KRUNKER_CLIENT_VERSION "10.0.6r1"
-#define KRUNKER_BUILD_VERSION "BMXeeCoe7d0j5zNh4KE3IsWuyP5twK9g"
+#define KRUNKER_CLIENT_VERSION "10.0.7r1"
+#define KRUNKER_BUILD_VERSION "7ccZCb5K8H21WeQNwr1szD2woJ2CP1WI"
 #define KRUNKER_CLIENT_REVISION "1"
 #define KRUNKER_MATCHMAKER_URL "https://matchmaker.krunker.io"
 #define KRUNKER_API_URL "https://api.krunker.io"
