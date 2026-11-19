@@ -20,6 +20,9 @@ display, a private XDG_CONFIG_HOME in a temp dir) driven by KRUNKNATIVE_EDITOR_S
    the copy under a new placeholder owner: two cubes, one placeholder, one group of one member.
 4. quick_add: window 4 search "spawn" lists the matches by raw name length; Enter adds the
    first (AI_SPAWNER, the shorter name) and closes the window (windows[3].clickButton(0)).
+5. asset_collision (v10.0.7): a CUSTOM_ASSET's Collision Size ("s", as a duplicated or imported one carries it) belongs
+   to its asset ID: typing the same ID keeps it, another ID drops it so the object has the size a fresh pick of the new
+   asset has (fixedSizeAid, editor-10.0.7.js:7395, :7588-7591).
 
 Exit status 0 = all passed; 77 when no client_bin is given (skip).
 """
@@ -132,6 +135,36 @@ def case_map_slots(c):
     check("mp" not in reset[0][1], "defaults did not drop mp: %r" % reset[0][1].get("mp"))
 
 
+def case_asset_collision(c):
+    keep = os.path.join(c.tmp, "asset-keep.txt")
+    out = os.path.join(c.tmp, "asset-objs.txt")
+    # a CUSTOM_ASSET carrying its collision size, as a duplicated (or imported) one does
+    src = os.path.join(c.tmp, "asset-map.json")
+    with open(src, "w", encoding="utf-8") as f:
+        json.dump({"name": "asset", "spawns": [[0, 0, 0, 0, 0, 0]],
+                   "objects": [{"i": 44, "p": [0, 0, 0], "s": [7, 8, 9], "aid": "46802q"}]}, f)
+    script = ";".join([
+        "clear", "file:import:" + src, "wait:0.5", "select:0",
+        "set:Asset ID=46802q", "select:0", "objdump:" + keep,
+        "set:Asset ID=46802g", "select:0", "objdump:" + out,
+    ])
+    log = run_editor(c, script, "asset")
+    fresh = os.path.join(c.tmp, "asset-fresh.txt") # what a fresh pick of the new asset serializes
+    run_editor(c, ";".join(["clear", "net:select:46802g:0:createObjects", "objdump:" + fresh]), "asset-fresh")
+    ref, _ = objects(fresh)
+    check("no control" not in log, "a control is missing: %s" % "\n".join(l for l in log.splitlines() if "no control" in l))
+    kept, _ = objects(keep)
+    check(kept and kept[0][1].get("aid") == "46802q" and kept[0][1].get("s") == [7, 8, 9],
+          "the collision size [7, 8, 9] not kept for the same asset ID: %r" % (kept[:1],))
+    objs, _ = objects(out)
+    check(objs and objs[0][1].get("aid") == "46802g", "the new asset ID was not set: %r" % (objs[:1],))
+    check(ref and ref[0][1].get("aid") == "46802g", "the fresh pick of 46802g: %r" % (ref[:1],))
+    # the old size is gone: the object serializes the size a fresh pick of the new asset has
+    check(objs and ref and objs[0][1].get("s") != [7, 8, 9] and objs[0][1].get("s") == ref[0][1].get("s"),
+          "another asset ID kept the old collision size: %r (a fresh 46802g: %r)" %
+          (objs[0][1].get("s") if objs else None, ref[0][1].get("s") if ref else None))
+
+
 def case_group_paste(c):
     out = os.path.join(c.tmp, "paste-objs.txt")
     run_editor(c, ";".join([
@@ -166,6 +199,7 @@ CASES = [
     ("map_slots", case_map_slots),
     ("group_paste", case_group_paste),
     ("quick_add", case_quick_add),
+    ("asset_collision", case_asset_collision),
 ]
 
 

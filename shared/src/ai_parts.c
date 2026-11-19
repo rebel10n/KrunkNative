@@ -12,6 +12,10 @@
 //   - setPartDamage keeps 32 parts (AI_PARTS_MAX, like glowPart / setNodeVisible); v10.0.3's partDmg has no cap.
 //   - A malformed GLB (an accessor out of the buffer, a bad index) leaves the affected data out instead
 //     of failing the whole model as the JS throw does.
+//   - ai_parts_part_key turns ASCII whitespace into '_'; JS's \s also matches Unicode spaces (U+00A0, U+2000..).
+// Krunker v10.0.7 (deob-10.0.7.js) matches part names by their key (ai_parts_part_key): the setters, partMult, the
+// hidden-node filter of hitTest / applySolid, partPosition and byName (:181588-181590, :181930-181933, :182571-182608,
+// :182707, :182724, :182805); partPosition asks for the rig of any AI with an asset (:182723).
 #include <ai_parts.h>
 #include <net_ext.h>
 #include <cJSON.h>
@@ -778,10 +782,29 @@ float ai_parts_model_clip_duration(const AiPartsModel *m, const char *name) {
     return c ? (float) c->duration : 0.0f;
 }
 
-int ai_parts_model_node_find(const AiPartsModel *m, const char *name) { // byName: the first node of a non-empty name
+void ai_parts_part_key(const char *name, char *out, const size_t size) { // iïïìiìï (deob-10.0.7.js:181588)
+    if (!out || !size) return;
+    size_t n = 0;
+    for (const char *c = name ? name : ""; *c && n + 1 < size; c++) {
+        if (*c == '[' || *c == ']' || *c == '.' || *c == ':' || *c == '/') continue; // .replace(/[\[\]\.:\/]/g, "")
+        out[n++] = *c == ' ' || (*c >= '\t' && *c <= '\r') ? '_' : *c;    // .replace(/\s/g, "_")
+    }
+    out[n] = 0;
+}
+
+static int key_eq(const char *raw, const char *key) { // iïïìiìï(raw) == key
+    char k[256];
+    ai_parts_part_key(raw, k, sizeof(k));
+    return !strcmp(k, key);
+}
+
+// byName: the first node of each non-empty name, then (10.0.7, :181930-181933) each node's key where no node took it
+int ai_parts_model_node_find(const AiPartsModel *m, const char *name) {
     if (!m || !name || !name[0]) return -1;
     for (int i = 0; i < m->node_count; i++)
         if (!strcmp(m->nodes[i].name, name)) return i;
+    for (int i = 0; i < m->node_count; i++)
+        if (m->nodes[i].name[0] && key_eq(m->nodes[i].name, name)) return i;
     return -1;
 }
 
@@ -1101,23 +1124,24 @@ int ai_parts_clip_at(Game *game, GameAI *ai, const double now, char *clip, const
     return c != NULL;
 }
 
-// the hidden-node filter of hitTest / applySolid: the group's node (byName) or an ancestor is hidden
+// the hidden-node filter of hitTest / applySolid: the group's node (byName) or an ancestor is hidden, by its key
+// (hiddenNodes.indexOf(iïïìiìï(node.name)), deob-10.0.7.js:182707, :182805)
 static int group_hidden(const AiPartsModel *m, const void *user, const char *name) {
     const AiParts *p = user;
     if (!p || !p->hidden_count) return 0;
     int guard = 0;
     for (int i = ai_parts_model_node_find(m, name); i >= 0 && guard++ <= m->node_count; i = m->nodes[i].parent)
         for (int h = 0; h < p->hidden_count; h++)
-            if (!strcmp(p->hidden[h], m->nodes[i].name)) return 1;
+            if (key_eq(m->nodes[i].name, p->hidden[h])) return 1;
     return 0;
 }
 
-// AI.partMult (:205189): the nearest part (or ancestor) with a setPartDamage, else bodyDmg
+// AI.partMult (deob-10.0.7.js:182606-182616): the nearest part (or ancestor) whose key has a setPartDamage, else bodyDmg
 static float part_mult(const AiPartsModel *m, const AiParts *p, const char *name) {
     int guard = 0;
     for (int i = ai_parts_model_node_find(m, name); p && i >= 0 && guard++ <= m->node_count; i = m->nodes[i].parent)
         for (int d = 0; d < p->dmg_count; d++)
-            if (!strcmp(p->dmg[d].name, m->nodes[i].name)) return p->dmg[d].mult;
+            if (key_eq(m->nodes[i].name, p->dmg[d].name)) return p->dmg[d].mult;
     return p ? p->body_dmg : 1.0f;
 }
 
@@ -1161,10 +1185,13 @@ int ai_parts_hit_test(Game *game, GameAI *ai, const vec3 origin, const vec3 delt
     return 1;
 }
 
-int ai_parts_part_position(Game *game, GameAI *ai, const char *name, vec3 *out) { // AI.partPosition (:205324)
+int ai_parts_part_position(Game *game, GameAI *ai, const char *name, vec3 *out) { // AI.partPosition (deob-10.0.7.js:182721)
     int state;
-    AiPartsModel *m = ai && ai->data.asset ? ai_parts_model_get(game, ai->data.asset, 0, &state) : NULL;
-    const int node = ai_parts_model_node_find(m, name);
+    // rig || !assetID || RENDER || loadModel(assetID) (:182723): a non-precise AI's rig loads too
+    AiPartsModel *m = ai && ai->data.asset ? ai_parts_model_get(game, ai->data.asset, game_is_authority(game), &state) : NULL;
+    char key[AI_PART_NAME_SIZE];
+    ai_parts_part_key(name, key, sizeof(key));
+    const int node = ai_parts_model_node_find(m, key); // rig.byName[iïïìiìï(name)] (:182724)
     if (node < 0) return 0;
     double t = 0;
     const Clip *clip = clip_at(game, ai, m, now_ms(game), &t);
@@ -1187,9 +1214,11 @@ int ai_parts_part_position(Game *game, GameAI *ai, const char *name, vec3 *out) 
     return 1;
 }
 
-void ai_parts_set_part_damage(Game *game, GameAI *ai, const char *part, const float mult) { // AI.setPartDamage (:205154)
+void ai_parts_set_part_damage(Game *game, GameAI *ai, const char *name, const float mult) { // AI.setPartDamage (deob-10.0.7.js:182570)
     AiParts *p = ai_parts_of(game, ai, 1);
-    if (!p || !part || !part[0]) return;
+    char part[AI_PART_NAME_SIZE];
+    ai_parts_part_key(name, part, sizeof(part)); // partDmg[iïïìiìï(name)] (:182571)
+    if (!p || !name || !name[0]) return;
     for (int i = 0; i < p->dmg_count; i++)
         if (!strcmp(p->dmg[i].name, part)) {
             p->dmg[i].mult = mult;
@@ -1210,9 +1239,11 @@ float ai_parts_body_damage(Game *game, const GameAI *ai) {
     return p ? p->body_dmg : 1.0f;
 }
 
-void ai_parts_glow_part(Game *game, GameAI *ai, const char *part, const char *color, const double intensity) { // AI.glowPart (:205157)
+void ai_parts_glow_part(Game *game, GameAI *ai, const char *name, const char *color, const double intensity) { // AI.glowPart (deob-10.0.7.js:182573)
     AiParts *p = ai_parts_of(game, ai, 1);
-    if (!p || !part) return;
+    if (!p || !name) return;
+    char part[AI_PART_NAME_SIZE];
+    ai_parts_part_key(name, part, sizeof(part)); // part = iïïìiìï(part) (:182574)
     if (!color) color = "";
     int at = -1;
     for (int i = 0; i < p->glow_count && at < 0; i++)
@@ -1232,9 +1263,11 @@ void ai_parts_glow_part(Game *game, GameAI *ai, const char *part, const char *co
     p->dirty = 1;
 }
 
-void ai_parts_node_visible(Game *game, GameAI *ai, const char *node, const int visible) { // AI.setNodeVisible (:205175)
+void ai_parts_node_visible(Game *game, GameAI *ai, const char *name, const int visible) { // AI.setNodeVisible (deob-10.0.7.js:182592)
     AiParts *p = ai_parts_of(game, ai, 1);
-    if (!p || !node) return;
+    if (!p || !name) return;
+    char node[AI_PART_NAME_SIZE];
+    ai_parts_part_key(name, node, sizeof(node)); // node = iïïìiìï(node) (:182593)
     int at = -1;
     for (int i = 0; i < p->hidden_count && at < 0; i++)
         if (!strcmp(p->hidden[i], node)) at = i;

@@ -472,6 +472,86 @@ static void test_ai_parts(void) {
     (void) shooter;
 }
 
+// v10.0.7: part names are matched by their key (whitespace -> '_', [ ] . : / dropped: iïïìiìï, deob-10.0.7.js:181588) in
+// glowPart / setPartDamage / setNodeVisible / getPartPosition, the KrunkScript check takes spaces, colons, slashes and
+// brackets (:185581), getPartPosition loads the rig of an AI without preciseHits (:182723), visionDis defaults to 120
+static void test_ai_parts_v1007(void) {
+    printf("Running v10.0.7 AI part names test...\n");
+    char key[AI_PART_NAME_SIZE];
+    ai_parts_part_key("Arm.R", key, sizeof(key));
+    CHECK(!strcmp(key, "ArmR"), "key(Arm.R) = ArmR (%s)", key);
+    ai_parts_part_key("Left Arm:[1]/x\tend", key, sizeof(key));
+    CHECK(!strcmp(key, "Left_Arm1x_end"), "key drops [ ] . : / and turns whitespace into _ (%s)", key);
+    unsigned char *glb = NULL;
+    size_t len = 0;
+    CHECK(!read_file("assets/user-assets/46802/model.glb", &glb, &len), "the test model is there");
+    AiPartsModel *model = glb ? ai_parts_model_parse(glb, len) : NULL;
+    free(glb);
+    CHECK(model && ai_parts_model_node_find(model, "Arm.R") == 3 && ai_parts_model_node_find(model, "ArmR") == 3,
+          "byName holds the raw name and its key (Arm.R / ArmR -> node 3)");
+    CHECK(model && ai_parts_model_node_find(model, "Arm_R") < 0, "a key that is no node's key finds nothing");
+    ai_parts_model_free(model);
+
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    static Game game;
+    game_on(&game, map, MODE_ID_FFA);
+    game.is_local = 1;
+    Player *shooter = add_player(&game, 2);
+    // only a box-hit AI: nothing else asks for the model, so getPartPosition must (10.0.6 answered {})
+    run_script(&game, "public action start() {\n"
+                      "    obj ai = GAME.AI.spawn(\"46802q\", \"Boxed\", 0, 0, 0, {health: 1000});\n"
+                      "    obj p = ai.getPartPosition(\"Hand/R\");\n    GAME.log(\"hand \" + toStr(p.y));\n}\n"
+                      "public action update(num delta) {}\n");
+    GameAI *boxed = ai_named(&game, "Boxed");
+    CHECK(boxed && !boxed->data.precise && boxed->data.vision == 120, "a script-spawned AI sees 120 units by default (%d)",
+          boxed ? boxed->data.vision : -1);
+    int found = 0;
+    for (int i = 0; i < g_log_count; i++) found |= !strncmp(g_log[i], "hand ", 5) && strcmp(g_log[i], "hand undefined");
+    CHECK(found, "getPartPosition on an AI without preciseHits: the rig is loaded, Hand/R is Hand.R (%s)", g_log_count ? g_log[0] : "none");
+    vec3 hand;
+    CHECK(boxed && ai_parts_part_position(&game, boxed, "Hand.R", &hand), "partPosition(Hand.R) of the box-hit AI");
+    ks_game_unload(&game);
+    game_ai_free(&game);
+
+    // a precise AI (a game of its own: parts_call acts on AI.list()[0]): setPartDamage("Arm:R") reaches the Arm.R node
+    // (partMult by key), setNodeVisible("[Arm.R]") hides it
+    static Game pg;
+    game_on(&pg, map, MODE_ID_FFA);
+    pg.is_local = 1;
+    add_player(&pg, 2);
+    run_script(&pg, k_parts_script);
+    GameAI *ai = ai_named(&pg, "Precise");
+    CHECK(ai && ai->data.precise, "the precise AI");
+    if (ai) {
+        parts_call(&pg, "    ai.setPartDamage(\"Arm:R\", 3);\n    ai.glowPart(\"Left Arm:1\", \"#fff\", 1);\n"
+                          "    ai.glowPart(\"Arm R!\", \"#fff\", 1);");
+        AiParts *parts = ai_parts_of(&pg, ai, 0);
+        CHECK(parts && parts->dmg_count == 1 && !strcmp(parts->dmg[0].name, "ArmR") && parts->dmg[0].mult == 3.0f,
+              "setPartDamage(Arm:R) keys the part as ArmR (%s)", parts && parts->dmg_count ? parts->dmg[0].name : "none");
+        CHECK(parts && parts->glow_count == 1 && !strcmp(parts->glow[0].name, "Left_Arm1"),
+              "glowPart takes spaces and colons and keys them; '!' is still refused (%d: %s)", parts ? parts->glow_count : -1,
+              parts && parts->glow_count ? parts->glow[0].name : "none");
+        vec3 arm;
+        GameAIHitPart part;
+        memset(&part, 0, sizeof(part));
+        float t = 0.0f;
+        if (ai_parts_part_position(&pg, ai, "Hand.R", &arm)) t = parts_ray(&pg, ai, arm, &part);
+        CHECK(t > 0.0f && part.has_part && (!strcmp(part.name, "Hand.R") || !strcmp(part.name, "Arm.R")) && part.mult == 3.0f,
+              "a hit under Arm.R takes setPartDamage(Arm:R)'s multiplier (%s x%.2f)", part.has_part ? part.name : "none", part.mult);
+        parts_call(&pg, "    ai.setNodeVisible(\"[Arm.R]\", false);");
+        parts = ai_parts_of(&pg, ai, 0);
+        CHECK(parts && parts->hidden_count == 1 && !strcmp(parts->hidden[0], "ArmR"), "setNodeVisible([Arm.R]) keys the node as ArmR");
+        memset(&part, 0, sizeof(part));
+        parts_ray(&pg, ai, arm, &part);
+        CHECK(!(part.has_part && (!strcmp(part.name, "Hand.R") || !strcmp(part.name, "Arm.R"))),
+              "the node hidden by its key is no longer hit (hit %s)", part.has_part ? part.name : "none");
+    }
+    ks_game_unload(&pg);
+    game_ai_free(&pg);
+    cJSON_Delete(map);
+    (void) shooter;
+}
+
 // ---------------------------------------------------------------- v10.0.3 AI wrapper, AI.spawn options, object hooks
 
 static const char *k_wrapper_script =
@@ -541,8 +621,8 @@ static void test_ai_wrapper(void) {
     CHECK(a->data.hbh == 2.0f && a->data.m_y_off == 100.0f && a->data.m_r_off == 90.0f && !strcmp(a->data.start_anim, "Run") &&
           a->data.effect_on_shot == 9 && a->data.chase_distance == 2000.0f && a->data.targets_players,
           "the option clamps (hitBoxH 2, modelOffsetY 100, modelRotation 90, animStart, shotEffect 9, chaseDis 2000, targPlr)");
-    CHECK(b->data.m_size == 0.0f && b->data.hbh == 1.0f && b->data.effect_on_shot == -1 && b->data.fire_rate == 200 && b->data.vision == 1,
-          "without options: mSize || 4, hitBoxH 1, no shot effect, fireRate 200 and visionDis 1 (the clamps of 0)");
+    CHECK(b->data.m_size == 0.0f && b->data.hbh == 1.0f && b->data.effect_on_shot == -1 && b->data.fire_rate == 200 && b->data.vision == 120,
+          "without options: mSize || 4, hitBoxH 1, no shot effect, fireRate 200 and visionDis 120 (10.0.7's default, deob-10.0.7.js:187284)");
     CHECK(logged("set 10 7 auto true"), "speed is clamped to 10, team set, autoTarget by default (%s)", g_log_count > 2 ? g_log[2] : "none");
     CHECK(logged("target 2 auto false active true"), "target = id: scriptTarget, the player (%s)", g_log_count > 3 ? g_log[3] : "none");
     CHECK(a->script_target && a->target.kind == AI_TARGET_PLAYER && a->target.id == p->uid, "the target is the player");
@@ -1498,6 +1578,7 @@ int main(void) {
     test_always_sync(&game);
     test_play_anim_reps();
     test_ai_parts();
+    test_ai_parts_v1007();
     test_ai_wrapper();
     test_move_dir();
     test_ai_reflections();

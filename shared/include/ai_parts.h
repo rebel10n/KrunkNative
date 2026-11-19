@@ -19,7 +19,7 @@
 #include <ai.h>
 
 #define AI_PARTS_MAX 32        // partGlow / hiddenNodes (v10.0.3: 32); setPartDamage too (KN cap)
-#define AI_PART_NAME_SIZE 49   // part / node names: /^[\w.\-]{1,48}$/ (iiÍíìíï :209277)
+#define AI_PART_NAME_SIZE 49   // part / node names: /^[\w.\-:\/\[\] ]{1,48}$/ (iîÏììiï, deob-10.0.7.js:185581)
 
 typedef struct AiPartsModel AiPartsModel;
 
@@ -79,7 +79,14 @@ typedef struct {
 AiPartsModel *ai_parts_model_parse(const unsigned char *glb, size_t length);
 void ai_parts_model_free(AiPartsModel*);
 int ai_parts_model_node_count(const AiPartsModel*);
-int ai_parts_model_node_find(const AiPartsModel*, const char *name); // byName: the first node so named, -1 none
+// byName: the first node so named, else the first whose key (ai_parts_part_key) is `name`; -1 none. 10.0.7 adds the
+// keys to byName after the raw names (deob-10.0.7.js:181930-181933).
+int ai_parts_model_node_find(const AiPartsModel*, const char *name);
+// The key a part / node name is matched by (iïïìiìï, deob-10.0.7.js:181588-181590): whitespace becomes '_' and
+// [ ] . : / are dropped, three.js's sanitizeNodeName (the names GLTFLoader gives the client's nodes). glowPart /
+// setPartDamage / setNodeVisible store keys, partMult / the hidden-node filter compare node keys, and partPosition
+// looks its name's key up (:182571-182608, :182707, :182724, :182805). `out` takes at least strlen(name) + 1 bytes.
+void ai_parts_part_key(const char *name, char *out, size_t size);
 const char *ai_parts_model_node_name(const AiPartsModel*, int node);
 int ai_parts_model_node_parent(const AiPartsModel*, int node);       // -1 for a root
 int ai_parts_model_hit_tris(const AiPartsModel*);                    // the hit mesh's triangle count
@@ -116,7 +123,8 @@ AiPartsModel *ai_parts_hit_model(Game*, GameAI*);
 // setPartDamage of the part or an ancestor, else bodyDamage; 0 = an armour hit).
 int ai_parts_hit_test(Game*, GameAI*, vec3 origin, vec3 delta, float *t, char *part, size_t part_size, float *mult);
 // AI.partPosition(name): the world position of the part's mesh centre in the current pose; 0 when the
-// asset's rig is not loaded or has no such node.
+// asset's rig is not loaded or has no such node. The authority asks for the rig of any AI with an asset, precise or
+// not (10.0.7: `rig || !assetID || RENDER || loadModel(assetID)`, deob-10.0.7.js:182723).
 int ai_parts_part_position(Game*, GameAI*, const char *name, vec3 *out);
 // AI.clipAt(now ms): the clip and its time (seconds) the AI is posed with; 0 none.
 int ai_parts_clip_at(Game*, GameAI*, double now_ms, char *clip, size_t clip_size, double *t);

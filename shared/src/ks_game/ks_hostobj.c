@@ -893,7 +893,8 @@ static KsValue ai_play_anim(KsScript *s, void *n, const KsValue *args, int argc)
     return ks_undef();
 }
 
-// /^[\w.\-]{1,48}$/ on a string (iiÍíìíï, deob-10.0.3.js:209277)
+// /^[\w.\-:\/\[\] ]{1,48}$/ on a string (iîÏììiï, deob-10.0.7.js:185580-185582; 10.0.6: /^[\w.\-]{1,48}$/): AI part names
+// may hold spaces, colons, slashes and brackets; ai_parts.c matches them by their key (ai_parts_part_key)
 static int part_name(const KsValue v, char *out, const size_t size)
 {
     size_t len = 0;
@@ -901,7 +902,7 @@ static int part_name(const KsValue v, char *out, const size_t size)
     if (!str || !len || len > 48 || len >= size) return 0;
     for (size_t i = 0; i < len; i++) {
         const unsigned char c = (unsigned char) str[i];
-        if (!(isalnum(c) || c == '_' || c == '.' || c == '-')) return 0;
+        if (!(isalnum(c) || c == '_' || c == '.' || c == '-' || c == ':' || c == '/' || c == '[' || c == ']' || c == ' ')) return 0;
     }
     memcpy(out, str, len);
     out[len] = 0;
@@ -1404,7 +1405,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.hit_rate = (float) clamp_d(opt_int(s, data, "meleeRate", 0), 200, 10000);
     d.melee_range = (float) clamp_d(opt_int(s, data, "meleeRange", 0), 10, 100);
     d.melee_damage = (float) clamp_d(opt_int(s, data, "meleeDmg", 0), 1, 200);
-    d.vision = (int) clamp_d(opt_int(s, data, "visionDis", 0), 1, 1000);
+    d.vision = (int) clamp_d(opt_int(s, data, "visionDis", 120), 1, 1000); // isNumber ? parseInt : 120 (deob-10.0.7.js:187284; 10.0.6: 0)
     d.score = (int) clamp_d(opt_int(s, data, "score", 0), 0, 10000);
     d.behaviour = (int) clamp_d(opt_int(s, data, "behaviorType", 0), 0, 20);
     d.always_sync = (unsigned char) opt_bool(s, data, "alwaysSync"); // v10.0.3 aSync: AI.sync / playAnim skip the 800 range

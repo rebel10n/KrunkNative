@@ -14,6 +14,9 @@
 // nodes (setNodeVisible: the node and every mesh under it), glowing parts (glowPart: the emissive of the meshes under the
 // node, pulsing, and an additive halo sprite at the node) and the held clip (playAnim hold: played once, kept on its last
 // frame, no Idle / Move). The node names come from the asset's own file (model.glb, or model.gltf for "g" assets).
+// v10.0.7 glow (deob-10.0.7.js:182850-182900): the emissive is the colour or #ff5a1e at ei + intensity * pulse, the base
+// colour darkens by 0.75 * intensity, and the halo (a 128px mipmapped (1 - d)^2.2 falloff, :182248-182265) is pulled
+// toward the camera by min(r, dist / 2), sized 2r (1.2 + 0.15 pulse) and 0.8 * intensity * pulse opaque.
 // Deliberate differences of the parts: the halo's size is the meshes' bounding spheres (diameter / sqrt 3), not a Box3;
 // a viewer that joins while a clip is held sees it play once and then hold (heldLate's jump to the end is not done).
 // Intentional differences: FBX AI models ("f") are not supported; a built-in kind whose v7 user
@@ -54,6 +57,7 @@ typedef struct {
     // v10.0.3 parts: the node names (the asset's file), each mesh's emissive before a glow, the halos
     AiPartsModel *rig;           // owned: the names / parents of the glTF nodes (node order = the instance's)
     vec4 *emissive0;             // per gltf mesh: its emissive (glowState mats ec / ei)
+    vec4 *color0;                // per gltf mesh: its colour (glowState mats c, deob-10.0.7.js:182866)
     unsigned char *env_extras;   // per gltf mesh: its glTF extras carry env (gltf.c set scene_env_intensity)
     Mesh *halo[AI_PARTS_MAX];    // per glow slot: the halo sprite (glowState.halo), NULL none
     char halo_name[AI_PARTS_MAX][AI_PART_NAME_SIZE];
@@ -107,6 +111,7 @@ static void air_drop_mesh(AIMesh *slot) {
     }
     ai_parts_model_free(slot->rig);
     free(slot->emissive0);
+    free(slot->color0);
     free(slot->env_extras);
     if (slot->mesh) {
         if (g_air.scene) scene_remove_mesh(g_air.scene, slot->mesh);
@@ -174,11 +179,17 @@ static int air_load_asset(AIMesh *slot, const GameAI *ai, float *center_y) {
         free(buf);
         free(rig_path);
         slot->emissive0 = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, sizeof(vec4));
+        slot->color0 = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, sizeof(vec4));
         slot->env_extras = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, 1);
+        if (!slot->color0) { // the glow needs both snapshots (emissive0 doubles as "the meshes were read")
+            free(slot->emissive0);
+            slot->emissive0 = NULL;
+        }
         for (size_t i = 0; slot->emissive0 && slot->env_extras && i < slot->gltf->mesh_count; i++) {
             Material *mat = slot->gltf->meshes[i]->material;
             if (!mat || mat->vtable != &basic_material_vtable) continue;
             slot->emissive0[i] = ((BasicMaterial *) mat)->emissive;
+            slot->color0[i] = ((BasicMaterial *) mat)->color;
             slot->env_extras[i] = ((BasicMaterial *) mat)->scene_env_intensity > 0.0f;
         }
         return 1;
@@ -348,25 +359,24 @@ static void air_clips(Client *client, AIMesh *slot, GameAI *ai, const double now
 
 // ---------------------------------------------------------------- v10.0.3 parts (AI.updateParts)
 
-static unsigned int g_halo_texture; // iîîìïîí: a 64x64 white radial gradient (stops 0: 1, .25: .55, 1: 0)
+static unsigned int g_halo_texture; // iiïiíïï (deob-10.0.7.js:182248-182265): 128x128 white, alpha 255 (1 - d)^2.2
 static Geometry *g_halo_geometry;   // the XY unit quad of a THREE.Sprite
 
 static unsigned int air_halo_texture(void) {
     if (g_halo_texture) return g_halo_texture;
-    static unsigned char px[64 * 64 * 4];
-    for (int y = 0; y < 64; y++)
-        for (int x = 0; x < 64; x++) {
-            const float dx = (float) x + 0.5f - 32.0f, dy = (float) y + 0.5f - 32.0f;
-            const float r = sqrtf(dx * dx + dy * dy) / 32.0f;
-            const float a = r <= 0.25f ? 1.0f - r / 0.25f * 0.45f : r < 1.0f ? 0.55f * (1.0f - (r - 0.25f) / 0.75f) : 0.0f;
-            unsigned char *p = &px[(y * 64 + x) * 4];
+    static unsigned char px[128 * 128 * 4];
+    for (int y = 0; y < 128; y++)
+        for (int x = 0; x < 128; x++) {
+            const double d = hypot(x + 0.5 - 64, y + 0.5 - 64) / 64;
+            unsigned char *p = &px[(y * 128 + x) * 4];
             p[0] = p[1] = p[2] = 255;
-            p[3] = (unsigned char) (a * 255.0f + 0.5f);
+            p[3] = d >= 1 ? 0 : (unsigned char) floor(255 * pow(1 - d, 2.2) + 0.5); // Math.round
         }
     glGenTextures(1, &g_halo_texture);
     glBindTexture(GL_TEXTURE_2D, g_halo_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glGenerateMipmap(GL_TEXTURE_2D); // generateMipmaps, LinearMipmapLinearFilter
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -456,9 +466,14 @@ static void air_parts(Client *client, AIMesh *slot, GameAI *ai, const int visibl
             BasicMaterial *bm = (BasicMaterial *) mat;
             const vec4 e0 = slot->emissive0 ? slot->emissive0[i] : (vec4) {0};
             const float ei = e0.w > 0.0f ? e0.w : 1.0f; // three.js emissiveIntensity (1 for a black emissive)
-            if (has_color) bm->emissive.x = color.x, bm->emissive.y = color.y, bm->emissive.z = color.z;
-            else bm->emissive.x = e0.x, bm->emissive.y = e0.y, bm->emissive.z = e0.z;
-            bm->emissive.w = fmaxf(ei, 0.25f) * (1.0f + eff * 6.0f * pulse);
+            // emissive.set(color || "#ff5a1e"); emissiveIntensity = ei + v * pulse; color = c * (1 - 0.75 v) (:182872)
+            const vec3 ec = has_color ? color : (vec3) {1.0f, 90.0f / 255.0f, 30.0f / 255.0f};
+            bm->emissive = (vec4) {ec.x, ec.y, ec.z, ei + eff * pulse};
+            if (slot->color0) {
+                const vec4 c0 = slot->color0[i];
+                const float k = 1.0f - 0.75f * eff;
+                bm->color = (vec4) {c0.x * k, c0.y * k, c0.z * k, c0.w};
+            }
             lit[i] = 1;
         }
         // the halo: created on the first glow, sized from the node's meshes then, at the node's position
@@ -501,12 +516,33 @@ static void air_parts(Client *client, AIMesh *slot, GameAI *ai, const int visibl
             Mesh *halo = slot->halo[slot_i];
             halo->visible = visible && eff > 0.0f;
             if (halo->visible) {
-                halo->transform.position = transform_point_to(node, (vec3) {0, 0, 0}, &slot->container);
-                const float size = slot->halo_size[slot_i] / fmaxf(slot->container.scale.x, 0.001f) * (1.4f + pulse * 0.25f);
+                // r = the box's max side / 2; the node's world position moves toward the camera by min(r, dist / 2),
+                // then into the AI's space (:182883-182893)
+                const float r = slot->halo_size[slot_i] / 2.0f;
+                vec3 at = transform_point_to(node, (vec3) {0, 0, 0}, &slot->container);
+                const vec3 w = transform_point_to(node, (vec3) {0, 0, 0}, NULL);
+                const vec3 to = {client->camera.position.x - w.x, client->camera.position.y - w.y, client->camera.position.z - w.z};
+                const float dist = sqrtf(to.x * to.x + to.y * to.y + to.z * to.z);
+                if (dist > 0.001f) {
+                    const float k = fminf(r, 0.5f * dist) / dist;
+                    const vec3 o = transform_point_to(&slot->container, (vec3) {0, 0, 0}, NULL);
+                    const vec3 axis[3] = {transform_point_to(&slot->container, (vec3) {1, 0, 0}, NULL),
+                                          transform_point_to(&slot->container, (vec3) {0, 1, 0}, NULL),
+                                          transform_point_to(&slot->container, (vec3) {0, 0, 1}, NULL)};
+                    float local[3];
+                    for (int a = 0; a < 3; a++) { // worldToLocal of the offset: the container's axes are orthogonal
+                        const vec3 e = {axis[a].x - o.x, axis[a].y - o.y, axis[a].z - o.z};
+                        const float len2 = e.x * e.x + e.y * e.y + e.z * e.z;
+                        local[a] = len2 > 0.0f ? (to.x * e.x + to.y * e.y + to.z * e.z) * k / len2 : 0.0f;
+                    }
+                    at = (vec3) {at.x + local[0], at.y + local[1], at.z + local[2]};
+                }
+                halo->transform.position = at;
+                const float size = 2.0f * r * (1.2f + 0.15f * pulse) / fmaxf(slot->container.scale.x, 0.001f);
                 halo->transform.scale = (vec3) {size, size, 1.0f};
                 BasicMaterial *hm = (BasicMaterial *) halo->material;
                 if (!has_color) color = (vec3) {1.0f, 90.0f / 255.0f, 30.0f / 255.0f}; // || "#ff5a1e"
-                hm->color = (vec4) {color.x, color.y, color.z, fminf(1.0f, eff * pulse)};
+                hm->color = (vec4) {color.x, color.y, color.z, fminf(1.0f, 0.8f * eff * pulse)};
             }
         }
     }
@@ -514,7 +550,10 @@ static void air_parts(Client *client, AIMesh *slot, GameAI *ai, const int visibl
     for (size_t i = 0; slot->emissive0 && i < slot->gltf->mesh_count; i++) {
         if (i < sizeof(lit) && lit[i]) continue;
         Material *mat = slot->gltf->meshes[i]->material;
-        if (mat && mat->vtable == &basic_material_vtable) ((BasicMaterial *) mat)->emissive = slot->emissive0[i];
+        if (mat && mat->vtable == &basic_material_vtable) {
+            ((BasicMaterial *) mat)->emissive = slot->emissive0[i];
+            if (slot->color0) ((BasicMaterial *) mat)->color = slot->color0[i]; // mat.color.copy(c) (:182872)
+        }
     }
     for (int k = 0; k < AI_PARTS_MAX; k++) {
         if (!slot->halo[k]) continue;

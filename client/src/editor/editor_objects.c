@@ -381,6 +381,20 @@ void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
         obj_normalize(o);
         return;
     }
+    if (!strcmp(prop, "assetID") && prefab == ED_PREFAB_CUSTOM_ASSET) {
+        // v10.0.7: the collision size (fixedSize, kept as "s") belongs to the asset it was set for; another asset ID
+        // drops it and the object takes the new model's bounds (fixedSizeAid, editor-10.0.7.js:7395, :7588-7591;
+        // Collision Size sets it with the current ID, index-10.0.7.js:7852-7854): "changing a duplicated object's asset
+        // ID now updates its collision size"
+        cJSON *before = ed_model_prop_get(d, prefab, "assetID");
+        char was[64] = "", now[64] = ""; // fixedSizeAid != assetID: compared as the text of the ID
+        if (cJSON_IsString(before)) snprintf(was, sizeof(was), "%s", before->valuestring);
+        else if (cJSON_IsNumber(before)) snprintf(was, sizeof(was), "%.0f", before->valuedouble);
+        if (cJSON_IsString(value)) snprintf(now, sizeof(now), "%s", value->valuestring);
+        else if (cJSON_IsNumber(value)) snprintf(now, sizeof(now), "%.0f", value->valuedouble);
+        cJSON_Delete(before);
+        if (strcmp(was, now)) cJSON_DeleteItemFromObjectCaseSensitive(d, "s");
+    }
     if (ed_model_prop_set(&o->data, prefab, prop, value)) return;
     // KrunkNative: inspector values ObjectInstance has no field for stay on the instance
     // (EditorObject.scratch, never exported)
