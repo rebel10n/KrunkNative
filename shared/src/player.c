@@ -4493,8 +4493,15 @@ float player_lerp_angle(float a, float b, const float t) {
 // rounded to whole ms, the integer ms of the Krunker wire), which at a locked or very high frame rate
 // sums to more than real time (16.67 ms frames run as 17 ms; 1.5 ms ones as 2 ms), so the bank fills at
 // PLAYER_INPUT_BANK_RATE times real time: a client sending honest frames never runs it dry.
-#define PLAYER_INPUT_BANK_MAX 0.5  // s: the most held-back input time one burst may still move
-#define PLAYER_INPUT_BANK_RATE 1.5 // refill per real second
+// The two values are KrunkNative's, not sourced (searched 2026-11-19): deob-10.0.7.js only declares
+// inputBank / inputBankAt (:171267-171268) and zeroes them (:171545) next to inputFreq (:171544, and
+// players.resetFreq :176781-176784); every read is on Krunker's game server, which no reference tree
+// has (Krunker_v3.1.1 and Krunker_v7.1.4 are client sources whose "Input Failed" path is the chat
+// line, v7.1.4 index.js:14728; game.leak/src has no input budget). The official server cannot be
+// measured either: KN's official link gets matchmaker.krunker.io's CaptchaRequired before any game
+// socket. Re-derive them if a server build or a capture ever shows Krunker's numbers.
+#define PLAYER_INPUT_BANK_MAX 0.5  // s: the most held-back input time one burst may still move (KN value)
+#define PLAYER_INPUT_BANK_RATE 1.5 // refill per real second (KN value)
 #define PLAYER_INPUT_BANK_EPSILON 1e-4
 
 void player_input_bank_tick(Player *player, const float delta) {

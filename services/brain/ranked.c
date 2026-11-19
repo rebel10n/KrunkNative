@@ -932,6 +932,25 @@ static void h_purchase_v10(kn_http_req *req, void *ud) {
     purchase_route(req, 1);
 }
 
+/* v10.0.7 "Fixed NO GAMES AVAILABLE sometimes showing when joining a ranked match as it starts" (a krunker.io server fix):
+ * the stored assignment's clientId is the seek ticket minted when the match was hosted (on_ranked_hosted), which
+ * expires brain.join_ttl_s later. An assignment handed out again (/mm/ranked/connection: a reload, the rejoin popup)
+ * gets a fresh ticket for the same lobby (no seat reservation: the roster is the match's, and the game server admits
+ * a roster account's expired ticket for its own lobby too, server/src/accounts.c acc_ranked_ticket_ok). */
+static void ranked_fresh_ticket(cJSON *as, const int64_t account_id, const char *name) {
+    const char *gid = kn_json_str(as, "gameId", "");
+    char node_id[MM_ID_MAX];
+    snprintf(node_id, sizeof(node_id), "%.*s", (int) strcspn(gid, ":"), gid);
+    MmNode *n = gid[0] ? registry_node(R.b->registry, node_id) : NULL;
+    cJSON *seek = n && account_id > 0 ? brain_seek_reply_ex(R.b, n, gid, account_id, name ? name : "", 0, 0) : NULL;
+    const char *ticket = seek ? kn_json_str(seek, "clientId", "") : "";
+    if (ticket[0]) {
+        cJSON_DeleteItemFromObjectCaseSensitive(as, "clientId");
+        cJSON_AddStringToObject(as, "clientId", ticket);
+    }
+    cJSON_Delete(seek);
+}
+
 static void on_connection(kn_db_result *res, void *ud) {
     ReqCtx *c = ud;
     if (!kn_db_ok(res)) return db_fail(c, "ranked connection", res);
@@ -940,6 +959,7 @@ static void on_connection(kn_db_result *res, void *ud) {
     const char *t = kn_db_rows(res) > 0 && !kn_db_isnull(res, 0, 0) ? kn_db_get(res, 0, 0) : "";
     cJSON *as = t[0] ? kn_json_parse(t, strlen(t)) : NULL;
     if (cJSON_IsObject(as)) {
+        ranked_fresh_ticket(as, c->id, c->name);
         cJSON_AddStringToObject(c->out, "serverUrl", kn_json_str(as, "connection", ""));
         cJSON_AddItemToObject(c->out, "assignment", as);
     } else {
@@ -953,7 +973,8 @@ static void connection_account(void *ud, kn_http_req *req, const int64_t id, con
     ReqCtx *c = ud;
     (void) req;
     (void) level;
-    (void) name;
+    c->id = id; /* on_connection mints the assignment a fresh ticket for this account */
+    snprintf(c->name, sizeof c->name, "%s", name ? name : "");
     /* the same match the join check (db_ranked.c run_rk_join) reports as ALREADY_IN_MATCH: creating or live */
     static const kn_sql q = {.any = "SELECT mp.assignment FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
                                     " WHERE mp.account_id = $1 AND m.status IN ('creating', 'live') AND NOT mp.abandoned"

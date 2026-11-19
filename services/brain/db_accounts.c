@@ -468,6 +468,42 @@ static kn_db_result *run_give_skin(kn_dbconn *c, int n, const char *const *p) {
 const kn_proc P_GIVE_SKIN = {"give_skin", "SELECT jsonb_build_object('skin', $2::int, 'count', kn_add_skin($1, $2, 1, $3, NULL))",
                              run_give_skin};
 
+/* give_skin_ref (account, skin, source, grant_ref): a game server's named grant (raid drops, found skins). The ref is
+ * unique per server process and grant, and the server posts the frame reliably (resent after a lost link), so the same
+ * ref can arrive twice: skin_grants (0370) keeps the refs and a repeat grants nothing ({dup: true}). Krunker v10.0.7's
+ * "Fixed double raid drops sometimes being lost" (a krunker.io server fix, no game.js hunk): KN lost a drop when the
+ * frame went out on a dropping link or the server's pending table was full, and could not resend it without doubling. */
+static kn_db_result *run_give_skin_ref(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    int64_t count = 0;
+    const int64_t fresh = dbx_exec(&x,
+        SQL(.pg = "INSERT INTO skin_grants (grant_ref, account_id, skin_id) VALUES ($3, $1::int, $2::int) ON CONFLICT DO NOTHING",
+            .any = "{insert_ignore} INTO skin_grants (grant_ref, account_id, skin_id) VALUES ($3, $1, $2) {ignore_conflicts}"),
+        KN_DB_ARGS(P(0), P(1), P(3))); /* only the bound ones: PostgreSQL cannot type an unused $n (42P18) */
+    if (fresh > 0) db_add_skin(&x, PI(0), PI(1), 1, P(2), P(3), &count);
+    else if (fresh == 0)
+        count = dbx_int(&x, SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"), KN_DB_ARGS(P(0), P(1)), 0);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "skin", (double)PI(1));
+    cJSON_AddNumberToObject(o, "count", (double)count);
+    if (fresh == 0) cJSON_AddBoolToObject(o, "dup", 1);
+    return dbx_json(&x, "jsonb_build_object", o);
+}
+const kn_proc P_GIVE_SKIN_REF = {"give_skin_ref", NULL, run_give_skin_ref};
+
+/* owned_skins (account): {skins: the owned list} (db_owned_skins, the join account's data[10] shape). A game server asks
+ * when a player wears an item its copy of the inventory lacks: Krunker v10.0.7 "Fixed items sometimes being unusable
+ * without a game reload" (a krunker.io server fix, no game.js hunk). KN's server loaded the inventory once at the join,
+ * so an item bought, spun, traded or won in the menu mid-session was stripped at every spawn until a reconnect. */
+static kn_db_result *run_owned_skins(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *o = cJSON_CreateObject();
+    cJSON *owned = db_owned_skins(&x, PI(0));
+    cJSON_AddItemToObject(o, "skins", owned ? owned : cJSON_CreateArray());
+    return dbx_json(&x, "jsonb_build_object", o);
+}
+const kn_proc P_OWNED_SKINS = {"owned_skins", NULL, run_owned_skins};
+
 /* give_skin_n (account, skin, quantity, source, ref): `quantity` units at once, the audit row naming `ref`
  * (a commit's match key: the event kill pools' items, Krunker v10.0.3 updateAccounts {skins: [{id, quantity}]}) */
 static kn_db_result *run_give_skin_n(kn_dbconn *c, int n, const char *const *p) {

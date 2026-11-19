@@ -628,13 +628,24 @@ void accounts_progress(const Player *player, const int stat, const char *key, co
 // account in a game with rewards (the KR gate of acc_reward: earn_kr, not a hosted custom game,
 // not hack-flagged). On success: challenges.update("find", 1, {item: skin}), "skin" to the
 // finder and "skinF" to everyone else (NET_PACKET_SKIN_FOUND).
-#define ACC_SKIN_PENDING 32
+#ifndef ACC_SKIN_MAX
+#define ACC_SKIN_MAX ((int) (sizeof(((ServerAccount *) 0)->skins_owned) * 8))
+#endif
+#define ACC_SKIN_PENDING 128 // finds awaiting their announcement (a boss kill: every eligible player, twice on a double-drop weekend)
 static ClientConnection *acc_client_by_account(int account_id);
 static struct {
     uint32_t rid;
     int account_id;
     int skin;
 } g_skin_pending[ACC_SKIN_PENDING];
+
+// v10.0.7 "Fixed double raid drops sometimes being lost" (a krunker.io server fix, no game.js hunk). KN's loss: the
+// frame was sent unreliably (a dropping brain link lost it), and a full g_skin_pending table skipped the grant itself.
+// Every grant now carries a ref unique to this process ("gs:<10 random hex>:<n>"), goes out reliably (brain.c resends
+// it after a reconnect until the reply comes) and the brain grants a ref once (give_skin_ref, skin_grants). The pending
+// table only names who to announce the find to: when it is full the skin is still granted, just not announced.
+static char g_grant_prefix[24];
+static uint64_t g_grant_seq;
 
 void accounts_give_skin(const Player *player, const int skin, const char *reason) {
     const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
@@ -647,7 +658,13 @@ void accounts_give_skin(const Player *player, const int skin, const char *reason
     int slot = -1;
     for (int i = 0; i < ACC_SKIN_PENDING && slot < 0; i++)
         if (!g_skin_pending[i].rid) slot = i;
-    if (slot < 0) return;
+    if (!g_grant_prefix[0]) {
+        char hex[16];
+        brain_random_hex(hex, sizeof(hex), 5);
+        snprintf(g_grant_prefix, sizeof(g_grant_prefix), "gs:%s", hex);
+    }
+    char ref[48];
+    snprintf(ref, sizeof(ref), "%s:%llu", g_grant_prefix, (unsigned long long) ++g_grant_seq);
     const uint32_t rid = brain_next_rid();
     cJSON *frame = cJSON_CreateObject();
     cJSON_AddStringToObject(frame, "type", "acct");
@@ -657,7 +674,15 @@ void accounts_give_skin(const Player *player, const int skin, const char *reason
     cJSON_AddNumberToObject(args, "id", client->acct.account_id);
     cJSON_AddNumberToObject(args, "skin", skin);
     cJSON_AddStringToObject(args, "source", reason ? reason : "raid");
-    if (brain_post(frame, 0) != 0) return; // brain_post consumed the frame
+    cJSON_AddStringToObject(args, "ref", ref);
+    if (brain_post(frame, 1) != 0) {
+        server_log_error("[accounts] skin %d for account %d not sent (%s)", skin, client->acct.account_id, ref);
+        return; // brain_post consumed the frame
+    }
+    if (slot < 0) {
+        server_log("[accounts] skin %d for account %d granted unannounced: %d finds pending", skin, client->acct.account_id, ACC_SKIN_PENDING);
+        return;
+    }
     g_skin_pending[slot].rid = rid;
     g_skin_pending[slot].account_id = client->acct.account_id;
     g_skin_pending[slot].skin = skin;
@@ -1119,7 +1144,11 @@ static int acc_handle_skin_reply(const cJSON *frame) {
             server_log("[accounts] skin %d for account %d refused: %s", skin, account_id, err->valuestring);
             return 1;
         }
-        const ClientConnection *client = acc_client_by_account(account_id);
+        ClientConnection *client = acc_client_by_account(account_id);
+        // account.addSkin: the found skin is wearable at once, as the event drops' (brain_events.c spin_reply); v10.0.7
+        // "Fixed items sometimes being unusable without a game reload"
+        if (client && client->acct.skins_known && skin >= 0 && skin < ACC_SKIN_MAX)
+            client->acct.skins_owned[skin >> 3] |= (uint8_t) (1u << (skin & 7));
         const Player *player = client ? client->player : NULL;
         if (!player) return 1;
         accounts_progress(player, 0, "find", 1, -1, -1, skin); // challenges.update(game, "find", 1, {item})
@@ -1872,6 +1901,22 @@ static const char *acc_ranked_refusal(const ClientConnection *client) {
     return NULL;
 }
 
+// v10.0.7 "Fixed NO GAMES AVAILABLE sometimes showing when joining a ranked match as it starts" (a krunker.io server fix,
+// no game.js hunk: v10 joins the assignment with the account's token, joinAssignment). KN's ranked assignment carries a
+// seek ticket minted when the match was hosted (services/brain/ranked.c on_ranked_hosted), which expires
+// brain.join_ttl_s (30 s) later. A roster player who joined after that (a late MATCHED poll, the Match-found popup, a
+// reload through /mm/ranked/connection) was refused "Join key expired", and the client's fresh seek for a roster-only
+// lobby ended on the No Games screen. An expired ticket (signature still checked) for this lobby whose account holds a
+// slot of the live match is admitted: the roster, not the ticket's age, decides who plays.
+static int acc_ranked_ticket_ok(const cJSON *claims) {
+    if (!g_rk.active || g_rk.ended || !claims) return 0;
+    const char *nid = cJSON_GetStringValue(cJSON_GetObjectItem(claims, "nid"));
+    const char *lid = cJSON_GetStringValue(cJSON_GetObjectItem(claims, "lid"));
+    const cJSON *acc = cJSON_GetObjectItem(claims, "acc");
+    if (!nid || strcmp(nid, g_gs_config.node_id) || !lid || strcmp(lid, g_acc.lobby_id) || !cJSON_IsNumber(acc)) return 0;
+    return acc->valueint > 0 && acc_ranked_slot(acc->valueint) != NULL;
+}
+
 static void acc_ranked_snapshot(RankedSlot *slot, const ClientConnection *client) {
     if (!client || !client->player) return;
     slot->kills = (int) client->player->kills;
@@ -2147,7 +2192,9 @@ static int acc_skins_enforced(void) {
     return g_gs_config.enforce_skins > 0 || (g_gs_config.enforce_skins < 0 && g_acc.brain);
 }
 
+#ifndef ACC_SKIN_MAX
 #define ACC_SKIN_MAX ((int) (sizeof(((ServerAccount *) 0)->skins_owned) * 8))
+#endif
 
 int accounts_owns_skin(const ClientConnection *client, const int skin) {
     if (skin < 0 || !acc_skins_enforced()) return 1;
@@ -2302,9 +2349,71 @@ static void acc_reject(ClientConnection *client, const char *message, const char
 
 // A client cannot wear a skin it does not own (the coordinator's inventory): unowned
 // cosmetic, weapon and melee slots fall back to none before the spawn, with a chat notice once per ENT.
+// v10.0.7 "Fixed items sometimes being unusable without a game reload" (a krunker.io server fix, no game.js hunk). The
+// server's copy of an inventory (skins_owned) is the join's, plus what this server granted itself; an item bought, spun,
+// traded or won in the menu while the player is in this game was stripped at every spawn until a reconnect. A strip now
+// asks the brain for the owned list again (op owned_skins: one request per account at a time, ACC_OWNED_SPACING_S
+// apart), so the item is worn from the next spawn on.
+#define ACC_OWNED_PENDING 16
+#define ACC_OWNED_SPACING_S 1.0
+static struct {
+    uint32_t rid;
+    int account_id;
+    double at; // monotonic seconds of the request
+} g_owned_pending[ACC_OWNED_PENDING];
+
+static double acc_mono_s(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double) ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static void acc_refresh_owned(const ClientConnection *client) {
+    if (!client || client->acct.account_id <= 0 || !client->acct.skins_known || !g_acc.brain || !brain_linked()) return;
+    const double now = acc_mono_s();
+    int slot = -1;
+    for (int i = 0; i < ACC_OWNED_PENDING; i++) {
+        if (g_owned_pending[i].rid && now - g_owned_pending[i].at > 30.0) g_owned_pending[i].rid = 0; // no answer: give up
+        if (g_owned_pending[i].account_id == client->acct.account_id && (g_owned_pending[i].rid || now - g_owned_pending[i].at < ACC_OWNED_SPACING_S))
+            return; // in flight, or asked a moment ago
+    }
+    for (int i = 0; i < ACC_OWNED_PENDING && slot < 0; i++)
+        if (!g_owned_pending[i].rid && (g_owned_pending[i].account_id == client->acct.account_id || now - g_owned_pending[i].at >= ACC_OWNED_SPACING_S))
+            slot = i;
+    if (slot < 0) return;
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "owned_skins");
+    cJSON_AddNumberToObject(cJSON_AddObjectToObject(frame, "args"), "id", client->acct.account_id);
+    if (brain_post(frame, 0) != 0) return;
+    g_owned_pending[slot].rid = rid;
+    g_owned_pending[slot].account_id = client->acct.account_id;
+    g_owned_pending[slot].at = now;
+}
+
+static int acc_handle_owned_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid)) return 0;
+    for (int i = 0; i < ACC_OWNED_PENDING; i++) {
+        if (!g_owned_pending[i].rid || g_owned_pending[i].rid != (uint32_t) rid->valuedouble) continue;
+        g_owned_pending[i].rid = 0; // the account's entry keeps its time: the rate limit
+        const cJSON *data = cJSON_GetObjectItem(frame, "data");
+        ClientConnection *client = acc_client_by_account(g_owned_pending[i].account_id);
+        if (client && cJSON_IsObject(data) && cJSON_IsArray(cJSON_GetObjectItem(data, "skins"))) {
+            accounts_load_skins(client, data);
+            server_log("[accounts] %s: inventory refreshed (an item from mid-session)", client->name);
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static void acc_enforce_skins(ClientConnection *client) {
     const int stripped = accounts_filter_cosmetics(client, &client->cosmetics, &client->cosmetics_v7) + accounts_filter_skins(client, &client->skins);
     if (!stripped) return;
+    acc_refresh_owned(client);
     server_log("%s: removed %d unowned cosmetic(s)", client->name, stripped);
     acc_chat_to(client, "You don't own some of the skins you equipped on this server");
 }
@@ -2730,7 +2839,7 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
         if (!claims && strstr(err, "exp")) { // a transport reconnect of a session this lobby admitted
             char age_err[96] = "";
             cJSON *old = brain_verify_ticket_any_age(join.client_key, age_err, sizeof(age_err));
-            if (old && acc_resume_allowed(cJSON_GetStringValue(cJSON_GetObjectItem(old, "jti")))) {
+            if (old && (acc_resume_allowed(cJSON_GetStringValue(cJSON_GetObjectItem(old, "jti"))) || acc_ranked_ticket_ok(old))) {
                 claims = old;
                 resumed = 1;
             } else {
@@ -3802,6 +3911,8 @@ static void acc_handle_frame(cJSON *frame) {
         server_log("[brain] assignment %s for lobby %s", jti ? jti : "?", acc_str(cJSON_GetObjectItem(frame, "lobbyId"), "?"));
     } else if (!strcmp(type, "acct-r") && acc_handle_skin_reply(frame)) {
         // season-system: give_skin replies (found skins)
+    } else if (!strcmp(type, "acct-r") && acc_handle_owned_reply(frame)) {
+        // owned_skins: the inventory again after a strip (an item from mid-session)
     } else if (!strcmp(type, "acct-r") && acc_handle_junk_reply(frame)) {
         // the Junk wallet: junk_credit replies (the finder's line, doc/v10/junk.md)
     } else if (!strcmp(type, "acct-r") && acc_handle_guest_reply(frame)) {

@@ -11,7 +11,7 @@ Covers: a game server's welcome carries the feed's game events running now (not 
 one), in v10's fields; editing the feed pushes "game-events" with the new set at the next ping; a final
 commit with itemRewards [{id, quantity}] adds them to the inventory (skin_transactions source
 "killpool"); the same match committed again adds nothing; a commit's items stop at 30; an unknown skin
-or a bad quantity is skipped.
+or a bad quantity is skipped; a game server's named give_skin (ref) is granted once per ref (v10.0.7 lost raid drops).
 """
 import asyncio
 import json
@@ -162,6 +162,17 @@ class Node:
                 return msg
 
 
+    async def acct(self, op, args):
+        self.rid += 1
+        rid = self.rid
+        await self.ws.send(json.dumps({"type": "acct", "rid": rid, "op": op, "args": args}))
+        while True:
+            msg = json.loads(await asyncio.wait_for(self.ws.recv(), 15))
+            self.note(msg)
+            if msg.get("type") == "acct-r" and msg.get("rid") == rid:
+                return msg
+
+
 def iso(t):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
@@ -238,6 +249,28 @@ async def scenario(port, feed):
             check(count(account, 5) == 28 and count(account, 7) == 6 and count(account, 9) == 0,
                   "a match's items stop at 30 (25 + 5), skin 0 and a negative quantity are skipped (%d, %d, %d)" %
                   (count(account, 5), count(account, 7), count(account, 9)))
+
+            # v10.0.7 "Fixed double raid drops sometimes being lost" (db_accounts.c give_skin_ref, 0370 skin_grants): a game
+            # server's named grant is granted once per ref, so a frame resent after a lost link does not double it; the
+            # two drops of a double-drop weekend have their own refs and both land
+            before = count(account, 11)
+            r1 = await node.acct("give_skin", {"id": account, "skin": 11, "source": "raid", "ref": "gs:test%d:1" % os.getpid()})
+            r2 = await node.acct("give_skin", {"id": account, "skin": 11, "source": "raid", "ref": "gs:test%d:2" % os.getpid()})
+            check(not r1.get("err") and not r2.get("err") and count(account, 11) == before + 2,
+                  "two named raid drops of the same skin both land (%d -> %d): %s %s" % (before, count(account, 11), r1, r2))
+            r3 = await node.acct("give_skin", {"id": account, "skin": 11, "source": "raid", "ref": "gs:test%d:2" % os.getpid()})
+            d3 = r3.get("data") if isinstance(r3.get("data"), dict) else r3
+            check(count(account, 11) == before + 2 and d3.get("dup") is True and d3.get("count") == before + 2,
+                  "the same ref again grants nothing and says dup (%d): %s" % (count(account, 11), r3))
+            # v10.0.7 "Fixed items sometimes being unusable without a game reload" (db_accounts.c owned_skins): a game server
+            # re-reads the owned list after a strip; it has the items granted since the join
+            ow = await node.acct("owned_skins", {"id": account})
+            od = ow.get("data") if isinstance(ow.get("data"), dict) else {}
+            rows = {r.get("ind"): r.get("cnt") for r in od.get("skins", []) if isinstance(r, dict)}
+            check(not ow.get("err") and rows.get(11) == before + 2 and rows.get(5) == count(account, 5),
+                  "owned_skins: the owned list as the join account's data[10] ({11: %s, 5: %s})" % (rows.get(11), rows.get(5)))
+            src = query("SELECT ref FROM skin_transactions WHERE account_id = %d AND skin_id = 11 AND source = 'raid' ORDER BY id" % account)
+            check(src == ["gs:test%d:1" % os.getpid(), "gs:test%d:2" % os.getpid()], "the audit rows name the refs: %s" % src)
 
             # v10.0.4 counter skins (db_accounts.c commit_skin_stats, 0365): the server's takeSkinStats rows add to the
             # account's skin_stats, once per match, on an owned skin and a known stat

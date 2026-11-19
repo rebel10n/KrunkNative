@@ -11,7 +11,8 @@ coordinator (kn_brain) and two server_bin processes from generated server.cfg fi
      -> the server learns A's inventory: A's owned hat stays, an unowned one is stripped;
      B (session-only JOIN, no skins) wearing the same hat gets it stripped; the same for weapon
      and melee skins (V6 ENT -> NET_PACKET_SKINS before each SPAWN, seen by the other player too);
-     the V7 ENT lagComp (ent[11] slider) per player, 0 clamped to 0.1 (rcon `lagcomp`)
+     the V7 ENT lagComp (ent[11] slider) per player, 0 clamped to 0.1 (rcon `lagcomp`); an item A gets mid-session
+     (the brain's inventory) is worn from the ENT after the strip that refreshed the list (v10.0.7, owned_skins)
   4. password-protected server refuses a wrong password
   5. rcon (local TCP): status, say, kick; `send` redirects a player to the other lobby
   6. online_mode server linked to the coordinator: not account-only (no onlineMode flag), guests
@@ -242,6 +243,23 @@ def run():
     a.read(timeout=1)
     seen = kn_proto.skins_of(a, spb["uid"]) if spb else None
     check("Alice sees Bob's stripped skins", seen == [-1, -1, -1], str(seen))
+
+    # v10.0.7 "Fixed items sometimes being unusable without a game reload": Alice gets the back skin mid-session (a menu
+    # purchase: the brain's inventory, not this server's copy). The next ENT still strips it and asks the brain again
+    # (owned_skins: one request at a time, 1 s apart); the refreshed list lets the ENT after it wear it
+    psql(f"SELECT kn_add_skin({alice}, {HAT_UNOWNED}, 1, 'shop', NULL)")
+    time.sleep(1.5)
+    removed = lambda: log("s0.log").count("ds_alice: removed")
+    refreshes = lambda: log("s0.log").count("ds_alice: inventory refreshed")
+    before_strips, before_refreshes = removed(), refreshes()
+    a.ent(cosmetics=(-1, -1, HAT_OWNED, HAT_UNOWNED, -1, -1, -1), skins=(AK_OWNED, AK_UNOWNED, MELEE_OWNED), lag_comp=0.3)
+    refreshed = wait_for(lambda: refreshes() > before_refreshes, 5)
+    check("a strip asks the brain for the owned list again (owned_skins)", bool(refreshed) and removed() == before_strips + 1,
+          log("s0.log")[-300:])
+    a.ent(cosmetics=(-1, -1, HAT_OWNED, HAT_UNOWNED, -1, -1, -1), skins=(AK_OWNED, -1, MELEE_OWNED), lag_comp=0.3)
+    a.read(timeout=1)
+    check("the item bought mid-session is worn from the next ENT on, no reconnect", removed() == before_strips + 1,
+          "%d strips" % (removed() - before_strips))
     info = wait_for(lambda: query(PORTS[0]) if query(PORTS[0]).get("players") == 2 else None, 3) or query(PORTS[0])
     check("info query counts players", info.get("players") == 2, json.dumps(info))
 

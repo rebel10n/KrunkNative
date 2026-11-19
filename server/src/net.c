@@ -908,9 +908,14 @@ static ClientConnection *net_client_of_player(const Player *player) {
     return NULL;
 }
 
+// v10.0.7: an anonMode account player is game_anon_alias ("Player_<n>") to everyone but itself and dev viewers, after
+// the ranked names (getName's order, deob-10.0.7.js:171688: isUsingRankedNames first, then the server's fakeName).
 static void net_shown_name(const ClientConnection *to, const ClientConnection *subject, const char *real, char *out, const size_t size) {
     const int id = subject ? accounts_ranked_lobby_id(subject) : 0;
     if (id > 0 && to != subject && game_names_masked(&g_server->game)) snprintf(out, size, "Player_%d", id);
+    else if (subject && to != subject && subject->player && subject->player->anon_mode && subject->acct.account_id > 0 &&
+             !(to && (to->acct.flags & NET_PLAYER_INFO_DEV)))
+        game_anon_alias(subject->player, out, size);
     else snprintf(out, size, "%s", real ? real : "");
 }
 

@@ -6,6 +6,7 @@
 #include <net_ext.h>
 #include <raid_drops.h> // v10.0.4 isDoubleRaidDrops
 #include <ks_game.h>    // ks_wall_ms (the wall clock for the event flags)
+#include <stdio.h>
 #include <string.h>
 
 static int64_t (*g_event_clock)(void); // tests: a fixed "now"
@@ -39,6 +40,17 @@ void game_set_state(Game *game, const GameState state) {
     const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_GAME_STATE, &packet, sizeof(packet));
     if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buf, n);
     if (game->hooks.state_changed) game->hooks.state_changed(game, state);
+}
+
+// v10.0.7 "Anonymous players now stay anonymous": the name others see for an anonMode account player. Krunker's
+// server gives it one from its backend (the lobby record's "an", the player's fakeName: getName, deob-10.0.7.js:171688;
+// lobbyPayload :190985); the bundle never generates one, and its only masked-name form is "Player_<n>" (ranked names,
+// getRankedPlayerName :195806-195812, and an account seen by a guest). KN uses that form with the player's join-order
+// number (Player.name_no, the same n the ranked names and Hide player names use).
+void game_anon_alias(const Player *player, char *out, const size_t size) {
+    if (!out || !size) return;
+    if (player && player->name_no > 0) snprintf(out, size, "Player_%d", player->name_no);
+    else snprintf(out, size, "Player");
 }
 
 // v10 isUsingRankedNames: a ranked match's names are hidden until the match starts (the roster

@@ -10,7 +10,8 @@ kn_proto.free_ports()), registers 8 accounts, then:
   0. first connect (v10 needAllTimer, 60 s): seven of eight join, the cancel reaches every connection with
      no rating (the ERROR texts, the cancel logged), and the queue works again
   1. all 8 queue /mm/ranked/queue (solo, region na) and long-poll until MATCHED
-  2. 8 protocol test clients (kn_proto, v7 HELLO) JOIN the match with their tickets:
+  2. 8 protocol test clients (kn_proto, v7 HELLO) JOIN the match with their tickets (the last one after its
+     ticket expired: brain.join_ttl_s 5, v10.0.7's ranked NO GAMES AVAILABLE fix):
      "Joined Ranked Match..." (ranked.join); INIT plays Hardpoint (the comp host's overDat
      modes [2]); NET_PACKET_COMP_LOBBY carries every roster entry on its queue team; a stranger
      is refused ("Game in Progress")
@@ -342,7 +343,8 @@ def run():
     subprocess.run([f"{BUILD}/services/common/kn_migrate", "--set", f"database.name={DB}"], check=True,
                    stdout=open(os.path.join(WORK, "migrate.log"), "w"), stderr=subprocess.STDOUT)
     procs.append(subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--set", f"database.name={DB}", "--set", f"brain.port={BRAIN_PORT}",
-                                   "--set", "brain.region=local", "--set", "brain.ranked.min_level=0"],
+                                   "--set", "brain.region=local", "--set", "brain.ranked.min_level=0",
+                                   "--set", "brain.join_ttl_s=5"],  # step 2: a roster player's ticket expires before it joins
                                   stdout=open(os.path.join(WORK, "brain.log"), "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL))
     up = bool(wait_for(lambda: http("/mm/status")[0] == 200)) and procs[-1].poll() is None
     check("coordinator up", up, "" if up else log("brain.log")[-300:])
@@ -379,6 +381,7 @@ def run():
     check("all 8 matched into one game", bool(states) and len({s["payload"]["assignment"]["gameId"] for s in states}) == 1)
     if not states:
         return
+    matched_at = time.time()
     states = [{"status": {"c": dict(s["payload"]["assignment"])}} for s in states]  # the shape below: port, clientId
 
     # 2. the test clients join with their tickets
@@ -392,11 +395,17 @@ def run():
             check("a stranger is refused: Game in Progress", bool(err) and "Game in Progress" in kn_proto.error_info(err)[0],
                   kn_proto.error_info(err)[0] if err else "no ERROR")
             stranger.close()
+            # v10.0.7 "NO GAMES AVAILABLE when joining a ranked match as it starts": the last roster player joins with
+            # the assignment's ticket after it expired (join_ttl_s 5 here, 30 s live); the server admits a roster
+            # account's expired ticket for its own lobby (accounts.c acc_ranked_ticket_ok) instead of "Join key expired"
+            time.sleep(max(0.0, matched_at + 6.0 - time.time()))
         c = kn_proto.Conn("127.0.0.1", int(s["status"]["c"]["port"]))
         c.send(1, bytes([1, MINOR_EXT, 2]))  # HELLO 1.4 (v7 lobby packets + the EXT envelope)
         c.join(client_key=s["status"]["c"]["clientId"], session=tokens[i])
         conns.append(c)
     inits = [c.read(until=kn_proto.INIT, timeout=10) for c in conns]
+    check("a roster player whose ticket expired before it joined still gets in (INIT, no 'Join key expired')", bool(inits[7]),
+          "" if inits[7] else log("game.log")[-400:])
     for c in conns:
         c.read(timeout=1.0)
     flags = [[b[0] for b in ext_bodies(c, EXT_RANKED_MATCH) if len(b) >= 1] for c in conns]

@@ -1397,9 +1397,23 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
             op_reply(o, "Unknown skin.", NULL);
             return -1;
         }
+        /* a named grant (game servers since v10.0.7's lost-raid-drop fix: posted reliably, granted once per ref) */
+        const char *ref = kn_json_str(args, "ref", "");
+        if (ref[0]) {
+            kn_db_call(g_acct_brain->db, &P_GIVE_SKIN_REF,
+                       KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, skin), kn_json_str(args, "source", "spin"), ref), op_json_done, o);
+            return 0;
+        }
         kn_db_call(g_acct_brain->db, &P_GIVE_SKIN,
                     KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, skin), kn_json_str(args, "source", "spin")),
                     op_json_done, o);
+        return 0;
+    }
+    /* a game server's copy of the inventory is stale (an item from the menu mid-session): the owned list again */
+    if (!strcmp(op, "owned_skins")) {
+        OpCtx *o = op_new(cb, ud, "owned_skins");
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_OWNED_SKINS, KN_DB_ARGS(acct_itoa(ids, id)), op_json_done, o);
         return 0;
     }
     /* the egg hunt (Krunker v10.0.3 live event 3, db_eggs.c, doc/v10/events.md): a shot or hit on an EVENT object */

@@ -318,12 +318,25 @@ static void test_comp_lobby(void) {
         CompLobbyEntry *stored = (CompLobbyEntry *) comp_lobby_get(&game, 1);
         stored->verified = 1;
         snprintf(stored->clan, sizeof(stored->clan), "KN");
+        // the entry's player (uid 1, join-order number 3): an anonymous account's n is its alias, game_anon_alias
+        Player anon_player;
+        memset(&anon_player, 0, sizeof(anon_player));
+        anon_player.uid = 1;
+        anon_player.name_no = 3;
+        Player *anon_list[1] = {&anon_player};
+        Player **saved_players = game.players;
+        const size_t saved_count = game.player_count;
+        game.players = anon_list;
+        game.player_count = 1;
         g_sent_count = 0;
         comp_lobby_set_anon(&game, 1, 1);
         const NetCompLobbyEntry *out = g_sent_count == 1 ? &g_sent[0].packet.entry : NULL;
         CHECK(out && g_sent[0].uid == NET_TARGET_ALL && g_sent[0].packet.op == NET_COMP_LOBBY_SET && out->uid == 1 && out->account_id == 0 &&
-                  out->level == 0 && out->verified == 0 && !out->clan[0] && out->flag == -1 && !strcmp(out->name, "alpha"),
-              "anonMode: \"cda\" without i / v / cl / l / f, the name kept");
+                  out->level == 0 && out->verified == 0 && !out->clan[0] && out->flag == -1 && !strcmp(out->name, "Player_3"),
+              "anonMode: \"cda\" without i / v / cl / l / f, n = the anonymous alias Player_3 (%s)", out ? out->name : "-");
+        CHECK(!strcmp(stored->name, "alpha"), "the table keeps the real name");
+        game.players = saved_players;
+        game.player_count = saved_count;
         CHECK(stored->account_id == 11 && stored->level == 30 && stored->verified && !strcmp(stored->clan, "KN"), "the table keeps the identity");
         g_sent_count = 0;
         comp_lobby_set_anon(&game, 1, 1);

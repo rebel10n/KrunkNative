@@ -28,13 +28,18 @@ const CompLobbyEntry *comp_lobby_get(const Game *game, const int uid) {
 // leaves without its "an" (the anonymous name), takes n = an when anonymous and the ranked names are not in use,
 // and goes out with i 0, v 0, cl 0, l 0 and f -1 when anonymous or while they are (isUsingRankedNames :195820:
 // ranked, gameState <= WARMUP; game_names_masked). "Anonymous players now stay anonymous on the team panel". The
-// official server sets "an"; ours has no anonymous alias (an anonMode player keeps its name in game too,
-// server/src/accounts.c acc_fill_info), so the name stays and only the identity is blanked.
+// official server sets "an" from Krunker's backend (the bundle never makes one); KN's is the anonymous alias the game
+// shows everywhere else, game_anon_alias ("Player_<n>", the masked-name form the bundle uses for ranked names and for
+// guest viewers, getName :171687-171688), sent as n while the ranked names are not in use.
 static CompLobbyEntry lobby_payload(const Game *game, const CompLobbyEntry *entry) {
     CompLobbyEntry out = *entry;
     const CompLobby *l = game->comp_lobby;
     const ptrdiff_t index = l ? entry - l->entries : -1;
     const int anon = l && index >= 0 && index < l->count && l->anon[index];
+    if (anon && entry->account_id > 0 && !game_names_masked(game)) { // iìIííìï['an'] && !isUsingRankedNames: n = an
+        const Player *player = game_find_player((Game *) game, entry->uid);
+        if (player) game_anon_alias(player, out.name, sizeof(out.name));
+    }
     if (anon || game_names_masked(game)) {
         out.account_id = 0;
         out.verified = 0;
