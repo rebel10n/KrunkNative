@@ -346,6 +346,14 @@ static int scene_mesh_culled(const Mesh *mesh, const float planes[6][4]) {
 static int g_frustum_culling = 1;
 void scene_set_frustum_culling(const int on) { g_frustum_culling = on ? 1 : 0; }
 
+// v10.0.7 prewarm(objInstances) (deob-10.0.7.js:207795-207797) for the meshes scene_add_* appended from `first` on. The
+// bundle keeps an object queued up to 10 s (prewarmSince, :207778) or 60 tries (:206072); a hidden mesh in view keeps
+// trying here for SCENE_PREWARM_FRAMES frames.
+#define SCENE_PREWARM_FRAMES 600
+void scene_prewarm_since(Scene *scene, const size_t first) {
+    for (size_t i = first; i < scene->mesh_count; i++) scene->meshes[i]->prewarm = SCENE_PREWARM_FRAMES;
+}
+
 static GlUniform u_transform = GL_UNIFORM_INIT("transform");
 static GlUniform u_camera_world_inverse = GL_UNIFORM_INIT("camera_world_inverse");
 static GlUniform u_camera_projection = GL_UNIFORM_INIT("camera_projection");
@@ -382,7 +390,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     for (size_t i = 0; i < scene->mesh_count; i++) {
         Mesh *mesh = scene->meshes[i];
         mesh_update_transform_matrix(mesh); // hidden ones too: other code reads their matrix (cached: cheap)
-        if (!mesh->visible) continue;
+        if (!mesh->visible && !mesh->prewarm) continue; // a hidden mesh still to prewarm draws once out of view (below)
 
         if (mesh->material->transparent) {
             // only the camera-space depth (row 2 of view * model, translation column) is sorted on
@@ -401,6 +409,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     draw_count += transparent_count;
 
     int last_transparent = -1; // GL_BLEND as the last visible mesh leaves it, culled or not
+    int entry_blend = -1;      // GL_BLEND before a hidden mesh's prewarm draw, when no visible mesh sets it afterwards
     // The camera uniforms are the same for every draw of this call: each program gets them once
     // (the uniform cache would skip the repeats, but only after resolving and comparing 3 matrices
     // per draw). Nothing else writes them on a program while this loop runs.
@@ -413,9 +422,22 @@ void scene_render(const Scene *scene, Camera *camera) {
     unsigned int vao_bound = 0;
     for (size_t i = 0; i < draw_count; i++) {
         if (i == opaque_count) { rt_water_copy_scene(scene); vao_bound = 0; } // the first transparent draw: refraction source (no-op unless traced water / glass is in view)
-        const Mesh *mesh = scene->meshes[indices[i]];
-        last_transparent = mesh->material->transparent ? 1 : 0;
-        if (g_frustum_culling && scene_mesh_culled(mesh, frustum)) continue;
+        Mesh *mesh = scene->meshes[indices[i]];
+        if (mesh->visible) last_transparent = mesh->material->transparent ? 1 : 0;
+        if (mesh->prewarm) {
+            // v10.0.7 prewarm (deob-10.0.7.js:206036-206075): the object compiles while hidden or out of view. Here the
+            // mesh draws once out of view (its bounds outside the frustum: no fragment) or once in view as usual; a
+            // hidden mesh in view waits, a shown one in view just draws. Unbounded meshes count as in view.
+            const int culled = scene_mesh_culled(mesh, frustum);
+            if (!mesh->visible && !culled) {
+                mesh->prewarm--; // gives up after its frames, as the bundle stops retrying (:206044, :206072)
+                continue;
+            }
+            if (!mesh->visible && entry_blend < 0) entry_blend = glIsEnabled(GL_BLEND) ? 1 : 0;
+            mesh->prewarm = 0;
+        } else if (g_frustum_culling && scene_mesh_culled(mesh, frustum)) {
+            continue;
+        }
 
         if (mesh->geometry->vao != vao_bound || !vao_bound) {
             glBindVertexArray(mesh->geometry->vao);
@@ -474,6 +496,7 @@ void scene_render(const Scene *scene, Camera *camera) {
         if (wire_ebo) glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
     }
 
+    if (last_transparent < 0) last_transparent = entry_blend; // only prewarm draws: GL_BLEND as the call found it
     if (last_transparent >= 0 && last_transparent != g_draw_current.blend) {
         if (last_transparent) glEnable(GL_BLEND);
         else glDisable(GL_BLEND);

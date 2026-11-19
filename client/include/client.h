@@ -498,6 +498,9 @@ typedef struct {
     // Krunker receiveShadow, inverted so calloc'd meshes (players, props) receive by
     // default; map objects set it from their prefab in shadow.c.
     unsigned char no_shadow_receive:1;
+    // v10.0.7 prewarm (deob-10.0.7.js:207795-207797): frames left to draw this mesh once while it is out of view, so the
+    // driver's first-draw work for it (program link, texture residency) is done before anyone sees it (scene_prewarm_since)
+    unsigned short prewarm;
 } Mesh;
 
 typedef struct {
@@ -689,6 +692,9 @@ void scene_remove_player_mesh(Scene*, const PlayerMesh*, size_t);
 void scene_add_mesh(Scene*, Mesh*);
 void scene_remove_mesh(Scene*, Mesh*);
 void scene_render(const Scene*, Camera*);
+// v10.0.7 players.add / updateLoadout `prewarm(objInstances)` for a player that is not you (deob-10.0.7.js:174280, :174456):
+// the meshes added to the scene from index `first` on draw once while out of view, hidden ones included (scene.c).
+void scene_prewarm_since(Scene*, size_t first);
 // 0: scene_render draws every visible mesh, in view or not (scene_warm.c's warm frames); 1 (default): frustum culling.
 void scene_set_frustum_culling(int on);
 // Called by a material's update_uniforms() inside scene_render(): the draw's face culling

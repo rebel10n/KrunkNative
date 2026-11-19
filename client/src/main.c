@@ -1357,7 +1357,11 @@ void client_add_player_mesh(Client *client, Player *player, const int render_you
     if (render_you) {
         scene_add_player_mesh(client->fps_scene, player->mesh, player->loadout_size);
     } else {
+        // players.add / updateLoadout prewarm a player that is not you (deob-10.0.7.js:174280, :174456): its meshes draw
+        // once before it comes on screen, the first-sight stutter 10.0.7 fixed (scene_prewarm_since)
+        const size_t first = client->scene->mesh_count;
         scene_add_player_mesh(client->scene, player->mesh, player->loadout_size);
+        if (!player->is_you) scene_prewarm_since(client->scene, first);
     }
 }
 

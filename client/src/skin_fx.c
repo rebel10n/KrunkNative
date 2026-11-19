@@ -316,7 +316,7 @@ static const MaterialVTable shadertoy_material_vtable = {shadertoy_update_unifor
 #define SKIN_FX_CUSTOM_FIRST 8
 #define SKIN_FX_CUSTOM_LAST 18
 #define SKIN_FX_CUSTOM_MAX 32
-#define SKIN_FX_CUSTOM_UNIFORMS 24 // 18 has 18 params
+#define SKIN_FX_CUSTOM_UNIFORMS 24 // 18 has 19 params
 #define SKIN_FX_SKYLINE_MAX 48 // 17.frag KN_SKYLINE_MAX
 #define SKIN_FX_SHOCK_SECONDS 0.75 // shader 14's pulse, sin(min(t / 0.75, 1) * PI) (deob-10.0.4.js:92705-92711)
 #define SKIN_FX_SHOCK_ARCS 4        // shader 14 keeps four arcs, one per shot (deob-10.0.4.js:92686-92688)
@@ -454,13 +454,14 @@ static void custom_defaults(CustomMaterial *m, const int n, const char *preset) 
         custom_set(m, "uLightRepetitions", 1, 100.0f, 0, 0);
         custom_set(m, "uShadowRepetitions", 1, 100.0f, 0, 0);
         break;
-    case 18: // Ametwista's params (deob-10.0.5.js:196207-196411)
+    case 18: // Ametwista's params (deob-10.0.5.js:196207-196411; objScale deob-10.0.7.js:196778-196785)
         custom_set(m, "stockX", 1, -7.4f, 0, 0);
         custom_set(m, "muzzleX", 1, 12.2f, 0, 0);
         custom_set_hex(m, "deepColor", 0x160826);
         custom_set_hex(m, "midColor", 0x6e35d9);
         custom_set_hex(m, "lightColor", 0xf1e6ff);
         custom_set(m, "crystalScale", 1, 1.8f, 0, 0);
+        custom_set(m, "objScale", 1, 0.00229f, 0, 0); // v10.0.7: the msc node, before it the model's world scale
         custom_set(m, "facetDepth", 1, 0.5f, 0, 0);
         custom_set(m, "glintAmt", 1, 0.9f, 0, 0);
         custom_set(m, "sparkleRate", 1, 0.05f, 0, 0);
@@ -479,14 +480,16 @@ static void custom_defaults(CustomMaterial *m, const int n, const char *preset) 
     }
 }
 
-// Shader 18's float params' ranges (deob-10.0.5.js:196207-196411): an override is clamped to them (iîïïìîî, :94780-94783)
+// Shader 18's float params' ranges (deob-10.0.5.js:196207-196411; v10.0.7 widened stockX to 15 and muzzleX to -15 and added
+// objScale, deob-10.0.7.js:196569, :196582, :196778-196785): an override is clamped to them (iîïïìîî, :94780-94783)
 typedef struct {
     const char *name;
     float min, max;
 } GraphRange;
 
 static const GraphRange k_ametwista_ranges[] = {
-    {"stockX", -30.0f, 0.0f}, {"muzzleX", 0.0f, 30.0f}, {"crystalScale", 0.5f, 6.0f}, {"facetDepth", 0.0f, 1.0f},
+    {"stockX", -30.0f, 15.0f}, {"muzzleX", -15.0f, 30.0f}, {"crystalScale", 0.5f, 6.0f}, {"objScale", 0.0005f, 20.0f},
+    {"facetDepth", 0.0f, 1.0f},
     {"glintAmt", 0.0f, 4.0f}, {"sparkleRate", 0.0f, 0.5f}, {"glowAmt", 0.0f, 3.0f}, {"blinkSpeed", 0.1f, 3.0f},
     {"outlineAmt", 0.0f, 4.0f}, {"outlineSpeed", 0.0f, 2.0f}, {"outlineCount", 0.5f, 5.0f}, {"bottomY", -15.0f, 0.0f},
     {"topY", 0.0f, 15.0f},
