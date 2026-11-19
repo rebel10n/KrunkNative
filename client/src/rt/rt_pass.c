@@ -231,7 +231,32 @@ int rt_supported(void) {
     return 1;
 }
 
+static int rt_no_gi(void);
+
+// rt_prewarm_tick: the tracer's programs, started on the driver's compiler threads before the first traced frame
+// (the match's load frame) needs them; compile() takes a started one instead of compiling it again
+static struct {
+    const char *vert, *frag;
+    unsigned int program; // shader_compile_async's id, 0 = not started (or already taken)
+} g_prewarm[] = {
+    {"shaders/rt_prepass.vert", "shaders/rt_prepass.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_trace.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_denoise.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_debug.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_reflect.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_refl_denoise.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_gi.frag", 0},
+    {"shaders/scene_composite.vert", "shaders/rt_gi_denoise.frag", 0},
+};
+#define RT_PREWARM_COUNT ((int) (sizeof(g_prewarm) / sizeof(g_prewarm[0])))
+
 static unsigned int compile(const char *vert_name, const char *frag_name) {
+    for (int i = 0; i < RT_PREWARM_COUNT; i++) {
+        if (!g_prewarm[i].program || strcmp(g_prewarm[i].vert, vert_name) || strcmp(g_prewarm[i].frag, frag_name)) continue;
+        const unsigned int started = g_prewarm[i].program;
+        g_prewarm[i].program = 0;
+        return shader_compile_async_finish(started); // waits only for what the driver has not finished
+    }
     char *vert = concat(assets_path(), vert_name);
     char *frag = concat(assets_path(), frag_name);
     unsigned int program = 0;
@@ -239,6 +264,42 @@ static unsigned int compile(const char *vert_name, const char *frag_name) {
     free(vert);
     free(frag);
     return program;
+}
+
+static void prewarm_start(const int index) {
+    if (g_prewarm[index].program) return;
+    char *vert = concat(assets_path(), g_prewarm[index].vert);
+    char *frag = concat(assets_path(), g_prewarm[index].frag);
+    if (vert && frag) g_prewarm[index].program = shader_compile_async(vert, frag, NULL);
+    free(vert);
+    free(frag);
+}
+
+void rt_prewarm_tick(void) {
+    static int started;
+    if (started) return;
+    const ClientRenderSettings *s = client_render_settings_stored();
+    if (s->rt_mode == RT_MODE_OFF) return; // rtMode 0 compiles nothing (and is asked again next frame)
+    started = 1;
+    const char *off = getenv("KRUNKNATIVE_RT_PREWARM"); // "0": compile on the first traced frame (A/B, doc/raytracing.md)
+    if (off && !strcmp(off, "0")) return;
+    // without parallel compile, starting them here would only move the stall onto a menu frame
+    if (!shader_parallel_compile() || !rt_supported()) return;
+    int units = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &units);
+    if (!g_rt.programs_tried)
+        for (int i = 0; i < 4; i++) prewarm_start(i); // programs_ready's four
+    // refl_ready / gi_ready's pairs, under the same conditions as theirs
+    if (!g_rt.refl_checked && s->rt_mode >= RT_MODE_REFLECTIONS && units >= RT_REFL_TEXTURE_UNIT + 1) {
+        prewarm_start(4);
+        prewarm_start(5);
+    }
+    if (!g_rt.gi_checked && s->rt_mode >= RT_MODE_AO && !rt_no_gi() && units >= RT_GI_TEXTURE_UNIT + 1) {
+        prewarm_start(6);
+        prewarm_start(7);
+    }
+    basic_material_prewarm_rt(s->rt_preset == 1 ? 2 : 1); // the world pass's basic.frag variant (rt_cinematic)
+    printf("[rt] prewarm: the ray tracing shaders compile on the driver's threads\n");
 }
 
 static int programs_ready(void) {

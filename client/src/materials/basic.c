@@ -28,7 +28,24 @@ static const char *const BASIC_VARIANT_DEFINES[3] = {
     "#define KN_RT 1\n#define KN_RT_CINE 1\n",
 };
 
+static unsigned int g_basic_variant_started[3]; // basic_material_prewarm_rt's shader_compile_async id
+
+void basic_material_prewarm_rt(const int variant) {
+    if (variant < 1 || variant > 2 || g_basic_variant_tried[variant] || g_basic_variant_started[variant]) return;
+    char *vert_shader = concat(assets_path(), "shaders/basic.vert");
+    char *frag_shader = concat(assets_path(), "shaders/basic.frag");
+    if (vert_shader && frag_shader) g_basic_variant_started[variant] = shader_compile_async(vert_shader, frag_shader, BASIC_VARIANT_DEFINES[variant]);
+    free(vert_shader);
+    free(frag_shader);
+}
+
 static unsigned int basic_variant_program(const int variant) {
+    if (!g_basic_variant_tried[variant] && g_basic_variant_started[variant]) { // started early: take it (waits only for the rest)
+        g_basic_variant_tried[variant] = 1;
+        g_basic_variants[variant] = shader_compile_async_finish(g_basic_variant_started[variant]);
+        g_basic_variant_started[variant] = 0;
+        if (!g_basic_variants[variant]) fprintf(stderr, "basic.frag: variant %d failed to compile\n", variant);
+    }
     if (!g_basic_variant_tried[variant]) {
         g_basic_variant_tried[variant] = 1;
         char *vert_shader = concat(assets_path(), "shaders/basic.vert");

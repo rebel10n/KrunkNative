@@ -1,5 +1,6 @@
 #include <gl.h>
 #include <client.h>
+#include <GLFW/glfw3.h> // glfwGetProcAddress: glMaxShaderCompilerThreads*
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -159,26 +160,63 @@ static unsigned char *shader_inject_defines(unsigned char *source, const char *d
     return out;
 }
 
-unsigned int shader_compile(const char *vertex_shader_path, const char *fragment_shader_path) {
-    return shader_compile_defines(vertex_shader_path, fragment_shader_path, NULL);
+// ---- parallel compile (client.h shader_compile_async)
+// GL_KHR_parallel_shader_compile (ES / WebGL / ANGLE) or GL_ARB_parallel_shader_compile (desktop): glCompileShader and
+// glLinkProgram return at once and the driver compiles on its own threads; GL_COMPLETION_STATUS asks without waiting.
+// Without the extension a program's first status query or draw compiles it on the calling thread.
+#define SHADER_COMPLETION_STATUS 0x91B1        // GL_COMPLETION_STATUS_KHR / _ARB (the same value)
+#define SHADER_MAX_COMPILER_THREADS 0xFFFFFFFFu // "as many as the implementation likes" (the KHR spec's default value)
+
+int shader_parallel_compile(void) {
+    static int available = -1;
+    if (available >= 0) return available;
+    available = 0;
+    int count = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+    for (int i = 0; i < count && !available; i++) {
+        const char *name = (const char *) glGetStringi(GL_EXTENSIONS, (unsigned int) i);
+        if (!name) continue;
+        if (!strcmp(name, "GL_KHR_parallel_shader_compile")) available = 1;
+        else if (!strcmp(name, "GL_ARB_parallel_shader_compile")) available = 2;
+    }
+    if (!available) return 0;
+    // the thread count starts implementation-defined (0 on some drivers: compile on the calling thread); ask for
+    // the driver's maximum, as Chromium does for WebGL's KHR_parallel_shader_compile
+    typedef void (*MaxThreadsFn)(unsigned int);
+    MaxThreadsFn max_threads = (MaxThreadsFn) glfwGetProcAddress(available == 1 ? "glMaxShaderCompilerThreadsKHR" : "glMaxShaderCompilerThreadsARB");
+    if (max_threads) max_threads(SHADER_MAX_COMPILER_THREADS);
+    while (glGetError() != GL_NO_ERROR) {} // nothing of this query is left for a caller's glGetError
+    printf("[gl] parallel shader compile: %s\n", available == 1 ? "GL_KHR_parallel_shader_compile" : "GL_ARB_parallel_shader_compile");
+    return available;
 }
 
-// shader_compile with `defines` injected after the version line of both stages (compile-time variants of one
-// source: materials/basic.c's KN_RT programs).
-unsigned int shader_compile_defines(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
+// One program between shader_compile_start and shader_compile_end: its stages stay alive for their info logs.
+typedef struct {
+    unsigned int program, vert, frag;
+    char *vertex_path, *fragment_path;
+} ShaderJob;
+
+#define SHADER_ASYNC_MAX 16
+static ShaderJob g_async[SHADER_ASYNC_MAX]; // started by shader_compile_async, not finished yet
+
+// Reads, rewrites and hands both stages and the link to GL, without asking for any status (a parallel-compile
+// driver returns at once). 0 when a source cannot be read.
+static int shader_compile_start(ShaderJob *job, const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
 #ifdef __EMSCRIPTEN__
     shader_prefetch_all();
 #endif
+    memset(job, 0, sizeof(*job));
     size_t vertex_shader_length;
     unsigned char *vertex_shader;
 
     size_t fragment_shader_length;
     unsigned char *fragment_shader;
 
-    if (
-        read_file(vertex_shader_path, &vertex_shader, &vertex_shader_length) ||
-        read_file(fragment_shader_path, &fragment_shader, &fragment_shader_length)
-    ) return 0;
+    if (read_file(vertex_shader_path, &vertex_shader, &vertex_shader_length)) return 0;
+    if (read_file(fragment_shader_path, &fragment_shader, &fragment_shader_length)) {
+        free(vertex_shader);
+        return 0;
+    }
 
     vertex_shader = shader_resolve_includes(vertex_shader, vertex_shader_path);
     fragment_shader = shader_resolve_includes(fragment_shader, fragment_shader_path);
@@ -189,68 +227,112 @@ unsigned int shader_compile_defines(const char *vertex_shader_path, const char *
     vertex_shader = shader_inject_defines(vertex_shader, defines);
     fragment_shader = shader_inject_defines(fragment_shader, defines);
 
-    const unsigned int vert = glCreateShader(GL_VERTEX_SHADER);
-    const unsigned int frag = glCreateShader(GL_FRAGMENT_SHADER);
+    job->vert = glCreateShader(GL_VERTEX_SHADER);
+    job->frag = glCreateShader(GL_FRAGMENT_SHADER);
 
-    glShaderSource(vert, 1, (const char**) &vertex_shader, NULL);
-    glShaderSource(frag, 1, (const char**) &fragment_shader, NULL);
+    glShaderSource(job->vert, 1, (const char**) &vertex_shader, NULL);
+    glShaderSource(job->frag, 1, (const char**) &fragment_shader, NULL);
 
-    glCompileShader(vert);
+    glCompileShader(job->vert);
+    glCompileShader(job->frag);
     free(vertex_shader);
-
-    int status;
-    char error[512];
-
-    glGetShaderiv(vert, GL_COMPILE_STATUS, &status);
-
-    if (!status) {
-        glGetShaderInfoLog(vert, sizeof(error), NULL, error);
-        printf("vertex shader compile error (%s):\n %s \n", vertex_shader_path, error);
-
-        glDeleteShader(vert);
-        glDeleteShader(frag);
-        free(fragment_shader);
-
-        return 0;
-    }
-
-    glCompileShader(frag);
     free(fragment_shader);
 
-    glGetShaderiv(frag, GL_COMPILE_STATUS, &status);
+    // linked right away: a stage that failed fails the link too, and shader_compile_end reports the stage's log
+    job->program = glCreateProgram();
+    glAttachShader(job->program, job->vert);
+    glAttachShader(job->program, job->frag);
+    glLinkProgram(job->program);
 
+    job->vertex_path = strdup(vertex_shader_path);
+    job->fragment_path = strdup(fragment_shader_path);
+    return 1;
+}
+
+// The job's statuses (waiting for the compile when it has not finished) and logs; the program, or 0 on an error.
+static unsigned int shader_compile_end(ShaderJob *job) {
+    int status;
+    char error[512];
+    const char *vertex_path = job->vertex_path ? job->vertex_path : "?";
+    const char *fragment_path = job->fragment_path ? job->fragment_path : "?";
+    unsigned int program = job->program;
+
+    glGetShaderiv(job->vert, GL_COMPILE_STATUS, &status);
     if (!status) {
-        glGetShaderInfoLog(frag, sizeof(error), NULL, error);
-        printf("fragment shader compile error (%s):\n %s \n", fragment_shader_path, error);
-
-        glDeleteShader(vert);
-        glDeleteShader(frag);
-
-        return 0;
-    }
-
-    const unsigned int program = glCreateProgram();
-
-    glAttachShader(program, vert);
-    glAttachShader(program, frag);
-
-    glLinkProgram(program);
-
-    glDeleteShader(vert);
-    glDeleteShader(frag);
-
-    glGetProgramiv(program, GL_LINK_STATUS, &status);
-
-    if (!status) {
-        glGetProgramInfoLog(program, sizeof(error), NULL, error);
-        printf("shader link error (%s, %s):\n %s \n", vertex_shader_path, fragment_shader_path, error);
-
+        glGetShaderInfoLog(job->vert, sizeof(error), NULL, error);
+        printf("vertex shader compile error (%s):\n %s \n", vertex_path, error);
         glDeleteProgram(program);
-        return 0;
+        program = 0;
     }
 
-    gl_uniform_forget_program(program); // GL may hand out the id of a deleted program again
+    if (program) {
+        glGetShaderiv(job->frag, GL_COMPILE_STATUS, &status);
+        if (!status) {
+            glGetShaderInfoLog(job->frag, sizeof(error), NULL, error);
+            printf("fragment shader compile error (%s):\n %s \n", fragment_path, error);
+            glDeleteProgram(program);
+            program = 0;
+        }
+    }
+
+    glDeleteShader(job->vert);
+    glDeleteShader(job->frag);
+
+    if (program) {
+        glGetProgramiv(program, GL_LINK_STATUS, &status);
+        if (!status) {
+            glGetProgramInfoLog(program, sizeof(error), NULL, error);
+            printf("shader link error (%s, %s):\n %s \n", vertex_path, fragment_path, error);
+            glDeleteProgram(program);
+            program = 0;
+        }
+    }
+
+    free(job->vertex_path);
+    free(job->fragment_path);
+    memset(job, 0, sizeof(*job));
+    if (program) gl_uniform_forget_program(program); // GL may hand out the id of a deleted program again
     return program;
+}
+
+unsigned int shader_compile(const char *vertex_shader_path, const char *fragment_shader_path) {
+    return shader_compile_defines(vertex_shader_path, fragment_shader_path, NULL);
+}
+
+// shader_compile with `defines` injected after the version line of both stages (compile-time variants of one
+// source: materials/basic.c's KN_RT programs).
+unsigned int shader_compile_defines(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
+    ShaderJob job;
+    if (!shader_compile_start(&job, vertex_shader_path, fragment_shader_path, defines)) return 0;
+    return shader_compile_end(&job);
+}
+
+unsigned int shader_compile_async(const char *vertex_shader_path, const char *fragment_shader_path, const char *defines) {
+    for (int i = 0; i < SHADER_ASYNC_MAX; i++) {
+        if (g_async[i].program) continue;
+        return shader_compile_start(&g_async[i], vertex_shader_path, fragment_shader_path, defines) ? g_async[i].program : 0;
+    }
+    return 0; // no free slot: the caller compiles when it needs the program
+}
+
+static ShaderJob *shader_async_job(const unsigned int program) {
+    if (!program) return NULL;
+    for (int i = 0; i < SHADER_ASYNC_MAX; i++)
+        if (g_async[i].program == program) return &g_async[i];
+    return NULL;
+}
+
+int shader_compile_async_done(const unsigned int program) {
+    if (!shader_async_job(program)) return 1;
+    if (!shader_parallel_compile()) return 1; // no way to ask without waiting
+    int done = 0;
+    glGetProgramiv(program, SHADER_COMPLETION_STATUS, &done);
+    return done != 0;
+}
+
+unsigned int shader_compile_async_finish(const unsigned int program) {
+    ShaderJob *job = shader_async_job(program);
+    return job ? shader_compile_end(job) : 0;
 }
 
 // ---- uniform cache (client.h GlUniform)

@@ -161,6 +161,15 @@ struct Material {
 
 unsigned int shader_compile(const char*, const char*);
 unsigned int shader_compile_defines(const char*, const char*, const char *defines); // `defines` after the version line
+// Asynchronous compile (shader.c): shader_compile_async hands the sources and the link to GL without waiting (the
+// driver's own threads compile them when shader_parallel_compile() is non-zero: GL_KHR/ARB_parallel_shader_compile)
+// and returns the program id, 0 when it could not start. The program is not usable before
+// shader_compile_async_finish(id), which waits for whatever is left and returns it, or 0 on a compile / link error
+// (logged like shader_compile). shader_compile_async_done(id): 1 = finish will not wait.
+int shader_parallel_compile(void);
+unsigned int shader_compile_async(const char*, const char*, const char *defines);
+int shader_compile_async_done(unsigned int program);
+unsigned int shader_compile_async_finish(unsigned int program);
 void material_update_uniforms(Material*);
 void material_fini(Material*);
 
@@ -367,6 +376,7 @@ BasicMaterial *basic_material_init();
 // Picks basic.frag's compile-time variant for this draw (materials/basic.c): scene_render calls it before using
 // material->program. No-op for other material types.
 void basic_material_select_program(Material*);
+void basic_material_prewarm_rt(int variant); // rt_prewarm_tick: start compiling basic.frag variant 1 / 2 (shader_compile_async)
 
 // Texture unit of BasicMaterial.emissive_texture (unit 0: base map, 1: shadow map).
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2

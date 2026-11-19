@@ -937,6 +937,16 @@ alpha-tested map objects cast (Krunker's chain-link cubes do not), for testing t
 material classes, the weapon masks and the viewmodel pass off; `KRUNKNATIVE_RT_MATERIALS_LOG=1` logs every
 class resolution; `KRUNKNATIVE_RT_NO_FILMIC=1` keeps the map's None / Linear curve instead of the filmic shoulder; `KRUNKNATIVE_RT_MASK_DUMP=<dir>` writes the built weapon masks; `KRUNKNATIVE_RT_NO_BUMP=1`, `KRUNKNATIVE_RT_NO_BEVEL=1`, `KRUNKNATIVE_RT_NO_FILTER=1` and `KRUNKNATIVE_RT_NO_SPEC_OCCLUSION=1` leave the relief normal maps, the bevels, the texture filtering and the specular occlusion off; `KRUNKNATIVE_RT_BUMP_BLUR=<0..1>` tunes the relief height blur; `KRUNKNATIVE_RT_SKY_VIS=1` turns on the (over-budget) world sky-visibility ray at mode 1. `KRUNKNATIVE_RT_NO_FLASH_LIGHT=1` adds no muzzle-flash / explosion lights. `KRUNKNATIVE_RT_NO_WATER=1` keeps Krunker's alpha blend on water and glass.
 
+Shader prewarm (`rt_prewarm_tick`, rt.h): with `rtMode` > 0 the tracer's programs (prepass, trace, denoise,
+debug, the reflection and GI pairs) and basic.frag's ray-traced variant start compiling at the client's start on
+the driver's compiler threads (`GL_KHR_parallel_shader_compile` / `GL_ARB_parallel_shader_compile`,
+`shader_compile_async`), so the first match's load frame takes finished programs instead of compiling them while
+the loading screen is frozen. That frame was the "blank screen / long lag before CLICK TO PLAY": on an RTX 2070
+SUPER with the Ray Traced preset and a shader cache that missed (any client update that changes a shader), it took
+3.5-4.9 s, 2.3 s of it the reflection and GI compiles and 1.2 s the first ray-traced world draw. A driver without
+parallel compile prewarms nothing (starting there would only move the stall onto a menu frame).
+`KRUNKNATIVE_RT_PREWARM=0` turns it off for A/B.
+
 Console (developer commands): `rt_debug <bvh|normals|visibility|history|ao|local|refl|motion|gi|off>`
 blits that intermediate over the frame; `rt_mode [0-3]` shows or sets `rtMode` through the settings
 store so the Settings row follows; `rt_materials_reload` re-reads the material table. `KRUNKNATIVE_GPU_TIMING=1` prints the `rt` pass (GPU and CPU).

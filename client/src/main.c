@@ -2236,6 +2236,7 @@ static void client_tick_game(Client*, float, float);
 
 void client_tick(Client *client, const float now, const float delta) {
     html_ui_update(); // pumps the HTML engine and runs the bridge handlers (menu/play/...)
+    rt_prewarm_tick(); // rtMode > 0: the ray tracing shaders compile on the driver's threads before the first match (rt.h)
     backend_frame(client); // brain HTTP / social socket delivery, account header, matchmaker (backend_startup.c)
     if (app_mode_frame(client, now, delta)) return; // hub/editor/viewer page: the game is frozen behind it (app_mode.c)
 

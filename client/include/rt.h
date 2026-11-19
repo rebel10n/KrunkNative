@@ -272,6 +272,12 @@ void rt_gpu_free(RtGpu *gpu);
 // rebuilds the scene, uploads, runs prepass + trace + denoise into the RT targets. Restores framebuffer,
 // viewport, program, VAO, cull / depth / blend state like shadow_update(). GPU_PASS_RT.
 void rt_frame(const Scene *scene, Camera *camera);
+// Once per frame from the client's start (main.c client_tick): with rtMode > 0 and a driver that compiles in parallel
+// (shader_parallel_compile), the tracer's programs and basic.frag's ray-traced variant start compiling on the driver's
+// threads, once, so the match's first traced frame (the map's load frame) takes them instead of compiling seconds of
+// shaders behind a frozen loading screen (v10.0.4 warmScene compiles with compileAsync for the same reason). rtMode 0:
+// nothing. Without parallel compile nothing either (the first traced frame compiles them, as before).
+void rt_prewarm_tick(void);
 // Binds the RT result textures on their units and sets basic.frag's rt_effects / rt_size uniforms for
 // the world scene draw; rt_end_world() clears rt_effects so the viewmodel / previews do not read them.
 void rt_begin_world(void);
