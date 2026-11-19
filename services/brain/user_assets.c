@@ -24,7 +24,8 @@
  * Responses carry Cache-Control: public (a week): Krunker never changes a published file in place.
  *
  * A Box Office asset (an id from USER_ASSET_KN_ID_BASE, published with the editor's Publish Asset: asset_upload.c) is
- * answered from uploads.dir only, with Cache-Control: no-cache (an update replaces its files in place). A Private one too,
+ * answered from uploads.dir only, with Cache-Control: no-cache and an ETag of its content's sha256 (an update replaces its
+ * files in place; If-None-Match with the same bytes answers 304). A Private one too,
  * to anyone, by id: Krunker loads an asset's files by id with no credentials for every player of a map that uses it (the
  * model: a bare fetch of <user-assets host>/<id>/model.glb, deob-10.0.7.js:181755-181764, host :16430; a texture: an image
  * src of /<id>/texture.png, :160800, :161497), so Private only keeps it out of other players' lists (creations.c
@@ -57,6 +58,7 @@
 #include <unistd.h>
 
 #include "knsvc/config.h"
+#include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
@@ -163,8 +165,17 @@ static int serve_local(kn_http_req *req, const char *rel) {
             reply_status(req, 404);
             return 1;
         }
+        /* the validator a no-cache client sends back (If-None-Match): the content's sha256, so an update's new bytes always
+         * answer 200 and the same bytes 304 (a browser, the web build, revalidates every load) */
+        uint8_t digest[KN_SHA256_LEN];
+        char hex[2 * KN_SHA256_LEN + 1] = "", etag[2 * KN_SHA256_LEN + 3] = "";
+        if (kn_sha256(data, len, digest) == 0 && kn_hex_encode(digest, sizeof digest, hex, sizeof hex) > 0)
+            snprintf(etag, sizeof etag, "\"%s\"", hex);
         kn_http_set_header(req, "Cache-Control", "no-cache");
-        kn_http_respond(req, 200, content_type(rel), data, len);
+        const char *inm = etag[0] ? kn_http_header_get(req, "If-None-Match") : NULL;
+        if (etag[0]) kn_http_set_header(req, "ETag", etag);
+        if (inm && !strcmp(inm, etag)) kn_http_respond(req, 304, content_type(rel), NULL, 0);
+        else kn_http_respond(req, 200, content_type(rel), data, len);
         free(data);
         return 1;
     }

@@ -42,12 +42,37 @@
  *   (applyCompanionTextures, deob-10.0.7.js:159176: p is the displacement map, file model_d.png); d prefab; x texture
  *   (x + v a video); u sound. The files go to uploads.dir/<id>/ under Krunker's names (user_asset_path.h), which
  *   GET /api/user-assets/<id>/<file> answers (user_assets.c); a staging copy lives in uploads.dir/.staging/<fileId>/.
+ *
+ * Mods (the menu's Upload Mod, windows[18] "mods_pub", deob-10.0.7.js:220943-221050; the api at :27313-27358):
+ *   1. submit() checks the name (required), the zip (25 MB, 50 MB premium; MB = 1e6 bytes) and that a thumbnail
+ *      needs level 10, then api.mods.publishKey({name, assetSizes: {mod, thumb}}) = POST /mods/publish/key
+ *      -> {data: {fileId, uploadUrl}} or {error: {code}} with a MODS_PUBLISH_* code (errors.mods.*, :223312-223324).
+ *   2. api.mods.publishUpload(uploadUrl, fileId, zip, thumb) POSTs a FormData {fileId, mod, thumb} to uploadUrl
+ *      -> {data: {mod_id}}, or a MODS_UPLOAD_* code; "Mod Published!", the Mod Manager's My Mods tab.
+ *   Here publishKey runs the same checks server side (level 5 to publish: errors.mods.publishLevelTooLow; level 10
+ *   for a thumbnail; the sizes; a name of another account's mod: MODS_UPLOAD_NAME_TAKEN; a flagged hacker; one key
+ *   per uploads.mod_cooldown_ms) and opens a ticket of kind K_MOD with the files "mod" (mod.zip) and "thumb" (thumb.png).
+ *   uploadUrl is <uploads.public_host>/mods/publish, or the path /mods/publish (the client puts the brain's URL in
+ *   front); the files come as chunks exactly as the assets' (the same deliberate difference), POST
+ *   /mods/publish?fileId=&key=&offset= and ?fileId=&done=1 -> {data: {mod_id}}; every refusal on that route is
+ *   {error: {code, message}}. The zip is checked by its central directory (check_zip). The mod is a published_mods
+ *   row with mod_url "ua" (Krunker's own value: the client loads userAssetsUrl("/md" + mod_id + "/mod.zip"),
+ *   :217728, :223453, :226188) and mod_info {"t": 1} with a thumbnail (/md<id>/thumb.png); the files go to
+ *   uploads.dir/md<id>/. A publish of a name the account already has updates that mod (mod_updatecounter + 1).
+ *
+ * Tickets survive a restart: each one is written to uploads.dir/.staging/<fileId>.json when it opens (the account,
+ *   the name, the declared files); init reads them back with each file's bytes so far taken from its staged size,
+ *   so the client's next chunk (a retry of the one the restart cut off) carries on. A chunk overlapping what is
+ *   already staged is written again whole (the same bytes), which also covers a chunk half written at the crash.
+ *   Tickets idle for uploads.ticket_s are dropped then, as in a running brain.
  */
 #include "asset_upload.h"
 
+#include "accounts.h"
 #include "acct_internal.h"
 #include "brain.h"
 #include "db_procs.h"
+#include "v10_api.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -67,6 +92,7 @@
 #include "knsvc/crypto.h"
 #include "knsvc/db.h"
 #include "knsvc/http.h"
+#include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 #include "user_asset_path.h"
@@ -78,9 +104,13 @@
 #define NAME_MAX_LEN 128 /* published_assets.name (mysql VARCHAR(128)); the popup allows 500 characters */
 #define MB 1000000ll     /* the editor measures MB as size / 1000000 (updateFile, editor-10.0.7.js:13942) */
 #define KB 1000ll
+#define MOD_LEVEL 5              /* MODS_PUBLISH_LEVEL_TOO_LOW below it (errors.mods.publishLevelTooLow names level 5) */
+#define MOD_THUMB_LEVEL 10       /* mods_pub: (level || 0) >= 10 for a thumbnail (deob-10.0.7.js:220954, :220997) */
+#define ZIP_UNPACKED_MAX (1024ll * MB) /* a mod's entries unpacked together (a zip bomb is refused) */
+#define ZIP_ENTRIES_MAX 20000
 
-enum { K_MODEL, K_PREFAB, K_TEXTURE, K_SOUND, K_VIDEO };
-enum { V_IMAGE, V_SOUND, V_VIDEO, V_MODEL, V_DATA };
+enum { K_MODEL, K_PREFAB, K_TEXTURE, K_SOUND, K_VIDEO, K_MOD };
+enum { V_IMAGE, V_SOUND, V_VIDEO, V_MODEL, V_DATA, V_ZIP };
 
 /* The popup's file fields: FormData key, stored file name (model: model.<mType>), asset id letter (0 = none), check,
  * limit in bytes (0 = only the model total; -1 = the thumbnail's free / premium limit) */
@@ -107,6 +137,7 @@ static const struct Field {
     {"light", "model_l.png", 'l', V_IMAGE, 10 * MB},
     {"model", NULL, 0, V_MODEL, 0},
     {"icon", "icon.png", 0, V_IMAGE, 100 * KB},          /* b6 100 kB */
+    {"mod", "mod.zip", 0, V_ZIP, 0},                     /* mods_pub: 25 / 50 MB (premiumT), deob-10.0.7.js:220956 */
 };
 #define FIELD_COUNT ((int) (sizeof(k_fields) / sizeof(k_fields[0])))
 
@@ -115,15 +146,16 @@ static int field_allowed(const int kind, const int f) {
     const char *k = k_fields[f].key;
     if (!strcmp(k, "thumb")) return 1;
     switch (kind) {
-        case K_MODEL: return strcmp(k, "texture") && strcmp(k, "sound") && strcmp(k, "video") && strcmp(k, "data");
+        case K_MODEL: return strcmp(k, "texture") && strcmp(k, "sound") && strcmp(k, "video") && strcmp(k, "data") && strcmp(k, "mod");
         case K_PREFAB: return !strcmp(k, "data");
         case K_TEXTURE: return !strcmp(k, "texture");
         case K_SOUND: return !strcmp(k, "sound");
-        default: return !strcmp(k, "video");
+        case K_VIDEO: return !strcmp(k, "video");
+        default: return !strcmp(k, "mod");
     }
 }
 
-static const char *const k_required[] = {"model", "data", "texture", "sound", "video"};
+static const char *const k_required[] = {"model", "data", "texture", "sound", "video", "mod"};
 
 typedef struct Part {
     int field;
@@ -153,7 +185,8 @@ static struct {
     int64_t ticket_ms;
     long long quota;     /* uploads.account_quota_mb: an account's stored assets */
     int per_hour;        /* uploads.per_hour: uploadA tickets an account may open per hour */
-    int max_assets;      /* uploads.max_assets: an account's assets */
+    int max_assets;      /* uploads.max_assets: an account's assets (and, apart, its mods) */
+    int64_t mod_cooldown_ms; /* uploads.mod_cooldown_ms (10000): the MODS_PUBLISH_COOLDOWN window between two mod keys */
 } C;
 
 static Ticket T[MAX_TICKETS];
@@ -165,6 +198,7 @@ static struct {
     int64_t account;
     uint64_t window;
     int n;
+    uint64_t last; /* kn_now_ms of the account's last mod key (the mods' cooldown) */
 } R[128];
 
 /* ------------------------------------------------------------------ files */
@@ -204,13 +238,48 @@ static const char *part_file(const Ticket *t, const Part *p, char *buf, const si
 }
 
 static void staging_dir(const Ticket *t, char *out, const size_t cap) { snprintf(out, cap, "%s%s", C.staging, t->id); }
+static void ticket_file(const char *id, char *out, const size_t cap) { snprintf(out, cap, "%s%s.json", C.staging, id); }
 
 static void ticket_free(Ticket *t) {
     if (!t->used) return;
     char d[1200];
     staging_dir(t, d, sizeof d);
     rm_tree(d);
+    ticket_file(t->id, d, sizeof d);
+    unlink(d);
     memset(t, 0, sizeof *t);
+}
+
+/* the ticket's record beside its staging directory (read back by tickets_restore after a restart) */
+static int ticket_save(const Ticket *t) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "account", (double) t->account);
+    cJSON_AddStringToObject(o, "username", t->username);
+    cJSON_AddStringToObject(o, "name", t->name);
+    cJSON_AddNumberToObject(o, "category", t->category);
+    cJSON_AddNumberToObject(o, "kind", t->kind);
+    cJSON_AddNumberToObject(o, "priv", t->priv);
+    cJSON_AddStringToObject(o, "ext", t->ext);
+    cJSON_AddStringToObject(o, "uvc", t->uvc);
+    cJSON *parts = cJSON_AddArrayToObject(o, "parts");
+    for (int i = 0; i < t->nparts; i++) {
+        cJSON *p = cJSON_CreateObject();
+        cJSON_AddStringToObject(p, "key", k_fields[t->parts[i].field].key);
+        cJSON_AddNumberToObject(p, "want", (double) t->parts[i].want);
+        cJSON_AddItemToArray(parts, p);
+    }
+    char *txt = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    char path[1200], tmp[1300];
+    ticket_file(t->id, path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = txt ? fopen(tmp, "wb") : NULL;
+    int ok = f && fputs(txt, f) >= 0;
+    if (f) ok &= fclose(f) == 0;
+    free(txt);
+    if (ok) ok = rename(tmp, path) == 0;
+    if (!ok) unlink(tmp);
+    return ok ? 0 : -1;
 }
 
 static void sweep(const uint64_t now) {
@@ -352,6 +421,55 @@ static const char *check_data(const unsigned char *d, const size_t n) {
     return ok ? NULL : "Invalid Prefab Data";
 }
 
+static uint16_t le16(const unsigned char *p) { return (uint16_t) (p[0] | p[1] << 8); }
+
+/* a mod pack: a zip whose end record and central directory hold together; every entry stored or deflated
+ * (JSZip, which loadModPack reads it with, deob-10.0.7.js:225863), with a relative name (no "..", no "\\", no
+ * drive or leading "/"), its local header where the directory says, the entries unpacked 1 GB at most, and at least
+ * one file in a folder loadModPack reads (textures/, img/, sound/, models/, scripts/, shaders/, css/, css-img/,
+ * :225880-225955). Nothing is unpacked here: the client unpacks it (mod_pack.c), checking each name again. */
+static const char *check_zip(const unsigned char *d, const size_t n) {
+    static const char *const bad = "Invalid Mod (.zip)";
+    if (n < 22 || memcmp(d, "PK\3\4", 4)) return bad;
+    size_t eocd = 0;
+    const size_t floor = n > 22 + 65535 ? n - 22 - 65535 : 0;
+    for (size_t i = n - 22 + 1; i-- > floor;)
+        if (!memcmp(d + i, "PK\5\6", 4)) {
+            eocd = i + 1;
+            break;
+        }
+    if (!eocd--) return bad;
+    const unsigned entries = le16(d + eocd + 10);
+    const uint32_t cd_size = le32(d + eocd + 12), cd_at = le32(d + eocd + 16);
+    if (!entries || entries > ZIP_ENTRIES_MAX || le16(d + eocd + 8) != entries || cd_at > eocd || cd_size > eocd - cd_at) return bad;
+    static const char *const dirs[] = {"textures/", "img/", "sound/", "models/", "scripts/", "shaders/", "css/", "css-img/"};
+    size_t at = cd_at;
+    long long unpacked = 0;
+    int known = 0;
+    for (unsigned e = 0; e < entries; e++) {
+        if (at + 46 > cd_at + cd_size || memcmp(d + at, "PK\1\2", 4)) return bad;
+        const unsigned method = le16(d + at + 10), nlen = le16(d + at + 28), xlen = le16(d + at + 30), clen = le16(d + at + 32);
+        const uint32_t csize = le32(d + at + 20), usize = le32(d + at + 24), local = le32(d + at + 42);
+        if (method != 0 && method != 8) return "Invalid Mod (.zip): stored or deflated entries only";
+        if (!nlen || at + 46 + nlen + xlen + clen > cd_at + cd_size) return bad;
+        const char *name = (const char *) d + at + 46;
+        if (memchr(name, 0, nlen) || memchr(name, '\\', nlen) || name[0] == '/' || (nlen >= 2 && name[1] == ':')) return "Invalid Mod (.zip): bad file name";
+        for (size_t i = 0; i + 1 < nlen; i++)
+            if (name[i] == '.' && name[i + 1] == '.' && (i == 0 || name[i - 1] == '/') && (i + 2 == nlen || name[i + 2] == '/'))
+                return "Invalid Mod (.zip): bad file name";
+        if (local > cd_at || local + 30 > cd_at || memcmp(d + local, "PK\3\4", 4) || csize > cd_at - local) return bad;
+        unpacked += usize;
+        if (unpacked > ZIP_UNPACKED_MAX || (method == 0 && csize != usize)) return bad;
+        if (name[nlen - 1] != '/')
+            for (size_t k = 0; k < sizeof dirs / sizeof dirs[0] && !known; k++) {
+                const size_t dl = strlen(dirs[k]);
+                known = nlen > dl && !memcmp(name, dirs[k], dl);
+            }
+        at += 46 + nlen + xlen + clen;
+    }
+    return known ? NULL : "Invalid Mod (.zip): no textures/, img/, sound/, models/, scripts/, shaders/, css/ or css-img/ files";
+}
+
 static unsigned char *read_all(const char *path, size_t *len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -393,6 +511,7 @@ static const char *check_file(const Ticket *t, const Part *p) {
             case V_SOUND: err = check_sound(d, n); break;
             case V_VIDEO: err = check_video(d, n); break;
             case V_MODEL: err = check_model(t->ext, d, n); break;
+            case V_ZIP: err = check_zip(d, n); break;
             default: err = check_data(d, n); break;
         }
     }
@@ -466,6 +585,75 @@ static kn_db_result *run_asset_publish(kn_dbconn *c, int n, const char *const *p
 
 static const kn_proc P_ASSET_PUBLISH = {"asset_publish", NULL, run_asset_publish};
 
+/* (me, name, mod_info, max mods) -> {id, updated}: the account's mod of that name is updated (mod_updatecounter + 1,
+ * mod_date), else a new published_mods row (mod_url "ua"); another account's live mod of that name refuses with
+ * MODS_UPLOAD_NAME_TAKEN (published_mods_name_lower_uq). */
+static kn_db_result *run_mod_publish(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    if (n < 4) return kn_db_result_user_error("bad call");
+    cJSON *row = dbx_row(&x, SQL(.any = "SELECT mod_id AS id__i, coalesce(creator_id, 0) AS creator__i FROM published_mods"
+                                       " WHERE lower(mod_name) = lower($1) AND deleted_at IS NULL"),
+                         KN_DB_ARGS(p[1]));
+    int64_t id = 0;
+    if (row) {
+        if (kn_json_int(row, "creator", 0) != atoll(p[0])) {
+            cJSON_Delete(row);
+            return dbx_finish(&x, kn_db_result_user_error("MODS_UPLOAD_NAME_TAKEN"));
+        }
+        id = kn_json_int(row, "id", 0);
+        cJSON_Delete(row);
+    }
+    int updated = 0;
+    if (id > 0) {
+        dbx_exec(&x, SQL(.pg = "UPDATE published_mods SET mod_url = 'ua', mod_info = $2::jsonb, mod_updatecounter = mod_updatecounter + 1,"
+                               " mod_date = now() WHERE mod_id = $1::int",
+                         .any = "UPDATE published_mods SET mod_url = 'ua', mod_info = $2, mod_updatecounter = mod_updatecounter + 1,"
+                                " mod_date = {now} WHERE mod_id = $1"),
+                 KN_DB_ARGS(I64S(id), p[2]));
+        updated = 1;
+    } else if (!dbx_failed(&x)) {
+        const int64_t mine = dbx_int(&x, SQL(.any = "SELECT count(*) FROM published_mods WHERE creator_id = {int:$1} AND deleted_at IS NULL"),
+                                     KN_DB_ARGS(p[0]), 0);
+        if (mine >= atoll(p[3])) return dbx_finish(&x, kn_db_result_user_error("MODS_PUBLISH_SIZE_LIMIT"));
+        /* the id from USER_ASSET_KN_ID_BASE, as the assets': md<id> of a Krunker mod (md43867) stays Krunker's, so the
+         * brain's user-assets mirror never answers one for the other (user_asset_rel_is_kn) */
+        const int64_t top = dbx_int(&x, SQL(.any = "SELECT coalesce(max(mod_id), 0) FROM published_mods WHERE mod_id >= {int:$1}"),
+                                    KN_DB_ARGS(I64S(USER_ASSET_KN_ID_BASE)), 0);
+        id = top >= USER_ASSET_KN_ID_BASE ? top + 1 : USER_ASSET_KN_ID_BASE;
+        dbx_exec(&x, SQL(.pg = "INSERT INTO published_mods (mod_id, mod_name, creator_id, mod_url, mod_info)"
+                               " VALUES ($1::int, $3, $2::int, 'ua', $4::jsonb)",
+                         .any = "INSERT INTO published_mods (mod_id, mod_name, creator_id, mod_url, mod_info) VALUES ($1, $3, $2, 'ua', $4)"),
+                 KN_DB_ARGS(I64S(id), p[0], p[1], p[2]));
+        if (dbx_failed(&x)) id = 0;
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) id);
+    cJSON_AddNumberToObject(o, "updated", updated);
+    return dbx_json(&x, "result", o);
+}
+
+static const kn_proc P_MOD_PUBLISH = {"mod_publish", NULL, run_mod_publish};
+
+/* (me, name) -> {premium, score, hack, taken}: what publishKey checks (taken: another account's live mod of the name) */
+static kn_db_result *run_mod_key_check(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    if (n < 2) return kn_db_result_user_error("bad call");
+    cJSON *o = dbx_row(&x, SQL(.any = "SELECT coalesce(player_premium, 0) AS premium__i, coalesce(player_score, 0) AS score__i,"
+                                     " coalesce(player_hack, 0) AS hack__i FROM players WHERE player_id = {int:$1}"),
+                       KN_DB_ARGS(p[0]));
+    if (!o) o = cJSON_CreateObject();
+    cJSON *acc = dbx_row(&x, SQL(.any = "SELECT username FROM accounts WHERE id = {int:$1}"), KN_DB_ARGS(p[0]));
+    cJSON_AddStringToObject(o, "username", kn_json_str(acc, "username", ""));
+    cJSON_Delete(acc);
+    const int64_t taken = dbx_int(&x, SQL(.any = "SELECT count(*) FROM published_mods WHERE lower(mod_name) = lower($2)"
+                                                " AND deleted_at IS NULL AND coalesce(creator_id, 0) <> {int:$1}"),
+                                  KN_DB_ARGS(p[0], p[1]), 0);
+    cJSON_AddNumberToObject(o, "taken", (double) taken);
+    return dbx_json(&x, "result", o);
+}
+
+static const kn_proc P_MOD_KEY_CHECK = {"mod_key_check", NULL, run_mod_key_check};
+
 /* ------------------------------------------------------------------ uploadA */
 
 static void refuse(SocialSession *s, const char *msg) {
@@ -497,7 +685,55 @@ static int hour_count(const int64_t account, const uint64_t now, const int add) 
     R[i].account = account;
     R[i].window = window;
     R[i].n = add;
+    R[i].last = 0;
     return add;
+}
+
+/* kn_now_ms of the account's last mod key, 0 when none is remembered; set_last_mod_key records one (after
+ * ticket_open, whose hour_count made the account's entry) */
+static uint64_t last_mod_key(const int64_t account) {
+    for (int i = 0; i < (int) (sizeof R / sizeof R[0]); i++)
+        if (R[i].account == account) return R[i].last;
+    return 0;
+}
+
+static void set_last_mod_key(const int64_t account, const uint64_t now) {
+    for (int i = 0; i < (int) (sizeof R / sizeof R[0]); i++)
+        if (R[i].account == account) R[i].last = now;
+}
+
+/* a new ticket from the checked request (its id drawn, its staging directory and record made); NULL with *why */
+static Ticket *ticket_open(const Ticket *req, const uint64_t now, const char **why) {
+    /* a new upload of the account replaces its open one of the same flow (the retry after a failure): an asset's
+     * (the editor) and a mod's (the menu) are apart */
+    Ticket *slot = NULL;
+    for (int i = 0; i < MAX_TICKETS; i++)
+        if (T[i].used && T[i].account == req->account && !T[i].committing && (T[i].kind == K_MOD) == (req->kind == K_MOD))
+            ticket_free(&T[i]);
+    for (int i = 0; i < MAX_TICKETS && !slot; i++)
+        if (!T[i].used) slot = &T[i];
+    if (!slot) {
+        *why = "Server busy, try again later";
+        return NULL;
+    }
+    *slot = *req;
+    if (kn_random_hex(slot->id, sizeof slot->id, 16) != 0) {
+        memset(slot, 0, sizeof *slot);
+        *why = "Upload Request Failed";
+        return NULL;
+    }
+    slot->used = 1;
+    slot->touched = now;
+    char dir[1200];
+    staging_dir(slot, dir, sizeof dir);
+    if (mkdirs(dir) != 0 || ticket_save(slot) != 0) {
+        KN_WARN(MOD, "cannot create %s: %s", dir, strerror(errno));
+        ticket_free(slot);
+        *why = "Upload Request Failed";
+        return NULL;
+    }
+    hour_count(req->account, now, 1);
+    return slot;
 }
 
 static void begin_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -526,33 +762,12 @@ static void begin_done(SocialSession *s, kn_db_result *res, void *extra) {
         refuse(s, "Too many uploads, try again later");
         return;
     }
-    /* a new upload of the account replaces its open one (the retry after a failure) */
-    Ticket *slot = NULL;
-    for (int i = 0; i < MAX_TICKETS; i++)
-        if (T[i].used && T[i].account == s->account_id && !T[i].committing) ticket_free(&T[i]);
-    for (int i = 0; i < MAX_TICKETS && !slot; i++)
-        if (!T[i].used) slot = &T[i];
+    const char *why = NULL;
+    const Ticket *slot = ticket_open(&b->t, now, &why);
     if (!slot) {
-        refuse(s, "Server busy, try again later");
+        refuse(s, why);
         return;
     }
-    *slot = b->t;
-    if (kn_random_hex(slot->id, sizeof slot->id, 16) != 0) {
-        memset(slot, 0, sizeof *slot);
-        refuse(s, "Upload Request Failed");
-        return;
-    }
-    slot->used = 1;
-    slot->touched = now;
-    char dir[1200];
-    staging_dir(slot, dir, sizeof dir);
-    if (mkdirs(dir) != 0) {
-        KN_WARN(MOD, "cannot create %s: %s", dir, strerror(errno));
-        ticket_free(slot);
-        refuse(s, "Upload Request Failed");
-        return;
-    }
-    hour_count(s->account_id, now, 1);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "fileId", slot->id);
     if (C.host[0]) cJSON_AddStringToObject(o, "srv", C.host);
@@ -680,6 +895,25 @@ static void reply_text(kn_http_req *req, const int status, const char *text) {
     kn_http_respond(req, status, "text/plain; charset=utf-8", text, strlen(text));
 }
 
+/* a refusal on the mods' route: {error: {code, message}} with Krunker's MODS_UPLOAD_* code (errors.mods.*,
+ * deob-10.0.7.js:223312-223324), the reason as the message */
+static void reply_fail(kn_http_req *req, const int mod, const int status, const char *text) {
+    if (!mod) {
+        reply_text(req, status, text);
+        return;
+    }
+    const char *code = !strncmp(text, "MODS_", 5)                                      ? text
+                       : status == 404 || status == 410                                ? "MODS_UPLOAD_INVALID_KEY"
+                       : !strcmp(text, "Upload incomplete") || !strcmp(text, "File size Limit Reached") ||
+                                 !strcmp(text, "Upload out of order") || !strcmp(text, "Invalid Chunk") ? "MODS_UPLOAD_SIZE_MISMATCH"
+                       : !strcmp(text, "Invalid File")                                 ? "MODS_UPLOAD_MISSING_FILE"
+                       : status == 400                                                 ? "MODS_UPLOAD_WRONG_TYPE"
+                                                                                       : "MODS_UPLOAD_STORAGE_FAIL";
+    brain_cors_headers(req);
+    kn_http_set_header(req, "Cache-Control", "no-store");
+    v10_reply_error(req, status, code, strncmp(text, "MODS_", 5) ? text : "The mod could not be stored, try again");
+}
+
 static void reply_got(kn_http_req *req, const long long got) {
     char body[64];
     snprintf(body, sizeof body, "{\"got\":%lld}", got);
@@ -691,6 +925,7 @@ static void reply_got(kn_http_req *req, const long long got) {
 typedef struct Commit {
     Ticket *t;
     char id[40];
+    int mod;           /* the mods' route: its answers are v10's {data} / {error} */
     kn_http_req *req;
     const char *err;   /* the worker's verdict */
     char data[160];    /* the asset's data JSON (its letters) */
@@ -705,18 +940,27 @@ static void commit_checked(kn_loop *loop, void *ud) {
     Commit *c = ud;
     Ticket *t = ticket_by_id(c->id);
     if (!t || t != c->t) { /* cannot happen while committing; be safe */
-        if (kn_http_req_alive(c->req)) reply_text(c->req, 410, "Upload expired");
+        if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 410, "Upload expired");
         free(c);
         return;
     }
     if (c->err) {
         t->committing = 0;
         t->touched = kn_now_ms();
-        if (kn_http_req_alive(c->req)) reply_text(c->req, 400, c->err);
+        if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 400, c->err);
         free(c);
         return;
     }
     char me[24], cat[24], kb[24], kind[24];
+    if (t->kind == K_MOD) {
+        if (kn_db_call(g_b->db, &P_MOD_PUBLISH, KN_DB_ARGS(acct_itoa(me, t->account), t->name, c->data, acct_itoa(kb, C.max_assets)),
+                       commit_db_done, c) != 0) {
+            t->committing = 0;
+            if (kn_http_req_alive(c->req)) reply_fail(c->req, 1, 503, "MODS_UPLOAD_STORAGE_FAIL");
+            free(c);
+        }
+        return;
+    }
     if (kn_db_call(g_b->db, &P_ASSET_PUBLISH,
                    KN_DB_ARGS(acct_itoa(me, t->account), t->name, acct_itoa(cat, t->category), c->data, acct_itoa(kb, c->size_kb),
                               t->priv ? "1" : "0", t->uvc[0] ? t->uvc : NULL, acct_itoa(kind, t->kind), acct_itoa((char[24]){0}, C.max_assets)),
@@ -751,6 +995,7 @@ static void *commit_thread(void *arg) {
         if (t->kind == K_TEXTURE || t->kind == K_VIDEO) cJSON_AddNumberToObject(d, "x", 1);
         if (t->kind == K_VIDEO) cJSON_AddNumberToObject(d, "v", 1);
         if (t->kind == K_SOUND) cJSON_AddNumberToObject(d, "u", 1);
+        /* a mod's mod_info: {"t": 1} with a thumbnail (the Mod Manager shows /md<id>/thumb.png then, :217723) */
         char *txt = cJSON_PrintUnformatted(d);
         snprintf(c->data, sizeof c->data, "%s", txt ? txt : "{}");
         free(txt);
@@ -766,7 +1011,7 @@ static void *commit_thread(void *arg) {
 static int install(const Ticket *t, const int64_t id) {
     char from[1200], to[1200], old[1300];
     staging_dir(t, from, sizeof from);
-    snprintf(to, sizeof to, "%s%lld", C.dir, (long long) id);
+    snprintf(to, sizeof to, "%s%s%lld", C.dir, t->kind == K_MOD ? "md" : "", (long long) id);
     snprintf(old, sizeof old, "%s.old-%s", to, t->id);
     struct stat st;
     const int had = !stat(to, &st);
@@ -784,28 +1029,36 @@ static void commit_db_done(kn_db_result *res, void *ud) {
     Ticket *t = ticket_by_id(c->id);
     const char *user = kn_db_user_message(res);
     if (!t) {
-        if (kn_http_req_alive(c->req)) reply_text(c->req, 410, "Upload expired");
+        if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 410, "Upload expired");
     } else if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
         t->committing = 0;
         if (!user) KN_WARN(MOD, "publish of %s failed: %s", t->name, kn_db_error(res));
-        if (kn_http_req_alive(c->req)) reply_text(c->req, user ? 400 : 503, user ? user : "Upload Request Failed");
+        if (kn_http_req_alive(c->req))
+            reply_fail(c->req, c->mod, user ? 400 : 503, user ? user : c->mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
     } else {
         cJSON *o = cJSON_Parse(kn_db_get(res, 0, 0));
         const int64_t id = (int64_t) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(o, "id"));
         const int updated = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(o, "updated"));
         cJSON_Delete(o);
         if (id <= 0 || install(t, id) != 0) {
-            KN_WARN(MOD, "storing asset %lld of %s failed: %s", (long long) id, t->username, strerror(errno));
+            KN_WARN(MOD, "storing %s %lld of %s failed: %s", t->kind == K_MOD ? "mod" : "asset", (long long) id, t->username, strerror(errno));
             t->committing = 0;
-            if (kn_http_req_alive(c->req)) reply_text(c->req, 503, "Upload Request Failed");
+            if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 503, c->mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
         } else {
-            KN_INFO(MOD, "%s %s asset %lld \"%s\" (%lld kB)", t->username, updated ? "updated" : "published", (long long) id, t->name,
-                    c->size_kb);
-            char body[64];
-            snprintf(body, sizeof body, "{\"id\":%lld,\"updated\":%d}", (long long) id, updated);
+            KN_INFO(MOD, "%s %s %s %lld \"%s\" (%lld kB)", t->username, updated ? "updated" : "published", t->kind == K_MOD ? "mod" : "asset",
+                    (long long) id, t->name, c->size_kb);
             if (kn_http_req_alive(c->req)) {
                 brain_cors_headers(c->req);
-                kn_http_respond(c->req, 200, "application/json", body, strlen(body));
+                if (c->mod) { /* publishUpload: {data: {mod_id}} */
+                    cJSON *d = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(d, "mod_id", (double) id);
+                    cJSON_AddNumberToObject(d, "updated", updated);
+                    v10_reply_data(c->req, 200, d);
+                } else {
+                    char body[64];
+                    snprintf(body, sizeof body, "{\"id\":%lld,\"updated\":%d}", (long long) id, updated);
+                    kn_http_respond(c->req, 200, "application/json", body, strlen(body));
+                }
             }
             ticket_free(t);
         }
@@ -813,41 +1066,43 @@ static void commit_db_done(kn_db_result *res, void *ud) {
     free(c);
 }
 
+/* POST /upload-user-asset (ud NULL) and POST /mods/publish (ud 1: a mod's ticket, v10's answers) */
 static void h_upload(kn_http_req *req, void *ud) {
-    (void) ud;
+    const int mod = ud != NULL;
     char id[40] = "", key[24] = "", off[24] = "", done[8] = "";
     kn_http_query_get(req, "fileId", id, sizeof id);
     kn_http_query_get(req, "key", key, sizeof key);
     kn_http_query_get(req, "offset", off, sizeof off);
     kn_http_query_get(req, "done", done, sizeof done);
     if (!C.enabled) {
-        reply_text(req, 503, "File uploads are not supported on this server");
+        reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "File uploads are not supported on this server");
         return;
     }
     const uint64_t now = kn_now_ms();
     sweep(now);
     Ticket *t = ticket_by_id(id);
-    if (!t) {
-        reply_text(req, 404, "Upload expired");
+    if (!t || (t->kind == K_MOD) != mod) {
+        reply_fail(req, mod, 404, "Upload expired");
         return;
     }
     if (t->committing) {
-        reply_text(req, 409, "Upload in progress");
+        reply_fail(req, mod, 409, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload in progress");
         return;
     }
     t->touched = now;
     if (done[0] == '1') {
         for (int i = 0; i < t->nparts; i++)
             if (t->parts[i].got != t->parts[i].want) {
-                reply_text(req, 400, "Upload incomplete");
+                reply_fail(req, mod, 400, "Upload incomplete");
                 return;
             }
         Commit *c = calloc(1, sizeof *c);
         if (!c) {
-            reply_text(req, 503, "Upload Request Failed");
+            reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
             return;
         }
         c->t = t;
+        c->mod = mod;
         c->req = req;
         snprintf(c->id, sizeof c->id, "%s", t->id);
         t->committing = 1;
@@ -862,7 +1117,7 @@ static void h_upload(kn_http_req *req, void *ud) {
             atomic_fetch_sub(&g_live, 1);
             t->committing = 0;
             free(c);
-            reply_text(req, 503, "Upload Request Failed");
+            reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
         }
         return;
     }
@@ -870,44 +1125,268 @@ static void h_upload(kn_http_req *req, void *ud) {
     for (int i = 0; i < t->nparts; i++)
         if (!strcmp(k_fields[t->parts[i].field].key, key)) p = &t->parts[i];
     if (!p) {
-        reply_text(req, 400, "Invalid File");
+        reply_fail(req, mod, 400, "Invalid File");
         return;
     }
     char *end = NULL;
     const long long at = strtoll(off, &end, 10);
     const long long len = (long long) req->body_len;
     if (!off[0] || !end || *end || at < 0 || len < 1 || len > (long long) CHUNK_MAX) {
-        reply_text(req, 400, "Invalid Chunk");
+        reply_fail(req, mod, 400, "Invalid Chunk");
         return;
     }
     if (at + len <= p->got) { /* a chunk already received: a re-send after a lost answer */
         reply_got(req, p->got);
         return;
     }
-    if (at != p->got) {
-        reply_text(req, 409, "Upload out of order");
+    /* a chunk starting inside what is staged (a re-send of the one a brain restart cut off, half written) is
+     * written again whole: the same bytes, and the check at done reads the file as it ends up */
+    if (at > p->got) {
+        reply_fail(req, mod, 409, "Upload out of order");
         return;
     }
     if (at + len > p->want) {
-        reply_text(req, 400, "File size Limit Reached");
+        reply_fail(req, mod, 400, "File size Limit Reached");
         return;
     }
     char dir[1200], path[1400], fb[24];
     staging_dir(t, dir, sizeof dir);
     snprintf(path, sizeof path, "%s/%s", dir, part_file(t, p, fb, sizeof fb));
     const int fd = open(path, O_WRONLY | O_CREAT | (at == 0 ? O_TRUNC : 0), 0644);
+    if (fd >= 0 && at > 0 && at < p->got && ftruncate(fd, (off_t) at) != 0) { /* drop what follows: it is sent again */
+        close(fd);
+        reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+        return;
+    }
     const int wrote = fd >= 0 && pwrite(fd, req->body, (size_t) len, (off_t) at) == (ssize_t) len;
     if (fd >= 0) close(fd);
     if (!wrote) {
         KN_WARN(MOD, "writing %s failed: %s", path, strerror(errno));
-        reply_text(req, 503, "Upload Request Failed");
+        reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
         return;
     }
     p->got = at + len;
     reply_got(req, p->got);
 }
 
+/* ------------------------------------------------------------------ POST /mods/publish/key */
+
+typedef struct ModKey {
+    kn_http_req *req;
+    Ticket t;
+    long long mod, thumb; /* assetSizes */
+} ModKey;
+
+static void mod_key_fail(ModKey *k, const int status, const char *code, const char *message) {
+    if (kn_http_req_alive(k->req)) v10_reply_error(k->req, status, code, message);
+    free(k);
+}
+
+#define KEY_FAIL(...)              \
+    do {                           \
+        mod_key_fail(__VA_ARGS__); \
+        return;                    \
+    } while (0)
+
+static void mod_key_checked(kn_db_result *res, void *ud) {
+    ModKey *k = ud;
+    if (!kn_http_req_alive(k->req)) {
+        free(k);
+        return;
+    }
+    cJSON *o = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!o) {
+        KEY_FAIL(k, 503, "MODS_UPLOAD_STORAGE_FAIL", "The mod could not be stored, try again");
+    }
+    const int premium = g_acct.free_premium || kn_json_int(o, "premium", 0) > 0;
+    const int level = accounts_level(kn_json_int(o, "score", 0), NULL);
+    const int hack = kn_json_int(o, "hack", 0) > 0, taken = kn_json_int(o, "taken", 0) > 0;
+    snprintf(k->t.username, sizeof k->t.username, "%s", kn_json_str(o, "username", ""));
+    cJSON_Delete(o);
+    const uint64_t now = kn_now_ms(), last = last_mod_key(k->t.account);
+    if (hack) KEY_FAIL(k, 403, "MODS_PUBLISH_HACKER_FLAGGED", "Publishing mods is blocked for this account for now");
+    if (level < MOD_LEVEL) KEY_FAIL(k, 403, "MODS_PUBLISH_LEVEL_TOO_LOW", "Mods can be published from level 5");
+    if (k->thumb && level < MOD_THUMB_LEVEL)
+        KEY_FAIL(k, 403, "MODS_PUBLISH_THUMB_LEVEL", "A mod thumbnail needs level 10");
+    if (k->mod > (premium ? 50 : 25) * MB || k->thumb > (premium ? 500 : 250) * KB)
+        KEY_FAIL(k, 400, "MODS_PUBLISH_SIZE_LIMIT", "The mod is larger than this account may upload");
+    if (taken) KEY_FAIL(k, 409, "MODS_UPLOAD_NAME_TAKEN", "Another player already has a mod of that name");
+    sweep(now);
+    if ((last && (int64_t) (now - last) < C.mod_cooldown_ms) || hour_count(k->t.account, now, 0) >= C.per_hour)
+        KEY_FAIL(k, 429, "MODS_PUBLISH_COOLDOWN", "Too soon after the last mod upload, try again shortly");
+    k->t.parts[k->t.nparts++] = (Part){FIELD_COUNT - 1, k->mod, 0}; /* "mod" */
+    if (k->thumb) k->t.parts[k->t.nparts++] = (Part){0, k->thumb, 0};
+    const char *why = NULL;
+    const Ticket *t = ticket_open(&k->t, now, &why);
+    if (!t) KEY_FAIL(k, 503, "MODS_UPLOAD_STORAGE_FAIL", why);
+    set_last_mod_key(k->t.account, now);
+    char url[400];
+    if (C.host[0]) snprintf(url, sizeof url, "%s%s/mods/publish", strstr(C.host, "://") ? "" : "https://", C.host);
+    else snprintf(url, sizeof url, "/mods/publish");
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddStringToObject(d, "fileId", t->id);
+    cJSON_AddStringToObject(d, "uploadUrl", url);
+    KN_INFO(MOD, "%s opened a mod upload \"%s\" (%lld bytes%s)", t->username, t->name, k->mod, k->thumb ? ", a thumbnail" : "");
+    v10_reply_data(k->req, 200, d);
+    free(k);
+}
+
+static void mod_key_account(void *ud, const char *err, const cJSON *acc) {
+    ModKey *k = ud;
+    const int64_t id = err || !acc ? 0 : kn_json_int(acc, "id", 0);
+    if (!kn_http_req_alive(k->req)) {
+        free(k);
+        return;
+    }
+    if (id <= 0) KEY_FAIL(k, 401, "LOGIN_REQUIRED", "You must be logged in to do this");
+    k->t.account = id;
+    char me[24];
+    if (!g_b->db || kn_db_call(g_b->db, &P_MOD_KEY_CHECK, KN_DB_ARGS(acct_itoa(me, id), k->t.name), mod_key_checked, k) != 0)
+        mod_key_fail(k, 503, "MODS_UPLOAD_STORAGE_FAIL", "The mod could not be stored, try again");
+}
+
+/* api.mods.publishKey({name, assetSizes: {mod, thumb}}) -> {data: {fileId, uploadUrl}} */
+static void h_mod_key(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!C.enabled || !g_b || !g_b->db) {
+        v10_reply_error(req, 503, "MODS_UPLOAD_STORAGE_FAIL", "Mod uploads are not available on this server");
+        return;
+    }
+    cJSON *in = kn_http_body_json(req);
+    ModKey *k = calloc(1, sizeof *k);
+    if (!k) {
+        cJSON_Delete(in);
+        v10_reply_error(req, 500, "SERVER_ERROR", "Server error.");
+        return;
+    }
+    k->req = req;
+    k->t.kind = K_MOD;
+    snprintf(k->t.ext, sizeof k->t.ext, "zip");
+    /* the name: trimmed (submit() trims it too), 1..128 characters, no control characters or markup */
+    const char *name = kn_json_str(in, "name", "");
+    while (*name == ' ' || *name == '\t') name++;
+    size_t nl = strlen(name);
+    while (nl && (name[nl - 1] == ' ' || name[nl - 1] == '\t')) nl--;
+    int restricted = 0;
+    for (size_t i = 0; i < nl; i++) restricted |= (unsigned char) name[i] < 0x20 || name[i] == '<' || name[i] == '>' || name[i] == '"';
+    const size_t keep = brain_utf16_prefix(name, NAME_MAX_LEN);
+    snprintf(k->t.name, sizeof k->t.name, "%.*s", (int) (keep < nl ? keep : nl), name);
+    const cJSON *sizes = cJSON_GetObjectItemCaseSensitive(in, "assetSizes");
+    const cJSON *zm = cJSON_GetObjectItemCaseSensitive(sizes, "mod"), *zt = cJSON_GetObjectItemCaseSensitive(sizes, "thumb");
+    k->mod = cJSON_IsNumber(zm) && zm->valuedouble >= 1 && zm->valuedouble <= 300 * MB ? (long long) zm->valuedouble : 0;
+    k->thumb = cJSON_IsNumber(zt) && zt->valuedouble >= 1 && zt->valuedouble <= 300 * MB ? (long long) zt->valuedouble : 0;
+    const int bad_thumb = zt && !cJSON_IsNull(zt) && !k->thumb;
+    cJSON_Delete(in);
+    if (!nl) KEY_FAIL(k, 400, "BAD_REQUEST", "Mod name is required");
+    if (restricted) KEY_FAIL(k, 400, "MODS_PUBLISH_NAME_RESTRICTED", "That name cannot be used for a mod");
+    if (!k->mod || bad_thumb) KEY_FAIL(k, 400, "MODS_UPLOAD_MISSING_FILE", "The mod needs a .zip file");
+    char token[512] = "";
+    if (kn_http_query_get(req, "token", token, sizeof token) <= 0) {
+        const char *bearer = kn_http_bearer(req);
+        snprintf(token, sizeof token, "%s", bearer ? bearer : "");
+    }
+    if (!token[0]) KEY_FAIL(k, 401, "LOGIN_REQUIRED", "You must be logged in to do this");
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "token", token);
+    accounts_internal_call(g_b, "token", args, mod_key_account, k);
+    cJSON_Delete(args);
+}
+
 /* ------------------------------------------------------------------ module */
+
+/* init: the tickets a previous run left (their records and staged files); anything else in .staging/ goes */
+static void tickets_restore(void) {
+    DIR *d = opendir(C.staging);
+    if (!d) return;
+    struct dirent *e;
+    char p[1300];
+    const time_t wall = time(NULL);
+    int kept = 0;
+    while ((e = readdir(d))) {
+        const size_t nl = strlen(e->d_name);
+        if (e->d_name[0] == '.' || nl != 32 + 5 || strcmp(e->d_name + 32, ".json")) continue;
+        char id[40];
+        snprintf(id, sizeof id, "%.32s", e->d_name);
+        snprintf(p, sizeof p, "%s%s", C.staging, e->d_name);
+        struct stat st;
+        size_t len = 0;
+        unsigned char *txt = stat(p, &st) == 0 ? read_all(p, &len) : NULL;
+        cJSON *o = txt ? cJSON_ParseWithLength((const char *) txt, len) : NULL;
+        free(txt);
+        Ticket *t = NULL;
+        for (int i = 0; i < MAX_TICKETS && !t; i++)
+            if (!T[i].used) t = &T[i];
+        int ok = o && t && kn_json_int(o, "account", 0) > 0;
+        for (const char *c = id; ok && *c; c++) ok = (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'f');
+        if (ok) {
+            memset(t, 0, sizeof *t);
+            snprintf(t->id, sizeof t->id, "%s", id);
+            t->account = kn_json_int(o, "account", 0);
+            snprintf(t->username, sizeof t->username, "%s", kn_json_str(o, "username", ""));
+            snprintf(t->name, sizeof t->name, "%s", kn_json_str(o, "name", ""));
+            t->category = (int) kn_json_int(o, "category", 0);
+            t->kind = (int) kn_json_int(o, "kind", 0);
+            t->priv = (int) kn_json_int(o, "priv", 0);
+            snprintf(t->ext, sizeof t->ext, "%s", kn_json_str(o, "ext", "obj"));
+            snprintf(t->uvc, sizeof t->uvc, "%s", kn_json_str(o, "uvc", ""));
+            ok = t->name[0] && t->kind >= K_MODEL && t->kind <= K_MOD;
+            /* the idle time: since the newest of the record and the staged files (a chunk touches its file) */
+            time_t newest = st.st_mtime;
+            char dir[1200], fp[1400], fb[24];
+            staging_dir(t, dir, sizeof dir);
+            const cJSON *it;
+            cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(o, "parts")) {
+                int fi = -1;
+                for (int i = 0; i < FIELD_COUNT; i++)
+                    if (!strcmp(kn_json_str(it, "key", ""), k_fields[i].key)) fi = i;
+                const long long want = kn_json_int(it, "want", 0);
+                if (fi < 0 || want < 1 || t->nparts >= MAX_PARTS || !field_allowed(t->kind, fi)) {
+                    ok = 0;
+                    break;
+                }
+                Part *pt = &t->parts[t->nparts++];
+                *pt = (Part){fi, want, 0};
+                struct stat fs;
+                snprintf(fp, sizeof fp, "%s/%s", dir, part_file(t, pt, fb, sizeof fb));
+                if (stat(fp, &fs) == 0) {
+                    pt->got = (long long) fs.st_size < want ? (long long) fs.st_size : want;
+                    if (fs.st_mtime > newest) newest = fs.st_mtime;
+                }
+            }
+            if (ok && (int64_t) (wall - newest) * 1000 > C.ticket_ms) ok = 0;
+            if (ok && stat(dir, &st) != 0) ok = mkdirs(dir) == 0;
+            if (ok) {
+                t->used = 1;
+                t->touched = kn_now_ms();
+                kept++;
+            } else {
+                t->used = 1; /* ticket_free removes its files */
+                ticket_free(t);
+            }
+        }
+        cJSON_Delete(o);
+        if (!ok) {
+            unlink(p);
+            snprintf(p, sizeof p, "%s%s", C.staging, id);
+            rm_tree(p);
+        }
+    }
+    /* staging directories without a live ticket, and half-written records */
+    rewinddir(d);
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        int live = 0;
+        for (int i = 0; i < MAX_TICKETS && !live; i++)
+            live = T[i].used && !strncmp(e->d_name, T[i].id, 32) && (!e->d_name[32] || !strcmp(e->d_name + 32, ".json"));
+        if (live) continue;
+        snprintf(p, sizeof p, "%s%s", C.staging, e->d_name);
+        struct stat st;
+        if (!lstat(p, &st) && S_ISDIR(st.st_mode)) rm_tree(p);
+        else unlink(p);
+    }
+    closedir(d);
+    if (kept) KN_INFO(MOD, "%d upload ticket%s kept from the last run", kept, kept == 1 ? "" : "s");
+}
 
 int asset_upload_path(const char *rel, char *out, const size_t cap) {
     if (!C.enabled || !rel) return 0;
@@ -934,6 +1413,7 @@ int asset_upload_init(Brain *b) {
     C.quota = (long long) kn_config_int(b->cfg, "uploads.account_quota_mb", 2048) * MB;
     C.per_hour = (int) kn_config_int(b->cfg, "uploads.per_hour", 30);
     C.max_assets = (int) kn_config_int(b->cfg, "uploads.max_assets", 500);
+    C.mod_cooldown_ms = kn_config_int(b->cfg, "uploads.mod_cooldown_ms", 10000);
     if (C.ticket_ms < 60000) C.ticket_ms = 60000;
     if (C.per_hour < 1) C.per_hour = 1;
     if (C.enabled) {
@@ -941,20 +1421,14 @@ int asset_upload_init(Brain *b) {
             KN_WARN(MOD, "cannot create %s (%s): uploads off", C.staging, strerror(errno));
             C.enabled = 0;
         } else {
-            /* a restart drops the open tickets: their staging copies go too */
-            DIR *d = opendir(C.staging);
-            struct dirent *e;
-            char p[1300];
-            while (d && (e = readdir(d))) {
-                if (e->d_name[0] == '.') continue;
-                snprintf(p, sizeof p, "%s%s", C.staging, e->d_name);
-                rm_tree(p);
-            }
-            if (d) closedir(d);
+            tickets_restore(); /* the open tickets of the last run carry on (see the notes at the top) */
         }
     }
-    kn_http_route(b->http, "POST", "/upload-user-asset", h_upload, b);
-    kn_http_route(b->http, "POST", "/api/upload-user-asset", h_upload, b);
+    kn_http_route(b->http, "POST", "/upload-user-asset", h_upload, NULL);
+    kn_http_route(b->http, "POST", "/api/upload-user-asset", h_upload, NULL);
+    /* the mods' publishKey and publishUpload (deob-10.0.7.js:27315-27350) */
+    kn_http_route(b->http, "POST", "/mods/publish/key", h_mod_key, NULL);
+    kn_http_route(b->http, "POST", "/mods/publish", h_upload, (void *) 1);
     if (C.enabled) KN_INFO(MOD, "asset uploads on: %s", C.dir);
     return 0;
 }
@@ -965,6 +1439,6 @@ void asset_upload_shutdown(Brain *b) {
         struct timespec ts = {0, 10 * 1000 * 1000};
         nanosleep(&ts, NULL);
     }
-    for (int i = 0; i < MAX_TICKETS; i++)
-        if (!T[i].committing) ticket_free(&T[i]);
+    /* the open tickets stay on disk: the next start carries them on (tickets_restore) */
+    memset(T, 0, sizeof T);
 }

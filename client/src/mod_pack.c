@@ -33,6 +33,7 @@ typedef struct {
 
 static struct {
     char url[512];       // the active pack, "" none
+    char user_url[512];  // the pack the player loaded (Mod Manager / Mod Loader), "" none: kept over map changes
     char dir[MP_PATH_MAX]; // its extraction directory
     ModFile *files;
     int count, cap;
@@ -125,8 +126,10 @@ static int entry_target(const char *name, char *rel, const size_t n, ModFileKind
     if (starts_with(name, "models/") && !strstr(name, "event_0")) {
         // f1876: updateMesh(filename minus "models/" and the extension, data, extension)
         if (ends_with(name, ".obj")) *kind = MP_MODEL_OBJ;
-        else if (ends_with(name, ".gltf") || ends_with(name, ".glb")) *kind = MP_MODEL_GLTF;
-        else return 0; // .fbx (no FBX loader), .mtl (OBJ materials are not read)
+        // updateMesh parses gltf / glb with GLTFLoader and fbx with FBXLoader into the same table (deob-10.0.7.js:208256-
+        // 208263); here gltf_model_load reads all three (an .fbx through ufbx, fbx_gltf.c)
+        else if (ends_with(name, ".gltf") || ends_with(name, ".glb") || ends_with(name, ".fbx")) *kind = MP_MODEL_GLTF;
+        else return 0; // .mtl (OBJ materials are not read)
         snprintf(rel, n, "%s", name);
         return 1;
     }
@@ -306,24 +309,10 @@ void mod_pack_shutdown(void) {
     g_mp.url[0] = 0;
 }
 
-int mod_pack_load(const char *url) {
-    if (!url || !*url) {
-        mod_pack_clear();
-        return 0;
-    }
-    if (g_mp.url[0] && !strcmp(g_mp.url, url)) return 1;
-    char *zip_path = mod_pack_resolve_url(url);
-    if (!zip_path) {
-        // v7 also loads Dropbox links; KrunkNative fetches nothing outside its asset host
-        printf("[mod] %s: not on the user-asset host, not loaded\n", url);
-        mod_pack_clear();
-        return 0;
-    }
+// the zip at zip_path (malloc'd, consumed) as the active pack, known by `url`
+static int load_zip(const char *url, char *zip_path) {
     unsigned char *zip = NULL;
     size_t size = 0;
-    // natively a pack the asset tree lacks is downloaded from the user-asset host (asset_fetch.h)
-    const char *const wait[] = {zip_path};
-    asset_prefetch_wait(wait, 1);
     const int read_error = read_file(zip_path, &zip, &size);
     if (read_error || !zip) {
         printf("[mod] %s: cannot read %s\n", url, zip_path);
@@ -358,8 +347,66 @@ int mod_pack_load(const char *url) {
     return 1;
 }
 
+int mod_pack_load(const char *url) {
+    if (!url || !*url) {
+        mod_pack_clear();
+        return 0;
+    }
+    if (g_mp.url[0] && !strcmp(g_mp.url, url)) return 1;
+    char *zip_path = mod_pack_resolve_url(url);
+    if (!zip_path) {
+        // v7 also loads Dropbox links; KrunkNative fetches nothing outside its asset host
+        printf("[mod] %s: not on the user-asset host, not loaded\n", url);
+        mod_pack_clear();
+        return 0;
+    }
+    // natively a pack the asset tree lacks is downloaded from the user-asset host (asset_fetch.h); a Box Office mod
+    // (md<id> from USER_ASSET_KN_ID_BASE) from the brain
+    const char *const wait[] = {zip_path};
+    asset_prefetch_wait(wait, 1);
+    return load_zip(url, zip_path);
+}
+
+int mod_pack_load_user(const char *url) {
+    if (!url || !*url) return 0;
+    const int ok = mod_pack_load(url);
+    if (ok) snprintf(g_mp.user_url, sizeof(g_mp.user_url), "%s", url);
+    return ok;
+}
+
+int mod_pack_load_file(const char *path) {
+    if (!path || !*path) return 0;
+    char url[600];
+    snprintf(url, sizeof(url), "file:%s", path); // the pack's name while it is active (a local file has no URL)
+    if (g_mp.url[0] && !strcmp(g_mp.url, url)) return 1;
+    const int ok = load_zip(url, concat(path, ""));
+    if (ok) snprintf(g_mp.user_url, sizeof(g_mp.user_url), "%s", url);
+    return ok;
+}
+
+void mod_pack_reset(void) {
+    g_mp.user_url[0] = 0;
+    mod_pack_clear();
+}
+
+const char *mod_pack_user_url(void) {
+    return g_mp.user_url;
+}
+
 void mod_pack_map_loaded(const cJSON *map_json) {
     const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(map_json, "modURL"));
-    if (url && *url) mod_pack_load(url); // (the same pack again: nothing to do, v11759 != modURL)
-    else mod_pack_clear();               // KrunkNative: the pack belongs to its map (mod_pack.h)
+    if (url && *url) {
+        mod_pack_load(url); // (the same pack again: nothing to do, v11759 != modURL)
+        return;
+    }
+    // no pack of its own: the player's mod (Krunker keeps loadedMods until Reset Mods, windows[3].reset,
+    // deob-10.0.7.js:218812-218823), else the game's files
+    if (!g_mp.user_url[0]) mod_pack_clear();
+    else if (strcmp(g_mp.url, g_mp.user_url)) {
+        if (!strncmp(g_mp.user_url, "file:", 5)) {
+            char path[512];
+            snprintf(path, sizeof(path), "%s", g_mp.user_url + 5);
+            mod_pack_load_file(path);
+        } else mod_pack_load(g_mp.user_url);
+    }
 }

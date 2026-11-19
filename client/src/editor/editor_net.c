@@ -40,7 +40,8 @@
 //   (?fileId=&key=&offset=), then ?fileId=&done=1: kn_brain and its proxies take request bodies of 1 MiB / 16 MiB,
 //   below a 250 MB model. "Asset Uploaded!" on the done's 200, else the answer's text ("Upload Request Failed" when
 //   a request failed). The files are read again from where they were picked when they are sent. After a failure
-//   Publish/Update starts over with a new uploadA (Krunker 10.0.7: "a failed custom asset upload" is retryable).
+//   Publish/Update starts over with a new uploadA (Krunker 10.0.7: "a failed custom asset upload" is retryable). A chunk
+//   whose request got no answer at all is sent again (UP_RETRIES): kn_brain keeps its tickets over a restart.
 // - updateMapLB (ulb) is v10's: no reply timeout, so the "Please wait..." popup stays until the
 //   user closes it, and the upMp reply goes through uploadResp into #gameUpResp, which the
 //   leaderboard popup does not have (nothing shows). kn_brain stores the settings on the map's
@@ -1510,6 +1511,8 @@ static void add_sizes(cJSON *sizes, const int *fields, const int n) {
 #define UP_CHUNK (512u * 1024u)  // kn_brain takes request bodies up to 1 MiB
 #define UP_TIMEOUT_MS 60000      // one chunk on a slow uplink
 #define UP_DATA (-1)             // the prefab's data.json (the popup's Paste Data text, not a picked file)
+#define UP_RETRIES 20            // a chunk whose request got no answer at all (a restarting brain keeps its tickets)
+#define UP_RETRY_MS 1500
 
 static struct {
     unsigned gen;             // bumped by every upload start / end: an answer of an older upload is dropped
@@ -1520,6 +1523,8 @@ static struct {
     char file_id[40];
     unsigned char *data;      // the file being sent
     size_t len, sent;
+    size_t at;                // the offset of the chunk in flight (sent again after a failed request)
+    int retries;
     char *prefab;             // the prefab data text (uploadA's data)
 } g_up;
 
@@ -1534,6 +1539,12 @@ static void up_end(const char *resp) {
 
 static void up_next(void);
 
+static void up_retry(void *user) {
+    if ((unsigned) (uintptr_t) user != g_up.gen || !g_up.active || !g_ed.active) return;
+    if (g_up.cur < g_up.nfields) g_up.sent = g_up.at; // the same chunk (done is simply asked again)
+    up_next();
+}
+
 static void up_answer(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     if ((unsigned) (uintptr_t) user != g_up.gen || !g_up.active) return;
@@ -1541,6 +1552,12 @@ static void up_answer(void *user, const int status, const char *body, const size
         up_end(NULL);
         return;
     }
+    if (status <= 0 && g_up.retries < UP_RETRIES) {
+        g_up.retries++;
+        html_timer_add(UP_RETRY_MS, up_retry, (void *) (uintptr_t) g_up.gen);
+        return;
+    }
+    g_up.retries = 0;
     if (status != 200) {
         // KE.publishAssetResp: the answer's text in the popup, "Upload Request Failed" when the request failed
         up_end(status > 0 && body && body[0] && body[0] != '{' ? body : "Upload Request Failed");
@@ -1609,6 +1626,7 @@ static void up_next(void) {
     snprintf(url, sizeof(url), "%s/upload-user-asset?fileId=%s&key=%s&offset=%zu", g_up.base, g_up.file_id,
              f == UP_DATA ? "data" : k_files[f].key, g_up.sent);
     const size_t at = g_up.sent;
+    g_up.at = at;
     g_up.sent += n;
     if (!backend_http_post_bytes(url, "application/octet-stream", g_up.data + at, n, UP_TIMEOUT_MS, up_answer, (void *) user))
         up_end("Upload Request Failed");

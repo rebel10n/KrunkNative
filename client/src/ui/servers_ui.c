@@ -3704,6 +3704,11 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             if (args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof(id), "%.0f", args[2].num);
             else snprintf(id, sizeof(id), "%s", args[2].kind == HTML_ARG_STR && args[2].str ? args[2].str : "");
             fav_toggle(id);
+        } else if (argc > 2 && args[0].kind == HTML_ARG_NUM && (int) args[0].num == 1) { // a mod's star (mods_ui.c)
+            char id[32];
+            if (args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof(id), "%.0f", args[2].num);
+            else snprintf(id, sizeof(id), "%s", args[2].kind == HTML_ARG_STR && args[2].str ? args[2].str : "");
+            mods_ui_favorite(id, args[1].kind == HTML_ARG_THIS ? (HtmlElem) args[1].num : 0);
         }
         return 1;
     }

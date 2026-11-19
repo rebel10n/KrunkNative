@@ -1,6 +1,9 @@
 // FBX class models: ufbx -> an in-memory GLB, so the whole glTF path (skins, clips, materials)
 // is shared with GLB/GLTF assets (client/src/gltf.c gltf_model_load's .fbx branch).
-// Space: glTF's right-handed Y-up, metres, baked by ufbx (load_opts.target_axes / target_unit_meters).
+// Space: three's FBXLoader's (Krunker loads FBX user assets with it): the file's own units and axes, no unit conversion
+// (UnitScaleFactor only goes to userData, deob-10.0.7.js:152235), and a Z-up file (GlobalSettings UpAxis 2) turned by
+// rotation.x = -PI / 2 on the root (deob-10.0.7.js:151967). ufbx gives the same: no target axes / units, and that
+// rotation as the root's transform when the file is Z-up.
 // Animations are baked to 30 fps TRS keys per anim stack (FBX curves have no direct glTF equivalent).
 #include <math.h>
 #include <stdarg.h>
@@ -128,14 +131,24 @@ typedef struct {
 int fbx_to_glb(const char *path, unsigned char **out, size_t *out_size) {
     ufbx_load_opts opts = {0};
     opts.generate_missing_normals = true;
-    opts.space_conversion = UFBX_SPACE_CONVERSION_ADJUST_TRANSFORMS;
-    opts.target_axes = ufbx_axes_right_handed_y_up;
-    opts.target_unit_meters = 1.0;
     ufbx_error err;
     ufbx_scene *scene = ufbx_load_file(path, &opts, &err);
     if (!scene) {
         fprintf(stderr, "fbx: %s: %s\n", path, err.description.data);
         return 0;
+    }
+    // FBXLoader: "UpAxis" value 2 (Z, either sign) -> sceneGraph.rotation.set(-PI / 2, 0, 0)
+    const ufbx_coordinate_axis up = scene->settings.axes.up;
+    if (up == UFBX_COORDINATE_AXIS_POSITIVE_Z || up == UFBX_COORDINATE_AXIS_NEGATIVE_Z) {
+        ufbx_free_scene(scene);
+        const double h = sqrt(0.5); // the quaternion of -PI / 2 about X: (sin(-PI / 4), 0, 0, cos(PI / 4))
+        opts.use_root_transform = true;
+        opts.root_transform = (ufbx_transform) {.translation = {0, 0, 0}, .rotation = {-h, 0, 0, h}, .scale = {1, 1, 1}};
+        scene = ufbx_load_file(path, &opts, &err);
+        if (!scene) {
+            fprintf(stderr, "fbx: %s: %s\n", path, err.description.data);
+            return 0;
+        }
     }
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s", path);
@@ -158,7 +171,8 @@ int fbx_to_glb(const char *path, unsigned char **out, size_t *out_size) {
         const ufbx_vec4 base = m->pbr.base_color.value_vec4;
         const float rough = (float) m->pbr.roughness.value_real;
         const float metal = (float) m->pbr.metalness.value_real;
-        addf(&s, ",\"pbrMetallicRoughness\":{\"baseColorFactor\":[%.6g,%.6g,%.6g,%.6g],\"metallicFactor\":%.6g,\"roughnessFactor\":%.6g}",
+        // pbrMetallicRoughness stays open: its baseColorTexture follows, then the "}" after the texture loop closes it
+        addf(&s, ",\"pbrMetallicRoughness\":{\"baseColorFactor\":[%.6g,%.6g,%.6g,%.6g],\"metallicFactor\":%.6g,\"roughnessFactor\":%.6g",
              base.x, base.y, base.z, base.w, metal, rough > 0.0f ? rough : 1.0f);
         const struct { const ufbx_material_map *map; int slot; } maps[] = {
             {&m->pbr.base_color, 0}, {&m->pbr.emission_color, 1}, {&m->pbr.normal_map, 2},

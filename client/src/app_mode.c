@@ -175,6 +175,7 @@ void app_mode_navigate_self(Client *client, const char *query) {
     if (self == APP_MODE_GAME) {
         if (query && strstr(query, "testMap=1")) g_app.test_pending = 1;
         servers_ui_query(query); // ?play=<map> / ?game=<id> (hub Play / Join links; brain, backend_ui.h)
+        mods_ui_query(query);    // ?mod=<name> (the hub's Play Mod)
         download_ui_query(query); // ?download: the Download window (the hub's app badges)
     } else {
         app_set_mode(client, self, query);
@@ -421,6 +422,7 @@ void app_mode_start(Client *client) {
     // index.html?offline=1&testMap=1 / --game "testMap=1": the editor's Test Map in a new game window
     if (g_start_mode == APP_MODE_GAME && strstr(g_start_query, "testMap=1")) g_app.test_pending = 1;
     if (g_start_mode == APP_MODE_GAME) servers_ui_query(g_start_query); // ?play= / ?game= (backend_ui.h)
+    if (g_start_mode == APP_MODE_GAME) mods_ui_query(g_start_query);    // ?mod= (mods_ui.c)
     if (g_start_mode == APP_MODE_GAME) download_ui_query(g_start_query); // ?download (download_ui.h)
     g_app.started = 1;
 }

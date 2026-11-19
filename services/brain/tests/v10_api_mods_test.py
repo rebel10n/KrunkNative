@@ -17,7 +17,6 @@ fields the caller reads:
 
   200  the data v10 reads (the field names of the caller's own code)
   403  FORBIDDEN: a staff-only write from a player without the staff flag (code is never NOT_IMPLEMENTED)
-  403  NOT_IMPLEMENTED: a refusal, only for a write KrunkNative cannot do (mod upload)
   401  LOGIN_REQUIRED: a write or a per-caller read without a session
   404  NOT_FOUND: an unknown resource, or a demo the caller may not open (the caller shows its message)
   400  BAD_REQUEST: a value outside the caller's contract
@@ -247,10 +246,13 @@ def scenario(port, db):
     check("160 POST /moderation/flag {flag:false} clears player_hack", s == 200 and hack and hack[0][0] == 0,
           brief(s, b) + " " + str(hack))
 
-    # ---- 173 POST /mods/publish/key: the upload key (KrunkNative has no mod file storage: a refusal)
+    # ---- 173 POST /mods/publish/key: the upload key (asset_upload.c; the whole flow is asset_upload_test.py's)
     s, b = http(port, "POST", "/mods/publish/key", {"name": "TestMod", "assetSizes": {"mod": 1}}, token=tok["dev"])
-    check("173 POST /mods/publish/key: 403 NOT_IMPLEMENTED refusal with a reason (%s, v10.js 27195 read at 213947)" % W,
-          refused(s, b, "NOT_IMPLEMENTED"), brief(s, b))
+    key_code = err_of(b).get("code") or ""
+    check("173 POST /mods/publish/key: an upload key {fileId, uploadUrl} or a MODS_* refusal (deob-10.0.7.js:27315, :220998-221010)",
+          (s == 200 and (data_of(b) or {}).get("fileId") and (data_of(b) or {}).get("uploadUrl")) or key_code.startswith("MODS_"), brief(s, b))
+    s, b = http(port, "POST", "/mods/publish/key", {"name": "TestMod", "assetSizes": {"mod": 1}})
+    check("173 POST /mods/publish/key without a session: 401 LOGIN_REQUIRED", error_code(s, b, "LOGIN_REQUIRED", 401), brief(s, b))
 
     # ---- 174 GET /mods/by-name/{name}: the published mod (published_mods)
     s, b = http(port, "GET", "/mods/by-name/TestMod")
@@ -312,10 +314,10 @@ def scenario(port, db):
     s, b = http(port, "GET", "/mods/by-name/DoomedMod")
     check("174 a deleted mod is not found by name", error_code(s, b, "NOT_FOUND", 404), brief(s, b))
 
-    # ---- 178 POST /mods/publish: the multipart upload (no mod file storage here: a refusal)
+    # ---- 178 POST /mods/publish: the upload (chunks of a ticket, asset_upload.c); no ticket -> MODS_UPLOAD_INVALID_KEY
     s, b = http(port, "POST", "/mods/publish", {}, token=tok["dev"])
-    check("178 POST /mods/publish: 403 NOT_IMPLEMENTED refusal with a reason (%s, v10.js 27229)" % W,
-          refused(s, b, "NOT_IMPLEMENTED"), brief(s, b))
+    check("178 POST /mods/publish without a ticket: 404 MODS_UPLOAD_INVALID_KEY (deob-10.0.7.js:27345, :223319)",
+          error_code(s, b, "MODS_UPLOAD_INVALID_KEY", 404), brief(s, b))
 
     # ---- 190 GET /kpd/demos: the demos grouped by suspect (kpd_demos, db_kpd.c P_KPD_DEMOS)
     s, b = http(port, "GET", "/kpd/demos?off=0")

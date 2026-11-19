@@ -708,12 +708,12 @@ int object_manager_is_map_object(const Game *game, const int uid) {
     return !o->spawned && !o->dynamic; // (builds and spawned objects come after the map's own)
 }
 
-// A user asset that plays as a GLTF instance (aid with g / q): its instance hangs off the map's
-// load (user_asset.c), so a rebuilt copy would have no instance in the scene
+// A user asset that plays as a GLTF instance (aid with g / q / f: an FBX loads as a GLB, user_asset.c): its instance
+// hangs off the map's load (user_asset.c), so a rebuilt copy would have no instance in the scene
 static int om_gltf_asset(const Object *o) {
     const cJSON *aid = o->raw ? cJSON_GetObjectItem(o->raw, "aid") : NULL;
     const char *text = cJSON_GetStringValue(aid);
-    return text && (strchr(text, 'g') || strchr(text, 'q'));
+    return text && (strchr(text, 'g') || strchr(text, 'q') || strchr(text, 'f'));
 }
 
 // Prefabs whose position other systems take once (the modes' flags, objectives, zones and nodes,

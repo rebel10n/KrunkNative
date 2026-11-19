@@ -30,5 +30,6 @@ long long user_asset_max_bytes(const char *rel);
 // image for .png (PNG, JPEG, GIF, BMP or WebP bytes: Krunker serves what was uploaded), a zip for
 // .zip, a glTF binary for .glb; never an HTML page (a CDN's block / error page answered 200).
 int user_asset_content_ok(const char *rel, const unsigned char *data, size_t len);
-// 1 when rel's id is a Box Office asset's (digits, at least USER_ASSET_KN_ID_BASE): only the brain has its files.
+// 1 when rel's id is a Box Office asset's or mod's (digits, or md + digits for a mod pack, at least
+// USER_ASSET_KN_ID_BASE): only the brain has its files.
 int user_asset_rel_is_kn(const char *rel);

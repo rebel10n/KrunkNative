@@ -121,6 +121,13 @@ int menu_open_window_id(void);                  // the window shown in #windowHo
 void menu_toggle_window(int open);               // UI.toggleWindow
 void menu_close_window(void);                    // closeWindow
 void menu_rerender_if_open(int id);              // rerenderIfOpen
+
+// ---- mods_ui.c: the Mod Manager (4), Mod Loader (18) and Upload Mod (19)
+char *mods_ui_window_gen(int id);   // NULL: not ours (or 19 signed out: the static capture)
+void  mods_ui_window_post(int id);
+int   mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+void  mods_ui_query(const char *query); // ?mod=<name>: loads that mod
+void  mods_ui_favorite(const char *id, HtmlElem star); // favoriteM(1, this, id)
 // a Junk-priced purchase's new balance ("12.34", the brain's reply): set as the "uj" push sets it (account_ui.c)
 void account_ui_set_junk(const char *text);
 void account_ui_set_funds(double kr); // an Eterno KR purchase's reply balance (junk_shop_ui.c)

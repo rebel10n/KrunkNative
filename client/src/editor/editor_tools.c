@@ -337,6 +337,7 @@ void ed_obj_replace_at(const vec3 pos, const char *text, const int group) {
 typedef struct {
     EdFileFn fn;
     void *user;
+    int editor; // asked by the editor: dropped once it closes (the menu's mods_ui.c asks too)
 } PickReq;
 
 static PickReq g_pick;
@@ -378,11 +379,11 @@ static void pick_poll(void *user) {
         PickReq r = g_pick;
         g_pick.fn = NULL;
         if (!strcmp(path, "!")) editor_message("Please select 1 file");
-        else if (r.fn && g_ed.active) r.fn(r.user, path);
+        else if (r.fn && (g_ed.active || !r.editor)) r.fn(r.user, path);
         free(path);
         return;
     }
-    if (g_ed.active && g_pick.fn && glfwGetTime() < g_pick_until) html_timer_add(200, pick_poll, NULL);
+    if ((g_ed.active || !g_pick.editor) && g_pick.fn && glfwGetTime() < g_pick_until) html_timer_add(200, pick_poll, NULL);
 }
 #else
 static void pick_prompted(void *user, const char *value) {
@@ -396,6 +397,7 @@ static void pick_prompted(void *user, const char *value) {
 void ed_pick_file(const char *accept, const EdFileFn fn, void *user) {
     g_pick.fn = fn;
     g_pick.user = user;
+    g_pick.editor = g_ed.active;
 #ifdef __EMSCRIPTEN__
     kn_ed_pick_open(accept ? accept : "");
     g_pick_until = glfwGetTime() + 300.0;
@@ -420,7 +422,8 @@ void ed_pick_file(const char *accept, const EdFileFn fn, void *user) {
             return;
         }
     }
-    ed_prompt("Path of the file to load", "", pick_prompted, NULL);
+    if (g_ed.active) ed_prompt("Path of the file to load", "", pick_prompted, NULL); // (no dialog tool: the editor asks)
+    else g_pick.fn = NULL;
 #endif
 }
 

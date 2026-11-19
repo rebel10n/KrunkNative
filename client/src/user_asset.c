@@ -5,7 +5,9 @@
 // - Only the base map, emissive map (e), alpha test (a) and lightmap (l) flags change the
 //   picture: BasicMaterial has no normal / specular / metalness / roughness / displacement /
 //   bump maps (n s m r p b are parsed and ignored, documented).
-// - FBX assets (f) are not supported (no FBX loader in KN): no mesh.
+// - FBX assets (f): loadObj / loadAnimObj load "<id>/model.fbx" with three's FBXLoader (deob-10.0.7.js:159264,
+//   :159283, :159375-159382) and treat the result like a glTF's (only createAnimMesh skips `.scene` for it,
+//   :159315); here gltf_model_load converts it to a GLB with ufbx (fbx_gltf.c), so f takes the GLTF / GLB path.
 // - Texture filtering: v7 uses LinearFilter unless "txs" (noSmooth); KN's texture cache is
 //   nearest-filtered, so every asset texture is nearest (documented difference).
 #include <user_asset.h>
@@ -75,7 +77,8 @@ int user_asset_load(const UserAssetFlags *flags, UserAssetModel *out) {
     if (!flags || !flags->id[0]) return 0;
 
     if (flags->gltf || flags->glb || flags->fbx) {
-        char *path = user_asset_path(flags, flags->glb ? "model.glb" : flags->fbx ? "model.fbx" : "model.gltf");
+        // loadObj: includes('g') gltf, then includes('q') glb, then includes('f') fbx, each overriding (:159262-159264)
+        char *path = user_asset_path(flags, flags->fbx ? "model.fbx" : flags->glb ? "model.glb" : "model.gltf");
         out->gltf = path ? gltf_model_load(path) : NULL;
         free(path);
         return out->gltf != NULL;
@@ -208,13 +211,15 @@ Mesh *user_asset_object_mesh(Object *object, const cJSON *raw_obj, const vec4 *c
     else return NULL;
 
     UserAssetFlags flags;
-    if (!user_asset_parse(aid_text, &flags) || flags.fbx) return NULL;
-    // the model file still downloading (asset_fetch.h): built when it arrives
-    char *model_path = user_asset_path(&flags, flags.glb ? "model.glb" : flags.gltf ? "model.gltf" : "model.obj");
+    if (!user_asset_parse(aid_text, &flags)) return NULL;
+    // the model file still downloading (asset_fetch.h): built when it arrives. fileExt: g gltf, q glb, f fbx, else obj
+    // (loadObj's includes order: the last one present wins, deob-10.0.7.js:159262-159264)
+    const char *model_file = flags.fbx ? "model.fbx" : flags.glb ? "model.glb" : flags.gltf ? "model.gltf" : "model.obj";
+    char *model_path = user_asset_path(&flags, model_file);
     const int downloading = model_path && asset_prefetch(model_path) == 0;
     UserAssetModel model;
     const int loaded = user_asset_load(&flags, &model);
-    if (!loaded && !(downloading && (flags.gltf || flags.glb))) {
+    if (!loaded && !(downloading && (flags.gltf || flags.glb || flags.fbx))) {
         free(model_path);
         return NULL;
     }
@@ -252,7 +257,7 @@ Mesh *user_asset_object_mesh(Object *object, const cJSON *raw_obj, const vec4 *c
         return mesh;
     }
 
-    // GLTF / GLB: loadAnimMesh places the model at p with rotation r and scale mSize (no re-centring)
+    // GLTF / GLB / FBX: loadAnimMesh places the model at p with rotation r and scale mSize (no re-centring)
     BasicMaterial *material = basic_material_init();
     Mesh *carrier = material ? mesh_init(gltf_empty_geometry(), (Material *) material) : NULL;
     if (!carrier) {

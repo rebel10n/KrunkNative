@@ -39,6 +39,7 @@ typedef struct {
     uint32_t hash;
     const KnAssetEntry *want; // manifest entry, NULL without one
     int ua;                   // a Krunker user asset outside the content set: the user-asset origins
+    int revalidate;           // a Box Office asset already on disk, asked for again once a session (see asset_fetch_request)
     EntryState state;
     int attempts;
     int64_t next_ms;
@@ -302,14 +303,28 @@ int asset_fetch_request(const char *path, const int enqueue) {
     Entry *e = entry_find(rel, hash);
     int answer;
     if (e) {
-        answer = state_answer(e->state);
+        answer = e->revalidate ? 1 : state_answer(e->state); // a revalidation: the file on disk is there all along
         pthread_mutex_unlock(&F.lock);
         return answer;
     }
     pthread_mutex_unlock(&F.lock);
 
-    // unknown so far: present with the manifest's size = fine (the launcher's sync hashed it)
     const int64_t size = kn_fs_size(path);
+    // A Box Office asset (kn_brain's uploads, user_asset_rel_is_kn) changes in place when its creator updates it, and the
+    // brain serves it with Cache-Control: no-cache. A browser (Krunker's client, the web build) asks again on every load
+    // (userAssetsUrl adds no version to a model, deob-10.0.7.js:24298-24301, :159261-159267); here the file on disk is used
+    // at once and asked for again once a session: unchanged it stays, changed it replaces the file and arrives (the
+    // loaders reload it, asset_fetch_client.c), like a three.js page that loads it again.
+    if (size >= 0 && ua && user_asset_rel_is_kn(rel + sizeof(USER_ASSET_DIR) - 1)) {
+        if (enqueue) {
+            pthread_mutex_lock(&F.lock);
+            e = entry_find(rel, hash);
+            if (!e && (e = entry_add(rel, hash, NULL, ua)) != NULL) e->revalidate = 1;
+            pthread_mutex_unlock(&F.lock);
+        }
+        return 1;
+    }
+    // unknown so far: present with the manifest's size = fine (the launcher's sync hashed it)
     if (size >= 0 && (!want || size == want->size)) return 1;
     if (!enqueue) return size >= 0 ? 1 : -1;
     pthread_mutex_lock(&F.lock);
@@ -485,6 +500,7 @@ typedef enum {
     TRY_BAD,      // content did not verify
     TRY_TRANSPORT,
     TRY_LOCAL,    // cannot write here: no point asking another origin
+    TRY_SAME,     // a revalidation: the origin's bytes are the file's (nothing written)
 } TryResult;
 
 // ------------------------------------------------------------------ the content-addressed cache
@@ -610,12 +626,21 @@ static TryResult try_origin(KnHttp *http, const Origin *o, const Entry *e, const
                  (long long) fs.bytes, hex, (long long) e->want->size, e->want->sha256);
         return TRY_BAD;
     }
+    if (e->revalidate) {
+        char old[65] = "";
+        if (kn_fs_sha256(target, old) && !strcmp(old, hex)) {
+            kn_fs_remove(tmp);
+            snprintf(msg, msgn, "%s: unchanged", o->url);
+            return TRY_SAME;
+        }
+    }
     if (!kn_fs_rename(tmp, target)) {
         kn_fs_remove(tmp);
         snprintf(msg, msgn, "cannot rename into %s", target);
         return TRY_LOCAL;
     }
-    snprintf(msg, msgn, "%s (%lld bytes%s)", o->url, (long long) fs.bytes, e->want ? ", verified" : "");
+    snprintf(msg, msgn, "%s (%lld bytes%s%s)", o->url, (long long) fs.bytes, e->want ? ", verified" : "",
+             e->revalidate ? ", updated" : "");
     return TRY_OK;
 }
 
@@ -683,7 +708,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
                     o->down_until = now_ms() + out;
                 } else if (r == TRY_REFUSED) {
                     o->down_until = now_ms() + ASSET_FETCH_ORIGIN_REFUSED_MS; // asked last until then
-                } else if (r != TRY_LOCAL) {
+                } else if (r != TRY_LOCAL) { // OK, SAME, MISSING, BAD: the origin answered
                     o->fail_streak = 0;
                     o->down_until = 0;
                 }
@@ -693,7 +718,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
                 if (r == TRY_BAD) fprintf(stderr, "[assets] %s: refused %s\n", rel, msg);
                 transport |= r == TRY_TRANSPORT;
                 outcome = r == TRY_REFUSED ? TRY_MISSING : r;
-                if (r == TRY_OK || r == TRY_LOCAL) break;
+                if (r == TRY_OK || r == TRY_LOCAL || r == TRY_SAME) break;
             }
         }
         if (!tried && outcome == TRY_MISSING) snprintf(last, sizeof(last), "no origin can serve it");
@@ -704,7 +729,12 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
     pthread_mutex_lock(&F.lock);
     Entry *e = &F.entries[index];
     e->attempts++;
-    if (outcome == TRY_OK) {
+    if (snapshot.revalidate && outcome != TRY_OK) {
+        // unchanged, or the origin could not say: the copy on disk stays (it is what the loaders have)
+        e->state = ENTRY_DONE;
+        F.busy--;
+        if (outcome != TRY_SAME) fprintf(stderr, "[assets] %s: kept the cached copy (%s)\n", rel, last);
+    } else if (outcome == TRY_OK) {
         e->state = ENTRY_ARRIVED;
         F.stats.fetched++;
         if (from_cache) F.stats.cached++;

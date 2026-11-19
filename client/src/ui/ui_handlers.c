@@ -353,6 +353,7 @@ H(h_settings_collapse_folder) {
 }
 
 H(h_switch_tab) { UNUSED; menu_set_active_tab(arg_int(args, argc, 0, 0)); return 1; } // windows[3]/[9].switchTab
+H(h_mods) { UNUSED; return mods_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0; } // mods_ui.c
 
 // ---- loadout / pickers / K.P.D / changelog (client/src/ui/ui_loadout.c)
 static HtmlElem arg_elem(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i) {
@@ -557,7 +558,16 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.0.collapseFolder", h_settings_collapse_folder},
     {"windows.1.searchList", h_servers},
     {"windows.2.action", h_loadout_action},
-    {"windows.3.switchTab", h_switch_tab},
+    {"windows.3.switchTab", h_mods}, // the Mod Manager (mods_ui.c)
+    {"windows.3.loadMore", h_mods},
+    {"windows.3.searchMods", h_mods},
+    {"windows.3.reset", h_mods},
+    {"loadUserMod", h_mods},
+    {"loadModURL", h_mods},
+    {"loadMod", h_mods},
+    {"knModPickLocal", h_mods},
+    {"knModPick", h_mods},
+    {"knModPublish", h_mods},
     // WP-E Host Game rows (ui_host_config.c, routed through servers_ui_handle; the flow's own rows: host_flow_ui.c)
     {"windows.7.toggle", h_servers},
     {"windows.7.changeWep", h_servers},

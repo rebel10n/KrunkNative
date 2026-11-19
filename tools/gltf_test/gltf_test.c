@@ -670,6 +670,49 @@ static void check_fbx_models(void) {
             gltf_instance_fini(inst);
         }
     }
+    // Bastion's FBX map asset (30213f): a material, which made fbx_to_glb's JSON invalid before
+    GltfModel *bastion = gltf_model_load("assets/user-assets/30213/model.fbx");
+    CHECK(bastion != NULL, "Bastion's FBX asset (with a material) loads");
+    if (bastion) {
+        GltfInstance *inst = gltf_instance_create(bastion, 1.0f);
+        CHECK(inst && inst->mesh_count == 1, "Bastion's FBX has one mesh");
+        if (inst && inst->mesh_count) {
+            const Material *m = inst->meshes[0]->material;
+            const int basic = m && m->vtable == &basic_material_vtable;
+            const vec4 c = basic ? ((const BasicMaterial *) m)->color : (vec4) {0};
+            CHECK(basic && fabsf(c.x - 1.0f) < 0.01f && c.y < 0.1f && c.z < 0.01f, "its material is the file's red (%g %g %g)", c.x, c.y, c.z);
+        }
+        if (inst) gltf_instance_fini(inst);
+    }
+    // FBXLoader's space: no unit conversion (a centimetre file stays in centimetres) and a Z-up file turned by
+    // rotation.x = -PI / 2 on the root (deob-10.0.7.js:151967, :152235)
+    GltfModel *zup = gltf_model_load("client/tests/data/fbx/zup_cm.fbx");
+    CHECK(zup != NULL, "the Z-up centimetre FBX loads");
+    if (zup) {
+        GltfInstance *inst = gltf_instance_create(zup, 1.0f);
+        CHECK(inst && inst->mesh_count == 1, "the Z-up FBX has one mesh");
+        if (inst && inst->mesh_count) {
+            const float r = inst->meshes[0]->geometry->bound_radius;
+            CHECK(r > 40.0f && r < 100.0f, "its triangle keeps its centimetre size (bound radius %g)", r);
+            gltf_instance_update(inst, 0.0);
+            const MeshTransform *root = gltf_instance_node(inst, 0);
+            CHECK(root && fabsf(root->rotation.x + (float) M_PI / 2.0f) < 1e-3f && fabsf(root->rotation.y) < 1e-3f &&
+                      fabsf(root->rotation.z) < 1e-3f,
+                  "its root is turned by -PI / 2 about X (%g %g %g)", root ? root->rotation.x : 0.0f,
+                  root ? root->rotation.y : 0.0f, root ? root->rotation.z : 0.0f);
+        }
+        if (inst) gltf_instance_fini(inst);
+    }
+    // a Y-up file is not turned
+    if (cube) {
+        GltfInstance *inst = gltf_instance_create(cube, 1.0f);
+        if (inst) {
+            gltf_instance_update(inst, 0.0);
+            const MeshTransform *root = gltf_instance_node(inst, 0);
+            CHECK(root && fabsf(root->rotation.x) < 1e-3f, "a Y-up FBX's root is not turned (%g)", root ? root->rotation.x : 0.0f);
+            gltf_instance_fini(inst);
+        }
+    }
 }
 
 int main(int argc, char **argv) {

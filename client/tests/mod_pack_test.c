@@ -125,7 +125,7 @@ static void check_test_pack(const char *dir) {
     g_calls[0] = 0;
     map_loaded(url);
     CHECK(!strcmp(mod_pack_active_url(), url), "the pack is active (%s)", mod_pack_active_url());
-    CHECK(mod_pack_file_count() == 6, "6 files replace the game's (%d)", mod_pack_file_count());
+    CHECK(mod_pack_file_count() == 7, "7 files replace the game's (%d)", mod_pack_file_count());
 
     // replaced files read as the pack's
     read_asset("textures/kntest/tex_a.png", got, sizeof(got));
@@ -139,10 +139,12 @@ static void check_test_pack(const char *dir) {
     read_asset("models/kntest/anim_a.glb", got, sizeof(got));
     CHECK(!strcmp(got, "glTF mod"), "models/<key>.glb (%s)", got);
     CHECK(redirected("models/kntest/model_a.obj", got, sizeof(got)), "models/<key>.obj");
+    // an .fbx model: updateMesh reads it with FBXLoader (deob-10.0.7.js:208256-208263); gltf_model_load converts it
+    CHECK(redirected("models/kntest/model_f.fbx", got, sizeof(got)), "models/<key>.fbx");
     CHECK(redirected("textures/kntest/tex_a.png", file_a, sizeof(file_a)), "");
     // what v7 does not apply
     static const char *const kept[] = {"textures/logo.png", "textures/medals/medal_1.png", "img/medals/medal_1.png", "textures/kntest/readme.txt",
-                                       "sound/sub/deeper.mp3", "models/kntest/model_a.mtl", "models/kntest/model_f.fbx", "models/kntest/event_0_x.obj",
+                                       "sound/sub/deeper.mp3", "models/kntest/model_a.mtl", "models/kntest/event_0_x.obj",
                                        "weapons/weapon_1.obj", "models/weapons/weapon_1.obj", "scripts/settings.txt", "css/main.css", "evil.png",
                                        "../evil.png"};
     for (size_t i = 0; i < sizeof(kept) / sizeof(kept[0]); i++) CHECK(!redirected(kept[i], got, sizeof(got)), "%s is replaced (%s)", kept[i], got);
@@ -189,12 +191,26 @@ static void check_test_pack(const char *dir) {
 
     // a map with a pack that cannot be used: nothing applies
     map_loaded(url);
-    CHECK(mod_pack_file_count() == 6, "the pack loads again (%d)", mod_pack_file_count());
+    CHECK(mod_pack_file_count() == 7, "the pack loads again (%d)", mod_pack_file_count());
     map_loaded("https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0");
     CHECK(!mod_pack_active_url()[0] && !redirected("textures/kntest/tex_a.png", got, sizeof(got)),
           "a map with a Dropbox pack (not loadable here) still has the previous map's pack");
     map_loaded("https://user-assets.krunker.io/mdbad/mod.zip");
     CHECK(!mod_pack_active_url()[0], "a corrupt pack is active");
+
+    // a player's mod (the Mod Manager's Load, mods_ui.c): kept over map changes until Reset Mods; a map's own pack
+    // takes over while that map is up
+    CHECK(mod_pack_load_user(url) && !strcmp(mod_pack_user_url(), url), "the player's mod loads (%s)", mod_pack_user_url());
+    map_loaded(NULL);
+    CHECK(!strcmp(mod_pack_active_url(), url) && mod_pack_file_count() == 7, "a map without a pack keeps the player's mod (%s)",
+          mod_pack_active_url());
+    map_loaded("https://user-assets.krunker.io/mdbad/mod.zip");
+    map_loaded(NULL);
+    CHECK(!strcmp(mod_pack_active_url(), url), "the player's mod is back after a map with its own pack (%s)", mod_pack_active_url());
+    mod_pack_reset();
+    CHECK(!mod_pack_active_url()[0] && !mod_pack_user_url()[0], "Reset Mods removes it");
+    map_loaded(NULL);
+    CHECK(!mod_pack_active_url()[0], "and the next map does not bring it back");
 }
 
 static void check_real_pack(void) {

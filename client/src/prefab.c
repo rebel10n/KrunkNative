@@ -1338,10 +1338,11 @@ static void prefab_prefetch_user_assets(PrefabPrefetch *list, const cJSON *raw_o
     char id[24], flags[24];
     if (prefab_prefetch_asset_id(cJSON_GetObjectItem(raw_obj, "aid"), id, sizeof(id), flags, sizeof(flags))) {
         char rel[64];
-        if (strchr(flags, 'g') || strchr(flags, 'q')) {
-            snprintf(rel, sizeof(rel), "user-assets/%s/model.%s", id, strchr(flags, 'q') ? "glb" : "gltf");
+        if (strchr(flags, 'g') || strchr(flags, 'q') || strchr(flags, 'f')) {
+            // loadObj's fileExt: f fbx over q glb over g gltf (deob-10.0.7.js:159262-159264)
+            snprintf(rel, sizeof(rel), "user-assets/%s/model.%s", id, strchr(flags, 'f') ? "fbx" : strchr(flags, 'q') ? "glb" : "gltf");
             prefab_prefetch_add(list, "%s", rel);
-        } else if (!strchr(flags, 'f')) {
+        } else {
             snprintf(rel, sizeof(rel), "user-assets/%s/model.obj", id);
             prefab_prefetch_add(list, "%s", rel);
             if (!settings->no_textures) {

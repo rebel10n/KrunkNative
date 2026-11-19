@@ -576,6 +576,78 @@ static void test_user_asset_outage(void) {
     asset_fetch_stop();
 }
 
+// A Box Office asset (id from USER_ASSET_KN_ID_BASE) already on disk: answered present at once, asked for again once a
+// session (the brain serves it no-cache: its creator may have updated it). Changed bytes replace the file and arrive;
+// the same bytes, or an origin that cannot answer, leave the cached copy (no arrival); a Krunker asset on disk is not
+// asked for again (Krunker never changes a published file).
+static int g_arrivals;
+static char g_arrived_path[1200];
+static void count_arrival(void *user, const char *path) {
+    (void) user;
+    g_arrivals++;
+    snprintf(g_arrived_path, sizeof(g_arrived_path), "%s", path);
+}
+
+static void test_kn_asset_revalidation(void) {
+    printf("Box Office assets: revalidated once a session...\n");
+    char dir[1100], why[1400], changed[1200], same[1200], down[1200], krunker[1200];
+    make_dir(dir, sizeof(dir), "uakn");
+    snprintf(changed, sizeof(changed), "%s/user-assets/1000000123/texture.png", dir);
+    snprintf(same, sizeof(same), "%s/user-assets/1000000124/texture.png", dir);
+    snprintf(down, sizeof(down), "%s/user-assets/1000000125/texture.png", dir);
+    snprintf(krunker, sizeof(krunker), "%s/user-assets/9356/texture.png", dir);
+    const char *old_png = "\x89PNG\r\n\x1a\n old", *new_png = "\x89PNG\r\n\x1a\n new";
+    const char *paths[] = {changed, same, down, krunker};
+    for (int i = 0; i < 4; i++) {
+        char d[1200];
+        snprintf(d, sizeof(d), "%s", paths[i]);
+        *strrchr(d, '/') = 0;
+        kn_fs_mkdirs(d);
+        FILE *f = fopen(paths[i], "wb");
+        if (f) {
+            fputs(old_png, f);
+            fclose(f);
+        }
+    }
+    routes_reset();
+    route(UM "1000000123/texture.png", 200, new_png, 0);
+    route(UM "1000000124/texture.png", 200, old_png, 0);
+    route(UM "1000000125/texture.png", 0, NULL, 0); // transport error
+    route(UK "9356/texture.png", 200, new_png, 0);
+    route(UM "9356/texture.png", 200, new_png, 0);
+    AssetFetchConfig cfg = config(dir);
+    cfg.user_assets = 1;
+    cfg.user_asset_origins = UK " " UM;
+    cfg.workers = 1;
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    for (int i = 0; i < 4; i++) CHECK(asset_fetch_request(paths[i], 1) == 1, "on disk: present at once (%d)", i);
+    asset_fetch_wait_idle(5000);
+    g_arrivals = 0;
+    asset_fetch_poll(count_arrival, NULL);
+    CHECK(g_arrivals == 1 && !strcmp(g_arrived_path, changed), "only the changed one arrives (%d: %s)", g_arrivals, g_arrived_path);
+    char *got = read_text(changed);
+    CHECK(got && strstr(got, "new"), "the changed one is replaced (%s)", got ? got : "(none)");
+    free(got);
+    got = read_text(same);
+    CHECK(got && strstr(got, "old"), "the unchanged one stays");
+    free(got);
+    got = read_text(down);
+    CHECK(got && strstr(got, "old"), "an origin that cannot answer leaves the cached copy");
+    free(got);
+    got = read_text(krunker);
+    CHECK(got && strstr(got, "old"), "a Krunker asset on disk is not asked for again");
+    free(got);
+    int asked_krunker = 0;
+    for (int i = 0; i < T.url_count; i++) asked_krunker |= strstr(T.last_urls[i], "/9356/") != NULL;
+    CHECK(!asked_krunker, "no request for the Krunker asset on disk");
+    const int before = T.requests;
+    for (int i = 0; i < 4; i++) CHECK(asset_fetch_request(paths[i], 1) == 1, "asked again: present (%d)", i);
+    asset_fetch_wait_idle(5000);
+    CHECK(T.requests == before, "once a session (%d more requests)", T.requests - before);
+    CHECK(!has_part_files(dir), "no partial files left");
+    asset_fetch_stop();
+}
+
 // the content-addressed cache (<assets>/.kn-objects): a missing file, or the same bytes under
 // another path, comes back from disk with no request; an object whose bytes are wrong is removed
 // and the file fetched again
@@ -649,6 +721,7 @@ int main(void) {
     test_split();
     test_user_assets();
     test_user_asset_outage();
+    test_kn_asset_revalidation();
     test_cache();
     kn_fs_rmtree(g_root);
     printf("asset_fetch_test: %d checks, %d failed\n", g_checks, g_failed);

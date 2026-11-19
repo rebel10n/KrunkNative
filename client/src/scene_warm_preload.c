@@ -55,12 +55,13 @@ static void preload_ai(const cJSON *record) {
     game_ai_data_defaults(&d);
     game_ai_data_set_asset(&d, text);
     if (!d.asset) return;
-    if (strchr(d.asset_text, 'g') || strchr(d.asset_text, 'q')) {
-        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d.asset, strchr(d.asset_text, 'q') ? "glb" : "gltf");
+    if (strchr(d.asset_text, 'g') || strchr(d.asset_text, 'q') || strchr(d.asset_text, 'f')) {
+        // fileExt q ? glb : g ? gltf : f ? fbx (deob-10.0.7.js:182480); an FBX loads through gltf_model_load too
+        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d.asset,
+                 strchr(d.asset_text, 'q') ? "glb" : strchr(d.asset_text, 'g') ? "gltf" : "fbx");
         preload_gltf(rel);
         return;
     }
-    if (strchr(d.asset_text, 'f')) return; // FBX: ai_render.c builds none
     snprintf(rel, sizeof(rel), "user-assets/%d/model.obj", d.asset);
     preload_obj(rel);
     snprintf(rel, sizeof(rel), "user-assets/%d/model.png", d.asset);

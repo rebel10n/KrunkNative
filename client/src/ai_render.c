@@ -19,7 +19,9 @@
 // toward the camera by min(r, dist / 2), sized 2r (1.2 + 0.15 pulse) and 0.8 * intensity * pulse opaque.
 // Deliberate differences of the parts: the halo's size is the meshes' bounding spheres (diameter / sqrt 3), not a Box3;
 // a viewer that joins while a clip is held sees it play once and then hold (heldLate's jump to the end is not done).
-// Intentional differences: FBX AI models ("f") are not supported; a built-in kind whose v7 user
+// FBX AI models ("f"): loadAnimMesh with fileExt q ? glb : g ? gltf : f ? fbx (deob-10.0.7.js:182480), three's FBXLoader
+// there and ufbx here (gltf_model_load converts the file to a GLB, fbx_gltf.c); the rig's node names come from that GLB.
+// Intentional differences: a built-in kind whose v7 user
 // asset is missing (Drowned Sailor, Jack O' Lantern, Mirror Image: not in the offline build) draws
 // the v3.1.1 model of that kind (ghost / pumpkin) instead of nothing; map AIs with a missing asset
 // draw nothing, as in v7. Side 1 (back faces only) draws both sides.
@@ -34,6 +36,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+int fbx_to_glb(const char *path, unsigned char **out, size_t *out_size); // client/src/fbx_gltf.c
 
 #define AI_RENDER_MAX GAME_AI_MAX
 #define AI_ORB_MAX 64
@@ -152,13 +156,19 @@ static void air_material(BasicMaterial *m, const GameAIData *d, const int emissi
     if (emissive) m->emissive = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
 }
 
-// The asset conf of AI.init: "user-assets/<id>/model.<obj|gltf|glb>" (+ model.png / model_e.png).
+// the anim model's file extension: fileExt q ? glb : g ? gltf : f ? fbx (deob-10.0.7.js:182480)
+static const char *air_anim_ext(const char *flags) {
+    return strchr(flags, 'q') ? "glb" : strchr(flags, 'g') ? "gltf" : "fbx";
+}
+
+// The asset conf of AI.init: "user-assets/<id>/model.<obj|gltf|glb|fbx>" (+ model.png / model_e.png).
 static int air_load_asset(AIMesh *slot, const GameAI *ai, float *center_y) {
     const GameAIData *d = &ai->data;
     const char *flags = d->asset_text;
     char rel[96];
-    if (strchr(flags, 'g') || strchr(flags, 'q')) {
-        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d->asset, strchr(flags, 'q') ? "glb" : "gltf");
+    if (strchr(flags, 'g') || strchr(flags, 'q') || strchr(flags, 'f')) {
+        const char *ext = air_anim_ext(flags);
+        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d->asset, ext);
         char *path = concat(assets_path(), rel);
         GltfModel *model = path ? gltf_model_load(path) : NULL;
         free(path);
@@ -171,11 +181,13 @@ static int air_load_asset(AIMesh *slot, const GameAI *ai, float *center_y) {
         // startAnim ? playClip(startAnim) : every clip (gltf_instance_create's default)
         gltf_instance_play_clip(slot->gltf, d->start_anim[0] ? d->start_anim : "Idle", 0);
         // the node names for setNodeVisible / glowPart (getObjectByName): the same file's rig
-        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d->asset, strchr(flags, 'q') ? "glb" : "gltf");
+        snprintf(rel, sizeof(rel), "user-assets/%d/model.%s", d->asset, ext);
         char *rig_path = concat(assets_path(), rel);
         unsigned char *buf = NULL;
         size_t len = 0;
-        if (rig_path && !read_file(rig_path, &buf, &len)) slot->rig = ai_parts_model_parse(buf, len);
+        // an FBX's node names: the GLB ufbx makes of it (the same conversion the meshes came from)
+        const int read = !rig_path ? 0 : !strcmp(ext, "fbx") ? fbx_to_glb(rig_path, &buf, &len) : !read_file(rig_path, &buf, &len);
+        if (read) slot->rig = ai_parts_model_parse(buf, len);
         free(buf);
         free(rig_path);
         slot->emissive0 = calloc(slot->gltf->mesh_count ? slot->gltf->mesh_count : 1, sizeof(vec4));
@@ -194,7 +206,6 @@ static int air_load_asset(AIMesh *slot, const GameAI *ai, float *center_y) {
         }
         return 1;
     }
-    if (strchr(flags, 'f')) return 0; // FBX
     snprintf(rel, sizeof(rel), "user-assets/%d/model.obj", d->asset);
     Geometry *geometry = air_obj(rel);
     if (!geometry) return 0;

@@ -661,6 +661,7 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     if (!live) live = object_manager_window_gen(id, header); // KrunkNative Object Manager (F1)
     if (!live) live = dedicated_server_window_gen(id, header); // KrunkNative Dedicated Server (its header)
     if (!live) live = v10_customize_window_gen(id); // v10 page: the Change Loadout shell (v10_customize.c)
+    if (!live) live = mods_ui_window_gen(id);        // Mod Manager / Upload Mod (mods_ui.c)
     if (live) return live;
     const WindowDef *w = find_window(id);
     return w ? w->gen() : gen_static(key);
@@ -683,4 +684,5 @@ void ui_window_post(const int id) {
     v10_customize_window_post(id); // v10 page: the class preview into #charPreviewSlot
     store_ui_window_post(id);      // v10 page: the Eterno Shop's #menuWindow.eterno
     battlepass_window_post(id); // windows[5].post(): the window width, scroll to the current level
+    mods_ui_window_post(id);    // the Mod Loader's drop area (mods_ui.c)
 }

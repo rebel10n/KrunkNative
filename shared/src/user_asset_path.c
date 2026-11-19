@@ -101,6 +101,7 @@ int user_asset_content_ok(const char *rel, const unsigned char *data, const size
 
 int user_asset_rel_is_kn(const char *rel) {
     if (!rel) return 0;
+    if (rel[0] == 'm' && rel[1] == 'd') rel += 2; // a mod pack, md<mod_id>/ (Box Office mods take ids from the same base)
     long long id = 0;
     size_t n = 0;
     for (; rel[n] >= '0' && rel[n] <= '9'; n++) {

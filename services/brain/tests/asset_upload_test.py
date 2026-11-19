@@ -7,7 +7,7 @@ the declared files as raw chunks to POST /upload-user-asset?fileId=&key=&offset=
 Checks:
 - a texture: pubR (srv null), chunks in order (a re-sent chunk answers 200, a gap 409, a chunk past the declared size
   400), done -> 200 {id >= 1000000000}; the file is answered by GET /api/user-assets/<id>/texture.png byte for byte with
-  Cache-Control no-cache, and the asset is listed by /api/assets with data {"x":1}.
+  Cache-Control no-cache and an ETag (If-None-Match answers 304), and the asset is listed by /api/assets with data {"x":1}.
 - Krunker 10.0.7 "a failed custom asset upload not being retryable": a model whose OBJ is not text fails its check
   (400 "Invalid Model") and leaves nothing published; its ticket stays open (the files can be sent again), and a new
   uploadA of the account replaces it (the old fileId answers 404) and publishes the model with its companion maps
@@ -18,6 +18,16 @@ Checks:
   "Missing File"; a guest "Must be logged in"; an incomplete upload's done "Upload incomplete".
 - a glTF naming an external buffer is refused (one file), a GLB passes, a prefab's data.json is stored.
 - Private: left out of the listing unless the creator's My Assets tab asks (username).
+- Mods (the menu's Upload Mod, deob-10.0.7.js:220943-221050): POST /mods/publish/key {name, assetSizes} refuses a guest
+  (LOGIN_REQUIRED), level < 5 (MODS_PUBLISH_LEVEL_TOO_LOW), a thumbnail under level 10 (MODS_PUBLISH_THUMB_LEVEL), a
+  zip over 25 MB free (MODS_PUBLISH_SIZE_LIMIT), another account's name (MODS_UPLOAD_NAME_TAKEN) and a key within the
+  cooldown (MODS_PUBLISH_COOLDOWN); else {data: {fileId, uploadUrl "/mods/publish"}}. The chunks to /mods/publish,
+  then done -> {data: {mod_id >= 1000000000}}; GET /api/user-assets/md<id>/mod.zip and thumb.png answer the bytes,
+  the row is mod_url "ua", mod_info {"t": 1}, found by GET /mods/by-name/<name>. A zip with a "../" name or without
+  any of loadModPack's folders, or not a zip, is MODS_UPLOAD_WRONG_TYPE; the same name again updates the mod (same id,
+  mod_updatecounter 2).
+- A restart of kn_brain mid-upload: an asset's and a mod's tickets carry on (the next chunks and done succeed), a
+  half-sent chunk is accepted again whole.
 
 Database: sqlite (KN_TEST_DB_DRIVER=postgres: the config's PostgreSQL in a scratch schema). 77 = skip.
 """
@@ -34,6 +44,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import io
+import zipfile
 import zlib
 
 try:
@@ -167,6 +179,159 @@ class Sock:
         await self.ws.close()
 
 
+def mod_zip(entries):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in entries:
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def mod_key(token, name, mod, thumb=None):
+    sizes = {"mod": mod}
+    if thumb is not None:
+        sizes["thumb"] = thumb
+    st, body, _ = http("POST", "/mods/publish/key", json.dumps({"name": name, "assetSizes": sizes}).encode(), token=token)
+    try:
+        j = json.loads(body)
+    except ValueError:
+        j = {}
+    return st, j.get("data"), (j.get("error") or {}).get("code") if isinstance(j.get("error"), dict) else j.get("error")
+
+
+def mod_send(fid, files, chunk=512 * 1024):
+    for key, data in files:
+        at = 0
+        while at < len(data):
+            st, body, _ = http("POST", "/mods/publish?fileId=%s&key=%s&offset=%d" % (fid, key, at), data[at:at + chunk])
+            if st != 200:
+                return st, body
+            at += chunk
+    st, body, _ = http("POST", "/mods/publish?fileId=%s&done=1" % fid, b"")
+    return st, body
+
+
+def err_code(body):
+    try:
+        return (json.loads(body).get("error") or {}).get("code")
+    except (ValueError, AttributeError):
+        return None
+
+
+async def scenario_mods(names):
+    sock = await Sock().open()
+    await sock.register(names[0])
+    zipped = mod_zip([("textures/ak_0.png", png(2, 2)), ("sound/hit_0.mp3", b"\xff\xfb\x90\x00" + b"\0" * 64), ("readme.txt", b"hi")])
+    thumb = png(4, 4)
+    st, d, code = mod_key(None, "Neon Pack", len(zipped))
+    check(st == 401 and code == "LOGIN_REQUIRED", "a guest -> 401 LOGIN_REQUIRED: %d %r" % (st, code))
+    st, d, code = mod_key(sock.token, "Neon Pack", len(zipped))
+    check(st == 403 and code == "MODS_PUBLISH_LEVEL_TOO_LOW", "level 1 -> MODS_PUBLISH_LEVEL_TOO_LOW: %d %r" % (st, code))
+    me = q("SELECT id FROM accounts WHERE lower(username) = lower(?)", names[0])[0][0]
+    q("UPDATE players SET player_score = ?, player_premium = 0 WHERE player_id = ?", 40000, int(me))   # level 6, free
+    st, d, code = mod_key(sock.token, "Neon Pack", len(zipped), len(thumb))
+    check(st == 403 and code == "MODS_PUBLISH_THUMB_LEVEL", "a thumbnail under level 10 -> MODS_PUBLISH_THUMB_LEVEL: %d %r" % (st, code))
+    q("UPDATE players SET player_score = ? WHERE player_id = ?", 5000000, int(me))
+    st, d, code = mod_key(sock.token, "Neon Pack", 25 * 1000000 + 1)
+    check(st == 400 and code == "MODS_PUBLISH_SIZE_LIMIT", "a zip over 25 MB (free) -> MODS_PUBLISH_SIZE_LIMIT: %d %r" % (st, code))
+    q("UPDATE players SET player_premium = ? WHERE player_id = ?", 86400000, int(me))
+    st, d, code = mod_key(sock.token, "Neon Pack", 50 * 1000000 + 1)
+    check(st == 400 and code == "MODS_PUBLISH_SIZE_LIMIT", "a zip over 50 MB (premium) -> MODS_PUBLISH_SIZE_LIMIT: %d %r" % (st, code))
+    q("UPDATE players SET player_premium = 0 WHERE player_id = ?", int(me))
+    st, d, code = mod_key(sock.token, "Neon Pack", len(zipped), 300 * 1000)
+    check(st == 400 and code == "MODS_PUBLISH_SIZE_LIMIT", "a 300 kB thumbnail (free) -> MODS_PUBLISH_SIZE_LIMIT: %d %r" % (st, code))
+    st, d, code = mod_key(sock.token, "  ", len(zipped))
+    check(st == 400, "no name -> 400: %d %r" % (st, code))
+    st, d, code = mod_key(sock.token, "Neon Pack", len(zipped), len(thumb))
+    check(st == 200 and d and len(d.get("fileId", "")) == 32 and d.get("uploadUrl") == "/mods/publish",
+          "publishKey -> {fileId, uploadUrl /mods/publish}: %d %r %r" % (st, d, code))
+    fid = d["fileId"] if d else ""
+    st, body, _ = http("POST", "/upload-user-asset?fileId=%s&key=mod&offset=0" % fid, zipped[:10])
+    check(st == 404, "a mod ticket is not the assets' route's: %d" % st)
+    st, d2, code = mod_key(sock.token, "Other Pack", len(zipped))
+    check(st == 429 and code == "MODS_PUBLISH_COOLDOWN", "a second key at once -> MODS_PUBLISH_COOLDOWN: %d %r" % (st, code))
+    st, body = mod_send(fid, [("mod", zipped)])
+    check(st == 400 and err_code(body) == "MODS_UPLOAD_SIZE_MISMATCH", "done without the thumbnail -> MODS_UPLOAD_SIZE_MISMATCH: %d %r" % (st, body))
+    st, body = mod_send(fid, [("thumb", thumb)])
+    j = json.loads(body) if st == 200 else {}
+    mid = (j.get("data") or {}).get("mod_id", 0)
+    check(st == 200 and mid >= BASE, "done -> {data: {mod_id >= %d}}: %d %r" % (BASE, st, body))
+    st, got, hdr = http("GET", "/api/user-assets/md%d/mod.zip" % mid)
+    check(st == 200 and got == zipped and "no-cache" in hdr.get("Cache-Control", ""), "GET md<id>/mod.zip: the bytes, no-cache: %d" % st)
+    st, got, _ = http("GET", "/api/user-assets/md%d/thumb.png" % mid)
+    check(st == 200 and got == thumb, "GET md<id>/thumb.png: %d" % st)
+    row = q("SELECT mod_url, mod_info, mod_updatecounter FROM published_mods WHERE mod_id = ?", mid)
+    check(row and row[0][0] == "ua" and json.loads(row[0][1]).get("t") == 1, "published_mods: mod_url ua, mod_info {t: 1}: %r" % (row,))
+    st, body, _ = http("GET", "/mods/by-name/Neon%20Pack")
+    check(st == 200 and str(mid) in body.decode(), "GET /mods/by-name/Neon Pack finds it: %d" % st)
+
+    other = await Sock().open()
+    await other.register(names[1])
+    oid = q("SELECT id FROM accounts WHERE lower(username) = lower(?)", names[1])[0][0]
+    q("UPDATE players SET player_score = ? WHERE player_id = ?", 5000000, int(oid))
+    st, d, code = mod_key(other.token, "neon pack", len(zipped))
+    check(st == 409 and code == "MODS_UPLOAD_NAME_TAKEN", "another account's name -> MODS_UPLOAD_NAME_TAKEN: %d %r" % (st, code))
+    for what, data in (("a ../ name", mod_zip([("textures/../../x.png", b"x")])), ("no loadModPack folder", mod_zip([("readme.txt", b"x")])),
+                       ("not a zip", b"PK" + b"\0" * 64)):
+        st, d, code = mod_key(other.token, "Bad Pack", len(data))
+        fid = d["fileId"] if d else ""
+        st, body = mod_send(fid, [("mod", data)])
+        check(st == 400 and err_code(body) == "MODS_UPLOAD_WRONG_TYPE", "%s -> MODS_UPLOAD_WRONG_TYPE: %d %r" % (what, st, body))
+        time.sleep(0.35)
+    check(not q("SELECT mod_id FROM published_mods WHERE mod_name = 'Bad Pack'"), "nothing published for the bad zips")
+
+    time.sleep(0.35)
+    z2 = mod_zip([("textures/ak_0.png", png(3, 3))])
+    st, d, code = mod_key(sock.token, "Neon Pack", len(z2))
+    st, body = mod_send(d["fileId"] if d else "", [("mod", z2)])
+    j = json.loads(body) if st == 200 else {}
+    check(st == 200 and (j.get("data") or {}).get("mod_id") == mid, "the same name again updates it (same id): %d %r" % (st, body))
+    row = q("SELECT mod_updatecounter FROM published_mods WHERE mod_id = ?", mid)
+    check(row and int(row[0][0]) == 2, "mod_updatecounter 2: %r" % (row,))
+    st, got, _ = http("GET", "/api/user-assets/md%d/mod.zip" % mid)
+    check(st == 200 and got == z2, "the new zip is served")
+    await other.close()
+    await sock.close()
+
+
+async def scenario_restart_open(names):
+    """opens an asset ticket and a mod ticket and sends part of each; returns what the second half needs"""
+    sock = await Sock().open()
+    await sock.register(names[0])
+    tex = png(64, 64, 40)
+    r = await sock.upload_a("Restart wall", 16, {"texture": len(tex)}, None, 2)
+    afid = r[1]["fileId"] if r and r[0] == "pubR" else ""
+    st, _, _ = http("POST", "/upload-user-asset?fileId=%s&key=texture&offset=0" % afid, tex[:100])
+    check(st == 200, "asset: the first chunk before the restart: %d" % st)
+    me = q("SELECT id FROM accounts WHERE lower(username) = lower(?)", names[0])[0][0]
+    q("UPDATE players SET player_score = ? WHERE player_id = ?", 5000000, int(me))
+    z = mod_zip([("textures/ak_%d.png" % i, png(8, 8, i)) for i in range(4)])
+    st, d, code = mod_key(sock.token, "Restart Pack", len(z))
+    mfid = d["fileId"] if d else ""
+    st, _, _ = http("POST", "/mods/publish?fileId=%s&key=mod&offset=0" % mfid, z[:50])
+    check(st == 200, "mod: the first chunk before the restart: %d" % st)
+    await sock.close()
+    return tex, afid, z, mfid
+
+
+def scenario_restart_finish(tex, afid, z, mfid):
+    # the chunk the restart cut off is sent again from where the client last heard back (offset 0 for the mod: a
+    # chunk overlapping what is staged is accepted whole)
+    st, body, _ = http("POST", "/upload-user-asset?fileId=%s&key=texture&offset=100" % afid, tex[100:])
+    check(st == 200, "asset: the next chunk after the restart: %d %r" % (st, body))
+    st, body = done(afid)
+    check(st == 200 and json.loads(body).get("id", 0) >= BASE, "asset: done after the restart -> 200 {id}: %d %r" % (st, body))
+    st, body, _ = http("POST", "/mods/publish?fileId=%s&key=mod&offset=20" % mfid, z[20:])
+    check(st == 200, "mod: an overlapping chunk after the restart -> 200: %d %r" % (st, body))
+    st, body, _ = http("POST", "/mods/publish?fileId=%s&done=1" % mfid, b"")
+    mid = (json.loads(body).get("data") or {}).get("mod_id", 0) if st == 200 else 0
+    check(mid >= BASE, "mod: done after the restart -> {data: {mod_id}}: %d %r" % (st, body))
+    st, got, _ = http("GET", "/api/user-assets/md%d/mod.zip" % mid)
+    check(st == 200 and got == z, "mod: the zip is whole")
+    left = [n for n in os.listdir(os.path.join(UPLOADS, ".staging")) if n.startswith(afid) or n.startswith(mfid)]
+    check(left == [], "the committed tickets leave nothing in .staging: %r" % left)
+
+
 def listing(user="", token=None, route="/api/assets"):
     path = route + "?index=0&cat=-1" + ("&username=" + user if user else "")
     st, body, _ = http("GET", path, token=token)
@@ -203,6 +368,15 @@ async def scenario(names):
     st, got, hdr = http("GET", "/api/user-assets/%d/texture.png" % tid)
     check(st == 200 and got == tex and "no-cache" in hdr.get("Cache-Control", ""),
           "GET /api/user-assets/<id>/texture.png: the bytes, no-cache: %d %s" % (st, hdr.get("Cache-Control")))
+    etag = hdr.get("ETag", "")
+    check(re.fullmatch(r'"[0-9a-f]{64}"', etag) is not None, "an ETag of the content's sha256: %r" % etag)
+    req = urllib.request.Request("http://127.0.0.1:%d/api/user-assets/%d/texture.png" % (PORT, tid), headers={"If-None-Match": etag})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            st = r.status
+    except urllib.error.HTTPError as e:
+        st = e.code
+    check(st == 304, "If-None-Match with that ETag -> 304 (the browser keeps its copy): %d" % st)
     st, _, _ = http("GET", "/api/user-assets/%d/thumb.png" % tid)
     check(st == 404, "a file it does not have -> 404 (never Krunker's host): %d" % st)
     lst = listing()
@@ -383,27 +557,49 @@ def main():
                    "brain": {"host": "127.0.0.1", "port": PORT, "federation": False, "internal_secret": "upl-%d" % os.getpid()},
                    "streams": {"enabled": False},
                    "user_assets": {"upstream": "http://127.0.0.1:9/", "cache_dir": os.path.join(WORK, "ua-cache")},
-                   "uploads": {"dir": UPLOADS},
+                   "uploads": {"dir": UPLOADS, "mod_cooldown_ms": 300},
                    "accounts": {"free_premium": False, "starting_kr": 0, "login_throttle_s": 0, "password_iterations": 1000,
                                 "email": {"required": False},
                                 "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
-    brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    try:
+    runs = [0]
+
+    def start():
+        runs[0] += 1
+        proc = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         up = False
         for _ in range(300):
             try:
                 with open(os.path.join(WORK, "brain.log")) as f:
-                    if re.search(r"listening on http://127\.0\.0\.1:%d" % PORT, f.read()):
+                    if len(re.findall(r"listening on http://127\.0\.0\.1:%d" % PORT, f.read())) >= runs[0]:
                         up = True
                         break
             except OSError:
                 pass
-            if brain.poll() is not None:
+            if proc.poll() is not None:
                 break
             time.sleep(0.1)
-        check(up, "kn_brain is up (%s)" % DRIVER)
+        check(up, "kn_brain is up (%s, run %d)" % (DRIVER, runs[0]))
+        return proc
+
+    def stop(proc):
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    brain = start()
+    try:
         stamp = str(int(time.time()) % 100000)
         asyncio.run(scenario(["upl%s" % stamp, "upo%s" % stamp]))
+        print("mods:")
+        asyncio.run(scenario_mods(["upm%s" % stamp, "upn%s" % stamp]))
+        print("a restart mid-upload:")
+        time.sleep(0.35)
+        pending = asyncio.run(scenario_restart_open(["upr%s" % stamp]))
+        stop(brain)
+        brain = start()
+        scenario_restart_finish(*pending)
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()

@@ -15,9 +15,9 @@
  *                                   (players.player_hack, moderation_log 'flag' / 'unflag'), v10's flagUser
  *                                   ("Flag Player as a Hacker"). Player reports are the social tunnel's.
  *
- *   mods (creations.c's published_mods; the upload is not hosted)
- *     POST /mods/publish/key        REFUSAL 403 NOT_IMPLEMENTED: KrunkNative keeps no mod files (sh_upload_files)
- *     POST /mods/publish            REFUSAL 403 NOT_IMPLEMENTED: the multipart upload, the same
+ *   mods (creations.c's published_mods)
+ *     POST /mods/publish/key        asset_upload.c: {name, assetSizes} -> {data: {fileId, uploadUrl}} (a mod ticket)
+ *     POST /mods/publish            asset_upload.c: the ticket's files as chunks, then done -> {data: {mod_id}}
  *     GET  /mods/by-name/:name      {data: mod row} (published_mods, the list's columns plus name, creator_name,
  *                                   featured and version: the fields v10's mod view reads; version null when
  *                                   mod_info has none); 404 NOT_FOUND
@@ -38,8 +38,7 @@
  *
  * Refusals: 403 FORBIDDEN (a staff-only write from another player, with its reason), 401 LOGIN_REQUIRED (a
  * write or a per-caller read without a session), 404 NOT_FOUND (an unknown resource, or a demo the caller may
- * not open), 400 BAD_REQUEST (a value outside the caller's contract). 403 NOT_IMPLEMENTED is only for the two
- * uploads, which KrunkNative cannot store.
+ * not open), 400 BAD_REQUEST (a value outside the caller's contract).
  */
 #include "v10_mods.h"
 
@@ -53,7 +52,6 @@
 #include "knsvc/json.h"
 
 /* the refusals' reasons and the not-found texts (the v10 caller shows the message) */
-#define WHY_UPLOAD "Mod uploads are not supported on this server"
 #define WHY_LOGIN "You must be logged in to do this"
 #define WHY_STAFF_CHAT "Only moderators and developers can ban chat"
 #define WHY_STAFF_FLAG "Only moderators and developers can flag a player"
@@ -512,7 +510,6 @@ static const kn_proc P_MOD_KPD_VOTE = {"mod_kpd_vote", NULL, run_kpd_vote};
 
 /* ------------------------------------------------------------------ the HTTP side */
 
-static void h_refuse(kn_http_req *req, void *ud) { v10_reply_error(req, 403, "NOT_IMPLEMENTED", (const char *) ud); }
 
 static void bad_request(kn_http_req *req, const char *message) { v10_reply_error(req, 400, "BAD_REQUEST", message); }
 
@@ -840,9 +837,8 @@ int v10_mods_init(Brain *b) {
     kn_http_route(b->http, "POST", "/moderation/chat", h_chat_set, b);
     kn_http_route(b->http, "POST", "/moderation/flag", h_flag, b);
 
-    /* mods: the uploads are refused (no mod file storage); the rest is the published_mods catalogue */
-    kn_http_route(b->http, "POST", "/mods/publish/key", h_refuse, (void *) WHY_UPLOAD);
-    kn_http_route(b->http, "POST", "/mods/publish", h_refuse, (void *) WHY_UPLOAD);
+    /* mods: POST /mods/publish/key and /mods/publish (the upload) are asset_upload.c's; the rest is the
+     * published_mods catalogue */
     kn_http_route(b->http, "GET", "/mods/by-name/:name", h_by_name, b);
     kn_http_route(b->http, "POST", "/mods/:id/vote", h_vote, b);
     kn_http_route(b->http, "POST", "/mods/:id/feature", h_feature, b);
