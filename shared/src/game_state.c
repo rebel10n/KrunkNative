@@ -42,12 +42,25 @@ void game_set_state(Game *game, const GameState state) {
     if (game->hooks.state_changed) game->hooks.state_changed(game, state);
 }
 
-// v10.0.7 "Anonymous players now stay anonymous": the name others see for an anonMode account player. Krunker's
-// server gives it one from its backend (the lobby record's "an", the player's fakeName: getName, deob-10.0.7.js:171688;
-// lobbyPayload :190985); the bundle never generates one, and its only masked-name form is "Player_<n>" (ranked names,
-// getRankedPlayerName :195806-195812, and an account seen by a guest). KN uses that form with the player's join-order
-// number (Player.name_no, the same n the ranked names and Hide player names use).
+// v10.0.7 "Anonymous players now stay anonymous": the name an account viewer sees for an anonMode account player.
+// Krunker's server sets it (the lobby record's "an", the player's fakeName: getName, deob-10.0.7.js:171688;
+// lobbyPayload :190985); the assignment is not in the shipped bundle (fakeName is only initialised, :171331). The
+// form is Krunker's own: the live i18n's anonymous tip addresses the player as "Anonymous_1" (generic.tips.anonymous,
+// deob-10.0.7.js:204284 and krunker.io/i18n/en.js?v=5fHFc, fetched 2026-11-19), and public descriptions of
+// Anonymous Mode say it shows as Anonymous plus a number (en.namu.wiki/w/Krunker, as quoted by search results
+// 2026-11-19). The number Krunker picks is server-side; KN uses the player's join-order number (Player.name_no,
+// Krunker's per-game sid counterpart, the n of "Player_<n>").
 void game_anon_alias(const Player *player, char *out, const size_t size) {
+    if (!out || !size) return;
+    if (player && player->name_no > 0) snprintf(out, size, "Anonymous_%d", player->name_no);
+    else snprintf(out, size, "Anonymous");
+}
+
+// getName's guest-viewer form (deob-10.0.7.js:171688: no viewer account -> 'Player_' + this.sid; the add-player
+// sync, chat and end board pass the viewer's account, :176753, :177091, :195257): what a viewer without an account
+// sees for an account player. Krunker's wiki says the same ("guests cannot see the usernames of accounts in game,
+// they show up as Player_1, Player_2", krunkerio.fandom.com/wiki/Accounts, as quoted by search results 2026-11-19).
+void game_guest_view_name(const Player *player, char *out, const size_t size) {
     if (!out || !size) return;
     if (player && player->name_no > 0) snprintf(out, size, "Player_%d", player->name_no);
     else snprintf(out, size, "Player");

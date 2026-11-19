@@ -29,6 +29,7 @@
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
 #include <quick_play_retry.h> // a Quick Play search's full official game is tried again (kio_retry)
 #include <cJSON.h>
+#include <krunker_probe.h> // the input-bank probe: out_flush holds the frames while it asks (krunker_probe.h)
 #include "../viewer/viewer_store.h" // a custom game's studio skins (viewer_skin_define)
 #include <GLFW/glfw3.h> // glfwGetTime: the sync trace's second
 #include <ctype.h>
@@ -1154,15 +1155,28 @@ static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target, int 
 }
 
 static void out_flush(HttpConn *c, int *ok) {
+    // KRUNKNATIVE_INPUT_BANK_PROBE (krunker_probe.h): while a held walk runs every frame stays queued, as behind
+    // a lag switch; the first flush after it sends them in one burst and logs how many went
+    static int held = 0;
+    if (krunker_probe_hold()) {
+        held = 1;
+        return;
+    }
     pthread_mutex_lock(&K.lock);
     OutFrame *f = K.out_head;
     K.out_head = K.out_tail = NULL;
     pthread_mutex_unlock(&K.lock);
+    int sent = 0;
     while (f) {
         OutFrame *next = f->next;
         if (*ok) *ok = ws_send_frame(c, 2, f->data, f->len);
+        sent++;
         free(f);
         f = next;
+    }
+    if (held) {
+        krunker_probe_released(sent);
+        held = 0;
     }
 }
 
@@ -1201,7 +1215,8 @@ static void *ws_thread(void *arg) {
             out_flush(&c, &ok);
             if (!ok) break;
             struct pollfd pfd[2] = {{c.fd, POLLIN, 0}, {K.wake[0], POLLIN, 0}};
-            const int ready = http_conn_pending(&c) ? 1 : poll(pfd, 2, 100);
+            // 10 ms while the input-bank probe runs, so a held walk's burst leaves close to its end
+            const int ready = http_conn_pending(&c) ? 1 : poll(pfd, 2, krunker_probe_active() ? 10 : 100);
             if (ready < 0 && errno == EINTR) continue;
             if (ready < 0) break;
             if (pfd[1].revents & POLLIN) {

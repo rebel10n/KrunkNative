@@ -1273,7 +1273,7 @@ else ()
 
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
-    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_link_trade.c client/src/ui/player_names.c
+    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_probe.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_link_trade.c client/src/ui/player_names.c
                    client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c shared/src/rules/v10/network_sounds_v10.c
                    shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                    shared/src/season.c shared/src/voice.c shared/src/social.c shared/src/ks/ks_net_official.c)
@@ -1360,7 +1360,7 @@ else ()
     # whole, with doubles for its client, account and map callers; no socket is opened
     if (NOT WIN32)
         add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
-                       client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
+                       client/src/net/krunker_link.c client/src/net/krunker_probe.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
                        client/src/net/krunker_link_s2c.c client/src/net/krunker_link_trade.c shared/src/ks/ks_net_official.c
                        client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c shared/src/rules/v10/network_sounds_v10.c client/src/ui/player_names.c
                        client/src/ui/quick_play_retry.c client/src/net/krunker_checkout.c
@@ -1475,7 +1475,7 @@ else ()
 
     # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
-    add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
+    add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c client/src/net/krunker_probe.c
                    client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_sounds.c client/src/net/krunker_link_trade.c shared/src/ks/ks_net_official.c
                    client/src/net/krunker_altcha.c client/src/ui/player_names.c)
     target_include_directories(krunker_sync_test PRIVATE client/include)

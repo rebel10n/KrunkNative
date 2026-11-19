@@ -908,14 +908,22 @@ static ClientConnection *net_client_of_player(const Player *player) {
     return NULL;
 }
 
-// v10.0.7: an anonMode account player is game_anon_alias ("Player_<n>") to everyone but itself and dev viewers, after
-// the ranked names (getName's order, deob-10.0.7.js:171688: isUsingRankedNames first, then the server's fakeName).
+// The name `to` sees for `subject`, in getName's order (deob-10.0.7.js:171687-171689, called per viewer with the
+// viewer's account and forceReal = viewer isDev, :176758-176761):
+//   itself, a dev viewer (forceReal) or a subject without an account -> the real name;
+//   a ranked match before IN_PROGRESS (isUsingRankedNames) -> "Player_<lobby id>" (getRankedPlayerName :195806);
+//   a viewer with an account -> the anonMode alias (fakeName; game_anon_alias, v10.0.7) or the real name;
+//   a viewer without an account -> "Player_<n>" for every account player (game_guest_view_name).
+// No accounts (offline, no brain): every account_id is 0, so every name is real.
 static void net_shown_name(const ClientConnection *to, const ClientConnection *subject, const char *real, char *out, const size_t size) {
+    const int real_name = !subject || to == subject || (to && (to->acct.flags & NET_PLAYER_INFO_DEV)) || subject->acct.account_id <= 0;
     const int id = subject ? accounts_ranked_lobby_id(subject) : 0;
-    if (id > 0 && to != subject && game_names_masked(&g_server->game)) snprintf(out, size, "Player_%d", id);
-    else if (subject && to != subject && subject->player && subject->player->anon_mode && subject->acct.account_id > 0 &&
-             !(to && (to->acct.flags & NET_PLAYER_INFO_DEV)))
-        game_anon_alias(subject->player, out, size);
+    if (real_name) snprintf(out, size, "%s", real ? real : "");
+    else if (id > 0 && game_names_masked(&g_server->game)) snprintf(out, size, "Player_%d", id);
+    else if (!to || to->acct.account_id <= 0) {
+        if (subject->player) game_guest_view_name(subject->player, out, size);
+        else snprintf(out, size, "%s", real ? real : "");
+    } else if (subject->player && subject->player->anon_mode) game_anon_alias(subject->player, out, size);
     else snprintf(out, size, "%s", real ? real : "");
 }
 

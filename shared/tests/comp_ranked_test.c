@@ -332,9 +332,16 @@ static void test_comp_lobby(void) {
         comp_lobby_set_anon(&game, 1, 1);
         const NetCompLobbyEntry *out = g_sent_count == 1 ? &g_sent[0].packet.entry : NULL;
         CHECK(out && g_sent[0].uid == NET_TARGET_ALL && g_sent[0].packet.op == NET_COMP_LOBBY_SET && out->uid == 1 && out->account_id == 0 &&
-                  out->level == 0 && out->verified == 0 && !out->clan[0] && out->flag == -1 && !strcmp(out->name, "Player_3"),
-              "anonMode: \"cda\" without i / v / cl / l / f, n = the anonymous alias Player_3 (%s)", out ? out->name : "-");
+                  out->level == 0 && out->verified == 0 && !out->clan[0] && out->flag == -1 && !strcmp(out->name, "Anonymous_3"),
+              "anonMode: \"cda\" without i / v / cl / l / f, n = the anonymous alias Anonymous_3 (%s)", out ? out->name : "-");
         CHECK(!strcmp(stored->name, "alpha"), "the table keeps the real name");
+        // getName's two masked forms (deob-10.0.7.js:171688; game_state.c): the anonMode alias an account viewer sees,
+        // and the guest viewer's name for any account player
+        char masked[32];
+        game_anon_alias(&anon_player, masked, sizeof(masked));
+        CHECK(!strcmp(masked, "Anonymous_3"), "game_anon_alias: Anonymous_<n> (%s)", masked);
+        game_guest_view_name(&anon_player, masked, sizeof(masked));
+        CHECK(!strcmp(masked, "Player_3"), "game_guest_view_name: Player_<n> (%s)", masked);
         game.players = saved_players;
         game.player_count = saved_count;
         CHECK(stored->account_id == 11 && stored->level == 30 && stored->verified && !strcmp(stored->clan, "KN"), "the table keeps the identity");

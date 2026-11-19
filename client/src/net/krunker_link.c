@@ -23,6 +23,7 @@
 #include <krunker_cheat.h>
 #include <krunker_build_live.h> // the current build's strides, offsets and argument positions
 #include <krunker_altcha.h>
+#include <krunker_probe.h> // the input-bank probe (doc/v10/input-bank-probe.md), off unless asked
 #include <cJSON.h>
 #include <game_config.h>
 #include <map_catalog.h>
@@ -702,6 +703,7 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     l->syncs++;
     l->last_ack = r.ack_seq;
     memcpy(l->sync_pos, r.position, sizeof(l->sync_pos));
+    krunker_probe_on_sync(r.ack_seq, r.position); // KRUNKNATIVE_INPUT_BANK_PROBE only (krunker_probe.h)
     // [1] Math.round(ping) (syncState, deob-10.0.3.js:222389): the handler takes it only when truthy
     // (`you && sync && sync[1]`, :258311), so a 0 keeps the last ping shown
     if (krunker_is(ping, KRUNKER_NUM) && ping->u.num != 0) {
@@ -3018,6 +3020,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
             if (n) emit(l, NET_PACKET_EXT, ext, n);
             const int code = (int) num(arg(&f, 0), -1);
             note(l, KRUNKER_LINK_EV_NOTE, "input sync failed (%d): pending inputs dropped", code);
+            krunker_probe_input_failed(code);
             // addChat(-1, null, "Input Failed " + code, 2) unless the code is 6, 7 or (v10.0.7) 8 or the last
             // "f" came under 5 s ago; the time is kept for every "f" (deob-10.0.7.js:227210-227212, 10.0.6 :225466
             // without 8: "Fixed players sometimes being kicked with Input Failed after a server hiccup")
@@ -3313,6 +3316,8 @@ void krunker_link_input_fields(const NetInputPacket *in, double v[15]) {
     v[2] = js_round(1000.0 * (js_round(in->x_dir * 1000.0) / 1000.0));
     v[3] = js_round(1000.0 * (js_round(in->y_dir * 1000.0) / 1000.0));
     v[4] = in->move_dir >= 0 && in->move_dir <= 7 ? (in->move_dir + 1) % 8 : -1; // movDirs index (see the top)
+    const int probe_dir = krunker_probe_move_dir(); // the input-bank probe's walk (krunker_probe.h); -2 = none
+    if (probe_dir >= -1) v[4] = probe_dir >= 0 ? (probe_dir + 1) % 8 : -1;
     v[5] = in->flags & NET_INPUT_SHOOT ? 1 : 0;
     v[6] = in->flags & NET_INPUT_SCOPE ? 1 : 0;
     v[7] = in->flags & NET_INPUT_JUMP ? 1 : 0;

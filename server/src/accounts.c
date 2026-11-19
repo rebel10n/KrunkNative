@@ -492,10 +492,12 @@ void accounts_configure_public(Game *game, const cJSON *cli_map) {
 static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *info, const ClientConnection *to) {
     memset(info, 0, sizeof(*info));
     info->uid = client->player ? client->player->uid : client->id;
-    // WP-C: v7.1.4 players.js sync with anonMode: a random level, no clan, account or badges for
-    // everyone but the player and dev viewers
+    // anonMode: no clan, account or badges for everyone but the player and dev viewers, and the level is
+    // `fakeLevel || randInt(1, 100)` (getPlayerAddData, deob-10.0.7.js:176753). fakeLevel starts at 1 (:171332)
+    // and only bots get another (createPlayer's config level, :177064), so an anonymous player shows level 1:
+    // the random level is never reached (it was rolled per send here before).
     if (client->player && client->player->anon_mode && to != client && !(to && (to->acct.flags & NET_PLAYER_INFO_DEV))) {
-        info->level = 1 + rand() % 100; // fakeLevel || UTILS.randInt(1, 100)
+        info->level = 1;
         return;
     }
     info->account_id = client->acct.account_id;

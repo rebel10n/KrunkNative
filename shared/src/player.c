@@ -4497,9 +4497,13 @@ float player_lerp_angle(float a, float b, const float t) {
 // inputBank / inputBankAt (:171267-171268) and zeroes them (:171545) next to inputFreq (:171544, and
 // players.resetFreq :176781-176784); every read is on Krunker's game server, which no reference tree
 // has (Krunker_v3.1.1 and Krunker_v7.1.4 are client sources whose "Input Failed" path is the chat
-// line, v7.1.4 index.js:14728; game.leak/src has no input budget). The official server cannot be
-// measured either: KN's official link gets matchmaker.krunker.io's CaptchaRequired before any game
-// socket. Re-derive them if a server build or a capture ever shows Krunker's numbers.
+// line, v7.1.4 index.js:14728; game.leak/src has no input budget), and neither the live i18n nor
+// krunker.io/docs/versions.txt nor a public page gives a number (re-searched 2026-11-19). What the
+// bundle does limit is each input: delta in [deltaMlt, Math.round(1000 / 30) = 33 ms] / deltaDiv
+// (deob-10.0.7.js:16404, :172014; game_constants.max_delta). The official server can be measured
+// with a person past matchmaker.krunker.io's captcha: KRUNKNATIVE_INPUT_BANK_PROBE (client/src/net/
+// krunker_probe.c, doc/v10/input-bank-probe.md) holds back the client's frames like a lag switch and
+// logs where the server puts the player; replace these two with what it measures.
 #define PLAYER_INPUT_BANK_MAX 0.5  // s: the most held-back input time one burst may still move (KN value)
 #define PLAYER_INPUT_BANK_RATE 1.5 // refill per real second (KN value)
 #define PLAYER_INPUT_BANK_EPSILON 1e-4

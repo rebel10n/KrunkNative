@@ -28,9 +28,8 @@ const CompLobbyEntry *comp_lobby_get(const Game *game, const int uid) {
 // leaves without its "an" (the anonymous name), takes n = an when anonymous and the ranked names are not in use,
 // and goes out with i 0, v 0, cl 0, l 0 and f -1 when anonymous or while they are (isUsingRankedNames :195820:
 // ranked, gameState <= WARMUP; game_names_masked). "Anonymous players now stay anonymous on the team panel". The
-// official server sets "an" from Krunker's backend (the bundle never makes one); KN's is the anonymous alias the game
-// shows everywhere else, game_anon_alias ("Player_<n>", the masked-name form the bundle uses for ranked names and for
-// guest viewers, getName :171687-171688), sent as n while the ranked names are not in use.
+// official server sets "an" (the bundle never makes one); KN's is the anonymous alias the game shows everywhere else,
+// game_anon_alias ("Anonymous_<n>", Krunker's own form: game_state.c), sent as n while the ranked names are not in use.
 static CompLobbyEntry lobby_payload(const Game *game, const CompLobbyEntry *entry) {
     CompLobbyEntry out = *entry;
     const CompLobby *l = game->comp_lobby;

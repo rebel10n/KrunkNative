@@ -2428,8 +2428,11 @@ void game_send_chat_names(Game*, int speaker, const char *speaker_name, int coun
 // hooks.state_changed. game_names_masked: a ranked match before IN_PROGRESS shows Player_<n> names.
 void game_set_state(Game*, GameState);
 int game_names_masked(const Game*);
-// The name others see for an anonMode account player ("Player_<name_no>", game_state.c): v10.0.7 anonymous players.
+// The name account viewers see for an anonMode account player ("Anonymous_<name_no>", game_state.c): v10.0.7
+// anonymous players. game_guest_view_name: what a viewer without an account sees for an account player
+// ("Player_<name_no>", getName's guest form).
 void game_anon_alias(const Player*, char *out, size_t size);
+void game_guest_view_name(const Player*, char *out, size_t size);
 // player-viewer WP-E part 2c (shared/src/game.c): v7 game.isPubType() (no host, or mimicPubs; the
 // offline sandbox counts), game.incStat(key, player), challenges.update(game, key, value,
 // {wep, stk}, player) through GameHooks.progress, and game.incMedal(name, player) (accounts and
