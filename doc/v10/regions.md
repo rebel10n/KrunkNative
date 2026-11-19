@@ -176,11 +176,11 @@ nearest to its real location:
 | `com.angeles` | `LA` | Los Angeles, CA | `us-ca-sv` | ~500 km | `us-ca-la` is not pinged; Silicon Valley is next (us-tx is ~2,000 km) |
 | `com.chitown` | `CH` | Chicago, IL | `us-nj` | ~1,150 km | `us-il` is dedicated-only; New York is the nearest pinged id (us-tx ~1,300 km) |
 | `amph.ashburn` | `VA` | Ashburn, VA | `us-nj` | ~350 km | no Virginia id; New York is the nearest pinged id (us-ga, a name only, is ~850 km) |
-| `kn-iev` | `KV` | Kyiv, Ukraine | `de-fra` | ~1,550 km | see below: no Ukrainian id; `pol` (Warsaw, ~690 km) is a name only; Frankfurt is the nearest pinged id (me-bhn ~3,200 km) |
-| `kn-mia` | `MI` | Miami, FL | `us-fl`, alias `us-nj` | 0 / ~1,760 km | see below: `us-fl` (Miami) is a name only, so the official client never pings it; the alias `us-nj` is listed for it while no node of its own holds `us-nj` |
+| `kn-iev` (gone 2026-11-19) | `KV` | Kyiv, Ukraine | `de-fra` | ~1,550 km | see below: no Ukrainian id; `pol` (Warsaw, ~690 km) is a name only; Frankfurt is the nearest pinged id (me-bhn ~3,200 km) |
+| `kn-mia` (gone 2026-11-19) | `MI` | Miami, FL | `us-fl`, alias `us-nj` | 0 / ~1,760 km | see below: `us-fl` (Miami) is a name only, so the official client never pings it; the alias `us-nj` is listed for it while no node of its own holds `us-nj` |
 | `kn-mnz` | `VA` | Ashburn/Manassas, VA | `us-nj` | ~350 km | as `amph.ashburn` before it (2026-11-13: a VM on meal) |
 | `kn-ams` | `AM` | Amsterdam, NL | `de-fra` | ~360 km | `nl-ams` (Amsterdam) is a name only; Frankfurt is the nearest pinged id. Shares `de-fra` with Kyiv |
-| `kn-jnb` | `JN` | Johannesburg, ZA | `af-ct`, alias `me-bhn` | ~1,270 / ~6,350 km | see below: `af-ct` (South Africa) is a name only; the alias `me-bhn` is the nearest pinged id |
+| `kn-jnb` (gone 2026-11-19) | `JN` | Johannesburg, ZA | `af-ct`, alias `me-bhn` | ~1,270 / ~6,350 km | see below: `af-ct` (South Africa) is a name only; the alias `me-bhn` is the nearest pinged id |
 | (dev / offline) | `local` | this machine | `local` | - | the non-production list is `["local"]` |
 
 A node whose region is already a pinged v10 id (`de-fra`, `us-nj`, `local`, as the federation test
@@ -201,6 +201,16 @@ to). The mapping is in `services/brain/registry.c` (`k_v10_regions`, aliases in 
   operator can point `us-nj` at a specific host.
 - **Ping host.** Without a `ping_host` the host is the owning brain's public URL (`/ping` is
   served there), as before.
+
+## 2026-11-19: Miami, Kyiv and Johannesburg are gone
+
+`kn-mia`, `kn-iev` and `kn-jnb` stopped answering (ping and ssh) by 2026-11-19 (the user: "the edge
+is gone, we need to use divide/wisp.baby"). Their nine Box Office servers moved to `kn-mnz`, CT 203
+on divide (Ashburn #4..#9, `VA`; `deploy/ansible/inventory/hosts.yml`), so the live nodes are `VA`
+(9 Box Office + 2 Strike) and `AM` (3 + 1). `MI`, `KV` and `JN` stay in every table below (codes,
+aliases, `accounts.region_index`): with no node they are simply not listed in `/mm/ping-list`, and a
+seek in them is routed to the nearest hosted node (section 3). The sections below describe the sites
+as they were.
 
 ## Kyiv (`KV`) and Miami (`MI`)
 

@@ -9,7 +9,9 @@ query_port      0
 // UDP replies from 0.0.0.0 leave with the route source and NATs drop them.
 // (Needs the server_bin with the whole-value cfg parse fix: "2.56.222.45" != 2.56.)
 listen_host     "{{ kn_gameserver_listen_host }}"
-public_host     "{{ kn_gameserver_hostname_fmt | format(n) }}"
+{# kn_gameserver_dns_count (defaults): above it, reuse an existing <edge>-<k> record (same address). #}
+{% set kn_gs_dns = [kn_gameserver_dns_count | int, 1] | max %}
+public_host     "{{ kn_gameserver_hostname_fmt | format(n if n <= kn_gs_dns else ((n - 1) % kn_gs_dns) + 1) }}"
 max_players     {{ kn_gameserver_max_players }}
 {% set kn_gs_modes = kn_gameserver_instance_modes[n] | default(kn_gameserver_modes) %}
 {% if kn_gs_modes %}

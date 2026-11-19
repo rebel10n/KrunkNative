@@ -5,6 +5,12 @@
 # kn_gameserver_first_port / kn_gameserver_count live in group_vars/edges/main.yml
 # (shared with edge_firewall, which opens exactly those ports).
 kn_gameserver_hostname_fmt: "{{ kn_edge_name }}-%d.{{ kn_domain }}"
+# How many <edge>-<n> A records exist (kept by hand in Spaceship's DNS panel; role kn_dns_check
+# lists the missing ones). An instance above it advertises the record of instance ((n-1) % it) + 1:
+# the same host and address (every record of an edge is its kn_public_ip), only the port differs,
+# as Strike already does with <edge>-1. Default: one record per instance. Raise it (or drop the
+# host's override) once the records are added.
+kn_gameserver_dns_count: "{{ kn_gameserver_count }}"
 # Units are installed but stay disabled/stopped until the finder heartbeat code
 # (server.cfg finder_url) lands in the shipped server_bin: flip to true then.
 kn_gameserver_enabled: false

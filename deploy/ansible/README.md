@@ -107,9 +107,9 @@ secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS DIVIDE_SSH_KEY DIVIDE_KNO
 "Through divide"). That includes `kn_bridge` (the bundle is
 built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped without CF secrets).
 
-`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` or e.g. `mia,iev`,
+`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` (= `ams,ashburn`) or e.g. `ams`,
 `dry_run` = `--check --diff`) builds server_bin for bullseye/bookworm/trixie and runs
-`edges.yml --tags release,gameserver`, the canary (mia) first, the others only once mia-1 answers the
+`edges.yml --tags release,gameserver`, the canary (ams) first, the others only once ams-1 answers the
 server-info query again. It restarts the game servers only when server_bin, its data or its
 config changed (below, "Restarts"), draining them. Secrets: `EDGES_SSH_KEY`
 (a CI-only ed25519 key, private half in `~/.config/kn-secrets/github-ci/edges_ci_ed25519`; in each
@@ -136,13 +136,24 @@ root `authorized_keys` needs the `krunknative-github-ci-edges` line like every e
 divide line and the secret.
 
 Edge groups (`inventory/hosts.yml`): `edges` = `edges_kn` (the dedicated `kn-<site>` VMs on the wisp
-Proxmox hosts; this repo owns their firewall and fail2ban base, `group_vars/edges_kn/main.yml`; and
-kn-mnz, CT 203 on divide, group `divide`: no in-guest firewall or fail2ban, see [Edge firewall](#edge-firewall)).
+Proxmox hosts, since 2026-11-19 only kn-ams; this repo owns their firewall and fail2ban base,
+`group_vars/edges_kn/main.yml`; and kn-mnz, CT 203 on divide, group `divide`: no in-guest firewall or
+fail2ban, see [Edge firewall](#edge-firewall)). kn-mia, kn-iev and kn-jnb are gone (2026-11-19: no
+answer to ping or ssh); their nine Box Office servers moved to kn-mnz (Ashburn #4..#9), whose CT grew
+to 10 cores / 6 GB, so it also runs 2 Strike instances (8+ vcpus). MI, KV and JN have no node: a seek
+there goes to the nearest hosted region (`doc/v10/regions.md`).
 kn-mnz is behind divide's NAT: `kn_public_ip` 91.199.82.174 (the `ashburn-<n>.krunk.io` A records),
 `kn_listen_ip` 172.16.5.94 (what the game sockets bind and the gateways also allow), and
-`kn_forwarded_ports` (21015-21017, 21115: what divide DNATs to it). `edges.yml` refuses a
+`kn_forwarded_ports` (21015-21023, 21115-21116: what divide DNATs to it). `edges.yml` refuses a
 `kn_gameserver_count` or Strike count with a port outside `kn_forwarded_ports`: raise them only together
-with divide's forwards and `/etc/pve/firewall/203.fw` (infra's side).
+with divide's forwards and `/etc/pve/firewall/203.fw` (infra's side). On divide those are the kn port
+sets in `/etc/nftables.conf` (the `dnat to $KN` line and the kru <-> kn hairpin accepts in
+`divide_guests`; back it up as `nftables.conf.bak-<what>-<time>`, `nft -c -f` then `nft -f`: the file
+replaces only its own tables) and the `-dport` lines of `203.fw`; the CT's size is `pct set 203
+--cores N --memory M` (a running CT keeps its old cpuset until restarted: write the new one to
+`/sys/fs/cgroup/lxc/203/cpuset.cpus` meanwhile). DNS: Spaceship has `ashburn-1..3` only, so
+`kn_gameserver_dns_count: 3` makes #4..#9 advertise `ashburn-1..3` (the same address, their own port)
+until `ashburn-4..9` A 91.199.82.174 are added by hand (the DNS check lists them); then drop it.
 The old G-Core VPSs shared with abulxt (`edges_old`) were cancelled 2026-11-13. A new VM needs, before
 Deploy edges can reach it: its address in `ssh_config` (HostName) and as `kn_public_ip` (unset = left out
 of kru's net-bridge / kn-rtc allowlists, and `edges.yml` stops at `kn_gameserver`), the CI key line
@@ -511,14 +522,13 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
   `edge_firewall_rollback_seconds`.
 
 Not on divide's guests (kn-mnz, CT 203; inventory group `divide`): divide's pve-firewall is their
-firewall (`/etc/pve/firewall/203.fw` opens 21015-21017 and 21115, tcp + udp; infra's side), never
+firewall (`/etc/pve/firewall/203.fw` opens 21015-21023 and 21115-21116, tcp + udp; infra's side), never
 rules inside the guest, so `kn_host_firewall: false` (`group_vars/divide/main.yml`) makes
 `edges.yml` and `firewall.yml` skip edge_firewall there (the role's files are untouched).
 
 This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
-also uses, so the open range always matches the instances (today every kn-<site> VM
-21015-21017), then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
+also uses, so the open range always matches the instances (today kn-ams 21015-21017), then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
 (and 21115).
 
 Safe apply (`roles/edge_firewall/tasks/apply.yml`), only when a rendered file changed: the files are

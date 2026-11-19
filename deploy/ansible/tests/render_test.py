@@ -34,32 +34,34 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ANSIBLE = os.path.dirname(HERE)
 results = []
 
-# (inventory host, vcpus, MemTotal MB). vcpus as the live instance counts say (README "Edge
-# firewall": every kn-<site> 21015-21017); memory: a test value. Since the old VPSs left
-# (2026-11-13) no edge has 8+ vcpus, so the 2-Strike path is not rendered here.
+# (inventory host, vcpus, MemTotal MB). vcpus as the live instance counts say: kn-ams 21015-21017,
+# kn-mnz (CT 203 on divide, 10 cores since 2026-11-19) 21015-21023, so it renders the 2-Strike path
+# (8+ vcpus); memory: kn-mnz's CT size, else a test value. kn-mia, kn-iev and kn-jnb are gone
+# (2026-11-19).
 EDGE_NAMES = {"kn-mnz": "ashburn"}  # inventory/hosts.yml kn_edge_name where it is not the host's suffix
 
 
 def edge_of(host):
-    """kn_edge_name of an inventory host: com.clara -> clara, kn-mia -> mia, kn-mnz -> ashburn."""
+    """kn_edge_name of an inventory host: com.clara -> clara, kn-ams -> ams, kn-mnz -> ashburn."""
     if host in EDGE_NAMES:
         return EDGE_NAMES[host]
     return host.split(".", 1)[1] if "." in host else host.split("-", 1)[1]
 
 
 HOSTS = {
-    "kn-mia": (4, 3915),
-    "kn-iev": (4, 3915),
-    "kn-mnz": (4, 3915),
-    "kn-jnb": (4, 3915),
+    "kn-mnz": (10, 6144),
     "kn-ams": (4, 3915),
 }
 # inventory/hosts.yml kn_public_ip, and kn_listen_ip where the host is behind NAT (kn-mnz: CT 203 on divide)
-PUBLIC = {"kn-mia": "45.92.71.48", "kn-iev": "185.101.138.155", "kn-mnz": "91.199.82.174",
-          "kn-jnb": "5.188.120.31", "kn-ams": "92.38.186.100"}
+PUBLIC = {"kn-mnz": "91.199.82.174", "kn-ams": "92.38.186.100"}
 NAT_LISTEN = {"kn-mnz": "172.16.5.94"}
+# inventory/hosts.yml kn_gameserver_dns_count where it is below the instance count (kn-mnz: Spaceship has
+# ashburn-1..3 only): instance n above it advertises <edge>-<((n-1) % it) + 1>, the same address.
+DNS_COUNT = {"kn-mnz": 3}
+# kn-mnz's kn_forwarded_ports: the hairpin on kru (kru-rtc.nft) sends exactly these to its LAN address
+MNZ_FORWARDED = "21015-21023, 21115-21116"
 DIVIDE = ("kru", "kn-mnz")  # inventory group divide: no in-guest firewall / fail2ban
-TIGHT = ("kn-iev", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
+TIGHT = ("kn-ams", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
 SECRET = "render-test-internal-secret-0123456789"
 
 PLAYBOOK = """
@@ -195,11 +197,13 @@ def check_host(out, host, vcpus, mem):
         t = read(os.path.join(d, f))
         n = int(re.search(r"(\d+)", f).group(1))
         bo_ports.add(int(cfg_value(t, "port")))
-        ok = (cfg_value(t, "node_id") == f"{edge.upper()}{n}" and cfg_value(t, "public_host") == f"{edge}-{n}.krunk.io"
+        dns = DNS_COUNT.get(host, bo)
+        name_n = n if n <= dns else (n - 1) % dns + 1
+        ok = (cfg_value(t, "node_id") == f"{edge.upper()}{n}" and cfg_value(t, "public_host") == f"{edge}-{name_n}.krunk.io"
               and cfg_value(t, "port") == str(21015 + n - 1) and "flavor" not in t and "strike" not in t.lower()
               and cfg_value(t, "modes") == "rotation" and cfg_value(t, "max_players") == "8"
               and cfg_value(t, "coordinator_secret") == SECRET and cfg_value(t, "bans_file") == f"/var/lib/krunknative/gs-{n}/bans.json")
-        check(f"{edge}: {f} is the Box Office config (no flavor, {edge.upper()}{n}, :{21015 + n - 1})", ok, t)
+        check(f"{edge}: {f} is the Box Office config (no flavor, {edge.upper()}{n}, :{21015 + n - 1}, {edge}-{name_n}.krunk.io)", ok, t)
     st_ports = set()
     for f in st_cfgs:
         t = read(os.path.join(d, f))
@@ -261,7 +265,7 @@ def main():
         nft = read(os.path.join(out, "kru-rtc.nft"))
         check("kru-rtc.nft: ICE DNAT to 91.199.82.174, hairpin of kn-mnz's forwarded ports to 172.16.5.94",
               'iifname "eth0" udp dport 21100 dnat to 91.199.82.174' in nft
-              and "ip daddr 91.199.82.174 meta l4proto { tcp, udp } th dport { 21015-21017, 21115 } dnat to 172.16.5.94" in nft
+              and f"ip daddr 91.199.82.174 meta l4proto {{ tcp, udp }} th dport {{ {MNZ_FORWARDED} }} dnat to 172.16.5.94" in nft
               and 'oifname "eth0" ip daddr 172.16.5.94 masquerade' in nft and "delete table ip krurtc" in nft, nft)
         unit = read(os.path.join(out, "kru-public-ip.service"))
         check("kru-public-ip.service: 91.199.82.174/32 on lo, then the NAT table, before kn-rtc",

@@ -632,27 +632,43 @@ jobs:
           --download-base "https://github.com/$GITHUB_REPOSITORY/releases/download/client-latest"
           --out "stage/$COMMIT12"
 
+      # kru is CT 120 on the Proxmox host divide since 2026-11-16, reachable only through it: ci_config
+      # is deploy/ansible/ssh_config with divide -> its CI key, as in deploy-kru.yml (ssh passes -F on
+      # to the ProxyJump). The kru connection itself takes -i id_kru and KRU_HOST (its LAN address).
       - name: SSH setup
         env:
           KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
           KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
+          DIVIDE_SSH_KEY: ${{ secrets.DIVIDE_SSH_KEY }}
+          DIVIDE_KNOWN_HOSTS: ${{ secrets.DIVIDE_KNOWN_HOSTS }}
         run: |
+          set -euo pipefail
+          if [ -z "$KRU_SSH_KEY" ] || [ -z "$DIVIDE_SSH_KEY" ] || [ -z "$DIVIDE_KNOWN_HOSTS" ]; then
+            echo "::error::missing KRU_SSH_KEY / DIVIDE_SSH_KEY / DIVIDE_KNOWN_HOSTS secret"; exit 1
+          fi
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru
-          chmod 600 ~/.ssh/id_kru
-          printf '%s\n' "$KRU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          (umask 077; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru; printf '%s\n' "$DIVIDE_SSH_KEY" > ~/.ssh/id_divide)
+          printf '%s\n%s\n' "$KRU_KNOWN_HOSTS" "$DIVIDE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+          awk '
+            $1 == "Host" { host = $2 }
+            host == "divide" && $1 == "IdentityFile" { print "  IdentityFile ~/.ssh/id_divide"; print "  IdentitiesOnly yes"; next }
+            $1 == "IdentityFile" { next }
+            { print }
+            END { print ""; print "Host *"; print "  StrictHostKeyChecking yes"; print "  UserKnownHostsFile ~/.ssh/known_hosts" }' \
+            deploy/ansible/ssh_config > ~/.ssh/ci_config
+          chmod 600 ~/.ssh/ci_config
 
       # kn-updates publish: verifies the packages, indexes the content, writes the manifest last and
       # only moves forward (an older commit than the published one is skipped).
       - name: Upload and publish
         run: |
           set -euo pipefail
-          ssh_cmd="ssh -i $HOME/.ssh/id_kru -p ${KRU_PORT:-22} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          ssh_cmd="ssh -F $HOME/.ssh/ci_config -o ProxyJump=divide -i $HOME/.ssh/id_kru -p ${KRU_PORT:-22} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
           rsync -rt --chmod=D755,F644 -e "$ssh_cmd" "stage/$COMMIT12/" "root@$KRU_HOST:/opt/krunknative-updates/incoming/$COMMIT12/"
           $ssh_cmd "root@$KRU_HOST" /usr/local/bin/kn-updates publish "/opt/krunknative-updates/incoming/$COMMIT12"
           echo "### updates: published $COMMIT12 to https://dl.krunk.io/updates/client/latest.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup key
         if: always()
-        run: rm -f ~/.ssh/id_kru
+        run: rm -f ~/.ssh/id_kru ~/.ssh/id_divide ~/.ssh/ci_config
