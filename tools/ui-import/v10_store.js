@@ -85,7 +85,7 @@ const tags = {
   Debug: '#000000', Easter: null, Twitch: '#6441a5', 'Clan Wars': null, Charity: '#6441a5', Raid: '#eb347a', Canteen: '#fe4002',
   Gift: null, Free: null, Christmas: null, Burg: '#ADE4F9', Sandstorm: '#ADE4F9', Littletown: '#ADE4F9', Site: '#ADE4F9',
   Industry: '#ADE4F9', Subzero: '#ADE4F9', Freight: '#ADE4F9', Undergrowth: '#ADE4F9', Lostworld: '#ADE4F9', Kanji: '#ADE4F9',
-  Citadel: '#ADE4F9', Oasis: '#ADE4F9', Evacuation: '#ADE4F9', Craftable: '#cc51f8', NFT: '#f3b8ff', Ranked: '#ff5500',
+  Citadel: '#ADE4F9', Oasis: '#ADE4F9', Evacuation: '#ADE4F9', Craftable: '#cc51f8', NFT: '#f3b8ff', Ranked: '#ff5500', Discord: '#5865f2' /* v10.0.7, deob-10.0.7.js:103481 */,
   FRVR: 'linear-gradient(132deg, rgba(0,189,255,1) 0%, rgba(155,0,255,1) 25%, rgba(255,0,41,1) 50%, rgba(255,150,3,1) 75%, rgba(255,199,0,1) 100%)',
   Halloween: '#ff5500', 'Battle Pass': '#00BCD4', 'Premium Spin': '#fc038d',
 };
@@ -149,6 +149,8 @@ function applyShopMutations(s, i, emojiMap) {
   if (s.free) { s.limT = 'Free'; s.noSale = true; s.noSpin = true; }
   if (s.itemShop) { s.noSale = s.itemShop == 1; s.noSpin = true; s.limited = true; s.limT = 'Item Shop'; }
   if (s.ranked) { s.noSale = true; s.noSpin = true; s.limited = true; s.noQuickSell = true; s.limT = 'Ranked'; }
+  // v10.0.7 (deob-10.0.7.js:103761): a Discord item is the Discord link's reward: no sale, no spin, no quick-sell
+  if (s.discord) { s.noSale = true; s.noSpin = true; s.limited = true; s.noQuickSell = true; s.limT = 'Discord'; }
   if (s.drop) { s.noSale = true; s.noQuickSell = true; if (!s.limT) s.limT = 'Twitch'; }
   if (s.mapReward != null) { s.noSpin = true; s.noSale = true; s.noQuickSell = true; if (!s.limT) s.limT = 'Map Reward'; }
   if (s.eventReward != null) { s.noSpin = true; s.noSale = true; s.noQuickSell = true; if (!s.limT) s.limT = 'Event Reward'; }

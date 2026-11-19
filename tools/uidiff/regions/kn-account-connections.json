@@ -1,0 +1,17 @@
+{
+  "note": "KN only: the Account window's Connections tab with Discord and v10.0.7's Connected apps open (account_links.c): the Discord row in v10's unavailable state, the Twitch header, the Connected apps section (Box Office wording, the empty list)",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "discord-section",
+      "rect": [270, 214, 740, 136]
+    },
+    {
+      "name": "connected-apps",
+      "rect": [270, 410, 740, 104]
+    }
+  ]
+}

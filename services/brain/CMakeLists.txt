@@ -19,6 +19,8 @@ set(KN_BRAIN_SOURCES
     # svc-accounts sources
     accounts.c
     account_life.c                # v10.0.3 Account Security / Privacy / Twitch (0359), raids.c's record (0360)
+    discord.c                     # v10.0.7 Discord link: link, Join Server, unlink, deletion pending (0366)
+    oauth.c                       # v10.0.7 Login with Box Office: the OAuth provider, Connected apps (0366)
     raids.c                       # v10.0.3's raid record: stats commits, account raidStats, the raid leaderboards
     social_ws.c
     social_eb.c
@@ -546,6 +548,18 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_life_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_account_life PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;accounts")
+    # v10.0.7's Login with Box Office (oauth.c, 0366, doc/v10/oauth-provider.md): registration, PKCE code flow,
+    # refresh rotation, revoke, scoped reads, Connected apps, the consent page, 2FA-approved write actions
+    add_test(NAME brain_oauth
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/oauth_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_oauth PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;accounts")
+    # v10.0.7's Discord link and the Twitch link's tokens (discord.c, account_life.c, 0366) against a fake Discord /
+    # Twitch: link, callback, Join Server, unlink with deletion pending; sealed tokens, refresh, the drops reconnect flag
+    add_test(NAME brain_account_links
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_links_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_account_links PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;accounts")
     # v10 lottery (lottery.c, 0348_lottery): the guest view, skin / Junk / RP entries, the timer's draw
     add_test(NAME brain_lottery
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py

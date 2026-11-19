@@ -28,11 +28,11 @@
  *                   <brain.public_url>/twitch/callback): the code is exchanged (streams.twitch.auth_url), the Twitch
  *                   user read (streams.twitch.api_url /users), the link stored, and the account's sockets get v10's
  *                   ["twitchVerifyResponse", error | null, twitchName, twitchId] (TWITCH_VERIFY_RESPONSE). The page
- *                   says the outcome. Neither token is kept (KrunkNative claims no drops with them).
+ *                   says the outcome. The tokens are kept sealed (kn_seal, 0366 twitch_links) for the drops' reconnect flag.
  *   ["removeTwitchLink"] -> ["twitchRemoveResponse"]: tw_userid / tw_twitchname cleared.
  *   ["getTwitchDrops"]   -> ["twitchDropsResponse", []]: Box Office has no Twitch drop campaigns (v10: "Nothing to
- *                   Claim"). v10.0.7's answer also carries a reconnect flag (the stored Twitch link expired); the brain
- *                   keeps no Twitch token, so it never sends one.
+ *                   Claim"), then v10.0.7's reconnect flag: true when the link's stored token is gone or Twitch refused it
+ *                   and its refresh (see "the drops answer's reconnect flag" below; doc/v10/oauth-provider.md).
  *   ["verifyTwitch", code] -> ["twitchVerifyResponse", "Twitch linking is currently unavailable."]: the code of a
  *                   redirect to a page is never valid here (the redirect URI is the brain's).
  *   The pair is permanent (twitch_links): an account keeps its Twitch user and a Twitch user its account after an
@@ -75,6 +75,9 @@
 #define TWITCH_STATE_S 600      /* a started link's state lives 10 minutes */
 #define TWITCH_MAX_BODY (64 * 1024)
 #define TWITCH_UNAVAILABLE "Twitch linking is currently unavailable."
+#define TWITCH_CHECK_S 3600     /* a stored token is validated with Twitch at most hourly (the drops answer) */
+#define TWITCH_SEAL_ACCESS "twitch.access"   /* kn_seal labels of the link's tokens (0366 twitch_links) */
+#define TWITCH_SEAL_REFRESH "twitch.refresh"
 
 #define P(i) (n > (i) ? p[i] : NULL)
 #define PI(i) pint(P(i))
@@ -87,7 +90,8 @@ static struct {
     int64_t grace_s;
     int purge;
     char client_id[128], client_secret[256];
-    char authorize_url[256], token_url[256], api_url[256], redirect_uri[512], scope[128];
+    char authorize_url[256], token_url[256], api_url[256], redirect_uri[512], scope[128], validate_url[256];
+    char seal[256]; /* the key material of the sealed tokens (accounts.secrets_key, else brain.join_secret) */
     int timeout_ms;
 } L;
 
@@ -158,11 +162,13 @@ static kn_db_result *run_account_delete(kn_dbconn *c, int n, const char *const *
 }
 static const kn_proc P_ACCOUNT_DELETE = {"account_delete", NULL, run_account_delete};
 
-/* (id, state) -> {linked}: the account's earlier states (and every stale one) go, the new one is stored hashed */
+/* (id, state, force) -> {linked}: the account's earlier states (and every stale one) go, the new one is stored hashed.
+ * A linked account may only start again as v10.0.7's reconnect (force 1, connectTwitchAcc(true), deob-10.0.7.js:218917):
+ * the same Twitch user comes back with fresh tokens (run_twitch_link keeps the permanent pair). */
 static kn_db_result *run_twitch_state_new(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     char *linked = dbx_text(&x, SQL(.any = "SELECT tw_userid FROM players WHERE player_id = $1"), KN_DB_ARGS(P(0)));
-    if (linked && *linked) {
+    if (linked && *linked && PI(2) != 1) {
         free(linked);
         dbx_refuse(&x, "Twitch Account Already Linked");
         return dbx_finish(&x, NULL);
@@ -191,7 +197,8 @@ static kn_db_result *run_twitch_state_take(kn_dbconn *c, int n, const char *cons
 }
 static const kn_proc P_TWITCH_STATE_TAKE = {"twitch_state_take", NULL, run_twitch_state_take};
 
-/* (id, twitch id, twitch login) -> {twitchId, twitch, username}: the permanent pair, then the account's link */
+/* (id, twitch id, twitch login, token_enc, refresh_enc, expires_in s) -> {twitchId, twitch, username}: the permanent
+ * pair, then the account's link and its sealed tokens (token_state 'ok': v10.0.7's reconnect flag is off again) */
 static kn_db_result *run_twitch_link(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     char *mine = dbx_text(&x, SQL(.any = "SELECT twitch_id FROM twitch_links WHERE account_id = $1"), KN_DB_ARGS(P(0)));
@@ -206,6 +213,10 @@ static kn_db_result *run_twitch_link(kn_dbconn *c, int n, const char *const *p) 
         dbx_exec(&x, SQL(.any = "INSERT INTO twitch_links (account_id, twitch_id, twitch_name) VALUES ($1, $2, $3)"), KN_DB_ARGS(P(0), P(1), P(2)));
     free(mine);
     dbx_exec(&x, SQL(.any = "UPDATE twitch_links SET twitch_name = $2 WHERE account_id = $1"), KN_DB_ARGS(P(0), P(2)));
+    if (P(3) && *P(3))
+        dbx_exec(&x, SQL(.any = "UPDATE twitch_links SET token_enc = $2, refresh_enc = nullif($3, ''), token_expires_at = {later:$4},"
+                                " token_checked_at = {now}, token_state = 'ok' WHERE account_id = $1"),
+                 KN_DB_ARGS(P(0), P(3), P(4) ? P(4) : "", PI(5) > 0 ? P(5) : "3600"));
     dbx_exec(&x, SQL(.any = "UPDATE players SET tw_userid = $2, tw_twitchname = $3, updated_at = {now} WHERE player_id = $1"),
              KN_DB_ARGS(P(0), P(1), P(2)));
     char *user = dbx_text(&x, SQL(.any = "SELECT username FROM accounts WHERE id = $1"), KN_DB_ARGS(P(0)));
@@ -362,7 +373,7 @@ void sh_twitch_auth(SocialSession *s, const cJSON *f) {
         return;
     }
     char me[24];
-    social_call(s, &P_TWITCH_STATE_NEW, KN_DB_ARGS(social_viewer(s, me), c->state), twitch_state_done, c);
+    social_call(s, &P_TWITCH_STATE_NEW, KN_DB_ARGS(social_viewer(s, me), c->state, c->force ? "1" : "0"), twitch_state_done, c);
 }
 
 static void twitch_unlink_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -374,20 +385,24 @@ static void twitch_unlink_done(SocialSession *s, kn_db_result *res, void *extra)
     social_send_n(s, "twitchRemoveResponse", 0);
 }
 
+/* (id) -> {}: the account's link goes and its sealed tokens with it; the permanent pair stays in twitch_links */
+static kn_db_result *run_twitch_unlink(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    dbx_exec(&x, SQL(.any = "UPDATE players SET tw_userid = NULL, tw_twitchname = NULL, updated_at = {now} WHERE player_id = $1"),
+             KN_DB_ARGS(P(0)));
+    dbx_exec(&x, SQL(.any = "UPDATE twitch_links SET token_enc = NULL, refresh_enc = NULL, token_expires_at = NULL,"
+                            " token_checked_at = NULL, token_state = NULL WHERE account_id = $1"),
+             KN_DB_ARGS(P(0)));
+    return dbx_json(&x, "twitch_unlink", cJSON_CreateObject());
+}
+static const kn_proc P_TWITCH_UNLINK = {"twitch_unlink", NULL, run_twitch_unlink};
+
 /* ["removeTwitchLink"] -> ["twitchRemoveResponse"] (the permanent pair stays in twitch_links) */
 void sh_twitch_unlink(SocialSession *s, const cJSON *f) {
     (void) f;
     if (!social_require_auth(s)) return;
     char me[24];
-    social_query(s, SQL(.any = "UPDATE players SET tw_userid = NULL, tw_twitchname = NULL, updated_at = {now} WHERE player_id = $1"),
-                 KN_DB_ARGS(social_viewer(s, me)), twitch_unlink_done, NULL);
-}
-
-/* ["getTwitchDrops"] -> ["twitchDropsResponse", []]: no drop campaigns on Box Office */
-void sh_twitch_drops(SocialSession *s, const cJSON *f) {
-    (void) f;
-    if (!social_require_auth(s)) return;
-    social_send_n(s, "twitchDropsResponse", 1, cJSON_CreateArray());
+    social_call(s, &P_TWITCH_UNLINK, KN_DB_ARGS(social_viewer(s, me)), twitch_unlink_done, NULL);
 }
 
 /* ["verifyTwitch", code]: v10's page-redirect code; the brain's redirect URI is the only one it accepts */
@@ -404,8 +419,28 @@ typedef struct TwitchJob {
     int64_t account;
     char code[512];
     char twitch_id[64], login[64];
+    char *token_enc, *refresh_enc; /* the sealed tokens (kn_seal), malloc'd; NULL when sealing failed */
+    char expires_in[24];
     char err[160];
 } TwitchJob;
+
+static void twitch_job_free(TwitchJob *j) {
+    if (!j) return;
+    free(j->token_enc);
+    free(j->refresh_enc);
+    free(j);
+}
+
+/* the tokens of a token answer, sealed (worker thread): 0 when an access token was sealed */
+static int twitch_seal_tokens(const cJSON *tok, char **access_enc, char **refresh_enc, char expires[24]) {
+    const char *access = cJSON_GetStringValue(cJSON_GetObjectItem(tok, "access_token"));
+    const char *refresh = cJSON_GetStringValue(cJSON_GetObjectItem(tok, "refresh_token"));
+    const double exp = cJSON_GetNumberValue(cJSON_GetObjectItem(tok, "expires_in"));
+    snprintf(expires, 24, "%lld", (long long) (exp > 0 ? exp : 3600));
+    *access_enc = access && *access ? kn_seal(L.seal, TWITCH_SEAL_ACCESS, access, strlen(access)) : NULL;
+    *refresh_enc = refresh && *refresh ? kn_seal(L.seal, TWITCH_SEAL_REFRESH, refresh, strlen(refresh)) : NULL;
+    return *access_enc ? 0 : -1;
+}
 
 #ifdef KN_HAVE_CURL
 typedef struct {
@@ -486,6 +521,8 @@ static void twitch_exchange(TwitchJob *j) {
     }
     char bearer[256], url[512];
     copy_str(bearer, sizeof bearer, access);
+    if (twitch_seal_tokens(tok, &j->token_enc, &j->refresh_enc, j->expires_in) != 0)
+        KN_WARN(MOD, "twitch token could not be sealed: the link is kept without it (drops will ask to reconnect)");
     cJSON_Delete(tok);
     snprintf(url, sizeof url, "%s/users", L.api_url);
     b = (TwBuf){0};
@@ -562,7 +599,7 @@ static void twitch_link_done(kn_db_result *res, void *ud) {
         callback_page(j->req, 200, "Twitch Account Linked", text);
     }
     cJSON_Delete(o);
-    free(j);
+    twitch_job_free(j);
 }
 
 static void twitch_job_done(kn_loop *loop, void *ud) {
@@ -572,18 +609,21 @@ static void twitch_job_done(kn_loop *loop, void *ud) {
         const char *err = j->err[0] ? j->err : TWITCH_UNAVAILABLE;
         push_verify(j->account, err, NULL, NULL);
         callback_page(j->req, 502, "Twitch Account Not Linked", err);
-        free(j);
+        twitch_job_free(j);
         return;
     }
     char id[24];
-    kn_db_call(L.b->db, &P_TWITCH_LINK, KN_DB_ARGS(acct_itoa(id, j->account), j->twitch_id, j->login), twitch_link_done, j);
+    kn_db_call(L.b->db, &P_TWITCH_LINK,
+               KN_DB_ARGS(acct_itoa(id, j->account), j->twitch_id, j->login, j->token_enc ? j->token_enc : "",
+                          j->refresh_enc ? j->refresh_enc : "", j->expires_in),
+               twitch_link_done, j);
 }
 
 static void *twitch_thread(void *arg) {
     TwitchJob *j = arg;
     twitch_exchange(j);
     memset(j->code, 0, sizeof j->code);
-    if (kn_loop_post_threadsafe(L.b->loop, twitch_job_done, j) != 0) free(j); /* the loop is gone: shutting down */
+    if (kn_loop_post_threadsafe(L.b->loop, twitch_job_done, j) != 0) twitch_job_free(j); /* the loop is gone: shutting down */
     atomic_fetch_sub(&g_live, 1);
     return NULL;
 }
@@ -595,7 +635,7 @@ static void state_taken(kn_db_result *res, void *ud) {
     cJSON_Delete(o);
     if (j->account <= 0) {
         callback_page(j->req, 400, "Twitch Account Not Linked", kn_db_ok(res) ? "This link has expired." : acct_db_error(res, "twitch_state"));
-        free(j);
+        twitch_job_free(j);
         return;
     }
     pthread_t t;
@@ -608,8 +648,210 @@ static void state_taken(kn_db_result *res, void *ud) {
     if (!ok) {
         atomic_fetch_sub(&g_live, 1);
         callback_page(j->req, 503, "Twitch Account Not Linked", "Server busy, try again.");
-        free(j);
+        twitch_job_free(j);
     }
+}
+
+/* ---- the drops answer's reconnect flag: v10.0.7 dropsLoaded(drops, reconnect) (deob-10.0.7.js:218880-218924)
+ *
+ * Box Office has no drop campaigns, so the drops are always []; the second element says the Twitch link has expired
+ * and the client shows v10.0.7's "Your Twitch connection expired, please reconnect to receive drops." popup. The
+ * link's access token is kept sealed (0366 twitch_links); at most hourly (TWITCH_CHECK_S, or once it is past its
+ * expiry) it is validated with Twitch, and refreshed when Twitch refuses it. A link without a usable token (made
+ * before the tokens were kept, sealed under another key, or refused on both counts) is expired. */
+
+/* (id) -> {linked, configured token, due}: the account's link and whether its token must be checked now */
+static kn_db_result *run_twitch_token_state(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *row = dbx_row(&x, SQL(.any = "SELECT p.tw_userid AS tw, l.token_enc, l.refresh_enc, l.token_state,"
+                                        " (l.token_expires_at IS NULL OR l.token_expires_at <= {now}"
+                                        " OR l.token_checked_at IS NULL OR l.token_checked_at <= {ago:" STR(TWITCH_CHECK_S) "}) AS due__b"
+                                        " FROM players p LEFT JOIN twitch_links l ON l.account_id = p.player_id WHERE p.player_id = $1"),
+                         KN_DB_ARGS(P(0)));
+    if (dbx_failed(&x)) return dbx_finish(&x, NULL);
+    return dbx_json(&x, "twitch_token", row ? row : cJSON_CreateObject());
+}
+static const kn_proc P_TWITCH_TOKEN_STATE = {"twitch_token_state", NULL, run_twitch_token_state};
+
+/* (id, state, token_enc, refresh_enc, expires_in) -> {}: the check's outcome; new sealed tokens when refreshed */
+static kn_db_result *run_twitch_token_save(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    if (P(2) && *P(2))
+        dbx_exec(&x, SQL(.any = "UPDATE twitch_links SET token_enc = $3, refresh_enc = coalesce(nullif($4, ''), refresh_enc),"
+                                " token_expires_at = {later:$5}, token_checked_at = {now}, token_state = $2 WHERE account_id = $1"),
+                 KN_DB_ARGS(P(0), P(1), P(2), P(3) ? P(3) : "", P(4) ? P(4) : "3600"));
+    else
+        dbx_exec(&x, SQL(.any = "UPDATE twitch_links SET token_checked_at = {now}, token_state = $2 WHERE account_id = $1"),
+                 KN_DB_ARGS(P(0), P(1)));
+    return dbx_json(&x, "twitch_token_save", cJSON_CreateObject());
+}
+static const kn_proc P_TWITCH_TOKEN_SAVE = {"twitch_token_save", NULL, run_twitch_token_save};
+
+static void send_drops(SocialSession *s, const int64_t account, const int reconnect) {
+    cJSON *fr = social_frame("twitchDropsResponse");
+    cJSON_AddItemToArray(fr, cJSON_CreateArray());
+    cJSON_AddItemToArray(fr, cJSON_CreateBool(reconnect));
+    if (s) {
+        social_send_n(s, "twitchDropsResponse", 2, cJSON_CreateArray(), cJSON_CreateBool(reconnect));
+        cJSON_Delete(fr);
+    } else {
+        social_push_account_ex(account, fr, 1); /* the check ran on a worker thread: the account's sockets */
+    }
+}
+
+typedef struct TwitchCheck {
+    int64_t account;
+    char *token_enc, *refresh_enc;  /* in: the stored sealed tokens */
+    char *new_access, *new_refresh; /* out: sealed, when refreshed */
+    char expires_in[24];
+    int ok;                         /* out: 1 the link works (validated or refreshed) */
+} TwitchCheck;
+
+static void twitch_check_free(TwitchCheck *k) {
+    if (!k) return;
+    free(k->token_enc);
+    free(k->refresh_enc);
+    free(k->new_access);
+    free(k->new_refresh);
+    free(k);
+}
+
+/* worker thread: validate the access token; when Twitch refuses it, the refresh token for a new pair */
+static void twitch_check_run(TwitchCheck *k) {
+#ifdef KN_HAVE_CURL
+    char *access = kn_unseal(L.seal, TWITCH_SEAL_ACCESS, k->token_enc, NULL);
+    if (access) {
+        char hdr[600];
+        snprintf(hdr, sizeof hdr, "Authorization: OAuth %s", access); /* Twitch's validate endpoint takes "OAuth" */
+        CURL *c = curl_easy_init();
+        long code = 0;
+        if (c) {
+            TwBuf b = {0};
+            struct curl_slist *h = curl_slist_append(NULL, hdr);
+            curl_easy_setopt(c, CURLOPT_URL, L.validate_url);
+            curl_easy_setopt(c, CURLOPT_HTTPHEADER, h);
+            curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, tw_write);
+            curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
+            curl_easy_setopt(c, CURLOPT_USERAGENT, "kn_brain");
+            curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+            curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long) L.timeout_ms);
+            if (curl_easy_perform(c) == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+            curl_slist_free_all(h);
+            curl_easy_cleanup(c);
+            free(b.data);
+        }
+        memset(hdr, 0, sizeof hdr);
+        memset(access, 0, strlen(access));
+        free(access);
+        if (code == 200) {
+            k->ok = 1;
+            return;
+        }
+        if (code != 401) { /* Twitch unreachable / erroring: not the player's link that failed, keep it as it was */
+            k->ok = -1;
+            return;
+        }
+    }
+    char *refresh = k->refresh_enc && *k->refresh_enc ? kn_unseal(L.seal, TWITCH_SEAL_REFRESH, k->refresh_enc, NULL) : NULL;
+    if (!refresh) return; /* nothing to refresh with: expired */
+    char *cid = curl_easy_escape(NULL, L.client_id, 0), *sec = curl_easy_escape(NULL, L.client_secret, 0);
+    char *rt = curl_easy_escape(NULL, refresh, 0);
+    memset(refresh, 0, strlen(refresh));
+    free(refresh);
+    char body[4096];
+    snprintf(body, sizeof body, "client_id=%s&client_secret=%s&grant_type=refresh_token&refresh_token=%s", cid ? cid : "",
+             sec ? sec : "", rt ? rt : "");
+    curl_free(cid);
+    curl_free(sec);
+    curl_free(rt);
+    TwBuf b = {0};
+    const long status = tw_call(L.token_url, body, NULL, &b);
+    memset(body, 0, sizeof body);
+    cJSON *tok = status == 200 && b.data ? cJSON_Parse(b.data) : NULL;
+    free(b.data);
+    if (tok && twitch_seal_tokens(tok, &k->new_access, &k->new_refresh, k->expires_in) == 0) k->ok = 1;
+    else if (status == 0 || status >= 500) k->ok = -1;
+    cJSON_Delete(tok);
+#else
+    k->ok = -1;
+#endif
+}
+
+static void twitch_check_saved(kn_db_result *res, void *ud) {
+    TwitchCheck *k = ud;
+    if (!kn_db_ok(res)) KN_WARN(MOD, "twitch token check of %lld: %s", (long long) k->account, acct_db_error(res, "twitch_token_save"));
+    send_drops(NULL, k->account, k->ok == 0);
+    twitch_check_free(k);
+}
+
+static void twitch_check_done(kn_loop *loop, void *ud) {
+    (void) loop;
+    TwitchCheck *k = ud;
+    if (k->ok < 0 || !L.b || !L.b->db) { /* Twitch did not answer: no verdict, no popup */
+        send_drops(NULL, k->account, 0);
+        twitch_check_free(k);
+        return;
+    }
+    char id[24];
+    kn_db_call(L.b->db, &P_TWITCH_TOKEN_SAVE,
+               KN_DB_ARGS(acct_itoa(id, k->account), k->ok ? "ok" : "expired", k->new_access ? k->new_access : "",
+                          k->new_refresh ? k->new_refresh : "", k->expires_in[0] ? k->expires_in : "3600"),
+               twitch_check_saved, k);
+}
+
+static void *twitch_check_thread(void *arg) {
+    TwitchCheck *k = arg;
+    twitch_check_run(k);
+    if (kn_loop_post_threadsafe(L.b->loop, twitch_check_done, k) != 0) twitch_check_free(k);
+    atomic_fetch_sub(&g_live, 1);
+    return NULL;
+}
+
+static void twitch_token_state_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    cJSON *o = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    const char *tw = kn_json_str(o, "tw", "");
+    const char *enc = kn_json_str(o, "token_enc", "");
+    const char *state = kn_json_str(o, "token_state", "");
+    if (!o || !*tw || !twitch_configured()) { /* not linked, or no Twitch app to reconnect with: v10's "Nothing to Claim" */
+        send_drops(s, s->account_id, 0);
+    } else if (!*enc || !strcmp(state, "expired")) {
+        send_drops(s, s->account_id, 1);
+    } else if (!cJSON_IsTrue(cJSON_GetObjectItem(o, "due"))) {
+        send_drops(s, s->account_id, 0);
+    } else {
+        TwitchCheck *k = calloc(1, sizeof *k);
+        pthread_t t;
+        pthread_attr_t attr;
+        int ok = 0;
+        if (k) {
+            k->account = s->account_id;
+            k->token_enc = strdup(enc);
+            k->refresh_enc = strdup(kn_json_str(o, "refresh_enc", ""));
+            if (k->token_enc && k->refresh_enc) {
+                pthread_attr_init(&attr);
+                pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+                atomic_fetch_add(&g_live, 1);
+                ok = pthread_create(&t, &attr, twitch_check_thread, k) == 0;
+                pthread_attr_destroy(&attr);
+                if (!ok) atomic_fetch_sub(&g_live, 1);
+            }
+        }
+        if (!ok) {
+            twitch_check_free(k);
+            send_drops(s, s->account_id, 0);
+        }
+    }
+    cJSON_Delete(o);
+}
+
+/* ["getTwitchDrops"] -> ["twitchDropsResponse", [], reconnect]: no drop campaigns on Box Office; reconnect true when
+ * the account's Twitch link has expired (above) */
+void sh_twitch_drops(SocialSession *s, const cJSON *f) {
+    (void) f;
+    if (!social_require_auth(s)) return;
+    char me[24];
+    social_call(s, &P_TWITCH_TOKEN_STATE, KN_DB_ARGS(social_viewer(s, me)), twitch_token_state_done, NULL);
 }
 
 static void h_twitch_callback(kn_http_req *req, void *ud) {
@@ -651,6 +893,8 @@ int account_life_init(Brain *b) {
     if (redirect[0]) copy_str(L.redirect_uri, sizeof L.redirect_uri, redirect);
     else if (mm_settings()->public_url[0]) snprintf(L.redirect_uri, sizeof L.redirect_uri, "%s/twitch/callback", mm_settings()->public_url);
     L.timeout_ms = (int) kn_config_int(cfg, "streams.timeout_ms", 8000);
+    copy_str(L.validate_url, sizeof L.validate_url, kn_config_str(cfg, "streams.twitch.validate_url", "https://id.twitch.tv/oauth2/validate"));
+    copy_str(L.seal, sizeof L.seal, account_links_seal_material(b));
     atomic_store(&g_cancel, 0);
     if (b->http) kn_http_route(b->http, "GET", "/twitch/callback", h_twitch_callback, b);
     if (b->db && b->loop && L.purge) L.sweep_timer = kn_loop_add_timer(b->loop, 30000, (uint64_t) sweep_s * 1000, sweep_tick, NULL);

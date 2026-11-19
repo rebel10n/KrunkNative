@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The v10 /auth, /account 2FA and usernames, /email, /discord routes (services/brain/v10_auth.c,
+"""The v10 /auth, /account 2FA and usernames, /email, /discord routes (services/brain/v10_auth.c, discord.c,
 account_security.c). Family f1b of doc/v10/api-inventory.md, rows 32-49,
 52-57, 65-70.
 
@@ -377,18 +377,25 @@ def run_checks(port, db_path, smtp):
     check("POST /email/preferences -> 403 REFUSAL (no preference store) (v10.0.3 decoded 5161; v10.js 26429, 114583)",
           is_refusal(st, body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
-    # ---- rows 67-70: Discord. No link exists: the status is the not-linked shape
+    # ---- rows 67-70: Discord (discord.c, v10.0.7). No Discord app is configured here: v10's unavailable row
+    # (configured false, :97480), link / join refused DISCORD_NOT_CONFIGURED (:97352-97354), unlink of no link.
+    # The configured flows run against a fake Discord in account_links_test.py.
     st, body = http(port, "GET", "/discord/status", token=token_a)
-    check("GET /discord/status -> 200 EMPTY {data: {linked: false}} (no Discord link) (v10.0.3 decoded 3336, 5161; v10.js 26439, 97112 reads data.linked)",
-          st == 200 and body == {"data": {"linked": False}, "error": None}, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    d = (body or {}).get("data") or {}
+    check("GET /discord/status -> 200 {configured: false, linked: false} (deob-10.0.7.js:26501, 97317)",
+          st == 200 and d.get("configured") is False and d.get("linked") is False and d.get("canJoin") is False,
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
     for label, path, req_body, cite in [
-        ("POST /discord/link", "/discord/link", {"returnTo": "x"}, "4655 / 5161; v10.js 26444, 97215"),
-        ("POST /discord/join", "/discord/join", {}, "5161; v10.js 26452"),
-        ("POST /discord/unlink", "/discord/unlink", {}, "4403 / 5161; v10.js 26457, 97215"),
+        ("POST /discord/link", "/discord/link", {"returnTo": "x"}, "26506, 97352-97354"),
+        ("POST /discord/join", "/discord/join", {}, "26514, 97366-97368"),
     ]:
         st, body = http(port, "POST", path, req_body, token=token_a)
-        check("%s -> 403 REFUSAL (Box Office has no Discord link) (v10.0.3 decoded %s)" % (label, cite), is_refusal(st, body),
+        check("%s -> 503 DISCORD_NOT_CONFIGURED (deob-10.0.7.js:%s)" % (label, cite),
+              st == 503 and ((body or {}).get("error") or {}).get("code") == "DISCORD_NOT_CONFIGURED",
               "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/discord/unlink", {}, token=token_a)
+    check("POST /discord/unlink -> 200 {unlinked: false} (no link) (deob-10.0.7.js:26519, 97384)",
+          st == 200 and ((body or {}).get("data") or {}).get("unlinked") is False, "HTTP %d %s" % (st, json.dumps(body)[:160]))
     email_code_checks(port, smtp, db_path)
     no_challenge_checks(port)
 

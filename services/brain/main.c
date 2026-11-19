@@ -20,6 +20,8 @@
 #include "brain_internal.h"
 #include "accounts.h"
 #include "account_life.h" /* v10.0.3 account lifecycle: deletion, Twitch, raid stats (account_life.c) */
+#include "discord.h"      /* v10.0.7 Discord link: status, link, Join Server, unlink (discord.c, 0366) */
+#include "oauth.h"        /* v10.0.7 Login with Box Office + Connected apps (oauth.c, 0366) */
 #include "captcha.h"
 #include "social_ws.h"
 #include "roles.h"
@@ -72,6 +74,8 @@ static const BrainModule k_brain_modules[] = {
     {"accounts", accounts_init, accounts_shutdown},
     {"social-ws", social_ws_init, social_ws_shutdown},
     {"account-life", account_life_init, account_life_shutdown}, /* deletion sweep + Twitch OAuth callback (0359) */
+    {"discord", discord_init, discord_shutdown},                /* v10.0.7 Discord link (0366) */
+    {"oauth", oauth_init, oauth_shutdown},                      /* v10.0.7 Login with Box Office, Connected apps (0366) */
     {"creations", creations_init, NULL},
     {"public-routes", public_routes_init, NULL},
     {"ranked", ranked_init, ranked_shutdown},

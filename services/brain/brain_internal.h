@@ -35,6 +35,10 @@ int mm_settings_load(Brain *b);
  * brain in federation, so their first heartbeat and /mm/ping-list do not advertise port zero. */
 void mm_settings_bound(Brain *b);
 const MmSettings *mm_settings(void);
+/* The key material of secrets the brain keeps at rest (third-party OAuth tokens: Twitch, Discord), for kn_seal /
+ * kn_unseal (knsvc/crypto.h): accounts.secrets_key, else brain.join_secret (always set). Changing it makes every
+ * stored token unreadable, which the links treat as expired (the player is asked to reconnect). */
+const char *account_links_seal_material(Brain *b);
 /* Security (doc/v7/command-auth.md): the Bearer brain.internal_secret gate of /mm/internal/ws and
  * /mm/admin/*. Rate-limited per address; a blank secret refuses everyone; the development default
  * (or a secret under 16 characters) only admits direct connections from this machine. 1 = authorised,

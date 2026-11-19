@@ -91,6 +91,91 @@ int kn_hmac_sha256(const void *key, size_t keylen, const void *data, size_t len,
     return HMAC(EVP_sha256(), key, (int)keylen, data, len, out, &olen) ? 0 : -1;
 }
 
+/* ---- secrets at rest (crypto.h kn_seal / kn_unseal) */
+
+#define SEAL_NONCE 12
+#define SEAL_TAG 16
+#define SEAL_PREFIX "v1."
+
+static int seal_key(const char *material, const char *label, uint8_t key[KN_SHA256_LEN]) {
+    if (!material || !*material || !label) return -1;
+    char info[160];
+    const int n = snprintf(info, sizeof info, "kn-seal-v1:%s", label);
+    if (n < 0 || (size_t)n >= sizeof info) return -1;
+    return kn_hmac_sha256(material, strlen(material), info, (size_t)n, key);
+}
+
+char *kn_seal(const char *material, const char *label, const void *plain, size_t len) {
+    uint8_t key[KN_SHA256_LEN];
+    if (seal_key(material, label, key) != 0 || (!plain && len)) return NULL;
+    const size_t raw_len = SEAL_NONCE + len + SEAL_TAG;
+    uint8_t *raw = malloc(raw_len);
+    char *out = NULL;
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int ol = 0, fl = 0;
+    if (raw && ctx && kn_random_bytes(raw, SEAL_NONCE) == 0 &&
+        EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) == 1 &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, SEAL_NONCE, NULL) == 1 &&
+        EVP_EncryptInit_ex(ctx, NULL, NULL, key, raw) == 1 &&
+        EVP_EncryptUpdate(ctx, NULL, &ol, (const uint8_t *)label, (int)strlen(label)) == 1 && /* the label as AAD */
+        (len == 0 || EVP_EncryptUpdate(ctx, raw + SEAL_NONCE, &ol, plain, (int)len) == 1) &&
+        EVP_EncryptFinal_ex(ctx, raw + SEAL_NONCE + (len ? ol : 0), &fl) == 1 &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, SEAL_TAG, raw + SEAL_NONCE + len) == 1) {
+        const size_t cap = sizeof SEAL_PREFIX + (raw_len + 2) / 3 * 4 + 1;
+        out = malloc(cap);
+        if (out) {
+            memcpy(out, SEAL_PREFIX, sizeof SEAL_PREFIX - 1);
+            if (kn_base64_encode(raw, raw_len, out + sizeof SEAL_PREFIX - 1, cap - (sizeof SEAL_PREFIX - 1), 1, 0) < 0) {
+                free(out);
+                out = NULL;
+            }
+        }
+    }
+    EVP_CIPHER_CTX_free(ctx);
+    if (raw) OPENSSL_cleanse(raw, raw_len);
+    free(raw);
+    OPENSSL_cleanse(key, sizeof key);
+    return out;
+}
+
+char *kn_unseal(const char *material, const char *label, const char *sealed, size_t *len) {
+    uint8_t key[KN_SHA256_LEN];
+    if (!sealed || strncmp(sealed, SEAL_PREFIX, sizeof SEAL_PREFIX - 1) != 0) return NULL;
+    if (seal_key(material, label, key) != 0) return NULL;
+    const char *b64 = sealed + sizeof SEAL_PREFIX - 1;
+    const size_t b64_len = strlen(b64);
+    const size_t cap = b64_len / 4 * 3 + 3;
+    uint8_t *raw = malloc(cap);
+    char *plain = NULL;
+    const int raw_len = raw ? kn_base64_decode(b64, b64_len, raw, cap) : -1;
+    if (raw_len >= SEAL_NONCE + SEAL_TAG) {
+        const size_t clen = (size_t)raw_len - SEAL_NONCE - SEAL_TAG;
+        plain = malloc(clen + 1);
+        EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+        int ol = 0, fl = 0;
+        const int ok = plain && ctx && EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) == 1 &&
+                       EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, SEAL_NONCE, NULL) == 1 &&
+                       EVP_DecryptInit_ex(ctx, NULL, NULL, key, raw) == 1 &&
+                       EVP_DecryptUpdate(ctx, NULL, &ol, (const uint8_t *)label, (int)strlen(label)) == 1 &&
+                       (clen == 0 || EVP_DecryptUpdate(ctx, (uint8_t *)plain, &ol, raw + SEAL_NONCE, (int)clen) == 1) &&
+                       EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, SEAL_TAG, raw + SEAL_NONCE + clen) == 1 &&
+                       EVP_DecryptFinal_ex(ctx, (uint8_t *)plain + (clen ? ol : 0), &fl) == 1;
+        EVP_CIPHER_CTX_free(ctx);
+        if (ok) {
+            plain[clen] = 0;
+            if (len) *len = clen;
+        } else if (plain) {
+            OPENSSL_cleanse(plain, clen + 1);
+            free(plain);
+            plain = NULL;
+        }
+    }
+    if (raw) OPENSSL_cleanse(raw, cap);
+    free(raw);
+    OPENSSL_cleanse(key, sizeof key);
+    return plain;
+}
+
 int kn_hmac_sha1(const void *key, size_t keylen, const void *data, size_t len, uint8_t out[KN_SHA1_LEN]) {
     unsigned int olen = 0;
     static const uint8_t empty = 0;

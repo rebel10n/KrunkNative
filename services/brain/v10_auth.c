@@ -26,7 +26,7 @@
  *       Box Office sells no usernames and keeps no renewals, so reserve is refused and a swap only answers the
  *       active name.
  *   GET /email/preferences -> data null (no preference stored: the consumer shows 'not chosen'); POST is refused.
- *   GET /discord/status -> {linked: false} (no Discord link); link, join and unlink are refused.
+ *   The Discord routes (/discord/status, link, callback, join, unlink) are discord.c's (v10.0.7, migration 0366).
  *   the email gate (accounts.login.require_verified, default on): a password login of an account whose email is
  *       not verified -> {type: "ensure_verified", challenge_id}, no token (the session acct_auth issued is revoked).
  *       The v10.0.3 consumer handles that state (its sign-in loop, v10.js 114131: the verify window, then
@@ -64,7 +64,6 @@
 
 #define WHY_SALE "Box Office does not sell usernames"
 #define WHY_PREF "Box Office does not store email preferences"
-#define WHY_DISCORD "Box Office has no Discord link"
 #define WHY_UNOFFERED "This sign-in step is not offered on Box Office"
 #define WHY_EMAIL_CODE "Sign in with your username or email and password on Box Office"
 /* the consumer's text for a challenge id nobody issued (the sign-in is over): v10.js throws it */
@@ -966,7 +965,7 @@ static void h_reserve(kn_http_req *req, void *ud) {
     auth_fail(req, 403, WHY_SALE);
 }
 
-/* ---------------------------------------------------------------- mail preference and Discord */
+/* ---------------------------------------------------------------- mail preference */
 
 static void h_email_prefs_get(kn_http_req *req, void *ud) {
     (void) ud;
@@ -976,18 +975,6 @@ static void h_email_prefs_get(kn_http_req *req, void *ud) {
 static void h_email_prefs_set(kn_http_req *req, void *ud) {
     (void) ud;
     refuse(req, WHY_PREF);
-}
-
-static void h_discord_status(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *d = cJSON_CreateObject();
-    cJSON_AddBoolToObject(d, "linked", 0);
-    v10_reply_data(req, 200, d);
-}
-
-static void h_discord_refuse(kn_http_req *req, void *ud) {
-    (void) ud;
-    refuse(req, WHY_DISCORD);
 }
 
 /* ---------------------------------------------------------------- routes */
@@ -1033,9 +1020,5 @@ int v10_auth_init(Brain *b) {
     kn_http_route(b->http, "POST", "/account/usernames/swap", h_swap, NULL);
     kn_http_route(b->http, "GET", "/email/preferences", h_email_prefs_get, NULL);
     kn_http_route(b->http, "POST", "/email/preferences", h_email_prefs_set, NULL);
-    kn_http_route(b->http, "GET", "/discord/status", h_discord_status, NULL);
-    kn_http_route(b->http, "POST", "/discord/link", h_discord_refuse, NULL);
-    kn_http_route(b->http, "POST", "/discord/join", h_discord_refuse, NULL);
-    kn_http_route(b->http, "POST", "/discord/unlink", h_discord_refuse, NULL);
     return 0;
 }

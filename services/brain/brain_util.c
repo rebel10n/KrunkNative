@@ -91,6 +91,11 @@ int mm_settings_load(Brain *b) {
     return 0;
 }
 
+const char *account_links_seal_material(Brain *b) {
+    const char *k = b && b->cfg ? kn_config_str(b->cfg, "accounts.secrets_key", "") : "";
+    return k && *k ? k : g_mm.join_secret;
+}
+
 const MmSettings *mm_settings(void) {
     return &g_mm;
 }

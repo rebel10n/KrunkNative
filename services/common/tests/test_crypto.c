@@ -198,7 +198,37 @@ static void test_totp(void) {
     CHECK(kn_totp_check(key, 20, "00592a", 1234567890, 1, NULL) == 0);
 }
 
+static void test_seal(void) {
+    const char *msg = "access-token-1234";
+    char *s = kn_seal("material-a", "twitch.access", msg, strlen(msg));
+    CHECK(s != NULL && strncmp(s, "v1.", 3) == 0);
+    CHECK(strstr(s, msg) == NULL);
+    size_t len = 0;
+    char *p = kn_unseal("material-a", "twitch.access", s, &len);
+    CHECK(p != NULL && len == strlen(msg) && strcmp(p, msg) == 0);
+    free(p);
+    CHECK(kn_unseal("material-b", "twitch.access", s, NULL) == NULL);   /* another key */
+    CHECK(kn_unseal("material-a", "twitch.refresh", s, NULL) == NULL);  /* another label */
+    char *t = strdup(s);
+    t[strlen(t) - 2] = t[strlen(t) - 2] == 'A' ? 'B' : 'A';             /* tampered tag */
+    CHECK(kn_unseal("material-a", "twitch.access", t, NULL) == NULL);
+    free(t);
+    char *s2 = kn_seal("material-a", "twitch.access", msg, strlen(msg));
+    CHECK(s2 != NULL && strcmp(s, s2) != 0);                             /* a fresh nonce each time */
+    free(s2);
+    free(s);
+    char *e = kn_seal("material-a", "x", "", 0);                         /* empty plaintext */
+    p = kn_unseal("material-a", "x", e, &len);
+    CHECK(p != NULL && len == 0 && p[0] == 0);
+    free(p);
+    free(e);
+    CHECK(kn_seal("", "x", "a", 1) == NULL);                             /* no key material */
+    CHECK(kn_unseal("material-a", "x", "v1.!!", NULL) == NULL);
+    CHECK(kn_unseal("material-a", "x", "plain", NULL) == NULL);
+}
+
 int main(void) {
+    test_seal();
     test_digests();
     test_encodings();
     test_random();

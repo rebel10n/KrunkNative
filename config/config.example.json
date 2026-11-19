@@ -125,6 +125,18 @@
     "heartbeat_interval_s": 60
   },
   "accounts": {
+    "_secrets_comment": "secrets_key: the key material of the sealed link tokens (Twitch, Discord; kn_seal AES-256-GCM, doc/v10/oauth-provider.md). Empty = brain.join_secret. Changing it makes stored link tokens unreadable (Discord asks to relink, Twitch drops ask to reconnect). Put it only in your gitignored config.json.",
+    "secrets_key": "",
+    "discord": {
+      "_comment": "v10.0.7's Discord link (services/brain/discord.c). client_id + client_secret turn linking on (empty = v10's unavailable row); bot_token + guild_id turn on Join Server (the bot needs Create Instant Invite in the server); guild_url is Open Server. redirect_uri empty = <brain.public_url>/discord/callback (register it in the Discord app). return_origins: the web build's origins a link may return to. Secrets only in your gitignored config.json.",
+      "client_id": "",
+      "client_secret": "",
+      "redirect_uri": "",
+      "bot_token": "",
+      "guild_id": "",
+      "guild_url": "",
+      "return_origins": []
+    },
     "name_min": 3,
     "name_max": 14,
     "password_min": 6,
@@ -220,6 +232,16 @@
     "verify_peer": true,
     "timeout_ms": 20000
   },
+  "oauth": {
+    "_comment": "v10.0.7's Login with Box Office (services/brain/oauth.c, doc/v10/oauth-provider.md): kn_brain as the OAuth 2.0 provider of Box Office accounts. Apps are registered by staff (POST /mm/admin/oauth/clients with brain.internal_secret).",
+    "enabled": true,
+    "access_ttl_s": 3600,
+    "refresh_ttl_s": 2592000,
+    "code_ttl_s": 600,
+    "action_ttl_s": 900,
+    "consent_ttl_s": 900,
+    "rate_per_min": 30
+  },
   "streams": {
     "_comment": "v10 Live Streams (services/brain/streams.c, GET /streams/top): Twitch Helix, the Krunker category. Put the client id and secret only in your gitignored config.json or KN_STREAMS_TWITCH_CLIENT_ID / KN_STREAMS_TWITCH_CLIENT_SECRET; empty = the route answers the empty list {success, data: {streams: []}} (the menu shows no streams).",
     "enabled": true,
@@ -237,7 +259,8 @@
       "api_url": "https://api.twitch.tv/helix",
       "authorize_url": "https://id.twitch.tv/oauth2/authorize",
       "redirect_uri": "",
-      "link_scope": "user_read viewing_activity_read"
+      "link_scope": "user_read viewing_activity_read",
+      "validate_url": "https://id.twitch.tv/oauth2/validate"
     },
     "thumbs": {
       "_comment": "GET /streams/thumb (services/brain/stream_thumbs.c): the cards' previews as data: URLs for the native client. Only https URLs on these hosts; cdn_url empty = fetch them directly.",

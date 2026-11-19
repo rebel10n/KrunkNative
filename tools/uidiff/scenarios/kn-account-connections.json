@@ -1,0 +1,47 @@
+{
+  "ref": "doc/ref/krunknative/kn-account-connections.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 5,
+    "account": {
+      "name": "Player",
+      "score": 50000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "challenges": []
+    },
+    "windowActions": [
+      [
+        "windows.4.switchTab",
+        3
+      ],
+      [
+        "windows.4.collapseCon",
+        "setHed_discord"
+      ],
+      [
+        "windows.4.collapseCon",
+        "setHed_apps"
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "KN only: the Account window's Connections tab (switchTab(3)) with the Discord and v10.0.7's Connected apps sections open (client/src/ui/account_links.c). With no account service the Discord row is v10's unavailable state and the apps list is empty (settings.apps.none). The reference is KN's own render."
+}

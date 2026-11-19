@@ -72,6 +72,15 @@ int kn_totp_code(const uint8_t *secret, size_t secret_len, int64_t step, char *o
 int kn_totp_check(const uint8_t *secret, size_t secret_len, const char *code, int64_t now_s, int window,
                   int64_t *last_step);
 
+/* Secrets at rest (third-party OAuth tokens in the database): AES-256-GCM under a key derived from
+ * key material and a purpose label (HMAC-SHA256(material, "kn-seal-v1:" label)), so one configured
+ * secret yields independent keys per use and a sealed value only opens for its own label.
+ * Text format: "v1." base64url(nonce[12] | ciphertext | tag[16]), no padding.
+ * kn_seal: malloc'd text or NULL. kn_unseal: malloc'd NUL-terminated plaintext (length in *len when
+ * len is given) or NULL when the value is malformed, sealed for another label or key, or tampered. */
+char *kn_seal(const char *material, const char *label, const void *plain, size_t len);
+char *kn_unseal(const char *material, const char *label, const char *sealed, size_t *len);
+
 /* Signed tokens. claims is not consumed. ttl_s <= 0 = no "exp". Returns malloc'd string. */
 char *kn_signed_token_create(const char *secret, const cJSON *claims, int64_t ttl_s);
 /* Returns the claims (caller frees) or NULL when the signature/format is bad or

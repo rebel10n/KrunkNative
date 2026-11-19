@@ -2262,7 +2262,7 @@ static const char *store_tag_color(const char *tag) {
         {"Burg", "#ADE4F9"}, {"Sandstorm", "#ADE4F9"}, {"Littletown", "#ADE4F9"}, {"Site", "#ADE4F9"}, {"Industry", "#ADE4F9"},
         {"Subzero", "#ADE4F9"}, {"Freight", "#ADE4F9"}, {"Undergrowth", "#ADE4F9"}, {"Lostworld", "#ADE4F9"}, {"Kanji", "#ADE4F9"},
         {"Citadel", "#ADE4F9"}, {"Oasis", "#ADE4F9"}, {"Evacuation", "#ADE4F9"}, {"Craftable", "#cc51f8"}, {"NFT", "#f3b8ff"},
-        {"Ranked", "#ff5500"}, {"Halloween", "#ff5500"},
+        {"Ranked", "#ff5500"}, {"Discord", "#5865f2"}, {"Halloween", "#ff5500"}, // Discord: v10.0.7 (deob-10.0.7.js:103481)
         {"FRVR", "linear-gradient(132deg, rgba(0,189,255,1) 0%, rgba(155,0,255,1) 25%, rgba(255,0,41,1) 50%, rgba(255,150,3,1) 75%, rgba(255,199,0,1) 100%)"},
     };
     for (size_t i = 0; tag && i < sizeof(tags) / sizeof(tags[0]); i++) {

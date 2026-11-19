@@ -57,6 +57,7 @@
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
 #include <ruleset.h>
+#include <account_links.h>   // Connections: the Discord row and Connected apps (v10.0.7, account_links.c)
 #include <avatar_ui.h>      // profile pictures: the "Change Picture" picker and its status line
 #include <v10_social.h> // the window's Friends tab (v10_social.c)
 #include <online_mode.h>  // auth_unreachable: offline mode
@@ -1352,6 +1353,7 @@ int account_saved_name(char *out, const size_t n) {
 // The menu's Logout (logoutAcc) and the developer console's `logout` (ui_console.c): 1 when an
 // account was logged out, 0 for a guest (nothing done)
 int account_ui_logout(void) {
+    account_links_reset();
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the krunker.io account (its tokens only: the krunk.io session stays)
         if (!krunker_account_signed_in()) return 0;
         krunker_account_sign_out();
@@ -1412,6 +1414,7 @@ static void on_social(void *user, const cJSON *frame) {
     (void) user;
     const char *label = str_at(frame, 0);
     if (!label) return;
+    account_links_social(label); // "discordStatus": the browser's Discord link finished (discord.c)
     if (!strcmp(label, "__open")) {
         g_restore_asks = 0; // a new socket: the saved session gets its asks again
         g_restore_retry_at = 0;
@@ -2562,6 +2565,7 @@ static void free_kr_ad_error(void *user, const char *error) {
 
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
+    if (name && account_links_handle(name, ev, args, argc)) return 1; // Connections: Discord, Connected apps
     // No account service, or the probe found none: say why at once. A socket that is still
     // connecting (the first seconds after start, a slow TLS handshake) is not a failure: the
     // request is queued until it opens (backend_social_send) and AUTH_TIMEOUT_SECONDS reports
@@ -3205,29 +3209,26 @@ static void twitch_html(StrBuf *sb) {
     free(items);
 }
 
-// v10.0.7 adds a third section, "Connected apps" (deob-10.0.7.js:219140-219142, :219174; the component :97493-97673 over
-// the oauth API :27656-27696: GET /account/apps, DELETE /account/apps/<id>, /activity): the third-party apps signed in
-// with "Login with Krunker". Not ported: kn_brain is no OAuth provider, so no app can sign in with a Box Office account
-// and the list could only ever be empty, and a krunker.io account's apps are krunker.io's to revoke (KrunkNative makes
-// only reads of krunker.io's gapi, v10_gapi.c kio_readable). The consent pages (oauth.*) are krunker.io's own site.
-// The Connections tab (deob-10.0.3.js:247686-247752): the Discord section, then Twitch's. v10 mounts its Discord
-// link component (svelte-17wd35, deob-10.0.3.js:110353-110561) in #discordLinkMount; it asks discord.getStatus()
-// and kn_brain's GET /discord/status answers {linked: false} with no `configured` (v10_auth.c: Box Office has no
-// Discord link), so the component's state is v10's not-configured one: the info line, "Discord Account (none)"
-// with no Link button, and "Discord linking is currently unavailable.". It is drawn in that state at once.
+// v10.0.7's Connected apps section (deob-10.0.7.js:219174), its body drawn by account_links.c
+static void apps_section_html(StrBuf *sb, const int krunker_io) {
+    sb_append(sb, "<div class='setHed' id='setHed_apps' style='margin-top:0px'onclick='window.windows[4].collapseCon(this)'><span class='material-icons plusOrMinus3'>keyboard_arrow_right</span> ");
+    sb_append_esc(sb, I18N("settings.apps.title", "Connected apps"));
+    sb_append(sb, "</div><div class='setBodH' id='setBod_apps' style='display:none'><div id='connectedAppsMount'>");
+    account_links_apps_html(sb, krunker_io);
+    sb_append(sb, "</div></div>");
+}
+
+// The Connections tab (deob-10.0.7.js:219172-219175): the Discord section (v10's link component mounted in
+// #discordLinkMount), Twitch's, then v10.0.7's "Connected apps" (the component mounted in #connectedAppsMount): the
+// apps signed in with "Login with Box Office" (kn_brain's OAuth provider, oauth.c). account_links.c draws both
+// mounts from kn_brain's /discord/* and /account/apps and redraws them when an answer comes.
 static void connections_html(StrBuf *sb) {
     sb_append(sb, "<div class='setHed' id='setHed_discord' style='margin-top:0px'onclick='window.windows[4].collapseCon(this)'><span class='material-icons plusOrMinus3'>keyboard_arrow_right</span> "
                   "<img src='./img/social/discord.png' style='height: 40px;vertical-align: middle;'> Discord</div><div class='setBodH' id='setBod_discord' style='display:none'><div id='discordLinkMount'>");
-    sb_append(sb, "<div class=\"discordInfo svelte-17wd35\">");
-    sb_append_esc(sb, I18N("discord.info", "Link Discord to get your Krunker roles in the Krunker Discord server and join Discord events."));
-    sb_append(sb, "</div> <div class=\"settName discordRow\"> ");
-    sb_append_esc(sb, I18N("discord.account", "Discord Account"));
-    sb_append(sb, " (");
-    sb_append_esc(sb, I18N("discord.none", "none"));
-    sb_append(sb, ") </div> <div class=\"discordMsg svelte-17wd35\">");
-    sb_append_esc(sb, I18N("discord.result.unavailable", "Discord linking is currently unavailable."));
-    sb_append(sb, "</div></div></div>");
+    account_links_discord_html(sb);
+    sb_append(sb, "</div></div>");
     twitch_html(sb);
+    apps_section_html(sb, 0);
 }
 
 // windows[4].gen() for a signed-in Box Office account (deob-10.0.3.js:247488-247763; a guest gets the login modal,
@@ -3871,9 +3872,9 @@ void account_ui_scenario_post(void) {
 }
 
 // windows[4].gen() for the krunker.io account (the active one in an official game): v10's Account
-// window with what krunker.io tells this client about it (name, level, score, KR, raid stats); its friends,
-// settings and connections tabs are krunker.io's own services, which this client does not
-// reach: the window has the home tab only, and Logout signs out of krunker.io.
+// window with what krunker.io tells this client about it (name, level, score, KR, raid stats) and its Connected apps
+// (read from krunker.io); its friends, settings and connections tabs are krunker.io's own services, which this client
+// does not reach: the window has the home tab only, and Logout signs out of krunker.io.
 static char *gen_kio_account(const AccountInfo *acc) {
     StrBuf sb = {0};
     sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'><div class='bigMenTab bigMenTabA' style='font-size:16px' onmouseenter='playTick(0.1);'>"
@@ -3898,6 +3899,10 @@ static char *gen_kio_account(const AccountInfo *acc) {
     sb_appendf(&sb, "</span></div><div class='settName'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>",
                I18N("generic.level", "Level"), acc->level);
     stats_html(&sb, acc, 1); // its real stats: the official game server's "a" / "ua" data
+    // v10.0.7's Connected apps, as krunker.io lists them (oauth.connectedApps, read-only: Box Office makes no writes to
+    // krunker.io, so its apps are disconnected there)
+    sb_append(&sb, "<div style='height:20px'></div>");
+    apps_section_html(&sb, 1);
     sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' id='knKioLogout' onclick='logoutAcc()'>%s</a>",
                I18N("generic.logout", "Logout"));
     return sb_finish(&sb);
