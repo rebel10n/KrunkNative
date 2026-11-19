@@ -218,6 +218,28 @@ it is touched.
   place (body_328/330.obj, melee_198/200.glb, hat_527.png) were already current; their pins in
   live_assets_v10.lock were re-taken.
 
+### Other gapi data (read 2026-11-19; pinned by `make live-data-fetch`, checked offline by `make live-data-verify` in `make check`)
+The 10.0.7 client's gapi client (`new iiíïíiï(GAPI_URI)`, :27773; requests through `iïîiíîï`, :26152) asks for
+these public, account-free routes; everything else it calls carries an Authorization header or is live state
+Box Office keeps itself.
+- `/shop/displays?tag=limited` (the Eterno Shop, :26627, :129566-129580; store.catalog :220848): one product
+  more than 0354's copy of 2026-10-22, v10.0.5's "1 new item to the Eterno Shop": Deathweaver (product 47,
+  skin 8080, USD 10, one per account) as the first node, every other node one place down. Migration
+  `0381_eterno_deathweaver` (all three dialects). As a USD product Box Office stores it but does not list it
+  (shop.c lists only what it can sell).
+- `/titles` (:27650): 113 titles, two more than assets/titles.json: 10.0.4's Candy Heist titles
+  Trick-or-Treater (112) and Candy Heist Master (113), with their `color`. assets/titles.json is now the live
+  list. Box Office's Candy Heist (shared/src/candy_heist.c) does not grant them; the event ended 2026-11-07.
+- `/shop/displays?tag=premium` (:128638, :220837): krunker.io's Premium monthly subscription (USD 4.99). Not
+  copied: Box Office sells no subscription, and the premium shop component is unchanged in 10.0.7 (KN's
+  v10_misc_popups.c "premium shop").
+- `/maps`, `/maps/<i>`: unchanged (fetch_maps.py). `/data/skins`, `/data/spins`, `/spins/wheels`: above.
+- Live state, not data (Box Office keeps its own): `/territorial-wars/status`, `/leaderboards/krunkcup/teams`,
+  `/creators/events`, `/social/news`, social's `/player-count`.
+- Need an account (401 without one; not fetched): `/ranked/shop` (KN: 0205 + 0371), `/market/black-market`
+  and its `/rank`, `/kpd/reviewers`, community's `/polls`; Twitch drops come over the social socket per
+  account (`getTwitchDrops`, :98486; Box Office runs no drop campaigns).
+
 ### Not ported (no KN counterpart)
 - The logger stops printing to the console (:28569-28602).
 - three.js / TSL node internals (WebGPU), analytics / gtag rewrites, the transpiler noise above.

@@ -518,6 +518,16 @@ store-import: ## The store table: assets/skins.json from Krunker v10.0.2 (tools/
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --tables --assets assets
 	node tools/ui-import/gen_viewer_store.js
 
+.PHONY: live-data-fetch live-data-verify live-data-check
+live-data-fetch: ## Pin Krunker's public gapi data KN serves from its own copies (titles, the Eterno Shop's limited display) into tools/krunker/live_data/ (KN_FETCH_PROXY=)
+	$(PYTHON) -I tools/krunker/live_data.py fetch
+
+live-data-verify: ## Offline: assets/titles.json and the shop_official_* migration rows (every dialect) match the pinned live data
+	$(PYTHON) -I tools/krunker/live_data.py verify
+
+live-data-check: ## Online: krunker.io's live titles and limited display still match the pins (exit 1 on drift; KN_FETCH_PROXY=)
+	$(PYTHON) -I tools/krunker/live_data.py check
+
 store-check: ## Drift check of the v10 store table, its generated C tables and test, and the store items' asset files
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --tables --check --assets assets
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
@@ -1061,7 +1071,7 @@ launcher-online-e2e: build ## Launcher-started client: finder + matchmaker reque
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_online_e2e.py $(DEBUG_DIR)
 
 .PHONY: smoke smoke-native smoke-ui smoke-web lint check
-check: test ks-test editor-mcp-test lint bridge-check deploy-test krunker-build-test ## Everything CI runs that does not need a display
+check: test ks-test editor-mcp-test lint bridge-check deploy-test krunker-build-test live-data-verify ## Everything CI runs that does not need a display
 
 .PHONY: deploy-test
 deploy-test: ## The asset CDN split (deploy/asset-shards.json) + the edge game-server render (Box Office + Krunker Strike instances, firewall, net-bridge allowlist; needs ansible-playbook, else skipped); the brain's user-asset proxy from a fake krunkbox .env (ansible, skipped without it)

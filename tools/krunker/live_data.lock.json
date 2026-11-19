@@ -1,0 +1,17 @@
+{
+  "comment": "tools/krunker/live_data.py: Krunker's public gapi data KN serves from its own copies",
+  "endpoints": {
+    "titles": {
+      "url": "https://gapi.svc.krunker.io/titles",
+      "sha256": "1501c0484f16bf58cd55ce1ca12d00ac63d162ff0669b5cb60b2f3f4eeba739c",
+      "bytes": 19791,
+      "fetched": "2026-11-19"
+    },
+    "limited": {
+      "url": "https://gapi.svc.krunker.io/shop/displays?tag=limited",
+      "sha256": "208eac9f62b4dfdde99305db2eab12ef0fffd823f694da47c48a3f88fe48926d",
+      "bytes": 14248,
+      "fetched": "2026-11-19"
+    }
+  }
+}

@@ -10,7 +10,7 @@ Stdlib only. One check per route, each printing PASS or FAIL:
   GET /maps/0                {data: the Burg map JSON, its objects as in assets/maps/official} (26586)
   GET /maps/47, /maps/x      404 {error: {code: MAP_NOT_FOUND}} (no such official map)
   GET /maps/by-name/burg     {data: the Burg map} case-insensitive (26592); unknown name 404
-  GET /titles                {data: the 111 titles of assets/titles.json} (27518, 103393)
+  GET /titles                {data: the 113 titles of assets/titles.json} (27518, 103393)
   GET /data/skins            the packed table of assets/skins.json; decoded with a port of v10.js
                              unpack (27906-27985) it is the file's array, in order (28035)
   GET /data/spins            the packed wheels; decoded it equals GET /api/data/spins (102764)

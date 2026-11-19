@@ -1,0 +1,1271 @@
+[
+ {
+  "active": true,
+  "desc": "Drop 2,500 nukes",
+  "id": 5,
+  "name": "Nuke Champion",
+  "rarity": 5,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drop 2,500 nukes"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 1,000,000 kills",
+  "id": 10,
+  "name": "Kill-ionaire",
+  "rarity": 5,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 1,000,000 kills"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all map challenges",
+  "id": 37,
+  "name": "Map Master",
+  "rarity": 5,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all map challenges"
+  }
+ },
+ {
+  "active": true,
+  "color": "#ff3333",
+  "desc": "Reach Kracked rank and claim the Emperor's Blade in the Black Market",
+  "id": 87,
+  "name": "No-Life",
+  "rarity": 5,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 4531,
+   "text": "Reach Kracked rank and claim the Emperor's Blade in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Drop 1,500 nukes",
+  "id": 4,
+  "name": "Tsar Bomba",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drop 1,500 nukes"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 500,000 kills",
+  "id": 9,
+  "name": "Executioner",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 500,000 kills"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Win 10,000 matches",
+  "id": 14,
+  "name": "Immortal",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Win 10,000 matches"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Soul Sanctum challenges",
+  "id": 66,
+  "name": "Ghostbuster",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Soul Sanctum challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Tortuga challenges",
+  "id": 67,
+  "name": "The Jolly Roger",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Tortuga challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Laboratory challenges",
+  "id": 68,
+  "name": "Professional Researcher",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Laboratory challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Khepri challenges",
+  "id": 69,
+  "name": "On The Styx",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Khepri challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Bastion challenges",
+  "id": 70,
+  "name": "Kingmaker",
+  "rarity": 4,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Bastion challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Have 1,000,000 KR and claim the reward in the Black Market",
+  "id": 93,
+  "name": "Millionaire",
+  "rarity": 4,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 2995,
+   "text": "Have 1,000,000 KR and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete 5,000 trades and claim the reward in the Black Market",
+  "id": 94,
+  "name": "Market Master",
+  "rarity": 4,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 2996,
+   "text": "Complete 5,000 trades and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Reach 10,000 followers and claim the reward in the Black Market",
+  "id": 97,
+  "name": "Famous",
+  "rarity": 4,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 3863,
+   "text": "Reach 10,000 followers and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Drop 750 nukes",
+  "id": 2,
+  "name": "Nuclear",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drop 750 nukes"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Drop 1,000 nukes",
+  "id": 3,
+  "name": "Radioactive",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drop 1,000 nukes"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 250,000 kills",
+  "id": 8,
+  "name": "Hitman",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 250,000 kills"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Win 5,000 matches",
+  "id": 13,
+  "name": "Champion",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Win 5,000 matches"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill the Weeping Soul 100 times",
+  "id": 45,
+  "name": "Cry No More",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill the Weeping Soul 100 times"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill Dr. Krunk 100 times",
+  "id": 52,
+  "name": "Krunkologist",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill Dr. Krunk 100 times"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill the Pharaoh 100 times",
+  "id": 57,
+  "name": "Tomb Raider",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill the Pharaoh 100 times"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill Osiris 100 times",
+  "id": 58,
+  "name": "Osiris' Curse",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill Osiris 100 times"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill 600 hydra heads on Bastion",
+  "id": 64,
+  "name": "Slayer of the Hydra",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill 600 hydra heads on Bastion"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill the Grim King 100 times",
+  "id": 65,
+  "name": "Grim Reaper",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill the Grim King 100 times"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill 1,000 Jack O' Lanterns",
+  "id": 71,
+  "name": "Pumped Up!",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill 1,000 Jack O' Lanterns"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Convert 1,000 zombies on Facility",
+  "id": 72,
+  "name": "Witch Doctor",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Convert 1,000 zombies on Facility"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Purchase 1,000 mystery boxes on Facility",
+  "id": 73,
+  "name": "LETS GO GAMBLING",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Purchase 1,000 mystery boxes on Facility"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Sniper Rifle challenges",
+  "id": 74,
+  "name": "Sharpshooter",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Sniper Rifle challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Assault Rifle challenges",
+  "id": 75,
+  "name": "Jack Of All Trades",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Assault Rifle challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Submachine Gun challenges",
+  "id": 76,
+  "name": "Vanguard",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Submachine Gun challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Revolver challenges",
+  "id": 77,
+  "name": "Six-Shot Superstar",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Revolver challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Shotgun challenges",
+  "id": 78,
+  "name": "Buckshot",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Shotgun challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Semi Auto challenges",
+  "id": 79,
+  "name": "Trigger Discipline",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Semi Auto challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Rocket Launcher challenges",
+  "id": 80,
+  "name": "Explosive Expert",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Rocket Launcher challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Akimbo Uzi challenges",
+  "id": 81,
+  "name": "Dual Wielder",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Akimbo Uzi challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Combat Knife challenges",
+  "id": 82,
+  "name": "Assassin",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Combat Knife challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Crossbow challenges",
+  "id": 83,
+  "name": "Crossed Up",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Crossbow challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Famas challenges",
+  "id": 84,
+  "name": "Burst Master",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Famas challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Blaster challenges",
+  "id": 85,
+  "name": "Plasma Professional",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Blaster challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete all Charge Rifle challenges",
+  "id": 86,
+  "name": "Overcharger",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete all Charge Rifle challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 10,000 mid-air kills",
+  "id": 88,
+  "name": "Airborne",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 10,000 mid-air kills"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 2,000 first bloods",
+  "id": 89,
+  "name": "First Strike",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 2,000 first bloods"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Reach level 50 with Runner and claim the reward in the Black Market",
+  "id": 90,
+  "name": "Roadrunner",
+  "rarity": 3,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 1672,
+   "text": "Reach level 50 with Runner and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 10,000 thrown melee kills and claim the reward in the Black Market",
+  "id": 91,
+  "name": "Pinpoint",
+  "rarity": 3,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 1866,
+   "text": "Get 10,000 thrown melee kills and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Spray 50,000 times and claim the reward in the Black Market",
+  "id": 92,
+  "name": "Graffiti Artist",
+  "rarity": 3,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 2994,
+   "text": "Spray 50,000 times and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Make 150 helpful reports and claim the reward in the Black Market",
+  "id": 95,
+  "name": "Watchdog",
+  "rarity": 3,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 2998,
+   "text": "Make 150 helpful reports and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Crouch 1,000,000 times and claim the reward in the Black Market",
+  "id": 96,
+  "name": "Squat King",
+  "rarity": 3,
+  "requirements": {
+   "kind": "blackmarket",
+   "skin": 3845,
+   "text": "Crouch 1,000,000 times and claim the reward in the Black Market"
+  }
+ },
+ {
+  "active": true,
+  "color": "#ff8a1a",
+  "desc": "Bank 10,000 candy in Candy Heist",
+  "id": 113,
+  "name": "Candy Heist Master",
+  "rarity": 3,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Bank 10,000 candy in Candy Heist"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Drop 500 nukes",
+  "id": 1,
+  "name": "Fallout",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drop 500 nukes"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 100,000 kills",
+  "id": 7,
+  "name": "Take Me To The Top",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 100,000 kills"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Win 1,000 matches",
+  "id": 12,
+  "name": "Legend",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Win 1,000 matches"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Burg challenges",
+  "id": 15,
+  "name": "Burger",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Burg challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Littletown challenges",
+  "id": 16,
+  "name": "Tiny",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Littletown challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Frontier challenges",
+  "id": 17,
+  "name": "Pioneer",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Frontier challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Subzero challenges",
+  "id": 18,
+  "name": "Ice Cold",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Subzero challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Undergrowth challenges",
+  "id": 19,
+  "name": "Overgrown",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Undergrowth challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Freight challenges",
+  "id": 20,
+  "name": "Dockmaster",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Freight challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Lostworld challenges",
+  "id": 21,
+  "name": "Aztec",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Lostworld challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Citadel challenges",
+  "id": 22,
+  "name": "Locked In",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Citadel challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Oasis challenges",
+  "id": 23,
+  "name": "Salvation",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Oasis challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Kanji challenges",
+  "id": 24,
+  "name": "Midnight Lights",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Kanji challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Industry challenges",
+  "id": 25,
+  "name": "Industry Plant",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Industry challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Lumber challenges",
+  "id": 26,
+  "name": "Chopped",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Lumber challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Evacuation challenges",
+  "id": 27,
+  "name": "First Responder",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Evacuation challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Site challenges",
+  "id": 28,
+  "name": "Plant The Bomb",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Site challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all SkyTemple challenges",
+  "id": 29,
+  "name": "Sage Wisdom",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all SkyTemple challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Lagoon challenges",
+  "id": 30,
+  "name": "Islander",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Lagoon challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Habitat challenges",
+  "id": 31,
+  "name": "Zookeeper",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Habitat challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Atomic challenges",
+  "id": 32,
+  "name": "The Bomb",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Atomic challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Erupt challenges",
+  "id": 33,
+  "name": "Eruption",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Erupt challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all HQ challenges",
+  "id": 34,
+  "name": "Big Wig CEO",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all HQ challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Eterno Simulator challenges",
+  "id": 35,
+  "name": "Matrix",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Eterno Simulator challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Finish all Tropicano challenges",
+  "id": 36,
+  "name": "Tourist",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Finish all Tropicano challenges"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill the Krab King",
+  "id": 46,
+  "name": "Cutthroat Crustacean",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill the Krab King"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill King Krum",
+  "id": 47,
+  "name": "King Krum",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill King Krum"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill Captain Krunk",
+  "id": 48,
+  "name": "Blackbeard",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill Captain Krunk"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill 1,000 zombies on Laboratory",
+  "id": 49,
+  "name": "Left For Dead",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill 1,000 zombies on Laboratory"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Collect 50 cards on Laboratory",
+  "id": 50,
+  "name": "Collector",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Collect 50 cards on Laboratory"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Shoot 50 sirens on Laboratory",
+  "id": 51,
+  "name": "Silencer",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Shoot 50 sirens on Laboratory"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill 1,000 mummies on Khepri",
+  "id": 53,
+  "name": "Mummified",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill 1,000 mummies on Khepri"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill the Pharaoh",
+  "id": 54,
+  "name": "Coffin Cracker",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill the Pharaoh"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill Osiris",
+  "id": 55,
+  "name": "From The Ashes",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill Osiris"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Collect 10 feathers on Khepri",
+  "id": 56,
+  "name": "Phoenix",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Collect 10 feathers on Khepri"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Make it to the King's Hall on Bastion",
+  "id": 59,
+  "name": "Castle Crasher",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Make it to the King's Hall on Bastion"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Knife 80 knights on Bastion",
+  "id": 60,
+  "name": "Night of Knights",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Knife 80 knights on Bastion"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Drink 200 chalices on Bastion",
+  "id": 61,
+  "name": "Raise A Glass",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drink 200 chalices on Bastion"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Collect 300 keys on Bastion",
+  "id": 62,
+  "name": "Keyholder",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Collect 300 keys on Bastion"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Arr Matey!! bundle",
+  "id": 98,
+  "name": "Captain",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 29,
+   "kind": "bundle",
+   "text": "Buy the Arr Matey!! bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy The Cat Bundle - Animated",
+  "id": 99,
+  "name": "Meow :3",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 28,
+   "kind": "bundle",
+   "text": "Buy The Cat Bundle - Animated"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Adventure Rabbit bundle",
+  "id": 100,
+  "name": "Bunny",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 26,
+   "kind": "bundle",
+   "text": "Buy the Adventure Rabbit bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Adventure Cat bundle",
+  "id": 101,
+  "name": "Wildcat",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 27,
+   "kind": "bundle",
+   "text": "Buy the Adventure Cat bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Onic Bundle",
+  "id": 102,
+  "name": "Lightning",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 20,
+   "kind": "bundle",
+   "text": "Buy the Onic Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Bullseye Bundle",
+  "id": 103,
+  "name": "Bullseye",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 19,
+   "kind": "bundle",
+   "text": "Buy the Bullseye Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Anger Management Bundle",
+  "id": 104,
+  "name": "Anger Issues",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 18,
+   "kind": "bundle",
+   "text": "Buy the Anger Management Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Bloated Bundle",
+  "id": 105,
+  "name": "Absolute Unit",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 16,
+   "kind": "bundle",
+   "text": "Buy the Bloated Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Cyberpunk Bundle",
+  "id": 106,
+  "name": "Cyber Ghost",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 10,
+   "kind": "bundle",
+   "text": "Buy the Cyberpunk Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Adventure Rat bundle",
+  "id": 107,
+  "name": "Scavenger",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 25,
+   "kind": "bundle",
+   "text": "Buy the Adventure Rat bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Stylized Bundle",
+  "id": 108,
+  "name": "Trendsetter",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 9,
+   "kind": "bundle",
+   "text": "Buy the Stylized Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the OG Joe Starter Pack",
+  "id": 109,
+  "name": "Joe",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 8,
+   "kind": "bundle",
+   "text": "Buy the OG Joe Starter Pack"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the Kawaii Bundle",
+  "id": 110,
+  "name": "uwu",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 6,
+   "kind": "bundle",
+   "text": "Buy the Kawaii Bundle"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Buy the World KrunkCup 2026 bundle",
+  "id": 111,
+  "name": "Hand of God",
+  "rarity": 2,
+  "requirements": {
+   "bundle": 30,
+   "kind": "bundle",
+   "text": "Buy the World KrunkCup 2026 bundle"
+  }
+ },
+ {
+  "active": true,
+  "color": "#ff8a1a",
+  "desc": "Bank 1,000 candy in Candy Heist",
+  "id": 112,
+  "name": "Trick-or-Treater",
+  "rarity": 2,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Bank 1,000 candy in Candy Heist"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Get 50,000 kills",
+  "id": 6,
+  "name": "Warming Up",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Get 50,000 kills"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Win 500 matches",
+  "id": 11,
+  "name": "Victor",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Win 500 matches"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Complete the parkour on Subzero",
+  "id": 38,
+  "name": "Icewalker",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Complete the parkour on Subzero"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Visit the lighthouse on Freight",
+  "id": 39,
+  "name": "Keeper Of The Beacon",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Visit the lighthouse on Freight"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Reach the top of the Citadel",
+  "id": 40,
+  "name": "Ascended",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Reach the top of the Citadel"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Destroy the satellite on Kanji",
+  "id": 41,
+  "name": "Orbital Breaker",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Destroy the satellite on Kanji"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Cut down the big tree on Lumber",
+  "id": 42,
+  "name": "Lumberjack",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Cut down the big tree on Lumber"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Break the big concrete block on Site",
+  "id": 43,
+  "name": "Demolitionist",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Break the big concrete block on Site"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Drink 25 kegs of Krum Juice on Tortuga",
+  "id": 44,
+  "name": "Krumaholic",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Drink 25 kegs of Krum Juice on Tortuga"
+  }
+ },
+ {
+  "active": true,
+  "desc": "Kill 10 archers or cannons on Bastion",
+  "id": 63,
+  "name": "Primitive Weaponry",
+  "rarity": 1,
+  "requirements": {
+   "kind": "challenge",
+   "text": "Kill 10 archers or cannons on Bastion"
+  }
+ }
+]

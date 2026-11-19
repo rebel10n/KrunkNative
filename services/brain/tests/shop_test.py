@@ -304,6 +304,11 @@ async def scenario(port):
               and hovi.get("purchase_limit") == 1 and hovi.get("purchase_limit_scope") == "per_user"
               and hovi.get("display_ids") == [37] and hovi.get("purchase_count") == 0,
               "Hovi (35) is krunker.io's product as the display has it: %s" % hovi)
+        # 0381: v10.0.5's new Eterno Shop product, Deathweaver (47, skin 8080, USD 10), is krunker.io's first node and every
+        # other node moved down one; as a USD product it is stored but not listed (below)
+        first = query("SELECT id FROM shop_official_products WHERE display_tag = 'limited' AND active = 1 ORDER BY node_order LIMIT 2")
+        check(first == ["47", "35"] and "47" not in official,
+              "Deathweaver (47) is the display's first node, Hovi (35) the second, and the USD product is not listed: %s" % first)
         # nothing listed is unbuyable: the USD products (Groza 26, Paint Ticket 33, Hanami 38...) and the badge (46) are not shown
         check("26" not in official and "33" not in official and "38" not in official and "46" not in official,
               "the USD products and the badge are not listed (Box Office cannot sell them): %s" % sorted(official))
