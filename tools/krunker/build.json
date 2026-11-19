@@ -2,10 +2,9 @@
  "generator_rev": 4,
  "schema": 1,
  "source": {
-  "url": null,
+  "url": "ssh://kru/home/kru/krunkbox/bin/game.deob.js",
   "sha256": "dc2c506a0b13883e34b9d058dbf5626331796dd1fa9fe0b77e342a688cc97af0",
-  "bytes": 13934544,
-  "file": "game.deob.js"
+  "bytes": 13934544
  },
  "ahkey": 17377,
  "ahkey_hex": "0x43e1",

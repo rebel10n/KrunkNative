@@ -34,10 +34,13 @@ usage:
   python3 -I tools/krunker/extract_build.py --check [--strict]  committed files current? (CI)
   python3 -I tools/krunker/extract_build.py --from-json         re-render the header from build.json
 
-SOURCE is a path or an http(s) URL of game.deob.js / game.debug.js / game.min.js or a
-game.manifest.json. Default: https://kru.eli.gift/game.deob.js (conditional GET, cached by
-ETag / Last-Modified under $XDG_CACHE_HOME/krunknative/krunker-build/), falling back to the
-cache, then to ~/.cache/kn-official/game.deob.js when the URL is unreachable.
+SOURCE is a path, an http(s) URL or an ssh://HOST/PATH of game.deob.js / game.debug.js / game.min.js
+or a game.manifest.json. Default: ssh://kru/home/kru/krunkbox/bin/game.deob.js, kru's own decode of the
+live build (its pipeline scrapes krunker.io with a real browser; https://kru.eli.gift/game.deob.js, the
+old public copy, is gone since its tunnel on divide's edge container went, 2026-11). An http(s) source
+is a conditional GET (ETag / Last-Modified), an ssh one compares the remote file's sha256 first: both
+cache under $XDG_CACHE_HOME/krunknative/krunker-build/ and fall back to that cache, then to
+~/.cache/kn-official/game.deob.js when the source is unreachable.
 
 Exit status: 0 done, 1 the bundle does not extract (an anchor or a value changed shape: the message names
 it), 3 the bundle could not be read (unreachable, no cache / local copy), 2 --check --strict unreachable.
@@ -45,7 +48,8 @@ it), 3 the bundle could not be read (unreachable, no cache / local copy), 2 --ch
 Regeneration is skipped (exit 0, "up to date") when the bundle's sha256 and the generator
 revision match the committed build.json; --force regenerates anyway.
 
-environment: KN_FETCH_PROXY (e.g. http://127.0.0.1:8888), KN_FETCH_UA, KRUNKER_BUILD_URL.
+environment: KN_FETCH_PROXY (e.g. http://127.0.0.1:8888), KN_FETCH_UA, KRUNKER_BUILD_URL,
+KRUNKER_BUILD_SSH (extra ssh arguments for an ssh:// source, e.g. "-F ~/.ssh/ci_config -i ~/.ssh/id_kru").
 """
 
 import argparse
@@ -55,6 +59,8 @@ import json
 import math
 import os
 import re
+import shlex
+import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -65,7 +71,7 @@ GENERATOR_REV = 4  # bump when the output format or the extraction rules change
 # itself was replaced by the caller's macro)
 SCHEMA = 1         # KRUNKER_BUILD_SCHEMA: bump when the header's C interface changes
 
-DEFAULT_URL = os.environ.get("KRUNKER_BUILD_URL", "https://kru.eli.gift/game.deob.js")
+DEFAULT_URL = os.environ.get("KRUNKER_BUILD_URL", "ssh://kru/home/kru/krunkbox/bin/game.deob.js")
 DEFAULT_LOCAL = os.path.expanduser("~/.cache/kn-official/game.deob.js")
 DEFAULT_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/141.0.0.0 Safari/537.36")
@@ -636,8 +642,9 @@ CC_HANDLER_V1 = (
     'V25=0V25<V23.lengthV25++)V24=16777619*(V24^=V23.charCodeAt(V25))|0return(V24>>>0).toString(16).padStart(8"0")'
     '(V0P0)V26.send(V27.CHEAT_CHECK_RESPONSEP0V11V20)catch(V28)')
 
-# The same handler with the loop variables declared in separate `var` statements (webcracked 10.0.3).
-CC_HANDLER_V2 = 'function(P0P1P2)tryV0V1=function(V2V3)V4V4="undefined"!=typeofBuffer?newUint8Array(Buffer.from(V2"base64")):newUint8Array(atob(V2).split("").map(function(V5)returnV5.charCodeAt(0)))V6=KS(V3V4.length)V7=newUint8Array(V4.length)for(V8=0V8<V4.lengthV8++)V7[V8]=V4[V8]^V6[V8]V9=newTextDecoder().decode(V7)returnJSON.parse(V9)(P2P0)tryV0=(0eval)(V1)catch(V10)V0=V11:nullV12:V13:V10.message||"eval_error"V14=function(V15V16)V17=JSON.stringify(V15)for(V18=newTextEncoder().encode(V17)V19=KS(V16V18.length)V20=newUint8Array(V18.length)V21=0V21<V18.lengthV21++)V20[V21]=V18[V21]^V19[V21]if("undefined"!=typeofBuffer)returnBuffer.from(V20).toString("base64")elsereturnbtoa(String.fromCharCode.apply(StringV22(V20)))(V0P0)V23=function(V24V25)for(V26=V25+JSON.stringify(V24)V27=2166136261V28=0V28<V26.lengthV28++)V27=(V27^=V26.charCodeAt(V28))*16777619|0return(V27>>>0).toString(16).padStart(8"0")(V0P0)V29.send(V30.CHEAT_CHECK_RESPONSEP0V14V23)catch(V31)'
+# The same handler with the loop variables declared in separate `var` statements and an if / else return
+# (webcrack: Krunker_v10.0.3/deob/game.deob.js and v10.0.2/game.deob.js).
+CC_HANDLER_V2 = 'function(P0P1P2)tryV0V1=function(V2V3)V4V4="undefined"!=typeofBuffer?newUint8Array(Buffer.from(V2"base64")):newUint8Array(atob(V2).split("").map(function(V5)returnV5.charCodeAt(0)))V6=KS(V3V4.length)V7=newUint8Array(V4.length)for(V8=0V8<V4.lengthV8++)V7[V8]=V4[V8]^V6[V8]V9=newTextDecoder().decode(V7)returnJSON.parse(V9)(P2P0)tryV0=(0eval)(V1)catch(V10)V0="r":null"e":"_eval":V10.message||"eval_error"V11=function(V12V13)V14=JSON.stringify(V12)for(V15=newTextEncoder().encode(V14)V16=KS(V13V15.length)V17=newUint8Array(V15.length)V18=0V18<V15.lengthV18++)V17[V18]=V15[V18]^V16[V18]if("undefined"!=typeofBuffer)returnBuffer.from(V17).toString("base64")elsereturnbtoa(String.fromCharCode.apply(StringV19(V17)))(V0P0)V20=function(V21V22)for(V23=V22+JSON.stringify(V21)V24=2166136261V25=0V25<V23.lengthV25++)V24=(V24^=V23.charCodeAt(V25))*16777619|0return(V24>>>0).toString(16).padStart(8"0")(V0P0)V26.send(V27.CHEAT_CHECK_RESPONSEP0V11V20)catch(V28)'
 
 # Handler v3 (live since 2026-11-04): v1 with the response bytes spread straight into
 # String.fromCharCode (`btoa(String.fromCharCode(...bytes))`) instead of `.apply(String, toArray(bytes))`;
@@ -652,6 +659,10 @@ CC_HANDLER_V3 = (
     '(String.fromCharCode(...V17))(V0P0)V19=function(V20V21)for(V22=V21+JSON.stringify(V20)V23=2166136261'
     'V24=0V24<V22.lengthV24++)V23=16777619*(V23^=V22.charCodeAt(V24))|0return(V23>>>0).toString(16).padStart(8"0")'
     '(V0P0)V25.send(V26.CHEAT_CHECK_RESPONSEP0V11V19)catch(V27)')
+
+# Handler v3 through our own decoder (Krunker_v10.0.3/deob/tools/deob.cjs; Krunker_v10.0.7/deob/game.webcrack.js):
+# v2's layout with v3's spread.
+CC_HANDLER_V4 = 'function(P0P1P2)tryV0V1=function(V2V3)V4V4="undefined"!=typeofBuffer?newUint8Array(Buffer.from(V2"base64")):newUint8Array(atob(V2).split("").map(function(V5)returnV5.charCodeAt(0)))V6=KS(V3V4.length)V7=newUint8Array(V4.length)for(V8=0V8<V4.lengthV8++)V7[V8]=V4[V8]^V6[V8]V9=newTextDecoder().decode(V7)returnJSON.parse(V9)(P2P0)tryV0=(0eval)(V1)catch(V10)V0="r":null"e":"_eval":V10.message||"eval_error"V11=function(V12V13)V14=JSON.stringify(V12)for(V15=newTextEncoder().encode(V14)V16=KS(V13V15.length)V17=newUint8Array(V15.length)V18=0V18<V15.lengthV18++)V17[V18]=V15[V18]^V16[V18]if("undefined"!=typeofBuffer)returnBuffer.from(V17).toString("base64")elsereturnbtoa(String.fromCharCode(...V17))(V0P0)V19=function(V20V21)for(V22=V21+JSON.stringify(V20)V23=2166136261V24=0V24<V22.lengthV24++)V23=(V23^=V22.charCodeAt(V24))*16777619|0return(V23>>>0).toString(16).padStart(8"0")(V0P0)V25.send(V26.CHEAT_CHECK_RESPONSEP0V11V19)catch(V27)'
 
 _TOK = re.compile(r"\s+|(" + STR + r")|(" + NUM + r")|(" + IDENT + r")|(.)", re.S)
 
@@ -682,16 +693,37 @@ def canonical_js(code, names, drop=("{", "}", ";")):
             continue
         out.append(t)
         i += 1
+    binds, scope_end = _js_bindings(out)
+    fixed = set(names)  # pre-mapped (P*, SALT, KS): never rebound
     names = dict(names)
     nloc = 0
     res = []
+    scopes = []  # [end token index, {name: previous mapping or None}]
     for j, (kind, v) in enumerate(out):
+        while scopes and scopes[-1][0] < j:
+            for n, prev in scopes.pop()[1].items():
+                if prev is None:
+                    names.pop(n, None)
+                else:
+                    names[n] = prev
+        if j in scope_end and j:
+            scopes.append([scope_end[j], {}])
         if kind == "i" and j and out[j - 1] == ("p", ".") and out[max(0, j - 3):j] != [("p", ".")] * 3:
             kind = "prop"  # x.name; `...name` is a spread of an identifier, not a property
         if kind == "i" and j == 1 and out[0] == ("i", "function"):
             continue  # the function's own (garbled) name
+        if (kind == "i" and j and out[j - 1][1] in ("{", ",") and j + 1 < len(out) and out[j + 1] == ("p", ":")
+                and v not in JS_GLOBALS and _js_in_object(out, j)):
+            kind = "s"  # a bare object key ({r: null}) is the string "r"
         if kind == "i" and v not in JS_GLOBALS:
-            if v not in names:
+            if j in binds and v not in fixed and scopes and v not in scopes[-1][1]:
+                # a binding in a scope: a minifier reuses short names in sibling scopes (game.min.js
+                # names every inner function's params l, x), so each binding gets its own number and
+                # the outer mapping comes back when the scope ends
+                scopes[-1][1][v] = names.get(v)
+                names[v] = "V%d" % nloc
+                nloc += 1
+            elif v not in names:
                 names[v] = "V%d" % nloc
                 nloc += 1
             v = names[v]
@@ -701,8 +733,93 @@ def canonical_js(code, names, drop=("{", "}", ";")):
             continue
         res.append(v)
     canon = "".join(res)
-    # `typeof x != "undefined"` and `"undefined" != typeof x` are the same guard (webcrack flips them)
+    # `typeof x != "undefined"`, `"undefined" != typeof x` and `typeof x < "u"` (esbuild, game.min.js) are
+    # the same guard
+    canon = re.sub(r'typeof([A-Za-z_$][\w$]*)<"u"', r'"undefined"!=typeof\1', canon)
     return re.sub(r'typeof([A-Za-z_$][\w$]*)!={1,3}"undefined"', r'"undefined"!=typeof\1', canon)
+
+
+def _js_match(toks, i):
+    """Index of the bracket closing toks[i] ((, [ or {), or len(toks)."""
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack = []
+    for k in range(i, len(toks)):
+        t = toks[k]
+        if t[0] != "p":
+            continue
+        if t[1] in pairs:
+            stack.append(pairs[t[1]])
+        elif stack and t[1] == stack[-1]:
+            stack.pop()
+            if not stack:
+                return k
+    return len(toks)
+
+
+def _js_in_object(toks, j):
+    """toks[j] (an identifier before `:`) is inside an object literal: the `{` around it follows `=`, `(`,
+    `,`, `:`, `?`, `return` or `[` (a block's `{` follows `)`, `else`, `try` ...)."""
+    depth = 0
+    for k in range(j - 1, -1, -1):
+        t = toks[k]
+        if t[0] != "p":
+            continue
+        if t[1] in ")]}":
+            depth += 1
+        elif t[1] in "([{":
+            if depth:
+                depth -= 1
+                continue
+            if t[1] != "{":
+                return False
+            prev = toks[k - 1] if k else ("p", "")
+            return prev in (("p", "="), ("p", "("), ("p", ","), ("p", ":"), ("p", "?"), ("p", "["),
+                            ("i", "return"))
+    return False
+
+
+def _js_bindings(toks):
+    """(binding token indices, {scope start index: scope end index}) of a token list: the params of each
+    `function (...) {` and `catch (...) {` and the `var` / `let` / `const` declarators, each scope from the
+    `function` / `catch` keyword to its body's closing brace."""
+    binds, scope_end = set(), {}
+    for i, t in enumerate(toks):
+        if t in (("i", "function"), ("i", "catch")):
+            k = i + 1
+            if k < len(toks) and toks[k][0] == "i":
+                k += 1  # function name
+            if k >= len(toks) or toks[k] != ("p", "("):
+                continue
+            close = _js_match(toks, k)
+            depth = 0
+            for m in range(k + 1, close):
+                tm = toks[m]
+                if tm[0] == "p" and tm[1] in "([{":
+                    depth += 1
+                elif tm[0] == "p" and tm[1] in ")]}":
+                    depth -= 1
+                elif tm[0] == "i" and depth == 0 and toks[m - 1] in (("p", "("), ("p", ",")):
+                    binds.add(m)
+            if close + 1 < len(toks) and toks[close + 1] == ("p", "{"):
+                scope_end[i] = _js_match(toks, close + 1)
+        elif t in (("i", "var"), ("i", "let"), ("i", "const")):
+            depth = 0
+            m = i + 1
+            if m < len(toks) and toks[m][0] == "i":
+                binds.add(m)
+            for m in range(i + 1, len(toks)):
+                tm = toks[m]
+                if tm[0] == "p" and tm[1] in "([{":
+                    depth += 1
+                elif tm[0] == "p" and tm[1] in ")]}":
+                    depth -= 1
+                    if depth < 0:
+                        break  # the end of a for (...) header
+                elif depth == 0 and tm in (("p", ";"), ("i", "in"), ("i", "of")):
+                    break
+                elif depth == 0 and tm == ("p", ",") and m + 1 < len(toks) and toks[m + 1][0] == "i":
+                    binds.add(m + 1)
+    return binds, scope_end
 
 
 def extract_cheat(src):
@@ -799,7 +916,7 @@ def extract_cheat(src):
         hpre = {p: "P%d" % i for i, p in enumerate(handler[2])}
         hpre[ks] = "KS"
         hcanon = canonical_js(hsrc, hpre, drop=("{", "}", ";", ",", "var"))
-        if hcanon not in (CC_HANDLER_V1, CC_HANDLER_V2, CC_HANDLER_V3):
+        if hcanon not in (CC_HANDLER_V1, CC_HANDLER_V2, CC_HANDLER_V3, CC_HANDLER_V4):
             k = next((i for i, (x, y) in enumerate(zip(hcanon, CC_HANDLER_V1)) if x != y),
                      min(len(hcanon), len(CC_HANDLER_V1)))
             fail("cheat handler", "cc handler shape changed (update krunker_cheat and CC_HANDLER_*) at "
@@ -967,10 +1084,11 @@ def _elem_fields(body, elem, fields, groups=1):
     # E == SOCKET['socketId']: the socket id of "you"
     for m in re.finditer(elem + r"\s*==\s*" + IDENT + r"\s*" + prop("socketId"), body):
         fields.add(num(m), "id", "socketId")
-    # var v = E; ... v ? / v && player['prop']
+    # var v = E; ... v ? / v && player['prop'], or if (v) { if (!player['prop'] (webcrack)
     for m in re.finditer(r"(?<![\w$.\]])(" + IDENT + r")\s*=\s*" + elem + r"\s*[;,]", body):
         v = m.group(1)
-        um = re.compile(_word(v) + r"\s*(?:\?|&&)\s*" + IDENT + r"\s*" + ANYPROP).search(body, m.end())
+        um = re.compile(r"(?:" + _word(v) + r"\s*(?:\?|&&)|if\s*\(\s*" + _word(v) + r"\s*\)\s*\{?\s*if\s*\(\s*!?)\s*" +
+                        IDENT + r"\s*" + ANYPROP).search(body, m.end())
         if um:
             fields.add(js_num(m.group(2)), _pname(um, 1), "local")
 
@@ -985,7 +1103,7 @@ def extract_add_players(src, tables):
     if not lm:
         fail(anchor, "no `for (var i = 0; i < list.length;)` over the handler's first argument")
     idx = lm.group(1)
-    strides = set(js_num(x) for x in re.findall(_word(idx) + r"\s*\+=\s*(" + NUM + r")\s*[;,)]", body))
+    strides = set(js_num(x) for x in re.findall(_word(idx) + r"\s*\+=\s*(" + NUM + r")\s*[;,)}]", body))
     if len(strides) != 1:
         fail(anchor, "expected one `i += STRIDE`, got %r" % sorted(strides))
     stride = strides.pop()
@@ -1066,7 +1184,7 @@ def extract_update_players(src, tables):
     if not lm:
         fail(anchor, "no `for (var i = 0; i < list.length;)` over the handler's first argument")
     idx = lm.group(1)
-    strides = set(js_num(x) for x in re.findall(_word(idx) + r"\s*\+=\s*(" + NUM + r")\s*[;,)]", body))
+    strides = set(js_num(x) for x in re.findall(_word(idx) + r"\s*\+=\s*(" + NUM + r")\s*[;,)}]", body))
     if len(strides) != 1:
         fail(anchor, "expected one `i += STRIDE`, got %r" % sorted(strides))
     stride = strides.pop()
@@ -1171,7 +1289,7 @@ def extract_kill_player(src, tables):
     found["deaths"] = _first(r"deathsVal\s*" + prop("textContent") + r"\s*=\s*" + P, body)
     found["hideFeed"] = _first(r"!\s*" + P + r"\s*&&[^;]{0,80}?" + prop("showKills"), body)
     if victim and killer:
-        found["stats"] = _first(r"\}\s*\(\s*" + _word(victim) + r"\s*,\s*" + _word(killer) + r"\s*,\s*" + P + r"\s*,", body)
+        found["stats"] = _first(r"\}\s*\)?\s*\(\s*" + _word(victim) + r"\s*,\s*" + _word(killer) + r"\s*,\s*" + P + r"\s*,", body)
     return _roles(anchor, params, found, ("victim", "deaths", "killer", "stats", "info", "hideFeed"))
 
 
@@ -1200,7 +1318,7 @@ def extract_change_health(src, tables):
              "noHitMarker": _first(r"<\s*" + IDENT + r"\s*&&\s*!\s*" + P + r"\s*&&\s*\(\s*null\s*!=", body),
              "resetMax": _first(r"\|\|\s*" + P + r"\s*\)\s*&&\s*\(\s*" + IDENT + r"\s*" + prop("maxHealth") + r"\s*=", body)}
     if found["srcX"]:
-        found["srcZ"] = _first(r"\}\s*\(\s*" + _word(found["srcX"]) + r"\s*,\s*" + P + r"\s*\)", body)
+        found["srcZ"] = _first(r"\}\s*\)?\s*\(\s*" + _word(found["srcX"]) + r"\s*,\s*" + P + r"\s*\)", body)
     return _roles(anchor, params, found, ("health", "sid", "srcX", "srcZ", "noHitMarker", "resetMax"))
 
 
@@ -1344,8 +1462,19 @@ def x_custom_build_version(src):
     return {"value": None}
 
 
+# esbuild (game.min.js) writes `x == null` / `x != null` where the deob / debug builds have `null == x`;
+# the read-site rules are written for the latter.
+_NULL_CMP = re.compile(r"(?<![\w$.\])])(" + IDENT + r")\s*(!=|==)\s*null(?![\w$])")
+
+
+def minified_idioms(src):
+    return _NULL_CMP.sub(lambda m: m.group(0) if m.group(1) in ("typeof", "return", "case", "in", "of")
+                         else "null%s%s" % (m.group(2), m.group(1)), src)
+
+
 def extract(src):
     norm, deob = deobfuscate(src)
+    norm = minified_idioms(norm)
     ahkey, ahform = extract_ahkey(norm)
     out = {
         "ahkey": ahkey,
@@ -1428,9 +1557,67 @@ def _atomic_write(path, data):
         raise
 
 
+def _ssh(host, remote_cmd, timeout):
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
+    cmd += [os.path.expanduser(a) for a in shlex.split(os.environ.get("KRUNKER_BUILD_SSH", ""))]
+    cmd += [host, remote_cmd]
+    r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
+    if r.returncode != 0:
+        raise OSError("ssh %s: exit %d: %s" % (host, r.returncode, r.stderr.decode("utf8", "replace").strip()[-300:]))
+    return r.stdout
+
+
+def fetch_ssh(url):
+    """fetch() for ssh://HOST/PATH: the remote sha256 stands in for the ETag, so an unchanged file is
+    not copied again ('url (unchanged, cached)')."""
+    m = re.match(r"ssh://([^/]+)(/.+)$", url)
+    if not m:
+        raise OSError("%s: not ssh://HOST/PATH" % url)
+    host, path = m.group(1), m.group(2)
+    cdir = cache_dir()
+    key_ = hashlib.sha256(url.encode()).hexdigest()[:16]
+    body_path = os.path.join(cdir, key_ + ".js")
+    meta_path = os.path.join(cdir, key_ + ".json")
+
+    def cached():
+        try:
+            with open(meta_path, encoding="utf8") as f:
+                meta = json.load(f)
+            with open(body_path, "rb") as f:
+                data = f.read()
+        except (OSError, ValueError):
+            return None, None
+        return (data, meta) if hashlib.sha256(data).hexdigest() == meta.get("sha256") else (None, None)
+
+    q = shlex.quote(path)
+    try:
+        out = _ssh(host, "sha256sum -- %s && stat -c %%Y -- %s" % (q, q), 60).decode().split()
+        remote_sha, mtime = out[0], out[-1]
+        data, meta = cached()
+        if data is not None and meta.get("sha256") == remote_sha:
+            return data, "url (unchanged, cached)"
+        data = _ssh(host, "cat -- %s" % q, 300)
+        sha = hashlib.sha256(data).hexdigest()
+        if sha != remote_sha:
+            raise OSError("%s changed while it was copied" % url)
+        _atomic_write(body_path, data)
+        _atomic_write(meta_path, json.dumps({"url": url, "etag": None, "last_modified": mtime, "sha256": sha,
+                                             "bytes": len(data)}, indent=1).encode())
+        return data, "url"
+    except (OSError, subprocess.TimeoutExpired, IndexError, UnicodeDecodeError) as e:
+        err = str(e)
+    data, _ = cached()
+    if data is not None:
+        log("%s unreachable (%s); using the cached copy from the last fetch" % (url, err))
+        return data, "cache"
+    raise OSError("%s: %s" % (url, err))
+
+
 def fetch(url):
     """(bytes, origin) with a conditional GET against the cache. origin: 'url' | 'cache'.
     Raises OSError when neither the URL nor a cached copy is usable."""
+    if url.startswith("ssh://"):
+        return fetch_ssh(url)
     cdir = cache_dir()
     key_ = hashlib.sha256(url.encode()).hexdigest()[:16]
     body_path = os.path.join(cdir, key_ + ".js")
@@ -1490,7 +1677,7 @@ def load_source(arg):
             with open(DEFAULT_LOCAL, "rb") as f:
                 data = f.read()
             prov = {"url": None, "origin": "local", "file": os.path.basename(DEFAULT_LOCAL)}
-    elif re.match(r"https?://", arg):
+    elif re.match(r"(https?|ssh)://", arg):
         try:
             data, origin = fetch(arg)
         except OSError as e:

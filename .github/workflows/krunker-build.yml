@@ -1,8 +1,11 @@
 name: Krunker build
 
 # Official lobbies speak Krunker's current build without a client rebuild (client/include/krunker_build_fetch.h).
-# Every 30 minutes (and by hand) this extracts https://kru.eli.gift/game.deob.js with
-# tools/krunker/extract_build.py (a static parse of the text: nothing executes it), checks the result
+# Every 30 minutes (and by hand) this extracts kru's decode of the live Krunker client
+# (kru:/home/kru/krunkbox/bin/game.deob.js, written by kru's krunkbox pipeline, which scrapes krunker.io with
+# a real browser; read over SSH through divide, as Deploy kru reaches kru; the old public copy
+# https://kru.eli.gift/game.deob.js is gone) with tools/krunker/extract_build.py (a static parse of the
+# text: nothing executes it), checks the result
 # with the client's own parser (tools/krunker/build_check.c over shared/src/krunker_build_live.c) and,
 # when it changed, publishes it to the updates store (tools/krunker/publish_build.py):
 #   https://dl.krunk.io/updates/krunker/<sha256>.json      the document (immutable)
@@ -32,13 +35,47 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      KRUNKER_BUNDLE: https://kru.eli.gift/game.deob.js
+      KRUNKER_BUNDLE: ssh://kru/home/kru/krunkbox/bin/game.deob.js
+      # -F: ci_config below (kru through divide, the CI keys, host keys checked)
+      KRUNKER_BUILD_SSH: -F ~/.ssh/ci_config
       PUBLISHED: https://dl.krunk.io/updates/client/krunker-build.json
       XDG_CACHE_HOME: ${{ github.workspace }}/.cache
     steps:
       - uses: actions/checkout@v7
 
-      # extract_build.py's conditional GET cache (ETag / Last-Modified): most runs get a 304
+      # ci_config: deploy/ansible/ssh_config with kru at KRU_HOST:KRU_PORT behind ProxyJump divide (kru is
+      # CT 120 on the Proxmox host divide, reached only through it) and each host's CI key. Used to read
+      # the bundle and to publish. Without the secrets (a fork) the bundle is unreachable: a warning.
+      - name: SSH setup
+        env:
+          KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
+          KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
+          KRU_HOST: ${{ secrets.KRU_HOST }}
+          KRU_PORT: ${{ secrets.KRU_PORT }}
+          DIVIDE_SSH_KEY: ${{ secrets.DIVIDE_SSH_KEY }}
+          DIVIDE_KNOWN_HOSTS: ${{ secrets.DIVIDE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KRU_SSH_KEY" ] || [ -z "$DIVIDE_SSH_KEY" ] || [ -z "$DIVIDE_KNOWN_HOSTS" ]; then
+            echo "::warning::no KRU_SSH_KEY / DIVIDE_SSH_KEY / DIVIDE_KNOWN_HOSTS secret: kru is unreachable"; exit 0
+          fi
+          install -d -m 700 ~/.ssh
+          (umask 077; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru; printf '%s\n' "$DIVIDE_SSH_KEY" > ~/.ssh/id_divide)
+          printf '%s\n%s\n' "$KRU_KNOWN_HOSTS" "$DIVIDE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          awk -v kh="${KRU_HOST:-}" -v kp="${KRU_PORT:-22}" '
+            $1 == "Host" { host = $2 }
+            host == "divide" && $1 == "IdentityFile" { print "  IdentityFile ~/.ssh/id_divide"; print "  IdentitiesOnly yes"; next }
+            host == "kru" && $1 == "HostName" {
+              print "  HostName " (kh != "" ? kh : $2); print "  Port " kp; print "  ProxyJump divide"
+              print "  IdentityFile ~/.ssh/id_kru"; print "  IdentitiesOnly yes"; next }
+            $1 == "IdentityFile" { next }
+            { print }
+            END { print ""; print "Host *"; print "  StrictHostKeyChecking yes"; print "  UserKnownHostsFile ~/.ssh/known_hosts" }' \
+            deploy/ansible/ssh_config > ~/.ssh/ci_config
+          chmod 600 ~/.ssh/ci_config
+
+      # extract_build.py's cache: the remote file's sha256 stands in for an ETag, so most runs copy nothing
       - uses: actions/cache@v6
         with:
           path: .cache/krunknative/krunker-build
@@ -91,35 +128,20 @@ jobs:
             echo "changed=1" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: SSH setup
-        if: steps.stage.outputs.changed == '1' && github.ref == 'refs/heads/main' && vars.KN_UPDATES_UPLOAD == '1'
-        env:
-          KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
-          KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru
-          chmod 600 ~/.ssh/id_kru
-          printf '%s\n' "$KRU_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-
       # the document first, then the manifest naming it (rsync writes a dot file and renames it: nginx
       # 404s dot files under /updates/, so a client never reads a half-written manifest)
       - name: Publish
         if: steps.stage.outputs.changed == '1' && github.ref == 'refs/heads/main' && vars.KN_UPDATES_UPLOAD == '1'
-        env:
-          KRU_HOST: ${{ secrets.KRU_HOST }}
-          KRU_PORT: ${{ secrets.KRU_PORT }}
         run: |
           set -euo pipefail
-          ssh_cmd="ssh -i $HOME/.ssh/id_kru -p ${KRU_PORT:-22} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
-          rsync -rt --chmod=D755,F644 -e "$ssh_cmd" stage/krunker/ "root@$KRU_HOST:/opt/krunknative-updates/public/krunker/"
-          rsync -t --chmod=F644 -e "$ssh_cmd" stage/client/krunker-build.json "root@$KRU_HOST:/opt/krunknative-updates/public/client/krunker-build.json"
+          ssh_cmd="ssh -F $HOME/.ssh/ci_config"
+          rsync -rt --chmod=D755,F644 -e "$ssh_cmd" stage/krunker/ "kru:/opt/krunknative-updates/public/krunker/"
+          rsync -t --chmod=F644 -e "$ssh_cmd" stage/client/krunker-build.json "kru:/opt/krunknative-updates/public/client/krunker-build.json"
           echo "### published to $PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Cleanup key
+      - name: Cleanup keys
         if: always()
-        run: rm -f ~/.ssh/id_kru
+        run: rm -f ~/.ssh/id_kru ~/.ssh/id_divide ~/.ssh/ci_config
 
       # the compiled fallback (krunker_build.h + build.json) against the live build: the regenerated files
       # as an artifact when they differ (informational: clients already speak the live build)

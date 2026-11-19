@@ -562,7 +562,7 @@ webview2-check: ## The staged WebView2 SDK files match tools/webview2/webview2.l
 # committed shared/include/krunker_build.h + tools/krunker/build.json (tools/krunker/extract_build.py).
 # SRC=<path|url> reads another bundle (game.deob.js / game.debug.js / game.min.js / manifest).
 .PHONY: krunker-build krunker-build-check krunker-build-test
-krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1)
+krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default ssh://kru/home/kru/krunkbox/bin/game.deob.js, kru's decode of the live build, cached by sha256; SRC=, FORCE=1)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) $(if $(FORCE),--force,)
 
 krunker-build-check: ## Regenerate krunker_build.h from the current Krunker bundle into a temp file; exit 1 when the committed header / build.json differ (bundle unreachable: header <-> build.json only, STRICT=1 fails)

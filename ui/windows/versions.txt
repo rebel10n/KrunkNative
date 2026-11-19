@@ -14,6 +14,119 @@
  - Here is some info on how to enable WebGL https://superuser.com/questions/836832/how-can-i-enable-webgl-in-my-browser
  - If you have connection issues at school or work, Try using browserfps.com
 
+ == UPDATE 10.0.7 ==
+ * General
+ - Reduced the stutter when an enemy first comes on screen
+ - Fixed lag switching letting players teleport
+ - Fixed players sometimes being kicked with "Input Failed" after a server hiccup
+ - Fixed items sometimes being unusable without a game reload
+ - Fixed KR not updating in game after market, trade and giveaway actions
+ - Fixed Junk not being added when bought on newer accounts
+ - Fixed double raid drops sometimes being lost
+ - Fixed Gun Game giving two Promotion medals for one promotion on multi-kill shots
+ - Fixed moving map objects like elevators jittering from the second round on
+ - Fixed the Random secondary skin always using the default skin after a reload
+ - Fixed Ametwista skins showing black
+ - Fixed some textures rendering wrong with WebGPU
+ - Fixed guests getting an error when clicking Double XP on the end screen
+ - Closing the daily spin wheel now returns to the menu
+ - Fixed the profiles of players with some special characters
+ * Ranked
+ - Fixed ranked matches sometimes being saved twice
+ - Players now get at most one cooldown penalty per ranked match
+ - Fixed NO GAMES AVAILABLE sometimes showing when joining a ranked match as it starts
+ - Anonymous players now stay anonymous on the team panel
+ - The Ranked Shop now sells the Universal Spin Ticket instead of the Season 9 Heroic Ticket, and no longer sells the Season 9 Ultra Ticket
+ * Inventory & Market
+ - Fixed the market tabs going off screen at high UI Scale
+ - Fixed the exchange and social windows not fitting with UI Scaling off
+ - Fixed listing items from the Krunker Hub inventory
+ - Fixed unlisting or listing again right after a Krunker Hub listing failing
+ - Trade item search now matches weapon names
+ * Social
+ - Fixed the first DM from some friends showing as "DM from Unknown"
+ - Fixed your chat draft being cleared when a message arrives
+ - Fixed the clan feed tab erroring for guests and players without a clan
+ - Fixed uploading a clan logo right after creating a clan
+ * Maps
+ - Favoriting a map now shows it in the Favorites tab
+ - Favorite stars now show correctly on every tab
+ * Twitch
+ - If your Twitch link has expired, claiming drops now asks you to reconnect it
+ * Editor
+ - Changing a duplicated object's asset ID now updates its collision size
+ - Fixed a failed custom asset upload not being retryable
+ * KrunkScript
+ - Script-spawned AIs now see 120 units by default (visionDis)
+ - AI part names now work the same in glowPart, getPartPosition and setPartDamage, and can contain spaces and colons
+ - getPartPosition now works for AIs spawned without preciseHits
+ - AI glow keeps its color and its halo looks smoother
+ * Login with Krunker
+ - Added Login with Krunker: sign in to third-party apps with your Krunker account
+ - Added Connected apps to Settings, where you can see and disconnect the apps you use
+
+ == UPDATE 10.0.6 ==
+ * General
+ - Added wear and paint to some cosmetics from November spin
+ - Added new skin Scarecrow Peg
+ * Store
+ - Limited items now show as sold out right after you buy them
+ - Fixed limited items sometimes being purchasable more than once
+
+ == UPDATE 10.0.5 ==
+ * General
+ - Added 71 new November spin items to the Starter, Elite, Heroic and Ultra spins, available from November 1
+ - Added 4 new Twitch drops
+ - Added 1 new item to the Eterno Shop
+ - Fixed players in other matches sometimes holding their arm like the Candy Heist pose
+ - Fixed some map textures not showing with WebGPU rendering
+ * Inventory & Market
+ - Trade history loads faster
+ - Fixed quick-sell sometimes failing
+ * Editor
+ - Added a Collision Size field for custom assets
+ - Added Convert to Collision Mesh to the right-click menu
+ - Collision triangles on imported maps can now be selected, moved and deleted
+ - Fixed custom asset collision sizes and map collision being lost when importing and exporting maps
+
+ == UPDATE 10.0.4 ==
+ * Candy Heist
+ - Added the Candy Heist Halloween event, running until November 7: collect candy, bank it at the Cauldron and avoid the Hollowmen
+ - Added Candy Heist challenges with KR rewards and the Trick-or-Treater and Candy Heist Master titles
+ - Event drops: Candy Corn Hat, Hollowman Mask, Hollowman's Staff, Candy Pail and Hollowmere Night AK & Sniper
+ - Complete all Candy Heist challenges to earn the Lil' Cauldron pet
+ - The Hollowman's Staff counts the candy you bank
+ * General
+ - Added a map loading screen
+ - Reduced stutter when a match starts
+ - Added an Interact button on mobile
+ - Added a Privacy & Age section to profile Settings
+ - Item drops can be equipped without relogging
+ - Chat-restricted players can now vote to forfeit
+ - Matches played alone now end with ENDED instead of DEFEAT
+ - Fixed some skins not showing on Mac
+ - Fixed some waist and shoe items not showing
+ - Fixed some Shotgun skins not showing in item previews
+ - Improved the size of waist items in item previews
+ - Fixed map models disappearing when replaying a map
+ - Fixed incorrect challenge progress
+ * Inventory & Market
+ - Added item locks to protect items from quick-sell, listing and trades
+ - Added Select mode to the inventory to quick-sell many items at once
+ - Added Select mode to the market inventory to list many items at once
+ - Added Buy multiple to listings
+ - Fixed "Market is busy" errors
+ - Fixed listed paints still being usable
+ * Raids
+ - Fixed raid bosses sometimes dropping nothing
+ - Bastion's Hydra and Catacombs now give double drops on double drop weekends
+ * KrunkScript & Editor
+ - Added AI Rarity Chances to set each boss's drop odds
+ - Added doubleRaidDrops to GAME.CONFIG.getMatch()
+ - Studios can now publish, unpublish and edit currencies
+ - Setting a player's score now only counts the difference toward score challenges
+ - Improved the third-person arm for player.pose.holdL
+
  == UPDATE 10.0.3 ==
  * General
  - Added a Disable Video Skins setting (Quality)

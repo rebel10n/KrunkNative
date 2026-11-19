@@ -149,6 +149,14 @@ def comparable(doc):
     return d
 
 
+# Krunker 10.0.7 (2026-11-16) in its three forms: kru's decode, the debug build and game.min.js as served
+# (esbuild: `x == null`, `typeof x < "u"`, short names reused across scopes, `i += 13}`). Under
+# ~/jails/kru/src/Krunker_v10.0.7 (KRUNKER_V1007_DIR), skipped where that tree is absent (CI).
+V1007_DIR = os.environ.get("KRUNKER_V1007_DIR", os.path.join(HOME, "jails", "kru", "src", "Krunker_v10.0.7"))
+V1007 = {"ahkey": 0x43E1, "client_version": "10.0.7r1", "build_version": "7ccZCb5K8H21WeQNwr1szD2woJ2CP1WI",
+         "salt": "KRUNK3R_AC", "c2s": 138, "s2c": 264}
+
+
 # ------------------------------------------------------------------ 1. real bundles
 
 def check_maps(label, doc):
@@ -578,6 +586,33 @@ def obfuscate(src, seed=7):
     return head + body
 
 
+def test_v1007(tmp):
+    required = os.environ.get("KRUNKER_BUNDLES_REQUIRED") == "1"
+    ref = None
+    for label, rel in (("10.0.7 game.deob.js", "deob/game.deob.js"), ("10.0.7 game.debug.js", "live/game.debug.js"),
+                       ("10.0.7 game.min.js", "live/game.min.js")):
+        path = os.path.join(V1007_DIR, rel)
+        if not os.path.exists(path):
+            print("  SKIP %s (not on this machine)" % label)
+            check(not required, "%s present" % label)
+            continue
+        text, prov = E.load_source(path)
+        doc, err = run_extract(text)
+        check(err is None, "%s extracts (%s)" % (label, err))
+        if not doc:
+            continue
+        check_values(label, doc, V1007)
+        check_layouts(label, doc, KNOWN_LAYOUTS)
+        check_maps(label, doc)
+        if ref is None:
+            ref = doc
+        else:
+            check(comparable(doc) == comparable(ref), "%s: every value identical to game.deob.js" % label)
+            check(E.canonical_js(doc["cheat_keystream_js"], {}) == E.canonical_js(ref["cheat_keystream_js"], {}),
+                  "%s: same keystream function" % label)
+        print("  %-21s %s" % (label, E.summary(E.build_doc(doc, prov)).split("\n")[0]))
+
+
 def test_synthetic(tmp):
     fx = make_fixture()
     doc, err = run_extract(fx)
@@ -824,7 +859,8 @@ def test_live(tmp):
 def main():
     tmp = tempfile.mkdtemp(prefix="kn-krunker-extract-test-")
     try:
-        for name, fn in (("real bundles", test_real_bundles), ("synthetic bundles", test_synthetic),
+        for name, fn in (("real bundles", test_real_bundles), ("10.0.7 bundles", test_v1007),
+                         ("synthetic bundles", test_synthetic),
                          ("committed header", test_committed), ("live build", test_live)):
             print("%s:" % name)
             fn(tmp)

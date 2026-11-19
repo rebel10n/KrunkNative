@@ -2,7 +2,7 @@
  * Regenerate: make krunker-build      Check: make krunker-build-check
  *
  * Build constants of the official Krunker client bundle the krunker_proto codec speaks to.
- * Source: game.deob.js
+ * Source: ssh://kru/home/kru/krunkbox/bin/game.deob.js
  * sha256: dc2c506a0b13883e34b9d058dbf5626331796dd1fa9fe0b77e342a688cc97af0 (13934544 bytes)
  */
 #ifndef KRUNKER_BUILD_H
@@ -10,7 +10,7 @@
 
 /* Bumped when this header's C interface changes; consumers: #if KRUNKER_BUILD_SCHEMA != N #error */
 #define KRUNKER_BUILD_SCHEMA 1
-#define KRUNKER_BUILD_SOURCE_URL ""
+#define KRUNKER_BUILD_SOURCE_URL "ssh://kru/home/kru/krunkbox/bin/game.deob.js"
 #define KRUNKER_BUILD_SOURCE_SHA256 "dc2c506a0b13883e34b9d058dbf5626331796dd1fa9fe0b77e342a688cc97af0"
 
 /* Every frame is msgpack([name, ...args]) + 2 trailer bytes {ahNum >> 4 & 0xf, ahNum & 0xf}.
