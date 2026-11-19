@@ -82,6 +82,8 @@ typedef struct HttpJob {
     char *url;      // full URL
     char method[8];
     char *body;     // request body (JSON), NULL = none; replaced by the response body
+    size_t body_len; // with ctype: the request body's length (raw bytes, backend_http_post_bytes)
+    char ctype[64];  // the request body's Content-Type when it is not JSON ("" = JSON text)
     BackendHttpFn fn;
     void *user;
     int status;
@@ -211,7 +213,9 @@ static void http_run(HttpJob *job) {
     job->status = 0;
     char *resp = NULL;
     size_t len = 0;
-    const int status = kn_winhttp_request(job->method, job->url, req_body, job->timeout_ms, &resp, &len, job->err, sizeof(job->err));
+    const int status = job->ctype[0] ? kn_winhttp_request_bytes(job->method, job->url, job->ctype, req_body, job->body_len, job->timeout_ms,
+                                                                &resp, &len, job->err, sizeof(job->err))
+                                     : kn_winhttp_request(job->method, job->url, req_body, job->timeout_ms, &resp, &len, job->err, sizeof(job->err));
     free(req_body);
     job->body = resp;
     job->length = len;
@@ -238,7 +242,7 @@ static void http_run(HttpJob *job) {
     // the whole path + query of the URL after host[:port]
     Bytes req = {0};
     char head[640];
-    const size_t body_len = req_body ? strlen(req_body) : 0;
+    const size_t body_len = req_body ? job->ctype[0] ? job->body_len : strlen(req_body) : 0;
     const char *target = http_url_target(job->url);
     bytes_push(&req, job->method, strlen(job->method));
     bytes_push(&req, " ", 1);
@@ -249,7 +253,7 @@ static void http_run(HttpJob *job) {
              a.host, default_port ? "" : ":", default_port ? "" : a.port);
     bytes_push(&req, head, strlen(head));
     if (req_body) {
-        snprintf(head, sizeof(head), "Content-Type: application/json\r\nContent-Length: %zu\r\n", body_len);
+        snprintf(head, sizeof(head), "Content-Type: %s\r\nContent-Length: %zu\r\n", job->ctype[0] ? job->ctype : "application/json", body_len);
         bytes_push(&req, head, strlen(head));
     }
     bytes_push(&req, "\r\n", 2);
@@ -468,6 +472,41 @@ int backend_http_get_probe(const char *path, const BackendHttpFn fn, void *user)
 int backend_http_request(const char *method, const char *url, const char *json_body, const BackendHttpFn fn, void *user) {
     if (backend_brain_refuses_url(url)) return 0;
     return http_queue(method && method[0] ? method : "GET", url, json_body, fn, user);
+}
+
+int backend_http_post_bytes(const char *url, const char *content_type, const void *data, const size_t len, const int timeout_ms,
+                            const BackendHttpFn fn, void *user) {
+    if (!url || !url[0] || !content_type || !content_type[0] || backend_brain_refuses_url(url)) return 0;
+    HttpJob *job = calloc(1, sizeof(*job));
+    if (!job) return 0;
+    job->timeout_ms = timeout_ms > 0 ? timeout_ms : BACKEND_HTTP_TIMEOUT_MS;
+    snprintf(job->method, sizeof(job->method), "POST");
+    snprintf(job->ctype, sizeof(job->ctype), "%s", content_type);
+    job->url = strdup(url);
+    job->body = malloc(len + 1); // never NULL for a zero-length body: a body is what makes the request carry a Content-Length
+    job->body_len = len;
+    job->fn = fn;
+    job->user = user;
+    if (!job->url || !job->body) {
+        free(job->url);
+        free(job->body);
+        free(job);
+        return 0;
+    }
+    if (len) memcpy(job->body, data, len);
+    job->body[len] = 0;
+    pthread_mutex_lock(&g_lock);
+    if (!g_http_thread_up[HTTP_LANE_BRAIN]) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, http_thread, (void *) (intptr_t) HTTP_LANE_BRAIN) == 0) {
+            pthread_detach(t);
+            g_http_thread_up[HTTP_LANE_BRAIN] = 1;
+        }
+    }
+    QUEUE_PUSH(g_http_pending[HTTP_LANE_BRAIN], job);
+    pthread_cond_broadcast(&g_http_cond[HTTP_LANE_BRAIN]);
+    pthread_mutex_unlock(&g_lock);
+    return 1;
 }
 
 // ------------------------------------------------------------------ social socket

@@ -23,6 +23,9 @@
  * At most UA_FETCHES transfers run at once; requests for a path being fetched wait for that fetch.
  * Responses carry Cache-Control: public (a week): Krunker never changes a published file in place.
  *
+ * A Box Office asset (an id from USER_ASSET_KN_ID_BASE, published with the editor's Publish Asset: asset_upload.c) is
+ * answered from uploads.dir only, with Cache-Control: no-cache (an update replaces its files in place).
+ *
  * <id>/video.mp4.knv is not on Krunker's host: it is the asset's video.mp4 (fetched as above) as
  * KrunkNative's frame sidecar (shared/include/knv.h: JPEG frames, user_assets.video_width wide at most,
  * user_assets.video_fps, the first user_assets.video_max_s seconds), made with user_assets.ffmpeg and
@@ -31,6 +34,8 @@
  * the asset's texture.png instead.
  */
 #include "user_assets.h"
+
+#include "asset_upload.h"
 
 #include "brain.h"
 
@@ -144,6 +149,21 @@ static unsigned char *read_whole(const char *path, const char *rel, size_t *len)
 }
 
 static int serve_local(kn_http_req *req, const char *rel) {
+    if (user_asset_rel_is_kn(rel)) {
+        /* a Box Office asset (asset_upload.c): only its upload store has it, and an update replaces its files in place, so
+         * caches must ask again (no-cache) instead of keeping a week's copy; never Krunker's host */
+        char path[1400];
+        size_t len = 0;
+        unsigned char *data = asset_upload_path(rel, path, sizeof path) ? read_whole(path, rel, &len) : NULL;
+        if (!data) {
+            reply_status(req, 404);
+            return 1;
+        }
+        kn_http_set_header(req, "Cache-Control", "no-cache");
+        kn_http_respond(req, 200, content_type(rel), data, len);
+        free(data);
+        return 1;
+    }
     const char *dirs[2] = {C.tree_dir, C.cache_dir};
     for (int i = 0; i < 2; i++) {
         if (!dirs[i][0]) continue;

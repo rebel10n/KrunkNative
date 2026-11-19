@@ -129,16 +129,16 @@ static void request_error(char *err, const size_t errn, const DWORD code) {
     }
     set_err(err, errn, what, code);
 }
-int kn_winhttp_request(const char *method, const char *url, const char *json_body, const int timeout_ms, char **body,
-                       size_t *length, char *err, const size_t errn) {
+// One request with these request headers and body (body_len bytes of it): kn_winhttp_request / _bytes.
+static int winhttp_send(const char *method, const char *url, const wchar_t *headers, const void *req_body, const size_t req_len,
+                        const int timeout_ms, char **body, size_t *length, char *err, const size_t errn) {
     *body = NULL;
     if (length) *length = 0;
     Handles h;
     if (!open_request(&h, method && method[0] ? method : "GET", url, timeout_ms, err, errn)) return 0;
-    const wchar_t *headers = json_body ? L"Accept: application/json\r\nContent-Type: application/json\r\n" : L"Accept: application/json\r\n";
-    const DWORD body_len = json_body ? (DWORD) strlen(json_body) : 0;
+    const DWORD body_len = (DWORD) req_len;
     int status = 0;
-    if (!WinHttpSendRequest(h.request, headers, (DWORD) -1L, (void *) json_body, body_len, body_len, 0) ||
+    if (!WinHttpSendRequest(h.request, headers, (DWORD) -1L, (void *) req_body, body_len, body_len, 0) ||
         !WinHttpReceiveResponse(h.request, NULL)) {
         request_error(err, errn, GetLastError());
         close_handles(&h);
@@ -183,6 +183,19 @@ int kn_winhttp_request(const char *method, const char *url, const char *json_bod
     *body = data;
     if (length) *length = len;
     return data ? status : 0;
+}
+
+int kn_winhttp_request(const char *method, const char *url, const char *json_body, const int timeout_ms, char **body,
+                       size_t *length, char *err, const size_t errn) {
+    const wchar_t *headers = json_body ? L"Accept: application/json\r\nContent-Type: application/json\r\n" : L"Accept: application/json\r\n";
+    return winhttp_send(method, url, headers, json_body, json_body ? strlen(json_body) : 0, timeout_ms, body, length, err, errn);
+}
+
+int kn_winhttp_request_bytes(const char *method, const char *url, const char *content_type, const void *req_body, const size_t req_len,
+                             const int timeout_ms, char **body, size_t *length, char *err, const size_t errn) {
+    wchar_t headers[160];
+    swprintf(headers, sizeof(headers) / sizeof(headers[0]), L"Accept: application/json\r\nContent-Type: %hs\r\n", content_type);
+    return winhttp_send(method, url, headers, req_body, req_len, timeout_ms, body, length, err, errn);
 }
 
 int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, const int timeout_ms,

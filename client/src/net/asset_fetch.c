@@ -662,6 +662,10 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
             for (int g = 0; g < F.origin_count && !__atomic_load_n(&F.stop, __ATOMIC_RELAXED); g++) {
                 Origin *o = &F.origins[g];
                 if (o->ua != snapshot.ua) continue; // user assets come from the user-asset origins only
+                // a Box Office asset (an id from USER_ASSET_KN_ID_BASE, kn_brain's asset uploads) is only on the brain's mirror
+                if (o->ua && !strncmp(o->url, USER_ASSET_HOST_URL, sizeof(USER_ASSET_HOST_URL) - 1) &&
+                    !strncmp(rel, USER_ASSET_DIR, sizeof(USER_ASSET_DIR) - 1) && user_asset_rel_is_kn(rel + sizeof(USER_ASSET_DIR) - 1))
+                    continue;
                 if (!o->by_path && !snapshot.want) continue; // content-addressed: needs the sha256
                 if (!kn_path_filter_ok(&o->filter, rel)) continue; // not in its part of a split CDN
                 pthread_mutex_lock(&F.lock);

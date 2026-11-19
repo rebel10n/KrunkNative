@@ -12,7 +12,10 @@ any display) restore its session from storage and drive editor_net.c with KRUNKN
    "Missing spawn points." as the failure popup; no publish form, nothing uploaded.
 1. Publish > Game (publishMap -> the My Games lookup -> publishGamePopup -> uploadM -> pubMR ->
    mapResp "Game Uploaded!"), the map on /api/maps; publishMap again: "Update Game" / "Publish v0.2"
-   -> "Game Updated!"; Publish > Asset -> uploadA -> kn_brain's "File uploads are not supported".
+   -> "Game Updated!"; Publish > Asset of a sound (uploadA -> pubR -> the chunked POST /upload-user-asset,
+   services/brain/asset_upload.c): a file that is no MP3 fails with the brain's reason in the popup, and the same
+   popup publishes once a real MP3 is picked (Krunker 10.0.7: a failed upload is retryable); the Sounds window
+   lists it and /api/user-assets/<id>/sound.mp3 answers its bytes.
 2. My Games (window 14) lists the map; openEdit; loadMap (edMp) imports the published map;
    updateMapLB (ulb) keeps v10's "Please wait..." popup (kn_brain answers upMp; the brain test checks the stored
    LEADERBOARD fields); deleteCreation
@@ -77,8 +80,8 @@ async def register(port, name):
 
 
 def seed_assets(dbcfg, account_id):
-    """Two published assets of the account (kn_brain hosts no asset uploads): a model with a thumbnail
-    flag and a sound. False when this driver cannot be written from here."""
+    """Two published assets of the account, inserted directly (asset ids below Box Office's own): a model with a
+    thumbnail flag and a sound. False when this driver cannot be written from here."""
     sql = ("INSERT INTO published_assets (creator_id, name, category, data, size_kb) VALUES "
            "(%d, 'Zed model', 3, '{\"t\":1}', 1500), (%d, 'Alpha sound', 17, '{\"u\":1}', 42)" % (account_id, account_id))
     if dbcfg.get("driver") == "sqlite":
@@ -138,7 +141,8 @@ def main():
         subprocess.run([os.path.join(BUILD, "services/brain/kn_brain"), "--migrate-only"], cwd=ROOT, env=env, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         brain = subprocess.Popen([os.path.join(BUILD, "services/brain/kn_brain"), "--brain.host=127.0.0.1", "--brain.port=0",
-                                  "--brain.id=edpub-%d" % os.getpid()], cwd=ROOT, env=env,
+                                  "--brain.id=edpub-%d" % os.getpid(), "--uploads.dir=%s" % os.path.join(WORK, "uploads")],
+                                 cwd=ROOT, env=env,
                                  stdout=open(brain_log, "w"), stderr=subprocess.STDOUT)
         m = wait_for(brain_log, r"listening on http://127\.0\.0\.1:(\d+) \(ws")
         if not m:
@@ -170,13 +174,18 @@ def main():
         check("... and the brain has no such map", not [r for r in rows if r["map_name"] == bad], str(rows)[:300])
 
         # ---- run 1: publish, update, publish asset
+        bad_mp3, good_mp3 = D("not-a-sound.mp3"), os.path.join(ROOT, "assets", "sound", "adrop_0.mp3")
+        with open(bad_mp3, "w") as f:
+            f.write("plain text, not a sound\n")
         # add:5 = SPAWN_POINT: uploadM runs v10's validateMap, which refuses a map without spawns
         s = ["cfg:set:map.name:%s" % json.dumps(mapname), "add:0", "add:1", "add:0", "add:5", "wait:1",
              "publish:7", "wait:6", "dump:popup:%s" % D("pub1.txt"),
              "ui:KE.publishMap()", "wait:4", "dump:popup:%s" % D("pub2-form.txt"),
              "ui:KE.uploadGame()", "wait:4", "dump:popup:%s" % D("pub2.txt"),
              "net:publish-asset", "wait:0.5", "dump:popup:%s" % D("asset-form.txt"),
-             "net:asset-type:3", "net:upload-asset", "wait:3", "dump:popup:%s" % D("asset.txt")]
+             "net:asset-type:3", "net:asset-name:Ed6Snd%s" % stamp, "net:file:gameSound:%s" % bad_mp3, "net:upload-asset",
+             "wait:4", "dump:popup:%s" % D("asset-bad.txt"),
+             "net:file:gameSound:%s" % good_mp3, "net:upload-asset", "wait:4", "dump:popup:%s" % D("asset.txt")]
         for n in (2, 5, 7, 9):
             s += ["window:%d" % n, "wait:2", "dump:window:%s" % D("w%d.txt" % n)]
         s.append("closewindow")
@@ -197,8 +206,18 @@ def main():
         af = read(D("asset-form.txt"))
         check("publish asset popup: v7's fields", "Publish or Update Asset" in af and "select#5[Model..Video]" in af
               and "select#17[Clutter..Triggers]" in af, af)
-        a = read(D("asset.txt"))
-        check("uploadA: kn_brain's answer in the popup", "File uploads are not supported on this server" in a, a)
+        a0, a = read(D("asset-bad.txt")), read(D("asset.txt"))
+        check("Publish Asset of a file that is no MP3: the brain's reason in the popup", "Invalid Sound (MP3 only)" in a0, a0 + log1[-800:])
+        check("the same popup again with an MP3: \"Asset Uploaded!\" (10.0.7: retryable)", "Asset Uploaded!" in a, a + log1[-800:])
+        mine_a = [r for r in api(port, "/api/assets?index=0&cat=17&username=%s" % account).get("data", [])
+                  if r.get("nm") == "Ed6Snd" + stamp] if "Asset Uploaded!" in a else []
+        check("the brain lists the uploaded sound (an id from 1000000000)", len(mine_a) == 1 and int(mine_a[0]["id"]) >= 1000000000,
+              str(mine_a)[:300])
+        if mine_a:
+            with open(good_mp3, "rb") as f:
+                want = f.read()
+            with urllib.request.urlopen("http://127.0.0.1:%d/api/user-assets/%s/sound.mp3" % (port, mine_a[0]["id"]), timeout=10) as r:
+                check("GET /api/user-assets/<id>/sound.mp3: the picked file", r.read() == want)
         w2, w9 = read(D("w2.txt")), read(D("w9.txt"))
         if seeded:
             # newest first; formatBytes(1500 kB, 0) = "2MB"; the owner gets the delete icon, a sound the play button

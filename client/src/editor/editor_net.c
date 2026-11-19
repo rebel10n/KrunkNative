@@ -34,9 +34,13 @@
 //   Mobile Friendly flags (kn_brain ignores them for now). The thumbnail defaults to a PNG of the
 //   3D view (v7 needs a picked file); Select picks a PNG instead. kn_brain keeps thumbnails up to
 //   200 kB of data URL, so larger ones are refused here.
-// - uploadA is sent as v7 sends it; kn_brain answers ["upMp", "File uploads are not supported on
-//   this server"] (no asset hosting), shown in the popup. A pubR reply (a server that hosts
-//   files) is answered with "Upload Request Failed": the client has no multipart POST.
+// - uploadA is sent as v10 sends it (editor-10.0.7.js:20656-20766); kn_brain answers pubR {fileId, srv} or upMp
+//   (services/brain/asset_upload.c). publishAssetResp's one multipart POST of every file to <srv>/upload-user-asset
+//   is a sequence of POSTs here, each file in order as raw chunks of 512 KiB at most
+//   (?fileId=&key=&offset=), then ?fileId=&done=1: kn_brain and its proxies take request bodies of 1 MiB / 16 MiB,
+//   below a 250 MB model. "Asset Uploaded!" on the done's 200, else the answer's text ("Upload Request Failed" when
+//   a request failed). The files are read again from where they were picked when they are sent. After a failure
+//   Publish/Update starts over with a new uploadA (Krunker 10.0.7: "a failed custom asset upload" is retryable).
 // - updateMapLB (ulb) is v10's: no reply timeout, so the "Please wait..." popup stays until the
 //   user closes it, and the upMp reply goes through uploadResp into #gameUpResp, which the
 //   leaderboard popup does not have (nothing shows). kn_brain stores the settings on the map's
@@ -1306,6 +1310,7 @@ static const struct { const char *id, *key, *accept, *label; int limit, kb; } k_
 static struct {
     double size;     // bytes, 0 = none
     char name[128];  // file name (the model's extension)
+    char path[1024]; // the picked file (read again when the upload sends it; the web build's copy in MEMFS)
 } g_files[AF_COUNT];
 static int g_asset_type; // vLN01461: 0 model, 1 prefab, 2 texture, 3 sound, 4 video
 
@@ -1438,6 +1443,7 @@ static void file_picked(void *user, const char *path) {
     base = base ? base + 1 : path;
     g_files[f].size = (double) got;
     snprintf(g_files[f].name, sizeof(g_files[f].name), "%s", base);
+    snprintf(g_files[f].path, sizeof(g_files[f].path), "%s", path);
     char id[48];
     snprintf(id, sizeof(id), "%sH", k_files[f].id);
     html_dom_set_attr(html_dom_by_id(id), "title", base);
@@ -1493,6 +1499,154 @@ static void file_picked(void *user, const char *path) {
 static void add_sizes(cJSON *sizes, const int *fields, const int n) {
     for (int i = 0; i < n; i++)
         if (g_files[fields[i]].size > 0) cJSON_AddNumberToObject(sizes, k_files[fields[i]].key, g_files[fields[i]].size);
+}
+
+// ---------------------------------------------------------------------------
+// publishAssetResp(pubR): the declared files to the server (kn_brain's asset_upload.c; see the notes at the top)
+
+#define UP_CHUNK (512u * 1024u)  // kn_brain takes request bodies up to 1 MiB
+#define UP_TIMEOUT_MS 60000      // one chunk on a slow uplink
+#define UP_DATA (-1)             // the prefab's data.json (the popup's Paste Data text, not a picked file)
+
+static struct {
+    unsigned gen;             // bumped by every upload start / end: an answer of an older upload is dropped
+    int active;
+    int fields[AF_COUNT + 1]; // what uploadA declared, in order (k_files index, or UP_DATA)
+    int nfields, cur;
+    char base[512];           // https://<srv>, or the brain's URL
+    char file_id[40];
+    unsigned char *data;      // the file being sent
+    size_t len, sent;
+    char *prefab;             // the prefab data text (uploadA's data)
+} g_up;
+
+static void up_end(const char *resp) {
+    free(g_up.data);
+    free(g_up.prefab);
+    const unsigned gen = g_up.gen + 1;
+    memset(&g_up, 0, sizeof(g_up));
+    g_up.gen = gen;
+    if (resp) upload_resp(resp);
+}
+
+static void up_next(void);
+
+static void up_answer(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    if ((unsigned) (uintptr_t) user != g_up.gen || !g_up.active) return;
+    if (!g_ed.active) {
+        up_end(NULL);
+        return;
+    }
+    if (status != 200) {
+        // KE.publishAssetResp: the answer's text in the popup, "Upload Request Failed" when the request failed
+        up_end(status > 0 && body && body[0] && body[0] != '{' ? body : "Upload Request Failed");
+        return;
+    }
+    if (g_up.cur >= g_up.nfields) {
+        up_end(NULL);
+        io_po("SUCCESS", NULL, "Asset Uploaded!");
+        return;
+    }
+    if (g_up.sent >= g_up.len) {
+        free(g_up.data);
+        g_up.data = NULL;
+        g_up.cur++;
+    }
+    up_next();
+}
+
+static unsigned char *read_whole_file(const char *path, size_t *len) {
+    FILE *fp = path && path[0] ? fopen(path, "rb") : NULL;
+    if (!fp) return NULL;
+    unsigned char *data = NULL;
+    if (!fseek(fp, 0, SEEK_END)) {
+        const long size = ftell(fp);
+        if (size > 0 && !fseek(fp, 0, SEEK_SET) && (data = malloc((size_t) size)) && fread(data, 1, (size_t) size, fp) != (size_t) size) {
+            free(data);
+            data = NULL;
+        }
+        if (data) *len = (size_t) size;
+    }
+    fclose(fp);
+    return data;
+}
+
+static void up_next(void) {
+    char url[1024];
+    const void *user = (const void *) (uintptr_t) g_up.gen;
+    if (g_up.cur >= g_up.nfields) {
+        // every file sent: the server checks and stores them
+        snprintf(url, sizeof(url), "%s/upload-user-asset?fileId=%s&done=1", g_up.base, g_up.file_id);
+        if (!backend_http_post_bytes(url, "application/octet-stream", "", 0, UP_TIMEOUT_MS, up_answer, (void *) user)) up_end("Upload Request Failed");
+        return;
+    }
+    const int f = g_up.fields[g_up.cur];
+    if (!g_up.data) {
+        // read now: the file as picked (its size is what uploadA declared)
+        g_up.sent = 0;
+        g_up.len = 0;
+        if (f == UP_DATA) {
+            g_up.len = g_up.prefab ? strlen(g_up.prefab) : 0;
+            g_up.data = g_up.len ? malloc(g_up.len) : NULL;
+            if (g_up.data) memcpy(g_up.data, g_up.prefab, g_up.len);
+        } else {
+            g_up.data = read_whole_file(g_files[f].path, &g_up.len);
+            if (g_up.data && (double) g_up.len != g_files[f].size) {
+                free(g_up.data);
+                g_up.data = NULL;
+            }
+        }
+        if (!g_up.data) {
+            up_end("Upload Request Failed");
+            return;
+        }
+    }
+    const size_t n = g_up.len - g_up.sent < UP_CHUNK ? g_up.len - g_up.sent : UP_CHUNK;
+    snprintf(url, sizeof(url), "%s/upload-user-asset?fileId=%s&key=%s&offset=%zu", g_up.base, g_up.file_id,
+             f == UP_DATA ? "data" : k_files[f].key, g_up.sent);
+    const size_t at = g_up.sent;
+    g_up.sent += n;
+    if (!backend_http_post_bytes(url, "application/octet-stream", g_up.data + at, n, UP_TIMEOUT_MS, up_answer, (void *) user))
+        up_end("Upload Request Failed");
+}
+
+// KE.publishAssetResp({fileId, srv, funds})
+static void publish_asset_resp(const cJSON *r) {
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(r, "fileId"), *srv = cJSON_GetObjectItemCaseSensitive(r, "srv");
+    if (!g_up.nfields || !(cJSON_IsString(id) || cJSON_IsNumber(id))) {
+        up_end("Upload Request Failed");
+        return;
+    }
+    upload_resp("Uploading...");
+    if (cJSON_IsString(id)) snprintf(g_up.file_id, sizeof(g_up.file_id), "%s", id->valuestring);
+    else snprintf(g_up.file_id, sizeof(g_up.file_id), "%.0f", id->valuedouble);
+    for (char *c = g_up.file_id; *c; c++)
+        if (!((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z'))) *c = '_';
+    if (cJSON_IsString(srv) && srv->valuestring[0]) snprintf(g_up.base, sizeof(g_up.base), "https://%s", srv->valuestring);
+    else snprintf(g_up.base, sizeof(g_up.base), "%s", backend_url());
+    g_up.active = 1;
+    g_up.cur = 0;
+    up_next();
+}
+
+// what uploadA declares: the fields it sent sizes for (KE.uploadAsset's iìïîíîî) and the prefab's text
+static void up_prepare(const cJSON *sizes, const char *prefab) {
+    up_end(NULL);
+    const cJSON *it;
+    cJSON_ArrayForEach(it, sizes) {
+        if (!it->string) continue;
+        if (!strcmp(it->string, "data")) {
+            g_up.fields[g_up.nfields++] = UP_DATA;
+            continue;
+        }
+        for (int f = 0; f < AF_THUMBNAIL; f++)
+            if (!strcmp(it->string, k_files[f].key) && g_up.nfields < AF_COUNT) {
+                g_up.fields[g_up.nfields++] = f;
+                break;
+            }
+    }
+    g_up.prefab = prefab && prefab[0] ? strdup(prefab) : NULL;
 }
 
 // KE.uploadAsset()
@@ -1556,6 +1710,7 @@ static void upload_asset(void) {
         cJSON_AddItemToArray(f, cJSON_CreateNull()); // v10's 8th argument (undefined)
         cJSON *uvc = uv_channels();
         cJSON_AddItemToArray(f, uvc ? uvc : cJSON_CreateNull()); // uploadA's uvc: the per-map UV channels or null
+        up_prepare(sizes, g_asset_type == 1 ? data : NULL);
         free(data);
     } else {
         // texture (2) / sound (3) / video (4): category 16 / 17 / 16, kind = type
@@ -1568,6 +1723,7 @@ static void upload_asset(void) {
         cJSON_AddItemToArray(f, sizes);
         cJSON_AddItemToArray(f, cJSON_CreateNull());
         cJSON_AddItemToArray(f, cJSON_CreateNumber(g_asset_type));
+        up_prepare(sizes, NULL);
     }
     if (!social_send(f, "pubR", 1)) upload_resp("Upload Request Failed");
 }
@@ -1751,10 +1907,10 @@ static void on_social(void *user, const cJSON *frame) {
         wait_done();
         upload_resp(text);
     } else if (!strcmp(l, "pubR")) {
-        // publishAssetResp: the files go to <srv>/upload-user-asset as multipart (not possible here)
+        // publishAssetResp: the declared files go to <srv>/upload-user-asset
         if (strcmp(g_wait, "pubR")) return;
         wait_done();
-        upload_resp("Upload Request Failed");
+        publish_asset_resp(a1);
     } else if (!strcmp(l, "edMp")) {
         if (strcmp(g_wait, "edMp")) return;
         wait_done();
@@ -1957,7 +2113,7 @@ int ed_net_keydown(const HtmlEvent *ev) {
 }
 
 // KRUNKNATIVE_EDITOR_SCRIPT "net:<call>" (the editor-6 publish test): net:publish-asset,
-// net:asset-type:<n>, net:upload-asset, net:load:<name>, net:delete:<id>:<kind>, net:lb:<id>,
+// net:asset-type:<n>, net:asset-name:<text>, net:file:<input id>:<path> (a picked file), net:upload-asset, net:load:<name>, net:delete:<id>:<kind>, net:lb:<id>,
 // net:funds:<id>:<withdraw>:<kr>, net:edit:<name>:<id>:<fund>, net:select:<id>:<type>:<from>,
 // net:pending:<window> (the list as while a request is pending: v7's offline capture, uidiff),
 // net:popup:<name> (v7ref.js's net-* popups with a stand-in account; tools/editor/windows_check.py)
@@ -1973,6 +2129,13 @@ int ed_net_script(const char *cmd, const char *arg) {
     if (!strcmp(p[0], "publish-asset")) ed_net_publish_asset();
     else if (!strcmp(p[0], "asset-type") && p[1]) update_asset_type(atoi(p[1]));
     else if (!strcmp(p[0], "upload-asset")) upload_asset();
+    else if (!strcmp(p[0], "asset-name") && p[1]) html_dom_set_value(html_dom_by_id("gameNameNew"), p[1]);
+    else if (!strcmp(p[0], "file") && p[1] && p[2]) {
+        // the OS file picker's answer for selectFile(<input id>) (p[2] holds the rest: a path may have ':')
+        if (p[3]) p[3][-1] = ':';
+        const int fi = file_index(p[1]);
+        if (fi >= 0) file_picked((void *) (intptr_t) fi, p[2]);
+    }
     else if (!strcmp(p[0], "load") && p[1]) {
         snprintf(g_load_name, sizeof(g_load_name), "%s", p[1]);
         load_map_confirmed(NULL, "1");

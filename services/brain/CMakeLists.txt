@@ -119,6 +119,7 @@ set(KN_BRAIN_SOURCES
     streams.c
     streams_norm.c
     stream_thumbs.c                 # the Live Streams cards' Twitch previews: GET /streams/thumb (allow-listed, capped, cached)
+    asset_upload.c                  # the editor's Publish Asset: uploadA -> pubR -> POST /upload-user-asset (chunks), stored for /api/user-assets
     user_assets.c                   # GET /api/user-assets/<id>/<file>: Krunker's user-asset host, mirrored + cached
     v10_api.c                       # v10 REST at the root: /maps, /maps/:id, /titles, packed /data/skins and /data/spins
     v10_pack.c                      # v10's packed JSON (unpack in v10.js 27744-27985)
@@ -673,6 +674,11 @@ if (Python3_FOUND)
     add_test(NAME brain_creator
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/creator_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_creator PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # the editor's Publish Asset (asset_upload.c, 0377): uploadA -> pubR, chunked POST /upload-user-asset, the
+    # checks and the editor's limits, the retry after a failed upload (10.0.7), updates, private, the served files
+    add_test(NAME brain_asset_upload
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/asset_upload_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_asset_upload PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the startup staff grant (accounts.developers / moderators -> db_accounts.c staff_dev): developer,
     # moderator, verified, lifetime premium and the creator badge, reapplied at every start
     add_test(NAME brain_staff_grant

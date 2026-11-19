@@ -10,6 +10,9 @@
 // malloc'd response body (NUL-terminated, also on error statuses), NULL on a transport error.
 int kn_winhttp_request(const char *method, const char *url, const char *json_body, int timeout_ms,
                        char **body, size_t *length, char *err, size_t errn);
+// The same with a raw body (req_len bytes) sent as content_type (backend_http_post_bytes).
+int kn_winhttp_request_bytes(const char *method, const char *url, const char *content_type, const void *req_body, size_t req_len,
+                             int timeout_ms, char **body, size_t *length, char *err, size_t errn);
 
 // A streamed request (client/src/net/http_stream.c): headers = extra "Name: value\r\n" lines (NULL
 // none), body sent as application/json (NULL none). on_head once with the status and content type,

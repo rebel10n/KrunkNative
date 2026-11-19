@@ -7,13 +7,17 @@
 // resource pack, mod.zip) or "m" + digits (a map thumbnail). <file> is one of the names Krunker's
 // loaders ask for (render.js loadMesh / loadTexture / applyCompanionTextures, the editor's cards,
 // loadModPack): texture.png, thumb.png, model.obj / .png / _e.png / _l.png / _n.png / _p.png (a paint mask) / .gltf /
-// .glb, sound.mp3, video.mp4, data.json, mod.zip; and video.mp4.knv, the video's frames in KrunkNative's
+// .glb, the other companion maps model_s / _a / _m / _r / _d / _b.png, icon.png, sound.mp3, video.mp4, data.json, mod.zip; and video.mp4.knv, the video's frames in KrunkNative's
 // sidecar format (knv.h), which only the brain's mirror makes (KrunkNative has no video decoder). A map studio's custom
 // skin keeps its files under skins/<_id>/ (a weapon's texture under skins/<skin index>/): model.obj / .gltf / .glb,
 // texture.png, texture_e.png, sound.mp3, sound_swap.mp3, sound_inspect.mp3.
 #include <stddef.h>
 
 #define USER_ASSET_HOST_URL "https://user-assets.krunker.io/"
+// The first id of an asset published on a Box Office server (kn_brain's asset uploads, services/brain/asset_upload.c):
+// published_assets ids start here (migration 0367), far above Krunker's user-asset ids, so a Box Office asset never
+// names a file of Krunker's host and the clients fetch it from the brain only (client/src/net/asset_fetch.c).
+#define USER_ASSET_KN_ID_BASE 1000000000ll
 #define USER_ASSET_DIR "user-assets/"
 
 // rel below the user-asset host ("9356/texture.png", "md43867/mod.zip"): 1 when it is one.
@@ -26,3 +30,5 @@ long long user_asset_max_bytes(const char *rel);
 // image for .png (PNG, JPEG, GIF, BMP or WebP bytes: Krunker serves what was uploaded), a zip for
 // .zip, a glTF binary for .glb; never an HTML page (a CDN's block / error page answered 200).
 int user_asset_content_ok(const char *rel, const unsigned char *data, size_t len);
+// 1 when rel's id is a Box Office asset's (digits, at least USER_ASSET_KN_ID_BASE): only the brain has its files.
+int user_asset_rel_is_kn(const char *rel);

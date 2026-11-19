@@ -30,6 +30,7 @@
  * the editor's validateMap rules (shared/src/map_validate.c), then the name is free.
  */
 #include "acct_internal.h"
+#include "asset_upload.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -353,6 +354,8 @@ static void h_assets(kn_http_req *req, void *ud) {
         run(a);
         return;
     }
+    /* a Private asset (asset_upload.c, the popup's Private switch) is listed on its creator's My Assets tab only (the
+     * tab that sends username, config.assetTabs sendUser); its id still works in maps, as on Krunker */
     char pat[200] = "", cat[24], user[64] = "";
     kn_http_query_get(req, "username", user, sizeof user);
     size_t o = 0;
@@ -366,11 +369,13 @@ static void h_assets(kn_http_req *req, void *ud) {
                           "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
                           "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name ILIKE '%' || $1 || '%') "
                           "AND ($2::int < 0 OR x.category = $2::int) AND ($3 = '' OR lower(a.username) = lower($3)) "
+                          "AND (NOT x.is_private OR $3 <> '') "
                           "ORDER BY x.id DESC LIMIT 500",
                     .any = "SELECT x.id, {html:x.name} AS nm, x.data AS dat__t, x.created_at AS ini, a.username AS plrn, "
                            "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
                            "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name {ilike} '%' || $1 || '%' ESCAPE '\\') "
                            "AND ({int:$2} < 0 OR x.category = {int:$2}) AND ($3 = '' OR lower(a.username) = lower($3)) "
+                           "AND (x.is_private = 0 OR $3 <> '') "
                            "ORDER BY x.id DESC LIMIT 500"),
                 KN_DB_ARGS(pat, acct_itoa(cat, a->tab), user), db_rows_done, a);
 }
@@ -749,11 +754,15 @@ void sh_delete_creation(SocialSession *s, const cJSON *f) {
     social_query(s, sql, KN_DB_ARGS(social_viewer(s, me), acct_itoa(id, fa_int(f, 1, 0))), delete_done, NULL);
 }
 
-/* "uploadMo" / "uploadA" need the v3.1.1 file upload endpoints (/upload-user-mod,
- * /upload-user-asset), which this server does not host. */
+/* "uploadA": the editor's Publish Asset (asset_upload.c). "uploadMo" needs v3.1.1's /upload-user-mod (a mod's
+ * resource pack), which this server does not host. */
 void sh_upload_files(SocialSession *s, const cJSON *f) {
     const char *label = fa_str(f, 0);
     const int mod = label && !strcmp(label, "uploadMo");
+    if (!mod) {
+        asset_upload_begin(s, f);
+        return;
+    }
     cJSON *fr = social_frame("upMp");
     cJSON_AddItemToArray(fr, cJSON_CreateString("File uploads are not supported on this server"));
     if (mod) cJSON_AddItemToArray(fr, cJSON_CreateNumber(1));

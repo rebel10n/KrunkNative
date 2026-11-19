@@ -157,6 +157,42 @@ EM_JS(void, backend_web_fetch, (const char *method, const char *url, const char 
     });
 });
 
+// backend_http_post_bytes: the same fetch with a raw body (a copy of len bytes at data) and its Content-Type
+EM_JS(void, backend_web_fetch_bytes, (const char *url, const char *ctype, const void *data, int len, void *req, int timeout_ms), {
+    var opts = { method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': UTF8ToString(ctype) },
+                 body: HEAPU8.slice(data, data + len) };
+    var ctl = timeout_ms > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timedOut = false, settled = false, timer = 0;
+    if (ctl) {
+        opts.signal = ctl.signal;
+        timer = setTimeout(function () { timedOut = true; ctl.abort(); }, timeout_ms);
+    }
+    var finish = function (status, text) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        _backend_web_fetch_done(req, status, text === null ? 0 : stringToNewUTF8(text), 0);
+    };
+    fetch(UTF8ToString(url), opts).then(function (r) {
+        return r.text().then(function (t) { finish(r.status, t); });
+    }).catch(function () {
+        finish(0, timedOut ? 'no answer within ' + Math.round(timeout_ms / 1000) + ' s (timed out)'
+                           : 'no answer (the browser refused it, CORS or the network)');
+    });
+});
+
+int backend_http_post_bytes(const char *url, const char *content_type, const void *data, const size_t len, const int timeout_ms,
+                            const BackendHttpFn fn, void *user) {
+    if (!url || !url[0] || !content_type || !content_type[0] || backend_brain_refuses_url(url) || len > 0x7fffffff) return 0;
+    WebReq *req = calloc(1, sizeof(*req));
+    if (!req) return 0;
+    req->fn = fn;
+    req->user = user;
+    req->call = call_label("POST", url);
+    backend_web_fetch_bytes(url, content_type, data, (int) len, req, timeout_ms > 0 ? timeout_ms : BACKEND_HTTP_TIMEOUT_MS);
+    return 1;
+}
+
 int backend_http_request(const char *method, const char *url, const char *json_body, const BackendHttpFn fn, void *user) {
     if (!url || !url[0] || backend_brain_refuses_url(url)) return 0;
     WebReq *req = calloc(1, sizeof(*req));

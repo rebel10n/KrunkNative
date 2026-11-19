@@ -7,6 +7,10 @@ static const char *const k_files[] = {
     "texture.png", "thumb.png", "model.obj", "model.png", "model_e.png", "model_l.png", "model_n.png",
     "model_p.png", // a paint's mask (paint.mask.src "<asset>/model_p": the Turf Wars banners, deob-10.0.3.js:214990)
     "model.gltf", "model.glb", "model.fbx", "sound.mp3", "video.mp4", "data.json", "mod.zip",
+    // the other companion maps of applyCompanionTextures ([letter, map, suffix]: s specular, a alpha, m metalness,
+    // r roughness, p displacement as _d, b bump; deob-10.0.7.js:159176) and a class model's icon ("/" + id + "/icon.png",
+    // :216477): what the editor's Publish Asset uploads besides the files above (editor-10.0.7.js:20598-20609)
+    "model_s.png", "model_a.png", "model_m.png", "model_r.png", "model_d.png", "model_b.png", "icon.png",
     "video.mp4.knv", // not Krunker's: KrunkNative's frames of video.mp4 (knv.h), made by the brain's mirror
 };
 
@@ -61,8 +65,11 @@ static int ends_with(const char *s, const char *suffix) {
 }
 
 long long user_asset_max_bytes(const char *rel) {
+    // a model asset's files may add up to the premium upload limit (250 MB, editor-config-10.0.7.js:9198): the
+    // model file itself has no limit of its own in the editor's Publish Asset popup (editor-10.0.7.js:20608)
+    if (rel && strstr(rel, "/model.") && !ends_with(rel, ".png")) return 250000000ll;
     if (rel && (ends_with(rel, ".zip") || ends_with(rel, ".mp4") || ends_with(rel, ".knv"))) return 64ll << 20;
-    return 32ll << 20; // Krunker's upload limit is far below (models: a few MB)
+    return 32ll << 20; // the editor's other files are 20 MB at most (a video, editor-config-10.0.7.js:9215)
 }
 
 int user_asset_content_ok(const char *rel, const unsigned char *data, const size_t len) {
@@ -90,4 +97,15 @@ int user_asset_content_ok(const char *rel, const unsigned char *data, const size
     if (ends_with(rel, ".knv")) return len >= 4 && !memcmp(data, "KNVF", 4);
     if (ends_with(rel, ".glb")) return len >= 4 && !memcmp(data, "glTF", 4);
     return len > 0;
+}
+
+int user_asset_rel_is_kn(const char *rel) {
+    if (!rel) return 0;
+    long long id = 0;
+    size_t n = 0;
+    for (; rel[n] >= '0' && rel[n] <= '9'; n++) {
+        if (n >= 12) return 0;
+        id = id * 10 + (rel[n] - '0');
+    }
+    return n > 0 && rel[n] == '/' && id >= USER_ASSET_KN_ID_BASE;
 }

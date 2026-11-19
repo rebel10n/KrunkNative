@@ -528,7 +528,8 @@ const kn_proc P_CHAT_THREAD = {
     "     ORDER BY d.mod_votes DESC) FROM published_mods d WHERE d.creator_id = r.player_id AND d.deleted_at IS NULL), '[]'::jsonb)," \
     " 'assets', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
     "     'id', x.id, 'nm', kn_html(x.name), 'dat', x.data::text, 'ini', x.created_at, 'plrn', r.player_name, 'siz', x.size_kb)" \
-    "     ORDER BY x.id DESC) FROM published_assets x WHERE x.creator_id = r.player_id AND x.deleted_at IS NULL), '[]'::jsonb)," \
+    "     ORDER BY x.id DESC) FROM published_assets x WHERE x.creator_id = r.player_id AND x.deleted_at IS NULL" \
+    "     AND (NOT x.is_private OR r.player_id = $2)), '[]'::jsonb)," \
     " 'follow', CASE WHEN EXISTS (SELECT 1 FROM follows w WHERE w.follower_id = $2 AND w.followee_id = r.player_id)" \
     "     THEN 1 ELSE 0 END)" \
     " FROM player_rows r WHERE lower(r.player_name) = lower($1)"
@@ -586,8 +587,9 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
         KN_DB_ARGS(id));
     cJSON *assets = dbx_rows(&x,
         SQL(.any = "SELECT x.id, {html:x.name} AS nm, x.data AS dat__t, x.created_at AS ini, $2 AS plrn, x.size_kb AS siz"
-                   " FROM published_assets x WHERE x.creator_id = $1 AND x.deleted_at IS NULL ORDER BY x.id DESC"),
-        KN_DB_ARGS(id, name));
+                   " FROM published_assets x WHERE x.creator_id = $1 AND x.deleted_at IS NULL"
+                   " AND (x.is_private = 0 OR x.creator_id = $3) ORDER BY x.id DESC"), /* Private: the creator's own view only */
+        KN_DB_ARGS(id, name, nz(P(1))));
     int follow = dbx_exists(&x, SQL(.any = "SELECT 1 FROM follows w WHERE w.follower_id = $1 AND w.followee_id = $2"),
                             KN_DB_ARGS(nz(P(1)), id));
     cJSON *o = cJSON_CreateObject();
