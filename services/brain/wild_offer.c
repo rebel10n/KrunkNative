@@ -41,7 +41,23 @@
 
 static int64_t pint(const char *s) { return s ? strtoll(s, NULL, 10) : 0; }
 
+/* The Heroic wheel's pools by slice label (the season's pools: s10Pool* until the live data of 2026-11-19
+ * moved every wheel to the nov26Pool* pools); the named pools are the fallback when the data has no
+ * Heroic wheel or no pool with that label. */
+static const char *const k_labels[] = {"Epic", "Legendary", "Relic", "Contraband"};
 static const char *const k_pools[] = {"s10PoolEpic", "s10PoolLegendary", "s10PoolRelic", "s10PoolContraband"};
+
+static const StorePool *heroic_pool(const StoreSpins *sp, const int k) {
+    const int w = store_spins_find(sp, "Heroic");
+    if (w >= 0) {
+        const StoreWheel *wheel = &sp->wheels[w];
+        for (int i = 0; i < wheel->pool_count; i++) {
+            const StorePool *pool = store_spins_pool(sp, wheel->pools[i]);
+            if (pool && !strcmp(pool->label, k_labels[k])) return pool;
+        }
+    }
+    return store_spins_pool(sp, k_pools[k]);
+}
 static const int k_weights[] = {60, 30, 9, 1};
 static const int k_rarity[] = {2, 3, 4, 5};
 static const int k_original[] = {1500, 4000, 10000, 25000};
@@ -73,7 +89,7 @@ static int offer_make(const int64_t account, const int64_t now_ms, const int64_t
     int roll = (int) (h % (uint64_t) total), k = 0;
     while (k < 3 && roll >= k_weights[k]) roll -= k_weights[k++];
     for (int tries = 0; tries < 4; tries++, k = (k + 3) % 4) { // a pool missing from the data: the next lower one
-        const StorePool *pool = store_spins_pool(sp, k_pools[k]);
+        const StorePool *pool = heroic_pool(sp, k);
         if (!pool || pool->count <= 0) continue;
         h = mix(h);
         o->id = day * 100 + r;

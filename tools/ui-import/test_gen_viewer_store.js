@@ -10,7 +10,7 @@
 //   - the assetType remap: BACK (14) items load from body/ (2), HEAD (15) items from hats/ (1);
 //   - the player-model fields: dyes, shoes' legLen / randomLeg, pets, charm mounts;
 //   - the v10 fields (paint ids, prevExt, tradable, remodel previews) and the wheels: Universal
-//     tickets, s10Pool pools of v10 items.
+//     tickets, the s10Pool and nov26Pool pools of v10 items.
 // Reads the generated C files, assets/skins.json and the v3.1.1 / v7.1.4 reference trees (read-only).
 //   node tools/ui-import/test_gen_viewer_store.js
 'use strict';
@@ -139,6 +139,14 @@ check(s10items.every((i) => i >= 6448 && i < 8153 && skinsNow[i]), `every s10Poo
 check(s10.every((k) => spins.itemPools[k].items.every((i) => skinsNow[i].rarity === ['Uncommon', 'Rare', 'Epic', 'Legendary', 'Relic', 'Contraband', 'Unobtainable'].indexOf(spins.itemPools[k].name))),
   "an s10Pool's items have its rarity");
 check(Object.values(spins.itemPools).every((p) => p.items.every((i) => i >= 0 && i < 8153)), 'every pool item is in the table');
+// live 2026-11-19 (v10.0.7): the wheels moved from the s10Pool pools to the nov26Pool ones (the November spin items)
+const nov26 = Object.keys(spins.itemPools).filter((k) => k.startsWith('nov26Pool'));
+check(nov26.length === 6, `6 nov26Pool pools (${nov26.length})`);
+check(['Starter', 'Elite', 'Heroic', 'Ultra'].every((n) => w(n).pools.filter((p) => !p.endsWith('Unobtainable')).every((p) => p.startsWith('nov26Pool'))),
+  'Starter / Elite / Heroic / Ultra draw from the nov26 pools');
+check(spins.wheels.every((x) => (x.pools || []).every((p) => spins.itemPools[p])), 'every wheel pool exists');
+check(nov26.every((k) => spins.itemPools[k].items.every((i) => skinsNow[i].rarity === ['Uncommon', 'Rare', 'Epic', 'Legendary', 'Relic', 'Contraband', 'Unobtainable'].indexOf(spins.itemPools[k].name))),
+  "a nov26Pool's items have its rarity");
 
 console.log(failures ? `test_gen_viewer_store: ${failures} of ${checks} checks failed` : `test_gen_viewer_store: OK (${checks} checks)`);
 process.exit(failures ? 1 : 0);

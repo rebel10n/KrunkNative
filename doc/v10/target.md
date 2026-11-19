@@ -201,6 +201,23 @@ it is touched.
   flags krunker_gateway_beta / krunker_matchmaker_beta (:16401); user-asset URLs go through one helper
   (:24286-24300, :124438, :125946, :126152, :126536, :139353). Production hosts unchanged.
 
+### Store data (gapi `/data/skins` and `/data/spins`, not the bundle; pinned 2026-11-19)
+- Skins: still 8153 items (sha256 `f9694fa9...`, the same bytes as kru's Nov 16 `skins.jspck`); six changed:
+  paints 7831-7834 move to season 9, Eterno (8003) drops `mScl` (the weapon's own scale applies, `mScl ||
+  scale`, :174199; KN: player_mesh.c, prefab.c), and the Ametwista knife (8078) gets
+  `customShaderInfo["*"].shaderArgs.params` {stockX -6.1, muzzleX 7.9, objScale 5.2, bottomY -6.2, topY 1.5}
+  over the graph's defaults (objScale default 0.00229, range 0.0005-20, :196777-196785). KN already
+  applies `shaderArgs.params` (skin_fx.c custom_graph_params); with the old data the knife rendered
+  almost solid black, with these params it shows the crystal cells.
+- Spins (sha256 `91089724...`): the 14 wheels now draw from six new `nov26Pool*` pools (Uncommon to
+  Contraband, the November spin items); the `s10Pool*` pools stay in the data (49 pools). KN's Wild Offer
+  follows the Heroic wheel's pools by label instead of naming the s10 pools (services/brain/wild_offer.c).
+- Maps: the official list and all 47 maps are byte-identical to `tools/krunker/maps.lock.json`.
+- Assets: every file of the 72 nov26 items (102 required) and every other referenced path (21540,
+  `make assets-sync --list-only`) is in assets/ and served by dl.krunk.io. Five files Krunker replaced in
+  place (body_328/330.obj, melee_198/200.glb, hat_527.png) were already current; their pins in
+  live_assets_v10.lock were re-taken.
+
 ### Not ported (no KN counterpart)
 - The logger stops printing to the console (:28569-28602).
 - three.js / TSL node internals (WebGPU), analytics / gtag rewrites, the transpiler noise above.

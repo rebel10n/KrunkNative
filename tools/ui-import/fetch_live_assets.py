@@ -431,6 +431,9 @@ def cmd_install(a):
     return 1 if failed else 0
 
 
+TEXT_EXTS = {".svg", ".json", ".css", ".txt", ".obj", ".mtl", ".glsl", ".js"}
+
+
 def cmd_check(a):
     missing = differ = 0
     for e in read_lock(a.lock):
@@ -442,6 +445,11 @@ def cmd_check(a):
         with open(dest, "rb") as f:
             data = f.read()
         if (not is_mp3(data)) if e["root"] == "assets-aac" else sha256(data) != e["sha256"]:
+            # a text file the host serves with CRLF line ends, committed with LF (git's text normalisation):
+            # the same content, so not a difference (the 9 SVGs of c077de5c: Krunker's flags / metamask.svg)
+            if e["root"] != "assets-aac" and os.path.splitext(dest)[1].lower() in TEXT_EXTS and b"\r" not in data \
+                    and sha256(data.replace(b"\n", b"\r\n")) == e["sha256"]:
+                continue
             print("differs", e["root"] + "/" + e["path"])
             differ += 1
     print("live assets: %d missing, %d differ" % (missing, differ))

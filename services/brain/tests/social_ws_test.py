@@ -530,8 +530,9 @@ async def scenario(base, internal_url, secret):
         r = await c.call("spin", "spin", 0, None, False)
         check(r[1] is None and isinstance(r[3], int) and r[4] == 950 and r[5] is None, "Starter wheel spin: %r" % r)
         check_pools([r[2]], [r[3]], 0, "Starter spin")
-        check(r[3] >= 6448 and r[3] in pools["s10PoolUncommon"]["items"] + pools["s10PoolRare"]["items"] + pools["s10PoolEpic"]["items"],
-              "the Starter wheel awards an s10Pool item (a v10 item): %r" % r[3])
+        starter_items = [i for p in wheels[0]["pools"] for i in pools[p]["items"]]
+        check(r[3] >= 6448 and r[3] in starter_items,
+              "the Starter wheel awards an item of its pools (%s; a v10 item): %r" % ("/".join(wheels[0]["pools"]), r[3]))
         won = [r[3]]
         r = await c.call("spin", "spin", 0, None, True)
         check(r[1] is None and len(r[2]) == 10 and len(r[3]) == 10 and r[4] == 450, "Starter 10x spin costs 10 x 50 KR: %r" % r)
