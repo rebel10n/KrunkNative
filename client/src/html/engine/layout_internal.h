@@ -17,6 +17,7 @@
 #include <lexbor.h>
 #include "dom.h"
 #include "layout.h"
+#include "css_values.h"
 
 #define LAYOUT_INDEFINITE (-1.0f)
 #define LAYOUT_INF        (1e9f)

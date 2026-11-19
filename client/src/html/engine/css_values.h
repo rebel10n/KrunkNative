@@ -174,6 +174,21 @@ int css_values_viewport_units_used(void);
 /* Resolves against a reference size (pct) returning px; keyword kinds -> 0. */
 float css_length_resolve(const CssLength *len, float reference_px);
 
+/* Math expressions (CssLength.calc != 0): min()/max()/clamp() whose arguments
+ * mix px / % / em / viewport units, and calc() sums or products over them.
+ * Interned and never freed, so a CssLength stays plain data. */
+/* The expression's value in px against reference_px (the box a % refers to). */
+float css_calc_eval(uint16_t calc, float reference_px);
+/* 1 when the expression has a % term somewhere (its value depends on the reference). */
+int css_calc_uses_pct(uint16_t calc);
+/* Value of a VALUE length against reference_px, math expression or not (px + pct% of reference). */
+static inline float css_len_value(const CssLength *len, float reference_px)
+{
+    return len->calc ? css_calc_eval(len->calc, reference_px) : len->px + len->pct * 0.01f * reference_px;
+}
+/* Interned nodes in use (tests / debugging). */
+int css_calc_node_count(void);
+
 int css_parse_number(const CssToken *tokens, int n, float *out);
 int css_parse_integer(const CssToken *tokens, int n, int *out);
 /* Chrome-like: clamps to int32 (`99999999999999999999` -> INT32_MAX); `auto` -> *is_auto=1. */

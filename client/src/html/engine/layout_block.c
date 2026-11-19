@@ -16,16 +16,16 @@ float layout_resolve_len(const CssLength *l, float base, float fallback)
     if (l->kind != CSS_LEN_VALUE) return fallback;
     if (l->pct != 0.0f) {
         if (base < 0) return fallback;   /* percentage against an indefinite base */
-        return l->px + l->pct * 0.01f * base;
+        return css_len_value(l, base);
     }
-    return l->px;
+    return l->calc ? css_calc_eval(l->calc, 0.0f) : l->px;
 }
 
 float layout_resolve_len_auto(const CssLength *l, float base, int *is_auto)
 {
     if (l->kind != CSS_LEN_VALUE || (l->pct != 0.0f && base < 0)) { *is_auto = 1; return 0; }
     *is_auto = 0;
-    return l->px + l->pct * 0.01f * base;
+    return css_len_value(l, base);
 }
 
 float layout_horizontal_extras(const Box *b) { return box_border_padding_w(b) + b->scrollbar_w; }

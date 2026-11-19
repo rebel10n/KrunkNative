@@ -224,6 +224,67 @@ static void test_props(void)
     CHECK(css_prop_is_inherited(a));
 }
 
+
+/* min() / max() / clamp() of mixed units (CssLength.calc): v10.0.7's .exchangeModal / .socialModal
+ * fit and the rest of CSS Values 4's math functions, evaluated against the reference at layout time. */
+static void test_math_expressions(void)
+{
+    CssComputed c = fresh();
+    css_values_set_viewport(1280, 720);
+    /* the live main.css (build 5fHFc) .exchangeModal: width / left / height */
+    CHECK(apply(&c, NULL, "width", "min(1580px, calc(100% - 191px))") && c.width.calc);
+    CHECK(feq(css_len_value(&c.width, 1920), 1580) && feq(css_len_value(&c.width, 1280), 1089));
+    CHECK(apply(&c, NULL, "left", "max(50%, calc(171px + min(790px, (100% - 191px) / 2)))") && c.inset[CSS_LEFT].calc);
+    CHECK(feq(css_len_value(&c.inset[CSS_LEFT], 1920), 961) && feq(css_len_value(&c.inset[CSS_LEFT], 1280), 715.5f));
+    CHECK(feq(css_len_value(&c.inset[CSS_LEFT], 4000), 2000));                 /* 50% wins on a wide screen */
+    CHECK(apply(&c, NULL, "height", "min(860px, calc(100% - 40px))") && feq(css_len_value(&c.height, 720), 680));
+    /* identical expressions intern to one id (CssComputed hashes byte-wise) */
+    CssComputed d = fresh();
+    const int nodes = css_calc_node_count();
+    CHECK(apply(&d, NULL, "width", "min(1580px, calc(100% - 191px))") && d.width.calc == c.width.calc);
+    CHECK(css_calc_node_count() == nodes);
+    /* clamp(), nesting, sums and products over an expression */
+    CHECK(apply(&c, NULL, "width", "clamp(100px, 50%, 400px)") && feq(css_len_value(&c.width, 100), 100) &&
+          feq(css_len_value(&c.width, 500), 250) && feq(css_len_value(&c.width, 2000), 400));
+    CHECK(apply(&c, NULL, "width", "calc(min(50%, 300px) - 20px)") && feq(css_len_value(&c.width, 400), 180) &&
+          feq(css_len_value(&c.width, 1000), 280));
+    CHECK(apply(&c, NULL, "width", "calc(2 * max(10%, 30px))") && feq(css_len_value(&c.width, 100), 60) &&
+          feq(css_len_value(&c.width, 1000), 200));
+    CHECK(apply(&c, NULL, "width", "calc(100% - min(10%, 50px))") && feq(css_len_value(&c.width, 1000), 950) &&
+          feq(css_len_value(&c.width, 200), 180));
+    CHECK(apply(&c, NULL, "width", "max(min(10%, 50px), 20px)") && feq(css_len_value(&c.width, 100), 20) &&
+          feq(css_len_value(&c.width, 1000), 50));
+    /* viewport units stay symbolic in an expression: a resize changes the value, not the node */
+    CHECK(apply(&c, NULL, "width", "min(50vw, 80%)"));
+    const uint16_t vw_node = c.width.calc;
+    CHECK(feq(css_len_value(&c.width, 1000), 640));
+    css_values_set_viewport(600, 200);
+    CHECK(feq(css_len_value(&c.width, 1000), 300));
+    CHECK(apply(&c, NULL, "width", "min(50vw, 80%)") && c.width.calc == vw_node);
+    css_values_set_viewport(1280, 720);
+    /* em is folded per font size by the cascade (2em at a 10px font) */
+    CssLength l;
+    CssToken t[32];
+    const int n = tok("max(2em, 10%)", t, 32);
+    CHECK(css_parse_length(t, n, CSS_LENF_PCT, &l) && l.calc);
+    css_length_resolve_em(&l, 10.0f);
+    CHECK(l.calc && feq(css_len_value(&l, 100), 20) && feq(css_len_value(&l, 1000), 100));
+    /* an indefinite base: a %-dependent expression falls back like a plain % */
+    CHECK(css_calc_uses_pct(l.calc));
+    /* font-size: em and % against the parent's size; line-height: % against the element's */
+    CssComputed parent = fresh();
+    parent.font_size = 20.0f;
+    CHECK(apply(&c, &parent, "font-size", "max(12px, 50%)") && feq(c.font_size, 12));
+    CHECK(apply(&c, &parent, "font-size", "min(2em, 150%)") && feq(c.font_size, 30));
+    /* invalid: numbers mixed with lengths, a % where none is allowed, too few clamp() arguments */
+    CHECK(!apply(&c, NULL, "width", "min(1, 50%)"));
+    CHECK(!apply(&c, NULL, "width", "clamp(10%, 20px)"));
+    CHECK(!apply(&c, NULL, "border-top-width", "min(10%, 5px)"));
+    CHECK(!apply(&c, NULL, "opacity", "min(50%, 1px)"));
+    /* number-only math still folds (opacity) */
+    CHECK(apply(&c, NULL, "opacity", "min(1, 0.5)") && feq(c.opacity, 0.5f));
+}
+
 static void test_lengths(void)
 {
     CssComputed c = fresh();
@@ -246,14 +307,18 @@ static void test_lengths(void)
     CHECK(apply(&c, NULL, "width", "min(744px, calc(100vw - 30px))") && len_is(c.width, 570, 0));
     CHECK(apply(&c, NULL, "height", "min(280px, calc(100vh - 30px))") && len_is(c.height, 170, 0));
     css_values_set_viewport(1280, 720);
-    CHECK(apply(&c, NULL, "width", "max(10px, 2em, 30px)") == 0);              /* px vs em: not comparable */
+    /* px vs em: not comparable while parsing, an expression the cascade folds (em = 16px here) */
+    CHECK(apply(&c, NULL, "width", "max(10px, 2em, 30px)") && c.width.calc && feq(css_len_value(&c.width, 0), 32));
     CHECK(apply(&c, NULL, "width", "max(10px, 20px, 5px)") && len_is(c.width, 20, 0));
     CHECK(apply(&c, NULL, "width", "clamp(100px, 50vw, 400px)") && len_is(c.width, 400, 0));
     CHECK(apply(&c, NULL, "width", "clamp(100px, 5vw, 400px)") && len_is(c.width, 100, 0));
     CHECK(apply(&c, NULL, "width", "calc(min(10%, 20%) + 5px)") && len_is(c.width, 5, 10));
     CHECK(apply(&c, NULL, "width", "max(0px, 25%)") && len_is(c.width, 0, 25));
-    CHECK(apply(&c, NULL, "width", "min(50%, 300px)") == 0);                    /* needs layout: rejected */
+    /* mixed units need the reference box: an expression evaluated at layout time */
+    CHECK(apply(&c, NULL, "width", "min(50%, 300px)") && c.width.calc && c.width.pct != 0 &&
+          feq(css_len_value(&c.width, 400), 200) && feq(css_len_value(&c.width, 1000), 300));
     CHECK(apply(&c, NULL, "width", "clamp(1px, 2px)") == 0);
+    test_math_expressions();
     CHECK(apply(&c, NULL, "width", "auto") && c.width.kind == CSS_LEN_AUTO);
     CHECK(apply(&c, NULL, "height", "min-content") && c.height.kind == CSS_LEN_MIN_CONTENT);
     CHECK(apply(&c, NULL, "width", "0") && len_is(c.width, 0, 0));
@@ -1109,21 +1174,18 @@ static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
     for (size_t k = 0; k + 10 <= tl; k++) if (kn_str_ieq(tv + k, 10, "color-mix(")) return 1;
     /* v10's Svelte sheets, not parsed yet. Visual only: SVG pointer-events keywords, background-clip:
      * text, elliptical border-radius (`/`), -webkit-grab. LAYOUT-AFFECTING (TODO engine: the box
-     * keeps its other width / height rule): min() / max() / clamp() sizes, ch and container-query
-     * (cq*) units, as in the Svelte popups' widths. */
+     * keeps its other width / height rule): ch and container-query (cq*) units, as in the Svelte
+     * popups' widths. (min() / max() / clamp() of mixed units parse since 2026-11-19: CssLength.calc.) */
     if (kn_str_ieq(name, nl, "pointer-events") || (kn_str_ieq(name, nl, "background-clip") && kn_str_ieq(tv, tl, "text")) ||
         (kn_str_ieq(name, nl, "cursor") && tl > 8 && kn_str_ieq(tv, 8, "-webkit-")) ||
         (kn_str_ieq(name, nl, "border-radius") && memchr(tv, '/', tl)))
         return 1;
     if (kn_str_ieq(name, nl, "width") || kn_str_ieq(name, nl, "height") || kn_str_ieq(name, nl, "min-width") ||
         kn_str_ieq(name, nl, "max-width") || kn_str_ieq(name, nl, "min-height") || kn_str_ieq(name, nl, "max-height")) {
-        if ((tl > 4 && (kn_str_ieq(tv, 4, "min(") || kn_str_ieq(tv, 4, "max("))) || (tl > 6 && kn_str_ieq(tv, 6, "clamp("))) return 1;
         if (tl > 2 && kn_str_ieq(tv + tl - 2, 2, "ch")) return 1;
-    }
-    /* the same for offsets: v10.0.7's .exchangeModal / .socialModal `left: max(50%, calc(... min(...)))` (mixed px / %
-     * arguments; the rule's own `left: 50%` applies) */
-    if (kn_str_ieq(name, nl, "left") || kn_str_ieq(name, nl, "right") || kn_str_ieq(name, nl, "top") || kn_str_ieq(name, nl, "bottom")) {
-        if ((tl > 4 && (kn_str_ieq(tv, 4, "min(") || kn_str_ieq(tv, 4, "max("))) || (tl > 6 && kn_str_ieq(tv, 6, "clamp("))) return 1;
+        /* container-query units (cqw / cqh / cqi / cqb / cqmin / cqmax): no container-type support */
+        for (size_t k = 1; k + 2 <= tl; k++)
+            if ((tv[k - 1] >= '0' && tv[k - 1] <= '9') && kn_str_ieq(tv + k, 2, "cq")) return 1;
     }
     if (kn_str_ieq(name, nl, "background-image") || kn_str_ieq(name, nl, "background")) {
         /* a gradient with two-position colour stops (`#hex 0 11px`) */

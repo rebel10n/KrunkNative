@@ -175,8 +175,8 @@ static void table_cell_widths(LayoutTree *t, Box *c, int ci, int span, float hs,
         float f = kn_maxf(mn, layout_box_sizing_w(c, w->px));
         col->fixed = kn_maxf(col->fixed, f);
         mx = kn_maxf(mn, f);
-    } else if (w->kind == CSS_LEN_VALUE && w->pct > 0) {
-        col->pct = kn_maxf(col->pct, w->pct);
+    } else if (w->kind == CSS_LEN_VALUE && w->pct > 0 && !w->calc) {
+        col->pct = kn_maxf(col->pct, w->pct);   /* a %-dependent math expression acts as auto here */
     }
     col->min = kn_maxf(col->min, mn);
     col->max = kn_maxf(col->max, mx);
@@ -266,7 +266,8 @@ static void distribute_fixed(LayoutTree *t, Box *b, ColInfo *cols, int nc, float
         const int span = cell_span_at(c, ci);
         const CssLength *w = &c->style->width;
         float cw = -1;
-        if (w->kind == CSS_LEN_VALUE && w->pct > 0) cw = w->pct * 0.01f * avail;
+        if (w->kind == CSS_LEN_VALUE && w->calc && w->pct != 0) cw = layout_box_sizing_w(c, css_len_value(w, avail));
+        else if (w->kind == CSS_LEN_VALUE && w->pct > 0) cw = w->pct * 0.01f * avail;
         else if (w->kind == CSS_LEN_VALUE) cw = layout_box_sizing_w(c, w->px);
         /* a spanning cell's width (less the spacing) is split evenly over its columns */
         if (cw >= 0) for (int k = 0; k < span; k++) cols[ci + k].w = kn_maxf(0, cw - hs * (float)(span - 1)) / (float)span;

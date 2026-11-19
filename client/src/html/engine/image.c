@@ -4,6 +4,7 @@
  * fetching) and doc/html-engine-plan.md "GL rendering" / "Images".
  */
 #include "image.h"
+#include "css_values.h"
 #include "svg.h"
 #include "webp.h"
 
@@ -1180,7 +1181,7 @@ static int image_length_is_auto(const CssLength *length) {
 }
 
 static float image_length_resolve(const CssLength *length, const float reference) {
-    return length->px + length->pct * 0.01f * reference;
+    return css_len_value(length, reference);
 }
 
 void image_bg_size(const float img_w, const float img_h, const float box_w, const float box_h,

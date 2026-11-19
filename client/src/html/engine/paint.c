@@ -107,7 +107,7 @@ static void mat_apply(Mat2D m, float x, float y, float *ox, float *oy)
 static float length_resolve(CssLength l, float ref)
 {
     if (l.kind != CSS_LEN_VALUE) return 0;
-    return l.px + l.pct * ref / 100.0f;
+    return css_len_value(&l, ref);
 }
 
 static int rect_empty(DlRect r) { return r.w <= 0 || r.h <= 0; }
@@ -1338,7 +1338,7 @@ static void paint_selection_rect(Painter *p, const Box *tb, const TextRun *run, 
     float lh = asc + desc;
     switch (s->line_height.kind) {
     case CSS_LEN_NUMBER: lh = s->line_height.px * s->font_size; break;
-    case CSS_LEN_VALUE: lh = s->line_height.px + s->line_height.pct * 0.01f * s->font_size; break;
+    case CSS_LEN_VALUE: lh = css_len_value(&s->line_height, s->font_size); break;
     default: if (tb->fm.line_height > 0) lh = tb->fm.line_height; break;
     }
     if (lh < asc + desc) lh = asc + desc;

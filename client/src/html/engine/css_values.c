@@ -577,16 +577,22 @@ int css_parse_declaration_block(const char *text, size_t len, CssDeclCb cb, void
 /* Lengths and calc()                                                        */
 /* ========================================================================= */
 
+/* A parsed math value: a linear part (px + pct% + em + viewport terms, or a
+ * plain number) plus, when min()/max()/clamp() mixed units somewhere, an
+ * interned expression `node` that is added to it. */
 typedef struct CalcVal {
     double px, pct, em;
+    double vw, vh, vmin, vmax;  /* viewport terms, folded into px unless they end up in a node */
     double num;        /* pure number component                               */
     int is_number;     /* 1 when the value is a plain number (no units)       */
+    uint16_t node;     /* 0, or the math expression added to the linear part  */
 } CalcVal;
 
 static int calc_sum(const CssToken *t, int n, int *i, CalcVal *out, int depth);
 
 /* Viewport for vw/vh/vmin/vmax: absolute lengths, resolved to px when the
- * value is computed (css_values_set_viewport). */
+ * value is computed (css_values_set_viewport); inside a math expression they
+ * stay symbolic and are read at css_calc_eval() time. */
 static float g_viewport_w = 1280.0f, g_viewport_h = 720.0f;
 static int g_viewport_units_used;
 
@@ -598,15 +604,212 @@ void css_values_set_viewport(float w, float h)
 
 int css_values_viewport_units_used(void) { return g_viewport_units_used; }
 
-/* min()/max()/clamp(): the arguments are resolved here, so they must be
- * comparable without layout: all absolute (px, incl. vw/vh), all percentages
- * or all em.  Mixed arguments (min(50%, 300px)) need a used-value calc tree
- * that CssLength cannot hold; such declarations are rejected. */
-/* 0 zero length, 1 px, 2 %, 3 em, 4 number; -1 mixed (not comparable). */
+/* ------------------------------------------------------------------------- */
+/* Math expressions                                                           */
+/* ------------------------------------------------------------------------- */
+/* min()/max()/clamp() of comparable arguments (all absolute, all %, all em or
+ * all numbers) fold to one number while parsing.  Mixed arguments,
+ * min(50%, 300px) or v10.0.7's `max(50%, calc(171px + min(790px, (100% -
+ * 191px) / 2)))`, depend on the reference box, which only layout knows, so
+ * they become a small expression tree (CSS Values 4, "Simplification": the
+ * arguments stay a calculation tree until the used value).  Nodes are
+ * interned (identical trees share an id, so CssComputed stays hashable
+ * byte-wise) and never freed; em is folded into new nodes by the cascade
+ * (css_length_resolve_em) and viewport units stay symbolic, so neither a font
+ * size nor a resize makes the pool grow without bound. */
+
+enum { CN_LEAF = 1, CN_SUM, CN_SCALE, CN_MIN, CN_MAX, CN_CLAMP };
+enum { CV_PX, CV_PCT, CV_EM, CV_VW, CV_VH, CV_VMIN, CV_VMAX, CV_COUNT };
+
+#define CALC_MAX_KIDS   8
+#define CALC_MAX_NODES  8192          /* ids are uint16_t, 0 = none          */
+#define CALC_HASH_SIZE  16384         /* power of two, > 2 * CALC_MAX_NODES  */
+
+typedef struct CalcNode {
+    uint8_t op;
+    uint8_t nkid;
+    uint8_t has_pct;                  /* derived: a % term in this subtree    */
+    uint8_t has_em;                   /* derived: an em term in this subtree  */
+    uint16_t kid[CALC_MAX_KIDS];
+    float v[CV_COUNT];                /* CN_LEAF coefficients                 */
+    float k;                          /* CN_SCALE factor                      */
+} CalcNode;
+
+static CalcNode g_calc_nodes[CALC_MAX_NODES];
+static int g_calc_count = 1;          /* id 0 is "no expression"             */
+static uint16_t g_calc_hash[CALC_HASH_SIZE];
+
+int css_calc_node_count(void) { return g_calc_count - 1; }
+
+static uint32_t calc_node_hash(const CalcNode *n)
+{
+    const unsigned char *p = (const unsigned char *)n;
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < sizeof(*n); i++) { h ^= p[i]; h *= 16777619u; }
+    return h;
+}
+
+/* n must be memset to 0 before it is filled (padding is hashed). 0 when the pool is full. */
+static uint16_t calc_intern(CalcNode *n)
+{
+    n->has_pct = n->has_em = 0;
+    if (n->op == CN_LEAF) {
+        n->has_pct = n->v[CV_PCT] != 0.0f;
+        n->has_em = n->v[CV_EM] != 0.0f;
+    }
+    for (int i = 0; i < n->nkid; i++) {
+        n->has_pct |= g_calc_nodes[n->kid[i]].has_pct;
+        n->has_em |= g_calc_nodes[n->kid[i]].has_em;
+    }
+    uint32_t h = calc_node_hash(n) & (CALC_HASH_SIZE - 1);
+    for (;;) {
+        uint16_t id = g_calc_hash[h];
+        if (!id) break;
+        if (!memcmp(&g_calc_nodes[id], n, sizeof(*n))) return id;
+        h = (h + 1) & (CALC_HASH_SIZE - 1);
+    }
+    if (g_calc_count >= CALC_MAX_NODES) return 0;
+    const uint16_t id = (uint16_t)g_calc_count++;
+    g_calc_nodes[id] = *n;
+    g_calc_hash[h] = id;
+    return id;
+}
+
+static uint16_t calc_mk_leaf(const CalcVal *v)
+{
+    CalcNode n;
+    memset(&n, 0, sizeof n);
+    n.op = CN_LEAF;
+    n.v[CV_PX] = (float)v->px;   n.v[CV_PCT] = (float)v->pct; n.v[CV_EM] = (float)v->em;
+    n.v[CV_VW] = (float)v->vw;   n.v[CV_VH] = (float)v->vh;
+    n.v[CV_VMIN] = (float)v->vmin; n.v[CV_VMAX] = (float)v->vmax;
+    return calc_intern(&n);
+}
+
+static uint16_t calc_mk_op(int op, const uint16_t *kids, int nkid, float k)
+{
+    CalcNode n;
+    memset(&n, 0, sizeof n);
+    if (nkid > CALC_MAX_KIDS) return 0;
+    for (int i = 0; i < nkid; i++) if (!kids[i]) return 0;
+    n.op = (uint8_t)op;
+    n.nkid = (uint8_t)nkid;
+    n.k = op == CN_SCALE ? k : 0.0f;
+    memcpy(n.kid, kids, sizeof(kids[0]) * (size_t)nkid);
+    return calc_intern(&n);
+}
+
+static int calc_linear_zero(const CalcVal *v)
+{
+    return v->px == 0.0 && v->pct == 0.0 && v->em == 0.0 && v->vw == 0.0 && v->vh == 0.0 &&
+           v->vmin == 0.0 && v->vmax == 0.0;
+}
+
+/* The whole value (linear part + node) as one node; 0 when the pool is full. */
+static uint16_t calc_to_node(const CalcVal *v)
+{
+    if (!v->node) return calc_mk_leaf(v);
+    if (calc_linear_zero(v)) return v->node;
+    const uint16_t kids[2] = { calc_mk_leaf(v), v->node };
+    return calc_mk_op(CN_SUM, kids, 2, 0.0f);
+}
+
+static double calc_vp(int which)
+{
+    switch (which) {
+    case CV_VW: return g_viewport_w;
+    case CV_VH: return g_viewport_h;
+    case CV_VMIN: return fminf(g_viewport_w, g_viewport_h);
+    default: return fmaxf(g_viewport_w, g_viewport_h);
+    }
+}
+
+/* em_px: what an unfolded em is worth (16 until the cascade folds it). */
+static double calc_eval_node(uint16_t id, double ref, double em_px, int depth)
+{
+    if (!id || id >= g_calc_count || depth > 64) return 0.0;
+    const CalcNode *n = &g_calc_nodes[id];
+    switch (n->op) {
+    case CN_LEAF:
+        return n->v[CV_PX] + n->v[CV_PCT] * 0.01 * ref + n->v[CV_EM] * em_px +
+               0.01 * (n->v[CV_VW] * calc_vp(CV_VW) + n->v[CV_VH] * calc_vp(CV_VH) +
+                       n->v[CV_VMIN] * calc_vp(CV_VMIN) + n->v[CV_VMAX] * calc_vp(CV_VMAX));
+    case CN_SUM: {
+        double s = 0.0;
+        for (int i = 0; i < n->nkid; i++) s += calc_eval_node(n->kid[i], ref, em_px, depth + 1);
+        return s;
+    }
+    case CN_SCALE: return n->k * calc_eval_node(n->kid[0], ref, em_px, depth + 1);
+    case CN_MIN: case CN_MAX: {
+        double r = calc_eval_node(n->kid[0], ref, em_px, depth + 1);
+        for (int i = 1; i < n->nkid; i++) {
+            const double x = calc_eval_node(n->kid[i], ref, em_px, depth + 1);
+            r = n->op == CN_MIN ? (x < r ? x : r) : (x > r ? x : r);
+        }
+        return r;
+    }
+    case CN_CLAMP: {   /* clamp(MIN, VAL, MAX) = max(MIN, min(VAL, MAX)) */
+        const double lo = calc_eval_node(n->kid[0], ref, em_px, depth + 1);
+        const double v = calc_eval_node(n->kid[1], ref, em_px, depth + 1);
+        const double hi = calc_eval_node(n->kid[2], ref, em_px, depth + 1);
+        const double r = v < hi ? v : hi;
+        return lo > r ? lo : r;
+    }
+    default: return 0.0;
+    }
+}
+
+float css_calc_eval(uint16_t calc, float reference_px)
+{
+    return (float)calc_eval_node(calc, reference_px, 16.0, 0);
+}
+
+int css_calc_uses_pct(uint16_t calc)
+{
+    return calc && calc < g_calc_count ? g_calc_nodes[calc].has_pct : 0;
+}
+
+/* A copy of the tree with em folded at font_px (same id when there is no em); 0 when the pool is full. */
+static uint16_t calc_fold_em(uint16_t id, float font_px, int depth)
+{
+    if (!id || id >= g_calc_count || !g_calc_nodes[id].has_em) return id;
+    if (depth > 64) return 0;
+    CalcNode n = g_calc_nodes[id];
+    if (n.op == CN_LEAF) {
+        n.v[CV_PX] += n.v[CV_EM] * font_px;
+        n.v[CV_EM] = 0.0f;
+        return calc_intern(&n);
+    }
+    for (int i = 0; i < n.nkid; i++) {
+        n.kid[i] = calc_fold_em(n.kid[i], font_px, depth + 1);
+        if (!n.kid[i]) return 0;
+    }
+    return calc_intern(&n);
+}
+
+/* Folds the viewport terms into px (a value that is used now, not kept in a node). */
+static void calc_fold_vp(CalcVal *v)
+{
+    if (v->vw != 0.0 || v->vh != 0.0 || v->vmin != 0.0 || v->vmax != 0.0) {
+        v->px += 0.01 * (v->vw * calc_vp(CV_VW) + v->vh * calc_vp(CV_VH) +
+                         v->vmin * calc_vp(CV_VMIN) + v->vmax * calc_vp(CV_VMAX));
+        v->vw = v->vh = v->vmin = v->vmax = 0.0;
+    }
+}
+
+static void calc_scale(CalcVal *v, double f)
+{
+    v->px *= f; v->pct *= f; v->em *= f; v->num *= f;
+    v->vw *= f; v->vh *= f; v->vmin *= f; v->vmax *= f;
+}
+
+/* 0 zero length, 1 px, 2 %, 3 em, 4 number; -1 mixed (not comparable). Viewport terms are px. */
 static int calc_kind(const CalcVal *v)
 {
     if (v->is_number) return 4;
-    const int px = v->px != 0.0, pct = v->pct != 0.0, em = v->em != 0.0;
+    if (v->node) return -1;
+    const int px = v->px != 0.0 || v->vw != 0.0 || v->vh != 0.0 || v->vmin != 0.0 || v->vmax != 0.0;
+    const int pct = v->pct != 0.0, em = v->em != 0.0;
     if (px + pct + em > 1) return -1;
     return px ? 1 : pct ? 2 : em ? 3 : 0;
 }
@@ -619,33 +822,42 @@ static double calc_scalar(const CalcVal *v, int kind)
 /* fn: 0 min, 1 max, 2 clamp(MIN, VAL, MAX) = max(MIN, min(VAL, MAX)). */
 static int calc_minmax(const CssToken *t, int n, int *i, CalcVal *out, int depth, int fn)
 {
-    double v[8];
-    CalcVal a;
-    int count = 0, kind = 0;
+    CalcVal a[CALC_MAX_KIDS];
+    int count = 0, mixed = 0, kind = 0, numbers = 0;
     for (;;) {
-        if (count == 8 || !calc_sum(t, n, i, &a, depth + 1)) return 0;
-        const int k = calc_kind(&a);
-        if (k < 0 || (k && kind && k != kind) || (k == 4 && count && !kind)) return 0;
-        if (k == 0 && kind == 4) return 0;
-        if (k) kind = k;
-        v[count++] = calc_scalar(&a, k ? k : 1);
+        if (count == CALC_MAX_KIDS || !calc_sum(t, n, i, &a[count], depth + 1)) return 0;
+        const int k = calc_kind(&a[count]);
+        if (k == 4) numbers++;
+        else if (k < 0 || (k && kind && k != kind)) mixed = 1;
+        if (k > 0 && k != 4) kind = kind && kind != k ? kind : k;
+        count++;
         if (*i < n && t[*i].type == CSS_TOK_COMMA) { (*i)++; continue; }
         break;
     }
     if (fn == 2 && count != 3) return 0;
-    double r = v[0];
-    if (fn == 2) {
-        r = v[1] < v[2] ? v[1] : v[2];
-        if (v[0] > r) r = v[0];
-    } else {
-        for (int k = 1; k < count; k++) r = fn == 0 ? (v[k] < r ? v[k] : r) : (v[k] > r ? v[k] : r);
-    }
+    /* numbers and lengths never mix (min(1, 2px) is invalid); min(0, 5px) neither (0 is a number) */
+    if (numbers && numbers != count) return 0;
     memset(out, 0, sizeof(*out));
-    if (kind == 2) out->pct = r;
-    else if (kind == 3) out->em = r;
-    else if (kind == 4) { out->num = r; out->is_number = 1; }
-    else out->px = r;
-    return 1;
+    if (!mixed) {
+        double v[CALC_MAX_KIDS];
+        for (int k = 0; k < count; k++) { calc_fold_vp(&a[k]); v[k] = calc_scalar(&a[k], numbers ? 4 : kind ? kind : 1); }
+        double r = v[0];
+        if (fn == 2) {
+            r = v[1] < v[2] ? v[1] : v[2];
+            if (v[0] > r) r = v[0];
+        } else {
+            for (int k = 1; k < count; k++) r = fn == 0 ? (v[k] < r ? v[k] : r) : (v[k] > r ? v[k] : r);
+        }
+        if (numbers) { out->num = r; out->is_number = 1; }
+        else if (kind == 2) out->pct = r;
+        else if (kind == 3) out->em = r;
+        else out->px = r;
+        return 1;
+    }
+    uint16_t kids[CALC_MAX_KIDS];
+    for (int k = 0; k < count; k++) if (!(kids[k] = calc_to_node(&a[k]))) return 0;
+    out->node = calc_mk_op(fn == 0 ? CN_MIN : fn == 1 ? CN_MAX : CN_CLAMP, kids, count, 0.0f);
+    return out->node != 0;
 }
 
 static int calc_primary(const CssToken *t, int n, int *i, CalcVal *out, int depth)
@@ -661,10 +873,10 @@ static int calc_primary(const CssToken *t, int n, int *i, CalcVal *out, int dept
         case CSS_UNIT_PT: out->px = k->num * 4.0 / 3.0; break;
         case CSS_UNIT_EM: out->em = k->num; break;
         case CSS_UNIT_REM: out->px = k->num * 16.0; break;
-        case CSS_UNIT_VW: out->px = k->num * 0.01 * g_viewport_w; g_viewport_units_used = 1; break;
-        case CSS_UNIT_VH: out->px = k->num * 0.01 * g_viewport_h; g_viewport_units_used = 1; break;
-        case CSS_UNIT_VMIN: out->px = k->num * 0.01 * fminf(g_viewport_w, g_viewport_h); g_viewport_units_used = 1; break;
-        case CSS_UNIT_VMAX: out->px = k->num * 0.01 * fmaxf(g_viewport_w, g_viewport_h); g_viewport_units_used = 1; break;
+        case CSS_UNIT_VW: out->vw = k->num; g_viewport_units_used = 1; break;
+        case CSS_UNIT_VH: out->vh = k->num; g_viewport_units_used = 1; break;
+        case CSS_UNIT_VMIN: out->vmin = k->num; g_viewport_units_used = 1; break;
+        case CSS_UNIT_VMAX: out->vmax = k->num; g_viewport_units_used = 1; break;
         default: return 0;
         }
         (*i)++;
@@ -689,6 +901,18 @@ static int calc_primary(const CssToken *t, int n, int *i, CalcVal *out, int dept
     return 0;
 }
 
+/* v *= f, including its expression node. */
+static int calc_mul(CalcVal *v, double f)
+{
+    calc_scale(v, f);
+    if (v->node && f != 1.0) {
+        const uint16_t kid = v->node;
+        v->node = calc_mk_op(CN_SCALE, &kid, 1, (float)f);
+        if (!v->node) return 0;
+    }
+    return 1;
+}
+
 static int calc_product(const CssToken *t, int n, int *i, CalcVal *out, int depth)
 {
     if (!calc_primary(t, n, i, out, depth)) return 0;
@@ -699,15 +923,15 @@ static int calc_product(const CssToken *t, int n, int *i, CalcVal *out, int dept
         if (!calc_primary(t, n, i, &r, depth)) return 0;
         if (mul) {
             if (r.is_number) {
-                out->px *= r.num; out->pct *= r.num; out->em *= r.num; out->num *= r.num;
+                if (!calc_mul(out, r.num)) return 0;
             } else if (out->is_number) {
                 double f = out->num;
                 *out = r;
-                out->px *= f; out->pct *= f; out->em *= f; out->num *= f;
+                if (!calc_mul(out, f)) return 0;
             } else return 0;
         } else {
             if (!r.is_number || r.num == 0.0) return 0;
-            out->px /= r.num; out->pct /= r.num; out->em /= r.num; out->num /= r.num;
+            if (!calc_mul(out, 1.0 / r.num)) return 0;
         }
     }
     return 1;
@@ -732,14 +956,47 @@ static int calc_sum(const CssToken *t, int n, int *i, CalcVal *out, int depth)
             return 0;
         }
         out->px += sign * r.px; out->pct += sign * r.pct; out->em += sign * r.em; out->num += sign * r.num;
+        out->vw += sign * r.vw; out->vh += sign * r.vh; out->vmin += sign * r.vmin; out->vmax += sign * r.vmax;
+        if (r.node) {
+            uint16_t rn = r.node;
+            if (sign < 0 && !(rn = calc_mk_op(CN_SCALE, &rn, 1, -1.0f))) return 0;
+            if (out->node) {
+                const uint16_t kids[2] = { out->node, rn };
+                if (!(out->node = calc_mk_op(CN_SUM, kids, 2, 0.0f))) return 0;
+            } else out->node = rn;
+        }
     }
     return 1;
 }
 
-static int length_from_calcval(const CalcVal *v, unsigned flags, int is_calc, CssLength *out)
+static float kn_maxf_cv(float a, float b) { return a > b ? a : b; }
+
+/* A CssLength for an expression: kind VALUE, px = its value against a 0 reference, pct a marker. */
+static void length_set_calc(CssLength *r, uint16_t node)
+{
+    r->kind = CSS_LEN_VALUE;
+    r->calc = node;
+    r->em = 0.0f;
+    r->px = css_calc_eval(node, 0.0f);
+    r->pct = css_calc_uses_pct(node) ? 1e-30f : 0.0f;
+    r->pct_term = 0;
+}
+
+static int length_from_calcval(const CalcVal *in, unsigned flags, int is_calc, CssLength *out)
 {
     CssLength r;
+    CalcVal vv = *in;
+    const CalcVal *v = &vv;
     memset(&r, 0, sizeof(r));
+    if (v->node) {
+        if (v->is_number) return 0;
+        const uint16_t node = calc_to_node(v);
+        if (!node || (css_calc_uses_pct(node) && !(flags & CSS_LENF_PCT))) return 0;
+        length_set_calc(&r, node);
+        *out = r;   /* calc() results are clamped at used-value time, never rejected */
+        return 1;
+    }
+    calc_fold_vp(&vv);
     if (v->is_number) {
         if (flags & CSS_LENF_NUMBER) { r.kind = CSS_LEN_NUMBER; r.px = (float)v->num; }
         else if (v->num == 0.0 || (flags & CSS_LENF_QUIRKY)) { r.kind = CSS_LEN_VALUE; r.px = (float)v->num; }
@@ -812,7 +1069,14 @@ int css_parse_length(const CssToken *tokens, int n, unsigned flags, CssLength *o
 
 void css_length_resolve_em(CssLength *len, float font_px)
 {
-    if (len->kind == CSS_LEN_VALUE && len->em != 0.0f) {
+    if (len->kind != CSS_LEN_VALUE) return;
+    if (len->calc) {
+        /* a full pool keeps the unfolded tree (its em then counts 16px) */
+        const uint16_t folded = calc_fold_em(len->calc, font_px, 0);
+        if (folded && folded != len->calc) length_set_calc(len, folded);
+        return;
+    }
+    if (len->em != 0.0f) {
         len->px += len->em * font_px;
         len->em = 0.0f;
     }
@@ -821,7 +1085,7 @@ void css_length_resolve_em(CssLength *len, float font_px)
 float css_length_resolve(const CssLength *len, float reference_px)
 {
     if (len->kind != CSS_LEN_VALUE) return 0.0f;
-    return len->px + len->pct * 0.01f * reference_px;
+    return css_len_value(len, reference_px);
 }
 
 /* ========================================================================= */
@@ -849,7 +1113,7 @@ int css_parse_number(const CssToken *tokens, int n, float *out)
         int m = tokens_copy_nows(tokens, n, buf, CSS_MAX_TOKENS);
         int i = 0;
         CalcVal v;
-        if (m == 0 || !calc_primary(buf, m, &i, &v, 0) || i != m || !v.is_number) return 0;
+        if (m == 0 || !calc_primary(buf, m, &i, &v, 0) || i != m || !v.is_number || v.node) return 0;
         *out = (float)v.num;
         return 1;
     }
@@ -950,7 +1214,7 @@ static int time_from_tokens(const CssToken *t, int n, int *used, float *out)
     }
     int j = 0;
     CalcVal v;
-    if (!calc_primary(buf, len, &j, &v, 0) || j != len || v.is_number || v.pct != 0.0 || v.em != 0.0) return 0;
+    if (!calc_primary(buf, len, &j, &v, 0) || j != len || v.is_number || v.node || v.pct != 0.0 || v.em != 0.0) return 0;
     *out = (float)v.px;
     *used = len;
     return 1;
@@ -1679,7 +1943,7 @@ static void m4_mul(const float a[16], const float b[16], float out[16])
 
 static float len_res(const CssLength *l, float ref)
 {
-    return l->kind == CSS_LEN_VALUE ? l->px + l->pct * 0.01f * ref : 0.0f;
+    return l->kind == CSS_LEN_VALUE ? css_len_value(l, ref) : 0.0f;
 }
 
 void css_transform_to_mat4(const CssTransform *t, float w, float h, float out[16])
@@ -4219,6 +4483,11 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         if (m == 1 && tok_is_ident(&t[0], "smaller")) { d->font_size = base / 1.2f; return 1; }
         CssLength l;
         if (!css_parse_length(t, m, CSS_LENF_PCT | CSS_LENF_NONNEG, &l)) return 0;
+        if (l.calc) {   /* em and % both refer to the parent's font size */
+            css_length_resolve_em(&l, base);
+            d->font_size = kn_maxf_cv(0.0f, css_calc_eval(l.calc, base));
+            return 1;
+        }
         d->font_size = l.px + l.em * base + l.pct * 0.01f * base;
         return 1;
     }
@@ -4235,6 +4504,12 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         CssLength l;
         if (!css_parse_line_height(t, m, &l)) return 0;
         resolve_em_len(&l, font_px);
+        if (l.kind == CSS_LEN_VALUE && l.calc) {   /* a % refers to the element's own font size */
+            const float v = css_calc_eval(l.calc, font_px);
+            memset(&l, 0, sizeof l);
+            l.kind = CSS_LEN_VALUE;
+            l.px = v;
+        }
         if (l.kind == CSS_LEN_VALUE && l.pct != 0) { l.px += l.pct * 0.01f * font_px; l.pct = 0; }
         d->line_height = l;
         return 1;

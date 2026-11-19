@@ -272,15 +272,17 @@ static int length_equal(const CssLength *a, const CssLength *b)
     if (a->kind != b->kind)
         return 0;
     if (a->kind == CSS_LEN_VALUE)
-        return a->px == b->px && a->pct == b->pct && a->em == b->em;
+        return a->px == b->px && a->pct == b->pct && a->em == b->em && a->calc == b->calc;
     if (a->kind == CSS_LEN_NUMBER)
         return a->px == b->px;
     return 1;
 }
 
+/* A math expression (CssLength.calc, min(50%, 300px)) steps at the midpoint: interpolating it
+ * needs a mixed tree per frame, which would grow the interned pool (Chrome interpolates it). */
 static int length_interpolable(const CssLength *a, const CssLength *b)
 {
-    return a->kind == b->kind && (a->kind == CSS_LEN_VALUE || a->kind == CSS_LEN_NUMBER);
+    return a->kind == b->kind && (a->kind == CSS_LEN_VALUE || a->kind == CSS_LEN_NUMBER) && !a->calc && !b->calc;
 }
 
 static void length_lerp(const CssLength *a, const CssLength *b, float t, CssLength *out)

@@ -44,7 +44,7 @@ float layout_line_height(const Box *b)
         const float pct = lh->px * 100.0f;
         return lu_floor(fs * pct / 100.0f);
     }
-    case CSS_LEN_VALUE: return lh->pct != 0.0f ? lu_floor(lh->px + lh->pct * 0.01f * fs) : lu_round(lh->px);
+    case CSS_LEN_VALUE: return lh->pct != 0.0f ? lu_floor(css_len_value(lh, fs)) : lu_round(css_len_value(lh, 0.0f));
     default: return b->fm.line_height;
     }
 }

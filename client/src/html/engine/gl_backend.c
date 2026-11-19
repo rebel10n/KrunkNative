@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gl_backend.h"
+#include "css_values.h"
 
 #define GLB_MAX_CLIPS 32
 #define GLB_MAX_XFORMS 64
@@ -251,7 +252,7 @@ static int mat_uniform_scale(const Mat2D *m) {
 }
 
 static float css_len(CssLength l, float ref) {
-    return l.px + l.pct * 0.01f * ref;
+    return css_len_value(&l, ref);
 }
 
 // Straight CssColor -> premultiplied rgba8, scaled by `opacity`.

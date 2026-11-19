@@ -266,7 +266,7 @@ static int accent_is_light(const CssComputed *st, CssColor accent)
 static float resolve_len(CssLength l, float ref, float fallback)
 {
     if (l.kind != CSS_LEN_VALUE) return fallback;
-    return l.px + l.pct * ref / 100.0f;
+    return css_len_value(&l, ref);
 }
 
 static int attr_eq(Dom *dom, HtmlElem e, const char *name, const char *lit)

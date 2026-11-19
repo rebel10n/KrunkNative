@@ -71,6 +71,14 @@ typedef struct CssLength {
     uint8_t pct_term;      /* 1: written as a percentage, also 0% (flex: 1's  */
                            /* flex-basis 0% is content-sized in an indefinite */
                            /* container, 0px is not; pct alone can't tell)    */
+    uint16_t calc;         /* 0, or an interned math expression (css_values.c */
+                           /* "Math expressions"): min()/max()/clamp() of     */
+                           /* mixed units, min(50%, 300px), that px + pct     */
+                           /* cannot hold.  The value is then                 */
+                           /* css_calc_eval(calc, reference); px is its value */
+                           /* against a 0 reference and pct a tiny non-zero   */
+                           /* marker when it depends on the reference, so     */
+                           /* `pct != 0` tests still see the % dependency.    */
 } CssLength;
 
 /* ------------------------------------------------------------------------- */

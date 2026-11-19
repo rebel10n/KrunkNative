@@ -16952,11 +16952,8 @@ input[type="search"]::-webkit-search-results-decoration { display: none; }
 	left: 50%;
 	transform: translate(-50%, -50%);
 	color: #fff;
-	width: 1580px;
-	height: 860px;
-	/* v10.0.7 (live main.css, build 5fHFc): the window fits beside the side menu when UI Scaling is off ("exchange and
-	   social windows not fitting with UI Scaling off"); the native engine keeps the fixed size above (min() / max() of
-	   mixed units are an engine gap, html_css_values_test known_gap) */
+	/* v10.0.7 (live main.css, build 5fHFc): the sidebar tabs hang 151px left of the window, so a small UI
+	   (high UI Scale, or UI Scaling off on a small screen) shrinks the window and shifts it right */
 	width: min(1580px, calc(100% - 191px));
 	left: max(50%, calc(171px + min(790px, (100% - 191px) / 2)));
 	height: min(860px, calc(100% - 40px));
@@ -16989,11 +16986,8 @@ input[type="search"]::-webkit-search-results-decoration { display: none; }
 	left: 50%;
 	transform: translate(-50%, -50%);
 	color: #fff;
-	width: 980px;
-	height: 820px;
-	/* v10.0.7 (live main.css, build 5fHFc): the window fits beside the side menu when UI Scaling is off ("exchange and
-	   social windows not fitting with UI Scaling off"); the native engine keeps the fixed size above (min() / max() of
-	   mixed units are an engine gap, html_css_values_test known_gap) */
+	/* v10.0.7 (live main.css, build 5fHFc): the sidebar tabs hang 151px left of the window, so a small UI
+	   (high UI Scale, or UI Scaling off on a small screen) shrinks the window and shifts it right */
 	width: min(980px, calc(100% - 191px));
 	left: max(50%, calc(171px + min(490px, (100% - 191px) / 2)));
 	height: min(820px, calc(100% - 40px));

@@ -579,7 +579,7 @@ static float lh_scrollbar_width(void *user, lxb_dom_node_t *node, float default_
 
 static float resolve_radius(const CssLength *l, float ref)
 {
-    return l->kind == CSS_LEN_VALUE ? l->px + l->pct * ref / 100.0f : 0.0f;
+    return l->kind == CSS_LEN_VALUE ? css_len_value(l, ref) : 0.0f;
 }
 
 static int paint_scrollbar_style_hook(void *user, const Box *box, PaintScrollbarStyle *st)

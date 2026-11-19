@@ -5,6 +5,7 @@
  * ordering and paint-order hit testing.
  */
 #include "layout_internal.h"
+#include "css_values.h"
 #include "html_dom.h"
 
 static const Mat2D k_identity = { 1, 0, 0, 1, 0, 0 };
@@ -228,7 +229,7 @@ static int point_in(float x, float y, float rx, float ry, float rw, float rh)
  * points as paint.c's push_clip_path (the border box's origin plus each length), filled with the
  * polygon's rule (nonzero unless evenodd). A box without a polygon, and an anonymous box (it borrows
  * its element's style, so its lengths are not its own), always passes. */
-static float clip_len(CssLength l, float ref) { return l.kind == CSS_LEN_VALUE ? l.px + l.pct * ref / 100.0f : 0.0f; }
+static float clip_len(CssLength l, float ref) { return l.kind == CSS_LEN_VALUE ? css_len_value(&l, ref) : 0.0f; }
 
 static int in_clip_polygon(const Box *b, float lx, float ly)
 {

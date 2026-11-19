@@ -743,6 +743,42 @@ static void t_display_contents_calc_var(void)
     fx_free(fx);
 }
 
+/* min() / max() / clamp() of mixed units (CssLength.calc), resolved against the containing block:
+ * v10.0.7's .exchangeModal fit (live main.css, build 5fHFc) in a 1280 x 720 and a 1920 x 1080
+ * viewport, and a %-dependent expression against an indefinite height (auto). */
+static void t_math_functions(void)
+{
+    static const char *css =
+        "#em { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);\n"
+        "  width: min(1580px, calc(100% - 191px)); left: max(50%, calc(171px + min(790px, (100% - 191px) / 2)));\n"
+        "  height: min(860px, calc(100% - 40px)); }\n"
+        "#cl { width: clamp(100px, 50%, 300px); height: 10px; }\n"
+        "#nest { width: calc(100% - min(10%, 50px)); height: 10px; }\n"
+        "#ah { height: min(50%, 300px); width: 10px; }\n";
+    Fx *fx = fx_html("<div id=em></div><div id=cl></div><div id=nest></div><div id=auto><div id=ah></div></div>", css);
+    fx->vw = 1280; fx->vh = 720;
+    fx_layout(fx);
+    HtmlRect r = rc(fx, "em");
+    CHECK_NEAR(r.w, 1089, 0.5, "min(1580px, calc(100% - 191px)) at 1280");
+    CHECK_NEAR(r.h, 680, 0.5, "min(860px, calc(100% - 40px)) at 720");
+    CHECK_NEAR(r.x + r.w / 2, 715.5, 0.5, "max(50%, calc(171px + min(790px, (100% - 191px) / 2))) at 1280");
+    CHECK_NEAR(r.x, 171, 0.5, "the window starts right of the 151px sidebar + 20px");
+    CHECK_NEAR(rc(fx, "cl").w, 300, 0.5, "clamp(100px, 50%, 300px) at 1280");
+    CHECK_NEAR(rc(fx, "nest").w, 1230, 0.5, "calc(100% - min(10%, 50px)) at 1280");
+    CHECK_NEAR(rc(fx, "ah").h, 0, 0.5, "min(50%, 300px) height in an auto-height parent: auto");
+    fx->vw = 1920; fx->vh = 1080;
+    fx_layout(fx);
+    r = rc(fx, "em");
+    CHECK_NEAR(r.w, 1580, 0.5, "min(1580px, ...) at 1920");
+    CHECK_NEAR(r.h, 860, 0.5, "min(860px, ...) at 1080");
+    CHECK_NEAR(r.x + r.w / 2, 961, 0.5, "max(50%, ...) at 1920");
+    fx->vw = 400; fx->vh = 300;
+    fx_layout(fx);
+    CHECK_NEAR(rc(fx, "cl").w, 200, 0.5, "clamp(100px, 50%, 300px) at 400");
+    CHECK_NEAR(rc(fx, "nest").w, 360, 0.5, "calc(100% - min(10%, 50px)) at 400");
+    fx_free(fx);
+}
+
 /* v7's empty Player List: an empty <table> with overflow-y: scroll and a percentage height
  * inside an auto-height block. Tables are not scroll containers (Chrome ignores overflow
  * scrolling on them) and the percentage height is indefinite: the table is 0 tall. */
@@ -2652,6 +2688,7 @@ int main(int argc, char **argv)
     t_abs_static_inline();
     t_flex_align_self();
     t_display_contents_calc_var();
+    t_math_functions();
     t_empty_table_overflow();
     t_grid_named();
     t_zoom();
