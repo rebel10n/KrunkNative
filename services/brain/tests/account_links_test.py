@@ -134,6 +134,13 @@ def check(cond, what):
         FAILS.append(what)
 
 
+def free_port():
+    import socket
+    with socket.socket() as so:
+        so.bind(("127.0.0.1", 0))
+        return so.getsockname()[1]
+
+
 def bound_port(log_path, proc):
     for _ in range(400):
         if proc.poll() is not None:
@@ -393,7 +400,11 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with open(log_path, "w") as log:
-            proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=kln-%d" % os.getpid(),
+            # its own port and public_url: the redirect URI and returnTo origin come from brain.public_url, and a
+            # config.json copied from config.example.json (CI) sets it to :5050, which port 0 would keep
+            port = free_port()
+            proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=%d" % port,
+                                     "--brain.public_url=http://127.0.0.1:%d" % port, "--brain.id=kln-%d" % os.getpid(),
                                      "--accounts.login_throttle_s=0", "--accounts.secrets_key=links-test-key",
                                      "--accounts.discord.client_id=dc-id", "--accounts.discord.client_secret=dc-secret",
                                      "--accounts.discord.bot_token=bot-tok", "--accounts.discord.guild_id=G1",

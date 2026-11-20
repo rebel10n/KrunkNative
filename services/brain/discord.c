@@ -851,7 +851,9 @@ int discord_init(Brain *b) {
     D.timeout_ms = (int) kn_config_int(cfg, "accounts.discord.timeout_ms", 10000);
     char def[512];
     snprintf(def, sizeof def, "%s/discord/callback", mm_settings()->public_url);
-    copy_str(D.redirect_uri, sizeof D.redirect_uri, kn_config_str(cfg, "accounts.discord.redirect_uri", def));
+    /* empty (config.example.json's value) = the default too, as the config comment says */
+    const char *redir = kn_config_str(cfg, "accounts.discord.redirect_uri", "");
+    copy_str(D.redirect_uri, sizeof D.redirect_uri, redir && *redir ? redir : def);
     copy_str(D.seal, sizeof D.seal, account_links_seal_material(b));
     /* returnTo: the brain's own origin and accounts.discord.return_origins (the web build's) */
     origin_of(mm_settings()->public_url, D.origins[0], sizeof D.origins[0]);
