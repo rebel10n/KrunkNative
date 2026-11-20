@@ -34,6 +34,7 @@
 #include <player_accounts.h>
 #include "klog.h"
 #include <backend_ui.h> // active_account: the local player's clan in the player list
+#include <backend.h>    // backend_http_request / backend_social_send_text: the punish popup's Flag and Chat Ban
 #include <client.h>
 
 // Game-event entry points (prototypes belong in client/include/ui_logic.h):
@@ -5041,6 +5042,87 @@ static void plist_ban_answered(const int accepted, const char *text, void *user)
     if (accepted && uid >= 0) plist_punish_send(uid, 1);
 }
 
+// flagPlayerConfirmed(id, on): Krunker sends "flgu" on the game socket; Box Office's staff hacker flag is the
+// brain's ["flg", name, 0|1] (profiles.c sh_flag, answered "fgr"), keyed by the account name.
+static int g_flag_uid = -1, g_flag_on;
+static void plist_flag_answered(const int accepted, const char *text, void *user) {
+    (void) text;
+    (void) user;
+    const int uid = g_flag_uid;
+    g_flag_uid = -1;
+    ui_loadout_clear_pops();
+    const char *alias = uid >= 0 ? hud_plist_alias(uid) : NULL;
+    if (!accepted || !alias || !alias[0]) return;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("flg"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(alias));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(g_flag_on));
+    char *text_json = cJSON_PrintUnformatted(f);
+    cJSON_Delete(f);
+    if (text_json) backend_social_send_text(text_json);
+    free(text_json);
+}
+
+// The chat bans this session set, by player id (v10 keeps player.chatBanned on the list entry).
+static struct { int uid; int banned; } g_chat_bans[64];
+static int plist_chat_banned(const int uid) {
+    for (size_t i = 0; i < sizeof(g_chat_bans) / sizeof(g_chat_bans[0]); i++)
+        if (g_chat_bans[i].uid == uid && uid > 0) return g_chat_bans[i].banned;
+    return 0;
+}
+static void plist_chat_ban_set(const int uid, const int banned) {
+    size_t free_i = SIZE_MAX;
+    for (size_t i = 0; i < sizeof(g_chat_bans) / sizeof(g_chat_bans[0]); i++) {
+        if (g_chat_bans[i].uid == uid) { g_chat_bans[i].banned = banned; return; }
+        if (free_i == SIZE_MAX && g_chat_bans[i].uid <= 0) free_i = i;
+    }
+    if (free_i != SIZE_MAX) { g_chat_bans[free_i].uid = uid; g_chat_bans[free_i].banned = banned; }
+}
+
+typedef struct { int uid, ban; char name[PLAYER_NAME_SIZE]; } ChatBanReq;
+static void plist_chat_ban_done(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    ChatBanReq *r = user;
+    cJSON *res = body ? cJSON_Parse(body) : NULL;
+    const cJSON *err = cJSON_GetObjectItem(res, "error");
+    char line[160];
+    if (status != 200 || (err && !cJSON_IsNull(err))) {
+        snprintf(line, sizeof(line), "Couldn't change the chat ban%s%s", cJSON_IsString(err) ? ": " : "", cJSON_IsString(err) ? err->valuestring : "");
+    } else {
+        plist_chat_ban_set(r->uid, r->ban);
+        char id[32];
+        snprintf(id, sizeof id, "chatBanBtn_%d", r->uid);
+        const HtmlElem btn = html_dom_by_id(id);
+        if (btn) html_dom_set_text(btn, r->ban ? "Chat Unban" : "Chat Ban");
+        snprintf(line, sizeof(line), "%s %s", r->name, r->ban ? "can no longer chat" : "can chat again");
+    }
+    hud_ui_add_chat_line_on(line, "#fff", -1);
+    cJSON_Delete(res);
+    free(r);
+}
+
+// POST /moderation/chat {player_name, ban} (services/brain/v10_mods.c), the session token as the caller
+static void plist_chat_ban(const int uid) {
+    const char *alias = uid >= 0 ? hud_plist_alias(uid) : NULL;
+    const char *token = account_session_token();
+    if (!alias || !alias[0] || !backend_enabled() || !token || !token[0]) return;
+    ChatBanReq *r = calloc(1, sizeof *r);
+    if (!r) return;
+    r->uid = uid;
+    r->ban = !plist_chat_banned(uid);
+    snprintf(r->name, sizeof(r->name), "%s", alias);
+    char enc[512], url[1024];
+    backend_url_encode(enc, sizeof enc, token);
+    snprintf(url, sizeof url, "%s/moderation/chat?token=%s", backend_url(), enc);
+    cJSON *b = cJSON_CreateObject();
+    cJSON_AddStringToObject(b, "player_name", alias);
+    cJSON_AddBoolToObject(b, "ban", r->ban);
+    char *json = cJSON_PrintUnformatted(b);
+    cJSON_Delete(b);
+    if (!json || !backend_http_request("POST", url, json, plist_chat_ban_done, r)) free(r);
+    free(json);
+}
+
 // Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
 int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
@@ -5099,6 +5181,14 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         // Ban: canGlobalBan = isDev || isMod (v10 punishPopup, game.deob.js:217250), and the official host too
         // (isHost || canGlobalBan). A KrunkerNative host's ban is not offered: its server's admin ban checks DEV / moderator
         if (kick || krunker_net_is_host()) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
+        // Flag / Unflag (canGlobalFlag) and Chat Ban (canChatBan, a moderation API call) for a signed-in target:
+        // v10.0.7's punishPopup (deob-10.0.7.js:224082). Both are staff rights here (hud_plist_staff kick).
+        const NetPlayerInfoPacket *target = player_accounts_get(uid);
+        if (kick && target && target->account_id > 0 && target->level > 0) {
+            const int hacker = (target->flags & NET_PLAYER_INFO_HACKER) != 0;
+            sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn tag' onclick='flagPlayer(\"%d\", %d)'>%s</span>", uid, hacker ? 0 : 1, hacker ? "Unflag" : "Flag");
+            sb_appendf(&sb, "<span onmouseenter='playTick()' id='chatBanBtn_%d' class='takeActionBtn kick' onclick='chatBanPlayer(\"%d\")'>%s</span>", uid, uid, plist_chat_banned(uid) ? "Chat Unban" : "Chat Ban");
+        }
         sb_append(&sb, "</div>");
         // the host's Transfer Host, in v10.0.3's second table (deob-10.0.3.js:254169: isHost; action 8 with the target)
         if (host) sb_appendf(&sb, "<div class='takeActionTable'><span onmouseenter='playTick()' class='takeActionBtn enabled' onclick='punishPlayer(\"%d\", 8);clearPops();'>Transfer Host</span></div>", uid);
@@ -5132,6 +5222,26 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         snprintf(q, sizeof(q), "Are you sure you want ban %s from this game?", alias); // windows.playerlist.ban
         g_ban_uid = uid;
         ui_confirm(q, plist_ban_answered, NULL);
+        return 1;
+    }
+    if (!strcmp(name, "flagPlayer")) { // flagPlayer(id, on): a YES / NO confirm, then flagPlayerConfirmed (deob-10.0.7.js:224064-224103)
+        const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
+        const NetPlayerInfoPacket *target = player_accounts_get(uid);
+        const int on = argc > 1 ? (int) (args[1].kind == HTML_ARG_STR && args[1].str ? atoi(args[1].str) : args[1].num)
+                                : !(target && (target->flags & NET_PLAYER_INFO_HACKER));
+        char shown[PLAYER_NAME_SIZE];
+        const char *alias = hud_plist_shown_alias(uid, shown, sizeof(shown));
+        if (!alias) return 1;
+        char q[160];
+        snprintf(q, sizeof(q), on ? "Mark %s as a hacker?" : "Remove the hacker mark from %s?", alias);
+        g_flag_uid = uid;
+        g_flag_on = on ? 1 : 0;
+        ui_confirm(q, plist_flag_answered, NULL);
+        return 1;
+    }
+    if (!strcmp(name, "chatBanPlayer")) { // chatBanPlayer(id): toggles the account's chat ban (deob-10.0.7.js:224104-224125)
+        const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
+        plist_chat_ban(uid);
         return 1;
     }
     return hud_votekick_handle(menu_ui()->client, name, ev, args, argc); // kickVote, confirmPolice, callPolice, copyUser; -1 when not one

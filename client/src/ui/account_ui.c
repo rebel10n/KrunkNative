@@ -1506,6 +1506,15 @@ static void on_social(void *user, const cJSON *frame) {
             menu_update_class_box();   // dJ()
             rerender_windows();        // updateWindow(null, true)
         }
+    } else if (!strcmp(label, "hdsr")) { // HIDE_STATUS: acc.stats.hds = v; updateWindow(5) (deob-10.0.7.js:225259-225261)
+        const cJSON *v = cJSON_GetArrayItem(frame, 1);
+        if (g_logged_in) {
+            const double on = cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsTrue(v) ? 1 : 0;
+            if (!g_acc.stats) g_acc.stats = cJSON_CreateObject();
+            cJSON_DeleteItemFromObject(g_acc.stats, "hds");
+            cJSON_AddNumberToObject(g_acc.stats, "hds", on);
+        }
+        menu_rerender_if_open(5);
     } else if (!strcmp(label, "flgr")) { // io_flgr(flag): acc.stats.flg; updateWindow(5)
         const cJSON *flag = cJSON_GetArrayItem(frame, 1);
         if (g_logged_in && cJSON_IsNumber(flag)) {
@@ -2843,6 +2852,11 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             if (res) html_dom_set_text(res, I18N("kn.vouch.noAnswer", "Couldn't reach the server. Try the code again."));
         }
         cJSON_Delete(frame);
+        return 1;
+    }
+    if (!strcmp(name, "toggleStatus")) { // if (acc) io.send(HIDE_DETAILS "hds", !!checked) (deob-10.0.7.js:217688-217693)
+        const int on = argc > 0 && args[0].kind == HTML_ARG_THIS_CHECKED ? ev && ev->checked : argc > 0 && args[0].num != 0.0;
+        if (g_logged_in) backend_social_send_text(on ? "[\"hds\",true]" : "[\"hds\",false]");
         return 1;
     }
     if (!strcmp(name, "selectFlag")) { // if (acc) io.send("flg", parseInt(value))

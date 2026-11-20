@@ -1940,6 +1940,7 @@ static void select_streak(int index, const int slot) {
 
 // selectCharm(index): selectedCharms[slot] = item || -2 ? index : -1 (one charm per item unless
 // owned twice: v7's "Charm already in use" popup becomes a plain alert).
+static void kpd_generic_popup(const char *html, const char *cls);
 static void select_charm(const int index) {
     const int value = store_skin(index) || index == -2 ? index : -1;
     if (value >= 0 && charm_at(g_charm_slot ? 0 : 1) == value) {
@@ -1948,7 +1949,14 @@ static void select_charm(const int index) {
         for (int i = 0; i < n; i++) if (owned[i].ind == value) count = owned[i].cnt;
         free(owned);
         if (count < 2 && !all_skins_unlocked()) {
-            ui_alert("Charm already in use");
+            // genericPopup(..., "charmErrorPop") with an Override button: overrideCharm(index) empties both
+            // slots, then selects the charm again (deob-10.0.7.js:217418-217423, :217436-217446). Our own wording.
+            char html[768];
+            snprintf(html, sizeof(html),
+                     "<div class=\"popHeader\">Charm Error</div>This charm is already on your other slot"
+                     "<div style=\"margin-top: 20px;\"><div class=\"charmBtn\" onmouseenter=\"playTick(0.1);\" "
+                     "onclick=\"playSelect(0.1);clearPops();overrideCharm(%d);\">Override</div></div>", index);
+            kpd_generic_popup(html, "charmErrorPop");
             return;
         }
     }
@@ -2109,6 +2117,12 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "selectScope")) {
         select_custom(SEL_SCOPE, "savedScope", harg_int(args, argc, 0, 0), harg_str(args, argc, 1));
+        return 1;
+    }
+    if (!strcmp(name, "overrideCharm")) { // selectedCharms = [-1, -1]; selectCharm(index) (deob-10.0.7.js:217418-217423)
+        charm_save(0, -1);
+        charm_save(1, -1);
+        select_charm(harg_int(args, argc, 0, -1));
         return 1;
     }
     if (!strncmp(name, "select", 6)) {
