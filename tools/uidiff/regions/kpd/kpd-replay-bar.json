@@ -1,0 +1,27 @@
+{
+  "note": "KN only: a K.P.D replay's #replayControls (hud_replay.c): play / pause, the segment-painted timeline, m:ss / m:ss, the speed, the suspect, the open case's counts and VERDICT, hitboxes, exit",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "replay-bar",
+      "rect": [
+        336,
+        474,
+        608,
+        32
+      ]
+    },
+    {
+      "name": "timeline",
+      "rect": [
+        370,
+        482,
+        230,
+        16
+      ]
+    }
+  ]
+}

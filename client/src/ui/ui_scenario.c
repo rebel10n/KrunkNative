@@ -54,6 +54,7 @@
 #include <v10_notify.h> // S5: state.notify
 #include <hud_modes.h>
 #include <net_ext.h> // state.voteKick: NetVoteKickStatePacket
+#include <hud_replay.h> // state.replayBar / replayCase: the K.P.D replay viewer
 #include <nametags.h> // state.kpdCase: the suspect is a player that sees an enemy (nametags_can_see)
 #include <modes.h>
 #include <ui_interact.h> // state.interact
@@ -348,6 +349,8 @@ static void warn_unknown_keys(void) {
         "nametags", // in game: the players' nametags (page elements) drawn over the background (the world is not)
         "trade",    // the live trade's window state {trader, invs: [mine, theirs], offers: [[[skin, n, copy]], [...]], kr, ready} (trade_ui.c)
         "kpdCase",  // spectating: an officer's case (kpdData) on the first other player, the second its caller (hud_votekick.c)
+        "replayBar",  // a K.P.D replay's #replayControls with fixed values {time, duration, speed, suspect, segments, case, resolve} (hud_replay.c)
+        "replayCase", // demoInfo's data: the openDemoLink case popup (hud_replay.c)
         "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
@@ -1273,6 +1276,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("trade")) trade_ui_scenario(st("trade")); // before the window: windows[36] draws this state (trade_ui.c)
     if (menu_open) apply_window(client);
     if (menu_open) apply_kpd_police(client); // after the window: the popup on its tab, the list from the fixture
+    if (st_has("replayBar") || st_has("replayCase")) hud_replay_scenario(client, st("replayBar"), st("replayCase")); // the replay viewer
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
     if (st_bool("gameCode", 0)) v10_party_password_prompt(); // v10 gameCode(): the server password popup

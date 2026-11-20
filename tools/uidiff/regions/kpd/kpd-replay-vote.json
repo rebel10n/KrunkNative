@@ -1,0 +1,27 @@
+{
+  "note": "KN only: the replay's verdict question (Cheating? YES / NO / cancel), paused, 2x, hitboxes on",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "replay-bar",
+      "rect": [
+        336,
+        474,
+        608,
+        32
+      ]
+    },
+    {
+      "name": "resolve",
+      "rect": [
+        755,
+        478,
+        135,
+        22
+      ]
+    }
+  ]
+}

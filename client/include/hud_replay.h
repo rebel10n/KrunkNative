@@ -17,6 +17,11 @@ void hud_replay_tick(Client*);
 // The page's listeners on #replayControls (installed once the page is up; idempotent).
 void hud_replay_bind(Client*);
 int  hud_replay_hitboxes(void); // the hitbox toggle (replayHitBtn)
+// --render-scenario (ui_scenario.c): state.replayBar {time, duration, speed, playing, suspect, segments: [[a, b]],
+// tok, ct, hitboxes, case: {opn, yes, f_no, myv, rsl, ban}, resolve: "status" | "question" | "error"} shows the bar
+// with those values (no demo plays); state.replayCase (demoInfo's data) the openDemoLink popup.
+struct cJSON;
+void hud_replay_scenario(Client*, const struct cJSON *bar, const struct cJSON *case_popup);
 
 // ---- client/src/replay_hitbox.c (GL): the hitbox outlines after the world pass
 void replay_hitbox_render(Client*);

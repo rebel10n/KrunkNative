@@ -1,0 +1,18 @@
+{
+  "note": "KN only: openDemoLink's case popup (hud_replay.c): map, mode, date and length, the suspect (a guest), the case's counts with this officer's dot, Watch and copy link",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "case-popup",
+      "rect": [
+        528,
+        284,
+        224,
+        154
+      ]
+    }
+  ]
+}

@@ -59,6 +59,31 @@ static struct {
 
 int hud_replay_hitboxes(void) { return g_rp.hitboxes; }
 
+// The bar's view: the replay player's, or a --render-scenario's fixed one (state.replayBar)
+static struct {
+    int on;
+    uint32_t t, duration;
+    float speed;
+    int playing, suspect;
+    DemoSegment segments[DEMO_SEGMENTS_MAX];
+    size_t segment_count;
+    char tok[48], ct[48];
+} g_sc;
+
+static int rv_active(void) { return g_sc.on || demo_play_active(); }
+static uint32_t rv_playhead(void) { return g_sc.on ? g_sc.t : demo_play_playhead_ms(); }
+static uint32_t rv_duration(void) { return g_sc.on ? g_sc.duration : demo_play_duration_ms(); }
+static float rv_speed(void) { return g_sc.on ? g_sc.speed : demo_play_speed(); }
+static int rv_playing(void) { return g_sc.on ? g_sc.playing : demo_play_playing(); }
+static int rv_suspect(void) { return g_sc.on ? g_sc.suspect : demo_play_suspect_uid(); }
+static const char *rv_token(void) { return g_sc.on ? g_sc.tok : demo_play_token(); }
+static const char *rv_call_token(void) { return g_sc.on ? g_sc.ct : demo_play_call_token(); }
+static const DemoSegment *rv_segments(size_t *count) {
+    if (!g_sc.on) return demo_play_segments(count);
+    *count = g_sc.segment_count;
+    return g_sc.segments;
+}
+
 static void rp_set_text(const char *id, const char *text, char *last, const size_t last_size) {
     if (last && !strcmp(last, text)) return;
     const HtmlElem e = html_dom_by_id(id);
@@ -139,7 +164,7 @@ static void rp_resolve_render(void) {
     const HtmlElem e = html_dom_by_id("replayResolve");
     if (!e) return;
     StrBuf sb = {0};
-    const ReplayCase *c = rp_case(demo_play_token(), demo_play_call_token(), 0);
+    const ReplayCase *c = rp_case(rv_token(), rv_call_token(), 0);
     if (!c || (!c->ban && !c->rsl && c->opn)) { // an open (or unknown) case: its counts, RESOLVE (:229606-229611)
         if (c && (c->yes || c->no || c->myv >= 0)) {
             rp_case_status(&sb, c);
@@ -158,7 +183,7 @@ static void rp_resolve_render(void) {
 static void rp_error_done(void *user) {
     (void) user;
     g_rp.error_timer = 0;
-    if (demo_play_active()) rp_resolve_render();
+    if (rv_active()) rp_resolve_render();
 }
 
 static void rp_resolve_error(const char *message) { // :229655-229658
@@ -179,7 +204,7 @@ static void rp_resolve_error(const char *message) { // :229655-229658
 static int h_replay_resolve(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) { // :229613-229626
     (void) user; (void) ev; (void) args; (void) argc;
     const HtmlElem e = html_dom_by_id("replayResolve");
-    if (!e || !demo_play_active()) return 1;
+    if (!e || !rv_active()) return 1;
     html_dom_set_html(e, "Cheating?<span class='replayResolveB' id='replayVoteY' style='color:#eb5656' onclick='replayVote(1)'>YES</span>"
                          "<span class='replayResolveB' id='replayVoteN' style='color:#7eeb7a' onclick='replayVote(0)'>NO</span>"
                          "<span class='replayResolveB' id='replayVoteC' onclick='replayVote(-1)'>&#10005;</span>");
@@ -193,9 +218,9 @@ static void rp_vote_done(void *user, const int status, const char *body, const s
     cJSON *root = body && length ? cJSON_ParseWithLength(body, length) : NULL;
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
     if (status == 200 && cJSON_IsObject(data)) { // :229634-229645
-        ReplayCase *c = rp_case(demo_play_token(), demo_play_call_token(), 0);
+        ReplayCase *c = rp_case(rv_token(), rv_call_token(), 0);
         if (!c) { // cache[key] || {opn: 1}
-            c = rp_case(demo_play_token(), demo_play_call_token(), 1);
+            c = rp_case(rv_token(), rv_call_token(), 1);
             c->opn = 1;
         }
         c->yes = rp_num(data, "yes");
@@ -224,18 +249,18 @@ static int h_replay_vote(void *user, const HtmlEvent *ev, const HtmlArg *args, c
         rp_resolve_render();
         return 1;
     }
-    if (!demo_play_call_token()[0] || !demo_play_token()[0]) {
+    if (!rv_call_token()[0] || !rv_token()[0]) {
         rp_resolve_error("Open this demo from the Demos list to give a verdict");
         return 1;
     }
     char path[160], url[1024], body[160];
-    snprintf(path, sizeof path, "/kpd/demos/%s/vote", demo_play_token());
+    snprintf(path, sizeof path, "/kpd/demos/%s/vote", rv_token());
     if (!rp_session_url(url, sizeof url, path)) {
         rp_resolve_error("Sign in to your Box Office account to vote");
         return 1;
     }
     cJSON *b = cJSON_CreateObject();
-    cJSON_AddStringToObject(b, "ct", demo_play_call_token());
+    cJSON_AddStringToObject(b, "ct", rv_call_token());
     cJSON_AddNumberToObject(b, "verdict", verdict ? 1 : 0);
     if (!cJSON_PrintPreallocated(b, body, sizeof body, 0)) body[0] = 0;
     cJSON_Delete(b);
@@ -253,11 +278,11 @@ static void rp_paint_timeline(void) {
     const HtmlElem slider = html_dom_by_id("replaySlider");
     if (!slider) return;
     char max[16];
-    snprintf(max, sizeof max, "%u", demo_play_duration_ms());
+    snprintf(max, sizeof max, "%u", rv_duration());
     html_dom_set_attr(slider, "max", max);
     size_t count = 0;
-    const DemoSegment *seg = demo_play_segments(&count);
-    const double duration = demo_play_duration_ms() ? (double) demo_play_duration_ms() : 1.0;
+    const DemoSegment *seg = rv_segments(&count);
+    const double duration = rv_duration() ? (double) rv_duration() : 1.0;
     const char *grey = "rgba(255,255,255,0.18)", *gold = "#fbc02d";
     if (!count) {
         html_dom_set_style(slider, "background", grey);
@@ -289,7 +314,7 @@ static void rp_show(Client *client) {
     const HtmlElem hit = html_dom_by_id("replayHitBtn");
     if (hit) html_dom_set_style(hit, "opacity", g_rp.hitboxes ? "1" : "0.45");
     const HtmlElem sus = html_dom_by_id("replaySusBtn");
-    if (sus) html_dom_set_display(sus, demo_play_suspect_uid() >= 0 ? "" : "none");
+    if (sus) html_dom_set_display(sus, rv_suspect() >= 0 ? "" : "none");
     rp_resolve_render();
     (void) client;
 }
@@ -303,7 +328,7 @@ static void rp_hide(void) {
 
 // iîìîìíí (:229846-229856): follow the suspect when it is in the game; 1 when the camera is on it
 static int rp_follow_suspect(Client *client) {
-    const int sus = demo_play_suspect_uid();
+    const int sus = rv_suspect();
     if (sus < 0 || !client->game.player_count) return 0;
     if (spectate_target_uid() == sus) return 1;
     const Player *p = client_find_player(client, sus);
@@ -379,12 +404,14 @@ void hud_replay_bind(Client *client) {
 void hud_replay_tick(Client *client) {
     if (!client) return;
     g_rp.client = client;
-    if (!demo_play_active()) {
+    if (g_sc.on) { // --render-scenario: the fixed bar (hud_replay_scenario)
+        if (!g_rp.shown) rp_show(client);
+    } else if (!demo_play_active()) {
         if (g_rp.shown) rp_hide();
         return;
     }
     if (!g_rp.bound) hud_replay_bind(client);
-    if (demo_play_take_round_start()) { // onRoundStart (:229724-229731)
+    if (!g_sc.on && demo_play_take_round_start()) { // onRoundStart (:229724-229731)
         ui_loadout_clear_pops();
         client_set_menu_open(client, 0);
         if (!rp_follow_suspect(client)) spectate_mode(client, 1);
@@ -395,19 +422,19 @@ void hud_replay_tick(Client *client) {
     demo_play_take_ended();
 
     char text[48], a[16], b[16];
-    rp_time_text(a, sizeof a, demo_play_playhead_ms());
-    rp_time_text(b, sizeof b, demo_play_duration_ms());
+    rp_time_text(a, sizeof a, rv_playhead());
+    rp_time_text(b, sizeof b, rv_duration());
     snprintf(text, sizeof text, "%s / %s", a, b);
     rp_set_text("replayTime", text, g_rp.last_time, sizeof g_rp.last_time);
-    const float speed = demo_play_speed();
+    const float speed = rv_speed();
     snprintf(text, sizeof text, speed < 1.0f ? "%.1fx" : "%.0fx", speed);
     rp_set_text("replaySpeed", text, g_rp.last_speed, sizeof g_rp.last_speed);
-    rp_set_text("replayPlayBtn", demo_play_playing() ? "pause" : "play_arrow", g_rp.last_play, sizeof g_rp.last_play);
-    if (demo_play_suspect_uid() >= 0) {
-        snprintf(text, sizeof text, "Suspect: Player_%d", demo_play_suspect_uid());
+    rp_set_text("replayPlayBtn", rv_playing() ? "pause" : "play_arrow", g_rp.last_play, sizeof g_rp.last_play);
+    if (rv_suspect() >= 0) {
+        snprintf(text, sizeof text, "Suspect: Player_%d", rv_suspect());
         rp_set_text("replaySusBtn", text, g_rp.last_sus, sizeof g_rp.last_sus);
     }
-    const uint32_t at = demo_play_playhead_ms();
+    const uint32_t at = rv_playhead();
     if (!g_rp.dragging && at != g_rp.last_slider) {
         const HtmlElem slider = html_dom_by_id("replaySlider");
         snprintf(text, sizeof text, "%u", at);
@@ -418,7 +445,7 @@ void hud_replay_tick(Client *client) {
     const double now = glfwGetTime();
     if (now >= g_rp.refollow_at) {
         g_rp.refollow_at = now + REPLAY_REFOLLOW_S;
-        if (demo_play_playing() && spectate_target_uid() != demo_play_suspect_uid()) rp_follow_suspect(client);
+        if (!g_sc.on && demo_play_playing() && spectate_target_uid() != rv_suspect()) rp_follow_suspect(client);
     }
 }
 
@@ -458,23 +485,11 @@ void hud_replay_watch(Client *client, const char *tok, const char *ct) {
         ui_loadout_response_popup("Demo Download Failed");
 }
 
-static void rp_info_done(void *user, const int status, const char *body, const size_t length) {
-    const unsigned gen = (unsigned) (uintptr_t) user;
-    if (gen != g_rp.gen) return;
-    cJSON *root = body && length ? cJSON_ParseWithLength(body, length) : NULL;
-    const cJSON *d = cJSON_GetObjectItemCaseSensitive(root, "data");
-    if (status != 200 || !cJSON_IsObject(d)) { // :229821-229823, :229831
-        ui_loadout_response_popup("Demo not found, or not yours to review");
-        cJSON_Delete(root);
-        return;
-    }
+// The case popup (:229824-229829) from demoInfo's data; 0 when its tokens are not a demo's
+static int rp_case_popup(const cJSON *d) {
     const cJSON *tok = cJSON_GetObjectItemCaseSensitive(d, "tok"), *ct = cJSON_GetObjectItemCaseSensitive(d, "ct");
     const char *t = cJSON_IsString(tok) ? tok->valuestring : g_rp.tok, *c = cJSON_IsString(ct) ? ct->valuestring : g_rp.ct;
-    if (!rp_token_ok(t) || (c[0] && !rp_token_ok(c))) {
-        ui_loadout_response_popup("Demo not found, or not yours to review");
-        cJSON_Delete(root);
-        return;
-    }
+    if (!rp_token_ok(t) || (c[0] && !rp_token_ok(c))) return 0;
     ReplayCase *rc = rp_case(t, c, 1);
     rp_case_from(rc, d);
 
@@ -522,6 +537,16 @@ static void rp_info_done(void *user, const int status, const char *body, const s
     ui_loadout_clear_pops();
     v10_popup_show("polConfPop", html, NULL);
     free(html);
+    return 1;
+}
+
+static void rp_info_done(void *user, const int status, const char *body, const size_t length) {
+    const unsigned gen = (unsigned) (uintptr_t) user;
+    if (gen != g_rp.gen) return;
+    cJSON *root = body && length ? cJSON_ParseWithLength(body, length) : NULL;
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(root, "data");
+    // :229821-229823, :229831
+    if (status != 200 || !cJSON_IsObject(d) || !rp_case_popup(d)) ui_loadout_response_popup("Demo not found, or not yours to review");
     cJSON_Delete(root);
 }
 
@@ -539,4 +564,39 @@ void hud_replay_open_link(Client *client, const char *tok, const char *ct) {
     ui_loading_popup("Loading..."); // :229819
     if (!backend_http_get_auth(path, account_session_token(), rp_info_done, (void *) (uintptr_t) g_rp.gen))
         ui_loadout_response_popup("Demo not found, or not yours to review");
+}
+
+// ---------------------------------------------------------------- --render-scenario
+
+void hud_replay_scenario(Client *client, const cJSON *bar, const cJSON *case_popup) {
+    if (cJSON_IsObject(case_popup)) rp_case_popup(case_popup);
+    if (!cJSON_IsObject(bar)) return;
+    g_rp.client = client;
+    memset(&g_sc, 0, sizeof(g_sc));
+    g_sc.on = 1;
+    g_sc.t = (uint32_t) rp_num(bar, "time");
+    g_sc.duration = (uint32_t) rp_num(bar, "duration");
+    const cJSON *speed = cJSON_GetObjectItemCaseSensitive(bar, "speed");
+    g_sc.speed = cJSON_IsNumber(speed) ? (float) speed->valuedouble : 1.0f;
+    const cJSON *playing = cJSON_GetObjectItemCaseSensitive(bar, "playing");
+    g_sc.playing = playing ? cJSON_IsTrue(playing) || rp_num(bar, "playing") : 1;
+    const cJSON *suspect = cJSON_GetObjectItemCaseSensitive(bar, "suspect");
+    g_sc.suspect = cJSON_IsNumber(suspect) ? suspect->valueint : -1;
+    const cJSON *seg;
+    cJSON_ArrayForEach(seg, cJSON_GetObjectItemCaseSensitive(bar, "segments")) {
+        if (g_sc.segment_count >= DEMO_SEGMENTS_MAX || cJSON_GetArraySize(seg) != 2) continue;
+        g_sc.segments[g_sc.segment_count].start = (uint32_t) cJSON_GetArrayItem(seg, 0)->valuedouble;
+        g_sc.segments[g_sc.segment_count++].end = (uint32_t) cJSON_GetArrayItem(seg, 1)->valuedouble;
+    }
+    const cJSON *tok = cJSON_GetObjectItemCaseSensitive(bar, "tok"), *ct = cJSON_GetObjectItemCaseSensitive(bar, "ct");
+    snprintf(g_sc.tok, sizeof g_sc.tok, "%s", cJSON_IsString(tok) ? tok->valuestring : "");
+    snprintf(g_sc.ct, sizeof g_sc.ct, "%s", cJSON_IsString(ct) ? ct->valuestring : "");
+    g_rp.hitboxes = rp_num(bar, "hitboxes");
+    const cJSON *kase = cJSON_GetObjectItemCaseSensitive(bar, "case");
+    if (cJSON_IsObject(kase)) rp_case_from(rp_case(g_sc.tok, g_sc.ct, 1), kase);
+    rp_show(client);
+    hud_replay_tick(client);
+    const cJSON *resolve = cJSON_GetObjectItemCaseSensitive(bar, "resolve");
+    if (cJSON_IsString(resolve) && !strcmp(resolve->valuestring, "question")) h_replay_resolve(NULL, NULL, NULL, 0);
+    else if (cJSON_IsString(resolve) && !strcmp(resolve->valuestring, "error")) rp_resolve_error(NULL);
 }
