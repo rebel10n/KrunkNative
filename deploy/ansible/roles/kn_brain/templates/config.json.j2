@@ -33,7 +33,12 @@
     "_comment_store_season": "config.currentSeason of the store table / prize wheels (accounts.store_season, services/brain/store.c): the season their unseasoned items roll. 10 for Krunker v10.0.2.",
     "_comment_region_index": "accounts.region_index (services/brain/accounts.c): a match's game region -> its config.socialRegions index, the leaderboard region filter.",
     "region_index": {{ kn_brain_region_index | to_json }},
-    "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
+    "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} },
+    "_comment_discord": "v10.0.7's Discord link (services/brain/discord.c): client_id / client_secret / bot_token / guild_id come from {{ kn_etc_dir }}/discord.env (KN_ACCOUNTS_DISCORD_*, role kn_brain), never this file; redirect_uri empty = <brain.public_url>/discord/callback.",
+    "discord": {
+      "guild_url": {{ kn_brain_discord_guild_url | to_json }},
+      "return_origins": {{ kn_web_origins | to_json }}
+    }
   },
   "captcha": {
     "_comment": "doc/backend.md 7.10: the ALTCHA captcha of sign-in, registration and hosting. enforce stays false until the clients that solve are what players run.",

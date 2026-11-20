@@ -122,6 +122,30 @@
     msg: "KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY not set: {{ kn_etc_dir }}/ai.env left as it is (the editor's AI answers 503 without it). Source ~/.config/kn-secrets/ai.env or set the KN_AI_UPSTREAM_* CI secrets."
   when: (kn_brain_ai_upstream_url | length == 0) or (kn_brain_ai_upstream_key | length == 0)
 
+# v10.0.7's Discord link: the app's credentials as accounts.discord.* config overrides (knsvc/config.h env names).
+- name: Discord env file (the account link's app credentials, never logged)
+  ansible.builtin.copy:
+    dest: "{{ kn_etc_dir }}/discord.env"
+    content: |
+      # Managed by KrunkNative deploy/ansible (role kn_brain): the Discord account link's app. Never commit.
+      {% for k, v in {'KN_ACCOUNTS_DISCORD_CLIENT_ID': kn_brain_discord_client_id,
+                      'KN_ACCOUNTS_DISCORD_CLIENT_SECRET': kn_brain_discord_client_secret,
+                      'KN_ACCOUNTS_DISCORD_BOT_TOKEN': kn_brain_discord_bot_token,
+                      'KN_ACCOUNTS_DISCORD_GUILD_ID': kn_brain_discord_guild_id} | dictsort if v | length > 0 -%}
+      {{ k }}={{ v | string | to_json(ensure_ascii=False) }}
+      {% endfor %}
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  when: (kn_brain_discord_client_id | length > 0) and (kn_brain_discord_client_secret | length > 0)
+  no_log: true
+  notify: Restart kn_brain
+
+- name: Note when no Discord app was given
+  ansible.builtin.debug:
+    msg: "KN_DISCORD_CLIENT_ID / KN_DISCORD_CLIENT_SECRET not set: {{ kn_etc_dir }}/discord.env left as it is (Settings > Account shows Discord unavailable without it). Source ~/.config/kn-secrets/discord.env or set the KN_DISCORD_* CI secrets."
+  when: (kn_brain_discord_client_id | length == 0) or (kn_brain_discord_client_secret | length == 0)
+
 - name: User-asset mirror proxy (the krunkbox .env's PROXY)
   ansible.builtin.include_tasks: user_assets_proxy.yml
 

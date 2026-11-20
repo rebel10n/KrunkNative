@@ -48,6 +48,20 @@ kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default(
 # kept otherwise. Without it the /ai routes answer 503 (the editor shows "AI unavailable").
 kn_brain_ai_upstream_url: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_URL') }}"
 kn_brain_ai_upstream_key: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_KEY') }}"
+# v10.0.7's Discord account link (services/brain/discord.c, accounts.discord.*): the Discord app's
+# credentials from the controller's environment (`set -a; . ~/.config/kn-secrets/discord.env; set +a`
+# locally, the KN_DISCORD_* secrets in deploy-kru.yml in CI), written to {{ kn_etc_dir }}/discord.env as
+# the KN_ACCOUNTS_DISCORD_* config overrides (root:kn 0640, no_log) only when client id + secret are set;
+# an existing file is kept otherwise. client id + secret turn linking on; bot token + guild id turn on
+# Join Server (the bot must be in that guild with Create Instant Invite). The OAuth redirect is
+# <brain.public_url>/discord/callback (https://coordinator.krunk.io/discord/callback): register it in the app.
+kn_brain_discord_client_id: "{{ lookup('ansible.builtin.env', 'KN_DISCORD_CLIENT_ID') }}"
+kn_brain_discord_client_secret: "{{ lookup('ansible.builtin.env', 'KN_DISCORD_CLIENT_SECRET') }}"
+kn_brain_discord_bot_token: "{{ lookup('ansible.builtin.env', 'KN_DISCORD_BOT_TOKEN') }}"
+kn_brain_discord_guild_id: "{{ lookup('ansible.builtin.env', 'KN_DISCORD_GUILD_ID') }}"
+# Open Server (accounts.discord.guild_url, not a secret): Box Office's Discord, the invite the game
+# servers' billboard shows (group_vars/edges kn_gameserver_billboard).
+kn_brain_discord_guild_url: "https://discord.gg/RqnSxVtUyk"
 # accounts.region_index: each game region (registry.c code or ping id) -> its config.socialRegions
 # index (0 = all, services/brain/leaderboards.c), the leaderboard region filter.
 # Same map as config/config.example.json; a region missing here gets no index.
