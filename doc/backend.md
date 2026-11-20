@@ -2368,7 +2368,7 @@ menu's Host Game button is shown; the chooser is v10's.
 ### 8.12 Build version and outdated servers
 
 A build is named by its commit, never by a version number: KrunkNative has none of its own, and
-players see only Krunker's version (the newest update of `ui/windows/kn-versions.txt`,
+players see only Krunker's version (the newest update of `ui/windows/versions.txt`, Krunker's official changelog,
 `v10_news_version`). Every binary embeds its build identity (`shared/include/build_info.h`,
 generated `kn_version.h` from `cmake/kn_version.cmake` at every build): 12-hex commit, its
 committer date, the build time and the protocol `NET_PROTOCOL_MAJOR.MINOR`, plus a `describe`

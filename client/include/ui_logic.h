@@ -683,7 +683,7 @@ void object_manager_ui_pick_entry(int tab, int item); // an Objects / Entities /
 // END object_manager_ui block
 
 // BEGIN v10_news block (client/src/ui/v10_news.c): Krunker v10.0.2's What's New (windows[34]
-// Changelog over Krunker Box Office's kn-versions.txt, the menu's #updateAd), Guide (openGuide)
+// Changelog over Krunker's official versions.txt, the menu's #updateAd), Guide (openGuide)
 // and Community & Events (openCommunityMenu, the brain's /creators/events and /social/news).
 char *v10_news_changelog_gen(void);              // windows[34].gen() (showWindow(35))
 void v10_news_toggle_log(HtmlElem obj);          // windows[34].toggleLog

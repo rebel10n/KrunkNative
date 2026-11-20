@@ -353,8 +353,10 @@ subtypes) follow AGENTS.md.
   version is `10.0.7r1` (`shared/include/krunker_build.h`, `tools/krunker/build.json`). The client
   logs `[client] Krunker v10.0.7` and the server `Plays Krunker v10.0.7`. The Android and iOS
   version fallbacks name 10.0.7.
-- What's New: `ui/windows/kn-versions.txt` leads with UPDATE 10.0.7 (CI's shipped version,
-  `tools/release/version-meta.sh`), and the What's New tile shows the newest entry.
+- What's New shows Krunker's official changelog, `ui/windows/versions.txt` (krunker.io/docs/versions.txt
+  as published, led by UPDATE 10.0.7; CI's shipped version, `tools/release/version-meta.sh`). Box Office
+  keeps no changelog of its own: the changelog is parity with Krunker's, never reworded (user rule,
+  2026-11-19; `kn-versions.txt` removed).
 
 ## What it does not change
 

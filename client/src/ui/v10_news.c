@@ -1,9 +1,9 @@
 // Krunker v10.0.2's What's New, Guide and Community & Events (doc/v10/ui.md "What's New, Guide, Community"):
 //   - windows[34] Changelog / "What's New" (showWindow(35); the menu's #updateAd item, the footer's
-//     Changelog link): v10's gen / toggleLog / switchTab / viewAll over Krunker Box Office's own
-//     changelog, <page>/windows/kn-versions.txt (Krunker's docs/versions.txt format; the page's
-//     versions.txt, Krunker's own, when a page tree has none). Its newest update is the version
-//     (v10's config.gameVersion). KN addition: the brain's news items (GET /social/news, v10's hub
+//     Changelog link): v10's gen / toggleLog / switchTab / viewAll over Krunker's official
+//     changelog, <page>/windows/versions.txt (krunker.io/docs/versions.txt as published, refreshed by
+//     the import pipeline; never reworded: the changelog is parity with Krunker's, user rule
+//     2026-11-19). Its newest update is the version (v10's config.gameVersion). KN addition: the brain's news items (GET /social/news, v10's hub
 //     News tab feed) as v10 .news-item cards above the notes, when there are any.
 //   - openGuide(section): v10's tutorialPopup (_66971, svelte-los391) with its twelve sections,
 //     the img/guide/* images (tools/ui-import/live_assets_v10.lock) and the Basics video
@@ -87,7 +87,7 @@ static long long parse_iso(const char *s) {
 // into [prefix, title, body, title, body, ...]; each pair is an update whose version is the
 // title's first /[\d\.]+/, grouped by its first number (the tabs v1.x .. v10.x). v10's loop
 // stops before the file's last pair (Krunker's file ends with "TRICKSHOT MUSIC", which has no
-// version and is skipped here anyway), so the last update of kn-versions.txt is kept.
+// version and is skipped here anyway), so the last update of versions.txt is kept.
 static int is_word_char(const char c) { return isalnum((unsigned char) c) || c == '_'; }
 
 static int changelog_title(const char *line, const size_t len, const char **title, size_t *title_len) {
@@ -164,8 +164,7 @@ static char *windows_file(const char *name) {
 
 static void changelog_load(void) {
     if (L.text) return;
-    L.text = windows_file("kn-versions.txt"); // Krunker Box Office's changelog
-    if (!L.text) L.text = windows_file("versions.txt");
+    L.text = windows_file("versions.txt"); // Krunker's official changelog, as published
     if (!L.text) return;
     typedef struct { const char *title; size_t title_len; const char *start, *end; } Hdr;
     Hdr *hdrs = NULL;

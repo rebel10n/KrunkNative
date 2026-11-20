@@ -14,7 +14,7 @@
 #   finder's outdated check (doc/backend.md 8.12) sees the edges as current. The binaries report
 #   that commit (server_bin --version, KNINFO).
 # Prints GITHUB_OUTPUT lines:
-#   krunker_version  Krunker's version the players see: the newest "== UPDATE x ==" of ui/windows/kn-versions.txt
+#   krunker_version  Krunker's version the players see: the newest "== UPDATE x ==" of ui/windows/versions.txt (Krunker's official changelog)
 #                at that commit (v10_news_version, client/src/ui/v10_news.c); "unknown" when there is none
 #   describe     the commit's 12 hex digits (the kn-build key of that name; the binaries' describe): the name a build
 #                goes by, never a git describe or a version number (server-info, lobby meta, release notes)
@@ -48,7 +48,7 @@ fi
 describe="${commit:0:12}"
 # the player-visible version is Krunker's (the changelog's newest update), never describe
 krunker_version=unknown
-kn_versions="$(git show "$commit:ui/windows/kn-versions.txt" 2> /dev/null || true)"
+kn_versions="$(git show "$commit:ui/windows/versions.txt" 2> /dev/null || true)"
 while IFS= read -r line; do
     if [[ "$line" =~ ^[[:space:]]*==\ UPDATE\ ([0-9][0-9.]*)\ == ]]; then krunker_version="${BASH_REMATCH[1]}"; break; fi
 done <<< "$kn_versions"

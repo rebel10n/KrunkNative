@@ -254,9 +254,9 @@ grep -o -E "[\"'](\./|/)?(img|textures|videos|sound|models|scares|promo|css|font
 
 - **What's New** = windows[34] (`showWindow(35)`: the nav item `#updateAd`, the footer's Changelog
   link) with v10's `gen` (line-height 1.8 notes, `img/backgrounds/whatsnew.png` header),
-  `toggleLog`, `switchTab`, `viewAll`, over Krunker Box Office's own changelog
-  `ui/windows/kn-versions.txt` (v10's `docs/versions.txt` format; `versions.txt`, Krunker's,
-  only when a page tree has no `kn-versions.txt`). The newest update is the version
+  `toggleLog`, `switchTab`, `viewAll`, over Krunker's official changelog
+  `ui/windows/versions.txt` (krunker.io/docs/versions.txt as published; Box Office keeps no changelog
+  of its own, user rule 2026-11-19). The newest update is the version
   (`config.gameVersion`), and `lastViewedUpdate` stores it alone (v10: `<version>_<build>`, which
   would bring What's New back with every deploy). `#updateAd` shows for a signed-in player who has
   not viewed it, with `" - v<version>"` (`_52131`, added to the static page by C); the window's

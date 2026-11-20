@@ -26,7 +26,7 @@
 #   --launcher <file>  the launcher (default <bin dir>/BoxOffice or BoxOffice.exe)
 #   --assets <dir>     full package: the whole game content as assets/ too (the name gets -full)
 #   --channel <name>   kn-install.json channel (default latest; client-v* tags: the tag)
-# Env: KN_COMMIT KN_COMMIT_TIME KN_BUILD_TIME KN_PROTOCOL (tools/release/version-meta.sh); the version is Krunker's (ui/windows/kn-versions.txt)
+# Env: KN_COMMIT KN_COMMIT_TIME KN_BUILD_TIME KN_PROTOCOL (tools/release/version-meta.sh); the version is Krunker's (ui/windows/versions.txt, the official changelog)
 set -euo pipefail
 
 usage() { sed -n '2,36p' "$0" >&2; exit 2; }
@@ -82,7 +82,7 @@ fi
 krunker_version=unknown
 while IFS= read -r line; do
     if [[ "$line" =~ ^[[:space:]]*==\ UPDATE\ ([0-9][0-9.]*)\ == ]]; then krunker_version="${BASH_REMATCH[1]}"; break; fi
-done < "$repo/ui/windows/kn-versions.txt"
+done < "$repo/ui/windows/versions.txt"
 stage="$work/package"   # the archive's top level
 rt="$stage/runtime"     # everything but the launcher
 mkdir -p "$rt"

@@ -288,9 +288,9 @@ def brain_case(port, version):
 
 
 def changelog_tab():
-    """What View All Updates shows (v10_news.c): the updates of kn-versions.txt grouped by their version's first
+    """What View All Updates shows (v10_news.c): the updates of versions.txt (Krunker's official changelog) grouped by their version's first
     number, the newest major's tab open. Returns (updates in that tab, number of tabs)."""
-    with open(os.path.join(ROOT, "ui", "windows", "kn-versions.txt")) as f:
+    with open(os.path.join(ROOT, "ui", "windows", "versions.txt")) as f:
         titles = re.findall(r"^\s*== ((?:UPDATE|UPADTE|INITIAL|TRICKSHOT)\b.*?) ==", f.read(), re.M)
     majors = [int(m.group(0)) for m in (re.search(r"\d+", t) for t in titles) if m]
     return (majors.count(max(majors)), len(set(majors))) if majors else (0, 0)
@@ -326,7 +326,7 @@ def client_case(port, user, token, version, news_count):
           and "handler showWindow(35)" in text, str(nodes(text, "whatsnew")))
     check("2: the brain's news as cards", nodes(text, "news") == news_count, "%d of %d" % (nodes(text, "news"), news_count))
     shown, tabs = changelog_tab()
-    check("2: View All Updates: the newest major's updates, one tab per major (kn-versions.txt: %d, %d)" % (shown, tabs),
+    check("2: View All Updates: the newest major's updates, one tab per major (versions.txt: %d, %d)" % (shown, tabs),
           nodes(text, "all") == shown and nodes(text, "tabs") == tabs, "%d %d" % (nodes(text, "all"), nodes(text, "tabs")))
     check("2: ... and the What's New item is gone", vis(text, "adgone").get("updateAd") == "0", str(vis(text, "adgone")))
     seen = read_log(os.path.join(cfg, "krunknative", "lastViewedUpdate.json"))
@@ -339,7 +339,7 @@ def main():
     if not os.access(f"{BUILD}/client_bin", os.X_OK):
         print("v10_news_e2e: no client_bin in %s: skipped" % BUILD)
         return 77
-    with open(os.path.join(ROOT, "ui", "windows", "kn-versions.txt")) as f:
+    with open(os.path.join(ROOT, "ui", "windows", "versions.txt")) as f:
         version = re.search(r"== (?:UPDATE|INITIAL RELEASE V?)\s*([\d.]+)", f.read()).group(1)
     scratch = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
     r = subprocess.run(scratch + ["create", DRIVER, NAME], capture_output=True)

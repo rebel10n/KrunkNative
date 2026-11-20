@@ -21,6 +21,7 @@
 #include <html_dom.h>
 #include <i18n.h>
 #include <junk_shop_ui.h>
+#include <ks_game.h> // ks_wall_ms
 #include <backend_ui.h> // store_skin_preview
 #include "../viewer/viewer_store.h" // the popup's skins and their rarity colours
 #include <ui_logic.h>
@@ -48,11 +49,8 @@ static struct {
     int ltm_timer;
 } B;
 
-double bundle_offers_now_ms(void) {
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return (double) ts.tv_sec * 1000.0 + (double) ts.tv_nsec / 1e6;
-}
+// epoch ms; ks_wall_ms has the Windows path (MinGW's C runtime has no timespec_get / TIME_UTC)
+double bundle_offers_now_ms(void) { return ks_wall_ms(); }
 
 // ISO-8601 (UTC "Z" or "+00:00", optional fraction) -> epoch ms; 0 when it does not parse
 double bundle_offers_iso_ms(const char *s) {

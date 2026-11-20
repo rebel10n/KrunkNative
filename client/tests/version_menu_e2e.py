@@ -7,7 +7,7 @@ Headless (client_bin --render-scenario, no window; the serialized DOM through KR
   1. `client_bin --version` names the build by its commit (or "no commit") and never by a describe
      string (v1.0.0-935-g400f0079) or a v1.x version: the build is identified by its commit only;
   2. the menu's What's New tile (#updateAd, a signed-in account not yet viewing it) shows exactly one
-     version, the newest update of ui/windows/kn-versions.txt, and that is Krunker's line (the same major
+     version, the newest update of ui/windows/versions.txt (Krunker's official changelog), and that is Krunker's line (the same major
      as the newest update of Krunker's own changelog, ui/windows/versions.txt): not v1.x;
   3. the Outdated / Update available box (#knUpdateAd, state.update) names this client by its commit
      7 digits ("This client: 400f007") and the newer build by the label the scenario gives (a commit),
@@ -135,7 +135,7 @@ def main():
     if not os.path.exists(CLIENT):
         print(f"client_bin not found: {CLIENT}")
         return 1
-    kn_versions = changelog_versions(os.path.join(WINDOWS, "kn-versions.txt"))
+    kn_versions = changelog_versions(os.path.join(WINDOWS, "versions.txt"))
     krunker = changelog_versions(os.path.join(WINDOWS, "versions.txt"))
     if not kn_versions or not krunker:
         print("the changelogs have no UPDATE entries")
@@ -170,7 +170,7 @@ def main():
           f"expected v{newest}, tile says {ad!r}")
     check("the tile names one version (no other version or build string)", ad is not None and VERSION_TOKEN.findall(ad) == [f"v{newest}"], repr(ad))
     check("that version is Krunker's line (the major of Krunker's own changelog)",
-          newest.split(".")[0] == krunker[0].split(".")[0], f"kn-versions {newest}, Krunker {krunker[0]}")
+          newest.split(".")[0] == krunker[0].split(".")[0], f"shown {newest}, Krunker {krunker[0]}")
 
     box = grab.found.get("knUpdateAd")
     check("the Outdated box is shown", box is not None)
