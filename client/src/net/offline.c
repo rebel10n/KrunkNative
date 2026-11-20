@@ -318,7 +318,10 @@ int local_game_host_custom(Client *client, const cJSON *map) {
         client->net_should_quit = 1;
         offline_begin(client, test_slot);
     }
-    ok = client->offline && game->ready && game->current_map_index == test_slot;
+    // hosted: the map is in play, or its INIT is held until the next presented frame (a map not built this
+    // session, main.c client_init_begin, f08545e2): offline_begin stops the sandbox if that load later fails
+    ok = client->offline && ((game->ready && game->current_map_index == test_slot) ||
+                             (client_init_pending(client) && client->net_map_init.map_index == test_slot));
 
     // both games left the old copy (the sandbox's map changed with the host, ours with its INIT)
     if (old && (!game->map || game->map->raw_data != old)) cJSON_Delete(old);

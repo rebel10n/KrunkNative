@@ -256,6 +256,7 @@ def main():
         check("playMap BAD never starts a game", "playing published map %s" % bad not in text)
         check("playMap GOOD: the offline game plays it", "[mm] playing published map %s offline" % good in text,
               "\n".join(l for l in text.splitlines() if "[mm]" in l or "[community]" in l)[-800:])
+        check("Play GOOD raises no \"Failed to load the game.\" alert", "alert: Failed to load the game." not in text)
         m = re.search(r"\[input_script\] state t=\d+ (.*)", text)
         state = m.group(1) if m else ""
         check("in the game on it after Play (the menu closed, spawned)", "menu=0" in state and "pos=0.000,0.000,0.000" not in state, state)
