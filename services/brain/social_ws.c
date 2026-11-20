@@ -934,6 +934,7 @@ static const LabelClass k_label_class[] = {
     {"raml", RC_WRITE, ANS_REPLY},
     {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
     {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */
+    {"dsrvl", RC_READ, ANS_REPLY}, {"rdsrv", RC_WRITE, ANS_REPLY}, /* v10.0.7 Rent Dedicated Server (rentals.c): answered "dsrvl" */
     /* fire-and-forget: no reply, one notice per refusal window */
     {"sfkr", RC_NOTICE, ANS_NOTICE}, {"lfkr", RC_NOTICE, ANS_NOTICE}, {"fkrf", RC_NOTICE, ANS_NOTICE},
     {"unbx", RC_NOTICE, ANS_NOTICE}, {"vcln", RC_NOTICE, ANS_NOTICE},
