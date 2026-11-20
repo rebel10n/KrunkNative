@@ -549,3 +549,71 @@ jobs:
 
       - name: shellcheck (CI and deploy scripts)
         run: shellcheck -S warning tools/release/*.sh tools/angle/*.sh deploy/ansible/build.sh
+
+  # The backend's tests on every store driver: `ctest -L knsvc` (services/: knsvc, the brain) and the `db`
+  # e2e suites (server_bin + kn_brain: dedicated servers, v10 ranked, federation, the schema parity of
+  # PostgreSQL / SQLite / MySQL). `make check` builds services/ but never ran these: without a database
+  # they skip (77). Throwaway PostgreSQL 18 and MariaDB 11.8 containers (credentials are CI-only, the
+  # containers die with the job); the Redis tests start their own redis-server (tests/with_redis.py).
+  services:
+    name: Backend tests (PostgreSQL, MariaDB, SQLite, Redis)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: krunknative
+          POSTGRES_PASSWORD: kn-ci-only
+          POSTGRES_DB: krunknative
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U krunknative" --health-interval 5s --health-timeout 5s --health-retries 20
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s
+          --health-retries 30
+    env:
+      PGPASSWORD: kn-ci-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev \
+            libxcb-present-dev libegl-dev \
+            postgresql-client mariadb-client redis-server
+
+      # config/config.json (gitignored): the example with the service container's database
+      - name: Test configuration
+        run: |
+          python3 -I - <<'PY'
+          import json
+          c = json.load(open("config/config.example.json"))
+          c["database"].update(driver="postgres", host="127.0.0.1", port=5432, name="krunknative",
+                               user="krunknative", password="kn-ci-only")
+          json.dump(c, open("config/config.json", "w"), indent=2)
+          PY
+          # the per-suite databases of the knsvc core and account tests (services/common/tests, brain tests)
+          for d in krunknative_svccore krunknative_svcacc; do
+            psql -h 127.0.0.1 -U krunknative -d krunknative -qAt -c "CREATE DATABASE $d"
+          done
+
+      - name: Build services and server_bin
+        run: |
+          make configure
+          cmake --build cmake-build-debug --target services_all server_bin
+
+      - name: Backend tests
+        working-directory: cmake-build-debug
+        run: ctest -L 'knsvc|db' --timeout 900 --output-on-failure -j 4

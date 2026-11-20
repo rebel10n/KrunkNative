@@ -17,6 +17,27 @@ static const kn_sql_macro *find_macro(const kn_sql_macro *m, const char *name, s
     return NULL;
 }
 
+/* 1 when the text written so far ends with the keyword LIMIT or OFFSET (and spaces) */
+static int after_limit_word(const kn_buf *out) {
+    size_t p = out->len;
+    while (p && isspace((unsigned char)out->data[p - 1])) p--;
+    size_t w = p;
+    while (w && isalpha((unsigned char)out->data[w - 1])) w--;
+    if (w && (isalnum((unsigned char)out->data[w - 1]) || out->data[w - 1] == '_')) return 0;
+    return (p - w == 5 && !strncasecmp(out->data + w, "LIMIT", 5)) ||
+           (p - w == 6 && !strncasecmp(out->data + w, "OFFSET", 6));
+}
+
+/* A macro right after LIMIT / OFFSET: the driver's "<name>_limit" variant when it has one (MySQL's LIMIT takes a
+ * literal or a placeholder only, never CAST(...): its int_limit is the bare argument, which the placeholder
+ * rewrite then inlines as a bare integer), else the macro itself. */
+static const kn_sql_macro *limit_variant(const kn_sql_macro *macros, const kn_sql_macro *m, const kn_buf *out) {
+    char name[64];
+    if (!after_limit_word(out) || snprintf(name, sizeof name, "%s_limit", m->name) >= (int) sizeof name) return m;
+    const kn_sql_macro *v = find_macro(macros, name, strlen(name));
+    return v ? v : m;
+}
+
 /* Length of a quoted literal starting at s[0] (' or "), doubled quotes escaped. */
 static size_t quoted_len(const char *s) {
     char q = s[0];
@@ -98,6 +119,7 @@ char *kn_sql_expand(const char *text, const kn_sql_macro *macros) {
             while (isalnum((unsigned char)text[i + n]) || text[i + n] == '_') n++;
             const kn_sql_macro *m = (text[i + n] == '}' || text[i + n] == ':') ? find_macro(macros, text + i + 1, n - 1) : NULL;
             if (m) {
+                if (out.data) m = limit_variant(macros, m, &out);
                 char *args[MAX_ARGS] = {0};
                 int nargs = 0;
                 size_t end = i + n;

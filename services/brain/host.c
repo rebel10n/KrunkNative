@@ -27,6 +27,7 @@ typedef struct HostCtx {
 } HostCtx;
 
 static void host_fail(HostCtx *h, const char *err) {
+    registry_host_release(registry_node(h->b->registry, h->node_id)); /* the slot is free again */
     BrainHostCb cb = h->cb;
     void *ud = h->ud;
     free(h);
@@ -67,6 +68,8 @@ static void on_host_reply(void *ud, const cJSON *reply, const char *err) {
         if (n->web_url[0]) cJSON_AddStringToObject(seek, "webUrl", n->web_url);
         else cJSON_AddNullToObject(seek, "webUrl");
     }
+    /* held until the node's lobby list shows the game (a remote node's: the other brain's next persist) */
+    registry_host_hosted(n, game_id, kn_wall_ms() + MM_HOST_HOLD_MS);
     KN_INFO("host", "custom game %s hosted on %s (account %lld)", game_id, n->node_id, (long long) h->account_id);
     BrainHostCb cb = h->cb;
     void *cud = h->ud;
@@ -108,6 +111,8 @@ int brain_host_game_ex(Brain *b, const char *region, const cJSON *config, int64_
     h->cb = cb;
     h->ud = ud;
     int timeout_ms = mm_settings()->host_timeout_s * 1000;
+    /* taken while the request is in flight: a concurrent host-game picks another node (registry.h) */
+    registry_host_hold(n, kn_wall_ms() + timeout_ms + 1000);
     KN_INFO("host", "hosting a custom game on node %s (brain %s, region %s)", n->node_id, n->brain_id, n->region);
     if (n->local) {
         cJSON *frame = cJSON_CreateObject();

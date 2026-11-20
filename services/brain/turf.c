@@ -392,7 +392,7 @@ static void h_loot_get(kn_http_req *req, void *ud) {
                                       " coalesce(l.min_games_required, 1) AS min_games_required__i, coalesce(l.updated_by, '') AS updated_by,"
                                       " coalesce(l.updated_by, '') AS updated_by_name, {epoch_ms:l.updated_at} AS updated_ms__i"
                                       " FROM clans c LEFT JOIN turf_loot_config l ON l.clan_id = c.clan_id"
-                                      " WHERE c.clan_id = (SELECT clan_id FROM clans WHERE CAST(clan_id AS TEXT) = $1 OR lower(clan_name) = lower($1) LIMIT 1)"};
+                                      " WHERE c.clan_id = (SELECT clan_id FROM clans WHERE {text:clan_id} = $1 OR lower(clan_name) = lower($1) LIMIT 1)"};
     kn_db_query_sql(T.b->db, &sql, KN_DB_ARGS(nz(kn_http_param(req, "id"))), on_loot_get, v);
 }
 

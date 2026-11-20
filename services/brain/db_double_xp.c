@@ -36,7 +36,11 @@ void db_dxp_record_match(Dbx *x, const int64_t id, const int offered, const int6
              SQL(.any = "INSERT INTO double_xp_offers (account_id, offered, games, xp)"
                         " VALUES ($1, {int:$2}, (SELECT player_games_played FROM players WHERE player_id = $1), {int:$3})"
                         " ON CONFLICT (account_id) DO UPDATE SET offered = excluded.offered, games = excluded.games,"
-                        " xp = excluded.xp"),
+                        " xp = excluded.xp",
+                 /* MySQL has no ON CONFLICT: the primary key's duplicate updates the row */
+                 .mysql = "INSERT INTO double_xp_offers (account_id, offered, games, xp)"
+                          " VALUES ($1, {int:$2}, (SELECT player_games_played FROM players WHERE player_id = $1), {int:$3})"
+                          " ON DUPLICATE KEY UPDATE offered = VALUES(offered), games = VALUES(games), xp = VALUES(xp)"),
              KN_DB_ARGS(I64S(id), I64S(offered ? 1 : 0), I64S(dxp_match_xp(xp))));
 }
 

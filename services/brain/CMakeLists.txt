@@ -332,6 +332,14 @@ add_test(NAME brain_federation
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_test.sh ${CMAKE_BINARY_DIR})
 set_tests_properties(brain_federation PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 
+# the three store drivers migrate to the same tables and columns (tests/schema_parity_test.py; the deliberate
+# differences are listed there with their reason; 77 with fewer than two drivers reachable)
+if (Python3_FOUND)
+    add_test(NAME brain_schema_parity
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/schema_parity_test.py ${CMAKE_BINARY_DIR})
+    set_tests_properties(brain_schema_parity PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+endif ()
+
 # coord-auth: central auth + finder + community coordinator + 2 dedicated servers + headless
 # clients in online and offline mode (needs server_bin and client_bin; skip 77 without a DB).
 if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
@@ -344,6 +352,16 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ks_storage_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_ks_storage_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # dedicated servers through the coordinator (doc/backend.md 8.7-8.10) and v10 ranked end to end (doc/v10/ranked-impl.md):
+        # server_bin + kn_brain on a scratch PostgreSQL database (server/tests/kn_testdb.py; 77 without one)
+        add_test(NAME server_dedicated_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/dedicated_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(server_dedicated_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        add_test(NAME server_ranked_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ranked_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(server_ranked_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # the captcha on Box Office servers (doc/v10/captcha.md): seek-game's CaptchaRequired and the in-game "cpt"
         # with captcha.enforce on, through a brain-linked server_bin and a headless client_bin (77 without client_bin)
         add_test(NAME brain_captcha_game_e2e
@@ -673,7 +691,7 @@ if (Python3_FOUND)
                 COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/double_xp_test.py
                         $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
             set_tests_properties(brain_double_xp_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-                ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;economy;${drv}")
+                ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;economy;${drv}")
         endif ()
     endforeach ()
     # the same through the v10 page: headless client_bin (client/src/ui/v10_studios.c)
@@ -775,12 +793,12 @@ foreach (drv IN ITEMS sqlite mysql)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/junk_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_junk_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;junk;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;junk;${drv}")
         add_test(NAME brain_lottery_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_lottery_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;lottery;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;lottery;${drv}")
         add_test(NAME brain_live_trade_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_trade_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
@@ -788,27 +806,27 @@ foreach (drv IN ITEMS sqlite mysql)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/node_events_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_node_events_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;${drv}")
         set_tests_properties(brain_live_trade_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;trade;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;trade;${drv}")
         add_test(NAME brain_shop_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/shop_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_shop_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;shop;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;shop;${drv}")
         add_test(NAME brain_strike_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_kpd_${drv} brain_progress_${drv} brain_season_${drv}
             brain_account_security_${drv} brain_economy_${drv} brain_strike_economy_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;${drv}")
         set_tests_properties(brain_ranked_${drv} PROPERTIES TIMEOUT 420)
     endif ()
     add_test(NAME brain_federation_${drv}
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_test.sh ${CMAKE_BINARY_DIR})
     set_tests_properties(brain_federation_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-        ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
+        ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;${drv}")
 endforeach ()
 
 # redis-tier: the hot tier (doc/backend.md 3.11). The suites again with every brain on a
@@ -831,17 +849,17 @@ if (Python3_FOUND AND TARGET knsvc_redis)
                 COMMAND ${_kn_wr} ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/${suite}_test.py
                         $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
             set_tests_properties(brain_${suite}${_sfx} PROPERTIES TIMEOUT 450 SKIP_RETURN_CODE 77
-                ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;redis;${drv}")
+                ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;redis;${drv}")
         endforeach ()
         add_test(NAME brain_federation${_sfx}
             COMMAND ${_kn_wr} ${CMAKE_CURRENT_SOURCE_DIR}/tests/federation_test.sh ${CMAKE_BINARY_DIR})
         set_tests_properties(brain_federation${_sfx} PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;redis;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;redis;${drv}")
         add_test(NAME brain_redis_failover_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/redis_failover_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_redis_failover_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
-            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;redis;${drv}")
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;redis;${drv}")
     endforeach ()
 endif ()
 

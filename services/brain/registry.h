@@ -76,6 +76,12 @@ typedef struct MmNode {
     int takeover;                    /* next persist claims the row (after hello) */
     MmLobby *lobbies;
     size_t lobby_count, lobby_cap;
+    /* A Host Game this brain sent the node: in flight (host_hold_game "") or answered with a game id the
+     * node's lobby list does not show yet. Until host_hold_until_ms it takes one lobby slot, so a second
+     * host-game does not pick the same idle node (a remote node's lobbies arrive only with the other
+     * brain's next persist). registry_host_hold / _hosted / _release. */
+    int64_t host_hold_until_ms;
+    char host_hold_game[MM_GAME_ID_MAX];
 } MmNode;
 
 /* A join ticket's seat. It counts towards its lobby until the node's own player count
@@ -150,6 +156,13 @@ MmLobby *registry_lobby_find(Registry *r, const char *id, MmNode **node_out);
 void registry_remote_begin(Registry *r);      /* mark remote nodes stale */
 MmNode *registry_remote_node(Registry *r, const char *node_id);  /* get-or-create, unmarks */
 void registry_remote_end(Registry *r);        /* remove still-marked remote nodes */
+
+/* ---- custom-game hosting in flight (MmNode.host_hold_*) */
+/* A host request answered with a game id that the lobby list may not show yet: held this long at most. */
+#define MM_HOST_HOLD_MS 15000
+void registry_host_hold(MmNode *n, int64_t until_ms);                         /* request sent */
+void registry_host_hosted(MmNode *n, const char *game_id, int64_t until_ms);  /* node answered ok */
+void registry_host_release(MmNode *n);                                        /* request failed */
 
 /* ---- reservations (seats handed out by this brain) */
 void registry_reserve(Registry *r, const char *jti, const char *game_id, int64_t expires_ms);

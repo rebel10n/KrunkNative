@@ -139,7 +139,8 @@ static int turf_lock(Dbx *x) {
     if (dbx_is_pg(x))
         return dbx_int(x, SQL(.pg = "SELECT CASE WHEN pg_try_advisory_xact_lock(kn_rq_lock() + 16) THEN 1 ELSE 0 END"), 0, NULL, 0) == 1;
     if (dbx_is_mysql(x)) {
-        kn_db_result *r = kn_dbconn_exec_sql(x->c, SQL(.any = "SELECT id FROM mm_ranked_lock WHERE id = 1 FOR UPDATE NOWAIT"), 0, NULL);
+        /* row 17 = postgres's kn_rq_lock() + 16 (0382_mysql_lock_rows.sql), not the ranked matcher's row 1 */
+        kn_db_result *r = kn_dbconn_exec_sql(x->c, SQL(.any = "SELECT id FROM mm_ranked_lock WHERE id = 17 FOR UPDATE NOWAIT"), 0, NULL);
         const int got = kn_db_ok(r) && kn_db_rows(r) > 0;
         kn_db_result_free(r);
         return got;

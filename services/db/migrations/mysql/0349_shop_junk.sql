@@ -5,7 +5,7 @@
 -- of writing, so the table starts empty: rows are published by staff, never invented by the brain.
 CREATE TABLE shop_products (
     id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-    display_tag        TEXT NOT NULL DEFAULT 'limited',
+    display_tag        VARCHAR(32) NOT NULL DEFAULT 'limited',  -- indexed: a key needs a bounded length on MySQL
     name               TEXT NOT NULL,
     description        TEXT NOT NULL DEFAULT '',
     image_url          TEXT NOT NULL DEFAULT '',

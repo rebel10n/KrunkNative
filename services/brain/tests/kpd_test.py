@@ -152,6 +152,16 @@ def sql(dbcfg, text):
         if r.returncode:
             return None
         return [l.split("|") for l in r.stdout.splitlines() if l and l != "SET" and not l.startswith(("UPDATE", "INSERT"))]
+    if DRIVER == "mysql":
+        tool = shutil.which("mariadb") or shutil.which("mysql")
+        if not tool:
+            return None
+        r = subprocess.run([tool, "--no-defaults", "--protocol=TCP", "-h", dbcfg["host"], "-P", str(dbcfg["port"]), "-u", dbcfg["user"],
+                            "-D", dbcfg["name"], "-N", "-B", "-e", text],
+                           env=dict(os.environ, MYSQL_PWD=dbcfg.get("password", "")), capture_output=True, text=True, timeout=30)
+        if r.returncode:
+            return None
+        return [["" if v == "NULL" else v for v in l.split("\t")] for l in r.stdout.splitlines() if l]
     return None
 
 

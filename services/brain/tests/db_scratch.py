@@ -31,9 +31,9 @@ def load_db(root):
         return {}
 
 
-def run(cmd, env):
+def run(cmd, env, timeout=60, cwd=None):
     try:
-        return subprocess.run(cmd, env=env, capture_output=True, timeout=60)
+        return subprocess.run(cmd, env=env, capture_output=True, timeout=timeout, cwd=cwd)
     except (OSError, subprocess.SubprocessError) as e:
         return subprocess.CompletedProcess(cmd, 127, b"", str(e).encode())
 
@@ -82,7 +82,19 @@ def mysql(root, action, name):
         print("MySQL/MariaDB unavailable at %s:%s: %s" % (host, port, r.stderr.decode(errors="replace").strip()[:200]),
               file=sys.stderr)
         return 77, None
-    return 0, {"driver": "mysql", "host": host, "port": int(port), "user": user, "password": password, "name": name}
+    cfg = {"driver": "mysql", "host": host, "port": int(port), "user": user, "password": password, "name": name}
+    # MySQL commits every DDL statement and InnoDB creates a file per table, so the full chain takes
+    # 40 s+ (minutes under ctest -j): run it here, ahead of the brain's own --migrate (then a no-op),
+    # so the tests' "kn_brain did not start listening" deadline only covers the brain's startup.
+    migrate = os.environ.get("KN_TEST_MIGRATE")
+    if action == "create" and migrate and os.access(migrate, os.X_OK):
+        env = dict(os.environ, **{"KN_DATABASE_%s" % k.upper(): str(v) for k, v in cfg.items()})
+        r = run([migrate], env, timeout=900, cwd=root)
+        if r.returncode:
+            print("kn_migrate failed on %s: %s" % (name, (r.stdout + r.stderr).decode(errors="replace").strip()[-400:]),
+                  file=sys.stderr)
+            return 1, None
+    return 0, cfg
 
 
 def main():

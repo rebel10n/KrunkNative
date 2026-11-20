@@ -414,6 +414,33 @@ int main(void) {
     CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000, NULL) == NULL); /* seat in flight */
     CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 3500, NULL) == b);
 
+    /* a Host Game in flight or answered but not listed yet takes the node's slot (MmNode.host_hold_*): two
+     * near-simultaneous host-games, or one before another brain persists the new lobby, never get the same
+     * idle node (federation_test "second host-game ... -> 503") */
+    registry_host_hold(b, 9000);
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 3500, NULL) == NULL); /* in flight */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 9500, NULL) == b);    /* hold expired */
+    registry_host_hold(b, 9000);
+    registry_host_release(b); /* the host failed: free at once */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 3500, NULL) == b);
+    registry_host_hosted(b, "NY2:ccccc", 3500 + MM_HOST_HOLD_MS);
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 4000, NULL) == NULL); /* hosted, not listed yet */
+    registry_lobby_remove(r, b, "bbbbb");
+    add_lobby(r, b, "ccccc", 0, 8, 1, "1.0"); /* the node lists the hosted custom game: busy on its own */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 4000, NULL) == NULL);
+    registry_lobby_remove(r, b, "ccccc");
+    add_lobby(r, b, "bbbbb", 0, 8, 0, "1.0"); /* the custom game ended: the listed game cleared the hold */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 4000, NULL) == b);
+    {
+        /* a node with room for more lobbies keeps hosting while one host is pending */
+        const int max = b->max_lobbies;
+        b->max_lobbies = 3;
+        registry_host_hold(b, 9000);
+        CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 4000, NULL) == b);
+        registry_host_release(b);
+        b->max_lobbies = max;
+    }
+
     /* online_mode + password protected nodes (hello.onlineMode / hello.password) */
     {
         Registry *o = registry_new();

@@ -3,7 +3,7 @@
 
   python3 -I server/tests/dedicated_e2e.py BUILD_DIR      (run from the repository root)
 
-Creates its own PostgreSQL database (sudo -n -u postgres createdb), migrates it, starts one
+Creates its own PostgreSQL database (kn_testdb.py: as the config user, else sudo -u postgres; 77 = skip), migrates it, starts one
 coordinator (kn_brain) and two server_bin processes from generated server.cfg files, then:
   1. server-info query on both servers (name, map, players, community, tags)
   2. accounts: kn_register x2, give_skin (svc-accounts' kn_add_skin) to account A only
@@ -36,6 +36,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import kn_proto  # noqa: E402
+import kn_testdb  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 DB = os.environ.get("KN_TEST_DB", f"kn_ds_e2e_{os.getpid()}")
@@ -137,7 +138,9 @@ def main():
         json.dump({"database": cfgdb()}, f)
     created = False
     if not os.environ.get("KN_TEST_DB"):
-        subprocess.run(["sudo", "-n", "-u", "postgres", "createdb", "-O", cfgdb().get("user", "krunknative"), DB], check=True)
+        if not kn_testdb.create(cfgdb(), DB):  # as the config's user, else sudo -u postgres (kn_testdb.py)
+            print(f"PostgreSQL unavailable (cannot create {DB}): skipped")
+            sys.exit(77)
         created = True
     try:
         run()
@@ -151,7 +154,7 @@ def main():
             except subprocess.TimeoutExpired:
                 p.kill()
         if created and not os.environ.get("KN_TEST_KEEP"):
-            subprocess.run(["sudo", "-n", "-u", "postgres", "dropdb", "--if-exists", DB])
+            kn_testdb.drop(cfgdb(), DB)
         print(f"logs: {WORK}")
     ok = all(results) and results
     print(f"{'ALL PASSED' if ok else 'FAILED'} ({sum(results)}/{len(results)})")
@@ -209,7 +212,7 @@ def run():
         if payload is None:
             break
         sp = kn_proto.spawn_info(payload)
-        if sp and sp["is_you"]:
+        if sp and sp["is_you"] and sp["active"]:  # not the dead own SPAWN (active 0) sent with the HELLO (679bce7c8)
             break
     check("ticket join spawns as the account", bool(sp) and sp["name"] == "ds_alice", str(sp))
     check("owned hat kept", bool(sp) and sp["cosmetics"][2] == HAT_OWNED, str(sp and sp["cosmetics"]))
@@ -232,7 +235,7 @@ def run():
         if payload is None:
             break
         spb = kn_proto.spawn_info(payload)
-        if spb and spb["is_you"]:
+        if spb and spb["is_you"] and spb["active"]:  # not the dead own SPAWN sent with the HELLO
             break
     check("session join (no ticket) spawns as the account", bool(spb) and spb["name"] == "ds_bob", str(spb))
     check("Bob cannot wear Alice's hat", bool(spb) and spb["cosmetics"][2] == -1, str(spb and spb["cosmetics"]))
@@ -326,7 +329,7 @@ def read_spawn(conn):
         if payload is None:
             return sp
         sp = kn_proto.spawn_info(payload)
-        if sp and sp["is_you"]:
+        if sp and sp["is_you"] and sp["active"]:  # not the dead own SPAWN (active 0) sent with the HELLO (679bce7c8)
             return sp
 
 

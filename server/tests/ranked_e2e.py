@@ -4,7 +4,7 @@
 
   python3 -I server/tests/ranked_e2e.py BUILD_DIR      (run from the repository root)
 
-Creates its own PostgreSQL database (sudo -n -u postgres createdb; KN_TEST_DB to reuse one),
+Creates its own PostgreSQL database (kn_testdb.py: as the config user, else sudo -u postgres; 77 = skip; KN_TEST_DB to reuse one),
 migrates it, starts one coordinator (kn_brain, ranked min level 0) and one server_bin (ports from
 kn_proto.free_ports()), registers 8 accounts, then:
   0. first connect (v10 needAllTimer, 60 s): seven of eight join, the cancel reaches every connection with
@@ -47,6 +47,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import kn_proto  # noqa: E402
+import kn_testdb  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 DB = os.environ.get("KN_TEST_DB", f"kn_rk_e2e_{os.getpid()}")
@@ -231,7 +232,9 @@ def spawned(conn, me_uid):
     for t, p in conn.packets:
         if t == kn_proto.SPAWN:
             info = kn_proto.spawn_info(p)
-            if info and info["uid"] == me_uid:
+            # an active SPAWN only: the joiner also gets its own dead SPAWN (active 0, team 0) with its HELLO
+            # (679bce7c8), which is not a spawn
+            if info and info["uid"] == me_uid and info["active"]:
                 return struct.unpack("<iBBii", p[:14])[4]  # NetSpawnPacket.team
     return None
 
@@ -315,7 +318,9 @@ def main():
         json.dump({"database": cfgdb()}, f)
     created = False
     if not os.environ.get("KN_TEST_DB"):
-        subprocess.run(["sudo", "-n", "-u", "postgres", "createdb", "-O", cfgdb().get("user", "krunknative"), DB], check=True)
+        if not kn_testdb.create(cfgdb(), DB):  # as the config's user, else sudo -u postgres (kn_testdb.py)
+            print(f"PostgreSQL unavailable (cannot create {DB}): skipped")
+            sys.exit(77)
         created = True
     try:
         run()
@@ -329,7 +334,7 @@ def main():
             except subprocess.TimeoutExpired:
                 p.kill()
         if created and not os.environ.get("KN_TEST_KEEP"):
-            subprocess.run(["sudo", "-n", "-u", "postgres", "dropdb", "--if-exists", DB])
+            kn_testdb.drop(cfgdb(), DB)
     ok = all(results) and results
     if ok and not os.environ.get("KN_TEST_KEEP"):
         shutil.rmtree(WORK, ignore_errors=True)
@@ -722,7 +727,10 @@ def run():
           and f[1].get("type") == "ranked:queued"]
     check("the social socket with no game logs in", bool(logged_in), str(frames[:2])[:200])
     check("a social socket with no game gets '<name> queued for ranked' (ranked:queued, #5ce05a)",
-          bool(eb) and eb[0].get("text") == f"{SOCIAL_NAME} queued for ranked" and eb[0].get("color") == "#5ce05a",
+          # since a7fb42b7 the event carries no composed line: the name and a template ('$' = the name), as the game
+          # nodes' ranked notice (services/brain/ranked_notice.c)
+          bool(eb) and eb[0].get("name") == SOCIAL_NAME and eb[0].get("template") == "$ queued for ranked"
+          and "text" not in eb[0] and eb[0].get("color") == "#5ce05a",
           str(eb[:1])[:200] if eb else str([f[:2] if isinstance(f, list) else f for f in frames])[:300])
 
 

@@ -200,7 +200,11 @@ static int rk_lock(Dbx *x, const int which) {
         return dbx_int(x, SQL(.pg = "SELECT CASE WHEN pg_try_advisory_xact_lock(kn_rq_lock() + $1::bigint) THEN 1 ELSE 0 END"),
                        KN_DB_ARGS(I64S(which + 1)), 0) == 1;
     if (dbx_is_mysql(x)) {
-        kn_db_result *r = kn_dbconn_exec_sql(x->c, SQL(.any = "SELECT id FROM mm_ranked_lock WHERE id = 1 FOR UPDATE NOWAIT"), 0, NULL);
+        /* one row per postgres key (id = the kn_rq_lock() offset + 1; 0382_mysql_lock_rows.sql): the matcher and the
+         * season close do not hold each other off, as their two advisory keys do not */
+        kn_db_result *r = kn_dbconn_exec_sql(x->c, which ? SQL(.any = "SELECT id FROM mm_ranked_lock WHERE id = 3 FOR UPDATE NOWAIT")
+                                                         : SQL(.any = "SELECT id FROM mm_ranked_lock WHERE id = 2 FOR UPDATE NOWAIT"),
+                                             0, NULL);
         const int got = kn_db_ok(r) && kn_db_rows(r) > 0;
         if (!kn_db_ok(r) && kn_db_errclass_of(r) != KN_DB_E_RETRY && !x->err) x->err = r;
         else kn_db_result_free(r);

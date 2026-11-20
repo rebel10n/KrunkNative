@@ -15,7 +15,7 @@
 -- empty and the grid shows what v10 shows without a bundle: nothing. Rows are published by staff.
 CREATE TABLE shop_official_products (
     id                   BIGINT PRIMARY KEY,                 -- v10's product id, verbatim
-    display_tag          TEXT NOT NULL DEFAULT 'limited',
+    display_tag          VARCHAR(32) NOT NULL DEFAULT 'limited',  -- indexed: a key needs a bounded length on MySQL
     node_id              BIGINT NOT NULL,                    -- the display node (children[].id)
     node_order           BIGINT NOT NULL,                    -- children[].order
     node_type            TEXT NOT NULL DEFAULT 'product' CHECK (node_type IN ('product', 'dynamic')),

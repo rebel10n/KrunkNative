@@ -239,7 +239,13 @@ fail:
 static int c_broken(void *conn) { return ((my *)conn)->broken; }
 
 static int c_lock(void *conn, const char *name, int on) {
-    kn_db_result *r = c_exec(conn, on ? "SELECT GET_LOCK($1, 120)" : "SELECT RELEASE_LOCK($1)", KN_DB_ARGS(name));
+    /* MySQL user locks are server-wide (a PostgreSQL advisory lock is per database): scope the
+     * name to this database, or migrations of unrelated databases on one server queue behind
+     * each other until GET_LOCK times out. Lock names are at most 64 characters. */
+    kn_db_result *r = c_exec(conn,
+                             on ? "SELECT GET_LOCK(LEFT(CONCAT(DATABASE(), '/', $1), 64), 120)"
+                                : "SELECT RELEASE_LOCK(LEFT(CONCAT(DATABASE(), '/', $1), 64))",
+                             KN_DB_ARGS(name));
     int ok = kn_db_ok(r) && (!on || kn_db_get_int64(r, 0, 0, 0) == 1);
     kn_db_result_free(r);
     return ok ? 0 : -1;
@@ -257,6 +263,7 @@ static const kn_sql_macro MY_MACROS[] = {
     {"epoch_ms", "CAST(ROUND(UNIX_TIMESTAMP(%1) * 1000) AS SIGNED)"},
     {"from_ms", "FROM_UNIXTIME((%1) / 1000)"},
     {"int", "CAST(%1 AS SIGNED)"},
+    {"int_limit", "%1"}, /* LIMIT / OFFSET {int:$n}: MySQL's LIMIT takes no expression (store_sql.c limit_variant) */
     {"float", "CAST(%1 AS DOUBLE)"},
     {"text", "CAST(%1 AS CHAR)"},
     {"bool", "(LOWER(CAST(%1 AS CHAR)) IN ('1', 't', 'true', 'y', 'yes', 'on'))"},

@@ -213,6 +213,17 @@ static const kn_sql TYPED = {
     .any = "SELECT {int:$1} + 2 AS n__i, {true} AS b__b, '{\"a\":[1,2]}' AS o__j, {text:$2} AS t__t, {html:$3} AS h,"
            " {hash:'abc'} AS hash, {epoch_ms:{now}} - {epoch_ms:{ago:60}} AS age_ms, {epoch_ms:{now}} AS now_ms"};
 
+/* LIMIT / OFFSET from parameters through {int:}: MySQL's LIMIT takes no CAST(...) (store_sql.c limit_variant) */
+static const kn_sql PAGED = {.any = "SELECT name FROM accounts ORDER BY id LIMIT {int:$1} OFFSET {int:$2}"};
+
+static void on_paged(kn_db_result *r, void *ud) {
+    (void) ud;
+    CHECK(kn_db_ok(r));
+    if (!kn_db_ok(r)) fprintf(stderr, "paged select: %s\n", kn_db_error(r));
+    CHECK(kn_db_ok(r) && kn_db_rows(r) == 1);
+    pending--;
+}
+
 static void test_basic(kn_db *db) {
     kn_db_query_sql(db, &INS, KN_DB_ARGS("alice", "150", "1", "hi", "{\"kills\":3}", "0.5"), on_insert, NULL);
     pending = 1;
@@ -224,7 +235,8 @@ static void test_basic(kn_db *db) {
     kn_db_query_sql(db, &INS_NAME, KN_DB_ARGS("alice"), on_dup, NULL);
     kn_db_query(db, "SELEC 1", 0, NULL, on_syntax, NULL);
     kn_db_query_sql(db, &TYPED, KN_DB_ARGS("5", "5", "<b> & \"x\" 'y'"), on_typed, NULL);
-    pending = 4;
+    kn_db_query_sql(db, &PAGED, KN_DB_ARGS("1", "1"), on_paged, NULL);
+    pending = 5;
     run_until_done(5000);
 }
 

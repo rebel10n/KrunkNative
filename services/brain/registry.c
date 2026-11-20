@@ -264,6 +264,8 @@ int registry_lobby_upsert(Registry *r, MmNode *n, const cJSON *tuple) {
     }
     lobby_from_tuple(l, n, ns);
     if (n->local) settle_arrived(r, l->game_id);
+    /* the hosted game is listed: it counts as the node's lobby from now on, the hold ends (registry.h) */
+    if (n->host_hold_game[0] && !strcmp(n->host_hold_game, l->game_id)) registry_host_release(n);
     n->dirty = 1;
     return 0;
 }
@@ -807,6 +809,30 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     return any_room && (q->mode_count > 0 || q->map_count > 0) ? MM_PICK_NO_PREF_MATCH : MM_PICK_NONE;
 }
 
+void registry_host_hold(MmNode *n, int64_t until_ms) {
+    if (!n) return;
+    n->host_hold_until_ms = until_ms;
+    n->host_hold_game[0] = 0;
+}
+
+void registry_host_hosted(MmNode *n, const char *game_id, int64_t until_ms) {
+    if (!n) return;
+    n->host_hold_until_ms = until_ms;
+    snprintf(n->host_hold_game, sizeof(n->host_hold_game), "%s", game_id ? game_id : "");
+}
+
+void registry_host_release(MmNode *n) {
+    if (!n) return;
+    n->host_hold_until_ms = 0;
+    n->host_hold_game[0] = 0;
+}
+
+/* 1 while a host this brain sent the node still takes a slot: in flight, or hosted but not listed yet
+ * (registry_lobby_upsert ends the hold when the node lists the game) */
+static int node_host_pending(const MmNode *n, int64_t now_ms) {
+    return n->host_hold_until_ms && now_ms < n->host_hold_until_ms;
+}
+
 static int node_host_free(const Registry *r, const MmNode *n, int authed, int64_t now_ms) {
     if (!n->custom || n->draining || n->password) return 0;
     /* remote nodes: the flags are known through their lobby tuples only */
@@ -818,13 +844,17 @@ static int node_host_free(const Registry *r, const MmNode *n, int authed, int64_
          * public lobby of a server-wide sv_password does */
         if ((l->protect && !l->custom) || (!authed && l->online_mode)) return 0;
     }
-    if ((int) n->lobby_count < n->max_lobbies) return 1;
+    /* a host in flight or not yet listed takes a free slot, or else one of the idle lobbies (which one is not
+     * known before the node lists it) */
+    const int pending = node_host_pending(n, now_ms);
+    if ((int) n->lobby_count + pending < n->max_lobbies) return 1;
+    int idle = 0;
     for (size_t j = 0; j < n->lobby_count; j++) {
         const MmLobby *l = &n->lobbies[j];
         /* idle = nobody playing and no seat handed out (a quick-join ticket in flight) */
-        if (!l->custom && !l->draining && registry_lobby_taken(r, l, now_ms) == 0) return 1;
+        if (!l->custom && !l->draining && registry_lobby_taken(r, l, now_ms) == 0) idle++;
     }
-    return 0;
+    return idle > pending;
 }
 
 static int node_load(const MmNode *n) {
