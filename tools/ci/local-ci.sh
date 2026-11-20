@@ -271,7 +271,12 @@ rm -f "$out"/.*.sh
         [ -f "$out/$j.status" ] || continue
         read -r st secs note < "$out/$j.status" || true
         printf '%-12s %-5s %6s  %s\n' "$j" "$st" "$secs" "${note:-}"
-        case "$st" in fail) rc=1 ;; skip) [[ "$note" == "not selected" ]] && rc=1 ;; esac
+        case "$st" in
+            fail) rc=1 ;;
+            # Missing host toolchains are expected; a job omitted by --only with
+            # no earlier result is not an acceptable substitute for a pass.
+            skip) if [[ "$note" == "not selected" ]]; then rc=1; fi ;;
+        esac
     done
 } | tee "$out/summary.txt"
 if [ $rc = 0 ]; then
