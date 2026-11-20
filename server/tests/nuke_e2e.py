@@ -124,7 +124,9 @@ class Peer(kn_proto.Conn):
             self.pump(0.2)
             for t, p in self.packets:
                 info = spawn(p) if t == SPAWN else None
-                if info and info["is_you"]:
+                # active: the HELLO's own SPAWN is the dead one; the ENT's answer comes after the load-in
+                # hold (kn_proto resends the ENT after the refusal, deob-10.0.7.js:191039)
+                if info and info["is_you"] and info["active"]:
                     self.uid = info["uid"]
         return self.uid
 
