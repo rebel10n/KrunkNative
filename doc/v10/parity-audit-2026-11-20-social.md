@@ -68,3 +68,21 @@ and MariaDB 11.8.
 | Skin Manager (`/skins` CRUD) | Hidden in 10.0.7 (its menu entry has `visible: !0x1`, deob-10.0.7.js:149443-149449). |
 | Studio skins (`/studios/:id/skins*`) | Depends on the Skin Manager above. |
 | Item instances (`/items/:id/instances`, Mints / serial / wear) | No item on Box Office is minted per copy; the route answers `[]`. |
+
+## Status 2026-11-20 (end of the session)
+
+- 5 Mod page Edit: done (`plm`, the Update Mod popup; asset_upload_test, hub_creator_e2e).
+- 6 Gift Premium: skipped (the user has not decided on Premium).
+- 7 Hub handlers: clanRSr, changeRegion, updateChatList, socPostRes, hideAll, confListPopup, confQSPopup and
+  bundleFilters were already implemented under the same names; buyblackM is KN's buyIllicit (`pbm`); openListing is
+  empty in Krunker and copyProfile unreferenced. Added: shareGameTweet, removeFriend and the friends sidebar (`chtb`,
+  `msg`), chatBanUser, the staff Reports tab (`rps`), loadMoreTradeHistory, createTip / cancelTip, the image
+  collection. Left: badge cards (createBadgeTip), which need badge art KN does not ship.
+- 8 Item styles: brain done (POST /items/:id/style, socket `ist`, item_styles 0393, m.style on the owned list;
+  0be47980). Left for the client: the style picker popup, the inventory's Style button, the `_s<n>` thumbnails and
+  in-game texture (deob-10.0.7.js:108855-108905, 135291, 173602), and the game server's loadout carrying m.style.
+- 9 Map versions: brain done (map_versions 0392, list and revert; 60aad066). Left for the client: the map detail
+  popup (svelte-1kkpw01) with its Versions tab is not ported.
+- 10 Email preferences: done (0391, the settings toggle, the register box, the opt-in popup on the game page;
+  0db2983a, 55bd7a2b; email_prefs_e2e). Box Office asks only when it can mail (`accounts.email.promotional_optin`).
+
