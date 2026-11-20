@@ -85,6 +85,8 @@ typedef struct {
     char ops[GS_MAX_LIST][GS_STR_SMALL]; // account ids or names that are DEV (op) on join
     int op_count;
     char bans_file[GS_STR_LARGE];        // persisted IP / name / account bans, "" = memory only
+    char demo_dir[GS_STR_LARGE];         // K.P.D demos also written here (<token>.kndemo + .json), "" = brain only (demo_rec.c)
+    int demos;                           // record K.P.D demos (default 1; they go to the brain and / or demo_dir)
     int allow_guests;                    // with a brain: players without an account may join
     int require_ticket;                  // with a brain: every join needs a ticket or session token
     int director_require_ticket;         // with director_secret: every join needs a director ticket

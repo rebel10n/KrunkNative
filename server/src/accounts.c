@@ -205,7 +205,7 @@ static const char *acc_map_name(void) {
 static int acc_player_count(void) {
     int count = 0;
     for (size_t i = 0; i < g_server->client_count; i++) {
-        if (g_server->clients[i].acct.join_state == SERVER_JOIN_READY) count++;
+        if (g_server->clients[i].acct.join_state == SERVER_JOIN_READY && !g_server->clients[i].recorder) count++; // not the demo recorder
     }
     return count;
 }
@@ -786,6 +786,12 @@ static int acc_kpd_slot(void) {
 
 static const char *acc_map_name(void);
 
+// v10 call types: 1 ranked, 2 comp, 3 custom (a hosted custom lobby), else 0 public
+int accounts_kpd_call_type(const ClientConnection *client) {
+    return g_server->game.is_ranked || accounts_ranked_active() ? 1 : g_server->game.comp_lobby ? 2
+         : (client && accounts_is_custom_host(client)) || g_acc.hosted_map ? 3 : 0;
+}
+
 void accounts_kpd_request(ClientConnection *client, const int tab, const ClientConnection *target) {
     const char *name = target ? target->name : "";
     if (!g_acc.brain || !brain_linked()) {
@@ -822,8 +828,7 @@ void accounts_kpd_request(ClientConnection *client, const int tab, const ClientC
         cJSON_AddStringToObject(args, "map", acc_map_name());
         cJSON_AddNumberToObject(args, "mode", game_mode_id(&g_server->game));
         // v10 call types: 1 ranked, 2 comp, 3 custom, else public
-        cJSON_AddNumberToObject(args, "typ", g_server->game.is_ranked || accounts_ranked_active() ? 1 : g_server->game.comp_lobby ? 2
-                                           : accounts_is_custom_host(client) || g_acc.hosted_map ? 3 : 0); // a hosted custom lobby
+        cJSON_AddNumberToObject(args, "typ", accounts_kpd_call_type(client));
     } else {
         cJSON_AddNumberToObject(args, "limit", 50); // the lists; kpd_stats reads the officer's id
     }

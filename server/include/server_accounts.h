@@ -122,6 +122,8 @@ void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skin
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)
 // The player list's K.P.D call (server_votekick.h): records it in kn_brain (op kpd_call) and answers
 // the caller; tab 1..3 asks for an officer's list (kpd_calls / kpd_log). target NULL for the lists.
+// The K.P.D call type of a call from `client` in this lobby (v10 typ: 0 public, 1 ranked, 2 comp, 3 custom)
+int accounts_kpd_call_type(const ClientConnection *client);
 void accounts_kpd_request(ClientConnection *client, int tab, const ClientConnection *target);
 // An officer's verdict on call `call_id` (op kpd_rate; 0 / no coordinator: logged only). A refusal
 // ("Case already closed") is told to the officer in chat.

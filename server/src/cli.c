@@ -1,6 +1,7 @@
 #include <server_cli.h>
 #include <server_accounts.h>
 #include <server_config.h>
+#include <server_demo.h> // the console demo cut
 #include <brain.h>
 #include <build_info.h>
 #include <ruleset.h>
@@ -299,6 +300,7 @@ static void cli_cmd_ban(const char *args);
 static void cli_cmd_drain(const char *args);
 static void cli_cmd_send(const char *args);
 static void cli_cmd_announce(const char *args);
+static void cli_cmd_demo(const char *args);
 static void cli_execute(const char *line);
 
 #define CLI_NAMES(...) ((const char *const[]) {__VA_ARGS__, NULL})
@@ -308,6 +310,7 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("status"), "status", "Show version, port, map, mode, players, uptime and tick rate", CLI_ARG_NONE, cli_cmd_status},
     {CLI_NAMES("players", "list"), "players", "List connected players (id, slot, name, class, state, address)", CLI_ARG_NONE, cli_cmd_players},
     {CLI_NAMES("kick"), "kick <id|name|selector>", "Disconnect a player (the id shown by 'players'), or every match of * @bots @humans Joel*", CLI_ARG_PLAYER, cli_cmd_kick},
+    {CLI_NAMES("demo"), "demo <name> [seconds]", "Cut a K.P.D demo of a player as a call would (written seconds from now, default 0)", CLI_ARG_PLAYER, cli_cmd_demo},
     {CLI_NAMES("ban"), "ban <id|name|selector>", "Kick a player and ban their account (guests: their IP); saved to bans_file", CLI_ARG_PLAYER, cli_cmd_ban},
     {CLI_NAMES("map", "maps", "changelevel"), "map [name|index]", "List the map rotation, or switch every client to another map", CLI_ARG_MAP, cli_cmd_map},
     {CLI_NAMES("mode", "modes"), "mode [alias|index]", "List the game modes, or restart the map in another mode (kept for the next rounds)", CLI_ARG_MODE, cli_cmd_mode},
@@ -420,7 +423,9 @@ static void cli_cmd_status(const char *args) {
     } else {
         server_log("  map        (no map loaded)");
     }
-    server_log("  players    %lu/%u connected, %lu in game", (unsigned long) g_server->client_count, (unsigned int) g_server->config.max_players, (unsigned long) in_game);
+    const int recorder = demo_rec_recorder_id() >= 0;
+    server_log("  players    %lu/%u connected, %lu in game", (unsigned long) (g_server->client_count - (size_t) recorder), (unsigned int) g_server->config.max_players, (unsigned long) in_game);
+    server_log("  demos      %s, %d written", recorder ? "recording (K.P.D demo recorder)" : "off", demo_rec_written());
     int fill_to = 0;
     const int autofill = game_bots_autofill(game, &fill_to); // KrunkNative chat `autofill`
     if (autofill) server_log("  bots       %d, autofill on (fill to %d players)", game_bots_count(game), fill_to);
@@ -451,8 +456,11 @@ static void cli_cmd_players(const char *args) {
 
     server_log("%4s %3s  %-20s %-14s %-6s %4s %6s  %s", "ID", "#", "NAME", "CLASS", "STATE", "HP", "IDLE", "ADDRESS");
 
+    size_t listed = 0;
     for (size_t i = 0; i < g_server->client_count; i++) {
         const ClientConnection *client = &g_server->clients[i];
+        if (client->recorder) continue; // the K.P.D demo recorder (status shows it)
+        listed++;
         const Player *player = client->player;
         const char *state = !player ? "lobby" : player->active ? "alive" : "dead";
         const float idle_since = client->last_significant_move_at; // net_check_idle_clients' clock
@@ -467,8 +475,22 @@ static void cli_cmd_players(const char *args) {
                    inet_ntoa(client->addr.sin_addr), (unsigned int) ntohs(client->addr.sin_port));
     }
 
-    server_log("%lu/%u players", (unsigned long) g_server->client_count, (unsigned int) g_server->config.max_players);
+    server_log("%lu/%u players", (unsigned long) listed, (unsigned int) g_server->config.max_players);
     pthread_mutex_unlock(&g_server->lock);
+}
+
+static void cli_cmd_demo(const char *args) {
+    char name[SERVER_PLAYER_NAME_MAX] = "";
+    double after = 0.0;
+    if (!args || sscanf(args, "%31s %lf", name, &after) < 1) {
+        server_log("Usage: demo <name> [seconds]   (needs gameserver.demo_dir or a brain)");
+        return;
+    }
+    pthread_mutex_lock(&g_server->lock);
+    const int ok = demo_rec_cut(name, after);
+    pthread_mutex_unlock(&g_server->lock);
+    if (ok) server_log("[demo] a demo of %s is cut in %.0f s", name, after);
+    else server_log("[demo] no player '%s', or the recorder is off (gameserver.demos, demo_dir / brain)", name);
 }
 
 static void cli_cmd_kick(const char *args) {

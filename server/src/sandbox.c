@@ -6,6 +6,7 @@
 #include <server_accounts.h>
 #include <server_config.h>
 #include <server_log.h>
+#include <server_demo.h>
 #include <knet.h>   // NET_LOOPBACK_FD_BASE, net_set_loopback_send
 #include <ks_server.h> // KrunkScript server host
 #include <bots.h>
@@ -299,6 +300,7 @@ void sandbox_stop(void) {
 
     pthread_mutex_lock(&g_server->lock);
     accounts_shutdown();
+    demo_rec_stop(); // (never on in the sandbox: no brain, no demo_dir; frees its state all the same)
     while (g_server->client_count) net_remove_client(&g_server->clients[0]); // closes every link's server end
     ks_server_shutdown(); // KrunkScript onServerClosed, then the script is freed
     pthread_mutex_unlock(&g_server->lock);

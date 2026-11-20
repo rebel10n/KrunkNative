@@ -14,6 +14,7 @@
 #include <server_votekick.h>
 #include <server_accounts.h>
 #include <server_log.h>
+#include <server_demo.h> // the call's K.P.D demo
 #include <shared.h>
 #include <game_config.h> // game_config_is_custom: no vote kicks in hosted lobbies (v10 isCustom)
 #include <chat_commands.h> // chat_command_admin_action: the DEV kick / ban (NET_EXT_ADMIN_ACTION)
@@ -82,7 +83,7 @@ static void vk_broadcast_ext(const uint16_t subtype, const void *body, const uin
 }
 
 static int vk_admitted(const ClientConnection *client) {
-    return client && client->acct.join_state == SERVER_JOIN_READY;
+    return client && client->acct.join_state == SERVER_JOIN_READY && !client->recorder; // the demo recorder votes on nothing
 }
 
 // v10's Votekick / K.P.D buttons are an account's (level >= 1): guests have neither
@@ -450,6 +451,7 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const ui
     recent->rated = 0;
     g_vk.last_kpd_call_at = g_server->now;
     server_log("[kpd] %s called the K.P.D on %s", client->name, target->name);
+    demo_rec_note_call(client, target, accounts_kpd_call_type(client)); // the demo of this lobby around the call
     const int recent_index = (int) (recent - g_vk.recent);
     accounts_kpd_request(client, 0, target); // the record (kn_brain), then the answer
     kpd_offer_new_call(recent_index);       // an officer already here: the case now (its call id follows the record)
@@ -542,6 +544,7 @@ void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const 
 // ---------------------------------------------------------------- K.P.D officers
 
 void votekick_kpd_recorded(const int suspect_id, const int64_t call_id) {
+    demo_rec_call_recorded(suspect_id, call_id);
     for (int i = 0; i < g_vk.recent_count; i++) {
         if (g_vk.recent[i].suspect_id == suspect_id && !g_vk.recent[i].rated) g_vk.recent[i].call_id = call_id;
     }

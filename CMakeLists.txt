@@ -203,6 +203,7 @@ set(SERVER_CORE_SOURCES
     server/src/ks_storage.c
     server/src/bot_banter.c       # bot chat via kn_brain (templates only without a brain link: the offline sandbox)
     server/src/votekick.c
+    server/src/demo_rec.c         # the K.P.D demo recorder (doc/v10/replays.md): off in the sandbox (no brain, no demo_dir)
     server/src/trade.c            # the live trade of Trade mode (doc/v10/trade.md): sessions, packets, the brain ops
     server/src/trade_session.c    # ... its state machine (pure, unit-tested by trade_test)
     server/src/published_maps.c   # published:<creator>/<name> maps: v10's checks + the cache (the fetch is brain.c's)

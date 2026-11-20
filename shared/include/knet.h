@@ -229,6 +229,11 @@ NetVirtualSendFn net_virtual_send(void);
 #define NET_LOOPBACK_FD_BASE 0x40000000
 void net_set_loopback_send(NetVirtualSendFn fn);
 NetVirtualSendFn net_loopback_send(void);
+// server_bin's K.P.D demo recorder (server/src/demo_rec.c): its hidden spectator connection's fd is
+// >= NET_DEMO_FD_BASE, and what is sent to it goes to the demo sender (checked before the loopback range).
+#define NET_DEMO_FD_BASE 0x70000000
+void net_set_demo_send(NetVirtualSendFn fn);
+NetVirtualSendFn net_demo_send(void);
 
 // ------------------------------------------------------------------ loss simulation
 // KRUNKNATIVE_NET_DROP / _DUP / _REORDER = percent of inbound datagrams dropped,

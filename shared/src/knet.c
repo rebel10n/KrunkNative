@@ -718,6 +718,9 @@ NetVirtualSendFn net_virtual_send(void) { return g_net_virtual_send; }
 static NetVirtualSendFn g_net_loopback_send;
 void net_set_loopback_send(const NetVirtualSendFn fn) { g_net_loopback_send = fn; }
 NetVirtualSendFn net_loopback_send(void) { return g_net_loopback_send; }
+static NetVirtualSendFn g_net_demo_send;
+void net_set_demo_send(const NetVirtualSendFn fn) { g_net_demo_send = fn; }
+NetVirtualSendFn net_demo_send(void) { return g_net_demo_send; }
 
 // ------------------------------------------------------------------ loss simulation
 static int knet_env_percent(const char *name) {

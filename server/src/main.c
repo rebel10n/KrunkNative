@@ -4,6 +4,7 @@
 #include <flavor.h>   // --flavor / server.cfg `flavor`: the product flavor (Krunker Strike)
 #include <flavor_rules.h> // the flavor's mode rotation (Krunker Strike)
 #include <server_accounts.h>
+#include <server_demo.h> // demo_rec_stop at shutdown
 #include <brain.h>
 #include <info_query.h>
 #include <rcon.h>
@@ -655,6 +656,7 @@ static void *server_net_thread(void *arg) {
 static void server_disconnect_all(void) {
     pthread_mutex_lock(&g_server->lock);
 
+    demo_rec_stop(); // pending K.P.D demos are written (and queued to the brain) before the players go
     // net_remove_client() closes the socket, frees the player and compacts the array.
     while (g_server->client_count) net_remove_client(&g_server->clients[0]);
 

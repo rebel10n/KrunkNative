@@ -1,6 +1,7 @@
 // Server core glue (server.h): the server clock, the transports flushed every tick and the
 // tick step shared by server_bin's loop (main.c) and the in-process sandbox (sandbox.c).
 #include <server.h>
+#include <server_demo.h>
 #include <server_accounts.h>
 #include <server_trade.h> // trade_tick
 #include <server_captcha.h> // game_captcha_tick
@@ -94,6 +95,7 @@ void server_core_tick(const float now, const float delta, const double tick_wall
     trade_tick(now, delta); // the live trade: request expiry, "Loading n", the settle (server/src/trade.c)
     net_check_idle_clients(now);
     net_broadcast_states();
+    demo_rec_tick(); // the K.P.D demo recorder's stream / keyframes / due demos (after the tick's sends)
 }
 
 // ------------------------------------------------------------------ shutdown reason (server.h)

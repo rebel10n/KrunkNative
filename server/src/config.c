@@ -63,6 +63,7 @@ void gs_config_defaults(GsConfig *cfg) {
     cfg->idle_move_threshold = 1.0f;    // SERVER_IDLE_MOVE_THRESHOLD
     cfg->allow_guests = 1;
     cfg->join_timeout = 5.0f;
+    cfg->demos = 1;
     cfg->earn_kr = 1;
     cfg->kr_cap = 30;                   // game.js endGame: min(premiumT ? 40 : 30, ...)
     cfg->kr_cap_premium = 40;
@@ -529,6 +530,13 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         if (path[0]) gs_resolve_path(cfg->bans_file, sizeof(cfg->bans_file), path);
         else if (gs_item(s, "bans_file")) cfg->bans_file[0] = 0;
     }
+    {
+        char path[GS_STR_LARGE] = "";
+        gs_read_str(s, "demo_dir", path, sizeof(path));
+        if (path[0]) gs_resolve_path(cfg->demo_dir, sizeof(cfg->demo_dir), path);
+        else if (gs_item(s, "demo_dir")) cfg->demo_dir[0] = 0;
+    }
+    gs_read_bool(s, "demos", &cfg->demos);
     gs_read_bool(s, "allow_guests", &cfg->allow_guests);
     gs_read_bool(s, "require_ticket", &cfg->require_ticket);
     gs_read_bool(s, "director_require_ticket", &cfg->director_require_ticket);

@@ -190,6 +190,8 @@ typedef struct {
     unsigned char announced:1;     // "<name> joined the game" was broadcast for this connection
     unsigned char voice_player:1;  // v7 findSocketPlayer for "vc": set by every ENT (spectators too), kept
                                    // across deaths, round ends and map changes
+    unsigned char recorder:1;      // the K.P.D demo recorder's hidden spectator (server/src/demo_rec.c): never
+                                   // counted, listed, announced, pinged or kicked
 
     NetChatLimiter chat_limiter;   // io_ct burst limit
     uint32_t ping_seq;             // seq of the outstanding PING, 0 none
@@ -283,6 +285,12 @@ void net_install_game_hooks(void);
 void net_poll_clients(void);
 int net_handle_packet(ClientConnection*, const NetPacket*); // 0 = the client was removed
 void net_add_client(ClientConnection*); // takes a copy; caller holds g_server->lock
+// The K.P.D demo recorder (server/src/demo_rec.c): a hidden spectator connection on `transport` / fd (no
+// player, never counted, listed, pinged or kicked), sent its join burst at once. Returns its id, -1 when the
+// game is not ready. net_send_demo_keyframe sends it the join burst again (MAP_INFO, INIT and what follows,
+// the spectate ack, every player, the round state): the recorder captures that as a keyframe.
+int net_add_recorder(const struct ServerTransport *transport, int fd);
+void net_send_demo_keyframe(int recorder_id);
 
 // One server tick (main.c's loop body, the sandbox step): g_server->now / tick_wall, bot
 // slots, game_tick, accounts_tick, idle kicks, the per-tick broadcast. Caller holds the lock.

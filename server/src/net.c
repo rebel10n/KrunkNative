@@ -30,6 +30,7 @@
 #include <net_ext.h>         // NET_PACKET_EXT (254): the v10+ envelope
 #include <bot_path_net.h>    // KrunkNative: NET_EXT_KN_BOT_PATH for a spectator following a bot (net_broadcast_bot_paths)
 #include <object_manager.h>  // KrunkNative Object Manager (spawn menu): ids 250-254
+#include <server_demo.h>       // the K.P.D demo recorder (net_add_recorder)
 #include <flavor.h>          // Krunker Strike: the product flavor carried in INIT / HELLO (shared.h)
 #include <errno.h>
 #include <math.h>
@@ -830,7 +831,7 @@ static void net_send_social_caps(const ClientConnection *client) {
 // resets its session there) and when accounts settle the identity.
 void net_comp_lobby_sync(ClientConnection *client) {
     Game *game = &g_server->game;
-    if (!game->config.comp || !client) return;
+    if (!game->config.comp || !client || client->recorder) return; // the demo recorder is nobody's lobby entry
     CompLobbyEntry identity;
     memset(&identity, 0, sizeof(identity));
     identity.flag = -1;
@@ -1457,6 +1458,7 @@ static int net_chat_peer_at(void *user, const int index, ChatPeer *out) {
     (void) user;
     if (index < 0 || (size_t) index >= g_server->client_count) return 0;
     const ClientConnection *client = &g_server->clients[index];
+    if (client->recorder) return 0; // the demo recorder is no chat peer (lists, counts, targets)
     *out = (ChatPeer) {
         .id = client->id,
         .name = client->name,
@@ -1587,9 +1589,16 @@ static void net_send_join_spawn(ClientConnection *client) {
     net_free_player(waiting);
 }
 
+// The connections that take a slot: all but the demo recorder
+static size_t net_connection_count(void) {
+    size_t n = 0;
+    for (size_t i = 0; i < g_server->client_count; i++) n += !g_server->clients[i].recorder;
+    return n;
+}
+
 void net_add_client(ClientConnection *client) {
-    if (g_server->config.max_players && g_server->client_count >= g_server->config.max_players) {
-        server_log("Rejecting client: server full (%zu/%u)", g_server->client_count, (unsigned int) g_server->config.max_players);
+    if (g_server->config.max_players && net_connection_count() >= g_server->config.max_players) {
+        server_log("Rejecting client: server full (%zu/%u)", net_connection_count(), (unsigned int) g_server->config.max_players);
         CLOSE_CLIENT_FD(client);
         return;
     }
@@ -1683,6 +1692,7 @@ void net_remove_client(ClientConnection *client) {
 
     if (index == SIZE_MAX) return;
 
+    demo_rec_on_leave(client); // a suspect's pending K.P.D demo is cut now
     accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
     votekick_on_leave(client); // a vote kick's target left (void), or a voter (recounted)
     trade_on_leave(client);    // its trade requests / session end ("NAME left the trade")
@@ -2047,6 +2057,57 @@ static void net_handle_input_batch(ClientConnection *client, const NetPacket *pa
 }
 
 // ENT after its fields were stored (also replayed by accounts.c once a deferred join settled).
+// ------------------------------------------------------------------ the K.P.D demo recorder
+// A spectator that never joined as a player (doc/v10/replays.md 2.1): it has the current protocol (as its
+// HELLO would say), no account and no player number, so the counts (acc_player_count, vote kicks), the
+// player list, chat peers, comp lobbies and pings leave it out; spectators are never idle-kicked.
+int net_add_recorder(const struct ServerTransport *transport, const int fd) {
+    if (!transport || !g_server->game.ready) return -1;
+    ClientConnection *grown = realloc(g_server->clients, (g_server->client_count + 1) * sizeof(ClientConnection));
+    if (!grown) return -1;
+    g_server->clients = grown;
+    ClientConnection *client = &g_server->clients[g_server->client_count++];
+    memset(client, 0, sizeof(*client));
+    client->fd = fd;
+    client->transport = transport;
+    client->addr.sin_family = AF_INET;
+    client->addr.sin_addr.s_addr = htonl(0x7f000001);
+    snprintf(client->address, sizeof(client->address), "demo");
+    client->id = g_server->next_client_id++;
+    client->recorder = 1;
+    client->first_packet_seen = 1;
+    client->peer_minor = NET_PROTOCOL_MINOR;
+    client->peer_patch = NET_PROTOCOL_PATCH;
+    client->peer_flavor = (unsigned char) flavor_get();
+    client->acct.join_state = SERVER_JOIN_READY;
+    client->connected_at = g_server->now;
+    client->last_significant_move_at = g_server->now;
+    client->ping_ms = -1;
+    client->secondary_index = -1;
+    client->pc_stat_index = -1;
+    client->skins = PLAYER_SKINS_NONE;
+    client->cosmetics = PLAYER_COSMETICS_NONE;
+    client->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
+    client->lag_comp = 1.0f;
+    client->attach_index = DEFAULT_ATTACHMENT_INDEX;
+    const int id = client->id;
+    net_send_demo_keyframe(id);
+    return id;
+}
+
+void net_send_demo_keyframe(const int recorder_id) {
+    ClientConnection *client = NULL;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        if (g_server->clients[i].id == recorder_id && g_server->clients[i].recorder) client = &g_server->clients[i];
+    }
+    if (!client || !g_server->game.ready) return;
+    net_send_init(client);
+    if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
+    net_set_spectating(client, 0); // a fresh spectator: the bars it was shown start over
+    net_set_spectating(client, 1);
+    net_send_spectate_state(client);
+}
+
 void net_resume_ent(ClientConnection *client, const int spectate) {
     // v7.1.4 "vc" relays whatever findSocketPlayer finds: every ENT adds a player, a spectator's
     // too (player.spectating), and a dead player keeps it. v3.1.1 left ctx.player null for
@@ -2596,6 +2657,7 @@ static void net_send_pings() {
 
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *client = &g_server->clients[i];
+        if (client->recorder) continue; // nothing answers a ping there (and a demo needs none)
         const int stale = client->ping_seq && now - client->ping_sent_at >= NET_PING_INTERVAL * 2.0f;
         if ((client->ping_seq && !stale) || now < client->next_ping_at) continue;
 
