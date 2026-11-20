@@ -1,0 +1,25 @@
+{
+  "scenario": "kn-menu-event-tile",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "event-tile",
+      "rect": [1090, 44, 190, 56],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knEventTile (.event-tile.svelte-18gradk) in #tlInfHold: event 7's art, the EVENT tag and the accent bar in #8e5cff, 'Box Office Night', 'Starts in 2d 5h' (v10.0.7, deob-10.0.7.js:146874, :148238-148290; KrunkNative's own styles)"
+    },
+    {
+      "name": "menu-buttons",
+      "rect": [1090, 456, 190, 222],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the play buttons under the right panel stay where they are with the tile up"
+    }
+  ]
+}

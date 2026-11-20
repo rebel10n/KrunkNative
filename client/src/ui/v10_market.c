@@ -2,12 +2,16 @@
 // window.openExchange(tab, itemIndex) from the main menu's #menuBtnMarket (genericPopup({component:
 // _46780}, 'exchangeModal'), v10.js 132601-136984), ported from its Svelte components to C over
 // html_dom.h. The markup is v10's templates verbatim (class names with their svelte-* hashes, so
-// ui/css/svelte.css styles them), rebuilt into #genericPop as the state changes:
+// ui/css/svelte.css styles them), rebuilt into #genericPop as the state changes.
+// Hashes follow v10.0.7's components: the inventory grid's item cards svelte-1n21gx (the grid, cards, bulk check and
+// lock, deob-10.0.7.js:132074-132118), Listing Details svelte-kcz1lc (:130971-131060), the signed-out
+// inventory message svelte-jskst (:132426). 10.0.2 called them 18k2d4k / olnzsm / htwh29; the rules in
+// ui/css/svelte.css were renamed with them, unchanged. The layout below:
 //
 //   sidebar   Market / Trading / Black Mkt / Junkyard / Catalog / Guide (_44583, svelte-berov0)
 //   Market    Browse / My Inventory / My Sales / History / Stats (_46437, svelte-1ugt6n9), the filter
 //             header (_45793), the market grid and cards (_45681, _45592, _36396), Listing Details
-//             (svelte-olnzsm) with its Listings / Stats (sales charts) / Owners tabs, the Purchase /
+//             (svelte-kcz1lc) with its Listings / Stats (sales charts) / Owners tabs, the Purchase /
 //             List / Unlist / Error modals, Quick Sell (_46234) and the notifications (_45504)
 //   Trading   incoming / outgoing / history offers (_46536), Accept / Decline / Cancel / Decline All,
 //             Start a Trade (player search) and the Create Trade window (_36706, _36585, _36471)
@@ -139,7 +143,7 @@ static struct {
     int inv_loading, sales_loading, hist_loading, stats_loading, gshown;
     char hcol[8];
     int hasc;
-    // Listing Details (svelte-olnzsm) / the catalog's item detail (_45008)
+    // Listing Details (svelte-kcz1lc) / the catalog's item detail (_45008)
     int detail, dtab, days, crange;   // Listing Details: item (-1 none), tab, Stats days
     int cdetail, ctab;                // the item detail page (_45008): item (-1 none), tab
     int data_item, dgd_range;         // whose listings / sales / owners are loaded; dgd: a range index (else days)
@@ -1286,7 +1290,7 @@ static int bulk_picked(const int official, const int index) {
 
 static void inventory_grid(StrBuf *sb, const TileList *l) {
     const int selecting = g_bsel && logged_in();
-    sb_append(sb, "<div class=\"market-grid svelte-18k2d4k\" id=\"v10mkGrid\">");
+    sb_append(sb, "<div class=\"market-grid svelte-1n21gx\" id=\"v10mkGrid\">");
     for (int k = 0; k < l->n && k < M.gshown; k++) {
         const int i = l->t[k].index;
         const cJSON *r = l->t[k].row;
@@ -1298,13 +1302,16 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         const int official = selecting && sellable ? bulk_official(i, sid, &stackable) : 0;
         const int locked = official && market_locks_has(inv_locks(), official, i, stackable);
         const int picked = bulk_picked(official, i);
-        sb_appendf(sb, "<div class=\"item-wrapper svelte-18k2d4k%s%s%s\">", M.detail == i ? " selected" : "",
-                   selecting && picked ? " bulk-selected svelte-1wcm5z8" : "", selecting && (!official || locked) ? " bulk-dim svelte-1wcm5z8" : "");
-        if (selecting && official && !locked) // the tile's check (iìíìîîí, deob-10.0.4.js:131902)
-            sb_appendf(sb, "<button type=\"button\" class=\"bulk-check bulk-check-btn svelte-1wcm5z8\" onclick=\"v10mk.bpick(%d,%d)\"><i class=\"material-icons svelte-1wcm5z8\">%s</i></button> ",
+        sb_appendf(sb, "<div class=\"item-wrapper svelte-1n21gx%s%s%s\">", M.detail == i ? " selected" : "",
+                   selecting && picked ? " bulk-selected" : "", selecting && (!official || locked) ? " bulk-dim" : "");
+        // the tile's check and its select-mode states: the card component's own hash since 10.0.7 (bulk-check /
+        // bulk-check-btn, bulk-dim, bulk-selected on .item-wrapper.svelte-1n21gx, deob-10.0.7.js:132074, :132108,
+        // :135397-135398; 10.0.4 drew them with the wallet's svelte-1wcm5z8)
+        if (selecting && official && !locked)
+            sb_appendf(sb, "<button type=\"button\" class=\"bulk-check bulk-check-btn svelte-1n21gx\" onclick=\"v10mk.bpick(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">%s</i></button> ",
                        i, sid, picked ? "check_box" : "check_box_outline_blank");
         else if (selecting && locked)
-            sb_append(sb, "<div class=\"bulk-lock svelte-1wcm5z8\"><i class=\"material-icons svelte-1wcm5z8\">lock</i></div> ");
+            sb_append(sb, "<div class=\"bulk-lock svelte-1n21gx\"><i class=\"material-icons svelte-1n21gx\">lock</i></div> ");
         const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid};
         market_card(sb, i, &o);
         sb_append(sb, " ");
@@ -1312,24 +1319,24 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         paint_badge(sb, meta, 10, 24);
         cJSON_Delete(meta);
         if (r && sid > 0 && paint_picker_can_open(i)) {
-            sb_appendf(sb, " <button type=\"button\" class=\"paint-icon svelte-18k2d4k\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-18k2d4k\">format_paint</i></button> ", sid, i, sid);
+            sb_appendf(sb, " <button type=\"button\" class=\"paint-icon svelte-1n21gx\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">format_paint</i></button> ", sid, i, sid);
         }
         const int qs = r ? jint(r, "qs", 0) : 0, destroy = r && (jint(r, "nqs", 0) || qs <= 0);
         if (cnt > 0 && (qs > 0 || destroy)) {
-            sb_append(sb, " <button type=\"button\" class=\"quick-sell-icon svelte-18k2d4k\" aria-label=\"Quick sell ");
+            sb_append(sb, " <button type=\"button\" class=\"quick-sell-icon svelte-1n21gx\" aria-label=\"Quick sell ");
             sb_append_esc(sb, s && s->name ? s->name : "");
-            sb_appendf(sb, "\" id=\"v10mkQS%d\" onclick=\"v10mk.qs(%d,%d)\"><i class=\"material-icons svelte-18k2d4k\">sell</i></button> ", sid, i, sid);
+            sb_appendf(sb, "\" id=\"v10mkQS%d\" onclick=\"v10mk.qs(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">sell</i></button> ", sid, i, sid);
         }
         sb_append(sb, "</div>");
     }
     sb_append(sb, "</div> ");
-    if (l->n > M.gshown) sb_append(sb, "<div class=\"market-grid-sentinel svelte-18k2d4k\"><button class=\"load-more-btn svelte-zhgogl\" onclick=\"v10mk.more()\">Load More</button></div> ");
-    if (!l->n) sb_append(sb, "<div class=\"empty-message svelte-18k2d4k\">No items in inventory</div>");
+    if (l->n > M.gshown) sb_append(sb, "<div class=\"market-grid-sentinel svelte-1n21gx\"><button class=\"load-more-btn svelte-zhgogl\" onclick=\"v10mk.more()\">Load More</button></div> ");
+    if (!l->n) sb_append(sb, "<div class=\"empty-message svelte-1n21gx\">No items in inventory</div>");
 }
 
 static void view_inventory(StrBuf *sb) {
     if (!logged_in()) {
-        sb_append(sb, "<div class=\"empty-message svelte-htwh29\">Please log in to view your inventory</div>");
+        sb_append(sb, "<div class=\"empty-message svelte-jskst\">Please log in to view your inventory</div>");
         return;
     }
     TileList l = inventory_list();
@@ -1555,7 +1562,7 @@ static void view_stats(StrBuf *sb) {
     free(g);
 }
 
-// ------------------------------------------------------------------ Listing Details (svelte-olnzsm)
+// ------------------------------------------------------------------ Listing Details (svelte-kcz1lc)
 
 // _5136: the popup button (svelte-whnh40)
 static void button_id(StrBuf *sb, const char *variant, const int slim, const int disabled, const char *onclick, const char *text, const char *id);
@@ -1648,26 +1655,26 @@ static void line_chart(StrBuf *sb, const double *v, const int n, const char *fil
 }
 
 static void trend_text(StrBuf *sb, const double trend) {
-    sb_appendf(sb, "<div class=\"stat-trending svelte-olnzsm\" style=\"background-color: %s\">%s %.0f%%</div>", trend >= 0 ? "#7ed633" : "#F44336",
+    sb_appendf(sb, "<div class=\"stat-trending svelte-kcz1lc\" style=\"background-color: %s\">%s %.0f%%</div>", trend >= 0 ? "#7ed633" : "#F44336",
                trend > 0 ? "+" : trend == 0 ? "~" : "-", fabs(trend));
 }
 
 static void detail_stats(StrBuf *sb) {
     static const int days[5] = {7, 14, 30, 60, 90};
-    sb_appendf(sb, "<div class=\"stats-section svelte-olnzsm\"><div class=\"stats-controls svelte-olnzsm\"><label for=\"days-back-select\" class=\"days-back-label svelte-olnzsm\">Time Range:</label> "
-                   "<select id=\"days-back-select\" class=\"days-back-select svelte-olnzsm\"%s onchange=\"v10mk.days(this.value)\">", M.dgd_loading ? " disabled" : "");
+    sb_appendf(sb, "<div class=\"stats-section svelte-kcz1lc\"><div class=\"stats-controls svelte-kcz1lc\"><label for=\"days-back-select\" class=\"days-back-label svelte-kcz1lc\">Time Range:</label> "
+                   "<select id=\"days-back-select\" class=\"days-back-select svelte-kcz1lc\"%s onchange=\"v10mk.days(this.value)\">", M.dgd_loading ? " disabled" : "");
     for (int i = 0; i < 5; i++) sb_appendf(sb, "<option value=\"%d\"%s>%d days</option>", days[i], M.days == days[i] ? " selected" : "", days[i]);
     sb_append(sb, "</select></div> ");
     if (M.lost & LOST_DGD) {
-        sb_appendf(sb, "<div class=\"stats-loading svelte-olnzsm\"><span>%s</span></div></div>", I18N("kn.mk.statsFailed", "Couldn't load statistics. Open the item again to retry."));
+        sb_appendf(sb, "<div class=\"stats-loading svelte-kcz1lc\"><span>%s</span></div></div>", I18N("kn.mk.statsFailed", "Couldn't load statistics. Open the item again to retry."));
         return;
     }
     if (M.dgd_loading || !M.dgd) {
-        sb_append(sb, "<div class=\"stats-loading svelte-olnzsm\"><div class=\"loading-spinner svelte-olnzsm\"></div> <span>Loading statistics...</span></div></div>");
+        sb_append(sb, "<div class=\"stats-loading svelte-kcz1lc\"><div class=\"loading-spinner svelte-kcz1lc\"></div> <span>Loading statistics...</span></div></div>");
         return;
     }
     if (!rows_count(M.dgd)) {
-        sb_append(sb, "<div class=\"empty-stats svelte-olnzsm\"><div>No sales data available for this item</div></div></div>");
+        sb_append(sb, "<div class=\"empty-stats svelte-kcz1lc\"><div>No sales data available for this item</div></div></div>");
         return;
     }
     Series *s = calloc(1, sizeof(Series));
@@ -1692,13 +1699,13 @@ static void detail_stats(StrBuf *sb) {
     char a[32], b[32];
     fmt(a, sizeof(a), units);
     fmt(b, sizeof(b), avg);
-    sb_appendf(sb, "<div class=\"stats-headers svelte-olnzsm\"><div class=\"stat-header svelte-olnzsm\"><div class=\"stat-label svelte-olnzsm\">Total Sold</div> <div class=\"stat-value svelte-olnzsm\">%s</div> ", a);
+    sb_appendf(sb, "<div class=\"stats-headers svelte-kcz1lc\"><div class=\"stat-header svelte-kcz1lc\"><div class=\"stat-label svelte-kcz1lc\">Total Sold</div> <div class=\"stat-value svelte-kcz1lc\">%s</div> ", a);
     trend_text(sb, utrend);
-    sb_appendf(sb, "</div> <div class=\"stat-header svelte-olnzsm\"><div class=\"stat-label svelte-olnzsm\">Average Cost</div> <div class=\"stat-value svelte-olnzsm\">%s <span style=\"color: #fff\">KR</span></div> ", b);
+    sb_appendf(sb, "</div> <div class=\"stat-header svelte-kcz1lc\"><div class=\"stat-label svelte-kcz1lc\">Average Cost</div> <div class=\"stat-value svelte-kcz1lc\">%s <span style=\"color: #fff\">KR</span></div> ", b);
     trend_text(sb, ptrend);
-    sb_append(sb, "</div></div> <div class=\"charts-container svelte-olnzsm\"><div class=\"chart-wrapper svelte-olnzsm\"><div class=\"chart-title svelte-olnzsm\">Average Price</div> <div class=\"chart-container svelte-olnzsm\">");
+    sb_append(sb, "</div></div> <div class=\"charts-container svelte-kcz1lc\"><div class=\"chart-wrapper svelte-kcz1lc\"><div class=\"chart-title svelte-kcz1lc\">Average Price</div> <div class=\"chart-container svelte-kcz1lc\">");
     line_chart(sb, s->price, s->n, "#85bb6555", "#85bb65", "KR", s->label);
-    sb_append(sb, "</div></div> <div class=\"chart-wrapper svelte-olnzsm\"><div class=\"chart-title svelte-olnzsm\">Units Sold</div> <div class=\"chart-container svelte-olnzsm\">");
+    sb_append(sb, "</div></div> <div class=\"chart-wrapper svelte-kcz1lc\"><div class=\"chart-title svelte-kcz1lc\">Units Sold</div> <div class=\"chart-container svelte-kcz1lc\">");
     line_chart(sb, s->units, s->n, "#fbc02d55", "#fbc02d", "Units", s->label);
     sb_append(sb, "</div></div></div></div>");
     free(s);
@@ -1712,15 +1719,15 @@ static void owners_list(StrBuf *sb, const int catalog) {
     }
     if (M.dview_loading || !M.downers) {
         if (catalog) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
-        else sb_append(sb, "<div class=\"stats-loading svelte-olnzsm\"><div class=\"loading-spinner svelte-olnzsm\"></div> <span>Loading owners...</span></div>");
+        else sb_append(sb, "<div class=\"stats-loading svelte-kcz1lc\"><div class=\"loading-spinner svelte-kcz1lc\"></div> <span>Loading owners...</span></div>");
         return;
     }
     if (!rows_count(M.downers)) {
-        sb_appendf(sb, "<div class=\"%s\">No owners yet.</div>", catalog ? "items-detail-empty svelte-dmu4q2" : "empty-stats svelte-olnzsm");
+        sb_appendf(sb, "<div class=\"%s\">No owners yet.</div>", catalog ? "items-detail-empty svelte-dmu4q2" : "empty-stats svelte-kcz1lc");
         return;
     }
-    const char *hash = catalog ? "svelte-dmu4q2" : "svelte-olnzsm";
-    if (!catalog) sb_appendf(sb, "<h4 class=\"listings-title svelte-olnzsm\">Owners (%d)</h4> ", rows_count(M.downers));
+    const char *hash = catalog ? "svelte-dmu4q2" : "svelte-kcz1lc";
+    if (!catalog) sb_appendf(sb, "<h4 class=\"listings-title svelte-kcz1lc\">Owners (%d)</h4> ", rows_count(M.downers));
     sb_appendf(sb, "<ol class=\"%s %s\">", catalog ? "items-detail-owners-list" : "owners-list", hash);
     int i = 0;
     const cJSON *o;
@@ -1755,8 +1762,8 @@ static void view_detail(StrBuf *sb) {
     const int owned = detail_owned();
     const cJSON *r = inv_row(M.detail);
     const int can_list = owned > 0 && !skin_bound(s) && !(r && jint(r, "nt", 0));
-    sb_append(sb, "<div class=\"item-detail-container svelte-olnzsm\"><div class=\"item-detail-header svelte-olnzsm\"><button class=\"back-button svelte-olnzsm\" aria-label=\"Back\" onclick=\"v10mk.back()\">"
-                  "<i class=\"material-icons svelte-olnzsm\">arrow_back</i></button> <h3 class=\"item-detail-title svelte-olnzsm\">Listing Details</h3>");
+    sb_append(sb, "<div class=\"item-detail-container svelte-kcz1lc\"><div class=\"item-detail-header svelte-kcz1lc\"><button class=\"back-button svelte-kcz1lc\" aria-label=\"Back\" onclick=\"v10mk.back()\">"
+                  "<i class=\"material-icons svelte-kcz1lc\">arrow_back</i></button> <h3 class=\"item-detail-title svelte-kcz1lc\">Listing Details</h3>");
     // krunker.io: Buy multiple (deob-10.0.4.js:136328-136345: an account and some listings; the accept slim button with
     // the cart, iïíîîiì :130763) opens the buy ladder (v10_bulk.c)
     if (kio_store_active() && acc() && rows_count(M.dlist) > 0) {
@@ -1766,10 +1773,10 @@ static void view_detail(StrBuf *sb) {
         sb_append_esc(sb, I18N("market.buyMulti.open", "Buy multiple"));
         sb_append(sb, "</button></div>");
     }
-    sb_append(sb, "</div> <div class=\"content-row svelte-olnzsm\"><div class=\"item-showcase-section svelte-olnzsm\"><div class=\"showcase-container svelte-olnzsm\">");
+    sb_append(sb, "</div> <div class=\"content-row svelte-kcz1lc\"><div class=\"item-showcase-section svelte-kcz1lc\"><div class=\"showcase-container svelte-kcz1lc\">");
     item_card(sb, s, "370px", 1, NULL, 0);
-    if (owned > 0) sb_appendf(sb, "<div class=\"item-ownership-overlay svelte-olnzsm\"><div class=\"ownership-count svelte-olnzsm\">%d owned</div></div>", owned);
-    sb_append(sb, "</div></div> <div class=\"item-info-section svelte-olnzsm\"><div class=\"item-creator svelte-olnzsm\">by  ");
+    if (owned > 0) sb_appendf(sb, "<div class=\"item-ownership-overlay svelte-kcz1lc\"><div class=\"ownership-count svelte-kcz1lc\">%d owned</div></div>", owned);
+    sb_append(sb, "</div></div> <div class=\"item-info-section svelte-kcz1lc\"><div class=\"item-creator svelte-kcz1lc\">by  ");
     if (!s->creator || !strcmp(s->creator, "Krunker.io")) {
         sb_append(sb, "Krunker.io");
     } else { // "a, b" -> buttons
@@ -1780,42 +1787,42 @@ static void view_detail(StrBuf *sb) {
             while (*t == ' ') t++;
             if (!*t) continue;
             if (k++) sb_append(sb, ", ");
-            sb_append(sb, "<button type=\"button\" class=\"creator-link svelte-olnzsm\"");
+            sb_append(sb, "<button type=\"button\" class=\"creator-link svelte-kcz1lc\"");
             sb_profile_click(sb, t);
             sb_append(sb, ">");
             sb_append_esc(sb, t);
             sb_append(sb, "</button>");
         }
     }
-    sb_append(sb, "</div>  <div class=\"full-details-container svelte-olnzsm\"><button type=\"button\" class=\"full-details-btn svelte-olnzsm\" onclick=\"v10mk.info()\"><i class=\"material-icons svelte-olnzsm\">info</i> <span>Item Info</span></button></div> ");
+    sb_append(sb, "</div>  <div class=\"full-details-container svelte-kcz1lc\"><button type=\"button\" class=\"full-details-btn svelte-kcz1lc\" onclick=\"v10mk.info()\"><i class=\"material-icons svelte-kcz1lc\">info</i> <span>Item Info</span></button></div> ");
     if (can_list) {
-        sb_append(sb, "<div class=\"list-button-container svelte-olnzsm\">");
+        sb_append(sb, "<div class=\"list-button-container svelte-kcz1lc\">");
         char oc[32];
         snprintf(oc, sizeof(oc), "v10mk.list(%d)", M.detail);
         button(sb, "accept", 1, M.busy, oc, "List Item");
         sb_append(sb, "</div>");
     }
-    sb_append(sb, "</div></div> <div class=\"tabs-content-section svelte-olnzsm\"><div class=\"tabs-section svelte-olnzsm\">");
+    sb_append(sb, "</div></div> <div class=\"tabs-content-section svelte-kcz1lc\"><div class=\"tabs-section svelte-kcz1lc\">");
     static const char *const dtabs[3] = {"Listings", "Stats", "Owners"};
     tabs_strip(sb, dtabs, 3, M.dtab, 0, "v10mk.dtab");
-    sb_append(sb, "</div> <div class=\"tab-content svelte-olnzsm\">");
+    sb_append(sb, "</div> <div class=\"tab-content svelte-kcz1lc\">");
     if (M.dtab == 0) {
         const AccountInfo *a = acc();
         int n = 0;
         const cJSON *l;
         cJSON_ArrayForEach(l, M.dlist) if (!a || strcmp(jstr(l, "p"), a->name) != 0) n++; // "Items sold by you are not shown here"
-        sb_appendf(sb, "<div class=\"listings-section svelte-olnzsm\"><h4 class=\"listings-title svelte-olnzsm\">Available Listings (%d)</h4> ", n);
+        sb_appendf(sb, "<div class=\"listings-section svelte-kcz1lc\"><h4 class=\"listings-title svelte-kcz1lc\">Available Listings (%d)</h4> ", n);
         if (!n) {
-            sb_append(sb, "<div class=\"empty-listings svelte-olnzsm\"><div class=\"svelte-olnzsm\">No listings available for this item</div> <div class=\"empty-note svelte-olnzsm\">Items sold by you are not shown here</div></div>");
+            sb_append(sb, "<div class=\"empty-listings svelte-kcz1lc\"><div class=\"svelte-kcz1lc\">No listings available for this item</div> <div class=\"empty-note svelte-kcz1lc\">Items sold by you are not shown here</div></div>");
         } else {
-            sb_append(sb, "<div class=\"listings-list svelte-olnzsm\">");
+            sb_append(sb, "<div class=\"listings-list svelte-kcz1lc\">");
             cJSON_ArrayForEach(l, M.dlist) { // the brain sends them cheapest first
                 if (a && !strcmp(jstr(l, "p"), a->name)) continue;
                 char p[32];
                 fmt(p, sizeof(p), jnum(l, "f"));
-                sb_appendf(sb, "<div class=\"listing-item svelte-olnzsm\"><div class=\"listing-info svelte-olnzsm\"><div class=\"listing-price svelte-olnzsm\">%s KR    </div> ", p);
+                sb_appendf(sb, "<div class=\"listing-item svelte-kcz1lc\"><div class=\"listing-info svelte-kcz1lc\"><div class=\"listing-price svelte-kcz1lc\">%s KR    </div> ", p);
                 if (jstr(l, "p")[0]) {
-                    sb_append(sb, "<div class=\"listing-seller svelte-olnzsm\">Seller:  <button type=\"button\" class=\"seller-link svelte-olnzsm\"");
+                    sb_append(sb, "<div class=\"listing-seller svelte-kcz1lc\">Seller:  <button type=\"button\" class=\"seller-link svelte-kcz1lc\"");
                     sb_profile_click(sb, jstr(l, "p"));
                     sb_append(sb, ">");
                     sb_append_esc(sb, jstr(l, "p"));
@@ -1831,7 +1838,7 @@ static void view_detail(StrBuf *sb) {
 #else
                     localtime_r(&t, &tmv);
 #endif
-                    sb_appendf(sb, "<div class=\"listing-time svelte-olnzsm\">Listed: %d/%d/%d</div>", tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year + 1900);
+                    sb_appendf(sb, "<div class=\"listing-time svelte-kcz1lc\">Listed: %d/%d/%d</div>", tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year + 1900);
                 }
                 sb_append(sb, "</div> ");
                 if (a) {
@@ -1847,7 +1854,7 @@ static void view_detail(StrBuf *sb) {
     } else if (M.dtab == 1) {
         detail_stats(sb);
     } else {
-        sb_append(sb, "<div class=\"owners-section svelte-olnzsm\">");
+        sb_append(sb, "<div class=\"owners-section svelte-kcz1lc\">");
         owners_list(sb, 0);
         sb_append(sb, "</div>");
     }

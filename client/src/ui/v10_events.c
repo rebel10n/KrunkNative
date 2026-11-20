@@ -47,6 +47,8 @@ const LiveEvents *client_live_events(void) {
     return &E.list;
 }
 
+static void event_tile_update(int force);
+
 static void events_set(const cJSON *events, const char *source) {
     live_events_parse(&E.list, cJSON_IsArray(events) ? events : NULL);
     E.loaded = 1;
@@ -57,6 +59,7 @@ static void events_set(const cJSON *events, const char *source) {
     }
     fprintf(stderr, "[events] %d live event(s) from %s%s%s\n", E.list.count, source, E.list.count ? ": " : "", ids);
     menu_rerender_if_open(CHAL_WINDOW); // the Event Challenges section follows the list
+    event_tile_update(1);                // so does the menu's event tile
 }
 
 static void on_events(void *user, const int status, const char *body, const size_t length) {
@@ -90,6 +93,7 @@ static void events_file(void) {
 void v10_events_tick(void) {
     client_event_objects_frame(menu_ui()->client); // event_objects.c: GAME_CONFIG can make the game custom after its INIT
     if (!E.file_checked) events_file();
+    event_tile_update(0); // the menu's event tile: its countdown every 30 s, the round's event when it changes
     if (E.fixed || E.inflight || backend_available() != 1) return;
     const double now = client_live_events_now_ms();
     const int stale = !E.loaded || now - E.fetched_at >= EVENTS_REFRESH_MS;
@@ -112,7 +116,95 @@ void v10_events_scenario(const cJSON *events, const double now_ms) {
     events_set(events, "the scenario");
 }
 
+/* ------------------------------------------------------------------ the menu's event tile */
+
+// v10.0.7's event tile (svelte-18gradk, deob-10.0.7.js:146873-146877, its component :148238-148290): a button in the
+// menu's right panel (#tlInfHold's second slot: after the guest's earned box, before Live Streams, :146880) while the
+// round's active event (UTILS.getActiveEvent(eventIndex), :226479) has not ended. It shows the event art, the "EVENT" tag,
+// the name and "Starts in" / "Ends in" with the bundle's d h / h m / m format, refreshed every 30 s (:148244), in the
+// event's accent color (event.color || #fbc02d, :148250); a click is playSelect() + eventPopup() (:148230). The art is
+// left out when it fails to load (:148270); KrunkNative's engine draws a missing image as nothing, so it always goes in.
+#define EVENT_TILE_ID "knEventTile"
+#define EVENT_TILE_REFRESH_MS (30.0 * 1000.0)
+
+static struct {
+    char key[192];   // what the tile shows now ("" = no tile)
+    double drawn_at; // client_live_events_now_ms() of the last check
+    int event_index; // the round's eventIndex at that check: a new round's event redraws at once
+} T;
+
+// the bundle's duration text: days and hours, else hours and minutes, else minutes (at least 1)
+static void tile_duration(char *out, const size_t n, const double ms) {
+    const long minutes = ms > 0.0 ? (long) (ms / 60000.0) : 0;
+    const long days = minutes / 1440, hours = minutes % 1440 / 60;
+    if (days) snprintf(out, n, "%ldd %ldh", days, hours);
+    else if (hours) snprintf(out, n, "%ldh %ldm", hours, minutes % 60);
+    else snprintf(out, n, "%ldm", minutes > 1 ? minutes : 1);
+}
+
+static void event_tile_update(const int force) {
+    const double now = client_live_events_now_ms();
+    const Client *client = menu_ui()->client;
+    const int event_index = client ? client->game.event_index : 0;
+    if (!force && event_index == T.event_index && T.drawn_at > 0.0 && now - T.drawn_at < EVENT_TILE_REFRESH_MS) return;
+    T.drawn_at = now;
+    T.event_index = event_index;
+    const HtmlElem panel = html_dom_by_id("tlInfHold");
+    if (!panel) return;
+    const LiveEvent *e = live_events_active(&E.list, event_index, now);
+    // open-ended events (KrunkNative's feed, end 0) count as running; v10's always end
+    const int on = e && (e->end_ms <= 0.0 || e->end_ms > now);
+    char when[48] = "", key[sizeof T.key] = "";
+    if (on) {
+        char span[24];
+        const int upcoming = e->start_ms > now;
+        tile_duration(span, sizeof(span), upcoming ? e->start_ms - now : e->end_ms - now);
+        if (upcoming) I18N_FMT(when, "menu.event.starts", span);
+        else if (e->end_ms > 0.0) I18N_FMT(when, "menu.event.ends", span);
+        snprintf(key, sizeof(key), "%d|%s|%s|%s", e->id, e->color, e->name, when);
+    }
+    HtmlElem tile = html_dom_by_id(EVENT_TILE_ID);
+    if (!strcmp(key, T.key) && (tile != 0) == on) return;
+    snprintf(T.key, sizeof(T.key), "%s", key);
+    if (tile) html_dom_remove(tile);
+    if (!on) return;
+    char path[96], url[256];
+    live_event_image(e, e->id, path, sizeof(path));
+    ui_img_url(path, url, sizeof(url));
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<button type=\"button\" class=\"event-tile svelte-18gradk\" id=\"" EVENT_TILE_ID "\" style=\"--event-accent: %s\" "
+                    "onclick=\"playSelect();eventPopup()\"><div class=\"event-tile__art svelte-18gradk\">"
+                    "<img alt=\"\" draggable=\"false\" class=\"svelte-18gradk\" src=\"",
+               e->color[0] ? e->color : "#fbc02d");
+    sb_append_esc(&sb, url);
+    sb_append(&sb, "\"></div> <div class=\"event-tile__info svelte-18gradk\"><span class=\"event-tile__tag svelte-18gradk\">");
+    sb_append_esc(&sb, I18N("menu.event.tag", "EVENT"));
+    sb_append(&sb, "</span> <span class=\"event-tile__name svelte-18gradk\">");
+    sb_append_esc(&sb, e->name);
+    sb_append(&sb, "</span> <span class=\"event-tile__time svelte-18gradk\">");
+    sb_append_esc(&sb, when);
+    sb_append(&sb, "</span></div></button>");
+    char *html = sb_finish(&sb);
+    // the slot: after the guest's earned box when it is there, else after the ad row; Live Streams stays below
+    const HtmlElem earned = html_dom_by_id("knGuestEarned"), ads = html_dom_by_id("topLeftAdHolder");
+    const HtmlElem before = earned ? earned : ads;
+    html_dom_insert_html(before ? before : panel, before ? HTML_INSERT_AFTER_END : HTML_INSERT_AFTER_BEGIN, html);
+    free(html);
+}
+
 /* ------------------------------------------------------------------ window.eventPopup */
+
+// acc.skins has the index with cnt > 0 (v10.0.7's owned check on the reward tiles, deob-10.0.7.js:228462-228466)
+static int reward_owned(const int skin) {
+    const AccountInfo *acc = active_account();
+    const cJSON *skins = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, skins) {
+        const cJSON *ind = cJSON_GetObjectItem(row, "ind"), *cnt = cJSON_GetObjectItem(row, "cnt");
+        if (cJSON_IsNumber(ind) && ind->valueint == skin) return !cJSON_IsNumber(cnt) || cnt->valueint > 0;
+    }
+    return 0;
+}
 
 // the reward tiles' sprite-sheet animation (UTILS.sprayAnimation, deob-10.0.3.js:27896-27902)
 static void spray_animation(StrBuf *sb, const ViewerSkin *skin, const char *name) {
@@ -180,7 +272,9 @@ static void event_popup(void) {
             } else {
                 sb_append(&skins, "background-size: contain;background-position: center;");
             }
-            sb_appendf(&skins, "border: 3px solid %s;' onclick='viewItem(%d)'></div>", g_viewer_rarities[r].color, index);
+            // v10.0.7: the tile is the owned mark's containing block, and an owned reward gets the check
+            sb_appendf(&skins, "border: 3px solid %s;position:relative;' onclick='viewItem(%d)'>%s</div>", g_viewer_rarities[r].color, index,
+                       reward_owned(index) ? "<i class='material-icons eventPopOwned'>check_circle</i>" : "");
         }
     }
     if (frame_count) {

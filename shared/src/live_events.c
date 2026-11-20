@@ -80,6 +80,14 @@ int live_events_parse(LiveEvents *out, const cJSON *events) {
         if (ext && ext[0] && strlen(ext) < sizeof(ev->img_ext) &&
             strspn(ext, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == strlen(ext))
             snprintf(ev->img_ext, sizeof(ev->img_ext), "%s", ext);
+        // color: the menu's event tile accent (v10.0.7, `event.color || "#fbc02d"`, deob-10.0.7.js:148250). It goes into
+        // a style attribute: "#" and 3 / 4 / 6 / 8 hex digits only, else the default ("")
+        const char *color = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "color"));
+        const size_t color_len = color ? strlen(color) : 0;
+        if (color && color[0] == '#' && color_len < sizeof(ev->color) &&
+            (color_len == 4 || color_len == 5 || color_len == 7 || color_len == 9) &&
+            strspn(color + 1, "0123456789abcdefABCDEF") == color_len - 1)
+            snprintf(ev->color, sizeof(ev->color), "%s", color);
         le_desc(ev, cJSON_GetObjectItemCaseSensitive(e, "longDesc"));
         ev->no_challenges = (unsigned char) le_true(cJSON_GetObjectItemCaseSensitive(e, "noChallenges"));
         ev->limited_time_mode = (unsigned char) le_true(cJSON_GetObjectItemCaseSensitive(e, "limitedTimeMode"));

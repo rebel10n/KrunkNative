@@ -17206,11 +17206,16 @@ input[type="search"]::-webkit-search-results-decoration { display: none; }
 .bm-btn-cancel.svelte-dk2h1b {background:rgba(255, 255, 255, 0.1);color:rgba(255, 255, 255, 0.85);}
 .bm-btn-buy.svelte-dk2h1b {background:#41c300;color:#fff;}
 .bm-btn-buy.svelte-dk2h1b:hover:not(:disabled) {background:#4fd80a;}
-.bulk-check.svelte-1wcm5z8, .bulk-lock.svelte-1wcm5z8 {position:absolute;top:6px;left:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:rgba(0, 0, 0, 0.75);border-radius:4px;pointer-events:none;}
-.bulk-check.svelte-1wcm5z8 i.svelte-1wcm5z8 {font-size:24px;color:#fbc02d;}
-.bulk-lock.svelte-1wcm5z8 i.svelte-1wcm5z8 {font-size:18px;color:#ccc;}
-.bulk-lock.svelte-1wcm5z8 {pointer-events:auto;}
-.bulk-check-btn.svelte-1wcm5z8 {border:none;padding:0;cursor:pointer;pointer-events:auto;z-index:2;}
+.bulk-check.svelte-1wcm5z8, .bulk-lock.svelte-1wcm5z8,
+.bulk-check.svelte-1n21gx, .bulk-lock.svelte-1n21gx {position:absolute;top:6px;left:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:rgba(0, 0, 0, 0.75);border-radius:4px;pointer-events:none;}
+.bulk-check.svelte-1wcm5z8 i.svelte-1wcm5z8, .bulk-check.svelte-1n21gx i.svelte-1n21gx {font-size:24px;color:#fbc02d;}
+.bulk-lock.svelte-1wcm5z8 i.svelte-1wcm5z8, .bulk-lock.svelte-1n21gx i.svelte-1n21gx {font-size:18px;color:#ccc;}
+.bulk-lock.svelte-1wcm5z8, .bulk-lock.svelte-1n21gx {pointer-events:auto;}
+.bulk-check-btn.svelte-1wcm5z8, .bulk-check-btn.svelte-1n21gx {border:none;padding:0;cursor:pointer;pointer-events:auto;z-index:2;}
+/* KrunkNative's own select-mode states for the market inventory's cards (v10.0.7 moved the check onto the card
+   component, svelte-1n21gx): a picked card gets a gold ring, one that can't be picked (locked, not listable) fades */
+.item-wrapper.bulk-selected.svelte-1n21gx {box-shadow:0 0 0 3px #fbc02d;border-radius:6px;}
+.item-wrapper.bulk-dim.svelte-1n21gx {opacity:0.4;}
 .bulk-bar.svelte-1wcm5z8 {display:flex;flex-direction:column;gap:8px;padding:12px 16px;background:#2a2a2a;border-top:1px solid rgba(255, 255, 255, 0.1);}
 .bulk-bar-actions.svelte-1wcm5z8 {display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .bulk-count.svelte-1wcm5z8 {font-size:16px;font-weight:700;}
@@ -17239,3 +17244,20 @@ input[type="search"]::-webkit-search-results-decoration { display: none; }
 .bulk-destroy.svelte-1wcm5z8 {background:#ed4242;border-color:#ed4242;}
 .buy-multiple-container.svelte-kcz1lc {margin-left:auto;}
 .buy-multiple-container.svelte-kcz1lc i {font-size:18px;vertical-align:middle;}
+
+/* KrunkNative's own styles for v10.0.7's menu event tile (client/src/ui/v10_events.c, the markup of deob-10.0.7.js:146874)
+   and the popup's owned reward mark (.eventPopOwned, :228468). Written for Box Office, not taken from Krunker's sheet:
+   a 300 x 88 card in the right panel, the event art on the left, the tag / name / countdown on the right, tinted by the
+   event's --event-accent. */
+.event-tile.svelte-18gradk {display:flex;align-items:stretch;width:300px;height:88px;margin:0;padding:0;border:none;
+  border-left:4px solid var(--event-accent, #fbc02d);border-radius:6px;overflow:hidden;cursor:pointer;pointer-events:auto;
+  background:rgba(0, 0, 0, 0.6);color:#fff;font-family:inherit;text-align:left;box-sizing:border-box;}
+.event-tile.svelte-18gradk:hover {background:rgba(0, 0, 0, 0.75);}
+.event-tile__art.svelte-18gradk {flex:0 0 84px;display:flex;align-items:center;justify-content:center;background:rgba(255, 255, 255, 0.06);}
+.event-tile__art.svelte-18gradk img.svelte-18gradk {width:84px;height:84px;object-fit:cover;}
+.event-tile__info.svelte-18gradk {flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:8px 12px;}
+.event-tile__tag.svelte-18gradk {align-self:flex-start;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:1px;
+  color:#111;background:var(--event-accent, #fbc02d);}
+.event-tile__name.svelte-18gradk {font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.event-tile__time.svelte-18gradk {font-size:13px;color:rgba(255, 255, 255, 0.75);}
+.eventPopOwned {position:absolute;right:2px;bottom:2px;font-size:20px;color:#3be354;text-shadow:0 0 3px rgba(0, 0, 0, 0.9);pointer-events:none;}

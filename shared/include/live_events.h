@@ -36,6 +36,7 @@ typedef struct {
     double start_ms, end_ms;        // new Date(start / end).getTime(); end 0 = open-ended (KrunkNative's feed)
     double reveal_ms;               // reveal, 0 = none
     char img_ext[LIVE_EVENT_EXT_SIZE]; // imgExt (letters and digits only), "" = "png"
+    char color[10];                 // color: "#rgb" .. "#rrggbbaa" (the menu's event tile accent), "" = #fbc02d
     // longDesc as text: v10 writes it as markup; KrunkNative's feed never carries markup to the clients, so it is
     // a string, or a list of lines the popup shows as <li> items (eventPopInfo > li, main.css). Lines are '\n'-joined.
     char long_desc[LIVE_EVENT_DESC_SIZE];

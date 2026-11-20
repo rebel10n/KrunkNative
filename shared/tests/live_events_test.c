@@ -65,10 +65,10 @@ static int reward(const LiveEvent *e, const int index, const int map, const doub
 
 static void test_parse(void) {
     LiveEvents evs = parse("[{\"id\":8,\"name\":\"Halloween\",\"startsAt\":\"2026-10-25T00:00:00Z\",\"endsAt\":\"2026-11-02T00:00:00Z\","
-                           "\"reveal\":86400000,\"imgExt\":\"webp\",\"longDesc\":[\"Hunt\",\"Collect\"],\"noChallenges\":1,"
+                           "\"reveal\":86400000,\"imgExt\":\"webp\",\"color\":\"#8E5cff\",\"longDesc\":[\"Hunt\",\"Collect\"],\"noChallenges\":1,"
                            "\"rewards\":{\"skins\":[7540,\"7541\",-3],\"weights\":[0,0,50,50]},\"rewardChance\":25,"
                            "\"eligibleMaps\":[0,3],\"limitedTimeMode\":true,\"eventObjects\":true},"
-                           "{\"id\":4,\"name\":\"<b>x\",\"start\":1000,\"end\":2000,\"imgExt\":\"../a\",\"longDesc\":\"one\\ntwo\"},"
+                           "{\"id\":4,\"name\":\"<b>x\",\"start\":1000,\"end\":2000,\"imgExt\":\"../a\",\"color\":\"red;x\",\"longDesc\":\"one\\ntwo\"},"
                            "{\"id\":\"x\"}, 7]");
     CHECK(evs.count == 3, "three objects kept, the number dropped: %d", evs.count);
     const LiveEvent *h = &evs.events[0];
@@ -84,6 +84,8 @@ static void test_parse(void) {
     const LiveEvent *a = &evs.events[1];
     CHECK(a->start_ms == 1000.0 && a->end_ms == 2000.0, "v10's start / end names are read too");
     CHECK(!a->img_ext[0] && !a->long_desc_list && !strcmp(a->long_desc, "one two"), "a path imgExt is dropped, newlines of a text become spaces");
+    CHECK(!strcmp(h->color, "#8E5cff") && !a->color[0] && !evs.events[2].color[0],
+          "color (the menu event tile accent, v10.0.7): a hex color kept, anything else dropped: '%s' '%s'", h->color, a->color);
     CHECK(a->reward_chance == 100 && !a->has_reward_skins && !a->has_eligible_maps && !a->event_objects, "rewardChance || 100, no lists");
     CHECK(evs.events[2].id == 0, "a non-numeric id is 0");
     char path[64];

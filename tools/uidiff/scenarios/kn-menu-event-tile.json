@@ -1,0 +1,38 @@
+{
+  "ref": "doc/ref/krunknative/kn-menu-event-tile.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 2.0,
+    "events": {
+      "now": 1795000000000,
+      "index": 7,
+      "list": [
+        {
+          "id": 7,
+          "name": "Box Office Night",
+          "color": "#8e5cff",
+          "start": 1795190800000,
+          "end": 1795777600000,
+          "longDesc": "A Box Office test event.",
+          "noChallenges": true
+        }
+      ]
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: v10.0.7's menu event tile (svelte-18gradk, deob-10.0.7.js:146874, its component :148238-148290) for an upcoming event: the right panel (#tlInfHold) shows the tile with event 7's art, the EVENT tag, the name and 'Starts in 2d 5h' in the event's purple accent. KrunkNative's own styles (ui/css/main.css); KN baseline, no Krunker capture."
+}

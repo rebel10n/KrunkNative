@@ -1,5 +1,6 @@
 // Krunker v10.0.2's Wallet and Inventory modal (_52368, v10:145475-145480; the template _52366, the
-// stylesheet svelte-l0gwpc in ui/css/svelte.css). The header's Wallet item (v10's _52516, the
+// stylesheet in ui/css/svelte.css, named svelte-l0gwpc in 10.0.2 and svelte-1wcm5z8 since v10.0.7, deob-10.0.7.js:147378-147412,
+// whose bulk-select / lock rules live in ui/css/main.css). The header's Wallet item (v10's _52516, the
 // backpack in #signedInHeaderBar, v10_menu.c) pushes it: a 1600 x 860 dialog on the view stack
 // (_5235(...).push()) with
 //   - the popup header (svelte-4fhlo6: the backpack icon, "Inventory", and the Catalog button in
@@ -156,13 +157,13 @@ static void junk_text(char *out, const size_t n, const double v) {
 }
 
 static void card(StrBuf *sb, const char *id, const char *name, const char *color, const char *icon_text, const char *icon_mat, const char *amount, const char *symbol) {
-    sb_appendf(sb, "<div class=\"currency-card svelte-l0gwpc\" id=\"%s\" role=\"button\" tabindex=\"0\"><div class=\"currency-icon svelte-l0gwpc\" style=\"color: %s\">",
+    sb_appendf(sb, "<div class=\"currency-card svelte-1wcm5z8\" id=\"%s\" role=\"button\" tabindex=\"0\"><div class=\"currency-icon svelte-1wcm5z8\" style=\"color: %s\">",
                id, color);
-    if (icon_text) sb_appendf(sb, "<span class=\"currency-text svelte-l0gwpc\">%s</span>", icon_text);
-    else sb_appendf(sb, "<span class=\"material-icons svelte-l0gwpc\">%s</span>", icon_mat);
-    sb_append(sb, "</div> <div class=\"currency-info svelte-l0gwpc\"><div class=\"currency-name svelte-l0gwpc\">");
+    if (icon_text) sb_appendf(sb, "<span class=\"currency-text svelte-1wcm5z8\">%s</span>", icon_text);
+    else sb_appendf(sb, "<span class=\"material-icons svelte-1wcm5z8\">%s</span>", icon_mat);
+    sb_append(sb, "</div> <div class=\"currency-info svelte-1wcm5z8\"><div class=\"currency-name svelte-1wcm5z8\">");
     sb_append_esc(sb, name);
-    sb_appendf(sb, "</div> <div class=\"currency-amount svelte-l0gwpc\" style=\"color: %s\">%s %s</div></div></div>", color, amount, symbol);
+    sb_appendf(sb, "</div> <div class=\"currency-amount svelte-1wcm5z8\" style=\"color: %s\">%s %s</div></div></div>", color, amount, symbol);
 }
 
 static void currencies(StrBuf *sb, const AccountInfo *a) {
@@ -170,7 +171,7 @@ static void currencies(StrBuf *sb, const AccountInfo *a) {
     v10_fmt_int(kr, sizeof(kr), floor(a ? a->funds : 0));
     junk_text(junk, sizeof(junk), a ? a->junk : 0);
     v10_fmt_int(rp, sizeof(rp), floor(a ? a->ranked_points : 0));
-    sb_append(sb, "<div class=\"currencies-grid svelte-l0gwpc\">");
+    sb_append(sb, "<div class=\"currencies-grid svelte-1wcm5z8\">");
     card(sb, "knV10WalletKR", I18N("kn.wallet.krunkies", "Krunkies"), "#fbc02d", "KR", NULL, kr, "KR");
     card(sb, "knV10WalletJunk", I18N("kn.wallet.junk", "Junk"), "#cc51f8", NULL, "plumbing", junk, "JNK");
     card(sb, "knV10WalletRP", I18N("kn.wallet.rankedPoints", "Ranked Points"), "#4caf50", NULL, "emoji_events", rp, "RP");
@@ -181,23 +182,23 @@ static void currencies(StrBuf *sb, const AccountInfo *a) {
 static void tile(StrBuf *sb, const WalletStack *s) {
     char onclick[64];
     snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", s->index);
-    sb_appendf(sb, "<div class=\"wallet-item svelte-l0gwpc%s\">", s->count > 1 ? " is-stack" : "");
+    sb_appendf(sb, "<div class=\"wallet-item svelte-1wcm5z8%s\">", s->count > 1 ? " is-stack" : "");
     v10_market_card(sb, s->index, 128, 128, "top-center", onclick, NULL);
     if (s->skin->type == 13) { // a spin ticket: Redeem (v10's spin-ticket-icon, _52335)
         char label[160];
         snprintf(label, sizeof(label), "%s %s", I18N("kn.wallet.redeem", "Redeem"), s->skin->name ? s->skin->name : "");
-        sb_appendf(sb, "<button type=\"button\" class=\"spin-ticket-icon svelte-l0gwpc\" aria-label=\"");
+        sb_appendf(sb, "<button type=\"button\" class=\"spin-ticket-icon svelte-1wcm5z8\" aria-label=\"");
         sb_append_esc(sb, label);
-        sb_appendf(sb, "\" onclick=\"playSelect(0.1),knV10WalletRedeem(%d)\"><i class=\"material-icons svelte-l0gwpc\">casino</i></button>", s->index);
+        sb_appendf(sb, "\" onclick=\"playSelect(0.1),knV10WalletRedeem(%d)\"><i class=\"material-icons svelte-1wcm5z8\">casino</i></button>", s->index);
     }
     {
         char label[160];
         snprintf(label, sizeof(label), "%s %s", I18N("kn.wallet.quickSell", "Quick sell"), s->skin->name ? s->skin->name : "");
-        sb_append(sb, "<button type=\"button\" class=\"quick-sell-icon svelte-l0gwpc\" aria-label=\"");
+        sb_append(sb, "<button type=\"button\" class=\"quick-sell-icon svelte-1wcm5z8\" aria-label=\"");
         sb_append_esc(sb, label);
-        sb_appendf(sb, "\" onclick=\"playSelect(0.1),knV10WalletSell(%d)\"><i class=\"material-icons svelte-l0gwpc\">sell</i></button>", s->index);
+        sb_appendf(sb, "\" onclick=\"playSelect(0.1),knV10WalletSell(%d)\"><i class=\"material-icons svelte-1wcm5z8\">sell</i></button>", s->index);
     }
-    if (s->count > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-l0gwpc\" aria-hidden=\"true\">\xc3\x97%d</div>", s->count);
+    if (s->count > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-1wcm5z8\" aria-hidden=\"true\">\xc3\x97%d</div>", s->count);
     sb_append(sb, "</div>");
 }
 
@@ -253,7 +254,7 @@ static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, c
     const int reason = W_select ? row_reason(g, copy) : MARKET_KEEP_NONE;
     char onclick[64];
     snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", g->item);
-    sb_appendf(sb, "<div class=\"wallet-item svelte-l0gwpc%s%s%s%s\"", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "",
+    sb_appendf(sb, "<div class=\"wallet-item svelte-1wcm5z8%s%s%s%s\"", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "",
                on ? " bulk-selected svelte-1wcm5z8" : "", reason != MARKET_KEEP_NONE ? " bulk-dim svelte-1wcm5z8" : "");
     if (market_keep_reason_name(reason)) { // its keep reason on hover (wallet.bulk.keep.reason.*, deob-10.0.4.js:147624)
         char key[64];
@@ -270,13 +271,13 @@ static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, c
     sb_appendf(sb, "<button type=\"button\" class=\"wallet-lock\" onclick=\"knV10WalletLock(%d,%d)\" aria-label=\"", gi, copy);
     sb_append_esc(sb, locked ? I18N("kn.inv.unlock", "Unlock") : I18N("kn.inv.lock", "Lock"));
     sb_appendf(sb, "\"><i class=\"material-icons\">%s</i></button>", locked ? "lock" : "lock_open");
-    if (stack && g->stack_max > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-l0gwpc\" aria-hidden=\"true\">\xc3\x97%d</div>", g->stack_max);
+    if (stack && g->stack_max > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-1wcm5z8\" aria-hidden=\"true\">\xc3\x97%d</div>", g->stack_max);
     sb_append(sb, "</div>");
 }
 
 // the select toggle (wallet.bulk.select / done, deob-10.0.4.js:147549) over the grid
 static void official_toolbar(StrBuf *sb) {
-    sb_append(sb, "<div class=\"wallet-bulkbar svelte-l0gwpc\">");
+    sb_append(sb, "<div class=\"wallet-bulkbar svelte-1wcm5z8\">");
     sb_appendf(sb, "<button type=\"button\" class=\"bulk-btn svelte-1wcm5z8%s\" onclick=\"knV10WalletSelect()\">", W_select ? " active" : "");
     sb_append_esc(sb, W_select ? I18N("wallet.bulk.done", "Done") : I18N("wallet.bulk.select", "Select"));
     sb_append(sb, "</button></div>");
@@ -391,7 +392,7 @@ static void official_grid(StrBuf *sb) {
     int n = 0;
     const MarketGroup *groups = inv_groups(&n);
     official_toolbar(sb);
-    sb_append(sb, "<div class=\"items-grid svelte-l0gwpc\" id=\"knV10WalletGrid\">");
+    sb_append(sb, "<div class=\"items-grid svelte-1wcm5z8\" id=\"knV10WalletGrid\">");
     int drawn = 0;
     for (int gi = 0; groups && gi < n; gi++) {
         if (groups[gi].stack_id) {
@@ -404,12 +405,12 @@ static void official_grid(StrBuf *sb) {
         }
     }
     if (drawn > W.shown) {
-        sb_append(sb, "<div class=\"wallet-items-sentinel svelte-l0gwpc\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
+        sb_append(sb, "<div class=\"wallet-items-sentinel svelte-1wcm5z8\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
         sb_append_esc(sb, I18N("kn.wallet.loadMore", "Load More"));
         sb_append(sb, "</button></div>");
     }
     if (!drawn) {
-        sb_append(sb, "<div class=\"empty-state svelte-l0gwpc\" id=\"knV10WalletEmpty\"><p class=\"svelte-l0gwpc\">");
+        sb_append(sb, "<div class=\"empty-state svelte-1wcm5z8\" id=\"knV10WalletEmpty\"><p class=\"svelte-1wcm5z8\">");
         if (inv_ready()) sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
         else sb_append_esc(sb, W_inv_err[0] ? W_inv_err : inv_gate_text());
         sb_append(sb, "</p></div>");
@@ -428,15 +429,15 @@ static void grid(StrBuf *sb, const AccountInfo *a) {
     const int cap = stack_count(a) > 0 ? stack_count(a) : 1;
     WalletStack *list = calloc((size_t) cap, sizeof(*list));
     const int n = list ? stacks_of(a, list, cap) : 0;
-    sb_append(sb, "<div class=\"items-grid svelte-l0gwpc\" id=\"knV10WalletGrid\">");
+    sb_append(sb, "<div class=\"items-grid svelte-1wcm5z8\" id=\"knV10WalletGrid\">");
     for (int i = 0; i < n && i < W.shown; i++) tile(sb, &list[i]);
     if (n > W.shown) {
-        sb_append(sb, "<div class=\"wallet-items-sentinel svelte-l0gwpc\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
+        sb_append(sb, "<div class=\"wallet-items-sentinel svelte-1wcm5z8\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
         sb_append_esc(sb, I18N("kn.wallet.loadMore", "Load More"));
         sb_append(sb, "</button></div>");
     }
     if (!n) {
-        sb_append(sb, "<div class=\"empty-state svelte-l0gwpc\" id=\"knV10WalletEmpty\"><p class=\"svelte-l0gwpc\">");
+        sb_append(sb, "<div class=\"empty-state svelte-1wcm5z8\" id=\"knV10WalletEmpty\"><p class=\"svelte-1wcm5z8\">");
         sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
         sb_append(sb, "</p></div>");
     }
@@ -496,16 +497,16 @@ void v10_wallet_note(const int ok, const char *msg) {
 static char *markup(void) {
     const AccountInfo *a = account();
     StrBuf sb = {0};
-    sb_append(&sb, "<div class=\"wallet-root svelte-l0gwpc\" id=\"knV10WalletRoot\" role=\"dialog\" aria-label=\"");
+    sb_append(&sb, "<div class=\"wallet-root svelte-1wcm5z8\" id=\"knV10WalletRoot\" role=\"dialog\" aria-label=\"");
     sb_append_esc(&sb, I18N("kn.wallet.dialog", "Wallet and Inventory"));
     sb_append(&sb, "\">");
     sb_append(&sb, "<div class=\"window-header svelte-4fhlo6\"><i class=\"material-icons window-header-icon svelte-4fhlo6\">backpack</i> <span class=\"window-header-title svelte-4fhlo6\">");
     sb_append_esc(&sb, I18N("kn.wallet.title", "Inventory"));
-    sb_append(&sb, "</span> <button class=\"wallet-catalog-btn svelte-l0gwpc\" type=\"button\" id=\"knV10WalletCatalogBtn\" onclick=\"playSelect(0.1),knV10WalletCatalog()\">"
-                   "<i class=\"material-icons svelte-l0gwpc\">inventory_2</i> <span class=\"svelte-l0gwpc\">");
+    sb_append(&sb, "</span> <button class=\"wallet-catalog-btn svelte-1wcm5z8\" type=\"button\" id=\"knV10WalletCatalogBtn\" onclick=\"playSelect(0.1),knV10WalletCatalog()\">"
+                   "<i class=\"material-icons svelte-1wcm5z8\">inventory_2</i> <span class=\"svelte-1wcm5z8\">");
     sb_append_esc(&sb, I18N("kn.wallet.catalog", "Catalog"));
     sb_append(&sb, "</span></button></div>");
-    sb_append(&sb, "<div class=\"wallet-body svelte-l0gwpc\">");
+    sb_append(&sb, "<div class=\"wallet-body svelte-1wcm5z8\">");
     currencies(&sb, a);
     grid(&sb, a);
     sb_append(&sb, "</div>");
