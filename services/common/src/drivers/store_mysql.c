@@ -153,6 +153,9 @@ static char *bind_params(my *c, const char *sql, int n, const char *const *param
     return kn_store_sql_inline(sql, n, params, my_escape, c);
 }
 
+/* JSON columns: MySQL reports MYSQL_TYPE_JSON; a MariaDB server's JSON is LONGTEXT, known as JSON only through
+ * Connector/C's extended metadata, so a MariaDB server through MySQL's libmysqlclient answers JSON as text (build
+ * against libmariadb for MariaDB, as deploy and the CI services job do). */
 static kn_db_type field_type(const MYSQL_FIELD *f) {
 #ifdef MARIADB_FIELD_ATTR_LAST /* MariaDB Connector/C: extended metadata */
     MARIADB_CONST_STRING attr = {0};

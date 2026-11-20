@@ -593,7 +593,8 @@ jobs:
             libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev \
             libxcb-present-dev libegl-dev \
             postgresql-client mariadb-client redis-server \
-            python3-websockets python3-numpy python3-cryptography
+            python3-websockets python3-numpy python3-cryptography \
+            libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libhiredis-dev libcurl4-openssl-dev libwebp-dev
           # the tests' work directories live under ~/.cache (the runner has none)
           mkdir -p ~/.cache
 
