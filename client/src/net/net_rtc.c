@@ -135,19 +135,29 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
     s.fail = fail;
     (async () => {
         try {
+            // the page's hot loader opened this channel already (platform/web/hot-loader.js, doc/web-hot-loader.md):
+            // taken as it is, opening or open, when it goes to this target
+            const hot = typeof window !== 'undefined' && window.__knHot ? window.__knHot.rtc : null;
+            const adopt = hot && !hot.adopted && !hot.failed && hot.target === target && hot.pc && hot.dc &&
+                          (hot.dc.readyState === 'open' || hot.dc.readyState === 'connecting');
             let url = null;
-            try { url = new URLSearchParams(location.search).get('rtc'); } catch (e) {}
+            if (adopt) url = hot.url;
+            if (!adopt) try { url = new URLSearchParams(location.search).get('rtc'); } catch (e) {}
             if (!url && Module['krunkNativeRtcUrl'] && Module['krunkNativeRtcUrl'] !== 'off') url = Module['krunkNativeRtcUrl']; // kn-rtc meta (loader.js)
             if (!url) {
                 const r = await fetch('rtc.json', {cache: 'no-store'});
                 if (!r.ok) throw new Error('no WebRTC gateway configured (rtc.json ' + r.status + ')');
                 url = (await r.json()).url;
             }
-            if (target) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'target=' + encodeURIComponent(target);
+            if (target && !adopt) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'target=' + encodeURIComponent(target);
             s.url = url;
-            console.log('[rtc] connecting to ' + url);
-            const pc = new RTCPeerConnection({iceServers: []});
-            const dc = pc.createDataChannel('knet', {ordered: false, maxRetransmits: 0});
+            console.log(adopt ? "[rtc] taking the hot loader's channel to " + url + ' (' + hot.dc.readyState + ')' : '[rtc] connecting to ' + url);
+            const pc = adopt ? hot.pc : new RTCPeerConnection({iceServers: []});
+            const dc = adopt ? hot.dc : pc.createDataChannel('knet', {ordered: false, maxRetransmits: 0});
+            if (adopt) {
+                hot.adopted = true;
+                s.peer = hot.peer;
+            }
             s.pc = pc;
             s.dc = dc;
             dc.binaryType = 'arraybuffer';
@@ -205,6 +215,22 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
                 _kn_dg_on_datagram(gen, p, n);
                 _free(p);
             };
+            if (adopt) {
+                // what the channel received before the client (in order) comes after its open
+                const early = hot.msgs.splice(0);
+                const flush = () => early.forEach((d) => dc.onmessage({data: d}));
+                if (dc.readyState === 'open') {
+                    s.times.answer = 0;
+                    setTimeout(() => { dc.onopen(); flush(); }, 0);
+                } else {
+                    s.phase = 'connecting';
+                    const opened = dc.onopen;
+                    dc.onopen = () => { opened(); flush(); };
+                    s.timers.push(setTimeout(() => { if (!s.up) fail("the hot loader's channel did not open within " + (signal_ms + connect_ms) + ' ms'); },
+                                             signal_ms + connect_ms));
+                }
+                return;
+            }
             await pc.setLocalDescription(await pc.createOffer());
             const abort = new AbortController();
             s.timers.push(setTimeout(() => abort.abort(), signal_ms));

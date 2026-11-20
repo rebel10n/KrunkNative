@@ -43,6 +43,7 @@
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
+#include <net_hot.h>         // the web hot loader's early seek (doc/web-hot-loader.md)
 #include <strike_ui.h>       // Krunker Strike's own server password prompt (strike_menu.c)
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
 #include <quick_play_retry.h> // a Quick Play search answered "full" is tried again (quick_play_retry.c)
@@ -657,6 +658,10 @@ static void fatal_error(const char *message) {
 }
 
 // A seek in flight (mm-token, doc/v10/matchmaker-token.md): GET /mm/generate-token, then
+// The web hot loader's answer (net_hot.h) for the startup seek it stands for: seek() hands it to on_seek instead of
+// asking the matchmaker (hot_adopt). NULL otherwise.
+static char *g_hot_answer;
+
 // /mm/seek-game with that ?validationToken= (Krunker's WP_MMToken / fetchValidationToken).
 typedef struct SeekReq {
     char *path;   // /mm/seek-game?... without the token
@@ -1308,6 +1313,13 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
         req->serial = ++g_seek_serial;
         req->action = action;
         if (req->qp) quick_play_retry_out();
+    }
+    if (req && req->path && g_hot_answer) { // the page's hot seek answered this seek already (hot_adopt)
+        char *body = g_hot_answer;
+        g_hot_answer = NULL;
+        on_seek(req, 200, body, strlen(body));
+        free(body);
+        return;
     }
     if (!req || !req->path || !seek_request_token(req)) {
         seek_req_free(req);
@@ -4916,6 +4928,47 @@ static void direct_account_tick(Client *client, const int direct) {
     if (direct && !client->offline && client->net_connected && !client->in_game) client_net_switch_server(client);
 }
 
+// The web hot loader (net_hot.h, doc/web-hot-loader.md): the page sought through /mm/hot-seek before the client ran, and
+// holds the channel to that server open. The startup seek waits for that answer (HOT_WAIT_MS after the page started) and
+// takes it as its own seek-game answer: no ping list, no region race, no token, no seek of its own. A signed-in player's
+// seek still goes out (the page's ticket is a guest's), in the answer's region. HOT_TICKET_MS: past it the answer's
+// ticket may have expired (brain.join_ttl_s, 30 s): the client seeks itself.
+#define HOT_WAIT_MS 8000.0
+#define HOT_TICKET_MS 20000.0
+
+// 1 = the startup seek went out from the hot answer (game: the lobby it asked for, NULL = any)
+static int hot_adopt(const char *game) {
+    const int st = net_hot_seek_status();
+    if (st < 0 && st != -2) return 0; // no hot loader on this page
+    char why[96] = "", want[160];
+    net_hot_seek_game(want, sizeof(want));
+    if (st != 200) snprintf(why, sizeof(why), st == -2 ? "the request failed" : "HTTP %d", st);
+    else if (strcmp(want, game ? game : "") != 0) snprintf(why, sizeof(why), "the client seeks another lobby");
+    else if (g_pin != PIN_NONE) snprintf(why, sizeof(why), "the client is pinned to a server");
+    else if (net_hot_age_ms() > HOT_TICKET_MS) snprintf(why, sizeof(why), "too old (%.0f s): its ticket may have expired", net_hot_age_ms() / 1000.0);
+    if (why[0]) {
+        net_hot_seek_drop(why);
+        KN_LOG_DEBUG1("[mm] hot seek not used: %s\n", why);
+        return 0;
+    }
+    char *body = net_hot_seek_take();
+    if (!body) return 0;
+    cJSON *a = cJSON_Parse(body);
+    const char *region = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "region"));
+    if (region && region[0]) snprintf(g_region, sizeof(g_region), "%s", region);
+    const int account = active_account() && account_session_token()[0];
+    printf("[mm] hot seek: %s in %s, answered before the client ran%s\n", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "gameId")),
+           g_region, account ? " (signed in: the client seeks with the account there)" : "");
+    cJSON_Delete(a);
+    if (account) free(body); // the page's ticket is a guest's: the account's seek goes out, in that region
+    else g_hot_answer = body;
+    if (!game) qp_begin();
+    seek_in_region(game);
+    free(g_hot_answer); // (seek did not go out: pinned)
+    g_hot_answer = NULL;
+    return 1;
+}
+
 void servers_ui_tick(Client *client) {
     link_tick(client);
     if (g_gen_avail != 1 && backend_available() == 1) { // the brain answered the probe after this window was generated
@@ -4962,6 +5015,10 @@ void servers_ui_tick(Client *client) {
     if (!g_brain_mode) return;
     if (!g_started) {
         if (g_startup_hold) return; // a restart's resume rejoins its lobby instead (servers_ui_resume_rejoin)
+        if (net_hot_seek_status() == 0) { // the page's hot seek is still out (hot_adopt): its answer is the startup seek's
+            if (net_hot_age_ms() < HOT_WAIT_MS) return;
+            net_hot_seek_drop("no answer in time");
+        }
         // readyLoad restores the saved session before the seek; wait briefly for it so
         // the lobby sees the account (the ticket carries it).
         const int has_token = account_session_token()[0] != 0; // the saved session (the alt vault's, or legacy)
@@ -5004,7 +5061,7 @@ void servers_ui_tick(Client *client) {
         if (!game && seek_prefs_on_launch()) { // Auto Seek on Launch: the Quickplay seek, once the menu is up
             if (!menu_ready_for_launch()) return;
             g_started = 1;
-            launch_seek();
+            if (!hot_adopt(NULL)) launch_seek(); // (the web always seeks Box Office: launch_seek's KN path)
             return;
         }
         g_started = 1;
@@ -5022,6 +5079,10 @@ void servers_ui_tick(Client *client) {
         }
 #endif
         // no lobby named: a new-game seek (Auto Seek on Launch off), so a full lobby is tried again (quick_play_retry.h)
+        if (hot_adopt(game)) { // the page's hot seek (it took qp_begin's part)
+            free(game);
+            return;
+        }
         if (!game) qp_begin();
         (void) qp_started(start_seek(game));
         free(game);

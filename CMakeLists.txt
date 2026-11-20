@@ -377,6 +377,9 @@ if (EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/assets ${WEB_DIST_DIR}/assets
         # Add to Home Screen (PWA): manifest, icons and the <head> links of index.html
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/platform/web/pwa.py ${WEB_DIST_DIR}
+        # the hot loader (doc/web-hot-loader.md): the first script of the game page's <head> seeks
+        # and opens the game connection before the client downloads (platform/web/hot_loader.py)
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/platform/web/hot_loader.py ${WEB_DIST_DIR} ${CMAKE_SOURCE_DIR}/shared/include/shared.h
         DEPENDS client
         COMMENT "Assembling web client in ${WEB_DIST_DIR}"
     )
