@@ -34,5 +34,7 @@ Host kn-mnz
 Host kn-ams
   HostName 92.38.186.100
   User root
-  # abulxt's pve_edge_vm installs the controller's id_ed25519.pub on the kn VMs
+  # The CI edge deploy key is in the VM's authorized_keys; use it when present
+  # for local hand deploys. CI environments can fall back to their id_ed25519.
+  IdentityFile ~/.config/kn-secrets/github-ci/edges_ci_ed25519
   IdentityFile ~/.ssh/id_ed25519
