@@ -18,6 +18,7 @@
 #include <app_mode.h>
 #include <audio.h>
 #include <backend.h>
+#include <ui_tooltip.h>
 #include <backend_ui.h>
 #include <kn_captcha.h> // the hub login's captcha (doc/v10/captcha.md)
 #include <krunker_account.h> // krunker_host_url: the data client's webhooks (the hub's maps, mods and search)
@@ -2493,7 +2494,8 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
                     if (!pa) continue;
                     char prev[256];
                     skin_preview(prev, sizeof(prev), pa);
-                    sb_appendf(b, "<div class='oItemHolder'style='border: 2px solid %s;'data-index='%d'>", rarity_color(pa), ids[k][i]);
+                    sb_appendf(b, "<div class='oItemHolder'style='border: 2px solid %s;'data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>",
+                               rarity_color(pa), ids[k][i]);
                     append_skin_img(b, pa, prev, "oItemSprayImg", "oItemImg");
                     sb_append(b, "</div>");
                 }
@@ -4351,7 +4353,11 @@ H(h_remove_friend) {
 // right of the bubble. The item-card form (createTip(el) on a market card) is hub_item_tip.
 H(h_create_tip) {
     UNUSED;
-    if (!ev || !ev->target || !(int) arg_n(args, argc, 1, 0)) return 1;
+    if (!ev || !ev->target) return 1;
+    if (!(int) arg_n(args, argc, 1, 0)) { // createTip(el): an item card's tooltip (hub-10.0.7.js:6879-6884; ui_tooltip.c)
+        ui_tooltip_item(ev->target);
+        return 1;
+    }
     const HtmlElem base = el("uiBase");
     if (!base) return 1;
     for (HtmlElem old; (old = html_dom_query(base, ".tooltip2"));) html_dom_remove(old);
@@ -4380,6 +4386,10 @@ H(h_create_tip) {
 
 H(h_cancel_tip) {
     UNUSED;
+    if (!(int) arg_n(args, argc, 0, 0)) {
+        ui_tooltip_cancel();
+        return 1;
+    }
     const HtmlElem base = el("uiBase");
     const char *sel = (int) arg_n(args, argc, 0, 0) ? ".tooltip2" : ".tooltip";
     for (HtmlElem old; base && (old = html_dom_query(base, sel));) html_dom_remove(old);
@@ -5574,7 +5584,9 @@ static void io_ul(const cJSON *rows) {
             char prev[256], price[32];
             skin_preview(prev, sizeof(prev), pe);
             const char *col = rarity_color(pe);
-            sb_appendf(&sb, "<div class='marketCard%s' id='itemCardmarket_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)'>", g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", i, col, col);
+            // the item's tooltip on hover (createTip(this), hub-10.0.7.js:3210)
+            sb_appendf(&sb, "<div class='marketCard%s' id='itemCardmarket_%d' style='color:%s;border:5px solid %s' data-index='%d' onmouseenter='SOUND.play(`tick_0`,0.1)' "
+                            "onmouseover='createTip(this)' onmouseout='cancelTip()'>", g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", i, col, col, m[i].skin);
             sb_append_esc(&sb, pe->name);
             sb_appendf(&sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
             append_skin_img(&sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
