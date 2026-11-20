@@ -311,12 +311,13 @@ static kn_db_result *run_map_funds(kn_dbconn *c, int n, const char *const *p) {
     int64_t player = 0;
     if (amount > 0) {
         if (db_add_funds(&x, PI(0), -amount, "map_funds", ref, &player) < 0) return dbx_finish(&x, NULL);
-        if (dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_funds = map_funds + {int:$3} WHERE map_id = $2"),
-                     KN_DB_ARGS(P(0), P(1), I64S(amount))) < 0)
+        /* only the parameters a statement uses: PostgreSQL cannot type an unused $n */
+        if (dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_funds = map_funds + {int:$2} WHERE map_id = $1"),
+                     KN_DB_ARGS(P(1), I64S(amount))) < 0)
             return dbx_finish(&x, NULL);
     } else {
-        if (dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_funds = map_funds - {int:$3} WHERE map_id = $2 AND map_funds >= {int:$3}"),
-                     KN_DB_ARGS(P(0), P(1), I64S(-amount))) == 0) {
+        if (dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_funds = map_funds - {int:$2} WHERE map_id = $1 AND map_funds >= {int:$2}"),
+                     KN_DB_ARGS(P(1), I64S(-amount))) == 0) {
             dbx_refuse(&x, "Not enough map funds");
             return dbx_finish(&x, NULL);
         }
@@ -867,6 +868,196 @@ void v10_catalog_map_by_name(kn_http_req *req, const char *name) {
     char arg[160];
     snprintf(arg, sizeof arg, "%s", name);
     kn_db_query_sql(g_b->db, &k_map_detail, KN_DB_ARGS(arg), on_map_detail, req);
+}
+
+/* ---- the hub's map page over the social socket
+ *
+ * The hub (krunker.io/social.html, static/social-CURLIuB7.js, cited hub-10.0.7.js:<line> after the repo's webcrack
+ * pass, doc/v10/parity-audit-2026-11-20-social.md) asks for the same rows and writes as the routes above, as frames:
+ *   ["glb", mapName, ltyp, lord, ltyp2]  -> ["glbR", type, mapName, [name, value, ...]]   (hub-10.0.7.js:3168, 3804-3822)
+ *   ["sd", mapName, player]              -> ["sdR", [{mk, kv}], player]                  (:3654-3680)
+ *   ["dd", player, key, mapId]           -> ["ddR", key, player]                         (:3682-3696)
+ *   ["dkd", mapId, key]                  -> ["po", "SUCCESS", null, text]                (:3649-3653)
+ *   ["mfnds", mapId, 0 deposit | 1 withdraw, amount] -> ["mfr", playerFunds | null]     (:6673-6678, 3796-3803)
+ * The leaderboard's settings come from the map's LEADERBOARD object (ulb / the HTTP route), not from the frame. A
+ * refusal of dd / dkd / mfnds is the hub's "po" error. mfnds moves the exact amount, as the game's Creations window
+ * (deob-10.0.7.js:107760-107764, updateMapFunds with the signed amount): the hub's 10% "Fee" line (calcMapFee,
+ * hub-10.0.7.js:6656-6671) has no rule in game.js, so the Box Office hub shows none. */
+
+typedef struct HubBoard {
+    char name[160];
+    char type[64];
+    int time, desc, custom;
+} HubBoard;
+
+static void hub_board_send(SocialSession *s, const HubBoard *h, cJSON *list) {
+    social_send_n(s, "glbR", 3, cJSON_CreateString(h->type), cJSON_CreateString(h->name), list ? list : cJSON_CreateArray());
+}
+
+static void hub_board_rows(SocialSession *s, kn_db_result *res, void *extra) {
+    const HubBoard *h = extra;
+    cJSON *list = cJSON_CreateArray();
+    if (kn_db_ok(res)) {
+        for (int i = 0; i < kn_db_rows(res); i++) {
+            cJSON_AddItemToArray(list, cJSON_CreateString(kn_db_get(res, i, 1)));
+            cJSON_AddItemToArray(list, cJSON_CreateNumber((double) kn_db_get_int64(res, i, 2, 0)));
+        }
+    }
+    hub_board_send(s, h, list);
+}
+
+static void hub_board_settings(SocialSession *s, kn_db_result *res, void *extra) {
+    HubBoard *h = extra;
+    cJSON *map = kn_db_ok(res) && kn_db_rows(res) > 0 ? cJSON_Parse(kn_db_get(res, 0, 0)) : NULL;
+    const cJSON *objs = map ? cJSON_GetObjectItemCaseSensitive(map, "objects") : NULL;
+    const cJSON *o, *lb = NULL;
+    cJSON_ArrayForEach(o, objs) {
+        if (cJSON_IsObject(o) && kn_json_int(o, "i", -1) == PREFAB_LEADERBOARD) {
+            lb = o;
+            break;
+        }
+    }
+    if (!lb) {
+        cJSON_Delete(map);
+        hub_board_send(s, h, NULL); /* no Leaderboard Display: "No Records Yet" */
+        return;
+    }
+    const char *custom = kn_json_str(lb, "ldc", "");
+    h->custom = custom[0] != 0;
+    h->time = kn_json_int(lb, "ldt", 0) == 1;
+    h->desc = kn_json_int(lb, "ldo", 0) == 1;
+    snprintf(h->type, sizeof h->type, "%s", h->custom ? custom : h->time ? "time" : "score");
+    cJSON_Delete(map);
+    if (h->custom) { /* a custom stat has no Box Office source (as GET /maps/by-name/:name/leaderboard) */
+        hub_board_send(s, h, NULL);
+        return;
+    }
+    HubBoard *next = malloc(sizeof *next);
+    if (!next) {
+        hub_board_send(s, h, NULL);
+        return;
+    }
+    *next = *h;
+    char limit[24], offset[24];
+    acct_itoa(limit, BOARD_PAGE);
+    acct_itoa(offset, 0);
+    social_query(s, &k_board[next->time][next->desc], KN_DB_ARGS(next->name, limit, offset), hub_board_rows, next);
+}
+
+void sh_map_board(SocialSession *s, const cJSON *f) {
+    HubBoard *h = calloc(1, sizeof *h);
+    if (!h) return;
+    snprintf(h->name, sizeof h->name, "%s", fa_str(f, 1) ? fa_str(f, 1) : "");
+    snprintf(h->type, sizeof h->type, "score");
+    social_query(s, &k_board_settings, KN_DB_ARGS(h->name), hub_board_settings, h);
+}
+
+/* the player's rows of a map found by name, for a caller who may manage it (k_data_get by name) */
+static const kn_sql k_hub_data = {
+    .any = "SELECT s.skey, s.svalue FROM ks_storage s JOIN published_maps m ON m.map_id = s.map_id"
+           " JOIN accounts a ON a.id = s.account_id"
+           " WHERE lower(m.map_name) = lower($2) AND lower(a.username) = lower($3) AND m.deleted_at IS NULL AND " MANAGE_SQL
+           " ORDER BY s.skey"};
+
+typedef struct HubData {
+    char player[160];
+    char key[128];
+} HubData;
+
+static void hub_data_rows(SocialSession *s, kn_db_result *res, void *extra) {
+    const HubData *d = extra;
+    cJSON *rows = cJSON_CreateArray();
+    if (kn_db_ok(res)) {
+        for (int i = 0; i < kn_db_rows(res); i++) {
+            cJSON *row = cJSON_CreateObject();
+            cJSON_AddStringToObject(row, "mk", kn_db_get(res, i, 0));
+            cJSON_AddStringToObject(row, "kv", kn_db_get(res, i, 1));
+            cJSON_AddItemToArray(rows, row);
+        }
+    }
+    social_send_n(s, "sdR", 2, rows, cJSON_CreateString(d->player));
+}
+
+void sh_map_data_search(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    HubData *d = calloc(1, sizeof *d);
+    if (!d) return;
+    snprintf(d->player, sizeof d->player, "%s", fa_str(f, 2) ? fa_str(f, 2) : "");
+    char me[24], map[160];
+    snprintf(map, sizeof map, "%s", fa_str(f, 1) ? fa_str(f, 1) : "");
+    social_query(s, &k_hub_data, KN_DB_ARGS(social_viewer(s, me), map, d->player), hub_data_rows, d);
+}
+
+static void hub_refused(SocialSession *s, kn_db_result *res, const char *what) {
+    const char *msg = kn_db_user_message(res);
+    social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(msg ? msg : acct_db_error(res, what)));
+}
+
+static void hub_data_deleted(SocialSession *s, kn_db_result *res, void *extra) {
+    const HubData *d = extra;
+    if (!kn_db_ok(res)) {
+        hub_refused(s, res, "map data");
+        return;
+    }
+    if (d->player[0])
+        social_send_n(s, "ddR", 2, cJSON_CreateString(d->key), cJSON_CreateString(d->player));
+    else
+        social_send_n(s, "po", 3, cJSON_CreateString("SUCCESS"), cJSON_CreateNull(), cJSON_CreateString("Key deleted for every player"));
+}
+
+static void hub_data_delete(SocialSession *s, int64_t map_id, const char *key, const char *player) {
+    if (!social_require_auth(s)) return;
+    if (map_id <= 0 || !key || !*key) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(map_id <= 0 ? MSG_NO_MAP : "A key is required"));
+        return;
+    }
+    HubData *d = calloc(1, sizeof *d);
+    if (!d) return;
+    snprintf(d->key, sizeof d->key, "%s", key);
+    snprintf(d->player, sizeof d->player, "%s", player ? player : "");
+    char me[24], map[24];
+    acct_itoa(map, map_id);
+    social_call(s, &P_MAP_DATA_DELETE, KN_DB_ARGS(social_viewer(s, me), map, d->key, d->player), hub_data_deleted, d);
+}
+
+/* ["dd", player, key, mapId]: one key of one player */
+void sh_map_data_delete(SocialSession *s, const cJSON *f) {
+    const char *player = fa_str(f, 1);
+    if (!player || !*player) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString("A player is required"));
+        return;
+    }
+    hub_data_delete(s, fa_int(f, 3, 0), fa_str(f, 2), player);
+}
+
+/* ["dkd", mapId, key]: the key of every player */
+void sh_map_key_delete(SocialSession *s, const cJSON *f) { hub_data_delete(s, fa_int(f, 1, 0), fa_str(f, 2), NULL); }
+
+static void hub_funds_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    if (!kn_db_ok(res)) {
+        if (kn_db_user_message(res)) hub_refused(s, res, "map funds");
+        else social_send_n(s, "mfr", 1, cJSON_CreateNull());
+        return;
+    }
+    cJSON *v = acct_db_json(res);
+    const cJSON *funds = v ? cJSON_GetObjectItemCaseSensitive(v, "player_funds") : NULL;
+    social_send_n(s, "mfr", 1, cJSON_IsNumber(funds) ? cJSON_CreateNumber(funds->valuedouble) : cJSON_CreateNull());
+    cJSON_Delete(v);
+}
+
+/* ["mfnds", mapId, 0 deposit | 1 withdraw, amount]: the creator's map funds (P_MAP_FUNDS, the signed amount) */
+void sh_map_funds(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    const int64_t map_id = fa_int(f, 1, 0), amount = fa_int(f, 3, 0);
+    if (map_id <= 0 || amount <= 0) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(map_id <= 0 ? MSG_NO_MAP : "An amount of KR is required"));
+        return;
+    }
+    char me[24], map[24], signed_amount[24];
+    acct_itoa(map, map_id);
+    acct_itoa(signed_amount, fa_int(f, 2, 0) == 1 ? -amount : amount);
+    social_call(s, &P_MAP_FUNDS, KN_DB_ARGS(social_viewer(s, me), map, signed_amount), hub_funds_done, NULL);
 }
 
 /* ---- the route table */

@@ -841,6 +841,11 @@ static const SocialRoute k_routes[] = {
     {"unbx", sh_noop},
     {"edMp", sh_edit_map},
     {"ulb", sh_update_map_lb}, /* v10 updateMapLB: the Leaderboard Display of an own map */
+    {"glb", sh_map_board},         /* the hub's map Leaderboard tab (v10_catalog.c) */
+    {"sd", sh_map_data_search},    /* the hub's map Data tab: one player's KrunkScript storage */
+    {"dd", sh_map_data_delete},    /* ... one key of that player */
+    {"dkd", sh_map_key_delete},    /* ... Delete By Key: the key of every player */
+    {"mfnds", sh_map_funds},       /* the hub's Edit popup: deposit / withdraw map funds */
     {"fvM", sh_fav_creation},
     {"ftC", sh_feature_creation},
     {"delC", sh_delete_creation},
@@ -918,6 +923,8 @@ static const LabelClass k_label_class[] = {
     {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
     {"nme", RC_WRITE, ANS_REPLY}, {"uploadS", RC_WRITE, ANS_REPLY}, {"uploadM", RC_WRITE, ANS_REPLY},
     {"uploadMo", RC_WRITE, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY}, {"ulb", RC_WRITE, ANS_REPLY},
+    {"glb", RC_READ, ANS_REPLY}, {"sd", RC_READ, ANS_REPLY}, {"dd", RC_WRITE, ANS_REPLY}, {"dkd", RC_WRITE, ANS_REPLY},
+    {"mfnds", RC_WRITE, ANS_REPLY},
     {"fvM", RC_WRITE, ANS_REPLY}, {"ftC", RC_WRITE, ANS_REPLY}, {"delC", RC_WRITE, ANS_REPLY},
     {"li", RC_WRITE, ANS_REPLY}, {"uli", RC_WRITE, ANS_REPLY}, {"pi", RC_WRITE, ANS_REPLY},
     {"qsi", RC_WRITE, ANS_REPLY}, {"ctr", RC_WRITE, ANS_REPLY}, {"trA", RC_WRITE, ANS_REPLY},

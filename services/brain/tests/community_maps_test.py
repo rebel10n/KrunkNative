@@ -21,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import shutil
+import sqlite3
 import urllib.parse
 import urllib.request
 
@@ -48,6 +50,30 @@ SCHEMA = "kn_test_cm_%d" % os.getpid()
 FAILS = []
 OFFICIAL_COUNT = 47  # map_catalog.h MAP_CATALOG_OFFICIAL_COUNT (Krunker's official list; 46 = Candy Heist, v10.0.4)
 CATEGORY_PARKOUR = 1  # map_catalog.c map_category_name: "Parkour"
+DBCFG = {}  # the scratch store of a non-postgres run (db_scratch.py create)
+
+
+def sql(text):
+    """One statement on the test store (seeding the hub map tools' KrunkScript storage); rows or None."""
+    if DRIVER == "sqlite":
+        con = sqlite3.connect(DBCFG["path"])
+        rows = [["" if v is None else str(v) for v in r] for r in con.execute(text).fetchall()]
+        con.commit()
+        con.close()
+        return rows
+    if DRIVER == "postgres":
+        get = lambda k, d: os.environ.get("KN_DATABASE_" + k.upper(), str(CONFIG_DB.get(k, d)))
+        r = subprocess.run(["psql", "-h", get("host", "127.0.0.1"), "-p", get("port", 5432), "-U", get("user", "krunknative"),
+                            "-d", DB, "-v", "ON_ERROR_STOP=1", "-qAt", "-c", "SET search_path TO %s; %s" % (SCHEMA, text)],
+                           env=dict(os.environ, PGPASSWORD=get("password", "")), capture_output=True, text=True, timeout=30)
+        return None if r.returncode else [l.split("|") for l in r.stdout.splitlines() if l and l != "SET"]
+    tool = shutil.which("mariadb") or shutil.which("mysql")
+    if not tool:
+        return None
+    r = subprocess.run([tool, "--no-defaults", "--protocol=TCP", "-h", DBCFG["host"], "-P", str(DBCFG["port"]), "-u", DBCFG["user"],
+                        "-D", DBCFG["name"], "-N", "-B", "-e", text],
+                       env=dict(os.environ, MYSQL_PWD=DBCFG.get("password", "")), capture_output=True, text=True, timeout=30)
+    return None if r.returncode else [l.split("\t") for l in r.stdout.splitlines() if l]
 
 
 def check(cond, what):
@@ -264,6 +290,48 @@ async def scenario(port):
     r = await alice_sock.call("upMp", "ulb", row.get("map_id") or 0, 1, "Kills", 1)
     check(r == ["upMp", "No leaderboard on this map"], "ulb on a map without a LEADERBOARD: %r" % (r,))
 
+    print("== the hub's map page tools (hub-10.0.7.js glb / sd / dd / dkd / mfnds; v10_catalog.c)")
+    r = await alice_sock.call("glbR", "glb", lb_name, 0, 0, "")
+    check(r == ["glbR", "score", lb_name, []], "glb: Score, no plays yet: %r" % (r,))
+    r = await alice_sock.call("upMp", "ulb", lb_id, 1, "", 1)
+    r = await alice_sock.call("glbR", "glb", lb_name, 0, 0, "")
+    check(r == ["glbR", "time", lb_name, []], "glb follows the map's Leaderboard Display (Time): %r" % (r,))
+    r = await bob_sock.call("glbR", "glb", name, 0, 0, "")
+    check(r == ["glbR", "score", name, []], "glb on a map without a LEADERBOARD: %r" % (r,))
+    bob_name = bob
+    seeded = sql("INSERT INTO ks_storage (account_id, map_id, skey, svalue, scope) VALUES (%d, %d, 'coins', '5', 0), "
+                 "(%d, %d, 'gems', '2', 0), (%d, %d, 'gems', '9', 0)" % (bob_id, lb_id, bob_id, lb_id, alice_id, lb_id))
+    check(seeded is not None, "seeded the map's KrunkNative storage")
+    r = await alice_sock.call("sdR", "sd", lb_name, bob_name.upper())
+    check(r == ["sdR", [{"mk": "coins", "kv": "5"}, {"mk": "gems", "kv": "2"}], bob_name.upper()],
+          "sd: the creator reads a player's keys (name case-insensitive): %r" % (r,))
+    r = await bob_sock.call("sdR", "sd", lb_name, bob_name)
+    check(r == ["sdR", [], bob_name], "sd by someone who may not manage the map: no rows: %r" % (r,))
+    r = await bob_sock.call("po", "dd", bob_name, "coins", lb_id)
+    check(r[0] == "po" and r[1] is None and r[2] == "Map not found", "dd on another creator's map: %r" % (r,))
+    r = await alice_sock.call("ddR", "dd", bob_name, "coins", lb_id, also=("po",))
+    check(r == ["ddR", "coins", bob_name], "dd: one key of one player: %r" % (r,))
+    left = sql("SELECT skey FROM ks_storage WHERE map_id = %d ORDER BY account_id, skey" % lb_id) or []
+    check([x[0] for x in left] == ["gems", "gems"] or sorted(x[0] for x in left) == ["gems", "gems"],
+          "dd removed only that player's coins: %r" % left)
+    r = await alice_sock.call("po", "dkd", lb_id, "gems")
+    check(r[:2] == ["po", "SUCCESS"], "dkd: Delete By Key: %r" % (r,))
+    check(sql("SELECT count(*) FROM ks_storage WHERE map_id = %d" % lb_id) == [["0"]], "dkd removed the key of every player")
+    r = await alice_sock.call("po", "dkd", lb_id, "")
+    check(r[:2] == ["po", None], "dkd without a key is refused: %r" % (r,))
+    r = await alice_sock.call("po", "mfnds", lb_id, 1, 50, also=("mfr",))
+    check(r == ["po", None, "Not enough map funds"], "mfnds withdraw from an empty map: %r" % (r,))
+    sql("UPDATE players SET player_funds = 1000 WHERE player_id = %d" % alice_id)
+    r = await alice_sock.call("mfr", "mfnds", lb_id, 0, 300, also=("po",))
+    check(r == ["mfr", 700], "mfnds deposit: the player's KR after it: %r" % (r,))
+    check(sql("SELECT map_funds FROM published_maps WHERE map_id = %d" % lb_id) == [["300"]], "the map holds 300 KR")
+    r = await alice_sock.call("mfr", "mfnds", lb_id, 1, 100, also=("po",))
+    check(r == ["mfr", 800], "mfnds withdraw: the exact amount comes back (no fee, as game.js): %r" % (r,))
+    r = await bob_sock.call("po", "mfnds", lb_id, 0, 10, also=("mfr",))
+    check(r == ["po", None, "Map not found"], "mfnds on another creator's map: %r" % (r,))
+    r = await alice_sock.call("po", "mfnds", lb_id, 0, 999999, also=("mfr",))
+    check(r == ["po", None, "Not enough KR"], "mfnds deposit beyond the player's KR: %r" % (r,))
+
     for sock in (alice_sock, bob_sock):
         await sock.ws.close()
 
@@ -288,6 +356,7 @@ def main():
             print("community maps test: %s unavailable: skipped" % DRIVER)
             sys.exit(r.returncode)
         dbcfg = json.loads(r.stdout)
+        DBCFG.update(dbcfg)
         dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in dbcfg.items()}
         drop = scratch + ["drop", DRIVER, SCHEMA]
     work = tempfile.mkdtemp(prefix="kn-cm.")

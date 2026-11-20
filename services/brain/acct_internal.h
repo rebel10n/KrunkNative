@@ -378,6 +378,11 @@ void sh_mail_read_all(SocialSession *s, const cJSON *f); /* "raml" */
 void sh_upload_map(SocialSession *s, const cJSON *f);    /* "uploadM" (creations.c) */
 void sh_edit_map(SocialSession *s, const cJSON *f);      /* "edMp" */
 void sh_update_map_lb(SocialSession *s, const cJSON *f); /* "ulb" (creations.c) */
+void sh_map_board(SocialSession *s, const cJSON *f);       /* "glb" (v10_catalog.c: the hub's map page) */
+void sh_map_data_search(SocialSession *s, const cJSON *f); /* "sd" */
+void sh_map_data_delete(SocialSession *s, const cJSON *f); /* "dd" */
+void sh_map_key_delete(SocialSession *s, const cJSON *f);  /* "dkd" */
+void sh_map_funds(SocialSession *s, const cJSON *f);       /* "mfnds" */
 void sh_fav_creation(SocialSession *s, const cJSON *f);  /* "fvM" */
 void sh_feature_creation(SocialSession *s, const cJSON *f); /* "ftC" */
 void sh_delete_creation(SocialSession *s, const cJSON *f);  /* "delC" */
