@@ -75,6 +75,10 @@ const CssKeyframes *cascade_find_keyframes(const char *name);
 typedef void (*CascadeCustomHook)(void *user, HtmlElem e, int pe, CssComputed *out);
 void cascade_set_custom_hook(CascadeCustomHook fn, void *user);
 
+/* Number of records computed so far with container-type size / inline-size (0: no size query
+ * container exists, so engine_flush_layout skips the container-size pass). */
+uint32_t cascade_containers_seen(void);
+
 /* Frees the module's scratch buffers (optional, for leak checkers). */
 void cascade_shutdown(void);
 

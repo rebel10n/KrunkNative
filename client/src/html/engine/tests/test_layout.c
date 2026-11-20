@@ -134,10 +134,15 @@ typedef struct Fx {
 
 static void fx_layout(Fx *fx)
 {
-    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
-    if (fx->tree) layout_tree_free(fx->tree);
-    fx->tree = layout_build(fx->dom, &g_ctx);
-    layout_run(fx->tree, fx->vw, fx->vh);
+    /* as engine_flush_layout: container query dependants restyle against the laid-out
+     * container size and lay out again */
+    for (int pass = 0; pass < 3; pass++) {
+        if (pass > 0 && !layout_update_container_sizes(fx->dom)) break;
+        cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+        if (fx->tree) layout_tree_free(fx->tree);
+        fx->tree = layout_build(fx->dom, &g_ctx);
+        layout_run(fx->tree, fx->vw, fx->vh);
+    }
 }
 
 static Fx *fx_html(const char *body, const char *css)
@@ -776,6 +781,63 @@ static void t_math_functions(void)
     fx_layout(fx);
     CHECK_NEAR(rc(fx, "cl").w, 200, 0.5, "clamp(100px, 50%, 300px) at 400");
     CHECK_NEAR(rc(fx, "nest").w, 360, 0.5, "calc(100% - min(10%, 50px)) at 400");
+    fx_free(fx);
+}
+
+/* Container queries (CSS Containment 3) and ch: svelte.css's 3D preview (`.preview-3d
+ * { container-type: size }`, `.preview-frame { width / height: min(100cqw, 100cqh) }`), size
+ * containment of the container's auto height, cq units without a container (the small
+ * viewport), inline-size containers, @container rules with names and ranges, and ch against the
+ * font's "0". */
+static void t_container_queries(void)
+{
+    static const char *css =
+        "#col { display: flex; flex-direction: column; width: 500px; height: 300px; }\n"
+        "#p3d { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center;\n"
+        "  container-type: size; }\n"
+        "#frame { flex: 0 0 auto; width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); }\n"
+        "#sz { container-type: size; width: 200px; } #sz > div { height: 40px; }\n"
+        "#nocq { width: 10cqw; height: 10cqh; }\n"
+        "#inl { container: card / inline-size; width: 320px; padding: 0 10px; }\n"
+        "#ic { width: 50cqi; height: 20px; }\n"
+        "#q1, #q2, #q3 { height: 10px; width: 1px; }\n"
+        "@container card (min-width: 300px) { #q1 { width: 7px; } }\n"
+        "@container card (width > 400px) { #q2 { width: 9px; } }\n"
+        "@container (200px < width <= 320px) and (not (height > 0px)) { #q3 { width: 11px; } }\n"
+        "@container other (min-width: 1px) { #q1 { width: 99px; } }\n"
+        "#ch { width: 10ch; height: 3ex; font-size: 20px; }\n";
+    Fx *fx = fx_html("<div id=col><div id=p3d><div id=frame></div></div></div>"
+                     "<div id=sz><div></div><div></div></div><div id=nocq></div>"
+                     "<div id=inl><div id=ic></div><div id=q1></div><div id=q2></div><div id=q3></div></div>"
+                     "<div id=ch></div>", css);
+    fx->vw = 800; fx->vh = 600;
+    css_values_set_viewport(800, 600);   /* the small viewport cq units fall back to (engine.c sets it) */
+    dom_mark_all_dirty(fx->dom);
+    fx_layout(fx);
+    CHECK_NEAR(rc(fx, "p3d").h, 300, 0.5, "container-type: size flex item fills its column");
+    CHECK_NEAR(rc(fx, "frame").w, 300, 0.5, "min(100cqw, 100cqh) = the container's 300px height");
+    CHECK_NEAR(rc(fx, "frame").h, 300, 0.5, "min(100cqw, 100cqh) height");
+    CHECK_NEAR(rc(fx, "frame").x, 100, 0.5, "align-items: center inside the 500px container");
+    CHECK_NEAR(rc(fx, "sz").h, 0, 0.5, "size containment: auto height ignores the 80px of children");
+    CHECK_NEAR(rc(fx, "nocq").w, 80, 0.5, "cqw without a container: the small viewport (10% of 800)");
+    CHECK_NEAR(rc(fx, "nocq").h, 60, 0.5, "cqh without a container: 10% of 600");
+    CHECK_NEAR(rc(fx, "ic").w, 160, 0.5, "50cqi of an inline-size container's 320px content box");
+    CHECK_NEAR(rc(fx, "inl").h, 50, 0.5, "inline-size containment keeps the content height");
+    CHECK_NEAR(rc(fx, "q1").w, 7, 0.01, "@container card (min-width: 300px) applies; the other name does not");
+    CHECK_NEAR(rc(fx, "q2").w, 1, 0.01, "@container card (width > 400px) does not apply");
+    CHECK_NEAR(rc(fx, "q3").w, 1, 0.01, "a height query on an inline-size container is unknown: false");
+    const float zero = tw("gamefont", 20, "0");
+    CHECK_NEAR(rc(fx, "ch").w, 10 * zero, 0.5, "10ch = 10 advances of \"0\" at 20px");
+    CHECK(rc(fx, "ch").h > 0.0f && rc(fx, "ch").h < 60.0f, "3ex: three x-heights (below 3em)");
+    /* the container resizes: its dependants follow in the same layout */
+    dom_set_style(fx->dom, dom_by_id(fx->dom, "col"), "height", "200px");
+    fx_layout(fx);
+    CHECK_NEAR(rc(fx, "frame").w, 200, 0.5, "cq units follow the container's new 200px height");
+    dom_set_style(fx->dom, dom_by_id(fx->dom, "inl"), "width", "500px");
+    fx_layout(fx);
+    CHECK_NEAR(rc(fx, "ic").w, 250, 0.5, "50cqi after the container widened to 500px");
+    CHECK_NEAR(rc(fx, "q2").w, 9, 0.01, "@container card (width > 400px) now applies");
+    css_values_set_viewport(1280, 720);
     fx_free(fx);
 }
 
@@ -2663,6 +2725,7 @@ int main(int argc, char **argv)
     char ui[1024];
     snprintf(ui, sizeof(ui), "%s/ui", g_root);
     g_ts = text_create(ui);
+    css_values_set_font_ratio_fn(layout_font_unit_ratios, g_ts);   /* ch / ex, as engine.c */
     if (!g_ts) { fprintf(stderr, "text_create failed\n"); return 99; }
     /* main.css: gamefont = FrVrKrunkerBold2.ttf (v3.1.1 used font2.ttf) */
     text_register_face(g_ts, "gamefont", "css/fonts/FrVrKrunkerBold2.ttf", 400, TEXT_STYLE_NORMAL);
@@ -2689,6 +2752,7 @@ int main(int argc, char **argv)
     t_flex_align_self();
     t_display_contents_calc_var();
     t_math_functions();
+    t_container_queries();
     t_empty_table_overflow();
     t_grid_named();
     t_zoom();

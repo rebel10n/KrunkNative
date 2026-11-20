@@ -61,6 +61,7 @@ typedef enum CssUnit {
     CSS_UNIT_S, CSS_UNIT_MS, CSS_UNIT_DEG, CSS_UNIT_RAD, CSS_UNIT_GRAD, CSS_UNIT_TURN,
     CSS_UNIT_VW, CSS_UNIT_VH, CSS_UNIT_PT, CSS_UNIT_CH, CSS_UNIT_EX, CSS_UNIT_FR,
     CSS_UNIT_VMIN, CSS_UNIT_VMAX,
+    CSS_UNIT_CQW, CSS_UNIT_CQH, CSS_UNIT_CQI, CSS_UNIT_CQB, CSS_UNIT_CQMIN, CSS_UNIT_CQMAX,
     CSS_UNIT_UNKNOWN
 } CssUnit;
 
@@ -171,6 +172,22 @@ void css_length_resolve_em(CssLength *len, float font_px);
  * comparable arguments only (all absolute, all %, all em or all numbers). */
 void css_values_set_viewport(float w, float h);
 int css_values_viewport_units_used(void);
+
+/* Font-relative units of the element's own font: ch = the advance of "0", ex = the x-height
+ * (CSS Values 4), each as a fraction of the font size.  The engine registers a measurer over its
+ * text system; without one (or when the font has no "0" / no x-height) both are 0.5em, the spec's
+ * fallback.  Results are cached per (family list, weight, italic). */
+typedef int (*CssFontRatioFn)(void *user, const CssComputed *style, float *ch_em, float *ex_em);
+void css_values_set_font_ratio_fn(CssFontRatioFn fn, void *user);
+
+/* Container query units (cqw/cqh/cqi/cqb/cqmin/cqmax, CSS Containment 3): 1% of the content box of
+ * the element's query container in that axis.  The cascade registers a resolver for the element
+ * being computed: axis 0 = width (inline), 1 = height (block); it returns 1 and the size in px, or 0
+ * when there is no eligible container (the unit then uses the small viewport, like Chrome).  The
+ * units fold to px while the value is computed, so the cascade restyles a container's dependants
+ * when layout changes its size (cascade_container_sizes_changed()). */
+typedef int (*CssContainerSizeFn)(void *user, int axis, float *out_px);
+void css_values_set_container_size_fn(CssContainerSizeFn fn, void *user);
 /* Resolves against a reference size (pct) returning px; keyword kinds -> 0. */
 float css_length_resolve(const CssLength *len, float reference_px);
 

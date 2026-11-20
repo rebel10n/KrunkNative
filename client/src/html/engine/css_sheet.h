@@ -68,6 +68,7 @@ typedef struct CssRule {
     uint32_t order;         /* 0-based position among the sheet's rules      */
     uint32_t stamp;         /* cascade scratch: last restyle that visited it */
     int32_t media;          /* innermost enclosing @media block, -1: none    */
+    int32_t container;      /* innermost enclosing @container block, -1: none */
 } CssRule;
 
 /* Index key kinds (the rightmost compound's most specific simple selector). */
@@ -176,6 +177,19 @@ int css_sheet_media_update(CssSheet *sheet);
 /* Number of @media blocks in the sheet / how many currently match. */
 uint32_t css_sheet_media_count(const CssSheet *sheet);
 uint32_t css_sheet_media_matching(const CssSheet *sheet);
+
+/* ---- @container (CSS Containment 3) ----------------------------------
+ * A rule inside @container blocks applies to an element only when every enclosing block's
+ * condition holds for that element's query container (the cascade checks it per element).
+ * css_sheet_container_block() returns block `idx` (name NULL = any container; parent -1 = top). */
+int css_sheet_rule_container(const CssSheet *sheet, uint32_t rule);
+int css_sheet_container_block(const CssSheet *sheet, int32_t idx, const char **name, const char **cond,
+                              int32_t *parent);
+/* 1 when the <container-condition> `text` holds for a container whose content box is w x h px
+ * (has_w / has_h: the axes its container-type makes queryable: inline-size gives width only).
+ * Size features only (width, height, inline-size, block-size, aspect-ratio, orientation); a feature
+ * on an axis the container cannot be queried in, or any other feature, is unknown (false). */
+int css_container_condition_matches(const char *text, size_t len, float w, float h, int has_w, int has_h);
 
 /* Strips a trailing pseudo-element from selector text in place of `out`
  * (returns the kind, CSS_PE_NONE when none, -1 when the selector can never

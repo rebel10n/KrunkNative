@@ -37,6 +37,13 @@ typedef struct CssMediaBlock {
     uint8_t match;          /* own query list matches the current env        */
 } CssMediaBlock;
 
+/* One @container block (CSS Containment 3): the optional container name and the condition. */
+typedef struct CssContainerBlock {
+    const char *name;       /* atom, case-sensitive; NULL: any container     */
+    const char *cond;       /* the <container-condition> as written, atom    */
+    int32_t parent;         /* enclosing @container block, -1: top level     */
+} CssContainerBlock;
+
 typedef struct Bucket {
     char *key;              /* kind byte + lower-cased name                  */
     U32Vec sels;
@@ -58,6 +65,8 @@ struct CssSheet {
     struct { CssPropertyRule *data; size_t len, cap; } properties;   /* @property */
     struct { CssMediaBlock *data; size_t len, cap; } media;   /* @media blocks */
     int32_t cur_media;              /* walk: innermost open @media block, -1 */
+    struct { CssContainerBlock *data; size_t len, cap; } containers;   /* @container blocks */
+    int32_t cur_container;          /* walk: innermost open @container block, -1 */
 
     DomInvalidation *inv;
     uint32_t serial;                /* unique per css_sheet_load()           */
@@ -933,6 +942,7 @@ static void add_rule(CssSheet *sheet, const char *prelude, size_t plen, lxb_css_
     rule.ndecls = (uint32_t)dv.len;
     rule.order = (uint32_t)sheet->rules.len;
     rule.media = sheet->cur_media;
+    rule.container = sheet->cur_container;
     KN_VEC_PUSH(&sheet->rules, rule);
     sc.rule = rule.order;
     split_commas(sheet, prelude, plen, add_selector, &sc);
@@ -1205,6 +1215,36 @@ static void walk_media(CssSheet *sheet, lxb_css_rule_at_t *at)
     sheet->cur_media = outer;
 }
 
+/* @container [<container-name>] <container-condition> { rules }: the rules are kept with the
+ * block's index (rule.container); the cascade evaluates the condition per element against its
+ * query container (css_container_condition_matches). */
+static void walk_container(CssSheet *sheet, lxb_css_rule_at_t *at, lxb_css_rule_list_t *block)
+{
+    size_t plen;
+    const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
+    if (block == NULL) return;
+    prelude = kn_str_trim(prelude, &plen);
+    CssContainerBlock cb = { NULL, NULL, sheet->cur_container };
+    /* a leading ident that is not `not` and not a function names the container */
+    size_t i = 0;
+    while (i < plen && (kn_is_alpha((unsigned char)prelude[i]) || kn_is_digit((unsigned char)prelude[i]) || prelude[i] == '-' || prelude[i] == '_' ||
+                        (unsigned char)prelude[i] >= 0x80))
+        i++;
+    if (i > 0 && (i >= plen || prelude[i] != '(') && !kn_str_ieq(prelude, i, "not") &&
+        !kn_str_ieq(prelude, i, "and") && !kn_str_ieq(prelude, i, "or")) {
+        cb.name = kn_atom(prelude, i);
+        prelude += i;
+        plen -= i;
+        prelude = kn_str_trim(prelude, &plen);
+    }
+    cb.cond = kn_atom(prelude, plen);
+    KN_VEC_PUSH(&sheet->containers, cb);
+    const int32_t outer = sheet->cur_container;
+    sheet->cur_container = (int32_t)(sheet->containers.len - 1);
+    walk_rules(sheet, block->first);
+    sheet->cur_container = outer;
+}
+
 static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
 {
     for (; r != NULL; r = r->next) {
@@ -1243,6 +1283,8 @@ static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
                     size_t plen;
                     const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
                     add_keyframes(sheet, prelude, plen, c->block);
+                } else if (kn_str_ieq(nm, nlen, "container")) {
+                    walk_container(sheet, at, c->block);
                 } else if (kn_str_ieq(nm, nlen, "property")) {
                     size_t plen;
                     const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
@@ -1312,6 +1354,7 @@ CssSheet *css_sheet_load(const char *text, size_t len, const char *name)
         return NULL;
     }
     sheet->cur_media = -1;
+    sheet->cur_container = -1;
     walk_rules(sheet, sheet->lxb->root);
     return sheet;
 }
@@ -1342,6 +1385,7 @@ void css_sheet_destroy(CssSheet *sheet)
     KN_VEC_FREE(&sheet->fonts);
     KN_VEC_FREE(&sheet->properties);
     KN_VEC_FREE(&sheet->media);
+    KN_VEC_FREE(&sheet->containers);
     for (size_t i = 0; i < sheet->bucket_cap; i++) {
         free(sheet->buckets[i].key);
         KN_VEC_FREE(&sheet->buckets[i].sels);
@@ -1440,6 +1484,10 @@ uint32_t css_sheet_serial(const CssSheet *sheet)
 /* ------------------------------------------------------------------------- */
 
 static CssMediaEnv g_media_env = { 1280.0f, 720.0f, 1.0f, 0, 0, 0 };
+
+/* css_container_condition_matches(): while `on`, the feature evaluators read the query container
+ * instead of the media environment. */
+static struct { int on, has_w, has_h; float w, h; } g_cq_env;
 
 void css_media_set_env(const CssMediaEnv *env)
 {
@@ -1643,6 +1691,23 @@ static int mq_cmp(float actual, int op, float want)
 static int mq_range_feature(const char *name, float *actual, int *kind)
 {
     const CssMediaEnv *e = &g_media_env;
+    if (g_cq_env.on) {
+        /* size features of the query container (CSS Containment 3); horizontal writing modes:
+         * inline-size = width, block-size = height */
+        if (!strcmp(name, "width") || !strcmp(name, "inline-size")) {
+            if (!g_cq_env.has_w) return 0;
+            *actual = g_cq_env.w; *kind = MQV_LEN; return 1;
+        }
+        if (!strcmp(name, "height") || !strcmp(name, "block-size")) {
+            if (!g_cq_env.has_h) return 0;
+            *actual = g_cq_env.h; *kind = MQV_LEN; return 1;
+        }
+        if (!strcmp(name, "aspect-ratio")) {
+            if (!g_cq_env.has_w || !g_cq_env.has_h) return 0;
+            *actual = g_cq_env.h > 0.0f ? g_cq_env.w / g_cq_env.h : 0.0f; *kind = MQV_RATIO; return 1;
+        }
+        return 0;
+    }
     if (!strcmp(name, "width") || !strcmp(name, "device-width")) { *actual = e->width; *kind = MQV_LEN; return 1; }
     if (!strcmp(name, "height") || !strcmp(name, "device-height")) { *actual = e->height; *kind = MQV_LEN; return 1; }
     if (!strcmp(name, "aspect-ratio") || !strcmp(name, "device-aspect-ratio")) {
@@ -1682,6 +1747,11 @@ static int mq_range_value(const MqVal *v, int kind, float *out)
 static const char *mq_discrete_feature(const char *name)
 {
     const CssMediaEnv *e = &g_media_env;
+    if (g_cq_env.on) {
+        if (!strcmp(name, "orientation") && g_cq_env.has_w && g_cq_env.has_h)
+            return g_cq_env.h >= g_cq_env.w ? "portrait" : "landscape";
+        return "";
+    }
     if (!strcmp(name, "orientation")) return e->height >= e->width ? "portrait" : "landscape";
     if (!strcmp(name, "prefers-color-scheme")) return e->dark ? "dark" : "light";
     if (!strcmp(name, "prefers-reduced-motion")) return e->reduced_motion ? "reduce" : "no-preference";
@@ -1922,6 +1992,37 @@ int css_media_query_matches(const char *text, size_t len)
     }
     split_commas(NULL, s, n, mq_list_part, &ctx);
     return ctx.any;
+}
+
+int css_container_condition_matches(const char *text, size_t len, float w, float h, int has_w, int has_h)
+{
+    size_t n = len;
+    const char *s = text != NULL ? kn_str_trim(text, &n) : "";
+    if (n == 0) return 0;                             /* @container needs a condition */
+    g_cq_env.on = 1;
+    g_cq_env.w = w; g_cq_env.h = h;
+    g_cq_env.has_w = has_w; g_cq_env.has_h = has_h;
+    MqCur c = { s, s + n };
+    int r = mq_condition(&c, 1, 0);
+    mq_ws(&c);
+    g_cq_env.on = 0;
+    return r == MQ_TRUE && c.p == c.end;
+}
+
+int css_sheet_rule_container(const CssSheet *sheet, uint32_t rule)
+{
+    return sheet != NULL && rule < sheet->rules.len ? sheet->rules.data[rule].container : -1;
+}
+
+int css_sheet_container_block(const CssSheet *sheet, int32_t idx, const char **name, const char **cond,
+                              int32_t *parent)
+{
+    if (sheet == NULL || idx < 0 || (size_t)idx >= sheet->containers.len) return 0;
+    const CssContainerBlock *b = &sheet->containers.data[idx];
+    if (name) *name = b->name;
+    if (cond) *cond = b->cond;
+    if (parent) *parent = b->parent;
+    return 1;
 }
 
 int css_sheet_media_update(CssSheet *sheet)

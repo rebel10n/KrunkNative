@@ -187,6 +187,8 @@ static CssUnit unit_lookup(const char *s, size_t len)
         { "rad", CSS_UNIT_RAD }, { "grad", CSS_UNIT_GRAD }, { "turn", CSS_UNIT_TURN },
         { "vw", CSS_UNIT_VW }, { "vh", CSS_UNIT_VH }, { "vmin", CSS_UNIT_VMIN }, { "vmax", CSS_UNIT_VMAX }, { "pt", CSS_UNIT_PT },
         { "ch", CSS_UNIT_CH }, { "ex", CSS_UNIT_EX }, { "fr", CSS_UNIT_FR },
+        { "cqw", CSS_UNIT_CQW }, { "cqh", CSS_UNIT_CQH }, { "cqi", CSS_UNIT_CQI }, { "cqb", CSS_UNIT_CQB },
+        { "cqmin", CSS_UNIT_CQMIN }, { "cqmax", CSS_UNIT_CQMAX },
     };
     for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++)
         if (kn_str_ieq(s, len, units[i].n)) return units[i].u;
@@ -604,6 +606,77 @@ void css_values_set_viewport(float w, float h)
 
 int css_values_viewport_units_used(void) { return g_viewport_units_used; }
 
+/* ---- ch / ex ---------------------------------------------------------- */
+
+static CssFontRatioFn g_font_ratio_fn;
+static void *g_font_ratio_user;
+static const CssComputed *g_unit_style;   /* the style whose font ch / ex measure (css_computed_apply) */
+
+typedef struct FontRatioEntry {
+    const char *fam[CSS_MAX_FONT_FAMILIES];
+    uint8_t count, italic;
+    uint16_t weight;
+    float ch, ex;
+} FontRatioEntry;
+static FontRatioEntry g_font_ratio_cache[32];
+static int g_font_ratio_n, g_font_ratio_next;
+
+void css_values_set_font_ratio_fn(CssFontRatioFn fn, void *user)
+{
+    g_font_ratio_fn = fn;
+    g_font_ratio_user = user;
+    g_font_ratio_n = g_font_ratio_next = 0;
+}
+
+/* which: 0 ch, 1 ex. A fraction of the font size. */
+static double font_unit_ratio(int which)
+{
+    const CssComputed *s = g_unit_style;
+    if (!s || !g_font_ratio_fn) return 0.5;
+    const int italic = s->font_style != CSS_FONT_STYLE_NORMAL;
+    for (int i = 0; i < g_font_ratio_n; i++) {
+        const FontRatioEntry *e = &g_font_ratio_cache[i];
+        if (e->count == s->font_family_count && e->weight == (uint16_t)s->font_weight && e->italic == italic &&
+            !memcmp(e->fam, s->font_families, sizeof(e->fam)))
+            return which ? e->ex : e->ch;
+    }
+    float ch = 0.5f, ex = 0.5f;
+    if (!g_font_ratio_fn(g_font_ratio_user, s, &ch, &ex)) { ch = 0.5f; ex = 0.5f; }
+    if (!(ch > 0.0f)) ch = 0.5f;
+    if (!(ex > 0.0f)) ex = 0.5f;
+    FontRatioEntry *e = &g_font_ratio_cache[g_font_ratio_next];
+    memset(e, 0, sizeof(*e));
+    memcpy(e->fam, s->font_families, sizeof(e->fam));
+    e->count = s->font_family_count;
+    e->weight = (uint16_t)s->font_weight;
+    e->italic = (uint8_t)italic;
+    e->ch = ch;
+    e->ex = ex;
+    g_font_ratio_next = (g_font_ratio_next + 1) % (int)(sizeof(g_font_ratio_cache) / sizeof(g_font_ratio_cache[0]));
+    if (g_font_ratio_n < (int)(sizeof(g_font_ratio_cache) / sizeof(g_font_ratio_cache[0]))) g_font_ratio_n++;
+    return which ? ex : ch;
+}
+
+/* ---- container query units -------------------------------------------- */
+
+static CssContainerSizeFn g_cq_fn;
+static void *g_cq_user;
+
+void css_values_set_container_size_fn(CssContainerSizeFn fn, void *user)
+{
+    g_cq_fn = fn;
+    g_cq_user = user;
+}
+
+/* 1% of the query container's content box in `axis` (0 width, 1 height); the small viewport
+ * when there is no eligible container (CSS Containment 3, "Container Relative Lengths"). */
+static double cq_axis(int axis)
+{
+    float v;
+    if (g_cq_fn && g_cq_fn(g_cq_user, axis, &v)) return 0.01 * v;
+    return 0.01 * (axis ? g_viewport_h : g_viewport_w);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Math expressions                                                           */
 /* ------------------------------------------------------------------------- */
@@ -877,6 +950,17 @@ static int calc_primary(const CssToken *t, int n, int *i, CalcVal *out, int dept
         case CSS_UNIT_VH: out->vh = k->num; g_viewport_units_used = 1; break;
         case CSS_UNIT_VMIN: out->vmin = k->num; g_viewport_units_used = 1; break;
         case CSS_UNIT_VMAX: out->vmax = k->num; g_viewport_units_used = 1; break;
+        /* font-relative: em times the measured ratio of the element's font (resolved with em) */
+        case CSS_UNIT_CH: out->em = k->num * font_unit_ratio(0); break;
+        case CSS_UNIT_EX: out->em = k->num * font_unit_ratio(1); break;
+        /* container-relative: absolute px against the query container's last laid-out size */
+        case CSS_UNIT_CQW: case CSS_UNIT_CQI: out->px = k->num * cq_axis(0); break;
+        case CSS_UNIT_CQH: case CSS_UNIT_CQB: out->px = k->num * cq_axis(1); break;
+        case CSS_UNIT_CQMIN: case CSS_UNIT_CQMAX: {
+            const double w = cq_axis(0), h = cq_axis(1);
+            out->px = k->num * (k->unit == CSS_UNIT_CQMIN ? (w < h ? w : h) : (w > h ? w : h));
+            break;
+        }
         default: return 0;
         }
         (*i)++;
@@ -3553,6 +3637,7 @@ static int shorthand_longhands(int id, int *out)
         P(GRID_AUTO_ROWS); P(GRID_AUTO_COLUMNS); P(GRID_AUTO_FLOW); break;
     case CSS_PROP_LIST_STYLE: P(LIST_STYLE_TYPE); break;
     case CSS_PROP_FONT: P(FONT_STYLE); P(FONT_WEIGHT); P(FONT_SIZE); P(LINE_HEIGHT); P(FONT_FAMILY); break;
+    case CSS_PROP_CONTAINER: P(CONTAINER_NAME); P(CONTAINER_TYPE); break;
     default: break;
     }
 #undef P
@@ -3976,6 +4061,31 @@ static int expand_grid(Emit *e, const int *lh, const CssToken *t, int m)
     return 1;
 }
 
+static const CssKeyword kw_scrollbar_width[] = { { "auto", CSS_SCROLLBAR_AUTO }, { "thin", CSS_SCROLLBAR_THIN },
+                                                  { "none", CSS_SCROLLBAR_NONE }, { NULL, 0 } };
+static const CssKeyword kw_container_type[] = { { "normal", CSS_CONTAINER_NORMAL }, { "size", CSS_CONTAINER_SIZE },
+                                                 { "inline-size", CSS_CONTAINER_INLINE_SIZE }, { NULL, 0 } };
+
+/* container-type: normal | size | inline-size (whitespace already stripped). */
+static int valid_container_type(const CssToken *t, int m)
+{
+    int v;
+    return m == 1 && css_keyword_lookup(&t[0], kw_container_type, &v);
+}
+
+/* container-name: none | <custom-ident>+ (not a CSS-wide keyword, none, and, or, not, default). */
+static int valid_container_name(const CssToken *t, int m)
+{
+    if (m == 1 && tok_is_ident(&t[0], "none")) return 1;
+    for (int i = 0; i < m; i++) {
+        if (t[i].type != CSS_TOK_IDENT || tok_is_global_kw(&t[i])) return 0;
+        if (tok_is_ident(&t[i], "none") || tok_is_ident(&t[i], "and") || tok_is_ident(&t[i], "or") ||
+            tok_is_ident(&t[i], "not") || tok_is_ident(&t[i], "default"))
+            return 0;
+    }
+    return m > 0;
+}
+
 int css_expand_shorthand(int id, const CssToken *tokens, int n, int important, CssDeclCb cb, void *user)
 {
     if (!CSS_PROP_IS_SHORTHAND(id)) return 0;
@@ -4073,6 +4183,20 @@ int css_expand_shorthand(int id, const CssToken *tokens, int n, int important, C
         int v0, v1;
         if (m == 1 && css_keyword_lookup(&t[0], kw_self_align, &v0)) { emit(&e, lh[0], t, 1); emit(&e, lh[1], t, 1); ok = 1; }
         else if (m == 2 && css_keyword_lookup(&t[0], kw_self_align, &v0) && css_keyword_lookup(&t[1], kw_self_align, &v1)) { emit(&e, lh[0], t, 1); emit(&e, lh[1], t + 1, 1); ok = 1; }
+        break;
+    }
+    case CSS_PROP_CONTAINER: {
+        /* container: <container-name> [ / <container-type> ]? (CSS Containment 3; the type
+         * defaults to normal) */
+        int slash = -1;
+        for (int i = 0; i < m; i++) if (tok_is_delim(&t[i], '/')) { slash = i; break; }
+        const int nl = slash < 0 ? m : slash;
+        if (nl == 0 || !valid_container_name(t, nl)) break;
+        if (slash < 0) { emit(&e, lh[0], t, nl); emit_lit(&e, lh[1], "normal"); ok = 1; break; }
+        if (slash + 1 >= m || !valid_container_type(t + slash + 1, m - slash - 1)) break;
+        emit(&e, lh[0], t, nl);
+        emit(&e, lh[1], t + slash + 1, m - slash - 1);
+        ok = 1;
         break;
     }
     case CSS_PROP_GAP: {
@@ -4394,6 +4518,9 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_ASPECT_RATIO: CP(aspect_ratio); CP(aspect_ratio_auto); break;
     case CSS_PROP_LINE_CLAMP: CP(line_clamp); break;
     case CSS_PROP_BOX_ORIENT: CP(box_orient); break;
+    case CSS_PROP_CONTAINER_TYPE: CP(container_type); break;
+    case CSS_PROP_CONTAINER_NAME: CP(container_name); break;
+    case CSS_PROP_SCROLLBAR_WIDTH: CP(scrollbar_width); break;
     default: break; /* ignored properties carry no state */
     }
 #undef CP
@@ -4420,8 +4547,22 @@ static void resolve_em_len(CssLength *l, float font_px) { css_length_resolve_em(
 #define SET_KW(table, field) do { int v_; if (!css_parse_keyword(t, m, table, &v_)) return 0; d->field = (uint8_t)v_; return 1; } while (0)
 #define SET_LEN(flags, field) do { CssLength l_; if (!css_parse_length(t, m, flags, &l_)) return 0; resolve_em_len(&l_, font_px); d->field = l_; return 1; } while (0)
 
+static int computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
+                          const CssComputed *parent, float font_px);
+
 int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
                        const CssComputed *parent, float font_px)
+{
+    /* ch / ex measure the element's own font; in font-size they use the parent's (CSS Values 4) */
+    const CssComputed *saved = g_unit_style;
+    g_unit_style = (id == CSS_PROP_FONT_SIZE && parent) ? parent : d;
+    const int r = computed_apply(d, id, tokens, n, parent, font_px);
+    g_unit_style = saved;
+    return r;
+}
+
+static int computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
+                          const CssComputed *parent, float font_px)
 {
     CssToken t[CSS_MAX_TOKENS];
     int m = tokens_copy_nows(tokens, n, t, CSS_MAX_TOKENS);
@@ -5002,6 +5143,22 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         return 1;
     }
     case CSS_PROP_BOX_ORIENT: SET_KW(kw_box_orient, box_orient);
+    case CSS_PROP_CONTAINER_TYPE: SET_KW(kw_container_type, container_type);
+    case CSS_PROP_SCROLLBAR_WIDTH: SET_KW(kw_scrollbar_width, scrollbar_width);
+    case CSS_PROP_CONTAINER_NAME: {
+        if (!valid_container_name(t, m)) return 0;
+        if (m == 1 && tok_is_ident(&t[0], "none")) { d->container_name = NULL; return 1; }
+        char buf[256];
+        size_t o = 0;
+        for (int i = 0; i < m; i++) {
+            if (o + t[i].len + 2 >= sizeof(buf)) return 0;
+            if (o) buf[o++] = ' ';
+            memcpy(buf + o, t[i].text, t[i].len);
+            o += t[i].len;
+        }
+        d->container_name = kn_atom(buf, o);   /* custom idents are case-sensitive */
+        return 1;
+    }
     case CSS_PROP_FONT_FEATURE_SETTINGS: case CSS_PROP_FONT_SMOOTHING: case CSS_PROP_TOUCH_CALLOUT:
     case CSS_PROP_USER_DRAG: case CSS_PROP_TEXT_RENDERING:
         return 1; /* accepted, no state */

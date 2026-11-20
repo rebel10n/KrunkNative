@@ -186,6 +186,9 @@ extern "C" {
     X(ASPECT_RATIO,               "aspect-ratio",               0, "auto") \
     X(LINE_CLAMP,                 "-webkit-line-clamp",         0, "none") \
     X(BOX_ORIENT,                 "-webkit-box-orient",         0, "horizontal") \
+    X(CONTAINER_TYPE,             "container-type",             0, "normal") \
+    X(CONTAINER_NAME,             "container-name",             0, "none") \
+    X(SCROLLBAR_WIDTH,            "scrollbar-width",            0, "auto") \
     /* ---- accepted and ignored (parse never fails on them) -------------- */ \
     X(FONT_FEATURE_SETTINGS,      "font-feature-settings",      1, "normal") \
     X(FONT_SMOOTHING,             "-webkit-font-smoothing",     1, "auto") \
@@ -224,7 +227,8 @@ extern "C" {
     X(PLACE_SELF,           "place-self") \
     X(GRID_TEMPLATE,        "grid-template") \
     X(GRID,                 "grid") \
-    X(MASK,                 "mask")
+    X(MASK,                 "mask") \
+    X(CONTAINER,            "container")
 
 /* X(name, canonical_id) ------------------------------------------------- */
 #define CSS_ALIAS_LIST(X) \

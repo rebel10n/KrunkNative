@@ -16,6 +16,7 @@
  *      client/src/html/engine/util.c client/lib/lexbor/lexbor.c -lm -o test_css_values && ./test_css_values .
  */
 #include "../css_values.h"
+#include "../css_sheet.h"
 #include "../util.h"
 
 #include <math.h>
@@ -23,6 +24,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void test_font_and_container_units(void);
 
 static int g_fail, g_pass;
 
@@ -947,6 +950,77 @@ static void test_layout_props(void)
     CHECK(apply(&c, NULL, "inset", "0") && len_is(c.inset[CSS_BOTTOM], 0, 0));
     CHECK(apply(&c, NULL, "gap", "10px 5px") && len_is(c.row_gap, 10, 0) && len_is(c.column_gap, 5, 0));
     CHECK(apply(&c, NULL, "border-spacing", "10px") && len_is(c.border_spacing_y, 10, 0));
+    test_font_and_container_units();
+}
+
+static int test_ratio_fn(void *user, const CssComputed *style, float *ch_em, float *ex_em)
+{
+    (void)user; (void)style;
+    *ch_em = 0.6f;
+    *ex_em = 0.45f;
+    return 1;
+}
+
+static int test_cq_fn(void *user, int axis, float *out_px)
+{
+    (void)user;
+    *out_px = axis ? 200.0f : 400.0f;
+    return 1;
+}
+
+/* ch / ex (the font's "0" advance / x-height as a fraction of the font size, 0.5em without a
+ * measurer), container query units against the resolver's container (the small viewport without
+ * one), container-type / container-name / the container shorthand. */
+static void test_font_and_container_units(void)
+{
+    CssComputed c = fresh();
+    CHECK(apply(&c, NULL, "width", "10ch") && len_is(c.width, 80, 0));            /* 0.5em fallback, 16px */
+    css_values_set_font_ratio_fn(test_ratio_fn, NULL);
+    CHECK(apply(&c, NULL, "width", "10ch") && len_is(c.width, 96, 0));            /* 10 x 0.6 x 16 */
+    CHECK(apply(&c, NULL, "height", "2ex") && len_is(c.height, 14.4f, 0));
+    CHECK(apply(&c, NULL, "width", "calc(100% - 5ch)") && len_is(c.width, -48, 100));
+    css_values_set_font_ratio_fn(NULL, NULL);
+    css_values_set_viewport(1000, 500);
+    CHECK(apply(&c, NULL, "width", "10cqw") && len_is(c.width, 100, 0));          /* no container: small viewport */
+    CHECK(apply(&c, NULL, "height", "10cqb") && len_is(c.height, 50, 0));
+    css_values_set_container_size_fn(test_cq_fn, NULL);
+    CHECK(apply(&c, NULL, "width", "50cqw") && len_is(c.width, 200, 0));
+    CHECK(apply(&c, NULL, "width", "50cqi") && len_is(c.width, 200, 0));
+    CHECK(apply(&c, NULL, "height", "50cqh") && len_is(c.height, 100, 0));
+    CHECK(apply(&c, NULL, "width", "10cqmin") && len_is(c.width, 20, 0));
+    CHECK(apply(&c, NULL, "width", "10cqmax") && len_is(c.width, 40, 0));
+    CHECK(apply(&c, NULL, "width", "min(100cqw, 100cqh)") && len_is(c.width, 200, 0) && c.width.calc == 0);
+    CHECK(apply(&c, NULL, "width", "calc(50% + 10cqw)") && len_is(c.width, 40, 50));
+    css_values_set_container_size_fn(NULL, NULL);
+    css_values_set_viewport(1280, 720);
+    CHECK(apply(&c, NULL, "container-type", "size") && c.container_type == CSS_CONTAINER_SIZE);
+    CHECK(apply(&c, NULL, "container-type", "inline-size") && c.container_type == CSS_CONTAINER_INLINE_SIZE);
+    CHECK(apply(&c, NULL, "container-type", "normal") && c.container_type == CSS_CONTAINER_NORMAL);
+    CHECK(!apply(&c, NULL, "container-type", "block-size"));
+    CHECK(apply(&c, NULL, "container-name", "card sidebar") && c.container_name && !strcmp(c.container_name, "card sidebar"));
+    CHECK(apply(&c, NULL, "container-name", "none") && c.container_name == NULL);
+    CHECK(!apply(&c, NULL, "container-name", "and"));
+    CHECK(!apply(&c, NULL, "container-name", "none card"));
+    CHECK(apply(&c, NULL, "container", "card / inline-size") && c.container_type == CSS_CONTAINER_INLINE_SIZE &&
+          c.container_name && !strcmp(c.container_name, "card"));
+    CHECK(apply(&c, NULL, "container", "panel") && c.container_type == CSS_CONTAINER_NORMAL &&
+          c.container_name && !strcmp(c.container_name, "panel"));
+    CHECK(!apply(&c, NULL, "container", "/ size"));
+    CHECK(!apply(&c, NULL, "container", "card / sideways"));
+    CHECK(apply(&c, NULL, "scrollbar-width", "none") && c.scrollbar_width == CSS_SCROLLBAR_NONE);
+    CHECK(apply(&c, NULL, "scrollbar-width", "thin") && c.scrollbar_width == CSS_SCROLLBAR_THIN);
+    CHECK(!apply(&c, NULL, "scrollbar-width", "12px"));
+    /* <container-condition> evaluation (size features only) */
+    CHECK(css_container_condition_matches("(min-width: 300px)", 18, 320, 0, 1, 0));
+    CHECK(!css_container_condition_matches("(width > 400px)", 15, 320, 0, 1, 0));
+    CHECK(css_container_condition_matches("(200px < inline-size <= 320px)", 30, 320, 0, 1, 0));
+    CHECK(!css_container_condition_matches("(height > 0px)", 14, 320, 50, 1, 0));   /* inline-size: no height */
+    CHECK(css_container_condition_matches("(height > 0px)", 14, 320, 50, 1, 1));
+    CHECK(css_container_condition_matches("(orientation: landscape) and (aspect-ratio > 1)", 47, 320, 50, 1, 1));
+    CHECK(css_container_condition_matches("not (width < 100px)", 19, 320, 50, 1, 1));
+    CHECK(css_container_condition_matches("(width < 100px) or (block-size: 50px)", 37, 320, 50, 1, 1));
+    CHECK(!css_container_condition_matches("(hover: hover)", 14, 320, 50, 1, 1));     /* media-only feature */
+    CHECK(!css_container_condition_matches("", 0, 320, 50, 1, 1));
 }
 
 static void test_text_props(void)
@@ -1148,7 +1222,7 @@ static int chrome_drops(const char *name, size_t nl, const char *val, size_t vl)
  * contain-intrinsic-size (render hints), text-wrap, and color-mix() values (the tint drops). */
 static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
 {
-    static const char *props[] = { "backdrop-filter", "transform-style", "scroll-behavior", "scrollbar-width",
+    static const char *props[] = { "backdrop-filter", "transform-style", "scroll-behavior",
                                    "background-origin", "align-content", "-webkit-tap-highlight-color", "fill",
                                    "text-decoration-color", "scrollbar-gutter", "resize", "aspect-ratio",
                                    "object-position", "content-visibility", "contain-intrinsic-size",
@@ -1164,7 +1238,7 @@ static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
                                    "-webkit-mask", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-position",
                                    "-webkit-mask-mode", "-webkit-mask-image", "font-variant-ligatures",
                                    "-webkit-font-variant-ligatures", "-webkit-background-clip", "touch-action", "tab-size",
-                                   "container-type", "caret-color", "border-image", "backface-visibility" };
+                                   "caret-color", "border-image", "backface-visibility" };
     for (size_t i = 0; i < sizeof(props) / sizeof(props[0]); i++)
         if (kn_str_ieq(name, nl, props[i])) return 1;
     size_t tl = vl;
@@ -1173,20 +1247,12 @@ static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
     if (kn_str_ieq(name, nl, "content") && tl > 4 && kn_str_ieq(tv, 4, "url(")) return 1;
     for (size_t k = 0; k + 10 <= tl; k++) if (kn_str_ieq(tv + k, 10, "color-mix(")) return 1;
     /* v10's Svelte sheets, not parsed yet. Visual only: SVG pointer-events keywords, background-clip:
-     * text, elliptical border-radius (`/`), -webkit-grab. LAYOUT-AFFECTING (TODO engine: the box
-     * keeps its other width / height rule): ch and container-query (cq*) units, as in the Svelte
-     * popups' widths. (min() / max() / clamp() of mixed units parse since 2026-11-19: CssLength.calc.) */
+     * text, elliptical border-radius (`/`), -webkit-grab. (min() / max() / clamp() of mixed units,
+     * ch / ex and container queries with cq units parse since 2026-11-19.) */
     if (kn_str_ieq(name, nl, "pointer-events") || (kn_str_ieq(name, nl, "background-clip") && kn_str_ieq(tv, tl, "text")) ||
         (kn_str_ieq(name, nl, "cursor") && tl > 8 && kn_str_ieq(tv, 8, "-webkit-")) ||
         (kn_str_ieq(name, nl, "border-radius") && memchr(tv, '/', tl)))
         return 1;
-    if (kn_str_ieq(name, nl, "width") || kn_str_ieq(name, nl, "height") || kn_str_ieq(name, nl, "min-width") ||
-        kn_str_ieq(name, nl, "max-width") || kn_str_ieq(name, nl, "min-height") || kn_str_ieq(name, nl, "max-height")) {
-        if (tl > 2 && kn_str_ieq(tv + tl - 2, 2, "ch")) return 1;
-        /* container-query units (cqw / cqh / cqi / cqb / cqmin / cqmax): no container-type support */
-        for (size_t k = 1; k + 2 <= tl; k++)
-            if ((tv[k - 1] >= '0' && tv[k - 1] <= '9') && kn_str_ieq(tv + k, 2, "cq")) return 1;
-    }
     if (kn_str_ieq(name, nl, "background-image") || kn_str_ieq(name, nl, "background")) {
         /* a gradient with two-position colour stops (`#hex 0 11px`) */
         for (size_t k = 0; k + 9 <= tl; k++) if (kn_str_ieq(tv + k, 9, "gradient(")) return 1;

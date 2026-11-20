@@ -1685,3 +1685,63 @@ void layout_dump(const Box *root, KnStrBuf *out)
 {
     if (root) dump_rec(root, out, 0);
 }
+
+/* Size query containers (container-type size / inline-size): writes each one's content box from
+ * the layout just run into ElemData.cq_w / cq_h and marks the subtree of every container whose
+ * size changed after a descendant read it (cq units, @container), so the next style flush
+ * recomputes those descendants.  Returns 1 when something needs restyling. */
+int layout_update_container_sizes(Dom *dom)
+{
+    if (!dom) return 0;
+    int changed = 0;
+    const uint32_t cap = dom_elem_capacity(dom);
+    for (HtmlElem e = 1; e < cap; e++) {
+        ElemData *ed = dom_elem_data(dom, e);
+        if (!ed || !ed->computed || ed->computed->container_type == CSS_CONTAINER_NORMAL) continue;
+        const Box *b = (const Box *)ed->box;
+        float w = 0.0f, h = 0.0f;
+        if (b) {
+            w = b->w - b->border[1] - b->border[3] - b->padding[1] - b->padding[3];
+            h = b->h - b->border[0] - b->border[2] - b->padding[0] - b->padding[2];
+            if (w < 0.0f) w = 0.0f;
+            if (h < 0.0f) h = 0.0f;
+        }
+        const int differs = !ed->cq_size_valid || fabsf(w - ed->cq_w) > 0.01f || fabsf(h - ed->cq_h) > 0.01f;
+        ed->cq_w = w;
+        ed->cq_h = h;
+        ed->cq_size_valid = 1;
+        if (differs && ed->cq_queried) {
+            ed->cq_queried = 0;
+            dom_mark_dirty(dom, e, DOM_DIRTY_DESCENDANTS);
+            changed = 1;
+        }
+    }
+    return changed;
+}
+
+/* ch / ex for css_values.c: the advance of "0" and the x-height of the style's first available
+ * font, as fractions of its size (measured at 100px, the font's own design). */
+int layout_font_unit_ratios(void *user, const CssComputed *s, float *ch_em, float *ex_em)
+{
+    TextSystem *ts = (TextSystem *)user;
+    if (!ts || !s) return 0;
+    char fam[512];
+    size_t o = 0;
+    for (int i = 0; i < s->font_family_count && i < CSS_MAX_FONT_FAMILIES; i++) {
+        const char *f = s->font_families[i];
+        if (!f) continue;
+        const size_t n = strlen(f);
+        if (o + n + 3 >= sizeof(fam)) break;
+        if (o) { fam[o++] = ','; fam[o++] = ' '; }
+        memcpy(fam + o, f, n);
+        o += n;
+    }
+    fam[o] = 0;
+    const float size = 100.0f;
+    TextFont *font = text_font(ts, o ? fam : NULL, size, s->font_weight, s->font_style != CSS_FONT_STYLE_NORMAL);
+    if (!font) return 0;
+    const TextMetrics *m = text_font_metrics(font);
+    *ch_em = text_font_has_glyph(font, '0') ? text_measure(font, "0", 1, 0.0f) / size : 0.5f;
+    *ex_em = m && m->x_height > 0.0f ? m->x_height / size : 0.5f;
+    return 1;
+}

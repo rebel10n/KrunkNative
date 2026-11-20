@@ -510,6 +510,10 @@ static void content_widths(LayoutTree *t, Box *b, float *out_min, float *out_max
     const CssComputed *s = b->style;
     {
         float cmin = 0, cmax = 0;
+        /* size / inline-size containment (contain, container-type): the box is sized as if it
+         * had no contents in the inline axis (CSS Containment 2 3.1 / 3: contain-intrinsic-size
+         * none = 0) */
+        if (s->contain & (CSS_CONTAIN_SIZE | CSS_CONTAIN_INLINE_SIZE)) goto contained;
         switch (b->type) {
         case BOX_FLEX:  layout_flex_intrinsic(t, b, &cmin, &cmax); break;
         case BOX_GRID:  layout_grid_intrinsic(t, b, &cmin, &cmax); break;
@@ -539,6 +543,7 @@ static void content_widths(LayoutTree *t, Box *b, float *out_min, float *out_max
                 if (fl_min > cmin) cmin = fl_min;
             }
         }
+    contained:;
         float extras = box_border_padding_w(b) + (s->overflow_y == CSS_OVERFLOW_SCROLL ? t->ctx->scrollbar_default_w : 0);
         if (s->width.kind == CSS_LEN_MIN_CONTENT) cmax = cmin;
         else if (s->width.kind == CSS_LEN_MAX_CONTENT) cmin = cmax;
@@ -975,6 +980,9 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
             content_h = h - box_border_padding_h(b);
         } else {
             layout_contents(t, b, &cin, &content_h, &o);
+            /* size containment (contain: size, container-type: size): the contents still lay
+             * out, but the box's auto height ignores them (CSS Containment 2 3.1) */
+            if (s->contain & CSS_CONTAIN_SIZE) content_h = 0;
         }
 
         /* height */

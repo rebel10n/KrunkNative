@@ -235,6 +235,17 @@ typedef enum CssBackfaceVisibility { CSS_BACKFACE_VISIBLE = 0, CSS_BACKFACE_HIDD
 /* background-clip / background-origin */
 typedef enum CssBgBox { CSS_BG_BOX_BORDER = 0, CSS_BG_BOX_PADDING, CSS_BG_BOX_CONTENT, CSS_BG_BOX_TEXT } CssBgBox;
 typedef enum CssMaskMode { CSS_MASK_MODE_MATCH_SOURCE = 0, CSS_MASK_MODE_ALPHA, CSS_MASK_MODE_LUMINANCE } CssMaskMode;
+/* container-type (CSS Containment 3): size = both axes (size containment),
+ * inline-size = the inline axis only; normal = not a size query container. */
+typedef enum CssContainerType {
+    CSS_CONTAINER_NORMAL = 0,
+    CSS_CONTAINER_SIZE,
+    CSS_CONTAINER_INLINE_SIZE
+} CssContainerType;
+
+/* scrollbar-width (CSS Scrollbars 1): none hides the bar and gives its space back. */
+typedef enum CssScrollbarWidth { CSS_SCROLLBAR_AUTO = 0, CSS_SCROLLBAR_THIN, CSS_SCROLLBAR_NONE } CssScrollbarWidth;
+
 typedef enum CssBoxOrient { CSS_BOX_ORIENT_HORIZONTAL = 0, CSS_BOX_ORIENT_VERTICAL } CssBoxOrient;
 
 typedef enum CssClipPathKind { CSS_CLIP_PATH_NONE = 0, CSS_CLIP_PATH_POLYGON } CssClipPathKind;
@@ -599,8 +610,11 @@ typedef struct CssComputed {
     uint8_t aspect_ratio_auto;        /* `auto` given (alone or with a ratio)  */
     uint8_t box_orient;               /* CssBoxOrient (-webkit-box-orient)     */
     uint8_t display_legacy_box;       /* 1: display came from -webkit-box / -webkit-inline-box */
-    uint8_t reserved_e3_;             /* explicit padding (hashed bytewise)    */
+    uint8_t container_type;           /* CssContainerType (container-type)     */
+    uint8_t scrollbar_width;          /* CssScrollbarWidth (scrollbar-width)   */
     uint16_t line_clamp;              /* -webkit-line-clamp, 0 = none          */
+    const char *container_name;       /* container-name: interned, space-joined lower-case
+                                         names ("a b"); NULL = none            */
 
     /* ---- hashes (not part of either range) ------------------------------ */
     uint64_t hash_inherited;

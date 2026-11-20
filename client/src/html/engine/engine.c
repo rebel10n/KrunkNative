@@ -565,6 +565,14 @@ static float lh_scrollbar_width(void *user, lxb_dom_node_t *node, float default_
      * match ran per scroll container and layout pass (the Object Manager's ~300 tile names) */
     ElemData *ed = dom_elem_data(g->dom, e);
     if (ed && ed->computed && ed->scrollbar_w_valid) return ed->scrollbar_w;
+    /* scrollbar-width: none hides the bar (CSS Scrollbars 1; Chrome then ignores ::-webkit-scrollbar).
+     * thin keeps the page's ::-webkit-scrollbar bar: the engine paints custom bars only, not Chrome's
+     * native thin one */
+    if (ed && ed->computed && ed->computed->scrollbar_width == CSS_SCROLLBAR_NONE) {
+        ed->scrollbar_w = 0.0f;
+        ed->scrollbar_w_valid = 1;
+        return 0.0f;
+    }
     float w = default_w;
     CssComputed tmp;
     if (cascade_pseudo_computed(g->dom, e, CSS_PE_SCROLLBAR, &tmp) && tmp.width.kind == CSS_LEN_VALUE && tmp.width.pct == 0.0f)
@@ -1364,33 +1372,43 @@ LayoutTree *engine_flush_layout(Engine *g)
     if (g->in_flush) return g->tree;
     g->in_flush = 1;
     engine_flush_style(g);
-    if (g->need_rebuild || !g->tree || g->need_layout) {
-        const double t0 = wall_ms();
-        int full = 0;
-        if (g->need_rebuild || !g->tree) {
-            if (g->tree) {
-                save_scroll_offsets(g);
-                layout_tree_free(g->tree);
-                g->restore_scroll_pending = g->saved_scroll_len > 0;
+    /* container queries: a size container's dependants are restyled against its new size and laid
+     * out again in the same frame (its own size never depends on them: size containment) */
+    for (int cq_pass = 0; cq_pass < 3; cq_pass++) {
+        if (cq_pass > 0) {
+            if (!g->dom || cascade_containers_seen() == 0 || !layout_update_container_sizes(g->dom)) break;
+            engine_flush_style(g);
+            if (!(g->need_rebuild || !g->tree || g->need_layout)) g->need_layout = 1;
+        }
+        if (g->need_rebuild || !g->tree || g->need_layout) {
+            const double t0 = wall_ms();
+            int full = 0;
+            if (g->need_rebuild || !g->tree) {
+                if (g->tree) {
+                    save_scroll_offsets(g);
+                    layout_tree_free(g->tree);
+                    g->restore_scroll_pending = g->saved_scroll_len > 0;
+                }
+                g->tree = layout_build(g->dom, &g->lctx);
+                full = 1;
+                g->stats.rebuilds++;
+                g->prof_rebuilds++;
             }
-            g->tree = layout_build(g->dom, &g->lctx);
-            full = 1;
-            g->stats.rebuilds++;
-            g->prof_rebuilds++;
+            if (g->tree) layout_run(g->tree, g->vw, g->vh);
+            if (full && g->tree) {
+                shadow_snapshot_all(g);
+                paint_invalidate_all(&g->paint);
+            }
+            g->need_rebuild = 0;
+            g->need_layout = 0;
+            g->need_paint = 1;
+            g->observe_pending = 1;
+            const double ms = wall_ms() - t0;
+            g->stats.layout_ms += ms;
+            g->stats.layouts++;
+            if (g->profile) { prof_add(&g->st_layout, ms); g->fr_layout += ms; g->fr_rebuilds += full; }
         }
-        if (g->tree) layout_run(g->tree, g->vw, g->vh);
-        if (full && g->tree) {
-            shadow_snapshot_all(g);
-            paint_invalidate_all(&g->paint);
-        }
-        g->need_rebuild = 0;
-        g->need_layout = 0;
-        g->need_paint = 1;
-        g->observe_pending = 1;
-        const double ms = wall_ms() - t0;
-        g->stats.layout_ms += ms;
-        g->stats.layouts++;
-        if (g->profile) { prof_add(&g->st_layout, ms); g->fr_layout += ms; g->fr_rebuilds += full; }
+        if (cq_pass == 0 && cascade_containers_seen() == 0) break;
     }
     if (g->restore_scroll_pending && g->tree) {
         g->restore_scroll_pending = 0;
@@ -2165,6 +2183,7 @@ static void engine_destroy(Engine *g)
     video_players_destroy(g->videos);
     if (g->glb) glb_destroy(g->glb);
     if (g->images) image_cache_destroy(g->images);
+    css_values_set_font_ratio_fn(NULL, NULL);
     if (g->text) text_destroy(g->text);
     for (int i = 0; i < g->n_sheets; i++) css_sheet_destroy(g->sheets[i]);
     if (g->ua) css_sheet_destroy(g->ua);
@@ -2243,6 +2262,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
         register_font_faces(g, g->sheets[i]);
         register_keyframes(g, g->sheets[i]);
     }
+    css_values_set_font_ratio_fn(layout_font_unit_ratios, g->text);   /* ch / ex; after the @font-face faces */
 
     /* events + widgets */
     g->ev_link.dom = g->dom;

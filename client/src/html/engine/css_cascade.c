@@ -59,6 +59,8 @@ static struct {
     CascadeCustomHook custom_hook;   /* cascade_set_custom_hook              */
     void *custom_user;
     HtmlElem cur_elem;               /* the element being computed (hook)     */
+    Dom *dom;                        /* the document of cur_elem (container queries) */
+    uint32_t containers_seen;        /* records computed with a container-type    */
     int cur_pe;                      /* CSS_PE_* of the record being computed */
     /* @property registrations (css_values.c registry), refreshed per restyle */
     const CssRegisteredProperty *regs[CSS_PROP_CUSTOM_MAX - CSS_PROP_CUSTOM_BASE];
@@ -94,9 +96,59 @@ static lxb_selectors_t *matcher(void)
     return g.selectors;
 }
 
+/* container-name is a space-joined list of idents; `name` matches one of them. */
+static int cascade_container_name_matches(const char *list, const char *name)
+{
+    if (list == NULL || name == NULL) return 0;
+    const size_t nl = strlen(name);
+    for (const char *p = list; *p;) {
+        const char *q = strchr(p, ' ');
+        const size_t l = q ? (size_t)(q - p) : strlen(p);
+        if (l == nl && memcmp(p, name, l) == 0) return 1;
+        if (!q) break;
+        p = q + 1;
+    }
+    return 0;
+}
+
+uint32_t cascade_containers_seen(void) { return g.containers_seen; }
+
+/* The query container of the element being computed: its nearest ancestor (the element itself for
+ * a pseudo-element) whose container-type covers `axis` (0 width: size or inline-size, 1 height:
+ * size).  CSS Containment 3: an element never queries itself.  Its size is the content box of the
+ * last layout (ElemData.cq_w / cq_h; 0 before the first one, which engine_flush_layout corrects
+ * in the same frame). */
+static ElemData *query_container(int axis, const char *name)
+{
+    Dom *dom = g.dom;
+    if (dom == NULL || g.cur_elem == 0) return NULL;
+    HtmlElem e = g.cur_pe != CSS_PE_NONE ? g.cur_elem : dom_parent(dom, g.cur_elem);
+    while (e != 0) {
+        ElemData *ad = dom_elem_data(dom, e);
+        const CssComputed *c = ad != NULL ? ad->computed : NULL;
+        if (c != NULL && c->container_type != CSS_CONTAINER_NORMAL &&
+            (axis < 0 || axis == 0 || c->container_type == CSS_CONTAINER_SIZE) &&
+            (name == NULL || cascade_container_name_matches(c->container_name, name)))
+            return ad;
+        e = dom_parent(dom, e);
+    }
+    return NULL;
+}
+
+static int cq_size_fn(void *user, int axis, float *out_px)
+{
+    (void)user;
+    ElemData *ad = query_container(axis, NULL);
+    if (ad == NULL) return 0;
+    ad->cq_queried = 1;
+    *out_px = ad->cq_size_valid ? (axis ? ad->cq_h : ad->cq_w) : 0.0f;
+    return 1;
+}
+
 static void set_sheets(Dom *dom, CssSheet *ua, CssSheet **author, int n_author)
 {
     registry_refresh();
+    css_values_set_container_size_fn(cq_size_fn, NULL);
     g.set.count = 0;
     g.set.sheets[g.set.count++] = ua;
     for (int i = 0; i < n_author && g.set.count < MAX_SHEETS; i++) {
@@ -269,6 +321,27 @@ static const char *sheet_base(const CssSheet *sheet)
     return name ? kn_atom_cstr(name) : NULL;
 }
 
+/* Every @container block enclosing the rule holds for the element being computed: each block's
+ * query container is the nearest ancestor container with that name (any container without
+ * one); no such container, or a false condition, drops the rule (CSS Containment 3). */
+static int container_rule_holds(const CssSheet *sheet, int32_t block)
+{
+    int guard = 0;
+    while (block >= 0 && guard++ < 32) {
+        const char *name = NULL, *cond = NULL;
+        int32_t parent = -1;
+        if (!css_sheet_container_block(sheet, block, &name, &cond, &parent)) return 0;
+        ElemData *ad = query_container(-1, name);
+        if (ad == NULL) return 0;
+        ad->cq_queried = 1;
+        const int has_h = ad->computed->container_type == CSS_CONTAINER_SIZE;
+        const float w = ad->cq_size_valid ? ad->cq_w : 0.0f, h = ad->cq_size_valid ? ad->cq_h : 0.0f;
+        if (!css_container_condition_matches(cond, cond ? strlen(cond) : 0, w, h, 1, has_h)) return 0;
+        block = parent;
+    }
+    return 1;
+}
+
 static void gather_entries(int pe)
 {
     g.entries.len = 0;
@@ -280,6 +353,9 @@ static void gather_entries(int pe)
         }
         rule = css_sheet_rule(g.set.sheets[m->sheet], m->rule);
         if (rule == NULL) {
+            continue;
+        }
+        if (rule->container >= 0 && !container_rule_holds(g.set.sheets[m->sheet], rule->container)) {
             continue;
         }
         for (uint32_t d = 0; d < rule->ndecls; d++) {
@@ -526,6 +602,14 @@ static void apply_entries(CssComputed *out, const CssComputed *parent)
     if (g.custom_hook != NULL && g.cur_elem != 0) {
         g.custom_hook(g.custom_user, g.cur_elem, g.cur_pe, out);
     }
+    /* font-family, then font-size: ch / ex in any later property measure the element's own
+     * font (css_values.c font_unit_ratio) */
+    for (size_t i = 0; i < g.entries.len; i++) {
+        const CssDecl *d = g.entries.data[i].decl;
+        if (d->prop == CSS_PROP_FONT_FAMILY) {
+            apply_decl(out, d, parent, parent_font);
+        }
+    }
     for (size_t i = 0; i < g.entries.len; i++) {
         const CssDecl *d = g.entries.data[i].decl;
         if (d->prop == CSS_PROP_FONT_SIZE) {
@@ -534,7 +618,8 @@ static void apply_entries(CssComputed *out, const CssComputed *parent)
     }
     for (size_t i = 0; i < g.entries.len; i++) {
         const CssDecl *d = g.entries.data[i].decl;
-        if (d->prop == CSS_PROP_FONT_SIZE || d->prop == CSS_PROP_ZOOM || CSS_PROP_IS_CUSTOM(d->prop)) {
+        if (d->prop == CSS_PROP_FONT_SIZE || d->prop == CSS_PROP_FONT_FAMILY || d->prop == CSS_PROP_ZOOM ||
+            CSS_PROP_IS_CUSTOM(d->prop)) {
             continue;
         }
         css_values_set_url_base(g.entries.data[i].base);
@@ -544,6 +629,13 @@ static void apply_entries(CssComputed *out, const CssComputed *parent)
     css_computed_zoom(out, ez, 0);
     out->zoom = ez;
     fixup_computed(out);
+    if (out->container_type != CSS_CONTAINER_NORMAL) {
+        /* container-type applies layout, style and size / inline-size containment (CSS
+         * Containment 3, "Creating Query Containers") */
+        out->contain |= CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE |
+                        (out->container_type == CSS_CONTAINER_SIZE ? CSS_CONTAIN_SIZE : CSS_CONTAIN_INLINE_SIZE);
+        g.containers_seen++;
+    }
     snap_border_widths(out);
     css_computed_hash(out);
 }
@@ -563,6 +655,7 @@ static void compute_element(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
     init_from_parent(out, parent);
     collect_matches(node);
     g.cur_elem = dom_node_elem(dom, node);
+    g.dom = dom;
     g.cur_pe = CSS_PE_NONE;
     gather_entries(CSS_PE_NONE);
     gather_inline(dom, dom_node_elem(dom, node));
@@ -891,6 +984,7 @@ uint32_t cascade_pseudo_computed(Dom *dom, HtmlElem e, int pe, CssComputed *out)
     registry_refresh();
     collect_matches(node);
     g.cur_elem = e;
+    g.dom = dom;
     return compute_pseudo_from_matches(self, pe, out);
 }
 

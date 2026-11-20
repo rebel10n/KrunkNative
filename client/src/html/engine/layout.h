@@ -329,6 +329,17 @@ static inline int box_is_replaced(const Box *b) {
  * a Box (ElemData.box points at it); display:none subtrees get none.  Call
  * layout_tree_free() on the previous tree first.  Returns NULL on OOM. */
 LayoutTree *layout_build(Dom *dom, LayoutCtx *ctx);
+
+/* Size query containers (container-type size / inline-size): after a layout_run, stores each one's
+ * content box in its ElemData (cq_w / cq_h) and marks the subtree of every container whose size
+ * changed after a descendant read it (container query units, @container) for restyling.  Returns 1
+ * when something needs restyling (then restyle and lay out again; the container's own size does
+ * not depend on its contents, so a second pass settles). */
+int layout_update_container_sizes(Dom *dom);
+
+/* css_values_set_font_ratio_fn() measurer over a TextSystem (`user`): ch = the advance of "0",
+ * ex = the x-height of the style's first available font, as fractions of its size. */
+int layout_font_unit_ratios(void *user, const CssComputed *style, float *ch_em, float *ex_em);
 void        layout_tree_free(LayoutTree *tree);
 Box        *layout_tree_root(LayoutTree *tree);
 LayoutCtx  *layout_tree_ctx(LayoutTree *tree);

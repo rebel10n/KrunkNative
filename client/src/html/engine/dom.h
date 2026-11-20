@@ -91,6 +91,13 @@ typedef struct ElemData {
      * css_cascade.c clears it at each restyle of the element */
     float scrollbar_w;
     uint8_t scrollbar_w_valid;
+    /* Size query containers (container-type size / inline-size): engine.c writes the content box
+     * size of the last layout (cq_w / cq_h, cq_size_valid); css_cascade.c sets cq_queried when a
+     * descendant's container query unit or @container rule read it, so a size change restyles the
+     * subtree (engine_flush_layout). */
+    float cq_w, cq_h;
+    uint8_t cq_size_valid;
+    uint8_t cq_queried;
 
     DomInlineDecl *inline_decls;
     uint32_t inline_count;
