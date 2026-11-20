@@ -851,6 +851,7 @@ static const SocialRoute k_routes[] = {
     {"ftC", sh_feature_creation},
     {"delC", sh_delete_creation},
     {"uploadMo", sh_upload_files},
+    {"plm", sh_mod_republish},
     {"uploadA", sh_upload_files},
 };
 
@@ -923,7 +924,7 @@ static const LabelClass k_label_class[] = {
     {"clnRA", RC_WRITE, ANS_REPLY}, {"rpt", RC_WRITE, ANS_REPLY}, {"flg", RC_WRITE, ANS_REPLY}, {"hds", RC_WRITE, ANS_REPLY},
     {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
     {"nme", RC_WRITE, ANS_REPLY}, {"uploadS", RC_WRITE, ANS_REPLY}, {"uploadM", RC_WRITE, ANS_REPLY},
-    {"uploadMo", RC_WRITE, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY}, {"ulb", RC_WRITE, ANS_REPLY},
+    {"uploadMo", RC_WRITE, ANS_REPLY}, {"plm", RC_READ, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY}, {"ulb", RC_WRITE, ANS_REPLY},
     {"glb", RC_READ, ANS_REPLY}, {"sd", RC_READ, ANS_REPLY}, {"dd", RC_WRITE, ANS_REPLY}, {"dkd", RC_WRITE, ANS_REPLY},
     {"mfnds", RC_WRITE, ANS_REPLY},
     {"fvM", RC_WRITE, ANS_REPLY}, {"ftC", RC_WRITE, ANS_REPLY}, {"delC", RC_WRITE, ANS_REPLY},

@@ -290,6 +290,17 @@ async def scenario_mods(names):
     check(row and int(row[0][0]) == 2, "mod_updatecounter 2: %r" % (row,))
     st, got, _ = http("GET", "/api/user-assets/md%d/mod.zip" % mid)
     check(st == 200 and got == z2, "the new zip is served")
+
+    # the hub's Edit on a mod (updateMod, hub-10.0.7.js:6640-6651): ["plm", name] -> ["plm", false, {mod_id, mod_name, mod_info}]
+    await sock.send(["plm", "neon PACK"])
+    f = await sock.recv_until(lambda f: f[0] in ("plm", "po"))
+    m = f[2] if f and f[0] == "plm" and isinstance(f[2], dict) else {}
+    # (the update above sent no thumbnail, so the mod has none now: mod_info {})
+    check(f and f[0] == "plm" and f[1] is False and m.get("mod_id") == mid and m.get("mod_name") == "Neon Pack"
+          and json.loads(m.get("mod_info") or "null") == {}, "plm (any case) -> the creator's mod row: %r" % (f,))
+    await other.send(["plm", "Neon Pack"])
+    f = await other.recv_until(lambda f: f[0] in ("plm", "po"))
+    check(f and f[0] == "po" and f[1] is None and f[2] == "Mod not found", "plm on another account's mod -> po Mod not found: %r" % (f,))
     await other.close()
     await sock.close()
 

@@ -128,6 +128,9 @@ void  mods_ui_window_post(int id);
 int   mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void  mods_ui_query(const char *query); // ?mod=<name>: loads that mod
 void  mods_ui_favorite(const char *id, HtmlElem star); // favoriteM(1, this, id)
+// The hub's Publish / Update Mod popup body (social_ui.c publishModPopup): window 19's form and upload. name, mod_id
+// and thumb (the mod has a thumbnail) prefill an update; name NULL is a new mod. done runs after a successful upload.
+char *mods_ui_hub_publish(const char *name, const char *mod_id, int thumb, void (*done)(void));
 // a Junk-priced purchase's new balance ("12.34", the brain's reply): set as the "uj" push sets it (account_ui.c)
 void account_ui_set_junk(const char *text);
 void account_ui_set_funds(double kr); // an Eterno KR purchase's reply balance (junk_shop_ui.c)

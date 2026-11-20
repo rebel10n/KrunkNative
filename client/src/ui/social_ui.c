@@ -5757,6 +5757,73 @@ H(h_share_link) {
 
 // Login-only actions: io_po(null, "Must be logged in") / "Please Login"
 H(h_publish_popup) { UNUSED; io_po(0, I18N("account.login.required", "Must be logged in")); return 1; }
+
+// publishModPopup(publish, mod) (hub-10.0.7.js:6732-6759): the Publish / Update Mod popup. Its form and upload are the
+// menu's Upload Mod (mods_ui.c: the brain's /mods/publish, chunked), whose publish of a name the account already has
+// updates that mod; mod (plm's answer) prefills the name and the thumbnail of an update.
+static void hub_mod_published(void) { io_po(1, "Mod uploaded"); }
+
+static void hub_mod_popup(const cJSON *mod) {
+    if (!g_hub.logged_in) {
+        io_po(0, I18N("account.login.required", "Must be logged in"));
+        return;
+    }
+    char id[32] = "";
+    int thumb = 0;
+    const char *name = mod ? jstr(mod, "mod_name") : NULL;
+    if (mod) {
+        js_num(id, sizeof(id), jnum(mod, "mod_id"));
+        const cJSON *info = cJSON_GetObjectItemCaseSensitive(mod, "mod_info");
+        cJSON *parsed = cJSON_IsString(info) ? cJSON_Parse(info->valuestring) : NULL;
+        const cJSON *t = cJSON_GetObjectItemCaseSensitive(parsed ? parsed : info, "t");
+        thumb = t && !cJSON_IsFalse(t) && !(cJSON_IsNumber(t) && t->valuedouble == 0);
+        cJSON_Delete(parsed);
+    }
+    char *form = mods_ui_hub_publish(name, id, thumb, hub_mod_published);
+    if (!form) {
+        io_po(0, I18N("account.login.required", "Must be logged in"));
+        return;
+    }
+    StrBuf sb = {0};
+    sb_append(&sb, "<div><div class='pubHed'>");
+    sb_append(&sb, name && *name ? "Update Mod" : "Publish Mod");
+    sb_append(&sb, "</div>");
+    sb_append(&sb, form);
+    sb_append(&sb, "</div>");
+    free(form);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "publishPop", NULL);
+    free(html);
+}
+
+H(h_publish_mod_popup) {
+    UNUSED;
+    hub_mod_popup(NULL);
+    return 1;
+}
+
+// updateMod(name) (hub-10.0.7.js:6640-6646): ["plm", name] -> ["plm", false, mod] (hub_map_tools_frame)
+H(h_update_mod) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, I18N("account.login.required", "Must be logged in"));
+        return 1;
+    }
+    const char *name = arg_s(ev, args, argc, 0);
+    if (!name || !*name) return 1;
+    io_wait("Please Wait...");
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("plm"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(name));
+    hub_send(f);
+    return 1;
+}
+
+// the popup's file pickers and Publish / Update (mods_ui.c)
+H(h_mod_form) {
+    UNUSED;
+    return mods_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0;
+}
 H(h_noop) { UNUSED; return 1; }
 
 // followUser(): toggle the button, io.send("f", profile.player_name, follow)
@@ -6387,6 +6454,9 @@ static int hub_map_tools_frame(const char *label, const cJSON *frame) {
             }
         }
         map_tools_rows();
+    } else if (!strcmp(label, "plm")) { // updateMod's answer: publishModPopup(false, mod)
+        clear_pops();
+        hub_mod_popup(cJSON_IsObject(a2) ? a2 : NULL);
     } else if (!strcmp(label, "mfr")) {
         if (cJSON_IsNumber(a1)) hub_set_funds(a1->valuedouble);
         io_po(cJSON_IsNumber(a1), cJSON_IsNumber(a1) ? "Map funds updated" : "The map funds could not be changed");
@@ -6596,7 +6666,10 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"shareMapLink", h_share_link},
     {"shareModLink", h_share_link},
     {"publishPopup", h_publish_popup},
-    {"publishModPopup", h_publish_popup},
+    {"publishModPopup", h_publish_mod_popup},
+    {"updateMod", h_update_mod},
+    {"knModPick", h_mod_form},
+    {"knModPublish", h_mod_form},
     {"switchFeedTab", h_switch_feed_tab},
     {"toggleView", h_toggle_view},
     {"favoriteM", h_noop},

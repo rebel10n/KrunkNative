@@ -387,6 +387,7 @@ void sh_fav_creation(SocialSession *s, const cJSON *f);  /* "fvM" */
 void sh_feature_creation(SocialSession *s, const cJSON *f); /* "ftC" */
 void sh_delete_creation(SocialSession *s, const cJSON *f);  /* "delC" */
 void sh_upload_files(SocialSession *s, const cJSON *f);  /* "uploadMo" / "uploadA" */
+void sh_mod_republish(SocialSession *s, const cJSON *f);
 void sh_spin(SocialSession *s, const cJSON *f);          /* "spin" (store.c) */
 void sh_free_kr(SocialSession *s, const cJSON *f);       /* "fkr" */
 void sh_spin_history(SocialSession *s, const cJSON *f);  /* "spinH" */

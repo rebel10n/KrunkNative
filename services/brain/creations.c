@@ -804,6 +804,35 @@ void sh_upload_files(SocialSession *s, const cJSON *f) {
     social_send(s, fr);
 }
 
+/* ["plm", modName]: the hub's Edit on one of the viewer's mods (updateMod, hub-10.0.7.js:6640-6646) -> ["plm", false,
+ * {mod_id, mod_name, mod_info}], which opens the Update Mod popup on that mod (publishModPopup(false, mod), :6648-6651,
+ * :6732-6759). The update itself is the menu's publish (asset_upload.c): a publish of a name the account already has
+ * updates that mod. Not the viewer's mod (or deleted): ["po", null, "Mod not found"]. */
+static void mod_republish_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(kn_db_ok(res) ? "Mod not found" : acct_db_error(res, "plm")));
+        return;
+    }
+    cJSON *mod = cJSON_CreateObject();
+    const char *id = kn_db_get(res, 0, 0), *info = kn_db_get(res, 0, 2);
+    cJSON_AddNumberToObject(mod, "mod_id", id ? (double) atoll(id) : 0);
+    cJSON_AddStringToObject(mod, "mod_name", kn_db_get(res, 0, 1) ? kn_db_get(res, 0, 1) : "");
+    cJSON_AddStringToObject(mod, "mod_info", info && *info ? info : "{}");
+    social_send_n(s, "plm", 2, cJSON_CreateFalse(), mod);
+}
+
+void sh_mod_republish(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    char me[24], name[160];
+    snprintf(name, sizeof name, "%s", fa_str(f, 1) ? fa_str(f, 1) : "");
+    social_query(s, SQL(.pg = "SELECT mod_id, mod_name, mod_info::text FROM published_mods WHERE creator_id = $1 AND lower(mod_name) = lower($2)"
+                              " AND deleted_at IS NULL ORDER BY mod_id LIMIT 1",
+                        .any = "SELECT mod_id, mod_name, mod_info FROM published_mods WHERE creator_id = $1 AND lower(mod_name) = lower($2)"
+                               " AND deleted_at IS NULL ORDER BY mod_id LIMIT 1"),
+                 KN_DB_ARGS(social_viewer(s, me), name), mod_republish_done, NULL);
+}
+
 /* ------------------------------------------------------------------ published map data for game servers */
 
 static void map_data_respond(kn_db_result *res, kn_http_req *req, const int meta) {

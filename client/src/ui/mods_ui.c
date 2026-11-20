@@ -357,6 +357,10 @@ static struct {
     int inflight;
     char resp[256];
     int resp_err;
+    // the hub's Publish / Update Mod popup (mods_ui_hub_publish): done != NULL; name / thumbnail of the mod updated
+    void (*done)(void);
+    int update;
+    char prefill[160], thumb_src[600];
     // the upload: the files in order (mod, then thumb), chunk by chunk
     unsigned gen;
     char base[512], file_id[40];
@@ -378,7 +382,7 @@ static void set_resp(const char *text, const int err) {
     html_dom_set_text(el, P.resp);
 }
 
-static char *publish_gen(void) {
+static char *publish_form(void) {
     const AccountInfo *acc = active_account();
     if (!acc) return NULL; // signed out: the static 19.html (log in first)
     const int lvl = level_ok(acc);
@@ -388,25 +392,72 @@ static char *publish_gen(void) {
     if (lvl) sb_appendf(&sb, "%.2f / %d KB", P.thumb_size / 1e3, thumb_kb(acc));
     else sb_append(&sb, "from level 10");
     sb_append(&sb, "</span></div><div id='modThumbH' style='display:flex;align-items:center;gap:10px;padding:10px;border-radius:4px;"
-                   "background:rgba(255,255,255,0.12);margin-bottom:15px'><img id='modThumbPrev' src='./img/noimg.png' "
-                   "style='width:80px;height:80px;object-fit:cover;border-radius:4px'>");
+                   "background:rgba(255,255,255,0.12);margin-bottom:15px'><img id='modThumbPrev' src='");
+    esc(&sb, P.thumb_src[0] ? P.thumb_src : "./img/noimg.png");
+    sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='width:80px;height:80px;object-fit:cover;border-radius:4px'>");
     if (lvl) sb_append(&sb, "<a href='javascript:;' class='menuLink' style='margin:0' onclick='knModPick(&quot;thumb&quot;)'>Choose image</a>");
     else sb_append(&sb, "<span style='color:rgba(255,255,255,0.4)'>Locked</span>");
     sb_appendf(&sb, "</div><div style='color:rgba(255,255,255,0.6);font-size:15px;margin-bottom:5px'>Mod pack (.zip)<span style='float:right' "
                     "id='modZipSize'>%.2f / %d MB</span></div><div id='modZipH' style='display:flex;align-items:center;gap:10px;padding:10px;"
                     "border-radius:4px;background:rgba(255,255,255,0.12);margin-bottom:15px'><span class='material-icons' "
                     "style='color:rgba(255,255,255,0.5);font-size:32px'>folder_zip</span><a href='javascript:;' class='menuLink' style='margin:0' "
-                    "onclick='knModPick(&quot;zip&quot;)'>Choose .zip</a><span style='color:rgba(255,255,255,0.5)'>",
+                    "onclick='knModPick(&quot;zip&quot;)'>Choose .zip</a><span id='modZipName' style='color:rgba(255,255,255,0.5)'>",
                P.zip_size / 1e6, zip_mb(acc));
     esc(&sb, P.zip_name);
     sb_append(&sb, "</span></div><input id='modNameNew' type='text' maxlength='128' class='accountInput' style='margin-top:0;margin-bottom:15px' placeholder='");
     esc(&sb, I18N("windows.publish.mod.name", "Mod Name"));
+    sb_append(&sb, "' value='");
+    esc(&sb, P.prefill);
     sb_appendf(&sb, "' autocomplete='off'><div id='modUpResp' style='min-height:20px;color:%s;font-size:14px;text-align:center;margin-bottom:10px'>",
                P.resp_err ? "#e33b3b" : "rgba(255,255,255,0.7)");
     esc(&sb, P.resp);
     sb_append(&sb, "</div><a id='modPubSubmit' href='javascript:;' class='menuLink' style='display:block;text-align:center;padding:12px;"
-                   "font-size:20px;background:rgba(255,255,255,0.12);border-radius:4px' onclick='knModPublish()'>Publish</a></div>");
+                   "font-size:20px;background:rgba(255,255,255,0.12);border-radius:4px' onclick='knModPublish()'>");
+    sb_append(&sb, P.update ? "Update" : "Publish");
+    sb_append(&sb, "</a></div>");
     return sb_finish(&sb);
+}
+
+static char *publish_gen(void) {
+    if (P.done && !P.inflight) { // the menu's window, not the hub's popup
+        P.done = NULL;
+        P.update = 0;
+        P.prefill[0] = P.thumb_src[0] = 0;
+    }
+    return publish_form();
+}
+
+static void forget_files(void) {
+    memset(P.zip, 0, sizeof P.zip);
+    memset(P.thumb, 0, sizeof P.thumb);
+    P.zip_size = P.thumb_size = 0;
+    P.zip_name[0] = P.resp[0] = 0;
+    P.resp_err = 0;
+}
+
+// the hub's popup cannot be re-rendered under the player: the picked file's size and name go in place
+static void picked_in_place(const int thumb) {
+    const AccountInfo *acc = active_account();
+    char t[96];
+    HtmlElem e;
+    if (thumb) {
+        snprintf(t, sizeof t, "%.2f / %d KB", P.thumb_size / 1e3, thumb_kb(acc));
+        if ((e = html_dom_by_id("modThumbSize"))) html_dom_set_text(e, t);
+    } else {
+        snprintf(t, sizeof t, "%.2f / %d MB", P.zip_size / 1e6, zip_mb(acc));
+        if ((e = html_dom_by_id("modZipSize"))) html_dom_set_text(e, t);
+        if ((e = html_dom_by_id("modZipName"))) html_dom_set_text(e, P.zip_name);
+    }
+}
+
+char *mods_ui_hub_publish(const char *name, const char *mod_id, const int thumb, void (*done)(void)) {
+    if (!P.inflight) forget_files();
+    P.done = done;
+    P.update = name && *name;
+    snprintf(P.prefill, sizeof P.prefill, "%s", P.update ? name : "");
+    if (P.update && thumb && mod_id && *mod_id) snprintf(P.thumb_src, sizeof P.thumb_src, USER_ASSETS "/md%s/thumb.png", mod_id);
+    else P.thumb_src[0] = 0;
+    return publish_form();
 }
 
 static void picked_publish(void *user, const char *path) {
@@ -425,10 +476,11 @@ static void picked_publish(void *user, const char *path) {
         const char *b = strrchr(path, '/');
         snprintf(P.zip_name, sizeof P.zip_name, "%s", b ? b + 1 : path);
     }
+    if (P.done) picked_in_place(thumb);
     char name[256] = "";
     HtmlElem in = html_dom_by_id("modNameNew");
     if (in) html_dom_get_value(in, name, sizeof name);
-    menu_rerender_if_open(PUBLISH_WINDOW);
+    if (!P.done) menu_rerender_if_open(PUBLISH_WINDOW);
     in = html_dom_by_id("modNameNew");
     if (in && name[0]) html_dom_set_value(in, name);
     HtmlElem prev = thumb ? html_dom_by_id("modThumbPrev") : 0;
@@ -479,13 +531,18 @@ static void up_answer(void *user, const int status, const char *body, const size
             return;
         }
         up_end(NULL);
-        memset(P.zip, 0, sizeof P.zip);
-        memset(P.thumb, 0, sizeof P.thumb);
-        P.zip_size = P.thumb_size = 0;
-        P.zip_name[0] = P.resp[0] = 0;
+        forget_files();
+        lists_reset();
+        if (P.done) { // the hub's popup
+            void (*fn)(void) = P.done;
+            P.done = NULL;
+            P.update = 0;
+            P.prefill[0] = P.thumb_src[0] = 0;
+            fn();
+            return;
+        }
         menu_close_window();
         popup(1, "Your mod is published");
-        lists_reset();
         M.tab = TAB_MINE; // the Mod Manager opens on My Mods next
         return;
     }
