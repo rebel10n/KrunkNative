@@ -2356,6 +2356,7 @@ static void reset_next(void) {
 static int reset_frame(const char *label, const cJSON *frame) {
     const int rpr = !strcmp(label, "rpr"), rpc = !strcmp(label, "rpc"), rps = !strcmp(label, "rps");
     if (!rpr && !rpc && !rps) return 0;
+    if (rps && cJSON_IsArray(cJSON_GetArrayItem(frame, 1))) return 0; // the hub's ["rps", rows]: a profile's reports (social_ui.c)
     if (g_reset.step <= 0) return 1;
     const char *err = str_at(frame, 1), *msg = str_at(frame, 2);
     if (err) {

@@ -1516,7 +1516,14 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     set_html("rightProfile", html);
     free(html);
     g_hub.profile_chat_banned = 0;
-    if (chat_staff && g_hub.profile_name[0]) profile_chat_ban_fetch();
+    if (chat_staff && g_hub.profile_name[0]) {
+        profile_chat_ban_fetch();
+        // canViewReports: the profile's Reports tab (hub-10.0.7.js:2173-2175: ["grp", name] -> ["rps", rows])
+        cJSON *f = cJSON_CreateArray();
+        cJSON_AddItemToArray(f, cJSON_CreateString("grp"));
+        cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
+        hub_send(f);
+    }
     if (g_hub.profile_name[0] && acc && strcmp(acc->name, g_hub.profile_name) != 0) set_display("followBtn", "inline-block");
     if (acc && acc->level >= TRADE_MIN_LVL && k >= TRADE_MIN_LVL) set_display("tradeBtn", "inline-block");
 
@@ -3574,6 +3581,7 @@ static char g_chat_pending_txt[320];
 // brain's mutual follows with presence). The friends list is kept for showFriends / removeFriend.
 static cJSON *g_friends; // the last "chtb" rows, online first (owned)
 static void io_msg(int from, const char *text); // ["msg", fromId, text] (below)
+static void profile_reports(const cJSON *rows);   // ["rps", rows]: the profile's Reports tab (below)
 
 static void chat_sidebar(const AccountInfo *acc) {
     (void) acc;
@@ -3902,6 +3910,10 @@ static void handle_reply_frame(const cJSON *frame) {
     }
     if (!strcmp(label, "chs")) {
         chat_status_frame(cJSON_GetArrayItem(frame, 1));
+        return;
+    }
+    if (!strcmp(label, "rps") && cJSON_IsArray(cJSON_GetArrayItem(frame, 1))) { // the profile's reports (staff)
+        profile_reports(cJSON_GetArrayItem(frame, 1));
         return;
     }
     if (!strcmp(label, "msg")) {
@@ -6488,6 +6500,67 @@ H(h_badge_user) {
 // reportPopup(): the reason list (v10's reportOptions) and the details (10 characters at least)
 static const char *const k_report_reasons[] = {"Hacking", "Exploiting", "Scamming", "Harassment", "Other", "Boosting", "Market Manipulation"};
 
+// The profile's Reports tab for staff (hub-10.0.7.js:4176-4193): newest first, the age, the reporter (viewReporter opens
+// their profile), the reason; a click on a report (openReport) shows or hides its text.
+static cJSON *g_reports; // the last "rps" rows (viewReporter reads the reporter's name back)
+
+static void profile_reports(const cJSON *rows) {
+    cJSON_Delete(g_reports);
+    g_reports = cJSON_Duplicate(rows, 1);
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='scrollItemNew'><div style='margin-top:10px;margin-bottom:10px;'>");
+    const int n = cJSON_GetArraySize(g_reports);
+    if (!n) sb_append(&sb, "<div style='color: rgba(255,255,255,0.6);'>None</div>");
+    for (int i = 0; i < n; i++) {
+        const cJSON *r = cJSON_GetArrayItem(g_reports, i);
+        const int idx = (int) jnum(r, "rp_index");
+        char ago[48] = "just now";
+        const double ms = jnum(r, "rp_ms");
+        if (ms > 0 && now_epoch_ms() - ms > 60000) {
+            char rt[40];
+            readable_time(rt, sizeof(rt), now_epoch_ms() - ms);
+            snprintf(ago, sizeof(ago), "%s ago", rt);
+        }
+        sb_appendf(&sb, "<div class='reportHolder' id='rpt_%d' onclick='openReport(this)'><div class='reportDate'>%s</div>"
+                        "<div class='reportFrom'>Report from <span class='reportFromView' onclick='viewReporter(%d)'>",
+                   (int) jnum(r, "rp_id"), ago, i);
+        sb_append_esc(&sb, jstr(r, "rp_reportername") ? jstr(r, "rp_reportername") : "");
+        sb_appendf(&sb, "</span></div><div class='reportType'>%s</div><div class='reportText'>",
+                   k_report_reasons[idx >= 0 && idx < (int) (sizeof(k_report_reasons) / sizeof(k_report_reasons[0])) ? idx : 4]);
+        sb_append(&sb, jstr(r, "rp_text") ? jstr(r, "rp_text") : ""); // the brain's kn_html: escaped already
+        sb_append(&sb, "</div></div>");
+    }
+    sb_append(&sb, "</div></div><div></div>");
+    char *html = sb_finish(&sb);
+    set_html("pTabContent_reports", html);
+    free(html);
+    set_display("pTab_reports", "");
+}
+
+// openReport(this): the report's text (its fourth child) shown or hidden
+H(h_open_report) {
+    UNUSED;
+    if (!ev || !ev->target) return 1;
+    const HtmlElem holder = html_dom_closest(ev->target, ".reportHolder");
+    const HtmlElem text = holder ? html_dom_query(holder, ".reportText") : 0;
+    if (!text) return 1;
+    char disp[16] = "";
+    html_dom_get_style(text, "display", disp, sizeof(disp));
+    html_dom_set_display(text, strcmp(disp, "block") ? "block" : "none");
+    return 1;
+}
+
+// viewReporter(i): the reporter's profile
+H(h_view_reporter) {
+    UNUSED;
+    const char *name = jstr(cJSON_GetArrayItem(g_reports, (int) arg_n(args, argc, 0, -1)), "rp_reportername");
+    if (!name) return 1;
+    char url[200];
+    snprintf(url, sizeof(url), "/social.html?p=profile&q=%s", name);
+    if (!app_route_url_target(url, 1)) ui_open_external(url);
+    return 1;
+}
+
 H(h_report_popup) {
     UNUSED;
     if (!g_hub.profile_name[0]) return 1;
@@ -6967,6 +7040,8 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"shareGameTweet", h_share_game_tweet},
     {"chatBanUser", h_chat_ban_user},
     {"loadMoreTradeHistory", h_load_more_trade_history},
+    {"openReport", h_open_report},
+    {"viewReporter", h_view_reporter},
     {"shareModLink", h_share_link},
     {"publishPopup", h_publish_popup},
     {"publishModPopup", h_publish_mod_popup},

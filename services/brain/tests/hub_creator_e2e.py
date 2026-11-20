@@ -278,8 +278,15 @@ def staff_profile(port, ids, tokens, names):
     """a developer on bob's profile: Chat Ban (hub-10.0.7.js:2801-2813, 4700-4723) through /moderation/chat"""
     A, B = ids
     q("UPDATE players SET player_developer = 1 WHERE player_id = ?", A)
+    q("INSERT INTO reports (reporter_id, target_id, reason, details) VALUES (?, ?, 'Scamming', 'took the KR and left')", A, B)
     c = Client(port, names[0], tokens[0], "p=profile&q=" + names[1], "staff")
     try:
+        # the Reports tab (canViewReports, hub-10.0.7.js:2173-2175, 4176-4193)
+        check(c.has("pTab_reports", 60), "a developer gets the profile's Reports tab")
+        check(c.text_has("#pTabContent_reports", "Scamming") and "took the KR" in (c.textof("#pTabContent_reports") or "")
+              and names[0] in (c.textof("#pTabContent_reports") or ""), "it lists the report: reason, reporter, text")
+        c.ui("openProfileTab('reports')")
+        c.shot("reports")
         check(c.has("chatBanBtn", 60), "a developer sees Chat Ban on a profile")
         check(c.text_has("#chatBanBtn", "Chat Ban"), "labelled Chat Ban (no ban in force)")
         c.ui("chatBanUser()")
