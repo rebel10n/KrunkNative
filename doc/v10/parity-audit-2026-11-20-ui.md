@@ -25,7 +25,7 @@ are in `target.md` "10.0.7"; this audit looks for anything else the client draws
 | 2 | Charm already on the other slot: 10.0.7 shows a Charm Error popup with Override (clears both slots, reselects); KN showed a plain alert | :217418-217446 | `ui_loadout.c` select_charm | low | fixed (8584382b) |
 | 3 | Punish popup lacked moderator Flag / Unflag and Chat Ban / Unban | :224082, :224064-224125 | `hud_ui.c` punishPopup | medium (staff) | fixed (8584382b): brain staff flag `["flg", name, on]`, `POST /moderation/chat` |
 | 4 | Prize wheel "+ More" was inert; 10.0.7 opens every item the wheel can roll | :224381, :224391-224445, modal :127588-127700 | `store_ui.c` show_more_items, `kn-alt.css` | medium | fixed (e6da86b9) |
-| 5 | Mod post-processing shaders: a mod's shaders add "Shader Mod #N" toggles and params to Settings (`setShaderInput`) | :205829-205935, :216668, :218092-218120 | none: KN loads no mod shader passes | medium | open: a renderer feature (TSL node graph as a full-screen pass); the settings rows follow once passes exist |
+| 5 | Mod post-processing shaders: a mod's shaders add "Shader Mod #N" toggles and params to Settings (`setShaderInput`) | :205829-205935, :216668, :218092-218120 | done (240da032, 5e582764): mod zips' shaders/ graphs run as post passes (doc/v10/mod-shaders.md), with the Shader Inputs rows on the advanced Render tab | medium | done |
 | 6 | `copyGameLink` (host message "Click to Copy", team links) | :204616-204621 | n/a | none | dead in 10.0.7: its only caller passes the try-again text without a link (:204804) |
 | 7 | `selectPack` / `selectPackPop`, `downloadPack` | :217738-217746, :223432 | n/a | none | official desktop client only (`window.ClientSession`) |
 | 8 | `debugBots`, `botsPopup` | :224130-, :221123 | n/a | none | developer tools (`isDev`) |
@@ -36,8 +36,8 @@ are in `target.md` "10.0.7"; this audit looks for anything else the client draws
 
 ## What remains
 
-- **Mod shaders (5):** a renderer port (mod shader graph -> post-process pass in `client/src/`), then the
-  Shaders folder rows in `ui_windows.c`. Out of this UI pass.
+- **Mod shaders (5):** done: `client/src/mod_shader_graph.c` (graph -> GLSL), `mod_shader.c` (the passes on the
+  scene target), the Shader Inputs rows in `ui_settings.c` / `ui_windows.c`; doc/v10/mod-shaders.md.
 - **Disconnect report (11):** Krunker's popup builds a JSON blob for its support. Box Office would need a
   support destination first.
 - **Not checked here:** the svelte components' inner layouts window by window (the uidiff scenarios cover
