@@ -592,7 +592,10 @@ jobs:
             libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev \
             libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev \
             libxcb-present-dev libegl-dev \
-            postgresql-client mariadb-client redis-server
+            postgresql-client mariadb-client redis-server \
+            python3-websockets python3-numpy python3-cryptography
+          # the tests' work directories live under ~/.cache (the runner has none)
+          mkdir -p ~/.cache
 
       # config/config.json (gitignored): the example with the service container's database
       - name: Test configuration

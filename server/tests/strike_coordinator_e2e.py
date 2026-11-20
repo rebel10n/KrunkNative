@@ -418,7 +418,13 @@ def main():
         code, rep = seek(port)
         check("Box Office seek with only a Strike lobby up: NoAvailableServers (never the Strike lobby)",
               code == 503 and rep.get("error") == "NoAvailableServers", (code, rep))
+        # the seeks above handed SCSTRIKE1's 8 seats out (2 joined): the unused tickets hold theirs for brain.join_ttl_s
+        # (30 s). The client cases usually outlast that; without a client_bin they are skipped, so wait for them here.
+        end = time.time() + 40
         code, rep = seek(port, "strike")
+        while code != 200 and time.time() < end:  # once a second: failed seeks reserve nothing
+            time.sleep(1)
+            code, rep = seek(port, "strike")
         check("Strike seek still -> SCSTRIKE1", code == 200 and rep.get("gameId") == strike_id, (code, rep))
     finally:
         for c in conns:

@@ -27,7 +27,7 @@ fi
 BRAIN=$BUILD/services/brain/kn_brain
 SERVER=$BUILD/server_bin
 CLIENT=$BUILD/client_bin
-for b in "$BRAIN" "$SERVER" "$CLIENT"; do [ -x "$b" ] || { echo "missing $b"; exit 1; }; done
+for b in "$BRAIN" "$SERVER" "$CLIENT"; do [ -x "$b" ] || { echo "missing $b: skipped"; exit 77; }; done  # 77: not built (the CI services job builds no client)
 SCHEMA=kn_test_fa_$$
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/kn-authe2e.XXXXXX")
 echo '{}' >"$WORK/empty.json" # server_bin: no config/config.json gameserver section (server.cfg only)

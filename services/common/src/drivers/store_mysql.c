@@ -134,8 +134,19 @@ static void c_disconnect(void *conn) {
 
 /* ------------------------------------------------------------------ statements */
 
+/* The session runs NO_BACKSLASH_ESCAPES on utf8mb4 (c_connect), so a quote is doubled and every other byte,
+ * backslashes included, is literal. Not mysql_real_escape_string: MySQL 8's libmysqlclient refuses it in that mode
+ * (CR_INSECURE_API_ERR, returns -1), which broke every inlined literal when the driver linked it instead of
+ * libmariadb. utf8mb4 never has 0x27 inside a multibyte sequence; params are C strings (no NUL). */
 static size_t my_escape(void *ud, char *to, const char *from, size_t len) {
-    return mysql_real_escape_string(((my *)ud)->m, to, from, (unsigned long)len);
+    (void)ud;
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (from[i] == '\'') to[o++] = '\'';
+        to[o++] = from[i];
+    }
+    to[o] = 0;
+    return o;
 }
 
 static char *bind_params(my *c, const char *sql, int n, const char *const *params) {
