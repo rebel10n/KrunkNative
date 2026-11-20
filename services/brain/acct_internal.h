@@ -329,6 +329,8 @@ void sh_daily_spin_claim(SocialSession *s, const cJSON *f); /* "dsl" (v10 DAILY_
 /* GET /daily-spin/progress (v10, HTTP root): the "dsp" state for account, answered with the v10 envelope */
 void daily_spin_progress_v10(kn_http_req *req, int64_t account);
 void sh_redeem_voucher(SocialSession *s, const cJSON *f);   /* "vr" (v10 REDEEM_VOUCHER, redeem.c) */
+void sh_dedi_list(SocialSession *s, const cJSON *f);        /* "dsrvl" (v10.0.7 Rent Dedicated Server, rentals.c) */
+void sh_dedi_rent(SocialSession *s, const cJSON *f);        /* "rdsrv" (v10.0.7 rentDediServer, rentals.c) */
 void sh_craft_recipes(SocialSession *s, const cJSON *f);    /* "recps" (v10 CRAFT_DATA_REQUEST, craft.c) */
 void sh_craft(SocialSession *s, const cJSON *f);            /* "crft" (v10 CRAFT_REQUEST -> "crftr", craft.c) */
 void sh_wild_offer(SocialSession *s, const cJSON *f);         /* "wo" (v10 Wild Offer, wild_offer.c) */

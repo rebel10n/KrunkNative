@@ -81,6 +81,7 @@ static const BrainModule k_brain_modules[] = {
     {"ranked", ranked_init, ranked_shutdown},
     {"turf", turf_init, turf_shutdown},
     {"lottery", lottery_init, lottery_shutdown}, /* v10 lottery windows and draws (lottery.c) */
+    {"rentals", rentals_init, rentals_shutdown}, /* v10.0.7 Rent Dedicated Server + the kn_rentd agent API (rentals.c) */
     {"shop", shop_init, shop_shutdown},          /* the Junk-priced shop (shop.c) */
     {"guest", guest_init, guest_shutdown},       /* the signed-out guest's balance: /guest/profile, /guest/claim (guest.c) */
     {"community", community_init, community_shutdown}, /* v10 events / news feed (community.c) */

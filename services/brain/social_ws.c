@@ -819,6 +819,8 @@ static const SocialRoute k_routes[] = {
     {"uml", sh_listings_of},            /* v7.1.4 profile "Listings" tab -> "ul" */
     {"pbm", sh_blackm_buy},             /* v7.1.4 Black Market purchase -> "bmr" */
     {"uploadM", sh_upload_map},
+    {"dsrvl", sh_dedi_list},          /* v10.0.7 Rent Dedicated Server: the list (rentals.c) */
+    {"rdsrv", sh_dedi_rent},          /* v10.0.7 rentDediServer: rent / extend / restart (rentals.c) */
     {"spin", sh_spin},
     {"fkr", sh_free_kr},
     {"spinH", sh_spin_history},
@@ -927,7 +929,6 @@ static const LabelClass k_label_class[] = {
     {"vr", RC_WRITE, ANS_REPLY}, /* v10 REDEEM_VOUCHER (redeem.c): a refusal is answered "vr" with the error */
     {"crft", RC_WRITE, ANS_REPLY}, /* v10 CRAFT_REQUEST (craft.c, the Junkyard): changes the inventory */
     {"ip", RC_WRITE, ANS_REPLY},   /* the paint picker's item paint (economy.c sh_item_paint): answered "ipr" */
-    {"smr", RC_WRITE, ANS_REPLY},  /* v10 SHARE_MATCH_RESULT (social_gapi.c sh_share_match): a feed post */
     /* v10.0.4 bulk market and item locks (economy.c): the writes as their single-item frames (qsi, li), the lock list a read */
     {"qsb", RC_WRITE, ANS_REPLY}, {"lib", RC_WRITE, ANS_REPLY}, {"ils", RC_WRITE, ANS_REPLY}, {"ilk", RC_READ, ANS_REPLY},
     {"raml", RC_WRITE, ANS_REPLY},

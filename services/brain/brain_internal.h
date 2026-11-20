@@ -123,6 +123,11 @@ void ranked_v10_claim_milestone(kn_http_req *req, const char *region);
 /* the running ranked season (brain.ranked.season, else the calendar's): the profile's rank chip (social_gapi.c) */
 int ranked_season_now(void);
 
+/* ---- v10.0.7 rented servers (rentals.c, 0390_rented_servers; doc/v10/rented-servers.md) */
+int rentals_init(Brain *b);
+void rentals_shutdown(Brain *b);
+int64_t rentals_price(int typ);
+int64_t rentals_days(int typ);
 /* ---- v10 lottery (lottery.c, 0348_lottery; db_lottery.c) */
 int lottery_init(Brain *b);
 void lottery_shutdown(Brain *b);

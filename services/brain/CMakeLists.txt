@@ -68,6 +68,7 @@ set(KN_BRAIN_SOURCES
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
     db_lottery.c                    # v10 lottery windows, entries, draws (0348_lottery; lottery.c)
     lottery.c
+    rentals.c                       # v10.0.7 Rent Dedicated Server: pool, "dsrvl" / "rdsrv", kn_rentd agent API (0390)
     db_guest.c                      # the signed-out guest's balance (0350_guest_profiles; guest.c, accounts.c guest ops)
     guest.c                         # GET /guest/profile, POST /guest/claim
     db_shop.c                       # the Junk-priced shop: display, purchase (0349_shop_junk; shop.c, doc/v10/junk.md)
@@ -583,6 +584,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_lottery PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;lottery")
+    # v10.0.7 rented servers (rentals.c, 0390_rented_servers, doc/v10/rented-servers.md): rent / extend / update, the refusals,
+    # the kn_rentd agent API, the startup guarantee's refund, the expiry
+    add_test(NAME brain_rentals
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/rentals_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_rentals PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;rentals")
     # the live trade of Trade mode (doc/v10/trade.md, 0357_live_trades): the game server's trade_inventories / live_trade
     # ops: the swap in one transaction, replays, ownership, a double spend, funds, levels, bans, limits, the ledger
     add_test(NAME brain_live_trade
@@ -799,6 +806,11 @@ foreach (drv IN ITEMS sqlite mysql)
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_lottery_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;lottery;${drv}")
+        add_test(NAME brain_rentals_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/rentals_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_rentals_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;rentals;${drv}")
         add_test(NAME brain_live_trade_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/live_trade_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
