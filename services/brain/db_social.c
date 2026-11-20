@@ -645,6 +645,50 @@ const kn_proc P_MOD_PAGE = {
     "WHERE lower(d.mod_name) = lower($1) AND d.deleted_at IS NULL",
     run_mod_page};
 
+/* The live data of a published map stored as its version (map_versions, migration 0392; the Creations map page's
+ * Versions tab, deob-10.0.7.js:107794-107835): the version number is the map_updatecounter it went live with. Every
+ * map_data write calls it (the publish, the Leaderboard Display updates, a revert); the newest MAP_VERSIONS_KEEP
+ * versions are kept (Box Office's bound: v10.0.7's bundle shows no limit). 0 ok, -1 failed (x carries the error).
+ * The .pg text is sent as written (no {macro} in it). */
+int db_map_snapshot(Dbx *x, const char *map_id) {
+    if (dbx_exec(x,
+                 SQL(.pg = "INSERT INTO map_versions (map_id, version, map_data, data_size, created_at) SELECT map_id, map_updatecounter,"
+                           " map_data, octet_length(map_data), now() FROM published_maps WHERE map_id = $1::bigint ON CONFLICT DO NOTHING",
+                     .sqlite = "INSERT OR IGNORE INTO map_versions (map_id, version, map_data, data_size, created_at) SELECT map_id,"
+                               " map_updatecounter, map_data, length(CAST(map_data AS BLOB)), {now} FROM published_maps WHERE map_id = {int:$1}",
+                     .mysql = "INSERT IGNORE INTO map_versions (map_id, version, map_data, data_size, created_at) SELECT map_id,"
+                              " map_updatecounter, map_data, LENGTH(map_data), {now} FROM published_maps WHERE map_id = {int:$1}"),
+                 KN_DB_ARGS(map_id)) < 0)
+        return -1;
+    const int64_t top = dbx_int(x, SQL(.any = "SELECT max(version) FROM map_versions WHERE map_id = {int:$1}"), KN_DB_ARGS(map_id), 0);
+    if (top > MAP_VERSIONS_KEEP &&
+        dbx_exec(x, SQL(.any = "DELETE FROM map_versions WHERE map_id = {int:$1} AND version <= {int:$2}"),
+                 KN_DB_ARGS(map_id, I64S(top - MAP_VERSIONS_KEEP))) < 0)
+        return -1;
+    return 0;
+}
+
+/* (map, data) -> {written}: a manager's rewrite of the live data (creations.c ulb), a new version */
+static kn_db_result *run_map_data_set(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t written = dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_data = $2, map_updatecounter = map_updatecounter + 1"
+                                                  " WHERE map_id = {int:$1} AND deleted_at IS NULL"),
+                                     KN_DB_ARGS(P(0), P(1)));
+    if (written > 0) db_map_snapshot(&x, P(0));
+    cJSON *v = cJSON_CreateObject();
+    cJSON_AddNumberToObject(v, "written", (double) (written > 0 ? written : 0));
+    return dbx_json(&x, "map_data_set", v);
+}
+const kn_proc P_MAP_DATA_SET = {"map_data_set", NULL, run_map_data_set};
+
+/* (map) -> {}: db_map_snapshot on its own (the social socket's writers: the publish, ulb) */
+static kn_db_result *run_map_snapshot(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    db_map_snapshot(&x, P(0) ? P(0) : "0");
+    return dbx_json(&x, "map_snapshot", cJSON_CreateObject());
+}
+const kn_proc P_MAP_SNAPSHOT = {"map_snapshot", NULL, run_map_snapshot};
+
 /* (me, name, data, desc, video, category, thumb) -> {updated, id, taken} */
 static kn_db_result *run_publish_map(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -670,22 +714,29 @@ static kn_db_result *run_publish_map(kn_dbconn *c, int n, const char *const *p) 
     /* P(7): map_info ({"m": mode ids}, creations.c); the thumbnail flag stays with map_image */
     if (id > 0 && n > 7 && P(7) && *P(7))
         dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_info = $2 WHERE map_id = $1"), KN_DB_ARGS(I64S(id), P(7)));
+    if (id > 0) db_map_snapshot(&x, I64S(id)); /* the new live data is a version (0392) */
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "updated", up > 0 ? 1 : 0);
     cJSON_AddNumberToObject(o, "id", (double)id);
     cJSON_AddNullToObject(o, "taken");
     return dbx_json(&x, "jsonb_build_object", o);
 }
+_Static_assert(MAP_VERSIONS_KEEP == 20, "P_PUBLISH_MAP's old_versions keeps MAP_VERSIONS_KEEP");
 const kn_proc P_PUBLISH_MAP = {
     "publish_map",
     "WITH up AS (UPDATE published_maps SET map_data = $3, map_description = coalesce($4, ''), map_video = nullif($5, ''), "
     "  map_category = $6, map_image = coalesce($7, map_image), map_info = coalesce(nullif($8, '')::jsonb, map_info), "
     "  map_updatecounter = map_updatecounter + 1, map_date = now() "
-    "  WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id = $1 RETURNING map_id), "
+    "  WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id = $1 RETURNING map_id, map_updatecounter, map_data), "
     "taken AS (SELECT 1 FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id IS DISTINCT FROM $1), "
     "ins AS (INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category, map_image, map_info) "
     "  SELECT $2, $1, $3, coalesce($4, ''), nullif($5, ''), $6, $7, coalesce(nullif($8, '')::jsonb, '{}'::jsonb) "
-    "  WHERE NOT EXISTS (SELECT 1 FROM up) AND NOT EXISTS (SELECT 1 FROM taken) RETURNING map_id) "
+    "  WHERE NOT EXISTS (SELECT 1 FROM up) AND NOT EXISTS (SELECT 1 FROM taken) RETURNING map_id, map_updatecounter, map_data), "
+    /* db_map_snapshot in the same statement: the new live data is a version, the oldest beyond MAP_VERSIONS_KEEP go */
+    "snap AS (INSERT INTO map_versions (map_id, version, map_data, data_size) SELECT map_id, map_updatecounter, map_data, "
+    "  octet_length(map_data) FROM (SELECT * FROM up UNION ALL SELECT * FROM ins) t ON CONFLICT DO NOTHING), "
+    "old_versions AS (DELETE FROM map_versions WHERE map_id = (SELECT map_id FROM up) "
+    "  AND version <= (SELECT map_updatecounter FROM up) - 20) " /* MAP_VERSIONS_KEEP */
     "SELECT jsonb_build_object('updated', (SELECT count(*) FROM up), "
     "'id', coalesce((SELECT map_id FROM up), (SELECT map_id FROM ins)), "
     "'taken', CASE WHEN EXISTS (SELECT 1 FROM taken) THEN kn_fail('Map name taken')::text END)",

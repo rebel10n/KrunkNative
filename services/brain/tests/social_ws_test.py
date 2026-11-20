@@ -476,7 +476,7 @@ async def scenario(base, internal_url, secret):
     # publishing maps (social.js uploadGameAsset "uploadM") + the hub catalogue
     http_base = base.replace("ws://", "http://")
     async with Social(ws_url, json_mode=True) as a:
-        await a.call("a", "a", 1, [alice, "hunter22", None])
+        alice_login = await a.call("a", "a", 1, [alice, "hunter22", None])
         mapname = "Arena_" + stamp
         mapjson = json.dumps({"name": mapname, "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}], "spawns": [[0, 1, 0], [4, 1, 0]]})
         r = await a.call("pubMR", "uploadM", mapjson, None, "my <i>map</i>", "", 2)
@@ -508,6 +508,24 @@ async def scenario(base, internal_url, secret):
         check(len(found["data"]) == 1, "/api/search finds the published map")
         data = urllib.request.urlopen(http_base + "/api/map-data?name=" + mapname).read()
         check(json.loads(data)["name"] == mapname, "/api/map-data serves the map JSON")
+        # the map's versions (v10_catalog.c, map_versions 0392): the publish and the republish each stored one
+        # (on PostgreSQL in P_PUBLISH_MAP's own statement), and a revert makes an old one live again
+        def maps_api(method, path):
+            req = urllib.request.Request(http_base + path, method=method, data=b"{}" if method == "POST" else None,
+                                         headers={"Authorization": "Bearer " + alice_login[5], "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read() or b"null")
+            except urllib.error.HTTPError as e:
+                return {"status": e.code}
+        map_id = found["data"][0].get("map_id")
+        vs = (maps_api("GET", "/maps/%s/versions" % map_id) or {}).get("data") or []
+        check([v.get("version") for v in vs] == [2, 1] and vs[0].get("current_version") == 2 and vs[0].get("data_size", 0) > 0,
+              "the publish and the republish are versions 2 and 1: %r" % (vs,))
+        rv = maps_api("POST", "/maps/%s/versions/1/revert" % map_id)
+        vs = (maps_api("GET", "/maps/%s/versions" % map_id) or {}).get("data") or []
+        check((rv.get("data") or {}).get("version") == 3 and [v.get("version") for v in vs] == [3, 2, 1],
+              "revert to v1: live as v3, v2 still listed: %r %r" % (rv, vs))
         try:
             urllib.request.urlopen(http_base + "/api/map-data?name=nope_" + stamp)
             check(False, "/api/map-data unknown map 404")

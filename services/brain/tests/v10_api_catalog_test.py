@@ -379,14 +379,19 @@ def section_maps(c):
     check("[91] unfeature by a developer -> 200 {featured: false, map_featured: 0}",
           is_data(st, body, {"featured": False, "map_featured": 0}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
-    # row 93 GET /maps/{id}/versions: no version store (one current map_data per map)
+    # row 93 GET /maps/{id}/versions: the managers' list (map_versions, migration 0392; deob-10.0.7.js:26713-26717,
+    # the Versions tab 107794-107811). This map was written straight into the table: no version stored yet.
     st, body = http(p, "GET", "/maps/%d/versions" % map1)
-    check("[93] GET versions -> 200 [] (no version store; consumer v10.js 107087 reads data || [])",
-          is_data(st, body, []), "HTTP %d %s" % (st, json.dumps(body)[:160]))
-    # row 94 POST revert: nothing to revert to
+    check("[93] GET versions signed out -> 401", st == 401, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/maps/%d/versions" % map1, token=tok_b)
+    check("[93] GET versions by a non-manager -> 404 MAP_NOT_FOUND (the tab is the owner's, deob-10.0.7.js:107651-107652)",
+          st == 404 and error_code(body) == "MAP_NOT_FOUND", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/maps/%d/versions" % map1, token=tok_a)
+    check("[93] GET versions by the owner before any write -> 200 []", is_data(st, body, []), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    # row 94 POST revert: a version that was never stored
     st, body = http(p, "POST", "/maps/%d/versions/2/revert" % map1, {}, token=tok_a)
-    check("[94] POST revert -> 403 NOT_IMPLEMENTED (no versions; wrapper L5161; consumer v10.js 107111 reads error)",
-          st == 403 and error_code(body) == "NOT_IMPLEMENTED", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[94] POST revert of an unknown version -> 400 Version not found (deob-10.0.7.js:107823-107826 reads error.message)",
+          st == 400 and "Version not found" in error_message(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
     # row 95 POST /maps/{id}/funds: the creator moves KR between the account and the map (consumer v10.js 107065)
     st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": 100}, token=tok_b)
@@ -432,6 +437,38 @@ def section_maps(c):
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 1, "custom_type": "", "order": 0}, token=tok_a)
     check("[96] back to Time, ASC (custom removed)", st == 200 and "ldc" not in (lb_object(map1) or {}), json.dumps(lb_object(map1)))
+
+    # rows 93-94 again: the three Leaderboard Display writes above each stored a version (2, 3, 4)
+    st, body = http(p, "GET", "/maps/%d/versions" % map1, token=tok_a)
+    rows = dig(body, "data") or []
+    live_size = len(one("SELECT map_data FROM published_maps WHERE map_id = ?", (map1,)).encode())
+    check("[93] versions newest first, each {version, created, data_size, current_version} (deob-10.0.7.js:107649, 108235-108266)",
+          st == 200 and [r.get("version") for r in rows] == [4, 3, 2] and all(r.get("current_version") == 4 for r in rows)
+          and rows[0].get("data_size") == live_size and re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", rows[0].get("created") or ""),
+          "HTTP %d %s" % (st, json.dumps(body)[:300]))
+    st, body = http(p, "POST", "/maps/%d/versions/3/revert" % map1, {}, token=tok_b)
+    check("[94] revert by a non-manager -> 404 MAP_NOT_FOUND", st == 404 and error_code(body) == "MAP_NOT_FOUND",
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/maps/%d/versions/4/revert" % map1, {}, token=tok_a)
+    check("[94] revert to the live version -> 400 REFUSED", st == 400 and error_code(body) == "REFUSED", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/maps/%d/versions/3/revert" % map1, {}, token=tok_a)
+    check("[94] revert to v3 -> 200 {version: 5} (\"Live version is now v{0}\" reads data.version, deob-10.0.7.js:107827)",
+          is_data(st, body, {"version": 5}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[94] v3's data is live again (its custom type kills), as a new version 5",
+          (lb_object(map1) or {}).get("ldc") == "kills" and one("SELECT map_updatecounter FROM published_maps WHERE map_id = ?", (map1,)) == 5,
+          json.dumps(lb_object(map1)))
+    st, body = http(p, "GET", "/maps/%d/versions" % map1, token=tok_a)
+    check("[93] the version that was live (4) stays listed: [5, 4, 3, 2], current 5",
+          [r.get("version") for r in dig(body, "data") or []] == [5, 4, 3, 2] and dig(body, "data")[0].get("current_version") == 5,
+          "HTTP %d %s" % (st, json.dumps(body)[:300]))
+    st, body = http(p, "POST", "/maps/%d/versions/4/revert" % map1, {}, token=tok_a)
+    check("[94] the revert undone (v4 back live as v6, no custom type)",
+          is_data(st, body, {"version": 6}) and "ldc" not in (lb_object(map1) or {}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    for i in range(20):  # a map keeps its newest 20 versions (MAP_VERSIONS_KEEP)
+        http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 1, "custom_type": "", "order": i % 2}, token=tok_a)
+    kept = sql("SELECT min(version), max(version), count(*) FROM map_versions WHERE map_id = ?", (map1,))
+    check("[93] the newest 20 versions are kept (7..26 after 20 more writes): %r" % (kept,), kept == [(7, 26, 20)])
+    http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 1, "custom_type": "", "order": 0}, token=tok_a)
 
     # rows 97-98: the map's key/value data per player (ks_storage; consumer v10.js 106987 reads data, mk, kv)
     sql("INSERT INTO ks_storage (account_id, map_id, skey, svalue, scope) VALUES (?, ?, 'coins', '5', 0)", (b, map1))

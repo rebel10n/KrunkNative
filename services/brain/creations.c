@@ -648,12 +648,14 @@ typedef struct LbUpdate {
 
 static void lb_write_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
     if (!kn_db_ok(res))
         social_send_n(s, "upMp", 1, cJSON_CreateString(acct_db_error(res, "ulb")));
-    else if (kn_db_affected(res) > 0)
+    else if (kn_json_int(v, "written", 0) > 0)
         social_send_n(s, "upMp", 1, cJSON_CreateString("Leaderboard Updated!"));
     else
         social_send_n(s, "upMp", 1, cJSON_CreateString("Not allowed"));
+    cJSON_Delete(v);
 }
 
 static void lb_set_number(cJSON *o, const char *key, int64_t v) {
@@ -701,10 +703,7 @@ static void lb_read_done(SocialSession *s, kn_db_result *res, void *extra) {
         return;
     }
     /* the params are consumed by the call (as social_call's do), so u and text may go after it */
-    social_query(s,
-                 SQL(.any = "UPDATE published_maps SET map_data = $2, map_updatecounter = map_updatecounter + 1"
-                            " WHERE map_id = $1 AND deleted_at IS NULL"),
-                 KN_DB_ARGS(u->map_id, text), lb_write_done, NULL);
+    social_call(s, &P_MAP_DATA_SET, KN_DB_ARGS(u->map_id, text), lb_write_done, NULL); /* a new version (0392) */
     free(text);
 }
 

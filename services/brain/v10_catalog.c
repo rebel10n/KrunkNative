@@ -24,8 +24,9 @@
  *   POST   /maps/:id/feature {featured}        developers (creations.c ftC) set map_featured
  *   DELETE /maps/:id                           soft delete (deleted_at) by the creator, developers and map
  *                                              mods (creations.c delC)
- *   GET    /maps/:id/versions                  EMPTY []: a map keeps one current map_data, no versions
- *   POST   /maps/:id/versions/:v/revert        REFUSAL: there are no versions to revert to
+ *   GET    /maps/:id/versions                  the map's versions (map_versions, 0392): {version, created,
+ *                                              data_size, current_version} newest first, for its managers
+ *   POST   /maps/:id/versions/:v/revert        version :v goes live as a new version; {version} (managers)
  *   POST   /maps/:id/funds {amount}            the creator moves KR between the account and the map's
  *                                              funds (map_funds; > 0 deposit, < 0 withdraw), the ledger
  *                                              rows source map_funds
@@ -44,6 +45,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "acct_internal.h"
 #include "db_procs.h"
@@ -55,7 +57,6 @@
 
 #define WHY_SKIN "Box Office has no Skin Manager: custom skins are not stored"
 #define WHY_SKIN_ASSET "Box Office has no asset store for skin files"
-#define WHY_VERSIONS "Box Office keeps no map versions to revert to"
 #define MSG_NO_MAP "Map not found"
 #define MSG_LOGIN "You must be logged in."
 #define BOARD_PAGE 20
@@ -377,7 +378,7 @@ static kn_db_result *run_map_lb(kn_dbconn *c, int n, const char *const *p) {
                                                   " WHERE map_id = $1 AND deleted_at IS NULL"),
                                      KN_DB_ARGS(P(1), out));
     free(out);
-    if (written < 0) return dbx_finish(&x, NULL);
+    if (written < 0 || (written > 0 && db_map_snapshot(&x, P(1)) < 0)) return dbx_finish(&x, NULL);
     cJSON *v = cJSON_CreateObject();
     /* the map record's leaderboard_type: "score", "time" or the custom key, a string (the Map Detail panel
      * stores data.leaderboard_type into it, deob-10.0.3.js:120948, and compares it with "time" at 121127) */
@@ -411,6 +412,118 @@ static kn_db_result *run_map_data_delete(kn_dbconn *c, int n, const char *const 
     return dbx_json(&x, "v10_map_data_delete", v);
 }
 static const kn_proc P_MAP_DATA_DELETE = {"v10_map_data_delete", NULL, run_map_data_delete};
+
+/* a version's time as the Versions tab's date reader takes it (deob-10.0.7.js:23916: split on "-", "T", ":", "." ...) */
+static void iso_ms(int64_t ms, char *out, size_t cap) {
+    const time_t t = (time_t) (ms / 1000);
+    struct tm tm;
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
+    snprintf(out, cap, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
+             tm.tm_sec, (int) (ms % 1000));
+}
+
+/* (me, map) -> [{version, created, data_size, current_version}] newest first: the map's versions (map_versions,
+ * migration 0392) for a caller who may manage it (the Versions tab is the owner's, deob-10.0.7.js:107651-107652);
+ * current_version is the live one (the tab reads it from the first row, 107649) */
+static kn_db_result *run_map_versions(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t live = dbx_int(&x, SQL(.any = "SELECT map_updatecounter FROM published_maps WHERE map_id = $2 AND deleted_at IS NULL AND " MANAGE_SQL),
+                                 KN_DB_ARGS(P(0), P(1)), -1);
+    if (live < 0) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, MSG_NO_MAP);
+        return dbx_finish(&x, NULL);
+    }
+    kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT version, {epoch_ms:created_at}, data_size FROM map_versions WHERE map_id = $1"
+                                           " ORDER BY version DESC"),
+                            KN_DB_ARGS(P(1)));
+    if (!r) return dbx_finish(&x, NULL);
+    cJSON *list = cJSON_CreateArray();
+    for (int i = 0; i < kn_db_rows(r); i++) {
+        char when[40];
+        iso_ms(kn_db_get_int64(r, i, 1, 0), when, sizeof when);
+        cJSON *row = cJSON_CreateObject();
+        cJSON_AddNumberToObject(row, "version", (double) kn_db_get_int64(r, i, 0, 0));
+        cJSON_AddStringToObject(row, "created", when);
+        cJSON_AddNumberToObject(row, "data_size", (double) kn_db_get_int64(r, i, 2, 0));
+        cJSON_AddNumberToObject(row, "current_version", (double) live);
+        cJSON_AddItemToArray(list, row);
+    }
+    kn_db_result_free(r);
+    return dbx_json(&x, "v10_map_versions", list);
+}
+static const kn_proc P_MAP_VERSIONS = {"v10_map_versions", NULL, run_map_versions};
+
+/* map_info's "m" (the modes the Games window tags, creations.c sh_upload_map) from the map data; NULL: unchanged */
+static char *info_with_modes(const char *info_text, const char *data) {
+    cJSON *map = cJSON_Parse(data);
+    const cJSON *list = cJSON_GetObjectItemCaseSensitive(map, "modes");
+    if (!cJSON_IsArray(list)) {
+        cJSON_Delete(map);
+        return NULL;
+    }
+    cJSON *info = info_text ? cJSON_Parse(info_text) : NULL;
+    if (!cJSON_IsObject(info)) {
+        cJSON_Delete(info);
+        info = cJSON_CreateObject();
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(info, "m");
+    cJSON *modes = cJSON_AddArrayToObject(info, "m");
+    const cJSON *mode;
+    cJSON_ArrayForEach(mode, list) {
+        if (cJSON_IsNumber(mode)) cJSON_AddItemToArray(modes, cJSON_CreateNumber(mode->valuedouble));
+    }
+    cJSON_Delete(map);
+    char *out = cJSON_PrintUnformatted(info);
+    cJSON_Delete(info);
+    return out;
+}
+
+/* (me, map, version) -> {version}: the version's data goes live as a new version (map_updatecounter + 1, so game
+ * servers reload it), and the one that was live stays listed ("The version currently live is kept as a snapshot,
+ * so you can undo this", deob-10.0.7.js:107816; "Live version is now v{0}" reads data.version, 107827) */
+static kn_db_result *run_map_revert(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t live = dbx_int(&x, SQL(.any = "SELECT map_updatecounter FROM published_maps WHERE map_id = $2 AND deleted_at IS NULL AND " MANAGE_SQL),
+                                 KN_DB_ARGS(P(0), P(1)), -1);
+    if (live < 0) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, MSG_NO_MAP);
+        return dbx_finish(&x, NULL);
+    }
+    if (PI(2) == live) {
+        dbx_refuse(&x, "This version is already live");
+        return dbx_finish(&x, NULL);
+    }
+    char *data = dbx_text(&x, SQL(.any = "SELECT map_data FROM map_versions WHERE map_id = $1 AND version = {int:$2}"),
+                          KN_DB_ARGS(P(1), P(2)));
+    if (!data) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Version not found");
+        return dbx_finish(&x, NULL);
+    }
+    char *info_text = dbx_text(&x, SQL(.pg = "SELECT map_info::text FROM published_maps WHERE map_id = $1",
+                                       .any = "SELECT map_info FROM published_maps WHERE map_id = $1"),
+                               KN_DB_ARGS(P(1)));
+    char *info = info_with_modes(info_text, data);
+    free(info_text);
+    int64_t written = dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_data = $2, map_updatecounter = map_updatecounter + 1,"
+                                              " map_date = {now} WHERE map_id = $1 AND deleted_at IS NULL"),
+                               KN_DB_ARGS(P(1), data));
+    free(data);
+    if (written > 0 && info)
+        written = dbx_exec(&x, SQL(.pg = "UPDATE published_maps SET map_info = $2::jsonb WHERE map_id = $1",
+                                   .any = "UPDATE published_maps SET map_info = $2 WHERE map_id = $1"),
+                           KN_DB_ARGS(P(1), info));
+    free(info);
+    if (written < 0 || db_map_snapshot(&x, P(1)) < 0) return dbx_finish(&x, NULL);
+    const int64_t now_live = dbx_int(&x, SQL(.any = "SELECT map_updatecounter FROM published_maps WHERE map_id = $1"), KN_DB_ARGS(P(1)), 0);
+    cJSON *v = cJSON_CreateObject();
+    cJSON_AddNumberToObject(v, "version", (double) now_live);
+    return dbx_json(&x, "v10_map_revert", v);
+}
+static const kn_proc P_MAP_REVERT = {"v10_map_revert", NULL, run_map_revert};
 
 /* ---- the single-statement map writes and reads (kn_db_query_sql) */
 
@@ -456,7 +569,7 @@ static const kn_sql k_board_count[2] = {{.any = COUNT_SQL("")}, {.any = COUNT_SQ
 
 /* ---- the map routes: one account step, then one DB step; the context follows the request */
 
-enum { OP_VOTE, OP_FUNDS, OP_LB, OP_FEATURE, OP_DELETE, OP_DATA_GET, OP_DATA_DELETE };
+enum { OP_VOTE, OP_FUNDS, OP_LB, OP_FEATURE, OP_DELETE, OP_DATA_GET, OP_DATA_DELETE, OP_VERSIONS, OP_REVERT };
 
 typedef struct CatOp {
     kn_http_req *req;
@@ -569,6 +682,12 @@ static void op_account(kn_http_req *req, int64_t id, void *ud) {
     case OP_DATA_DELETE:
         kn_db_call(db, &P_MAP_DATA_DELETE, KN_DB_ARGS(me, map, o->s1, o->s2), on_map_proc, o);
         break;
+    case OP_VERSIONS:
+        kn_db_call(db, &P_MAP_VERSIONS, KN_DB_ARGS(me, map), on_map_proc, o);
+        break;
+    case OP_REVERT:
+        kn_db_call(db, &P_MAP_REVERT, KN_DB_ARGS(me, map, n1), on_map_proc, o);
+        break;
     case OP_FEATURE:
         kn_db_query_sql(db, &k_feature, KN_DB_ARGS(me, map, n1), on_feature, o);
         break;
@@ -668,16 +787,21 @@ static void h_map_leaderboard(kn_http_req *req, void *ud) {
     map_route(req, OP_LB, path_id(req, "id"), type, order, custom, NULL);
 }
 
-/* GET /maps/:id/versions: no version store */
+/* GET /maps/:id/versions (deob-10.0.7.js:26713-26717): the manager's list of the map's versions */
 static void h_map_versions(kn_http_req *req, void *ud) {
     (void) ud;
-    v10_reply_data(req, 200, cJSON_CreateArray());
+    map_route(req, OP_VERSIONS, path_id(req, "id"), 0, 0, NULL, NULL);
 }
 
-/* POST /maps/:id/versions/:v/revert */
+/* POST /maps/:id/versions/:v/revert (deob-10.0.7.js:26719-26723): version :v goes live again */
 static void h_map_revert(kn_http_req *req, void *ud) {
     (void) ud;
-    v10_reply_error(req, 403, "NOT_IMPLEMENTED", WHY_VERSIONS);
+    const int64_t v = path_id(req, "v");
+    if (v <= 0) {
+        v10_reply_error(req, 404, "VERSION_NOT_FOUND", "Version not found");
+        return;
+    }
+    map_route(req, OP_REVERT, path_id(req, "id"), v, 0, NULL, NULL);
 }
 
 /* GET /maps/:id/data?player= */
