@@ -189,6 +189,31 @@ def spawn_all(peers, timeout=5.0):
     return [n for n, p in peers.items() if not p.me]
 
 
+def shield(proc, tag, peers, names, timeout=3.0):
+    """God mode on for the players that must stay alive. Everyone spawns in the same tick once the
+    2 s load-in hold ends (deob-10.0.7.js:16546, :191039), so getSpawnPoint (:191848) stacks the
+    13 players on the arena's 4 spawn points, and a firing peer (shooter, holder, botshooter) kills
+    whoever stands on its point: that player then waits dead and gets the 8 s menu kick instead.
+    God mode only stops the deaths; it is not activity, so the idle kick still applies."""
+    want = []
+    for n in names:
+        me = peers[n].me
+        if me:
+            console(proc, f"god {me[1]['uid']} on")  # "on": a bare "1" or "0" would be the toggle itself
+            want.append(me[1]["name"])
+    log = os.path.join(WORK, f"s{tag}.log")
+    end = time.time() + timeout
+    missing = want
+    while time.time() < end and missing:
+        with open(log, errors="replace") as f:
+            text = f.read()
+        missing = [name for name in want if f"God mode ON on {name}" not in text]
+        for p in peers.values():
+            p.drain()
+        time.sleep(0.05)
+    check(f"god mode on for the {len(want)} players that stay alive", not missing and len(want) == len(names), ", ".join(missing))
+
+
 def kicked_near(peers, start, n, expect, slack=1.6):
     p = peers[n]
     at = p.kicked_at
@@ -218,10 +243,14 @@ def phase1(proc):
         peers[n].pitch = SKY
     missing = spawn_all(peers)
     check("phase 1: everyone spawned", not missing, ", ".join(missing))
+    # menu and respawner die by their own /kill
+    shield(proc, 1, peers, [n for n in names if n not in ("menu", "respawner")])
     # A stopped bot (no attack, no roam) 8 units in front of the botshooter, both away from the
     # arena's spawns; botshooter looks along -z (yaw 0), level.
     console(proc, "bot_stop on")
-    console(proc, "bot_add 1")
+    # godMode: the bot takes every hit (HIT goes out, health refills: player.c's god_mode) and never dies.
+    # Mortal, it died in two hits and took ~2.8 s to respawn, leaving room for 5-9 hits in 14 s.
+    console(proc, "bot_add 1 god=1")
     me = peers["botshooter"].me[1] if peers["botshooter"].me else {"pos": (0, 2.0, 0), "name": "?"}
     y = me["pos"][1]
     console(proc, f"bring {me['name']} 120 {y:g} 120")  # guests are Guest_<n>: the SPAWN names it
@@ -312,6 +341,7 @@ def phase2(old_peers, proc):
     missing = spawn_all(peers)
     check(f"phase 2: everyone rejoined the restarted server ({time.time() - restarted:.1f} s after it answered)", not missing,
           ", ".join(missing))
+    shield(proc, 2, peers, list(peers))
     peers["rejoin_hold"].pitch = SKY
     start = time.time()
     tick = 0
