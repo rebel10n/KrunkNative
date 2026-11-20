@@ -9,7 +9,8 @@ kn_brain on sqlite + one client_bin at a time, logged in from seeded storage and
      the Leaderboard tab lists the seeded scores; the Data tab finds a player's keys, deletes one, then Delete By
      Key removes a key of every player; Edit -> Add / Take Out moves the map funds; Update Leaderboard republishes
   2. a mod's Edit (updateMod -> plm): the Update Mod popup prefilled with the mod's name
-  3. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
+  3. a developer's Chat Ban on a profile (/moderation/chat)
+  4. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
      Remove unfollows
 Screenshots go to the work dir (~/.cache/kn-hub-creator.*, kept on failure or with KN_KEEP=1).
 77 = skip (no client_bin / kn_brain / websockets).
@@ -272,6 +273,26 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
         c.close()
 
 
+def staff_profile(port, ids, tokens, names):
+    """a developer on bob's profile: Chat Ban (hub-10.0.7.js:2801-2813, 4700-4723) through /moderation/chat"""
+    A, B = ids
+    q("UPDATE players SET player_developer = 1 WHERE player_id = ?", A)
+    c = Client(port, names[0], tokens[0], "p=profile&q=" + names[1], "staff")
+    try:
+        check(c.has("chatBanBtn", 60), "a developer sees Chat Ban on a profile")
+        check(c.text_has("#chatBanBtn", "Chat Ban"), "labelled Chat Ban (no ban in force)")
+        c.ui("chatBanUser()")
+        check(wait(lambda: q("SELECT 1 FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", B)),
+              "Chat Ban: a chat ban in force for bob")
+        check(c.text_has("#chatBanBtn", "Chat Unban"), "the button reads Chat Unban")
+        c.ui("chatBanUser()")
+        check(wait(lambda: not q("SELECT 1 FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", B)),
+              "Chat Unban revoked it")
+    finally:
+        c.close()
+        q("UPDATE players SET player_developer = 0 WHERE player_id = ?", A)
+
+
 async def friends(port, ids, tokens, names, bob_sock):
     A, B = ids
     c = Client(port, names[0], tokens[0], "p=feed", "friends")
@@ -337,6 +358,7 @@ def main():
         q("INSERT INTO published_mods (mod_id, mod_name, creator_id, mod_url, mod_info) VALUES (?, ?, ?, 'ua', '{}'), (?, ?, ?, 'ua', '{}')",
           1000000900 + int(stamp) % 50, "Hub Pack " + stamp, ids[0], 1000000950 + int(stamp) % 50, "Not Mine " + stamp, ids[1])
         map_page(port, ids, tokens, names, map_name, map_id, stamp)
+        staff_profile(port, ids, tokens, names)
 
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", ids[0], ids[1], ids[1], ids[0])
 

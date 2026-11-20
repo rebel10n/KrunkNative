@@ -172,6 +172,7 @@ typedef struct {
     int profile_id;
     int profile_featured, profile_hack; // player_featured / player_hack of the profile (Verify, Flag)
     int profile_creator;                // creator_badge of the profile (v10's creator badge: Creator / Uncreator)
+    int profile_chat_banned;            // the profile's chat ban in force (GET /moderation/chat/:name, staff only)
     double profile_followed, profile_following;
     int giveaway;           // the post box's KR giveaway switch (togglPos)
     int posting;            // Ve: a post is being submitted
@@ -1367,6 +1368,60 @@ static void append_level_cell(StrBuf *sb, const double score) {
     sb_appendf(sb, "<span class='floatR' style='color:rgba(255,255,255,0.5);'><img src='./img/levels/%d.png' class='rnkIcon'>%d</span>", icon, lvl);
 }
 
+// The profile's Chat Ban (hub-10.0.7.js:2801-2813, 4700-4723): v10's moderation API on the brain (services/brain/v10_mods.c),
+// GET /moderation/chat/:name for the label, POST /moderation/chat {player_name, ban} for the switch; staff only.
+static void chat_ban_label(void) {
+    const HtmlElem b = el("chatBanBtn");
+    if (b) html_dom_set_text(b, g_hub.profile_chat_banned ? "Chat Unban" : "Chat Ban");
+}
+
+static void profile_chat_ban_got(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    char *name = user;
+    cJSON *j = status == 200 && body ? cJSON_Parse(body) : NULL;
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "data"), "chat_banned");
+    if (name && !strcmp(name, g_hub.profile_name) && cJSON_IsBool(v)) {
+        g_hub.profile_chat_banned = cJSON_IsTrue(v);
+        chat_ban_label();
+    }
+    cJSON_Delete(j);
+    free(name);
+}
+
+static void moderation_url(char *url, const size_t n, const char *path) {
+    char token[400];
+    backend_url_encode(token, sizeof(token), account_session_token());
+    snprintf(url, n, "%s%s?token=%s", backend_url(), path, token);
+}
+
+static void profile_chat_ban_fetch(void) {
+    char enc[200], path[260], url[1024];
+    backend_url_encode(enc, sizeof(enc), g_hub.profile_name);
+    snprintf(path, sizeof(path), "/moderation/chat/%s", enc);
+    moderation_url(url, sizeof(url), path);
+    char *name = strdup(g_hub.profile_name);
+    if (name && !backend_http_request("GET", url, NULL, profile_chat_ban_got, name)) free(name);
+}
+
+static void profile_chat_ban_set(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    char *name = user;
+    cJSON *j = body ? cJSON_Parse(body) : NULL;
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "data"), *err = cJSON_GetObjectItemCaseSensitive(j, "error");
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(d, "chat_banned");
+    if (status == 200 && cJSON_IsBool(v)) {
+        if (name && !strcmp(name, g_hub.profile_name)) {
+            g_hub.profile_chat_banned = cJSON_IsTrue(v);
+            chat_ban_label();
+        }
+    } else {
+        const char *msg = cJSON_IsString(err) ? err->valuestring : cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(err, "message"));
+        io_po(0, msg && *msg ? msg : "Failed to update chat ban");
+    }
+    cJSON_Delete(j);
+    free(name);
+}
+
 static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     set_display("profileHolder", "block");
     const char *name = jstr(t, "player_name");
@@ -1451,12 +1506,17 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
                not_following ? I18N("generic.follow", "Follow") : I18N("generic.unfollow", "Unfollow"));
     sb_appendf(&sb, "<div class='bottomBtn canVerify%s' id='verifyBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='verifyPopup();'>%s</div>", acc && acc->is_dev ? "" : " hide", jnum(t, "player_featured") ? "Unverify" : "Verify");
     sb_appendf(&sb, "<div class='bottomBtn canBadge%s' id='badgeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='badgePopup();'>Give Badge</div>", acc && acc->is_dev ? "" : " hide");
+    // Chat Ban (canChatBan: staff), hub-10.0.7.js:2801-2813; the label follows the ban in force (profile_chat_ban_fetch)
+    const int chat_staff = acc && (acc->is_dev || acc->is_mod);
+    sb_appendf(&sb, "<div class='bottomBtn canChatBan%s' id='chatBanBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='chatBanUser();'>Chat Ban</div>", chat_staff ? "" : " hide");
     // KrunkNative: v10's creator badge has no setter in the v10 page; developers give it here ("crt")
     sb_appendf(&sb, "<div class='bottomBtn canVerify%s' id='creatorBtn' style='color:#993299;border-color:#993299' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='creatorPopup();'>%s</div>", acc && acc->is_dev ? "" : " hide",
                g_hub.profile_creator ? "Uncreator" : "Creator");
     char *html = sb_finish(&sb);
     set_html("rightProfile", html);
     free(html);
+    g_hub.profile_chat_banned = 0;
+    if (chat_staff && g_hub.profile_name[0]) profile_chat_ban_fetch();
     if (g_hub.profile_name[0] && acc && strcmp(acc->name, g_hub.profile_name) != 0) set_display("followBtn", "inline-block");
     if (acc && acc->level >= TRADE_MIN_LVL && k >= TRADE_MIN_LVL) set_display("tradeBtn", "inline-block");
 
@@ -6465,6 +6525,24 @@ H(h_share_game_tweet) {
     return 1;
 }
 
+// chatBanUser(): the switch (profile_chat_ban_set answers)
+H(h_chat_ban_user) {
+    UNUSED;
+    const AccountInfo *acc = active_account();
+    if (!acc || !(acc->is_dev || acc->is_mod) || !g_hub.profile_name[0]) return 1;
+    char url[1024];
+    moderation_url(url, sizeof(url), "/moderation/chat");
+    cJSON *b = cJSON_CreateObject();
+    cJSON_AddStringToObject(b, "player_name", g_hub.profile_name);
+    cJSON_AddBoolToObject(b, "ban", !g_hub.profile_chat_banned);
+    char *json = cJSON_PrintUnformatted(b);
+    cJSON_Delete(b);
+    char *name = strdup(g_hub.profile_name);
+    if (!json || !name || !backend_http_request("POST", url, json, profile_chat_ban_set, name)) free(name);
+    free(json);
+    return 1;
+}
+
 // shareProfile(): the profile link to the clipboard (v10 copies https://krunker.io/social.html?p=profile&q=NAME)
 H(h_share_profile) {
     UNUSED;
@@ -6858,6 +6936,7 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"updateMapTab", h_update_map_tab},
     {"shareMapLink", h_share_link},
     {"shareGameTweet", h_share_game_tweet},
+    {"chatBanUser", h_chat_ban_user},
     {"shareModLink", h_share_link},
     {"publishPopup", h_publish_popup},
     {"publishModPopup", h_publish_mod_popup},
