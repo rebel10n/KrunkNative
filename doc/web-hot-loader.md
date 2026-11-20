@@ -182,6 +182,23 @@ waiting when the main loop starts (about 400 ms). The old chain from `backend_st
 On plain loopback the native difference (50 to 150 ms) is below the dev box's run-to-run noise:
 GL setup alone varies from 100 to 600 ms there.
 
+### Production baseline (before the hot loader)
+
+Measured on 2026-11-20 against https://krunk.io/ with the same headless Chromium (`hot-e2e.js`), a
+guest. Production still runs the old startup chain (no `/mm/hot-seek` deployed yet). All numbers are
+ms from navigation:
+
+| krunk.io (no hot loader) | WebRTC starts | connect | click to play | in game |
+|---|---|---|---|---|
+| cold | 4385 | 4649 | 9333 | 13356 |
+| warm 1 | 1226 | 1513 | 4539 | 5781 |
+| warm 2 | 1031 | 1269 | 5206 | 6511 |
+
+On a cold load, 4.3 MB of wasm is transferred, compressed, by about 2.3 s. The matchmaker's
+requests (`mm`) end just before the connect. The hot loader moves the seek and the channel ahead of
+the download. The "after" numbers come once the endpoint is live on kru and the page is live on
+krunk.io; krunk.io's page is the GitHub Pages deploy.
+
 ## Ideas not done
 
 - **Prefetch the map's assets while the wasm downloads.** The hot answer names the map, but
