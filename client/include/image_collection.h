@@ -8,6 +8,15 @@
 // imagePopup / imageNewPopup / addNewImage / removeImage / selectImage; -1 = not ours.
 int image_collection_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
 
+// The page the popup lives on: the menu (NULL, the default: v10_popup_show, ui_settings_set_string, v10_popup_close) or
+// another page's own popup and settings (the hub, social_ui.c: genericPopup, its setSetting, openSettings).
+typedef struct {
+    void (*show)(const char *cls, const char *html);
+    void (*set)(const char *key, const char *url);
+    void (*close)(void);
+} ImageCollectionHost;
+void image_collection_set_host(const ImageCollectionHost *host);
+
 // The stored list ("krk_custImgs"): add (0 and *why on a bad name / URL), remove, count, an entry's URL.
 int image_collection_add(const char *name, const char *url, int tab, const char **why);
 int image_collection_remove(int index);

@@ -36,6 +36,14 @@ static IcImage g_images[IC_MAX];
 static int g_count, g_loaded;
 static char g_key[48]; // the setting the open popup fills
 static int g_tab;
+static const ImageCollectionHost *g_host; // NULL: the menu page
+
+void image_collection_set_host(const ImageCollectionHost *host) { g_host = host; }
+
+static void popup_show(const char *cls, const char *html, void (*rerender)(void)) {
+    if (g_host && g_host->show) g_host->show(cls, html);
+    else v10_popup_show(cls, html, rerender);
+}
 
 static const char *tab_label(const int i) {
     switch (i) {
@@ -191,7 +199,7 @@ static void render(void) {
         sb_add(&b, &l, &c, line);
     }
     sb_add(&b, &l, &c, "</div>");
-    v10_popup_show("imagePop", b ? b : "", render);
+    popup_show("imagePop", b ? b : "", render);
     free(b);
 }
 
@@ -218,7 +226,7 @@ static void render_new(void) {
                                  "<div class='button buttonR' onclick='imagePopup(\"\",%d)'>%s</div></div>",
              I18N("kn.imageCollection.save", "Save"), g_tab, I18N("kn.imageCollection.back", "Back"));
     sb_add(&b, &l, &c, line);
-    v10_popup_show("imageNewPop", b ? b : "", render_new);
+    popup_show("imageNewPop", b ? b : "", render_new);
     free(b);
 }
 
@@ -268,7 +276,8 @@ void image_collection_reload(void) { g_loaded = 0; }
 
 static void set_url_setting(const char *url) {
     if (!g_key[0] || !url) return;
-    ui_settings_set_string(g_key, url);
+    if (g_host && g_host->set) g_host->set(g_key, url);
+    else ui_settings_set_string(g_key, url);
 }
 
 int image_collection_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -312,7 +321,8 @@ int image_collection_handle(const char *name, const HtmlEvent *ev, const HtmlArg
         const int index = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : -1;
         if (builtin >= 0) set_url_setting("img/backgrounds/0.png");
         else set_url_setting(image_collection_url(index));
-        v10_popup_close();
+        if (g_host && g_host->close) g_host->close();
+        else v10_popup_close();
         return 0;
     }
     return -1;

@@ -19,6 +19,7 @@
 #include <audio.h>
 #include <backend.h>
 #include <ui_tooltip.h>
+#include <image_collection.h>
 #include <backend_ui.h>
 #include <kn_captcha.h> // the hub login's captcha (doc/v10/captcha.md)
 #include <krunker_account.h> // krunker_host_url: the data client's webhooks (the hub's maps, mods and search)
@@ -4526,6 +4527,22 @@ static int l_search_keyup(void *user, const HtmlEvent *ev, const HtmlArg *args, 
 
 H(h_open_settings) { UNUSED; open_settings(); return 1; }
 
+// The settings' image collection (imagePopup / imageNewPopup / addNewImage / removeImage / selectImage, hub-10.0.7.js:
+// 6335-6440): the menu's (image_collection.c, the same "krk_custImgs" list) in the hub's popup; a pick sets the
+// setting and opens the settings again (selectImage, :6359-6368).
+static void image_host_show(const char *cls, const char *html) { generic_popup(html, cls, NULL); }
+static void image_host_set(const char *key, const char *url) { set_setting(key, url); }
+static void image_host_close(void) { open_settings(); }
+
+H(h_image_collection) {
+    static const ImageCollectionHost host = {image_host_show, image_host_set, image_host_close};
+    (void) user;
+    image_collection_set_host(&host);
+    image_collection_handle(html_ui_current_handler(), ev, args, argc);
+    image_collection_set_host(NULL);
+    return 1;
+}
+
 H(h_set_setting) {
     (void) user;
     const char *key = arg_s(ev, args, argc, 0);
@@ -7166,7 +7183,11 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"deleteDataConf", h_delete_data_conf},
     {"deleteKeyData", h_delete_key_data},
     {"logBtnFRVR", h_noop},     // analytics
-    {"imagePopup", h_noop},     // the custom background collection (krk_custImgs): not ported
+    {"imagePopup", h_image_collection}, // the settings' image collection (image_collection.c)
+    {"imageNewPopup", h_image_collection},
+    {"addNewImage", h_image_collection},
+    {"removeImage", h_image_collection},
+    {"selectImage", h_image_collection},
 };
 
 // Krunker functions that need an account (follow, trade, post, chat, filters, ...): no-ops
