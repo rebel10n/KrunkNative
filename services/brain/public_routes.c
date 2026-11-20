@@ -23,6 +23,9 @@
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 #include "social_ws.h"  /* social_ws_online: the footer's on-Social count */
+#include <flavor_rules.h> /* /mm/hot-seek: flavor_rotation_modes, the default mode list */
+#include <modes.h>        /* mode_config: a valid seek mode */
+#include <shared.h>       /* g_rotation_maps: the default map list */
 
 /* ---- helpers */
 
@@ -305,8 +308,14 @@ static int int_list(const cJSON *v, int *out, int cap) {
     return n;
 }
 
-static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
-    (void) ctx;
+/* /mm/hot-seek's preferences, resolved server-side (h_hot_seek): the lists the seek filters by, instead of a
+ * client-built dataQuery */
+typedef struct HotPrefs {
+    int modes[MM_SEEK_PREFS_MAX], maps[MM_SEEK_PREFS_MAX];
+    int mode_count, map_count;
+} HotPrefs;
+
+static void seek_core(kn_http_req *req, Brain *b, int64_t account_id, const char *name, const HotPrefs *hp) {
     if (!kn_http_req_alive(req)) {
         kn_http_respond_error(req, 499, "gone");
         return;
@@ -331,6 +340,12 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         mode_count = int_list(cJSON_GetObjectItemCaseSensitive(jq, "dsmo"), modes, MM_SEEK_PREFS_MAX);
         map_count = int_list(cJSON_GetObjectItemCaseSensitive(jq, "dsma"), maps, MM_SEEK_PREFS_MAX);
         cJSON_Delete(jq);
+    }
+    if (hp) { /* /mm/hot-seek: the preferences it resolved (no dataQuery) */
+        memcpy(modes, hp->modes, sizeof(modes));
+        memcpy(maps, hp->maps, sizeof(maps));
+        mode_count = hp->mode_count;
+        map_count = hp->map_count;
     }
     MmPickQuery q = {
         .region = region,
@@ -378,8 +393,19 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
              pick.routed ? pick.region : "", game, flavor[0] ? flavor : "base", account_id > 0 ? "account" : "guest",
              pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
              registry_lobby_needs_account(pick.node, pick.lobby) ? ", online_mode" : "");
+    if (hp) cJSON_AddTrueToObject(reply, "hot"); /* the page's hot loader asked (doc/web-hot-loader.md) */
     brain_reply_json(req, 200, reply);
     cJSON_Delete(reply);
+}
+
+static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
+    (void) ctx;
+    seek_core(req, b, account_id, name, NULL);
+}
+
+static void hot_seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
+    seek_core(req, b, account_id, name, ctx);
+    free(ctx);
 }
 
 /* A CORS preflight (the reference answers it like a GET) must not issue a ticket
@@ -425,6 +451,95 @@ static void h_seek_game(kn_http_req *req, void *ud) {
     }
     if (tr == MM_TOKEN_MISSING) KN_DEBUG("routes", "seek-game without a validation token from %s (optional)", req->remote_addr ? req->remote_addr : "?");
     with_account(req, b, seek_with_account, NULL);
+}
+
+/* ---- /mm/hot-seek (KrunkNative, doc/web-hot-loader.md)
+ *
+ * The web page's hot loader (platform/web/hot-loader.js, the first script in <head>) seeks with this
+ * one GET before the client has even downloaded, then opens the game connection to the answer's
+ * host:port, which the client adopts once it runs. The whole find happens here: what the client's
+ * startup seek does over /mm/ping-list, the region race, /mm/generate-token and /mm/seek-game.
+ *   region       the saved Default Region, else the region an earlier ping race cached; "" = the
+ *                matchmaker routes it (registry_pick: the only / nearest hosted region)
+ *   seek_modes   the saved Settings > Quickplay switches (localStorage knSettings), as v10 saves them:
+ *   seek_maps    comma lists of indices (v10 getSavedVal, deob-10.0.7.js:229233-229237: the seek's dataQuery dsmo /
+ *                dsma). None switched on = the public rotation, as seek_prefs.c's current_filter.
+ *   game, proto, ruleset, flavor, token   as /mm/seek-game
+ * The validation token is issued and spent here (the round trip it would cost is the point), under
+ * /mm/generate-token's per-address limit. A seek that needs a captcha answers CaptchaRequired: the page
+ * then leaves the seek to the client. The answer is /mm/seek-game's, plus "hot": true. */
+
+/* v10's saved seek list ("1,3", seek_filter_parse): the valid entries, at most cap */
+static int hot_saved_list(const char *s, int *out, int cap, int (*valid)(int)) {
+    int n = 0;
+    for (const char *p = s; p && *p && n < cap;) {
+        char *end = NULL;
+        const long v = strtol(p, &end, 10);
+        if (end != p && (*end == ',' || !*end) && valid((int) v)) {
+            int dup = 0;
+            for (int i = 0; i < n; i++) dup |= out[i] == (int) v;
+            if (!dup) out[n++] = (int) v;
+        }
+        p = strchr(p, ',');
+        if (p) p++;
+    }
+    return n;
+}
+
+static int hot_mode_valid(int id) {
+    const GameModeConfig *m = id >= 0 ? mode_config(id) : NULL;
+    return m && m->name && m->alias && flavor_mode_allowed(id);
+}
+static int hot_map_valid(int index) { return index >= 0 && index < 256; } /* the registry matches the lobby's map index */
+
+static void hot_effective(int *list, int *count, const int *defaults, size_t default_count) {
+    if (*count > 0) return; /* switched on by the player */
+    for (size_t i = 0; i < default_count && *count < MM_SEEK_PREFS_MAX; i++) list[(*count)++] = defaults[i];
+}
+
+static void h_hot_seek(kn_http_req *req, void *ud) {
+    Brain *b = ud;
+    if (preflight(req)) return;
+    if (b->draining) {
+        reply_error(req, 503, "updating");
+        return;
+    }
+    const char *ip = req->remote_addr ? req->remote_addr : "";
+    static AuthLimiter *limit; /* shared budget with /mm/generate-token: one token per seek */
+    if (!limit) limit = auth_limiter_new(120, 60000);
+    if (!hot_limit("mm_token", ip, 120, 60, auth_limiter_hit(limit, ip, kn_now_ms()))) {
+        reply_error(req, 429, "TooManyRequests");
+        return;
+    }
+    if (captcha_enforced()) { /* the seek's captcha is the client's (kn_captcha.h): it seeks itself */
+        reply_error(req, 400, "CaptchaRequired");
+        return;
+    }
+    char *token = mm_token_issue(ip); /* NULL: no key, which /mm/seek-game accepts as a missing token */
+    const MmTokenResult tr = mm_token_check(token, ip, 0);
+    free(token);
+    const char *refusal = mm_token_error_name(tr);
+    if (refusal) {
+        reply_error(req, error_status(refusal), refusal);
+        return;
+    }
+    HotPrefs *hp = calloc(1, sizeof(*hp));
+    if (!hp) {
+        reply_error(req, 500, "internal");
+        return;
+    }
+    char flavor[16] = "", list[512] = "";
+    query_flavor(req, flavor, sizeof(flavor));
+    if (kn_http_query_get(req, "seek_modes", list, sizeof(list)) > 0)
+        hp->mode_count = hot_saved_list(list, hp->modes, MM_SEEK_PREFS_MAX, hot_mode_valid);
+    list[0] = 0;
+    if (kn_http_query_get(req, "seek_maps", list, sizeof(list)) > 0)
+        hp->map_count = hot_saved_list(list, hp->maps, MM_SEEK_PREFS_MAX, hot_map_valid);
+    const int *rot = NULL;
+    const size_t rot_count = flavor_rotation_modes(flavor_from_key(flavor[0] ? flavor : "base", flavor_get()), &rot);
+    hot_effective(hp->modes, &hp->mode_count, rot, rot ? rot_count : 0);
+    hot_effective(hp->maps, &hp->map_count, g_rotation_maps, sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]));
+    with_account(req, b, hot_seek_with_account, hp);
 }
 
 /* ---- /mm/generate-token (Krunker: GET matchmaker.krunker.io/generate-token, plain text) */
@@ -783,6 +898,7 @@ int public_routes_init(Brain *b) {
     route2(b, NULL, "game-info", h_game_info);
     route2(b, NULL, "seek-game", h_seek_game);
     route2(b, NULL, "generate-token", h_generate_token); /* mm-token: seek-game ?validationToken= */
+    route2(b, NULL, "hot-seek", h_hot_seek); /* the web hot loader's one-trip seek (doc/web-hot-loader.md) */
     route2(b, NULL, "host-game", h_host_game); /* GET ?config= or POST {region, config} */
     route2(b, NULL, "status", h_status);
     route2(b, NULL, "brains", h_brains);

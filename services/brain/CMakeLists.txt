@@ -402,6 +402,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/mm_token_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_mm_token_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # /mm/hot-seek: the web hot loader's one-trip seek (doc/web-hot-loader.md): preferences resolved by the
+        # brain, the ticket admitted by server_bin, the captcha / validation-token rules (skips 77 without a database)
+        add_test(NAME brain_hot_seek_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/hot_seek_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_hot_seek_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # v10 Invite / Join: presence:game to friends, Invite link, Join from the clipboard / window /
         # a friend's game, the server password popup (3 nodes, headless client_bin on ui/)
         add_test(NAME brain_v10_party_e2e
