@@ -18,6 +18,10 @@ concurrency:
 permissions:
   contents: read
 
+# Linux jobs run on KrunkNative's self-hosted runners on divide's CT 208 (label kn-ci; the backend job on
+# kn-db, the one runner whose host ports 5432 / 3306 its service containers bind): deploy/ci-runner/README.md.
+# Back to GitHub-hosted without a commit: repo variables KN_LINUX_RUNNER / KN_DB_RUNNER = '"ubuntu-latest"'.
+
 env:
   # Emscripten release used by the `web` job (matches the local toolchain).
   EM_VERSION: 6.0.12
@@ -29,7 +33,7 @@ jobs:
   meta:
     name: Version
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.KN_LINUX_RUNNER || '["self-hosted", "kn-ci"]') }}
     outputs:
       cmake_flags: ${{ steps.meta.outputs.cmake_flags }}
       describe: ${{ steps.meta.outputs.describe }}
@@ -51,7 +55,7 @@ jobs:
   linux:
     name: Linux (GCC)
     needs: meta
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.KN_LINUX_RUNNER || '["self-hosted", "kn-ci"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,6 +63,7 @@ jobs:
 
       # libegl-dev: the headless EGL mode (client/include/headless.h) is compiled in.
       - name: Install build dependencies
+        if: runner.environment == 'github-hosted' # deploy/ci-runner/setup-kn-runners.sh preinstalls these
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -323,7 +328,7 @@ jobs:
   web:
     name: Web (Emscripten / WebGL2)
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.KN_LINUX_RUNNER || '["self-hosted", "kn-ci"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -334,6 +339,7 @@ jobs:
           node-version: 22
 
       - name: Install build dependencies
+        if: runner.environment == 'github-hosted' # deploy/ci-runner/setup-kn-runners.sh preinstalls these
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build rsync
@@ -502,7 +508,7 @@ jobs:
   check:
     name: make check (tests, lint, net-bridge typecheck)
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.KN_LINUX_RUNNER || '["self-hosted", "kn-ci"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -520,6 +526,7 @@ jobs:
           cache: false
 
       - name: Install build dependencies
+        if: runner.environment == 'github-hosted' # deploy/ci-runner/setup-kn-runners.sh preinstalls these
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -527,7 +534,10 @@ jobs:
             libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev \
             libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev \
             libxcb-present-dev libegl-dev
-          # pinned; `make lint` runs it (it skips without one) and it runs shellcheck on run: blocks
+
+      # pinned; `make lint` runs it (it skips without one) and it runs shellcheck on run: blocks
+      - name: actionlint
+        run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
@@ -558,7 +568,7 @@ jobs:
   services:
     name: Backend tests (PostgreSQL, MariaDB, SQLite, Redis)
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.KN_DB_RUNNER || '["self-hosted", "kn-db"]') }}
     services:
       postgres:
         image: postgres:18
@@ -585,6 +595,7 @@ jobs:
           submodules: recursive
 
       - name: Install build dependencies
+        if: runner.environment == 'github-hosted' # deploy/ci-runner/setup-kn-runners.sh preinstalls these
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -595,8 +606,10 @@ jobs:
             postgresql-client mariadb-client redis-server \
             python3-websockets python3-numpy python3-cryptography \
             libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libhiredis-dev libcurl4-openssl-dev libwebp-dev
-          # the tests' work directories live under ~/.cache (the runner has none)
-          mkdir -p ~/.cache
+
+      # the tests' work directories live under ~/.cache (a GitHub-hosted runner has none)
+      - name: Test cache directory
+        run: mkdir -p ~/.cache
 
       # config/config.json (gitignored): the example with the service container's database
       - name: Test configuration

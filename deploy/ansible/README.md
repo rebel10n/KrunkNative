@@ -1,6 +1,7 @@
 # deploy/ansible
 
-Ansible for the Krunker Box Office central node (`kru`) and the edge game servers.
+Ansible for the Krunker Box Office central node (`kru`) and the edge game servers. The self-hosted CI
+runners (divide CT 208) are set up by `deploy/ci-runner/` instead (its README).
 
 | playbook | hosts | what |
 | --- | --- | --- |
