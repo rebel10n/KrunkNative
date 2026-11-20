@@ -119,7 +119,7 @@ extern const kn_proc P_POST_CREATE_V10, P_GIVEAWAY_SETTLE;
 
 /* ---- the K.P.D distress calls of the in-game player list (db_kpd.c, migrations 0209, 0346) */
 extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS, P_KPD_APPLY, P_KPD_APPS, P_KPD_OFFICER,
-    P_KPD_DEMOS, P_KPD_REVIEWERS;
+    P_KPD_DEMOS, P_KPD_REVIEWERS, P_KPD_DEMO_ADD;
 
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_QUICK_SELL_BULK, P_MARKET_LIST_BULK, P_ITEM_LOCKS, P_ITEM_LOCK, P_MARKET_ITEM, P_TRADE_PAGE,

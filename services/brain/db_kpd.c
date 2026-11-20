@@ -31,6 +31,9 @@
  *               demo (migration 0346_kpd_demos), grouped in order: {grp, name (banned suspects only),
  *               gst, ban, tok, ct, typ, map, mod, dat (epoch s), dur (ms), rsl, opn, yes, f_no, myv (null:
  *               no votes yet)}. more: another group exists after this page.
+ *   P_KPD_DEMO_ADD (json {tok, ct, call, suspect, suspect_name, typ, map, mode, dur}) -> {id, tok}: a demo the
+ *               game server recorded (server/src/demo_rec.c, doc/v10/replays.md) and kn_brain stored; a guest
+ *               suspect (suspect 0) takes the group of an earlier guest demo of the same name, else a new one.
  *   P_KPD_REVIEWERS () -> {reviewers: [{name, cnt, range}]}: the officers who handled the most K.P.D
  *               calls (kpd_calls status 1 by handled_by), range "month" (last 30 days) then "all", up to
  *               50 each, ties by name (v10 kpd.reviewers, tab 5).
@@ -458,3 +461,48 @@ static kn_db_result *run_kpd_reviewers(kn_dbconn *c, int n, const char *const *p
     return dbx_json(&x, "reviewers", o);
 }
 const kn_proc P_KPD_REVIEWERS = {"kpd_reviewers", NULL, run_kpd_reviewers};
+
+/* ---- a recorded demo (migration 0346's kpd_demos row; the file is the brain's, services/brain/accounts.c) */
+static kn_db_result *run_kpd_demo_add(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *in = cJSON_Parse(nz(P(0)));
+    const char *tok = jstr(in, "tok");
+    const int64_t suspect = (int64_t) jnum(in, "suspect"), call = (int64_t) jnum(in, "call");
+    const char *name = jstr(in, "suspect_name");
+    if (!cJSON_IsObject(in) || !tok[0]) {
+        cJSON_Delete(in);
+        dbx_refuse(&x, "bad demo");
+        return dbx_finish(&x, NULL);
+    }
+    int64_t group = 0;
+    if (suspect <= 0) { /* a guest: its name's group, else the next one */
+        char *g = dbx_text(&x, SQL(.any = "SELECT suspect_group FROM kpd_demos WHERE suspect_id IS NULL AND suspect_name = $1"
+                                         " ORDER BY id DESC LIMIT 1"),
+                           KN_DB_ARGS(name));
+        if (g && g[0]) group = strtoll(g, NULL, 10);
+        free(g);
+        if (group <= 0) {
+            char *m = dbx_text(&x, SQL(.any = "SELECT coalesce(max(suspect_group), 0) FROM kpd_demos"), 0, NULL);
+            group = (m ? strtoll(m, NULL, 10) : 0) + 1;
+            free(m);
+        }
+    }
+    /* a call id the brain does not know (no coordinator when it was made) is no call */
+    const int known = call > 0 && dbx_exists(&x, SQL(.any = "SELECT 1 FROM kpd_calls WHERE id = {int:$1}"), KN_DB_ARGS(I64S(call)));
+    const int64_t id = dbx_insert_id(
+        &x,
+        SQL(.pg = "INSERT INTO kpd_demos (token, ct, call_id, suspect_id, suspect_name, suspect_group, typ, map, mode_name, duration_ms)"
+                  " VALUES ($1, $2, $3::bigint, $4::int, $5, $6::int, $7::int, $8, $9, $10::int) RETURNING id",
+            .sqlite = "INSERT INTO kpd_demos (token, ct, call_id, suspect_id, suspect_name, suspect_group, typ, map, mode_name, duration_ms)"
+                      " VALUES ($1, $2, {int:$3}, {int:$4}, $5, {int:$6}, {int:$7}, $8, $9, {int:$10}) RETURNING id",
+            .any = "INSERT INTO kpd_demos (token, ct, call_id, suspect_id, suspect_name, suspect_group, typ, map, mode_name, duration_ms)"
+                   " VALUES ($1, $2, {int:$3}, {int:$4}, $5, {int:$6}, {int:$7}, $8, $9, {int:$10})"),
+        KN_DB_ARGS(tok, jstr(in, "ct"), known ? I64S(call) : NULL, suspect > 0 ? I64S(suspect) : NULL, name, I64S(group),
+                   I64S((int64_t) jnum(in, "typ")), jstr(in, "map"), jstr(in, "mode"), I64S((int64_t) jnum(in, "dur"))));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) id);
+    cJSON_AddStringToObject(o, "tok", tok);
+    cJSON_Delete(in);
+    return dbx_json(&x, "demo", o);
+}
+const kn_proc P_KPD_DEMO_ADD = {"kpd_demo_add", NULL, run_kpd_demo_add};

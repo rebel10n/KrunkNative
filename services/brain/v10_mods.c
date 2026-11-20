@@ -32,6 +32,8 @@
  *                                   carries demos[] (tok, ct, typ, map, mod, dat, dur, rsl, opn, yes, f_no, myv:
  *                                   the caller's own verdict). Public, as the list P_KPD_DEMOS serves it.
  *     GET  /kpd/demos/:id?ct=       {data: demo} for an officer (the demo's tok and ct); any other caller 404
+ *     GET  /kpd/demos/:id/download  the demo file (application/octet-stream) for an officer, else 404 (v10
+ *                                   kpd.downloadDemo; the file: server/src/demo_rec.c, doc/v10/replays.md)
  *     POST /kpd/demos/:id/vote      {ct, verdict 0|1} -> {data: {yes, no, myv, banned, resolved}}: one verdict per
  *                                   officer (kpd_demo_votes, migration 0351); the counts follow; a closed case 400
  *     GET  /kpd/reviewers           {data: {month: [{name, cnt}], all: [{name, cnt}]}} (P_KPD_REVIEWERS, db_kpd.c)
@@ -42,12 +44,15 @@
  */
 #include "v10_mods.h"
 
+#include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "acct_internal.h"
 #include "v10_api.h"
+#include "knsvc/config.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
 
@@ -546,6 +551,7 @@ typedef struct Op {
     cJSON *(*shape)(cJSON *raw); /* NULL: the proc's own result is the envelope */
     int login;                   /* 1: a session is required (401 without one) */
     int caller_arg;              /* 1: p[0] is the caller's account id (0 when none) */
+    int download;                /* 1: a 200 answers the demo file of data.tok instead (h_demo_download) */
     int argc;
     char arg[OP_MAX][256];
 } Op;
@@ -573,6 +579,33 @@ static void op_add_int(Op *op, int64_t v) {
     op_add(op, acct_itoa(buf, v));
 }
 
+/* GET /kpd/demos/:id/download (deob-10.0.7.js:27461-27465 downloadDemo): the recorded file the brain stored
+ * (uploads.dir/kpd-demos/<tok>.kndemo, accounts.c's kpd_demo_done), raw, to the officer the demo proc let
+ * through; a demo row whose file is gone is 404 like any other. */
+static void send_demo_file(Op *op, const cJSON *env) {
+    const char *tok = kn_json_str(cJSON_GetObjectItemCaseSensitive(env, "data"), "tok", "");
+    for (const char *c = tok; *c; c++) {
+        if (!isalnum((unsigned char) *c) && *c != '-' && *c != '_') tok = ""; /* a file name, never a path */
+    }
+    char path[1200];
+    snprintf(path, sizeof path, "%s/kpd-demos/%s.kndemo", kn_config_str(op->b->cfg, "uploads.dir", "data/user-uploads"), tok);
+    FILE *f = tok[0] ? fopen(path, "rb") : NULL;
+    long len = -1;
+    if (f && fseek(f, 0, SEEK_END) == 0) len = ftell(f);
+    uint8_t *bytes = len > 0 && len <= (long) (3584u * 1024u) ? malloc((size_t) len) : NULL;
+    if (bytes && (fseek(f, 0, SEEK_SET) != 0 || fread(bytes, 1, (size_t) len, f) != (size_t) len)) {
+        free(bytes);
+        bytes = NULL;
+    }
+    if (f) fclose(f);
+    if (!bytes) {
+        v10_reply_error(op->req, 404, "NOT_FOUND", WHY_NO_DEMO);
+        return;
+    }
+    kn_http_respond(op->req, 200, "application/octet-stream", bytes, (size_t) len);
+    free(bytes);
+}
+
 static void on_done(kn_db_result *res, void *ud) {
     Op *op = ud;
     cJSON *env;
@@ -583,7 +616,11 @@ static void on_done(kn_db_result *res, void *ud) {
         cJSON *raw = acct_db_json(res);
         env = op->shape ? op->shape(raw) : raw;
     }
-    if (kn_http_req_alive(op->req)) reply_env(op->req, env);
+    if (kn_http_req_alive(op->req)) {
+        const cJSON *s = cJSON_GetObjectItemCaseSensitive(env, "s");
+        if (op->download && cJSON_IsNumber(s) && (int) s->valuedouble == 200) send_demo_file(op, env);
+        else reply_env(op->req, env);
+    }
     cJSON_Delete(env);
     free(op);
 }
@@ -786,6 +823,15 @@ static void h_demo(kn_http_req *req, void *ud) {
     op_start(op);
 }
 
+static void h_demo_download(kn_http_req *req, void *ud) {
+    Op *op = op_new(req, ud, &P_MOD_KPD_DEMO, 1, 1);
+    if (!op) return;
+    op->download = 1;
+    op_add(op, kn_http_param(req, "id"));
+    op_add(op, ""); /* any call token: the officer opened the demo itself */
+    op_start(op);
+}
+
 static void h_demo_vote(kn_http_req *req, void *ud) {
     const char *token = kn_http_param(req, "id");
     cJSON *in = kn_http_body_json(req);
@@ -847,6 +893,7 @@ int v10_mods_init(Brain *b) {
     /* KPD */
     kn_http_route(b->http, "GET", "/kpd/demos", h_demos, b);
     kn_http_route(b->http, "GET", "/kpd/demos/:id", h_demo, b);
+    kn_http_route(b->http, "GET", "/kpd/demos/:id/download", h_demo_download, b);
     kn_http_route(b->http, "POST", "/kpd/demos/:id/vote", h_demo_vote, b);
     kn_http_route(b->http, "GET", "/kpd/reviewers", h_reviewers, b);
     return 0;

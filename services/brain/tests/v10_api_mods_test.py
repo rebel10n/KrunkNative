@@ -38,6 +38,7 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+UPLOADS = ""  # the brain's uploads.dir (main): the K.P.D demo files
 ARG = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 ROOT = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 BRAIN = os.path.join(ARG, "services", "brain", "kn_brain") if os.path.isdir(ARG) else ARG
@@ -97,6 +98,16 @@ def http(port, method, path, body=None, token=None):
         return status, json.loads(raw or b"null")
     except ValueError:
         return status, None
+
+
+def http_raw(port, path, token=None):
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), method="GET",
+                                 headers={"Authorization": "Bearer " + token} if token else {})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read(), r.headers.get("Content-Type", "")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), e.headers.get("Content-Type", "")
 
 
 def err_of(reply):
@@ -355,6 +366,21 @@ def scenario(port, db):
     s, b = http(port, "GET", "/kpd/demos/tokA?ct=ctA")
     check("191 GET /kpd/demos/{id} without a session: 401 LOGIN_REQUIRED", error_code(s, b, "LOGIN_REQUIRED", 401), brief(s, b))
 
+    # ---- GET /kpd/demos/{id}/download (deob-10.0.7.js:27461 downloadDemo): the stored file, officers only
+    demo_bytes = b"KNDEMO\0\x01" + b"\x02\x00\x00\x00{}" + bytes(range(64))
+    os.makedirs(os.path.join(UPLOADS, "kpd-demos"), exist_ok=True)
+    with open(os.path.join(UPLOADS, "kpd-demos", "tokA.kndemo"), "wb") as f:
+        f.write(demo_bytes)
+    s, raw, ctype = http_raw(port, "/kpd/demos/tokA/download", tok["mod"])
+    check("GET /kpd/demos/{id}/download: the demo file, application/octet-stream, for an officer",
+          s == 200 and raw == demo_bytes and ctype.startswith("application/octet-stream"), "HTTP %d %d bytes %s" % (s, len(raw), ctype))
+    s, b = http(port, "GET", "/kpd/demos/tokA/download", token=tok["plain"])
+    check("GET /kpd/demos/{id}/download as a player who is not an officer: 404 NOT_FOUND", error_code(s, b, "NOT_FOUND", 404), brief(s, b))
+    s, b = http(port, "GET", "/kpd/demos/tokB/download", token=tok["mod"])
+    check("GET /kpd/demos/{id}/download of a demo whose file is missing: 404 NOT_FOUND", error_code(s, b, "NOT_FOUND", 404), brief(s, b))
+    s, b = http(port, "GET", "/kpd/demos/tokA/download")
+    check("GET /kpd/demos/{id}/download without a session: 401 LOGIN_REQUIRED", error_code(s, b, "LOGIN_REQUIRED", 401), brief(s, b))
+
     # ---- 192 POST /kpd/demos/{id}/vote: one verdict per officer (kpd_demo_votes), the counts follow
     s, b = http(port, "POST", "/kpd/demos/tokC/vote", {"ct": "ctC", "verdict": 1}, token=tok["mod"])
     check("192 POST /kpd/demos/{id}/vote {ct, verdict:1}: data.yes, no, myv, banned, resolved (%s, v10.js 27345 read at 222454)" % W,
@@ -441,8 +467,11 @@ def main():
         check("the migrations apply", mig.returncode == 0, mig.stderr.decode(errors="replace")[-200:])
         if mig.returncode:
             return 1
+        global UPLOADS
+        UPLOADS = os.path.join(work, "uploads")
         brain = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.region=local",
-                                  "--brain.id=v10-mods-test-%d" % os.getpid(), "--finder.poll_interval_s=1"],
+                                  "--brain.id=v10-mods-test-%d" % os.getpid(), "--finder.poll_interval_s=1",
+                                  "--uploads.dir=" + UPLOADS],
                                  cwd=ROOT, env=env, stdout=open(log, "w"), stderr=subprocess.STDOUT,
                                  stdin=subprocess.DEVNULL, start_new_session=True)
         procs.append(brain)

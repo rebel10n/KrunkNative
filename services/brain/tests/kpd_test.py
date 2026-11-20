@@ -18,10 +18,12 @@ Two accounts register over the social socket; a fake game server on /mm/internal
   - kpd_apply: refused below 20 positive reports, kept from there (one pending), listed by kpd_apps;
     kpd_officer: refused for a player, a developer grants (moderator flag, application closed), the
     console (actor 0) revokes, moderation_log keeps both; an officer cannot apply
-  - kpd_demos (the Demos window, migration 0346_kpd_demos; rows are inserted directly, there is no
-    recorder yet): a page is 30 suspect groups with more, the next page the rest; a named suspect's
+  - kpd_demos (the Demos window, migration 0346_kpd_demos; rows are inserted directly here): a page is 30 suspect groups with more, the next page the rest; a named suspect's
     name shows only when banned; a guest is gst 1 by its group; the flat rows keep each group's demos
     together; q is the name (case-insensitive exact); dur is milliseconds; myv is null
+  - kpd_demo_chunk / kpd_demo_done (the recorder's upload, doc/v10/replays.md 2.1): slices (one resent), the file
+    under uploads.dir/kpd-demos, its row linked to the call; a guest's demos share a group; not a demo, no chunks,
+    a bad token and an offset past the cap are refused
   - kpd_reviewers (the Reviewers window): the officers' handled calls, the last 30 days and all time
 """
 import asyncio
@@ -58,6 +60,7 @@ if not DB and DRIVER == "postgres":
 SCHEMA = "kn_test_kpd_%d" % os.getpid()
 SECRET = "kn-kpd-test-%d" % os.getpid()
 FAILS = []
+UPLOADS = ""  # the brain's uploads.dir (main): the K.P.D demo files
 
 
 def check(cond, what):
@@ -311,6 +314,47 @@ async def scenario(port, dbcfg):
         err, data = await n.op("kpd_demos", off=0, q="nobody_" + stamp)
         check(err is None and data == {"demos": [], "more": False}, "q: no demos for that name: %s %s" % (err, data))
 
+        print("== kpd_demo_chunk / kpd_demo_done (a recorded demo from the game server, server/src/demo_rec.c)")
+        import base64
+        demo = b"KNDEMO\0\x01" + b"\x02\x00\x00\x00{}" + os.urandom(300000)
+        tok = "a1b2c3d4e5f6"
+        half = 200000
+        for off in (0, half, 0):  # the first slice is resent (the reliable link after a reconnect)
+            part = demo[off:off + half]
+            err, _ = await n.op("kpd_demo_chunk", tok=tok, off=off, data=base64.b64encode(part).decode())
+            check(err is None, "chunk at %d: %s" % (off, err))
+        err, data = await n.op("kpd_demo_done", tok=tok, size=len(demo), call=bob_call, ct="ffee00112233", suspect=bob_id,
+                               suspect_name=bob, typ=1, map="Burg", mode="Team Deathmatch", dur=150000)
+        check(err is None and data and data.get("id", 0) > 0 and data.get("tok") == tok, "the demo is stored: %s %s" % (err, data))
+        stored = os.path.join(UPLOADS, "kpd-demos", tok + ".kndemo")
+        check(os.path.exists(stored) and open(stored, "rb").read() == demo, "uploads.dir/kpd-demos/<tok>.kndemo is the file")
+        err, data = await n.op("kpd_demos", off=0, q=bob)
+        rows = [r for r in (data or {}).get("demos", []) if r.get("tok") == tok]
+        check(len(rows) == 1 and rows[0]["ct"] == "ffee00112233" and rows[0]["dur"] == 150000 and rows[0]["typ"] == 1
+              and rows[0]["map"] == "Burg", "listed under bob with its ct, duration, type and map: %s" % rows)
+        rows = sql(dbcfg, "SELECT call_id FROM kpd_demos WHERE token = '%s'" % tok)
+        if rows is not None:
+            check(rows == [[str(bob_call)]], "linked to bob's call: %s" % rows)
+        for i, gtok in enumerate(("0a0a0a0a0a01", "0a0a0a0a0a02")):
+            await n.op("kpd_demo_chunk", tok=gtok, off=0, data=base64.b64encode(demo[:5000]).decode())
+            err, _ = await n.op("kpd_demo_done", tok=gtok, size=5000, call=0, ct="c%d" % i, suspect=0, suspect_name="Guest_44",
+                                typ=0, map="Kanji", mode="Free for All", dur=1000)
+            check(err is None, "a guest suspect's demo %d: %s" % (i, err))
+        rows = sql(dbcfg, "SELECT DISTINCT suspect_group FROM kpd_demos WHERE suspect_name = 'Guest_44'")
+        if rows is not None:
+            check(len(rows) == 1 and int(rows[0][0]) > 0, "one guest, one group across its demos: %s" % rows)
+        err, _ = await n.op("kpd_demo_chunk", tok="0b0b0b0b0b0b", off=0, data=base64.b64encode(b"<html>" + b"x" * 64).decode())
+        err, _ = await n.op("kpd_demo_done", tok="0b0b0b0b0b0b", size=70, call=0, ct="x", suspect=0, suspect_name="Guest_1",
+                            typ=0, map="Burg", mode="", dur=1)
+        check(err and "not a demo" in err, "a file that is not a demo is refused: %s" % err)
+        err, _ = await n.op("kpd_demo_done", tok="0c0c0c0c0c0c", size=10, call=0, ct="x", suspect=0, suspect_name="Guest_1",
+                            typ=0, map="Burg", mode="", dur=1)
+        check(err and "missing" in err, "no chunks: refused: %s" % err)
+        err, _ = await n.op("kpd_demo_chunk", tok="../etc", off=0, data="AAAA")
+        check(err and "bad demo" in err, "a token that is no file name: refused: %s" % err)
+        err, _ = await n.op("kpd_demo_chunk", tok="0d0d0d0d0d0d", off=4 << 20, data="AAAA")
+        check(err and "bad demo" in err, "past the 3.5 MiB cap: refused: %s" % err)
+
         print("== kpd_reviewers (the Reviewers window: the officers' handled calls)")
         err, data = await n.op("kpd_reviewers")
         rv = (data or {}).get("reviewers", [])
@@ -394,7 +438,10 @@ def main():
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
         with open(log_path, "w") as log:
-            proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=kpd-%d" % os.getpid()],
+            global UPLOADS
+            UPLOADS = os.path.join(work, "uploads")
+            proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=kpd-%d" % os.getpid(),
+                                     "--uploads.dir=" + UPLOADS],
                                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         port = bound_port(log_path, proc)
         asyncio.run(scenario(port, dbcfg))

@@ -12,6 +12,9 @@
 #include "node_events.h" /* the game servers' v10.0.3 event ops: turf_clan, map_spin, studio_game, studio_charge */
 
 #include <ctype.h>
+#include <errno.h>
+#include <sys/stat.h> /* the K.P.D demo directory */
+#include <unistd.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -1299,6 +1302,85 @@ static int op_rewards(const cJSON *args, AcctReplyFn cb, void *ud) {
     return o ? 0 : -1;
 }
 
+/* ------------------------------------------------------------------ K.P.D demo files
+ * The game server's recorder (server/src/demo_rec.c, doc/v10/replays.md 2.1) sends a demo as kpd_demo_chunk
+ * {tok, off, data: base64} frames, then kpd_demo_done {tok, size, call, ct, suspect, suspect_name, typ, map,
+ * mode, dur}: the chunks are written to uploads.dir/kpd-demos/.staging/<tok>.part, done checks the size and the
+ * file's header, moves it to uploads.dir/kpd-demos/<tok>.kndemo (GET /kpd/demos/<tok>/download, v10_mods.c)
+ * and adds the kpd_demos row. A chunk sent again (the reliable link's resend) writes the same bytes again. */
+#define KPD_DEMO_MAX_BYTES (3584u * 1024u) /* shared/include/demo.h DEMO_MAX_BYTES */
+
+static int kpd_demo_token_ok(const char *tok) {
+    size_t n = 0;
+    for (; tok && tok[n]; n++) {
+        if (!isxdigit((unsigned char) tok[n])) return 0;
+    }
+    return n >= 8 && n <= 32;
+}
+
+static void kpd_demo_dir(char *out, size_t size, const char *sub) {
+    const char *base = kn_config_str(g_acct_brain->cfg, "uploads.dir", "data/user-uploads");
+    snprintf(out, size, "%s/kpd-demos%s", base, sub);
+}
+
+static int kpd_demo_mkdirs(void) {
+    char dir[1100];
+    kpd_demo_dir(dir, sizeof dir, "");
+    const char *base = kn_config_str(g_acct_brain->cfg, "uploads.dir", "data/user-uploads");
+    mkdir(base, 0755);
+    mkdir(dir, 0755);
+    kpd_demo_dir(dir, sizeof dir, "/.staging");
+    return mkdir(dir, 0755) == 0 || errno == EEXIST;
+}
+
+static const char *kpd_demo_chunk(const cJSON *args) {
+    const char *tok = kn_json_str(args, "tok", "");
+    const char *data = kn_json_str(args, "data", "");
+    const int64_t off = kn_json_int(args, "off", -1);
+    if (!kpd_demo_token_ok(tok) || off < 0) return "bad demo chunk";
+    const size_t len = strlen(data);
+    uint8_t *bytes = malloc(len / 4 * 3 + 4);
+    if (!bytes) return "Server error.";
+    const int n = kn_base64_decode(data, len, bytes, len / 4 * 3 + 4);
+    if (n < 0 || (uint64_t) off + (uint64_t) n > KPD_DEMO_MAX_BYTES) {
+        free(bytes);
+        return "bad demo chunk";
+    }
+    char path[1200];
+    kpd_demo_mkdirs();
+    char dir[1100];
+    kpd_demo_dir(dir, sizeof dir, "/.staging");
+    snprintf(path, sizeof path, "%s/%s.part", dir, tok);
+    FILE *f = fopen(path, "r+b"); /* never truncated: a resent slice rewrites its own bytes only */
+    if (!f) f = fopen(path, "wb");
+    const int ok = f && fseek(f, (long) off, SEEK_SET) == 0 && fwrite(bytes, 1, (size_t) n, f) == (size_t) n;
+    if (f) fclose(f);
+    free(bytes);
+    return ok ? NULL : "cannot store the demo";
+}
+
+/* the staged file whole and a demo: its final name (else why not) */
+static const char *kpd_demo_commit(const cJSON *args) {
+    const char *tok = kn_json_str(args, "tok", "");
+    const int64_t size = kn_json_int(args, "size", -1);
+    if (!kpd_demo_token_ok(tok) || size <= 0 || size > KPD_DEMO_MAX_BYTES) return "bad demo";
+    char dir[1100], part[1200], done[1200];
+    kpd_demo_dir(dir, sizeof dir, "/.staging");
+    snprintf(part, sizeof part, "%s/%s.part", dir, tok);
+    kpd_demo_dir(dir, sizeof dir, "");
+    snprintf(done, sizeof done, "%s/%s.kndemo", dir, tok);
+    FILE *f = fopen(part, "rb");
+    if (!f) return access(done, R_OK) == 0 ? NULL : "demo chunks missing"; /* a resent done: already committed */
+    uint8_t head[8] = {0};
+    const size_t got = fread(head, 1, sizeof head, f);
+    fseek(f, 0, SEEK_END);
+    const long length = ftell(f);
+    fclose(f);
+    if (got != sizeof head || memcmp(head, "KNDEMO\0", 7) != 0 || head[7] < 1) return "not a demo file";
+    if (length != (long) size) return "demo incomplete";
+    return rename(part, done) == 0 ? NULL : "cannot store the demo";
+}
+
 int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctReplyFn cb, void *ud) {
     (void) b;
     if (!op || !cb) {
@@ -1555,6 +1637,27 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
                    KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "off", 0)), acct_itoa(v2, kn_json_int(args, "limit", 30)),
                               kn_json_str(args, "q", "")),
                    op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "kpd_demo_chunk")) { /* a recorded demo's next slice (kpd_demo_chunk above) */
+        const char *err = kpd_demo_chunk(args);
+        cJSON *ok = cJSON_CreateObject();
+        cb(ud, err, err ? NULL : ok);
+        cJSON_Delete(ok);
+        return err ? -1 : 0;
+    }
+    if (!strcmp(op, "kpd_demo_done")) { /* the demo whole: the file in place, then its kpd_demos row */
+        const char *err = kpd_demo_commit(args);
+        if (err) {
+            KN_WARN(MOD, "kpd demo %s: %s", kn_json_str(args, "tok", "?"), err);
+            cb(ud, err, NULL);
+            return -1;
+        }
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        char *json = cJSON_PrintUnformatted(args);
+        kn_db_call(g_acct_brain->db, &P_KPD_DEMO_ADD, KN_DB_ARGS(json ? json : "{}"), op_json_done, o);
+        free(json);
         return 0;
     }
     if (!strcmp(op, "kpd_reviewers")) { /* the Reviewers window: the officers' handled calls, month and all time */
