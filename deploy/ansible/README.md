@@ -151,9 +151,9 @@ sets in `/etc/nftables.conf` (the `dnat to $KN` line and the kru <-> kn hairpin 
 `divide_guests`; back it up as `nftables.conf.bak-<what>-<time>`, `nft -c -f` then `nft -f`: the file
 replaces only its own tables) and the `-dport` lines of `203.fw`; the CT's size is `pct set 203
 --cores N --memory M` (a running CT keeps its old cpuset until restarted: write the new one to
-`/sys/fs/cgroup/lxc/203/cpuset.cpus` meanwhile). DNS: Spaceship has `ashburn-1..3` only, so
-`kn_gameserver_dns_count: 3` makes #4..#9 advertise `ashburn-1..3` (the same address, their own port)
-until `ashburn-4..9` A 91.199.82.174 are added by hand (the DNS check lists them); then drop it.
+`/sys/fs/cgroup/lxc/203/cpuset.cpus` meanwhile). DNS: Spaceship has `ashburn-1..9` A 91.199.82.174 (4..9
+added 2026-11-19), one record per instance; `kn_gameserver_dns_count` (below the count, instance n reuses
+`<edge>-<((n-1) % it) + 1>`) is only for a host whose records lag behind its instances.
 The old G-Core VPSs shared with abulxt (`edges_old`) were cancelled 2026-11-13. A new VM needs, before
 Deploy edges can reach it: its address in `ssh_config` (HostName) and as `kn_public_ip` (unset = left out
 of kru's net-bridge / kn-rtc allowlists, and `edges.yml` stops at `kn_gameserver`), the CI key line

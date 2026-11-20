@@ -55,9 +55,9 @@ HOSTS = {
 # inventory/hosts.yml kn_public_ip, and kn_listen_ip where the host is behind NAT (kn-mnz: CT 203 on divide)
 PUBLIC = {"kn-mnz": "91.199.82.174", "kn-ams": "92.38.186.100"}
 NAT_LISTEN = {"kn-mnz": "172.16.5.94"}
-# inventory/hosts.yml kn_gameserver_dns_count where it is below the instance count (kn-mnz: Spaceship has
-# ashburn-1..3 only): instance n above it advertises <edge>-<((n-1) % it) + 1>, the same address.
-DNS_COUNT = {"kn-mnz": 3}
+# inventory/hosts.yml kn_gameserver_dns_count where it is below the instance count (none since Spaceship got
+# ashburn-4..9, 2026-11-19): instance n above it advertises <edge>-<((n-1) % it) + 1>, the same address.
+DNS_COUNT = {}
 # kn-mnz's kn_forwarded_ports: the hairpin on kru (kru-rtc.nft) sends exactly these to its LAN address
 MNZ_FORWARDED = "21015-21023, 21115-21116"
 DIVIDE = ("kru", "kn-mnz")  # inventory group divide: no in-guest firewall / fail2ban
