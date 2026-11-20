@@ -50,3 +50,47 @@ tarball over `/home/knci/kn-N` and start it (the runner also self-updates when G
 If CT 208 is down, set the repo variables (Settings > Variables > Actions) `KN_LINUX_RUNNER` and
 `KN_DB_RUNNER` to `"ubuntu-latest"` (JSON, with the quotes); the jobs read
 `fromJSON(vars.KN_LINUX_RUNNER || '["self-hosted", "kn-ci"]')`. Delete them to go back.
+
+## Local CI and hand deploys (no GitHub Actions)
+
+Every GitHub account we push with has ended up flagged (pushes start no workflow runs), so CI and
+deploys also run from an operator's machine, on the same hosts: `tools/ci/local-ci.sh` and
+`tools/ci/local-deploy.sh` (user, 2026-11-20: "CI all locally on our mac and ci ... you are authorized to
+deploy").
+
+```sh
+tools/ci/local-ci.sh origin/main          # ~/.cache/kn-ci/<commit12>/{summary.txt,<job>.log,PASS}
+tools/ci/local-deploy.sh origin/main      # refuses without that commit's PASS
+tools/ci/local-deploy.sh --dry-run --only kru,edges <rev>   # builds, ansible --check --diff
+```
+
+`local-ci.sh` exports the commit with `git archive` (never the shared checkout) and runs build.yml's jobs
+in parallel:
+
+| job | host | what |
+| --- | --- | --- |
+| meta | this machine | `version-meta.sh` (and `--server`): needs the history and tags |
+| check | CT 208 | `make check` + the workflow's shellcheck; the "Test game content" files come from this checkout's `assets/` (CT 208 cannot reach dl.krunk.io) |
+| linux | CT 208 | `make release`, `proc_input_test`, `ui_test lexbor-probe` |
+| web | CT 208 | `make web` (emsdk 6.0.12 in `/home/knci/kn-local/emsdk`), the GitHub Pages stage check |
+| services | CT 208 | the backend tests on PostgreSQL 18 + MariaDB 11.8 containers (host ports 5432 / 3306, one run at a time: `flock`) |
+| windows | this machine | `build-client.sh windows` with `mingw64-cmake` (Fedora), `package-client.sh windows-x64`, `wine --version` as a smoke test |
+| macos | VM 126 `mac` | `build-client.sh macos` (x86_64, the pinned prebuilt ANGLE, static OpenSSL cached in `~/kn-ci/openssl-*`), `proc_input_test`, `ui_test`, `package-client.sh macos-x64`, codesign check, `--version` |
+| android, ios, macos-arm64 | - | skipped: no Android SDK, no Xcode on the mac (Command Line Tools only), no Apple silicon |
+
+CT 208 jobs run as `knci` inside `kn-ci.slice` (`systemd-run --slice=kn-ci.slice`, the runners' caps), with
+work trees in `/home/knci/kn-local/work/<commit12>/` (removed after the run unless `--keep`). The mac's
+tools (cmake 3.31.6, ninja 1.12.1) are in `~/kn-ci/tools/bin`; nothing is installed system-wide there, and
+its existing `~/actions-runner` is not ours. Package artifacts (Windows, macOS) are copied to
+`~/.cache/kn-ci/<commit12>/artifacts/`.
+
+`local-deploy.sh` does deploy-kru.yml, deploy-edges.yml and assets-cdn.yml from this machine with the
+operator's ssh keys (deploy/ansible/ssh_config, ProxyJump divide): `make web` + kn_brain / kn_migrate
+(bookworm container) + `central.yml`; server_bin + kn_rentd (bullseye / bookworm / trixie) + `edges.yml` on
+the canary kn-ams, its health (instance 1 answers with this build's server commit), then kn-mnz; the asset
+CDN when it lacks dl.krunk.io's `assets/version.txt`. Secrets come from `~/.config/kn-secrets/` (smtp, ai,
+discord env files: a missing one keeps kru's file; the CDN's `github-ci/CLOUDFLARE_*`). Two things still
+need GitHub and are not done by hand: the krunk.io front end on GitHub Pages (a `build_type=workflow`
+site is only published by Actions; kru's own copy of the web build, role kn_web, does go out) and the
+`client-latest` / `server-latest` releases (their publish replaces every platform's asset, and arm64,
+Android and iOS have no build host here).
