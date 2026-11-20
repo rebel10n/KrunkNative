@@ -6543,7 +6543,9 @@ static struct {
 } g_map_tools;
 
 static void hub_map_opened(const char *name, const int id) {
-    snprintf(g_map_tools.name, sizeof(g_map_tools.name), "%s", name ? name : "");
+    char copy[sizeof(g_map_tools.name)]; // name may be g_map_tools.name itself (the refresh after Update Leaderboard)
+    snprintf(copy, sizeof(copy), "%s", name ? name : "");
+    memcpy(g_map_tools.name, copy, sizeof(copy));
     g_map_tools.id = id;
     cJSON_Delete(g_map_tools.rows);
     g_map_tools.rows = NULL;
