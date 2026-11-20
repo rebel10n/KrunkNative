@@ -6274,6 +6274,22 @@ H(h_report_user) {
     return 1;
 }
 
+// shareGameTweet(name) (hub-10.0.7.js:1568-1571): a post on X / Twitter with the map's play link, in the browser
+H(h_share_game_tweet) {
+    UNUSED;
+    const char *name = arg_s(ev, args, argc, 0);
+    if (!name || !*name) return 1;
+    char origin[128], play[512], enc_play[1024];
+    html_page_origin(origin, sizeof(origin));
+    snprintf(play, sizeof(play), "%s/?play=%s", origin, name);
+    backend_url_encode(enc_play, sizeof(enc_play), play);
+    char url[1400];
+    snprintf(url, sizeof(url), "https://twitter.com/intent/tweet?url=%s&text=%s&hashtags=krunker%%2Cgaming", enc_play,
+             "Play%20this%20map%20with%20me%20on%20Box%20Office");
+    ui_open_external(url);
+    return 1;
+}
+
 // shareProfile(): the profile link to the clipboard (v10 copies https://krunker.io/social.html?p=profile&q=NAME)
 H(h_share_profile) {
     UNUSED;
@@ -6664,6 +6680,7 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"playMod", h_play_mod},
     {"updateMapTab", h_update_map_tab},
     {"shareMapLink", h_share_link},
+    {"shareGameTweet", h_share_game_tweet},
     {"shareModLink", h_share_link},
     {"publishPopup", h_publish_popup},
     {"publishModPopup", h_publish_mod_popup},
