@@ -1789,6 +1789,16 @@ else ()
     target_link_libraries(meshopt_test PRIVATE cJSON m)
     add_test(NAME meshopt_test COMMAND meshopt_test ${CMAKE_SOURCE_DIR})
 
+    # mod_shader_test: mod post-pass shader graphs (client/src/mod_shader_graph.c): the validator's refusals and
+    # every node type translating; mod_shader_glsl runs glslangValidator on that GLSL (ES 3.00 and 4.50) when installed
+    add_executable(mod_shader_test client/tests/mod_shader_test.c)
+    target_include_directories(mod_shader_test PRIVATE client/include)
+    target_link_libraries(mod_shader_test PRIVATE cJSON m)
+    add_test(NAME mod_shader_test COMMAND mod_shader_test)
+    if (NOT WIN32)
+        add_test(NAME mod_shader_glsl COMMAND ${CMAKE_SOURCE_DIR}/tools/modshader/check_glsl.sh $<TARGET_FILE:mod_shader_test>)
+    endif ()
+
     # mod_pack_test: map resource packs (client/src/mod_pack.c, zip_read.c): the override applies on
     # the pack's map and is gone after a map change (client/tests/data/mod_pack_test.zip). POSIX.
     if (NOT WIN32)

@@ -41,6 +41,12 @@ static struct {
     int dir_count, dir_cap;
     int serial;
     ModPackHooks hooks;
+    // shaders/ entries (loadModPack's iïíííiï, deob-10.0.7.js:225662-225676, :225918-225921): their text, in zip
+    // order, handed to hooks.shader (insertShaderPass) once the pack is active
+    char **shaders;
+    size_t *shader_lens;
+    int shader_count, shader_cap;
+    int shader_passes; // the active pack added passes (mod_pack_clear resets them)
 } g_mp;
 
 void mod_pack_set_hooks(const ModPackHooks *hooks) {
@@ -231,8 +237,36 @@ static void delete_files(void) {
 
 // ---------------------------------------------------------------- loading
 
+// a shaders/ entry: every file whose first path segment is "shaders" (a directory entry ends in '/')
+static int keep_shader(const char *name, const unsigned char *data, const size_t size) {
+    if (!starts_with(name, "shaders/") || !name[strlen("shaders/")] || name[strlen(name) - 1] == '/') return 0;
+    if (g_mp.shader_count == g_mp.shader_cap) {
+        const int cap = g_mp.shader_cap ? g_mp.shader_cap * 2 : 8;
+        char **texts = realloc(g_mp.shaders, (size_t) cap * sizeof(*texts));
+        if (!texts) return 1;
+        g_mp.shaders = texts;
+        size_t *lens = realloc(g_mp.shader_lens, (size_t) cap * sizeof(*lens));
+        if (!lens) return 1;
+        g_mp.shader_lens = lens;
+        g_mp.shader_cap = cap;
+    }
+    char *text = malloc(size + 1);
+    if (!text) return 1;
+    if (size) memcpy(text, data, size);
+    text[size] = 0;
+    g_mp.shaders[g_mp.shader_count] = text;
+    g_mp.shader_lens[g_mp.shader_count++] = size;
+    return 1;
+}
+
+static void free_shaders(void) {
+    for (int i = 0; i < g_mp.shader_count; i++) free(g_mp.shaders[i]);
+    g_mp.shader_count = 0;
+}
+
 static int extract_entry(const char *name, const unsigned char *data, const size_t size, void *user) {
     (void) user;
+    if (keep_shader(name, data, size)) return 1;
     char rel[MP_PATH_MAX];
     ModFileKind kind;
     if (!entry_target(name, rel, sizeof(rel), &kind)) return 1;
@@ -295,6 +329,8 @@ static void temp_root(char *out, const size_t n) {
 }
 
 void mod_pack_clear(void) {
+    if (g_mp.shader_passes && g_mp.hooks.shaders_reset) g_mp.hooks.shaders_reset(); // resetShaderPasses
+    g_mp.shader_passes = 0;
     if (!g_mp.url[0] && !g_mp.count) return;
     if (g_mp.url[0]) KN_LOG_DEBUG1("[mod] removed %s: the game's own files are back\n", g_mp.url);
     file_set_overlay(NULL); // first: the refresh reads the game's own files
@@ -306,6 +342,13 @@ void mod_pack_clear(void) {
 void mod_pack_shutdown(void) {
     file_set_overlay(NULL);
     delete_files();
+    free_shaders();
+    free(g_mp.shaders);
+    free(g_mp.shader_lens);
+    g_mp.shaders = NULL;
+    g_mp.shader_lens = NULL;
+    g_mp.shader_cap = 0;
+    g_mp.shader_passes = 0;
     g_mp.url[0] = 0;
 }
 
@@ -328,17 +371,25 @@ static int load_zip(const char *url, char *zip_path) {
     MP_MKDIR(root); // (MEMFS /tmp, or a TMPDIR that does not exist yet)
     snprintf(g_mp.dir, sizeof(g_mp.dir), "%s/kn_modpack_%d_%d", root, (int) MP_PID(), ++g_mp.serial);
     MP_MKDIR(g_mp.dir);
+    free_shaders();
     const int entries = zip_read_entries(zip, size, extract_entry, NULL);
     free(zip);
-    if (!entries || !g_mp.count) {
+    if (!entries || (!g_mp.count && !g_mp.shader_count)) { // (a pack of only shaders still loads)
         KN_LOG_DEBUG1("[mod] %s: %s (%d entries, none replaces a game file)\n", url, entries ? "nothing to apply" : "not a zip archive", entries);
         delete_files();
+        free_shaders();
         free(zip_path);
         return 0;
     }
     snprintf(g_mp.url, sizeof(g_mp.url), "%s", url);
-    file_set_overlay(mod_redirect);
-    refresh_caches();
+    if (g_mp.count) {
+        file_set_overlay(mod_redirect);
+        refresh_caches();
+    }
+    for (int i = 0; i < g_mp.shader_count; i++) // insertShaderPass(JSON.parse(text)) per entry, in zip order
+        if (g_mp.hooks.shader && g_mp.hooks.shader(g_mp.shaders[i], g_mp.shader_lens[i])) g_mp.shader_passes = 1;
+    if (g_mp.shader_count) KN_LOG_DEBUG1("[mod] %s: %d shader entries\n", url, g_mp.shader_count);
+    free_shaders();
     int counts[4] = {0, 0, 0, 0};
     for (int i = 0; i < g_mp.count; i++) counts[g_mp.files[i].kind]++;
     KN_LOG_DEBUG1("[mod] loaded %s (%s): %d files replace the game's (%d textures, %d models, %d sounds)\n", url, zip_path, g_mp.count,

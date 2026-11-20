@@ -22,7 +22,10 @@
 //     names: assets/user-assets/<path>, fetched through ensure_asset_file on the web). v7 also
 //     loads Dropbox links; KrunkNative has no fetch outside its asset host, so those are skipped.
 //   - textures/logo.png (the menu logo, v7 only with canChangeLogo), img/medals/*, scripts/
-//     (settings.txt), shaders/ (post passes), css/ and css-img/ (page styles) are not applied.
+//     (settings.txt), css/ and css-img/ (page styles) are not applied.
+//   - shaders/<name>.json (v10's post passes, client/include/mod_shader.h) go to hooks.shader in zip order once the
+//     pack is active; they belong to the pack (mod_pack_clear resets them), where Krunker keeps appending passes
+//     from every pack it loads until Reset Mods.
 //   - The lookup is per file: a page image the HTML engine reads from the asset tree while a pack
 //     is active (/assets/textures/..., e.g. store previews) takes the pack's copy too, where v7's
 //     page keeps loading it from the asset host.
@@ -63,5 +66,7 @@ typedef struct {
     int (*geometry)(const char *path);
     void (*gltf)(const char *path);
     void (*sound)(const char *name);
+    int (*shader)(const char *text, size_t len); // a shaders/ entry (mod_shader_insert_json): 1 when it added a pass
+    void (*shaders_reset)(void);                 // the pack's passes go (mod_shader_reset)
 } ModPackHooks;
 void mod_pack_set_hooks(const ModPackHooks *hooks);

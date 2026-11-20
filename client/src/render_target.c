@@ -53,6 +53,7 @@
 // scaled (resolution 1, no aspect override) the upscale is skipped and only the sharpening runs, and only with
 // TAA on (TAA softens). The laced pass keeps its own path. Without rtSharpen nothing here changes.
 #include <gl.h>
+#include <mod_shader.h>
 #include "klog.h"
 #include <GLFW/glfw3.h>
 #include <nettspend.h>
@@ -724,7 +725,9 @@ int render_target_begin(Client *client) {
     int bloom = s->rt_bloom && s->rt_mode > RT_MODE_OFF && !rt.bloom_failed && rt_supported() && bloom_init_program();
     rt.bloom = 0;
     if (!bloom) bloom_delete_targets();
-    const int need = fabsf(scale - 1.0f) > 1e-4f || s->anti_alias || aspect || rt_filtered(s) || laced || taa || bloom;
+    // mod shader passes (mod_shader.h) read the scene from the target; none enabled: nothing changes here
+    const int need = fabsf(scale - 1.0f) > 1e-4f || s->anti_alias || aspect || rt_filtered(s) || laced || taa || bloom ||
+                     mod_shader_active();
     if (!need) {
         if (rt.fbo) rt_delete_targets(); // back to the direct path: release the buffers
         return 0;
@@ -824,6 +827,9 @@ void render_target_end(Client *client) {
     const int bloom = rt.bloom && bloom_run(scene_tex);
     rt.bloom = 0;
     post_timing_mark(3);
+    // the mod's post passes (insertShaderPass -> postfx, deob-10.0.7.js:205848-205942, :195864-196010) over the
+    // finished scene at its own size; the upscale / sharpen and the saturation / hue filter then take their result
+    scene_tex = mod_shader_render(scene_tex, rt.width, rt.height);
 
     glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int) rt.prev_draw_fbo);
     glViewport(0, 0, rt.fb_width, rt.fb_height);

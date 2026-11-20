@@ -57,6 +57,7 @@
 #include <stb_image.h>
 #include <audio.h>
 #include <gltf.h>     // gltf_model_forget (mod_pack.c hooks)
+#include <mod_shader.h>
 #include <mod_pack.h> // map resource packs (mod_pack.c)
 #include <live_events_client.h> // v10.0.3 live events: the EVENT prefab's meshes (event_objects.c)
 #ifndef __EMSCRIPTEN__
@@ -776,7 +777,8 @@ int main(int argc, char **argv) {
     vt_init(&g_geometry_cache);
     vt_init(&g_texture_cache);
     // map resource packs: what is already loaded follows a pack coming or going (mod_pack.c)
-    const ModPackHooks mod_hooks = {texture_cache_reload, geometry_cache_reload, gltf_model_forget, audio_reload};
+    const ModPackHooks mod_hooks = {texture_cache_reload, geometry_cache_reload, gltf_model_forget, audio_reload,
+                                     mod_shader_insert_json, mod_shader_reset}; // + shaders/ post passes (mod_shader.c)
     mod_pack_set_hooks(&mod_hooks);
     vt_init(&g_glyph_cache);
 #ifndef __EMSCRIPTEN__
@@ -1223,6 +1225,7 @@ int main(int argc, char **argv) {
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
     env_map_fini(); // GLB reflections' getEnvMap table and DFG LUT (env_map.c)
     render_target_fini();
+    mod_shader_fini(); // the mod shader passes' programs and targets
     frame_target_fini();
     html_ui_fini();
     voice_fini();
