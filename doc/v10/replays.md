@@ -167,6 +167,16 @@ every frame.
   `--demo` and screenshots the replay.
 - uidiff `kpd/kpd-replay-bar`, `kpd/kpd-replay-vote`, `kpd/kpd-replay-case` (state.replayBar /
   replayCase, KN baselines); the Demos list is `kpd/kpd-officer-demos`.
+- `client/tests/kpd_replay_vote_e2e.py BUILD`: a live kn_brain plus a recorded Sandstorm demo
+  uploaded as a K.P.D case. A headless officer client signs in, opens it with `watchDemo`, leaves its
+  game server for the replay, frees the pointer with Escape and clicks VERDICT and YES on the bar. The
+  test checks that the vote landed (`kpd_demo_votes`, the case counts, the Demos list), that the bar
+  shows 1Y 0N, and that the speed, pause and exit controls work.
+- `tools/replay/rt0_identity.sh BASE_BIN NEW_BIN`: the rtMode 0 check of AGENTS.md. It takes
+  pinned-camera captures on Sandstorm and Kanji, with the UI and world-only, at a base build and at
+  the new one. It runs each build `RUNS` times (default 6) to mask the pixels that differ between
+  runs of the same build (Kanji's billboard video, menu animations). It fails on any other differing
+  pixel.
 
 Known limits: a custom or published map the client lacks cannot be fetched during a replay (there is
 no server to answer MAP_REQUEST); server-line chat text is not anonymised; the window lengths
