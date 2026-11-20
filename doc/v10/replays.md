@@ -135,11 +135,39 @@ the game exactly as when it spectated live. Sends go nowhere. Playback starts at
 a seek on the same map clears the players and applies the keyframe without its INIT / MAP_INFO, then
 the frames up to the target with transient packets (shots, projectiles, sounds, effects, kills but
 the last three) left out; another map re-inits. 33 ms steps, speeds 0.5 / 1 / 2 / 4, the suspect
-segments and the 1.5 s re-follow as Krunker.
+segments and the 1.5 s re-follow as Krunker. `client->replay` makes `client_net_send` a no-op; an INIT of
+the demo (the first keyframe's, a seek to another map's, a round change in the stream) holds the
+playhead until its map is built (`game.ready`, no held INIT, no map download), 20 s at most. Box Office
+choices: the step is per frame instead of a 33 ms timer; a seek's fast-forward applies the STATEs of the
+last second before the target only (the earlier ones are overwritten anyway); control packets (pings,
+errors, redirects, RECON / POSITION of a player the recorder does not have) are never applied.
+`client_bin --demo <file>[:<call token>]` plays a local file (no server); `KRUNKNATIVE_REPLAY_LOG=1`
+prints the playhead every second.
 
 ### 2.5 UI (`client/src/ui/hud_replay.c`)
 
 `#replayControls` of the page (ids as Krunker's), driven from C: play / pause, slider, time, speed,
 suspect follow, hitboxes, the resolve area and exit (leaves the replay back to the menu). `watchDemo`
-downloads and plays; `openDemoLink` (a `?demo=` / `--demo` link) shows the case popup first. Text and
-CSS are Box Office's own.
+downloads and plays; `openDemoLink` (a `?demo=<tok>&sus=<ct>` link, `client_bin --demo-link
+<tok>[:<ct>]`) shows the case popup first. Text and CSS are Box Office's own (VERDICT -> "Cheating?" YES /
+NO / cancel). Votes go to `POST /kpd/demos/<tok>/vote` with the account's session (`?token=`). While a
+replay plays, `hud_votekick_kpd_sus()` is the replay's suspect (isReplay stands in for kpdData: the
+spectator cards, KPD Vision), and the live case's verdict keys / panel are off. Exit Replay gives back
+what the replay replaced (the server it was on, or the offline game) instead of reloading the page. The
+hitbox outlines (`client/src/replay_hitbox.c`) are LineMaterial boxes after the world pass, rebuilt
+every frame.
+
+## 3. Tests
+
+- `demo_test` (shared): format round-trip, determinism, refusals, keyframe lookup, segments, anonymize.
+- `server/tests/kpd_demo_e2e.py BUILD [MAP] [KEEP]`: server_bin records (recorder invisible, keyframes,
+  the window, a leaving suspect); `services/brain/tests/kpd_test.py` (upload) and
+  `v10_api_mods_test.py` (download, list, vote) on the brain.
+- `tools/replay/capture.sh`: records a demo on Sandstorm and Kanji, plays each headless with
+  `--demo` and screenshots the replay.
+- uidiff `kpd/kpd-replay-bar`, `kpd/kpd-replay-vote`, `kpd/kpd-replay-case` (state.replayBar /
+  replayCase, KN baselines); the Demos list is `kpd/kpd-officer-demos`.
+
+Known limits: a custom or published map the client lacks cannot be fetched during a replay (there is
+no server to answer MAP_REQUEST); server-line chat text is not anonymised; the window lengths
+(120 s before a call, 30 s after) are Box Office's.
