@@ -92,6 +92,10 @@ typedef struct {
     int director_require_ticket;         // with director_secret: every join needs a director ticket
     float join_timeout;                  // seconds a brain-linked server waits for JOIN
 
+    // ---- a rented server (kn_rentd, doc/v10/rented-servers.md): Krunker v10.0.7 isDedicated (deob-10.0.7.js:190676):
+    // the lobby is listed 24/7 under its own name (meta ds / h, :218466-218476) and earns no rewards (:194509-194518)
+    int dedicated;
+
     // ---- rewards (v3.1.1 endGame: min(premium ? 40 : 30, floor(score * rewardMlt / 100)))
     int earn_kr;
     int kr_cap;

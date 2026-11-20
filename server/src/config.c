@@ -542,8 +542,10 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     gs_read_bool(s, "director_require_ticket", &cfg->director_require_ticket);
     gs_read_float(s, "join_timeout", &cfg->join_timeout, 0.5f, 120.0f);
 
+    gs_read_bool(s, "dedicated", &cfg->dedicated); // a rented server (server_config.h)
     // rewards
     gs_read_bool(s, "earn_kr", &cfg->earn_kr);
+    if (cfg->dedicated) cfg->earn_kr = 0; // isDedicated: no giveSkin / dropSkin / KR (deob-10.0.7.js:194509-194518)
     gs_read_int(s, "kr_cap", &cfg->kr_cap, 0, 1000000);
     gs_read_int(s, "kr_cap_premium", &cfg->kr_cap_premium, 0, 1000000);
     gs_read_float(s, "kr_multiplier", &cfg->kr_multiplier, 0.0f, 1000.0f);

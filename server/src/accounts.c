@@ -271,6 +271,11 @@ static cJSON *acc_lobby_tuple(void) {
     if (custom_map) cJSON_AddStringToObject(meta, "m", map);
     else cJSON_AddNullToObject(meta, "m");
     cJSON_AddBoolToObject(meta, "pr", g_gs_config.password[0] != 0); // password protected (never quick-joined)
+    // a rented server: v10.0.7's ds (the blue 24/7 tag, no 2XP) and h, the row's own name (deob-10.0.7.js:218466-218476)
+    if (g_gs_config.dedicated) {
+        cJSON_AddBoolToObject(meta, "ds", 1);
+        cJSON_AddStringToObject(meta, "h", g_gs_config.name);
+    }
     cJSON_AddBoolToObject(meta, "earnKR", g_gs_config.earn_kr && !g_acc.custom);
     cJSON_AddNumberToObject(meta, "mode", mode_id);
     cJSON_AddStringToObject(meta, "modeName", mode_name(mode_id));

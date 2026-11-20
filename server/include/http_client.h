@@ -15,6 +15,9 @@ typedef struct {
 // Returns 0 when a response arrived (any status), -1 on transport errors.
 int http_request(const char *method, const char *url, const char *content_type, const char *body, int timeout_ms,
                  size_t max_body, HttpResult *out);
+// Same with one extra request header line ("Authorization: Bearer ...", no CRLF; NULL / "" none).
+int http_request_hdr(const char *method, const char *url, const char *content_type, const char *extra_header, const char *body,
+                     int timeout_ms, size_t max_body, HttpResult *out);
 void http_result_free(HttpResult *r);
 
 // A POST to a URL that a player chose (the comp host's webhook, server/src/comp_webhook.c): https:// only

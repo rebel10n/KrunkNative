@@ -221,6 +221,8 @@ set(SERVER_CORE_STANDALONE_SOURCES
     server/src/sandbox_backend.c
 )
 list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/server/src/sandbox_backend.c)
+# kn_rentd (the rented servers' supervisor, doc/v10/rented-servers.md) is its own program
+list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/server/src/rentd.c ${CMAKE_SOURCE_DIR}/server/src/rentd_core.c)
 foreach (src IN LISTS SERVER_CORE_SOURCES)
     list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/${src})
 endforeach ()
@@ -619,6 +621,28 @@ else ()
     if (CURL_FOUND)
         target_link_libraries(${SERVER_BINARY} PRIVATE CURL::libcurl ${KN_CURL_DEPS})
         target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_HAVE_CURL=1)
+    endif ()
+
+    # kn_rentd: the rented servers' supervisor on a game host (doc/v10/rented-servers.md). POSIX only (fork / exec).
+    if (NOT WIN32)
+        add_executable(kn_rentd server/src/rentd.c server/src/rentd_core.c server/src/http_client.c server/include/rentd.h)
+        target_include_directories(kn_rentd PRIVATE server/include)
+        target_link_libraries(kn_rentd PRIVATE cJSON Threads::Threads)
+        if (CURL_FOUND)
+            target_link_libraries(kn_rentd PRIVATE CURL::libcurl ${KN_CURL_DEPS})
+            target_compile_definitions(kn_rentd PRIVATE KRUNKNATIVE_HAVE_CURL=1)
+        endif ()
+        add_executable(rentd_test server/tests/rentd_test.c server/src/rentd_core.c)
+        target_include_directories(rentd_test PRIVATE server/include)
+        target_link_libraries(rentd_test PRIVATE cJSON)
+        add_test(NAME rentd_test COMMAND rentd_test)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if (Python3_FOUND)
+            # the process loop against a fake agent API and a fake server_bin: start, restart on a new generation,
+            # crash restart, stop on expiry, the status posts
+            add_test(NAME rentd_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/rentd_e2e.py $<TARGET_FILE:kn_rentd>)
+            set_tests_properties(rentd_e2e PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endif ()
     endif ()
 
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

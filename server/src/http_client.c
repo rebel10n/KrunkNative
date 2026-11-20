@@ -34,8 +34,8 @@ static size_t http_curl_write(char *data, size_t size, size_t n, void *ud) {
 static pthread_once_t g_curl_once = PTHREAD_ONCE_INIT;
 static void http_curl_init(void) { curl_global_init(CURL_GLOBAL_DEFAULT); }
 
-int http_request(const char *method, const char *url, const char *content_type, const char *body, const int timeout_ms,
-                 const size_t max_body, HttpResult *out) {
+int http_request_hdr(const char *method, const char *url, const char *content_type, const char *extra_header, const char *body,
+                     const int timeout_ms, const size_t max_body, HttpResult *out) {
     memset(out, 0, sizeof(*out));
     pthread_once(&g_curl_once, http_curl_init);
     CURL *curl = curl_easy_init();
@@ -51,6 +51,7 @@ int http_request(const char *method, const char *url, const char *content_type, 
         headers = curl_slist_append(headers, ct);
     }
     headers = curl_slist_append(headers, "Accept: application/json");
+    if (extra_header && *extra_header) headers = curl_slist_append(headers, extra_header);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -153,8 +154,8 @@ int http_post_checked(const char *url, const char *content_type, const char *bod
 #include <sys/time.h>
 #include <unistd.h>
 
-int http_request(const char *method, const char *url, const char *content_type, const char *body, const int timeout_ms,
-                 const size_t max_body, HttpResult *out) {
+int http_request_hdr(const char *method, const char *url, const char *content_type, const char *extra_header, const char *body,
+                     const int timeout_ms, const size_t max_body, HttpResult *out) {
     memset(out, 0, sizeof(*out));
     if (strncmp(url, "http://", 7)) {
         snprintf(out->error, sizeof(out->error), "only http:// URLs (build without libcurl)");
@@ -191,12 +192,13 @@ int http_request(const char *method, const char *url, const char *content_type, 
         return -1;
     }
     const size_t body_len = body ? strlen(body) : 0;
-    char head[1024];
+    char head[1536];
+    const int extra = extra_header && *extra_header;
     const int n = snprintf(head, sizeof(head),
                            "%s %s HTTP/1.1\r\nHost: %s:%s\r\nUser-Agent: krunknative-server_bin\r\nAccept: application/json\r\n"
-                           "Connection: close\r\n%s%s%sContent-Length: %zu\r\n\r\n",
+                           "Connection: close\r\n%s%s%s%s%sContent-Length: %zu\r\n\r\n",
                            method, path, host, port, content_type ? "Content-Type: " : "", content_type ? content_type : "",
-                           content_type ? "\r\n" : "", body_len);
+                           content_type ? "\r\n" : "", extra ? extra_header : "", extra ? "\r\n" : "", body_len);
     int failed = n <= 0 || (size_t) n >= sizeof(head) || send(fd, head, (size_t) n, MSG_NOSIGNAL) != n ||
                  (body_len && send(fd, body, body_len, MSG_NOSIGNAL) != (ssize_t) body_len);
     char *buf = NULL;
@@ -230,9 +232,9 @@ int http_request(const char *method, const char *url, const char *content_type, 
 }
 
 #else
-int http_request(const char *method, const char *url, const char *content_type, const char *body, const int timeout_ms,
-                 const size_t max_body, HttpResult *out) {
-    (void) method; (void) url; (void) content_type; (void) body; (void) timeout_ms; (void) max_body;
+int http_request_hdr(const char *method, const char *url, const char *content_type, const char *extra_header, const char *body,
+                     const int timeout_ms, const size_t max_body, HttpResult *out) {
+    (void) method; (void) url; (void) content_type; (void) extra_header; (void) body; (void) timeout_ms; (void) max_body;
     memset(out, 0, sizeof(*out));
     snprintf(out->error, sizeof(out->error), "HTTP client needs libcurl on Windows");
     return -1;
@@ -268,4 +270,9 @@ void http_url_encode(char *out, const size_t size, const char *in) {
         }
     }
     if (size) out[n < size ? n : size - 1] = 0;
+}
+
+int http_request(const char *method, const char *url, const char *content_type, const char *body, const int timeout_ms,
+                 const size_t max_body, HttpResult *out) {
+    return http_request_hdr(method, url, content_type, NULL, body, timeout_ms, max_body, out);
 }
