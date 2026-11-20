@@ -242,7 +242,9 @@ def client(name, brain_port, script, storage):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_PACKET_LOG": "1", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port})
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_PACKET_LOG": "1",
+                # [sprays] decal lines are KN_LOG_VERBOSE2 (level 2 since 5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port})
     if os.environ.get("KN_SPRAYS_TRANSPORT"):
         env["KRUNKNATIVE_NET_TRANSPORT"] = os.environ["KN_SPRAYS_TRANSPORT"]
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
@@ -345,6 +347,7 @@ def decal_fit(before_path, after_path, skin):
         return None, frac
     y0, y1, x0, x1 = changed_region(changed)
     b, a = before[y0:y1, x0:x1], after[y0:y1, x0:x1]
+    still = ~changed[y0:y1, x0:x1][:, :, None]  # unchanged pixels of the decal's box
     item = SKINS[skin]
     opacity = item.get("opacity") or 1.0
     sheet = Image.open(os.path.join(ROOT, "assets", "textures", "sprays", "%d.png" % item["id"])).convert("RGBA")
@@ -364,7 +367,12 @@ def decal_fit(before_path, after_path, skin):
                 rest = b * (1.0 - alpha)
                 denom = float((rgb * rgb).sum())
                 k = float((rgb * (a - rest)).sum()) / denom if denom > 0 else 0.0  # the light on the decal
-                err = float(np.abs(rest + k * rgb - a).sum(axis=2).mean())
+                # A pixel the candidate covers opaquely that did not change is hidden by something
+                # in front of the decal (the sprayer's body, seen by the watcher): it shows no texture,
+                # so it counts for neither candidate. Every pixel that did change still counts.
+                seen = ~(still & (alpha > 0.5))
+                k = float((rgb * (a - rest) * seen).sum()) / max(float((rgb * rgb * seen).sum()), 1e-6) if denom > 0 else 0.0
+                err = float((np.abs(rest + k * rgb - a).sum(axis=2) * seen[:, :, 0]).sum() / max(float(seen.sum()), 1.0))
                 best = err if best is None or err < best else best
     return best, frac
 
@@ -392,7 +400,8 @@ def shots(first, count, step, work, name):
 WATCHER_SCRIPT = "0 play\n500 state\n" + "".join("%d look 0 -1.6\n" % (t * 1000) for t in range(1, 45)) + "{shots}45000 quit\n"
 # Customize (windows[2].tabIndex = 2, showWindow(3)) > Spray (showWindow(9): Select Spray), the
 # spray's card is listed and its onclick (selectSpray) picks it, Play; then look down and spray with
-# the spray key (F), shots after it. (The handler is called, not clicked: at the bottom of the list
+# the spray key (F), shots after it. The look comes 2.2 s before the spray: the watcher shoots every
+# second, so its last frame before the decal shows the sprayer already still (looking down). (The handler is called, not clicked: at the bottom of the list
 # a card can sit under the window's edge.)
 PICK_SCRIPT = """0 menu
 500 clickid customizeButton
@@ -408,7 +417,7 @@ PICK_SCRIPT = """0 menu
 5000 frames {work}/{name}_picked 1
 5200 play
 9000 state
-11000 look 0 -1.6
+9500 look 0 -1.6
 11500 shot {work}/{name}_before.png
 11700 down F
 11800 up F
