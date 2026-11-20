@@ -130,7 +130,7 @@ assets	models/melee/melee_202.obj	https://assets.krunker.io/models/melee/melee_2
 assets	models/melee/melee_203.obj	https://assets.krunker.io/models/melee/melee_203.obj	fe658c43427547daa10659ab0376cfb474c495af3e10a8d471a5e614a948891e	35402
 assets	models/melee/melee_204.obj	https://assets.krunker.io/models/melee/melee_204.obj	42acc9d8858552aad02322728cefd2a2f3cbbeece863acb3f4085831dfc1913e	99133
 assets	models/melee/melee_205.obj	https://assets.krunker.io/models/melee/melee_205.obj	75e31fdd1d6f97909fadbe2ff87acb39534ebb1bca8492feb6c0d2d4270fceaf	209552
-assets	models/melee/melee_206.glb	https://assets.krunker.io/models/melee/melee_206.glb	3b625fc0f962728fdd5eda773923f353038fb384334673acfc805f8d18e72517	3560572
+assets	models/melee/melee_206.glb	https://assets.krunker.io/models/melee/melee_206.glb	5b2f004e6f83c1fce54c275e4cd10cd7d087f01cd9aa52167cc2f564f352245d	3560508
 assets	models/melee/melee_207.obj	https://assets.krunker.io/models/melee/melee_207.obj	16ad8bbce617c7f28a0ea02b62bd01701cba853dea24305198b7759cf2d0007b	196100
 assets	models/melee/melee_208.glb	https://assets.krunker.io/models/melee/melee_208.glb	33d8379a8d9b40001c3d8f4c7991281fd8d859e4c8ce8f45b36c28b8131a0237	1457980
 assets	models/melee/melee_209.obj	https://assets.krunker.io/models/melee/melee_209.obj	5ceff78489271b43500a0028ab66538baa798153f65a33ba8739bcfcdd1f0594	185101
@@ -155,7 +155,7 @@ assets	models/shoes/shoe_68.obj	https://assets.krunker.io/models/shoes/shoe_68.o
 assets	models/shoes/shoe_69.obj	https://assets.krunker.io/models/shoes/shoe_69.obj	f9addf71628c85a34595cb98cc70efb35db23c33d73ffe2544f5907110d00908	14254
 assets	models/shoes/shoe_70.obj	https://assets.krunker.io/models/shoes/shoe_70.obj	b522643439ab635b37e535bc5ff861cf95b4bc94619976bbaedc83658e16552c	35119
 assets	models/shoes/shoe_71.obj	https://assets.krunker.io/models/shoes/shoe_71.obj	3539fd63867e01df614370d5f2b44cb861bbf5d477bd3119a6447d4862a357ea	87978
-assets	models/shoes/shoe_72.obj	https://assets.krunker.io/models/shoes/shoe_72.obj	0bf74a41691a5b65bd5dd7b8a2f98acc8c3314c5a80eb9fd1aa646b6e89d8b64	12054
+assets	models/shoes/shoe_72.obj	https://assets.krunker.io/models/shoes/shoe_72.obj	e803b83c7bbe10120d5d29890e2a6dafbd93f9f4e51aedf320faa2967080a07f	12054
 assets	models/shoes/shoe_73.obj	https://assets.krunker.io/models/shoes/shoe_73.obj	3539fd63867e01df614370d5f2b44cb861bbf5d477bd3119a6447d4862a357ea	87978
 assets	models/shoes/shoe_74.obj	https://assets.krunker.io/models/shoes/shoe_74.obj	e1c9847d39b2c8477628a922aa28001c7d317c179405f8c03382164dd6ea780c	69015
 assets	models/waist/waist_100.obj	https://assets.krunker.io/models/waist/waist_100.obj	2e4592e092d7f6f253f005ea89bff6e5a4ab9d751ff080a00d784a5c212b536e	80864
@@ -3175,7 +3175,7 @@ assets-v10	models/weapons/weapon_16_3.gltf	https://assets.krunker.io/models/weap
 assets-v10	models/weapons/weapon_17_5.gltf	https://assets.krunker.io/models/weapons/weapon_17_5.gltf	08114922751f2127aa59a46f5c2c5aa18f2d1268e3ca4acaca47480466ca9d0c	1145113
 assets-v10	models/weapons/weapon_2_12.gltf	https://assets.krunker.io/models/weapons/weapon_2_12.gltf	a2c1dda1861a8b78307c8e690bb3e2e4b6ea46d8cda4b3197d3558a98c482b61	1367919
 assets-v10	models/weapons/weapon_4_9.gltf	https://assets.krunker.io/models/weapons/weapon_4_9.gltf	2ab0d376ed2bb477b6cbb0b81c67ac18899f71e4a4f3fb251b427686203fc75c	1278821
-assets-v10	models/weapons/weapon_8_2.obj	https://assets.krunker.io/models/weapons/weapon_8_2.obj	bc190496df7005f2cf3dbd292af2a40cbf4df70b554c892894e24bcb5987a4d7	461337
+assets-v10	models/weapons/weapon_8_2.obj	https://assets.krunker.io/models/weapons/weapon_8_2.obj	6e0f6e754165e864a6245a6fa9ce781463af775961afe134dd22ed25e9eaa732	461171
 assets-v10	textures/melee/melee_173.png	https://assets.krunker.io/textures/melee/melee_173.png	3fa0e3ca8e1da366765df95f3f0756384f2b910084a1a48510edc4dacf116945	901706
 assets-v10	textures/sprays/106.png	https://assets.krunker.io/textures/sprays/106.png	fc130f5328638479d4439d76eefbd83ba184c9aa56d4c612b5b895f47d285c54	116997
 assets-v10	textures/sprays/23.png	https://assets.krunker.io/textures/sprays/23.png	8b0c560cd8df712c3297dcaffc0aaf424c7c0e8805e9afdf5fa49659d17c5315	71074
