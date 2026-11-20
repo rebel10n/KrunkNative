@@ -1,5 +1,10 @@
 # deploy/pages
 
+The owned-host GitHub Pages replacement is staged on kru, isolated from public
+traffic. See [OWNED_HOST.md](OWNED_HOST.md) for its deployment, DNS-free checks,
+production ingress prerequisites and rollback. The existing GitHub Pages workflow
+below remains the live front end until an explicit DNS cutover.
+
 The krunk.io front end and the game content's hosting. The page (dist/web without assets/) is
 on **GitHub Pages**; the game content is on the **asset CDN** (two Cloudflare Pages projects, split by
 directory, `deploy/asset-shards.json`) with kru's **download host** as the source and the fallback;

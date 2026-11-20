@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage dist/web for GitHub Pages or Cloudflare Pages (deploy/pages/README.md).
+"""Stage dist/web for GitHub Pages, Cloudflare Pages, or owned nginx hosting (deploy/pages/README.md).
 
 Copies the web build without assets/ (game content stays on the asset origins: see
 README "Asset origins"), renames client.{js,wasm,data} to client.<hash>.* (one content
@@ -23,6 +23,8 @@ the file's download host.
   custom domain from the repository's Pages settings); --keep-from URL also ships the
   client.<hash>.* files of the build that site serves now, so a page a browser still has
   cached for those 10 minutes finds its client after the deploy. Limits 1 GB, 100 MB a file.
+--target nginx: no Pages-specific files; --keep-from keeps the previous public build's
+  hashed client files while the owned host is staged (nginx handles its cache headers).
 
 usage: stage.py <dist/web> <out dir> --brain URL [--asset-base URL | --asset-origins n=URL,... --asset-origin n
                 [--asset-fallback n] [--asset-shards FILE] [--asset-dl URL]]
@@ -48,7 +50,8 @@ CONFIG_FILE = "kn-config.json"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 URL_RE = re.compile(r"^https?://[^\s\"'<>]+/$")
 BASE_RE = re.compile(r"<base\s[^>]*href=", re.I)
-LIMITS = {"cloudflare": (20000, 25 * 1024 * 1024, None), "github": (None, 100 * 1000 * 1000, 1000 * 1000 * 1000)}
+LIMITS = {"cloudflare": (20000, 25 * 1024 * 1024, None), "github": (None, 100 * 1000 * 1000, 1000 * 1000 * 1000),
+          "nginx": (None, None, None)}
 
 # Pages' default for everything else (pages, js/, css/, img/, windows/) is
 # "public, max-age=0, must-revalidate" + ETag: always revalidated, never stale.
@@ -186,7 +189,7 @@ def main():
     ap.add_argument("--asset-fallback", default="", help='the one a failed download is retried on; "" = none')
     ap.add_argument("--asset-shards", default="", help="deploy/asset-shards.json: its origins and split")
     ap.add_argument("--asset-dl", default="", help="the download host instead of the shard file's")
-    ap.add_argument("--target", choices=("cloudflare", "github"), default="cloudflare")
+    ap.add_argument("--target", choices=("cloudflare", "github", "nginx"), default="cloudflare")
     ap.add_argument("--cname", default="", help="github: custom domain written to CNAME")
     ap.add_argument("--keep-from", default="", help="github: the live site, whose client files are kept")
     args = ap.parse_args()
@@ -241,12 +244,14 @@ def main():
         if asset_base:
             with open(os.path.join(args.out, "_redirects"), "w") as f:
                 f.write("/assets/* %sassets/:splat 302\n" % asset_base)
-    else:
+    elif args.target == "github":
         if args.cname:
             with open(os.path.join(args.out, "CNAME"), "w") as f:
                 f.write(args.cname + "\n")
         if args.keep_from:
             keep_previous(args.out, build, args.keep_from)
+    elif args.keep_from:
+        keep_previous(args.out, build, args.keep_from)
 
     # A missing file must be a 404, not a 200 index.html: without a top-level 404.html Pages
     # serves the site as an SPA (index.html for every unknown path), so a missing <img> (e.g.
@@ -258,7 +263,7 @@ def main():
     max_files, max_size, max_total = LIMITS[args.target]
     sizes = [os.path.getsize(os.path.join(d, n)) for d, _ds, fs in os.walk(args.out) for n in fs]
     big = [os.path.join(d, n) for d, _ds, fs in os.walk(args.out) for n in fs
-           if os.path.getsize(os.path.join(d, n)) > max_size]
+           if max_size and os.path.getsize(os.path.join(d, n)) > max_size]
     if (max_files and len(sizes) > max_files) or big or (max_total and sum(sizes) > max_total):
         sys.exit("stage.py: over the %s Pages limits (%d files, %d bytes, too large: %s)" % (args.target, len(sizes), sum(sizes), big))
     print("staged %s for %s: build %s, %d pages, %d files, %.1f MB, assets %s%s, analytics %s" % (

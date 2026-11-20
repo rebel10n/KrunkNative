@@ -14,7 +14,7 @@ bad() { printf '  FAIL  %s\n' "$*"; fail=1; }
 warn() { printf '  warn  %s\n' "$*"; }
 
 assets() {
-    local base=$1; shift
+    local base=$1 sample=$2; shift 2
     echo "asset origin $base"
     local v
     v=$(curl -fsS "$@" "${base}assets/version.txt" | tr -d '[:space:]') || { bad "${base}assets/version.txt"; return; }
@@ -22,8 +22,8 @@ assets() {
     local h
     h=$(curl -fsS -o /dev/null -D - "$@" "${base}assets/version.txt") || true
     grep -qi '^cache-control:.*no-store' <<< "$h" && ok "version.txt no-store" || warn "version.txt Cache-Control: $(grep -i '^cache-control' <<< "$h" | tr -d '\r')"
-    h=$(curl -fsS -o /dev/null -D - "$@" -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${base}assets/img/icon.png?v=$v") \
-        || { bad "assets/img/icon.png"; return; }
+    h=$(curl -fsS -o /dev/null -D - "$@" -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${base}assets/$sample?v=$v") \
+        || { bad "assets/$sample"; return; }
     grep -qiE '^access-control-allow-origin: (\*|https://krunk\.io)' <<< "$h" && ok "CORS" || bad "no Access-Control-Allow-Origin for https://krunk.io"
     grep -qE '^HTTP/[0-9.]+ 206' <<< "$h" && ok "byte range: 206 $(grep -i '^content-range' <<< "$h" | tr -d '\r' | cut -d' ' -f2-)" \
         || warn "byte range: $(head -1 <<< "$h" | tr -d '\r') (the client never sends one; fine)"
@@ -36,7 +36,7 @@ assets() {
 if [ "${1:-}" = --assets ]; then
     shift
     base=${1:?asset origin URL}; shift
-    assets "${base%/}/" "$@"
+    assets "${base%/}/" img/icon.png "$@"
     exit $fail
 fi
 
@@ -62,7 +62,11 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$@" "${site}no-such-page-$$")
 cfg=$(curl -fsS "$@" "${site}kn-config.json") || { bad "kn-config.json"; exit 1; }
 python3 -c 'import json,sys; c=json.loads(sys.argv[1]); print("  ok    kn-config.json: origin %s, fallback %s" % (c["asset_origin"], c["asset_fallback"] or "none"))' "$cfg" \
     || bad "kn-config.json is not the expected JSON"
-for base in $(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["asset_origins"].values()))' "$cfg" 2>/dev/null); do
-    assets "$base"
-done
+# Shard b contains preview/cosmetic textures and intentionally lacks img/icon.png.
+# Probe a real file on each shard rather than failing the CDN's correct split.
+while IFS=$'\t' read -r name base; do
+    sample=img/icon.png
+    case "$name" in b|b-dev) sample=textures/previews/attach/attach_0.png ;; esac
+    assets "$base" "$sample"
+done < <(python3 -c 'import json,sys; print("\n".join(name+"\t"+url for name,url in json.loads(sys.argv[1])["asset_origins"].items()))' "$cfg")
 exit $fail
