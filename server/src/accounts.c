@@ -2297,6 +2297,25 @@ static int acc_copy_paint(const cJSON *entry, WornSkinPaint *out) {
     return out->color >= 0 || out->shader >= 0;
 }
 
+// The style of an owned copy's metadata m (the object, or its JSON string): v10.0.7's m.style (items.setStyle,
+// deob-10.0.7.js:27102-27106, read by generateMeshData at :173602). 0 when the copy has none.
+static int acc_copy_style(const cJSON *entry) {
+    const cJSON *m = cJSON_IsObject(entry) ? cJSON_GetObjectItem(entry, "m") : NULL;
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+    if (parsed) m = parsed;
+    const cJSON *style = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "style") : NULL;
+    const int out = cJSON_IsNumber(style) && style->valuedouble >= 1 && style->valuedouble < 1024 ? style->valueint : 0;
+    cJSON_Delete(parsed);
+    return out;
+}
+
+// The style the account's first styled copy of store index skin wears, 0 none.
+static int acc_style_of(const ServerAccount *acct, const int skin) {
+    for (uint16_t i = 0; i < acct->skin_style_count; i++)
+        if (acct->skin_styles[i].skin == skin) return acct->skin_styles[i].style;
+    return 0;
+}
+
 // whether the account already has a paint for store index skin (its first painted copy)
 static int acc_has_paint(const ServerAccount *acct, const int skin) {
     for (uint16_t i = 0; i < acct->skin_paint_count; i++) {
@@ -2313,6 +2332,7 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
     const cJSON *data = cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "data") : NULL;
     const cJSON *skins = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 10) : cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "skins") : NULL;
     client->acct.skins_known = cJSON_IsArray(skins);
+    client->acct.skin_style_count = 0;
     int count = 0;
     const cJSON *e;
     cJSON_ArrayForEach(e, skins) {
@@ -2326,6 +2346,11 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
         WornSkinPaint paint;
         if (acc_copy_paint(e, &paint) && !acc_has_paint(&client->acct, skin) && client->acct.skin_paint_count < SERVER_SKIN_PAINT_MAX) {
             client->acct.skin_paints[client->acct.skin_paint_count++] = (ServerSkinPaint) {skin, paint};
+        }
+        const int style = acc_copy_style(e);
+        if (style > 0 && !acc_style_of(&client->acct, skin) && client->acct.skin_style_count < SERVER_SKIN_STYLE_MAX) {
+            client->acct.skin_styles[client->acct.skin_style_count].skin = skin;
+            client->acct.skin_styles[client->acct.skin_style_count++].style = style;
         }
     }
     skin_counters_load(client, skins); // v10.0.4 counter skins: each one's copy stat m[stat]
@@ -2348,6 +2373,25 @@ void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skin
             }
         }
     }
+}
+
+void accounts_skin_styles_send(ClientConnection *to, const ClientConnection *owner, const Player *player) {
+    if (!to || !owner || !player || to->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    // the worn cosmetics (generateMeshes' slots: hat, body, waist, face, head, back, shoe, pet, wrist)
+    const int32_t worn[] = {player->cosmetics.hat, player->cosmetics.body, player->cosmetics.waist, player->cosmetics.face,
+                            player->cosmetics_v7.head, player->cosmetics_v7.back, player->cosmetics_v7.shoe,
+                            player->cosmetics_v7.pet, player->cosmetics_v7.wrist};
+    NetSkinStylesPacket packet = {.uid = player->uid};
+    for (size_t k = 0; k < sizeof(worn) / sizeof(worn[0]) && packet.count < NET_SKIN_STYLES_MAX; k++) {
+        const int style = worn[k] >= 0 ? acc_style_of(&owner->acct, worn[k]) : 0;
+        if (style <= 0) continue;
+        packet.skin[packet.count] = worn[k];
+        packet.style[packet.count++] = style;
+    }
+    // an owner with styled copies always sends one (count 0 too), so a client drops a style the player stopped wearing
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
+    const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SKIN_STYLES, &packet, sizeof(packet));
+    if (len) net_send_packet(to->fd, NET_PACKET_EXT, buf, len);
 }
 
 // ------------------------------------------------------------------ connection lifecycle
@@ -2410,6 +2454,12 @@ static void acc_refresh_owned(const ClientConnection *client) {
     g_owned_pending[slot].at = now;
 }
 
+void accounts_refresh_skin_styles(const ClientConnection *client) {
+    // The client sends no style values. The existing owned-skins rate limit and account
+    // validation fetch the source of truth after the authenticated brain write succeeds.
+    acc_refresh_owned(client);
+}
+
 static int acc_handle_owned_reply(const cJSON *frame) {
     const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
     if (!cJSON_IsNumber(rid)) return 0;
@@ -2420,6 +2470,12 @@ static int acc_handle_owned_reply(const cJSON *frame) {
         ClientConnection *client = acc_client_by_account(g_owned_pending[i].account_id);
         if (client && cJSON_IsObject(data) && cJSON_IsArray(cJSON_GetObjectItem(data, "skins"))) {
             accounts_load_skins(client, data);
+            if (client->player) {
+                // A skin's new m.style can be chosen in the menu mid-match. The revalidated
+                // worn styles go to all peers, including this player, while they are alive.
+                for (size_t j = 0; j < g_server->client_count; j++)
+                    accounts_skin_styles_send(&g_server->clients[j], client, client->player);
+            }
             server_log("[accounts] %s: inventory refreshed (an item from mid-session)", client->name);
         }
         return 1;

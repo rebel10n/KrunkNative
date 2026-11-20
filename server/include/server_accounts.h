@@ -117,6 +117,12 @@ int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 void accounts_load_skins(ClientConnection*, const cJSON *account);
 // The paint of each worn skin, from the owner's painted copies (NULL owner: none). Sent with SKINS V2.
 void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out);
+// v10.0.7 item styles: NET_EXT_KN_SKIN_STYLES to `to` with the styles player's worn cosmetics wear (the owner's styled
+// copies), sent before SPAWN and after a mid-match inventory refresh. A count-zero packet clears old styles.
+void accounts_skin_styles_send(ClientConnection *to, const ClientConnection *owner, const Player *player);
+// A confirmed items.setStyle change asks the brain to refresh this account's held inventory,
+// then sends fresh style packets to every player in the match.
+void accounts_refresh_skin_styles(const ClientConnection *client);
 
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)

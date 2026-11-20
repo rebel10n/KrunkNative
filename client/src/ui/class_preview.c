@@ -143,6 +143,10 @@ static void preview_player_destroy(Client *client) {
     preview->map = NULL;
 }
 
+void client_class_preview_invalidate(Client *client) {
+    if (client) client->class_preview.class_index = -1;
+}
+
 // dJ() / updateClassPreview: the preview wears the player's own Change Loadout look, the very one
 // the ENT sends (ui_loadout_look: skins, sight, charms, wrist, cosmetics, the secondary), except that
 // Random shows none (v7's `== -2 ? -1`) where the ENT rolls an owned item. The K.P.D popup's dI

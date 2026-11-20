@@ -700,6 +700,37 @@ void account_paint_applied(const int item, const int paint, const int copy_id, c
     if (paint_stack) take_stack_unit(skins, paint_stack);
 }
 
+// The style selector changes metadata without consuming an item. Refresh this copy or stack's
+// m.style as soon as the brain confirms items.setStyle (deob-10.0.7.js:108817-108850).
+void account_style_applied(const int item, const int sid, const int style) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !g_logged_in || !g_acc.data) return;
+    cJSON *rows = cJSON_GetArrayItem(g_acc.data, 10), *row;
+    cJSON_ArrayForEach(row, rows) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(row, "ind");
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
+        if (!cJSON_IsNumber(ind) || ind->valueint != item) continue;
+        if (sid >= 1000000 ? !cJSON_IsNumber(id) || id->valueint != sid : cJSON_IsNumber(id)) continue;
+        cJSON *meta = cJSON_GetObjectItemCaseSensitive(row, "m");
+        if (cJSON_IsString(meta) && meta->valuestring) {
+            // Account updates can encode m as a JSON string. Retain wear, paint and
+            // counter keys while changing its style (the picker reads either form).
+            cJSON *parsed = cJSON_Parse(meta->valuestring);
+            if (cJSON_IsObject(parsed)) {
+                cJSON_ReplaceItemInObjectCaseSensitive(row, "m", parsed);
+                meta = cJSON_GetObjectItemCaseSensitive(row, "m");
+            } else cJSON_Delete(parsed);
+        }
+        if (!cJSON_IsObject(meta)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(row, "m");
+            meta = cJSON_AddObjectToObject(row, "m");
+        }
+        if (!meta) return;
+        cJSON_DeleteItemFromObjectCaseSensitive(meta, "style");
+        if (style > 0) cJSON_AddNumberToObject(meta, "style", style);
+        return;
+    }
+}
+
 void account_set_last_reward(const double ms) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in || !g_acc.data) return;

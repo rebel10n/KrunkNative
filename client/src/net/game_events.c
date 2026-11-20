@@ -30,6 +30,7 @@
 #include <hud_map.h>  // WP-E part 2a: death markers, minimap blips
 #include <hud_endscreen_v10.h> // NET_EXT_LATEST_RANKED_MMR_CHANGE: the end screen's rank card (lrmr)
 #include <skin_counter.h>      // v10.0.4 counter skins: kills / hits / AI kills / SKIN_STAT counted on the client
+#include <skin_style.h> // v10.0.7 item styles, before the next player SPAWN
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
@@ -1437,6 +1438,23 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                         skin_counter_set_seed(copies.uid, worn[k], copies.seed[k]);
                     }
                 }
+            } else if (subtype == NET_EXT_KN_SKIN_STYLES && body_length >= sizeof(NetSkinStylesPacket)) {
+                NetSkinStylesPacket styles;
+                memcpy(&styles, body, sizeof styles);
+                if (styles.count >= 0 && styles.count <= NET_SKIN_STYLES_MAX) {
+                    // The packet normally precedes SPAWN. A refreshed owned inventory also
+                    // sends one mid-match; a visible player rebuilds styled cosmetics then.
+                    Player *player = events_find_player(client, styles.uid);
+                    const int body_before = player ? skin_style_of(styles.uid, player->cosmetics.body) : -1;
+                    const int wrist_before = player ? skin_style_of(styles.uid, player->cosmetics_v7.wrist) : -1;
+                    skin_style_set(styles.uid, styles.count, styles.skin, styles.style);
+                    if (player && player->mesh && (body_before != skin_style_of(styles.uid, player->cosmetics.body) ||
+                                                   wrist_before != skin_style_of(styles.uid, player->cosmetics_v7.wrist))) {
+                        const int render_you = player->render_you;
+                        client_drop_player_mesh(client, player);
+                        client_add_player_mesh(client, player, render_you);
+                    }
+                }
             } else if (subtype == NET_EXT_KN_SKIN_STAT && body_length >= sizeof(NetSkinStatPacket)) { // "sks" SKIN_STAT
                 NetSkinStatPacket sks;
                 memcpy(&sks, body, sizeof(sks));
@@ -1576,6 +1594,9 @@ static int g_game_joined; // an INIT was applied since the last client_leave_gam
 
 // New session or round (INIT): no clock, no end screen, nobody dead yet.
 void client_game_events_reset(Client *client) {
+    // Every INIT starts fresh player styles. The server sends each player's complete
+    // selection again before SPAWN, so reused uids cannot inherit old cosmetics.
+    skin_style_reset();
     client_world_reset(); // WP-B: no speed-run time yet
     player_accounts_on_init();
     billboard_ad_on_init(); // the server's ad for this map, before client_load_map builds it

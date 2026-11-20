@@ -965,6 +965,7 @@ static void net_send_skins(ClientConnection *client, const Player *player) {
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
     // The weapon / melee skins first: the client builds the player's meshes on SPAWN.
     net_send_skins(client, player);
+    accounts_skin_styles_send(client, net_client_of_player(player), player); // v10.0.7 item styles, before the SPAWN
 
     NetSpawnPacket packet = {
         .uid = player->uid,
@@ -2472,6 +2473,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             const uint8_t *body;
             if (client->peer_minor < NET_PROTOCOL_MINOR_EXT || !net_ext_unpack(packet->payload, packet->length, &subtype, &body, &body_length)) break;
             if (subtype == NET_EXT_JOINED_RANK) accounts_handle_joined_rank(client);                      // "joinedRank" (accounts.c)
+            else if (subtype == NET_EXT_KN_STYLE_REFRESH && body_length == 0) accounts_refresh_skin_styles(client);
             else if (subtype == NET_EXT_KN_ACCOUNT_AUTH) accounts_handle_live_auth(client, body, body_length); // live sign-in (accounts.c)
             else if (subtype == NET_EXT_KN_GUEST_ID) accounts_handle_guest_id(client, body, body_length);   // a guest's unclaimed rewards (accounts.c)
             else if (subtype == NET_EXT_VOTE_KICK) votekick_handle(client, body, body_length);           // "v2k" (votekick.c)

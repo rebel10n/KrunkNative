@@ -7,6 +7,8 @@
 #include <ui_logic.h> // ui_setting_weapon_float: vmSetts Per Weapon
 #include <skin_fx.h>
 #include <skin_counter.h> // v10.0.4 counter skins on the weapon
+#include <skin_style.h> // v10.0.7 equipped item styles, received before SPAWN
+#include <style_picker.h> // the menu preview uses the account's selected style
 #include <backend_ui.h>   // account_skin_stat: your krunker.io copy's counter base
 #include <skin_video.h> // the upgraded weapons' altSkin video
 #include <third_person.h> // the local third-person model
@@ -937,7 +939,16 @@ typedef struct {
     int skin_color, hair_color; // ENT skinColIndex colour / hairCol, -1 = the class's
     // each item's copy wear (player_copy_wear), -1 none; generateMeshData skips customTextures items (deob-10.0.6.js:173414)
     double hat_wear, head_wear, face_wear, body_wear, back_wear, waist_wear, shoe_wear, wrist_wear;
+    int body_style, wrist_style;
 } PlayerLook;
+
+static int look_style(const Player *player, const int index) {
+    if (index < 0) return 0;
+    const int server = skin_style_of(player->uid, index);
+    if (server >= 0) return server;
+    // Menu preview (uid -1) and the local player before the first game: selected copy's m.style.
+    return player->uid == -1 || player->is_you ? style_picker_account_style(index) : 0;
+}
 
 static double look_wear(const Player *player, const ViewerSkin *item, const int store) {
     return item && !(item->flags & VS_CUSTOM_TEXTURES) ? player_copy_wear(player, store) : -1.0;
@@ -981,6 +992,8 @@ static void player_look(const Player *player, PlayerLook *look) {
     look->waist_wear = look_wear(player, look->waist, c.waist);
     look->shoe_wear = look_wear(player, look->shoe, v7.shoe);
     look->wrist_wear = look_wear(player, look->wrist, v7.wrist);
+    look->body_style = look_style(player, c.body);
+    look->wrist_style = look_style(player, v7.wrist);
 }
 
 // UTILS.getRandom of a dye colour list: picked per player (uid) so every client and every
@@ -1019,9 +1032,15 @@ static void player_look_colors(const PlayerLook *look, const int uid, int colors
 // ("<store.types[assetType || type]><id>.obj", textures/<...>[_<tex>].png) with its material options
 // (skin_material: colour, opacity, side, alphaTest, wire, tileS, frames, the glow).
 // The animations, env maps, shaderNum and v10.0.3's video (noVideoSkins: the model texture) are skin_fx_apply's.
-static Mesh *generate_item_mesh(const ViewerSkin *item, const vec3 at, const vec3 rotation, const float scale, MeshTransform *holder) {
+static Mesh *generate_item_mesh(const ViewerSkin *item, const int style, const vec3 at, const vec3 rotation, const float scale, MeshTransform *holder) {
     char model[128], texture[160];
     cosmetic_asset_keys(item, model, sizeof(model), texture, sizeof(texture));
+    // generateMeshData's tex suffix for styles > 0 (deob-10.0.7.js:173602, :173611).
+    if (style > 0 && style < item->styles) {
+        char styled[sizeof texture];
+        skin_style_texture_key(styled, sizeof styled, texture, style, item->styles);
+        snprintf(texture, sizeof texture, "%s", styled);
+    }
     Geometry *geometry = skin_model(model);
     if (!geometry) return NULL;
     unsigned int texture_id = skin_texture(texture);
@@ -1063,7 +1082,7 @@ static struct GltfInstance *generate_item_model(const ViewerSkin *item, const ve
 // One slot: holder = genObj3D(x, y, -sitOffZ) on `parent`, the item inside it at (0, item_y, 0),
 // rotation PI / 2 about y, `scale`. hasAnim items whose GLTF loads use it, the others the OBJ.
 static void player_generate_cosmetic(PlayerMesh *player_mesh, const int slot, const ViewerSkin *item, MeshTransform *parent,
-                                     const float x, const float y, const float item_y, const float scale, const double wear) {
+                                     const float x, const float y, const float item_y, const float scale, const double wear, const int style) {
     MeshTransform *holder = &player_mesh->cosmetic_holders[slot];
     holder->position = (vec3) {x, y, -item->sit_off_z};
     holder->scale = (vec3) {1.0f, 1.0f, 1.0f};
@@ -1071,7 +1090,7 @@ static void player_generate_cosmetic(PlayerMesh *player_mesh, const int slot, co
     const vec3 rotation = {0.0f, (float) M_PI * 0.5f, 0.0f};
     const vec3 at = {0.0f, item_y, 0.0f};
     player_mesh->cosmetic_models[slot] = generate_item_model(item, at, rotation, scale, holder);
-    if (!player_mesh->cosmetic_models[slot]) player_mesh->cosmetics[slot] = generate_item_mesh(item, at, rotation, scale, holder);
+    if (!player_mesh->cosmetic_models[slot]) player_mesh->cosmetics[slot] = generate_item_mesh(item, style, at, rotation, scale, holder);
     skin_fx_apply_wear_gltf(player_mesh->cosmetic_models[slot], item, wear); // generateMeshData's wear (deob-10.0.6.js:173414)
     skin_fx_apply_wear(player_mesh->cosmetics[slot], item, wear);
 }
@@ -1083,19 +1102,19 @@ static float item_scl(const ViewerSkin *item) { return item->scl_mlt != 0.0f ? i
 static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const PlayerLook *look, const int random_leg) {
     const float above_legs = game_constants.player_height - game_constants.leg_height; // playerHeight - legHeight
     MeshTransform *lower = player_mesh->body_anchor;
-    const struct { int slot; const ViewerSkin *item; float y; float scale; double wear; } items[] = {
-        {PLAYER_COSMETIC_BODY, look->body, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->body_wear},
-        {PLAYER_COSMETIC_BACK, look->back, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->back_wear},
-        {PLAYER_COSMETIC_WAIST, look->waist, (above_legs - game_constants.head_scale - 2.0f) / 2.0f, 2.1f, look->waist_wear},
-        {PLAYER_COSMETIC_HAT, look->hat, above_legs, 2.1f, look->hat_wear},
-        {PLAYER_COSMETIC_HEAD, look->head, above_legs, 2.1f, look->head_wear},
-        {PLAYER_COSMETIC_FACE, look->face, above_legs, 1.0f, look->face_wear},
+    const struct { int slot; const ViewerSkin *item; float y; float scale; double wear; int style; } items[] = {
+        {PLAYER_COSMETIC_BODY, look->body, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->body_wear, look->body_style},
+        {PLAYER_COSMETIC_BACK, look->back, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->back_wear, 0},
+        {PLAYER_COSMETIC_WAIST, look->waist, (above_legs - game_constants.head_scale - 2.0f) / 2.0f, 2.1f, look->waist_wear, 0},
+        {PLAYER_COSMETIC_HAT, look->hat, above_legs, 2.1f, look->hat_wear, 0},
+        {PLAYER_COSMETIC_HEAD, look->head, above_legs, 2.1f, look->head_wear, 0},
+        {PLAYER_COSMETIC_FACE, look->face, above_legs, 1.0f, look->face_wear, 0},
     };
     for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
         const ViewerSkin *item = items[i].item;
         if (!item) continue;
         player_generate_cosmetic(player_mesh, items[i].slot, item, lower, 0.0f, items[i].y - item->sit_off, 0.0f, item_scl(item) * items[i].scale,
-                                 items[i].wear);
+                                 items[i].wear, items[i].style);
     }
 
     // shoes: for i < 2 (standing legs) genObj3D(legScale / 2 * (i == 1 ? -1 : 1), legHeight - sitOff - 0.01,
@@ -1105,7 +1124,7 @@ static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const Playe
             const float x = game_constants.leg_scale * 0.5f * (i == 1 ? -1.0f : 1.0f);
             player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_SHOE_R + i, look->shoe, &player_mesh->hold, x, // meshHoldObj
                                      game_constants.leg_height - look->shoe->sit_off - 0.01f, -game_constants.leg_height, item_scl(look->shoe),
-                                     look->shoe_wear);
+                                     look->shoe_wear, 0);
             player_mesh->shoe_hidden[i] = (look->shoe->flags2 & VS2_RANDOM_LEG) && random_leg != i;
         }
     }
@@ -1127,7 +1146,7 @@ static vec3 euler_xyz_from_axes(const vec3 x, const vec3 y, const vec3 z) {
 // the forearm: its +Z is the forearm's down axis, its +Y is up made orthogonal to it. The frame's scale is
 // wristScale * the arm's width (genArm's 1.2, times 0.68 in the first person), `unit` is that width / 1.2,
 // and the item sits in the frame at -sitOff * unit, rotated (sxRot, -PI / 2 + syRot, szRot), scaled by
-static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, const int third_person, const double wear) {
+static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, const int third_person, const double wear, const int style) {
     PlayerArmMesh *arm = arms->left;
     if (!arm || !arm->lower) return;
     const float unit = third_person ? 1.0f : 0.68f;
@@ -1163,7 +1182,7 @@ static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, con
     const vec3 rotation = {wrist->sx_rot, (float) -M_PI * 0.5f + wrist->sy_rot, wrist->sz_rot};
     const float scale = game_constants.wrist_scale * arm_width * item_scl(wrist);
     arms->wrist_model = generate_item_model(wrist, at, rotation, scale, holder);
-    if (!arms->wrist_model) arms->wrist = generate_item_mesh(wrist, at, rotation, scale, holder);
+    if (!arms->wrist_model) arms->wrist = generate_item_mesh(wrist, style, at, rotation, scale, holder);
     skin_fx_apply_wear_gltf(arms->wrist_model, wrist, wear);
     skin_fx_apply_wear(arms->wrist, wrist, wear);
 }
@@ -1192,7 +1211,7 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     arms->charm_mount->transform.parent = &arms->anchor;
 
     const vec3 rotation = {0.0f, (float) -M_PI, 0.0f};
-    arms->charm = generate_item_mesh(charm, (vec3) {0.0f, 0.0f, 0.0f}, rotation, mount->scl, &arms->charm_mount->transform);
+    arms->charm = generate_item_mesh(charm, 0, (vec3) {0.0f, 0.0f, 0.0f}, rotation, mount->scl, &arms->charm_mount->transform);
     if (arms->charm) {
         arms->charm->transform.position = (vec3) {mount->offset[0], mount->offset[1] + 0.17f, mount->offset[2]};
         ((BasicMaterial *) arms->charm->material)->base.transparent = 1;
@@ -1725,7 +1744,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                 }
                 // v10 generateMeshes builds it on every visible player's left arm (no isYou test: wristMeshes
                 // on each client-side model), so other players wear their wrist item too
-                if (look.wrist) player_generate_wrist(arms, look.wrist, third_person, look.wrist_wear);
+                if (look.wrist) player_generate_wrist(arms, look.wrist, third_person, look.wrist_wear, look.wrist_style);
 
                 // Sight attachment: only on the first-person (U) and preview (V) models, like jLrR6.
                 // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff.

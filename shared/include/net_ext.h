@@ -202,6 +202,9 @@ typedef enum {
     NET_EXT_KN_VIDEO_AD = 0x8170, // S -> C no body: FORCE_VIDEO_AD "vad"; C -> S NetVideoAdPacket: CUSTOM_VIDEO_AD "vad" [state]
     // 0x8180 the hosted community map's brain id and creator (client/src/ui/creation_vote.c: the menu's map vote)
     NET_EXT_KN_CREATION_INFO = 0x8180, // S -> C NetCreationInfoPacket, after each INIT of a published map
+    // 0x8190 v10.0.7 item styles (client/include/skin_style.h, server/src/accounts.c accounts_skin_styles_send)
+    NET_EXT_KN_SKIN_STYLES = 0x8190, // S -> C NetSkinStylesPacket, right before a player's SPAWN: the worn copies' styles
+    NET_EXT_KN_STYLE_REFRESH = 0x8191, // C -> S no body, re-read authoritative owned cosmetics after items.setStyle
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -231,6 +234,20 @@ typedef struct {
     int32_t seed[3];
 } NetSkinCopiesPacket;
 _Static_assert(sizeof(NetSkinCopiesPacket) == 28, "NetSkinCopiesPacket: the wire body is 28 bytes");
+
+// NET_EXT_KN_SKIN_STYLES (S -> C): the style each worn cosmetic of player `uid` wears (v10.0.7 item styles: the owned
+// copy's m.style, set with items.setStyle, deob-10.0.7.js:27102-27106), as pairs (store index, style); generateMeshData
+// draws style s > 0 with the texture "<type><id>_<tex>_s<s>" (deob-10.0.7.js:173602, :173611). Only styles > 0 are sent,
+// before every SPAWN of a player that wears one, so a client has them when the SPAWN builds the meshes; a SPAWN without
+// one before it wears none.
+#define NET_SKIN_STYLES_MAX 8
+typedef struct {
+    int32_t uid;
+    int32_t count;                       // pairs used, 0..NET_SKIN_STYLES_MAX
+    int32_t skin[NET_SKIN_STYLES_MAX];   // store.skins index of a worn cosmetic
+    int32_t style[NET_SKIN_STYLES_MAX];  // its style, 1..styles.length - 1
+} NetSkinStylesPacket;
+_Static_assert(sizeof(NetSkinStylesPacket) == 72, "NetSkinStylesPacket: the wire body is 72 bytes");
 
 // NET_EXT_KN_SKIN_STAT (S -> C, to the counting player only): SKIN_STAT "sks" [weapon, stat, amount] (deob-10.0.4.js:184311),
 // handled as countSkinStat(you, weapon, stat, amount) (:221919-221923). stat: the index in SKIN_STATS (shared.h).

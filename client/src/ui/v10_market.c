@@ -64,6 +64,8 @@
 #include <ui_vgrid.h> // the Create Trade inventory lists: virtual (v10_market_tick)
 #include <skin_paint.h>   // a painted copy's badge (v10.0.3's PaintedBadge after the card: deob-10.0.3.js:150273-150277)
 #include <paint_picker.h> // the inventory tile's Paint button (deob:147316, gated at deob:150226-150228)
+#include <style_picker.h> // v10.0.7 item's style selector (styles.length > 1)
+#include <skin_style.h> // style preview suffix, deob-10.0.7.js:24388
 #include <junk.h>         // Quick Sell's Junk: the hundredths of the inventory rows, the reply's balance (doc/v10/junk.md)
 #include <ctype.h>
 #include <math.h>
@@ -622,10 +624,16 @@ static void filter_header(StrBuf *sb, const Filter *f, const FilterView *v) {
 // ------------------------------------------------------------------ cards
 
 // _36396: the generic item card (svelte-r5taai)
-static void item_card(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count) {
+static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count, const int style) {
     const int index = (int) (s - g_viewer_skins);
     char url[512];
     thumb(url, sizeof(url), s);
+    if (style > 0 && style < s->styles) {
+        char base[512], styled[600];
+        viewer_skin_preview_path(s, base, sizeof base);
+        skin_style_preview_path(styled, sizeof styled, base, style, s->styles, s->style_ext);
+        html_dom_asset_url(styled, url, sizeof url);
+    }
     const char *col = rarity_color(s);
     const int tiny = size && atoi(size) > 0 && atoi(size) <= 80;
     sb_appendf(sb, "<div class=\"market-card svelte-r5taai%s%s\" role=\"button\" tabindex=\"0\" style=\"border: 2px solid %s; width: %s; height: %s;\" data-index=\"%d\"",
@@ -652,6 +660,10 @@ static void item_card(StrBuf *sb, const ViewerSkin *s, const char *size, const i
     if (s->puls_t > 0 || s->frames > 0 || s->mov_t > 0 || s->r_anim > 0 || (s->flags & VS_RGB)) sb_append(sb, "<div class=\"material-icons isAnim svelte-r5taai\">loop</div>");
 }
 
+static void item_card(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count) {
+    item_card_styled(sb, s, size, top_center, onclick, owned_count, 0);
+}
+
 typedef struct {
     int listing_id, price;    // a listing (Browse): Buy
     const char *seller;
@@ -662,6 +674,7 @@ typedef struct {
     int list;                 // inventory: List
     int locked;               // inventory: Not sellable
     int sid;                  // inventory: the unit List acts on (a painted copy's id, else the store index)
+    int style;                // owned row's m.style, used for the thumbnail
 } CardOpts;
 
 // _45592: the market card (svelte-hk8nq9): the item card + its overlay
@@ -671,7 +684,7 @@ static void market_card(StrBuf *sb, const int index, const CardOpts *o) {
     char onclick[48], n[32];
     snprintf(onclick, sizeof(onclick), "v10mk.item(%d)", index);
     sb_append(sb, "<div class=\"market-card-shell svelte-hk8nq9\">");
-    item_card(sb, s, "100%", 1, onclick, 0);
+    item_card_styled(sb, s, "100%", 1, onclick, 0, o->style);
     sb_append(sb, "<div class=\"overlay-container svelte-hk8nq9\">");
     if (o->count > 0) {
         if (o->on_sale) sb_appendf(sb, "<div class=\"count-badge svelte-hk8nq9\">%d on sale</div>", o->count);
@@ -1312,15 +1325,19 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
                        i, sid, picked ? "check_box" : "check_box_outline_blank");
         else if (selecting && locked)
             sb_append(sb, "<div class=\"bulk-lock svelte-1n21gx\"><i class=\"material-icons svelte-1n21gx\">lock</i></div> ");
-        const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid};
+        cJSON *meta = row_meta(r);
+        const int style = (int) jnum(meta, "style");
+        const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid, .style = style};
         market_card(sb, i, &o);
         sb_append(sb, " ");
-        cJSON *meta = row_meta(r);
         paint_badge(sb, meta, 10, 24);
         cJSON_Delete(meta);
         if (r && sid > 0 && paint_picker_can_open(i)) {
             sb_appendf(sb, " <button type=\"button\" class=\"paint-icon svelte-1n21gx\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">format_paint</i></button> ", sid, i, sid);
         }
+        if (r && sid > 0 && style_picker_can_open(i))
+            sb_appendf(sb, " <button type=\"button\" class=\"style-icon svelte-1n21gx\" style=\"left:%dpx\" aria-label=\"Choose item style\" onclick=\"v10mk.style(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">palette</i></button> ",
+                       paint_picker_can_open(i) ? 48 : 10, i, sid);
         const int qs = r ? jint(r, "qs", 0) : 0, destroy = r && (jint(r, "nqs", 0) || qs <= 0);
         if (cnt > 0 && (qs > 0 || destroy)) {
             sb_append(sb, " <button type=\"button\" class=\"quick-sell-icon svelte-1n21gx\" aria-label=\"Quick sell ");
@@ -3978,6 +3995,9 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     } else if (!strcmp(h, "paint")) { // paint(index, sid): the tile's Paint button (deob:149062-149069: the popup with skinId = row.sid)
         html_ui_stop_propagation();
         if (a1 > 0) paint_picker_open(a0, a1);
+    } else if (!strcmp(h, "style")) {
+        html_ui_stop_propagation();
+        if (a1 > 0) style_picker_open(a0, a1);
     } else if (!strcmp(h, "qs")) { // qs(index, sid): the row's unit; a painted copy is one item (deob:147652: "1 Item" only)
         html_ui_stop_propagation();
         M.sel_skin = a0;

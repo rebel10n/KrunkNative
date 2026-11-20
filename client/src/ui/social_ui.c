@@ -1862,6 +1862,7 @@ static void hub_render_leaders(const char *a, const cJSON *t) {
 // (f540: the matchmaker's game list filtered to this map) are not fetched: none online.
 static int g_map_tab; // vLN0588
 static void hub_map_opened(const char *name, int id); // the map page tools (below): the open map, its Leaderboard
+static void hub_map_versions_load(void);
 
 // getMapTapHTML(canEdit)
 static void append_map_tabs(StrBuf *sb, const int can_edit) {
@@ -1869,6 +1870,7 @@ static void append_map_tabs(StrBuf *sb, const int can_edit) {
                g_map_tab == 0 ? " activeTab" : "", can_edit ? "true" : "false", g_map_tab == 1 ? " activeTab" : "", can_edit ? "true" : "false",
                g_map_tab == 2 ? " activeTab" : "", can_edit ? "true" : "false");
     if (can_edit) sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(3, true)'>Data</div>", g_map_tab == 3 ? " activeTab" : "");
+    if (can_edit) sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(4, true)'>Versions</div>", g_map_tab == 4 ? " activeTab" : "");
 }
 
 static void hub_render_creation(const int is_mod, const cJSON *t) {
@@ -1972,6 +1974,7 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
         sb_appendf(&sb, "<div id='activeGames' style='display:%s'></div><div id='mapLeaders' style='display:%s;'><div style='font-size:16px;margin-bottom: 2px;text-align:center;color:#fff'>Not Set Yet!</div></div>",
                    g_map_tab == 1 ? "block" : "none", g_map_tab == 2 ? "block" : "none");
         if (can_edit) sb_appendf(&sb, "<div id='mapData' style='display:%s;margin-bottom:20px'><div style='font-size:16px;margin-bottom: 2px'><input type='text' id='searchDInput' placeholder='Search User' onkeyup='if (window.event.keyCode==13) window.searchPData();'><div id='searchDBtn' onclick='window.searchPData();'>Search</div><div id='deleteDBtn' onclick='window.deleteDataPop();'>Delete By Key</div></div><div id='dataList'></div></div>", g_map_tab == 3 ? "block" : "none");
+        if (can_edit) sb_appendf(&sb, "<div id='mapVersions' style='display:%s;margin-bottom:20px'>Loading versions...</div>", g_map_tab == 4 ? "block" : "none");
         sb_append(&sb, "<div class='button map buttonP' onclick='shareMapLink(this, &quot;");
         sb_append_js_escape(&sb, name);
         sb_append(&sb, "&quot;)'>Share</div><div class='button map buttonH' style='margin-left:8px' onclick='hostMap(&quot;");
@@ -6041,6 +6044,8 @@ H(h_update_map_tab) {
     set_display("activeGames", g_map_tab == 1 ? "block" : "none");
     set_display("mapLeaders", g_map_tab == 2 ? "block" : "none");
     if (el("mapData")) set_display("mapData", g_map_tab == 3 ? "block" : "none");
+    if (el("mapVersions")) set_display("mapVersions", g_map_tab == 4 ? "block" : "none");
+    if (g_map_tab == 4 && can_edit) hub_map_versions_load();
     return 1;
 }
 
@@ -6751,11 +6756,131 @@ static struct {
     char key[128];   // the key Delete By Key asked about
 } g_map_tools;
 
+// v10.0.7 Creations' Versions tab (deob-10.0.7.js:107649-107652, :107794-107835).
+// Each request carries its map id and a generation: switching pages cannot install a late response.
+static unsigned g_map_versions_generation;
+typedef struct {
+    int map_id;
+    unsigned generation;
+} MapVersionsRequest;
+
+static int map_versions_url(char *url, size_t n, const char *path) {
+    const char *token = account_session_token();
+    if (!backend_enabled() || !token || !*token) return 0;
+    char encoded[512];
+    backend_url_encode(encoded, sizeof encoded, token);
+    snprintf(url, n, "%s%s?token=%s", backend_url(), path, encoded);
+    return 1;
+}
+
+static void map_versions_done(void *user, int status, const char *body, size_t len) {
+    MapVersionsRequest *req = user;
+    if (!req) return;
+    const int current = req->map_id == g_map_tools.id && req->generation == g_map_versions_generation;
+    free(req);
+    if (!current || !el("mapVersions")) return;
+    cJSON *root = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
+    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "data");
+    StrBuf sb = {0};
+    if (!cJSON_IsArray(rows)) {
+        sb_append(&sb, "<div class='knMapEditNote'>Could not load versions. <button onclick='loadMapVersions()'>Retry</button></div>");
+    } else if (!cJSON_GetArraySize(rows)) {
+        sb_append(&sb, "<div class='knMapEditNote'>No saved versions yet.</div>");
+    } else {
+        sb_append(&sb, "<div class='knMapEditSect'>Version history</div>");
+        const cJSON *row;
+        cJSON_ArrayForEach(row, rows) {
+            const int version = (int) jnum(row, "version"), live = (int) jnum(row, "current_version");
+            if (version <= 0) continue;
+            char date[64];
+            get_date(date, sizeof date, jstr(row, "created"));
+            sb_appendf(&sb, "<div class='knMapEditSect' style='display:flex;align-items:center;justify-content:space-between;gap:12px;'>"
+                        "<div>v%d %s<div class='knMapEditNote'>%s · %.0f bytes</div></div>",
+                       version, version == live ? "(Current)" : "", date, jnum(row, "data_size"));
+            if (version != live) sb_appendf(&sb, "<button class='button buttonP' onclick='revertMapVersion(%d,%d)'>Revert</button>", g_map_tools.id, version);
+            sb_append(&sb, "</div>");
+        }
+    }
+    char *html = sb_finish(&sb);
+    set_html("mapVersions", html);
+    free(html);
+    cJSON_Delete(root);
+}
+
+static void hub_map_versions_load(void) {
+    if (g_map_tools.id <= 0 || !el("mapVersions")) return;
+    ++g_map_versions_generation;
+    set_html("mapVersions", "<div class='knMapEditNote'>Loading versions...</div>");
+    MapVersionsRequest *req = malloc(sizeof *req);
+    char path[128], url[1024];
+    snprintf(path, sizeof path, "/maps/%d/versions", g_map_tools.id);
+    if (!req || !map_versions_url(url, sizeof url, path)) {
+        free(req);
+        set_html("mapVersions", "Sign in to view map versions.");
+        return;
+    }
+    *req = (MapVersionsRequest) {g_map_tools.id, g_map_versions_generation};
+    if (!backend_http_request("GET", url, NULL, map_versions_done, req)) {
+        free(req);
+        set_html("mapVersions", "Could not request map versions.");
+    }
+}
+
+H(h_load_map_versions) {
+    UNUSED;
+    hub_map_versions_load();
+    return 1;
+}
+
+H(h_revert_map_version) {
+    UNUSED;
+    const int map = (int) arg_n(args, argc, 0, 0), version = (int) arg_n(args, argc, 1, 0);
+    if (map <= 0 || version <= 0 || map != g_map_tools.id) return 1;
+    char callback[96];
+    snprintf(callback, sizeof callback, "revertMapVersionGo(%d,%d)", map, version);
+    confirm_popup("Restore this version? The current map will be saved as a new version.", callback, "confSubmitPop");
+    return 1;
+}
+
+static void map_revert_done(void *user, int status, const char *body, size_t len) {
+    MapVersionsRequest *req = user;
+    if (!req) return;
+    const int current = req->map_id == g_map_tools.id && req->generation == g_map_versions_generation;
+    free(req);
+    if (!current) return;
+    cJSON *root = body ? cJSON_ParseWithLength(body, len) : NULL;
+    const int ok = status == 200 && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(root, "data"));
+    cJSON_Delete(root);
+    io_po(ok, ok ? "Map version restored." : "Could not restore map version.");
+    if (ok) hub_map_versions_load();
+}
+
+H(h_revert_map_version_go) {
+    UNUSED;
+    const int map = (int) arg_n(args, argc, 0, 0), version = (int) arg_n(args, argc, 1, 0);
+    if (map <= 0 || version <= 0 || map != g_map_tools.id) return 1;
+    char path[160], url[1024];
+    snprintf(path, sizeof path, "/maps/%d/versions/%d/revert", map, version);
+    MapVersionsRequest *req = malloc(sizeof *req);
+    if (!req || !map_versions_url(url, sizeof url, path)) {
+        free(req);
+        io_po(0, "Sign in to restore map versions.");
+        return 1;
+    }
+    *req = (MapVersionsRequest) {map, ++g_map_versions_generation};
+    if (!backend_http_request("POST", url, "{}", map_revert_done, req)) {
+        free(req);
+        io_po(0, "Could not request map restoration.");
+    }
+    return 1;
+}
+
 static void hub_map_opened(const char *name, const int id) {
     char copy[sizeof(g_map_tools.name)]; // name may be g_map_tools.name itself (the refresh after Update Leaderboard)
     snprintf(copy, sizeof(copy), "%s", name ? name : "");
     memcpy(g_map_tools.name, copy, sizeof(copy));
     g_map_tools.id = id;
+    ++g_map_versions_generation;
     cJSON_Delete(g_map_tools.rows);
     g_map_tools.rows = NULL;
     g_map_tools.player[0] = 0;
@@ -6767,6 +6892,7 @@ static void hub_map_opened(const char *name, const int id) {
     cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
     cJSON_AddItemToArray(f, cJSON_CreateString(""));
     hub_send(f);
+    if (g_map_tab == 4) hub_map_versions_load();
 }
 
 // a stored value as the hub shows it: a "time" key / board is milliseconds, shown as h:mm:ss.cc or m:ss.cc
@@ -7065,6 +7191,9 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"hostMap", h_play_map},
     {"playMod", h_play_mod},
     {"updateMapTab", h_update_map_tab},
+    {"loadMapVersions", h_load_map_versions},
+    {"revertMapVersion", h_revert_map_version},
+    {"revertMapVersionGo", h_revert_map_version_go},
     {"shareMapLink", h_share_link},
     {"shareGameTweet", h_share_game_tweet},
     {"chatBanUser", h_chat_ban_user},

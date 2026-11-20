@@ -37,6 +37,7 @@
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
 #include <strike_econ.h>  // Krunker Strike: the economy's knStrike* handlers (strike_econ.c)
 #include <paint_picker.h> // the owned card's paint popup (paint_picker_handle)
+#include <style_picker.h> // v10.0.7 owned item style picker
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <live_events_client.h> // v10.0.3 live events: eventPopup (v10_events.c)
 #include <math.h>
@@ -639,6 +640,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_wallet_handle,         // v10_wallet.c: v10 Wallet and Inventory (knV10Wallet*)
     v10_bulk_handle,           // v10_bulk.c: bulk quick-sell, List Items, Buy Multiple (knV10Bulk*)
     paint_picker_handle,       // paint_picker.c: the owned card's paint popup (paintOpen, paintPick, paintApply)
+    style_picker_handle,       // style_picker.c: styleOpen, stylePick, styleApply
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     trade_ui_handle,           // trade_ui.c: the live trade (windows[36].*, acceptRequest, requestTrade)

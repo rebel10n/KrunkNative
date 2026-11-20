@@ -61,6 +61,8 @@ typedef struct ViewerSkin {
     const char *tex_ext; // texExt (player cards, emoji: "webp"), NULL = "png"
     const char *prev_ext; // prevExt: the preview's own extension (v10), NULL = tex_ext
     const char *file_ext; // fileExt of a hasAnim model, NULL = "gltf"
+    int styles;          // styles.length (v10.0.7 item styles: KrunkCup Jerseys / Participation Band), 0 = none
+    const char *style_ext; // styleExt: a style preview's extension, NULL = "png" (deob-10.0.7.js:24388)
     float anim_s;        // animS (hasAnim)
     float env;           // env map intensity (env || sameEnv), 0 = none
     // ---- v7.1.4 player-model and material-effect fields (WP-F: players.js generateMeshes /

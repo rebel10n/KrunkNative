@@ -25,6 +25,8 @@
 #include <render_settings.h>
 #include <skin_paint.h> // the owned card's paint badge (Krunker v10.0.3's skinPaintBadge)
 #include <paint_picker.h> // the owned card's paint button (paint_picker.c)
+#include <style_picker.h> // v10.0.7 style selection on owned copies
+#include <skin_style.h> // style-specific preview path
 #include "../viewer/viewer_store.h"
 #include <sprays.h> // SPRAYS_BASE_COUNT, social_v7.h (store spray indices)
 #include <ctype.h>
@@ -1277,6 +1279,14 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     const char *col = rarity_color(s);
     char img[256];
     skin_thumb(o->ind, img, sizeof(img));
+    if (s->styles > 1 && o->meta) {
+        const cJSON *style = cJSON_GetObjectItemCaseSensitive(o->meta, "style");
+        if (cJSON_IsNumber(style)) {
+            char styled[sizeof img];
+            skin_style_preview_path(styled, sizeof styled, img, style->valueint, s->styles, s->style_ext);
+            snprintf(img, sizeof img, "%s", styled);
+        }
+    }
     sb_appendf(out, "<div class='skinCard%s%s' style='color:%s;border:5px solid%s' onmouseenter='playTick()'onclick='%s(%d",
                s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, fn, o->ind);
     if (weapon >= 0) sb_appendf(out, ",%d", weapon);
@@ -1293,6 +1303,9 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     if (paint_picker_can_open(o->ind))
         sb_appendf(out, "<div class='selctPaintBtn' onmouseenter='playTick()' onclick='paintOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>format_paint</i></div>",
                    o->ind, o->copy_id ? o->copy_id : o->ind);
+    if (style_picker_can_open(o->ind))
+        sb_appendf(out, "<div class='selctPaintBtn' style='left:%dpx;background-color:#fc038d' title='Choose style' onclick='styleOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>palette</i></div>",
+                   paint_picker_can_open(o->ind) ? 38 : 5, o->ind, o->copy_id ? o->copy_id : o->ind);
     sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
                o->ind, o->ind);
 }

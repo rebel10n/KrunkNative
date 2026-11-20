@@ -180,6 +180,7 @@ void account_kio_set_balances(int has_funds, double funds, int has_junk, double 
 void account_remove_skin(int skin_index);   // acc.removeSkin: -1 of skin (a redeemed spin ticket)
 // A paint applied (paint_picker.c): one paint unit taken, copy_id gets paint m (from_stack: a stack's unit became it)
 void account_paint_applied(int item, int paint, int copy_id, int from_stack, const cJSON *m);
+void account_style_applied(int item, int sid, int style); // v10.0.7: update the owned row's m.style immediately
 void account_set_last_reward(double ms);    // acc.lastReward (the Free KR wheel's clock)
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)

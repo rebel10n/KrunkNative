@@ -68,6 +68,8 @@ const rows = store.skins.map((s, i) => {
   if (s.texExt) fields.push(`.tex_ext = ${cstr(s.texExt)}`);
   if (s.prevExt) fields.push(`.prev_ext = ${cstr(s.prevExt)}`);
   if (s.fileExt) fields.push(`.file_ext = ${cstr(s.fileExt)}`);
+  if (Array.isArray(s.styles) && s.styles.length) fields.push(`.styles = ${s.styles.length}`); // v10.0.7 item styles
+  if (s.styleExt) fields.push(`.style_ext = ${cstr(s.styleExt)}`);
   if (s.hasAnim) fields.push(`.anim_s = ${f(num(s.animS, 1))}`);
   if (s.env || s.sameEnv) fields.push(`.env = ${f(num(s.env, 3))}`);
   const opt = (key, cname, d) => { if (s[key] !== undefined && s[key] !== null && num(s[key], d) !== d) fields.push(`.${cname} = ${f(num(s[key], d))}`); };
