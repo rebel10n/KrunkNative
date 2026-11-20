@@ -497,7 +497,8 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
             else
                 sb_appendf(&sb, "<img class='spinPrevIcon' style='border-color:%s' onclick='viewItem(%d)' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' src='%s' />", col, id, src);
         }
-        if (n) sb_append(&sb, "<span style='color:#fff;line-height:85px;margin-left:6px'>+ More</span>");
+        // + More opens every item the wheel can roll (showMoreItems, deob-10.0.7.js:224381, :224391-224445)
+        if (n) sb_append(&sb, "<span style='color:#fff;line-height:85px;margin-left:6px;cursor:pointer;' onclick='knShowMoreItems();event.stopPropagation();'>+ More</span>");
         html = sb_finish(&sb);
         set_html("spinItems", html);
         free(html);
@@ -1643,9 +1644,79 @@ static void generic_popup(const char *html, const char *cls) {
     set_display("genericPop", "block");
 }
 
+// one section of the More popup: a coloured header and the items' icons with the owned count
+static void more_items_section(StrBuf *sb, const char *name, const char *color, const int *items, const int n) {
+    sb_append(sb, "<div class='knMoreSection'><div class='knMoreHead' style='color:");
+    sb_append_esc(sb, color && color[0] ? color : "#fff");
+    sb_append(sb, "'>");
+    sb_append_esc(sb, name ? name : "");
+    sb_appendf(sb, " <span class='knMoreCount'>%d</span></div><div class='knMoreGrid'>", n);
+    for (int i = 0; i < n; i++) {
+        const int id = items[i];
+        char src[160];
+        store_skin_preview(id, src, sizeof(src));
+        const char *col = g_viewer_rarities[g_viewer_skins[id].rarity].color;
+        sb_appendf(sb, "<div class='knMoreItem' style='border-color:%s' onclick='viewItem(%d)'><img loading='lazy' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' src='%s'>", col, id, src);
+        const int owned = owned_count(id);
+        if (owned > 0) sb_appendf(sb, "<div class='knMoreOwned'>%dx</div>", owned);
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// showMoreItems(wheel): genericPopup(the items modal, "defaultModal") titled "Items - <wheel>". A pool wheel lists
+// its pools, rarest (lowest weight) first; other wheels list their rarities from the top down, skipping the ones
+// they cannot roll (deob-10.0.7.js:224391-224445, the modal :127588-127700). Our own markup and CSS (kn-alt.css).
+static void show_more_items(const UiWheel *w) {
+    if (!w || w->kr) return;
+    enum { MAX_ITEMS = 2048 };
+    int *pool = malloc(sizeof(int) * MAX_ITEMS);
+    if (!pool) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='knMoreItems'><div class='knMoreTitle'>Items - ");
+    sb_append_esc(&sb, w->name ? w->name : "");
+    sb_append(&sb, "</div><div class='knMoreBody'>");
+    if (w->src && w->src->pool_count > 0) {
+        const StoreSpins *sp = store_spins_builtin();
+        int order[STORE_WHEEL_SLICES];
+        const int pc = w->src->pool_count < STORE_WHEEL_SLICES ? w->src->pool_count : STORE_WHEEL_SLICES;
+        for (int k = 0; k < pc; k++) order[k] = k;
+        for (int a = 1; a < pc; a++) // a stable sort by weight (a missing weight sorts last)
+            for (int b = a; b > 0; b--) {
+                const double wa = order[b - 1] < w->src->slices ? w->src->weights[order[b - 1]] : 1e300;
+                const double wb = order[b] < w->src->slices ? w->src->weights[order[b]] : 1e300;
+                if (wb >= wa) break;
+                const int t = order[b]; order[b] = order[b - 1]; order[b - 1] = t;
+            }
+        for (int o = 0; o < pc; o++) {
+            const StorePool *p = store_spins_pool(sp, w->src->pools[order[o]]);
+            if (!p) continue;
+            int n = 0;
+            for (int i = 0; i < p->count && n < MAX_ITEMS; i++)
+                if (viewer_skin(p->items[i])) pool[n++] = p->items[i];
+            if (n) more_items_section(&sb, p->label[0] ? p->label : p->name, p->color, pool, n);
+        }
+    } else {
+        for (int r = (g_viewer_rarity_count < 7 ? g_viewer_rarity_count : 7) - 1; r >= 0; r--) {
+            if (wheel_rarity(w, r) <= 0) continue;
+            const int n = spin_pool(w, r, pool, MAX_ITEMS);
+            if (n) more_items_section(&sb, g_viewer_rarities[r].name, g_viewer_rarities[r].color, pool, n);
+        }
+    }
+    sb_append(&sb, "</div></div>");
+    free(pool);
+    char *html = sb_finish(&sb);
+    if (html) generic_popup(html, "defaultModal");
+    free(html);
+}
+
 // windows[13] / store handlers; guests included (the -1 guard below is for the wheels)
 static int store_window_handle(const char *name, const HtmlArg *args, const int argc) {
     const int a0 = argc > 0 && (args[0].kind == HTML_ARG_NUM || args[0].kind == HTML_ARG_BOOL) ? (int) args[0].num : 0;
+    if (!strcmp(name, "knShowMoreItems")) { // showMoreItems(wheel index) on the open wheel; guests too
+        show_more_items(current_wheel());
+        return 1;
+    }
     if (!strcmp(name, "windows.13.switchTab")) { // 5 Marketplace -> the hub, 4 Redeem -> voucherPopup()
         if (a0 != 4) { // v10: 5 is the Eterno Shop tab, the Marketplace is openExchange()
             g_store_tab = a0 >= 0 && a0 < V10_SHOP_TABS ? a0 : 0;

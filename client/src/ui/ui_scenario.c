@@ -327,7 +327,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "anim_seek", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
-        "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
+        "clientChrome", "settingsView", "windowActions", "spinActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "officialClasses", // the class list an official krunker.io game sent (game_config_apply, ui_scenario_apply)
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "rentServers", // the brain's ["dsrvl", 0, rows] for Rent Dedicated Server: {rows, game} (rent_servers_ui.c)
@@ -1286,6 +1286,7 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open) v10_wild_offer_scenario(st("wildOffer")); // the brain's "wo" reply (v10_wild_offer.c)
     if (menu_open && st_has("spin")) {
         store_ui_scenario_wheel(st_int("spin", 0), st_bool("spinMulti", 0));
+        apply_actions(client, st("spinActions")); // handlers once the wheel is up (knShowMoreItems: its + More)
         const cJSON *result = st("spinResult");
         if (cJSON_IsObject(result)) {
             run_frames(client, 2); // the wheel's geometry first (store_ui_tick)
