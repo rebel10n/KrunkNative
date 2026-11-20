@@ -7,6 +7,8 @@
 // listeners (setupDom's addEventListener calls).
 #include <v10_menu.h>
 #include "klog.h"
+#include <creation_vote.h>
+#include <image_collection.h>
 #include <v10_social.h>
 #include <v10_studios.h>  // v10 Studios (v10_studios.c)
 #include <ui_logic.h>
@@ -608,6 +610,8 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     turf_ui_handle,            // turf_ui.c: v10 Turf Wars
     v10_news_handle,           // v10_news.c: What's New (windows[34]), Guide, Community & Events
     v10_competitive_handle,    // v10_competitive.c: v10 Leaderboards, the view stack
+    image_collection_handle,   // image_collection.c: a URL setting's image collection (imagePopup, addNewImage, selectImage, ...)
+    creation_vote_handle,      // creation_vote.c: the menu's map / mod vote (voteMap, voteMod)
     v10_social_handle,         // v10_social.c: v10 Social hub, player profile, clan view (openSocial, openPlayerProfile, ...)
     v10_studios_handle,        // v10_studios.c: v10 Studios (openStudios, knStudios)
     v10_market_handle,         // v10_market.c: v10 Market & Trading (openExchange, v10mk.*)

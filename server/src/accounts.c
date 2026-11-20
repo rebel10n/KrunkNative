@@ -84,6 +84,7 @@ static struct {
     uint32_t pending_rid;
     cJSON *hosted_map;         // the fetched published map of the current custom game (owned)
     char published_map[128];   // WP6: config.customMap of the current custom game ("" none)
+    char published_creator[64]; // its creator's account name ("" unknown): the menu's map vote (NET_EXT_KN_CREATION_INFO)
     char webhook[COMP_WEBHOOK_URL_MAX + 1]; // the comp host's webhook ("" none): v10 game.webhook
     int webhook_posted;        // this match's match_end went out
     int kr_rewards;            // WP6: host option krRewards on that published map
@@ -1817,6 +1818,10 @@ const char *accounts_published_map(void) {
     return g_acc.custom && g_acc.published_map[0] ? g_acc.published_map : NULL;
 }
 
+const char *accounts_published_creator(void) {
+    return accounts_published_map() ? g_acc.published_creator : "";
+}
+
 int accounts_kr_rewards(void) {
     return accounts_published_map() && g_acc.kr_rewards;
 }
@@ -3444,6 +3449,7 @@ static void acc_revert_custom(const char *why) {
     g_acc.host_account_id = 0;
     g_acc.host_guest[0] = 0;
     g_acc.published_map[0] = 0;
+    g_acc.published_creator[0] = 0;
     g_acc.webhook[0] = 0;
     memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed));
     g_acc.kr_rewards = 0;
@@ -3680,6 +3686,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     char published[96] = "", published_creator[64];
     if (custom_map) acc_custom_map_name(config, published, sizeof(published), published_creator, sizeof(published_creator));
     snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published); // the bare name (storage key)
+    snprintf(g_acc.published_creator, sizeof(g_acc.published_creator), "%s", custom_map ? published_creator : "");
     g_acc.kr_rewards = g_acc.published_map[0] && cJSON_IsTrue(cJSON_GetObjectItem(config, "krRewards"));
     // v10 applyConfig (deob-10.0.3.js:216122-216129): a comp game (host type 1, ranked too) keeps a non-empty
     // webhook, any other game none; the match_end goes there at each match end (acc_post_webhook). Longer than

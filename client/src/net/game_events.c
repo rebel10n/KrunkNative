@@ -37,6 +37,7 @@
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
 #include <v10_party.h>     // official lobbies' password prompt ("code" / "codeT" / "codeP")
 #include <hud_social.h>    // WP-E part 2b: NET_PACKET_CHAT_V7 / VOICE_V7 / SPRAY_V7 (social_v7.h)
+#include <creation_vote.h> // NET_EXT_KN_CREATION_INFO: the menu's map vote
 #include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
 #include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
 #include <map_triggers.h>  // map trigger events: "do"/"ro"/"gte"/"bnk", "chp", "s", "scr", "am" popups (client/src/map_triggers.c)
@@ -1478,6 +1479,13 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetRankedNoticePacket notice;
                 memcpy(&notice, body, sizeof(notice));
                 events_ranked_notice(client, &notice);
+            }
+            else if (subtype == NET_EXT_KN_CREATION_INFO && body_length == sizeof(NetCreationInfoPacket)) { // the hosted community map
+                NetCreationInfoPacket info;
+                memcpy(&info, body, sizeof(info));
+                info.name[sizeof(info.name) - 1] = 0;
+                info.creator[sizeof(info.creator) - 1] = 0;
+                creation_vote_set_map(info.map_id, info.name, info.creator);
             }
             else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
                 NetMarkPositionPacket ping;

@@ -80,6 +80,7 @@ void accounts_tick_custom_for_test(void);
 // WP6: the published map (config.customMap) the current custom lobby hosts, NULL none:
 // GAME.STORAGE and Save / Load Data need one online (v7 customMap + defaultSetts).
 const char *accounts_published_map(void);
+const char *accounts_published_creator(void); // the hosted published map's creator ("" none / unknown)
 // WP6: v7 game.krRewards: the host option krRewards on a hosted published map.
 int accounts_kr_rewards(void);
 

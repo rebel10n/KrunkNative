@@ -199,7 +199,19 @@ typedef enum {
     NET_EXT_KN_SKIN_STAT = 0x8161,     // S -> C NetSkinStatPacket: "sks" SKIN_STAT, a server-only stat counted for you
     // 0x8170 v10 video ads (client/include/kn_ad.h: the placeholder ad, doc/v10/ads.md)
     NET_EXT_KN_VIDEO_AD = 0x8170, // S -> C no body: FORCE_VIDEO_AD "vad"; C -> S NetVideoAdPacket: CUSTOM_VIDEO_AD "vad" [state]
+    // 0x8180 the hosted community map's brain id and creator (client/src/ui/creation_vote.c: the menu's map vote)
+    NET_EXT_KN_CREATION_INFO = 0x8180, // S -> C NetCreationInfoPacket, after each INIT of a published map
 } NetExtSubtype;
+
+// NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
+// a tip for its creator (Krunker sends the same three fields inside INIT's custom map data, deob-10.0.7.js:226239).
+// map_id 0 = an official map or one the brain does not know: no vote.
+typedef struct {
+    int32_t map_id;   // the brain's published_maps.map_id
+    char name[64];    // the map's name, NUL-terminated
+    char creator[32]; // the creator's account name, NUL-terminated
+} NetCreationInfoPacket;
+_Static_assert(sizeof(NetCreationInfoPacket) == 100, "NetCreationInfoPacket: the wire body is 100 bytes");
 
 // NET_EXT_KN_VIDEO_AD (C -> S): forceVideoAd's CUSTOM_VIDEO_AD states (deob-10.0.4.js:226675-226692): 1 asked, 2 shown,
 // 3 completed, -1 failed. The server fires KrunkScript's onAdFinished(playerID, success) on 3 (true) and -1 (false).

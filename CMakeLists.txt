@@ -1326,6 +1326,20 @@ else ()
     target_link_libraries(market_trade_list_test PRIVATE cJSON m)
     add_test(NAME market_trade_list_test COMMAND market_trade_list_test)
 
+    # creation_vote_test (client/src/ui/creation_vote.c): the menu's map / mod vote: the toggle, the rendered
+    # buttons, the brain requests and a guest's press, against stubbed DOM, brain and account
+    add_executable(creation_vote_test client/tests/creation_vote_test.c client/src/ui/creation_vote.c)
+    target_include_directories(creation_vote_test PRIVATE client/include client/src/viewer shared/include)
+    target_link_libraries(creation_vote_test PRIVATE freetype cJSON m)
+    add_test(NAME creation_vote_test COMMAND creation_vote_test)
+
+    # image_collection_test (client/src/ui/image_collection.c): a URL setting's image collection: name and link
+    # checks, add / pick / remove and the stored list, against stubbed storage, DOM, popup and settings
+    add_executable(image_collection_test client/tests/image_collection_test.c client/src/ui/image_collection.c)
+    target_include_directories(image_collection_test PRIVATE client/include client/src/viewer shared/include)
+    target_link_libraries(image_collection_test PRIVATE freetype cJSON m)
+    add_test(NAME image_collection_test COMMAND image_collection_test)
+
     # follower_counts_test (client/include/follower_counts.h): a follow moves the author's count on
     # their posts and profile (v10_social.c followers_moved)
     add_executable(follower_counts_test client/tests/follower_counts_test.c)

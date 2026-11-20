@@ -9,6 +9,7 @@
 #include <player_anim.h> // the "uai" of a spawn's onPlayerSpawn after its SPAWN
 #include <server.h>
 #include <server_log.h>
+#include <published_maps.h> // published_map_id: NET_EXT_KN_CREATION_INFO
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <account.h>         // AccountInfo (GameHooks.account_info)
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
@@ -278,6 +279,23 @@ void net_broadcast_chat(const char *from, const char *msg) {
     if (!net_chat_sanitize(text, sizeof(text), msg, msg ? strlen(msg) : 0)) return;
 
     net_broadcast_chat_except(NULL, -1, NET_CHAT_SERVER, from, text);
+}
+
+// NET_EXT_KN_CREATION_INFO after an INIT: the published map this server hosts (map_id 0 for an official map, so a
+// client forgets the previous one). Only EXT peers understand it; an older client simply shows no map vote.
+static void net_send_creation_info(ClientConnection *client) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    NetCreationInfoPacket body;
+    memset(&body, 0, sizeof(body));
+    const char *map = accounts_published_map();
+    if (map) {
+        body.map_id = published_map_id(map);
+        snprintf(body.name, sizeof(body.name), "%s", map);
+        snprintf(body.creator, sizeof(body.creator), "%s", accounts_published_creator());
+    }
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_CREATION_INFO, &body, sizeof(body));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
 }
 
 // The brain's ranked notice ("ranked-notice"): a line for every player of this game server. An EXT peer gets
@@ -896,6 +914,7 @@ static void net_send_init(ClientConnection *client) {
     brain_events_send_init(client); // v10 init syncData.warsClan: the Turf Wars clan holding the map
     ks_entities_send_state(&g_server->game, client->id); // v10 init syncData entSeed / lo / ent / entAtt (after the INIT that resets them)
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
+    net_send_creation_info(client); // the hosted community map's id and creator: the menu's map vote
 }
 
 // v10 getName under isUsingRankedNames: a ranked player's name is "Player_<n>" for everyone else

@@ -22,6 +22,7 @@
 // Native differences: the page's <input type=file> does nothing natively, so the two Select links and the Mod
 // Loader's drop area open the platform file dialog (ed_pick_file) through KrunkNative handlers (knModPick,
 // knModPickLocal). The window markup is KrunkNative's own, on the page's classes.
+#include <creation_vote.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
@@ -179,6 +180,7 @@ static int load_user_mod(const char *name, const char *url, const char *id, cons
         return 0;
     }
     loaded_add(name, full, id, creator, thumb);
+    creation_vote_set_mod(id ? atoi(id) : 0, name, creator); // #modVote: the loaded mod's vote (:225872-225880)
     popup(1, "Mod loaded");
     menu_rerender_if_open(MODS_WINDOW);
     return 1;
@@ -197,6 +199,7 @@ static void picked_local(void *user, const char *path) {
     }
     const char *base = strrchr(path, '/');
     loaded_add(base ? base + 1 : path, path, "", "", 0);
+    creation_vote_set_mod(0, NULL, NULL); // a local zip has no brain id: no vote
     popup(1, "Mod loaded");
 }
 
