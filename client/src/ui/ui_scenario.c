@@ -105,6 +105,7 @@
 #include <hud_endscreen_v10.h> // the v10 end-of-match components (state.endscreen rewards / rank)
 #include <live_events_client.h> // state.events: v10.0.3 live events (v10_events.c)
 #include <rent_servers_ui.h> // state.rentServers
+#include <mod_shader.h>      // state.modShaders
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -338,6 +339,7 @@ static void warn_unknown_keys(void) {
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
         "events",    // v10.0.3 live events {list: config.events, index: the round's eventIndex, now: Date.now ms} (v10_events.c)
         "kioStore", // krunker.io's store answers {limited, ranked} with officialSession (kio_store.c)
+        "modShaders", // mod post passes: [shader entry JSON ({graph, shaderArgs} or a bare post graph)] (mod_shader.c)
         "kioBundles", // krunker.io's bundle frames [["abd", rows], ["gbdr", ...]] with officialSession (kio_checkout.c)
         "creationVote", // {map: {id, name, creator}, mod: {...}}: the hosted community map / loaded mod's vote (creation_vote.c)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
@@ -950,8 +952,19 @@ static void apply_window_scroll(void) {
     }
 }
 
+// state.modShaders: each entry as a mod zip's shaders/<name>.json (insertShaderPass), before the window renders its
+// Shader Inputs rows (the scenario draws no world: the passes themselves do not run here)
+static void apply_mod_shaders(void) {
+    const cJSON *item;
+    mod_shader_reset();
+    cJSON_ArrayForEach(item, st("modShaders")) {
+        if (!mod_shader_insert(item)) fprintf(stderr, "[scenario] modShaders: an entry was refused\n");
+    }
+}
+
 static void apply_window(Client *client) {
     int id;
+    if (st_has("modShaders")) apply_mod_shaders();
     if (!scenario_window_id(st("window"), &id)) {
         apply_window_actions(client); // no window: the actions open a popup (openGuide, openCommunityMenu)
         apply_window_scroll();

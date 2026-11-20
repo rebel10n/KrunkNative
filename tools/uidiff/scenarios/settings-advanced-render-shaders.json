@@ -1,0 +1,159 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunknative/settings-advanced-render-shaders.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 0,
+    "settingsTab": 3,
+    "settingsView": "advanced",
+    "modShaders": [
+      {
+        "graph": {
+          "v": 1,
+          "kind": "post",
+          "nodes": [
+            {
+              "id": "scene",
+              "type": "sceneColor",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "grey",
+              "type": "grayscale",
+              "inputs": {
+                "c": {
+                  "node": "scene"
+                }
+              },
+              "x": 200,
+              "y": 0
+            },
+            {
+              "id": "amount",
+              "type": "param",
+              "params": {
+                "name": "amount",
+                "type": "float",
+                "default": 1,
+                "min": 0,
+                "max": 1
+              },
+              "x": 200,
+              "y": 120
+            },
+            {
+              "id": "mixed",
+              "type": "mix",
+              "inputs": {
+                "a": {
+                  "node": "scene"
+                },
+                "b": {
+                  "node": "grey"
+                },
+                "t": {
+                  "node": "amount"
+                }
+              },
+              "x": 400,
+              "y": 0
+            },
+            {
+              "id": "out",
+              "type": "output",
+              "inputs": {
+                "color": {
+                  "node": "mixed"
+                }
+              },
+              "x": 600,
+              "y": 0
+            }
+          ],
+          "output": "out"
+        },
+        "shaderArgs": {
+          "params": {
+            "amount": 1
+          }
+        }
+      },
+      {
+        "v": 1,
+        "kind": "post",
+        "nodes": [
+          {
+            "id": "scene",
+            "type": "sceneColor"
+          },
+          {
+            "id": "inv",
+            "type": "oneMinus",
+            "inputs": {
+              "x": {
+                "node": "scene"
+              }
+            }
+          },
+          {
+            "id": "parts",
+            "type": "split",
+            "inputs": {
+              "v": {
+                "node": "inv"
+              }
+            }
+          },
+          {
+            "id": "rgba",
+            "type": "combine",
+            "inputs": {
+              "x": {
+                "node": "parts",
+                "port": "x"
+              },
+              "y": {
+                "node": "parts",
+                "port": "y"
+              },
+              "z": {
+                "node": "parts",
+                "port": "z"
+              },
+              "w": {
+                "value": 1
+              }
+            }
+          },
+          {
+            "id": "out",
+            "type": "output",
+            "inputs": {
+              "color": {
+                "node": "rgba"
+              }
+            }
+          }
+        ],
+        "output": "out"
+      }
+    ]
+  },
+  "frames": 3,
+  "note": "Settings, advanced view, Render tab with two mod post passes loaded (state.modShaders: client/tests/data/mod_shader/grey.json and invert.json): the Shader Inputs block (getSettings, deob-10.0.7.js:218099-218120) above Performance. KN-only reference: no v10 capture with mod shaders exists."
+}

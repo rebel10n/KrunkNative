@@ -23,6 +23,7 @@
 #include <gamepad.h>         // disableCons: gamepad_set_disabled
 #include <seek_prefs.h>      // SEEK_SERVERS_KEY: the Server Type's key
 #include <v10_menu.h>        // v10_menu_sources_changed: the menu follows a changed Server Type
+#include <mod_shader.h>       // Shader Inputs: the mod post passes' rows (mod_shader.c)
 #define UI_HAVE_RENDER_SETTINGS 1
 #endif
 #endif
@@ -1496,6 +1497,15 @@ static char *search_html(const char *query) {
     const int view = 1; // every category (the advanced tabs)
     StrBuf out = {0}, seen = {0};
     int keybinds = 0;
+    // getSettings: the Shader Inputs block when searchMatches({name: "settings.shaders.header"}) (deob-10.0.7.js:218099)
+    char shader_label[128];
+    snprintf(shader_label, sizeof(shader_label), "%s", I18N("settings.shaders.header", "Shader Inputs"));
+    for (char *c = shader_label; *c; c++) *c = (char) tolower((unsigned char) *c);
+    if (matches(shader_label, query)) {
+        char *rows = ui_settings_shader_html();
+        if (rows) sb_append(&out, rows);
+        free(rows);
+    }
     for (int tab = 0; tab < ui_settings_view_tab_count(view); tab++) {
         const char *tpl = ui_settings_view_tab_html(view, tab);
         const char *holder = strstr(tpl, "<div id=\"settHolder\">");
@@ -1683,6 +1693,92 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
     KN_LOG_VERBOSE2("[ui] setting %s=%s\n", key, value);
 }
 
+// ---------------------------------------------------------------- Shader Inputs (mod post passes)
+
+// JS's String(number) for the row values (0.01, 1, 0.37)
+static void js_num(char *out, const size_t n, const float v) {
+    snprintf(out, n, "%.7g", (double) v);
+}
+
+// getSettings' Shader Inputs block (deob-10.0.7.js:218099-218120): a header, then per pass its switch row and one
+// row per parameter (a switch, or a number box + range); NULL while no pass exists (shaderInputs.length == 0)
+char *ui_settings_shader_html(void) {
+    const int passes = mod_shader_count();
+    if (!passes) return NULL;
+    StrBuf out = {0};
+    sb_appendf(&out, "<div class='setHed'>%s</div><div class='setBodH'>", I18N("settings.shaders.header", "Shader Inputs"));
+    for (int i = 0; i < passes; i++) {
+        for (int j = 0; j < mod_shader_input_count(i); j++) {
+            const ModShaderInput *in = mod_shader_input(i, j);
+            char name[sizeof(in->name)];
+            size_t k = 0;
+            for (const char *c = in->name; *c && k + 1 < sizeof(name); c++) // name.replace(/[^\w +#]/gim, "")
+                if (isalnum((unsigned char) *c) || *c == '_' || *c == ' ' || *c == '+' || *c == '#') name[k++] = *c;
+            name[k] = 0;
+            sb_appendf(&out, "<div class=\"settName\" style=\"margin-top:15px\">%s", name);
+            if (in->toggle) {
+                sb_appendf(&out, "<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='setShaderInput(%d, %d, this.checked)' %s>"
+                                 "<span class='slider'></span></label>", i, j, in->val != 0.0f ? "checked" : "");
+            } else {
+                char lo[32], hi[32], st[32], val[32];
+                js_num(lo, sizeof(lo), in->min);
+                js_num(hi, sizeof(hi), in->max);
+                js_num(st, sizeof(st), in->step);
+                js_num(val, sizeof(val), in->val);
+                sb_appendf(&out, "<input type='number' class='sliderVal' id='shader_input_%d_%d' min='%s' max='%s' value='%s' "
+                                 "onkeypress='return delayExecute2(%d, %d, this)' style='margin-right:0px;border-width:0px' />"
+                                 "<div class='slidecontainer'><input type='range' id='shader_%d_%d' min='%s' max='%s' step='%s' value='%s' "
+                                 "class='sliderM' oninput='setShaderInput(%d, %d, this.value)'></div>",
+                           i, j, lo, hi, val, i, j, i, j, lo, hi, st, val, i, j);
+            }
+            sb_append(&out, "</div>");
+        }
+    }
+    sb_append(&out, "</div>");
+    return sb_finish(&out);
+}
+
+// setShaderInput(i, j, v) (deob:216668-216673): the row takes the (clamped) value, its range and number box show it
+static void shader_input_set(const int i, const int j, const char *value) {
+    mod_shader_set_input(i, j, value);
+    const ModShaderInput *in = mod_shader_input(i, j);
+    if (!in || in->toggle) return;
+    char id[48], val[32];
+    js_num(val, sizeof(val), in->val);
+    snprintf(id, sizeof(id), "shader_%d_%d", i, j);
+    HtmlElem el = html_dom_by_id(id);
+    if (el) html_dom_set_value(el, val);
+    snprintf(id, sizeof(id), "shader_input_%d_%d", i, j);
+    el = html_dom_by_id(id);
+    if (el) html_dom_set_value(el, val);
+}
+
+// delayExecute2(i, j, el, ms = 600): a key press in a row's number box sets the row 600 ms later (one timer a row)
+typedef struct {
+    int pass, index;
+    HtmlElem el;
+} ShaderDelay;
+static int g_shader_timers[MOD_SHADER_MAX_PASSES][MOD_SHADER_MAX_INPUTS];
+
+static void shader_delay_fire(void *user) {
+    ShaderDelay *d = user;
+    g_shader_timers[d->pass][d->index] = 0;
+    char value[64];
+    if (d->el && html_dom_get_value(d->el, value, sizeof(value)) >= 0) shader_input_set(d->pass, d->index, value);
+    free(d);
+}
+
+static void shader_delay(const int i, const int j, const HtmlElem el) {
+    if (i < 0 || i >= MOD_SHADER_MAX_PASSES || j < 0 || j >= MOD_SHADER_MAX_INPUTS || !el) return;
+    if (g_shader_timers[i][j]) html_timer_cancel(g_shader_timers[i][j]); // clearTimeout (its ShaderDelay is the timer's)
+    ShaderDelay *d = calloc(1, sizeof(*d));
+    if (!d) return;
+    d->pass = i;
+    d->index = j;
+    d->el = el;
+    g_shader_timers[i][j] = html_timer_add(600.0, shader_delay_fire, d);
+}
+
 // ---------------------------------------------------------------- inline handlers
 
 static const char *arg_text(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i, char *buf, const size_t n) {
@@ -1801,6 +1897,18 @@ int ui_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
     if (!strcmp(name, "delayExecute") || !strcmp(name, "window.delayExecute")) {
         const HtmlElem el = arg_elem(ev, args, argc, 1);
         delay_execute(arg_text(ev, args, argc, 0, buf, sizeof(buf)), el);
+        return 1; // `return true`
+    }
+    if (!strcmp(name, "setShaderInput")) {
+        const int i = (int) strtol(arg_text(ev, args, argc, 0, buf, sizeof(buf)), NULL, 10);
+        const int j = (int) strtol(arg_text(ev, args, argc, 1, buf, sizeof(buf)), NULL, 10);
+        shader_input_set(i, j, arg_text(ev, args, argc, 2, buf, sizeof(buf)));
+        return 1;
+    }
+    if (!strcmp(name, "delayExecute2")) {
+        const int i = (int) strtol(arg_text(ev, args, argc, 0, buf, sizeof(buf)), NULL, 10);
+        const int j = (int) strtol(arg_text(ev, args, argc, 1, buf, sizeof(buf)), NULL, 10);
+        shader_delay(i, j, arg_elem(ev, args, argc, 2));
         return 1; // `return true`
     }
     if (!strcmp(name, "aspectSelect")) {

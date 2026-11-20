@@ -1,0 +1,33 @@
+{
+  "scenario": "settings-advanced-render-shaders",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "shader-inputs-header",
+      "rect": [293, 151, 694, 31],
+      "kind": "text",
+      "note": "the Shader Inputs header (settings.shaders.header) above the Render tab's categories",
+      "fuzz": 12,
+      "max_pct": 3.0
+    },
+    {
+      "name": "shader-inputs-rows",
+      "rect": [296, 193, 686, 107],
+      "kind": "text",
+      "note": "two passes: Shader Mod # 1 (switch) + its amount slider and number box, Shader Mod # 2 (switch)",
+      "fuzz": 12,
+      "max_pct": 3.0
+    },
+    {
+      "name": "performance-header",
+      "rect": [293, 323, 694, 37],
+      "kind": "text",
+      "note": "the first category follows the block",
+      "fuzz": 12,
+      "max_pct": 3.0
+    }
+  ]
+}

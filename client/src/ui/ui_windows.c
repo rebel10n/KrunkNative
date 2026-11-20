@@ -511,6 +511,11 @@ static char *gen_settings(void) {
                 ext = quickplay;
             }
         }
+        // getSettings: the Shader Inputs block on the tab whose categories include "shaders" (the advanced Render
+        // tab, deob-10.0.7.js:218016, :218099), before its categories
+        char *shader_rows = view == 1 && tab == 3 ? ui_settings_shader_html() : NULL;
+        if (shader_rows) sb_append(&out, shader_rows);
+        free(shader_rows);
         sb_append(&out, ext ? ext : inner_s);
         free(ext);
         free(inner_s);

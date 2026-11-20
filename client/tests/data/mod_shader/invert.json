@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "kind": "post",
+  "nodes": [
+    {"id": "scene", "type": "sceneColor"},
+    {"id": "inv", "type": "oneMinus", "inputs": {"x": {"node": "scene"}}},
+    {"id": "parts", "type": "split", "inputs": {"v": {"node": "inv"}}},
+    {"id": "rgba", "type": "combine", "inputs": {"x": {"node": "parts", "port": "x"}, "y": {"node": "parts", "port": "y"}, "z": {"node": "parts", "port": "z"}, "w": {"value": 1}}},
+    {"id": "out", "type": "output", "inputs": {"color": {"node": "rgba"}}}
+  ],
+  "output": "out"
+}

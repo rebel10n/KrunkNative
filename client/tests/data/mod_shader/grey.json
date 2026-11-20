@@ -1,0 +1,15 @@
+{
+  "graph": {
+    "v": 1,
+    "kind": "post",
+    "nodes": [
+      {"id": "scene", "type": "sceneColor", "x": 0, "y": 0},
+      {"id": "grey", "type": "grayscale", "inputs": {"c": {"node": "scene"}}, "x": 200, "y": 0},
+      {"id": "amount", "type": "param", "params": {"name": "amount", "type": "float", "default": 1, "min": 0, "max": 1}, "x": 200, "y": 120},
+      {"id": "mixed", "type": "mix", "inputs": {"a": {"node": "scene"}, "b": {"node": "grey"}, "t": {"node": "amount"}}, "x": 400, "y": 0},
+      {"id": "out", "type": "output", "inputs": {"color": {"node": "mixed"}}, "x": 600, "y": 0}
+    ],
+    "output": "out"
+  },
+  "shaderArgs": {"params": {"amount": 1}}
+}

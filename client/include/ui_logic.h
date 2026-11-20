@@ -180,6 +180,7 @@ void ui_handlers_install(MenuUi *ui);            // html_ui_set_handlers + the n
 // Module handlers (ui_handlers.c h_fallback): the inline-handler names one module owns.
 // -1 = not ours, else the handler's result (0 = `return false`).
 int ui_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // ui_settings.c
+char *ui_settings_shader_html(void); // the Shader Inputs block of the advanced Render tab (mod shader passes), malloc'd; NULL none
 int ui_controls_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // ui_controls.c
 int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);  // ui_loadout.c
 int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);      // hud_ui.c
