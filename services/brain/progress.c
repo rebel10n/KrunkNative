@@ -44,6 +44,7 @@ static void prog_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON *out = NULL;
     if (!strcmp(r->label, "bdgr")) out = cJSON_CreateNumber((double) kn_json_int(v, "bdg", -1));
     else if (!strcmp(r->label, "flgr")) out = cJSON_CreateNumber((double) kn_json_int(v, "flg", -1));
+    else if (!strcmp(r->label, "hdsr")) out = cJSON_CreateNumber((double) kn_json_int(v, "hds", 0));
     else if (!strcmp(r->label, "cbdgr")) out = cJSON_CreateNumber((double) kn_json_int(v, "badge", -1));
     else out = v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull();
     social_send_n(s, r->label, 1, out);
@@ -70,6 +71,16 @@ void sh_country_flag(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], flag[24];
     social_call(s, &P_COUNTRY_FLAG, KN_DB_ARGS(social_viewer(s, me), acct_itoa(flag, fa_int(f, 1, -1))), prog_done, prog_reply("flgr"));
+}
+
+/* ["hds", on] -> ["hdsr", 0|1] (toggleStatus, deob-10.0.7.js:217688-217693; HIDE_STATUS :98648): the
+ * account's "Hide Detailed Online Status" switch, stats.hds. */
+void sh_hide_status(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    char me[24], on[24];
+    const cJSON *v = cJSON_GetArrayItem(f, 1);
+    social_call(s, &P_HIDE_STATUS, KN_DB_ARGS(social_viewer(s, me), acct_itoa(on, cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0) ? 1 : 0)),
+                prog_done, prog_reply("hdsr"));
 }
 
 void sh_badge_claim(SocialSession *s, const cJSON *f) {

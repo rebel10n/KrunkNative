@@ -285,6 +285,14 @@ async def scenario(port):
             r = await s.call("fgr", "flg", alice, 0)
             check(r[1] is None, "a name still takes the staff flag path (a plain account: refused): %s" % r)
 
+            print("== hide detailed online status (stats.hds)")
+            r = await s.call("hdsr", "hds", True)
+            check(r[1] == 1, "hide the detailed status: %s" % r)
+            r = await s.call("a", "a", 1, [alice, None, token])
+            check(r[4][16].get("hds") == 1, "account stats.hds 1: %s" % r[4][16].get("hds"))
+            r = await s.call("hdsr", "hds", False)
+            check(r[1] == 0, "show it again: %s" % r)
+
             print("== medals")
             r = await s.call("mdl", "mdl")
             check(r[1] == {"Headshot": 3, "Double Kill": 2}, "medal counts (unknown names dropped): %s" % r[1])

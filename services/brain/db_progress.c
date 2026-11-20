@@ -360,6 +360,38 @@ static kn_db_result *run_country_flag(kn_dbconn *c, int n, const char *const *p)
 }
 const kn_proc P_COUNTRY_FLAG = {"country_flag", NULL, run_country_flag};
 
+/* (account id, on) -> {hds}: stats.hds = 1 hides the detailed online status, 0 shows it (Settings >
+ * Account's "Hide Detailed Online Status": toggleStatus sends ["hds", bool], deob-10.0.7.js:217688-217693;
+ * the answer HIDE_STATUS "hdsr" sets account.stats.hds and redraws window 5, :98648, :225259-225261). */
+static kn_db_result *run_hide_status(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t id = PI(0);
+    const int64_t on = PI(1) ? 1 : 0;
+    char *text = dbx_text(&x, SQL(.any = "SELECT player_stats FROM players WHERE player_id = $1 {for_update}"), KN_DB_ARGS(I64S(id)));
+    cJSON *stats = text ? cJSON_Parse(text) : NULL;
+    free(text);
+    if (dbx_failed(&x)) {
+        cJSON_Delete(stats);
+        return dbx_finish(&x, NULL);
+    }
+    if (!cJSON_IsObject(stats)) {
+        cJSON_Delete(stats);
+        stats = cJSON_CreateObject();
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(stats, "hds");
+    cJSON_AddNumberToObject(stats, "hds", (double) on);
+    char *merged = cJSON_PrintUnformatted(stats);
+    cJSON_Delete(stats);
+    const int64_t done = dbx_exec(&x, SQL(.any = "UPDATE players SET player_stats = $2, updated_at = {now} WHERE player_id = $1"),
+                                  KN_DB_ARGS(I64S(id), merged));
+    free(merged);
+    if (done == 0) dbx_refuse(&x, "Account not found.");
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddNumberToObject(out, "hds", (double) on);
+    return dbx_json(&x, "status", out);
+}
+const kn_proc P_HIDE_STATUS = {"hide_status", NULL, run_hide_status};
+
 /* (actor, name, badge, on) -> one row when the badge was given (on = 1) or removed (on = 0) by a
  * developer (v10's Give Badge / Remove on a profile). Removing the badge a player has equipped
  * clears stats.bdg. The change is logged in moderation_log (action "badge" / "unbadge"). */
