@@ -73,6 +73,7 @@
 
 void client_net_send(Client *client, const NetPacketType type, const void *payload, const uint16_t length) {
     client_net_tally_egress(length); // WP-E: #egressPacketCount
+    if (client->replay) return;      // a K.P.D replay has no server (demo_play.c)
     if (client->offline) {
         client_offline_send(client, type, payload, length); // the sandbox server's connection (net/offline.c)
         return;

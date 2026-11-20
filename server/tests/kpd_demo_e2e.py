@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """K.P.D demo recorder on a dedicated server (server/src/demo_rec.c, doc/v10/replays.md 2.1).
 
-  python3 -I server/tests/kpd_demo_e2e.py BUILD_DIR      (run from the repository root)
+  python3 -I server/tests/kpd_demo_e2e.py BUILD_DIR [MAP] [KEEP_DIR]   (run from the repository root)
+
+MAP: the server's map (default Sandstorm). KEEP_DIR: the demos are copied there (the client's replay capture,
+tools/replay_capture.sh, plays them).
 
 No database or coordinator: one standalone server_bin with gameserver.demo_dir, then
   1. the recorder is on (status) and invisible: the server-info query, `players` and a joining guest
@@ -27,6 +30,8 @@ import kn_demo  # noqa: E402
 import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
+MAP = sys.argv[2] if len(sys.argv) > 2 else "Sandstorm"
+KEEP = sys.argv[3] if len(sys.argv) > 3 else ""
 RCON_PORT, PORT = kn_proto.free_ports(2)
 WORK = tempfile.mkdtemp(prefix="kn-demo-e2e-")
 DEMOS = os.path.join(WORK, "demos")
@@ -74,7 +79,7 @@ def main():
     os.makedirs(DEMOS)
     cfg = os.path.join(WORK, "s.cfg")
     with open(cfg, "w") as f:
-        f.write(f'hostname "Demo"\nport {PORT}\nregion local\nmaxplayers 8\nmapcycle Sandstorm\nmode ffa\n'
+        f.write(f'hostname "Demo"\nport {PORT}\nregion local\nmaxplayers 8\nmapcycle {MAP}\nmode ffa\n'
                 f"round_seconds 600\nrcon_password rc-pw\nrcon_port {RCON_PORT}\n")
     with open(os.path.join(WORK, "c.json"), "w") as f:
         json.dump({"gameserver": {"demo_dir": DEMOS}}, f)
@@ -121,7 +126,7 @@ def main():
             data = open(files[0], "rb").read()
             version, meta, records = kn_demo.parse(data)
             check("version 1", version == 1)
-            check("meta: map, mode, call, suspect", meta.get("map") == "Sandstorm" and meta.get("mode") and
+            check("meta: map, mode, call, suspect", meta.get("map") == MAP and meta.get("mode") and
                   len(meta.get("calls", [])) == 1 and len(meta.get("suspects", [])) == 1, json.dumps(meta)[:300])
             first = records[0]
             types = [t for t, _ in first[2]]
@@ -159,6 +164,11 @@ def main():
             proc.wait(10)
         except subprocess.TimeoutExpired:
             proc.kill()
+    if KEEP:
+        import shutil
+        os.makedirs(KEEP, exist_ok=True)
+        for f in demos():
+            shutil.copy(f, os.path.join(KEEP, f"{MAP.lower()}-{os.path.basename(f)}"))
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'}: {sum(results)}/{len(results)} checks")
     return 0 if ok else 1

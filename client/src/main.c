@@ -108,6 +108,8 @@
 #include <entities.h> // v10 KrunkScript entities / runtime blocks (official lobbies), web builds too
 #include <player_names.h> // Hide player names: the game-leave and SPAWN hooks, web builds too
 #include <scene_warm.h> // v10.0.4 warmScene: the match-start warm frames, every build
+#include <demo_play.h>  // the K.P.D replay player (net/demo_play.c)
+#include <hud_replay.h> // its viewer (ui/hud_replay.c) and hitbox outlines (replay_hitbox.c)
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 #include <ui_logic.h>
 #ifndef __EMSCRIPTEN__
@@ -333,6 +335,8 @@ static void print_usage_to(FILE *out, const char *program) {
                  "  --sandbox       --offline on the sandbox map, v7's blank Test map (console `sandbox`, web ?sandbox)\n"
                  "  --map <name>    start on a catalogue map: key, name or path under assets/maps (web ?map=)\n"
                  "  map.json        start on this map file (offline: the sandbox server plays it)\n"
+                 "  --demo <file>[:ct]  play a K.P.D demo file (.kndemo; ct: the call token whose suspect it follows)\n"
+                 "  --demo-link <tok>[:ct]  open a K.P.D demo's case on the brain (web ?demo=<tok>&sus=<ct>)\n"
                  "  --krunker [id]  join an official krunker.io game (that game id, else any) over Krunker's own\n"
                  "                  protocol (web ?krunker=<id|1>; client/include/krunker_net.h)\n"
                  "  --flavor base|strike  the product flavor: base = Krunker Box Office, strike = Krunker Strike\n"
@@ -603,6 +607,20 @@ static int file_exists(const char *path) {
 // --krunker [gameId] / ?krunker=<gameId|1>: start in an official krunker.io game (krunker_net.h)
 static int g_krunker_start;
 static const char *g_krunker_game;
+// --demo <file>[:<call token>]: play a K.P.D demo file (demo_play.h), no server; --demo-link <tok>[:<ct>] /
+// ?demo=<tok>&sus=<ct>: the case popup of a demo on the brain (openDemoLink, hud_replay.h)
+static char g_demo_file[512], g_demo_ct[48], g_demo_link[48], g_demo_link_ct[48];
+
+static void split_demo_arg(const char *arg, char *head, const size_t head_size, char *tail, const size_t tail_size) {
+    const char *colon = strrchr(arg, ':');
+    if (colon && colon[1] && !strchr(colon, '/')) {
+        snprintf(head, head_size, "%.*s", (int) (colon - arg), arg);
+        snprintf(tail, tail_size, "%s", colon + 1);
+    } else {
+        snprintf(head, head_size, "%s", arg);
+        tail[0] = 0;
+    }
+}
 
 static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox, const char **map_name, const char **map_path, const char **scenario, const char **scenario_out) {
     *offline = 0;
@@ -632,6 +650,10 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
         } else if (!strcmp(argv[i], "--render-scenario") && i + 2 < argc) {
             *scenario = argv[++i];
             *scenario_out = argv[++i];
+        } else if (!strcmp(argv[i], "--demo") && i + 1 < argc) {
+            split_demo_arg(argv[++i], g_demo_file, sizeof(g_demo_file), g_demo_ct, sizeof(g_demo_ct));
+        } else if (!strcmp(argv[i], "--demo-link") && i + 1 < argc) {
+            split_demo_arg(argv[++i], g_demo_link, sizeof(g_demo_link), g_demo_link_ct, sizeof(g_demo_link_ct));
         } else if (!strcmp(argv[i], "--rt-selftest") && i + 1 < argc) {
             g_rt_selftest_path = argv[++i]; // an offline game on that map, then rt_selftest() (client_frame)
             *map_path = g_rt_selftest_path;
@@ -809,6 +831,14 @@ int main(int argc, char **argv) {
     if (web_query_flag("sandbox") || web_query_flag("test")) offline = sandbox = 1;
     char *web_map_name = web_query_string("map");
     if (web_map_name && web_map_name[0]) startup_map_name = web_map_name;
+    char *web_demo = web_query_string("demo"); // ?demo=<tok>&sus=<ct> (deob-10.0.7.js:230167)
+    if (web_demo && web_demo[0]) {
+        char *web_sus = web_query_string("sus");
+        snprintf(g_demo_link, sizeof(g_demo_link), "%s", web_demo);
+        snprintf(g_demo_link_ct, sizeof(g_demo_link_ct), "%s", web_sus ? web_sus : "");
+        free(web_sus);
+    }
+    free(web_demo);
     char *web_krunker = web_query_string("krunker");
     if (web_krunker) {
         g_krunker_start = 1;
@@ -816,6 +846,7 @@ int main(int argc, char **argv) {
     }
 #endif
     if (offline || scenario_path) g_krunker_start = 0; // an offline / scenario run stays local
+    if (g_demo_file[0]) offline = g_krunker_start = 0;  // a demo file plays alone
 
     // --sandbox / ?sandbox without a map: v7.1.4 loadSandbox(config.blankMap)
     if (sandbox && !startup_map_name && !startup_map_path) startup_map_name = LOCAL_GAME_SANDBOX_MAP;
@@ -1100,9 +1131,16 @@ int main(int argc, char **argv) {
     // brain backend (backend_ui.h): with a brain URL the matchmaker picks the game
     // server (servers_ui.c starts the transport); offline / --connect / no brain: as before
     // an official krunker.io start skips the brain's matchmaking like an offline one
-    const int brain_mode = backend_startup(&INSTANCE, offline || g_krunker_start, SCENARIO_ACTIVE());
+    const int brain_mode = backend_startup(&INSTANCE, offline || g_krunker_start || g_demo_file[0], SCENARIO_ACTIVE());
 
-    if (g_krunker_start) {
+    if (g_demo_file[0]) {
+        (void) net_args;
+        char err[64] = "";
+        if (!demo_play_start_file(&INSTANCE, g_demo_file, g_demo_ct, err, sizeof(err))) {
+            fprintf(stderr, "--demo %s: %s\n", g_demo_file, err);
+            return -1;
+        }
+    } else if (g_krunker_start) {
         (void) net_args;
         krunker_net_join(&INSTANCE, g_krunker_game, NULL); // matchmaker, then Krunker's WebSocket (krunker_net.c)
     } else if (offline) {
@@ -1178,6 +1216,7 @@ int main(int argc, char **argv) {
     vfx_fini();
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
     nav_overlay_fini(); // show_navmeshes: waits for a running build, GL buffers, the line program
+    replay_hitbox_fini(); // the replay's hitbox outlines (replay_hitbox.c)
     om_build_fini();    // the Object Manager overlay's GL buffers (om_gizmo.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     rt_fini();     // ray tracing targets, programs, BVH tables (rt.h)
@@ -1631,7 +1670,7 @@ void client_send_cycle_packet(Client *client) {
 // krunker.io bridge and offline play are never refused: their INIT carries our own flavor by
 // construction (krunker_link emits base; offline is this same process).
 static int client_refuse_wrong_flavor(Client *client, const NetInitPacket *init) {
-    if (client->offline || krunker_net_active()) return 0;
+    if (client->offline || client->replay || krunker_net_active()) return 0;
     const GameFlavor server_flavor = (GameFlavor) NET_WIRE_FLAVOR(init->ruleset);
     if (server_flavor == flavor_get()) return 0;
     char msg[sizeof(((NetErrorPacket *) 0)->message)];
@@ -1795,7 +1834,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             pthread_mutex_lock(&client->net_lock);
             const unsigned session = client->net_session_seq;
             pthread_mutex_unlock(&client->net_lock);
-            if (session != last_session_seq && !client->offline) client_leave_game(client);
+            if (session != last_session_seq && !client->offline && !client->replay) client_leave_game(client);
             last_session_seq = session;
             menu_idle_reset(); // v7 io_init: CONTROLS.idleTimer = 0 (a map change restarts the menu idle kick)
             if (client_map_prepare_init(client, &init)) client_init_begin(client, &init);
@@ -2364,6 +2403,7 @@ void client_tick(Client *client, const float now, const float delta) {
 #endif
 
     client_offline_pump(client, delta); // offline: the sandbox server's step on this frame (net/offline.c)
+    demo_play_pump(client, delta);      // a K.P.D replay: the demo's packets up to the playhead (net/demo_play.c)
     client_tick_net(client);
     client_game_events_tick(client); // death delay -> menu (net/game_events.c)
 
@@ -2376,6 +2416,11 @@ void client_tick(Client *client, const float now, const float delta) {
 
     client_menu_tick(client);
     hud_spectate_tick(client); // #spectateUI while spectating (after hud_ui.c's pass in client_menu_tick)
+    hud_replay_tick(client);   // a K.P.D replay's #replayControls (client/src/ui/hud_replay.c)
+    if (g_demo_link[0] && html_ui_available() && html_ui_is_ready()) { // --demo-link / ?demo=: openDemoLink once the page is up
+        hud_replay_open_link(client, g_demo_link, g_demo_link_ct);
+        g_demo_link[0] = 0;
+    }
     hud_map_tick(client);      // WP-E part 2a: minimap + death markers (client/src/ui/hud_map.c)
     ui_mobile_tick(client);    // #mobileUI touch controls on phones (client/src/ui/ui_mobile.c)
     if (debug_capture_hide_ui()) {
@@ -2821,6 +2866,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         rt_shafts_composite(); // rtShafts: the traced sun shafts over the world, before its effects and the viewmodel (rt_pass.c)
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
         nav_overlay_render(client); // show_navmeshes: nav areas + connections, over the world (nav_overlay.c)
+        replay_hitbox_render(client); // a K.P.D replay's hitbox outlines (replay_hitbox.c)
         om_build_render(client);    // Object Manager: the Physics Gun's beam, the btools' box and handles (om_build.c)
         gpu_timer_mark(GPU_PASS_VFX);
     }

@@ -836,6 +836,9 @@ typedef struct {
     // Offline (client/src/net/offline.c): connected to the in-process sandbox server
     // (server/include/server_sandbox.h) over its loopback transport; `game` is a normal client game.
     unsigned char offline:1;
+    // A K.P.D replay plays (client/src/net/demo_play.c): the demo's packets feed the game, client_net_send
+    // sends nothing, no transport runs.
+    unsigned char replay:1;
 
     pthread_t net_thread;
     pthread_mutex_t net_lock;

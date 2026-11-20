@@ -227,6 +227,17 @@ void ui_loadout_response_popup(const char *text) {
     g_response_popups++;
     snprintf(g_response_text, sizeof(g_response_text), "%s", text ? text : "");
 }
+// the replay viewer (hud_replay.c / demo_play.c): watchDemo hands the demo over, no replay plays here
+static int g_watch_calls;
+static char g_watch_tok[48], g_watch_ct[48];
+void hud_replay_watch(Client *client, const char *tok, const char *ct) {
+    (void) client;
+    g_watch_calls++;
+    snprintf(g_watch_tok, sizeof(g_watch_tok), "%s", tok ? tok : "");
+    snprintf(g_watch_ct, sizeof(g_watch_ct), "%s", ct ? ct : "");
+}
+int demo_play_active(void) { return 0; }
+int demo_play_suspect_uid(void) { return -1; }
 void ui_loadout_kpd_demo_query(int *off, const char **q) {
     if (off) *off = g_demo_off;
     if (q) *q = "";
@@ -561,7 +572,8 @@ static void case_reviewers_and_watch(void) {
     free(g_kpd_calls_html);
     g_kpd_calls_html = NULL;
     hud_votekick_watch_demo("tokA", "ctA");
-    CHECK(g_response_popups == 1 && !strcmp(g_response_text, "Demo Download Failed"), "watchDemo fails with v10's popup (%d %s)", g_response_popups, g_response_text);
+    CHECK(g_watch_calls == 1 && !strcmp(g_watch_tok, "tokA") && !strcmp(g_watch_ct, "ctA"), "watchDemo hands tok and ct to the replay viewer (%d %s %s)",
+          g_watch_calls, g_watch_tok, g_watch_ct);
     free(c);
 }
 

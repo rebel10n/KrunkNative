@@ -17,6 +17,8 @@
 #include <net_ext.h>
 #include <game_config.h> // game_config_is_custom: v10 isCustom
 #include <spectate.h> // the officer's suspect: focusPlayer(sus, false, true)
+#include <demo_play.h> // a replay's suspect (demo_play.c)
+#include <hud_replay.h> // watchDemo (hud_replay.c)
 #include <pthread.h> // client->net_lock: the socket check before a call goes out
 #include <stdio.h>
 #include <stdlib.h>
@@ -938,12 +940,9 @@ void hud_votekick_kpd_list(Client *client, const int code, const int off, const 
     g_vk.list_timer = html_timer_add(KPD_NO_ANSWER_MS, list_no_answer, NULL);
 }
 
-// watchDemo(tok, ct) (v10 :222511): the demo's download. KrunkNative keeps no demo files, so the
-// download fails with v10's own response popup (_69540(null, "Demo Download Failed")).
+// watchDemo(tok, ct) (deob-10.0.7.js:229694): the demo's download from the brain and its replay (hud_replay.c)
 void hud_votekick_watch_demo(const char *tok, const char *ct) {
-    (void) tok;
-    (void) ct;
-    ui_loadout_response_popup("Demo Download Failed");
+    hud_replay_watch(NULL, tok, ct);
 }
 
 // copyDemoLink(el, tok, ct) (v10 :222653): "?demo=<tok>&sus=<ct>" to the clipboard (the page's origin is
@@ -965,6 +964,8 @@ void hud_votekick_admin_action(Client *client, const int uid, const int action) 
 // ---------------------------------------------------------------- the K.P.D officer (kpdData)
 
 int hud_votekick_kpd_sus(const Client *client) {
+    // a replay's suspect stands in for kpdData.sus (isReplay, deob-10.0.7.js:216370): specSUS, KPD Vision
+    if (demo_play_active()) return demo_play_suspect_uid();
     if (!g_vk.kpd_case || !client || client->net_client_id != g_vk.kpd_conn) return -1;
     return g_vk.kpd_sus;
 }
@@ -1054,13 +1055,14 @@ void hud_votekick_on_kpd_reset(Client *client) { // "kpdf": iiíìîìi
 
 // kpdVoteY / kpdVoteN while spectating with a case (v10 :221340): 1 when it took the key
 int hud_votekick_kpd_key(Client *client, const int yes) {
-    if (hud_votekick_kpd_sus(client) < 0 || !spectate_active()) return 0;
+    // a replay votes in its resolve area (hud_replay.c), not with the live case's keys (kpdData is null there)
+    if (demo_play_active() || hud_votekick_kpd_sus(client) < 0 || !spectate_active()) return 0;
     kpd_step(client, yes ? 1 : -1);
     return 1;
 }
 
 // hud_spectate.c: the panel's display follows the case
-int hud_votekick_kpd_panel_visible(const Client *client) { return hud_votekick_kpd_sus(client) >= 0; }
+int hud_votekick_kpd_panel_visible(const Client *client) { return !demo_play_active() && hud_votekick_kpd_sus(client) >= 0; }
 
 // ---------------------------------------------------------------- session
 
