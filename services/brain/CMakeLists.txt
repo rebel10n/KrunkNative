@@ -752,6 +752,10 @@ if (Python3_FOUND)
     add_test(NAME brain_hub_creator_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/hub_creator_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_hub_creator_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # v10.0.7's email preference through the client (account_ui.c, v10_auth.c, 0391): the opt-in popup, Accept / Decline, the toggle
+    add_test(NAME brain_email_prefs_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/email_prefs_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_email_prefs_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
     # the v10 page's Market & Trading popup (client/src/ui/v10_market.c): list, buy, quick sell, offer, accept
     add_test(NAME brain_v10_market_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_market_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

@@ -308,6 +308,26 @@ async def scenario(base, internal_url, secret):
         gmc = await b.recv("gmc")
         check(gmc[1] == 0, "unread mail count pushed after login (JSON clients)")
 
+        # the email preference (v10_auth.c, migration 0391; deob-10.0.7.js:116911-116937) on this store driver
+        def prefs(method, body=None):
+            req = urllib.request.Request("http" + base[2:] + "/email/preferences", method=method,
+                                         data=json.dumps(body).encode() if body is not None else None,
+                                         headers={"Authorization": "Bearer " + bob_token, "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return resp.status, json.loads(resp.read() or b"null")
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        st, got = prefs("GET")
+        check(st == 200 and (got or {}).get("data") == {"chosen": False, "promotional": False}, "email preference not chosen yet: %r" % (got,))
+        st, got = prefs("POST", {"promotional": True, "source": "registration"})
+        check(st == 200 and ((got or {}).get("data") or {}).get("success") is True, "email preference stored: %r" % (got,))
+        st, got = prefs("GET")
+        check(st == 200 and (got or {}).get("data") == {"chosen": True, "promotional": True}, "email preference read back: %r" % (got,))
+        st, got = prefs("POST", {"promotional": False, "source": "settings"})
+        st, got = prefs("GET")
+        check(st == 200 and (got or {}).get("data") == {"chosen": True, "promotional": False}, "email preference turned off: %r" % (got,))
+
         r = await b.call("0", "r", "profile", alice, bob_id, bob, None, 0)
         row = r[3]
         check(r[1] == "profile" and r[2] == alice and row and row["player_name"] == alice, "profile row")

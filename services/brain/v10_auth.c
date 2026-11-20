@@ -25,7 +25,7 @@
  *   GET /account/usernames -> the account's own username: one name, active, never expires (accounts.username).
  *       Box Office sells no usernames and keeps no renewals, so reserve is refused and a swap only answers the
  *       active name.
- *   GET /email/preferences -> data null (no preference stored: the consumer shows 'not chosen'); POST is refused.
+ *   GET / POST /email/preferences -> the account's stored choice (accounts.email_pref_*, migration 0391).
  *   The Discord routes (/discord/status, link, callback, join, unlink) are discord.c's (v10.0.7, migration 0366).
  *   the email gate (accounts.login.require_verified, default on): a password login of an account whose email is
  *       not verified -> {type: "ensure_verified", challenge_id}, no token (the session acct_auth issued is revoked).
@@ -63,7 +63,6 @@
 #include "knsvc/loop.h"
 
 #define WHY_SALE "Box Office does not sell usernames"
-#define WHY_PREF "Box Office does not store email preferences"
 #define WHY_UNOFFERED "This sign-in step is not offered on Box Office"
 #define WHY_EMAIL_CODE "Sign in with your username or email and password on Box Office"
 /* the consumer's text for a challenge id nobody issued (the sign-in is over): v10.js throws it */
@@ -100,8 +99,6 @@ static int err_status(const char *err) {
     if (!strcmp(err, "Invalid login.") || !strcmp(err, "Invalid credentials.")) return 401;
     return 400;
 }
-
-static void refuse(kn_http_req *req, const char *why) { v10_reply_error(req, 403, "NOT_IMPLEMENTED", why); }
 
 static void not_offered(kn_http_req *req, void *ud) { auth_fail(req, 404, (const char *) ud); }
 
@@ -967,14 +964,92 @@ static void h_reserve(kn_http_req *req, void *ud) {
 
 /* ---------------------------------------------------------------- mail preference */
 
+/* GET /email/preferences -> {chosen, promotional} (deob-10.0.7.js:116911-116921: the client caches data when the
+ * status is 200; a chosen false opens its opt-in popup 3 s after sign-in, 216865-216873).
+ * POST {promotional, source} -> {success: true} (116923-116937); accounts.email_pref_* of migration 0391. */
+static void prefs_got(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    if (!kn_db_ok(res)) {
+        auth_fail(req, 503, "Server error.");
+        return;
+    }
+    cJSON *d = cJSON_CreateObject();
+    const int row = kn_db_rows(res) > 0;
+    cJSON_AddBoolToObject(d, "chosen", row && atoi(kn_db_get(res, 0, 0)) != 0);
+    cJSON_AddBoolToObject(d, "promotional", row && atoi(kn_db_get(res, 0, 1)) != 0);
+    v10_reply_data(req, 200, d);
+}
+
+static void prefs_get_who(kn_http_req *req, int64_t id, const char *username, void *ud) {
+    (void) username;
+    (void) ud;
+    char idbuf[24];
+    if (id <= 0) {
+        need_sign_in(req);
+        return;
+    }
+    if (kn_db_query_sql(g_brain->db,
+                        SQL(.any = "SELECT CASE WHEN email_pref_at IS NULL THEN 0 ELSE 1 END,"
+                                   " CASE WHEN email_promotional THEN 1 ELSE 0 END FROM accounts WHERE id = {int:$1}"),
+                        KN_DB_ARGS(acct_itoa(idbuf, id)), prefs_got, req) != 0)
+        auth_fail(req, 503, "Server error.");
+}
+
 static void h_email_prefs_get(kn_http_req *req, void *ud) {
     (void) ud;
-    auth_reply(req, 200, NULL, NULL); /* no preference stored: the consumer reads null as not chosen */
+    with_who(req, prefs_get_who, NULL);
+}
+
+typedef struct PrefCtx {
+    kn_http_req *req;
+    int promotional;
+    char source[32];
+} PrefCtx;
+
+static void prefs_set_done(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    if (!kn_db_ok(res) || kn_db_affected(res) < 1) {
+        auth_fail(req, 503, "Server error.");
+        return;
+    }
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddBoolToObject(d, "success", 1);
+    v10_reply_data(req, 200, d);
+}
+
+static void prefs_set_who(kn_http_req *req, int64_t id, const char *username, void *ud) {
+    (void) username;
+    PrefCtx *p = ud;
+    char idbuf[24];
+    if (id <= 0) {
+        need_sign_in(req);
+    } else if (kn_db_query_sql(g_brain->db,
+                               SQL(.any = "UPDATE accounts SET email_pref_at = {now}, email_promotional = {bool:$2},"
+                                          " email_pref_source = $3 WHERE id = {int:$1}"),
+                               KN_DB_ARGS(acct_itoa(idbuf, id), p->promotional ? "1" : "0", p->source), prefs_set_done, req) != 0) {
+        auth_fail(req, 503, "Server error.");
+    }
+    free(p);
 }
 
 static void h_email_prefs_set(kn_http_req *req, void *ud) {
     (void) ud;
-    refuse(req, WHY_PREF);
+    cJSON *body = kn_http_body_json(req);
+    const cJSON *promo = cJSON_GetObjectItemCaseSensitive(body, "promotional");
+    PrefCtx *p = cJSON_IsBool(promo) ? calloc(1, sizeof *p) : NULL;
+    if (!p) {
+        cJSON_Delete(body);
+        auth_fail(req, 400, "Invalid request.");
+        return;
+    }
+    p->req = req;
+    p->promotional = cJSON_IsTrue(promo);
+    /* the three the client sends (popup 116865, registration 117421, settings 217697); anything else is kept as "other" */
+    const char *src = kn_json_str(body, "source", "");
+    snprintf(p->source, sizeof p->source, "%s",
+             src && (!strcmp(src, "popup") || !strcmp(src, "registration") || !strcmp(src, "settings")) ? src : "other");
+    cJSON_Delete(body);
+    with_who(req, prefs_set_who, p);
 }
 
 /* ---------------------------------------------------------------- routes */

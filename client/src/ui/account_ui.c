@@ -95,7 +95,12 @@ enum { PROFILE_TAB_HOME, PROFILE_TAB_FRIENDS, PROFILE_TAB_SETTINGS, PROFILE_TAB_
 // KrunkNative's Medals (kn_brain "mdl", a Box Office account only; doc/v10/kn-additions.md)
 enum { STAT_TAB_RAIDS = 4, STAT_TAB_MEDALS = 5, STAT_TAB_COUNT = 6 };
 static int g_tab_index;          // windows[4].tabIndex
-static int g_promo_emails = -1;  // the email preference v10 caches (iiíììîî.promotional): -1 none stored (null)
+static int g_promo_emails = -1;  // the email preference v10 caches (iiîìîìî.promotional): -1 none read yet (null)
+static int g_promo_chosen = -1;  // iiîìîìî.chosen: -1 none read yet
+static int g_promo_gen;          // bumped by clear_account
+static int g_optin_shown;        // iïîíîïí: the opt-in popup opened once this run
+static int g_optin_busy;         // the popup's request is out (iÏìiìïï): its buttons are disabled
+static int g_reg_optin = -1;     // the register card's checkbox, sent with source "registration" once the account exists (117421)
 static cJSON *g_raid_stats;      // the Box Office account's raidStats (owned; kn_brain's account info, raids.c)
 static int g_req_del;            // acc.reqDel (v10 player_cancelrequest): "Processing Deletion" (account_life.c)
 static char g_twitch_id[64];     // acc.twitchId (setData [44]): the linked Twitch user id, "" none
@@ -1105,6 +1110,9 @@ static void try_restore(void) {
     alt_wipe(token, sizeof(token));
 }
 
+static void optin_close(void);
+static void promo_after_login(void);
+
 static void clear_account(void) {
     g_logged_in = 0;
     store_ui_account_changed();
@@ -1125,6 +1133,9 @@ static void clear_account(void) {
     g_twitch_id[0] = 0;
     g_twitch_name[0] = 0;
     g_promo_emails = -1;
+    g_promo_chosen = -1;
+    g_promo_gen++; // an email preference answer still out is the old session's
+    optin_close();
     battlepass_ui_reset(); // windows[5].data / account.BP
     memset(&g_email, 0, sizeof(g_email));
 }
@@ -1253,6 +1264,7 @@ static void account_response(const cJSON *frame) {
     g_restore_sent = 0;
     g_auth_sent_at = 0;
     if (cJSON_IsString(err) && err->valuestring[0]) {
+        g_reg_optin = -1; // the registration failed: its choice is not sent with a later sign-in
         if (was_restore && !g_logged_in && g_restore_asks < RESTORE_ASKS && g_token[0]) {
             // a refused saved session is asked once more (account_ui_tick), before anything is shown or forgotten
             printf("[account] the saved session was refused (%s): asking once more\n", err->valuestring);
@@ -1308,6 +1320,7 @@ static void account_response(const cJSON *frame) {
     rerender_windows();
     menu_update_class_box(); // dJ()
     avatar_ui_refresh();     // the profile picture's review status (after the token is saved above)
+    if (!had) promo_after_login(); // getPreference and the opt-in popup (deob-10.0.7.js:216865-216873)
 }
 
 // The signed-in account ends here: the server hears logoutAcc and the session leaves storage. The
@@ -2530,23 +2543,166 @@ static void collapse_con(const HtmlElem hd) {
     html_dom_set_display(body, closed ? "" : "none");
 }
 
-// email.setPreference({promotional, source}) (deob-10.0.3.js:130868-130882): a 200 with data.success caches
-// {chosen: true, promotional}; anything else leaves the cache (togglePromoEmails reads no answer). kn_brain's POST
-// /email/preferences refuses (v10_auth.c: Box Office stores no email preference), so the row stays unchecked
-// the next time the window draws, as v10's does when the call fails.
-static void promo_emails_done(void *user, const int status, const char *body, const size_t len) {
-    const int on = (int) (intptr_t) user;
-    cJSON *j = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
-    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "data"), "success"))) g_promo_emails = on;
-    cJSON_Delete(j);
+// ---- the email preference (deob-10.0.7.js:116909-116937): kn_brain's GET / POST /email/preferences (v10_auth.c,
+// accounts.email_pref_* of migration 0391). getPreference caches data {chosen, promotional} on a 200 (iiîìîìî);
+// setPreference({promotional, source}) caches {chosen: true, promotional} when data.success. The sign-in reads it
+// (216865) and, 3 s later, outside a game and once per run (iïîíîïí), opens the opt-in popup when nothing is chosen
+// (216866-216873). The answers carry the session's generation: one that lands after a sign-out is dropped.
+
+static int promo_url(char *url, const size_t n) {
+    if (!backend_enabled() || !g_logged_in || !g_token[0]) return 0;
+    snprintf(url, n, "%s/email/preferences?token=%s", backend_url(), g_token);
+    return 1;
 }
 
-static void promo_emails_set(const int on) {
-    char url[512];
-    snprintf(url, sizeof(url), "%s/email/preferences", backend_url());
-    if (!backend_enabled() || !backend_http_request("POST", url, on ? "{\"promotional\":true,\"source\":\"settings\"}" : "{\"promotional\":false,\"source\":\"settings\"}",
-                                                    promo_emails_done, (void *) (intptr_t) on))
-        printf("[account] togglePromoEmails: no account service\n");
+typedef void (*PromoDone)(int ok);
+
+typedef struct PromoReq {
+    int gen, on;
+    PromoDone done;
+} PromoReq;
+
+static PromoReq *promo_req(const int on, const PromoDone done) {
+    PromoReq *r = calloc(1, sizeof *r);
+    if (r) {
+        r->gen = g_promo_gen;
+        r->on = on;
+        r->done = done;
+    }
+    return r;
+}
+
+static void promo_emails_done(void *user, const int status, const char *body, const size_t len) {
+    PromoReq *r = user;
+    cJSON *j = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
+    const int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "data"), "success"));
+    cJSON_Delete(j);
+    if (r->gen == g_promo_gen && ok) {
+        g_promo_emails = r->on;
+        g_promo_chosen = 1;
+    }
+    const PromoDone done = r->gen == g_promo_gen ? r->done : NULL;
+    free(r);
+    if (done) done(ok);
+}
+
+static void promo_emails_send(const int on, const char *source, const PromoDone done) {
+    char url[640], body[96];
+    PromoReq *r = promo_url(url, sizeof url) ? promo_req(on, done) : NULL;
+    snprintf(body, sizeof body, "{\"promotional\":%s,\"source\":\"%s\"}", on ? "true" : "false", source);
+    if (!r || !backend_http_request("POST", url, body, promo_emails_done, r)) {
+        free(r);
+        printf("[account] email preference: no account service\n");
+        if (done) done(0);
+    }
+}
+
+static void promo_emails_set(const int on) { promo_emails_send(on, "settings", NULL); }
+
+static void promo_got(void *user, const int status, const char *body, const size_t len) {
+    PromoReq *r = user;
+    cJSON *j = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "data");
+    const int ok = r->gen == g_promo_gen && cJSON_IsObject(d);
+    if (ok) {
+        g_promo_chosen = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(d, "chosen"));
+        g_promo_emails = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(d, "promotional"));
+    }
+    cJSON_Delete(j);
+    const PromoDone done = r->gen == g_promo_gen ? r->done : NULL;
+    free(r);
+    if (done) done(ok);
+}
+
+static void promo_fetch(const PromoDone done) {
+    char url[640];
+    PromoReq *r = promo_url(url, sizeof url) ? promo_req(0, done) : NULL;
+    if (!r || !backend_http_request("GET", url, NULL, promo_got, r)) {
+        free(r);
+        if (done) done(0);
+    }
+}
+
+// the opt-in popup (iiíiìíï, 116848-116905): the hero with the title, the text, Accept / Decline, the disclaimer.
+// Dismissable: a click on the overlay closes it with nothing sent. Box Office ships no hero picture
+// (./img/email_optin_bg.webp): the hero is its gradient.
+static void optin_close(void) {
+    HtmlElem host = html_dom_by_id("knOptIn");
+    if (host) html_dom_remove(host);
+    g_optin_busy = 0;
+}
+
+static void optin_answered(const int ok) {
+    (void) ok; // closed either way (the finally of iÍîíiïí)
+    optin_close();
+}
+
+static void optin_show(void) {
+    HtmlElem body = html_dom_body();
+    if (!body || html_dom_by_id("knOptIn")) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"view-stack svelte-sdh4ve\" id=\"knOptIn\"><div class=\"view-stack-overlay svelte-sdh4ve\" onclick=\"knOptInClose()\">"
+                   "<div class=\"view-wrapper svelte-sdh4ve\" style=\"display: block\"><div class=\"popup-container svelte-1wz7ymp\">"
+                   "<div class=\"popup svelte-1wz7ymp\" style=\"width: 600px; padding: 0;\" onclick=\"knOptInStay()\">"
+                   "<div class=\"optin svelte-ga1m1g\"><div class=\"optin__hero svelte-ga1m1g\"><div class=\"optin__hero-fade svelte-ga1m1g\"></div>"
+                   "<div class=\"optin__title svelte-ga1m1g\">");
+    sb_append_esc(&sb, I18N("emailPrefs.popup.title", "Stay in the loop!"));
+    sb_append(&sb, "</div></div><div class=\"optin__content svelte-ga1m1g\"><div class=\"optin__desc svelte-ga1m1g\">");
+    sb_append_esc(&sb, I18N("emailPrefs.popup.desc", "Event, update and season news by email."));
+    sb_append(&sb, "</div><div class=\"optin__buttons svelte-ga1m1g\"><button class=\"optin__btn optin__btn--accept svelte-ga1m1g\" id=\"knOptInYes\" "
+                   "onclick=\"knOptInAnswer(1)\">");
+    sb_append_esc(&sb, I18N("emailPrefs.popup.accept", "Yes"));
+    sb_append(&sb, "</button><button class=\"optin__btn optin__btn--decline svelte-ga1m1g\" id=\"knOptInNo\" onclick=\"knOptInAnswer(0)\">");
+    sb_append_esc(&sb, I18N("emailPrefs.popup.decline", "No"));
+    sb_append(&sb, "</button></div><div class=\"optin__disclaimer svelte-ga1m1g\">");
+    sb_append_esc(&sb, I18N("emailPrefs.popup.disclaimer", "You can change this in Settings."));
+    sb_append(&sb, "</div></div></div></div></div></div></div></div>");
+    char *html = sb_finish(&sb);
+    html_dom_insert_html(body, HTML_INSERT_BEFORE_END, html);
+    free(html);
+}
+
+static void optin_check_got(const int ok) {
+    if (ok && g_promo_chosen == 0 && !g_optin_shown && g_logged_in) {
+        g_optin_shown = 1;
+        optin_show();
+    }
+}
+
+// setTimeout(.., 3000): not in a game (iîiìiîí: the menu is up), not shown yet, signed in: getPreference again
+static void optin_timer(void *user) {
+    if ((int) (intptr_t) user != g_promo_gen || g_optin_shown || !g_logged_in || !menu_ui()->menu_open) return;
+    promo_fetch(optin_check_got);
+}
+
+static void promo_after_read(const int ok) {
+    (void) ok; // .then(): the timer starts whatever the read answered
+    html_timer_add(3000, optin_timer, (void *) (intptr_t) g_promo_gen);
+}
+
+// a sign-in to kn_brain: the registration's choice first (sent without waiting, as 117421), then the read
+static void promo_after_login(void) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKIO || g_scenario) return;
+    if (g_reg_optin >= 0) promo_emails_send(g_reg_optin, "registration", NULL);
+    g_reg_optin = -1;
+    promo_fetch(promo_after_read);
+}
+
+static int optin_handle(const char *name, const HtmlArg *args, const int argc) {
+    if (strncmp(name, "knOptIn", 7) != 0) return -1;
+    if (strcmp(name, "knOptInClose") != 0) html_ui_stop_propagation(); // a click inside the popup is not the overlay's
+    if (!strcmp(name, "knOptInClose")) {
+        if (!g_optin_busy) optin_close();
+    } else if (!strcmp(name, "knOptInAnswer") && !g_optin_busy) {
+        g_optin_busy = 1;
+        const char *ids[] = {"knOptInYes", "knOptInNo"};
+        for (int i = 0; i < 2; i++) {
+            HtmlElem b = html_dom_by_id(ids[i]);
+            if (b) html_dom_set_attr(b, "disabled", "");
+        }
+        promo_emails_send(argc > 0 && args[0].num != 0.0, "popup", optin_answered);
+    }
+    return 1;
 }
 
 // ---- the Free KR card's ad (claimReward): its AD_STARTED / AD_LOADED / AD_FAILED to the account's own socket (the krunker.io
@@ -2629,6 +2785,8 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
                 memset(pass, 0, sizeof(pass));
                 return 1;
             }
+            HtmlElem optin = html_dom_by_id("knV10OptIn"); // the card's "Send me news" box: setPreference(checked, "registration")
+            g_reg_optin = optin ? html_dom_get_checked(optin) != 0 : -1;
             send_account_request_email(0, user, pass, NULL, mail); // [name, pass, referralCode, email]
         } else if (names_other_account(user, mail)) { // the session stays: the card says whose it is, nothing is sent
             show_other_signed_in(user[0] ? user : mail);
@@ -2685,6 +2843,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         collapse_con(hd ? hd : ev ? ev->target : 0);
         return 1;
     }
+    if (optin_handle(name, args, argc) >= 0) return 1;
     if (!strcmp(name, "togglePromoEmails")) { // window.togglePromoEmails(on): if (account) setPreference(!!on, "settings")
         const int on = argc > 0 && args[0].kind == HTML_ARG_THIS_CHECKED ? ev && ev->checked : argc > 0 && args[0].num != 0.0;
         if (g_logged_in) promo_emails_set(on);
@@ -3319,7 +3478,7 @@ static char *gen_account(void) {
         }
         sb_append(&sb, "</div>");
         sb_appendf(&sb, "<div class='settName'>Hide Detailed Online Status<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='toggleStatus(this.checked)'%s><span class='slider'></span></label></div>", stat_num("hds") ? " checked" : "");
-        // Promotional Emails (deob-10.0.3.js:247677-247678): checked from the cached preference (promo_emails_set)
+        // Promotional Emails (deob-10.0.7.js:219118-219119): checked from the cached preference (promo_got / promo_emails_done)
         sb_appendf(&sb, "<div class='settName'>%s<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='togglePromoEmails(this.checked)'%s><span class='slider'></span></label><div style='font-size:16px;line-height:1.8;color:rgba(255,255,255,0.4);margin-top:4px'>%s</div></div></div>",
                    I18N("emailPrefs.settings.label", "Promotional Emails"), g_promo_emails == 1 ? " checked" : "",
                    I18N("emailPrefs.settings.desc", "Receive news about events, game updates and season releases by email"));

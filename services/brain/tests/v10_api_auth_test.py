@@ -369,13 +369,27 @@ def run_checks(port, db_path, smtp):
           st == 200 and isinstance(data, dict) and data.get("active") == A and isinstance(data.get("names"), list),
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
-    # ---- rows 65-66: the mail preference. Box Office stores none: the consumer's 'not chosen' is data null
+    # ---- rows 65-66: the mail preference (accounts.email_pref_*, migration 0391): nothing chosen yet, then the choice
     st, body = http(port, "GET", "/email/preferences", token=token_a)
-    check("GET /email/preferences -> 200 EMPTY {data: null} (no stored preference; the consumer shows 'not chosen') (v10.0.3 decoded 5511, 5161; v10.js 26424, 114573)",
-          st == 200 and body == {"data": None, "error": None}, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("GET /email/preferences -> 200 {chosen: false, promotional: false} before any choice (deob-10.0.7.js:116911-116921, 216865-216873)",
+          st == 200 and (body or {}).get("data") == {"chosen": False, "promotional": False}, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "GET", "/email/preferences")
+    check("GET /email/preferences signed out -> 401", st == 401, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/email/preferences", {"promotional": True, "source": "popup"}, token=token_a)
+    check("POST /email/preferences {promotional: true, source: popup} -> 200 {success: true} (deob-10.0.7.js:116923-116937)",
+          st == 200 and ((body or {}).get("data") or {}).get("success") is True, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "GET", "/email/preferences", token=token_a)
+    check("GET /email/preferences -> {chosen: true, promotional: true} after the popup's accept",
+          st == 200 and (body or {}).get("data") == {"chosen": True, "promotional": True}, "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(port, "POST", "/email/preferences", {"promotional": False, "source": "settings"}, token=token_a)
-    check("POST /email/preferences -> 403 REFUSAL (no preference store) (v10.0.3 decoded 5161; v10.js 26429, 114583)",
-          is_refusal(st, body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st2, body2 = http(port, "GET", "/email/preferences", token=token_a)
+    check("POST {promotional: false, source: settings} -> success; GET -> {chosen: true, promotional: false}",
+          st == 200 and ((body or {}).get("data") or {}).get("success") is True and st2 == 200
+          and (body2 or {}).get("data") == {"chosen": True, "promotional": False}, "HTTP %d %s / %s" % (st, json.dumps(body)[:120], json.dumps(body2)[:120]))
+    st, body = http(port, "POST", "/email/preferences", {"source": "settings"}, token=token_a)
+    check("POST /email/preferences without promotional -> 400", st == 400, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/email/preferences", {"promotional": True, "source": "settings"})
+    check("POST /email/preferences signed out -> 401", st == 401, "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
     # ---- rows 67-70: Discord (discord.c, v10.0.7). No Discord app is configured here: v10's unavailable row
     # (configured false, :97480), link / join refused DISCORD_NOT_CONFIGURED (:97352-97354), unlink of no link.

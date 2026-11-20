@@ -184,7 +184,7 @@ static void render_register(StrBuf *sb, const char *mail, const char *name, cons
                    "onkeydown=\"knV10LoginKey()", I18N("generic.password", "Password"), I18N("generic.auth.enterPassword", "Enter Password"));
     append_value(sb, pass);
     }
-    sb_appendf(sb, " <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" class=\"svelte-16z1lxi\"> "
+    sb_appendf(sb, " <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" id=\"knV10OptIn\" class=\"svelte-16z1lxi\"> "
                    "<span>%s</span></label> "
                    "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"window.knV10LoginGo()\">%s</button> "
                    "<div class=\"terms-privacy-notice svelte-16z1lxi\">%s "
