@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #define RUNNING_AFTER_S 5.0 // a child alive this long counts as running (and resets its crash count)
+#define STATUS_REPEAT_S 60.0 // an unchanged status is posted again after this long
 
 typedef struct {
     int id;
@@ -268,16 +269,28 @@ static void post_status(const RentdSlot *slots, int n, double now) {
     }
     char *text = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
+    // only a change, or once a minute: the poll is the heartbeat (agent_seen_s), and every call to the internal API
+    // counts against the brain's per-address limit (30 a minute, brain_util.c mm_internal_authorized)
+    static char *last;
+    static double last_at;
+    if (text && last && !strcmp(text, last) && now - last_at < STATUS_REPEAT_S) {
+        free(text);
+        return;
+    }
     char url[512], auth[256];
     snprintf(url, sizeof(url), "%s/mm/internal/rentals/status", g.brain_url);
     auth_header(auth, sizeof(auth));
-    HttpResult r;
+    HttpResult r = {0};
     if (text && http_request_hdr("POST", url, "application/json", auth, text, 10000, 65536, &r) != 0)
         logf_("status post failed: %s", r.error);
     else if (text && r.status != 200)
         logf_("status post: HTTP %d", r.status);
+    const int ok = text && r.status == 200;
     if (text) http_result_free(&r);
-    free(text);
+    free(last);
+    last = ok ? text : NULL; // a failed post is sent again on the next pass
+    last_at = now;
+    if (!ok) free(text);
 }
 
 static void pass(void) {
