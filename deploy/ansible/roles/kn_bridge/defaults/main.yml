@@ -23,7 +23,7 @@ kn_bridge_node_dir: "{{ kn_bridge_node_root }}/node-v{{ kn_bridge_node_version }
 # same range (instance n listens on first_port+n-1; kn_gameserver group_vars). Nothing else:
 # no loopback, no default target, so the bridge is not an open TCP proxy.
 kn_bridge_target_port_lo: 21015
-kn_bridge_target_port_hi: 21025
+kn_bridge_target_port_hi: 21026 # 21024-21026: kn-mnz's rented servers (role kn_rentd)
 # Edges without a kn_public_ip yet (a new VM whose address is still undecided, inventory/hosts.yml)
 # are left out until they get one.
 kn_bridge_edge_hosts: >-

@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       tags:
-        description: "edges.yml tags (firewall,fail2ban,user,release,gameserver[,dns])"
+        description: "edges.yml tags (firewall,fail2ban,user,release,gameserver[,rentd][,dns])"
         type: string
         default: firewall,fail2ban,user,release,gameserver
       hosts:
@@ -119,7 +119,8 @@ jobs:
 
       - name: Build
         env:
-          TARGETS: server_bin
+          # kn_rentd: the rented servers' supervisor (role kn_rentd, doc/v10/rented-servers.md)
+          TARGETS: server_bin kn_rentd
           KN_CMAKE_ARGS: ${{ needs.plan.outputs.cmake_flags }}
           KN_BUILD_ROOT: ${{ runner.temp }}/kn-build
         run: deploy/ansible/build.sh "${{ matrix.codename }}"
@@ -127,7 +128,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: deploy-${{ matrix.codename }}
-          path: dist/deploy/${{ matrix.codename }}/bin/server_bin
+          path: |
+            dist/deploy/${{ matrix.codename }}/bin/server_bin
+            dist/deploy/${{ matrix.codename }}/bin/kn_rentd
           if-no-files-found: error
           retention-days: 3
 
@@ -166,6 +169,7 @@ jobs:
           set -euo pipefail
           for c in bullseye bookworm trixie; do
             install -D -m 0755 "dist/deploy-artifacts/deploy-$c/server_bin" "dist/deploy/$c/bin/server_bin"
+            install -D -m 0755 "dist/deploy-artifacts/deploy-$c/kn_rentd" "dist/deploy/$c/bin/kn_rentd"
           done
           ls -la dist/deploy/*/bin
 

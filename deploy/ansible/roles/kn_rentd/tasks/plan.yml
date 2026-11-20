@@ -1,0 +1,7 @@
+# The host's rented slots (no changes): tasks/main.yml, and tests/render_test.py (with public: the role's defaults).
+- name: Rented server slots
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: kn_rentd {{ 'on' if kn_rentd_enabled | bool else 'off' }}, {{ kn_rentd_slots }} slot(s)
+      ids {{ kn_rentd_first_id }}.., ports {{ kn_rentd_first_port }}..{{ (kn_rentd_first_port | int) + (kn_rentd_slots | int) - 1 }},
+      {{ kn_rentd_name }}_<n> at {{ kn_rentd_public_host }}

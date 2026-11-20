@@ -18,6 +18,8 @@ are what they were:
   - an edge behind NAT (kn_listen_ip: kn-mnz on divide) binds its LAN address, both gateways allow it
     by public and LAN address, and kru's kn_rtc NAT (kru-rtc.nft, kru-public-ip.service) hairpins its
     forwarded ports; divide's guests skip the in-guest firewall and fail2ban (kn_host_firewall);
+  - kn-mnz's kn_rentd (rented servers): rentd.cfg (its host id, the brain, the Box Office address and secret) and
+    kn-rentd.service's caps; no other edge runs one;
   - ansible-playbook --syntax-check of edges.yml, central.yml, firewall.yml and fail2ban.yml.
 Prints PASS/FAIL lines; exit 0 only when every check passed, 0 with "skipped" when ansible-playbook
 is not installed.
@@ -58,8 +60,10 @@ NAT_LISTEN = {"kn-mnz": "172.16.5.94"}
 # inventory/hosts.yml kn_gameserver_dns_count where it is below the instance count (none since Spaceship got
 # ashburn-4..9, 2026-11-19): instance n above it advertises <edge>-<((n-1) % it) + 1>, the same address.
 DNS_COUNT = {}
+# inventory/hosts.yml kn_rentd_slots where kn_rentd_enabled (role kn_rentd: rented servers)
+RENTD = {"kn-mnz": 3}
 # kn-mnz's kn_forwarded_ports: the hairpin on kru (kru-rtc.nft) sends exactly these to its LAN address
-MNZ_FORWARDED = "21015-21023, 21115-21116"
+MNZ_FORWARDED = "21015-21023, 21024-21026, 21115-21116"  # 21024-21026: the rented servers (role kn_rentd)
 DIVIDE = ("kru", "kn-mnz")  # inventory group divide: no in-guest firewall / fail2ban
 TIGHT = ("kn-ams", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
 SECRET = "render-test-internal-secret-0123456789"
@@ -93,6 +97,14 @@ PLAYBOOK = """
     - ansible.builtin.template: {src: "%(roles)s/kn_gameserver/templates/kn-strike@.service.j2", dest: "{{ out }}/kn-strike@.service", mode: "0644"}
     - ansible.builtin.template: {src: "%(roles)s/edge_firewall/templates/dropin.nft.j2", dest: "{{ out }}/60-krunknative.nft", mode: "0644"}
       vars: {edge_firewall_dropin: "{{ edge_firewall_dropins[0] }}"}
+    - ansible.builtin.include_role:
+        name: kn_rentd
+        tasks_from: plan.yml
+        public: true
+    - ansible.builtin.template: {src: "%(roles)s/kn_rentd/templates/rentd.cfg.j2", dest: "{{ out }}/rentd.cfg", mode: "0644"}
+      when: kn_rentd_enabled | bool
+    - ansible.builtin.template: {src: "%(roles)s/kn_rentd/templates/kn-rentd.service.j2", dest: "{{ out }}/kn-rentd.service", mode: "0644"}
+      when: kn_rentd_enabled | bool
     - ansible.builtin.copy:
         dest: "{{ out }}/plan.json"
         mode: "0644"
@@ -233,6 +245,20 @@ def check_host(out, host, vcpus, mem):
     want_listen = NAT_LISTEN.get(host, PUBLIC.get(host))
     check(f"{edge}: game sockets bind {want_listen}", listen == want_listen
           and all(cfg_value(read(os.path.join(d, f)), "listen_host") == want_listen for f in bo_cfgs + st_cfgs), listen)
+    rentd = read(os.path.join(d, "rentd.cfg"))
+    if host in RENTD:
+        rent_unit = read(os.path.join(d, "kn-rentd.service"))
+        check(f"{edge}: rentd.cfg polls the brain as {host}, runs server_bin on the Box Office address and secret",
+              cfg_value(rentd, "host_id") == host and cfg_value(rentd, "brain_url") == "https://coordinator.krunk.io"
+              and cfg_value(rentd, "server_bin") == "/opt/krunknative-svc/current/bin/server_bin"
+              and cfg_value(rentd, "listen_host") == NAT_LISTEN.get(host, PUBLIC.get(host))
+              and cfg_value(rentd, "public_host") == f"{edge}-1.krunk.io" and cfg_value(rentd, "coordinator_secret") == SECRET
+              and cfg_value(rentd, "region") == cfg_value(read(os.path.join(d, "server-1.cfg")), "region"), rentd)
+        check(f"{edge}: kn-rentd.service caps the rentals together (one core each)",
+              f"CPUQuota={RENTD[host] * 100}%" in rent_unit and "MemoryMax=" in rent_unit and "TasksMax=" in rent_unit
+              and "--cfg /etc/krunknative/rentd.cfg" in rent_unit and "StateDirectory=krunknative/rentd" in rent_unit, rent_unit)
+    else:
+        check(f"{edge}: no kn_rentd", not rentd)
     nft = read(os.path.join(d, "60-krunknative.nft"))
     want_tcp = plan.get("bo_ports", "?") + (", " + plan.get("strike_ports", "?") if plan.get("strike_planned") else "")
     check(f"{edge}: firewall drop-in opens {want_tcp} (tcp + udp)",
@@ -253,14 +279,14 @@ def main():
         targets = json.loads(read(os.path.join(out, "bridge-targets.json")) or "[]")
         for host in HOSTS:
             edge = edge_of(host)
-            check(f"net-bridge allows {edge}-1.krunk.io:21115-21118 (Strike) and still {edge}-1..11:21015-21025",
-                  f"{edge}-1.krunk.io:21115-21118" in targets and f"{edge}-11.krunk.io:21015-21025" in targets
-                  and f"{edge}-1.krunk.io:21015-21025" in targets, targets)
+            check(f"net-bridge allows {edge}-1.krunk.io:21115-21118 (Strike) and still {edge}-1..11:21015-21026 (21024-21026: rented servers)",
+                  f"{edge}-1.krunk.io:21115-21118" in targets and f"{edge}-11.krunk.io:21015-21026" in targets
+                  and f"{edge}-1.krunk.io:21015-21026" in targets, targets)
         rtc = json.loads(read(os.path.join(out, "rtc-targets.json")) or "[]")
         for host, ip in PUBLIC.items():
             ips = [ip] + ([NAT_LISTEN[host]] if host in NAT_LISTEN else [])
             check(f"{edge_of(host)}: net-bridge and kn-rtc allow {', '.join(ips)}",
-                  all(f"{a}:21015-21025" in targets and f"{a}:21115-21118" in targets and f"{a}:21015-21025" in rtc for a in ips)
+                  all(f"{a}:21015-21026" in targets and f"{a}:21115-21118" in targets and f"{a}:21015-21026" in rtc for a in ips)
                   and not any(t.startswith("5.188.124.94:") for t in targets + rtc), (targets, rtc))
         nft = read(os.path.join(out, "kru-rtc.nft"))
         check("kru-rtc.nft: ICE DNAT to 91.199.82.174, hairpin of kn-mnz's forwarded ports to 172.16.5.94",

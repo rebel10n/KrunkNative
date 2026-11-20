@@ -1,0 +1,48 @@
+# kn_rentd (defaults/main.yml). Runs after kn_gameserver on the same host: its coordinator secrets
+# (kn_gs_internal_secret / kn_gs_join_secret) and listen address are kn_gameserver's.
+- name: Plan
+  ansible.builtin.import_tasks: plan.yml
+
+- name: Rented slots inside the forwarded ports
+  ansible.builtin.assert:
+    that:
+      - kn_rentd_slots | int > 0
+      - kn_gs_internal_secret | default('') | length >= 16
+    fail_msg: "kn_rentd on {{ inventory_hostname }}: no slots, or no coordinator secret (kn_gameserver runs first)"
+    quiet: true
+  when: kn_rentd_enabled | bool
+
+- name: rentd.cfg
+  ansible.builtin.template:
+    src: rentd.cfg.j2
+    dest: "{{ kn_etc_dir }}/rentd.cfg"
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  when: kn_rentd_enabled | bool
+  notify: Restart kn_rentd
+  diff: false # carries the coordinator secret
+
+- name: kn-rentd unit
+  ansible.builtin.template:
+    src: kn-rentd.service.j2
+    dest: /etc/systemd/system/kn-rentd.service
+    mode: "0644"
+  when: kn_rentd_enabled | bool
+  notify: Restart kn_rentd
+
+- name: Release changed -> restart kn_rentd
+  ansible.builtin.debug:
+    msg: "current -> {{ kn_svc_release_id }}"
+  changed_when: kn_release_changed | default(false) | bool
+  when: kn_rentd_enabled | bool
+  notify: Restart kn_rentd
+
+- name: kn-rentd enabled and started (stopped where off)
+  ansible.builtin.systemd_service:
+    name: kn-rentd
+    enabled: "{{ kn_rentd_enabled | bool }}"
+    state: "{{ 'started' if kn_rentd_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: kn_rentd_enabled | bool or (ansible_facts.services is defined and 'kn-rentd.service' in ansible_facts.services)
+  ignore_errors: "{{ ansible_check_mode }}"

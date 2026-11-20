@@ -12,12 +12,14 @@
   become: false
   pre_tasks:
     # A host behind NAT (kn_forwarded_ports, inventory: kn-mnz on divide) gets traffic only on the
-    # ports the NAT forwards: refuse a Box Office or Strike count whose ports are not all among them.
+    # ports the NAT forwards: refuse a Box Office, Strike or rented-server count (kn_rentd) whose ports are not all among them.
     - name: Game ports are all forwarded by the NAT in front of the host
       vars:
         kn_needed_ports: >-
           {%- set out = [] -%}
-          {%- for r in [kn_gameserver_port_range] + ([kn_strike_port_range] if (kn_strike_count | int) > 0 else []) -%}
+          {%- set rent = ([(kn_rentd_first_port | default(21024) | int) ~ '-' ~ ((kn_rentd_first_port | default(21024) | int) + (kn_rentd_slots | default(0) | int) - 1)]
+                          if (kn_rentd_enabled | default(false) | bool) and (kn_rentd_slots | default(0) | int) > 0 else []) -%}
+          {%- for r in [kn_gameserver_port_range] + ([kn_strike_port_range] if (kn_strike_count | int) > 0 else []) + rent -%}
             {%- set ab = (r | string).split('-') -%}
             {%- set _ = out.extend(range(ab[0] | int, (ab[-1] | int) + 1)) -%}
           {%- endfor -%}
@@ -44,4 +46,5 @@
     - { role: kn_user, tags: [user, gameserver] }
     - { role: kn_release, tags: [release, gameserver] }
     - { role: kn_gameserver, tags: [gameserver] }
+    - { role: kn_rentd, tags: [rentd, gameserver] }
     - { role: kn_dns_check, tags: [dns] }

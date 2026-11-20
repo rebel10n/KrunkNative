@@ -1,0 +1,32 @@
+# kn_rentd: the rented servers' supervisor on a game host (server/src/rentd.c, doc/v10/rented-servers.md).
+# Krunker v10.0.7's Rent Dedicated Server (hostTypes[2], deob-10.0.7.js:16580): kn_brain sells the slots
+# (services/brain/rentals.c, brain.rentals.pool from these same vars: role kn_brain's config.json.j2), kn_rentd
+# polls the brain's agent API (GET /mm/internal/rentals?host=<inventory_hostname>) and runs one server_bin per
+# rented slot with `dedicated 1` (Krunker's isDedicated: the 24/7 row under its own name, no rewards).
+# Off unless a host sets kn_rentd_enabled (inventory: kn-mnz).
+kn_rentd_enabled: false
+# The host's slots: ids kn_rentd_first_id.. (unique across hosts: the brain's rented_servers.id), ports
+# kn_rentd_first_port.. (inside the host's kn_forwarded_ports and kn_bridge / kn_rtc_target_port_hi).
+kn_rentd_slots: 0
+kn_rentd_first_id: 1
+kn_rentd_first_port: 21024
+# The window's region (Krunker's rental regions, deob-10.0.7.js:18709-18777: 0 New York, 13 Frankfurt, ...)
+# and the server names: <kn_rentd_name>_<n> (SVN_SID, "Ashburn_1").
+kn_rentd_region: 0
+kn_rentd_name: "{{ kn_edge_name | capitalize }}"
+# The server_bin region code (the browser's region group) and the advertised address (one of the host's
+# <edge>-<n> records: every one of them is kn_public_ip).
+kn_rentd_server_region: "{{ kn_gameserver_region }}"
+kn_rentd_public_host: "{{ kn_gameserver_hostname_fmt | format(1) }}"
+kn_rentd_max_players: "{{ kn_gameserver_max_players }}"
+# The agent API (Bearer = the coordinator's internal secret, read like kn_gameserver's).
+kn_rentd_brain_url: "https://coordinator.{{ kn_domain }}"
+kn_rentd_poll_s: 10
+# SIGTERM to a rented server_bin, then SIGKILL after this long (its own drain is shutdown_grace 30).
+kn_rentd_stop_grace_s: 40
+# Caps: per server RLIMIT_AS (MB), and for the whole unit (every rented server is in its cgroup):
+# "Cloud Compute, one core" each.
+kn_rentd_child_mem_mb: 1024
+kn_rentd_cpu_quota: "{{ (kn_rentd_slots | int) * 100 }}%"
+kn_rentd_memory_max: "{{ (kn_rentd_slots | int) * 512 + 128 }}M"
+kn_rentd_tasks_max: "{{ (kn_rentd_slots | int) * 64 + 32 }}"

@@ -1,0 +1,58 @@
+# {{ ansible_managed }} (deploy/ansible role kn_rentd)
+# The rented servers' supervisor: {{ kn_etc_dir }}/rentd.cfg. Every rented server_bin runs in this unit's
+# cgroup, so the caps below are the rentals' together.
+[Unit]
+Description=KrunkNative rented servers (kn_rentd)
+After=network-online.target
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User={{ kn_user }}
+Group={{ kn_group }}
+WorkingDirectory={{ kn_svc_current }}
+ExecStart={{ kn_svc_current }}/bin/kn_rentd --cfg {{ kn_etc_dir }}/rentd.cfg
+# SIGTERM: kn_rentd stops its servers (SIGTERM, SIGKILL after stop_grace_s) and exits.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec={{ (kn_rentd_stop_grace_s | int) + 30 }}
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+StateDirectory=krunknative/rentd
+LogsDirectory=krunknative
+
+CPUQuota={{ kn_rentd_cpu_quota }}
+MemoryMax={{ kn_rentd_memory_max }}
+TasksMax={{ kn_rentd_tasks_max }}
+CPUWeight=50
+Nice=0
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+ReadOnlyPaths={{ kn_svc_base }} {{ kn_etc_dir }}
+
+[Install]
+WantedBy=krunknative.target

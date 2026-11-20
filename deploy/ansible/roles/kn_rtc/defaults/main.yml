@@ -25,7 +25,7 @@ kn_rtc_binary: "{{ kn_artifact_root }}/kn-rtc/kn-rtc"
 # Allowlist (KRUNK_NATIVE_TARGETS): exactly the edge game servers, as kn_bridge
 # (<edge>-<n>.krunk.io and each edge's kn_public_ip, ports lo..hi). No loopback, no default.
 kn_rtc_target_port_lo: 21015
-kn_rtc_target_port_hi: 21025
+kn_rtc_target_port_hi: 21026 # 21024-21026: kn-mnz's rented servers (role kn_rentd)
 # Edges without a kn_public_ip yet (a new VM whose address is still undecided, inventory/hosts.yml)
 # are left out until they get one.
 kn_rtc_edge_hosts: >-

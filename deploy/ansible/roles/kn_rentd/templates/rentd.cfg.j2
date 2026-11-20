@@ -1,0 +1,20 @@
+// {{ ansible_managed }} (deploy/ansible role kn_rentd)
+// kn_rentd on {{ inventory_hostname }}: {{ kn_rentd_slots }} rented server slot(s), ports {{ kn_rentd_first_port }}..{{ kn_rentd_first_port + (kn_rentd_slots | int) - 1 }}.
+host_id         "{{ inventory_hostname }}"
+brain_url       "{{ kn_rentd_brain_url }}"
+server_bin      "{{ kn_svc_current }}/bin/server_bin"
+// server_bin resolves ./assets relative to its working directory.
+workdir         "{{ kn_svc_current }}"
+// Writable: StateDirectory=krunknative/rentd (each slot's server.cfg, log and bans).
+state_dir       "{{ kn_state_dir }}/rentd"
+region          "{{ kn_rentd_server_region }}"
+listen_host     "{{ kn_gameserver_listen_host }}"
+public_host     "{{ kn_rentd_public_host }}"
+max_players     {{ kn_rentd_max_players }}
+auth_url        "{{ kn_gameserver_auth_url }}"
+coordinator_url "{{ kn_gameserver_coordinator_url }}"
+coordinator_secret "{{ kn_gs_internal_secret }}"
+join_secret     "{{ kn_gs_join_secret or kn_gs_internal_secret }}"
+poll_s          {{ kn_rentd_poll_s }}
+stop_grace_s    {{ kn_rentd_stop_grace_s }}
+child_mem_mb    {{ kn_rentd_child_mem_mb }}

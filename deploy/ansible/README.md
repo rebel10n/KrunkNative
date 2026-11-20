@@ -145,7 +145,7 @@ to 10 cores / 6 GB, so it also runs 2 Strike instances (8+ vcpus). MI, KV and JN
 there goes to the nearest hosted region (`doc/v10/regions.md`).
 kn-mnz is behind divide's NAT: `kn_public_ip` 91.199.82.174 (the `ashburn-<n>.krunk.io` A records),
 `kn_listen_ip` 172.16.5.94 (what the game sockets bind and the gateways also allow), and
-`kn_forwarded_ports` (21015-21023, 21115-21116: what divide DNATs to it). `edges.yml` refuses a
+`kn_forwarded_ports` (21015-21023, 21024-21026 for the rented servers of role kn_rentd, 21115-21116: what divide DNATs to it). `edges.yml` refuses a
 `kn_gameserver_count` or Strike count with a port outside `kn_forwarded_ports`: raise them only together
 with divide's forwards and `/etc/pve/firewall/203.fw` (infra's side). On divide those are the kn port
 sets in `/etc/nftables.conf` (the `dnat to $KN` line and the kru <-> kn hairpin accepts in
@@ -161,7 +161,22 @@ of kru's net-bridge / kn-rtc allowlists, and `edges.yml` stops at `kn_gameserver
 above in root's `authorized_keys`, its host key in `EDGES_KNOWN_HOSTS` (keyed by that HostName), its
 `<edge>-<n>.krunk.io` records, and its name in the workflow's `live` list (until then it deploys only
 when named in `hosts`). Its `kn_gameserver_count` stays at most 11 while `kn_bridge_target_port_hi` /
-`kn_rtc_target_port_hi` are 21025.
+`kn_rtc_target_port_hi` are 21026 (21024-21026: kn-mnz's rented servers, [Rented servers](#rented-servers-kn_rentd)).
+
+### Rented servers (kn_rentd)
+
+Krunker v10.0.7's Rent Dedicated Server (doc/v10/rented-servers.md). Role `kn_rentd` (edges.yml, tags
+`rentd` and `gameserver`, after `kn_gameserver`) runs `kn-rentd.service` on a host with `kn_rentd_enabled`
+(today kn-mnz: 3 slots, ids 1-3, ports 21024-21026, "Ashburn_1..3" in the window's New York, advertised as
+`ashburn-1.krunk.io`). kn_rentd polls the brain's agent API (`GET https://coordinator.krunk.io/mm/internal/rentals?host=<inventory name>`,
+Bearer = the coordinator's internal secret, read from kru's `secrets.env` like the game servers') and runs one
+`server_bin --cfg /var/lib/krunknative/rentd/rent-<id>.cfg` per rented slot (`dedicated 1`), restarting a
+crashed one with a backoff and stopping it when the rental ends. Every rented server is in the unit's cgroup:
+`CPUQuota` = 100 % per slot, `MemoryMax`, `TasksMax` (role defaults). The brain's side is
+`brain.rentals.pool` in kn_brain's `config.json`, rendered from the same host vars, so a slot exists only
+where its kn_rentd runs. The ports are in `kn_forwarded_ports` (divide DNATs them and `203.fw` opens them;
+`edges.yml` refuses a slot outside them) and below `kn_bridge` / `kn_rtc_target_port_hi`. Logs:
+`journalctl -u kn-rentd` and `/var/lib/krunknative/rentd/rent-<id>.log`.
 
 Release builds (`.github/workflows/release.yml`) use the same `build.sh` (bookworm + bullseye,
 `TARGETS=server_bin`); `KN_CMAKE_ARGS` passes the build version (`tools/release/version-meta.sh
@@ -385,7 +400,7 @@ TCP to the edge. Role `kn_bridge` (tag `bridge`):
   reads the credentials): one line `KN_BRIDGE_KRUNKER_PROXY=socks5h://user:password@PROXY_HOST:PORT`,
   then `systemctl restart kn-bridge`. Empty or missing = off.
 - Allowlist (`KRUNK_NATIVE_TARGETS`), generated from the `edges` inventory: `<edge>-<n>.krunk.io`
-  for n = 1..11 and each edge's `kn_public_ip`, ports 21015-21025 (`kn_bridge_target_port_lo/hi`).
+  for n = 1..11 and each edge's `kn_public_ip`, ports 21015-21026 (`kn_bridge_target_port_lo/hi`).
   Anything else, including a missing `target`, loopback and other kru ports, is refused with 403
   before the WebSocket handshake. Adding an edge to the inventory and re-running `--tags bridge`
   updates it.
@@ -432,7 +447,7 @@ port. Role `kn_rtc` (tag `rtc`; `kn_rtc_enabled: false` stops and disables the u
   interfaces). The static binary is built on the controller (`go build`, CGO off, reproducible)
   into `/opt/krunknative-rtc/kn-rtc`. Settings are in `/etc/krunknative/rtc.env` (root:kn 0640,
   no secrets).
-- Allowlist and limits mirror kn_bridge: the edges by name and IP, ports 21015-21025, no
+- Allowlist and limits mirror kn_bridge: the edges by name and IP, ports 21015-21026, no
   loopback and no default target. Also 8 sessions per `CF-Connecting-IP`, 1024 in total, 10 s
   for ICE + DTLS + the channel, and 30 s without a datagram from the edge. CORS and Origin are
   limited to `kn_web_origins`.
@@ -523,7 +538,7 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
   `edge_firewall_rollback_seconds`.
 
 Not on divide's guests (kn-mnz, CT 203; inventory group `divide`): divide's pve-firewall is their
-firewall (`/etc/pve/firewall/203.fw` opens 21015-21023 and 21115-21116, tcp + udp; infra's side), never
+firewall (`/etc/pve/firewall/203.fw` opens 21015-21026 and 21115-21116, tcp + udp; infra's side), never
 rules inside the guest, so `kn_host_firewall: false` (`group_vars/divide/main.yml`) makes
 `edges.yml` and `firewall.yml` skip edge_firewall there (the role's files are untouched).
 

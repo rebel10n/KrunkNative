@@ -1,0 +1,9 @@
+# A restart stops the rented servers (their players see the server go) and starts them again on the new
+# release at once: kn_rentd starts every rented slot on its first poll.
+- name: Restart kn_rentd
+  ansible.builtin.systemd_service:
+    name: kn-rentd
+    state: restarted
+    daemon_reload: true
+  when: kn_rentd_enabled | bool
+  ignore_errors: "{{ ansible_check_mode }}"
