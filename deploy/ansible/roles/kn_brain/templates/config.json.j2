@@ -6,7 +6,24 @@
     "trust_proxy": true,
     "region": "us",
     "federation": false,
-    "cors_origins": {{ (kn_web_origins + kn_official_page_origins + ["https://coordinator." ~ kn_domain, "https://matchmaker." ~ kn_domain]) | to_json }}
+    "cors_origins": {{ (kn_web_origins + kn_official_page_origins + ["https://coordinator." ~ kn_domain, "https://matchmaker." ~ kn_domain]) | to_json }},
+    "rentals": {
+      "_comment": "Rent a Server (Krunker v10.0.7 Rent Dedicated Server, services/brain/rentals.c, doc/v10/rented-servers.md): the slots of every edge with kn_rentd_enabled (role kn_rentd's vars), whose kn_rentd polls GET /mm/internal/rentals?host=<its inventory name>.",
+      "pool": [
+{%- set kn_pool = [] -%}
+{%- for h in groups['edges'] | default([]) -%}
+{%-   set hv = hostvars[h] -%}
+{%-   if hv.kn_rentd_enabled | default(false) | bool -%}
+{%-     for i in range(hv.kn_rentd_slots | default(0) | int) -%}
+{%-       set _ = kn_pool.append({"id": (hv.kn_rentd_first_id | default(1) | int) + i, "host": h, "region": hv.kn_rentd_region | default(0) | int,
+                                    "name": hv.kn_rentd_name | default((hv.kn_edge_name | default(h)) | capitalize), "sid": i + 1,
+                                    "port": (hv.kn_rentd_first_port | default(21024) | int) + i,
+                                    "public_host": hv.kn_rentd_public_host | default((hv.kn_edge_name | default(h)) ~ "-1." ~ kn_domain)}) -%}
+{%-     endfor -%}
+{%-   endif -%}
+{%- endfor -%}
+{{ kn_pool | map('to_json') | join(', ') }}]
+    }
   },
   "accounts": {
     "developers": {{ kn_brain_developers | to_json }},
@@ -25,23 +42,6 @@
   "user_assets": {
     "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host for community maps. The cache lives in the state dir (the release is read-only and replaced). Its proxy: KN_USER_ASSETS_PROXY in {{ kn_etc_dir }}/user-assets.env, written from the krunkbox .env's PROXY (tasks/user_assets_proxy.yml).",
     "cache_dir": "{{ kn_state_dir }}/user-assets"
-  },
-  "rentals": {
-    "_comment": "Rent a Server (Krunker v10.0.7 Rent Dedicated Server, services/brain/rentals.c, doc/v10/rented-servers.md): the slots of every edge with kn_rentd_enabled (role kn_rentd's vars), whose kn_rentd polls GET /mm/internal/rentals?host=<its inventory name>.",
-    "pool": [
-{%- set kn_pool = [] -%}
-{%- for h in groups['edges'] | default([]) -%}
-{%-   set hv = hostvars[h] -%}
-{%-   if hv.kn_rentd_enabled | default(false) | bool -%}
-{%-     for i in range(hv.kn_rentd_slots | default(0) | int) -%}
-{%-       set _ = kn_pool.append({"id": (hv.kn_rentd_first_id | default(1) | int) + i, "host": h, "region": hv.kn_rentd_region | default(0) | int,
-                                  "name": hv.kn_rentd_name | default((hv.kn_edge_name | default(h)) | capitalize), "sid": i + 1,
-                                  "port": (hv.kn_rentd_first_port | default(21024) | int) + i,
-                                  "public_host": hv.kn_rentd_public_host | default((hv.kn_edge_name | default(h)) ~ "-1." ~ kn_domain)}) -%}
-{%-     endfor -%}
-{%-   endif -%}
-{%- endfor -%}
-{{ kn_pool | map('to_json') | join(', ') }}]
   },
   "ai": {
     "_comment": "The map editor's AI (services/brain/ai.h). The upstream URL + key: {{ kn_etc_dir }}/ai.env. Web search: role kn_ai_search.",
