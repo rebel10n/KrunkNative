@@ -656,6 +656,30 @@ void sh_item_paint(SocialSession *s, const cJSON *f) {
                 paint_done, ctx_new("ipr", fa_int(f, 6, 0), 0));
 }
 
+static void style_done(SocialSession *s, kn_db_result *res, void *extra) {
+    Ctx *c = extra;
+    if (!kn_db_ok(res)) {
+        social_error(s, acct_db_error(res, "ist"));
+        return;
+    }
+    cJSON *v = acct_db_json(res);
+    social_send_n(s, "istr", 2, v ? v : cJSON_CreateNull(), cJSON_CreateNumber((double) c->a));
+}
+
+/* ["ist", copy id | store index, item, style, uid] -> ["istr", {copy_id, item_id, style} | null, uid]: v10.0.7's
+ * items.setStyle (deob-10.0.7.js:27102-27106, 108817-108850); the item's styles count comes from skins.json */
+void sh_item_style(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    const int64_t item = fa_int(f, 2, -1);
+    const SkinInfo *k = item >= 0 ? acct_skin(item) : NULL;
+    char me[24], copy[24], it[24], style[24], styles[24];
+    me_str(s, me);
+    social_call(s, &P_ITEM_STYLE,
+                KN_DB_ARGS(me, acct_itoa(copy, fa_int(f, 1, -1)), acct_itoa(it, item), acct_itoa(style, fa_int(f, 3, -1)),
+                           acct_itoa(styles, k ? k->styles : 0)),
+                style_done, ctx_new("istr", fa_int(f, 4, 0), 0));
+}
+
 static void unlist_done(SocialSession *s, kn_db_result *res, void *extra) {
     Ctx *c = extra;
     cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;

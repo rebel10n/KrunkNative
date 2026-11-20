@@ -497,6 +497,44 @@ static kn_db_result *run_item_paint(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_ITEM_PAINT = {"item_paint", NULL, run_item_paint};
 
+/* (actor, copy id or the stack's store index, item store index, style, styles count) -> {copy_id, item_id, style}:
+ * v10.0.7's setStyle (deob-10.0.7.js:108817-108850; body {item_id, style}). A copy id names an owned painted copy of
+ * the item, a store index the item's unpainted units (the stack, copy_id 0 in item_styles, 0393). Style 0 is the
+ * default and drops the row; 1..styles-1 are stored. Nothing is consumed. */
+static kn_db_result *run_item_style(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t actor = PI(0), copy = PI(1), item = PI(2), style = PI(3), styles = PI(4);
+    if (item < 0 || styles <= 0) return dbx_finish(&x, kn_db_result_user_error("This item has no styles."));
+    if (style < 0 || style >= styles) return dbx_finish(&x, kn_db_result_user_error("That style does not exist."));
+    int64_t key = 0; /* item_styles.copy_id */
+    if (copy >= V10_COPY_ID_BASE) {
+        const int64_t skin = dbx_int(&x, SQL(.any = "SELECT skin_id FROM skin_copies WHERE copy_id = $1 AND account_id = $2"),
+                                     KN_DB_ARGS(I64S(copy), I64S(actor)), -1);
+        if (skin < 0) return dbx_finish(&x, kn_db_result_user_error("You don't own that copy."));
+        if (skin != item) return dbx_finish(&x, kn_db_result_user_error("That copy is not that item."));
+        key = copy;
+    } else {
+        if (copy != item) return dbx_finish(&x, kn_db_result_user_error("Item not found"));
+        const int64_t owned = dbx_int(&x, SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"),
+                                      KN_DB_ARGS(I64S(actor), I64S(item)), 0);
+        const int64_t copies = dbx_int(&x, SQL(.any = "SELECT count(*) FROM skin_copies WHERE account_id = $1 AND skin_id = $2"),
+                                       KN_DB_ARGS(I64S(actor), I64S(item)), 0);
+        if (owned - copies <= 0) return dbx_finish(&x, kn_db_result_user_error("You don't own that item."));
+    }
+    if (dbx_exec(&x, SQL(.any = "DELETE FROM item_styles WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                 KN_DB_ARGS(I64S(actor), I64S(item), I64S(key))) < 0)
+        return dbx_finish(&x, NULL);
+    if (style > 0 && dbx_exec(&x, SQL(.any = "INSERT INTO item_styles (account_id, skin_id, copy_id, style) VALUES ({int:$1}, {int:$2}, {int:$3}, {int:$4})"),
+                              KN_DB_ARGS(I64S(actor), I64S(item), I64S(key), I64S(style))) < 0)
+        return dbx_finish(&x, NULL);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "copy_id", (double) copy);
+    cJSON_AddNumberToObject(o, "item_id", (double) item);
+    cJSON_AddNumberToObject(o, "style", (double) style);
+    return dbx_json(&x, "style", o);
+}
+const kn_proc P_ITEM_STYLE = {"item_style", NULL, run_item_style};
+
 /* $4 listing -> {r: "SUCCESS" | "SOLD", i: skin} */
 static kn_db_result *run_market_unlist(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};

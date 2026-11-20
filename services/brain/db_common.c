@@ -418,6 +418,33 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         }
     }
     cJSON_Delete(counts);
+    /* v10.0.7 item styles (item_styles, 0393): m.style on the stack (copy_id 0) or the copy it was set on; the card and
+     * the game read it for the styles[n] thumbnail and the _s<n> texture (deob-10.0.7.js:223502, 173602) */
+    cJSON *styled = dbx_rows(x, SQL(.any = "SELECT skin_id AS ind, copy_id AS id, style FROM item_styles WHERE account_id = $1"),
+                             KN_DB_ARGS(I64S(id)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(styled);
+        cJSON_Delete(rows);
+        return NULL;
+    }
+    cJSON_ArrayForEach(row, styled) {
+        const int64_t ind = kn_json_int(row, "ind", -1), copy = kn_json_int(row, "id", 0);
+        cJSON *entry;
+        cJSON_ArrayForEach(entry, rows) {
+            if (kn_json_int(entry, "ind", -2) != ind || kn_json_int(entry, "id", 0) != copy) continue;
+            cJSON *m = cJSON_GetObjectItemCaseSensitive(entry, "m");
+            if (!cJSON_IsObject(m)) {
+                cJSON_DeleteItemFromObjectCaseSensitive(entry, "m");
+                m = cJSON_AddObjectToObject(entry, "m");
+            }
+            if (m) {
+                cJSON_DeleteItemFromObjectCaseSensitive(m, "style");
+                cJSON_AddNumberToObject(m, "style", (double) kn_json_int(row, "style", 0));
+            }
+            break;
+        }
+    }
+    cJSON_Delete(styled);
     return rows;
 }
 

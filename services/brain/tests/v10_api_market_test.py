@@ -488,7 +488,16 @@ def market_scenario(port, path):
     st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": 2}, s_tok)
     expect_error("143 POST /items/{id}/paint (not a paint)", st, r, "ITEM_PAINT_INVALID", 400, "That item is not a paint.")
     st, r = http(port, "POST", "/items/%d/style" % ITEM, {"item_id": ITEM, "style": 1}, s_tok)
-    expect_refusal("144 POST /items/{id}/style", st, r)
+    expect_error("144 POST /items/{id}/style (an item with no styles)", st, r, "ITEM_STYLE_INVALID", 400, "This item has no styles.")
+    # KrunkCup Jerseys (7794, 48 styles; deob-10.0.7.js:27102-27106, 108817-108850): the stack's style is stored
+    seed(path, [("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (s_id, 7794))])
+    st, r = http(port, "POST", "/items/7794/style", {"item_id": 7794, "style": 5}, s_tok)
+    expect_data("144 POST /items/{id}/style (the stack's style 5)", st, r, lambda d: d.get("style") == 5, "{copy_id, item_id, style}")
+    st, r = http(port, "POST", "/items/7794/style", {"item_id": 7794, "style": 48}, s_tok)
+    check("144 POST /items/{id}/style (no such style) -> 400 That style does not exist.",
+          st == 400 and "That style does not exist." in json.dumps(r), "HTTP %d %s" % (st, json.dumps(r)[:160]))
+    st, r = http(port, "POST", "/items/7794/style", {"item_id": 7794, "style": 2})
+    check("144 POST /items/{id}/style signed out -> 401", st == 401, "HTTP %d" % st)
 
     # ---- quick sell (after the trades: the seller holds one skin 0 again)
     st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 1, "amount": 0}, s_tok)

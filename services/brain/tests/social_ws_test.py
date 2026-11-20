@@ -539,6 +539,19 @@ async def scenario(base, internal_url, secret):
         check(len(r[4]) == 1 and r[4][0]["map_name"] == mapname, "profile games tab")
         r = await a.call("po", "delC", r[4][0]["map_id"], 0)
         check(r[1] == "SUCCESS", "creator deletes the map")
+        # v10.0.7 item styles (economy.c sh_item_style, item_styles 0393): KrunkCup Jerseys (store index 7794, 48 styles)
+        jersey = 7794
+        async with Internal(internal_url, secret) as g:
+            err, _ = await g.op("give_skin", id=alice_id, skin=jersey)
+            check(err is None, "give the KrunkCup Jerseys")
+        r = await a.call("istr", "ist", jersey, jersey, 3, 41)
+        check(r[1] == {"copy_id": jersey, "item_id": jersey, "style": 3} and r[2] == 41, "ist: the stack's style 3: %r" % r)
+        async with Social(ws_url, json_mode=True) as a2:
+            r = await a2.call("a", "a", 1, [alice, None, alice_login[5]])
+            owned = [e for e in (r[4][10] if r and r[4] else []) if e.get("ind") == jersey]
+            check(owned and (owned[0].get("m") or {}).get("style") == 3, "the owned list carries m.style 3: %r" % owned)
+        r = await a.call("istr", "ist", jersey, jersey, 0, 43)
+        check(r[1] and r[1].get("style") == 0, "ist style 0: back to the default: %r" % r)
 
     # store: v10.0.2 prize wheels (store.wheels + item pools of gapi /data/spins: single, 10x
     # multi, ticket-only wheels, Universal tickets, a v7 ticket's own wheel), spin history, Free KR

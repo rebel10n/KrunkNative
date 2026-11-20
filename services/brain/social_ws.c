@@ -799,6 +799,7 @@ static const SocialRoute k_routes[] = {
     {"li", sh_market_list},
     {"uli", sh_market_unlist},
     {"ip", sh_item_paint},              /* v10 items.setPaint: ["ip", skin, item, paint, colour, shader, uid] -> ["ipr", copy | null, uid] (economy.c) */
+    {"ist", sh_item_style},             /* v10.0.7 items.setStyle: ["ist", skin, item, style, uid] -> ["istr", {copy_id, item_id, style} | null, uid] (economy.c) */
     {"pi", sh_market_buy},
     {"fil", sh_market_filter},
     {"srt", sh_inventory_sort},
@@ -938,6 +939,7 @@ static const LabelClass k_label_class[] = {
     {"vr", RC_WRITE, ANS_REPLY}, /* v10 REDEEM_VOUCHER (redeem.c): a refusal is answered "vr" with the error */
     {"crft", RC_WRITE, ANS_REPLY}, /* v10 CRAFT_REQUEST (craft.c, the Junkyard): changes the inventory */
     {"ip", RC_WRITE, ANS_REPLY},   /* the paint picker's item paint (economy.c sh_item_paint): answered "ipr" */
+    {"ist", RC_WRITE, ANS_REPLY},  /* the style picker's item style (economy.c sh_item_style): answered "istr" */
     /* v10.0.4 bulk market and item locks (economy.c): the writes as their single-item frames (qsi, li), the lock list a read */
     {"qsb", RC_WRITE, ANS_REPLY}, {"lib", RC_WRITE, ANS_REPLY}, {"ils", RC_WRITE, ANS_REPLY}, {"ilk", RC_READ, ANS_REPLY},
     {"raml", RC_WRITE, ANS_REPLY},

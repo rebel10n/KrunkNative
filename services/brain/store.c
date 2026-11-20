@@ -191,6 +191,8 @@ static void skins_load(void) {
                 k->tradable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "tradable"));
                 k->premium_spin = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "premiumSpin"));
                 k->craftable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "craftable"));
+                const cJSON *styles = cJSON_GetObjectItemCaseSensitive(it, "styles");
+                k->styles = cJSON_IsArray(styles) ? cJSON_GetArraySize(styles) : 0; /* deob-10.0.7.js:108866 */
                 k->qs_kr = (int) kn_json_int(it, "qsKR", 0);
                 k->funds = kn_json_int(it, "funds", 0);
                 k->title = (int) kn_json_int(it, "title", -1); /* blackM items: the title the purchase grants (deob-10.0.3.js:152763) */

@@ -127,7 +127,7 @@ extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_QUICK_SELL_BULK, P_MARKET_LIST_BULK, P_ITEM_LOCKS, P_ITEM_LOCK, P_MARKET_ITEM, P_TRADE_PAGE,
     P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
-    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT;
+    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT, P_ITEM_STYLE;
 /* the live trade of Trade mode (db_economy.c, 0357_live_trades; doc/v10/trade.md): the game server's window and settle */
 extern const kn_proc P_LIVE_TRADE_OPEN, P_LIVE_TRADE;
 

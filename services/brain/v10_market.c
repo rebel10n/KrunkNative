@@ -44,7 +44,8 @@
  *     GET  /items/:id/instances?sort=  [] : KrunkNative keeps no per-copy instances (128573)
  *     POST /items/:id/paint            {item_id, paint_item_id}: paints an owned copy (or an unpainted unit of the item,
  *                                      which becomes a copy); 400 for a non-paint (128724; doc/v10/paint-copy.md)
- *     POST /items/:id/style            REFUSAL: no per-copy style state (128924)
+ *     POST /items/:id/style            {item_id, style}: the style of an owned copy or of the item's stack (item_styles,
+ *                                      0393; deob-10.0.7.js:27102-27106, 108817-108850); 400 for an item with no styles
  *
  *   trades (27047-27078)
  *     GET  /trades/history             {open, completed, completed_has_more} (economy's trade page) (108327)
@@ -82,7 +83,6 @@
 #define MAX_ITEM_IDS 256
 
 /* the refusals' reasons (the handler's ud) */
-#define WHY_ITEM_STYLE "Item style is not served over HTTP: KrunkNative keeps no per-copy style state"
 
 /* the day ranges of v10's sales graphs (v10.js 10075: the range index picks one) */
 static const int k_day_ranges[] = {7, 14, 21, 30, 60, 90, 120};
@@ -1296,10 +1296,48 @@ static void h_item_paint(kn_http_req *req, void *ud) {
     route_begin(req, 1, 1, step_item_paint, reply_item_paint, &a, body);
 }
 
+/* ---- POST /items/:id/style (v10.0.7's items.setStyle, body {item_id, style}, deob-10.0.7.js:27102-27106): the {id} is
+ * the owned copy's id or the stack's store index, as the paint's; the work is sh_item_style (economy.c) and
+ * run_item_style (db_economy.c, item_styles of 0393). The consumer reads only error.message (108826-108828). */
+static void step_item_style(Op *op) {
+    cJSON *f = social_frame("ist");
+    add_int(f, op->a.id);
+    add_int(f, kn_json_int(op->body, "item_id", -1));
+    add_int(f, kn_json_int(op->body, "style", -1));
+    op_call(op, sh_item_style, f);
+}
+
+static void reply_item_style(Op *op) {
+    if (op_failed(op)) return;
+    const cJSON *v = op_arg(op, "istr", 1);
+    v10_reply_data(op->req, 200, cJSON_IsObject(v) ? cJSON_Duplicate(v, 1) : cJSON_CreateObject());
+}
+
 static void h_item_style(kn_http_req *req, void *ud) {
     (void) ud;
-    if (!item_known(req)) return;
-    v10_reply_error(req, 403, "NOT_IMPLEMENTED", WHY_ITEM_STYLE);
+    Args a;
+    memset(&a, 0, sizeof a);
+    a.id = (int64_t) strtoll(kn_http_param(req, "id"), NULL, 10);
+    cJSON *body = body_of(req);
+    const int64_t item = kn_json_int(body, "item_id", -1);
+    const SkinInfo *k = acct_skin(item);
+    if (!k) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 404, "ITEMS_INVALID_ID", "Item not found");
+        return;
+    }
+    if (k->styles <= 0) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 400, "ITEM_STYLE_INVALID", "This item has no styles."); /* the picker's empty text, 108852 */
+        return;
+    }
+    if (a.id != item && a.id < V10_COPY_ID_BASE) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 400, "ITEM_STYLE_INVALID", "Style the copy of that item, or the item itself.");
+        return;
+    }
+    a.ectx = ERR_OBJECT;
+    route_begin(req, 1, 1, step_item_style, reply_item_style, &a, body);
 }
 
 /* the item's market page: {ind, onS, inC, high, low} with the owners ["0", "itemsales", sub, info, owners] */
