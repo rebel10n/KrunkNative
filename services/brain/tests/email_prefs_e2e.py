@@ -11,6 +11,7 @@ time, signed in from seeded storage and driven through KRUNKNATIVE_UI_CMDS. Outc
   3. Settings > Account's Promotional Emails toggle (togglePromoEmails, 217694-217698) stores source "settings"
   4. a run with a choice stored opens no popup
   5. another account's Decline stores promotional false
+  6. a brain that does not ask (no smtp, accounts.email.promotional_optin unset) opens no popup
 Screenshots go to the work dir (~/.cache/kn-email-prefs.*, kept on failure or with KN_KEEP=1).
 77 = skip (no client_bin / kn_brain / websockets).
 """
@@ -24,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 try:
     import websockets
@@ -179,6 +181,7 @@ def main():
         json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
                    "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "emailprefs-%d" % os.getpid()},
                    "accounts": {"signup_rewards": {"enabled": False}, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0,
+                                "email": {"promotional_optin": True},  # no smtp here: ask anyway (v10_auth.c)
                                 "password_iterations": 1000, "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
     log = open(os.path.join(WORK, "brain.log"), "w")
     brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -242,6 +245,27 @@ def main():
         B.click("knOptInNo")
         check(wait(lambda: pref(b) == (True, False, "popup"), 10), "Decline: chosen, promotional false, source popup (%r)" % (pref(b),))
         done(B)
+
+        # 6. the same brain without accounts.email.promotional_optin and without smtp: nothing to ask
+        brain.terminate()
+        brain.wait(10)
+        with open(cfg) as f:
+            conf = json.load(f)
+        del conf["accounts"]["email"]
+        with open(cfg, "w") as f:
+            json.dump(conf, f)
+        log.write("---- restart without promotional_optin\n")
+        log.flush()
+        mark = len(open(os.path.join(WORK, "brain.log")).read())
+        brain = subprocess.Popen([BRAIN, "--config", cfg], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        check(bool(wait(lambda: re.search(r"listening on http://127\.0\.0\.1:%d" % port, open(os.path.join(WORK, "brain.log")).read()[mark:]), 30)),
+              "kn_brain is up again")
+        c_name = "epc%s" % stamp
+        c, c_tok = asyncio.run(register(port, c_name))
+        req = urllib.request.Request("http://127.0.0.1:%d/email/preferences" % port, headers={"Authorization": "Bearer " + c_tok})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            got = json.loads(resp.read())
+        check((got.get("data") or {}).get("chosen") is True, "no mailer and no promotional_optin: GET answers chosen (no popup): %r" % (got,))
     except Exception as e:  # pragma: no cover
         check(False, "exception: %r" % e)
     finally:

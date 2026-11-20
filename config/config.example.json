@@ -218,7 +218,8 @@
       "resend_cooldown_s": 60,
       "max_per_account_day": 5,
       "max_per_address_day": 5,
-      "max_per_ip_hour": 10
+      "max_per_ip_hour": 10,
+      "_promotional_optin": "promotional_optin true/false: ask players for promotional emails (v10.0.7's opt-in popup); unset = only when smtp is configured"
     }
   },
   "smtp": {

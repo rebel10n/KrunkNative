@@ -25,7 +25,8 @@
  *   GET /account/usernames -> the account's own username: one name, active, never expires (accounts.username).
  *       Box Office sells no usernames and keeps no renewals, so reserve is refused and a swap only answers the
  *       active name.
- *   GET / POST /email/preferences -> the account's stored choice (accounts.email_pref_*, migration 0391).
+ *   GET / POST /email/preferences -> the account's stored choice (accounts.email_pref_*, migration 0391). GET answers
+ *       chosen true when Box Office does not ask (accounts.email.promotional_optin, default on when smtp is configured).
  *   The Discord routes (/discord/status, link, callback, join, unlink) are discord.c's (v10.0.7, migration 0366).
  *   the email gate (accounts.login.require_verified, default on): a password login of an account whose email is
  *       not verified -> {type: "ensure_verified", challenge_id}, no token (the session acct_auth issued is revoked).
@@ -975,7 +976,10 @@ static void prefs_got(kn_db_result *res, void *ud) {
     }
     cJSON *d = cJSON_CreateObject();
     const int row = kn_db_rows(res) > 0;
-    cJSON_AddBoolToObject(d, "chosen", row && atoi(kn_db_get(res, 0, 0)) != 0);
+    /* Box Office only asks when it can mail (accounts.email.promotional_optin, default: smtp configured): without a
+     * mailer nothing promotional would ever be sent, so the answer is "chosen" and the client opens no opt-in popup */
+    const int ask = kn_config_bool(g_brain->cfg, "accounts.email.promotional_optin", acct_email_enabled());
+    cJSON_AddBoolToObject(d, "chosen", !ask || (row && atoi(kn_db_get(res, 0, 0)) != 0));
     cJSON_AddBoolToObject(d, "promotional", row && atoi(kn_db_get(res, 0, 1)) != 0);
     v10_reply_data(req, 200, d);
 }

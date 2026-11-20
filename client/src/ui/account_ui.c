@@ -2663,7 +2663,7 @@ static void optin_show(void) {
 }
 
 static void optin_check_got(const int ok) {
-    if (ok && g_promo_chosen == 0 && !g_optin_shown && g_logged_in) {
+    if (ok && g_promo_chosen == 0 && !g_optin_shown && g_logged_in && v10_menu_page()) {
         g_optin_shown = 1;
         optin_show();
     }
@@ -2671,7 +2671,8 @@ static void optin_check_got(const int ok) {
 
 // setTimeout(.., 3000): not in a game (iîiìiîí: the menu is up), not shown yet, signed in: getPreference again
 static void optin_timer(void *user) {
-    if ((int) (intptr_t) user != g_promo_gen || g_optin_shown || !g_logged_in || !menu_ui()->menu_open) return;
+    // the game page only (game.js's; the hub, editor and viewer pages have no opt-in)
+    if ((int) (intptr_t) user != g_promo_gen || g_optin_shown || !g_logged_in || !menu_ui()->menu_open || !v10_menu_page()) return;
     promo_fetch(optin_check_got);
 }
 

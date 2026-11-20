@@ -384,7 +384,8 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     linking is unavailable.
     Settings has Promotional Emails (`togglePromoEmails`: POST `/email/preferences`, kn_brain stores the choice;
     the sign-in reads it, and 3 s later on the menu opens the opt-in popup once per run when nothing is chosen,
-    deob-10.0.7.js:216865-216873; the register card's box is sent with source "registration") and the usernames row (`manageAccNames`,
+    deob-10.0.7.js:216865-216873; the register card's box is sent with source "registration"; a brain that sends no
+    mail answers chosen and nobody is asked, `accounts.email.promotional_optin`) and the usernames row (`manageAccNames`,
     the usernames popup).
   - Social panel: opening it, or switching to a tab, starts that tab afresh as v10's components do
     (Social on Global, Friends with no chat open, no filter, empty draft); the Search tab's scroll is kept.
