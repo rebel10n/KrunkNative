@@ -18,8 +18,9 @@ concurrency:
 permissions:
   contents: read
 
-# Linux jobs run on KrunkNative's self-hosted runners on divide's CT 208 (label kn-ci; the backend job on
-# kn-db, the one runner whose host ports 5432 / 3306 its service containers bind): deploy/ci-runner/README.md.
+# Linux jobs (meta, linux, web, services) run on KrunkNative's self-hosted runners on divide's CT 208 (label
+# kn-ci; the backend job on kn-db, the one runner whose host ports 5432 / 3306 its service containers bind):
+# deploy/ci-runner/README.md. `check` stays GitHub-hosted (it fetches from dl.krunk.io, see there).
 # Back to GitHub-hosted without a commit: repo variables KN_LINUX_RUNNER / KN_DB_RUNNER = '"ubuntu-latest"'.
 
 env:
@@ -508,7 +509,9 @@ jobs:
   check:
     name: make check (tests, lint, net-bridge typecheck)
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' # CI runs on main only
-    runs-on: ${{ fromJSON(vars.KN_LINUX_RUNNER || '["self-hosted", "kn-ci"]') }}
+    # GitHub-hosted: "Test game content" downloads from dl.krunk.io, and CT 208's firewall (untrusted job
+    # code: internet only) drops divide's own public address, the hairpin to kru (deploy/ci-runner/README.md).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:

@@ -17,7 +17,7 @@ tarball=actions-runner-linux-x64-$version.tar.gz
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-	build-essential cmake ninja-build pkg-config shellcheck rsync git git-lfs curl jq zip unzip xz-utils \
+	build-essential cmake ninja-build pkg-config shellcheck rsync ccache mold git git-lfs curl jq zip unzip xz-utils \
 	libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev libxrandr-dev libxi-dev \
 	libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev libxcb-present-dev libegl-dev \
 	postgresql-client mariadb-client redis-server \
@@ -30,7 +30,7 @@ systemctl disable --now redis-server >/dev/null 2>&1 || true
 # backend job's service containers.
 id "$user" >/dev/null 2>&1 || useradd -m -s /bin/bash "$user"
 usermod -aG docker "$user"
-install -d -o "$user" -g "$user" "$home/dl" "$home/hooks" "$home/tmp" "$home/cache" "$home/.cache"
+install -d -o "$user" -g "$user" "$home/dl" "$home/hooks" "$home/tmp" "$home/cache" "$home/.cache" "$home/.ccache"
 
 # All KN runners share one slice: at most 12 of the CT's 28 cores and 24 GB, so Fracital's CI keeps headroom.
 cat >/etc/systemd/system/kn-ci.slice <<'SLICE'
@@ -94,11 +94,15 @@ for n in $(seq 1 "$count"); do
 	fi
 	install -d -o "$user" -g "$user" "$home/tmp/$name" "$home/cache/$name"
 	# JOBS: the Makefile's --parallel (it defaults to nproc = 28); the slice caps the CPU anyway.
+	# CCACHE_DIR: one compiler cache for all KN runners (CMakeLists.txt KRUNKNATIVE_FAST_BUILD picks up
+	# ccache and mold), kept across jobs: actions/checkout cleans the build dirs, not this.
 	cat >"$dir/.env" <<ENV
 LANG=C.UTF-8
 TMPDIR=$home/tmp/$name
 XDG_CACHE_HOME=$home/cache/$name
 JOBS=8
+CCACHE_DIR=$home/.ccache
+CCACHE_MAXSIZE=30G
 ImageOS=ubuntu26
 ACTIONS_RUNNER_HOOK_JOB_STARTED=$home/hooks/job.sh
 ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$home/hooks/job.sh
