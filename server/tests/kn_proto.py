@@ -10,6 +10,7 @@ import time
 HELLO, ENT, SPAWN, INIT, CHAT, ERROR = 1, 3, 4, 2, None, 30
 JOIN, AUTH_CHALLENGE, REDIRECT = 72, 73, 74
 SKINS = 35  # S->C before every SPAWN: uid i + PlayerSkins (primary, secondary, melee) 3i
+LOAD_IN_REFUSAL = b"Loading the map..."  # canSpawn during the load-in hold (deob-10.0.7.js:191039-191040)
 
 
 def free_ports(n):
@@ -51,6 +52,8 @@ class Conn:
         self.s.settimeout(timeout)
         self.buf = b""
         self.packets = []
+        self._ent = None        # the last ENT payload, resent after a load-in refusal
+        self._ent_retry = None  # when to resend it (time.time()), None = no refusal pending
 
     def send(self, ptype, payload=b""):
         self.s.sendall(struct.pack(">BH", ptype, len(payload)) + payload)
@@ -72,7 +75,16 @@ class Conn:
             payload += struct.pack("<3i", *(skins if skins is not None else (-1, -1, -1)))
         if lag_comp is not None:
             payload += struct.pack("<f", lag_comp)
+        self._ent, self._ent_retry = payload, None
         self.send(ENT, payload)
+
+    def _refused(self, t, payload):
+        """canSpawn's load-in refusal (the 2 s after a map start, deob-10.0.7.js:191039): a pre-EXT peer gets
+        it as a server line, an EXT peer as FAILED_TO_ENDER. A player clicks Play again; so does this client."""
+        if self._ent is None:
+            return
+        if (t == 9 and LOAD_IN_REFUSAL in payload) or (t == 254 and payload[:2] == b"\x33\x80"):
+            self._ent_retry = time.time() + 0.3
 
     def read(self, until=None, timeout=5.0):
         """Reads packets for up to timeout s; returns the first matching `until` type (or None)."""
@@ -84,10 +96,23 @@ class Conn:
                     break
                 payload, self.buf = self.buf[3 : 3 + n], self.buf[3 + n :]
                 self.packets.append((t, payload))
+                self._refused(t, payload)
                 if until is not None and t == until:
+                    if t == SPAWN and self._ent is not None:
+                        info = spawn_info(payload)
+                        if info and info["is_you"] and not info["active"]:
+                            continue  # the HELLO's dead SPAWN, not the answer to the pending ENT
+                        if info and info["is_you"]:
+                            self._ent = self._ent_retry = None  # entered
                     return payload
+            if self._ent_retry is not None and time.time() >= self._ent_retry:
+                self._ent_retry = None
+                self.send(ENT, self._ent)
             try:
-                self.s.settimeout(max(0.05, end - time.time()))
+                wait = end - time.time()
+                if self._ent_retry is not None:
+                    wait = min(wait, self._ent_retry - time.time())
+                self.s.settimeout(max(0.05, wait))
                 data = self.s.recv(65536)
             except socket.timeout:
                 continue

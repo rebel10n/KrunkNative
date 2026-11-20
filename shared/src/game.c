@@ -295,6 +295,14 @@ int game_can_spawn(const Game *game, const Player *player) {
     return mode_can_spawn(game, player); // lives modes: out of lives once the match started
 }
 
+// canSpawn (deob-10.0.7.js:191038-191055): "Loading the map..." while the load-in hold runs, then the comp
+// lobby's team / class checks.
+const char *game_spawn_block(const Game *game, const int uid) {
+    if (!game) return NULL;
+    if (game->load_in_timer > 0.0f) return "Loading the map...";
+    return comp_lobby_spawn_block(game, uid);
+}
+
 void game_player_changing(const Game *game, Player *player, const int done) {
     if (game && game->hooks.player_changing) game->hooks.player_changing(game, player, done);
 }
@@ -535,6 +543,8 @@ void game_start_round(Game *game) {
     game->round_seconds_sent = -1;
     game->round_endless = 0;
     game->end_timer = 0.0f;
+    // finishInit: loadInTimer = isServer && !isSandbox ? loadInTime : 0 (deob-10.0.7.js:193804)
+    game->load_in_timer = game->server && !game->is_sandbox ? GAME_LOAD_IN_TIME : 0.0f;
     game->kill_count = 0;
     game->nuke_timer = 0.0f;
     game->nuke_player = NULL;
@@ -831,6 +841,13 @@ static int game_tick_round(Game *game, const float delta) {
             game_send_timer(game, NET_TARGET_ALL, seconds, 1);
         }
 
+        return 0;
+    }
+
+    // loadInTimer (deob-10.0.7.js:195342-195345): no lockout, wait timers, conditions or clock until it runs out
+    if (game->load_in_timer > 0.0f) {
+        game->load_in_timer -= delta;
+        if (game->load_in_timer < 0.0f) game->load_in_timer = 0.0f;
         return 0;
     }
 

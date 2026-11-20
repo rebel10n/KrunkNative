@@ -2128,6 +2128,9 @@ typedef struct {
 // Krunker v3.1.1 match constants (src/config.js) in seconds.
 #define GAME_END_TIMER 25.0f        // config.endTimer (end screen / map vote)
 #define GAME_DEATH_DELAY 2.8f       // config.deathDelay (death card before the menu returns)
+// config.loadInTime (deob-10.0.7.js:16546 0x7d0 ms, config key :19812): finishInit holds a server game this long
+// (loadInTimer, :193804) before anyone may spawn or any round timer runs (:195342-195345, canSpawn :191039)
+#define GAME_LOAD_IN_TIME 2.0f
 #define GAME_ASSIST_TIME 5.0f       // config.assistTime
 #define GAME_ASSIST_SCORE 25        // config.assistScore
 #define GAME_ASSIST_MIN 20.0f       // config.assistMin
@@ -2309,6 +2312,7 @@ typedef struct Game_t {
     unsigned char is_official:1;
 
     float end_timer;              // seconds of end screen left (> 0 = round over)
+    float load_in_timer;          // v10 loadInTimer: seconds left of the map load-in hold (GAME_LOAD_IN_TIME), 0 none
 
     // Round state (authority): Krunker game.gameTimer / lastTimer / kills.
     float round_timer;            // seconds left in the round
@@ -2409,6 +2413,7 @@ int game_raycast(Game *game, vec3 origin, vec3 dir, float range, const Player *e
 // io_ent spawn rules: a ready round, not the end screen, not alive, config.deathDelay since
 // the last death, lives left (`player` NULL: first spawn). Server and offline client alike.
 int game_can_spawn(const Game*, const Player*);
+const char *game_spawn_block(const Game*, int uid); // v10 canSpawn's message (load-in, then the comp lobby), NULL = may spawn
 int game_end_late_spawn(const Game*, const Player*); // ENT while the round is over (vote window): spawn anyway
 void game_send_end_late(Game*, int uid);              // then the "end" with didWin -1 for that uid
 void game_player_changing(const Game*, Player*, int done); // GameHooks.player_changing, when set

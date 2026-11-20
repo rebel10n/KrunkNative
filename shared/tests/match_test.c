@@ -1625,6 +1625,35 @@ static void test_secondary_level(Game *game) {
     game_config_free(&custom);
 }
 
+// v10 loadInTimer (deob-10.0.7.js:193804, :195342-195345, canSpawn :191039): a server's finishInit holds the game
+// loadInTime (2 s, :16546) with no spawning and no clock; the offline sandbox and a client-local game have no hold.
+static void test_load_in(Game *game) {
+    const int failures = g_failures;
+    printf("Running load-in test...\n");
+    static int fake_server;
+    game->server = &fake_server;
+    game_start_round(game);
+    CHECK(near(game->load_in_timer, GAME_LOAD_IN_TIME, 0.001f) && GAME_LOAD_IN_TIME == 2.0f, "server round start: load-in %.2f", game->load_in_timer);
+    const char *why = game_spawn_block(game, 1);
+    CHECK(why && !strcmp(why, "Loading the map..."), "canSpawn during the load-in: %s", why ? why : "(none)");
+    const float clock = game->round_timer;
+    game_tick(game, game->now + 1.5f, 1.5f);
+    CHECK(near(game->round_timer, clock, 0.001f), "the clock waits for the load-in: %.2f (was %.2f)", game->round_timer, clock);
+    game_tick(game, game->now + 1.0f, 1.0f);
+    CHECK(game->load_in_timer == 0.0f && game_spawn_block(game, 1) == NULL, "load-in over: %.2f, spawning open", game->load_in_timer);
+    game_tick(game, game->now + 1.0f, 1.0f);
+    CHECK(near(game->round_timer, clock - 1.0f, 0.01f), "the clock runs after the load-in: %.2f", game->round_timer);
+
+    game->is_sandbox = 1;
+    game_start_round(game);
+    CHECK(game->load_in_timer == 0.0f, "the offline sandbox has no load-in (%.2f)", game->load_in_timer);
+    game->is_sandbox = 0;
+    game->server = NULL;
+    game_start_round(game);
+    CHECK(game->load_in_timer == 0.0f, "a client-local game has no load-in (%.2f)", game->load_in_timer);
+    printf("Load-in test %s\n", g_failures != failures ? "FAILED" : "OK");
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
@@ -1659,6 +1688,7 @@ int main(void) {
     test_kill_medals(&game);
     test_endless(&game);
     test_round(&game);
+    test_load_in(&game);
     test_secondary_level(&game);
     test_chat();
 

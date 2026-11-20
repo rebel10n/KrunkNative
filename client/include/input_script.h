@@ -6,6 +6,7 @@
 float input_script_delta(float delta);            // KRUNKNATIVE_FIXED_DELTA override of the frame delta (seconds)
 int input_script_fixed_delta(void);               // 1 when KRUNKNATIVE_FIXED_DELTA steps every frame (the HUD clock follows it)
 void input_script_tick(Client*);                  // frame start: run due script events (keys, mouse, pose, play)
+void input_script_enter_failed(void);             // FAILED_TO_ENDER: a scripted `play` clicks Play again 0.3 s later
 void input_script_adjust_input(Client*, Input*);  // after the look/move sampling: scripted look deltas
 void input_script_frame_end(Client*, float delta, float frame_delta);// after game_tick + camera: per-frame log row
 void input_script_frame_presented(Client*);       // the finished frame (page included): `frames` captures

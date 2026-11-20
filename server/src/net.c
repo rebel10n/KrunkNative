@@ -1229,6 +1229,8 @@ static void net_spawn_client(ClientConnection *client) {
 
 // ENT from a client: (re)spawn unless the round is over, the player is alive, or
 // it died less than config.deathDelay ago.
+static void net_send_enter_failed(ClientConnection *client, const char *text);
+
 static void net_request_spawn(ClientConnection *client) {
     // io_ent in the vote window: spawn anyway, then the late "end" (didWin -1), so the
     // joiner gets the end screen instead of a closed menu over nothing.
@@ -1238,14 +1240,28 @@ static void net_request_spawn(ClientConnection *client) {
         return;
     }
     if (!game_can_spawn(&g_server->game, client->player)) return; // shared with the offline client
-    // comp lobby canSpawn: a team and a class picked in the comp menu
-    const char *blocked = comp_lobby_spawn_block(&g_server->game, client->id);
+    // canSpawn: the map load-in hold, then a team and a class picked in the comp menu
+    const char *blocked = game_spawn_block(&g_server->game, client->id);
     if (blocked) {
-        accounts_notice(client, blocked);
+        net_send_enter_failed(client, blocked);
         return;
     }
 
     net_spawn_client(client);
+}
+
+// FAILED_TO_ENDER ("fe", deob-10.0.7.js:98699, handled at :214976-214981): canSpawn's message refuses an ENT and
+// the client returns to the menu with its enter cleared, so the player may click to play again; the message is
+// a red server line. A pre-EXT peer gets the line as a notice.
+static void net_send_enter_failed(ClientConnection *client, const char *text) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_EXT) {
+        accounts_notice(client, text);
+        return;
+    }
+    const size_t len = strlen(text) + 1;
+    uint8_t buf[NET_EXT_HEADER_SIZE + 128];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_OFFICIAL_ENTER_FAILED, text, (uint16_t) (len < 128 ? len : 128));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
 }
 
 static void net_free_players() {

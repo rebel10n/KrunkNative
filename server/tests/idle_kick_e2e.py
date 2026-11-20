@@ -173,10 +173,16 @@ def console(proc, line):
 
 
 def spawn_all(peers, timeout=5.0):
-    for p in peers.values():
-        p.ent(class_index=0, lag_comp=1.0)
+    # a refused ENT (canSpawn's 2 s load-in after a map start, deob-10.0.7.js:191039) is clicked again every
+    # 0.5 s, as a player would
+    sent = 0.0
     t0 = time.time()
     while time.time() - t0 < timeout and not all(p.me for p in peers.values()):
+        if time.time() - sent >= 0.5:
+            sent = time.time()
+            for p in peers.values():
+                if not p.me:
+                    p.ent(class_index=0, lag_comp=1.0)
         for p in peers.values():
             p.drain()
         time.sleep(0.02)

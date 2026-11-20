@@ -294,6 +294,8 @@ static struct {
     int boot_mode;    // the first event is `boot`: time runs from the page, before any map
     int play_pending; // boot mode's `play`: enter the game once the map is ready (retried per frame)
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
+    int enter_wanted;     // menu mode's `play` ran and our player is not active yet
+    float enter_retry_at; // >= 0: the server refused the enter (FAILED_TO_ENDER); click Play again at this time
     int page_wait;    // `page`: 1 until that page is shown and ready, -1 one more frame (its UI ticks), 0 none
     int spawn_wait;   // `spawn`: 1 until our player is active and the menu closed (spawn_waiting)
     char wait_sel[192]; // `waitfor <selector>`: the clock and the events stop until a node matches (clock_held)
@@ -1533,6 +1535,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "play") && g_script.menu_mode) {
         if (html_ui_available() && html_ui_is_menu_open()) client_set_menu_open(client, 0);
         client_enter_game(client);
+        g_script.enter_wanted = 1;
+        g_script.enter_retry_at = -1.0f;
     } else if (!strcmp(e->cmd, "shot")) {
         strncpy(g_script.shot, e->arg, sizeof(g_script.shot) - 1);
     } else if (!strcmp(e->cmd, "frames")) {
@@ -1607,6 +1611,10 @@ static void ft_sample(void) {
     g_script.ft_last = now;
 }
 
+void input_script_enter_failed(void) {
+    if (g_script.active && g_script.enter_wanted) g_script.enter_retry_at = g_script.time + 0.3f;
+}
+
 void input_script_tick(Client *client) {
     script_load();
     if (!g_script.active) return;
@@ -1647,6 +1655,14 @@ void input_script_tick(Client *client) {
     // events would otherwise run together and the probe would read the page before the UI
     // reacted to them (the HUD / menu passes run later in the frame), or the look before the
     // frame's mouse movement turned the camera (`state` yaw / pitch).
+    // a refused `play` (canSpawn's load-in after a map start, deob-10.0.7.js:191039): Play again, as a player would
+    if (g_script.enter_wanted && client->me && client->me->active) g_script.enter_wanted = 0;
+    if (g_script.enter_wanted && g_script.enter_retry_at >= 0.0f && g_script.time >= g_script.enter_retry_at) {
+        g_script.enter_retry_at = -1.0f;
+        if (html_ui_available() && html_ui_is_menu_open()) client_set_menu_open(client, 0);
+        client_enter_game(client);
+    }
+
     int ran = 0;
     while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
         const ScriptEvent *e = &g_script.events[g_script.next];

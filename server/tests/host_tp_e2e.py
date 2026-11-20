@@ -100,12 +100,15 @@ class Peer(kn_proto.Conn):
                 self.closed = True  # read() returned early: the socket closed
 
     def spawn(self):
-        self.ent(class_index=0, lag_comp=1.0)
+        # a refused ENT (canSpawn: the 2 s load-in after a map start, deob-10.0.7.js:191039) is clicked
+        # again, as a player would after the FAILED_TO_ENDER menu
         end = time.time() + 5
         while time.time() < end and self.me is None:
-            p = self.read(until=SPAWN, timeout=1)
-            if p is not None and kn_proto.spawn_info(p)["is_you"]:
-                self.me = kn_proto.spawn_info(p)
+            self.ent(class_index=0, lag_comp=1.0)
+            p = self.read(until=SPAWN, timeout=0.6)
+            info = kn_proto.spawn_info(p) if p is not None else None
+            if info and info["is_you"] and info["active"]:  # not the dead SPAWN that comes with the HELLO
+                self.me = info
         return self.me
 
     def say(self, text):

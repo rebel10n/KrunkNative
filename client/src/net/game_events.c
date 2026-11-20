@@ -14,6 +14,7 @@
 #include <s2c_events.h> // NET_EXT_PLAYER_ANIM / SPEECH_BUBBLE / SKIN_DEFINITION_CHANGED (doc/v10/s2c-coverage.md)
 #include <nettspend_audio.h> // NET_EXT_KN_LACED: the Purple Drank's laced spell, its ambience (nettspend_audio.c)
 #include <client.h>
+#include <input_script.h> // input_script_enter_failed
 #include <strike_hud_fx.h>   // STRIKE_DMG_KEY_AI: the Strike damage numbers' bot key (events_strike_damage_number)
 #include <hud_modes.h>
 #include <html_ui.h>
@@ -936,6 +937,7 @@ static void events_enter_failed(Client *client, const char *text, const uint16_t
         client->menu_play_pending = 0;
     }
     if (html_ui_available() && !html_ui_is_menu_open()) client_set_menu_open(client, 1);
+    input_script_enter_failed(); // tests: a scripted `play` clicks again
     char line[NET_CHAT_TEXT_SIZE];
     snprintf(line, sizeof(line), "%.*s", length ? (int) strnlen(text, length) : 0, text);
     if (line[0]) {

@@ -150,7 +150,8 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_AMMO = 0x8030,         // "uamo" NetOfficialAmmoPacket
     NET_EXT_KN_OFFICIAL_CHAT_I18N = 0x8031,    // "chi" NetOfficialChatI18nHeader + strings
     NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
-    NET_EXT_KN_OFFICIAL_ENTER_FAILED = 0x8033, // "fe" FAILED_TO_ENDER: the server's message, NUL-terminated ("" none)
+    NET_EXT_KN_OFFICIAL_ENTER_FAILED = 0x8033, // "fe" FAILED_TO_ENDER: the server's message, NUL-terminated ("" none); our
+                                               // own server sends it too, for canSpawn's refusals (server/src/net.c)
     NET_EXT_KN_OFFICIAL_MEDAL = 0x8034,        // "am" NetOfficialMedalPacket (a text score, sound, count)
     NET_EXT_KN_OFFICIAL_END_ROW = 0x8035,      // "end" NetOfficialEndRowPacket per endData.ed row, ahead of the END
     NET_EXT_KN_OFFICIAL_ROUND_SWITCH = 0x8036, // "rds" Switching Sides, no body: every player inactive, the menu in 3 s

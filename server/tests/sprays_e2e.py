@@ -184,7 +184,7 @@ def peer(brain_port, spray, token=""):
         if payload is None:
             break
         sp = kn_proto.spawn_info(payload)
-        if sp and sp["is_you"]:
+        if sp and sp["is_you"] and sp["active"]:  # not the dead SPAWN of the HELLO; kn_proto clicks again on a refusal
             return c, sp["uid"]
     return c, None
 
