@@ -3491,43 +3491,70 @@ static int g_chat_peer;    // ve.id
 static int g_chat_pending; // he != null
 static char g_chat_pending_txt[320];
 
-// the signed-in sidebar: clan chat, trade chat, then the conversations ("chtb")
+// The signed-in chat sidebar (hub-10.0.7.js:2201-2207): the Friends button, then the friends' bubbles ("chtb", the
+// brain's mutual follows with presence). The friends list is kept for showFriends / removeFriend.
+static cJSON *g_friends; // the last "chtb" rows, online first (owned)
+static void io_msg(int from, const char *text); // ["msg", fromId, text] (below)
+
 static void chat_sidebar(const AccountInfo *acc) {
+    (void) acc;
     set_display("chatHolder", "block");
-    StrBuf sb = {0};
-    if (acc->clan[0]) {
-        sb_append(&sb, "<div class='chatBlobI' data-tip='[");
-        sb_append_esc(&sb, acc->clan);
-        sb_append(&sb, "] Clan Chat'  onmouseover='createTip(this, 1)' onmouseout='cancelTip(this, 1)'><img class='chatBlobImg' onclick='startChat(0,1,&quot;[");
-        sb_append_esc(&sb, acc->clan);
-        sb_append(&sb, "] Clan Chat&quot;,this)' src='/img/crossed_swords_0.svg'/></div>");
-    }
-    sb_append(&sb, "<div class='chatBlobI' data-tip='Trade Chat'  onmouseover='createTip(this, 1)' onmouseout='cancelTip(this, 1)'><img class='chatBlobImg' onclick='startChat(0,2,&quot;Trade Chat&quot;,this)' src='/img/shaking_hands.svg'/></div><div class='chatListSep'></div><div id='chatBubHold'><div class='lds-ring' style='margin-top:10px;opacity:0.5'><div></div><div></div><div></div><div></div></div></div>");
-    char *html = sb_finish(&sb);
-    set_html("chatScroller", html);
-    free(html);
+    set_html("chatScroller", "<div class='chatBlobI' data-tip='Friends' onclick='showFriends()' onmouseover='createTip(this, 1, `Your friends list`)' "
+                             "onmouseout='cancelTip(1)'><div class='chatBlobIcn'><span class='material-icons' style='color:rgba(255,255,255,0.9);"
+                             "font-size:38px;line-height:57px;'>group</span></div></div><div class='chatListSep'></div><div id='chatBubHold'>"
+                             "<div class='lds-ring' style='margin-top:10px;opacity:0.5'><div></div><div></div><div></div><div></div></div></div>");
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("chtb"));
     hub_send(f);
 }
 
-// io_xhtb(rows): the conversation avatars, unread count badges
+// a friend's status line: "In game" (sm) / "Online" / "Offline"
+static const char *friend_status(const cJSON *r) {
+    if (!jnum(r, "st")) return "Offline";
+    const char *sm = jstr(r, "sm");
+    return sm && *sm ? sm : "Online";
+}
+
+// startChat(fid, 0, name, picture, 1, status, game) for a friend row
+static void friend_chat_call(StrBuf *sb, const cJSON *r) {
+    const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "", *gid = jstr(r, "gid") ? jstr(r, "gid") : "";
+    sb_appendf(sb, "startChat(%d,0,&quot;", (int) jnum(r, "fid"));
+    sb_append_js_escape(sb, fna);
+    sb_append(sb, "&quot;,&quot;./img/favicon.png&quot;,1,&quot;");
+    sb_append_js_escape(sb, jnum(r, "st") ? friend_status(r) : "");
+    sb_append(sb, "&quot;,&quot;");
+    sb_append_js_escape(sb, gid);
+    sb_append(sb, "&quot;)");
+}
+
+static int friend_order(const cJSON *a, const cJSON *b) { return (int) jnum(b, "st") - (int) jnum(a, "st"); }
+
+// io_xhtb(rows) (hub-10.0.7.js:2321-2346): online friends first, a status dot, the unread count
 static void io_xhtb(const cJSON *rows) {
-    if (!el("chatBubHold")) return;
-    StrBuf sb = {0};
+    cJSON_Delete(g_friends);
+    g_friends = cJSON_CreateArray();
     const cJSON *r;
     cJSON_ArrayForEach(r, rows) {
-        const int cht = (int) jnum(r, "cht"), fid = (int) jnum(r, "fid");
-        const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "";
-        sb_appendf(&sb, "<div class='chatBlobI' style='opacity:%s'  data-tip='", cht > 0 ? "1" : "0.7");
-        sb_append_esc(&sb, fna);
-        sb_append(&sb, "' onmouseover='createTip(this, 1)' onmouseout='cancelTip(this, 1)'>");
-        if (cht) sb_appendf(&sb, "<div class='msgCount' id='msgCnt%d'>%d</div>", fid, cht);
-        sb_appendf(&sb, "<img class='chatBlobImg' onclick='startChat(%d,0,&quot;", fid);
-        sb_append_esc(&sb, fna);
-        sb_append(&sb, "&quot;,this,1)'onerror='this.onerror=null;this.src=\"./img/favicon.png\";' src='./img/favicon.png'/></div>");
+        if (!cJSON_IsObject(r)) continue;
+        int at = cJSON_GetArraySize(g_friends); // a stable sort: after every friend at least as online
+        while (at > 0 && friend_order(cJSON_GetArrayItem(g_friends, at - 1), r) > 0) at--;
+        cJSON_InsertItemInArray(g_friends, at, cJSON_Duplicate(r, 1));
     }
-    if (!cJSON_GetArraySize(rows)) sb_append(&sb, "<div class='chatBlobI'><img class='chatBlobImg'/></div>");
+    if (!el("chatBubHold")) return;
+    StrBuf sb = {0};
+    cJSON_ArrayForEach(r, g_friends) {
+        const int cht = (int) jnum(r, "cht"), fid = (int) jnum(r, "fid"), on = jnum(r, "st") != 0;
+        const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "";
+        sb_appendf(&sb, "<div class='chatBlobI' style='opacity:%s' data-tip='", cht > 0 || on ? "1" : "0.7");
+        sb_append_esc(&sb, fna);
+        sb_append(&sb, "' onmouseover='createTip(this, 1, `");
+        sb_append_js_escape(&sb, friend_status(r));
+        sb_appendf(&sb, "`, %d)' onmouseout='cancelTip(1)'><div class='statusBlob' style='background:%s'></div>", on, on ? "#27ab32" : "#7f7f7f");
+        sb_appendf(&sb, "<div class='msgCount' id='msgCnt%d'%s>%d</div><img class='chatBlobImg' onclick='", fid, cht ? "" : " style='display: none;'", cht);
+        friend_chat_call(&sb, r);
+        sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/favicon.png\";' src='./img/favicon.png'/></div>");
+    }
+    if (!cJSON_GetArraySize(g_friends)) sb_append(&sb, "<div class='chatBlobI'><img class='chatBlobImg'/></div>");
     char *html = sb_finish(&sb);
     set_html("chatBubHold", html);
     free(html);
@@ -3796,6 +3823,10 @@ static void handle_reply_frame(const cJSON *frame) {
     }
     if (!strcmp(label, "chs")) {
         chat_status_frame(cJSON_GetArrayItem(frame, 1));
+        return;
+    }
+    if (!strcmp(label, "msg")) {
+        io_msg((int) cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 1)), cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)));
         return;
     }
     if (!strcmp(label, "sst")) {
@@ -4167,6 +4198,136 @@ H(h_search_profile) {
     return 1;
 }
 
+// showFriends() (hub-10.0.7.js:5324-5343): every friend, with Message, Join (in a game) and Remove Friend
+H(h_show_friends) {
+    UNUSED;
+    if (!g_hub.logged_in || !g_friends) return 1;
+    const int n = cJSON_GetArraySize(g_friends);
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div style='font-size:22px;margin-bottom:20px;color:#fff;'>Friends<div style='float:right;color:rgba(255,255,255,0.8);'>%d</div></div>", n);
+    for (int i = 0; i < n; i++) {
+        const cJSON *r = cJSON_GetArrayItem(g_friends, i);
+        const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "", *gid = jstr(r, "gid");
+        const int on = jnum(r, "st") != 0;
+        sb_append(&sb, "<div class='friendBHold'><div style='text-align:left;'><img class='folPfp' style='width:60px;height:60px;' "
+                       "onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='./img/player_pfp.png'/><div class='folInfHldr'>");
+        if (jnum(r, "sub")) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+        if (jnum(r, "plf")) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;margin-right:4px;font-size:28px;vertical-align:middle;'>check_circle</i>");
+        sb_append(&sb, "<a href='/social.html?p=profile&q=");
+        sb_append_esc(&sb, fna);
+        sb_append(&sb, "' class='lName' style='color:rgba(255,255,255,0.9)'>");
+        sb_append_esc(&sb, fna);
+        sb_appendf(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:16px;margin-left:2px;'><div class='onStatus' style='background:%s'></div>",
+                   on ? "#27ab32" : "#7f7f7f");
+        sb_append_esc(&sb, friend_status(r));
+        sb_append(&sb, "</div></div><div class='friendHrgt'><div class='dmFrndBtn' title='Message' onclick='");
+        friend_chat_call(&sb, r);
+        sb_append(&sb, "'><span class='material-icons' style='color:#fff;font-size:47px;vertical-align:middle;margin-bottom:-16px;'>chat_bubble_outline</span></div>");
+        if (gid && *gid) {
+            sb_append(&sb, "<div class='button buttonB' style='margin-right:15px;padding:10px;transform:translateY(7px);display:inline-block;' onclick='openURL(`/?game=");
+            sb_append_js_escape(&sb, gid);
+            sb_append(&sb, "`,1)'>Join</div>");
+        }
+        sb_appendf(&sb, "<div class='button buttonR' style='padding:10px;transform:translateY(7px);display:inline-block;vertical-align:unset;' "
+                        "onclick='removeFriend(%d)'>Remove</div></div></div></div>", i);
+    }
+    if (!n) sb_append(&sb, "No friends yet: follow someone who follows you back");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "followPop", NULL);
+    free(html);
+    return 1;
+}
+
+// removeFriend(i) (hub-10.0.7.js:5345-5352): unfollow (["f", name, 0]), drop the row, show the list again
+H(h_remove_friend) {
+    const int i = (int) arg_n(args, argc, 0, -1);
+    const cJSON *r = g_friends ? cJSON_GetArrayItem(g_friends, i) : NULL;
+    const char *fna = r ? jstr(r, "fna") : NULL;
+    if (!fna) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("f"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(fna));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+    hub_send(f);
+    cJSON *rows = cJSON_Duplicate(g_friends, 1);
+    cJSON_DeleteItemFromArray(rows, i);
+    io_xhtb(rows);
+    cJSON_Delete(rows);
+    return h_show_friends(user, ev, args, argc);
+}
+
+// createTip(el, 1, sub, online) / cancelTip(1) (hub-10.0.7.js:6862-6878, 6885-6890): the chat sidebar's tooltip,
+// right of the bubble. The item-card form (createTip(el) on a market card) is hub_item_tip.
+H(h_create_tip) {
+    UNUSED;
+    if (!ev || !ev->target || !(int) arg_n(args, argc, 1, 0)) return 1;
+    const HtmlElem base = el("uiBase");
+    if (!base) return 1;
+    for (HtmlElem old; (old = html_dom_query(base, ".tooltip2"));) html_dom_remove(old);
+    char tip[200] = "";
+    html_dom_get_attr(ev->target, "data-tip", tip, sizeof(tip));
+    const char *sub = argc > 2 ? arg_s(ev, args, argc, 2) : "";
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='tooltip2'><div class='tooltipSub'>");
+    if (argc > 3) sb_appendf(&sb, "<div class='onStatus' style='background:%s;margin-top:-8px;vertical-align:middle;'></div>", arg_n(args, argc, 3, 0) ? "#27ab32;" : "#7f7f7f;");
+    sb_append_esc(&sb, tip);
+    sb_append(&sb, "<div class='tooltipSubS'>");
+    sb_append_esc(&sb, sub ? sub : "");
+    sb_append(&sb, "</div></div></div>");
+    char *html = sb_finish(&sb);
+    html_dom_insert_html(base, HTML_INSERT_AFTER_BEGIN, html);
+    free(html);
+    HtmlRect r, t;
+    const HtmlElem tipel = html_dom_query(base, ".tooltip2");
+    if (tipel && html_dom_get_rect(ev->target, &r) && html_dom_get_rect(tipel, &t)) {
+        char style[96];
+        snprintf(style, sizeof(style), "top:%.0fpx;left:%.0fpx;", r.y + r.h / 2 - t.h / 2, r.x + r.w + 15);
+        html_dom_set_attr(tipel, "style", style);
+    }
+    return 1;
+}
+
+H(h_cancel_tip) {
+    UNUSED;
+    const HtmlElem base = el("uiBase");
+    const char *sel = (int) arg_n(args, argc, 0, 0) ? ".tooltip2" : ".tooltip";
+    for (HtmlElem old; base && (old = html_dom_query(base, sel));) html_dom_remove(old);
+    return 1;
+}
+
+// ["msg", fromId, text] (hub-10.0.7.js:6932-6950): the open thread gets the line, else the friend's bubble counts it
+static void io_msg(const int from, const char *text) {
+    if (g_chat_peer == from && g_chat_list && el("chatBox")) {
+        const cJSON *peer = NULL, *r;
+        cJSON_ArrayForEach(r, g_friends) if ((int) jnum(r, "fid") == from) peer = r;
+        cJSON *m = cJSON_CreateObject();
+        cJSON_AddStringToObject(m, "fna", peer && jstr(peer, "fna") ? jstr(peer, "fna") : "");
+        cJSON_AddNumberToObject(m, "tim", 0);
+        cJSON_AddNumberToObject(m, "fid", from);
+        StrBuf t = {0};
+        sb_append_esc(&t, text ? text : "");
+        char *txt = sb_finish(&t);
+        cJSON_AddStringToObject(m, "txt", txt ? txt : "");
+        free(txt);
+        cJSON_InsertItemInArray(g_chat_list, 0, m);
+        chat_update_list();
+        return;
+    }
+    hub_sound("notif_0", 0.7f);
+    char id[32];
+    snprintf(id, sizeof(id), "msgCnt%d", from);
+    const HtmlElem c = el(id);
+    if (!c) return;
+    char now[16] = "";
+    html_dom_get_text(c, now, sizeof(now));
+    char next[16];
+    snprintf(next, sizeof(next), "%d", atoi(now) + 1);
+    html_dom_set_text(c, next);
+    html_dom_set_display(c, "block");
+    const HtmlElem blob = html_dom_parent(c);
+    if (blob) html_dom_set_style(blob, "opacity", "1");
+}
+
 // onkeyup="if (window.event.keyCode==13) window.searchProfile();" (the native engine
 // does not run that statement: the keyup listener on #searchPInput does it)
 // startChat(id, kind, name, img, isPlayer): the chat box (kind 1 clan / 2 trade: id 0)
@@ -4199,8 +4360,22 @@ H(h_start_chat) {
     } else if (name) {
         sb_append_esc(&sb, name);
     }
-    // the peer's presence (v10: Online / Offline at the right of the header), from the brain's "chs"
-    sb_append(&sb, "<div id='chatStatus' style='position:absolute;vertical-align:top;color:rgba(255,255,255,0.6);margin-right:5px;right:5px;top:6px;'></div>");
+    // the peer's presence at the right of the header: startChat's status text (a friend bubble's, hub-10.0.7.js:2229-2262),
+    // then the brain's "chs"; Join while the friend is in a game
+    const char *status = argc > 5 ? arg_s(ev, args, argc, 5) : NULL, *game = argc > 6 ? arg_s(ev, args, argc, 6) : NULL;
+    sb_append(&sb, "<div id='chatStatus' style='position:absolute;vertical-align:top;color:rgba(255,255,255,0.6);margin-right:5px;right:5px;top:6px;'>");
+    if (status && *status && strcmp(status, "undefined")) {
+        sb_append(&sb, "<div class='onStatus' style='background:#27ab32;margin-top:-8px;vertical-align:middle;'></div>");
+        sb_append_esc(&sb, status);
+    } else if (argc > 5) {
+        sb_append(&sb, "<div class='onStatus' style='background:#7f7f7f;margin-top:-8px;vertical-align:middle;'></div>Offline");
+    }
+    if (game && *game) {
+        sb_append(&sb, "<div class='frndQickJoin' title='Join' onclick='openURL(`/?game=");
+        sb_append_js_escape(&sb, game);
+        sb_append(&sb, "`,1)'><span class='material-icons'>login</span></div>");
+    }
+    sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
     set_html("chatWithHead", html);
     free(html);
@@ -6685,6 +6860,10 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"publishPopup", h_publish_popup},
     {"publishModPopup", h_publish_mod_popup},
     {"updateMod", h_update_mod},
+    {"showFriends", h_show_friends},   // the chat sidebar's friends (io_xhtb)
+    {"removeFriend", h_remove_friend},
+    {"createTip", h_create_tip},
+    {"cancelTip", h_cancel_tip},
     {"knModPick", h_mod_form},
     {"knModPublish", h_mod_form},
     {"switchFeedTab", h_switch_feed_tab},

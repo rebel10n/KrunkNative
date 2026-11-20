@@ -175,18 +175,81 @@ static void rows_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, c->label, 1, rows ? rows : cJSON_CreateArray());
 }
 
-/* ["chtb"] -> ["chtb", [{fid, fna, cht}]] conversations, newest first, cht = unread */
+/* ["chtb"] -> ["chtb", [{fid, fna, cht, st, sm, sub, plf, gid}]]: the hub's chat sidebar and Friends popup are the
+ * viewer's friends (mutual follows, as social_eb.c's friends:list), hub-10.0.7.js:2203-2207 (the request), 2321-2346
+ * (the bubbles: online first, a status dot, the unread count, startChat with the status text and game) and 5324-5343
+ * (showFriends: premium mark and picture, verified mark, Join while in a game, Remove Friend). cht = unread from that
+ * friend, st = online (any brain), sm = "In game" and gid = the game id while the friend is in a game (game_presence),
+ * sub = premium, plf = verified. */
+typedef struct ChatFriends {
+    SocialSession *s; /* held */
+    cJSON *rows;
+} ChatFriends;
+
+static void chat_friends_online(void *ud, const int *online, size_t n) {
+    ChatFriends *w = ud;
+    size_t i = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, w->rows) {
+        const int on = i < n && online[i];
+        i++;
+        cJSON_AddNumberToObject(r, "st", on);
+        char game[96] = "";
+        int locked = 0;
+        if (on && game_presence_get((int64_t) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "fid")), game, sizeof game, &locked) == 1
+            && game[0]) {
+            cJSON_AddStringToObject(r, "sm", "In game");
+            cJSON_AddStringToObject(r, "gid", game);
+        }
+    }
+    social_send_n(w->s, "chtb", 1, w->rows);
+    social_unhold(w->s);
+    free(w);
+}
+
+static void chat_friends_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    if (!kn_db_ok(res)) {
+        acct_db_error(res, "chtb");
+        social_send_n(s, "chtb", 1, cJSON_CreateArray());
+        return;
+    }
+    const int n = kn_db_rows(res);
+    ChatFriends *w = calloc(1, sizeof *w);
+    int64_t *ids = calloc(n > 0 ? (size_t) n : 1, sizeof *ids);
+    if (!w || !ids) {
+        free(w);
+        free(ids);
+        return;
+    }
+    w->rows = cJSON_CreateArray();
+    for (int i = 0; i < n; i++) {
+        cJSON *o = cJSON_CreateObject();
+        ids[i] = kn_db_get_int64(res, i, 0, 0);
+        cJSON_AddNumberToObject(o, "fid", (double) ids[i]);
+        cJSON_AddStringToObject(o, "fna", kn_db_get(res, i, 1) ? kn_db_get(res, i, 1) : "");
+        cJSON_AddNumberToObject(o, "cht", (double) kn_db_get_int64(res, i, 2, 0));
+        cJSON_AddNumberToObject(o, "sub", kn_db_get_int64(res, i, 3, 0) > 0);
+        cJSON_AddNumberToObject(o, "plf", kn_db_get_int64(res, i, 4, 0) > 0);
+        cJSON_AddItemToArray(w->rows, o);
+    }
+    w->s = social_hold(s);
+    social_online_lookup(ids, (size_t) n, chat_friends_online, w);
+    free(ids);
+}
+
 void sh_chat_blobs(SocialSession *s, const cJSON *f) {
     (void) f;
     if (s->account_id <= 0) return;
     char me[24];
     social_query(s,
-                 SQL(.any = "SELECT peer AS fid, a.username AS fna, "
-                            "(SELECT count(*) FROM chat_messages m WHERE m.sender_id = peer AND m.receiver_id = $1 AND m.read_at IS NULL) AS cht "
-                            "FROM (SELECT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS peer, max(id) AS last "
-                            "      FROM chat_messages WHERE sender_id = $1 OR receiver_id = $1 GROUP BY 1) t "
-                            "JOIN accounts a ON a.id = t.peer ORDER BY t.last DESC LIMIT 50"),
-                 KN_DB_ARGS(me_str(s, me)), rows_done, ctx_new("chtb", 0, 0));
+                 SQL(.any = "SELECT a.id, a.username, "
+                            "(SELECT count(*) FROM chat_messages m WHERE m.sender_id = a.id AND m.receiver_id = $1 AND m.read_at IS NULL), "
+                            "coalesce(p.player_premium, 0), coalesce(p.player_featured, 0) "
+                            "FROM follows f1 JOIN follows f2 ON f2.follower_id = f1.followee_id AND f2.followee_id = f1.follower_id "
+                            "JOIN accounts a ON a.id = f1.followee_id LEFT JOIN players p ON p.player_id = a.id "
+                            "WHERE f1.follower_id = $1 ORDER BY lower(a.username) LIMIT 200"),
+                 KN_DB_ARGS(me_str(s, me)), chat_friends_done, NULL);
 }
 
 /* ["chs", {id, st, sm}]: the chat peer's presence for the header (v10: Online / Offline, or the
@@ -229,22 +292,24 @@ void sh_chat_thread(SocialSession *s, const cJSON *f) {
     }
 }
 
+typedef struct ChatSend {
+    int64_t a;    /* the recipient */
+    char text[2048];
+} ChatSend;
+
 static void chat_sent(SocialSession *s, kn_db_result *res, void *extra) {
-    Ctx *c = extra;
+    ChatSend *c = extra;
     if (!kn_db_ok(res) || kn_db_affected(res) < 1) {
         social_send_n(s, "chf", 2, cJSON_CreateFalse(),
                       cJSON_CreateString(kn_db_ok(res) ? "Message not Sent" : acct_db_error(res, "ict")));
         return;
     }
     social_send_n(s, "chf", 1, cJSON_CreateTrue());
-    /* live update for the recipient's open hub pages: refresh their conversation list */
-    cJSON *push = social_frame("chtb");
-    cJSON *rows = cJSON_CreateArray(), *row = cJSON_CreateObject();
-    cJSON_AddNumberToObject(row, "fid", (double) s->account_id);
-    cJSON_AddStringToObject(row, "fna", s->username);
-    cJSON_AddNumberToObject(row, "cht", 1);
-    cJSON_AddItemToArray(rows, row);
-    cJSON_AddItemToArray(push, rows);
+    /* the recipient's open hub pages: ["msg", fromId, text] (hub-10.0.7.js:6932-6950: the open thread gets the line,
+     * else the sender's bubble counts one more unread) */
+    cJSON *push = social_frame("msg");
+    cJSON_AddItemToArray(push, cJSON_CreateNumber((double) s->account_id));
+    cJSON_AddItemToArray(push, cJSON_CreateString(c->text));
     social_push_account(c->a, push);
 }
 
@@ -258,6 +323,10 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
         return;
     }
     char me[24], p[24];
+    ChatSend *c = calloc(1, sizeof *c);
+    if (!c) return;
+    c->a = peer;
+    snprintf(c->text, sizeof c->text, "%s", txt);
     social_query(s,
                  /* a staff chat ban (feature_bans 'chat', in force) refuses the line: no row, chf false */
                  SQL(.pg = "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
@@ -269,7 +338,7 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
                             "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) < 30 "
                             "AND NOT EXISTS (SELECT 1 FROM feature_bans WHERE account_id = $1 AND feature = 'chat' AND revoked_at IS NULL "
                             "AND (expires_at IS NULL OR expires_at > {now}))"),
-                 KN_DB_ARGS(me_str(s, me), acct_itoa(p, peer), txt), chat_sent, ctx_new("ict", peer, 0));
+                 KN_DB_ARGS(me_str(s, me), acct_itoa(p, peer), txt), chat_sent, c);
 }
 
 /* ------------------------------------------------------------------ clans */

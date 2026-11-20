@@ -249,8 +249,8 @@ async def scenario(a, b, redis):
         check(redis.cmd("GET", sess_key(tok)) == str(u1_id), "cached value is the account id")
         r = await sb.call("chf", "ict", u1_id, "hello across brains")
         check(r[1] is True, "chat sent on B")
-        push = await sa.recv("chtb", 5)
-        check(push[1][0]["fna"] == u2, "chat push reached the recipient's socket on A")
+        push = await sa.recv("msg", 5)
+        check(push and push[2] == "hello across brains", "chat push (msg) reached the recipient's socket on A")
 
         # ---- rate limit: 4 logins per minute per IP over both brains
         codes = []
@@ -308,8 +308,8 @@ async def scenario(a, b, redis):
         a.http("GET", "/auth/me?token=" + tok)
         check(wait_for(lambda: redis.cmd("EXISTS", sess_key(tok)) == 1, 3), "session cache fills again")
         r = await sb.call("chf", "ict", u1_id, "after restart")
-        push = await sa.recv("chtb", 5)
-        check(push[1][0]["fna"] == u2, "cross-brain push works again")
+        push = await sa.recv("msg", 5)
+        check(push and push[2] == "after restart", "cross-brain push works again")
 
     # ---- revocation: logout on A drops the cached session for B too
     st, _ = a.http("POST", "/auth/logout", {"token": tok})

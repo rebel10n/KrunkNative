@@ -367,10 +367,22 @@ async def scenario(base, internal_url, secret):
             # chat
             r = await a.call("chf", "ict", bob_id, "hey bob")
             check(r[1] is True, "chat sent")
-            push = await b.recv("chtb")
-            check(push[1][0]["fid"] == alice_id, "chat push to the recipient")
+            push = await b.recv("msg")
+            check(push[1] == alice_id and push[2] == "hey bob", "chat push to the recipient: [msg, from, text]")
+            # the hub's chat sidebar is the friends (mutual follows, hub-10.0.7.js:2321-2346)
             r = await b.call("chtb", "chtb")
-            check(r[1][0]["fna"] == alice and r[1][0]["cht"] == 1, "chat blobs with unread")
+            check(r[1] == [], "chat blobs: no friends yet")
+            await a.send("f", bob, 1)
+            await a.call("chtb", "chtb")  # a's socket runs its requests in order: the follow is in
+            await b.send("f", alice, 1)
+            r = await b.call("chtb", "chtb")
+            row = r[1][0] if r[1] else {}
+            check(row.get("fna") == alice and row.get("fid") == alice_id and row.get("cht") == 1 and row.get("st") == 1
+                  and "sub" in row and "plf" in row, "chat blobs: the friend, online, one unread: %r" % (r[1],))
+            await a.send("f", bob, 0)
+            await b.send("f", alice, 0)
+            await a.call("chtb", "chtb")
+            await b.call("chtb", "chtb")
             r = await b.call("chtl", "ctd", alice_id)
             check(r[1][0]["txt"] == "hey bob", "chat thread")
 
