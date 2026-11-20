@@ -10,7 +10,8 @@ kn_brain on sqlite + one client_bin at a time, logged in from seeded storage and
      Key removes a key of every player; Edit -> Add / Take Out moves the map funds; Update Leaderboard republishes
   2. a mod's Edit (updateMod -> plm): the Update Mod popup prefilled with the mod's name
   3. a developer's Chat Ban on a profile (/moderation/chat)
-  4. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
+  4. Market > Trading > History pages (loadMoreTradeHistory)
+  5. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
      Remove unfollows
 Screenshots go to the work dir (~/.cache/kn-hub-creator.*, kept on failure or with KN_KEEP=1).
 77 = skip (no client_bin / kn_brain / websockets).
@@ -293,6 +294,26 @@ def staff_profile(port, ids, tokens, names):
         q("UPDATE players SET player_developer = 0 WHERE player_id = ?", A)
 
 
+def trade_history(port, ids, tokens, names):
+    """Market > Trading > History: a page of 30, Load More for the rest (hub-10.0.7.js:2690-2702, 3844-3890)"""
+    A, B = ids
+    for i in range(35):
+        q("INSERT INTO trades (sender_id, receiver_id, status, closed_at) VALUES (?, ?, 'declined', strftime('%Y-%m-%d %H:%M:%f', 'now'))",
+          A if i % 2 else B, B if i % 2 else A)
+    c = Client(port, names[0], tokens[0], "p=market&q=trades", "trades")
+    try:
+        check(c.has("tn_his", 60), "the Trading tab")
+        c.ui("updateTrades('his')")
+        check(wait(lambda: c.count("#o_his .offerHolder[id]") == 30, 15), "History shows the first 30: %d" % c.count("#o_his .offerHolder[id]"))
+        check(c.count("#o_his .loadMoreHis") == 1, "and Load More")
+        c.shot("history")
+        c.ui("loadMoreTradeHistory()")
+        check(wait(lambda: c.count("#o_his .offerHolder[id]") == 35, 10), "Load More: all 35")
+        check(c.count("#o_his .loadMoreHis") == 0 and c.has("o_his", 5), "no more pages; the History tab stays open")
+    finally:
+        c.close()
+
+
 async def friends(port, ids, tokens, names, bob_sock):
     A, B = ids
     c = Client(port, names[0], tokens[0], "p=feed", "friends")
@@ -359,6 +380,7 @@ def main():
           1000000900 + int(stamp) % 50, "Hub Pack " + stamp, ids[0], 1000000950 + int(stamp) % 50, "Not Mine " + stamp, ids[1])
         map_page(port, ids, tokens, names, map_name, map_id, stamp)
         staff_profile(port, ids, tokens, names)
+        trade_history(port, ids, tokens, names)
 
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", ids[0], ids[1], ids[1], ids[0])
 

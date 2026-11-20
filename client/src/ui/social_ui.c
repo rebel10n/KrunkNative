@@ -2392,8 +2392,22 @@ static void offers_clear(void);
 static HubOffer *g_offers;
 static int g_offer_count;
 
+// Trade History pages (hub-10.0.7.js:2690-2702, 3844-3890: getHistory pages, a Load More row while the server has more).
+// The socket's trade page carries the whole history (economy.c, 500 rows); the hub shows it a page at a time, the page
+// of kn_brain's GET /trades/history (30).
+#define TRADE_HISTORY_PAGE 30
+static cJSON *g_trades_cache; // the last trade page (loadMoreTradeHistory draws it again)
+static int g_his_page = TRADE_HISTORY_PAGE, g_his_keep;
+
 static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
+    if (t != g_trades_cache) {
+        cJSON_Delete(g_trades_cache);
+        g_trades_cache = cJSON_Duplicate(t, 1);
+    }
+    if (!g_his_keep) g_his_page = TRADE_HISTORY_PAGE;
+    g_his_keep = 0;
+    int his_more = 0;
     if (!acc || acc->level < TRADE_MIN_LVL) {
         sb_appendf(out, "Must be level %d", TRADE_MIN_LVL);
         *shown = -1; // marketList = O, no "none" text
@@ -2413,6 +2427,10 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
             const char *give = jstr(o, he ? "sksell" : "skbuy"), *take = jstr(o, he ? "skbuy" : "sksell");
             const char *name = jstr(o, he ? "buyer" : "player");
             if (!name) continue;
+            if (we == 2 && fe[2] >= g_his_page) {
+                his_more = 1;
+                continue;
+            }
             int ids[2][16], counts[2] = {0, 0};
             const char *lists[2] = {give, take};
             for (int k = 0; k < 2; k++) {
@@ -2498,6 +2516,7 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
         char *body = sb_finish(&pe[i]);
         sb_append(out, body[0] ? body : "<div style='color: rgba(0,0,0,0.6);font-size: 17px;'>None</div>");
         free(body);
+        if (i == 2 && his_more) sb_append(out, "<div class='offerHolder loadMoreHis' onclick='loadMoreTradeHistory()' style='text-align: center;'>Load More</div>");
         sb_append(out, "</div>");
     }
     sb_append(out, "</div>");
@@ -4769,6 +4788,16 @@ H(h_update_trades) {
     return 1;
 }
 
+// loadMoreTradeHistory(): the next page of the Trade History, the History tab kept open
+H(h_load_more_trade_history) {
+    if (!g_trades_cache || strcmp(g_hub.v, "market") || strcmp(g_hub.b, "trades")) return 1;
+    g_his_page += TRADE_HISTORY_PAGE;
+    g_his_keep = 1;
+    hub_render_market("trades", g_trades_cache);
+    const HtmlArg tab = {.kind = HTML_ARG_STR, .str = "his"};
+    return h_update_trades(user, ev, &tab, 1);
+}
+
 // fastDeclOffer(id) / declineAllTrades(): io.send("trC", id) / ("trCA")
 H(h_decline_offer) {
     UNUSED;
@@ -6937,6 +6966,7 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"shareMapLink", h_share_link},
     {"shareGameTweet", h_share_game_tweet},
     {"chatBanUser", h_chat_ban_user},
+    {"loadMoreTradeHistory", h_load_more_trade_history},
     {"shareModLink", h_share_link},
     {"publishPopup", h_publish_popup},
     {"publishModPopup", h_publish_mod_popup},
