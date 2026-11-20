@@ -11,8 +11,13 @@
   ansible.builtin.shell: |
     set -euo pipefail
     list="$(mktemp "${TMPDIR:-/tmp}/kn-tracked-assets.XXXXXX")"
-    git -C {{ kn_repo_root | quote }} ls-files -z -- assets | tr '\0' '\n' | sed 's|^assets/||' \
-      | grep -vxF -f <(printf '%s\n' {{ kn_web_tracked_assets_skip | map('quote') | join(' ') }}) > "$list"
+    if git -C {{ kn_repo_root | quote }} rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      git -C {{ kn_repo_root | quote }} ls-files -z -- assets | tr '\0' '\n' | sed 's|^assets/||'
+    else
+      # local-deploy.sh runs Ansible from a clean git archive without .git.
+      # That archive contains only tracked sources, so its assets/ files are the index.
+      find {{ (kn_repo_root ~ '/assets') | quote }} -type f -printf '%P\n'
+    fi | LC_ALL=C sort | grep -vxF -f <(printf '%s\n' {{ kn_web_tracked_assets_skip | map('quote') | join(' ') }}) > "$list"
     echo "$list"
   args:
     executable: /bin/bash
