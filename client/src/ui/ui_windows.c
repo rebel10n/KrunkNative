@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <rent_servers_ui.h> // the Host chooser's Rent a Server card
 
 // ---------------------------------------------------------------- StrBuf
 
@@ -557,6 +558,9 @@ static char *gen_42(void) {
     sb_append_n(&out, html, (size_t) (at - html));
     sb_appendf(&out, "gamecats/c_%d.png", cats[pick]);
     sb_append(&out, at + sizeof(frozen) - 1);
+    // Box Office: v7.1.4's Dedicated card back (Krunker_v7.1.4/src/index.js:9402): 10.0.7 still ships the Rent
+    // Dedicated Server window (hostTypes[2]) but its chooser has no way in (deob-10.0.7.js:222239)
+    rent_servers_ui_chooser_card(&out);
     return sb_finish(&out);
 }
 static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (pListKey, hud_ui.c)

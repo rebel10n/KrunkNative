@@ -14,6 +14,7 @@
 #include <host_flow_ui.h>
 #include <host_command.h>
 #include <dedicated_server_ui.h> // "Get the dedicated server": the Dedicated Server window
+#include <rent_servers_ui.h>      // host type 2, Rent Dedicated Server (buyServ): its own pages
 #include <client.h>
 #include <community_host.h>      // the community maps' seam (community_maps.c): published maps, the catalogue
 #include <game_config.h>
@@ -564,6 +565,8 @@ static char *config_bodies(char *html, const int step, const cJSON *preset, cons
 
 // The window's markup for the state (MENU_WINDOW_HOST's generator, servers_ui.c)
 char *host_flow_window_gen(void) {
+    // buyServ (deob-10.0.7.js:219853): Rent Dedicated Server draws only its rental pages (rent_servers_ui.c)
+    if (g_flow.host_type == GAME_HOST_RENT) return rent_servers_ui_gen();
     const char *tpl = ui_windows_html("8");
     if (!tpl || !*tpl) return strdup("");
     const char *title = game_host_type_name(g_flow.host_type);
@@ -679,6 +682,7 @@ static void flow_reset(const int host_type) {
 // openHostWindow(false, type): the chooser's server-type cards (window 42)
 void host_flow_open(const int host_type) {
     flow_reset(host_type);
+    if (g_flow.host_type == GAME_HOST_RENT) rent_servers_ui_open();
     flow_show();
 }
 

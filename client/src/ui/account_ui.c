@@ -67,6 +67,7 @@
 #include <video_ad.h>        // FORCE_VIDEO_AD on an official game: the placeholder video ad
 #include <double_xp_offer.h> // the end screen's 2x XP answer on the krunker.io game socket ("rrqdxp")
 #include <app_backend.h>     // app_backend_official_session(): the router's / a child window's official connection
+#include <rent_servers_ui.h> // "dsrvl"
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT I18N("generic.wait", "Please wait...") // v7 showAccountResponse(i18n.t("generic.wait"))
@@ -1442,6 +1443,8 @@ static void on_social(void *user, const cJSON *frame) {
         rerender_windows();
     } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
         store_ui_frame(frame);
+    } else if (!strcmp(label, "dsrvl")) { // v10.0.7 DEDI_BUY_RESPONSE: Rent Dedicated Server (rent_servers_ui.c)
+        rent_servers_ui_frame(frame);
     } else if (!strcmp(label, "vr")) { // v10 REDEEM_VOUCHER_RESPONSE: the redeem popup's answer
         redeem_voucher_frame(frame);
     } else if (!strcmp(label, "ttl")) { // v10: the account's titles (v10_customize.c)

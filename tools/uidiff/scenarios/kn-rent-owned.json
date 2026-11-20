@@ -1,0 +1,77 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunknative/kn-rent-owned.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Player",
+      "score": 200000,
+      "funds": 25000,
+      "premium": 0,
+      "badges": [],
+      "stats": {}
+    },
+    "window": "host",
+    "rentServers": {
+      "rows": [
+        {
+          "ID": 1,
+          "REG": 0,
+          "TRM": 0,
+          "OID": null,
+          "SVN": "Ashburn",
+          "SID": 1,
+          "CONF": null
+        },
+        {
+          "ID": 2,
+          "REG": 0,
+          "TRM": 2161320000,
+          "OID": 7,
+          "SVN": "Ashburn",
+          "SID": 2,
+          "CONF": "{\"gid\": 12, \"mn\": \"Rooftop Run\", \"cr\": \"MapMaker_42\", \"typ\": 0}"
+        },
+        {
+          "ID": 3,
+          "REG": 0,
+          "TRM": 5444580000,
+          "OID": 1,
+          "SVN": "Ashburn",
+          "SID": 3,
+          "CONF": "{\"gid\": 40, \"mn\": \"Skyline Duel\", \"cr\": \"Player\", \"typ\": 1}"
+        }
+      ]
+    },
+    "windowActions": [
+      [
+        "openHostWindow",
+        false,
+        2
+      ],
+      [
+        "windows.7.servInd=",
+        2
+      ],
+      [
+        "windows.7.switchTab2",
+        3
+      ]
+    ]
+  },
+  "note": "Rent Dedicated Server (rent_servers_ui.c, doc/v10/rented-servers.md): Krunker v10.0.7's buyServ pages (deob-10.0.7.js:219853-219938) with Box Office's own markup and wording over the page's serverCard / rentServBtn styles. Reference: KN's own render. This one: tab 3: the owner's server: Time left, Extend Rental and Restart / Update."
+}

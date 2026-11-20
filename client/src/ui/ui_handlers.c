@@ -19,6 +19,7 @@
 #include <seek_prefs.h> // seek_prefs_handle
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
+#include <rent_servers_ui.h>  // Rent Dedicated Server: windows.7.switchTab2 / dediCst, rentDediServer, showGames(2)
 #include <host_flow_ui.h>   // the Host Game window: openHostWindow, selectHostMap, showGames(true), Start Game
 #include <game_config.h>    // GAME_HOST_CUSTOM
 #include <cJSON.h>
@@ -296,6 +297,14 @@ H(h_select_host_map) {
     UNUSED;
     const char *name = arg_str(ev, args, argc, 0, ""), *creator = arg_str(ev, args, argc, 3, "");
     const int index = community_catalogue_index(name, creator);
+    if (rent_servers_ui_picking()) { // windows[9].hostType 2: the Rent Dedicated Server window's game (deob-10.0.7.js:225339)
+        const MapCatalogEntry *e = index >= 0 ? map_catalog_at((size_t) index) : NULL;
+        char id[24] = "";
+        if (argc > 2 && args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof(id), "%.0f", args[2].num);
+        else snprintf(id, sizeof(id), "%s", arg_str(ev, args, argc, 2, ""));
+        rent_servers_ui_pick(e && e->name ? e->name : name, e ? "" : creator, e ? e->key : "", id);
+        return 1;
+    }
     if (index >= 0) {
         host_flow_open_map(index);
         return 1;
@@ -425,6 +434,10 @@ H(h_close_wind) { UNUSED; menu_toggle_window(0); return 1; }
 // Games card (showGames(true)) browses the community maps for the Host Game window; Custom Games browses too.
 H(h_show_games) {
     UNUSED;
+    if (argc > 0 && args[0].kind == HTML_ARG_NUM && args[0].num == 2) { // showGames(2): a rented server's game
+        rent_servers_ui_browse();
+        return 1;
+    }
     if (arg_bool(ev, args, argc, 0, 0)) {
         host_flow_browse_community();
         return 1;
@@ -600,6 +613,7 @@ typedef int (*UiModuleHandler)(const char *name, const HtmlEvent *ev, const Html
 static const UiModuleHandler MODULE_HANDLERS[] = {
     kn_ad_handle,              // kn_ad.c: the placeholder ad's Continue / close (knAdContinue, knAdClose)
     host_flow_ui_handle,       // host_flow_ui.c: the Host Game flow (knHostFlow), every Host Game entry point
+    rent_servers_ui_handle,    // rent_servers_ui.c: Rent Dedicated Server (windows.7.switchTab2 / servInd / dediCst, rentDediServer)
     v10_menu_handle,           // v10_menu.c / v10_login.c: the v10 page's menu shell, loginOrRegister
     v10_rewards_handle,        // v10_rewards.c: v10.0.2 signup rewards, windows[32] (before account_ui.c's v7 ones)
     v10_events_handle,         // v10_events.c: v10.0.3 live events (eventPopup)

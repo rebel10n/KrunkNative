@@ -104,6 +104,7 @@
 #include <console.h> // state.console: ui_console_exec (frame sequences: `kill`, `end`)
 #include <hud_endscreen_v10.h> // the v10 end-of-match components (state.endscreen rewards / rank)
 #include <live_events_client.h> // state.events: v10.0.3 live events (v10_events.c)
+#include <rent_servers_ui.h> // state.rentServers
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -329,6 +330,7 @@ static void warn_unknown_keys(void) {
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "officialClasses", // the class list an official krunker.io game sent (game_config_apply, ui_scenario_apply)
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "rentServers", // the brain's ["dsrvl", 0, rows] for Rent Dedicated Server: {rows, game} (rent_servers_ui.c)
         "guestEarned", // {kr, score}: a guest's unclaimed rewards (v10_rewards.c: the menu's box, the signup rewards')
         "altAccounts", // the Account Manager's rows [{name, backend: "krunk.io" | "krunker.io", active}] (alt_manager_ui.c)
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
@@ -1274,6 +1276,7 @@ static int ui_scenario_apply(Client *client) {
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (st_has("kpdPhone")) hud_votekick_scenario_phone(st_bool("kpdPhone", 0)); // after the game's INIT, which ends a call
     if (st_has("trade")) trade_ui_scenario(st("trade")); // before the window: windows[36] draws this state (trade_ui.c)
+    if (menu_open && st_has("rentServers")) rent_servers_ui_scenario(st("rentServers")); // before the window opens
     if (menu_open) apply_window(client);
     if (menu_open) apply_kpd_police(client); // after the window: the popup on its tab, the list from the fixture
     if (st_has("replayBar") || st_has("replayCase")) hud_replay_scenario(client, st("replayBar"), st("replayCase")); // the replay viewer

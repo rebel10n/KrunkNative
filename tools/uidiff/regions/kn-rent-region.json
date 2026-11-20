@@ -1,0 +1,21 @@
+{
+  "scenario": "kn-rent-region",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "window",
+      "rect": [
+        280,
+        50,
+        720,
+        620
+      ],
+      "kind": "text",
+      "max_pct": 2.0,
+      "note": "#menuWindow, Rent a Server (rent_servers_ui.c): tab 2: New York's servers, the rented one greyed."
+    }
+  ]
+}
