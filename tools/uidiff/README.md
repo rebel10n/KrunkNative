@@ -199,6 +199,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `settingsView` | `"basic"` / `"advanced"` | `windows[0].settingType` (v7's default is basic) |
 | `windowActions` | array of `[name, args...]` | inline-handler calls dispatched once the window is open, by the names v7's markup uses: `["windows.2.switchTab", 0]` (Change Loadout's Class tab), `["windows.6.switchTab", 2]` (a controls tab) |
 | `windowScroll` | object `{id: top}` | scrollTop of the window's scroll containers once `windowActions` ran (clamped, so `1000000` is the end): `{"knOmToolsList": 1000000}` (kn-om-tools-short). A key starting with `.` is a selector (its first match), for the v10 Svelte popups that have no ids: `{".my-clan-tab.svelte-51j5cz": 800}` (kn-turf-history) |
+| `creationVote` | object `{map: {id, name, creator}, mod: {id, name, creator}}` | the menu's vote on the hosted community map (`#mapVote`) and the loaded mod (`#modVote`) as `creation_vote_set_map` / `creation_vote_set_mod` set them (NET_EXT_KN_CREATION_INFO, a mod load); id 0 = none (`kn-map-vote`, `kn-mod-vote`) |
 | `connected`, `ready` | bool | net state for `#instructions` (CLICK TO PLAY when both true) |
 | `updateArt` | int | the `img/menu-bg/<id>.png` (and its credit) the Game Updating screen shows; default id 0. `seq-game-updating` pins what v10's seeded `Math.random` picked in the capture (4) |
 | `inGame` | bool | HUD visible when `inGame && !menu`; with `menu` also true = ESC pause |
@@ -471,6 +472,11 @@ and the note says which.
   window; `client/tests/bp_scenario_e2e.py` (ctest `bp_scenario_e2e`) asserts the item count, tier,
   BPP, claimed cards and tab from the scenario's state line. All 6 regions pass (bp-header 0.699 /
   0.746, bp-levels 2.068, bp-buttons 3.606 / 3.861, window-body 0.579).
-- **Not individually root-caused here**: `kn-market-blackm`, `market-junkyard`,
+- **`market-junkyard` `register`** (fixed 2026-11-19, 5.70 -> 0.00 %): a real markup error, not a stale
+  reference. v10 renders the guest's Register line, the Loading / No Recipes status and the cards inside
+  `.craft-grid` (a wrapping flex row, `deob-10.0.7.js:138020-138054`; a fresh offline-sandbox capture shows
+  the same DOM), so the line shrinks to its text at the grid's left; `v10_junkyard.c` had put it before the
+  grid, where its `text-align: center` centred it.
+- **Not individually root-caused here**: `kn-market-blackm`,
   `ranked-shop-flying`, `ingame-endscreen-collect-raid`, `kn-ranked-sort`, `kn-servers-official-error`
   and `kn-servers-official-mixed`, and the `strike/*` scenarios (the Strike flavour, not v10 parity).

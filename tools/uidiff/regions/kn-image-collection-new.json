@@ -1,0 +1,21 @@
+{
+  "scenario": "kn-image-collection-new",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        511,
+        224,
+        257,
+        227
+      ],
+      "kind": "text",
+      "max_pct": 2.0,
+      "note": "#genericPop.imageNewPop: name / tab / link fields and Save / Back (the fields stack: .inputGrey2's float cleared)"
+    }
+  ]
+}

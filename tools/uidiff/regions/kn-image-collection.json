@@ -1,0 +1,21 @@
+{
+  "scenario": "kn-image-collection",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        342,
+        255,
+        594,
+        176
+      ],
+      "kind": "text",
+      "max_pct": 2.0,
+      "note": "#genericPop.imagePop: My Images, Add an image, the five tabs and the Backgrounds tiles (stored images through remoteImages, the built-in one)"
+    }
+  ]
+}

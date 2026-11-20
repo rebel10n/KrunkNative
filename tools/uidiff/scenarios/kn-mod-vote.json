@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunknative/kn-mod-vote.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "creationVote": {
+      "mod": {
+        "id": 913,
+        "name": "Neon Pack",
+        "creator": "ModMaker_7"
+      }
+    }
+  },
+  "note": "KN's #modVote (creation_vote.c via mods_ui.c): a loaded published mod's name, tip link and thumbs in the top bar (deob-10.0.7.js:225872-225880). Own markup and wording. Reference: KN's own render."
+}

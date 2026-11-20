@@ -1,0 +1,21 @@
+{
+  "scenario": "kn-map-vote",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "mapVote",
+      "rect": [
+        716,
+        598,
+        158,
+        34
+      ],
+      "kind": "text",
+      "max_pct": 2.0,
+      "note": "#mapVote: the tip link and thumbs down / up (creation_vote.c render_map)"
+    }
+  ]
+}

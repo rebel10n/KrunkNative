@@ -1,0 +1,38 @@
+{
+  "ref": "doc/ref/krunknative/kn-image-collection.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": null,
+    "storage": {
+      "krk_custImgs": "[[\"Sunset Range\",\"https://user-assets.krunker.io/m114845/thumb.png\",0],[\"Harbour\",\"https://user-assets.krunker.io/m148572/thumb.png\",0],[\"Desert\",\"https://user-assets.krunker.io/m115530/thumb.png\",1],[\"Ruins\",\"https://user-assets.krunker.io/m158288/thumb.png\",0]]"
+    },
+    "remoteImages": {
+      "https://user-assets.krunker.io/m114845/thumb.png": "tools/uidiff/remote/m114845-thumb.png",
+      "https://user-assets.krunker.io/m148572/thumb.png": "tools/uidiff/remote/m148572-thumb.png",
+      "https://user-assets.krunker.io/m115530/thumb.png": "tools/uidiff/remote/m115530-thumb.png",
+      "https://user-assets.krunker.io/m158288/thumb.png": "tools/uidiff/remote/m158288-thumb.png"
+    },
+    "windowActions": [
+      [
+        "imagePopup",
+        "crosshairImage"
+      ]
+    ]
+  },
+  "note": "KN's image collection popup (image_collection.c: imagePopup from a URL setting's collections button, deob-10.0.7.js:214688-214775): the Backgrounds tab with three stored images (krk_custImgs, local thumbnails through remoteImages) and the built-in background; the Overlays entry is on another tab. Own markup, CSS (kn-alt.css) and wording. Reference: KN's own render."
+}

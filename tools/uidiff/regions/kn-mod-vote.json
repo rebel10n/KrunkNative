@@ -1,0 +1,21 @@
+{
+  "scenario": "kn-mod-vote",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "modVote",
+      "rect": [
+        855,
+        2,
+        212,
+        36
+      ],
+      "kind": "text",
+      "max_pct": 2.0,
+      "note": "#modVote: the mod's name, the tip link and thumbs in the top bar (creation_vote.c render_mod)"
+    }
+  ]
+}

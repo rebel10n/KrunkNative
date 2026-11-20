@@ -69,6 +69,7 @@
 #include <v10_menu.h> // state.officialSession
 #include <kio_store.h> // state.kioStore
 #include <kio_checkout.h> // state.kioBundles
+#include <creation_vote.h> // state.creationVote
 #include <png_write.h>
 #include <pcg_basic.h>
 #include <stb_image.h>
@@ -335,6 +336,7 @@ static void warn_unknown_keys(void) {
         "events",    // v10.0.3 live events {list: config.events, index: the round's eventIndex, now: Date.now ms} (v10_events.c)
         "kioStore", // krunker.io's store answers {limited, ranked} with officialSession (kio_store.c)
         "kioBundles", // krunker.io's bundle frames [["abd", rows], ["gbdr", ...]] with officialSession (kio_checkout.c)
+        "creationVote", // {map: {id, name, creator}, mod: {...}}: the hosted community map / loaded mod's vote (creation_vote.c)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
         "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
         "leaderboards", // the v10 Leaderboards popup: {category, tab, region, season} (v10_competitive.c)
@@ -1246,6 +1248,13 @@ static int ui_scenario_apply(Client *client) {
     alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts
     kio_store_scenario(st("kioStore"));  // krunker.io's shop answers (kio_store.c), without krunker.io
     kio_checkout_scenario(st("kioBundles")); // krunker.io's bundle frames: the home card, the shop note (kio_checkout.c)
+    if (st_has("creationVote")) { // the menu's #mapVote / #modVote without a server or a loaded mod (creation_vote.c)
+        const cJSON *cv = st("creationVote"), *m;
+        if (cJSON_IsObject(m = cJSON_GetObjectItem(cv, "map")))
+            creation_vote_set_map((int) obj_num(m, "id", 0.0), obj_str(m, "name"), obj_str(m, "creator"));
+        if (cJSON_IsObject(m = cJSON_GetObjectItem(cv, "mod")))
+            creation_vote_set_mod((int) obj_num(m, "id", 0.0), obj_str(m, "name"), obj_str(m, "creator"));
+    }
     v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
