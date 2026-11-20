@@ -545,6 +545,10 @@ assets-check-live: ## List both locks' files missing from (exit 1) or differing 
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --assets assets --ui ui
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --lock tools/ui-import/live_assets_v10.lock --assets assets --ui ui
 
+.PHONY: assets-rehash
+assets-rehash: ## Drift check of every shipped Krunker asset against the live hosts (MD5 from HEAD, no downloads; resumable, ARGS=--refresh / --only PREFIX; KN_FETCH_PROXY, default the local proxy): exit 1 when Krunker changed a file
+	KN_FETCH_PROXY=$${KN_FETCH_PROXY:-http://127.0.0.1:8888} $(PYTHON) -I tools/ui-import/rehash_live_assets.py $(ARGS)
+
 .PHONY: video-frames
 video-frames: ## The native HTML engine's <video> frame sidecars (<file>.knv next to the v10 page's videos in assets/; ffmpeg; ARGS=--check)
 	$(PYTHON) -I tools/ui-import/video_frames.py --assets assets $(ARGS)
