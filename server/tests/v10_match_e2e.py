@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A v10.0.3 match smoke on server_bin (Krunker v10.0.3, the only version; doc/v10/gameplay.md).
+"""A v10 match smoke on server_bin (Krunker v10, the only version: ruleset.c's version; doc/v10/gameplay.md).
 
   python3 -I server/tests/v10_match_e2e.py BUILD_DIR [MODE...]      (run from the repository root)
 
@@ -15,6 +15,7 @@ Spray N Pray with the Compressor as its secondary. Per mode:
 Ports come from kn_proto.free_ports(). Prints PASS/FAIL lines; exit code 0 only when all passed.
 """
 import json
+import re
 import os
 import socket
 import subprocess
@@ -27,6 +28,9 @@ import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 ONLY = sys.argv[2:]
+# the version server_bin announces ("Plays Krunker v%s", server/src/main.c): the one ruleset's
+with open(os.path.join(os.getcwd(), "shared/src/rules/ruleset.c")) as _f:
+    RULESET_VERSION = re.search(r'\.version = "([0-9.]+)"', _f.read()).group(1)
 WORK = tempfile.mkdtemp(prefix="kn-v10-match-", dir=os.path.expanduser("~/.cache"))
 HELLO, INIT, SPAWN, STATE, KILL = 1, 2, 4, 6, 10
 MASK_V7, MASK_V10 = 1 << 1, 1 << 2
@@ -122,7 +126,8 @@ def run_mode(alias, mode_id, port):
         with open(log_path, errors="replace") as f:
             text = f.read()
         bad = [line for line in text.splitlines() if "AddressSanitizer" in line or "Segmentation" in line or "assert" in line.lower()]
-        check(f"{alias}: clean log", not bad and "Plays Krunker v10.0.4" in text, bad[0][:200] if bad else "")
+        banner = "Plays Krunker v%s" % RULESET_VERSION
+        check(f"{alias}: clean log", not bad and banner in text, bad[0][:200] if bad else "no %r line" % banner)
 
 
 def main():
