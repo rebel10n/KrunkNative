@@ -17,6 +17,8 @@
 #include <krunker_lobbies.h>
 #include <krunker_relay.h>   // the web build reads the bridge's krunker.io relay flag once
 #include <v10_menu.h>
+#include <app_mode.h>  // app_mode_plain_game_start (backend_hot_start)
+#include <ui_logic.h> // ui_settings_load (backend_hot_start)
 #include <live_events_client.h> // v10.0.3 live events: the client's config.events (v10_events.c)
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,7 @@ static const char *g_cli_brain;
 static const char *g_cli_connect;
 static const char *g_cli_mode, *g_cli_finder; // --mode online|offline, --finder <url> (online_mode.h)
 static int g_hub_page; // --hub / --social / social.html: the hub needs no game server with a brain
+static int g_backend_early; // backend_hot_start ran online_mode_init + backend_init already
 
 void backend_parse_args(int *argc, char **argv) {
     int out = 1;
@@ -50,6 +53,27 @@ void backend_parse_args(int *argc, char **argv) {
     }
     *argc = out;
     argv[out] = NULL;
+}
+
+// Native: the startup seek's request goes out now, right after the command line is parsed, instead of after the
+// window, GL, the fonts and the menu page are set up (servers_ui_hot_start, net_hot.h): for a plain online launch
+// into the game page that will matchmake through a brain (the conditions backend_startup's brain_mode checks).
+// online_mode_init and backend_init run here then (they read only the command line, the environment and the
+// stored keys), and backend_startup does not run them again. The web: its page's hot loader sent it.
+void backend_hot_start(const int offline, const int scenario) {
+#ifndef __EMSCRIPTEN__
+    if (offline || scenario || g_hub_page || (g_cli_connect && g_cli_connect[0]) || getenv("KRUNKNATIVE_SERVER_PORT")) return;
+    if (!app_mode_plain_game_start() || getenv("KRUNKNATIVE_NO_HOT")) return; // (KRUNKNATIVE_NO_HOT: off, for measurements)
+    online_mode_init(g_cli_mode, g_cli_finder);
+    backend_init(online_mode_online() ? g_cli_brain : "");
+    g_backend_early = 1;
+    if (!backend_enabled()) return;
+    ui_settings_load(); // the saved Quickplay lists and Default Region (main.c loads them again with the menu)
+    servers_ui_hot_start();
+#else
+    (void) offline;
+    (void) scenario;
+#endif
 }
 
 int backend_startup(Client *client, const int offline, const int scenario) {
@@ -79,8 +103,10 @@ int backend_startup(Client *client, const int offline, const int scenario) {
         servers_ui_init(client, 0);
         return 0;
     }
-    online_mode_init(g_cli_mode, g_cli_finder); // offline mode: no account service at all
-    backend_init(online_mode_online() ? g_cli_brain : "");
+    if (!g_backend_early) { // (backend_hot_start ran them)
+        online_mode_init(g_cli_mode, g_cli_finder); // offline mode: no account service at all
+        backend_init(online_mode_online() ? g_cli_brain : "");
+    }
 #ifdef __EMSCRIPTEN__
     direct |= EM_ASM_INT({
         try { return new URLSearchParams(location.search).get('ws') ? 1 : 0; } catch (e) { return 0; }

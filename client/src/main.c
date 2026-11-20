@@ -849,6 +849,9 @@ int main(int argc, char **argv) {
 #endif
     if (offline || scenario_path) g_krunker_start = 0; // an offline / scenario run stays local
     if (g_demo_file[0]) offline = g_krunker_start = 0;  // a demo file plays alone
+    // the startup seek's request goes out now, while the window, GL and the menu page are set up
+    // (backend_hot_start, net_hot.h); F5's relaunch rejoins its own lobby instead (servers_ui_hot_start)
+    if (!game_reload_resume_online()) backend_hot_start(offline || g_krunker_start || g_demo_file[0], scenario_path != NULL);
 
     // --sandbox / ?sandbox without a map: v7.1.4 loadSandbox(config.blankMap)
     if (sandbox && !startup_map_name && !startup_map_path) startup_map_name = LOCAL_GAME_SANDBOX_MAP;

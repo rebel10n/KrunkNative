@@ -4928,8 +4928,9 @@ static void direct_account_tick(Client *client, const int direct) {
     if (direct && !client->offline && client->net_connected && !client->in_game) client_net_switch_server(client);
 }
 
-// The web hot loader (net_hot.h, doc/web-hot-loader.md): the page sought through /mm/hot-seek before the client ran, and
-// holds the channel to that server open. The startup seek waits for that answer (HOT_WAIT_MS after the page started) and
+// The hot seek (net_hot.h, doc/web-hot-loader.md). The web: the page sought through /mm/hot-seek before the client ran,
+// and holds the channel to that server open. Native: servers_ui_hot_start sent it while the window and the menu were
+// being set up. The startup seek waits for that answer (HOT_WAIT_MS after the page started) and
 // takes it as its own seek-game answer: no ping list, no region race, no token, no seek of its own. A signed-in player's
 // seek still goes out (the page's ticket is a guest's), in the answer's region. HOT_TICKET_MS: past it the answer's
 // ticket may have expired (brain.join_ttl_s, 30 s): the client seeks itself.
@@ -4954,10 +4955,17 @@ static int hot_adopt(const char *game) {
     char *body = net_hot_seek_take();
     if (!body) return 0;
     cJSON *a = cJSON_Parse(body);
+    const char *answered = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "gameId"));
+    if (game && (!answered || strcmp(answered, game) != 0)) { // (a brain that sought another lobby for it)
+        printf("[mm] hot seek not used: it answered %s, not the lobby %s\n", answered ? answered : "nothing", game);
+        cJSON_Delete(a);
+        free(body);
+        return 0;
+    }
     const char *region = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "region"));
     if (region && region[0]) snprintf(g_region, sizeof(g_region), "%s", region);
     const int account = active_account() && account_session_token()[0];
-    printf("[mm] hot seek: %s in %s, answered before the client ran%s\n", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "gameId")),
+    printf("[mm] hot seek: %s in %s, answered during startup%s\n", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "gameId")),
            g_region, account ? " (signed in: the client seeks with the account there)" : "");
     cJSON_Delete(a);
     if (account) free(body); // the page's ticket is a guest's: the account's seek goes out, in that region
@@ -4967,6 +4975,37 @@ static int hot_adopt(const char *game) {
     free(g_hot_answer); // (seek did not go out: pinned)
     g_hot_answer = NULL;
     return 1;
+}
+
+// Native: the startup seek's request, sent as soon as the command line is parsed (backend_hot_start), so its answer is
+// back by the time the menu is up. The same seek the startup seek would send for a plain launch (a guest's Quickplay:
+// the saved seek_modes / seek_maps, Default Region, else the region a ping race confirmed), in one /mm/hot-seek. Not
+// sent when the startup seek would not be that one: Server Type krunker.io / both, Krunker Strike's director, an
+// F5 relaunch's lobby. KRUNKNATIVE_GAME names the lobby, as for the startup seek.
+void servers_ui_hot_start(void) {
+#ifndef __EMSCRIPTEN__
+    if (seek_prefs_servers() != SEEK_SERVERS_KN || strike_director_enabled() || game_reload_resume_online()) return;
+    char region[32] = "", enc[512], modes[256], maps[512], path[1600];
+    const cJSON *setting = ui_setting_saved("defaultRegion");
+    if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(region, sizeof(region), "%s", setting->valuestring);
+    else snprintf(region, sizeof(region), "%s", servers_ui_auto_region());
+    canonical_region(region, sizeof(region));
+    seek_prefs_hot_lists(modes, sizeof(modes), maps, sizeof(maps));
+    const char *game = getenv("KRUNKNATIVE_GAME");
+    if (game && !game[0]) game = NULL;
+    backend_url_encode(enc, sizeof(enc), region);
+    int n = snprintf(path, sizeof(path), "/mm/hot-seek?hostname=krunknative&proto=%s&ruleset=%s&region=%s", kn_build_protocol(),
+                     ruleset_current()->key, enc);
+    if (modes[0]) n += snprintf(path + n, sizeof(path) - (size_t) n, "&seek_modes=%s", modes);
+    if (maps[0]) n += snprintf(path + n, sizeof(path) - (size_t) n, "&seek_maps=%s", maps);
+    if (game) {
+        backend_url_encode(enc, sizeof(enc), game);
+        // as the startup seek of a named lobby (seek_in_region): a gone one is refused, never another lobby
+        n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s&autoChangeGame=false", enc);
+    }
+    snprintf(path + n, sizeof(path) - (size_t) n, "%s", mm_flavor_param(path));
+    if (net_hot_seek_start(path, game)) KN_LOG_DEBUG1("[mm] hot seek sent at startup (region %s)\n", region[0] ? region : "any");
+#endif
 }
 
 void servers_ui_tick(Client *client) {

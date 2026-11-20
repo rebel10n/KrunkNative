@@ -54,6 +54,9 @@ const char *seek_prefs_krunker_region(void);
 void seek_prefs_dq_fields(char *out, size_t n);
 // dataQuery JSON for our /mm/seek-game ({"dsma":[5],"dsmo":[0,2,3,19,25]}).
 void seek_prefs_data_query(char *out, size_t n);
+// The switched-on Quickplay entries as /mm/hot-seek takes them (seek_modes / seek_maps: "1,3", "" = none on:
+// the brain seeks the rotation), for the native hot seek (servers_ui_hot_start)
+void seek_prefs_hot_lists(char *modes, size_t modes_n, char *maps, size_t maps_n);
 // Official lobby filter over krunker.io's game-list entry: mode, map name and the flags (SEEK_LOBBY_*).
 int seek_prefs_lobby_ok(int mode, const char *map_name, unsigned flags);
 int seek_prefs_flag(const void *value); // krunker.io's flag (true or 1)

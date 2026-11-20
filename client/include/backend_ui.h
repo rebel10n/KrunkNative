@@ -295,6 +295,8 @@ int  servers_ui_host_game(const char *config_json); // Start Game on Box Office 
 // playMap(name): join a brain lobby on that map, else host it (brain); a published map that
 // is not in the catalogue is fetched (/api/map-data) and played offline otherwise. 1 = handled.
 int  servers_ui_play_map(const char *name, int catalogue);
+// Native: the startup seek's /mm/hot-seek, sent before the window and the menu page are set up (net_hot.h)
+void servers_ui_hot_start(void);
 void servers_ui_query(const char *query);   // the game page's ?play= / ?game= (acted on in tick)
 void servers_ui_redirect(const char *game_id, const char *host, int port, const char *reason); // NET_PACKET_REDIRECT
 void servers_ui_join_ticket(const char *host, int port, const char *game_id, const char *ticket, const char *web_url);
@@ -323,6 +325,9 @@ int  servers_games_tab_more(int tab);
 // ---- backend_startup.c (main.c glue)
 // Strips --brain <url> and --connect <host[:port]> from argv (before the other parsers).
 void backend_parse_args(int *argc, char **argv);
+// Native: sends the startup seek's /mm/hot-seek right after the command line is parsed, for a plain
+// online launch (net_hot.h); offline = the same flag backend_startup gets. The web: nothing.
+void backend_hot_start(int offline, int scenario);
 // Startup decision after Client is set up: applies --connect, initialises the brain
 // client, account and matchmaker. Returns 1 when the brain matchmaker connects the
 // game (main.c must not start the default transport), 0 for the classic paths

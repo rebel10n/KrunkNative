@@ -67,6 +67,9 @@ const AppPage *editor_app_page(void);
 const AppPage *viewer_app_page(void);
 
 AppMode app_mode(void);
+// 1 when this window starts as the game with no page query (no ?play= / ?game= / testMap: a plain launch),
+// known once the command line is parsed (backend_hot_start: the native hot seek)
+int app_mode_plain_game_start(void);
 // 1 when this window shows a page (not the game) that was entered and reports ready
 // (AppPage.ready): page-mode screenshots and input scripts wait for it.
 int app_mode_page_ready(Client *client);

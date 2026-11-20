@@ -102,5 +102,5 @@ for r in runs:
         print("  FAIL: %s never got in game" % r["label"]); ok = False
 sys.exit(0 if ok else 1)
 PY
-echo "[hot-e2e] brain log:"; grep -E 'hot-seek|seek' "$WORK/brain.log" | tail -n 4 | sed 's/^/  /'
+echo "[hot-e2e] brain log:"; { grep -E 'hot-seek|seek' "$WORK/brain.log" || true; } | tail -n 4 | sed 's/^/  /'
 [ $status = 0 ] && echo "[hot-e2e] PASS" || { echo "[hot-e2e] FAIL"; KN_TEST_KEEP=1; exit 1; }

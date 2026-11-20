@@ -66,7 +66,8 @@
   var cached = ls('pingRegion7');
   if (!region && cached && cached === ls('knPingRegionPinged')) region = cached; // a ping race's winner only
   var p = {hostname: 'krunknative', proto: '@KN_PROTOCOL@', ruleset: 'v10', region: region,
-           seek_modes: list(settings.seek_modes), seek_maps: list(settings.seek_maps), game: H.game};
+           seek_modes: list(settings.seek_modes), seek_maps: list(settings.seek_maps), game: H.game,
+           autoChangeGame: H.game ? 'false' : ''}; // a ?game= that is gone: refused (the client shows why), never another lobby
   var qs = [];
   for (var k in p) if (p[k]) qs.push(k + '=' + encodeURIComponent(p[k]));
   if (typeof fetch !== 'function') return;

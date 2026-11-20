@@ -163,6 +163,25 @@ void seek_prefs_data_query(char *out, const size_t n) {
     else out[0] = 0;
 }
 
+static void comma_list(char *out, const size_t n, const int *ids, const int count) {
+    size_t at = 0;
+    if (n) out[0] = 0;
+    for (int i = 0; i < count && at < n; i++) {
+        const int w = snprintf(out + at, n - at, "%s%d", i ? "," : "", ids[i]);
+        if (w < 0 || (size_t) w >= n - at) {
+            out[at] = 0;
+            return;
+        }
+        at += (size_t) w;
+    }
+}
+
+void seek_prefs_hot_lists(char *modes, const size_t modes_n, char *maps, const size_t maps_n) {
+    int on[SEEK_FILTER_MAX];
+    comma_list(modes, modes_n, on, saved_list(SEEK_MODES_KEY, on, SEEK_FILTER_MAX, mode_valid));
+    comma_list(maps, maps_n, on, saved_list(SEEK_MAPS_KEY, on, SEEK_FILTER_MAX, map_valid));
+}
+
 int seek_prefs_flag(const void *value) { return seek_filter_flag(value); }
 
 int seek_prefs_lobby_ok(const int mode, const char *map_name, const unsigned flags) {

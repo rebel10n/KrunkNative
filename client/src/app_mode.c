@@ -436,6 +436,8 @@ int app_mode_needs_server(void) {
 static AppMode g_start_mode_fwd(void) {
     return g_start_mode;
 }
+
+int app_mode_plain_game_start(void) { return g_start_mode == APP_MODE_GAME && !g_start_query[0]; }
 #endif
 
 // ------------------------------------------------------------------ input while a page is shown
