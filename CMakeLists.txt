@@ -727,6 +727,14 @@ else ()
         target_link_libraries(host_command_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # demo_test: the K.P.D demo file (shared/src/demo.c, doc/v10/replays.md): round trip, keyframes, suspect segments
+    add_executable(demo_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/demo_test.c)
+    target_link_libraries(demo_test PRIVATE m)
+    add_test(NAME demo_test COMMAND demo_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(demo_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
     target_link_libraries(class_spawn_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
