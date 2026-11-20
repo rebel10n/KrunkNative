@@ -278,7 +278,7 @@ static void grid_html(StrBuf *sb) {
 
 static void refresh_grid(void) {
     const HtmlElem e = html_dom_by_id("jyGrid");
-    if (!e) return;
+    if (!e || !acc() || !J.rows) return; // the grid holds the Register / status line then, not cards
     StrBuf sb = {0};
     grid_html(&sb);
     char *html = sb_finish(&sb);
@@ -344,6 +344,19 @@ void v10_junkyard_render(StrBuf *sb) {
                    "<div class=\"craft-header-name svelte-1vqzycn\">Welcome to the Junkyard</div> <div class=\"craft-header-desc svelte-1vqzycn\">"
                    "Craft brand new skins &amp; items by using Junk and other Materials, which can be found scattered around every map in the game or earned from challenges.</div></div> ",
                bg);
+    // v10 (deob-10.0.7.js:138020-138054): the filter bar fills the anchor between the header and .craft-grid
+    // (only with recipes); the guest's Register line, the Loading / No Recipes status and the cards all sit
+    // inside .craft-grid, a wrapping flex row, so those one-line divs shrink to their text at the grid's left
+    // (their text-align: center has no width to centre in) below its 5px padding.
+    if (acc() && J.rows) {
+        sb_append(sb, "<div class=\"jy-filter-bar svelte-1vqzycn\"><input type=\"search\" id=\"v10jySearch\" placeholder=\"Search items...\" class=\"jy-search-input svelte-1vqzycn\" value=\"");
+        sb_append_esc(sb, J.search);
+        sb_append(sb, "\" oninput=\"v10jy.search(this.value)\"> <select class=\"jy-sort-select svelte-1vqzycn\" id=\"v10jySort\" onchange=\"v10jy.sort(this.value)\">");
+        for (int i = 0; i < SORT_COUNT; i++)
+            sb_appendf(sb, "<option value=\"%s\"%s>%s</option>", k_sort_value[i], J.sort == i ? " selected" : "", k_sort_label[i]);
+        sb_append(sb, "</select></div>");
+    }
+    sb_append(sb, " <div class=\"craft-grid svelte-1vqzycn\" id=\"jyGrid\">");
     if (!acc()) {
         sb_append(sb, "<div style=\"color: #fff; text-align: center; margin-top: 20px; cursor: pointer;\" role=\"button\" tabindex=\"0\" onclick=\"showWindow(5)\">"
                       "<span style=\"color: #31caec\">Register</span> to craft!</div>");
@@ -354,16 +367,9 @@ void v10_junkyard_render(StrBuf *sb) {
                          : J.failed ? "No Recipes Found" : "Loading Recipes...";
         sb_appendf(sb, "<div id=\"v10jyStatus\" style=\"color: #fff; text-align: center; margin-top: 20px;\">%s</div>", text);
     } else {
-        sb_append(sb, "<div class=\"jy-filter-bar svelte-1vqzycn\"><input type=\"search\" id=\"v10jySearch\" placeholder=\"Search items...\" class=\"jy-search-input svelte-1vqzycn\" value=\"");
-        sb_append_esc(sb, J.search);
-        sb_append(sb, "\" oninput=\"v10jy.search(this.value)\"> <select class=\"jy-sort-select svelte-1vqzycn\" id=\"v10jySort\" onchange=\"v10jy.sort(this.value)\">");
-        for (int i = 0; i < SORT_COUNT; i++)
-            sb_appendf(sb, "<option value=\"%s\"%s>%s</option>", k_sort_value[i], J.sort == i ? " selected" : "", k_sort_label[i]);
-        sb_append(sb, "</select></div>");
-        sb_append(sb, "<div class=\"craft-grid svelte-1vqzycn\" id=\"jyGrid\">");
         grid_html(sb);
-        sb_append(sb, "</div>");
     }
+    sb_append(sb, "</div>");
     overlay_html(sb);
     sb_append(sb, "</div></div>");
 }
