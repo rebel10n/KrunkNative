@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Krunker v10.0.2 ranked end to end (doc/v10/ranked-impl.md, doc/backend.md 8.6): the solo queue, a
+"""Krunker v10.0.7 ranked end to end (doc/v10/ranked-impl.md, doc/backend.md 8.6): the solo queue, a
 4v4 comp match on a real server_bin, the comp lobby rules and the TrueSkill profiles.
 
   python3 -I server/tests/ranked_e2e.py BUILD_DIR      (run from the repository root)
@@ -59,6 +59,7 @@ EXT_MARK_POSITION = 0x0900
 MINOR_V7 = 3
 MINOR_EXT = 4  # HELLO 1.4: the EXT envelope (the "mpos" ping), and the roster's "gsc", names push and "vf"
 EXT_RANKED_MATCH = 0x8050  # NET_EXT_KN_RANKED_MATCH: the lobby's ranked flag after each INIT
+EXT_ENTER_FAILED = 0x8033  # NET_EXT_KN_OFFICIAL_ENTER_FAILED: v10 "fe" for an unsuccessful ENT
 EXT_LRMR = 0x0601  # NET_EXT_LATEST_RANKED_MMR_CHANGE: the rating change (v10 lrmr)
 results = []
 procs = []
@@ -431,8 +432,10 @@ def run():
     a = conns[2]
     a.ent(class_index=0)
     a.read(timeout=1.5)
+    enter_failures = [kn_proto.uncstr(body) for body in ext_bodies(a, EXT_ENTER_FAILED)]
     check("ENT without a lobby class: 'Please select a Class to Spawn', no spawn",
-          any("Please select a Class to Spawn" in t for t in chats(a)) and spawned(a, uids[2]) is None, str(chats(a)[-2:]))
+          "Please select a Class to Spawn" in enter_failures and spawned(a, uids[2]) is None,
+          str(enter_failures[-2:]))
     comp_set(a, "c", 7)  # Rocketeer: classLim7 0
     a.read(timeout=0.8)
     check("Rocketeer refused (not a ranked class)", comp_table(a).get(uids[2], {}).get("c") == -1)
