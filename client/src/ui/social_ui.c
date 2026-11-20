@@ -1792,6 +1792,7 @@ static void hub_render_leaders(const char *a, const cJSON *t) {
 // io_0("map"/"mod", name, row): the creation page (mapProfile / modProfile). Active servers
 // (f540: the matchmaker's game list filtered to this map) are not fetched: none online.
 static int g_map_tab; // vLN0588
+static void hub_map_opened(const char *name, int id); // the map page tools (below): the open map, its Leaderboard
 
 // getMapTapHTML(canEdit)
 static void append_map_tabs(StrBuf *sb, const int can_edit) {
@@ -1911,6 +1912,7 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
     char *html = sb_finish(&sb);
     set_html(is_mod ? "modProfile" : "mapProfile", html);
     free(html);
+    if (!is_mod) hub_map_opened(name, id);
 }
 
 static void hub_render_search(const cJSON *t) {
@@ -3330,6 +3332,7 @@ static void market_toggle_filters(const int sort) {
 }
 
 static int hub_economy_frame(const char *label, const cJSON *frame);
+static int hub_map_tools_frame(const char *label, const cJSON *frame); // the map page tools (below)
 
 // The market / clan / activity reply frames (handle_reply_frame); 1 = handled
 static int hub_market_frame(const char *label, const cJSON *frame) {
@@ -3833,6 +3836,9 @@ static void handle_reply_frame(const cJSON *frame) {
         if (!strcmp(path, "/maps")) list_loaded(0, data, index, error);       // Ea
         else if (!strcmp(path, "/mods")) list_loaded(1, data, index, error);  // Ha
         else if (!strcmp(path, "/search")) list_search_resp(index == 3, data); // za
+    }
+    else if (g_hub.brain && hub_map_tools_frame(label, frame)) {
+        // the map page tools (glbR / sdR / ddR / mfr / upMp / edMp)
     }
     else if (g_hub.brain && hub_market_frame(label, frame)) {
         // market / clan / activity / sales replies (hub_market_frame)
@@ -6257,6 +6263,291 @@ H(h_delete_creation) {
     return 1;
 }
 
+// ---- the map page tools: the Leaderboard tab, the creator's Data tab and Edit popup
+//
+// Krunker's hub (static/social-CURLIuB7.js, cited hub-10.0.7.js:<line> after the repo's webcrack pass;
+// doc/v10/parity-audit-2026-11-20-social.md) asks kn_brain (v10_catalog.c) over the social socket:
+//   glb   the Leaderboard tab once the map page shows (:3168) -> glbR(type, map, [name, value, ...]) (:3804-3822)
+//   sd    Search on the Data tab (searchPData, :3654-3660) -> sdR([{mk, kv}], player) (:3663-3681)
+//   dd    a row's delete (deleteData, :3691-3696) -> ddR(key, player) (:3682-3690)
+//   dkd   Delete By Key, the key of every player (deleteKeyData, :3649-3653) -> po
+//   mfnds the Edit popup's Deposit (0) / Withdraw (1) (chngMapFunds, :6673-6679) -> mfr(funds | null) (:3796-3803)
+//   ulb   its Leaderboard Display (updateMapLB, :6680-6688) -> upMp(text)
+//   edMp  its Open in Editor (grabMap, :6689-6693) -> edMp(json | null): staged as mapToEdit (s2c_ui_edit_map)
+// The markup and wording here are Box Office's own. The Edit popup shows no fee line: kn_brain moves the exact
+// amount, as the game's Creations window does (deob-10.0.7.js:107760-107764).
+static struct {
+    char name[160];  // the map page's map
+    int id;
+    cJSON *rows;     // the Data tab's last search: [{mk, kv}]
+    char player[64]; // ... and whose rows they are
+    char key[128];   // the key Delete By Key asked about
+} g_map_tools;
+
+static void hub_map_opened(const char *name, const int id) {
+    snprintf(g_map_tools.name, sizeof(g_map_tools.name), "%s", name ? name : "");
+    g_map_tools.id = id;
+    cJSON_Delete(g_map_tools.rows);
+    g_map_tools.rows = NULL;
+    g_map_tools.player[0] = 0;
+    if (!g_map_tools.name[0]) return;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("glb"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(g_map_tools.name));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(0)); // the brain reads the map's own Leaderboard Display
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+    cJSON_AddItemToArray(f, cJSON_CreateString(""));
+    hub_send(f);
+}
+
+// a stored value as the hub shows it: a "time" key / board is milliseconds, shown as h:mm:ss.cc or m:ss.cc
+static void map_tools_value(StrBuf *sb, const char *label, const cJSON *v) {
+    char num[48];
+    const double ms = cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsString(v) ? atof(v->valuestring) : 0;
+    if (label && !strcasecmp(label, "time") && ms > 0) {
+        const long long t = (long long) ms, h = t / 3600000, m = (t / 60000) % 60, s = (t / 1000) % 60, cs = (t % 1000) / 10;
+        if (h) snprintf(num, sizeof(num), "%lld:%02lld:%02lld.%02lld", h, m, s, cs);
+        else snprintf(num, sizeof(num), "%lld:%02lld.%02lld", m, s, cs);
+        sb_append(sb, num);
+    } else if (cJSON_IsString(v)) {
+        sb_append_esc(sb, v->valuestring);
+    } else {
+        js_num(num, sizeof(num), ms);
+        sb_append(sb, num);
+    }
+}
+
+static void map_tools_board(const char *type, const cJSON *list) {
+    if (!el("mapLeaders")) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='knMapBoardHead'><span>Player</span><span>");
+    if (type && !strcmp(type, "score")) sb_append(&sb, "Score");
+    else if (type && !strcmp(type, "time")) sb_append(&sb, "Time");
+    else sb_append_esc(&sb, type ? type : "");
+    sb_append(&sb, "</span></div>");
+    const int n = cJSON_GetArraySize(list);
+    for (int i = 0; i + 1 < n; i += 2) {
+        sb_appendf(&sb, "<div class='knMapBoardRow'><span>%d. ", i / 2 + 1);
+        sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetArrayItem(list, i)));
+        sb_append(&sb, "</span><span>");
+        map_tools_value(&sb, type, cJSON_GetArrayItem(list, i + 1));
+        sb_append(&sb, "</span></div>");
+    }
+    if (n < 2) sb_append(&sb, "<div class='knMapBoardEmpty'>Nobody is on this board yet</div>");
+    char *html = sb_finish(&sb);
+    set_html("mapLeaders", html);
+    free(html);
+}
+
+static void map_tools_rows(void) {
+    if (!el("dataList")) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='knMapBoardHead'><span>Key</span><span>Value</span></div>");
+    const cJSON *row;
+    int n = 0;
+    cJSON_ArrayForEach(row, g_map_tools.rows) {
+        const char *key = jstr(row, "mk") ? jstr(row, "mk") : "";
+        sb_append(&sb, "<div class='knMapBoardRow'><span><span class='material-icons knMapDataDel' title='Delete' onclick='deleteData(&quot;");
+        sb_append_js_escape(&sb, g_map_tools.player);
+        sb_append(&sb, "&quot;, &quot;");
+        sb_append_js_escape(&sb, key);
+        sb_append(&sb, "&quot;)'>delete</span> ");
+        sb_append_esc(&sb, key);
+        sb_append(&sb, "</span><span>");
+        map_tools_value(&sb, key, cJSON_GetObjectItemCaseSensitive(row, "kv"));
+        sb_append(&sb, "</span></div>");
+        n++;
+    }
+    if (!n) sb_append(&sb, "<div class='knMapBoardEmpty'>This player has no saved data on this game</div>");
+    char *html = sb_finish(&sb);
+    set_html("dataList", html);
+    free(html);
+}
+
+// the map page's replies: 1 when the label is one of them
+static int hub_map_tools_frame(const char *label, const cJSON *frame) {
+    const cJSON *a1 = cJSON_GetArrayItem(frame, 1), *a2 = cJSON_GetArrayItem(frame, 2), *a3 = cJSON_GetArrayItem(frame, 3);
+    if (!strcmp(label, "glbR")) {
+        const char *map = cJSON_GetStringValue(a2);
+        if (map && !strcasecmp(map, g_map_tools.name)) map_tools_board(cJSON_GetStringValue(a1), a3);
+    } else if (!strcmp(label, "sdR")) {
+        clear_pops();
+        cJSON_Delete(g_map_tools.rows);
+        g_map_tools.rows = cJSON_IsArray(a1) ? cJSON_Duplicate(a1, 1) : cJSON_CreateArray();
+        snprintf(g_map_tools.player, sizeof(g_map_tools.player), "%s", cJSON_GetStringValue(a2) ? cJSON_GetStringValue(a2) : "");
+        map_tools_rows();
+    } else if (!strcmp(label, "ddR")) {
+        clear_pops();
+        const char *key = cJSON_GetStringValue(a1);
+        const int n = cJSON_GetArraySize(g_map_tools.rows);
+        for (int i = 0; key && i < n; i++) {
+            if (!strcmp(jstr(cJSON_GetArrayItem(g_map_tools.rows, i), "mk") ? jstr(cJSON_GetArrayItem(g_map_tools.rows, i), "mk") : "", key)) {
+                cJSON_DeleteItemFromArray(g_map_tools.rows, i);
+                break;
+            }
+        }
+        map_tools_rows();
+    } else if (!strcmp(label, "mfr")) {
+        if (cJSON_IsNumber(a1)) hub_set_funds(a1->valuedouble);
+        io_po(cJSON_IsNumber(a1), cJSON_IsNumber(a1) ? "Map funds updated" : "The map funds could not be changed");
+    } else if (!strcmp(label, "upMp")) {
+        const char *text = cJSON_GetStringValue(a1);
+        io_po(text && !strcmp(text, "Leaderboard Updated!"), text ? text : "Error");
+        if (text && !strcmp(text, "Leaderboard Updated!")) hub_map_opened(g_map_tools.name, g_map_tools.id);
+    } else if (!strcmp(label, "edMp")) {
+        const char *json = cJSON_GetStringValue(a1);
+        if (json) {
+            clear_pops();
+            s2c_ui_edit_map(json, strlen(json));
+        } else {
+            io_po(0, "That game could not be opened in the editor");
+        }
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+static void map_tools_send(cJSON *f, const char *wait) {
+    if (wait) io_wait(wait);
+    hub_send(f);
+}
+
+// openEdit(name, id, funds): the creator's Edit popup
+H(h_open_edit) {
+    UNUSED;
+    const char *name = arg_s(ev, args, argc, 0);
+    const int id = (int) arg_n(args, argc, 1, 0);
+    char funds[48];
+    comma_number(funds, sizeof(funds), arg_n(args, argc, 2, 0));
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='knMapEdit'><div class='knMapEditTitle'>");
+    sb_append_esc(&sb, name ? name : "");
+    sb_append(&sb, "<span class='knMapEditOpen' onclick='grabMap(&quot;");
+    sb_append_js_escape(&sb, name ? name : "");
+    sb_append(&sb, "&quot;)'>Edit in the Editor</span></div>");
+    sb_appendf(&sb, "<div class='knMapEditSect'>Game Funds <span class='knMapEditNote'>%s KR in this game</span></div>", funds);
+    sb_append(&sb, "<input type='number' min='0' id='mapFundsInp' class='inputGrey2' placeholder='KR'>");
+    sb_appendf(&sb, "<div class='knMapEditBtns'><div class='button knMapFundsAdd' onclick='chngMapFunds(%d, 0)'>Add</div>"
+                    "<div class='button knMapFundsTake' onclick='chngMapFunds(%d, 1)'>Take Out</div></div>", id, id);
+    sb_append(&sb, "<div class='knMapEditSect'>Leaderboard Display</div>"
+                   "<select id='leaderType' class='inputGrey2'><option value='0'>Score</option><option value='1'>Time</option></select>"
+                   "<input type='text' id='leaderTypeCust' class='inputGrey2' maxlength='40' placeholder='Custom stat (optional)'>"
+                   "<select id='leaderOrder' class='inputGrey2'><option value='0'>Lowest first</option><option value='1'>Highest first</option></select>");
+    sb_appendf(&sb, "<div class='knMapEditBtns'><div class='button knMapLbSave' onclick='updateMapLB(%d)'>Save</div></div></div>", id);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "editMapPop", NULL);
+    free(html);
+    return 1;
+}
+
+// grabMap(name): the map's data for the editor
+H(h_grab_map) {
+    UNUSED;
+    if (!g_hub.logged_in) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("edMp"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(arg_s(ev, args, argc, 0) ? arg_s(ev, args, argc, 0) : ""));
+    map_tools_send(f, "Please Wait...");
+    return 1;
+}
+
+static double map_tools_input_number(const char *id) {
+    char text[64] = "";
+    if (el(id)) html_dom_get_value(el(id), text, sizeof(text));
+    return atof(text);
+}
+
+// chngMapFunds(id, 0 deposit | 1 withdraw): the amount of #mapFundsInp
+H(h_chng_map_funds) {
+    UNUSED;
+    const double amount = floor(map_tools_input_number("mapFundsInp"));
+    if (amount <= 0) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("mfnds"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 1, 0) == 1 ? 1 : 0));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(amount));
+    map_tools_send(f, "Please Wait...");
+    return 1;
+}
+
+// updateMapLB(id): #leaderType, #leaderTypeCust, #leaderOrder
+H(h_update_map_lb) {
+    UNUSED;
+    char custom[64] = "";
+    if (el("leaderTypeCust")) html_dom_get_value(el("leaderTypeCust"), custom, sizeof(custom));
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("ulb"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(map_tools_input_number("leaderType") == 1 ? 1 : 0));
+    cJSON_AddItemToArray(f, cJSON_CreateString(custom));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(map_tools_input_number("leaderOrder") == 1 ? 1 : 0));
+    map_tools_send(f, "Please Wait...");
+    return 1;
+}
+
+// searchPData(): the player of #searchDInput on the Data tab
+H(h_search_pdata) {
+    UNUSED;
+    char player[64] = "";
+    if (el("searchDInput")) html_dom_get_value(el("searchDInput"), player, sizeof(player));
+    if (!player[0] || !g_map_tools.name[0]) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("sd"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(g_map_tools.name));
+    cJSON_AddItemToArray(f, cJSON_CreateString(player));
+    map_tools_send(f, "Searching...");
+    return 1;
+}
+
+// deleteData(player, key): one key of one player
+H(h_delete_data) {
+    UNUSED;
+    const char *player = arg_s(ev, args, argc, 0), *key = arg_s(ev, args, argc, 1);
+    if (!player || !key || g_map_tools.id <= 0) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("dd"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(player));
+    cJSON_AddItemToArray(f, cJSON_CreateString(key));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(g_map_tools.id));
+    map_tools_send(f, "Please Wait...");
+    return 1;
+}
+
+// deleteDataPop(): asks which key to delete for every player
+H(h_delete_data_pop) {
+    UNUSED;
+    generic_popup("<div class='knMapEdit'><div class='knMapEditSect'>Delete a key for every player</div>"
+                  "<input type='text' id='delKeyInput' class='inputGrey2' maxlength='64' placeholder='Key'>"
+                  "<div class='knMapEditBtns'><div class='button knMapFundsTake' onclick='deleteDataConf()'>Delete</div></div></div>",
+                  "confSubmitPop", NULL);
+    return 1;
+}
+
+// deleteDataConf(): the confirmation of Delete By Key
+H(h_delete_data_conf) {
+    UNUSED;
+    g_map_tools.key[0] = 0;
+    if (el("delKeyInput")) html_dom_get_value(el("delKeyInput"), g_map_tools.key, sizeof(g_map_tools.key));
+    if (!g_map_tools.key[0]) return 1;
+    confirm_popup("Every player's saved value for this key will be removed. Continue?", "deleteKeyData()", "confSubmitPop");
+    return 1;
+}
+
+// deleteKeyData([key]): the key of every player (the confirmed key when none is given)
+H(h_delete_key_data) {
+    UNUSED;
+    const char *key = argc > 0 ? arg_s(ev, args, argc, 0) : g_map_tools.key;
+    if (!key || !*key || g_map_tools.id <= 0) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("dkd"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(g_map_tools.id));
+    cJSON_AddItemToArray(f, cJSON_CreateString(key));
+    map_tools_send(f, "Deleting...");
+    return 1;
+}
+
 // togglPos(): the KR giveaway switch of the post box (#givaButton, the KR field #krInptHol)
 H(h_toggle_pos) {
     UNUSED;
@@ -6398,6 +6689,15 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"featureCreation", h_feature_creation},
     {"deleteCreationConf", h_delete_creation_conf},
     {"deleteCreation", h_delete_creation},
+    {"openEdit", h_open_edit},           // the map page tools (hub_map_tools_frame)
+    {"grabMap", h_grab_map},
+    {"chngMapFunds", h_chng_map_funds},
+    {"updateMapLB", h_update_map_lb},
+    {"searchPData", h_search_pdata},
+    {"deleteData", h_delete_data},
+    {"deleteDataPop", h_delete_data_pop},
+    {"deleteDataConf", h_delete_data_conf},
+    {"deleteKeyData", h_delete_key_data},
     {"logBtnFRVR", h_noop},     // analytics
     {"imagePopup", h_noop},     // the custom background collection (krk_custImgs): not ported
 };
