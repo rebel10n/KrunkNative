@@ -80,7 +80,8 @@ static void test_rotation_data(void) {
     const int *maps = NULL;
     const size_t map_count = seek_filter_rotation_maps(&maps);
     CHECK(map_count == 34, "v10's rotationMaps has %zu maps, v10 has 34", map_count);
-    CHECK(maps[0] == 0 && maps[map_count - 1] == 45, "rotationMaps runs from Burg (0) to Barnyard (45)");
+    // deob-10.0.7.js:169614: 10.0.4 dropped 40 and added 46 (10.0.3 ended at Barnyard, 45)
+    CHECK(maps[0] == 0 && maps[map_count - 1] == 46, "rotationMaps runs from Burg (0) to Candy Heist (46)");
 }
 
 // the defaults: every rotation switch on, every other switch off
@@ -194,7 +195,7 @@ static void test_data_query(void) {
     make_filter(&f, NULL, 0, NULL, 0);
     char out[1200];
     seek_filter_dq_fields(&f, out, sizeof(out));
-    CHECK(strncmp(out, ",\"dsma\":[0,1,2,3,4,6,7,8,9,10,11,12,13,14,15,16,19,21,22,23,24,25,26,28,32,33,34,36,37,39,40,42,44,45],\"dsmo\":[0,2,3,19,25]", 110) == 0,
+    CHECK(strncmp(out, ",\"dsma\":[0,1,2,3,4,6,7,8,9,10,11,12,13,14,15,16,19,21,22,23,24,25,26,28,32,33,34,36,37,39,42,44,45,46],\"dsmo\":[0,2,3,19,25]", 110) == 0,
           "default -> the rotation's dsma and dsmo -> '%.80s...'", out);
     const int trade[] = {0, 2, 3, 18, 19, 25};
     const int shipment[] = {0, 1, 2, 3, 4, 5, 6};
