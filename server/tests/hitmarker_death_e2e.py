@@ -97,7 +97,9 @@ def main():
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_INPUT_SCRIPT": script,
-                "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                # the sandbox server's lines ([sandbox] [cmd] ...: /kill) are KN_LOG_VERBOSE2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2"})
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--sandbox"], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -113,7 +115,7 @@ def main():
     alive = frames("alive")
     count = magenta_count(alive[0], CENTRE) if alive else -1
     check("alive: a hit shows the marker", vis(lines, "alive") == "1" and count > 30, f"visible {vis(lines, 'alive')}, magenta px {count}")
-    check("the player died (`kill`)", any("/kill" in l for l in lines))
+    check("the player died (`kill`)", any("[cmd]" in l and l.rstrip().endswith(": /kill") for l in lines))
     for label, prefix in (("dead", "dead"), ("deadhit", "deadhit"), ("dead2", "later")):
         shots = frames(prefix)
         counts = [magenta_count(s, CENTRE) for s in shots] # the chat's names are magenta too
