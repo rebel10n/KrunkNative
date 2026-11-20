@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-end-share-pop",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "share-popup",
+      "rect": [
+        510,
+        290,
+        260,
+        140
+      ],
+      "kind": "text",
+      "note": "#genericPop.kn-share-pop: the title, the #shareTxt note box and the Post button (end_share.c)"
+    }
+  ]
+}

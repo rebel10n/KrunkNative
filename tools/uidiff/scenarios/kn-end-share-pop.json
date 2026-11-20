@@ -1,0 +1,114 @@
+{
+  "ref": "doc/ref/krunknative/kn-end-share-pop.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 2.0,
+    "hud": {
+      "health": 100,
+      "maxHealth": 100,
+      "healthSegments": 6,
+      "ammo": 30,
+      "ammoMax": 30,
+      "ammoLimit": false,
+      "melee": false,
+      "reloading": false,
+      "reloadPercent": 0,
+      "timerText": "03:45",
+      "kills": 0,
+      "deaths": 0,
+      "score": 0,
+      "weaponName": "Assault Rifle",
+      "weaponIcon": "icon_2",
+      "classIndex": 0,
+      "scoped": false,
+      "fps": 0,
+      "aim": 0,
+      "spread": 100,
+      "scoreboard": false,
+      "ping": 0,
+      "loadout": [
+        {
+          "name": "Assault Rifle",
+          "icon": "icon_2",
+          "melee": false
+        },
+        {
+          "name": "Pistol",
+          "icon": "icon_3",
+          "melee": false
+        },
+        {
+          "name": "Combat Knife",
+          "icon": "icon_0",
+          "melee": true
+        }
+      ],
+      "loadoutIndex": 0
+    },
+    "chat": [],
+    "endscreen": {
+      "place": 1,
+      "result": 1,
+      "text": "#1 VICTORY",
+      "nextRound": "00:17",
+      "results": 1,
+      "actions": [
+        [
+          "GUI.endScreen.changeTab",
+          "leaderboard"
+        ],
+        [
+          "shareResult"
+        ]
+      ]
+    },
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 420,
+        "kills": 7,
+        "deaths": 2,
+        "me": true,
+        "level": 42
+      },
+      {
+        "rank": 2,
+        "name": "Ranger",
+        "score": 300,
+        "kills": 5,
+        "deaths": 4,
+        "level": 18
+      },
+      {
+        "rank": 3,
+        "name": "Guest_77",
+        "score": 120,
+        "kills": 2,
+        "deaths": 6
+      }
+    ],
+    "account": {
+      "name": "Local User",
+      "score": 200000,
+      "funds": 500
+    },
+    "official": true
+  },
+  "frames": 3,
+  "note": "KN only: the end table's share popup (end_share.c, deob-10.0.7.js:227048-227054): the #shareTxt note box and the Post button. official true: a public match (the offline sandbox is a hosted, custom game, which gets no share button). Reference: KN's own render."
+}

@@ -6,6 +6,7 @@
 #define KN_JUNK_SHOP_UI_H
 
 #include <ui_logic.h> // StrBuf
+#include <cJSON.h>
 
 // appends the products under the Eterno Shop's wild offer (store_ui.c v10_store_eterno). Returns the
 // display request's state: 0 loading, 1 loaded (with or without products), -1 failed
@@ -20,5 +21,11 @@ void junk_shop_bundles_render(StrBuf *sb);
 // a bundle card's bundlePopup(true, false, id) on Box Office (no bundle popup): the bundle's purchase
 // (POST /api/shop/bundles/purchase); v10's loginOrRegister for a guest
 void junk_shop_bundle_buy(int bundle_id);
+
+// the bundle rows the Store's grid and the home tab's bundle card use: krunker.io's pushed rows, or the brain's GET
+// /api/shop/bundles (requested here; NULL until it answers)
+const cJSON *junk_shop_bundles_rows(void);
+// the rows in the grid's order (newest, cheapest for low levels, owned last); returns the count written to out
+int junk_shop_bundles_order(const cJSON *rows, const cJSON **out, int max);
 
 #endif

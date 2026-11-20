@@ -591,8 +591,8 @@ def run():
         "11000 clickid accName", "11100 type " + LOGIN,
         "11300 clickid accPass", "11400 type " + PASSWORD,
         "11600 clickid knV10LoginSubmit",
-        "13000 vis @cap knCaptchaHolder",  # the challenge webview passes by itself: the modal stays hidden
-        "15300 vis @capdone knCaptchaHolder",
+        "13000 vis @cap turnstileHolder",  # the challenge webview passes by itself: the modal stays hidden
+        "15300 vis @capdone turnstileHolder",
         "15400 vis @code knV10Code knV10Code0 knV10CodeSubmit",
         "15450 text @codehdr [id=knV10Code]",
         "15500 click 20 20",  # the code form's overlay: not dismissable
@@ -695,7 +695,7 @@ def run():
           probe(text, "umode"))
     cap, capdone = probe(text, "cap"), probe(text, "capdone")
     check("a username login passes the Security Challenge by itself (the webview; the modal stays hidden)",
-          "knCaptchaHolder=0" in cap and "knCaptchaHolder=0" in capdone, (cap, capdone))
+          "turnstileHolder=0" in cap and "turnstileHolder=0" in capdone, (cap, capdone))
     logins = stub.find("POST", "/api/auth/login/username")
     body = logins[0][4] if logins else None
     check("POST /auth/login/username {username, password, b: the Turnstile token}", len(logins) == 1 and isinstance(body, dict) and

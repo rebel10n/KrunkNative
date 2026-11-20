@@ -1826,7 +1826,7 @@ def run_native():
     """The whole game, joined without the challenge: the matchmaker lets the first seek through (captcha_free), so
     no Security Challenge modal comes up at all (the probes stay hidden)."""
     label = "native"
-    modal = "".join("%d vis @modal knCaptchaHolder\n" % t for t in range(1500, 9000, 1500))
+    modal = "".join("%d vis @modal turnstileHolder\n" % t for t in range(1500, 9000, 1500))
     script = ("0 boot\n" + modal + "9000 play\n"
               # the stub void-kills DeadBot and an unknown sid right after we enter (on its "en");
               # the rows live 4 s, so probe #killFeed a few times inside that window.
@@ -1848,7 +1848,7 @@ def run_native():
     finally:
         lines = finish_native(label, stub, p, out, log)
     text = "\n".join(lines)
-    vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal knCaptchaHolder=(\d|-)", l) for l in lines) if m]
+    vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal turnstileHolder=(\d|-)", l) for l in lines) if m]
     check(f"{label}: nothing is drawn (the matchmaker let the first seek through)", len(vis) >= 3 and set(vis) <= {"0", "-"}, vis)
     check_seek_once_without_captcha(label, stub)
     check(f"{label}: the browser link is never offered (no paste box, no callback)", "knCaptchaCallback" not in text and "#kn-captcha=" not in text)
@@ -1970,12 +1970,12 @@ def run_native_unavailable():
     def setup(st):
         st.captcha_free = False  # the matchmaker asks for the Turnstile on every seek without a token
 
-    probes = "".join("%d vis @modal knCaptchaHolder\n" % t for t in range(1500, 19500, 1500))
+    probes = "".join("%d vis @modal turnstileHolder\n" % t for t in range(1500, 19500, 1500))
     script = "0 boot\n" + probes + "20000 text @inst [id=instructionsUpdate]\n20500 quit\n"
     stub, p, out, log = launch_native(label, script, {}, stub_setup=setup)
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
-    vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal knCaptchaHolder=(\d|-)", l) for l in lines) if m]
+    vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal turnstileHolder=(\d|-)", l) for l in lines) if m]
     check(f"{label}: nothing is drawn (the widget holder stays hidden)", len(vis) >= 3 and set(vis) == {"0"}, vis)
     seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
     gen = [pth for pth, _, _ in stub.http_log if pth == "/generate-token"]
@@ -2837,7 +2837,7 @@ def run_native_lobby():
               "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
               "3180 grep @kioMap %s .settNameIn\n"
               "3200 call krunkerJoin \"%s\"\n3210 vis @curtain loadingBg\n3230 vis @curtain loadingBg\n3260 vis @curtain loadingBg\n3300 text @loading [id=loadGamNm]\n"
-              "4500 vis @modal knCaptchaHolder\n"
+              "4500 vis @modal turnstileHolder\n"
               "6200 text @toast1 [id=knNotify]\n"
               "8000 play\n12800 text @toast2 [id=knNotify]\n"
               "12900 vis @curtain2 loadingBg\n13000 players\n"
@@ -2865,7 +2865,7 @@ def run_native_lobby():
     check(f"{label}: the click joins in-client (no browser)", f"[krunker] official lobby {GAME_ID}: joining in-client" in text and
           "open (disabled by KRUNKNATIVE_NO_BROWSER)" not in text, text[-400:])
     check(f"{label}: nothing is drawn (the matchmaker lets the first seek through)",
-          re.search(r"@modal knCaptchaHolder=(0|-)", text) is not None and "@modal knCaptchaHolder=1" not in text)
+          re.search(r"@modal turnstileHolder=(0|-)", text) is not None and "@modal turnstileHolder=1" not in text)
     seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
     # /ping-list: the krunker.io list's own ping round (krunker_lobbies.c: the row pings), not a seek's step
     paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list")]
@@ -3504,7 +3504,7 @@ def run_native_leave_state():
               "12000 play\n15000 grep @kn hello [id=chatList]\n15000 nodes @kn [id=chatList] .chatItem\n15100 con say zzknmark\n"
               "16500 grep @kn-said zzknmark [id=chatList]\n"
               "16500 state\n17000 call krunkerJoin \"%s\"\n"
-              "18300 vis @challenge knCaptchaHolder menuHolder :cursor\n18400 state\n"
+              "18300 vis @challenge turnstileHolder menuHolder :cursor\n18400 state\n"
               # the KrunkNative chat is gone once the official game has loaded (no challenge holds the join back)
               "19000 grep @left-kn zzknmark [id=chatList]\n19000 nodes @left-kn [id=chatList] .chatItem\n"
               "21000 play\n"
@@ -3539,7 +3539,7 @@ def run_native_leave_state():
           len(ordered) == 3 and " menu=0 locked=1 " in ordered[0], ordered[:1])
     chal = re.search(r"\[input_script\] vis t=\d+ @challenge (.*)", text)
     check(f"{label}: no challenge over the game (the menu closed, no modal)",
-          chal and chal.group(1).split()[:2] in (["knCaptchaHolder=0", "menuHolder=0"], ["knCaptchaHolder=-", "menuHolder=0"]),
+          chal and chal.group(1).split()[:2] in (["turnstileHolder=0", "menuHolder=0"], ["turnstileHolder=-", "menuHolder=0"]),
           chal.group(1) if chal else None)
     check(f"{label}: back in the game afterwards: pointer locked, no menu", len(ordered) == 3 and " menu=0 locked=1 " in ordered[2]
           and "cursor=disabled" in ordered[2], ordered[2:])
@@ -4666,7 +4666,7 @@ def run_native_webview():
     # shows no card either (the player sees only the loading state). Every 400 ms: a card would stay
     # longer than that.
     probe_t = list(range(800, 15601, 400))
-    probes = "".join("%d vis @silent knCaptchaHolder knCaptchaWebview\n" % t for t in probe_t)
+    probes = "".join("%d vis @silent turnstileHolder knCaptchaWebview\n" % t for t in probe_t)
     script = "0 boot\n" + probes + "16000 play\n21000 players\n21200 quit\n"
     stub, lines, log, left, maps, moves = webview_session(label, script, page, True)
     text = "\n".join(lines)
@@ -4678,7 +4678,7 @@ def run_native_webview():
           [l for l in lines if "[webview]" in l][:12])
     silent = re.findall(r"\[input_script\] vis t=\d+ @silent (.*)", text)
     check(f"{label}: silent first: the widget stayed hidden at every probe (the spinner stays, nothing is drawn)",
-          len(silent) == len(probe_t) and not any(re.search(r"knCaptchaHolder=1|knCaptchaWebview=1", s) for s in silent),
+          len(silent) == len(probe_t) and not any(re.search(r"turnstileHolder=1|knCaptchaWebview=1", s) for s in silent),
           [s for s in silent if "=1" in s][:4] or len(silent))
     probe_lines = [i for i, l in enumerate(lines) if "@silent " in l and "[input_script] vis" in l]
     pow_ok = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
@@ -4725,7 +4725,7 @@ def run_native_webview_interactive():
     page = ChallengePage(page_port, interactive=True)
     page.start()
     # the stub's game server sends a SHA-512 "cpt" (the widget's G = SHA-256 / SHA-384 / SHA-512): solved, nothing shown
-    probes = "".join("%d vis @pow knCaptchaHolder knCaptchaWebview instructions\n" % t for t in range(1000, 9801, 400))
+    probes = "".join("%d vis @pow turnstileHolder knCaptchaWebview instructions\n" % t for t in range(1000, 9801, 400))
     script = "0 boot\n" + probes + "10000 play\n15000 players\n15200 quit\n"
 
     def sha512(stub):
@@ -4762,7 +4762,7 @@ def run_native_webview_interactive():
     after = [m.group(1) for i, l in enumerate(lines) if pass_i and i > pass_i[0]
              for m in [re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)] if m]
     check(f"{label}: no card is drawn for the \"cpt\" (the widget holder stays hidden)",
-          after and not any("knCaptchaHolder=1" in v for v in after), after[:4])
+          after and not any("turnstileHolder=1" in v for v in after), after[:4])
     # the widget takes the spinner's place: while it is drawn the join's spinner (#instructions) is hidden
     drawn = [v for v in (re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l) for l in lines) if v]
     drawn = [v.group(1) for v in drawn if "knCaptchaWebview=1" in v.group(1)]
@@ -4898,7 +4898,7 @@ def run_web(mode):
         cdp.send("Fetch.enable", {"patterns": [{"urlPattern": TURNSTILE_URL + "*"}]})
         url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
         cdp.send("Page.navigate", {"url": url})
-        modal_js = ("(() => { const h = document.getElementById('knCaptchaHolder'); if (!h) return null;"
+        modal_js = ("(() => { const h = document.getElementById('turnstileHolder'); if (!h) return null;"
                     " const w = document.getElementById('knTurnstileHolder');"
                     " return {shown: getComputedStyle(h).display !== 'none', text: h.textContent.replace(w ? w.textContent : '', ''),"
                     " widget: !!document.querySelector('#knTurnstileHolder .kn-e2e-turnstile')}; })()")

@@ -5,6 +5,7 @@
 // clans) are answered by that module's *_handle() through h_fallback. Analytics / ad hooks
 // (logBtnFRVR, ...) are no-ops; the payment ones are kio_checkout.c's. Also installs the non-inline
 // listeners (setupDom's addEventListener calls).
+#include <end_share.h>
 #include <v10_menu.h>
 #include "klog.h"
 #include <creation_vote.h>
@@ -605,6 +606,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     account_ui_handle,         // account_ui.c: Account window, logout, mail, profile
     servers_ui_handle,         // servers_ui.c: Servers / Server Finder / Games / Host / Join
     store_ui_handle,           // store_ui.c: Store (windows[13])
+    end_share_handle,          // end_share.c: the end table's share / report buttons (shareResult, shareMatch)
     clan_ui_handle,            // clan_ui.c: Clans (windows[12])
     ranked_ui_handle,          // ranked_ui.c: Ranked (windows[26])
     turf_ui_handle,            // turf_ui.c: v10 Turf Wars

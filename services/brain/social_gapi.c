@@ -384,6 +384,28 @@ static void social_create(SocialSession *s, const GapiReq *r) {
                 create_done, gctx(r, t, 0, NULL));
 }
 
+/* ["smr", note]: v10's SHARE_MATCH_RESULT from the end table's share popup (deob-10.0.7.js:227055-227064). The
+ * client expects no reply (it closes its popups at once). Krunker's server side is not shipped; Box Office's reading
+ * posts the share to the player's feed as an ordinary post, under the post rules above (level 10, the length cap,
+ * the "spost" rate limit). An empty note posts Box Office's own line. */
+static void share_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) s;
+    (void) extra;
+    if (!kn_db_ok(res)) KN_INFO("social", "share match refused: %s", acct_db_error(res, "share match"));
+}
+
+void sh_share_match(SocialSession *s, const cJSON *f) {
+    if (s->account_id <= 0 || !write_ok(s, "spost", 20, 3600)) return;
+    const cJSON *n = fa(f, 1);
+    const char *note = cJSON_IsString(n) ? n->valuestring : "";
+    while (*note == ' ' || *note == '\n' || *note == '\t') note++;
+    char me[24], max[24];
+    social_call(s, &P_POST_CREATE_V10,
+                KN_DB_ARGS(social_viewer(s, me), "0", *note ? note : "Just finished a match on Box Office", "0",
+                           acct_itoa(max, g_acct.post_max_len > 0 ? g_acct.post_max_len : 1024), "20", "24"),
+                share_done, NULL);
+}
+
 /* the vote's reply {value}: the value the viewer now has (1 liked, 0 not) */
 static void vote_done(SocialSession *s, kn_db_result *res, void *extra) {
     GCtx *c = extra;

@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-end-share",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "end-table",
+      "rect": [
+        355,
+        170,
+        580,
+        145
+      ],
+      "kind": "text",
+      "note": "#endTable: the share icon on your own row, the report flag on the other account's row, nothing on the guest's (end_share.c)"
+    }
+  ]
+}

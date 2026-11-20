@@ -68,22 +68,23 @@ static void wipe(void *p, size_t n) {
 
 // The holder on <body>, made on first use (the page may have been rebuilt: look it up every time). It is the
 // challenge's one element: centred on the screen where the join's spinner is, hidden until the widget is shown.
+// Its id is the bundle's own (`turnstileHolder`, made on <body> and centred: deob-10.0.7.js:116406-116407).
 static char *markup(void) {
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div id=\"knCaptchaHolder\" class=\"kn-captcha-holder\" style=\"display:none\">" CAPTCHA_CONTENT "</div>");
+    sb_appendf(&sb, "<div id=\"turnstileHolder\" class=\"kn-captcha-holder\" style=\"display:none\">" CAPTCHA_CONTENT "</div>");
     return sb_finish(&sb);
 }
 
 static HtmlElem holder(void) {
     if (!html_ui_available() || !html_ui_is_ready()) return 0;
-    HtmlElem h = html_dom_by_id("knCaptchaHolder");
+    HtmlElem h = html_dom_by_id("turnstileHolder");
     if (!h) {
         const HtmlElem body = html_dom_body();
         if (!body) return 0;
         char *html = markup();
         html_dom_insert_html(body, HTML_INSERT_BEFORE_END, html);
         free(html);
-        h = html_dom_by_id("knCaptchaHolder");
+        h = html_dom_by_id("turnstileHolder");
     }
     return h;
 }
@@ -95,7 +96,7 @@ static void show(const char *id, const int on) {
 
 // The holder (the widget or the webview's canvas) is shown, or hidden.
 static void holder_show(const int on) {
-    const HtmlElem h = html_dom_by_id("knCaptchaHolder");
+    const HtmlElem h = html_dom_by_id("turnstileHolder");
     if (h) html_dom_set_display(h, on ? "" : "none");
 }
 

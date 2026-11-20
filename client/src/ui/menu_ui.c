@@ -51,6 +51,7 @@
 #include <online_mode.h> // live sign-in: the session's rights end with it
 #include <audio.h> // the auto-respawn countdown's tick_0
 #include <nettspend.h>   // the Nettspend's weapon previews
+#include <bundle_offers.h> // the home tab's bundle card
 #include "v10_loading.h" // #loadingBg: a switch in place is a fresh page for the map card
 #include <krunker_captcha.h> // krunker_captcha_needs_player: the security challenge frees the pointer
 
@@ -1903,6 +1904,8 @@ static void setup_dom(void) {
     // has no answer), not the ad slot
     set_display("streamCon", "block");
     set_display("adCon", "none");
+    // the ad slot's other half: the home tab's bundle card (bundle_offers.c; Box Office shows no ads)
+    bundle_offers_home_refresh();
     // the FTUE / gradual-menu chrome stays as fullMenu() leaves it
     set_display("frvrFTUEVideoHolder", "none");
     set_display("expertModeBtn", "none");

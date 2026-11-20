@@ -220,6 +220,7 @@ AccountBackend account_backend(void) {
 static int brain_gated(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
 
 void account_ui_scenario_official(const int on) { g_scenario_official = on != 0; }
+int account_ui_scenario_signed_in(void) { return g_scenario && g_logged_in; }
 
 const AccountInfo *krunkio_account(void) { return g_logged_in ? &g_acc : NULL; }
 

@@ -68,6 +68,7 @@
 #include <v10_social.h> // state.social
 #include <v10_menu.h> // state.officialSession
 #include <kio_store.h> // state.kioStore
+#include <kio_checkout.h> // state.kioBundles
 #include <png_write.h>
 #include <pcg_basic.h>
 #include <stb_image.h>
@@ -333,6 +334,7 @@ static void warn_unknown_keys(void) {
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
         "events",    // v10.0.3 live events {list: config.events, index: the round's eventIndex, now: Date.now ms} (v10_events.c)
         "kioStore", // krunker.io's store answers {limited, ranked} with officialSession (kio_store.c)
+        "kioBundles", // krunker.io's bundle frames [["abd", rows], ["gbdr", ...]] with officialSession (kio_checkout.c)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
         "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
         "leaderboards", // the v10 Leaderboards popup: {category, tab, region, season} (v10_competitive.c)
@@ -891,8 +893,7 @@ static int scenario_window_id(const cJSON *window, int *id) {
 // state.windowActions: inline-handler calls dispatched once the window is open, as the
 // window's own markup would (["windows.2.switchTab", 0], ["windows.6.switchTab", 2], ...):
 // each entry is [name, args...] with number / string / bool arguments.
-static void apply_window_actions(Client *client) {
-    const cJSON *actions = st("windowActions");
+static void apply_actions(Client *client, const cJSON *actions) {
     const cJSON *action;
     cJSON_ArrayForEach(action, actions) {
         const cJSON *name = cJSON_IsArray(action) ? cJSON_GetArrayItem(action, 0) : action;
@@ -913,6 +914,10 @@ static void apply_window_actions(Client *client) {
         html_ui_dispatch(name->valuestring, &ev, argc ? args : NULL, argc);
         run_frames(client, 2);
     }
+}
+
+static void apply_window_actions(Client *client) {
+    apply_actions(client, st("windowActions"));
     // state.windowClicks [css selector, ...]: a real DOM click on the first match, so the page's own
     // onclick runs with its element (a settings folder's collapseFolder needs it: the Quickplay
     // section starts folded, and a scenario opens it the way a user does).
@@ -1091,6 +1096,9 @@ static void apply_endscreen(Client *client) {
     hud_ui_show_end_screen(client, cJSON_IsNumber(result) ? result->valueint : place == 1, obj_str(end, "nextRound"));
     hud_endscreen_v10_scenario(end); // rank / rp / items / raid / collect (hud_endscreen_v10.c)
     if (obj_num(end, "results", 0)) hud_ui_end_results_now(client); // the GUI.endScreen tabs (performance)
+    // endscreen.actions: inline-handler calls on the results, as state.windowActions (["GUI.endScreen.changeTab",
+    // "leaderboard"], ["shareResult"])
+    apply_actions(client, cJSON_GetObjectItemCaseSensitive(end, "actions"));
 }
 
 // Time-dependent pieces, applied at `clock_ms` for a capture at `capture_ms`.
@@ -1237,6 +1245,7 @@ static int ui_scenario_apply(Client *client) {
     v10_rewards_guest_earned_scenario(st("guestEarned")); // a guest's unclaimed KR / score (v10_rewards.c)
     alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts
     kio_store_scenario(st("kioStore"));  // krunker.io's shop answers (kio_store.c), without krunker.io
+    kio_checkout_scenario(st("kioBundles")); // krunker.io's bundle frames: the home card, the shop note (kio_checkout.c)
     v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)

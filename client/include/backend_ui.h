@@ -91,6 +91,7 @@ int account_custom_badge(void);
 void account_ui_scenario(const cJSON *account); // --render-scenario: state.account stands in for a login
 void account_ui_scenario_official(int on);      // --render-scenario: state.official, krunker.io is the active backend
 void account_ui_scenario_post(void);             // after the scenario's window: account.c2fa (the 2FA popup)
+int account_ui_scenario_signed_in(void);        // --render-scenario: state.account's stand-in login is on
 int account_owns_badge(int badge);
 void account_popup(int kind, const char *error, const char *text); // popupResponse: 0 error, 1 success, 2 loading
 // Strike's message popups: 1 when the Strike page shows the answer of a request it made (strike_popup_expect),

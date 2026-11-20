@@ -55,7 +55,7 @@ lifetime are not visible from the client; the rule above is what the client does
 
 ## Web build
 
-1. `CaptchaRequired` draws the Turnstile widget where the join's spinner is (`#knCaptchaHolder`, centred; the
+1. `CaptchaRequired` draws the Turnstile widget where the join's spinner is (`#turnstileHolder`, centred; the
    spinner is hidden while it is up). Nothing else is drawn: no box, no text, no button.
 2. `api.js` is loaded on demand and the widget is rendered with krunker.io's sitekey and
    `appearance: "interaction-only"` (the live client's getCaptchaToken). Its token goes straight into the

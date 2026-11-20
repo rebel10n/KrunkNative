@@ -780,6 +780,7 @@ static const SocialRoute k_routes[] = {
     {"wob", sh_wild_offer_buy},         /* v10 shop.purchaseWildOffer */
     {"wor", sh_wild_offer_refresh},     /* v10 shop.refreshWildOffer */
     {"rqdxp", sh_double_xp_claim},      /* v10 2x XP claim after the end-screen offer -> "rrqdxp" (double_xp_social.c) */
+    {"smr", sh_share_match},            /* v10 SHARE_MATCH_RESULT: the end table's share, a feed post (social_gapi.c) */
     {"clnRA", sh_clan_decline_all},     /* v10 clan window: Decline All */
     {"vcln", sh_clan_viewed},           /* v10 OPEN_CLAN_TAB */
     {"uploadS", sh_settings_up},

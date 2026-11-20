@@ -336,6 +336,7 @@ void sh_wild_offer_buy(SocialSession *s, const cJSON *f);     /* "wob" (purchase
 void sh_wild_offer_refresh(SocialSession *s, const cJSON *f); /* "wor" (refresh) */
 int wild_offer_refresh_cost(void);                             /* the refresh price in KR (wild_offer.c) */
 void sh_double_xp_claim(SocialSession *s, const cJSON *f); /* "rqdxp" (v10 2x XP claim, double_xp_social.c) */
+void sh_share_match(SocialSession *s, const cJSON *f);      /* "smr" (v10 SHARE_MATCH_RESULT: a feed post, social_gapi.c) */
 int store_wheel_ticket(const char *name);              /* a store wheel's ticketIndex, -1 none (store.c) */
 /* POST /spins/execute (v10, HTTP root): the socket's "spin" for account (store.c), answered with the v10 envelope */
 void store_spin_v10(kn_http_req *req, int64_t account, int64_t index, int64_t ticket, int want_multi);

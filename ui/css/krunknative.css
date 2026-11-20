@@ -939,3 +939,23 @@ html.kn-bare-window #instructions {
 #genericPop.knAdPop { width: 520px; text-align: center; }
 #genericPop.knAdPop .knAdBody { font-family: "GameFont", sans-serif; }
 #genericPop.knAdPop #confirmBtn.knAdWait { opacity: 0.4; pointer-events: none; cursor: default; }
+
+/* The end table's share popup (end_share.c: #genericPop.kn-share-pop; Krunker's shareResult popup,
+ * deob-10.0.7.js:227048-227054). Krunker opens it with no class, and a classless #genericPop has no rule
+ * placing it (each popup's class carries its card), so it lands in the page's top-left corner. Box Office
+ * gives it the centred dark card the other popups use, with the confirm popups' 400px content box. */
+#genericPop.kn-share-pop {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  max-width: calc(100vw - 64px);
+  padding: 15px;
+  border-radius: 10px;
+  background-color: #353535;
+  box-shadow: 2px 2px 8px rgb(0 0 0 / 50%);
+  color: #fff;
+  pointer-events: all;
+}
+#genericPop.kn-share-pop textarea { box-sizing: border-box; resize: none; }

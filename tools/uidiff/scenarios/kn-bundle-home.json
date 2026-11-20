@@ -1,0 +1,60 @@
+{
+  "ref": "doc/ref/krunknative/kn-bundle-home.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "officialSession": true,
+    "window": null,
+    "kioBundles": [
+      [
+        "abd",
+        [
+          {
+            "ID": 41,
+            "NAME": "Starter Pack",
+            "PRICE": 4.99,
+            "ORIGINAL_PRICE": 9.99,
+            "DISCOUNT_PCT": 50,
+            "SKINS": "1,2",
+            "EXPIRY": "2026-01-01T00:00:00.000Z",
+            "INFO": "",
+            "FUNDS": 600,
+            "JUNK": 0,
+            "PREMIUM": 0,
+            "EVENT_NAME": null,
+            "EVENT_ENDS_AT": null,
+            "DATE": "2026-10-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      [
+        "gbdr",
+        [
+          41
+        ]
+      ]
+    ],
+    "storage": {
+      "kio_access_token": "h.eyJ1c2VybmFtZSI6IlBsYXllciIsImV4cCI6NDEwMjQ0NDgwMH0.s",
+      "kio_username": "Player",
+      "kio_level": "5"
+    },
+    "after_ms": 1500
+  },
+  "note": "KN only: the menu's home bundle card (#homeStoreAd, bundle_offers.c) from krunker.io's \"abd\" rows with officialSession: the art, name, price and the -50% #bundleHomeDiscountLabel (deob-10.0.7.js:215607-215705). after_ms 1500 and 60 frames: past the 250 ms fade and its 0.5 s transition. Reference: KN's own render.",
+  "frames": 60
+}

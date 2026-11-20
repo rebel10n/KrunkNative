@@ -34,6 +34,8 @@ void kio_checkout_bundle(int bundle, const char *gift_to);
 // owned, deob-10.0.4.js iíïïìïî): v10's bundle rows for the Store's grid (junk_shop_bundles_render). NULL until the
 // game server sent them.
 const cJSON *kio_checkout_bundles(void);
+// --render-scenario: state.kioBundles, frames as the game socket sends them ([["abd", rows], ["gbdr", ids, ...]])
+void kio_checkout_scenario(const cJSON *frames);
 // bundlePopup(true, false, id) (:212740-212862): the bundle's popup (#bundlePop) with BUY (selectBundle) and GIFT
 // (selectBundleGift: the player's name, then "xstb" with it).
 void kio_checkout_bundle_popup(int bundle);

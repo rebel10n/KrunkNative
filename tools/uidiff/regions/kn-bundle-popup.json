@@ -1,0 +1,21 @@
+{
+  "scenario": "kn-bundle-popup",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        330,
+        135,
+        660,
+        420
+      ],
+      "kind": "text",
+      "max_pct": 2.0,
+      "note": "#bundlePop: the title, the discount ribbon, the art box, the price row and the .strike-timer countdown (Ends in / #timer-text: the day count moves by one a day, so the cap is wider)"
+    }
+  ]
+}

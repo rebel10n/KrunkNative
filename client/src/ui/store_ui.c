@@ -19,6 +19,7 @@
 #include <backend_ui.h>
 #include <app_mode.h>
 #include <ui_logic.h>
+#include <bundle_offers.h>
 #include <junk_shop_ui.h>
 #include <audio.h>
 #include <spin_wheel.h>
@@ -1657,7 +1658,12 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     if (!strcmp(name, "bundlePopup")) { // bundlePopup(true, false, ID): a home-tab bundle card (junk_shop_ui.c), the purchase
         const int id = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 0;
         if (kio_store_active()) kio_checkout_bundle_popup(id); // the bundle's BUY / GIFT popup (deob-10.0.4.js:212740-212935)
-        else if (id > 0) junk_shop_bundle_buy(id);
+        else if (id > 0) bundle_offers_popup(id); // the Box Office bundle's popup (bundle_offers.c), BUY = knBundleBuy
+        return 1;
+    }
+    if (!strcmp(name, "knBundleBuy")) { // the Box Office bundle popup's BUY: the brain's purchase
+        const int id = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        if (id > 0) junk_shop_bundle_buy(id);
         return 1;
     }
     if (!strcmp(name, "windows.13.premium")) { g_store_tab = 2; menu_show_window(14, 1); return 1; }

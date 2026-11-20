@@ -29,6 +29,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <i18n.h>
+#include <bundle_offers.h> // the home card, a timed bundle's countdown, the shop button's note
 #include "klog.h"
 #include "../viewer/viewer_store.h" // the bundle popup's skins and their rarity colours
 #include <math.h>
@@ -66,6 +67,9 @@ static struct {
     unsigned browser_gen;
     cJSON *bundles;      // the official bundle rows ("abd") and the available ids ("gbdr")
     cJSON *available;
+    cJSON *cond_rows;    // "gbdr" [2]: the conditional bundles' rows (deob-10.0.7.js:215686-215694)
+    cJSON *conditions;   // "gbdr" [3]: {bundle id: [{condition_type, ...}]}
+    cJSON *first_seen;   // "gbdr" [4]: [{bundle_id, first_seen}]
     int error_shown;     // iìiíîíí: purchaseError's #purchaseResponse is up
 } K;
 
@@ -526,13 +530,45 @@ void kio_checkout_bundle(const int bundle, const char *gift_to) {
 
 const cJSON *kio_checkout_bundles(void) { return K.bundles; }
 
+void kio_checkout_scenario(const cJSON *frames) {
+    const cJSON *f;
+    cJSON_ArrayForEach(f, frames) {
+        const cJSON *label = cJSON_GetArrayItem(f, 0);
+        if (cJSON_IsString(label)) frame_listen(label->valuestring, f);
+    }
+}
+
 static const cJSON *bundle_row(const int id) {
-    const cJSON *b;
-    cJSON_ArrayForEach(b, K.bundles) {
-        const cJSON *bid = cJSON_GetObjectItem(b, "ID");
-        if (cJSON_IsNumber(bid) && (int) bid->valuedouble == id) return b;
+    const cJSON *lists[2] = {K.bundles, K.cond_rows}, *b;
+    for (int l = 0; l < 2; l++) {
+        cJSON_ArrayForEach(b, lists[l]) {
+            const cJSON *bid = cJSON_GetObjectItem(b, "ID");
+            if (cJSON_IsNumber(bid) && (int) bid->valuedouble == id) return b;
+        }
     }
     return NULL;
+}
+
+// a conditional bundle's 24-hour condition (condition_type "valid_for_24_hours", deob-10.0.7.js:203294) and the
+// epoch ms the account first saw it (iììiíìi's first_seen); 0 when it has none
+static double bundle_first_seen_ms(const int id) {
+    char key[16];
+    snprintf(key, sizeof key, "%d", id);
+    const cJSON *list = cJSON_GetObjectItem(K.conditions, key), *c;
+    int day = 0;
+    cJSON_ArrayForEach(c, list) {
+        const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(c, "condition_type"));
+        day |= t && !strcmp(t, "valid_for_24_hours");
+    }
+    if (!day) return 0;
+    const cJSON *f;
+    cJSON_ArrayForEach(f, K.first_seen) {
+        const cJSON *bid = cJSON_GetObjectItem(f, "bundle_id");
+        const double v = cJSON_IsNumber(bid) ? bid->valuedouble : cJSON_IsString(bid) ? atof(bid->valuestring) : -1;
+        if ((int) v != id) continue;
+        return bundle_offers_iso_ms(cJSON_GetStringValue(cJSON_GetObjectItem(f, "first_seen")));
+    }
+    return 0;
 }
 
 static double row_num(const cJSON *b, const char *key) { // the rows hold numbers or numeric strings (parseFloat)
@@ -542,7 +578,8 @@ static double row_num(const cJSON *b, const char *key) { // the rows hold number
 
 // bundlePopup(true, false, id) (deob-10.0.4.js:212740-212862): the bundle's skins (up to 12 of SKINS, each in its
 // rarity's border), the discount label, its art, the Junk it adds, the struck original price, BUY "$PRICE USD" unless
-// OWNED (selectBundle) and GIFT (selectBundleGift; "GIFT $PRICE USD" once owned). The offer timer is left out.
+// OWNED (selectBundle) and GIFT (selectBundleGift; "GIFT $PRICE USD" once owned), and a timed bundle's countdown
+// (bundle_offers.c, deob-10.0.7.js:215809-215945).
 void kio_checkout_bundle_popup(const int id) {
     if (!official() || !signed_in()) return;
     const cJSON *b = bundle_row(id);
@@ -568,6 +605,8 @@ void kio_checkout_bundle_popup(const int id) {
     }
     sb_append(&sb, "</div>");
     if (disc > 0) sb_appendf(&sb, "<div class='bundlPopDiscountLabel'>-%.0f%% OFF</div>", floor(disc + 0.5));
+    const double ends = bundle_offers_ends_ms(b, bundle_first_seen_ms(id)); // the offer's countdown (bundle_offers.c)
+    bundle_offers_timer_html(&sb, b, ends);
     char art[320], path[64];
     snprintf(path, sizeof(path), "img/backgrounds/bundles/b_%d.png", id);
     html_dom_asset_url(path, art, sizeof(art));
@@ -588,6 +627,7 @@ void kio_checkout_bundle_popup(const int id) {
         html_dom_set_display(pop, "block");
     }
     free(html);
+    bundle_offers_timer_start(ends);
 }
 
 // selectBundleGift(el, id) (:212863-212892): "Gifting Bundle", the player's name (trimmed), then selectBundle(el, id, false, name)
@@ -819,12 +859,32 @@ static void frame_listen(const char *label, const cJSON *frame) {
         K.bundles = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : NULL;
         bundles_owned();
         menu_rerender_if_open(14);
-    } else if (!strcmp(label, "gbdr")) { // AVAILABLE_BUNDLE_DATA [available ids, ...] (iíïïìïî)
+        bundle_offers_home_refresh(); // the home card (deob-10.0.7.js:215669-215684)
+    } else if (!strcmp(label, "gbdr")) { // AVAILABLE_BUNDLE_DATA [available ids, conditional rows, conditions, first seen]
         cJSON_Delete(K.available);
         const cJSON *ids = arg(frame, 1);
         K.available = cJSON_IsArray(ids) ? cJSON_Duplicate(ids, 1) : NULL;
+        cJSON_Delete(K.cond_rows);
+        cJSON_Delete(K.conditions);
+        cJSON_Delete(K.first_seen);
+        const cJSON *cr = arg(frame, 2), *cn = arg(frame, 3), *fs = arg(frame, 4);
+        K.cond_rows = cJSON_IsArray(cr) ? cJSON_Duplicate(cr, 1) : NULL;
+        K.conditions = cJSON_IsObject(cn) ? cJSON_Duplicate(cn, 1) : NULL;
+        K.first_seen = cJSON_IsArray(fs) ? cJSON_Duplicate(fs, 1) : NULL;
         bundles_owned();
         menu_rerender_if_open(14);
+        bundle_offers_home_refresh(); // the home card, now with the account's owned bundles (:215696-215705)
+        // a random conditional bundle with a 24-hour condition: the shop button's note (:215708-215739)
+        const int count = cJSON_GetArraySize(K.cond_rows);
+        if (count > 0) {
+            const cJSON *pick = cJSON_GetArrayItem(K.cond_rows, rand() % count);
+            const int id = (int) row_num(pick, "ID");
+            const double seen = bundle_first_seen_ms(id);
+            if (seen > 0) {
+                const double left = bundle_offers_ends_ms(pick, seen) - bundle_offers_now_ms();
+                bundle_offers_ltm_note(id, left > 0 ? left : 0);
+            }
+        }
     } else if (!strcmp(label, "xst")) {
         on_token(frame);
     } else if (!strcmp(label, "pur")) { // [provider, err, funds, pIndex, price, currency, txn, ext]

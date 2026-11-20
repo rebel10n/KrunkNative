@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-bundle-home",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "bundle-card",
+      "rect": [
+        1060,
+        30,
+        220,
+        180
+      ],
+      "kind": "text",
+      "note": "#homeStoreAd in #topLeftAdHolder's swap slot after the fade: the bundle name, the -50% #bundleHomeDiscountLabel and the discounted price (bundle_offers.c)"
+    }
+  ]
+}

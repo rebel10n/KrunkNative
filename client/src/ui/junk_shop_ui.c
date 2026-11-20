@@ -250,6 +250,21 @@ void junk_shop_bundles_render(StrBuf *sb) {
     }
 }
 
+// The rows the home tab's bundle card rotates through (bundle_offers.c): the same source as the grid. NULL while
+// they load (a Box Office request is started, no redraw is asked for) or when there are none.
+const cJSON *junk_shop_bundles_rows(void) {
+    if (kio_store_active()) return kio_checkout_bundles();
+    char t[256], path[320];
+    v10_url_token(t, sizeof t);
+    snprintf(path, sizeof path, "/api/shop/bundles%s%s", t[0] ? "?token=" : "", t);
+    const V10Req *r = v10_get(path, BUNDLES_TTL_MS);
+    if (!r || r->status != 200 || !r->json) return NULL;
+    const cJSON *data = cJSON_GetObjectItem(r->json, "data");
+    return cJSON_IsArray(data) ? data : NULL;
+}
+
+int junk_shop_bundles_order(const cJSON *rows, const cJSON **out, const int max) { return bundles_ordered(rows, out, max); }
+
 // bundlePopup(true, false, ID) from a bundle card (store_ui.c): Box Office has no bundle popup (v10's bundlePop, deob-
 // 10.0.3.js:242965-243225: the items, the offer timer, BUY / GIFT through the payment provider), so the card goes
 // straight to the bundle's purchase, whose answer is the brain's: a bundle is USD and Box Office takes no payment.

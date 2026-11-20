@@ -73,6 +73,7 @@ void hud_ui_hit(Client*, int kill);
 #include <console.h>     // ui_console_on_server_line: the official line in the developer console
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
 #include "v10_loading.h" // #loadingBg: the v10.0.4 map card (client/tests/v10_loading_test.c)
+#include <end_share.h> // the end table's share / report buttons
 #include <game_config.h> // game_config_is_custom: the card's accent is #fff in a custom game
 #include <scene_warm.h> // the card waits for the warm frames (scene_warm_active)
 #include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
@@ -3509,9 +3510,10 @@ static const char *hud_reward_html(const int reward, char *out, const size_t siz
 
 // f1917's row of #endTable (config.endStats: name, score, kills, deaths, reward): rank, the
 // pfp + profile link (local #fff, team mate rgba(255,255,255,0.6), else COLORS.teams[1]),
-// the stats and the empty actions cell (guests: no share / report buttons).
+// the stats and the actions cell (end_share.c: your share button, another account's report button; none for a guest).
 static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *name,
-                             const char *color, const int score, const int kills, const int deaths, const int reward, const int blank) {
+                             const char *color, const int score, const int kills, const int deaths, const int reward, const int blank,
+                             const char *actions) {
     char shown[PLAYER_NAME_SIZE];
     hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td style='position: relative;'>", last ? "border-bottom:none" : "", rank);
     hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>");
@@ -3527,7 +3529,7 @@ static void hud_end_row_html(char *out, const size_t size, size_t *len, const in
     }
     hb_append(out, size, len, "</a></td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td>"
                               "<td style='position: relative;'>%s</td>", stat[0], stat[1], stat[2], reward_html);
-    hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
+    hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'>%s</td></tr>", actions ? actions : "");
 }
 
 // Scenario rows (state.scoreboard [{name, score, kills?, deaths?, reward?, me?}]): FFA, so
@@ -3546,8 +3548,10 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
         name = player_names_shown(-1, is_you, name, pname, sizeof(pname)); // Hide player names
 #define ROW_INT(key) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, key)) ? cJSON_GetObjectItemCaseSensitive(row, key)->valueint : 0)
         index++;
+        char actions[512];
+        end_share_actions_html(actions, sizeof actions, is_you, ROW_INT("level") > 0, game_config_is_custom(&client->game), name);
         hud_end_row_html(out, size, len, index, index >= count, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
-                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you));
+                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you), actions);
 #undef ROW_INT
     }
     return count;
@@ -3584,9 +3588,13 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
         // null there, so `0 == null` makes every other FFA row red.
         const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
         const char *color = p == client->me ? "#fff" : p->team && p->team == local_team ? "rgba(255,255,255,0.6)" : FEED_COLOR_ENEMY;
-        char pname[PLAYER_NAME_SIZE];
-        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_player_name(client, p, pname, sizeof(pname)), color, p->score, (int) p->kills,
-                         (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me));
+        char pname[PLAYER_NAME_SIZE], actions[512];
+        const char *shown = hud_player_name(client, p, pname, sizeof(pname));
+        const NetPlayerInfoPacket *acc = player_accounts_get(p->uid);
+        end_share_actions_html(actions, sizeof actions, p == client->me, acc && acc->level > 0 && !player_names_extras_hidden(0),
+                               game_config_is_custom(&client->game), hud_raw_player_name(client, p)); // the account name, not a shown alias
+        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, shown, color, p->score, (int) p->kills,
+                         (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me), actions);
     }
     hb_append(out, size, len, "</table>");
 }
