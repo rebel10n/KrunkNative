@@ -317,6 +317,15 @@ def trade_history(port, ids, tokens, names):
         c.ui("loadMoreTradeHistory()")
         check(wait(lambda: c.count("#o_his .offerHolder[id]") == 35, 10), "Load More: all 35")
         check(c.count("#o_his .loadMoreHis") == 0 and c.has("o_his", 5), "no more pages; the History tab stays open")
+        # the settings' image collection (hub-10.0.7.js:6335-6440; image_collection.c)
+        c.ui("clearPops();imagePopup('customScope')")
+        check(c.has("imagesTabLayout"), "imagePopup opens the image collection")
+        c.ui("imageNewPopup()")
+        check(c.has("newCustName"), "Add an image asks for a name and a link")
+        c.type("newCustName", "Blue Scope")
+        c.type("newCustImg", "https://example.com/scope.png")
+        c.ui("addNewImage()")
+        check(c.text_has(".kn-image-grid", "Blue Scope", 10), "the new image is in the collection")
     finally:
         c.close()
 
