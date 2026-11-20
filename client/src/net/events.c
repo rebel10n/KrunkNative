@@ -94,6 +94,10 @@ void on_client_socket_disconnect(Client *client) {
         return;
     }
 
+    if (intended && client->replay) { // a K.P.D replay replaced the session (demo_play.c): no next session, no spinner
+        printf("left the server for a replay\n");
+        return;
+    }
     if (intended) { // a server switch: the next session follows at once, the page shows its loading spinner
         net_set_status_code(client, NET_STATUS_CONNECTING, "", "");
         printf("switching servers (the session closed on purpose)\n");

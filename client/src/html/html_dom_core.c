@@ -129,7 +129,7 @@ static void normalise_handler_name(const char *name, char *out, const size_t n) 
 }
 
 // html_ui_add_handler: run-time handlers of the game page (context 0)
-#define HTML_MAX_ADDED_HANDLERS 8
+#define HTML_MAX_ADDED_HANDLERS 32 // the end screen, notices, K.P.D replays, KrunkScript, Strike... (8 dropped the replay bar's)
 static HtmlHandlerEntry g_added_handlers[HTML_MAX_ADDED_HANDLERS];
 static char g_added_names[HTML_MAX_ADDED_HANDLERS][48];
 
@@ -144,7 +144,11 @@ void html_ui_add_handler(const char *name, const HtmlHandlerFn fn) {
         }
         if (!g_added_handlers[i].name && free_slot < 0) free_slot = i;
     }
-    if (!fn || free_slot < 0) return;
+    if (!fn) return;
+    if (free_slot < 0) {
+        fprintf(stderr, "[ui] html_ui_add_handler %s: table full (HTML_MAX_ADDED_HANDLERS)\n", name);
+        return;
+    }
     snprintf(g_added_names[free_slot], sizeof(g_added_names[free_slot]), "%s", name);
     g_added_handlers[free_slot] = (HtmlHandlerEntry) {g_added_names[free_slot], fn};
 }

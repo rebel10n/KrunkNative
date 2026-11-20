@@ -222,6 +222,7 @@ int demo_play_start(Client *client, const uint8_t *data, const size_t length, co
     // window.isReplay; the live socket closed (:229716-229722)
     g_play.had_offline = client->offline;
     g_play.had_session = !client->offline && (client->net_connected || client->net_thread_running);
+    client->replay = 1; // before the release: its session's close is the replay's, not a server switch (events.c)
     client_net_release(client);
     client_leave_game(client);
 

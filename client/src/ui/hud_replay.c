@@ -350,10 +350,11 @@ static int l_slider_down(void *user, const HtmlEvent *ev, const HtmlArg *args, c
 }
 
 static int l_slider_change(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user; (void) args; (void) argc;
+    (void) user;
     g_rp.dragging = 0;
-    if (!g_rp.client || !ev || !ev->value) return 1;
-    demo_play_seek(g_rp.client, (uint32_t) strtoul(ev->value, NULL, 10));
+    const char *v = argc > 0 && args[0].str ? args[0].str : ev ? ev->value : NULL;
+    if (!g_rp.client || !v || !v[0]) return 1;
+    demo_play_seek(g_rp.client, (uint32_t) strtoul(v, NULL, 10));
     return 1;
 }
 
@@ -386,19 +387,33 @@ static int l_exit(void *user, const HtmlEvent *ev, const HtmlArg *args, const in
     return 1;
 }
 
+// The bar's own elements get inline handlers (the page's markup has none: Krunker sets .onclick from its
+// script, :229771-229806); inline handlers dispatch the same on the native engine and the web page.
+static void rp_on(const char *id, const char *attr, const char *call) {
+    const HtmlElem e = html_dom_by_id(id);
+    if (e) html_dom_set_attr(e, attr, call);
+}
+
 void hud_replay_bind(Client *client) {
     g_rp.client = client;
-    if (g_rp.bound) return;
+    if (g_rp.bound || !html_dom_by_id("replayControls")) return;
     g_rp.bound = 1;
-    html_ui_set_listener("replayPlayBtn", "click", l_play);
-    html_ui_set_listener("replaySlider", "mousedown", l_slider_down);
-    html_ui_set_listener("replaySlider", "change", l_slider_change);
-    html_ui_set_listener("replaySpeed", "click", l_speed);
-    html_ui_set_listener("replaySusBtn", "click", l_suspect);
-    html_ui_set_listener("replayHitBtn", "click", l_hitboxes);
-    html_ui_set_listener("replayExitBtn", "click", l_exit);
+    html_ui_add_handler("replayPlay", l_play);
+    html_ui_add_handler("replayDrag", l_slider_down);
+    html_ui_add_handler("replaySeek", l_slider_change);
+    html_ui_add_handler("replaySpeed", l_speed);
+    html_ui_add_handler("replaySuspect", l_suspect);
+    html_ui_add_handler("replayHitboxes", l_hitboxes);
+    html_ui_add_handler("replayExit", l_exit);
     html_ui_add_handler("replayResolve", h_replay_resolve);
     html_ui_add_handler("replayVote", h_replay_vote);
+    rp_on("replayPlayBtn", "onclick", "replayPlay()");
+    rp_on("replaySlider", "onmousedown", "replayDrag()");
+    rp_on("replaySlider", "onchange", "replaySeek(this.value)");
+    rp_on("replaySpeed", "onclick", "replaySpeed()");
+    rp_on("replaySusBtn", "onclick", "replaySuspect()");
+    rp_on("replayHitBtn", "onclick", "replayHitboxes()");
+    rp_on("replayExitBtn", "onclick", "replayExit()");
 }
 
 void hud_replay_tick(Client *client) {
@@ -413,6 +428,7 @@ void hud_replay_tick(Client *client) {
     if (!g_rp.bound) hud_replay_bind(client);
     if (!g_sc.on && demo_play_take_round_start()) { // onRoundStart (:229724-229731)
         ui_loadout_clear_pops();
+        if (menu_connecting()) menu_connect_stopped(); // no connect is under way: the menu's Escape works (main.c)
         client_set_menu_open(client, 0);
         if (!rp_follow_suspect(client)) spectate_mode(client, 1);
         g_rp.refollow_at = glfwGetTime() + REPLAY_REFOLLOW_S;
@@ -420,6 +436,13 @@ void hud_replay_tick(Client *client) {
     }
     if (!g_rp.shown) return;
     demo_play_take_ended();
+    // The menu over a replay (Escape frees the pointer): hud_spectate.c hides #spectateUI with the menu, but the
+    // bar stays up there, the only place it can be clicked (main.css: .onMenu hides its other children)
+    if (html_ui_is_menu_open()) {
+        const HtmlElem ui = html_dom_by_id("spectateUI");
+        char cur[16] = "";
+        if (ui && (html_dom_get_style(ui, "display", cur, sizeof cur) < 0 || strcmp(cur, "block") != 0)) html_dom_set_display(ui, "block");
+    }
 
     char text[48], a[16], b[16];
     rp_time_text(a, sizeof a, rv_playhead());

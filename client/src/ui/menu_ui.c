@@ -1721,6 +1721,8 @@ static void menu_poll_connection(Client *client) {
                 client_set_menu_open(client, 0);
             }
         }
+    } else if (status == NET_STATUS_CONNECTING && client->replay) {
+        client->net_connected = 0; // the session a K.P.D replay replaced (demo_play.c): the replay's game stays
     } else if (status == NET_STATUS_CONNECTING) {
         client->net_connected = 0; // a switch closed the session on purpose: the next one follows (spinner below)
         if (!client->offline) client_leave_game(client); // that game's chat, feed, players and end screen go now
