@@ -490,15 +490,35 @@ def web_main():
                 x, y, w, h = geo["box"]
                 return round(x * d), round(y * d), round(w * d), round(h * d)
 
+            async def preview_up(seconds):
+                """The canvas shown and its bitmap the box's device size: the preview arrives after the menu
+                (the model waits for the map and weapons; a loaded machine takes seconds more)."""
+                geo = None
+                for _ in range(int(seconds * 4)):
+                    geo = await evaluate(geometry)
+                    if geo and geo.get("shown"):
+                        box = device_box(geo)
+                        if abs(geo["bitmap"][0] - box[2]) <= 1 and abs(geo["bitmap"][1] - box[3]) <= 1:
+                            return geo
+                    await asyncio.sleep(0.25)
+                return geo
+
             async def measure(tag, popup=False):
-                geo = await evaluate(geometry)
+                geo = await preview_up(60)
                 if not geo or not geo.get("shown"):
                     check(f"web {tag}: the preview canvas is shown", False, str(geo))
                     return
                 box = device_box(geo)
+                dialogs = []
                 if popup:
                     await evaluate("(() => { document.getElementById('popupHolder').style.display = 'block'; return 1; })()")
                     await asyncio.sleep(0.5)
+                    # the popup's own boxes (an empty #genericPop dialog's border) are above its backdrop: not the model
+                    dialogs = await evaluate(
+                        "(() => Array.from(document.querySelectorAll('#popupHolder *')).filter(e => e.id !== 'popupBack'"
+                        " && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden')"
+                        ".map(e => e.getBoundingClientRect()).filter(b => b.width > 0 && b.height > 0)"
+                        ".map(b => [b.left, b.top, b.width, b.height]))()") or []
                 shots = await pair(tag)
                 if popup:
                     await evaluate("(() => { document.getElementById('popupHolder').style.display = 'none'; return 1; })()")
@@ -512,10 +532,14 @@ def web_main():
                     check(f"web {tag}: under the popup the shade is uniform up to the canvas edges", ok, detail)
                     x, y, w, h = box
                     H, W = frame.shape[:2]
-                    inner = frame[max(0, y):min(H - 1, y + h), max(0, x):min(W - 1, x + w)]
+                    lit = frame.max(2).astype(float)
+                    d = geo["dpr"]
+                    for dx, dy, dw, dh in dialogs:  # 2 px more for the border's antialiasing
+                        lit[max(0, round(dy * d) - 2):round((dy + dh) * d) + 2, max(0, round(dx * d) - 2):round((dx + dw) * d) + 2] = 0
+                    inner = lit[max(0, y):min(H - 1, y + h), max(0, x):min(W - 1, x + w)]
                     peak = float(inner.max()) if inner.size else 255.0
                     check(f"web {tag}: the model is under the popup's backdrop", peak <= 255 * 0.25 + 4,
-                          f"brightest {peak:.0f}")
+                          f"brightest {peak:.0f} (popup boxes left out: {len(dialogs)})")
                     return
                 # the bitmap is the box, within a device px (the box and the bitmap round the same CSS size apart)
                 bitmap_ok = abs(geo["bitmap"][0] - box[2]) <= 1 and abs(geo["bitmap"][1] - box[3]) <= 1
