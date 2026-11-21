@@ -144,7 +144,9 @@ def render(scenario_path, tag):
     png = os.path.join(WORK, tag + ".png")
     html = os.path.join(WORK, tag + ".html")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_SCENARIO_HTML": html, "KRUNKNATIVE_ASSETS_DIR": ASSETS})
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_SCENARIO_HTML": html, "KRUNKNATIVE_ASSETS_DIR": ASSETS,
+                # the console's lines reach the log as "[console] ..." only at level 2 (ui_console.c)
+                "KRUNKNATIVE_DEBUG": "2"})
     proc = subprocess.run([CLIENT, "--render-scenario", scenario_path, png], env=env, capture_output=True, text=True, timeout=600)
     global LAST_OUT
     LAST_OUT = proc.stdout

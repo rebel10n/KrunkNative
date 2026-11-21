@@ -52,7 +52,9 @@ def run(timeout=180):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
                 "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "XDG_STATE_HOME": os.path.join(WORK, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_INPUT_SCRIPT": script,
-                "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+                "KRUNKNATIVE_FIXED_DELTA": "16.667",
+                # the console's lines reach the log as "[console] ..." only at level 2 (ui_console.c)
+                "KRUNKNATIVE_DEBUG": "2"})
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)

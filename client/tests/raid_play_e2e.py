@@ -67,7 +67,9 @@ def env_base():
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_ASSET_FETCH": "off", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "off",
-                "KRUNKNATIVE_ASSETS_DIR": ASSETS})
+                "KRUNKNATIVE_ASSETS_DIR": ASSETS,
+                # the console's lines reach the log as "[console] ..." only at level 2 (ui_console.c)
+                "KRUNKNATIVE_DEBUG": "2"})
     return env
 
 

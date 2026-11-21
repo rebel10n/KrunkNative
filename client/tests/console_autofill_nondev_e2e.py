@@ -19,6 +19,7 @@ Checks (the client log and the hint rows):
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it), and a LAN address
 (override with KN_AUDIT_LAN_IP). Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
+import json
 import os
 import re
 import shutil
@@ -122,7 +123,12 @@ def main():
     ip = lan_ip()
     address = f"{ip}:{PORT}"
     server_log = os.path.join(WORK, "server.log")
-    server = subprocess.Popen([f"{BUILD}/server_bin", "--cfg", "none", "--headless", "--port", str(PORT),
+    # no idle kick (60 s of wall clock, config.c): on a loaded machine the scripted wait outlasts it and the pings
+    # below would find the player kicked
+    gs_cfg = os.path.join(WORK, "gameserver.json")
+    with open(gs_cfg, "w") as f:
+        json.dump({"gameserver": {"idle_kick_seconds": 0}}, f)
+    server = subprocess.Popen([f"{BUILD}/server_bin", "--cfg", gs_cfg, "--headless", "--port", str(PORT),
                                "assets/maps/official/10_kanji.json"],
                               stdin=subprocess.PIPE, stdout=open(server_log, "w"), stderr=subprocess.STDOUT,
                               start_new_session=True)
@@ -148,9 +154,13 @@ def main():
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
         env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
                     "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": state, "KRUNKNATIVE_NO_BROWSER": "1",
-                    "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+                    "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667",
+                    # the console's lines reach the log as "[console] ..." only at level 2 (ui_console.c)
+                    "KRUNKNATIVE_DEBUG": "2"})
         with open(log, "w") as out:
-            p = subprocess.Popen([f"{BUILD}/client_bin"], stdout=out, stderr=subprocess.STDOUT,
+            # --connect: a bare client_bin dials 127.0.0.1:21015, gives up and never has a ready game, so the `menu`
+            # script (input_script waits for client->game.ready) never starts; the typed `connect` below still runs
+            p = subprocess.Popen([f"{BUILD}/client_bin", "--connect", address], stdout=out, stderr=subprocess.STDOUT,
                                  stdin=subprocess.DEVNULL, env=env, start_new_session=True)
             try:
                 p.wait(timeout=900)
