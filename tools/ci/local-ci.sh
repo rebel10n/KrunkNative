@@ -71,6 +71,7 @@ pids=()
 run_job() {
     local name="$1" fn="$2" script="$3"
     want "$name" || { [ -f "$out/$name.status" ] || echo "skip 0 not selected" > "$out/$name.status"; return 0; }
+    rm -f "$out/$name.status"  # an --only rerun must not keep an earlier pass if this run dies unreported
     (
         t0=$(date +%s)
         if "$fn" < "$script" > "$out/$name.log" 2>&1; then st=pass; else st=fail; fi
@@ -264,21 +265,25 @@ if [ $keep = 0 ]; then
 fi
 rm -f "$out"/.*.sh
 
+# Not `{ ...; } | tee`: the left side of a pipe is a subshell, so rc=1 would never reach the PASS check.
 {
     printf 'local CI %s (%s)\n' "$s12" "$(git -C "$repo" log -1 --format=%s "$sha" | cut -c1-80)"
     printf '%-12s %-5s %6s  %s\n' job result secs note
     for j in meta check linux web services windows macos macos-arm64 android ios; do
-        [ -f "$out/$j.status" ] || continue
-        read -r st secs note < "$out/$j.status" || true
+        # every job writes a status (run_job / skip_job); none means it died before reporting
+        st=fail secs=0 note="no result"
+        if [ -f "$out/$j.status" ]; then read -r st secs note < "$out/$j.status" || true; fi
         printf '%-12s %-5s %6s  %s\n' "$j" "$st" "$secs" "${note:-}"
         case "$st" in
-            fail) rc=1 ;;
+            pass) ;;
             # Missing host toolchains are expected; a job omitted by --only with
             # no earlier result is not an acceptable substitute for a pass.
-            skip) if [[ "$note" == "not selected" ]]; then rc=1; fi ;;
+            skip) if [[ "${note:-}" == "not selected" ]]; then rc=1; fi ;;
+            *) rc=1 ;;
         esac
     done
-} | tee "$out/summary.txt"
+} > "$out/summary.txt"
+cat "$out/summary.txt"
 if [ $rc = 0 ]; then
     echo "$sha" > "$out/PASS"
     echo "PASS: $sha" >&2
