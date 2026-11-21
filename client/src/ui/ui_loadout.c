@@ -1274,18 +1274,26 @@ static void owned_paint_badge(StrBuf *out, const OwnedSkin *o) {
     sb_append(out, html);
 }
 
+// An owned row's m.style (m is the object or its JSON string), -1 when it has none.
+static int owned_meta_style(const cJSON *meta) {
+    cJSON *parsed = cJSON_IsString(meta) && meta->valuestring ? cJSON_Parse(meta->valuestring) : NULL;
+    const cJSON *style = cJSON_GetObjectItemCaseSensitive(parsed ? parsed : meta, "style");
+    const int value = cJSON_IsNumber(style) ? style->valueint : -1;
+    cJSON_Delete(parsed);
+    return value;
+}
+
 // One owned item card of f1828 / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)).
 static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, const char *fn, const char *img_class, const int with_season, const int weapon) {
     const char *col = rarity_color(s);
     char img[256];
     skin_thumb(o->ind, img, sizeof(img));
-    if (s->styles > 1 && o->meta) {
-        const cJSON *style = cJSON_GetObjectItemCaseSensitive(o->meta, "style");
-        if (cJSON_IsNumber(style)) {
-            char styled[sizeof img];
-            skin_style_preview_path(styled, sizeof styled, img, style->valueint, s->styles, s->style_ext);
-            snprintf(img, sizeof img, "%s", styled);
-        }
+    // styles && m && m.style != null && 0 <= m.style < styles.length: getStylePreview(item, m.style) (deob-10.0.7.js:223502)
+    const int style = owned_meta_style(o->meta);
+    if (s->styles > 0 && style >= 0 && style < s->styles) {
+        char path[256];
+        skin_style_preview(s, style, path, sizeof path);
+        asset(path, img, sizeof img);
     }
     sb_appendf(out, "<div class='skinCard%s%s' style='color:%s;border:5px solid%s' onmouseenter='playTick()'onclick='%s(%d",
                s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, fn, o->ind);
@@ -1303,9 +1311,13 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     if (paint_picker_can_open(o->ind))
         sb_appendf(out, "<div class='selctPaintBtn' onmouseenter='playTick()' onclick='paintOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>format_paint</i></div>",
                    o->ind, o->copy_id ? o->copy_id : o->ind);
-    if (style_picker_can_open(o->ind))
-        sb_appendf(out, "<div class='selctPaintBtn' style='left:%dpx;background-color:#fc038d' title='Choose style' onclick='styleOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>palette</i></div>",
-                   paint_picker_can_open(o->ind) ? 38 : 5, o->ind, o->copy_id ? o->copy_id : o->ind);
+    // v10.0.7's style icon (deob-10.0.7.js:147392, :147909-147917): the else branch of the paint icon, "Style <name>"
+    else if (style_picker_can_open(o->ind)) {
+        sb_append(out, "<div class='selctPaintBtn' style='background-color:#fc038d' aria-label='Style ");
+        sb_append_esc(out, s->name ? s->name : "");
+        sb_appendf(out, "' onclick='styleOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>checkroom</i></div>", o->ind,
+                   o->copy_id ? o->copy_id : o->ind);
+    }
     sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
                o->ind, o->ind);
 }

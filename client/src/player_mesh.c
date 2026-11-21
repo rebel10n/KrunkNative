@@ -939,7 +939,8 @@ typedef struct {
     int skin_color, hair_color; // ENT skinColIndex colour / hairCol, -1 = the class's
     // each item's copy wear (player_copy_wear), -1 none; generateMeshData skips customTextures items (deob-10.0.6.js:173414)
     double hat_wear, head_wear, face_wear, body_wear, back_wear, waist_wear, shoe_wear, wrist_wear;
-    int body_style, wrist_style;
+    // each item's style (generateMeshData's m.style, deob-10.0.7.js:173602): NET_EXT_KN_SKIN_STYLES lists every worn slot
+    int hat_style, head_style, face_style, body_style, back_style, waist_style, shoe_style, wrist_style;
 } PlayerLook;
 
 static int look_style(const Player *player, const int index) {
@@ -992,7 +993,13 @@ static void player_look(const Player *player, PlayerLook *look) {
     look->waist_wear = look_wear(player, look->waist, c.waist);
     look->shoe_wear = look_wear(player, look->shoe, v7.shoe);
     look->wrist_wear = look_wear(player, look->wrist, v7.wrist);
+    look->hat_style = look_style(player, c.hat);
+    look->head_style = look_style(player, v7.head);
+    look->face_style = look_style(player, c.face);
     look->body_style = look_style(player, c.body);
+    look->back_style = look_style(player, v7.back);
+    look->waist_style = look_style(player, c.waist);
+    look->shoe_style = look_style(player, v7.shoe);
     look->wrist_style = look_style(player, v7.wrist);
 }
 
@@ -1035,8 +1042,9 @@ static void player_look_colors(const PlayerLook *look, const int uid, int colors
 static Mesh *generate_item_mesh(const ViewerSkin *item, const int style, const vec3 at, const vec3 rotation, const float scale, MeshTransform *holder) {
     char model[128], texture[160];
     cosmetic_asset_keys(item, model, sizeof(model), texture, sizeof(texture));
-    // generateMeshData's tex suffix for styles > 0 (deob-10.0.7.js:173602, :173611).
-    if (style > 0 && style < item->styles) {
+    // generateMeshData's tex suffix for 0 < style < styles.length, on texSrc only: an item with a tex that is not
+    // customTextures (deob-10.0.7.js:173602, :173611).
+    if (style > 0 && style < item->styles && viewer_skin_tex_truthy(item) && !(item->flags & VS_CUSTOM_TEXTURES)) {
         char styled[sizeof texture];
         skin_style_texture_key(styled, sizeof styled, texture, style, item->styles);
         snprintf(texture, sizeof texture, "%s", styled);
@@ -1104,11 +1112,11 @@ static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const Playe
     MeshTransform *lower = player_mesh->body_anchor;
     const struct { int slot; const ViewerSkin *item; float y; float scale; double wear; int style; } items[] = {
         {PLAYER_COSMETIC_BODY, look->body, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->body_wear, look->body_style},
-        {PLAYER_COSMETIC_BACK, look->back, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->back_wear, 0},
-        {PLAYER_COSMETIC_WAIST, look->waist, (above_legs - game_constants.head_scale - 2.0f) / 2.0f, 2.1f, look->waist_wear, 0},
-        {PLAYER_COSMETIC_HAT, look->hat, above_legs, 2.1f, look->hat_wear, 0},
-        {PLAYER_COSMETIC_HEAD, look->head, above_legs, 2.1f, look->head_wear, 0},
-        {PLAYER_COSMETIC_FACE, look->face, above_legs, 1.0f, look->face_wear, 0},
+        {PLAYER_COSMETIC_BACK, look->back, (above_legs - game_constants.head_scale) / 2.0f, 2.1f, look->back_wear, look->back_style},
+        {PLAYER_COSMETIC_WAIST, look->waist, (above_legs - game_constants.head_scale - 2.0f) / 2.0f, 2.1f, look->waist_wear, look->waist_style},
+        {PLAYER_COSMETIC_HAT, look->hat, above_legs, 2.1f, look->hat_wear, look->hat_style},
+        {PLAYER_COSMETIC_HEAD, look->head, above_legs, 2.1f, look->head_wear, look->head_style},
+        {PLAYER_COSMETIC_FACE, look->face, above_legs, 1.0f, look->face_wear, look->face_style},
     };
     for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
         const ViewerSkin *item = items[i].item;
@@ -1124,7 +1132,7 @@ static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const Playe
             const float x = game_constants.leg_scale * 0.5f * (i == 1 ? -1.0f : 1.0f);
             player_generate_cosmetic(player_mesh, PLAYER_COSMETIC_SHOE_R + i, look->shoe, &player_mesh->hold, x, // meshHoldObj
                                      game_constants.leg_height - look->shoe->sit_off - 0.01f, -game_constants.leg_height, item_scl(look->shoe),
-                                     look->shoe_wear, 0);
+                                     look->shoe_wear, look->shoe_style);
             player_mesh->shoe_hidden[i] = (look->shoe->flags2 & VS2_RANDOM_LEG) && random_leg != i;
         }
     }

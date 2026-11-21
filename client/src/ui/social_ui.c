@@ -1862,7 +1862,7 @@ static void hub_render_leaders(const char *a, const cJSON *t) {
 // (f540: the matchmaker's game list filtered to this map) are not fetched: none online.
 static int g_map_tab; // vLN0588
 static void hub_map_opened(const char *name, int id); // the map page tools (below): the open map, its Leaderboard
-static void hub_map_versions_load(void);
+static void hub_map_versions_show(void);
 
 // getMapTapHTML(canEdit)
 static void append_map_tabs(StrBuf *sb, const int can_edit) {
@@ -1870,7 +1870,9 @@ static void append_map_tabs(StrBuf *sb, const int can_edit) {
                g_map_tab == 0 ? " activeTab" : "", can_edit ? "true" : "false", g_map_tab == 1 ? " activeTab" : "", can_edit ? "true" : "false",
                g_map_tab == 2 ? " activeTab" : "", can_edit ? "true" : "false");
     if (can_edit) sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(3, true)'>Data</div>", g_map_tab == 3 ? " activeTab" : "");
-    if (can_edit) sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(4, true)'>Versions</div>", g_map_tab == 4 ? " activeTab" : "");
+    // v10.0.7's owner tab "Versions" (deob-10.0.7.js:107938-107945)
+    if (can_edit) sb_appendf(sb, "<div class='mapTabP%s' onclick='updateMapTab(4, true)'>%s</div>", g_map_tab == 4 ? " activeTab" : "",
+                             i18n_tr("creations.versions.tab", "Versions"));
 }
 
 static void hub_render_creation(const int is_mod, const cJSON *t) {
@@ -1974,7 +1976,7 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
         sb_appendf(&sb, "<div id='activeGames' style='display:%s'></div><div id='mapLeaders' style='display:%s;'><div style='font-size:16px;margin-bottom: 2px;text-align:center;color:#fff'>Not Set Yet!</div></div>",
                    g_map_tab == 1 ? "block" : "none", g_map_tab == 2 ? "block" : "none");
         if (can_edit) sb_appendf(&sb, "<div id='mapData' style='display:%s;margin-bottom:20px'><div style='font-size:16px;margin-bottom: 2px'><input type='text' id='searchDInput' placeholder='Search User' onkeyup='if (window.event.keyCode==13) window.searchPData();'><div id='searchDBtn' onclick='window.searchPData();'>Search</div><div id='deleteDBtn' onclick='window.deleteDataPop();'>Delete By Key</div></div><div id='dataList'></div></div>", g_map_tab == 3 ? "block" : "none");
-        if (can_edit) sb_appendf(&sb, "<div id='mapVersions' style='display:%s;margin-bottom:20px'>Loading versions...</div>", g_map_tab == 4 ? "block" : "none");
+        if (can_edit) sb_appendf(&sb, "<div id='mapVersions' style='display:%s;margin-bottom:20px'></div>", g_map_tab == 4 ? "block" : "none");
         sb_append(&sb, "<div class='button map buttonP' onclick='shareMapLink(this, &quot;");
         sb_append_js_escape(&sb, name);
         sb_append(&sb, "&quot;)'>Share</div><div class='button map buttonH' style='margin-left:8px' onclick='hostMap(&quot;");
@@ -6045,7 +6047,7 @@ H(h_update_map_tab) {
     set_display("mapLeaders", g_map_tab == 2 ? "block" : "none");
     if (el("mapData")) set_display("mapData", g_map_tab == 3 ? "block" : "none");
     if (el("mapVersions")) set_display("mapVersions", g_map_tab == 4 ? "block" : "none");
-    if (g_map_tab == 4 && can_edit) hub_map_versions_load();
+    if (g_map_tab == 4 && can_edit) hub_map_versions_show();
     return 1;
 }
 
@@ -6756,9 +6758,21 @@ static struct {
     char key[128];   // the key Delete By Key asked about
 } g_map_tools;
 
-// v10.0.7 Creations' Versions tab (deob-10.0.7.js:107649-107652, :107794-107835).
+// v10.0.7 Creations' Versions tab (the map details window's, deob-10.0.7.js:107649-107654, :107794-107835,
+// :108190-108280), on the hub's map page: its markup (md-data / md-ver-*, svelte-1kkpw01) and creations.versions.*
+// texts. getMapVersions is GET /maps/<id>/versions, revertMapVersion POST /maps/<id>/versions/<v>/revert
+// (deob-10.0.7.js:26713-26723). Deviations: v10's confirm dialog (title "Revert Map", button "Revert") is the hub's
+// confirm popup with the same description; a revert does not reload the rest of the map page (v10's iÏïììiï).
 // Each request carries its map id and a generation: switching pages cannot install a late response.
-static unsigned g_map_versions_generation;
+static struct {
+    unsigned generation; // the list request in flight's
+    int map_id;          // the map the state below is for
+    cJSON *rows;         // the last list: [{version, created, data_size, current_version}], newest first
+    int loaded, loading; // the list was fetched once for this map (v10 loads it on the tab's first open) / in flight
+    int reverting;       // the version a revert is in flight for, 0 none
+    char error[256], success[160];
+} g_mv;
+
 typedef struct {
     int map_id;
     unsigned generation;
@@ -6773,105 +6787,195 @@ static int map_versions_url(char *url, size_t n, const char *path) {
     return 1;
 }
 
-static void map_versions_done(void *user, int status, const char *body, size_t len) {
-    MapVersionsRequest *req = user;
-    if (!req) return;
-    const int current = req->map_id == g_map_tools.id && req->generation == g_map_versions_generation;
-    free(req);
-    if (!current || !el("mapVersions")) return;
-    cJSON *root = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
-    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "data");
+// A reply's error.message || error (as a string), else NULL.
+static const char *map_versions_error(const cJSON *root) {
+    const cJSON *e = cJSON_GetObjectItemCaseSensitive(root, "error");
+    if (cJSON_IsString(e) && e->valuestring[0]) return e->valuestring;
+    const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "message"));
+    return message && *message ? message : NULL;
+}
+
+static void hub_map_versions_render(void) {
+    if (!el("mapVersions")) return;
     StrBuf sb = {0};
-    if (!cJSON_IsArray(rows)) {
-        sb_append(&sb, "<div class='knMapEditNote'>Could not load versions. <button onclick='loadMapVersions()'>Retry</button></div>");
-    } else if (!cJSON_GetArraySize(rows)) {
-        sb_append(&sb, "<div class='knMapEditNote'>No saved versions yet.</div>");
+    sb_append(&sb, "<div class='md-data svelte-1kkpw01'><div class='md-ver-intro svelte-1kkpw01'>");
+    sb_append_esc(&sb, i18n_tr("creations.versions.intro", "Every publish stores a snapshot of your game. Revert to roll the live game back to an older snapshot — the current one is kept, so a revert can be undone."));
+    sb_append(&sb, "</div>");
+    if (g_mv.error[0]) {
+        sb_append(&sb, " <div class='md-data-error svelte-1kkpw01'>");
+        sb_append_esc(&sb, g_mv.error);
+        sb_append(&sb, "</div>");
+    }
+    if (g_mv.success[0]) {
+        sb_append(&sb, " <div class='md-data-success svelte-1kkpw01'>");
+        sb_append_esc(&sb, g_mv.success);
+        sb_append(&sb, "</div>");
+    }
+    const int count = cJSON_GetArraySize(g_mv.rows);
+    if (g_mv.loading) {
+        sb_append(&sb, " <div class='md-center-sm svelte-1kkpw01'><i class='material-icons spin svelte-1kkpw01'>hourglass_empty</i></div>");
+    } else if (!count) {
+        sb_append(&sb, " <div class='md-empty svelte-1kkpw01'>");
+        sb_append_esc(&sb, i18n_tr("creations.versions.empty", "No saved versions yet."));
+        sb_append(&sb, "</div>");
     } else {
-        sb_append(&sb, "<div class='knMapEditSect'>Version history</div>");
+        // the live version: versions[0].current_version (deob-10.0.7.js:107654)
+        const int live = (int) jnum(cJSON_GetArrayItem(g_mv.rows, 0), "current_version");
+        sb_append(&sb, " <div class='md-data-table svelte-1kkpw01'><div class='md-ver-head svelte-1kkpw01'><span>");
+        sb_append_esc(&sb, i18n_tr("creations.versions.colVersion", "Version"));
+        sb_append(&sb, "</span> <span>");
+        sb_append_esc(&sb, i18n_tr("creations.versions.colDate", "Saved"));
+        sb_append(&sb, "</span> <span>");
+        sb_append_esc(&sb, i18n_tr("creations.versions.colSize", "Size"));
+        sb_append(&sb, "</span> <span></span></div> ");
         const cJSON *row;
-        cJSON_ArrayForEach(row, rows) {
-            const int version = (int) jnum(row, "version"), live = (int) jnum(row, "current_version");
-            if (version <= 0) continue;
-            char date[64];
+        cJSON_ArrayForEach(row, g_mv.rows) {
+            const int version = (int) jnum(row, "version");
+            char date[64], kb[48], size[64];
             get_date(date, sizeof date, jstr(row, "created"));
-            sb_appendf(&sb, "<div class='knMapEditSect' style='display:flex;align-items:center;justify-content:space-between;gap:12px;'>"
-                        "<div>v%d %s<div class='knMapEditNote'>%s · %.0f bytes</div></div>",
-                       version, version == live ? "(Current)" : "", date, jnum(row, "data_size"));
-            if (version != live) sb_appendf(&sb, "<button class='button buttonP' onclick='revertMapVersion(%d,%d)'>Revert</button>", g_map_tools.id, version);
+            // "{0} KB" of Math.max(1, Math.round(data_size / 1024)).toLocaleString() (deob-10.0.7.js:108257)
+            const double k = round(jnum(row, "data_size") / 1024.0);
+            comma_number(kb, sizeof kb, k > 1 ? k : 1);
+            i18n_trf(size, sizeof size, "creations.versions.size", "{0} KB", 1, I18N_ARGV(kb));
+            sb_appendf(&sb, "<div class='md-ver-row svelte-1kkpw01'><span class='md-ver-num svelte-1kkpw01'>v%d ", version);
+            if (version == live) {
+                sb_append(&sb, "<span class='md-ver-badge svelte-1kkpw01'>");
+                sb_append_esc(&sb, i18n_tr("creations.versions.current", "Current"));
+                sb_append(&sb, "</span>");
+            }
+            sb_append(&sb, "</span> <span class='md-ver-date svelte-1kkpw01'>");
+            sb_append_esc(&sb, date);
+            sb_append(&sb, "</span> <span class='md-ver-size svelte-1kkpw01'>");
+            sb_append_esc(&sb, size);
+            sb_append(&sb, "</span> ");
+            if (version == live) {
+                sb_append(&sb, "<span></span>");
+            } else {
+                sb_appendf(&sb, "<button class='md-ver-btn svelte-1kkpw01' type='button' onclick='revertMapVersion(%d,%d)'%s><i class='material-icons svelte-1kkpw01'>history</i> ",
+                           g_mv.map_id, version, g_mv.reverting ? " disabled" : "");
+                sb_append_esc(&sb, g_mv.reverting == version ? i18n_tr("creations.versions.reverting", "Reverting...")
+                                                             : i18n_tr("creations.versions.revert", "Revert"));
+                sb_append(&sb, "</button>");
+            }
             sb_append(&sb, "</div>");
         }
+        sb_append(&sb, "</div>");
     }
+    sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
     set_html("mapVersions", html);
     free(html);
-    cJSON_Delete(root);
 }
 
+static void map_versions_done(void *user, int status, const char *body, size_t len) {
+    MapVersionsRequest *req = user;
+    if (!req) return;
+    const int current = req->map_id == g_mv.map_id && req->generation == g_mv.generation;
+    free(req);
+    if (!current) return;
+    g_mv.loading = 0;
+    cJSON *root = body ? cJSON_ParseWithLength(body, len) : NULL;
+    cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "data");
+    const char *error = map_versions_error(root);
+    cJSON_Delete(g_mv.rows);
+    g_mv.rows = NULL;
+    if (status == 200 && !error) { // versions = data || []
+        g_mv.rows = cJSON_IsArray(rows) ? cJSON_DetachItemViaPointer(root, rows) : NULL;
+        g_mv.loaded = 1;
+    } else {
+        snprintf(g_mv.error, sizeof g_mv.error, "%s", error ? error : i18n_tr("creations.versions.error", "Failed to load versions."));
+    }
+    cJSON_Delete(root);
+    hub_map_versions_render();
+}
+
+// loadVersions (deob-10.0.7.js:107794-107811)
 static void hub_map_versions_load(void) {
-    if (g_map_tools.id <= 0 || !el("mapVersions")) return;
-    ++g_map_versions_generation;
-    set_html("mapVersions", "<div class='knMapEditNote'>Loading versions...</div>");
+    if (g_mv.map_id <= 0 || !el("mapVersions")) return;
+    ++g_mv.generation;
+    g_mv.loading = 1;
+    g_mv.error[0] = 0;
+    hub_map_versions_render();
     MapVersionsRequest *req = malloc(sizeof *req);
     char path[128], url[1024];
-    snprintf(path, sizeof path, "/maps/%d/versions", g_map_tools.id);
-    if (!req || !map_versions_url(url, sizeof url, path)) {
-        free(req);
-        set_html("mapVersions", "Sign in to view map versions.");
-        return;
+    snprintf(path, sizeof path, "/maps/%d/versions", g_mv.map_id);
+    if (req && map_versions_url(url, sizeof url, path)) {
+        *req = (MapVersionsRequest) {g_mv.map_id, g_mv.generation};
+        if (backend_http_request("GET", url, NULL, map_versions_done, req)) return;
     }
-    *req = (MapVersionsRequest) {g_map_tools.id, g_map_versions_generation};
-    if (!backend_http_request("GET", url, NULL, map_versions_done, req)) {
-        free(req);
-        set_html("mapVersions", "Could not request map versions.");
-    }
+    free(req);
+    g_mv.loading = 0;
+    snprintf(g_mv.error, sizeof g_mv.error, "%s", i18n_tr("creations.versions.error", "Failed to load versions."));
+    hub_map_versions_render();
 }
 
-H(h_load_map_versions) {
-    UNUSED;
-    hub_map_versions_load();
-    return 1;
+// The tab opened: "versions" !== tab || loaded || loadVersions() (deob-10.0.7.js:107848), else the current state.
+static void hub_map_versions_show(void) {
+    if (!g_mv.loaded && !g_mv.loading) hub_map_versions_load();
+    else hub_map_versions_render();
 }
 
+// A row's Revert: v10's confirm (deob-10.0.7.js:107813-107818), then the revert
 H(h_revert_map_version) {
     UNUSED;
     const int map = (int) arg_n(args, argc, 0, 0), version = (int) arg_n(args, argc, 1, 0);
-    if (map <= 0 || version <= 0 || map != g_map_tools.id) return 1;
-    char callback[96];
+    if (map <= 0 || version <= 0 || map != g_mv.map_id || g_mv.reverting) return 1;
+    char callback[96], question[320], v[16];
     snprintf(callback, sizeof callback, "revertMapVersionGo(%d,%d)", map, version);
-    confirm_popup("Restore this version? The current map will be saved as a new version.", callback, "confSubmitPop");
+    snprintf(v, sizeof v, "%d", version);
+    i18n_trf(question, sizeof question, "creations.versions.confirmDesc",
+             "Revert this map to version {0}? The version currently live is kept as a snapshot, so you can undo this.", 1, I18N_ARGV(v));
+    confirm_popup(question, callback, "confSubmitPop");
     return 1;
 }
 
 static void map_revert_done(void *user, int status, const char *body, size_t len) {
     MapVersionsRequest *req = user;
     if (!req) return;
-    const int current = req->map_id == g_map_tools.id && req->generation == g_map_versions_generation;
+    const int current = req->map_id == g_mv.map_id;
     free(req);
     if (!current) return;
+    g_mv.reverting = 0;
     cJSON *root = body ? cJSON_ParseWithLength(body, len) : NULL;
-    const int ok = status == 200 && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(root, "data"));
+    const char *error = map_versions_error(root);
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (status == 200 && !error) {
+        // "Reverted. Live version is now v{0}." with data.version ?? "" (deob-10.0.7.js:107827), then loadVersions()
+        char v[24] = "";
+        const cJSON *version = cJSON_GetObjectItemCaseSensitive(data, "version");
+        if (cJSON_IsNumber(version)) js_num(v, sizeof v, version->valuedouble);
+        i18n_trf(g_mv.success, sizeof g_mv.success, "creations.versions.reverted", "Reverted. Live version is now v{0}.", 1, I18N_ARGV(v));
+        cJSON_Delete(root);
+        hub_map_versions_load();
+        return;
+    }
+    snprintf(g_mv.error, sizeof g_mv.error, "%s", error ? error : i18n_tr("creations.versions.revertError", "Failed to revert this version."));
     cJSON_Delete(root);
-    io_po(ok, ok ? "Map version restored." : "Could not restore map version.");
-    if (ok) hub_map_versions_load();
+    hub_map_versions_render();
 }
 
 H(h_revert_map_version_go) {
     UNUSED;
+    clear_pops();
     const int map = (int) arg_n(args, argc, 0, 0), version = (int) arg_n(args, argc, 1, 0);
-    if (map <= 0 || version <= 0 || map != g_map_tools.id) return 1;
+    if (map <= 0 || version <= 0 || map != g_mv.map_id || g_mv.reverting) return 1;
     char path[160], url[1024];
     snprintf(path, sizeof path, "/maps/%d/versions/%d/revert", map, version);
+    g_mv.reverting = version;
+    g_mv.error[0] = 0;
+    g_mv.success[0] = 0;
     MapVersionsRequest *req = malloc(sizeof *req);
-    if (!req || !map_versions_url(url, sizeof url, path)) {
-        free(req);
-        io_po(0, "Sign in to restore map versions.");
-        return 1;
+    if (req && map_versions_url(url, sizeof url, path)) {
+        *req = (MapVersionsRequest) {map, 0};
+        if (backend_http_request("POST", url, NULL, map_revert_done, req)) {
+            hub_map_versions_render();
+            return 1;
+        }
     }
-    *req = (MapVersionsRequest) {map, ++g_map_versions_generation};
-    if (!backend_http_request("POST", url, "{}", map_revert_done, req)) {
-        free(req);
-        io_po(0, "Could not request map restoration.");
-    }
+    free(req);
+    g_mv.reverting = 0;
+    snprintf(g_mv.error, sizeof g_mv.error, "%s", i18n_tr("creations.versions.revertError", "Failed to revert this version."));
+    hub_map_versions_render();
     return 1;
 }
 
@@ -6880,7 +6984,14 @@ static void hub_map_opened(const char *name, const int id) {
     snprintf(copy, sizeof(copy), "%s", name ? name : "");
     memcpy(g_map_tools.name, copy, sizeof(copy));
     g_map_tools.id = id;
-    ++g_map_versions_generation;
+    if (g_mv.map_id != id) { // another map: its Versions state starts over, a reply in flight is dropped
+        ++g_mv.generation;
+        cJSON_Delete(g_mv.rows);
+        g_mv.rows = NULL;
+        g_mv.map_id = id;
+        g_mv.loaded = g_mv.loading = g_mv.reverting = 0;
+        g_mv.error[0] = g_mv.success[0] = 0;
+    }
     cJSON_Delete(g_map_tools.rows);
     g_map_tools.rows = NULL;
     g_map_tools.player[0] = 0;
@@ -6892,7 +7003,7 @@ static void hub_map_opened(const char *name, const int id) {
     cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
     cJSON_AddItemToArray(f, cJSON_CreateString(""));
     hub_send(f);
-    if (g_map_tab == 4) hub_map_versions_load();
+    if (g_map_tab == 4) hub_map_versions_show();
 }
 
 // a stored value as the hub shows it: a "time" key / board is milliseconds, shown as h:mm:ss.cc or m:ss.cc
@@ -7191,7 +7302,6 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"hostMap", h_play_map},
     {"playMod", h_play_mod},
     {"updateMapTab", h_update_map_tab},
-    {"loadMapVersions", h_load_map_versions},
     {"revertMapVersion", h_revert_map_version},
     {"revertMapVersionGo", h_revert_map_version_go},
     {"shareMapLink", h_share_link},

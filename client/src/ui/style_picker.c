@@ -1,6 +1,7 @@
-// v10.0.7 owned-item style picker. Selection belongs to a stack or a specific painted copy,
-// and is written through the brain's items.setStyle frame (deob-10.0.7.js:27102-27106,
-// :108817-108850). The response triggers an account refresh, which carries m.style.
+// v10.0.7 owned-item style picker. Selection belongs to a stack or a specific painted copy. v10 posts items.setStyle
+// (POST /items/<skinId>/style {item_id, style}, deob-10.0.7.js:27101-27106, :108817-108850); the native client sends
+// the same request over the brain's social socket, ["ist", skinId, item_id, style, uid] -> ["istr", {copy_id, item_id,
+// style} | null, uid] or "po" (services/brain/economy.c sh_item_style; the brain's HTTP route runs the same op).
 #include <style_picker.h>
 #include <skin_style.h>
 #include <backend_ui.h>
@@ -16,10 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Market views reuse the refreshed inventory after the account's owned style changes.
-void v10_market_owned_changed(void);
-
 #define STYLE_WAIT_MS 15000
+// The swatch row: v10 scrolls it by 0.8 * clientWidth per arrow (deob-10.0.7.js:108878-108887); the native page has no
+// scrollBy, so the arrows page through it STYLE_PAGE_SIZE swatches at a time (88px + 10px gap each in the 700px popup).
 #define STYLE_PAGE_SIZE 5
 #define COPY_ID_BASE 1000000
 
@@ -71,55 +71,79 @@ int style_picker_account_style(int index) {
 
 int style_picker_can_open(int index) {
     const ViewerSkin *item = viewer_skin(index);
-    return item && item->styles > 1 && account_backend() != ACCOUNT_BACKEND_KRUNKER && active_account();
+    // styles.length > 0 (deob-10.0.7.js:135291, :147912)
+    return item && item->styles > 0 && account_backend() != ACCOUNT_BACKEND_KRUNKER && active_account();
 }
 
+// styles[i] || "Style " + i (deob-10.0.7.js:108866-108870)
+static void style_name(char *out, const size_t n, const int i) {
+    const cJSON *styles = cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(S.index), "styles");
+    const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(styles, i));
+    if (name && *name) snprintf(out, n, "%s", name);
+    else snprintf(out, n, "Style %d", i);
+}
+
+// The style popup (deob-10.0.7.js:108851-108856, :108938-108990) in the paint picker's popup wrapper. Not drawn: the
+// style-iframe viewer.html?nobg&showcase=<index>&style=<n> and so the style-overlay over it (the native page has no
+// iframes): the header and controls flow in the content, which keeps their height instead of 800px.
 static char *style_html(void) {
     const ViewerSkin *item = viewer_skin(S.index);
     StrBuf sb = {0};
     if (!item) return sb_finish(&sb);
+    char name[160];
     sb_append(&sb, "<div class='popup-container svelte-1wz7ymp'><div class='popup svelte-1wz7ymp' style='width:700px'>"
-                   "<div class='style-container io-popup-container svelte-143xo7r'><div class='style-content io-popup-content svelte-143xo7r' style='height:auto;min-height:330px'>"
+                   "<div class='style-container io-popup-container svelte-143xo7r'><div class='style-content io-popup-content svelte-143xo7r' style='height:auto'>"
                    "<div class='style-header svelte-143xo7r'><div class='item-name svelte-143xo7r'>");
-    sb_append_esc(&sb, item->name ? item->name : "Item Styles");
-    sb_append(&sb, "</div><div class='item-sub svelte-143xo7r'>Pick a style to preview, then press Apply.</div></div>"
-                   "<div class='style-controls svelte-143xo7r'><div class='swatch-slider svelte-143xo7r'>");
-    sb_appendf(&sb, "<button type='button' class='slider-arrow left svelte-143xo7r' aria-label='Previous styles' onclick='stylePage(-1)'%s>"
-                    "<span class='slider-arrow-icon svelte-143xo7r'></span></button>", S.page <= 0 ? " disabled" : "");
-    sb_append(&sb, "<div class='swatch-row svelte-143xo7r' role='radiogroup' aria-label='Item styles'>");
-    const cJSON *raw = ui_loadout_skin_json(S.index);
-    const cJSON *styles = cJSON_GetObjectItemCaseSensitive(raw, "styles");
-    char base[512];
-    viewer_skin_preview_path(item, base, sizeof base);
-    const int end = (S.page + 1) * STYLE_PAGE_SIZE < item->styles ? (S.page + 1) * STYLE_PAGE_SIZE : item->styles;
-    for (int i = S.page * STYLE_PAGE_SIZE; i < end; i++) {
-        const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(styles, i));
-        char path[600], url[1024];
-        skin_style_picker_preview_path(path, sizeof path, base, i, item->styles, item->style_ext);
-        // These newly recovered v10 previews live under assets/, not ui/textures/.
-        html_dom_asset_url(path, url, sizeof url);
-        sb_appendf(&sb, "<button type='button' class='swatch%s svelte-143xo7r' role='radio' aria-checked='%s'"
-                        " onclick='stylePick(%d)' style='min-width:90px'>"
-                        "<img class='swatch-img svelte-143xo7r' loading='lazy' src='%s' alt=''>"
-                        "<span class='swatch-name svelte-143xo7r'>",
-                   S.selected == i ? " selected" : "", S.selected == i ? "true" : "false", i, url);
-        sb_append_esc(&sb, name ? name : i == 0 ? "Default" : "Style");
-        sb_append(&sb, "</span></button>");
+    sb_append_esc(&sb, item->name && *item->name ? item->name : "Unnamed Item");
+    sb_append(&sb, "</div> <div class='item-sub svelte-143xo7r'>Pick a style to preview, then press Apply.</div></div> "
+                   "<div class='style-controls svelte-143xo7r'>");
+    if (item->styles <= 0) {
+        sb_append(&sb, "<div class='style-empty svelte-143xo7r'>This item has no styles.</div>");
+    } else {
+        const int first = S.page * STYLE_PAGE_SIZE;
+        const int end = first + STYLE_PAGE_SIZE < item->styles ? first + STYLE_PAGE_SIZE : item->styles;
+        sb_appendf(&sb, "<div class='swatch-slider svelte-143xo7r'><button type='button' class='slider-arrow left svelte-143xo7r%s' aria-label='Scroll styles left'"
+                        " onclick='stylePage(-1)'%s><span class='slider-arrow-icon svelte-143xo7r'></span></button> "
+                        "<div class='swatch-row svelte-143xo7r' role='radiogroup' aria-label='Available styles'>",
+                   S.page <= 0 ? " disabled" : "", S.page <= 0 ? " disabled" : "");
+        for (int i = first; i < end; i++) {
+            char path[256], url[1024];
+            style_name(name, sizeof name, i);
+            skin_style_preview(item, i, path, sizeof path); // thumbnail: getStylePreview(item, index) (deob-10.0.7.js:108869)
+            html_dom_asset_url(path, url, sizeof url);
+            sb_appendf(&sb, "<button type='button' class='swatch svelte-143xo7r%s' role='radio' aria-checked='%s' onclick='stylePick(%d)' aria-label='",
+                       S.selected == i ? " selected" : "", S.selected == i ? "true" : "false", i);
+            sb_append_esc(&sb, name);
+            sb_append(&sb, "' title='");
+            sb_append_esc(&sb, name);
+            sb_append(&sb, "'><img class='swatch-img svelte-143xo7r' alt='' draggable='false' loading='lazy' src='");
+            sb_append_esc(&sb, url);
+            sb_append(&sb, "'> <span class='swatch-name svelte-143xo7r'>");
+            sb_append_esc(&sb, name);
+            sb_append(&sb, "</span></button>");
+        }
+        sb_appendf(&sb, "</div> <button type='button' class='slider-arrow right svelte-143xo7r%s' aria-label='Scroll styles right' onclick='stylePage(1)'%s>"
+                        "<span class='slider-arrow-icon svelte-143xo7r'></span></button></div>",
+                   end >= item->styles ? " disabled" : "", end >= item->styles ? " disabled" : "");
     }
-    sb_append(&sb, "</div>");
-    sb_appendf(&sb, "<button type='button' class='slider-arrow right svelte-143xo7r' aria-label='Next styles' onclick='stylePage(1)'%s>"
-                    "<span class='slider-arrow-icon svelte-143xo7r'></span></button>",
-               end >= item->styles ? " disabled" : "");
-    sb_append(&sb, "</div>");
     if (S.error[0]) {
-        sb_append(&sb, "<div class='style-error svelte-143xo7r'>");
+        sb_append(&sb, " <div class='style-error svelte-143xo7r'>");
         sb_append_esc(&sb, S.error);
         sb_append(&sb, "</div>");
     }
-    sb_append(&sb, "<div class='style-actions svelte-143xo7r'><button class='btn btn-cancel svelte-143xo7r' onclick='knViewPop(0)'>Cancel</button>");
-    sb_appendf(&sb, "<button class='btn btn-apply svelte-143xo7r' onclick='styleApply()'%s>%s</button>",
-               S.busy ? " disabled" : "", S.busy ? "Saving..." : "Apply Style");
-    sb_append(&sb, "</div></div></div></div></div>");
+    // Cancel (disabled while applying) and Apply: "Applying…", else "Apply (<name>)" (deob-10.0.7.js:108963-108988)
+    sb_appendf(&sb, " <div class='style-actions svelte-143xo7r'><button class='btn btn-cancel svelte-143xo7r' onclick='knViewPop(0)'%s>Cancel</button> ",
+               S.busy ? " disabled" : "");
+    const int has = S.selected >= 0 && S.selected < item->styles;
+    if (has) style_name(name, sizeof name, S.selected);
+    sb_appendf(&sb, "<button class='btn btn-apply svelte-143xo7r' onclick='styleApply()'%s>", S.busy || !has ? " disabled" : "");
+    if (S.busy) sb_append(&sb, "Applying…");
+    else if (has) {
+        sb_append(&sb, "Apply (");
+        sb_append_esc(&sb, name);
+        sb_append(&sb, ")");
+    } else sb_append(&sb, "Apply");
+    sb_append(&sb, "</button></div></div></div></div></div></div>");
     return sb_finish(&sb);
 }
 
@@ -138,13 +162,16 @@ static void complete(const cJSON *data, const char *error) {
     if (S.timer) html_timer_cancel(S.timer);
     S.timer = 0;
     if (!cJSON_IsObject(data)) {
-        snprintf(S.error, sizeof S.error, "%s", error && *error ? error : "Could not save this style.");
+        // error.message || "Failed to apply style" (deob-10.0.7.js:108826-108834)
+        snprintf(S.error, sizeof S.error, "%s", error && *error ? error : "Failed to apply style");
         redraw();
         return;
     }
     // The brain persists style in item_styles (db_economy.c:504-535); the local account's
     // copy must also change now, so the loadout and preview render the chosen style.
-    account_style_applied(S.index, S.sid, S.selected);
+    const cJSON *applied = cJSON_GetObjectItemCaseSensitive(data, "style");
+    const int style = cJSON_IsNumber(applied) ? applied->valueint : S.selected;
+    account_style_applied(S.index, S.sid, style);
     Client *client = menu_ui() ? menu_ui()->client : NULL;
     if (client) client_class_preview_invalidate(client);
     if (client && client->net_connected && !client->offline) {
@@ -154,7 +181,17 @@ static void complete(const cJSON *data, const char *error) {
     }
     ui_loadout_owned_changed();
     v10_market_owned_changed();
-    ui_notify("Item style saved.");
+    // the caller's success toast: "Styled " + item.name + (styleName ? " - " + styleName : "") (deob-10.0.7.js:134262-134263,
+    // :147775); styleName is the swatch's name, styles[i] || "Style " + i (:108843, :108867)
+    const ViewerSkin *item = viewer_skin(S.index);
+    char name[160], text[384];
+    style_name(name, sizeof name, style);
+    snprintf(text, sizeof text, "Styled %s - %s", item && item->name ? item->name : "", name);
+    StrBuf toast = {0};
+    sb_append_esc(&toast, text);
+    char *html = sb_finish(&toast);
+    ui_notify(html);
+    free(html);
     if (S.open) v10_view_pop(1);
 }
 
@@ -194,7 +231,7 @@ static void apply(void) {
         S.busy = 1;
         S.error[0] = 0;
         S.timer = html_timer_add(STYLE_WAIT_MS, expired, NULL);
-    } else snprintf(S.error, sizeof S.error, "Could not send style selection.");
+    } else snprintf(S.error, sizeof S.error, "Failed to apply style");
     redraw();
 }
 
@@ -217,8 +254,10 @@ int style_picker_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
     if (!strcmp(name, "styleOpen")) {
         style_picker_open(picker_arg(args, argc, 0, -1), picker_arg(args, argc, 1, 0));
     } else if (!strcmp(name, "stylePick")) {
-        if (S.open && !S.busy) {
-            S.selected = picker_arg(args, argc, 0, -1);
+        const ViewerSkin *item = viewer_skin(S.index);
+        const int pick = picker_arg(args, argc, 0, -1);
+        if (S.open && !S.busy && item && pick >= 0 && pick < item->styles) {
+            S.selected = pick;
             S.error[0] = 0;
             redraw();
         }

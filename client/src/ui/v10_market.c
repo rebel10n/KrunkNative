@@ -628,11 +628,11 @@ static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, 
     const int index = (int) (s - g_viewer_skins);
     char url[512];
     thumb(url, sizeof(url), s);
-    if (style > 0 && style < s->styles) {
-        char base[512], styled[600];
-        viewer_skin_preview_path(s, base, sizeof base);
-        skin_style_preview_path(styled, sizeof styled, base, style, s->styles, s->style_ext);
-        html_dom_asset_url(styled, url, sizeof url);
+    // metadata.style != null && styles && 0 <= style < styles.length: getStylePreview(item, style) (deob-10.0.7.js:110719)
+    if (style >= 0 && style < s->styles) {
+        char path[256];
+        skin_style_preview(s, style, path, sizeof path);
+        html_dom_asset_url(path, url, sizeof url);
     }
     const char *col = rarity_color(s);
     const int tiny = size && atoi(size) > 0 && atoi(size) <= 80;
@@ -661,7 +661,7 @@ static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, 
 }
 
 static void item_card(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count) {
-    item_card_styled(sb, s, size, top_center, onclick, owned_count, 0);
+    item_card_styled(sb, s, size, top_center, onclick, owned_count, -1);
 }
 
 typedef struct {
@@ -674,7 +674,7 @@ typedef struct {
     int list;                 // inventory: List
     int locked;               // inventory: Not sellable
     int sid;                  // inventory: the unit List acts on (a painted copy's id, else the store index)
-    int style;                // owned row's m.style, used for the thumbnail
+    int style;                // owned row's metadata.style for the thumbnail, -1 = none (deob-10.0.7.js:110719)
 } CardOpts;
 
 // _45592: the market card (svelte-hk8nq9): the item card + its overlay
@@ -1143,7 +1143,7 @@ static void browse_grid(StrBuf *sb) {
     for (int g = 0; g < groups && g < M.bshown; g++) {
         const cJSON *r = first[g];
         sb_appendf(sb, "<div class=\"item-wrapper svelte-zhgogl%s\">", M.detail == order[g] ? " selected" : "");
-        const CardOpts o = {.listing_id = jint(r, "m", 0), .price = jint(r, "f", 0), .seller = jstr(r, "p"), .count = count[g], .on_sale = 1};
+        const CardOpts o = {.listing_id = jint(r, "m", 0), .price = jint(r, "f", 0), .seller = jstr(r, "p"), .count = count[g], .on_sale = 1, .style = -1};
         market_card(sb, order[g], &o);
         sb_append(sb, " </div>");
     }
@@ -1326,7 +1326,8 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         else if (selecting && locked)
             sb_append(sb, "<div class=\"bulk-lock svelte-1n21gx\"><i class=\"material-icons svelte-1n21gx\">lock</i></div> ");
         cJSON *meta = row_meta(r);
-        const int style = (int) jnum(meta, "style");
+        const cJSON *style_v = cJSON_GetObjectItemCaseSensitive(meta, "style");
+        const int style = cJSON_IsNumber(style_v) ? style_v->valueint : -1; // metadata.style, -1 = null
         const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid, .style = style};
         market_card(sb, i, &o);
         sb_append(sb, " ");
@@ -1335,9 +1336,13 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         if (r && sid > 0 && paint_picker_can_open(i)) {
             sb_appendf(sb, " <button type=\"button\" class=\"paint-icon svelte-1n21gx\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">format_paint</i></button> ", sid, i, sid);
         }
-        if (r && sid > 0 && style_picker_can_open(i))
-            sb_appendf(sb, " <button type=\"button\" class=\"style-icon svelte-1n21gx\" style=\"left:%dpx\" aria-label=\"Choose item style\" onclick=\"v10mk.style(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">palette</i></button> ",
-                       paint_picker_can_open(i) ? 48 : 10, i, sid);
+        // the style icon (deob-10.0.7.js:132095, :135289-135292, :135366-135372): not in select mode, only where there
+        // is no paint icon, aria-label "Style <name>"
+        else if (r && sid > 0 && !selecting && style_picker_can_open(i)) {
+            sb_append(sb, " <button type=\"button\" class=\"style-icon svelte-1n21gx\" aria-label=\"Style ");
+            sb_append_esc(sb, s && s->name ? s->name : "");
+            sb_appendf(sb, "\" onclick=\"v10mk.style(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">checkroom</i></button> ", i, sid);
+        }
         const int qs = r ? jint(r, "qs", 0) : 0, destroy = r && (jint(r, "nqs", 0) || qs <= 0);
         if (cnt > 0 && (qs > 0 || destroy)) {
             sb_append(sb, " <button type=\"button\" class=\"quick-sell-icon svelte-1n21gx\" aria-label=\"Quick sell ");
@@ -1414,7 +1419,7 @@ static void sales_grid(StrBuf *sb, int *count_out) {
         if (!filter_match(&M.f, skin(i))) continue;
         n++;
         sb_appendf(sb, "<div class=\"item-wrapper svelte-1l3mtrv%s\">", M.detail == i ? " selected" : "");
-        const CardOpts o = {.sale_id = jint(r, "m", 0), .price = jint(r, "f", 0), .listed_ms = jnum(r, "ms")};
+        const CardOpts o = {.sale_id = jint(r, "m", 0), .price = jint(r, "f", 0), .listed_ms = jnum(r, "ms"), .style = -1};
         market_card(sb, i, &o);
         sb_append(sb, " </div>");
     }

@@ -31,6 +31,7 @@
 #include <hud_endscreen_v10.h> // NET_EXT_LATEST_RANKED_MMR_CHANGE: the end screen's rank card (lrmr)
 #include <skin_counter.h>      // v10.0.4 counter skins: kills / hits / AI kills / SKIN_STAT counted on the client
 #include <skin_style.h> // v10.0.7 item styles, before the next player SPAWN
+#include <style_picker.h> // style_picker_account_style: your model's style before the server's first packet
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
@@ -1445,11 +1446,22 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                     // The packet normally precedes SPAWN. A refreshed owned inventory also
                     // sends one mid-match; a visible player rebuilds styled cosmetics then.
                     Player *player = events_find_player(client, styles.uid);
-                    const int body_before = player ? skin_style_of(styles.uid, player->cosmetics.body) : -1;
-                    const int wrist_before = player ? skin_style_of(styles.uid, player->cosmetics_v7.wrist) : -1;
+                    // the worn slots the server reports (accounts_skin_styles_send): any of them changing rebuilds
+                    int worn[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1}, before[9], changed = 0;
+                    if (player) {
+                        const int slots[9] = {player->cosmetics.hat, player->cosmetics.body, player->cosmetics.waist, player->cosmetics.face,
+                                              player->cosmetics_v7.head, player->cosmetics_v7.back, player->cosmetics_v7.shoe,
+                                              player->cosmetics_v7.pet, player->cosmetics_v7.wrist};
+                        memcpy(worn, slots, sizeof worn);
+                    }
+                    // unknown (-1) is what the model was built with: none, or your account's m.style (player_mesh.c look_style)
+                    for (int k = 0; k < 9; k++) {
+                        before[k] = worn[k] >= 0 ? skin_style_of(styles.uid, worn[k]) : 0;
+                        if (before[k] < 0) before[k] = player->is_you ? style_picker_account_style(worn[k]) : 0;
+                    }
                     skin_style_set(styles.uid, styles.count, styles.skin, styles.style);
-                    if (player && player->mesh && (body_before != skin_style_of(styles.uid, player->cosmetics.body) ||
-                                                   wrist_before != skin_style_of(styles.uid, player->cosmetics_v7.wrist))) {
+                    for (int k = 0; k < 9; k++) changed |= worn[k] >= 0 && before[k] != skin_style_of(styles.uid, worn[k]);
+                    if (player && player->mesh && changed) {
                         const int render_you = player->render_you;
                         client_drop_player_mesh(client, player);
                         client_add_player_mesh(client, player, render_you);

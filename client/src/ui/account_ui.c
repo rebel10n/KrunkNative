@@ -725,8 +725,9 @@ void account_style_applied(const int item, const int sid, const int style) {
             meta = cJSON_AddObjectToObject(row, "m");
         }
         if (!meta) return;
+        // m.style = result.style, 0 too (deob-10.0.7.js:147757): the card then shows getStylePreview(item, 0)
         cJSON_DeleteItemFromObjectCaseSensitive(meta, "style");
-        if (style > 0) cJSON_AddNumberToObject(meta, "style", style);
+        cJSON_AddNumberToObject(meta, "style", style);
         return;
     }
 }

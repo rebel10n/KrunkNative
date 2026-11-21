@@ -1,4 +1,5 @@
 #include <skin_style.h>
+#include "viewer/viewer_store.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -54,23 +55,15 @@ void skin_style_texture_key(char *out, const unsigned long n, const char *base, 
     else snprintf(out, n, "%s", base);
 }
 
-static void style_preview_variant(char *out, const unsigned long n, const char *base, const int style, const char *style_ext) {
-    if (!n) return;
-    const char *dot = base ? strrchr(base, '.') : NULL;
-    const char *slash = base ? strrchr(base, '/') : NULL;
-    if (!dot || (slash && dot < slash)) {
-        snprintf(out, n, "%s_s%d.%s", base ? base : "", style, style_ext && *style_ext ? style_ext : "png");
+void skin_style_preview(const ViewerSkin *item, const int style, char *out, const unsigned long n) {
+    if (!out || !n) return;
+    if (!item) {
+        out[0] = 0;
         return;
     }
-    snprintf(out, n, "%.*s_s%d.%s", (int) (dot - base), base, style, style_ext && *style_ext ? style_ext : "png");
-}
-
-void skin_style_preview_path(char *out, const unsigned long n, const char *base, const int style, const int styles, const char *style_ext) {
-    if (style > 0 && style < styles) style_preview_variant(out, n, base, style, style_ext);
-    else if (n) snprintf(out, n, "%s", base ? base : "");
-}
-
-void skin_style_picker_preview_path(char *out, const unsigned long n, const char *base, const int style, const int styles, const char *style_ext) {
-    if (style >= 0 && style < styles) style_preview_variant(out, n, base, style, style_ext);
-    else if (n) snprintf(out, n, "%s", base ? base : "");
+    const int dir = item->asset_type ? item->asset_type : item->type;
+    const char *ext = item->style_ext && *item->style_ext ? item->style_ext : "png";
+    if (item->pat >= 0) snprintf(out, n, "textures/previews/cosmetics/%d_%d_c%d_s%d.%s", dir, item->id, item->pat, style, ext);
+    else if (viewer_skin_tex_truthy(item)) snprintf(out, n, "textures/previews/cosmetics/%d_%d_%s_s%d.%s", dir, item->id, item->tex, style, ext);
+    else snprintf(out, n, "textures/previews/cosmetics/%d_%d_s%d.%s", dir, item->id, style, ext);
 }
