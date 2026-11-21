@@ -153,7 +153,9 @@ def run_case(name, display, action):
     env.update({"DISPLAY": display, "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"),
                 "XDG_RUNTIME_DIR": os.path.join(WORK, f"{name}-run"),  # no Discord RPC socket of the user's
-                "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO": "0", "KRUNKNATIVE_RESIZE_LOG": "1", "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO": "0", "KRUNKNATIVE_RESIZE_LOG": "1",
+                # the menu-up marker "[ui] setting" is KN_LOG_VERBOSE2 (level 2 since 5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
     os.makedirs(env["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
@@ -335,13 +337,26 @@ def web_main():
             await call("Runtime.enable")
             await call("Page.enable")
             await call("Page.navigate", url=f"http://127.0.0.1:{http_port}/?offline=1&map=burg")
+            async def menu_up():
+                # the web build logs at level 0 (no "[ui] setting"): the menu's instructions text is the marker
+                r = await call("Runtime.evaluate", returnByValue=True, expression=(
+                    "(() => { const e = document.getElementById('instructions'); return !!(e && e.innerText.trim()); })()"))
+                return bool(r.get("result", {}).get("value"))
+
+            async def until_menu(seconds):
+                for _ in range(int(seconds * 4)):
+                    if await menu_up():
+                        return True
+                    await asyncio.sleep(0.25)
+                return False
+
             started = await until(lambda: any("%c Renderer" in line for line in console), 120)
             check("web: main() created the canvas (startup banner)", started, f"{len(console)} console lines")
-            loaded = any("[ui] setting" in line for line in console)
+            loaded = await menu_up()
             # the window shrinks while startup is still loading (the page, settings, the map)
             await call("Emulation.setDeviceMetricsOverride", width=900, height=500, deviceScaleFactor=1, mobile=False)
             check("web: the resize came before the menu was up (during startup)", not loaded)
-            menu = await until(lambda: any("[ui] setting" in line for line in console), 180)
+            menu = await until_menu(180)
             check("web: the menu came up", menu)
             await asyncio.sleep(2.0)
             size = await canvas_size()

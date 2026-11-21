@@ -47,14 +47,18 @@ int headless_parse_args(int *argc, char **argv) {
     // Nor do they reach the desktop keyring: the alt vault's master key goes to the run's own config
     // directory (the 0600 file keystore, client/src/alt/alt_keystore.c) unless a run forces another one.
     // A private XDG_CONFIG_HOME does not isolate the Secret Service or the Keychain, so without this
-    // every e2e client would leave a key item in the user's login keyring.
+    // every e2e client would leave a key item in the user's login keyring. And no external link opens
+    // the desktop's browser (ui_open_external, xdg-open / ShellExecute): KRUNKNATIVE_NO_BROWSER=1 only
+    // logs it, unless the run sets the variable itself.
     if (g_headless) {
 #ifdef _WIN32
         _putenv_s("KRUNKNATIVE_AUDIO_BACKEND", "null");
         if (!getenv("KRUNKNATIVE_ALT_KEYSTORE")) _putenv_s("KRUNKNATIVE_ALT_KEYSTORE", "file");
+        if (!getenv("KRUNKNATIVE_NO_BROWSER")) _putenv_s("KRUNKNATIVE_NO_BROWSER", "1");
 #else
         setenv("KRUNKNATIVE_AUDIO_BACKEND", "null", 1);
         setenv("KRUNKNATIVE_ALT_KEYSTORE", "file", 0);
+        setenv("KRUNKNATIVE_NO_BROWSER", "1", 0);
 #endif
     }
     return g_headless;
