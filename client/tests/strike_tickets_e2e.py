@@ -51,13 +51,13 @@ SCRIPT = """0 menu
 4000 nodes @wheels .sectioned-scroll:first-child .store-wheel
 4100 clicksel {kr_wheel}
 4800 nodes @spin .frvr-spin-screen
-4900 clickid spinBottomSection
+4900 clickid spinBottomSection 0.5 0.75
 20000 grep @kr-spun {kr_after_spin} .currency-header .krunkies
 20050 clicksel [onclick="strikeAction('reward-next')"]
 20600 clicksel .frvr-spin-screen .frvr-button-back
 20800 clicksel {ticket_wheel}
 21500 nodes @spin2 .frvr-spin-screen
-21600 clickid spinBottomSection
+21600 clickid spinBottomSection 0.5 0.75
 23000 nodes @popup .popup__holder .buy-tickets
 23100 clickid ticketPlus
 23500 clickid ticketPlus
@@ -65,7 +65,7 @@ SCRIPT = """0 menu
 24100 grep @price 240 .store-ticket-exchange__buttons .frvr-button-text
 24200 clickid ticketBuy
 27000 nodes @popup-after .popup__holder .buy-tickets
-27100 clickid spinBottomSection
+27100 clickid spinBottomSection 0.5 0.75
 40000 clicksel .frvr-spin-screen .frvr-button-home
 41000 quit
 """

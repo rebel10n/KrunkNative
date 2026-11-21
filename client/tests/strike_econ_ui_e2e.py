@@ -71,7 +71,7 @@ SCRIPT = """0 menu
 4000 nodes @products .sectioned-scroll:first-child .store-product
 4100 clicksel {kr_wheel}
 4800 nodes @spin .frvr-spin-screen
-4900 clickid spinBottomSection
+4900 clickid spinBottomSection 0.5 0.75
 24000 grep @kr-spun {kr_after_spin} .currency-header .krunkies
 24000 nodes @reward1 .frvr-reward-screen .reward-viewer-image img
 24000 nodes @reward1-lights .reward-screen-bg-lights img
@@ -86,7 +86,7 @@ SCRIPT = """0 menu
 27100 clicksel [onclick="strikeAction('reward-next')"]
 27800 clicksel {ticket_wheel}
 28500 nodes @spin2 .frvr-spin-screen
-28600 clickid spinBottomSection
+28600 clickid spinBottomSection 0.5 0.75
 47400 nodes @reward3 .frvr-reward-screen
 47500 clicksel [onclick="strikeAction('reward-next')"]
 48100 clicksel .frvr-spin-screen .frvr-button-home
@@ -128,6 +128,8 @@ SCRIPT = """0 menu
 62600 call strikeAction "missions"
 65800 call strikeAction "bp-tab:0"
 66100 call strikeAction "bp-tab:1"
+66700 call strikeAction "bp-tab:0"
+66900 call strikeAction "bp-tab:1"
 67300 nodes @cards .frvr-mission-card
 67300 nodes @claimable .frvr-mission-card[onclick]
 67300 rects @cardrects .frvr-mission-card
@@ -341,8 +343,11 @@ def main_scenario(brain_port, dbpath):
     db(dbpath, "INSERT INTO strike_progress (account_id, xp) VALUES (?, 6000)", (aid,))
     db(dbpath, "INSERT INTO strike_items (account_id, item_id, count) VALUES (?, ?, 1)", (aid, skin["id"]))
 
+    # the shop lists strike_products (active, the brain's catalogue: gen_economy's products plus rows added by
+    # migrations, e.g. 0345's kr_500 / kr_1500) and then today's deals (strike_econ.c shop_json): the first deal's index
+    deal_index = db(dbpath, "SELECT COUNT(*) FROM strike_products WHERE active = 1")[0][0]
     script = SCRIPT.format(kr_wheel=SPIN0.format(kr_index), ticket_wheel=SPIN0.format(ticket_index),
-                           deal_index=len(cat["products"]), start=START, kr_after_spin=START - kr_price, kr_after_buy=START - kr_price - ticket_price)
+                           deal_index=deal_index, start=START, kr_after_spin=START - kr_price, kr_after_buy=START - kr_price - ticket_price)
     path = os.path.join(WORK, "client.script")
     with open(path, "w") as f:
         f.write(script)
@@ -387,7 +392,9 @@ def main_scenario(brain_port, dbpath):
             seen[label] = {"kr": wallet(dbpath, aid, "kr"), "spin_ticket": wallet(dbpath, aid, "spin_ticket"),
                            "items": db(dbpath, "SELECT item_id, count FROM strike_items WHERE account_id = ?", (aid,)),
                            "loadout": db(dbpath, "SELECT slot, item_id FROM strike_loadout WHERE account_id = ?", (aid,))}
-            if label == "missions":  # today's missions exist now: complete them all
+            # today's missions exist now: complete them all. This is the Missions tab's fetch at 66100 (the marks match in
+            # order, so the boot fetch is passed over), so the script visits the tab again at 66900 to read them completed
+            if label == "missions":
                 db(dbpath, "UPDATE strike_daily_missions SET completed = 1, progress = 999 WHERE account_id = ?", (aid,))
             i += 1
 

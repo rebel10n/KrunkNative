@@ -47,7 +47,8 @@
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
 //   100 clickid specBtn          the same at the centre of a page element's box (a display:none one: its
-//                                nearest rendered ancestor, e.g. a switch's <label>)
+//                                nearest rendered ancestor, e.g. a switch's <label>); clickid <id> fx fy: at that
+//                                fraction of the box (a clip-path half: Strike's split spin button)
 //   100 clicksel .skinCard[data-index]  the same at the centre of the LAST element matching a selector
 //                                (the bottom card of a scrolled list)
 //   100 cursorid knOmToolsList 0.98 0.05  the cursor (no click) at that fraction of a page element's box
@@ -380,7 +381,7 @@ static void script_load(void) {
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
         }
         if (!strcmp(e->cmd, "frames")) sscanf(rest, "%159s %f", e->arg, &e->v[0]); // frames <prefix> <count>
-        if (!strcmp(e->cmd, "cursorid")) { // cursorid <id> [fx fy]
+        if (!strcmp(e->cmd, "cursorid") || !strcmp(e->cmd, "clickid")) { // cursorid / clickid <id> [fx fy]
             e->v[0] = e->v[1] = 0.5f;
             sscanf(rest, "%1023s %f %f", e->arg, &e->v[0], &e->v[1]);
         }
@@ -599,7 +600,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
         // that fraction of it, no click.
         double x = e->v[0], y = e->v[1];
         const int by_id = !strcmp(e->cmd, "clickid") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "cursorid");
-        const float fx = e->cmd[1] == 'u' ? e->v[0] : 0.5f, fy = e->cmd[1] == 'u' ? e->v[1] : 0.5f;
+        const int frac = e->cmd[1] == 'u' || !strcmp(e->cmd, "clickid"); // cursorid / clickid <id> [fx fy]
+        const float fx = frac ? e->v[0] : 0.5f, fy = frac ? e->v[1] : 0.5f;
         if (by_id) {
             HtmlElem el = 0;
             if (e->cmd[5] == 's') { // clicksel: the last match

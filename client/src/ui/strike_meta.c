@@ -515,7 +515,9 @@ static void bp_tab(const HtmlElem root, const int tab) {
     if (!content) return;
     char *html = NULL;
     if ((tab == 1 || T.econ_missions_failed) && !T.econ_missions_asked) econ_missions_ask(); // a Strike account: GET /strike/v1/missions/me
-    if (tab == 0 && bp_has_data()) {
+    // the Rewards track draws the pass itself: a Strike account's bp_has_data() is its missions answer, which can
+    // come before the pass (else rewards_html read a NULL pass: the Missions action crashed the client)
+    if (tab == 0 && bp_has_data() && battlepass_ui_pass()) {
         html = rewards_html();
     } else if (tab == 1 && bp_has_data()) {
         if (!econ_on()) account_challenges_request(); // account.activeMissions: asked once per session

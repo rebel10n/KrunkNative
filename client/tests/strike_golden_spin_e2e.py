@@ -51,7 +51,8 @@ SCRIPT = """0 menu
 4800 nodes @spin .frvr-spin-screen
 4850 nodes @spin-meter .frvr-spin-screen .golden-spin-meter
 4900 grep @title Golden .spinner-title
-4950 clickid spinBottomSection
+4950 clickid spinBottomSection 0.5 0.75
+20100 clicksel [onclick="strikeAction('reward-next')"]
 24000 clicksel .frvr-spin-screen .frvr-button-back
 24800 nodes @buy .sectioned-scroll:first-child [id="luckyDrawGolden"] .golden-spin-block__button
 24900 clicksel .sectioned-scroll:first-child [id="luckyDrawGolden"] .golden-spin-block__button
