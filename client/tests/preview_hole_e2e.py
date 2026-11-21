@@ -223,7 +223,8 @@ def native_run(tag, size, scale_ui, hide=0, frames=120, script=None):
     env = dict(os.environ, KRUNKNATIVE_HEADLESS="1", KRUNKNATIVE_AUDIO_BACKEND="null",
                XDG_CONFIG_HOME=os.path.dirname(cfg), KRUNKNATIVE_WINDOW_SIZE=size,
                KRUNKNATIVE_CAMERA=CAMERA, KRUNKNATIVE_FIXED_DELTA="0.016", KRUNKNATIVE_HIDE_UI=str(hide),
-               KRUNKNATIVE_CAPTURE_FRAMES=str(frames), KRUNKNATIVE_SCREENSHOT=png, KRUNKNATIVE_PREVIEW_LOG="1")
+               KRUNKNATIVE_CAPTURE_FRAMES=str(frames), KRUNKNATIVE_SCREENSHOT=png, KRUNKNATIVE_PREVIEW_LOG="1",
+               KRUNKNATIVE_DEBUG="2")  # "[preview] rect ..." (class_preview.c) is KN_LOG_VERBOSE2
     if script:
         path = os.path.join(WORK, f"{tag}.script")
         with open(path, "w") as f:
@@ -434,6 +435,16 @@ def web_main():
                 r = await call("Runtime.evaluate", returnByValue=True, expression=expr)
                 return r.get("result", {}).get("value")
 
+            async def until_menu(seconds):
+                # the web build logs at level 0 (no "[ui] setting"): the menu's instructions text is the marker
+                await asyncio.sleep(1.0)  # past Page.navigate's commit, so the old document cannot answer
+                for _ in range(int(seconds * 4)):
+                    if await evaluate("(() => { const e = document.getElementById('instructions'); "
+                                      "return !!(e && e.innerText.trim()); })()"):
+                        return True
+                    await asyncio.sleep(0.25)
+                return False
+
             async def pause(on):
                 # the game's frames stop (the WebGL canvas and the preview's canvas keep their last
                 # frame), so a page screenshot and a world screenshot see the same world
@@ -540,7 +551,7 @@ def web_main():
                             startup_bad.append(f"{time.monotonic() - start:.1f}s: {detail}")
                     else:
                         await asyncio.sleep(0.05)
-                menu = await until(lambda: any("[ui] setting" in line for line in console), 240)
+                menu = await until_menu(240)
                 if not menu:
                     check(f"web {tag}: the menu came up", False)
                     continue
@@ -556,7 +567,7 @@ def web_main():
             await call("Emulation.setDeviceMetricsOverride", width=1280, height=720, deviceScaleFactor=1, mobile=False)
             console.clear()
             await call("Page.navigate", url=page_url)
-            if await until(lambda: any("[ui] setting" in line for line in console), 240):
+            if await until_menu(240):
                 await asyncio.sleep(4.0)
                 ring_bad, seam_bad, seen = [], [], 0
                 sizes = [(1366, 768, 1.1), (1280, 720, 1.0), (1536, 864, 1.25), (1301, 733, 1.0)]

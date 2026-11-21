@@ -80,7 +80,9 @@ def run_client(name, args, script, size="1280x720", env_extra=None, actions=(), 
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg_dir(cfg or name),
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": size})
+                "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": size,
+                # the sandbox's "[sandbox] ..." lines and the reload details are KN_LOG_VERBOSE2 / DEBUG1
+                "KRUNKNATIVE_DEBUG": "2"})
     env.update(env_extra or {})
     pending = list(actions)
     with open(log, "w") as out:

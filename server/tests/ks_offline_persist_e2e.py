@@ -5,12 +5,13 @@
 
 client_bin --offline (headless, KRUNKNATIVE_HEADLESS=1) runs twice on one private
 XDG_CONFIG_HOME with a map whose
-  * client script counts its runs in GAME.COOKIES (localStorage "krkcst_<map>_<key>": natively
-    $XDG_CONFIG_HOME/krunknative/<key>.json) and checks v7's value rules (booleans refused,
-    arrays as "1,2", a missing key reads "null");
+  * client script counts its runs in GAME.COOKIES. Since 8c5fbc25 the key is
+    "krkcst_<customMapData.id>_<key>" (client/src/ks/ks_misc.c cookie_key, v10 L182675-182685) and a
+    native offline map has no custom game id, so v10 refuses every cookie: has() is false, load()
+    reads "", nothing is written, and each run counts 1;
   * server script (the offline sandbox) adds 1 to GAME.STORAGE "visits" on every spawn: the
     offline file store ks-storage-<hash>.json, written through the client's html_storage.
-The second run must see runs 2 and visits 2.
+The second run must see runs 1 again (no cookie) and visits 2.
 """
 import json
 import os
@@ -46,7 +47,9 @@ def check(name, ok, detail=""):
 
 
 def run(cfg, map_path, inputs):
-    env = dict(os.environ, KRUNKNATIVE_HEADLESS="1", XDG_CONFIG_HOME=cfg, KRUNKNATIVE_INPUT_SCRIPT=inputs, KRUNKNATIVE_FRAME_CAP="60")
+    # KRUNKNATIVE_DEBUG=2: the console's lines reach stdout as "[console] ..." only at level 2 (ui_console.c)
+    env = dict(os.environ, KRUNKNATIVE_HEADLESS="1", XDG_CONFIG_HOME=cfg, KRUNKNATIVE_INPUT_SCRIPT=inputs, KRUNKNATIVE_FRAME_CAP="60",
+               KRUNKNATIVE_DEBUG="2")
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
     r = subprocess.run([f"{BUILD}/client_bin", "--offline", map_path], env=env, capture_output=True, timeout=180)
@@ -68,13 +71,13 @@ def main():
     cfg = os.path.join(WORK, "cfg")
     os.makedirs(cfg)
     first = run(cfg, map_path, inputs)
-    check("first run", any("cookies 1 null 1,2 null" in l for l in first) and any("visits true local 1" in l for l in first), str(first))
+    check("first run", any(l.endswith("cookies 1   ") for l in first) and any("visits true local 1" in l for l in first), str(first))
     second = run(cfg, map_path, inputs)
-    check("COOKIES persist across sessions", any("cookies 2 null 1,2 null" in l for l in second), str(second))
+    check("COOKIES are refused without a custom game id (runs stays 1)", any(l.endswith("cookies 1   ") for l in second), str(second))
     check("offline STORAGE persists across sessions", any("visits true local 2" in l for l in second), str(second))
     files = os.listdir(os.path.join(cfg, "krunknative"))
-    check("stored under the config dir", "krkcst_KsPersist_runs.json" in files and any(n.startswith("ks-storage-") for n in files),
-          str(files))
+    check("STORAGE under the config dir, no cookie file", not any(n.startswith("krkcst_") for n in files)
+          and any(n.startswith("ks-storage-") for n in files), str(files))
     if all(results):
         shutil.rmtree(WORK, ignore_errors=True)
     else:

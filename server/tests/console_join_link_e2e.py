@@ -130,7 +130,9 @@ def run():
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL", "KRUNKNATIVE_KRUNKER_JOIN")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "XDG_STATE_HOME": os.path.join(WORK, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UI_CMDS": CMDS, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
-                "KRUNKNATIVE_KRUNKER_MATCHMAKER": f"http://127.0.0.1:{mm_port}"})
+                "KRUNKNATIVE_KRUNKER_MATCHMAKER": f"http://127.0.0.1:{mm_port}",
+                # "[krunker] official lobby ...: joining in-client" is KN_LOG_DEBUG1 (krunker_lobbies.c)
+                "KRUNKNATIVE_DEBUG": "2"})
     with open(CLIENT_LOG, "w") as out:
         procs.append(subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin"], stdout=out, stderr=subprocess.STDOUT,
                                       stdin=subprocess.DEVNULL, env=env, start_new_session=True))
