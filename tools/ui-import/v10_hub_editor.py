@@ -80,7 +80,9 @@ KN_TWOFA = ('<div id="twoFAPop" style="display:none"><div id="twoFAWindow"><div 
             '<div id="twoFAbtn" onclick="sub2FA()">Submit</div></div></div>')
 KN_TWOFA_CSS = "css/kn-twofa.css"
 V7_EDITOR_CSS = "/home/user/jails/kru/src/Krunker_v7.1.4/public/css/editor.css"
-HUB_SVELTE = ("sdh4ve", "1wz7ymp", "16z1lxi")  # view stack, popup frame, LoginModal
+# view stack, popup frame, LoginModal, the map details window (its Versions tab markup on the hub map page,
+# social_ui.c; deob-10.0.7.js:107603)
+HUB_SVELTE = ("sdh4ve", "1wz7ymp", "16z1lxi", "1kkpw01")
 HUB_SVELTE_CSS = "css/hub-svelte.css"
 # v10_bundle.js output, first that exists: the page tree's copy, then the bundle cache
 SVELTE_CSS = ("css/svelte.css", os.path.expanduser("~/.cache/kn-v10/bundle/svelte.css"))

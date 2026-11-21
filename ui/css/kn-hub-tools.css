@@ -72,3 +72,9 @@
 	gap: 10px;
 	margin-top: 14px;
 }
+/* The map page's Versions tab is v10.0.7's map details markup (svelte-1kkpw01, css/hub-svelte.css). On v10's page its
+ * uncoloured parts inherit .md-root's color:#fff (deob-10.0.7.js:107603); the hub's v7 `* { color: #353535 }`
+ * (css/social.css) would colour each of them directly, so they inherit again here. No other value changes. */
+#mapVersions .md-data.svelte-1kkpw01 { color: #fff; }
+.md-data-table.svelte-1kkpw01, .md-ver-row.svelte-1kkpw01, .md-ver-date.svelte-1kkpw01, .md-ver-head.svelte-1kkpw01 > span,
+.md-ver-btn.svelte-1kkpw01 i.svelte-1kkpw01, .md-center-sm.svelte-1kkpw01 i.svelte-1kkpw01 { color: inherit; }

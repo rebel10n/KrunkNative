@@ -333,7 +333,8 @@ scripts, comments, preload links and description / og / twitter metas removed, `
 stripped, URLs made relative, `static/index.css` linked, the web build's hidden
 `<canvas id="canvas">` + `js/kn-shim.js` / `js/loader.js` added, the app badge pointed at our
 Download window, `#twoFAPop` + `css/kn-twofa.css` kept, and `css/hub-svelte.css` (v10's view
-stack / popup / LoginModal component CSS, from `svelte.css` of `v10_bundle.js`) linked.
+stack / popup / LoginModal / map details window (svelte-1kkpw01: the map page's Versions tab) component CSS,
+from `svelte.css` of `v10_bundle.js`) linked.
 `css/kn-hub-tools.css` is Box Office's own (the map page's Leaderboard / Data rows and the creator's Edit
 popup, client/src/ui/social_ui.c "the map page tools"), linked after `css/kn-twofa.css`.
 `css/social.css` and `css/social_custom.css` are v10's (URL rewrite).
