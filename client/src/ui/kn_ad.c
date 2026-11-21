@@ -1,5 +1,6 @@
 // KrunkNative's placeholder ad (client/include/kn_ad.h): where v10 plays an FRVR ad, a card that says so, counts down and
-// then grants what the watched ad grants. No ad network, no script: the flow is kn_ad_flow.c, the card #genericPop.
+// then grants what the watched ad grants. No ad network, no script: the flow is kn_ad_flow.c, the card #genericPop
+// (v10's page) or, on a page without one (Krunker Strike's FRVR page, ui/strike/), #knAdStrikePop under <body>.
 #include <kn_ad.h>
 #include <ui_logic.h>
 #include <html_ui.h>
@@ -33,11 +34,23 @@ static void ad_render(void) {
             snprintf(t, sizeof t, "%s", I18N("kn.ad.ready", "Ad finished"));
         html_dom_set_text(count, t);
     }
-    const HtmlElem cont = html_dom_query(0, "#genericPop .knAdContinue");
+    const HtmlElem cont = html_dom_query(0, html_dom_by_id("genericPop") ? "#genericPop .knAdContinue" : "#knAdStrikePop .knAdContinue");
     if (cont) html_dom_set_class(cont, "knAdWait", g_flow.phase != KN_AD_READY);
 }
 
-static void ad_popup(void) {
+// The card's own holder on a page without v10's #popupHolder / #genericPop (Strike: FRVR's page has neither):
+// a full-screen layer under <body>, styled by ui/strike/css/kn-strike-overrides.css. 0 = no body either.
+static HtmlElem strike_pop(void) {
+    HtmlElem pop = html_dom_by_id("knAdStrikePop");
+    if (pop) return pop;
+    const HtmlElem body = html_dom_body();
+    if (!body) return 0;
+    html_dom_insert_html(body, HTML_INSERT_BEFORE_END, "<div id='knAdStrikePop' class='knAdStrikePop'></div>");
+    return html_dom_by_id("knAdStrikePop");
+}
+
+// 1 = the card shows (with its Continue / close), 0 = the page has nowhere to show it
+static int ad_popup(void) {
     StrBuf sb = {0};
     sb_append(&sb, "<div class='knAdCard' style='width:100%;text-align:center'>"
                    "<div class='knAdClose material-icons' onclick='knAdClose()' style='float:right;cursor:pointer;color:rgba(255,255,255,0.5)'>close</div>"
@@ -52,18 +65,24 @@ static void ad_popup(void) {
     sb_append_esc(&sb, I18N("kn.ad.continue", "Continue"));
     sb_append(&sb, "</div></div>");
     char *html = sb_finish(&sb);
-    ui_loadout_clear_pops();
-    const HtmlElem holder = html_dom_by_id("popupHolder");
-    if (holder) html_dom_set_display(holder, "block");
-    const HtmlElem pop = html_dom_by_id("genericPop");
+    HtmlElem pop = html_dom_by_id("genericPop");
     if (pop) {
+        ui_loadout_clear_pops();
+        const HtmlElem holder = html_dom_by_id("popupHolder");
+        if (holder) html_dom_set_display(holder, "block");
         html_dom_set_attr(pop, "class", "loadingPop knAdPop");
         html_dom_set_attr(pop, "style", "");
+    } else {
+        pop = strike_pop();
+    }
+    if (pop) {
         html_dom_set_html(pop, html);
         html_dom_set_display(pop, "block");
     }
     free(html);
+    if (!pop) return 0;
     ad_render();
+    return 1;
 }
 
 static void ad_tick(void *user) {
@@ -86,6 +105,8 @@ static void ad_end(const int completed) {
     const HtmlElem pop = html_dom_by_id("genericPop");
     char cls[48] = "";
     if (pop && html_dom_get_attr(pop, "class", cls, sizeof cls) >= 0 && strstr(cls, "knAdPop")) ui_loadout_clear_pops();
+    const HtmlElem strike = html_dom_by_id("knAdStrikePop");
+    if (strike) html_dom_remove(strike);
     KN_LOG_DEBUG1("[ad] placeholder %s\n", result == KN_AD_COMPLETED ? "completed" : "skipped");
     if (result == KN_AD_COMPLETED) {
         if (req.on_complete) req.on_complete(req.user);
@@ -98,7 +119,11 @@ static void ad_end(const int completed) {
 int kn_ad_show(const KnAdRequest *req) {
     if (!req || !kn_ad_flow_start(&g_flow, ad_seconds(), req->allow_skip)) return 0;
     g_req = *req;
-    ad_popup();
+    if (!ad_popup()) { // nowhere to show the card: the ad fails at once (onError, onExit) instead of staying "running"
+        KN_LOG_DEBUG1("[ad] placeholder: the page has no holder for the card\n");
+        ad_end(0);
+        return 1;
+    }
     if (g_req.on_show) g_req.on_show(g_req.user);
     if (g_flow.phase == KN_AD_COUNTING) g_timer = html_timer_add(1000.0, ad_tick, NULL);
     return 1;

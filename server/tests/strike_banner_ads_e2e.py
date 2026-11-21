@@ -5,15 +5,16 @@
 
 FRVR 1.37.2 shows a bottom banner on the lean end screen when its ads are supported; Krunker Box Office's
 placeholder ad always is, so the slot is always there. Its click is the match's Double XP claim
-(double_xp_offer.h): double_xp_claim sends ["rqdxp"] on the social socket at once (no ad), and the answer
+(double_xp_offer.h): since 6d6fdd11 the placeholder ad plays first (kn_ad.c; KRUNKNATIVE_AD_SECONDS=0 makes it
+ready at once, the script clicks its Continue), then double_xp_claim sends ["rqdxp"] on the social socket, and the answer
 ["rrqdxp", {playerScore, xp, games}] doubles the match. A stand-in brain serves one account per run over ws /social/ws (the saved session's token login, ["rqdxp"], and the account's "dxp" object:
 offer {games, xp, claimable} and the weekend schedules); nothing else is contacted. A headless Strike client
 (--offline --flavor strike, one input script) then plays a match and ends it, per run:
   offer: signed in, games % 3 == 0 and the offer claimable:
     1. the slot is in the lean end screen's bottom strip, and its status is empty before any click;
-    2. the first click sends one rqdxp (dxp-client's claim has no ad step); the status reads "2x XP"
+    2. the first click plays one placeholder ad, then sends one rqdxp; the status reads "2x XP"
        and the button reads Collected;
-    3. the second click sends nothing.
+    3. the second click sends nothing and plays no ad.
   no offer: signed in, games % 3 != 0 (the offer is not claimable):
     4. the clicks watch no ad and send no rqdxp; the status says the match has no Double XP, and the
        button is dimmed.
@@ -217,6 +218,7 @@ SCRIPT = """
 15000 text @before .strike-banner-ad__status
 15000 nodes @dim-before .strike-banner-ad__button--off
 15100 clicksel .strike-banner-ad
+15300 clicksel .knAdContinue
 16500 text @status .strike-banner-ad__status
 16500 text @button .strike-banner-ad__button
 16500 nodes @dim .strike-banner-ad__button--off
@@ -264,10 +266,12 @@ def run_client(brain_port, script_text, signed_in, tag):
     with open(path, "w") as f:
         f.write(script_text)
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+    # the [strike] / [mm] / [spectate] / console lines reach the log only at level 2 (5f55eef1)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, tag, "state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_FIXED_DELTA": "16.6667",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                "KRUNKNATIVE_AD_SECONDS": "0",  # the placeholder ad (6d6fdd11) is ready at once: the script clicks Continue
                 "KRUNKNATIVE_ASSETS_DIR": os.environ.get("KRUNKNATIVE_ASSETS_DIR", os.path.join(REPO, "assets")),
                 "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{brain_port}"})
     args = ["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "--map", "kanji", "--flavor", "strike"]
@@ -382,7 +386,8 @@ def run():
           texts.get("before", (0, ""))[1] == "", repr(texts.get("before")))
     check("offer: the button is not dimmed before the click", nodes.get("dim-before") == 0, f"{nodes.get('dim-before')}")
     ads = [l for l in lines if "[ad] placeholder" in l]
-    check("offer: no rewarded ad is shown (the claim is sent at once, dxp-client has no ad step)", len(ads) == 0, f"{len(ads)} ad lines")
+    check("offer: the first click plays one placeholder ad to its end (6d6fdd11), then claims",
+          len(ads) == 1 and "completed" in ads[0], f"{ads}")
     check("offer: one rqdxp over the social socket, the first click's, nothing else",
           r["claims"] == [["rqdxp"]], repr(r["claims"]))
     check("offer: the claim is granted (the match doubled)", any("[strike] banner ad: double XP granted" in l for l in lines))
@@ -391,7 +396,7 @@ def run():
     check("offer: the button reads Collected after the claim", texts.get("button", (0, ""))[1] == "Collected", repr(texts.get("button")))
     check("offer: the spent button is dimmed", nodes.get("dim") == 1, f"{nodes.get('dim')}")
     check("offer: the second click sends nothing (no rqdxp, no ad)",
-          r["claims"] == [["rqdxp"]] and len(ads) == 0 and any("[strike] banner ad: double XP not offered" in l for l in lines))
+          r["claims"] == [["rqdxp"]] and len(ads) == 1 and any("[strike] banner ad: double XP not offered" in l for l in lines))
     check("offer: the status after the second click is unchanged", texts.get("again", (0, ""))[1] == ALL_ON, repr(texts.get("again")))
 
     # ---- no offer: signed in, games % 3 != 0

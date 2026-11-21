@@ -233,3 +233,11 @@ html #devConsoleOverlay > .modal{width:min(400px,calc(100vw - 30px));height:min(
  * stay on one line and the row is centred (FRVR's bar at 640 x 360 keeps its place). */
 .lean-end-screen__main-container .progress-bar__horizontal-holder{justify-content:center;width:100%}
 .lean-end-screen__main-container .progress-bar__horizontal-holder .progress-bar__left-text,.lean-end-screen__main-container .progress-bar__horizontal-holder .progress-bar__right-text{white-space:nowrap}
+
+/* KrunkNative: the placeholder rewarded ad (client/src/ui/kn_ad.c, doc/v10/ads.md) where FRVR plays its SDK's ad. FRVR's
+ * page has no #genericPop, so the card is #knAdStrikePop under <body>: a dimmed full-screen layer over the round end,
+ * the card centred in it. Continue is FRVR-blue and greyed until the countdown ends (.knAdWait). */
+#knAdStrikePop{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);font-family:var(--font-family,sans-serif)}
+#knAdStrikePop .knAdCard{max-width:calc(520 * var(--base-scale));padding:calc(20 * var(--base-scale));box-sizing:border-box;background:rgba(20,20,20,0.95);border-radius:calc(12 * var(--base-scale))}
+#knAdStrikePop .knAdContinue{padding:calc(12 * var(--base-scale)) 0;border-radius:calc(8 * var(--base-scale));background:#2f9bff;color:#fff;font-size:calc(22 * var(--base-scale));cursor:pointer}
+#knAdStrikePop .knAdContinue.knAdWait{opacity:0.4;pointer-events:none;cursor:default}
