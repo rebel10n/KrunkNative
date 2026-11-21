@@ -1,18 +1,17 @@
 # deploy/pages
 
-The owned-host GitHub Pages replacement is staged on kru, isolated from public
-traffic. See [OWNED_HOST.md](OWNED_HOST.md) for its deployment, DNS-free checks,
-production ingress prerequisites and rollback. The existing GitHub Pages workflow
-below remains the live front end until an explicit DNS cutover.
+Since 2026-11-21 the krunk.io front end is served by kru through divide's edge relay, not GitHub
+Pages: [OWNED_HOST.md](OWNED_HOST.md) has the path, publishing, certificate and rollback. The
+GitHub Pages workflow below is kept as the rollback (its site and custom-domain setting stay).
 
 The krunk.io front end and the game content's hosting. The page (dist/web without assets/) is
-on **GitHub Pages**; the game content is on the **asset CDN** (two Cloudflare Pages projects, split by
+on **kru** (OWNED_HOST.md; GitHub Pages before 2026-11-21); the game content is on the **asset CDN** (two Cloudflare Pages projects, split by
 directory, `deploy/asset-shards.json`) with kru's **download host** as the source and the fallback;
 the page picks its origin at run time (kn-config.json, below); services stay on the central node:
 
 | host | what | where |
 | --- | --- | --- |
-| `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`, custom domain `krunk.io`, HTTPS enforced) |
+| `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | kru `/opt/krunknative-pages/current` via divide edge CT 201 (OWNED_HOST.md); GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`) is the rollback |
 | `assets.krunk.io` | asset origin `own`: `/assets/` but the directories of project b (10.9k files, 2.2 GB); `_redirects`: those 301 to `assets1.`, `/updates/*` 302 to `dl.` | Cloudflare Pages project `krunknative-assets-a` (custom domain; pages.dev: `krunknative-assets-a.pages.dev`, origin `a-dev`). Before the cutover (runbook): kru through the abulxt edges |
 | `assets1.krunk.io` | `/assets/` of project b's directories (`textures/previews/`, `hats/`, `melee/`, `faces/`, `body/`, `sprays/`, `back/`: 11.2k files, 0.5 GB) | Cloudflare Pages project `krunknative-assets-b` (origin `b-dev` on pages.dev) |
 | `dl.krunk.io` | asset origin `dl`: the whole `/assets/` tree and `/updates/` (the launcher's store); the CDN's source, the clients' fallback | kru: host nginx :443 (Let's Encrypt) -> OpenResty :8087 (deploy/ansible role kn_dl_origin) |
@@ -24,7 +23,7 @@ the page picks its origin at run time (kn-config.json, below); services stay on 
 
 DNS: the krunk.io zone is on Spaceship (since 2026-10-13); every record is set by hand (or
 through Spaceship's API by the runbook), nothing in CI writes DNS. Names this setup owns: the DNS
-records `krunk.io` (GitHub's A records), `www.krunk.io` (CNAME to `rebel10n.github.io`),
+records `krunk.io` (A 91.199.82.174, divide), `www.krunk.io` (CNAME to `krunk.io`),
 `assets.krunk.io` / `assets1.krunk.io` (CNAMEs to `krunknative-assets-a` / `-b.pages.dev`, the
 projects' custom domains) and `dl.krunk.io` (A record, kru's public IP), and the Pages projects
 `krunknative-assets-a` / `-b`. What the page relies on from every asset origin: CORS `*`,

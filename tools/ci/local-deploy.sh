@@ -11,9 +11,10 @@
 #          release,gameserver) on the canary kn-ams, its health, then kn-mnz, then every edge's health
 #   cdn    deploy/pages/assets-cdn.sh when the CDN lacks dl.krunk.io's assets/version.txt (CLOUDFLARE_* from
 #          ~/.config/kn-secrets/github-ci/)
-# Not here (they need GitHub): the krunk.io front end on GitHub Pages (deploy-kru.yml job `pages`: an Actions
-# artifact + deploy-pages), and the client-latest / server-latest releases (client.yml / release.yml publish:
-# every platform or none, see the README). kru's own web release (central.yml, role kn_web) does go out.
+# Not here: the krunk.io front end (since 2026-11-21 kru's /opt/krunknative-pages, published with
+# deploy/pages/owned.sh stage / publish-stage / verify-stage, deploy/pages/OWNED_HOST.md; GitHub Pages is only
+# the rollback), and the client-latest / server-latest releases (client.yml / release.yml publish, they need
+# GitHub: every platform or none, see the README). kru's own web release (central.yml, role kn_web) does go out.
 #
 # Usage: tools/ci/local-deploy.sh [--only kru,edges,cdn] [--dry-run] <rev>
 #   --dry-run  builds, then ansible --check --diff (changes nothing); no CDN upload

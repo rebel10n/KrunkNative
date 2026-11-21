@@ -8,23 +8,37 @@ Krunker Strike page and the content-hashed client JS/Wasm/data triplet. Assets
 remain on `assets.krunk.io` / `assets1.krunk.io`, with `dl.krunk.io` as fallback.
 The `<head>` hot loader is preserved from `dist/web/index.html` by staging.
 
-## Current staging state (November 20, 2026)
+## Live state (cut over 2026-11-21 ~01:50 UTC)
 
-- `kru` (SSH alias from `deploy/ansible/ssh_config`) has the isolated directory
-  `/opt/krunknative-pages/releases/`, with `current` as an atomic symlink.
-- Host nginx serves `/opt/krunknative-pages/current` at **127.0.0.1:18080** via
-  `/etc/nginx/sites-enabled/zz-krunknative-pages-stage.conf` (tracked source:
-  `deploy/pages/owned-stage.nginx.conf`). It has no public port, firewall or DNS
-  route. The production app and downloads continue to use their existing vhosts.
-- Staged release `804ff462006f02db` serves client build
-  `e7df029ceee3c32d` and keeps the prior GitHub client build
-  `daeb2112581dc60c` for cached pages. This is a preview of the available
-  `dist/web` at staging time, **not** a CI-approved production release.
-- `nginx -t` and `deploy/pages/owned.sh verify-stage` passed. The latter checks
-  HTML, client JS/Wasm/data and MIME types, 404s, PWA files, `kn-config.json`,
-  and all configured CDN origins. The Cloudflare Pages CDN may answer 200 to
-  a range request; the checker warns but accepts it, as the client does not
-  issue byte-range requests. No public DNS, certs or edge routes were changed.
+`krunk.io` and `www.krunk.io` are served by **kru**, not GitHub Pages:
+
+```
+browser -> 91.199.82.174:443 (divide DNAT) -> edge relay CT 201 OpenResty
+           conf.d/25-krunknative-pages.conf (owned-edge.openresty.conf), cert /etc/letsencrypt/live/krunk.io
+        -> http://172.16.5.47:80 Host krunk.io (kru host nginx, owned-origin.nginx.conf,
+           sites-enabled/zz-krunknative-pages-origin.conf, allow 172.16.5.10 only)
+        -> /opt/krunknative-pages/current -> releases/<id>
+```
+
+- The origin uses kru's existing wildcard `:80` listener (selected by `server_name`), because
+  divide's `divide_guests` `from_edge` chain and CT 120's `/etc/pve/firewall/120.fw` already pass
+  edge -> kru tcp 80/443; no firewall rule was added. Never make it `listen 172.16.5.47:80`: an
+  address-specific listener takes that address from kru's other `:80` vhosts (`kru.eli.gift`).
+- Certificate: certbot on CT 201, DNS-01 through Spaceship's API with
+  `/etc/letsencrypt/kn-spaceship-hook.py` (= `certbot-spaceship-hook.py`; credentials in
+  `/etc/letsencrypt/kn-spaceship.env`, root 0600). The renewal config keeps the auth/cleanup hooks
+  and `renew_hook = systemctl reload openresty`, so `certbot.timer` renews unattended. Check with
+  `pct exec 201 -- certbot renew --dry-run --cert-name krunk.io`.
+- DNS at Spaceship: `@ A 91.199.82.174` (TTL 300), `www CNAME krunk.io` (TTL 300), no AAAA (divide
+  has no inbound IPv6 for the relay). Rollback snapshot of the whole zone, from Spaceship's API:
+  `~/.config/kn-pages/rollback-spaceship-20261121T014946Z.json` (0600). The old values were
+  `@ CNAME rebel10n.github.io` and `www CNAME rebel10n.github.io`, both TTL 1800.
+- The GitHub Pages site and its `krunk.io` custom-domain setting are left in place as the rollback.
+- Served release `ad0ed3f80c5edd97` (client build `00b9da7e4e577ebd`, from `aaf774e7`).
+- `127.0.0.1:18080` (`owned-stage.nginx.conf`) remains for `owned.sh verify-stage`.
+
+Publishing a new front end is now: `make web`, `owned.sh stage`, `owned.sh publish-stage`,
+`owned.sh verify-stage`, then `check.sh https://krunk.io/` (the stage *is* production).
 
 ## Repeatable staging (no DNS changes)
 
@@ -67,7 +81,7 @@ terminal and run `ssh -F deploy/ansible/ssh_config -N -L
 `http://localhost:18080/`. Browser CORS and secure-context behavior still need
 validation against the eventual HTTPS origin `https://krunk.io/`.
 
-## Public cutover prerequisites (pending, not executed)
+## Cutover procedure (done 2026-11-21; kept for a rebuild)
 
 Public `91.199.82.174:80/443` on `divide` is currently fronted by the **edge
 relay CT 201** (OpenResty). `kru` is CT 120 at **172.16.5.47**, not a public
@@ -85,12 +99,12 @@ Prepare and review these steps before editing DNS:
    the rollback destination.
 2. Add a **LAN-only** nginx origin vhost on kru, serving the same
    `/opt/krunknative-pages/current` with the rules in
-   `owned-stage.nginx.conf`, bound to `172.16.5.47:18080`, allowing only
+   `owned-stage.nginx.conf`, on kru's wildcard `:80` by `server_name`, allowing only
    CT 201 (`172.16.5.10`). Keep the loopback staging listener. Add a
    corresponding allow rule in the actual CT 120 firewall only if required;
    verify that the public Internet cannot reach the port.
 3. Add a dedicated `krunk.io www.krunk.io` OpenResty vhost to CT 201,
-   forwarding to `http://172.16.5.47:18080` with the original `Host` and
+   forwarding to `http://172.16.5.47:80` with the original `Host` and
    `X-Forwarded-Proto: https` headers. Keep existing matchmaker, coordinator,
    play, assets and download routes untouched. Use the relay's existing
    TLS/ACME infrastructure and obtain a valid certificate for both names.
@@ -111,11 +125,11 @@ Prepare and review these steps before editing DNS:
    `www` CNAME from `rebel10n.github.io` to `krunk.io`. Verify authoritative
    and public DNS, HTTPS, hot matchmaking and all ancillary pages.
 
-## Reviewable CT 201 ingress and certificate commands
+## CT 201 ingress and certificate commands (as executed)
 
 Two prepared configurations are **not enabled**:
 
-- `owned-origin.nginx.conf` binds `172.16.5.47:18080` on kru, accepts only
+- `owned-origin.nginx.conf` joins kru's wildcard `:80` for `krunk.io www.krunk.io`, accepts only
   `172.16.5.10` (CT 201), and serves the staged release using the same cache,
   MIME and 404 rules as the loopback preview.
 - `owned-edge.openresty.conf` binds `krunk.io www.krunk.io` on the public edge
@@ -126,15 +140,18 @@ Two prepared configurations are **not enabled**:
   check used the relay's existing fallback certificate only for syntax.
 
 These are the exact installation actions for a **later approved cutover**. On
-CT 201, `certbot` is installed. Provision a certificate **while the GitHub
-records still answer**, using a DNS-01 challenge (the interactive command
-prints TXT records for the operator to add in Spaceship; it does not change A
-or CNAME records). Use a contact address in your normal ACME account setup.
+CT 201, `certbot` is installed. The certificate is issued by DNS-01 while the old
+records still answer: `certbot-spaceship-hook.py` (installed as
+`/etc/letsencrypt/kn-spaceship-hook.py`, credentials in `/etc/letsencrypt/kn-spaceship.env`,
+root 0600) writes and removes only the `_acme-challenge` TXT records through Spaceship's API
+and waits until both authoritative servers answer them.
 
 ```sh
-# Human action: add the requested DNS TXT values, then confirm validation.
+# Issue (or reissue) with the hooks; certbot.timer renews with the same hooks.
 ssh -t -F deploy/ansible/ssh_config divide \
-  'pct exec 201 -- certbot certonly --manual --preferred-challenges dns --cert-name krunk.io -d krunk.io -d www.krunk.io'
+  'pct exec 201 -- certbot certonly --non-interactive --agree-tos --manual --preferred-challenges dns --cert-name krunk.io -d krunk.io -d www.krunk.io \
+     --manual-auth-hook "/etc/letsencrypt/kn-spaceship-hook.py auth" --manual-cleanup-hook "/etc/letsencrypt/kn-spaceship-hook.py cleanup" \
+     --deploy-hook "systemctl reload openresty"'
 
 # Install the private origin on kru. Only CT 201 may reach this LAN listener.
 scp -F deploy/ansible/ssh_config deploy/pages/owned-origin.nginx.conf \
@@ -144,7 +161,7 @@ ssh -F deploy/ansible/ssh_config kru \
 
 # Verify inside CT 201 that its private network reaches the origin.
 ssh -F deploy/ansible/ssh_config divide \
-  'pct exec 201 -- curl --noproxy "*" -fsSI --resolve krunk.io:18080:172.16.5.47 http://krunk.io:18080/'
+  'pct exec 201 -- curl --noproxy "*" -fsSI -H "Host: krunk.io" http://172.16.5.47/'
 
 # Install the edge vhost only after both certificates exist and origin works.
 scp -F deploy/ansible/ssh_config deploy/pages/owned-edge.openresty.conf \
@@ -161,12 +178,10 @@ deploy/pages/check.sh https://www.krunk.io/ --resolve www.krunk.io:443:91.199.82
 
 If any config test fails, **do not reload**. Remove the newly added
 `zz-krunknative-pages-origin.conf` symlink or `25-krunknative-pages.conf`
-edge file, recheck syntax and leave live routing alone. The private CT 120
-firewall must allow `172.16.5.10 -> 172.16.5.47:18080` before the origin
-probe can pass. Do not open that port to the Internet. Confirm DNS-01
-renewal automation (or schedule and monitor renewals using Spaceship's DNS
-API) before relying on a manually issued certificate in production;
-`certbot --manual` without hooks does not automatically renew the cert.
+edge file, recheck syntax and leave live routing alone. The origin rides kru's
+`:80`, which divide's `from_edge` chain and CT 120's firewall already pass from
+CT 201; no port is opened to the Internet. `certbot renew --dry-run --cert-name
+krunk.io` on CT 201 exercises the renewal hooks.
 
 ## Rollback
 
