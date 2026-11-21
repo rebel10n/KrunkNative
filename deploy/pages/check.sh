@@ -64,9 +64,13 @@ python3 -c 'import json,sys; c=json.loads(sys.argv[1]); print("  ok    kn-config
     || bad "kn-config.json is not the expected JSON"
 # Shard b contains preview/cosmetic textures and intentionally lacks img/icon.png.
 # Probe a real file on each shard rather than failing the CDN's correct split.
+# (Listed first, not read from a process substitution: a missing asset_origins must fail, not check nothing.)
+origins=$(python3 -c 'import json,sys; o=json.loads(sys.argv[1])["asset_origins"]; assert o; print("\n".join(n+"\t"+u for n,u in o.items()))' "$cfg") \
+    || { bad "kn-config.json has no asset_origins"; origins=""; }
 while IFS=$'\t' read -r name base; do
+    [ -n "$name" ] || continue
     sample=img/icon.png
     case "$name" in b|b-dev) sample=textures/previews/attach/attach_0.png ;; esac
     assets "$base" "$sample"
-done < <(python3 -c 'import json,sys; print("\n".join(name+"\t"+url for name,url in json.loads(sys.argv[1])["asset_origins"].items()))' "$cfg")
+done <<< "$origins"
 exit $fail
