@@ -265,6 +265,20 @@ EM_JS(void, kn_js_set_style, (int id, const char *prop, const char *value), {
      * No regex: EM_JS bodies lose their backslashes. */
     var t = v.trim(), bang = t.lastIndexOf("!");
     if (bang >= 0 && t.slice(bang + 1).trim().toLowerCase() === "important") { v = t.slice(0, bang).trim(); prio = "important"; }
+    /* A custom property's url() resolves where var() is used: in css/main.css a "./img/..." became
+     * css/img/... (404). The native engine resolves it against the page, so make it absolute here. */
+    if (p.lastIndexOf("--", 0) === 0 && v.indexOf("url(") >= 0) {
+        var out = "", i = 0, j, k, raw, c;
+        while ((j = v.indexOf("url(", i)) >= 0 && (k = v.indexOf(")", j + 4)) >= 0) {
+            raw = v.slice(j + 4, k).trim();
+            c = raw.charAt(0);
+            if ((c === '"' || c === "'") && raw.length > 1 && raw.charAt(raw.length - 1) === c) raw = raw.slice(1, -1);
+            try { raw = new URL(raw, document.baseURI).href; } catch (e) {}
+            out += v.slice(i, j) + "url(" + JSON.stringify(raw) + ")";
+            i = k + 1;
+        }
+        v = out + v.slice(i);
+    }
     if (v === "") el.style.removeProperty(p);
     else el.style.setProperty(p, v, prio);
 });
