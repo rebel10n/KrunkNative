@@ -171,7 +171,8 @@ def run(name, script_lines):
     # shoot button its saved place only in a frame that renders them). strike_screens_e2e.py pins it too.
     # a phone (ui_mobile.c detect_mobile): the touch layer is the in-game input and Customize Controls edits it
     # (strike_touch_layer); a desktop has no shoot button or menu button in game
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
+    # the [strike] / [mm] / [spectate] / console lines reach the log only at level 2 (5f55eef1)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FIXED_DELTA": "16.667",
                 "KRUNKNATIVE_MOBILE": "1"})
