@@ -241,7 +241,8 @@ def main():
     brain_log = os.path.join(WORK, "brain.log")
     proxy = None
     try:
-        procs.append(subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=%d" % brain_port, "--brain.region=local",
+        # --debug=1: the brain\'s "Strike catalogue: ..." readiness line is KN_INFO (level 1 since 5f55eef1)
+        procs.append(subprocess.Popen([BRAIN, "--debug=1", "--brain.host=127.0.0.1", "--brain.port=%d" % brain_port, "--brain.region=local",
                                        "--brain.id=kmt-%d" % os.getpid(), "--accounts.signup_rewards.enabled=false",
                                        "--database.driver=sqlite", "--database.path=" + dbpath, "--migrate",
                                        "--brain.public_url=http://127.0.0.1:%d" % brain_port],
@@ -286,7 +287,8 @@ def main():
             f.write(script)
         log = os.path.join(WORK, "client.log")
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KN_FLAVOR", "KRUNKNATIVE_UI_DIR")}
-        env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+        # the [strike] / [gamepad] / console lines read here are KN_LOG_VERBOSE2 / DEBUG1 since 5f55eef1
+        env.update({"KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                     "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                     "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FIXED_DELTA": "16.667",
                     "KRUNKNATIVE_KRUNKER_MATCHMAKER": "off",

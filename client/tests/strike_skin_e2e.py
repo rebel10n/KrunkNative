@@ -98,7 +98,8 @@ def run_client(name, account, script, brain_port, game_port, timeout=150):
     with open(path, "w") as f:
         f.write(script)
     cfg = os.path.join(WORK, name + "-cfg")
-    folder = os.path.join(cfg, "krunknative")
+    # Krunker Strike keeps its storage (the saved session included) in its own config dir since 41b15773
+    folder = os.path.join(cfg, "krunknative-strike")
     os.makedirs(folder, exist_ok=True)
     for key, value in (("krunker_username", account["name"]), ("krunker_token", account["token"]), ("consent", "1")):
         with open(os.path.join(folder, key + ".json"), "w") as f:
@@ -107,7 +108,8 @@ def run_client(name, account, script, brain_port, game_port, timeout=150):
     # through the coordinator, as the Strike app plays: seek-game hands out the Strike lobby and a join
     # ticket, the JOIN carries the session, the Strike server verifies it with kn_brain
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KN_FLAVOR", "KRUNKNATIVE_UI_DIR")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+    # the [strike] / [gamepad] / console lines read here are KN_LOG_VERBOSE2 / DEBUG1 since 5f55eef1
+    env.update({"KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_NET_TRANSPORT": "tcp",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port,
@@ -180,7 +182,8 @@ def main():
     env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET)
     brain_log, server_log = os.path.join(WORK, "brain.log"), os.path.join(WORK, "server.log")
     try:
-        procs.append(subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=%d" % brain_port, "--brain.region=local",
+        # --debug=1: the brain\'s "Strike catalogue: ..." readiness line is KN_INFO (level 1 since 5f55eef1)
+        procs.append(subprocess.Popen([BRAIN, "--debug=1", "--brain.host=127.0.0.1", "--brain.port=%d" % brain_port, "--brain.region=local",
                                        "--brain.id=kss-%d" % os.getpid(), "--accounts.signup_rewards.enabled=false",
                                        "--database.driver=sqlite", "--database.path=" + dbpath, "--migrate",
                                        "--brain.public_url=http://127.0.0.1:%d" % brain_port],

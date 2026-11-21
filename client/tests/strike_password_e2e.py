@@ -114,7 +114,8 @@ def run_client(name, args, script, timeout=300):
     os.makedirs(cfg, exist_ok=True)
     log = os.path.join(WORK, f"{name}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+    # the [strike] / [gamepad] / console lines read here are KN_LOG_VERBOSE2 / DEBUG1 since 5f55eef1
+    env.update({"KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_FIXED_DELTA": "16.667",
                 "KRUNKNATIVE_WINDOW_SIZE": "%dx%d" % WINDOW})
