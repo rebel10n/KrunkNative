@@ -11,11 +11,12 @@ server), then drives a headless client_bin in brain mode through KRUNKNATIVE_UI_
      seek moves it back to the lobby (the old menu_retry_connect -> servers_ui_retry seek)
   3. `reconnect` (while connected) comes back to that same server
   4. `disconnect` stays disconnected: no seek, no transport retry
-  5. `reconnect` after `disconnect` reaches the same server again; after another `disconnect`
-     the menu's Connect link (after Invite - Join on v10's match bar) opens the Connect window
-     with that server filled in and its button joins it
-  6. the local server goes away: the transport retries with a backoff (2 s, 4 s, ...)
-     and never falls back to the lobby
+  5. `reconnect` after `disconnect` reaches the same server again, where the menu's Connect link
+     sits after Invite - Join on v10's match bar; another `disconnect` shows the Lost Connection
+     screen (ffb6bcef: the menu chrome, match bar included, hides behind it), and the Connect
+     link's handler opens the Connect window with that server filled in; its button joins it
+  6. the local server goes away: the Lost Connection screen (b1d947d5: a lost session is held,
+     never retried behind a loading screen) and never a fall back to the lobby
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -147,7 +148,9 @@ def run():
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "XDG_STATE_HOME": os.path.join(WORK, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UI_CMDS": CMDS, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
-                "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{BRAIN_PORT}"})
+                "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{BRAIN_PORT}",
+                # "[mm] connect window: ..." (servers_ui.c) and the other [mm] lines are KN_LOG_VERBOSE2
+                "KRUNKNATIVE_DEBUG": "2"})
     with open(CLIENT_LOG, "w") as out:
         procs.append(subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin"], stdout=out, stderr=subprocess.STDOUT,
                                       stdin=subprocess.DEVNULL, env=env, start_new_session=True))
@@ -174,10 +177,8 @@ def run():
     mark = con("reconnect")
     check("reconnect after disconnect reaches the same server", wait_for(lambda: after(mark, re.escape(here)), 10.0))
 
-    # the menu's Connect link (servers_ui_menu_setup: after Invite - Join in v10's match bar) opens
-    # the Connect window with the last direct server filled in; its button joins it
-    mark = con("disconnect")
-    wait_for(lambda: after(mark, r"disconnected from server"), 5.0)
+    # the menu's Connect link (servers_ui_menu_setup: after Invite - Join in v10's match bar), measured
+    # while connected: the menu is up
     time.sleep(1.0)
     mark = ui("rect menuBtnConnect")
     ui("rect menuBtnJoin")
@@ -186,7 +187,17 @@ def run():
     c, j = rect_of(bar), rect_of(join)
     check("the Connect link sits after Join on the match bar's line",
           c and j and c[2] > 0 and c[0] > j[0] + j[2] and abs((c[1] + c[3] / 2) - (j[1] + j[3] / 2)) < 2, f"connect {c} join {j}")
-    mark = ui("clickid menuBtnConnect")
+    # a user `disconnect` is the Lost Connection screen ("Disconnected", ffb6bcef), the menu chrome
+    # hidden behind it (menu_apply_chrome); the Connect link's own handler (its onclick) still opens the
+    # Connect window with the last direct server filled in, and its button joins it
+    mark = con("disconnect")
+    wait_for(lambda: after(mark, r"disconnected from server"), 5.0)
+    check("disconnect shows the Lost Connection screen", wait_for(lambda: after(mark, r"error screen: Disconnected"), 5.0))
+    time.sleep(1.0)
+    mark = ui("rect menuBtnConnect")
+    hidden = wait_for(lambda: after(mark, r"\[ui_cmds\] #menuBtnConnect(?: rect|: no box)"), 5.0)
+    check("the match bar hides behind the Lost Connection screen", hidden and "no box" in hidden[-1], "; ".join(hidden or []))
+    mark = ui("ui openConnectWindow()")
     time.sleep(1.0)
     ui("value connectAddr")
     val = wait_for(lambda: after(mark, r"\[ui_cmds\] value connectAddr"), 5.0)
@@ -199,9 +210,11 @@ def run():
     time.sleep(1.0)
     mark = len(client_lines())
     os.killpg(local.pid, signal.SIGKILL)
-    delays = wait_for(lambda: (lambda d: d if len(d) >= 3 else None)(
-        [int(m) for l in after(mark, r"\[net\] retrying") for m in re.findall(r" in (\d+) s", l)]), 30.0) or []
-    check("a dead server is retried with a backoff", delays[:3] == [2, 4, 8], f"delays {delays}")
+    lost = wait_for(lambda: after(mark, r"error screen: Lost connection"), 30.0)
+    check("a dead server is the Lost Connection screen", lost, "; ".join(after(mark, r"disconnected from|error screen")))
+    time.sleep(3.0)
+    check("a lost session is held (no transport retry)", not after(mark, r"\[net\] retrying|connected to server"),
+          "; ".join(after(mark, r"\[net\] retrying|connected to server")))
     check("the dead pinned server never falls back to the lobby", not after(mark, r"\[mm\] joining|" + re.escape(lobby)))
 
 
