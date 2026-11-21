@@ -379,6 +379,7 @@ static void print_usage(const char *program) {
 // (servers_ui.c), so a reload (F5) lands on the same map.
 //   social.html, editor.html, viewer.html boot in that page's app mode (app_mode.c)
 //   ?ws=<url>      WebSocket server URL (see net_web.c)
+//   ?debug=<0-2>   the debug output level (--debug=N / KRUNKNATIVE_DEBUG natively, klog.h); bare ?debug = 1
 static int web_query_flag(const char *name) {
     return EM_ASM_INT({
         var value = null;
@@ -728,6 +729,13 @@ int main(int argc, char **argv) {
     kn_debug_init_env(); // KRUNKNATIVE_DEBUG; a --debug flag on the command line overrides it (klog.h)
 #ifdef __EMSCRIPTEN__
     web_resolve_flavor(); // the web build has no command line: the page picks the flavor
+    char *debug = web_query_string("debug"); // ?debug=N: the page's --debug=N (klog.h)
+    if (debug) {
+        char arg[48];
+        snprintf(arg, sizeof(arg), "--debug=%s", debug);
+        kn_debug_parse_arg(arg, NULL); // a bad value is reported and ignored
+        free(debug);
+    } else if (web_query_flag("debug")) g_kn_debug_level = 1;
 #else
     kn_console_init("client.log"); // client.exe is a GUI-subsystem exe on Windows: the terminal, or a log file
 #endif
