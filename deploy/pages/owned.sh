@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Stage the Pages front end on the owned kru host without changing public ingress.
-# No live DNS writes, no production vhost: 127.0.0.1:18080 only.
+# The krunk.io front end on kru (OWNED_HOST.md). Since the 2026-11-21 cutover the staged release IS
+# production: CT 201 proxies krunk.io to kru :80 (owned-origin.nginx.conf), which serves
+# /opt/krunknative-pages/current, the same tree the 127.0.0.1:18080 stage listener verifies.
+# No DNS writes. KN_OWNED_WEB_DIR = the dist/web to stage (default dist/web; use a CI-approved
+# export's, ~/.cache/kn-ci/<sha12>/deploy/src/dist/web).
 # Usage: deploy/pages/owned.sh stage|publish-stage|verify-stage|snapshot-dns
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -8,6 +11,7 @@ cd "$(dirname "$0")/../.."
 . deploy/pages/site.sh
 : "${KN_OWNED_STAGE_HOST:=kru}"
 : "${KN_OWNED_STAGE_DIR:=dist/owned-pages}"
+: "${KN_OWNED_WEB_DIR:=dist/web}"
 KN_OWNED_STAGE_PREVIOUS="${KN_OWNED_STAGE_PREVIOUS-https://krunk.io/}"
 : "${KN_ASSET_FALLBACK:=dl}"
 ssh_args=(-F deploy/ansible/ssh_config -o BatchMode=yes)
@@ -19,7 +23,7 @@ esac
 stage() {
     local site=()
     mapfile -d '' site < <(kn_site_args)
-    python3 deploy/pages/stage.py dist/web "$KN_OWNED_STAGE_DIR" --target nginx \
+    python3 deploy/pages/stage.py "$KN_OWNED_WEB_DIR" "$KN_OWNED_STAGE_DIR" --target nginx \
         --keep-from "$KN_OWNED_STAGE_PREVIOUS" "${site[@]}"
 }
 
@@ -65,6 +69,11 @@ publish_stage() {
     rsync -rt --checksum --delete --chmod=D755,F644 \
         -e "ssh -F deploy/ansible/ssh_config -o BatchMode=yes" \
         "$KN_OWNED_STAGE_DIR/" "$KN_OWNED_STAGE_HOST:/opt/krunknative-pages/releases/$release/"
+    # Precompressed copies for the origin's gzip_static (owned-origin.nginx.conf): GitHub Pages sent the
+    # 12.7 MB wasm gzipped (~4.3 MB); compressing per request would cost kru a core per cold load.
+    ssh "${ssh_args[@]}" "$KN_OWNED_STAGE_HOST" "find /opt/krunknative-pages/releases/$release -type f -size +1k \\( \
+        -name '*.wasm' -o -name '*.data' -o -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' \
+        -o -name '*.svg' -o -name '*.txt' -o -name '*.webmanifest' \\) -exec gzip -k -9 -n -f {} +"
 
     # The remote config lives only on loopback. Never overwrite a different
     # operator-owned file of the same name, or leave a broken nginx vhost enabled.
