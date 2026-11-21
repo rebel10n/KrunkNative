@@ -760,6 +760,11 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_market_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_market_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_market_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;e2e")
+    # v10.0.7 item styles (style_picker.c: My Inventory's palette -> ist -> item_styles, then SKIN_STYLES on a game join)
+    # and a map's Versions tab (social_ui.c: Revert -> confirm -> POST /maps/:id/versions/:v/revert) through client_bin
+    add_test(NAME item_style_map_revert_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/item_style_map_revert_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(item_style_map_revert_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;e2e")
     # the Junkyard's craft screen from the Store's tile: recipes listed, craft through the confirmation (materials taken, the skin granted), the result popup
     add_test(NAME brain_junkyard_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/junkyard_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

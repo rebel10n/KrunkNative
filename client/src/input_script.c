@@ -113,7 +113,8 @@
 //   100 skindef 10000007 {"name":"x","weapon":6,"_id":"a1","customSound":true}  define store.skins[index] as an "sdc" /
 //                                a custom game's studio skin would (viewer_skin_define; custom skin sound tests)
 //   100 cosm @game               log the store items the menu's class preview and our own player wear
-//                                (hat, body, face, head, back, primary skin, melee: store indices, -1 none)
+//                                (hat, body, face, head, back, primary skin, melee: store indices, -1 none;
+//                                body_style: the server's style of the body item, skin_style_of: -1 unknown)
 //   100 wsel @menu               log what the model build picked on the held slot (weapon, store skin, model /
 //                                texture keys or the hose, tint, sight, charm, wrist) for the menu's class
 //                                preview (who=preview) and our own player (who=me): "[input_script] wsel t=100
@@ -265,6 +266,7 @@
 #include <store_spins.h>   // `wheelrar`
 #include <prize_wheel_render.h>
 #include <wars_banners.h>
+#include <skin_style.h>    // `cosm`: the body item's server style
 #include <cJSON.h>
 #include "viewer/viewer_store.h" // `skindef`: viewer_skin_define
 #include <GLFW/glfw3.h>
@@ -1170,9 +1172,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 fprintf(stderr, "[input_script] cosm t=%.0f %s who=%s -\n", g_script.time, e->arg, names[k]);
                 continue;
             }
-            fprintf(stderr, "[input_script] cosm t=%.0f %s who=%s hat=%d body=%d face=%d head=%d back=%d primary=%d melee=%d\n",
+            fprintf(stderr, "[input_script] cosm t=%.0f %s who=%s hat=%d body=%d face=%d head=%d back=%d primary=%d melee=%d body_style=%d\n",
                     g_script.time, e->arg, names[k], (int) p->cosmetics.hat, (int) p->cosmetics.body, (int) p->cosmetics.face,
-                    (int) p->cosmetics_v7.head, (int) p->cosmetics_v7.back, (int) p->skins.primary, (int) p->skins.melee);
+                    (int) p->cosmetics_v7.head, (int) p->cosmetics_v7.back, (int) p->skins.primary, (int) p->skins.melee,
+                    skin_style_of(p->uid, p->cosmetics.body));
         }
     } else if (!strcmp(e->cmd, "wsel")) {
         // wsel @label: what player_generate_meshes built on the held slot of the menu's class preview

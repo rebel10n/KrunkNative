@@ -498,6 +498,26 @@ def market_scenario(port, path):
           st == 400 and "That style does not exist." in json.dumps(r), "HTTP %d %s" % (st, json.dumps(r)[:160]))
     st, r = http(port, "POST", "/items/7794/style", {"item_id": 7794, "style": 2})
     check("144 POST /items/{id}/style signed out -> 401", st == 401, "HTTP %d" % st)
+    # ownership: the buyer owns no Jerseys (no stack) and may not style the seller's painted copy of them
+    st, r = http(port, "POST", "/items/7794/style", {"item_id": 7794, "style": 2}, b_tok)
+    check("144 POST /items/{id}/style (a stack not owned) -> 400 You don't own that item.",
+          st == 400 and "You don't own that item." in json.dumps(r), "HTTP %d %s" % (st, json.dumps(r)[:160]))
+    seed(path, [("UPDATE inventory SET count = 2 WHERE account_id = ? AND skin_id = ?", (s_id, 7794)),
+                ("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (?, ?, '#dc3c3c', NULL)", (s_id, 7794))])
+    jersey_copy = query(path, "SELECT copy_id FROM skin_copies WHERE account_id = ? AND skin_id = ?", (s_id, 7794))[0][0]
+    st, r = http(port, "POST", "/items/%d/style" % jersey_copy, {"item_id": 7794, "style": 2}, b_tok)
+    check("144 POST /items/{id}/style (another account's copy) -> 400 You don't own that copy.",
+          st == 400 and "You don't own that copy." in json.dumps(r), "HTTP %d %s" % (st, json.dumps(r)[:160]))
+    st, r = http(port, "POST", "/items/%d/style" % jersey_copy, {"item_id": 7803, "style": 2}, s_tok)
+    check("144 POST /items/{id}/style (the copy is another item) -> 400 That copy is not that item.",
+          st == 400 and "That copy is not that item." in json.dumps(r), "HTTP %d %s" % (st, json.dumps(r)[:160]))
+    st, r = http(port, "POST", "/items/%d/style" % jersey_copy, {"item_id": 7794, "style": 7}, s_tok)
+    expect_data("144 POST /items/{id}/style (the owner's copy, style 7)", st, r,
+                lambda d: d.get("copy_id") == jersey_copy and d.get("style") == 7, "{copy_id, item_id, style}")
+    check("144 the buyer's refusals stored nothing; the stack keeps 5 and the copy 7",
+          sorted(query(path, "SELECT account_id, copy_id, style FROM item_styles WHERE skin_id = 7794", ()))
+          == sorted([(s_id, 0, 5), (s_id, jersey_copy, 7)]),
+          repr(query(path, "SELECT account_id, copy_id, style FROM item_styles", ())))
 
     # ---- quick sell (after the trades: the seller holds one skin 0 again)
     st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 1, "amount": 0}, s_tok)
