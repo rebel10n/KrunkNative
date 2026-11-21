@@ -128,10 +128,11 @@
     "_secrets_comment": "secrets_key: the key material of the sealed link tokens (Twitch, Discord; kn_seal AES-256-GCM, doc/v10/oauth-provider.md). Empty = brain.join_secret. Changing it makes stored link tokens unreadable (Discord asks to relink, Twitch drops ask to reconnect). Put it only in your gitignored config.json.",
     "secrets_key": "",
     "discord": {
-      "_comment": "v10.0.7's Discord link (services/brain/discord.c). client_id + client_secret turn linking on (empty = v10's unavailable row); bot_token + guild_id turn on Join Server (the bot needs Create Instant Invite in the server); guild_url is Open Server. redirect_uri empty = <brain.public_url>/discord/callback (register it in the Discord app). return_origins: the web build's origins a link may return to. Secrets only in your gitignored config.json.",
+      "_comment": "v10.0.7's Discord link (services/brain/discord.c). client_id + client_secret turn linking on (empty = v10's unavailable row); bot_token + guild_id turn on Join Server (the bot needs Create Instant Invite in the server); guild_url is Open Server. redirect_uri empty = <brain.public_url>/discord/callback (register it in the Discord app). state_prefix goes before the state sent to Discord and is taken off at /discord/callback, so a redirect_uri borrowed from another site can be forwarded by prefix. return_origins: the web build's origins a link may return to. Secrets only in your gitignored config.json.",
       "client_id": "",
       "client_secret": "",
       "redirect_uri": "",
+      "state_prefix": "",
       "bot_token": "",
       "guild_id": "",
       "guild_url": "",

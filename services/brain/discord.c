@@ -60,6 +60,10 @@ static struct {
     char client_id[128], client_secret[256], redirect_uri[512];
     char bot_token[256], guild_id[64], guild_url[256];
     char authorize_url[256], api_url[256];
+    /* accounts.discord.state_prefix: put before the state sent to Discord, taken off at the callback. A
+     * redirect_uri that is another site's registered callback (the app's list is portal-only) can then be
+     * shared: that host's edge sends a state with this prefix on to /discord/callback (OWNED_HOST.md). */
+    char state_prefix[32];
     char origins[MAX_ORIGINS][256]; /* returnTo must start with one of them */
     int norigins;
     char seal[256];
@@ -448,8 +452,8 @@ static void link_state_done(kn_db_result *res, void *ud) {
 #ifdef KN_HAVE_CURL
     char *cid = curl_easy_escape(NULL, D.client_id, 0), *redir = curl_easy_escape(NULL, D.redirect_uri, 0);
     char url[1400];
-    snprintf(url, sizeof url, "%s?response_type=code&client_id=%s&scope=identify%%20guilds.join&redirect_uri=%s&state=%s&prompt=consent",
-             D.authorize_url, cid, redir, c->nonce);
+    snprintf(url, sizeof url, "%s?response_type=code&client_id=%s&scope=identify%%20guilds.join&redirect_uri=%s&state=%s%s&prompt=consent",
+             D.authorize_url, cid, redir, D.state_prefix, c->nonce);
     curl_free(cid);
     curl_free(redir);
     cJSON *d = cJSON_CreateObject();
@@ -640,11 +644,13 @@ static void h_callback(kn_http_req *req, void *ud) {
         job_free(j);
         return finish_callback(req, NULL, "unavailable");
     }
-    if (!state[0]) {
+    const size_t np = strlen(D.state_prefix);
+    const char *nonce = np && !strncmp(state, D.state_prefix, np) ? state + np : state;
+    if (!nonce[0]) {
         job_free(j);
         return finish_callback(req, NULL, "expired");
     }
-    kn_db_call(D.b->db, &P_DC_STATE_TAKE, KN_DB_ARGS(state), state_taken, j);
+    kn_db_call(D.b->db, &P_DC_STATE_TAKE, KN_DB_ARGS(nonce), state_taken, j);
 }
 
 /* ================================================================== POST /discord/join */
@@ -848,6 +854,7 @@ int discord_init(Brain *b) {
     copy_str(D.guild_url, sizeof D.guild_url, kn_config_str(cfg, "accounts.discord.guild_url", ""));
     copy_str(D.authorize_url, sizeof D.authorize_url, kn_config_str(cfg, "accounts.discord.authorize_url", "https://discord.com/oauth2/authorize"));
     copy_str(D.api_url, sizeof D.api_url, kn_config_str(cfg, "accounts.discord.api_url", "https://discord.com/api/v10"));
+    copy_str(D.state_prefix, sizeof D.state_prefix, kn_config_str(cfg, "accounts.discord.state_prefix", ""));
     D.timeout_ms = (int) kn_config_int(cfg, "accounts.discord.timeout_ms", 10000);
     char def[512];
     snprintf(def, sizeof def, "%s/discord/callback", mm_settings()->public_url);

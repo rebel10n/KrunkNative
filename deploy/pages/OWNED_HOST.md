@@ -225,3 +225,24 @@ deploy/pages/owned.sh verify-stage
 Rollback of public ingress should preserve other CT 201 service names.
 GitHub's DNS answer alone is insufficient for rollback if its Pages custom
 domain or repository settings have meanwhile been removed.
+
+## Discord link (borrowed callback)
+
+The Discord app the brain uses ("Meal") belongs to abulxt's Discord account, and an app's redirect
+list can be edited only in its owner's Developer Portal (Discord's API cannot change it). Its list has
+`https://abstracteducation.loan/api/account/discord/callback`, a name divide's edge relay serves, so
+the link borrows it:
+
+- kn_brain (`kn_brain_discord_redirect_uri`, `kn_brain_discord_state_prefix` in
+  `deploy/ansible/roles/kn_brain/defaults/main.yml`) sends that `redirect_uri` and a state starting
+  `kbo-`, and uses the same `redirect_uri` for the token exchange; `/discord/callback` takes the prefix
+  off before looking the state up (`services/brain/discord.c`).
+- CT 201's `00-edge-relay.conf` (Fracital/infra `roles/edge_relay/templates/byod-edge.conf.j2`, map
+  `$kn_discord_bounce`) answers a callback for that host whose state starts `kbo-` with
+  `302 https://coordinator.krunk.io/discord/callback?<the same query>`; every other callback still
+  goes to abulxt. Applied live 2026-11-21 (backup `/root/00-edge-relay.conf.pre-kbo-discord` on CT 201).
+- Check: `curl -sI 'https://abstracteducation.loan/api/account/discord/callback?code=x&state=kbo-x'`
+  must 302 to the coordinator, and a state without `kbo-` must not.
+- If the owner ever registers `https://coordinator.krunk.io/discord/callback` in the portal, set
+  `kn_brain_discord_redirect_uri: ""` and `kn_brain_discord_state_prefix: ""` (the brain's default
+  `<public_url>/discord/callback`) and drop the edge map.

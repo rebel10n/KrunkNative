@@ -68,6 +68,8 @@ class Fake(BaseHTTPRequestHandler):
         if self.path == "/discord/oauth2/token":
             if form.get("client_id") != "dc-id" or form.get("client_secret") != "dc-secret":
                 return self.reply(401, {"error": "invalid_client"})
+            if form.get("grant_type") == "authorization_code" and form.get("redirect_uri") != BORROWED:
+                return self.reply(400, {"error": "invalid_grant", "error_description": "Invalid \"redirect_uri\" in request."})
             if form.get("grant_type") == "authorization_code" and form.get("code", "").startswith("good-"):
                 uid = form["code"][5:]
                 tok = "dat-%s-%s" % (uid, secrets.token_hex(4))
@@ -228,6 +230,12 @@ async def register(name, password):
         return r[2], r[5]
 
 
+# the production setup (deploy/ansible kn_brain_discord_*): another site's registered callback, whose edge sends a
+# state with the prefix on to /discord/callback; the token exchange must name that same redirect_uri
+BORROWED = "https://abulxt.example/api/account/discord/callback"
+PREFIX = "kbo-"
+
+
 def state_of(url):
     return urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("state", [""])[0]
 
@@ -245,8 +253,9 @@ def discord(me, tok, other_tok):
     url = ((r or {}).get("data") or {}).get("url", "")
     q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     check(st == 200 and url.startswith("http://127.0.0.1:%d/discord/oauth2/authorize?" % FAKE_PORT) and q.get("client_id") == ["dc-id"]
-          and q.get("scope") == ["identify guilds.join"] and q.get("redirect_uri") == ["http://127.0.0.1:%d/discord/callback" % PORT]
-          and len(q.get("state", [""])[0]) >= 40, "link: the authorize URL (client, scopes, redirect, state)")
+          and q.get("scope") == ["identify guilds.join"] and q.get("redirect_uri") == [BORROWED]
+          and q.get("state", [""])[0].startswith(PREFIX) and len(q.get("state", [""])[0]) >= 40 + len(PREFIX),
+          "link: the authorize URL (client, scopes, the configured redirect, the prefixed state)")
     state = state_of(url)
     st, h, page = req("GET", "/discord/callback?error=access_denied&state=" + state)
     check(st == 400 and "cancelled" in str(page) and "location" not in h, "callback error=access_denied: cancelled, no redirect to a foreign returnTo")
@@ -407,6 +416,7 @@ def main():
                                      "--brain.public_url=http://127.0.0.1:%d" % port, "--brain.id=kln-%d" % os.getpid(),
                                      "--accounts.login_throttle_s=0", "--accounts.secrets_key=links-test-key",
                                      "--accounts.discord.client_id=dc-id", "--accounts.discord.client_secret=dc-secret",
+                                     "--accounts.discord.redirect_uri=" + BORROWED, "--accounts.discord.state_prefix=" + PREFIX,
                                      "--accounts.discord.bot_token=bot-tok", "--accounts.discord.guild_id=G1",
                                      "--accounts.discord.guild_url=https://discord.gg/kbo-test",
                                      "--accounts.discord.api_url=" + f + "/discord", "--accounts.discord.authorize_url=" + f + "/discord/oauth2/authorize",

@@ -62,6 +62,11 @@ kn_brain_discord_guild_id: "{{ lookup('ansible.builtin.env', 'KN_DISCORD_GUILD_I
 # Open Server (accounts.discord.guild_url, not a secret): Box Office's Discord, the invite the game
 # servers' billboard shows (group_vars/edges kn_gameserver_billboard).
 kn_brain_discord_guild_url: "https://discord.gg/RqnSxVtUyk"
+# The Meal app (owned by abulxt's Discord account) lists only abulxt callbacks and its list is portal-only:
+# borrow abstracteducation.loan's, which divide's edge relay serves; Fracital/infra byod-edge.conf.j2 sends
+# a state with this prefix on to coordinator.krunk.io/discord/callback. Empty redirect = <public_url>/discord/callback.
+kn_brain_discord_redirect_uri: "https://abstracteducation.loan/api/account/discord/callback"
+kn_brain_discord_state_prefix: "kbo-"
 # accounts.region_index: each game region (registry.c code or ping id) -> its config.socialRegions
 # index (0 = all, services/brain/leaderboards.c), the leaderboard region filter.
 # Same map as config/config.example.json; a region missing here gets no index.

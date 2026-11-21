@@ -35,7 +35,10 @@
     "region_index": {{ kn_brain_region_index | to_json }},
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} },
     "_comment_discord": "v10.0.7's Discord link (services/brain/discord.c): client_id / client_secret / bot_token / guild_id come from {{ kn_etc_dir }}/discord.env (KN_ACCOUNTS_DISCORD_*, role kn_brain), never this file; redirect_uri empty = <brain.public_url>/discord/callback.",
+    "_comment_discord_redirect": "The Discord app's redirect list is edited only in its owner's Developer Portal, so the link borrows a callback already on it (kn_brain_discord_redirect_uri); that host's edge relay sends a state starting with state_prefix on to <public_url>/discord/callback (deploy/pages/OWNED_HOST.md \"Discord link\").",
     "discord": {
+      "redirect_uri": {{ kn_brain_discord_redirect_uri | to_json }},
+      "state_prefix": {{ kn_brain_discord_state_prefix | to_json }},
       "guild_url": {{ kn_brain_discord_guild_url | to_json }},
       "return_origins": {{ kn_web_origins | to_json }}
     }
