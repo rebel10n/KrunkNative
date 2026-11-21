@@ -208,7 +208,9 @@ def run(name, deadline, expect, transport=None, stub_pings=None, kill_server=Fal
         env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(base, "cfg"),
                     "XDG_STATE_HOME": os.path.join(base, "state"), "KRUNKNATIVE_NO_BROWSER": "1",
                     "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_FINDER_URL": "off", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "off",
-                    "KRUNKNATIVE_UI_CMDS": cmds, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                    "KRUNKNATIVE_UI_CMDS": cmds, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                    # the console's lines (and [mm]/[sandbox] logs) reach the log only at level 2 (5f55eef1)
+                    "KRUNKNATIVE_DEBUG": "2",})
         args = [CLIENT, "--finder", "off"]
         if matched:
             # matched through the stub matchmaker: the launch seek (Auto Seek on Launch, on by default) joins its lobby

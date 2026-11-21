@@ -159,6 +159,8 @@ def client(name, brain_port, script, storage, secs=90):
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_INPUT_SCRIPT": path,
                 "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                # the console's lines (and [mm]/[sandbox] logs) reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),

@@ -50,7 +50,9 @@ def run(name, script, timeout=150):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": CFG,
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "XDG_DOWNLOAD_DIR": DOWNLOADS,
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_UI_DIR": UI_DIR,
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                # "[ui] setting" / "[render] setting" / "[ui] Quickplay" reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2"})
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline"], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)

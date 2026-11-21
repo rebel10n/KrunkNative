@@ -1792,7 +1792,9 @@ def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), s
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, label + "-cfg"), "XDG_STATE_HOME": os.path.join(WORK, label + "-state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_WINDOW_SIZE": "960x540", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % mm,
-                "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
+                "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off",
+                # the link's "[krunker] ..." events, "[mm]" and "[console]" lines reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2"})
     if display:
         env["DISPLAY"] = display  # a private Xvfb of the test's own (the challenge webview runs; the game stays headless)
     # the live Krunker build's cache stays in the run (krunker_build_fetch.h); a stub publishing a build names it
