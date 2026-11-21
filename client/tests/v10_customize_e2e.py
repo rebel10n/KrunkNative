@@ -2,7 +2,8 @@
 """The v10 Customize / Loadout / Titles / Store flow end to end (client/src/ui/v10_customize.c,
 store_ui.c) on a real kn_brain (sqlite, temp dir) and server_bin:
 
-  a guest's locked classes and Acog Scope -> register -> the Acog Scope locked at class level 1, open
+  a guest's open classes (every class opens off official krunker.io games since 8de2fe8c) and locked
+  Acog Scope -> register -> the Acog Scope locked at class level 1, open
   at 20 -> the Customize tab of Change Loadout (windows[2] tab 2) -> the Hat picker (the shell
   wraps it, goBackWindow(52)) -> equip a granted hat -> Title window (windows[53]: the catalogue
   with every title locked, a locked pick does not equip) -> the Store on the v10 layout
@@ -82,6 +83,23 @@ def count(log, label):
     return int(m.group(1)) if m else -1
 
 
+def seed_session(brain_url, name, password):
+    """The signed-in runs resume NAME's session. A sign-in is stored only for an account the Account Manager
+    lists (account_ui.c persist_session, since c7f73bd4 / f6d4a040), so the native form's sign-in does not
+    survive the client; the legacy krunker_username / krunker_token keys do: load_session moves them into the
+    alt vault (the file keystore in headless runs). The token comes from the brain's /auth/login."""
+    req = urllib.request.Request(brain_url + "/auth/login", data=json.dumps({"username": name, "password": password}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        token = json.loads(r.read()).get("token", "")
+    folder = os.path.join(WORK, "cfg", "krunknative")
+    os.makedirs(folder, exist_ok=True)
+    for key, value in (("krunker_username", name), ("krunker_token", token)):
+        with open(os.path.join(folder, key + ".json"), "w") as f:
+            f.write(value)
+    return bool(token)
+
+
 def storage(key):
     try:
         with open(os.path.join(WORK, "cfg", "krunknative", key + ".json")) as f:
@@ -106,7 +124,9 @@ def db(path, sql, args=()):
 
 
 def scenario(brain_url, game_port, dbpath):
-    # 0. a guest online: the Class tab locks the classes that need a level (v10 req _34270)
+    # 0. a guest online: the Class tab opens every class. v10 locks a class below its level (req _34270), but
+    #    Box Office only does that in an official krunker.io game (8de2fe8c, ui_loadout.c gen_tab_class), which
+    #    this local brain + server_bin cannot host.
     log = run_client("guest", """0 menu
 1500 call showWindow 3
 2500 clicksel [onclick*="tabIndex=0"]
@@ -118,8 +138,8 @@ def scenario(brain_url, game_port, dbpath):
 4600 rects @acogopen [onclick*="selectAttachment(1)"]
 4700 quit
 """, brain_url, game_port)
-    check("guest: every class but the level-0 ones is locked (Register to unlock)",
-          count(log, "locked") >= 10 and count(log, "locked") < count(log, "cards"), "locked=%d cards=%d" % (count(log, "locked"), count(log, "cards")))
+    check("guest on a Box Office server: every class is open (no Register to unlock)",
+          count(log, "locked") == 0 and count(log, "cards") >= 10, "locked=%d cards=%d" % (count(log, "locked"), count(log, "cards")))
     # v10 "Acog Scope": minRec 20 on the class level (stats.c<class>), devs exempt (v10.js:178106)
     check("guest: Select Attachment locks the Acog Scope (None, Reflex Sight, a locked Acog)",
           count(log, "attach") == 3 and count(log, "acoglock") == 1 and count(log, "acogopen") == 0,
@@ -140,6 +160,7 @@ def scenario(brain_url, game_port, dbpath):
 5000 quit
 """ % (NAME, PASS, NAME), brain_url, game_port)
     check("register through the native form", f"[account] logged in as {NAME}" in log)
+    check("the account's session is seeded for the next runs", seed_session(brain_url, NAME, PASS))
     db(dbpath, "UPDATE players SET player_funds = 2000 WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,))
     db(dbpath, "INSERT INTO inventory (account_id, skin_id, count) SELECT id, ?, 1 FROM accounts WHERE username = ?",
        (GRANTED, NAME))
