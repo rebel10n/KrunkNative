@@ -2838,11 +2838,12 @@ def run_native_lobby():
               # the KRUNKER.IO group (the last one) opened: its rows' titles
               "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
               "3180 grep @kioMap %s .settNameIn\n"
-              "3200 call krunkerJoin \"%s\"\n3210 vis @curtain loadingBg\n3230 vis @curtain loadingBg\n3260 vis @curtain loadingBg\n3300 text @loading [id=loadGamNm]\n"
+              "3200 call krunkerJoin \"%s\"\n3210 style @curtain instructionsFadeBG:opacity\n3230 style @curtain instructionsFadeBG:opacity\n"
+              "3260 style @curtain instructionsFadeBG:opacity\n3300 text @loading [id=loadGamNm]\n"
               "4500 vis @modal turnstileHolder\n"
               "6200 text @toast1 [id=knNotify]\n"
               "8000 play\n12800 text @toast2 [id=knNotify]\n"
-              "12900 vis @curtain2 loadingBg\n13000 players\n"
+              "12900 style @curtain2 instructionsFadeBG:opacity\n13000 players\n"
               # in the official game: the Invite link is krunker.io's, the serverinfo and the menu's region
               # label name the official lobby (its list row: region, map, mode, players)
               "13050 con status\n13100 call copyInviteLink\n13150 text @region [id=menuRegionLabel]\n13200 quit\n"
@@ -2855,9 +2856,12 @@ def run_native_lobby():
     check(f"{label}: the krunker.io status line is empty: its lobbies are listed and join here", st and not st.group(1).strip(),
           st.group(1) if st else None)
     loading = re.search(r"\[input_script\] text t=\d+ @loading n=1 .*?text=(.*)", text)
+    # the curtain is #instructionsFadeBG at opacity 1 (menu_boot_arm); #loadingBg is the map card since v10.0.4,
+    # which an in-place switch leaves hidden (33e04c28, menu_ui.c), so it is not probed here
     check(f"{label}: the click raises v10's loading screen with the lobby's map (Loading {MAP_NAME} ...)",
-          loading and loading.group(1).strip() == f"Loading {MAP_NAME} ..." and "@curtain loadingBg=1" in text, loading.group(1) if loading else None)
-    check(f"{label}: the official game's INIT lifts it", "@curtain2 loadingBg=0" in text, re.findall(r"@curtain2 \S+", text))
+          loading and loading.group(1).strip() == f"Loading {MAP_NAME} ..." and "@curtain instructionsFadeBG:opacity=1" in text,
+          (loading.group(1) if loading else None, re.findall(r"@curtain \S+", text)))
+    check(f"{label}: the official game's INIT lifts it", "@curtain2 instructionsFadeBG:opacity=0" in text, re.findall(r"@curtain2 \S+", text))
     check(f"{label}: no \"can't be joined\" text anywhere", not re.search(r"can.t be joined|cannot be joined|can.t join krunker", text))
     rows = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
     check(f"{label}: the krunker.io group is listed with its Quick Join (main's group header)", rows and int(rows.group(1)) >= 1, rows.group(0) if rows else None)
@@ -4898,7 +4902,7 @@ def run_web(mode):
         cdp.send("Page.enable")
         cdp.intercept = (TURNSTILE_URL, turnstile_stub(mode))
         cdp.send("Fetch.enable", {"patterns": [{"urlPattern": TURNSTILE_URL + "*"}]})
-        url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
+        url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1&debug=2" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
         cdp.send("Page.navigate", {"url": url})
         modal_js = ("(() => { const h = document.getElementById('turnstileHolder'); if (!h) return null;"
                     " const w = document.getElementById('knTurnstileHolder');"
@@ -4909,8 +4913,8 @@ def run_web(mode):
         while time.time() < end and not stub.captcha_ok.is_set():
             time.sleep(0.25)
             st = cdp.eval(modal_js)
-            if st and st.get("shown"):
-                seen_modal = seen_modal or dict(st)
+            if st and st.get("shown") and not (seen_modal or {}).get("widget"):
+                seen_modal = dict(st)  # the holder can show a frame before the widget is in it: keep sampling until it is
             if mode != "ok" and seen_modal and not (st or {}).get("shown") and sum(1 for pth, _, _ in stub.http_log if pth == "/seek-game") >= 2:
                 time.sleep(2.0)  # the second refusal ends the join: its failure is on the error screen
                 break
@@ -4964,6 +4968,10 @@ def run_web(mode):
                 sample_timer()
                 check("web: the HUD match timer counts down (#timerVal)",
                       len(timer_samples) >= 2 and timer_samples[0] > 0 and timer_samples[-1] < timer_samples[0], timer_samples)
+                # check_run wants >= 20 "q" windows: a loaded host's page ticks slower than the fixed sleeps above
+                end = time.time() + 30
+                while time.time() < end and sum(1 for f in list(stub.frames) if f[0] == "q") < 20:
+                    time.sleep(0.25)
         lines = list(cdp.console)
         cdp.ws.close()
     finally:
@@ -5018,7 +5026,7 @@ def run_web_voice():
         cdp.send("Page.enable")
         cdp.intercept = (TURNSTILE_URL, turnstile_stub("ok"))
         cdp.send("Fetch.enable", {"patterns": [{"urlPattern": TURNSTILE_URL + "*"}]})
-        url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1&voicelog=1" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
+        url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1&voicelog=1&debug=2" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
         cdp.send("Page.navigate", {"url": url})
         stub.captcha_ok.wait(120)
         end = time.time() + 150
@@ -5205,15 +5213,16 @@ def main():
             run_native_webview()
             run_native_webview_interactive()
             ran = True
-    if ONLY in ("", "web") and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):
+    web_ok = DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm"))
+    if ONLY in ("", "web") and web_ok:
         run_web("ok")
         run_web("110200")
         run_web_voice()
         ran = True
-    if ONLY == "webvoice" and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):  # just the web voice run
+    if ONLY == "webvoice" and web_ok:  # just the web voice run
         run_web_voice()
         ran = True
-    elif ONLY == "web":
+    elif ONLY in ("web", "webvoice") and not web_ok:
         print("krunker_official_e2e: the web run needs Chromium and a web build (WEB_DIST_DIR): skipped")
     if not ran or (ONLY == "webview" and webview_skipped):
         return 77

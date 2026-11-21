@@ -128,6 +128,9 @@ int krunker_net_invite_link(char *out, size_t n);
 // session follows); else the error screen shows it.
 void krunker_net_leave(Client *client, const char *reason);
 int krunker_net_active(void);      // the mode owns the connection (seeking, connecting, open or dropped)
+// The v10 GameObject uid of the official game's map object `index` (map->objects), as the link translates it
+// (krunker_link_world.c, map_game_uids.h); `index` itself without an official game or a table, -1 for none.
+int krunker_net_game_uid(int index);
 // The krunker.io account the official game server signed in on this session ("a" ACCOUNT_RESPONSE,
 // v10's _67362 there): 1 = one is (out filled), 0 = a guest or no official session (out zeroed).
 typedef struct {

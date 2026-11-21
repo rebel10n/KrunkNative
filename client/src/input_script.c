@@ -259,6 +259,7 @@
 #include <ks_client.h>         // `poses`: the attached script objects per pass
 #include <ui_mobile.h>  // `touch`: the phone touch controls
 #include <ai.h>           // `world`: the AI list
+#include <krunker_net.h>   // `world`: krunker_net_game_uid (an official game's object uids)
 #include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE; `ranked`: NET_EXT_KN_RANKED_MATCH
 #include <lobby_ui.h>     // `ranked`: comp_ui_round (the comp menu an INIT opens)
 #include <s2c_events.h>   // `wars` / `spinw`: the EXT handler
@@ -1127,7 +1128,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
         for (size_t i = 0, n = 0; game->map && i < game->map->object_count; i++) {
             if (!game->map->objects[i]->destroyed) continue;
             destroyed++;
-            if (i < 16 && n + 4 < sizeof(low)) n += (size_t) snprintf(low + n, sizeof(low) - n, "%s%zu", n ? "," : "", i); // the uids below 16
+            // the uids below 16: an official game's are v10's GameObject numbering (krunker_net_game_uid), not map->objects'
+            const int uid = krunker_net_game_uid((int) i);
+            if (uid >= 0 && uid < 16 && n + 4 < sizeof(low)) n += (size_t) snprintf(low + n, sizeof(low) - n, "%s%d", n ? "," : "", uid);
         }
         const int ais = game->ready ? game_ai_active_count(game, 0) : 0;
         for (int i = 0; i < AIRDROP_MAX; i++) drops += game->zombies.drops[i].active;

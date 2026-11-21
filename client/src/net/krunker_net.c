@@ -1987,6 +1987,13 @@ void krunker_net_attach(Client *client) {
 
 int krunker_net_active(void) { return K.state != KS_OFF; }
 
+int krunker_net_game_uid(const int index) {
+    pthread_mutex_lock(&K.lock);
+    const int uid = K.state != KS_OFF ? map_game_uid_of_index(&K.link.uids, index) : index;
+    pthread_mutex_unlock(&K.lock);
+    return uid;
+}
+
 int krunker_net_account(KrunkerNetAccount *out) {
     memset(out, 0, sizeof(*out));
     pthread_mutex_lock(&K.lock);
