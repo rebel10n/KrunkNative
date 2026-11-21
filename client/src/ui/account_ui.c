@@ -607,13 +607,16 @@ const AccountInfo *active_account(void) {
     return account_backend() == ACCOUNT_BACKEND_KRUNKER ? kio_account() : krunkio_account();
 }
 
-// What the UI last followed: the backend, the krunk.io login and the krunker.io account's state
+// What the UI last followed: the backend, the krunk.io login and the krunker.io account's state. `identity` moves only
+// when the account itself changes (active_changed); `generation` also when the same account's data moves (data_only).
 static struct {
     int backend, kn_logged_in, kio_signed_in;
-    unsigned kio_gen, kio_data_gen, generation;
+    unsigned kio_gen, kio_data_gen, generation, identity;
+    char kio_name[64];
 } g_active = {.backend = -1};
 
 unsigned account_active_generation(void) { return g_active.generation; }
+unsigned account_active_identity(void) { return g_active.identity; }
 
 // One no-argument social frame (v10 "ttl": the account's titles; v10_customize.c). The frame
 // goes through the same queue as the mail frames (backend_social_send_text).
@@ -2113,6 +2116,7 @@ static void email_html(StrBuf *sb) {
 // sign-in or sign-out): everything that shows the account follows at once, as after a login.
 static void active_changed(void) {
     g_active.generation++;
+    g_active.identity++;
     battlepass_ui_reset(); // windows[5].data, account.BP: the other account's
     clan_ui_reset();       // clanData: the other account's
     apply_menu_name();
@@ -2140,11 +2144,16 @@ static void active_tick(void) {
     g_active.backend = backend;
     // a krunker.io game: nothing done under its account reaches the krunk.io account (backend.h)
     backend_social_hold(backend == ACCOUNT_BACKEND_KRUNKER);
+    // the same krunker.io account's data moved (the game server's row, or v10's own balance change after a ranked claim /
+    // purchase, krunker_account_add_points): the account is the same one, so nothing of it is reset or dropped
+    const char *kio_name = kio ? krunker_account_name() : "";
+    const int data_only = !first && backend == ACCOUNT_BACKEND_KRUNKER && kio && kio == g_active.kio_signed_in &&
+                          g_logged_in == g_active.kn_logged_in && !strcmp(kio_name, g_active.kio_name) &&
+                          (g_active.kio_data_gen != g_kio.gen || kio_gen != g_active.kio_gen);
     g_active.kn_logged_in = g_logged_in;
     g_active.kio_signed_in = kio;
     g_active.kio_gen = kio_gen;
-    const int data_only = !first && backend == ACCOUNT_BACKEND_KRUNKER && g_active.kio_data_gen != g_kio.gen && kio_gen == g_active.kio_gen &&
-                          kio == g_active.kio_signed_in;
+    snprintf(g_active.kio_name, sizeof(g_active.kio_name), "%s", kio_name);
     g_active.kio_data_gen = g_kio.gen;
     if (data_only) { // the krunker.io account's KR / skins / stats moved: the header and the open window follow
         g_active.generation++;
@@ -2153,7 +2162,10 @@ static void active_tick(void) {
         return;
     }
     if (!first) active_changed();
-    else g_active.generation++;
+    else {
+        g_active.generation++;
+        g_active.identity++;
+    }
 }
 
 void account_ui_tick(Client *client) {

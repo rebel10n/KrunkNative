@@ -513,8 +513,9 @@ SCRIPTS = {
 28000 text @kiolevel [id=knV10Level]
 28100 text @menurpsess [id=menuRPCount]
 36000 call knRkBuy 7
-36300 text @neterr .error-popup-container
 36500 call knViewPop 1
+37500 text @neterr .error-popup-container
+37700 call knViewPop 1
 38000 quit
 """,
     "kio_cooldown": """0 menu
@@ -714,10 +715,13 @@ def check_kio_match(text, entries, token):
             check("kio_match: " + label, bool(hit), str(paths)[:200])
         else:
             check("kio_match: " + label, any(re.search(pattern, p) for p in paths), str(paths)[:300])
-    # the krunker.io Store is read-only in Box Office (kio_store.c kio_store_read_only, the ranked buy: ranked_ui.c): a
-    # purchase is shown and never sent, so the fake's purchase route is not reached
+    # purchases are on (b77ede1d): each confirmed Buy POSTs v10's purchaseSkin({skin_id: the shop row's id})
+    # (deob-10.0.7.js:113364-113366). Three buys: two answered, the fake drops the third. The second follows a milestone
+    # claim, whose balance change must not drop the cached shop (else "Item not found in shop" and no POST).
     sent = [e for e in api if e["p"] == "/gapi/ranked/purchase"]
-    check("kio_match: a purchase is never sent to krunker.io (read-only Store, kio_store.c)", not sent, str([(e["m"], e["body"]) for e in sent])[:200])
+    check("kio_match: every confirmed purchase is sent to krunker.io (3 POSTs of {\"skin_id\":7}, v10 purchaseSkin)",
+          len(sent) == 3 and all(e["m"] == "POST" and json.loads(e["body"] or "{}") == {"skin_id": 7} for e in sent),
+          str([(e["m"], e["body"]) for e in sent])[:200])
     season = str(current_season())
     seasons = {"profile": None, "leaderboard": None, "history": None}
     for e in api:
@@ -760,10 +764,12 @@ def check_kio_match(text, entries, token):
           text_of(text, "rpafter").endswith("text=" + "{:,}".format(WALLET_TEST)), text_of(text, "rpafter")[:60])
     check("kio_match: a refused claim shows nothing (no .text-error popup, v10:98757-98764)", nodes(text, "claimerr") == 0,
           str(nodes(text, "claimerr")))
-    check("kio_match: a purchase shows the read-only notice (krunker.io Store: never buys; kio_store_read_only_text)",
-          "never buys" in text_of(text, "neterr"), text_of(text, "neterr")[:120])
-    moved = WALLET_TEST + MILESTONE_REWARD  # the read-only purchase takes nothing off the balance (SKIN_PRICE stays on the shop row)
-    check("kio_match: a claim adds the milestone's reward and a purchase leaves the balance (read-only Store): %d"
+    # a request that throws (the fake closes the third purchase's connection unanswered) is v10's "Network error"
+    # (deob-10.0.7.js:113385-113388), shown in the error popup (:113543-113545)
+    check("kio_match: a purchase with no answer shows Network error (v10's thrown request)",
+          "Network error" in text_of(text, "neterr"), text_of(text, "neterr")[:120])
+    moved = WALLET_TEST + MILESTONE_REWARD - SKIN_PRICE  # v10: rankedPoints += reward (claim), -= price (purchase, :113367)
+    check("kio_match: a claim adds the milestone's reward and a purchase takes the price off the balance: %d"
           % moved, text_of(text, "rpmoved").endswith("text=" + "{:,}".format(moved)), text_of(text, "rpmoved")[:60])
     check("kio_match: the account row's level is row[6]'s score (level 20): the krunker.io account's header says Lv 20",
           text_of(text, "kiolevel").endswith("Lv 20"), text_of(text, "kiolevel")[:120])

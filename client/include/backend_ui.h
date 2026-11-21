@@ -60,7 +60,8 @@ typedef enum {
 AccountBackend account_backend(void);
 const AccountInfo *active_account(void);    // the active backend's account, NULL = guest (Krunker `acc == null`)
 const AccountInfo *krunkio_account(void);   // the krunk.io account whatever the active backend (NULL = guest)
-unsigned account_active_generation(void);   // bumped when the active account changes (backend switch, sign-in / out)
+unsigned account_active_generation(void);   // bumped when the active account changes (backend switch, sign-in / out) or its data moves
+unsigned account_active_identity(void);     // bumped only when the active account itself changes (not its balance or row)
 // The krunk.io session token while krunk.io is the active backend, "" otherwise (or none saved).
 const char *account_session_token(void);
 int  account_ui_logout(void);               // logoutAcc (menu Logout, console `logout`): 1 logged out, 0 guest

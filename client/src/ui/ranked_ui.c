@@ -1762,6 +1762,7 @@ static void shop_expired(void *user) {
         memset(&g_kio[i], 0, sizeof(g_kio[i]));
     }
     v10_forget("/mm/ranked/shop");   // the brain's
+    kio_store_ranked_shop_expire();  // a krunker.io account's (get_shop reads kio_store_ranked_shop)
     v10_refresh();
 }
 

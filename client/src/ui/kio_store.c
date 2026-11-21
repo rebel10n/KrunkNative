@@ -88,7 +88,7 @@ static int scenario_active(void) {
 // a sign-in / out or a backend switch: the shop store is the old account's (v10 logout: _38964)
 static void sync_gen(void) {
     if (scenario_active()) return; // --render-scenario: state.kioStore's answers stay
-    const unsigned g = account_active_generation();
+    const unsigned g = account_active_identity(); // another account; its own balance moving keeps the answers (a ranked claim)
     if (g == g_gen) return;
     g_gen = g;
     for (int i = 0; i < SLOTS; i++) slot_clear(&g_slot[i]);
@@ -213,6 +213,11 @@ const V10Req *kio_store_ranked_shop(void) {
     static const V10Req none = {-1, NULL};
     const Slot *s = kio_get(RANKED_SHOP, RANKED_TTL_MS);
     return s ? &s->req : &none; // _37760: any failure is an empty shop
+}
+
+void kio_store_ranked_shop_expire(void) {
+    Slot *s = slot_find(RANKED_SHOP);
+    if (s && !s->inflight) slot_clear(s);
 }
 
 // ------------------------------------------------------------------ krunker.io writes

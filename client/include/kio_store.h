@@ -24,6 +24,8 @@ void kio_store_eterno(StrBuf *sb);
 // ranked.getShop()'s data ({skins: [...]}, each row's expires_at as epoch ms) in the shape of the
 // brain's /mm/ranked/shop answer, for ranked_ui.c's Shop tab. Never NULL.
 const struct V10Req *kio_store_ranked_shop(void);
+// An item's expires_at passed (ranked_ui.c, v10's onExpired refetch): the cached ranked shop goes, the next read asks again.
+void kio_store_ranked_shop_expire(void);
 // The brain's Junk-priced display (junk_shop_ui.c) in the shop's markup: the display's "products" map is read
 // from it. Gift buttons are left out; a card's BUY is junk_shop_buy on Box Office.
 void kio_store_display_html(StrBuf *sb, const cJSON *display);
