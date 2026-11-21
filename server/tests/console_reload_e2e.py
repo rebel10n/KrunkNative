@@ -140,6 +140,10 @@ def saved_geom(name):
 
 
 CONSOLE = ".modal[data-kn-pointer]"  # the console's box (#devConsoleOverlay > .modal)
+# The geometry runs' script times are summed frame deltas: on a loaded host one slow frame (2.5 s) fired
+# the toggles, the resize and both probes together (@a and @b at one t), and `type` landed with the
+# console's opening. A fixed 60 fps step gives every event its own frame (input_script.c).
+STEP = {"KRUNKNATIVE_FIXED_DELTA": "16.667"}
 
 
 # ---------------------------------------------------------------- console geometry
@@ -160,7 +164,7 @@ def console_offscreen():
                        "2450 cursor 1273 713\n2500 mdown left\n2550 cursor 500 300\n2600 mup left\n"
                        "2700 cursor 200 15\n2750 mdown left\n2850 cursor 900 600\n2950 cursor 3000 3000\n3050 mup left\n"
                        f"3200 rects @drag {CONSOLE}\n"
-                       "3700 quit\n")
+                       "3700 quit\n", env_extra=STEP)
     opened = box(lines, "open")
     check("off-screen save: the console opens inside the window, shrunk to it", near(opened, (0, 0, 1280, 720)), f"box {opened}")
     check("off-screen save: the console runs a typed command", any("console-usable-42" in l and "echo" not in l for l in lines))
@@ -180,7 +184,7 @@ def console_offscreen():
     # end of the last run, no ` needed) in the same box; console_reset: the default
     lines = run_client("geom-again", ["--sandbox"],
                        f"0 menu\n1000 rects @again {CONSOLE}\n"
-                       f"1100 con console_reset\n1500 rects @reset {CONSOLE}\n2000 quit\n", cfg="geom")
+                       f"1100 con console_reset\n1500 rects @reset {CONSOLE}\n2000 quit\n", cfg="geom", env_extra=STEP)
     again = box(lines, "again")
     check("restored from the save: the same box (no growth by the padding)", near(again, drag), f"box {again}, saved {drag}")
     reset = box(lines, "reset")
@@ -196,7 +200,7 @@ def console_resize():
                        f"0 menu\n200 down GRAVE\n250 up GRAVE\n1000 rects @a {CONSOLE}\n"
                        "1100 down GRAVE\n1150 up GRAVE\n1300 resize 800 450\n"
                        f"2000 down GRAVE\n2050 up GRAVE\n2600 rects @b {CONSOLE}\n"
-                       f"2700 resize 640 300\n3500 rects @c {CONSOLE}\n4000 quit\n")
+                       f"2700 resize 640 300\n3500 rects @c {CONSOLE}\n4000 quit\n", env_extra=STEP)
     a = box(lines, "a")
     check("resize: a saved box that fits stays where it was", near(a, (400, 300, 758, 294)), f"box {a}")
     b = box(lines, "b")
@@ -212,7 +216,7 @@ def console_fullscreen():
         f.write('{"left":1100,"top":700,"width":758,"height":294}')
     lines = run_client("fs", ["--sandbox", "--fullscreen"],
                        f"0 menu\n200 down GRAVE\n250 up GRAVE\n1000 rects @full {CONSOLE}\n"
-                       f"1200 down F11\n1250 up F11\n2500 rects @windowed {CONSOLE}\n3000 quit\n", size="800x450")
+                       f"1200 down F11\n1250 up F11\n2500 rects @windowed {CONSOLE}\n3000 quit\n", size="800x450", env_extra=STEP)
     sizes = [tuple(map(int, m.groups())) for m in (re.search(r"pbuffer resized to (\d+)x(\d+)", l) for l in lines) if m]
     full = box(lines, "full")
     vw, vh = sizes[0] if sizes else (0, 0)
