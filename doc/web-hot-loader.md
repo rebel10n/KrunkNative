@@ -196,8 +196,109 @@ ms from navigation:
 
 On a cold load, 4.3 MB of wasm is transferred, compressed, by about 2.3 s. The matchmaker's
 requests (`mm`) end just before the connect. The hot loader moves the seek and the channel ahead of
-the download. The "after" numbers come once the endpoint is live on kru and the page is live on
-krunk.io; krunk.io's page is the GitHub Pages deploy.
+the download. These numbers were taken on another day under other network conditions. Compare the
+"after" numbers below with their own A/B arms, not with this table.
+
+### After (production, 2026-11-21)
+
+**Setup.** Measured on 2026-11-21 from 02:16 to 02:58 UTC, after krunk.io moved to the owned host
+(deploy/pages/OWNED_HOST.md). Same dev box, network and headless Chromium as the baseline, a
+guest, and `hot-e2e.js` unchanged. Chrome ran with `--mute-audio`. All numbers are ms from
+navigation.
+
+**The three arms.** Each was interleaved round by round, with a fresh profile per round: one cold
+load, then two warm loads in the same profile.
+
+- **hot**: `https://krunk.io/`, the owned host, build `00b9da7e4e577ebd` with the hot loader.
+- **nohot**: `https://krunk.io/?nohot=1`, the same host and build, with the hot loader skipped. This
+  arm isolates the hot loader.
+- **gh**: `https://krunk.io/` with `--host-resolver-rules` pinning krunk.io to GitHub Pages
+  (185.199.108.153). That serves the old build `daeb2112581dc60c` (no hot loader) on the same
+  origin, brain, gateway and asset hosts. `rebel10n.github.io/KrunkNative/` itself only 301s to
+  krunk.io now.
+
+The driver is a loop around `hot-e2e.js`: `~/.cache/kn-hot-after/run.sh` on the dev box, not in
+the repo. The table shows the median, with the range in brackets.
+
+**Clean window.** The table is rounds 5 to 7 (02:43 to 02:58). Every run in it connected and got in
+game, all arms in the same stretch.
+
+| rounds 5-7 | n | hot answer | channel open | connect | click to play | in game |
+|---|---|---|---|---|---|---|
+| hot, cold | 3 | 101 [90-117] | 453 [363-455] | 1998 [1770-2372] | 4964 [3521-5708] | 7065 [6407-7819] |
+| nohot, cold | 3 | – | – | 2530 [2493-3063] | 6356 [4379-7489] | 10568 [8447-15795] |
+| gh, cold | 3 | – | – | 2784 [2781-3225] | 4600 [4555-5080] | 8171 [7552-82237] |
+| hot, warm | 6 | 60 [28-97] | 303 [246-484] | 1056 [1005-1432] | 3128 [2946-3644] | 4706 [4082-7294] |
+| nohot, warm | 6 | – | – | 1285 [1213-1385] | 3196 [3046-3403] | 4179 [3831-4808] |
+| gh, warm | 6 | – | – | 1666 [1242-5007] | 3823 [3251-11191] | 6599 [4690-66170] |
+
+**All seven rounds (59 loads).** Medians with ranges:
+
+| | hot | nohot | gh |
+|---|---|---|---|
+| cold connect | 3560 [1770-46083] | 2796 [2435-81244] | 3846 [2781-101905] |
+| warm connect | 1276 [1005-27120] | 1385 [1213-5010] | 1880 [1238-8517] |
+
+In rounds 1 to 4, loads stalled for tens of seconds in every arm. Cold wasm downloads took 41 to
+96 s, and one warm client took 26 s to start. Four loads never connected within 90 s, all in round
+4: the hot cold load and all three nohot loads. Three gh loads connected but never got in game. The
+box was heavily loaded
+during the run (load average about 135 on 32 cores, other sessions' work). Those stalls are not
+the hot loader's doing, and the all-rounds medians mostly measure them.
+
+**What the hot loader does in production.**
+
+- **The page side works.** The `/mm/hot-seek` answer is back at about 100 ms cold and 60 ms warm.
+  The WebRTC channel is open at about 300 to 450 ms.
+- **The client takes both as soon as its wasm runs:** at 1.5 to 2.1 s cold and 0.75 to 0.93 s
+  warm, the "taken" step.
+- **The connect is earlier, but by less than on the local stack.** It is about 0.5 s earlier cold
+  (1998 against 2530) and about 0.23 s earlier warm (1056 against 1285), not the 1.0 to 1.4 s
+  measured at 60 ms on the local stack. Production's own seek chain is short from here. In nohot,
+  the WebRTC setup alone (`[rtc] connecting` to `connected`) is 0.4 to 0.5 s. With the hot loader,
+  about 0.25 s is left after adoption, for the knet handshake and HELLO.
+- **No measurable gain to time-to-game.** Click to play is unchanged warm (3128 against 3196 ms).
+  Cold it is 1.4 s earlier, but on three runs with a 3.1 s spread. In game is noisier still:
+  - The harness clicks every 700 ms.
+  - Some runs needed many clicks. gh cold reached 82 s, and outliers of 15 to 66 s show up in
+    every arm.
+  - Hot warm (4706) came out slower than nohot warm (4179), which is within that noise.
+
+  As on loopback, the map's load and build after the connect (about 2 to 3 s, on SwiftShader on
+  a loaded CPU) dominates.
+
+**The owned host does not compress the wasm or the data.** `client.<hash>.wasm` goes out with
+`Content-Length: 12682042` and no `Content-Encoding`. The cold loads transfer 12.4 MB of wasm and
+1.2 MB of data, where GitHub Pages sent 4.3 MB and 230 KB gzipped (`client.js` is gzipped on both
+hosts).
+
+- On this link the wasm still finished by 0.5 to 0.8 s in the clean rounds, so the cost was small
+  here.
+- For a player on a slower link it is about 9 MB more per cold load. That is more than the hot
+  loader saves.
+- Against the old GitHub Pages build, the owned host plus hot loader connects about 0.8 s sooner
+  cold (1998 against 2784) and 0.6 s sooner warm. It does not reach click to play sooner cold
+  (4964 against 4600).
+- Gzip or brotli for `.wasm` and `.data` on the origin or edge would be the larger win. It was not
+  changed here.
+- The hosts also cache differently. Pages sends `max-age=600`; the owned host sends
+  `max-age=31536000, immutable` on the hashed client files. Warm loads more than 10 minutes apart
+  would revalidate on Pages but not here. This run's warm loads were seconds apart, so it does not
+  show.
+
+**Failure modes seen.**
+
+- **A slow cold load loses the early channel.** In round 2's hot cold load the wasm arrived at
+  about 42 s. By then the answer was older than `HOT_TICKET_MS`, and the client logged "the hot
+  seek is not used: too old (37 s)". The page's channel had already closed at 30.6 s, before the
+  client could take it. The client then ran its own seek and connected at 46 s, so the fallback
+  works.
+- Round 4's hot cold load closed its channel the same way, at 31.5 s, and never connected, but
+  neither did any nohot load in that round.
+- In round 4's warm 1 the answer was dropped as too old (26 s), yet the still-open channel was
+  adopted (`[rtc] taking the hot loader's channel`) and connected.
+- So an early channel lives about 30 s, not the page's 90 s. Something on the gateway or server
+  path closes it first.
 
 ## Ideas not done
 
