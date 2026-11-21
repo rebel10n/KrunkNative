@@ -729,6 +729,7 @@ static void scenario_frame(Client *client, const double clock_ms, const int pres
     if (cJSON_IsArray(votes) && !cJSON_GetArraySize(votes) && lobby_vote_state()->count) lobby_vote_reset();
     client_tick(client, (float) now_s, (float) delta);
     if (present) headless_swap_buffers(client->window);
+    client_frame_presented(); // drawn (read back or swapped): a held INIT goes on (main.c client_init_defer_tick)
     glfwPollEvents();
 }
 

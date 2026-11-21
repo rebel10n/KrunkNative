@@ -1164,6 +1164,7 @@ void client_force_player_positions(Client*); // players.js forcePos(): every rem
 void client_players_hide_all(Client*);       // NET_EXT_PLAYER_SYNC: players.hideAll(), settling the sync before it (main.c)
 int client_map_prepare_init(Client*, NetInitPacket*);   // 1: apply now (map_index resolved), 0: map download started
 int client_map_hold(Client*, const NetPacket*);         // 1: packet queued until the streamed map is in
+void client_frame_presented(void);           // a frame drawn outside client_frame (ui_scenario.c): releases a held INIT
 int client_init_pending(const Client*);          // 1: an INIT is held until a frame is presented (main.c client_init_begin)
 int client_map_take_ready(Client*, NetInitPacket*, NetPacket**, size_t*); // 1: download done (INIT + held packets, caller frees)
 int client_map_list_add(Client*, const cJSON*); // index of the map in game.maps, appending it (official games, streamed maps); -1 OOM

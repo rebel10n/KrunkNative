@@ -1820,6 +1820,12 @@ static void client_init_defer_tick(Client *client) {
     }
 }
 
+// A frame drawn outside client_frame (client_bin --render-scenario's scenario_frame): a held INIT
+// waits for one, so without this the scenario's INIT stays held until MAP_WAIT_TIMEOUT (20 s).
+void client_frame_presented(void) {
+    g_frames_presented++;
+}
+
 int client_init_pending(const Client *client) {
     return g_init_held && client->net_map_wait;
 }
