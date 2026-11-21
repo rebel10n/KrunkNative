@@ -192,7 +192,8 @@ def run_client(name, assets, ui, origins, release=None, timeout=150):
     env = {k: v for k, v in os.environ.items()
            if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL", "KRUNKNATIVE_ASSET_FETCH",
                         "KRUNKNATIVE_ASSET_FETCH_CHECKOUT")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
+    # KRUNKNATIVE_DEBUG=2: the [account] / [mm] / [preview] / console lines it waits on are level 1-2 (5f55eef1)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": "960x540",
                 "KRUNKNATIVE_FIXED_DELTA": "16.6667", "KRUNKNATIVE_FRAME_CAP": "60",
