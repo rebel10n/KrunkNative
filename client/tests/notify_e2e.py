@@ -109,7 +109,8 @@ class UiClient:
             f.write(token)
         open(self.cmds, "w").close()
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL", "KRUNKNATIVE_UI_DIR")}
-        env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
+        # "[notify] ..." / "[emoji] ..." reach the log only at level 1-2 (5f55eef1)
+        env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
                     "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_UI_CMDS": self.cmds,
                     "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port,
                     "KRUNKNATIVE_ASSETS_DIR": ASSETS})
@@ -226,7 +227,8 @@ def run_script(name, script, timeout=180, settings=None):
         f.write(script)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, name + "-cfg"),
+    # "[notify] ..." / "[emoji] ..." reach the log only at level 1-2 (5f55eef1)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, name + "-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_ASSETS_DIR": ASSETS,
                 "KRUNKNATIVE_MODE": "offline"})  # the sandbox: every skin and emoji unlocked for a guest
@@ -314,7 +316,8 @@ def announce_flow():
             f.write("0 menu\n5000 nodes @shown .game-announcement.show\n5000 grep @msg Double .ga-message\n"
                     "9000 nodes @cleared .game-announcement.show\n9500 quit\n")
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-        env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "announce-cfg"),
+        # "[notify] ..." / "[emoji] ..." reach the log only at level 1-2 (5f55eef1)
+        env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "announce-cfg"),
                     "XDG_STATE_HOME": os.path.join(WORK, "announce-state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                     "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_ASSETS_DIR": ASSETS})
         log = os.path.join(WORK, "announce.log")

@@ -91,7 +91,8 @@ def get_json_status(port, path):
 
 def env_base():
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
+    # "[mm] joining" reach the log only at level 1-2 (5f55eef1)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null",
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_ASSET_FETCH": "off", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "off",
                 "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})

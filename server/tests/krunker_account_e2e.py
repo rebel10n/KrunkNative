@@ -640,7 +640,9 @@ def run():
                 "KRUNKNATIVE_KRUNKER_AUTH": base + "/frvr/v1/auth", "KRUNKNATIVE_KRUNKER_TRACE": "1",
                 "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off",
                 "KRUNKNATIVE_FINDER_URL": "off",  # no public server list in the test (its groups would shift)
-                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + CAPTCHA_PATH})  # the challenge webview's page: its own stub
+                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + CAPTCHA_PATH,  # the challenge webview's page: its own stub
+                # the "[krunker] ..." link events reach the log only at level 1-2 (5f55eef1); the leak check sees every line
+                "KRUNKNATIVE_DEBUG": "2"})
     log_path = os.path.join(WORK, "account.log")
     with open(log_path, "w") as out:
         # a private Xvfb for the challenge webview (WebKitGTK needs a display; the game itself stays headless)
@@ -901,7 +903,8 @@ def run_web():
         def page(extra=""):
             q = "&".join("%s=%s" % (k, urllib.parse.quote(v, safe="")) for k, v in (
                 ("krunkerApi", base + "/api"), ("krunkerAuth", base + "/frvr/v1/auth"), ("krunkerMM", base + "/mm")))
-            return "http://127.0.0.1:%d/?%s%s" % (web, q, extra)
+            # debug=2: the page logs every level (the leak check reads the console; main.c ?debug=)
+            return "http://127.0.0.1:%d/?%s&debug=2%s" % (web, q, extra)
 
         def wait(js, timeout=90.0):
             end = time.time() + timeout

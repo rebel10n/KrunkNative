@@ -64,7 +64,8 @@ def run_client(name, script, brain_url, game_port, timeout=150):
         f.write(script)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
+    # "[account] logged in as" / "[account] logged out" reach the log only at level 1-2 (5f55eef1)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
     with open(log, "w") as out:
@@ -251,12 +252,14 @@ def down_scenario(game_port):
     """The login while the account server is down: the reason, not v3.1.1's "Please try again."."""
     (dead,) = free_ports(1)
     # the login card by username (a guest keeps no saved name: the popup opens on Email)
+    # AUTH_TIMEOUT_SECONDS (8 s) counts from the send, which waits for the captcha's fetch since 95ae6eb9:
+    # quit well after both
     log = run_client("down", OPEN + BY_NAME + """1200 clickid accName
 1300 type someone
 1400 clickid accPass
 1500 type some_pass
 1600 clickid knV10LoginSubmit
-11000 quit
+16000 quit
 """, "http://127.0.0.1:%d" % dead, game_port)
     check("a down account server: the specific reason", "[account] the social socket to" in log and "did not open" in log,
           "log in %s" % WORK)
