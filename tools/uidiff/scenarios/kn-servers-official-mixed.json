@@ -178,5 +178,5 @@
     }
   },
   "frames": 3,
-  "note": "KrunkNative: the Servers window with our lobbies (Chicago, Santa Clara) and krunker.io's (state.krunkerLobbies). The official region groups read like v10's own: the region's place name, then Quick Join and 'N online' (Frankfurt open: its rows have no tag). One line before them, 'krunker.io servers' with the krunker.io account it uses (signed in: Sidney, Level 30, Logout), is the only cue (servers_ui.c append_krunker_status). The footer's In Game adds krunker.io's totalPlayerCount. Compare the official groups with doc/ref/krunker-v10.0.2/servers/servers-official-open.png"
+  "note": "KrunkNative: the Servers window with our lobbies (state.servers: Chicago, Santa Clara) and krunker.io's (state.krunkerLobbies), signed in to krunker.io (state.storage: Sidney, Level 30). Since 732c9bfe the tabs are the backends and never mix: the krunker.io tab (windows.1.switchTab 1) shows only krunker.io's groups, the official region groups read like v10's own (place name, Quick Join, 'N online'), Sydney open (setExpandedRegion 4), and its footer's In Game is krunker.io's totalPlayerCount; a count not read is blank (3cec1138). Compare the official groups with doc/ref/krunker-v10.0.2/servers/servers-official-open.png"
 }

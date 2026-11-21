@@ -73,5 +73,5 @@
     ]
   },
   "frames": 3,
-  "note": "KrunkNative: krunker.io refused the official list: the krunker.io servers line says why in red where the official groups would be; our groups are unchanged"
+  "note": "KrunkNative: krunker.io refused the official list: on the krunker.io tab (732c9bfe) the refusal says why in red where its groups would be, and the footer has no In Game count (a list not read is blank, 3cec1138); the krunk.io tab's groups are unchanged"
 }

@@ -14,7 +14,7 @@
         600
       ],
       "kind": "text",
-      "note": "KrunkNative's own baseline: the krunker.io servers line with krunker.io's refusal in red"
+      "note": "KrunkNative's own baseline (refreshed after 732c9bfe / 3cec1138): the krunker.io tab with krunker.io's refusal in red and no list, so no In Game count"
     }
   ]
 }

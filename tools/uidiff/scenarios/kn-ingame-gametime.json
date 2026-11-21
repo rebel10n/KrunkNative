@@ -101,7 +101,8 @@
     "account": {
       "name": "Local User",
       "score": 225,
-      "funds": 0
+      "funds": 0,
+      "timePlayed": 8073900
     },
     "storage": {
       "knClient": "{\"gameTime\": true}",
@@ -109,5 +110,5 @@
     }
   },
   "frames": 3,
-  "note": "The game time tile (hud_ui.c hud_gametime_step), opt-in: Settings > Client > Game > Show Game Time is on in this capture (state.storage knClient). The total is the device's own (state.storage knGameTime, 8073900 ms = 2h 14m 33.9s), read at the first frame. A signed-in stand-in account (state.account) shows the same tile: nothing comes from the account. Default settings otherwise (every stat tile off), so the tile is the only one in the counters row. KrunkNative's own render (doc/ref/krunknative/, llvmpipe); v10 has no such tile or setting."
+  "note": "The game time tile (hud_ui.c hud_gametime_step), opt-in: Settings > Client > Game > Show Game Time is on in this capture (state.storage knClient). Since a97e4d72 the tile is v7.1.4 mod's HH:MM:SS and a signed-in account shows the account's time played (state.account timePlayed, 8073900 ms, shown as 02:14:34) instead of the device's count (state.storage knGameTime, the same total, which a guest would show). Default settings otherwise (every stat tile off), so the tile is the only one in the counters row. KrunkNative's own render (doc/ref/krunknative/, llvmpipe); v10 has no such tile or setting."
 }

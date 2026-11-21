@@ -106,7 +106,8 @@
     "account": {
       "name": "Local User",
       "score": 225,
-      "funds": 0
+      "funds": 0,
+      "timePlayed": 8073900
     },
     "storage": {
       "knClient": "{\"gameTime\": true}",
@@ -114,5 +115,5 @@
     }
   },
   "frames": 3,
-  "note": "The game time tile with every stat tile on and the old scoreboard (leaderType 0: .topRightCounters 400px wide, #leaderboardHolder above it, #killFeed below), Show Game Time on: the tile must stay inside the counters row or wrap onto its own row, clear of the board and the kill feed. KrunkNative's own render (doc/ref/krunknative/, llvmpipe)."
+  "note": "The game time tile with every stat tile on and the old scoreboard (leaderType 0: .topRightCounters 400px wide, #leaderboardHolder above it, #killFeed below), Show Game Time on: the tile must stay inside the counters row or wrap onto its own row, clear of the board and the kill feed. KrunkNative's own render (doc/ref/krunknative/, llvmpipe). Since a97e4d72 the tile is HH:MM:SS and the signed-in stand-in account shows its time played (state.account timePlayed, 8073900 ms, shown as 02:14:34)."
 }

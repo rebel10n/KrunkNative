@@ -9,13 +9,13 @@
       "name": "window-header",
       "rect": [
         307,
-        118,
+        115,
         480,
         30
       ],
       "ref_offset": [
         0,
-        12
+        15
       ],
       "kind": "text",
       "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button)"
@@ -24,13 +24,13 @@
       "name": "top-groups",
       "rect": [
         307,
-        170,
+        196,
         665,
         90
       ],
       "ref_offset": [
         0,
-        12
+        -14
       ],
       "kind": "text",
       "note": "Official Customs and Custom Games"
@@ -39,28 +39,28 @@
       "name": "new-york-header",
       "rect": [
         307,
-        293,
+        295,
         665,
         38
       ],
       "ref_offset": [
         0,
-        -12
+        -14
       ],
       "kind": "text",
-      "note": "the open official region group: New York, Quick Join, 14 online (after KrunkNative's krunker.io servers line, hence the offset)"
+      "note": "the open official region group: New York, Quick Join, 14 online (below KrunkNative's krunk.io / krunker.io tab bar, 732c9bfe, hence the offset)"
     },
     {
       "name": "new-york-rows",
       "rect": [
         307,
-        342,
+        344,
         665,
         105
       ],
       "ref_offset": [
         0,
-        -12
+        -14
       ],
       "kind": "text",
       "max_pct": 5.0,
@@ -70,13 +70,13 @@
       "name": "other-groups",
       "rect": [
         307,
-        457,
+        459,
         665,
         90
       ],
       "ref_offset": [
         0,
-        -12
+        -14
       ],
       "kind": "text",
       "note": "Frankfurt and Sydney"
@@ -85,16 +85,16 @@
       "name": "footer",
       "rect": [
         307,
-        560,
-        665,
+        562,
+        220,
         36
       ],
       "ref_offset": [
         0,
-        -12
+        -14
       ],
       "kind": "text",
-      "note": "61 In Game"
+      "note": "61 In Game: the In Game count only. KrunkNative leaves a count it has not read blank (3cec1138: the scenario reads no editor / social count), where the v10 capture shows 0 in Editor, 0 on Social"
     }
   ]
 }

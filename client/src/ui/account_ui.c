@@ -4043,6 +4043,7 @@ void account_ui_scenario(const cJSON *account) {
     g_acc.ranked_points = cnum(account, "rankedPoints"); // the Wallet's Ranked Points card
     g_acc.spending_tier = (int) cnum(account, "spendingTier"); // the Purchase KR tab's spender-only cards (store_ui.c)
     g_acc.games = cnum(account, "games"); // the per-match Double XP offer (games % 3, double_xp_offer.c)
+    g_acc.time_played = cnum(account, "timePlayed"); // ms, players.player_timeplayed: the Game Time tile's account count (hud_ui.c)
     g_acc.premium = cnum(account, "premium") != 0.0;
     g_acc.is_dev = cnum(account, "dev") != 0.0; // the player list's Kick / Ban (punishPopup) need DEV rights
     update_level();

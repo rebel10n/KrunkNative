@@ -38,10 +38,6 @@
  * take each other's clicks. Same heights, stated in base units. */
 .customization-screen__cat-box-middle img{height:calc(54 * var(--base-scale));width:auto}
 .customization-screen__cat-box-middle--small img{height:calc(22 * var(--base-scale))}
-/* GAP (native engine): ITEM_SELECTION_SCREEN's square image is width:100% in its flex .item-selection__item-image
- * (at least 92 units wide); the engine sizes the flex item from the image instead (as the leaderboard picture
- * above). Same box, stated in base units. */
-.item-selection__item-image img{flex:none;width:calc(92 * var(--base-scale))}
 /* GAP (native engine): the reward screen's rarity art (img/reward-bg/*.svg, Figma exports) blurs each
  * shape with an SVG feGaussianBlur filter, which nanosvg (svg.c) does not apply, and its colour layer
  * tints the screen with mix-blend-mode: color, which the engine does not have (it paints normally).

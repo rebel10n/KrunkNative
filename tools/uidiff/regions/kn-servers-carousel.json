@@ -9,13 +9,13 @@
       "name": "window-header",
       "rect": [
         307,
-        125,
+        116,
         480,
         30
       ],
       "ref_offset": [
         0,
-        12
+        21
       ],
       "kind": "text",
       "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button)"
@@ -24,13 +24,13 @@
       "name": "carousel-names",
       "rect": [
         307,
-        180,
+        216,
         665,
         26
       ],
       "ref_offset": [
         0,
-        12
+        -24
       ],
       "kind": "text",
       "fuzz": 12,
@@ -41,13 +41,13 @@
       "name": "carousel",
       "rect": [
         307,
-        206,
+        242,
         665,
         60
       ],
       "ref_offset": [
         0,
-        12
+        -24
       ],
       "kind": "image",
       "fuzz": 12,
@@ -58,13 +58,13 @@
       "name": "top-groups",
       "rect": [
         307,
-        280,
+        312,
         665,
         90
       ],
       "ref_offset": [
         0,
-        12
+        -20
       ],
       "kind": "text",
       "note": "Official Customs, Custom Games (85 online: the custom games)"
@@ -73,31 +73,31 @@
       "name": "region-groups",
       "rect": [
         307,
-        401,
+        409,
         665,
         140
       ],
       "ref_offset": [
         0,
-        -12
+        -20
       ],
       "kind": "text",
-      "note": "New York, Frankfurt, Sydney after KrunkNative's krunker.io servers line"
+      "note": "New York, Frankfurt, Sydney below KrunkNative's krunk.io / krunker.io tab bar (732c9bfe)"
     },
     {
       "name": "footer",
       "rect": [
         307,
-        555,
-        665,
+        563,
+        220,
         36
       ],
       "ref_offset": [
         0,
-        -12
+        -20
       ],
       "kind": "text",
-      "note": "137 In Game"
+      "note": "137 In Game: the In Game count only. KrunkNative leaves a count it has not read blank (3cec1138: the scenario reads no editor / social count), where the v10 capture shows 0 in Editor, 0 on Social"
     }
   ]
 }

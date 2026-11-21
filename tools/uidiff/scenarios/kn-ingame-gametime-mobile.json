@@ -106,7 +106,8 @@
     "account": {
       "name": "Local User",
       "score": 225,
-      "funds": 0
+      "funds": 0,
+      "timePlayed": 8073900
     },
     "mobile": true,
     "storage": {
@@ -115,5 +116,5 @@
     }
   },
   "frames": 3,
-  "note": "The game time tile on the phone layout (844x390, state.mobile), Show Game Time on: it wraps with the stat tiles in .topRightCounters and clears the kill feed. KrunkNative's own render (doc/ref/krunknative/, llvmpipe)."
+  "note": "The game time tile on the phone layout (844x390, state.mobile), Show Game Time on: it wraps with the stat tiles in .topRightCounters and clears the kill feed. KrunkNative's own render (doc/ref/krunknative/, llvmpipe). Since a97e4d72 the tile is HH:MM:SS and the signed-in stand-in account shows its time played (state.account timePlayed, 8073900 ms, shown as 02:14:34)."
 }
