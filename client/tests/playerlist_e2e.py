@@ -35,7 +35,7 @@ private XDG_CONFIG_HOME), joined through the matchmaker and driven through KRUNK
      row shows its key [=], and [=] turns KPD Vision off and on ("KPD Vision Disabled" / "Enabled");
      Settings > General shows the officer the KPD folder (KPD Vision's switch and colour)
   7. the vision overlay headless (client_bin --render-scenario, no server needed): spectating Team
-     Deathmatch on Kanji's sandbox bots (bot 9, frozen by bot_stop), state.kpdCase hands the officer a
+     Deathmatch on Kanji's sandbox bots (bot 9, frozen by bot_stop at 9 s), state.kpdCase hands the officer a
      case on a bot that sees an enemy, state.nametags draws the tags over the black background. The
      screenshot (kept as kpd-vision.png in the logs dir on a failure) has the kpdVisionCol (#00ffff)
      bar of the player the suspect sees, the red SUSPECT label and the suspect's / caller's card
@@ -702,11 +702,13 @@ def vision_screenshot():
                 "weaponName": "Assault Rifle", "weaponIcon": "icon_2", "classIndex": 0, "spread": 100,
                 "loadout": [{"name": "Assault Rifle", "icon": "icon_2", "melee": False}, {"name": "Pistol", "icon": "icon_3", "melee": False},
                             {"name": "Combat Knife", "icon": "icon_0", "melee": True}], "loadoutIndex": 0},
-        "console": ["bot 9", {"at_ms": 3000, "cmd": "bot_stop"}],  # the bots stand still from 3 s on
+        # the bots stand still from 9 s on: at 3 s Kanji's TDM bots still stand on spawns that see no enemy (the case
+        # then has no seen player and no kpdVisionCol bar); by 9 s one sees an enemy (the sandbox is deterministic)
+        "console": ["bot 9", {"at_ms": 9000, "cmd": "bot_stop"}],
         "kpdCase": True, "nametags": True,
     }
-    with open(scen, "w") as f:  # 239 frames: the capture comes a second after bot_stop, once the case is on
-        json.dump({"size": [1280, 720], "background": "#000000", "state": state, "frames": 239}, f)
+    with open(scen, "w") as f:  # 599 frames: the capture comes a second after bot_stop, once the case is on
+        json.dump({"size": [1280, 720], "background": "#000000", "state": state, "frames": 599}, f)
     out = os.path.join(WORK, "kpd-vision.png")
     cfg = os.path.join(WORK, "scenario-cfg")
     os.makedirs(cfg, exist_ok=True)
