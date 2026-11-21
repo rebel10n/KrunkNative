@@ -227,7 +227,8 @@ function startBridgeOnly(): ReturnType<typeof createServer> {
   const http = createServer((req, res) => {
     const pathname = (req.url || "/").split("?")[0];
     if (req.method === "GET" && pathname === "/healthz") {
-      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      // CORS *: the page (krunk.io) reads krunkerRelay from here cross-origin (client/src/net/krunker_relay.c)
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
       res.end(JSON.stringify({ ok: true, version, ...webBridge.getStats() }));
       return;
     }
