@@ -521,11 +521,18 @@ static kn_db_result *run_item_style(kn_dbconn *c, int n, const char *const *p) {
                                        KN_DB_ARGS(I64S(actor), I64S(item)), 0);
         if (owned - copies <= 0) return dbx_finish(&x, kn_db_result_user_error("You don't own that item."));
     }
-    if (dbx_exec(&x, SQL(.any = "DELETE FROM item_styles WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
-                 KN_DB_ARGS(I64S(actor), I64S(item), I64S(key))) < 0)
+    /* one statement per outcome, so two writes of the same item's style never race on the primary key */
+    if (style == 0 && dbx_exec(&x, SQL(.any = "DELETE FROM item_styles WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                               KN_DB_ARGS(I64S(actor), I64S(item), I64S(key))) < 0)
         return dbx_finish(&x, NULL);
-    if (style > 0 && dbx_exec(&x, SQL(.any = "INSERT INTO item_styles (account_id, skin_id, copy_id, style) VALUES ({int:$1}, {int:$2}, {int:$3}, {int:$4})"),
-                              KN_DB_ARGS(I64S(actor), I64S(item), I64S(key), I64S(style))) < 0)
+    if (style > 0 &&
+        dbx_exec(&x,
+                 SQL(.any = "INSERT INTO item_styles (account_id, skin_id, copy_id, style) VALUES ({int:$1}, {int:$2}, {int:$3}, {int:$4})"
+                            " ON CONFLICT (account_id, skin_id, copy_id) DO UPDATE SET style = excluded.style",
+                     /* MySQL has no ON CONFLICT: the primary key's duplicate updates the row */
+                     .mysql = "INSERT INTO item_styles (account_id, skin_id, copy_id, style) VALUES ({int:$1}, {int:$2}, {int:$3}, {int:$4})"
+                              " ON DUPLICATE KEY UPDATE style = VALUES(style)"),
+                 KN_DB_ARGS(I64S(actor), I64S(item), I64S(key), I64S(style))) < 0)
         return dbx_finish(&x, NULL);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "copy_id", (double) copy);

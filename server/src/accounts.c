@@ -1340,7 +1340,8 @@ static void acc_add_kill_items(cJSON *p, const ClientConnection *client) {
     }
 }
 
-static cJSON *acc_player_stats(const ClientConnection *client, const int final) {
+// Not const: skin_counters_take drains the client's pending skin counters into the frame.
+static cJSON *acc_player_stats(ClientConnection *client, const int final) {
     const Player *player = client->player;
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
     // updateAccounts: hosted games and noReward modes only add time played

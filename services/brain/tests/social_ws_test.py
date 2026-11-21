@@ -550,6 +550,20 @@ async def scenario(base, internal_url, secret):
             r = await a2.call("a", "a", 1, [alice, None, alice_login[5]])
             owned = [e for e in (r[4][10] if r and r[4] else []) if e.get("ind") == jersey]
             check(owned and (owned[0].get("m") or {}).get("style") == 3, "the owned list carries m.style 3: %r" % owned)
+            # a repeated write and two concurrent writes of the same row (item_styles' primary key: an upsert, never a
+            # duplicate-key error), from the two sessions at once
+            r = await a.call("istr", "ist", jersey, jersey, 3, 44)
+            check(r[1] == {"copy_id": jersey, "item_id": jersey, "style": 3} and r[2] == 44, "ist: the same style again: %r" % r)
+            for _ in range(4):
+                await asyncio.gather(a.send("ist", jersey, jersey, 5, 45), a2.send("ist", jersey, jersey, 9, 46))
+                r1, r2 = await asyncio.gather(a.recv("istr"), a2.recv("istr"))
+                check(r1[1] == {"copy_id": jersey, "item_id": jersey, "style": 5} and r1[2] == 45
+                      and r2[1] == {"copy_id": jersey, "item_id": jersey, "style": 9} and r2[2] == 46,
+                      "ist: concurrent writes of the stack's style both succeed: %r %r" % (r1, r2))
+        async with Social(ws_url, json_mode=True) as a3:
+            r = await a3.call("a", "a", 1, [alice, None, alice_login[5]])
+            owned = [e for e in (r[4][10] if r and r[4] else []) if e.get("ind") == jersey]
+            check(owned and (owned[0].get("m") or {}).get("style") in (5, 9), "one row, one of the two styles: %r" % owned)
         r = await a.call("istr", "ist", jersey, jersey, 0, 43)
         check(r[1] and r[1].get("style") == 0, "ist style 0: back to the default: %r" % r)
 
