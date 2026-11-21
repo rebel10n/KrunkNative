@@ -328,7 +328,7 @@ def main():
     server = http.server.ThreadingHTTPServer(("127.0.0.1", http_port), functools.partial(Handler, directory=DIST))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     proc = subprocess.Popen([chrome, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader",
-                             "--enable-unsafe-swiftshader", f"--remote-debugging-port={cdp_port}",
+                             "--enable-unsafe-swiftshader", "--mute-audio", f"--remote-debugging-port={cdp_port}",
                              f"--user-data-dir={os.path.join(WORK, 'chrome')}", "--window-size=1280,720", "about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:

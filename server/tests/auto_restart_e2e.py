@@ -417,7 +417,7 @@ def case_web():
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", http_port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     browser = subprocess.Popen([chrome, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader",
-                                "--enable-unsafe-swiftshader", "--remote-debugging-port=%d" % cdp_port,
+                                "--enable-unsafe-swiftshader", "--mute-audio", "--remote-debugging-port=%d" % cdp_port,
                                 "--user-data-dir=" + os.path.join(WORK, "chrome"), "--window-size=1280,720", "about:blank"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     procs.append(browser)

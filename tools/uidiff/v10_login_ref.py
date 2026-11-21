@@ -42,7 +42,7 @@ def main():
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--hide-scrollbars", "--force-device-scale-factor=1"])
+            browser = p.chromium.launch(args=["--hide-scrollbars", "--mute-audio", "--force-device-scale-factor=1"])
             try:
                 tab = browser.new_page(viewport={"width": 1280, "height": 720})
                 tab.goto("http://127.0.0.1:%d/index.html?offline=1" % port)

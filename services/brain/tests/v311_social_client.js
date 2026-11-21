@@ -7,7 +7,7 @@
 //   node v311_social_client.js <sitePort> <cdpPort> <user> <pass> <outDir>
 //
 // Needs: v311_site_proxy.js on 127.0.0.1:<sitePort> (public/ + brain proxy, the
-// nginx of a deployment) and `chromium-browser --headless=new
+// nginx of a deployment) and `chromium-browser --headless=new --mute-audio
 // --remote-debugging-port=<cdpPort>` already running (never on the user's display).
 // recaptcha/hcaptcha/cdn scripts are stubbed (offline); the page code is untouched.
 'use strict';

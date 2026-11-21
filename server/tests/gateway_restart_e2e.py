@@ -150,7 +150,7 @@ def main():
         start([f"{BUILD}/server_bin", "--headless", "--cfg", "none", "--port", str(GAME), "server/tests/arena.json"], GAME_LOG)
         rtc = start_rtc()
         bridge = start_bridge()
-        start([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+        start([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio",
                "--user-data-dir=" + os.path.join(WORK, "chrome"), "--remote-debugging-port=%d" % CDPP, "about:blank"],
               os.path.join(WORK, "chrome.log"))
         check("server, kn-rtc, net-bridge and Chromium up",

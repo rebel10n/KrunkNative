@@ -23,10 +23,10 @@ for s in "${SCENES[@]}"; do
     rc=$?
     [ $rc -ne 0 ] && { echo "$s: canvas2d_test exit $rc"; status=1; }
     node tools/canvas2d/ref.js "$scene" "$OUT/$s.html"
-    "$CHROME" --headless=new --disable-gpu --hide-scrollbars --no-first-run --no-default-browser-check \
+    "$CHROME" --headless=new --mute-audio --disable-gpu --hide-scrollbars --no-first-run --no-default-browser-check \
         --user-data-dir="$OUT/chrome-profile" --force-device-scale-factor="$DPR" --window-size="$W,$H" \
         --virtual-time-budget=5000 --screenshot="$OUT/$s.chrome.png" "file://$OUT/$s.html" > /dev/null 2>&1
-    "$CHROME" --headless=new --disable-gpu --no-first-run --user-data-dir="$OUT/chrome-profile" \
+    "$CHROME" --headless=new --mute-audio --disable-gpu --no-first-run --user-data-dir="$OUT/chrome-profile" \
         --virtual-time-budget=5000 --dump-dom "file://$OUT/$s.html" 2> /dev/null \
         | python3 -I -c 'import sys, re, html; m = re.search(r"<pre id=.out.>(.*?)</pre>", sys.stdin.read(), re.S); print(html.unescape(m.group(1)) if m else "")' \
         > "$OUT/$s.chrome.txt"

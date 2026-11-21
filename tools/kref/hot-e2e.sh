@@ -67,7 +67,7 @@ results="$WORK/results.jsonl"
 browse() { # <label> <query> <warm runs>: a fresh profile, one cold load, then warm ones
     local label=$1 query=$2 warm=$3
     rm -rf "$WORK/chrome"
-    chromium-browser --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+    chromium-browser --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --mute-audio \
         --autoplay-policy=no-user-gesture-required --user-data-dir="$WORK/chrome" --remote-debugging-port=$CDPP about:blank \
         > "$WORK/chrome-$label.log" 2>&1 &
     local chrome=$!

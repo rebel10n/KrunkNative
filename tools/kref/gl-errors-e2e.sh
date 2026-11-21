@@ -22,7 +22,7 @@ trap cleanup EXIT
 chrome=$(command -v chromium-browser || command -v chromium || command -v google-chrome)
 (cd "$DIST" && exec python3 -m http.server "$HTTP" --bind 127.0.0.1) > "$WORK/http.log" 2>&1 &
 pids+=($!)
-"$chrome" --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+"$chrome" --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --mute-audio \
     --window-size=1280,720 --user-data-dir="$WORK/chrome" --remote-debugging-port=$CDPP about:blank > "$WORK/chrome.log" 2>&1 &
 pids+=($!)
 sleep 1

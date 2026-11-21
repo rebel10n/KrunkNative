@@ -55,7 +55,7 @@ pids+=($!)
 pids+=($!)
 for _ in $(seq 1 80); do curl -sf "http://127.0.0.1:$BRIDGE/healthz" >/dev/null 2>&1 && break; sleep 0.25; done
 
-"$CHROME" --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+"$CHROME" --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --mute-audio \
     --autoplay-policy=no-user-gesture-required --window-size=1280,720 \
     --user-data-dir="$RUN/chrome" --remote-debugging-port="$CDPP" about:blank > "$RUN/chrome.log" 2>&1 &
 pids+=($!)

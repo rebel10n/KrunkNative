@@ -83,7 +83,7 @@ def main():
             with gzip.open(keep, "wt", encoding="utf-8") as f:
                 f.write(doc)
         shot = os.path.join(work, "ref.png")
-        cmd = [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
+        cmd = [browser, "--headless=new", "--mute-audio", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
                "--user-data-dir=" + os.path.join(work, "chrome"),
                "--allow-file-access-from-files", "--force-device-scale-factor=1", "--window-size=%d,%d" % (w, h),
                "--virtual-time-budget=3000", "--screenshot=" + shot, "file://" + page]

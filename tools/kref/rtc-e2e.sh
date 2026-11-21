@@ -37,7 +37,7 @@ RTC_PID=$!
 pids+=($RTC_PID)
 (cd net-bridge && KRUNK_NATIVE_PORT=$GAME KRUNK_NATIVE_BRIDGE_PORT=$HTTP KRUNK_NATIVE_WEB_DIR="$DIST" exec npm run web) > "$WORK/bridge.log" 2>&1 &
 pids+=($!)
-chromium-browser --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+chromium-browser --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --mute-audio \
     --user-data-dir="$WORK/chrome" --remote-debugging-port=$CDPP about:blank > "$WORK/chrome.log" 2>&1 &
 pids+=($!)
 for _ in $(seq 100); do grep -q "listening on http" "$WORK/bridge.log" 2>/dev/null && [ -f "$DIST/rtc.json" ] && break; sleep 0.2; done

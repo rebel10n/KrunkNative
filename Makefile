@@ -1233,7 +1233,7 @@ smoke-web: ## Load the web build offline in headless Chromium and screenshot it 
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
 	@chrome=$$(command -v chromium-browser || command -v chromium || command -v google-chrome) || { echo "needs chromium or google-chrome"; exit 1; }; \
 	(cd $(DIST_WEB) && $(PYTHON) -m http.server $(PORT) >/dev/null 2>&1) & srv=$$!; sleep 1; \
-	timeout 120 $$chrome --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+	timeout 120 $$chrome --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --mute-audio \
 	  --window-size=1280,720 --virtual-time-budget=20000 --enable-logging=stderr --v=0 \
 	  --screenshot=/tmp/smoke-web.png "http://localhost:$(PORT)/?offline=1&map=burg" 2>&1 | grep CONSOLE | cut -c1-200 > /tmp/smoke-web.log; \
 	kill $$srv 2>/dev/null; \

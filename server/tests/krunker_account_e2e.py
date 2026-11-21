@@ -887,7 +887,7 @@ def run_web():
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     chrome_log = open(os.path.join(WORK, "web-chrome.log"), "w")
     chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader",
-                               "--enable-unsafe-swiftshader", "--user-data-dir=" + os.path.join(WORK, "web-chrome"),
+                               "--enable-unsafe-swiftshader", "--mute-audio", "--user-data-dir=" + os.path.join(WORK, "web-chrome"),
                                "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720", "about:blank"],
                               stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     console = []

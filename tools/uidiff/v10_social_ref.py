@@ -55,7 +55,7 @@ def main():
     os.makedirs(REF_DIR, exist_ok=True)
     os.makedirs(REG_DIR, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="v10-social-ref.", dir=os.path.expanduser("~/.cache")) as work, sync_playwright() as p:
-        browser = p.chromium.launch(args=["--hide-scrollbars", "--force-device-scale-factor=1"])
+        browser = p.chromium.launch(args=["--hide-scrollbars", "--mute-audio", "--force-device-scale-factor=1"])
         try:
             for name in NAMES:
                 d = dump(name, work)

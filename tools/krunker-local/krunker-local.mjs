@@ -299,7 +299,7 @@ async function check() {
   const rules = hostRules();
   const child = spawn(chrome, [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
-    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio", "--window-size=1280,720",
     `--host-resolver-rules=${rules.join(", ")}`, "--ignore-certificate-errors",
     `--user-data-dir=${profile}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
@@ -555,7 +555,7 @@ async function join() {
   const cdpPort = await freePort();
   const child = spawn(findChrome(), [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
-    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio", "--window-size=1280,720",
     `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
     `--user-data-dir=${path.join(cfg.runDir, process.env.KN_JOIN_PROFILE || "join-profile")}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
@@ -904,7 +904,7 @@ async function runPeer(ctx) {
   const cdpPort = await freePort();
   const child = spawn(findChrome(), [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
-    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio", "--window-size=1280,720",
     `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
     `--user-data-dir=${path.join(cfg.runDir, `playable-peer-${t0}`)}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
@@ -1046,7 +1046,7 @@ export async function playable(opts = {}) {
   const cdpPort = await freePort();
   const child = spawn(findChrome(), [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
-    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio", "--window-size=1280,720",
     `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
     `--user-data-dir=${path.join(cfg.runDir, `playable-${t0}`)}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });

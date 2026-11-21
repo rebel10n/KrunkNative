@@ -2650,7 +2650,7 @@ def chromium_clip_probe(label, url):
         return None
     (cdpp,) = kn_proto.free_ports(1)
     log = open(os.path.join(WORK, f"{label}-chrome.log"), "w")
-    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--autoplay-policy=no-user-gesture-required",
+    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--mute-audio", "--autoplay-policy=no-user-gesture-required",
                                "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "about:blank"],
                               stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     try:
@@ -4886,7 +4886,7 @@ def run_web(mode):
     httpd = ThreadingHTTPServer(("127.0.0.1", web), StaticHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     chrome_log = open(os.path.join(WORK, f"{label}-chrome.log"), "w")
-    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio",
                                "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
                                "about:blank"], stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     lines = []
@@ -5005,7 +5005,7 @@ def run_web_voice():
     httpd = ThreadingHTTPServer(("127.0.0.1", web), StaticHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     chrome_log = open(os.path.join(WORK, f"{label}-chrome.log"), "w")
-    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio",
                                "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required",
                                "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
                                "about:blank"], stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)

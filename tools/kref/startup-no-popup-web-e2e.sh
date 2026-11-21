@@ -25,7 +25,7 @@ sleep 1
 
 run_chrome() { # profile dir, then the mode
     local profile=$1 mode=$2 status=0
-    "$chrome" --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+    "$chrome" --headless=new --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --mute-audio \
         --window-size=1280,720 --user-data-dir="$profile" --remote-debugging-port=$CDPP about:blank > "$profile.log" 2>&1 &
     local chrome_pid=$!
     pids+=($chrome_pid)
