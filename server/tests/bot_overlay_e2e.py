@@ -98,7 +98,9 @@ def main():
                 "8700 quit\n")
     log = os.path.join(WORK, "client.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "KRUNKNATIVE_NO_BROWSER": "1",
+    env.update({"KRUNKNATIVE_HEADLESS": "1",
+                # the [mm] / [krunker] / [console] lines it reads reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
     with open(log, "w") as out:

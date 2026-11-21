@@ -252,7 +252,9 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
         write(os.path.join(tmp, name + ".script"), script)
         write(os.path.join(tmp, name + "-relaunch.script"), relaunch)
         cenv = dict(env)
-        cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": assets, "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"),
+        cenv.update({"KRUNKNATIVE_HEADLESS": "1",
+                     # "[update] restarting through ..." (update_ui.c) reaches the log only at level 1+ (5f55eef1)
+                     "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_ASSETS_DIR": assets, "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"),
                      "KRUNKNATIVE_LAUNCHER": os.path.join(inst, "BoxOffice"), "KRUNKNATIVE_UPDATES_URL": url,
                      "KRUNKNATIVE_INPUT_SCRIPT": os.path.join(tmp, name + ".script"),
                      "KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": os.path.join(tmp, name + "-relaunch.script"),
@@ -584,7 +586,9 @@ def main():
             script = os.path.join(tmp, "update-now.script")
             write(script, "0 play\n2500 down ESC\n2550 up ESC\n6000 con update now\n20000 quit\n")
             cenv = dict(env)
-            cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS_SRC,
+            cenv.update({"KRUNKNATIVE_HEADLESS": "1",
+                         # the "[update] ..." lines it reads reach the log only at level 1+ (5f55eef1)
+                         "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_ASSETS_DIR": ASSETS_SRC,
                          "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"), "KRUNKNATIVE_LAUNCHER": fake,
                          "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_NO_BROWSER": "1",
                          "KRUNKNATIVE_LOCAL_BUILD": "0"})  # a published build: a dev build's flag would hide the box

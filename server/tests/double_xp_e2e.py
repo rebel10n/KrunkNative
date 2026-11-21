@@ -11,9 +11,10 @@ session) then:
   1. plays a match in All or Nothing (KRUNKNATIVE_MODE=aon, a doubleXP mode) on the base page, so the
      in-game "2x XP" badge (#dxpHudBadge) shows; the end screen's Double XP button (v10 #doubleXPButton)
      is shown (v10: after every non-comp match);
-  2. presses it: no ad is shown, the client sends ["rqdxp"] once (games % 3 == 0), the brain answers ["rrqdxp",
-     {playerScore, xp, games}] and the XP Doubled! pop comes up; the offer is spent, and the button stays
-     (v10 hides nothing after the claim).
+  2. presses it: since 6d6fdd11 the placeholder rewarded ad plays first (kn_ad.c; KRUNKNATIVE_AD_SECONDS=0
+     makes it ready at once and the script clicks its Continue, .knAdContinue), then the client sends
+     ["rqdxp"] once (games % 3 == 0), the brain answers ["rrqdxp", {playerScore, xp, games}] and the XP
+     Doubled! pop comes up; the offer is spent, and the button stays (v10 hides nothing after the claim).
 The strike flavor runs the same account and offer with Krunker Strike's own markup: the lean end
 screen's Double XP button (.lean-end-screen__double-reward, "Collected" once spent) and the "2x XP"
 badge (.booster-time-left, FRVR's booster layout) in the doubleXP mode.
@@ -192,6 +193,7 @@ BASE_SCRIPT = """
 15000 nodes @button .doubleXPButton
 15000 text @label .doubleXPButton
 15100 clickid doubleXPButton
+15300 clicksel .knAdContinue
 16000 nodes @popup .dxp-header
 16000 text @popup-head .dxp-header
 16000 check @claimed doubleXPButton=1
@@ -199,7 +201,8 @@ BASE_SCRIPT = """
 """
 
 # Strike: the same account and offer; the end screen is LEAN_END_SCREEN and its Double XP is the reward row's
-# button (FRVR's lean end screen, a claimed offer reads Collected).
+# button (FRVR's lean end screen, a claimed offer reads Collected). The lean screen opens after the victory
+# banner's 2.5 s endAnim (dee971c6), ~10 s in: probed at 11 s. Strike's claim has no rewarded ad.
 STRIKE_SCRIPT = """
 0 menu
 300 con bot_add 1
@@ -207,7 +210,7 @@ STRIKE_SCRIPT = """
 1500 play
 3500 check @alive dxpBadge=0
 4000 con end
-10000 check @endanim leanEndScreen=1
+11000 check @endanim leanEndScreen=1
 15000 check @results leanEndScreen=1
 15000 nodes @button .lean-end-screen__double-reward .frvr-button
 15000 text @label .lean-end-screen__double-reward
@@ -248,7 +251,10 @@ def run_client(brain_port, script_text):
                 "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_FIXED_DELTA": "16.6667",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_ASSETS_DIR": os.path.join(REPO, "assets"),
-                "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{brain_port}"})
+                "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{brain_port}",
+                "KRUNKNATIVE_AD_SECONDS": "0",  # the placeholder ad (6d6fdd11) is ready at once: the script clicks Continue
+                # "[double_xp] doubled" and "[ad] placeholder ..." reach the log only at level 1/2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2"})
     args = ["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "--map", "kanji"]
     if FLAVOR == "strike":
         args += ["--flavor", "strike"]
@@ -297,8 +303,11 @@ def run():
         brain.stop()
     check("the client loaded the page and played the script", any("[input_script] vis" in l for l in lines), log)
     check("the stand-in brain logged the saved session in over the social socket", brain.logins >= 1, f"logins {brain.logins}")
-    check("no rewarded ad is shown for the claim (v10: the claim is sent at once)",
-          not any("[ad]" in l for l in lines))
+    if FLAVOR == "base":
+        check("the placeholder rewarded ad plays before the claim and completes (6d6fdd11)",
+              any("[ad] placeholder completed" in l for l in lines))
+    else:
+        check("Strike's claim shows no rewarded ad", not any("[ad]" in l for l in lines))
     check("exactly one claim: [\"rqdxp\"] on the social socket", brain.claims == [["rqdxp"]], repr(brain.claims))
     check("the client took the doubled score (rrqdxp's playerScore)",
           any(f"[double_xp] doubled: score {PLAYER_SCORE}" in l for l in lines))

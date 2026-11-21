@@ -66,7 +66,9 @@ def run_client(name, script, env_extra=None, timeout=240):
         f.write(script.strip() + "\n")
     log = os.path.join(WORK, f"{name}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1",
+                # the [mm] / [krunker] / [console] lines it reads reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_UPDATES_URL": "off"})

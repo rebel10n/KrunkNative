@@ -101,7 +101,9 @@ def run_client(name, cfg, script, brain_port):
         f.write(script)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_NO_BROWSER": "1",
+    env.update({"KRUNKNATIVE_HEADLESS": "1",
+                # the [mm] / [krunker] / [console] lines it reads reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_NO_BROWSER": "1",
                 "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, name + "-state"),
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
@@ -144,8 +146,11 @@ def main():
         cfg = os.path.join(WORK, "cfg-va")
         run_client("set-va", cfg, '0 call setSetting "defaultRegion" "VA"\n1500 quit\n', brain_port)
         log = run_client("boot-va", cfg, "0 boot\n6000 quit\n", brain_port)
-        check("unlisted default region (VA, us-nj) is logged and the seek goes on in local",
-              "[mm] default region us-nj is not in the matchmaker's list: seeking in local instead" in log,
+        # since 72c6f679 the startup seek is the hot seek (/mm/hot-seek with the saved region, answered by the brain
+        # in an available region): the client-side "not in the matchmaker's list" fallback only runs without it
+        check("unlisted default region (VA, us-nj): the seek goes on in local",
+              "[mm] default region us-nj is not in the matchmaker's list: seeking in local instead" in log
+              or re.search(r"\[mm\] hot seek: LOC1:\S+ in local", log) is not None,
               [l for l in log.splitlines() if "[mm]" in l][:4])
         check("an unlisted default region shows no error text", "not available" not in log and "seek failed" not in log and
               "Could not reach" not in log, [l for l in log.splitlines() if "fail" in l.lower() or "error" in l.lower()][:4])

@@ -16,9 +16,10 @@ startup seek lands in RLA; the console's `connect <RLB id>` moves it to RLB.
       back to a seek (lands in RLA) and says so ("[mm] reload: ... is gone")
   R3: in RLB, F5; while the new process starts, RLB fills up: the reload falls back to a seek
       (lands in RLA) and says so ("[mm] reload: ... is full")
-  R4: a lost session mid-match (the lobby's server is killed, then comes back): the client rejoins
-      the lobby through the matchmaker and is in the game again with no Play press (the HUD up, the
-      camera on the player), as a fresh join from Play is (menu_ui.c menu_resume_play)
+  R4: a lost session mid-match (the lobby's server is killed, then comes back): since dd41178a the
+      Lost Connection screen shows at once and nothing rejoins on a timer (v10: socket.onclose, Find
+      Game is a fresh seek); its Find Game (knRetry) seeks and joins a lobby again, and a respawn puts
+      the player in the game (the HUD up, the camera on the player)
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
 """
@@ -147,7 +148,9 @@ def client(name, brain_port, script, relaunch_script, mode):
         json.dump({"seek_modes": str(mode)}, f)  # Settings > Quickplay > Seek Mode: the startup seek lands in RLA
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+    env.update({"KRUNKNATIVE_HEADLESS": "1",
+                # the [mm] / [krunker] / [console] lines it reads reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": rpath,
                 "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
@@ -283,14 +286,17 @@ def probes(start, stop):
 
 def run_drop(brain_port):
     """R4: the lobby's server is killed mid-match (a lost session, no server ERROR) and comes back on the same
-    port: the client rejoins through the matchmaker, and it is in the game again with no Play press."""
+    port: Lost Connection at once and no rejoin on a timer (dd41178a); Find Game seeks a lobby again and a
+    respawn enters it."""
     p_d, game_d = start_node(brain_port, "RLD", PORT_D, "ffa", "Burg")
     check("RLD (the lobby that drops) up", game_d is not None, "")
     if not game_d:
         return
     # the startup seek takes RLD (the only lobby listed: RLA and RLC are stopped), `play` enters it; no
     # command after the drop (a `connect` would replace the rejoin: "any other matchmaking action")
-    script = "0 play\n" + probes(3000, 60000) + "65000 quit\n"
+    # input scripts run their lines in file order: Find Game and the respawn go in among the probes by time
+    lines = ("0 play\n" + probes(3000, 60000) + "20000 call knRetry\n25000 respawn\n65000 quit\n").splitlines()
+    script = "".join(l + "\n" for l in sorted(lines, key=lambda l: int(l.split()[0])))
     p, log = client("drop", brain_port, script, "0 quit\n", game_d[4]["mode"])
     entered = wait_for(lambda: in_game(states(read_log(log))), 60)
     check("R4: in RLD's game before the drop", entered, str(states(read_log(log))[-2:]))
@@ -306,11 +312,14 @@ def run_drop(brain_port):
     text = read_log(log)
     i = text.find("connection lost")
     after = text[i:] if i >= 0 else ""
-    check("R4: the lost session is rejoined through the matchmaker", "rejoining" in after, after[:300])
+    j = after.find("knRetry")
+    held, after = (after[:j], after[j:]) if j >= 0 else (after, "")
+    check("R4: the lost session shows Lost Connection at once (dd41178a)", "error screen: Lost connection" in held, held[:300])
+    check("R4: nothing rejoins on a timer before Find Game", not joined(held) and "rejoining" not in held, str(joined(held)))
     rjs = joined(after)
-    print("R4: lobbies joined after the drop: %s" % rjs, flush=True)
-    check("R4: the rejoin joined a lobby again", len(rjs) >= 1, str(rjs))
-    check("R4: and is in the game again with no Play press", in_game(states(after)), str(states(after)[-3:]))
+    print("R4: lobbies joined after Find Game: %s" % rjs, flush=True)
+    check("R4: Find Game (knRetry) seeks and joins a lobby again", len(rjs) >= 1, str(rjs))
+    check("R4: and a respawn puts the player in the game", in_game(states(after)), str(states(after)[-3:]))
     vis = re.findall(r"\[input_script\] vis t=\d+ @hud (.*)", after)
     hud = vis[-1] if vis else ""
     check("R4: the HUD is up (inGameUI and the ammo holder shown)", "inGameUI=1" in hud and "ammoHolder=1" in hud, hud)

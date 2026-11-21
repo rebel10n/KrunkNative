@@ -11,11 +11,11 @@ free_ports. Two headless client_bin runs against server_bin:
      transport retries (refused) while the page shows the loading spinner (.lds-ring) and no error box
      (.instructionsHeader absent). Server B starts; a retry connects, the client is in the game again,
      and the switch never showed the error screen ("[ui log] error screen" absent).
-  2. give up: the client plays on server A, which is then killed (no ERROR: a dropped session). The
-     spinner stays up through the transport's backoff; after NET_RETRY_BUDGET failures the transport
-     gives up: the Lost Connection box shows with v10's Find Game as its first tab (a server joined
-     directly, from the server list or the console's connect, says Reconnect) and the give-up text in
-     the log. Server A is started again and that tab (call knRetry) brings the client back in the game.
+  2. give up: the client plays on server A, which is then killed (no ERROR: a dropped session). Since
+     b1d947d5 / dd41178a a lost session ends at once (v10: socket.onclose shows the screen): no retry
+     behind the spinner, the Lost Connection box shows ("Lost connection to the server (no data for
+     10 s)", NET_SESSION_IDLE_SECONDS) with v10's Find Game as its first tab, and nothing reconnects
+     on its own. Server A is started again and that tab (call knRetry) brings the client back in the game.
 
 Samples are read with the input script's `nodes` / `text` lines (class selectors: the id selectors do
 not see the page's boot markup). Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL;
@@ -80,7 +80,9 @@ def start_client(name, args, script):
         f.write(script)
     log = os.path.join(WORK, f"{name}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1",
+                # the [mm] / [krunker] / [console] lines it reads reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_INPUT_SCRIPT": script_path,
                 "KRUNKNATIVE_WINDOW_SIZE": "640x360"})
@@ -170,15 +172,16 @@ def giveup_scenario():
     a = start_server(port_a, "a2")
     p, log = start_client("giveup", ["--connect", f"127.0.0.1:{port_a}"],
                           "0 play\n3000 state\n"
-                          "20000 nodes @spin .lds-ring\n20000 nodes @box .instructionsHeader\n"
+                          "20000 nodes @box .instructionsHeader\n"
                           "50000 nodes @box .instructionsHeader\n50100 text @tab .instructionsTab\n"
                           "53000 call knRetry\n53500 respawn\n58000 state\n60000 quit\n")
     seen = wait_for(lambda: "connected to server 127.0.0.1:%d" % port_a in read(log) and any(s["t"] >= 3000 for s in states(read(log))), 60)
     check("giveup: the client plays on the server", seen, read(log)[-300:])
     os.killpg(a.pid, signal.SIGKILL)  # no ERROR: the session drops
     a.wait()
-    gave_up = wait_for(lambda: "gave up after" in read(log), 90)
-    check("giveup: the transport gives up after the retry budget", gave_up, read(log)[-500:])
+    gave_up = wait_for(lambda: "[mm] connection lost" in read(log), 60)
+    check("giveup: the lost session ends at once (no transport retry, b1d947d5)", gave_up and "[net] retrying" not in read(log),
+          read(log)[-500:])
     # the server comes back; the client stays on the disconnected screen until Find Game
     connects_before = read(log).count("connected to server 127.0.0.1:%d" % port_a)
     a2 = start_server(port_a, "a2b")
@@ -188,17 +191,16 @@ def giveup_scenario():
     finish(p, 90)
     text = read(log)
     st = states(text)
-    during = nodes_at(text, "@spin", 20000, 20100)
-    check("giveup: the spinner shows while the transport retries", during and during[0] >= 1, str(during))
     early_box = nodes_at(text, "@box", 20000, 20100)
-    check("giveup: no error box while the transport still retries", early_box and early_box[0] == 0, str(early_box))
+    check("giveup: the Lost Connection box is already up at 20 s (no spinner limbo)", early_box and early_box[0] >= 1, str(early_box))
     final_box = nodes_at(text, "@box", 50000, 50100)
     check("giveup: the disconnected screen (Lost Connection box) shows when it gives up", final_box and final_box[0] >= 1, str(final_box))
     tab = text_at(text, "@tab", 50100, 50200)
     # v10's first tab is Find Game (g:222118); only a server joined directly (servers_ui.c direct_join) says Reconnect
     check("giveup: the disconnected screen's first tab is Find Game", tab and tab[0][2].strip() == "Find Game", str(tab))
     gave_log = [l for l in text.splitlines() if "[ui log] error screen" in l]
-    check("giveup: the error screen says the client gave up", any("gave up after" in l for l in gave_log), str(gave_log[:2]))
+    check("giveup: the error screen says the connection was lost",
+          any("Lost connection to the server" in l for l in gave_log), str(gave_log[:2]))
     check("giveup: Find Game reconnects to the server", text.count("connected to server 127.0.0.1:%d" % port_a) > connects_before,
           str(text.count("connected to server")))
     check("giveup: back in the game after Find Game", len(st) >= 2 and in_game(st[-1]), str(st[-2:]))

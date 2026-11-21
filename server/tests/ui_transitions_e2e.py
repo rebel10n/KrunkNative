@@ -135,7 +135,9 @@ def run_client(name, args, script, timeout=150, on_line=None, env_extra=None, st
         f.write(text)
     log = os.path.join(WORK, f"{name}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1",
+                # the [mm] / [krunker] / [console] lines it reads reach the log only at level 2 (5f55eef1)
+                "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": os.path.join(WORK, f"{name}-cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, f"{name}-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_UPDATES_URL": "off"})
@@ -1116,9 +1118,9 @@ def sc_om_tools():
 
 def sc_online():
     """Online: ESC / death on a server, offline and back online, disconnect / reconnect, then the
-    server goes away: the loading spinner while the transport retries (no error box), the Lost
-    Connection box once it gives up (NET_RETRY_BUDGET, ~50 s: connect_ux_e2e), ESC keeps the
-    error box (v7 f2040 is terminal), and `offline` leaves it."""
+    server goes away: the Lost Connection box as soon as the session is lost (b1d947d5 / dd41178a: no
+    transport retry behind the spinner, as v10; connect_ux_e2e), ESC keeps the error box (v7 f2040 is
+    terminal), and `offline` leaves it."""
     server, port = start_server("online")
     killed = []
 
@@ -1149,7 +1151,7 @@ def sc_online():
             20000 respawn
             22000 check @reconnected {HUD}
             22500 check @kill-server inGameUI=?
-            34000 check @lost-retrying instructionsUpdate=0 inGameUI=0 chatHolder=0
+            34000 check @lost-at-once instructionsUpdate=1 inGameUI=0 chatHolder=0
             75000 check @lost-connection instructionsUpdate=1 menuHolder=0 inGameUI=0 chatHolder=0
             75500 esc
             76500 check @lost-connection-esc instructionsUpdate=1 inGameUI=0
@@ -1165,8 +1167,8 @@ def sc_online():
 
 
 def sc_lost_during_end():
-    """The server goes away while the results show: not the old results, the spinner while the
-    transport retries, then the Lost Connection box once it gives up."""
+    """The server goes away while the results show: not the old results; the Lost Connection box comes up
+    as soon as the session is lost (b1d947d5 / dd41178a: no transport retry behind the spinner, as v10)."""
     server, port = start_server("lost-end")
     killed = []
 
@@ -1181,7 +1183,7 @@ def sc_lost_during_end():
             1000 con end
             12000 check @end endUI=1 matchVoteHolder=? :cursor=1
             12100 check @kill-server endUI=?
-            24000 check @lost-retrying instructionsUpdate=0 endUI=0
+            24000 check @lost-at-once instructionsUpdate=1 endUI=0
             64000 check @lost instructionsUpdate=1 endUI=0
             64500 esc
             65500 check @lost-esc instructionsUpdate=1 endUI=0
