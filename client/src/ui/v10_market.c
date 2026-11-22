@@ -35,6 +35,11 @@
 //                                                         / ["trC"] / ["trCA"]
 //   /trades/player-search, /trades/inventory/<id>         ["sp"] / ["ri"]
 //   /market/black-market(/purchase)                       the store table / ["pbm"]
+// A krunker.io account (kio_store_active) reads krunker.io's gapi instead (v10_gapi, kio_store_write): the listings and
+// stats, /market/sales, /market/history (kio_history_done), /items/<i>/view for the detail's stats, owners and listings
+// (kio_view_done), /market/items/<i>/sales-statistics and /items/<i>/sales for its charts (kio_sales_stats_done), and
+// the writes market/purchase|list|unlist|quick-sell, market/black-market/purchase and trades/* (kio_act_send); the
+// row shapes are kio_market.h's and kio_trade.h's.
 // Quick Sell's Junk is the Junk wallet's (doc/v10/junk.md: "qsi" mode 1, the inventory rows' qj). What
 // does not exist here: item instances (wear, mints, serials, styles, name tags: an item is a stack or a
 // painted copy) and the 3D showcase. The estimates of
@@ -54,6 +59,7 @@
 #include <kio_trade.h> // krunker.io's trades: the create body and the trade paths (deob-10.0.4.js:27162-27193)
 #include <backend.h> // backend_url_encode: the player search's name
 #include <kio_inventory.h> // krunker.io active: the official inventory's stack ids (quick sell, list)
+#include <kio_market.h>    // krunker.io active: the History, item detail and Black Market buy paths and rows
 #include <v10_bulk.h>      // List Items (both accounts) and Buy Multiple (krunker.io) (deob-10.0.4.js:131877-132185, :132755-132945)
 #include <inv_source.h>    // the select mode's inventory: krunker.io's official one or the Box Office account's
 #include <v10_social.h> // krunker.io active: the listings are v10's gapi reads (kio_browse_load)
@@ -403,6 +409,12 @@ static int send_frame(cJSON *f) {
         M.wait_timer = html_timer_add(MARKET_WAIT_MS, reads_expired, NULL);
     }
     return sent;
+}
+
+// a krunker.io read in flight (v10_gapi): the same deadline as a socket read, so its screen fails instead of loading for good
+static void kio_read_arm(void) {
+    html_timer_cancel(M.wait_timer);
+    M.wait_timer = html_timer_add(MARKET_WAIT_MS, reads_expired, NULL);
 }
 
 // ["r", page, sub, K, q, s, region, item]: the brain's market pages
@@ -909,9 +921,31 @@ static void sales_load(void) {
     }
     if (!request_page("market", "sales", -1)) M.sales_loading = 0;
 }
+// krunker.io's history (v10 market.getHistory, gapi GET /market/history?sort=newest&limit=50, v10:26948; the table's
+// reader deob-10.0.3.js:147567, 150717): {history: [{type, date, skinindex, amount, other_party_name, status}]}, the
+// History table's rows once other_party_name is its Who (kio_market_history_rows). An error keeps the rows we have.
+static void kio_history_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    if (!M.hist_loading) return; // the read expired (reads_expired) or the exchange was closed
+    M.hist_loading = 0;
+    if (status == 200 && cJSON_IsObject(data)) {
+        cJSON_Delete(M.hist);
+        M.hist = kio_market_history_rows(data);
+    }
+    render_both();
+}
+
 static void history_load(void) {
     if (!logged_in() || M.hist_loading) return;
     M.hist_loading = 1;
+    if (kio_store_active()) {
+        char path[64];
+        kio_market_history_path(path, sizeof(path));
+        if (v10_gapi("GET", path, NULL, kio_history_done, NULL)) kio_read_arm();
+        else M.hist_loading = 0;
+        return;
+    }
     if (!request_page("market", "history", -1)) M.hist_loading = 0;
 }
 // krunker.io's Stats (v10's market.getStats, gapi GET /market/stats, v10:26882): the first page of {stats: rows} in
@@ -1028,9 +1062,73 @@ static const cJSON *inv_unit(const int index, const int sid) {
     return NULL;
 }
 
+// krunker.io's item view (v10 items.getView, gapi GET /items/<i>/view, v10:26957; its reader deob-10.0.3.js:122532,
+// 123271-123335): {stats: {ind, onS, inC, high, low}, owners: [{nm, ct, su, ft, cr}], sales, listings, ...}. The stats and
+// owners are the economy's "itemsales" reply as they are; the listings (marketid, skinindex, price, seller_name,
+// listed_time) become the detail's listing rows (kio_market_view_listings), so the one read fills Listings and Owners.
+// An answer for an item no longer shown is dropped; an error is the tabs' load failure.
+static void kio_view_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) error;
+    const int item = (int) (intptr_t) user;
+    if (item != M.data_item || (!M.dview_loading && !M.dlist_loading)) return;
+    M.dview_loading = M.dlist_loading = 0;
+    if (status != 200 || !cJSON_IsObject(data)) {
+        M.lost |= LOST_DVIEW | LOST_DLIST;
+        render_both();
+        return;
+    }
+    M.lost &= ~(LOST_DVIEW | LOST_DLIST);
+    const cJSON *stats = cJSON_GetObjectItemCaseSensitive(data, "stats");
+    cJSON_Delete(M.dview);
+    M.dview = cJSON_IsObject(stats) ? cJSON_Duplicate(stats, 1) : cJSON_CreateObject();
+    const cJSON *owners = cJSON_GetObjectItemCaseSensitive(data, "owners");
+    cJSON_Delete(M.downers);
+    M.downers = cJSON_IsArray(owners) ? cJSON_Duplicate(owners, 1) : cJSON_CreateArray();
+    cJSON_Delete(M.dlist);
+    M.dlist = kio_market_view_listings(cJSON_GetObjectItemCaseSensitive(data, "listings"), item);
+    render_both();
+}
+
+static void kio_view_load(void) {
+    if (M.dview_loading && M.dlist_loading) return; // one view read fills both
+    char path[48];
+    M.dview_loading = M.dlist_loading = 1;
+    M.lost &= ~(LOST_DVIEW | LOST_DLIST);
+    if (kio_market_view_path(path, sizeof(path), M.data_item) && v10_gapi("GET", path, NULL, kio_view_done, (void *) (intptr_t) M.data_item)) {
+        kio_read_arm();
+        return;
+    }
+    M.dview_loading = M.dlist_loading = 0;
+    M.lost |= LOST_DVIEW | LOST_DLIST;
+}
+
+// krunker.io's sales chart: Listing Details' Stats tab (days: market.getItemSalesStatistics, gapi GET
+// /market/items/<i>/sales-statistics?daysback=<d>, v10:26895, reader deob-10.0.3.js:151414) or the Catalog item page's
+// Sales / Units Sold (a range index: items.getSales, GET /items/<i>/sales?range=<r>, v10:26963, reader :123825); both
+// answer [{d, f, t}], the economy's "gd" rows. user packs the item and the kind (range or days) it was asked for.
+static void kio_sales_stats_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) error;
+    const intptr_t packed = (intptr_t) user;
+    const int item = (int) (packed >> 1), range = (int) (packed & 1);
+    if (item != M.data_item || range != M.dgd_range || !M.dgd_loading) return;
+    M.dgd_loading = 0;
+    if (status != 200 || !cJSON_IsArray(data)) {
+        M.lost |= LOST_DGD;
+    } else {
+        M.lost &= ~LOST_DGD;
+        cJSON_Delete(M.dgd);
+        M.dgd = kio_market_sales_rows(data);
+    }
+    render_both();
+}
+
 // the item's listings (the detail's Listings tab): ["r","market","market",..,item]
 static void detail_listings_load(void) {
     if (M.data_item < 0) return;
+    if (kio_store_active()) { // krunker.io: the item view's listings (kio_view_load)
+        kio_view_load();
+        return;
+    }
     M.dlist_loading = 1;
     M.lost &= ~LOST_DLIST;
     if (!request_page("market", "market", M.data_item)) {
@@ -1046,6 +1144,18 @@ static void detail_stats_load(const int days_or_range) {
     M.dgd_range = days_or_range < 7;
     cJSON_Delete(M.dgd);
     M.dgd = NULL;
+    if (kio_store_active()) {
+        char path[96];
+        const intptr_t packed = ((intptr_t) M.data_item << 1) | (intptr_t) (M.dgd_range != 0);
+        if (kio_market_sales_path(path, sizeof(path), M.data_item, days_or_range) &&
+            v10_gapi("GET", path, NULL, kio_sales_stats_done, (void *) packed)) {
+            kio_read_arm();
+        } else {
+            M.dgd_loading = 0;
+            M.lost |= LOST_DGD;
+        }
+        return;
+    }
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("st"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(M.data_item));
@@ -1058,6 +1168,10 @@ static void detail_stats_load(const int days_or_range) {
 // owners + market stats: ["r","itemsales",..,item] -> ["0","itemsales",sub,{ind,onS,inC,high,low},owners]
 static void detail_view_load(void) {
     if (M.data_item < 0) return;
+    if (kio_store_active()) { // krunker.io: GET /items/<i>/view (kio_view_load)
+        kio_view_load();
+        return;
+    }
     M.dview_loading = 1;
     M.lost &= ~LOST_DVIEW;
     if (!request_page("itemsales", NULL, M.data_item)) {
@@ -3352,8 +3466,8 @@ static void open_create_trade(const int id, const char *name) {
     render_modal();
 }
 
-// krunker.io is the active backend: the actions not yet sent to krunker.io (the Black Market, trades)
-// are refused: the market's error modal says so and nothing is sent. 1 = refused.
+// krunker.io is the active backend: an action not sent to krunker.io (every modal action has a krunker.io path
+// now: confirm_modal's list) is refused: the market's error modal says so and nothing is sent. 1 = refused.
 static int kio_refused(const char *what) {
     if (!kio_store_active()) return 0;
     printf("[kio-store] market %s not sent to krunker.io yet\n", what);
@@ -3404,6 +3518,10 @@ static void kio_act_answer(void *user, const int status, const cJSON *data, cons
         cJSON *o = cJSON_CreateObject();
         if (cJSON_IsNumber(fv)) cJSON_AddNumberToObject(o, "funds", fv->valuedouble);
         kio_reply("trR", o, NULL);
+    } else if (act == ACT_BM) { // "bmr": {item, kr, f[, title]} from {item, kr, funds[, title]} (deob-10.0.3.js:152786-152831)
+        const AccountInfo *a = acc();
+        cJSON *o = kio_market_bm_reply(data, M.bm_buying, a ? a->funds : 0);
+        kio_reply("bmr", o ? o : cJSON_CreateNull(), NULL);
     } else if (act == ACT_DECLINE_ALL) { // "pRes": the declined-all answer (SUCCESS / ERROR)
         kio_reply("pRes", cJSON_CreateString("SUCCESS"), NULL);
     } else { // ACT_QS: the stack's count left (the economy's "c"), funds, and the sale's kind (kr / jnk) as "qsr" reads them
@@ -3621,7 +3739,7 @@ static void trade_action(const char *label, const int id, const int act) {
 
 static void confirm_modal(void) {
     if (M.modal != MODAL_NONE && M.modal != MODAL_START && M.modal != MODAL_PURCHASE && M.modal != MODAL_LIST && M.modal != MODAL_UNLIST
-        && M.modal != MODAL_DECLINE_ALL && M.modal != MODAL_TRADE_CONFIRM && kio_refused("action")) return;
+        && M.modal != MODAL_BM && M.modal != MODAL_DECLINE_ALL && M.modal != MODAL_TRADE_CONFIRM && kio_refused("action")) return;
     const AccountInfo *a = acc();
     switch (M.modal) {
         case MODAL_PURCHASE: {
@@ -3721,6 +3839,11 @@ static void confirm_modal(void) {
             if (!a) return;
             M.bm_buying = M.sel_skin;
             M.pending = ACT_BM;
+            if (kio_store_active()) { // market.purchaseBlackMarketItem {item_index} (POST market/black-market/purchase, v10:26934)
+                kio_act_send(ACT_BM, 0, "POST", "market/black-market/purchase", kio_market_bm_body(M.sel_skin));
+                render_both();
+                break;
+            }
             const double v[1] = {M.sel_skin};
             send_econ("pbm", 1, v, M.op);
             render_both();

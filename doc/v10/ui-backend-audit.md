@@ -34,9 +34,9 @@ Hosts: `gapi` = gapi.svc.krunker.io (v10 `_10449`, KRUNKER_SVC_API, the `/api` b
 | 9 | Market Browse (listings) | client/src/ui/v10_market.c `kio_browse_load` / `kio_browse_done` | GET /market/listings | gapi | krunker.io gapi (was: "No listings available") | economy socket (brain) | mismatch (fixed) | kio_market_e2e 1 |
 | 10 | Market Stats (per-skin circulation, on sale, low / high) | v10_market.c `stats_load`, `kio_stats_done` | GET /market/stats | gapi | krunker.io gapi (v10 rows: ski, inC, onS, low, high) | economy socket (brain) | mismatch (fixed) | kio_market_e2e 2. The freeze on Stats is another owner's; view_stats is untouched |
 | 11 | Market Inventory | v10_market.c `request_page("market","inventory")` | economy frame (socket) | brain socket | v10 has GET /market/inventory (gapi) but no KN row mapping yet: empty list | brain | mismatch (open) | v10.js 26862 |
-| 12 | Market Sales / History | v10_market.c | economy frames | brain socket | v10 has GET /market/sales, /market/history (gapi): not mapped yet, empty | brain | mismatch (open) | v10.js 26867, 26948 |
-| 13 | Market item detail (listings, sales, owners, statistics) | v10_market.c `detail_listings_load`, `detail_stats_load` | economy frames ["r","market",..], ["st", ...] | brain socket | v10 has GET /items/<i>/view, /market/items/<i>/sales(-statistics) (gapi): not mapped yet, empty | brain | mismatch (open) | v10.js 26887-26895, 26957 |
-| 14 | Market Black Market | v10_market.c | economy frames | brain socket | v10 has GET /market/black-market (gapi): not mapped yet | brain | mismatch (open) | v10.js 26924 |
+| 12 | Market Sales / History | v10_market.c `sales_load` / `kio_sales_done`, `history_load` / `kio_history_done` | GET market/sales, GET /market/history?sort=newest&limit=50 | gapi | krunker.io gapi; history rows {type, date, skinindex, amount, other_party_name, status} (kio_market.c) (was: empty) | economy socket (brain) | mismatch (fixed) | kio_market_e2e (History); kio_market_test; v10.js 26867, 26948 |
+| 13 | Market item detail (listings, sales, owners, statistics) | v10_market.c `kio_view_load` / `kio_view_done`, `detail_stats_load` / `kio_sales_stats_done` | GET /items/<i>/view (stats, owners, listings), /market/items/<i>/sales-statistics?daysback=, /items/<i>/sales?range= | gapi | krunker.io gapi (was: loading, then the load failure) | economy socket (brain) | mismatch (fixed) | kio_market_e2e (Listing Details, item page); kio_market_test; v10.js 26895, 26957, 26963 |
+| 14 | Market Black Market | v10_market.c | GET /market/black-market (owned list, rank); POST market/black-market/purchase | gapi | the buy: krunker.io's purchase {item_index} (was: refused, "not in KrunkNative yet"); the owned list and the rank are not read yet | brain | mismatch (open) | buy: kio_market_e2e (Black Market); list: v10.js 26924-26929 |
 | 15 | Market trades, list, buy, unlist, quick-sell | v10_market.c `kio_refused` | POST writes | brain socket | read-only notice, nothing sent (kio_store.h) | brain | no source | writes are not ported for krunker.io |
 | 16 | Store home: bundle grid (bundleCols) | store_ui.c `v10_store_home` | none (bundles are the game's ALL_BUNDLE_DATA packet) | none | empty, as v10 is without a bundle | empty: the brain has no bundles | no source | v10.js ALL_BUNDLE_DATA -> `_69845`; brain has no bundle table |
 | 17 | Store Eterno Shop (limited displays, products) | store_ui.c, junk_shop_ui.c, kio_store.c | GET /api/shop/displays?tag=limited | gapi `/shop/displays` (kio_store, KRUNKER_SVC_API) | krunker.io's display (kio_store_display_html) | brain display: no products in shop_products (the migration seeds none), so v10's "No offers right now" | no source (Box Office: no products); ok (official) | kio-store-e2e 2-4 |
@@ -57,16 +57,16 @@ Hosts: `gapi` = gapi.svc.krunker.io (v10 `_10449`, KRUNKER_SVC_API, the `/api` b
 | 32 | Clan Turf banner, loot config and transfer writes | clan_ui.c | POST / PUT / DELETE on the clan | brain | not sent (writes not ported) | brain | no source | clan_ui.c |
 | 33 | Community maps (published map data) | community_maps.c | GET /api/map-data?name= | brain | gated: not sent, the map falls back to the bundled copy | brain | no source | backend_http_get |
 | 34 | Avatar | avatar_ui.c | GET/POST /api/account/avatar | brain | gated: not sent; no krunker.io avatar read in this client | brain | no source | avatar_ui.c 137-180 |
-| 35 | Lottery (raffle) | v10_misc_popups.c | GET /api/lottery/<id> | brain | not sent: the answer is -1 and the popup shows its load failure | brain (lottery.c) | mismatch (open) | v10_misc_popups.c 521 |
+| 35 | Lottery (raffle) | v10_misc_popups.c | GET /api/lottery/<id> (krunker_kio_gapi_path: /lottery/<id>), POST lottery/<id>/participate | gapi | krunker.io gapi with the Bearer (was: not sent, the popup showed its load failure) | brain (lottery.c) | mismatch (fixed) | kio_market_e2e (lottery); krunker_kio_routes_test 6b; v10.js 26566-26571 |
 | 36 | Guest Unclaimed Rewards | v10_rewards.c | GET guest profile (backend_http_get) | brain | gated: nothing shown | brain guest ledger | no source | v10_rewards.c 177 |
-| 37 | Studios | v10_studios.c | gapi /studios/* | gapi | not sent: /studios/ is not in kio_readable | brain | mismatch (open) | v10_gapi.c kio_readable |
+| 37 | Studios | v10_studios.c | gapi /studios/* | gapi | krunker.io gapi: the GET reads (/studios/ in kio_readable); writes not sent (was: nothing sent) | brain | mismatch (fixed) | kio_market_e2e (Studios); v10.js 27371-27480 |
 | 38 | Krunker Strike menus (economy, missions, feedback) | strike_*.c | /v1/* on the Strike brain | strike brain | no krunker.io Strike: not sent | strike brain | no source | strike_econ.c |
 | 39 | Web push subscription | web_push.c | /api/push/* | brain | not sent (browser only) | brain | no source | web_push.c 18-20 |
 
 ## Counts
 
-39 screens: **ok 13** (rows 18-30), **mismatch (fixed) 8** (rows 1-6, 9, 10), **mismatch (open) 7** (rows 11-14,
-31, 35, 37), **no source 11** (rows 7, 8, 15, 16, 17, 32-34, 36, 38, 39; row 17 is ok on the official type and
+39 screens: **ok 13** (rows 18-30), **mismatch (fixed) 12** (rows 1-6, 9, 10, 12, 13, 35, 37), **mismatch (open) 3**
+(rows 11, 14, 31), **no source 11** (rows 7, 8, 15, 16, 17, 32-34, 36, 38, 39; row 17 is ok on the official type and
 no source on Box Office, as its Box Office side has no products).
 
 ## Not traced here

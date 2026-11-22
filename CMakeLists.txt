@@ -1693,6 +1693,12 @@ else ()
     target_include_directories(kio_trade_test PRIVATE client/include shared/include)
     target_link_libraries(kio_trade_test PRIVATE cJSON m)
     add_test(NAME kio_trade_test COMMAND kio_trade_test)
+    # kio_market_test: a krunker.io account's market reads and Black Market buy (client/src/ui/kio_market.c): the paths of
+    # market/history, items/<i>/view, the sales charts, and their answers as the economy's rows (v10:26895-26963)
+    add_executable(kio_market_test client/tests/kio_market_test.c client/src/ui/kio_market.c)
+    target_include_directories(kio_market_test PRIVATE client/include shared/include)
+    target_link_libraries(kio_market_test PRIVATE cJSON m)
+    add_test(NAME kio_market_test COMMAND kio_market_test)
     # shop_counts_test: a display's purchase counts after a purchase (client/src/ui/shop_counts.c; updateDisplayPurchaseCount,
     # deob-10.0.6.js:115979-116030)
     add_executable(shop_counts_test client/tests/shop_counts_test.c client/src/ui/shop_counts.c)

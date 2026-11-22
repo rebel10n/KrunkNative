@@ -807,7 +807,7 @@ kio-turf-e2e: build ## Turf Wars on an official krunker.io game (turf_ui.c): the
 	timeout 400 $(PYTHON) -I server/tests/kio_turf_e2e.py $(DEBUG_DIR)
 
 .PHONY: kio-market-e2e
-kio-market-e2e: build ## The Market on an official krunker.io game (v10_market.c): the Browse grid lists krunker.io's listings and the Stats tab its stats (gapi /market, signed in; krunker.io stubs, headless)
+kio-market-e2e: build ## The Market, lottery and Studios on an official krunker.io game (v10_market.c, v10_misc_popups.c, v10_studios.c): Browse, Stats, History, Listing Details, the item page's sales and a Black Market buy, a lottery entry and the studio list from krunker.io's gapi (signed in; krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I server/tests/kio_market_e2e.py $(DEBUG_DIR)
 
 .PHONY: ranked-krunker-e2e

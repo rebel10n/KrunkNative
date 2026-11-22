@@ -107,6 +107,31 @@ GAPI_READS = {
     "/api/territorial-wars/clan/%d/payouts" % TURF_CLAN_ID: [],
     "/api/clans/by-name/%s" % TURF_CLAN: {"clan_id": TURF_CLAN_ID, "clan_name": TURF_CLAN},
 }
+# the Market's account and item reads (v10 market.getHistory v10:26948, items.getView v10:26957, items.getSales v10:26963,
+# market.getItemSalesStatistics v10:26895), the Studios window's (studios.getMyStudios / getMyStudioInvites, v10:27371-27401)
+# and the lottery's view (lottery.getLottery, v10:26566), in the shapes v10 reads (the brain's same routes:
+# services/brain/tests/v10_api_market_test.py, services/brain/lottery.c). Item 1 is the listed item; today has 4 sales.
+MARKET_HISTORY_PARTY, MARKET_OWNER, KIO_STUDIO, KIO_LOTTERY = "KioBuyer", "KioOwner", "KioStudio", "Kio Raffle"
+MARKET_TODAY = time.strftime("%Y-%m-%d")
+GAPI_READS.update({
+    "/api/market/history": {"history": [{"type": "sell", "date": "2026-11-20T10:00:00.000Z", "skinindex": 1, "amount": 777,
+                                         "other_party_name": MARKET_HISTORY_PARTY, "status": "completed"}],
+                            "has_more": False, "next_cursor": None},
+    "/api/items/1/view": {"stats": {"ind": 1, "onS": 3, "inC": 42, "high": 900, "low": 100},
+                          "owners": [{"nm": MARKET_OWNER, "ct": 2, "su": 0, "ft": 0, "cr": 0}],
+                          "sales": [{"d": MARKET_TODAY, "f": 2000, "t": 4}],
+                          "listings": [{"marketid": 555, "skinindex": 1, "price": 1234, "seller_name": MARKET_SELLER, "seller_id": 9,
+                                        "listed_time": "2026-11-20T10:00:00.000Z"}],
+                          "stackable": True, "wearable": False},
+    "/api/market/items/1/sales-statistics": [{"d": MARKET_TODAY, "f": 2000, "t": 4}],
+    "/api/items/1/sales": [{"d": MARKET_TODAY, "f": 2000, "t": 4}],
+    "/api/studios/mine": [{"id": 31, "name": KIO_STUDIO, "owner": ACCOUNT_NAME, "role": 1, "member_count": 2}],
+    "/api/studios/invites": [],
+    "/api/lottery/3": {"lottery": {"id": 3, "title": KIO_LOTTERY, "theme": "neutral", "frequency": 24},
+                       "current_draw": {"id": 1, "ends_at": "2099-01-01T00:00:00Z", "prizes": []},
+                       "costs": [{"cost_type": "currency", "cost_ref": 1, "cost_quantity": 100, "num_entries": 1}],
+                       "previous_draws": []},
+})
 
 LOBBIES = [  # [id, region, players, max, data, timeLeft]: one mode (0), so one KRUNKER.IO group
     ["TEST:full", "de-fra", 8, 8, {"i": "Kanji", "g": 0}, 200],   # full
@@ -429,6 +454,16 @@ class Stub:
                         self.reply(200, {"data": {"type": "login_ok", "access_token": stub.access1, "refresh_token": REFRESH1}, "error": None})
                     else:
                         self.reply(200, {"data": None, "error": "Invalid 2FA code"})
+                elif path == "/api/market/black-market/purchase":  # market.purchaseBlackMarketItem {item_index} (v10:26934)
+                    if self.headers.get("Authorization", "") in ("Bearer " + stub.access1, "Bearer " + stub.access2):
+                        self.reply(200, {"data": {"item": body.get("item_index"), "kr": 3000, "funds": 2000}, "error": None})
+                    else:
+                        self.reply(401, {"data": None, "error": {"code": "LOGIN_REQUIRED", "message": "Must be logged in"}})
+                elif path == "/api/lottery/3/participate":  # lottery.participateInLottery (v10:26571)
+                    if self.headers.get("Authorization", "") in ("Bearer " + stub.access1, "Bearer " + stub.access2):
+                        self.reply(200, {"data": {"player_entries": 1, "total_entries": 10}, "error": None})
+                    else:
+                        self.reply(401, {"data": None, "error": {"code": "LOGIN_REQUIRED", "message": "Must be logged in"}})
                 elif path == "/frvr/v1/auth/refresh":
                     if body.get("refreshToken") in stub.refresh_ok:
                         self.reply(201, {"accessToken": stub.access2, "refreshToken": REFRESH2})
