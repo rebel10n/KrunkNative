@@ -98,6 +98,15 @@ keeps no medal counts). v10's own tab ids 0-4 are unchanged, so `switchStat(0..4
 Account window's main tabs are v10.0.3's `profileTabs` with no KrunkNative tab (v7's Partner and promo
 code tabs were dropped with v10).
 
+## The 2-Factor popup on the game page (`#twoFAPop`)
+
+v10 has no 2FA code popup on any page (krunker.io's 2FA runs through its own login card). Box Office
+accounts keep v7.1.4's brain 2FA: Account Security's Enable 2FA (QR code, then six code inputs) and a 2FA
+login. `client/src/ui/account_ui.c` (`twofa_res`) shows both in v7.1.4's `#twoFAPop`, so the game page
+(`ui/index.html`), like the hub and the editor, carries that popup and `css/kn-twofa.css`
+(`tools/ui-import/v10_hub_editor.py` `add_twofa`; the game page's variant `KN_TWOFA_GAME` has the QR
+block). Test: `services/brain/tests/email_verify_web_e2e.py` (CTest `brain_email_web_e2e`).
+
 ## Intentional fixes where v10.0.3 itself is wrong (user, 2026-10-25)
 
 The user chose "keep the fixes, documented" over copying v10.0.3 bug for bug. These are deliberate

@@ -3,9 +3,9 @@
 headless Chromium on the Emscripten build (dist/web) against kn_brain (sqlite) and
 services/common/tests/fake_smtp.py.
 
-  register in the menu's account window with an email -> the verification mail arrives at the
-  fake SMTP server -> its link (fetched like a mail client would) verifies the address -> the open
-  menu's Account Security block turns "Verified" (the "emailS" push) -> Enable 2FA shows v7's popup
+  register in the menu's v10 login modal (Register here) with an email -> the verification mail arrives
+  at the fake SMTP server -> its link (fetched like a mail client would) verifies the address -> the open
+  Account window's Account Security block turns "Verified" (the "emailS" push) -> Enable 2FA shows v7's popup
   with the QR code -> the six code inputs (typed into, as a player would) enable it -> "Disable".
 
   email_verify_web_e2e.py <native build dir> <repo root> [<web dist dir>]
@@ -147,22 +147,37 @@ async def scenario(http_port, cdp_port, brain_port, smtp, db_path, work):
     ok = await c.wait("!!document.querySelector('[onclick*=\"showWindow(5)\"]')", 180)
     check(ok, "menu up")
     await asyncio.sleep(2)
+    # a guest's showWindow(5) is v10's login modal (v10_login.c: #knV10Login, the login card in Email mode);
+    # "Register here" (#knV10AuthSwitch) turns it into the register card: Email, Username, Password
     await c.eval("document.querySelector('[onclick*=\"showWindow(5)\"]').click()")
-    ok = await c.wait("!!document.getElementById('accEmail')", 30)
-    check(ok, "the account window has the email field")
+    ok = await c.wait("!!document.querySelector('#knV10Login #accEmail')", 30)
+    check(ok, "the login modal has the email field")
+    await c.eval("document.getElementById('knV10AuthSwitch').click()")
+    ok = await c.wait("!!document.querySelector('#knV10Login #accEmail') && !!document.getElementById('accName') && "
+                      "!!document.getElementById('accPass')", 10)
+    check(ok, "Register here: the register card has Email, Username and Password")
     await c.eval("""(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v;
         e.dispatchEvent(new Event('input', {bubbles: true})); };
-        set('accName', %s); set('accPass', 'web_pass_1'); set('accEmail', %s);
-        document.querySelector('.accBtn.buttonP').click(); })()""" % (json.dumps(name), json.dumps(addr)))
-    ok = await c.wait("!!document.querySelector('[onclick*=\"logoutAcc\"]')", 30)
+        set('accEmail', %s); set('accName', %s); set('accPass', 'web_pass_1');
+        document.getElementById('knV10LoginSubmit').click(); })()""" % (json.dumps(addr), json.dumps(name)))
+    # signed in: v10_menu.c's header shows #signedInHeaderBar for #signedOutHeaderBar, and the modal leaves
+    # (v10_login_account_changed)
+    ok = await c.wait("(() => { const i = document.getElementById('signedInHeaderBar'), o = document.getElementById('signedOutHeaderBar');"
+                      " return !!i && getComputedStyle(i).display !== 'none' && (!o || getComputedStyle(o).display === 'none') &&"
+                      " !document.getElementById('knV10Login'); })()", 30)
     check(ok, "registered and logged in through the menu")
+    # signed in, showWindow(5) (the header's #knV10Profile) is the Account window (account_ui.c gen_account)
+    await c.eval("document.getElementById('knV10Profile').click()")
+    ok = await c.wait("!!document.querySelector('#menuWindow [onclick*=\"logoutAcc\"]')", 20)
+    check(ok, "the profile opens the Account window")
     mails = smtp.wait_messages(1, 30)
     check(len(mails) == 1 and mails[0]["rcpt"] == [addr], "the verification mail reached the SMTP server")
     link = mail_token(mails[0]) if mails else None
     check(link and link.startswith("http://127.0.0.1:%d/auth/verify-email?token=" % brain_port), "the mail links to this brain")
 
-    # Account Security (windows[4] tab 3): unverified, then the link -> "Verified" without a reload
-    await c.eval("document.querySelector('[onclick*=\"switchTab(3)\"]').click()")
+    # Account Security (v10's profileTabs: windows[4] tab 2, Settings): unverified, then the link -> "Verified"
+    # without a reload
+    await c.eval("document.querySelector('[onclick*=\"windows[4].switchTab(2)\"]').click()")
     ok = await c.wait("document.getElementById('emailRes') && document.getElementById('menuWindow').innerText.includes('Not verified')", 20)
     check(ok, "Account Security shows the address as not verified")
     await c.shot(os.path.join(work, "email-unverified.png"))

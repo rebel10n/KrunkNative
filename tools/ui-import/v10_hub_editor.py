@@ -79,6 +79,26 @@ KN_TWOFA = ('<div id="twoFAPop" style="display:none"><div id="twoFAWindow"><div 
             '<div id="twoFAmsg">Enter Verification Code</div><form id="twoFAForm"></form>'
             '<div id="twoFAbtn" onclick="sub2FA()">Submit</div></div></div>')
 KN_TWOFA_CSS = "css/kn-twofa.css"
+# the game page's variant (v7.1.4 index.html): Account Security's Enable 2FA shows the QR code first
+# (account_ui.c twofa_res: #twoFAqr's img; the code line is the page's second #twoFAmsg)
+KN_TWOFA_GAME = ('<div id="twoFAPop" style="display:none"><div id="twoFAWindow"><div class="twoFAHeader">2-Factor Authentication</div>'
+                 '<div id="twoFAqr" style="display:none"><div id="twoFAmsg">Scan QR code with<div style="color:rgba(0,0,0,.4)">'
+                 '<span style="color:#9c9c9c">Authy</span> or <span style="color:#9c9c9c">Google Authenticator</span></div></div>'
+                 '<img src style="width:250px;margin-top:15px"></div>'
+                 '<div id="twoFAmsg">Enter Verification Code</div><form id="twoFAForm"></form>'
+                 '<div id="twoFAbtn" onclick="sub2FA()">Submit</div></div></div>')
+
+
+def add_twofa(html, name, markup=KN_TWOFA):
+    """v7.1.4's #twoFAPop at the start of #uiBase and css/kn-twofa.css linked: the hub, the editor and
+    (v10_page.py, with KN_TWOFA_GAME) the game page, where account_ui.c's twofa_res shows the code popup
+    for a brain 2FA login and for Account Security's Enable 2FA."""
+    if 'id="twoFAPop"' in html:
+        return html
+    html, n = re.subn(r'(<div id="uiBase"[^>]*>)', lambda m: m.group(1) + markup, html, count=1)
+    if not n:
+        raise SystemExit("v10 %s: #uiBase not found (the 2FA popup goes into it)" % name)
+    return html.replace("</head>", '<link rel="stylesheet" href="%s"></head>' % KN_TWOFA_CSS, 1)
 V7_EDITOR_CSS = "/home/user/jails/kru/src/Krunker_v7.1.4/public/css/editor.css"
 # view stack, popup frame, LoginModal, the map details window (its Versions tab markup on the hub map page,
 # social_ui.c; deob-10.0.7.js:107603)
@@ -118,11 +138,7 @@ def transform_page(name, html):
         html = html.replace(cdn, local)
     html = _relative_urls(html)
     html = STATIC_CSS_RE.sub(STATIC_CSS, html)
-    if 'id="twoFAPop"' not in html:
-        html, n = re.subn(r'(<div id="uiBase"[^>]*>)', lambda m: m.group(1) + KN_TWOFA, html, count=1)
-        if not n:
-            raise SystemExit("v10 %s: #uiBase not found (the 2FA popup goes into it)" % name)
-        html = html.replace("</head>", '<link rel="stylesheet" href="%s"></head>' % KN_TWOFA_CSS, 1)
+    html = add_twofa(html, name)
     if name == "social.html":
         html = html.replace('<link rel="stylesheet" href="%s">' % STATIC_CSS,
                             '<link rel="stylesheet" href="%s"><link rel="stylesheet" href="%s">' % (STATIC_CSS, HUB_SVELTE_CSS), 1)

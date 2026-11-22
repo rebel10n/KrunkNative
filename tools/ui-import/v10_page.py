@@ -36,6 +36,7 @@ import tempfile
 
 import index_page
 import social_page
+import v10_hub_editor  # add_twofa
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -103,6 +104,8 @@ def transform_page(name, html, mounts):
         html = index_page.transform_index(html)
         html = html.replace('<link rel="stylesheet" href="css/krunknative.css">',
                             '<link rel="stylesheet" href="css/svelte.css">\n<link rel="stylesheet" href="css/krunknative.css">', 1)
+        # v10 dropped the 2FA code popup; Box Office keeps brain 2FA (account_ui.c twofa_res), as the hub / editor do
+        html = v10_hub_editor.add_twofa(html, name, v10_hub_editor.KN_TWOFA_GAME)
     else:
         html = social_page._transform_html(html, True)
         html = re.sub(r"https?://assets\.krunker\.io/", "", html)
