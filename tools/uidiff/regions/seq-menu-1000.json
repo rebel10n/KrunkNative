@@ -11,7 +11,7 @@
       "kind": "scene",
       "fuzz": 12,
       "max_pct": 10.0,
-      "note": "the menu at 1000 px wide (the @media rules)"
+      "note": "the menu at 1000 px wide (the #uiBase scale; the haslogin sandbox state)"
     }
   ]
 }

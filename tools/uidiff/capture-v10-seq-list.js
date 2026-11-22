@@ -199,6 +199,6 @@ module.exports = function (seq, V) {
   });
   seq('menu-1000', {
     size: [1000, 720], bg: '#222222', prepare: menu, restartAnims: true, times: [0],
-    note: 'The menu in a 1000 px wide window: the @media (max-width) rules (narrow layout).',
+    note: 'The menu in a 1000 px wide window: the #uiBase scale (1000/1280); the composition is the haslogin sandbox menu, the same as at 1280 px (no @media rule applies).',
   });
 };
