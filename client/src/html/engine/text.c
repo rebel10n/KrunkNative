@@ -350,12 +350,17 @@ static void text_add_fallbacks(TextSystem *ts) {
             return;
         }
     }
+    /* Liberation Sans first: Krunker's pages ask for Helvetica / Arial, which Chrome on Linux gets from
+     * fontconfig as Liberation Sans (their metric alias), and the uidiff references were rendered with it.
+     * DejaVu Sans before it made a Debian host (fonts-dejavu-core is always there) lay text out wider */
     static const char *const latin[] = {
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
