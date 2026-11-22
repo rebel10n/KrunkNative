@@ -158,7 +158,7 @@ def run_client(brain_url, game_port, timeout=240):
     with open(path, "w") as f:
         f.write(script.strip() + "\n")
     log = os.path.join(WORK, "client.log")
-    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY") and not k.startswith("KRUNKNATIVE_")}
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY") and (not k.startswith("KRUNKNATIVE_") or k == "KRUNKNATIVE_EGL_DEVICE")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_DEBUG": "1",

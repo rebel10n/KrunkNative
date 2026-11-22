@@ -347,13 +347,17 @@ def client_f4(port, game_a, game_b):
 
 def client_launch(port, game_b):
     """Auto Seek on Launch (Settings > Quickplay, on by default): the launch seeks once, the way F4 does,
-    after the menu is up; a launch that names a lobby (KRUNKNATIVE_GAME, ?game=) does not seek."""
+    after the menu is up; a launch that names a lobby (KRUNKNATIVE_GAME, ?game=) does not seek.
+    Since 7a1e3256 the startup hot seek's answer is adopted in place of the launch seek
+    (servers_ui.c: hot_adopt() else launch_seek()), so the one seek is either line."""
     p, log = client("launch", port, "0 play\n6000 state\n9000 quit\n")
     finish(p, 60)
     text = read_log(log)
     js = joined(text)
-    check("L1: the launch seeks once (the option is on by default)", text.count("[mm] launch seek: Quickplay KrunkNative") == 1 and len(js) == 1,
-          "%s %s" % (text.count("[mm] launch seek"), str(js)))
+    launch = text.count("[mm] launch seek: Quickplay KrunkNative")
+    hot = len(re.findall(r"\[mm\] hot seek: \S+ in \S+, answered during startup", text))
+    check("L1: the launch seeks once (the option is on by default; the launch seek or the adopted hot seek)",
+          launch + hot == 1 and len(js) == 1, "launch %d hot %d %s" % (launch, hot, str(js)))
     check("L1: and plays the lobby it found", in_game(states(text)) and js and "[mm] joining %s at" % js[0] in text, str(states(text)))
     check("L1: nothing picked: the launch seek takes the public rotation's lobby (ffa), never the tdm node (v10 rotationModes)",
           js and js[0] != game_b[0], str(js))
