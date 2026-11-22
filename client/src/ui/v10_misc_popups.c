@@ -20,8 +20,11 @@
 //   lottery         svelte-1rj22es (v10:127123-127780): window.openLottery(id = 3) -> genericPopup "defaultModal
 //                   lotteryModal"; themes christmas (light bulbs 1fenhdo) / easter (eggs gt9grt) / neutral
 //                   (gifts wjqbtw), the quantity steppers (jsgxg6), winners (14vp3ai). Data: GET /api/lottery/<id>
-//                   and POST /api/lottery/<id>/participate on the brain. The brain has no lottery yet: the request
-//                   fails and the popup shows v10's loading box with the error, as v10 does when its API fails.
+//                   and POST /api/lottery/<id>/participate on the brain (services/brain/lottery.c); for a krunker.io
+//                   account krunker.io's gapi GET /lottery/<id> (krunker_kio_gapi_path) and POST
+//                   lottery/<id>/participate (kio_store_write), v10's lottery.getLottery / participateInLottery
+//                   (v10:26566-26571). A failed view shows v10's loading box with the error, as v10 does when its
+//                   API fails.
 //   premium shop    svelte-190e6fj (v10:129616+, cancel confirm 18wpngg): the Store Premium tab's subscription
 //                   branch, which v10.0.2 hides behind `() => !0x0` (the four legacy cards show instead), so v10
 //                   never shows it either: knMiscOpen("premium") only. Products / subscriptions: none (no shop).
@@ -38,6 +41,7 @@
 #include "klog.h"
 #include <backend.h>
 #include <backend_ui.h>
+#include <kio_store.h> // a krunker.io account's lottery entry: POST lottery/<id>/participate (kio_store_write)
 #include <html_ui.h>
 #include <i18n.h>
 #include <ctype.h>
@@ -817,6 +821,20 @@ static void lot_done(void *user, const int status, const cJSON *json) {
     if (v10_popup_open("defaultModal lotteryModal")) lot_render();
 }
 
+// a krunker.io account's entry (kio_store_write's answer): v10's error text, else the view is asked again, as lot_done
+static void lot_kio_done(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) status;
+    (void) data;
+    (void) code;
+    if (!message) {
+        lot_done(user, 200, NULL);
+        return;
+    }
+    LT.submitting = 0;
+    snprintf(LT.error, sizeof(LT.error), "%s", message);
+    if (v10_popup_open("defaultModal lotteryModal")) lot_render();
+}
+
 static void lot_enter(void) {
     const cJSON *lottery = lot_data(NULL);
     const cJSON *info = lottery ? cJSON_GetObjectItem(lottery, "lottery") : NULL;
@@ -839,6 +857,11 @@ static void lot_enter(void) {
             snprintf(body, sizeof(body), "{\"cost_type\":\"%s\",\"cost_ref\":\"%s\",\"cost_quantity\":%d}", v10_str(cost, "cost_type"), r, LT.qty[i]);
             LT.submitting = 1;
             LT.error[0] = 0;
+            if (kio_store_active()) { // krunker.io's gapi, with the account's Bearer (participateInLottery, v10:26571)
+                snprintf(path, sizeof(path), "lottery/%d/participate", LT.id);
+                kio_store_write("POST", path, body, lot_kio_done, NULL);
+                return;
+            }
             v10_send("POST", lot_path(path, sizeof(path), "/participate"), body, lot_done, NULL);
             return;
         }

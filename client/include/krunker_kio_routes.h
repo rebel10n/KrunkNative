@@ -48,6 +48,7 @@ size_t krunker_kio_gapi_leaderboard_path(char *out, size_t n, const char *kn_pat
 //   "/api/clans/recruitment[?<q>]"   -> "/clans/recruitment[?<q>]"     (v10:26796, listRecruitment)
 //   "/api/clans/by-name/<name>"      -> "/clans/by-name/<name>"        (v10:26756, getClanProfileByName)
 //   "/api/clans/<id>/recruitment"    -> "/clans/<id>/recruitment"      (v10:26805, getRecruitment)
+//   "/api/lottery/<id>[?<q>]"        -> "/lottery/<id>[?<q>]"          (v10:26566, lottery.getLottery; not /participate)
 // Any other path returns 0 (no gapi route: the caller sends nothing and shows the empty state), and so does one
 // that carries a token= (a Box Office session token is never sent to krunker.io). Returns the length.
 size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);

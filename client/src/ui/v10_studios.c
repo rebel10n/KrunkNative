@@ -9,7 +9,8 @@
 // Svelte binds with __click / __input are inline knStudios(op, ...) handlers here, and the elements
 // carry knSt* ids (KrunkNative-only, for the client e2e). Text is v10's i18n (studios.*).
 // Data: v10's _10449.studios.* calls (v10.js 27360-27520) over the gapi tunnel of the social socket
-// (v10_gapi.c -> services/brain/studios.c); the studio view's "Your Games" list is
+// (v10_gapi.c -> services/brain/studios.c), or for a krunker.io account krunker.io's own gapi (v10_gapi.c kio_gapi:
+// the GET reads only; a write is not sent and shows its failure text); the studio view's "Your Games" list is
 // _10449.players.getProfile(me).maps, as in v10. v10's _10449.skins.list() (the Skin Manager's
 // custom skins) has no KrunkNative counterpart: the "Your Skins" select stays empty.
 // The Games window's My Games tab shows the pending invite count (servers_ui.c, the functions at

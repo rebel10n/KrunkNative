@@ -139,6 +139,8 @@ int main(void) {
         {"/api/clans/by-name/dev", "/clans/by-name/dev"},
         {"/api/clans/77/recruitment", "/clans/77/recruitment"},
         {"/api/leaderboards/krunkcup/teams/4/contributors", "/leaderboards/krunkcup/teams/4/contributors"},
+        {"/api/lottery/3", "/lottery/3"}, // the lottery's view (v10 lottery.getLottery, v10:26566)
+        {"/api/lottery/12?x=1", "/lottery/12?x=1"},
     };
     for (size_t i = 0; i < sizeof(gapi_cases) / sizeof(gapi_cases[0]); i++) {
         CHECK(krunker_kio_gapi_path(gpath, sizeof(gpath), gapi_cases[i].kn) != 0 && !strcmp(gpath, gapi_cases[i].gapi),
@@ -148,7 +150,8 @@ int main(void) {
     // non-recruitment reads with no gapi counterpart here, and anything with a token
     const char *no_route[] = {"/api/clans/my-applications?token=abc", "/api/clans/by-name/", "/api/clans/12/apply?token=x",
                               "/api/clans/recruitment2", "/api/clans/x/recruitment", "/api/territorial-wars/status?token=x",
-                              "/api/shop/displays?tag=limited", "/mm/ranked/leaderboard?season=1", "/api/lottery/3", NULL};
+                              "/api/shop/displays?tag=limited", "/mm/ranked/leaderboard?season=1", "/api/lottery/3?token=abc",
+                              "/api/lottery/3/participate", "/api/lottery/", "/api/lottery/x", NULL};
     for (size_t i = 0; no_route[i]; i++) {
         const int got = krunker_kio_gapi_path(gpath, sizeof(gpath), no_route[i]);
         CHECK(got == 0 && gpath[0] == 0, "%s has no gapi route (got '%s')", no_route[i], gpath);
