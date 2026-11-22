@@ -377,7 +377,8 @@ cJSON *social_account_info(const cJSON *account) {
                           "creator_badge", /* v10's creatorBadge (0210_creator_badge) */
                           "dxp",           /* v10 double XP: the 2x XP offer and the weekend schedules (0341_double_xp) */
                           "junk",          /* the Junk wallet's balance, "12.34" (0347_junk_wallet, doc/v10/junk.md) */
-                          "reqDel", "twitchId", "twitch", "raidStats"}; /* v10.0.3 setData [29] / [44] / [23] / [52] (account_life.c) */
+                          "reqDel", "twitchId", "twitch", "raidStats", /* v10.0.3 setData [29] / [44] / [23] / [52] (account_life.c) */
+                          "trades"}; /* v10's account.trades, setData [33] (deob-10.0.7.js:115184): db_completed_trades */
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(account, keys[i]);
         if (v) cJSON_AddItemToObject(info, keys[i], cJSON_Duplicate(v, 1));

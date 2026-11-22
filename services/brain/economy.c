@@ -1005,11 +1005,13 @@ void sh_blackm_buy(SocialSession *s, const cJSON *f) {
     }
     EconHead h;
     econ_head(&h, s, f, "buy", "market");
-    char sk[24], pr[24], amt[48], ti[24];
+    char sk[24], pr[24], amt[48], ti[24], rs[16 * 12] = "";
     snprintf(amt, sizeof amt, "%.17g", k->req_amount);
+    for (int i = 0, o = 0; i < k->req_skin_count && o < (int) sizeof rs; i++)
+        o += snprintf(rs + o, sizeof rs - (size_t) o, "%s%d", i ? "," : "", k->req_skins[i]);
     social_call(s, &P_BLACKM_BUY,
                 KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(sk, id), acct_itoa(pr, k->funds), k->req_kind, k->req_var, amt,
-                           acct_itoa(ti, k->title)),
+                           acct_itoa(ti, k->title), rs),
                 blackm_done, NULL);
 }
 

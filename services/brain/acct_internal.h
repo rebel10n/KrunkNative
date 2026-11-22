@@ -130,8 +130,9 @@ typedef struct SkinInfo {
     int qs_kr;                                   /* qsKR: quick sell KR override (0 none) */
     int64_t funds;                               /* funds: the Black Market price (blackM items) */
     int title;                                   /* title: the v10.0.3 title its Black Market purchase grants, -1 none */
-    char req_kind[12], req_var[16];              /* req ("accAge" | "stats" | "accVar" | "disabled") / reqVar */
+    char req_kind[12], req_var[16];              /* req ("accAge" | "stats" | "accVar" | "rank" | "ownSkins" | "disabled") / reqVar */
     double req_amount;                           /* reqAmount */
+    int req_skins[16], req_skin_count;           /* reqSkins: the store indexes an ownSkins item needs owned (all of them) */
     int spin_wheel;                              /* TICKET items: index of its spinWheel (store.c), -1 none */
     int spin_wheel_id;                           /* v10 TICKET items: store.wheels[spinWheelId], -1 none */
     char spin_wheel_name[32];                    /* v10 TICKET items: the wheel of that name ("Premium") */

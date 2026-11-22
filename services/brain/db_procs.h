@@ -88,6 +88,8 @@ int copy_give(Dbx *x, int64_t acc, int64_t skin, const CopyPaint *paint, const c
 int db_take_units(Dbx *x, int64_t acc, int64_t skin, int64_t want, const char *source, const char *ref);
 /* the account's unpainted units of a skin: inventory.count less its painted copies (the stack's count) */
 int64_t db_unpainted_units(Dbx *x, int64_t acc, int64_t skin);
+/* the account's completed trades: accepted trade offers and settled Trade mode trades (v10's account.trades) */
+int64_t db_completed_trades(Dbx *x, int64_t id);
 /* Same, with the counterparty of the movement (gift / market / trade) and the fee charged on
  * top of it: the ledger row then records who moved the KR and what it cost. */
 int db_add_funds_ex(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref,

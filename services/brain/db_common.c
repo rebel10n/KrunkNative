@@ -459,9 +459,27 @@ static void db_account_chat_ban(Dbx *x, const int64_t id, cJSON *o) {
     cJSON_AddBoolToObject(o, "chat_banned", banned);
 }
 
+/* the account's completed trades (v10's account.trades = player_trades, deob-10.0.7.js:115126): its accepted trade offers,
+ * sent or received (trades.status 'accepted', db_economy.c run_trade_accept), and its settled Trade mode trades
+ * (live_trades, 0357), either side */
+int64_t db_completed_trades(Dbx *x, int64_t id) {
+    return dbx_int(x,
+        SQL(.any = "SELECT (SELECT count(*) FROM trades WHERE status = 'accepted' AND (sender_id = {int:$1} OR receiver_id = {int:$1}))"
+                   " + (SELECT count(*) FROM live_trades WHERE account_a = {int:$1} OR account_b = {int:$1})"),
+        KN_DB_ARGS(I64S(id)), 0);
+}
+
+/* "trades": the count above, which the social socket's account info carries (social_account_info) for the client's
+ * account.trades (setData slot 33, deob-10.0.7.js:115184; the Black Market's accVar "trades" item) */
+static void db_account_trades(Dbx *x, const int64_t id, cJSON *o) {
+    if (!o) return;
+    cJSON_DeleteItemFromObjectCaseSensitive(o, "trades");
+    cJSON_AddNumberToObject(o, "trades", (double) db_completed_trades(x, id));
+}
+
 /* PostgreSQL's kn_account_json (and the functions that return it, e.g. kn_commit_stats) builds the account in SQL; what
  * the other drivers' C adds is added here: the owned list (the SQL's data[10] counts every unit; painted copies apart,
- * counter skins' m[stat]), reqDel / twitchId / raidStats and chat_banned. Every account a PostgreSQL proc hands out goes
+ * counter skins' m[stat]), reqDel / twitchId / raidStats, chat_banned and trades. Every account a PostgreSQL proc hands out goes
  * through this (db_accounts.c: session_account, account_json, commit_stats). */
 void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     if (!v || id <= 0) return;
@@ -471,6 +489,7 @@ void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     else cJSON_Delete(owned);
     db_account_life_extras(x, id, v); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
     db_account_chat_ban(x, id, v);
+    db_account_trades(x, id, v);
 }
 
 cJSON *db_account_json(Dbx *x, int64_t id) {
@@ -552,5 +571,6 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     cJSON_AddItemToObject(o, "dxp", db_dxp_state(x, id, kn_wall_ms()));
     db_account_life_extras(x, id, o); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
     db_account_chat_ban(x, id, o);
+    db_account_trades(x, id, o);
     return o;
 }

@@ -200,6 +200,17 @@ static void skins_load(void) {
                 if (cJSON_IsString(rq)) snprintf(k->req_kind, sizeof k->req_kind, "%s", rq->valuestring);
                 snprintf(k->req_var, sizeof k->req_var, "%s", kn_json_str(it, "reqVar", ""));
                 k->req_amount = cJSON_IsNumber(ra) ? ra->valuedouble : cJSON_IsString(ra) ? strtod(ra->valuestring, NULL) : 0;
+                /* reqSkins (ownSkins items, deob-10.0.7.js:103576-103580); a longer list than req_skins holds is never
+                 * checked short: the item is then refused like a disabled one */
+                const cJSON *rs = cJSON_GetObjectItemCaseSensitive(it, "reqSkins"), *rsi;
+                const int rs_max = (int) (sizeof k->req_skins / sizeof k->req_skins[0]);
+                if (cJSON_IsArray(rs) && cJSON_GetArraySize(rs) > rs_max) {
+                    snprintf(k->req_kind, sizeof k->req_kind, "disabled");
+                } else if (cJSON_IsArray(rs)) {
+                    cJSON_ArrayForEach(rsi, rs) {
+                        if (cJSON_IsNumber(rsi)) k->req_skins[k->req_skin_count++] = (int) rsi->valuedouble;
+                    }
+                }
                 k->spin_wheel = ticket_wheel_load(cJSON_GetObjectItemCaseSensitive(it, "spinWheel"));
                 k->spin_wheel_id = (int) kn_json_int(it, "spinWheelId", -1);
                 snprintf(k->spin_wheel_name, sizeof k->spin_wheel_name, "%s", kn_json_str(it, "spinWheelName", ""));

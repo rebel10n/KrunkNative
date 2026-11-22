@@ -225,6 +225,79 @@ def po_text(r):
 
 # ---------------------------------------------------------------- scenarios
 
+async def blackm_requirements(url, db, c, names, C, D):
+    """v10.0.7's checkReq kinds beyond accAge / stats (deob-10.0.7.js:103566-103580; db_economy.c run_blackm_buy):
+    accVar (funds / kills / jobRatingPos / followers / timePlayed / trades), rank (peak MMR over the ranked seasons)
+    and ownSkins (every reqSkins index owned)."""
+    async def buy(item):
+        return await c.call(("bmr", "po"), "pbm", item, op())
+
+    def bought(r, item, cf, price):
+        return r[0] == "bmr" and r[1] and r[1]["item"] == item and r[1]["f"] == cf - price and count(db, C, item) == 1
+
+    set_player(db, C, funds=50000)
+    # accVar: not met (a fresh account has 0 of each; funds 50000 < 1000000)
+    for item, what in ((2995, "funds"), (3059, "kills"), (2998, "jobRatingPos"), (3863, "followers"), (3852, "timePlayed"),
+                       (2996, "trades")):
+        r = await buy(item)
+        check(po_text(r) == "Access Denied" and count(db, C, item) == 0, "black market accVar %s not met: %r" % (what, r))
+    # accVar: met, each from the players column v10's account reads it from
+    for item, col, amount, price, what in ((3059, "player_kills", 50000, 10000, "kills"),
+                                            (2998, "jobratingpositive", 150, 5000, "jobRatingPos"),
+                                            (3863, "player_followed", 10000, 5000, "followers"),
+                                            (3852, "player_timeplayed", 2592000000, 5000, "timePlayed")):
+        db.q("UPDATE players SET %s = $2 WHERE player_id = $1" % col, C, amount - 1)
+        r = await buy(item)
+        check(po_text(r) == "Access Denied", "black market accVar %s one short: %r" % (what, r))
+        db.q("UPDATE players SET %s = $2 WHERE player_id = $1" % col, C, amount)
+        cf = funds(db, C)
+        r = await buy(item)
+        check(bought(r, item, cf, price), "black market accVar %s met: %r" % (what, r))
+    # accVar trades: completed trades (accepted offers + settled Trade mode trades, db_completed_trades)
+    if DRIVER == "mysql":  # MariaDB stops a recursive CTE at max_recursive_iterations (1000 here)
+        ins = ("SET STATEMENT max_recursive_iterations = 10000 FOR INSERT INTO live_trades (req_key, account_a, account_b)"
+               " WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $3) SELECT CONCAT('bm', i), $1, $2 FROM n")
+    else:
+        ins = ("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $3)"
+               " INSERT INTO live_trades (req_key, account_a, account_b) SELECT 'bm' || i, $1, $2 FROM n")
+    db.q(ins, C, D, 4999)
+    r = await buy(2996)
+    check(po_text(r) == "Access Denied", "black market accVar trades: 4999 trades short: %r" % (r,))
+    db.q("INSERT INTO live_trades (req_key, account_a, account_b) VALUES ('bm5000', $1, $2)", D, C)  # either side counts
+    cf = funds(db, C)
+    r = await buy(2996)
+    check(bought(r, 2996, cf, 10000), "black market accVar trades met: %r" % (r,))
+    async with Social(url) as s:
+        r = await s.login(names["cat"], "econ_pass1")
+        check(isinstance(r[6], dict) and r[6].get("trades") == 5000, "account info carries trades (v10 account.trades): %r"
+              % (r[6].get("trades") if isinstance(r[6], dict) else r[6],))
+    # accVar funds: the balance itself
+    set_player(db, C, funds=1000000)
+    r = await buy(2995)
+    check(bought(r, 2995, 1000000, 10000), "black market accVar funds met: %r" % (r,))
+    # rank: Emperor's Blade (1 KR), peakMMR >= 4700, the best over the account's seasons
+    r = await buy(4531)
+    check(po_text(r) == "Access Denied", "black market rank: no ranked profile: %r" % (r,))
+    db.q("INSERT INTO ranked_profiles (account_id, season, region, peak_mmr) VALUES ($1, 1, 'eu', 4699)", C)
+    r = await buy(4531)
+    check(po_text(r) == "Access Denied", "black market rank: peak 4699 < 4700: %r" % (r,))
+    db.q("INSERT INTO ranked_profiles (account_id, season, region, peak_mmr) VALUES ($1, 2, 'na', 4700)", C)
+    cf = funds(db, C)
+    r = await buy(4531)
+    check(bought(r, 4531, cf, 1), "black market rank met (another season's peak): %r" % (r,))
+    # ownSkins: Ranked Tamer (100 KR) needs all of 7722..7727 owned
+    for skin in (7722, 7723, 7724, 7725, 7726):
+        give(db, C, skin)
+    r = await buy(7618)
+    check(po_text(r) == "Access Denied" and count(db, C, 7618) == 0, "black market ownSkins: one of six missing: %r" % (r,))
+    give(db, C, 7727)
+    cf = funds(db, C)
+    r = await buy(7618)
+    check(bought(r, 7618, cf, 100), "black market ownSkins met: %r" % (r,))
+    r = await buy(8004)
+    check(po_text(r) == "Access Denied", "black market ownSkins: Krunkuku Tamer, none owned: %r" % (r,))
+
+
 async def scenario(url, db):
     names = {k: "%s%s" % (k, STAMP) for k in ("ann", "bob", "cat", "dan", "eve", "fay", "gus")}
     ids = {}
@@ -431,6 +504,7 @@ async def scenario(url, db):
               "an item without a title grants none")
         r = await b.call("gapi", "gapi", 3, "GET", "/players/" + names["bob"], None)
         check(r[3]["data"]["player_titles"] == "", "another account's profile: no titles: %r" % (r[3]["data"].get("player_titles"),))
+        await blackm_requirements(url, db, c, names, C, D)
         # MAX
         give(db, D, 0, 3)
         d = await user(url, names["dan"])

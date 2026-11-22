@@ -826,16 +826,41 @@ static kn_db_result *run_item_lock(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_ITEM_LOCK = {"item_lock", NULL, run_item_lock};
 
-/* $4 skin, $5 price, $6 requirement ('' | accAge | stats | accVar), $7 its variable, $8 its amount,
- * $9 the item's title (-1 none) -> {item, kr, f[, title]}. v7.1.4's Black Market (market tab "blackm",
- * pbm -> bmr): a blackM item bought from the game for its store `funds`, if store.checkReq(item, account)
- * holds. v10.0.3: an item with a `title` grants that title with it, and the reply names it
- * (purchaseBlackMarketItem's `title`, deob-10.0.3.js:152803-152806): a player_titles row (0361), once. */
+/* accVar's reqVar -> the players column v10's Account reads it from (deob-10.0.7.js:115087-115126: kills = player_kills,
+ * timePlayed = player_timeplayed, followers = player_followed, jobRatingPos = jobratingpositive); funds is the locked
+ * balance and trades db_completed_trades. Any other variable has no source here: refused. */
+static int blackm_acc_var(Dbx *x, const EconPlayer *me, const char *var, double need) {
+    static const struct { const char *var; kn_sql sql; } cols[] = {
+        {"kills", {.any = "SELECT player_kills FROM players WHERE player_id = {int:$1}"}},
+        {"timePlayed", {.any = "SELECT player_timeplayed FROM players WHERE player_id = {int:$1}"}},
+        {"followers", {.any = "SELECT player_followed FROM players WHERE player_id = {int:$1}"}},
+        {"jobRatingPos", {.any = "SELECT jobratingpositive FROM players WHERE player_id = {int:$1}"}},
+    };
+    if (!strcmp(var, "funds")) return (double) me->funds >= need;
+    if (!strcmp(var, "trades")) return (double) db_completed_trades(x, me->id) >= need;
+    for (size_t i = 0; i < sizeof cols / sizeof cols[0]; i++)
+        if (!strcmp(var, cols[i].var)) return (double) dbx_int(x, &cols[i].sql, KN_DB_ARGS(I64S(me->id)), 0) >= need;
+    return 0;
+}
+
+/* $4 skin, $5 price, $6 requirement, $7 its variable, $8 its amount, $9 the item's title (-1 none), $10 its reqSkins
+ * ("7722,7723", ownSkins) -> {item, kr, f[, title]}. v7.1.4's Black Market (market tab "blackm", pbm -> bmr): a blackM
+ * item bought from the game for its store `funds`, if store.checkReq(item, account) holds (an item without a `req`
+ * passes, deob-10.0.7.js:137682). v10.0.7's checkReq (deob-10.0.7.js:103566-103580) has five requirements:
+ *   accAge    now - createDate >= reqAmount
+ *   stats     account.stats[reqVar] >= reqAmount (players.player_stats)
+ *   accVar    account[reqVar] >= reqAmount (blackm_acc_var)
+ *   rank      account.peakMMR >= reqAmount: the peak over the account's ranked seasons, as GET
+ *             /market/black-market/rank's peak_mmr (v10_market.c) that the client passes as peakMMR
+ *   ownSkins  every reqSkins index in account.skins: inventory count > 0 (painted copies count, listed units are
+ *             out of the inventory), as db_owned_skins builds account.skins
+ * v10.0.3: an item with a `title` grants that title with it, and the reply names it (purchaseBlackMarketItem's
+ * `title`, deob-10.0.3.js:152803-152806): a player_titles row (0361), once. */
 static kn_db_result *run_blackm_buy(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     ECON_OPEN("bm", "kn_blackm_buy");
     const int64_t me_id = PI(0), skin = PI(4), price = PI(5), title = P(9) ? PI(9) : -1;
-    const char *req = nz(P(6)), *var = nz(P(7)), *amount = P(8);
+    const char *req = nz(P(6)), *var = nz(P(7)), *amount = P(8), *req_skins = n > 10 ? nz(P(10)) : "";
     const double need = amount ? strtod(amount, NULL) : 0;
     if (skin < 0 || price <= 0) return econ_refuse(&x, "Item Unavailable");
     EconPlayer me;
@@ -856,6 +881,25 @@ static kn_db_result *run_blackm_buy(kn_dbconn *c, int n, const char *const *p) {
         ok = cJSON_IsNumber(v) && v->valuedouble >= need;
         cJSON_Delete(st);
         free(text);
+    } else if (!strcmp(req, "accVar") && *var) {
+        ok = blackm_acc_var(&x, &me, var, need);
+    } else if (!strcmp(req, "rank")) {
+        ok = dbx_int(&x, SQL(.any = "SELECT max(peak_mmr) FROM ranked_profiles WHERE account_id = {int:$1}"), KN_DB_ARGS(P(0)), 0) >= need;
+    } else if (!strcmp(req, "ownSkins")) {
+        /* v10: false for an empty reqSkins */
+        const char *s = req_skins;
+        char *end;
+        int any = 0;
+        ok = 1;
+        while (ok && *s && !dbx_failed(&x)) {
+            const long long id = strtoll(s, &end, 10);
+            if (end == s) break;
+            any = 1;
+            ok = dbx_int(&x, SQL(.any = "SELECT count FROM inventory WHERE account_id = {int:$1} AND skin_id = {int:$2}"),
+                         KN_DB_ARGS(P(0), I64S(id)), 0) > 0;
+            s = *end == ',' ? end + 1 : end;
+        }
+        ok = ok && any;
     }
     if (dbx_failed(&x)) return dbx_finish(&x, NULL);
     if (!ok) return econ_refuse(&x, "Access Denied");
