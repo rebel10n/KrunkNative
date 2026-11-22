@@ -19,8 +19,9 @@
     "region": "...",
     "mapName": "Kanji",
     "mapFile": "maps/311_kanji.json",
-    "gameName": ""
+    "gameName": "ffa on Kanji",
+    "sandbox": true,
+    "preview": true
   },
-  "pending": "E3 (resolved: not a width effect): capture-v10-seq.js takes every sequence with krunker_haslogin=true + custMap (the in-page sandbox) and no backend account, and that menu (Skin Manager in the nav, no login/rewards bar, no play column / Quick Match, the class-preview model) is identical at 1280 px (sequences/click-to-play-grow/0.png, mobile-menu/0.png). The only width effect, the #uiBase scale (1000/1280), already matches the native render. Needs the same haslogin-without-account menu state as seq-mobile-menu (S2)",
-  "note": "The menu at 1000 px wide (the #uiBase scale) in the sequence capture's haslogin sandbox state. Reference: capture-v10-seq.js menu-1000."
+  "note": "The menu at 1000 px wide (the #uiBase scale) in the sequence capture's state: krunker_haslogin=true + custMap, so v10 runs its in-page sandbox and its menu is connectToSandbox's (state.sandbox, v10_menu.c sandbox_apply: no play column, no guest header bar, Store / Challenges hidden, Skin Manager shown; the sandbox game joined, so #infoHolder shows: gameName; the class-preview model: preview). Reference: capture-v10-seq.js menu-1000."
 }

@@ -16,6 +16,7 @@
 #include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
 #include <viewer_embed.h> // the hub's item view showcase
 #include <console.h>      // the developer console on every page
+#include <v10_menu.h>     // the Test Map's sandbox menu
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -212,7 +213,10 @@ static void test_map_host(Client *client) {
 #ifdef LOCAL_GAME_HAVE_HOST_CUSTOM
     menu_host_switch(map); // the reloaded tab's curtain and ring, not the map card
     if (!local_game_host_custom(client, map)) fprintf(stderr, "[app] test map: hosting failed\n");
-    else fprintf(stderr, "[app] test map hosted in this window\n");
+    else {
+        fprintf(stderr, "[app] test map hosted in this window\n");
+        v10_menu_set_sandbox(1); // v10's tab on custMap: loadSandbox, the sandbox menu (v10_menu.c sandbox_apply)
+    }
 #else
     (void) client;
     fprintf(stderr, "[app] test map: this build cannot host custom maps offline yet (LOCAL_GAME_HAVE_HOST_CUSTOM)\n");

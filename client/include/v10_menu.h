@@ -11,6 +11,11 @@ void v10_menu_account_changed(void);     // account_ui: login / logout / funds /
 void v10_menu_scenario_official(int on);
 int  v10_menu_official_session(void);     // in a krunker.io server (krunker_net_active), or a scenario's officialSession   // --render-scenario state.officialSession: the header as in a krunker.io server
 void v10_menu_account_tick(void);
+// The sandbox menu: v10's page in its in-page sandbox (a custMap page: the editor's Test; /?sandbox) keeps v7's
+// connectToSandbox chrome: no play column (#subLogoButtons), no guest header bar, no right panel / news, Store and
+// Challenges hidden (mIH), Skin Manager shown. Set by --sandbox / ?sandbox / ?test / ?testMap=1 and a scenario's
+// state.sandbox; a remote game joined later turns it off (v10_menu_account_tick).
+void v10_menu_set_sandbox(int on);
 // The Server Type changed (Settings > Quickplay, seek_prefs.h): Popular Now and the Live Streams overlay read the
 // new type's lists / host at once (menu_sources.h) instead of at their next 60 s / 30 s interval.
 void v10_menu_sources_changed(void);

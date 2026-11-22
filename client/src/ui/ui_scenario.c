@@ -379,6 +379,7 @@ static void warn_unknown_keys(void) {
         "notify",     // S5: {notifications, announcement, emoji, tip}: the chat column's v10 widgets, item tooltips (v10_notify.c)
         "servers",    // the brain's /mm/game-list answer {games, totalPlayerCount} (servers_ui_set_games)
         "officialSession", // true: the menu as in a krunker.io server (the header shows the krunker.io account, v10_menu.c)
+        "sandbox", // true: the menu of v10's in-page sandbox (a custMap / ?sandbox page: v10_menu_set_sandbox)
         "remoteImages", // {url: local file}: the http(s) images the page shows, no network (remote_images.h)
         "krunkerLobbies", // krunker.io's /game-list answer {games, totalPlayerCount} or {error} (krunker_lobbies_set_fixed)
     };
@@ -1262,6 +1263,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("servers")) servers_ui_set_games(st("servers"));
     if (st_has("krunkerLobbies")) krunker_lobbies_set_fixed(st("krunkerLobbies"));
     if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
+    if (st_bool("sandbox", 0)) v10_menu_set_sandbox(1); // v10's sandbox menu (capture-v10.js's custMap storage)
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
     v10_rewards_guest_earned_scenario(st("guestEarned")); // a guest's unclaimed KR / score (v10_rewards.c)
     alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts

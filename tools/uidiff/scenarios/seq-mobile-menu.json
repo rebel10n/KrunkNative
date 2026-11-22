@@ -19,8 +19,9 @@
     "region": "...",
     "mapName": "Kanji",
     "mapFile": "maps/311_kanji.json",
-    "gameName": ""
+    "gameName": "ffa on Kanji",
+    "sandbox": true,
+    "preview": true
   },
-  "pending": "v10's mobile menu is the live menu with krunker_haslogin=true and no backend: no header bars, no play column. toggleMobileUI(true) changes no menu element (sandbox probe: visibility and rects identical before/after), so the diff is not a mobile gap; needs a native haslogin-without-account state in v10_menu.c (S2)",
-  "note": "The mobile menu layout (toggleMobileUI(true)). Reference: capture-v10-seq.js mobile-menu."
+  "note": "The mobile menu layout (toggleMobileUI(true)) in the sequence capture's sandbox state (krunker_haslogin=true + custMap: state.sandbox, v10_menu.c sandbox_apply; the sandbox game joined: gameName; the class-preview model: preview). toggleMobileUI(true) changes no menu element (sandbox probe: visibility and rects identical before/after), so no mobile state key is needed. Reference: capture-v10-seq.js mobile-menu."
 }

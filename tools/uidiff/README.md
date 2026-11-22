@@ -343,7 +343,7 @@ with the reason (never faked). The sequences (`seq-<name>` scenarios):
 | `end-collect-button`, `end-rewards-overlay` | injected `otherData.items` / pending S4 | Collect Rewards pulse, card flip + fly |
 | `notification-register` | the 45-60 s guest timer / pending S5 | notification center slideIn + countdown |
 | `tooltip-loadout` | pointer on an item / pending S5 | createTip |
-| `mobile-menu`, `menu-1000` | / pending S8, `cycle` at 1000 px | mobile layout, the `@media` narrow layout |
+| `mobile-menu`, `menu-1000` | / `applied`, `cycle` at 1000 px | the sandbox menu (`state.sandbox`: the capture's custMap runs v10's in-page sandbox), at 1280 and 1000 px |
 
 Unreachable offline (listed by `--list`, not captured): `nuke-flash` (a 25-streak pickup drawn
 on the overlay canvas), `ranked-leaderboard-open` (signed-in ranked data), `spin` (the server's

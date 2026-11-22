@@ -179,19 +179,23 @@ sc("tooltip-loadout", [0, 100, 300], "applied", dict(MENU, window=3),
    unreachable="a guest owns no skins: Change Loadout lists no item with createTip (0 on every tab), and the store "
                "window (showWindow(14)) throws without the signed-in store data",
    note="Customize (Loadout), the pointer on the first item: the item tooltip (S5; also needs a pointer state key).")
-sc("mobile-menu", [0], "applied", dict(MENU),
+# the sequence capture's storage (krunker_haslogin=true + custMap) runs v10's in-page sandbox: its menu is
+# connectToSandbox's (state.sandbox), the sandbox game is joined (#infoHolder: gameName), the class preview drawn
+SANDBOX_MENU = dict(MENU, gameName="ffa on Kanji", sandbox=True, preview=True)
+sc("mobile-menu", [0], "applied", dict(SANDBOX_MENU),
    [R("menu", [0, 0, 1280, 720], "scene", "the mobile menu layout", max_pct=10.0)], bg="#222222",
-   pending="S8: no state key turns the mobile UI on (toggleMobileUI(true))",
-   note="The mobile menu layout (toggleMobileUI(true)). Reference: capture-v10-seq.js mobile-menu.")
-sc("menu-1000", [0], "cycle", dict(MENU),
-   [R("menu", [0, 0, 1000, 720], "scene", "the menu at 1000 px wide (the #uiBase scale; the haslogin sandbox state)", max_pct=10.0)],
+   note="The mobile menu layout (toggleMobileUI(true)) in the sequence capture's sandbox state (krunker_haslogin=true "
+        "+ custMap: state.sandbox, v10_menu.c sandbox_apply; the sandbox game joined: gameName; the class-preview "
+        "model: preview). toggleMobileUI(true) changes no menu element (sandbox probe: visibility and rects identical "
+        "before/after), so no mobile state key is needed. Reference: capture-v10-seq.js mobile-menu.")
+sc("menu-1000", [0], "cycle", dict(SANDBOX_MENU),
+   [R("menu", [0, 0, 1000, 720], "scene", "the menu at 1000 px wide (the #uiBase scale; the sandbox menu state)", max_pct=10.0)],
    bg="#222222", size=(1000, 720),
-   pending="E3 (resolved: not a width effect): capture-v10-seq.js takes every sequence with krunker_haslogin=true + custMap "
-           "(the in-page sandbox) and no backend account, and that menu (Skin Manager in the nav, no login/rewards bar, no play "
-           "column / Quick Match, the class-preview model) is identical at 1280 px (sequences/click-to-play-grow/0.png, "
-           "mobile-menu/0.png). The only width effect, the #uiBase scale (1000/1280), already matches the native render. Needs "
-           "the same haslogin-without-account menu state as seq-mobile-menu (S2)",
-   note="The menu at 1000 px wide (the #uiBase scale) in the sequence capture's haslogin sandbox state. Reference: capture-v10-seq.js menu-1000.")
+   note="The menu at 1000 px wide (the #uiBase scale) in the sequence capture's state: krunker_haslogin=true + "
+        "custMap, so v10 runs its in-page sandbox and its menu is connectToSandbox's (state.sandbox, v10_menu.c "
+        "sandbox_apply: no play column, no guest header bar, Store / Challenges hidden, Skin Manager shown; the "
+        "sandbox game joined, so #infoHolder shows: gameName; the class-preview model: preview). Reference: "
+        "capture-v10-seq.js menu-1000.")
 
 
 def main():

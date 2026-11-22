@@ -68,6 +68,7 @@
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
 #include <remote_images.h>   // the native engine's <img src="http(s)..."> fetcher (streams thumbnails, clan logos)
 #include <menu_view.h> // the world behind the menu: menu/death cameras, end slow motion (menu_view.c)
+#include <v10_menu.h>  // --sandbox / ?sandbox: the sandbox menu (v10_menu_set_sandbox)
 #include <spectate.h> // Krunker spectating (window.Bf5): cameras, controls, #spectateUI (spectate.c, ui/hud_spectate.c)
 #include <stalker_client.h> // v10 Stalker: the model's look (stalker_render.c)
 #include <hud_map.h>  // WP-E part 2a: minimap + death markers
@@ -1158,6 +1159,9 @@ int main(int argc, char **argv) {
         krunker_net_join(&INSTANCE, g_krunker_game, NULL); // matchmaker, then Krunker's WebSocket (krunker_net.c)
     } else if (offline) {
         if (!local_game_start(&INSTANCE)) return -1; // the in-process sandbox server, joined like any server (net/offline.c)
+        // --sandbox / ?sandbox / ?test: v10's /?sandbox page, whose menu is the sandbox's (v10_menu.c sandbox_apply);
+        // a plain --offline / ?offline=1 is KrunkNative's local game and keeps the live menu
+        if (sandbox && !SCENARIO_ACTIVE()) v10_menu_set_sandbox(1);
     } else if (!SCENARIO_ACTIVE() && game_reload_resume_official(&INSTANCE)) {
         (void) net_args; // F5's relaunch from an official krunker.io game: that game again, by its id
     } else {

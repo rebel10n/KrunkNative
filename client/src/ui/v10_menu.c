@@ -81,6 +81,8 @@ static struct {
     int level;
     int notif_open;       // the Notifications toggle (webpush-container) is expanded
     unsigned active_gen;  // account_active_generation() the header last followed
+    int sandbox;          // the sandbox menu (v10_menu_set_sandbox): v10's /?sandbox or custMap page
+    int sandbox_shown;    // sandbox_apply last hid the play column / nav items (0: they are their owners')
 } V = {.signed_in = -1};
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
@@ -253,7 +255,8 @@ static void header_update(const AccountInfo *acc) {
             html_dom_insert_html(profile, HTML_INSERT_AFTER_END, markup);
         }
     }
-    set_display(out, acc ? "none" : "");
+    // the sandbox menu hides the guest bar (connectToSandbox, see sandbox_apply); a signed-in bar stays
+    set_display(out, acc || V.sandbox ? "none" : "");
     set_display(in, acc ? "" : "none");
     // the Inbox entry (_52295) of .headerBarRight: signed in only
     HtmlElem inbox = by_id("knV10Inbox");
@@ -320,6 +323,40 @@ static void nav_update(const AccountInfo *acc) {
     set_display(nav_item("menuBtnLeaderboards"), guest ? "none" : "");
 }
 
+// ---------------------------------------------------------------- the sandbox menu
+
+// v10's in-page sandbox (a page loaded with localStorage custMap, the editor's Test, or /?sandbox: loadSandbox,
+// then connectToSandbox) keeps v7.1.4's sandbox chrome (connectToSandbox's f2064, v7 index.js:18405-18560,
+// doc/v7/map-logic.md 2.0; the elements tools/ui-import/v7_page.js CONNECTED_MENU undoes). v10.0.2's DOM in
+// that state (doc/ref/krunker-v10/menu/menu-host-type.html.gz, capture-v10.js's custMap storage) against its
+// live menu (doc/ref/krunker-v10/mobile/menu-mobile.html.gz, no custMap): #subLogoButtons (the play column:
+// the action cards and the match-info bar; capture-v10.js cites v10:11105776), #tlInfHold (the right panel)
+// and #newsHolder get style display:none, #signedOutHeaderBar too (so .headerBarRight's Notifications /
+// Settings / More Krunker start the bar at the left); the Store (#menuItemShop) and Challenges items get class
+// mIH (main.css display:none !important) and the Skin Manager item, display:none on the live menu, style "".
+// krunker_haslogin is no part of it: v10's live menu with krunker_haslogin=true (doc/ref/krunker-v10.0.2/
+// main-menu.png, capture_v10_live.js GUEST_STORAGE) shows the guest bar and the play column.
+// Off again (a remote game joined), each element gets back what the live menu has.
+static void sandbox_apply(void) {
+    const int on = V.sandbox;
+    if (!v10_menu_page() || (!on && !V.sandbox_shown)) return;
+    set_display(by_id("subLogoButtons"), on ? "none" : "");
+    set_display(by_id("tlInfHold"), on ? "none" : "");
+    set_display(by_id("newsHolder"), on ? "none" : "");
+    HtmlElem el;
+    if ((el = nav_item("menuBtnShop"))) html_dom_set_class(el, "mIH", on);
+    if ((el = nav_item("menuBtnChall"))) html_dom_set_class(el, "mIH", on);
+    set_display(nav_item("menuBtnSkinManager"), on ? "" : "none");
+    V.sandbox_shown = on;
+}
+
+void v10_menu_set_sandbox(const int on) {
+    if (V.sandbox == !!on) return;
+    V.sandbox = !!on;
+    menu_log(on ? "sandbox menu (connectToSandbox)" : "sandbox menu off: the live menu");
+    if (V.wired) v10_menu_account_changed(); // the header bar, then sandbox_apply
+}
+
 // v10 runs fetchIsPlayerInRankedMatch() once per sign-in, when the home loads (v10:209847); this
 // is set by a sign-in and sent by v10_menu_tick once the brain can answer (ranked_ui_home_ready)
 static int g_rejoin_check;
@@ -339,6 +376,7 @@ void v10_menu_account_changed(void) {
     if (acc && V.signed_in != 1) g_rejoin_check = 1;
     header_update(acc);
     nav_update(acc);
+    sandbox_apply();
     // hideSpectateIfGuestUser (v10:208579-208581, after a login v10:209811 and a logout v10:209874):
     // the menu's Spectate switch is for accounts only (main.css hides #spectButtonHolder)
     set_display(by_id("spectButtonHolder"), acc ? "block" : "none");
@@ -1126,6 +1164,10 @@ void v10_menu_account_tick(void) {
     if (!V.wired || !v10_menu_page()) return;
     v10_login_tick();
     v10_wallet_tick(); // the Wallet and Inventory modal follows its account (funds, skins)
+    // v10 leaves its sandbox only by loading the page again (/ without custMap); here the same window can go on
+    // to a remote game (the console, a ?play= link): its menu is the live one then
+    const Client *c = menu_ui()->client;
+    if (V.sandbox && !scenario_on() && c && !c->offline && (c->net_connected || krunker_net_active())) v10_menu_set_sandbox(0);
     if (account_active_generation() == V.active_gen) return;
     v10_menu_account_changed();
 }
@@ -1251,6 +1293,7 @@ void v10_menu_dom_init(void) {
     g_buff_init[0] = 0;
     V.wired = 1;
     V.signed_in = -1;
+    V.sandbox_shown = 0; // a new page: its markup is the live menu's
     v10_menu_account_changed();
 }
 
