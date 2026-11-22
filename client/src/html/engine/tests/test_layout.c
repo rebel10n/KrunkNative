@@ -2706,6 +2706,49 @@ static void t_memo_auto_margin(void)
     fx_free(fx);
 }
 
+/* <select> flex items in a row, as in Chrome 152 (measured on the map editor AI composer's row with
+ * editor.css + editor-ai.css: a 348px bar): editor.css's page-wide `select { width: 100% }` makes a
+ * flex-shrink: 0 picker the bar's full width (flex-basis auto = width, a definite percentage), and
+ * .knAiMini's width: auto gives it back its intrinsic width (widest option + arrow). Composer row:
+ * tune icon, "Agent" picker, shield, "Ask first" picker, a flex: 1 spacer, the context ring. */
+static void t_flex_select_intrinsic(void)
+{
+    static const char *row =
+        "<div class=bar id=bar%s style='width:240px'>"
+        "<i style='width:18px;height:18px;flex-shrink:0'></i>"
+        "<select id=s1%s class=mini><option>Agent</option><option>Ask</option><option>Plan</option></select>"
+        "<i style='width:18px;height:18px;margin-left:8px'></i>"
+        "<select id=s2%s class=mini><option>Ask first</option><option>Allow all</option><option>Autopilot</option></select>"
+        "<div class=grow></div>"
+        "<div id=ring%s style='width:18px;height:18px;flex-shrink:0'></div></div>";
+    char html[2048];
+    int n = snprintf(html, sizeof html, row, "a", "a", "a", "a");
+    n += snprintf(html + n, sizeof html - (size_t)n, row, "p", "p", "p", "p");
+    snprintf(html + n, sizeof html - (size_t)n, "<div style='display:flex;width:300px'><select id=s3 class=auto>"
+             "<option>x</option><option>longer option</option></select></div>");
+    Fx *fx = fx_html(html,
+        "select { width:100%; font-size:12px; border:1px solid #444 }"
+        ".bar { display:flex; align-items:center }"
+        ".mini { height:24px; min-width:0; padding:0 2px 0 5px; flex-shrink:0 }"
+        "#bara .mini, .auto { width:auto }"
+        ".grow { flex:1; min-width:0 }");
+    /* width: auto: each picker is its intrinsic width, the ring ends the row */
+    Box *s1 = bx(fx, "s1a"), *s2 = bx(fx, "s2a"), *s3 = bx(fx, "s3");
+    HtmlRect r1 = rc(fx, "s1a"), r2 = rc(fx, "s2a"), r3 = rc(fx, "s3"), rr = rc(fx, "ringa");
+    if (s1) CHECK_NEAR(r1.w, s1->intrinsic_w + 2 + 7, 0.01, "flex select, width auto: intrinsic + border + padding");
+    if (s2) CHECK_NEAR(r2.w, s2->intrinsic_w + 2 + 7, 0.01, "second flex select, width auto: intrinsic + border + padding");
+    CHECK(r1.w < 120 && r2.w < 120, "flex selects stay compact: %.2f %.2f", r1.w, r2.w);
+    CHECK(r2.x > r1.x + r1.w, "second select after the first: %.2f > %.2f", r2.x, r1.x + r1.w);
+    CHECK_NEAR(rr.x + rr.w, 240, 0.5, "width auto: the ring ends the row");
+    if (s3) CHECK_NEAR(r3.w, s3->intrinsic_w + 2, 0.01, "flex-shrink 1 select, width auto: intrinsic + border (UA padding 0)");
+    /* width: 100%: the first picker is the bar's width and pushes the rest past its end (Chrome) */
+    r1 = rc(fx, "s1p");
+    r2 = rc(fx, "s2p");
+    CHECK_NEAR(r1.w, 240, 0.01, "flex select, width 100%%: the row's width");
+    CHECK(r2.x >= r1.x + r1.w, "width 100%%: the second select follows past the row's end: %.2f", r2.x);
+    fx_free(fx);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -2802,6 +2845,7 @@ int main(int argc, char **argv)
     t_video_intrinsic();
     t_bfc_roots();
     t_nested_scroll_passes();
+    t_flex_select_intrinsic();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

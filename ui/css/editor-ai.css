@@ -319,7 +319,11 @@
 	margin-left: 8px;
 	color: #7fb98f;
 }
+/* width: auto undoes editor.css's page-wide `select { width: 100% }`: the pickers keep their
+ * option-text width in the composer's flex row (with 100% the Agent picker fills the row in
+ * Chrome, and natively since a percentage-width replaced flex item resolves its flex basis) */
 .knAiMini {
+	width: auto;
 	height: 24px;
 	min-width: 0;
 	padding: 0 2px 0 5px;
