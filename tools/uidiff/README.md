@@ -40,6 +40,19 @@ without `UIDIFF_RENDER_CMD` it calls `<client_bin> --render-scenario <scenario> 
 Requirements: bash, ImageMagick (`magick`, or `convert` + `compare`), python3, and
 Mesa llvmpipe with either `xvfb-run` (Xvfb) or libEGL (`UIDIFF_HEADLESS=1`).
 
+The references and the tuned thresholds come from one machine: the old Fedora desktop's llvmpipe, with
+Liberation Sans as the system fallback font (`client/src/html/engine/text.c` now tries it first; DejaVu
+Sans first made Debian hosts lay Helvetica / Arial text out wider). On the Debian 13 devbox (Mesa 25.0.7,
+LLVM 19.1.7) on 2026-11-22, solid fills and text are pixel-identical to the desktop's own captures
+(`kn-servers-official-mixed`: 2552 differing pixels of 921600 with no fuzz), yet 93 of 942 regions fail:
+83 of them pass with 4 to 8 points more fuzz (small colour differences in blended and scaled images,
+e.g. `game-updating` credit: 124 pixels at fuzz 6, none at 8). The rest are edges of 3D thumbnails and
+character previews (Strike item / class selection, `seq-end-collect-button`) and a few layouts
+(`kn-servers-official` top-groups, `menu-host-type`, `kn-ranked-sort` rs-arrow, `kn-tip-spin` cost,
+`ranked-shop-flying`). The likeliest cause is the llvmpipe version (the desktop's was not recorded).
+Compare a run on another machine with this baseline, not with zero failures, before treating a
+colour-only failure as a regression.
+
 ## Pipeline
 
 For each `scenarios/<name>.json`:
