@@ -921,7 +921,7 @@ static void sales_load(void) {
     }
     if (!request_page("market", "sales", -1)) M.sales_loading = 0;
 }
-// krunker.io's history (v10 market.getHistory, gapi GET /market/history?sort=newest&limit=50, v10:26948; the table's
+// krunker.io's history (v10 market.getHistory, gapi GET /market/history?sort=date_desc&limit=50: the tab's default sort, deob-10.0.7.js:135772-135790; the table's
 // reader deob-10.0.3.js:147567, 150717): {history: [{type, date, skinindex, amount, other_party_name, status}]}, the
 // History table's rows once other_party_name is its Who (kio_market_history_rows). An error keeps the rows we have.
 static void kio_history_done(void *user, const int status, const cJSON *data, const cJSON *error) {

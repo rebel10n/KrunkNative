@@ -3,7 +3,7 @@
 // gapi paths v10 asks and its answers turned into the rows v10_market.c already draws (the economy socket's rows).
 // Pure: no network, no UI. The routes (doc/v10/api-inventory.md rows 131, 138-141; v10.js lines of v10.0.2's client
 // _10077, the readers' deob-10.0.3.js lines):
-//   GET  /market/history?sort=newest&limit=50        market.getHistory (v10:26948; reader deob-10.0.3.js:147567, 150717)
+//   GET  /market/history?sort=date_desc&limit=50     market.getHistory (v10:26948, deob-10.0.7.js:27050; reader deob-10.0.3.js:147567, 150717)
 //   GET  /items/<i>/view                             items.getView (v10:26957; reader deob-10.0.3.js:122532, 123271-123335)
 //   GET  /market/items/<i>/sales-statistics?daysback=<d>   market.getItemSalesStatistics (v10:26895; reader :151414)
 //   GET  /items/<i>/sales?range=<r>                  items.getSales (v10:26963; reader :123825)

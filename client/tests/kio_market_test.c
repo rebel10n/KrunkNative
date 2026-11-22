@@ -36,8 +36,8 @@ int main(void) {
     CHECK(kio_market_time_ms(t) == 0, "not a date: 0");
     cJSON_Delete(t);
 
-    // History: GET /market/history?sort=newest&limit=50 (v10:26948) -> the table's rows, other_party_name as Who
-    CHECK(kio_market_history_path(path, sizeof(path)) && !strcmp(path, "/market/history?sort=newest&limit=50"), "history path %s", path);
+    // History: GET /market/history?sort=date_desc&limit=50 (deob-10.0.7.js:135786-135790) -> the table's rows, other_party_name as Who
+    CHECK(kio_market_history_path(path, sizeof(path)) && !strcmp(path, "/market/history?sort=date_desc&limit=50"), "history path %s", path);
     cJSON *hist = cJSON_Parse("{\"history\":[{\"type\":\"buy\",\"date\":\"2026-11-20T10:00:00.000Z\",\"skinindex\":1,\"amount\":777,"
                               "\"other_party_name\":\"KioSeller\",\"status\":\"completed\"},"
                               "{\"type\":\"sell\",\"date\":1700000000000,\"skinindex\":\"5\",\"amount\":\"20\",\"other_party_name\":null,"

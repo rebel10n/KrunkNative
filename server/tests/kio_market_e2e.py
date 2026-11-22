@@ -9,7 +9,7 @@ krunker.io's listings (v10's market.getListings: gapi GET /market/listings) and 
 answered, so the Browse grid said "No listings available" and the Stats tab stayed empty.
 
 The account's other screens that read krunker.io the same way (each was a brain request the brain gate refused):
-  History            market.getHistory: GET /market/history?sort=newest&limit=50 (v10:26948)
+  History            market.getHistory: GET /market/history?sort=date_desc&limit=50 (deob-10.0.7.js:135786)
   Listing Details    items.getView: GET /items/1/view (v10:26957) for its listings and owners, and
                      market.getItemSalesStatistics: GET /market/items/1/sales-statistics?daysback=30 (v10:26895) for Stats
   the item page      items.getSales: GET /items/1/sales?range=3 (v10:26963) for its Sales chart
@@ -198,8 +198,8 @@ def checks(text, stub):
 
     # History
     hist = stub.find("GET", "/api/market/history")
-    check("the History tab asks krunker.io's /market/history?sort=newest&limit=50 with the Bearer",
-          bearer(hist) and hist[-1][2] == {"sort": "newest", "limit": "50"}, [(r[2], r[3].get("authorization", "")[:7]) for r in hist])
+    check("the History tab asks krunker.io's /market/history?sort=date_desc&limit=50 with the Bearer",
+          bearer(hist) and hist[-1][2] == {"sort": "date_desc", "limit": "50"}, [(r[2], r[3].get("authorization", "")[:7]) for r in hist])
     check("... and shows its row: the other party as Who, 777 KR, no 'No transaction history found'",
           grep(text, "mkhist") > 0 and grep(text, "mkhist_amt") > 0 and nodes(text, "mkhist_none") == 0,
           (grep(text, "mkhist"), grep(text, "mkhist_amt"), nodes(text, "mkhist_none")))

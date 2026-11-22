@@ -44,7 +44,9 @@ static const char *str(const cJSON *o, const char *k) {
     return cJSON_IsString(v) ? v->valuestring : "";
 }
 
-size_t kio_market_history_path(char *out, const size_t n) { return put(out, n, snprintf(out, n, "/market/history?sort=newest&limit=50")); }
+// the History tab's first page: sort "date" + order "desc" is date_desc, 50 rows (deob-10.0.7.js:135772-135790,
+// market.getHistory :27050-27063)
+size_t kio_market_history_path(char *out, const size_t n) { return put(out, n, snprintf(out, n, "/market/history?sort=date_desc&limit=50")); }
 
 cJSON *kio_market_history_rows(const cJSON *data) {
     cJSON *rows = cJSON_CreateArray();

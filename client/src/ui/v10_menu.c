@@ -255,9 +255,10 @@ static void header_update(const AccountInfo *acc) {
             html_dom_insert_html(profile, HTML_INSERT_AFTER_END, markup);
         }
     }
-    // the sandbox menu hides the guest bar (connectToSandbox, see sandbox_apply); a signed-in bar stays
+    // the sandbox menu hides both bars, the signed-in one too (connectToSandbox, deob-10.0.7.js:229384-229387; see
+    // sandbox_apply)
     set_display(out, acc || V.sandbox ? "none" : "");
-    set_display(in, acc ? "" : "none");
+    set_display(in, acc && !V.sandbox ? "" : "none");
     // the Inbox entry (_52295) of .headerBarRight: signed in only
     HtmlElem inbox = by_id("knV10Inbox");
     if (acc && !inbox) {
@@ -325,24 +326,26 @@ static void nav_update(const AccountInfo *acc) {
 
 // ---------------------------------------------------------------- the sandbox menu
 
-// v10's in-page sandbox (a page loaded with localStorage custMap, the editor's Test, or /?sandbox: loadSandbox,
-// then connectToSandbox) keeps v7.1.4's sandbox chrome (connectToSandbox's f2064, v7 index.js:18405-18560,
-// doc/v7/map-logic.md 2.0; the elements tools/ui-import/v7_page.js CONNECTED_MENU undoes). v10.0.2's DOM in
-// that state (doc/ref/krunker-v10/menu/menu-host-type.html.gz, capture-v10.js's custMap storage) against its
-// live menu (doc/ref/krunker-v10/mobile/menu-mobile.html.gz, no custMap): #subLogoButtons (the play column:
-// the action cards and the match-info bar; capture-v10.js cites v10:11105776), #tlInfHold (the right panel)
-// and #newsHolder get style display:none, #signedOutHeaderBar too (so .headerBarRight's Notifications /
-// Settings / More Krunker start the bar at the left); the Store (#menuItemShop) and Challenges items get class
-// mIH (main.css display:none !important) and the Skin Manager item, display:none on the live menu, style "".
+// v10's in-page sandbox: ?test / ?sandbox, or a page loaded with localStorage custMap (the editor's Test), starts
+// connectToSandbox (deob-10.0.7.js:230090-230094 -> :229372). Unless it is the bot FTUE, that hides
+// (:229380-229396) #tlInfHold (the right panel), #subLogoButtons (the play column: the action cards and the
+// match-info bar), #newsHolder, #signedInHeaderBar and #signedOutHeaderBar (so .headerBarRight's Notifications /
+// Settings / More Krunker start the bar at the left; header_update) and #menuServerInfoContainer; the Store and
+// Challenges items get class mIH (main.css display:none !important) and the Skin Manager item is shown
+// ($skinManagerEnabled, a store that starts true and is never set: :128568). Its ad row needs canShowAds, which
+// KrunkNative never has (menu_ui.c). The same chrome as v7.1.4's connectToSandbox (v7 index.js:18405-18560) and
+// v10.0.2's captured DOM (doc/ref/krunker-v10/menu/menu-host-type.html.gz against menu-mobile.html.gz).
 // krunker_haslogin is no part of it: v10's live menu with krunker_haslogin=true (doc/ref/krunker-v10.0.2/
-// main-menu.png, capture_v10_live.js GUEST_STORAGE) shows the guest bar and the play column.
-// Off again (a remote game joined), each element gets back what the live menu has.
+// main-menu.png) shows the guest bar and the play column.
+// v10 leaves the sandbox only by loading the page again; KrunkNative turns it off when the same window joins a
+// remote game (v10_menu_account_tick), and each element gets back what the live menu has.
 static void sandbox_apply(void) {
     const int on = V.sandbox;
     if (!v10_menu_page() || (!on && !V.sandbox_shown)) return;
     set_display(by_id("subLogoButtons"), on ? "none" : "");
     set_display(by_id("tlInfHold"), on ? "none" : "");
     set_display(by_id("newsHolder"), on ? "none" : "");
+    set_display(by_id("menuServerInfoContainer"), on ? "none" : ""); // "": match_info_setup's
     HtmlElem el;
     if ((el = nav_item("menuBtnShop"))) html_dom_set_class(el, "mIH", on);
     if ((el = nav_item("menuBtnChall"))) html_dom_set_class(el, "mIH", on);
