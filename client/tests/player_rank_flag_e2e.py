@@ -81,6 +81,18 @@ def end_cell(doc, name):
     return ""
 
 
+def end_actions(doc):
+    """The end table's last cell (the actions) of each row, by player name."""
+    acts = {}
+    for m in re.finditer(r"<tr[^>]*>(.*?)</tr>", doc, re.S):
+        row = m.group(1).replace("'", '"')
+        name = next((n for n in ("Local User", "Quentin", "Rhea") if ">" + n in row), None)
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        if name and tds:
+            acts[name] = tds[-1]
+    return acts
+
+
 RANK_IMG = re.compile(r'<div class="newLeaderRanked"><img src="([^"]*)" alt="Rank" class="newLeaderRankedIcon"></div>')
 END_RANK_IMG = re.compile(r'<div class="endTableRanked"><img src="([^"]*)" alt="Rank" class="endTableRankedIcon"></div>')
 
@@ -114,6 +126,22 @@ def main():
     check("end: the rank last (.endTableRanked, rank_gold.svg)", m is not None and m.group(1).endswith("img/ranked/ranks/rank_gold.svg") and q.endswith(m.group(0)),
           q[-400:])
     check("end: Rhea has no flag, icon or rank", rh and "endTableFlag" not in rh and "endTableRanked" not in rh and "material-icons" not in rh, rh)
+
+    # the actions cell (:226775-226777): an account sees its own row's share button and a Report button on another account's
+    # row (`player.level`), none on a guest's; reportPlayer(`name`, this) opens the profile (:227065-227070)
+    acct_rows = [dict(ROWS[0], level=42), dict(ROWS[1], level=18), dict(ROWS[2])]
+    doc = render("endtable-actions", dict(end, scoreboard=acct_rows, account={"name": "Local User", "score": 200000, "funds": 500},
+                                          official=True))
+    acts = end_actions(doc)
+    check("end actions: another account's row has v10's Report button",
+          re.fullmatch(r'<div class="material-icons reportBut" title="Report Player" onclick="reportPlayer\((&quot;|")Quentin(&quot;|"),this\)">report</div>',
+                       acts.get("Quentin", "")) is not None, acts.get("Quentin"))
+    check("end actions: your own row has the share button (Share Match Results)",
+          acts.get("Local User") == '<div class="material-icons reportBut shareBut" title="Share Match Results" onclick="shareResult()">share</div>',
+          acts.get("Local User"))
+    check("end actions: no button on a guest's row (no level)", acts.get("Rhea") == "", acts.get("Rhea"))
+    doc = render("endtable-actions-guest", dict(end, scoreboard=acct_rows))
+    check("end actions: a guest viewer gets neither button", doc and "reportBut" not in doc)
 
     # Client > Hide player names (knClient.json hidePlayerNames, client/tests/hide_names_e2e.py)
     doc = render("endtable-hidden", dict(end, storage={"knClient": json.dumps({"hidePlayerNames": True})}))

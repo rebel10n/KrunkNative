@@ -42,15 +42,15 @@ void end_share_actions_html(char *out, const size_t size, const int is_you, cons
     if (!account_split_signed_in() && !account_ui_scenario_signed_in()) return;
     if (is_you) {
         if (custom_game) return; // no share for a custom game
-        snprintf(out, size, "<div class='material-icons reportBut shareBut' title='%s' onclick='shareResult()'>share</div>",
-                 I18N("kn.share.button", "Share this result"));
+        snprintf(out, size, "<div class='material-icons reportBut shareBut' title='Share Match Results' onclick='shareResult()'>share</div>");
         return;
     }
+    // another player with an account (`player && player.level`): v10's Report button, "report" in Material Icons, whose
+    // reportPlayer(`name`, this) opens the player's profile
     if (!other_has_account || !name || !*name) return;
     char safe[128];
     escape_attr(safe, sizeof safe, name);
-    snprintf(out, size, "<div class='material-icons reportBut' title='%s' onclick='reportPlayer(\"%s\")'>flag</div>",
-             I18N("kn.share.report", "Report this player"), safe);
+    snprintf(out, size, "<div class='material-icons reportBut' title='Report Player' onclick='reportPlayer(\"%s\",this)'>report</div>", safe);
 }
 
 static void share_popup(void) {
