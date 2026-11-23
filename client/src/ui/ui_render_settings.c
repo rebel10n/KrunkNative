@@ -484,6 +484,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("objectAnim", object_anim, NULL),
     RS_B("screenShake", screen_shake, NULL),
     RS_B("weaponShine", weapon_shine, NULL),
+    RS_B("noPaintAnim", no_paint_anim, NULL),           // paint.shader null (deob-10.0.7.js:206560, :207947): skin_fx.c
     RS_I("lighting", lighting, NULL),
     RS_S("hudHealthHigh", hud_health_high, NULL),       // set(){} in v3.1.1
     RS_S("hudHealthLow", hud_health_low, NULL),         // set(){} in v3.1.1

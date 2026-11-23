@@ -7,6 +7,7 @@
 #include <cosmetics.h> // cosmetic_asset_path: a custom skin's user-asset keys
 #include <cJSON.h>     // customShaderInfo (ViewerSkin.shader_info)
 #include <client.h>    // g_render_lighting: shader 18's Lambert
+#include <render_settings.h> // noPaintAnim
 #include <ruleset.h>   // light_unit_factor (as basic.c)
 #include <mod_shader.h> // shader graphs: mod_shader_graph_compile_surface
 #include <math.h>
@@ -1287,13 +1288,16 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
 static unsigned int g_paint_env_texture;
 static int g_paint_env_tried;
 
-static void fx_paint_material(BasicMaterial *material, const WornSkinPaint paint, const ViewerSkin *skin) {
+static void fx_paint_material(BasicMaterial *material, WornSkinPaint paint, const ViewerSkin *skin) {
+    // `null == paint.shader || noPaintAnim ? null : shaders.find(...)` (deob-10.0.7.js:206560, :207947): with
+    // noPaintAnim the colour paint alone, intensity 0 (unpainted) when there is no colour
+    if (client_render_settings()->no_paint_anim) paint.shader = -1;
     const int known_shader = paint.shader >= 0 && paint.shader <= 5;
     const vec4 rgb = fx_color(paint.color >= 0 ? paint.color : 0xFFFFFF, 1.0f);
     material->paint_enabled = 1;
     material->paint_color = (vec3) {rgb.x, rgb.y, rgb.z};
     material->paint_intensity = paint.color >= 0 || known_shader ? 1.0f : 0.0f;
-    material->paint_shader = paint.color >= 0 ? -1 : known_shader ? paint.shader : 99; // 99: an unknown shader, unpainted
+    material->paint_shader = paint.color >= 0 || paint.shader < 0 ? -1 : known_shader ? paint.shader : 99; // 99: an unknown shader, unpainted
     material->paint_mask_texture = 0;
     material->paint_env_texture = 0;
     if (skin && skin->paint_mask) {
@@ -1367,6 +1371,7 @@ void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, co
 }
 
 static void fx_paint_graph_material(BasicMaterial *material, const int graph, const ViewerSkin *skin) {
+    if (client_render_settings()->no_paint_anim) return; // the graph is the paint's shader: none with noPaintAnim
     fx_paint_material(material, (WornSkinPaint) {.color = -1, .shader = 0}, skin); // a shader paint's colour, intensity, mask
     material->paint_shader = 100;
     material->paint_graph = graph;
