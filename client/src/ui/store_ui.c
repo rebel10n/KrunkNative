@@ -385,7 +385,11 @@ static void toggle_menu_hider(const int on) {
     HtmlElem base = html_dom_by_id("uiBase");
     if (base) html_dom_set_class(base, "onMenu", on);
     set_display("gameNameHolder", on ? "" : "none");
-    set_display("spectButton", on ? "" : "none");
+    // `spectButton.display = showSpect && on ? null : none` (deob-10.0.7.js:163418): showSpect is the game's
+    // allowSpect (setShowSpect, :226419), true until a game is in; as menu_ui.c's menu chrome
+    const Client *client = menu_ui()->client;
+    const int allow_spect = !client || !client->game.ready || client->game.config.allow_spectate;
+    set_display("spectButton", on && allow_spect ? "" : "none");
     if (on) {
         set_display("spinUI", "none");
         set_display("spinUIBtns", "none");
