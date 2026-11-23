@@ -104,8 +104,8 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | SHOW_SPEECH_BUBBLE | `sb` | :261181 | menu mascot bubble, `ms \|\| 2500`, optional sigh | **ported** | `NET_EXT_SPEECH_BUBBLE` |
 | CLAN_LEAVE_RESPONSE | `clnL` | :255456 | clan window | KN equivalent | kn_brain clans |
 | WARS_CLAN | `warsClan` | :255551 | `territorialWars.setClanInfo`, then once per game a "Turf Wars / Territory controlled by X" textPopup 1 s after entering | **ported** | `NET_EXT_WARS_CLAN`, also from init's `syncData.warsClan` (:256999, `krunker_link_s2c_init`); the clan and the popup are `client/src/ui/s2c_ui.c`; the `wars_banner*` server nodes' banners (models 64295 / 64301 / 64303, the banner colour as their paint, the logo or the name as a decal) are `client/src/wars_banners.c` (no KN map has the nodes yet). KN's server sends it too: at an eligible round start (the Turf Wars kill rule) it asks kn_brain for the clan that won the map yesterday (`turf_clan`), broadcasts it and sends it after every joiner's INIT (server/src/brain_events.c) |
-| UPLOAD_RESPONSE | `upR` | :255675 | upload window text | KN equivalent | kn_brain uploads |
-| UPLOAD_PROFILE_RESPONSE | `upPR` | :255687 | profile picture uploaded | KN equivalent | kn_brain |
+| UPLOAD_RESPONSE | `upR` | :255675 | upload window text | by name | the krunker.io account's profile picture refusal [message, 1] into #pfpUpResp: `account_scoped` -> account_ui.c `kio_pfp_frame` (deob-10.0.7.js:225320-225327); type 2 (the settings upload) is not drawn |
+| UPLOAD_PROFILE_RESPONSE | `upPR` | :255687 | profile picture uploaded | by name | the krunker.io account's picture is up: `account_scoped` -> account_ui.c `kio_pfp_frame` (pfpUploaded, updateWindow(5), "Uploaded!"; deob-10.0.7.js:225328-225333) |
 | SPIN_RESPONSE | `spin` | :254882 | prize wheel result | KN equivalent | spins are kn_brain's (spin_wheel.c) |
 | SAVE_SPIN_HISTORY | `spinH` | :254698 | spin history popup | KN equivalent | kn_brain |
 | SPIN_WHEEL_RESPONSE | `spinW` | :254991 | a map spinner object's spin: `updateSpinner(uid, ..., skin)`, funds and skin to the spinner | **ported** | `NET_EXT_SPIN_WHEEL_RESPONSE`; `client/src/prize_wheels.c` keeps the map's spinners and their spinInfo, steps them every 50 ms and plays the ticks / reward sounds; ours pays the account. The wheel canvas and the won item's model are `client/src/prize_wheel_render.c` (a won dye: a class-9 preview player wearing it). KN's server sends it too: interact 9 in reach with the KR offers the spin (`cnfm` [uid, 2]), `cnfm` 2 spins that store wheel through kn_brain's KR wallet (`map_spin`: the KR, the skin and their ledger rows in one transaction) and the stop goes to everyone (server/src/brain_events.c). One spin per wheel at a time (KN: v10 restarts a turning wheel and loses its unbS) |
@@ -198,7 +198,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | PLAYER_POSE | `pz` | :261743 | `players.setPose` | ported | `NET_EXT_PLAYER_POSE` (krunker_link_script.c, init `plrPose` too; client/src/player_pose_render.c; doc/v10/player-pose.md) |
 
 Totals: 24 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`, `sd`,
-`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`, `aip`), 10 by name, 36 KN equivalent, 35
+`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`, `aip`), 14 by name, 33 KN equivalent, 35
 irrelevant, 5 other agent, 0 open.
 
 ## Open work

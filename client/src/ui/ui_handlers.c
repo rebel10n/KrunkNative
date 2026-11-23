@@ -282,7 +282,9 @@ H(h_play_map) {
 // selectHostMap(name, modURL, id, creator): Krunker remembers the community game for the
 // Host Game window (selectedCustomMapId). KrunkNative opens the Host Game flow at its Mode step with
 // that map chosen: a catalogue map at once; a published map (kn_brain) once its copy is downloaded
-// and passes v10's checks (community_fetch), else v10's message in an alert.
+// and passes v10's checks (community_fetch), else v10's message in an alert. On krunker.io (its Games
+// window lists krunker.io's maps) v10.0.7 downloads nothing: it keeps {id, name} and shows the Host window
+// (deob-10.0.7.js:225334-225347); the game server sends the map with the game's init.
 typedef struct {
     char name[96], creator[64];
 } HostPick;
@@ -313,6 +315,11 @@ H(h_select_host_map) {
     }
     if (index >= 0) {
         host_flow_open_map(index);
+        return 1;
+    }
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        menu_log("selectHostMap: %s (krunker.io) -> host flow", name);
+        host_flow_open_published(name, creator);
         return 1;
     }
     HostPick *pick = calloc(1, sizeof(*pick));

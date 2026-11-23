@@ -808,6 +808,14 @@ kio-junkyard-e2e: build ## The Junkyard on an official krunker.io game (v10_junk
 kio-chatban-e2e: build ## The punish popup's Chat Ban on an official krunker.io game (hud_ui.c): getChatBan / chatBan on krunker.io's gapi with the Bearer, v10's label and chat lines, nothing to the brain (krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I client/tests/kio_chatban_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-hostmap-e2e
+kio-hostmap-e2e: build ## Hosting a krunker.io community map from a krunker.io account: selectHostMap keeps {id, name} (no brain download), Start Game sends CUSTOM_SERVER with customMap = the name (krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I client/tests/kio_hostmap_e2e.py $(DEBUG_DIR)
+
+.PHONY: kio-pfp-e2e
+kio-pfp-e2e: build ## A premium krunker.io account's profile picture: user-assets /p<id>/profile.png, pfpPopup, the 250 kb check, "uploadP" on the official socket, "Uploaded!" on "upPR" (krunker.io stubs, a stub zenity, headless)
+	timeout 400 $(PYTHON) -I client/tests/kio_pfp_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-store-e2e
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)

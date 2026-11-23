@@ -614,6 +614,9 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         // the Junkyard's recipes and crafts (v10_junkyard.c, through account_ui.c's kio_frame)
         case KRUNKER_S2C_CRAFT_DATA_RESPONSE:
         case KRUNKER_S2C_CRAFT_RESPONSE:
+        // the profile picture upload's answers (account_ui.c's kio_frame: #pfpUpResp, "Uploaded!")
+        case KRUNKER_S2C_UPLOAD_RESPONSE:
+        case KRUNKER_S2C_UPLOAD_PROFILE_RESPONSE:
             return 1;
 
         // Ignored on purpose (doc/v10/s2c-coverage.md, "irrelevant" and "KN equivalent" rows): real-money store and
@@ -627,8 +630,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_SURVEY_BUNDLE_RESPONSE:
         case KRUNKER_S2C_POPUP_REGISTER_REWARDS:
         case KRUNKER_S2C_CLAN_LEAVE_RESPONSE:
-        case KRUNKER_S2C_UPLOAD_RESPONSE:
-        case KRUNKER_S2C_UPLOAD_PROFILE_RESPONSE:
         case KRUNKER_S2C_SPIN_RESPONSE:
         case KRUNKER_S2C_SAVE_SPIN_HISTORY:
         case KRUNKER_S2C_SPIN_WHEELS_UPDATED:

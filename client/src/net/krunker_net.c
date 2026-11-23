@@ -731,6 +731,8 @@ static int clan_frame_ok(const double action, const int n, const cJSON *a2, cons
 //                     the ownership transfer's rpcs (rpc(name, ...args), :220556, :220631, :220638); answered
 //                     ["_0" | "_1", name, results...] (rpc_answer) as the Daily Spin's
 //   ["recps"], ["crft", SID]  the Junkyard's recipes and a craft (answered "recps" / "crftr"), once in the game
+//   ["uploadP", dataURL]  UPLOAD_PROFILE_PICTURE: a premium account's profile picture, the PNG as the FileReader's data
+//                     URL (deob-10.0.7.js:223508-223524); answered "upPR" (done) or "upR" [message, 1] (account_ui.c)
 //   ["vo", code]      REDEEM_VOUCHER (v10 sends it straight, deob-10.0.4.js:221047): grants KR, answered "vr"
 //                     [funds | null, message] (kio_store_voucher_answer)
 //   ["dsl"]           the Daily Spin claim, sent as v10's rpc(DAILY_SPIN_CLAIM) = ["_0", rpcId, "dsl"]
@@ -790,17 +792,18 @@ int krunker_net_send_account_frame(const cJSON *frame) {
         ok = K.link.joined;
         pthread_mutex_unlock(&K.lock);
     }
+    if (!strcmp(name, "uploadP") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1)) &&
+        !strncmp(cJSON_GetArrayItem(frame, 1)->valuestring, "data:", 5))
+        ok = 1;
     if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)
     if (!ok || n > 10) return 0;
     KrunkerValue args[10], kv[10][2];
-    char text[10][256], key[10][8];
+    char key[10][8];
     for (int i = 0; i < n; i++) {
         const cJSON *v = cJSON_GetArrayItem(frame, i + 1);
         if (cJSON_IsNumber(v)) args[i] = KRUNKER_V_NUM(v->valuedouble);
-        else if (cJSON_IsString(v)) {
-            snprintf(text[i], sizeof(text[i]), "%s", v->valuestring);
-            args[i] = KRUNKER_V_STR(text[i]);
-        } else if (cJSON_IsBool(v)) args[i] = KRUNKER_V_BOOL(cJSON_IsTrue(v));
+        else if (cJSON_IsString(v)) args[i] = KRUNKER_V_STR(v->valuestring); // the frame outlives the send (a data URL is long)
+        else if (cJSON_IsBool(v)) args[i] = KRUNKER_V_BOOL(cJSON_IsTrue(v));
         else if (cJSON_IsObject(v) && v->child && !v->child->next && v->child->string && cJSON_IsNumber(v->child) &&
                  strlen(v->child->string) < sizeof(key[i])) { // a one-number object: the clan frames' {r} / {wd} (clan_frame_ok)
             snprintf(key[i], sizeof(key[i]), "%s", v->child->string);

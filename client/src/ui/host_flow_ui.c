@@ -8,7 +8,8 @@
 // The last step offers, by the window's backend: the Servers tab it was opened from (host_flow_open_backend,
 // the "+ Host Game" of krunk.io or krunker.io), else the active one (krunker_net_active(): the official krunker.io
 // connection). The session's backend is never changed here.
-//   krunker.io  -> krunker.io's official hosting: v10's CUSTOM_SERVER request (krunker_net_host_custom)
+//   krunker.io  -> krunker.io's official hosting: v10's CUSTOM_SERVER request (krunker_net_host_custom); a map
+//                  chosen on krunker.io's Games window goes by its name (customMap), a Box Office one is refused
 //   krunk.io    -> Box Office servers: the brain hosts the game (/mm/host-game, servers_ui_host_game)
 //   always      -> host it yourself: the server_bin command and the Dedicated Server window
 #include <host_flow_ui.h>
@@ -43,12 +44,14 @@
 
 // The flow's state. The page holds the values while the window is open; sync_page() reads them back.
 static struct {
+    int ready;                             // flow_reset ran once (before it the backend reads 0, the Box Office tab's)
     int host_type;                         // config.hostTypes index (GAME_HOST_*)
     int backend;                           // the Start Game's backend: 1 krunker.io, 0 Box Office, -1 the active one
     int step;                              // the tab shown (FLOW_STEP_*)
     unsigned char maps[FLOW_MAP_MAX];      // gameMap<mapIndex> checked (Krunker's own maps)
     char custom_key[256];                  // a community map chosen in the Games window: its key or published spec ("" none)
     char custom_name[96];                  // its name (the Select banner)
+    int custom_official;                   // the choice was made on krunker.io's Games window (a krunker.io map, hosted by name)
     cJSON *request;                        // the rows as last read back (ui_host_config_collect); NULL until read
     char name[64];                         // --hostname (the self-host fields)
     int port;                              // --port (0: the default)
@@ -342,9 +345,12 @@ void host_flow_start(void) {
 #ifdef __EMSCRIPTEN__
         set_message(I18N("kn.hostflow.kio.web", "Hosting on krunker.io is not available in the browser build"), 1);
 #else
-        if (g_flow.custom_key[0]) { // a community map is Box Office's (kn_brain) and is not on krunker.io
+        if (g_flow.custom_key[0] && !g_flow.custom_official) { // a Box Office (kn_brain) community map is not on krunker.io
             set_message(I18N("kn.hostflow.kio.community", "Community maps are hosted on Box Office servers or on your own server."), 1);
         } else {
+            // a krunker.io map is hosted by its name, as v10.0.7's createPrivateRoom sends it (customMap: the chosen
+            // map's name, deob-10.0.7.js:204711); its data comes with the game's init (krunker_map_source.h)
+            if (g_flow.custom_key[0]) cJSON_ReplaceItemInObject(config, "customMap", cJSON_CreateString(g_flow.custom_name));
             // the refusals say why (krunker_net_host_block): the player can act on each one
             switch (krunker_net_host_block()) {
             case KRUNKER_HOST_NOT_CONNECTED:
@@ -676,7 +682,14 @@ static void flow_reset(const int host_type) {
     g_flow.backend = -1;
     g_flow.host_type = game_host_type_name(host_type) ? host_type : GAME_HOST_CUSTOM;
     g_flow.port = FLOW_DEFAULT_PORT;
+    g_flow.ready = 1;
     servers_ui_set_host_type(g_flow.host_type); // the rows' read-back (ui_host_config_collect) reads it
+}
+
+// selectHostMap before any Host window was opened (the Games window's Host button): the window's defaults, so
+// Start Game hosts on the active backend (-1) and not on the zeroed state's Box Office tab
+static void flow_ensure(void) {
+    if (!g_flow.ready) flow_reset(GAME_HOST_CUSTOM);
 }
 
 // openHostWindow(false, type): the chooser's server-type cards (window 42)
@@ -697,23 +710,29 @@ void host_flow_open_backend(const int host_type, const int krunker) {
 // selectHostMap on a catalogue map (the Games window's Host button): an official map is checked; a community
 // map is the Select banner's choice. The rest of the window's values are kept.
 void host_flow_open_map(const int catalog_index) {
+    flow_ensure();
     const MapCatalogEntry *e = map_catalog_at((size_t) catalog_index);
     if (e && official_hostable(e)) {
         g_flow.maps[e->index] = 1;
     } else if (e) {
         snprintf(g_flow.custom_key, sizeof(g_flow.custom_key), "%s", e->key);
         snprintf(g_flow.custom_name, sizeof(g_flow.custom_name), "%s", e->name);
+        g_flow.custom_official = account_backend() == ACCOUNT_BACKEND_KRUNKER;
     }
     g_flow.step = 0;
     flow_show();
 }
 
-// selectHostMap on a published map (downloaded and checked first, community_fetch): the banner's choice
+// selectHostMap on a published map: the banner's choice. A Box Office map is downloaded and checked first
+// (community_fetch); a krunker.io map is remembered by its name only, as v10.0.7's selectHostMap does
+// ({id, name}, then showWindow(8): deob-10.0.7.js:225334-225347), and hosted by that name.
 void host_flow_open_published(const char *name, const char *creator) {
+    flow_ensure();
     char spec[256] = "";
     if (community_published_spec(spec, sizeof(spec), name, creator)) {
         snprintf(g_flow.custom_key, sizeof(g_flow.custom_key), "%s", spec);
         snprintf(g_flow.custom_name, sizeof(g_flow.custom_name), "%s", name);
+        g_flow.custom_official = account_backend() == ACCOUNT_BACKEND_KRUNKER;
     }
     g_flow.step = 0;
     flow_show();
@@ -739,6 +758,7 @@ int host_flow_set_community_name(const char *name) {
         if (!key[0] && !community_published_spec(key, sizeof(key), name, NULL)) return 0;
         snprintf(g_flow.custom_key, sizeof(g_flow.custom_key), "%s", key);
         snprintf(g_flow.custom_name, sizeof(g_flow.custom_name), "%s", name);
+        g_flow.custom_official = account_backend() == ACCOUNT_BACKEND_KRUNKER;
     }
     const HtmlElem banner = html_dom_by_id("hostCMapPickT");
     if (banner) html_dom_set_text(banner, g_flow.custom_name);

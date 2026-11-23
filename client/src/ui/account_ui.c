@@ -514,10 +514,16 @@ static void chal_capture(const char *label, const cJSON *frame) {
     free(text);
 }
 
+static void kio_pfp_frame(const char *label, const cJSON *frame); // the profile picture's upload answers (below)
+
 // The official game socket's account frames (krunker_net_account_listen), main thread
 static void kio_frame(const char *label, const cJSON *frame) {
     if (!strcmp(label, "recps") || !strcmp(label, "crftr")) { // CRAFT_DATA_RESPONSE / CRAFT_RESPONSE: the Junkyard's
         v10_junkyard_kio_frame(frame);
+        return;
+    }
+    if (!strcmp(label, "upR") || !strcmp(label, "upPR")) { // UPLOAD_RESPONSE / UPLOAD_PROFILE_RESPONSE: the profile picture
+        kio_pfp_frame(label, frame);
         return;
     }
     if (strcmp(label, "a") && strcmp(label, "ua")) chal_capture(label, frame); // ("a" / "ua": after the account is set)
@@ -2896,6 +2902,140 @@ static void free_kr_ad_error(void *user, const char *error) {
     free_kr_ad_frame("fkrf");
 }
 
+// ------------------------------------------------------------------ the krunker.io account's profile picture
+
+// v10.0.7 (deob-10.0.7.js): a premium account's picture is user-assets /p<id>/profile.png (iíìííìì, :24307-24312), else
+// the class icon, blurred (:218977-218978); "Change Picture" opens pfpPopup (:223293-223295: "Must have premium" without
+// premium), whose Select picks a PNG (selectFile / updateFile: its name and size in kb, :223296-223310) and whose
+// Publish/Update sends UPLOAD_PROFILE_PICTURE ["uploadP", the FileReader's data URL] on the game socket once it is 250 kb
+// at most (uploadProfilePic, :223508-223524; the size is iiîïìíì's, :24255-24257). The server answers UPLOAD_RESPONSE
+// ["upR", message, 1] into #pfpUpResp (iïiiíïi, :225320-225327) or UPLOAD_PROFILE_RESPONSE ["upPR"]: pfpUploaded,
+// updateWindow(5) and the "Uploaded!" popup (:225328-225333). The file dialog is avatar_ui.c's (PNG only).
+#define KIO_PFP_LIMIT_KB 250                  // 0xfa
+#define KIO_PFP_PICK_MAX (8u * 1024u * 1024u) // the dialog's read cap; the 250 kb check is uploadProfilePic's
+#define KIO_PFP_HOUR_MS 3600000.0             // iîîïiïï (0x36ee80): the picture's cache key steps by the hour
+
+static struct {
+    char *data;      // the picked file as a data URL ("data:image/png;base64,..."), NULL before a pick
+    int uploaded_id; // pfpUploaded "<id>:<ms>": the account whose picture was uploaded here, and when
+    double uploaded_ms;
+} g_kio_pfp;
+
+static double kio_pfp_now_ms(void) { return (double) time(NULL) * 1000.0; }
+
+// iíìííìì(id): the picture's URL with v = the hour, or the upload's time when this account uploaded since
+static void kio_pfp_url(char *out, const size_t n, const int id) {
+    double v = floor(kio_pfp_now_ms() / KIO_PFP_HOUR_MS) * KIO_PFP_HOUR_MS;
+    if (g_kio_pfp.uploaded_id == id && g_kio_pfp.uploaded_ms > v) v = g_kio_pfp.uploaded_ms;
+    snprintf(out, n, "https://user-assets.krunker.io/p%d/profile.png?v=%.0f", id, v);
+}
+
+// popupResponse(kind, error, text) of v10.0.7 (:222910-222916): genericPopup(..., "responsePop")
+static void generic_popup(const char *html, const char *cls);
+static void kio_response_popup(const int success, const char *text) {
+    StrBuf sb = {0};
+    if (success)
+        sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
+    else
+        sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#e33b3b'>clear</i></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
+    sb_append(&sb, text && text[0] ? text : success ? "Success!" : I18N("social.market.failed", "Failed"));
+    sb_append(&sb, "</div></div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html ? html : "", "responsePop");
+    free(html);
+}
+
+static void kio_pfp_resp(const char *html) { // iïiiíïi(text, 1): #pfpUpResp
+    const HtmlElem el = html_dom_by_id("pfpUpResp");
+    if (el) html_dom_set_html(el, html ? html : "");
+}
+
+// updateFile("pfp"): the picked file's name (or "Failed") and its size in kb
+static void kio_pfp_picked(void *user, const char *b64, const size_t bytes, const char *error) {
+    (void) user;
+    free(g_kio_pfp.data);
+    g_kio_pfp.data = NULL;
+    const HtmlElem name = html_dom_by_id("pfpName"), size = html_dom_by_id("pfpSize");
+    if (error || !b64) {
+        if (name) html_dom_set_html(name, I18N("generic.failed", "Failed"));
+        return;
+    }
+    static const char prefix[] = "data:image/png;base64,";
+    const size_t n = strlen(b64);
+    g_kio_pfp.data = malloc(sizeof(prefix) + n);
+    if (g_kio_pfp.data) {
+        memcpy(g_kio_pfp.data, prefix, sizeof(prefix) - 1);
+        memcpy(g_kio_pfp.data + sizeof(prefix) - 1, b64, n + 1);
+    }
+    if (name) html_dom_set_text(name, avatar_ui_picked_name());
+    if (size) {
+        char html[96];
+        snprintf(html, sizeof(html), "%.15g <span style='color:rgba(0,0,0,0.8);'>kb</span>", (double) bytes / 1000.0);
+        html_dom_set_html(size, html);
+    }
+}
+
+static int kio_pfp_handle(const char *name) {
+    const AccountInfo *acc = account_backend() == ACCOUNT_BACKEND_KRUNKER ? active_account() : NULL;
+    if (!strcmp(name, "pfpPopup")) {
+        if (!acc) kio_response_popup(0, I18N("account.login.required", "Must be logged in"));
+        else if (!acc->premium) kio_response_popup(0, "Must have premium");
+        else
+            generic_popup("<div class='pubHed'>Upload or Update Profile Pic</div><div style='color: rgba(255,255,255,0.4);font-size:18px' id='pfpH'>"
+                          "<input onclick='selectFile(&quot;pfp&quot;)' type='button' id='pfpBtn' style='cursor:pointer' value='Select'><input id='pfp' "
+                          "name='profilepic' type='file' accept='image/png' style='width:1px;visibility:hidden;' onchange='updateFile(this.id)'><span "
+                          "style='color: rgba(255,255,255,0.4);margin-left:10px;font-size: 14px;' id='pfpName'>Image (.png) - Max 250KB</span><span "
+                          "style='color: rgba(255,255,255,0.4);font-size: 14px;float:right;margin-top: 5px;' id='pfpSize'></span></div><div id='pfpResHolder' "
+                          "style='margin-top:8px;margin-bottom:5px;display:inline-block'><div id='pfpUpResp' style='color: rgba(255,255,255,0.3);display: "
+                          "inline-block;'>Inappropriate Images will result in a ban</div></div><div id='pubPfp' onclick='uploadProfilePic()'>Publish/Update</div>",
+                          "pfpPop");
+        return 1;
+    }
+    if (!strcmp(name, "selectFile")) { // selectFile("pfp"): the file dialog (PNG, as the input's accept)
+        avatar_ui_pick_file(1, KIO_PFP_PICK_MAX, kio_pfp_picked, NULL);
+        return 1;
+    }
+    // uploadProfilePic
+    kio_pfp_resp("Loading...");
+    if (!g_kio_pfp.data) {
+        kio_pfp_resp("Upload Error");
+        return 1;
+    }
+    size_t chars = 0; // iiîïìíì: parseInt(0.75 * the data URL without its '=' padding) / 1000
+    for (const char *p = g_kio_pfp.data; *p; p++) chars += *p != '=';
+    const double kb = (double) (long long) (0.75 * (double) chars) / 1000.0;
+    if (kb > KIO_PFP_LIMIT_KB) {
+        char limit[96];
+        I18N_F(limit, "image.upload.limit", "Failed. {0}kb Image Limit", "250");
+        kio_pfp_resp(limit);
+        return 1;
+    }
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString("uploadP"));
+    cJSON_AddItemToArray(frame, cJSON_CreateString(g_kio_pfp.data));
+    const int sent = acc && krunker_net_send_account_frame(frame);
+    cJSON_Delete(frame);
+    // v10's socket is always open; the official connection here is a game's: without one the upload cannot go
+    if (!sent) kio_pfp_resp("Upload Error");
+    return 1;
+}
+
+static void kio_pfp_frame(const char *label, const cJSON *frame) {
+    if (!strcmp(label, "upR")) { // [message, type]: type 1 is the picture's line (2: the settings upload, not here)
+        const cJSON *type = cJSON_GetArrayItem(frame, 2);
+        const char *msg = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1));
+        if (cJSON_IsNumber(type) && type->valueint == 1 && msg) kio_pfp_resp(msg);
+        return;
+    }
+    const AccountInfo *acc = account_backend() == ACCOUNT_BACKEND_KRUNKER ? active_account() : NULL;
+    if (acc) {
+        g_kio_pfp.uploaded_id = acc->id;
+        g_kio_pfp.uploaded_ms = kio_pfp_now_ms();
+    }
+    menu_rerender_if_open(5);
+    kio_response_popup(1, "Uploaded!");
+}
+
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     if (name && account_links_handle(name, ev, args, argc)) return 1; // Connections: Discord, Connected apps
@@ -2982,6 +3122,10 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         avatar_ui_pick();
         return 1;
     }
+    // the krunker.io account's picture (v10.0.7's pfpPopup, selectFile("pfp"), uploadProfilePic: kio_pfp_handle)
+    if (!strcmp(name, "pfpPopup") || !strcmp(name, "uploadProfilePic") ||
+        (!strcmp(name, "selectFile") && argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str && !strcmp(args[0].str, "pfp")))
+        return kio_pfp_handle(name);
     if (progress_handle(name, args, argc) >= 0) return 1; // WP-E part 2c: badges, windows[32]
     if (!strcmp(name, "windows.4.switchStat")) { // statTabB<n> shown, statTab<n> active
         const int t = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
@@ -4226,9 +4370,16 @@ static char *gen_kio_account(const AccountInfo *acc) {
     sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'><div class='bigMenTab bigMenTabA' style='font-size:16px' onmouseenter='playTick(0.1);'>"
                    "<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span></div></div>");
     sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
-    // v10's #profilePicM gets .blurred (image-rendering pixelated, greyed) unless a premium account shows its own
-    // upload. This page shows only the stock icon_0, so it is blurred, as the native account's picture is (above)
-    sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'></div>");
+    // v10.0.7's #profilePicM (deob-10.0.7.js:218977-218978): a premium account's own picture (user-assets
+    // /p<id>/profile.png), else the stock icon_0 with .blurred (image-rendering pixelated, greyed), as the native
+    // account's picture (above); "Change Picture" opens pfpPopup (kio_pfp_handle). The onerror is v10's, quotes and all.
+    char pic[160];
+    if (acc->premium) kio_pfp_url(pic, sizeof(pic), acc->id);
+    else snprintf(pic, sizeof(pic), "textures/classes/icon_0.png");
+    sb_appendf(&sb, "<div id='profilePicM' class='%s'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='%s' "
+                    "onerror='this.onerror=null;this.parentNode.className='blurred';this.src='textures/classes/icon_0.png';'><a class='pfpAction' "
+                    "onmouseenter='playTick(0.1)' onclick='pfpPopup();'>%s</a></div>",
+               acc->premium ? "" : "blurred", pic, I18N("windows.profile.picture", "Change Picture"));
     sb_append(&sb, "<div class='setBodH' id='knKioAccName' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
     sb_append(&sb, I18N("generic.name", "Name"));
     sb_append(&sb, "<span class='floatR' style='color:rgba(255,255,255,0.8)'>");
