@@ -1770,7 +1770,7 @@ static void redeem_voucher_frame(const cJSON *frame) {
     if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
 }
 
-static void twitch_reconnect_confirmed(int ok, const char *text, void *user); // (the Twitch handlers below)
+static void twitch_link_popup(const char *title, const char *yes, const char *no, const char *on_yes); // (the Twitch popups below)
 
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
@@ -1923,13 +1923,13 @@ static void on_social(void *user, const cJSON *frame) {
         } else {
             copy_str(g_twitch_name, sizeof(g_twitch_name), str_at(frame, 2) ? str_at(frame, 2) : "");
             copy_str(g_twitch_id, sizeof(g_twitch_id), str_at(frame, 3) ? str_at(frame, 3) : "");
-            popup_response(1, NULL, I18N("kn.account.twitch.linked", "Twitch account linked."));
+            popup_response(1, NULL, "Twitch Account Linked"); // :229274
             rerender_windows();
         }
     } else if (!strcmp(label, "twitchRemoveResponse")) {
         g_twitch_id[0] = 0;
         g_twitch_name[0] = 0;
-        popup_response(1, NULL, I18N("kn.account.twitch.unlinked", "Twitch account unlinked."));
+        popup_response(1, NULL, "Twitch Account Unlinked"); // :229277-229281
         rerender_windows();
     } else if (!strcmp(label, "twitchDropsResponse")) { // Box Office has no drop campaigns: [] -> "Nothing to Claim"
         // [drops, reconnect]: v10.0.7's dropsLoaded(drops, reconnect) (deob-10.0.7.js:218880, :225177-225178): no drops and an
@@ -1937,10 +1937,12 @@ static void on_social(void *user, const cJSON *frame) {
         const cJSON *drops = cJSON_GetArrayItem(frame, 1);
         const int any = drops && cJSON_GetArraySize(drops) > 0;
         if (!any && cJSON_IsTrue(cJSON_GetArrayItem(frame, 2))) {
-            ui_confirm_labeled(I18N("twitch.reconnect", "Your Twitch connection expired, please reconnect to receive drops."),
-                               I18N("twitch.reconnect.confirm", "Reconnect"), I18N("twitch.reconnect.decline", "Later"), twitch_reconnect_confirmed, NULL);
+            twitch_link_popup(I18N("twitch.reconnect", "Your Twitch connection expired, please reconnect to receive drops."),
+                              I18N("twitch.reconnect.confirm", "Reconnect"), I18N("twitch.reconnect.decline", "Later"), "connectTwitchAcc(true)");
+        } else if (any) {
+            popup_response(1, NULL, I18N("kn.account.twitch.drops", "Drops claimed."));
         } else {
-            popup_response(1, NULL, any ? I18N("kn.account.twitch.drops", "Drops claimed.") : I18N("kn.account.twitch.noDrops", "Nothing to Claim"));
+            popup_response(0, "Nothing to Claim", NULL); // v10's error popup (:218927)
         }
     } else if (!strcmp(label, "__close")) {
         g_restore_sent = 0;
@@ -3298,28 +3300,55 @@ static void deletion_answer(const cJSON *frame) {
                       NULL, NULL, NULL);
 }
 
-// v10's connectTwitchAcc: the confirm, then the OAuth page. Here kn_brain is the OAuth client: "twitchAuth"
-// answers the page to open in the system browser (account_life.c), and the callback pushes twitchVerifyResponse.
-static void twitch_link_confirmed(const int ok, const char *text, void *user) {
-    (void) text;
-    (void) user;
-    if (!ok || !g_logged_in) return;
-    backend_social_send_text("[\"twitchAuth\"]");
+// v10.0.7's Twitch link component (svelte-49hpzc, deob-10.0.7.js:97248-97283) in genericPopup(_, "twitchPop"): the title
+// (titleKey, twitch.link by default), YES / NO (confirmKey / declineKey). linkTwitchPop (:229507-229521) opens it with
+// onConfirm connectTwitchAcc(), the drops reconnect (:218910-218924) with the twitch.reconnect keys and connectTwitchAcc(true).
+static void twitch_link_popup(const char *title, const char *yes, const char *no, const char *on_yes) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div id=\"twitch-link-popup-title\" class=\"svelte-49hpzc\">");
+    sb_append_esc(&sb, title);
+    sb_appendf(&sb, "</div> <div id=\"confirmBtn\" onclick='%s' onmouseover='playTick(0.1)'>", on_yes);
+    sb_append_esc(&sb, yes);
+    sb_append(&sb, "</div> <div id=\"declineBtn\" onclick='clearPops()' onmouseover='playTick(0.1)'>");
+    sb_append_esc(&sb, no);
+    sb_append(&sb, "</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "twitchPop");
+    free(html);
 }
 
-// v10.0.7's reconnect popup's Reconnect: connectTwitchAcc(true), the OAuth page with force_verify (deob-10.0.7.js:218917,
-// :229547-229551); kn_brain adds it for ["twitchAuth", true] (account_life.c)
-static void twitch_reconnect_confirmed(const int ok, const char *text, void *user) {
-    (void) text;
-    (void) user;
-    if (!ok || !g_logged_in) return;
-    backend_social_send_text("[\"twitchAuth\",true]");
+// unlinkTwitchPop (:229525-229538): the unlink component (svelte-1ouxez5, :97966-97995), the red twitch.unlink.warning over
+// the twitch.unlink title, YES = unlinkTwitch(), NO = clearPops()
+static void twitch_unlink_popup(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"twitch-unlink-popup-warning svelte-1ouxez5\">");
+    sb_append_esc(&sb, I18N("twitch.unlink.warning", "Unlinking does not allow you to link a seperate twitch account."));
+    sb_append(&sb, "</div> <div id=\"twitch-unlink-popup-title\" class=\"svelte-1ouxez5\">");
+    sb_append_esc(&sb, I18N("twitch.unlink", "Are you sure you want to unlink your twitch account?"));
+    sb_append(&sb, "</div> <div id=\"confirmBtn\" onclick='unlinkTwitch()' onmouseover='playTick(0.1)'>YES</div>"
+                   " <div id=\"declineBtn\" onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "twitchPop");
+    free(html);
 }
 
-static void twitch_unlink_confirmed(const int ok, const char *text, void *user) {
-    (void) text;
-    (void) user;
-    if (!ok || !g_logged_in) return;
+// connectTwitchAcc(force) (:229547-229551): "Please Wait...", then the OAuth page (force: &force_verify=true). Here kn_brain is
+// the OAuth client: "twitchAuth" answers the page to open in the system browser (account_life.c), and its callback pushes
+// twitchVerifyResponse.
+static void twitch_connect(const int force) {
+    if (!g_logged_in) return;
+    popup_response(2, NULL, "Please Wait...");
+    backend_social_send_text(force ? "[\"twitchAuth\",true]" : "[\"twitchAuth\"]");
+}
+
+// unlinkTwitch() (:229540-229545): no linked Twitch id -> the error "Twitch Account Not Linked"; else "Please Wait..." and
+// REMOVE_TWITCH
+static void twitch_unlink(void) {
+    if (!g_logged_in || !g_twitch_id[0]) {
+        popup_response(0, "Twitch Account Not Linked", NULL);
+        return;
+    }
+    popup_response(2, NULL, "Please Wait...");
     backend_social_send_text("[\"removeTwitchLink\"]");
 }
 
@@ -3783,18 +3812,27 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         if (g_logged_in) promo_emails_set(on);
         return 1;
     }
-    if (!strcmp(name, "linkTwitchPop") || !strcmp(name, "unlinkTwitchPop")) {
-        // v10 asks "Are you sure you want to link a twitch account?" (connectTwitchAcc, deob-10.0.3.js:261960-262004).
-        // The OAuth page comes from kn_brain (account_life.c); unlink keeps the permanent pair, as v10 warns.
-        if (!g_logged_in) return 1;
-        if (name[1] == 'i') // linkTwitchPop
-            ui_confirm("Are you sure you want to link a twitch account?", twitch_link_confirmed, NULL);
-        else
-            ui_confirm("Unlinking does not allow you to link a seperate twitch account. Unlink?", twitch_unlink_confirmed, NULL);
+    if (!strcmp(name, "linkTwitchPop")) { // deob-10.0.7.js:229507-229521
+        twitch_link_popup(I18N("twitch.link", "Are you sure you want to link a twitch account?"), "YES", "NO", "connectTwitchAcc()");
         return 1;
     }
-    if (!strcmp(name, "claimDrops") || !strcmp(name, "windows.4.claimDrops")) { // window.windows[4].claimDrops: Box Office has no Twitch drop campaigns
-        if (g_logged_in) backend_social_send_text("[\"getTwitchDrops\"]");
+    if (!strcmp(name, "unlinkTwitchPop")) { // :229525-229538
+        twitch_unlink_popup();
+        return 1;
+    }
+    if (!strcmp(name, "connectTwitchAcc")) { // connectTwitchAcc(force)
+        twitch_connect(argc > 0 && ((args[0].kind == HTML_ARG_BOOL || args[0].kind == HTML_ARG_NUM) && args[0].num != 0.0));
+        return 1;
+    }
+    if (!strcmp(name, "unlinkTwitch")) {
+        twitch_unlink();
+        return 1;
+    }
+    if (!strcmp(name, "claimDrops") || !strcmp(name, "windows.4.claimDrops")) { // windows[4].claimDrops (:218929-218932): Box Office has no Twitch drop campaigns
+        if (g_logged_in) {
+            popup_response(2, NULL, "Please Wait...");
+            backend_social_send_text("[\"getTwitchDrops\"]");
+        }
         return 1;
     }
     if (!strcmp(name, "requestDeletion")) { // window.requestDeletion(flag): the YES / NO popup

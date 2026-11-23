@@ -420,6 +420,27 @@ def main():
             time.sleep(0.2)
         check(not gone, "Remove Friend: FOLLOW_PLAYER (name, 0) dropped the follow")
         A.shot("window5-friends")
+        # the Connections tab's Twitch popups: linkTwitchPop (deob-10.0.7.js:229507-229521) is the link component
+        # (svelte-49hpzc, :97248) in #genericPop.twitchPop, unlinkTwitchPop (:229525-229538) the unlink component
+        # (svelte-1ouxez5, :97966) with its red warning; unlinkTwitch without a linked Twitch id (:229540-229545) is the
+        # error "Twitch Account Not Linked"
+        A.ui("linkTwitchPop()")
+        t = A.textof("twitch-link-popup-title") or ""
+        check(t == "Are you sure you want to link a twitch account?" and A.count("#genericPop.twitchPop #confirmBtn") == 1
+              and A.count("#genericPop.twitchPop #declineBtn") == 1 and "YES" in (A.textof("genericPop") or "")
+              and "NO" in (A.textof("genericPop") or ""),
+              "linkTwitchPop: the twitch.link title over YES / NO in #genericPop.twitchPop: %r" % t)
+        A.ui("clearPops()")
+        A.ui("unlinkTwitchPop()")
+        w = A.textof("genericPop") or ""
+        check(A.count(".twitch-unlink-popup-warning") == 1
+              and "Unlinking does not allow you to link a seperate twitch account." in w
+              and (A.textof("twitch-unlink-popup-title") or "") == "Are you sure you want to unlink your twitch account?",
+              "unlinkTwitchPop: the warning over the twitch.unlink title: %r" % w)
+        A.ui("unlinkTwitch()")
+        e = A.textof("popupContent") or ""
+        check("Twitch Account Not Linked" in e, "unlinkTwitch with no Twitch link: \"Twitch Account Not Linked\": %r" % e)
+        A.ui("clearPops()")
         A.ui("closWind()")
         # the notification window (windows[29], deob-10.0.7.js:221282-221354): a Followers entry, a Hub post mail
         # (km_type 5) and an Inbox sale, unread; one read sale (Archive)
