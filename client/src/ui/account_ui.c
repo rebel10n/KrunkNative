@@ -54,6 +54,7 @@
 #include <badges.h>      // WP-E part 2c: badges.js
 #include <kid_settings.h> // Privacy & Age (v10.0.4): the k-ID section of Account Settings
 #include <map_catalog.h> // WP-E part 2c: the Map Challenges cards
+#include "v10_junkyard.h"   // v10_junkyard_kio_frame: the official game socket's recipes and crafts
 #include <weapons.h>
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
@@ -515,6 +516,10 @@ static void chal_capture(const char *label, const cJSON *frame) {
 
 // The official game socket's account frames (krunker_net_account_listen), main thread
 static void kio_frame(const char *label, const cJSON *frame) {
+    if (!strcmp(label, "recps") || !strcmp(label, "crftr")) { // CRAFT_DATA_RESPONSE / CRAFT_RESPONSE: the Junkyard's
+        v10_junkyard_kio_frame(frame);
+        return;
+    }
     if (strcmp(label, "a") && strcmp(label, "ua")) chal_capture(label, frame); // ("a" / "ua": after the account is set)
     if (!strcmp(label, "a")) {
         const cJSON *err = cJSON_GetArrayItem(frame, 1), *data = cJSON_GetArrayItem(frame, 4);

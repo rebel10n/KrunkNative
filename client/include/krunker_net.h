@@ -161,7 +161,7 @@ typedef void (*KrunkerVoucherFn)(int has_funds, double funds, const char *messag
 void krunker_net_voucher_listen(KrunkerVoucherFn fn);
 // A window's request over the game socket for the krunker.io account, as the frame the window would
 // send kn_brain: the read-only ones (["bpdl"], ["vcln"], ["cln", 3, value]) and the Daily Spin claim
-// (["dsl"], sent as v10's rpc(DAILY_SPIN_CLAIM)); 0 = not sent (not open, or anything else: nothing
+// (["dsl"], sent as v10's rpc(DAILY_SPIN_CLAIM)), the Junkyard's ["recps"] / ["crft", SID] once in the game; 0 = not sent (not open, or anything else: nothing
 // that spends KR goes out).
 int krunker_net_send_account_frame(const cJSON *frame);
 int krunker_net_open(void);        // the WebSocket is open

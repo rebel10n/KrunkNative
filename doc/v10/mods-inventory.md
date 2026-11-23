@@ -19,7 +19,7 @@ that tree (v7) or into this repository at `ff4a851b` plus this change (KN).
 |---|---|---|---|---|---|
 | Chat / server commands (v7 `registerServer` + the server switch, `server/index.ts:2854-3236`) | 56 | 48 (incl. `bhop`, client-side; and `modes`, `maps` after their fix) | 2 remaining (`xp`, `kr`) | 2 fixed (`modes`, `maps` were DEV-only; v7 has no gate) | 6 added: `endvote`, `time`, `endtime`, `serverinfo`, `status`, `classes` |
 | Console-only commands (v7 `registerLocal`, `mod/devConsole.ts`) | 31 | 26 | 1 remaining (`ent_bbox`) | 0 | 4 added: `resetbinds`, `reset_binds`, `third`, `tpmesh` |
-| Client mods (`mod/mods.ts`, `mod/*.ts`, `main/*`) | 30 | 18 | 1 (`ent_bbox`); 1 partial (F6 editor); 1 moved (F1) | 0 | 9 are browser-page or v7-sandbox workarounds, not applicable |
+| Client mods (`mod/mods.ts`, `mod/*.ts`, `main/*`) | 30 | 19 | 1 (`ent_bbox`); 1 moved (F1) | 0 | 9 are browser-page or v7-sandbox workarounds, not applicable |
 | Bridge: official `ct` chat (`server/bridge/v10_bridge.c`) | 1 path | 0 (fixed) | 0 | 1 fixed (every chat line from the official client was dropped) | fail-before test |
 
 The 56 chat names and the 30 console names overlap (`ping`, `maps`, `status`, `serverinfo` appear in
@@ -180,7 +180,7 @@ are silent, so the four timer and class names above were also needed as `registe
 | Entity bounding boxes (`ent_bbox`) | devConsole.ts:1392 and its overlay | none | native | **missing** (remaining) |
 | F4 find new game | mods.ts:916-919 | ui_mod_keys.c:64-70 | native | have (read) |
 | F5 reload | mods.ts:920-922 | ui_controls.c (reload bind) | native | have (read) |
-| F6 editor, staging the current map | mods.ts:923-944 (`saveVal("mapToEdit", ...)`) | ui_mod_keys.c:73-77 opens `editor.html` but does not stage the map; the editor reads `mapToEdit` (editor.c:986) | native | **partial** (remaining) |
+| F6 editor, staging the current map | mods.ts:923-944 (`saveVal("mapToEdit", ...)`) | ui_mod_keys.c `stage_loaded_map`: the loaded map's JSON staged as `mapToEdit` the way v10.0.7's edMp stages one (s2c_ui.c `s2c_ui_stage_map_to_edit`: `col: false` / `l: false` dropped, deob-10.0.7.js:228218), then `editor.html`; the editor's checkEdit reads it first (editor_io.c `ed_map_restore`) | native | have (run: mod_keys_f6_e2e 6/6) |
 | F1 clear log | mods.ts:911-914 | F1 is the Object Manager key (ui_controls.c:250); `clear` in the console | native | **moved**: the clear-log packet is not bound to a key |
 | Quick join (region fix) | index.ts (mod) `quickJoinRegion`, index.ts:116 | servers_ui.c:4 (quick join through seek) | native | have (read; the populated-only filter is not in KN's seek path) |
 | Settings rows (dev console, offline, binds) | mods.ts:775-846 | ui_mods.c | native | have (read) |
@@ -198,8 +198,7 @@ are silent, so the four timer and class names above were also needed as `registe
 | Bot worker (nextbot) | botWorker.ts | bots.c, bot_*.c | n/a | n/a: native bots |
 | Connect state | connectState.ts | ui_console.c `connect` | n/a | n/a: native connect |
 
-Counted: 30 rows. Have 18 (mod packs are partial), missing 1 (`ent_bbox`), partial 1 (F6), moved
-1 (F1), n/a 9.
+Counted: 30 rows. Have 19 (mod packs are partial), missing 1 (`ent_bbox`), moved 1 (F1), n/a 9.
 
 ## 5. Deviations kept on purpose (not gaps)
 
@@ -214,11 +213,15 @@ Counted: 30 rows. Have 18 (mod packs are partial), missing 1 (`ent_bbox`), parti
 
 ## 6. Remaining gaps
 
-| Gap | Why not done here | What it needs |
-|---|---|---|
-| `xp`, `kr` (chat, dev: add XP / KR to the own account) | ChatCommandHost has no grant callback; the account economy lives in kn_brain | a brain route for a dev grant, then a host callback like `kpd_officer` |
-| `ent_bbox` (console overlay of movement boxes) | client renderer work (a debug overlay like nav_overlay.c, with its own headless test) | a line overlay for player and object boxes; its own e2e |
-| F6 stages the current map (`mapToEdit`) | client change with a headless test that is not written yet | ui_mod_keys.c F6: write the loaded map's JSON to `mapToEdit` before opening editor.html; test by the editor e2e |
+Checked against v10.0.7 (`Krunker_v10.0.7/deob/game.deob.js`). v10.0.7 has no developer console, no chat
+command list, no F6 key and no `ent_bbox`; its only `mapToEdit` writer is the server's EDIT_MAP ("edMp",
+deob-10.0.7.js:228218). So none of these rows is a v10.0.7 parity gap: the two left are v7.1.4 mod features.
+
+| Gap | v10.0.7 | Why not done here | What it needs |
+|---|---|---|---|
+| `xp`, `kr` (chat, dev: add XP / KR to the own account) | not in v10.0.7 (v7.1.4 `server/index.ts` only) | ChatCommandHost has no grant callback; the account economy lives in kn_brain | a brain route for a dev grant, then a host callback like `kpd_officer` |
+| `ent_bbox` (console overlay of movement boxes) | not in v10.0.7 (v7.1.4 `devConsole.ts` only) | client renderer work (a debug overlay like nav_overlay.c, with its own headless test) | a line overlay for player and object boxes; its own e2e |
+| F6 stages the current map (`mapToEdit`) | no F6 in v10.0.7 | **done**: F6 already staged the loaded map (mod_keys_f6_e2e 4 and 5); it now stages it through edMp's own staging (`col: false` / `l: false` dropped), so the editor gets the same JSON either way | nothing |
 
 ## Changes in this pass
 

@@ -59,9 +59,11 @@ static void toggle_ctrl_tp(void) {
     printf("%s\n", msg);
 }
 
-// F6 stages the map being played as "mapToEdit" (v10: the JSON of the loaded map, which the
-// editor imports on open), so the editor opens that map and not its own last session. Returns
-// the staged map's name, or NULL when no map is loaded (the menu): nothing is staged then.
+// F6 stages the map being played as "mapToEdit" (the JSON of the loaded map, which the editor
+// imports on open), so the editor opens that map and not its own last session. v10.0.7 has no F6;
+// its only staging path is edMp, so the map is staged the way edMp stages one
+// (s2c_ui_stage_map_to_edit: col / l false dropped, deob-10.0.7.js:228218). Returns the staged
+// map's name, or NULL when no map is loaded (the menu): nothing is staged then.
 static const char *stage_loaded_map(const Client *client) {
     const Map *map = client && client->game.ready ? client->game.map : NULL;
     char *text = map && map->raw_data ? cJSON_PrintUnformatted(map->raw_data) : NULL;
@@ -69,7 +71,7 @@ static const char *stage_loaded_map(const Client *client) {
         html_storage_set(MAP_TO_EDIT_KEY, NULL); // a stale stage must not open in its place
         return NULL;
     }
-    html_storage_set(MAP_TO_EDIT_KEY, text);
+    s2c_ui_stage_map_to_edit(text, strlen(text));
     cJSON_free(text);
     return map->name;
 }

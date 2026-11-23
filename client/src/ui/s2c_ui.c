@@ -181,7 +181,9 @@ void s2c_ui_tick(Client *client) {
 
 #define MAP_TO_EDIT_KEY "mapToEdit" // the editor's checkEdit reads it first (editor_io.c ed_map_restore; ui_mod_keys.c)
 
-void s2c_ui_edit_map(const char *json, const size_t len) {
+// edMp's staging (deob-10.0.7.js:228218): the map's objects lose `col: false` and `l: false`, then it is saved as
+// mapToEdit; a map that does not parse is saved as it came (the try's catch). F6 (ui_mod_keys.c) stages the same way.
+void s2c_ui_stage_map_to_edit(const char *json, const size_t len) {
     if (!json || !len) return;
     char *text = NULL;
     cJSON *map = cJSON_ParseWithLength(json, len);
@@ -206,6 +208,11 @@ void s2c_ui_edit_map(const char *json, const size_t len) {
         html_storage_set(MAP_TO_EDIT_KEY, text);
         cJSON_free(text);
     }
+}
+
+void s2c_ui_edit_map(const char *json, const size_t len) {
+    if (!json || !len) return;
+    s2c_ui_stage_map_to_edit(json, len);
     KN_LOG_VERBOSE2("[editor] edMp: a %zu byte map staged, the editor opens\n", len);
     app_route_url_target("editor.html", 1); // window.open("/editor.html", "_blank")
 }

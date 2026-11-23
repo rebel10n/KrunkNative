@@ -611,6 +611,9 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_PURCHASE_ERROR:
         case KRUNKER_S2C_AVAILABLE_BUNDLE_DATA:
         case KRUNKER_S2C_ALL_BUNDLE_DATA:
+        // the Junkyard's recipes and crafts (v10_junkyard.c, through account_ui.c's kio_frame)
+        case KRUNKER_S2C_CRAFT_DATA_RESPONSE:
+        case KRUNKER_S2C_CRAFT_RESPONSE:
             return 1;
 
         // Ignored on purpose (doc/v10/s2c-coverage.md, "irrelevant" and "KN equivalent" rows): real-money store and
@@ -633,7 +636,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_SET_EXPERIMENTAL:
         case KRUNKER_S2C_NEW_PASS_RESPONSE:
         case KRUNKER_S2C_ADD_DEBUG_POING:
-        case KRUNKER_S2C_CRAFT_RESPONSE:
         case KRUNKER_S2C_CONSOLE_LOG:
         case KRUNKER_S2C_SOCKET_PING_RESULT:
         case KRUNKER_S2C_COUNTRY_FLAG_UPDATE:

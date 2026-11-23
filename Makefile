@@ -800,6 +800,10 @@ kio-spin-battlepass-e2e: build ## The Daily Spin and the Battle Pass on an offic
 kio-battlepass-e2e: build ## The Battle Pass on an official krunker.io game (battlepass_ui.c, doc/v10/battlepass.md): krunker.io's season, end, BP XP, level and tiers in USD; purchases and claims refused with v10's purchase error; an unanswered pass says Loading, never a failure (kn_brain on sqlite, headless)
 	timeout 900 $(PYTHON) -I client/tests/kio_battlepass_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-junkyard-e2e
+kio-junkyard-e2e: build ## The Junkyard on an official krunker.io game (v10_junkyard.c): "recps" / "crft" on the game socket after "en", krunker.io's recipes against the account's materials, v10's confirmation, craftRes' "<t> remaining", no second "recps" (krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I client/tests/kio_junkyard_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-store-e2e
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)

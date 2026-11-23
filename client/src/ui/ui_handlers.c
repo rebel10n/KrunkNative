@@ -46,6 +46,7 @@
 #include <update_ui.h>
 #include <stdlib.h>
 #include <string.h>
+#include "v10_junkyard.h" // v10_junkyard_handle: windows[13].sendCraft / startCraft, v10jy.*
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -638,6 +639,8 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     creation_vote_handle,      // creation_vote.c: the menu's map / mod vote (voteMap, voteMod)
     v10_social_handle,         // v10_social.c: v10 Social hub, player profile, clan view (openSocial, openPlayerProfile, ...)
     v10_studios_handle,        // v10_studios.c: v10 Studios (openStudios, knStudios)
+    v10_junkyard_handle,       // v10_junkyard.c: the Junkyard (v10jy.*, windows[13].sendCraft / startCraft): its
+                               // confirmation replaces the exchange in #genericPop, so it is not gated on the exchange
     v10_market_handle,         // v10_market.c: v10 Market & Trading (openExchange, v10mk.*)
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])

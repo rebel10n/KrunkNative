@@ -703,6 +703,7 @@ static int send_rpc(const char *name) {
 //   ["cln", 3, value] the Clans window's sendReq(3): the player's clan page (v10:213459-213462, answered
 //                     "cln" -> clanData, v10:213437); every other "cln" action (create, join, leave,
 //                     kick, roles, funds, discord) is refused
+//   ["recps"], ["crft", SID]  the Junkyard's recipes and a craft (answered "recps" / "crftr"), once in the game
 //   ["vo", code]      REDEEM_VOUCHER (v10 sends it straight, deob-10.0.4.js:221047): grants KR, answered "vr"
 //                     [funds | null, message] (kio_store_voucher_answer)
 //   ["dsl"]           the Daily Spin claim, sent as v10's rpc(DAILY_SPIN_CLAIM) = ["_0", rpcId, "dsl"]
@@ -734,6 +735,14 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     }
     if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
     if (!strcmp(name, "vo") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1))) ok = 1;
+    // the Junkyard (v10_junkyard.c): CRAFT_DATA_REQUEST ["recps"] and CRAFT_REQUEST ["crft", SID] (deob-10.0.7.js:137938,
+    // :220777), answered "recps" / "crftr". Only once the player is in the game: before it the live server refuses
+    // recps with "Socket error" 000008 (the KRUNKNATIVE_DUMP_RECPS probe above)
+    if (((!strcmp(name, "recps") && n == 0) || (!strcmp(name, "crft") && n == 1 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1))))) {
+        pthread_mutex_lock(&K.lock);
+        ok = K.link.joined;
+        pthread_mutex_unlock(&K.lock);
+    }
     if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)
     if (!ok || n > 10) return 0;
     KrunkerValue args[10];

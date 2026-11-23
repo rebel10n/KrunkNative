@@ -534,6 +534,22 @@ int main(void) {
     admin_action(B, conn(C)->id, 0);
     pump(5);
     CHECK(got_error(C, "Kicked by host") && !conn(C), "a moderator's kick from the list kicks Carol (\"Kicked by host\", game.kick)");
+    // the DEV's Disconnect (action 7: v10.0.7 canSilentKick = isDev || isAdmin, deob-10.0.7.js:115238, 224082)
+    if (C->fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(C->fd);
+    pump(10);
+    join(C);
+    pump(30);
+    give_account(C, 203, 30, "CarolToo");
+    CHECK(conn(C) != NULL, "Carol is back for the Disconnect case");
+    reset_received();
+    admin_action(B, conn(C)->id, 7); // a moderator is not canSilentKick
+    admin_action(A, conn(A)->id, 7); // the DEV herself
+    pump(5);
+    CHECK(conn(C) && got_chat(B, "Only DEV accounts can disconnect from the player list"), "a moderator's Disconnect is refused: Carol stays");
+    CHECK(conn(A) && got_chat(A, "Cannot disconnect yourself"), "a DEV cannot disconnect herself");
+    admin_action(A, conn(C)->id, 7);
+    pump(5);
+    CHECK(got_error(C, "Disconnected") && !conn(C), "a DEV's Disconnect drops Carol (\"Disconnected\")");
     conn(A)->acct.flags = 0;
 
     // ---- 9. a custom game's host (v10.0.3 isHost: Kick, Transfer Host; deob-10.0.3.js:254169)

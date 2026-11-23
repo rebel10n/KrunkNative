@@ -5017,7 +5017,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
 // punishPlayer(id, action) as the list sends it: the server's chat command for the action (kick
 // "/kick", ban "/ban", kill, tp2 / tpme / bring, "/bring all" for 9); the server checks the rights
 static void plist_punish_send(const int uid, const int action) {
-    if (action == 0 || action == 1 || action == 8) { // Kick / Ban / Transfer Host: v10 ADMIN_ACTIONS (the server checks the right)
+    if (action == 0 || action == 1 || action == 7 || action == 8) { // Kick / Ban / Disconnect / Transfer Host: v10 ADMIN_ACTIONS (the server checks the right)
         if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, uid, action);
         return;
     }
@@ -5080,25 +5080,72 @@ static void plist_chat_ban_set(const int uid, const int banned) {
 }
 
 typedef struct { int uid, ban; char name[PLAYER_NAME_SIZE]; } ChatBanReq;
+
+static void plist_chat_ban_label(const int uid, const int banned) {
+    char id[32];
+    snprintf(id, sizeof id, "chatBanBtn_%d", uid);
+    const HtmlElem btn = html_dom_by_id(id);
+    if (btn) html_dom_set_text(btn, banned ? "Chat Unban" : "Chat Ban");
+}
+
+// chatBanPlayer's answer (deob-10.0.7.js:224104-224125): an error is "Chat ban failed: <error>", a request that
+// failed outright "Chat ban failed", else the label flips and the chat reads "Chat banned / Chat unbanned <name>"
 static void plist_chat_ban_done(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     ChatBanReq *r = user;
     cJSON *res = body ? cJSON_Parse(body) : NULL;
     const cJSON *err = cJSON_GetObjectItem(res, "error");
+    const char *msg = cJSON_IsString(err) ? err->valuestring : cJSON_GetStringValue(cJSON_GetObjectItem(err, "message"));
     char line[160];
-    if (status != 200 || (err && !cJSON_IsNull(err))) {
-        snprintf(line, sizeof(line), "Couldn't change the chat ban%s%s", cJSON_IsString(err) ? ": " : "", cJSON_IsString(err) ? err->valuestring : "");
+    if (err && !cJSON_IsNull(err)) {
+        snprintf(line, sizeof(line), "Chat ban failed: %s", msg ? msg : "Error");
+    } else if (status != 200 || !res) {
+        snprintf(line, sizeof(line), "Chat ban failed");
     } else {
         plist_chat_ban_set(r->uid, r->ban);
-        char id[32];
-        snprintf(id, sizeof id, "chatBanBtn_%d", r->uid);
-        const HtmlElem btn = html_dom_by_id(id);
-        if (btn) html_dom_set_text(btn, r->ban ? "Chat Unban" : "Chat Ban");
-        snprintf(line, sizeof(line), "%s %s", r->name, r->ban ? "can no longer chat" : "can chat again");
+        plist_chat_ban_label(r->uid, r->ban);
+        snprintf(line, sizeof(line), "%s %s", r->ban ? "Chat banned" : "Chat unbanned", r->name);
     }
     hud_ui_add_chat_line_on(line, "#fff", -1);
     cJSON_Delete(res);
     free(r);
+}
+
+static void plist_moderation_url(char *url, const size_t n, const char *path) {
+    char enc[512];
+    backend_url_encode(enc, sizeof enc, account_session_token());
+    snprintf(url, n, "%s%s?token=%s", backend_url(), path, enc);
+}
+
+// punishPopup's getChatBan (deob-10.0.7.js:224084-224090): {data: {chat_banned}} sets player.chatBanned and the label
+static void plist_chat_ban_got(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    ChatBanReq *r = user;
+    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
+    const cJSON *err = cJSON_GetObjectItem(res, "error");
+    const cJSON *v = cJSON_GetObjectItem(cJSON_GetObjectItem(res, "data"), "chat_banned");
+    if (v && (!err || cJSON_IsNull(err))) {
+        plist_chat_ban_set(r->uid, cJSON_IsTrue(v));
+        plist_chat_ban_label(r->uid, cJSON_IsTrue(v));
+    }
+    cJSON_Delete(res);
+    free(r);
+}
+
+// GET /moderation/chat/:name (services/brain/v10_mods.c), the session token as the caller
+static void plist_chat_ban_fetch(const int uid) {
+    const char *alias = uid >= 0 ? hud_plist_alias(uid) : NULL;
+    const char *token = account_session_token();
+    if (!alias || !alias[0] || !backend_enabled() || !token || !token[0]) return;
+    ChatBanReq *r = calloc(1, sizeof *r);
+    if (!r) return;
+    r->uid = uid;
+    snprintf(r->name, sizeof(r->name), "%s", alias);
+    char enc[200], path[260], url[1024];
+    backend_url_encode(enc, sizeof enc, alias);
+    snprintf(path, sizeof path, "/moderation/chat/%s", enc);
+    plist_moderation_url(url, sizeof url, path);
+    if (!backend_http_request("GET", url, NULL, plist_chat_ban_got, r)) free(r);
 }
 
 // POST /moderation/chat {player_name, ban} (services/brain/v10_mods.c), the session token as the caller
@@ -5111,9 +5158,8 @@ static void plist_chat_ban(const int uid) {
     r->uid = uid;
     r->ban = !plist_chat_banned(uid);
     snprintf(r->name, sizeof(r->name), "%s", alias);
-    char enc[512], url[1024];
-    backend_url_encode(enc, sizeof enc, token);
-    snprintf(url, sizeof url, "%s/moderation/chat?token=%s", backend_url(), enc);
+    char url[1024];
+    plist_moderation_url(url, sizeof url, "/moderation/chat");
     cJSON *b = cJSON_CreateObject();
     cJSON_AddStringToObject(b, "player_name", alias);
     cJSON_AddBoolToObject(b, "ban", r->ban);
@@ -5177,21 +5223,27 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         sb_append(&sb, "<div style='color:#fff;font-size:15px;position:relative;margin-bottom:15px;'>");
         sb_append_esc(&sb, q);
         sb_append(&sb, "</div><div class='takeActionTable'>");
-        sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='punishPlayer(\"%d\", 0);clearPops();'>Kick</span>", uid);
+        // Kick: isHost || canGlobalKick (deob-10.0.7.js:224082)
+        if (kick || host) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='punishPlayer(\"%d\", 0);clearPops();'>Kick</span>", uid);
         // Ban: canGlobalBan = isDev || isMod (v10 punishPopup, game.deob.js:217250), and the official host too
         // (isHost || canGlobalBan). A KrunkerNative host's ban is not offered: its server's admin ban checks DEV / moderator
         if (kick || krunker_net_is_host()) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
         // Flag / Unflag (canGlobalFlag) and Chat Ban (canChatBan, a moderation API call) for a signed-in target:
-        // v10.0.7's punishPopup (deob-10.0.7.js:224082). Both are staff rights here (hud_plist_staff kick).
+        // v10.0.7's punishPopup (deob-10.0.7.js:224082). Both are staff rights here (hud_plist_staff kick). The Chat Ban
+        // label starts "Chat Ban"; getChatBan's answer turns it to "Chat Unban" (deob-10.0.7.js:224084-224090).
         const NetPlayerInfoPacket *target = player_accounts_get(uid);
-        if (kick && target && target->account_id > 0 && target->level > 0) {
+        const int chat_ban = kick && target && target->account_id > 0 && target->level > 0;
+        if (chat_ban) {
             const int hacker = (target->flags & NET_PLAYER_INFO_HACKER) != 0;
             sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn tag' onclick='flagPlayer(\"%d\", %d)'>%s</span>", uid, hacker ? 0 : 1, hacker ? "Unflag" : "Flag");
-            sb_appendf(&sb, "<span onmouseenter='playTick()' id='chatBanBtn_%d' class='takeActionBtn kick' onclick='chatBanPlayer(\"%d\")'>%s</span>", uid, uid, plist_chat_banned(uid) ? "Chat Unban" : "Chat Ban");
+            sb_appendf(&sb, "<span id='chatBanBtn_%d' onmouseenter='playTick()' class='takeActionBtn kick' onclick='chatBanPlayer(\"%d\")'>Chat Ban</span>", uid, uid);
         }
+        // the second table, always there (deob-10.0.7.js:224082): a DEV's Disconnect (canSilentKick = isDev || isAdmin,
+        // :115238; action 7) and the host's Transfer Host (isHost; action 8 with the target)
+        sb_append(&sb, "</div><div class='takeActionTable'>");
+        if (dev) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='punishPlayer(\"%d\", 7);clearPops();'>Disconnect</span>", uid);
+        if (host) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn enabled' onclick='punishPlayer(\"%d\", 8);clearPops();'>Transfer Host</span>", uid);
         sb_append(&sb, "</div>");
-        // the host's Transfer Host, in v10.0.3's second table (deob-10.0.3.js:254169: isHost; action 8 with the target)
-        if (host) sb_appendf(&sb, "<div class='takeActionTable'><span onmouseenter='playTick()' class='takeActionBtn enabled' onclick='punishPlayer(\"%d\", 8);clearPops();'>Transfer Host</span></div>", uid);
         char *html = sb_finish(&sb);
         ui_loadout_clear_pops();
         dom_display("popupHolder", "block");
@@ -5203,11 +5255,12 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
             html_dom_set_display(pop, "block");
         }
         free(html);
+        if (chat_ban) plist_chat_ban_fetch(uid);
         return 1;
     }
     if (!strcmp(name, "punishPlayer")) {
         // punishPlayer(id, action): the server's chat commands, which check the rights themselves
-        // (0 kick, 3 kill, 4 TP2 = teleport to them, 5 TPME = bring them, 9 TPAll)
+        // (ADMIN_ACTIONS 0 kick, 1 ban, 7 disconnect, 8 transfer host; 3 kill, 4 TP2 = teleport to them, 5 TPME = bring them, 9 TPAll)
         const int action = argc > 1 ? (int) (args[1].kind == HTML_ARG_STR && args[1].str ? atoi(args[1].str) : args[1].num) : -1;
         const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
         plist_punish_send(uid, action);

@@ -328,6 +328,7 @@ void s2c_ui_wars_clan(Client*, int has, const char *clan_name); // "warsClan": t
 void s2c_ui_on_init(Client*);                     // INIT: no clan, the popup may show again, no charge prompt
 void s2c_ui_tick(Client*);                        // per frame: entering the game schedules the Turf Wars popup
 void s2c_ui_edit_map(const char *json, size_t len); // "edMp": the map staged as mapToEdit, the editor opened
+void s2c_ui_stage_map_to_edit(const char *json, size_t len); // edMp's mapToEdit staging (col / l false dropped); F6 too
 void hud_ui_end_challenge_completed(int icon, const char *name);
 void hud_ui_render_team(const Client*);     // the player card's team type / name (io_updateTeam, isYou)
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled

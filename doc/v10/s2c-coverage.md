@@ -122,7 +122,8 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | INTER_M_PROG | `mp` | :259398 | spectated player's charge bar (:222288) | **ported** | `NET_EXT_PLAYER_INTER_PROG` bar 1, sent and drawn as `p` (build_ui.c) |
 | NEW_PASS_RESPONSE | `upp` | :244558 | password change | irrelevant | the official account's auth is FRVR's |
 | ADD_DEBUG_POING | `dbgp` | :241808 | debug sphere | irrelevant | developer view |
-| CRAFT_RESPONSE | `crftr` | windows[13].craftRes :249907 | crafting window | KN equivalent | kn_brain |
+| CRAFT_RESPONSE | `crftr` | windows[13].craftRes :249907 | crafting window | by name | the krunker.io account's craft answer: `account_scoped` -> account_ui.c -> v10_junkyard.c (deob-10.0.7.js:220755) |
+| CRAFT_DATA_RESPONSE | `recps` | windows[13].craftDatRes | crafting window | by name | the krunker.io account's recipes: `account_scoped` -> account_ui.c -> v10_junkyard.c (deob-10.0.7.js:220747) |
 | CUSTOM_NETWORK_MESSAGE | `sd` | :241493 | `mainScript.onNetworkMessage(id, data)` | done | `NET_PACKET_SCRIPT_MSG` (krunker_link_s2c.c `on_network_message`); the msgpack data's `V_` keys are stripped into the `ks_serialize` body by `ks_net_body_from_official` (shared/src/ks/ks_net_official.c). The client's `GAME.NETWORK.send` goes back out as C2S `sd` (krunker_link.c). doc/v10/krunkscript-1003.md section 6 |
 | CONSOLE_LOG | `clog` | console.log | developer log | irrelevant | nothing shown |
 | OPEN_MAIL | `rml` | :253782 | mail window | KN equivalent | kn_brain |

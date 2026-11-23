@@ -503,7 +503,10 @@ void votekick_handle_kpd_apply(ClientConnection *client, const uint8_t *body, co
 //     one who removes a player (250341). The kicked player reads "Kicked by host" (game.kick, 222586-222588). A DEV
 //     cannot be kicked this way (v10's ADMIN script API refuses DEV targets, 211939);
 //   - the host's Transfer Host (action 8, shown to the host only, 254169) hands the game to the target
-//     (accounts_transfer_host_to: a signed-in or guest player, within the transfer limit).
+//     (accounts_transfer_host_to: a signed-in or guest player, within the transfer limit);
+//   - a DEV's Disconnect (action 7: v10.0.7's punishPopup offers it for canSilentKick = isDev || isAdmin,
+//     deob-10.0.7.js:115238, 224082) drops the target's connection: no kick reason, the player reads the plain
+//     "Disconnected". KrunkNative has no admin role, so it is a DEV's.
 // Deliberate difference (doc/backend.md 8.5): Ban (action 1) stays a DEV's. A KrunkNative ban is a persistent
 // account ban across the server; v10.0.3's host / moderator ban is that game's only, a list KrunkNative does not keep,
 // so the host's and the moderator's Ban is refused rather than turned into a server ban. Anything else is refused with
@@ -512,7 +515,17 @@ void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const 
     if (!client || length < sizeof(NetAdminActionPacket)) return;
     NetAdminActionPacket req;
     memcpy(&req, body, sizeof(req));
-    if (req.action != 0 && req.action != 1 && req.action != 8) return; // kill / tp / bring stay chat commands
+    if (req.action != 0 && req.action != 1 && req.action != 7 && req.action != 8) return; // kill / tp / bring stay chat commands
+    if (req.action == 7) {
+        ClientConnection *target = vk_by_id((int) req.uid);
+        if (!net_client_is_dev(client)) vk_chat_to(client, "Only DEV accounts can disconnect from the player list");
+        else if (target == client) vk_chat_to(client, "Cannot disconnect yourself");
+        else if (target) {
+            server_log("[admin] %s disconnects %s", client->name, target->name);
+            net_kick_client(target->id, "Disconnected", "000000");
+        }
+        return;
+    }
     if (req.action == 8) {
         ClientConnection *target = vk_by_id((int) req.uid);
         if (!accounts_is_custom_host(client)) vk_chat_to(client, "Only the host can transfer host");

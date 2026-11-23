@@ -2924,7 +2924,9 @@ static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
                                         "chgC", "_0", "_1", "dslr", // (chgC: CHALLENGE_COMPLETED, for account_ui.c's challenge capture)
                                         "vr", "xst", "pur", "ppr", "purprm", "purb", "purbp", "purbpl", "pErr", "uprm", "abd", "gbdr",
                                         // the ad-gated answers and FORCE_VIDEO_AD (account_ui.c, kn_ad.h, doc/v10/ads.md)
-                                        "spinKR", "rrqdxp", "bpclmr", "vad"};
+                                        "spinKR", "rrqdxp", "bpclmr", "vad",
+                                        // the Junkyard's CRAFT_DATA_RESPONSE / CRAFT_RESPONSE (v10_junkyard.c)
+                                        "recps", "crftr"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strlen(names[i]) != f->name_len || memcmp(names[i], f->name, f->name_len)) continue;
         *argc = i == 0 && f->argc > 4 ? 4 : (uint32_t) f->argc;

@@ -1,19 +1,30 @@
 // v10's Junkyard tab, ported from its Svelte components (svelte-1vqzycn: the page, the filter bar,
-// the grid; svelte-ggnigm: the recipe card; v10.js 132366-132400, 136440-136770). The order and
-// the states follow v10 (see the comments on each step); the protocol is kn_brain's craft.c, so
-// a craft is one ["crft", SID] and its answer ["crftr", SID, ok, msg].
+// the grid; svelte-ggnigm: the recipe card; v10.0.7: deob-10.0.7.js:137930-138260) and windows[13]'s
+// craft functions (craftDatRes / craftRes / startCraft / sendCraft, deob-10.0.7.js:220747-220790).
+// The order and the states follow v10 (see the comments on each step):
+//   - the recipes: ["recps"] once the tab opens (CRAFT_DATA_REQUEST), answered ["recps", rows(, junk)];
+//   - a card's Craft: sendCraft's confirmation (genericPopup "confPremiumPop": Junk, Materials, Craft time),
+//     its Craft is startCraft (the craft_0 sound, "Please Wait...", ["crft", SID]), answered
+//     ["crftr", SID, ok, msg]: ok closes the popups (clearPops), a refusal is v10's response popup;
+//   - a card's or a material's click: the item view (svelte-2tp35a, More info / Share).
+// The transport: a Box Office account's frames are kn_brain's social socket (services/brain/craft.c, whose
+// answer carries the junk balance as its third slot); a krunker.io account's are the official game socket's
+// (krunker_net_send_account_frame: v10 sends both there), its junk the account's (acc.junk, "uf").
 //
-// Deviations (doc/v7/decisions.md, Crafting): the skin is granted at the request, so there is no
-// crafting timer (v10's STATORD / EXP): the card shows "Crafting..." only while the answer is out,
-// and the confirmation shows no craft time. The recipe rows are the brain's table
-// (assets/junkyard_recipes.json), empty until v10's rows are copied in: until then the grid says
-// "No items match your search.", as v10 does for an empty list. The item click opens the
-// exchange's item page (Market) for that skin.
+// Deviations: kn_brain grants the skin at the request (craft.c: no crafting timer), so a Box Office craft
+// never shows v10's "Crafting..." / "<t> remaining" / "Complete" states (STATORD / EXP), and the recipes are asked
+// again after it (their CNT and the junk balance changed; v10 keeps its first answer). A krunker.io craft's
+// answer sets v10's STATORD 1 / EXP (the card's "<t> remaining"). A Box Office tab asks for the recipes each time
+// it opens (the brain's junk balance travels with them); krunker.io's are asked once, as v10 caches craftData.
+#include <audio.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <economy_client.h> // econ_black_market_find: the item view's Black Market badge
+#include <krunker_net.h>    // krunker_net_send_account_frame: a krunker.io account's frames
 #include <html_dom.h>
 #include <i18n.h>
 #include <ui_logic.h>
+#include <v10_ui.h> // v10_popup_show (genericPopup), v10_view_push (the item view)
 #include <cJSON.h>
 
 #include <ctype.h>
@@ -42,6 +53,9 @@ typedef struct {
     const ViewerSkin *skin;     // the result (SOUT)
     int sid, sout, cnt;         // CNT: copies left in the world, -1 unlimited, 0 sold out
     double junk, dat, order;
+    int status;                 // cftSts: STATORD (0 ready, 1 crafting, 2 complete)
+    int has_exp;                // crftTim: EXP is set (the "<t> remaining" line, else "Crafting...")
+    double exp;
     int n;
     int mat[MATS_MAX], mat_n[MATS_MAX];
     int is_new, affordable, mats_ok;
@@ -53,31 +67,36 @@ static struct {
     int loading, failed;
     int timer;                  // the deadline of the recps request in flight (html_timer id, 0 none)
     int timed_out;              // failed because no answer came by the deadline (not a logged-out null)
-    double junk;                // the account's junk balance (recps)
+    double junk;                // the junk balance the recps answer carried (Box Office: craft.c's third slot)
+    int junk_known;             // ... it carried one (krunker.io's has none: the account's acc.junk then)
     char search[SEARCH_MAX];
     int sort;
-    int confirm;                // SID of the craft confirmation, -1 none
-    int crafting;               // SID of the craft in flight, -1 none
-    int done_sid, done_skin;    // the result popup, -1 none
-    char err[200];              // the error popup's text, "" none
+    int share_timer;            // the item view's Share "Copied!" (1.5 s)
 } J;
 
 static JyItem s_items[JY_MAX];  // the recipes as built (build_items)
-static JyItem s_list[JY_MAX];   // the grid's list (visible_items); overlay_html reads it after grid_html
+static JyItem s_list[JY_MAX];   // the grid's list (visible_items)
 
 static void jy_init(void) {
     if (J.inited) return;
     J.inited = 1;
-    J.confirm = -1;
-    J.crafting = -1;
-    J.done_sid = -1;
 }
 
 static const AccountInfo *acc(void) { return active_account(); }
+static int kio(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// v10's `account.junk` (cantCraft, the order): the recps answer's balance on Box Office, the account's on krunker.io
+static double junk_balance(void) {
+    if (J.junk_known) return J.junk;
+    const AccountInfo *a = acc();
+    return a ? a->junk : 0;
+}
 
 static double num(const cJSON *o, const char *k, const double def) {
     const cJSON *v = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
-    return cJSON_IsNumber(v) ? v->valuedouble : def;
+    if (cJSON_IsNumber(v)) return v->valuedouble;
+    if (cJSON_IsString(v) && v->valuestring[0]) return atof(v->valuestring); // parseFloat(JUNK): krunker.io's may be text
+    return def;
 }
 
 // acc.skins[ind].cnt (0 for none / guests)
@@ -101,6 +120,23 @@ static void thumb(char *out, const size_t n, const ViewerSkin *s) {
     html_dom_asset_url(path, out, n);
 }
 
+// iííìïïï(ms) with no other argument (deob-10.0.7.js:23957): years, days, hours when non-zero, then the minutes
+// always ("0m "), no seconds: sendCraft's "Craft time" (1000 * DUR) and a crafting card's "<t> remaining" (EXP)
+static void duration(char *out, const size_t n, const double ms) {
+    long long s = ms > 0 ? (long long) floor(ms / 1000.0) : 0;
+    long long m = s / 60, h = m / 60, d = h / 24;
+    const long long y = d / 365;
+    m %= 60;
+    h %= 24;
+    d %= 365;
+    size_t o = 0;
+    out[0] = 0;
+    if (y && o < n) o += (size_t) snprintf(out + o, n - o, "%lldy ", y);
+    if (d && o < n) o += (size_t) snprintf(out + o, n - o, "%lldd ", d);
+    if (h && o < n) o += (size_t) snprintf(out + o, n - o, "%lldh ", h);
+    if (o < n) snprintf(out + o, n - o, "%lldm ", m);
+}
+
 // ------------------------------------------------------------------ the recipes
 
 // "skin,count,skin,count" -> the pairs (up to MATS_MAX; kn_brain has checked every row)
@@ -109,11 +145,19 @@ static void parse_mats(JyItem *it, const char *sin) {
     snprintf(buf, sizeof buf, "%s", sin ? sin : "");
     for (char *tok = strtok_r(buf, ",", &save); tok && it->n < MATS_MAX; tok = strtok_r(NULL, ",", &save)) {
         char *cnt = strtok_r(NULL, ",", &save);
-        if (!cnt) break;
         it->mat[it->n] = atoi(tok);
-        it->mat_n[it->n] = atoi(cnt);
+        it->mat_n[it->n] = cnt ? atoi(cnt) : 0; // parseInt(count || 0)
         it->n++;
+        if (!cnt) break;
     }
+}
+
+static cJSON *row_of(const int sid) {
+    cJSON *row;
+    cJSON_ArrayForEach(row, J.rows) {
+        if ((int) num(row, "SID", -1) == sid) return row;
+    }
+    return NULL;
 }
 
 // the recps rows as JyItems (v10 craftData.dat: rows whose result the store lacks are not shown)
@@ -131,17 +175,23 @@ static int build_items(void) {
         it->sout = (int) num(row, "SOUT", -1);
         it->skin = viewer_skin(it->sout);
         if (!it->skin) continue;
-        it->cnt = (int) num(row, "CNT", -1);
+        it->cnt = (int) num(row, "CNT", 0); // parseInt(CNT || 0)
         it->junk = num(row, "JUNK", 0);
         it->dat = num(row, "DAT", 0);
+        it->status = (int) num(row, "STATORD", 0);
+        const cJSON *exp = cJSON_GetObjectItemCaseSensitive(row, "EXP");
+        it->has_exp = cJSON_IsNumber(exp);
+        it->exp = it->has_exp ? exp->valuedouble : 0;
         parse_mats(it, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "SIN")));
         it->mats_ok = 1;
         for (int i = 0; i < it->n; i++)
-            if (owned(it->mat[i]) < it->mat_n[i]) it->mats_ok = 0;
-        // v10's order: the junk price; +10000 when NEW; +15000 when it can be crafted now, else -15000
+            if (it->mat[i] && owned(it->mat[i]) < it->mat_n[i]) it->mats_ok = 0;
+        // v10's order (deob-10.0.7.js:137950-137973): the junk price; -20000 while crafting or complete (STATORD > 0);
+        // else +10000 when NEW, then +15000 when it can be crafted now, -15000 when not
         it->is_new = fabs(now - it->dat) < NEW_MS;
-        it->affordable = logged && J.junk >= it->junk && it->mats_ok;
-        it->order = it->junk + (it->is_new ? 10000.0 : 0.0) + (it->affordable ? 15000.0 : -15000.0);
+        it->affordable = logged && junk_balance() >= it->junk && it->mats_ok;
+        if (it->status > 0) it->order = it->junk - 20000.0;
+        else it->order = it->junk + (it->is_new ? 10000.0 : 0.0) + (it->affordable ? 15000.0 : -15000.0);
         n++;
     }
     return n;
@@ -163,9 +213,10 @@ static void sort_items(JyItem *v, const int n, int (*less)(const JyItem *, const
     }
 }
 
+// the select's sorts (deob-10.0.7.js:137983-137994): rarity high to low, name A to Z, junk price low to high
 static int less_default(const JyItem *a, const JyItem *b) { return order_or_m1(a) > order_or_m1(b); }
 static int less_rarity(const JyItem *a, const JyItem *b) { return a->skin->rarity > b->skin->rarity; }
-static int less_junk(const JyItem *a, const JyItem *b) { return a->junk > b->junk; }
+static int less_junk(const JyItem *a, const JyItem *b) { return a->junk < b->junk; }
 
 static int ci_compare(const char *a, const char *b) {
     for (;; a++, b++) {
@@ -192,19 +243,17 @@ static int ci_contains(const char *hay, const char *needle) {
 // the list the grid shows: v10's order, then the search (case-insensitive name), then the sort
 static int visible_items(void) {
     const int n = build_items();
-    int m = 0;
     char needle[SEARCH_MAX];
     size_t a = 0;
     while (J.search[a] == ' ') a++;
     snprintf(needle, sizeof needle, "%s", J.search + a);
     for (size_t e = strlen(needle); e > 0 && needle[e - 1] == ' '; e--) needle[e - 1] = 0;
-    // v10 sorts by the order first; the order is kept by the stable sorts below
     JyItem *v = s_list;
-    for (int i = 0; i < n; i++) {
-        if (!ci_contains(s_items[i].skin->name ? s_items[i].skin->name : "", needle)) continue;
-        v[m++] = s_items[i];
-    }
-    sort_items(v, m, less_default);
+    for (int i = 0; i < n; i++) v[i] = s_items[i];
+    sort_items(v, n, less_default);
+    int m = 0;
+    for (int i = 0; i < n; i++)
+        if (ci_contains(v[i].skin->name ? v[i].skin->name : "", needle)) v[m++] = v[i];
     if (J.sort == SORT_RARITY) sort_items(v, m, less_rarity);
     else if (J.sort == SORT_NAME) sort_items(v, m, less_name);
     else if (J.sort == SORT_JUNK) sort_items(v, m, less_junk);
@@ -214,16 +263,19 @@ static int visible_items(void) {
 // v10's cantCraft: the junk first, Sold out over it, Missing materials only when nothing else
 static const char *cant_reason(const JyItem *it) {
     const char *r = NULL;
-    if (!acc() || J.junk < it->junk) r = "Not enough Junk";
+    if (!acc() || junk_balance() < it->junk) r = "Not enough Junk";
     if (it->cnt == 0) r = "Sold out";
-    if (!r && !it->mats_ok) r = "Missing materials";
+    for (int i = 0; i < it->n && !r; i++) {
+        const ViewerSkin *m = it->mat[i] ? viewer_skin(it->mat[i]) : NULL;
+        if (m && owned(it->mat[i]) < it->mat_n[i]) r = "Missing materials"; // a material the store lacks is skipped
+    }
     return r;
 }
 
 // ------------------------------------------------------------------ markup
 
 static void mat_thumb_block(StrBuf *sb, const JyItem *it, const int i) {
-    const ViewerSkin *m = viewer_skin(it->mat[i]);
+    const ViewerSkin *m = it->mat[i] ? viewer_skin(it->mat[i]) : NULL;
     if (!m) return;
     const int have = owned(it->mat[i]) >= it->mat_n[i];
     char url[512];
@@ -233,10 +285,10 @@ static void mat_thumb_block(StrBuf *sb, const JyItem *it, const int i) {
                have ? "" : " missing", have ? rarity_color(m) : "#5e5e5e", url, it->mat[i], it->mat_n[i]);
 }
 
+// the recipe card (svelte-ggnigm, deob-10.0.7.js:133701 and its states :138083-138195)
 static void card(StrBuf *sb, const JyItem *it) {
     const ViewerSkin *s = it->skin;
     const char *col = rarity_color(s);
-    const int crafting = J.crafting == it->sid;
     char url[512];
     thumb(url, sizeof url, s);
     sb_append(sb, "<div class=\"craft-recipe-card svelte-ggnigm\">");
@@ -245,24 +297,36 @@ static void card(StrBuf *sb, const JyItem *it) {
     sb_append_esc(sb, s->name ? s->name : "");
     sb_append(sb, "\"> <div class=\"craft-item-name svelte-ggnigm\" style=\"color: ");
     sb_append(sb, col);
-    sb_append(sb, ";\">");
+    sb_append(sb, "\">");
     sb_append_esc(sb, s->name ? s->name : "");
     sb_appendf(sb, "</div> <div class=\"craft-item-junk svelte-ggnigm\">%.2f <span class=\"material-icons svelte-ggnigm\" style=\"color: #cc51f8; font-size: 34px; margin-left: 5px; vertical-align: top;\">plumbing</span></div>",
                it->junk);
-    if (it->is_new && !crafting) sb_append(sb, "<div class=\"craft-new-tag svelte-ggnigm\">NEW</div>");
+    if (it->is_new && it->status == 0) sb_append(sb, "<div class=\"craft-new-tag svelte-ggnigm\">NEW</div>");
     if (it->cnt > 0) sb_appendf(sb, "<div class=\"craft-limit-amount svelte-ggnigm\" title=\"%d left in the world\">x%d</div>", it->cnt, it->cnt);
-    if (crafting) sb_append(sb, "<div class=\"craft-hammer-animation svelte-ggnigm\"><span class=\"material-icons craft-hammer-icon svelte-ggnigm\">plumbing</span></div>");
-    sb_append(sb, "</div>");
-    sb_append(sb, "<div class=\"craft-requirements-list svelte-ggnigm\">");
+    if (it->status == 1) sb_append(sb, "<div class=\"craft-hammer-animation svelte-ggnigm\"><span class=\"material-icons craft-hammer-icon svelte-ggnigm\">plumbing</span></div>");
+    if (it->status == 2)
+        sb_append(sb, "<div class=\"done-craft-icon svelte-ggnigm\"><span class=\"material-icons svelte-ggnigm\" style=\"font-size: 160px; color: #38cd3a; line-height: 175px;\">done</span></div>");
+    sb_append(sb, "</div> <div class=\"craft-requirements-list svelte-ggnigm\">");
     for (int i = 0; i < it->n; i++) mat_thumb_block(sb, it, i);
-    sb_append(sb, "</div>");
+    sb_append(sb, "</div> ");
     const char *reason = cant_reason(it);
-    if (crafting) sb_append(sb, "<div class=\"craft-timer svelte-ggnigm\">Crafting...</div>");
-    else if (reason) {
+    if (it->status == 1) {
+        char t[64] = "Crafting...";
+        if (it->has_exp) {
+            duration(t, sizeof t, it->exp);
+            strncat(t, " remaining", sizeof t - strlen(t) - 1);
+        }
+        sb_appendf(sb, "<div class=\"craft-timer svelte-ggnigm\">%s</div>", t);
+    } else if (it->status == 2) {
+        sb_append(sb, "<div class=\"craft-timer svelte-ggnigm\">Complete</div>");
+    } else if (reason) {
         sb_append(sb, "<div class=\"craft-timer svelte-ggnigm\">");
         sb_append_esc(sb, reason);
         sb_append(sb, "</div>");
-    } else sb_appendf(sb, "<div class=\"craft-button svelte-ggnigm\" id=\"v10jyCraft%d\" role=\"button\" tabindex=\"0\" onclick=\"v10jy.craft(%d)\">Craft</div>", it->sid, it->sid);
+    } else {
+        sb_appendf(sb, "<div class=\"craft-button svelte-ggnigm\" id=\"v10jyCraft%d\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" onclick=\"v10jy.craft(%d)\">Craft</div>",
+                   it->sid, it->sid);
+    }
     sb_append(sb, "</div>");
 }
 
@@ -286,55 +350,6 @@ static void refresh_grid(void) {
     free(html);
 }
 
-// the craft confirmation (v10's sendCraft popup, without the craft time), the result and the error
-static void overlay_html(StrBuf *sb) {
-    if (J.confirm >= 0) {
-        const int n = visible_items();
-        const JyItem *it = NULL;
-        for (int i = 0; i < n; i++)
-            if (s_list[i].sid == J.confirm) it = &s_list[i];
-        if (!it) return;
-        const char *col = rarity_color(it->skin);
-        sb_append(sb, "<div class=\"modal-overlay svelte-1ugt6n9\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Craft confirmation\" tabindex=\"-1\" onclick=\"v10jy.cclose()\">"
-                      "<div class=\"modal-content svelte-1ugt6n9\" role=\"document\" onclick=\"v10jy.stop()\"><h3 class=\"svelte-1ugt6n9\">Craft <span style=\"color: ");
-        sb_append(sb, col);
-        sb_append(sb, "\">");
-        sb_append_esc(sb, it->skin->name ? it->skin->name : "");
-        sb_appendf(sb, "</span></h3><div style=\"color: #979797;\">Junk<span style=\"float: right; color: #e5e5e5;\">-%.2f <span class=\"material-icons\" style=\"color: #cc51f8; font-size: 30px; vertical-align: middle;\">plumbing</span></span></div>", it->junk);
-        sb_append(sb, "<div style=\"color: #979797;\">Materials</div><div style=\"display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 12px;\">");
-        for (int i = 0; i < it->n; i++) {
-            const ViewerSkin *m = viewer_skin(it->mat[i]);
-            if (!m) continue;
-            char url[512];
-            thumb(url, sizeof url, m);
-            sb_appendf(sb, "<div class=\"craft-item-req svelte-ggnigm\" style=\"border: 2px solid %s; background-image: url(%s);\"><div class=\"craft-req-count svelte-ggnigm\">x%d</div></div>",
-                       owned(it->mat[i]) >= it->mat_n[i] ? rarity_color(m) : "#5e5e5e", url, it->mat_n[i]);
-        }
-        sb_append(sb, "</div><div style=\"display: flex; gap: 10px;\">");
-        sb_append(sb, "<button class=\"main-button svelte-whnh40\" id=\"v10jyCraftGo\" type=\"button\" onclick=\"v10jy.cgo()\">Craft</button>");
-        sb_append(sb, "<button class=\"main-button svelte-whnh40\" id=\"v10jyCraftNo\" type=\"button\" onclick=\"v10jy.cclose()\">Cancel</button>");
-        sb_append(sb, "</div></div></div>");
-    } else if (J.done_sid >= 0) {
-        const ViewerSkin *s = viewer_skin(J.done_skin);
-        char url[512] = "";
-        if (s) thumb(url, sizeof url, s);
-        sb_append(sb, "<div class=\"modal-overlay svelte-1ugt6n9\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Craft result\" tabindex=\"-1\" onclick=\"v10jy.rok()\">"
-                      "<div class=\"modal-content svelte-1ugt6n9\" role=\"document\" onclick=\"v10jy.stop()\">"
-                      "<div style=\"text-align: center;\"><span class=\"material-icons\" style=\"font-size: 96px; color: #38cd3a; line-height: 110px; pointer-events: none;\">done</span></div>"
-                      "<h3 class=\"svelte-1ugt6n9\">Crafted <span style=\"color: ");
-        sb_append(sb, rarity_color(s));
-        sb_append(sb, "\">");
-        sb_append_esc(sb, s && s->name ? s->name : "");
-        sb_appendf(sb, "</span></h3><img draggable=\"false\" src=\"%s\" alt=\"\" style=\"height: 120px; margin: 8px auto 12px; display: block; pointer-events: none;\">", url);
-        sb_append(sb, "<button class=\"main-button svelte-whnh40\" id=\"v10jyDoneOk\" type=\"button\" onclick=\"v10jy.rok()\">OK</button></div></div>");
-    } else if (J.err[0]) {
-        sb_append(sb, "<div class=\"modal-overlay svelte-1ugt6n9\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Error message\" tabindex=\"-1\" onclick=\"v10jy.errok()\">"
-                      "<div class=\"modal-content svelte-1ugt6n9\" role=\"document\" onclick=\"v10jy.stop()\"><h3 class=\"svelte-1ugt6n9\">Error</h3><p>");
-        sb_append_esc(sb, J.err);
-        sb_append(sb, "</p><button class=\"main-button svelte-whnh40\" id=\"v10jyErrOk\" type=\"button\" onclick=\"v10jy.errok()\">OK</button></div></div>");
-    }
-}
-
 void v10_junkyard_render(StrBuf *sb) {
     jy_init();
     char bg[256];
@@ -345,7 +360,7 @@ void v10_junkyard_render(StrBuf *sb) {
                    "Craft brand new skins &amp; items by using Junk and other Materials, which can be found scattered around every map in the game or earned from challenges.</div></div> ",
                bg);
     // v10 (deob-10.0.7.js:138020-138054): the filter bar fills the anchor between the header and .craft-grid
-    // (only with recipes); the guest's Register line, the Loading / No Recipes status and the cards all sit
+    // (only with recipes); the guest's Register line, the Loading status and the cards all sit
     // inside .craft-grid, a wrapping flex row, so those one-line divs shrink to their text at the grid's left
     // (their text-align: center has no width to centre in) below its 5px padding.
     if (acc() && J.rows) {
@@ -361,23 +376,81 @@ void v10_junkyard_render(StrBuf *sb) {
         sb_append(sb, "<div style=\"color: #fff; text-align: center; margin-top: 20px; cursor: pointer;\" role=\"button\" tabindex=\"0\" onclick=\"showWindow(5)\">"
                       "<span style=\"color: #31caec\">Register</span> to craft!</div>");
     } else if (!J.rows) {
-        // a request that got no answer (the socket dropped, the brain is down) is failed after its deadline:
-        // the screen says so rather than "Loading Recipes..." for good
-        const char *text = J.timed_out ? I18N("kn.jy.loadFailed", "Couldn't load the recipes. Open the Junkyard again to retry.")
-                         : J.failed ? "No Recipes Found" : "Loading Recipes...";
+        // v10 shows "Loading Recipes..." until rows come: its "No Recipes Found" reads craftData.error, which craftDatRes
+        // never sets (it sets `err`, deob-10.0.7.js:220749 vs :138042), so a null answer reads Loading too. A request
+        // that got no answer at all (the socket dropped, the brain is down) is failed after its deadline here: the
+        // screen says so rather than "Loading Recipes..." for good (KrunkNative's)
+        const char *text = J.timed_out ? I18N("kn.jy.loadFailed", "Couldn't load the recipes. Open the Junkyard again to retry.") : "Loading Recipes...";
         sb_appendf(sb, "<div id=\"v10jyStatus\" style=\"color: #fff; text-align: center; margin-top: 20px;\">%s</div>", text);
     } else {
         grid_html(sb);
     }
-    sb_append(sb, "</div>");
-    overlay_html(sb);
-    sb_append(sb, "</div></div>");
+    sb_append(sb, "</div></div></div>");
+}
+
+// ------------------------------------------------------------------ the item view (iîiíìîi, svelte-2tp35a)
+
+static const char *item_type(const ViewerSkin *vs) {
+    static const char *const types[] = {NULL, "Hat Item", "Body Item", "Melee Item", "Spray Item", "Dye Item", "Waist Item", "Face Item", "Shoe Item", "Pet Item",
+                                        "Collectible Item", "Wrist Item", "Charm Item", "Spin Ticket Item", "Back Item", "Head Item", "Player Card"};
+    if (vs && vs->type > 0 && vs->type < (int) (sizeof(types) / sizeof(types[0]))) return types[vs->type];
+    if (vs && vs->type == 0 && vs->weapon > 0) return "Weapon Skin";
+    return "";
+}
+
+// IÎïïiîí (deob-10.0.7.js:137995-138011): a card's or a material's click opens the item view of that store skin
+// ({...skin, index, rarity_meta}): the image, the name, the type, the status badge (deob-10.0.7.js:106727-106746:
+// Black Market, Vaulted, Limited), More info (openSales) and Share (the ?item= link)
+static void item_view(const int index) {
+    const ViewerSkin *s = viewer_skin(index);
+    if (!s) return;
+    const char *col = rarity_color(s);
+    const int animate = s->rarity == 6, dark = s->rarity == 5; // rarity_meta.animate (Unobtainable) / .dark (Contraband)
+    char img[512];
+    store_skin_preview(index, img, sizeof img);
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp translucent slim-border\" style=\"width: 600px;\">"
+                    "<div class=\"item-showcase-container io-popup-container svelte-2tp35a\"><div class=\"item-showcase-content io-popup-content svelte-2tp35a\">"
+                    "<div class=\"image-display svelte-2tp35a%s\" style=\"border: 3px solid %s; background-image: url(%s);\"></div> "
+                    "<div class=\"showcase-overlay svelte-2tp35a\"><!----> <div class=\"showcase-header svelte-2tp35a\"><!----> <div class=\"item-showcase-header svelte-2tp35a\">"
+                    "<div class=\"item-info svelte-2tp35a\"><!----> <div class=\"item-name svelte-2tp35a%s%s\" style=\"color: %s;\">",
+               animate ? " rainbow" : "", col, img, animate ? " rainbow" : "", dark ? " dark" : "", col);
+    sb_append_esc(&sb, s->name && s->name[0] ? s->name : "Unnamed Item");
+    sb_appendf(&sb, "</div> <!----> <div class=\"item-description svelte-2tp35a\">%s</div> ", item_type(s));
+    const int seas = s->seas ? s->seas : 1;
+    if (econ_black_market_find(index)) sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #00ffff;\">Black Market</div>");
+    else if (s->type != 18 && seas != g_viewer_current_season) sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #666666;\">Vaulted</div>");
+    else if (s->flags & VS_BLOCKED) sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #faa332;\">Limited</div>");
+    else sb_append(&sb, "<!---->");
+    sb_appendf(&sb, "</div> <div class=\"item-showcase-btns svelte-2tp35a\"><button class=\"more-info-btn svelte-2tp35a\" onclick=\"openSales(%d)\">More info</button> "
+                    "<button class=\"share-btn svelte-1524ito\" type=\"button\" title=\"Copy link\" id=\"v10jyShareBtn\" onclick=\"v10jy.share(%d)\"><i class=\"material-icons svelte-1524ito\">share</i> "
+                    "<span class=\"svelte-1524ito\">Share</span></button></div></div></div> <!----></div></div></div></div></div>",
+               index, index);
+    v10_view_push(sb_finish(&sb), NULL, NULL, NULL);
+}
+
+// ShareButton's copied state (title, icon, label, .share-copied for 1.5 s)
+static void share_copied_set(const int copied) {
+    const HtmlElem btn = html_dom_by_id("v10jyShareBtn");
+    if (!btn) return;
+    html_dom_set_attr(btn, "title", copied ? I18N("generic.copied", "Copied!") : "Copy link");
+    html_dom_set_class(btn, "share-copied", copied);
+    const HtmlElem icon = html_dom_query(btn, "i"), label = html_dom_query(btn, "span");
+    if (icon) html_dom_set_text(icon, copied ? "check" : "share");
+    if (label) html_dom_set_text(label, copied ? I18N("generic.copied", "Copied!") : "Share");
+}
+static void share_copied_done(void *user) {
+    (void) user;
+    J.share_timer = 0;
+    share_copied_set(0);
 }
 
 // ------------------------------------------------------------------ the protocol
 
+// A Box Office account's frames go to kn_brain's social socket, a krunker.io account's to the official game socket
+// (v10 sends CRAFT_DATA_REQUEST / CRAFT_REQUEST there: io.send)
 static int send_frame(cJSON *f) {
-    const int sent = backend_social_send(f);
+    const int sent = kio() ? krunker_net_send_account_frame(f) : backend_social_send(f);
     cJSON_Delete(f);
     return sent;
 }
@@ -402,80 +475,136 @@ static void request_recipes(void) {
     J.timer = html_timer_add(RECPS_WAIT_MS, recps_expired, NULL);
     J.loading = 1;
     J.timed_out = 0;
-    if (!send_frame(f)) { // no socket at all: no answer can come
+    if (!send_frame(f)) { // not sent: no answer can come
         html_timer_cancel(J.timer);
         J.timer = 0;
         J.loading = 0;
-        J.failed = 1;
+        // krunker.io's game server takes recps only once the player is in the game (krunker_net.c): asked again by
+        // the tab's next render, "Loading Recipes..." meanwhile; no Box Office socket at all is a failure
+        J.failed = !kio();
     }
 }
 
-static void send_craft(const int sid) {
+// windows[13].sendCraft(SID) (deob-10.0.7.js:220779-220789): genericPopup(<the confirmation>, "confPremiumPop"):
+// "Craft <name>", the Junk it costs, the materials (rarity-coloured, not by ownership as on the card), the craft
+// time, then #confirmBtn (startCraft) / #declineBtn (clearPops). v10's markup, its unclosed url( included.
+static void send_craft_popup(const int sid) {
+    const cJSON *row = row_of(sid);
+    const ViewerSkin *out = row ? viewer_skin((int) num(row, "SOUT", -1)) : NULL;
+    if (!out) return;
+    JyItem it;
+    memset(&it, 0, sizeof it);
+    parse_mats(&it, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "SIN")));
+    StrBuf mats = {0};
+    sb_append(&mats, "");
+    for (int i = 0; i < it.n; i++) {
+        const ViewerSkin *m = it.mat[i] ? viewer_skin(it.mat[i]) : NULL;
+        if (!m) continue;
+        char url[512];
+        thumb(url, sizeof url, m);
+        sb_appendf(&mats, "<div class='crftRecSml' style='%sborder: 2px solid %s;background-image:url(%s'></div>", i ? "" : "margin-left:-5px;", rarity_color(m), url);
+    }
+    char *mats_html = sb_finish(&mats);
+    char t[64];
+    duration(t, sizeof t, 1000.0 * num(row, "DUR", 0));
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='pubHed'>Craft <span style='color:%s'>", rarity_color(out));
+    sb_append_esc(&sb, out->name ? out->name : "");
+    sb_appendf(&sb, "</span></div><div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>"
+                    "<div style='color:#979797;'>Junk<span style='float:right;color:#e5e5e5;'>-%.2f<span class='material-icons' style='color:#cc51f8;font-size:30px;vertical-align:middle;margin-top:-7px;margin-left:5px;margin-right:-5px;'>plumbing</span></span></div>"
+                    "<div style='color:#979797;'>Materials<div style='float:right;'>-%s</div></div>"
+                    "<div style='color:#979797;'>Craft time<span style='float:right;color:#e5e5e5;'>%s</span></div></div>"
+                    "<div id='confirmBtn' onclick='logBtnFRVR(`craft_item_confirm`);windows[13].startCraft(%d)' onmouseover='playTick(0.1)'>Craft</div><div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>Cancel</div>",
+               num(row, "JUNK", 0), mats_html ? mats_html : "", t, sid);
+    free(mats_html);
+    char *html = sb_finish(&sb);
+    v10_popup_show("confPremiumPop", html, NULL);
+    free(html);
+}
+
+// windows[13].startCraft(SID) (deob-10.0.7.js:220774-220778): the craft sound, "Please Wait...", CRAFT_REQUEST
+static void start_craft(const int sid) {
+    audio_play("craft_0", 0.4f, 0, 1.0f);
+    ui_loading_popup("Please Wait...");
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("crft"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(sid));
-    J.crafting = sid;
-    send_frame(f);
+    if (!send_frame(f)) ui_loadout_response_popup("Error"); // nothing went out: no answer would close the wait
 }
 
-static int sout_of(const int sid) {
-    const cJSON *row;
-    cJSON_ArrayForEach(row, J.rows) {
-        if ((int) num(row, "SID", -1) == sid) return (int) num(row, "SOUT", -1);
-    }
-    return -1;
+static int truthy(const cJSON *v) {
+    return (cJSON_IsNumber(v) && v->valuedouble != 0) || cJSON_IsTrue(v) || (cJSON_IsString(v) && v->valuestring[0]);
 }
 
-static const cJSON *frame_at(const cJSON *frame, const int i) { return cJSON_GetArrayItem(frame, i); }
-
-static void on_social(void *user, const cJSON *frame) {
-    (void) user;
+// The recps / crftr answers (Box Office: the social socket's; krunker.io: the game socket's, v10_junkyard_kio_frame)
+static void on_frame(const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
-    if (!strcmp(label, "recps")) {
-        const cJSON *rows = frame_at(frame, 1), *junk = frame_at(frame, 2);
+    if (!strcmp(label, "recps")) { // craftDatRes(rows): {dat: rows, err: !rows}
+        const cJSON *rows = cJSON_GetArrayItem(frame, 1), *junk = cJSON_GetArrayItem(frame, 2);
         html_timer_cancel(J.timer);
         J.timer = 0;
         J.loading = 0;
         cJSON_Delete(J.rows);
         J.rows = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : NULL;
         J.failed = J.rows == NULL;
-        J.junk = cJSON_IsNumber(junk) ? junk->valuedouble : 0;
+        J.junk_known = cJSON_IsNumber(junk);
+        J.junk = J.junk_known ? junk->valuedouble : 0;
         v10_market_junkyard_refresh();
-    } else if (!strcmp(label, "crftr")) {
-        const cJSON *sid_j = frame_at(frame, 1), *ok_j = frame_at(frame, 2), *msg_j = frame_at(frame, 3);
-        const int crafted = cJSON_IsNumber(sid_j) ? sid_j->valueint : -1;
-        if (crafted == J.crafting) J.crafting = -1;
-        if (cJSON_IsNumber(ok_j) && ok_j->valueint == 1) {
-            J.done_sid = crafted;
-            J.done_skin = sout_of(crafted);
-            request_recipes(); /* the counts and the junk after the craft */
+    } else if (!strcmp(label, "crftr")) { // craftRes(SID, ok, msg) (deob-10.0.7.js:220755-220772)
+        const cJSON *sid_j = cJSON_GetArrayItem(frame, 1), *ok_j = cJSON_GetArrayItem(frame, 2), *msg_j = cJSON_GetArrayItem(frame, 3);
+        if (truthy(ok_j)) {
+            // the recipe's EXP = 1000 * DUR and STATORD = 1 (the card reads "<t> remaining"), clearPops, updateWindow(14)
+            cJSON *row = kio() && cJSON_IsNumber(sid_j) ? row_of(sid_j->valueint) : NULL;
+            if (row) {
+                const double dur = num(row, "DUR", 0);
+                cJSON_DeleteItemFromObjectCaseSensitive(row, "EXP");
+                cJSON_DeleteItemFromObjectCaseSensitive(row, "STATORD");
+                cJSON_AddNumberToObject(row, "EXP", 1000.0 * dur);
+                cJSON_AddNumberToObject(row, "STATORD", 1);
+            }
+            ui_loadout_clear_pops(); // the confirmation / "Please Wait..." had replaced the exchange: it is closed now
+            menu_rerender_if_open(14); // updateWindow(14): the store's junk balance
+            if (!kio()) request_recipes(); // Box Office: granted at once, so the counts and the junk balance changed
+            v10_market_junkyard_refresh();
         } else {
             const char *msg = cJSON_GetStringValue(msg_j);
-            snprintf(J.err, sizeof J.err, "%s", msg && msg[0] ? msg : "Error");
+            ui_loadout_response_popup(msg && msg[0] ? msg : "Error"); // showPopup(null, msg || "Error")
         }
-        v10_market_junkyard_refresh();
-    } else if (!strcmp(label, "ua")) {
-        v10_market_junkyard_refresh(); /* the owned materials and the result changed */
+    } else if (!strcmp(label, "ua") || !strcmp(label, "uf")) {
+        v10_market_junkyard_refresh(); /* the owned materials, the junk */
     }
+}
+
+static void on_social(void *user, const cJSON *frame) {
+    (void) user;
+    if (!kio()) on_frame(frame);
+}
+
+void v10_junkyard_kio_frame(const cJSON *frame) {
+    if (kio()) on_frame(frame);
 }
 
 // ------------------------------------------------------------------ entry and handlers
 
+// The tab opened. v10 asks once: `!craftData && account && io` sends CRAFT_DATA_REQUEST (deob-10.0.7.js:137938) and
+// keeps the answer (krunker.io's here). A Box Office tab asks each time it opens (the brain's junk balance travels with
+// the recipes).
 void v10_junkyard_enter(void) {
     jy_init();
     if (!J.listening) J.listening = backend_social_listen(on_social, NULL);
-    J.confirm = -1;
-    J.done_sid = -1;
-    J.err[0] = 0;
+    if (kio()) {
+        if (acc() && !J.rows && !J.loading) request_recipes();
+        return;
+    }
     cJSON_Delete(J.rows);
     J.rows = NULL;
     J.failed = 0;
     if (acc()) request_recipes();
 }
 
-// The account changed (a login, a logout, the session restored after the tab opened): the recipes are the
-// account's (counts, junk), so they are asked for again by the next render of a logged-in tab.
+// The account changed (a login, a logout, the session restored after the tab opened, the backend switched): the
+// recipes are the account's (counts, junk), so they are asked for again by the next render of a logged-in tab.
 void v10_junkyard_account_changed(void) {
     jy_init();
     html_timer_cancel(J.timer);
@@ -486,6 +615,7 @@ void v10_junkyard_account_changed(void) {
     cJSON_Delete(J.rows);
     J.rows = NULL;
     J.junk = 0;
+    J.junk_known = 0;
 }
 
 // The tab's render asks for the recipes when they are missing: a logged-in tab whose recipes were never asked
@@ -508,7 +638,20 @@ static int arg_int(const HtmlArg *args, const int argc, const int i, const int d
 }
 
 int v10_junkyard_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    if (!name || strncmp(name, "v10jy.", 6) != 0) return -1;
+    if (!name) return -1;
+    // v10's own names (windows[13]): the confirmation replaced the exchange in #genericPop (genericPopup), so these
+    // run with the exchange closed, as the item view's buttons do
+    if (!strcmp(name, "windows.13.startCraft")) {
+        jy_init();
+        if (acc()) start_craft(arg_int(args, argc, 0, -1));
+        return 1;
+    }
+    if (!strcmp(name, "windows.13.sendCraft")) {
+        jy_init();
+        if (acc()) send_craft_popup(arg_int(args, argc, 0, -1));
+        return 1;
+    }
+    if (strncmp(name, "v10jy.", 6) != 0) return -1;
     jy_init();
     const char *h = name + 6;
     if (!strcmp(h, "stop")) {
@@ -522,30 +665,21 @@ int v10_junkyard_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
             if (!strcmp(v, k_sort_value[i])) J.sort = i;
         refresh_grid();
     } else if (!strcmp(h, "craft")) {
-        // v10's onCraftClick: the confirmation first (nothing while a craft is out)
-        if (acc() && J.crafting < 0) {
-            J.confirm = arg_int(args, argc, 0, -1);
-            v10_market_junkyard_refresh();
-        }
-    } else if (!strcmp(h, "cgo")) {
-        if (J.confirm >= 0 && J.crafting < 0 && acc()) {
-            const int sid = J.confirm;
-            J.confirm = -1;
-            send_craft(sid);
-            v10_market_junkyard_refresh();
-        }
-    } else if (!strcmp(h, "cclose")) {
-        J.confirm = -1;
-        v10_market_junkyard_refresh();
-    } else if (!strcmp(h, "rok")) {
-        J.done_sid = -1;
-        v10_market_junkyard_refresh();
-    } else if (!strcmp(h, "errok")) {
-        J.err[0] = 0;
-        v10_market_junkyard_refresh();
+        // the card's onCraftClick: playTick + playSelect, logBtnFRVR("craft_item"), windows[13].sendCraft(SID)
+        audio_play("tick_0", 0.1f, 0, 1.0f);
+        audio_play("select_0", 0.1f, 0, 1.0f);
+        if (acc()) send_craft_popup(arg_int(args, argc, 0, -1));
     } else if (!strcmp(h, "item")) {
-        // the skin's item page: the exchange's Market tab (v10_market_open(TAB_MARKET, skin))
-        v10_market_open(0, arg_int(args, argc, 0, -1));
+        item_view(arg_int(args, argc, 0, -1));
+    } else if (!strcmp(h, "share")) { // ShareButton (?item=<index>), "Copied!" for 1.5 s
+        html_ui_stop_propagation();
+        char origin[256], url[320];
+        html_page_origin(origin, sizeof origin);
+        snprintf(url, sizeof url, "%s/?item=%d", origin, arg_int(args, argc, 0, -1));
+        html_clipboard_write(url);
+        if (J.share_timer) html_timer_cancel(J.share_timer);
+        share_copied_set(1);
+        J.share_timer = html_timer_add(1500, share_copied_done, NULL);
     }
     return 1;
 }

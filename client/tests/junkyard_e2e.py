@@ -6,9 +6,15 @@
      windows[13].craftMenu() -> the exchange's Junkyard tab
   2. the recipe cards are listed: a craftable recipe with its Craft button, a paid recipe the
      account cannot afford ("Not enough Junk"), a recipe short of a material ("Missing materials")
-  3. Craft -> the confirmation -> Craft: the materials are taken and the result granted (database),
-     the result popup shows the skin
+  3. the sort: "Sort by Junk Price" lists the cheapest recipe first (v10: JUNK low to high, :137990)
   4. the search bar: a name that matches nothing shows "No items match your search."
+  5. a card's click opens the item view (svelte-2tp35a: the name, More info, Share) over the exchange
+  6. Craft -> v10's confirmation (windows[13].sendCraft: genericPopup "Craft <name>", Junk, Materials,
+     Craft time; deob-10.0.7.js:220779). genericPopup puts it in #genericPop, where the exchange was
+     (openExchange is genericPopup(..., "exchangeModal"), :222746): Cancel (clearPops) leaves both closed
+  7. the tile again, Craft -> Craft (windows[13].startCraft): the materials are taken and the result
+     granted (database); craftRes clears the popups (no result popup); the tile again lists the recipe
+     short of its materials now
 
   python3 -I client/tests/junkyard_e2e.py BUILD_DIR REPO_ROOT
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs) driven through
@@ -51,7 +57,7 @@ WOOD, WIRES, KRYSTALLIZER, PLASMA = 1, 3, 3283, 3921
 RECIPES = [
     {"SID": 1, "SOUT": KRYSTALLIZER, "SIN": "%d,2,%d,1" % (WOOD, WIRES), "JUNK": 0, "DUR": 0, "CNT": -1, "DAT": 1700000000000},
     {"SID": 2, "SOUT": PLASMA, "SIN": "%d,1" % WOOD, "JUNK": 5, "DUR": 0, "CNT": -1, "DAT": 1700000000000},
-    {"SID": 3, "SOUT": KRYSTALLIZER, "SIN": "%d,4" % WIRES, "JUNK": 0, "DUR": 0, "CNT": -1, "DAT": 1700000000000},
+    {"SID": 3, "SOUT": KRYSTALLIZER, "SIN": "%d,4" % WIRES, "JUNK": 0, "DUR": 5400, "CNT": -1, "DAT": 1700000000000},
 ]
 
 
@@ -234,25 +240,59 @@ def scenario(port, aid, token, name):
         check("Missing materials" in grid, "the recipe short of Wires says Missing materials")
         c.shot("junkyard")
 
-        # 3: craft recipe 1 through the confirmation
-        c.click("v10jyCraft1")
-        check(c.has("v10jyCraftGo", 15), "Craft opens the confirmation (Craft / Cancel)")
-        c.shot("confirm")
-        c.click("v10jyCraftGo")
-        check(c.has("v10jyDoneOk", 25), "the result popup shows after the craft")
-        c.shot("result")
-        check(wait(lambda: one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", aid, KRYSTALLIZER) == 1, 10),
-              "the result skin is granted (Krystallizer x1)")
-        check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", aid, WOOD) == 3, "2 Wood were taken (5 -> 3)")
-        check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", aid, WIRES) == 0, "1 Wires was taken (1 -> 0)")
-        c.click("v10jyDoneOk")
-        check(c.gone("v10jyDoneOk", 10), "the result popup closes")
+        # 3: the sort by junk price: the cheapest first (Krystallizer's 0.00 before Plasma Cutter's 5.00)
+        c.ui("v10jy.sort('junk')")
+        grid = c.textof("jyGrid")
+        kp, pp = grid.find("Krystallizer"), grid.find("Plasma Cutter")
+        check(0 <= kp < pp, "Sort by Junk Price: low to high (Krystallizer before Plasma Cutter): %r" % grid[:200])
+        c.ui("v10jy.sort('default')")
 
         # 4: the search bar: no match, then the list comes back
         c.type("v10jySearch", "zzzq")
         time.sleep(0.5)
         check("No items match your search." in c.textof("jyGrid"), "a search that matches nothing: the empty line")
         c.shot("search")
+        c.ui("v10jy.search('')")
+        check(c.has("v10jyCraft1", 15), "an empty search lists the recipes again")
+
+        # 5: a card's click: the item view (svelte-2tp35a) over the exchange
+        c.ui("v10jy.item(%d)" % PLASMA)
+        check(c.has("v10jyShareBtn", 15), "the card's click opens the item view (its Share button)")
+        view = c.textof(".item-showcase-container")
+        check("Plasma Cutter" in view and "More info" in view and "Share" in view, "the item view names the skin, More info, Share: %r" % view[:160])
+        c.shot("item")
+        c.ui("knViewPop(0)")
+        check(c.gone("v10jyShareBtn", 10) and c.has("v10jyCraft1", 10), "the item view closes back to the Junkyard")
+
+        # 6: a recipe's confirmation: the craft time (v10's iííìïïï(1000 * DUR): 5400 s is "1h 30m"), then Cancel
+        c.ui("windows[13].sendCraft(3)")
+        check(c.has("confirmBtn", 15), "sendCraft opens v10's confirmation (#confirmBtn / #declineBtn)")
+        pop = c.textof("genericPop")
+        check("Craft Krystallizer" in pop and "Junk" in pop and "Materials" in pop and "Craft time" in pop and "1h 30m" in pop,
+              "the confirmation is sendCraft's: Craft <name>, Junk, Materials, Craft time (5400 s: 1h 30m): %r" % pop[:200])
+        c.shot("confirm")
+        c.click("declineBtn")
+        check(c.gone("confirmBtn", 10), "Cancel closes the confirmation (clearPops)")
+        check(c.gone("v10mkSide3", 5), "the confirmation had replaced the exchange: both are closed (v10's genericPopup)")
+
+        # 7: the tile again, then craft recipe 1 through the confirmation
+        c.ui("windows[13].craftMenu()")
+        check(c.has("v10jyCraft1", 25), "the tile reopens the Junkyard")
+        c.click("v10jyCraft1")
+        check(c.has("confirmBtn", 15), "the card's Craft opens the confirmation")
+        pop = c.textof("genericPop")
+        check("Craft Krystallizer" in pop and "0m" in pop, "recipe 1's confirmation (0 s: 0m): %r" % pop[:200])
+        c.click("confirmBtn")
+        check(wait(lambda: one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", aid, KRYSTALLIZER) == 1, 10),
+              "the result skin is granted (Krystallizer x1)")
+        check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", aid, WOOD) == 3, "2 Wood were taken (5 -> 3)")
+        check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", aid, WIRES) == 0, "1 Wires was taken (1 -> 0)")
+        check(c.gone("confirmBtn", 10), "the craft's answer closes the popups (craftRes: clearPops)")
+        check(not c.has("v10jyDoneOk", 2), "no result popup (v10 has none)")
+        c.shot("result")
+        c.ui("windows[13].craftMenu()")
+        check(wait(lambda: "Missing materials" in c.textof("jyGrid") and not c.has("v10jyCraft1", 1), 25),
+              "the Junkyard again: recipe 1 now lacks its materials")
     finally:
         c.close()
 

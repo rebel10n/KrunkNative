@@ -22,7 +22,10 @@ private XDG_CONFIG_HOME), joined through the matchmaker and driven through KRUNK
      reason), Submit: "Application sent!", the kpd_applications row
      Settings has no KPD folder for her (not K.P.D)
   5. a second launch (alice now a moderator): the mutes are still there (from disk), and the open call
-     on carol is alice's case: carol's row is first in a red frame (the officer's suspect row)
+     on carol is alice's case: carol's row is first in a red frame (the officer's suspect row).
+     The moderator's punish popup on bob (v10.0.7 punishPopup): Kick / Ban / Flag / Chat Ban, the second table
+     without Disconnect (a DEV's) or Transfer Host; Chat Ban -> "Chat banned bob", the popup again reads
+     "Chat Unban" from getChatBan (GET /moderation/chat/bob), Chat Unban -> "Chat unbanned bob"
   6. a third launch: alice (the officer) spectates in the lobby before any call (carol has left, so no
      open case); eve joins and bob calls the K.P.D on her. Alice gets the case at once: the verdict
      panel asks "Is eve hacking?". Escape (the menu, a free cursor), More Krunker -> KPD: the officer's
@@ -526,6 +529,32 @@ def second_launch(brain, node_log, sql, tokens, ids, peers):
     k_bob, t_bob = c.row_of(BOB)
     check("5: bob is still muted (chat and voice, from disk)", t_bob and "speaker_notes_off" in t_bob and "voice_over_off" in t_bob, t_bob)
     c.shot("officer")
+    # 5b. the moderator's punish popup on bob (v10.0.7 punishPopup, deob-10.0.7.js:224076-224125): Kick, Ban, Flag,
+    # Chat Ban in the first table; the second table always there, empty for a moderator (Disconnect is canSilentKick =
+    # isDev || isAdmin, Transfer Host the host's). Chat Ban -> POST /moderation/chat: "Chat banned bob", the label
+    # "Chat Unban"; the popup again starts "Chat Ban" and getChatBan (GET /moderation/chat/bob) turns it to "Chat Unban"
+    punish = "#playerListH tr:nth-child(%d) .punishButton.kick" % (k_bob or 0)
+    btn = "#genericPop [id^=chatBanBtn_]"
+    check("5b: bob's row has the punish button (a moderator: canGlobalKick)", bool(k_bob) and c.clicksel(0, punish), t_bob)
+    if k_bob:
+        pop = wait_for(lambda: (lambda t: t if t and "Chat Ban" in t else None)(c.textof("genericPop")), 8) or ""
+        check("5b: the popup's first table: Kick, Ban, Flag, Chat Ban", all(w in pop for w in ("Kick", "Ban", "Flag", "Chat Ban")), pop)
+        check("5b: the second table is there, without Disconnect or Transfer Host (a moderator, not the host)",
+              c.count("#genericPop .takeActionTable") == 2 and "Disconnect" not in pop and "Transfer Host" not in pop, pop)
+        c.clicksel(0, btn)
+        chat = wait_for(lambda: (lambda t: t if t and "Chat banned %s" % BOB in t else None)(c.textof("chatList")), 10)
+        check("5b: Chat Ban: \"Chat banned bob\" in chat (chatBanPlayer)", chat, c.textof("chatList"))
+        check("5b: ... and the button reads Chat Unban", wait_for(lambda: c.textof(btn) == "Chat Unban", 5), c.textof(btn))
+        c.cmd("ui clearPops()")
+        time.sleep(0.5)
+        c.clicksel(0, punish)
+        check("5b: the popup again: getChatBan's answer (bob is chat banned) turns the label to Chat Unban",
+              wait_for(lambda: c.textof(btn) == "Chat Unban", 8), c.textof(btn))
+        c.clicksel(0, btn)
+        chat = wait_for(lambda: (lambda t: t if t and "Chat unbanned %s" % BOB in t else None)(c.textof("chatList")), 10)
+        check("5b: Chat Unban: \"Chat unbanned bob\" in chat", chat, c.textof("chatList"))
+        c.shot("punish")
+        c.cmd("ui clearPops()")
     c.close()
 
 
