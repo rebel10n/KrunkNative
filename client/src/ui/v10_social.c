@@ -3374,6 +3374,16 @@ static void sb_gift(StrBuf *sb, View *v) {
     else sb_appendf(sb, "<button class=\"gift-send svelte-g5j1wf\" type=\"button\" id=\"v10sGiftSend\" onclick=\"v10s('giftsend')\">Send %lld KR (+%lld fee)</button></div></div>", amt, fee);
 }
 
+// iÎíìiîi: the details' trimmed length (String.prototype.trim: every space, tab and line end)
+static size_t report_trim(const char **start) {
+    const char *t = g_report_text;
+    while (*t && isspace((unsigned char) *t)) t++;
+    size_t len = strlen(t);
+    while (len && isspace((unsigned char) t[len - 1])) len--;
+    if (start) *start = t;
+    return len;
+}
+
 static void sb_report(StrBuf *sb, View *v) {
     sb_append(sb, "<div class=\"report-root svelte-18p16wl\" role=\"dialog\" aria-label=\"Report player\"><div class=\"report-header svelte-18p16wl\"><button class=\"report-back svelte-18p16wl\" type=\"button\" "
                   "aria-label=\"Back\" id=\"v10sBack\" onclick=\"v10s('back')\"><i class=\"material-icons svelte-18p16wl\">arrow_back</i></button> <i class=\"material-icons report-header-icon svelte-18p16wl\">report</i> "
@@ -3398,8 +3408,9 @@ static void sb_report(StrBuf *sb, View *v) {
         sb_append_esc(sb, v->error);
         sb_append(sb, "</div> ");
     }
+    // disabled while submitting or while the details are under 10 characters (deob-10.0.7.js:111840-111843)
     sb_appendf(sb, "<button class=\"report-send svelte-18p16wl\" type=\"button\" id=\"v10sReportSend\"%s onclick=\"v10s('reportsend')\">%s</button></div></div>",
-               v->loading ? " disabled" : "", v->loading ? "Submitting..." : "Submit Report");
+               v->loading || report_trim(NULL) < 10 ? " disabled" : "", v->loading ? "Submitting..." : "Submit Report");
 }
 
 // ------------------------------------------------------------------ render: the hub (#genericPop)
@@ -4062,19 +4073,22 @@ static void gift_send(View *v) {
     render_views();
 }
 
+// iíiiîïí (deob-10.0.7.js:111760-111778): nothing while submitting or done; under 10 characters the error line;
+// else reportPlayer(name, reason, text.trim())
 static void report_send(View *v) {
-    const char *t = g_report_text;
-    while (*t == ' ' || *t == '\n') t++;
+    if (v->loading || v->done) return;
+    const char *t;
+    const size_t len = report_trim(&t);
     v->error[0] = 0;
-    size_t len = strlen(t);
-    while (len && (t[len - 1] == ' ' || t[len - 1] == '\n')) len--;
     if (len < 10) {
         snprintf(v->error, sizeof(v->error), "Please provide at least 10 characters of detail.");
         render_views();
         return;
     }
     v->loading = 1;
-    social_frame_send("rpt", cJSON_CreateString(v->name), cJSON_CreateNumber(g_report_reason), cJSON_CreateString(t), NULL);
+    char text[sizeof(g_report_text)];
+    snprintf(text, sizeof(text), "%.*s", (int) len, t);
+    social_frame_send("rpt", cJSON_CreateString(v->name), cJSON_CreateNumber(g_report_reason), cJSON_CreateString(text), NULL);
     render_views();
 }
 
@@ -4320,7 +4334,14 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             snprintf(g_gift_amount, sizeof(g_gift_amount), "%s", value);
             render_views();
         } else if (!strcmp(what, "giftmsg")) snprintf(g_gift_msg, sizeof(g_gift_msg), "%s", value);
-        else if (!strcmp(what, "reporttext")) snprintf(g_report_text, sizeof(g_report_text), "%s", value);
+        else if (!strcmp(what, "reporttext")) {
+            snprintf(g_report_text, sizeof(g_report_text), "%s", value);
+            const HtmlElem b = html_dom_by_id("v10sReportSend"); // the Submit button follows the trimmed length
+            if (b && top_view() && top_view()->type == V_REPORT && !top_view()->loading) {
+                if (report_trim(NULL) >= 10) html_dom_remove_attr(b, "disabled");
+                else html_dom_set_attr(b, "disabled", "");
+            }
+        }
         else if (!strcmp(what, "reason")) g_report_reason = atoi(value);
         return 1;
     }
