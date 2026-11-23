@@ -578,9 +578,14 @@ char *v10_io_error(const char *title, const char *message) {
 
 // _37790 success popup: message_html is a component's markup (or escaped text)
 char *v10_io_success(const char *title, const char *message_html, const char *button, const char *button_mods) {
+    return v10_io_success_w(title, message_html, button, button_mods, 450);
+}
+
+// the same with the popup's width prop (default 450, deob-10.0.7.js:113445)
+char *v10_io_success_w(const char *title, const char *message_html, const char *button, const char *button_mods, const int width) {
     StrBuf sb = {0};
-    sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 450px;\">"
-                   "<div class=\"success-popup-container io-popup-container\"><div class=\"success-popup-header io-popup-header io-popup-header--slim\">"
+    sb_appendf(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: %dpx;\">", width);
+    sb_append(&sb, "<div class=\"success-popup-container io-popup-container\"><div class=\"success-popup-header io-popup-header io-popup-header--slim\">"
                    "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"success-icon svelte-12d6f79\" viewBox=\"0 0 24 24\" fill=\"currentColor\">"
                    "<path d=\"M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z\" class=\"svelte-12d6f79\"></path></svg> ");
     sb_append_esc(&sb, title ? title : "Success");

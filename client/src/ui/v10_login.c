@@ -741,6 +741,12 @@ int v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     return -1;
 }
 
+// iííîîiï() (deob-10.0.7.js:12059): every view of the stack closes, this modal with them (requestConfirm's
+// "Account Deletion Requested": the logout's showWindow(5) pushed it, the modal replaces it)
+void v10_menu_login_close(void) {
+    if (L.open || by_id("knV10Login")) close_modal();
+}
+
 // Escape with the modal up (not in a field): the modal goes, the menu stays
 int v10_menu_login_escape(void) {
     if (!v10_menu_login_open()) return 0;

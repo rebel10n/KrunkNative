@@ -116,6 +116,11 @@ refreshes an expired user token first. `DISCORD_NEEDS_RELINK` means Discord refu
 `DISCORD_JOIN_FAILED` means anything else failed. `POST /discord/unlink` answers `{unlinked}` and revokes the token
 at Discord.
 
+The signed-in client hears each result as v10's `DISCORD_LINK_RESULT`: `["dlnkR", result]` on the account's social
+sockets (:216792-216796) for every callback whose account is known, and `expired` when a started link's state runs
+out unused. The settings tab (`client/src/ui/account_links.c`) shows it in v10's response popup; there is no client
+timeout of its own.
+
 **Deletion pending** (10.0.7): while `accounts.delete_requested_at` is set, unlink and link answer 409
 `DISCORD_DELETION_PENDING` and the row shows `discord.result.deletion_pending`. The link goes with the account
 when the deletion sweep runs (ON DELETE CASCADE).

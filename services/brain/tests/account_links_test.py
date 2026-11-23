@@ -8,7 +8,8 @@ env: KN_TEST_DB_DRIVER=sqlite (default) | postgres | mysql (db_scratch.py). 77 =
 Discord: status (configured, guildUrl), link (session, the state, returnTo only to an allowed origin), the
 callback (cancelled, expired / single-use state, linked with sealed tokens, in_use), Join Server (joined,
 already a member, the expired token refreshed, DISCORD_NEEDS_RELINK), unlink (DISCORD_DELETION_PENDING while
-the account is being deleted, then unlinked and the token revoked at Discord).
+the account is being deleted, then unlinked and the token revoked at Discord), and the callback's result pushed as
+["dlnkR", result] to the linking account's social sockets (cancelled, expired, linked, in_use).
 Twitch: the link keeps sealed tokens; the drops answer's reconnect flag (fresh: false; due and refused: the
 token refreshed, false; refresh refused too: true and 'expired'; Twitch down: no verdict, false; a legacy link
 without tokens: true); ["twitchAuth", true] relinks a linked account.
@@ -327,6 +328,46 @@ def discord(me, tok, other_tok):
     check(st == 200 and r.get("data", {}).get("unlinked") is False, "unlink again: nothing to unlink")
 
 
+async def next_frame(sock, label, secs=15):
+    try:
+        return await asyncio.wait_for(sock.call(label), secs)
+    except (asyncio.TimeoutError, TimeoutError):
+        return None
+
+
+async def discord_results(me, name, other_name, password, tok, other_tok):
+    """["dlnkR", result] (v10's DISCORD_LINK_RESULT, deob-10.0.7.js:216792) on the linking account's social sockets"""
+    async with Social(PORT) as s, Social(PORT) as o:
+        await s.call("a", "a", 1, [name, password, None], "captcha")
+        await o.call("a", "a", 1, [other_name, password, None], "captcha")
+
+        st, _, r = req("POST", "/discord/link", {}, bearer=tok)
+        req("GET", "/discord/callback?error=access_denied&state=" + state_of(r["data"]["url"]))
+        f = await next_frame(s, "dlnkR")
+        check(f == ["dlnkR", "cancelled"], "dlnkR: cancelled at Discord (%r)" % (f,))
+
+        st, _, r = req("POST", "/discord/link", {}, bearer=tok)
+        query("UPDATE discord_link_states SET created_at = %s WHERE account_id = %d" % (past(700), me))
+        req("GET", "/discord/callback?code=good-1002&state=" + state_of(r["data"]["url"]))
+        f = await next_frame(s, "dlnkR")
+        check(f == ["dlnkR", "expired"], "dlnkR: a state older than 10 minutes, expired (%r)" % (f,))
+
+        st, _, r = req("POST", "/discord/link", {}, bearer=tok)
+        st, _, _ = req("GET", "/discord/callback?code=good-1001&state=" + state_of(r["data"]["url"]))
+        f = await next_frame(s, "dlnkR")
+        check(st == 200 and f == ["dlnkR", "linked"], "dlnkR: linked (%s %r)" % (st, f))
+
+        st, _, r = req("POST", "/discord/link", {}, bearer=other_tok)
+        req("GET", "/discord/callback?code=good-1001&state=" + state_of(r["data"]["url"]))
+        f = await next_frame(o, "dlnkR")
+        check(f == ["dlnkR", "in_use"], "dlnkR: the same Discord user on another account, in_use to that account (%r)" % (f,))
+        f = await next_frame(s, "dlnkR", 1)
+        check(f is None, "dlnkR goes only to the linking account's sockets (%r)" % (f,))
+
+        st, _, r = req("POST", "/discord/unlink", bearer=tok)
+        check(st == 200 and r.get("data", {}).get("unlinked") is True, "unlinked again")
+
+
 async def drops(s):
     r = await s.call("twitchDropsResponse", "getTwitchDrops")
     return r[2] if len(r) > 2 else None
@@ -432,6 +473,7 @@ def main():
         _, other_tok = asyncio.run(register("lb%d" % n, password))
         print("account links test on %s (account %s)" % (DRIVER, me))
         discord(me, tok, other_tok)
+        asyncio.run(discord_results(me, name, "lb%d" % n, password, tok, other_tok))
         asyncio.run(twitch(me, name, password))
     finally:
         if proc:

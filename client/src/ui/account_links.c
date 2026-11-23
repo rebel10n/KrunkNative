@@ -1,16 +1,21 @@
 // Settings > Connections: the Discord row and Connected apps (Krunker v10.0.7), driven from C (client/include/account_links.h).
 //
-// Discord (svelte-17wd35, deob-10.0.7.js:97250-97490): getStatus on mount; Link asks /discord/link for Discord's authorize
-// page, which opens in the system browser (v10 opens a popup and polls it closed, :97355-97357), while the row says
-// "Waiting for Discord..." with Cancel and the status is re-read every few seconds (and at once on kn_brain's
-// "discordStatus" frame) until the link shows up; Unlink asks once more ("Confirm", 3 s, :97375-97377); Join Server
-// when the brain can add members (canJoin), Open Server once the account is in the guild. The results are
-// discord.result.<key>: linked / unlinked / joined / already_member in green, the rest (unavailable, failed, relink,
-// join_failed, and 10.0.7's deletion_pending for an account being deleted, :97384) in yellow.
+// Discord (svelte-17wd35, deob-10.0.7.js:97250-97490): each mount reads getStatus again with confirm / busy / waiting
+// back to off (:97387-97391); Link shows "Waiting for Discord..." with Cancel at once (v10 opens its popup first,
+// :97343-97350), asks /discord/link for Discord's authorize page and opens it in the system browser (v10 polls its
+// popup closed, :97355-97357; here the status is re-read every few seconds and a link that shows up ends the wait).
+// kn_brain answers the browser's callback with ["dlnkR", result] on the account's social sockets (v10's
+// DISCORD_LINK_RESULT, handled at :216792-216796): linked is a SUCCESS popup, the rest an error popup with
+// discord.result.<cancelled|expired|in_use|unavailable|failed>, and the mounted row stops waiting and reloads. Unlink
+// asks once more ("Confirm", 3 s, :97375-97377); Join Server when the brain can add members (canJoin), Open Server once
+// the account is in the guild. The row's own results are discord.result.<key> (:97334-97341): unlinked / joined /
+// already_member in green, unavailable, failed, relink, join_failed and deletion_pending (:97384) in yellow; the last
+// one shows again on a mount within 10 s (:97389).
 //
-// Connected apps (svelte-10ho5mo, :97493-97673): connectedApps on mount; each app's icon (or its first letter), its
-// name (a link to its homepage), "by <developer>", "Connected <date> · Last used <date>", its scopes as oauth.scope.*,
-// View activity (appActivity, toggled), and Disconnect (asked again for 4 s, then revokeApp and the list again).
+// Connected apps (svelte-10ho5mo, :97493-97673): connectedApps on each mount; each app's icon (or its first letter),
+// its name (a link to its homepage), "by <developer>", "Connected <date> · Last used <date>", its scopes as
+// oauth.scope.*, View activity (appActivity, toggled), and Disconnect (asked again for 4 s, then revokeApp and the
+// list again).
 #include <account_links.h>
 
 #include <backend.h>
@@ -24,30 +29,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
-#define STATUS_TTL_S 30.0     // a drawn Connections tab older than this loads again
 #define WAIT_POLL_MS 3000.0   // the status while the browser link runs
-#define WAIT_MAX_POLLS 200    // 10 minutes: kn_brain's link state lives 600 s (discord.c STATE_S)
+#define WAIT_MAX_POLLS 200    // the polls stop after 10 minutes (kn_brain says "expired" by then, discord.c STATE_S)
 #define UNLINK_CONFIRM_MS 3000.0
 #define REVOKE_CONFIRM_MS 4000.0
-#define RESULT_KEEP_S 10.0    // a result still shown when the tab draws again (v10 keeps 10 s across mounts, :97389)
+#define RESULT_KEEP_S 10.0    // the last result shows again on a mount within 10 s (:97389)
 
 double glfwGetTime(void);
 
 static struct {
     cJSON *status;        // GET /discord/status's data (NULL = not loaded)
-    double status_at;
     int loading, busy, waiting, polls, poll_timer;
     int confirm, confirm_timer;
-    char result[32];      // discord.result.<key> on show, "" = none
-    double result_at;
+    char result[32];      // the mounted row's discord.result.<key>, "" = none
+    char last[32];        // the last result and when (iíiîïîí, :97335-97338)
+    double last_at;
     unsigned gen;         // bumped by account_links_reset: answers of an older account are dropped
+    unsigned mount;       // bumped by each mount: an older mount's answers keep only `last`
 } g_dc;
 
 static struct {
     cJSON *list;          // the apps (NULL = not loaded)
-    double at;
     int loading, busy, kio;
+    unsigned mount;       // bumped by each mount: an older mount's list answer is dropped
     char confirm[96];     // the app whose Disconnect asks again
     int confirm_timer;
     cJSON *activity;      // {client_id: [rows] | null (loading)}
@@ -62,22 +68,26 @@ static const char *jstr(const cJSON *o, const char *k) {
 
 static int jtrue(const cJSON *o, const char *k) { return cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, k)); }
 
-// new Date(1000 * s).toLocaleDateString() / toLocaleString() as en-US: M/D/YYYY[, h:mm:ss AM]
+// new Date(1000 * s).toLocaleDateString() / toLocaleString() as en-US, local time: M/D/YYYY[, h:mm:ss AM]
 static void locale_time(const double s, const int with_time, char *out, const size_t n) {
-    const long long secs = (long long) floor(s);
-    long long z = (secs >= 0 ? secs / 86400 : (secs - 86399) / 86400) + 719468;
-    const long long era = (z >= 0 ? z : z - 146096) / 146097;
-    const long long doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    const long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
-    const int day = (int) (doy - (153 * mp + 2) / 5 + 1), mon = (int) (mp < 10 ? mp + 3 : mp - 9);
-    const int year = (int) (yoe + era * 400 + (mon <= 2));
-    if (!with_time) {
-        snprintf(out, n, "%d/%d/%d", mon, day, year);
+    const time_t t = (time_t) floor(s);
+    struct tm tm;
+#ifdef _WIN32
+    const int ok = !localtime_s(&tm, &t);
+#else
+    const int ok = localtime_r(&t, &tm) != NULL;
+#endif
+    if (!ok) {
+        copy_str(out, n, "Invalid Date");
         return;
     }
-    const long long tod = secs - (secs >= 0 ? secs / 86400 : (secs - 86399) / 86400) * 86400;
-    const int h = (int) (tod / 3600), m = (int) (tod / 60 % 60), sec = (int) (tod % 60);
-    snprintf(out, n, "%d/%d/%d, %d:%02d:%02d %s", mon, day, year, h % 12 ? h % 12 : 12, m, sec, h < 12 ? "AM" : "PM");
+    if (!with_time) {
+        snprintf(out, n, "%d/%d/%d", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900);
+        return;
+    }
+    const int h = tm.tm_hour;
+    snprintf(out, n, "%d/%d/%d, %d:%02d:%02d %s", tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900, h % 12 ? h % 12 : 12, tm.tm_min,
+             tm.tm_sec, h < 12 ? "AM" : "PM");
 }
 
 static int session_path(char *out, const size_t n, const char *path) {
@@ -89,13 +99,46 @@ static int session_path(char *out, const size_t n, const char *path) {
     return 1;
 }
 
+// genericPopup(html, cls): #genericPop over #popupBack
+static void generic_popup(const char *html, const char *cls) {
+    ui_loadout_clear_pops();
+    const HtmlElem holder = html_dom_by_id("popupHolder");
+    if (holder) html_dom_set_display(holder, "block");
+    const HtmlElem pop = html_dom_by_id("genericPop");
+    if (!pop) return;
+    html_dom_set_attr(pop, "class", cls);
+    html_dom_set_attr(pop, "style", "");
+    html_dom_set_html(pop, html);
+    html_dom_set_display(pop, "block");
+}
+
+// popupResponse("SUCCESS", null, text) / popupResponse(null, error) (:222910-222916): genericPopup(..., "responsePop")
+static void response_popup(const int success, const char *text) {
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div style='width:100%%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:%s'>%s</i></div>"
+                    "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>",
+               success ? "#3be354" : "#e33b3b", success ? "done" : "clear");
+    sb_append_esc(&sb, text && text[0] ? text : success ? "Success!" : I18N("social.market.failed", "Failed. Try Again"));
+    sb_append(&sb, "</div></div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html ? html : "", "responsePop");
+    free(html);
+}
+
 // ================================================================== Discord
 
 static void dc_redraw(void);
 
-static void dc_result(const char *key) {
-    copy_str(g_dc.result, sizeof g_dc.result, key);
-    g_dc.result_at = glfwGetTime();
+// an answer's tag: the account (gen) and the mount it was asked from, 16 bits each
+static void *dc_tag(void) { return (void *) (uintptr_t) (((g_dc.gen & 0xffffu) << 16) | (g_dc.mount & 0xffffu)); }
+static int dc_tag_account(void *user) { return (((unsigned) (uintptr_t) user >> 16) & 0xffffu) == (g_dc.gen & 0xffffu); }
+static int dc_tag_mounted(void *user) { return ((unsigned) (uintptr_t) user & 0xffffu) == (g_dc.mount & 0xffffu); }
+
+// iÍiíìiî(key, store = true) (:97334-97341); an older mount's answer keeps only the last result
+static void dc_result(const char *key, const int mounted) {
+    copy_str(g_dc.last, sizeof g_dc.last, key);
+    g_dc.last_at = glfwGetTime();
+    if (mounted) copy_str(g_dc.result, sizeof g_dc.result, key);
 }
 
 static int dc_result_ok(const char *key) {
@@ -120,6 +163,7 @@ static const char *dc_result_text(const char *key) {
     return I18N("discord.result.failed", "Failed to link Discord, please try again.");
 }
 
+// iIíïïíi (:97320-97327): the wait is over
 static void dc_stop_wait(void) {
     if (g_dc.poll_timer) html_timer_cancel(g_dc.poll_timer);
     g_dc.poll_timer = 0;
@@ -131,20 +175,16 @@ static void dc_stop_wait(void) {
 static void dc_load(void);
 
 static void dc_status_done(void *user, const int status, const char *body, const size_t len) {
-    if ((unsigned) (uintptr_t) user != g_dc.gen) return;
+    if (!dc_tag_account(user)) return;
     g_dc.loading = 0;
     cJSON *j = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
     cJSON *d = cJSON_DetachItemFromObjectCaseSensitive(j, "data");
     cJSON_Delete(j);
-    if (cJSON_IsObject(d)) {
-        const int was = g_dc.status && jtrue(g_dc.status, "linked");
+    if (cJSON_IsObject(d)) { // getStatus().data && (status = data) (:97316-97319)
         cJSON_Delete(g_dc.status);
         g_dc.status = d;
-        g_dc.status_at = glfwGetTime();
-        if (g_dc.waiting && jtrue(d, "linked") && !was) { // the browser link finished
-            dc_stop_wait();
-            dc_result("linked");
-        }
+        // the browser link is done (v10: its popup closed, :97356): the wait ends; dlnkR brings the result
+        if (g_dc.waiting && jtrue(d, "linked")) dc_stop_wait();
     } else {
         cJSON_Delete(d);
     }
@@ -155,21 +195,15 @@ static void dc_load(void) {
     char url[1024];
     if (g_dc.loading || !session_path(url, sizeof url, "/discord/status")) return;
     g_dc.loading = 1;
-    if (!backend_http_request("GET", url, NULL, dc_status_done, (void *) (uintptr_t) g_dc.gen)) g_dc.loading = 0;
+    if (!backend_http_request("GET", url, NULL, dc_status_done, dc_tag())) g_dc.loading = 0;
 }
 
 static void dc_poll(void *user) {
     (void) user;
     g_dc.poll_timer = 0;
     if (!g_dc.waiting) return;
-    if (++g_dc.polls > WAIT_MAX_POLLS) { // kn_brain's state is gone by now
-        dc_stop_wait();
-        dc_result("expired");
-        dc_redraw();
-        return;
-    }
     dc_load();
-    g_dc.poll_timer = html_timer_add(WAIT_POLL_MS, dc_poll, NULL);
+    if (++g_dc.polls < WAIT_MAX_POLLS) g_dc.poll_timer = html_timer_add(WAIT_POLL_MS, dc_poll, NULL);
 }
 
 static const char *error_code(const cJSON *j) {
@@ -177,49 +211,50 @@ static const char *error_code(const cJSON *j) {
 }
 
 static void dc_link_done(void *user, const int status, const char *body, const size_t len) {
-    if ((unsigned) (uintptr_t) user != g_dc.gen) return;
-    g_dc.busy = 0; // the waiting line takes over while the browser runs
+    if (!dc_tag_account(user)) return;
+    const int mounted = dc_tag_mounted(user);
     cJSON *j = body ? cJSON_ParseWithLength(body, len) : NULL;
     const char *url = jstr(cJSON_GetObjectItemCaseSensitive(j, "data"), "url");
     if (status == 200 && url && !strncmp(url, "http", 4)) {
-        ui_open_browser(url);
-        g_dc.waiting = 1;
-        g_dc.polls = 0;
-        if (!g_dc.poll_timer) g_dc.poll_timer = html_timer_add(WAIT_POLL_MS, dc_poll, NULL);
-    } else {
+        ui_open_browser(url); // (v10's popup goes there even when its row was unmounted meanwhile)
+        if (mounted && g_dc.waiting && !g_dc.poll_timer) {
+            g_dc.polls = 0;
+            g_dc.poll_timer = html_timer_add(WAIT_POLL_MS, dc_poll, NULL);
+        }
+    } else { // :97351-97354
         const char *code = error_code(j);
-        dc_stop_wait();
-        // :97352-97354, and an account being deleted can't change its link
-        dc_result(code && !strcmp(code, "DISCORD_NOT_CONFIGURED") ? "unavailable"
-                  : code && !strcmp(code, "DISCORD_DELETION_PENDING") ? "deletion_pending" : "failed");
+        if (mounted) dc_stop_wait();
+        dc_result(code && !strcmp(code, "DISCORD_NOT_CONFIGURED") ? "unavailable" : "failed", mounted);
     }
     cJSON_Delete(j);
     dc_redraw();
 }
 
 static void dc_join_done(void *user, const int status, const char *body, const size_t len) {
-    if ((unsigned) (uintptr_t) user != g_dc.gen) return;
-    g_dc.busy = 0;
+    if (!dc_tag_account(user)) return;
+    const int mounted = dc_tag_mounted(user);
+    if (mounted) g_dc.busy = 0;
     cJSON *j = body ? cJSON_ParseWithLength(body, len) : NULL;
     const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "data");
     const char *code = error_code(j);
     // :97366-97368
-    if (status == 200 && cJSON_IsObject(d)) dc_result(jtrue(d, "joined") ? "joined" : "already_member");
-    else dc_result(code && !strcmp(code, "DISCORD_NEEDS_RELINK") ? "relink" : "join_failed");
+    if (status == 200 && cJSON_IsObject(d)) dc_result(jtrue(d, "joined") ? "joined" : "already_member", mounted);
+    else dc_result(code && !strcmp(code, "DISCORD_NEEDS_RELINK") ? "relink" : "join_failed", mounted);
     cJSON_Delete(j);
-    dc_load();
+    if (mounted) dc_load();
     dc_redraw();
 }
 
 static void dc_unlink_done(void *user, const int status, const char *body, const size_t len) {
-    if ((unsigned) (uintptr_t) user != g_dc.gen) return;
-    g_dc.busy = 0;
+    if (!dc_tag_account(user)) return;
+    const int mounted = dc_tag_mounted(user);
+    if (mounted) g_dc.busy = 0;
     cJSON *j = body ? cJSON_ParseWithLength(body, len) : NULL;
     const char *code = error_code(j);
     // :97384: v10.0.7's deletion_pending
-    dc_result(status == 200 && !code ? "unlinked" : code && !strcmp(code, "DISCORD_DELETION_PENDING") ? "deletion_pending" : "failed");
+    dc_result(status == 200 && !code ? "unlinked" : code && !strcmp(code, "DISCORD_DELETION_PENDING") ? "deletion_pending" : "failed", mounted);
     cJSON_Delete(j);
-    dc_load();
+    if (mounted) dc_load();
     dc_redraw();
 }
 
@@ -232,17 +267,14 @@ static void dc_confirm_off(void *user) {
 
 static void dc_post(const char *path, const char *json, BackendHttpFn fn) {
     char url[1024];
-    if (!session_path(url, sizeof url, path) || !backend_http_request("POST", url, json, fn, (void *) (uintptr_t) g_dc.gen)) {
-        g_dc.busy = 0;
-        g_dc.waiting = 0;
-        dc_result("failed");
+    if (!session_path(url, sizeof url, path) || !backend_http_request("POST", url, json, fn, dc_tag())) {
+        dc_stop_wait();
+        dc_result("failed", 1);
     }
 }
 
-// the component's markup (templates :97286-97298), into the mount
-void account_links_discord_html(StrBuf *sb) {
-    if (!g_dc.status || glfwGetTime() - g_dc.status_at > STATUS_TTL_S) dc_load();
-    if (g_dc.result[0] && glfwGetTime() - g_dc.result_at > RESULT_KEEP_S && !g_dc.busy) g_dc.result[0] = 0;
+// the component's markup (templates :97286-97298)
+static void dc_html(StrBuf *sb) {
     const cJSON *st = g_dc.status;
     const int linked = jtrue(st, "linked");
     sb_append(sb, "<div class=\"discordInfo svelte-17wd35\">");
@@ -297,52 +329,79 @@ void account_links_discord_html(StrBuf *sb) {
         sb_appendf(sb, "<div class=\"discordMsg svelte-17wd35%s\">", dc_result_ok(g_dc.result) ? " discordOk" : "");
         sb_append_esc(sb, dc_result_text(g_dc.result));
         sb_append(sb, "</div>");
-    } else if (!st || (!jtrue(st, "configured") && !linked)) { // not loaded (no kn_brain) or no Discord app: :97480-97483
+    } else if (st && !jtrue(st, "configured") && !linked) { // loaded, and no Discord app: :97479-97483
         sb_append(sb, "<div class=\"discordMsg svelte-17wd35\">");
         sb_append_esc(sb, I18N("discord.result.unavailable", "Discord linking is currently unavailable."));
         sb_append(sb, "</div>");
     }
 }
 
+// a mount (onMount, :97387-97391): a fresh component (no wait, confirm or busy), the last result again within 10 s,
+// and getStatus
+void account_links_discord_html(StrBuf *sb) {
+    dc_stop_wait();
+    if (g_dc.confirm_timer) html_timer_cancel(g_dc.confirm_timer);
+    g_dc.confirm_timer = 0;
+    g_dc.confirm = 0;
+    g_dc.mount++;
+    if (g_dc.last[0] && glfwGetTime() - g_dc.last_at < RESULT_KEEP_S) copy_str(g_dc.result, sizeof g_dc.result, g_dc.last);
+    else g_dc.result[0] = 0;
+    g_dc.loading = 0; // (a load still running answers this mount too; this one asks again)
+    dc_load();
+    dc_html(sb);
+}
+
 static void dc_redraw(void) {
     const HtmlElem m = html_dom_by_id("discordLinkMount");
     if (!m) return;
     StrBuf sb = {0};
-    const int was_loading = g_dc.loading;
-    g_dc.loading = 1; // (drawing must not start another load)
-    account_links_discord_html(&sb);
-    g_dc.loading = was_loading;
+    dc_html(&sb);
     char *html = sb_finish(&sb);
     html_dom_set_html(m, html);
     free(html);
+}
+
+// dlnkR (iiiìíïì, :216792-216796): the result whitelisted, its popup, then the mounted row stops waiting and reloads
+static void dc_link_result(const char *result) {
+    static const char *const keys[] = {"linked", "cancelled", "expired", "in_use", "unavailable"};
+    const char *key = "failed";
+    for (size_t i = 0; result && i < sizeof keys / sizeof keys[0]; i++)
+        if (!strcmp(result, keys[i])) key = keys[i];
+    response_popup(!strcmp(key, "linked"), dc_result_text(key));
+    if (!html_dom_by_id("discordLinkMount")) return; // no row mounted: the next mount reads the status
+    dc_stop_wait(); // iÎiiîíì (:97328-97331)
+    g_dc.loading = 0;
+    dc_load();
+    dc_redraw();
 }
 
 // ================================================================== Connected apps
 
 static void apps_redraw(void);
 
-static void apps_done_list(cJSON *data) {
+// a list answer's tag: the account (gen) and the mount it was asked from, 16 bits each
+static void *apps_tag(void) { return (void *) (uintptr_t) (((g_dc.gen & 0xffffu) << 16) | (g_apps.mount & 0xffffu)); }
+static int apps_tag_current(void *user) {
+    return (unsigned) (uintptr_t) user == (((g_dc.gen & 0xffffu) << 16) | (g_apps.mount & 0xffffu));
+}
+
+// iÎïiííi (:97523-97526): apps = connectedApps().data ?? []
+static void apps_done_list(const cJSON *data) {
     g_apps.loading = 0;
-    if (cJSON_IsArray(data)) {
-        cJSON_Delete(g_apps.list);
-        g_apps.list = cJSON_Duplicate(data, 1);
-        g_apps.at = glfwGetTime();
-    } else if (!g_apps.list) {
-        g_apps.list = cJSON_CreateArray(); // v10: connectedApps().data ?? []
-        g_apps.at = glfwGetTime();
-    }
+    cJSON_Delete(g_apps.list);
+    g_apps.list = cJSON_IsArray(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateArray();
     apps_redraw();
 }
 
 static void apps_brain_done(void *user, const int status, const char *body, const size_t len) {
-    if ((unsigned) (uintptr_t) user != g_dc.gen) return;
+    if (!apps_tag_current(user)) return;
     cJSON *j = status == 200 && body ? cJSON_ParseWithLength(body, len) : NULL;
     apps_done_list(cJSON_GetObjectItemCaseSensitive(j, "data"));
     cJSON_Delete(j);
 }
 
 static void apps_kio_done(void *user, const int status, const cJSON *res) {
-    if ((unsigned) (uintptr_t) user != g_dc.gen) return;
+    if (!apps_tag_current(user)) return;
     apps_done_list(status == 200 ? cJSON_GetObjectItemCaseSensitive(res, "data") : NULL);
 }
 
@@ -350,16 +409,13 @@ static void apps_load(void) {
     if (g_apps.loading) return;
     g_apps.loading = 1;
     if (g_apps.kio) { // krunker.io's own list (oauth.connectedApps, :27667): a read of the account
-        if (!krunker_account_api("GET", KRUNKER_SVC_API, "/account/apps", NULL, apps_kio_done, (void *) (uintptr_t) g_dc.gen)) g_apps.loading = 0;
+        if (!krunker_account_api("GET", KRUNKER_SVC_API, "/account/apps", NULL, apps_kio_done, apps_tag())) g_apps.loading = 0;
         return;
     }
     char url[1024];
-    if (!session_path(url, sizeof url, "/account/apps") || !backend_http_request("GET", url, NULL, apps_brain_done, (void *) (uintptr_t) g_dc.gen)) {
+    if (!session_path(url, sizeof url, "/account/apps") || !backend_http_request("GET", url, NULL, apps_brain_done, apps_tag())) {
         g_apps.loading = 0;
-        if (!g_apps.list) { // no account service to ask (offline, a scenario): v10's connectedApps().data ?? []
-            g_apps.list = cJSON_CreateArray();
-            g_apps.at = glfwGetTime();
-        }
+        if (!g_apps.list) g_apps.list = cJSON_CreateArray(); // no account service to ask (offline, a scenario): ?? []
     }
 }
 
@@ -394,7 +450,7 @@ static void app_html(StrBuf *sb, const cJSON *a) {
         sb_append_esc(sb, icon);
         sb_append(sb, "\">");
     } else {
-        char first[8] = "?";
+        char first[8] = ""; // name.slice(0, 1).toUpperCase() (:97581)
         if (name[0]) {
             size_t n = 1; // the first character (a UTF-8 sequence whole), upper-cased when ASCII
             while (name[n] && ((unsigned char) name[n] & 0xC0) == 0x80 && n < 4) n++;
@@ -417,11 +473,12 @@ static void app_html(StrBuf *sb, const cJSON *a) {
     } else {
         sb_append_esc(sb, name);
     }
+    sb_append(sb, " "); // the template's space between the name and the developer slots (:97506)
     const char *dev = jstr(a, "developer");
     if (dev && dev[0]) {
         char by[160];
         I18N_F(by, "oauth.by", "by {0}", dev);
-        sb_append(sb, " <span class=\"appDev svelte-10ho5mo\">");
+        sb_append(sb, "<span class=\"appDev svelte-10ho5mo\">");
         sb_append_esc(sb, by);
         sb_append(sb, "</span>");
     }
@@ -464,9 +521,10 @@ static void app_html(StrBuf *sb, const cJSON *a) {
                 char when[48];
                 locale_time(jnum(r, "created_at"), 1, when, sizeof when);
                 const char *res = jstr(r, "result");
-                sb_append(sb, "<div class=\"actRow svelte-10ho5mo\"><span>");
+                // actBad on the row when result isn't "ok" (:97651)
+                sb_appendf(sb, "<div class=\"actRow svelte-10ho5mo%s\"><span>", res && !strcmp(res, "ok") ? "" : " actBad");
                 sb_append_esc(sb, when);
-                sb_appendf(sb, "</span> <span%s>", res && !strcmp(res, "ok") ? "" : " class=\"actBad svelte-10ho5mo\"");
+                sb_append(sb, "</span> <span>");
                 sb_append_esc(sb, jstr(r, "action") ? jstr(r, "action") : "");
                 sb_append(sb, "</span> ");
                 if (jstr(r, "scope")) {
@@ -492,30 +550,20 @@ static void app_html(StrBuf *sb, const cJSON *a) {
     sb_append(sb, "</div>");
 }
 
-// the component's markup (:97561-97673), into the mount
-void account_links_apps_html(StrBuf *sb, const int krunker_io) {
-    if (g_apps.kio != krunker_io) { // the other account's list
-        cJSON_Delete(g_apps.list);
-        g_apps.list = NULL;
-        g_apps.kio = krunker_io;
-    }
-    if (!g_apps.list || glfwGetTime() - g_apps.at > STATUS_TTL_S) apps_load();
+// the component's markup (:97561-97673)
+static void apps_html(StrBuf *sb, const int krunker_io) {
     sb_append(sb, "<div class=\"appsInfo svelte-10ho5mo\">");
     sb_append_esc(sb, krunker_io ? I18N("settings.apps.desc", "Apps you signed in to with your Krunker account.")
                                  : I18N("kn.settings.apps.desc", "Apps you signed in to with your Box Office account."));
     sb_append(sb, "</div> ");
-    if (!g_apps.list) {
-        sb_append(sb, "<div class=\"appsEmpty svelte-10ho5mo\">");
-        sb_append_esc(sb, I18N("generic.wait", "Please wait..."));
-        sb_append(sb, "</div>");
-    } else if (!cJSON_GetArraySize(g_apps.list)) {
+    if (g_apps.list && !cJSON_GetArraySize(g_apps.list)) { // (nothing more while the list loads, :97563-97568)
         sb_append(sb, "<div class=\"appsEmpty svelte-10ho5mo\">");
         sb_append_esc(sb, I18N("settings.apps.none", "You haven't connected any apps."));
         sb_append(sb, "</div>");
-    } else {
-        const cJSON *a;
-        cJSON_ArrayForEach(a, g_apps.list) app_html(sb, a);
     }
+    sb_append(sb, " ");
+    const cJSON *a;
+    cJSON_ArrayForEach(a, g_apps.list) app_html(sb, a);
     if (krunker_io) {
         sb_append(sb, " <div class=\"appsInfo svelte-10ho5mo\">");
         sb_append_esc(sb, I18N("kn.settings.apps.kioReadOnly", "Disconnect these apps on krunker.io."));
@@ -523,14 +571,31 @@ void account_links_apps_html(StrBuf *sb, const int krunker_io) {
     }
 }
 
+// a mount (onMount(iÎïiííi), :97558): a fresh component (no activity shown, no Disconnect asking, not busy) and
+// connectedApps again; the last list stays drawn until it answers (the other account's is dropped)
+void account_links_apps_html(StrBuf *sb, const int krunker_io) {
+    if (g_apps.kio != krunker_io) {
+        cJSON_Delete(g_apps.list);
+        g_apps.list = NULL;
+        g_apps.kio = krunker_io;
+    }
+    if (g_apps.confirm_timer) html_timer_cancel(g_apps.confirm_timer);
+    g_apps.confirm_timer = 0;
+    g_apps.confirm[0] = 0;
+    g_apps.busy = 0;
+    cJSON_Delete(g_apps.activity);
+    g_apps.activity = NULL;
+    g_apps.mount++;
+    g_apps.loading = 0; // (an older mount's answer is dropped: this one asks again)
+    apps_load();
+    apps_html(sb, krunker_io);
+}
+
 static void apps_redraw(void) {
     const HtmlElem m = html_dom_by_id("connectedAppsMount");
     if (!m) return;
     StrBuf sb = {0};
-    const int was = g_apps.loading;
-    g_apps.loading = 1;
-    account_links_apps_html(&sb, g_apps.kio);
-    g_apps.loading = was;
+    apps_html(&sb, g_apps.kio);
     char *html = sb_finish(&sb);
     html_dom_set_html(m, html);
     free(html);
@@ -543,7 +608,6 @@ static void revoke_done(void *user, const int status, const char *body, const si
     if ((unsigned) (uintptr_t) user != g_dc.gen) return;
     g_apps.busy = 0;
     g_apps.loading = 0;
-    g_apps.at = 0;
     apps_load(); // v10: revokeApp, then connectedApps again
     apps_redraw();
 }
@@ -594,10 +658,11 @@ static const char *arg_str(const HtmlArg *args, const int argc) {
 
 int account_links_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
-    if (!strcmp(name, "knDiscordLink")) { // :97349-97358 (no returnTo: the browser page says the result)
+    if (!strcmp(name, "knDiscordLink")) { // :97343-97358 (no returnTo: the browser page and dlnkR say the result)
         if (g_dc.busy || g_dc.waiting) return 1;
-        g_dc.busy = 1;
         g_dc.result[0] = 0;
+        g_dc.busy = 1;
+        g_dc.waiting = 1; // waiting at once, like v10's popup opened before the request (:97348-97349)
         dc_post("/discord/link", "{}", dc_link_done);
         dc_redraw();
         return 1;
@@ -685,8 +750,10 @@ int account_links_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     return 0;
 }
 
-void account_links_social(const char *label) {
-    if (label && !strcmp(label, "discordStatus")) dc_load(); // discord.c: the browser link finished
+void account_links_social_frame(const cJSON *frame) {
+    const cJSON *label = cJSON_GetArrayItem(frame, 0), *result = cJSON_GetArrayItem(frame, 1);
+    if (cJSON_IsString(label) && !strcmp(label->valuestring, "dlnkR")) // discord.c: the browser link's result
+        dc_link_result(cJSON_IsString(result) ? result->valuestring : NULL);
 }
 
 void account_links_reset(void) {

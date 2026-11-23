@@ -81,6 +81,7 @@ void v10_table_end(StrBuf *sb);
 // io-popup dialogs (malloc'd markup for v10_view_push)
 char *v10_io_error(const char *title, const char *message);           // svelte-1t9wm2m, "Dismiss"
 char *v10_io_success(const char *title, const char *message_html, const char *button, const char *button_mods);
+char *v10_io_success_w(const char *title, const char *message_html, const char *button, const char *button_mods, int width);
 
 // the store item card (market-card, svelte-r5taai) of skin `index` with extra markup inside
 void v10_market_card(StrBuf *sb, int skin_index, int w, int h, const char *position, const char *onclick, const char *children);

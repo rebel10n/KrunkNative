@@ -7,6 +7,10 @@
  *                                        | DISCORD_DELETION_PENDING (an account being deleted can't change its link)
  *   GET  /discord/callback?code&state  the browser comes back here: the link, then returnTo?discord_link=<result>
  *                                        (linked | cancelled | expired | in_use | unavailable | failed, :216792) or a page
+ *   ["dlnkR", result]                  v10's DISCORD_LINK_RESULT (the game socket's answer to the DISCORD_LINK_WAIT that
+ *                                        onLinkStart sends, :219136-219137, handled at :216792-216796) on the account's
+ *                                        social sockets, for every callback whose account is known, and "expired" when a
+ *                                        started link's state runs out unused (STATE_S)
  *   POST /discord/join                -> {joined} (false = already a member) | DISCORD_NEEDS_RELINK | DISCORD_JOIN_FAILED
  *                                        (:97366-97368; PUT /guilds/:guild/members/:user with the bot token)
  *   POST /discord/unlink              -> {unlinked} | DISCORD_DELETION_PENDING (v10.0.7's new state, :97384)
@@ -69,6 +73,15 @@ static struct {
     char seal[256];
     int timeout_ms;
 } D;
+
+/* the started links, one per account (a new link replaces the account's earlier states): STATE_S after the start
+ * a still unused state is taken and the account told "expired" */
+#define MAX_EXPIRY 256
+static struct Expiry {
+    int64_t account;
+    char nonce[64];
+    kn_timer_id timer;
+} g_expiry[MAX_EXPIRY];
 
 static atomic_int g_live;
 static atomic_int g_cancel;
@@ -307,7 +320,7 @@ struct Job {
     void (*done)(Job *);
     kn_http_req *req;
     int64_t account;
-    char code[256], return_to[512];
+    char code[256], return_to[512], nonce[64];
     char *token_enc, *refresh_enc; /* in: the stored ones; out: new ones */
     char expires[24];
     int expired, refreshed;
@@ -437,8 +450,61 @@ static int return_ok(const char *to) {
 
 typedef struct {
     kn_http_req *req;
+    int64_t account;
     char nonce[64];
 } LinkCtx;
+
+/* ["dlnkR", result] (deob-10.0.7.js:216792-216796) to the account's social sockets */
+static void push_result(const int64_t account, const char *result) {
+    if (account <= 0) return;
+    cJSON *fr = social_frame("dlnkR");
+    cJSON_AddItemToArray(fr, cJSON_CreateString(result));
+    social_push_account_ex(account, fr, 1);
+}
+
+static void expiry_taken(kn_db_result *res, void *ud) {
+    (void) ud;
+    cJSON *o = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    push_result(kn_json_int(o, "account", 0), "expired"); /* nobody came back with it */
+    cJSON_Delete(o);
+}
+
+static void expiry_fire(kn_loop *loop, void *ud) {
+    (void) loop;
+    struct Expiry *e = ud;
+    char nonce[64];
+    copy_str(nonce, sizeof nonce, e->nonce);
+    memset(e, 0, sizeof *e);
+    if (D.b && D.b->db) kn_db_call(D.b->db, &P_DC_STATE_TAKE, KN_DB_ARGS(nonce), expiry_taken, NULL);
+}
+
+static void expiry_clear(struct Expiry *e) {
+    if (e->timer && D.b && D.b->loop) kn_loop_cancel_timer(D.b->loop, e->timer);
+    memset(e, 0, sizeof *e);
+}
+
+static void expiry_start(const int64_t account, const char *nonce) {
+    struct Expiry *slot = NULL;
+    for (int i = 0; i < MAX_EXPIRY; i++) {
+        if (g_expiry[i].account == account) {
+            expiry_clear(&g_expiry[i]);
+            slot = &g_expiry[i];
+            break;
+        }
+        if (!slot && !g_expiry[i].account) slot = &g_expiry[i];
+    }
+    if (!slot || !D.b || !D.b->loop) return; /* full: a late callback still says "expired" */
+    slot->account = account;
+    copy_str(slot->nonce, sizeof slot->nonce, nonce);
+    slot->timer = kn_loop_add_timer(D.b->loop, (uint64_t) (STATE_S + 5) * 1000, 0, expiry_fire, slot);
+    if (!slot->timer) memset(slot, 0, sizeof *slot);
+}
+
+/* the callback took this state: its expiry is moot */
+static void expiry_taken_by(const int64_t account, const char *nonce) {
+    for (int i = 0; i < MAX_EXPIRY; i++)
+        if (g_expiry[i].account == account && !strcmp(g_expiry[i].nonce, nonce)) expiry_clear(&g_expiry[i]);
+}
 
 static void link_state_done(kn_db_result *res, void *ud) {
     LinkCtx *c = ud;
@@ -459,6 +525,7 @@ static void link_state_done(kn_db_result *res, void *ud) {
     cJSON *d = cJSON_CreateObject();
     cJSON_AddStringToObject(d, "url", url);
     v10_reply_data(c->req, 200, d);
+    expiry_start(c->account, c->nonce);
 #else
     v10_reply_error(c->req, 503, "DISCORD_NOT_CONFIGURED", "Discord linking is currently unavailable.");
 #endif
@@ -474,6 +541,7 @@ static void link_session(kn_http_req *req, int64_t account, void *ud) {
         return v10_reply_error(req, 500, "internal", "Server error.");
     }
     c->req = req;
+    c->account = account;
     char id[24];
     kn_db_call(D.b->db, &P_DC_STATE_NEW, KN_DB_ARGS(acct_itoa(id, account), c->nonce, return_ok(to) ? to : ""), link_state_done, c);
     free(to);
@@ -540,9 +608,10 @@ static void finish_callback(kn_http_req *req, const char *return_to, const char 
     kn_buf_free(&b);
 }
 
-static void push_status(int64_t account) {
-    cJSON *fr = social_frame("discordStatus"); /* Box Office: the open Settings re-reads /discord/status */
-    social_push_account_ex(account, fr, 1);
+/* the callback's answer, and the same result to the account's open game (["dlnkR", result]) */
+static void finish_result(kn_http_req *req, const int64_t account, const char *return_to, const char *result) {
+    push_result(account, result);
+    finish_callback(req, return_to, result);
 }
 
 static void linked(kn_db_result *res, void *ud) {
@@ -553,9 +622,8 @@ static void linked(kn_db_result *res, void *ud) {
         r = !strcmp(e, "in_use") ? "in_use" : !strcmp(e, "deletion_pending") ? "deletion_pending" : "failed";
     } else {
         KN_INFO(MOD, "account %lld linked Discord user %s", (long long) j->account, j->discord_id);
-        push_status(j->account);
     }
-    finish_callback(j->req, j->return_to, r);
+    finish_result(j->req, j->account, j->return_to, r);
     job_free(j);
 }
 
@@ -595,9 +663,10 @@ static void exchange_work(Job *j) {
 }
 
 static void exchange_done(Job *j) {
-    if (strcmp(j->result, "linked") || !D.b || !D.b->db) return finish_callback(j->req, j->return_to, j->result[0] ? j->result : "failed");
+    if (strcmp(j->result, "linked") || !D.b || !D.b->db)
+        return finish_result(j->req, j->account, j->return_to, j->result[0] && strcmp(j->result, "linked") ? j->result : "failed");
     Job *copy = malloc(sizeof *copy); /* job_done frees j: the database call gets its own copy (the tokens move) */
-    if (!copy) return finish_callback(j->req, j->return_to, "failed");
+    if (!copy) return finish_result(j->req, j->account, j->return_to, "failed");
     *copy = *j;
     j->token_enc = j->refresh_enc = NULL;
     char id[24];
@@ -614,18 +683,19 @@ static void state_taken(kn_db_result *res, void *ud) {
     copy_str(j->return_to, sizeof j->return_to, kn_json_str(o, "return_to", ""));
     const int fresh = cJSON_IsTrue(cJSON_GetObjectItem(o, "fresh"));
     cJSON_Delete(o);
+    if (j->account > 0) expiry_taken_by(j->account, j->nonce);
     if (j->account <= 0 || !fresh) {
-        finish_callback(j->req, j->return_to, "expired");
+        finish_result(j->req, j->account, j->return_to, "expired");
         return job_free(j);
     }
     if (!j->code[0]) { /* Discord sent error=access_denied: the player cancelled */
-        finish_callback(j->req, j->return_to, "cancelled");
+        finish_result(j->req, j->account, j->return_to, "cancelled");
         return job_free(j);
     }
     j->work = exchange_work;
     j->done = exchange_done;
     if (job_start(j) != 0) {
-        finish_callback(j->req, j->return_to, "failed");
+        finish_result(j->req, j->account, j->return_to, "failed");
         job_free(j);
     }
 }
@@ -650,6 +720,7 @@ static void h_callback(kn_http_req *req, void *ud) {
         job_free(j);
         return finish_callback(req, NULL, "expired");
     }
+    copy_str(j->nonce, sizeof j->nonce, nonce);
     kn_db_call(D.b->db, &P_DC_STATE_TAKE, KN_DB_ARGS(nonce), state_taken, j);
 }
 
@@ -844,6 +915,7 @@ static void origin_of(const char *url, char *out, size_t cap) {
 
 int discord_init(Brain *b) {
     memset(&D, 0, sizeof D);
+    memset(g_expiry, 0, sizeof g_expiry);
     D.b = b;
     atomic_store(&g_cancel, 0);
     const kn_config *cfg = b->cfg;
@@ -883,6 +955,8 @@ int discord_init(Brain *b) {
 
 void discord_shutdown(Brain *b) {
     (void) b;
+    for (int i = 0; i < MAX_EXPIRY; i++)
+        if (g_expiry[i].account) expiry_clear(&g_expiry[i]);
     atomic_store(&g_cancel, 1);
     for (int i = 0; i < 200 && atomic_load(&g_live) > 0; i++) {
         struct timespec ts = {0, 10 * 1000 * 1000};

@@ -86,6 +86,7 @@ int  account_ui_twofa_handler(const char *name); // 1 for the 2FA popup's handle
 char *account_window_gen(int id, const char **header);
 void account_window_post(int id);
 double account_reward_ms(void);             // daily free KR: ms left, 0 claimable, -1 no account / level too low
+void account_set_name(const char *name);    // manageAccNames' onSwapped: acc.name = name; updateWindow(5)
 void account_set_funds(double funds);       // updateFunds(funds): header + windows
 void account_double_xp_claimed(double player_score); // rrqdxp: account.score = playerScore, the offer is spent
 void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / "" = none)

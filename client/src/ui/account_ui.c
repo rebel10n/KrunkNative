@@ -59,6 +59,7 @@
 #include "v10_junkyard.h"   // v10_junkyard_kio_frame: the official game socket's recipes and crafts
 #include <weapons.h>
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
+#include <v10_ui.h>                // v10.0.7's io-popup views (2FA form, deletion modals)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
 #include <ruleset.h>
 #include <account_links.h>   // Connections: the Discord row and Connected apps (v10.0.7, account_links.c)
@@ -108,6 +109,8 @@ static int g_optin_busy;         // the popup's request is out (iÏìiìïï): i
 static int g_reg_optin = -1;     // the register card's checkbox, sent with source "registration" once the account exists (117421)
 static cJSON *g_raid_stats;      // the Box Office account's raidStats (owned; kn_brain's account info, raids.c)
 static int g_req_del;            // acc.reqDel (v10 player_cancelrequest): "Processing Deletion" (account_life.c)
+static void deletion_answer(const cJSON *frame); // requestConfirm's answer (Account Privacy, below)
+static void deletion_confirm(int flag);      // requestConfirm(flag): rpc("rqd", flag)
 static char g_twitch_id[64];     // acc.twitchId (setData [44]): the linked Twitch user id, "" none
 static char g_twitch_name[64];   // acc.twitch (setData [23]): the linked Twitch login, "" none
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
@@ -941,6 +944,16 @@ void account_set_funds(const double funds) {
     mark_header();
 }
 
+// manageAccNames' onSwapped (deob-10.0.7.js:217077-217088): acc.name = name; updateWindow(5); updateClassRender()
+void account_set_name(const char *name) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !g_logged_in || !name || !name[0]) return;
+    if (!strcmp(g_acc.alias, g_acc.name)) copy_str(g_acc.alias, sizeof(g_acc.alias), name);
+    copy_str(g_acc.name, sizeof(g_acc.name), name);
+    mark_header();
+    menu_rerender_if_open(5);
+    menu_update_class_box(); // updateClassRender
+}
+
 void account_kio_set_balances(const int has_funds, const double funds, const int has_junk, const double junk) {
     if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj) return;
     cJSON *v = NULL;
@@ -1623,6 +1636,7 @@ static void account_response(const cJSON *frame) {
     // CHALLENGE_COMPLETED [index, ...] the game server has kn_brain send indexes into it
     account_challenges_request();
     if (!had) promo_after_login(); // getPreference and the opt-in popup (deob-10.0.7.js:216865-216873)
+    if (!had && g_req_del) deletion_confirm(0); // `acc.reqDel && requestConfirm(0)` (deob-10.0.7.js:216885)
 }
 
 // The signed-in account ends here: the server hears logoutAcc and the session leaves storage. The
@@ -1733,7 +1747,7 @@ static void on_social(void *user, const cJSON *frame) {
     (void) user;
     const char *label = str_at(frame, 0);
     if (!label) return;
-    account_links_social(label); // "discordStatus": the browser's Discord link finished (discord.c)
+    account_links_social_frame(frame); // ["dlnkR", result]: the browser's Discord link finished (discord.c)
     if (!strcmp(label, "__open")) {
         g_restore_asks = 0; // a new socket: the saved session gets its asks again
         g_restore_retry_at = 0;
@@ -1863,19 +1877,8 @@ static void on_social(void *user, const cJSON *frame) {
         }
         HtmlElem res = html_dom_by_id("newPRes");
         if (res) html_dom_set_html(res, str_at(frame, 1) ? str_at(frame, 1) : "");
-    } else if (!strcmp(label, "rqd")) { // deletion request / cancel: [ok, error, null, flag] (account_life.c)
-        const int flag = (int) num_at(frame, 4);
-        if (num_at(frame, 1) != 1.0 && !cJSON_IsTrue(cJSON_GetArrayItem(frame, 1))) {
-            popup_response(0, str_at(frame, 2) ? str_at(frame, 2) : "Server error.", NULL);
-        } else if (flag) {
-            // v10 logs out after a deletion request (deob-10.0.3.js:244613); kn_brain ends every session too
-            account_ui_logout();
-            popup_response(1, NULL, I18N("kn.account.delete.requested", "Deletion requested. You have been logged out."));
-        } else {
-            g_req_del = 0;
-            popup_response(1, NULL, I18N("kn.account.delete.cancelled", "Deletion request cancelled."));
-            rerender_windows();
-        }
+    } else if (!strcmp(label, "rqd")) { // requestConfirm's rpc answer: [ok, error, null, flag] (account_life.c)
+        deletion_answer(frame);
     } else if (!strcmp(label, "twitchAuth")) { // the OAuth page to open, or [null, error]
         const char *url = str_at(frame, 1);
         if (url && url[0]) {
@@ -2348,6 +2351,208 @@ static char *friends_html(void) {
     }
     sb_append(&sb, "</div>");
     return sb_finish(&sb);
+}
+
+// ---- 2FA of the account window (v10.0.7 act2FA / dact2FA, deob-10.0.7.js:217005-217146): kn_brain's
+// POST /account/2fa/enable/start, /account/2fa/enable/verify {code} and /account/2fa/disable {code}
+// (services/brain/v10_auth.c). Each step is v10's generic io-popup form (iìïíïíì, deob-10.0.7.js:15103-15560,
+// svelte-1xwmszg): a title, a description, the QR code (enable) and one six-box one-time-code field, Cancel and
+// Submit, dismissable. A code the server calls invalid asks again with "Invalid code. Please try again."; any other
+// error is v10's error popup (svelte-1t9wm2m). The window is redrawn when the flow ends (updateWindow(5)).
+#define TFA_LEN 6 // the field's codeLength (config.twoFAKeyLen)
+
+static struct {
+    int disable;     // dact2FA (else act2FA)
+    int busy;        // a request is out
+    unsigned gen;    // the flow's generation: an answer of an older flow is dropped
+    char *qr;        // enable: the otpauth:// URI as a data URL (QRCODE.toDataURL)
+    char retry[64];  // the description after an invalid code
+} g_tfa;
+
+static char *qr_data_url(const char *text);
+
+static void tfa_end(const int ok) {
+    if (ok && g_logged_in) g_acc.has_2fa = !g_tfa.disable; // acc.twoFA = true / false
+    free(g_tfa.qr);
+    g_tfa.qr = NULL;
+    g_tfa.busy = 0;
+    g_tfa.gen++;
+    menu_rerender_if_open(5); // updateWindow(5)
+}
+
+// res.error of v10's request helper: the text, or an error object's message
+static const char *tfa_error(const cJSON *json) {
+    const cJSON *e = json ? cJSON_GetObjectItem(json, "error") : NULL;
+    if (cJSON_IsString(e) && e->valuestring[0]) return e->valuestring;
+    const cJSON *m = cJSON_IsObject(e) ? cJSON_GetObjectItem(e, "message") : NULL;
+    return cJSON_IsString(m) && m->valuestring[0] ? m->valuestring : NULL;
+}
+
+static void tfa_error_closed(int accepted, void *user) {
+    (void) accepted;
+    (void) user;
+    tfa_end(0);
+}
+
+// iiïíììì({message}): the error popup, then the flow ends (return false; updateWindow(5))
+static void tfa_fail(const char *message) {
+    free(g_tfa.qr);
+    g_tfa.qr = NULL;
+    g_tfa.busy = 0;
+    v10_view_push(v10_io_error("Error", message), NULL, tfa_error_closed, NULL);
+}
+
+static void tfa_form_closed(int accepted, void *user) {
+    (void) user;
+    if (!accepted && !g_tfa.busy) tfa_end(0); // Cancel / the overlay: the popup resolves null -> return false
+}
+
+static void read_input(const char *id, char *out, size_t n);
+
+static void tfa_form(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\">"
+                   "<div class=\"io-popup-container\"><div class=\"io-popup-header\">");
+    sb_append_esc(&sb, g_tfa.disable ? "Disable Two-Factor Authentication" : "Enable Two-Factor Authentication");
+    sb_append(&sb, "</div> <div class=\"io-popup-content\"><div class=\"io-card\"><p>");
+    sb_append_esc(&sb, g_tfa.retry[0]    ? g_tfa.retry
+                       : g_tfa.disable ? "Enter the 6-digit code from your authenticator app to disable 2FA."
+                                       : "Scan this QR code with your authenticator app, then enter the 6-digit code below.");
+    sb_append(&sb, "</p> <form><div class=\"io-input-container\">");
+    if (!g_tfa.disable) { // {id: "qrcode", type: "qr-code", label: "Scan with your authenticator app"}
+        sb_append(&sb, "<div class=\"io-section qr-code-container svelte-1xwmszg\"><div class=\"label-row\"><label class=\"input-label\">"
+                       "Scan with your authenticator app</label></div> ");
+        if (g_tfa.qr) {
+            sb_append(&sb, "<img alt=\"QR Code\" class=\"qr-code-image svelte-1xwmszg\" id=\"knTfaQr\" src=\"");
+            sb_append(&sb, g_tfa.qr);
+            sb_append(&sb, "\">");
+        }
+        sb_append(&sb, "</div> ");
+    }
+    sb_append(&sb, "<div class=\"io-section\"> <div class=\"code-input-container svelte-1xwmszg\">"); // {id: "code", type: "one-time-code"}
+    for (int i = 0; i < TFA_LEN; i++)
+        sb_appendf(&sb, "<input type=\"number\" min=\"0\" max=\"9\" maxlength=\"1\" placeholder=\" \" id=\"knTfaCode%d\" "
+                        "class=\"code-input code-input-code svelte-1xwmszg\" oninput=\"knTfaInput(%d)\" onkeydown=\"knTfaKey(%d)\">",
+                   i, i, i);
+    sb_append(&sb, "</div></div> <div class=\"io-button-group\"><button type=\"button\" class=\"io-button\" onclick=\"knViewPop(0)\">Cancel</button> "
+                   "<button type=\"submit\" class=\"io-button io-button--accept\" id=\"knTfaSubmit\" disabled onclick=\"knTfaSubmit()\">Submit</button>"
+                   "</div></div></form></div></div></div></div></div>");
+    v10_view_push(sb_finish(&sb), NULL, tfa_form_closed, NULL);
+    const HtmlElem first = html_dom_by_id("knTfaCode0");
+    if (first) html_dom_focus(first);
+}
+
+static void tfa_code(char *out, const size_t n) {
+    size_t o = 0;
+    for (int i = 0; i < TFA_LEN && o + 1 < n; i++) {
+        char id[16], v[8] = "";
+        snprintf(id, sizeof(id), "knTfaCode%d", i);
+        read_input(id, v, sizeof(v));
+        const size_t len = strlen(v);
+        if (len && v[len - 1] >= '0' && v[len - 1] <= '9') out[o++] = v[len - 1];
+    }
+    out[o] = 0;
+}
+
+static void tfa_answer(void *user, const int status, const cJSON *json) {
+    if ((unsigned) (uintptr_t) user != g_tfa.gen) return;
+    g_tfa.busy = 0;
+    const char *err = tfa_error(json);
+    if (!err && (status < 0 || !json)) {
+        tfa_fail(g_tfa.disable ? "An unexpected error occurred while disabling 2FA." : "An unexpected error occurred while enabling 2FA.");
+        return;
+    }
+    if (!err) { // break: acc.twoFA set, updateWindow(5)
+        tfa_end(1);
+        return;
+    }
+    char lower[256];
+    size_t i = 0;
+    for (; err[i] && i + 1 < sizeof(lower); i++) lower[i] = (char) tolower((unsigned char) err[i]);
+    lower[i] = 0;
+    if (!strstr(lower, "invalid code")) {
+        tfa_fail(err);
+        return;
+    }
+    snprintf(g_tfa.retry, sizeof(g_tfa.retry), "Invalid code. Please try again.");
+    tfa_form();
+}
+
+// the form resolves {code}: verify (enable) or disable with it
+static void tfa_submit(void) {
+    char code[TFA_LEN + 2];
+    tfa_code(code, sizeof(code));
+    if (strlen(code) < TFA_LEN || g_tfa.busy) return;
+    g_tfa.busy = 1;
+    v10_view_pop(1);
+    char path[320], tok[256], body[48];
+    v10_url_token(tok, sizeof(tok));
+    snprintf(path, sizeof(path), "%s?token=%s", g_tfa.disable ? "/account/2fa/disable" : "/account/2fa/enable/verify", tok);
+    snprintf(body, sizeof(body), "{\"code\":\"%s\"}", code);
+    v10_send("POST", path, body, tfa_answer, (void *) (uintptr_t) g_tfa.gen);
+    memset(code, 0, sizeof(code));
+    memset(body, 0, sizeof(body));
+}
+
+static void tfa_started(void *user, const int status, const cJSON *json) {
+    if ((unsigned) (uintptr_t) user != g_tfa.gen) return;
+    g_tfa.busy = 0;
+    const char *err = tfa_error(json);
+    const cJSON *data = json ? cJSON_GetObjectItem(json, "data") : NULL;
+    const char *uri = cJSON_GetStringValue(cJSON_GetObjectItem(data, "qr_code_url"));
+    if (err || status < 0 || !uri) {
+        tfa_fail(err ? err : "An unexpected error occurred while enabling 2FA.");
+        return;
+    }
+    free(g_tfa.qr);
+    g_tfa.qr = qr_data_url(uri);
+    tfa_form();
+}
+
+// act2FA (enable2FAStart, then the form) / dact2FA (the form)
+static void tfa_open(const int disable) {
+    if (!g_logged_in || g_tfa.busy) return;
+    g_tfa.gen++;
+    g_tfa.disable = disable;
+    g_tfa.retry[0] = 0;
+    free(g_tfa.qr);
+    g_tfa.qr = NULL;
+    if (disable) {
+        tfa_form();
+        return;
+    }
+    g_tfa.busy = 1;
+    char path[320], tok[256];
+    v10_url_token(tok, sizeof(tok));
+    snprintf(path, sizeof(path), "/account/2fa/enable/start?token=%s", tok);
+    v10_send("POST", path, NULL, tfa_started, (void *) (uintptr_t) g_tfa.gen);
+}
+
+// the code boxes (deob-10.0.7.js:15207-15225): one digit each, the next box focused; the last box completing the code
+// of a form whose only input is the code submits it
+static void tfa_input(const int i) {
+    char id[16], v[16] = "";
+    snprintf(id, sizeof(id), "knTfaCode%d", i);
+    read_input(id, v, sizeof(v));
+    const HtmlElem el = html_dom_by_id(id);
+    if (strlen(v) > 1 && el) {
+        const char last[2] = {v[strlen(v) - 1], 0};
+        html_dom_set_value(el, last);
+    }
+    if (v[0] && i + 1 < TFA_LEN) {
+        snprintf(id, sizeof(id), "knTfaCode%d", i + 1);
+        const HtmlElem next = html_dom_by_id(id);
+        if (next) html_dom_focus(next);
+    }
+    char code[TFA_LEN + 2];
+    tfa_code(code, sizeof(code));
+    const HtmlElem btn = html_dom_by_id("knTfaSubmit");
+    if (btn) {
+        if (strlen(code) == TFA_LEN) html_dom_remove_attr(btn, "disabled");
+        else html_dom_set_attr(btn, "disabled", "");
+    }
+    if (strlen(code) == TFA_LEN && v[0] && i + 1 == TFA_LEN) tfa_submit();
+    memset(code, 0, sizeof(code));
 }
 
 // ---- 2FA: v7.1.4 index.js twoFAres / f1789 / onInput2FA / onKeyDown2FA / sub2FA / act2FA / dact2FA
@@ -3005,14 +3210,63 @@ static void show_other_signed_in(const char *typed) {
 
 // ------------------------------------------------------------------ Account Privacy / Twitch (kn_brain account_life.c)
 
-// v10's requestDeletion(flag) -> rpc("rqd", flag) (deob-10.0.3.js:244600). The request itself is confirmed first;
-// cancelling needs none.
-static void deletion_confirmed(const int ok, const char *text, void *user) {
-    (void) text;
-    if (!ok || !g_logged_in) return;
+// v10.0.7's requestDeletion(flag) (deob-10.0.7.js:216941-216947): genericPopup "confPop" with account.delete.request
+// (flag 1) or account.delete.cancel (flag 0), YES = requestConfirm(flag), NO = clearPops(). requestConfirm(flag)
+// (:216949-216985) is rpc("rqd", flag) (kn_brain account_life.c); acc.reqDel = flag, clearPops(), updateWindow(5), then:
+// a request logs out and shows "Account Deletion Requested" (the logged-out text, OK), a cancel "Account Deletion
+// Cancelled"; a refused rpc v10's error popup. A login of an account whose deletion is pending cancels it the same way
+// (:216885, `acc.reqDel && requestConfirm(0)`).
+static void generic_popup(const char *html, const char *cls);
+
+static void deletion_ask(const int flag) {
+    char html[640];
+    snprintf(html, sizeof(html),
+             "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>%s</div><div id='confirmBtn' onclick='requestConfirm(%d)' "
+             "onmouseover='playTick(0.1)'>YES</div><div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>",
+             flag ? I18N("account.delete.request", "Are you sure you want to request an account deletion?")
+                  : I18N("account.delete.cancel", "Are you sure you want to cancel account deletion?"),
+             flag ? 1 : 0);
+    generic_popup(html, "confPop");
+}
+
+static int g_del_sent = -1; // the flag of the rpc in flight (-1: none)
+
+static void deletion_confirm(const int flag) {
+    if (!g_logged_in || g_del_sent >= 0) return;
+    g_del_sent = flag ? 1 : 0;
     char frame[24];
-    snprintf(frame, sizeof frame, "[\"rqd\",%d]", (int) (intptr_t) user);
+    snprintf(frame, sizeof frame, "[\"rqd\",%d]", g_del_sent);
     backend_social_send_text(frame);
+}
+
+static void deletion_answer(const cJSON *frame) {
+    const int flag = g_del_sent >= 0 ? g_del_sent : (int) num_at(frame, 4) != 0;
+    g_del_sent = -1;
+    const int ok = num_at(frame, 1) == 1.0 || cJSON_IsTrue(cJSON_GetArrayItem(frame, 1));
+    ui_loadout_clear_pops(); // clearPops()
+    if (!ok) { // the rpc threw: updateWindow(5), the error popup
+        rerender_windows();
+        v10_view_push(v10_io_error("Error", str_at(frame, 2) ? str_at(frame, 2) : "An unexpected error occurred."), NULL, NULL, NULL);
+        return;
+    }
+    g_req_del = flag; // acc.reqDel = flag; updateWindow(5)
+    rerender_windows();
+    if (flag) account_ui_logout(); // logoutAcc() (kn_brain has ended every session of the account too); its
+                                   // updateWindow(5) of the guest pushes the login modal
+    v10_view_clear();               // iííîîiï(): every view closed (the login modal too), then the modal
+    v10_menu_login_close();
+    if (flag)
+        v10_view_push(v10_io_success_w("Account Deletion Requested",
+                                       "<div style=\"color: #2ecc40;\">You have been logged out. <br> <br> Your account is scheduled to be deleted in "
+                                       "the next 14 days and will become unrecoverable after that. <br> <br> If you log back in before the 14 days "
+                                       "are up, the deletion request will be cancelled automatically.</div>",
+                                       "OK", "accept slim", 700),
+                      NULL, NULL, NULL);
+    else
+        v10_view_push(v10_io_success_w("Account Deletion Cancelled",
+                                       "<p class=\"text-success svelte-12d6f79\">Your account deletion request has been cancelled.</p>", "OK",
+                                       "accept slim", 700),
+                      NULL, NULL, NULL);
 }
 
 // v10's connectTwitchAcc: the confirm, then the OAuth page. Here kn_brain is the OAuth client: "twitchAuth"
@@ -3510,18 +3764,17 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             ui_confirm("Unlinking does not allow you to link a seperate twitch account. Unlink?", twitch_unlink_confirmed, NULL);
         return 1;
     }
-    if (!strcmp(name, "claimDrops")) { // window.windows[4].claimDrops: Box Office has no Twitch drop campaigns
+    if (!strcmp(name, "claimDrops") || !strcmp(name, "windows.4.claimDrops")) { // window.windows[4].claimDrops: Box Office has no Twitch drop campaigns
         if (g_logged_in) backend_social_send_text("[\"getTwitchDrops\"]");
         return 1;
     }
-    if (!strcmp(name, "requestDeletion")) { // window.requestDeletion(flag): v10's rpc("rqd", flag)
+    if (!strcmp(name, "requestDeletion")) { // window.requestDeletion(flag): the YES / NO popup
         const int flag = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num != 0 : 1;
-        if (!g_logged_in) return 1;
-        if (flag)
-            ui_confirm(I18N("kn.account.delete.confirm", "Request the deletion of this account and all associated data? You will be logged out."),
-                       deletion_confirmed, (void *) (intptr_t) 1);
-        else
-            deletion_confirmed(1, NULL, (void *) (intptr_t) 0);
+        if (g_logged_in) deletion_ask(flag);
+        return 1;
+    }
+    if (!strcmp(name, "requestConfirm")) { // window.requestConfirm(flag): rpc("rqd", flag)
+        deletion_confirm(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num != 0 : 0);
         return 1;
     }
     if (!strcmp(name, "claimReward")) {
@@ -3634,12 +3887,42 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         twofa_submit();
         return 1;
     }
-    if (!strcmp(name, "act2FA") && g_logged_in) { // io.send("a2FA")
-        backend_social_send_text("[\"a2FA\"]");
+    if (!strcmp(name, "act2FA")) { // v10.0.7 act2FA: enable2FAStart, then the QR code and code form (deob-10.0.7.js:217005)
+        tfa_open(0);
         return 1;
     }
-    if (!strcmp(name, "dact2FA") && g_logged_in) { // io.send("d2FA")
-        backend_social_send_text("[\"d2FA\"]");
+    if (!strcmp(name, "dact2FA")) { // v10.0.7 dact2FA: the code form, then disable2FA (deob-10.0.7.js:217093)
+        tfa_open(1);
+        return 1;
+    }
+    if (!strcmp(name, "knTfaInput")) {
+        tfa_input(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
+        return 1;
+    }
+    if (!strcmp(name, "knTfaSubmit")) {
+        tfa_submit();
+        return 1;
+    }
+    if (!strcmp(name, "knTfaKey")) { // Enter submits a full code (else nothing); Backspace in an empty box: the previous one
+        const int i = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        if (ev && html_key_is_enter(ev->key)) {
+            tfa_submit();
+            return 0;
+        }
+        if (ev && (ev->key == 259 || ev->key == 8) && i > 0) {
+            char id[16], v[8] = "";
+            snprintf(id, sizeof(id), "knTfaCode%d", i);
+            read_input(id, v, sizeof(v));
+            if (!v[0]) {
+                snprintf(id, sizeof(id), "knTfaCode%d", i - 1);
+                const HtmlElem prev = html_dom_by_id(id);
+                if (prev) {
+                    html_dom_set_value(prev, "");
+                    html_dom_focus(prev);
+                }
+                return 0;
+            }
+        }
         return 1;
     }
     if (!strcmp(name, "changeEmail") && g_logged_in) { // KrunkNative: ["cemail", email]
@@ -3724,18 +4007,19 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         }
         return 1;
     }
-    if (!strcmp(name, "changePass")) { // io.send("upp", old, new, repeat)
-        char old_pass[128], new_pass[128], rep[128];
+    if (!strcmp(name, "changePass")) { // changePass (deob-10.0.7.js:216987-216993): io.send("upp", new, repeat, refresh token)
+        char new_pass[128], rep[128];
         HtmlElem res = html_dom_by_id("newPRes");
         if (res) html_dom_set_html(res, "Please wait...");
-        read_input("oldPass", old_pass, sizeof(old_pass));
         read_input("newPass", new_pass, sizeof(new_pass));
         read_input("repNPass", rep, sizeof(rep));
         cJSON *frame = cJSON_CreateArray();
         cJSON_AddItemToArray(frame, cJSON_CreateString("upp"));
-        cJSON_AddItemToArray(frame, cJSON_CreateString(old_pass));
         cJSON_AddItemToArray(frame, cJSON_CreateString(new_pass));
         cJSON_AddItemToArray(frame, cJSON_CreateString(rep));
+        // v10's third value is the FRVR refresh token: KrunkNative's session token is its refresh token, and kn_brain
+        // takes it as the proof this client signed in (services/brain/social_data.c sh_password)
+        cJSON_AddItemToArray(frame, cJSON_CreateString(g_token));
         backend_social_send(frame);
         cJSON_Delete(frame);
         return 1;
@@ -4057,11 +4341,14 @@ static void twitch_html(StrBuf *sb) {
     sb_append_esc(sb, twitch[0] ? twitch : "none");
     // v10 (deob-10.0.3.js:247700): Claim when linked, Link / Unlink by acc.twitchId
     if (g_twitch_id[0])
-        sb_append(sb, ")<div class='lnkTw' style='background-color:#4144a5;' onclick='claimDrops();'>Claim</div>"
+        sb_append(sb, ")<div class='lnkTw' style='background-color:#4144a5;' onclick='window.windows[4].claimDrops();'>Claim</div>"
                        "<div class='lnkTw' onclick='unlinkTwitchPop();'>Unlink</div></div>");
     else
         sb_append(sb, ")<div class='lnkTw' onclick='linkTwitchPop();'>Link</div></div>");
-    sb_append(sb, "<div style='margin-top:10px;'>Link <a href='https://www.twitch.tv/directory/game/Krunker' target='_blank' style='color:#6441a5'>Twitch</a> to earn Drops & Items</div>");
+    if (g_twitch_id[0]) // v10.0.7 (deob-10.0.7.js:219176): a linked account is told to watch, the others to link
+        sb_append(sb, "<div style='margin-bottom:10px;margin-top:10px'>Watch <a href='https://www.twitch.tv/directory/game/Krunker' target='_blank' style='color:#6441a5'>Krunker on Twitch</a> to earn more Drops & Items (When Available)</div>");
+    else
+        sb_append(sb, "<div style='margin-top:10px;'>Link <a href='https://www.twitch.tv/directory/game/Krunker' target='_blank' style='color:#6441a5'>Twitch</a> to earn Drops & Items</div>");
     sb_append(sb, "<div id='skinList' style='text-align: center;'>");
     if (n) sb_append(sb, "<div class='setHed' style='margin-bottom:20px;'>Drops Earned</div>");
     for (int i = 0; i < n; i++) {
@@ -4182,7 +4469,7 @@ static char *gen_account(void) {
                    I18N("emailPrefs.settings.label", "Promotional Emails"), g_promo_emails == 1 ? " checked" : "",
                    I18N("emailPrefs.settings.desc", "Receive news about events, game updates and season releases by email"));
         if (!g_acc.hack) {
-            sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>");
+            sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>");
             sb_append(&sb, I18N("generic.submit", "Submit"));
             sb_append(&sb, "</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
             // 2FA: v7 offers it from level 20 (or dev / partner / featured); KrunkNative always does
@@ -4203,8 +4490,7 @@ static char *gen_account(void) {
         sb_appendf(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>%s</div><div style='height:10px;'></div><div style='margin-top:10px'>",
                    I18N("account.delete", "You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed."));
         if (g_req_del)
-            sb_appendf(&sb, "Processing Deletion <a class='menuLink' onclick='requestDeletion(0)' style='float:right;font-size:20px'>%s</a></div></div>",
-                       I18N("generic.cancel", "Cancel"));
+            sb_append(&sb, "Processing Deletion <a class='menuLink' onclick='requestDeletion(0)' style='float:right;font-size:18px'>Cancel</a></div></div>");
         else
             sb_append(&sb, "Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>");
     } else if (g_tab_index == PROFILE_TAB_CONNECTIONS) {

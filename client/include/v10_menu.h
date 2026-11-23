@@ -23,6 +23,7 @@ int  v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
 int  v10_menu_login_open(void);          // the login / register modal is up (Enter in its fields is its own)
 int  v10_menu_login_escape(void);        // Escape: closes the modal; 1 = it was up
 int  v10_login_logging_in(void);         // v10's $loggingIn: a login / registration the modal sent is waiting for its answer
+void v10_menu_login_close(void);         // the view stack cleared (iííîîiï): the modal closes too
 int  v10_login_guest_window(void);       // showWindow(5) for a guest: the modal instead (1 = taken over)
 // The Account Manager's Use: the login card opens with a listed account's Username and its saved Password filled
 // in, and signs in with them (the card's Login, for the player). The card signs in to the connected server's backend
