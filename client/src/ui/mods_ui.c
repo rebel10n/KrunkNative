@@ -8,10 +8,15 @@
 //     (loadModPack) and adds it to the Loaded tab; Reset Mods drops every loaded mod (:218812-218823).
 //   - mod_url "ua" is a Box Office / Krunker hosted pack: userAssetsUrl("/md" + mod_id + "/mod.zip") (:217728, :223453).
 //   - the Mod Loader loads a pack by URL (loadModURL, :225764) or from a picked .zip (loadMod, :225961).
-//   - Upload Mod (:220943-221050): signed out, the window asks to log in (the static 19.html); signed in, a thumbnail
-//     (level 10, 250 / 500 KB premium; KB = 1e3 bytes), the .zip (25 / 50 MB premium; MB = 1e6), the name, Publish:
-//     api.mods.publishKey({name, assetSizes}) then publishUpload(uploadUrl, fileId, zip, thumb) -> {data: {mod_id}};
-//     on success the window closes, a success popup shows, and the Mod Manager forgets its lists and opens on My Mods.
+//   - Upload Mod (mods_pub, :220943-221050): signed out, the window asks to log in (the static 19.html); signed in,
+//     v10's markup: Thumbnail (PNG) (level 10, else "Level 10 required" and a Locked link; 250 / 500 KB premium,
+//     KB = 1e3 bytes), Mod File (.zip) (25 / 50 MB premium; MB = 1e6), the name, #modUpResp and Publish
+//     (windows[18].submit). onFileChange writes a file's name into #<id>H's title and round(size, 2) / limit into
+//     #<id>Size. submit: "Mod name is required", "Select a .zip mod file", "Mod .zip exceeds N MB limit", "Thumbnails
+//     require level 10+", then "Requesting upload key..." api.mods.publishKey({name, assetSizes}), "Uploading..."
+//     publishUpload(uploadUrl, fileId, zip, thumb) -> {data: {mod_id}}; errors through errors.mods.* (else "Mod
+//     upload failed. Please try again."); on success the window closes, "Mod Published!" shows, and the Mod Manager
+//     forgets its lists and opens on My Mods.
 //   - ?mod=<name> on the page loads that mod by name (:226181-226190; here GET /mods/by-name/<name>).
 //
 // Here (kn_brain, services/brain/asset_upload.c): publishKey is POST /mods/publish/key?token=, the files go to
@@ -19,9 +24,9 @@
 // takes request bodies of 1 MiB; a chunk whose request failed outright (a brain restart: its tickets survive it) is
 // sent again a few times before the upload gives up. Errors come back as MODS_* codes shown through errors.mods.* (i18n).
 //
-// Native differences: the page's <input type=file> does nothing natively, so the two Select links and the Mod
-// Loader's drop area open the platform file dialog (ed_pick_file) through KrunkNative handlers (knModPick,
-// knModPickLocal). The window markup is KrunkNative's own, on the page's classes.
+// Native differences: the page's <input type=file> does nothing natively, so selectFile (the Select links) and the
+// Mod Loader's drop area (knModPickLocal) open the platform file dialog (ed_pick_file); the picked file's name, size
+// and preview are written in place as onFileChange does.
 #include <creation_vote.h>
 #include <backend.h>
 #include <backend_ui.h>
@@ -53,6 +58,7 @@ void ed_pick_file(const char *accept, EdFileFn fn, void *user);
 #define CHUNK_RETRIES 20            // a request that failed outright (status 0): a restarting brain
 #define CHUNK_RETRY_MS 1500
 #define LOADED_MAX 16
+#define UPLOAD_FAILED "Mod upload failed. Please try again." // v10's text for an error without errors.mods.* (:223326-223340)
 
 enum { TAB_HOME, TAB_POPULAR, TAB_NEW, TAB_FAV, TAB_MINE, TAB_LOADED, TAB_SEARCH, TAB_COUNT };
 
@@ -426,39 +432,78 @@ static char *hub_publish_form(void) {
     return sb_finish(&sb);
 }
 
+// a picked file's size line: the window's onFileChange (game.deob.js:220986-220990) and the hub's updateFile
+// (hub-10.0.7.js:6796-6800): round(size / unit, 2) / limit and the unit, the hub's span with !important
+static void size_line(StrBuf *sb, const double size, const int mb, const int limit, const int hub) {
+    sb_appendf(sb, "%g / %d <span style='color:%s'>%s</span>", round(size / (mb ? 1e6 : 1e3) * 100.0) / 100.0, limit,
+               hub ? "rgba(255, 255, 255, 0.4)!important;" : "rgba(255,255,255,0.4)", mb ? "MB" : "KB");
+}
+
+static const char *base_name(const char *path) {
+    const char *b = path ? strrchr(path, '/') : NULL;
+    return b ? b + 1 : path ? path : "";
+}
+
+// Upload Mod (window 19), v10.0.7's markup (mods_pub gen, game.deob.js:220949-220962); a file already picked shows
+// as onFileChange left it (its name in #<id>H's title, its size line, the thumbnail's preview)
 static char *publish_form(void) {
     const AccountInfo *acc = active_account();
     if (!acc) return NULL; // signed out: the static 19.html (log in first)
-    const int lvl = level_ok(acc);
+    const int lvl = level_ok(acc), kb = thumb_kb(acc), mb = zip_mb(acc);
     StrBuf sb = {0};
-    sb_append(&sb, "<div id='modPubBody' style='padding:10px 5px 5px 5px'>"
-                   "<div style='color:rgba(255,255,255,0.6);font-size:15px;margin-bottom:5px'>Thumbnail (.png)<span style='float:right' id='modThumbSize'>");
-    if (lvl) sb_appendf(&sb, "%.2f / %d KB", P.thumb_size / 1e3, thumb_kb(acc));
-    else sb_append(&sb, "from level 10");
-    sb_append(&sb, "</span></div><div id='modThumbH' style='display:flex;align-items:center;gap:10px;padding:10px;border-radius:4px;"
+    sb_append(&sb, "<div id='modPubBody' style='padding:10px 5px 5px 5px'><div style='color:rgba(255,255,255,0.6);font-size:15px;margin-bottom:5px'>"
+                   "Thumbnail (PNG)");
+    if (lvl) {
+        sb_append(&sb, " <span style='float:right' id='modThumbSize'>");
+        if (P.thumb[0]) size_line(&sb, P.thumb_size, 0, kb, 0);
+        else sb_appendf(&sb, "0 / %d <span style='color:rgba(255,255,255,0.4)'>KB</span>", kb);
+        sb_append(&sb, "</span>");
+    } else {
+        sb_append(&sb, " <span style='float:right;color:rgba(255,255,255,0.4);font-size:13px' title='Reach level 10 to attach a thumbnail'>"
+                       "Level 10 required</span>");
+    }
+    sb_append(&sb, "</div><div id='modThumbH' ");
+    if (P.thumb[0]) {
+        sb_append(&sb, "title='");
+        esc(&sb, base_name(P.thumb));
+        sb_append(&sb, "' ");
+    }
+    sb_append(&sb, "style='position:relative;display:flex;align-items:center;gap:10px;padding:10px;border-radius:4px;"
                    "background:rgba(255,255,255,0.12);margin-bottom:15px'><img id='modThumbPrev' src='");
-    esc(&sb, P.thumb_src[0] ? P.thumb_src : "./img/noimg.png");
-    sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='width:80px;height:80px;object-fit:cover;border-radius:4px'>");
-    if (lvl) sb_append(&sb, "<a href='javascript:;' class='menuLink' style='margin:0' onclick='knModPick(&quot;thumb&quot;)'>Choose image</a>");
-    else sb_append(&sb, "<span style='color:rgba(255,255,255,0.4)'>Locked</span>");
-    sb_appendf(&sb, "</div><div style='color:rgba(255,255,255,0.6);font-size:15px;margin-bottom:5px'>Mod pack (.zip)<span style='float:right' "
-                    "id='modZipSize'>%.2f / %d MB</span></div><div id='modZipH' style='display:flex;align-items:center;gap:10px;padding:10px;"
-                    "border-radius:4px;background:rgba(255,255,255,0.12);margin-bottom:15px'><span class='material-icons' "
-                    "style='color:rgba(255,255,255,0.5);font-size:32px'>folder_zip</span><a href='javascript:;' class='menuLink' style='margin:0' "
-                    "onclick='knModPick(&quot;zip&quot;)'>Choose .zip</a><span id='modZipName' style='color:rgba(255,255,255,0.5)'>",
-               P.zip_size / 1e6, zip_mb(acc));
-    esc(&sb, P.zip_name);
-    sb_append(&sb, "</span></div><input id='modNameNew' type='text' maxlength='128' class='accountInput' style='margin-top:0;margin-bottom:15px' placeholder='");
-    esc(&sb, I18N("windows.publish.mod.name", "Mod Name"));
-    sb_append(&sb, "' value='");
-    esc(&sb, P.prefill);
-    sb_appendf(&sb, "' autocomplete='off'><div id='modUpResp' style='min-height:20px;color:%s;font-size:14px;text-align:center;margin-bottom:10px'>",
-               P.resp_err ? "#e33b3b" : "rgba(255,255,255,0.7)");
+    if (P.thumb[0]) {
+        sb_append(&sb, "file://");
+        esc(&sb, P.thumb);
+    } else {
+        sb_append(&sb, "./img/noimg.png");
+    }
+    sb_appendf(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='width:80px;height:80px;object-fit:cover;border-radius:4px;"
+                    "background:rgba(0,0,0,0.3)'><input id='modThumb' type='file' accept='image/png' style='width:1px;visibility:hidden;"
+                    "position:absolute' onchange=\"windows[18].onFileChange('modThumb', false, %d)\"%s><a href='javascript:;' class='menuLink' "
+                    "style='margin:0%s' %s>%s</a></div>",
+               kb, lvl ? "" : " disabled", lvl ? "" : ";pointer-events:none;opacity:0.4",
+               lvl ? "onclick='selectFile(&quot;modThumb&quot;)'" : "onclick='return false;'", lvl ? "Select Thumbnail" : "Locked");
+    sb_append(&sb, "<div style='color:rgba(255,255,255,0.6);font-size:15px;margin-bottom:5px'>Mod File (.zip) <span style='float:right' id='modZipSize'>");
+    if (P.zip[0]) size_line(&sb, P.zip_size, 1, mb, 0);
+    else sb_appendf(&sb, "0 / %d <span style='color:rgba(255,255,255,0.4)'>MB</span>", mb);
+    sb_append(&sb, "</span></div><div id='modZipH' ");
+    if (P.zip[0]) {
+        sb_append(&sb, "title='");
+        esc(&sb, P.zip_name);
+        sb_append(&sb, "' ");
+    }
+    sb_appendf(&sb, "style='display:flex;align-items:center;gap:10px;padding:10px;border-radius:4px;background:rgba(255,255,255,0.12);"
+                    "margin-bottom:15px'><span class='material-icons' style='color:rgba(255,255,255,0.5);font-size:32px'>folder_zip</span>"
+                    "<input id='modZip' type='file' accept='.zip' style='width:1px;visibility:hidden;position:absolute' "
+                    "onchange=\"windows[18].onFileChange('modZip', true, %d)\"><a href='javascript:;' class='menuLink' style='margin:0' "
+                    "onclick='selectFile(&quot;modZip&quot;)'>Select Mod Zip</a></div>",
+               mb);
+    sb_append(&sb, "<input id='modNameNew' type='text' maxlength='500' class='accountInput' style='margin-top:0;margin-bottom:15px' "
+                   "placeholder='Mod Name' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>");
+    sb_appendf(&sb, "<div id='modUpResp' style='min-height:20px;color:%s;font-size:14px;text-align:center;margin-bottom:10px'>",
+               P.resp[0] && !P.resp_err ? "rgba(255,255,255,0.7)" : "#e33b3b");
     esc(&sb, P.resp);
     sb_append(&sb, "</div><a id='modPubSubmit' href='javascript:;' class='menuLink' style='display:block;text-align:center;padding:12px;"
-                   "font-size:20px;background:rgba(255,255,255,0.12);border-radius:4px' onclick='knModPublish()'>");
-    sb_append(&sb, P.update ? "Update" : "Publish");
-    sb_append(&sb, "</a></div>");
+                   "font-size:20px;background:rgba(255,255,255,0.12);border-radius:4px' onclick='windows[18].submit()'>Publish</a></div>");
     return sb_finish(&sb);
 }
 
@@ -479,21 +524,27 @@ static void forget_files(void) {
     P.resp_err = 0;
 }
 
-// the hub's popup cannot be re-rendered under the player: updateFile (hub-10.0.7.js:6779-6802) in place. #<id>H's
-// title is the file's name and #<id>Select reads Change; the .zip's size line is round(MB, 2) / its limit (the
-// thumbnail's updateFile passes no size flag, so its "0 / KB" line stays)
+// a picked file, in place (the page's file inputs do nothing natively): the hub's updateFile (hub-10.0.7.js:6779-6802)
+// and the window's onFileChange (game.deob.js:220976-220991). #<id>H's title is the file's name and the thumbnail's
+// preview shows it; the hub's #<id>Select reads Change and only its .zip gets a size line (its thumbnail passes no
+// size flag), the window writes both
 static void picked_in_place(const int thumb, const char *path) {
     const AccountInfo *acc = active_account();
-    const char *base = path ? strrchr(path, '/') : NULL;
-    base = base ? base + 1 : path ? path : "";
+    const int hub = P.done != NULL;
     HtmlElem e;
-    if ((e = html_dom_by_id(thumb ? "modThumbH" : "modZipH"))) html_dom_set_attr(e, "title", base);
-    if ((e = html_dom_by_id(thumb ? "modThumbSelect" : "modZipSelect"))) html_dom_set_value(e, "Change");
-    if (!thumb) {
-        char t[160];
-        snprintf(t, sizeof t, "%g / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>MB</span>",
-                 round(P.zip_size / 1e6 * 100.0) / 100.0, zip_mb(acc));
-        if ((e = html_dom_by_id("modZipSize"))) html_dom_set_html(e, t);
+    if ((e = html_dom_by_id(thumb ? "modThumbH" : "modZipH"))) html_dom_set_attr(e, "title", base_name(path));
+    if (hub && (e = html_dom_by_id(thumb ? "modThumbSelect" : "modZipSelect"))) html_dom_set_value(e, "Change");
+    if (!thumb || !hub) {
+        StrBuf sb = {0};
+        size_line(&sb, thumb ? P.thumb_size : P.zip_size, !thumb, thumb ? thumb_kb(acc) : zip_mb(acc), hub);
+        char *t = sb_finish(&sb);
+        if (t && (e = html_dom_by_id(thumb ? "modThumbSize" : "modZipSize"))) html_dom_set_html(e, t);
+        free(t);
+    }
+    if (thumb && (e = html_dom_by_id("modThumbPrev"))) {
+        char url[1100];
+        snprintf(url, sizeof url, "file://%s", path);
+        html_dom_set_attr(e, "src", url);
     }
 }
 
@@ -523,19 +574,7 @@ static void picked_publish(void *user, const char *path) {
         const char *b = strrchr(path, '/');
         snprintf(P.zip_name, sizeof P.zip_name, "%s", b ? b + 1 : path);
     }
-    if (P.done) picked_in_place(thumb, path);
-    char name[256] = "";
-    HtmlElem in = html_dom_by_id("modNameNew");
-    if (in) html_dom_get_value(in, name, sizeof name);
-    if (!P.done) menu_rerender_if_open(PUBLISH_WINDOW);
-    in = html_dom_by_id("modNameNew");
-    if (in && name[0]) html_dom_set_value(in, name);
-    HtmlElem prev = thumb ? html_dom_by_id("modThumbPrev") : 0;
-    if (prev) {
-        char url[1100];
-        snprintf(url, sizeof url, "file://%s", path);
-        html_dom_set_attr(prev, "src", url);
-    }
+    picked_in_place(thumb, path);
 }
 
 static void up_end(const char *error) {
@@ -565,7 +604,7 @@ static void up_answer(void *user, const int status, const char *body, const size
     P.retries = 0;
     char err[256];
     if (status != 200) {
-        answer_error(body, err, sizeof err, error_text("MODS_UPLOAD_STORAGE_FAIL", "The mod upload failed"));
+        answer_error(body, err, sizeof err, error_text("MODS_UPLOAD_STORAGE_FAIL", UPLOAD_FAILED));
         up_end(err);
         return;
     }
@@ -574,7 +613,7 @@ static void up_answer(void *user, const int status, const char *body, const size
         const double id = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "data"), "mod_id"));
         cJSON_Delete(j);
         if (!(id > 0)) {
-            up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", "The mod upload failed"));
+            up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", UPLOAD_FAILED));
             return;
         }
         up_end(NULL);
@@ -589,7 +628,7 @@ static void up_answer(void *user, const int status, const char *body, const size
             return;
         }
         menu_close_window();
-        popup(1, "Your mod is published");
+        popup(1, "Mod Published!");
         M.tab = TAB_MINE; // the Mod Manager opens on My Mods next
         return;
     }
@@ -624,14 +663,14 @@ static void up_next(void) {
     if (P.part >= 2) {
         snprintf(url, sizeof url, "%s?fileId=%s&done=1", P.base, P.file_id);
         if (!backend_http_post_bytes(url, "application/octet-stream", "", 0, CHUNK_TIMEOUT_MS, up_answer, (void *) user))
-            up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", "The mod upload failed"));
+            up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", UPLOAD_FAILED));
         return;
     }
     if (!P.data) {
         P.sent = P.len = 0;
         P.data = read_whole(P.part == 0 ? P.zip : P.thumb, &P.len);
         if (!P.data || (double) P.len != (P.part == 0 ? P.zip_size : P.thumb_size)) {
-            up_end(error_text("MODS_UPLOAD_SIZE_MISMATCH", "The file changed since it was chosen"));
+            up_end(error_text("MODS_UPLOAD_SIZE_MISMATCH", UPLOAD_FAILED));
             return;
         }
     }
@@ -640,7 +679,7 @@ static void up_next(void) {
     snprintf(url, sizeof url, "%s?fileId=%s&key=%s&offset=%zu", P.base, P.file_id, P.part == 0 ? "mod" : "thumb", P.at);
     P.sent += P.n;
     if (!backend_http_post_bytes(url, "application/octet-stream", P.data + P.at, P.n, CHUNK_TIMEOUT_MS, up_answer, (void *) user))
-        up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", "The mod upload failed"));
+        up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", UPLOAD_FAILED));
 }
 
 static void on_key(void *user, const int status, const char *body, const size_t length) {
@@ -653,7 +692,7 @@ static void on_key(void *user, const int status, const char *body, const size_t 
     const char *up = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(d, "uploadUrl"));
     if (!fid || !up || strlen(fid) >= sizeof P.file_id) {
         cJSON_Delete(j);
-        answer_error(body, err, sizeof err, error_text("MODS_UPLOAD_STORAGE_FAIL", "The mod upload failed"));
+        answer_error(body, err, sizeof err, error_text("MODS_UPLOAD_STORAGE_FAIL", UPLOAD_FAILED));
         up_end(err);
         return;
     }
@@ -677,11 +716,19 @@ static void publish(void) {
     char *s = name;
     while (*s == ' ') s++;
     for (size_t n = strlen(s); n && s[n - 1] == ' ';) s[--n] = 0;
-    if (!*s) { set_resp("Give the mod a name", 1); return; }
-    if (!P.zip[0]) { set_resp("Choose the mod's .zip first", 1); return; }
-    if (P.zip_size / 1e6 > zip_mb(acc)) { set_resp(error_text("MODS_PUBLISH_SIZE_LIMIT", "The .zip is too large"), 1); return; }
-    if (P.thumb[0] && !level_ok(acc)) { set_resp(error_text("MODS_PUBLISH_THUMB_LEVEL", "A thumbnail needs level 10"), 1); return; }
-    if (P.thumb[0] && P.thumb_size / 1e3 > thumb_kb(acc)) { set_resp(error_text("MODS_PUBLISH_SIZE_LIMIT", "The image is too large"), 1); return; }
+    // the window's submit (game.deob.js:220993-221012); the hub's uploadMod (hub-10.0.7.js:6755-6773) says Loading...
+    // and checks only the .zip's size; kn_brain refuses the rest (a thumbnail's size and level among them)
+    if (P.done) set_resp("Loading...", 0);
+    if (!*s) { set_resp("Mod name is required", 1); return; }
+    if (!P.zip[0]) { set_resp("Select a .zip mod file", 1); return; }
+    if (P.zip_size / 1e6 > zip_mb(acc)) {
+        char t[64];
+        if (P.done) snprintf(t, sizeof t, "Mod.zip size Limit Reached");
+        else snprintf(t, sizeof t, "Mod .zip exceeds %d MB limit", zip_mb(acc));
+        set_resp(t, 1);
+        return;
+    }
+    if (!P.done && P.thumb[0] && !level_ok(acc)) { set_resp("Thumbnails require level 10+", 1); return; }
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "name", s);
     cJSON *sizes = cJSON_AddObjectToObject(body, "assetSizes");
@@ -694,9 +741,9 @@ static void publish(void) {
     snprintf(url, sizeof url, "%s/mods/publish/key?token=%s", backend_url(), token);
     P.gen++;
     P.inflight = 1;
-    set_resp("Asking the server for an upload...", 0);
+    if (!P.done) set_resp("Requesting upload key...", 0);
     if (!backend_http_request("POST", url, json ? json : "{}", on_key, (void *) (uintptr_t) P.gen))
-        up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", "The mod upload failed"));
+        up_end(error_text("MODS_UPLOAD_STORAGE_FAIL", UPLOAD_FAILED));
     free(json);
 }
 
@@ -737,7 +784,7 @@ void mods_ui_favorite(const char *id, const HtmlElem star) {
     const int now = star ? !html_dom_has_class(star, "sel") : 1;
     if (star) html_dom_set_class(star, "sel", now);
     char frame[96];
-    snprintf(frame, sizeof frame, "[\"fvM\",%lld,1,%d]", mid, now);
+    snprintf(frame, sizeof frame, "[\"fvM\",1,%lld,%d]", mid, now); // v10's order: kind, id, flag
     if (account_backend() != ACCOUNT_BACKEND_KRUNKER) backend_social_send_text(frame);
     free(M.data[TAB_FAV].html);
     memset(&M.data[TAB_FAV], 0, sizeof M.data[TAB_FAV]);
@@ -802,14 +849,12 @@ int mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         if (url[0]) load_user_mod("", url, "", "", 0);
     } else if (!strcmp(name, "loadMod") || !strcmp(name, "knModPickLocal")) {
         ed_pick_file(".zip", picked_local, NULL);
-    } else if (!strcmp(name, "knModPick")) {
-        const int thumb = !strcmp(sarg(args, argc, 0), "thumb");
-        if (thumb && !level_ok(active_account())) return 1;
-        ed_pick_file(thumb ? "image/png" : ".zip", picked_publish, thumb ? (void *) 1 : NULL);
-    } else if (!strcmp(name, "selectFile")) { // the hub's popup: selectFile("modThumb" | "modZip")
+    } else if (!strcmp(name, "selectFile")) { // selectFile("modThumb" | "modZip"): the window's links, the hub's buttons
         const int thumb = !strcmp(sarg(args, argc, 0), "modThumb");
+        if (thumb && !P.done && !level_ok(active_account())) return 1; // the window's Locked link
         ed_pick_file(thumb ? "image/png" : ".zip", picked_publish, thumb ? (void *) 1 : NULL);
-    } else if (!strcmp(name, "knModPublish") || !strcmp(name, "uploadMod")) {
+    } else if (!strcmp(name, "windows.18.onFileChange")) { // the file inputs' onchange: no change event natively
+    } else if (!strcmp(name, "windows.18.submit") || !strcmp(name, "uploadMod")) {
         publish();
     } else return -1;
     return 1;

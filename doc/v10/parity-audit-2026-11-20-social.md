@@ -39,9 +39,13 @@ menu's UI windows are other audits.
 | 3 | The map page's Edit button (`openEdit`) did nothing: no popup, so no map funds (`mfnds` -> `mfr`), no Leaderboard Display (`ulb`) and no Open in Editor (`grabMap` -> `edMp`) from the hub. | hub-10.0.7.js:6652-6693, 3796-3803 | `v10_catalog.c` sh_map_funds; `social_ui.c` h_open_edit, h_grab_map, h_chng_map_funds, h_update_map_lb | high | 4a15b6c7 + client commit |
 | 4 | `POST /maps/:id/funds` (the game's Creations window, deob-10.0.7.js:107760-107764) failed on PostgreSQL, which production runs: both UPDATEs bound an unused `$1` that PostgreSQL cannot type. SQLite accepted it, so the SQLite-only route test never caught it. | deob-10.0.7.js:107760 | `v10_catalog.c` run_map_funds | high (a production bug) | 4a15b6c7 |
 
-Intentional difference: the hub's Edit popup shows a 10% "Fee" line (calcMapFee, hub-10.0.7.js:6656-6671), but
-game.js moves the signed amount with no fee, and no fee rule is visible in either bundle. kn_brain moves the
-exact amount for both paths, so the Box Office popup shows no fee line.
+Map funds fee (2026-11-23): the hub's Edit popup (and the editor's copy of it) shows a "KR Fee" of
+floor(amount * 0.1) for either button (calcMapFee, hub-10.0.7.js:6657-6672). kn_brain now charges exactly that on
+`mfnds`, out of what arrives: a deposit takes the whole amount from the account and the map gets the rest; a
+withdrawal takes the whole amount from the map and the account gets the rest. Nobody receives the fee. The ledger
+row (source `map_funds`) records it in `fee`, as the market and gift fees do. Under 10 KR there is no fee, as the
+popup's "None" says. `POST /maps/:id/funds` (the game's Creations window, deob-10.0.7.js:107760-107764) shows no
+fee line and still moves the exact amount.
 
 Tests: `services/brain/tests/community_maps_test.py`, section "the hub's map page tools", on SQLite, PostgreSQL 18
 and MariaDB 11.8.
@@ -105,12 +109,54 @@ handlers (`window.<name>` resolves to `<name>`, html_dom_core.c), and every gene
 - Map page tools: the markup was Box Office's own; now v10's. The Edit popup (openEdit :6653-6656, with the KR Fee
   line of calcMapFee :6657-6671 and chngMapFunds sending parseInt of the field), the Leaderboard board (glbR
   :3804-3822) and Data rows (sdR :3663-3681) with getTime for "time", Delete By Key (deleteDataPop / deleteDataConf
-  :3627-3642: "No Key Provided", YES / NO) and the funds answer (mfr: SUCCESS, else the default error). The KR Fee
-  line is display only in v10's page too; kn_brain moves the exact amount (open: whether krunker.io's `mfnds` took
-  10% is not in any client). hub_creator_e2e.
+  :3627-3642: "No Key Provided", YES / NO) and the funds answer (mfr: SUCCESS, else the default error). kn_brain charges
+  the KR Fee the popup shows (see "Map funds fee" above). hub_creator_e2e, community_maps_test.
 - Publish / Update Mod popup: the markup was the game window's (mods_ui.c publish_form); the hub's is now v10's
   (publishModPopup :6734-6754: publishLeft / publishRight, selectFile, uploadMod, #modResHolder). Box Office keeps
   its own upload transport (the platform file dialog, chunked to kn_brain). hub_creator_e2e.
 - Left as they are: `buyblackM` is KN's `buyIllicit` (same frame, KN adds an idempotency key); `openOneTrust` (the
   ad consent manager, Box Office shows no ads); the documented Box Office additions (KR in trade offers, the
   developers' creator badge, the map page's Versions tab from the game's Creations window).
+
+## Sweep 2026-11-23, second pass
+
+The hub's socket frames (every `send("…")` in hub-10.0.7.js) and its user-facing strings were checked against
+social_ui.c, mods_ui.c and kn_brain.
+
+- Map funds: kn_brain charges the Edit popup's 10% KR Fee on `mfnds` (see "Map funds fee" above).
+  community_maps_test on SQLite, PostgreSQL and MySQL; hub_creator_e2e.
+- `favoriteM(kind, this, id)` (:6616-6622) was a no-op in the hub. It now flips the star's `sel` and sends
+  `["fvM", kind, id, 1|0]`. That is v10's order (the game sends the same, deob-10.0.7.js:228231-228236). kn_brain
+  read `[id, kind, flag]`, so it now reads v10's order. The Mod Manager (mods_ui.c) sends v10's order too. The
+  Games window (servers_ui.c, another agent's file) still sends `[id, 0, flag]`. kn_brain still reads that form: its
+  third element is the kind 0, where v10's is an id. hub_creator_e2e.
+- Followers / following popups (fwsr / fwr :5360-5394): ported to v10. The header is "Your followers" / "You
+  follow" for the viewer's own lists, else "<name>'s followers" / "<name> follows". The viewer's own following
+  rows say Unfollow (`deleteFollower(index, this)` :5395-5406: unfollows, removes the row, counts down
+  #followC and #followCP), other rows say Follow. `viewFollowers(1)` / `viewFollowing(1)` (the feed's counters)
+  show the signed-in account's lists. The request is v10's `["gfs" | "gfg", name, id]`. kn_brain answers
+  `[rows, name, id]`, rows with `friendid`. social_ws_test, hub_creator_e2e.
+- Market Inventory / My Sales stats (#invStats :3308-3349): KN wrote two elements the page does not have, so the
+  line never showed. Now v10's: "N / <skins> Items" and "Est. Value", or "N / 20 (40 premium) On Sale" and
+  "Potential Earnings" (the listings' prices). hub_creator_e2e.
+- The hub's mod upload says "Loading..." and "Mod Uploaded!" (:6755-6773, 6829), and "Mod.zip size Limit
+  Reached" for a .zip over the limit.
+- Left as they are: the pfp image of a follows row or post (`./img/player_pfp.png`; v10 builds a per-player
+  avatar URL that Box Office does not serve); the page titles ("Mods - Krunker Hub", ...); the badge tables
+  (served by kn_brain).
+
+## Upload Mod window (window 19), 2026-11-23
+
+The game's Upload Mod window (mods_pub, deob-10.0.7.js:220943-221050) now uses v10.0.7's own markup:
+#modPubBody, Thumbnail (PNG) with "Level 10 required" / Locked under level 10, Mod File (.zip), Select Thumbnail /
+Select Mod Zip (`selectFile`), the name, #modUpResp and Publish (`windows[18].submit()`). This is not the hub
+popup's markup: the game has its own form, and v10.0.7 decides. The flow is v10's too:
+- `onFileChange` writes the file name into #<id>H's title and "round(size, 2) / limit" into #<id>Size.
+- `submit` checks, in order: "Mod name is required", "Select a .zip mod file", "Mod .zip exceeds N MB limit",
+  "Thumbnails require level 10+".
+- Then "Requesting upload key...", "Uploading...". Errors go through errors.mods.*, else "Mod upload failed.
+  Please try again.".
+- On success the window closes on "Mod Published!" and the Mod Manager opens on My Mods.
+
+As before, selectFile opens the platform file dialog, and the upload is chunked to kn_brain. hub_creator_e2e
+covers it: a stand-in file dialog, the size lines, and a publish landing in published_mods.

@@ -2695,7 +2695,7 @@ static void hub_render_market(const char *a, const cJSON *t) {
                 g_market_row_count = g_market_rows ? n : 0;
                 if (g_market_rows) memcpy(g_market_rows, rows, (size_t) n * sizeof(*rows));
                 snprintf(g_market_sub, sizeof(g_market_sub), "%s", sub);
-                const int inventory = !strcmp(sub, "inventory");
+                const int inventory = !strcmp(sub, "inventory"), sales = !strcmp(sub, "sales");
                 int te = 0;
                 double oe = 0;
                 free(g_market_view);
@@ -2710,19 +2710,26 @@ static void hub_render_market(const char *a, const cJSON *t) {
                     if (inventory && (m->funds || !m->count)) continue;
                     shown++;
                     te++;
-                    oe += (double) estimate_value(m->skin) * m->count;
+                    // the stat's value (hub-10.0.7.js:3321-3322): a sale's price, else the estimate, times the count
+                    const double val = sales ? (double) (long long) m->funds : (double) estimate_value(m->skin);
+                    oe += round(val * (m->count ? m->count : sales ? 1 : 0));
                     if (g_market_view) g_market_view[g_market_view_n++] = v;
                 }
                 if (shown) {
                     vgrid_begin(&g_market_grid, "marketList", g_market_view_n, market_card, NULL);
                     vgrid_html(&g_market_grid, &sb);
                 }
-                char track[96], value[96], v_s[32];
-                snprintf(track, sizeof(track), "%d<span style='color:#fff'> / %d Items</span>", te, g_viewer_skin_count);
+                // #invStats (hub-10.0.7.js:3349): "N / <skins> Items" and Est. Value, or My Sales' "N / 20 (40 premium)
+                // On Sale" and Potential Earnings
+                char stats[400], v_s[32];
                 comma_number(v_s, sizeof(v_s), oe);
-                snprintf(value, sizeof(value), "Est. Value <span style='color:#fff'>%s</span> KR", v_s);
-                set_html("invTrack", track);
-                set_html("invValue", value);
+                if (sales)
+                    snprintf(stats, sizeof(stats), "<div style='display: inline-block;vertical-align: bottom;'><div id='invStat'>%d<span style='color:#fff'> / %d On Sale</span></div>"
+                             "<div id='invStat'>Potential Earnings <span style='color:#fff'>%s</span> KR</div></div>", te, acc && acc->premium > 0 ? 40 : 20, v_s);
+                else
+                    snprintf(stats, sizeof(stats), "<div style='display: inline-block;vertical-align: bottom;'><div id='invStat'>%d<span style='color:#fff'> / %d Items</span></div>"
+                             "<div id='invStat'>Est. Value <span style='color:#fff'>%s</span> KR</div></div>", te, g_viewer_skin_count, v_s);
+                set_html("invStats", stats);
                 free(rows);
             }
         }
@@ -3830,12 +3837,12 @@ static void handle_reply_frame(const cJSON *frame);
 
 // followers / following (v10 viewFollowers / viewFollowing): the popup's rows and state
 static struct FollowState {
-    int open, following;
+    int open, following, own; // own: the list is the viewer's (its id is the account's)
     char title[128];
     double count;
     cJSON *rows;      // the current popup's rows (the list deleteFollower indexes)
 } g_follows;
-static void follows_reply(const cJSON *rows, const char *name, int following);
+static void follows_reply(const cJSON *rows, const char *name, double id, int following);
 
 // The "api" stand-in as the brain's real HTTP route: /api/maps|mods?index=&pos=,
 // /api/search?type=&val= (publicRoutes.ts); the answer is fed back as an "api" frame.
@@ -4003,7 +4010,8 @@ static void handle_reply_frame(const cJSON *frame) {
             io_po(0, STR_MARKET_NONE);
         }
     } else if (!strcmp(label, "fwsr") || !strcmp(label, "fwr")) {
-        follows_reply(cJSON_GetArrayItem(frame, 1), cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)), !strcmp(label, "fwr"));
+        follows_reply(cJSON_GetArrayItem(frame, 1), cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)),
+                      cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 3)), !strcmp(label, "fwr"));
     } else if (!strcmp(label, "chtb")) {
         io_xhtb(cJSON_GetArrayItem(frame, 1));
     } else if (!strcmp(label, "chtl")) {
@@ -5621,6 +5629,7 @@ static const char *kr_source_label(const char *src) {
         {"spin", "Spin"}, {"turf", "Turf Wars"}, {"starting", "Starting KR"}, {"admin", "Adjustment"},
         {"mail", "Mail"}, {"clan-deposit", "Clan deposit"}, {"clan-withdraw", "Clan withdrawal"},
         {"battlepass", "Battle Pass"}, {"battlepass-skip", "Battle Pass tiers"}, {"map_reward", "Map reward"},
+        {"map_funds", "Map funds"},
     };
     for (size_t i = 0; src && i < sizeof(map) / sizeof(map[0]); i++)
         if (!strcmp(src, map[i][0])) return map[i][1];
@@ -6182,7 +6191,7 @@ H(h_publish_popup) { UNUSED; io_po(0, I18N("account.login.required", "Must be lo
 // publishModPopup(publish, mod) (hub-10.0.7.js:6732-6759): the Publish / Update Mod popup. Its form and upload are the
 // menu's Upload Mod (mods_ui.c: the brain's /mods/publish, chunked), whose publish of a name the account already has
 // updates that mod; mod (plm's answer) prefills the name and the thumbnail of an update.
-static void hub_mod_published(void) { io_po(1, "Mod uploaded"); }
+static void hub_mod_published(void) { io_po(1, "Mod Uploaded!"); } // hub-10.0.7.js:6829 (the upload's SUCCESS)
 
 static void hub_mod_popup(const cJSON *mod) {
     if (!g_hub.logged_in) {
@@ -6265,9 +6274,19 @@ H(h_follow_user) {
 }
 
 // viewFollowers / viewFollowing: io.send("gfs"|"gfg", name, id, count, captcha)
+// viewFollowers(own) / viewFollowing(own) (hub-10.0.7.js:5353-5359, 5373-5381): with own (the feed's counters) the
+// lists are the signed-in account's, whose id, name and counts become the viewed profile's first; then
+// io.send("gfs" | "gfg", player_name, player_id)
 H(h_view_follows) {
     UNUSED;
     if (!g_hub.brain) return 1;
+    if (argc >= 1 && arg_n(args, argc, 0, 0)) {
+        const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
+        g_hub.profile_id = acc ? acc->id : 0;
+        snprintf(g_hub.profile_name, sizeof(g_hub.profile_name), "%s", acc ? acc->name : "");
+        g_hub.profile_following = acc ? acc->following : 0;
+        g_hub.profile_followed = acc ? acc->followers : 0;
+    }
     cJSON_Delete(g_follows.rows);
     g_follows.rows = NULL;
     const int following = !strcmp(html_ui_current_handler(), "viewFollowing");
@@ -6276,8 +6295,6 @@ H(h_view_follows) {
     cJSON_AddItemToArray(f, cJSON_CreateString(following ? "gfg" : "gfs"));
     cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(g_hub.profile_id));
-    cJSON_AddItemToArray(f, cJSON_CreateNumber(following ? g_hub.profile_following : g_hub.profile_followed));
-    cJSON_AddItemToArray(f, cJSON_CreateTrue());
     hub_send(f);
     return 1;
 }
@@ -6286,20 +6303,34 @@ H(h_view_follows) {
 // viewFollowers / viewFollowing ask the brain ("gfs" / "gfg"), fwsr / fwr come back with the rows
 // (services/brain/profiles.c) and the popup renders them (social/renamed.js:5346-5399, _1394/_1403).
 
+// fwsr / fwr (hub-10.0.7.js:5360-5372, 5382-5394): "Your followers" / "<name>'s followers", "You follow" /
+// "<name> follows", then a row per player (Since <date>); a row's button is Follow, except the viewer's own
+// following list, whose rows say Unfollow (deleteFollower)
 static void follows_popup(void) {
-    const int self = g_hub.profile_id != 0 && g_follows.title[0] == 0;
-    (void) self;
     StrBuf sb = {0};
     char num[32];
     comma_number(num, sizeof(num), g_follows.count);
-    sb_append(&sb, "<div style='margin-top:-8px;font-size: 22px;margin-bottom:10px;color:#fff;'>");
-    if (g_follows.following) sb_appendf(&sb, "You follow<div style='float: right;color:rgba(255,255,255,0.8)' id='followCP'>%s People</div></div>", num);
-    else {
-        sb_append_esc(&sb, g_follows.title);
-        sb_appendf(&sb, "'s followers<div style='float: right;color:rgba(255,255,255,0.8);' id='followerCP'>%s People</div></div>", num);
+    sb_append(&sb, "<div style='margin-top:-8px;font-size:");
+    if (g_follows.following) {
+        sb_append(&sb, "22px;margin-bottom:10px;color:#fff;'>");
+        if (g_follows.own) sb_append(&sb, "You follow");
+        else {
+            sb_append_esc(&sb, g_follows.title);
+            sb_append(&sb, " follows");
+        }
+        sb_appendf(&sb, "<div style='float:right;color:rgba(255,255,255,0.8)' id='followCP'>%s People</div></div>", num);
+    } else {
+        sb_append(&sb, " 22px;margin-bottom:10px;color:#fff;'>");
+        if (g_follows.own) sb_append(&sb, "Your followers");
+        else {
+            sb_append_esc(&sb, g_follows.title);
+            sb_append(&sb, "'s followers");
+        }
+        sb_appendf(&sb, "<div style='float: right;color:rgba(255,255,255,0.8);' id='followerCP'>%s People</div></div>", num);
     }
     if (cJSON_GetArraySize(g_follows.rows)) {
         const cJSON *r;
+        int i = 0;
         cJSON_ArrayForEach(r, g_follows.rows) {
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "friendname"));
             const int premium = (int) jnum(r, "subscription");
@@ -6311,16 +6342,19 @@ static void follows_popup(void) {
             sb_append_esc(&sb, name ? name : "");
             sb_append(&sb, "' class='lName' style='color:rgba(255,255,255,0.9)'>");
             sb_append_esc(&sb, name ? name : "");
-            sb_append(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:14px;'>Since <span style='color:rgba(255,255,255,0.6)'>");
+            sb_appendf(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:14px;'>%s <span style='color:rgba(255,255,255,0.6)'>", I18N("social.since", "Since"));
             get_date(num, sizeof(num), (char *) cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "date")));
             sb_append_esc(&sb, num);
             sb_append(&sb, "</span></div></div></div>");
-            if (g_hub.logged_in) {
+            if (g_follows.following && g_follows.own) {
+                sb_appendf(&sb, "<div class='reqFollB buttonR' style='float:right;' title='Unfollow' onclick='deleteFollower(%d, this)'>Unfollow</div>", i);
+            } else if (g_follows.following || g_hub.logged_in) {
                 sb_append(&sb, "<div class='reqFollB' style='float:right;' onclick='instaFollo(&quot;");
                 sb_append_esc(&sb, name ? name : "");
                 sb_append(&sb, "&quot;,this)'>Follow</div>");
             }
             sb_append(&sb, "</div>");
+            i++;
         }
     } else {
         sb_append(&sb, "None");
@@ -6330,12 +6364,14 @@ static void follows_popup(void) {
     free(html);
 }
 
-// fwsr(rows, name) / fwr(rows, name)
-static void follows_reply(const cJSON *rows, const char *name, const int following) {
+// fwsr(rows, name, id) / fwr(rows, name, id)
+static void follows_reply(const cJSON *rows, const char *name, const double id, const int following) {
+    const AccountInfo *acc = active_account();
     cJSON_Delete(g_follows.rows);
     g_follows.rows = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : cJSON_CreateArray();
     g_follows.open = 1;
     g_follows.following = following;
+    g_follows.own = g_hub.logged_in && acc && id > 0 && acc->id == (int) id;
     snprintf(g_follows.title, sizeof(g_follows.title), "%s", name ? name : "");
     g_follows.count = following ? g_hub.profile_following : g_hub.profile_followed;
     follows_popup();
@@ -6353,21 +6389,32 @@ H(h_insta_follo) {
     return 1;
 }
 
+// deleteFollower(index, this) (hub-10.0.7.js:5395-5406): the row's player is unfollowed (io.send("f", name, 0)),
+// the row goes, and the profile's following count and the popup's "N People" go down by one
 H(h_delete_follower) {
     (void) user;
-    const char *name = arg_s(ev, args, argc, 0);
-    const HtmlElem btn = argc >= 2 && args[1].kind == HTML_ARG_THIS ? ev->target : 0;
-    if (!name || !g_hub.brain) return 1;
+    const cJSON *row = cJSON_GetArrayItem(g_follows.rows, (int) arg_n(args, argc, 0, -1));
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "friendname"));
+    if (!name) return 1;
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("f"));
     cJSON_AddItemToArray(f, cJSON_CreateString(name));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
     hub_send(f);
+    const HtmlElem btn = argc >= 2 && args[1].kind == HTML_ARG_THIS && ev ? ev->target : 0;
     if (btn) {
-        const HtmlElem row = html_dom_closest(btn, ".friendBHold");
-        if (row) html_dom_remove(row);
+        const HtmlElem holder = html_dom_closest(btn, ".friendBHold");
+        if (holder) html_dom_remove(holder);
     }
-    g_hub.profile_following -= 1; // v10 removes the row and decrements locally
+    g_hub.profile_following -= 1;
+    char num[32], text[160];
+    format_num(num, sizeof(num), g_hub.profile_following); // followC.firstChild: the profile's count
+    snprintf(text, sizeof(text), "%s<span class='follCount'>%s</span>", num, I18N("generic.following", "following"));
+    set_html("followC", text);
+    comma_number(num, sizeof(num), g_hub.profile_following);
+    snprintf(text, sizeof(text), "%s People", num);
+    const HtmlElem cp = el("followCP");
+    if (cp) html_dom_set_text(cp, text);
     return 1;
 }
 
@@ -6799,6 +6846,22 @@ H(h_share_profile) {
     snprintf(url, sizeof(url), "%s/social.html?p=profile&q=%s", origin, g_hub.profile_name);
     html_clipboard_write(url);
     io_po(1, "Link copied");
+    return 1;
+}
+
+// favoriteM(kind, this, id) (hub-10.0.7.js:6616-6622): signed in, the star's sel class flips and
+// io.send("fvM", kind, id, 1 favourite | 0 not)
+H(h_favorite_m) {
+    UNUSED;
+    if (!g_hub.logged_in || !ev || !ev->target) return 1;
+    const int on = !html_dom_has_class(ev->target, "sel");
+    html_dom_set_class(ev->target, "sel", on);
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("fvM"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 2, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(on));
+    hub_send(f);
     return 1;
 }
 
@@ -7495,14 +7558,12 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"createTip", h_create_tip},
     {"cancelTip", h_cancel_tip},
     {"createBadgeTip", h_create_badge_tip},
-    {"knModPick", h_mod_form},
-    {"knModPublish", h_mod_form},
     {"selectFile", h_mod_form},  // the Publish / Update Mod popup (hub-10.0.7.js:6746-6754, mods_ui.c)
     {"uploadMod", h_mod_form},
     {"updateFile", h_noop},      // its hidden file inputs' onchange: selectFile's platform dialog fills them in place
     {"switchFeedTab", h_switch_feed_tab},
     {"toggleView", h_toggle_view},
-    {"favoriteM", h_noop},
+    {"favoriteM", h_favorite_m},
     {"instaFollo", h_insta_follo},
     {"deleteFollower", h_delete_follower},
     {"followUser", h_follow_user},

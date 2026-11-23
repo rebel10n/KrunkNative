@@ -374,10 +374,14 @@ static kn_db_result *run_map_vote(kn_dbconn *c, int n, const char *const *p) {
 }
 static const kn_proc P_MAP_VOTE = {"v10_map_vote", NULL, run_map_vote};
 
-/* (me, map, amount) -> {map_funds, player_funds}: the creator's deposit (> 0) or withdrawal (< 0) */
+/* (me, map, amount, fee percent) -> {map_funds, player_funds}: the creator's deposit (> 0) or withdrawal (< 0).
+ * The fee is floor(|amount| * percent / 100) and comes out of what arrives: a deposit takes the whole amount
+ * from the account and the map gets the rest, a withdrawal takes the whole amount from the map and the account
+ * gets the rest. Nobody receives the fee (the ledger row records it, as the market and gift fees). */
 static kn_db_result *run_map_funds(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    const int64_t amount = PI(2);
+    const int64_t amount = PI(2), pct = PI(3) > 0 ? PI(3) : 0;
+    const int64_t fee = (amount < 0 ? -amount : amount) * pct / 100;
     char ref[24];
     snprintf(ref, sizeof ref, "%s", P(1) ? P(1) : "");
     if (!dbx_exists(&x, SQL(.any = "SELECT 1 FROM published_maps WHERE map_id = $2 AND creator_id = $1 AND deleted_at IS NULL"),
@@ -387,10 +391,10 @@ static kn_db_result *run_map_funds(kn_dbconn *c, int n, const char *const *p) {
     }
     int64_t player = 0;
     if (amount > 0) {
-        if (db_add_funds(&x, PI(0), -amount, "map_funds", ref, &player) < 0) return dbx_finish(&x, NULL);
+        if (db_add_funds_ex(&x, PI(0), -amount, "map_funds", ref, 0, fee, &player) < 0) return dbx_finish(&x, NULL);
         /* only the parameters a statement uses: PostgreSQL cannot type an unused $n */
         if (dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_funds = map_funds + {int:$2} WHERE map_id = $1"),
-                     KN_DB_ARGS(P(1), I64S(amount))) < 0)
+                     KN_DB_ARGS(P(1), I64S(amount - fee))) < 0)
             return dbx_finish(&x, NULL);
     } else {
         if (dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_funds = map_funds - {int:$2} WHERE map_id = $1 AND map_funds >= {int:$2}"),
@@ -398,7 +402,7 @@ static kn_db_result *run_map_funds(kn_dbconn *c, int n, const char *const *p) {
             dbx_refuse(&x, "Not enough map funds");
             return dbx_finish(&x, NULL);
         }
-        if (db_add_funds(&x, PI(0), -amount, "map_funds", ref, &player) < 0) return dbx_finish(&x, NULL);
+        if (db_add_funds_ex(&x, PI(0), -amount - fee, "map_funds", ref, 0, fee, &player) < 0) return dbx_finish(&x, NULL);
     }
     const int64_t funds = dbx_int(&x, SQL(.any = "SELECT map_funds FROM published_maps WHERE map_id = $1"), KN_DB_ARGS(P(1)), 0);
     cJSON *v = cJSON_CreateObject();
@@ -750,7 +754,7 @@ static void op_account(kn_http_req *req, int64_t id, void *ud) {
         kn_db_call(db, &P_MAP_VOTE, KN_DB_ARGS(me, map, n1), on_map_proc, o);
         break;
     case OP_FUNDS:
-        kn_db_call(db, &P_MAP_FUNDS, KN_DB_ARGS(me, map, n1), on_map_proc, o);
+        kn_db_call(db, &P_MAP_FUNDS, KN_DB_ARGS(me, map, n1, "0"), on_map_proc, o); /* game.js's Creations window: no fee */
         break;
     case OP_LB:
         kn_db_call(db, &P_MAP_LB, KN_DB_ARGS(me, map, n1, n2, o->s1), on_map_proc, o);
@@ -1080,9 +1084,10 @@ void v10_catalog_map_by_name(kn_http_req *req, const char *name) {
  *   ["dkd", mapId, key]                  -> ["po", "SUCCESS", null, text]                (:3649-3653)
  *   ["mfnds", mapId, 0 deposit | 1 withdraw, amount] -> ["mfr", playerFunds | null]     (:6673-6678, 3796-3803)
  * The leaderboard's settings come from the map's LEADERBOARD object (ulb / the HTTP route), not from the frame. A
- * refusal of dd / dkd / mfnds is the hub's "po" error. mfnds moves the exact amount, as the game's Creations window
- * (deob-10.0.7.js:107760-107764, updateMapFunds with the signed amount): the hub's 10% "Fee" line (calcMapFee,
- * hub-10.0.7.js:6656-6671) has no rule in game.js, so the Box Office hub shows none. */
+ * refusal of dd / dkd / mfnds is the hub's "po" error. mfnds charges the "KR Fee" its Edit popup shows (calcMapFee,
+ * hub-10.0.7.js:6657-6672, and the editor's copy): floor(amount * 0.1), out of what arrives, in both directions.
+ * POST /maps/:id/funds moves the exact amount, as the game's Creations window shows no fee
+ * (deob-10.0.7.js:107760-107764, updateMapFunds with the signed amount). */
 
 typedef struct HubBoard {
     char name[160];
@@ -1246,7 +1251,9 @@ static void hub_funds_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_Delete(v);
 }
 
-/* ["mfnds", mapId, 0 deposit | 1 withdraw, amount]: the creator's map funds (P_MAP_FUNDS, the signed amount) */
+/* ["mfnds", mapId, 0 deposit | 1 withdraw, amount]: the creator's map funds (P_MAP_FUNDS, the signed amount)
+ * less the 10% fee both screens that send it show (the hub's and the editor's calcMapFee, floor(amount * 0.1)) */
+#define MAP_FUNDS_FEE "10"
 void sh_map_funds(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     const int64_t map_id = fa_int(f, 1, 0), amount = fa_int(f, 3, 0);
@@ -1257,7 +1264,7 @@ void sh_map_funds(SocialSession *s, const cJSON *f) {
     char me[24], map[24], signed_amount[24];
     acct_itoa(map, map_id);
     acct_itoa(signed_amount, fa_int(f, 2, 0) == 1 ? -amount : amount);
-    social_call(s, &P_MAP_FUNDS, KN_DB_ARGS(social_viewer(s, me), map, signed_amount), hub_funds_done, NULL);
+    social_call(s, &P_MAP_FUNDS, KN_DB_ARGS(social_viewer(s, me), map, signed_amount, MAP_FUNDS_FEE), hub_funds_done, NULL);
 }
 
 /* ---- the route table */

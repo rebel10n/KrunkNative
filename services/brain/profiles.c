@@ -302,13 +302,14 @@ void sh_follow(SocialSession *s, const cJSON *f) {
 typedef struct FollowCtx {
     char label[8];
     char name[64];
+    double id; /* the request's player id, echoed: the popup compares it with the viewer's (hub-10.0.7.js:5361, 5383) */
 } FollowCtx;
 
 static void follow_list_done(SocialSession *s, kn_db_result *res, void *extra) {
     FollowCtx *c = extra;
     cJSON *rows = kn_db_ok(res) ? kn_db_result_to_json(res) : cJSON_CreateArray();
     if (!kn_db_ok(res)) acct_db_error(res, c->label);
-    social_send_n(s, c->label, 2, rows, cJSON_CreateString(c->name));
+    social_send_n(s, c->label, 3, rows, cJSON_CreateString(c->name), c->id > 0 ? cJSON_CreateNumber(c->id) : cJSON_CreateNull());
 }
 
 static void follow_list(SocialSession *s, const cJSON *f, int followers) {
@@ -317,21 +318,22 @@ static void follow_list(SocialSession *s, const cJSON *f, int followers) {
     if (!c) return;
     snprintf(c->label, sizeof c->label, "%s", followers ? "fwsr" : "fwr");
     snprintf(c->name, sizeof c->name, "%s", name ? name : "");
+    c->id = (double) fa_int(f, 2, 0);
     const char *sql = followers
-        ? "SELECT r.player_name AS friendname, r.player_featured AS featured, "
+        ? "SELECT r.player_id AS friendid, r.player_name AS friendname, r.player_featured AS featured, "
           "CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END AS subscription, w.created_at AS date "
           "FROM follows w JOIN player_rows r ON r.player_id = w.follower_id "
           "WHERE w.followee_id = " ACCOUNT_ID_OF_1 " ORDER BY w.created_at DESC LIMIT 500"
-        : "SELECT r.player_name AS friendname, r.player_featured AS featured, "
+        : "SELECT r.player_id AS friendid, r.player_name AS friendname, r.player_featured AS featured, "
           "CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END AS subscription, w.created_at AS date "
           "FROM follows w JOIN player_rows r ON r.player_id = w.followee_id "
           "WHERE w.follower_id = " ACCOUNT_ID_OF_1 " ORDER BY w.created_at DESC LIMIT 500";
     social_query(s, SQL(.any = sql), KN_DB_ARGS(c->name), follow_list_done, c);
 }
 
-/* ["gfs", name, id, count, captcha] -> ["fwsr", rows, name] (followers) */
+/* ["gfs", name, id, count, captcha] -> ["fwsr", rows, name, id] (followers; hub-10.0.7.js:5358, 5360-5372) */
 void sh_followers(SocialSession *s, const cJSON *f) { follow_list(s, f, 1); }
-/* ["gfg", name, id, count, captcha] -> ["fwr", rows, name] (following) */
+/* ["gfg", name, id, count, captcha] -> ["fwr", rows, name, id] (following; :5380, 5382-5394) */
 void sh_following(SocialSession *s, const cJSON *f) { follow_list(s, f, 0); }
 
 /* ------------------------------------------------------------------ profile tabs */

@@ -15,6 +15,9 @@ kn_brain on sqlite + one client_bin at a time, logged in from seeded storage and
   4. Market > Trading > History pages (loadMoreTradeHistory)
   5. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
      Remove unfollows
+  6. the menu's Upload Mod (window 19, v10's mods_pub, game.deob.js:220943-221050): v10's markup and texts, the
+     Select links through the platform file dialog (a stand-in zenity prints the picked path), the size lines and
+     titles onFileChange writes, and a publish that lands in published_mods and closes on "Mod Published!"
 Screenshots go to the work dir (~/.cache/kn-hub-creator.*, kept on failure or with KN_KEEP=1).
 77 = skip (no client_bin / kn_brain / websockets).
 """
@@ -28,6 +31,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+import struct
+import zlib
 
 try:
     import websockets
@@ -48,6 +54,13 @@ FAILS = []
 WORK = tempfile.mkdtemp(prefix="kn-hub-creator.", dir=os.path.expanduser("~/.cache"))
 DB = os.path.join(WORK, "coordinator.db")
 PREFAB_LEADERBOARD = 72
+# the platform file dialog (ed_pick_file runs zenity): a stand-in that prints the path in PICK, the file "picked"
+PICK_BIN = os.path.join(WORK, "bin")
+PICK = os.path.join(WORK, "pick.txt")
+os.makedirs(PICK_BIN, exist_ok=True)
+with open(os.path.join(PICK_BIN, "zenity"), "w") as f:
+    f.write("#!/bin/sh\ncat '%s'\n" % PICK)
+os.chmod(os.path.join(PICK_BIN, "zenity"), 0o755)
 
 
 def check(cond, what):
@@ -114,7 +127,7 @@ async def register(port, name):
 class Client:
     """One headless client_bin on the hub, as `name`."""
 
-    def __init__(self, port, name, token, query, tag):
+    def __init__(self, port, name, token, query, tag, hub=True):
         self.cmds = os.path.join(WORK, tag + ".cmds")
         self.log = os.path.join(WORK, tag + ".log")
         self.tag = tag
@@ -128,9 +141,10 @@ class Client:
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
         env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
                     "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UI_CMDS": self.cmds, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                    "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port})
+                    "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port,
+                    "PATH": PICK_BIN + os.pathsep + os.environ.get("PATH", "")})
         self.out = open(self.log, "w")
-        self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT, "--hub", query], stdout=self.out, stderr=subprocess.STDOUT,
+        self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT] + (["--hub", query] if hub else []), stdout=self.out, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, env=env, cwd=ROOT, start_new_session=True)
 
     def text(self):
@@ -254,18 +268,19 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
               "calcMapFee: 300 KR shows a -30 KR fee: %r" % c.textof("#mapFeeVal"))
         c.shot("edit")
         c.ui("chngMapFunds(%d, 0)" % map_id)
-        check(wait(lambda: one("SELECT map_funds FROM published_maps WHERE map_id = ?", map_id) == 300) and
-              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 700, "Deposit: 300 KR into the map")
+        check(wait(lambda: one("SELECT map_funds FROM published_maps WHERE map_id = ?", map_id) == 270) and
+              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 700,
+              "Deposit: 300 KR leave the account, the map gets 270 (the 30 KR fee the popup showed)")
         check(c.text_has("#genericPop", "Success!"), "mfr: v10's SUCCESS popup")
-        c.ui("clearPops();openEdit('%s', %d, 300)" % (map_name, map_id))
+        c.ui("clearPops();openEdit('%s', %d, 270)" % (map_name, map_id))
         c.type("mapFundsInp", "100")
         c.ui("chngMapFunds(%d, 1)" % map_id)
-        check(wait(lambda: one("SELECT map_funds FROM published_maps WHERE map_id = ?", map_id) == 200) and
-              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 800, "Withdraw: 100 KR back")
-        check(c.text_has("#profileKR", "800"), "the KR in the nav bar follows")
+        check(wait(lambda: one("SELECT map_funds FROM published_maps WHERE map_id = ?", map_id) == 170) and
+              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 790, "Withdraw: 100 KR from the map, 90 KR back")
+        check(c.text_has("#profileKR", "790"), "the KR in the nav bar follows")
 
         upd = one("SELECT map_updatecounter FROM published_maps WHERE map_id = ?", map_id)
-        c.ui("clearPops();openEdit('%s', %d, 200)" % (map_name, map_id))
+        c.ui("clearPops();openEdit('%s', %d, 170)" % (map_name, map_id))
         c.type("leaderTypeCust", "Laps")
         c.ui("updateMapLB(%d)" % map_id)
         check(wait(lambda: one("SELECT map_updatecounter FROM published_maps WHERE map_id = ?", map_id) == upd + 1),
@@ -365,6 +380,8 @@ def trade_history(port, ids, tokens, names):
     for i in range(35):
         q("INSERT INTO trades (sender_id, receiver_id, status, closed_at) VALUES (?, ?, 'declined', strftime('%Y-%m-%d %H:%M:%f', 'now'))",
           A if i % 2 else B, B if i % 2 else A)
+    q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, 20, 1)", A)
+    q("INSERT INTO market_listings (seller_id, skin_id, price) VALUES (?, 21, 1234)", A)
     c = Client(port, names[0], tokens[0], "p=market&q=trades", "trades")
     try:
         check(c.has("tn_his", 60), "the Trading tab")
@@ -384,6 +401,79 @@ def trade_history(port, ids, tokens, names):
         c.type("newCustImg", "https://example.com/scope.png")
         c.ui("addNewImage()")
         check(c.text_has(".kn-image-grid", "Blue Scope", 10), "the new image is in the collection")
+        # the Inventory / My Sales stats (#invStats, hub-10.0.7.js:3308-3349)
+        c.ui("clearPops();updateWindow('market','inventory',null,null,'store')")
+        check(wait(lambda: re.match(r"^1 / \d+ ItemsEst\. Value [\d,]+ KR$", c.textof("#invStats") or ""), 15),
+              "Inventory: N / <skins> Items, Est. Value: %r" % c.textof("#invStats"))
+        c.ui("updateWindow('market','sales',null,null,'store')")
+        check(wait(lambda: (c.textof("#invStats") or "") == "1 / 20 On SalePotential Earnings 1,234 KR", 15),
+              "My Sales: 1 / 20 On Sale, Potential Earnings (the listing's price): %r" % c.textof("#invStats"))
+    finally:
+        c.close()
+
+
+def png(w, h, pad=0):
+    raw = b"".join(b"\0" + b"\x80\x40\x20\xff" * w for _ in range(h))
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    text = chunk(b"tEXt", b"c\0" + b"x" * pad) if pad else b""
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) + text +
+            chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def pick(path):
+    with open(PICK, "w") as f:
+        f.write(path + "\n")
+
+
+def mod_window(port, ids, tokens, names, stamp):
+    """the menu's Upload Mod (window 19): v10.0.7's mods_pub (game.deob.js:220943-221050)"""
+    A = ids[0]
+    zpath, tpath = os.path.join(WORK, "pack.zip"), os.path.join(WORK, "thumb.png")
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:  # stored: the size line shows a real MB figure
+        z.writestr("textures/ak_0.png", png(2, 2, 1500000))
+    with open(tpath, "wb") as f:
+        f.write(png(4, 4, 2000))
+    zmb = "%g" % (round(os.path.getsize(zpath) / 1e6 * 100) / 100)
+    tkb = "%g" % (round(os.path.getsize(tpath) / 1e3 * 100) / 100)
+    c = Client(port, names[0], tokens[0], "", "modwin", hub=False)
+    try:
+        check(c.has("menuHolder", 90) or c.has("uiBase", 30), "the game's menu")
+        opened = False
+        for _ in range(10):  # signed in once the account has loaded; before that it is the static "log in" text
+            c.ui("showWindow(19)")
+            opened = c.has("modPubBody", 4)
+            if opened:
+                break
+        check(opened, "Upload Mod opens v10's form (#modPubBody)")
+        check((c.textof("#modThumbSize") or "") == "0 / 250 KB" and (c.textof("#modZipSize") or "") == "0 / 25 MB",
+              "the limits: 0 / 250 KB, 0 / 25 MB (no premium): %r %r" % (c.textof("#modThumbSize"), c.textof("#modZipSize")))
+        body = c.textof("#modPubBody") or ""
+        check(body.startswith("Thumbnail (PNG)") and "Mod File (.zip)" in body and "Select Thumbnail" in body and
+              "Select Mod Zip" in body and body.endswith("Publish"), "v10's labels and links: %r" % body)
+        check(c.count("#modPubBody [onclick='windows[18].submit()']") == 1 and c.count("input[id=modNameNew][placeholder='Mod Name']") == 1,
+              "Publish is windows[18].submit(), the name's placeholder Mod Name")
+        c.ui("windows[18].submit()")
+        check(c.text_has("#modUpResp", "Mod name is required", 5), "no name: %r" % c.textof("#modUpResp"))
+        c.type("modNameNew", "Window Pack " + stamp)
+        c.ui("windows[18].submit()")
+        check(c.text_has("#modUpResp", "Select a .zip mod file", 5), "no .zip: %r" % c.textof("#modUpResp"))
+        pick(zpath)
+        c.ui("selectFile('modZip')")
+        check(wait(lambda: (c.textof("#modZipSize") or "") == zmb + " / 25 MB", 5) and c.count("#modZipH[title='pack.zip']") == 1,
+              "onFileChange: the .zip's size line %s / 25 MB and its name in #modZipH's title: %r" % (zmb, c.textof("#modZipSize")))
+        pick(tpath)
+        c.ui("selectFile('modThumb')")
+        check(wait(lambda: (c.textof("#modThumbSize") or "") == tkb + " / 250 KB", 5) and c.count("#modThumbH[title='thumb.png']") == 1,
+              "onFileChange: the thumbnail's size line %s / 250 KB and its title: %r" % (tkb, c.textof("#modThumbSize")))
+        check((c.value("modNameNew") or "") == "Window Pack " + stamp, "picking a file keeps the typed name")
+        c.shot("upload-mod")
+        c.ui("windows[18].submit()")
+        check(wait(lambda: one("SELECT count(*) FROM published_mods WHERE mod_name = ? AND creator_id = ?", "Window Pack " + stamp, A) == 1, 60),
+              "Publish: the mod is in published_mods")
+        check(c.text_has("#popupContent", "Mod Published!", 10), "v10's SUCCESS popup: Mod Published!")
+        check(c.count("#modPubBody") == 0, "the window closed")
     finally:
         c.close()
 
@@ -403,6 +493,29 @@ async def friends(port, ids, tokens, names, bob_sock):
         c.ui("removeFriend(0)")
         check(wait(lambda: not q("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?", A, B)), "Remove unfollowed bob")
         check(wait(lambda: c.count("#chatBubHold .chatBlobImg[onclick]") == 0, 10), "and his bubble left the sidebar")
+        # the feed's own Followers / Following (viewFollowers(1) / viewFollowing(1), hub-10.0.7.js:5353-5406)
+        c.ui("clearPops();viewFollowers(1)")
+        check(c.text_has("#genericPop", "Your followers") and c.text_has("#genericPop", names[1]) and
+              c.count("#genericPop .reqFollB[onclick^='instaFollo']") == 1, "Your followers: bob, with Follow: %r" % c.textof("#genericPop"))
+        q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?)", A, B)
+        c.ui("clearPops();viewFollowing(1)")
+        check(c.text_has("#genericPop", "You follow") and c.text_has("#genericPop", names[1]) and
+              c.count("#genericPop .reqFollB.buttonR[title='Unfollow']") == 1, "You follow: bob, with Unfollow: %r" % c.textof("#genericPop"))
+        c.cmd("clicksel 0 #genericPop .reqFollB.buttonR")
+        check(wait(lambda: not q("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?", A, B)) and
+              wait(lambda: c.count("#genericPop .friendBHold") == 0, 5), "Unfollow (deleteFollower): bob unfollowed, his row gone")
+        # favoriteM(kind, this, id) on the Mods page: io.send("fvM", 1, id, 1), the star turns sel (hub-10.0.7.js:6616-6622)
+        mod_id = one("SELECT mod_id FROM published_mods WHERE creator_id = ? ORDER BY mod_id LIMIT 1", B)
+        c.ui("clearPops();updateWindow('mods')")
+        time.sleep(1.5)
+        c.ui("windows[1].switchTab(2)")  # New: every mod, newest first
+        star = "#modsHolder .creationAction[onclick='favoriteM(1, this, %d);']" % mod_id
+        if wait(lambda: c.count(star) == 1, 20):
+            c.cmd("clicksel 0 " + star)
+            check(wait(lambda: q("SELECT 1 FROM creation_favs WHERE account_id = ? AND kind = 1 AND creation_id = ?", A, mod_id), 10)
+                  and c.count(star.replace(".creationAction", ".creationAction.sel")) == 1, "favoriteM: the mod is a favourite, its star sel")
+        else:
+            check(False, "the Mods page lists bob's mod with its star: %r" % (c.textof("#modsHolder") or "")[:400])
     finally:
         c.close()
 
@@ -415,6 +528,7 @@ def main():
         json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
                    "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "hubc-e2e-%d" % os.getpid(),
                              "ranked": {"season": 9}},
+                   "uploads": {"dir": os.path.join(WORK, "uploads"), "mod_cooldown_ms": 0},
                    "accounts": {"signup_rewards": {"enabled": False}, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0,
                                 "password_iterations": 1000, "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
     brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -456,6 +570,7 @@ def main():
         map_page(port, ids, tokens, names, map_name, map_id, stamp)
         staff_profile(port, ids, tokens, names)
         trade_history(port, ids, tokens, names)
+        mod_window(port, ids, tokens, names, stamp)
 
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", ids[0], ids[1], ids[1], ids[0])
 

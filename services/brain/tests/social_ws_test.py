@@ -339,9 +339,10 @@ async def scenario(base, internal_url, secret):
         r = await b.call("0", "r", "profile", alice, bob_id, bob, None, 0)
         check(r[6] == [{"f": 1}] and r[3]["player_followed"] == 1, "follow counted")
         r = await b.call("fwsr", "gfs", alice, alice_id, 1, "c")
-        check(len(r[1]) == 1 and r[1][0]["friendname"] == bob and r[2] == alice, "followers list")
+        check(len(r[1]) == 1 and r[1][0]["friendname"] == bob and r[1][0]["friendid"] == bob_id and r[2] == alice
+              and r[3] == alice_id, "followers list: rows (friendid, friendname), the name and the id asked for: %r" % (r,))
         r = await b.call("fwr", "gfg", bob, bob_id, 1, "c")
-        check(len(r[1]) == 1 and r[1][0]["friendname"] == alice, "following list")
+        check(len(r[1]) == 1 and r[1][0]["friendname"] == alice and r[3] == bob_id, "following list")
 
         r = await b.call("spR", "sp", alice[:4], "c")
         check(r[1] and any(x["player_name"] == alice for x in r[1]), "player search")

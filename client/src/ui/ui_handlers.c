@@ -592,8 +592,9 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"loadModURL", h_mods},
     {"loadMod", h_mods},
     {"knModPickLocal", h_mods},
-    {"knModPick", h_mods},
-    {"knModPublish", h_mods},
+    {"selectFile", h_mods}, // Upload Mod (window 19, v10's mods_pub): the Select links, submit, the file inputs
+    {"windows.18.submit", h_mods},
+    {"windows.18.onFileChange", h_mods},
     // WP-E Host Game rows (ui_host_config.c, routed through servers_ui_handle; the flow's own rows: host_flow_ui.c)
     {"windows.7.toggle", h_servers},
     {"windows.7.changeWep", h_servers},

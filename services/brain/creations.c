@@ -734,12 +734,17 @@ static void silent_done(SocialSession *s, kn_db_result *res, void *extra) {
     if (!kn_db_ok(res)) social_error(s, acct_db_error(res, "creation"));
 }
 
-/* ["fvM", id, kind 0 map | 1 mod, 1 fav | 0 unfav] (no reply) */
+/* ["fvM", kind 0 map | 1 mod, id, 1 fav | 0 unfav] (no reply): v10.0.7's order, the hub's favoriteM
+ * (hub-10.0.7.js:6616-6622) and the game's (deob-10.0.7.js:228231-228236). The order KrunkNative sent before,
+ * ["fvM", id, 0, flag], is still read (the Games window, servers_ui.c): its third element is the kind 0, where v10's
+ * is an id (from 1). */
 void sh_fav_creation(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24], id[24], kind[24];
-    acct_itoa(id, fa_int(f, 1, 0));
-    acct_itoa(kind, fa_int(f, 2, 0) ? 1 : 0);
+    const int64_t a = fa_int(f, 1, 0), b = fa_int(f, 2, 0);
+    const int v10 = (a == 0 || a == 1) && b >= 1;
+    acct_itoa(id, v10 ? b : a);
+    acct_itoa(kind, (v10 ? a : b) ? 1 : 0);
     if (fa_int(f, 3, 1))
         social_query(s, SQL(.pg = "INSERT INTO creation_favs (kind, creation_id, account_id) VALUES ($2, $3, $1) ON CONFLICT DO NOTHING",
                             .any = "{insert_ignore} INTO creation_favs (kind, creation_id, account_id) VALUES ($2, $3, $1) {ignore_conflicts}"),
