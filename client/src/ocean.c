@@ -7,12 +7,14 @@
 // 1, 6) - 1]; Water: normal map textures/water_0.png, sun direction / colour from the map's
 // skyLight at creation (white and zero without one), fog, FrontSide, transparent unless
 // opacity 1.
-// Differences (documented): the reflectionQuality setting is not ported (map dependent, its
-// default); the mirror pass clips below the water with a discard plane instead of three's
+// The reflection setting is reflectionQuality (deob-10.0.7.js:196299, :210599): 0 "Map Dependent" keeps ocRefRes,
+// 1..6 replaces it when the next map loads (needsRestart).
+// Differences (documented): the mirror pass clips below the water with a discard plane instead of three's
 // oblique near plane; the mirror camera keeps the player's roll (the sampled view is the same).
 #include <gl.h>
 #include <ocean.h>
 #include <shadow.h>
+#include <render_settings.h> // reflection: reflectionQuality
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,7 +133,9 @@ void ocean_load(const Map *map) {
     const float width = ocean_clamp(ocean_float(raw, "ocW", 1000.0f), 100.0f, 20000.0f);
     const float length = ocean_clamp(ocean_float(raw, "ocL", 1000.0f), 100.0f, 20000.0f);
     static const int resolutions[6] = {32, 64, 128, 256, 1024, 2048};
-    const int quality = (int) ocean_clamp(ocean_float(raw, "ocRefRes", 3.0f), 1.0f, 6.0f);
+    // limitMM(reflectionQuality || ocRefRes, 1, 6) (deob-10.0.7.js:196299)
+    const int setting = client_render_settings()->reflection;
+    const int quality = (int) ocean_clamp(setting ? (float) setting : ocean_float(raw, "ocRefRes", 3.0f), 1.0f, 6.0f);
     g_ocean.resolution = resolutions[quality - 1];
 
     // skyLight ? position.normalize() / colour : (0, 0, 0) / white

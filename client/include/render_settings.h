@@ -46,6 +46,7 @@ typedef struct {
     int particles;           // particles: particle manager active (VFX reads ui settings itself)
     float particles_dist;    // particlesDist
     float render_dist;       // renderDist: camera.far = v * 60
+    int reflection;          // reflection (restart): reflectionQuality, 0 = the map's ocRefRes, 1..6 the ocean mirror size (ocean.c)
     int shadows, soft_shadows, high_res_shadows, dynamic_shadows; // shadow map flags; read by client/src/shadow.c (soft/dynamic not ported yet)
     int ambient_shading;     // ambientShading: ambient_0/1 AO plane groups (not generated yet: flag)
     int show_trails, your_trails, muzzle_flash; // showTrails/yourTrails/muzzleFlash (VFX)

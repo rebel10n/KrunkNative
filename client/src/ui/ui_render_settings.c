@@ -466,6 +466,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("particles", particles, NULL),                 // PARTICLES.active
     RS_F("particlesDist", particles_dist, NULL),        // PARTICLES.partDst
     RS_F("renderDist", render_dist, apply_render_dist), // camera.far = v * 60
+    RS_I("reflection", reflection, NULL),               // RENDER.reflectionQuality (deob-10.0.7.js:210599): ocean.c
     RS_SHARED_B("shadows", shadows, NULL),              // toggleShadowMap
     RS_SHARED_B("softShad", soft_shadows, NULL),        // toggleShadQual: PCFSoft vs Basic
     RS_SHARED_B("highResShad", high_res_shadows, NULL), // shadow map 4096
