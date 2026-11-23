@@ -97,7 +97,8 @@ def run_client(tag, script, brain_url, game_port, timeout=240):
                 "KRUNKNATIVE_DEBUG": "1", "KRUNKNATIVE_BRAIN_URL": brain_url,
                 # nothing reaches production: no server finder, krunker.io's hosts are a dead local port
                 "KRUNKNATIVE_FINDER_URL": "off", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:9",
-                "KRUNKNATIVE_KRUNKER_SOCIAL": "http://127.0.0.1:9/social", "KRUNKNATIVE_KRUNKER_EDITOR": "http://127.0.0.1:9/editor"})
+                "KRUNKNATIVE_KRUNKER_SOCIAL": "http://127.0.0.1:9/social", "KRUNKNATIVE_KRUNKER_EDITOR": "http://127.0.0.1:9/editor",
+                "KRUNKNATIVE_KRUNKER_USER_ASSETS": "http://127.0.0.1:9"})
     with open(log, "w") as out:
         p = subprocess.Popen([CLIENT, "--mode", "online", "--brain", brain_url, "--finder", "off",
                               "--connect", "127.0.0.1:%d" % game_port],
@@ -168,6 +169,10 @@ def scenario(brain_url, game_port):
 7200 grep @ashburn Ashburn_1 [id=menuWindow]
 7300 call windows.7.servInd= 0
 7310 call windows.7.switchTab2 3
+7400 grep @duration Duration [id=menuWindow]
+7410 grep @single single-core [id=menuWindow]
+7500 clickid rentServBtn
+7600 text @nogame [id=dediHostErr]
 7800 call showGames 2
 8800 call selectHostMap "Kanji" 0 "" ""
 9500 grep @game Kanji [id=menuWindow]
@@ -177,17 +182,25 @@ def scenario(brain_url, game_port):
 12500 text @msg [id=dediHostErr]
 12600 call windows.7.switchTab2 1
 13200 grep @mine Ashburn_1 [id=menuWindow]
+13210 attr @thumb style [id=menuWindow] .serverCardI
 13300 quit
 """, brain_url, game_port)
     check("signed in", "[account] logged in as %s" % NAME in log, "log in " + WORK)
     check("Host Game has the Rent a Server card", grep(log, "@card") >= 1)
     check("the card opens the rental window's regions (Available counts)", grep(log, "@regions") >= 1, text(log, "@tabs"))
     check("New York lists Ashburn_1", grep(log, "@ashburn") >= 1)
+    check("the free server: Rental Duration, Cloud Compute single-core (deob-10.0.7.js:219931)",
+          grep(log, "@duration") >= 1 and grep(log, "@single") >= 1)
+    nogame = text(log, "@nogame")
+    check("Rent Server without a game: v10's \"Please select a game to host\"", nogame == "Please select a game to host", nogame)
     check("the Games window's pick comes back as the server's game", grep(log, "@game") >= 1)
     check("30 days cost 7,500 KR (dediPrices[0])", text(log, "@cost") == "7,500", text(log, "@cost"))
     msg = text(log, "@msg") or ""
     check("Rent Server: the brain's answer in #dediHostErr", "rented" in msg.lower(), msg)
     check("My Servers lists the rented server", grep(log, "@mine") >= 1)
+    thumb = re.search(r"\[input_script\] attr t=\d+ @thumb n=\d+ style=(.*)", log)
+    check("its card shows the game's user-assets thumbnail (/m<gid>/thumb.png)", thumb and "/thumb.png" in thumb.group(1),
+          thumb.group(1) if thumb else "")
     acc = [(ACC[0],)]
     funds = sql("SELECT player_funds FROM players WHERE player_id = ?", ACC[0])
     check("the brain charged 7,500 KR", funds and funds[0][0] == 22500, funds)

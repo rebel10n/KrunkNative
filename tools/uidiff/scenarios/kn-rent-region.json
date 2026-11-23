@@ -73,5 +73,5 @@
       ]
     ]
   },
-  "note": "Rent Dedicated Server (rent_servers_ui.c, doc/v10/rented-servers.md): Krunker v10.0.7's buyServ pages (deob-10.0.7.js:219853-219938) with Box Office's own markup and wording over the page's serverCard / rentServBtn styles. Reference: KN's own render. This one: tab 2: New York's servers, the rented one greyed."
+  "note": "Rent Dedicated Server (rent_servers_ui.c, doc/v10/rented-servers.md): Krunker v10.0.7's buyServ pages (deob-10.0.7.js:219853-219938) with Krunker's markup and wording. Reference: KN's own render (10.0.7 has no entry point to capture this window from). This one: tab 2: New York's servers, the rented one greyed."
 }

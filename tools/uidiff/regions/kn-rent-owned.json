@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#menuWindow, Rent a Server (rent_servers_ui.c): tab 3: the owner's server: Time left, Extend Rental and Restart / Update."
+      "note": "#menuWindow, Rent Dedicated Server (rent_servers_ui.c): tab 3: the owner's server: Time remaining, Extend Time, Change Game, Extend Rental and Restart/Update."
     }
   ]
 }

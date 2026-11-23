@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#menuWindow, Rent a Server (rent_servers_ui.c): tab 0: the listed regions with their free servers (New York: 1 Available)."
+      "note": "#menuWindow, Rent Dedicated Server (rent_servers_ui.c): tab 0: the listed regions with their free servers (New York: 1 Available)."
     }
   ]
 }

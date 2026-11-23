@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#menuWindow, Rent a Server (rent_servers_ui.c): tab 1: My Servers (the account's Ashburn_3)."
+      "note": "#menuWindow, Rent Dedicated Server (rent_servers_ui.c): tab 1: My Servers (the account's Ashburn_3)."
     }
   ]
 }

@@ -79,9 +79,12 @@ that card: "Dedicated", with the background `/img/host-bg/2.png` (Krunker_v7.1.4
   - Before sending, the client hides both buttons and shows "Please Wait..." in white.
 - `dsrvl` (S2C, `DEDI_BUY_RESPONSE`, :98672; handler `iiiîïíî` :225183 -> `windows[7].dediRes`,
   :219811-219823):
-  - `[0, servers]` replaces `dediServers.data` and redraws the window;
-  - `[1, message, keepHidden]` shows the message in white and shows the buttons again unless
-    `keepHidden` is set.
+  - `[0, servers]` replaces `dediServers.data` and redraws the window, so a message on the page is
+    gone (`#dediHostErr` is drawn hidden and empty);
+  - `[1, message, keepHidden]` shows the message (`innerHTML`) in white and shows the buttons again
+    unless `keepHidden` is set.
+- The list is asked for only the first time the window is drawn (`dediServers` is then `{}`), so later
+  opens show the last list the server sent.
 
 A server row is `{ID, REG, TRM, OID, SVN, SID, CONF}`:
 - `TRM`: milliseconds left; `<= 0` means free.
@@ -120,8 +123,10 @@ social socket with Krunker's labels and argument order.
 
 ### `rdsrv` rules (services/brain/rentals.c)
 
-Every refusal is `["dsrvl", 1, text, false]`. Every success is `["dsrvl", 1, text, true]` followed by
-the fresh list `["dsrvl", 0, rows]`. The texts are Box Office's own.
+Every refusal is `["dsrvl", 1, text, false]`. Every success is the fresh list `["dsrvl", 0, rows]`
+followed by `["dsrvl", 1, text, true]`: the list's redraw would wipe a message sent before it, and
+`keepHidden` only means anything when no redraw follows. The texts are the server's, which the
+10.0.7 bundle does not contain, so Box Office's own.
 
 | case | result |
 | --- | --- |
@@ -184,8 +189,12 @@ server_bin's `dedicated 1` (server.cfg):
 ### Client (client/src/ui/rent_servers_ui.c)
 
 - The window is host type 2's Host Game window, drawn in C with Krunker's element ids (`rentServBtn`,
-  `updDediServBtn`, `dediHostDur`, `dediCostI`, `dediHostErr`) and the page's existing classes. The
-  copy is Box Office's own.
+  `updDediServBtn`, `dediHostDur`, `dediCostI`, `dediHostErr`), Krunker's markup and Krunker's
+  wording. The cards' thumbnails are the user-assets `/m<gid>/thumb.png` that 10.0.7 asks for.
+- `rdsrv` carries `typ` as `#dediHostDur`'s text value and the rent button's id as text, as 10.0.7's
+  do; the brain reads both.
+- One Box Office message: "Not connected to Box Office servers." when the social socket is down and
+  the frame can't be sent (Krunker's game socket would queue it).
 - Handlers: `windows.7.switchTab2`, `windows.7.dediCst`, `rentDediServer`, and `showGames(2)` (the
   Games window, whose Host button picks the rental's game).
 - **Entry point.** The Host chooser (window 42) gets v7.1.4's Dedicated card back. It is the only way

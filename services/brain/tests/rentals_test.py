@@ -194,12 +194,13 @@ def agent_poll(port, host):
 
 async def rent(sock, sid, game, update=None):
     frame = ["rdsrv", sid, game] + ([update] if update is not None else [])
-    r = await sock.call("dsrvl", *frame)
-    while r[1] != 1:  # a stray list
-        r = await sock.call("dsrvl")
-    if r[3] is True:  # a success is followed by the fresh list
-        while (await sock.call("dsrvl"))[1] != 0:
-            pass
+    sock.inbox = [f for f in sock.inbox if f[0] != "dsrvl"]
+    r, before = await sock.call("dsrvl", *frame), None
+    while r[1] != 1:  # the fresh list (a success's, or a stray one)
+        before, r = r, await sock.call("dsrvl")
+    # a success's list comes first: dediRes [0] redraws the window and would wipe the text (deob-10.0.7.js:219812)
+    if r[3] is True:
+        check(before is not None and before[1] == 0, "rdsrv: a success sends the fresh list before its text")
     return r
 
 

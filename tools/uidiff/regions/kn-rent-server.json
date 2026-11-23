@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#menuWindow, Rent a Server (rent_servers_ui.c): tab 3: a free server with a chosen game, 30 days for 7,500 KR."
+      "note": "#menuWindow, Rent Dedicated Server (rent_servers_ui.c): tab 3: a free server with a chosen game, 30 days for 7,500 KR."
     }
   ]
 }

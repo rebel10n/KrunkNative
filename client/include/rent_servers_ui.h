@@ -6,7 +6,7 @@
 #include <html_dom.h>
 #include <ui_logic.h> // StrBuf
 
-// The window opened (openHostWindow(false, 2)): the Rent Server tab, the list asked for again.
+// The window opened (openHostWindow(false, 2)): the Rent Server tab, no chosen game (the list is kept).
 void rent_servers_ui_open(void);
 // The window's markup (the Host Game window's generator for host type 2).
 char *rent_servers_ui_gen(void);

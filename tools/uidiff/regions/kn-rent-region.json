@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#menuWindow, Rent a Server (rent_servers_ui.c): tab 2: New York's servers, the rented one greyed."
+      "note": "#menuWindow, Rent Dedicated Server (rent_servers_ui.c): tab 2: New York's servers, the rented one greyed."
     }
   ]
 }

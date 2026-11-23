@@ -1,17 +1,21 @@
 // Rent Dedicated Server (Krunker v10.0.7 hostTypes[2], buyServ; client/include/rent_servers_ui.h,
-// doc/v10/rented-servers.md). Behaviour is Krunker's, the markup and wording are Box Office's own:
-//   - windows[7].gen with buyServ (deob-10.0.7.js:219853-219938): tab 0 the regions with their free servers,
-//     tab 1 the player's rented servers, tab 2 a region's servers (a rented one greyed, not clickable), tab 3 one
-//     server: its details, Time remaining, the duration select (#dediHostDur: 30 / 60 / 90 days), the game
-//     (showGames(2)), the cost (#dediCostI), the message line (#dediHostErr), Rent Server / Extend Rental
-//     (#rentServBtn) and the owner's Restart/Update (#updDediServBtn);
+// doc/v10/rented-servers.md). Krunker's markup and wording:
+//   - windows[7].gen with buyServ (deob-10.0.7.js:219853-219938): tab 0 the regions with their free servers
+//     ("N Available"), tab 1 the player's rented servers, tab 2 a region's servers (a rented one greyed, not
+//     clickable), each a card with the game's thumbnail (user-assets /m<gid>/thumb.png); tab 3 one server: its
+//     details, Time remaining, Rental Duration / Extend Time (#dediHostDur: 30 / 60 / 90 Days, CONF.typ
+//     selected), Select / Change Game (showGames(2)), the terms and Server Cost (#dediCostI), then outside the
+//     panel the message line (#dediHostErr), Rent Server / Extend Rental (#rentServBtn) and the owner's
+//     Restart/Update (#updDediServBtn);
 //   - switchTab2(i) (:219801-219805) clears the chosen game on tab 0; dediCst(v) the cost line (:219824-219826);
-//   - rentDediServer(id, update) (:204642-204668): no game -> "select a game" in red; else both buttons hidden,
-//     "Please wait" and ["rdsrv", id, {typ, mid, gnm}, update] (+ cr / key: the published map's creator, the
-//     catalogue key, Box Office's additions that tell kn_rentd which map to load);
-//   - dediRes (:219811-219823): [0, rows] the list, [1, text, keepHidden] the message (white), the buttons back
-//     unless keepHidden.
-// The list is asked for the first time the window is drawn (["dsrvl"], :219866) and again on every open.
+//   - rentDediServer(id, update) (:204642-204668): no game -> "Please select a game to host" in red; else both
+//     buttons hidden, "Please Wait..." and ["rdsrv", id, {typ: #dediHostDur's value, mid, gnm}, update] (+ cr /
+//     key: the published map's creator, the catalogue key, Box Office's additions that tell kn_rentd which map
+//     to load);
+//   - dediRes (:219811-219823): [0, rows] the list, redrawn; [1, text, keepHidden] the message (innerHTML,
+//     white), the buttons back unless keepHidden.
+// The list is asked for the first time the window is drawn (["dsrvl"], :219864-219866); after that only the
+// brain's answers replace it.
 #include <rent_servers_ui.h>
 
 #include <backend.h>    // backend_social_send_text
@@ -47,14 +51,9 @@ static struct {
     cJSON *data;  // dediServers.data (owned); NULL until the list arrived
     int requested;
     int picking;  // showGames(2) is open for this window
-    int typ;      // the duration select's value
     struct {
         char id[24], name[96], creator[48], key[96];
     } game;       // iîìîìíi: the chosen game ({id, name}); name "" = none
-    struct {
-        char text[256], color[16];
-        int buttons; // 0 the buttons hidden (a request on its way), 1 shown
-    } msg;           // #dediHostErr: kept across the list's re-render that follows an answer; text "" = none
 } R;
 
 static int region_of(const cJSON *row) {
@@ -107,23 +106,34 @@ static int owns(const cJSON *row) {
     return a && a->id > 0 && num(row, "TRM") > 0 && (int) num(row, "OID") == a->id;
 }
 
-// the CONF of a row with time left, as JSON (NULL otherwise; caller frees)
+// JSON.parse(CONF || '{}') of a row with time left (a free row's is {}): NULL for {} (caller frees)
 static cJSON *conf_of(const cJSON *row) {
     const char *t = str(row, "CONF");
     return num(row, "TRM") > 0 && t[0] ? cJSON_Parse(t) : NULL;
 }
 
-static void request_list(void) {
-    R.requested = 1;
-    backend_social_send_text("[\"dsrvl\"]");
+// iìïïiïî('/m' + gid + '/thumb.png'): the user-assets thumbnail, gid as JS prints it (undefined when the CONF has
+// none). servers_ui.c's carousel reads the same KRUNKNATIVE_KRUNKER_USER_ASSETS override (tests, scenarios).
+static void thumb_url(char *out, const size_t size, const cJSON *gid, const char *chosen) {
+    const char *over = getenv("KRUNKNATIVE_KRUNKER_USER_ASSETS");
+    const char *base = over && over[0] ? over : "https://user-assets.krunker.io";
+    char g[64] = "undefined";
+    if (chosen) snprintf(g, sizeof(g), "%s", chosen[0] ? chosen : "undefined");
+    else if (cJSON_IsNumber(gid)) snprintf(g, sizeof(g), "%.15g", gid->valuedouble);
+    else if (cJSON_IsString(gid)) snprintf(g, sizeof(g), "%s", gid->valuestring);
+    else if (cJSON_IsNull(gid)) snprintf(g, sizeof(g), "null");
+    else if (cJSON_IsBool(gid)) snprintf(g, sizeof(g), "%s", cJSON_IsTrue(gid) ? "true" : "false");
+    snprintf(out, size, "%s/m%s/thumb.png", base, g);
 }
+
+// once per run, like dediServers; a draw before the social socket is up asks again on the next one
+static void request_list(void) { R.requested = backend_social_send_text("[\"dsrvl\"]") != 0; }
 
 static void rerender(void) { menu_rerender_if_open(MENU_WINDOW_HOST); }
 
 // ------------------------------------------------------------------ markup
 
 static void tab_bar(StrBuf *sb) {
-    static const char *const keys[2] = {"kn.rent.tab.rent", "kn.rent.tab.mine"};
     static const char *const names[2] = {"Rent Server", "My Servers"}; // buyTabs (:219806-219810)
     const int deep = R.tab >= 2;
     sb_append(sb, "<div class='bigMenTabs' style='margin-top:0px !important;margin-left:0px;'>");
@@ -131,7 +141,7 @@ static void tab_bar(StrBuf *sb) {
         sb_appendf(sb, "<div class='bigMenTab%s%s' onclick='playSelect();", R.tab == i ? " bigMenTabA" : "", deep ? " bigMenTabDis" : "");
         if (!deep) sb_appendf(sb, "windows[7].switchTab2(%d)", i);
         sb_append(sb, "' onmouseenter='playTick(0.1);'>");
-        sb_append_esc(sb, I18N(keys[i], names[i]));
+        sb_append(sb, names[i]);
         sb_append(sb, "</div>");
     }
     if (deep)
@@ -140,11 +150,18 @@ static void tab_bar(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
-static void card(StrBuf *sb, const char *onclick, const int greyed, const char *flag, const char *title, const char *side) {
+// a serverCard: style (NULL = none), onclick (NULL = none), the thumbnail (NULL = none: tab 0's regions), the flag,
+// the name and the side text
+static void card(StrBuf *sb, const char *style, const char *onclick, const char *thumb, const char *flag, const char *title, const char *side) {
     sb_append(sb, "<div class='serverCard'");
-    if (greyed) sb_append(sb, " style='filter:grayscale(100%);cursor:default;'");
+    if (style) sb_appendf(sb, " style='%s'", style);
     if (onclick) sb_appendf(sb, " onclick='%s'", onclick);
-    sb_append(sb, "><div class='serverCardI'></div>");
+    sb_append(sb, ">");
+    if (thumb) {
+        sb_append(sb, "<div style='background-image:url(");
+        sb_append_esc(sb, thumb);
+        sb_append(sb, ")' class='serverCardI'></div>");
+    }
     sb_appendf(sb, "<img class='serverFlag' src='img/flags/3x2/%s.svg' />", flag);
     sb_append(sb, "<div class='serverCardInfo'><span style='padding-left:10px;color:#fff;'>");
     sb_append_esc(sb, title);
@@ -153,15 +170,9 @@ static void card(StrBuf *sb, const char *onclick, const int greyed, const char *
     sb_append(sb, "</span></div></div>");
 }
 
-static void notice(StrBuf *sb, const char *text) {
-    sb_append(sb, "<div style='color:#fff;text-align:center;margin-top:20px;'>");
-    sb_append_esc(sb, text);
-    sb_append(sb, "</div>");
-}
-
 static void row_name(const cJSON *row, char *out, const size_t size) { snprintf(out, size, "%s_%d", str(row, "SVN"), (int) num(row, "SID")); }
 
-static void tab_regions(StrBuf *sb) {
+static void tab_regions(StrBuf *sb) { // :219874-219880
     int free_in[REGION_COUNT] = {0};
     const cJSON *row;
     cJSON_ArrayForEach(row, R.data) {
@@ -170,16 +181,16 @@ static void tab_regions(StrBuf *sb) {
     }
     for (int i = 0; i < REGION_COUNT; i++) {
         if (k_regions[i].unlisted) continue;
-        char click[96], side[64];
+        char click[96], side[32];
         snprintf(click, sizeof(click), "windows[7].servInd=%d;playSelect();windows[7].switchTab2(2);", i);
-        snprintf(side, sizeof(side), "%d %s", free_in[i], I18N("kn.rent.available", "Available"));
-        card(sb, click, 0, k_regions[i].flag, k_regions[i].city, side);
+        snprintf(side, sizeof(side), "%d Available", free_in[i]);
+        card(sb, NULL, click, NULL, k_regions[i].flag, k_regions[i].city, side);
     }
 }
 
-static void tab_mine(StrBuf *sb) {
+static void tab_mine(StrBuf *sb) { // :219881-219899
     if (!R.data) {
-        notice(sb, I18N("kn.rent.loading", "Loading..."));
+        sb_append(sb, "<div style='text-align:center;color:#fff'>Loading...</div>");
         return;
     }
     int shown = 0, i = 0;
@@ -187,20 +198,23 @@ static void tab_mine(StrBuf *sb) {
     cJSON_ArrayForEach(row, R.data) {
         const int r = region_of(row);
         if (r >= 0 && owns(row)) {
-            char click[96], name[96];
+            char click[96], name[96], thumb[256];
             snprintf(click, sizeof(click), "windows[7].servInd=%d;playSelect();windows[7].switchTab2(3);", i);
             row_name(row, name, sizeof(name));
-            card(sb, click, 0, k_regions[r].flag, name, I18N("kn.rent.cloud", "Cloud Compute"));
+            cJSON *conf = conf_of(row);
+            thumb_url(thumb, sizeof(thumb), cJSON_GetObjectItemCaseSensitive(conf, "gid"), NULL);
+            cJSON_Delete(conf);
+            card(sb, NULL, click, thumb, k_regions[r].flag, name, "Cloud Compute");
             shown++;
         }
         i++;
     }
-    if (!shown) notice(sb, I18N("kn.rent.none.mine", "You aren't renting any servers yet."));
+    if (!shown) sb_append(sb, "<div style='color:#fff;text-align:center;'>No available servers</div>");
 }
 
-static void tab_region(StrBuf *sb) {
+static void tab_region(StrBuf *sb) { // :219900-219917
     if (!R.data) {
-        notice(sb, I18N("kn.rent.loading", "Loading..."));
+        sb_append(sb, "<div style='text-align:center;color:#fff;'>Loading...</div>");
         return;
     }
     int shown = 0, i = 0;
@@ -208,101 +222,85 @@ static void tab_region(StrBuf *sb) {
     cJSON_ArrayForEach(row, R.data) {
         if (region_of(row) == R.serv_ind) {
             const int rented = num(row, "TRM") > 0;
-            char click[96], name[96];
+            char click[96], name[96], thumb[256];
             snprintf(click, sizeof(click), "windows[7].servInd=%d;playSelect();windows[7].switchTab2(3);", i);
             row_name(row, name, sizeof(name));
-            card(sb, rented ? NULL : click, rented, k_regions[R.serv_ind].flag, name,
-                 rented ? I18N("kn.rent.taken", "Rented") : I18N("kn.rent.cloud", "Cloud Compute"));
+            cJSON *conf = conf_of(row);
+            thumb_url(thumb, sizeof(thumb), cJSON_GetObjectItemCaseSensitive(conf, "gid"), NULL);
+            cJSON_Delete(conf);
+            card(sb, rented ? "filter:grayscale(100%);" : "", rented ? NULL : click, thumb, k_regions[R.serv_ind].flag, name, "Cloud Compute");
             shown++;
         }
         i++;
     }
-    if (!shown) notice(sb, I18N("kn.rent.none.region", "No servers to rent in this region right now."));
+    if (!shown) sb_append(sb, "<div style='color:#fff;text-align:center;'>No available servers</div>");
 }
 
 static void detail(StrBuf *sb, const char *label, const char *value) {
-    sb_append(sb, "<div class='settName' style='font-size:20px;'>");
-    sb_append_esc(sb, label);
-    sb_append(sb, " <span class='floatR'>");
+    sb_appendf(sb, "<div class='settName' style='font-size:20px;'>%s <span class='floatR'>", label);
     sb_append_esc(sb, value);
     sb_append(sb, "</span></div>");
 }
 
-static void tab_server(StrBuf *sb) {
+// CONF.typ || 0 (a number, or the select's value as text)
+static int conf_typ(const cJSON *conf) {
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(conf, "typ");
+    const int v = cJSON_IsNumber(t) ? t->valueint : cJSON_IsString(t) ? atoi(t->valuestring) : 0;
+    return v >= 0 && v < 3 ? v : 0;
+}
+
+static void tab_server(StrBuf *sb) { // :219918-219935
     const cJSON *row = cJSON_GetArrayItem(R.data, R.serv_ind);
     const int r = row ? region_of(row) : -1;
-    if (r < 0) {
-        notice(sb, I18N("kn.rent.loading", "Loading..."));
-        return;
-    }
-    char name[96], text[160];
+    if (r < 0) return;
+    char name[96], text[160], thumb[256];
     row_name(row, name, sizeof(name));
     cJSON *conf = conf_of(row);
     const int mine = owns(row);
     const char *current = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(conf, "mn"));
-    const cJSON *ctyp = cJSON_GetObjectItemCaseSensitive(conf, "typ");
-    if (cJSON_IsNumber(ctyp) && ctyp->valueint >= 0 && ctyp->valueint < 3 && R.typ < 0) R.typ = ctyp->valueint;
-    if (R.typ < 0 || R.typ > 2) R.typ = 0;
-    card(sb, NULL, 0, k_regions[r].flag, name, I18N("kn.rent.cloud", "Cloud Compute"));
+    const int typ = conf_typ(conf);
+    thumb_url(thumb, sizeof(thumb), cJSON_GetObjectItemCaseSensitive(conf, "gid"), R.game.name[0] ? R.game.id : NULL);
+    card(sb, NULL, NULL, thumb, k_regions[r].flag, name, "Cloud Compute");
     sb_append(sb, "<div class='setBodH' style='width:731px;display:inline-block;margin-top:8px;margin-left:10px;'>");
-    detail(sb, I18N("kn.rent.name", "Server Name"), name);
-    detail(sb, I18N("kn.rent.region", "Region"), k_regions[r].region);
-    detail(sb, I18N("kn.rent.city", "City"), k_regions[r].city);
-    detail(sb, I18N("kn.rent.type", "Type"), I18N("kn.rent.type.value", "Cloud Compute, one core"));
+    detail(sb, "Server Name", name);
+    detail(sb, "Server Region", k_regions[r].region);
+    detail(sb, "City", k_regions[r].city);
+    detail(sb, "Type", "Cloud Compute single-core");
     sb_append(sb, "</div><div class='setBodH' style='margin-top:10px;'>");
     if (num(row, "TRM") > 0) {
         rent_servers_ui_time(num(row, "TRM"), text, sizeof(text));
-        sb_append(sb, "<div class='settName' style='font-size:20px;padding-bottom:15px;padding-top:10px;'>");
-        sb_append_esc(sb, I18N("kn.rent.left", "Time left"));
-        sb_append(sb, "<span style='float:right;color:#c2c2c2;'>");
+        sb_append(sb, "<div class='settName' style='font-size:20px;padding-bottom:15px;padding-top:10px;'>Time remaining"
+                      "<span style='float:right;color:#c2c2c2;'>");
         sb_append_esc(sb, text);
         sb_append(sb, "</span></div>");
     }
-    sb_append(sb, "<div class='settName' style='font-size:20px;padding-bottom:15px;padding-top:10px;'>");
-    sb_append_esc(sb, mine ? I18N("kn.rent.extend.for", "Add time") : I18N("kn.rent.duration", "Rent for"));
-    sb_append(sb, "<select onchange='windows[7].dediCst(this.value)' class='inputGrey2' style='margin-top:-5px;' id='dediHostDur'>");
-    for (int i = 0; i < 3; i++) {
-        sb_appendf(sb, "<option value='%d'%s>%d ", i, i == R.typ ? " selected=''" : "", k_days[i]);
-        sb_append_esc(sb, I18N("kn.rent.days", "days"));
-        sb_append(sb, "</option>");
-    }
-    sb_append(sb, "</select></div><div class='settName' style='font-size:20px;padding-bottom:15px;padding-top:10px;'>");
-    sb_append_esc(sb, mine ? I18N("kn.rent.game.change", "Game") : I18N("kn.rent.game.pick", "Game to host"));
-    sb_append(sb, "<span class='floatR' style='margin-top:-5px;'><a href='javascript:showGames(2);'>");
-    sb_append_esc(sb, R.game.name[0] ? R.game.name : current && current[0] ? current : I18N("kn.rent.game.none", "Choose a game"));
-    sb_append(sb, "</a></span></div>");
+    sb_appendf(sb, "<div class='settName' style='font-size:20px;padding-bottom:15px;padding-top:10px;'>%s"
+                   "<select onchange='windows[7].dediCst(this.value)' class='inputGrey2' style='margin-top:-5px;' id='dediHostDur'>",
+               mine ? "Extend Time" : "Rental Duration");
+    for (int i = 0; i < 3; i++) sb_appendf(sb, "<option value='%d' %s>%d Days</option>", i, i == typ ? " selected=''" : "", k_days[i]);
+    sb_appendf(sb, "</select></div><div class='settName' style='font-size:20px;padding-bottom:15px;padding-top:10px;'>%s"
+                   "<span class='floatR' style='margin-top:-5px;'><a href='javascript:showGames(2);'>",
+               mine ? "Change Game" : "Select Game");
+    sb_append_esc(sb, R.game.name[0] ? R.game.name : current && current[0] ? current : "Select Game");
     char cost[32];
-    thousands(cost, sizeof(cost), k_price[R.typ]);
-    sb_append(sb, "<div class='setBodH' style='margin-top:20px;padding-bottom:5px;padding-top:15px;'>");
-    sb_append_esc(sb, I18N("kn.rent.terms", "The rental is paid up front in KR and runs around the clock until its time is up. "
-                                            "A new server can take up to 10 minutes to start; one that never starts is refunded."));
-    sb_append(sb, "<div class='settName' style='font-size:20px;padding-top:10px;border-top: 3px solid rgba(255, 255, 255, 0.2);'>");
-    sb_append_esc(sb, I18N("kn.rent.cost", "Cost"));
-    sb_appendf(sb, "<span class='floatR' style='color:#fff'><span id='dediCostI' style='color:rgba(255,255,255,0.7)'>%s</span> KR</span></div></div>", cost);
-    sb_appendf(sb, "<div style='font-size:22px;padding-left:10px;margin-top:20px;display:%s;width:100%%;text-align:center;color:%s' id='dediHostErr'>",
-               R.msg.text[0] ? "block" : "none", R.msg.color[0] ? R.msg.color : "#fff");
-    sb_append_esc(sb, R.msg.text);
-    sb_append(sb, "</div>");
+    thousands(cost, sizeof(cost), k_price[typ]);
+    sb_appendf(sb, "</a></span></div><div class='setBodH' style='margin-top:20px;padding-bottom:5px;padding-top:15px;'>"
+                   "By renting a server, you agree to the <a>Terms &amp; Conditions</a>. It may take up to 10 minutes for a server to "
+                   "become available once it starts up.<div class='settName' style='font-size:20px;padding-top:10px;border-top: 3px solid "
+                   "rgba(255, 255, 255, 0.2);'>Server Cost<span class='floatR' style='color:#fff'><span id='dediCostI' "
+                   "style='color:rgba(255,255,255,0.7)'>%s</span> KR</span></div></div></div>",
+               cost);
+    sb_append(sb, "<div style='font-size:22px;padding-left:10px;margin-top:20px;display:none;width:100%;text-align:center;' id='dediHostErr'></div>");
     const int id = (int) num(row, "ID");
-    const char *hide = R.msg.text[0] && !R.msg.buttons ? "display:none;" : "";
-    sb_appendf(sb, "<div id='rentServBtn' onclick='rentDediServer(%d);' style='%s%s'>", id, mine ? "width:calc(50% - 20px);" : "", hide);
-    sb_append_esc(sb, mine ? I18N("kn.rent.extend", "Extend Rental") : I18N("kn.rent.rent", "Rent Server"));
-    sb_append(sb, "</div>");
-    if (mine) {
-        sb_appendf(sb, "<div id='updDediServBtn' onclick='rentDediServer(%d, 1)' style='%s'>", id, hide);
-        sb_append_esc(sb, I18N("kn.rent.update", "Restart / Update"));
-        sb_append(sb, "</div>");
-    }
-    sb_append(sb, "</div>");
+    sb_appendf(sb, "<div id='rentServBtn' onclick='rentDediServer(`%d`);' style='%s'>%s</div>", id, mine ? "width:calc(50% - 20px);" : "",
+               mine ? "Extend Rental" : "Rent Server");
+    if (mine) sb_appendf(sb, "<div id='updDediServBtn' onclick='rentDediServer(%d, 1)'>Restart/Update</div>", id);
     cJSON_Delete(conf);
 }
 
 char *rent_servers_ui_gen(void) {
     if (!R.data && !R.requested) request_list();
     StrBuf sb = {0};
-    sb_append(&sb, "<div class='hostHeader' style='margin-bottom:15px;width:100%;margin-top:-10px;padding-left:15px;'>");
-    sb_append_esc(&sb, I18N("kn.rent.title", "Rent a Server"));
-    sb_append(&sb, "</div>");
     tab_bar(&sb);
     if (R.tab == 0) tab_regions(&sb);
     else if (R.tab == 1) tab_mine(&sb);
@@ -326,42 +324,45 @@ void rent_servers_ui_chooser_card(StrBuf *sb) {
 
 static cJSON *g_fixture; // a scenario's rows (rent_servers_ui_scenario): no brain to ask
 
+// openHostWindow(false, 2) (:225502-225512): the chosen game cleared. dediServers is kept from the window's first
+// draw (:219864-219866), so the list is not asked for again.
 void rent_servers_ui_open(void) {
     R.tab = 0;
-    R.typ = -1;
     R.picking = 0;
     memset(&R.game, 0, sizeof(R.game));
-    memset(&R.msg, 0, sizeof(R.msg));
-    cJSON_Delete(R.data);
-    R.data = g_fixture ? cJSON_Duplicate(g_fixture, 1) : NULL;
-    R.requested = g_fixture != NULL;
+    if (g_fixture) {
+        cJSON_Delete(R.data);
+        R.data = cJSON_Duplicate(g_fixture, 1);
+        R.requested = 1;
+    }
 }
 
 void rent_servers_ui_scenario(const cJSON *fixture) {
     cJSON_Delete(g_fixture);
     const cJSON *rows = cJSON_GetObjectItemCaseSensitive(fixture, "rows");
     g_fixture = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : NULL;
+    if (!g_fixture) {
+        cJSON_Delete(R.data);
+        R.data = NULL;
+        R.requested = 0;
+    }
     rent_servers_ui_open();
     const char *game = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(fixture, "game"));
     if (game) snprintf(R.game.name, sizeof(R.game.name), "%s", game);
 }
 
 static void switch_tab2(const int tab) {
-    memset(&R.msg, 0, sizeof(R.msg));
     if (tab == 0 && !g_fixture) memset(&R.game, 0, sizeof(R.game));
-    if (tab != 3) R.typ = -1;
     R.tab = tab < 0 ? 0 : tab > 3 ? 3 : tab;
     rerender();
 }
 
-static void show_message(const char *text, const char *color, const int buttons) {
-    snprintf(R.msg.text, sizeof(R.msg.text), "%s", text ? text : "");
-    snprintf(R.msg.color, sizeof(R.msg.color), "%s", color ? color : "#fff");
-    if (buttons >= 0) R.msg.buttons = buttons;
+// #dediHostErr: shown, its innerHTML and colour; buttons 0 hides both, 1 shows both, -1 leaves them
+static void show_message(const char *html, const char *color, const int buttons) {
     HtmlElem e = html_dom_by_id("dediHostErr");
     if (e) {
         html_dom_set_style(e, "display", "block");
-        html_dom_set_text(e, text);
+        html_dom_set_html(e, html ? html : "");
         html_dom_set_style(e, "color", color);
     }
     if (buttons >= 0) {
@@ -371,41 +372,46 @@ static void show_message(const char *text, const char *color, const int buttons)
     }
 }
 
-static void rent(const int id, const int update) {
-    const cJSON *row = NULL, *r;
-    cJSON_ArrayForEach(r, R.data) if ((int) num(r, "ID") == id) row = r;
+// rentDediServer(id, update): the game is the chosen one, else the shown server's (windows[7].servInd) CONF while
+// it has time left; typ is #dediHostDur's value as text
+static void rent(const char *id, const int update) {
+    const cJSON *row = cJSON_GetArrayItem(R.data, R.serv_ind);
     cJSON *conf = row ? conf_of(row) : NULL;
-    const char *cur = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(conf, "mn"));
-    if (!R.game.name[0] && !(cur && cur[0])) {
-        cJSON_Delete(conf);
-        show_message(I18N("kn.rent.game.missing", "Choose a game for the server first."), "#ff3232", -1);
+    if (!R.game.name[0] && !conf) {
+        show_message("Please select a game to host", "#ff3232", -1);
         return;
     }
-    show_message(I18N("kn.rent.wait", "Please wait..."), "#fff", 0);
+    show_message("Please Wait...", "#fff", 0);
+    char typ[16] = "0";
+    HtmlElem dur = html_dom_by_id("dediHostDur");
+    if (dur) html_dom_get_value(dur, typ, sizeof(typ));
+    if (!typ[0]) snprintf(typ, sizeof(typ), "0");
     cJSON *frame = cJSON_CreateArray(), *game = cJSON_CreateObject();
     cJSON_AddItemToArray(frame, cJSON_CreateString("rdsrv"));
-    cJSON_AddItemToArray(frame, cJSON_CreateNumber(id));
-    cJSON_AddNumberToObject(game, "typ", R.typ >= 0 ? R.typ : 0);
+    char *end = NULL;
+    const double n = strtod(id, &end); // `ID` (rent / extend) is text, ID (update) a number
+    cJSON_AddItemToArray(frame, update && end && end != id && !*end ? cJSON_CreateNumber(n) : cJSON_CreateString(id));
+    cJSON_AddStringToObject(game, "typ", typ);
     if (R.game.name[0]) {
-        if (R.game.id[0]) cJSON_AddStringToObject(game, "mid", R.game.id);
-        else cJSON_AddNullToObject(game, "mid");
+        if (R.game.id[0]) cJSON_AddStringToObject(game, "mid", R.game.id); // undefined: left out, as JSON.stringify does
         cJSON_AddStringToObject(game, "gnm", R.game.name);
         if (R.game.creator[0]) cJSON_AddStringToObject(game, "cr", R.game.creator);
         if (R.game.key[0]) cJSON_AddStringToObject(game, "key", R.game.key);
     } else { // the server's own game (CONF gid / mn, and Box Office's cr / key)
-        const cJSON *gid = cJSON_GetObjectItemCaseSensitive(conf, "gid");
-        cJSON_AddItemToObject(game, "mid", gid ? cJSON_Duplicate(gid, 1) : cJSON_CreateNull());
-        cJSON_AddStringToObject(game, "gnm", cur);
+        const cJSON *gid = cJSON_GetObjectItemCaseSensitive(conf, "gid"), *mn = cJSON_GetObjectItemCaseSensitive(conf, "mn");
+        if (gid) cJSON_AddItemToObject(game, "mid", cJSON_Duplicate(gid, 1));
+        if (mn) cJSON_AddItemToObject(game, "gnm", cJSON_Duplicate(mn, 1));
         const char *cr = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(conf, "cr"));
         const char *key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(conf, "key"));
         if (cr && cr[0]) cJSON_AddStringToObject(game, "cr", cr);
         if (key && key[0]) cJSON_AddStringToObject(game, "key", key);
     }
     cJSON_AddItemToArray(frame, game);
-    if (update) cJSON_AddItemToArray(frame, cJSON_CreateNumber(1));
+    if (update) cJSON_AddItemToArray(frame, cJSON_CreateNumber(update));
     char *text = cJSON_PrintUnformatted(frame);
     cJSON_Delete(frame);
     cJSON_Delete(conf);
+    // Box Office's: the social socket is down (Krunker's game socket queues the frame and the window waits)
     if (!text || !backend_social_send_text(text)) show_message(I18N("kn.rent.offline", "Not connected to Box Office servers."), "#ff3232", 1);
     free(text);
 }
@@ -413,14 +419,15 @@ static void rent(const int id, const int update) {
 void rent_servers_ui_frame(const cJSON *frame) {
     const cJSON *kind = cJSON_GetArrayItem(frame, 1);
     if (!cJSON_IsNumber(kind)) return;
-    if (kind->valueint == 0) { // the list
+    if (kind->valueint == 0) { // the list, redrawn (the message line with it)
         const cJSON *rows = cJSON_GetArrayItem(frame, 2);
         cJSON_Delete(R.data);
         R.data = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : cJSON_CreateArray();
         rerender();
     } else if (kind->valueint == 1) { // the request's answer
         const char *text = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2));
-        show_message(text ? text : "", "#fff", cJSON_IsTrue(cJSON_GetArrayItem(frame, 3)) ? -1 : 1);
+        const cJSON *keep = cJSON_GetArrayItem(frame, 3);
+        show_message(text ? text : "", "#fff", keep && !cJSON_IsFalse(keep) && !cJSON_IsNull(keep) && !(cJSON_IsNumber(keep) && keep->valuedouble == 0) ? -1 : 1);
     }
 }
 
@@ -461,16 +468,19 @@ int rent_servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         return 1;
     }
     if (!strcmp(name, "windows.7.dediCst")) {
-        R.typ = arg_num(ev, args, argc, 0, 0);
-        if (R.typ < 0 || R.typ > 2) R.typ = 0;
+        int typ = arg_num(ev, args, argc, 0, 0);
+        if (typ < 0 || typ > 2) typ = 0;
         char cost[32];
-        thousands(cost, sizeof(cost), k_price[R.typ]);
+        thousands(cost, sizeof(cost), k_price[typ]);
         HtmlElem e = html_dom_by_id("dediCostI");
-        if (e) html_dom_set_text(e, cost);
+        if (e) html_dom_set_html(e, cost);
         return 1;
     }
     if (!strcmp(name, "rentDediServer")) {
-        rent(arg_num(ev, args, argc, 0, 0), arg_num(ev, args, argc, 1, 0) != 0);
+        char id[32];
+        if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) snprintf(id, sizeof(id), "%s", args[0].str);
+        else snprintf(id, sizeof(id), "%d", arg_num(ev, args, argc, 0, 0));
+        rent(id, arg_num(ev, args, argc, 1, 0));
         return 1;
     }
     return -1;

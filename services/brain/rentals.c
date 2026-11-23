@@ -6,7 +6,7 @@
  * Social socket (Krunker's game-socket labels and argument order; KrunkNative's client talks to kn_brain):
  *   ["dsrvl"]                                 -> ["dsrvl", 0, rows]        (deob-10.0.7.js:219866, dediRes :219811)
  *   ["rdsrv", id, {typ, mid, gnm, cr, key}, update]                     (rentDediServer :204642-204668)
- *       -> ["dsrvl", 1, text, keepHidden], then ["dsrvl", 0, rows] after a success
+ *       -> ["dsrvl", 1, text, false]; a success ["dsrvl", 0, rows], then ["dsrvl", 1, text, true]
  * A row is {ID, REG, TRM, OID, SVN, SID, CONF} (:219857-219935): TRM ms left (0 = free), CONF the game as
  * JSON text {gid, mn, typ} (+ Box Office's cr / key: the published map's creator, the catalogue key).
  * cr and key are additions to Krunker's request object; a client without them hosts by name.
@@ -332,16 +332,19 @@ static const kn_proc P_RENT_AGENT_STATUS = {"rentals_status", NULL, run_agent_st
 
 /* ------------------------------------------------------------------ social frames */
 
+/* the list, then a success's text (extra: ["dsrvl", 1, text, true] after it). dediRes [0] redraws the window
+ * (deob-10.0.7.js:219812-219814) and so wipes a message sent before it; [1, text, true] keeps the buttons hidden,
+ * which only means anything when no redraw follows it. */
 static void list_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) extra;
     cJSON *rows = kn_db_ok(res) ? acct_db_json(res) : NULL;
     social_send_n(s, "dsrvl", 2, cJSON_CreateNumber(0), rows ? rows : cJSON_CreateArray());
+    if (extra) social_send_n(s, "dsrvl", 3, cJSON_CreateNumber(1), cJSON_CreateString(extra), cJSON_CreateTrue());
 }
 
-static void send_list(SocialSession *s) {
+static void send_list(SocialSession *s, const char *then) {
     char now[24];
     acct_itoa(now, now_s());
-    social_call(s, &P_RENT_LIST, KN_DB_ARGS(now), list_done, NULL);
+    social_call(s, &P_RENT_LIST, KN_DB_ARGS(now), list_done, then ? strdup(then) : NULL);
 }
 
 /* ["dsrvl"]: the window's list (guests see it too: the regions' free servers) */
@@ -351,7 +354,7 @@ void sh_dedi_list(SocialSession *s, const cJSON *f) {
         social_send_n(s, "dsrvl", 2, cJSON_CreateNumber(0), cJSON_CreateArray());
         return;
     }
-    send_list(s);
+    send_list(s, NULL);
 }
 
 static void push_account_cb(void *ud, const char *err, const cJSON *data) {
@@ -371,8 +374,7 @@ static void rent_done(SocialSession *s, kn_db_result *res, void *extra) {
     const char *text = kind == RENT_RENTED     ? "Server rented. It can take a few minutes before it shows up in the server list."
                        : kind == RENT_EXTENDED ? "Rental extended."
                                                : "Your server is restarting with the selected game.";
-    social_send_n(s, "dsrvl", 3, cJSON_CreateNumber(1), cJSON_CreateString(text), cJSON_CreateTrue());
-    send_list(s);
+    send_list(s, text);
     if (kind != RENT_UPDATED) acct_get(s->account_id, push_account_cb, NULL);
 }
 
