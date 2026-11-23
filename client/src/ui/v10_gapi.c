@@ -138,7 +138,8 @@ static unsigned g_kio_ids;
 static int kio_readable(const char *method, const char *path) {
     // the reads v10's own pages make of gapi (v10 getNews, getUpcomingEvents, the leaderboards: v10 _10449); nothing that
     // changes an account. The streams are not here: v10's getTopStreams is the data client's (api.krunker.io, krunker_kio_routes.h).
-    // /items/: items.getView / getSales (v10:26957-26963, the Market's item detail); /studios/: getMyStudios,
+    // /items/: items.getView / getSales (v10:26957-26963, the Market's item detail) and getInstances (the item page's Mints /
+    // Wear, deob-10.0.7.js:27078-27083); /studios/: getMyStudios,
     // getMyStudioInvites, getStudio and its monetization / analytics / skins reads (v10:27371-27480, the Studios window);
     // /lottery/: getLottery (v10:26566, window.openLottery)
     static const char *const groups[] = {"/players/", "/social/", "/clans/", "/territorial-wars/", "/creators/", "/leaderboards/",

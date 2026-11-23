@@ -77,6 +77,93 @@ size_t kio_market_sales_path(char *out, const size_t n, const int item, const in
     return put(out, n, snprintf(out, n, "/market/items/%d/sales-statistics?daysback=%d", item, days_or_range));
 }
 
+size_t kio_market_instances_path(char *out, const size_t n, const int item, const int wear) {
+    if (item < 0) return put(out, n, 0);
+    return put(out, n, snprintf(out, n, "/items/%d/instances?sort=%s", item, wear ? "wear" : "mint"));
+}
+
+const char *kio_market_wear_color(const double wear) {
+    // iìïîïií (deob-10.0.7.js:16478-16494): flawless < 0.1, tested < 0.3, trashed < 0.6, wrecked < 1, else the last
+    static const struct {
+        double max;
+        const char *color;
+    } tiers[] = {{0.1, "#41c300"}, {0.3, "#a8d600"}, {0.6, "#faa332"}, {1.0, "#f44336"}};
+    for (size_t i = 0; i < sizeof(tiers) / sizeof(tiers[0]); i++)
+        if (wear < tiers[i].max) return tiers[i].color;
+    return tiers[sizeof(tiers) / sizeof(tiers[0]) - 1].color;
+}
+
+// v10's truthy id: a non-zero number or a non-empty string
+static int id_set(const cJSON *e) {
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id");
+    return (cJSON_IsNumber(id) && id->valuedouble != 0) || (cJSON_IsString(id) && id->valuestring && id->valuestring[0]);
+}
+static int id_is(const cJSON *e, const double v) {
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id");
+    return (cJSON_IsNumber(id) && id->valuedouble == v) || (cJSON_IsString(id) && id->valuestring && strtod(id->valuestring, NULL) == v && id->valuestring[0]);
+}
+static int ind_is(const cJSON *e, const int item) {
+    const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+    return cJSON_IsNumber(ind) && ind->valuedouble == item;
+}
+
+int kio_market_quick_sold(cJSON *skins, const int item, const int skin_id, const int count) {
+    if (!cJSON_IsArray(skins)) return 0;
+    int stack = 0, copies = 0, named = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, skins) {
+        if (!ind_is(e, item)) continue;
+        if (!id_set(e)) stack = 1;
+        else {
+            copies++;
+            if (skin_id && id_is(e, skin_id)) named = 1;
+        }
+    }
+    int changed = 0;
+    if (stack) { // the item's stack entries get cnt = count, and go at 0
+        for (int k = cJSON_GetArraySize(skins) - 1; k >= 0; k--) {
+            cJSON *s = cJSON_GetArrayItem(skins, k);
+            if (!ind_is(s, item) || id_set(s)) continue;
+            if (count > 0) {
+                cJSON_DeleteItemFromObjectCaseSensitive(s, "cnt");
+                cJSON_AddNumberToObject(s, "cnt", count);
+            } else {
+                cJSON_DeleteItemFromArray(skins, k);
+            }
+            changed = 1;
+        }
+    } else if (copies > 0 && named) { // the sold instance goes (every entry with its id)
+        for (int k = cJSON_GetArraySize(skins) - 1; k >= 0; k--)
+            if (id_is(cJSON_GetArrayItem(skins, k), skin_id)) {
+                cJSON_DeleteItemFromArray(skins, k);
+                changed = 1;
+            }
+    } else if (copies > count) { // the first copies.length - count copies of the item go (by their ids)
+        int drop = copies - (count > 0 ? count : 0);
+        double *ids = calloc((size_t) drop, sizeof(double));
+        if (!ids) return 0;
+        int n = 0;
+        cJSON_ArrayForEach(e, skins) {
+            if (n >= drop) break;
+            if (ind_is(e, item) && id_set(e)) {
+                const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id");
+                ids[n++] = cJSON_IsNumber(id) ? id->valuedouble : strtod(id->valuestring, NULL);
+            }
+        }
+        for (int k = cJSON_GetArraySize(skins) - 1; k >= 0; k--) {
+            const cJSON *s = cJSON_GetArrayItem(skins, k);
+            for (int j = 0; j < n; j++)
+                if (id_is(s, ids[j])) {
+                    cJSON_DeleteItemFromArray(skins, k);
+                    changed = 1;
+                    break;
+                }
+        }
+        free(ids);
+    }
+    return changed;
+}
+
 cJSON *kio_market_sales_rows(const cJSON *data) {
     cJSON *rows = cJSON_CreateArray();
     const cJSON *r;

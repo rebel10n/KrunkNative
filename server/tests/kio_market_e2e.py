@@ -12,7 +12,10 @@ The account's other screens that read krunker.io the same way (each was a brain 
   History            market.getHistory: GET /market/history?sort=date_desc&limit=50 (deob-10.0.7.js:135786)
   Listing Details    items.getView: GET /items/1/view (v10:26957) for its listings and owners, and
                      market.getItemSalesStatistics: GET /market/items/1/sales-statistics?daysback=30 (v10:26895) for Stats
-  the item page      items.getSales: GET /items/1/sales?range=3 (v10:26963) for its Sales chart
+  the item page      items.getSales: GET /items/1/sales?range=3 (v10:26963) for its Sales chart; a minted, wearable
+                     item's Mints and Wear tabs, items.getInstances: GET /items/7791/instances?sort=mint|wear
+                     (deob-10.0.7.js:27078-27083), the wear read failing ("Failed to load wear leaderboard"), and an
+                     item whose view read fails ("Failed to load item details", no Mints tab)
   Black Market       getBlackMarketItems / getBlackMarketRank on the tab's mount: GET /market/black-market (owned) and
                      /market/black-market/rank (peak_mmr, the rank item) (deob-10.0.7.js:109167-109178);
                      market.purchaseBlackMarketItem: POST /market/black-market/purchase {item_index} (v10:26934), was
@@ -135,6 +138,28 @@ def script():
           "21200 nodes @mkcsales_none .items-detail-empty",
           "21210 nodes @mkcsales_chart .items-detail-graph-canvas",
           "21300 call v10mk.back",
+          # the item page of a minted, wearable item (K-35 B): its Mints and Wear tabs, the mint list, the wear read's failure
+          "21310 call v10mk.citem %d" % kae.PAINT_ITEM,
+          "21320 waitfor !.items-detail-loading",
+          "21330 grep @cmints_tab Mints .simple-tabs",
+          "21340 grep @cwear_tab Wear .simple-tabs",
+          "21350 call v10mk.ctab 5",
+          "21360 waitfor .items-detail-instance-table",
+          "21370 grep @cmint_owner %s .items-detail-instance-table" % kae.INSTANCE_OWNERS[0],
+          "21380 grep @cmint_serial 1,234 .items-detail-instance-table",
+          "21390 grep @cmint_wear 0.0500 .items-detail-instance-table",
+          "21400 nodes @cmint_rank .ii-col-rank",
+          "21410 nodes @cmint_float .ii-col-float",
+          "21420 call v10mk.ctab 6",
+          "21430 waitfor .items-detail-error",
+          "21440 grep @cwear_err leaderboard .items-detail-error",
+          "21450 call v10mk.back",
+          # an item page whose view read fails (KrunkCup Jerseys): v10's "Failed to load item details", no Mints tab
+          "21460 call v10mk.citem %d" % kae.STYLE_ITEM,
+          "21470 waitfor .items-detail-error",
+          "21480 grep @cview_err details .items-detail-error",
+          "21490 grep @cview_mints Mints .simple-tabs",
+          "21500 call v10mk.back",
           # the Black Market buy (v10mk.side 2, bmbuy, the modal's OK)
           "21800 call v10mk.side 2",
           # the tab's mount: krunker.io's owned list and peak rank, then the grid
@@ -412,6 +437,19 @@ def checks(text, stub):
           [r[2] for r in sales])
     check("... and draws it (no 'No sales in this window')", nodes(text, "mkcsales_none") == 0 and nodes(text, "mkcsales_chart") == 1,
           (nodes(text, "mkcsales_none"), nodes(text, "mkcsales_chart")))
+    # the item page's Mints / Wear tabs (deob-10.0.7.js:109725-109768)
+    inst = stub.find("GET", "/api/items/%d/instances" % kae.PAINT_ITEM)
+    check("a minted item's page (stackable false, wearable) has the Mints and Wear tabs",
+          grep(text, "cmints_tab") > 0 and grep(text, "cwear_tab") > 0, (grep(text, "cmints_tab"), grep(text, "cwear_tab")))
+    check("... each tab asks items.getInstances once with the Bearer: /items/7791/instances?sort=mint, then ?sort=wear",
+          bearer(inst) and [r[2] for r in inst] == [{"sort": "mint"}, {"sort": "wear"}], [r[2] for r in inst])
+    check("... Mints lists the instances: rank, owner, Float (0.0500), Mint (#1,234; a dash without a serial)",
+          grep(text, "cmint_owner") > 0 and grep(text, "cmint_serial") > 0 and grep(text, "cmint_wear") > 0 and
+          nodes(text, "cmint_rank") == 3 and nodes(text, "cmint_float") == 3,
+          (grep(text, "cmint_owner"), grep(text, "cmint_serial"), grep(text, "cmint_wear"), nodes(text, "cmint_rank"), nodes(text, "cmint_float")))
+    check("... a failed wear read shows 'Failed to load wear leaderboard'", grep(text, "cwear_err") > 0, grep(text, "cwear_err"))
+    check("a failed view read shows 'Failed to load item details' and no Mints tab",
+          grep(text, "cview_err") > 0 and grep(text, "cview_mints") == 0, (grep(text, "cview_err"), grep(text, "cview_mints")))
     # the Black Market tab: v10's two reads on mount (deob-10.0.7.js:137741-137751)
     bmi, bmr = stub.find("GET", "/api/market/black-market"), stub.find("GET", "/api/market/black-market/rank")
     check("the Black Market tab asks krunker.io's /market/black-market and /market/black-market/rank with the Bearer",

@@ -37,6 +37,18 @@ cJSON *kio_market_sales_rows(const cJSON *data);
 // brain sends them. Returns a new array (cJSON_Delete it).
 cJSON *kio_market_view_listings(const cJSON *listings, int item);
 
+// The item page's Mints / Wear read, items.getInstances (deob-10.0.7.js:27078-27083, loader :109012-109019):
+// "/items/<i>/instances?sort=mint" (wear 0) or "?sort=wear". Returns the length (0 when it does not fit or item < 0).
+size_t kio_market_instances_path(char *out, size_t n, int item, int wear);
+// v10's getWearColor (iìiïííí over the wear tiers iìïîïií, deob-10.0.7.js:16478-16494, :24610-24617): a wear level's colour.
+const char *kio_market_wear_color(double wear);
+// The account's skins after a quick sell, as v10.0.7's quickSellItem updates them (deob-10.0.7.js:132715-132745), with
+// the answer's count (data.count, 0 when absent) and the skin_id it sent (0 none): when the item has a stack entry (ind,
+// no id) each such entry gets cnt = count and goes at 0, its copies untouched; else, when it has copies (entries with
+// an id), the one whose id is skin_id goes, or with no such copy the first (copies - count) copies go. Returns 1 when
+// skins changed.
+int kio_market_quick_sold(cJSON *skins, int item, int skin_id, int count);
+
 // The Black Market buy's body {item_index}. Returns a new object (cJSON_Delete it).
 cJSON *kio_market_bm_body(int item);
 // Its answer {item, kr, funds[, title]} as the economy's "bmr" object {item, kr, f[, title]}; f is the account's

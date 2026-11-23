@@ -698,6 +698,11 @@ static void kio_instance_set_meta(cJSON *entry, cJSON *meta) {
     g_kio.gen++;
 }
 
+void account_kio_quick_sold(const int item, const int skin_id, const int count) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj || !krunker_account_signed_in()) return;
+    if (kio_market_quick_sold(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins"), item, skin_id, count)) g_kio.gen++;
+}
+
 void account_remove_skin(const int skin_index) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         if (g_kio.obj && krunker_account_signed_in()) kio_take_unit(skin_index);

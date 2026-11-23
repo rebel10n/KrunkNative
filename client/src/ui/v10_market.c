@@ -18,7 +18,7 @@
 //   Black Mkt the Black Market cards and purchase (svelte-dbcods)
 //   Junkyard  the crafting page (svelte-1vqzycn)
 //   Catalog   every store item (_46722) and its detail page (_45008: Info, Listings, Sales, Units
-//             Sold, Owners)
+//             Sold, Owners, and Mints / Wear for a minted item)
 //   Guide     the trading guide (svelte-4log2q, v10_market_guide.h)
 //
 // Transport: v10 talks to its REST API (api.krunker.io /market, /trades, /items); here every call is
@@ -31,6 +31,7 @@
 //   POST /market/list|purchase|unlist|quick-sell   ["li"] / ["pi"] / ["uli"] / ["qsi"] with {op} keys
 //   /market/items/<i>/sales-statistics, /items/<i>/sales   ["st", item, days | range]
 //   /items/<i>/view (stats, owners)                     ["r","itemsales",..,item]
+//   /items/<i>/view (stackable, wearable), /items/<i>/instances?sort=   the same gapi (v10_gapi over the social socket)
 //   /trades/history, create, accept, cancel, decline-all ["r","market","trades"] / ["ctr"] / ["trA"]
 //                                                         / ["trC"] / ["trCA"]
 //   /trades/player-search, /trades/inventory/<id>         ["sp"] / ["ri"]
@@ -41,8 +42,8 @@
 // the writes market/purchase|list|unlist|quick-sell, market/black-market/purchase and trades/* (kio_act_send); the
 // row shapes are kio_market.h's and kio_trade.h's.
 // Quick Sell's Junk is the Junk wallet's (doc/v10/junk.md: "qsi" mode 1, the inventory rows' qj). What
-// does not exist here: item instances (wear, mints, serials, styles, name tags: an item is a stack or a
-// painted copy) and the 3D showcase. The estimates of
+// does not exist on Box Office: item instances (wear, mints, serials, name tags: an item is a stack or a painted
+// copy; kn_brain's view says stackable, so the item page has no Mints / Wear tab there) and the 3D showcase. The estimates of
 // /webhooks/general/items/prices are ["r","market","prices"]: this economy's own mean sale prices,
 // then the bundled data/prices.js snapshot (social_estimate_value); with neither, v10's "~ Unknown".
 #include <backend.h>
@@ -157,6 +158,15 @@ static struct {
     int data_item, dgd_range;         // whose listings / sales / owners are loaded; dgd: a range index (else days)
     cJSON *dlist, *dgd, *dview, *downers;
     int dlist_loading, dgd_loading, dview_loading;
+    // the item page's view flags (items.getView's stackable / wearable, deob-10.0.7.js:109778-109779): dstack -1 null
+    // (not read, or the read failed), 0 false, 1 true; and the view's error text ("Failed to load item details")
+    int dstack, dwearable;
+    char dview_err[160];
+    // the item page's Mints (0, sort=mint) and Wear (1, sort=wear) lists (items.getInstances, :109739-109768): asked once
+    // per page, as v10's component does
+    cJSON *dinst[2];
+    int dinst_loading[2], dinst_asked[2];
+    char dinst_err[2][160];
     // the reads that got no answer by their deadline (LOST_*: the screen says so, not "Loading" for good)
     int lost, wait_timer, account_id;
     // modals
@@ -169,6 +179,7 @@ static struct {
     char err_msg[256];
     int qs_mode;
     char qs_err[160];
+    int qs_item, qs_kid;   // krunker.io: the quick sell in flight's item and the skin_id it sent (0 none)
     Note notes[6];
     int nnotes, note_seq;
     // Trading
@@ -200,7 +211,7 @@ static struct {
     int cshown;
     // Guide
     int gtab;
-} M = {.days = 30, .crange = 3, .detail = -1, .cdetail = -1, .data_item = -1};
+} M = {.days = 30, .crange = 3, .detail = -1, .cdetail = -1, .data_item = -1, .dstack = -1};
 
 // The inventory's select mode (the market inventory's bulk list, deob-10.0.4.js:132150-132220, :134940-135290): the
 // picks are the ids of the tiles' units as the active account's inventory names them (bulk_official)
@@ -401,6 +412,8 @@ static void svg_data_url(StrBuf *sb, const char *svg) {
 // reply that arrives after a reopen is still applied.
 #define MARKET_WAIT_MS 15000
 enum { LOST_TRADES = 1, LOST_DLIST = 2, LOST_DGD = 4, LOST_DVIEW = 8 };
+// the item page's tabs (v10.0.7's iÎiïiíì, deob-10.0.7.js:109708-109736): Info, Listings, Sales, Units Sold, Owners, Mints, Wear
+enum { CTAB_INFO, CTAB_LISTINGS, CTAB_SALES, CTAB_UNITS, CTAB_OWNERS, CTAB_MINTS, CTAB_WEAR, CTAB_COUNT };
 
 static void reads_expired(void *user);
 
@@ -908,7 +921,8 @@ static void kio_inventory_done(void *user, const int status, const cJSON *data, 
     render_both();
 }
 
-// krunker.io's item locks came (getLocks, kio_inventory_locks_load): the tiles' lock toggles and sellable states
+// The item locks came (krunker.io's getLocks, kio_inventory_locks_load; Box Office's "ilk", bo_inventory_load): the tiles'
+// lock toggles and sellable states
 static void render_grid(void);
 static void kio_locks_loaded(void *user, const int ok, const char *message) {
     (void) user;
@@ -927,6 +941,7 @@ static void inventory_load(void) {
         return;
     }
     if (!request_page("market", "inventory", -1)) M.inv_loading = 0;
+    if (!bo_inventory_loading()) bo_inventory_load(kio_locks_loaded, NULL); // Box Office: the locks ("ilk"; one read at a time)
 }
 // krunker.io's own sales (GET market/sales: getSales, deob-10.0.4.js:26947, loader :108894). A row {marketid,
 // skinindex, funds, listed_time} is what the sale card reads (funds = the price, listed_time = its age:
@@ -1111,16 +1126,28 @@ static const cJSON *inv_unit(const int index, const int sid) {
 // owners are the economy's "itemsales" reply as they are; the listings (marketid, skinindex, price, seller_name,
 // listed_time) become the detail's listing rows (kio_market_view_listings), so the one read fills Listings and Owners.
 // An answer for an item no longer shown is dropped; an error is the tabs' load failure.
+// The view's stackable / wearable (the item page's Mints and Wear tabs: stackable === false, and wearable too, :109725-109735).
+static void view_flags_apply(const cJSON *data) {
+    const cJSON *st = cJSON_GetObjectItemCaseSensitive(data, "stackable"), *we = cJSON_GetObjectItemCaseSensitive(data, "wearable");
+    M.dstack = cJSON_IsBool(st) ? cJSON_IsTrue(st) : -1;
+    M.dwearable = cJSON_IsTrue(we) || (cJSON_IsNumber(we) && we->valuedouble != 0);
+}
+
 static void kio_view_done(void *user, const int status, const cJSON *data, const cJSON *error) {
-    (void) error;
     const int item = (int) (intptr_t) user;
     if (item != M.data_item || (!M.dview_loading && !M.dlist_loading)) return;
     M.dview_loading = M.dlist_loading = 0;
-    if (status != 200 || !cJSON_IsObject(data)) {
+    if (status != 200 || error || !cJSON_IsObject(data)) {
+        // v10's catch: stackable null, wearable false, the error's text || "Failed to load item details" (:109780-109788)
+        M.dstack = -1;
+        M.dwearable = 0;
+        snprintf(M.dview_err, sizeof(M.dview_err), "%s", error ? v10_gapi_error_text(error, "Failed to load item details") : "Failed to load item details");
         M.lost |= LOST_DVIEW | LOST_DLIST;
         render_both();
         return;
     }
+    M.dview_err[0] = 0;
+    view_flags_apply(data);
     M.lost &= ~(LOST_DVIEW | LOST_DLIST);
     const cJSON *stats = cJSON_GetObjectItemCaseSensitive(data, "stats");
     cJSON_Delete(M.dview);
@@ -1224,14 +1251,76 @@ static void detail_view_load(void) {
     }
 }
 
-// ------------------------------------------------------------------ notifications (_45504)
-
 static void render_notes(void);
 static void views_sync(void);
 static void render(void);
 static void render_content(void);
 static int is_open(void);
 static void render_modal(void);
+static int g_scenario; // a UI scenario is shown (v10_market_scenario): no reads are sent
+
+// Box Office: the item page's view flags from kn_brain's items.getView (GET /items/<i>/view over the social socket's gapi,
+// services/brain/v10_market.c h_item_view; its stats, owners and listings come from the economy frames as before).
+// kn_brain answers stackable true (no per-copy mints), so its items show no Mints / Wear tab, as v10 shows none then.
+static void bo_view_flags_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    if ((int) (intptr_t) user != M.cdetail) return;
+    if (status == 200 && !error && cJSON_IsObject(data)) {
+        view_flags_apply(data);
+    } else {
+        M.dstack = -1;
+        M.dwearable = 0;
+    }
+    if (is_open()) render_modal();
+}
+
+static void bo_view_flags_load(void) {
+    char path[48];
+    if (kio_store_active() || g_scenario || M.cdetail < 0) return; // krunker.io: kio_view_load reads them
+    if (kio_market_view_path(path, sizeof(path), M.cdetail)) v10_gapi("GET", path, NULL, bo_view_flags_done, (void *) (intptr_t) M.cdetail);
+}
+
+static void instances_reset(void) {
+    for (int w = 0; w < 2; w++) {
+        cJSON_Delete(M.dinst[w]);
+        M.dinst[w] = NULL;
+        M.dinst_loading[w] = M.dinst_asked[w] = 0;
+        M.dinst_err[w][0] = 0;
+    }
+}
+
+// items.getInstances' answer (the loader iîíîïîï, deob-10.0.7.js:109012-109019, and the tab's catch :109745-109768): the
+// rows (data || []), or [] and the error's text || "Failed to load item instances"; a read that got no answer is the tab's
+// own text, "Failed to load mints" / "Failed to load wear leaderboard". user packs the item and the list (wear).
+static void instances_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    const intptr_t packed = (intptr_t) user;
+    const int item = (int) (packed >> 1), wear = (int) (packed & 1);
+    if (item != M.cdetail || !M.dinst_loading[wear]) return;
+    M.dinst_loading[wear] = 0;
+    cJSON_Delete(M.dinst[wear]);
+    M.dinst[wear] = cJSON_IsArray(data) && !error && status >= 200 && status < 300 ? cJSON_Duplicate(data, 1) : cJSON_CreateArray();
+    if (error) snprintf(M.dinst_err[wear], sizeof(M.dinst_err[wear]), "%s", v10_gapi_error_text(error, "Failed to load item instances"));
+    else if (status < 200 || status >= 300) snprintf(M.dinst_err[wear], sizeof(M.dinst_err[wear]), "%s", wear ? "Failed to load wear leaderboard" : "Failed to load mints");
+    else M.dinst_err[wear][0] = 0;
+    if (is_open()) render_modal();
+}
+
+// The Mints (wear 0) or Wear (1) tab's read, once per page (v10's iÎîíïíï / iÌíïìiï guards): GET
+// /items/<i>/instances?sort=mint|wear on either account (v10_gapi: krunker.io's gapi, or kn_brain's h_item_instances).
+static void instances_load(const int wear) {
+    char path[64];
+    if (M.cdetail < 0 || M.dinst_asked[wear] || g_scenario) return;
+    M.dinst_asked[wear] = 1;
+    M.dinst_loading[wear] = 1;
+    M.dinst_err[wear][0] = 0;
+    const intptr_t packed = ((intptr_t) M.cdetail << 1) | (intptr_t) wear;
+    if (kio_market_instances_path(path, sizeof(path), M.cdetail, wear) && v10_gapi("GET", path, NULL, instances_done, (void *) packed)) return;
+    M.dinst_loading[wear] = 0;
+    cJSON_Delete(M.dinst[wear]);
+    M.dinst[wear] = cJSON_CreateArray();
+    snprintf(M.dinst_err[wear], sizeof(M.dinst_err[wear]), "%s", wear ? "Failed to load wear leaderboard" : "Failed to load mints");
+}
+
+// ------------------------------------------------------------------ notifications (_45504)
 
 static void note_expire(void *user) {
     const int id = (int) (intptr_t) user;
@@ -1473,10 +1562,12 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         const int cnt = r ? jint(r, "c", 1) : 0;
         const int sid = r ? row_sid(r) : 0;
         const int tradable = cnt > 0 && r && !jint(r, "nt", 0);
-        // krunker.io: the row's item lock ($itemLocks.ids has row.sid, deob-10.0.7.js:134986-134988): a locked row is not
-        // sellable (no List, no Quick sell: :135276-135283)
-        const int kid = kio_store_active() && r ? jint(r, "kid", 0) : 0;
-        const int item_locked = kid > 0 && market_locks_has(kio_inventory_locks(), kid, i, 0);
+        // the row's item lock ($itemLocks.ids has row.sid, deob-10.0.7.js:134986-134988): a locked row is not sellable (no
+        // List, no Quick sell: :135276-135283). krunker.io: the row's kid; Box Office: the unit kn_brain locks (bo_inventory.c:
+        // a copy's id, a stack's store index: the row's sid) once its locks are in ("ilk")
+        const int lock_stack = !kio_store_active() && sid < COPY_ID_BASE;
+        const int kid = !r || cnt <= 0 ? 0 : kio_store_active() ? jint(r, "kid", 0) : inv_ready() ? sid : 0;
+        const int item_locked = kid > 0 && market_locks_has(inv_locks(), kid, i, lock_stack);
         const int sellable = tradable && !item_locked;
         const ViewerSkin *s = skin(i);
         int stackable = 0;
@@ -1501,8 +1592,8 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         sb_append(sb, " ");
         paint_badge(sb, meta, 10, 24);
         cJSON_Delete(meta);
-        // krunker.io: the lock toggle (owned, a sid, not in select mode: deob-10.0.7.js:132078, :135346-135357), aria-label
-        // Lock / Unlock, is-locked and the lock / lock_open icon by the row's lock
+        // the lock toggle (owned, a sid, not in select mode: deob-10.0.7.js:132078, :135346-135357), aria-label Lock / Unlock,
+        // is-locked and the lock / lock_open icon by the row's lock; on either account
         if (kid > 0 && cnt > 0 && !selecting)
             sb_appendf(sb, " <button type=\"button\" class=\"lock-toggle svelte-1n21gx%s\" aria-label=\"%s\" id=\"v10mkLock%d\" onclick=\"v10mk.lock(%d,%d)\">"
                            "<i class=\"material-icons svelte-1n21gx\">%s</i></button> ",
@@ -1907,10 +1998,20 @@ static void detail_stats(StrBuf *sb) {
     free(s);
 }
 
+// the item page's error line (.items-detail-error, deob-10.0.7.js:109528-109561)
+static void detail_error(StrBuf *sb, const char *text) {
+    sb_append(sb, "<div class=\"items-detail-error svelte-dmu4q2\">");
+    sb_append_esc(sb, text);
+    sb_append(sb, "</div>");
+}
+// the view read's error as the item page shows it: its text || "Failed to load item details" (:109788)
+static const char *view_error(void) { return M.dview_err[0] ? M.dview_err : "Failed to load item details"; }
+
 static void owners_list(StrBuf *sb, const int catalog) {
     const char *h = catalog ? "items-detail-owner" : "owner";
     if (M.lost & LOST_DVIEW) {
-        sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.ownersFailed", "Couldn't load the owners."));
+        if (catalog) detail_error(sb, view_error()); // the item page: the view's error (deob-10.0.7.js:110162-110166)
+        else sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.ownersFailed", "Couldn't load the owners."));
         return;
     }
     if (M.dview_loading || !M.downers) {
@@ -2936,7 +3037,6 @@ static void bm_modal(StrBuf *sb) {
 // ------------------------------------------------------------------ Junkyard (svelte-1vqzycn)
 
 // The crafting page (v10_junkyard.c): the recipes, the craft confirmation and its result
-static int g_scenario;
 static void view_junkyard(StrBuf *sb) {
     if (!g_scenario) v10_junkyard_ensure(); // a logged-in tab with no recipes asked for yet asks now
     v10_junkyard_render(sb);
@@ -2986,6 +3086,54 @@ static void view_catalog(StrBuf *sb) {
     free(l.idx);
 }
 
+// The item page's Mints / Wear tab (deob-10.0.7.js:110206-110250): the read's spinner, its error, the empty line, or the
+// instance table (iIìííïì, :109574-109600): # (rank), Owner (a profile link), Float (the wear, 4 decimals in its tier's
+// colour; '#888' and a dash without one) when the item is wearable, Mint (#serial with commas, a dash without one).
+static void instances_panel(StrBuf *sb, const int wear) {
+    sb_append(sb, "<div class=\"items-detail-instance-panel svelte-dmu4q2\">");
+    const cJSON *rows = M.dinst[wear];
+    if (M.dinst_loading[wear]) {
+        sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
+    } else if (M.dinst_err[wear][0]) {
+        detail_error(sb, M.dinst_err[wear]);
+    } else if (!rows_count(rows)) {
+        sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", wear ? "No wear data yet." : "No minted instances yet.");
+    } else {
+        sb_append(sb, "<table class=\"items-detail-instance-table svelte-dmu4q2\"><thead><tr class=\"svelte-dmu4q2\"><th class=\"ii-col-rank svelte-dmu4q2\">#</th>"
+                      "<th class=\"ii-col-owner svelte-dmu4q2\">Owner</th>");
+        if (M.dwearable) sb_append(sb, "<th class=\"ii-col-float svelte-dmu4q2\">Float</th>");
+        sb_append(sb, "<th class=\"ii-col-num svelte-dmu4q2\">Mint</th></tr></thead><tbody>");
+        int k = 0;
+        const cJSON *r;
+        cJSON_ArrayForEach(r, rows) {
+            const char *nm = jstr(r, "nm");
+            sb_appendf(sb, "<tr class=\"svelte-dmu4q2\"><td class=\"ii-col-rank svelte-dmu4q2\">%d</td><td class=\"ii-col-owner svelte-dmu4q2\">"
+                           "<button class=\"items-detail-owner-name svelte-dmu4q2\" type=\"button\"", ++k);
+            if (nm[0]) sb_profile_click(sb, nm);
+            sb_append(sb, ">");
+            sb_append_esc(sb, nm);
+            sb_append(sb, "</button></td>");
+            if (M.dwearable) {
+                const cJSON *w = cJSON_GetObjectItemCaseSensitive(r, "wear");
+                if (cJSON_IsNumber(w))
+                    sb_appendf(sb, "<td class=\"ii-col-float svelte-dmu4q2\" style=\"color: %s;\">%.4f</td>", kio_market_wear_color(w->valuedouble), w->valuedouble);
+                else
+                    sb_append(sb, "<td class=\"ii-col-float svelte-dmu4q2\" style=\"color: #888;\">\xe2\x80\x94</td>");
+            }
+            const cJSON *serial = cJSON_GetObjectItemCaseSensitive(r, "serial");
+            if (cJSON_IsNumber(serial)) {
+                char num[32];
+                fmt(num, sizeof(num), serial->valuedouble);
+                sb_appendf(sb, "<td class=\"ii-col-num svelte-dmu4q2\">#%s</td></tr>", num);
+            } else {
+                sb_append(sb, "<td class=\"ii-col-num svelte-dmu4q2\">\xe2\x80\x94</td></tr>");
+            }
+        }
+        sb_append(sb, "</tbody></table>");
+    }
+    sb_append(sb, "</div>");
+}
+
 // the item detail page (_45008), pushed over the exchange
 static void catalog_detail(StrBuf *sb) {
     const ViewerSkin *s = skin(M.cdetail);
@@ -3016,10 +3164,13 @@ static void catalog_detail(StrBuf *sb) {
     sb_append(sb, " ");
     if (bound) sb_append(sb, "<i class=\"material-icons items-detail-lock svelte-dmu4q2\" title=\"Bound to account\">lock</i>");
     sb_append(sb, "</div></div>   </div> <div class=\"items-detail-tabs-panel svelte-dmu4q2\"><div class=\"items-detail-tabs-bar svelte-dmu4q2\"><div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
-    // tabs: Info, Listings, Sales, Units Sold (tradable items), Owners
-    static const char *const labels[5] = {"Info", "Listings", "Sales", "Units Sold", "Owners"};
-    for (int t = 0; t < 5; t++) {
-        if (!tradable && t >= 1 && t <= 3) continue;
+    // tabs: Info, Listings, Sales, Units Sold (tradable items), Owners; Mints when the view says stackable === false, Wear
+    // when it is also wearable (deob-10.0.7.js:109725-109735)
+    static const char *const labels[CTAB_COUNT] = {"Info", "Listings", "Sales", "Units Sold", "Owners", "Mints", "Wear"};
+    for (int t = 0; t < CTAB_COUNT; t++) {
+        if (!tradable && t >= CTAB_LISTINGS && t <= CTAB_UNITS) continue;
+        if (t == CTAB_MINTS && M.dstack != 0) continue;
+        if (t == CTAB_WEAR && (M.dstack != 0 || !M.dwearable)) continue;
         sb_appendf(sb, "<div class=\"simple-tab svelte-1oqd18e%s\" role=\"tab\" aria-selected=\"%s\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" onclick=\"v10mk.ctab(%d)\"> <span class=\"simple-tab-label svelte-1oqd18e\">%s</span></div>",
                    M.ctab == t ? " simple-tab-active" : "", M.ctab == t ? "true" : "false", t, labels[t]);
     }
@@ -3040,7 +3191,7 @@ static void catalog_detail(StrBuf *sb) {
         sb_append_esc(sb, type_label(s));
         sb_append(sb, "</div>     <div class=\"items-detail-stats-section svelte-dmu4q2\"><div class=\"items-detail-stats-header svelte-dmu4q2\">Market</div> ");
         if (M.lost & LOST_DVIEW) {
-            sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.statsDetailFailed", "Couldn't load the market stats."));
+            detail_error(sb, view_error()); // (deob-10.0.7.js:110087-110091)
         } else if (M.dview_loading || !M.dview) {
             sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         } else {
@@ -3060,7 +3211,7 @@ static void catalog_detail(StrBuf *sb) {
         sb_append(sb, " </div> </div>");
     } else if (M.ctab == 1) {
         sb_append(sb, "<div class=\"items-detail-listings-panel svelte-dmu4q2\">");
-        if (M.lost & LOST_DLIST) sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.listingsFailed", "Couldn't load the listings."));
+        if (M.lost & LOST_DLIST) detail_error(sb, view_error()); // (deob-10.0.7.js:110113-110117)
         else if (M.dlist_loading || !M.dlist) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         else if (!rows_count(M.dlist)) sb_append(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">No active listings.</div>");
         else {
@@ -3095,7 +3246,7 @@ static void catalog_detail(StrBuf *sb) {
         for (int r = 0; r < 7; r++)
             sb_appendf(sb, "<button class=\"items-detail-range-btn svelte-dmu4q2%s\" type=\"button\" onclick=\"v10mk.crange(%d)\">%s</button>", M.crange == r ? " active" : "", r, ranges[r]);
         sb_append(sb, "</div> <div class=\"items-detail-graph-canvas svelte-dmu4q2\">");
-        if (M.lost & LOST_DGD) sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.salesFailed", "Couldn't load the sales."));
+        if (M.lost & LOST_DGD) detail_error(sb, "Failed to load sales history"); // (deob-10.0.7.js:110275, :110292-110296)
         else if (M.dgd_loading || !M.dgd) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         else if (!rows_count(M.dgd)) sb_append(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">No sales in this window.</div>");
         else {
@@ -3112,6 +3263,8 @@ static void catalog_detail(StrBuf *sb) {
             }
         }
         sb_append(sb, "</div>");
+    } else if (M.ctab == CTAB_MINTS || M.ctab == CTAB_WEAR) {
+        instances_panel(sb, M.ctab == CTAB_WEAR);
     } else {
         sb_append(sb, "<div class=\"items-detail-owners-panel svelte-dmu4q2\">");
         owners_list(sb, 1);
@@ -3372,6 +3525,9 @@ static void item_data(const int index) {
     cJSON_Delete(M.downers);
     M.dlist = M.dgd = M.dview = M.downers = NULL;
     M.dlist_loading = M.dgd_loading = M.dview_loading = 0;
+    M.dstack = -1;
+    M.dwearable = 0;
+    M.dview_err[0] = 0;
     if (!g_scenario) {
         detail_listings_load();
         detail_view_load();
@@ -3390,7 +3546,9 @@ static void open_cdetail(const int index) { // the item detail page, over the ex
     if (!skin(index)) return;
     M.cdetail = index;
     M.ctab = 0;
+    instances_reset(); // v10's item page asks its Mints / Wear once per mount
     item_data(index);
+    bo_view_flags_load();
     render_modal();
 }
 
@@ -3655,6 +3813,8 @@ static void kio_act_answer(void *user, const int status, const cJSON *data, cons
     } else if (act == ACT_DECLINE_ALL) { // "pRes": the declined-all answer (SUCCESS / ERROR)
         kio_reply("pRes", cJSON_CreateString("SUCCESS"), NULL);
     } else { // ACT_QS: the stack's count left (the economy's "c"), funds, and the sale's kind (kr / jnk) as "qsr" reads them
+        // the account's skins as quickSellItem updates them (deob-10.0.7.js:132715-132745): data.count (0 without data)
+        account_kio_quick_sold(M.qs_item, M.qs_kid, cJSON_IsNumber(cv) ? cv->valueint : 0);
         cJSON *o = cJSON_CreateObject();
         cJSON_AddNumberToObject(o, "c", cJSON_IsNumber(cv) ? cv->valueint : 0);
         if (cJSON_IsNumber(fv)) cJSON_AddNumberToObject(o, "f", fv->valuedouble);
@@ -3692,6 +3852,26 @@ static void kio_lock_done(void *user, const int ok, const char *message) {
     if (ok) notify(1, I18N_F(text, was ? "item.lock.didUnlock" : "item.lock.didLock", was ? "Unlocked {0}" : "Locked {0}", s && s->name ? s->name : ""));
     else notify(0, message && message[0] ? message : "Failed to update lock");
     if (M.tab == TAB_MARKET && M.mtab == MT_INVENTORY) render_grid();
+}
+
+// Box Office's lock toggle: the unit's group of the account's own rows (bo_inventory_groups: a stack by its store index, a
+// painted copy by its id) locked or unlocked with kn_brain's "ils" (economy.c sh_item_lock, P_ITEM_LOCK), then its locks
+// read again ("ilk") and kio_lock_done's note. One lock write at a time (bo_inventory_set_lock refuses a second).
+static void bo_toggle_lock(const int index, const int sid) {
+    int n = 0, stack = 0;
+    const int unit = bulk_official(index, sid, &stack);
+    const MarketGroup *g = unit > 0 ? inv_groups(&n) : NULL;
+    for (int k = 0; g && k < n; k++) {
+        if (g[k].item != index) continue;
+        int copy = -2;
+        if (stack && g[k].stack_id == unit) copy = -1;
+        for (int c = 0; !stack && c < g[k].n_instances; c++)
+            if (g[k].instances[c] == unit) copy = c;
+        if (copy == -2) continue;
+        const int was = market_locks_has(inv_locks(), unit, index, stack);
+        if (!bo_inventory_set_lock(&g[k], copy, !was, kio_lock_done, (void *) (intptr_t) (index * 2 + was))) notify(0, "Failed to update lock");
+        return;
+    }
 }
 
 // A painted copy's official id on krunker.io (the bundle's instanceId, sent as skin_id: deob-10.0.4.js:108919-108921,
@@ -3848,6 +4028,8 @@ static void kio_quick_sell(const int action) {
     cJSON_AddNumberToObject(b, "action", action);
     cJSON_AddNumberToObject(b, "amount", amount);
     if (amount == 0) cJSON_AddNumberToObject(b, "skin_id", skin);
+    M.qs_item = M.sel_skin;
+    M.qs_kid = amount == 0 ? skin : 0;
     kio_act_send(ACT_QS, action, "POST", "market/quick-sell", b);
 }
 
@@ -4213,6 +4395,7 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     } else if (!strcmp(h, "ctab")) {
         M.ctab = a0;
         if ((a0 == 2 || a0 == 3) && !g_scenario && ((!M.dgd && !M.dgd_loading) || !M.dgd_range)) detail_stats_load(M.crange); // a range index 0..6
+        if (a0 == CTAB_MINTS || a0 == CTAB_WEAR) instances_load(a0 == CTAB_WEAR); // the tab's effect (deob-10.0.7.js:109740-109769)
         render_modal();
     } else if (!strcmp(h, "crange")) {
         M.crange = a0;
@@ -4288,12 +4471,16 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         html_ui_stop_propagation();
         const int sid = kio_store_active() ? kio_unit_kid(a0, a1) : a1; // (deob-10.0.7.js:134252-134256)
         if (sid > 0) style_picker_open(a0, sid);
-    } else if (!strcmp(h, "lock")) { // lock(index, sid): krunker.io's lock toggle (onToggleLock, deob-10.0.7.js:134989-135000)
+    } else if (!strcmp(h, "lock")) { // lock(index, sid): the lock toggle (onToggleLock, deob-10.0.7.js:134989-135000)
         html_ui_stop_propagation();
-        const int kid = kio_store_active() ? kio_unit_kid(a0, a1) : 0;
-        if (kid > 0) {
-            const int was = market_locks_has(kio_inventory_locks(), kid, a0, 0);
-            kio_inventory_lock_skin(kid, !was, kio_lock_done, (void *) (intptr_t) (a0 * 2 + was));
+        if (kio_store_active()) {
+            const int kid = kio_unit_kid(a0, a1);
+            if (kid > 0) {
+                const int was = market_locks_has(kio_inventory_locks(), kid, a0, 0);
+                kio_inventory_lock_skin(kid, !was, kio_lock_done, (void *) (intptr_t) (a0 * 2 + was));
+            }
+        } else {
+            bo_toggle_lock(a0, a1);
         }
     } else if (!strcmp(h, "qs")) { // qs(index, sid): the row's unit; a painted copy is one item (deob:147652: "1 Item" only)
         html_ui_stop_propagation();
@@ -4681,8 +4868,7 @@ static void on_social(void *user, const cJSON *frame) {
                 junk_format(junk_hundredths(j->valuedouble), junk, sizeof(junk));
                 account_ui_set_junk(junk);
             }
-            // krunker.io: not the paint rule of account_remove_skin (quickSellItem's own skins update, deob-10.0.7.js
-            // :132715-132745, is not ported: the inventory reload shows the sale)
+            // krunker.io: the account's skins were updated as quickSellItem does (kio_act_answer: account_kio_quick_sold)
             for (int k = 0; k < sold && !kio_store_active(); k++) account_remove_skin(M.sel_skin);
             char msg[160];
             // deob-10.0.3.js:149025-149031: "Destroyed X" / "Sold X for Junk" / "Sold X for KR"

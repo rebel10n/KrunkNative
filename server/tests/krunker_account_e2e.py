@@ -178,6 +178,16 @@ GAPI_READS.update({
     "/api/trades/inventory/%d" % MARKET_FRIEND_ID: {"my_inventory": [{"i": INV_STACK, "st": 1, "sid": INV_STACK_KID, "cnt": 3}],
                                                   "their_inventory": [{"i": INV_COPY, "st": 0, "sid": THEIR_COPY_KID}]},
 })
+# the item page's Mints / Wear tabs (items.getView's stackable / wearable, items.getInstances ?sort=mint|wear,
+# deob-10.0.7.js:27078-27083, :109725-109768): K-35 B (PAINT_ITEM) is a minted (stackable false), wearable item; its mint
+# list has two instances (KioMinter's #1,234 at wear 0.05, KioHolder's with no serial or wear), its wear read fails (500).
+# KrunkCup Jerseys' (STYLE_ITEM) view read fails (500): the page's "Failed to load item details".
+INSTANCE_OWNERS = ("KioMinter", "KioHolder")
+GAPI_READS["/api/items/%d/view" % PAINT_ITEM] = {"stats": {"ind": PAINT_ITEM, "onS": 0, "inC": 2, "high": 0, "low": 0}, "owners": [],
+                                                 "sales": [], "listings": [], "stackable": False, "wearable": True}
+INSTANCE_READS = {("/api/items/%d/instances" % PAINT_ITEM, "mint"): [{"nm": INSTANCE_OWNERS[0], "serial": 1234, "wear": 0.05},
+                                                                     {"nm": INSTANCE_OWNERS[1], "serial": None, "wear": None}]}
+FAILED_READS = {"/api/items/%d/instances" % PAINT_ITEM, "/api/items/%d/view" % STYLE_ITEM}
 # the popup's writes, answered for the account's Bearer as {data, error} (v10's gapi envelope): market.listItem, unlistItem,
 # purchaseItem, quickSellItem (deob-10.0.7.js:26980-27000), trades.createTrade / acceptTrade / cancelTrade / declineAll
 # (:27160-27185). Trade 44's accept is refused with a code (v10 shows its errors.exchange.* text, not the message).
@@ -495,6 +505,10 @@ class Stub:
                         self.reply(200, {"data": {"username": ACCOUNT_NAME, "id": ACCOUNT_ID}, "error": None})
                     else:
                         self.reply(401, {"data": None, "error": "Unauthorized"})
+                elif (path, q.get("sort")) in INSTANCE_READS:  # items.getInstances by its sort (INSTANCE_READS above)
+                    self.reply(200, {"data": INSTANCE_READS[(path, q.get("sort"))], "error": None})
+                elif path in FAILED_READS:  # a read the server fails (FAILED_READS above)
+                    self.reply(500, {"data": None, "error": None})
                 elif path in GAPI_READS:  # the gapi reads of GAPI_READS above: the same answer for any query
                     self.reply(200, {"data": GAPI_READS[path], "error": None})
                 elif path == "/api/daily-spin/progress":  # dailySpin.getProgress (the data client, v10:25999): stub.daily_spin

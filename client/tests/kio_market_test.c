@@ -151,6 +151,37 @@ int main(void) {
     cJSON_Delete(rows);
     cJSON_Delete(inv);
 
+    // the item page's Mints / Wear read (items.getInstances, deob-10.0.7.js:27078-27083) and the wear colours (:16478)
+    char ipath[64];
+    CHECK(kio_market_instances_path(ipath, sizeof(ipath), 7791, 0) && !strcmp(ipath, "/items/7791/instances?sort=mint"), "Mints: sort=mint");
+    CHECK(kio_market_instances_path(ipath, sizeof(ipath), 7791, 1) && !strcmp(ipath, "/items/7791/instances?sort=wear"), "Wear: sort=wear");
+    CHECK(!kio_market_instances_path(ipath, sizeof(ipath), -1, 0) && !kio_market_instances_path(ipath, 8, 7791, 0), "no item / no room: no path");
+    CHECK(!strcmp(kio_market_wear_color(0.05), "#41c300") && !strcmp(kio_market_wear_color(0.1), "#a8d600") &&
+              !strcmp(kio_market_wear_color(0.45), "#faa332") && !strcmp(kio_market_wear_color(0.9), "#f44336") &&
+              !strcmp(kio_market_wear_color(1.5), "#f44336"),
+          "the wear tiers' colours (max exclusive; past the last: the last)");
+
+    // quickSellItem's skins update (deob-10.0.7.js:132715-132745)
+    cJSON *sk = cJSON_Parse("[{\"ind\":10,\"cnt\":3},{\"ind\":10,\"cnt\":1,\"id\":501},{\"ind\":11,\"cnt\":2}]");
+    CHECK(kio_market_quick_sold(sk, 10, 0, 1) && cJSON_GetArraySize(sk) == 3 && n(cJSON_GetArrayItem(sk, 0), "cnt") == 1 &&
+              n(cJSON_GetArrayItem(sk, 1), "id") == 501,
+          "a stack: cnt = the answer's count, its copy kept");
+    CHECK(kio_market_quick_sold(sk, 10, 0, 0) && cJSON_GetArraySize(sk) == 2 && n(cJSON_GetArrayItem(sk, 0), "id") == 501,
+          "a stack sold out: its entry goes, the copy stays");
+    cJSON_Delete(sk);
+    sk = cJSON_Parse("[{\"ind\":12,\"id\":601},{\"ind\":12,\"id\":602},{\"ind\":12,\"id\":603},{\"ind\":13,\"cnt\":1}]");
+    CHECK(kio_market_quick_sold(sk, 12, 602, 2) && cJSON_GetArraySize(sk) == 3 && n(cJSON_GetArrayItem(sk, 0), "id") == 601 &&
+              n(cJSON_GetArrayItem(sk, 1), "id") == 603,
+          "copies: the sold instance (skin_id) goes");
+    CHECK(kio_market_quick_sold(sk, 12, 999, 1) && cJSON_GetArraySize(sk) == 2 && n(cJSON_GetArrayItem(sk, 0), "id") == 603,
+          "copies, no copy with that skin_id: the first (copies - count) go");
+    CHECK(!kio_market_quick_sold(sk, 12, 0, 1) && cJSON_GetArraySize(sk) == 2, "copies already at the count: nothing goes");
+    CHECK(kio_market_quick_sold(sk, 12, 0, 0) && cJSON_GetArraySize(sk) == 1 && n(cJSON_GetArrayItem(sk, 0), "ind") == 13,
+          "count 0: every copy goes");
+    CHECK(!kio_market_quick_sold(sk, 77, 0, 0) && cJSON_GetArraySize(sk) == 1, "an item the account has none of: no change");
+    CHECK(!kio_market_quick_sold(NULL, 1, 0, 0), "no skins: no change");
+    cJSON_Delete(sk);
+
     // the error codes' keys (deob-10.0.7.js:104431-104513)
     CHECK(!strcmp(kio_market_error_key("MARKET_LISTING_GONE"), "errors.exchange.listingGone"), "a market code's key");
     CHECK(!strcmp(kio_market_error_key("TRADE_ITEM_NOT_OWNED"), "errors.exchange.tradeItemNotOwned"), "a trade code's key");

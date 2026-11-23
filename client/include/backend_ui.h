@@ -184,6 +184,9 @@ void account_kio_set_balances(int has_funds, double funds, int has_junk, double 
 // acc.removeSkin: -1 of skin (a redeemed spin ticket, a spent paint). On krunker.io the account's own skins, as v10.0.7
 // takes a spent paint (an item paint, a clan banner colour): the first entry of the index with cnt ?? 1 > 0, gone at 0.
 void account_remove_skin(int skin_index);
+// krunker.io: the account's skins after a quick sell of item (POST market/quick-sell's data.count, the skin_id it sent or
+// 0), as v10.0.7's quickSellItem updates them (kio_market_quick_sold, deob-10.0.7.js:132715-132745). Box Office: nothing.
+void account_kio_quick_sold(int item, int skin_id, int count);
 // A paint applied (paint_picker.c): one paint unit taken, copy_id gets paint m (from_stack: a stack's unit became it).
 // krunker.io: copy_id is the instance id; m is {paint} or {paintShader}.
 void account_paint_applied(int item, int paint, int copy_id, int from_stack, const cJSON *m);

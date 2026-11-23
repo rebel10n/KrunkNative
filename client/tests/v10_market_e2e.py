@@ -6,7 +6,8 @@ kn_brain (sqlite, temp dir) and one headless client_bin at a time, from the v10 
   2. alice's inventory (My Inventory): the item's card, List -> 300 KR -> confirm: the listing is in
      the database and the KR fee was charged
   3. bob's Market: the listing on the Browse card -> Purchase -> confirm: KR and the item move
-  4. bob's inventory: Quick sell -> Get KR -> confirm: KR credited, the stack drops
+  4. bob's inventory: the stack's lock toggle (item_locks; no Quick sell while locked), unlock; then
+     Quick sell -> Get KR -> confirm: KR credited, the stack drops
   5. alice's Trading tab: Start a Trade -> bob -> Create Trade: add her item, add his, Submit ->
      confirm (his offer side included); then bob's Trading tab -> the incoming offer -> Accept
   6. both live balances (the header KR) and the ledger match; the sold item's estimate badge is its sale price
@@ -248,8 +249,22 @@ def scenario(port, ids, tokens, names):
         check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = 4", B) == 1, "the item moved to bob")
         check(wait(lambda: q("SELECT 1 FROM mail WHERE account_id = ? AND subject = 'Item sold'", A), 10), "alice got the Item sold mail")
 
-        # ---- 4: bob quick sells it
+        # ---- 4a: the lock toggle (v10.0.7's lock-toggle, deob-10.0.7.js:134989-135000, :135346-135357) on a Box Office
+        # account: kn_brain's "ils" (economy.c sh_item_lock, P_ITEM_LOCK), a locked stack has no Quick sell, then unlock
         c.click("v10mkTab1")
+        check(c.has("v10mkLock4", 25), "bob: his stack's lock toggle")
+        c.click("v10mkLock4")
+        locked = wait(lambda: one("SELECT count(*) FROM item_locks WHERE account_id = ? AND skin_id = 4 AND copy_id = 0", B), 15)
+        check(locked, "Lock stores the stack's item lock (item_locks)")
+        check(wait(lambda: "Locked Moon Dragon" in c.textof(".notification-list"), 10), "... says 'Locked Moon Dragon'")
+        check(wait(lambda: not c.has("v10mkQS4", 2), 10), "... and the locked stack has no Quick sell")
+        c.shot("locked")
+        c.click("v10mkLock4")
+        check(wait(lambda: one("SELECT count(*) FROM item_locks WHERE account_id = ? AND skin_id = 4", B) == 0, 15),
+              "Unlock removes it")
+        check(wait(lambda: "Unlocked Moon Dragon" in c.textof(".notification-list"), 10), "... says 'Unlocked Moon Dragon'")
+
+        # ---- 4: bob quick sells it
         check(c.has("v10mkQS4", 25), "bob: his inventory's quick-sell button")
         b_before = one("SELECT player_funds FROM players WHERE player_id = ?", B)
         c.click("v10mkQS4")
