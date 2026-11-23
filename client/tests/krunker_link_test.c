@@ -1411,6 +1411,42 @@ static void test_actions(void) {
         const KrunkerValue *e = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
         CHECK(e && krunker_num(krunker_at(e, 26), 0) == 3 && krunker_num(krunker_at(e, 27), 0) == -1 && krunker_num(krunker_at(e, 28), 0) == 5 &&
               krunker_num(krunker_at(e, 13), 0) == 2 && krunker_num(krunker_at(e, 8), 0) == 2, "en: streaks 3/-1/5, pcStat 2, team 2");
+        CHECK(e && krunker_num(krunker_at(e, 10), 0) == -1 && krunker_num(krunker_at(e, 17), 0) == -1 &&
+              krunker_num(krunker_at(e, 18), 0) == -1 && krunker_num(krunker_at(e, 34), 0) == -1,
+              "en without NET_EXT_KN_LOOK: skinColIndex / hairCol / chatCol / titleIndex -1");
+    }
+    clear();
+    {
+        // NET_EXT_KN_LOOK is kept for the next "en": [10] skinColIndex (the hex or the index), [17] hairCol,
+        // [18] chatCol, [34] titleIndex (deob-10.0.7.js:215052)
+        const KrunkerValue *e;
+        NetLookPacket look;
+        memset(&look, 0, sizeof(look));
+        look.skin_col_index = -1;
+        look.title_index = 87;
+        snprintf(look.skin_col, sizeof(look.skin_col), "#ff0000");
+        snprintf(look.hair_col, sizeof(look.hair_col), "#0f0");
+        uint8_t lb[NET_EXT_HEADER_SIZE + sizeof(look)];
+        uint16_t ln = net_ext_pack(lb, sizeof(lb), NET_EXT_KN_LOOK, &look, sizeof(look));
+        CHECK(ln && !krunker_link_send_ours(&link, NET_PACKET_EXT, lb, ln) && g_out_count == 0, "NET_EXT_KN_LOOK: kept, nothing sent");
+        krunker_link_send_ours(&link, NET_PACKET_ENT, &ent, sizeof(ent));
+        e = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
+        CHECK(e && krunker_str(krunker_at(e, 10)) && !strcmp(krunker_str(krunker_at(e, 10)), "#ff0000") &&
+              krunker_str(krunker_at(e, 17)) && !strcmp(krunker_str(krunker_at(e, 17)), "#0f0") &&
+              krunker_num(krunker_at(e, 18), 0) == -1 && krunker_num(krunker_at(e, 34), 0) == 87,
+              "en: skinColIndex \"#ff0000\", hairCol \"#0f0\", chatCol -1, titleIndex 87");
+        clear();
+        memset(&look, 0, sizeof(look));
+        look.skin_col_index = 3;
+        look.title_index = -1;
+        snprintf(look.chat_col, sizeof(look.chat_col), "#123456");
+        ln = net_ext_pack(lb, sizeof(lb), NET_EXT_KN_LOOK, &look, sizeof(look));
+        krunker_link_send_ours(&link, NET_PACKET_EXT, lb, ln);
+        krunker_link_send_ours(&link, NET_PACKET_ENT, &ent, sizeof(ent));
+        e = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
+        CHECK(e && krunker_num(krunker_at(e, 10), 0) == 3 && krunker_num(krunker_at(e, 17), 0) == -1 &&
+              krunker_str(krunker_at(e, 18)) && !strcmp(krunker_str(krunker_at(e, 18)), "#123456") && krunker_num(krunker_at(e, 34), 0) == -1,
+              "en: skinColIndex 3, chatCol \"#123456\"");
     }
     clear();
 
