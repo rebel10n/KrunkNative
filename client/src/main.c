@@ -792,7 +792,8 @@ int main(int argc, char **argv) {
     // map resource packs: what is already loaded follows a pack coming or going (mod_pack.c)
     const ModPackHooks mod_hooks = {texture_cache_reload, geometry_cache_reload, gltf_model_forget, audio_reload,
                                      mod_shader_insert_json, mod_shader_reset, // + shaders/ post passes (mod_shader.c)
-                                     mods_ui_can_load, mods_ui_pack_logo, mods_ui_pack_settings}; // canLoadMods, logo, settings.txt
+                                     mods_ui_can_load, mods_ui_pack_logo, mods_ui_pack_settings, // canLoadMods, logo, settings.txt
+                                     mods_ui_map_pack}; // a map's pack: the Mod Manager's "Server Mod"
     mod_pack_set_hooks(&mod_hooks);
     vt_init(&g_glyph_cache);
 #ifndef __EMSCRIPTEN__

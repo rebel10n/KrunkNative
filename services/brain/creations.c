@@ -231,14 +231,15 @@ static void db_rows_done(kn_db_result *res, void *ud) {
 #define MAP_COLS MAP_COLS_("kn_html(", ")", "m.map_info::text AS map_info")
 #define MAP_COLS_ANY MAP_COLS_("{html:", "}", "m.map_info AS map_info__t")
 
-#define MOD_COLS_(H0, H1, INFO_D)                                                                                  \
+/* fav: the caller's own favourite (accountId, $1), as v10's card reads a row's fav (deob-10.0.7.js:223452) */
+#define MOD_COLS_(H0, H1, INFO_D, ACC)                                                                             \
     "SELECT d.mod_id, " H0 "d.mod_name" H1 " AS mod_name, d.mod_date, d.mod_initialdate, " INFO_D ", "             \
     "coalesce(d.mod_image, '') AS mod_image, d.mod_votes, d.mod_plays AS mod_pl, d.mod_updatecounter, d.mod_featured, " \
     H0 "d.mod_description" H1 " AS mod_description, d.mod_url, coalesce(a.username, 'Community') AS creatorname, " \
-    "0 AS fund, (SELECT count(*) FROM creation_favs f WHERE f.kind = 1 AND f.creation_id = d.mod_id) AS fav " \
+    "0 AS fund, (SELECT count(*) FROM creation_favs f WHERE f.kind = 1 AND f.creation_id = d.mod_id AND f.account_id = " ACC ") AS fav " \
     "FROM published_mods d LEFT JOIN accounts a ON a.id = d.creator_id "
-#define MOD_COLS MOD_COLS_("kn_html(", ")", "d.mod_info::text AS mod_info")
-#define MOD_COLS_ANY MOD_COLS_("{html:", "}", "d.mod_info AS mod_info__t")
+#define MOD_COLS MOD_COLS_("kn_html(", ")", "d.mod_info::text AS mod_info", "$1::int")
+#define MOD_COLS_ANY MOD_COLS_("{html:", "}", "d.mod_info AS mod_info__t", "{int:$1}")
 
 static void run(ApiReq *a) {
     Brain *b = g_acct_brain;

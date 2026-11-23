@@ -18,6 +18,14 @@
 //     upload failed. Please try again."); on success the window closes, "Mod Published!" shows, and the Mod Manager
 //     forgets its lists and opens on My Mods.
 //   - ?mod=<name> on the page loads that mod by name (:226181-226190; here GET /mods/by-name/<name>).
+//   - the cards (iìïïííî, :223416-223459): the Favorite star (favoriteM, :228231-228245: `sel` = not a favourite,
+//     FAVORITE_MAPMOD(1, id, wasSel)), NEW! / UPDATED, the thumbnail, the name opening the mod view, "<n> likes" and
+//     the liked-by-friend line; Home is the featured banner (bigMFeatHold); a load writes #modLInfo ("loading mod...",
+//     "Success!", "mod error!", "mods disabled", "invalid mod file!", :225733-225762, :225961).
+//   - the mod view (openModDetail, svelte-1v2j2f2, :108350-108478): version, votes, creator, Created / Updated,
+//     description, Share (copies <origin>/?mod=<name>), Use, Report, and for a developer Feature / Delete.
+//   - Reset Mods (:218818-218831) answers the SUCCESS popup "Will take effect after respawning."; Ctrl+/ (:209629-209632)
+//     clears the last mod and resets quietly ("Mods Cleared" in chat); a map's modURL loads as "Server Mod" (:226475).
 //
 // Here (kn_brain, services/brain/asset_upload.c): publishKey is POST /mods/publish/key?token=, the files go to
 // uploadUrl (/mods/publish) as chunks (?fileId=&key=&offset=, then &done=1) like the editor's assets, because the brain
@@ -33,8 +41,11 @@
 #include <html_dom.h>
 #include <html_ui.h>
 #include <i18n.h>
+#include <krunker_net.h> // FAVORITE_MAPMOD on the game socket for a krunker.io account
 #include <mod_pack.h>
 #include <ui_logic.h>
+#include <v10_social.h> // the mod view's creator: openPlayerProfile
+#include <v10_ui.h>     // the mod view on the view stack
 
 #include <cJSON.h>
 #include <stdint.h>
@@ -44,6 +55,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <ctype.h>
+#include <time.h>
 
 // the platform file dialog (client/src/editor/editor_tools.c; editor_internal.h pulls in GL)
 typedef void (*EdFileFn)(void *user, const char *path);
@@ -76,7 +89,8 @@ static const char *const k_tab_names[TAB_COUNT] = {"Home", "Popular", "New", "Fa
 
 typedef struct {
     char *html;   // the cards so far
-    int used, waiting, page, more;
+    cJSON *list;  // the last page's rows (listData[tab].list: the Home tab's featured mod)
+    int used, waiting, page;
 } TabData;
 
 typedef struct {
@@ -170,9 +184,18 @@ static void answer_error(const char *body, char *out, const size_t n, const char
 
 static void popup(const int kind, const char *text) { account_popup(kind, NULL, text); }
 
+// the Mod Loader's #modLInfo line (iiìíiiï, deob-10.0.7.js:225733-225740): loadModPack's progress and errors
+static void loader_info(const char *text) {
+    HtmlElem e = html_dom_by_id("modLInfo");
+    if (e) html_dom_set_text(e, text);
+}
+
 // ------------------------------------------------------------------ the player's loaded mods
 
+// windows[3].loaded (deob-10.0.7.js:218805-218817): once per name; no name is "Auto Loaded" for the last mod loaded
+// again at start, "Server Mod" for a map's pack, else "Mod"
 static void loaded_add(const char *name, const char *url, const char *id, const char *creator, const int thumb) {
+    if (!name || !*name) name = "Mod";
     for (int i = 0; i < M.nloaded; i++)
         if (!strcmp(M.loaded[i].name, name)) return;
     if (M.nloaded == LOADED_MAX) {
@@ -180,60 +203,218 @@ static void loaded_add(const char *name, const char *url, const char *id, const 
         M.nloaded--;
     }
     LoadedMod *m = &M.loaded[M.nloaded++];
-    snprintf(m->name, sizeof m->name, "%s", name && *name ? name : "Mod");
+    snprintf(m->name, sizeof m->name, "%s", name);
     snprintf(m->url, sizeof m->url, "%s", url ? url : "");
     snprintf(m->id, sizeof m->id, "%s", id ? id : "");
     snprintf(m->creator, sizeof m->creator, "%s", creator ? creator : "");
     m->thumb = thumb;
 }
 
-// loadUserMod / loadModURL: the pack becomes the player's mod (mod_pack.h), kept over map changes
-static int load_user_mod(const char *name, const char *url, const char *id, const char *creator, const int thumb) {
+// loadModPack(url, true, server, name, id, creator, thumb) (deob-10.0.7.js:225865-225955) for the player's mod (the
+// Mod Manager's Load, the Mod Loader's URL, ?mod=): canLoadMods, then setLastMod (not for ?mod=), the #modVote of a
+// named mod, windows[3].loaded, and the pack (mod_pack.h, kept over map changes); its progress and errors in #modLInfo
+static int load_user_mod(const char *name, const char *url, const char *id, const char *creator, const int thumb, const int server) {
     char full[600];
     mod_url_of(url, id, full, sizeof full);
-    popup(2, I18N("generic.loading", "Loading..."));
-    if (!mod_pack_load_user(full)) {
-        popup(0, mod_pack_refused() ? I18N("mod.disabled", "mods disabled") : "This mod could not be loaded");
+    if (!mods_ui_can_load()) {
+        loader_info(I18N("mod.disabled", "mods disabled"));
         return 0;
     }
-    // loadModPack(url, true): autoLoadLast keeps it for the next start (setLastMod, deob-10.0.7.js:225871)
-    if (!ui_setting_is_false("autoLoadLast") && ui_setting_value("autoLoadLast")) html_storage_set("krk_lastMod", full);
+    if (!server && !ui_setting_is_false("autoLoadLast") && ui_setting_value("autoLoadLast")) html_storage_set("krk_lastMod", full);
+    creation_vote_set_mod(id ? atoi(id) : 0, name, creator); // #modVote: a named mod's vote (:225872-225880)
     loaded_add(name, full, id, creator, thumb);
-    creation_vote_set_mod(id ? atoi(id) : 0, name, creator); // #modVote: the loaded mod's vote (:225872-225880)
-    popup(1, "Mod loaded");
     menu_rerender_if_open(MODS_WINDOW);
+    if (!mod_pack_load_user(full)) {
+        loader_info(mod_pack_refused() ? I18N("mod.disabled", "mods disabled") : I18N("mod.error", "mod error!"));
+        return 0;
+    }
+    loader_info(I18N("generic.success", "Success!")); // the last entry extracted (iììiíii.close, :225747-225752)
     return 1;
 }
 
+// loadMod (deob-10.0.7.js:225961-225966): a .zip says "loading mod..." and loads (loadModPack(dataURL): no name, no
+// last mod, no vote), anything else "invalid mod file!"
 static void picked_local(void *user, const char *path) {
     (void) user;
     const size_t n = path ? strlen(path) : 0;
     if (n < 4 || strcasecmp(path + n - 4, ".zip")) {
-        popup(0, I18N("mod.invalid", "Invalid mod file"));
+        loader_info(I18N("mod.invalid", "invalid mod file!"));
         return;
     }
+    loader_info(I18N("mod.loading", "loading mod..."));
+    if (!mods_ui_can_load()) {
+        loader_info(I18N("mod.disabled", "mods disabled"));
+        return;
+    }
+    creation_vote_set_mod(0, NULL, NULL);
+    loaded_add(NULL, path, "", "", 0);
+    menu_rerender_if_open(MODS_WINDOW);
     if (!mod_pack_load_file(path)) {
-        popup(0, mod_pack_refused() ? I18N("mod.disabled", "mods disabled") : "This mod could not be loaded");
+        loader_info(mod_pack_refused() ? I18N("mod.disabled", "mods disabled") : I18N("mod.error", "mod error!"));
         return;
     }
-    const char *base = strrchr(path, '/');
-    loaded_add(base ? base + 1 : path, path, "", "", 0);
-    creation_vote_set_mod(0, NULL, NULL); // a local zip has no brain id: no vote
-    popup(1, "Mod loaded");
+    loader_info(I18N("generic.success", "Success!"));
 }
 
 // ------------------------------------------------------------------ the Mod Manager (window 4)
 
 static void list_request(int tab, int page);
 
-static void card(StrBuf *sb, const cJSON *r) {
-    char id[24], url[600], votes[32];
+// UTILS.formatNumYT (deob-10.0.7.js:23796-23806): from 1000 on, thousands to two significant digits, else one, so at
+// most two digits remain; one decimal when fractional ("1.2k", "12k")
+static void format_num_yt(char *out, const size_t n, const double v) {
+    static const char *const suffix[] = {"", "k", "m", "b", "t"};
+    if (!(v >= 1000)) {
+        snprintf(out, n, "%.15g", v > 0 ? v : 0);
+        return;
+    }
+    char whole[40];
+    snprintf(whole, sizeof whole, "%.15g", v);
+    int k = (int) (strlen(whole) / 3);
+    if (k > 4) k = 4;
+    const double scaled = v / pow(1000.0, k);
+    double r = scaled;
+    for (int p = 2; p >= 1; p--) {
+        char buf[40];
+        snprintf(buf, sizeof buf, "%.*g", p, scaled); // toPrecision(p) -> parseFloat
+        r = atof(buf);
+        snprintf(buf, sizeof buf, "%.15g", r);
+        size_t d = 0;
+        for (const char *q = buf; *q; q++) d += isalnum((unsigned char) *q) != 0;
+        if (d <= 2) break;
+    }
+    if (r != floor(r)) snprintf(out, n, "%.1f%s", r, suffix[k]);
+    else snprintf(out, n, "%.15g%s", r, suffix[k]);
+}
+
+// (v || 0).toString() with the thousands commas (deob-10.0.7.js:23949-23951)
+static void format_commas(char *out, const size_t n, const double v) {
+    char raw[48];
+    snprintf(raw, sizeof raw, "%.0f", v);
+    const size_t len = strlen(raw), lead = raw[0] == '-';
+    size_t o = 0;
+    for (size_t i = 0; i < len && o + 2 < n; i++) {
+        if (i > lead && (len - i) % 3 == 0) out[o++] = ',';
+        out[o++] = raw[i];
+    }
+    out[o] = 0;
+}
+
+// days since a row's mod_date ("2026-10-15T10:00:00Z" / "2026-10-15 10:00:00+00"), -1 when it does not parse
+// ((Date.now() - new Date(date)) / 864e5, deob-10.0.7.js:223444-223449)
+static double days_since(const char *date) {
+    int y, mo, d, h = 0, mi = 0, sec = 0;
+    if (!date || sscanf(date, "%d-%d-%d%*[T ]%d:%d:%d", &y, &mo, &d, &h, &mi, &sec) < 3) return -1;
+    y -= mo <= 2;
+    const long era = (y >= 0 ? y : y - 399) / 400;
+    const long yoe = y - era * 400, doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const long days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    const double then = (double) days * 86400.0 + h * 3600.0 + mi * 60.0 + sec;
+    const double age = ((double) time(NULL) - then) / 86400.0;
+    return age >= 0 ? age : 0;
+}
+
+// ---- the account's favourite mods (iìíîîïì[1], deob-10.0.7.js:228180-228217): ids loaded once from the Favorites
+// tab's first page for the signed-in account, with the toggles made meanwhile (edits) laid over them
+#define FAV_MAX 256
+typedef struct {
+    long long id;
+    int fav;
+} FavId;
+static struct {
+    int acc;    // the account the set belongs to, 0 none
+    int loaded; // the ids came back (before that, the edits only)
+    unsigned gen;
+    int n;
+    FavId e[FAV_MAX]; // the loaded ids (fav 1) and the edits: one entry per id, the last word wins
+} F;
+
+static void fav_put(const long long id, const int fav) {
+    for (int i = 0; i < F.n; i++)
+        if (F.e[i].id == id) {
+            F.e[i].fav = fav;
+            return;
+        }
+    if (F.n < FAV_MAX) F.e[F.n++] = (FavId) {id, fav};
+}
+
+// -1 unknown, else 0 / 1
+static int fav_known(const char *id) {
+    const long long v = id ? strtoll(id, NULL, 10) : 0;
+    if (v <= 0 || !F.acc) return -1;
+    for (int i = 0; i < F.n; i++)
+        if (F.e[i].id == v) return F.e[i].fav;
+    return F.loaded ? 0 : -1;
+}
+
+// iíììïïï(1): every mod star on the page follows the set (sel = not favourited)
+static void fav_paint(void) {
+    if (!F.loaded) return;
+    HtmlElem stars[256];
+    const int n = html_dom_query_all(0, ".mapActionB[data-fav='1']", stars, 256);
+    for (int i = 0; i < n; i++) {
+        char id[32] = "";
+        if (html_dom_get_attr(stars[i], "data-favid", id, sizeof id) < 0) continue;
+        const int fav = fav_known(id) == 1;
+        html_dom_set_class(stars[i], "sel", !fav);
+        HtmlElem icon = html_dom_query(stars[i], ".material-icons");
+        if (icon) html_dom_set_text(icon, fav ? "star" : "star_border");
+    }
+}
+
+static void on_fav_ids(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    if ((unsigned) (uintptr_t) user != F.gen) return;
+    cJSON *j = status == 200 && body ? cJSON_Parse(body) : NULL;
+    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(j, "data");
+    if (!cJSON_IsArray(rows)) { // an error: forgotten, so the next showing asks again
+        F.acc = 0;
+        F.n = 0;
+        cJSON_Delete(j);
+        return;
+    }
+    FavId edits[FAV_MAX]; // the toggles made while the list was on its way go over the ids
+    const int ne = F.n;
+    memcpy(edits, F.e, sizeof(F.e[0]) * (size_t) ne);
+    F.n = 0;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        char id[24];
+        jid(r, id, sizeof id);
+        if (id[0]) fav_put(strtoll(id, NULL, 10), 1);
+    }
+    for (int i = 0; i < ne; i++) fav_put(edits[i].id, edits[i].fav);
+    F.loaded = 1;
+    cJSON_Delete(j);
+    fav_paint();
+}
+
+// iìíìiíí(1) (the window's post): the set for the signed-in account, once
+static void fav_sync(void) {
+    const AccountInfo *acc = active_account();
+    if (!acc || acc->id <= 0) return;
+    if (F.acc == acc->id && (F.loaded || F.n)) {
+        fav_paint();
+        return;
+    }
+    F.acc = acc->id;
+    F.loaded = 0;
+    F.n = 0;
+    F.gen++;
+    char path[160];
+    snprintf(path, sizeof path, "/webhooks/general/mods/list?index=%d&pos=0&accountId=%d", TAB_FAV, acc->id);
+    backend_http_get(path, on_fav_ids, (void *) (uintptr_t) F.gen);
+}
+
+// iìïïííî(rows, "mod", tab) for one row (deob-10.0.7.js:223416-223459)
+static void card(StrBuf *sb, const cJSON *r, const int tab) {
+    char id[24], url[600], likes[32];
     jid(r, id, sizeof id);
     const char *name = jstr(r, "mna", "mod_name"), *creator = jstr(r, "ctn", "creatorname");
     const int thumb = info_thumb(r);
     mod_url_of(jstr(r, "url", "mod_url"), id, url, sizeof url);
-    snprintf(votes, sizeof votes, "%.0f", jnum(r, "vte", "mod_votes"));
-    const int fav = jnum(r, "fav", NULL) != 0 || M.tab == TAB_FAV;
+    format_num_yt(likes, sizeof likes, jnum(r, "vte", "mod_votes"));
+    const int fav = jnum(r, "fav", NULL) != 0 || tab == TAB_FAV || fav_known(id) == 1;
     sb_append(sb, "<div style='display:inline-block;'><div class='mapListItem'><div class='mapActionOvrl'><div class='mapActionHol'>"
                   "<div class='mapActionB' title='Load' onclick='loadUserMod(&quot;");
     arg(sb, name);
@@ -241,41 +422,82 @@ static void card(StrBuf *sb, const cJSON *r) {
     arg(sb, url);
     sb_appendf(sb, "&quot;,&quot;%s&quot;,&quot;", id);
     arg(sb, creator);
-    sb_appendf(sb, "&quot;,%d)'><span class='material-icons' style='font-size:70px;color:#fff;'>play_arrow</span></div></div></div>", thumb);
-    sb_appendf(sb, "<span title='Favorite' class='material-icons creationAction%s' onclick='favoriteM(1, this, %s);'>grade</span>", fav ? " sel" : "", id);
-    sb_append(sb, "<div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='");
+    sb_appendf(sb, "&quot;,%d)'><span class='material-icons' style='font-size:70px;color:#fff;'>play_arrow</span></div>"
+                   "<div class='mapActionSep'></div>", thumb);
+    // the star: sel while NOT a favourite (favoriteM flips it, deob-10.0.7.js:228231-228236)
+    sb_appendf(sb, "<div class='mapActionB%s' data-fav='1' data-favid='%s' onclick='favoriteM(1,this, %s);'>"
+                   "<span class='material-icons' style='font-size:70px;color:#fff;'>%s</span></div></div></div>",
+               fav ? "" : " sel", id, id[0] ? id : "0", fav ? "star" : "star_border");
+    const double age = days_since(jstr(r, "dte", "mod_date"));
+    if (age >= 0 && age <= 7) {
+        const int upd = jnum(r, "upd", "mod_updatecounter") > 1;
+        sb_appendf(sb, "<div class='mapAgeD' style='background-image:%s'>%s</div>",
+                   upd ? "linear-gradient(to right,#E040FB,#6240fb);" : "linear-gradient(to right,#fb9c40,#fb4040);", upd ? "UPDATED" : "NEW!");
+    }
+    sb_append(sb, "<div style='height:200px;width:100%;overflow: hidden;'><img class='mapListThumb' loading='lazy' src='");
     if (thumb) sb_appendf(sb, "%s/md%s/thumb.png", thumb_host(), id);
     else {
         const char *img = jstr(r, "mod_image", NULL);
         esc(sb, *img ? img : "./img/noimg.png");
     }
-    sb_append(sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'/></div><div class='mapListCrdI'>");
+    sb_append(sb, "' /></div><div style='margin-top:5px;padding-left:5px;padding-right:5px;line-height:30px;margin-bottom:0px;'>"
+                  "<div style='display:inline-block;max-width:250px;overflow:hidden;white-space:nowrap'><a href='javascript:;' "
+                  "onclick='window.openModDetail(&quot;");
+    arg(sb, name);
+    sb_append(sb, "&quot;)' />");
     esc(sb, name);
-    sb_append(sb, "<span style='float:right;color:rgba(255,255,255,0.6);margin-right:6px;'>");
-    esc(sb, votes);
-    sb_append(sb, " <span class='material-icons' style='font-size:16px;vertical-align:middle'>thumb_up</span></span></div></div></div>");
+    sb_appendf(sb, "</a></div><span style='font-size:15px;text-align:right;padding-right:2px;float:right;color:#fff;'>%s "
+                   "<span style='color:rgba(255,255,255,0.5)'>likes</span></span></div></div>", likes);
+    const char *friendname = jstr(r, "friendname", NULL);
+    if (*friendname) {
+        sb_append(sb, "<div class='likdByFrnd'><span class='material-icons' style='color:#fff;font-size:23px;vertical-align:middle;"
+                      "margin-right:6px;margin-top:-4px;'>thumb_up</span>liked by <span style='color:rgba(255,255,255,0.6);'>");
+        esc(sb, friendname);
+        sb_append(sb, "</span></div>");
+    } else {
+        sb_append(sb, "<div style='height:10px;'></div>");
+    }
+    sb_append(sb, "</div>");
 }
 
+// windows[3].modsLoaded(data, index, error) (deob-10.0.7.js:218782-218798): a page's cards are added to the tab's; an
+// answer with an error and nothing before shows the error in the list; an empty answer with nothing before shows
+// "No Mods found"; both of those forget the tab, so it asks again when shown next
 static void on_list(void *user, const int status, const char *body, const size_t length) {
     (void) length;
+    (void) status;
     const unsigned gen = (unsigned) ((uintptr_t) user >> 8);
     const int tab = (int) ((uintptr_t) user & 0xff);
     if (gen != M.gen || tab < 0 || tab >= TAB_COUNT) return;
     TabData *d = &M.data[tab];
     d->waiting = 0;
-    cJSON *j = status == 200 && body ? cJSON_Parse(body) : NULL;
+    cJSON *j = body ? cJSON_Parse(body) : NULL;
     const cJSON *rows = cJSON_GetObjectItemCaseSensitive(j, "data");
-    StrBuf sb = {0};
-    if (d->html) sb_append(&sb, d->html);
+    const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
     const int n = cJSON_GetArraySize(rows);
-    const cJSON *r;
-    cJSON_ArrayForEach(r, rows) card(&sb, r);
-    if (!n && !d->html) sb_append(&sb, I18N("windows.mods.none", "No Mods found"));
-    d->more = n > 0 && tab != TAB_HOME && tab != TAB_FAV;
-    free(d->html);
-    d->html = sb_finish(&sb);
+    const char *empty_text = NULL;
+    if (n && cJSON_IsString(err) && err->valuestring[0]) {
+        if (!d->html) empty_text = err->valuestring;
+    } else if (n) {
+        StrBuf sb = {0};
+        if (d->html) sb_append(&sb, d->html);
+        const cJSON *r;
+        cJSON_ArrayForEach(r, rows) card(&sb, r, tab);
+        free(d->html);
+        d->html = sb_finish(&sb);
+        cJSON_Delete(d->list);
+        d->list = cJSON_Duplicate(rows, 1);
+        if (M.tab == tab) menu_rerender_if_open(MODS_WINDOW);
+    } else if (!d->html) {
+        empty_text = I18N("windows.mods.none", "No Mods found");
+    }
+    if (empty_text) {
+        HtmlElem list = M.tab == tab ? html_dom_by_id("modList") : 0;
+        if (list) html_dom_set_html(list, empty_text);
+        cJSON_Delete(d->list);
+        memset(d, 0, sizeof *d);
+    }
     cJSON_Delete(j);
-    if (M.tab == tab) menu_rerender_if_open(MODS_WINDOW);
 }
 
 static void list_request(const int tab, const int page) {
@@ -284,30 +506,30 @@ static void list_request(const int tab, const int page) {
     snprintf(path, sizeof path, "/webhooks/general/mods/list?index=%d&pos=%d&accountId=%d", tab, page, acc ? acc->id : 0);
     M.data[tab].waiting = 1;
     M.data[tab].used = 1;
-    if (!backend_http_get(path, on_list, (void *) (uintptr_t) (M.gen << 8 | (unsigned) tab))) {
-        M.data[tab].waiting = 0;
-        free(M.data[tab].html);
-        StrBuf none = {0};
-        sb_append(&none, I18N("windows.mods.none", "No Mods found"));
-        M.data[tab].html = sb_finish(&none);
-    }
+    M.data[tab].page = page;
+    if (!backend_http_get(path, on_list, (void *) (uintptr_t) (M.gen << 8 | (unsigned) tab))) M.data[tab].waiting = 0;
 }
 
+// windows[3].searchResp(data) (deob-10.0.7.js:218769-218774): the cards of the Search tab (searchId), else none
 static void on_search(void *user, const int status, const char *body, const size_t length) {
     (void) user;
     (void) length;
-    HtmlElem out = html_dom_by_id("searchResultsMO");
-    if (!out) return;
     cJSON *j = status == 200 && body ? cJSON_Parse(body) : NULL;
     const cJSON *rows = cJSON_GetObjectItemCaseSensitive(j, "data");
     StrBuf sb = {0};
-    const cJSON *r;
-    cJSON_ArrayForEach(r, rows) card(&sb, r);
-    if (!cJSON_GetArraySize(rows)) sb_append(&sb, I18N("windows.mods.none", "No Mods found"));
+    if (cJSON_GetArraySize(rows)) {
+        sb_append(&sb, "<div style='height:10px'></div>");
+        const cJSON *r;
+        cJSON_ArrayForEach(r, rows) card(&sb, r, TAB_SEARCH);
+    } else {
+        sb_append(&sb, I18N("windows.mods.none", "No Mods found"));
+    }
     char *html = sb_finish(&sb);
-    html_dom_set_html(out, html);
+    HtmlElem out = html_dom_by_id("searchResultsMO");
+    if (out) html_dom_set_html(out, html);
     free(html);
     cJSON_Delete(j);
+    fav_paint();
 }
 
 static void search(void) {
@@ -317,14 +539,54 @@ static void search(void) {
     backend_url_encode(enc, sizeof enc, val);
     snprintf(path, sizeof path, "/webhooks/general/mods/search?val=%s", enc);
     HtmlElem out = html_dom_by_id("searchResultsMO");
-    if (out) html_dom_set_html(out, I18N("generic.loading", "Loading..."));
+    if (out) html_dom_set_html(out, "Loading...");
     backend_http_get(path, on_search, NULL);
 }
 
+// the Home tab's featured mod: a random row of the tab's last page (deob-10.0.7.js:218849-218857)
+static void featured(StrBuf *sb, const cJSON *rows) {
+    const int n = cJSON_GetArraySize(rows);
+    if (n <= 0) return;
+    const cJSON *r = cJSON_GetArrayItem(rows, rand() % n);
+    char id[24], url[600], votes[48];
+    jid(r, id, sizeof id);
+    const int thumb = info_thumb(r);
+    mod_url_of(jstr(r, "url", "mod_url"), id, url, sizeof url);
+    format_commas(votes, sizeof votes, jnum(r, "vte", "mod_votes"));
+    StrBuf c = {0};
+    arg(&c, jstr(r, "ctn", "creatorname")); // iìïìîiï: the creator's quotes dropped
+    char *creator = sb_finish(&c);
+    if (!creator) creator = strdup("");
+    const char *name = jstr(r, "mna", "mod_name");
+    // url(<thumbnail> + ".png"): v10 appends .png to the thumbnail's URL (or to nothing)
+    sb_append(sb, "<div class='bigMFeatHold' style='background-image:linear-gradient(to right, black, rgba(0, 0, 0, 0.5)),url(");
+    if (thumb) sb_appendf(sb, "%s/md%s/thumb.png", thumb_host(), id);
+    sb_append(sb, ".png);'><div id='bigMFeatName' style='top:200px;'>");
+    esc(sb, name);
+    sb_appendf(sb, "</div><div id='bigMFeatVbar' style='top:275px;'>%s<span class='material-icons' style='margin-left:10px;font-size:33px;"
+                   "vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;"
+                   "margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a>", votes);
+    esc(sb, creator);
+    sb_append(sb, "</a></div></div><div id='bigMFeatPBtn' style='bottom:30px;width:230pxheight:40px;padding-top:10px;' onclick='loadUserMod(`");
+    arg(sb, name);
+    sb_append(sb, "`,`");
+    arg(sb, url);
+    sb_appendf(sb, "`,`%s`,`%s`,%d)'>Load Mod <span class='material-icons' style='font-size:40px;color:#fff;vertical-align:top;"
+                   "margin-top:-3px;margin-left:5px'>move_to_inbox</span></div><div id='bigMFeatHBtn' style='bottom:30px;right:320px;"
+                   "width:auto;height:40px;padding-top:8px;' onclick='openPlayerProfile(`%s`)'>by <span style='color:#fff;'>",
+               id, creator, thumb, creator);
+    esc(sb, creator);
+    sb_append(sb, "</span></div></div><div class='mapListCat' style='margin-bottom:10px;padding-bottom:10px;margin-top:20px;'>Featured Mods</div>");
+    free(creator);
+}
+
+// windows[3].gen (deob-10.0.7.js:218832-218859)
 static char *manager_gen(void) {
     StrBuf sb = {0};
     sb_append(&sb, "<a href='javascript:;' onclick='showWindow(18)' class='menuLink'>Load Mod</a> | "
                    "<a href='javascript:;' onclick='showWindow(19)' class='menuLink'>Upload Mod</a>"
+                   "<div style='float:right'> <span style='color:rgba(255,255,255,0.5)'>30,000+</span> Mods | "
+                   "<a href='/viewer.html' class='menuLink'>Model Viewer</a></div>"
                    "<div style='margin-top:30px;margin-bottom:10px'><div class='bigMenTabs'>");
     for (int i = 0; i < TAB_COUNT; i++) {
         sb_appendf(&sb, "<div class='bigMenTab%s' onmouseenter='playTick(0.1);' onclick='playSelect();windows[3].switchTab(%d)'>",
@@ -334,36 +596,51 @@ static char *manager_gen(void) {
         else sb_append(&sb, k_tab_names[i]);
         sb_append(&sb, "</div>");
     }
-    sb_append(&sb, "</div></div><div style='color:rgba(255,255,255,0.3)' id='modList'>");
+    sb_append(&sb, "</div></div>");
+    StrBuf list = {0};
     if (M.tab == TAB_SEARCH) {
-        sb_append(&sb, "<input type='text' id='mdSrch' class='smlInput' placeholder='Mod name' onkeydown='if(window.event.keyCode==13)windows[3].searchMods()' />"
-                       "<div class='searchBtn' onclick='windows[3].searchMods()'><span class='material-icons' style='color:#fff;font-size:45px;'>search</span></div>"
-                       "<div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsMO'></div>");
+        sb_append(&list, "<input type='text' id='mdSrch' class='smlInput' placeholder='Mod Name or Keyword' "
+                         "onkeydown='if(window.event.keyCode==13)windows[3].searchMods()' /><div class='searchBtn' onclick='windows[3].searchMods()'>"
+                         "<span class='material-icons' style='color:#fff;font-size:45px;margin-bottom:-30px;line-height:75px'>search</span></div>"
+                         "<div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsMO'></div>");
     } else if (M.tab == TAB_LOADED) {
         for (int i = 0; i < M.nloaded; i++) {
             const LoadedMod *m = &M.loaded[i];
-            sb_append(&sb, "<div class='mapListItem'><div style='height:200px;width:100%;overflow:hidden;'><img class='mapListThumb' src='");
-            if (m->thumb && m->id[0]) sb_appendf(&sb, "%s/md%s/thumb.png", thumb_host(), m->id);
-            else sb_append(&sb, "./img/noimg.png");
-            sb_append(&sb, "' /></div><div style='margin-top:1px'><a href='javascript:;'>");
-            esc(&sb, m->name);
-            sb_append(&sb, "</a></div></div>");
+            sb_append(&list, "<div class='mapListItem'><div style='height:200px;width:100%;overflow: hidden;'><img class='mapListThumb' loading='lazy' src='");
+            if (m->thumb && m->id[0]) sb_appendf(&list, "%s/md%s/thumb.png", thumb_host(), m->id);
+            else sb_append(&list, "./img/noimg.png");
+            sb_append(&list, "' /></div><div style='margin-top:1px'><a href='javascript:;'>");
+            esc(&list, m->name);
+            sb_append(&list, "</a></div></div>");
         }
-        if (M.nloaded) sb_append(&sb, "<div class='loadMoreD' onclick='windows[3].reset()'>Reset Mods</div>");
-        else sb_append(&sb, I18N("windows.mods.none", "No Mods found"));
+        if (M.nloaded) sb_append(&list, "<div class='loadMoreD' onclick='windows[3].reset()'>Reset Mods</div>");
+        else sb_append(&list, I18N("windows.mods.none", "No Mods found"));
     } else {
         TabData *d = &M.data[M.tab];
         if (!d->used) list_request(M.tab, 0);
-        if (d->html) sb_append(&sb, d->html);
-        if (d->waiting) sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
-        else if (d->more) sb_append(&sb, "<div class='loadMoreD' onclick='windows[3].loadMore(this)'>Load More</div>");
+        if (d->html) {
+            sb_append(&list, d->html);
+            if (d->waiting) sb_append(&list, "<div class='loadMoreW'>Loading...</div>");
+            else if (M.tab != TAB_FAV && M.tab != TAB_HOME) // fav / noPages
+                sb_append(&list, "<div class='loadMoreD' onclick='windows[3].loadMore(this)'>Load More</div>");
+        } else {
+            sb_append(&list, "<div class='loadMoreW'>Loading...</div>");
+        }
+        if (M.tab == TAB_HOME && d->list) featured(&sb, d->list);
     }
+    sb_append(&sb, "<div style='color:rgba(255,255,255,0.3)' id='modList'>");
+    char *l = sb_finish(&list);
+    if (l) sb_append(&sb, l);
+    free(l);
     sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
 
 static void lists_reset(void) {
-    for (int i = 0; i < TAB_COUNT; i++) free(M.data[i].html);
+    for (int i = 0; i < TAB_COUNT; i++) {
+        free(M.data[i].html);
+        cJSON_Delete(M.data[i].list);
+    }
     memset(M.data, 0, sizeof M.data);
     M.gen++;
 }
@@ -790,6 +1067,8 @@ static void publish(void) {
 
 // ------------------------------------------------------------------ ?mod=<name>
 
+// the page's ?mod=<name> (deob-10.0.7.js:226181-226192): the mod of exactly that name, loaded as a server mod
+// (loadModPack(url, true, true, ...): not kept as the last mod); none found says nothing
 static void on_by_name(void *user, const int status, const char *body, const size_t length) {
     (void) user;
     (void) length;
@@ -798,8 +1077,7 @@ static void on_by_name(void *user, const int status, const char *body, const siz
     char id[24];
     jid(d, id, sizeof id);
     const char *name = jstr(d, "mod_name", "name");
-    if (d && id[0]) load_user_mod(name, jstr(d, "mod_url", NULL), id, jstr(d, "creator_name", "creatorname"), info_thumb(d));
-    else popup(0, "No mod of that name");
+    if (d && id[0]) load_user_mod(name, jstr(d, "mod_url", NULL), id, jstr(d, "creatorname", "creator_name"), info_thumb(d), 1);
     cJSON_Delete(j);
 }
 
@@ -817,18 +1095,329 @@ void mods_ui_query(const char *query) {
     backend_http_get(path, on_by_name, NULL);
 }
 
-// favoriteM(1, this, id): the star's sel class flips, kn_brain's fvM (kind 1, creations.c) records it, and the
-// Favorites tab is asked again next time
-void mods_ui_favorite(const char *id, const HtmlElem star) {
+// favoriteM(1, this, id) (deob-10.0.7.js:228231-228245), signed in: the star's sel class (set = not a favourite)
+// flips and its icon follows, FAVORITE_MAPMOD(1, id, wasSel) goes out (kn_brain's fvM, creations.c; the game socket
+// for a krunker.io account), the favourite set takes the toggle, and the Favorites tab's list is dropped unless a page
+// of it is loading
+void mods_ui_favorite(const char *id, HtmlElem star) {
     const long long mid = id ? strtoll(id, NULL, 10) : 0;
-    if (mid <= 0 || !active_account()) return;
-    const int now = star ? !html_dom_has_class(star, "sel") : 1;
-    if (star) html_dom_set_class(star, "sel", now);
+    if (!active_account()) return;
+    char got[32] = "";
+    if (!star || html_dom_get_attr(star, "data-favid", got, sizeof got) < 0 || strcmp(got, id ? id : "") != 0) {
+        // `this` did not come through as the star (an inner node or none): the card's star by its id
+        char sel[96];
+        snprintf(sel, sizeof sel, ".mapActionB[data-fav='1'][data-favid='%lld']", mid);
+        star = mid > 0 ? html_dom_query(0, sel) : 0;
+    }
+    const int was_sel = star ? html_dom_has_class(star, "sel") : fav_known(id) != 1;
+    if (star) {
+        html_dom_set_class(star, "sel", !was_sel);
+        html_dom_set_html(star, was_sel ? "<span class='material-icons' style='font-size:50px;color:#fff;'>star</span>"
+                                        : "<span class='material-icons' style='font-size:50px;color:#fff;'>star_border</span>");
+    }
     char frame[96];
-    snprintf(frame, sizeof frame, "[\"fvM\",1,%lld,%d]", mid, now); // v10's order: kind, id, flag
+    snprintf(frame, sizeof frame, "[\"fvM\",1,%lld,%s]", mid, was_sel ? "true" : "false"); // v10's order: kind, id, flag
     if (account_backend() != ACCOUNT_BACKEND_KRUNKER) backend_social_send_text(frame);
-    free(M.data[TAB_FAV].html);
-    memset(&M.data[TAB_FAV], 0, sizeof M.data[TAB_FAV]);
+    else {
+        cJSON *f = cJSON_Parse(frame);
+        krunker_net_send_account_frame(f);
+        cJSON_Delete(f);
+    }
+    if (mid > 0 && F.acc) fav_put(mid, was_sel);
+    if (!M.data[TAB_FAV].waiting) {
+        free(M.data[TAB_FAV].html);
+        cJSON_Delete(M.data[TAB_FAV].list);
+        memset(&M.data[TAB_FAV], 0, sizeof M.data[TAB_FAV]);
+    }
+}
+
+// iíïííiì("SUCCESS", null, lines) (deob-10.0.7.js:222910-222916): the green tick over the lines (HTML, joined by <br>)
+static void success_popup_html(const char *html) {
+    static const char *const pops[] = {"popupContent", "confPremiumPop", "gameCodePop", "tradePop", "twitchPop", "pfpPop", "dropsPop", "confPop"};
+    HtmlElem e = html_dom_by_id("popupHolder");
+    if (e) html_dom_set_display(e, "block");
+    for (size_t i = 0; i < sizeof pops / sizeof pops[0]; i++)
+        if ((e = html_dom_by_id(pops[i]))) html_dom_set_display(e, "none");
+    HtmlElem content = html_dom_by_id("popupContent");
+    if (!content) return;
+    html_dom_set_style(content, "width", "300px");
+    html_dom_set_display(content, "block");
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div style='width:100%%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div>"
+                    "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>%s</div></div>", html);
+    char *h = sb_finish(&sb);
+    html_dom_set_html(content, h ? h : "");
+    free(h);
+}
+
+// windows[3].reset(quiet) (deob-10.0.7.js:218818-218831): the loaded list empties, the pack and its passes, sounds,
+// css and logo go, #modVote hides; the Reset Mods link redraws the window and says so in a SUCCESS popup; Ctrl + /
+// also forgets the last mod and says "Mods Cleared" in the chat
+static void mods_reset(const int quiet) {
+    M.nloaded = 0;
+    mod_pack_reset();
+    creation_vote_set_mod(0, NULL, NULL);
+    if (quiet) {
+        hud_ui_add_chat_line_on("Mods Cleared", NULL, -1);
+        return;
+    }
+    menu_rerender_if_open(MODS_WINDOW);
+    char text[256];
+    snprintf(text, sizeof text, "%s<br><small>%s</small>", I18N("mod.reset.0", "Will take effect after respawning."),
+             I18N("mod.reset.1", "Map Objects dont get reset"));
+    success_popup_html(text);
+}
+
+// Ctrl + / (deob-10.0.7.js:209630-209632): setLastMod('') and windows[3].reset(true)
+void mods_ui_clear_all(void) {
+    html_storage_set("krk_lastMod", "");
+    mods_reset(1);
+}
+
+// ------------------------------------------------------------------ the mod view (openModDetail, svelte-1v2j2f2)
+
+// window.openModDetail(name) (deob-10.0.7.js:222799-222803) pushes the mod view (:108361-108478): the header (back,
+// the extension icon, the name, the share button once loaded), then the hourglass while getModByName runs, its error,
+// or the body: the thumbnail with v<version> and the votes, "by <creator>" (the profile), Featured, Use (/?mod=<name>),
+// Report, Feature / Delete for staff, Created / Updated and the description
+static struct {
+    int open, loading, copied;
+    unsigned gen;
+    char name[160], error[200];
+    cJSON *mod;
+} V;
+
+static void view_render(void);
+
+static void view_closed(const int accepted, void *user) {
+    (void) accepted;
+    (void) user;
+    V.open = 0;
+    V.gen++;
+    cJSON_Delete(V.mod);
+    V.mod = NULL;
+}
+
+// iïìîîíì(date) (deob-10.0.7.js:23916-23923): "D Mon YYYY", "None" without a date
+static void view_date(StrBuf *sb, const char *iso) {
+    static const char *const mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    int y, mo, d;
+    if (!iso || !*iso || sscanf(iso, "%d-%d-%d", &y, &mo, &d) != 3 || mo < 1 || mo > 12) {
+        sb_append(sb, "None");
+        return;
+    }
+    sb_appendf(sb, "%d %s %d", d, mon[mo - 1], y);
+}
+
+static char *view_html(void) {
+    StrBuf sb = {0};
+    const AccountInfo *acc = active_account();
+    sb_append(&sb, "<div class=\"mod-root svelte-1v2j2f2\"><div class=\"mod-header svelte-1v2j2f2\"><button class=\"mod-back svelte-1v2j2f2\" "
+                   "type=\"button\" aria-label=\"Back\" onclick=\"knModView('back')\"><i class=\"material-icons svelte-1v2j2f2\">arrow_back</i>"
+                   "</button> <i class=\"material-icons mod-header-icon svelte-1v2j2f2\">extension</i> <span class=\"mod-header-title svelte-1v2j2f2\">");
+    const char *name = V.mod ? jstr(V.mod, "name", "mod_name") : "";
+    esc(&sb, *name ? name : V.name);
+    sb_append(&sb, "</span> <div class=\"mod-header-actions svelte-1v2j2f2\">");
+    if (V.mod) // the share button (svelte-1524ito): origin + /?mod=<name>, "Copied!" for 1.5 s
+        sb_appendf(&sb, "<button class=\"share-btn svelte-1524ito%s\" type=\"button\" title=\"%s\" onclick=\"knModView('share')\">"
+                        "<i class=\"material-icons svelte-1524ito\">%s</i> <span class=\"svelte-1524ito\">%s</span></button>",
+                   V.copied ? " share-copied" : "", V.copied ? "Copied!" : "Copy link", V.copied ? "check" : "share", V.copied ? "Copied!" : "Share");
+    sb_append(&sb, "</div></div> ");
+    if (V.loading) {
+        sb_append(&sb, "<div class=\"mod-center svelte-1v2j2f2\"><i class=\"material-icons spin svelte-1v2j2f2\">hourglass_empty</i></div>");
+    } else if (V.error[0]) {
+        sb_append(&sb, "<div class=\"mod-center svelte-1v2j2f2\" style=\"color:#f44336\">");
+        esc(&sb, V.error);
+        sb_append(&sb, "</div>");
+    } else if (V.mod) {
+        char id[24], votes[48];
+        jid(V.mod, id, sizeof id);
+        format_commas(votes, sizeof votes, jnum(V.mod, "votes", "mod_votes"));
+        const cJSON *ver = cJSON_GetObjectItemCaseSensitive(V.mod, "version");
+        const int featured = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(V.mod, "featured")) || jnum(V.mod, "featured", NULL) != 0;
+        sb_appendf(&sb, "<div class=\"mod-body svelte-1v2j2f2\"><div class=\"mod-hero svelte-1v2j2f2\"><img class=\"mod-thumb svelte-1v2j2f2\" "
+                        "src=\"%s/md%s/thumb.png\" alt=\"", thumb_host(), id);
+        esc(&sb, name);
+        sb_append(&sb, "\" onerror=\"this.onerror=null;this.src='./img/noimg.png';\"> <div class=\"mod-hero-overlay svelte-1v2j2f2\">"
+                       "<span class=\"mod-version svelte-1v2j2f2\">v");
+        if (cJSON_IsString(ver) && ver->valuestring[0]) esc(&sb, ver->valuestring);
+        else if (cJSON_IsNumber(ver) && ver->valuedouble != 0) sb_appendf(&sb, "%g", ver->valuedouble);
+        else sb_append(&sb, "0.1");
+        sb_appendf(&sb, "</span> <span class=\"mod-votes svelte-1v2j2f2\"><i class=\"material-icons svelte-1v2j2f2\">thumb_up</i> %s</span></div></div> "
+                        "<div class=\"mod-info-bar svelte-1v2j2f2\"><div class=\"mod-info-left svelte-1v2j2f2\"><button class=\"mod-creator svelte-1v2j2f2\" "
+                        "type=\"button\" onclick=\"knModView('creator')\">by ", votes);
+        esc(&sb, jstr(V.mod, "creator_name", "creatorname"));
+        sb_append(&sb, "</button> ");
+        if (featured)
+            sb_append(&sb, "<span class=\"mod-featured svelte-1v2j2f2\"><i class=\"material-icons svelte-1v2j2f2\">check_circle</i> Featured</span>");
+        sb_append(&sb, "</div> <div class=\"mod-actions svelte-1v2j2f2\"><button class=\"mod-use-btn svelte-1v2j2f2\" type=\"button\" "
+                       "onclick=\"knModView('use')\"><i class=\"material-icons svelte-1v2j2f2\">play_arrow</i> Use</button> <button "
+                       "class=\"mod-icon-btn svelte-1v2j2f2\" type=\"button\" title=\"Report\" onclick=\"knModView('report')\"><i "
+                       "class=\"material-icons svelte-1v2j2f2\">flag</i></button> ");
+        if (acc && acc->is_dev)
+            sb_appendf(&sb, "<button class=\"mod-icon-btn svelte-1v2j2f2\" type=\"button\" title=\"%s\" onclick=\"knModView('feature')\">"
+                            "<i class=\"material-icons svelte-1v2j2f2\" style=\"color:%s\">check_circle</i></button>",
+                       featured ? "Unfeature" : "Feature", featured ? "#fbc02d" : "#ccc");
+        sb_append(&sb, " ");
+        if (acc && acc->is_dev)
+            sb_append(&sb, "<button class=\"mod-icon-btn mod-del svelte-1v2j2f2\" type=\"button\" title=\"Delete\" onclick=\"knModView('delete')\">"
+                           "<i class=\"material-icons svelte-1v2j2f2\">delete_forever</i></button>");
+        sb_append(&sb, "</div></div> <div class=\"mod-content svelte-1v2j2f2\"><div class=\"mod-dates svelte-1v2j2f2\"><span>Created: ");
+        view_date(&sb, jstr(V.mod, "created_at", NULL));
+        sb_append(&sb, "</span> <span>Updated: ");
+        view_date(&sb, jstr(V.mod, "updated_at", NULL));
+        sb_append(&sb, "</span></div> <div class=\"mod-desc svelte-1v2j2f2\">");
+        const char *desc = jstr(V.mod, "description", "mod_description");
+        esc(&sb, *desc ? desc : "No Description");
+        sb_append(&sb, "</div></div></div>");
+    }
+    sb_append(&sb, "</div>");
+    return sb_finish(&sb);
+}
+
+static void view_render(void) {
+    if (V.open) v10_view_set(view_html());
+}
+
+static void on_mod_view(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    if ((unsigned) (uintptr_t) user != V.gen || !V.open) return;
+    cJSON *j = body ? cJSON_Parse(body) : NULL;
+    const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "data");
+    V.loading = 0;
+    if (err && !cJSON_IsNull(err)) { // throw new Error(error.message || error)
+        const char *m = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(err, "message"));
+        snprintf(V.error, sizeof V.error, "%s", m && *m ? m : cJSON_IsString(err) && err->valuestring[0] ? err->valuestring : "Failed to load mod");
+    } else if (status != 200 || !cJSON_IsObject(d)) {
+        snprintf(V.error, sizeof V.error, "Failed to load mod");
+    } else {
+        cJSON_Delete(V.mod);
+        V.mod = cJSON_Duplicate(d, 1);
+    }
+    cJSON_Delete(j);
+    view_render();
+}
+
+static void mod_view_open(const char *name) {
+    if (!name || !*name) return; // iîIiîïï && push
+    if (V.open) v10_view_pop(0);
+    memset(V.error, 0, sizeof V.error);
+    snprintf(V.name, sizeof V.name, "%s", name);
+    V.open = 1;
+    V.loading = 1;
+    V.copied = 0;
+    V.gen++;
+    v10_view_push(view_html(), view_render, view_closed, NULL);
+    char enc[480], path[520];
+    backend_url_encode(enc, sizeof enc, name);
+    snprintf(path, sizeof path, "/mods/by-name/%s", enc);
+    if (!backend_http_get(path, on_mod_view, (void *) (uintptr_t) V.gen)) {
+        V.loading = 0;
+        snprintf(V.error, sizeof V.error, "Failed to load mod");
+        view_render();
+    }
+}
+
+static void view_uncopy(void *user) {
+    if ((unsigned) (uintptr_t) user != V.gen || !V.copied) return;
+    V.copied = 0;
+    view_render();
+}
+
+static void view_reported(const int accepted, const char *text, void *user) {
+    (void) user;
+    if (!accepted || !text || !V.mod) return;
+    char reason[300];
+    snprintf(reason, sizeof reason, "%s", text);
+    char *s = reason;
+    while (*s == ' ' || *s == '\t' || *s == '\n') s++;
+    for (size_t n = strlen(s); n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\n');) s[--n] = 0;
+    if (strlen(s) < 10) return; // min 10 chars
+    char info[480];
+    snprintf(info, sizeof info, "Mod: %s - %s", jstr(V.mod, "name", "mod_name"), s);
+    cJSON *f = cJSON_CreateArray(); // players.reportPlayer(creator, 0, info): kn_brain's rpt
+    cJSON_AddItemToArray(f, cJSON_CreateString("rpt"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(jstr(V.mod, "creator_name", "creatorname")));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+    cJSON_AddItemToArray(f, cJSON_CreateString(info));
+    const int sent = backend_social_send(f);
+    cJSON_Delete(f);
+    ui_alert(sent ? "Report submitted." : "Failed to submit report");
+}
+
+static void view_feature_done(void *user, const int status, const cJSON *json) {
+    if ((unsigned) (uintptr_t) user != V.gen || !V.mod || status != 200) return;
+    const cJSON *f = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(json, "data"), "featured");
+    cJSON_DeleteItemFromObjectCaseSensitive(V.mod, "featured");
+    cJSON_AddBoolToObject(V.mod, "featured", cJSON_IsTrue(f) || (cJSON_IsNumber(f) && f->valuedouble != 0));
+    view_render();
+}
+
+static void view_delete_done(void *user, const int status, const cJSON *json) {
+    (void) json;
+    if ((unsigned) (uintptr_t) user != V.gen || status != 200) return;
+    v10_view_pop(0);
+}
+
+static void view_delete_confirmed(const int accepted, const char *text, void *user) {
+    (void) text;
+    if (!accepted || (unsigned) (uintptr_t) user != V.gen || !V.mod) return;
+    char id[24], path[120], tok[400];
+    jid(V.mod, id, sizeof id);
+    v10_url_token(tok, sizeof tok);
+    snprintf(path, sizeof path, "/mods/%s?token=%s", id, tok);
+    v10_send("DELETE", path, NULL, view_delete_done, (void *) (uintptr_t) V.gen);
+}
+
+static void mod_view_action(const char *what) {
+    if (!strcmp(what, "back")) {
+        v10_view_pop(0);
+        return;
+    }
+    if (!V.mod) return;
+    const AccountInfo *acc = active_account();
+    if (!strcmp(what, "share")) {
+        char origin[256], enc[480], url[800];
+        html_page_origin(origin, sizeof origin);
+        backend_url_encode(enc, sizeof enc, jstr(V.mod, "name", "mod_name"));
+        snprintf(url, sizeof url, "%s/?mod=%s", origin, enc);
+        html_clipboard_write(url);
+        V.copied = 1;
+        view_render();
+        html_timer_add(1500, view_uncopy, (void *) (uintptr_t) V.gen);
+    } else if (!strcmp(what, "creator")) {
+        // the profile view of { playerName: creator_name } (v10_social.c's openPlayerProfile)
+        HtmlArg a = {0};
+        a.kind = HTML_ARG_STR;
+        a.str = jstr(V.mod, "creator_name", "creatorname");
+        if (*a.str) v10_social_handle("openPlayerProfile", NULL, &a, 1);
+    } else if (!strcmp(what, "use")) { // window.open('/?mod=<name>'): the mod, loaded here
+        char q[400], enc[360];
+        backend_url_encode(enc, sizeof enc, jstr(V.mod, "name", "mod_name"));
+        snprintf(q, sizeof q, "mod=%s", enc);
+        mods_ui_query(q);
+    } else if (!strcmp(what, "report")) {
+        ui_prompt("Report reason (min 10 chars):", view_reported, NULL);
+    } else if (!strcmp(what, "feature") && acc && acc->is_dev) {
+        char id[24], path[120], tok[400], body[48];
+        jid(V.mod, id, sizeof id);
+        const int on = !(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(V.mod, "featured")) || jnum(V.mod, "featured", NULL) != 0);
+        v10_url_token(tok, sizeof tok);
+        snprintf(path, sizeof path, "/mods/%s/feature?token=%s", id, tok);
+        snprintf(body, sizeof body, "{\"featured\":%s}", on ? "true" : "false");
+        v10_send("POST", path, body, view_feature_done, (void *) (uintptr_t) V.gen);
+    } else if (!strcmp(what, "delete") && acc && acc->is_dev) {
+        ui_confirm_labeled("Are you sure you want to delete this Mod?", "Delete", "Cancel", view_delete_confirmed, (void *) (uintptr_t) V.gen);
+    }
+}
+
+// a map's own pack (loadModPack(modURL, true, true, undefined, undefined, creator), deob-10.0.7.js:226475): the Loaded
+// tab lists it as "Server Mod" (not the last mod, no vote)
+void mods_ui_map_pack(const char *url) {
+    creation_vote_set_mod(0, NULL, NULL);
+    loaded_add("Server Mod", url, "", "", 0);
+    menu_rerender_if_open(MODS_WINDOW);
 }
 
 // ------------------------------------------------------------------ pack hooks (mod_pack.h)
@@ -866,9 +1455,9 @@ void mods_ui_pack_settings(const char *text, const size_t len) {
 void mods_ui_autoload_last(void) {
     char url[600];
     if (ui_setting_is_false("autoLoadLast") || !ui_setting_value("autoLoadLast")) return;
-    if (html_storage_get("krk_lastMod", url, sizeof url) < 0 || !url[0]) return;
-    if (!mod_pack_load_user(url)) return;
-    loaded_add("Auto Loaded", url, "", "", 0);
+    if (html_storage_get("krk_lastMod", url, sizeof url) < 0 || !url[0] || !mods_ui_can_load()) return;
+    loaded_add("Auto Loaded", url, "", "", 0); // listed before the pack loads, as windows[3].loaded
+    mod_pack_load_user(url);
 }
 
 // ------------------------------------------------------------------ the module
@@ -880,6 +1469,7 @@ char *mods_ui_window_gen(const int id) {
 }
 
 void mods_ui_window_post(const int id) {
+    if (id == MODS_WINDOW) fav_sync(); // windows[3].post: iìíìiíí(1); iíììïïï(1) (deob-10.0.7.js:218775-218778)
     // the Mod Loader's drop area opens the file dialog natively (the page's file input does nothing here)
     HtmlElem drop = id == LOADER_WINDOW ? html_dom_by_id("modDropper") : 0;
     if (drop) html_dom_set_attr(drop, "onclick", "knModPickLocal()");
@@ -896,7 +1486,6 @@ static int iarg(const HtmlArg *a, const int argc, const int i) {
 }
 
 int mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) ev;
     if (!name) return -1;
     if (!strcmp(name, "windows.3.switchTab")) {
         const int t = iarg(args, argc, 0);
@@ -905,29 +1494,35 @@ int mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
             menu_rerender_if_open(MODS_WINDOW);
         }
     } else if (!strcmp(name, "windows.3.loadMore")) {
+        // loadMore(el): the link reads Loading... (loadMoreW) while the next page comes (deob-10.0.7.js:218779-218781)
         TabData *d = &M.data[M.tab];
-        if (!d->waiting && d->more) {
-            list_request(M.tab, ++d->page);
-            menu_rerender_if_open(MODS_WINDOW);
+        if (d->used && !d->waiting) {
+            if (ev && ev->target) {
+                html_dom_set_attr(ev->target, "class", "loadMoreW");
+                html_dom_set_html(ev->target, "Loading...");
+            }
+            list_request(M.tab, d->page + 1);
         }
     } else if (!strcmp(name, "windows.3.searchMods")) {
         search();
     } else if (!strcmp(name, "windows.3.reset")) {
-        M.nloaded = 0;
-        mod_pack_reset();
-        popup(1, "Mods cleared");
-        menu_rerender_if_open(MODS_WINDOW);
-    } else if (!strcmp(name, "loadUserMod")) {
+        mods_reset(0);
+    } else if (!strcmp(name, "loadUserMod")) { // showWindow(18), "LOADING...", loadModPack (deob-10.0.7.js:225755-225762)
         menu_show_window(LOADER_WINDOW, 0);
+        loader_info(I18N("generic.loading", "LOADING..."));
         char id[24];
         if (args && argc > 2 && args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof id, "%.0f", args[2].num);
         else snprintf(id, sizeof id, "%s", sarg(args, argc, 2));
-        load_user_mod(sarg(args, argc, 0), sarg(args, argc, 1), id, sarg(args, argc, 3), iarg(args, argc, 4));
+        load_user_mod(sarg(args, argc, 0), sarg(args, argc, 1), id, sarg(args, argc, 3), iarg(args, argc, 4), 0);
     } else if (!strcmp(name, "loadModURL")) {
         char url[512] = "";
         HtmlElem in = html_dom_by_id("modURL");
         if (in) html_dom_get_value(in, url, sizeof url);
-        if (url[0]) load_user_mod("", url, "", "", 0);
+        if (url[0]) load_user_mod(NULL, url, "", "", 0, 0);
+    } else if (!strcmp(name, "openModDetail")) {
+        mod_view_open(sarg(args, argc, 0));
+    } else if (!strcmp(name, "knModView")) {
+        mod_view_action(sarg(args, argc, 0));
     } else if (!strcmp(name, "loadMod") || !strcmp(name, "knModPickLocal")) {
         ed_pick_file(".zip", picked_local, NULL);
     } else if (!strcmp(name, "selectFile")) { // selectFile("modThumb" | "modZip"): the window's links, the hub's buttons

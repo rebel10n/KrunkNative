@@ -620,6 +620,8 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"loadUserMod", h_mods},
     {"loadModURL", h_mods},
     {"loadMod", h_mods},
+    {"openModDetail", h_mods}, // window.openModDetail(name): the mod view (mods_ui.c)
+    {"knModView", h_mods},     // the mod view's buttons
     {"knModPickLocal", h_mods},
     {"selectFile", h_select_file}, // Upload Mod (window 19, v10's mods_pub) and the profile picture ("pfp")
     {"windows.18.submit", h_mods},

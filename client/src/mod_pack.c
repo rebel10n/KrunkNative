@@ -503,6 +503,13 @@ const char *mod_pack_user_url(void) {
 void mod_pack_map_loaded(const cJSON *map_json) {
     const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(map_json, "modURL"));
     if (url && *url) {
+        // loadModPack(modURL, true, true, ...) once per new modURL (deob-10.0.7.js:226475): windows[3].loaded lists
+        // it as "Server Mod" (hooks.map_pack) before the pack loads
+        static char last[512];
+        if (strcmp(last, url)) {
+            snprintf(last, sizeof(last), "%s", url);
+            if (g_mp.hooks.map_pack && !refused()) g_mp.hooks.map_pack(url);
+        }
         mod_pack_load(url); // (the same pack again: nothing to do, v11759 != modURL)
         return;
     }

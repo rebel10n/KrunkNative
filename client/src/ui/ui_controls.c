@@ -1581,6 +1581,11 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
         if (code >= 0 && !bind_is(UI_CONTROL_CHAT, code)) capture_bind(code);
         return 1;
     }
+    // Ctrl + / clears every mod and the last mod (v10's keydown, deob-10.0.7.js:209629-209632; mods_ui.c)
+    if (press && key == GLFW_KEY_SLASH && (mods & GLFW_MOD_CONTROL)) {
+        mods_ui_clear_all();
+        return 1;
+    }
 
     // Reload Game: in game and in the menu, also with the console open; while typing only on a
     // function key (F5 never types; the browser's F5 reloads from a text field too)

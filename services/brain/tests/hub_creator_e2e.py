@@ -844,8 +844,75 @@ def mod_window(port, ids, tokens, names, stamp):
               "Publish: the mod is in published_mods")
         check(c.text_has("#popupContent", "Mod Published!", 10), "v10's SUCCESS popup: Mod Published!")
         check(c.count("#modPubBody") == 0, "the window closed")
+        mod_manager(c, A, "Window Pack " + stamp)
     finally:
         c.close()
+
+
+def mod_manager(c, A, name):
+    """the Mod Manager (window 4, v10.0.7's windows[3]: game.deob.js:218751-218859), its cards (iìïïííî "mod",
+    :223416-223459), favoriteM (:228231-228245), the mod view (openModDetail, svelte-1v2j2f2 :108350-108478), the Mod
+    Loader's #modLInfo (:225733-225966) and Reset Mods (:218818-218831)"""
+    mod_id = one("SELECT mod_id FROM published_mods WHERE mod_name = ?", name)
+    c.ui("clearPops();showWindow(4)")
+    check(c.has("modList", 10), "the Mod Manager opens (#modList)")
+    head = c.textof("#menuWindow") or ""
+    check("30,000+ Mods | Model Viewer" in head and c.count("#menuWindow a.menuLink[href='/viewer.html']") == 1,
+          "v10's header: Load Mod | Upload Mod, 30,000+ Mods | Model Viewer: %r" % head[:160])
+    check(c.count("#menuWindow .bigMenTab") == 7, "seven tabs (Home, Popular, New, Favorites, My Mods, Loaded, Search)")
+    # My Mods (tabIndex 4 after a publish): the card in v10's markup
+    c.ui("windows[3].switchTab(4)")
+    card = "#modList .mapActionB[data-fav='1'][data-favid='%d']" % mod_id
+    check(wait(lambda: c.count(card) == 1, 20), "My Mods lists the published mod with its star (data-fav / data-favid)")
+    check(c.count(card + ".sel") == 1 and c.text_has(card, "star_border", 3), "not a favourite: sel, star_border (v10's inverted sel)")
+    check(c.count("#modList .mapActionSep") >= 1 and c.count("#modList a[onclick^='window.openModDetail']") >= 1,
+          "the card's separator and its name links to openModDetail")
+    check(c.text_has("#modList", "likes", 3) and c.count("#modList .mapAgeD") >= 1 and c.text_has("#modList .mapAgeD", "NEW!", 3),
+          "the likes count and the NEW! badge of a mod published this week: %r" % (c.textof("#modList") or "")[:200])
+    check(c.text_has("#modList", "Load More", 3), "My Mods pages: Load More")
+    # favoriteM(1, this, id): fvM, sel off, the 50px star
+    c.cmd("clicksel 0 " + card)
+    check(wait(lambda: q("SELECT 1 FROM creation_favs WHERE account_id = ? AND kind = 1 AND creation_id = ?", A, mod_id), 10),
+          "favoriteM: the mod is a favourite in creation_favs")
+    check(c.count(card + ".sel") == 0 and c.text_has(card, "star", 3), "the star lost sel and reads star")
+    c.ui("windows[3].switchTab(3)")
+    check(wait(lambda: c.count(card) == 1, 20) and c.count(card + ".sel") == 0, "Favorites lists it, its star a favourite's")
+    check(not c.text_has("#modList", "Load More", 1), "Favorites does not page")
+    # Search
+    c.ui("windows[3].switchTab(6)")
+    check(c.count("input#mdSrch[placeholder='Mod Name or Keyword']") == 1, "Search: v10's placeholder Mod Name or Keyword")
+    c.type("mdSrch", name)
+    c.ui("windows[3].searchMods()")
+    check(wait(lambda: c.count("#searchResultsMO .mapActionB[data-favid='%d']" % mod_id) == 1, 15), "the search finds the mod")
+    # the mod view
+    c.ui("window.openModDetail('%s')" % name)
+    check(wait(lambda: c.count(".mod-root.svelte-1v2j2f2 .mod-body") == 1, 15), "openModDetail: the mod view (svelte-1v2j2f2) loads")
+    check((c.textof(".mod-header-title") or "") == name and c.text_has(".mod-version", "v", 3) and
+          c.count(".mod-use-btn") == 1 and c.count(".share-btn.svelte-1524ito") == 1, "the view's title, version, Use and Share")
+    check(c.text_has(".mod-dates", "Created: ", 3) and c.text_has(".mod-dates", "Updated: ", 3), "Created / Updated")
+    c.ui("knModView('back')")
+    check(wait(lambda: c.count(".mod-root") == 0, 5), "Back closes the view")
+    c.ui("window.openModDetail('No Such Mod %s')" % name)
+    check(wait(lambda: c.count(".mod-root .mod-center[style]") == 1, 15), "an unknown mod: the view's red error line")
+    c.ui("knModView('back')")
+    # Load: the Mod Loader opens and its #modLInfo says how the pack went; Loaded lists the mod
+    c.ui("loadUserMod('%s','ua','%d','%s',0)" % (name, mod_id, one("SELECT username FROM accounts WHERE id = ?", A)))
+    check(c.has("modLInfo", 10), "loadUserMod opens the Mod Loader")
+    check(wait(lambda: (c.textof("#modLInfo") or "") in ("Success!", "mod error!"), 30),
+          "#modLInfo ends on Success! or mod error!: %r" % c.textof("#modLInfo"))
+    c.ui("showWindow(4);windows[3].switchTab(5)")
+    check(wait(lambda: c.text_has("#modList", name, 1), 10) and c.text_has("#modList", "Reset Mods", 3), "Loaded lists it, with Reset Mods")
+    c.ui("windows[3].reset()")
+    check(c.text_has("#popupContent", "Will take effect after respawning.", 5) and c.text_has("#popupContent", "Map Objects dont get reset", 3),
+          "Reset Mods: v10's SUCCESS popup (mod.reset.0 / mod.reset.1)")
+    check(wait(lambda: c.text_has("#modList", "No Mods found", 1), 5), "and Loaded is empty again")
+    # the Mod Loader's local file: anything but a .zip is "invalid mod file!"
+    bad = os.path.join(WORK, "not-a-mod.txt")
+    open(bad, "w").write("x")
+    pick(bad)
+    c.ui("clearPops();showWindow(18);loadMod()")
+    check(wait(lambda: (c.textof("#modLInfo") or "") == "invalid mod file!", 10), "a picked non-zip: invalid mod file!: %r" % c.textof("#modLInfo"))
+    c.shot("mod-manager")
 
 
 async def friends(port, ids, tokens, names, bob_sock):

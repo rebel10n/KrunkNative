@@ -137,6 +137,8 @@ void  mods_ui_pack_logo(const char *path);
 void  mods_ui_pack_settings(const char *text, size_t len);
 // startup: autoLoadLast's krk_lastMod loaded again (deob-10.0.7.js:225960)
 void  mods_ui_autoload_last(void);
+void  mods_ui_map_pack(const char *url); // a map's own pack came: the Loaded tab's "Server Mod" (mod_pack.h hook)
+void  mods_ui_clear_all(void);           // Ctrl + /: setLastMod('') and windows[3].reset(true) (deob-10.0.7.js:209630)
 // The hub's Publish / Update Mod popup body (social_ui.c publishModPopup): window 19's form and upload. name, mod_id
 // and thumb (the mod has a thumbnail) prefill an update; name NULL is a new mod. done runs after a successful upload.
 char *mods_ui_hub_publish(const char *name, const char *mod_id, int thumb, void (*done)(void));

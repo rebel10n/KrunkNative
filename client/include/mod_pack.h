@@ -73,6 +73,7 @@ typedef struct {
     int (*can_load)(void);                       // 0: packs are refused (canLoadMods off); NULL = always
     void (*logo)(const char *path);              // textures/logo.png: the extracted file, NULL when the pack goes
     void (*settings_text)(const char *text, size_t len); // scripts/settings.txt of the pack that became active
+    void (*map_pack)(const char *url);           // a map's own pack is loaded (a modURL other than the last one)
 } ModPackHooks;
 // 1 when the last mod_pack_load / mod_pack_load_file refused the pack because hooks.can_load said no
 int mod_pack_refused(void);
