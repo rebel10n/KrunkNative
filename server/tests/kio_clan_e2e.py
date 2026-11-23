@@ -14,19 +14,29 @@ brain:
           POST /clans/<id>/banner-color {paint_item_id}, DELETE /clans/<id>/logo, POST /clans/<id>/recruitment {post},
           DELETE /clans/<id>/recruitment, POST /clans/<id>/apply (no body), and a staff Take Down: DELETE
           /clans/<other>/recruitment
-and each answer lands in the window as v10 applies it. Before this the reads went out but every write was dropped
-(clan_kio_write, turf_ui.c "not ported").
+  upload  POST /clans/<id>/logo as v10's FormData: multipart/form-data, one part `file` with the picked PNG's name, type
+          and bytes (deob-10.0.7.js:96094-96120)
+and the window's game-socket writes go over the official game socket as v10.0.7 encodes them (deob-10.0.7.js
+220405-220642, 223013): ["cln", 1 | 2, tag] create / join, ["cln", 4, 1] leave, ["cln", 5, id] kick, ["cln", 6, id, {r}]
+role, ["cln", 7, kr, {wd}] funds, ["cln", 9, link] Discord, ["clnR", id, ok], ["clnRA"], and the ownership transfer's
+rpcs ["_0", rpcId, "clan-transfer-initiate" | "-cancel" | "-respond", ...]; each answer ("cln", "clnL", "_0") lands in
+the window as v10 applies it. The Social hub's clan view sends Request to Join as applyToClan too.
 
 The krunker.io stubs of krunker_account_e2e.py (its HTTP stub, extended here by a handler subclass with the clan routes:
 nothing in that file changes) and its game server (the "cln" answer added through frame_handlers). Two headless
 client_bin runs (--offline, no brain):
   A. signed in with the clan KPD (id 9001, the account its owner, one Red Paint): the home tab's loot display and the
      settings tab's MOTD, loot config and recruitment post come from krunker.io; then the MOTD is saved and removed,
-     the loot config saved, the Red Paint applied, the logo removed, the recruitment post saved and removed
+     the loot config saved, the Red Paint applied, the logo removed, the recruitment post saved and removed; the
+     ownership transfer refused, started and cancelled, a respond; a logo uploaded (KRUNKNATIVE_PICK_FILE: a 512 x 512
+     PNG); the Discord link set, a member's role changed, KR deposited, the member kicked, a request accepted and the
+     rest declined; the clan left, and a new one created
   B. signed in with no clan as a moderator: the Recruitment board lists krunker.io's posts, my-applications marks one
-     Applied, Apply on the other sends applyToClan and marks it Applied, a Take Down removes a post
+     Applied, Apply on the other sends applyToClan and marks it Applied, a Take Down removes a post; the Clans window's
+     join request; the hub's clan view's Request to Join
 Exit 0 when every check passed, 77 when it cannot run.
 """
+import copy
 import json
 import os
 import re
@@ -37,6 +47,7 @@ import sys
 import tempfile
 import time
 import urllib.parse
+import zlib
 
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import kn_proto  # noqa: E402
@@ -55,8 +66,30 @@ RED_PAINT = 7776  # k_paints[0]: the first owned paint is the default pick
 NEW_MOTD = "Raid at nine"
 ANSWER_BANNER = "#123456"  # the banner-color answer's clan_banner_color (v10 shows the answer's, not the paint's own)
 RC_APPLY, RC_APPLIED, RC_TAKEDOWN = 4242, 4343, 4444  # Recruitment board posts: Apply, already applied, taken down
+MEMBER_ID, REQ_ID = 555, 666  # a Soldier of KPD; a join request's player
 KIO_CLAN = {"clan_name": CLAN, "clan_id": CLAN_ID, "clan_score": 5000, "clan_funds": 50000, "clan_playerid": kae.ACCOUNT_ID,
-            "members": [{"p": kae.ACCOUNT_NAME, "i": kae.ACCOUNT_ID, "r": 3}], "requests": []}
+            "members": [{"p": kae.ACCOUNT_NAME, "i": kae.ACCOUNT_ID, "r": 3}, {"p": "Soldier1", "i": MEMBER_ID, "r": 1}],
+            "requests": [{"player_name": "Wannabe", "cr_playerid": REQ_ID}, {"player_name": "Other", "cr_playerid": 667}]}
+NEW_CLAN, NEW_CLAN_ID = "NWC", 9002  # the clan created after leaving KPD
+HUB_CLAN, HUB_CLAN_ID = "HUB", 4545  # the hub's clan view (run B)
+DISCORD = "https://discord.gg/kpdraid"
+HEIR = "Heir"  # the transfer's target ("Nobody" is refused)
+KR_AFTER, CLAN_FUNDS_AFTER = 4321, 50900  # the deposit's answer: the account's KR and the clan bank
+LOGO_NAME = "kpd_logo.png"
+
+
+def png(w, h):  # a grey w x h PNG (8-bit greyscale)
+    def chunk(kind, data):
+        return len(data).to_bytes(4, "big") + kind + data + (zlib.crc32(kind + data) & 0xffffffff).to_bytes(4, "big")
+    raw = b"".join(b"\x00" + b"\x80" * w for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", w.to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 0, 0, 0, 0])) +
+            chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+LOGO = png(512, 512)
+STATE = {"clan": None}  # the stub game server's clan for the account (create / leave change it)
+WS = []  # the clan frames the client sent, decoded ([name, args...]; an rpc as ["_0", id, name, args...])
+ORDER = []  # ("ws", frame) and ("http", method, path) in arrival order
 MOTD = {"message": "Welcome to KPD", "set_by_name": "KioCaptain", "set_at": 1763632800000}
 LOOT = {"distribution_mode": "top_weighted", "clan_pct": 10, "top_player_count": 5, "top_player_pct": 70, "remainder_pct": 30,
         "min_games_required": 3, "updated_by_name": "KioCaptain", "updated_at": "2026-11-20T10:00:00.000Z"}
@@ -76,6 +109,8 @@ READS = {  # GET path -> data
     "/api/clans/recruitment": {"posts": [board_post(RC_APPLY, "APX", "Apply here"), board_post(RC_APPLIED, "APD", "Applied before"),
                                          board_post(RC_TAKEDOWN, "TKD", "Spam post")], "total": 3, "page": 1, "limit": 20},
     "/api/clans/my-applications": {"clan_ids": [RC_APPLIED]},
+    "/api/clans/by-name/" + HUB_CLAN: {"clan_id": HUB_CLAN_ID, "clan_name": HUB_CLAN, "creator_name": "HubBoss", "clan_score": 900,
+                                       "members": [{"p": "HubBoss", "i": 1, "r": 3}]},
 }
 
 
@@ -100,6 +135,10 @@ def write_answer(method, path, body):  # (status, JSON | None for no body) of a 
         return 200, {"data": {"message": "Application sent!"}, "error": None}
     if (method, path) == ("DELETE", "/api/clans/%d/recruitment" % RC_TAKEDOWN):
         return 200, {"data": None, "error": None}
+    if (method, path) == ("POST", "/api/clans/%d/apply" % HUB_CLAN_ID):
+        return 200, {"data": {"message": "Application sent!"}, "error": None}
+    if (method, path) == ("POST", base + "/logo"):
+        return 200, {"data": {"message": "Logo uploaded and pending review"}, "error": None}
     return None
 
 
@@ -120,6 +159,7 @@ class ClanServer(kae.ThreadingHTTPServer):
                 if path not in READS:
                     return super().do_GET()
                 self.record("GET")
+                ORDER.append(("http", "GET", path))
                 if authed(self):
                     self.reply(200, {"data": READS[path], "error": None})
                 else:
@@ -129,7 +169,15 @@ class ClanServer(kae.ThreadingHTTPServer):
                 path = urllib.parse.urlsplit(self.path).path
                 if not path.startswith("/api/clans/"):
                     return False
-                _, _, body = self.record(method)
+                if method == "POST" and path.endswith("/logo"):  # FormData: the raw bytes are the body
+                    u = urllib.parse.urlsplit(self.path)
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = self.rfile.read(n) if n else b""
+                    STUB[0].requests.append((method, u.path, dict(urllib.parse.parse_qsl(u.query)),
+                                             {k.lower(): v for k, v in self.headers.items()}, body))
+                else:
+                    _, _, body = self.record(method)
+                ORDER.append(("http", method, path))
                 ans = write_answer(method, path, body)
                 if not authed(self):
                     self.reply(401, {"data": None, "error": {"code": "LOGIN_REQUIRED", "message": "Must be logged in"}})
@@ -244,8 +292,10 @@ def script_a():
           "%d text @lootok .loot-config-container .success-message" % (t + 8220),
           "%d text @lootby .loot-updated-info" % (t + 8230),
           # the banner colour (setBannerColor with the default pick, the Red Paint)
+          "%d nodes @swatch0 .swatch-grid .swatch" % (t + 8990),
           "%d call windows.12.bannerApply" % (t + 9000),
           "%d text @banner .banner-color-current" % (t + 11000),
+          "%d nodes @paintsleft .banner-color-empty" % (t + 11010),
           # the logo removal (removeLogo; v10 then asks for the clan again: sendReq(3))
           "%d call windows.12.logoRemoveConfirmed" % (t + 11200),
           # the recruitment post: saved (createOrUpdateRecruitment), then removed (removeRecruitment)
@@ -255,9 +305,63 @@ def script_a():
           "%d call windows.12.recruitRemoveConfirmed" % (t + 14000),
           "%d text @rremoved .recruitment-manage .success-message" % (t + 16000),
           "%d text @rdesc2 [id=recruit-desc]" % (t + 16010),
-          # writes that stay off for the krunker.io account: the game socket's (here: Discord) and the transfer
-          "%d call windows.12.transferStart" % (t + 16200),
-          "%d quit" % (t + 17500)]
+          ]
+    u = t + 16200
+    s += [  # the ownership transfer (the socket's rpcs): refused, started, cancelled; then a respond
+          # (the transfer is the settings tab's last section: scrolled into view for the clicks)
+          "%d setscroll menuWindow 100000" % (u - 100), "%d clickid newOwnerName" % u, "%d type Nobody" % (u + 100),
+          "%d call windows.12.transferStart" % (u + 300),
+          "%d text @terr .transfer-ownership-container .error-message" % (u + 1500),
+          "%d setscroll menuWindow 100000" % (u + 1550), "%d clickid newOwnerName" % (u + 1600), "%d down CTRL+A" % (u + 1700), "%d up CTRL+A" % (u + 1750),
+          "%d type %s" % (u + 1800, HEIR),
+          "%d call windows.12.transferStart" % (u + 2000),
+          "%d text @tpend .highlight-name" % (u + 3500),
+          "%d call windows.12.transferCancel" % (u + 3600),
+          "%d nodes @tpend2 .highlight-name" % (u + 5000), "%d nodes @tinput [id=newOwnerName]" % (u + 5010),
+          "%d call windows.12.transferRespond 1" % (u + 5200),
+          # the logo upload (v10's FormData), the file being KRUNKNATIVE_PICK_FILE
+          "%d call windows.12.logoPick" % (u + 6600),
+          "%d grep @logoerr logo .error-message" % (u + 8500),
+          # Discord (owner): ["cln", 9, link]
+          "%d call windows.12.discordPop" % (u + 8600),
+          "%d clickid clanDiscordLink" % (u + 8800), "%d type %s" % (u + 8900, DISCORD),
+          "%d call windows.12.updateDis" % (u + 9500),
+          "%d nodes @dispop .contPop" % (u + 10500),
+          # Members: a role (["cln", 6, id, {r}]), answered with the new rank
+          "%d call windows.12.switchTab 1" % (u + 10600),
+          "%d waitfor [id=clanRolD%d]" % (u + 10700, MEMBER_ID),
+          "%d nodes @rol0 [id=clanRolD%d]" % (u + 11000, MEMBER_ID),
+          "%d call windows.12.updRol %d" % (u + 11100, MEMBER_ID),
+          "%d grep @rolok Success [id=genericPop]" % (u + 12500),
+          "%d text @rolsel [id=clanRolD%d]" % (u + 12510, MEMBER_ID),
+          # funds: a deposit (["cln", 7, kr, {wd: 0}]), answered with the account's KR and the clan bank
+          "%d call windows.12.mangFunds" % (u + 12600),
+          "%d clickid clanFundsIn" % (u + 12800), "%d type 1000" % (u + 12900),
+          "%d call windows.12.chngFunds 0" % (u + 13200),
+          "%d grep @fundok Success [id=genericPop]" % (u + 14500),
+          "%d text @kr [id=menuKRCount]" % (u + 14510),
+          "%d call windows.12.mangFunds" % (u + 14600),
+          "%d grep @cfunds 50,900 [id=genericPop]" % (u + 14800),
+          "%d call clearPops" % (u + 14900),
+          # kick (["cln", 5, id]): the member leaves the list
+          '%d call windows.12.kickReq "Soldier1" %d' % (u + 15000, MEMBER_ID),
+          "%d call kickClanConfirmed %d" % (u + 15200, MEMBER_ID),
+          "%d nodes @rol1 [id=clanRolD%d]" % (u + 15500, MEMBER_ID),
+          # requests: one accepted (["clnR", id, 1]), the rest declined (["clnRA"])
+          "%d call windows.12.switchTab 3" % (u + 15600),
+          "%d call windows.12.updReq 0 %d 1" % (u + 15800, REQ_ID),
+          "%d call windows.12.declinePop" % (u + 16000), "%d call windows.12.decAll" % (u + 16100),
+          "%d grep @reqs Other .setBodH" % (u + 16300),
+          # leave (["cln", 4, 1] -> "clnL"), then create (["cln", 1, tag])
+          "%d call windows.12.delReq" % (u + 16600),
+          "%d call delClanConfirmed" % (u + 16800),
+          "%d call showWindow 13" % (u + 18500),
+          "%d waitfor [id=clanInp1]" % (u + 18600),
+          "%d nodes @form [id=clanInp1]" % (u + 19000),
+          "%d clickid clanInp1" % (u + 19100), "%d type %s" % (u + 19200, NEW_CLAN),
+          "%d call windows.12.sendReq 1" % (u + 19500),
+          "%d grep @nwc %s .setHed" % (u + 21500, NEW_CLAN),
+          "%d quit" % (u + 22000)]
     return "\n".join(s) + "\n"
 
 
@@ -280,7 +384,21 @@ def script_b():
           "%d call knViewPop 1" % (t + 6200),
           "%d grep @rc2_tkd TKD [id=genericPop]" % (t + 8500),
           "%d nodes @rccards2 .post-card" % (t + 8510),
-          "%d quit" % (t + 9500)]
+          # the Clans window's join request (["cln", 2, tag], answered with a message)
+          "%d call closWind" % (t + 8600), "%d call clearPops" % (t + 8650),
+          "%d call showWindow 13" % (t + 8800),
+          "%d waitfor [id=clanInp2]" % (t + 8810),
+          "%d clickid clanInp2" % (t + 9000), "%d type APX" % (t + 9100),
+          "%d call windows.12.sendReq 2" % (t + 9400),
+          "%d text @joinmsg [id=clanErr]" % (t + 11000),
+          # the hub's clan view: Request to Join (applyToClan)
+          "%d call closWind" % (t + 11100),
+          '%d call openClanView "%s"' % (t + 11300, HUB_CLAN),
+          "%d waitfor [id=v10sClanJoin]" % (t + 11310),
+          "%d text @hubjoin0 [id=v10sClanJoin]" % (t + 13000),
+          '%d call v10s "apply"' % (t + 13100),
+          "%d text @hubjoin1 [id=v10sClanJoin]" % (t + 15000),
+          "%d quit" % (t + 15500)]
     return "\n".join(s) + "\n"
 
 
@@ -301,7 +419,8 @@ def run_client(stub, name, script):
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": base + "/mm", "KRUNKNATIVE_KRUNKER_API": base + "/api",
                 "KRUNKNATIVE_KRUNKER_AUTH": base + "/frvr/v1/auth", "KRUNKNATIVE_ASSETS_DIR": kae.ASSETS,
                 "KRUNKNATIVE_ASSET_FETCH": "off",
-                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + kae.CAPTCHA_PATH})
+                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + kae.CAPTCHA_PATH,
+                "KRUNKNATIVE_PICK_FILE": os.path.join(WORK, LOGO_NAME)})
     p = subprocess.Popen(["xvfb-run", "-a", "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
     procs.append(p)
@@ -364,6 +483,8 @@ def checks_a(text, stub, cln_before_logo):
     check("A. setBannerColor: POST /clans/9001/banner-color {paint_item_id: 7776} with the Bearer",
           r is not None and bearer(r) and r[4] == {"paint_item_id": RED_PAINT}, r and r[4])
     check("A. ... and the current colour is the answer's", ANSWER_BANNER in text_of(text, "banner"), text_of(text, "banner"))
+    check("A. ... and the spent Red Paint is taken off the account (its one unit: no paint left to pick)",
+          nodes(text, "swatch0") == 1 and nodes(text, "paintsleft") == 1, (nodes(text, "swatch0"), nodes(text, "paintsleft")))
 
     r = one(stub, "DELETE", base + "/logo")
     check("A. removeLogo: DELETE /clans/9001/logo with the Bearer", r is not None and bearer(r), r and r[1])
@@ -380,12 +501,100 @@ def checks_a(text, stub, cln_before_logo):
     check("A. ... and the form is cleared (Recruitment post removed.)", "Recruitment post removed." in text_of(text, "rremoved")
           and value_of(text, "rdesc2") == "", (text_of(text, "rremoved"), value_of(text, "rdesc2")))
 
+    checks_a_socket(text, stub)
+
     writes = [(r[0], r[1]) for r in stub.requests if r[0] != "GET" and r[1].startswith("/api/clans/")]
     allowed = {("PUT", base + "/motd"), ("DELETE", base + "/motd"), ("PUT", base + "/loot-config"), ("POST", base + "/banner-color"),
-               ("DELETE", base + "/logo"), ("POST", base + "/recruitment"), ("DELETE", base + "/recruitment")}
-    check("A. no other clan write reached krunker.io (the transfer is a socket rpc in v10: not sent)",
-          set(writes) <= allowed and not stub.find("POST", base + "/transfer"), writes)
+               ("DELETE", base + "/logo"), ("POST", base + "/recruitment"), ("DELETE", base + "/recruitment"), ("POST", base + "/logo")}
+    check("A. no other clan write reached krunker.io (the transfer is the socket's rpcs in v10, not gapi)",
+          set(writes) <= allowed and not stub.find("POST", base + "/transfer") and not stub.find("DELETE", base + "/transfer"), writes)
     check("A. each write went out once", len(writes) == len(set(writes)), writes)
+
+
+def frames(name, *head):  # the clan frames sent, [name, args...], whose first args are head
+    return [f for f in WS if f[0] == name and list(f[1:1 + len(head)]) == list(head)]
+
+
+def rpcs(name):  # the rpcs sent of that name: ["_0", id, name, args...]
+    return [f for f in WS if f[0] == "_0" and len(f) > 2 and f[2] == name]
+
+
+def asked_after(event):  # a ["cln", 3, ...] went out after that event (v10's sendReq(3))
+    i = ORDER.index(event) if event in ORDER else len(ORDER)
+    return any(e[0] == "ws" and e[1][:2] == ["cln", 3] for e in ORDER[i + 1:])
+
+
+def multipart(r):  # (boundary, [(headers dict, bytes)]) of a FormData request, or None
+    ctype = r[3].get("content-type", "")
+    m = re.match(r"multipart/form-data; boundary=(\S+)$", ctype)
+    if not m or not isinstance(r[4], bytes):
+        return None
+    b = m.group(1).encode()
+    body = r[4]
+    if not body.startswith(b"--" + b + b"\r\n") or not body.endswith(b"\r\n--" + b + b"--\r\n"):
+        return m.group(1), None
+    parts = []
+    for chunk in body[len(b) + 4:-(len(b) + 8)].split(b"\r\n--" + b + b"\r\n"):
+        head, _, data = chunk.partition(b"\r\n\r\n")
+        hs = dict(line.split(": ", 1) for line in head.decode().split("\r\n") if ": " in line)
+        parts.append(({k.lower(): v for k, v in hs.items()}, data))
+    return m.group(1), parts
+
+
+def checks_a_socket(text, stub):
+    # the ownership transfer
+    r = rpcs("clan-transfer-initiate")
+    check("A. transferOwnership: the socket's rpc [\"_0\", rpcId, \"clan-transfer-initiate\", name], once per Transfer",
+          [f[3:] for f in r] == [["Nobody"], [HEIR]] and all(isinstance(f[1], int) for f in r), r)
+    check("A. ... its res.error is thrown: \"Error: Player not found\"", "Error: Player not found" in text_of(text, "terr"), text_of(text, "terr"))
+    check("A. ... and res.data is the ownership_transfer: pending to Heir", text_of(text, "tpend") == HEIR, text_of(text, "tpend"))
+    r = rpcs("clan-transfer-cancel")
+    check("A. cancelTransfer: [\"_0\", rpcId, \"clan-transfer-cancel\"] (no args)", len(r) == 1 and len(r[0]) == 3, r)
+    check("A. ... the transfer is gone: the name input is back", nodes(text, "tpend2") == 0 and nodes(text, "tinput") == 1,
+          (nodes(text, "tpend2"), nodes(text, "tinput")))
+    r = rpcs("clan-transfer-respond")
+    check("A. respondToTransfer(true): [\"_0\", rpcId, \"clan-transfer-respond\", true]", len(r) == 1 and r[0][3:] == [True], r)
+    ids = [f[1] for f in WS if f[0] == "_0"]
+    check("A. ... each rpc its own id (v10's rpcCounter)", len(ids) == len(set(ids)) == 4, ids)
+    check("A. ... and its success asks for the clan again (sendReq(3))", asked_after(("ws", r[0])) if r else False)
+
+    # the logo upload
+    r = one(stub, "POST", "/api/clans/%d/logo" % CLAN_ID)
+    mp = multipart(r) if r else None
+    check("A. uploadLogo: POST /clans/9001/logo with the Bearer and an X-Idempotency-Key", r is not None and bearer(r) and
+          r[3].get("x-idempotency-key"), r and {k: v for k, v in r[3].items() if k != "authorization"})
+    check("A. ... as multipart/form-data with Chromium's boundary (----WebKitFormBoundary + 16)",
+          mp is not None and re.match(r"----WebKitFormBoundary[A-Za-z0-9]{16}$", mp[0]) is not None, r and r[3].get("content-type"))
+    part = mp[1][0] if mp and mp[1] and len(mp[1]) == 1 else None
+    check("A. ... one part: name=\"file\", the file's name, Content-Type image/png",
+          part is not None and part[0].get("content-disposition") == 'form-data; name="file"; filename="%s"' % LOGO_NAME and
+          part[0].get("content-type") == "image/png", mp and mp[1] and [p[0] for p in mp[1]])
+    check("A. ... holding the PNG's bytes as they are", part is not None and part[1] == LOGO, part and (len(part[1]), len(LOGO)))
+    check("A. ... no error, and the clan is asked for again (sendReq(3))", grep(text, "logoerr") == 0 and
+          asked_after(("http", "POST", "/api/clans/%d/logo" % CLAN_ID)), grep(text, "logoerr"))
+
+    # the game socket's writes
+    check("A. updateDis: [\"cln\", 9, the link] (the owner)", frames("cln", 9) == [["cln", 9, DISCORD]], frames("cln", 9))
+    check("A. ... its ok closes the Discord popup", nodes(text, "dispop") == 0, nodes(text, "dispop"))
+    check("A. updRol: [\"cln\", 6, id, {r}] (the select's rank)", frames("cln", 6) == [["cln", 6, MEMBER_ID, {"r": 1}]], frames("cln", 6))
+    check("A. ... the answer's rank is the member's: Success, the select reads Captain",
+          grep(text, "rolok") > 0 and nodes(text, "rol0") == 1 and "Captain" in text_of(text, "rolsel"), (grep(text, "rolok"), text_of(text, "rolsel")))
+    check("A. chngFunds(0): [\"cln\", 7, 1000, {wd: 0}]", frames("cln", 7) == [["cln", 7, 1000, {"wd": 0}]], frames("cln", 7))
+    check("A. ... the answer's pf is the krunker.io account's KR, cf the clan bank",
+          grep(text, "fundok") > 0 and text_of(text, "kr") == "4,321" and grep(text, "cfunds") > 0,
+          (grep(text, "fundok"), text_of(text, "kr"), grep(text, "cfunds")))
+    check("A. kick: [\"cln\", 5, id], and the member leaves the list", frames("cln", 5) == [["cln", 5, MEMBER_ID]] and nodes(text, "rol1") == 0,
+          (frames("cln", 5), nodes(text, "rol1")))
+    check("A. updReq: [\"clnR\", id, 1]", frames("clnR") == [["clnR", REQ_ID, 1]], frames("clnR"))
+    check("A. decAll: [\"clnRA\"], and the requests are gone", frames("clnRA") == [["clnRA"]] and grep(text, "reqs") == 0,
+          (frames("clnRA"), grep(text, "reqs")))
+    check("A. delClanConfirmed: [\"cln\", 4, 1]", frames("cln", 4) == [["cln", 4, 1]], frames("cln", 4))
+    check("A. ... \"clnL\" ends the clan: acc.clan = null, the create / join form", nodes(text, "form") == 1, nodes(text, "form"))
+    check("A. sendReq(1): [\"cln\", 1, the tag]", frames("cln", 1) == [["cln", 1, NEW_CLAN]], frames("cln", 1))
+    check("A. ... the answer has no clan_id: the clan is asked for (sendReq(3)), and the window is the new clan's",
+          asked_after(("ws", ["cln", 1, NEW_CLAN])) and grep(text, "nwc") > 0, grep(text, "nwc"))
+    bad = [f for f in WS if f[0] == "cln" and (len(f) < 2 or f[1] not in (1, 3, 4, 5, 6, 7, 9))]
+    check("A. no other clan frame went out", not bad, bad)
 
 
 def checks_b(text, stub):
@@ -406,13 +615,64 @@ def checks_b(text, stub):
     check("B. Take Down: DELETE /clans/4444/recruitment with the Bearer", r is not None and bearer(r), r and r[1])
     check("B. ... and the post leaves the board", grep(text, "rc2_tkd") == 0 and nodes(text, "rccards2") == 2,
           (nodes(text, "rccards2"), grep(text, "rc2_tkd")))
+    check("B. the Clans window's join: [\"cln\", 2, the tag], its answer's message in #clanErr",
+          frames("cln", 2) == [["cln", 2, "APX"]] and text_of(text, "joinmsg") == "Request sent to APX!", (frames("cln", 2), text_of(text, "joinmsg")))
+    check("B. the hub's clan view shows Request to Join to the krunker.io account (no clan)", text_of(text, "hubjoin0") == "group_add Request to Join",
+          text_of(text, "hubjoin0"))
+    r = one(stub, "POST", "/api/clans/%d/apply" % HUB_CLAN_ID)
+    check("B. ... and sends applyToClan: POST /clans/4545/apply with the Bearer, no body", r is not None and bearer(r) and r[4] is None, r and r[4])
+    check("B. ... then reads Request Sent", text_of(text, "hubjoin1") == "check Request Sent", text_of(text, "hubjoin1"))
     writes = [(x[0], x[1]) for x in stub.requests if x[0] != "GET" and x[1].startswith("/api/clans/")]
     check("B. no other clan write reached krunker.io", sorted(set(writes)) == sorted({("POST", "/api/clans/%d/apply" % RC_APPLY),
-                                                                                    ("DELETE", "/api/clans/%d/recruitment" % RC_TAKEDOWN)}), writes)
+                                                                                    ("DELETE", "/api/clans/%d/recruitment" % RC_TAKEDOWN),
+                                                                                    ("POST", "/api/clans/%d/apply" % HUB_CLAN_ID)}), writes)
 
 
-async def answer_cln(send, msg):  # sendReq(3): the clan page ("cln" [msg, clanData, ok, action])
-    await send("cln", "", KIO_CLAN, 1, 3)
+async def answer_cln(send, msg):  # windows[12]'s "cln" frames, answered as krunker.io's game server ("cln" [msg, data, ok, action])
+    f = kae.frame_args(msg)
+    WS.append(f)
+    ORDER.append(("ws", f))
+    action = f[1] if len(f) > 1 else None
+    if action == 3:  # the clan page
+        await send("cln", "", STATE["clan"], 1, 3)
+    elif action == 1:  # create: the new clan, without its id (v10 then asks: clan_id || sendReq(3))
+        STATE["clan"] = {"clan_name": f[2], "clan_id": NEW_CLAN_ID, "clan_score": 0, "clan_funds": 0, "clan_playerid": kae.ACCOUNT_ID,
+                         "members": [{"p": kae.ACCOUNT_NAME, "i": kae.ACCOUNT_ID, "r": 3}], "requests": []}
+        await send("cln", "", {k: v for k, v in STATE["clan"].items() if k != "clan_id"}, 1, 1)
+    elif action == 2:  # join: a request sent
+        await send("cln", "Request sent to %s!" % f[2], None, 1, 2)
+    elif action == 4:  # leave / delete
+        STATE["clan"] = None
+        await send("clnL")
+    elif action == 6:  # role: the member's new rank
+        await send("cln", "", {"i": f[2], "r": 2}, 1, 6)
+    elif action == 7:  # funds: the account's KR and the clan bank
+        await send("cln", "", {"pf": KR_AFTER, "cf": CLAN_FUNDS_AFTER}, 1, 7)
+    elif action == 9:  # Discord
+        await send("cln", "", None, 1, 9)
+
+
+async def record_frame(send, msg):  # "clnR" / "clnRA": no answer
+    f = kae.frame_args(msg)
+    WS.append(f)
+    ORDER.append(("ws", f))
+
+
+async def answer_rpc(send, msg):  # ["_0", rpcId, name, args...]: the transfer's rpcs answered ["_0", rpcId, {data, error}]
+    f = kae.frame_args(msg)
+    if len(f) < 3 or not str(f[2]).startswith("clan-transfer-"):
+        return
+    WS.append(f)
+    ORDER.append(("ws", f))
+    if f[2] == "clan-transfer-initiate" and f[3:] == ["Nobody"]:
+        await send("_0", f[1], {"data": None, "error": "Player not found"})
+    elif f[2] == "clan-transfer-initiate":
+        await send("_0", f[1], {"data": {"to_player_name": f[3], "to_player_id": MEMBER_ID, "from_player_id": kae.ACCOUNT_ID}, "error": None})
+    else:
+        await send("_0", f[1], {"data": None, "error": None})
+
+
+HANDLERS = {"cln": answer_cln, "clnR": record_frame, "clnRA": record_frame, "_0": answer_rpc}
 
 
 def run_stub(account, handlers, fn):
@@ -420,7 +680,9 @@ def run_stub(account, handlers, fn):
     stub = kae.Stub(http_port, ws_port)
     STUB[:] = [stub]
     stub.account_data = [account]
-    stub.frame_handlers = handlers
+    stub.frame_handlers = dict(handlers)
+    WS.clear()
+    ORDER.clear()
     try:
         stub.start()
         fn(stub)
@@ -461,8 +723,12 @@ def main():
             cln_before_logo.append(stub.ws_frames.count("cln"))
         checks_a(text, stub, cln_before_logo)
 
-    run_stub({"player_clan": CLAN, "skins": [{"ind": RED_PAINT, "cnt": 1}]}, {"cln": answer_cln}, run_a)
-    run_stub({"player_role": 2}, {}, lambda stub: checks_b(run_client(stub, "b", script_b()), stub))
+    with open(os.path.join(WORK, LOGO_NAME), "wb") as f:
+        f.write(LOGO)
+    STATE["clan"] = copy.deepcopy(KIO_CLAN)
+    run_stub({"player_clan": CLAN, "skins": [{"ind": RED_PAINT, "cnt": 1}]}, HANDLERS, run_a)
+    STATE["clan"] = None
+    run_stub({"player_role": 2}, HANDLERS, lambda stub: checks_b(run_client(stub, "b", script_b()), stub))
     print(f"{sum(results)}/{len(results)} passed")
     if all(results):
         shutil.rmtree(WORK, ignore_errors=True)

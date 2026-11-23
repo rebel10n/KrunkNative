@@ -14,6 +14,11 @@
 typedef void (*V10GapiFn)(void *user, int status, const cJSON *data, const cJSON *error);
 int v10_gapi(const char *method, const char *path, const cJSON *body, V10GapiFn fn, void *user); // 0 = not sent (fn not called)
 void v10_gapi_cancel(V10GapiFn fn, void *user); // forget pending requests of (fn, user): fn is not called for them
+// The krunker.io account's FormData upload (krunker_kio_gapi_upload: uploadLogo, POST /clans/<id>/logo): a FormData
+// holding one file as `field`, sent as the browser sends it (multipart/form-data, one part with the file's name and
+// type), answered as v10_gapi's. 0 = not sent (not the krunker.io account, not that write, or no slot).
+int v10_gapi_upload(const char *path, const char *field, const char *filename, const char *file_type, const void *bytes,
+                    size_t len, V10GapiFn fn, void *user);
 // v10's _34582: an error object -> the English text (errors.* i18n), else `fallback`
 const char *v10_gapi_error_text(const cJSON *error, const char *fallback);
 // A gapi GET answered as the brain's HTTP answer (BackendHttpFn, backend.h): the body is the {"data", "error"}

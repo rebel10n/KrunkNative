@@ -137,7 +137,7 @@ static struct {
     volatile int points_event;  // the socket thread saw "ua" UPDATE_ACCOUNT's rankedPoints (the same, for the balance)
     // the rpcs sent for the windows (krunker_net_send_account_frame) waiting for their "_0" / "_1" answer:
     // v10's rpcHandlers[id] (deob-10.0.3.js 111537). Main thread only (sent and answered there).
-    struct { unsigned id; char name[8]; } rpc_pending[4];
+    struct { unsigned id; char name[32]; } rpc_pending[4];
     int rpc_pending_n;
     // the account-scoped frames (KrunkerLinkIO.account_frame), socket thread -> krunker_net_tick (K.lock)
     char *acct_q[32];
@@ -679,16 +679,36 @@ static void account_frames_tick(void) {
     }
 }
 
-// socket.rpc(name) (deob-10.0.3.js 111529-111540): send(RPC "_0", rpcCounter++, name) and remember the id
-// for its "_0" / "_1" answer (rpc_answer). Main thread, K.lock held by the caller.
-static int send_rpc(const char *name) {
+// socket.rpc(name, ...args) (deob-10.0.3.js 111529-111540): send(RPC "_0", rpcCounter++, name, ...args) and
+// remember the id for its "_0" / "_1" answer (rpc_answer). Main thread, K.lock held by the caller.
+static int send_rpc(const char *name, const KrunkerValue *args, const size_t argc) {
     if (K.rpc_pending_n >= (int) (sizeof(K.rpc_pending) / sizeof(K.rpc_pending[0]))) return 0;
-    const int id = krunker_link_rpc(&K.link, name, NULL, 0); // the link's rpcCounter (shared with its own bCpt)
+    const int id = krunker_link_rpc(&K.link, name, args, argc); // the link's rpcCounter (shared with its own bCpt)
     if (id < 0) return 0;
     K.rpc_pending[K.rpc_pending_n].id = (unsigned) id;
     snprintf(K.rpc_pending[K.rpc_pending_n].name, sizeof(K.rpc_pending[0].name), "%s", name);
     K.rpc_pending_n++;
     return 1;
+}
+
+// {key: number} and nothing else
+static int one_number(const cJSON *o, const char *key) {
+    return cJSON_IsObject(o) && o->child && !o->child->next && o->child->string && !strcmp(o->child->string, key) && cJSON_IsNumber(o->child);
+}
+
+// ["cln", action, ...] in one of the shapes v10.0.7's Clans window sends (deob-10.0.7.js 220405-220475, 223013):
+// n the args after the name (the action included), a2 / a3 the two after the action
+static int clan_frame_ok(const double action, const int n, const cJSON *a2, const cJSON *a3) {
+    if (action == 1 || action == 2) // sendReq(1 | 2): create / join, the tag (or 1: an empty input)
+        return n == 2 && (cJSON_IsString(a2) || (cJSON_IsNumber(a2) && a2->valuedouble == 1));
+    if (action == 3) return n == 1 || (n == 2 && (cJSON_IsString(a2) || cJSON_IsNumber(a2))); // sendReq(3): the clan page
+    if (action == 4) return n == 2 && cJSON_IsNumber(a2) && a2->valuedouble == 1; // delClanConfirmed: leave / delete
+    if (action == 5) return n == 2 && cJSON_IsNumber(a2);                        // kick(id)
+    if (action == 6) return n == 3 && cJSON_IsNumber(a2) && one_number(a3, "r");  // updRol(id): id, {r}
+    if (action == 7)                                                               // chngFunds(wd): kr, {wd}
+        return n == 3 && cJSON_IsNumber(a2) && one_number(a3, "wd") && (a3->child->valuedouble == 0 || a3->child->valuedouble == 1);
+    if (action == 9) return n == 2 && cJSON_IsString(a2);                        // updateDis: the Discord link
+    return 0;
 }
 
 // The windows' requests over the game socket while the krunker.io account is the active one (v10
@@ -700,9 +720,16 @@ static int send_rpc(const char *name) {
 //                     "xst" [token, sandbox]; ["xsin", invoice] a payment done (krunker_checkout.h)
 //   ["bpdl"]          DATA_LOADED: the battle pass's data (answered "bpdl" / "bppd"; v10:209854, 212301)
 //   ["vcln"]          OPEN_CLAN_TAB (v10:213455)
-//   ["cln", 3, value] the Clans window's sendReq(3): the player's clan page (v10:213459-213462, answered
-//                     "cln" -> clanData, v10:213437); every other "cln" action (create, join, leave,
-//                     kick, roles, funds, discord) is refused
+//   ["cln", action, ...] the Clans window's io.send(CLAN, ...) as v10.0.7 encodes it (deob-10.0.7.js
+//                     220405-220509, 223013), answered "cln" [msg, data, ok, action] (CLAN_RESPONSE) or, for a
+//                     leave / delete, "clnL" (CLAN_LEAVE_RESPONSE): sendReq(a, v) = [a, v || input || 1] for
+//                     1 create (tag) / 2 join (tag) / 3 the player's clan page; delClanConfirmed [4, 1]; kick
+//                     [5, id]; updRol [6, id, {r}]; chngFunds [7, kr, {wd}]; updateDis [9, link] (clan_frame_ok)
+//   ["clnR", id, ok]  updReq: a join request accepted (1) or declined (0) (CLAN_REQUEST, :220424)
+//   ["clnRA"]         decAll: every request declined (:220475)
+//   ["clan-transfer-initiate", name] / ["clan-transfer-cancel"] / ["clan-transfer-respond", accept]
+//                     the ownership transfer's rpcs (rpc(name, ...args), :220556, :220631, :220638); answered
+//                     ["_0" | "_1", name, results...] (rpc_answer) as the Daily Spin's
 //   ["recps"], ["crft", SID]  the Junkyard's recipes and a craft (answered "recps" / "crftr"), once in the game
 //   ["vo", code]      REDEEM_VOUCHER (v10 sends it straight, deob-10.0.4.js:221047): grants KR, answered "vr"
 //                     [funds | null, message] (kio_store_voucher_answer)
@@ -715,7 +742,25 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     if (!name || K.state != KS_OPEN) return 0;
     if (!strcmp(name, "dsl") && n == 0) {
         pthread_mutex_lock(&K.lock);
-        const int sent = send_rpc("dsl");
+        const int sent = send_rpc("dsl", NULL, 0);
+        pthread_mutex_unlock(&K.lock);
+        return sent;
+    }
+    const cJSON *a1 = cJSON_GetArrayItem(frame, 1), *a2 = cJSON_GetArrayItem(frame, 2);
+    if (!strncmp(name, "clan-transfer-", 14)) { // the ownership transfer's rpcs, in v10.0.7's shapes
+        KrunkerValue rarg[1];
+        size_t rn = 0;
+        char who[128];
+        if (!strcmp(name, "clan-transfer-initiate") && n == 1 && cJSON_IsString(a1)) {
+            snprintf(who, sizeof(who), "%s", a1->valuestring);
+            rarg[rn++] = KRUNKER_V_STR(who);
+        } else if (!strcmp(name, "clan-transfer-respond") && n == 1 && cJSON_IsBool(a1)) {
+            rarg[rn++] = KRUNKER_V_BOOL(cJSON_IsTrue(a1));
+        } else if (strcmp(name, "clan-transfer-cancel") || n != 0) {
+            return 0;
+        }
+        pthread_mutex_lock(&K.lock);
+        const int sent = send_rpc(name, rn ? rarg : NULL, rn);
         pthread_mutex_unlock(&K.lock);
         return sent;
     }
@@ -733,7 +778,9 @@ int krunker_net_send_account_frame(const cJSON *frame) {
         const int s = cJSON_GetArrayItem(frame, 1)->valueint;
         ok = s == 1 || s == 2 || s == 3 || s == -1;
     }
-    if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
+    if (!strcmp(name, "cln") && cJSON_IsNumber(a1)) ok = clan_frame_ok(a1->valuedouble, n, a2, cJSON_GetArrayItem(frame, 3));
+    if (!strcmp(name, "clnR") && n == 2 && cJSON_IsNumber(a1) && cJSON_IsNumber(a2) && (a2->valuedouble == 0 || a2->valuedouble == 1)) ok = 1;
+    if (!strcmp(name, "clnRA") && n == 0) ok = 1;
     if (!strcmp(name, "vo") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1))) ok = 1;
     // the Junkyard (v10_junkyard.c): CRAFT_DATA_REQUEST ["recps"] and CRAFT_REQUEST ["crft", SID] (deob-10.0.7.js:137938,
     // :220777), answered "recps" / "crftr". Only once the player is in the game: before it the live server refuses
@@ -745,8 +792,8 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     }
     if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)
     if (!ok || n > 10) return 0;
-    KrunkerValue args[10];
-    char text[10][128];
+    KrunkerValue args[10], kv[10][2];
+    char text[10][256], key[10][8];
     for (int i = 0; i < n; i++) {
         const cJSON *v = cJSON_GetArrayItem(frame, i + 1);
         if (cJSON_IsNumber(v)) args[i] = KRUNKER_V_NUM(v->valuedouble);
@@ -754,7 +801,13 @@ int krunker_net_send_account_frame(const cJSON *frame) {
             snprintf(text[i], sizeof(text[i]), "%s", v->valuestring);
             args[i] = KRUNKER_V_STR(text[i]);
         } else if (cJSON_IsBool(v)) args[i] = KRUNKER_V_BOOL(cJSON_IsTrue(v));
-        else args[i] = KRUNKER_V_NIL;
+        else if (cJSON_IsObject(v) && v->child && !v->child->next && v->child->string && cJSON_IsNumber(v->child) &&
+                 strlen(v->child->string) < sizeof(key[i])) { // a one-number object: the clan frames' {r} / {wd} (clan_frame_ok)
+            snprintf(key[i], sizeof(key[i]), "%s", v->child->string);
+            kv[i][0] = KRUNKER_V_STR(key[i]);
+            kv[i][1] = KRUNKER_V_NUM(v->child->valuedouble);
+            args[i] = KRUNKER_V_MAP(kv[i], 1);
+        } else args[i] = KRUNKER_V_NIL;
     }
     pthread_mutex_lock(&K.lock);
     const int sent = krunker_link_send(&K.link, name, n ? args : NULL, (size_t) n);

@@ -155,6 +155,10 @@ void krunker_service_url(KrunkerService svc, const char *path, char *out, size_t
 typedef void (*KrunkerApiFn)(void *user, int status, const cJSON *res);
 // method "GET" / "POST" / ...; body JSON or NULL. 0 = refused at once (every slot busy).
 int krunker_account_api(const char *method, KrunkerService svc, const char *path, const char *body, KrunkerApiFn fn, void *user);
+// The same with a body of body_len bytes (binary allowed) sent as content_type: v10's FormData uploads, whose
+// Content-Type is the browser's "multipart/form-data; boundary=..." (deob-10.0.7.js:27705: no JSON type for FormData).
+int krunker_account_api_body(const char *method, KrunkerService svc, const char *path, const void *body, size_t body_len,
+                             const char *content_type, KrunkerApiFn fn, void *user);
 
 // A username sign-in's Turnstile request is the one krunker_captcha.h shows (krunker_net leaves it open).
 int krunker_account_owns_captcha(void);

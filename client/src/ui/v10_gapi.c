@@ -12,7 +12,8 @@
 // only writes that go there are v10.0.7's clan writes (krunker_kio_gapi_write: the MOTD, loot config,
 // banner colour, logo removal, recruitment post and apply, deob-10.0.7.js:26838-26924) and the punish
 // popup's Chat Ban (chatBan POST /moderation/chat and its getChatBan GET, deob-10.0.7.js:27208-27217),
-// with their JSON body and the account's Bearer. Anything else (follow, vote, comment, post, gift, report, other
+// with their JSON body and the account's Bearer, and the logo upload as the multipart FormData v10 sends
+// (v10_gapi_upload). Anything else (follow, vote, comment, post, gift, report, other
 // groups) is not ported for the krunker.io account and is not sent at all (0: the caller's own
 // failure path); the kn_brain socket is held meanwhile, so nothing reaches the Box Office account either.
 #include <backend.h>
@@ -26,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h> // the multipart boundary's seed
 
 #define GAPI_PENDING 64
 
@@ -198,6 +200,69 @@ static int kio_gapi(const char *method, const char *path, const cJSON *body, con
     char *text = write && body ? cJSON_PrintUnformatted(body) : NULL;
     const int sent = krunker_account_api(write ? method : "GET", KRUNKER_SVC_API, path, text, kio_done, (void *) (uintptr_t) g_kio_ids);
     free(text);
+    if (!sent) {
+        g_kio[slot].id = 0;
+        g_kio[slot].fn = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+// a FormData's multipart boundary as Chromium writes it: "----WebKitFormBoundary" + 16 of its alphanumerics
+static void form_boundary(char *out, const size_t n) {
+    static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB";
+    static uint64_t seed;
+    if (!seed) seed = (uint64_t) time(NULL) * 6364136223846793005ULL + (uint64_t) (uintptr_t) &seed;
+    char rnd[17];
+    for (int i = 0; i < 16; i++) {
+        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+        rnd[i] = T[(seed >> 33) & 63];
+    }
+    rnd[16] = 0;
+    snprintf(out, n, "----WebKitFormBoundary%s", rnd);
+}
+
+int v10_gapi_upload(const char *path, const char *field, const char *filename, const char *file_type, const void *bytes, const size_t len,
+                    const V10GapiFn fn, void *user) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !path || !field || !bytes || !fn) return 0;
+    if (!krunker_kio_gapi_upload("POST", path)) {
+        printf("[gapi] POST %s is not sent for the krunker.io account (not ported)\n", path);
+        return 0;
+    }
+    int slot = -1;
+    for (int i = 0; i < KIO_PENDING && slot < 0; i++)
+        if (!g_kio[i].id) slot = i;
+    if (slot < 0) return 0;
+    // the part's header as Chromium writes a File entry: the name and filename quoted, '"' and CR / LF escaped
+    char boundary[48], name[256], head[768];
+    form_boundary(boundary, sizeof(boundary));
+    size_t o = 0;
+    for (const char *p = filename && filename[0] ? filename : "blob"; *p && o + 4 < sizeof(name); p++) {
+        if (*p == '"') o += (size_t) snprintf(name + o, sizeof(name) - o, "%%22");
+        else if (*p == '\r') o += (size_t) snprintf(name + o, sizeof(name) - o, "%%0D");
+        else if (*p == '\n') o += (size_t) snprintf(name + o, sizeof(name) - o, "%%0A");
+        else name[o++] = *p;
+    }
+    name[o] = 0;
+    const int hn = snprintf(head, sizeof(head), "--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n",
+                            boundary, field, name, file_type && file_type[0] ? file_type : "application/octet-stream");
+    char tail[64];
+    const int tn = snprintf(tail, sizeof(tail), "\r\n--%s--\r\n", boundary);
+    if (hn <= 0 || (size_t) hn >= sizeof(head) || tn <= 0 || (size_t) tn >= sizeof(tail)) return 0;
+    const size_t total = (size_t) hn + len + (size_t) tn;
+    char *body = malloc(total);
+    if (!body) return 0;
+    memcpy(body, head, (size_t) hn);
+    memcpy(body + hn, bytes, len);
+    memcpy(body + hn + len, tail, (size_t) tn);
+    char ctype[96];
+    snprintf(ctype, sizeof(ctype), "multipart/form-data; boundary=%s", boundary);
+    if (!++g_kio_ids) g_kio_ids = 1;
+    g_kio[slot].id = g_kio_ids;
+    g_kio[slot].fn = fn;
+    g_kio[slot].user = user;
+    const int sent = krunker_account_api_body("POST", KRUNKER_SVC_API, path, body, total, ctype, kio_done, (void *) (uintptr_t) g_kio_ids);
+    free(body);
     if (!sent) {
         g_kio[slot].id = 0;
         g_kio[slot].fn = NULL;

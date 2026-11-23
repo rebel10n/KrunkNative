@@ -22,6 +22,11 @@ HttpStream *http_stream_start(const char *method, const char *url, const char *h
     (void) method; (void) url; (void) headers; (void) body; (void) cb; (void) user;
     return NULL;
 }
+HttpStream *http_stream_start_body(const char *method, const char *url, const char *headers, const void *body, size_t body_len,
+                                   const char *content_type, const HttpStreamCallbacks *cb, void *user) {
+    (void) method; (void) url; (void) headers; (void) body; (void) body_len; (void) content_type; (void) cb; (void) user;
+    return NULL;
+}
 void http_stream_cancel(HttpStream *s) { (void) s; }
 void http_stream_poll(void) {}
 void krunker_captcha_ask(int attempt, int rejected, KrunkerCaptchaDone done, void *user) { (void) attempt; (void) rejected; (void) done; (void) user; }
@@ -167,7 +172,7 @@ int main(void) {
                   {"DELETE", "/clans/9001/recruitment"}, {"POST", "/clans/4242/apply"}};
     for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
         CHECK(krunker_kio_gapi_write(writes[i].method, writes[i].path), "%s %s is a v10.0.7 clan write", writes[i].method, writes[i].path);
-    // not: the multipart logo upload, wrong methods, the transfer (a socket rpc in v10), a query, a non-numeric id, reads
+    // not: the multipart logo upload (krunker_kio_gapi_upload, 6d), wrong methods, the transfer (a socket rpc in v10), a query, a non-numeric id, reads
     const struct {
         const char *method, *path;
     } refused[] = {{"POST", "/clans/9001/logo"},         {"POST", "/clans/9001/motd"},          {"GET", "/clans/9001/motd"},
@@ -192,6 +197,17 @@ int main(void) {
                        {"GET", "/moderation/chat/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}};
     for (size_t i = 0; i < sizeof(mod_refused) / sizeof(mod_refused[0]); i++)
         CHECK(!krunker_kio_gapi_write(mod_refused[i].method, mod_refused[i].path), "%s %s is not sent", mod_refused[i].method, mod_refused[i].path);
+
+    // 6e. the one FormData write: uploadLogo, POST /clans/<id>/logo (deob-10.0.7.js:26859, :96104); nothing else
+    CHECK(krunker_kio_gapi_upload("POST", "/clans/9001/logo"), "POST /clans/9001/logo is v10.0.7's multipart upload");
+    const struct {
+        const char *method, *path;
+    } not_upload[] = {{"PUT", "/clans/9001/logo"},  {"DELETE", "/clans/9001/logo"}, {"POST", "/clans/9001/logo/"}, {"POST", "/clans/abc/logo"},
+                      {"POST", "/clans/9001/logo?x=1"}, {"POST", "/clans/9001/motd"}, {"POST", "/api/clans/9001/logo"}, {"POST", "/account/avatar"},
+                      {NULL, "/clans/9001/logo"}, {"POST", NULL}};
+    for (size_t i = 0; i < sizeof(not_upload) / sizeof(not_upload[0]); i++)
+        CHECK(!krunker_kio_gapi_upload(not_upload[i].method, not_upload[i].path), "%s %s is not an upload",
+              not_upload[i].method ? not_upload[i].method : "(null)", not_upload[i].path ? not_upload[i].path : "(null)");
 
     // 7. a mirror moves the data client: the webhooks and the streams follow KRUNKNATIVE_KRUNKER_DATA_API
     env_clear();

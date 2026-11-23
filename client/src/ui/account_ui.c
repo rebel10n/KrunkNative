@@ -575,13 +575,14 @@ static void kio_frame(const char *label, const cJSON *frame) {
         double_xp_offer_answer(frame);
     } else if (!strcmp(label, "vad")) { // FORCE_VIDEO_AD: forceVideoAd (:227964-227981), the placeholder ad
         client_video_ad_force(); // its CUSTOM_VIDEO_AD states back on the game socket (video_ad.c)
-    } else if (!strcmp(label, "cln")) {
+    } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // CLAN_RESPONSE / CLAN_LEAVE_RESPONSE (clan_ui.c)
         clan_ui_frame(frame);
     } else if (!strcmp(label, "dslr")) { // DAILY_SPIN_CLAIM_RESPONSE [{ticketId}] (v10_daily_spin.c)
         v10_daily_spin_frame(label, frame);
     } else if (!strcmp(label, "_0") || !strcmp(label, "_1")) { // an rpc's answer, named (krunker_net.h): the claim's
         const char *rpc = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1));
         if (rpc && !strcmp(rpc, "dsl")) v10_daily_spin_frame(label, frame);
+        else if (rpc && !strncmp(rpc, "clan-transfer-", 14)) clan_ui_rpc(label, frame); // the ownership transfer's
     } else if ((!strcmp(label, "chg") || !strcmp(label, "uchp")) && g_kio.obj) {
         // UPDATE_CHALLENGES [PT, CI, PV]... / UPDATE_CHALLENGES_PROGRESS [CI, PV]... (v10:218110 / 218121)
         cJSON *list = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges");
@@ -861,6 +862,15 @@ void account_kio_set_balances(const int has_funds, const double funds, const int
     cJSON_Delete(v);
     v = NULL;
     if (has_junk && (v = cJSON_CreateNumber(junk))) obj_set("player_jnk", v);
+    cJSON_Delete(v);
+    g_kio.gen++;
+}
+
+// v10's acc.clan for the krunker.io account (windows[12].resp / del, deob-10.0.7.js:220509, :220436): its player_clan
+void account_kio_set_clan(const char *tag) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER || !g_kio.obj) return;
+    cJSON *v = tag && tag[0] ? cJSON_CreateString(tag) : cJSON_CreateNull();
+    obj_set("player_clan", v);
     cJSON_Delete(v);
     g_kio.gen++;
 }

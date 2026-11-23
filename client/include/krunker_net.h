@@ -146,7 +146,7 @@ int krunker_net_account(KrunkerNetAccount *out);
 void krunker_net_account_signed_in(void);
 // The official game socket's account-scoped frames, on the main thread: label + the whole frame
 // ["name", args...] ("a" ACCOUNT_RESPONSE without its token, "ua", "uf", "bpdl", "bppd", "chg",
-// "uchp", "cln", "dslr"), and the answers to the rpcs krunker_net_send_account_frame sent, with the
+// "uchp", "cln", "clnL", "dslr"), and the answers to the rpcs krunker_net_send_account_frame sent, with the
 // rpc's name in the id's place: ["_0", "dsl", results...] RPC_SUCCESS / ["_1", "dsl", errors...]
 // RPC_ERROR (v10.0.3 deob 111117-111118). One listener (account_ui.c: the krunker.io account's real
 // data, as v10 keeps it).
@@ -160,9 +160,11 @@ void krunker_net_checkout_listen(KrunkerNetAccountFn fn);
 typedef void (*KrunkerVoucherFn)(int has_funds, double funds, const char *message);
 void krunker_net_voucher_listen(KrunkerVoucherFn fn);
 // A window's request over the game socket for the krunker.io account, as the frame the window would
-// send kn_brain: the read-only ones (["bpdl"], ["vcln"], ["cln", 3, value]) and the Daily Spin claim
-// (["dsl"], sent as v10's rpc(DAILY_SPIN_CLAIM)), the Junkyard's ["recps"] / ["crft", SID] once in the game; 0 = not sent (not open, or anything else: nothing
-// that spends KR goes out).
+// send kn_brain, in the shapes v10 sends them (krunker_net.c lists them): the reads (["bpdl"], ["vcln"],
+// ["cln", 3, value]), the Clans window's "cln" / "clnR" / "clnRA" writes, the claims, the Junkyard's
+// ["recps"] / ["crft", SID] once in the game, and the rpcs (["dsl"], ["clan-transfer-initiate" | "-cancel" |
+// "-respond", ...], sent as v10's rpc(name, ...args), answered "_0" / "_1" with the name); 0 = not sent
+// (not open, or a frame outside the list).
 int krunker_net_send_account_frame(const cJSON *frame);
 int krunker_net_open(void);        // the WebSocket is open
 // client_net_send_packet while active: our packet translated and sent (or dropped). 1 = sent.

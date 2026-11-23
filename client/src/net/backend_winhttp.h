@@ -16,10 +16,11 @@ int kn_winhttp_request_bytes(const char *method, const char *url, const char *co
                              const char *bearer, int timeout_ms, char **body, size_t *length, char *err, size_t errn);
 
 // A streamed request (client/src/net/http_stream.c): headers = extra "Name: value\r\n" lines (NULL
-// none), body sent as application/json (NULL none). on_head once with the status and content type,
+// none), body_len bytes of body sent as content_type (NULL none). on_head once with the status and content type,
 // then on_data per piece as it arrives (return 0 to stop: the call then ends with status 0,
 // "cancelled"). Returns the HTTP status, 0 on a transport error (`err` says why). Blocking.
-int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, int timeout_ms,
+int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, size_t body_len,
+                      const char *content_type, int timeout_ms,
                       void (*on_head)(void *user, int status, const char *content_type), int (*on_data)(void *user, const char *data, size_t len),
                       void *user, char *err, size_t errn);
 

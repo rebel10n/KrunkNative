@@ -27,6 +27,10 @@ typedef struct {
 // (bad URL, https without TLS support, out of memory): on_done is then not called.
 HttpStream *http_stream_start(const char *method, const char *url, const char *headers, const char *body,
                               const HttpStreamCallbacks *cb, void *user);
+// The same with a body of body_len bytes (any bytes: a multipart/form-data upload) sent as content_type
+// (NULL body = none). http_stream_start is this with the JSON text and "application/json".
+HttpStream *http_stream_start_body(const char *method, const char *url, const char *headers, const void *body, size_t body_len,
+                                   const char *content_type, const HttpStreamCallbacks *cb, void *user);
 // Stops the transfer; no callbacks after this returns. The handle is invalid afterwards.
 void http_stream_cancel(HttpStream *s);
 // Main thread, once per frame: delivers the callbacks.

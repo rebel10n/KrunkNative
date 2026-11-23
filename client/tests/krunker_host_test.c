@@ -24,6 +24,11 @@ HttpStream *http_stream_start(const char *method, const char *url, const char *h
     (void) method; (void) url; (void) headers; (void) body; (void) cb; (void) user;
     return NULL;
 }
+HttpStream *http_stream_start_body(const char *method, const char *url, const char *headers, const void *body, size_t body_len,
+                                   const char *content_type, const HttpStreamCallbacks *cb, void *user) {
+    (void) method; (void) url; (void) headers; (void) body; (void) body_len; (void) content_type; (void) cb; (void) user;
+    return NULL;
+}
 void http_stream_cancel(HttpStream *s) { (void) s; }
 void http_stream_poll(void) {}
 void krunker_captcha_ask(int attempt, int rejected, KrunkerCaptchaDone done, void *user) { (void) attempt; (void) rejected; (void) done; (void) user; }

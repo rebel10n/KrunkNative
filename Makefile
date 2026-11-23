@@ -817,7 +817,7 @@ kio-turf-e2e: build ## Turf Wars on an official krunker.io game (turf_ui.c): the
 	timeout 400 $(PYTHON) -I server/tests/kio_turf_e2e.py $(DEBUG_DIR)
 
 .PHONY: kio-clan-e2e
-kio-clan-e2e: build ## The Clans window and Turf Wars Recruitment on an official krunker.io game (clan_ui.c, turf_ui.c): the MOTD, loot config and recruitment reads and v10.0.7's clan writes (MOTD, loot config, banner colour, logo removal, recruitment post, apply, Take Down) go to krunker.io's gapi with the Bearer, the answers shown as v10 shows them (krunker.io stubs, headless)
+kio-clan-e2e: build ## The Clans window and Turf Wars Recruitment on an official krunker.io game (clan_ui.c, turf_ui.c): the MOTD, loot config and recruitment reads and v10.0.7's clan writes (MOTD, loot config, banner colour, logo removal, recruitment post, apply, Take Down) go to krunker.io's gapi with the Bearer, the logo upload as v10's multipart FormData, the game-socket writes (create, join, leave, kick, role, funds, requests, Discord) and the transfer rpcs on the official game socket as v10.0.7 encodes them, the hub's Request to Join; the answers shown as v10 shows them (krunker.io stubs, headless)
 	timeout 600 $(PYTHON) -I server/tests/kio_clan_e2e.py $(DEBUG_DIR)
 
 .PHONY: kio-market-e2e

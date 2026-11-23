@@ -66,15 +66,16 @@ EMSCRIPTEN_KEEPALIVE void http_stream_web_event(const int id, const int kind, co
     push(s, kind, status, text, text ? strlen(text) : 0);
 }
 
-EM_JS(void, hs_web_fetch, (int id, const char *method, const char *url, const char *headers, const char *body), {
+EM_JS(void, hs_web_fetch, (int id, const char *method, const char *url, const char *headers, const char *body, int body_len,
+                           const char *ctype), {
     var map = Module.knHttpStreams || (Module.knHttpStreams = {});
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     map[id] = ctl;
     var opts = { method: UTF8ToString(method), headers: { 'Accept': 'text/event-stream, application/json' } };
     if (ctl) opts.signal = ctl.signal;
     if (body) {
-        opts.body = UTF8ToString(body);
-        opts.headers['Content-Type'] = 'application/json';
+        opts.body = HEAPU8.slice(body, body + body_len); // the bytes as they are (a multipart upload is binary)
+        opts.headers['Content-Type'] = UTF8ToString(ctype);
     }
     if (headers) {
         UTF8ToString(headers).split('\r\n').forEach(function (line) {
@@ -114,9 +115,9 @@ EM_JS(void, hs_web_abort, (int id), {
     if (map[id]) { try { map[id].abort(); } catch (e) {} delete map[id]; }
 });
 
-HttpStream *http_stream_start(const char *method, const char *url, const char *headers, const char *body, const HttpStreamCallbacks *cb,
-                              void *user) {
-    if (!url || !url[0] || !cb) return NULL;
+HttpStream *http_stream_start_body(const char *method, const char *url, const char *headers, const void *body, const size_t body_len,
+                                   const char *content_type, const HttpStreamCallbacks *cb, void *user) {
+    if (!url || !url[0] || !cb || (body && !content_type) || body_len > 0x7fffffff) return NULL;
     HttpStream *s = calloc(1, sizeof(*s));
     if (!s) return NULL;
     s->id = g_next_id++;
@@ -124,7 +125,7 @@ HttpStream *http_stream_start(const char *method, const char *url, const char *h
     s->user = user;
     s->next = g_streams;
     g_streams = s;
-    hs_web_fetch(s->id, method && method[0] ? method : "GET", url, headers, body);
+    hs_web_fetch(s->id, method && method[0] ? method : "GET", url, headers, body, (int) body_len, content_type);
     return s;
 }
 
@@ -199,7 +200,8 @@ struct HttpStream {
     atomic_int cancelled;  // main thread: no more callbacks; the worker stops
     int finished;          // worker: HS_DONE queued (under mu)
     int fd;                // POSIX: the socket while the worker reads (under mu; -1 none)
-    char *method, *url, *headers, *body;
+    char *method, *url, *headers, *body, *ctype; // body: body_len bytes (+ a NUL), sent as ctype
+    size_t body_len;
     HttpStreamCallbacks cb;
     void *user;
 };
@@ -239,8 +241,9 @@ static void stream_free(HttpStream *s) {
     free(s->url);
     if (s->headers) memset(s->headers, 0, strlen(s->headers)); // may carry a key
     free(s->headers);
-    if (s->body) memset(s->body, 0, strlen(s->body)); // may carry a password (krunker_account.c)
+    if (s->body) memset(s->body, 0, s->body_len); // may carry a password (krunker_account.c)
     free(s->body);
+    free(s->ctype);
     pthread_mutex_destroy(&s->mu);
     free(s);
 }
@@ -256,7 +259,8 @@ static int win_data(void *user, const char *data, const size_t len) {
 
 static void run(HttpStream *s) {
     char err[256] = "";
-    const int status = kn_winhttp_stream(s->method, s->url, s->headers, s->body, HS_TIMEOUT_MS, win_head, win_data, s, err, sizeof(err));
+    const int status = kn_winhttp_stream(s->method, s->url, s->headers, s->body, s->body_len, s->ctype, HS_TIMEOUT_MS, win_head, win_data, s,
+                                         err, sizeof(err));
     push(s, HS_DONE, status, status ? NULL : err, status ? 0 : strlen(err));
 }
 #else
@@ -322,16 +326,16 @@ static void run(HttpStream *s) {
     pthread_mutex_unlock(&s->mu);
     const char *target = http_url_target(s->url);
     const int default_port = !strcmp(a.port, a.tls ? "443" : "80");
-    const size_t body_len = s->body ? strlen(s->body) : 0;
-    const size_t cap = strlen(target) + (s->headers ? strlen(s->headers) : 0) + 512;
+    const size_t body_len = s->body ? s->body_len : 0;
+    const size_t cap = strlen(target) + (s->headers ? strlen(s->headers) : 0) + (s->ctype ? strlen(s->ctype) : 0) + 512;
     char *req = malloc(cap);
     int ok = 0;
     if (req) {
         const int n = snprintf(req, cap,
                                "%s %s HTTP/1.1\r\nHost: %s%s%s\r\nUser-Agent: KrunkNative\r\nAccept: text/event-stream, application/json\r\n"
-                               "Connection: close\r\n%s%s",
+                               "Connection: close\r\n%s%s%s%s",
                                s->method, target[0] ? target : "/", a.host, default_port ? "" : ":", default_port ? "" : a.port,
-                               s->headers ? s->headers : "", s->body ? "Content-Type: application/json\r\n" : "");
+                               s->headers ? s->headers : "", s->body ? "Content-Type: " : "", s->body ? s->ctype : "", s->body ? "\r\n" : "");
         char cl[64];
         const int m = s->body ? snprintf(cl, sizeof(cl), "Content-Length: %zu\r\n\r\n", body_len) : snprintf(cl, sizeof(cl), "\r\n");
         ok = n > 0 && http_conn_send(&c, req, (size_t) n) && http_conn_send(&c, cl, (size_t) m) && (!body_len || http_conn_send(&c, s->body, body_len));
@@ -428,9 +432,9 @@ static char *dup_or_null(const char *s) {
     return d;
 }
 
-HttpStream *http_stream_start(const char *method, const char *url, const char *headers, const char *body, const HttpStreamCallbacks *cb,
-                              void *user) {
-    if (!url || !url[0] || !cb) return NULL;
+HttpStream *http_stream_start_body(const char *method, const char *url, const char *headers, const void *body, const size_t body_len,
+                                   const char *content_type, const HttpStreamCallbacks *cb, void *user) {
+    if (!url || !url[0] || !cb || (body && !content_type)) return NULL;
 #if !defined(_WIN32) && !defined(KRUNKNATIVE_HAVE_TLS)
     if (!strncmp(url, "https://", 8)) return NULL;
 #endif
@@ -442,10 +446,15 @@ HttpStream *http_stream_start(const char *method, const char *url, const char *h
     s->method = dup_or_null(method && method[0] ? method : "GET");
     s->url = dup_or_null(url);
     s->headers = dup_or_null(headers);
-    s->body = dup_or_null(body);
+    if (body && (s->body = malloc(body_len + 1))) {
+        memcpy(s->body, body, body_len);
+        s->body[body_len] = 0;
+        s->body_len = body_len;
+    }
+    s->ctype = body ? dup_or_null(content_type) : NULL;
     s->cb = *cb;
     s->user = user;
-    if (!s->method || !s->url || (headers && !s->headers) || (body && !s->body)) {
+    if (!s->method || !s->url || (headers && !s->headers) || (body && (!s->body || !s->ctype))) {
         stream_free(s);
         return NULL;
     }
@@ -526,3 +535,8 @@ void http_stream_poll(void) {
     }
 }
 #endif
+
+HttpStream *http_stream_start(const char *method, const char *url, const char *headers, const char *body, const HttpStreamCallbacks *cb,
+                              void *user) {
+    return http_stream_start_body(method, url, headers, body, body ? strlen(body) : 0, "application/json", cb, user);
+}

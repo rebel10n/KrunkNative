@@ -18,6 +18,10 @@ void avatar_ui_pick(void);
 // not be read); a cancelled dialog calls nothing. png_only: PNG only (the clan logo).
 typedef void (*AvatarPickFn)(void *user, const char *b64, size_t bytes, const char *error);
 void avatar_ui_pick_file(int png_only, size_t max_bytes, AvatarPickFn fn, void *user);
+// The name of the file the last pick handed over (its File.name: the path's last part natively), "" when none.
+// Valid until the next pick (a FormData upload's filename, clan_ui.c). Natively KRUNKNATIVE_PICK_FILE=<path>
+// answers the dialog with that file without opening one (the e2e tests: no desktop dialog in a headless run).
+const char *avatar_ui_picked_name(void);
 // Asks the brain for the signed-in account's picture status and writes it into the account
 // page's status line (#pfpStatus). A no-op without a brain or a session.
 void avatar_ui_refresh(void);

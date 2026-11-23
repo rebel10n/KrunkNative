@@ -6,11 +6,12 @@
 // {r}) 7 funds(kr, {wd}) 9 Discord link; ["clnR", playerId, 1|0]; ["clnRA"] decline all; ["vcln"]
 // on every render (OPEN_CLAN_TAB). The settings tab's gapi calls go through v10_gapi()
 // (client/src/ui/v10_gapi.c, services/brain/clan_v10.c): /clans/<id>/motd | banner-color | logo |
-// transfer. Deviation: v10's ownership-transfer socket RPCs (clan-transfer-initiate / -cancel /
-// -respond) are POST / DELETE /clans/<id>/transfer and POST /clans/<id>/transfer/respond. The
+// transfer. Deviation (Box Office): v10's ownership-transfer socket RPCs (clan-transfer-initiate /
+// -cancel / -respond) are POST / DELETE /clans/<id>/transfer and POST /clans/<id>/transfer/respond. The
 // Turf Wars loot config and the recruitment board are kn_brain HTTP routes (turf.c, ?token=).
 // The logo: the file dialog is the profile picture's (avatar_ui_pick_file, PNG only) and the upload
-// is POST /clans/<id>/logo {file: base64} over the gapi tunnel (v10 sends the multipart `file`);
+// is POST /clans/<id>/logo {file: base64} over the gapi tunnel on Box Office (v10 sends the multipart
+// `file`, as the krunker.io account's upload does);
 // the approved logo is GET /api/clans/<id>/logo (clan_logo.c), not v10's user-assets CDN.
 //
 // Permissions as v10: owner = clanData.clan_playerid; clanRole = the account's clan_members rank
@@ -21,18 +22,20 @@
 // (ui/css/svelte.css); the confirm prompts it pushes on its view stack use #genericPop.
 //
 // While krunker.io is the active account backend (an official krunker.io game) the window is the
-// krunker.io account's clan: "vcln" and the ["cln", 3] read go over the official game socket (the
-// account bridge's held-sender route) and its "cln" answer comes back to clan_ui_frame(); the
-// settings tab's reads are v10's own gapi calls (v10_gapi.c: GET /clans/<id>/motd, /loot-config,
-// /recruitment, the id being clanData.clan_id as v10's), and so are its gapi writes, with v10.0.7's
-// method, path and JSON body and the account's Bearer (deob-10.0.7.js:26838-26924): PUT / DELETE
-// /clans/<id>/motd {message}, PUT /clans/<id>/loot-config, POST /clans/<id>/banner-color
-// {paint_item_id}, DELETE /clans/<id>/logo, POST / DELETE /clans/<id>/recruitment; their answers are
-// applied as v10's settings components apply them. Not ported for that account (clan_kio_write: its
-// handler does nothing, so nothing is sent anywhere): the game-socket writes (create, join, leave /
-// delete, kick, roles, funds, requests, Discord: "cln" / "clnR" / "clnRA"; v10's ownership transfer is
-// the socket's clan-transfer-* rpcs, deob-10.0.7.js:220556-220642) and the logo upload, which v10 sends
-// as multipart FormData (deob-10.0.7.js:96104).
+// krunker.io account's clan, written as v10.0.7 writes it. Over the official game socket (the account
+// bridge's held-sender route, krunker_net_send_account_frame): "vcln", the ["cln", 3] read and the
+// window's writes with v10's encoding (create / join ["cln", 1 | 2, tag], leave / delete ["cln", 4, 1],
+// kick ["cln", 5, id], role ["cln", 6, id, {r}], funds ["cln", 7, kr, {wd}], Discord ["cln", 9, link],
+// ["clnR", id, ok], ["clnRA"]), whose "cln" / "clnL" answers come back to clan_ui_frame(), and the
+// ownership transfer's rpcs clan-transfer-initiate / -cancel / -respond (deob-10.0.7.js:220556-220642),
+// whose "_0" / "_1" answers come back to clan_ui_rpc(). The settings tab's reads are v10's own gapi
+// calls (v10_gapi.c: GET /clans/<id>/motd, /loot-config, /recruitment, the id being clanData.clan_id as
+// v10's), and so are its gapi writes, with v10.0.7's method, path and JSON body and the account's Bearer
+// (deob-10.0.7.js:26838-26924): PUT / DELETE /clans/<id>/motd {message}, PUT /clans/<id>/loot-config,
+// POST /clans/<id>/banner-color {paint_item_id}, DELETE /clans/<id>/logo, POST / DELETE
+// /clans/<id>/recruitment, and the logo upload POST /clans/<id>/logo as v10's multipart FormData with
+// the picked PNG as `file` (v10_gapi_upload, deob-10.0.7.js:96094-96120); their answers are applied as
+// v10's settings components apply them.
 #include <avatar_ui.h>
 #include <backend.h>
 #include <backend_ui.h>
@@ -317,6 +320,23 @@ static void motd_expired(void *user) {
 }
 
 static int kio_clan(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// acc.clan / acc.funds as windows[12] sets them, on the account the window belongs to
+static void set_acc_clan(const char *tag) {
+    if (kio_clan()) account_kio_set_clan(tag);
+    else account_set_clan(tag);
+}
+
+static void set_acc_funds(const double funds) {
+    if (kio_clan()) account_kio_set_balances(1, funds, 0, 0);
+    else account_set_funds(funds);
+}
+
+// a krunker.io answer's error text as v10's callers throw it: error.message, else the fallback
+static const char *kio_error_text(const cJSON *error, const char *fallback) {
+    const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
+    return e && e[0] ? e : fallback;
+}
 
 // A gapi answer that succeeded. krunker.io: v10.0.7's wrapper (deob-10.0.7.js:26152) gives {data, error} for any
 // status in [200, 500) and its callers throw only on error, so a 204 (no body) or a 4xx without an error is a success
@@ -1504,12 +1524,56 @@ static void recruit_remove(void) {
     clan_rerender();
 }
 
+// the picked file's base64 -> its bytes (owned; NULL on a bad character)
+static unsigned char *b64_decode(const char *in, size_t *out_n) {
+    const size_t len = in ? strlen(in) : 0;
+    unsigned char *out = malloc(len / 4 * 3 + 3);
+    if (!out) return NULL;
+    size_t o = 0;
+    unsigned v = 0;
+    int bits = 0;
+    for (size_t i = 0; i < len; i++) {
+        const char c = in[i];
+        int d;
+        if (c >= 'A' && c <= 'Z') d = c - 'A';
+        else if (c >= 'a' && c <= 'z') d = c - 'a' + 26;
+        else if (c >= '0' && c <= '9') d = c - '0' + 52;
+        else if (c == '+' || c == '-') d = 62;
+        else if (c == '/' || c == '_') d = 63;
+        else if (c == '=' || c == '\r' || c == '\n') continue;
+        else {
+            free(out);
+            return NULL;
+        }
+        v = v << 6 | (unsigned) d;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[o++] = (unsigned char) (v >> bits & 0xff);
+        }
+    }
+    *out_n = o;
+    return out;
+}
+
 // the logo's file: the profile picture's dialog, PNG only, up to 256 KB; the brain checks the
 // 512 x 512 size and the moderation (clan_logo.c). The upload starts when a file is chosen.
 static void on_logo_picked(void *user, const char *b64, size_t bytes, const char *error);
 static void logo_pick(void) {
     S.logo_err[0] = 0;
     if (S.logo_busy || !g_clan) return;
+    if (kio_clan()) { // v10.0.7's upload checks, in its order and words (deob-10.0.7.js:96094-96099)
+        if (!clan_id()) return;
+        if (jnum(g_clan, "clan_funds") < LOGO_COST) snprintf(S.logo_err, sizeof(S.logo_err), "Insufficient clan funds. Need 20,000 krunkies.");
+        else if (jnum(g_clan, "clan_logo_pending") > 0 || jstr(g_clan, "clan_logo_pending")[0])
+            snprintf(S.logo_err, sizeof(S.logo_err), "A logo is already pending approval. Please wait for admin review.");
+        else {
+            avatar_ui_pick_file(1, LOGO_MAX_BYTES, on_logo_picked, NULL);
+            return;
+        }
+        rerender_kept();
+        return;
+    }
     if (jnum(g_clan, "clan_logo_pending") > 0) {
         snprintf(S.logo_err, sizeof(S.logo_err), "A logo is already pending review. Please wait before uploading a new one.");
     } else if (jnum(g_clan, "clan_funds") < LOGO_COST) {
@@ -1533,10 +1597,25 @@ static void on_logo_picked(void *user, const char *b64, size_t bytes, const char
         rerender_kept();
         return;
     }
-    cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "file", b64);
     char path[64];
     snprintf(path, sizeof(path), "/clans/%d/logo", clan_id());
+    if (kio_clan()) { // v10.0.7: the 512 x 512 check, then a FormData with the file as `file` (deob-10.0.7.js:96060-96112)
+        size_t n = 0;
+        unsigned char *png = b64_decode(b64, &n);
+        const long w = png && n >= 24 ? (long) png[16] << 24 | (long) png[17] << 16 | png[18] << 8 | png[19] : -1;
+        const long h = png && n >= 24 ? (long) png[20] << 24 | (long) png[21] << 16 | png[22] << 8 | png[23] : -1;
+        if (!png || n < 24 || memcmp(png + 12, "IHDR", 4)) snprintf(S.logo_err, sizeof(S.logo_err), "Invalid image file");
+        else if (w != 512 || h != 512) snprintf(S.logo_err, sizeof(S.logo_err), "Image must be exactly 512x512 pixels");
+        else {
+            S.logo_busy = v10_gapi_upload(path, "file", avatar_ui_picked_name(), "image/png", png, n, on_logo_uploaded, NULL);
+            if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), "Failed to upload logo");
+        }
+        free(png);
+        rerender_kept();
+        return;
+    }
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "file", b64);
     S.logo_busy = v10_gapi("POST", path, body, on_logo_uploaded, NULL);
     cJSON_Delete(body);
     if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), "Failed to upload logo");
@@ -1559,6 +1638,16 @@ static void on_logo_uploaded(void *user, const int status, const cJSON *data, co
     (void) user;
     (void) data;
     S.logo_busy = 0;
+    if (kio_clan()) { // v10.0.7: an error throws error.message || "Failed to upload logo"; else sendReq(3)
+        if (gapi_ok(status, error)) {
+            S.logo_err[0] = 0;
+            send_cln(3, NULL, NULL);
+        } else {
+            snprintf(S.logo_err, sizeof(S.logo_err), "%s", kio_error_text(error, "Failed to upload logo"));
+        }
+        rerender_kept();
+        return;
+    }
     if (status == 200 && !error) {
         S.logo_err[0] = 0;
         send_cln(3, NULL, NULL); // the clan's data: the logo is pending now
@@ -1599,9 +1688,80 @@ static void on_transfer(void *user, const int status, const cJSON *data, const c
     rerender_kept();
 }
 
+// JS String(v) of an rpc result's error (v10 throws new Error(res.error)): its message
+static void js_string(char *out, const size_t n, const cJSON *v) {
+    if (cJSON_IsString(v)) snprintf(out, n, "%s", v->valuestring);
+    else if (cJSON_IsNumber(v)) snprintf(out, n, "%.17g", v->valuedouble);
+    else if (cJSON_IsTrue(v)) snprintf(out, n, "true");
+    else if (cJSON_IsObject(v)) snprintf(out, n, "[object Object]");
+    else out[0] = 0;
+}
+
+// The krunker.io account's transfer rpc answers (account_ui.c): ["_0", name, res] resolves with res = {data, error},
+// ["_1", name, err] rejects with err. v10.0.7 (deob-10.0.7.js:220555-220642, the settings component :96025-96057):
+// initiate: res.error throws it, else clanData.ownership_transfer = res.data and the name input is cleared; cancel:
+// res.error throws, else ownership_transfer is deleted; respond: res.error throws (nothing shown), else
+// ownership_transfer is deleted and sendReq(3). A throw shows error.message || the fallback.
+void clan_ui_rpc(const char *label, const cJSON *frame) {
+    const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1));
+    if (!label || !name) return;
+    const int kind = !strcmp(name, "clan-transfer-initiate") ? 0 : !strcmp(name, "clan-transfer-cancel") ? 1
+                   : !strcmp(name, "clan-transfer-respond")  ? 2 : -1;
+    if (kind < 0) return;
+    S.transfer_busy = 0;
+    const cJSON *res = cJSON_GetArrayItem(frame, 2);
+    char err[96] = "";
+    int failed = 1;
+    if (!strcmp(label, "_0") && cJSON_IsObject(res)) {
+        const cJSON *e = cJSON_GetObjectItem(res, "error");
+        const int thrown = e && !cJSON_IsNull(e) && !cJSON_IsFalse(e) && !(cJSON_IsNumber(e) && e->valuedouble == 0) &&
+                           !(cJSON_IsString(e) && !e->valuestring[0]);
+        if (thrown) js_string(err, sizeof(err), e);
+        failed = thrown;
+    } else if (!strcmp(label, "_1")) {
+        const char *m = cJSON_GetStringValue(cJSON_GetObjectItem(res, "message"));
+        if (m) snprintf(err, sizeof(err), "%s", m);
+    }
+    if (!failed && g_clan) {
+        S.transfer_err[0] = 0;
+        cJSON_DeleteItemFromObject(g_clan, "ownership_transfer");
+        const cJSON *data = cJSON_GetObjectItem(res, "data");
+        if (kind == 0 && data && !cJSON_IsNull(data)) cJSON_AddItemToObject(g_clan, "ownership_transfer", cJSON_Duplicate(data, 1));
+        if (kind == 0) S.transfer_name[0] = 0;
+        if (kind == 2) send_cln(3, NULL, NULL);
+    } else if (failed && kind != 2) {
+        static const char *const fails[] = {"Failed to transfer ownership", "Failed to cancel transfer request"};
+        snprintf(S.transfer_err, sizeof(S.transfer_err), "%s", err[0] ? err : fails[kind]);
+    }
+    rerender_kept();
+}
+
 static void transfer_send(const int kind, const int accept) {
     if (!g_clan || S.transfer_busy) return;
     sync_forms();
+    if (kio_clan()) { // v10.0.7: the socket's rpc(name, ...args) (deob-10.0.7.js:220556, :220631, :220638)
+        const char *p = S.transfer_name;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        if (kind == 0 && !*p) { // name.trim() || "Please enter a player name" (:96035-96048)
+            snprintf(S.transfer_err, sizeof(S.transfer_err), "Please enter a player name");
+            clan_rerender();
+            return;
+        }
+        static const char *const names[] = {"clan-transfer-initiate", "clan-transfer-cancel", "clan-transfer-respond"};
+        cJSON *f = cJSON_CreateArray();
+        cJSON_AddItemToArray(f, cJSON_CreateString(names[kind]));
+        if (kind == 0) cJSON_AddItemToArray(f, cJSON_CreateString(S.transfer_name));
+        if (kind == 2) cJSON_AddItemToArray(f, cJSON_CreateBool(accept));
+        if (kind != 2) S.transfer_err[0] = 0;
+        S.transfer_busy = backend_social_send(f);
+        cJSON_Delete(f);
+        if (!S.transfer_busy && kind != 2) {
+            static const char *const fails[] = {"Failed to transfer ownership", "Failed to cancel transfer request"};
+            snprintf(S.transfer_err, sizeof(S.transfer_err), "%s", fails[kind]);
+        }
+        clan_rerender();
+        return;
+    }
     char path[64];
     snprintf(path, sizeof(path), kind == 2 ? "/clans/%d/transfer/respond" : "/clans/%d/transfer", clan_id());
     cJSON *body = NULL;
@@ -1625,27 +1785,10 @@ static void transfer_send(const int kind, const int accept) {
 
 // ------------------------------------------------------------------ handler table
 
-// the window's writes that are not ported for the krunker.io account, and the popups that only lead to one: the game
-// socket's (v10's io.send("cln" / "clnR" / "clnRA") and its clan-transfer-* rpcs) and the logo upload (multipart in v10).
-// The settings tab's gapi writes (MOTD, loot config, banner colour, logo removal, recruitment post) are v10's own there.
-static int clan_kio_write(const char *name, const char *m) {
-    static const char *const writes[] = {"sendReq", "updReq", "updRol", "chngFunds", "decAll", "updateDis", "logoPick",
-                                         "transferStart", "transferCancel", "transferRespond", "delReq", "kickReq", "mangFunds",
-                                         "declinePop"};
-    if (!strcmp(name, "delClanConfirmed") || !strcmp(name, "kickClanConfirmed")) return 1;
-    for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
-        if (!strcmp(m, writes[i])) return 1;
-    return 0;
-}
-
 int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     if (!name || (strncmp(name, "windows.12.", 11) && strcmp(name, "delClanConfirmed") && strcmp(name, "kickClanConfirmed"))) return -1;
     const char *m = name + 11;
-    if (kio_clan() && clan_kio_write(name, m)) {
-        printf("[clan] %s: not ported for the krunker.io account\n", name);
-        return 1;
-    }
     if (!strcmp(name, "delClanConfirmed")) { // _70159 + io.send("cln", 4, 1)
         wait_popup();
         send_cln(4, NULL, NULL);
@@ -1852,7 +1995,7 @@ void clan_ui_frame(const cJSON *frame) {
     if (!label) return;
     if (!strcmp(label, "clnL")) { // del(): clanData = null; acc.clan = null; showWindow(5)
         clan_ui_reset();
-        account_set_clan(NULL);
+        set_acc_clan(NULL);
         ui_loadout_clear_pops();
         menu_show_window(5, 1);
         return;
@@ -1865,7 +2008,7 @@ void clan_ui_frame(const cJSON *frame) {
     const int has_data = cJSON_IsObject(data);
     if (action == 7) {
         if (ok && has_data) {
-            account_set_funds(jnum(data, "pf"));
+            set_acc_funds(jnum(data, "pf")); // acc.funds = pf || 0
             if (g_clan) cJSON_ReplaceItemInObject(g_clan, "clan_funds", cJSON_CreateNumber(jnum(data, "cf")));
             menu_rerender_if_open(13);
             result_popup(1, "Success");
@@ -1907,7 +2050,7 @@ void clan_ui_frame(const cJSON *frame) {
     if (msg && msg[0] && html_dom_by_id("clanErr")) {
         clan_err(msg, ok);
     } else if (has_data && cJSON_GetObjectItem(data, "clan_name")) {
-        account_set_clan(jstr(data, "clan_name"));
+        set_acc_clan(jstr(data, "clan_name"));
         sync_forms();
         cJSON_Delete(g_clan);
         g_clan = cJSON_Duplicate(data, 1);

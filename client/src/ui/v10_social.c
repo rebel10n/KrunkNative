@@ -21,8 +21,9 @@
 // and read receipts are what v10 sends from the Friends tab, so they go over that socket too. What
 // would change the krunker.io account or spend its KR is not ported here and reads as v10 shows it
 // to a guest (actor() = NULL): Follow / Unfollow (profile, follow list, giveaway card), Like,
-// comments, New post, Gift KR, Report, Trade and the clan view's Request to Join are hidden or do
-// nothing; v10_gapi.c does not send their requests for that account either.
+// comments, New post, Gift KR, Report and Trade are hidden or do nothing; v10_gapi.c does not send
+// their requests for that account either. The clan view's Request to Join is v10.0.7's own gapi write
+// there (POST /clans/<id>/apply, as the Turf Wars board's).
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
@@ -2542,7 +2543,9 @@ static void sb_clan(StrBuf *sb, View *v) {
         sb_arg(sb, jstr(d, "clan_link4"));
         sb_append(sb, ")\"><i class=\"material-icons svelte-5j94nj\">forum</i> <span>Discord</span></button> ");
     }
-    const AccountInfo *a = actor(); // Request to Join
+    // Request to Join: account && !account.clan (deob-10.0.7.js:104358); the krunker.io account's too, whose apply is
+    // v10.0.7's own gapi write (POST /clans/<id>/apply)
+    const AccountInfo *a = kio() ? active_account() : actor();
     if (a && !a->clan[0]) {
         sb_appendf(sb, "<button class=\"clan-view-join svelte-5j94nj\" type=\"button\"%s id=\"v10sClanJoin\" onclick=\"v10s('apply')\"><i class=\"material-icons svelte-5j94nj\">%s</i> <span>%s</span></button> ",
                    v->apply_busy || v->applied ? " disabled" : "", v->applied ? "check" : "group_add",
@@ -3243,7 +3246,11 @@ static void apply_done(const int status, const cJSON *data, const cJSON *error, 
     View *v = view_of(tag);
     if (!v) return;
     v->apply_busy = 0;
-    if (ok(status, error)) v->applied = 1;
+    if (kio()) { // v10.0.7 (deob-10.0.7.js:104197-104212): res.error throws error.message || error; else "applied"
+        const char *e = cJSON_IsString(error) ? error->valuestring : cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
+        if (status >= 200 && status < 500 && !error) v->applied = 1;
+        else snprintf(v->apply_error, sizeof(v->apply_error), "%s", e && e[0] ? e : "Failed to send request");
+    } else if (ok(status, error)) v->applied = 1;
     else snprintf(v->apply_error, sizeof(v->apply_error), "%s", v10_gapi_error_text(error, "Failed to apply"));
     render_views();
 }
@@ -3627,10 +3634,11 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     const char *op = arg_str(args, argc, 0);
     View *v = top_view();
     // krunker.io account: the hub's writes are not ported (follow, like, comment, post, gift,
-    // report, trade, clan apply): their buttons are hidden as for a v10 guest, and a stale or
-    // scripted click does nothing (the stop keeps a card click from opening its post)
+    // report, trade): their buttons are hidden as for a v10 guest, and a stale or scripted click
+    // does nothing (the stop keeps a card click from opening its post). The clan view's apply is
+    // v10.0.7's gapi write (POST /clans/<id>/apply, krunker_kio_gapi_write).
     static const char *const kio_writes[] = {"compose", "submit", "giveaway", "vote", "pfollow", "reply", "follow", "frow",
-                                             "trade", "gift", "giftsend", "report", "reportsend", "apply"};
+                                             "trade", "gift", "giftsend", "report", "reportsend"};
     for (size_t i = 0; kio() && i < sizeof(kio_writes) / sizeof(kio_writes[0]); i++)
         if (!strcmp(op, kio_writes[i])) {
             html_ui_stop_propagation();

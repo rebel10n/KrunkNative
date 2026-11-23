@@ -203,18 +203,19 @@ int kn_winhttp_request_bytes(const char *method, const char *url, const char *co
                         timeout_ms, body, length, err, errn);
 }
 
-int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, const int timeout_ms,
+int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, const size_t body_len,
+                      const char *content_type, const int timeout_ms,
                       void (*on_head)(void *user, int status, const char *content_type), int (*on_data)(void *user, const char *data, size_t len),
                       void *user, char *err, const size_t errn) {
     Handles h;
     if (!open_request(&h, method && method[0] ? method : "GET", url, timeout_ms, err, errn)) return 0;
     // the defaults + the caller's lines, as one wide header block
     char all[4096];
-    snprintf(all, sizeof(all), "Accept: text/event-stream, application/json\r\n%s%s", body ? "Content-Type: application/json\r\n" : "",
-             headers ? headers : "");
+    snprintf(all, sizeof(all), "Accept: text/event-stream, application/json\r\n%s%s%s%s", body ? "Content-Type: " : "",
+             body && content_type ? content_type : "", body ? "\r\n" : "", headers ? headers : "");
     wchar_t *wh = widen(all);
-    const DWORD body_len = body ? (DWORD) strlen(body) : 0;
-    const int sent = wh && WinHttpSendRequest(h.request, wh, (DWORD) -1L, (void *) body, body_len, body_len, 0) &&
+    const DWORD len = body ? (DWORD) body_len : 0;
+    const int sent = wh && WinHttpSendRequest(h.request, wh, (DWORD) -1L, (void *) body, len, len, 0) &&
                      WinHttpReceiveResponse(h.request, NULL);
     free(wh);
     if (!sent) {

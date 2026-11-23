@@ -150,6 +150,8 @@ int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
 void turf_ui_scenario(const cJSON *state); // --render-scenario: state.turf
 int  turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
+// the krunker.io account's ownership-transfer rpc answers: ["_0" | "_1", "clan-transfer-...", results...] (krunker_net.h)
+void clan_ui_rpc(const char *label, const cJSON *frame);
 // v10 Market & Trading (v10_market.c): window.openExchange(tab, itemIndex) -> the exchangeModal popup
 void v10_market_open(int tab, int item);
 void v10_market_account_changed(void);        // the active account changed: the open exchange's tab asks again (v10_market.c)
@@ -181,6 +183,7 @@ double account_skin_wear(int skin);
 // does (an entry {ind, cnt: 1, id, m, st: 0}, deob-10.0.4.js:115078-115087, :221926), so it can be equipped at once.
 // krunker.io: the balances a market REST answer carries (data.funds / data.junk), set as the "uf" frame sets them.
 void account_kio_set_balances(int has_funds, double funds, int has_junk, double junk);
+void account_kio_set_clan(const char *tag); // the krunker.io account's acc.clan (player_clan; NULL / "" = none)
 // acc.removeSkin: -1 of skin (a redeemed spin ticket, a spent paint). On krunker.io the account's own skins, as v10.0.7
 // takes a spent paint (an item paint, a clan banner colour): the first entry of the index with cnt ?? 1 > 0, gone at 0.
 void account_remove_skin(int skin_index);

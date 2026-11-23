@@ -58,7 +58,7 @@ size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);
 // krunker.io account's clan window and Turf Wars send there:
 //   PUT /clans/<id>/motd {message}         DELETE /clans/<id>/motd          (setMotd / deleteMotd)
 //   PUT /clans/<id>/loot-config {config}   POST /clans/<id>/banner-color {paint_item_id}
-//   DELETE /clans/<id>/logo                (removeLogo; uploadLogo is multipart FormData: not here)
+//   DELETE /clans/<id>/logo                (removeLogo; uploadLogo is multipart FormData: krunker_kio_gapi_upload)
 //   POST /clans/<id>/recruitment {post}    DELETE /clans/<id>/recruitment   (createOrUpdateRecruitment / removeRecruitment)
 //   POST /clans/<id>/apply                 (applyToClan, no body)
 // <id> is digits; no query. Also the punish popup's Chat Ban (deob-10.0.7.js:27208-27217), exact:
@@ -66,3 +66,6 @@ size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);
 //                                                                             encoded segment, at most 64 characters)
 // Anything else is 0 (not sent).
 int krunker_kio_gapi_write(const char *method, const char *path);
+// 1 when "<method> <path>" is v10.0.7's one multipart gapi write: uploadLogo, POST /clans/<id>/logo with a FormData
+// body holding the picked file as `file` (deob-10.0.7.js:26859, :96104). Anything else is 0.
+int krunker_kio_gapi_upload(const char *method, const char *path);

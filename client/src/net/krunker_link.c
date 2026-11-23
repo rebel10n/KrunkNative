@@ -2920,7 +2920,7 @@ static int send_voice(KrunkerLink *l, const void *payload, const uint16_t length
 static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
     // vr: the voucher redeem's answer; xst ... uprm: the real-money purchase's, abd / gbdr: the bundle store's data
     // (krunker_checkout.h), all for the main thread
-    static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln", "ub", "chlR",
+    static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln", "clnL", "ub", "chlR",
                                         "chgC", "_0", "_1", "dslr", // (chgC: CHALLENGE_COMPLETED, for account_ui.c's challenge capture)
                                         "vr", "xst", "pur", "ppr", "purprm", "purb", "purbp", "purbpl", "pErr", "uprm", "abd", "gbdr",
                                         // the ad-gated answers and FORCE_VIDEO_AD (account_ui.c, kn_ad.h, doc/v10/ads.md)

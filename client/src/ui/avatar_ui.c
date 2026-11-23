@@ -35,6 +35,7 @@ EM_JS(void, kn_avatar_pick_open, (int png_only, double max_bytes), {
     input.onchange = function () {
         var f = input.files && input.files[0];
         if (!f) { Module.knAvatarPick = "!cancel"; return; }
+        Module.knAvatarPickName = String(f.name || "");
         if (f.size > max_bytes) { Module.knAvatarPick = "!size"; return; }
         if (png_only && f.type !== "image/png") { Module.knAvatarPick = "!type"; return; }
         var r = new FileReader();
@@ -44,6 +45,8 @@ EM_JS(void, kn_avatar_pick_open, (int png_only, double max_bytes), {
     };
     input.click();
 });
+
+EM_JS(char *, kn_avatar_pick_name, (void), { return stringToNewUTF8(String(Module.knAvatarPickName || "")); });
 
 EM_JS(char *, kn_avatar_pick_take, (void), {
     var p = Module.knAvatarPick;
@@ -61,6 +64,9 @@ static struct {          // the dialog in progress (one at a time)
     AvatarPickFn fn;
     void *user;
 } g_pick;
+static char g_pick_name[256]; // the picked file's name (avatar_ui_picked_name)
+
+const char *avatar_ui_picked_name(void) { return g_pick_name; }
 
 // ---- base64 (the upload is JSON; no shared encoder in the client)
 
@@ -219,6 +225,11 @@ static int read_picture(const char *path, const size_t max_bytes, unsigned char 
 
 // zenity, then kdialog (the editor's dialogs); the chosen path, or NULL when cancelled / none
 static int native_pick(const int png_only, char *out, const size_t cap) {
+    const char *test_file = getenv("KRUNKNATIVE_PICK_FILE"); // the e2e tests' answer (avatar_ui.h)
+    if (test_file && test_file[0]) {
+        snprintf(out, cap, "%s", test_file);
+        return 1;
+    }
     static const char *commands[] = {
         "zenity --file-selection --title='Choose a picture' --file-filter='Pictures | *.png *.jpg *.jpeg *.webp' 2>/dev/null",
         "kdialog --getopenfilename . 'Pictures (*.png *.jpg *.jpeg *.webp)' 2>/dev/null",
@@ -250,6 +261,8 @@ static void pick_native(void) {
         g_pick.fn = NULL; // cancelled: the callback is not called
         return;
     }
+    const char *slash = strrchr(path, '/');
+    snprintf(g_pick_name, sizeof(g_pick_name), "%s", slash ? slash + 1 : path);
     unsigned char *data = NULL;
     size_t n = 0;
     if (!read_picture(path, g_pick.max_bytes, &data, &n)) {
@@ -271,6 +284,9 @@ static void pick_poll(void *user) {
     (void) user;
     char *p = kn_avatar_pick_take();
     if (p) {
+        char *name = kn_avatar_pick_name();
+        snprintf(g_pick_name, sizeof(g_pick_name), "%s", name ? name : "");
+        free(name);
         if (!strcmp(p, "!size")) picked(NULL, 0, "FileTooLarge");
         else if (!strcmp(p, "!type")) picked(NULL, 0, "UnsupportedType");
         else if (!strcmp(p, "!read")) picked(NULL, 0, "BadImage");
@@ -294,6 +310,7 @@ static void pick_poll(void *user) {
 #endif
 
 void avatar_ui_pick_file(const int png_only, const size_t max_bytes, const AvatarPickFn fn, void *user) {
+    g_pick_name[0] = 0;
     g_pick.png_only = png_only;
     g_pick.max_bytes = max_bytes;
     g_pick.fn = fn;

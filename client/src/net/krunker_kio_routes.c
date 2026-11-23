@@ -160,9 +160,19 @@ size_t krunker_kio_gapi_path(char *out, const size_t n, const char *kn_path) {
     return 0;
 }
 
+// "/clans/<digits><tail>": the tail, else NULL
+static const char *clan_tail(const char *path) {
+    static const char clans[] = "/clans/";
+    if (!path || strncmp(path, clans, sizeof(clans) - 1) != 0) return NULL;
+    const char *id = path + sizeof(clans) - 1, *tail = id;
+    while (*tail >= '0' && *tail <= '9') tail++;
+    return tail == id || tail - id > 12 ? NULL : tail;
+}
+
 // v10.0.7's clan writes on gapi (the clans client, deob-10.0.7.js:26838-26924), each "<method> /clans/<id>/<tail>":
 // setMotd / deleteMotd, updateLootConfig, setBannerColor, removeLogo, createOrUpdateRecruitment / removeRecruitment,
-// applyToClan. uploadLogo (POST /clans/<id>/logo) is not here: v10 sends it as multipart FormData.
+// applyToClan. uploadLogo (POST /clans/<id>/logo) is not here: v10 sends it as multipart FormData
+// (krunker_kio_gapi_upload).
 int krunker_kio_gapi_write(const char *method, const char *path) {
     static const struct {
         const char *method, *tail;
@@ -180,12 +190,15 @@ int krunker_kio_gapi_write(const char *method, const char *path) {
         const size_t len = strlen(name);
         return len > 0 && len <= 64 && !strpbrk(name, "/?#");
     }
-    static const char clans[] = "/clans/";
-    if (strncmp(path, clans, sizeof(clans) - 1) != 0) return 0;
-    const char *id = path + sizeof(clans) - 1, *tail = id;
-    while (*tail >= '0' && *tail <= '9') tail++;
-    if (tail == id || tail - id > 12) return 0;
+    const char *tail = clan_tail(path);
+    if (!tail) return 0;
     for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
         if (!strcmp(method, writes[i].method) && !strcmp(tail, writes[i].tail)) return 1;
     return 0;
+}
+
+// uploadLogo: POST /clans/<id>/logo with the FormData body (deob-10.0.7.js:26859, :96104)
+int krunker_kio_gapi_upload(const char *method, const char *path) {
+    const char *tail = clan_tail(path);
+    return method && tail && !strcmp(method, "POST") && !strcmp(tail, "/logo");
 }

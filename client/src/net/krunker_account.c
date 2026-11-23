@@ -99,7 +99,9 @@ typedef struct {
     unsigned id;
     char method[8];
     char url[1024];
-    char *body;
+    char *body;          // body_len bytes (+ a NUL), sent as ctype ("" = JSON text)
+    size_t body_len;
+    char ctype[128];
     KrunkerApiFn fn;
     void *user;
 } ApiReq;
@@ -350,9 +352,10 @@ static void idempotency_key(char *out, const size_t n) {
     out[i] = 0;
 }
 
-// headers: extra lines (never logged). body: JSON (POST). 1 = started. The log shows the URL up to
-// a code step's challenge id (the id is not logged either).
-static int req_start(Req *r, const ReqKind kind, const char *method, const char *url, const char *bearer, const char *body) {
+// headers: extra lines (never logged). body: JSON (POST), or body_len bytes sent as ctype when ctype is set.
+// 1 = started. The log shows the URL up to a code step's challenge id (the id is not logged either).
+static int req_start_body(Req *r, const ReqKind kind, const char *method, const char *url, const char *bearer, const char *body,
+                          const size_t body_len, const char *ctype) {
     req_cancel(r);
     char headers[TOKEN_MAX + 160];
     size_t o = 0;
@@ -366,7 +369,8 @@ static int req_start(Req *r, const ReqKind kind, const char *method, const char 
     static const HttpStreamCallbacks cb = {on_open, on_data, on_done};
     r->kind = kind;
     r->started = now_s();
-    r->stream = http_stream_start(method, url, headers, body, &cb, r);
+    r->stream = ctype && ctype[0] ? http_stream_start_body(method, url, headers, body, body_len, ctype, &cb, r)
+                                  : http_stream_start(method, url, headers, body, &cb, r);
     wipe(headers, sizeof(headers));
     const char *cut = kind == REQ_CODE ? strrchr(url, '/') : NULL;
     KN_LOG_DEBUG1("[kio-account] %s %.*s%s\n", method, cut ? (int) (cut - url + 1) : (int) strlen(url), url, cut ? "(challenge)" : "");
@@ -375,6 +379,10 @@ static int req_start(Req *r, const ReqKind kind, const char *method, const char 
         return 0;
     }
     return 1;
+}
+
+static int req_start(Req *r, const ReqKind kind, const char *method, const char *url, const char *bearer, const char *body) {
+    return req_start_body(r, kind, method, url, bearer, body, body ? strlen(body) : 0, NULL);
 }
 
 static const char *json_str(const cJSON *o, const char *key) { return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, key)); }
@@ -781,7 +789,7 @@ static void api_with_token(void *user, const char *token) {
     for (int i = 0; i < API_SLOTS && !q; i++)
         if (g_api[i].used && g_api[i].id == id) q = &g_api[i];
     if (!q) return; // cancelled meanwhile (signed out)
-    if (!req_start(&q->r, REQ_API, q->method, q->url, token, q->body)) {
+    if (!req_start_body(&q->r, REQ_API, q->method, q->url, token, q->body, q->body_len, q->ctype)) {
         const KrunkerApiFn fn = q->fn;
         void *u = q->user;
         free(q->body);
@@ -793,6 +801,11 @@ static void api_with_token(void *user, const char *token) {
 }
 
 int krunker_account_api(const char *method, const KrunkerService svc, const char *path, const char *body, const KrunkerApiFn fn, void *user) {
+    return krunker_account_api_body(method, svc, path, body, body ? strlen(body) : 0, NULL, fn, user);
+}
+
+int krunker_account_api_body(const char *method, const KrunkerService svc, const char *path, const void *body, const size_t body_len,
+                             const char *content_type, const KrunkerApiFn fn, void *user) {
     load();
     ApiReq *q = NULL;
     for (int i = 0; i < API_SLOTS && !q; i++)
@@ -803,7 +816,16 @@ int krunker_account_api(const char *method, const KrunkerService svc, const char
     q->id = ++g_api_ids;
     snprintf(q->method, sizeof(q->method), "%s", method);
     krunker_service_url(svc, path, q->url, sizeof(q->url));
-    q->body = body ? strdup(body) : NULL;
+    if (body && (q->body = malloc(body_len + 1))) {
+        memcpy(q->body, body, body_len);
+        q->body[body_len] = 0;
+        q->body_len = body_len;
+    }
+    if (body && !q->body) {
+        q->used = 0;
+        return 0;
+    }
+    snprintf(q->ctype, sizeof(q->ctype), "%s", content_type ? content_type : "");
     q->fn = fn;
     q->user = user;
     // the API client's interceptor: Authorization: Bearer <FRVR's fresh access token>, refreshed
