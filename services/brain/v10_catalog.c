@@ -7,7 +7,8 @@
  *   GET    /skins?page&page_size&type&weapon&search, GET|PUT|DELETE /skins/:id, POST /skins,
  *   POST   /skins/:id/duplicate                the Skin Manager's custom skins of the caller (skins.c P_CUSTOM_SKIN,
  *                                              0394_custom_skins; the same proc as the gapi tunnel's skins_gapi)
- *   POST   /skins/:id/upload                   REFUSAL: Box Office has no asset store for skin files
+ *   POST   /skins/:id/upload                   skins.uploadAsset's FormData {file, asset_type, category} -> {asset_path}
+ *                                              (asset_upload.c asset_upload_skin_form; a file up to brain.max_body_bytes)
  *   GET    /shop/wild-offer                    the day's offer (wild_offer.c P_WILD_OFFER); {offer: null}
  *                                              with no session
  *   POST   /shop/wild-offer/purchase {offer_id}  P_WILD_OFFER_BUY: KR from the account's funds, the skin
@@ -49,13 +50,13 @@
 #include "acct_internal.h"
 #include "db_procs.h"
 #include "shared.h" // PREFAB_LEADERBOARD (a map object's "i")
+#include "asset_upload.h" // the Skin Manager's files
 #include "skins.h"  // P_CUSTOM_SKIN: the Skin Manager's custom skins
 #include "v10_api.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
 #include "knsvc/loop.h"
 
-#define WHY_SKIN_ASSET "Box Office has no asset store for skin files"
 #define MSG_NO_MAP "Map not found"
 #define MSG_LOGIN "You must be logged in."
 #define BOARD_PAGE 20
@@ -175,6 +176,8 @@ static void on_skin_proc(kn_db_result *res, void *ud) {
     kn_http_req *req = k->req;
     if (kn_db_ok(res)) {
         cJSON *v = acct_db_json(res);
+        if (k->kind == SK_DELETE || k->kind == SK_DUPLICATE)
+            skins_after(k->kind == SK_DELETE ? "delete" : "duplicate", strtoll(k->id, NULL, 10), v);
         v10_reply_data(req, 200, v ? v : cJSON_CreateObject());
     } else {
         const char *code = kn_db_user_message(res) ? kn_db_user_message(res) : acct_db_error(res, "skins"), *message = NULL;
@@ -244,8 +247,24 @@ static void h_skin_update(kn_http_req *req, void *ud) { (void) ud; skin_route(re
 static void h_skin_delete(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_DELETE); }
 static void h_skin_duplicate(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_DUPLICATE); }
 
-/* skins.uploadAsset (models, textures, sounds, thumbnails): refused, a text error (see above) */
-static void h_refuse(kn_http_req *req, void *ud) { v10_reply_text_error(req, 403, ud); }
+/* skins.uploadAsset (models, textures, sounds, thumbnails): the FormData itself (asset_upload.c) */
+static void skin_upload_account(kn_http_req *req, int64_t id, void *ud) {
+    if (id <= 0) {
+        v10_reply_text_error(req, 401, MSG_LOGIN);
+        return;
+    }
+    asset_upload_skin_form(req, id, "", (int64_t) (intptr_t) ud);
+}
+
+static void h_skin_upload(kn_http_req *req, void *ud) {
+    (void) ud;
+    const int64_t id = path_id(req, "id");
+    if (id <= 0) {
+        v10_reply_text_error(req, 404, "Skin not found");
+        return;
+    }
+    with_account(req, skin_upload_account, (void *) (intptr_t) id);
+}
 
 /* ---- the wild offer (wild_offer.c's procs; the account and the clock are the same as the social frames') */
 
@@ -1277,7 +1296,7 @@ int v10_catalog_init(Brain *b) {
     kn_http_route(b->http, "POST", "/skins", h_skin_create, NULL);
     kn_http_route(b->http, "PUT", "/skins/:id", h_skin_update, NULL);
     kn_http_route(b->http, "DELETE", "/skins/:id", h_skin_delete, NULL);
-    kn_http_route(b->http, "POST", "/skins/:id/upload", h_refuse, (void *) WHY_SKIN_ASSET);
+    kn_http_route(b->http, "POST", "/skins/:id/upload", h_skin_upload, NULL);
     kn_http_route(b->http, "POST", "/skins/:id/duplicate", h_skin_duplicate, NULL);
     kn_http_route(b->http, "GET", "/shop/wild-offer", h_wild_offer, NULL);
     kn_http_route(b->http, "POST", "/shop/wild-offer/purchase", h_wild_purchase, NULL);

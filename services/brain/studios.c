@@ -19,10 +19,10 @@
  *   POST   /studios/<id>/currencies/<cid>/publish | /unpublish
  *   POST   /studios/<id>/currencies/<cid>/edit {name, symbol, decimals}  editStudioCurrency
  *   GET    /studios/<id>/analytics                  getStudioAnalytics
- *   GET    /studios/<id>/skins                      getStudioSkins        []
- *   POST   /studios/<id>/skins/import {custom_skin_id}         refused: no studio skin store yet (skins.c has the
- *                                                               Skin Manager's custom skins)
- *   POST   /studios/<id>/skins/<sid>/publish | /unpublish      refused: no such skin
+ *   GET    /studios/<id>/skins                      getStudioSkins        [{skin_id, name, active, has_thumbnail, csrc, ...}]
+ *   POST   /studios/<id>/skins/import {custom_skin_id}         importStudioSkin   a copy of one of the owner's Skin
+ *                                                               Manager skins (skins.c), unpublished
+ *   POST   /studios/<id>/skins/<sid>/publish | /unpublish      publish / unpublishStudioSkin
  *   GET    /studios/<id>/monetization               getStudioMonetization the status
  *   POST   /studios/<id>/monetization {description, map_ids}  applyStudioMonetization
  *   DELETE /studios/<id>/monetization               cancelStudioMonetization
@@ -73,6 +73,8 @@ static const struct {
     {"STUDIO_CURRENCY_TAKEN", 409, "This studio already has a currency with that symbol."},
     {"STUDIO_CURRENCY_NOT_FOUND", 404, "Currency not found."},
     {"STUDIO_SKIN_NOT_FOUND", 404, "Skin not found."},
+    {"STUDIO_SKIN_TAKEN", 409, "That skin is already assigned to this studio."},
+    {"STUDIO_SKIN_LIMIT", 400, "Up to 20 skins per studio."},
     {"MONETIZATION_INVALID", 400, "Describe what you want to monetize in 10 to 500 characters."},
     {"MONETIZATION_MAPS_INVALID", 400, "Example games must be games of this studio (up to 5)."},
     {"MONETIZATION_NOT_ELIGIBLE", 400, "Meet every requirement above to apply."},
@@ -207,10 +209,11 @@ int studios_gapi(SocialSession *s, const GapiReq *r) {
         call(s, r, "analytics", r->seg[1], NULL, NULL);
     } else if (gapi_is(r, "GET", "/studios/:id/skins")) {
         call(s, r, "skins", r->seg[1], NULL, NULL);
-    } else if (gapi_is(r, "POST", "/studios/:id/skins/import") || gapi_is(r, "POST", "/studios/:id/skins/:sid/publish") ||
-               gapi_is(r, "POST", "/studios/:id/skins/:sid/unpublish")) {
-        /* the Skin Manager's custom skins (skins.c) cannot be imported into a studio yet: no studio skin exists */
-        gapi_error(s, r->rid, 404, "STUDIO_SKIN_NOT_FOUND", "Skin not found.");
+    } else if (gapi_is(r, "POST", "/studios/:id/skins/import")) {
+        snprintf(num, sizeof num, "%lld", (long long) kn_json_int(r->body, "custom_skin_id", 0));
+        call(s, r, "skin_import", r->seg[1], num, NULL);
+    } else if (gapi_is(r, "POST", "/studios/:id/skins/:sid/publish") || gapi_is(r, "POST", "/studios/:id/skins/:sid/unpublish")) {
+        call(s, r, "skin_active", r->seg[1], is_id(r->seg[3]) ? r->seg[3] : "0", strcmp(r->seg[4], "publish") ? "0" : "1");
     } else if (gapi_is(r, "GET", "/studios/:id/monetization")) {
         call(s, r, "monetization", r->seg[1], NULL, NULL);
     } else if (gapi_is(r, "POST", "/studios/:id/monetization")) {

@@ -335,6 +335,20 @@ int asset_fetch_request(const char *path, const int enqueue) {
     return answer;
 }
 
+void asset_fetch_forget(const char *path) {
+    if (!F.running || !path || strncmp(path, F.dir, F.dir_len) != 0) return;
+    const char *rel = path + F.dir_len;
+    while (rel[0] == '.' && rel[1] == '/') rel += 2;
+    const uint32_t hash = fnv1a(rel);
+    pthread_mutex_lock(&F.lock);
+    Entry *e = entry_find(rel, hash);
+    if (e && (e->state == ENTRY_DONE || e->state == ENTRY_DEAD)) {
+        free(e->rel);
+        *e = F.entries[--F.entry_count]; // the table is unordered: the last entry takes the place
+    }
+    pthread_mutex_unlock(&F.lock);
+}
+
 int asset_fetch_poll(void (*fn)(void *user, const char *path), void *user) {
     if (!F.running) return 0;
     pthread_mutex_lock(&F.lock);

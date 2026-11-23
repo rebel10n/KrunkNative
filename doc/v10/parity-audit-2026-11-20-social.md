@@ -69,7 +69,7 @@ and MariaDB 11.8.
 | Username reserve / swap / renew (`/account/usernames/*`, deob-10.0.7.js:26405-26430, 115380-115540) | Usernames are paid for with real money (the `usernamePurchased` / `usernameRenewed` checkout events, 115430-115445), so the same decision applies. |
 | Krunker Cup wristband claim (`WHY_WRISTBAND`) | A physical event item. |
 | Kid / age-consent and the migrate / username / password challenge states (`/auth/kid/*`, `/auth/*-challenge`) | Krunker's backend issues these; Box Office's sign-in never enters those states. A real age-consent flow would be a legal and product decision. |
-| Studio skins (`/studios/:id/skins*`) | Open: the Skin Manager's skins exist since 2026-11-23 (below), but a studio does not take them in yet (studios.c refuses STUDIO_SKIN_NOT_FOUND, db_studios.c lists none, the Studios window's Your Skins list is empty). |
+| Studio skins (`/studios/:id/skins*`) | Fixed (2026-11-23): import a Skin Manager skin with a thumbnail (the Studios window's Your Skins and Assign Skin, v10_studios.c), list, publish / unpublish (db_studios.c, studio_skins of migration 0395; studios_test.py). |
 | Item instances (`/items/:id/instances`, Mints / serial / wear) | No item on Box Office is minted per copy; the route answers `[]`. |
 
 ## Status 2026-11-20 (end of the session)

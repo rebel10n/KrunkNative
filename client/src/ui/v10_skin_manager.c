@@ -14,21 +14,42 @@
 // -wfs5t6 and -3rvofx); Svelte's __click / __input / __change are inline knSkins(op, ...) handlers here, and the
 // elements carry knSm* ids (KrunkNative-only, for the client e2e). The strings are v10's (the component has no i18n).
 //
-// Not ported, each because Box Office lacks what it needs: the 3D preview iframe (the showcase page: the preview
-// pane, Capture Thumbnail, the wear / paint / attach / charm editors), the asset uploads (models, textures, sounds,
-// thumbnails: POST /skins/:id/upload is refused, skins.c), the Appearance tab's upload, dye colour and shader
-// sections, and the Test button's skin swap on the sandbox player (it closes the window and enters the sandbox game,
-// as testSkinSandbox :204469 does before it calls skinManager.setSkin).
+// The editor's preview pane (:124686-124704, :127463-127540): the viewer page in an iframe (#knSmPreview) whose
+// query is the edited skin's game skin as JSON (iíïíîïì, 300 ms after a change), drawn natively by viewer_embed.h; a
+// player card / emoji shows its texture or thumbnail instead. Capture Thumbnail (:124566-124570, :124764-124790) takes
+// that showcase as a 256 px PNG (viewer_embed_capture), uploads it as the thumbnail, sets itemConfig.customThumbnail and
+// saves the skin. The Appearance tab's Model, Textures (diffuse / emissive, Transparency, Pulse), Sounds (shoot / swap
+// / inspect, Loop while inspecting), Dye Colors and Shader Studio sections (:125300-127400) upload through
+// uploadAsset (:124434-124459): a file picked in the platform dialog (ed_pick_file, the hidden <input type=file>'s
+// place) is checked as v10's drop zone checks it (svelte-145grbc: type, size), then goes to the brain as the gapi
+// key + chunks of Box Office's asset uploads (POST /skins/:id/upload, then uploadUrl, services/brain/asset_upload.c);
+// once stored it is also the local copy at once (asset_fetch_client_put), as a browser would load it again. Test
+// (testSkinSandbox :204469-204590) closes the window, enters the sandbox game and, 50 ms on, defines the skin
+// (skinManager.setSkin: viewer_skin_define) and puts it on the local player's slot of its type (a weapon skin: the
+// class whose primary it is), then rebuilds the player's meshes.
+//
+// Not ported: the wear map, paint target / paint colour, Kounter, attachment and charm editors of the Appearance tab
+// and the preview's wear / paint controls (no Box Office data behind them yet), Shader Studio's node canvas (the graph
+// is the skin's own, or v10's default surface graph; its params, parts, Apply to all parts, Refresh / Clear Preview
+// and Remove Shader are here) and the graph's look: itemConfig.customShader is saved as v10 saves it, but the
+// preview and the game draw the skin without it (the client compiles no node graph; skin_fx has v10's fixed shaders), and an OGG sound (the client has no Vorbis decoder: the brain refuses it). A krunker.io
+// account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its saves do.
 #include <v10_skin_manager.h>
 #include <v10_social.h>
 #include <v10_ui.h>
-#include <backend.h>
+#include <backend.h> // the upload chunks (backend_http_post_bytes)
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <ruleset.h>
 #include <ui_logic.h>
 #include <weapons.h>
 #include "../viewer/viewer_store.h" // the catalogue's base skins and the rarity colours
+#include <asset_fetch.h>   // asset_fetch_client_put: an uploaded file is the local copy at once
+#include <client.h>
+#include <png_write.h>     // the captured thumbnail
+#include <user_asset_path.h> // user_asset_rel_is_kn: a Box Office skin's files are the brain's
+#include <viewer_embed.h>  // the preview iframe's showcase and its capture
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,13 +57,29 @@
 #include <time.h>
 
 #define MSG 320
-#define PAGE_SIZE 10          // the table's pageSize default (:125010)
+#define SM_PAGE_SIZE 10       // the table's pageSize default (:125010)
 #define CACHE_MS 30000.0      // the provider's cache lifetime
 #define SEARCH_DEBOUNCE_MS 300.0
+#define PREVIEW_DEBOUNCE_MS 300.0 // the preview JSON's setTimeout (:124687)
+#define CAPTURE_SIZE 256          // capturePreview's size (:124567)
+#define TEST_DELAY_MS 50.0        // testSkinSandbox's setTimeout (:204473)
+#define TEST_WAIT_MS 10000.0      // KrunkNative: how long Test waits for the local player / its new class
+#define CHUNK (512u * 1024u)      // kn_brain's request bodies are 1 MiB at most (mods_ui.c's uploads)
+#define CHUNK_TIMEOUT_MS 60000
+#define SLOT_ERRORS 12
+
+// the platform file dialog (client/src/editor/editor_tools.c; editor_internal.h pulls in GL)
+typedef void (*EdFileFn)(void *user, const char *path);
+void ed_pick_file(const char *accept, EdFileFn fn, void *user);
 
 enum { TAB_GENERAL, TAB_APPEARANCE, TAB_ADVANCED };
-enum { R_LIST, R_SAVE, R_DELETE, R_DUPLICATE };
+enum { R_LIST, R_SAVE, R_DELETE, R_DUPLICATE, R_THUMB };
 enum { T_PLAYER_CARD = 16, T_EMOJI = 17, T_PAINT = 18 };
+
+typedef struct {
+    char slot[24];
+    char upload_error[200], drop_error[200], file_name[128];
+} SlotState;
 
 static struct {
     int depth;               // the window's view-stack depth, 0 = closed
@@ -65,7 +102,43 @@ static struct {
     // the delete prompt
     int confirm_depth;
     int64_t confirm_id;
+    // the preview pane (iÍìïïíî): the game skin's JSON for the iframe's query, set 300 ms after a change
+    char *preview;
+    double preview_due;
+    unsigned asset_rev; // the skin files' ?v= (userAssetsUrl's Date.now(), :24298-24300): bumped by each upload
+    int capturing, captured; // iÍiíiìî, iÍìîiiï
+    // the Appearance tab: textureSettings.hasGlow, the model picked this session (iÏíïííi: its extension), the
+    // sections' upload errors and the drop zones' own state (a picked file's name, a refused file's message)
+    int has_glow;
+    char model_ext[8];
+    SlotState slots[SLOT_ERRORS];
+    // the upload running (one at a time): the gapi key, then the chunks to uploadUrl, then done
+    struct {
+        int active;
+        unsigned gen;
+        char slot[24], type[16], category[16], file_name[128];
+        int64_t skin;
+        unsigned char *data;
+        size_t len, sent;
+        int done_sent;
+        char file_id[96], base[1200];
+    } up;
+    // Shader Studio (iÍíìiìî open, iIïïiìì legacy, iIiiíîì graph, iÎiiiîí applyToAll, iIíiîiî parts), per skin
+    struct {
+        int open, legacy, apply_all, preview;
+        cJSON *graph, *parts;
+        int64_t skin;
+        int loaded;
+    } sh;
 } SM;
+
+// Test's pending swap (outlives the window, which Test closes): the skin, its game skin, when it is due
+static struct {
+    int64_t id;
+    cJSON *skin;
+    double due, until;
+    int class_asked;
+} g_test;
 
 typedef struct {
     int kind;
@@ -119,6 +192,57 @@ static void set_number(cJSON *o, const char *k, const double v) {
         cJSON_AddNumberToObject(o, k, v);
     }
 }
+
+// o[k] = v (v owned; NULL deletes)
+static void put(cJSON *o, const char *k, cJSON *v) {
+    cJSON_DeleteItemFromObjectCaseSensitive(o, k);
+    if (v) cJSON_AddItemToObject(o, k, v);
+}
+
+static int cfg_true(const cJSON *cfg, const char *k) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(cfg, k);
+    return v && !cJSON_IsFalse(v) && !cJSON_IsNull(v) && !(cJSON_IsNumber(v) && v->valuedouble == 0) &&
+           !(cJSON_IsString(v) && !v->valuestring[0]);
+}
+
+void v10_skin_file_url(const char *folder, const char *file, const unsigned rev, char *out, const size_t n) {
+    char rel[160];
+    snprintf(rel, sizeof(rel), "skins/%s/%s", folder ? folder : "", file ? file : "");
+    if (user_asset_rel_is_kn(rel)) snprintf(out, n, "%s/user-assets/%s?v=%u", backend_url(), rel, rev);
+    else snprintf(out, n, "https://user-assets.krunker.io/%s?v=%u", rel, rev);
+}
+
+static void skin_url(const char *file, char *out, const size_t n) {
+    char folder[32];
+    snprintf(folder, sizeof(folder), "%lld", (long long) editing_id());
+    v10_skin_file_url(folder, file, SM.asset_rev, out, n);
+}
+
+// the Appearance tab's per-slot state ("model", "texture:diffuse", "sound:inspect", ...)
+static SlotState *slot_state(const char *slot, const int make) {
+    for (int i = 0; i < SLOT_ERRORS; i++)
+        if (SM.slots[i].slot[0] && !strcmp(SM.slots[i].slot, slot)) return &SM.slots[i];
+    if (!make) return NULL;
+    for (int i = 0; i < SLOT_ERRORS; i++)
+        if (!SM.slots[i].slot[0]) {
+            memset(&SM.slots[i], 0, sizeof(SM.slots[i]));
+            snprintf(SM.slots[i].slot, sizeof(SM.slots[i].slot), "%s", slot);
+            return &SM.slots[i];
+        }
+    return NULL;
+}
+
+static const char *upload_error(const char *slot) {
+    const SlotState *st = slot_state(slot, 0);
+    return st ? st->upload_error : "";
+}
+
+static void set_upload_error(const char *slot, const char *msg) {
+    SlotState *st = slot_state(slot, 1);
+    if (st) snprintf(st->upload_error, sizeof(st->upload_error), "%s", msg ? msg : "");
+}
+
+static int uploading(const char *slot) { return SM.up.active && !strcmp(SM.up.slot, slot); }
 
 // ------------------------------------------------------------------ the item tables
 
@@ -226,18 +350,98 @@ static char *stringify(const cJSON *v) {
     return sb_finish(&sb);
 }
 
-// the Advanced tab's Automatic Attributes: the base skin's AUTO_KEYS (skins.json), as the box prints them
-static char *auto_attributes(void) {
-    cJSON *attrs = cJSON_CreateObject();
-    const int base = base_skin((int) jnum(SM.editing, "type"), (int) jnum(SM.editing, "weapon"), editing_config(), attrs);
+// iììïïíî (:120558-120581): a custom skin's attributes from its base skin, AUTO_KEYS of skins.json
+static void add_auto(cJSON *attrs, const cJSON *skin) {
+    const cJSON *cfg = cJSON_GetObjectItemCaseSensitive(skin, "itemConfig");
+    const int base = base_skin((int) jnum(skin, "type"), (int) jnum(skin, "weapon"), cfg, attrs);
     const cJSON *json = base >= 0 ? ui_loadout_skin_json(base) : NULL;
     for (size_t i = 0; json && i < sizeof(AUTO_KEYS) / sizeof(AUTO_KEYS[0]); i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(json, AUTO_KEYS[i]);
-        if (v) cJSON_AddItemToObject(attrs, AUTO_KEYS[i], cJSON_Duplicate(v, 1));
+        if (v) put(attrs, AUTO_KEYS[i], cJSON_Duplicate(v, 1));
     }
+}
+
+// the Advanced tab's Automatic Attributes: the base skin's AUTO_KEYS (skins.json), as the box prints them
+static char *auto_attributes(void) {
+    cJSON *attrs = cJSON_CreateObject();
+    add_auto(attrs, SM.editing);
     char *text = stringify(attrs);
     cJSON_Delete(attrs);
     return text;
+}
+
+// iíïíîïì (:120593-120606): the game's skin of a custom skin: the base skin's attributes, {_id: skinId, name, type,
+// weapon, rarity}, the itemConfig over them, then a template's (iîííiíì :120583-120591). rarity_meta (the rarity's
+// row) is left out: the game reads the rarity itself here, and the preview drops it as v10's does.
+static cJSON *game_skin(const cJSON *skin) {
+    cJSON *g = cJSON_CreateObject();
+    add_auto(g, skin);
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(skin, "skinId");
+    put(g, "_id", cJSON_IsNumber(id) ? cJSON_CreateNumber(id->valuedouble) : cJSON_CreateNull());
+    put(g, "name", cJSON_CreateString(jstr(skin, "name")));
+    put(g, "type", cJSON_CreateNumber(jnum(skin, "type")));
+    put(g, "weapon", cJSON_CreateNumber(jnum(skin, "weapon")));
+    put(g, "rarity", cJSON_CreateNumber(jnum(skin, "rarity")));
+    const cJSON *cfg = cJSON_GetObjectItemCaseSensitive(skin, "itemConfig"), *c;
+    cJSON_ArrayForEach(c, cfg) if (c->string) put(g, c->string, cJSON_Duplicate(c, 1));
+    const cJSON *tpl = cJSON_GetObjectItemCaseSensitive(g, "template");
+    const cJSON *row = cJSON_IsNumber(tpl) && tpl->valuedouble >= 1 ? ui_loadout_skin_json((int) tpl->valuedouble) : NULL;
+    for (size_t i = 0; row && i < sizeof(AUTO_KEYS) / sizeof(AUTO_KEYS[0]); i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(row, AUTO_KEYS[i]);
+        if (v) put(g, AUTO_KEYS[i], cJSON_Duplicate(v, 1));
+    }
+    return g;
+}
+
+// testSkinSandbox's customShaderInfo of an itemConfig.customShader graph (:204476-204508): "*" when it applies to
+// the whole model (or names no part), else one entry per part; each {shaderDef, shaderArgs: {params}}
+static cJSON *shader_info(const cJSON *shader) {
+    const cJSON *graph = cJSON_GetObjectItemCaseSensitive(shader, "graph");
+    if (strcmp(jstr(shader, "type"), "graph") || !cJSON_IsObject(graph)) return NULL;
+    cJSON *info = cJSON_CreateObject();
+    const cJSON *parts = cJSON_GetObjectItemCaseSensitive(shader, "parts");
+    const int all = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(shader, "applyToAll")) || !cJSON_GetArraySize(parts);
+    const cJSON *part = all ? NULL : parts->child;
+    do {
+        cJSON *e = cJSON_CreateObject();
+        cJSON *def = cJSON_AddObjectToObject(e, "shaderDef");
+        cJSON_AddStringToObject(def, "type", "graph");
+        cJSON_AddItemToObject(def, "graph", cJSON_Duplicate(graph, 1));
+        const cJSON *params = part ? cJSON_GetObjectItemCaseSensitive(part, "params") : NULL;
+        if (cJSON_GetArraySize(params)) cJSON_AddItemToObject(cJSON_AddObjectToObject(e, "shaderArgs"), "params", cJSON_Duplicate(params, 1));
+        cJSON_AddItemToObject(info, part ? part->string : "*", e);
+        part = part ? part->next : NULL;
+    } while (part);
+    return info;
+}
+
+// encodeURIComponent
+static void uri_component(StrBuf *sb, const char *s) {
+    for (const unsigned char *p = (const unsigned char *) s; *p; p++) {
+        if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || strchr("-_.!~*'()", *p))
+            sb_appendf(sb, "%c", *p);
+        else sb_appendf(sb, "%%%02X", *p);
+    }
+}
+
+// the preview's showcase query value (:124688-124701): the game skin without name, rarity, rarity_meta,
+// customShader, attach and the charm offsets (iïiîïîï :120757), as encodeURIComponent(JSON.stringify(...)); with
+// Shader Studio's Refresh Preview, the shader as customShaderInfo (the iframe's shaderStudioUpdate, :124651-124656)
+static char *preview_query(void) {
+    cJSON *g = game_skin(SM.editing);
+    static const char *const strip[] = {"name", "rarity", "rarity_meta", "customShader", "attach", "charmMXOff", "charmMYOff", "charmMZOff",
+                                        "charmMScl"};
+    for (size_t i = 0; i < sizeof(strip) / sizeof(strip[0]); i++) cJSON_DeleteItemFromObjectCaseSensitive(g, strip[i]);
+    if (SM.sh.preview) {
+        cJSON *info = shader_info(cJSON_GetObjectItemCaseSensitive(editing_config(), "customShader"));
+        if (info) put(g, "customShaderInfo", info);
+    }
+    char *json = cJSON_PrintUnformatted(g);
+    cJSON_Delete(g);
+    StrBuf sb = {0};
+    uri_component(&sb, json ? json : "{}");
+    free(json);
+    return sb_finish(&sb);
 }
 
 // ------------------------------------------------------------------ requests
@@ -268,7 +472,7 @@ static void load_page(void) {
     SM.fetched_at = 0;
     SM.loading = 1;
     char path[400];
-    int n = snprintf(path, sizeof(path), "/skins?page=%d&page_size=%d", SM.page, PAGE_SIZE);
+    int n = snprintf(path, sizeof(path), "/skins?page=%d&page_size=%d", SM.page, SM_PAGE_SIZE);
     if (SM.filter[0] && n > 0 && (size_t) n < sizeof(path)) {
         char enc[320];
         backend_path_segment(enc, sizeof(enc), SM.filter);
@@ -284,7 +488,7 @@ static void invalidate(void) {
     load_page();
 }
 
-static int num_pages(void) { return SM.total > 0 ? (SM.total + PAGE_SIZE - 1) / PAGE_SIZE : 0; }
+static int num_pages(void) { return SM.total > 0 ? (SM.total + SM_PAGE_SIZE - 1) / SM_PAGE_SIZE : 0; }
 
 static void fail_text(const char *prefix, const int status, const cJSON *error) {
     snprintf(SM.error, sizeof(SM.error), "%s%s", prefix, v10_gapi_error_text(error, status ? "Request failed" : "Failed to fetch"));
@@ -330,6 +534,14 @@ static void on_answer(void *user, const int status, const cJSON *data, const cJS
         if (ok) invalidate();
         else fail_text("Failed to duplicate skin: ", status, error);
         break;
+    case R_THUMB: // Capture's updateSkin, then invalidateCache and Captured
+        SM.capturing = 0;
+        if (ok) {
+            invalidate();
+            SM.captured = 1;
+            fprintf(stderr, "[skins] captured %lld\n", (long long) editing_id());
+        } else fail_text("Failed to upload thumbnail: ", status, error);
+        break;
     default: break;
     }
     free(r);
@@ -371,9 +583,9 @@ static void thumbnail(StrBuf *sb, const cJSON *skin) {
     const cJSON *cfg = cJSON_GetObjectItemCaseSensitive(skin, "itemConfig");
     const cJSON *custom = cJSON_GetObjectItemCaseSensitive(cfg, "customThumbnail");
     if (custom && !cJSON_IsFalse(custom) && !cJSON_IsNull(custom)) {
-        char path[96], url[512];
-        snprintf(path, sizeof(path), "skins/%lld/thumbnail.png", (long long) jnum(skin, "skinId"));
-        html_dom_asset_url(path, url, sizeof(url));
+        char folder[32], url[600];
+        snprintf(folder, sizeof(folder), "%lld", (long long) jnum(skin, "skinId"));
+        v10_skin_file_url(folder, "thumbnail.png", SM.asset_rev, url, sizeof(url));
         sb_appendf(sb, "<img class=\"item-thumbnail svelte-103lu6x\" width=\"56\" height=\"56\" src=\"%s\" alt=\"", url);
         sb_text(sb, jstr(skin, "name"));
         sb_append(sb, "\">");
@@ -464,7 +676,462 @@ static void general_markup(StrBuf *sb) {
     sb_append(sb, "</div></div></div></div>");
 }
 
-// the Appearance tab's "Same attributes as" (every section but this one needs an upload or the 3D preview)
+
+// ------------------------------------------------------------------ the Appearance tab's sections
+
+typedef struct {
+    const char *type, *category; // uploadAsset's {type, category}
+    const char *accept;          // the drop zone's acceptedTypes, joined
+    long long max;               // its maxSize
+} DropKind;
+
+static const DropKind DROP_MODEL = {"model", "", ".obj,.gltf,.glb", 0x3200000};       // :125747-125749
+static const DropKind DROP_TEXTURE = {"texture", "", ".png,.jpg,.jpeg", 0xa00000};    // :125944-125946
+static const DropKind DROP_SOUND = {"sound", "", ".mp3,.wav,.ogg", 0x200000};         // :127022-127024
+
+// "Max: 10.0MB" / "500KB" (:11999)
+static void size_text(char *out, const size_t n, const long long max) {
+    if (max < 0x100000) snprintf(out, n, "%lldKB", (long long) llround((double) max / 1024.0));
+    else snprintf(out, n, "%.1fMB", (double) max / 1024.0 / 1024.0);
+}
+
+// iììiíïí (:11910-12030, svelte-145grbc): the drop zone. Its click is the hidden input's (the platform dialog here);
+// a picked file shows its name (file-success-state), a refused one its message (file-error-state)
+static void file_drop(StrBuf *sb, const DropKind *k, const char *category, const char *slot, const char *label) {
+    const SlotState *st = slot_state(slot, 0);
+    const int has = st && st->file_name[0], err = st && st->drop_error[0] && !has;
+    sb_appendf(sb, "<div class=\"file-drop-target svelte-145grbc%s%s%s\" role=\"button\" tabindex=\"0\" aria-label=\"", has ? " has-file" : "",
+               err ? " error" : "", uploading(slot) ? " disabled" : "");
+    sb_text(sb, label);
+    sb_appendf(sb, "\" id=\"knSmDrop-%s\" onclick=\"knSkins('pick','%s','%s')\"><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" "
+                   "accept=\"%s\"> <div class=\"file-drop-content svelte-145grbc\">", slot, k->type, category, k->accept);
+    if (has) {
+        sb_append(sb, "<div class=\"file-success-state svelte-145grbc\"><i class=\"material-icons success-icon svelte-145grbc\">check_circle</i> "
+                      "<div class=\"file-name svelte-145grbc\">");
+        sb_text(sb, st->file_name);
+        sb_appendf(sb, "</div> <button class=\"remove-file-btn svelte-145grbc\" aria-label=\"Remove file\" onclick=\"event.stopPropagation();"
+                       "knSkins('unset','%s','%s')\"><i class=\"material-icons svelte-145grbc\">close</i></button></div>", k->type, category);
+    } else if (err) {
+        sb_append(sb, "<div class=\"file-error-state svelte-145grbc\"><i class=\"material-icons error-icon svelte-145grbc\">error</i> "
+                      "<div class=\"error-message svelte-145grbc\">");
+        sb_text(sb, st->drop_error);
+        sb_append(sb, "</div> <div class=\"retry-hint svelte-145grbc\">Click to try again</div></div>");
+    } else {
+        char types[64], max[24];
+        snprintf(types, sizeof(types), "%s", k->accept);
+        size_text(max, sizeof(max), k->max);
+        sb_append(sb, "<div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">");
+        sb_text(sb, label);
+        sb_append(sb, "</div> <div class=\"accepted-types svelte-145grbc\">");
+        for (const char *p = types; *p; p++) sb_append(sb, *p == ',' ? ", " : (char[2]) {*p, 0});
+        sb_appendf(sb, "</div> <div class=\"size-limit svelte-145grbc\">Max: %s</div></div>", max);
+    }
+    sb_append(sb, "</div></div>");
+}
+
+static void upload_error_markup(StrBuf *sb, const char *hash, const char *slot) {
+    const char *e = upload_error(slot);
+    if (!e[0]) return;
+    sb_appendf(sb, "<div class=\"upload-error svelte-%s\" id=\"knSmError-%s\"><i class=\"material-icons svelte-%s\">error</i> ", hash, slot, hash);
+    sb_text(sb, e);
+    sb_append(sb, "</div>");
+}
+
+static void model_note(StrBuf *sb, const char *ext) {
+    if (!strcmp(ext, "gltf") || !strcmp(ext, "glb"))
+        sb_append(sb, " <div class=\"info-note svelte-gygf75\">\xf0\x9f\x93\x9d GLTF/GLB models include textures - texture section will be hidden</div>");
+    else if (!strcmp(ext, "obj")) sb_append(sb, " <div class=\"info-note svelte-gygf75\">\xf0\x9f\x93\x9d OBJ models require separate texture files</div>");
+}
+
+// the Model section (iïîîîìì, svelte-gygf75, :125700-125805): the uploaded model (Format, Status, Replace / Remove,
+// both onModelRemoved) or the drop zone
+static void model_section(StrBuf *sb) {
+    const cJSON *cfg = editing_config();
+    const char *ext = jstr(cfg, "fileExt"); // modelType (iÌíiiïí)
+    sb_append(sb, "<div class=\"model-section section svelte-gygf75\" id=\"knSmModel\"><h3 class=\"section-title svelte-gygf75\"><i class=\"material-icons svelte-gygf75\">"
+                  "view_in_ar</i> Model</h3> <div class=\"section-content svelte-gygf75\"><p class=\"section-description svelte-gygf75\">Upload a 3D model for your skin. "
+                  "Supported formats: OBJ, GLTF, GLB</p> ");
+    upload_error_markup(sb, "gygf75", "model");
+    if (cfg_true(cfg, "customModel")) { // existingCustomModel
+        char up[8] = "";
+        for (size_t i = 0; ext[i] && i + 1 < sizeof(up); i++) up[i] = (char) (ext[i] >= 'a' && ext[i] <= 'z' ? ext[i] - 32 : ext[i]);
+        sb_append(sb, " <div class=\"existing-model svelte-gygf75\"><div class=\"model-info file-info svelte-gygf75\"><div class=\"info-item svelte-gygf75\">"
+                      "<span class=\"info-label svelte-gygf75\">Format:</span> <span class=\"info-value svelte-gygf75\">");
+        sb_text(sb, up[0] ? up : "Unknown");
+        sb_append(sb, "</span></div> <div class=\"info-item svelte-gygf75\"><span class=\"info-label svelte-gygf75\">Status:</span> <span class=\"info-value svelte-gygf75\">"
+                      "Uploaded</span></div> ");
+        model_note(sb, ext);
+        sb_append(sb, "</div> <div class=\"existing-model-actions svelte-gygf75\"><button type=\"button\" class=\"btn-replace svelte-gygf75\" id=\"knSmModelReplace\" "
+                      "onclick=\"knSkins('unset','model','')\"><i class=\"material-icons svelte-gygf75\">refresh</i> Replace</button> <button type=\"button\" "
+                      "class=\"btn-remove svelte-gygf75\" id=\"knSmModelRemove\" onclick=\"knSkins('unset','model','')\"><i class=\"material-icons svelte-gygf75\">"
+                      "delete</i> Remove</button></div></div>");
+    } else {
+        sb_append(sb, " ");
+        file_drop(sb, &DROP_MODEL, "", "model", uploading("model") ? "Uploading..." : "Drop 3D model here");
+        if (ext[0]) {
+            char up[8] = "";
+            for (size_t i = 0; ext[i] && i + 1 < sizeof(up); i++) up[i] = (char) (ext[i] >= 'a' && ext[i] <= 'z' ? ext[i] - 32 : ext[i]);
+            sb_appendf(sb, " <div class=\"model-info file-info svelte-gygf75\"><div class=\"info-item svelte-gygf75\"><span class=\"info-label svelte-gygf75\">Format:</span> "
+                           "<span class=\"info-value svelte-gygf75\">%s</span></div> <div class=\"info-item svelte-gygf75\"><span class=\"info-label svelte-gygf75\">Max size:</span> "
+                           "<span class=\"info-value svelte-gygf75\">50MB</span></div> ", up);
+            model_note(sb, ext);
+            sb_append(sb, "</div>");
+        }
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// the Textures section (iïìììïí, svelte-4e4ust, :125806-126046): diffuse (a paint's Icon) and emissive (not for a
+// player card), Texture Settings (Transparency, and Pulse with a glow), each texture uploaded or its drop zone
+static void textures_section(StrBuf *sb, const int type) {
+    const cJSON *cfg = editing_config();
+    const cJSON *existing = cJSON_GetObjectItemCaseSensitive(cfg, "customTextures");
+    const int icon_only = type == T_PAINT, hide_emissive = type == T_PLAYER_CARD;
+    sb_appendf(sb, "<div class=\"textures-section section svelte-4e4ust\" id=\"knSmTextures\"><h3 class=\"section-title svelte-4e4ust\"><i class=\"material-icons svelte-4e4ust\">"
+                   "%s</i> %s</h3> <div class=\"section-content svelte-4e4ust\"><p class=\"section-description svelte-4e4ust\">%s</p> ",
+               icon_only ? "image" : "texture", icon_only ? "Paint Icon" : "Textures",
+               icon_only ? "Upload the icon shown for this paint in the shop and inventory."
+                         : "Upload texture maps to customize the appearance of your skin. Diffuse texture is required.");
+    if (!icon_only) {
+        sb_appendf(sb, "<div class=\"texture-settings svelte-4e4ust\"><h4 class=\"svelte-4e4ust\">Texture Settings</h4> <div class=\"settings-grid svelte-4e4ust\">"
+                       "<label class=\"toggle-switch svelte-4e4ust\"><span class=\"svelte-4e4ust\">Transparency</span> <input type=\"checkbox\" class=\"svelte-4e4ust\" "
+                       "id=\"knSmTrans\" onchange=\"knSkins('trans',this.checked)\"%s> <span class=\"slider svelte-4e4ust\"></span></label> ",
+                   cfg_true(cfg, "trans") ? " checked" : "");
+        if (cfg_true(cfg, "glow") && !hide_emissive) {
+            const double p = jnum(cfg, "pulsT");
+            const char *sel = p == 0.0015 ? "slow" : p == 0.003 ? "fast" : "off";
+            sb_appendf(sb, "<div class=\"form-group form-row svelte-4e4ust\"><label for=\"pulse-setting\" class=\"svelte-4e4ust\">Pulse</label> <select id=\"pulse-setting\" "
+                           "class=\"form-select svelte-4e4ust\" onchange=\"knSkins('pulse',this.value)\"><option class=\"svelte-4e4ust\" value=\"off\"%s>Off</option>"
+                           "<option class=\"svelte-4e4ust\" value=\"slow\"%s>Slow</option><option class=\"svelte-4e4ust\" value=\"fast\"%s>Fast</option></select></div>",
+                       !strcmp(sel, "off") ? " selected" : "", !strcmp(sel, "slow") ? " selected" : "", !strcmp(sel, "fast") ? " selected" : "");
+        }
+        sb_append(sb, "</div></div>");
+    }
+    sb_append(sb, " <div class=\"texture-uploads svelte-4e4ust\">");
+    for (int i = 0; i < (icon_only || hide_emissive ? 1 : 2); i++) {
+        const char *cat = i ? "emissive" : "diffuse";
+        const char *label = i ? "Emissive/Glow" : icon_only ? "Icon" : "Diffuse/Albedo";
+        const char *desc = i ? "Glowing/emissive areas (suffix: _e)" : icon_only ? "The image shown for this paint in the shop and inventory."
+                                                                                 : "Main color/diffuse texture (Required)";
+        char slot[24];
+        snprintf(slot, sizeof(slot), "texture:%s", cat);
+        sb_appendf(sb, "<div class=\"texture-upload-item svelte-4e4ust%s\" id=\"knSmTex-%s\"><div class=\"texture-header svelte-4e4ust\"><h5 class=\"svelte-4e4ust\">%s</h5> ",
+                   i ? "" : " required", cat, label);
+        if (!i) sb_append(sb, "<span class=\"required-badge svelte-4e4ust\">Required</span>");
+        if (uploading(slot)) sb_append(sb, " <span class=\"uploading-badge svelte-4e4ust\"><i class=\"material-icons spinning svelte-4e4ust\">sync</i> Uploading...</span>");
+        sb_appendf(sb, "</div> <p class=\"texture-description svelte-4e4ust\">%s</p> ", desc);
+        upload_error_markup(sb, "4e4ust", slot);
+        if (i) // settingKey hasGlow: the texture's toggle
+            sb_appendf(sb, " <label class=\"texture-toggle svelte-4e4ust\"><input type=\"checkbox\" class=\"svelte-4e4ust\" id=\"knSmGlow\" "
+                           "onchange=\"knSkins('glow',this.checked)\"%s> <span class=\"svelte-4e4ust\">Enable Emissive/Glow</span></label>",
+                       SM.has_glow ? " checked" : "");
+        if (cfg_true(existing, cat)) {
+            char url[600];
+            skin_url(i ? "texture_e.png" : "texture.png", url, sizeof(url));
+            sb_appendf(sb, " <div class=\"existing-texture svelte-4e4ust\"><div class=\"texture-preview svelte-4e4ust\"><img class=\"texture-image svelte-4e4ust\" src=\"%s\" alt=\"%s texture\">"
+                           "</div> <div class=\"existing-texture-actions svelte-4e4ust\"><button type=\"button\" class=\"btn-replace svelte-4e4ust\" "
+                           "onclick=\"knSkins('unset','texture','%s')\"><i class=\"material-icons svelte-4e4ust\">refresh</i> Replace</button> <button type=\"button\" "
+                           "class=\"btn-remove svelte-4e4ust\" id=\"knSmTexRemove-%s\" onclick=\"knSkins('unset','texture','%s')\"><i class=\"material-icons svelte-4e4ust\">"
+                           "delete</i> Remove</button></div></div>", url, label, cat, cat, cat);
+        } else if (!i || SM.has_glow) {
+            sb_append(sb, " <div class=\"file-drop-container svelte-4e4ust\">");
+            file_drop(sb, &DROP_TEXTURE, cat, slot, uploading(slot) ? "Uploading..." : "Drop texture here");
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div></div></div>");
+}
+
+// the Sounds section (iííìiíï, svelte-awmvtb, :126980-127098): a weapon's shoot / swap / inspect sounds, a melee's
+// swap / inspect; other types get the disabled section
+static void sounds_section(StrBuf *sb, const int type) {
+    static const struct {
+        const char *kind, *title, *desc, *flag;
+    } items[] = {{"shoot", "Shoot Sound", "Plays every time the weapon fires", "customSound"},
+                 {"swap", "Swap Sound", "Plays when the item is equipped (swapped to)", "customSwapSound"},
+                 {"inspect", "Inspect Sound", "Plays when the item is inspected", "customInspectSound"}};
+    if (type != 0 && type != 3) {
+        sb_append(sb, "<div class=\"sound-section-disabled section svelte-awmvtb\" id=\"knSmSounds\"><h3 class=\"section-title svelte-awmvtb\"><i class=\"material-icons svelte-awmvtb\">"
+                      "volume_up</i> Sounds</h3> <div class=\"section-content svelte-awmvtb\"><p class=\"section-description disabled svelte-awmvtb\">Custom sounds are only "
+                      "available for weapons and melee</p></div></div>");
+        return;
+    }
+    const cJSON *cfg = editing_config();
+    sb_append(sb, "<div class=\"sound-section section svelte-awmvtb\" id=\"knSmSounds\"><h3 class=\"section-title svelte-awmvtb\"><i class=\"material-icons svelte-awmvtb\">volume_up</i> "
+                  "Sounds</h3> <div class=\"section-content svelte-awmvtb\"><p class=\"section-description svelte-awmvtb\">Upload custom sounds for this item. Supported formats: "
+                  "MP3, WAV, OGG</p> <div class=\"sound-items svelte-awmvtb\">");
+    for (int i = type == 3 ? 1 : 0; i < 3; i++) {
+        char slot[24];
+        snprintf(slot, sizeof(slot), "sound:%s", items[i].kind);
+        sb_appendf(sb, "<div class=\"sound-item svelte-awmvtb\" id=\"knSmSound-%s\"><div class=\"sound-header svelte-awmvtb\"><h5 class=\"svelte-awmvtb\">%s</h5></div> "
+                       "<p class=\"sound-description svelte-awmvtb\">%s</p> ", items[i].kind, items[i].title, items[i].desc);
+        upload_error_markup(sb, "awmvtb", slot);
+        if (cfg_true(cfg, items[i].flag)) {
+            sb_appendf(sb, " <div class=\"existing-sound svelte-awmvtb\"><div class=\"sound-info svelte-awmvtb\"><div class=\"info-item svelte-awmvtb\"><span class=\"icon svelte-awmvtb\">"
+                           "\xe2\x9c\x85</span> <span class=\"svelte-awmvtb\">Custom sound uploaded</span></div></div> <div class=\"existing-sound-actions svelte-awmvtb\">"
+                           "<button type=\"button\" class=\"btn-replace svelte-awmvtb\" onclick=\"knSkins('unset','sound','%s')\"><i class=\"material-icons svelte-awmvtb\">refresh</i> "
+                           "Replace</button> <button type=\"button\" class=\"btn-remove svelte-awmvtb\" id=\"knSmSoundRemove-%s\" onclick=\"knSkins('unset','sound','%s')\">"
+                           "<i class=\"material-icons svelte-awmvtb\">delete</i> Remove</button></div></div>", items[i].kind, items[i].kind, items[i].kind);
+        } else {
+            sb_append(sb, " <div class=\"file-drop-container svelte-awmvtb\">");
+            file_drop(sb, &DROP_SOUND, items[i].kind, slot, uploading(slot) ? "Uploading..." : "Drop sound file here");
+            sb_append(sb, "</div>");
+        }
+        if (i == 2)
+            sb_appendf(sb, " <label class=\"loop-toggle svelte-awmvtb\"><input type=\"checkbox\" id=\"knSmInspLoop\" onchange=\"knSkins('loop',this.checked)\"%s> Loop while "
+                           "inspecting</label>", cfg_true(cfg, "inspSLoop") ? " checked" : "");
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div> <div class=\"sound-info svelte-awmvtb\"><div class=\"info-item svelte-awmvtb\"><span class=\"icon svelte-awmvtb\">\xf0\x9f\x92\xa1</span> "
+                  "<span class=\"svelte-awmvtb\">Keep each file under 2MB for best performance</span></div> <div class=\"info-item svelte-awmvtb\"><span class=\"icon svelte-awmvtb\">"
+                  "\xf0\x9f\x8e\xb5</span> <span class=\"svelte-awmvtb\">Recommended: 44.1kHz, 16-bit, mono or stereo</span></div></div></div></div>");
+}
+
+static const char *const DYE_KEYS[] = {"skinCol", "shirtCol", "sleeveCol", "pantsCol", "waistCol", "shoeCol", "hairCol"}; // iÏiììîî
+static const char *const DYE_LABELS[] = {"Skin", "Shirt", "Sleeves", "Pants", "Waist", "Shoes", "Hair"};
+
+// the Dye Colors section (iïíìíîí, :125660-125700): each colour (iïiííìí: the itemConfig number as #rrggbb, else
+// #ffffff) with its remove button when set, and the Opacity slider (opac, 1 when absent)
+static void dye_section(StrBuf *sb) {
+    const cJSON *cfg = editing_config();
+    sb_append(sb, "<div class=\"section dye-colors-section svelte-wfs5t6\" id=\"knSmDye\"><h3 class=\"section-title svelte-wfs5t6\"><i class=\"material-icons svelte-wfs5t6\">"
+                  "palette</i> Dye Colors</h3> <div class=\"section-content svelte-wfs5t6\"><p class=\"section-description svelte-wfs5t6\">Configure the colors and opacity "
+                  "for this dye. Colors are applied to different parts of the player model.</p> <div class=\"dye-colors-grid svelte-wfs5t6\">");
+    for (int i = 0; i < 7; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(cfg, DYE_KEYS[i]);
+        const int set = cJSON_IsNumber(v);
+        char hex[8] = "#ffffff";
+        if (set) snprintf(hex, sizeof(hex), "#%06x", (unsigned) ((long long) v->valuedouble & 0xffffff));
+        sb_appendf(sb, "<div class=\"dye-color-item svelte-wfs5t6\"><label class=\"dye-color-label svelte-wfs5t6\" for=\"dye-%s\">%s:</label> <div class=\"dye-color-input-wrapper "
+                       "svelte-wfs5t6\"><input type=\"color\" class=\"dye-color-input svelte-wfs5t6\" id=\"dye-%s\" value=\"%s\" oninput=\"knSkins('dye','%s',this.value)\" "
+                       "onchange=\"knSkins('dye','%s',this.value)\"> ", DYE_KEYS[i], DYE_LABELS[i], DYE_KEYS[i], hex, DYE_KEYS[i], DYE_KEYS[i]);
+        if (set)
+            sb_appendf(sb, "<button type=\"button\" class=\"dye-color-remove svelte-wfs5t6\" title=\"Remove color\" id=\"knSmDyeRemove-%s\" onclick=\"knSkins('undye','%s')\">"
+                           "<i class=\"material-icons svelte-wfs5t6\">close</i></button>", DYE_KEYS[i], DYE_KEYS[i]);
+        sb_append(sb, "</div></div>");
+    }
+    const cJSON *op = cJSON_GetObjectItemCaseSensitive(cfg, "opac");
+    const double opac = cJSON_IsNumber(op) ? op->valuedouble : 1.0;
+    sb_appendf(sb, "</div> <div class=\"dye-opacity-control svelte-wfs5t6\"><label class=\"dye-opacity-label svelte-wfs5t6\" for=\"dye-opacity\">Opacity:</label> <div class=\"dye-opacity-wrapper "
+                   "svelte-wfs5t6\"><input type=\"range\" id=\"dye-opacity\" min=\"0\" max=\"1\" step=\"0.01\" class=\"dye-opacity-slider svelte-wfs5t6\" value=\"%g\" "
+                   "oninput=\"knSkins('opac',this.value)\"> <span class=\"dye-opacity-value svelte-wfs5t6\" id=\"knSmOpacValue\">%.2f</span></div></div></div></div>",
+               opac, opac);
+}
+
+// ---- Shader Studio (iììîiìï, svelte-1x46pbz, :127099-127410)
+
+// iìíïïìí("surface") (:122361-122420): a baseColor node into the output, alpha 1
+static cJSON *default_graph(void) {
+    return cJSON_Parse("{\"v\":1,\"kind\":\"surface\",\"nodes\":[{\"id\":\"base1\",\"type\":\"baseColor\",\"x\":120,\"y\":90},{\"id\":\"out\",\"type\":\"output\","
+                       "\"x\":420,\"y\":80,\"inputs\":{\"color\":{\"node\":\"base1\"},\"alpha\":{\"value\":1}}}],\"output\":\"out\"}");
+}
+
+// iìïìïïï (:122528): a graph document
+static int graph_ok(const cJSON *g) {
+    return cJSON_IsObject(g) && jnum(g, "v") == 1 && cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(g, "nodes")) &&
+           cJSON_IsString(cJSON_GetObjectItemCaseSensitive(g, "output"));
+}
+
+// iiïìïiï (:122495-122511): a param's default of its type
+static cJSON *param_default(const char *type, const cJSON *v) {
+    if (!strcmp(type, "color")) {
+        const char *h = cJSON_IsString(v) ? v->valuestring : "";
+        int ok = h[0] == '#' && strlen(h) == 7;
+        for (int i = 1; ok && i < 7; i++) ok = strchr("0123456789abcdefABCDEF", h[i]) != NULL;
+        return cJSON_CreateString(ok ? h : "#ffffff");
+    }
+    const int n = !strcmp(type, "vec2") ? 2 : !strcmp(type, "vec3") ? 3 : !strcmp(type, "vec4") ? 4 : 1;
+    if (n == 1) return cJSON_CreateNumber(cJSON_IsNumber(v) && isfinite(v->valuedouble) ? v->valuedouble : 0);
+    cJSON *a = cJSON_CreateArray();
+    const cJSON *first = cJSON_IsArray(v) ? v->child : v;
+    for (int i = 0; i < n; i++) {
+        const cJSON *e = cJSON_IsArray(v) ? cJSON_GetArrayItem(v, i) : NULL;
+        cJSON_AddItemToArray(a, cJSON_CreateNumber(cJSON_IsNumber(e) ? e->valuedouble : cJSON_IsNumber(first) ? first->valuedouble : 0));
+    }
+    return a;
+}
+
+// iïíìíìï (:122457-122494): the graph's "param" nodes, by name (the first of a name)
+static cJSON *graph_params(void) {
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *node;
+    cJSON_ArrayForEach(node, cJSON_GetObjectItemCaseSensitive(SM.sh.graph, "nodes")) {
+        if (strcmp(jstr(node, "type"), "param")) continue;
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(node, "params");
+        char name[64];
+        trimmed(name, sizeof(name), jstr(p, "name"));
+        int dup = !name[0];
+        const cJSON *e;
+        cJSON_ArrayForEach(e, out) dup |= !strcmp(jstr(e, "name"), name);
+        if (dup) continue;
+        const char *type = jstr(p, "type")[0] ? jstr(p, "type") : "float";
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "nodeId", jstr(node, "id"));
+        cJSON_AddStringToObject(o, "name", name);
+        cJSON_AddStringToObject(o, "type", type);
+        cJSON_AddItemToObject(o, "default", param_default(type, cJSON_GetObjectItemCaseSensitive(p, "default")));
+        cJSON_AddItemToArray(out, o);
+    }
+    return out;
+}
+
+// iÍìïíïî: a value as the chips print it
+static void param_text(StrBuf *sb, const char *type, const cJSON *v) {
+    if (!strcmp(type, "color")) sb_text(sb, cJSON_IsString(v) ? v->valuestring : "");
+    else if (cJSON_IsArray(v)) {
+        const cJSON *e;
+        int first = 1;
+        cJSON_ArrayForEach(e, v) {
+            sb_appendf(sb, "%s%g", first ? "" : ", ", round(e->valuedouble * 1000.0) / 1000.0);
+            first = 0;
+        }
+    } else sb_appendf(sb, "%g", round((cJSON_IsNumber(v) ? v->valuedouble : 0) * 1000.0) / 1000.0);
+}
+
+// the studio's state of the edited skin (the effect at :127106-127124): its graph customShader, else the default
+static void shader_load(void) {
+    const int64_t id = editing_id();
+    if (SM.sh.loaded && SM.sh.skin == id) return;
+    cJSON_Delete(SM.sh.graph);
+    cJSON_Delete(SM.sh.parts);
+    const cJSON *cs = cJSON_GetObjectItemCaseSensitive(editing_config(), "customShader");
+    const cJSON *g = cJSON_GetObjectItemCaseSensitive(cs, "graph");
+    const int graph = !strcmp(jstr(cs, "type"), "graph") && graph_ok(g);
+    SM.sh.legacy = cs && !graph;
+    SM.sh.graph = graph ? cJSON_Duplicate(g, 1) : default_graph();
+    SM.sh.apply_all = !graph || !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(cs, "applyToAll"));
+    SM.sh.parts = cJSON_CreateArray();
+    const cJSON *p;
+    if (graph) cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(cs, "parts")) {
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "nodeName", p->string ? p->string : "");
+        const cJSON *params = cJSON_GetObjectItemCaseSensitive(p, "params");
+        cJSON_AddItemToObject(e, "params", cJSON_IsObject(params) ? cJSON_Duplicate(params, 1) : cJSON_CreateObject());
+        cJSON_AddItemToArray(SM.sh.parts, e);
+    }
+    if (cs) SM.sh.open = 1;
+    SM.sh.skin = id;
+    SM.sh.loaded = 1;
+}
+
+static void shader_section(StrBuf *sb) {
+    shader_load();
+    sb_appendf(sb, "<div class=\"section shader-studio-section svelte-1x46pbz\" id=\"knSmShader\"><h3 class=\"section-title svelte-1x46pbz\" style=\"cursor: pointer\" "
+                   "id=\"knSmShaderToggle\" onclick=\"knSkins('shader','toggle')\"><i class=\"material-icons svelte-1x46pbz\">account_tree</i> %s <i class=\"material-icons "
+                   "expand-icon svelte-1x46pbz\">%s</i></h3>", i18n_tr("shaderGraph.studio.title", "Shader Studio"), SM.sh.open ? "expand_less" : "expand_more");
+    if (!SM.sh.open) {
+        sb_append(sb, " <!----></div>");
+        return;
+    }
+    sb_append(sb, " <div class=\"section-content svelte-1x46pbz\"><p class=\"section-description svelte-1x46pbz\">");
+    sb_text(sb, i18n_tr("shaderGraph.studio.desc", "Build the item's material as a node graph with live preview."));
+    sb_append(sb, "</p> ");
+    if (SM.sh.legacy) {
+        sb_append(sb, "<div class=\"legacy-notice svelte-1x46pbz\"><i class=\"material-icons svelte-1x46pbz\">warning</i> ");
+        sb_text(sb, i18n_tr("shaderGraph.legacyNotice", "This item used a GLSL shader, which is no longer supported."));
+        sb_append(sb, "</div>");
+    }
+    cJSON *params = graph_params();
+    sb_append(sb, " <div class=\"params-section svelte-1x46pbz\"><div class=\"editor-label svelte-1x46pbz\">");
+    sb_text(sb, i18n_tr("shaderGraph.params.title", "Exposed params"));
+    sb_append(sb, "</div> ");
+    if (cJSON_GetArraySize(params)) {
+        sb_append(sb, "<div class=\"params-list svelte-1x46pbz\">");
+        const cJSON *p;
+        cJSON_ArrayForEach(p, params) {
+            sb_append(sb, "<div class=\"param-chip svelte-1x46pbz\" title=\"");
+            sb_text(sb, jstr(p, "nodeId"));
+            sb_append(sb, "\"><span class=\"param-name svelte-1x46pbz\">");
+            sb_text(sb, jstr(p, "name"));
+            sb_append(sb, "</span> <span class=\"param-type svelte-1x46pbz\">");
+            sb_text(sb, jstr(p, "type"));
+            sb_append(sb, "</span> <span class=\"param-default svelte-1x46pbz\">= ");
+            param_text(sb, jstr(p, "type"), cJSON_GetObjectItemCaseSensitive(p, "default"));
+            sb_append(sb, "</span></div>");
+        }
+        sb_append(sb, "</div>");
+    } else {
+        sb_append(sb, "<p class=\"parts-description svelte-1x46pbz\">");
+        sb_text(sb, i18n_tr("shaderGraph.params.none", "Add a \xe2\x80\x9cparam\xe2\x80\x9d node to the graph to expose a value that parts can override."));
+        sb_append(sb, "</p>");
+    }
+    sb_appendf(sb, "</div> <div class=\"apply-all-row svelte-1x46pbz\"><label class=\"apply-all-label svelte-1x46pbz\"><input type=\"checkbox\" class=\"apply-all-checkbox "
+                   "svelte-1x46pbz\" id=\"knSmApplyAll\" onchange=\"knSkins('shader','applyAll',this.checked)\"%s> %s</label> <span class=\"apply-all-hint svelte-1x46pbz\">%s</span></div> ",
+               SM.sh.apply_all ? " checked" : "", i18n_tr("shaderGraph.applyAll", "Apply to all parts"),
+               SM.sh.apply_all ? i18n_tr("shaderGraph.applyAll.on", "Shader applies to the entire model")
+                               : i18n_tr("shaderGraph.applyAll.off", "Shader only applies to the parts listed below"));
+    if (!SM.sh.apply_all) {
+        sb_appendf(sb, "<div class=\"parts-section svelte-1x46pbz\"><div class=\"parts-header svelte-1x46pbz\"><div class=\"editor-label svelte-1x46pbz\">%s</div> "
+                       "<button class=\"add-uniform-btn svelte-1x46pbz\" id=\"knSmAddPart\" onclick=\"knSkins('shader','addPart')\"><i class=\"material-icons svelte-1x46pbz\">add</i> "
+                       "%s</button></div> <p class=\"parts-description svelte-1x46pbz\">", i18n_tr("shaderGraph.parts.title", "Parts"),
+                   i18n_tr("shaderGraph.parts.add", "Add Part"));
+        sb_text(sb, i18n_tr("shaderGraph.parts.desc", "Only the named mesh nodes below get the shader."));
+        sb_append(sb, "</p> ");
+        int i = 0;
+        const cJSON *part;
+        cJSON_ArrayForEach(part, SM.sh.parts) {
+            sb_append(sb, "<div class=\"part-block svelte-1x46pbz\"><div class=\"part-header svelte-1x46pbz\"><input type=\"text\" class=\"part-name-input svelte-1x46pbz\" placeholder=\"");
+            sb_text(sb, i18n_tr("shaderGraph.parts.nodeName", "Node name (e.g. Blob_low)"));
+            sb_appendf(sb, "\" id=\"knSmPart%d\" value=\"", i);
+            sb_text(sb, jstr(part, "nodeName"));
+            sb_appendf(sb, "\" onchange=\"knSkins('shader','partName',%d,this.value)\"> <button class=\"copy-defaults-btn svelte-1x46pbz\" title=\"%s\" "
+                           "onclick=\"knSkins('shader','copyDefaults',%d)\"%s><i class=\"material-icons svelte-1x46pbz\">content_copy</i></button> <button "
+                           "class=\"remove-uniform-btn svelte-1x46pbz\" onclick=\"knSkins('shader','removePart',%d)\"><i class=\"material-icons svelte-1x46pbz\">close</i></button></div> ",
+                       i, i18n_tr("shaderGraph.parts.copyDefaults", "Override every param with the graph defaults"), i,
+                       cJSON_GetArraySize(params) ? "" : " disabled", i);
+            const cJSON *pv = cJSON_GetObjectItemCaseSensitive(part, "params");
+            if (!cJSON_GetArraySize(params)) {
+                sb_append(sb, "<p class=\"parts-description svelte-1x46pbz\">");
+                sb_text(sb, i18n_tr("shaderGraph.params.none", "Add a \xe2\x80\x9cparam\xe2\x80\x9d node to the graph to expose a value that parts can override."));
+                sb_append(sb, "</p>");
+            }
+            const cJSON *p;
+            cJSON_ArrayForEach(p, params) {
+                const char *name = jstr(p, "name"), *type = jstr(p, "type");
+                const cJSON *v = cJSON_GetObjectItemCaseSensitive(pv, name);
+                sb_appendf(sb, "<div class=\"uniform-row svelte-1x46pbz\"><label class=\"override-toggle svelte-1x46pbz\" title=\"%s\"><input type=\"checkbox\" "
+                               "class=\"uniform-checkbox svelte-1x46pbz\" onchange=\"knSkins('shader','override',%d,'", i18n_tr("shaderGraph.parts.override", "Override for this part"), i);
+                sb_text(sb, name);
+                sb_appendf(sb, "',this.checked)\"%s></label> <span class=\"uniform-name svelte-1x46pbz\">", v ? " checked" : "");
+                sb_text(sb, name);
+                sb_append(sb, "</span> <span class=\"param-type svelte-1x46pbz\">");
+                sb_text(sb, type);
+                sb_append(sb, "</span> <div class=\"uniform-value svelte-1x46pbz\">");
+                if (v) { // KrunkNative: one text field for the value (v10's sg value editor: a slider / colour / vector)
+                    StrBuf vb = {0};
+                    param_text(&vb, type, v);
+                    char *vt = sb_finish(&vb);
+                    sb_appendf(sb, "<input type=\"%s\" class=\"sgInput\" value=\"", !strcmp(type, "color") ? "color" : "text");
+                    sb_text(sb, vt ? vt : "");
+                    sb_appendf(sb, "\" onchange=\"knSkins('shader','param',%d,'", i);
+                    sb_text(sb, name);
+                    sb_append(sb, "',this.value)\">");
+                    free(vt);
+                } else {
+                    sb_appendf(sb, "<span class=\"param-default svelte-1x46pbz\">%s: ", i18n_tr("shaderGraph.parts.useDefault", "default"));
+                    param_text(sb, type, cJSON_GetObjectItemCaseSensitive(p, "default"));
+                    sb_append(sb, "</span>");
+                }
+                sb_append(sb, "</div></div>");
+            }
+            sb_append(sb, "</div>");
+            i++;
+        }
+        sb_append(sb, "</div>");
+    }
+    cJSON_Delete(params);
+    sb_appendf(sb, " <div class=\"shader-actions svelte-1x46pbz\"><button class=\"apply-btn svelte-1x46pbz\" id=\"knSmShaderApply\" onclick=\"knSkins('shader','refresh')\">"
+                   "<i class=\"material-icons svelte-1x46pbz\">play_arrow</i> %s</button> <button class=\"clear-btn svelte-1x46pbz\" id=\"knSmShaderClear\" "
+                   "onclick=\"knSkins('shader','clearPreview')\"><i class=\"material-icons svelte-1x46pbz\">visibility_off</i> %s</button> <button class=\"clear-btn danger "
+                   "svelte-1x46pbz\" id=\"knSmShaderRemove\" onclick=\"knSkins('shader','remove')\"><i class=\"material-icons svelte-1x46pbz\">delete</i> %s</button></div></div></div>",
+               i18n_tr("shaderGraph.refreshPreview", "Refresh Preview"), i18n_tr("shaderGraph.clearPreview", "Clear Preview"),
+               i18n_tr("shaderGraph.removeShader", "Remove Shader"));
+}
+
+// iïìiiìì (:124527, :125610): Same attributes as (not for a paint), Dye Colors (a dye), Model (not for a spray, card,
+// emoji, face, dye or paint), Textures (not with a GLTF / GLB model or for a dye), Sounds (not for those six types),
+// Shader Studio (not for a paint)
 static void appearance_markup(StrBuf *sb) {
     const int type = (int) jnum(SM.editing, "type"), weapon = (int) jnum(SM.editing, "weapon");
     sb_append(sb, "<div class=\"appearance-tab svelte-wfs5t6\">");
@@ -495,6 +1162,13 @@ static void appearance_markup(StrBuf *sb) {
         }
         sb_append(sb, "</div></div>");
     }
+    const char *ext = jstr(editing_config(), "fileExt");
+    const int no_model = type == 4 || type == T_PLAYER_CARD || type == T_EMOJI || type == 7 || type == 5 || type == T_PAINT; // iÌiìiìï
+    if (type == 5) dye_section(sb);
+    if (!no_model) model_section(sb);
+    if (!(!strcmp(ext, "gltf") || !strcmp(ext, "glb") || type == 5)) textures_section(sb, type); // iÎîììïï hides it
+    if (!no_model) sounds_section(sb, type);
+    if (type != T_PAINT) shader_section(sb);
     sb_append(sb, "</div>");
 }
 
@@ -516,6 +1190,30 @@ static void advanced_markup(StrBuf *sb) {
     free(autos);
 }
 
+// the preview pane (iiìíiiì, :127463-127540) once its JSON is set: a paint's animated preview, a player card's /
+// emoji's texture (or thumbnail), else the 3D preview (its wear / paint controls are not ported)
+static void preview_markup(StrBuf *sb) {
+    if (!SM.preview) {
+        sb_append(sb, "<!---->");
+        return;
+    }
+    const int type = (int) jnum(SM.editing, "type");
+    sb_append(sb, "<div class=\"preview-3d svelte-103lu6x\">");
+    if (type == T_PLAYER_CARD || type == T_EMOJI) {
+        char url[600];
+        if (cfg_true(cJSON_GetObjectItemCaseSensitive(editing_config(), "customTextures"), "diffuse")) skin_url("texture.png", url, sizeof(url));
+        else if (cfg_true(editing_config(), "customThumbnail")) skin_url("thumbnail.png", url, sizeof(url));
+        else url[0] = 0;
+        if (url[0]) sb_appendf(sb, "<img alt=\"Thumbnail\" class=\"preview-frame svelte-103lu6x\" style=\"object-fit: contain; border: none\" id=\"knSmPreviewImg\" src=\"%s\">", url);
+    } else {
+        sb_appendf(sb, "<iframe class=\"preview-frame svelte-103lu6x\" style=\"border: none\" title=\"%s\" id=\"knSmPreview\" src=\"/viewer.html?nobg%s&amp;showcase=",
+                   type == T_PAINT ? "Paint Preview" : "3D Preview", type == T_PAINT ? "&amp;anim" : "");
+        sb_text(sb, SM.preview);
+        sb_append(sb, "\"></iframe>");
+    }
+    sb_append(sb, "</div>");
+}
+
 static void editor_markup(StrBuf *sb) {
     static const char *const tabs[] = {"general", "appearance", "advanced"};
     static const char *const icons[] = {"settings", "palette", "code"};
@@ -528,7 +1226,9 @@ static void editor_markup(StrBuf *sb) {
     if (SM.tab == TAB_GENERAL) general_markup(sb);
     else if (SM.tab == TAB_APPEARANCE) appearance_markup(sb);
     else advanced_markup(sb);
-    sb_append(sb, "</div> <!----></div></div>");
+    sb_append(sb, "</div> ");
+    preview_markup(sb);
+    sb_append(sb, "</div></div>");
 }
 
 static void save_button(StrBuf *sb) {
@@ -552,10 +1252,11 @@ static void window_markup(StrBuf *sb) {
         sb_append(sb, " ");
         const int type = (int) jnum(SM.editing, "type");
         if (type != T_PLAYER_CARD && type != T_EMOJI) {
-            sb_appendf(sb, "<button class=\"io-action-bar-button svelte-103lu6x\" id=\"knSmCapture\" onclick=\"knSkins('capture')\" title=\"%s\"",
-                       editing_id() ? "Position the preview, then capture it as the item thumbnail" : "Save the skin first");
-            disabled_attr(sb, SM.busy || !editing_id());
-            sb_append(sb, "><i class=\"material-icons svelte-103lu6x\">photo_camera</i> Capture Thumbnail</button>");
+            sb_appendf(sb, "<button class=\"io-action-bar-button svelte-103lu6x%s\" id=\"knSmCapture\" onclick=\"knSkins('capture')\" title=\"%s\"",
+                       SM.capturing ? " is-loading" : "", editing_id() ? "Position the preview, then capture it as the item thumbnail" : "Save the skin first");
+            disabled_attr(sb, SM.busy || SM.capturing || !editing_id());
+            sb_appendf(sb, "><i class=\"material-icons svelte-103lu6x\">%s</i> %s</button>", SM.capturing ? "sync" : SM.captured ? "check" : "photo_camera",
+                       SM.capturing ? "Capturing..." : SM.captured ? "Captured" : "Capture Thumbnail");
         }
     } else {
         sb_append(sb, "<div class=\"search-container svelte-103lu6x\"><input type=\"text\" placeholder=\"Search by name or ID...\" class=\"search-input svelte-103lu6x\" "
@@ -611,9 +1312,14 @@ static void render(void) {
 static void reset(void) {
     cJSON_Delete(SM.rows);
     cJSON_Delete(SM.editing);
-    const unsigned gen = SM.gen + 1;
+    free(SM.preview);
+    free(SM.up.data);
+    cJSON_Delete(SM.sh.graph);
+    cJSON_Delete(SM.sh.parts);
+    const unsigned gen = SM.gen + 1, rev = SM.asset_rev;
     memset(&SM, 0, sizeof(SM));
     SM.gen = gen;
+    SM.asset_rev = rev; // the files' ?v= stays new: a reopened window must not show the cached old file
 }
 
 static void window_closed(const int accepted, void *user) {
@@ -680,8 +1386,23 @@ static void set_disabled(const char *id, const int off) {
     else html_dom_remove_attr(e, "disabled");
 }
 
-static void changed(void) { // onSkinChange (iÍíìîïí): the skin is unsaved
+static void changed(void) { // onSkinChange (iÍíìîïí): the skin is unsaved, and the preview follows 300 ms on
     SM.saved = 0;
+    SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+}
+
+// the editor opens on a skin: its preview, its glow toggle (hasGlow: an emissive texture, never for a player card),
+// Shader Studio's state, the sections' errors (each section component is new)
+static void editor_opened(void) {
+    free(SM.preview);
+    SM.preview = NULL;
+    SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+    SM.captured = SM.capturing = 0;
+    SM.has_glow = cfg_true(cJSON_GetObjectItemCaseSensitive(editing_config(), "customTextures"), "emissive") && (int) jnum(SM.editing, "type") != T_PLAYER_CARD;
+    SM.model_ext[0] = 0;
+    memset(SM.slots, 0, sizeof(SM.slots));
+    SM.sh.loaded = 0;
+    SM.sh.open = SM.sh.preview = 0;
 }
 
 // value: the inline handler's third argument when it has one (a scripted call), else this.value
@@ -763,6 +1484,7 @@ static void do_edit(const int64_t id) { // iÍiíiíi: a copy of the row with a 
     cJSON_Delete(SM.editing);
     SM.editing = e;
     SM.saved = 1;
+    editor_opened();
 }
 
 static void do_add(void) { // iìiîiìí: a new skin, then a save (the editor opens on it once it has an id)
@@ -776,18 +1498,577 @@ static void do_add(void) { // iìiîiìí: a new skin, then a save (the editor o
     cJSON_Delete(SM.editing);
     SM.editing = e;
     SM.tab = TAB_GENERAL;
+    editor_opened();
     do_save();
+}
+
+
+// ------------------------------------------------------------------ uploads (uploadAsset, :124434-124459)
+
+static unsigned char *read_whole(const char *path, size_t *len) {
+    *len = 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    unsigned char *d = NULL;
+    if (!fseek(f, 0, SEEK_END)) {
+        const long n = ftell(f);
+        if (n >= 0 && !fseek(f, 0, SEEK_SET) && (d = malloc((size_t) n + 1)) && fread(d, 1, (size_t) n, f) != (size_t) n) {
+            free(d);
+            d = NULL;
+        }
+        if (d) *len = (size_t) n;
+    }
+    fclose(f);
+    return d;
+}
+
+static const char *base_name(const char *path) {
+    const char *a = strrchr(path, '/'), *b = strrchr(path, '\\');
+    const char *s = a > b ? a : b;
+    return s ? s + 1 : path;
+}
+
+// '.' + name.split('.').pop().toLowerCase()
+static void name_ext(const char *name, char *out, const size_t n) {
+    const char *dot = strrchr(name, '.');
+    const char *e = dot ? dot + 1 : name;
+    size_t i = 0;
+    out[i++] = '.';
+    for (; *e && i + 1 < n; e++) out[i++] = (char) (*e >= 'A' && *e <= 'Z' ? *e + 32 : *e);
+    out[i] = 0;
+}
+
+static void apply_config(void);
+
+// one upload's end: its error on its section (the message, else "Upload failed"), then applyConfig (iÍïîîíî), which
+// every section's upload ends with
+static void up_end(const char *err) {
+    if (!SM.up.active) return;
+    if (err && !strcmp(SM.up.type, "thumbnail")) {
+        SM.capturing = 0;
+        snprintf(SM.error, sizeof(SM.error), "Failed to upload thumbnail: %s", err);
+    } else if (err) set_upload_error(SM.up.slot, err[0] ? err : "Upload failed");
+    const int thumb = !strcmp(SM.up.type, "thumbnail");
+    free(SM.up.data);
+    const unsigned gen = SM.up.gen;
+    memset(&SM.up, 0, sizeof(SM.up));
+    SM.up.gen = gen;
+    if (!thumb) apply_config();
+    render();
+}
+
+// the stored file: the local copy (asset_fetch_client_put, as the browser's next load gets it), the files' ?v=, then
+// the section's success (:125367-125378, :125420-125435, :125486, :124778-124786)
+static void up_stored(const char *asset_path) {
+    char want[48];
+    snprintf(want, sizeof(want), "skins/%lld/", (long long) SM.up.skin);
+    if (!strncmp(asset_path, want, strlen(want)) && !strstr(asset_path, "..")) {
+        if (!strcmp(SM.up.type, "model")) { // the brain dropped the model of another format
+            static const char *const exts[] = {"obj", "gltf", "glb", "fbx"};
+            for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) {
+                char rel[96];
+                snprintf(rel, sizeof(rel), "%smodel.%s", want, exts[i]);
+                if (strcmp(rel, asset_path)) asset_fetch_client_put(rel, NULL, 0);
+            }
+        }
+        asset_fetch_client_put(asset_path, SM.up.data, SM.up.len);
+    }
+    SM.asset_rev++;
+    fprintf(stderr, "[skins] uploaded %s %s %s (%zu bytes)\n", SM.up.type, SM.up.category[0] ? SM.up.category : "-", asset_path, SM.up.len);
+    cJSON *cfg = SM.editing && editing_id() == SM.up.skin ? editing_config() : NULL;
+    if (!cfg) {
+        up_end(NULL);
+        return;
+    }
+    if (!strcmp(SM.up.type, "thumbnail")) { // itemConfig.customThumbnail, updateSkin
+        put(cfg, "customThumbnail", cJSON_CreateTrue());
+        char path[48];
+        snprintf(path, sizeof(path), "/skins/%lld", (long long) SM.up.skin);
+        send_req("PUT", path, cJSON_Duplicate(SM.editing, 1), R_THUMB);
+    } else if (!strcmp(SM.up.type, "model")) {
+        put(cfg, "customModel", cJSON_CreateTrue());
+        changed();
+    } else if (!strcmp(SM.up.type, "texture")) {
+        if (!((int) jnum(SM.editing, "type") == T_PLAYER_CARD && !strcmp(SM.up.category, "emissive"))) {
+            cJSON *tex = cJSON_GetObjectItemCaseSensitive(cfg, "customTextures");
+            if (!cJSON_IsObject(tex)) {
+                put(cfg, "customTextures", cJSON_CreateObject());
+                tex = cJSON_GetObjectItemCaseSensitive(cfg, "customTextures");
+            }
+            put(tex, SM.up.category, cJSON_CreateTrue());
+            if (!strcmp(SM.up.category, "emissive")) put(cfg, "glow", cJSON_CreateTrue());
+            changed();
+        }
+    } else if (!strcmp(SM.up.type, "sound")) {
+        const char *flag = !strcmp(SM.up.category, "swap") ? "customSwapSound" : !strcmp(SM.up.category, "inspect") ? "customInspectSound" : "customSound";
+        put(cfg, flag, cJSON_CreateTrue());
+        changed();
+    }
+    up_end(NULL);
+}
+
+// the brain's refusal of a chunk / done: its {error} text
+static void body_error(const char *body, char *out, const size_t n) {
+    cJSON *j = body ? cJSON_Parse(body) : NULL;
+    const char *e = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "error"));
+    if (!e) e = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "message"));
+    snprintf(out, n, "%s", e ? e : "Upload failed");
+    cJSON_Delete(j);
+}
+
+static void up_next(void);
+
+static void on_up_chunk(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    if ((unsigned) (uintptr_t) user != SM.up.gen || !SM.up.active) return;
+    if (status != 200) {
+        char err[200];
+        body_error(body, err, sizeof(err));
+        up_end(err);
+        return;
+    }
+    if (SM.up.done_sent) { // {data: {asset_path}}
+        cJSON *j = body ? cJSON_Parse(body) : NULL;
+        const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "data"), "asset_path"));
+        char rel[160];
+        snprintf(rel, sizeof(rel), "%s", path ? path : "");
+        cJSON_Delete(j);
+        if (!rel[0]) up_end("Upload failed");
+        else up_stored(rel);
+        return;
+    }
+    up_next();
+}
+
+static void up_next(void) {
+    char url[1400];
+    void *user = (void *) (uintptr_t) SM.up.gen;
+    if (SM.up.sent >= SM.up.len) {
+        snprintf(url, sizeof(url), "%s?fileId=%s&done=1", SM.up.base, SM.up.file_id);
+        SM.up.done_sent = 1;
+        if (!backend_http_post_bytes(url, "application/octet-stream", "", 0, CHUNK_TIMEOUT_MS, on_up_chunk, user)) up_end("Upload failed");
+        return;
+    }
+    const size_t at = SM.up.sent, n = SM.up.len - at < CHUNK ? SM.up.len - at : CHUNK;
+    snprintf(url, sizeof(url), "%s?fileId=%s&key=file&offset=%zu", SM.up.base, SM.up.file_id, at);
+    SM.up.sent += n;
+    if (!backend_http_post_bytes(url, "application/octet-stream", SM.up.data + at, n, CHUNK_TIMEOUT_MS, on_up_chunk, user)) up_end("Upload failed");
+}
+
+static void on_up_key(void *user, const int status, const cJSON *data, const cJSON *error) {
+    if ((unsigned) (uintptr_t) user != SM.up.gen || !SM.up.active) return;
+    const char *fid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "fileId"));
+    const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "uploadUrl"));
+    if (status < 200 || status >= 300 || error || !fid || !url || strlen(fid) >= sizeof(SM.up.file_id)) {
+        up_end(v10_gapi_error_text(error, "Upload failed"));
+        return;
+    }
+    snprintf(SM.up.file_id, sizeof(SM.up.file_id), "%s", fid);
+    if (url[0] == '/') snprintf(SM.up.base, sizeof(SM.up.base), "%s%s", backend_url(), url);
+    else snprintf(SM.up.base, sizeof(SM.up.base), "%s", url);
+    up_next();
+}
+
+// uploadAsset(skinId, file, type, category): the gapi key, the chunks, done (one upload at a time; data owned)
+static void up_start(const char *slot, const char *type, const char *category, const char *file_name, unsigned char *data, const size_t len) {
+    free(SM.up.data);
+    const unsigned gen = SM.up.gen + 1;
+    memset(&SM.up, 0, sizeof(SM.up));
+    SM.up.gen = gen;
+    SM.up.active = 1;
+    SM.up.skin = editing_id();
+    SM.up.data = data;
+    SM.up.len = len;
+    snprintf(SM.up.slot, sizeof(SM.up.slot), "%s", slot);
+    snprintf(SM.up.type, sizeof(SM.up.type), "%s", type);
+    snprintf(SM.up.category, sizeof(SM.up.category), "%s", category);
+    snprintf(SM.up.file_name, sizeof(SM.up.file_name), "%s", file_name);
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "asset_type", type);
+    if (category[0]) cJSON_AddStringToObject(body, "category", category);
+    cJSON_AddStringToObject(body, "fileName", file_name);
+    cJSON_AddNumberToObject(body, "size", (double) len);
+    char path[64];
+    snprintf(path, sizeof(path), "/skins/%lld/upload", (long long) SM.up.skin);
+    const int sent = v10_gapi("POST", path, body, on_up_key, (void *) (uintptr_t) gen);
+    cJSON_Delete(body);
+    if (!sent) up_end("Failed to fetch");
+}
+
+// iÍïîîíî (:125342-125356): the picked model's extension as fileExt (hasAnim when the model was a GLTF), glow with
+// the glow toggle and an emissive texture
+static void apply_config(void) {
+    if (!SM.editing) return;
+    cJSON *cfg = editing_config();
+    if (SM.model_ext[0]) {
+        const int was_gltf = !strcmp(jstr(cfg, "fileExt"), "gltf");
+        put(cfg, "fileExt", cJSON_CreateString(SM.model_ext));
+        if (was_gltf) put(cfg, "hasAnim", cJSON_CreateTrue());
+    }
+    if (SM.has_glow && cfg_true(cJSON_GetObjectItemCaseSensitive(cfg, "customTextures"), "emissive")) put(cfg, "glow", cJSON_CreateTrue());
+    changed();
+}
+
+static const DropKind *drop_kind(const char *type) {
+    return !strcmp(type, "model") ? &DROP_MODEL : !strcmp(type, "texture") ? &DROP_TEXTURE : !strcmp(type, "sound") ? &DROP_SOUND : NULL;
+}
+
+static void slot_name(const char *type, const char *category, char *out, const size_t n) {
+    if (!strcmp(type, "model")) snprintf(out, n, "model");
+    else snprintf(out, n, "%s:%s", type, category[0] ? category : !strcmp(type, "texture") ? "diffuse" : "shoot");
+}
+
+// a file for a section: the drop zone's check (iììiíïí's validateFile, :11960-11975), then the section's
+// onFileSelected (the model's / a texture's / a sound's, :125357-125386, :125405-125455, :125476-125495)
+static void file_chosen(const char *type, const char *category, const char *path) {
+    const DropKind *k = drop_kind(type);
+    if (!k || !SM.editing || !path || !path[0]) return;
+    char slot[24], ext[16];
+    slot_name(type, category, slot, sizeof(slot));
+    const char *cat = strchr(slot, ':') ? strchr(slot, ':') + 1 : "";
+    SlotState *st = slot_state(slot, 1);
+    if (!st) return;
+    size_t len = 0;
+    unsigned char *data = read_whole(path, &len);
+    const char *name = base_name(path);
+    name_ext(name, ext, sizeof(ext));
+    st->file_name[0] = st->drop_error[0] = 0;
+    if (!data) snprintf(st->drop_error, sizeof(st->drop_error), "The file could not be read"); // KrunkNative: the path is the dialog's
+    else if (k->max && (long long) len > k->max) {
+        char max[24];
+        size_text(max, sizeof(max), k->max);
+        snprintf(st->drop_error, sizeof(st->drop_error), "File size exceeds %s limit", max);
+    } else {
+        char list[64];
+        snprintf(list, sizeof(list), ",%s,", k->accept);
+        char needle[24];
+        snprintf(needle, sizeof(needle), ",%s,", ext);
+        if (!strstr(list, needle)) {
+            StrBuf sb = {0};
+            sb_append(&sb, "File type not supported. Accepted types: ");
+            for (const char *p = k->accept; *p; p++) sb_append(&sb, *p == ',' ? ", " : (char[2]) {*p, 0});
+            char *t = sb_finish(&sb);
+            snprintf(st->drop_error, sizeof(st->drop_error), "%s", t ? t : "");
+            free(t);
+        }
+    }
+    if (st->drop_error[0]) {
+        free(data);
+        return;
+    }
+    snprintf(st->file_name, sizeof(st->file_name), "%s", name);
+    st->upload_error[0] = 0;
+    const char *wait = "";
+    if (!strcmp(type, "model")) {
+        snprintf(SM.model_ext, sizeof(SM.model_ext), "%s", ext + 1);
+        wait = "Please save the skin first before uploading model";
+    } else if (!strcmp(type, "texture")) {
+        if (!strcmp(cat, "emissive") && !SM.has_glow) SM.has_glow = 1; // the drop zone's file turns its setting on
+        wait = "Please save the skin first before uploading textures";
+    } else wait = "Please save the skin first before uploading sound";
+    if (!editing_id()) {
+        set_upload_error(slot, wait);
+        free(data);
+        apply_config();
+        return;
+    }
+    if (SM.up.active) { // KrunkNative: one upload at a time (v10 runs each section's at once)
+        set_upload_error(slot, "Another upload is still running");
+        free(data);
+        return;
+    }
+    up_start(slot, type, cat, name, data, len);
+}
+
+// the hidden <input type=file>'s dialog: the platform's (ed_pick_file); its answer goes to the section asked
+static struct {
+    char type[16], category[16];
+    unsigned gen;
+} g_pick;
+
+static void on_picked(void *user, const char *path) {
+    (void) user;
+    if (g_pick.gen != SM.gen || !SM.depth) return;
+    file_chosen(g_pick.type, g_pick.category, path);
+    render();
+}
+
+// a section's Remove (and the drop zone's remove-file button): the model (onModelRemoved :125388), a texture
+// (iIíiïïï :125456, iIiîïïi), a sound (iÎííiïí :125496)
+static void unset_asset(const char *type, const char *category) {
+    char slot[24];
+    slot_name(type, category, slot, sizeof(slot));
+    SlotState *st = slot_state(slot, 0);
+    if (st) st->file_name[0] = st->drop_error[0] = st->upload_error[0] = 0;
+    cJSON *cfg = editing_config();
+    const char *cat = strchr(slot, ':') ? strchr(slot, ':') + 1 : "";
+    if (!strcmp(type, "model")) {
+        SM.model_ext[0] = 0;
+        put(cfg, "customModel", cJSON_CreateFalse());
+        apply_config();
+    } else if (!strcmp(type, "texture")) {
+        cJSON *tex = cJSON_GetObjectItemCaseSensitive(cfg, "customTextures");
+        if (cJSON_IsObject(tex)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(tex, cat);
+            if (!tex->child) cJSON_DeleteItemFromObjectCaseSensitive(cfg, "customTextures");
+        }
+        if (!strcmp(cat, "emissive")) {
+            cJSON_DeleteItemFromObjectCaseSensitive(cfg, "glow");
+            cJSON_DeleteItemFromObjectCaseSensitive(cfg, "pulsT");
+        }
+        apply_config();
+    } else if (!strcmp(type, "sound")) {
+        put(cfg, !strcmp(cat, "swap") ? "customSwapSound" : !strcmp(cat, "inspect") ? "customInspectSound" : "customSound", cJSON_CreateFalse());
+        apply_config();
+    }
+}
+
+// ------------------------------------------------------------------ Shader Studio's edits
+
+static cJSON *part_at(const int i) { return cJSON_GetArrayItem(SM.sh.parts, i); }
+
+static cJSON *part_params(cJSON *part) {
+    cJSON *p = cJSON_GetObjectItemCaseSensitive(part, "params");
+    if (!cJSON_IsObject(p)) {
+        put(part, "params", cJSON_CreateObject());
+        p = cJSON_GetObjectItemCaseSensitive(part, "params");
+    }
+    return p;
+}
+
+static const cJSON *param_named(const cJSON *params, const char *name) {
+    const cJSON *p;
+    cJSON_ArrayForEach(p, params) if (!strcmp(jstr(p, "name"), name)) return p;
+    return NULL;
+}
+
+// a value editor's text as the param's type ("#rrggbb", a number, "x, y, z")
+static cJSON *param_parse(const char *type, const char *text) {
+    if (!strcmp(type, "color")) {
+        cJSON *v = cJSON_CreateString(text);
+        cJSON *d = param_default("color", v);
+        cJSON_Delete(v);
+        return d;
+    }
+    cJSON *a = cJSON_CreateArray();
+    const char *p = text;
+    while (*p) {
+        char *end = NULL;
+        const double d = strtod(p, &end);
+        if (end == p) {
+            p++;
+            continue;
+        }
+        cJSON_AddItemToArray(a, cJSON_CreateNumber(d));
+        p = end;
+    }
+    cJSON *out = param_default(type, cJSON_GetArraySize(a) == 1 && !strcmp(type, "float") ? a->child : a);
+    cJSON_Delete(a);
+    return out;
+}
+
+// onChange (:127180-127200): itemConfig.customShader {type: "graph", graph, applyToAll, parts: {nodeName: {params}}}
+static void shader_write(void) {
+    cJSON *cs = cJSON_CreateObject();
+    cJSON_AddStringToObject(cs, "type", "graph");
+    cJSON_AddItemToObject(cs, "graph", cJSON_Duplicate(SM.sh.graph, 1));
+    cJSON_AddBoolToObject(cs, "applyToAll", SM.sh.apply_all);
+    if (!SM.sh.apply_all) {
+        cJSON *parts = cJSON_AddObjectToObject(cs, "parts");
+        const cJSON *part;
+        cJSON_ArrayForEach(part, SM.sh.parts) {
+            char name[64];
+            trimmed(name, sizeof(name), jstr(part, "nodeName"));
+            if (!name[0] || cJSON_GetObjectItemCaseSensitive(parts, name)) continue;
+            cJSON *e = cJSON_AddObjectToObject(parts, name);
+            const cJSON *params = cJSON_GetObjectItemCaseSensitive(part, "params");
+            cJSON_AddItemToObject(e, "params", cJSON_IsObject(params) ? cJSON_Duplicate(params, 1) : cJSON_CreateObject());
+        }
+    }
+    put(editing_config(), "customShader", cs);
+    changed();
+}
+
+static void shader_op(const char *op, const HtmlArg *args, const int argc);
+
+// ------------------------------------------------------------------ Capture Thumbnail (:124566-124570, :124764-124790)
+
+static void capture(void) {
+    if (!editing_id()) {
+        snprintf(SM.error, sizeof(SM.error), "Please save the skin first before capturing a thumbnail");
+        return;
+    }
+    if (SM.capturing || SM.up.active) return;
+    SM.capturing = 1;
+    SM.captured = 0;
+    unsigned char *rgba = viewer_embed_capture(CAPTURE_SIZE);
+    size_t n = 0;
+    unsigned char *png = rgba ? png_encode_rgba(rgba, CAPTURE_SIZE, CAPTURE_SIZE, &n) : NULL;
+    free(rgba);
+    if (!png) { // the iframe's capture never answers (no showcase shown): Capturing... stays in v10; here it ends
+        SM.capturing = 0;
+        snprintf(SM.error, sizeof(SM.error), "Failed to upload thumbnail: %s", "the preview is not shown");
+        return;
+    }
+    up_start("thumbnail", "thumbnail", "", "thumbnail.png", png, n);
+}
+
+// ------------------------------------------------------------------ Test (testSkinSandbox, :204469-204610)
+
+// the class whose primary is weapon index w (setClass's search), or the first with a secondary; 0 when none
+static int test_class(const int secondary, const int w) {
+    const ClassConfig *classes = rules_classes();
+    const size_t count = rules_class_count();
+    for (size_t i = 0; classes && i < count; i++) {
+        if (secondary ? classes[i].secondary : classes[i].loadout && classes[i].loadout[0] == w) return (int) i;
+    }
+    return 0;
+}
+
+static void test_apply(Client *client, Player *me) {
+    const int type = (int) jnum(g_test.skin, "type");
+    const int id = (int) g_test.id;
+    client_drop_player_mesh(client, me);
+    const char *slot = "-";
+    switch (type) {
+    case 0: {
+        const int weapon = (int) jnum(g_test.skin, "weapon");
+        if (weapon < 1) break;
+        const Weapon *w = rules_weapon(weapon - 1);
+        const int secondary = w && w->secondary;
+        const int cls = test_class(secondary, weapon - 1);
+        if (me->class_index != cls || (secondary && me->secondary_index != weapon - 1))
+            player_switch_class(me, cls, secondary ? weapon - 1 : me->secondary_index);
+        if (secondary) me->skins.secondary = id, slot = "secondary";
+        else me->skins.primary = id, slot = "primary";
+        break;
+    }
+    case 1: me->cosmetics.hat = id, slot = "hat"; break;
+    case 15: me->cosmetics_v7.head = id, slot = "head"; break;
+    case 7: me->cosmetics.face = id, slot = "face"; break;
+    case 2: me->cosmetics.body = id, slot = "body"; break;
+    case 14: me->cosmetics_v7.back = id, slot = "back"; break;
+    case 6: me->cosmetics.waist = id, slot = "waist"; break;
+    case 8: me->cosmetics_v7.shoe = id, slot = "shoe"; break;
+    case 11: me->cosmetics_v7.wrist = id, slot = "wrist"; break;
+    case 5: me->cosmetics.dye = id, slot = "dye"; break;
+    case 3: me->skins.melee = id, slot = "melee"; break;
+    case 9: me->cosmetics_v7.pet = id, slot = "pet"; break;
+    case 12:
+        if (me->cosmetics_v7.charms[1] != -1) me->cosmetics_v7.charms[1] = id;
+        me->cosmetics_v7.charms[0] = id, slot = "charm";
+        break;
+    default: break;
+    }
+    client_add_player_mesh(client, me, me->render_you); // players.regenMeshes
+    fprintf(stderr, "[skins] test %d type=%d slot=%s class=%d\n", id, type, slot, me->class_index);
+}
+
+// each frame: 50 ms after Test, setSkin; then the sandbox player's slot once it is in the game (KrunkNative waits
+// up to TEST_WAIT_MS for it: v10's tmpPlayer is there at once)
+static void test_tick(void) {
+    if (!g_test.skin || now_ms() < g_test.due) return;
+    if (!g_test.class_asked) { // skinManager.setSkin(id, skin)
+        g_test.class_asked = 1;
+        viewer_skin_define((int) g_test.id, g_test.skin);
+        g_test.until = now_ms() + TEST_WAIT_MS;
+    }
+    MenuUi *ui = menu_ui();
+    Client *client = ui ? ui->client : NULL;
+    Player *me = client ? client->me : NULL;
+    if (me && me->active && me->mesh) test_apply(client, me);
+    else if (now_ms() < g_test.until) return;
+    else fprintf(stderr, "[skins] test %lld: no player\n", (long long) g_test.id);
+    cJSON_Delete(g_test.skin);
+    memset(&g_test, 0, sizeof(g_test));
+}
+
+// the preview JSON 300 ms after a change: a new iframe src (viewer_embed follows it), or the pane's first render
+static void preview_tick(void) {
+    if (SM.preview_due <= 0 || now_ms() < SM.preview_due) return;
+    SM.preview_due = 0;
+    if (!SM.editing) return;
+    char *q = preview_query();
+    if (!q) return;
+    const int first = !SM.preview;
+    free(SM.preview);
+    SM.preview = q;
+    const HtmlElem frame = first ? 0 : html_dom_by_id("knSmPreview");
+    const int type = (int) jnum(SM.editing, "type");
+    if (frame && type != T_PLAYER_CARD && type != T_EMOJI) {
+        StrBuf sb = {0};
+        sb_appendf(&sb, "/viewer.html?nobg%s&showcase=%s", type == T_PAINT ? "&anim" : "", q);
+        char *src = sb_finish(&sb);
+        if (src) html_dom_set_attr(frame, "src", src);
+        free(src);
+    } else render();
+}
+
+// an inline handler's argument: a literal, or this.value / this.checked (events.c fills .str / .num)
+static int arg_is_str(const HtmlArg *args, const int argc, const int i) {
+    return i < argc && (args[i].kind == HTML_ARG_STR || args[i].kind == HTML_ARG_THIS_VALUE);
 }
 
 static int64_t arg_i64(const HtmlArg *args, const int argc, const int i) {
     if (i >= argc) return 0;
-    if (args[i].kind == HTML_ARG_NUM || args[i].kind == HTML_ARG_BOOL) return (int64_t) args[i].num;
-    if (args[i].kind == HTML_ARG_STR && args[i].str) return strtoll(args[i].str, NULL, 10);
+    if (args[i].kind == HTML_ARG_NUM || args[i].kind == HTML_ARG_BOOL || args[i].kind == HTML_ARG_THIS_CHECKED) return (int64_t) args[i].num;
+    if (arg_is_str(args, argc, i) && args[i].str) return strtoll(args[i].str, NULL, 10);
     return 0;
 }
 
 static const char *arg_s(const HtmlArg *args, const int argc, const int i) {
-    return i < argc && args[i].kind == HTML_ARG_STR && args[i].str ? args[i].str : "";
+    return arg_is_str(args, argc, i) && args[i].str ? args[i].str : "";
+}
+
+static void shader_op(const char *op, const HtmlArg *args, const int argc) {
+    shader_load();
+    const int i = (int) arg_i64(args, argc, 2);
+    if (!strcmp(op, "toggle")) SM.sh.open = !SM.sh.open;
+    else if (!strcmp(op, "applyAll")) SM.sh.apply_all = arg_i64(args, argc, 2) != 0;
+    else if (!strcmp(op, "addPart")) {
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "nodeName", "");
+        cJSON_AddObjectToObject(e, "params");
+        cJSON_AddItemToArray(SM.sh.parts, e);
+    } else if (!strcmp(op, "removePart")) {
+        if (i >= 0 && i < cJSON_GetArraySize(SM.sh.parts)) cJSON_DeleteItemFromArray(SM.sh.parts, i);
+    } else if (!strcmp(op, "partName")) {
+        cJSON *part = part_at(i);
+        if (part) put(part, "nodeName", cJSON_CreateString(arg_s(args, argc, 3)));
+        return; // the field keeps its caret: no new markup
+    } else if (!strcmp(op, "copyDefaults") || !strcmp(op, "override") || !strcmp(op, "param")) {
+        cJSON *part = part_at(i);
+        if (!part) return;
+        cJSON *params = graph_params();
+        cJSON *pv = part_params(part);
+        if (!strcmp(op, "copyDefaults")) {
+            const cJSON *p;
+            cJSON_ArrayForEach(p, params) put(pv, jstr(p, "name"), cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(p, "default"), 1));
+        } else {
+            const char *name = arg_s(args, argc, 3);
+            const cJSON *p = param_named(params, name);
+            if (p && !strcmp(op, "override"))
+                put(pv, name, arg_i64(args, argc, 4) ? cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(p, "default"), 1) : NULL);
+            else if (p) put(pv, name, param_parse(jstr(p, "type"), arg_s(args, argc, 4)));
+        }
+        cJSON_Delete(params);
+    } else if (!strcmp(op, "refresh")) { // Refresh Preview: the skin's customShader, the preview with it
+        shader_write();
+        SM.sh.preview = 1;
+    } else if (!strcmp(op, "clearPreview")) {
+        SM.sh.preview = 0;
+        SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+    } else if (!strcmp(op, "remove")) { // Remove Shader
+        cJSON_DeleteItemFromObjectCaseSensitive(editing_config(), "customShader");
+        cJSON_Delete(SM.sh.graph);
+        cJSON_Delete(SM.sh.parts);
+        SM.sh.graph = default_graph();
+        SM.sh.parts = cJSON_CreateArray();
+        SM.sh.apply_all = 1;
+        SM.sh.legacy = 0;
+        SM.sh.preview = 0;
+        changed();
+    }
 }
 
 int v10_skin_manager_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -811,7 +2092,7 @@ int v10_skin_manager_handle(const char *name, const HtmlEvent *ev, const HtmlArg
     if (!strcmp(op, "set")) {
         char value[32];
         const int64_t n = arg_i64(args, argc, 2);
-        if (argc > 2 && args[2].kind == HTML_ARG_STR) snprintf(value, sizeof(value), "%s", arg_s(args, argc, 2));
+        if (arg_is_str(args, argc, 2)) snprintf(value, sizeof(value), "%s", arg_s(args, argc, 2));
         else snprintf(value, sizeof(value), "%lld", (long long) n);
         on_set(arg_s(args, argc, 1), value);
     } else if (!strcmp(op, "tab")) { // iÏîïîïí
@@ -820,14 +2101,81 @@ int v10_skin_manager_handle(const char *name, const HtmlEvent *ev, const HtmlArg
     } else if (!strcmp(op, "back")) { // iìiiíîi
         cJSON_Delete(SM.editing);
         SM.editing = NULL;
+        free(SM.preview);
+        SM.preview = NULL;
+        SM.preview_due = 0;
         SM.saved = 1;
         SM.error[0] = 0;
     } else if (!strcmp(op, "save")) {
         if (SM.saved) return 1;
         do_save();
-    } else if (!strcmp(op, "capture")) { // iììííií: the showcase iframe captures; Box Office has none
-        if (!editing_id()) snprintf(SM.error, sizeof(SM.error), "Please save the skin first before capturing a thumbnail");
-        else snprintf(SM.error, sizeof(SM.error), "Box Office has no 3D preview to capture a thumbnail from");
+    } else if (!strcmp(op, "capture")) { // iììííií: the showcase's 256 px capture as the thumbnail
+        if (SM.busy) return 1;
+        capture();
+    } else if (!strcmp(op, "pick") || !strcmp(op, "file")) { // a drop zone's click / a file for it (scripted: its path)
+        if (!SM.editing || SM.up.active) return 1;
+        const char *type = arg_s(args, argc, 1);
+        const DropKind *k = drop_kind(type);
+        if (!k) return 1;
+        if (!strcmp(op, "file")) file_chosen(type, arg_s(args, argc, 2), arg_s(args, argc, 3));
+        else {
+            snprintf(g_pick.type, sizeof(g_pick.type), "%s", type);
+            snprintf(g_pick.category, sizeof(g_pick.category), "%s", arg_s(args, argc, 2));
+            g_pick.gen = SM.gen;
+            ed_pick_file(k->accept, on_picked, NULL);
+            return 1; // on_picked renders (at once natively, later on the web)
+        }
+    } else if (!strcmp(op, "unset")) {
+        if (!SM.editing) return 1;
+        unset_asset(arg_s(args, argc, 1), arg_s(args, argc, 2));
+    } else if (!strcmp(op, "glow")) { // textureSettings.hasGlow: off removes the emissive texture
+        if (!SM.editing) return 1;
+        SM.has_glow = arg_i64(args, argc, 1) != 0;
+        if (!SM.has_glow) unset_asset("texture", "emissive");
+    } else if (!strcmp(op, "trans") || !strcmp(op, "loop")) { // Transparency / Loop while inspecting
+        if (!SM.editing) return 1;
+        put(editing_config(), !strcmp(op, "trans") ? "trans" : "inspSLoop", arg_i64(args, argc, 1) ? cJSON_CreateTrue() : NULL);
+        changed();
+    } else if (!strcmp(op, "pulse")) { // Pulse: pulsT 0.0015 / 0.003, Off deletes it
+        if (!SM.editing) return 1;
+        const char *v = arg_s(args, argc, 1);
+        put(editing_config(), "pulsT", !strcmp(v, "slow") ? cJSON_CreateNumber(0.0015) : !strcmp(v, "fast") ? cJSON_CreateNumber(0.003) : NULL);
+        changed();
+    } else if (!strcmp(op, "dye") || !strcmp(op, "undye")) { // a dye colour as parseInt(hex, 16); its remove button
+        if (!SM.editing) return 1;
+        const char *key = arg_s(args, argc, 1);
+        int known = 0;
+        for (int i = 0; i < 7; i++) known |= !strcmp(key, DYE_KEYS[i]);
+        if (!known) return 1;
+        cJSON *cfg = editing_config();
+        const int had = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(cfg, key));
+        if (!strcmp(op, "dye")) {
+            const char *hex = arg_s(args, argc, 2);
+            if (hex[0] == '#') hex++;
+            char *end = NULL;
+            const long v = strtol(hex, &end, 16);
+            if (end == hex) return 1;
+            put(cfg, key, cJSON_CreateNumber((double) v));
+        } else put(cfg, key, NULL);
+        changed();
+        if (had && !strcmp(op, "dye")) return 1; // the picker stays as it is: no new markup
+    } else if (!strcmp(op, "opac")) { // Opacity: 1 deletes opac
+        if (!SM.editing) return 1;
+        const double v = atof(arg_s(args, argc, 1));
+        put(editing_config(), "opac", v >= 1.0 ? NULL : cJSON_CreateNumber(v < 0 ? 0 : v));
+        changed();
+        const HtmlElem out = html_dom_by_id("knSmOpacValue");
+        if (out) {
+            char t[16];
+            snprintf(t, sizeof(t), "%.2f", v < 0 ? 0 : v > 1 ? 1 : v);
+            html_dom_set_html(out, t);
+        }
+        return 1; // the slider keeps its drag
+    } else if (!strcmp(op, "shader")) {
+        if (!SM.editing) return 1;
+        const char *sub = arg_s(args, argc, 1);
+        shader_op(sub, args, argc);
+        if (!strcmp(sub, "partName")) return 1;
     } else if (!strcmp(op, "clear")) { // iiïììîi: the field and (at once) the filter
         SM.search[0] = SM.filter[0] = 0;
         SM.search_due = 0;
@@ -854,6 +2202,16 @@ int v10_skin_manager_handle(const char *name, const HtmlEvent *ev, const HtmlArg
         return 1;
     } else if (!strcmp(op, "test")) { // testSkinSandbox (:204469): close the view, the windows, enter the game
         if (SM.busy) return 1;
+        const cJSON *row = row_by_id(a1);
+        if (row) { // the row's game skin, with its shader as customShaderInfo (:204476-204508), 50 ms on
+            cJSON_Delete(g_test.skin);
+            memset(&g_test, 0, sizeof(g_test));
+            g_test.id = a1;
+            g_test.skin = game_skin(row);
+            cJSON *info = shader_info(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(row, "itemConfig"), "customShader"));
+            if (info) put(g_test.skin, "customShaderInfo", info);
+            g_test.due = now_ms() + TEST_DELAY_MS;
+        }
         v10_view_pop(0);
         menu_toggle_window(0);
         menu_play();
@@ -880,6 +2238,8 @@ int v10_skin_manager_key(const int key) {
 }
 
 void v10_skin_manager_tick(void) {
+    test_tick();
+    if (SM.depth) preview_tick();
     if (!SM.depth || SM.search_due <= 0 || now_ms() < SM.search_due) return;
     SM.search_due = 0;
     char t[sizeof(SM.filter)];

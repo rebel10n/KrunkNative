@@ -12,7 +12,8 @@ Covers every route v10's Studios window and studio view call: create (name rule,
 mine, get (members / invites / games / currencies, member-only), invites (send, list, cancel,
 accept, decline, expiry, 20 seats), transfer, remove / leave, games (own published maps only, one
 studio per game, the map's video id), currencies (rules, 20 in total, 5 published, publish / unpublish), analytics,
-skins, the monetization application (requirements, apply, pending, withdraw, rejection wait) and
+skins (importStudioSkin of the owner's own Skin Manager skin, once each, 20 at most, ids from 10000001, the list's
+fields, publish / unpublish, owner only), the monetization application (requirements, apply, pending, withdraw, rejection wait) and
 delete. 77 = skip (no kn_brain / websockets / database server).
 """
 import asyncio
@@ -311,7 +312,47 @@ async def scenario(port):
     st, data, err = await mem.gapi("GET", "/studios/%d/skins" % sid)
     check(st == 200 and data == [], "skins: none", (st, data, err))
     st, data, err = await own.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": 10000001})
-    check(st == 404 and code(err) == "STUDIO_SKIN_NOT_FOUND", "skins: import refused (no custom skins)", err)
+    check(st == 404 and code(err) == "STUDIO_SKIN_NOT_FOUND", "skins: import of no such custom skin is 404", err)
+    st, d, err = await own.gapi("POST", "/skins", {"name": "Studio Glow", "type": 0, "weapon": 3, "rarity": 2,
+                                                  "itemConfig": {"customThumbnail": True, "customTextures": {"diffuse": True}}})
+    mine = ((d or {}).get("skin") or {}).get("skinId", 0)
+    st, d, err = await mem.gapi("POST", "/skins", {"name": "Not Yours", "type": 1})
+    theirs = ((d or {}).get("skin") or {}).get("skinId", 0)
+    check(mine > 0 and theirs > 0, "skins: two Skin Manager skins to import", (mine, theirs))
+    st, data, err = await own.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": theirs})
+    check(st == 404 and code(err) == "STUDIO_SKIN_NOT_FOUND", "skins: another account's custom skin is 404", err)
+    st, data, err = await mem.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": theirs})
+    check(st == 403 and code(err) == "STUDIO_FORBIDDEN", "skins: only the owner imports", err)
+    st, data, err = await out.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": mine})
+    check(st == 404 and code(err) == "STUDIO_NOT_FOUND", "skins: an outsider's import is 404", err)
+    st, sk, err = await own.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": mine})
+    check(st == 200 and sk and sk["skin_id"] >= 10000001 and sk["name"] == "Studio Glow" and sk["type"] == 0 and sk["weapon"] == 3
+          and sk["rarity"] == 2 and sk["active"] is False and sk["has_thumbnail"] is True and sk["csrc"] == str(mine)
+          and re.match(r"\d{4}-\d\d-\d\dT", sk.get("created_at") or ""),
+          "skins: import -> the skin (a copy, unpublished, the game id from 10000001, csrc the custom skin)", (st, sk, err))
+    st, data, err = await own.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": mine})
+    check(st == 409 and code(err) == "STUDIO_SKIN_TAKEN", "skins: a custom skin once per studio", err)
+    st, data, err = await mem.gapi("GET", "/studios/%d/skins" % sid)
+    check(st == 200 and data == [sk], "skins: a member lists it", (st, data, err))
+    st, data, err = await out.gapi("GET", "/studios/%d/skins" % sid)
+    check(st == 404, "skins: an outsider's list is 404", (st, err))
+    st, data, err = await own.gapi("POST", "/studios/%d/skins/%d/publish" % (sid, sk["skin_id"]))
+    check(st == 200 and data == {"skin_id": sk["skin_id"], "active": True}, "skins: publish", (st, data, err))
+    st, data, err = await mem.gapi("GET", "/studios/%d/skins" % sid)
+    check(st == 200 and data and data[0]["active"] is True, "skins: the list shows it published", data)
+    st, data, err = await mem.gapi("POST", "/studios/%d/skins/%d/unpublish" % (sid, sk["skin_id"]))
+    check(st == 403 and code(err) == "STUDIO_FORBIDDEN", "skins: only the owner unpublishes", err)
+    st, data, err = await own.gapi("POST", "/studios/%d/skins/%d/unpublish" % (sid, sk["skin_id"]))
+    check(st == 200 and data == {"skin_id": sk["skin_id"], "active": False}, "skins: unpublish", (st, data, err))
+    st, data, err = await own.gapi("POST", "/studios/%d/skins/99999999/publish" % sid)
+    check(st == 404 and code(err) == "STUDIO_SKIN_NOT_FOUND", "skins: publish of no such skin is 404", err)
+    # 19 more straight into the table (the gapi's 60 writes a minute would not take 38 calls here)
+    for i in range(19):
+        q("INSERT INTO studio_skins (studio_id, custom_skin_id, name, item_config) VALUES (?, ?, ?, '{}')", sid, 900000 + i, "Bulk %d" % i)
+    st, d, err = await own.gapi("POST", "/skins", {"name": "One Too Many"})
+    st, data, err = await own.gapi("POST", "/studios/%d/skins/import" % sid, {"custom_skin_id": d["skin"]["skinId"]})
+    st2, data2, err2 = await own.gapi("GET", "/studios/%d/skins" % sid)
+    check(st == 400 and code(err) == "STUDIO_SKIN_LIMIT" and len(data2 or []) == 20, "skins: 20 per studio", (st, err, len(data2 or [])))
 
     # ---- monetization
     st, mon, err = await own.gapi("GET", "/studios/%d/monetization" % sid)

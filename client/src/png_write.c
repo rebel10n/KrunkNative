@@ -238,9 +238,10 @@ static void mem_chunk(PngBits *out, const char *type, const unsigned char *data,
     for (int i = 0; i < 4; i++) pb_byte(out, c[i]);
 }
 
-unsigned char *png_encode_rgb(const unsigned char *rgba, const int w, const int h, size_t *out_len) {
+// channels 3: RGB (alpha dropped), 4: RGBA
+static unsigned char *png_encode(const unsigned char *rgba, const int w, const int h, const int channels, size_t *out_len) {
     *out_len = 0;
-    const size_t row = (size_t) w * 3 + 1;
+    const size_t row = (size_t) w * (size_t) channels + 1;
     const size_t raw_len = row * (size_t) h;
     unsigned char *raw = malloc(raw_len ? raw_len : 1);
     if (!raw) return NULL;
@@ -249,7 +250,8 @@ unsigned char *png_encode_rgb(const unsigned char *rgba, const int w, const int 
         r[0] = 2; // Up
         const unsigned char *src = rgba + (size_t) y * w * 4, *above = y ? rgba + (size_t) (y - 1) * w * 4 : NULL;
         for (int x = 0; x < w; x++) {
-            for (int c = 0; c < 3; c++) r[1 + x * 3 + c] = (unsigned char) (src[x * 4 + c] - (above ? above[x * 4 + c] : 0));
+            for (int c = 0; c < channels; c++)
+                r[1 + x * channels + c] = (unsigned char) (src[x * 4 + c] - (above ? above[x * 4 + c] : 0));
         }
     }
     PngBits z = {0};
@@ -276,7 +278,7 @@ unsigned char *png_encode_rgb(const unsigned char *rgba, const int w, const int 
     png_be32(ihdr, (uint32_t) w);
     png_be32(ihdr + 4, (uint32_t) h);
     ihdr[8] = 8;
-    ihdr[9] = 2; // RGB
+    ihdr[9] = channels == 4 ? 6 : 2; // RGBA / RGB
     ihdr[10] = ihdr[11] = ihdr[12] = 0;
     mem_chunk(&out, "IHDR", ihdr, 13);
     mem_chunk(&out, "IDAT", z.buf, z.len);
@@ -288,4 +290,12 @@ unsigned char *png_encode_rgb(const unsigned char *rgba, const int w, const int 
     }
     *out_len = out.len;
     return out.buf;
+}
+
+unsigned char *png_encode_rgb(const unsigned char *rgba, const int w, const int h, size_t *out_len) {
+    return png_encode(rgba, w, h, 3, out_len);
+}
+
+unsigned char *png_encode_rgba(const unsigned char *rgba, const int w, const int h, size_t *out_len) {
+    return png_encode(rgba, w, h, 4, out_len);
 }

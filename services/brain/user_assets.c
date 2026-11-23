@@ -574,10 +574,12 @@ static long long pfp_player(const char *id) {
     return v;
 }
 
+/* ud: the rel's prefix, NULL or "skins/" (a custom skin's skins/<_id>/<file>: a map studio's on Krunker's host, a Skin
+ * Manager skin's in the upload store, user_asset_rel_is_kn) */
 static void h_asset(kn_http_req *req, void *ud) {
-    (void) ud;
+    const char *prefix = ud ? (const char *) ud : "";
     const char *id = kn_http_param(req, "id"), *file = kn_http_param(req, "file");
-    const long long pfp = pfp_player(id);
+    const long long pfp = prefix[0] ? 0 : pfp_player(id);
     if (pfp > 0 && file && !strcmp(file, "profile.png")) {
         avatar_serve_public(req, pfp);
         return;
@@ -587,7 +589,7 @@ static void h_asset(kn_http_req *req, void *ud) {
         return;
     }
     char rel[UA_REL_MAX];
-    if (!id || !file || snprintf(rel, sizeof(rel), "%s/%s", id, file) >= (int) sizeof(rel) || !user_asset_rel_ok(rel)) {
+    if (!id || !file || snprintf(rel, sizeof(rel), "%s%s/%s", prefix, id, file) >= (int) sizeof(rel) || !user_asset_rel_ok(rel)) {
         reply_status(req, 404);
         return;
     }
@@ -683,8 +685,10 @@ int user_assets_init(Brain *b) {
     if (C.video_fps < 1) C.video_fps = 1;
     if (C.video_quality < 2) C.video_quality = 2;
     if (C.video_max_s < 1) C.video_max_s = 1;
-    kn_http_route(b->http, "GET", "/api/user-assets/:id/:file", h_asset, b);
-    kn_http_route(b->http, "GET", "/user-assets/:id/:file", h_asset, b);
+    kn_http_route(b->http, "GET", "/api/user-assets/:id/:file", h_asset, NULL);
+    kn_http_route(b->http, "GET", "/user-assets/:id/:file", h_asset, NULL);
+    kn_http_route(b->http, "GET", "/api/user-assets/skins/:id/:file", h_asset, (void *) "skins/");
+    kn_http_route(b->http, "GET", "/user-assets/skins/:id/:file", h_asset, (void *) "skins/");
 #ifndef KN_HAVE_CURL
     if (C.enabled) KN_WARN(MOD, "built without libcurl: only the asset tree and the cache answer");
 #endif

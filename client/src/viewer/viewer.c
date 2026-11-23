@@ -12,7 +12,8 @@
 //   swap=-1|1       show the secondary / melee      nosup   keep skinIdP/S through the first f451()
 //   cosmetic=<i>    render page for one store item (512 x 512 canvas, "Render" button)
 //   auto            with cosmetic: export every item from <i> on      size=<px> export size
-//   showcase=<i>    one store item on its own, auto-rotating (the store's item view)
+//   showcase=<i>    one store item on its own, auto-rotating (the store's item view); a JSON object: that game
+//                   skin, defined at VIEWER_SHOWCASE_SKIN_INDEX (v10.0.7's Skin Manager preview)
 //   nogui           no panel, the weapon close up    noTex   untextured models
 //   nobg            no background gradient
 //   dev             the Render <slot> buttons, the <Slot> / <Weapon> Config editors with Export
@@ -683,6 +684,16 @@ static void state_from_params(void) {
     g_viewer.showcase = js_parse_int(viewer_param_get("showcase"), &ok);
     g_viewer.showcase_set = ok;
     if (!ok) g_viewer.showcase = -1;
+    // v10.0.7's Skin Manager preview: showcase=encodeURIComponent(JSON.stringify(gameSkin)) (deob-10.0.7.js:124686-124704)
+    const char *showcase = viewer_param_get("showcase");
+    if (!ok && showcase && showcase[0] == '{') {
+        cJSON *skin = cJSON_Parse(showcase);
+        if (skin && viewer_skin_define(VIEWER_SHOWCASE_SKIN_INDEX, skin)) {
+            g_viewer.showcase = VIEWER_SHOWCASE_SKIN_INDEX;
+            g_viewer.showcase_set = 1;
+        }
+        cJSON_Delete(skin);
+    }
     // the shown copy's paint (v10.0.3 deob:123160-123173: "&paint=" + colour without its "#", "&paintShader=" + n)
     g_viewer.paint = WORN_SKIN_PAINT_NONE;
     const char *paint = viewer_param_get("paint");
@@ -907,7 +918,7 @@ const AppPage *viewer_app_page(void) {
 static struct {
     int active;
     int index;
-    char query[192]; // the iframe's query: the shown copy's wear / paint / seed with the index
+    char query[8192]; // the iframe's query: the shown copy's wear / paint / seed with the index (or the skin's JSON)
 } g_embed;
 
 void viewer_embed_fini(void) {
@@ -918,22 +929,22 @@ void viewer_embed_fini(void) {
     memset(&g_embed, 0, sizeof(g_embed));
 }
 
-// the iframe of #itemViewPop that shows viewer.html?...showcase=<i>: its store index, -1 = none, and its query
+// the iframe that shows viewer.html?...showcase=<i>: #itemViewPop's (the store's item view) or the Skin Manager's
+// preview (#knSmPreview, showcase=<the skin's JSON>); its store index (VIEWER_SHOWCASE_SKIN_INDEX for a JSON
+// skin, -1 = none) and its query
 static HtmlElem embed_frame(int *index, char *query_out, const size_t query_n) {
     *index = -1;
     query_out[0] = '\0';
     const HtmlElem pop = html_dom_by_id("itemViewPop");
     char display[16] = "";
-    if (!pop) return 0;
-    html_dom_get_style(pop, "display", display, sizeof(display));
-    if (!strcmp(display, "none") || !display[0]) return 0;
-    const HtmlElem frame = html_dom_query(pop, "iframe");
-    char src[224];
+    if (pop) html_dom_get_style(pop, "display", display, sizeof(display));
+    const HtmlElem frame = pop && display[0] && strcmp(display, "none") ? html_dom_query(pop, "iframe") : html_dom_by_id("knSmPreview");
+    static char src[sizeof g_embed.query + 64];
     if (!frame || html_dom_get_attr(frame, "src", src, sizeof(src)) < 0 || !strstr(src, "viewer.html")) return 0;
     const char *query = strchr(src, '?');
     const char *showcase = query ? strstr(query, "showcase=") : NULL;
     if (!showcase) return 0;
-    *index = atoi(showcase + 9);
+    *index = !strncmp(showcase + 9, "%7B", 3) || showcase[9] == '{' ? VIEWER_SHOWCASE_SKIN_INDEX : atoi(showcase + 9);
     snprintf(query_out, query_n, "%s", query + 1);
     return frame;
 }
@@ -946,7 +957,7 @@ void viewer_embed_frame(Client *client, const float delta) {
 #else
     if (g_ui.entered || !client || !client->window) return; // the viewer page owns the scene
     int index = -1;
-    char query[sizeof(g_embed.query)];
+    static char query[sizeof(g_embed.query)];
     const HtmlElem frame = embed_frame(&index, query, sizeof(query));
     HtmlRect rect = {0};
     if (!frame || !html_dom_get_rect(frame, &rect) || rect.w < 1.0f || rect.h < 1.0f) {
@@ -960,6 +971,10 @@ void viewer_embed_frame(Client *client, const float delta) {
         g_viewer.client = client;
         params_parse(query);
         state_from_params();
+        if (index == VIEWER_SHOWCASE_SKIN_INDEX && g_viewer.showcase != index) { // a JSON skin that did not parse
+            viewer_embed_fini();
+            return;
+        }
         g_embed.active = 1;
         g_embed.index = index;
         snprintf(g_embed.query, sizeof(g_embed.query), "%s", query);
@@ -981,5 +996,15 @@ void viewer_embed_frame(Client *client, const float delta) {
     const int y = fb_h - (int) lroundf(rect.y * scale) - h;
     vscene_tick(fminf(delta, 0.1f) * 1000.0f);
     vscene_render_rect(x, y, w, h, fb_w, fb_h);
+#endif
+}
+
+unsigned char *viewer_embed_capture(const int size) {
+#ifdef __EMSCRIPTEN__
+    (void) size;
+    return NULL;
+#else
+    if (!g_embed.active || size <= 0) return NULL;
+    return vscene_capture(size, size, 0);
 #endif
 }

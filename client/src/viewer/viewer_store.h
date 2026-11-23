@@ -218,6 +218,13 @@ void viewer_skin_edits_clear(void);
 // viewer_skin_define.c fills it from the server's JSON (viewer_skin_define).
 #define VIEWER_SKIN_INDEX_MAX 65535
 ViewerSkin *viewer_skin_define_slot(int index);
+// The dye of a defined type-5 index (a custom skin's skinCol / shirtCol / ... colours): the entry viewer_dye() returns
+// for it from then on, zeroed when new; NULL out of range / out of slots. viewer_dye_define_drop: no dye any more.
+ViewerDye *viewer_dye_define_slot(int index);
+void viewer_dye_define_drop(int index);
+// The showcase of a game skin given whole (viewer.html?showcase=<JSON>, the Skin Manager's preview: v10.0.7 puts the
+// edited skin's JSON there, deob-10.0.7.js:124686-124704): the index it is defined at (viewer.c state_from_params)
+#define VIEWER_SHOWCASE_SKIN_INDEX 2100000000
 // The server's store.skins[index] = skin (a JSON object as v10 keeps it): fills the index's definition slot
 // (client/src/viewer/viewer_skin_define.c). 1 = applied, 0 = not an object / out of range / out of slots.
 struct cJSON;

@@ -12,6 +12,7 @@
 #include <audio.h>
 #include <client.h>
 #include <gltf.h>
+#include <kn_fs.h>
 #include <user_asset.h>
 
 #include <stdio.h>
@@ -98,9 +99,31 @@ void asset_fetch_client_frame(void) {
     texture_placeholders_check(); // a placeholder whose file the fetch gave up shows the checker (loaders.c)
 }
 
+int asset_fetch_client_put(const char *rel, const void *data, const size_t n) {
+    const char *base = assets_path();
+    if (!base || !*base || !rel || !*rel || strstr(rel, "..")) return 0;
+    char path[4096];
+    const size_t blen = strlen(base);
+    snprintf(path, sizeof path, "%s%suser-assets/%s", base, blen && base[blen - 1] == '/' ? "" : "/", rel);
+    if (data) {
+        if (!kn_fs_mkdirs_parent(path) || !kn_fs_write_atomic(path, data, n)) return 0;
+    } else if (remove(path) != 0 && kn_fs_size(path) >= 0) return 0;
+    asset_fetch_forget(path);
+    if (data) arrived(NULL, path); // the loaders take the new file (a removed one: nothing loads it any more)
+    return 1;
+}
+
 void asset_fetch_client_shutdown(void) {
     if (!asset_fetch_running()) return;
     asset_set_fetch_hook(NULL);
     asset_fetch_stop();
+}
+#else
+#include <asset_fetch.h>
+int asset_fetch_client_put(const char *rel, const void *data, const size_t n) {
+    (void) rel;
+    (void) data;
+    (void) n;
+    return 0;
 }
 #endif

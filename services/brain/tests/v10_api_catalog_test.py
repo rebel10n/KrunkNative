@@ -233,8 +233,8 @@ def section_skins(c):
           st == 200 and isinstance(dup, int) and dup != sid and (dig(body, "data", "skin") or {}).get("name") == "Renamed (Copy)",
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "POST", "/skins/%d/upload" % sid, {"type": "thumbnail"}, token=c.tok_a)
-    check("[76] POST /skins/:id/upload -> 403 refusal, a text error: Box Office has no asset store for skin files",
-          text_error(st, body, 403) and "skin" in body["error"].lower(), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[76] POST /skins/:id/upload without its FormData file -> 400 text error \"Missing File\" (the upload itself: skins_test.py)",
+          text_error(st, body, 400) and body["error"] == "Missing File", "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "DELETE", "/skins/%d" % sid, token=c.tok_b)
     check("[75] DELETE another account's skin -> 404", text_error(st, body, 404), "HTTP %d %s" % (st, json.dumps(body)[:160]))
     for k in (sid, dup):

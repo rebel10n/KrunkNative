@@ -24,10 +24,13 @@ static int digits(const char *s, const size_t n) {
 // A map studio's custom skin's files under skins/<folder>/ (folder: its _id, or for a weapon's texture its skin index;
 // letters, digits, '_' or '-'): the model (customModel src "skins/" + _id + "/model" + fileExt, deob-10.0.3.js:194709,
 // :233093), the texture and its glow map (customTextures texSrc ".../texture" + "_e", :194710, :231924), and the shot /
-// swap / inspect sounds ("skins/" + _id, ".../sound_swap", ".../sound_inspect", :196407, :198265, :195533, :225205)
+// swap / inspect sounds ("skins/" + _id, ".../sound_swap", ".../sound_inspect", :196407, :198265, :195533, :225205); and
+// v10.0.7's Skin Manager's (its skins' _id is the skinId): the wear and paint maps (texture_w / texture_p,
+// deob-10.0.7.js:126536, :126152) and the captured thumbnail (thumbnail.png, :124964, :226227)
 static int custom_skin_file(const char *rel) {
     static const char *const files[] = {"model.obj", "model.gltf", "model.glb", "model.fbx", "texture.png", "texture_e.png",
-                                        "sound.mp3", "sound_swap.mp3", "sound_inspect.mp3"};
+                                        "texture_w.png", "texture_p.png", "thumbnail.png", "sound.mp3", "sound_swap.mp3",
+                                        "sound_inspect.mp3"};
     if (strncmp(rel, "skins/", 6) != 0) return 0;
     const char *id = rel + 6, *slash = strchr(id, '/');
     if (!slash || slash == id || slash - id > 64) return 0;
@@ -102,6 +105,7 @@ int user_asset_content_ok(const char *rel, const unsigned char *data, const size
 int user_asset_rel_is_kn(const char *rel) {
     if (!rel) return 0;
     if (rel[0] == 'm' && rel[1] == 'd') rel += 2; // a mod pack, md<mod_id>/ (Box Office mods take ids from the same base)
+    else if (!strncmp(rel, "skins/", 6)) rel += 6; // a Skin Manager skin's skins/<skinId>/ (skins.c: ids from the same base)
     long long id = 0;
     size_t n = 0;
     for (; rel[n] >= '0' && rel[n] <= '9'; n++) {

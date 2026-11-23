@@ -72,6 +72,7 @@
 #include "acct_internal.h"
 #include "brain.h"
 #include "db_procs.h"
+#include "skins.h"
 #include "v10_api.h"
 
 #include <dirent.h>
@@ -109,7 +110,9 @@
 #define ZIP_UNPACKED_MAX (1024ll * MB) /* a mod's entries unpacked together (a zip bomb is refused) */
 #define ZIP_ENTRIES_MAX 20000
 
-enum { K_MODEL, K_PREFAB, K_TEXTURE, K_SOUND, K_VIDEO, K_MOD };
+enum { K_MODEL, K_PREFAB, K_TEXTURE, K_SOUND, K_VIDEO, K_MOD, K_SKIN };
+/* the upload flows: a new ticket replaces the account's open one of the same flow (ticket_open) */
+#define FLOW(kind) ((kind) == K_MOD ? 1 : (kind) == K_SKIN ? 2 : 0)
 enum { V_IMAGE, V_SOUND, V_VIDEO, V_MODEL, V_DATA, V_ZIP };
 
 /* The popup's file fields: FormData key, stored file name (model: model.<mType>), asset id letter (0 = none), check,
@@ -138,24 +141,28 @@ static const struct Field {
     {"model", NULL, 0, V_MODEL, 0},
     {"icon", "icon.png", 0, V_IMAGE, 100 * KB},          /* b6 100 kB */
     {"mod", "mod.zip", 0, V_ZIP, 0},                     /* mods_pub: 25 / 50 MB (premiumT), deob-10.0.7.js:220956 */
+    {"file", NULL, 0, V_IMAGE, 0},                       /* a Skin Manager file: its name, check and limit from the ticket */
 };
 #define FIELD_COUNT ((int) (sizeof(k_fields) / sizeof(k_fields[0])))
 
 /* the fields each kind may send (indices into k_fields) and the one it must */
 static int field_allowed(const int kind, const int f) {
     const char *k = k_fields[f].key;
-    if (!strcmp(k, "thumb")) return 1;
+    if (!strcmp(k, "thumb")) return kind != K_SKIN;
     switch (kind) {
-        case K_MODEL: return strcmp(k, "texture") && strcmp(k, "sound") && strcmp(k, "video") && strcmp(k, "data") && strcmp(k, "mod");
+        case K_MODEL:
+            return strcmp(k, "texture") && strcmp(k, "sound") && strcmp(k, "video") && strcmp(k, "data") && strcmp(k, "mod") &&
+                   strcmp(k, "file");
         case K_PREFAB: return !strcmp(k, "data");
         case K_TEXTURE: return !strcmp(k, "texture");
         case K_SOUND: return !strcmp(k, "sound");
         case K_VIDEO: return !strcmp(k, "video");
+        case K_SKIN: return !strcmp(k, "file");
         default: return !strcmp(k, "mod");
     }
 }
 
-static const char *const k_required[] = {"model", "data", "texture", "sound", "video", "mod"};
+static const char *const k_required[] = {"model", "data", "texture", "sound", "video", "mod", "file"};
 
 typedef struct Part {
     int field;
@@ -175,6 +182,7 @@ typedef struct Ticket {
     int nparts;
     uint64_t touched;  /* kn_now_ms of the last activity */
     int committing;    /* the checks or the database run: chunks and a second done are refused */
+    int64_t skin;      /* K_SKIN: the custom skin (skins.c) the file is for; name is then the file's ("texture_e.png") */
 } Ticket;
 
 static struct {
@@ -232,6 +240,7 @@ static void rm_tree(const char *dir) {
 }
 
 static const char *part_file(const Ticket *t, const Part *p, char *buf, const size_t cap) {
+    if (t->kind == K_SKIN) return t->name;
     if (k_fields[p->field].file) return k_fields[p->field].file;
     snprintf(buf, cap, "model.%s", t->ext);
     return buf;
@@ -261,6 +270,7 @@ static int ticket_save(const Ticket *t) {
     cJSON_AddNumberToObject(o, "priv", t->priv);
     cJSON_AddStringToObject(o, "ext", t->ext);
     cJSON_AddStringToObject(o, "uvc", t->uvc);
+    if (t->kind == K_SKIN) cJSON_AddNumberToObject(o, "skin", (double) t->skin);
     cJSON *parts = cJSON_AddArrayToObject(o, "parts");
     for (int i = 0; i < t->nparts; i++) {
         cJSON *p = cJSON_CreateObject();
@@ -505,10 +515,18 @@ static const char *check_file(const Ticket *t, const Part *p) {
     char rel[64];
     snprintf(rel, sizeof rel, "1/%s", file);
     const char *err = !user_asset_content_ok(rel, d, n) ? "Invalid File" : NULL;
+    const int check = t->kind != K_SKIN ? k_fields[p->field].check
+                      : !strncmp(file, "model.", 6) ? V_MODEL
+                      : strstr(file, ".mp3")        ? V_SOUND
+                                                    : V_IMAGE;
     if (!err) {
-        switch (k_fields[p->field].check) {
+        switch (check) {
             case V_IMAGE: err = check_image(d, n); break;
-            case V_SOUND: err = check_sound(d, n); break;
+            case V_SOUND:
+                /* a skin's sound may also be a WAV (RIFF....WAVE), which the client's decoder plays as well */
+                err = t->kind == K_SKIN && n >= 12 && !memcmp(d, "RIFF", 4) && !memcmp(d + 8, "WAVE", 4) ? NULL : check_sound(d, n);
+                if (err && t->kind == K_SKIN) err = "Invalid Sound (MP3 or WAV only)";
+                break;
             case V_VIDEO: err = check_video(d, n); break;
             case V_MODEL: err = check_model(t->ext, d, n); break;
             case V_ZIP: err = check_zip(d, n); break;
@@ -708,7 +726,7 @@ static Ticket *ticket_open(const Ticket *req, const uint64_t now, const char **w
      * (the editor) and a mod's (the menu) are apart */
     Ticket *slot = NULL;
     for (int i = 0; i < MAX_TICKETS; i++)
-        if (T[i].used && T[i].account == req->account && !T[i].committing && (T[i].kind == K_MOD) == (req->kind == K_MOD))
+        if (T[i].used && T[i].account == req->account && !T[i].committing && FLOW(T[i].kind) == FLOW(req->kind))
             ticket_free(&T[i]);
     for (int i = 0; i < MAX_TICKETS && !slot; i++)
         if (!T[i].used) slot = &T[i];
@@ -732,7 +750,7 @@ static Ticket *ticket_open(const Ticket *req, const uint64_t now, const char **w
         *why = "Upload Request Failed";
         return NULL;
     }
-    hour_count(req->account, now, 1);
+    if (req->kind != K_SKIN) hour_count(req->account, now, 1); /* a skin's files: skins.c's write limit instead */
     return slot;
 }
 
@@ -895,11 +913,18 @@ static void reply_text(kn_http_req *req, const int status, const char *text) {
     kn_http_respond(req, status, "text/plain; charset=utf-8", text, strlen(text));
 }
 
-/* a refusal on the mods' route: {error: {code, message}} with Krunker's MODS_UPLOAD_* code (errors.mods.*,
- * deob-10.0.7.js:223312-223324), the reason as the message */
+/* a refusal (mod: the route, 0 the editor's assets, 1 the mods', 2 the Skin Manager's). The mods': {error: {code,
+ * message}} with Krunker's MODS_UPLOAD_* code (errors.mods.*, deob-10.0.7.js:223312-223324), the reason as the message;
+ * the skins': {error: "<reason>"}, as every skins.* call but list (skins.c: its service throws res.error) */
 static void reply_fail(kn_http_req *req, const int mod, const int status, const char *text) {
     if (!mod) {
         reply_text(req, status, text);
+        return;
+    }
+    if (mod == 2) {
+        brain_cors_headers(req);
+        kn_http_set_header(req, "Cache-Control", "no-store");
+        v10_reply_text_error(req, status, text);
         return;
     }
     const char *code = !strncmp(text, "MODS_", 5)                                      ? text
@@ -925,7 +950,7 @@ static void reply_got(kn_http_req *req, const long long got) {
 typedef struct Commit {
     Ticket *t;
     char id[40];
-    int mod;           /* the mods' route: its answers are v10's {data} / {error} */
+    int mod;           /* the route (reply_fail): 1 the mods' and 2 the skins' answer v10's {data} / {error} */
     kn_http_req *req;
     const char *err;   /* the worker's verdict */
     char data[160];    /* the asset's data JSON (its letters) */
@@ -933,6 +958,7 @@ typedef struct Commit {
 } Commit;
 
 static void commit_db_done(kn_db_result *res, void *ud);
+static void skin_commit(Commit *c);
 
 /* loop thread: the checks are done */
 static void commit_checked(kn_loop *loop, void *ud) {
@@ -952,6 +978,10 @@ static void commit_checked(kn_loop *loop, void *ud) {
         return;
     }
     char me[24], cat[24], kb[24], kind[24];
+    if (t->kind == K_SKIN) {
+        skin_commit(c);
+        return;
+    }
     if (t->kind == K_MOD) {
         if (kn_db_call(g_b->db, &P_MOD_PUBLISH, KN_DB_ARGS(acct_itoa(me, t->account), t->name, c->data, acct_itoa(kb, C.max_assets)),
                        commit_db_done, c) != 0) {
@@ -1034,7 +1064,7 @@ static void commit_db_done(kn_db_result *res, void *ud) {
         t->committing = 0;
         if (!user) KN_WARN(MOD, "publish of %s failed: %s", t->name, kn_db_error(res));
         if (kn_http_req_alive(c->req))
-            reply_fail(c->req, c->mod, user ? 400 : 503, user ? user : c->mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+            reply_fail(c->req, c->mod, user ? 400 : 503, user ? user : c->mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
     } else {
         cJSON *o = cJSON_Parse(kn_db_get(res, 0, 0));
         const int64_t id = (int64_t) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(o, "id"));
@@ -1043,7 +1073,7 @@ static void commit_db_done(kn_db_result *res, void *ud) {
         if (id <= 0 || install(t, id) != 0) {
             KN_WARN(MOD, "storing %s %lld of %s failed: %s", t->kind == K_MOD ? "mod" : "asset", (long long) id, t->username, strerror(errno));
             t->committing = 0;
-            if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 503, c->mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+            if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 503, c->mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
         } else {
             KN_INFO(MOD, "%s %s %s %lld \"%s\" (%lld kB)", t->username, updated ? "updated" : "published", t->kind == K_MOD ? "mod" : "asset",
                     (long long) id, t->name, c->size_kb);
@@ -1066,27 +1096,338 @@ static void commit_db_done(kn_db_result *res, void *ud) {
     free(c);
 }
 
-/* POST /upload-user-asset (ud NULL) and POST /mods/publish (ud 1: a mod's ticket, v10's answers) */
+/* the checks of a committing ticket on a worker thread (commit_thread); a refusal when it cannot start */
+static void commit_start(Commit *c) {
+    pthread_t th;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    atomic_fetch_add(&g_live, 1);
+    const int ok = pthread_create(&th, &attr, commit_thread, c) == 0;
+    pthread_attr_destroy(&attr);
+    if (!ok) {
+        atomic_fetch_sub(&g_live, 1);
+        c->t->committing = 0;
+        reply_fail(c->req, c->mod, 503, c->mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+        free(c);
+    }
+}
+
+/* ------------------------------------------------------------------ the Skin Manager's files (skins.uploadAsset) */
+
+/* v10.0.7's uploadAsset(skinId, {file, type, category}) (deob-10.0.7.js:124434-124459, the api :26588-26596) and where
+ * its game loads each file from "skins/<_id>/" (_id = skinId: the row's game skin, iíïíîïì :120593; the loaders
+ * :173611, :174066 and the window's own previews :125940-125948, :126152, :126536, :124964):
+ *   model      model.<ext of the picked file> (obj, gltf, glb, fbx: itemConfig.fileExt, :125347)
+ *   texture    diffuse texture.png, emissive texture_e.png, wear texture_w.png, the paint mask texture_p.png
+ *              (category "mask", :126090)
+ *   sound      shoot sound.mp3 (uploadSound's default), swap sound_swap.mp3, inspect sound_inspect.mp3: an MP3 or
+ *              a WAV (the names stay .mp3 as v10 loads them; the client's decoder reads either by content). v10's
+ *              drop zone also takes .ogg: KrunkNative's client has no Vorbis decoder, so an OGG is refused at done
+ *   thumbnail  thumbnail.png (Capture Thumbnail, :124779; the table's image :124964)
+ * The limits are Box Office's (v10 leaves them to its server): the editor's Publish Asset ones (a texture 10 MB, a sound
+ * 5 MB, a model 100 MB) and 1 MB for a thumbnail (a 256 px capture). 0 with *code on a refusal. */
+static int skin_target(const char *type, const char *category, const char *file_name, char *out, const size_t n, long long *limit,
+                       const char **code) {
+    static const struct {
+        const char *type, *category, *file;
+        long long limit;
+    } k_targets[] = {
+        {"texture", "diffuse", "texture.png", 10 * MB},     {"texture", "emissive", "texture_e.png", 10 * MB},
+        {"texture", "wear", "texture_w.png", 10 * MB},      {"texture", "mask", "texture_p.png", 10 * MB},
+        {"sound", "shoot", "sound.mp3", 5 * MB},            {"sound", "swap", "sound_swap.mp3", 5 * MB},
+        {"sound", "inspect", "sound_inspect.mp3", 5 * MB},  {"thumbnail", "", "thumbnail.png", 1 * MB},
+    };
+    *code = "SKIN_UPLOAD_TYPE";
+    if (!type) return 0;
+    if (!strcmp(type, "model")) {
+        const char *dot = file_name ? strrchr(file_name, '.') : NULL;
+        char ext[8] = "";
+        for (size_t i = 0; dot && dot[1 + i] && i + 1 < sizeof ext; i++)
+            ext[i] = (char) (dot[1 + i] >= 'A' && dot[1 + i] <= 'Z' ? dot[1 + i] + 32 : dot[1 + i]);
+        if (strcmp(ext, "obj") && strcmp(ext, "gltf") && strcmp(ext, "glb") && strcmp(ext, "fbx")) return 0;
+        snprintf(out, n, "model.%s", ext);
+        *limit = 100 * MB;
+        return 1;
+    }
+    const char *cat = category && *category ? category : !strcmp(type, "texture") ? "diffuse" : !strcmp(type, "sound") ? "shoot" : "";
+    for (size_t i = 0; i < sizeof k_targets / sizeof k_targets[0]; i++)
+        if (!strcmp(type, k_targets[i].type) && (!strcmp(type, "thumbnail") || !strcmp(cat, k_targets[i].category))) {
+            snprintf(out, n, "%s", k_targets[i].file);
+            *limit = k_targets[i].limit;
+            return 1;
+        }
+    return 0;
+}
+
+/* uploads.dir/skins/<skin> */
+static void skin_dir(const int64_t skin, char *out, const size_t n) { snprintf(out, n, "%sskins/%lld", C.dir, (long long) skin); }
+
+/* the checked file into uploads.dir/skins/<skin>/ (a model replaces the skin's model of another format) */
+static int skin_install(const Ticket *t) {
+    char dir[1200], from[1400], to[1400];
+    skin_dir(t->skin, dir, sizeof dir);
+    if (mkdirs(dir) != 0) return -1;
+    if (!strncmp(t->name, "model.", 6)) {
+        static const char *const exts[] = {"obj", "gltf", "glb", "fbx"};
+        for (size_t i = 0; i < sizeof exts / sizeof exts[0]; i++) {
+            snprintf(to, sizeof to, "%s/model.%s", dir, exts[i]);
+            if (strcmp(t->name + 6, exts[i])) unlink(to);
+        }
+    }
+    staging_dir(t, from, sizeof from);
+    snprintf(from + strlen(from), sizeof from - strlen(from), "/%.40s", t->name);
+    snprintf(to, sizeof to, "%s/%.40s", dir, t->name);
+    return rename(from, to);
+}
+
+/* loop thread: the skin is still the uploader's (P_CUSTOM_SKIN get), or the file is refused */
+static void skin_db_done(kn_db_result *res, void *ud) {
+    Commit *c = ud;
+    Ticket *t = ticket_by_id(c->id);
+    if (!t) {
+        if (kn_http_req_alive(c->req)) reply_fail(c->req, 2, 410, "Upload expired");
+    } else if (!kn_db_ok(res)) {
+        const char *code = kn_db_user_message(res);
+        if (code) { /* SKIN_NOT_FOUND: deleted meanwhile, or not the uploader's */
+            const char *message = NULL;
+            const int status = skins_error(code, &message);
+            if (kn_http_req_alive(c->req)) reply_fail(c->req, 2, status, message);
+            ticket_free(t);
+        } else {
+            t->committing = 0;
+            KN_WARN(MOD, "skin %lld file check failed: %s", (long long) t->skin, kn_db_error(res));
+            if (kn_http_req_alive(c->req)) reply_fail(c->req, 2, 503, "Upload Request Failed");
+        }
+    } else if (skin_install(t) != 0) {
+        KN_WARN(MOD, "storing skin %lld's %s failed: %s", (long long) t->skin, t->name, strerror(errno));
+        t->committing = 0;
+        if (kn_http_req_alive(c->req)) reply_fail(c->req, 2, 503, "Upload Request Failed");
+    } else {
+        KN_INFO(MOD, "account %lld uploaded skin %lld's %s (%lld kB)", (long long) t->account, (long long) t->skin, t->name, c->size_kb);
+        if (kn_http_req_alive(c->req)) {
+            /* uploadAsset: {data: {asset_path}}, "skins/<id>/<file>" (userAssetsUrl takes it as is, :24298-24301) */
+            char path[96];
+            snprintf(path, sizeof path, "skins/%lld/%.40s", (long long) t->skin, t->name);
+            cJSON *d = cJSON_CreateObject();
+            cJSON_AddStringToObject(d, "asset_path", path);
+            cJSON_AddNumberToObject(d, "skinId", (double) t->skin);
+            brain_cors_headers(c->req);
+            v10_reply_data(c->req, 200, d);
+        }
+        ticket_free(t);
+    }
+    free(c);
+}
+
+static void skin_commit(Commit *c) {
+    Ticket *t = c->t;
+    char me[24], id[24];
+    if (kn_db_call(g_b->db, &P_CUSTOM_SKIN, KN_DB_ARGS("get", acct_itoa(me, t->account), acct_itoa(id, t->skin)), skin_db_done, c) != 0) {
+        t->committing = 0;
+        if (kn_http_req_alive(c->req)) reply_fail(c->req, 2, 503, "Upload Request Failed");
+        free(c);
+    }
+}
+
+int asset_upload_skin_open(const int64_t account, const char *username, const int64_t skin, const char *type, const char *category,
+                           const char *file_name, const long long size, char *file_id, const size_t file_id_n, char *url,
+                           const size_t url_n, const char **code) {
+    if (!C.enabled || !g_b || !g_b->db) {
+        *code = "SKIN_UPLOAD_OFF";
+        return 0;
+    }
+    Ticket req;
+    memset(&req, 0, sizeof req);
+    long long limit = 0;
+    if (account <= 0 || skin <= 0 || !skin_target(type, category, file_name, req.name, sizeof req.name, &limit, code)) return 0;
+    if (size < 1 || size > limit) {
+        *code = "SKIN_UPLOAD_SIZE";
+        return 0;
+    }
+    req.kind = K_SKIN;
+    req.account = account;
+    req.skin = skin;
+    snprintf(req.username, sizeof req.username, "%s", username ? username : "");
+    snprintf(req.ext, sizeof req.ext, "%s", !strncmp(req.name, "model.", 6) ? req.name + 6 : "");
+    req.parts[req.nparts++] = (Part){FIELD_COUNT - 1, size, 0}; /* "file" */
+    const uint64_t now = kn_now_ms();
+    sweep(now);
+    const char *why = NULL;
+    const Ticket *t = ticket_open(&req, now, &why);
+    if (!t) {
+        *code = "SKIN_UPLOAD_BUSY";
+        return 0;
+    }
+    snprintf(file_id, file_id_n, "%s", t->id);
+    if (C.host[0]) snprintf(url, url_n, "%s%s/skins/upload", strstr(C.host, "://") ? "" : "https://", C.host);
+    else snprintf(url, url_n, "/skins/upload");
+    return 1;
+}
+
+void asset_upload_skin_purge(const int64_t skin) {
+    if (!C.enabled || skin <= 0) return;
+    char dir[1200];
+    skin_dir(skin, dir, sizeof dir);
+    rm_tree(dir);
+}
+
+void asset_upload_skin_copy(const int64_t from, const int64_t to) {
+    if (!C.enabled || from <= 0 || to <= 0) return;
+    char src[1200], dst[1200], a[1500], b[1500];
+    skin_dir(from, src, sizeof src);
+    skin_dir(to, dst, sizeof dst);
+    DIR *d = opendir(src);
+    if (!d) return;
+    if (mkdirs(dst) == 0) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            snprintf(a, sizeof a, "%s/%.64s", src, e->d_name);
+            snprintf(b, sizeof b, "%s/%.64s", dst, e->d_name);
+            size_t n = 0;
+            unsigned char *data = read_all(a, &n);
+            FILE *f = data ? fopen(b, "wb") : NULL;
+            if (f) {
+                if (fwrite(data, 1, n, f) != n) KN_WARN(MOD, "copying %s failed", a);
+                fclose(f);
+            }
+            free(data);
+        }
+    }
+    closedir(d);
+}
+
+/* v10.0.7's own uploadAsset: one FormData POST /skins/<id>/upload {file, asset_type, category} (:26588-26596) with a
+ * Bearer session, for a file that fits one request body (brain.max_body_bytes); the native client sends larger ones
+ * as chunks (skins.c's key). The parts are read here, the file is staged on a ticket and committed as a chunked
+ * upload's done is (its check, the skin's owner, skin_install). */
+static const char *mp_find(const char *hay, const size_t n, const char *needle, const size_t nn) {
+    for (size_t i = 0; nn <= n && i <= n - nn; i++)
+        if (!memcmp(hay + i, needle, nn)) return hay + i;
+    return NULL;
+}
+
+typedef struct MpPart {
+    char name[32], filename[160];
+    const char *data;
+    size_t len;
+} MpPart;
+
+static int mp_parse(const kn_http_req *req, MpPart *parts, const int max) {
+    const char *ct = kn_http_header_get((kn_http_req *) req, "Content-Type");
+    const char *bp = ct ? strstr(ct, "boundary=") : NULL;
+    if (!bp) return -1;
+    char boundary[200];
+    bp += 9;
+    if (*bp == '"') bp++;
+    size_t bl = strcspn(bp, "\";");
+    if (bl == 0 || bl + 2 >= sizeof boundary) return -1;
+    boundary[0] = boundary[1] = '-';
+    memcpy(boundary + 2, bp, bl);
+    bl += 2;
+    boundary[bl] = 0;
+    const char *body = (const char *) req->body, *end = body + req->body_len;
+    const char *at = mp_find(body, req->body_len, boundary, bl);
+    int count = 0;
+    while (at && count < max) {
+        at += bl;
+        if (end - at >= 2 && at[0] == '-' && at[1] == '-') break; /* the closing boundary */
+        if (end - at < 2 || at[0] != '\r' || at[1] != '\n') return -1;
+        at += 2;
+        const char *hdr_end = mp_find(at, (size_t) (end - at), "\r\n\r\n", 4);
+        if (!hdr_end) return -1;
+        MpPart *p = &parts[count];
+        memset(p, 0, sizeof *p);
+        char hdr[600];
+        const size_t hl = (size_t) (hdr_end - at) < sizeof hdr - 1 ? (size_t) (hdr_end - at) : sizeof hdr - 1;
+        memcpy(hdr, at, hl);
+        hdr[hl] = 0;
+        const char *nm = strstr(hdr, " name=\"");
+        const char *fn = strstr(hdr, "filename=\"");
+        if (nm) snprintf(p->name, sizeof p->name, "%.*s", (int) strcspn(nm + 7, "\""), nm + 7);
+        if (fn) snprintf(p->filename, sizeof p->filename, "%.*s", (int) strcspn(fn + 10, "\""), fn + 10);
+        p->data = hdr_end + 4;
+        const char *next = mp_find(p->data, (size_t) (end - p->data), boundary, bl);
+        if (!next || next - p->data < 2) return -1;
+        p->len = (size_t) (next - p->data) - 2; /* the CRLF before the boundary */
+        count++;
+        at = next;
+    }
+    return count;
+}
+
+static void mp_value(const MpPart *parts, const int n, const char *name, char *out, const size_t cap) {
+    out[0] = 0;
+    for (int i = 0; i < n; i++)
+        if (!strcmp(parts[i].name, name)) snprintf(out, cap, "%.*s", (int) (parts[i].len < cap ? parts[i].len : cap - 1), parts[i].data);
+}
+
+void asset_upload_skin_form(kn_http_req *req, const int64_t account, const char *username, const int64_t skin) {
+    MpPart parts[8];
+    const int n = mp_parse(req, parts, 8);
+    const MpPart *file = NULL;
+    for (int i = 0; i < n; i++)
+        if (!strcmp(parts[i].name, "file")) file = &parts[i];
+    char type[24], category[24];
+    mp_value(parts, n, "asset_type", type, sizeof type);
+    mp_value(parts, n, "category", category, sizeof category);
+    if (n < 0 || !file || !file->len) {
+        reply_fail(req, 2, 400, "Missing File");
+        return;
+    }
+    char fid[40], url[300];
+    const char *code = NULL, *message = NULL;
+    if (!asset_upload_skin_open(account, username, skin, type, category, file->filename, (long long) file->len, fid, sizeof fid, url,
+                                sizeof url, &code)) {
+        const int status = skins_error(code, &message);
+        reply_fail(req, 2, status, message);
+        return;
+    }
+    Ticket *t = ticket_by_id(fid);
+    char dir[1200], path[1400];
+    staging_dir(t, dir, sizeof dir);
+    snprintf(path, sizeof path, "%s/%.40s", dir, t->name);
+    FILE *f = fopen(path, "wb");
+    const int wrote = f && fwrite(file->data, 1, file->len, f) == file->len;
+    if (f && fclose(f) != 0) KN_WARN(MOD, "closing %s failed: %s", path, strerror(errno));
+    Commit *c = wrote ? calloc(1, sizeof *c) : NULL;
+    if (!c) {
+        ticket_free(t);
+        reply_fail(req, 2, 503, "Upload Request Failed");
+        return;
+    }
+    t->parts[0].got = (long long) file->len;
+    c->t = t;
+    c->mod = 2;
+    c->req = req;
+    snprintf(c->id, sizeof c->id, "%s", t->id);
+    t->committing = 1;
+    commit_start(c);
+}
+
+/* POST /upload-user-asset (ud NULL), POST /mods/publish (ud 1: a mod's ticket, v10's answers) and POST /skins/upload
+ * (ud 2: a Skin Manager file's ticket) */
 static void h_upload(kn_http_req *req, void *ud) {
-    const int mod = ud != NULL;
+    const int mod = (int) (intptr_t) ud;
     char id[40] = "", key[24] = "", off[24] = "", done[8] = "";
     kn_http_query_get(req, "fileId", id, sizeof id);
     kn_http_query_get(req, "key", key, sizeof key);
     kn_http_query_get(req, "offset", off, sizeof off);
     kn_http_query_get(req, "done", done, sizeof done);
     if (!C.enabled) {
-        reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "File uploads are not supported on this server");
+        reply_fail(req, mod, 503, mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "File uploads are not supported on this server");
         return;
     }
     const uint64_t now = kn_now_ms();
     sweep(now);
     Ticket *t = ticket_by_id(id);
-    if (!t || (t->kind == K_MOD) != mod) {
+    if (!t || FLOW(t->kind) != mod) {
         reply_fail(req, mod, 404, "Upload expired");
         return;
     }
     if (t->committing) {
-        reply_fail(req, mod, 409, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload in progress");
+        reply_fail(req, mod, 409, mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload in progress");
         return;
     }
     t->touched = now;
@@ -1098,7 +1439,7 @@ static void h_upload(kn_http_req *req, void *ud) {
             }
         Commit *c = calloc(1, sizeof *c);
         if (!c) {
-            reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+            reply_fail(req, mod, 503, mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
             return;
         }
         c->t = t;
@@ -1106,19 +1447,7 @@ static void h_upload(kn_http_req *req, void *ud) {
         c->req = req;
         snprintf(c->id, sizeof c->id, "%s", t->id);
         t->committing = 1;
-        pthread_t th;
-        pthread_attr_t attr;
-        pthread_attr_init(&attr);
-        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-        atomic_fetch_add(&g_live, 1);
-        const int ok = pthread_create(&th, &attr, commit_thread, c) == 0;
-        pthread_attr_destroy(&attr);
-        if (!ok) {
-            atomic_fetch_sub(&g_live, 1);
-            t->committing = 0;
-            free(c);
-            reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
-        }
+        commit_start(c);
         return;
     }
     Part *p = NULL;
@@ -1155,14 +1484,14 @@ static void h_upload(kn_http_req *req, void *ud) {
     const int fd = open(path, O_WRONLY | O_CREAT | (at == 0 ? O_TRUNC : 0), 0644);
     if (fd >= 0 && at > 0 && at < p->got && ftruncate(fd, (off_t) at) != 0) { /* drop what follows: it is sent again */
         close(fd);
-        reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+        reply_fail(req, mod, 503, mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
         return;
     }
     const int wrote = fd >= 0 && pwrite(fd, req->body, (size_t) len, (off_t) at) == (ssize_t) len;
     if (fd >= 0) close(fd);
     if (!wrote) {
         KN_WARN(MOD, "writing %s failed: %s", path, strerror(errno));
-        reply_fail(req, mod, 503, mod ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
+        reply_fail(req, mod, 503, mod == 1 ? "MODS_UPLOAD_STORAGE_FAIL" : "Upload Request Failed");
         return;
     }
     p->got = at + len;
@@ -1214,7 +1543,7 @@ static void mod_key_checked(kn_db_result *res, void *ud) {
     sweep(now);
     if ((last && (int64_t) (now - last) < C.mod_cooldown_ms) || hour_count(k->t.account, now, 0) >= C.per_hour)
         KEY_FAIL(k, 429, "MODS_PUBLISH_COOLDOWN", "Too soon after the last mod upload, try again shortly");
-    k->t.parts[k->t.nparts++] = (Part){FIELD_COUNT - 1, k->mod, 0}; /* "mod" */
+    k->t.parts[k->t.nparts++] = (Part){FIELD_COUNT - 2, k->mod, 0}; /* "mod" (k_fields: "file" is last) */
     if (k->thumb) k->t.parts[k->t.nparts++] = (Part){0, k->thumb, 0};
     const char *why = NULL;
     const Ticket *t = ticket_open(&k->t, now, &why);
@@ -1329,7 +1658,8 @@ static void tickets_restore(void) {
             t->priv = (int) kn_json_int(o, "priv", 0);
             snprintf(t->ext, sizeof t->ext, "%s", kn_json_str(o, "ext", "obj"));
             snprintf(t->uvc, sizeof t->uvc, "%s", kn_json_str(o, "uvc", ""));
-            ok = t->name[0] && t->kind >= K_MODEL && t->kind <= K_MOD;
+            t->skin = kn_json_int(o, "skin", 0);
+            ok = t->name[0] && t->kind >= K_MODEL && t->kind <= K_SKIN && (t->kind != K_SKIN || t->skin > 0);
             /* the idle time: since the newest of the record and the staged files (a chunk touches its file) */
             time_t newest = st.st_mtime;
             char dir[1200], fp[1400], fb[24];
@@ -1429,6 +1759,8 @@ int asset_upload_init(Brain *b) {
     /* the mods' publishKey and publishUpload (deob-10.0.7.js:27315-27350) */
     kn_http_route(b->http, "POST", "/mods/publish/key", h_mod_key, NULL);
     kn_http_route(b->http, "POST", "/mods/publish", h_upload, (void *) 1);
+    /* the Skin Manager's files, chunked (skins.c's POST /skins/:id/upload key) */
+    kn_http_route(b->http, "POST", "/skins/upload", h_upload, (void *) 2);
     if (C.enabled) KN_INFO(MOD, "asset uploads on: %s", C.dir);
     return 0;
 }

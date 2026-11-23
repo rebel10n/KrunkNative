@@ -11,3 +11,5 @@ int png_write_rgba(const char *path, const unsigned char *rgba, int w, int h);
 // a malloc'd buffer of *out_len bytes, NULL on allocation failure.
 #include <stddef.h>
 unsigned char *png_encode_rgb(const unsigned char *rgba, int w, int h, size_t *out_len);
+// The same with the alpha channel kept (an RGBA PNG: the Skin Manager's captured thumbnail).
+unsigned char *png_encode_rgba(const unsigned char *rgba, int w, int h, size_t *out_len);

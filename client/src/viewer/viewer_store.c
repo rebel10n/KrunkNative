@@ -25,6 +25,31 @@ static struct {
     ViewerSkin skin[VIEWER_MAX_DEFINES];
 } g_defines;
 
+// The dyes of the defined custom skins (viewer_skin_define.c: a type-5 definition's colours)
+static struct {
+    int count;
+    ViewerDye dye[VIEWER_MAX_DEFINES];
+} g_dye_defines;
+
+ViewerDye *viewer_dye_define_slot(const int index) {
+    if (index < 0 || (index > VIEWER_SKIN_INDEX_MAX && index < VIEWER_CUSTOM_SKIN_MIN)) return NULL;
+    for (int i = 0; i < g_dye_defines.count; i++) {
+        if (g_dye_defines.dye[i].index == index) return &g_dye_defines.dye[i];
+    }
+    if (g_dye_defines.count >= VIEWER_MAX_DEFINES) return NULL;
+    ViewerDye *dye = &g_dye_defines.dye[g_dye_defines.count++];
+    *dye = (ViewerDye) {.index = index};
+    return dye;
+}
+
+void viewer_dye_define_drop(const int index) {
+    for (int i = 0; i < g_dye_defines.count; i++) {
+        if (g_dye_defines.dye[i].index != index) continue;
+        g_dye_defines.dye[i] = g_dye_defines.dye[--g_dye_defines.count];
+        return;
+    }
+}
+
 static const ViewerSkin *table_skin(const int index) {
     for (int i = 0; i < g_defines.count; i++) {
         if (g_defines.skin_index[i] == index) return &g_defines.skin[i];
@@ -66,6 +91,9 @@ static const ViewerDye *table_dye(const int index);
 const ViewerDye *viewer_dye(const int index) {
     for (int i = 0; i < g_edits.dye_count; i++) {
         if (g_edits.dye[i].index == index) return &g_edits.dye[i];
+    }
+    for (int i = 0; i < g_dye_defines.count; i++) {
+        if (g_dye_defines.dye[i].index == index) return &g_dye_defines.dye[i];
     }
     return table_dye(index);
 }

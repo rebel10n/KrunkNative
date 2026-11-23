@@ -11,14 +11,16 @@
 // Data: v10's _10449.studios.* calls (v10.js 27360-27520) over the gapi tunnel of the social socket
 // (v10_gapi.c -> services/brain/studios.c), or for a krunker.io account krunker.io's own gapi (v10_gapi.c kio_gapi:
 // the GET reads only; a write is not sent and shows its failure text); the studio view's "Your Games" list is
-// _10449.players.getProfile(me).maps, as in v10. v10's _10449.skins.list() (the Skin Manager's
-// custom skins: v10_skin_manager.c, services/brain/skins.c) is not read here yet: the brain takes no studio
-// skin import (studios.c), so the "Your Skins" select stays empty.
+// _10449.players.getProfile(me).maps, as in v10. "Your Skins" is v10's _10449.skins.list() (the Skin Manager's
+// custom skins: v10_skin_manager.c, services/brain/skins.c) that have a captured thumbnail (deob-10.0.7.js:138981-
+// 138990), and Assign Skin imports the picked one (importStudioSkin, POST /studios/:id/skins/import
+// {custom_skin_id}, :27607, :138546-138556; studios.c).
 // The Games window's My Games tab shows the pending invite count (servers_ui.c, the functions at
 // the end).
 #include <v10_studios.h>
 #include <v10_social.h>
 #include <v10_ui.h>
+#include <v10_skin_manager.h> // v10_skin_file_url
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -61,6 +63,9 @@ static struct {
     char map_sel[24];
     int assigning;
     cJSON *skins;            // getStudioSkins
+    cJSON *my_skins;         // "Your Skins": [{skinId, name}] of skins.list() with a customThumbnail
+    char skin_sel[24];       // the picked skin's id ("" = the placeholder)
+    int skin_assigning;
     int skin_busy[4];
     char cur_name[64], cur_symbol[16];
     int cur_decimals, cur_creating;
@@ -188,7 +193,7 @@ static int currency_ok(void) {
 
 typedef enum {
     R_MINE, R_INVITES, R_INVITE_ANSWER, R_CREATE, R_STUDIO, R_MY_MAPS, R_SKINS, R_MON, R_ACTION, R_LEAVE, R_DELETE,
-    R_SKIN_TOGGLE, R_ANALYTICS, R_APPLY, R_MON_CANCEL, R_POLL_INVITES,
+    R_SKIN_TOGGLE, R_MY_SKINS, R_SKIN_IMPORT, R_ANALYTICS, R_APPLY, R_MON_CANCEL, R_POLL_INVITES,
 } ReqKind;
 
 typedef struct {
@@ -253,6 +258,9 @@ static void load_skins(void) {
     snprintf(path, sizeof(path), "/studios/%lld/skins", (long long) S.sid);
     send_req("GET", path, NULL, R_SKINS, S.sd_gen, 0, 0, NULL, NULL);
 }
+
+// skins.list() (no page: the brain's first page) for "Your Skins"
+static void load_my_skins(void) { send_req("GET", "/skins", NULL, R_MY_SKINS, S.sd_gen, 0, 0, NULL, NULL); }
 
 // _48555: run a studio call, show its success text and reload the studio, or show the error
 static void action(const char *method, const char *path, cJSON *body, const int flags, const char *ok_text, const char *fail_text) {
@@ -362,6 +370,31 @@ static void on_answer(void *user, const int status, const cJSON *data, const cJS
     case R_SKINS:
         if (!sd_live) break;
         set_json(&S.skins, good && cJSON_IsArray(data) ? data : NULL);
+        break;
+    case R_MY_SKINS: { // the skins with a captured thumbnail, as {skinId, name}; an error: none
+        if (!sd_live) break;
+        cJSON *list = cJSON_CreateArray();
+        const cJSON *k, *all = good ? cJSON_GetObjectItem(data, "skins") : NULL;
+        cJSON_ArrayForEach(k, all) {
+            const cJSON *thumb = cJSON_GetObjectItem(cJSON_GetObjectItem(k, "itemConfig"), "customThumbnail");
+            if (!thumb || cJSON_IsFalse(thumb) || cJSON_IsNull(thumb)) continue;
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddNumberToObject(o, "skinId", jnum(k, "skinId"));
+            cJSON_AddStringToObject(o, "name", jstr(k, "name"));
+            cJSON_AddItemToArray(list, o);
+        }
+        set_json(&S.my_skins, list);
+        cJSON_Delete(list);
+        break;
+    }
+    case R_SKIN_IMPORT: // iiîìiíî: the message, the select back to its placeholder on success, the list again
+        if (!sd_live) break;
+        S.skin_assigning = 0;
+        if (good) {
+            set_msg(S.sd_success, r->ok_text);
+            S.skin_sel[0] = 0;
+        } else set_err(S.sd_error, error, r->fail_text);
+        load_skins();
         break;
     case R_MON:
         if (!sd_live) break;
@@ -772,9 +805,11 @@ static void skins_markup(StrBuf *sb) {
             const int id = (int) jnum(k, "skin_id"), active = cJSON_IsTrue(cJSON_GetObjectItem(k, "active"));
             sb_appendf(sb, "<div class=\"sd-row svelte-a9j4oe%s\">", active ? "" : " sd-row-off");
             if (cJSON_IsTrue(cJSON_GetObjectItem(k, "has_thumbnail")) && jstr(k, "csrc")[0]) {
-                sb_append(sb, "<img class=\"sd-skin-thumb svelte-a9j4oe\" src=\"https://user-assets.krunker.io/skins/");
-                sb_text(sb, jstr(k, "csrc"));
-                sb_append(sb, "/thumbnail.png\" alt=\"");
+                char url[600]; // userAssetsUrl("skins/" + csrc + "/thumbnail.png"): Box Office's are the brain's
+                v10_skin_file_url(jstr(k, "csrc"), "thumbnail.png", 0, url, sizeof(url));
+                sb_append(sb, "<img class=\"sd-skin-thumb svelte-a9j4oe\" src=\"");
+                sb_text(sb, url);
+                sb_append(sb, "\" alt=\"");
                 sb_text(sb, jstr(k, "name"));
                 sb_append(sb, "\">");
             } else {
@@ -807,13 +842,22 @@ static void skins_markup(StrBuf *sb) {
     }
     sb_append(sb, " ");
     if (!is_owner()) return;
-    // _48469: "Your Skins" lists the Skin Manager's custom skins (_10449.skins.list()); the brain cannot
-    // import one into a studio yet (studios.c), so only the placeholder option
+    // _48469: "Your Skins", the Skin Manager's custom skins with a thumbnail; Assign Skin while one is picked
     sb_append(sb, "<div class=\"sd-form svelte-a9j4oe\"><label class=\"sd-field svelte-a9j4oe\"><span class=\"sd-label svelte-a9j4oe\">");
     sb_text(sb, I18N("studios.skins.addLabel", "Your Skins"));
-    sb_append(sb, "</span> <select class=\"sd-input svelte-a9j4oe\"><option value=\"\">");
+    sb_append(sb, "</span> <select class=\"sd-input svelte-a9j4oe\" id=\"knSdSkinSel\" onchange=\"knStudios('skinsel',this.value)\"><option value=\"\">");
     sb_text(sb, I18N("studios.skins.addPlaceholder", "Select a skin..."));
-    sb_append(sb, "</option></select></label> <button class=\"sd-primary svelte-a9j4oe\" type=\"button\" disabled><i class=\"material-icons svelte-a9j4oe\">add</i> ");
+    sb_append(sb, "</option>");
+    const cJSON *mine;
+    cJSON_ArrayForEach(mine, S.my_skins) {
+        char id[24];
+        snprintf(id, sizeof(id), "%lld", (long long) jnum(mine, "skinId"));
+        sb_appendf(sb, "<option value=\"%s\"%s>", id, !strcmp(id, S.skin_sel) ? " selected" : "");
+        sb_text(sb, jstr(mine, "name"));
+        sb_append(sb, "</option>");
+    }
+    sb_appendf(sb, "</select></label> <button class=\"sd-primary svelte-a9j4oe\" type=\"button\" id=\"knSdSkinAssign\" onclick=\"knStudios('assignskin')\"%s>"
+                   "<i class=\"material-icons svelte-a9j4oe\">add</i> ", S.skin_assigning || !S.skin_sel[0] ? " disabled" : "");
     sb_text(sb, I18N("studios.skins.add", "Assign Skin"));
     sb_append(sb, "</button></div> <div class=\"sd-hint svelte-a9j4oe\">");
     sb_text(sb, I18N("studios.skins.hint", "Create skins in the Skin Manager, then assign them here. Assigned skins only appear inside this studio\xe2\x80\x99s games. Up to 20 per studio."));
@@ -1173,6 +1217,10 @@ static void studio_reset(void) {
     cJSON_Delete(S.studio);
     cJSON_Delete(S.my_maps);
     cJSON_Delete(S.skins);
+    cJSON_Delete(S.my_skins);
+    S.my_skins = NULL;
+    S.skin_sel[0] = 0;
+    S.skin_assigning = 0;
     cJSON_Delete(S.mon);
     cJSON_Delete(S.analytics);
     S.studio = S.my_maps = S.skins = S.mon = S.analytics = NULL;
@@ -1239,6 +1287,7 @@ static void open_studio(const int64_t id) {
         send_req("GET", path, NULL, R_MY_MAPS, S.sd_gen, 0, 0, NULL, NULL);
     }
     load_skins();
+    load_my_skins();
     render();
 }
 
@@ -1664,6 +1713,19 @@ int v10_studios_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
         S.sd_error[0] = S.sd_success[0] = 0;
         snprintf(path, sizeof(path), "/studios/%lld/skins/%lld/%s", (long long) S.sid, (long long) a1, active ? "unpublish" : "publish");
         send_req("POST", path, NULL, R_SKIN_TOGGLE, S.sd_gen, a1, 0, NULL, I18N("studios.error.toggleSkin", "Failed to update that skin."));
+    } else if (!strcmp(op, "skinsel")) { // the select's bind:value
+        const char *v = argc > 1 && args[1].kind == HTML_ARG_THIS_VALUE && args[1].str ? args[1].str : arg_s(args, argc, 1);
+        snprintf(S.skin_sel, sizeof(S.skin_sel), "%s", v);
+    } else if (!strcmp(op, "assignskin")) { // iiîìiíî: importStudioSkin(studioId, Number(picked))
+        if (!S.skin_sel[0] || S.skin_assigning || !is_owner()) return 1;
+        S.skin_assigning = 1;
+        S.sd_error[0] = S.sd_success[0] = 0;
+        char path[64];
+        snprintf(path, sizeof(path), "/studios/%lld/skins/import", (long long) S.sid);
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddNumberToObject(body, "custom_skin_id", strtod(S.skin_sel, NULL));
+        send_req("POST", path, body, R_SKIN_IMPORT, S.sd_gen, 0, 0, I18N("studios.skins.assigned", "Skin assigned to the studio."),
+                 I18N("studios.error.assignSkin", "Failed to assign that skin."));
     } else if (!strcmp(op, "copyskin")) { // _48549
         char id[24];
         snprintf(id, sizeof(id), "%lld", (long long) a1);

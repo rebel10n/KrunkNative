@@ -6,7 +6,10 @@
 #ifndef KN_BRAIN_SKINS_H
 #define KN_BRAIN_SKINS_H
 
+#include "cJSON.h"
 #include "knsvc/store.h"
+
+#include <stdint.h>
 
 struct SocialSession;
 struct GapiReq;
@@ -22,6 +25,10 @@ extern const kn_proc P_CUSTOM_SKIN;
 
 /* a SKIN_* refusal code -> its HTTP status and the message the window shows (500 / the code when unknown) */
 int skins_error(const char *code, const char **message);
+
+/* after a write's answer: a deleted skin's files go, a duplicate copies its original's (asset_upload.c); op as the
+ * proc's, id the skin the request named, answer the proc's JSON */
+void skins_after(const char *op, int64_t id, const cJSON *answer);
 
 /* /skins...: 1 = the request was ours (answered now or later) */
 int skins_gapi(struct SocialSession *s, const struct GapiReq *r);

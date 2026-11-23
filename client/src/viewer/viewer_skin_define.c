@@ -3,8 +3,9 @@
 // HEAD assetType, creators, template, free). Here the JSON becomes the ViewerSkin viewer_skin() returns for that index
 // (viewer_store.c viewer_skin_define_slot), field for field as tools/ui-import/gen_viewer_store.js builds the table
 // rows. Not applied (documented in doc/v10/s2c-coverage.md): `template` (v10's template rows are folded into the
-// generated table; a new definition naming one keeps its own fields only), a dye's colours (viewer_dye keeps the
-// table's), and the lists built from the table (dropdowns, wheel pools) do not gain a new index.
+// generated table; a new definition naming one keeps its own fields only), a table dye's colours (viewer_dye keeps the
+// table's: a definition past the table, a custom dye, has its own, viewer_dye_define_slot), and the lists built from
+// the table (dropdowns, wheel pools) do not gain a new index.
 #include "viewer_store.h"
 #include <cosmetics.h>
 #include <cJSON.h>
@@ -198,6 +199,34 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
     }
 }
 
+// A dye past the table (a custom skin of type 5): its colours, each a number or a list of numbers (v10 keeps the
+// Skin Manager's "#rrggbb" as parseInt(hex, 16), deob-10.0.7.js:24563)
+static void define_dye(const int index, const cJSON *j) {
+    static const char *const keys[VIEWER_DYE_PARTS] = {"skinCol", "shirtCol", "sleeveCol", "pantsCol", "waistCol", "shoeCol", "hairCol"};
+    if (index <= VIEWER_SKIN_INDEX_MAX) return;
+    if ((int) num(get(j, "type"), 0) != 5) {
+        viewer_dye_define_drop(index);
+        return;
+    }
+    ViewerDye *dye = viewer_dye_define_slot(index);
+    if (!dye) return;
+    *dye = (ViewerDye) {.index = index};
+    for (int i = 0; i < VIEWER_DYE_PARTS; i++) {
+        const cJSON *v = get(j, keys[i]);
+        if (cJSON_IsArray(v)) {
+            const cJSON *c;
+            cJSON_ArrayForEach(c, v) {
+                if (dye->parts[i].count >= 4) break;
+                const double n = num(c, NAN);
+                if (!isnan(n)) dye->parts[i].cols[dye->parts[i].count++] = (int) n;
+            }
+        } else if (!isnan(num(v, NAN))) {
+            dye->parts[i].cols[0] = (int) num(v, 0);
+            dye->parts[i].count = 1;
+        }
+    }
+}
+
 int viewer_skin_define(const int index, const cJSON *skin) {
     if (!cJSON_IsObject(skin)) return 0;
     ViewerSkin *slot = viewer_skin_define_slot(index);
@@ -210,6 +239,7 @@ int viewer_skin_define(const int index, const cJSON *skin) {
     d->json = json;
     d->paint_targets = NULL;
     fill(slot, d, json);
+    define_dye(index, json);
     cJSON_Delete(old_json); // the old strings went with the old definition
     free(old_targets);
     return 1;

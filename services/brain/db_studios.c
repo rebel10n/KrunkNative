@@ -29,7 +29,10 @@
  *   currency_active (studio, currency, 1|0)            -> {currency_id, active} owner
  *   analytics (studio)           -> {kr_earned, kr_charged, currencies [{currency_id, name, symbol,
  *                                   circulating, holders}]}
- *   skins (studio)               -> []
+ *   skins (studio)               -> [{skin_id, name, type, weapon, rarity, active, has_thumbnail, csrc,
+ *                                   created_at}]                               a member
+ *   skin_import (studio, custom skin)  -> the skin             owner; the actor's own custom skin (skins.c)
+ *   skin_active (studio, skin, 1|0)    -> {skin_id, active}    owner
  *   monetization (studio)        -> the status (below)
  *   monetization_apply (studio, {description, map_ids})  -> the status   owner, can_apply
  *   monetization_cancel (studio) -> the status                           owner, a pending request
@@ -39,10 +42,14 @@
  * ok, required?, value?}]} for account_age (90 days), level (20), twofa, no_recent_ban (180 days)
  * and has_map (a published game in the studio), all of the studio owner. Times are ISO 8601 UTC.
  *
- * Deviations from v10 (KrunkNative takes no payments and has no studio skins): an application
- * stays pending until a developer reviews it in the database; currency balances are 0 (there are
- * no PAYMENTS currency balances); skins is always empty and studios.c refuses imports (the Skin
- * Manager's custom skins, skins.c, have no studio store yet). KR charged / earned are the studio's games' consented charges (0358_studio_charges).
+ * Studio skins (0395_skin_assets studio_skins): an import copies the custom skin's name, type, weapon, rarity and
+ * itemConfig as they are then; csrc is the custom skin whose skins/<csrc>/ folder has its files. skin_id is the game's
+ * skin id (from 10000001, scripts' setSkin range). Up to 20 per studio ("Up to 20 per studio", studios.skins.hint),
+ * each custom skin once per studio; a new skin is unpublished until the owner publishes it.
+ *
+ * Deviations from v10 (KrunkNative takes no payments): an application stays pending until a developer reviews it in
+ * the database; currency balances are 0 (there are no PAYMENTS currency balances). KR charged / earned are the
+ * studio's games' consented charges (0358_studio_charges).
  *
  * The game servers' side (P_STUDIO_GAME, P_STUDIO_CHARGE, at the end): whether a hosted published
  * map is monetized, and the KR of PAYMENTS.charge / transact after the player's consent.
@@ -516,9 +523,96 @@ static kn_db_result *op_analytics(Dbx *x, int64_t actor, int64_t studio) {
     return dbx_json(x, "analytics", o);
 }
 
+#define STUDIO_SKINS_MAX 20
+#define STUDIO_SKIN_COLS "id AS skin_id__i, name AS name__t, type AS type__i, weapon AS weapon__i, rarity AS rarity__i," \
+                         " active AS active__i, custom_skin_id AS csrc__i, item_config AS cfg__t, {epoch_ms:created_at} AS created__i"
+
+/* a studio_skins row -> getStudioSkins' entry */
+static cJSON *studio_skin_json(const cJSON *r) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "skin_id", jnum(r, "skin_id"));
+    cJSON_AddStringToObject(o, "name", jstr(r, "name"));
+    cJSON_AddNumberToObject(o, "type", jnum(r, "type"));
+    cJSON_AddNumberToObject(o, "weapon", jnum(r, "weapon"));
+    cJSON_AddNumberToObject(o, "rarity", jnum(r, "rarity"));
+    cJSON_AddBoolToObject(o, "active", jnum(r, "active") != 0);
+    cJSON *cfg = cJSON_Parse(jstr(r, "cfg"));
+    cJSON_AddBoolToObject(o, "has_thumbnail", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cfg, "customThumbnail")));
+    cJSON_Delete(cfg);
+    char csrc[24];
+    snprintf(csrc, sizeof csrc, "%.0f", jnum(r, "csrc"));
+    cJSON_AddStringToObject(o, "csrc", csrc);
+    cJSON_AddItemToObject(o, "created_at", iso((int64_t) jnum(r, "created")));
+    return o;
+}
+
 static kn_db_result *op_skins(Dbx *x, int64_t actor, int64_t studio) {
     if (role_of(x, studio, actor) <= 0) return refuse(x, "STUDIO_NOT_FOUND");
-    return dbx_json(x, "skins", cJSON_CreateArray());
+    cJSON *rows = dbx_rows(x, SQL(.any = "SELECT " STUDIO_SKIN_COLS " FROM studio_skins WHERE studio_id = {int:$1} ORDER BY id"),
+                           KN_DB_ARGS(I64S(studio)));
+    if (!rows) return dbx_finish(x, NULL);
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) cJSON_AddItemToArray(out, studio_skin_json(r));
+    cJSON_Delete(rows);
+    return dbx_json(x, "skins", out);
+}
+
+/* importStudioSkin(studio, custom_skin_id): the owner's copy of one of their Skin Manager skins */
+static kn_db_result *op_skin_import(Dbx *x, int64_t actor, int64_t studio, int64_t custom) {
+    const int role = role_of(x, studio, actor);
+    if (role <= 0) return refuse(x, "STUDIO_NOT_FOUND");
+    if (role != 1) return refuse(x, "STUDIO_FORBIDDEN");
+    cJSON *src = custom > 0 ? dbx_row(x, SQL(.any = "SELECT name AS name__t, type AS type__i, weapon AS weapon__i, rarity AS rarity__i,"
+                                                    " item_config AS cfg__t FROM custom_skins WHERE id = {int:$1} AND owner_id = {int:$2}"),
+                                      KN_DB_ARGS(I64S(custom), I64S(actor)))
+                                : NULL;
+    if (!src) return dbx_failed(x) ? dbx_finish(x, NULL) : refuse(x, "STUDIO_SKIN_NOT_FOUND");
+    if (dbx_int(x, SQL(.any = "SELECT count(*) FROM studio_skins WHERE studio_id = {int:$1} AND custom_skin_id = {int:$2}"),
+                KN_DB_ARGS(I64S(studio), I64S(custom)), 0) > 0) {
+        cJSON_Delete(src);
+        return refuse(x, "STUDIO_SKIN_TAKEN");
+    }
+    if (dbx_int(x, SQL(.any = "SELECT count(*) FROM studio_skins WHERE studio_id = {int:$1}"), KN_DB_ARGS(I64S(studio)), 0) >= STUDIO_SKINS_MAX) {
+        cJSON_Delete(src);
+        return refuse(x, "STUDIO_SKIN_LIMIT");
+    }
+    char type[24], weapon[24], rarity[24];
+    snprintf(type, sizeof type, "%.0f", jnum(src, "type"));
+    snprintf(weapon, sizeof weapon, "%.0f", jnum(src, "weapon"));
+    snprintf(rarity, sizeof rarity, "%.0f", jnum(src, "rarity"));
+    const int64_t id = dbx_insert_id(
+        x,
+        SQL(.pg = "INSERT INTO studio_skins (studio_id, custom_skin_id, name, type, weapon, rarity, item_config, created_by)"
+                  " VALUES ($1::int, $2::bigint, $3, $4::int, $5::int, $6::int, $7, $8::int) RETURNING id",
+            .sqlite = "INSERT INTO studio_skins (studio_id, custom_skin_id, name, type, weapon, rarity, item_config, created_by)"
+                      " VALUES ({int:$1}, {int:$2}, $3, {int:$4}, {int:$5}, {int:$6}, $7, {int:$8}) RETURNING id",
+            .any = "INSERT INTO studio_skins (studio_id, custom_skin_id, name, type, weapon, rarity, item_config, created_by)"
+                   " VALUES ({int:$1}, {int:$2}, $3, {int:$4}, {int:$5}, {int:$6}, $7, {int:$8})"),
+        KN_DB_ARGS(I64S(studio), I64S(custom), jstr(src, "name"), type, weapon, rarity, jstr(src, "cfg")[0] ? jstr(src, "cfg") : "{}",
+                   I64S(actor)));
+    cJSON_Delete(src);
+    cJSON *row = id > 0 ? dbx_row(x, SQL(.any = "SELECT " STUDIO_SKIN_COLS " FROM studio_skins WHERE id = {int:$1}"), KN_DB_ARGS(I64S(id)))
+                        : NULL;
+    if (!row) return dbx_finish(x, NULL);
+    cJSON *o = studio_skin_json(row);
+    cJSON_Delete(row);
+    return dbx_json(x, "skin", o);
+}
+
+/* publishStudioSkin / unpublishStudioSkin */
+static kn_db_result *op_skin_active(Dbx *x, int64_t actor, int64_t studio, int64_t skin, int on) {
+    const int role = role_of(x, studio, actor);
+    if (role <= 0) return refuse(x, "STUDIO_NOT_FOUND");
+    if (role != 1) return refuse(x, "STUDIO_FORBIDDEN");
+    const int64_t changed = dbx_exec(x, SQL(.any = "UPDATE studio_skins SET active = {int:$1} WHERE id = {int:$2} AND studio_id = {int:$3}"),
+                                     KN_DB_ARGS(on ? "1" : "0", I64S(skin), I64S(studio)));
+    if (changed < 0) return dbx_finish(x, NULL);
+    if (changed == 0) return refuse(x, "STUDIO_SKIN_NOT_FOUND");
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "skin_id", (double) skin);
+    cJSON_AddBoolToObject(o, "active", on);
+    return dbx_json(x, "skin", o);
 }
 
 /* ------------------------------------------------------------------ monetization */
@@ -709,6 +803,8 @@ static kn_db_result *run_studio(kn_dbconn *c, int n, const char *const *p) {
     if (!strcmp(op, "currency_edit")) return op_currency_edit(&x, actor, a, PI(3), nz(P(4)));
     if (!strcmp(op, "analytics")) return op_analytics(&x, actor, a);
     if (!strcmp(op, "skins")) return op_skins(&x, actor, a);
+    if (!strcmp(op, "skin_import")) return op_skin_import(&x, actor, a, PI(3));
+    if (!strcmp(op, "skin_active")) return op_skin_active(&x, actor, a, PI(3), PI(4) != 0);
     if (!strcmp(op, "monetization")) return op_monetization(&x, actor, a);
     if (!strcmp(op, "monetization_apply")) return op_monetization_apply(&x, actor, a, P(3));
     if (!strcmp(op, "monetization_cancel")) return op_monetization_cancel(&x, actor, a);

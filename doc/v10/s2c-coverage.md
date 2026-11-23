@@ -58,8 +58,8 @@ Client consumers are in `client/src/net/s2c_events.c`:
 - `sdc` is applied by `viewer_skin_define` (`client/src/viewer/viewer_skin_define.c`). It maps the fields as
   `tools/ui-import/gen_viewer_store.js` does and repeats v10's entry setup (:116530): BACK gets `assetType` 2, HEAD gets
   `assetType` 1, and a `free` item gets `noSpin` and is left out of the wheels. Not applied: a `template` key (the
-  generated table folds v10's template rows in already), a dye's colours, and a new index in the dropdown and wheel
-  lists. Models already built keep their look until rebuilt, as in v10.
+  generated table folds v10's template rows in already), a table dye's colours (a dye past the table, the Skin
+  Manager's custom dye, keeps its own: `define_dye`, 2026-11-23), and a new index in the dropdown and wheel lists. Models already built keep their look until rebuilt, as in v10.
 - `p` / `mp` keep the followed player's bars; `s2c_events_spectate_bar` gives them to `#interactProg` (ui_interact.c) and
   the charge bar (build_ui.c) while we spectate, and they start at 0 with every spectate.
 - `unb` / `unbS` / `lotWin` are chat lines (`hud_ui_unboxed`, `hud_ui_raffle_won` in hud_ui.c): store names from the viewer

@@ -91,6 +91,9 @@ int asset_fetch_running(void);
 // not a managed file), 0 = queued / downloading / waiting to retry (enqueue 0: only when already
 // known), -1 = given up. Thread-safe.
 int asset_fetch_request(const char *path, int enqueue);
+// Forgets what the fetch knows of a full path (a given-up 404, a file it fetched): the next request looks at the disk
+// again. A file in flight is kept. Thread-safe; a no-op when not running.
+void asset_fetch_forget(const char *path);
 // Render thread: fn(full path) for every file that arrived since the last call. Returns the count.
 int asset_fetch_poll(void (*fn)(void *user, const char *path), void *user);
 // Waits until nothing is queued, downloading or waiting to retry (tests). 1 = idle.
@@ -116,3 +119,7 @@ void asset_fetch_stats(AssetFetchStats *out);
 void asset_fetch_client_init(void);
 void asset_fetch_client_frame(void);    // once per frame: arrived files reach the loaders
 void asset_fetch_client_shutdown(void);
+// A Box Office user asset this client has just uploaded (the Skin Manager's files, v10_skin_manager.c): the bytes go
+// to <assets>/user-assets/<rel> as if fetched (the fetch forgets the path) and the loaders reload it, as a browser
+// loads the file again; data NULL removes the local copy (a model of another format). 1 = done. A no-op (0) on the web, whose browser fetches.
+int asset_fetch_client_put(const char *rel, const void *data, size_t n);

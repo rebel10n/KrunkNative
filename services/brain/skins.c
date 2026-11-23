@@ -9,8 +9,20 @@
  *   PUT    /skins/<id> {...}                                skins.update     {skin}
  *   DELETE /skins/<id>                                      skins.delete     {deleted, skinId}
  *   POST   /skins/<id>/duplicate                            skins.duplicate  {skin}
- *   POST   /skins/<id>/upload (multipart)                   skins.uploadAsset: refused, Box Office has no store for
- *                                                           skin files (models, textures, sounds, thumbnails)
+ *   POST   /skins/<id>/upload (multipart)                   skins.uploadAsset  {asset_path}
+ *
+ * uploadAsset (FormData {file, asset_type, category}) stores one file of the skin where v10's game loads it,
+ * "skins/<skinId>/<file>" (asset_upload.c skin_target: model.<ext>, texture.png / texture_e / _w / _p, sound.mp3 /
+ * sound_swap / sound_inspect, thumbnail.png), on the editor's and the mods' upload tickets (asset_upload.c), and
+ * GET /api/user-assets/skins/<id>/<file> serves it (user_assets.c). Two ways in:
+ *   HTTP (v10's own client): the FormData POST itself, for a file that fits one request body (brain.max_body_bytes);
+ *   the gapi tunnel (the native client), a deliberate difference as the mods' publishKey: POST /skins/<id>/upload
+ *   {asset_type, category, fileName, size} -> {fileId, uploadUrl}; the file then goes as chunks to uploadUrl
+ *   (/skins/upload?fileId=&key=file&offset=, then &done=1 -> {data: {asset_path}}), so a 100 MB model fits.
+ * Either way the file is checked (its format: PNG / JPEG, MP3, OBJ / glTF / GLB / FBX) and stored only while the skin
+ * is still the uploader's. Skin ids start at 1000000000 (USER_ASSET_KN_ID_BASE, migration 0395) so a skin's folder
+ * never names one of Krunker's skins/<_id>/ folders (user_asset_rel_is_kn). Deleting a skin deletes its files; a
+ * duplicate gets a copy of them.
  *
  * A skin is {skinId, name, type, weapon, rarity, itemConfig, created_at, updated_at} (the fields the window reads:
  * :124947-124983 the list row, :124794-124803 the editor's copy, :124651-124663 the save). Every route is the
@@ -25,6 +37,7 @@
  * uses, and HTTP on the brain root with a Bearer session (v10_catalog.c).
  */
 #include "acct_internal.h"
+#include "asset_upload.h"
 #include "db_procs.h"
 #include "skins.h"
 
@@ -59,6 +72,10 @@ static const struct {
     {"SKIN_TYPE_INVALID", 400, "Unknown skin type, weapon or rarity"},
     {"SKIN_CONFIG_INVALID", 400, "The item configuration must be a JSON object of at most 32 KB"},
     {"SKIN_LIMIT", 400, "You can keep up to 200 skins"},
+    {"SKIN_UPLOAD_OFF", 503, "File uploads are not supported on this server"},
+    {"SKIN_UPLOAD_TYPE", 400, "Unsupported file type for this upload"},
+    {"SKIN_UPLOAD_SIZE", 400, "File size Limit Reached"},
+    {"SKIN_UPLOAD_BUSY", 503, "Server busy, try again later"},
 };
 
 int skins_error(const char *code, const char **message) {
@@ -392,26 +409,71 @@ static int write_ok(int64_t account) {
     return hot_limit("skins", key, 60, 60, local);
 }
 
+void skins_after(const char *op, const int64_t id, const cJSON *answer) {
+    if (!strcmp(op, "delete")) asset_upload_skin_purge(id);
+    if (!strcmp(op, "duplicate"))
+        asset_upload_skin_copy(id, (int64_t) jnum(cJSON_GetObjectItemCaseSensitive(answer, "skin"), "skinId"));
+}
+
+typedef struct Call {
+    int64_t rid;
+    char op[16];
+    int64_t id;
+    /* the upload key's request (op "upload": the skin's get first) */
+    char type[16], category[16], file_name[160];
+    long long size;
+} Call;
+
 static void done(SocialSession *s, kn_db_result *res, void *extra) {
-    const int64_t rid = *(int64_t *) extra;
+    const Call *k = extra;
     if (!kn_db_ok(res)) {
         const char *code = acct_db_error(res, "skins"), *message = NULL;
         const int status = skins_error(code, &message);
-        gapi_error(s, rid, status, status == 500 ? "SKIN_ERROR" : code, message);
+        gapi_error(s, k->rid, status, status == 500 ? "SKIN_ERROR" : code, message);
         return;
     }
     cJSON *v = acct_db_json(res);
-    gapi_reply(s, rid, v ? v : cJSON_CreateObject());
+    if (!strcmp(k->op, "upload")) { /* the skin is the account's: the file's ticket */
+        cJSON_Delete(v);
+        char fid[40], url[300];
+        const char *code = NULL, *message = NULL;
+        if (!asset_upload_skin_open(s->account_id, s->username, k->id, k->type, k->category, k->file_name, k->size, fid, sizeof fid,
+                                    url, sizeof url, &code)) {
+            const int status = skins_error(code, &message);
+            gapi_error(s, k->rid, status, code, message);
+            return;
+        }
+        cJSON *d = cJSON_CreateObject();
+        cJSON_AddStringToObject(d, "fileId", fid);
+        cJSON_AddStringToObject(d, "uploadUrl", url);
+        gapi_reply(s, k->rid, d);
+        return;
+    }
+    skins_after(k->op, k->id, v);
+    gapi_reply(s, k->rid, v ? v : cJSON_CreateObject());
+}
+
+static Call *call_new(const GapiReq *r, const char *op, const char *id) {
+    Call *k = calloc(1, sizeof *k);
+    if (!k) return NULL;
+    k->rid = r->rid;
+    snprintf(k->op, sizeof k->op, "%s", op);
+    k->id = id ? strtoll(id, NULL, 10) : 0;
+    return k;
 }
 
 static void call(SocialSession *s, const GapiReq *r, const char *op, const char *a, const char *b, const char *c,
                  const char *d, const char *e) {
-    int64_t *rid = malloc(sizeof *rid);
-    if (!rid) return;
-    *rid = r->rid;
+    Call *k = call_new(r, op, !strcmp(op, "list") || !strcmp(op, "create") ? NULL : a);
+    if (!k) return;
     char me[24];
     social_viewer(s, me);
-    social_call(s, &P_CUSTOM_SKIN, KN_DB_ARGS(op, me, nz(a), nz(b), nz(c), nz(d), nz(e)), done, rid);
+    social_call(s, &P_CUSTOM_SKIN, KN_DB_ARGS(op, me, nz(a), nz(b), nz(c), nz(d), nz(e)), done, k);
+}
+
+static void str_field(const cJSON *o, const char *key, char *out, const size_t n) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    snprintf(out, n, "%s", cJSON_IsString(v) && v->valuestring ? v->valuestring : "");
 }
 
 static int is_id(const char *s) {
@@ -460,7 +522,17 @@ int skins_gapi(SocialSession *s, const GapiReq *r) {
     } else if (gapi_is(r, "POST", "/skins/:id/duplicate")) {
         call(s, r, "duplicate", r->seg[1], NULL, NULL, NULL, NULL);
     } else if (gapi_is(r, "POST", "/skins/:id/upload")) {
-        gapi_error(s, r->rid, 403, "SKIN_UPLOAD_REFUSED", "Box Office has no asset store for skin files");
+        /* the native client's key for a chunked upload: {asset_type, category, fileName, size} -> {fileId, uploadUrl} */
+        Call *k = call_new(r, "upload", r->seg[1]);
+        if (!k) return 1;
+        str_field(r->body, "asset_type", k->type, sizeof k->type);
+        str_field(r->body, "category", k->category, sizeof k->category);
+        str_field(r->body, "fileName", k->file_name, sizeof k->file_name);
+        const double size = jnum(r->body, "size");
+        k->size = size >= 1 && size <= 1e9 ? (long long) size : 0;
+        char me[24];
+        social_viewer(s, me);
+        social_call(s, &P_CUSTOM_SKIN, KN_DB_ARGS("get", me, r->seg[1]), done, k);
     } else {
         gapi_error(s, r->rid, 404, "NOT_FOUND", "Not found.");
     }

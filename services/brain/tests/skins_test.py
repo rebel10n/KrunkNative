@@ -11,7 +11,10 @@ with its own sqlite database (never config/config.json).
 Covers what v10.0.7's Skin Manager window calls (deob-10.0.7.js:26551-26604 the client, :124350-124511 the
 service): list (page, page_size, type, weapon, search by name or id, newest first, {skins, total}), get,
 create (defaults, name / type / config rules, 200 per account), update (partial), duplicate (" (Copy)"),
-delete, upload (refused: no asset store), ownership (another account's skin is 404) and guests (401).
+delete, ownership (another account's skin is 404) and guests (401); uploadAsset (asset_upload.c): the gapi key then
+chunks to /skins/upload, v10's own FormData POST over HTTP, each file where the game loads it (skins/<skinId>/<file>,
+served by /api/user-assets/skins/...), the checks (type, category, size, content, owner), a model of another format
+replacing the old one, a duplicate's copy of the files and a delete removing them; ids from 1000000000 (0395).
 77 = skip (no kn_brain / websockets / database server).
 """
 import asyncio
@@ -24,9 +27,11 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import struct
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 try:
     import websockets
@@ -127,6 +132,71 @@ class Sock:
 
     async def close(self):
         await self.ws.close()
+
+
+def png(w=2, h=2):
+    raw = b"".join(b"\0" + b"\x80\x40\x20\xff" * w for _ in range(h))
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+MP3 = b"ID3\x03\0\0\0\0\0\0" + b"\xff\xfb\x90\x00" + b"\0" * 64
+WAV = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x44\xac\0\0\x88\x58\x01\0\x02\0\x10\0data\0\0\0\0"
+OGG = b"OggS\0\x02" + b"\0" * 58
+OBJ = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n"
+
+
+def glb():
+    js = json.dumps({"asset": {"version": "2.0"}, "buffers": [{"byteLength": 4}]}).encode()
+    js += b" " * (-len(js) % 4)
+    bin_ = b"\0\0\0\0"
+    body = struct.pack("<I4s", len(js), b"JSON") + js + struct.pack("<I4s", len(bin_), b"BIN\0") + bin_
+    return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
+
+
+def raw(port, method, path, data=b"", ctype="application/octet-stream", token=None):
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), data=data, method=method)
+    req.add_header("Content-Type", ctype)
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def form(fields, file_name, data):
+    b = "----knskins%d" % os.getpid()
+    out = b""
+    for k, v in fields.items():
+        out += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % (b, k, v)).encode()
+    out += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            % (b, file_name)).encode() + data + ("\r\n--%s--\r\n" % b).encode()
+    return out, "multipart/form-data; boundary=" + b
+
+
+async def upload(sock, port, skin, asset_type, data, category=None, file_name="file.bin", chunk=7):
+    """the native client's way: the gapi key, the chunks, done -> (status, json body)"""
+    body = {"asset_type": asset_type, "fileName": file_name, "size": len(data)}
+    if category:
+        body["category"] = category
+    st, d, err = await sock.gapi("POST", "/skins/%d/upload" % skin, body)
+    if st != 200:
+        return st, {"error": err}
+    url = d["uploadUrl"]
+    for at in range(0, len(data), chunk):
+        cst, _ = raw(port, "POST", "%s?fileId=%s&key=file&offset=%d" % (url, d["fileId"], at), data[at:at + chunk])
+        if cst != 200:
+            return cst, None
+    st, out = raw(port, "POST", "%s?fileId=%s&done=1" % (url, d["fileId"]))
+    try:
+        return st, json.loads(out or b"null")
+    except ValueError:
+        return st, out
 
 
 def code(err):
@@ -250,9 +320,61 @@ async def scenario(port):
     st, data, err = await b.gapi("POST", "/skins/%d/duplicate" % s2["skinId"])
     check(st == 404 and code(err) == "SKIN_NOT_FOUND", "duplicate: another account's skin is 404", (st, err))
 
-    # ---- upload: no asset store
-    st, data, err = await a.gapi("POST", "/skins/%d/upload" % s2["skinId"], {"asset_type": "thumbnail"})
-    check(st == 403 and code(err) == "SKIN_UPLOAD_REFUSED", "upload: refused (no asset store)", (st, err))
+    # ---- uploads (asset_upload.c): the files of a skin where v10's game loads them
+    check(s1["skinId"] >= 1000000000, "ids: from 1000000000, a Box Office skin's skins/<id>/ folder is the brain's", s1["skinId"])
+    sid = s2["skinId"]
+    tex = png(4, 4)
+    st, body = await upload(a, port, sid, "texture", tex, "diffuse", "skin.png")
+    check(st == 200 and (body or {}).get("data", {}).get("asset_path") == "skins/%d/texture.png" % sid,
+          "upload: a diffuse texture -> {data: {asset_path: skins/<id>/texture.png}}", (st, body))
+    st, got = raw(port, "GET", "/api/user-assets/skins/%d/texture.png" % sid, None)
+    check(st == 200 and got == tex, "upload: GET /api/user-assets/skins/<id>/texture.png serves it", (st, len(got or b"")))
+    for asset_type, category, data, fname, want in (("texture", "emissive", png(), "g.png", "texture_e.png"),
+                                                   ("texture", "wear", png(), "w.png", "texture_w.png"),
+                                                   ("texture", "mask", png(), "p.png", "texture_p.png"),
+                                                   ("sound", None, MP3, "shot.mp3", "sound.mp3"),
+                                                   ("sound", "swap", WAV, "s.wav", "sound_swap.mp3"),
+                                                   ("sound", "inspect", MP3, "i.mp3", "sound_inspect.mp3"),
+                                                   ("thumbnail", None, png(8, 8), "thumb.png", "thumbnail.png"),
+                                                   ("model", None, OBJ, "Gun.OBJ", "model.obj")):
+        st, body = await upload(a, port, sid, asset_type, data, category, fname)
+        check(st == 200 and (body or {}).get("data", {}).get("asset_path") == "skins/%d/%s" % (sid, want),
+              "upload: %s %s -> %s" % (asset_type, category or "(default)", want), (st, body))
+    st, body = await upload(a, port, sid, "model", glb(), None, "gun.glb")
+    st1, _ = raw(port, "GET", "/api/user-assets/skins/%d/model.glb" % sid, None)
+    st2, _ = raw(port, "GET", "/api/user-assets/skins/%d/model.obj" % sid, None)
+    check(st == 200 and st1 == 200 and st2 == 404, "upload: a GLB model replaces the OBJ (one model per skin)", (st, st1, st2))
+    for asset_type, category, data, fname, want_st, what in (
+            ("texture", "normal", png(), "n.png", 400, "an unknown texture category"),
+            ("model", None, OBJ, "gun.exe", 400, "a model of no model format"),
+            ("video", None, png(), "v.mp4", 400, "an unknown asset type")):
+        st, body = await upload(a, port, sid, asset_type, data, category, fname)
+        check(st == want_st and code((body or {}).get("error")) == "SKIN_UPLOAD_TYPE", "upload: %s is refused" % what, (st, body))
+    st, d, err = await a.gapi("POST", "/skins/%d/upload" % sid, {"asset_type": "thumbnail", "size": 2000000})
+    check(st == 400 and code(err) == "SKIN_UPLOAD_SIZE", "upload: a thumbnail over 1 MB is refused at the key", (st, err))
+    st, body = await upload(a, port, sid, "texture", b"<html>not a png</html>", "diffuse", "x.png")
+    check(st == 400, "upload: a texture that is no image fails its check at done", (st, body))
+    st, body = await upload(a, port, sid, "sound", OGG, "inspect", "i.ogg")
+    check(st == 400 and "MP3 or WAV" in json.dumps(body), "upload: an OGG sound is refused at done (no Vorbis decoder)", (st, body))
+    st, d, err = await b.gapi("POST", "/skins/%d/upload" % sid, {"asset_type": "thumbnail", "size": 100})
+    check(st == 404 and code(err) == "SKIN_NOT_FOUND", "upload: another account's skin is 404", (st, err))
+    # the skin deleted between the key and done: nothing is stored
+    st, d, err = await a.gapi("POST", "/skins", {"name": "Doomed"})
+    doomed = d["skin"]["skinId"]
+    st, k, err = await a.gapi("POST", "/skins/%d/upload" % doomed, {"asset_type": "thumbnail", "size": len(tex)})
+    raw(port, "POST", "%s?fileId=%s&key=file&offset=0" % (k["uploadUrl"], k["fileId"]), tex)
+    await a.gapi("DELETE", "/skins/%d" % doomed)
+    st, out = raw(port, "POST", "%s?fileId=%s&done=1" % (k["uploadUrl"], k["fileId"]))
+    st2, _ = raw(port, "GET", "/api/user-assets/skins/%d/thumbnail.png" % doomed, None)
+    check(st == 404 and st2 == 404, "upload: a skin deleted before done stores nothing (404)", (st, out, st2))
+    # a duplicate copies the files
+    st, data, err = await a.gapi("POST", "/skins/%d/duplicate" % sid)
+    dup = ((data or {}).get("skin") or {}).get("skinId", 0)
+    st1, got = raw(port, "GET", "/api/user-assets/skins/%d/texture.png" % dup, None)
+    check(st == 200 and st1 == 200 and got == tex, "duplicate: the copy has the original's files", (st, st1))
+    st, data, err = await a.gapi("DELETE", "/skins/%d" % dup)
+    st1, _ = raw(port, "GET", "/api/user-assets/skins/%d/texture.png" % dup, None)
+    check(st == 200 and st1 == 404, "delete: the skin's files go with it", (st, st1))
 
     # ---- delete
     st, data, err = await b.gapi("DELETE", "/skins/%d" % s2["skinId"])
@@ -296,10 +418,22 @@ async def scenario(port):
     check(st == 404 and isinstance((body or {}).get("error"), str), "HTTP: another account's skin is 404", (st, body))
     st, body = http(port, "POST", "/skins/%d/duplicate" % hs.get("skinId", 0), {}, token=tok)
     check(st == 200 and (((body or {}).get("data") or {}).get("skin") or {}).get("name") == "Http Skin (Copy)", "HTTP: duplicate", (st, body))
+    # v10's own uploadAsset: one FormData POST {file, asset_type, category}
+    data_, ctype = form({"asset_type": "texture", "category": "emissive"}, "glow.png", tex)
+    st, out = raw(port, "POST", "/skins/%d/upload" % hs.get("skinId", 0), data_, ctype, token=tok)
+    check(st == 200 and json.loads(out).get("data", {}).get("asset_path") == "skins/%d/texture_e.png" % hs.get("skinId", 0),
+          "HTTP: the FormData upload -> {data: {asset_path}}", (st, out[:200]))
+    st1, got = raw(port, "GET", "/user-assets/skins/%d/texture_e.png" % hs.get("skinId", 0), None)
+    check(st1 == 200 and got == tex, "HTTP: the uploaded file is served", st1)
+    data_, ctype = form({"asset_type": "texture"}, "x.png", tex)
+    st, out = raw(port, "POST", "/skins/%d/upload" % s3["skinId"], data_, ctype, token=tok)
+    check(st == 404 and isinstance(json.loads(out).get("error"), str), "HTTP: an upload to another account's skin is 404", (st, out[:200]))
+    st, out = raw(port, "POST", "/skins/%d/upload" % hs.get("skinId", 0), b"{}", "application/json", token=tok)
+    check(st == 400, "HTTP: an upload without a file is 400", (st, out[:200]))
+    st, out = raw(port, "POST", "/skins/%d/upload" % hs.get("skinId", 0), data_, ctype)
+    check(st == 401, "HTTP: a guest's upload is 401", st)
     st, body = http(port, "DELETE", "/skins/%d" % hs.get("skinId", 0), token=tok)
     check(st == 200 and ((body or {}).get("data") or {}).get("deleted") is True, "HTTP: delete", (st, body))
-    st, body = http(port, "POST", "/skins/%d/upload" % hs.get("skinId", 0), {}, token=tok)
-    check(st == 403 and isinstance((body or {}).get("error"), str), "HTTP: upload refused", (st, body))
 
     for s in (a, b):
         await s.close()
@@ -342,6 +476,7 @@ def main():
     with open(cfg, "w") as f:
         json.dump({"database": dict(dbcfg, migrations_dir=os.path.join(ROOT, "services", "db", "migrations")),
                    "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "skins-%d" % os.getpid()},
+                   "uploads": {"dir": os.path.join(WORK, "uploads")},
                    "accounts": {"free_premium": False, "starting_kr": 0, "login_throttle_s": 0, "password_iterations": 1000,
                                 "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
     brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
