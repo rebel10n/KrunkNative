@@ -50,6 +50,8 @@ int store_wheel_parse(const cJSON *o, StoreWheel *w) {
     copy_str(w->price_t, sizeof w->price_t, o, "priceT");
     copy_str(w->promo_text, sizeof w->promo_text, o, "promoText");
     copy_str(w->promo_col, sizeof w->promo_col, o, "promoCol");
+    copy_str(w->info_text, sizeof w->info_text, o, "infoText");
+    copy_str(w->end_date, sizeof w->end_date, o, "endDate");
     copy_str(w->lim_type, sizeof w->lim_type, o, "limType");
     copy_str(w->lim_group, sizeof w->lim_group, o, "limGroup");
     copy_str(w->tag, sizeof w->tag, o, "tag");

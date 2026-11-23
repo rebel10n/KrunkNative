@@ -21,3 +21,6 @@ void v10_misc_popups_scenario(const cJSON *popups);
 void v10_misc_survey_show(const cJSON *survey);   // GAME_SURVEY: {surveyId, question, answers[], expiresAt (unix s), rewardAmount}
 void v10_misc_survey_clear(void);                 // surveyId "CLEAR_SURVEY"
 void v10_misc_guest_progress(double kr, double score); // the guest's earnings the mission briefing reports
+// The lottery's social pushes (deob-10.0.7.js:224921-225003, :120428): ["lotEnt", lotteryId, drawId, total],
+// ["lotWinP", lotteryId, drawId, {type, ref, quantity}], ["lotStart", lotteryId], ["lotEnd", lotteryId]. 1 = handled.
+int  v10_misc_lottery_frame(const char *label, const cJSON *frame);

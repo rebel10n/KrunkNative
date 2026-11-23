@@ -508,7 +508,11 @@ static struct {
     double frozen_left;
     int timer;                // the view's deadline (html_timer id, 0 none): no answer by then fails the window
     int timed_out;
-} LT;
+    int sent;                 // the cost the entry in flight pays (-1 none; its quantity resets on success, deob-10.0.7.js:127898)
+    char sent_type[16];
+    int sent_ref, sent_qty;
+    int live_total;           // UPDATE_LOTTERY_ENTRIES' total_entries since the view came (-1 none, :224921-224923)
+} LT = {.sent = -1, .live_total = -1};
 
 // the lottery view has a deadline: no answer by then (the brain is gone, or it stalls) shows the failure with Retry
 #define LOT_WAIT_MS 15000
@@ -524,29 +528,46 @@ static char *lot_path(char *out, const size_t n, const char *suffix) {
 
 static const char *cur_name(const char *ref) { return !strcmp(ref, "1") ? "KR" : !strcmp(ref, "2") ? "JNK" : !strcmp(ref, "3") ? "RP" : "KR"; }
 
-// the account's available quantity of a cost (the skin count in data[10], or the KR balance)
-static int lot_available(const cJSON *cost) {
+// a cost's cost_ref as a number (parseInt(cost_ref) || 0): v10 sends it as text, a number reads too
+static int lot_ref(const cJSON *cost, const char *key) {
+    const char *s = v10_str(cost, key);
+    return s[0] ? atoi(s) : (int) v10_num(cost, key, 0);
+}
+
+// the account's available quantity of a cost (deob-10.0.7.js:128008-128021): the skin's cnt, else currency 1 funds,
+// 2 junk (the wallet's amount, as v10 reads it), 3 rankedPoints
+static double lot_available(const cJSON *cost) {
     const AccountInfo *acc = active_account();
     if (!acc) return 0;
     const char *type = v10_str(cost, "cost_type");
-    const int ref = (int) v10_num(cost, "cost_ref", 0);
+    const int ref = lot_ref(cost, "cost_ref");
     if (!strcmp(type, "skin")) {
         const cJSON *inventory = acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL, *e;
         cJSON_ArrayForEach(e, inventory) {
-            if ((int) v10_num(e, "ind", -1) == ref) return (int) v10_num(e, "cnt", 1);
+            if ((int) v10_num(e, "ind", -1) == ref) return v10_num(e, "cnt", 0);
         }
         return 0;
     }
-    if (!strcmp(type, "currency") && ref == 1) return (int) acc->funds;
+    if (!strcmp(type, "currency")) return ref == 1 ? acc->funds : ref == 2 ? acc->junk : ref == 3 ? acc->ranked_points : 0;
     return 0;
 }
 
-// a prize / cost item as v10 shows it: the item card, or the currency display
-static void lot_item(StrBuf *sb, const char *type, const char *ref, const double quantity, const int card, const char *children, const char *fallback) {
+// a JS number as text (`${n}`)
+static void lot_num(char *out, const size_t n, const double v) {
+    if (v == floor(v) && fabs(v) < 1e15) snprintf(out, n, "%.0f", v);
+    else snprintf(out, n, "%.15g", v);
+}
+
+// a prize / cost item as v10 shows it: the item card (showItemInfo / onclick: a cost's card has no info, the Grand
+// Prize's has it and opens the item view, deob-10.0.7.js:128283-128290, :128403-128409), or the currency display
+static void lot_item(StrBuf *sb, const char *type, const char *ref, const double quantity, const int card, const char *children, const char *fallback,
+                     const int show_info, const int clickable) {
     if (!strcmp(type, "skin")) {
         const int index = atoi(ref);
         if (viewer_skin(index)) {
-            v10_market_card(sb, index, card, card, "top-center", NULL, children);
+            char click[48];
+            snprintf(click, sizeof click, "viewItem(%d)", index);
+            v10_market_card_ex(sb, index, card, card, "top-center", clickable ? click : NULL, children, show_info);
             return;
         }
     } else if (!strcmp(type, "currency")) {
@@ -595,10 +616,28 @@ static const cJSON *lot_data(const V10Req **req_out) {
     return cJSON_IsObject(data) ? data : r->json; // v10 stores answer.data
 }
 
+#define LOT_MAX_PRIZES 64
+// the draw's prizes sorted by prize_pool_id ([...prizes].sort((a, b) => a.prize_pool_id - b.prize_pool_id), deob-10.0.7.js:128072-128076)
+static int lot_prizes(const cJSON *draw, const cJSON **out) {
+    int n = 0;
+    const cJSON *p;
+    cJSON_ArrayForEach(p, cJSON_GetObjectItem(draw, "prizes")) {
+        if (n >= LOT_MAX_PRIZES) break;
+        int j = n++;
+        const double key = v10_num(p, "prize_pool_id", 0);
+        while (j > 0 && v10_num(out[j - 1], "prize_pool_id", 0) > key) { // a stable insertion sort
+            out[j] = out[j - 1];
+            j--;
+        }
+        out[j] = p;
+    }
+    return n;
+}
+
 static void lot_stepper(StrBuf *sb, const int i, const int value, const int max, const int step, const int disabled) {
-    sb_appendf(sb, "<div class=\"quantity-selector svelte-jsgxg6\"><button class=\"quantity-button svelte-jsgxg6\"%s onmouseenter=\"playTick(0.1)\" onclick=\"knMiscLotQty(%d,-1)\">-</button> "
+    sb_appendf(sb, "<div class=\"quantity-selector svelte-jsgxg6\"><button class=\"quantity-button svelte-jsgxg6\"%s onmouseenter=\"playTick(0.1)\" onclick=\"playSelect(0.1);knMiscLotQty(%d,-1)\">-</button> "
                    "<div class=\"quantity-display svelte-jsgxg6\"><div class=\"quantity-number svelte-jsgxg6\">%d</div> <!----></div> "
-                   "<button class=\"quantity-button svelte-jsgxg6\"%s onmouseenter=\"playTick(0.1)\" onclick=\"knMiscLotQty(%d,1)\">+</button></div>",
+                   "<button class=\"quantity-button svelte-jsgxg6\"%s onmouseenter=\"playTick(0.1)\" onclick=\"playSelect(0.1);knMiscLotQty(%d,1)\">+</button></div>",
                disabled || value <= 0 ? " disabled" : "", i, value, disabled || value >= max ? " disabled" : "", i);
     (void) step;
 }
@@ -662,16 +701,20 @@ static char *lot_html(void) {
         }
         const double left = LT.frozen ? LT.frozen_left : ends_s - now_s();
         const int open = left > 0, drawing = !open && !cJSON_IsTrue(cJSON_GetObjectItem(draw, "drawn_at")) && !v10_str(draw, "drawn_at")[0];
-        const int frequency = (int) v10_num(info, "frequency", 0);
-        const int n_prizes = cJSON_GetArraySize(cJSON_GetObjectItem(draw, "prizes"));
+        const cJSON *freq = cJSON_GetObjectItem(info, "frequency");
+        char freq_s[32] = "";
+        if (cJSON_IsNumber(freq)) lot_num(freq_s, sizeof(freq_s), freq->valuedouble);
+        else if (cJSON_IsString(freq)) snprintf(freq_s, sizeof(freq_s), "%s", freq->valuestring);
+        const cJSON *sorted[LOT_MAX_PRIZES];
+        const int n_prizes = lot_prizes(draw, sorted);
         const int extra = n_prizes > 1 ? n_prizes - 1 : 0;
         sb_append(&sb, "<div class=\"lottery-container svelte-1rj22es\"><div class=\"left-column svelte-1rj22es\"><div class=\"description svelte-1rj22es\">Earn materials by eliminating players in-game. Enter the ");
         sb_append_esc(&sb, title[0] ? title : "Raffle");
-        sb_append(&sb, " for a chance at prizes!");
-        if (frequency > 0) {
-            sb_appendf(&sb, "  <span class=\"description-muted svelte-1rj22es\"> A new draw happens every %d %s, with 1 grand prize winner and up to %d %s receiving additional prizes.</span>",
-                       frequency, frequency == 1 ? "hour" : "hours", extra, extra == 1 ? "extra winner" : "extra winners");
-        }
+        // the muted line always follows (frequency ?? ''), deob-10.0.7.js:128213-128220
+        sb_append(&sb, " for a chance at prizes!  <span class=\"description-muted svelte-1rj22es\">A new draw happens every ");
+        sb_append_esc(&sb, freq_s);
+        sb_appendf(&sb, " %s, with 1 grand prize winner and up to %d %s receiving additional prizes.</span>",
+                   cJSON_IsNumber(freq) && freq->valuedouble == 1 ? "hour" : "hours", extra, extra == 1 ? "extra winner" : "extra winners");
         sb_append(&sb, "</div> ");
         if (drawing) {
             sb_append(&sb, "<div class=\"draw-timer drawing-status svelte-1rj22es\"><span class=\"timer-label svelte-1rj22es\">Status:</span> <span class=\"timer-value svelte-1rj22es\">Drawing in progress</span></div>");
@@ -679,8 +722,8 @@ static char *lot_html(void) {
             const long total = (long) left;
             sb_appendf(&sb, "<div class=\"draw-timer svelte-1rj22es\"><span class=\"timer-label svelte-1rj22es\">Next Draw:</span> <span class=\"timer-value svelte-1rj22es\" id=\"knLotTimer\">%ldh %ldm %lds</span></div>",
                        total / 3600, total % 3600 / 60, total % 60);
-        } else {
-            sb_append(&sb, "<!---->");
+        } else { // a drawn, ended draw: the countdown's text is "Drawing in progress" (deob-10.0.7.js:127996-128000, :128224-128233)
+            sb_append(&sb, "<div class=\"draw-timer svelte-1rj22es\"><span class=\"timer-label svelte-1rj22es\">Next Draw:</span> <span class=\"timer-value svelte-1rj22es\">Drawing in progress</span></div>");
         }
         sb_append(&sb, " <div class=\"costs-row svelte-1rj22es\">");
         double submitting = 0;
@@ -696,41 +739,53 @@ static char *lot_html(void) {
             }
             const int step = (int) v10_num(cost, "cost_quantity", 1) > 0 ? (int) v10_num(cost, "cost_quantity", 1) : 1;
             const double per = v10_num(cost, "num_entries", 1) / step;
-            const int avail = lot_available(cost);
-            const int max = avail / step * step;
+            const double avail = lot_available(cost);
+            const int max = (int) (floor(avail / step) * step);
             if (LT.qty[i] > max) LT.qty[i] = max;
             const double entries = LT.qty[i] > 0 ? LT.qty[i] * per : 0;
             submitting += entries;
             const int disabled = LT.submitting || !open;
             const int is_skin = !strcmp(type, "skin");
-            const char *name = is_skin ? skin_name(ref) : cur_name(ref);
-            const char *color = "#ffffff";
-            sb_appendf(&sb, "<div class=\"cost-column themed-box svelte-1rj22es\"><div class=\"cost-header svelte-1rj22es\"><div class=\"cost-name svelte-1rj22es\" style=\"color: %s\">", color);
+            // the cost's name, rarity colour and `dark` (rarity_meta.dark: Contraband), deob-10.0.7.js:128296-128298, :103540
+            const ViewerSkin *cskin = is_skin ? viewer_skin(atoi(ref)) : NULL;
+            char name[96];
+            if (is_skin) snprintf(name, sizeof(name), "%s", cskin && cskin->name && cskin->name[0] ? cskin->name : "Item");
+            else if (!strcmp(type, "currency")) snprintf(name, sizeof(name), "%s Currency", cur_name(ref));
+            else snprintf(name, sizeof(name), "Item");
+            const char *color = cskin && cskin->rarity >= 0 && cskin->rarity < g_viewer_rarity_count && g_viewer_rarities[cskin->rarity].color
+                                    ? g_viewer_rarities[cskin->rarity].color : "#ffffff";
+            char per_s[32], avail_s[32];
+            lot_num(per_s, sizeof(per_s), per);
+            lot_num(avail_s, sizeof(avail_s), avail);
+            sb_appendf(&sb, "<div class=\"cost-column themed-box svelte-1rj22es\"><div class=\"cost-header svelte-1rj22es\"><div class=\"cost-name svelte-1rj22es%s\" style=\"color: %s\">",
+                       cskin && cskin->rarity == 5 ? " dark" : "", color);
             sb_append_esc(&sb, name);
-            sb_appendf(&sb, "</div> <div class=\"cost-entries svelte-1rj22es\">(%.17g %s)</div></div> <div class=\"cost-item-display svelte-1rj22es\">", per, per == 1 ? "entry" : "entries");
+            sb_appendf(&sb, "</div> <div class=\"cost-entries svelte-1rj22es\">(%s %s/each)</div></div> <div class=\"cost-item-display svelte-1rj22es\">", per_s, per == 1 ? "entry" : "entries");
             char kids[160] = "";
             if (entries > 0) snprintf(kids, sizeof(kids), "<div class=\"entries-from-this svelte-1rj22es\">(%.17g entries)</div>", entries);
-            lot_item(&sb, type, ref, v10_num(cost, "cost_quantity", 1), 160, kids, name);
-            sb_appendf(&sb, "</div> <div class=\"available-quantity-display svelte-1rj22es\">Available: %d</div> ", avail);
+            lot_item(&sb, type, ref, v10_num(cost, "cost_quantity", 1), 160, kids, name, 0, 0);
+            sb_appendf(&sb, "</div> <div class=\"available-quantity-display svelte-1rj22es\">Available: %s</div> ", avail_s);
             lot_stepper(&sb, i, LT.qty[i], max, step, disabled);
-            sb_appendf(&sb, " <button class=\"add-all-button svelte-1rj22es\"%s onmouseenter=\"playTick(0.1)\" onclick=\"knMiscLotAll(%d)\">Add All</button></div>",
+            sb_appendf(&sb, " <button class=\"add-all-button svelte-1rj22es\"%s onmouseenter=\"playTick(0.1)\" onclick=\"playSelect(0.1);knMiscLotAll(%d)\">Add All</button></div>",
                        disabled || avail == 0 || max == LT.qty[i] ? " disabled" : "", i);
             i++;
         }
-        sb_appendf(&sb, "</div> <button class=\"enter-lottery-button svelte-1rj22es\"%s onmouseenter=\"playTick(0.1)\" onclick=\"knMiscLotEnter()\">%s</button> <div class=\"entry-info svelte-1rj22es\">",
+        sb_appendf(&sb, "</div> <button class=\"enter-lottery-button svelte-1rj22es\"%s onmouseenter=\"playTick(0.1)\" onclick=\"playSelect(0.1);knMiscLotEnter()\">%s</button> <div class=\"entry-info svelte-1rj22es\">",
                    LT.submitting || submitting <= 0 || !open ? " disabled" : "", LT.submitting ? "ENTERING..." : open ? "ENTER RAFFLE!" : "SUBMISSION CLOSED");
         if (submitting > 0) sb_appendf(&sb, "<div class=\"submitting-entries svelte-1rj22es\">Submitting: %.17g %s</div>", submitting, submitting == 1 ? "entry" : "entries");
         else sb_append(&sb, "<!---->");
         sb_appendf(&sb, " <div class=\"your-total-entries svelte-1rj22es\">Your Total Entries: %d</div> <div class=\"draw-total-entries svelte-1rj22es\">Total Draw Entries: %d</div></div></div> ",
-                   (int) v10_num(draw, "player_entries", 0), (int) v10_num(draw, "total_entries", 0));
+                   (int) v10_num(draw, "player_entries", 0), LT.live_total >= 0 ? LT.live_total : (int) v10_num(draw, "total_entries", 0));
         // the right column: grand prize, additional prizes, last draw's winners
         sb_append(&sb, "<div class=\"right-column svelte-1rj22es\">");
-        const cJSON *first = cJSON_GetArrayItem(cJSON_GetObjectItem(draw, "prizes"), 0);
+        const cJSON *first = n_prizes > 0 ? sorted[0] : NULL; // prizes sorted by prize_pool_id (deob-10.0.7.js:128072-128076)
         if (first) {
             char ref[16];
             snprintf(ref, sizeof(ref), "%d", (int) v10_num(first, "prize_ref", 0));
             sb_append(&sb, "<div class=\"grand-prize-container themed-box svelte-1rj22es\"><div class=\"grand-prize-title svelte-1rj22es\">Grand Prize</div> <div class=\"grand-prize-display svelte-1rj22es\">");
-            lot_item(&sb, v10_str(first, "prize_type"), ref, v10_num(first, "prize_quantity", 1), 200, NULL, "Prize");
+            char fb[96];
+            snprintf(fb, sizeof(fb), "%s %s", v10_str(first, "prize_type"), ref);
+            lot_item(&sb, v10_str(first, "prize_type"), ref, v10_num(first, "prize_quantity", 1), 200, NULL, fb, 1, 1);
             sb_append(&sb, "</div></div> ");
         } else {
             sb_append(&sb, "<!----> ");
@@ -765,7 +820,7 @@ static char *lot_html(void) {
             sb_append(&sb, "<!---->");
         }
         sb_append(&sb, "</div></div>");
-    } else if (cJSON_IsTrue(cJSON_GetObjectItem(info, "event_ended"))) {
+    } else if (cJSON_IsTrue(cJSON_GetObjectItem(lottery, "event_ended")) || cJSON_IsTrue(cJSON_GetObjectItem(info, "event_ended"))) { // data.event_ended (:128541)
         sb_append(&sb, "<div class=\"no-drawing-message svelte-1rj22es\">The raffle event has ended. Thank you for participating!</div>");
     } else {
         sb_append(&sb, "<div class=\"no-drawing-message svelte-1rj22es\">A new drawing will be created soon. Please check back in a few moments!</div>");
@@ -799,6 +854,8 @@ static void lot_open(const int id) {
     LT.id = id > 0 ? id : 3; // openLottery(): lotteryId = arguments[0] ?? 3
     memset(LT.qty, 0, sizeof(LT.qty));
     LT.submitting = 0;
+    LT.sent = -1;
+    LT.live_total = -1;
     if (!G.scenario) LT.error[0] = 0; // a scenario's error (its answer) is the state it stands in for
     lot_arm_deadline();
     char *html = lot_html();
@@ -810,11 +867,18 @@ static void lot_done(void *user, const int status, const cJSON *json) {
     (void) user;
     LT.submitting = 0;
     if (status == 200) {
-        memset(LT.qty, 0, sizeof(LT.qty));
+        // participateInLottery's success (deob-10.0.7.js:127853-127893): the paid cost leaves the account (removeSkin, or
+        // funds / junk (quantity / 100) / rankedPoints), only that cost's quantity resets (:127898), the view is asked again
+        // (its answer stays up until the next one comes: no "Loading..." in between)
+        if (LT.sent >= 0 && LT.sent < LOT_MAX_COSTS) LT.qty[LT.sent] = 0;
+        if (LT.sent >= 0) account_lottery_booked(LT.sent_type, LT.sent_ref, LT.sent_qty, -1);
+        LT.sent = -1;
+        LT.live_total = -1; // the answer carries total_entries (updateTotalEntries, :127857)
         LT.error[0] = 0;
         char path[512];
-        v10_forget(lot_path(path, sizeof(path), ""));
+        v10_expire(lot_path(path, sizeof(path), ""));
     } else {
+        LT.sent = -1;
         const char *e = json ? v10_str(json, "error") : "";
         snprintf(LT.error, sizeof(LT.error), "%s", e[0] ? e : "Failed to participate");
     }
@@ -831,6 +895,7 @@ static void lot_kio_done(void *user, const int status, const cJSON *data, const 
         return;
     }
     LT.submitting = 0;
+    LT.sent = -1;
     snprintf(LT.error, sizeof(LT.error), "%s", message);
     if (v10_popup_open("defaultModal lotteryModal")) lot_render();
 }
@@ -857,6 +922,10 @@ static void lot_enter(void) {
             snprintf(body, sizeof(body), "{\"cost_type\":\"%s\",\"cost_ref\":\"%s\",\"cost_quantity\":%d}", v10_str(cost, "cost_type"), r, LT.qty[i]);
             LT.submitting = 1;
             LT.error[0] = 0;
+            LT.sent = i;
+            snprintf(LT.sent_type, sizeof(LT.sent_type), "%s", v10_str(cost, "cost_type"));
+            LT.sent_ref = atoi(r);
+            LT.sent_qty = LT.qty[i];
             if (kio_store_active()) { // krunker.io's gapi, with the account's Bearer (participateInLottery, v10:26571)
                 snprintf(path, sizeof(path), "lottery/%d/participate", LT.id);
                 kio_store_write("POST", path, body, lot_kio_done, NULL);
@@ -868,6 +937,38 @@ static void lot_enter(void) {
         i++;
     }
     snprintf(LT.error, sizeof(LT.error), "Please select at least one item to participate");
+}
+
+// the lottery's social pushes (deob-10.0.7.js:224921-225003, :229369; sent by services/brain/lottery.c)
+int v10_misc_lottery_frame(const char *label, const cJSON *frame) {
+    if (!label || strncmp(label, "lot", 3)) return 0;
+    const int id = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 1));
+    const int shown = v10_popup_open("defaultModal lotteryModal");
+    if (!strcmp(label, "lotEnt")) { // UPDATE_LOTTERY_ENTRIES: updateTotalEntries(total), whichever lottery it names (:224921-224923)
+        const cJSON *total = cJSON_GetArrayItem(frame, 3);
+        if (LT.id > 0 && cJSON_IsNumber(total)) {
+            LT.live_total = (int) total->valuedouble;
+            if (shown) lot_render();
+        }
+        return 1;
+    }
+    if (!strcmp(label, "lotWinP")) { // LOTTERY_PRIZE_WON_PLAYER: the prize lands in the account (:224954-224992)
+        const cJSON *prize = cJSON_GetArrayItem(frame, 3);
+        const char *ref = v10_str(prize, "ref");
+        const int r = ref[0] ? atoi(ref) : (int) v10_num(prize, "ref", 0);
+        account_lottery_booked(v10_str(prize, "type"), r, v10_num(prize, "quantity", 0), +1);
+        return 1;
+    }
+    if (!strcmp(label, "lotStart") || !strcmp(label, "lotEnd")) { // LOTTERY_STARTED / _ENDED: the loaded lottery is asked again (:120428-120431)
+        if (LT.id > 0 && id == LT.id) {
+            char path[512];
+            v10_expire(lot_path(path, sizeof(path), ""));
+            LT.live_total = -1;
+            if (shown) lot_render();
+        }
+        return 1;
+    }
+    return 0;
 }
 
 static void lot_tick(void) {
@@ -1309,7 +1410,7 @@ int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         const cJSON *cost = i >= 0 && i < LOT_MAX_COSTS ? cJSON_GetArrayItem(costs, i) : NULL;
         if (!cost || LT.submitting) return 1;
         const int step = (int) v10_num(cost, "cost_quantity", 1) > 0 ? (int) v10_num(cost, "cost_quantity", 1) : 1;
-        const int max = lot_available(cost) / step * step;
+        const int max = (int) (floor(lot_available(cost) / step) * step);
         if (!strcmp(name, "knMiscLotAll")) LT.qty[i] = max;
         else LT.qty[i] = (int) fmax(0, fmin(max, LT.qty[i] + arg_int(args, argc, 1, 0) * step));
         lot_render();

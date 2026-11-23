@@ -31,6 +31,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <store_spins.h> // v10 store.wheels / itemPools
+#include <v10_ui.h>      // v10_market_card: the items modal's cards
 #include <junk.h>          // the Junk wallet's amounts (doc/v10/junk.md)
 #include <v10_wild_offer.h>
 #include <v10_menu.h>      // v10_menu_kr_sale: the Purchase KR tab's sale weekends
@@ -62,12 +63,21 @@ typedef struct {
     int hide, locked;
 } UiWheel;
 
-// store.wheels (v10 gapi /data/spins: shared/include/store_spins.h store_spins_builtin(), the
-// data kn_brain spins; index = the "spin" frame's wheel index). Built once from that data, so a
-// data change (new wheels, pools, prices, tickets) is all it takes.
+// store.wheels (v10 gapi /data/spins: shared/include/store_spins.h; index = the "spin" frame's wheel index). v10 loads
+// /data/spins at startup (deob-10.0.7.js:103441-103447) and takes SPIN_WHEELS_UPDATED's data (:229335-229337): here the
+// brain's GET /api/data/spins (the wheels it spins, store_spin_data included) and its "swu" push, store_spins_builtin()
+// until the brain answers (and for krunker.io). Rebuilt whenever the data changes.
 #define UI_WHEELS_MAX 32
 static UiWheel g_ui_wheels[UI_WHEELS_MAX];
 static int g_ui_wheel_count = -1;
+static const StoreSpins *g_ui_wheels_from; // the data g_ui_wheels was built from
+static StoreSpins g_net_spins;             // the brain's answer / last "swu"
+static int g_net_spins_set;
+static int g_spins_fetch;                  // 0 not asked (or retry), 1 asked, 2 answered
+static double g_spins_retry;               // glfwGetTime of the next try after a failure
+static char *g_spins_pending;              // data that came while a spin was in flight
+
+static const StoreSpins *ui_spins(void) { return g_net_spins_set && !kio_store_active() ? &g_net_spins : store_spins_builtin(); }
 
 // a pool's rarity: its items' (a pool holds one rarity; the first item tells)
 static int pool_rarity(const StorePool *p) {
@@ -79,8 +89,9 @@ static int pool_rarity(const StorePool *p) {
 }
 
 static void wheels_load(void) {
-    if (g_ui_wheel_count >= 0) return;
-    const StoreSpins *sp = store_spins_builtin();
+    const StoreSpins *sp = ui_spins();
+    if (g_ui_wheel_count >= 0 && g_ui_wheels_from == sp) return;
+    g_ui_wheels_from = sp;
     g_ui_wheel_count = 0;
     for (int i = 0; i < sp->wheel_count && g_ui_wheel_count < UI_WHEELS_MAX; i++) {
         const StoreWheel *w = &sp->wheels[i];
@@ -116,6 +127,45 @@ static void wheels_load(void) {
 static int wheel_count(void) {
     wheels_load();
     return g_ui_wheel_count;
+}
+
+// a pool wheel (pools + poolWeights): its slices are its pools (v10.0.7 prizeWheel / the wheel canvas, deob-10.0.7.js
+// :224322-224330, :228563-228585)
+static int wheel_pools(const UiWheel *w) { return w && w->src && w->src->pool_count > 0; }
+
+// the wheel's slices: its pools, else store.rarities
+static int slice_count(const UiWheel *w) {
+    if (wheel_pools(w)) return w->src->pool_count < STORE_WHEEL_SLICES ? w->src->pool_count : STORE_WHEEL_SLICES;
+    return g_viewer_rarity_count < 7 ? g_viewer_rarity_count : 7;
+}
+
+// poolWeights[k] || 0, else rarities[k] || 0
+static double slice_weight(const UiWheel *w, const int k) {
+    if (wheel_pools(w)) return k >= 0 && k < w->src->slices ? w->src->weights[k] : 0.0;
+    return w && k >= 0 && k < 7 ? w->rarities[k] : 0.0;
+}
+
+// itemPools[pools[k]] (NULL: not a pool wheel, or no such pool)
+static const StorePool *slice_pool(const UiWheel *w, const int k) {
+    return wheel_pools(w) && k >= 0 && k < w->src->pool_count ? store_spins_pool(ui_spins(), w->src->pools[k]) : NULL;
+}
+
+// the slice's colour: itemPools[pool].color, else the rarity's
+static const char *slice_color(const UiWheel *w, const int k) {
+    if (wheel_pools(w)) {
+        const StorePool *p = slice_pool(w, k);
+        return p && p->color[0] ? p->color : "#ffffff";
+    }
+    return k >= 0 && k < g_viewer_rarity_count ? g_viewer_rarities[k].color : "#ffffff";
+}
+
+// the pool a roll lands on (iîìîiïï(wheel, 1, roll).rarity, deob-10.0.7.js:25104-25125): the first whose running sum of
+// poolWeights reaches the roll, else 0
+static int pool_of_roll(const UiWheel *w, const double roll) {
+    double sum = 0;
+    for (int k = 0; k < slice_count(w); k++)
+        if (roll <= (sum += slice_weight(w, k))) return k;
+    return 0;
 }
 
 static const UiWheel *wheel_at(const int i) { return i >= 0 && i < wheel_count() ? &g_ui_wheels[i] : NULL; }
@@ -206,9 +256,11 @@ static struct {
     int items[SPIN_ITEMS], item_count; // vA632: the won items, highest rarity first
     int next_item;              // vLN01913: the next item f1840 loads
     int win_skin, win_rarity;   // v11654: the item on show (win_skin -1: a Free KR prize)
+    int item_slice[SPIN_ITEMS]; // iîîììïî: a pool wheel's items' pools (iîìîiïï(wheel, 1, roll).rarity, deob-10.0.7.js:224744-224748)
+    int win_slice;              // the slice that fills the wheel: the item's pool on a pool wheel, else its rarity (:228566)
     int win_kr;                 // its KR (Free KR wheel)
     int has_item;               // a result is loaded
-} g_wheel = {.win_skin = -1, .win_rarity = -1};
+} g_wheel = {.win_skin = -1, .win_rarity = -1, .win_slice = -1};
 static SpinWheelDraw g_wheel_draw;
 
 // The wheel's clock in seconds: the HUD clock (a --render-scenario's virtual time, an input script's
@@ -344,15 +396,17 @@ static void hue_rgb(const double h, float *rgb) {
 // store.getSpnItems(wheel, rarity, acc, wheel.season || config.currentSeason, wheel.bigRar)
 // for the previews: limited / blackM / opensea / limT / limG items never qualify (the store
 // wheels have no limType / itemTypes / weaponType)
+// (a pool wheel's `rarity` is the slice: store.getSpnItems(wheel, i) = the unique items of itemPools[pools[i]],
+// deob-10.0.7.js:103876-103885)
 static int spin_pool(const UiWheel *w, const int rarity, int *pool, const int max) {
     int count = 0;
-    if (w && w->src && w->src->pool_count > 0) { // v10 pool wheels: the pools of that rarity (store.getSpnItems)
-        const StoreSpins *sp = store_spins_builtin();
-        for (int k = 0; k < w->src->pool_count && count < max; k++) {
-            const StorePool *p = store_spins_pool(sp, w->src->pools[k]);
-            if (pool_rarity(p) != rarity) continue;
-            for (int i = 0; i < p->count && count < max; i++)
-                if (viewer_skin(p->items[i])) pool[count++] = p->items[i];
+    if (wheel_pools(w)) {
+        const StorePool *p = slice_pool(w, rarity);
+        for (int i = 0; p && i < p->count && count < max; i++) {
+            if (!viewer_skin(p->items[i])) continue;
+            int dup = 0;
+            for (int k = 0; k < count && !dup; k++) dup = pool[k] == p->items[i];
+            if (!dup) pool[count++] = p->items[i];
         }
         return count;
     }
@@ -367,8 +421,15 @@ static int spin_pool(const UiWheel *w, const int rarity, int *pool, const int ma
     return count;
 }
 
-// the wheel's top rarity (rarities.indexOf(rarities.filter(r > 0).slice(-1).pop()))
+// the wheel's top rarity (rarities.indexOf(rarities.filter(r > 0).slice(-1).pop())); a pool wheel's rarest pool
+// (poolWeights.indexOf(Math.min(...poolWeights)), deob-10.0.7.js:224355-224359, the tiles :130136-130141)
 static int top_rarity(const UiWheel *w) {
+    if (wheel_pools(w)) {
+        int best = 0;
+        for (int k = 1; k < w->src->slices && k < slice_count(w); k++)
+            if (w->src->weights[k] < w->src->weights[best]) best = k;
+        return best;
+    }
     int last = 0;
     for (int r = 0; r < 7; r++)
         if (wheel_rarity(w, r) > 0) last = r;
@@ -385,15 +446,55 @@ static void open_item_sales(const int skin) {
 
 static void spin_button_click(void);
 
-// prizeWheel(i, skin, multi, autoSpin, noAnim): the spin screen of store wheel `index`, or of
-// TICKET item `skin`'s spinWheel; multi = wheel.multi rolls at once; noAnim shows the wheel at
-// its full size at once (spinWhlMlt = 1: the respin, and the uidiff win-spin scenarios)
+// store.skins[skin].spinWheelId (assets/skins.json: the Universal tickets, 8067 Starter -> 0, 8068 Elite -> 1,
+// 7993 Universal -> 2), -1 none
+static int ticket_spin_wheel_id(const int skin) {
+    const cJSON *id = skin >= 0 ? cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(skin), "spinWheelId") : NULL;
+    return cJSON_IsNumber(id) && id->valuedouble >= 0 ? (int) id->valuedouble : -1;
+}
+
+// v10.0.7 iîìiiii(wheel) (deob-10.0.7.js:25150-25158): no startDate / endDate, or now inside them
+static int wheel_available(const UiWheel *w) {
+    if (!w || !w->src || (!w->src->start_ms && !w->src->end_ms)) return 1;
+    const int64_t now = (int64_t) ks_wall_ms();
+    const int64_t start = w->src->start_ms ? w->src->start_ms : now - 1000, end = w->src->end_ms ? w->src->end_ms : now + 1000;
+    return now > start && !(now > end);
+}
+
+// #spinKR: the redeemed ticket's count ("N Tickets") on a ticket spin, else the account's KR (deob-10.0.7.js:224349)
+static void spin_kr_ticket(const int ticket) {
+    if (ticket < 0) {
+        spin_kr();
+        return;
+    }
+    if (!active_account()) return;
+    char n[32], html[128];
+    comma(n, sizeof(n), owned_count(ticket));
+    snprintf(html, sizeof(html), "<span style='color:rgba(255,255,255,0.6)'>%s</span> Tickets", n);
+    set_html("spinKR", html);
+}
+
+// prizeWheel(i, ticket, multi, autoSpin, noAnim) (deob-10.0.7.js:224276-224384): the spin screen of store wheel `index`,
+// or of TICKET item `skin`'s wheel (its spinWheel, else store.wheels[spinWheelId], which also becomes the index); multi =
+// wheel.multi rolls at once; noAnim shows the wheel at its full size at once (spinWhlMlt = 1: the respin, and the uidiff
+// win-spin scenarios). A wheel outside its startDate / endDate does not open.
 static void prize_wheel(const int index, const int skin, const int multi, const int auto_spin, const int no_anim) {
-    // a store wheel (paid with its ticketIndex when skin is that ticket), else the TICKET item's
-    // own spinWheel (v10 prizeWheel(index, ticketIndex) / prizeWheel(null, ticket))
-    int wheel = index >= 0 ? index : wheel_of_ticket(skin);
-    const UiWheel *w = wheel >= 0 ? wheel_at(wheel) : skin >= 0 ? ticket_wheel(skin) : NULL;
-    if (!w) return;
+    int wheel = index;
+    const int wheel_id = skin >= 0 ? ticket_spin_wheel_id(skin) : -1;
+    if (wheel_id >= 0) wheel = wheel_id;
+    const UiWheel *w = NULL;
+    if (skin >= 0) { // spinWheel || wheels[spinWheelId] (iíìîìïí, deob-10.0.7.js:224216-224219); k_ticket_wheels also stands in
+        // for the Universal tickets, which have no spinWheel of their own
+        const int own = cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(skin), "spinWheel"));
+        w = own || wheel_id < 0 ? ticket_wheel(skin) : NULL;
+        if (!w && wheel_id >= 0) w = wheel_at(wheel_id);
+    }
+    if (!w) {
+        // KrunkNative: a ticket with no wheel of its own opens the store wheel it pays (its ticketIndex)
+        if (wheel < 0 && skin >= 0) wheel = wheel_of_ticket(skin);
+        w = wheel_at(wheel);
+    }
+    if (!w || (!w->kr && !wheel_available(w))) return; // (the Free KR wheel is KrunkNative's: v10.0.7 has none)
     if (!wheel_at(wheel)) wheel = -1;
     if (!w->kr) { // a respin (spinUI already shown) keeps the window it would return to
         HtmlElem shown = html_dom_by_id("spinUI");
@@ -427,6 +528,14 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     set_display("spinItem", "none");
     set_display("spinUIBtns", "none");
     set_display("spinUI", "block");
+    // #spinPromo: promoText on promoCol || #ff8f00 (deob-10.0.7.js:224311-224313)
+    HtmlElem promo = html_dom_by_id("spinPromo");
+    const char *promo_text = w->src ? w->src->promo_text : "";
+    if (promo) {
+        html_dom_set_text(promo, promo_text);
+        html_dom_set_style(promo, "display", promo_text[0] ? "block" : "none");
+        if (promo_text[0]) html_dom_set_style(promo, "background-color", w->src->promo_col[0] ? w->src->promo_col : "#ff8f00");
+    }
     set_display("spinItemName", "none");
     g_wheel.cam_x = 300;
     HtmlElem button = html_dom_by_id("spinButton");
@@ -435,13 +544,16 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     set_html("spinHeader", "SPIN");
     const int count = g_multi ? g_multi : 1;
     char buf[512];
-    snprintf(buf, sizeof(buf), "-%dKR", w->price * count);
+    // a ticket spin costs "-<multi> Tickets" (shown for the Nx spin only), else "-<price * n>KR" (deob-10.0.7.js:224319-224320)
+    if (g_spin_ticket >= 0) snprintf(buf, sizeof(buf), "-%d Tickets", w->multi);
+    else snprintf(buf, sizeof(buf), "-%dKR", w->price * count);
     set_html("spinCost", buf);
-    set_display("spinCost", g_spin_ticket >= 0 ? "none" : "");
+    set_display("spinCost", g_spin_ticket >= 0 && !g_multi ? "none" : "");
     if (g_spin_ticket >= 0) {
-        char thumb[256];
+        char thumb[256], times[24] = "";
         store_skin_preview(g_spin_ticket, thumb, sizeof(thumb));
-        snprintf(buf, sizeof(buf), "<i class='material-icons' style='margin-top: -10px;margin-left: -10px;text-shadow: none;vertical-align: middle;font-size: 38px;color: #fff;'>refresh</i> Redeem<img src=\"%s\" style=\"width: 40px;vertical-align: text-top;display: inline-block;\">", thumb);
+        if (g_multi) snprintf(times, sizeof(times), " x%d", w->multi);
+        snprintf(buf, sizeof(buf), "<i class='material-icons' style='margin-top: -10px;margin-left: -10px;text-shadow: none;vertical-align: middle;font-size: 38px;color: #fff;'>refresh</i> Redeem%s<img src=\"%s\" style=\"width: 40px;vertical-align: text-top;display: inline-block;\">", times, thumb);
     } else {
         snprintf(buf, sizeof(buf), "<i class='material-icons' style='margin-top: -10px;margin-left: -10px;text-shadow: none;vertical-align: middle;font-size: 38px;color: #fff;'>refresh</i> %d KR", w->price * count);
     }
@@ -456,39 +568,70 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     if ((el = html_dom_by_id("spinEquipBtn"))) html_dom_set_attr(el, "onclick", "knSpinEquip()");
     if ((el = html_dom_by_id("spinNextBtn"))) html_dom_set_attr(el, "onclick", "knSpinNext()");
 
-    // #spinInfo: every rarity but the noSpin NFT one (the first 7) with its chance (0% too), the
-    // KR wheel its prize per rarity (rarities it can roll only), then Spin History
+    // #spinInfo (deob-10.0.7.js:224322-224346): a row per slice (a pool wheel's pools: itemPools[pool].name / color and
+    // its poolWeight; else every rarity but the noSpin NFT one, 0% too), the KR wheel its prize per rarity (the ones it
+    // can roll only), Spin History, the 1x / Nx switch, then infoText's lines and "Available until: <endDate>"
     StrBuf sb = {0};
     char upper[32];
     snprintf(upper, sizeof(upper), "%s", w->name);
     for (char *p = upper; *p; p++) if (*p >= 'a' && *p <= 'z') *p -= 32;
     sb_appendf(&sb, "<div style='font-size:50px;color:#fff'>%s</div>", upper);
-    for (int r = 0; r < g_viewer_rarity_count && r < 7; r++) {
-        // the Free KR wheel skips its empty rarities; a v10 pool wheel lists its pools only
-        if ((w->kr || (w->src && w->src->pool_count > 0)) && !wheel_rarity(w, r)) continue;
-        const int anim = r == 6; // RENDER.rarityAnim && rarity.animate (Unobtainable)
+    const int pools = wheel_pools(w);
+    for (int r = 0; r < slice_count(w); r++) {
+        const StorePool *p = slice_pool(w, r);
+        if (pools && !p) continue;
+        const double weight = slice_weight(w, r);
+        if (w->kr && !weight) continue;
+        const int anim = !pools && r == 6; // RENDER.rarityAnim && rarity.animate (Unobtainable)
         if (anim) sb_append(&sb, "<div style='margin-top:5px;color:#fff'><div class='colCub rainbowBG'></div>");
-        else sb_appendf(&sb, "<div style='margin-top:5px;color:#fff'><div class='colCub' style='background-color:%s'></div>", g_viewer_rarities[r].color);
+        else sb_appendf(&sb, "<div style='margin-top:5px;color:#fff'><div class='colCub' style='background-color:%s'></div>", slice_color(w, r));
         if (w->kr) {
             sb_appendf(&sb, "<span style='color:rgba(255,255,255,0.5)'>&emsp;%d KR</span></div>", r < 4 ? k_free_kr[r] : 0);
         } else {
-            char pct[16];
-            snprintf(pct, sizeof(pct), "%g", wheel_rarity(w, r)); // JS number -> string (48, 2.49, 0.5)
-            sb_appendf(&sb, "%s<span style='color:rgba(255,255,255,0.5);float:right'>&emsp;%s%%</span></div>", g_viewer_rarities[r].name, pct);
+            char pct[32];
+            snprintf(pct, sizeof(pct), "%.15g", weight); // JS number -> string (48, 2.49, 0.5)
+            if (pools) sb_append_esc(&sb, p->label[0] ? p->label : p->name);
+            else sb_append(&sb, g_viewer_rarities[r].name);
+            sb_appendf(&sb, "<span style='color:rgba(255,255,255,0.5);float:right'>&emsp;%s%%</span></div>", pct);
         }
     }
     if (!w->kr) sb_append(&sb, "<div id=\"spinHistoryBtn\" onclick=\"spinHistoryPopup()\">Spin History</div>");
     // v10 (v10.js 217254): the 1x / Nx switch under Spin History; toggleSpinMulti re-opens the wheel
     if (!w->kr && w->multi)
         sb_appendf(&sb, "<div id=\"spinMultiToggleBtn\" onclick=\"toggleSpinMulti();event.stopPropagation();\">Switch to %dx Spin</div>", g_multi ? 1 : w->multi);
+    if (w->src && w->src->info_text[0]) {
+        sb_appendf(&sb, "<div class=\"spinInfoText\" style=\"top: calc(100%% + %dpx)\">", w->kr ? 8 : w->multi ? 136 : 72);
+        const char *s = w->src->info_text;
+        for (;;) {
+            const char *nl = strchr(s, '\n');
+            const size_t len = nl ? (size_t) (nl - s) : strlen(s);
+            char line[1024];
+            snprintf(line, sizeof(line), "%.*s", (int) len, s);
+            sb_append(&sb, "<span>");
+            sb_append(&sb, line); // markup as given (the data's <br>, <b>), as v10 (:224336)
+            sb_append(&sb, "</span>");
+            if (!nl) break;
+            s = nl + 1;
+        }
+        if (w->src->end_date[0]) {
+            sb_append(&sb, "<span id=\"spinEndTime\"><br>Available until: ");
+            sb_append_esc(&sb, w->src->end_date);
+            sb_append(&sb, "</span>");
+        }
+        sb_append(&sb, "</div>");
+    }
     char *html = sb_finish(&sb);
     set_html("spinInfo", html);
     free(html);
-    spin_kr();
-    // #spinItems: four random items of the wheel's top rarity (store.getSpnItems), + More
+    spin_kr_ticket(g_spin_ticket);
+    // #spinItems: four random items of the wheel's rarest pool / top rarity (store.getSpnItems), the slice before it
+    // joining when it has fewer than four (deob-10.0.7.js:224354-224363), + More
     if (!w->kr) {
-        int pool[1024];
-        const int n = spin_pool(w, top_rarity(w), pool, 1024);
+        enum { PREVIEW_MAX = 2048 };
+        int *pool = malloc(sizeof(int) * PREVIEW_MAX);
+        const int top = top_rarity(w);
+        int n = pool ? spin_pool(w, top, pool, PREVIEW_MAX) : 0;
+        if (pool && n < 4 && top > 0) n += spin_pool(w, top - 1, pool + n, PREVIEW_MAX - n);
         for (int i = 0; i < 4 && n; i++) {
             const int id = pool[rand() % n];
             char src[160];
@@ -499,6 +642,7 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
             else
                 sb_appendf(&sb, "<img class='spinPrevIcon' style='border-color:%s' onclick='viewItem(%d)' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' src='%s' />", col, id, src);
         }
+        free(pool);
         // + More opens every item the wheel can roll (showMoreItems, deob-10.0.7.js:224381, :224391-224445)
         if (n) sb_append(&sb, "<span style='color:#fff;line-height:85px;margin-left:6px;cursor:pointer;' onclick='knShowMoreItems();event.stopPropagation();'>+ More</span>");
         html = sb_finish(&sb);
@@ -565,6 +709,7 @@ static void show_item_image(const int skin, const char *src, const int rarity, c
 // f1840: the next won item (vA632[vLN01913]) on show: its name card and image
 static void load_next_item(void) {
     if (g_wheel.next_item >= g_wheel.item_count) return;
+    const int slot = g_wheel.next_item;
     const int item = g_wheel.items[g_wheel.next_item++];
     const ViewerSkin *skin = viewer_skin(item);
     const int owned = owned_count(item);
@@ -582,6 +727,7 @@ static void load_next_item(void) {
     g_wheel.bob_time = 0;
     g_wheel.win_skin = item;
     g_wheel.win_rarity = skin ? skin->rarity : 0;
+    g_wheel.win_slice = wheel_pools(g_cur) ? g_wheel.item_slice[slot] : g_wheel.win_rarity;
     g_wheel.win_kr = 0;
     g_wheel.has_item = 1;
     char src[160];
@@ -603,7 +749,7 @@ static void spin_error(const char *err) {
     if (g_cur && ui && html_dom_get_style(ui, "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "block"))
         prize_wheel(g_spin_index, g_spin_ticket, g_multi, 0, 0);
     char html[256];
-    snprintf(html, sizeof(html), "<div class=\"popHeader\">Spin Error</div>%s", strcmp(err, "DISABLED") ? err : "Spins are disabled in your country");
+    snprintf(html, sizeof(html), "<div class=\"popHeader\">Spin Error</div>%s", strcmp(err, "DISABLED") ? err : I18N("spins.banned", "Spins are disabled in your country"));
     generic_popup(html, "spinErrorPop");
 }
 
@@ -646,14 +792,21 @@ static void spin_response(const cJSON *frame) {
             item[j - 1] = ti;
             roll[j - 1] = tr;
         }
+    // a pool wheel's slices are its pools: each sorted roll's pool (deob-10.0.7.js:224744-224748)
+    for (int i = 0; i < n; i++) g_wheel.item_slice[i] = wheel_pools(g_cur) ? pool_of_roll(g_cur, roll[i]) : item_rarity(item[i]);
     account_set_funds(cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 4)));
     for (int i = 0; i < n; i++) {
         account_add_skin(item[i]);
-        history_add(item[i], g_cur && g_spin_ticket < 0 ? g_cur->price : 0); // f1838
+        history_add(item[i], g_cur ? g_cur->price : 0); // f1838: fds = the wheel's price, a ticket spin's too (:224757-224760)
     }
+    // usedTicket: removeSkin(ticket, itemIds.length) and #spinKR its count (deob-10.0.7.js:224783)
     const cJSON *removed = cJSON_GetArrayItem(frame, 5);
-    if (cJSON_IsNumber(removed)) account_remove_skin(removed->valueint);
-    spin_kr();
+    if (cJSON_IsNumber(removed)) {
+        for (int i = 0; i < n; i++) account_remove_skin(removed->valueint);
+        spin_kr_ticket(removed->valueint);
+    } else {
+        spin_kr();
+    }
     double fastest = 0;
     for (int i = 0; i < n; i++) {
         g_wheel.items[i] = item[i];
@@ -689,6 +842,7 @@ static void spin_kr_response(const cJSON *frame) {
     spin_kr();
     g_wheel.win_skin = -1;
     g_wheel.win_rarity = index >= 0 && index < 4 ? index : 0;
+    g_wheel.win_slice = g_wheel.win_rarity;
     g_wheel.win_kr = k_free_kr[g_wheel.win_rarity];
     g_wheel.has_item = 1;
     g_wheel.item_count = g_wheel.next_item = 0;
@@ -766,6 +920,10 @@ static void spin_button_click(void) {
         spin_error("Spin Error 9");
         return;
     }
+    if (g_spin_ticket >= 0 && owned_count(g_spin_ticket) < (g_multi ? g_cur->multi : 1)) {
+        spin_error("Not enough tickets");
+        return;
+    }
     if (kio_store_active()) {
         if (g_cur->kr) { // the Free KR wheel (after claimReward's ad): AD_FINISHED "fkr" on the game socket, answered "spinKR"
             cJSON *fkr = cJSON_CreateArray(); // (deob-10.0.5.js:222644, :222655)
@@ -799,7 +957,7 @@ static void spin_button_click(void) {
     if (g_cur->kr) snprintf(frame, sizeof(frame), "[\"fkr\"]");
     else if (g_spin_ticket >= 0 && g_spin_index >= 0) // a store wheel paid with its ticket (v10 Universal tickets)
         snprintf(frame, sizeof(frame), "[\"spin\",%d,%d,%s]", g_spin_index, g_spin_ticket, g_multi ? "true" : "false");
-    else if (g_spin_ticket >= 0) snprintf(frame, sizeof(frame), "[\"spin\",null,%d,false]", g_spin_ticket);
+    else if (g_spin_ticket >= 0) snprintf(frame, sizeof(frame), "[\"spin\",null,%d,%s]", g_spin_ticket, g_multi ? "true" : "false");
     else snprintf(frame, sizeof(frame), "[\"spin\",%d,null,%s]", g_spin_index, g_multi ? "true" : "false");
     backend_social_send_text(frame);
     set_html("spinHeader", "");
@@ -1673,42 +1831,41 @@ static void generic_popup(const char *html, const char *cls) {
     set_display("genericPop", "block");
 }
 
-// one section of the More popup: a coloured header and the items' icons with the owned count
+// one section of the items modal (deob-10.0.7.js:127582, :127690-127720): its header in the pool's / rarity's colour and
+// a 140 px market card per item, with the account's count ("<n>x") when owned
 static void more_items_section(StrBuf *sb, const char *name, const char *color, const int *items, const int n) {
-    sb_append(sb, "<div class='knMoreSection'><div class='knMoreHead' style='color:");
-    sb_append_esc(sb, color && color[0] ? color : "#fff");
-    sb_append(sb, "'>");
+    sb_append(sb, "<div class=\"rarity-section svelte-9ff17r\"><div class=\"rarity-header svelte-9ff17r\" style=\"background-color: ");
+    sb_append_esc(sb, color ? color : "");
+    sb_append(sb, ";\"><h2 class=\"rarity-title svelte-9ff17r\">");
     sb_append_esc(sb, name ? name : "");
-    sb_appendf(sb, " <span class='knMoreCount'>%d</span></div><div class='knMoreGrid'>", n);
+    sb_append(sb, " <!----></h2></div> <div class=\"items-grid svelte-9ff17r\">");
     for (int i = 0; i < n; i++) {
-        const int id = items[i];
-        char src[160];
-        store_skin_preview(id, src, sizeof(src));
-        const char *col = g_viewer_rarities[g_viewer_skins[id].rarity].color;
-        sb_appendf(sb, "<div class='knMoreItem' style='border-color:%s' onclick='viewItem(%d)'><img loading='lazy' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' src='%s'>", col, id, src);
-        const int owned = owned_count(id);
-        if (owned > 0) sb_appendf(sb, "<div class='knMoreOwned'>%dx</div>", owned);
-        sb_append(sb, "</div>");
+        char onclick[32], owned_html[96];
+        snprintf(onclick, sizeof(onclick), "viewItem(%d)", items[i]);
+        const int owned = owned_count(items[i]);
+        if (owned > 0) snprintf(owned_html, sizeof(owned_html), "<div class=\"owned-count-overlay svelte-9ff17r\">%dx</div>", owned);
+        else snprintf(owned_html, sizeof(owned_html), "<!---->");
+        v10_market_card(sb, items[i], 140, 140, "top-center", onclick, owned_html);
     }
     sb_append(sb, "</div></div>");
 }
 
-// showMoreItems(wheel): genericPopup(the items modal, "defaultModal") titled "Items - <wheel>". A pool wheel lists
-// its pools, rarest (lowest weight) first; other wheels list their rarities from the top down, skipping the ones
-// they cannot roll (deob-10.0.7.js:224391-224445, the modal :127588-127700). Our own markup and CSS (kn-alt.css).
+// showMoreItems(wheel): genericPopup(the items modal, "defaultModal") titled "Items - <wheel>" (deob-10.0.7.js:224391-224445,
+// the modal :127580-127730). A pool wheel lists its pools by weight, rarest first (a missing weight last), each its unique
+// items under itemPools[pool].name in its colour; other wheels their rarities from the top down, skipping those they cannot
+// roll.
 static void show_more_items(const UiWheel *w) {
     if (!w || w->kr) return;
     enum { MAX_ITEMS = 2048 };
     int *pool = malloc(sizeof(int) * MAX_ITEMS);
     if (!pool) return;
     StrBuf sb = {0};
-    sb_append(&sb, "<div class='knMoreItems'><div class='knMoreTitle'>Items - ");
+    sb_append(&sb, "<div class=\"window-container svelte-623zut\"><div class=\"window-title svelte-l3klys\"><!----> <span class=\"window-title-text svelte-l3klys\">Items - ");
     sb_append_esc(&sb, w->name ? w->name : "");
-    sb_append(&sb, "</div><div class='knMoreBody'>");
-    if (w->src && w->src->pool_count > 0) {
-        const StoreSpins *sp = store_spins_builtin();
+    sb_append(&sb, "</span></div> <div class=\"items-container svelte-9ff17r\">");
+    if (wheel_pools(w)) {
         int order[STORE_WHEEL_SLICES];
-        const int pc = w->src->pool_count < STORE_WHEEL_SLICES ? w->src->pool_count : STORE_WHEEL_SLICES;
+        const int pc = slice_count(w);
         for (int k = 0; k < pc; k++) order[k] = k;
         for (int a = 1; a < pc; a++) // a stable sort by weight (a missing weight sorts last)
             for (int b = a; b > 0; b--) {
@@ -1718,11 +1875,9 @@ static void show_more_items(const UiWheel *w) {
                 const int t = order[b]; order[b] = order[b - 1]; order[b - 1] = t;
             }
         for (int o = 0; o < pc; o++) {
-            const StorePool *p = store_spins_pool(sp, w->src->pools[order[o]]);
+            const StorePool *p = slice_pool(w, order[o]);
             if (!p) continue;
-            int n = 0;
-            for (int i = 0; i < p->count && n < MAX_ITEMS; i++)
-                if (viewer_skin(p->items[i])) pool[n++] = p->items[i];
+            const int n = spin_pool(w, order[o], pool, MAX_ITEMS);
             if (n) more_items_section(&sb, p->label[0] ? p->label : p->name, p->color, pool, n);
         }
     } else {
@@ -1953,11 +2108,8 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     if (kio_store_handle(name, ev, args, argc) >= 0) return 1; // knKioShop*: the krunker.io store's cards
     const int r = store_window_handle(name, args, argc);
     if (r >= 0) return r;
-    if (!backend_enabled() || !active_account()) return -1;
-    if (!strcmp(name, "knStoreMusicStop")) { // the music player's Stop
-        eterno_music(0);
-        return 1;
-    }
+    // prizeWheel / toggleSpinMulti open the spin screen and spinUI closes it for anyone, as v10 (deob-10.0.7.js:224277-224387,
+    // :224509-224516: no account check; #spinKR only fills in for an account)
     if (!strcmp(name, "toggleSpinMulti")) { // v10: _72136 (spinning) || prizeWheel(index, ticket, !multi)
         html_ui_stop_propagation();
         if (!g_spinning && g_cur) prize_wheel(g_spin_index, g_spin_ticket, !g_multi, 0, 0);
@@ -1972,14 +2124,6 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         prize_wheel(index, skin, multi, auto_spin, no_anim);
         return 1;
     }
-    if (!strcmp(name, "openSales")) { // openURL("/social.html?p=itemsales&i=" + i)
-        if (argc > 0 && args[0].kind == HTML_ARG_NUM) open_item_sales((int) args[0].num);
-        return 1;
-    }
-    if (!strcmp(name, "knSpinButton")) {
-        spin_button_click();
-        return 0;
-    }
     if (!strcmp(name, "knSpinUI")) { // spinUI.onclick: closes the wheel at any time
         if (store_now() - g_spin_button_time < 0.05) return 1; // a button's click bubbling up
         if (g_spin_return_window) menu_show_window(g_spin_return_window, 0); // V && showWindow(V) (deob-10.0.7.js:224510)
@@ -1988,6 +2132,19 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         backend_social_send_text("[\"unbx\"]");
         spin_kr();
         return 1;
+    }
+    if (!backend_enabled() || !active_account()) return -1;
+    if (!strcmp(name, "knStoreMusicStop")) { // the music player's Stop
+        eterno_music(0);
+        return 1;
+    }
+    if (!strcmp(name, "openSales")) { // openURL("/social.html?p=itemsales&i=" + i)
+        if (argc > 0 && args[0].kind == HTML_ARG_NUM) open_item_sales((int) args[0].num);
+        return 1;
+    }
+    if (!strcmp(name, "knSpinButton")) {
+        spin_button_click();
+        return 0;
     }
     if (!strcmp(name, "knSpinRespin")) { // spinAgainBtn: prizeWheel(i, skin, multi, true, true)
         g_spin_button_time = store_now();
@@ -2148,7 +2305,82 @@ static void spin_hole(const int on, const float cx, const float cy, const float 
 // index.js render loop while #spinUI shows: spinWhlMlt, the end animation, the pointer
 // (spinRotation -> spinVal, a tick_0 every PI / 1.5), the button/text sizes, the canvas
 // (handed to spin_wheel.c as g_wheel_draw) and the item + name card fly-in.
+// store.applySpinData(data) (deob-10.0.7.js:229336): the new wheels; an open spin screen not mid-spin redraws with them
+// (prizeWheel(i, ticket, multi), :229337). Data that comes during a spin waits for its answer.
+static void spins_apply(const cJSON *data) {
+    if (!cJSON_IsObject(data)) return;
+    char *text = cJSON_PrintUnformatted(data);
+    if (!text) return;
+    if (g_spinning) {
+        free(g_spins_pending);
+        g_spins_pending = text;
+        return;
+    }
+    StoreSpins next;
+    if (store_spins_parse(text, &next) != 0 || next.wheel_count <= 0) {
+        store_spins_free(&next);
+        free(text);
+        return;
+    }
+    free(text);
+    const UiWheel *cur = g_cur;
+    const int on_wheel = cur && cur >= g_ui_wheels && cur < g_ui_wheels + UI_WHEELS_MAX, was_kr = cur && cur->kr;
+    store_spins_free(&g_net_spins);
+    g_net_spins = next;
+    g_net_spins_set = 1;
+    g_ui_wheel_count = -1;
+    wheels_load();
+    KN_LOG_VERBOSE2("[store] spin data: %d wheels, %d item pools\n", next.wheel_count, next.pool_count);
+    if (!on_wheel) return;
+    // the screen's wheel is store.wheels[g_spin_index] again (or gone); the Free KR wheel stays as it is
+    if (was_kr) {
+        const int kr = free_kr_wheel();
+        g_cur = kr >= 0 ? &g_ui_wheels[kr] : NULL;
+        g_spin_index = kr;
+        return;
+    }
+    g_cur = g_spin_index >= 0 && g_spin_index < g_ui_wheel_count ? &g_ui_wheels[g_spin_index] : NULL;
+    HtmlElem ui = html_dom_by_id("spinUI");
+    char disp[16] = "";
+    if (ui && html_dom_get_style(ui, "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "block") && g_cur)
+        prize_wheel(g_spin_index, g_spin_ticket, g_multi, 0, 0);
+}
+
+static void spins_fetched(void *user, const int status, const cJSON *json) {
+    (void) user;
+    if (status != 200 || !cJSON_IsObject(json) || !cJSON_IsArray(cJSON_GetObjectItem(json, "wheels"))) {
+        g_spins_fetch = 0;
+        g_spins_retry = glfwGetTime() + 60.0;
+        return;
+    }
+    g_spins_fetch = 2;
+    spins_apply(json);
+}
+
+// v10 loads /data/spins once at startup (deob-10.0.7.js:103441-103447): the brain's GET /api/data/spins once it is
+// reachable (again after a failure, a minute later; and when the backend URL changes); krunker.io keeps the built-in data
+static void spins_fetch_tick(void) {
+    static char fetched_from[256];
+    const char *url = backend_url();
+    if (strcmp(fetched_from, url ? url : "")) {
+        snprintf(fetched_from, sizeof(fetched_from), "%s", url ? url : "");
+        if (g_spins_fetch == 2) g_spins_fetch = 0;
+        g_spins_retry = 0;
+    }
+    if (g_spins_pending && !g_spinning) {
+        cJSON *data = cJSON_Parse(g_spins_pending);
+        free(g_spins_pending);
+        g_spins_pending = NULL;
+        spins_apply(data);
+        cJSON_Delete(data);
+    }
+    if (g_spins_fetch || kio_store_active() || backend_available() != 1 || glfwGetTime() < g_spins_retry) return;
+    g_spins_fetch = 1;
+    v10_send("GET", "/api/data/spins", NULL, spins_fetched, NULL);
+}
+
 void store_ui_tick(void) {
+    spins_fetch_tick();
     kio_checkout_tick(); // the real-money checkout's wait (the account's funds) and Stripe's poll
     if (g_eterno_music && (!menu_window_is_open() || menu_ui()->active_window != 14 || g_store_tab != 5)) eterno_music(0);
     const double now = store_now();
@@ -2247,15 +2479,17 @@ void store_ui_tick(void) {
     }
     d->radius = (float) radius;
     d->slice_rotation = 0;
-    const int win = g_wheel.win_rarity;
+    const int win = g_wheel.win_slice;
+    const int pools = wheel_pools(wheel);
+    const int slices = pools ? slice_count(wheel) : g_viewer_rarity_count;
     if (g_wheel.end_target) {
         double hy = 0;
-        for (int z = 0; z < g_viewer_rarity_count; z++) {
-            if (win == z) {
-                hy += wheel_rarity(wheel, z) / 2;
+        for (int z = 0; z < slices; z++) {
+            if (win == z) { // v10 adds a pool's whole weight, a rarity's half (deob-10.0.7.js:228567-228569)
+                hy += pools ? slice_weight(wheel, z) : slice_weight(wheel, z) / 2;
                 break;
             }
-            hy += wheel_rarity(wheel, z);
+            hy += slice_weight(wheel, z);
         }
         hy /= 100;
         const double t = g_wheel.end_val / g_wheel.end_target;
@@ -2264,17 +2498,17 @@ void store_ui_tick(void) {
     }
     d->slices = 0;
     double hx = 0;
-    for (int z = 0; z < g_viewer_rarity_count && d->slices < SPIN_WHEEL_MAX_SLICES; z++) {
-        double share = wheel_rarity(wheel, z);
+    for (int z = 0; z < slices && d->slices < SPIN_WHEEL_MAX_SLICES; z++) {
+        double share = slice_weight(wheel, z);
         if (g_wheel.end_target) {
             if (win == z) share += g_wheel.end_val;
             // v10 index.js: iìÌìiií -= endVal * (rarities[i] || 0 / endTarget): the operator
             // precedence makes it endVal * rarity (no division), so the losing slices run past zero
-            else share -= g_wheel.end_val * wheel_rarity(wheel, z);
+            else share -= g_wheel.end_val * slice_weight(wheel, z);
         }
         float rgb[3];
-        hex_rgb(g_viewer_rarities[z].color, rgb);
-        if (win == z && g_wheel.end_target && z == 6) { // RENDER.rarityAnim && rarity.animate (Unobtainable, as line ~419): fill = hue(round(anim)), anim += 0.3 dt
+        hex_rgb(slice_color(wheel, z), rgb);
+        if (!pools && win == z && g_wheel.end_target && z == 6) { // RENDER.rarityAnim && rarity.animate (Unobtainable, as line ~419): fill = hue(round(anim)), anim += 0.3 dt
             hue_rgb(round(g_wheel.rainbow), rgb);
             if ((g_wheel.rainbow += 0.3 * delta_ms) >= 360) g_wheel.rainbow = 0;
         }
@@ -2340,6 +2574,7 @@ void store_ui_frame(const cJSON *frame) {
     if (!strcmp(label, "spin")) spin_response(frame);
     else if (!strcmp(label, "spinKR")) spin_kr_response(frame);
     else if (!strcmp(label, "spinH")) history_response(frame);
+    else if (!strcmp(label, "swu")) spins_apply(cJSON_GetArrayItem(frame, 1)); // SPIN_WHEELS_UPDATED (services/brain/store.c)
 }
 
 // claimReward(): the Free KR wheel once its timer ran out and its ad (the placeholder, account_ui.c) was watched

@@ -98,7 +98,7 @@ def stop(p):
 
 HALLOWEEN = {"id": 8, "name": "Halloween", "startsAt": "2026-10-25T00:00:00Z", "endsAt": "2026-11-02T00:00:00Z", "imgExt": "webp",
              "longDesc": ["Play public matches for a chance at the event's skins", "Complete the event challenges"],
-             "rewards": {"skins": [7540, 7541, 7543, 7545]}, "rewardChance": 100}
+             "rewards": {"skins": [7540, 7541, 7543, 7545], "challengeSkins": [7542, 7544]}, "rewardChance": 100}
 AON = {"id": 4, "name": "All or Nothing", "startsAt": "2026-10-26T08:00:00Z", "endsAt": "2026-10-28T00:00:00Z", "reveal": 86400000,
        "longDesc": "One shot, one kill.", "noChallenges": True, "limitedTimeMode": True}
 
@@ -110,7 +110,7 @@ def scenario(name, state):
     with open(path, "w") as f:
         json.dump({"size": [1280, 720], "background": "#000000", "state": dict(base, **state), "frames": 3}, f)
     png = os.path.join(WORK, f"{name}.png")
-    log = run(name, ["--render-scenario", path, png], client_env(name))
+    log = run(name, ["--render-scenario", path, png], client_env(name, {"KRUNKNATIVE_SCENARIO_HTML": os.path.join(WORK, f"{name}.html")}))
     return log, os.path.exists(png)
 
 
@@ -156,6 +156,15 @@ try:
     log, shot = scenario("popup", {"events": events, "windowActions": [["eventPopup"]]})
     check("popup: window.eventPopup opens event 8 with its 4 reward skins", shot and
           '[events] eventPopup: event 8 "Halloween" (running, 4 reward skin(s))' in log, "log " + os.path.join(WORK, "popup.log"))
+    doc = read(os.path.join(WORK, "popup.html"))
+    # v10.0.7: noChallenges || rewardChance reads "playing the event"; rewards.challengeSkins gets its own block, every tile
+    # (deob-10.0.7.js:228474-228475)
+    check("popup: an event with rewardChance says \"Earn these skins from playing the event\"",
+          "Earn these skins from playing the event" in doc and "completing challenges" not in doc)
+    chall = doc[doc.find("Complete every challenge for"):]
+    check("popup: rewards.challengeSkins: \"Complete every challenge for\" and its 2 tiles",
+          "Complete every challenge for" in doc and "viewItem(7542)" in chall and "viewItem(7544)" in chall
+          and chall.count("bundlItmC") == 2, "html " + os.path.join(WORK, "popup.html"))
     log, shot = scenario("reveal", {"events": dict(events, index=0), "windowActions": [["eventPopup"]]})
     check("popup: no round event: getActiveEvent's revealed event 4 ('Starts in')",
           '[events] eventPopup: event 4 "All or Nothing" (upcoming' in log, "log " + os.path.join(WORK, "reveal.log"))

@@ -63,6 +63,7 @@
 #include <account_links.h>   // Connections: the Discord row and Connected apps (v10.0.7, account_links.c)
 #include <avatar_ui.h>      // profile pictures: the "Change Picture" picker and its status line
 #include <v10_social.h> // the window's Friends tab (v10_social.c)
+#include <v10_misc_popups.h> // the lottery's social pushes (v10_misc_lottery_frame)
 #include <online_mode.h>  // auth_unreachable: offline mode
 #include <krunker_account.h> // the krunker.io account: the active one in an official game
 #include <krunker_net.h>     // krunker_net_active(): an official game is being joined or played
@@ -1430,6 +1431,35 @@ void account_ui_set_funds(const double kr) {
     rerender_windows();
 }
 
+// A lottery entry paid (sign -1, participateInLottery's success, deob-10.0.7.js:127856-127893) or a prize won (sign +1,
+// LOTTERY_PRIZE_WON_PLAYER, :224954-224992): a skin's units (removeSkin / addSkin), else currency 1 funds, 2 junk
+// (quantity / 100), 3 rankedPoints; then updateMenuAccountData
+void account_lottery_booked(const char *type, const int ref, const double quantity, const int sign) {
+    if (!type || quantity <= 0) return;
+    if (!strcmp(type, "skin")) {
+        for (int i = 0; i < (int) quantity && i < 10000; i++) {
+            if (sign > 0) account_add_skin(ref);
+            else account_remove_skin(ref);
+        }
+    } else if (!strcmp(type, "currency")) {
+        const AccountInfo *acc = active_account();
+        if (!acc) return;
+        const double delta = sign * (ref == 2 ? quantity / 100.0 : quantity);
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+            if (ref == 1) account_kio_set_balances(1, fmax(0, acc->funds + delta), 0, 0);
+            else if (ref == 2) account_kio_set_balances(0, 0, 1, fmax(0, acc->junk + delta));
+        } else if (g_logged_in) {
+            if (ref == 1) account_set_funds(fmax(0, g_acc.funds + delta));
+            else if (ref == 2) g_acc.junk = fmax(0, g_acc.junk + delta);
+            else if (ref == 3) g_acc.ranked_points = fmax(0, g_acc.ranked_points + delta);
+        }
+    } else {
+        return;
+    }
+    mark_header();
+    rerender_windows();
+}
+
 // v10.0.3's account extras from kn_brain's account info (account_life.c): reqDel (setData [29]), twitchId ([44]),
 // twitch ([23]) and raidStats ([52]). An info without a key keeps what the account had.
 static void set_life(const cJSON *info) {
@@ -1696,7 +1726,8 @@ static void on_social(void *user, const cJSON *frame) {
         set_junk_text(str_at(frame, 1));
         mark_header();
         rerender_windows();
-    } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
+    } else if (v10_misc_lottery_frame(label, frame)) { // the lottery's pushes (services/brain/lottery.c)
+    } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH") || !strcmp(label, "swu")) {
         store_ui_frame(frame);
     } else if (!strcmp(label, "dsrvl")) { // v10.0.7 DEDI_BUY_RESPONSE: Rent Dedicated Server (rent_servers_ui.c)
         rent_servers_ui_frame(frame);

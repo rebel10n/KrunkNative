@@ -108,8 +108,16 @@ int live_events_parse(LiveEvents *out, const cJSON *events) {
                 if (r < LIVE_EVENT_RARITIES) ev->reward_weights[r++] = cJSON_IsNumber(w) && isfinite(w->valuedouble) ? w->valuedouble : 0.0;
             }
         }
-        const int chance = le_int(cJSON_GetObjectItemCaseSensitive(e, "rewardChance"), 0);
+        const cJSON *chance_v = cJSON_GetObjectItemCaseSensitive(e, "rewardChance");
+        const int chance = le_int(chance_v, 0);
         ev->reward_chance = chance ? chance : 100; // rewardChance || 100
+        ev->has_reward_chance = (unsigned char) le_true(chance_v);
+        // rewards.challengeSkins: eventPopup's "Complete every challenge for" tiles (deob-10.0.7.js:228475)
+        const cJSON *chall = cJSON_IsObject(rewards) ? cJSON_GetObjectItemCaseSensitive(rewards, "challengeSkins") : NULL;
+        ev->has_challenge_skins = (unsigned char) cJSON_IsArray(chall);
+        cJSON_ArrayForEach(skin, (cJSON_IsArray(chall) ? chall : NULL)) {
+            if (ev->challenge_skin_count < LIVE_EVENT_SKINS_MAX) ev->challenge_skins[ev->challenge_skin_count++] = le_int(skin, -1);
+        }
         const cJSON *maps = cJSON_GetObjectItemCaseSensitive(e, "eligibleMaps");
         if (cJSON_IsArray(maps)) {
             ev->has_eligible_maps = 1;

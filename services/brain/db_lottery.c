@@ -404,6 +404,7 @@ static kn_db_result *run_participate(kn_dbconn *c, int n, const char *const *p) 
     const int64_t total = dbx_int(&x, SQL(.any = "SELECT total_entries FROM lottery_draws WHERE id = $1"), KN_DB_ARGS(I64S(draw)), 0);
     cJSON_AddNumberToObject(o, "player_entries", (double) mine);
     cJSON_AddNumberToObject(o, "total_entries", (double) total);
+    cJSON_AddNumberToObject(o, "draw", (double) draw); /* lottery.c's "lotEnt" push; not in the reply */
     return dbx_json(&x, "lottery_participate", o);
 }
 const kn_proc P_LOTTERY_PARTICIPATE = {"lottery_participate", NULL, run_participate};
@@ -535,8 +536,8 @@ static int draw_one(Dbx *x, const int64_t draw, const int64_t id, const int64_t 
     return dbx_failed(x) ? -1 : paid > 0 ? 1 : 0;
 }
 
-/* $0 now (epoch seconds) -> {drawn, wins}: settles every window that has ended and has entries; wins = every prize
- * paid, in draw order (draw_one) */
+/* $0 now (epoch seconds) -> {drawn, wins, ended}: settles every window that has ended and has entries; wins = every
+ * prize paid, in draw order (draw_one); ended = the lottery of each draw claimed (lottery.c's "lotEnd" pushes) */
 static kn_db_result *run_settle(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t now = PI(0);
@@ -548,21 +549,24 @@ static kn_db_result *run_settle(kn_dbconn *c, int n, const char *const *p) {
         return dbx_finish(&x, NULL);
     }
     int64_t drawn = 0;
-    cJSON *wins = cJSON_CreateArray();
+    cJSON *wins = cJSON_CreateArray(), *ended = cJSON_CreateArray();
     for (int i = 0; due && i < cJSON_GetArraySize(due); i++) {
         const cJSON *row = cJSON_GetArrayItem(due, i);
         const int r = draw_one(&x, jint(row, "id"), jint(row, "lottery"), now, wins);
         if (r < 0) break;
+        if (r > 0) cJSON_AddItemToArray(ended, cJSON_CreateNumber((double) jint(row, "lottery")));
         drawn += r;
     }
     cJSON_Delete(due);
     if (dbx_failed(&x)) {
         cJSON_Delete(wins);
+        cJSON_Delete(ended);
         return dbx_finish(&x, NULL);
     }
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "drawn", (double) drawn);
     cJSON_AddItemToObject(o, "wins", wins);
+    cJSON_AddItemToObject(o, "ended", ended);
     return dbx_json(&x, "lottery_settle", o);
 }
 const kn_proc P_LOTTERY_SETTLE = {"lottery_settle", NULL, run_settle};

@@ -51,6 +51,10 @@ typedef struct {
     int reward_skins[LIVE_EVENT_SKINS_MAX];
     double reward_weights[LIVE_EVENT_RARITIES];
     int reward_chance;              // rewardChance || 100 (a percentage)
+    unsigned char has_reward_chance; // rewardChance given (truthy): the popup's "Earn these skins from playing the event"
+    unsigned char has_challenge_skins; // rewards.challengeSkins given (the popup's "Complete every challenge for" block)
+    int challenge_skin_count;       // rewards.challengeSkins (store indexes, as reward_skins)
+    int challenge_skins[LIVE_EVENT_SKINS_MAX];
     int eligible_map_count;
     int eligible_maps[LIVE_EVENT_MAPS_MAX]; // eligibleMaps: official map indexes
 } LiveEvent;

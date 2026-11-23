@@ -12,6 +12,11 @@
  * The timer (brain.lottery.settle_check_ms, default 60 s; brain.lottery.enabled) settles every window that
  * has ended (P_LOTTERY_SETTLE): one draw each, one transaction per pass, never two passes at once. Each prize paid
  * then goes to the game server its winner plays on ("raffle-win", node_events.c: v10's "lotWin" chat line).
+ *
+ * Social socket pushes (v10.0.7's lottery socket events, deob-10.0.7.js:224921-225003, :120428):
+ *   ["lotEnt", lottery, draw, total_entries]     to every signed-in socket after an entry (UPDATE_LOTTERY_ENTRIES)
+ *   ["lotWinP", lottery, draw, {type, ref, quantity}] to the winner's sockets per prize paid (LOTTERY_PRIZE_WON_PLAYER)
+ *   ["lotEnd", lottery]                          to every signed-in socket per settled draw (LOTTERY_ENDED)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +25,7 @@
 #include "brain_internal.h"
 #include "db_procs.h"
 #include "node_events.h" /* the winners' "raffle-win" to their game servers */
+#include "social_ws.h"   /* the lottery's social pushes */
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/db.h"
@@ -71,6 +77,17 @@ static void on_db(kn_db_result *res, void *ud) {
     } else {
         const char *t = kn_db_rows(res) > 0 ? kn_db_get(res, 0, 0) : NULL;
         cJSON *data = t ? kn_json_parse(t, strlen(t)) : NULL;
+        if (q->participate && data) {
+            /* UPDATE_LOTTERY_ENTRIES to everyone (deob-10.0.7.js:224921-224923); the draw id is not in v10's reply */
+            cJSON *draw = cJSON_DetachItemFromObjectCaseSensitive(data, "draw");
+            cJSON *push = cJSON_CreateArray();
+            cJSON_AddItemToArray(push, cJSON_CreateString("lotEnt"));
+            cJSON_AddItemToArray(push, cJSON_CreateNumber((double) q->lottery));
+            cJSON_AddItemToArray(push, cJSON_CreateNumber(draw ? draw->valuedouble : 0));
+            cJSON_AddItemToArray(push, cJSON_CreateNumber(kn_json_num(data, "total_entries", 0)));
+            cJSON_Delete(draw);
+            social_push_all_json(push);
+        }
         cJSON *o = cJSON_CreateObject();
         cJSON_AddItemToObject(o, "data", data ? data : cJSON_CreateNull());
         if (!q->participate) kn_http_set_header(q->req, "Cache-Control", "no-cache, no-store, must-revalidate");
@@ -206,9 +223,27 @@ static void settle_done(kn_db_result *res, void *ud) {
     /* v10 "lotWin" (deob-10.0.3.js:255154): each winner's game server writes "<name> won <prize> in the raffle!" to
      * its players (node_events.c; the draw's transaction is committed by now) */
     const cJSON *w;
-    cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(o, "wins"))
+    cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(o, "wins")) {
         node_events_raffle_win(kn_json_int(w, "account", 0), kn_json_int(w, "lottery", 0), kn_json_int(w, "draw", 0),
                                kn_json_str(w, "type", "skin"), kn_json_str(w, "ref", ""), kn_json_num(w, "quantity", 1));
+        /* LOTTERY_PRIZE_WON_PLAYER (deob-10.0.7.js:224954-224992): the winner's client books the prize */
+        cJSON *push = cJSON_CreateArray(), *prize = cJSON_CreateObject();
+        cJSON_AddItemToArray(push, cJSON_CreateString("lotWinP"));
+        cJSON_AddItemToArray(push, cJSON_CreateNumber((double) kn_json_int(w, "lottery", 0)));
+        cJSON_AddItemToArray(push, cJSON_CreateNumber((double) kn_json_int(w, "draw", 0)));
+        cJSON_AddStringToObject(prize, "type", kn_json_str(w, "type", "skin"));
+        cJSON_AddStringToObject(prize, "ref", kn_json_str(w, "ref", ""));
+        cJSON_AddNumberToObject(prize, "quantity", kn_json_num(w, "quantity", 1));
+        cJSON_AddItemToArray(push, prize);
+        social_push_account(kn_json_int(w, "account", 0), push);
+    }
+    /* LOTTERY_ENDED (deob-10.0.7.js:225001-225003, :120428): a client showing that lottery asks for it again */
+    cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(o, "ended")) {
+        cJSON *push = cJSON_CreateArray();
+        cJSON_AddItemToArray(push, cJSON_CreateString("lotEnd"));
+        cJSON_AddItemToArray(push, cJSON_CreateNumber(w->valuedouble));
+        social_push_all_json(push);
+    }
     cJSON_Delete(o);
 }
 

@@ -172,17 +172,3 @@
 	white-space: nowrap;
 }
 
-/* Prize wheel "+ More": every item the wheel can roll (store_ui.c show_more_items; Krunker v10.0.7's
-   showMoreItems modal). Box Office's own layout: one section per rarity or pool, a grid of icons. */
-.knMoreItems { display: flex; flex-direction: column; width: 100%; height: 100%; }
-.knMoreTitle { padding: 14px 0; text-align: center; font-size: 30px; color: #fff; background: rgba(0, 0, 0, 0.6); }
-.knMoreBody { overflow-y: auto; padding: 16px 20px; }
-.knMoreSection { margin-bottom: 24px; }
-.knMoreHead { text-shadow: 0 0 2px rgba(255, 255, 255, 0.6); font-size: 24px; margin-bottom: 10px; border-bottom: 2px solid rgba(255, 255, 255, 0.15); padding-bottom: 4px; }
-.knMoreCount { font-size: 16px; color: rgba(255, 255, 255, 0.5); }
-.knMoreGrid { display: flex; flex-wrap: wrap; gap: 8px; }
-.knMoreItem { position: relative; width: 84px; height: 84px; border: 3px solid; border-radius: 6px;
-  background: rgba(0, 0, 0, 0.35); cursor: pointer; box-sizing: border-box; }
-.knMoreItem:hover { background: rgba(255, 255, 255, 0.12); }
-.knMoreItem img { width: 100%; height: 100%; object-fit: contain; }
-.knMoreOwned { position: absolute; right: 3px; bottom: 2px; font-size: 14px; color: #fff; text-shadow: 0 0 3px #000; }

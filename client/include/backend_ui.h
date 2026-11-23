@@ -191,6 +191,9 @@ void account_kio_set_clan(const char *tag); // the krunker.io account's acc.clan
 // acc.removeSkin: -1 of skin (a redeemed spin ticket, a spent paint). On krunker.io the account's own skins, as v10.0.7
 // takes a spent paint (an item paint, a clan banner colour): the first entry of the index with cnt ?? 1 > 0, gone at 0.
 void account_remove_skin(int skin_index);
+// A lottery booking (deob-10.0.7.js:127856-127893 entry paid, sign -1; :224954-224992 LOTTERY_PRIZE_WON_PLAYER, sign +1):
+// type "skin" adds / removes quantity of skin ref; "currency" ref 1 funds, 2 junk (quantity / 100), 3 rankedPoints
+void account_lottery_booked(const char *type, int ref, double quantity, int sign);
 // krunker.io: the account's skins after a quick sell of item (POST market/quick-sell's data.count, the skin_id it sent or
 // 0), as v10.0.7's quickSellItem updates them (kio_market_quick_sold, deob-10.0.7.js:132715-132745). Box Office: nothing.
 void account_kio_quick_sold(int item, int skin_id, int count);

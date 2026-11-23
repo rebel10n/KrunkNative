@@ -617,6 +617,12 @@ static const char *item_type_label(const ViewerSkin *skin) {
 }
 
 void v10_market_card(StrBuf *sb, const int skin_index, const int w, const int h, const char *position, const char *onclick, const char *children) {
+    v10_market_card_ex(sb, skin_index, w, h, position, onclick, children, 1);
+}
+
+// showItemInfo (default true): false leaves the name / type block out, its {#if} anchor stays (deob-10.0.7.js:110707, :128286)
+void v10_market_card_ex(StrBuf *sb, const int skin_index, const int w, const int h, const char *position, const char *onclick, const char *children,
+                        const int show_info) {
     const ViewerSkin *skin = viewer_skin(skin_index);
     const char *color = "#B0B0B0";
     if (skin && skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count && g_viewer_rarities[skin->rarity].color)
@@ -634,6 +640,12 @@ void v10_market_card(StrBuf *sb, const int skin_index, const int w, const int h,
                    skin && (skin->flags & VS_RGB) ? " rgbHue" : "", img);
         sb_append_esc(sb, skin ? skin->name : "");
         sb_append(sb, "\">");
+    }
+    if (!show_info) {
+        sb_append(sb, " <!----> <!----> <!----> <!---->");
+        if (children) sb_append(sb, children);
+        sb_append(sb, "</div>");
+        return;
     }
     sb_appendf(sb, " <!----> <div class=\"itemInfo svelte-r5taai%s\"><!----> <div class=\"itemName svelte-r5taai\" style=\"color: %s;\">",
                position && !strcmp(position, "top-center") ? " top-center" : "", color);

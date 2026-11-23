@@ -227,6 +227,38 @@ static void desc_html(StrBuf *sb, const LiveEvent *e) {
     }
 }
 
+// eventPopup's tiles (deob-10.0.7.js:228456-228472): `count` of them, a grey tile for an index the store does not have
+// (or past the list); a spray's frame count joins `frames` for the popup's keyframes
+static void reward_tiles(StrBuf *sb, const int *list, const int list_n, const int count, int *frames, int *frame_count) {
+    for (int i = 0; i < count; i++) {
+        const int index = i < list_n ? list[i] : -1;
+        const ViewerSkin *skin = index >= 0 ? viewer_skin(index) : NULL;
+        if (!skin) {
+            sb_append(sb, "<div class='bundlItmC' style='border: 3px solid #707070;'></div>");
+            continue;
+        }
+        const int r = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
+        const int spray = skin->type == 4 && skin->frames;
+        if (spray) {
+            int dup = 0;
+            for (int k = 0; k < *frame_count; k++) dup |= frames[k] == skin->frames;
+            if (!dup && *frame_count < 2 * LIVE_EVENT_SKINS_MAX) frames[(*frame_count)++] = skin->frames;
+        }
+        char thumb[256];
+        store_skin_preview(index, thumb, sizeof(thumb));
+        sb_appendf(sb, "<div class='bundlItmC' style='background:url(%s);", thumb);
+        if (spray) {
+            sb_append(sb, "background-size: cover !important;");
+            spray_animation(sb, skin, "sprayAnmB");
+        } else {
+            sb_append(sb, "background-size: contain;background-position: center;");
+        }
+        // v10.0.7: the tile is the owned mark's containing block, and an owned reward gets the check
+        sb_appendf(sb, "border: 3px solid %s;position:relative;' onclick='viewItem(%d)'>%s</div>", g_viewer_rarities[r].color, index,
+                   reward_owned(index) ? "<i class='material-icons eventPopOwned'>check_circle</i>" : "");
+    }
+}
+
 static void event_popup(void) {
     const Client *client = menu_ui()->client;
     const int event_index = client ? client->game.event_index : 0;
@@ -244,38 +276,18 @@ static void event_popup(void) {
     sb_appendf(&sb, "<div class='eventPopHeader' style='background-image:url(%s);'><div class='eventPopName'>", url);
     sb_append_esc(&sb, e->name);
     sb_append(&sb, "</div></div>");
-    // rewards.skins: the first 12, a grey tile for an index the store does not have
+    // rewards.skins: the first 12 ("playing the event" for noChallenges || rewardChance); rewards.challengeSkins: every one
+    // (deob-10.0.7.js:228474-228475)
     StrBuf skins = {0};
-    int frames[LIVE_EVENT_POPUP_SKINS], frame_count = 0;
+    int frames[2 * LIVE_EVENT_SKINS_MAX], frame_count = 0;
     if (e->has_reward_skins) {
-        sb_appendf(&skins, "<div class='eventPopSkinsH'>Earn these skins from %s</div>", e->no_challenges ? "playing the event" : "completing challenges");
-        for (int i = 0; i < LIVE_EVENT_POPUP_SKINS; i++) {
-            const int index = i < e->reward_skin_count ? e->reward_skins[i] : -1;
-            const ViewerSkin *skin = index >= 0 ? viewer_skin(index) : NULL;
-            if (!skin) {
-                sb_append(&skins, "<div class='bundlItmC' style='border: 3px solid #707070;'></div>");
-                continue;
-            }
-            const int r = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
-            const int spray = skin->type == 4 && skin->frames;
-            if (spray) {
-                int dup = 0;
-                for (int k = 0; k < frame_count; k++) dup |= frames[k] == skin->frames;
-                if (!dup) frames[frame_count++] = skin->frames;
-            }
-            char thumb[256];
-            store_skin_preview(index, thumb, sizeof(thumb));
-            sb_appendf(&skins, "<div class='bundlItmC' style='background:url(%s);", thumb);
-            if (spray) {
-                sb_append(&skins, "background-size: cover !important;");
-                spray_animation(&skins, skin, "sprayAnmB");
-            } else {
-                sb_append(&skins, "background-size: contain;background-position: center;");
-            }
-            // v10.0.7: the tile is the owned mark's containing block, and an owned reward gets the check
-            sb_appendf(&skins, "border: 3px solid %s;position:relative;' onclick='viewItem(%d)'>%s</div>", g_viewer_rarities[r].color, index,
-                       reward_owned(index) ? "<i class='material-icons eventPopOwned'>check_circle</i>" : "");
-        }
+        sb_appendf(&skins, "<div class='eventPopSkinsH'>Earn these skins from %s</div>",
+                   e->no_challenges || e->has_reward_chance ? "playing the event" : "completing challenges");
+        reward_tiles(&skins, e->reward_skins, e->reward_skin_count, LIVE_EVENT_POPUP_SKINS, frames, &frame_count);
+    }
+    if (e->has_challenge_skins) {
+        sb_append(&skins, "<div class='eventPopSkinsH'>Complete every challenge for</div>");
+        reward_tiles(&skins, e->challenge_skins, e->challenge_skin_count, e->challenge_skin_count, frames, &frame_count);
     }
     if (frame_count) {
         sb_append(&sb, "<style>");

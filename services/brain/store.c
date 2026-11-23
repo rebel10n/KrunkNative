@@ -17,6 +17,7 @@
 #include "acct_internal.h"
 #include "node_events.h" /* "unb" to the unboxer's game server; the game servers' "map_spin" */
 #include "v10_api.h"
+#include "social_ws.h" /* "swu": the new spin data to every signed-in social socket */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,16 +53,30 @@ static int store_season(void) {
     return v > 0 && v < 1000 ? (int) v : d;
 }
 
+/* v10.0.7 SPIN_WHEELS_UPDATED ("swu", deob-10.0.7.js:98736, :229335-229337): the clients apply the new wheels
+ * (store.applySpinData) and redraw an open spin screen. v10 sends it on the game socket; KrunkNative on the social one. */
+static void push_spin_data(void) {
+    const char *s = store_spins_json();
+    cJSON *data = s ? kn_json_parse(s, strlen(s)) : NULL;
+    if (!data) return;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("swu"));
+    cJSON_AddItemToArray(f, data);
+    social_push_all_json(f);
+}
+
 static void spins_row_done(kn_db_result *res, void *ud) {
     (void) ud;
     if (!kn_db_ok(res)) return; /* no table yet (migration pending): the built-in wheels */
     const char *text = kn_db_rows(res) > 0 ? kn_db_get(res, 0, 0) : NULL;
     if (!text || !*text) {
-        if (s_db_spins_set) KN_INFO(MOD, "store_spin_data cleared: the built-in v10 wheels");
+        const int was = s_db_spins_set;
+        if (was) KN_INFO(MOD, "store_spin_data cleared: the built-in v10 wheels");
         store_spins_free(&s_db_spins);
         s_db_spins_set = 0;
         free(s_db_spins_text);
         s_db_spins_text = NULL;
+        if (was) push_spin_data();
         return;
     }
     if (s_db_spins_text && !strcmp(s_db_spins_text, text)) return;
@@ -77,6 +92,7 @@ static void spins_row_done(kn_db_result *res, void *ud) {
     free(s_db_spins_text);
     s_db_spins_text = strdup(text);
     KN_INFO(MOD, "store_spin_data: %d wheels, %d item pools", next.wheel_count, next.pool_count);
+    push_spin_data();
 }
 
 static void spins_tick(kn_loop *loop, void *ud) {

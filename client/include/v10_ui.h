@@ -84,6 +84,8 @@ char *v10_io_success(const char *title, const char *message_html, const char *bu
 
 // the store item card (market-card, svelte-r5taai) of skin `index` with extra markup inside
 void v10_market_card(StrBuf *sb, int skin_index, int w, int h, const char *position, const char *onclick, const char *children);
+// as v10_market_card; show_info 0 = showItemInfo false (no name / type block)
+void v10_market_card_ex(StrBuf *sb, int skin_index, int w, int h, const char *position, const char *onclick, const char *children, int show_info);
 
 // JSON helpers
 double v10_num(const cJSON *o, const char *key, double def);

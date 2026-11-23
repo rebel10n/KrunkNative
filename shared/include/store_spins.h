@@ -23,6 +23,8 @@ typedef struct StoreWheel {
     char name[32];
     char language[48];       // i18n key of the name
     char head_col[24], button_col[24], price_t[16], promo_text[32], promo_col[16];
+    char info_text[1024];    // infoText: the spin screen's lines under the odds ('\n'-separated, v10.0.7 prizeWheel)
+    char end_date[40];       // endDate as given ("Available until: <endDate>" under infoText)
     int price;               // KR per spin
     int multi;               // the "Nx Spin" count, 0 = single spins only
     int icons;               // img/shop/spins/<index>_<0..icons-1>.png

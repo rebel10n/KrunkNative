@@ -363,6 +363,7 @@ static void warn_unknown_keys(void) {
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
         "spinResult", // {rand, item} (arrays for a multi-spin): the wheel's spin reply (the won item's reveal)
         "spinMulti",  // with spin: the wheel's Nx spin (prizeWheel(i, null, multi))
+        "spinData",   // with spin: {season, wheels, itemPools}, the brain's "swu" push (store.applySpinData) before the wheel opens
         "spinHistory", // with spin: a "spinH" reply [{ind, dte, fds}] (the Spin History popup)
         "modeHud", // with modeName: pinned mode HUD state (hud_modes_scenario: scores, flags, gmsg)
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
@@ -1337,6 +1338,13 @@ static int ui_scenario_apply(Client *client) {
     if (st_bool("gameCode", 0)) v10_party_password_prompt(); // v10 gameCode(): the server password popup
     if (menu_open) v10_wild_offer_scenario(st("wildOffer")); // the brain's "wo" reply (v10_wild_offer.c)
     if (menu_open && st_has("spin")) {
+        if (cJSON_IsObject(st("spinData"))) { // the brain's "swu": these wheels instead of the built-in ones
+            cJSON *frame = cJSON_CreateArray();
+            cJSON_AddItemToArray(frame, cJSON_CreateString("swu"));
+            cJSON_AddItemToArray(frame, cJSON_Duplicate(st("spinData"), 1));
+            store_ui_frame(frame);
+            cJSON_Delete(frame);
+        }
         store_ui_scenario_wheel(st_int("spin", 0), st_bool("spinMulti", 0));
         apply_actions(client, st("spinActions")); // handlers once the wheel is up (knShowMoreItems: its + More)
         const cJSON *result = st("spinResult");

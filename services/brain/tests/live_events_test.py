@@ -58,7 +58,8 @@ def iso(t):
 def halloween(now):
     return {"id": 8, "name": "Halloween", "startsAt": iso(now - 3600), "endsAt": iso(now + 3600), "reveal": 86400000,
             "imgExt": "webp", "longDesc": ["Hunt the pumpkins", "<b>Collect</b> the skins"], "noChallenges": False,
-            "rewards": {"skins": [7540, "x", 7541, 1.5], "weights": [0, 0, 70, 25, 4, 0.1, 0.01, 9]}, "rewardChance": 40,
+            "rewards": {"skins": [7540, "x", 7541, 1.5], "weights": [0, 0, 70, 25, 4, 0.1, 0.01, 9], "challengeSkins": [7542, "y"]},
+            "rewardChance": 40, "color": "#ff7518",
             "eligibleMaps": [0, 3, "a"], "limitedTimeMode": True, "eventObjects": 1, "killPoolsWeight": 5,
             "killPoolsMode": "dilute", "killPoolsIcon": "gift",
             "killPools": [{"weight": 100, "contents": [{"content_type": "skin", "content_ref": "7540"}]}]}
@@ -67,7 +68,7 @@ def halloween(now):
 def feed_events(now, aon_starts):
     return [halloween(now),
             {"id": 4, "name": "All or Nothing", "startsAt": iso(aon_starts), "endsAt": iso(now + 7200), "reveal": 3600000,
-             "imgExt": "../x", "longDesc": "<i>One shot</i>", "limitedTimeMode": True},
+             "imgExt": "../x", "longDesc": "<i>One shot</i>", "limitedTimeMode": True, "color": "red;x"},
             {"id": 5, "name": "Mag Dump", "startsAt": iso(now + 7200), "endsAt": iso(now + 9000), "reveal": 60000},
             {"id": 6, "name": "Over", "startsAt": iso(now - 9000), "endsAt": iso(now - 3600)}]
 
@@ -143,7 +144,10 @@ async def scenario(port, feed, now):
             check("killPools" not in c8 and "killPoolsWeight" not in c8, "no kill pools for the clients")
             check(c8.get("rewards", {}).get("skins") == [7540, 7541] and c8.get("eventObjects") is True and c8.get("imgExt") == "webp",
                   "the clients get the popup's fields (rewards, imgExt) and eventObjects")
-            check("imgExt" not in c4 and c4.get("longDesc") == "<i>One shot</i>" and c4.get("reveal") == 3600000,
+            # v10.0.7: the menu tile's color, the popup's rewards.challengeSkins (deob-10.0.7.js:131660, :228475)
+            check(c8.get("color") == "#ff7518" and c8.get("rewards", {}).get("challengeSkins") == [7542],
+                  "the clients get color and rewards.challengeSkins (integers only): %s %s" % (c8.get("color"), c8.get("rewards")))
+            check("color" not in c4 and "imgExt" not in c4 and c4.get("longDesc") == "<i>One shot</i>" and c4.get("reveal") == 3600000,
                   "an imgExt with a path is dropped; longDesc stays the feed's text (the client escapes it): %s" % c4)
 
         # All or Nothing starts (the feed is edited): the next ping pushes the new set to the servers

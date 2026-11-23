@@ -66,7 +66,7 @@ static int reward(const LiveEvent *e, const int index, const int map, const doub
 static void test_parse(void) {
     LiveEvents evs = parse("[{\"id\":8,\"name\":\"Halloween\",\"startsAt\":\"2026-10-25T00:00:00Z\",\"endsAt\":\"2026-11-02T00:00:00Z\","
                            "\"reveal\":86400000,\"imgExt\":\"webp\",\"color\":\"#8E5cff\",\"longDesc\":[\"Hunt\",\"Collect\"],\"noChallenges\":1,"
-                           "\"rewards\":{\"skins\":[7540,\"7541\",-3],\"weights\":[0,0,50,50]},\"rewardChance\":25,"
+                           "\"rewards\":{\"skins\":[7540,\"7541\",-3],\"weights\":[0,0,50,50],\"challengeSkins\":[7542,7543]},\"rewardChance\":25,"
                            "\"eligibleMaps\":[0,3],\"limitedTimeMode\":true,\"eventObjects\":true},"
                            "{\"id\":4,\"name\":\"<b>x\",\"start\":1000,\"end\":2000,\"imgExt\":\"../a\",\"color\":\"red;x\",\"longDesc\":\"one\\ntwo\"},"
                            "{\"id\":\"x\"}, 7]");
@@ -87,6 +87,11 @@ static void test_parse(void) {
     CHECK(!strcmp(h->color, "#8E5cff") && !a->color[0] && !evs.events[2].color[0],
           "color (the menu event tile accent, v10.0.7): a hex color kept, anything else dropped: '%s' '%s'", h->color, a->color);
     CHECK(a->reward_chance == 100 && !a->has_reward_skins && !a->has_eligible_maps && !a->event_objects, "rewardChance || 100, no lists");
+    // v10.0.7 eventPopup: rewardChance given (truthy) and rewards.challengeSkins (deob-10.0.7.js:228474-228475)
+    CHECK(h->has_reward_chance && !a->has_reward_chance, "has_reward_chance: rewardChance given");
+    CHECK(h->has_challenge_skins && h->challenge_skin_count == 2 && h->challenge_skins[0] == 7542 && h->challenge_skins[1] == 7543 &&
+              !a->has_challenge_skins && !a->challenge_skin_count,
+          "rewards.challengeSkins");
     CHECK(evs.events[2].id == 0, "a non-numeric id is 0");
     char path[64];
     live_event_image(h, 8, path, sizeof(path));

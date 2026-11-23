@@ -447,6 +447,13 @@ static cJSON *game_event_out(const cJSON *e, const int64_t start, const int64_t 
     int ext_ok = ext && ext[0] && strlen(ext) <= 5;
     for (const char *p = ext; ext_ok && *p; p++) ext_ok = isalnum((unsigned char) *p) != 0;
     if (ext_ok) cJSON_AddStringToObject(o, "imgExt", ext);
+    /* color: the menu's event tile accent (v10.0.7 event.color || "#fbc02d", deob-10.0.7.js:131660); "#rgb" .. "#rrggbbaa" only,
+     * as the clients' live_events.c reads it */
+    const char *color = cJSON_GetStringValue(cJSON_GetObjectItem(e, "color"));
+    const size_t color_len = color ? strlen(color) : 0;
+    if (color && color[0] == '#' && (color_len == 4 || color_len == 5 || color_len == 7 || color_len == 9) &&
+        strspn(color + 1, "0123456789abcdefABCDEF") == color_len - 1)
+        cJSON_AddStringToObject(o, "color", color);
     const cJSON *desc = cJSON_GetObjectItem(e, "longDesc");
     if (cJSON_IsString(desc)) cJSON_AddStringToObject(o, "longDesc", desc->valuestring);
     else if (cJSON_IsArray(desc)) {
@@ -463,6 +470,9 @@ static cJSON *game_event_out(const cJSON *e, const int64_t start, const int64_t 
     if (cJSON_IsObject(rewards)) {
         cJSON *r = cJSON_AddObjectToObject(o, "rewards");
         cJSON_AddItemToObject(r, "skins", int_list(cJSON_GetObjectItem(rewards, "skins"), 32));
+        /* challengeSkins: eventPopup's "Complete every challenge for" tiles (deob-10.0.7.js:228475) */
+        const cJSON *chall = cJSON_GetObjectItem(rewards, "challengeSkins");
+        if (cJSON_IsArray(chall)) cJSON_AddItemToObject(r, "challengeSkins", int_list(chall, 32));
         const cJSON *weights = cJSON_GetObjectItem(rewards, "weights");
         if (cJSON_IsArray(weights)) {
             cJSON *w = cJSON_AddArrayToObject(r, "weights");

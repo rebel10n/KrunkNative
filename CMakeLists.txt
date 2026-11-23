@@ -1635,6 +1635,17 @@ else ()
             add_test(NAME chal_card_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chal_card_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(chal_card_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # lottery_scenario_e2e: the raffle window on --render-scenario answers (costs, Grand Prize, timer states,
+            # event_ended; client/tests/lottery_scenario_e2e.py)
+            add_test(NAME lottery_scenario_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/lottery_scenario_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(lottery_scenario_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # prize_wheel_scenario_e2e: the spin screen on --render-scenario (pool rows, previews, the items modal, a
+            # ticket's spinWheelId, the brain's "swu" wheels, infoText / promo, an expired wheel;
+            # client/tests/prize_wheel_scenario_e2e.py)
+            add_test(NAME prize_wheel_scenario_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/prize_wheel_scenario_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(prize_wheel_scenario_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # rent_servers_e2e: Rent a Server end to end: the window against kn_brain (sqlite), kn_rentd starting the
             # server_bin, the browser's 24/7 row, the expiry (client/tests/rent_servers_e2e.py, doc/v10/rented-servers.md)
             add_test(NAME rent_servers_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/rent_servers_e2e.py

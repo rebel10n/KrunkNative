@@ -114,6 +114,20 @@ class Social:
     async def __aexit__(self, *a):
         await self.ws.close()
 
+    async def drain(self, secs):
+        """every frame that comes within secs, into the inbox"""
+        deadline = time.time() + secs
+        while time.time() < deadline:
+            try:
+                self.inbox.append(json.loads(await asyncio.wait_for(self.ws.recv(), max(0.05, deadline - time.time()))))
+            except asyncio.TimeoutError:
+                break
+
+    def taken(self, label):
+        got = [f for f in self.inbox if f and f[0] == label]
+        self.inbox = [f for f in self.inbox if not f or f[0] != label]
+        return got
+
     async def call(self, label, *frame):
         if frame:
             await self.ws.send(json.dumps(list(frame)))
@@ -251,6 +265,10 @@ async def scenario(port):
         status, body = http(port, "POST", base + "/participate", {"cost_type": "skin", "cost_ref": "7782", "cost_quantity": 2}, a_tok)
         check(status == 200 and body.get("data") == {"player_entries": 2, "total_entries": 2},
               "two skin bundles give 2 entries: %s %s" % (status, body))
+        # UPDATE_LOTTERY_ENTRIES to every signed-in socket (v10.0.7 "lotEnt", deob-10.0.7.js:224921-224923)
+        ent = await sock_b.call("lotEnt")
+        check(len(ent) == 4 and ent[1] == LOTTERY and isinstance(ent[2], (int, float)) and ent[2] > 0 and ent[3] == 2,
+              "the entry pushes [\"lotEnt\", 3, draw, 2] to another signed-in socket: %s" % ent)
         check(one("SELECT COALESCE(SUM(delta), 0) FROM skin_transactions WHERE account_id = %d AND skin_id = 7782" % a_id) == 0,
               "the two skins are spent (the account holds none)")
         status, body = http(port, "POST", base + "/participate", {"cost_type": "skin", "cost_ref": "7782", "cost_quantity": 1}, a_tok)
@@ -318,6 +336,20 @@ async def scenario(port):
         check(all(p.get("prize_type") == "skin" and int(p.get("prize_ref")) in pools.get(p.get("prize_pool_id"), set()) for p in prizes),
               "every prize is a skin of its own pool")
         check(all(p.get("won_by_name") in (alice, bob) for p in prizes), "every winner is an account with entries")
+        # LOTTERY_PRIZE_WON_PLAYER to each winner's sockets, LOTTERY_ENDED to everyone (deob-10.0.7.js:224954-225003)
+        await sock_a.drain(2)
+        await sock_b.drain(1)
+        wins_a, wins_b = sock_a.taken("lotWinP"), sock_b.taken("lotWinP")
+        wins_p = wins_a + wins_b
+        check(len(wins_p) == 10 and all(len(f) == 4 and f[1] == LOTTERY and f[3].get("type") == "skin" and f[3].get("quantity") == 1
+                                        and isinstance(f[3].get("ref"), str) for f in wins_p),
+              "each prize is pushed to its winner as [\"lotWinP\", 3, draw, {type skin, ref, quantity 1}] (%d)" % len(wins_p))
+        for sock_wins, who in ((wins_a, alice), (wins_b, bob)):
+            check(sorted(f[3].get("ref") for f in sock_wins) == sorted(str(p.get("prize_ref")) for p in prizes if p.get("won_by_name") == who),
+                  "%s's socket gets exactly %s's prizes" % (who, who))
+        ends_a, ends_b = sock_a.taken("lotEnd"), sock_b.taken("lotEnd")
+        check(ends_a[:1] == [["lotEnd", LOTTERY]] and ends_b[:1] == [["lotEnd", LOTTERY]],
+              "the settled draw pushes [\"lotEnd\", 3] to every signed-in socket: %s %s" % (ends_a, ends_b))
         check(one("SELECT COUNT(*) FROM skin_transactions WHERE source = 'lottery' AND delta = 1") == 10,
               "each prize is granted once as a skin (10 grant rows, source 'lottery')")
         await asyncio.sleep(3)
@@ -337,6 +369,24 @@ async def scenario(port):
               and one("SELECT COUNT(*) FROM lottery_prizes WHERE winner_id IS NULL", 0) == 0
               and one("SELECT COUNT(*) FROM lottery_prizes", 0) == 10,
               "a draw nobody entered is drawn and drops its unwon prizes (no winner, no grant)")
+
+        # (not the lottery: the same push path) v10.0.7 SPIN_WHEELS_UPDATED: a new store_spin_data row goes out as
+        # ["swu", data] to every signed-in socket, and clearing it as the built-in wheels (services/brain/store.c,
+        # deob-10.0.7.js:229335-229337)
+        spin_data = {"season": 10, "wheels": [{"name": "Pushed", "price": 7, "pools": ["p"], "poolWeights": [100]}],
+                     "itemPools": {"p": {"name": "Pool", "color": "#123456", "items": [14]}}}
+        sock_a.taken("swu"), sock_b.taken("swu")
+        query("INSERT INTO store_spin_data (id, data) VALUES (1, '%s')" % json.dumps(spin_data))
+        await sock_a.drain(4)
+        await sock_b.drain(1)
+        swu_a, swu_b = sock_a.taken("swu"), sock_b.taken("swu")
+        check(swu_a[-1:] == [["swu", spin_data]] and swu_b[-1:] == [["swu", spin_data]],
+              "a new store_spin_data row is pushed as [\"swu\", data] to every socket: %s %s" % (swu_a[-1:], swu_b[-1:]))
+        query("DELETE FROM store_spin_data")
+        await sock_a.drain(4)
+        swu_a = sock_a.taken("swu")
+        check(len(swu_a) == 1 and len(swu_a[0][1].get("wheels", [])) > 1 and swu_a[0][1]["wheels"][0].get("name") == "Starter",
+              "clearing it pushes the built-in wheels: %s" % [len(f[1].get("wheels", [])) for f in swu_a])
 
 
 def start_brain(env, log_path, extra):
@@ -373,7 +423,7 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
-        proc, port = start_brain(env, log_path, ["--brain.lottery.settle_check_ms=1000"])
+        proc, port = start_brain(env, log_path, ["--brain.lottery.settle_check_ms=1000", "--accounts.store_reload_ms=1500"])
         asyncio.run(scenario(port))
     finally:
         if proc:
