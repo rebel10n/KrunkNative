@@ -45,7 +45,7 @@ cJSON *kio_market_bm_reply(const cJSON *data, int item, double funds_now);
 
 // GET /market/inventory's data, an array of rows {i, st, sid, cnt, m} (v10.0.7 keeps the rows whose cnt is absent or > 0,
 // deob-10.0.7.js:134361; a row with st 1 is a stack, any other one copy: :135061), as the Inventory tab's rows
-// {i, st, c, sid, kid[, m][, nt]}: c is the stack's cnt (a copy is one unit), kid the official sid the writes send as
+// {i, st, c, sid, kid[, m][, nt][, marketid]} (marketid: the unit is listed): c is the stack's cnt (a copy is one unit), kid the official sid the writes send as
 // skin_id (listItem :109104-109108, quickSellItem :132700-132706). sid is KrunkNative's unit id, as the brain's rows
 // have it: a stack's is its item index, a copy's copy_base + its position in the answer (krunker.io's instance ids
 // are not in KrunkNative's copy id space). A row without a numeric i is dropped. Returns a new array (cJSON_Delete it);

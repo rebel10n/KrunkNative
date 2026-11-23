@@ -6,14 +6,23 @@
 // work as the HTTP route POST /items/<id>/paint, doc/v10/paint-copy.md). The list is the account's own data, so the
 // popup has no load to fail: an account without paints gets v10's empty state. A paint that was applied sets the
 // copy's paint on the owned list at once (account_paint_applied); the brain pushes the account again ("ua") after.
+//
+// A krunker.io account sends v10.0.7's own request to krunker.io with its Bearer (kio_store_write): items.setPaint
+// POST /items/<skinId>/paint {item_id, paint_item_id} (deob-10.0.7.js:27093-27097, :108616-108665), skinId the card's
+// instance (the inventory tab's row sid, the loadout copy's id). An error shows error.message || "Failed to apply
+// paint" in the popup; a success takes one paint unit off the account's skins as v10 does (:108632-108648), gives the
+// instance its paint as the inventory's caller does (:147688-147705), toasts, and the Market's inventory asks again
+// (:134247-134250).
 #include <paint_picker.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <kio_store.h> // kio_store_write: a krunker.io account's setPaint
 #include <ui_logic.h>
 #include <v10_ui.h>
 #include <i18n.h>
 #include "../viewer/viewer_store.h"
 #include <cJSON.h>
+#include <stdint.h> // intptr_t: the paint of a krunker.io request
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -151,17 +160,20 @@ static const PaintRow *find_row(const PaintRow *rows, const int n, const int ind
 
 // The paint the card's copy wears (its m: a paint colour or a shader number), by store index; -1 none.
 static int copy_paint(const PaintRow *rows, const int n) {
-    if (S.sid < COPY_ID_BASE) return -1;
+    if (S.sid < COPY_ID_BASE && account_backend() != ACCOUNT_BACKEND_KRUNKER) return -1; // (krunker.io: any instance id)
     const cJSON *e = owned_copy(owned_list(), S.sid);
     const cJSON *m = e ? cJSON_GetObjectItemCaseSensitive(e, "m") : NULL;
-    if (!m) return -1;
-    const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
-    const char *colour = json_str(m, "paint");
-    for (int i = 0; rows && i < n; i++) {
-        if (cJSON_IsNumber(shader) && rows[i].has_shader && rows[i].shader == shader->valueint) return rows[i].index;
-        if (colour && rows[i].color[0] && !strcasecmp(rows[i].color, colour)) return rows[i].index;
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL; // krunker.io's JSON-string m
+    if (parsed) m = parsed;
+    const cJSON *shader = m ? cJSON_GetObjectItemCaseSensitive(m, "paintShader") : NULL;
+    const char *colour = m ? json_str(m, "paint") : NULL;
+    int pick = -1;
+    for (int i = 0; rows && i < n && pick < 0; i++) {
+        if (cJSON_IsNumber(shader) && rows[i].has_shader && rows[i].shader == shader->valueint) pick = rows[i].index;
+        else if (colour && rows[i].color[0] && !strcasecmp(rows[i].color, colour)) pick = rows[i].index;
     }
-    return -1;
+    cJSON_Delete(parsed);
+    return pick;
 }
 
 // A colour as the swatch's style: only "#" and hex digits survive.
@@ -254,6 +266,8 @@ static void paint_closed(const int accepted, void *user) {
 
 // ---------------------------------------------------------------- apply
 
+static void applied_toast(int item, int paint);
+
 // The brain's answer to the paint in flight: `data` is the "ipr" payload (NULL: refused, no text), `message` the
 // "po" text (NULL: none). On success the paint's unit is taken, the copy gets its paint, and when the copy is new one
 // unpainted unit of the item becomes it (from_stack); the popup closes with the toast. The brain pushes the account
@@ -272,15 +286,7 @@ static void finish_apply(const cJSON *data, const char *message) {
     const int item = S.ind, paint = S.pending_paint;
     // v10.0.3 (deob-10.0.3.js:149074-149075): "Painted " + item.name + (paintName ? " with " + paintName : ""), where
     // paintName is the store paint's own name (no "Paint" fallback: that is only the Paint button's label, :122033)
-    const char *paint_name = json_str(store_json(paint), "name");
-    char text[256];
-    if (paint_name && paint_name[0]) I18N_F(text, "kn.paint.applied", "Painted {0} with {1}", item_name(item), paint_name);
-    else snprintf(text, sizeof(text), "Painted %s", item_name(item));
-    StrBuf sb = {0};
-    sb_append_esc(&sb, text);
-    char *toast = sb_finish(&sb);
-    ui_notify(toast);
-    free(toast);
+    applied_toast(item, paint);
     account_paint_applied(item, paint, copy->valueint, S.sid < COPY_ID_BASE, cJSON_GetObjectItemCaseSensitive(data, "m"));
     ui_loadout_owned_changed();
     if (S.open) v10_view_pop(1); // accepted: v10's push resolves with the result and the popup closes (deob:122174-122178)
@@ -309,6 +315,47 @@ static void paint_expired(void *user) {
     if (S.busy) finish_apply(NULL, NULL);
 }
 
+// The toast of an applied paint: "Painted " + item.name + (paintName ? " with " + paintName : "") (deob-10.0.7.js
+// :134247-134249, :147726-147728), paintName the store paint's own name.
+static void applied_toast(const int item, const int paint) {
+    const char *paint_name = json_str(store_json(paint), "name");
+    char text[256];
+    if (paint_name && paint_name[0]) I18N_F(text, "kn.paint.applied", "Painted {0} with {1}", item_name(item), paint_name);
+    else snprintf(text, sizeof(text), "Painted %s", item_name(item));
+    StrBuf sb = {0};
+    sb_append_esc(&sb, text);
+    char *toast = sb_finish(&sb);
+    ui_notify(toast);
+    free(toast);
+}
+
+// krunker.io's answer to items.setPaint (deob-10.0.7.js:108626-108660): an error's message (no code text: :108631),
+// else "Failed to apply paint"; a success takes the paint unit and paints the instance (account_paint_applied), the
+// toast, and the Market's inventory asks again (:134250). user: the paint index.
+static void kio_paint_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) status;
+    (void) data;
+    const int paint = (int) (intptr_t) user;
+    S.busy = 0;
+    if (message || code) {
+        snprintf(S.error, sizeof(S.error), "%s", message && message[0] ? message : I18N("kn.paint.failed", "Failed to apply paint"));
+        paint_render();
+        return;
+    }
+    applied_toast(S.ind, paint);
+    // the instance's new paint: {paintShader} for a shader paint, else {paint: colour} (:108651-108655, :147697-147699)
+    cJSON *m = cJSON_CreateObject();
+    const cJSON *j = store_json(paint);
+    const cJSON *shader = j ? cJSON_GetObjectItemCaseSensitive(j, "paintShader") : NULL;
+    if (cJSON_IsNumber(shader)) cJSON_AddNumberToObject(m, "paintShader", shader->valuedouble);
+    else if (json_str(j, "paintColor")) cJSON_AddStringToObject(m, "paint", json_str(j, "paintColor"));
+    account_paint_applied(S.ind, paint, S.sid, 0, m);
+    cJSON_Delete(m);
+    ui_loadout_owned_changed();
+    v10_market_owned_changed();
+    if (S.open) v10_view_pop(1);
+}
+
 static void apply(void) {
     if (!S.open || S.busy || S.selected < 0) return;
     int n = 0;
@@ -318,6 +365,19 @@ static void apply(void) {
         free(rows);
         snprintf(S.error, sizeof(S.error), "%s", I18N("kn.paint.none", "You don't have any of that paint left."));
         paint_render();
+        return;
+    }
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // items.setPaint(skinId, {item_id: item.index, paint_item_id: paint.index}) (deob-10.0.7.js:108623-108626)
+        char path[64], body[96];
+        snprintf(path, sizeof(path), "items/%d/paint", S.sid);
+        snprintf(body, sizeof(body), "{\"item_id\":%d,\"paint_item_id\":%d}", S.ind, row->index);
+        const int paint = row->index;
+        free(rows);
+        S.error[0] = 0;
+        S.busy = 1;
+        paint_render();
+        kio_store_write("POST", path, body, kio_paint_answer, (void *) (intptr_t) paint); // (a refusal answers at once)
         return;
     }
     // v10's items.setPaint(skinId, {item_id, paint_item_id}) (deob:122139-122142) as the socket frame
@@ -349,7 +409,7 @@ static void apply(void) {
 // ---------------------------------------------------------------- open / handlers
 
 int paint_picker_can_open(const int ind) {
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !active_account()) return 0;
+    if (!active_account()) return 0; // (krunker.io too: its setPaint goes to krunker.io, apply)
     const cJSON *j = store_json(ind);
     const cJSON *t = j ? cJSON_GetObjectItemCaseSensitive(j, "paintTargets") : NULL; // true or a list of meshes
     return t && !cJSON_IsNull(t) && !cJSON_IsFalse(t);

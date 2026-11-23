@@ -24,6 +24,11 @@ int  kio_inventory_locked(const MarketGroup *g, int copy); // copy: index into i
 
 // Lock or unlock one copy (copy >= 0) or the stack (copy -1). 1 = sent (done runs when it ends).
 int  kio_inventory_set_lock(const MarketGroup *g, int copy, int locked, KioInvDone done, void *user);
+// The Market inventory's own lock reads and toggle (v10.0.7, deob-10.0.7.js:134986-135003), with no inventory load
+// needed: GET items/locks into the lock sets, and POST items/locks {skin_id, locked} for a row's sid (a stack's too),
+// then the locks again. done runs once, also when the request cannot start (then 0 is returned).
+int  kio_inventory_locks_load(KioInvDone done, void *user);
+int  kio_inventory_lock_skin(int skin_id, int locked, KioInvDone done, void *user);
 // The official instance id (the bundle's instanceId, deob-10.0.4.js:131141, :133997) of the item's one copy whose
 // paint key is key (market_paint_key), or 0 when no copy or more than one has that paint (the pairing is not certain).
 int  kio_inventory_copy_for_paint(int item, const char *key);

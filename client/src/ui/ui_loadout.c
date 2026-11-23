@@ -1307,12 +1307,15 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     sb_appendf(out, "<img loading='lazy' %sclass='%s%s' src='%s' />",
                weapon >= 0 ? "draggable='false' " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img);
     owned_paint_badge(out, o); // v10.0.3: after the image, before the info button
-    // v10.0.3's paint-icon (deob:147316, shown when paintTargets and a skinId: deob:150226): the picker of this unit
-    if (paint_picker_can_open(o->ind))
+    // v10.0.3's paint-icon (deob:147316, shown when paintTargets and a skinId: deob:150226): the picker of this unit.
+    // krunker.io: v10.0.7's icons need the entry's instance (paintTargets && instanceId, styles && instanceId:
+    // deob-10.0.7.js:147902-147913), the skinId its setPaint / setStyle names; the brain's account also paints a stack
+    const int unit = o->copy_id || account_backend() != ACCOUNT_BACKEND_KRUNKER;
+    if (unit && paint_picker_can_open(o->ind))
         sb_appendf(out, "<div class='selctPaintBtn' onmouseenter='playTick()' onclick='paintOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>format_paint</i></div>",
                    o->ind, o->copy_id ? o->copy_id : o->ind);
     // v10.0.7's style icon (deob-10.0.7.js:147392, :147909-147917): the else branch of the paint icon, "Style <name>"
-    else if (style_picker_can_open(o->ind)) {
+    else if (unit && style_picker_can_open(o->ind)) {
         sb_append(out, "<div class='selctPaintBtn' style='background-color:#fc038d' aria-label='Style ");
         sb_append_esc(out, s->name ? s->name : "");
         sb_appendf(out, "' onclick='styleOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>checkroom</i></div>", o->ind,

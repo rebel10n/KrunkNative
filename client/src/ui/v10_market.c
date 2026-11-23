@@ -908,12 +908,22 @@ static void kio_inventory_done(void *user, const int status, const cJSON *data, 
     render_both();
 }
 
+// krunker.io's item locks came (getLocks, kio_inventory_locks_load): the tiles' lock toggles and sellable states
+static void render_grid(void);
+static void kio_locks_loaded(void *user, const int ok, const char *message) {
+    (void) user;
+    (void) ok;
+    (void) message; // (v10's mount read: iïìïíïï().catch(() => {}), deob-10.0.7.js:135001-135003)
+    if (M.tab == TAB_MARKET && M.mtab == MT_INVENTORY) render_grid();
+}
+
 static void inventory_load(void) {
     if (!logged_in() || M.inv_loading) return;
     M.inv_loading = 1;
     if (kio_store_active()) {
         if (v10_gapi("GET", "/market/inventory", NULL, kio_inventory_done, NULL)) kio_read_arm();
         else M.inv_loading = 0;
+        kio_inventory_locks_load(kio_locks_loaded, NULL); // the inventory's mount: getLocks (deob-10.0.7.js:135001-135003)
         return;
     }
     if (!request_page("market", "inventory", -1)) M.inv_loading = 0;
@@ -1423,10 +1433,14 @@ static TileList inventory_list(void) {
 static int kio_copy_sid(int index, int sid);
 
 // krunker.io: a tile's unit as the official inventory names it: a stack by its group's stack id, a painted copy by its
-// one matching instance (kio_copy_sid). 0 when the official inventory has no such unit (the tile can't be picked).
+// one matching instance (kio_copy_sid). 0 when the official inventory has no such unit (the tile can't be picked), or the
+// row is a listed unit (its marketid: v10.0.7's selectable rule IÌìíîîi is sid && !marketid && ..., deob-10.0.7.js
+// :135063-135064, so select mode dims it and Select all leaves it out).
 static int bulk_official(const int index, const int sid, int *stackable) {
     *stackable = 0;
     if (!inv_ready()) return 0;
+    const cJSON *row = inv_unit(index, sid);
+    if (row && jnum(row, "marketid") > 0) return 0;
     int n = 0;
     const MarketGroup *g = inv_groups(&n);
     if (sid >= COPY_ID_BASE) {
@@ -1458,10 +1472,15 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         const cJSON *r = l->t[k].row;
         const int cnt = r ? jint(r, "c", 1) : 0;
         const int sid = r ? row_sid(r) : 0;
-        const int sellable = cnt > 0 && r && !jint(r, "nt", 0);
+        const int tradable = cnt > 0 && r && !jint(r, "nt", 0);
+        // krunker.io: the row's item lock ($itemLocks.ids has row.sid, deob-10.0.7.js:134986-134988): a locked row is not
+        // sellable (no List, no Quick sell: :135276-135283)
+        const int kid = kio_store_active() && r ? jint(r, "kid", 0) : 0;
+        const int item_locked = kid > 0 && market_locks_has(kio_inventory_locks(), kid, i, 0);
+        const int sellable = tradable && !item_locked;
         const ViewerSkin *s = skin(i);
         int stackable = 0;
-        const int official = selecting && sellable ? bulk_official(i, sid, &stackable) : 0;
+        const int official = selecting && tradable ? bulk_official(i, sid, &stackable) : 0;
         const int locked = official && market_locks_has(inv_locks(), official, i, stackable);
         const int picked = bulk_picked(official, i);
         sb_appendf(sb, "<div class=\"item-wrapper svelte-1n21gx%s%s%s\">", M.detail == i ? " selected" : "",
@@ -1482,6 +1501,12 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         sb_append(sb, " ");
         paint_badge(sb, meta, 10, 24);
         cJSON_Delete(meta);
+        // krunker.io: the lock toggle (owned, a sid, not in select mode: deob-10.0.7.js:132078, :135346-135357), aria-label
+        // Lock / Unlock, is-locked and the lock / lock_open icon by the row's lock
+        if (kid > 0 && cnt > 0 && !selecting)
+            sb_appendf(sb, " <button type=\"button\" class=\"lock-toggle svelte-1n21gx%s\" aria-label=\"%s\" id=\"v10mkLock%d\" onclick=\"v10mk.lock(%d,%d)\">"
+                           "<i class=\"material-icons svelte-1n21gx\">%s</i></button> ",
+                       item_locked ? " is-locked" : "", item_locked ? "Unlock" : "Lock", sid, i, sid, item_locked ? "lock" : "lock_open");
         if (r && sid > 0 && paint_picker_can_open(i)) {
             sb_appendf(sb, " <button type=\"button\" class=\"paint-icon svelte-1n21gx\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">format_paint</i></button> ", sid, i, sid);
         }
@@ -1493,7 +1518,7 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
             sb_appendf(sb, "\" onclick=\"v10mk.style(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">checkroom</i></button> ", i, sid);
         }
         const int qs = r ? jint(r, "qs", 0) : 0, destroy = r && (jint(r, "nqs", 0) || qs <= 0);
-        if (cnt > 0 && (qs > 0 || destroy)) {
+        if (cnt > 0 && !item_locked && (qs > 0 || destroy)) {
             sb_append(sb, " <button type=\"button\" class=\"quick-sell-icon svelte-1n21gx\" aria-label=\"Quick sell ");
             sb_append_esc(sb, s && s->name ? s->name : "");
             sb_appendf(sb, "\" id=\"v10mkQS%d\" onclick=\"v10mk.qs(%d,%d)\"><i class=\"material-icons svelte-1n21gx\">sell</i></button> ", sid, i, sid);
@@ -3658,6 +3683,17 @@ static int kio_unit_kid(const int index, const int sid) {
     return r ? jint(r, "kid", 0) : 0;
 }
 
+// The lock toggle's end (deob-10.0.7.js:134993-134999): the locks read again, then "Locked <name>" / "Unlocked <name>"
+// (item.lock.didLock / didUnlock), or the error's text || "Failed to update lock". user: index * 2 + was locked.
+static void kio_lock_done(void *user, const int ok, const char *message) {
+    const int packed = (int) (intptr_t) user, index = packed / 2, was = packed % 2;
+    const ViewerSkin *s = skin(index);
+    char text[200];
+    if (ok) notify(1, I18N_F(text, was ? "item.lock.didUnlock" : "item.lock.didLock", was ? "Unlocked {0}" : "Locked {0}", s && s->name ? s->name : ""));
+    else notify(0, message && message[0] ? message : "Failed to update lock");
+    if (M.tab == TAB_MARKET && M.mtab == MT_INVENTORY) render_grid();
+}
+
 // A painted copy's official id on krunker.io (the bundle's instanceId, sent as skin_id: deob-10.0.4.js:108919-108921,
 // :132491): its row's kid when the row is krunker.io's (kio_unit_kid). Otherwise the pairing is certain only when the copy's paint matches exactly one copy of the item in KN's inventory
 // and exactly one copy of it in the official one (kio_inventory_copy_for_paint; each side's paint is its metadata,
@@ -4245,10 +4281,20 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         render_modal();
     } else if (!strcmp(h, "paint")) { // paint(index, sid): the tile's Paint button (deob:149062-149069: the popup with skinId = row.sid)
         html_ui_stop_propagation();
-        if (a1 > 0) paint_picker_open(a0, a1);
+        // krunker.io: skinId is the row's own sid (its kid: v10.0.7's IÏîìîîì passes row.sid, deob-10.0.7.js:134236-134240)
+        const int sid = kio_store_active() ? kio_unit_kid(a0, a1) : a1;
+        if (sid > 0) paint_picker_open(a0, sid);
     } else if (!strcmp(h, "style")) {
         html_ui_stop_propagation();
-        if (a1 > 0) style_picker_open(a0, a1);
+        const int sid = kio_store_active() ? kio_unit_kid(a0, a1) : a1; // (deob-10.0.7.js:134252-134256)
+        if (sid > 0) style_picker_open(a0, sid);
+    } else if (!strcmp(h, "lock")) { // lock(index, sid): krunker.io's lock toggle (onToggleLock, deob-10.0.7.js:134989-135000)
+        html_ui_stop_propagation();
+        const int kid = kio_store_active() ? kio_unit_kid(a0, a1) : 0;
+        if (kid > 0) {
+            const int was = market_locks_has(kio_inventory_locks(), kid, a0, 0);
+            kio_inventory_lock_skin(kid, !was, kio_lock_done, (void *) (intptr_t) (a0 * 2 + was));
+        }
     } else if (!strcmp(h, "qs")) { // qs(index, sid): the row's unit; a painted copy is one item (deob:147652: "1 Item" only)
         html_ui_stop_propagation();
         M.sel_skin = a0;
@@ -4598,7 +4644,9 @@ static void on_social(void *user, const cJSON *frame) {
         } else if (cJSON_IsObject(a1)) {
             M.modal = MODAL_NONE;
             if (cJSON_GetObjectItemCaseSensitive(a1, "funds")) apply_funds(jnum(a1, "funds"));
-            account_remove_skin(M.sel_skin);
+            // krunker.io: v10.0.7's listItem leaves the account's skins as they are (deob-10.0.7.js:109104-109115), the
+            // reload shows the listing; account_remove_skin there is the paint rule, not a listing's
+            if (!kio_store_active()) account_remove_skin(M.sel_skin);
             market_reload_after();
             notify(1, "Item listed successfully");
         } else {
@@ -4633,7 +4681,9 @@ static void on_social(void *user, const cJSON *frame) {
                 junk_format(junk_hundredths(j->valuedouble), junk, sizeof(junk));
                 account_ui_set_junk(junk);
             }
-            for (int k = 0; k < sold; k++) account_remove_skin(M.sel_skin);
+            // krunker.io: not the paint rule of account_remove_skin (quickSellItem's own skins update, deob-10.0.7.js
+            // :132715-132745, is not ported: the inventory reload shows the sale)
+            for (int k = 0; k < sold && !kio_store_active(); k++) account_remove_skin(M.sel_skin);
             char msg[160];
             // deob-10.0.3.js:149025-149031: "Destroyed X" / "Sold X for Junk" / "Sold X for KR"
             const char *fmt_msg = jnum(a1, "jnk") > 0 ? "Sold %s for Junk" : jnum(a1, "kr") > 0 ? "Sold %s for KR" : "Destroyed %s";

@@ -146,6 +146,14 @@ GAPI_READS.update({
 MARKET_TRADER, MARKET_FRIEND, MARKET_FRIEND_ID = "KioTrader", "KioFriend", 31
 INV_STACK, INV_STACK_KID, INV_COPY, INV_COPY_KID, SALE_ITEM, SALE_MARKET_ID = 4, 901, 2, 5551, 10, 777
 THEIR_COPY_KID = 6661
+# the inventory's paint, style, lock and bulk rows (deob-10.0.7.js:27064-27107 items, :27030-27060 market): a copy of
+# K-35 B (7791, paintable, instance 5552) and of KrunkCup Jerseys (7794, 48 styles, instance 5553, locked), a listed copy
+# of Autumn Hunt (item 1, instance 5554, on the market as 888) and two copies of Acid Breath (item 10, 5555 and 5556).
+# The account's own skins (its "a" data) hold two Red Paints (7776) and the two instances the pickers act on.
+PAINT_ITEM, PAINT_COPY_KID, PAINT, STYLE_ITEM, STYLE_COPY_KID, STYLE_PICK = 7791, 5552, 7776, 7794, 5553, 3
+LISTED_ITEM, LISTED_KID, LISTED_MARKET_ID, BQS_ITEM, BQS_KIDS = 1, 5554, 888, 10, (5555, 5556)
+KIO_SKINS = [{"ind": PAINT, "cnt": 2}, {"ind": PAINT_ITEM, "cnt": 1, "id": PAINT_COPY_KID, "m": "{}"},
+             {"ind": STYLE_ITEM, "cnt": 1, "id": STYLE_COPY_KID, "m": "{}"}]
 
 
 def _trade(trid, mine, ind_sell, ind_buy):
@@ -157,7 +165,12 @@ def _trade(trid, mine, ind_sell, ind_buy):
 GAPI_READS.update({
     "/api/market/inventory": [{"i": INV_STACK, "st": 1, "sid": INV_STACK_KID, "cnt": 3},
                               {"i": INV_COPY, "st": 0, "sid": INV_COPY_KID, "m": {"paint": "#ff0000"}},
-                              {"i": 3, "st": 1, "sid": 903, "cnt": 0}],
+                              {"i": 3, "st": 1, "sid": 903, "cnt": 0},
+                              {"i": PAINT_ITEM, "st": 0, "sid": PAINT_COPY_KID}, {"i": STYLE_ITEM, "st": 0, "sid": STYLE_COPY_KID},
+                              {"i": LISTED_ITEM, "st": 0, "sid": LISTED_KID, "marketid": LISTED_MARKET_ID},
+                              {"i": BQS_ITEM, "st": 0, "sid": BQS_KIDS[0]}, {"i": BQS_ITEM, "st": 0, "sid": BQS_KIDS[1]}],
+    "/api/items/locks": {"locks": [{"skin_id": STYLE_COPY_KID, "item_id": STYLE_ITEM, "stack": False}]},
+    "/api/market/items/1/buy-ladder": {"prices": [1234, 1300]},
     "/api/market/sales": [{"marketid": SALE_MARKET_ID, "skinindex": SALE_ITEM, "funds": 800, "listed_time": "2026-11-20T10:00:00.000Z"}],
     "/api/trades/history": {"open": [_trade(41, False, 1, 4), _trade(42, True, 4, 1), _trade(43, False, 0, 4), _trade(44, False, 5, 4)],
                             "completed": [], "completed_has_more": False},
@@ -179,6 +192,13 @@ GAPI_WRITES = {
     "/api/trades/43/cancel": {"data": {"success": True}, "error": None},
     "/api/trades/44/accept": {"data": None, "error": {"code": "TRADE_ITEM_NOT_OWNED", "message": "items not owned"}},
     "/api/trades/decline-all": {"data": {"success": True}, "error": None},
+    # items.setPaint / setStyle (:27093-27106), setLock (:27088-27092); market.listBulk, bulkQuickSell, buyMultiple (:27030-27050)
+    "/api/items/%d/paint" % PAINT_COPY_KID: {"data": {"success": True}, "error": None},
+    "/api/items/%d/style" % STYLE_COPY_KID: {"data": {"success": True}, "error": None},
+    "/api/items/locks": {"data": {"success": True}, "error": None},
+    "/api/market/list/bulk": {"data": {"listed": 3, "funds": 3500, "results": [{"item_id": INV_STACK, "skin_id": INV_STACK_KID}]}, "error": None},
+    "/api/market/quick-sell/bulk": {"data": {"sold": [BQS_KIDS[0]], "skipped": [], "funds": 3900, "junk": 12.5}, "error": None},
+    "/api/market/buy-multiple": {"data": {"funds": 966, "bought": 2, "spent": 2534}, "error": None},
 }
 
 LOBBIES = [  # [id, region, players, max, data, timeLeft]: one mode (0), so one KRUNKER.IO group

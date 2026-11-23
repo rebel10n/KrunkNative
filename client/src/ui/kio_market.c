@@ -159,6 +159,9 @@ cJSON *kio_market_inventory_rows(const cJSON *data, const int copy_base) {
         const cJSON *m = cJSON_GetObjectItemCaseSensitive(r, "m");
         if (cJSON_IsObject(m) || (cJSON_IsString(m) && m->valuestring[0])) cJSON_AddItemToObject(o, "m", cJSON_Duplicate(m, 1));
         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "nt")) || num(r, "nt", 0) > 0) cJSON_AddNumberToObject(o, "nt", 1);
+        // a listed unit: its listing's marketid (the row is not bulk-selectable: deob-10.0.7.js:135063-135064)
+        const double market_id = num(r, "marketid", 0);
+        if (market_id > 0) cJSON_AddNumberToObject(o, "marketid", market_id);
         cJSON_AddItemToArray(rows, o);
     }
     return rows;

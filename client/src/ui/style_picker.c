@@ -2,7 +2,10 @@
 // (POST /items/<skinId>/style {item_id, style}, deob-10.0.7.js:27101-27106, :108817-108850); the native client sends
 // the same request over the brain's social socket, ["ist", skinId, item_id, style, uid] -> ["istr", {copy_id, item_id,
 // style} | null, uid] or "po" (services/brain/economy.c sh_item_style; the brain's HTTP route runs the same op).
+// A krunker.io account sends v10.0.7's request itself to krunker.io with its Bearer (kio_store_write), skinId the card's
+// instance; the answer is applied as v10 applies it (complete).
 #include <style_picker.h>
+#include <kio_store.h> // kio_store_write: a krunker.io account's setStyle
 #include <skin_style.h>
 #include <backend_ui.h>
 #include <backend.h>
@@ -13,6 +16,7 @@
 #include <net_ext.h>
 #include "../viewer/viewer_store.h"
 #include <cJSON.h>
+#include <stdint.h> // intptr_t: the style of a krunker.io request
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,13 +43,26 @@ static const cJSON *owned_list(void) {
     return acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
 }
 
+// 1 when sid names an instance of the owned list: a copy id (sid >= COPY_ID_BASE) on the brain's account, an entry's id
+// on krunker.io's (its instance ids are not in the brain's copy id space)
+static int is_instance(const cJSON *owned, const int sid) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) return sid >= COPY_ID_BASE;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, owned) {
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
+        if (cJSON_IsNumber(id) && id->valueint == sid) return 1;
+    }
+    return 0;
+}
+
 static int owned_style(int index, int sid) {
     const cJSON *owned = owned_list(), *row;
+    const int instance = is_instance(owned, sid);
     cJSON_ArrayForEach(row, owned) {
         const cJSON *ind = cJSON_GetObjectItemCaseSensitive(row, "ind");
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
         if (!cJSON_IsNumber(ind) || ind->valueint != index) continue;
-        if (sid >= COPY_ID_BASE ? !cJSON_IsNumber(id) || id->valueint != sid : cJSON_IsNumber(id)) continue;
+        if (instance ? !cJSON_IsNumber(id) || id->valueint != sid : cJSON_IsNumber(id)) continue;
         const cJSON *m = cJSON_GetObjectItemCaseSensitive(row, "m");
         cJSON *parsed = NULL;
         if (cJSON_IsString(m) && m->valuestring) m = parsed = cJSON_Parse(m->valuestring);
@@ -72,7 +89,7 @@ int style_picker_account_style(int index) {
 int style_picker_can_open(int index) {
     const ViewerSkin *item = viewer_skin(index);
     // styles.length > 0 (deob-10.0.7.js:135291, :147912)
-    return item && item->styles > 0 && account_backend() != ACCOUNT_BACKEND_KRUNKER && active_account();
+    return item && item->styles > 0 && active_account(); // (krunker.io too: apply sends its setStyle to krunker.io)
 }
 
 // styles[i] || "Style " + i (deob-10.0.7.js:108866-108870)
@@ -174,7 +191,7 @@ static void complete(const cJSON *data, const char *error) {
     account_style_applied(S.index, S.sid, style);
     Client *client = menu_ui() ? menu_ui()->client : NULL;
     if (client) client_class_preview_invalidate(client);
-    if (client && client->net_connected && !client->offline) {
+    if (client && client->net_connected && !client->offline && account_backend() != ACCOUNT_BACKEND_KRUNKER) { // (a KN game server's)
         uint8_t packet[NET_EXT_HEADER_SIZE];
         const uint16_t size = net_ext_pack(packet, sizeof packet, NET_EXT_KN_STYLE_REFRESH, NULL, 0);
         if (size) client_net_send(client, NET_PACKET_EXT, packet, size);
@@ -213,9 +230,36 @@ static void expired(void *user) {
     if (S.busy) complete(NULL, NULL);
 }
 
+// krunker.io's answer to items.setStyle (deob-10.0.7.js:108823-108845): an error's message, else "Failed to apply
+// style"; a success is the picked style (:108840-108844), applied as the brain's answer is.
+static void kio_style_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
+    (void) status;
+    (void) data;
+    const int style = (int) (intptr_t) user;
+    if (message || code) {
+        complete(NULL, message && message[0] ? message : NULL);
+        return;
+    }
+    cJSON *done = cJSON_CreateObject();
+    cJSON_AddNumberToObject(done, "style", style);
+    complete(done, NULL);
+    cJSON_Delete(done);
+}
+
 static void apply(void) {
     const ViewerSkin *item = viewer_skin(S.index);
     if (!S.open || S.busy || !item || S.selected < 0 || S.selected >= item->styles) return;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // items.setStyle(skinId, {item_id: item.index, style: index}) (deob-10.0.7.js:108823-108826)
+        char path[64], body[64];
+        snprintf(path, sizeof path, "items/%d/style", S.sid);
+        snprintf(body, sizeof body, "{\"item_id\":%d,\"style\":%d}", S.index, S.selected);
+        S.busy = 1;
+        S.error[0] = 0;
+        redraw();
+        kio_store_write("POST", path, body, kio_style_answer, (void *) (intptr_t) S.selected); // (a refusal answers at once)
+        return;
+    }
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("ist"));
     cJSON_AddItemToArray(frame, cJSON_CreateNumber(S.sid));

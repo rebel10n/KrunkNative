@@ -24,13 +24,23 @@ The account's other screens that read krunker.io the same way (each was a brain 
                      unlist) and trades.acceptTrade / cancelTrade / declineAll / createTrade (POST /trades/<id>/accept,
                      /trades/<id>/cancel, /trades/decline-all, /trades/create), with My Sales (GET /market/sales), Trading
                      (GET /trades/history) and Create Trade's reads (GET /trades/player-search, /trades/inventory/<id>)
+  paint and style    items.setPaint / setStyle: POST /items/<instance>/paint {item_id, paint_item_id}, /style {item_id,
+                     style} (deob-10.0.7.js:27093-27106, :108616-108665, :108817-108850); the paint taken off the account
+  locks              items.getLocks / setLock: GET /items/locks on the inventory's mount, POST /items/locks {skin_id,
+                     locked} from the inventory's lock toggle and {item_id | skin_id, locked} from the Wallet (:109026-109063)
+  bulk and multiple  market.listBulk POST /market/list/bulk {items: [{item_id, skin_id, price, quantity}]} (:132187),
+                     bulkQuickSell POST /market/quick-sell/bulk {action, items: [{skin_id, item_id}]} (:147136),
+                     getBuyLadder GET /market/items/<i>/buy-ladder and buyMultiple POST /market/buy-multiple {item_id,
+                     quantity, max_total} (:132963, :133029); a listed row (marketid) is not bulk-selectable (:135063)
 
 The krunker.io stubs of krunker_account_e2e.py (GAPI_READS there, in v10's shapes) and one headless client_bin
 (--offline, no brain). The client starts with a stored krunker.io session (refreshed by the stub), opens the Market
 and checks the Browse grid, the Stats tab, the History tab, Listing Details' Listings / Owners / Stats, the item page's
 Sales chart and a Black Market buy, then the lottery (and an entry) and the Studios window, then each of the popup's
 writes: the listing's buy, My Inventory and a List, two Quick Sells, an Unlist, the trades' accept / decline / cancel (and a
-refused accept), Decline All and a Create Trade, each checked for its body, the Bearer and its note.
+refused accept), Decline All and a Create Trade, each checked for its body, the Bearer and its note; then a paint and a
+style applied from My Inventory, a lock toggle, the select mode (the listed copy left out), a bulk List and a Buy
+Multiple, and the Wallet's two locks and a bulk Quick Sell.
 Exit 0 when every check passed, 77 when it cannot run.
 """
 import os
@@ -243,7 +253,84 @@ def script():
           "29120 waitfor .trading-notification",
           "29200 grep @tsent sent .trading-notification",
           "29210 nodes @tsent_open .trade-sides",
-          "29500 quit"]
+          # My Inventory again: the lock toggles (the locked style copy's is on), the paint icon of the K-35 B copy
+          "29300 call v10mk.side 0",
+          "29310 call v10mk.mtab 1",
+          "29320 waitfor [id=v10mkLock1000001]",
+          "29400 nodes @locks .lock-toggle",
+          "29410 nodes @locks_on .lock-toggle.is-locked",
+          "29420 nodes @inv_all .item-wrapper",
+          "29430 nodes @paintbtn [id=v10mkPaint1000001]",
+          # paint the K-35 B copy (local id 1000001, instance 5552) with the first owned paint, Red Paint (x2)
+          "29500 call v10mk.paint %d 1000001" % kae.PAINT_ITEM,
+          "29510 waitfor .paint-container",
+          "29600 grep @paint_x2 x2 .swatch-count",
+          "29610 call paintApply",
+          "29620 waitfor !.paint-container",
+          "29700 grep @wpaint Painted [id=knNotify]",
+          # the paint was spent: the picker lists one Red Paint now
+          "29800 call v10mk.paint %d 1000001" % kae.PAINT_ITEM,
+          "29810 waitfor .paint-container",
+          "29900 grep @paint_x1 x1 .swatch-count",
+          "29910 call knViewPop 0",
+          "29920 waitfor !.paint-container",
+          # style the KrunkCup Jerseys copy (1000002, instance 5553): style 3
+          "30000 call v10mk.style %d 1000002" % kae.STYLE_ITEM,
+          "30010 waitfor .style-container",
+          "30100 call stylePick %d" % kae.STYLE_PICK,
+          "30110 call styleApply",
+          "30120 waitfor !.style-container",
+          "30200 grep @wstyle Styled [id=knNotify]",
+          # lock the K-35 B copy from its toggle
+          "30300 call v10mk.lock %d 1000001" % kae.PAINT_ITEM,
+          "30310 waitfor .notification-item",
+          "30400 grep @wlock Locked .notification-list",
+          "30410 waitfor !.notification-item",
+          # select mode: the listed copy (1000003) is not picked, Select all leaves it and the locked copy out
+          "30500 call v10mk.bsel",
+          "30510 waitfor .bulk-check-btn",
+          "30600 call v10mk.bpick %d 1000003" % kae.LISTED_ITEM,
+          "30610 nodes @bpick_listed .item-wrapper.bulk-selected",
+          "30620 nodes @bdim .item-wrapper.bulk-dim",
+          "30630 call v10mk.ball",
+          "30700 grep @ball 5 .bulk-count",
+          "30710 call v10mk.bclr",
+          # List selected: the stack (3 units) at 5,000 KR each
+          "30720 call v10mk.bpick %d %d" % (kae.INV_STACK, kae.INV_STACK),
+          "30730 call v10mk.blist",
+          "30740 waitfor [id=knV10BulkConfirm]",
+          "30800 call knV10BulkPrice 0 5000",
+          "30810 call knV10BulkConfirm",
+          "30820 waitfor .notification-item",
+          "30900 grep @wblist Listed .notification-list",
+          "30910 waitfor !.notification-item",
+          "30920 call v10mk.bsel",
+          # Buy multiple from Listing Details of item 1: its ladder (1,234 and 1,300 KR), two of them
+          "31000 call v10mk.item 1",
+          "31010 waitfor .buy-multiple-container",
+          "31100 call v10mk.bbuy",
+          "31110 waitfor .bm-chip",
+          "31200 call knV10BulkBuyQty 2",
+          "31210 call knV10BulkConfirm",
+          "31220 waitfor .notification-item",
+          "31300 grep @wbuym Bought .notification-list",
+          "31310 waitfor !.notification-item",
+          "31400 call closWind",
+          # the Wallet: lock the stack (group 0) and an Acid Breath copy (group 6), then a bulk Quick Sell for KR of the
+          # Acid Breath copy it picks (group 6, copy 0: instance 5555)
+          "31500 call knV10Wallet",
+          "31510 waitfor .wallet-lock",
+          "31600 call knV10WalletLock 0 -1",
+          "31700 call knV10WalletLock 6 0",
+          "31800 call knV10WalletSelect",
+          "31810 waitfor .wallet-pick",
+          "31900 call knV10WalletPick 6 0",
+          "32000 call knV10WalletBulkSell 0",
+          "32010 waitfor [id=knV10BulkConfirm]",
+          "32100 call knV10BulkConfirm",
+          "32110 waitfor .notification-item",
+          "32200 grep @wbqs Sold [id=knV10WalletNotes]",
+          "32500 quit"]
     return "\n".join(s) + "\n"
 
 
@@ -369,8 +456,9 @@ def checks(text, stub):
           (grep(text, "wbuy"), nodes(text, "wbuy_err")))
     inv = stub.find("GET", "/api/market/inventory")
     check("My Inventory asks krunker.io's /market/inventory with the Bearer (deob-10.0.7.js:26949)", bearer(inv), [r[1] for r in inv])
-    check("... and shows its rows: the stack (x3, List) and the copy, not the emptied stack (cnt 0)",
-          nodes(text, "inv") == 2 and grep(text, "inv_x3") > 0 and nodes(text, "inv_none") == 0 and nodes(text, "inv_list") == 1,
+    check("... and shows its rows: the stack (x3, List), the copies (2, the paint, style and listed ones, two Acid Breath), "
+          "not the emptied stack (cnt 0)",
+          nodes(text, "inv") == 7 and grep(text, "inv_x3") > 0 and nodes(text, "inv_none") == 0 and nodes(text, "inv_list") == 1,
           (nodes(text, "inv"), grep(text, "inv_x3"), nodes(text, "inv_none"), nodes(text, "inv_list")))
     check("List POSTs /market/list {item_id, price, skin_id: the stack's sid} (deob-10.0.7.js:109104-109108)",
           one("/api/market/list") == {"item_id": kae.INV_STACK, "price": 500, "skin_id": kae.INV_STACK_KID}, one("/api/market/list"))
@@ -416,12 +504,58 @@ def checks(text, stub):
           (grep(text, "tsent"), nodes(text, "tsent_open")))
     check("no write was refused as not sent to krunker.io", "is not sent for the krunker.io account" not in text,
           re.findall(r"\[gapi\].*not sent.*", text)[:3])
+    # the paint, style, lock, bulk and Buy Multiple writes (v10.0.7's items / market APIs)
+    locks = stub.find("GET", "/api/items/locks")
+    check("My Inventory asks krunker.io's /items/locks with the Bearer on its mount (deob-10.0.7.js:135001)", bearer(locks),
+          [r[1] for r in locks])
+    check("... and each owned row with a sid has a lock toggle, the locked copy's on (is-locked)",
+          nodes(text, "locks") == 7 and nodes(text, "locks_on") == 1 and nodes(text, "inv_all") == 7,
+          (nodes(text, "locks"), nodes(text, "locks_on"), nodes(text, "inv_all")))
+    check("the paintable copy has the paint icon on krunker.io (was: no picker for the account)", nodes(text, "paintbtn") == 1,
+          nodes(text, "paintbtn"))
+    check("Paint POSTs /items/<instance>/paint {item_id, paint_item_id} with the Bearer (deob-10.0.7.js:108623-108626)",
+          one("/api/items/%d/paint" % kae.PAINT_COPY_KID) == {"item_id": kae.PAINT_ITEM, "paint_item_id": kae.PAINT},
+          one("/api/items/%d/paint" % kae.PAINT_COPY_KID))
+    check("... toasts 'Painted K-35 B with Red Paint' and takes the paint off the account (x2, then x1: :108632-108648)",
+          grep(text, "wpaint") > 0 and grep(text, "paint_x2") > 0 and grep(text, "paint_x1") > 0,
+          (grep(text, "wpaint"), grep(text, "paint_x2"), grep(text, "paint_x1")))
+    check("Style POSTs /items/<instance>/style {item_id, style} with the Bearer (deob-10.0.7.js:108823-108826) and toasts 'Styled'",
+          one("/api/items/%d/style" % kae.STYLE_COPY_KID) == {"item_id": kae.STYLE_ITEM, "style": kae.STYLE_PICK} and grep(text, "wstyle") > 0,
+          (one("/api/items/%d/style" % kae.STYLE_COPY_KID), grep(text, "wstyle")))
+    lk = [r[4] for r in stub.find("POST", "/api/items/locks")]
+    check("the lock toggle POSTs /items/locks {skin_id: the row's sid, locked} (deob-10.0.7.js:134993-134995), the Wallet's "
+          "{item_id} for a stack and {skin_id} for a copy (:147536-147539)",
+          bearer(stub.find("POST", "/api/items/locks")) and lk == [{"skin_id": kae.PAINT_COPY_KID, "locked": True},
+                                                                  {"item_id": kae.INV_STACK, "locked": True},
+                                                                  {"skin_id": kae.BQS_KIDS[0], "locked": True}], lk)
+    check("... and says 'Locked K-35 B', reading the locks again", grep(text, "wlock") > 0 and len(locks) >= 3, (grep(text, "wlock"), len(locks)))
+    check("select mode: the listed copy (marketid) is dimmed and not picked, Select all picks the 5 others that can be "
+          "(the locked copy left out too: deob-10.0.7.js:135063-135064)",
+          nodes(text, "bpick_listed") == 0 and nodes(text, "bdim") == 2 and grep(text, "ball") > 0,
+          (nodes(text, "bpick_listed"), nodes(text, "bdim"), grep(text, "ball")))
+    check("List selected POSTs /market/list/bulk {items: [{item_id, skin_id, price, quantity}]} (deob-10.0.7.js:132187-132195) "
+          "and says 'Listed 3 items'",
+          one("/api/market/list/bulk") == {"items": [{"item_id": kae.INV_STACK, "skin_id": kae.INV_STACK_KID, "price": 5000, "quantity": 3}]}
+          and grep(text, "wblist") > 0, (one("/api/market/list/bulk"), grep(text, "wblist")))
+    lad = stub.find("GET", "/api/market/items/1/buy-ladder")
+    check("Buy multiple asks /market/items/1/buy-ladder (deob-10.0.7.js:133029) and POSTs /market/buy-multiple {item_id, "
+          "quantity, max_total} (:132963-132967), then says 'Bought 2 for 2,534 KR'",
+          bearer(lad) and one("/api/market/buy-multiple") == {"item_id": 1, "quantity": 2, "max_total": 2534} and grep(text, "wbuym") > 0,
+          (len(lad), one("/api/market/buy-multiple"), grep(text, "wbuym")))
+    bqs = one("/api/market/quick-sell/bulk")
+    check("the Wallet's bulk Quick Sell POSTs /market/quick-sell/bulk {action 0, items: [{skin_id, item_id}]} for one Acid "
+          "Breath copy (deob-10.0.7.js:147136-147144) and says 'Sold 1 for ... KR'",
+          bqs == {"action": 0, "items": [{"skin_id": kae.BQS_KIDS[0], "item_id": kae.BQS_ITEM}]}
+          and grep(text, "wbqs") > 0, (bqs, grep(text, "wbqs")))
     posts = [(r[0], r[1]) for r in stub.requests if r[0] != "GET" and not r[1].startswith("/api/auth/") and not r[1].startswith("/frvr/")]
     check("nothing but the sign-in and these writes was POSTed to krunker.io, in this order",
           posts == [("POST", p) for p in ("/api/market/black-market/purchase", "/api/lottery/3/participate", "/api/market/purchase",
                                           "/api/market/list", "/api/market/quick-sell", "/api/market/quick-sell", "/api/market/unlist",
                                           "/api/trades/41/accept", "/api/trades/43/cancel", "/api/trades/42/cancel",
-                                          "/api/trades/44/accept", "/api/trades/decline-all", "/api/trades/create")], posts)
+                                          "/api/trades/44/accept", "/api/trades/decline-all", "/api/trades/create",
+                                          "/api/items/%d/paint" % kae.PAINT_COPY_KID, "/api/items/%d/style" % kae.STYLE_COPY_KID,
+                                          "/api/items/locks", "/api/market/list/bulk", "/api/market/buy-multiple",
+                                          "/api/items/locks", "/api/items/locks", "/api/market/quick-sell/bulk")], posts)
 
 
 def main():
@@ -434,7 +568,8 @@ def main():
     http_port, ws_port = kn_proto.free_ports(2)
     stub = kae.Stub(http_port, ws_port)
     # 5000 KR: the lottery's KR cost can be entered (each sign-in's "a" carries it); level 12: the account can trade
-    stub.account_data = [{"player_clan": kae.TURF_CLAN, "player_funds": 5000, "player_score": 160000}] * 2
+    # its skins: two Red Paints and the instances the paint and style pickers act on (kae.KIO_SKINS)
+    stub.account_data = [{"player_clan": kae.TURF_CLAN, "player_funds": 5000, "player_score": 160000, "skins": kae.KIO_SKINS}] * 2
     try:
         stub.start()
         text = run_client(stub)

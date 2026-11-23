@@ -4,6 +4,7 @@
 #include <kio_inventory.h>
 
 #include <kio_store.h>
+#include <kio_market.h> // kio_market_error_key: v10.0.7's error texts
 #include <backend_ui.h> // active_account, account_kio_set_balances: a run's balances
 #include <i18n.h>
 #include "../viewer/viewer_store.h"
@@ -23,9 +24,11 @@ static struct {
     MarketLocks locks;
 } I;
 
+// v10.0.7's error text (iíiììiì, deob-10.0.7.js:104503-104513): a coded error is its code's text (kio_market_error_key;
+// an unknown code is errors.common.unknown), a plain one its message
 static const char *error_text(const char *code, const char *message) {
-    const char *key = market_error_key(code);
-    if (key) return I18N(key, BUSY_TEXT);
+    const char *key = kio_market_error_key(code);
+    if (key) return I18N(key, !strcmp(key, "errors.exchange.busy") ? BUSY_TEXT : message ? message : "An unknown error occurred.");
     return message ? message : I18N("generic.error", "Error");
 }
 
@@ -99,10 +102,8 @@ static void inventory_loaded(void *user, const int status, const cJSON *data, co
     I.n = 0;
     market_groups_parse(data, &I.groups, &I.n); // (ok: the answer is an array of rows; a non-array has no groups)
     drop_unknown_items(I.groups, &I.n);
-    if (!kio_store_write("GET", "items/locks", NULL, locks_loaded, r)) {
-        load_finish(r, 0, I18N("generic.error", "Error"));
-        free(r);
-    }
+    // (a request that cannot start is answered at once: locks_loaded ends the load and frees r)
+    kio_store_write("GET", "items/locks", NULL, locks_loaded, r);
 }
 
 void kio_inventory_load(KioInvDone done, void *user) {
@@ -119,11 +120,8 @@ void kio_inventory_load(KioInvDone done, void *user) {
     r->done = done;
     r->user = user;
     I.loading = 1;
-    if (!kio_store_write("GET", "market/inventory", NULL, inventory_loaded, r)) {
-        I.loading = 0;
-        free(r);
-        if (done) done(user, 0, I18N("generic.error", "Error"));
-    }
+    // (a request that cannot start is answered at once: inventory_loaded ends the load, runs done and frees r)
+    kio_store_write("GET", "market/inventory", NULL, inventory_loaded, r);
 }
 
 int kio_inventory_ready(void) { return I.loaded && kio_store_active(); }
@@ -302,9 +300,12 @@ static void bulk_next(Req *r) {
     }
     char *text = body ? cJSON_PrintUnformatted(body) : NULL;
     cJSON_Delete(body);
-    const int sent = text && kio_store_write("POST", path, text, bulk_answer, r);
+    if (!text) {
+        bulk_done(r, 0, I18N("generic.error", "Error"));
+        return;
+    }
+    kio_store_write("POST", path, text, bulk_answer, r); // (a request that cannot start is answered at once: bulk_answer ends the run)
     free(text);
-    if (!sent) bulk_done(r, 0, I18N("generic.error", "Error"));
 }
 
 static int quantity_of(const MarketGroup *groups, const int n, const int skin, const int item) {
@@ -428,12 +429,40 @@ static void lock_answer(void *user, const int status, const cJSON *data, const c
         if (current && done) done(u, 0, error_text(code, message));
         return;
     }
-    if (!kio_store_write("GET", "items/locks", NULL, locks_reread, r)) {
-        const KioInvDone done = r->done;
-        void *u = r->user;
-        req_free(r);
-        if (done) done(u, 0, I18N("generic.error", "Error"));
+    kio_store_write("GET", "items/locks", NULL, locks_reread, r); // (a request that cannot start: locks_reread answers it)
+}
+
+// GET items/locks alone (v10.0.7's getLocks on the Market inventory's mount, deob-10.0.7.js:109026-109050, :135001-135003)
+int kio_inventory_locks_load(KioInvDone done, void *user) {
+    Req *r = calloc(1, sizeof(*r));
+    if (!r) {
+        if (done) done(user, 0, I18N("generic.error", "Error"));
+        return 0;
     }
+    r->gen = I.gen;
+    r->done = done;
+    r->user = user;
+    return kio_store_write("GET", "items/locks", NULL, locks_reread, r); // (0: locks_reread answered it at once)
+}
+
+// The Market inventory's lock toggle (deob-10.0.7.js:134989-135000): setLock({skinId: row.sid}, locked) is POST
+// items/locks {skin_id, locked} (:109052-109063), then getLocks again.
+int kio_inventory_lock_skin(const int skin_id, const int locked, KioInvDone done, void *user) {
+    cJSON *body = market_lock_body(skin_id, 0, locked);
+    char *text = body ? cJSON_PrintUnformatted(body) : NULL;
+    cJSON_Delete(body);
+    Req *r = text ? calloc(1, sizeof(*r)) : NULL;
+    if (!r) {
+        free(text);
+        if (done) done(user, 0, I18N("generic.error", "Error"));
+        return 0;
+    }
+    r->gen = I.gen;
+    r->done = done;
+    r->user = user;
+    const int sent = kio_store_write("POST", "items/locks", text, lock_answer, r); // (a refusal answers at once)
+    free(text);
+    return sent;
 }
 
 int kio_inventory_set_lock(const MarketGroup *g, const int copy, const int locked, KioInvDone done, void *user) {
@@ -456,11 +485,7 @@ int kio_inventory_set_lock(const MarketGroup *g, const int copy, const int locke
     r->done = done;
     r->user = user;
     r->kind = 0;
-    const int sent = kio_store_write("POST", "items/locks", text, lock_answer, r);
+    const int sent = kio_store_write("POST", "items/locks", text, lock_answer, r); // (0: lock_answer answered it at once)
     free(text);
-    if (!sent) {
-        req_free(r);
-        if (done) done(user, 0, I18N("generic.error", "Error"));
-    }
     return sent;
 }

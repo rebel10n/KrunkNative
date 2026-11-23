@@ -797,6 +797,15 @@ void v10_wallet_tick(void) {
 }
 
 void v10_wallet_account_changed(void) {
+    // the account itself changed, not only its data: the menu calls this for each (account_active_generation), and a
+    // krunker.io answer's balances (a bulk run's funds, account_kio_set_balances) or a spent paint move the data of the
+    // same account; clearing then dropped the run's own inventory reload (its done never ran: no "Listed" / "Sold" note)
+    static unsigned seen;
+    static int seen_any;
+    const unsigned identity = account_active_identity();
+    if (seen_any && identity == seen) return;
+    seen = identity;
+    seen_any = 1;
     kio_inventory_clear();
     bo_inventory_clear();
     market_picks_free(&W_picks);

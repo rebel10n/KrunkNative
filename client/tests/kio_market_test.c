@@ -140,6 +140,16 @@ int main(void) {
     rows = kio_market_inventory_rows(NULL, 1000000);
     CHECK(cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 0, "no data: no rows");
     cJSON_Delete(rows);
+    // a listed unit keeps its listing's marketid (v10.0.7's select rule leaves it out: deob-10.0.7.js:135063-135064)
+    inv = cJSON_Parse("[{\"i\":1,\"st\":0,\"sid\":5554,\"marketid\":888},{\"i\":2,\"st\":0,\"sid\":5555,\"marketid\":\"889\"},"
+                      "{\"i\":3,\"st\":0,\"sid\":5556}]");
+    rows = kio_market_inventory_rows(inv, 1000000);
+    CHECK(cJSON_GetArraySize(rows) == 3 && n(cJSON_GetArrayItem(rows, 0), "marketid") == 888 &&
+              n(cJSON_GetArrayItem(rows, 1), "marketid") == 889 && !cJSON_GetObjectItem(cJSON_GetArrayItem(rows, 2), "marketid") &&
+              n(cJSON_GetArrayItem(rows, 0), "sid") == 1000000 && n(cJSON_GetArrayItem(rows, 0), "kid") == 5554,
+          "a listed copy keeps its marketid (a numeric string too), an unlisted one has none; still a copy with its kid");
+    cJSON_Delete(rows);
+    cJSON_Delete(inv);
 
     // the error codes' keys (deob-10.0.7.js:104431-104513)
     CHECK(!strcmp(kio_market_error_key("MARKET_LISTING_GONE"), "errors.exchange.listingGone"), "a market code's key");

@@ -642,8 +642,67 @@ static void update_header(void);
 
 static void reward_tick(int force);
 
+// krunker.io: the account's skins (g_kio.obj "skins") as v10.0.7 takes a spent paint off them, for an item paint
+// (deob-10.0.7.js:108632-108648) and a clan banner colour (:96203-96218): the first entry of the index whose cnt ?? 1 is
+// above 0 gets one less, and goes at 0. 1 when an entry was taken.
+static int kio_take_unit(const int skin_index) {
+    cJSON *skins = g_kio.obj ? cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins") : NULL;
+    cJSON *entry;
+    int i = 0;
+    cJSON_ArrayForEach(entry, skins) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(entry, "ind"), *cnt = cJSON_GetObjectItemCaseSensitive(entry, "cnt");
+        const int have = cJSON_IsNumber(cnt) ? cnt->valueint : 1;
+        if (cJSON_IsNumber(ind) && ind->valueint == skin_index && have > 0) {
+            if (have - 1 > 0) {
+                cJSON_DeleteItemFromObjectCaseSensitive(entry, "cnt");
+                cJSON_AddNumberToObject(entry, "cnt", have - 1);
+            } else {
+                cJSON_DeleteItemFromArray(skins, i);
+            }
+            g_kio.gen++;
+            return 1;
+        }
+        i++;
+    }
+    return 0;
+}
+
+// krunker.io: the account's entry of instance id (v10's skins.map(s => s.id !== instanceId ? s : ...), deob-10.0.7.js
+// :147693-147705, :147749-147766) in *entry_out, and its m as an object (a JSON-string m parsed, {} when it is not an
+// object; the caller owns it). NULL when no entry has that id.
+static cJSON *kio_instance_meta(const int id, cJSON **entry_out) {
+    cJSON *skins = g_kio.obj ? cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins") : NULL, *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *eid = cJSON_GetObjectItemCaseSensitive(e, "id");
+        if (!cJSON_IsNumber(eid) || (int) eid->valuedouble != id) continue;
+        const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m");
+        cJSON *meta = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : cJSON_IsObject(m) ? cJSON_Duplicate(m, 1) : NULL;
+        if (!cJSON_IsObject(meta)) { // try { JSON.parse(m) } catch { {} }
+            cJSON_Delete(meta);
+            meta = cJSON_CreateObject();
+        }
+        *entry_out = e;
+        return meta;
+    }
+    return NULL;
+}
+
+// The entry's m as v10 writes it back: m: JSON.stringify(meta) (deob-10.0.7.js:147701, :147762). Takes meta.
+static void kio_instance_set_meta(cJSON *entry, cJSON *meta) {
+    char *text = cJSON_PrintUnformatted(meta);
+    cJSON_Delete(meta);
+    if (!text) return;
+    cJSON_DeleteItemFromObjectCaseSensitive(entry, "m");
+    cJSON_AddStringToObject(entry, "m", text);
+    free(text);
+    g_kio.gen++;
+}
+
 void account_remove_skin(const int skin_index) {
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        if (g_kio.obj && krunker_account_signed_in()) kio_take_unit(skin_index);
+        return;
+    }
     if (!g_logged_in || !g_acc.data) return;
     cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
     cJSON *entry;
@@ -681,7 +740,26 @@ static void take_stack_unit(cJSON *skins, cJSON *entry) {
 // copy_id gets the paint m (a new copy, or a repaint). from_stack: sid was an unpainted unit's stack, so one of its units
 // became the copy. The brain pushes the account again ("ua") after this, which replaces it.
 void account_paint_applied(const int item, const int paint, const int copy_id, const int from_stack, const cJSON *m) {
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // krunker.io (items.setPaint answered, deob-10.0.7.js:108626-108655): the paint's unit taken as v10 takes it, and
+        // the instance copy_id (the card's instanceId) given the paint as the inventory's caller does (:147688-147705):
+        // a paintShader replaces paint, a paint replaces paintShader. A stack (no instance) has no entry to change.
+        (void) item;
+        (void) from_stack;
+        if (!g_kio.obj || !krunker_account_signed_in()) return;
+        cJSON *entry = NULL, *meta = kio_instance_meta(copy_id, &entry);
+        if (meta) {
+            const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
+            const char *colour = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "paint"));
+            cJSON_DeleteItemFromObjectCaseSensitive(meta, "paint");
+            cJSON_DeleteItemFromObjectCaseSensitive(meta, "paintShader");
+            if (cJSON_IsNumber(shader)) cJSON_AddNumberToObject(meta, "paintShader", shader->valuedouble);
+            else if (colour && colour[0]) cJSON_AddStringToObject(meta, "paint", colour);
+            kio_instance_set_meta(entry, meta);
+        }
+        kio_take_unit(paint);
+        return;
+    }
     if (!g_logged_in || !g_acc.data) return;
     cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
     if (!cJSON_IsArray(skins)) return;
@@ -715,7 +793,19 @@ void account_paint_applied(const int item, const int paint, const int copy_id, c
 // The style selector changes metadata without consuming an item. Refresh this copy or stack's
 // m.style as soon as the brain confirms items.setStyle (deob-10.0.7.js:108817-108850).
 void account_style_applied(const int item, const int sid, const int style) {
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !g_logged_in || !g_acc.data) return;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // krunker.io (items.setStyle answered): the instance sid's m.style, as the inventory's caller sets it
+        // (deob-10.0.7.js:147749-147766); a stack (no instance) has none to change
+        (void) item;
+        if (!g_kio.obj || !krunker_account_signed_in()) return;
+        cJSON *entry = NULL, *meta = kio_instance_meta(sid, &entry);
+        if (!meta) return;
+        cJSON_DeleteItemFromObjectCaseSensitive(meta, "style");
+        cJSON_AddNumberToObject(meta, "style", style);
+        kio_instance_set_meta(entry, meta);
+        return;
+    }
+    if (!g_logged_in || !g_acc.data) return;
     cJSON *rows = cJSON_GetArrayItem(g_acc.data, 10), *row;
     cJSON_ArrayForEach(row, rows) {
         const cJSON *ind = cJSON_GetObjectItemCaseSensitive(row, "ind");

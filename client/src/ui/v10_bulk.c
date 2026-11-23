@@ -9,6 +9,7 @@
 #include <v10_ui.h>
 #include <v10_wallet.h> // the inventory's notification list (the quick-sell results)
 #include <kio_store.h>
+#include <kio_market.h> // kio_market_error_key: v10.0.7's error texts (iíiììiì)
 #include <backend_ui.h>
 #include <economy_client.h> // econ_rarity_sell: a listing's minimum price
 #include <i18n.h>
@@ -654,14 +655,22 @@ static void buy_markup(StrBuf *sb) {
     sb_append(sb, "</button></div></div></div>");
 }
 
-// GET market/items/:id/buy-ladder (getBuyLadder, deob-10.0.4.js:132838-132846): data.prices, cheapest first
+// v10.0.7's iíiììiì (deob-10.0.7.js:104503-104513): a coded error's text by its code (an unknown code's is
+// errors.common.unknown), else the message, else the caller's fallback
+static const char *kio_error(const char *code, const char *message, const char *fallback) {
+    const char *key = kio_market_error_key(code);
+    if (key) return I18N(key, message && message[0] ? message : "An unknown error occurred.");
+    return message && message[0] ? message : fallback;
+}
+
+// GET market/items/:id/buy-ladder (getBuyLadder, deob-10.0.4.js:132838-132846; v10.0.7 :133026-133044): data.prices,
+// cheapest first; an error's text || "Failed to load listings"
 static void ladder_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
     (void) status;
-    (void) code;
     if ((int) (intptr_t) user != B.gen || B.kind != OV_BUY) return;
     B.loading = 0;
-    if (message) {
-        snprintf(B.error, sizeof(B.error), "%s", message);
+    if (message || code) {
+        snprintf(B.error, sizeof(B.error), "%s", kio_error(code, message, "Failed to load listings"));
         render();
         return;
     }
@@ -691,7 +700,7 @@ static void buy_answer(void *user, const int status, const cJSON *data, const ch
     if ((int) (intptr_t) user != B.gen || B.kind != OV_BUY) return;
     if (message || code) {
         B.busy = 0;
-        snprintf(B.error, sizeof(B.error), "%s", message && message[0] ? message : "Failed to buy items");
+        snprintf(B.error, sizeof(B.error), "%s", kio_error(code, message, "Failed to buy items")); // (deob-10.0.7.js:132968-132986)
         if (code && (!strcmp(code, "MARKET_PRICE_CHANGED") || !strcmp(code, "MARKET_NOT_ENOUGH_LISTINGS"))) ladder_load();
         render();
         return;

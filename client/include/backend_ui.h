@@ -181,10 +181,13 @@ double account_skin_wear(int skin);
 // does (an entry {ind, cnt: 1, id, m, st: 0}, deob-10.0.4.js:115078-115087, :221926), so it can be equipped at once.
 // krunker.io: the balances a market REST answer carries (data.funds / data.junk), set as the "uf" frame sets them.
 void account_kio_set_balances(int has_funds, double funds, int has_junk, double junk);
-void account_remove_skin(int skin_index);   // acc.removeSkin: -1 of skin (a redeemed spin ticket)
-// A paint applied (paint_picker.c): one paint unit taken, copy_id gets paint m (from_stack: a stack's unit became it)
+// acc.removeSkin: -1 of skin (a redeemed spin ticket, a spent paint). On krunker.io the account's own skins, as v10.0.7
+// takes a spent paint (an item paint, a clan banner colour): the first entry of the index with cnt ?? 1 > 0, gone at 0.
+void account_remove_skin(int skin_index);
+// A paint applied (paint_picker.c): one paint unit taken, copy_id gets paint m (from_stack: a stack's unit became it).
+// krunker.io: copy_id is the instance id; m is {paint} or {paintShader}.
 void account_paint_applied(int item, int paint, int copy_id, int from_stack, const cJSON *m);
-void account_style_applied(int item, int sid, int style); // v10.0.7: update the owned row's m.style immediately
+void account_style_applied(int item, int sid, int style); // v10.0.7: update the owned row's m.style immediately (krunker.io: sid is the instance id)
 void account_set_last_reward(double ms);    // acc.lastReward (the Free KR wheel's clock)
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
