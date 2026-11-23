@@ -19,11 +19,18 @@ The account's other screens that read krunker.io the same way (each was a brain 
                      refused with "This krunker.io action is not in KrunkNative yet"
   lottery            lottery.getLottery: GET /lottery/3 (v10:26566) and participateInLottery: POST /lottery/3/participate
   Studios            studios.getMyStudios: GET /studios/mine (v10:27371), was never sent (not a krunker.io read)
+  My Inventory       market.getInventory: GET /market/inventory (deob-10.0.7.js:26949), was the brain's empty page
+  the popup's writes market.purchaseItem / listItem / quickSellItem / unlistItem (POST /market/purchase, list, quick-sell,
+                     unlist) and trades.acceptTrade / cancelTrade / declineAll / createTrade (POST /trades/<id>/accept,
+                     /trades/<id>/cancel, /trades/decline-all, /trades/create), with My Sales (GET /market/sales), Trading
+                     (GET /trades/history) and Create Trade's reads (GET /trades/player-search, /trades/inventory/<id>)
 
 The krunker.io stubs of krunker_account_e2e.py (GAPI_READS there, in v10's shapes) and one headless client_bin
 (--offline, no brain). The client starts with a stored krunker.io session (refreshed by the stub), opens the Market
 and checks the Browse grid, the Stats tab, the History tab, Listing Details' Listings / Owners / Stats, the item page's
-Sales chart and a Black Market buy, then the lottery (and an entry) and the Studios window.
+Sales chart and a Black Market buy, then the lottery (and an entry) and the Studios window, then each of the popup's
+writes: the listing's buy, My Inventory and a List, two Quick Sells, an Unlist, the trades' accept / decline / cancel (and a
+refused accept), Decline All and a Create Trade, each checked for its body, the Bearer and its note.
 Exit 0 when every check passed, 77 when it cannot run.
 """
 import os
@@ -149,7 +156,94 @@ def script():
           "25010 waitfor [id=knStRow31]",
           "25500 nodes @studio [id=knStRow31]",
           "25510 grep @studioname %s [id=knStRow31]" % kae.KIO_STUDIO,
-          "26000 quit"]
+          "25600 call closWind",
+          # the popup's writes. Each waits for its answer (the note), then for the note to go, so a check reads its own.
+          # Buy the Browse listing (555, item 1, 1234 KR)
+          "26000 call openExchange 0",
+          "26010 waitfor .item-wrapper",
+          "26100 call v10mk.buy 555 1 1234",
+          "26200 call v10mk.mok",
+          "26210 waitfor .notification-item",
+          "26300 grep @wbuy purchased .notification-list",
+          "26310 nodes @wbuy_err .notification-item.error",
+          "26320 waitfor !.notification-item",
+          # My Inventory (v10mk.mtab 1): krunker.io's rows, the emptied stack left out
+          "26400 call v10mk.mtab 1",
+          "26410 waitfor .quick-sell-icon",
+          "26500 nodes @inv .item-wrapper",
+          "26510 grep @inv_x3 x3 [id=v10mkGrid]",
+          "26520 nodes @inv_none .empty-message",
+          "26530 nodes @inv_list [id=v10mkList%d]" % kae.INV_STACK,
+          # list the stack (its unit: the item index) for 500 KR
+          "26600 call v10mk.list %d %d" % (kae.INV_STACK, kae.INV_STACK),
+          '26610 call v10mk.price "500"',
+          "26700 call v10mk.mok",
+          "26710 waitfor .notification-item",
+          "26800 grep @wlist listed .notification-list",
+          "26810 nodes @wlist_err .notification-item.error",
+          "26820 waitfor !.notification-item",
+          # quick-sell the copy (its local id 1000000, the first copy of the answer) for KR: "1 Item"
+          "26900 call v10mk.qs %d 1000000" % kae.INV_COPY,
+          "26910 call v10mk.qsgo 0",
+          "26920 waitfor .notification-item",
+          "27000 grep @wqs Reticle .notification-list",
+          "27010 nodes @wqs_err .notification-item.error",
+          "27020 waitfor !.notification-item",
+          # quick-sell all of the stack for Junk: "All" (amount 2), no skin_id
+          "27100 call v10mk.qs %d %d" % (kae.INV_STACK, kae.INV_STACK),
+          '27110 call v10mk.qsmode "2"',
+          "27120 call v10mk.qsgo 1",
+          "27130 waitfor .notification-item",
+          "27200 grep @wqsj Junk .notification-list",
+          "27210 waitfor !.notification-item",
+          # My Sales (v10mk.mtab 2): unlist krunker.io's listing
+          "27300 call v10mk.mtab 2",
+          "27310 waitfor [id=v10mkUnlist%d]" % kae.SALE_MARKET_ID,
+          "27400 call v10mk.unlist %d %d" % (kae.SALE_MARKET_ID, kae.SALE_ITEM),
+          "27500 call v10mk.mok",
+          "27510 waitfor .notification-item",
+          "27600 grep @wunlist unlisted .notification-list",
+          "27610 nodes @wunlist_err .notification-item.error",
+          # Trading (v10mk.side 1): krunker.io's open trades
+          "27700 call v10mk.side 1",
+          "27710 waitfor [id=v10mkAccept41]",
+          "27800 nodes @tin [id^=v10mkAccept]",
+          "27810 nodes @tout [id^=v10mkCancel]",
+          "27900 call v10mk.taccept 41",
+          "27910 waitfor .trading-notification",
+          "28000 grep @tacc accepted .trading-notification",
+          "28010 waitfor !.trading-notification",
+          "28100 call v10mk.tdecline 43",
+          "28110 waitfor .trading-notification",
+          "28200 grep @tdec declined .trading-notification",
+          "28210 waitfor !.trading-notification",
+          "28300 call v10mk.tcancel 42",
+          "28310 waitfor .trading-notification",
+          "28400 grep @tcan cancelled .trading-notification",
+          "28410 waitfor !.trading-notification",
+          # trade 44's accept is refused with a code: v10's text for it (errors.exchange.tradeItemNotOwned)
+          "28500 call v10mk.taccept 44",
+          "28510 waitfor .trading-notification",
+          "28600 grep @taccerr inventory .trading-notification",
+          "28610 nodes @taccerr_cls .trading-notification.error",
+          "28620 waitfor !.trading-notification",
+          "28700 call v10mk.tdeclineall",
+          "28710 call v10mk.mok",
+          "28720 waitfor .trading-notification",
+          "28800 grep @tdall All .trading-notification",
+          "28810 waitfor !.trading-notification",
+          # Create Trade: the player search, the two inventories, the stack's unit and their copy, Submit, the confirm
+          "28900 call v10mk.tcreate",
+          '28910 call v10mk.tname "%s"' % kae.MARKET_FRIEND,
+          "28920 waitfor .trade-sides",
+          "29000 call v10mk.cadd 0 %d 0" % kae.INV_STACK,
+          "29010 call v10mk.cadd 1 %d %d" % (kae.INV_COPY, kae.THEIR_COPY_KID),
+          "29100 call v10mk.csubmit",
+          "29110 call v10mk.mok",
+          "29120 waitfor .trading-notification",
+          "29200 grep @tsent sent .trading-notification",
+          "29210 nodes @tsent_open .trade-sides",
+          "29500 quit"]
     return "\n".join(s) + "\n"
 
 
@@ -212,7 +306,9 @@ def checks(text, stub):
           grep(text, "mkhist") > 0 and grep(text, "mkhist_amt") > 0 and nodes(text, "mkhist_none") == 0,
           (grep(text, "mkhist"), grep(text, "mkhist_amt"), nodes(text, "mkhist_none")))
     # Listing Details: /items/1/view (listings, owners) and the Stats tab's sales-statistics
-    view = stub.find("GET", "/api/items/1/view")
+    # (counted up to the lottery: the writes' Market, opened again later, reloads the item's listings, as a buy does)
+    lottery = next((k for k, r in enumerate(stub.requests) if r[0] == "GET" and r[1] == "/api/lottery/3"), len(stub.requests))
+    view = [r for r in stub.requests[:lottery] if r[0] == "GET" and r[1] == "/api/items/1/view"]
     check("Listing Details asks krunker.io's /items/1/view (once for its listings and owners)", bearer(view) and len(view) == 1,
           [r[1] for r in view])
     check("... its Listings tab lists the view's listing (one, the seller)", nodes(text, "mklisting") == 1 and grep(text, "mklisting_seller") > 0,
@@ -262,9 +358,70 @@ def checks(text, stub):
     check("the Studios window asks krunker.io's /studios/mine with the Bearer", bearer(mine), [r[1] for r in mine])
     check("... and lists krunker.io's studio", nodes(text, "studio") == 1 and grep(text, "studioname") > 0,
           (nodes(text, "studio"), grep(text, "studioname")))
+    # the popup's writes: v10.0.7's method, path and body, the account's Bearer, and the answer applied
+    def one(path):
+        rows = stub.find("POST", path)
+        return rows[0][4] if bearer(rows) and len(rows) == 1 else ("not one with the Bearer", [(r[4], r[3].get("authorization", "")[:7]) for r in rows])
+
+    check("the listing's buy POSTs /market/purchase {market_id} (deob-10.0.7.js:134157)", one("/api/market/purchase") == {"market_id": 555},
+          one("/api/market/purchase"))
+    check("... and says 'Item purchased successfully!'", grep(text, "wbuy") > 0 and nodes(text, "wbuy_err") == 0,
+          (grep(text, "wbuy"), nodes(text, "wbuy_err")))
+    inv = stub.find("GET", "/api/market/inventory")
+    check("My Inventory asks krunker.io's /market/inventory with the Bearer (deob-10.0.7.js:26949)", bearer(inv), [r[1] for r in inv])
+    check("... and shows its rows: the stack (x3, List) and the copy, not the emptied stack (cnt 0)",
+          nodes(text, "inv") == 2 and grep(text, "inv_x3") > 0 and nodes(text, "inv_none") == 0 and nodes(text, "inv_list") == 1,
+          (nodes(text, "inv"), grep(text, "inv_x3"), nodes(text, "inv_none"), nodes(text, "inv_list")))
+    check("List POSTs /market/list {item_id, price, skin_id: the stack's sid} (deob-10.0.7.js:109104-109108)",
+          one("/api/market/list") == {"item_id": kae.INV_STACK, "price": 500, "skin_id": kae.INV_STACK_KID}, one("/api/market/list"))
+    check("... and says 'Item listed successfully'", grep(text, "wlist") > 0 and nodes(text, "wlist_err") == 0,
+          (grep(text, "wlist"), nodes(text, "wlist_err")))
+    qs = stub.find("POST", "/api/market/quick-sell")
+    check("Quick Sell POSTs /market/quick-sell with the Bearer: the copy's {item_id, action 0, amount 0, skin_id: its instance}, "
+          "then the stack's All for Junk {action 1, amount 2} with no skin_id (deob-10.0.7.js:132698-132706)",
+          bearer(qs) and [r[4] for r in qs] == [{"item_id": kae.INV_COPY, "action": 0, "amount": 0, "skin_id": kae.INV_COPY_KID},
+                                                {"item_id": kae.INV_STACK, "action": 1, "amount": 2}], [r[4] for r in qs])
+    check("... and says 'Sold Reticle Blaze for KR', then 'Sold Moon Dragon for Junk'",
+          grep(text, "wqs") > 0 and nodes(text, "wqs_err") == 0 and grep(text, "wqsj") > 0, (grep(text, "wqs"), nodes(text, "wqs_err"), grep(text, "wqsj")))
+    sales = stub.find("GET", "/api/market/sales")
+    check("My Sales asks krunker.io's /market/sales with the Bearer", bearer(sales), [r[1] for r in sales])
+    check("Unlist POSTs /market/unlist {market_id} (deob-10.0.7.js:134319)", one("/api/market/unlist") == {"market_id": kae.SALE_MARKET_ID},
+          one("/api/market/unlist"))
+    check("... and says 'Item unlisted successfully'", grep(text, "wunlist") > 0 and nodes(text, "wunlist_err") == 0,
+          (grep(text, "wunlist"), nodes(text, "wunlist_err")))
+    th = stub.find("GET", "/api/trades/history")
+    check("Trading asks krunker.io's /trades/history?offset=0&limit=30 and lists its offers (3 incoming, 1 outgoing)",
+          bearer(th) and th[0][2] == {"offset": "0", "limit": "30"} and nodes(text, "tin") == 3 and nodes(text, "tout") == 1,
+          ([r[2] for r in th][:1], nodes(text, "tin"), nodes(text, "tout")))
+    for path, label, note in (("/api/trades/41/accept", "tacc", "Trade accepted!"), ("/api/trades/43/cancel", "tdec", "Trade declined"),
+                              ("/api/trades/42/cancel", "tcan", "Trade cancelled")):
+        rows = stub.find("POST", path)
+        check("%s POSTs %s with the Bearer and no body (deob-10.0.7.js:27165-27180)" % (note.split()[1].capitalize(), path[4:]),
+              bearer(rows) and len(rows) == 1 and rows[0][4] is None, [(r[4], r[3].get("authorization", "")[:7]) for r in rows])
+        check("... and says '%s'" % note, grep(text, label) > 0, grep(text, label))
+    rows = stub.find("POST", "/api/trades/44/accept")
+    check("a refused accept (code TRADE_ITEM_NOT_OWNED) shows v10's text for the code as an error",
+          bearer(rows) and grep(text, "taccerr") > 0 and nodes(text, "taccerr_cls") == 1, (len(rows), grep(text, "taccerr"), nodes(text, "taccerr_cls")))
+    rows = stub.find("POST", "/api/trades/decline-all")
+    check("Decline All POSTs /trades/decline-all with the Bearer (deob-10.0.7.js:137269) and says 'All trades declined'",
+          bearer(rows) and len(rows) == 1 and rows[0][4] is None and grep(text, "tdall") > 0, (len(rows), grep(text, "tdall")))
+    ps, ti = stub.find("GET", "/api/trades/player-search"), stub.find("GET", "/api/trades/inventory/%d" % kae.MARKET_FRIEND_ID)
+    check("Create Trade asks /trades/player-search?name= and /trades/inventory/<id> with the Bearer",
+          bearer(ps) and ps[0][2] == {"name": kae.MARKET_FRIEND} and bearer(ti), ([r[2] for r in ps], len(ti)))
+    check("... and POSTs /trades/create {target_player_id, my_offer: [{i, c}], their_offer: [{i, c, iids}], message} (deob-10.0.7.js:111517)",
+          one("/api/trades/create") == {"target_player_id": kae.MARKET_FRIEND_ID, "my_offer": [{"i": kae.INV_STACK, "c": 1}],
+                                        "their_offer": [{"i": kae.INV_COPY, "c": 1, "iids": [kae.THEIR_COPY_KID]}], "message": ""},
+          one("/api/trades/create"))
+    check("... then the window closes and 'Trade offer sent!' shows", grep(text, "tsent") > 0 and nodes(text, "tsent_open") == 0,
+          (grep(text, "tsent"), nodes(text, "tsent_open")))
+    check("no write was refused as not sent to krunker.io", "is not sent for the krunker.io account" not in text,
+          re.findall(r"\[gapi\].*not sent.*", text)[:3])
     posts = [(r[0], r[1]) for r in stub.requests if r[0] != "GET" and not r[1].startswith("/api/auth/") and not r[1].startswith("/frvr/")]
-    check("nothing but the sign-in, the Black Market buy and the lottery entry was POSTed to krunker.io",
-          posts == [("POST", "/api/market/black-market/purchase"), ("POST", "/api/lottery/3/participate")], posts)
+    check("nothing but the sign-in and these writes was POSTed to krunker.io, in this order",
+          posts == [("POST", p) for p in ("/api/market/black-market/purchase", "/api/lottery/3/participate", "/api/market/purchase",
+                                          "/api/market/list", "/api/market/quick-sell", "/api/market/quick-sell", "/api/market/unlist",
+                                          "/api/trades/41/accept", "/api/trades/43/cancel", "/api/trades/42/cancel",
+                                          "/api/trades/44/accept", "/api/trades/decline-all", "/api/trades/create")], posts)
 
 
 def main():
@@ -276,8 +433,8 @@ def main():
         return 77
     http_port, ws_port = kn_proto.free_ports(2)
     stub = kae.Stub(http_port, ws_port)
-    # 5000 KR: the lottery's KR cost can be entered (each sign-in's "a" carries it)
-    stub.account_data = [{"player_clan": kae.TURF_CLAN, "player_funds": 5000}] * 2
+    # 5000 KR: the lottery's KR cost can be entered (each sign-in's "a" carries it); level 12: the account can trade
+    stub.account_data = [{"player_clan": kae.TURF_CLAN, "player_funds": 5000, "player_score": 160000}] * 2
     try:
         stub.start()
         text = run_client(stub)

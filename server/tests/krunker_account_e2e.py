@@ -137,6 +137,50 @@ GAPI_READS.update({
                        "previous_draws": []},
 })
 
+# the Market & Trading popup's account reads and writes (v10.0.7's market / trades APIs, deob-10.0.7.js:26949-27060,
+# 27150-27200). My Inventory (market.getInventory, :26949): a stack of Moon Dragon (item 4, its official stack id 901,
+# 3 units) and one copy of Reticle Blaze (item 2, instance 5551); an emptied stack (cnt 0) v10 drops (:134361). My Sales
+# (market.getSales): one listing of Acid Breath (item 10, market id 777). Trading (trades.getHistory): incoming 41, 43
+# and 44 from KioTrader, outgoing 42 to KioTrader; the player search finds KioFriend (id 31, level 12), whose trade
+# inventories are the stack (mine) and a copy of Reticle Blaze (theirs, instance 6661).
+MARKET_TRADER, MARKET_FRIEND, MARKET_FRIEND_ID = "KioTrader", "KioFriend", 31
+INV_STACK, INV_STACK_KID, INV_COPY, INV_COPY_KID, SALE_ITEM, SALE_MARKET_ID = 4, 901, 2, 5551, 10, 777
+THEIR_COPY_KID = 6661
+
+
+def _trade(trid, mine, ind_sell, ind_buy):
+    return {"trid": trid, "pl": ACCOUNT_ID if mine else 9, "player": ACCOUNT_NAME if mine else MARKET_TRADER,
+            "buyer": MARKET_TRADER if mine else ACCOUNT_NAME, "message": "", "dte": 1795168800000,
+            "sksell": [{"ind": ind_sell}], "skbuy": [{"ind": ind_buy}], "csell": [], "cbuy": []}
+
+
+GAPI_READS.update({
+    "/api/market/inventory": [{"i": INV_STACK, "st": 1, "sid": INV_STACK_KID, "cnt": 3},
+                              {"i": INV_COPY, "st": 0, "sid": INV_COPY_KID, "m": {"paint": "#ff0000"}},
+                              {"i": 3, "st": 1, "sid": 903, "cnt": 0}],
+    "/api/market/sales": [{"marketid": SALE_MARKET_ID, "skinindex": SALE_ITEM, "funds": 800, "listed_time": "2026-11-20T10:00:00.000Z"}],
+    "/api/trades/history": {"open": [_trade(41, False, 1, 4), _trade(42, True, 4, 1), _trade(43, False, 0, 4), _trade(44, False, 5, 4)],
+                            "completed": [], "completed_has_more": False},
+    "/api/trades/player-search": {"player_id": MARKET_FRIEND_ID, "player_name": MARKET_FRIEND, "player_score": 160000},
+    "/api/trades/inventory/%d" % MARKET_FRIEND_ID: {"my_inventory": [{"i": INV_STACK, "st": 1, "sid": INV_STACK_KID, "cnt": 3}],
+                                                  "their_inventory": [{"i": INV_COPY, "st": 0, "sid": THEIR_COPY_KID}]},
+})
+# the popup's writes, answered for the account's Bearer as {data, error} (v10's gapi envelope): market.listItem, unlistItem,
+# purchaseItem, quickSellItem (deob-10.0.7.js:26980-27000), trades.createTrade / acceptTrade / cancelTrade / declineAll
+# (:27160-27185). Trade 44's accept is refused with a code (v10 shows its errors.exchange.* text, not the message).
+GAPI_WRITES = {
+    "/api/market/list": {"data": {"response": "SUCCESS"}, "error": None},
+    "/api/market/unlist": {"data": {"response": "SUCCESS"}, "error": None},
+    "/api/market/purchase": {"data": {"funds": 3766}, "error": None},
+    "/api/market/quick-sell": {"data": {"funds": 3776, "junk": 12.5, "count": 0}, "error": None},
+    "/api/trades/create": {"data": {"funds": 3776}, "error": None},
+    "/api/trades/41/accept": {"data": {"funds": 3776}, "error": None},
+    "/api/trades/42/cancel": {"data": {"success": True}, "error": None},
+    "/api/trades/43/cancel": {"data": {"success": True}, "error": None},
+    "/api/trades/44/accept": {"data": None, "error": {"code": "TRADE_ITEM_NOT_OWNED", "message": "items not owned"}},
+    "/api/trades/decline-all": {"data": {"success": True}, "error": None},
+}
+
 LOBBIES = [  # [id, region, players, max, data, timeLeft]: one mode (0), so one KRUNKER.IO group
     ["TEST:full", "de-fra", 8, 8, {"i": "Kanji", "g": 0}, 200],   # full
     ["TEST:burg", "de-fra", 7, 8, {"i": "Burg", "g": 0}, 200],    # fuller, but not the seek map
@@ -461,6 +505,11 @@ class Stub:
                 elif path == "/api/market/black-market/purchase":  # market.purchaseBlackMarketItem {item_index} (v10:26934)
                     if self.headers.get("Authorization", "") in ("Bearer " + stub.access1, "Bearer " + stub.access2):
                         self.reply(200, {"data": {"item": body.get("item_index"), "kr": 3000, "funds": 2000}, "error": None})
+                    else:
+                        self.reply(401, {"data": None, "error": {"code": "LOGIN_REQUIRED", "message": "Must be logged in"}})
+                elif path in GAPI_WRITES:  # the Market & Trading popup's writes (GAPI_WRITES above)
+                    if self.headers.get("Authorization", "") in ("Bearer " + stub.access1, "Bearer " + stub.access2):
+                        self.reply(200, GAPI_WRITES[path])
                     else:
                         self.reply(401, {"data": None, "error": {"code": "LOGIN_REQUIRED", "message": "Must be logged in"}})
                 elif path == "/api/lottery/3/participate":  # lottery.participateInLottery (v10:26571)

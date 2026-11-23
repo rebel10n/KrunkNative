@@ -1,5 +1,6 @@
 // kio_market: a krunker.io account's market paths and its answers as the economy's rows (client/src/ui/kio_market.c):
-// the History rows, the item view's listings, the sales charts' rows and paths, the Black Market body and reply.
+// the History rows, the item view's listings, the sales charts' rows and paths, the Black Market body and reply, the
+// My Inventory rows.
 #include <kio_market.h>
 #include <stdio.h>
 #include <string.h>
@@ -112,6 +113,40 @@ int main(void) {
     cJSON_Delete(bmr);
     cJSON_Delete(ans);
     CHECK(kio_market_bm_reply(NULL, 1, 0) == NULL, "no data: the purchase failed");
+
+    // My Inventory: GET /market/inventory's rows (deob-10.0.7.js:26949) -> {i, st, c, sid, kid[, m][, nt]}; cnt 0 dropped (:134361)
+    cJSON *inv = cJSON_Parse("[{\"i\":1,\"st\":1,\"sid\":901,\"cnt\":3},{\"i\":1,\"st\":0,\"sid\":5551,\"m\":{\"paint\":\"#ff0000\"}},"
+                             "{\"i\":2,\"st\":1,\"sid\":902,\"cnt\":0},{\"i\":4,\"sid\":5552,\"m\":\"{\\\"style\\\":1}\",\"nt\":true},"
+                             "{\"st\":1,\"sid\":3,\"cnt\":1},{\"i\":\"6\",\"st\":1,\"sid\":4,\"cnt\":1}]");
+    rows = kio_market_inventory_rows(inv, 1000000);
+    CHECK(cJSON_GetArraySize(rows) == 3, "a cnt 0 row and rows with no numeric i are dropped (%d rows)", cJSON_GetArraySize(rows));
+    r0 = cJSON_GetArrayItem(rows, 0);
+    r1 = cJSON_GetArrayItem(rows, 1);
+    const cJSON *r2 = cJSON_GetArrayItem(rows, 2);
+    CHECK(n(r0, "i") == 1 && n(r0, "st") == 1 && n(r0, "c") == 3 && n(r0, "sid") == 1 && n(r0, "kid") == 901 && !cJSON_GetObjectItem(r0, "m"),
+          "a stack: its count, sid = the item index, kid = the official stack id");
+    CHECK(n(r1, "i") == 1 && n(r1, "st") == 0 && n(r1, "c") == 1 && n(r1, "sid") == 1000000 && n(r1, "kid") == 5551 &&
+              !strcmp(s(cJSON_GetObjectItem(r1, "m"), "paint"), "#ff0000") && !cJSON_GetObjectItem(r1, "nt"),
+          "a copy: one unit, a local copy id, the official instance id as kid, its m");
+    CHECK(n(r2, "i") == 4 && n(r2, "st") == 0 && n(r2, "sid") == 1000001 && n(r2, "kid") == 5552 && cJSON_IsString(cJSON_GetObjectItem(r2, "m")) &&
+              n(r2, "nt") == 1, "no st: a copy; m as a string is kept; nt kept");
+    cJSON_Delete(rows);
+    cJSON_Delete(inv);
+    inv = cJSON_Parse("{\"rows\":[]}");
+    rows = kio_market_inventory_rows(inv, 1000000);
+    CHECK(cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 0, "not an array: no rows");
+    cJSON_Delete(rows);
+    cJSON_Delete(inv);
+    rows = kio_market_inventory_rows(NULL, 1000000);
+    CHECK(cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 0, "no data: no rows");
+    cJSON_Delete(rows);
+
+    // the error codes' keys (deob-10.0.7.js:104431-104513)
+    CHECK(!strcmp(kio_market_error_key("MARKET_LISTING_GONE"), "errors.exchange.listingGone"), "a market code's key");
+    CHECK(!strcmp(kio_market_error_key("TRADE_ITEM_NOT_OWNED"), "errors.exchange.tradeItemNotOwned"), "a trade code's key");
+    CHECK(!strcmp(kio_market_error_key("SOCIAL_GIVEAWAY_LEVEL_TOO_LOW"), "errors.social.giveawayLevelTooLow"), "the table's last code");
+    CHECK(!strcmp(kio_market_error_key("TRADE_NOT_FOUND"), "errors.common.unknown"), "a code not in the table: the unknown key");
+    CHECK(kio_market_error_key(NULL) == NULL && kio_market_error_key("") == NULL, "no code: no key");
 
     printf("kio_market_test: %d/%d\n", checks - failures, checks);
     return failures ? 1 : 0;

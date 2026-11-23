@@ -36,8 +36,8 @@
 //   /trades/player-search, /trades/inventory/<id>         ["sp"] / ["ri"]
 //   /market/black-market(/purchase)                       the store table / ["pbm"]
 // A krunker.io account (kio_store_active) reads krunker.io's gapi instead (v10_gapi, kio_store_write): the listings and
-// stats, /market/sales, /market/history (kio_history_done), /items/<i>/view for the detail's stats, owners and listings
-// (kio_view_done), /market/items/<i>/sales-statistics and /items/<i>/sales for its charts (kio_sales_stats_done), and
+// stats, /market/inventory (kio_inventory_done), /market/sales, /market/history (kio_history_done), /items/<i>/view for
+// the detail's stats, owners and listings (kio_view_done), /market/items/<i>/sales-statistics and /items/<i>/sales for its charts (kio_sales_stats_done), and
 // the writes market/purchase|list|unlist|quick-sell, market/black-market/purchase and trades/* (kio_act_send); the
 // row shapes are kio_market.h's and kio_trade.h's.
 // Quick Sell's Junk is the Junk wallet's (doc/v10/junk.md: "qsi" mode 1, the inventory rows' qj). What
@@ -884,9 +884,38 @@ static void browse_loaded(const cJSON *rows) {
     M.bshown = LISTING_PAGE;
 }
 
+// krunker.io's My Inventory (v10 market.getInventory, gapi GET /market/inventory, deob-10.0.7.js:26949; its loader
+// :109077-109084 and the tab's load :134356-134368): the rows {i, st, sid, cnt, m} as the tab's rows
+// (kio_market_inventory_rows; each keeps its official sid as kid, the writes' skin_id), with the Quick Sell values v10
+// computes from the item (iïiíííî, deob-10.0.7.js:109117-109152: market_qs_value) as the brain's decorations
+// qs / qj / nqs / nqv that qs_values and the tile read. An error leaves the tab empty, as v10's catch does (:134363).
+static void kio_inventory_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    if (!M.inv_loading) return; // the read expired (reads_expired) or the exchange was closed
+    M.inv_loading = 0;
+    cJSON *rows = kio_market_inventory_rows(status == 200 ? data : NULL, COPY_ID_BASE);
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        const MarketQsValue v = market_qs_value(ui_loadout_skin_json(jint(r, "i", -1)));
+        if (!v.can_qs && !v.can_destroy) cJSON_AddNumberToObject(r, "nqv", 1); // "This item cannot be sold back for currency."
+        else if (v.can_destroy) cJSON_AddNumberToObject(r, "nqs", 1);
+        if (v.can_kr) cJSON_AddNumberToObject(r, "qs", v.kr);
+        if (v.can_junk) cJSON_AddNumberToObject(r, "qj", (double) junk_hundredths(v.junk));
+    }
+    cJSON_Delete(M.inv);
+    M.inv = rows;
+    render_both();
+}
+
 static void inventory_load(void) {
     if (!logged_in() || M.inv_loading) return;
     M.inv_loading = 1;
+    if (kio_store_active()) {
+        if (v10_gapi("GET", "/market/inventory", NULL, kio_inventory_done, NULL)) kio_read_arm();
+        else M.inv_loading = 0;
+        return;
+    }
     if (!request_page("market", "inventory", -1)) M.inv_loading = 0;
 }
 // krunker.io's own sales (GET market/sales: getSales, deob-10.0.4.js:26947, loader :108894). A row {marketid,
@@ -909,7 +938,7 @@ static void kio_sales_done(void *user, const int status, const cJSON *data, cons
         cJSON_AddNumberToObject(o, "m", m->valuedouble);
         cJSON_AddNumberToObject(o, "i", s->valuedouble);
         cJSON_AddNumberToObject(o, "f", jnum(r, "funds"));
-        cJSON_AddNumberToObject(o, "ms", jnum(r, "listed_time"));
+        cJSON_AddNumberToObject(o, "ms", kio_market_time_ms(cJSON_GetObjectItemCaseSensitive(r, "listed_time"))); // ISO or epoch ms
         cJSON_AddItemToArray(rows, o);
     }
     cJSON_Delete(M.sales);
@@ -3562,13 +3591,19 @@ static void kio_reply(const char *label, cJSON *a1, cJSON *a2) {
     cJSON_Delete(f);
 }
 
+// A krunker.io error as v10.0.7 shows it (iíiììiì, deob-10.0.7.js:104503-104513): a code is its table's text (an unknown
+// code the generic one, kio_market_error_key), else the message; NULL when there is neither (the caller's fallback).
+static const char *kio_error_text(const char *code, const char *message) {
+    const char *key = kio_market_error_key(code);
+    return key ? I18N(key, message ? message : "An unknown error occurred.") : message;
+}
+
 // user packs the pending act (high) and the quick-sell action (low): act * 16 + action
 static void kio_act_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
     (void) status;
-    (void) code;
     const int packed = (int) (intptr_t) user, act = packed / 16, action = packed % 16;
-    if (message) {
-        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(message));
+    if (message || code) {
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(kio_error_text(code, message)));
         return;
     }
     const cJSON *fv = data ? cJSON_GetObjectItemCaseSensitive(data, "funds") : NULL;
@@ -3598,6 +3633,9 @@ static void kio_act_answer(void *user, const int status, const cJSON *data, cons
         cJSON *o = cJSON_CreateObject();
         cJSON_AddNumberToObject(o, "c", cJSON_IsNumber(cv) ? cv->valueint : 0);
         if (cJSON_IsNumber(fv)) cJSON_AddNumberToObject(o, "f", fv->valuedouble);
+        // the account's Junk after the sale (deob-10.0.7.js:132753: account.junk = data.junk)
+        const cJSON *jv = data ? cJSON_GetObjectItemCaseSensitive(data, "junk") : NULL;
+        if (cJSON_IsNumber(jv)) cJSON_AddNumberToObject(o, "j", jv->valuedouble);
         cJSON_AddNumberToObject(o, "kr", action == 0 ? 1 : 0);
         cJSON_AddNumberToObject(o, "jnk", action == 1 ? 1 : 0);
         kio_reply("qsr", o, NULL);
@@ -3613,12 +3651,21 @@ static void kio_act_send(const int act, const int action, const char *method, co
     if (!sent) kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(I18N("generic.error", "Error")));
 }
 
+// The official sid of a unit of krunker.io's own inventory rows (kio_inventory_done: the row's kid), 0 when the unit's
+// row is not one of them (the inventory not loaded yet).
+static int kio_unit_kid(const int index, const int sid) {
+    const cJSON *r = inv_unit(index, sid);
+    return r ? jint(r, "kid", 0) : 0;
+}
+
 // A painted copy's official id on krunker.io (the bundle's instanceId, sent as skin_id: deob-10.0.4.js:108919-108921,
-// :132491). The pairing is certain only when the copy's paint matches exactly one copy of the item in KN's inventory
+// :132491): its row's kid when the row is krunker.io's (kio_unit_kid). Otherwise the pairing is certain only when the copy's paint matches exactly one copy of the item in KN's inventory
 // and exactly one copy of it in the official one (kio_inventory_copy_for_paint; each side's paint is its metadata,
 // deob-10.0.4.js:131126, :106577-106578). 0 when the paint is missing or either side has none or several: the
 // caller refuses.
 static int kio_copy_sid(const int index, const int sid) {
+    const int kid = kio_unit_kid(index, sid);
+    if (kid) return kid; // the row is krunker.io's: its own sid
     const cJSON *mine = inv_unit(index, sid);
     cJSON *meta = mine ? row_meta(mine) : NULL;
     char *key = market_paint_key(meta);
@@ -3642,8 +3689,8 @@ static int kio_copy_sid(const int index, const int sid) {
 // krunker.io's trade calls (deob-10.0.4.js:27162-27193, the trades API). The player search returns one row
 // (deob-10.0.4.js:110474-110485) that the "spR" reply reads by name, as the brain's list does; the inventories
 // (GET trades/inventory/<id>, deob-10.0.4.js:111361-111366) are the "trD" reply's [mine, theirs]; the create is POST
-// trades/create (kio_create_trade). Accept and cancel stay refused on krunker.io: the trade list is still the brain's,
-// so its ids are not the official trades' (kio_trade.h).
+// trades/create (kio_create_trade). Accept, decline and cancel act on the official trades of trades/history below
+// (kio_trade_action: their trid is krunker.io's).
 // GET trades/history (deob-10.0.4.js:27155, the trades page's first load: offset 0, limit 30, open included; the
 // wrapper returns the data, :110451-110461). The rows become the native trade rows (kio_trade_row): the list is
 // [open, completed], as the brain's "trades" reply is.
@@ -3673,9 +3720,9 @@ static void kio_trades_answer(void *user, const int status, const cJSON *data, c
 static void kio_trade_search_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
     (void) user;
     (void) status;
-    (void) code;
-    if (message || !data) {
-        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(message ? message : "Player not found"));
+    if (message || code || !data) {
+        const char *e = kio_error_text(code, message);
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(e ? e : "Player not found"));
         return;
     }
     cJSON *rows = cJSON_CreateArray(); // the "spR" reply reads a list of rows
@@ -3694,9 +3741,9 @@ static void kio_trade_search(const char *name) {
 static void kio_trade_inv_answer(void *user, const int status, const cJSON *data, const char *code, const char *message) {
     (void) user;
     (void) status;
-    (void) code;
-    if (message || !data) {
-        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(message ? message : "Failed to load inventories"));
+    if (message || code || !data) {
+        const char *e = kio_error_text(code, message);
+        kio_reply("po", cJSON_CreateString("ERROR"), cJSON_CreateString(e ? e : "Failed to load inventories"));
         return;
     }
     const cJSON *mine = cJSON_GetObjectItemCaseSensitive(data, "my_inventory");
@@ -3728,28 +3775,34 @@ static void kio_create_trade(void) {
     kio_act_send(ACT_CREATE, 0, "POST", "trades/create", kio_trade_create_body(M.ct_target_id, mine, theirs, M.ct_msg));
 }
 
-// Quick Sell on krunker.io: action 0 Get KR, 1 Get Junk, 2 Destroy (deob-10.0.4.js:132491). A stack's official id is
-// its row in the official inventory (kio_inventory_groups); a painted copy's is kio_copy_sid. KN's skin index is the item.
+// Quick Sell on krunker.io: quickSellItem {item_id, action, amount[, skin_id]} (deob-10.0.7.js:132700-132706, POST
+// /market/quick-sell :26990): action 0 Get KR, 1 Get Junk, 2 Destroy; amount the select's 0 "1 Item", 1 "All But 1",
+// 2 "All"; skin_id the unit's instanceId (the row's sid, :134204) only for "1 Item" (:132698). The unit's official sid is
+// its row's kid (kio_inventory_done); a unit not in those rows (the wallet's, before the tab's read came) is found in the
+// official inventory as before: a stack by its group (kio_inventory_groups), a painted copy by kio_copy_sid.
 static void kio_quick_sell(const int action) {
-    if (!kio_inventory_ready()) {
-        snprintf(M.qs_err, sizeof(M.qs_err), "%s", kio_inventory_gate_text());
-        return;
-    }
-    int skin = 0;
-    if (M.sel_sid >= COPY_ID_BASE) {
-        skin = kio_copy_sid(M.sel_skin, M.sel_sid);
-        if (!skin) {
-            snprintf(M.qs_err, sizeof(M.qs_err), "This painted copy can't be matched to a single krunker.io copy, so it can't be quick-sold there");
+    const int amount = M.sel_count > 1 ? M.qs_mode : 0;
+    int skin = kio_unit_kid(M.sel_skin, M.sel_sid);
+    if (!skin) {
+        if (!kio_inventory_ready()) {
+            snprintf(M.qs_err, sizeof(M.qs_err), "%s", kio_inventory_gate_text());
             return;
         }
-    } else {
-        int n = 0;
-        const MarketGroup *groups = kio_inventory_groups(&n);
-        for (int i = 0; i < n; i++) if (groups[i].item == M.sel_skin && groups[i].stack_id > 0) skin = groups[i].stack_id;
-    }
-    if (!skin) {
-        snprintf(M.qs_err, sizeof(M.qs_err), "This item is not in your krunker.io inventory");
-        return;
+        if (M.sel_sid >= COPY_ID_BASE) {
+            skin = kio_copy_sid(M.sel_skin, M.sel_sid);
+            if (!skin) {
+                snprintf(M.qs_err, sizeof(M.qs_err), "This painted copy can't be matched to a single krunker.io copy, so it can't be quick-sold there");
+                return;
+            }
+        } else {
+            int n = 0;
+            const MarketGroup *groups = kio_inventory_groups(&n);
+            for (int i = 0; i < n; i++) if (groups[i].item == M.sel_skin && groups[i].stack_id > 0) skin = groups[i].stack_id;
+        }
+        if (!skin) {
+            snprintf(M.qs_err, sizeof(M.qs_err), "This item is not in your krunker.io inventory");
+            return;
+        }
     }
     M.busy = 1;
     M.qs_err[0] = 0;
@@ -3757,8 +3810,8 @@ static void kio_quick_sell(const int action) {
     cJSON *b = cJSON_CreateObject();
     cJSON_AddNumberToObject(b, "item_id", M.sel_skin);
     cJSON_AddNumberToObject(b, "action", action);
-    cJSON_AddNumberToObject(b, "amount", M.sel_count > 1 ? M.qs_mode : 0);
-    cJSON_AddNumberToObject(b, "skin_id", skin);
+    cJSON_AddNumberToObject(b, "amount", amount);
+    if (amount == 0) cJSON_AddNumberToObject(b, "skin_id", skin);
     kio_act_send(ACT_QS, action, "POST", "market/quick-sell", b);
 }
 
@@ -3854,9 +3907,9 @@ static void confirm_modal(void) {
                 show_error("Price cannot exceed 10,000,000 KR");
                 return;
             }
-            if (kio_store_active()) { // deob-10.0.4.js:108919: listItem {item_id, price, skin_id?}: a stack has no skin_id
-                int skin = 0;
-                if (M.sel_sid >= COPY_ID_BASE) {
+            if (kio_store_active()) { // listItem {item_id, price, skin_id: the row's sid} (deob-10.0.7.js:109104-109108, :134291)
+                int skin = kio_unit_kid(M.sel_skin, M.sel_sid); // krunker.io's own row (kio_inventory_done): its sid, a stack's too
+                if (!skin && M.sel_sid >= COPY_ID_BASE) {
                     skin = kio_copy_sid(M.sel_skin, M.sel_sid);
                     if (!skin) {
                         show_error("This painted copy can't be matched to a single krunker.io copy, so it can't be listed there");
