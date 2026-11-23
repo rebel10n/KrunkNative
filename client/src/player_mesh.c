@@ -1832,6 +1832,24 @@ static void player_arms_set_visible(const PlayerArms *arms, const int visible) {
     }
 }
 
+// lowSpec: updateMsh hides every legMeshes / shoeMeshes entry each frame (deob-10.0.7.js:173449-173450) and
+// updateHeight's crouch swap leaves them alone (:173369-173370), so a lowSpec player model has no legs or shoes
+static void player_low_spec_legs(PlayerMesh *pm) {
+    for (int i = 0; i < 2; i++) {
+        const ColorCube *leg = pm->legs[i];
+        for (size_t j = 0; leg && j < leg->mesh_count; j++) leg->meshes[j]->visible = 0;
+        PlayerCrouchedLeg *crouched = pm->crouched_legs[i];
+        if (crouched) {
+            if (crouched->upper) crouched->upper->visible = 0;
+            if (crouched->joint) crouched->joint->visible = 0;
+            for (size_t j = 0; crouched->lower && j < crouched->lower->mesh_count; j++) crouched->lower->meshes[j]->visible = 0;
+        }
+        Mesh *shoe = pm->cosmetics[PLAYER_COSMETIC_SHOE_R + i];
+        if (shoe) shoe->visible = 0;
+        if (pm->cosmetic_models[PLAYER_COSMETIC_SHOE_R + i]) gltf_instance_set_visible(pm->cosmetic_models[PLAYER_COSMETIC_SHOE_R + i], 0);
+    }
+}
+
 void player_update_meshes(Player *player, const int is_preview) {
     if (!player->mesh) return;
 
@@ -2149,6 +2167,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     // v10.0.3 player.pose (applyPose, refreshWeaponVisibility, syncHands / syncHandL; player_pose_render.c):
     // after the movement's own leg, arm and upper-body pose, before the charm / GLTF visibility below
     player_pose_render(player, player->render_you && !third_person, step_anim);
+    if (settings->low_spec) player_low_spec_legs(player_mesh);
 
     // the charm sways with the weapon (players.js:501-504)
     PlayerArms *charm_arms = player->loadout_index >= 0 && player->loadout_index < player->loadout_size ? player_mesh->arms[player->loadout_index] : NULL;
