@@ -339,6 +339,8 @@ void hud_ui_end_cell_info(const Client *client, const Player *player, HudEndCell
 void hud_ui_end_name_cell(char *out, size_t size, size_t *len, const HudEndCellInfo *info, const char *profile_name, const char *shown,
                           const char *color);
 void hud_ui_add_reward_skin(int skin);
+// A mid-match CHALLENGE_COMPLETED's REW.jnk (deob-10.0.7.js:225219): into matchRewardSummary.junk, the Rewards tab's Junk card
+void hud_ui_add_reward_junk(double junk);
 void hud_ui_end_refresh(void); // re-render the end screen tab (the Battle Pass bpData came in late)
 void hud_ui_end_results_now(const Client*); // --render-scenario endscreen.results: skip config.endAnim
 void hud_ui_skin_found(Client*, int uid, int skin); // season-system: NET_PACKET_SKIN_FOUND (v7 "skin" / "skinF")

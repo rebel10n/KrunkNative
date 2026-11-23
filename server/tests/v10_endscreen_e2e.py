@@ -12,7 +12,8 @@ of its own, so the skins are the only source. At the end of the match v10.0.2 sh
   - the countdown ticks once a second;
   - a click on the button (its onclick handler) opens the rewards overlay (svelte-1sac6ik): one card per skin, the cards
     flip one by one (500 ms, then every 1000 ms with two items), the items fly to the backpack, and
-    the overlay closes with the Rewards tab selected and the button gone (v10's onCompleteManualCollect).
+    the overlay closes with the Rewards tab selected and the button gone (v10's onCompleteManualCollect);
+  - a mid-match challenge's Junk (CHALLENGE_COMPLETED REW.jnk, input script `rewjunk`) is the Rewards tab's first card.
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device.
 """
 import os
@@ -36,6 +37,7 @@ SCRIPT = """
 3500 check @alive weapHolder=1 deathUIHolder=0 timerHolder=1
 3600 skin 1
 3800 skin 2
+3900 rewjunk 1.25
 4000 check @found inGameUI=1
 5000 con end
 7000 lrmr 14 4 25
@@ -79,6 +81,7 @@ SCRIPT = """
 21000 nodes @button-gone .collect-rewards-button
 21000 text @tab .tabHeader.selected
 21000 nodes @rewards-list .rewItemHolder
+21000 text @rewards-junk .rewItemHolder .rewItemN
 21200 call GUI.endScreen.changeTab "leaderboard"
 21500 text @lbtab .tabHeader.selected
 21500 attr @lb-onclick onclick .endTableN
@@ -193,7 +196,10 @@ def run():
     check("the button is gone once collected", n("button-gone") == 0, f"{n('button-gone')} .collect-rewards-button")
     tab = texts.get("tab", (0, ""))[1]
     check("the Rewards tab is selected afterwards", tab == "Rewards", repr(tab))
-    check("the Rewards tab lists the two skins", (n("rewards-list") or 0) == 2, f"{n('rewards-list')} .rewItemHolder")
+    # a mid-match challenge's Junk (CHALLENGE_COMPLETED REW.jnk, deob-10.0.7.js:225219; `rewjunk 1.25`) is the first card
+    check("the Rewards tab lists the challenge's Junk card first, then the two skins",
+          (n("rewards-list") or 0) == 3 and texts.get("rewards-junk", (0, ""))[1] == "1.25 Junk",
+          f"{n('rewards-list')} .rewItemHolder, first {texts.get('rewards-junk')}")
     # GUI.endScreen.init: changeTab(spectating || isCustom ? leaderboard : performance) (deob-10.0.7.js:210069); the
     # offline sandbox is not a custom game
     check("the results open on the Performance tab (not spectating, not a custom game)",

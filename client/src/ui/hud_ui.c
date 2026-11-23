@@ -3922,6 +3922,12 @@ void hud_ui_set_end_medals(const NetEndMedalsPacket *packet) {
     if (g_hud_ui.ended && g_hud_ui.end_phase == 2 && g_end_tab == 2 && g_end_client) hud_end_card_render(g_end_client);
 }
 
+// CHALLENGE_COMPLETED during the match with REW.jnk (deob-10.0.7.js:225219): matchRewardSummary.junk += parseFloat(jnk),
+// which the end screen's Rewards tab shows as its Junk card ("<x.xx> Junk", tabs.rewards.gen :210029-210052)
+void hud_ui_add_reward_junk(const double junk) {
+    if (isfinite(junk)) g_end_junk += junk;
+}
+
 // io_challengeCompleted: a challenge's skins go to matchRewardSummary.skins (counted)
 void hud_ui_add_reward_skin(const int skin) {
     for (int i = 0; i < g_end_skin_count; i++) {

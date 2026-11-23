@@ -113,6 +113,7 @@
 //                                camera's ADS zoom, aim: aim_val)
 //   100 skindef 10000007 {"name":"x","weapon":6,"_id":"a1","customSound":true}  define store.skins[index] as an "sdc" /
 //                                a custom game's studio skin would (viewer_skin_define; custom skin sound tests)
+//   100 rewjunk 1.25             a mid-match challenge's Junk (CHALLENGE_COMPLETED REW.jnk) for the end screen's Rewards tab
 //   100 cosm @game               log the store items the menu's class preview and our own player wear
 //                                (hat, body, face, head, back, primary skin, melee: store indices, -1 none;
 //                                body_style: the server's style of the body item, skin_style_of: -1 unknown)
@@ -689,6 +690,11 @@ static void script_run(Client *client, const ScriptEvent *e) {
         // (v10_endscreen_e2e.py): the skin is held for the Collect Rewards button (hud_endscreen_v10.c).
         if (client->me) hud_ui_skin_found(client, client->me->uid, (int) e->v[0]);
         fprintf(stderr, "[input_script] skin t=%.0f %d\n", g_script.time, (int) e->v[0]);
+    } else if (!strcmp(e->cmd, "rewjunk")) {
+        // rewjunk <amount>: a mid-match challenge's Junk (CHALLENGE_COMPLETED's REW.jnk, hud_ui_add_reward_junk) into the
+        // end screen's Rewards tab
+        hud_ui_add_reward_junk(e->v[0]);
+        fprintf(stderr, "[input_script] rewjunk t=%.0f %.2f\n", g_script.time, e->v[0]);
     } else if (!strcmp(e->cmd, "ranked")) {
         // ranked <0|1> [<0|1>]: the server's NET_EXT_KN_RANKED_MATCH for this round, through the client's own packet
         // path (game_events.c). A second 1 first makes the game a comp lobby (config.comp, test mode) and opens its menu
