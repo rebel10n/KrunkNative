@@ -1735,6 +1735,26 @@ static void t_scroll_extent(void)
     CHECK(txt && NEAR(txt->scroll_h, 140, 0.01), "four 25px lines + padding = 140 (%.1f)", txt ? txt->scroll_h : -1);
     CHECK(ab && NEAR(ab->scroll_h, 130, 0.01), "abs box extends scrollHeight by its border box only (%.1f)", ab ? ab->scroll_h : -1);
     fx_free(fx);
+
+    /* The end padding goes on the in-flow bounds only (Blink's ScrollableOverflowCalculator::Result): a grandchild
+     * hanging out of its in-flow parent counts as is. v10's Customize tab: .otherContainer is 205 px tall, its five
+     * .settName rows end 40 px lower, 4 px into #loadoutContent's 18 px bottom padding; Chrome's scrollHeight is the
+     * clientHeight (909), so the scroller has no scrollable overflow and is not composited (no layer-origin snap). */
+    fx = fx_html("<div id=hang style='overflow-y:auto;padding:18px;height:100px;width:200px'>"
+                 "<div style='height:60px'><div style='height:104px'></div></div></div>"
+                 "<div id=past style='overflow-y:auto;padding:18px;height:100px;width:200px'>"
+                 "<div style='height:60px'><div style='height:130px'></div></div></div>"
+                 "<div id=wide style='overflow-x:auto;padding:0 18px;height:100px;width:200px'>"
+                 "<div style='width:100px'><div style='width:230px;height:10px'></div></div></div>", NULL);
+    Box *hang = bx(fx, "hang"), *past = bx(fx, "past"), *wide = bx(fx, "wide");
+    CHECK(hang && NEAR(hang->scroll_h, 136, 0.01) && hang->scrollbar_w == 0,
+          "a grandchild 4 px into the bottom padding: no overflow, scrollHeight = clientHeight 136 (%.1f, bar %.0f)",
+          hang ? hang->scroll_h : -1, hang ? hang->scrollbar_w : -1);
+    CHECK(past && NEAR(past->scroll_h, 148, 0.01), "a grandchild past the padding box: 18 + 130, no end padding after it (%.1f)",
+          past ? past->scroll_h : -1);
+    CHECK(wide && NEAR(wide->scroll_w, 248, 0.01), "inline axis alike: 18 + 230, no end padding after the grandchild (%.1f)",
+          wide ? wide->scroll_w : -1);
+    fx_free(fx);
 }
 
 static void t_closed_inline_states(void)

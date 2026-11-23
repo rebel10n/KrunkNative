@@ -138,9 +138,12 @@ Round 7 (2026-11-23) took that list:
 - Weapon wear uses v10's wearMap key (:174184-174189). The item view shows a copy's wear and serial
   (:223653-223690). v10's createTip shows wear only from `data-wear`, which only the trade cards set.
 
-uidiff `customize-customize` (content 3.95 %) is a sub-pixel offset of the first row only. The card borders sit at
-the same rows in both images (y 136, 252, 368 at the 1280 x 720 capture), but the reference's top border of row 1 is
-brighter at y 136 and darker at y 138, i.e. about 0.3 px higher, and its labels sit 1 px higher (y 140-150 against
-141-151). Rows 2 and 3 match to the pixel. So Chrome's first line box in `#customizeContainer` (inline-block cards,
-`text-align: center`) starts a fraction of a pixel higher than the later ones, and the text snaps a whole pixel; KN
-lays every line box out alike. Not changed: it is the engine's line-box rounding, not the markup.
+uidiff `customize-customize` (content 3.95 %) was a sub-pixel offset of every card row (KN about 0.33 px higher;
+row 1's labels a whole pixel higher, rows 2 and 3 rounded alike). Not the line boxes: Chrome lays the cards out
+exactly where KN does (headless Chrome on KN's own DOM: the first card's top at 136.3907 px in both) and its
+screenshot of that DOM matches the reference to the pixel. The difference was KN's scrollable overflow:
+`.otherContainer` (205 px) has rows that end 4 px into `#loadoutContent`'s 18 px bottom padding, and KN added the end
+padding after those descendants (scrollHeight 913 > clientHeight 909), so it treated `#loadoutContent` as a composited
+scroller and moved its contents to a whole device pixel (`scroller_layer_snap`, -0.565 CSS px). Chrome adds the end
+padding to the in-flow children's boxes only (ScrollableOverflowCalculator; its scrollHeight there is 909): fixed in
+`layout_block.c` `compute_overflow` (2026-11-23), content 3.95 -> 0.40 %.
