@@ -63,6 +63,13 @@ int skin_fx_apply_paint_graph(Mesh *mesh, struct GltfInstance *model, int graph,
 // when the host has no such map.
 void skin_fx_apply_wear(Mesh *mesh, const struct ViewerSkin *skin, double wear);
 void skin_fx_apply_wear_gltf(struct GltfInstance *model, const struct ViewerSkin *skin, double wear);
+// A weapon skin's wear (v10.0.7 generateMeshes, deob-10.0.7.js:174184-174189: `wear: {src: 'weapons/' + weapon.src +
+// (null != skin.mid ? '_' + skin.mid : '') + '_wear', data: {level: m.wear}}` whenever the slot's m has a wear; no
+// customTextures test there, unlike a cosmetic's): the key, 0 when the weapon has no src. mid < 0: none.
+int skin_fx_weapon_wear_key(const char *weapon_src, int mid, char *out, size_t n);
+// The wearMap `key` at level `wear` on a mesh and / or every mesh of a GLTF model (wear < 0, or a host without the map: as
+// they are). The loadMesh / loadAnimMesh wear branch (deob-10.0.7.js:206558, :207981-207993).
+void skin_fx_apply_wear_key(Mesh *mesh, struct GltfInstance *model, const char *key, double wear);
 // The wearMap key (a textures/ key, no extension) of a typed item, or 0 when it has none (a weapon skin, no type).
 int skin_fx_wear_key(const struct ViewerSkin *skin, char *out, size_t n);
 // A custom skin's own wear map (customTextures.wear: user-assets/skins/<_id>/texture_w, the Skin Manager's packed

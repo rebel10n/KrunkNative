@@ -1333,7 +1333,10 @@ static void fx_paint_material(BasicMaterial *material, WornSkinPaint paint, cons
 // Probe (two-client paint e2e, client/tests/paint_shader_two_client_e2e.py): one line per painted mesh with the paint state
 // the material now carries. Only a painted mesh logs, so any other player's line is a paint their client drew.
 static void fx_paint_probe(const BasicMaterial *material) {
-    fprintf(stderr, "[paint] mesh enabled=%d shader=%d\n", material->paint_enabled, material->paint_shader);
+    // the colour after the shader (copy_pick_e2e.py tells two copies of one item apart by it)
+    const int rgb = (int) (material->paint_color.x * 255.0f + 0.5f) << 16 | (int) (material->paint_color.y * 255.0f + 0.5f) << 8 |
+                    (int) (material->paint_color.z * 255.0f + 0.5f);
+    fprintf(stderr, "[paint] mesh enabled=%d shader=%d color=%06x\n", material->paint_enabled, material->paint_shader, rgb & 0xFFFFFF);
 }
 
 void skin_fx_apply_paint(Mesh *mesh, const WornSkinPaint paint, const ViewerSkin *skin) {
@@ -1400,7 +1403,7 @@ int skin_fx_apply_paint_graph(Mesh *mesh, GltfInstance *model, const int graph, 
 int skin_fx_wear_key(const ViewerSkin *skin, char *out, const size_t n) {
     if (!out || !n) return 0;
     out[0] = 0;
-    // deob-10.0.6.js:222889: a typed item (type > 0); a weapon skin's is weapons/<src>[_mid]_wear (:222885), not drawn
+    // deob-10.0.7.js:173647 / :174103: a typed item (type > 0); a weapon skin's is skin_fx_weapon_wear_key (:174185)
     if (!skin || skin->type <= 0 || skin->id < 0) return 0;
     const int t = skin->asset_type > 0 ? skin->asset_type : skin->type;
     if (t < 0 || t >= g_viewer_type_count) return 0;
@@ -1430,24 +1433,43 @@ static unsigned int fx_wear_texture(const char *key) {
     return texture;
 }
 
+int skin_fx_weapon_wear_key(const char *weapon_src, const int mid, char *out, const size_t n) {
+    if (!out || !n) return 0;
+    out[0] = 0;
+    if (!weapon_src || !weapon_src[0]) return 0;
+    // 'weapons/' + weapon.src + (null != skin.mid ? '_' + skin.mid : '') + '_wear' (deob-10.0.7.js:174185)
+    const int w = mid >= 0 ? snprintf(out, n, "weapons/%s_%d_wear", weapon_src, mid) : snprintf(out, n, "weapons/%s_wear", weapon_src);
+    return w > 0 && (size_t) w < n;
+}
+
+// Probe (copy_pick_e2e.py): one line per worn mesh / model given a wear, with its wearMap key, its level and whether the
+// host has that map (texture 0: nothing drawn, as v10's missing texture)
+static void fx_wear_probe(const char *key, const double wear, const unsigned int texture) {
+    fprintf(stderr, "[wear] %s level=%.4f map=%d\n", key, wear, texture ? 1 : 0);
+}
+
+void skin_fx_apply_wear_key(Mesh *mesh, GltfInstance *model, const char *key, const double wear) {
+    if (!key || !key[0] || wear < 0.0 || (!mesh && !model)) return;
+    const unsigned int texture = fx_wear_texture(key);
+    fx_wear_probe(key, wear, texture);
+    if (!texture) return;
+    if (mesh && mesh->material && mesh->material->vtable == &basic_material_vtable) fx_wear_material((BasicMaterial *) mesh->material, texture, wear);
+    for (size_t i = 0; model && i < model->mesh_count; i++) {
+        Mesh *m = model->meshes[i];
+        if (m && m->material && m->material->vtable == &basic_material_vtable) fx_wear_material((BasicMaterial *) m->material, texture, wear);
+    }
+}
+
 void skin_fx_apply_wear(Mesh *mesh, const ViewerSkin *skin, const double wear) {
     if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable || wear < 0.0) return;
     char key[96];
-    if (!skin_fx_wear_key(skin, key, sizeof(key))) return;
-    const unsigned int texture = fx_wear_texture(key);
-    if (texture) fx_wear_material((BasicMaterial *) mesh->material, texture, wear);
+    if (skin_fx_wear_key(skin, key, sizeof(key))) skin_fx_apply_wear_key(mesh, NULL, key, wear);
 }
 
 void skin_fx_apply_wear_gltf(GltfInstance *model, const ViewerSkin *skin, const double wear) {
     if (!model || wear < 0.0) return;
     char key[96];
-    if (!skin_fx_wear_key(skin, key, sizeof(key))) return;
-    const unsigned int texture = fx_wear_texture(key);
-    if (!texture) return;
-    for (size_t i = 0; i < model->mesh_count; i++) {
-        Mesh *mesh = model->meshes[i];
-        if (mesh && mesh->material && mesh->material->vtable == &basic_material_vtable) fx_wear_material((BasicMaterial *) mesh->material, texture, wear);
-    }
+    if (skin_fx_wear_key(skin, key, sizeof(key))) skin_fx_apply_wear_key(NULL, model, key, wear);
 }
 
 int skin_fx_apply_custom_wear(Mesh *mesh, GltfInstance *model, const ViewerSkin *skin, const double wear) {
