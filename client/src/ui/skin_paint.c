@@ -4,6 +4,7 @@
 #include <i18n.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -149,4 +150,40 @@ size_t skin_paint_badge_at(char *out, size_t n, const cJSON *meta, const SkinPai
     char place[96];
     snprintf(place, sizeof(place), "top:%dpx;left:%dpx;width:%dpx;height:%dpx", offset, offset, size, size);
     return badge(out, n, meta, store, place);
+}
+
+// ---------------------------------------------------------------- v10.0.7 copies: wear tiers, slot values
+
+static const struct {
+    double max;
+    const char *key, *color;
+} k_wear_tiers[] = {
+    {0.1, "wear_flawless", "#41c300"}, {0.3, "wear_tested", "#a8d600"}, {0.6, "wear_trashed", "#faa332"}, {1.0, "wear_wrecked", "#f44336"},
+};
+#define WEAR_TIER_COUNT ((int) (sizeof(k_wear_tiers) / sizeof(k_wear_tiers[0])))
+
+static int wear_tier(const double wear) {
+    for (int i = 0; i < WEAR_TIER_COUNT; i++)
+        if (wear < k_wear_tiers[i].max) return i;
+    return WEAR_TIER_COUNT - 1;
+}
+
+const char *skin_wear_tier_key(const double wear) { return k_wear_tiers[wear_tier(wear)].key; }
+const char *skin_wear_tier_color(const double wear) { return k_wear_tiers[wear_tier(wear)].color; }
+
+int skin_slot_parse(const char *value, const int fallback, int *copy_id) {
+    if (copy_id) *copy_id = 0;
+    if (!value) return fallback;
+    const char *hash = strchr(value, '#');
+    if (hash && hash != value) {
+        char *end_id, *end_ind;
+        const long id = strtol(value, &end_id, 10);
+        const long ind = strtol(hash + 1, &end_ind, 10);
+        if (end_id == value || end_ind == hash + 1) return fallback; // parseInt: NaN
+        if (copy_id && id > 0 && id <= 0x7fffffffL) *copy_id = (int) id;
+        return (int) ind;
+    }
+    char *end;
+    const long v = strtol(value, &end, 10);
+    return end != value ? (int) v : fallback;
 }

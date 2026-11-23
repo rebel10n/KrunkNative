@@ -251,6 +251,17 @@ void client_send_look(Client *client) {
     if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, out, n);
 }
 
+// NET_EXT_KN_SKIN_COPY_IDS: v10.0.7's ENTER_GAME sends a slot picked from a copy as "<copyId>#<index>" (deob-10.0.7.js:215052);
+// the ENT keeps the index, this packet the copy (look->copies), to a KrunkNative server and to the krunker.io link alike.
+void client_send_skin_copies(Client *client, const LoadoutLook *look) {
+    if (!client || !look) return;
+    // a KN server older than the EXT envelope would not read it (one that has EXT ignores an unknown subtype)
+    if (!krunker_net_active() && !client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_EXT) return;
+    uint8_t out[NET_EXT_HEADER_SIZE + sizeof(look->copies)];
+    const uint16_t n = net_ext_pack(out, sizeof(out), NET_EXT_KN_SKIN_COPY_IDS, &look->copies, sizeof(look->copies));
+    if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, out, n);
+}
+
 // g1(): kill feed for everyone, death card + respawn delay for the victim.
 static void events_kill(Client *client, const NetKillPacket *packet) {
     Player *victim = events_find_player(client, packet->victim_uid);
@@ -1504,21 +1515,27 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&item, body, sizeof(item));
                 item.icon[sizeof(item.icon) - 1] = 0;
                 hud_endscreen_v10_offer_item(item.skin, item.icon); // the Collect Rewards button (hud_endscreen_v10.c)
-            } else if (subtype == NET_EXT_KN_SKIN_COPIES && body_length >= sizeof(NetSkinCopiesPacket)) { // worn copies' stat / seed
-                NetSkinCopiesPacket copies;
-                memcpy(&copies, body, sizeof(copies));
-                const Player *p = events_find_player(client, copies.uid);
-                if (p) {
-                    const int32_t worn[3] = {p->skins.primary, p->skins.secondary, p->skins.melee};
-                    for (int k = 0; k < 3; k++) {
-                        if (worn[k] < 0) continue;
-                        skin_counter_set_base(copies.uid, worn[k], copies.base[k]);
-                        skin_counter_set_seed(copies.uid, worn[k], copies.seed[k]);
-                    }
+            } else if (subtype == NET_EXT_KN_SKIN_COPIES && body_length >= sizeof(NetSkinCopiesPacket)) { // worn copies' stat / seed / wear
+                NetSkinCopiesPacketV2 copies;
+                memcpy(&copies.v1, body, sizeof(copies.v1));
+                for (int k = 0; k < 3; k++) copies.wear[k] = -1.0f; // a V1 body (an older server): no wear
+                if (body_length >= sizeof(copies)) memcpy(&copies, body, sizeof(copies));
+                // the packet follows the player's SKINS and comes before its SPAWN: the skins it is about are that SKINS'
+                // (client_pending_skins), not the ones the player still wears from its last spawn
+                const PlayerSkins skins = client_pending_skins(copies.v1.uid);
+                const int32_t worn[3] = {skins.primary, skins.secondary, skins.melee};
+                for (int k = 0; k < 3; k++) {
+                    if (worn[k] < 0) continue;
+                    skin_counter_set_base(copies.v1.uid, worn[k], copies.v1.base[k]);
+                    skin_counter_set_seed(copies.v1.uid, worn[k], copies.v1.seed[k]);
+                    skin_counter_set_wear(copies.v1.uid, worn[k], copies.wear[k]);
                 }
             } else if (subtype == NET_EXT_KN_SKIN_STYLES && body_length >= sizeof(NetSkinStylesPacket)) {
-                NetSkinStylesPacket styles;
-                memcpy(&styles, body, sizeof styles);
+                NetSkinStylesPacketV2 styles2;
+                memcpy(&styles2.v1, body, sizeof styles2.v1);
+                for (int k = 0; k < NET_SKIN_STYLES_MAX; k++) styles2.wear[k] = -1.0f; // a V1 body: no wear
+                if (body_length >= sizeof styles2) memcpy(&styles2, body, sizeof styles2);
+                const NetSkinStylesPacket styles = styles2.v1;
                 if (styles.count >= 0 && styles.count <= NET_SKIN_STYLES_MAX) {
                     // The packet normally precedes SPAWN. A refreshed owned inventory also
                     // sends one mid-match; a visible player rebuilds styled cosmetics then.
@@ -1532,12 +1549,18 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                         memcpy(worn, slots, sizeof worn);
                     }
                     // unknown (-1) is what the model was built with: none, or your account's m.style (player_mesh.c look_style)
+                    double before_wear[9];
                     for (int k = 0; k < 9; k++) {
                         before[k] = worn[k] >= 0 ? skin_style_of(styles.uid, worn[k]) : 0;
-                        if (before[k] < 0) before[k] = player->is_you ? style_picker_account_style(worn[k]) : 0;
+                        if (before[k] < 0) before[k] = player && player->is_you ? style_picker_account_style(worn[k]) : 0;
+                        before_wear[k] = worn[k] >= 0 ? skin_style_wear_of(styles.uid, worn[k]) : -1.0;
                     }
-                    skin_style_set(styles.uid, styles.count, styles.skin, styles.style);
-                    for (int k = 0; k < 9; k++) changed |= worn[k] >= 0 && before[k] != skin_style_of(styles.uid, worn[k]);
+                    double wears[NET_SKIN_STYLES_MAX];
+                    for (int k = 0; k < NET_SKIN_STYLES_MAX; k++) wears[k] = styles2.wear[k];
+                    skin_style_set_wears(styles.uid, styles.count, styles.skin, styles.style, wears);
+                    for (int k = 0; k < 9; k++)
+                        changed |= worn[k] >= 0 && (before[k] != skin_style_of(styles.uid, worn[k]) ||
+                                                    (!(player && player->is_you) && before_wear[k] != skin_style_wear_of(styles.uid, worn[k])));
                     if (player && player->mesh && changed) {
                         const int render_you = player->render_you;
                         client_drop_player_mesh(client, player);

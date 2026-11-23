@@ -410,7 +410,13 @@ H(h_select_stat) {
     return 1;
 }
 H(h_skin_selector) { UNUSED; ui_loadout_skin_selector(arg_int(args, argc, 0, 0), arg_bool(ev, args, argc, 1, 0)); return 1; }
-H(h_select_skin) { UNUSED; ui_loadout_select_skin(arg_int(args, argc, 0, -1), arg_int(args, argc, 1, 0)); return 1; }
+// selectSkin(ind, weapon, noShow, id): an owned copy's card passes its id (deob-10.0.7.js:220896, :217812-217822)
+H(h_select_skin) {
+    UNUSED;
+    const int id = arg_int(args, argc, 3, 0); // `undefined`: a stack
+    ui_loadout_select_skin_copy(arg_int(args, argc, 0, -1), arg_int(args, argc, 1, 0), id > 0 ? id : 0);
+    return 1;
+}
 H(h_loadout_action) { UNUSED; ui_loadout_action(arg_int(args, argc, 0, 0)); return 1; }
 H(h_toggle_log) { UNUSED; v10_news_toggle_log(arg_elem(ev, args, argc, 0)); return 1; } // v10_news.c
 // toggleSpect(this.checked): `co`, read by enterGame (client/src/spectate.c)

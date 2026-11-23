@@ -320,7 +320,10 @@ typedef struct {
     int pc_stat;                    // -1 none
     NetLookPacket look;             // NET_EXT_KN_LOOK: [10] skinColIndex, [17] hairCol, [18] chatCol, [34] titleIndex
     int look_set;
-    int team_pick;                  // toggleTeam's iïíiîiì (default 1)
+    // NET_EXT_KN_SKIN_COPY_IDS: the copy each slot of the next "en" names, sent as v10.0.7's "<copyId>#<index>" string
+    NetSkinCopyIdsPacket copies;
+    int copies_set;
+    int team_pick;                 // toggleTeam's iïíiîiì (default 1)
     // the end screen's match vote: endData.mts as the server wrote each option ("mode,map[,name,id]"),
     // echoed verbatim by "maVote"; the parsed ids are what the client's cards send back
     char vote_mts[NET_MATCH_PICKS][96];

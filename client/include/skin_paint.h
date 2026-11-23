@@ -45,4 +45,15 @@ size_t skin_paint_badge(char *out, size_t n, const cJSON *meta, const SkinPaint 
 // wallet keeps the defaults (6, 24). The badge gets an inline style with those pixels.
 size_t skin_paint_badge_at(char *out, size_t n, const cJSON *meta, const SkinPaint *store, int offset, int size);
 
+// v10.0.7 copy wear tiers (deob-10.0.7.js:16478-16494): flawless below 0.1 (#41c300), tested below 0.3 (#a8d600), trashed
+// below 0.6 (#faa332), else wrecked (#f44336). iîìiiïî gives the tier's i18n key ("wear_flawless" ..), iìiïííí its colour:
+// the first tier whose max is above the wear, the last one past the end (:24599-24617).
+const char *skin_wear_tier_key(double wear);
+const char *skin_wear_tier_color(double wear);
+
+// A v10.0.7 loadout slot value (iïiíiïí, deob-10.0.7.js:24362-24380): "<copyId>#<index>" gives the index and *copy_id the id
+// (iîìîiìï keeps a plain index for a falsy id, :24381-24383); anything else parseInt(value) and *copy_id 0. An unreadable
+// value (NaN) is `fallback`.
+int skin_slot_parse(const char *value, int fallback, int *copy_id);
+
 #endif

@@ -162,11 +162,44 @@ static void test_settings_row(const char *root) {
     }
 }
 
+// v10.0.7's wear tiers (deob-10.0.7.js:16478-16494): iîìiiïî / iìiïííí, the first tier whose max is above the wear, the last
+// past the end (:24599-24617)
+static void test_wear_tiers(void) {
+    static const struct { double wear; const char *key, *color; } cases[] = {
+        {0.0, "wear_flawless", "#41c300"},   {0.0999, "wear_flawless", "#41c300"}, {0.1, "wear_tested", "#a8d600"},
+        {0.2999, "wear_tested", "#a8d600"},  {0.3, "wear_trashed", "#faa332"},    {0.5999, "wear_trashed", "#faa332"},
+        {0.6, "wear_wrecked", "#f44336"},    {0.9999, "wear_wrecked", "#f44336"}, {1.0, "wear_wrecked", "#f44336"},
+        {1.5, "wear_wrecked", "#f44336"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        CHECK(!strcmp(skin_wear_tier_key(cases[i].wear), cases[i].key), "wear %.4f is %s (got %s)", cases[i].wear, cases[i].key,
+              skin_wear_tier_key(cases[i].wear));
+        CHECK(!strcmp(skin_wear_tier_color(cases[i].wear), cases[i].color), "wear %.4f is %s (got %s)", cases[i].wear, cases[i].color,
+              skin_wear_tier_color(cases[i].wear));
+    }
+}
+
+// iïiíiïí / iîìîiìï (deob-10.0.7.js:24362-24383): "<copyId>#<index>" and plain slot values
+static void test_slot_parse(void) {
+    int copy = -7;
+    CHECK(skin_slot_parse("1234#7819", -1, &copy) == 7819 && copy == 1234, "a copy's slot (index %d copy %d)", skin_slot_parse("1234#7819", -1, &copy), copy);
+    CHECK(skin_slot_parse("7819", -1, &copy) == 7819 && copy == 0, "a plain index");
+    CHECK(skin_slot_parse("-2", 0, &copy) == -2 && copy == 0, "Random");
+    CHECK(skin_slot_parse("0#55", -1, &copy) == 55 && copy == 0, "a falsy id keeps the plain index");
+    CHECK(skin_slot_parse("#41c300", -9, &copy) == -9 && copy == 0, "a hex colour is no slot (NaN)");
+    CHECK(skin_slot_parse("abc", -9, &copy) == -9, "NaN: the fallback");
+    CHECK(skin_slot_parse("12#x", -9, &copy) == -9 && copy == 0, "an unreadable index: the fallback");
+    CHECK(skin_slot_parse(NULL, 4, &copy) == 4, "no value: the fallback");
+    CHECK(skin_slot_parse("99#7819", -1, NULL) == 7819, "no copy out");
+}
+
 int main(int argc, char **argv) {
     const char *root = argc > 1 ? argv[1] : ".";
     test_shows();
     test_badge_markup();
     test_settings_row(root);
+    test_wear_tiers();
+    test_slot_parse();
     printf("skin_paint_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

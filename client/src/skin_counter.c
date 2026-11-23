@@ -73,6 +73,7 @@ int skin_counter_icon_lit(const char *stat, const int pixel) {
 static struct {
     int used, uid, skin, has_base, seed;
     long base;
+    double wear; // the copy's m.wear (the weapon's wearMap level, NET_EXT_KN_SKIN_COPIES V2), -1 none
 } g_base[BASE_MAX];
 static int g_base_next;
 
@@ -91,11 +92,25 @@ static int copy_slot(const int uid, const int skin, const int create) {
     g_base[slot].used = 1;
     g_base[slot].uid = uid;
     g_base[slot].skin = skin;
+    g_base[slot].wear = -1.0;
     return slot;
 }
 
 static void copy_drop_empty(const int slot) {
-    if (slot >= 0 && !g_base[slot].has_base && !g_base[slot].seed) g_base[slot].used = 0;
+    if (slot >= 0 && !g_base[slot].has_base && !g_base[slot].seed && g_base[slot].wear < 0.0) g_base[slot].used = 0;
+}
+
+void skin_counter_set_wear(const int uid, const int skin, const double wear) {
+    if (skin < 0) return;
+    const int slot = copy_slot(uid, skin, wear >= 0.0);
+    if (slot < 0) return;
+    g_base[slot].wear = wear >= 0.0 ? wear : -1.0;
+    copy_drop_empty(slot);
+}
+
+double skin_counter_wear(const int uid, const int skin) {
+    const int slot = copy_slot(uid, skin, 0);
+    return slot >= 0 ? g_base[slot].wear : -1.0;
 }
 
 void skin_counter_set_base(const int uid, const int skin, const long base) {

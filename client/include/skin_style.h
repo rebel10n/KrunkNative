@@ -8,6 +8,12 @@ struct ViewerSkin;
 
 // The styles player `uid` wears, replaced as a whole (a packet lists every styled worn cosmetic; count 0 clears them).
 void skin_style_set(int uid, int count, const int *skins, const int *styles);
+// ... with each pair's wear (the worn copy's m.wear, a V2 packet; wears NULL or < 0: none)
+void skin_style_set_wears(int uid, int count, const int *skins, const int *styles, const double *wears);
+// The wear of the copy player `uid` wears as store item `skin` (generateMeshData's wearMap level, deob-10.0.7.js:173646-173651),
+// -1 none or unknown.
+double skin_style_wear_of(int uid, int skin);
+int skin_style_known(int uid); // 1 when a packet came for that player
 // The style player `uid` wears on store item `skin`: -1 unknown (no packet for that player), 0 none, else the style.
 int skin_style_of(int uid, int skin);
 void skin_style_reset(void); // a new connection: every player's styles are gone

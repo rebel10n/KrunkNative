@@ -929,19 +929,50 @@ static int player_weapon_skin_files_ready(const Player *player) {
     return 0;
 }
 
-// The worn copy's seed (getMat's seeded shader 15, deob-10.0.4.js:203448 / :203463): you on krunker.io, your own account's
-// copy; everyone on Box Office, the server's NET_EXT_KN_SKIN_COPIES. 0 = none (a stack, a shop copy).
-// The worn copy's wear (v10.0.6's wearMap level, the copy's m.wear: <slot>Metadata, deob-10.0.6.js:173449-173459): you
-// and the menu's preview on krunker.io, your own account's copy. -1 = none: Box Office copies have none, and no packet
-// carries another player's.
-static double player_copy_wear(const Player *player, const int store) {
-    return store >= 0 && (player->is_you || player->own_copies) ? account_skin_wear(store) : -1.0;
+// The copy a slot of our own model names for store index `store` ("<copyId>#<index>", v10.0.7's slot value): the menu's
+// preview reads the saved slots (updateClassPreview, deob-10.0.7.js:217902-217926), our player in a game the ENT's
+// (ui_loadout_ent_copies). 0 = a plain index.
+static int player_own_copy(const Player *player, const int store) {
+    if (player->own_copies) return ui_loadout_worn_copy(store);
+    return net_skin_copy_id_of(ui_loadout_ent_copies(), -1, store);
 }
 
+// The worn copy's wear (the wearMap level, the copy's m.wear: generateMeshData / generateMeshes read the slot's metadata,
+// deob-10.0.7.js:173646-173651, :174102-174107, :174184-174189): you and the menu's preview, the copy your slot names (else
+// the first copy of the index with a wear, the plain-index rule); another player, the server's (NET_EXT_KN_SKIN_COPIES V2
+// for the weapons and the melee, NET_EXT_KN_SKIN_STYLES V2 for the cosmetics). -1 = none.
+static double player_copy_wear(const Player *player, const int store) {
+    if (store < 0) return -1.0;
+    if (player->is_you || player->own_copies) {
+        const int copy = player_own_copy(player, store);
+        const double own = ui_loadout_copy_wear(store, copy);
+        // a named copy's own wear (none: none); a plain index on krunker.io: its own list's first worn copy
+        return own >= 0.0 || copy > 0 ? own : account_skin_wear(store);
+    }
+    const double weapon = skin_counter_wear(player->uid, store);
+    return weapon >= 0.0 ? weapon : skin_style_wear_of(player->uid, store);
+}
+
+// The worn copy's seed (getMat's seeded shader 15, deob-10.0.4.js:203448 / :203463): you on krunker.io, your own account's
+// copy; everyone on Box Office, the server's NET_EXT_KN_SKIN_COPIES. 0 = none (a stack, a shop copy).
 static int player_copy_seed(const Player *player, const int store) {
     if (store < 0) return 0;
+    // the menu's preview: iiiíìiî(slot, m) of the slot's copy (meleeSeed and the weapons' {i, m, id}: deob-10.0.7.js:24346-24352,
+    // :217860-217950); a plain index has none
+    if (player->own_copies) {
+        const int seed = ui_loadout_copy_seed(store, ui_loadout_worn_copy(store));
+        if (seed > 0) return seed;
+    }
     const int own = player->is_you ? account_skin_seed(store) : -1;
     return own >= 0 ? own : skin_counter_seed(player->uid, store);
+}
+
+// generateMeshes' weapon wear (deob-10.0.7.js:174184-174189): "weapons/<src>[_<mid>]_wear" at the slot's m.wear
+static void player_weapon_wear(const Player *player, const int slot, const Weapon *weapon, const ViewerSkin *skin, Mesh *mesh,
+                               GltfInstance *model) {
+    char key[160];
+    if (!skin || !skin_fx_weapon_wear_key(weapon->src, skin->mid, key, sizeof key)) return;
+    skin_fx_apply_wear_key(mesh, model, key, player_copy_wear(player, player_slot_skin_index(player, slot)));
 }
 
 // generateMeshes' counter attach (deob-10.0.4.js:172723-172737): a counter skin's stat counter on the weapon mesh, showing
@@ -1014,8 +1045,13 @@ static int look_style(const Player *player, const int index) {
     if (index < 0) return 0;
     const int server = skin_style_of(player->uid, index);
     if (server >= 0) return server;
-    // Menu preview (uid -1) and the local player before the first game: selected copy's m.style.
-    return player->uid == -1 || player->is_you ? style_picker_account_style(index) : 0;
+    // Menu preview (uid -1) and the local player before the first game: the slot's copy's m.style (the Customize slot and
+    // updateClassPreview's xMetadata, deob-10.0.7.js:222501-222512, :217860-217950), else the plain-index rule
+    if (player->uid == -1 || player->is_you) {
+        const int copy = player_own_copy(player, index);
+        return copy > 0 ? ui_loadout_copy_style(index, copy) : style_picker_account_style(index);
+    }
+    return 0;
 }
 
 static double look_wear(const Player *player, const ViewerSkin *item, const int store) {
@@ -1726,6 +1762,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                             weapon_mesh = gltf_skin_carrier(skin, model, &weapon_model);
                             if (!weapon_mesh) continue;
                             if (skin && weapon_model) skin_fx_apply_paint_gltf(weapon_model, player_slot_paint(player, i, weapon), skin); // loadAnimMesh's paint
+                            if (!alt) player_weapon_wear(player, i, weapon, skin, NULL, weapon_model); // loadAnimMesh's wear (:207981-207993)
                         } else {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
@@ -1744,6 +1781,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                             }
                             if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
                             if (skin && !alt) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon), skin); // the store copy's paint
+                            if (!alt) player_weapon_wear(player, i, weapon, skin, weapon_mesh, NULL); // the copy's wear (loadMesh, :206558)
                             if (upgraded) skin_fx_apply_video(weapon_mesh, skin_video_alt_skin(player->loadout[i]), 1, 1); // tFilter Linear
                         }
                         arms->weapon_models[j] = weapon_model;

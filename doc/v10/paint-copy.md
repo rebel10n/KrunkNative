@@ -209,11 +209,68 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
 - The socket's `market` inventory page (`market_done` / `shape_inventory` in `economy.c`) returns the same rows without
   the SQL's paint columns: a stack `{i, s, c, qs}`, a painted copy `{i, s, c: 1, sid, m, qs}`.
 
+### Loadout copies (v10.0.7 `"<copyId>#<index>"` slots)
+
+v10.0.7 (deob-10.0.7.js line numbers):
+
+- A slot picked from an owned card with an `id` is `"<copyId>#<index>"` (`iîìîiìï`, :24381-24383). The weapon card calls
+  `selectSkin(ind, weapon - 1, undefined, id)` (:220896) and `selectSkin` stores `iîìîiìï(id, ind)` (:217812-217830); the
+  item cards call `fn("<id>#<ind>")` (:223502) and `selectHat` & co. save the raw value (`iïîîíïí`, :217270-217272,
+  :217305-217465). Random returns the picked entry's `"<id>#<ind>"` (`iiïíïíí`, :217797-217812; favourites by
+  `isFav`, :214623-214625). Presets (`krk_loadouts`) keep the raw values (:218607). `ENTER_GAME` sends them as
+  they are (:215052).
+- `iïiíiïí` splits a slot into `skinId` / `skinIndex` (:24362-24380); `iiîiîîî` gives the index of a string or an `{i, m}`
+  object (:24322-24334).
+- The class preview (:217860-217950): a weapon slot is `{i, m, id}` when it is `"<id>#<ind>"` and the account entry with
+  that id has an `m`, else the plain index; a cosmetic's `xMetadata` is the entry's `m` only for `"<id>#<ind>"`; the melee
+  seed is `iiiíìiî(slot, m)` (m.seed, else a hash of the id, :24346-24352).
+- The Customize tab's slot finds the entry by its id (or, for a plain index, the first entry of the index with an `m`) and
+  draws `m.style`'s style preview (:222501-222512).
+- `selectCharm` (:217425-217452): both charm slots on one index are fine when both are copies with different ids; the same
+  copy twice, or a plain index with no stack of `cnt > 1`, empties the slot and shows "Charm already in use" with
+  Override (`overrideCharm(JSON.stringify(value))`) and Ok.
+
+KrunkNative:
+
+- `client/src/ui/ui_loadout.c` keeps each saved slot's copy (`Selected.copy`; the `skins` and `charms` JSON hold the
+  `"<id>#<ind>"` string), parses it with `skin_slot_parse` (`client/src/ui/skin_paint.c`), writes it from the owned cards
+  (`owned_card`: the weapon card's `selectSkin(ind,weapon,undefined,id)`, the item cards' `fn("<id>#<ind>")`), the
+  handlers (`harg_slot`, `ui_handlers.c` `h_select_skin`'s 4th argument), Random, presets and `select_charm` (v10's rule
+  and popup). `ui_loadout_look` fills `LoadoutLook.copies` (the copy each routed slot names), and the client sends it as
+  `NET_EXT_KN_SKIN_COPY_IDS` (0x81C0, `NetSkinCopyIdsPacket`, 128 bytes: store index and copy id per `SKIN_COPY_SLOT_*`)
+  right before every ENT (`client_send_skin_copies`, a server with EXT; the krunker.io link turns it into the "en"
+  array's `"<id>#<ind>"` strings, `krunker_link.c` `ent_slot`). The ENT itself keeps the plain indices.
+- The local model: the menu preview reads the saved slots (`ui_loadout_worn_copy`), our player in a game the last ENT's
+  copies (`ui_loadout_ent_copies`). Paint, style, seed and wear come from that copy's `m` (`ui_loadout_copy_meta` and
+  friends; `player_mesh.c` `player_own_copy`); a plain index keeps the plain-index rule (the first copy with a paint /
+  style / wear). Another copy of a worn index rebuilds the preview (`class_preview.c`).
+- The server (`server/src/net.c`, `accounts.c`): the EXT is kept as `ent_copies`, copied to `worn_copies` at spawn.
+  `accounts_load_skins` records every owned entry with an id (`ServerSkinCopy`: paint, style, seed, wear; 512 per
+  account). `accounts_worn_copy` gives the copy a slot names when the account still has it and it is a copy of that index;
+  else NULL and the plain-index rule applies (a gone copy, another index's copy, an older client that sends no EXT). The
+  copy's paint goes on SKINS V2, its seed and wear on `NET_EXT_KN_SKIN_COPIES` V2 (40 bytes: the V1 28 bytes, then
+  `float wear[3]`), a cosmetic's style and wear on `NET_EXT_KN_SKIN_STYLES` V2 (104 bytes: the V1 72, then
+  `float wear[8]`; a pair with a wear and style 0 is listed too). Readers take both sizes; an older client reads the V1
+  prefix.
+- Wear on the model (`client/src/skin_fx.c`): the wearMap of a cosmetic (`<type dir><id>_wear`, not for customTextures,
+  :173646-173651), of a melee (`melee/melee_<id>_wear`, :174102-174107) and of a weapon skin
+  (`weapons/<src>[_<mid>]_wear`, :174184-174189, `skin_fx_weapon_wear_key`) at the copy's `m.wear`, mixed by
+  `basic.frag`'s `wear_apply` as v10's `iïìîïiì` (:95713-95730). Another player's levels come from the two V2 packets
+  (`skin_counter_wear`, `skin_style_wear_of`). The assets ship no weapon wearMap yet (melee 182-200 and a few cosmetics
+  only): a weapon skin's wear is computed and logged (`[wear] ... map=0`) but not drawn.
+- The item view (`view_item`, :223653-223690): the account's first entry of the index gives `.itemViewWear` ("<tier>
+  (wear.toFixed(4))" and `#serial`), `.itemViewDesc` / `.itemViewDescWear` with the type label (`iìíiiií`,
+  :24595-24598), and the viewer URL's `&wear`, `&paint`, `&style`, `&seed` and counter stats (`ui_loadout_paint_query`).
+  The owned card's tooltip (`createTip`, :223704-223712) shows a wear and serial only from `data-wear` / `data-serial`,
+  which the Loadout cards do not set (only the trade cards, :221824 / :221856 / :221970); `ui_tooltip.c` already does
+  the same.
+
 ### The bridge
 
 The v10 bridge (`net-bridge/v10Translate.ts`, `v10Proxy.ts`) keeps the paint of our own loadout's `{i, m}` slots
 (`loadoutPaintOf`, `EV.loadoutPaint`) and puts it on our own spawn's add record (`buildPlayerAdd`, weapon slots [12] and
-[19]): `{i, m}` instead of the plain index. The native ENT carries only indices (the loadout's paint stays on the bridge).
+[19]): `{i, m}` instead of the plain index. The native ENT carries only indices; the copies ride in
+`NET_EXT_KN_SKIN_COPY_IDS` (above), which the bridge does not read yet.
 The native SKINS packet carries each worn skin's paint from patch 6 (below): the server fills it from the owner's painted
 copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a native client shows another player's paint.
 
@@ -237,12 +294,13 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   deob:150226), not in the Loadout chooser; the native button is on the chooser's card, where the owned badge is. A
   krunker.io account gets no button (nothing is sent to krunker.io for a paint, `v10_gapi` refuses writes there).
   The clan banner (`clan_ui.c`, `POST /clans/{id}/banner-color`) is a separate clan route.
-- A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge. The paint of a copy is the client's own
-  one (its `$account.skins`, section 6), so the local model is painted. A native client paints another player's worn
-  skins from SKINS V2 (patch 6). The paint is the owner's first painted copy of that store index, the plain-index rule
-  (deob-10.0.3.js:252090-252095): a loadout that names a second painted copy of the same index with a different paint
-  shows the first one to other players. The native ENT carries no copy id, so this is the one case not matched.
-  Not drawn: a shader paint (`paintShader`; the packet carries its number, `client/src/skin_fx.c` draws only colour
+- A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge (`v10_translate.c` ignores
+  `NET_EXT_KN_SKIN_COPY_IDS`). A native client gets the copy each slot names from the server (Loadout copies, above); a
+  plain index (or a gone copy) shows the owner's first painted copy of that store index, the plain-index rule
+  (deob-10.0.3.js:252090-252095), and its first worn copy's wear. v10.0.7 gives a plain index no `m` at all
+  (:217860-217950): KrunkNative keeps the plain-index rule for older saved slots and older clients.
+- A counter skin's count (`skin_counters_bases`) is still the first counted copy of the index, not the named copy's.
+- Not drawn: a shader paint (`paintShader`; the packet carries its number, `client/src/skin_fx.c` draws only colour
   paints, `basic.frag` mixes the albedo as the official colorNode does). The official client does not yet get native
   players' paint: the C bridge (`server/bridge/v10_translate.c`) accepts V2 and takes only the indices.
 - `paintTargets` (which items accept a paint) is not checked by the brain; the client offers only paintable items.
@@ -294,3 +352,15 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   brain makes the copy (skin_copies, #dc3c3c), one paint is taken, the popup closes with "Painted Bullseye Halo with Red
   Paint", and the card's badge reads "Painted: Red Paint". An account with no paint gets v10's empty state; a refused Paint
   shows the brain's reason. Before this change the card has no paint button (the first check fails).
+- `server/tests/skin_copy_ids_test.c` (`skin_copy_ids_test`): an owner sends `NET_EXT_KN_SKIN_COPY_IDS` naming its second
+  Topo copy, an unpainted melee copy and a styled body copy before its ENT; a joiner gets the second copy's paint (SKINS
+  V2), its seed and wear (SKIN_COPIES V2, 40 bytes, the V1 prefix unchanged), the named melee copy's lack of wear, the
+  body copy's style and the plain hat's first-copy wear (SKIN_STYLES V2, 104 bytes). A gone copy, another index's copy
+  and no packet fall back to the plain-index rule; a copy named on another slot of its index is still found.
+- `client/tests/skin_paint_test.c`: the wear tiers (`skin_wear_tier_key` / `_color` at each boundary) and the slot
+  parser (`"<id>#<ind>"`, a plain index, Random, a falsy id, a hex colour, NaN).
+- `client/tests/copy_pick_e2e.py` (`copy_pick_e2e`): alice owns two Topo copies (#ff0000 wear 0.05, #00ff00 wear 0.45)
+  and two Flip-Flop copies (wear 0.12, 0.71); her client calls the weapon card's `selectSkin(7819,1,undefined,id)` and
+  clicks the second Flip-Flop card of Select Melee. The slots save `"<id>#7819"` and `"<id>#7857"`; bob's client draws
+  alice's Topo with color=00ff00 (never ff0000), logs `[wear] weapons/weapon_2_wear level=0.4500` and
+  `[wear] melee/melee_182_wear level=0.7100 map=1`, and alice's own model does the same.

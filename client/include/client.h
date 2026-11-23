@@ -1144,6 +1144,11 @@ int zombie_events_handle(Client*, int type, const void *payload, uint16_t length
 void combat_send_streak_slots(Client*);      // the streakIndex1..3 loadout, right before every ENT
 void client_send_pc_stat(Client*);           // WP-E (net/game_events.c): pcStatIndex, right before every ENT
 void client_send_look(Client*);             // NET_EXT_KN_LOOK (net/game_events.c): an official ENTER_GAME's colours and title
+struct LoadoutLook;
+// NET_EXT_KN_SKIN_COPY_IDS (net/game_events.c): the copies the ENT's slots name (look->copies), right before the ENT
+void client_send_skin_copies(Client*, const struct LoadoutLook *look);
+// The skins of player uid's last SKINS (the next SPAWN wears them), PLAYER_SKINS_NONE when none came (main.c)
+PlayerSkins client_pending_skins(int uid);
 void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the streak keys
 // The sight a player's weapons take (attach.js index): the local player's saved attachIndex,
 // others' Player.attach_index (0 Reflex until the v7 SPAWN carries attachIndex, WP-C).

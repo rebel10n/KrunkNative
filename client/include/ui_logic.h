@@ -16,6 +16,7 @@
 #include <client.h>
 #include <html_dom.h>
 #include <i18n.h> // I18N(key, english): every user-visible string (client/src/ui/i18n.c)
+#include <net_ext.h> // NetSkinCopyIdsPacket (LoadoutLook.copies)
 
 // Window ids: Krunker's showWindow(n) ids = windows[n - 1] + 1 (v7.1.4: 1 settings, 2 servers,
 // 3 customize, 8 host, 24 join, 48 server finder, ...).
@@ -773,6 +774,7 @@ void ui_loadout_select_skin_color(int index);   // selectSkinColor
 void ui_loadout_select_stat(int index);         // selectStat
 void ui_loadout_skin_selector(int weapon, int secondary); // skinSelector
 void ui_loadout_select_skin(int index, int weapon); // selectSkin
+void ui_loadout_select_skin_copy(int index, int weapon, int copy_id); // selectSkin(index, weapon, noShow, id): "<id>#<index>" for a copy
 const cJSON *ui_loadout_skin_json(int index);        // the store item's JSON (skins.json), NULL when unknown
 const char *ui_loadout_tag_color(const char *tag);  // store.tags: a limT badge's colour (#41c300 when untagged)
 const char *ui_loadout_tag_name(int i);             // store.tags' i-th name, NULL past the last
@@ -795,20 +797,49 @@ int  ui_loadout_saved_hex(const char *key, char out[8]); // a hex string saved u
 // in, or offline: every skin), like the Loadout / Customize tabs draw them (a guest's saved picks
 // are stripped by the server anyway). cosmetics are routed (cosmetics_route); attach_index is v7's
 // `forceAttach ? 0 : attachIndex` (cosmetics_attach_index).
-typedef struct {
+typedef struct LoadoutLook {
     PlayerCosmetics cosmetics;     // skin colour + hat / body / waist / face / dye
     PlayerCosmeticsV7 cosmetics_v7; // head / back / shoe / pet / wrist / charms / card (badge: the server's)
     PlayerSkins skins;             // primary / secondary weapon skins, melee
-    PlayerSkinPaints skin_paints;  // the paint of each of those (the account's own painted copy: ui_loadout_skin_paints)
+    PlayerSkinPaints skin_paints;  // the paint of each of those (the copy each slot names: ui_loadout_skin_paints)
     int secondary_index;           // setClass's selectedSecondaryIndex (ui_loadout_secondary)
     int attach_index;              // the sight: 0 Reflex, 1 Acog, -1 none
+    // v10.0.7 "<copyId>#<index>" slots (deob-10.0.7.js:24381-24383): each slot's store index (as routed above) and the owned
+    // copy it names, 0 = a plain index (NET_EXT_KN_SKIN_COPY_IDS, sent before the ENT)
+    NetSkinCopyIdsPacket copies;
 } LoadoutLook;
 void ui_loadout_look(int class_index, int for_ent, LoadoutLook *out);
-// The paint the account's own copy of store index `index` wears (v10.0.3's plain-index rule, deob-10.0.3.js:252090-252095:
-// the first owned copy of that index with metadata; its m.paint / m.paintShader). 1 and *out when painted, else 0 and
-// WORN_SKIN_PAINT_NONE. The local player's and the preview's model read it (the official reads its own $account.skins).
+// The paint the account's copy of store index `index` wears: the copy a loadout slot names ("<copyId>#<index>", v10.0.7's
+// class preview, deob-10.0.7.js:217902-217926), else v10.0.3's plain-index rule (deob-10.0.3.js:252090-252095: the first
+// owned copy of that index with a paint). 1 and *out when painted, else 0 and WORN_SKIN_PAINT_NONE. The local player's and
+// the preview's model read it (the official reads its own $account.skins).
 int ui_loadout_skin_paint(int index, WornSkinPaint *out);
-void ui_loadout_skin_paints(const PlayerSkins *skins, PlayerSkinPaints *out);
+// ... of each weapon slot: the copy `copies` names for it (NULL: the saved loadout's, ui_loadout_worn_copy)
+void ui_loadout_skin_paints(const PlayerSkins *skins, const NetSkinCopyIdsPacket *copies, PlayerSkinPaints *out);
+// The copy id a loadout slot names for store index `index` (a weapon's saved skin, a cosmetic, a charm: "<copyId>#<index>"),
+// 0 when every slot wearing it holds the plain index (or none wears it).
+int ui_loadout_worn_copy(int index);
+// The metadata m of the account's copy of `index` that the loadout wears: the copy `copy_id` names (copy_id > 0; v10.0.7
+// finds it by id, deob-10.0.7.js:217906-217908), else the first copy of that index with an m that has `key` (the plain-index
+// rule; key NULL: any m). A parsed copy: the caller cJSON_Deletes it. NULL none.
+cJSON *ui_loadout_copy_meta(int index, int copy_id, const char *key);
+// A copy's wear (m.wear, 0..1: the model's wearMap level, deob-10.0.7.js:173646-173651), its seed (iiiíìiî: m.seed, else a
+// hash of its id, deob-10.0.7.js:24346-24352; 0 none) and its style (m.style, 0 none), for the local player and the preview:
+// copy `copy_id` of store index `index` (a slot's "<copyId>#<index>"), else (0, or gone) the first copy of the index with one
+// (the plain-index rule the server applies too). Wear -1 none.
+double ui_loadout_copy_wear(int index, int copy_id);
+int ui_loadout_copy_seed(int index, int copy_id);
+int ui_loadout_copy_style(int index, int copy_id);
+// The copy ids of the last look built for an ENT (ui_loadout_look(.., for_ent=1, ..)): the local player's model reads its
+// copies from it while in a game, as the server does (NET_EXT_KN_SKIN_COPY_IDS).
+const NetSkinCopyIdsPacket *ui_loadout_ent_copies(void);
+// iîìiiïî(wear) (deob-10.0.7.js:24599-24609, the tiers at :16478-16494): the wear tier's i18n key ("wear_flawless" below 0.1,
+// "wear_tested" below 0.3, "wear_trashed" below 0.6, else "wear_wrecked") and iìiïííí's colour (:24610-24617).
+const char *ui_loadout_wear_tier_key(double wear);
+const char *ui_loadout_wear_tier_color(double wear);
+// A saved slot value: "<copyId>#<index>" (*copy_id = the id) or a plain index (*copy_id = 0); iïiíiïí, deob-10.0.7.js:24362-24380.
+// Returns the store index (parseInt: an unreadable value is `fallback`).
+int ui_loadout_parse_slot(const char *value, int fallback, int *copy_id);
 // The item view's viewer URL tail for the owned copy: "&wear=w" (deob-10.0.6.js:221934) then its paint ("&paint=rrggbb" /
 // "&paintShader=n", v10 deob:123160-123173), "" none.
 void ui_loadout_paint_query(int index, char *out, size_t n);

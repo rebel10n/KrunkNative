@@ -31,6 +31,7 @@
 #include "../viewer/viewer_store.h"
 #include <sprays.h> // SPRAYS_BASE_COUNT, social_v7.h (store spray indices)
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,11 +181,13 @@ static const char *PC_STATS[] = {"SPK", "Kills", "Deaths", "KDR", "KPG", "Games 
 
 // ---------------------------------------------------------------- selected* state
 
-// `var selectedX = getSavedVal(key) || default`: one saved integer per key.
+// `var selectedX = getSavedVal(key) || default`: one saved value per key, an integer or (v10.0.7, an owned copy picked
+// from its card) "<copyId>#<index>" (iîìîiìï, deob-10.0.7.js:24381-24383; the selects save it raw, :217270-217272).
 typedef struct {
     const char *key;
     int def;
-    int value;
+    int value; // the store index (iïiíiïí's skinIndex)
+    int copy;  // the copy id ("<copyId>#<index>": iïiíiïí's skinId, deob-10.0.7.js:24362-24380), 0 a plain index
 } Selected;
 
 enum {
@@ -212,6 +215,7 @@ static int g_sel_loaded;
 static int g_skin_weapon = 1; // activeSkinSel: the weapon the Select Skin window is for
 
 static void sel_save(int which, int value);
+static void sel_save_copy(int which, int value, int copy);
 
 // f1795(slot, index, default): a streak index stays only when it exists and is for that slot.
 static int streak_valid(const int slot, const int index) {
@@ -224,10 +228,14 @@ static void sel_load(void) {
     for (int i = 0; i < SEL_COUNT; i++) {
         char buf[32];
         g_sel[i].value = g_sel[i].def;
+        g_sel[i].copy = 0;
         if (html_storage_get(g_sel[i].key, buf, sizeof(buf)) < 0 || !buf[0]) continue;
-        char *end;
-        const long v = strtol(buf, &end, 10);
-        if (end != buf) g_sel[i].value = (int) v;
+        int copy = 0;
+        const int v = ui_loadout_parse_slot(buf, INT_MIN, &copy);
+        if (v != INT_MIN) {
+            g_sel[i].value = v;
+            g_sel[i].copy = copy;
+        }
     }
     for (int k = 0; k < 3; k++) g_sel[SEL_STREAK1 + k].value = streak_valid(k, g_sel[SEL_STREAK1 + k].value);
     // KrunkNative v3.1.1 -> v7.1.4 migration: v3's "Back" slot (backIndex) held body items
@@ -253,26 +261,58 @@ static int sel(const int which) {
     return g_sel[which].value;
 }
 
-static void sel_save(const int which, const int value) {
+// the copy id the slot's saved value names ("<copyId>#<index>"), 0 a plain index
+static int sel_copy(const int which) {
+    sel_load();
+    return g_sel[which].copy;
+}
+
+// saveVal(key, iîìîiìï(copy, value)): "<copy>#<value>" for a copy (copy > 0), else the plain index
+static void sel_save_copy(const int which, const int value, const int copy) {
     g_sel_loaded = 1;
     g_sel[which].value = value;
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d", value);
+    g_sel[which].copy = copy > 0 && value >= 0 ? copy : 0;
+    char buf[32];
+    if (g_sel[which].copy) snprintf(buf, sizeof(buf), "%d#%d", copy, value);
+    else snprintf(buf, sizeof(buf), "%d", value);
     html_storage_set(g_sel[which].key, buf);
 }
 
-// selectedCharms (localStorage "charms", [primary, secondary]): -1 none.
-static int charm_at(const int slot) {
+static void sel_save(const int which, const int value) { sel_save_copy(which, value, 0); }
+
+int ui_loadout_parse_slot(const char *value, const int fallback, int *copy_id) { return skin_slot_parse(value, fallback, copy_id); }
+
+// A JSON slot value (the "skins" object's, the "charms" array's): a number, or a "<copyId>#<index>" string. -1 none.
+static int json_slot(const cJSON *v, int *copy) {
+    if (copy) *copy = 0;
+    if (cJSON_IsNumber(v)) return v->valueint;
+    if (cJSON_IsString(v) && v->valuestring) return ui_loadout_parse_slot(v->valuestring, -1, copy);
+    return -1;
+}
+
+// iîìîiìï(copy, value) as JSON: a "<copy>#<value>" string for a copy, else the number
+static cJSON *json_slot_value(const int value, const int copy) {
+    if (copy > 0 && value >= 0) {
+        char key[32];
+        snprintf(key, sizeof(key), "%d#%d", copy, value);
+        return cJSON_CreateString(key);
+    }
+    return cJSON_CreateNumber(value);
+}
+
+// selectedCharms (localStorage "charms", [primary, secondary]): -1 none; a copy's "<copyId>#<index>" (*copy its id).
+static int charm_at_copy(const int slot, int *copy) {
     char buf[256] = "[]";
     html_storage_get("charms", buf, sizeof(buf));
     cJSON *a = cJSON_Parse(buf);
-    const cJSON *v = cJSON_GetArrayItem(a, slot);
-    const int r = cJSON_IsNumber(v) ? v->valueint : -1;
+    const int r = json_slot(cJSON_GetArrayItem(a, slot), copy);
     cJSON_Delete(a);
     return r;
 }
 
-static void charm_save(const int slot, const int value) {
+static int charm_at(const int slot) { return charm_at_copy(slot, NULL); }
+
+static void charm_save_copy(const int slot, const int value, const int copy) {
     char buf[256] = "[]";
     html_storage_get("charms", buf, sizeof(buf));
     cJSON *a = cJSON_Parse(buf);
@@ -281,12 +321,14 @@ static void charm_save(const int slot, const int value) {
         a = cJSON_CreateArray();
     }
     while (cJSON_GetArraySize(a) <= slot) cJSON_AddItemToArray(a, cJSON_CreateNull());
-    cJSON_ReplaceItemInArray(a, slot, value >= 0 || value == -2 ? cJSON_CreateNumber(value) : cJSON_CreateNull());
+    cJSON_ReplaceItemInArray(a, slot, value >= 0 || value == -2 ? json_slot_value(value, copy) : cJSON_CreateNull());
     char *text = cJSON_PrintUnformatted(a);
     if (text) html_storage_set("charms", text);
     free(text);
     cJSON_Delete(a);
 }
+
+static void charm_save(const int slot, const int value) { charm_save_copy(slot, value, 0); }
 
 // v10's colour check iìíiïií: /^#([0-9A-F]{3}){1,2}$/i (deob-10.0.7.js:24042-24044)
 int ui_loadout_hex_color_ok(const char *s) {
@@ -318,8 +360,9 @@ int ui_loadout_skin_color(void) {
     return ui_loadout_saved_hex("skinColIndex", NULL);
 }
 
-static int random_owned_skin(int weapon, int type);
+static int random_owned_skin(int weapon, int type, int *copy);
 static int weapon_skin(int weapon);
+static int weapon_skin_copy(int weapon, int *copy);
 static const cJSON *skin_json(int index);
 
 // store.skins[ind].attachBypass: the skin takes an attachment on a weapon without one (Vince Mastery)
@@ -330,53 +373,81 @@ static int has_inventory(void);
 
 // A store item pick as worn: -1 none (also v7's explicit None, -3); Random (-2) is getRandomOwnedSkin
 // (`weapon` 1-based for a weapon skin, else store `type`) when resolve_random (the ENT), none for the
-// preview (`== -2 ? -1`). Nothing without an inventory, as the tabs show it.
-static int32_t worn(const int pick, const int resolve_random, const int weapon, const int type) {
-    if (!has_inventory() && !(pick >= 0 && store_item_free(pick))) return -1; // a guest wears the free items
-    if (pick == -2) return resolve_random ? random_owned_skin(weapon, type) : -1;
-    return pick >= 0 ? pick : -1;
+// preview (`== -2 ? -1`). Nothing without an inventory, as the tabs show it. `copy`: the pick's copy id
+// ("<copyId>#<index>"); `slot` gets the worn index and its copy (Random's pick: "<id>#<ind>", deob-10.0.7.js:217812).
+static int32_t worn(const int pick, const int copy, const int resolve_random, const int weapon, const int type, NetSkinCopyIdsPacket *pre,
+                    const int slot) {
+    int32_t out = -1, out_copy = 0;
+    if (!has_inventory() && !(pick >= 0 && store_item_free(pick))) out = -1; // a guest wears the free items
+    else if (pick == -2) out = resolve_random ? random_owned_skin(weapon, type, &out_copy) : -1;
+    else if (pick >= 0) {
+        out = pick;
+        out_copy = copy;
+    }
+    if (pre && slot >= 0 && slot < SKIN_COPY_SLOTS) {
+        pre->skin[slot] = out;
+        pre->copy_id[slot] = out >= 0 ? out_copy : 0;
+    }
+    return out;
 }
 
 // skin colour and hat / body / waist / face / dye (enterGame ent[3]/[4]/[14]/[17]/[21], dJ's
 // hatIndex & co). hairCol is the premium picker's hex string (selectHairColor, deob-10.0.7.js:217487-217494),
 // else the class colour (-1). PlayerCosmetics.body is the type-2 body item (v7 Body, bodyIndex).
-static void look_cosmetics(PlayerCosmetics *out, const int resolve_random) {
-    static const struct { int which, type; } SLOTS[5] = {
-        {SEL_HAT, 1}, {SEL_BODY, 2}, {SEL_WAIST, 6}, {SEL_FACE, 7}, {SEL_DYE, 5},
+static void look_cosmetics(PlayerCosmetics *out, const int resolve_random, NetSkinCopyIdsPacket *pre) {
+    static const struct { int which, type, slot; } SLOTS[5] = {
+        {SEL_HAT, 1, SKIN_COPY_SLOT_HAT}, {SEL_BODY, 2, SKIN_COPY_SLOT_BODY}, {SEL_WAIST, 6, SKIN_COPY_SLOT_WAIST},
+        {SEL_FACE, 7, SKIN_COPY_SLOT_FACE}, {SEL_DYE, 5, SKIN_COPY_SLOT_DYE},
     };
     int32_t *slot[5] = {&out->hat, &out->body, &out->waist, &out->face, &out->dye};
     out->skin_color = ui_loadout_skin_color();
     out->hair_color = ui_loadout_saved_hex("hairCol", NULL);
-    for (int i = 0; i < 5; i++) *slot[i] = worn(sel(SLOTS[i].which), resolve_random, 0, SLOTS[i].type);
+    for (int i = 0; i < 5; i++)
+        *slot[i] = worn(sel(SLOTS[i].which), sel_copy(SLOTS[i].which), resolve_random, 0, SLOTS[i].type, pre, SLOTS[i].slot);
 }
 
 // WP-F: the v7.1.4 slots of enterGame's "en" (ent[15] shoeIndex, [21] petIndex, [26] wristIndex,
 // [30] selectedLoadoutCharms, [31] backIndex, [32] headIndex, [33] playerCardIndex); the secondary's
 // charm only for a class with a secondary slot. The badge is the server's (-1 here).
-static void look_cosmetics_v7(const int class_index, PlayerCosmeticsV7 *out, const int resolve_random) {
-    static const struct { int which, type; } SLOTS[6] = {
-        {SEL_HEAD, 15}, {SEL_BACK, 14}, {SEL_SHOE, 8}, {SEL_PET, 9}, {SEL_WRIST, 11}, {SEL_CARD, 16},
+static void look_cosmetics_v7(const int class_index, PlayerCosmeticsV7 *out, const int resolve_random, NetSkinCopyIdsPacket *pre) {
+    static const struct { int which, type, slot; } SLOTS[6] = {
+        {SEL_HEAD, 15, SKIN_COPY_SLOT_HEAD}, {SEL_BACK, 14, SKIN_COPY_SLOT_BACK}, {SEL_SHOE, 8, SKIN_COPY_SLOT_SHOE},
+        {SEL_PET, 9, SKIN_COPY_SLOT_PET},    {SEL_WRIST, 11, SKIN_COPY_SLOT_WRIST}, {SEL_CARD, 16, SKIN_COPY_SLOT_CARD},
     };
     *out = PLAYER_COSMETICS_V7_NONE;
     int32_t *slot[6] = {&out->head, &out->back, &out->shoe, &out->pet, &out->wrist, &out->player_card};
-    for (int i = 0; i < 6; i++) *slot[i] = worn(sel(SLOTS[i].which), resolve_random, 0, SLOTS[i].type);
-    for (int k = 0; k < 2; k++) out->charms[k] = k == 1 && !class_at(class_index).secondary ? -1 : worn(charm_at(k), resolve_random, 0, 12);
+    for (int i = 0; i < 6; i++)
+        *slot[i] = worn(sel(SLOTS[i].which), sel_copy(SLOTS[i].which), resolve_random, 0, SLOTS[i].type, pre, SLOTS[i].slot);
+    for (int k = 0; k < 2; k++) {
+        int copy = 0;
+        const int pick = charm_at_copy(k, &copy);
+        out->charms[k] = k == 1 && !class_at(class_index).secondary ? -1 : worn(pick, copy, resolve_random, 0, 12, pre, SKIN_COPY_SLOT_CHARM1 + k);
+    }
 }
 
 // selectedSkinsByWeapon[weapon] of a loadout slot (ent[2]) and meleeIndex (ent[9]).
-static void look_skins(const int class_index, PlayerSkins *out, const int resolve_random) {
+static void look_skins(const int class_index, PlayerSkins *out, const int resolve_random, NetSkinCopyIdsPacket *pre) {
     const int primary = class_at(class_index).primary, secondary = ui_loadout_secondary(class_index);
-    out->primary = primary >= 0 ? worn(weapon_skin(primary), resolve_random, primary + 1, -1) : -1;
-    out->secondary = secondary >= 0 ? worn(weapon_skin(secondary), resolve_random, secondary + 1, -1) : -1;
-    out->melee = worn(sel(SEL_MELEE), resolve_random, 0, 3);
+    int copy = 0, pick = primary >= 0 ? weapon_skin_copy(primary, &copy) : -1;
+    out->primary = primary >= 0 ? worn(pick, copy, resolve_random, primary + 1, -1, pre, SKIN_COPY_SLOT_PRIMARY) : -1;
+    pick = secondary >= 0 ? weapon_skin_copy(secondary, &copy) : -1;
+    out->secondary = secondary >= 0 ? worn(pick, copy, resolve_random, secondary + 1, -1, pre, SKIN_COPY_SLOT_SECONDARY) : -1;
+    out->melee = worn(sel(SEL_MELEE), sel_copy(SEL_MELEE), resolve_random, 0, 3, pre, SKIN_COPY_SLOT_MELEE);
 }
 
+static NetSkinCopyIdsPacket g_ent_copies = {
+    {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}, {0},
+};
+
+const NetSkinCopyIdsPacket *ui_loadout_ent_copies(void) { return &g_ent_copies; }
+
 void ui_loadout_look(const int class_index, const int for_ent, LoadoutLook *out) {
-    look_cosmetics(&out->cosmetics, for_ent);
-    look_cosmetics_v7(class_index, &out->cosmetics_v7, for_ent);
+    NetSkinCopyIdsPacket pre;
+    for (int k = 0; k < SKIN_COPY_SLOTS; k++) pre.skin[k] = -1, pre.copy_id[k] = 0;
+    look_cosmetics(&out->cosmetics, for_ent, &pre);
+    look_cosmetics_v7(class_index, &out->cosmetics_v7, for_ent, &pre);
     cosmetics_route(&out->cosmetics, &out->cosmetics_v7); // v3.1.1 placements to their v7 slots
-    look_skins(class_index, &out->skins, for_ent);
-    ui_loadout_skin_paints(&out->skins, &out->skin_paints); // the account's own painted copies of those skins
+    look_skins(class_index, &out->skins, for_ent, &pre);
     out->secondary_index = ui_loadout_secondary(class_index);
     // forceAttach ? 0 : parseInt(attachIndex): the primary weapon's (also weapon_attachment()'s) or its skin's
     const int primary = class_at(class_index).primary;
@@ -384,75 +455,241 @@ void ui_loadout_look(const int class_index, const int for_ent, LoadoutLook *out)
     // never the Box Office picks; the routing below still applies
     if (strike_econ_apply_look(primary, out->secondary_index, &out->skins, &out->cosmetics, &out->cosmetics_v7))
         cosmetics_route(&out->cosmetics, &out->cosmetics_v7);
+    // each slot's worn index (as routed) and the copy its pick named (the copy follows its index to the routed slot;
+    // an index no pick named, a Strike item, is a plain index)
+    const PlayerCosmetics *c = &out->cosmetics;
+    const PlayerCosmeticsV7 *v = &out->cosmetics_v7;
+    const int32_t final[SKIN_COPY_SLOTS] = {
+        out->skins.primary, out->skins.secondary, out->skins.melee, c->hat, c->body, c->waist, c->face, c->dye,
+        v->head, v->back, v->shoe, v->pet, v->wrist, v->charms[0], v->charms[1], v->player_card,
+    };
+    for (int k = 0; k < SKIN_COPY_SLOTS; k++) {
+        out->copies.skin[k] = final[k];
+        out->copies.copy_id[k] = net_skin_copy_id_of(&pre, k, final[k]);
+    }
+    if (for_ent) g_ent_copies = out->copies;
+    ui_loadout_skin_paints(&out->skins, &out->copies, &out->skin_paints); // the paints of the copies those slots name
     const Weapon *pw = rules_weapon(primary);
     out->attach_index = pw && pw->force_attach ? 0 : cosmetics_attach_index(out->skins.primary, sel(SEL_ATTACH));
 }
 
 // ---------------------------------------------------------------- the account's own paint
 
-// v10.0.3's plain-index rule (deob-10.0.3.js:252090-252095): a loadout slot that is a plain store index wears the
-// first owned copy of that index with metadata; its m (an object, or a JSON string: the normaliser deob:128883-128894)
-// has `paint` "#rrggbb" or `paintShader` n. The owned list is account data slot 10 ({ind, cnt: 1, id, m, st: 0} copies).
-int ui_loadout_skin_paint(const int index, WornSkinPaint *out) {
-    *out = WORN_SKIN_PAINT_NONE;
+// The owned list is account data slot 10 ({ind, cnt: 1, id, m, st: 0} copies); m is an object or a JSON string (the
+// normaliser, deob-10.0.3.js:128883-128894).
+static const cJSON *owned_entries(void) {
     const AccountInfo *acc = active_account();
-    const cJSON *owned = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
-    if (index < 0 || !owned) return 0;
-    const cJSON *e;
-    cJSON_ArrayForEach(e, owned) {
-        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
-        if (!cJSON_IsNumber(ind) || ind->valueint != index) continue;
-        const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m");
-        cJSON *parsed = NULL;
-        if (cJSON_IsString(m) && m->valuestring) m = parsed = cJSON_Parse(m->valuestring);
-        if (!cJSON_IsObject(m)) {
-            cJSON_Delete(parsed);
-            continue;
-        }
-        const cJSON *paint = cJSON_GetObjectItemCaseSensitive(m, "paint");
-        const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
-        int found = 0;
-        if (cJSON_IsString(paint) && paint->valuestring && paint->valuestring[0] == '#' && strlen(paint->valuestring) == 7) {
-            char *end;
-            const long rgb = strtol(paint->valuestring + 1, &end, 16);
-            if (*end == '\0') {
-                out->color = (int) rgb;
-                found = 1;
-            }
-        } else if (cJSON_IsNumber(shader)) {
-            out->shader = shader->valueint;
-            found = 1;
-        }
+    return acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
+}
+
+// an entry's m as a parsed copy (the caller deletes it), NULL none
+static cJSON *entry_meta(const cJSON *e) {
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m");
+    if (cJSON_IsString(m) && m->valuestring) {
+        cJSON *parsed = cJSON_Parse(m->valuestring);
+        if (cJSON_IsObject(parsed)) return parsed;
         cJSON_Delete(parsed);
-        if (found) return 1;
+        return NULL;
+    }
+    return cJSON_IsObject(m) ? cJSON_Duplicate(m, 1) : NULL;
+}
+
+// m.paint "#rrggbb" or m.paintShader n (deob-10.0.3.js:252090-252095)
+static int meta_paint(const cJSON *m, WornSkinPaint *out) {
+    *out = WORN_SKIN_PAINT_NONE;
+    const cJSON *paint = cJSON_GetObjectItemCaseSensitive(m, "paint");
+    const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
+    if (cJSON_IsString(paint) && paint->valuestring && paint->valuestring[0] == '#' && strlen(paint->valuestring) == 7) {
+        char *end;
+        const long rgb = strtol(paint->valuestring + 1, &end, 16);
+        if (*end == '\0') {
+            out->color = (int) rgb;
+            return 1;
+        }
+    } else if (cJSON_IsNumber(shader)) {
+        out->shader = shader->valueint;
+        return 1;
     }
     return 0;
 }
 
-void ui_loadout_skin_paints(const PlayerSkins *skins, PlayerSkinPaints *out) {
-    *out = PLAYER_SKIN_PAINTS_NONE;
-    if (!skins) return;
-    ui_loadout_skin_paint(skins->primary, &out->primary);
-    ui_loadout_skin_paint(skins->secondary, &out->secondary);
-    ui_loadout_skin_paint(skins->melee, &out->melee);
+static int meta_has_paint(const cJSON *m, const char *key) {
+    (void) key;
+    WornSkinPaint p;
+    return meta_paint(m, &p);
 }
 
-// The item view's viewer URL tail for an index the account has a copy of (v10's instance → viewer URL, deob-10.0.6.js:
-// 221934): "&wear=<w>" for a worn copy (krunker.io's m.wear), then "&paint=<rrggbb>" or "&paintShader=<n>"
-// (deob-10.0.3.js:123160-123173) for a painted one; "" otherwise.
-void ui_loadout_paint_query(const int index, char *out, const size_t n) {
-    out[0] = '\0';
-    size_t len = 0;
-    const double wear = account_skin_wear(index);
-    if (wear >= 0.0) {
-        const int w = snprintf(out, n, "&wear=%.15g", wear);
-        len = w > 0 && (size_t) w < n ? (size_t) w : 0;
-        out[len] = '\0';
+static int meta_has_key(const cJSON *m, const char *key) { return !key || cJSON_GetObjectItemCaseSensitive(m, key) != NULL; }
+
+// ui_loadout_copy_meta with a test of the plain-index rule's m: the copy `copy_id` names (of index `index`) is the one
+// worn, its m or {} (it has none: nothing of it shows); gone, or a plain index, the first copy whose m passes `has`.
+static cJSON *copy_meta_by(const int index, const int copy_id, int (*has)(const cJSON *, const char *), const char *key) {
+    const cJSON *owned = owned_entries();
+    if (index < 0 || !owned) return NULL;
+    const cJSON *e;
+    if (copy_id > 0) {
+        // updateClassPreview finds the slot's entry by its id (deob-10.0.7.js:217902-217926); the server also checks its
+        // index (accounts_worn_copy)
+        cJSON_ArrayForEach(e, owned) {
+            const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id"), *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+            if (!cJSON_IsNumber(id) || id->valuedouble != (double) copy_id || !cJSON_IsNumber(ind) || ind->valueint != index) continue;
+            cJSON *m = entry_meta(e);
+            return m ? m : cJSON_CreateObject();
+        }
     }
-    WornSkinPaint paint;
-    if (!ui_loadout_skin_paint(index, &paint)) return;
-    if (paint.color >= 0) snprintf(out + len, n - len, "&paint=%06x", paint.color & 0xFFFFFF);
-    else if (paint.shader >= 0) snprintf(out + len, n - len, "&paintShader=%d", paint.shader);
+    cJSON_ArrayForEach(e, owned) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (!cJSON_IsNumber(ind) || ind->valueint != index) continue;
+        cJSON *m = entry_meta(e);
+        if (m && has(m, key)) return m;
+        cJSON_Delete(m);
+    }
+    return NULL;
+}
+
+cJSON *ui_loadout_copy_meta(const int index, const int copy_id, const char *key) {
+    return copy_meta_by(index, copy_id, meta_has_key, key);
+}
+
+// v10.0.3's plain-index rule (deob-10.0.3.js:252090-252095), v10.0.7's copies: copy `copy_id` of the index (a slot's
+// "<copyId>#<index>"), else the first owned copy of that index with a paint.
+static int skin_paint_copy(const int index, const int copy_id, WornSkinPaint *out) {
+    *out = WORN_SKIN_PAINT_NONE;
+    cJSON *m = copy_meta_by(index, copy_id, meta_has_paint, NULL);
+    const int found = m && meta_paint(m, out);
+    cJSON_Delete(m);
+    return found;
+}
+
+int ui_loadout_skin_paint(const int index, WornSkinPaint *out) {
+    return skin_paint_copy(index, ui_loadout_worn_copy(index), out);
+}
+
+void ui_loadout_skin_paints(const PlayerSkins *skins, const NetSkinCopyIdsPacket *copies, PlayerSkinPaints *out) {
+    *out = PLAYER_SKIN_PAINTS_NONE;
+    if (!skins) return;
+    const int32_t idx[3] = {skins->primary, skins->secondary, skins->melee};
+    WornSkinPaint *dst[3] = {&out->primary, &out->secondary, &out->melee};
+    for (int k = 0; k < 3; k++)
+        skin_paint_copy(idx[k], copies ? net_skin_copy_id_of(copies, SKIN_COPY_SLOT_PRIMARY + k, idx[k]) : ui_loadout_worn_copy(idx[k]), dst[k]);
+}
+
+double ui_loadout_copy_wear(const int index, const int copy_id) {
+    cJSON *m = ui_loadout_copy_meta(index, copy_id, "wear");
+    const cJSON *w = cJSON_GetObjectItemCaseSensitive(m, "wear");
+    const double wear = cJSON_IsNumber(w) && w->valuedouble >= 0.0 && w->valuedouble <= 1.0 ? w->valuedouble : -1.0;
+    cJSON_Delete(m);
+    return wear;
+}
+
+int ui_loadout_copy_seed(const int index, const int copy_id) {
+    // iiiíìiî(slot, m): (floor(m.seed) % 1e6 + 1e6) % 1e6, else the copy id's hash; a plain index none (its m is null)
+    if (copy_id <= 0) return 0;
+    cJSON *m = ui_loadout_copy_meta(index, copy_id, NULL);
+    const cJSON *seed = cJSON_GetObjectItemCaseSensitive(m, "seed");
+    const int32_t out = skin_copy_seed(copy_id, cJSON_IsNumber(seed), cJSON_IsNumber(seed) ? seed->valuedouble : 0.0);
+    cJSON_Delete(m);
+    return out;
+}
+
+int ui_loadout_copy_style(const int index, const int copy_id) {
+    cJSON *m = ui_loadout_copy_meta(index, copy_id, "style");
+    const cJSON *st = cJSON_GetObjectItemCaseSensitive(m, "style");
+    const int style = cJSON_IsNumber(st) && st->valueint > 0 ? st->valueint : 0;
+    cJSON_Delete(m);
+    return style;
+}
+
+// the wear tiers (deob-10.0.7.js:16478-16494, :24599-24617): skin_paint.c
+const char *ui_loadout_wear_tier_key(const double wear) { return skin_wear_tier_key(wear); }
+const char *ui_loadout_wear_tier_color(const double wear) { return skin_wear_tier_color(wear); }
+
+// JS's String(number): the shortest decimal that reads back as the same double
+static void js_number(char *out, const size_t n, const double v) {
+    for (int prec = 1; prec <= 17; prec++) {
+        snprintf(out, n, "%.*g", prec, v);
+        if (strtod(out, NULL) == v) return;
+    }
+}
+
+// the first owned entry of `index` (account.skins.find(s => s.ind === index), deob-10.0.7.js:223668-223670), NULL none
+static const cJSON *first_entry(const int index) {
+    const cJSON *e;
+    cJSON_ArrayForEach(e, owned_entries()) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (cJSON_IsNumber(ind) && ind->valueint == index) return e;
+    }
+    return NULL;
+}
+
+// a whole "&key=value" piece, or nothing when it does not fit
+static void query_add(char *out, const size_t n, const char *piece) {
+    const size_t len = strlen(out), add = strlen(piece);
+    if (len + add < n) memcpy(out + len, piece, add + 1);
+}
+
+// The item view's viewer URL tail (viewItem, deob-10.0.7.js:223667-223688): the account's first entry of the index and its
+// m: "&wear=<m.wear>", "&paint=<m.paint without #>", "&style=<m.style>", "&seed=<iiiíìiî({id}, m)>" (0: none), then each
+// counter stat m has ("&kills=n" & co., iiîïîìî, :106682); "" for an index the account has no entry of.
+void ui_loadout_paint_query(const int index, char *out, const size_t n) {
+    if (!n) return;
+    out[0] = '\0';
+    const cJSON *entry = first_entry(index);
+    if (!entry) {
+        // krunker.io's own list when it is not the active account's (backend_ui.c): its copy's wear
+        const double wear = account_skin_wear(index);
+        if (wear >= 0.0) {
+            char num[40], piece[56];
+            js_number(num, sizeof num, wear);
+            snprintf(piece, sizeof piece, "&wear=%s", num);
+            query_add(out, n, piece);
+        }
+        return;
+    }
+    cJSON *m = entry_meta(entry);
+    char piece[160], num[40];
+    const cJSON *wear = cJSON_GetObjectItemCaseSensitive(m, "wear");
+    if (cJSON_IsNumber(wear)) {
+        js_number(num, sizeof num, wear->valuedouble);
+        snprintf(piece, sizeof piece, "&wear=%s", num);
+        query_add(out, n, piece);
+    }
+    const cJSON *paint = cJSON_GetObjectItemCaseSensitive(m, "paint");
+    if (cJSON_IsString(paint) && paint->valuestring && paint->valuestring[0]) {
+        // encodeURIComponent(("" + m.paint).replace(/^#/, ""))
+        const char *v = paint->valuestring + (paint->valuestring[0] == '#');
+        size_t k = (size_t) snprintf(piece, sizeof piece, "&paint=");
+        for (; *v && k + 4 < sizeof piece; v++) {
+            const unsigned char c = (unsigned char) *v;
+            if (isalnum(c) || strchr("-_.!~*'()", c)) piece[k++] = (char) c;
+            else k += (size_t) snprintf(piece + k, sizeof piece - k, "%%%02X", c);
+        }
+        piece[k] = '\0';
+        query_add(out, n, piece);
+    }
+    const cJSON *style = cJSON_GetObjectItemCaseSensitive(m, "style");
+    if (cJSON_IsNumber(style)) {
+        js_number(num, sizeof num, style->valuedouble);
+        snprintf(piece, sizeof piece, "&style=%s", num);
+        query_add(out, n, piece);
+    }
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(entry, "id"), *seed = cJSON_GetObjectItemCaseSensitive(m, "seed");
+    const int32_t sd = skin_copy_seed(cJSON_IsNumber(id) ? (int64_t) id->valuedouble : 0, cJSON_IsNumber(seed), cJSON_IsNumber(seed) ? seed->valuedouble : 0.0);
+    if (sd) {
+        snprintf(piece, sizeof piece, "&seed=%d", sd);
+        query_add(out, n, piece);
+    }
+    static const char *const stats[SKIN_STAT_COUNT] = SKIN_STATS;
+    for (int i = 0; i < SKIN_STAT_COUNT; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(m, stats[i]);
+        if (!v || cJSON_IsNull(v)) continue;
+        if (cJSON_IsNumber(v)) js_number(num, sizeof num, v->valuedouble);
+        else if (cJSON_IsString(v)) snprintf(num, sizeof num, "%s", v->valuestring);
+        else snprintf(num, sizeof num, "%s", cJSON_IsTrue(v) ? "true" : "false");
+        snprintf(piece, sizeof piece, "&%s=%s", stats[i], num);
+        query_add(out, n, piece);
+    }
+    cJSON_Delete(m);
 }
 
 int ui_loadout_weapon_skin_shown(const int weapon) {
@@ -869,10 +1106,12 @@ int ui_loadout_spray_wheel(int *out, const int max) {
 
 // getRandomOwnedSkin(weapon, type): a random owned weapon skin of `weapon` (1-based, type < 0) or item
 // of store type `type`; -1 when there is none (a guest owns nothing, offline mode owns everything).
-// v10 (deob-10.0.7.js:217800-217813) keeps the items of the selected class (or none) and picks among the
-// favourites when any of them is one.
-static int random_owned_skin(const int weapon, const int type) {
-    int n = 0, m = 0;
+// v10 (deob-10.0.7.js:217800-217813) keeps the items of the selected class (or none), picks among the
+// favourites (isFav: the entry's "<id>#<ind>" key or its ind, :214623-214625) when any of them is one, and
+// returns iïiìíïi(ind, id): the picked entry's "<id>#<ind>" (*copy its id) for a copy.
+static int random_owned_skin(const int weapon, const int type, int *copy) {
+    int n = 0, m = 0, favn = 0;
+    if (copy) *copy = 0;
     OwnedSkin *owned = owned_skins(&n, -1);
     int *pool = malloc((size_t) (n + 1) * sizeof(int));
     for (int i = 0; pool && i < n; i++) {
@@ -880,12 +1119,20 @@ static int random_owned_skin(const int weapon, const int type) {
         if (!s || (type < 0 ? s->type != 0 || s->weapon != weapon : s->type != type)) continue;
         const int ci = skin_class_index(owned[i].ind);
         if (ci >= 0 && ci != menu_ui()->client->menu_class_index) continue;
-        pool[m++] = owned[i].ind;
+        pool[m++] = i;
+        favn += is_fav(owned[i].ind, owned[i].copy_id);
     }
+    int pick = -1;
+    if (pool && m) {
+        int k = rand() % (favn ? favn : m);
+        for (int i = 0; i < m && pick < 0; i++)
+            if ((!favn || is_fav(owned[pool[i]].ind, owned[pool[i]].copy_id)) && k-- == 0) pick = pool[i];
+    }
+    const int ind = pick >= 0 ? owned[pick].ind : -1;
+    if (copy && pick >= 0) *copy = owned[pick].copy_id;
     free(owned);
-    const int pick = pool ? pick_random_pool(pool, m) : -1;
     free(pool);
-    return pick;
+    return ind;
 }
 
 // localStorage "skins" parsed once (the class preview asks every frame); writers go through skins_store().
@@ -899,23 +1146,24 @@ static void skins_store(const char *text) {
     g_skins_cached = 0;
 }
 
-// dz[weapon]: the saved weapon skin (localStorage "skins" {weapon: index}), -1 none.
-static int weapon_skin(const int weapon) {
+// dz[weapon]: the saved weapon skin (localStorage "skins" {weapon: index or "<copyId>#<index>"}), -1 none; *copy the
+// copy id a "<copyId>#<index>" names (selectSkin, deob-10.0.7.js:217816-217822), 0 a plain index.
+static int weapon_skin_copy(const int weapon, int *copy) {
     if (!g_skins_cached) {
-        char buf[1024] = "{}";
+        char buf[4096] = "{}";
         html_storage_get("skins", buf, sizeof(buf));
         g_skins_cache = cJSON_Parse(buf);
         g_skins_cached = 1;
     }
     char key[16];
     snprintf(key, sizeof(key), "%d", weapon);
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_skins_cache, key);
-    return cJSON_IsNumber(v) ? v->valueint : -1;
+    return json_slot(cJSON_GetObjectItemCaseSensitive(g_skins_cache, key), copy);
 }
 
+static int weapon_skin(const int weapon) { return weapon_skin_copy(weapon, NULL); }
+
 // The loadout wears this store index: a cosmetic slot or a weapon's saved skin (the wallet's "Keep equipped items",
-// deob-10.0.4.js:147054-147072, :147296). KrunkNative's slots hold plain indices: a painted copy is worn as the first
-// owned copy of its index (ui_loadout_skin_paint).
+// deob-10.0.4.js:147054-147072, :147296), a plain index or a copy of it.
 int ui_loadout_wears(const int index) {
     if (index < 0) return 0;
     static const int slots[] = {SEL_DYE, SEL_FACE, SEL_SHOE, SEL_MELEE, SEL_BODY, SEL_BACK, SEL_HAT, SEL_HEAD, SEL_CARD,
@@ -924,14 +1172,35 @@ int ui_loadout_wears(const int index) {
         if (sel(slots[i]) == index) return 1;
     weapon_skin(0); // the "skins" cache
     const cJSON *v;
-    cJSON_ArrayForEach(v, g_skins_cache) if (cJSON_IsNumber(v) && v->valueint == index) return 1;
+    cJSON_ArrayForEach(v, g_skins_cache) if (json_slot(v, NULL) == index) return 1;
+    return 0;
+}
+
+// The copy the loadout's slots name for store index `index`: the first slot (cosmetic, melee, a weapon's saved skin, a
+// charm) holding "<copyId>#<index>"; 0 when they hold the plain index or nothing wears it.
+int ui_loadout_worn_copy(const int index) {
+    if (index < 0) return 0;
+    static const int slots[] = {SEL_MELEE, SEL_HAT, SEL_BODY, SEL_WAIST, SEL_FACE, SEL_DYE, SEL_HEAD, SEL_BACK, SEL_SHOE,
+                                SEL_PET, SEL_WRIST, SEL_CARD};
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++)
+        if (sel(slots[i]) == index && sel_copy(slots[i]) > 0) return sel_copy(slots[i]);
+    weapon_skin(0); // the "skins" cache
+    const cJSON *v;
+    cJSON_ArrayForEach(v, g_skins_cache) {
+        int copy = 0;
+        if (json_slot(v, &copy) == index && copy > 0) return copy;
+    }
+    for (int k = 0; k < 2; k++) {
+        int copy = 0;
+        if (charm_at_copy(k, &copy) == index && copy > 0) return copy;
+    }
     return 0;
 }
 
 // genLoadouts(true): the preset row (#loadoutHolder content).
 static void gen_loadouts(StrBuf *out) {
     sb_append(out, "<span class='settNameSmall' style='margin:0;margin-bottom:5px;border-bottom: unset;'><input id='loadoutName' type='text' class='formInput' placeholder='Loadout name' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' style='border:none;background:#eee;padding-bottom:6px;float:left;margin-top:5px;margin-bottom:5px;'><select id='loadoutSelect'><option selected>Select</option>");
-    char buf[8192];
+    char buf[32768];
     if (html_storage_get("krk_loadouts", buf, sizeof(buf)) >= 0) {
         cJSON *all = cJSON_Parse(buf);
         const cJSON *it;
@@ -1291,6 +1560,29 @@ static void gen_tab_customize(StrBuf *out) {
             slot_item(&v, pick);
             v.glow = NULL;
             spray_item = s->type == 4;
+            // the slot's copy shows its style (deob-10.0.7.js:222502-222512): a "<copyId>#<index>" slot's entry by its id,
+            // a plain index's first entry of the index with an m; m.style in [0, styles) is getStylePreview's thumbnail
+            if (s->styles > 0 && active_account()) {
+                const int copy = sel_copy(cs->which);
+                const cJSON *e, *found = NULL;
+                cJSON_ArrayForEach(e, owned_entries()) {
+                    const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id"), *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+                    if (copy > 0 ? cJSON_IsNumber(id) && id->valuedouble == (double) copy
+                                 : cJSON_IsNumber(ind) && ind->valueint == pick && cJSON_GetObjectItemCaseSensitive(e, "m") &&
+                                       !cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(e, "m"))) {
+                        found = e;
+                        break;
+                    }
+                }
+                cJSON *m = found ? entry_meta(found) : NULL;
+                const cJSON *style = cJSON_GetObjectItemCaseSensitive(m, "style");
+                if (cJSON_IsNumber(style) && style->valueint >= 0 && style->valueint < s->styles) {
+                    char path[256];
+                    skin_style_preview(s, style->valueint, path, sizeof path);
+                    asset(path, v.img, sizeof v.img);
+                }
+                cJSON_Delete(m);
+            }
         }
         sb_appendf(out, "<div class='custContainer contCanSelect' onclick='showWindow(%d)' onmouseenter='playTick()' style='width: 22.25%%;height: 174px;'><div class='custItNm blackShad'>%s</div><div class='custClear' onclick='windows[%d].clear();'><span class='material-icons'>close</span></div>",
                    cs->window, slot_label(cs), cs->window - 1);
@@ -1543,14 +1835,8 @@ static int owned_meta_style(const cJSON *meta) {
     return value;
 }
 
-// iîìiiïî(wear) (deob-10.0.7.js: the wear tiers, config-10.0.7.js:7052-7068): the tier's name, the last past the end
-static const char *wear_tier_name(const double wear) {
-    static const double max[] = {0.1, 0.3, 0.6, 1};
-    static const char *const keys[] = {"wear_flawless", "wear_tested", "wear_trashed", "wear_wrecked"};
-    for (int i = 0; i < 4; i++)
-        if (wear < max[i]) return i18n_t(keys[i]);
-    return i18n_t(keys[3]);
-}
+// iîìiiïî(wear) (deob-10.0.7.js:24599-24609, the tiers at :16478-16494): the tier's name, the last past the end
+static const char *wear_tier_name(const double wear) { return i18n_t(ui_loadout_wear_tier_key(wear)); }
 
 // The copy's m.name ("<name>") and its wear / #serial tags (deob-10.0.7.js:220895, :223505)
 static void owned_name_tags(StrBuf *out, const cJSON *meta) {
@@ -1601,8 +1887,13 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     else sb_appendf(out, "<div class='skinCard%s%s' style='color:%s;border:5px solid%s' onmouseenter='playTick()'",
                     s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col);
     if (open) {
-        sb_appendf(out, "onclick='%s(%d", fn, o->ind);
-        if (weapon >= 0) sb_appendf(out, ",%d", weapon);
+        // a weapon card: selectSkin(ind, weapon - 1, undefined, id) (deob-10.0.7.js:220896); an item card:
+        // fn("<id>#<ind>") for a copy, fn(ind) else (iîìîiìï, :223502)
+        if (weapon >= 0) {
+            sb_appendf(out, "onclick='%s(%d,%d", fn, o->ind, weapon);
+            if (o->copy_id) sb_appendf(out, ",undefined,%d", o->copy_id);
+        } else if (o->copy_id) sb_appendf(out, "onclick='%s(\"%d#%d\"", fn, o->copy_id, o->ind);
+        else sb_appendf(out, "onclick='%s(%d", fn, o->ind);
         sb_append(out, ");cancelTip()' ");
     } else {
         sb_append(out, " ");
@@ -2105,12 +2396,12 @@ static const struct { const char *name; int which; } SELECT_MAP[] = {
     {"selectSpray", SEL_SPRAY}, {"selectAttachment", SEL_ATTACH}, {"selectReticle", SEL_RETICLE}, {"selectScope", SEL_SCOPE},
 };
 
-// selectHat(i, noShow, update) & co.: saveVal, updateClassPreview, showWindow(3) unless noShow,
-// updateWindow(3) with update.
-static int select_item(const char *what, const int value, const int no_show, const int update) {
+// selectHat(i, noShow, update) & co.: saveVal (the raw value: a copy's "<copyId>#<index>", deob-10.0.7.js:217305-217315),
+// updateClassPreview, showWindow(3) unless noShow, updateWindow(3) with update.
+static int select_item(const char *what, const int value, const int copy, const int no_show, const int update) {
     for (size_t i = 0; i < sizeof(SELECT_MAP) / sizeof(SELECT_MAP[0]); i++) {
         if (strcmp(SELECT_MAP[i].name, what)) continue;
-        sel_save(SELECT_MAP[i].which, value);
+        sel_save_copy(SELECT_MAP[i].which, value, copy);
         if (SELECT_MAP[i].which == SEL_RETICLE) update_aim_dot();
         refresh_class_box();
         if (!no_show) menu_show_window(3, 0);
@@ -2121,7 +2412,7 @@ static int select_item(const char *what, const int value, const int no_show, con
 }
 
 void ui_loadout_select(const char *what, const int value) {
-    select_item(what, value, 0, 0);
+    select_item(what, value, 0, 0, 0);
 }
 
 // selectSkinColor(i) / selectStat(v): saveVal, updateClassPreview, updateWindow(3).
@@ -2155,10 +2446,12 @@ void ui_loadout_skin_selector(const int weapon, const int secondary) {
     menu_show_window(15, 0);
 }
 
-// selectSkin(index, weapon): a store skin index or -2 (Random) is remembered, anything else
-// (v7's None is -3) clears it.
-void ui_loadout_select_skin(const int index, const int weapon) {
-    char buf[1024] = "{}";
+// selectSkin(index, weapon, noShow, id): a store skin index (a copy's "<id>#<index>", deob-10.0.7.js:217816-217822) or -2
+// (Random) is remembered, anything else (v7's None is -3) clears it.
+void ui_loadout_select_skin(const int index, const int weapon) { ui_loadout_select_skin_copy(index, weapon, 0); }
+
+void ui_loadout_select_skin_copy(const int index, const int weapon, const int copy_id) {
+    char buf[4096] = "{}";
     html_storage_get("skins", buf, sizeof(buf));
     cJSON *skins = cJSON_Parse(buf);
     if (!skins || !cJSON_IsObject(skins)) {
@@ -2168,8 +2461,8 @@ void ui_loadout_select_skin(const int index, const int weapon) {
     char key[16];
     snprintf(key, sizeof(key), "%d", weapon);
     cJSON_DeleteItemFromObject(skins, key);
-    // skinsLoadout[weapon] = store.skins[index] || index == -2 ? index : undefined
-    if (index == -2 || store_skin(index)) cJSON_AddNumberToObject(skins, key, index);
+    // skinsLoadout[weapon] = store.skins[index] || index == -2 ? iîìîiìï(id, index) : undefined
+    if (index == -2 || store_skin(index)) cJSON_AddItemToObject(skins, key, json_slot_value(index, copy_id));
     char *text = cJSON_PrintUnformatted(skins);
     if (text) skins_store(text);
     free(text);
@@ -2208,7 +2501,7 @@ void ui_loadout_action(const int action) {
     const int nothing = !selected[0] || !strcmp(selected, "Select");
     if ((action == 0 || action == 2) && nothing) return;
 
-    char buf[8192] = "{}";
+    char buf[32768] = "{}";
     html_storage_get("krk_loadouts", buf, sizeof(buf));
     cJSON *all = cJSON_Parse(buf);
     if (!all || !cJSON_IsObject(all)) {
@@ -2224,11 +2517,12 @@ void ui_loadout_action(const int action) {
             char hex[8];
             if (preset_color_field(PRESET_FIELDS[i].which) && ui_loadout_saved_hex(PRESET_FIELDS[i].field, hex) >= 0)
                 cJSON_AddStringToObject(preset, PRESET_FIELDS[i].field, hex); // a premium hex colour stays a string
-            else cJSON_AddNumberToObject(preset, PRESET_FIELDS[i].field, sel(PRESET_FIELDS[i].which));
+            else // the raw slot: a copy's "<copyId>#<index>" stays a string (deob-10.0.7.js:218607)
+                cJSON_AddItemToObject(preset, PRESET_FIELDS[i].field, json_slot_value(sel(PRESET_FIELDS[i].which), sel_copy(PRESET_FIELDS[i].which)));
         }
         cJSON_AddNumberToObject(preset, "titleIndex", v10_customize_title());
         cJSON_AddNumberToObject(preset, "classindex", menu_ui()->client->menu_class_index);
-        char skins[1024] = "{}", charms[256] = "[]", saved[512] = "";
+        char skins[4096] = "{}", charms[256] = "[]", saved[512] = "";
         html_storage_get("skins", skins, sizeof(skins));
         cJSON_AddStringToObject(preset, "skins", skins);
         html_storage_get("charms", charms, sizeof(charms));
@@ -2244,7 +2538,11 @@ void ui_loadout_action(const int action) {
             for (size_t i = 0; i < sizeof(PRESET_FIELDS) / sizeof(PRESET_FIELDS[0]); i++) {
                 const cJSON *v = cJSON_GetObjectItem(preset, PRESET_FIELDS[i].field);
                 if (cJSON_IsNumber(v)) sel_save(PRESET_FIELDS[i].which, v->valueint);
-                else if (cJSON_IsString(v) && preset_color_field(PRESET_FIELDS[i].which)) {
+                else if (cJSON_IsString(v) && !preset_color_field(PRESET_FIELDS[i].which) && strchr(v->valuestring, '#')) {
+                    int copy = 0;
+                    const int ind = ui_loadout_parse_slot(v->valuestring, -1, &copy);
+                    sel_save_copy(PRESET_FIELDS[i].which, ind, copy);
+                } else if (cJSON_IsString(v) && preset_color_field(PRESET_FIELDS[i].which)) {
                     g_sel[PRESET_FIELDS[i].which].value = -1;
                     html_storage_set(PRESET_FIELDS[i].field, v->valuestring);
                 }
@@ -2345,29 +2643,42 @@ static void select_streak(int index, const int slot) {
     menu_rerender_if_open(45);
 }
 
-// selectCharm(index): selectedCharms[slot] = item || -2 ? index : -1 (one charm per item unless
-// owned twice: v7's "Charm already in use" popup becomes a plain alert).
+// selectCharm(value) (deob-10.0.7.js:217425-217452): selectedCharms[slot] = store.skins[index] || index == -2 ? value : -1,
+// the raw value (a copy's "<copyId>#<index>"). Both slots on one index: two different copies are fine; the same copy
+// twice, or (a plain index on either) no stack of it with cnt > 1, empties this slot and shows "Charm already in use"
+// with Override (overrideCharm(JSON.stringify(value))) and Ok.
 static void kpd_generic_popup(const char *html, const char *cls);
-static void select_charm(const int index) {
+static void select_charm(const int index, const int copy) {
     const int value = store_skin(index) || index == -2 ? index : -1;
-    if (value >= 0 && charm_at(g_charm_slot ? 0 : 1) == value) {
-        int n, count = 0;
-        OwnedSkin *owned = owned_skins(&n, 0);
-        for (int i = 0; i < n; i++) if (owned[i].ind == value) count = owned[i].cnt;
-        free(owned);
-        if (count < 2 && !all_skins_unlocked()) {
-            // genericPopup(..., "charmErrorPop") with an Override button: overrideCharm(index) empties both
-            // slots, then selects the charm again (deob-10.0.7.js:217418-217423, :217436-217446). Our own wording.
-            char html[768];
+    int other_copy = 0;
+    const int other = charm_at_copy(g_charm_slot ? 0 : 1, &other_copy);
+    const int this_copy = value >= 0 ? copy : 0;
+    if (value >= 0 && other == value && !(this_copy && other_copy && this_copy != other_copy)) {
+        int clash = this_copy && other_copy; // the same copy on both slots
+        if (!clash && !all_skins_unlocked()) {
+            const cJSON *owned = owned_entries(), *e;
+            clash = 1; // !account || !account.skins.some(s => s.ind === index && s.cnt > 1)
+            cJSON_ArrayForEach(e, owned) {
+                const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind"), *cnt = cJSON_GetObjectItemCaseSensitive(e, "cnt");
+                if (cJSON_IsNumber(ind) && ind->valueint == index && cJSON_IsNumber(cnt) && cnt->valuedouble > 1) clash = 0;
+            }
+        }
+        if (clash) {
+            // selectedCharms[slot] = -1 (v10 keeps it in memory, unsaved; the loadout here is its saved value)
+            charm_save(g_charm_slot, -1);
+            char arg[40], html[1024];
+            if (this_copy) snprintf(arg, sizeof(arg), "\"%d#%d\"", this_copy, index); // JSON.stringify of the string
+            else snprintf(arg, sizeof(arg), "%d", index);
             snprintf(html, sizeof(html),
-                     "<div class=\"popHeader\">Charm Error</div>This charm is already on your other slot"
-                     "<div style=\"margin-top: 20px;\"><div class=\"charmBtn\" onmouseenter=\"playTick(0.1);\" "
-                     "onclick=\"playSelect(0.1);clearPops();overrideCharm(%d);\">Override</div></div>", index);
+                     "<div class=\"popHeader\">Charm Error</div>Charm already in use<div style=\"margin-top: 20px;\">"
+                     "<div class=\"charmBtn\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);clearPops();overrideCharm(%s);\">Override</div>"
+                     "<div class=\"charmBtn\" style=\"background:var(--green)\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);clearPops();\">Ok</div></div>",
+                     arg);
             kpd_generic_popup(html, "charmErrorPop");
             return;
         }
     }
-    charm_save(g_charm_slot, value);
+    charm_save_copy(g_charm_slot, value, this_copy);
     menu_show_window(3, 0);
 }
 
@@ -2457,6 +2768,13 @@ static const char *harg_str(const HtmlArg *args, const int argc, const int i) {
     return i < argc && args[i].kind == HTML_ARG_STR && args[i].str ? args[i].str : "";
 }
 
+// a slot value argument: a number, or a string ("<copyId>#<index>": *copy its id)
+static int harg_slot(const HtmlArg *args, const int argc, const int i, const int fallback, int *copy) {
+    *copy = 0;
+    if (i < argc && args[i].kind == HTML_ARG_STR && args[i].str) return ui_loadout_parse_slot(args[i].str, fallback, copy);
+    return harg_int(args, argc, i, fallback);
+}
+
 // UTILS.compareString(a, b): either contains the other, case-insensitively.
 static int compare_string(const char *a, const char *b) {
     if (!a || !b) return 0;
@@ -2529,14 +2847,17 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "overrideCharm")) { // selectedCharms = [-1, -1]; selectCharm(index) (deob-10.0.7.js:217418-217423)
         charm_save(0, -1);
         charm_save(1, -1);
-        select_charm(harg_int(args, argc, 0, -1));
+        int copy;
+        const int value = harg_slot(args, argc, 0, -1, &copy);
+        select_charm(value, copy);
         return 1;
     }
     if (!strncmp(name, "select", 6)) {
-        const int value = harg_int(args, argc, 0, -1);
-        if (select_item(name, value, harg_int(args, argc, 1, 0), harg_int(args, argc, 2, 0))) return 1;
+        int copy;
+        const int value = harg_slot(args, argc, 0, -1, &copy);
+        if (select_item(name, value, copy, harg_int(args, argc, 1, 0), harg_int(args, argc, 2, 0))) return 1;
         if (!strcmp(name, "selectStreak")) { select_streak(value, harg_int(args, argc, 1, 0)); return 1; }
-        if (!strcmp(name, "selectCharm")) { select_charm(value); return 1; }
+        if (!strcmp(name, "selectCharm")) { select_charm(value, copy); return 1; }
         if (!strcmp(name, "selectHairColor") || !strcmp(name, "selectChatColor")) { // premium hex colours
             html_storage_set(!strcmp(name, "selectHairColor") ? "hairCol" : "chatCol", harg_str(args, argc, 0));
             refresh_class_box();
@@ -2719,6 +3040,21 @@ static int json_truthy(const cJSON *item) {
            !(cJSON_IsString(item) && !item->valuestring[0]);
 }
 
+// iìíiiií(item) (deob-10.0.7.js:24595-24598): a cosmetic's social.market.* label, a weapon skin's weapon name
+static const char *item_type_label(const ViewerSkin *skin) {
+    static const char *const keys[] = {NULL, "social.market.hat", "social.market.body", "social.market.melee", "social.market.spray",
+                                       "social.market.dye", "social.market.waist", "social.market.face", "social.market.shoe",
+                                       "social.market.pet", "social.market.collectible", "social.market.wrist", "social.market.charm",
+                                       "social.market.ticket", "social.market.back", "social.market.head", "social.market.playerCard",
+                                       "social.market.emoji", "social.market.paint"};
+    static const char *const english[] = {NULL, "Hat Item", "Body Item", "Melee Item", "Spray Item", "Dye Item", "Waist Item",
+                                          "Face Item", "Shoe Item", "Pet Item", "Collectible Item", "Wrist Item", "Charm Item",
+                                          "Spin Ticket Item", "Back Item", "Head Item", "Player Card", "Emoji", "Paint"};
+    if (skin->type > 0 && skin->type < (int) (sizeof(keys) / sizeof(keys[0]))) return i18n_tr(keys[skin->type], english[skin->type]);
+    const Weapon *w = skin->weapon >= 1 ? rules_weapon(skin->weapon - 1) : NULL;
+    return w && w->name ? w->name : "";
+}
+
 // viewItem(index, mode) (v7 index.js): the item popup over the menu; its 3D showcase is the
 // viewer page's in an iframe (viewer.html?nobg&showcase=<index>, drawn natively by
 // viewer_embed.h); a mode or an unknown item opens the sales page instead.
@@ -2750,6 +3086,30 @@ static void view_item(const int index, const int mode) {
                rarity_anim(skin) ? " rainbow" : "", color ? color : "#fff"); // 5: CONTRABAND
     sb_append_esc(&sb, skin->name ? skin->name : "");
     sb_append(&sb, "</div>");
+    // the account's first entry of the index: its m.wear as "<tier> (wear.toFixed(4))" and its "#serial", then the type
+    // label in .itemViewDesc / .itemViewDescWear (deob-10.0.7.js:223668-223688)
+    cJSON *meta = entry_meta(first_entry(index));
+    const cJSON *wear = cJSON_GetObjectItemCaseSensitive(meta, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(meta, "serial");
+    const int has_wear = wear && !cJSON_IsNull(wear);
+    if (has_wear) {
+        const double w = cJSON_IsNumber(wear) ? wear->valuedouble : 0.0;
+        sb_append(&sb, "<div class='itemViewWear'>");
+        sb_append_esc(&sb, wear_tier_name(w));
+        sb_appendf(&sb, " (%.4f)", w);
+        if (serial && !cJSON_IsNull(serial)) {
+            char num[40];
+            if (cJSON_IsNumber(serial)) js_number(num, sizeof num, serial->valuedouble);
+            else snprintf(num, sizeof num, "%s", cJSON_IsString(serial) ? serial->valuestring : "");
+            sb_append(&sb, "<span class='serialTag'>#");
+            sb_append_esc(&sb, num);
+            sb_append(&sb, "</span>");
+        }
+        sb_append(&sb, "</div>");
+    }
+    cJSON_Delete(meta);
+    sb_appendf(&sb, "<div class='itemViewDesc%s'>", has_wear ? "Wear" : "");
+    sb_append_esc(&sb, item_type_label(skin));
+    sb_append(&sb, "</div>");
     const int vaulted = (skin->seas ? skin->seas : 1) != g_viewer_current_season ||
                         (json_truthy(cJSON_GetObjectItemCaseSensitive(json, "limited")) && json_truthy(cJSON_GetObjectItemCaseSensitive(json, "noSpin")) &&
                          !json_truthy(cJSON_GetObjectItemCaseSensitive(json, "itemShop")));
@@ -2764,13 +3124,13 @@ static void view_item(const int index, const int mode) {
     } else if (json_truthy(cJSON_GetObjectItemCaseSensitive(json, "limited")) || (skin->flags & VS_BLOCKED)) {
         sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
     }
-    if (skin->type == 16) { // PLAYER_CARD: its thumbnail (UTILS.getPreview)
+    if (skin->type == 16 || skin->type == 17 || skin->type == 18) { // a card, emoji or paint: its thumbnail (viewItemCard / viewItemEmoji)
         char path[256], url[320];
         viewer_skin_preview_path(skin, path, sizeof(path));
         html_dom_asset_url(path, url, sizeof(url));
-        sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url);
+        sb_appendf(&sb, "<div class='viewItem%s' style='background-image:url(%s)'></div>", skin->type == 16 ? "Card" : "Emoji", url);
     } else {
-        char paint[80]; // the owned copy's wear and paint on the showcase (v10's instance → viewer URL, deob-10.0.6.js:221934)
+        char paint[256]; // the first entry's wear, paint, style, seed and counter stats on the showcase (deob-10.0.7.js:223688)
         ui_loadout_paint_query(index, paint, sizeof(paint));
         sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d%s'></iframe>", index, paint);
     }

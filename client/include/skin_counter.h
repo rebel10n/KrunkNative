@@ -43,6 +43,10 @@ void skin_counter_frame(const Player *me);
 // base < 0 removes it) and the copy's seed for the seeded custom shader 15 (iîîíïiï, :24344-24353; 0 none).
 void skin_counter_set_base(int uid, int skin, long base);
 void skin_counter_set_seed(int uid, int skin, int seed);
+// ... and the copy's wear (m.wear, NET_EXT_KN_SKIN_COPIES V2): the level of the weapon model's wearMap (generateMeshes,
+// deob-10.0.7.js:174102-174107, :174184-174189); < 0 removes it. skin_counter_wear: -1 when none is known.
+void skin_counter_set_wear(int uid, int skin, double wear);
+double skin_counter_wear(int uid, int skin);
 long skin_counter_base(int uid, int skin); // 0 when none is known
 int skin_counter_seed(int uid, int skin);  // 0 when none is known
 void skin_counter_reset_bases(void);

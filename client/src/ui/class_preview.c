@@ -172,8 +172,13 @@ static float preview_head_mlt(const Client *client) {
     return client->me && client->me->head_mlt > 0.0f ? client->me->head_mlt : 1.0f;
 }
 
+// The copies the preview's slots name (v10.0.7's "<copyId>#<index>"): the model reads each copy's paint, style, seed and
+// wear (player_mesh.c player_own_copy), so another copy of a worn index rebuilds it too.
+static NetSkinCopyIdsPacket g_preview_copies;
+
 // Everything of the look that player_generate_meshes reads: a change rebuilds the model.
 static void preview_look_apply(Player *player, const LoadoutLook *look, const float head_mlt) {
+    g_preview_copies = look->copies;
     player->cosmetics = look->cosmetics;
     player->cosmetics_v7 = look->cosmetics_v7;
     player->skins = look->skins;
@@ -188,7 +193,8 @@ static int preview_cosmetics_changed(const Client *client, const Player *player)
     return memcmp(&player->cosmetics, &want.cosmetics, sizeof(want.cosmetics)) != 0 || memcmp(&player->skins, &want.skins, sizeof(want.skins)) != 0 ||
            memcmp(&player->skin_paints, &want.skin_paints, sizeof(want.skin_paints)) != 0 ||
            memcmp(&player->cosmetics_v7, &want.cosmetics_v7, sizeof(want.cosmetics_v7)) != 0 || player->secondary_index != want.secondary_index ||
-           player->attach_index != want.attach_index || player->head_mlt != preview_head_mlt(client);
+           player->attach_index != want.attach_index || player->head_mlt != preview_head_mlt(client) ||
+           memcmp(&g_preview_copies, &want.copies, sizeof(want.copies)) != 0;
 }
 
 // A private third-person player of the menu class, like Krunker's preview `dF`

@@ -9,6 +9,7 @@
 static struct {
     int used, uid, count;
     int skin[STYLE_SLOTS], style[STYLE_SLOTS];
+    double wear[STYLE_SLOTS]; // the worn copy's m.wear (NET_EXT_KN_SKIN_STYLES V2), -1 none
 } g_styles[STYLE_PLAYERS];
 static int g_next;
 
@@ -23,7 +24,9 @@ static int slot_of(const int uid, const int create) {
     return i;
 }
 
-void skin_style_set(const int uid, int count, const int *skins, const int *styles) {
+void skin_style_set(const int uid, const int count, const int *skins, const int *styles) { skin_style_set_wears(uid, count, skins, styles, NULL); }
+
+void skin_style_set_wears(const int uid, int count, const int *skins, const int *styles, const double *wears) {
     const int i = slot_of(uid, 1);
     if (count < 0) count = 0;
     if (count > STYLE_SLOTS) count = STYLE_SLOTS;
@@ -34,8 +37,19 @@ void skin_style_set(const int uid, int count, const int *skins, const int *style
     for (int k = 0; k < count; k++) {
         g_styles[i].skin[k] = skins[k];
         g_styles[i].style[k] = styles[k];
+        g_styles[i].wear[k] = wears && wears[k] >= 0.0 ? wears[k] : -1.0;
     }
 }
+
+double skin_style_wear_of(const int uid, const int skin) {
+    const int i = slot_of(uid, 0);
+    if (i < 0 || skin < 0) return -1.0;
+    for (int k = 0; k < g_styles[i].count; k++)
+        if (g_styles[i].skin[k] == skin) return g_styles[i].wear[k];
+    return -1.0;
+}
+
+int skin_style_known(const int uid) { return slot_of(uid, 0) >= 0; }
 
 int skin_style_of(const int uid, const int skin) {
     const int i = slot_of(uid, 0);

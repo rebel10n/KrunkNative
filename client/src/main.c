@@ -1472,12 +1472,16 @@ void client_drop_player_mesh(Client *client, Player *player) {
 static NetSkinsPacketV2 g_client_skins[CLIENT_SKINS_MAX];
 static int g_client_skins_count;
 
+PlayerSkins client_pending_skins(const int uid);
+
 static PlayerSkins client_skins_of(const int uid) {
     for (int i = 0; i < g_client_skins_count; i++) {
         if (g_client_skins[i].uid == uid) return g_client_skins[i].skins;
     }
     return PLAYER_SKINS_NONE;
 }
+
+PlayerSkins client_pending_skins(const int uid) { return client_skins_of(uid); }
 
 // the paint of each of those skins (SKINS V2, patch 6; a V1 SKINS or none: no paint)
 static PlayerSkinPaints client_skin_paints_of(const int uid) {
@@ -1523,7 +1527,7 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     PlayerSkinPaints paints = client_skin_paints_of(packet->uid);
     // Our own model wears our account's own painted copies (v10.0.3: the local match reads $account.skins,
     // deob-10.0.3.js:252090-252095), whatever the server's SKINS said (offline the sandbox has no account).
-    if (packet->is_you) ui_loadout_skin_paints(&skins, &paints);
+    if (packet->is_you) ui_loadout_skin_paints(&skins, ui_loadout_ent_copies(), &paints); // the copies our last ENT named
     if (!player) {
         player = player_init(&client->game);
         if (!player) return;
@@ -2429,6 +2433,7 @@ void client_enter_game(Client *client) {
         combat_send_streak_slots(client); // WP-B: v7 ENT streakIndexes, ahead of the ENT (1.3+ servers)
         client_send_pc_stat(client);      // WP-E: v7 ENT pcStatIndex, ahead of the ENT (1.3+ servers)
         client_send_look(client);         // official lobbies: ENTER_GAME skinColIndex / hairCol / chatCol / titleIndex
+        client_send_skin_copies(client, &look); // v10.0.7 "<copyId>#<index>" slots: the copies the ENT's slots name
         client_net_send(client, NET_PACKET_ENT, &packet, ent_size);
     } else {
         client->in_game = 0;

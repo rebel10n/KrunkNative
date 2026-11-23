@@ -3281,6 +3281,15 @@ static void on_challenge_rewards(KrunkerLink *l, const KrunkerFrame *f) {
 // come from our ENT. On a socket signed in to a krunker.io account (l->account) the player's own
 // loadout goes out instead, like the live client's saved selections: the spray, the weapon and melee
 // skins and the cosmetic slots of our ENT (krunker.io keeps what the account owns).
+// An "en" slot: v10.0.7 sends the saved value as it is (deob-10.0.7.js:215052), "<copyId>#<index>" for an owned copy
+// (iîìîiìï, :24381-24383), else the index. `slot` a SKIN_COPY_SLOT_*; buf keeps the string.
+static KrunkerValue ent_slot(const KrunkerLink *l, const int slot, const double value, char *buf, const size_t n) {
+    const int32_t copy = l->copies_set && value >= 0 && l->copies.skin[slot] == (int32_t) value ? l->copies.copy_id[slot] : 0;
+    if (copy <= 0) return KRUNKER_V_NUM(value);
+    const int w = snprintf(buf, n, "%d#%d", copy, (int) value);
+    return KRUNKER_V_STRN(buf, w > 0 && (size_t) w < n ? (size_t) w : 0);
+}
+
 static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length) {
     NetEntPacket ent;
     memset(&ent, 0, sizeof(ent));
@@ -3300,9 +3309,11 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
     for (int i = 0; l->streak_slots_set && i < 3; i++) streak[i] = l->streak_slots[i];
     const int own = l->account; // the account's loadout, else a guest's
 #define OWN(v) ((own && (v) >= 0) ? (double) (v) : -1.0)
-    const KrunkerValue skins[] = {KRUNKER_V_NUM(OWN(ent.skins.primary)), KRUNKER_V_NUM(OWN(ent.skins.secondary))};
-    const KrunkerValue charms[] = {own && ent.cosmetics_v7.charms[0] >= 0 ? KRUNKER_V_NUM(ent.cosmetics_v7.charms[0]) : KRUNKER_V_NIL,
-                                   KRUNKER_V_NUM(OWN(ent.cosmetics_v7.charms[1]))};
+    char copy_str[SKIN_COPY_SLOTS][24];
+#define SLOT(k, v) ent_slot(l, (k), OWN(v), copy_str[(k)], sizeof(copy_str[(k)]))
+    const KrunkerValue skins[] = {SLOT(SKIN_COPY_SLOT_PRIMARY, ent.skins.primary), SLOT(SKIN_COPY_SLOT_SECONDARY, ent.skins.secondary)};
+    const KrunkerValue charms[] = {own && ent.cosmetics_v7.charms[0] >= 0 ? SLOT(SKIN_COPY_SLOT_CHARM1, ent.cosmetics_v7.charms[0]) : KRUNKER_V_NIL,
+                                   SLOT(SKIN_COPY_SLOT_CHARM2, ent.cosmetics_v7.charms[1])};
     // NET_EXT_KN_LOOK's colours (deob-10.0.7.js:215052 sends the saved values as they are)
     l->look.skin_col[sizeof(l->look.skin_col) - 1] = l->look.hair_col[sizeof(l->look.hair_col) - 1] = 0;
     l->look.chat_col[sizeof(l->look.chat_col) - 1] = 0;
@@ -3312,38 +3323,39 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
         KRUNKER_V_NUM(ent.class_index),                                   // [0] classIndex
         KRUNKER_V_NUM(own && ent.spray_index > 0 ? ent.spray_index : 2482), // [1] sprayIndex (0x9b2)
         KRUNKER_V_ARRAY(skins, 2),                                        // [2] weapon skins
-        KRUNKER_V_NUM(OWN(ent.cosmetics.hat)),                            // [3] hatIndex
-        KRUNKER_V_NUM(OWN(ent.cosmetics.body)),                           // [4] bodyIndex
+        SLOT(SKIN_COPY_SLOT_HAT, ent.cosmetics.hat),                       // [3] hatIndex
+        SLOT(SKIN_COPY_SLOT_BODY, ent.cosmetics.body),                     // [4] bodyIndex
         KRUNKER_V_NUM(ent.secondary_index >= 0 ? ent.secondary_index : 2),// [5] secondaryInd
         KRUNKER_V_NUM(ent.spectate ? 1 : 0),                              // [6] spectate
         KRUNKER_V_NUM(ent.chall_mode ? 1 : 0),                            // [7] challenge mode
         KRUNKER_V_NUM(l->team_pick),                                      // [8] team pick (iïíiîiì, toggleTeam)
-        KRUNKER_V_NUM(OWN(ent.skins.melee)),                              // [9] meleeIndex
+        SLOT(SKIN_COPY_SLOT_MELEE, ent.skins.melee),                       // [9] meleeIndex
         skin_col,                                                         // [10] skinColIndex (index or "#rrggbb")
         KRUNKER_V_NUM(ent.lag_comp),                                      // [11] lagComp
         KRUNKER_V_NUM(ent.attach_index >= 0 ? ent.attach_index : 0),      // [12] attachIndex
         KRUNKER_V_NUM(l->pc_stat),                                        // [13] pcStatIndex (PC_STAT, -1 none)
-        KRUNKER_V_NUM(OWN(ent.cosmetics.dye)),                            // [14] dyeIndex
-        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.shoe)),                        // [15] shoeIndex
-        KRUNKER_V_NUM(OWN(ent.cosmetics.waist)),                          // [16] waistIndex
+        SLOT(SKIN_COPY_SLOT_DYE, ent.cosmetics.dye),                       // [14] dyeIndex
+        SLOT(SKIN_COPY_SLOT_SHOE, ent.cosmetics_v7.shoe),                  // [15] shoeIndex
+        SLOT(SKIN_COPY_SLOT_WAIST, ent.cosmetics.waist),                   // [16] waistIndex
         l->look_set && l->look.hair_col[0] ? KRUNKER_V_STR(l->look.hair_col) : KRUNKER_V_NUM(-1), // [17] hairCol
         l->look_set && l->look.chat_col[0] ? KRUNKER_V_STR(l->look.chat_col) : KRUNKER_V_NUM(-1), // [18] chatCol
         KRUNKER_V_NUM(ent.anon_mode ? 1 : 0),                             // [19] anonMode
-        KRUNKER_V_NUM(OWN(ent.cosmetics.face)),                           // [20] faceIndex
-        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.pet)),                         // [21] petIndex
+        SLOT(SKIN_COPY_SLOT_FACE, ent.cosmetics.face),                     // [20] faceIndex
+        SLOT(SKIN_COPY_SLOT_PET, ent.cosmetics_v7.pet),                    // [21] petIndex
         // [22..24] tmp.verifiedBadge / premiumBadge / customBadge ? 1 : 0 (deob-10.0.7.js:215052)
         KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_VERIFIED ? 1 : 0), // [22] verifiedBadge
         KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_PREMIUM ? 1 : 0),  // [23] premiumBadge
         KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_CUSTOM ? 1 : 0),   // [24] customBadge
-        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.wrist)),                       // [25] wristIndex
+        SLOT(SKIN_COPY_SLOT_WRIST, ent.cosmetics_v7.wrist),                // [25] wristIndex
         KRUNKER_V_NUM(streak[0]), KRUNKER_V_NUM(streak[1]), KRUNKER_V_NUM(streak[2]), // [26..28] streakIndex1..3
         KRUNKER_V_ARRAY(charms, 2),                                       // [29] charms
-        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.back)),                        // [30] backIndex
-        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.head)),                        // [31] headIndex
-        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.player_card)),                 // [32] playerCardIndex
+        SLOT(SKIN_COPY_SLOT_BACK, ent.cosmetics_v7.back),                  // [30] backIndex
+        SLOT(SKIN_COPY_SLOT_HEAD, ent.cosmetics_v7.head),                  // [31] headIndex
+        SLOT(SKIN_COPY_SLOT_CARD, ent.cosmetics_v7.player_card),           // [32] playerCardIndex
         KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_RANK ? 1 : 0),     // [33] rankBadge
         KRUNKER_V_NUM(l->look_set ? l->look.title_index : -1),            // [34] titleIndex
     };
+#undef SLOT
 #undef OWN
     const KrunkerValue args[] = {
         KRUNKER_V_ARRAY(enter, 35),
@@ -3695,6 +3707,11 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             if (subtype == NET_EXT_KN_LOOK && body_length >= sizeof(NetLookPacket)) { // kept for the next "en"
                 memcpy(&l->look, body, sizeof(l->look));
                 l->look_set = 1;
+                return 0;
+            }
+            if (subtype == NET_EXT_KN_SKIN_COPY_IDS && body_length >= sizeof(NetSkinCopyIdsPacket)) { // kept for the next "en"
+                memcpy(&l->copies, body, sizeof(l->copies));
+                l->copies_set = 1;
                 return 0;
             }
             if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket)) { // the stalker's taunt key: ["stlkrt", i] (:260109)
