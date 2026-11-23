@@ -285,6 +285,7 @@ void sh_flag(SocialSession *s, const cJSON *f);        /* "flg" */
 void sh_staff_badge(SocialSession *s, const cJSON *f); /* "sbdg": give (1) / remove (0) a badge, developers */
 void sh_verify(SocialSession *s, const cJSON *f);      /* "ver" */
 void sh_creator(SocialSession *s, const cJSON *f);     /* "crt": v10's creator badge, developers */
+void sh_skin_maker(SocialSession *s, const cJSON *f);  /* "skm": v10's isSkinMaker (player_skinmaker), developers */
 void leaders_page(SocialSession *s, const char *sub, int64_t region);
 
 void sh_post(SocialSession *s, const cJSON *f);        /* "ps" */

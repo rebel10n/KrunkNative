@@ -375,6 +375,7 @@ cJSON *social_account_info(const cJSON *account) {
     cJSON *info = cJSON_CreateObject();
     const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges",
                           "creator_badge", /* v10's creatorBadge (0210_creator_badge) */
+                          "player_skinmaker", /* v10's isSkinMaker (0401_skin_maker, deob-10.0.7.js:115136) */
                           "dxp",           /* v10 double XP: the 2x XP offer and the weekend schedules (0341_double_xp) */
                           "junk",          /* the Junk wallet's balance, "12.34" (0347_junk_wallet, doc/v10/junk.md) */
                           "reqDel", "twitchId", "twitch", "raidStats", /* v10.0.3 setData [29] / [44] / [23] / [52] (account_life.c) */
@@ -760,6 +761,7 @@ static const SocialRoute k_routes[] = {
     {"flg", sh_flag},
     {"hds", sh_hide_status},
     {"ver", sh_verify},
+    {"skm", sh_skin_maker},            /* KrunkNative: v10's isSkinMaker (players.player_skinmaker, profiles.c) */
     {"crt", sh_creator},               /* KrunkNative: v10's creator badge on a profile (profiles.c) */
     {"sbdg", sh_staff_badge},          /* KrunkNative: Give Badge / Remove on a profile (profiles.c) */
     {"ps", sh_post},
@@ -926,7 +928,7 @@ static const LabelClass k_label_class[] = {
     {"lps", RC_WRITE, ANS_REPLY}, {"dps", RC_WRITE, ANS_REPLY}, {"ict", RC_WRITE, ANS_REPLY},
     {"kr", RC_WRITE, ANS_REPLY}, {"prm", RC_WRITE, ANS_REPLY}, {"cln", RC_WRITE, ANS_REPLY}, {"clnR", RC_WRITE, ANS_REPLY},
     {"clnRA", RC_WRITE, ANS_REPLY}, {"rpt", RC_WRITE, ANS_REPLY}, {"flg", RC_WRITE, ANS_REPLY}, {"hds", RC_WRITE, ANS_REPLY},
-    {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
+    {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"skm", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
     {"nme", RC_WRITE, ANS_REPLY}, {"uploadS", RC_WRITE, ANS_REPLY}, {"uploadM", RC_WRITE, ANS_REPLY},
     {"uploadMo", RC_WRITE, ANS_REPLY}, {"plm", RC_READ, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY}, {"ulb", RC_WRITE, ANS_REPLY},
     {"glb", RC_READ, ANS_REPLY}, {"sd", RC_READ, ANS_REPLY}, {"dd", RC_WRITE, ANS_REPLY}, {"dkd", RC_WRITE, ANS_REPLY},

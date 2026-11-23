@@ -815,8 +815,8 @@ const kn_proc P_PUBLISH_MAP = {
 
 /* staff flags: (actor, name, on) -> player_id row when changed. kind 0 = flag (player_hack;
  * moderators and developers), 1 = verify (player_featured; developers), 2 = v10's creator badge
- * (creator_badge, 0210; developers). */
-enum { STAFF_FLAG, STAFF_VERIFY, STAFF_CREATOR };
+ * (creator_badge, 0210; developers), 3 = v10's isSkinMaker (player_skinmaker, 0401; developers). */
+enum { STAFF_FLAG, STAFF_VERIFY, STAFF_CREATOR, STAFF_SKIN_MAKER };
 static kn_db_result *staff_set(kn_dbconn *c, int n, const char *const *p, int kind) {
     Dbx x = {c, NULL};
     int allowed = kind != STAFF_FLAG
@@ -833,9 +833,11 @@ static kn_db_result *staff_set(kn_dbconn *c, int n, const char *const *p, int ki
         [STAFF_FLAG] = {.any = "UPDATE players SET player_hack = $2 WHERE player_id = $1"},
         [STAFF_VERIFY] = {.any = "UPDATE players SET player_featured = $2 WHERE player_id = $1"},
         [STAFF_CREATOR] = {.any = "UPDATE players SET creator_badge = $2 WHERE player_id = $1"},
+        [STAFF_SKIN_MAKER] = {.any = "UPDATE players SET player_skinmaker = $2 WHERE player_id = $1"},
     };
     static const char *const k_action[][2] = {
-        [STAFF_FLAG] = {"unflag", "flag"}, [STAFF_VERIFY] = {"unverify", "verify"}, [STAFF_CREATOR] = {"uncreator", "creator"}};
+        [STAFF_FLAG] = {"unflag", "flag"}, [STAFF_VERIFY] = {"unverify", "verify"}, [STAFF_CREATOR] = {"uncreator", "creator"},
+        [STAFF_SKIN_MAKER] = {"unskinmaker", "skinmaker"}};
     if (target > 0 && dbx_exec(&x, &k_update[kind], KN_DB_ARGS(I64S(target), P(2))) > 0) {
         const char *action = k_action[kind][PI(2) == 1];
         dbx_exec(&x, SQL(.any = "INSERT INTO moderation_log (actor_id, target_id, action) VALUES ($1, $2, $3)"),
@@ -848,6 +850,7 @@ static kn_db_result *staff_set(kn_dbconn *c, int n, const char *const *p, int ki
 static kn_db_result *run_set_hack(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_FLAG); }
 static kn_db_result *run_set_featured(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_VERIFY); }
 static kn_db_result *run_set_creator(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_CREATOR); }
+static kn_db_result *run_set_skin_maker(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_SKIN_MAKER); }
 const kn_proc P_SET_HACK = {
     "set_hack",
     "WITH ok AS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_moderator > 0)), "
@@ -869,3 +872,10 @@ const kn_proc P_SET_CREATOR = {
     "l AS (INSERT INTO moderation_log (actor_id, target_id, action) SELECT $1, player_id, "
     "CASE WHEN $3::int = 1 THEN 'creator' ELSE 'uncreator' END FROM u) SELECT player_id FROM u",
     run_set_creator};
+const kn_proc P_SET_SKIN_MAKER = {
+    "set_skin_maker",
+    "WITH ok AS (SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0), "
+    "u AS (UPDATE players SET player_skinmaker = $3 WHERE player_id = kn_account_id($2) AND EXISTS (SELECT 1 FROM ok) RETURNING player_id), "
+    "l AS (INSERT INTO moderation_log (actor_id, target_id, action) SELECT $1, player_id, "
+    "CASE WHEN $3::int = 1 THEN 'skinmaker' ELSE 'unskinmaker' END FROM u) SELECT player_id FROM u",
+    run_set_skin_maker};

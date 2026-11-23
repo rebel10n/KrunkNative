@@ -1476,6 +1476,7 @@ Other labels (request -> reply):
 | `["sst", name?, season?]` | `["sst", {season, name, kills, deaths, wins, games, score, timePlayed, bpp, tier, level, levels} \| null]`: the profile's season block (Krunker Box Office) |
 | `["flg", name, 0\|1]` / `["ver", name, 0\|1]` | `["fgr", ok]` (mods) / `["verr", ok]` (devs) |
 | `["crt", name, 0\|1]` | `["crtr", ok]` (devs): v10's creator badge (`players.creator_badge`, 0210), sent as `creator_badge` in the profile row and the account info |
+| `["skm", name, 0\|1]` | `["skmr", ok]` (devs): v10's skin maker (`acc.isSkinMaker`, `players.player_skinmaker`, 0401), sent as `player_skinmaker` in the account info; the game server and the loadout give a skin maker the season 6+ store items no creator made (getSkins, deob-10.0.7.js:217781-217789) |
 
 Server pushes: `["ua", data40, info]` (v3.1.1 `updateAccount`) after a stats commit
 of that account; `["gmc", n]` unread mail. After a commit with v7 progression fields (7.6):

@@ -9,6 +9,9 @@ a plain account's ["crt", name, 1] is refused (crtr null, nothing changes); a de
 creator_badge in the account info of the sign-in ("a" frame, its 7th field), in v10's profile
 (gapi GET /players/<name>) and in the hub's profile row (["r", "profile", name]).
 
+Skin maker (players.player_skinmaker, migration 0401; profiles.c "skm", db_social.c P_SET_SKIN_MAKER): v10's
+acc.isSkinMaker, set and cleared by a developer, refused for a plain account, sent as player_skinmaker in the account info.
+
 Map video (creations.c uploadM, shared/src/youtube_link.c): a published map keeps the YouTube id of
 its link (map_video), not the text typed; a link that is not a YouTube video stores none; /api/maps
 lists it as map_videolink and the map page (["r", "map", name]) as vl.
@@ -197,6 +200,45 @@ async def creator_badge(names):
         await s.close()
 
 
+async def skin_maker(names):
+    """v10's skin makers (acc.isSkinMaker = ~~player_skinmaker, deob-10.0.7.js:115136; 0401_skin_maker): a developer's
+    ["skm", name, 1] sets players.player_skinmaker (skmr true, moderation_log 'skinmaker'), 0 clears it ('unskinmaker');
+    a plain account's is refused. The account info (db_account_json: the sign-in's "a" info and the game server's
+    account) carries it as player_skinmaker."""
+    dev_n, tgt_n, plain_n = names
+    D, T, P = await Sock().open(), await Sock().open(), await Sock().open()
+    dev, _ = await D.register(dev_n)
+    tgt, tgt_tok = await T.register(tgt_n)
+    await P.register(plain_n)
+    q("UPDATE players SET player_developer = 1 WHERE player_id = ?", dev)
+    check(q("SELECT player_skinmaker FROM players WHERE player_id = ?", tgt)[0][0] == 0, "0401: a new account is no skin maker")
+    f = await T.login(tgt_n, tgt_tok)
+    check(info_of(f).get("player_skinmaker") == 0, "the sign-in's account info says player_skinmaker 0")
+
+    r = await P.ask(["skm", tgt_n, 1], "skmr")
+    check(r is not None and r[1] is None, "a plain account's skm is refused (skmr null)")
+    check(q("SELECT player_skinmaker FROM players WHERE player_id = ?", tgt)[0][0] == 0, "the refused skm changed nothing")
+
+    r = await D.ask(["skm", tgt_n, 1], "skmr")
+    check(r is not None and r[1] is True, "a developer's skm makes a skin maker (skmr true)")
+    check(q("SELECT player_skinmaker FROM players WHERE player_id = ?", tgt)[0][0] == 1, "players.player_skinmaker = 1")
+    check(bool(q("SELECT 1 FROM moderation_log WHERE actor_id = ? AND target_id = ? AND action = 'skinmaker'", dev, tgt)),
+          "moderation_log has the developer's 'skinmaker' row")
+    f = await T.login(tgt_n, tgt_tok)
+    check(info_of(f).get("player_skinmaker") == 1, "the skin maker's sign-in carries player_skinmaker 1 (account info)")
+
+    r = await D.ask(["skm", tgt_n, 0], "skmr")
+    check(r is not None and r[1] is True, "a developer's skm 0 takes it back")
+    check(q("SELECT player_skinmaker FROM players WHERE player_id = ?", tgt)[0][0] == 0, "players.player_skinmaker = 0 again")
+    check(bool(q("SELECT 1 FROM moderation_log WHERE target_id = ? AND action = 'unskinmaker'", tgt)), "logged as 'unskinmaker'")
+    f = await T.login(tgt_n, tgt_tok)
+    check(info_of(f).get("player_skinmaker") == 0, "the account info says player_skinmaker 0 again")
+    r = await D.ask(["skm", "nobody_zz_%s" % dev_n[-5:], 1], "skmr")
+    check(r is not None and r[1] is None, "skm on an unknown name: skmr null")
+    for s in (D, T, P):
+        await s.close()
+
+
 def map_json(name):
     return json.dumps({"name": name, "objects": [{"p": [0, 0, 0], "s": [10, 10, 10]}], "spawns": [[0, 10, 0, 0, 0, 0]]})
 
@@ -284,6 +326,8 @@ def main():
         stamp = str(int(time.time()) % 100000)
         print("creator badge:")
         asyncio.run(creator_badge(["crdev%s" % stamp, "crtgt%s" % stamp, "crplain%s" % stamp]))
+        print("skin maker:")
+        asyncio.run(skin_maker(["skdev%s" % stamp, "sktgt%s" % stamp, "skplain%s" % stamp]))
         print("map YouTube video:")
         asyncio.run(map_video(["crpub%s" % stamp]))
     except Exception as e:  # noqa: BLE001

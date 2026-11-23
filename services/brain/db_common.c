@@ -568,6 +568,16 @@ static void db_account_ranked_rank(Dbx *x, const int64_t id, cJSON *o) {
     cJSON_AddNumberToObject(o, "ranked_rank", rank);
 }
 
+/* 0401_skin_maker: v10's acc.isSkinMaker (~~player_skinmaker, deob-10.0.7.js:115136), players.player_skinmaker. The game
+ * server gives a skin maker the season 6+ store items no creator made (getSkins, :217781-217789); developers set it ("skm",
+ * profiles.c). Added in C for every driver (kn_account_json is unchanged). */
+static void db_account_skin_maker(Dbx *x, const int64_t id, cJSON *o) {
+    if (!o) return;
+    cJSON_DeleteItemFromObjectCaseSensitive(o, "player_skinmaker");
+    cJSON_AddNumberToObject(o, "player_skinmaker",
+        (double) dbx_int(x, SQL(.any = "SELECT player_skinmaker FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
+}
+
 /* PostgreSQL's kn_account_json (and the functions that return it, e.g. kn_commit_stats) builds the account in SQL; what
  * the other drivers' C adds is added here: the owned list (the SQL's data[10] counts every unit; painted copies apart,
  * counter skins' m[stat]), reqDel / twitchId / raidStats, chat_banned, trades and ranked_rank. Every account a PostgreSQL proc hands out goes
@@ -582,6 +592,7 @@ void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     db_account_chat_ban(x, id, v);
     db_account_trades(x, id, v);
     db_account_ranked_rank(x, id, v);
+    db_account_skin_maker(x, id, v);
 }
 
 cJSON *db_account_json(Dbx *x, int64_t id) {
@@ -665,5 +676,6 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     db_account_chat_ban(x, id, o);
     db_account_trades(x, id, o);
     db_account_ranked_rank(x, id, o);
+    db_account_skin_maker(x, id, o);
     return o;
 }
