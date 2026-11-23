@@ -5273,7 +5273,10 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // aiming cancels an inspect in v3.1.1, so the dot never shows during one; keep that explicit.
     // KrunkNative's third person aims behind the shoulder: v10 toggleAim shows the dot there too
     // (v10.js 172054, only camType.isNormal); the host's own thirdPerson keeps v7's rule.
-    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended && class_fps; // isNormal (:195330)
+    // The sight is toggleAim's (deob-10.0.7.js:174576-174577): null when (weapon.attach == null && !currentSkin.attachBypass)
+    // || currentSkin.noAttach || !attach[player.attachIndex], i.e. player_attachment: our pick on the held weapon with its
+    // skin, so Vince Mastery (attachBypass) on the Shotgun shows the dot and a noAttach skin on the Assault Rifle does not.
+    next.aim_dot = weapon && player_attachment(me) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended && class_fps; // isNormal (:195330)
     next.weapon = weapon;
     hud_timer(client, next.timer_text, sizeof(next.timer_text));
     next_extra.spread = (int) lroundf(hud_spread(me));
