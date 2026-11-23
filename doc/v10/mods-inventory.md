@@ -215,7 +215,11 @@ Counted: 30 rows. Have 19 (mod packs are partial), missing 1 (`ent_bbox`), moved
 
 Checked against v10.0.7 (`Krunker_v10.0.7/deob/game.deob.js`). v10.0.7 has no developer console, no chat
 command list, no F6 key and no `ent_bbox`; its only `mapToEdit` writer is the server's EDIT_MAP ("edMp",
-deob-10.0.7.js:228218). So none of these rows is a v10.0.7 parity gap: the two left are v7.1.4 mod features.
+deob-10.0.7.js:228218; the `saveVal("mapToEdit", ...)` at :228227). So none of these rows is a v10.0.7 parity gap:
+the two left are v7.1.4 mod features. Re-checked on 2026-11-23: `ent_bbox` has no match; 'F6' appears only in the
+key-name table at :23738 (keybind labels), with no handler; the one `giveKR` (:187064) is the map scripts'
+`PAYMENTS.giveKR` (a script pays a player from the map's `krRewards`), not a developer grant, and KN's map
+script API carries it on its own.
 
 | Gap | v10.0.7 | Why not done here | What it needs |
 |---|---|---|---|

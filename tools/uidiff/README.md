@@ -556,13 +556,13 @@ The structural (not fuzz-only) failures of the 2026-11-22 devbox run. Before -> 
 **Passing on the devbox, nothing to fix**: `ingame-endscreen-collect-raid` (3 of 3 runs),
 `kn-servers-official-error` (0.000 %) and `kn-servers-official-mixed` (0.003 % before its re-render).
 
-**Environment, not KN**
+**Environment, not KN** (wrong, see "Strike text, the static reference and flex shrink" below)
 - **Strike `item-selection` / `class-selection`**: the weapon thumbnails are PNG previews
   (`assets/textures/previews/weapons/*.png`, `image-rendering: pixelated`), not 3D. Regenerating the
   Chrome reference on the devbox with `static_ref.py` gives the committed reference exactly (items-row
   0.000 %), while KN's render is 8.3 % off; forcing smooth sampling does not help (8.2 %), and the same
-  code passed at 2.4 % on the desktop (4b03e2be). The difference is KN's GL image sampling on this
-  llvmpipe.
+  code passed at 2.4 % on the desktop (4b03e2be). This was put down to KN's GL image sampling on
+  llvmpipe; it was layout (a 0.67 px flex shrink), text kerning and the reference's device scale.
 
 **Sub-pixel placement of translated windows** (fixed later on 2026-11-23). With v10-identical
 markup (the tab strip and the status line hidden) KN painted the Servers window's sticky header
@@ -782,3 +782,54 @@ while dead: the overlay's `render` clears the canvas every frame and draws the c
 game.js:159839), and the death handler zeroes its opacity (`toggleGameUI(false)`, :163461). The
 crosshair in those captures is a stale overlay frame (it flickers across the `seq-death` frames), so
 KN keeps hiding it; no region covers the centre.
+
+### Strike text, the static reference and flex shrink (2026-11-23)
+
+Baseline: this branch on origin/main 9a7afde6 with the round 4 Skin Manager work, all 256 scenarios
+with a regions file as eight shards on the devbox's llvmpipe: **801 passed / 53 failed / 89 skipped**
+of 943 regions. The 36 failing scenarios again at `UIDIFF_FUZZ_SCALE=1.67` (fuzz +4..8): only five
+regions still fail; the other 48 are colour drift. The five: `boot-curtain-350` instructions (KN-own
+reference, see round 3), `strike/class-selection` selected-card, and `strike/item-selection` items-row,
+default-square and title. The others on the list for this pass (`kn-servers-official` top-groups,
+`menu-host-type`, `kn-ranked-sort` rs-arrow, `kn-tip-spin` cost, `ranked-shop-flying`,
+`seq-end-collect`) already pass after the earlier triage.
+
+After, on origin/main e2474665 (which has the round 4 work) with the fixes below: **806 / 48 / 89**, no
+region from pass to fail; the 48 are the baseline's colour drift and `boot-curtain-350`. One earlier
+full run (before the `v10_rewards.c` fix) had 803 / 51: `login-2fa`'s three regions failed (form-header
+15.2 -> 47.9 %), that frame having the login form without its 2FA form. It was the only run of that
+scenario whose log shows krunker.io's guest profile answered mid-render; the same binary passed it alone
+and in a 4-shard run. `v10_rewards.c` no longer asks for it during a render (a render never reaches the
+network, as `remote_images.c`), and no scenario log of the final run shows the request.
+
+**Fixed**
+- **GPOS kerning** (`text.c`, `strike/class-selection` class-list 2.29 -> 0.27 %, selected-card
+  4.96 -> 1.49 %). FreeType's `FT_Get_Kerning` reads only the legacy `kern` table; ChakraPetch (Strike's
+  font) has GPOS pair adjustments only, which Chrome applies, so KN's lines were wider and the diff
+  started exactly at the kerned pairs (`kb`, `nt`, `at`, `ra`: -10 / -10 / -10 / -25 per 1000 em).
+  `gpos_load` collects the `kern` feature's PairPos lookups (type 2, also through Extension type 9) and
+  `gpos_kern` applies formats 1 and 2 (first subtable that covers the glyph decides), scaled like the
+  legacy path. Test: `html_text_test` (A/V -2.72 px and k/b -0.32 px at 32 px, o/o 0).
+- **The static reference's device scale** (`item-selection` title 2.56 -> 0.00 %). FRVR's own captures
+  are Chrome under DevTools emulation, 640 x 360 CSS px at deviceScaleFactor 2, mobile
+  (`capture-strike.js:20,67,339`), and KN lays the Strike page out the same way (`strike_ui.c`
+  `apply_viewport`) and rounds text baselines in CSS px (`paint.c` `glyph_to_quad`). `static_ref.py`
+  shot a 1280 x 720 window at `--force-device-scale-factor=1`, which rounds in device px: the title sat
+  1 device px lower. A plain `--force-device-scale-factor=2` window gave the same pixels as scale 1;
+  `Emulation.setDeviceMetricsOverride` (`tools/strike/static_ref_shot.js`) is what changes it. The
+  reference and its kept page are regenerated with it.
+- **Flex: a definite flex container's automatic minimum size** (`item-selection` items-row 8.99 ->
+  0.58 %, default-square 6.85 -> 0.20 %). Not image sampling: `.item-selection__item-square` (120 px
+  border box, 2 px border: 116 px of content) holds a 100 px image box and a 20 px row-flex label around
+  a 16 px span. Chrome's rects (same emulation): image 96.67, label 19.33 at y 159.67, the 4 px shared
+  100:20. KN took the content size suggestion from the laid-out content height, which for a flex
+  container with a definite height is that height, so the label kept 20 and the image box took the
+  whole 4 px (96.0, the banner 0.67 px lower, the pixelated image on another pixel grid). A flex
+  container now also reports the height its lines would give an auto height (`LayoutOutput.auto_h`;
+  a column's items at their hypothetical sizes), which `content_auto_h` uses (CSS Flexbox 4.5). KN's
+  boxes match Chrome's to the dump's 0.1 px. Test: `html_layout_test` `t_flex_column_definite_item_min`
+  (fails before: image 100, label 20; a definite column item kept 40 and starved its sibling to 0).
+
+**Left**: `boot-curtain-350` instructions (0.97 %, max 0.5, KN-own reference: nothing new);
+`item-selection` back / home are skipped regions (2.53 / 2.16 %, max 2).
+
