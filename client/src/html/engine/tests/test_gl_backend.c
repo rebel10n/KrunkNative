@@ -219,6 +219,16 @@ static void build_list(DisplayList *dl, GLuint checker, GLuint disc, DlGlyphQuad
     const CssColor transparent = dl_color(0, 0, 0, 0), teal = dl_color(38, 166, 154, 255), orange = dl_color(255, 112, 67, 255);
     const CssColor paper = dl_color(236, 239, 241, 255);
 
+    // --- row 0 (y < 20): radius = width borders have a hard inner edge -----------
+    {   // white 3px borders at x .2 / y .2: inner edges at 1103.2, 1127.2 (x) and 4.2, 14.2 (y)
+        const float w[4] = {3, 3, 3, 3};
+        const CssColor c[4] = {white, white, white, white};
+        const uint8_t s[4] = {DL_BORDER_SOLID, DL_BORDER_SOLID, DL_BORDER_SOLID, DL_BORDER_SOLID};
+        push_border(dl, dl_rect(1100.2f, 1.2f, 30, 16), dl_radii_all(3), w, c, s);   // radius = width: hard
+        push_border(dl, dl_rect(1150.2f, 1.2f, 30, 16), dl_radii_all(0), w, c, s);   // square: anti-aliased
+        push_border(dl, dl_rect(1200.2f, 1.2f, 30, 16), dl_radii_all(2), w, c, s);   // radius < width: anti-aliased
+    }
+
     // --- row 1: solid, rounded, borders, images --------------------------------
     push_rect(dl, dl_rect(20, 20, 100, 60), red);
     push_rect(dl, dl_rect(130, 20, 100, 60), green);                          // semi-transparent over bg
@@ -638,6 +648,16 @@ int main(int argc, char **argv) {
     expect(img, 560, 95, 0, 255, 0, 2, "border: bottom edge (10px green)");
     expect(img, 617, 60, 255, 0, 0, 2, "border: right edge (6px red)");
     expect(img, 560, 60, BG.r, BG.g, BG.b, 2, "border: interior empty");
+    {   // row 0: 0.2 / 0.8 of a pixel's area is 30 + 0.2 * 225 = 75 / 30 + 0.8 * 225 = 210
+        expect(img, 1103, 9, BG.r, BG.g, BG.b, 2, "radius = width: inner left px center inside");
+        expect(img, 1115, 4, BG.r, BG.g, BG.b, 2, "radius = width: inner top px center inside");
+        expect(img, 1127, 9, 210, 210, 210, 4, "radius = width: inner right px keeps 0.8");
+        expect(img, 1115, 14, 210, 210, 210, 4, "radius = width: inner bottom px keeps 0.8");
+        expect(img, 1100, 9, 210, 210, 210, 4, "radius = width: outer left edge stays AA");
+        expect(img, 1153, 9, 75, 75, 79, 4, "square border: inner left edge AA (0.2)");
+        expect(img, 1165, 4, 75, 75, 79, 4, "square border: inner top edge AA (0.2)");
+        expect(img, 1203, 9, 75, 75, 79, 4, "radius < width: inner left edge AA (0.2)");
+    }
     expect(img, 960, 58, 229, 57, 53, 2, "css triangle: bottom center red");
     expect(img, 935, 25, BG.r, BG.g, BG.b, 2, "css triangle: top-left transparent edge");
     expect(img, 1150, 30, 60, 90, 200, 2, "image nearest: crisp dark cell");

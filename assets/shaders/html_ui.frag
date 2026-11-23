@@ -12,7 +12,7 @@
 //                      p1.w = 1: AA edges at target rect p2
 //   5 box-shadow       uv = local px from shadow rect center; p0 = shadow radii; p1 = (hw, hh, sigma, box radius delta);
 //                      p2 = (box cx, box cy, box hw, box hh): the element box is cut out
-//   6 border           uv = local px from border-box center; p0 = outer radii; p1 = (hw, hh, style + 4*edge, period); p2 = widths t,r,b,l
+//   6 border           uv = local px from border-box center; p0 = outer radii; p1 = (hw, hh, style + 4*edge [+ 16: hard inner edge], period); p2 = widths t,r,b,l
 //   7 group composite  uv = texcoord of the group FBO; u_opacity x u_cm color matrix; p0.x = 1 -> shadow (color x alpha)
 //   8 blur pass        uv = texcoord; separable 7-tap Gaussian along u_blur_dir (internal), taps clamped
 //                      to u_blur_clamp (edge mode clamp); u_blur_dir = 0 is a plain bilinear resample
@@ -309,10 +309,15 @@ void main() {
         vec4 ir = max(v_p0 - vec4(max(w.x, w.w), max(w.x, w.y), max(w.z, w.y), max(w.z, w.w)), vec4(0.0));
         float id = sd_rrect(v_uv - ic, max(ih, vec2(1e-4)), ir);
         float ipx = edge_px(id, px);                    // derivatives outside the branch below
+        // p1.z >= 16: a uniform border with radius = width, whose inner edge Chrome does not
+        // anti-alias (gl_backend.c border_hard_inner_edge): a pixel whose center is inside the padding
+        // box gets none, the others keep their area coverage
+        bool hard = v_p1.z > 15.5;
+        float code = hard ? v_p1.z - 16.0 : v_p1.z;
         float inner = 0.0;
-        if (ih.x > 0.0 && ih.y > 0.0) inner = aa(id, ipx);
-        float style = mod(v_p1.z, 4.0);
-        float edge = floor(v_p1.z / 4.0);
+        if (ih.x > 0.0 && ih.y > 0.0) inner = hard && id < 0.0 ? 1.0 : aa(id, ipx);
+        float style = mod(code, 4.0);
+        float edge = floor(code / 4.0);
         float s, t, ew;
         if (edge < 0.5) { s = v_uv.x + h.x; t = v_uv.y + h.y - 0.5 * w.x; ew = w.x; }
         else if (edge < 1.5) { s = v_uv.y + h.y; t = h.x - v_uv.x - 0.5 * w.y; ew = w.y; }

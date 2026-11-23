@@ -49,7 +49,7 @@
         270,
         40
       ],
-      "note": "#spinUIBtns: respin price, info and Equip Item. The respin icon is the same Material Icons 'refresh' glyph (v10.0.7 links the same flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2, Version 1.017, as KN's material-icons.ttf), turned by #spinAgainBtn > i's 2 s spin: the capture shows it at ~225 deg, anim_time 0.05 (was 0.8, 0 deg). Residual: Chrome's Equip / respin borders, see README round 4",
+      "note": "#spinUIBtns: respin price, info and Equip Item. The respin icon is the same Material Icons 'refresh' glyph (v10.0.7 links the same flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2, Version 1.017, as KN's material-icons.ttf), turned by #spinAgainBtn > i's 2 s spin: the capture shows it at ~225 deg, anim_time 0.05. The .button borders (4px, radius 4px) have Chrome's hard inner edge (gl_backend.c border_hard_inner_edge): Equip's bottom and right are 2.0 device px, not 2.32; 5.6-7.3 % before it (README round 5)",
       "max_pct": 5.5
     }
   ]

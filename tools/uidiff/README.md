@@ -51,7 +51,9 @@ version (the desktop's was not recorded). The structural failures of that run we
 2026-11-23 (see "Failing-region triage (2026-11-23)" below); after those fixes the devbox, run as four
 shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run),
 and 787 / 64 / 91 after the translated-window snapping fix (791 / 60 / 91 after the percentage and
-transformed-origin fixes of "Failing-region triage, round 3"; 794 / 59 / 89 after round 4).
+transformed-origin fixes of "Failing-region triage, round 3"; 794 / 59 / 89 after round 4; on
+main 4b5ef143, with the death screen failing since a73e24b8: 785 / 69 / 89, and 789 / 65 / 89 after
+round 5; 800 / 54 / 89 with round 5 on 5f2e9442, which fixed the death screen).
 `menu-host-type` was a layout of its own: the Rent a Server card's 15 px margin moved the centred window a
 fractional 31.3 px at the #uiBase scale (fixed 2026-11-23: 14 px, `rent_servers_ui.c`; the scenario also needed the
 sandbox menu its reference shows).
@@ -688,10 +690,55 @@ failed / 89 skipped, no region from pass to fail (every other region within 0.2 
   at 1.6 k + 0.05 s) matches that phase in all four scenarios; 0.8 drew it at 0 degrees.
 
 **Still open**
-- **`spin-item*` buttons, borders**: not a uniform device-pixel floor. Under `#uiBase`'s 0.579 scale
+- **`spin-item*` buttons, borders** (resolved in round 5, which also corrects this paragraph: the
+  purple box is the respin button, the cyan one Equip): not a uniform device-pixel floor. Under `#uiBase`'s 0.579 scale
   the 4 px borders are 2.32 device px in KN; in Chrome the purple Equip box's left / right are 2.31
   (as KN), its top / bottom 2.03-2.06, the cyan respin box 2.08 (left) and 2.0 (right). The top
   border differs at its outer edge (601.80 Chrome, 601.58 KN), the bottom at its inner edge
   (631.98 / 631.69); the button text matches to 0.01 px. Floor-snapping every border width would
   break the left / right edges that already match, so nothing changed; the likeliest source is still
   the compositor raster of the scaled layer.
+
+### Failing-region triage, round 5 (2026-11-23): borders whose radius equals their width
+
+Baseline: main 4b5ef143, four shards on the devbox's llvmpipe, 785 / 69 / 89 (the death screen
+fails since a73e24b8, left to the menu work). After the change below: 789 / 65 / 89, one region
+from pass to fail before its KN-own reference was corrected (`kn-map-vote`, below).
+
+**Measured.** The spin-item capture, as per-pixel coverage of the border colour (KN's band in
+brackets): respin (purple) left 514.30-516.61 and right 612.18-614.49 (the same), Equip (cyan) left
+648.86-650.94 (648.65-650.97) and right 763.00-765.00 (762.72-765.03), top 601.80-603.86
+(601.58-603.90), bottom 631.98-633.98 (631.69-634.00). Snapping each edge to device pixels cannot
+give this: it makes every edge whole, where the respin box's left and right edges carry 0.70 / 0.61
+and 0.82 / 0.49 of a pixel. To isolate the rule, headless Chromium 1255 (SwiftShader) drew 64
+`.button`-like boxes under `scale(0.579)` at x / y phases of k/8 px and every band was fitted
+(scratch tool: a page of absolutely placed boxes, coverage of `#b447ff` read back per band).
+
+- Outer edges: the border box snapped to whole CSS px in the scaled space, then scaled: what KN
+  already draws (0.03 per pixel).
+- Inner edges, radius 0 / 2 / 3 / 5 / 8 with a 4 px border: area coverage (0.03).
+- Inner edges, radius = width (2/2, 4/4, 6/6): a hard edge. A pixel whose centre is inside the
+  padding box gets no border, the others keep their area coverage (0.03; area coverage misses by up
+  to 0.52). This is Skia's stroked circular rrect with an inner radius of exactly 0.
+
+Applied to the capture, this rule gives every inner edge above: Equip right starts at 763.00
+(KN's 762.72 pixel has its centre inside), the bottom at 632.0, and the others keep their partial
+pixel. The two outer edges still 0.21 px off (top, Equip left) are placement, not width.
+
+**Fixed**
+- `gl_backend.c` `border_hard_inner_edge` (uniform width, style, colour and radius, radius = width)
+  flags the border, and `html_ui.frag` mode 6 then drops the coverage of a pixel whose centre is
+  inside the padding box. Test: `html_gl_backend_test` row 0 (radius = width cleared, square and
+  radius < width keep 0.2).
+- `spin-item` buttons 5.62 -> 2.74 %, `-body` 7.29 -> 4.57, `-legendary` 6.29 -> 3.59, `-melee`
+  7.66 -> 4.57: all four pass (max 5.5). Also lower: `spin-starter` / `spin-heroic` info
+  2.23 / 2.53 -> 1.53 / 1.64, `ingame-pause-esc` class-card 0.63 -> 0.34, the hub profile cards
+  0.17 -> 0.03, `menu-mobile` loadout 2.57 -> 2.10, `main-menu-nowplaying-long` class-card
+  2.93 -> 2.61.
+- `kn-map-vote` mapVote (0.00 -> 2.94 %, max 2): its reference is KN-own (2026-11-19) and drew the
+  Tip button's 4px / radius 4px border with KN's old inner edge. The reference's 296 pixels where the
+  new render differs from the old one were moved by exactly that difference (its other pixels,
+  captured on the desktop, are kept); 0.00 again.
+- Moved the other way, still passing: `kn-store-hats-v10` / `-melee-v10` picker 0.00 / 0.61 ->
+  0.92 / 1.53 (KN-own references, same buttons), `kn-om-*` om-footer 2.12 -> 2.22,
+  `customize-secondary` content 1.67 -> 1.85.

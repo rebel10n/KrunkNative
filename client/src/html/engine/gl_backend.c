@@ -1190,6 +1190,27 @@ static void draw_box_shadow(GlBackend *b, const DlItem *it) {
     emit_local_quad(b, &t, xy, scx, scy);
 }
 
+// Chrome (Skia) draws a uniform border whose corner radius equals its width (v10's .button: 4px solid,
+// border-radius 4px) as a stroked circular rrect whose inner radius is exactly 0, and that stroke's
+// inner edge is not anti-aliased: a pixel whose center lies inside the padding box gets no border,
+// one whose center is outside keeps its area coverage. Measured in headless Chromium under #uiBase's
+// scale(0.579) at 64 sub-pixel phases: radius = width 2/2, 4/4, 6/6 fit that rule to 0.03 per pixel
+// (plain area coverage misses by up to 0.52), radius 0, 2, 3, 5 and 8 with a 4px border fit plain
+// coverage to 0.03. It is what made spin-item's Equip border 2.0 device px at the bottom and the
+// right where KN drew 2.32. Square borders and every other radius keep the anti-aliased inner edge.
+static int border_hard_inner_edge(const DlItem *it) {
+    const float w = it->u.border.width[0];
+    const float rad = it->u.border.radii.tl;
+    if (!(w > 0.0f) || !(rad > 0.0f) || fabsf(rad - w) > 1e-3f * w) return 0;
+    for (int e = 0; e < 4; e++) {
+        if (it->u.border.width[e] != w || it->u.border.style[e] != DL_BORDER_SOLID) return 0;
+        const CssColor c = it->u.border.color[e], c0 = it->u.border.color[0];
+        if (c.r != c0.r || c.g != c0.g || c.b != c0.b || c.a != c0.a) return 0;
+    }
+    const DlRadii ra = it->u.border.radii;
+    return ra.tr == rad && ra.br == rad && ra.bl == rad;
+}
+
 static void draw_border(GlBackend *b, const DlItem *it) {
     const DlRect r = it->u.border.rect;
     if (r.w <= 0.0f || r.h <= 0.0f) return;
@@ -1229,6 +1250,7 @@ static void draw_border(GlBackend *b, const DlItem *it) {
 
     const float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
     const float edge_len[4] = {r.w, r.h, r.w, r.h};
+    const int hard_inner = border_hard_inner_edge(it);
 
     for (int e = 0; e < 4; e++) {
         const float w = it->u.border.width[e];
@@ -1246,7 +1268,8 @@ static void draw_border(GlBackend *b, const DlItem *it) {
         color_premul(it->u.border.color[e], b->opacity_mul, rgba);
         GlbVertex t = vertex_template(b, MODE_BORDER, rgba);
         set4(t.p0, it->u.border.radii.tl * s, it->u.border.radii.tr * s, it->u.border.radii.br * s, it->u.border.radii.bl * s);
-        set4(t.p1, r.w * 0.5f * s, r.h * 0.5f * s, (float) it->u.border.style[e] + 4.0f * (float) e, period * s);
+        set4(t.p1, r.w * 0.5f * s, r.h * 0.5f * s, (float) it->u.border.style[e] + 4.0f * (float) e + (hard_inner ? 16.0f : 0.0f),
+             period * s);
         set4(t.p2, wt * s, wr * s, wb * s, wl * s);
 
         float xy[8];

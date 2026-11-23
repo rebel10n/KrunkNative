@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#mapVote: the tip link and thumbs down / up (creation_vote.c render_map)"
+      "note": "#mapVote: the tip link and thumbs down / up (creation_vote.c render_map). The Tip button's 4px / radius 4px border has Chrome's hard inner edge since 2026-11-23 (README round 5): the reference's 296 border pixels were moved by exactly the render's change, the rest of the image is the 2026-11-19 capture"
     }
   ]
 }
