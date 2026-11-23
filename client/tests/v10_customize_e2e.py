@@ -372,7 +372,8 @@ def owner_picks(brain_url, game_port, dbpath):
     """getSkins(account, true) (deob-10.0.7.js:217752-217795) in the Hat picker, the card found with Search Item (the
     virtual grid): item.streamers holds the lower-cased Twitch (acc.twitch = tw_twitchname, :115113; data slot 31), so
     the account linked as "KaarSon" lists Emoji Beanie (2904, streamers ["kaarson"]); a developer (acc.isDev, :217767)
-    lists every store skin, so Warlock (1870, made by someone else) shows up."""
+    lists every store skin, so Warlock (1870, made by someone else) shows up; a skin maker lists Citadel Tophat (5256,
+    season 6, no creator)."""
     pick = """0 menu
 1500 call showWindow 16
 2500 clickid itemSearch
@@ -394,6 +395,15 @@ def owner_picks(brain_url, game_port, dbpath):
     log = run_client("dev", pick.format(query="Warlock", index=1870), brain_url, game_port)
     check("a developer: every store skin, Warlock too (acc.isDev)", count(log, "card") == 1, "card=%d" % count(log, "card"))
     db(dbpath, "UPDATE players SET player_developer = 0 WHERE player_id = ?", (acc,))
+    # a skin maker (acc.isSkinMaker = ~~player_skinmaker, :115136; the account info's "player_skinmaker" read by
+    # account_ui.c) lists the season 6+ items no creator made (:217787): Citadel Tophat (5256, seas 6, no creator)
+    log = run_client("skm-none", pick.format(query="Citadel", index=5256), brain_url, game_port)
+    check("a plain account: Citadel Tophat (season 6, no creator, not owned) is not listed", count(log, "card") == 0,
+          "card=%d" % count(log, "card"))
+    db(dbpath, "UPDATE players SET player_skinmaker = 1 WHERE player_id = ?", (acc,))
+    log = run_client("skm", pick.format(query="Citadel", index=5256), brain_url, game_port)
+    check("a skin maker: Citadel Tophat is listed (isSkinMaker's season 6+ items)", count(log, "card") == 1, "card=%d" % count(log, "card"))
+    db(dbpath, "UPDATE players SET player_skinmaker = 0 WHERE player_id = ?", (acc,))
 
 
 def main():

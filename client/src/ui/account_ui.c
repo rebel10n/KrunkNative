@@ -336,6 +336,7 @@ static void kio_build(void) {
     a->junk = obj_num("player_jnk");
     a->ranked_points = obj_num("ranked_points");
     a->spending_tier = (int) obj_num("spending_tier"); // spending_tier || 0 (deob-10.0.3.js:128959): the store's spender-only KR cards
+    a->skin_maker = (int) obj_num("player_skinmaker") != 0; // isSkinMaker = ~~(player_skinmaker || 0) (deob-10.0.7.js:115136)
     a->level = progression_level(a->score, RANK_VAR);
     a->level_prog = progression_level_prog(a->score, RANK_VAR);
     // stats: player_stats is JSON text in the object form, an object in setData's
@@ -356,7 +357,9 @@ static void kio_build(void) {
     } map[] = {{1, "player_kills"}, {2, "player_wins"}, {3, "player_games_played"}, {4, "player_deaths"}, {5, "player_funds"},
                {6, "player_score"}, {7, "player_clan"}, {8, "player_timeplayed"}, {9, "player_featured"}, {10, "skins"},
                {11, "player_lastreward"}, {12, "player_developer"}, {13, "player_following"}, {14, "player_followed"},
-               {17, "player_hack"}, {27, "player_premium"}, {28, "player_2FA"}, {29, "player_alias"}, {38, "jobrating"}, {39, "jobratingpositive"}};
+               {17, "player_hack"}, {27, "player_premium"}, {28, "player_2FA"}, {29, "player_alias"},
+               {31, "tw_twitchname"}, // acc.twitch (deob-10.0.7.js:115113): kn_brain's slot 31, which getSkins' streamer items read
+               {38, "jobrating"}, {39, "jobratingpositive"}};
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_kio.obj, map[i].key);
         if (v) cJSON_ReplaceItemInArray(a->data, map[i].slot, cJSON_Duplicate(v, 1));
@@ -397,8 +400,9 @@ static void kio_set_data(const cJSON *d) {
                {6, "player_score"}, {7, "player_clan"}, {8, "player_timeplayed"}, {9, "player_featured"}, {10, "skins"},
                {11, "player_lastreward"}, {12, "player_developer"}, {13, "player_following"}, {14, "player_followed"},
                {15, "player_stats"}, {16, "player_hack"}, {17, "player_region"}, {18, "player_role"}, {19, "player_premium"},
-               {20, "player_2FA"}, {21, "player_alias"}, {27, "jobrating"}, {28, "jobratingpositive"}, {30, "player_clanrole"},
-               {37, "player_jnk"}, {38, "activeChallenges"}, {39, "player_badge"},
+               {20, "player_2FA"}, {21, "player_alias"}, {23, "tw_twitchname"}, {27, "jobrating"}, {28, "jobratingpositive"},
+               {30, "player_clanrole"}, {37, "player_jnk"}, {38, "activeChallenges"}, {39, "player_badge"},
+               {42, "player_skinmaker"}, // isSkinMaker: setData's [42] (deob-10.0.7.js:115193)
                {47, "ranked_points"}, {48, "spending_tier"}, // (rankedPoints: setData's [47], v10:112873; spendingTier [48], deob-10.0.3.js:129017)
                {52, "raidStats"}}; // raidStats: setData's [52] (deob-10.0.3.js:129021; the constructor's is [])
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
@@ -536,7 +540,7 @@ static void chal_reward_skins(const cJSON *rew) {
 }
 
 // CHALLENGE_COMPLETED [index, midGame, REW] (deob-10.0.7.js:225216-225229), index into account.activeChallenges: during
-// the match a chat line ("Finish the game to complete: [N] challenge") and REW's skins into matchRewardSummary; at the
+// the match a chat line ("Finish the game to complete: [N] challenge") and REW's Junk and skins into matchRewardSummary; at the
 // match end the "Completed!" card in #endChals
 static void challenge_completed(const cJSON *list, const cJSON *frame) {
     const cJSON *idx = cJSON_GetArrayItem(frame, 1);
@@ -547,7 +551,12 @@ static void challenge_completed(const cJSON *list, const cJSON *frame) {
     const cJSON *mid = cJSON_GetArrayItem(frame, 2);
     if (cJSON_IsTrue(mid) || (cJSON_IsNumber(mid) && mid->valuedouble != 0.0)) {
         hud_ui_challenge_mid_game(name);
-        chal_reward_skins(cJSON_GetArrayItem(frame, 3));
+        // REW.jnk && (matchRewardSummary.junk += parseFloat(REW.jnk)): the end screen's Rewards tab Junk card
+        const cJSON *rew = cJSON_GetArrayItem(frame, 3);
+        const cJSON *jnk = cJSON_GetObjectItemCaseSensitive(rew, "jnk");
+        const double junk = cJSON_IsNumber(jnk) ? jnk->valuedouble : cJSON_IsString(jnk) ? atof(jnk->valuestring) : 0.0;
+        if (junk != 0.0) hud_ui_add_reward_junk(junk);
+        chal_reward_skins(rew);
         // its skins are in matchRewardSummary now: the match end's KrunkNative form adds only its card
         if (!cJSON_GetObjectItemCaseSensitive(c, "knMid")) cJSON_AddTrueToObject((cJSON *) c, "knMid");
     } else {
@@ -1504,6 +1513,8 @@ void account_lottery_booked(const char *type, const int ref, const double quanti
 
 // v10.0.3's account extras from kn_brain's account info (account_life.c): reqDel (setData [29]), twitchId ([44]),
 // twitch ([23]) and raidStats ([52]). An info without a key keeps what the account had.
+static void twitch_name_set(const char *name);
+
 static void set_life(const cJSON *info) {
     if (!cJSON_IsObject(info)) return;
     const cJSON *req = cJSON_GetObjectItem(info, "reqDel");
@@ -1511,7 +1522,7 @@ static void set_life(const cJSON *info) {
     const cJSON *tw = cJSON_GetObjectItem(info, "twitchId");
     if (tw) copy_str(g_twitch_id, sizeof(g_twitch_id), cJSON_IsString(tw) ? tw->valuestring : "");
     const cJSON *tn = cJSON_GetObjectItem(info, "twitch");
-    if (tn) copy_str(g_twitch_name, sizeof(g_twitch_name), cJSON_IsString(tn) ? tn->valuestring : "");
+    if (tn) twitch_name_set(cJSON_IsString(tn) ? tn->valuestring : "");
     const cJSON *raids = cJSON_GetObjectItem(info, "raidStats");
     if (cJSON_IsArray(raids)) {
         cJSON_Delete(g_raid_stats);
@@ -1519,11 +1530,21 @@ static void set_life(const cJSON *info) {
     }
 }
 
+// acc.twitch: the linked Twitch login ("" none), also in the account data's slot 31 (kn_brain's tw_twitchname), where
+// getSkins' streamer items look for it (ui_loadout.c owned_twitch; deob-10.0.7.js:217781-217789)
+static void twitch_name_set(const char *name) {
+    copy_str(g_twitch_name, sizeof(g_twitch_name), name ? name : "");
+    if (g_acc.data && cJSON_GetArraySize(g_acc.data) > 31)
+        cJSON_ReplaceItemInArray(g_acc.data, 31, g_twitch_name[0] ? cJSON_CreateString(g_twitch_name) : cJSON_CreateNull());
+}
+
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
-// creatorBadge (~~creator_badge, v10:112770) comes with it
+// creatorBadge (~~creator_badge, v10:112770) and isSkinMaker (~~player_skinmaker, deob-10.0.7.js:115136) come with it
 static void set_badges(const cJSON *info) {
     const cJSON *creator = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "creator_badge") : NULL;
     if (creator) g_acc.creator = cJSON_IsNumber(creator) ? creator->valueint != 0 : cJSON_IsTrue(creator);
+    const cJSON *skm = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "player_skinmaker") : NULL;
+    if (skm) g_acc.skin_maker = cJSON_IsNumber(skm) ? (int) skm->valuedouble != 0 : cJSON_IsTrue(skm);
     const cJSON *trades = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "trades") : NULL; // acc.trades (kn_brain)
     if (cJSON_IsNumber(trades)) g_acc.trades = trades->valuedouble;
     const cJSON *badges = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "badges") : NULL;
@@ -1921,15 +1942,17 @@ static void on_social(void *user, const cJSON *frame) {
         if (err) {
             popup_response(0, err, NULL);
         } else {
-            copy_str(g_twitch_name, sizeof(g_twitch_name), str_at(frame, 2) ? str_at(frame, 2) : "");
+            twitch_name_set(str_at(frame, 2));
             copy_str(g_twitch_id, sizeof(g_twitch_id), str_at(frame, 3) ? str_at(frame, 3) : "");
+            menu_update_class_box(); // the streamer items it unlocks (getSkins)
             popup_response(1, NULL, "Twitch Account Linked"); // :229274
             rerender_windows();
         }
     } else if (!strcmp(label, "twitchRemoveResponse")) {
         g_twitch_id[0] = 0;
-        g_twitch_name[0] = 0;
+        twitch_name_set(NULL);
         popup_response(1, NULL, "Twitch Account Unlinked"); // :229277-229281
+        menu_update_class_box();
         rerender_windows();
     } else if (!strcmp(label, "twitchDropsResponse")) { // Box Office has no drop campaigns: [] -> "Nothing to Claim"
         // [drops, reconnect]: v10.0.7's dropsLoaded(drops, reconnect) (deob-10.0.7.js:218880, :225177-225178): no drops and an

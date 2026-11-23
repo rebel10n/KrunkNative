@@ -71,6 +71,7 @@ SECRET = "chal-mid-e2e-%d" % os.getpid()
 PASS_WORD = "chal_mid_pass_1"
 DAILY, MAP_KILLS, E2E_CI = 16, 1, 900  # the seeded "Get 3000 score" daily, "Get 25 kills on Burg", the test's own row
 E2E_SKIN = 6423
+E2E_JNK = 1.25  # the e2e row's REW.jnk: the Rewards tab's Junk card and chlR's jnk
 EXPECT_KR = {DAILY: 5, MAP_KILLS: 10, E2E_CI: 7}
 DAILY_BPP = 50
 results = []
@@ -291,7 +292,7 @@ def run(brain_port, game_port):
     if not check("an account whose dailies hold the seeded \"Get 3000 score\" (CI %d)" % DAILY, account_id):
         return
     sql("INSERT INTO challenges (challenge_id, ctype, dat, rew, icon, name, sort) VALUES (?, 'map', ?, ?, 0, ?, 16)",
-        (E2E_CI, '{"ky":"k","val":20,"mp":0}', '{"kr":7,"sk":[%d]}' % E2E_SKIN, "Get 20 kills on Burg (e2e)"))
+        (E2E_CI, '{"ky":"k","val":20,"mp":0}', '{"kr":7,"jnk":%s,"sk":[%d]}' % (E2E_JNK, E2E_SKIN), "Get 20 kills on Burg (e2e)"))
     daily_rew = json.loads(sql("SELECT rew FROM challenges WHERE challenge_id = ?", (DAILY,))[0][0])
     check("the daily carries 0397's REW.bpp", daily_rew.get("bpp") == DAILY_BPP and daily_rew.get("kr") == 5, str(daily_rew))
 
@@ -379,6 +380,16 @@ def run(brain_port, game_port):
     check("BPP: battlepass_progress = before + gn + cbp", bpp1 == bpp0 + t.get("gn", -1) + t.get("cbp", -1), "%s -> %s %s" % (bpp0, bpp1, t))
     chlr = social.get("chlR", since_end)[-1]
     check("chlR [skins, funds, junk, jnk, kr, ...]: the skin and the KR", chlr[1] == [E2E_SKIN] and chlr[5] == want_kr, str(chlr))
+    # the mid-match chgC's REW.jnk went to matchRewardSummary.junk (deob-10.0.7.js:225219): the Rewards tab's first card is
+    # "<x.xx> Junk" (tabs.rewards.gen :210029-210052), the sum over the challenges completed mid-match
+    want_jnk = sum(float(rew.get(ci, {}).get("jnk", 0) or 0) for ci in got)
+    card = wait_for(lambda: (lambda t: t if t and t.endswith("Junk") else None)(c.textof(".rewItemHolder .rewItemN", 2.0)), 30, 1.0)
+    # (the same card also counts Junk the match's kill pools found, "You found [x] Junk": at least the challenges')
+    card_jnk = float(card.split()[0]) if card and re.fullmatch(r"\d+\.\d\d Junk", card) else -1.0
+    check("the end screen's Rewards tab: the mid-match Junk card (at least %.2f Junk)" % want_jnk,
+          want_jnk >= E2E_JNK and card_jnk >= want_jnk - 0.005, str(card))
+    done_jnk = sum(float(rew.get(ci, {}).get("jnk", 0) or 0) for ci in done_rows)
+    check("chlR's jnk: the challenges' Junk credited at the round end (%.2f)" % done_jnk, abs(float(chlr[4] or 0) - done_jnk) < 0.005, str(chlr))
     ends = wait_for(lambda: (c.textof("endChals") or "").count("Completed!") >= 3 and c.textof("endChals"), 15)
     check("the end screen shows each one \"Completed!\"", ends and all((names[ci] or "Get 3000 score") in ends for ci in (DAILY, MAP_KILLS, E2E_CI)),
           str(ends))
