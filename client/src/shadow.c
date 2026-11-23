@@ -19,13 +19,15 @@
 // basic.frag krunker_shadow_mask: three r18x's 5-tap Vogel PCF); "shadowsDynamic" is toggleShadowAuto
 // (:205966-205971): skyLight.shadow.autoUpdate, the map re-rendered every frame, with the players' head, body and
 // legs casting (genHead / genBody / genLeg castShadow = dynamicShadows, :206746, :206770, :206791) through
-// shadow_dynamic_caster.
+// shadow_dynamic_caster, and with "highResShad" also a full model's arms and guns (:206820, :174143).
 #include <gl.h>
 #include <client.h>
 #include <shadow.h>
 #include <render_settings.h>
 #include <prefabs.h>
 #include <terrain.h>
+#include <class_camera.h> // class_camera_player_third_person: a full (third-person) model
+#include <player_class_model.h> // player_class_model_replaces_body
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -467,6 +469,32 @@ static void shadow_color_cube_casters(const ColorCube *cube) {
     for (size_t i = 0; cube && i < cube->mesh_count; i++) shadow_dynamic_caster(cube->meshes[i]);
 }
 
+// highResShad: a full model's arms and gun meshes (deob-10.0.7.js:206820 genArms castShadow = !firstPerson && highResShad;
+// :174143 the weapon loadMesh's `shadows: highResShad`, castShadow = shadows :207421). The melee, the sight, the flap and
+// the charm load without `shadows` and do not cast. The first-person viewmodel is on layer 1 (:174260-174262), which the
+// sun's shadow camera does not see (it takes the camera's layer 0 mask, :69767-69768): its arms and weapon never cast.
+static void shadow_arms_casters(const Player *player, const PlayerMesh *pm) {
+    if (!pm->arms || !player->loadout || !player->game) return;
+    for (int slot = 0; slot < (int) player->loadout_size; slot++) {
+        const PlayerArms *arms = pm->arms[slot];
+        if (!arms) continue;
+        for (int side = 0; side < 2; side++) {
+            const PlayerArmMesh *arm = side ? arms->left : arms->right;
+            if (!arm) continue;
+            if (arm->upper) shadow_dynamic_caster(arm->upper);
+            if (arm->joint) shadow_dynamic_caster(arm->joint);
+            shadow_color_cube_casters(arm->lower);
+        }
+        const Weapon *weapon = player_slot_weapon(player, slot);
+        if (!weapon || weapon->melee || !weapon->src) continue; // `weapon.src`: the gun's loadMesh (:174118)
+        Mesh *guns[2] = {arms->weapon_right, arms->weapon_left};
+        for (int j = 0; j < 2; j++) {
+            // a hasAnim skin's GLTF carrier (an empty mesh) and KrunkNative's procedural hose stay out
+            if (guns[j] && guns[j] != arms->hose && !arms->weapon_models[j]) shadow_dynamic_caster(guns[j]);
+        }
+    }
+}
+
 void shadow_player_casters(const Client *client) {
     const ClientRenderSettings *settings = client_render_settings();
     if (!shadow.enabled || !settings->dynamic_shadows || !settings->shadows || !client) return;
@@ -474,6 +502,12 @@ void shadow_player_casters(const Client *client) {
         const Player *player = client->game.players[i];
         const PlayerMesh *pm = player && player->active ? player->mesh : NULL;
         if (!pm) continue;
+        // a class model or a Prop Hunt prop stands in for the body, arms and weapons: those stay out of the scene
+        // (scene_add_player_mesh), so they do not cast either
+        if ((pm->class_model && player_class_model_replaces_body(pm->class_model)) || pm->prop) continue;
+        // generateMeshes' full model (deob-10.0.7.js:173703): another player, or ours in a third-person camera
+        const int full_model = !pm->render_you || pm->kn_third_person || class_camera_player_third_person(player);
+        if (settings->high_res_shadows && full_model) shadow_arms_casters(player, pm);
         shadow_color_cube_casters(pm->head);
         shadow_color_cube_casters(pm->body);
         for (int k = 0; k < 2; k++) {

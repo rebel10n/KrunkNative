@@ -25,7 +25,8 @@ void shadow_set_normal_bias(float normal_bias);
 // shadowsDynamic: a caster for this frame's shadow map only (a player's head / body / legs); call before
 // shadow_update, which draws them after the map's casters and forgets them.
 void shadow_dynamic_caster(Mesh *mesh);
-// shadowsDynamic: every active player's head, body and leg meshes as this frame's casters (no-op when off)
+// shadowsDynamic: every active player's head, body and leg meshes as this frame's casters (no-op when off); with
+// highResShad also the arms and gun meshes of a full (third-person) model
 void shadow_player_casters(const Client *client);
 // Renders the shadow map if it is out of date (every frame with shadowsDynamic). Restores framebuffer, viewport,
 // program, VAO, cull/depth/blend state.
