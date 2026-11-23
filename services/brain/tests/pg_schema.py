@@ -21,7 +21,7 @@ def main():
         return 2
     db = {}
     try:
-        with open(os.path.join(root, "config", "config.json")) as fp:
+        with open(os.environ.get("KN_TEST_CONFIG", os.path.join(root, "config", "config.json"))) as fp:
             db = json.load(fp).get("database", {})
     except (OSError, ValueError):
         pass

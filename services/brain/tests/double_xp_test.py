@@ -3,7 +3,7 @@
 double_xp_social.c, the commit in db_accounts.c, kn_commit_stats / kn_dxp on PostgreSQL).
 
   double_xp_test.py <kn_brain> <repo root> [database]
-Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name. Every run
+Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's (or $KN_TEST_CONFIG's) database.name. Every run
 uses its own schema (postgres) or file (sqlite). KN_TEST_DB_DRIVER=postgres (default) | sqlite.
 77 = skip (no PostgreSQL / python websockets).
 
@@ -38,7 +38,7 @@ DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 CONFIG_DB = {}
 try:
-    with open(os.path.join(ROOT, "config", "config.json")) as fp:
+    with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
         CONFIG_DB = json.load(fp).get("database", {})
 except (OSError, ValueError):
     pass

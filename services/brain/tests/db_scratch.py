@@ -25,7 +25,7 @@ import sys
 
 def load_db(root):
     try:
-        with open(os.path.join(root, "config", "config.json")) as fp:
+        with open(os.environ.get("KN_TEST_CONFIG", os.path.join(root, "config", "config.json"))) as fp:
             return json.load(fp).get("database", {})
     except (OSError, ValueError):
         return {}

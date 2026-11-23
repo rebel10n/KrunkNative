@@ -12,7 +12,9 @@
 
 static kn_config *test_db_config(kn_db_config *dbc) {
     char path[4096], err[256];
-    snprintf(path, sizeof path, "%s/config/config.json", KN_REPO_ROOT);
+    const char *test_config = getenv("KN_TEST_CONFIG"); /* a worktree has no config/config.json of its own */
+    if (test_config && *test_config) snprintf(path, sizeof path, "%s", test_config);
+    else snprintf(path, sizeof path, "%s/config/config.json", KN_REPO_ROOT);
     kn_config *cfg = kn_config_load(path, 0, NULL, err, sizeof err);
     if (!cfg) cfg = kn_config_from_string("{}", err, sizeof err);
     const char *name = getenv("KN_TEST_DATABASE");

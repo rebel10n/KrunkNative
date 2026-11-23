@@ -21,7 +21,7 @@ ROOT=$PWD
 DB=${2:-${KN_MM_TEST_DATABASE:-}}
 if [ -z "$DB" ]; then
     DB=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("database",{}).get("name",""))' \
-         config/config.json 2>/dev/null)
+         "${KN_TEST_CONFIG:-config/config.json}" 2>/dev/null)
 fi
 [ -n "$DB" ] || { echo "auth e2e: no database configured; skipped"; exit 77; }
 BRAIN=$BUILD/services/brain/kn_brain

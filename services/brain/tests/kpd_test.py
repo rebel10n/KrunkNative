@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The in-game player list's K.P.D call on kn_brain (services/brain/db_kpd.c, migration 0209_kpd_calls): the game server's "acct" ops kpd_call / kpd_calls / kpd_log / kpd_rate / kpd_stats / kpd_apply / kpd_apps / kpd_officer / kpd_demos / kpd_reviewers.
   kpd_test.py <kn_brain> <repo root> [database]
-Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name (local
+Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's (or $KN_TEST_CONFIG's) database.name (local
 PostgreSQL); every run uses its own schema (kn_test_kpd_<pid>, dropped after) and an ephemeral port.
 KN_TEST_DB_DRIVER=sqlite|mysql runs on that store driver (db_scratch.py). 77 = skip.
 Two accounts register over the social socket; a fake game server on /mm/internal/ws then:
@@ -48,7 +48,7 @@ DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 CONFIG_DB = {}
 try:
-    with open(os.path.join(ROOT, "config", "config.json")) as fp:
+    with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
         CONFIG_DB = json.load(fp).get("database", {})
 except (OSError, ValueError):
     pass

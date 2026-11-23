@@ -89,7 +89,9 @@ static int setup(kn_db_config *dbc) {
     }
     /* postgres */
     char path[4096];
-    snprintf(path, sizeof path, "%s/config/config.json", KN_REPO_ROOT);
+    const char *test_config = getenv("KN_TEST_CONFIG"); /* a worktree has no config/config.json of its own */
+    if (test_config && *test_config) snprintf(path, sizeof path, "%s", test_config);
+    else snprintf(path, sizeof path, "%s/config/config.json", KN_REPO_ROOT);
     g_cfg = kn_config_load(path, 0, NULL, err, sizeof err);
     if (!g_cfg) g_cfg = kn_config_from_string("{}", err, sizeof err);
     const char *name = getenv("KN_TEST_DATABASE");

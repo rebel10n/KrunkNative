@@ -541,6 +541,14 @@ interface. Applications use `knsvc/db.h`; drivers implement `knsvc/store.h`.
 
 DB tests skip (exit 77) when their server is unreachable. PostgreSQL: create the test
 database once with `sudo -u postgres createdb -O krunknative krunknative_svccore`.
+The PostgreSQL suites take their credentials and database name from `config/config.json`'s
+`database` section, or from the file `KN_TEST_CONFIG` names. A git worktree has no
+`config/config.json` of its own (it is gitignored), so without `KN_TEST_CONFIG` every
+`_postgres` / postgres-default suite there skips with "no database configured" or "cannot
+connect". Point it at the main checkout's file: `export
+KN_TEST_CONFIG=/path/to/KrunkNative/config/config.json`. Don't copy the file, because it holds
+the password. `KN_DATABASE_*` overrides single keys; keep them unset for `knsvc_config`, which
+checks the parser without overrides.
 MySQL/MariaDB: `KN_TEST_MYSQL_HOST` / `_PORT` / `_USER` / `_PASSWORD` (default
 `127.0.0.1:3306 root`) must be allowed to create and drop databases (`kn_test_*`).
 `ctest -L sqlite` / `ctest -L mysql` run one driver; the brain scripts take

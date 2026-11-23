@@ -37,7 +37,7 @@ BRAIN, ROOT = sys.argv[1], sys.argv[2]
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 if not DB:
     try:
-        with open(os.path.join(ROOT, "config", "config.json")) as fp:
+        with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
             DB = json.load(fp).get("database", {}).get("name", "")
     except (OSError, ValueError):
         DB = ""

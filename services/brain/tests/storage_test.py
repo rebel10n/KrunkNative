@@ -3,7 +3,7 @@
 doc/backend.md 7.6 ops "storage", "storage_load", "map_reward"; services/brain/db_storage.c).
 
   storage_test.py <kn_brain> <repo root> [database]
-Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name; every
+Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's (or $KN_TEST_CONFIG's) database.name; every
 run uses its own schema (kn_test_kss_<pid>, dropped after) and an ephemeral port. 77 = skip
 (no PostgreSQL / python websockets). KN_TEST_DB_DRIVER=sqlite|mysql runs on that store driver
 (db_scratch.py).
@@ -36,7 +36,7 @@ DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 CONFIG_DB = {}
 try:
-    with open(os.path.join(ROOT, "config", "config.json")) as fp:
+    with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
         CONFIG_DB = json.load(fp).get("database", {})
 except (OSError, ValueError):
     pass

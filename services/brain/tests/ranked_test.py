@@ -4,7 +4,7 @@ third with the default level gate), a fake game server on brain A, 9 accounts re
 social socket.
 
   ranked_test.py <kn_brain> <repo root> [database]
-Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name; every run
+Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's (or $KN_TEST_CONFIG's) database.name; every run
 uses its own schema (kn_test_rq_<pid>, dropped after) and ephemeral ports. 77 = skip (no
 PostgreSQL). KN_TEST_DB_DRIVER=sqlite|mysql runs the brains on that store driver instead.
 
@@ -42,7 +42,7 @@ BRAIN, ROOT = sys.argv[1], sys.argv[2]
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 if not DB:
     try:
-        with open(os.path.join(ROOT, "config", "config.json")) as fp:
+        with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
             DB = json.load(fp).get("database", {}).get("name", "")
     except (OSError, ValueError):
         DB = ""
@@ -397,7 +397,7 @@ async def scenario(pa, pb, pc, node, v7_seeded):
 def psql(sql):
     db = {}
     try:
-        with open(os.path.join(ROOT, "config", "config.json")) as fp:
+        with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
             db = json.load(fp).get("database", {})
     except (OSError, ValueError):
         pass

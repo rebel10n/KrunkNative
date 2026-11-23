@@ -9,7 +9,7 @@ refuses a review beyond the limit (fail closed) and /ai/status counts it; a mode
 does not exist, or ai.enabled=0, turns uploads off (503 ModerationUnavailable).
 
   avatar_test.py <kn_brain> <repo root> [database]
-Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name (PostgreSQL,
+Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's (or $KN_TEST_CONFIG's) database.name (PostgreSQL,
 its own schema). 77 = skip (no database or python websockets).
 """
 import asyncio
@@ -39,7 +39,7 @@ BRAIN, ROOT = sys.argv[1], sys.argv[2]
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 CONFIG_DB = {}
 try:
-    with open(os.path.join(ROOT, "config", "config.json")) as fp:
+    with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
         CONFIG_DB = json.load(fp).get("database", {})
 except (OSError, ValueError):
     pass

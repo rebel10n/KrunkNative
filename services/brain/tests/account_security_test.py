@@ -9,7 +9,7 @@ recipient, v7.1.4's TOTP 2FA lock after 10 wrong codes, and KrunkNative's passwo
 emailed code (rpr / rpc / rps, the /auth/reset-password page, no account enumeration).
 
   account_security_test.py <kn_brain> <repo root> [database]
-Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name; every run
+Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's (or $KN_TEST_CONFIG's) database.name; every run
 uses its own schema / scratch database, an ephemeral brain port and a free SMTP port.
 KN_TEST_DB_DRIVER=sqlite|mysql runs on that store driver (db_scratch.py). 77 = skip (no database,
 python websockets or openssl CLI).
@@ -48,7 +48,7 @@ DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
 DB = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_MM_TEST_DATABASE", "")
 CONFIG_DB = {}
 try:
-    with open(os.path.join(ROOT, "config", "config.json")) as fp:
+    with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
         CONFIG_DB = json.load(fp).get("database", {})
 except (OSError, ValueError):
     pass
