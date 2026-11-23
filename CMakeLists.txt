@@ -1079,6 +1079,14 @@ else ()
         target_link_libraries(skin_counters_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
     add_test(NAME skin_counters_test COMMAND skin_counters_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    # skin_owner_test: v10.0.7 getSkins on the server (accounts_owns_skin, store_item_owner_match): the free items, a
+    #   developer's every skin, creators / streamers / K.P.D / skin maker items (run from the repository root: assets/skins.json)
+    add_executable(skin_owner_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/skin_owner_test.c)
+    target_link_libraries(skin_owner_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(skin_owner_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME skin_owner_test COMMAND skin_owner_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     add_executable(trade_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/trade_test.c)
     target_link_libraries(trade_test PRIVATE kn_server_core m)

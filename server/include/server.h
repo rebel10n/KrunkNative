@@ -107,6 +107,10 @@ typedef struct {
     unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
     unsigned char password_ok:1;       // a JOIN carried the right server password
     uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v10.0.2 has 8069), enforced on ENT
+    // getSkins' other store items (deob-10.0.7.js:217781-217789, accounts_load_owner): the account's Twitch (tw_twitchname,
+    // item.streamers) and v10's isSkinMaker (players.player_skinmaker); the name is `username`, the officer flag MOD
+    char twitch[32];
+    unsigned char skin_maker:1;
     // the paint of the account's painted copies, one per store index (the first copy of that index in the owned
     // list: the official plain-index rule, doc/v10/paint-copy.md section 6). Sent with the owner's SKINS (V2).
     uint16_t skin_paint_count;

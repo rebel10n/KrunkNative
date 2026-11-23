@@ -6,20 +6,77 @@
 #include <modes.h>
 #include <cJSON.h>
 #include <pcg_basic.h>
+#include <ctype.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 // ---------------------------------------------------------------- store sprays
 
+// What getSkins (deob-10.0.7.js:217752-217795) reads of each store item, one byte per store index
+enum {
+    ITEM_FREE = 1 << 0,       // free && !blocked (:217752)
+    ITEM_KPD = 1 << 1,        // kpd: a moderator's or a deputy's
+    ITEM_SKIN_MAKER = 1 << 2, // !creator && seas >= 6 && !blocked: a skin maker's
+};
+#define ITEM_NAME_STREAMER 0x80000000u // StoreItemName.at: a streamers entry (else a creators one)
+
+// One item.creators / item.streamers entry: its item and the name's offset in the pool (| ITEM_NAME_STREAMER)
+typedef struct {
+    int32_t item;
+    uint32_t at;
+} StoreItemName;
+
 static struct {
     int loaded;
     StoreSpray *items; // sorted by index
     int count;
-    unsigned char *free_items; // store_item_free, one per store index
+    unsigned char *item_flags; // ITEM_*, one per store index
     int item_count;
+    StoreItemName *names; // every creators / streamers name, in store index order
+    int name_count;
+    char *name_pool; // the names, NUL-separated
 } g_store_sprays;
+
+// The creators / streamers names of the store items (each as written: v10 compares them with the lower-cased
+// account name / Twitch)
+static void store_names_load(const cJSON *json) {
+    static const char *const keys[2] = {"creators", "streamers"};
+    size_t bytes = 0;
+    int n = 0;
+    const cJSON *item, *e;
+    cJSON_ArrayForEach(item, json) {
+        for (int k = 0; k < 2; k++) {
+            cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(item, keys[k])) {
+                if (cJSON_IsString(e) && e->valuestring[0]) n++, bytes += strlen(e->valuestring) + 1;
+            }
+        }
+    }
+    if (!n) return;
+    g_store_sprays.names = malloc((size_t) n * sizeof(StoreItemName));
+    g_store_sprays.name_pool = malloc(bytes);
+    if (!g_store_sprays.names || !g_store_sprays.name_pool) {
+        free(g_store_sprays.names), free(g_store_sprays.name_pool);
+        g_store_sprays.names = NULL, g_store_sprays.name_pool = NULL;
+        return;
+    }
+    size_t at = 0;
+    int index = 0;
+    cJSON_ArrayForEach(item, json) {
+        for (int k = 0; k < 2; k++) {
+            cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(item, keys[k])) {
+                if (!cJSON_IsString(e) || !e->valuestring[0]) continue;
+                const size_t len = strlen(e->valuestring) + 1;
+                memcpy(g_store_sprays.name_pool + at, e->valuestring, len);
+                g_store_sprays.names[g_store_sprays.name_count++] = (StoreItemName) {index, (uint32_t) at | (k ? ITEM_NAME_STREAMER : 0)};
+                at += len;
+            }
+        }
+        index++;
+    }
+}
 
 static void store_sprays_load(void) {
     if (g_store_sprays.loaded) return;
@@ -51,13 +108,23 @@ static void store_sprays_load(void) {
         return;
     }
     const int total = cJSON_GetArraySize(json);
-    g_store_sprays.free_items = calloc((size_t) (total > 0 ? total : 1), 1);
-    g_store_sprays.item_count = g_store_sprays.free_items ? total : 0;
+    g_store_sprays.item_flags = calloc((size_t) (total > 0 ? total : 1), 1);
+    g_store_sprays.item_count = g_store_sprays.item_flags ? total : 0;
+    store_names_load(json);
     cJSON_ArrayForEach(item, json) {
         const int at = index++;
-        if (at < g_store_sprays.item_count)
-            g_store_sprays.free_items[at] = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "free")) &&
-                                            !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "blocked"));
+        if (at < g_store_sprays.item_count) {
+            const int blocked = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "blocked"));
+            const cJSON *creator = cJSON_GetObjectItemCaseSensitive(item, "creator");
+            const cJSON *seas = cJSON_GetObjectItemCaseSensitive(item, "seas");
+            const int has_creator = cJSON_IsString(creator) ? creator->valuestring[0] != 0
+                                    : cJSON_IsNumber(creator) ? creator->valuedouble != 0
+                                                              : cJSON_IsTrue(creator);
+            g_store_sprays.item_flags[at] =
+                (unsigned char) ((cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "free")) && !blocked ? ITEM_FREE : 0) |
+                                 (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "kpd")) ? ITEM_KPD : 0) |
+                                 (!has_creator && cJSON_IsNumber(seas) && seas->valuedouble >= 6 && !blocked ? ITEM_SKIN_MAKER : 0));
+        }
         const cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
         if (!cJSON_IsNumber(type) || type->valueint != SPRAY_ITEM_TYPE) continue;
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
@@ -92,7 +159,45 @@ const StoreSpray *store_spray(const int index) {
 
 int store_item_free(const int index) {
     store_sprays_load();
-    return index >= 0 && index < g_store_sprays.item_count && g_store_sprays.free_items[index];
+    return index >= 0 && index < g_store_sprays.item_count && (g_store_sprays.item_flags[index] & ITEM_FREE);
+}
+
+int store_item_exists(const int index) {
+    store_sprays_load();
+    return index >= 0 && index < g_store_sprays.item_count;
+}
+
+// s lower-cased into out (JS toLowerCase on the ASCII letters account and Twitch names use)
+static void lower_copy(char *out, const size_t size, const char *s) {
+    size_t n = 0;
+    for (; s && s[n] && n + 1 < size; n++) out[n] = (char) tolower((unsigned char) s[n]);
+    out[n] = 0;
+}
+
+int store_item_owner_match(const int index, const StoreOwner *owner) {
+    store_sprays_load();
+    if (!owner || index < 0 || index >= g_store_sprays.item_count) return 0;
+    const unsigned char flags = g_store_sprays.item_flags[index];
+    if ((flags & ITEM_KPD) && owner->kpd_officer) return 1;        // item.kpd && (acc.isMod || acc.isDeputy)
+    if ((flags & ITEM_SKIN_MAKER) && owner->skin_maker) return 1; // !item.creator && item.seas >= 6 && acc.isSkinMaker && !blocked
+    int lo = 0, hi = g_store_sprays.name_count; // the first name of the item
+    while (lo < hi) {
+        const int mid = (lo + hi) / 2;
+        if (g_store_sprays.names[mid].item < index) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo >= g_store_sprays.name_count || g_store_sprays.names[lo].item != index) return 0;
+    char name[64], twitch[64];
+    lower_copy(name, sizeof(name), owner->name);
+    lower_copy(twitch, sizeof(twitch), owner->twitch);
+    for (int i = lo; i < g_store_sprays.name_count && g_store_sprays.names[i].item == index; i++) {
+        const uint32_t at = g_store_sprays.names[i].at;
+        const char *entry = g_store_sprays.name_pool + (at & ~ITEM_NAME_STREAMER);
+        // item.creators.indexOf(acc.name.toLowerCase()), item.streamers.indexOf(acc.twitch.toLowerCase()) (acc.twitch set)
+        const char *mine = at & ITEM_NAME_STREAMER ? twitch : name;
+        if (mine[0] && !strcmp(entry, mine)) return 1;
+    }
+    return 0;
 }
 
 int store_spray_from_legacy(const int index) {

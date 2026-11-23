@@ -115,6 +115,9 @@ int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*, PlayerC
 int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 // The account's owned list (data slot 10, cJSON) -> the skin bitset and the painted copies (their paint).
 void accounts_load_skins(ClientConnection*, const cJSON *account);
+// The account fields getSkins gives store items by (accounts_owns_skin): "twitch" (else data[31], tw_twitchname) and
+// "player_skinmaker" of the brain's account JSON
+void accounts_load_owner(ClientConnection*, const cJSON *account);
 // The paint of each worn skin, from the owner's painted copies (NULL owner: none). Sent with SKINS V2.
 void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out);
 // v10.0.7 item styles: NET_EXT_KN_SKIN_STYLES to `to` with the styles player's worn cosmetics wear (the owner's styled

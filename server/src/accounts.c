@@ -2432,11 +2432,23 @@ static int acc_skins_enforced(void) {
 #define ACC_SKIN_MAX ((int) (sizeof(((ServerAccount *) 0)->skins_owned) * 8))
 #endif
 
+// The first custom game skin id (game.customSkins, deob-10.0.7.js:17253 iiiîìîï = 10000000)
+#define ACC_CUSTOM_SKIN_MIN 10000000
+
+// getSkins(account, true) (deob-10.0.7.js:217752-217795) and canUseSkin (:24320): what the account may wear
 int accounts_owns_skin(const ClientConnection *client, const int skin) {
     if (skin < 0 || !acc_skins_enforced()) return 1;
-    if (store_item_free(skin)) return 1; // getSkins(account, true): the free items are everyone's, guests' too
-    if (!client->acct.account_id || !client->acct.skins_known || skin >= ACC_SKIN_MAX) return 0;
-    return (client->acct.skins_owned[skin >> 3] >> (skin & 7)) & 1;
+    if (store_item_free(skin)) return 1; // the free items are everyone's, guests' too
+    if (!client->acct.account_id) return 0;
+    // acc.isDev: every store skin and the game's customSkins (the account's DEV flag, a gameserver op's as everywhere)
+    if (client->acct.flags & NET_PLAYER_INFO_DEV) return store_item_exists(skin) || skin >= ACC_CUSTOM_SKIN_MIN;
+    // item.creators / item.streamers / item.kpd / a skin maker's season 6+ item (:217781-217789). Box Office has no
+    // Deputy role (player_role 3), so the K.P.D officer is a moderator.
+    const StoreOwner owner = {client->acct.username, client->acct.twitch, (client->acct.flags & NET_PLAYER_INFO_MOD) != 0,
+                              client->acct.skin_maker};
+    if (store_item_owner_match(skin, &owner)) return 1;
+    if (!client->acct.skins_known || skin >= ACC_SKIN_MAX) return 0;
+    return (client->acct.skins_owned[skin >> 3] >> (skin & 7)) & 1; // acc.skins
 }
 
 int accounts_can_use_skin(const Player *player, const int skin) {
@@ -2496,6 +2508,20 @@ int accounts_filter_skins(const ClientConnection *client, PlayerSkins *s) {
         }
     }
     return stripped;
+}
+
+static void acc_copy_field(char *dst, size_t size, const char *src);
+
+void accounts_load_owner(ClientConnection *client, const cJSON *account) {
+    // acc.twitch = tw_twitchname (deob-10.0.7.js:115113): kn_brain's "twitch" (account_life.c), else data[31]
+    const cJSON *tw = cJSON_GetObjectItem(account, "twitch");
+    if (!cJSON_IsString(tw)) {
+        const cJSON *data = cJSON_GetObjectItem(account, "data");
+        tw = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 31) : NULL;
+    }
+    acc_copy_field(client->acct.twitch, sizeof(client->acct.twitch), cJSON_GetStringValue(tw));
+    // acc.isSkinMaker = ~~player_skinmaker (:115136)
+    client->acct.skin_maker = acc_truthy(cJSON_GetObjectItem(account, "player_skinmaker")) ? 1 : 0;
 }
 
 // The paint of an owned copy's metadata m (the object, or its JSON string: the client's normaliser):
@@ -3246,6 +3272,7 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
         if (!found) client->acct.badge = -1;
     }
     accounts_load_skins(client, account);
+    accounts_load_owner(client, account);
     // WP-E: the death screen's account values (class levels, config.playerCardStats)
     client->acct.has_stats = 1;
     for (int i = 0; i < SERVER_CLASS_STATS_MAX; i++) {

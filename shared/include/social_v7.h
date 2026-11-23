@@ -99,6 +99,20 @@ typedef struct {
 const StoreSpray *store_spray(int index);
 // store.skins[index].free && !blocked: an item everyone has (getSkins(account, true), deob-10.0.7.js:217752)
 int store_item_free(int index);
+// index is a store.skins index (the table's length; a custom game's customSkins are not in it)
+int store_item_exists(int index);
+
+// The account fields getSkins (deob-10.0.7.js:217752-217795) gives store items by, beyond acc.skins and the free items
+typedef struct {
+    const char *name;   // acc.name (item.creators has it lower-cased)
+    const char *twitch; // acc.twitch, tw_twitchname (item.streamers has it lower-cased); NULL / "" none
+    int kpd_officer;    // acc.isMod || acc.isDeputy (player_role 2 / 3): the K.P.D's items (item.kpd)
+    int skin_maker;     // acc.isSkinMaker (~~player_skinmaker): the season 6+ items no creator made (!item.blocked)
+} StoreOwner;
+// getSkins' store filter for a signed-in account that is not a developer (:217781-217789): item.creators has the
+// lower-cased name, item.streamers the lower-cased Twitch, item.kpd for an officer, or a skin maker's season 6+
+// item with no creator (not blocked). The developer's every-item list is the caller's.
+int store_item_owner_match(int index, const StoreOwner *owner);
 // ENT sprayIndex of older KrunkNative clients: 0..52 named v3.1.1's Game.sprays, which v7.1.4 sells
 // as the free store items 2482..2534 (same textures). Every other index is returned unchanged.
 int store_spray_from_legacy(int index);
