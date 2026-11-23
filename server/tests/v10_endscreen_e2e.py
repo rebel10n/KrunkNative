@@ -52,7 +52,7 @@ SCRIPT = """
 15000 rects @card #endTabbedView
 15000 nodes @dxp .doubleXPButton
 15000 text @deftab .tabHeader.selected
-15000 text @scorelabel #combatRecordLayout .crLabel
+15000 text @scorelabel .crLabel
 15000 rects @dxp .doubleXPButton
 15500 nodes @rank1 .rank-display
 15500 text @name1 .rank-display .rank-value
@@ -81,8 +81,8 @@ SCRIPT = """
 21000 nodes @rewards-list .rewItemHolder
 21200 call GUI.endScreen.changeTab "leaderboard"
 21500 text @lbtab .tabHeader.selected
-21500 attr @lb-onclick onclick #endTable .endTableN
-21500 nodes @lb-pfp #endTable .endTablePfp
+21500 attr @lb-onclick onclick .endTableN
+21500 nodes @lb-pfp .endTablePfp
 22000 quit
 """
 
