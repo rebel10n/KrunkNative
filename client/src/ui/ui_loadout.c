@@ -1287,6 +1287,9 @@ static void gen_tab_customize(StrBuf *out) {
                             : (has_inventory() || store_item_free(pick) ? store_skin(pick) : NULL); // account || item.free (deob-10.0.7.js:222501)
         if (spray_base) { // KrunkNative's default sprays (Game.sprays of v3.1.1): free items
             snprintf(v.name, sizeof(v.name), "%s", spray_base);
+            // the name in its rarity's colour, as for any store item (store.rarities[rarity || 0].color, deob-10.0.7.js:222501)
+            const ViewerSkin *item = store_skin(store_spray_from_legacy(pick));
+            if (item) v.color = rarity_color(item);
             char path[64];
             snprintf(path, sizeof(path), "textures/sprays/%d.png", BASE_SPRAYS[pick].id);
             asset(path, v.img, sizeof(v.img));
