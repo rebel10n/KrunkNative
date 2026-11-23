@@ -362,6 +362,9 @@ U(u_normal_scale, "normal_scale");
 U(u_use_specular_map, "use_specular_map");
 U(u_specular_map, "specular_map");
 U(u_maps_flip_v, "maps_flip_v");
+U(u_material_phong, "material_phong");         // BasicMaterial.phong: the weapon's own Phong options (weaponShine)
+U(u_material_shininess, "material_shininess");
+U(u_material_specular, "material_specular");
 // v10.0.3 decal (wars_banners.c's clan logo): the decalMap (unit 12) in its local box
 U(u_decal_enabled, "decal_enabled");
 U(u_decal_map, "decal_map");
@@ -811,6 +814,11 @@ void basic_material_update_uniforms(Material *base) {
     }
     gl_uniform_1i(&u_use_specular_map, program, material->specular_texture != 0);
     gl_uniform_1i(&u_maps_flip_v, program, material->maps_flip_v);
+    gl_uniform_1i(&u_material_phong, program, material->phong);
+    if (material->phong) {
+        gl_uniform_1f(&u_material_shininess, program, material->shininess);
+        gl_uniform_3f(&u_material_specular, program, material->specular.x, material->specular.y, material->specular.z);
+    }
     if (material->specular_texture) {
         gl_uniform_1i(&u_specular_map, program, BASIC_SPECULAR_TEXTURE_UNIT);
         glActiveTexture(GL_TEXTURE0 + BASIC_SPECULAR_TEXTURE_UNIT);

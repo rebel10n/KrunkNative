@@ -57,7 +57,7 @@ typedef struct {
     int no_video_skins;      // noVideoSkins (v10.0.3 "Disable Video Skins", restart): skin videos off (skin_video.h)
     int object_anim;         // objectAnim: liquid wave animation (flag)
     int screen_shake;        // screenShake (camera shake, flag)
-    int weapon_shine;        // weaponShine: weapons Phong instead of Lambert (flag)
+    int weapon_shine;        // weaponShine: weapon meshes Phong instead of Lambert under lighting 1 (next model)
     int lighting;            // lighting (restart): 0 low (Lambert->Basic), 1 normal, 2 high (Phong) (flag)
     char hud_health_high[RS_COLOR_MAX], hud_health_low[RS_COLOR_MAX]; // hudHealthHigh/Low: set(){} in v3.1.1
     float speed_lines;       // showSpdLines: speed line strength (0 = off)

@@ -225,6 +225,11 @@ uniform bool use_specular_map;
 uniform sampler2D specular_map;
 uniform bool maps_flip_v;
 float specular_strength = 1.0;
+// The weapon materials' MeshPhongMaterial options (BasicMaterial.phong, deob-10.0.7.js:174083-174253): 1 their
+// shininess / specular for the lighting 2 Phong, 2 Phong under lighting 1 too (weaponShine); 0 the setting's own
+uniform int material_phong;
+uniform float material_shininess;
+uniform vec3 material_specular;
 
 // v10.0.3 GLB environment reflections (client/include/env_map.h): a GLB material whose glTF extras carry "env"
 // reflects render.getEnvMap() at envMapIntensity scene_env_intensity (deob-10.0.3.js:233665-233669). scene_env_map
@@ -548,13 +553,14 @@ vec3 f_schlick(vec3 f0, float f90, float dot_vh) {
     return f0 * (1.0 - fresnel) + f90 * fresnel;
 }
 
-// three.js r150 BRDF_BlinnPhong (specular 0x111111, shininess 30): F * 0.25 * D_BlinnPhong
+// three.js r150 BRDF_BlinnPhong (specular 0x111111, shininess 30, or the material's own): F * 0.25 * D_BlinnPhong
 vec3 brdf_blinn_phong(vec3 light_dir, vec3 normal, vec3 view_dir) {
     vec3 half_dir = normalize(light_dir + view_dir);
     float dot_nh = clamp(dot(normal, half_dir), 0.0, 1.0);
     float dot_vh = clamp(dot(view_dir, half_dir), 0.0, 1.0);
-    vec3 f = f_schlick(vec3(17.0 / 255.0), 1.0, dot_vh);
-    return f * (0.25 * RECIPROCAL_PI * (30.0 * 0.5 + 1.0) * pow(dot_nh, 30.0));
+    float shininess = material_phong > 0 ? material_shininess : 30.0;
+    vec3 f = f_schlick(material_phong > 0 ? material_specular : vec3(17.0 / 255.0), 1.0, dot_vh);
+    return f * (0.25 * RECIPROCAL_PI * (shininess * 0.5 + 1.0) * (shininess > 0.0 ? pow(dot_nh, shininess) : 1.0));
 }
 
 // three.js r150 BRDF_GGX with its alpha (roughness^2) and specular F0 (MeshStandardMaterial's specularColor)
@@ -654,7 +660,8 @@ vec3 krunker_direct(vec3 c, vec3 l, vec3 diffuse, vec3 normal, vec3 view_dir) {
     vec3 irradiance = c * dot_nl;
     vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI;
     if (pbr_active) outgoing += irradiance * brdf_ggx_alpha(l, normal, view_dir, pbr_alpha, pbr_f0);
-    else if (lighting_mode == 2) outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir) * specular_strength;
+    else if (lighting_mode == 2 || (lighting_mode == 1 && material_phong == 2))
+        outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir) * specular_strength;
     else if (lighting_mode == 3) outgoing += irradiance * brdf_ggx(l, normal, view_dir);
     return outgoing;
 }

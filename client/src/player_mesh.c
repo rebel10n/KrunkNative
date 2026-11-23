@@ -443,6 +443,20 @@ static void player_update_melee_arms(const Player *player, PlayerArms *arms, con
 }
 
 // loadMesh({src: "attach/" + af.src, transparent: true}, 0, -(yOrg || 0) + (attachYOff || 0), -(attachZOff || 0), PI / 2, af.scale, group)
+// The weapon materials' MeshPhongMaterial options (deob-10.0.7.js:174083-174253): `mat: weaponShine ?
+// MeshPhongMaterial : MeshLambertMaterial` with their shininess / specular. shine: the model asked for that mat (else
+// null: the default Lambert); the options also reach the Phong every material gets under lighting 2 (:206487).
+static void weapon_shine_material(BasicMaterial *material, const int shine, const float shininess, const unsigned int specular) {
+    if (!material) return;
+    material->phong = shine && client_render_settings()->weapon_shine ? 2 : 1;
+    material->shininess = shininess;
+    material->specular = (vec3) {(float) ((specular >> 16) & 255) / 255.0f, (float) ((specular >> 8) & 255) / 255.0f,
+                                 (float) (specular & 255) / 255.0f};
+}
+
+#define WEAPON_SPECULAR 0x292929u // the weapon / melee / sight specular
+#define PHONG_SPECULAR 0x111111u  // MeshPhongMaterial's default (the flap, the charm)
+
 static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachment *attachment, MeshTransform *parent) {
     char model[128];
     char texture[128];
@@ -461,6 +475,7 @@ static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachme
     BasicMaterial *material = basic_material_init();
     material->texture = texture_id;
     material->base.transparent = 1;
+    weapon_shine_material(material, 1, 60.0f, WEAPON_SPECULAR); // first person / preview: weaponShine's mat (:174252)
     rt_materials_hint_model(material, model); // rt.h material classes
 
     Mesh *mesh = mesh_init(geometry, (Material *) material);
@@ -1207,6 +1222,7 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     BasicMaterial *mount_mat = basic_material_init();
     mount_mat->texture = skin_texture("charms/charm_mount_0");
     mount_mat->base.transparent = 1;
+    weapon_shine_material(mount_mat, 1, 60.0f, PHONG_SPECULAR); // weaponShine ? Phong : Lambert (deob-10.0.7.js:174207)
     arms->charm_mount = mesh_init(mount_geo, (Material *) mount_mat);
     arms->charm_mount->transform.position = (vec3) {mount->mount[0], mount->mount[1], mount->mount[2]};
     // v10.0.7: the skin's own mount (`skin.charmMXOff || weapon.charmMXOff`, scale weapon.charmMScl * (skin.charmMScl
@@ -1232,6 +1248,7 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     if (arms->charm) {
         arms->charm->transform.position = (vec3) {mount->offset[0], mount->offset[1] + 0.17f, mount->offset[2]};
         ((BasicMaterial *) arms->charm->material)->base.transparent = 1;
+        weapon_shine_material((BasicMaterial *) arms->charm->material, 1, 60.0f, PHONG_SPECULAR); // :174224
     }
 }
 
@@ -1559,6 +1576,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *melee_mat = basic_material_init();
                             melee = mesh_init(melee_geo, (Material *) melee_mat);
                             melee_mat->texture = melee_texture;
+                            // !preview && !renderYou || noShine ? null : weaponShine ? Phong : Lambert, specular
+                            // 0x292929, shininess 100 (deob-10.0.7.js:174083-174086; noShine is not parsed)
+                            weapon_shine_material(melee_mat, render_you || player->uid == -1, 100.0f, WEAPON_SPECULAR);
                             rt_mask_apply(melee_mat, model); // rt_masks.c (rtMode > 0)
                             rt_materials_hint_weapon(melee_mat, player->loadout[i]); // rt.h material classes
                         }
@@ -1654,6 +1674,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
                             weapon_mat->texture = weapon_tex;
+                            // the same mat, shininess noShine ? shine || 60 : 0, specular 0x292929 (deob-10.0.7.js:174138-174157)
+                            weapon_shine_material(weapon_mat, render_you || player->uid == -1, 0.0f, WEAPON_SPECULAR);
                             rt_mask_apply(weapon_mat, model); // rt_masks.c: the model's metal / roughness parts (rtMode > 0)
                             rt_materials_hint_weapon(weapon_mat, player->loadout[i]); // rt.h material classes
                             if (weapon->tint) { // KrunkNative weapons (the Tool Gun): a colour over the reused model

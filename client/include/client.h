@@ -317,6 +317,13 @@ typedef struct {
     // specular maps keep three's flipY false over an OBJ's flipped base map, so they sample at (u, 1 - v)
     unsigned int specular_texture;
     int maps_flip_v;
+    // The weapon materials' own MeshPhongMaterial options (deob-10.0.7.js:174083-174253): phong 1 keeps shininess /
+    // specular for the lighting 2 Phong (getMat swaps any mat for Phong there, the options stay, :206487); phong 2 is
+    // also Phong under lighting 1 (weaponShine on: `mat: weaponShine ? MeshPhongMaterial : MeshLambertMaterial`).
+    // 0: the lighting setting's own Phong (shininess 30, specular 0x111111).
+    int phong;
+    float shininess;
+    vec3 specular;
 
     // Per-copy paint of a worn store skin (skin_fx_apply_paint): v10.0.3's paint node in basic.frag (paint_apply):
     // the colour paint overlays the albedo, a shader paint draws its graph over it. 0 = unpainted.
