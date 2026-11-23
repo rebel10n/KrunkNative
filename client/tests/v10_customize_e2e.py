@@ -368,6 +368,34 @@ def daily_spin(brain_url, game_port, dbpath):
           "%s done=%d" % (vis(log, "wheel"), count(log, "done")))
 
 
+def owner_picks(brain_url, game_port, dbpath):
+    """getSkins(account, true) (deob-10.0.7.js:217752-217795) in the Hat picker, the card found with Search Item (the
+    virtual grid): item.streamers holds the lower-cased Twitch (acc.twitch = tw_twitchname, :115113; data slot 31), so
+    the account linked as "KaarSon" lists Emoji Beanie (2904, streamers ["kaarson"]); a developer (acc.isDev, :217767)
+    lists every store skin, so Warlock (1870, made by someone else) shows up."""
+    pick = """0 menu
+1500 call showWindow 16
+2500 clickid itemSearch
+2600 type {query}
+2700 call searchItems
+3500 rects @card .skinCard[data-index="{index}"]
+3600 quit
+"""
+    acc = db(dbpath, "SELECT id FROM accounts WHERE username = ?", (NAME,))[0][0]
+    log = run_client("streamer-none", pick.format(query="Emoji", index=2904), brain_url, game_port)
+    check("no Twitch linked: Emoji Beanie (a streamer's) is not listed", count(log, "card") == 0, "card=%d" % count(log, "card"))
+    db(dbpath, "UPDATE players SET tw_twitchname = 'KaarSon' WHERE player_id = ?", (acc,))
+    log = run_client("streamer", pick.format(query="Emoji", index=2904), brain_url, game_port)
+    check("Twitch KaarSon: the streamer's Emoji Beanie is listed (item.streamers)", count(log, "card") == 1, "card=%d" % count(log, "card"))
+    db(dbpath, "UPDATE players SET tw_twitchname = NULL WHERE player_id = ?", (acc,))
+    log = run_client("dev-none", pick.format(query="Warlock", index=1870), brain_url, game_port)
+    check("a plain account: Warlock (not owned) is not listed", count(log, "card") == 0, "card=%d" % count(log, "card"))
+    db(dbpath, "UPDATE players SET player_developer = 1 WHERE player_id = ?", (acc,))
+    log = run_client("dev", pick.format(query="Warlock", index=1870), brain_url, game_port)
+    check("a developer: every store skin, Warlock too (acc.isDev)", count(log, "card") == 1, "card=%d" % count(log, "card"))
+    db(dbpath, "UPDATE players SET player_developer = 0 WHERE player_id = ?", (acc,))
+
+
 def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
     brain_port, game_port = free_ports(2)
@@ -376,7 +404,9 @@ def main():
     brain_log = open(os.path.join(WORK, "brain.log"), "w")
     try:
         procs.append(subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--accounts.signup_rewards.enabled=false", "--brain.port=%d" % brain_port, "--database.driver=sqlite",
-                                       "--database.path=" + dbpath, "--migrate", "--brain.public_url=" + brain_url],
+                                       "--database.path=" + dbpath, "--migrate", "--brain.public_url=" + brain_url,
+                                       # this checkout's migrations (a worktree's brain finds the main config/config.json)
+                                       "--database.migrations_dir=" + os.path.join(ROOT, "services", "db", "migrations")],
                                       cwd=ROOT, stdout=brain_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                       start_new_session=True))
         procs.append(subprocess.Popen([os.path.join(BUILD, "server_bin"), "--headless", "--cfg", "none", "--port", str(game_port)],
@@ -392,6 +422,7 @@ def main():
         guest_picks(brain_url, game_port)
         scenario(brain_url, game_port, dbpath)
         daily_spin(brain_url, game_port, dbpath)
+        owner_picks(brain_url, game_port, dbpath)
     except Exception as e:  # noqa: BLE001
         check("exception", False, repr(e))
     finally:

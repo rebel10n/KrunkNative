@@ -602,32 +602,24 @@ static int has_inventory(void) { return active_account() || all_skins_unlocked()
 
 static const cJSON *skin_json(int index);
 
-// item.creators / item.streamers hold lower-case names
-static int json_list_has_lower(const cJSON *list, const char *name) {
-    if (!cJSON_IsArray(list) || !name || !name[0]) return 0;
-    char low[64];
-    size_t n = 0;
-    for (; name[n] && n + 1 < sizeof(low); n++) low[n] = (char) tolower((unsigned char) name[n]);
-    low[n] = 0;
-    const cJSON *e;
-    cJSON_ArrayForEach(e, list) if (cJSON_IsString(e) && !strcmp(e->valuestring, low)) return 1;
-    return 0;
+// acc.twitch (tw_twitchname, deob-10.0.7.js:115113): kn_brain's account data slot 31; NULL none
+static const char *owned_twitch(const AccountInfo *acc) {
+    const cJSON *tw = acc && acc->data ? cJSON_GetArrayItem(acc->data, 31) : NULL;
+    return cJSON_IsString(tw) && tw->valuestring[0] ? tw->valuestring : NULL;
 }
 
 // getSkins(account, true) (deob-10.0.7.js:217752-217795): everyone's list also has the store's free, unblocked
-// items, and the items the account made (item.creators has its name) or, for a moderator, the K.P.D's (kpd).
-// The free sprays stay out: Select Spray, the spray wheel and Random add them themselves. A streamer's items
-// (item.streamers vs the account's Twitch) and a skin maker's are left out: KrunkNative's account has neither.
+// items, and a signed-in account the store items store_item_owner_match gives it (:217781-217789, the game server's
+// accounts_owns_skin rule): item.creators has its name, item.streamers its Twitch, item.kpd for a moderator or a
+// deputy, a skin maker's season 6+ items no creator made. The free sprays stay out: Select Spray, the spray wheel and
+// Random add them themselves.
 static void owned_add_free(OwnedSkin **list, int *count, const AccountInfo *acc) {
+    const StoreOwner owner = {acc ? acc->name : NULL, owned_twitch(acc), acc && (acc->is_mod || acc->is_deputy), acc && acc->skin_maker};
     for (int i = 0; i < g_viewer_skin_count; i++) {
         const ViewerSkin *s = viewer_skin(i);
         if (!s || !s->name) continue;
         int add = (s->flags & VS_FREE) && !(s->flags & VS_BLOCKED) && s->type != 4;
-        if (!add && acc) {
-            const cJSON *j = skin_json(i);
-            add = json_list_has_lower(cJSON_GetObjectItemCaseSensitive(j, "creators"), acc->name) ||
-                  (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "kpd")) && acc->is_mod);
-        }
+        if (!add && acc) add = store_item_owner_match(i, &owner);
         if (!add) continue;
         int dup = 0;
         for (int k = 0; k < *count && !dup; k++) dup = (*list)[k].ind == i;
@@ -641,11 +633,12 @@ static void owned_add_free(OwnedSkin **list, int *count, const AccountInfo *acc)
 }
 
 // acc.skins ({ind, cnt} entries, account data slot 10) plus getSkins(acc, true)'s free items, sorted
-// (by_rarity_only < 0: in account order); a guest has the free items only. Offline mode: one of every
-// skin. Caller frees.
+// (by_rarity_only < 0: in account order); a guest has the free items only. Offline mode (isSandbox) and a developer
+// (acc.isDev, deob-10.0.7.js:217767-217768): one of every store skin. Caller frees.
 static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
     *count = 0;
-    if (all_skins_unlocked() && g_viewer_skin_count > 0) {
+    const AccountInfo *dev = active_account();
+    if ((all_skins_unlocked() || (dev && dev->is_dev)) && g_viewer_skin_count > 0) {
         OwnedSkin *all = calloc((size_t) g_viewer_skin_count, sizeof(OwnedSkin));
         if (!all) return NULL;
         for (int i = 0; i < g_viewer_skin_count; i++) {

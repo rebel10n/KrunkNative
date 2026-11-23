@@ -31,6 +31,7 @@ typedef struct {
     int premium, featured, is_dev, is_mod, hack, has_2fa;
     int is_deputy;        // v10 isDeputy (player_role 3, deob-10.0.7.js:145472): the krunker.io account's; Box Office has no Deputy role (0)
     int creator;          // v10 creatorBadge: kn_brain's account info "creator_badge" (players.creator_badge)
+    int skin_maker;       // v10 isSkinMaker (~~player_skinmaker, deob-10.0.7.js:115136): kn_brain's account info "player_skinmaker"
     int following, followers;
     int job_rating, job_rating_pos; // K.P.D Helpful Reports: rated calls / tagged ones (data 38 / 39)
     double trades;        // acc.trades (player_trades, deob-10.0.7.js:115126): kn_brain's account info "trades"
