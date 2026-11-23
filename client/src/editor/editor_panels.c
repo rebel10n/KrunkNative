@@ -232,7 +232,7 @@ static void new_project_confirmed(void *user, const char *value) {
 
 void ed_import_map_popup(void) {
     // importMapPopup (E:3891): a paste box; importMapData imports it and clears the popup
-    ed_generic_popup("<div class='pubHed'>Import Map</div><div style='color:rgba(255,255,255,0.7);font-size:19px;text-align:center;margin-bottom:15px;margin-top: -10px;'>Copy Paste Map Text Here</div><textarea id='importTxt' rows='3' onkeydown='importMapKey()'></textarea><div class='mapFndB' onclick='importMapData()' style='margin-left: 0px;margin-top: 10px;background-color:#4ca9f5;width: 380px;'>Import</div>",
+    ed_generic_popup("<div class='pubHed'>Import Map</div><div style='color:rgba(255,255,255,0.7);font-size:19px;text-align:center;margin-bottom:15px;margin-top: -10px;'>Copy Paste Map Text Here</div><textarea id='importTxt' rows='3' onkeydown='importMapKey()'></textarea><div class='mapFndB' onclick='importMapData()' onmouseover='playTick(0.1)' style='margin-left: 0px;margin-top: 10px;background-color:#4ca9f5;width: 380px;'>Import</div>",
                      "importPop");
     const HtmlElem t = html_dom_by_id("importTxt");
     if (t) html_dom_focus(t);
@@ -694,12 +694,19 @@ static void win_speed_changed(EdCtl *c, const cJSON *v) {
     editor_settings_save();
 }
 
-static void win_reset_speed(EdCtl *c) {
-    (void) c;
+// advancedOptions.speedReset (editor-10.0.7.js:14864-14869): confirm (v10 asks about "All settings" here too)
+static void win_reset_speed_ok(void *user, const char *value) {
+    (void) user;
+    if (!value) return;
     ed_json_set_num(g_ed.settings, "speedNormal", 70);
     ed_json_set_num(g_ed.settings, "speedSprint", 180);
     editor_settings_save();
     ed_window_show(1);
+}
+
+static void win_reset_speed(EdCtl *c) {
+    (void) c;
+    ed_confirm("Are you sure you want to reset All settings?", win_reset_speed_ok, NULL);
 }
 
 static int g_controls_tab;
@@ -785,6 +792,26 @@ static void window_controls(EdBuild *b) {
 
 static void on_setting(EdCtl *c, const cJSON *v) { (void) c; (void) v; editor_settings_save(); }
 
+// Grid Size: setSettings("gridSize", Math.abs(v)); Spacing: Math.abs(v) || defaultSettings.gridSpacing (index-10.0.7.js:13308-13328)
+static void on_grid_number(EdCtl *c, const cJSON *v) {
+    double x = fabs(cJSON_IsNumber(v) ? v->valuedouble : 0.0);
+    if (isnan(x)) x = 0.0;
+    if (!strcmp(c->key, "gridSpacing") && x == 0.0) {
+        cJSON *def = cJSON_Parse(editor_default_settings());
+        x = ed_json_num(def, "gridSpacing", 10);
+        cJSON_Delete(def);
+    }
+    ed_json_set_num(g_ed.settings, c->key, x);
+    editor_settings_save();
+}
+
+// setSettings("borderVisuals", v); updateBorderVisuals() (index-10.0.7.js:13418, editor-10.0.7.js:15958-15965)
+static void on_border_visuals(EdCtl *c, const cJSON *v) {
+    (void) c; (void) v;
+    editor_settings_save();
+    ed_obj_border_visuals();
+}
+
 static void on_ui_scale(EdCtl *c, const cJSON *v) {
     (void) c; (void) v;
     editor_settings_save();
@@ -812,8 +839,12 @@ static void on_disable_warnings(EdCtl *c, const cJSON *v) {
     g_ed.dirty_counts = 1;
 }
 
+// Anti-aliasing: v10's switch is bound to settings.resMltV (the GUI writes the switch's value there) and its
+// onChange stores antiAlias (index-10.0.7.js:13145-13154), so the switch shows on while resMltV is set and
+// turning it on or off also makes the resolution true (1) or false (0.6, setResMlt's "|| 0.6")
 static void on_anti_alias(EdCtl *c, const cJSON *v) {
-    (void) c; (void) v;
+    (void) c;
+    ed_json_set_bool(g_ed.settings, "antiAlias", ed_json_truthy(v));
     editor_settings_save();
     editor_message("This change will occur after you refresh");
 }
@@ -822,17 +853,29 @@ static void on_toggle_div(EdCtl *c, const cJSON *v) {
     // the switches that show/hide a "div" of dependent settings (history limit, grid, barrier)
     editor_settings_save();
     const int on = ed_json_truthy(v);
+    // Disable History: toggleHistory(true) -> disableHistory empties undos, redos and objHistory (editor-10.0.7.js:15363-15372)
+    if (on && !strcmp(c->key, "disableHistory")) ed_history_clear();
     html_dom_set_display(html_dom_by_id(c->path), (c->arg ? !on : on) ? "" : "none");
 }
 
 static void open_controls(EdCtl *c) { (void) c; editor_show_window(1); }
 
-static void reset_settings(EdCtl *c, const char *const *keys, const int n) {
-    (void) c;
+// setSettings(keys, values) after confirm(...) (advancedOptions.snappingReset / gridReset / dbReset,
+// editor-10.0.7.js:14881-14901): grid and barrier go back to the defaults, snapping to 1, 1, 1
+typedef struct {
+    const char *const *keys;
+    int n;
+    const double *values; // NULL: defaultSettings
+} ResetSet;
+
+static void reset_settings_ok(void *user, const char *value) {
+    const ResetSet *r = user;
+    if (!value) return;
     cJSON *def = cJSON_Parse(editor_default_settings());
-    for (int i = 0; i < n; i++) {
-        cJSON_DeleteItemFromObjectCaseSensitive(g_ed.settings, keys[i]);
-        cJSON_AddItemToObject(g_ed.settings, keys[i], cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(def, keys[i]), 1));
+    for (int i = 0; i < r->n; i++) {
+        cJSON_DeleteItemFromObjectCaseSensitive(g_ed.settings, r->keys[i]);
+        cJSON_AddItemToObject(g_ed.settings, r->keys[i],
+                              r->values ? cJSON_CreateNumber(r->values[i]) : cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(def, r->keys[i]), 1));
     }
     cJSON_Delete(def);
     editor_settings_save();
@@ -840,27 +883,42 @@ static void reset_settings(EdCtl *c, const char *const *keys, const int n) {
 }
 
 static void grid_reset(EdCtl *c) {
+    (void) c;
     static const char *const k[] = {"gridOpacity", "gridSize", "gridSpacing", "gridVisibility"};
-    reset_settings(c, k, 4);
+    static const ResetSet r = {k, 4, NULL};
+    ed_confirm("Are you sure you want to reset Grid settings?", reset_settings_ok, (void *) &r);
 }
 
 static void db_reset(EdCtl *c) {
+    (void) c;
     static const char *const k[] = {"dbOpacity", "dbVisibility"};
-    reset_settings(c, k, 2);
+    static const ResetSet r = {k, 2, NULL};
+    ed_confirm("Are you sure you want to reset Barrier settings?", reset_settings_ok, (void *) &r);
 }
 
 static void snapping_reset(EdCtl *c) {
+    (void) c;
     static const char *const k[] = {"translationSnapping", "rotationSnapping", "scaleSnapping"};
-    reset_settings(c, k, 3);
+    static const double v[] = {1, 1, 1};
+    static const ResetSet r = {k, 3, v};
+    ed_confirm("Are you sure you want to reset Snapping settings?", reset_settings_ok, (void *) &r);
 }
 
-static void reset_all(EdCtl *c) {
-    (void) c;
+// advancedOptions.reset -> resetSettings (editor-10.0.7.js:14853-14857, :19954-19960)
+static void reset_all_ok(void *user, const char *value) {
+    (void) user;
+    if (!value) return;
     cJSON_Delete(g_ed.settings);
     g_ed.settings = cJSON_Parse(editor_default_settings());
     editor_settings_save();
     editor_scale_ui();
     editor_show_window(3);
+    editor_message("Some settings require a refresh take effect");
+}
+
+static void reset_all(EdCtl *c) {
+    (void) c;
+    ed_confirm("Are you sure you want to reset All settings?", reset_all_ok, NULL);
 }
 
 // Settings > Object: Lightcone / Model & Asset bounding box toggles (toggleLightCones /
@@ -956,9 +1014,7 @@ static void window_settings(EdBuild *b) {
         ed_gui_rule(b);
         ed_gui_folder_begin(b, "Render", 0, 1, 0, "settings.render");
         edp_json_slider(b, "Resolution", s, "resMltV", 0.1, 2, 0.1, 0, on_setting);
-        // v7.1.4 binds this switch to "resMltV" and stores antiAlias on change; here it shows
-        // and stores antiAlias (intentional difference from v7.1.4, doc/v7/editor.md 1.13)
-        edp_json_switch(b, "Anti-aliasing", s, "antiAlias", 0, on_anti_alias);
+        edp_json_switch(b, "Anti-aliasing", s, "resMltV", 0, on_anti_alias);
         edp_json_slider(b, "Render Distance", s, "renderDist", 100, 20000, 50, 0, on_setting);
         ed_gui_folder_end(b, 0);
         ed_gui_folder_begin(b, "History", 0, 1, 0, "settings.history");
@@ -981,8 +1037,8 @@ static void window_settings(EdBuild *b) {
         div_switch(b, "Visible", "gridVisibility", "grid", 0);
         edp_div_begin(b, "grid", editor_setting_bool("gridVisibility"));
         edp_json_slider(b, "Opacity", s, "gridOpacity", 0.05, 1, 0.05, 1, on_setting);
-        edp_json_number(b, "Size", s, "gridSize", "", 1, on_setting);
-        edp_json_number(b, "Spacing", s, "gridSpacing", "", 1, on_setting);
+        edp_json_number(b, "Size", s, "gridSize", "", 1, on_grid_number);
+        edp_json_number(b, "Spacing", s, "gridSpacing", "", 1, on_grid_number);
         edb_add(&b->html, "</div>\n");
         ed_gui_button_line(b, "Reset Grid", "Reset", grid_reset, 0);
         ed_gui_folder_end(b, 0);
@@ -996,7 +1052,7 @@ static void window_settings(EdBuild *b) {
     } else if (g_settings_tab == 2) {
         edp_json_switch(b, "Object Connections", s, "triggerCons", 0, on_setting);
         edp_json_switch(b, "Select through invisible objects [ALT]", s, "selectThroughInvis", 0, on_setting);
-        edp_json_switch(b, "Object Border Visuals", s, "borderVisuals", 0, on_setting);
+        edp_json_switch(b, "Object Border Visuals", s, "borderVisuals", 0, on_border_visuals);
         edp_json_switch(b, "Highlight", s, "objectHighlight", 0, on_setting);
         edp_json_switch(b, "Create Near", s, "createObjectNear", 0, on_setting);
         ed_gui_button_line(b, "Lightcone Boundingbox", "Toggle", toggle_light_cones, 0);
@@ -1383,8 +1439,7 @@ static void window_publishing(EdBuild *b) {
             "<div class='pubGIt'><span style='color:#fff'>4.</span> To help <b>increase plays on your game</b>, we recommend that you publish your game to Online Game Sites like "
             "<a target='_blank' class='popupLink' href='https://developer.crazygames.com/'>Crazy Games</a>. Sharing your game with "
             "<a class='popupLink' target='_blank' href='https://www.twitch.tv/directory/game/Krunker'>Content Creators</a> is also a great way to get additional feedback and exposure."
-            "<div style=''><img class='pubGImg' style='max-width:100%;display:block;margin-top:33px' src='img/publishing/4_promo.png'/></div></div>"
-            "<div class='pubGIt'><span style='color:#fff'>5.</span> Once your game hits <b>50,000</b> Plays in 30 days you can apply to become a Partner and start earning Revenue.</div><div class='pubGRule'></div>");
+            "<div style=''><img class='pubGImg' style='max-width:100%;display:block;margin-top:33px' src='img/publishing/4_promo.png'/></div></div>"); // ends at step 4 (editor-10.0.7.js:13494)
 }
 
 // windows[11] / [12] "Tutorials" / "Tips & Tricks": YouTube iframes in v7 (config.tutorials /
@@ -1483,8 +1538,9 @@ static int h_backup(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
     const char *name = html_ui_current_handler();
     if (!name) return 1;
     if (!strcmp(name, "windows.14.clear")) {
-        // LocalDB.clear: io_po("SUCCESS", null, "Backups Cleared") (a #chatList notice here)
-        editor_message(ed_backup_clear() ? "Backups Cleared" : "Failed to clear Backups");
+        // LocalDB.clear: io_po("SUCCESS", null, "Backups Cleared"), else io_po(null, "Failed to clear Backups") (editor-10.0.7.js:13570-13580)
+        if (ed_backup_clear()) ed_response_popup("SUCCESS", NULL, "Backups Cleared");
+        else ed_response_popup(NULL, "Failed to clear Backups", NULL);
         editor_show_window(15);
     } else if (!strcmp(name, "KE.importMapBackup") && argc >= 1 && args[0].kind == HTML_ARG_NUM) {
         ed_backup_load(args[0].num);

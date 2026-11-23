@@ -249,7 +249,109 @@ void ed_render_init(void) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
+
+// ---------------------------------------------------------------------------
+// The 3D view's resolution and anti-aliasing: renderer.setPixelRatio(devicePixelRatio * (resMltV || 0.6))
+// (setResMlt, editor-10.0.7.js:20071-20074) with the canvas kept at its size, and WebGLRenderer({antialias:
+// !!settings.antiAlias}) made once at startup (:14709; the switch says "This change will occur after you
+// refresh"). The framebuffer is in device pixels already, so the view draws into an offscreen target of
+// view size * resMltV, multisampled when antiAlias was on at startup, and is stretched back over the view
+// rect with linear filtering (the browser's canvas scaling). At 1 without anti-aliasing it draws directly.
+
+static struct {
+    unsigned int fbo, color, depth;       // single-sample target (the blit source)
+    unsigned int ms_fbo, ms_color, ms_depth; // multisampled target (antiAlias)
+    int w, h, samples, prev_fbo, active;
+} g_vt;
+static int g_vt_aa = -1; // antiAlias as read at startup
+
+static void view_target_free(void) {
+    if (g_vt.fbo) glDeleteFramebuffers(1, &g_vt.fbo);
+    if (g_vt.ms_fbo) glDeleteFramebuffers(1, &g_vt.ms_fbo);
+    const unsigned int rbs[4] = {g_vt.color, g_vt.depth, g_vt.ms_color, g_vt.ms_depth};
+    for (int i = 0; i < 4; i++) if (rbs[i]) glDeleteRenderbuffers(1, &rbs[i]);
+    memset(&g_vt, 0, sizeof(g_vt));
+}
+
+static unsigned int view_target_rb(const int samples, const unsigned int format, const int w, const int h) {
+    unsigned int rb = 0;
+    glGenRenderbuffers(1, &rb);
+    glBindRenderbuffer(GL_RENDERBUFFER, rb);
+    if (samples > 0) glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, format, w, h);
+    else glRenderbufferStorage(GL_RENDERBUFFER, format, w, h);
+    return rb;
+}
+
+static unsigned int view_target_fb(const unsigned int color, const unsigned int depth) {
+    unsigned int fb = 0;
+    glGenFramebuffers(1, &fb);
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, color);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth);
+    return fb;
+}
+
+int ed_view_target_begin(const int view_w, const int view_h, int *w, int *h) {
+    if (g_vt_aa < 0) g_vt_aa = editor_setting_bool("antiAlias");
+    const cJSON *rv = cJSON_GetObjectItemCaseSensitive(g_ed.settings, "resMltV"); // a number, or the Anti-aliasing switch's bool
+    double res = cJSON_IsNumber(rv) ? fabs(rv->valuedouble) : cJSON_IsTrue(rv) ? 1.0 : 0.0;
+    if (!(res > 0.0)) res = 0.6; // resMltV || 0.6
+    g_vt.active = 0;
+    if (fabs(res - 1.0) < 1e-6 && !g_vt_aa) return 0;
+    const int tw = (int) lround(view_w * res) > 0 ? (int) lround(view_w * res) : 1;
+    const int th = (int) lround(view_h * res) > 0 ? (int) lround(view_h * res) : 1;
+    int max_samples = 0;
+    if (g_vt_aa) glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
+    const int samples = g_vt_aa ? (max_samples < 4 ? max_samples : 4) : 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &g_vt.prev_fbo);
+    if (tw != g_vt.w || th != g_vt.h || samples != g_vt.samples || !g_vt.fbo) {
+        const int prev = g_vt.prev_fbo;
+        view_target_free();
+        g_vt.prev_fbo = prev;
+        g_vt.color = view_target_rb(0, GL_RGBA8, tw, th);
+        g_vt.depth = view_target_rb(0, GL_DEPTH24_STENCIL8, tw, th);
+        g_vt.fbo = view_target_fb(g_vt.color, g_vt.depth);
+        if (samples > 0) {
+            g_vt.ms_color = view_target_rb(samples, GL_RGBA8, tw, th);
+            g_vt.ms_depth = view_target_rb(samples, GL_DEPTH24_STENCIL8, tw, th);
+            g_vt.ms_fbo = view_target_fb(g_vt.ms_color, g_vt.ms_depth);
+        }
+        g_vt.w = tw;
+        g_vt.h = th;
+        g_vt.samples = samples;
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int) g_vt.prev_fbo);
+            view_target_free();
+            return 0;
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, g_vt.ms_fbo ? g_vt.ms_fbo : g_vt.fbo);
+    g_vt.active = 1;
+    *w = tw;
+    *h = th;
+    return 1;
+}
+
+void ed_view_target_end(const int x, const int y, const int w, const int h) {
+    if (!g_vt.active) return;
+    g_vt.active = 0;
+    glDisable(GL_SCISSOR_TEST);
+    if (g_vt.ms_fbo) { // resolve the multisampled view
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, g_vt.ms_fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_vt.fbo);
+        glBlitFramebuffer(0, 0, g_vt.w, g_vt.h, 0, 0, g_vt.w, g_vt.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, g_vt.fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int) g_vt.prev_fbo);
+    glBlitFramebuffer(0, 0, g_vt.w, g_vt.h, x, y, x + w, y + h, GL_COLOR_BUFFER_BIT,
+                      g_vt.w == w && g_vt.h == h ? GL_NEAREST : GL_LINEAR);
+    glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int) g_vt.prev_fbo);
+    glEnable(GL_SCISSOR_TEST);
+}
+
 void ed_render_fini(void) {
+    view_target_free();
     if (g_vbo) glDeleteBuffers(1, &g_vbo);
     if (g_vao) glDeleteVertexArrays(1, &g_vao);
     if (g_program) glDeleteProgram(g_program);
@@ -749,6 +851,10 @@ static void gizmo_axes(vec3 axes[3]) {
 }
 
 static const int k_axis_hex[3] = {0xff0000, 0x00ff00, 0x0000ff};
+
+static int project(const vec3 w, float *sx, float *sy);
+
+int ed_project_point(const vec3 w, float *sx, float *sy) { return project(w, sx, sy); }
 
 static int project(const vec3 w, float *sx, float *sy) {
     const float *m = g_vp;

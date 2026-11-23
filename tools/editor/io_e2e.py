@@ -207,7 +207,8 @@ def drop_imports_in_turn(c):
     e = jload(out(c, "drop_cmd.json"))
     want = jload(sand)["name"]
     check(e["name"] == want, "drop: the last file did not win (%s != %s)" % (e["name"], want))
-    check("not valid JSON" in log, "a dropped non-map was not reported")
+    # alert("Failed to import map with error:\n" + error) (editor-10.0.7.js:17186)
+    check("Failed to import map with error:" in log and "SyntaxError" in log, "a dropped non-map was not reported")
 
 
 @test

@@ -177,7 +177,9 @@ def test_welcome_text(c):
 def test_publishing_guide(c):
     text, _ = dump(c, "pubguide", "window", "window:11;wait:1")
     check(text.startswith("H Publishing"), "window 11 is not Publishing: %r" % text[:80])
-    check("X Publishing Guide" in text and "X 5." in text and "Partner" in text, "Publishing Guide lacks its steps")
+    # v10.0.7's guide ends at step 4, Online Game Sites (editor-10.0.7.js:13494): no step 5, no Partner program
+    check("X Publishing Guide" in text and "X 4." in text and "Crazy Games" in text, "Publishing Guide lacks its steps")
+    check("X 5." not in text and "Partner" not in text, "Publishing Guide has v10.0.2's step 5")
 
 
 @test

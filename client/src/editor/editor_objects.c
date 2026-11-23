@@ -170,7 +170,33 @@ static cJSON *faces_json(const EditorObject *o) {
 // v10 map-slot properties (E10:6740-6890, IDX:16449-16501): "mp:<slot>:<field>" reads and writes
 // mapProps[slot][field] ("ch" channel, "i" intensity / scale, "fy" flip Y) of the object's "mp". A
 // value at its default is dropped (_setMapProp) and an empty slot / "mp" is removed.
+// The accessor names ObjectInstance gives the same values (lightMapChannel .. roughnessMapFlipY,
+// editor-10.0.7.js:6765-6896), as the group "Key" select lists them, map to "mp:<slot>:<field>".
 static int mapprop_name(const char *prop, char *slot, char *field, const size_t n) {
+    static const struct {const char *name; char slot;} maps[] = {
+        {"lightMap", 'l'}, {"normalMap", 'n'}, {"bumpMap", 'b'}, {"displacementMap", 'p'}, {"emissiveMap", 'e'},
+        {"specularMap", 's'}, {"alphaMap", 'a'}, {"metalnessMap", 'm'}, {"roughnessMap", 'r'},
+    };
+    static const struct {const char *name; char slot;} scales[] = {
+        {"lightMapIntensity", 'l'}, {"bumpScale", 'b'}, {"displacementScale", 'p'}, {"normalScale", 'n'},
+    };
+    for (size_t i = 0; i < sizeof(scales) / sizeof(scales[0]); i++)
+        if (!strcmp(prop, scales[i].name)) {
+            slot[0] = scales[i].slot;
+            slot[1] = 0;
+            snprintf(field, n, "i");
+            return 1;
+        }
+    for (size_t i = 0; i < sizeof(maps) / sizeof(maps[0]); i++) {
+        const size_t l = strlen(maps[i].name);
+        if (strncmp(prop, maps[i].name, l)) continue;
+        const char *f = !strcmp(prop + l, "Channel") ? "ch" : !strcmp(prop + l, "FlipY") ? "fy" : NULL;
+        if (!f) continue;
+        slot[0] = maps[i].slot;
+        slot[1] = 0;
+        snprintf(field, n, "%s", f);
+        return 1;
+    }
     if (strncmp(prop, "mp:", 3) || !prop[3] || prop[4] != ':' || !prop[5]) return 0;
     slot[0] = prop[3];
     slot[1] = 0;
@@ -251,8 +277,8 @@ cJSON *ed_prop_get(const EditorObject *o, const char *prop) {
     if (!strcmp(prop, "mSize")) return cJSON_CreateNumber(ed_json_num(d, "ms", editor_prefabs[o->prefab].scale));
     if (!strcmp(prop, "faces")) return faces_json(o);
     if (!strcmp(prop, "lightTarget")) return vec_json(ed_obj_vec(o, "lt", (vec3) {0}), 2);
-    if (!strncmp(prop, "mp:", 3)) {
-        cJSON *m = mapprop_get(o, prop);
+    {
+        cJSON *m = mapprop_get(o, prop); // "mp:<slot>:<field>" and the v10 accessor names, else NULL
         if (m) return m;
     }
     cJSON *v = ed_model_prop_get(d, o->prefab, prop);
@@ -277,9 +303,12 @@ int ed_prop_needs_rebuild(const char *prop) {
 void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
     cJSON *d = o->data;
     const int prefab = o->prefab;
-    if (!strncmp(prop, "mp:", 3)) {
-        mapprop_set(o, prop, value);
-        return;
+    {
+        char slot[2], field[8];
+        if (mapprop_name(prop, slot, field, sizeof(field))) {
+            mapprop_set(o, prop, value);
+            return;
+        }
     }
 
     if (!strcmp(prop, "pos") || !strcmp(prop, "size") || !strcmp(prop, "rot") || !strcmp(prop, "lightTarget")) {
@@ -515,6 +544,16 @@ void ed_obj_rebuild(EditorObject *o) {
     cJSON *objects = cJSON_AddArrayToObject(o->render_doc, "objects");
     cJSON_AddArrayToObject(o->render_doc, "spawns");
     cJSON *copy = cJSON_Duplicate(o->data, 1);
+    // Object Border Visuals: a hasBorder object with its border on is drawn #ff0000 (set color / set border,
+    // editor-10.0.7.js:6943, :7033)
+    if (editor_prefab_has(o->prefab, EP_HASBORDER) && editor_setting_bool("borderVisuals") && cJSON_GetObjectItemCaseSensitive(o->data, "bo"))
+        ed_json_set_str(copy, "c", "#ff0000");
+    // Highlight: the object under the mouse gets a random emissive (setHighlight, :17607-17614)
+    if (o->uuid == g_ed.highlight_uuid && g_ed.highlight_uuid) {
+        char hex[8];
+        snprintf(hex, sizeof(hex), "#%06x", g_ed.highlight_hex & 0xffffff);
+        ed_json_set_str(copy, "e", hex);
+    }
     // the editor always draws invisible objects' boxes; their meshes stay hidden (opacity 0)
     cJSON_AddItemToArray(objects, copy);
     o->render_map = map_init(o->render_doc);
@@ -522,6 +561,24 @@ void ed_obj_rebuild(EditorObject *o) {
         o->mesh = o->render_map->objects[0]->mesh;
         if (o->mesh && g_ed.proj->scene) scene_add_mesh(g_ed.proj->scene, o->mesh);
     }
+}
+
+void ed_obj_set_highlight(EditorObject *o) {
+    const uint32_t uuid = o ? o->uuid : 0;
+    if (uuid == g_ed.highlight_uuid) return; // this.highlightObject != o
+    EditorObject *prev = g_ed.highlight_uuid ? ed_obj_find(g_ed.highlight_uuid) : NULL;
+    g_ed.highlight_uuid = uuid;
+    if (prev) ed_obj_rebuild(prev); // emissive.setHex(currentHex)
+    if (o) {
+        g_ed.highlight_hex = rand() & 0xffffff; // setHex(Math.random() * 267386880 - 267386880)
+        ed_obj_rebuild(o);
+    }
+}
+
+void ed_obj_border_visuals(void) {
+    if (!g_ed.proj) return;
+    for (size_t i = 0; i < g_ed.proj->count; i++)
+        if (editor_prefab_has(g_ed.proj->objects[i]->prefab, EP_HASBORDER)) ed_obj_rebuild(g_ed.proj->objects[i]);
 }
 
 // ---------------------------------------------------------------------------
@@ -991,7 +1048,7 @@ static void entry_free(EditorHistoryEntry *e) {
 }
 
 static void history_push(EditorHistoryEntry **list, size_t *count, size_t *cap, const EditorHistoryEntry e) {
-    const size_t limit = (size_t) editor_setting_num("historyLimit", 1000);
+    const size_t limit = (size_t) editor_setting_num("historyLimit", 100);
     if (*count == *cap) {
         const size_t ncap = *cap ? *cap * 2 : 64;
         EditorHistoryEntry *n = realloc(*list, ncap * sizeof(EditorHistoryEntry));
@@ -1059,9 +1116,8 @@ static void history_item(EdBuf *b, const EditorHistoryEntry *e, const int redo) 
     const EditorObject *o = e->action == 'u' ? ed_obj_find(e->uuid) : NULL;
     const cJSON *data = e->state ? e->state : o ? o->data : NULL;
     const int prefab = data ? ed_model_prefab(data) : -1;
-    const cJSON *nm = data ? cJSON_GetObjectItemCaseSensitive(data, "n") : NULL; // obj.name || obj.objType || "Object"
-    const char *name = cJSON_IsString(nm) && nm->valuestring[0] ? nm->valuestring
-                     : prefab >= 0 && prefab < EDITOR_PREFAB_COUNT ? editor_prefabs[prefab].name : "Object";
+    // obj.name || obj.objType || "Object": an ObjectInstance's name is formatConstName(prefab.name) (editor-10.0.7.js:7134)
+    const char *name = prefab >= 0 && prefab < EDITOR_PREFAB_COUNT ? editor_prefabs[prefab].label : "Object";
     const char *verb = e->action == 'a' ? "Added" : e->action == 'r' ? "Removed" : "Updated";
     edb_addf(b, "<div class=\"history-item history-item-%s\">\n\t\t\t<span class=\"history-item-indicator\">\u25cf</span> %s ", redo ? "redo" : "undo", verb);
     edb_add_escaped(b, name);
@@ -1293,7 +1349,7 @@ int ed_history_redo_undoable(void) {
 }
 
 void ed_history_poll(void) {
-    if (editor_setting_bool("disableHistory") || !editor_setting_num("historyLimit", 1000)) return;
+    if (editor_setting_bool("disableHistory") || !editor_setting_num("historyLimit", 100)) return;
     if (ed_rotate_active()) return; // a turn is one step: its poll is the one that ends it (ed_rotate_end)
     for (size_t i = 0; i < g_ed.proj->count; i++) {
         EditorObject *o = g_ed.proj->objects[i];

@@ -1,8 +1,9 @@
 /* The map editor's AI panel (client/src/editor/editor_ai.c, KrunkNative): a compact chat docked over
  * the right side of the 3D view (#center). Looks like the editor's dark panels (editor_dark.css:
  * #242424 surfaces, #333 / #444 controls, #f0f0f0 text, #1d8eb9 accent, #13677f hover, 4 px radii,
- * the canvas buttons' shadow); the chat's shapes after abulxt's compact popout chat (no assistant
- * bubble, a quiet user bubble, hover actions, one-line tool rows).
+ * the canvas buttons' shadow) and the editor page's GameFont (editor.css html, body; code stays monospace);
+ * the chat's shapes after abulxt's compact popout chat (no assistant bubble, a quiet user bubble, hover
+ * actions, one-line tool rows). Krunker v10.0.7's editor has no AI assistant: the panel is KrunkNative's.
  *
  * Every control of the header row is 24 px high and centred (flex, align-items: center), and the
  * composer's Tools / Web / Ask / Stop share .knAiBtnS (24 px, 0 10 px, 12 px text, 4 px radius), so
@@ -21,7 +22,7 @@
 	border-radius: 4px;
 	box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
 	color: #e8e8e8;
-	font-family: Helvetica, Arial, sans-serif;
+	font-family: 'GameFont';
 	font-size: 13px;
 	line-height: 1.5;
 	z-index: 20;
@@ -130,7 +131,7 @@
 	z-index: 40;
 	pointer-events: auto; /* #center passes the pointer to the 3D view; the dropdown must take it (hover, clicks) */
 	color: #f0f0f0;
-	font-family: Helvetica, Arial, sans-serif;
+	font-family: 'GameFont';
 	font-size: 12px;
 }
 .knAiModelList {
@@ -221,7 +222,7 @@
 /* the editor's own #center rules (canvas buttons: GameFont, grey, text shadow) outrank single-class
  * selectors on the overlay's descendants; restate the overlay's typography at #center specificity */
 #center .knAiModelPop, #center .knAiModelPop * {
-	font-family: Helvetica, Arial, sans-serif;
+	font-family: 'GameFont';
 	text-shadow: none;
 	text-transform: none;
 	letter-spacing: 0;

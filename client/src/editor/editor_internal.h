@@ -178,6 +178,8 @@ typedef struct {
     // input / controls
     int move_forward, move_backward, move_left, move_right, move_up, move_down, move_sprint;
     int looking;           // right mouse held: PointerLockControls enabled
+    uint32_t highlight_uuid; // objectHighlight: the object under the mouse (setHighlight), 0 = none
+    int highlight_hex;       // its random emissive
     double look_last_x, look_last_y;
     double mouse_x, mouse_y; // framebuffer px
     int mods;
@@ -533,6 +535,11 @@ void ed_render_fini(void);
 void ed_render_grid(void);                         // before scene_render (GridHelper)
 int ed_render_bot_chain_count(void);               // BOT_PATH_NODE chain lines drawn by the last frame (editor tests)
 void ed_render_overlays(void);                     // after scene_render, inside the view viewport
+void ed_obj_set_highlight(EditorObject *o);        // setHighlight(o) / removeHighlight() (NULL)
+int  ed_project_point(vec3 w, float *sx, float *sy); // world -> framebuffer pixel (0 = behind the camera)
+void ed_obj_border_visuals(void);                  // updateBorderVisuals: redraw every hasBorder object
+int  ed_view_target_begin(int view_w, int view_h, int *w, int *h); // resMltV / antiAlias: 1 = draw the view into w x h
+void ed_view_target_end(int x, int y, int w, int h);              // stretch it over the view rect (after begin() = 1)
 void ed_render_apply_wireframe(EditorProject *p, int on); // ObjectInstance.forceWire on p's object materials
 int  ed_pick(double fb_x, double fb_y, int skip_invisible, EditorObject **out, vec3 *hit, int *face);
 void ed_view_ray(double fb_x, double fb_y, vec3 *origin, vec3 *dir);

@@ -22,10 +22,10 @@
 //   at all (no brain), leaves "Loading..." as v10's failed fetch does.
 // - My Assets goes with the account's session (Authorization: Bearer): kn_brain lists a Private asset
 //   to its signed-in owner only (Krunker's listAssets is a bare fetch).
-// - Thumbnails, textures and sounds live under assets/user-assets/<id>/ (the v7 import), not on
-//   user-assets.krunker.io: natively a card shows the local file when it exists, else
-//   ./img/noimg.png (the onerror fallback; the tree has no noimg2.png); the web build uses the asset
-//   host's URL. A map card shows the thumbnail kn_brain stored with the map (map_image, a PNG data
+// - Thumbnails, textures and sounds of the v7 import live under assets/user-assets/<id>/: natively a
+//   card shows the local file when it exists, else the user-assets host's (kn_brain's /user-assets, or
+//   user-assets.krunker.io for a krunker.io account), else ./img/noimg.png (also the onerror fallback;
+//   the tree has no noimg2.png); the web build uses the asset host's URL. A map card shows the thumbnail kn_brain stored with the map (map_image, a PNG data
 //   URL); the Update Game popup fetches the stored one from the brain (/api/user-assets/m<id>/thumb.png).
 // - Prefab assets (selectAsset type 3) read user-assets/<id>/data.json from the asset tree.
 // - uploadA / uploadM's thumbnail: publishAssetResp's / publishMapResp's one multipart POST of every
@@ -225,6 +225,12 @@ static void user_asset_src(EdBuf *b, const char *rel) {
     if (f) {
         fclose(f);
         html_dom_asset_url(rel, url, sizeof(url));
+        edb_add(b, url);
+    } else if (!strncmp(rel, "user-assets/", 12) && (account_backend() == ACCOUNT_BACKEND_KRUNKER || backend_url()[0])) {
+        // not in the local tree: the user-assets host as v10 loads it (editor-10.0.7.js:13754, :13814), Krunker's for a
+        // krunker.io account, else kn_brain's /user-assets (user_assets.c; the hub's ua_url, social_ui.c)
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) snprintf(url, sizeof(url), "https://user-assets.krunker.io/%s", rel + 12);
+        else snprintf(url, sizeof(url), "%s/user-assets/%s", backend_url(), rel + 12);
         edb_add(b, url);
     } else {
         edb_add(b, "./img/noimg.png");

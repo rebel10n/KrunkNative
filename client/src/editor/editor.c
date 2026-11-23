@@ -29,6 +29,7 @@
 #include <map_validate.h> // testMap: validateMap(export, cb, true)
 #include <math.h>
 #include <sky.h>
+#include <sound_events.h> // playTick / playSelect
 #include <ui_logic.h> // ui_text_input_focused
 #include <backend_ui.h> // account_ui_twofa_handler: the 2FA popup of a password login
 #include <backend.h>    // the editor presence heartbeat (the Servers window's "in Editor" count)
@@ -56,7 +57,7 @@ static const char k_default_settings[] =
     "\"mergeVoxels\":false,\"speedNormal\":70,\"speedSprint\":180,\"voxelSize\":10,\"imageSize\":1,\"imageDepth\":1,\"imageCol\":true,"
     "\"assetAutoGroup\":true,\"preserveFolderState\":true,\"translationSnapping\":1,\"rotationSnapping\":1,\"scaleSnapping\":1,"
     "\"autoBackups\":true,\"backupTimer\":10,\"quickGUI\":true,\"quickGUIOpen\":0,\"resMltV\":0.6,\"renderDist\":20000,\"createObjectNear\":false,"
-    "\"pointerLock\":true,\"historyLimit\":1000,\"disableHistory\":false,\"disableWarnings\":false,\"showRealHitbox\":false,"
+    "\"pointerLock\":true,\"historyLimit\":100,\"disableHistory\":false,\"disableWarnings\":false,\"showRealHitbox\":false,"
     "\"uiScale\":1,\"borderVisuals\":true,\"testInEditor\":false,\"autoLog\":true,\"showFPS\":false,\"darkMode\":true,\"fowardKey\":\"W\","
     "\"backwardKey\":\"S\",\"leftKey\":\"A\",\"rightKey\":\"D\",\"upKey\":\"E\",\"downKey\":\"Q\",\"faceModeKey\":\"M\",\"groupModeKey\":\"N\","
     "\"wireframeKey\":\"\xc2\xbc\",\"translateKey\":\"1\",\"rotateKey\":\"2\",\"scaleKey\":\"3\",\"transformSpaceKey\":\"\xc3\x80\",\"placeHolderKey\":\"P\","
@@ -838,7 +839,7 @@ static int h_keydown(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n
 static int h_script(void *u, const HtmlEvent *ev, const HtmlArg *a, int n);
 
 static void install_handlers(void) {
-    static HtmlHandlerEntry table[384];
+    static HtmlHandlerEntry table[512];
     size_t count = 0;
     const HtmlHandlerEntry own[] = {
         {"closeWindow", h_close_window},
@@ -850,6 +851,9 @@ static void install_handlers(void) {
         {"KE.teleportPopup", h_teleport_popup},
         {"KE.teleport", h_teleport},
         {"KE.kn.script", h_script},
+        // window.playTick / playSelect (editor-10.0.7.js:12856-12861): hover_0 at 0.2, select_0 at 0.15 by default
+        {"playTick", ui_sound_play_tick},
+        {"playSelect", ui_sound_play_select},
     };
     for (size_t i = 0; i < sizeof(own) / sizeof(own[0]); i++) table[count++] = own[i];
     ed_gui_install(table, &count, sizeof(table) / sizeof(table[0]));
@@ -1326,6 +1330,65 @@ static void dump_toolbar(const HtmlElem e, EdBuf *b, const int depth) {
     }
 }
 
+static int page_cursor(Client *client, double x, double y);
+
+// edstate:PATH (tools/editor/panels_e2e.py): one JSON snapshot of what the v10.0.7 panel checks read: the
+// settings, the Recent Actions markup, the open prompt's text, the T-key popup's visible item names, each
+// object's drawn colour / emissive (the render copy) and the 3D view's target size
+static void dump_state(const char *path) {
+    cJSON *st = cJSON_CreateObject();
+    cJSON_AddItemToObject(st, "settings", cJSON_Duplicate(g_ed.settings, 1));
+    char *hist = ed_history_html();
+    cJSON_AddStringToObject(st, "history", hist ? hist : "");
+    free(hist);
+    char t[1024] = "";
+    const HtmlElem prompt = html_dom_by_id("knPrompt");
+    if (prompt) html_dom_get_text(prompt, t, sizeof(t));
+    if (prompt) cJSON_AddStringToObject(st, "prompt", t);
+    else cJSON_AddNullToObject(st, "prompt");
+    cJSON *vis = cJSON_AddArrayToObject(st, "popup");
+    enum { MAX_ITEMS = 16384 };
+    HtmlElem *items = malloc(MAX_ITEMS * sizeof(*items));
+    int count = items ? html_dom_query_all(html_dom_by_id("genericPop"), ".textureListItem", items, MAX_ITEMS) : 0;
+    if (count > MAX_ITEMS) count = MAX_ITEMS;
+    for (int i = 0; i < count; i++) {
+        char disp[32] = "";
+        if (html_dom_get_style(items[i], "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "none")) continue;
+        const HtmlElem nm = html_dom_query(items[i], ".textureListName");
+        const HtmlElem vr = html_dom_query(items[i], ".textureListVariant");
+        char name[256] = "", var[128] = "";
+        if (nm) dump_text(nm, name, sizeof(name));
+        if (vr) dump_text(vr, var, sizeof(var));
+        char both[400];
+        snprintf(both, sizeof(both), "%s%s%s", name, var[0] ? "|" : "", var);
+        cJSON_AddItemToArray(vis, cJSON_CreateString(both));
+    }
+    free(items);
+    cJSON *render = cJSON_AddArrayToObject(st, "render");
+    for (size_t i = 0; g_ed.proj && i < g_ed.proj->count; i++) {
+        const EditorObject *o = g_ed.proj->objects[i];
+        const cJSON *copy = o->render_doc ? cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(o->render_doc, "objects"), 0) : NULL;
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddStringToObject(r, "c", ed_json_str(copy, "c", ""));
+        cJSON_AddStringToObject(r, "e", ed_json_str(copy, "e", ""));
+        cJSON_AddItemToArray(render, r);
+    }
+    cJSON_AddNumberToObject(st, "highlight", g_ed.highlight_uuid ? 1 : 0);
+    int tw = 0, th = 0;
+    cJSON_AddBoolToObject(st, "scaled", ed_view_target_begin(g_ed.view_w, g_ed.view_h, &tw, &th));
+    ed_view_target_end(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
+    cJSON_AddNumberToObject(st, "view_w", g_ed.view_w);
+    cJSON_AddNumberToObject(st, "target_w", tw);
+    char *text = cJSON_Print(st);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        if (text) fputs(text, f);
+        fclose(f);
+    }
+    free(text);
+    cJSON_Delete(st);
+}
+
 static void dump_panel(const char *which, const char *path) {
     const int win = !strcmp(which, "window") || !strcmp(which, "popup");
     const HtmlElem root = !strcmp(which, "left") ? g_ed.el_left_list : !strcmp(which, "window") ? g_ed.el_menu_window
@@ -1465,6 +1528,18 @@ static void run_script_text(const char *text) {
                 nth = atoi(hash + 1);
             }
             if (!ed_gui_press_by_label(g_ed.el_right_list, arg, nth)) fprintf(stderr, "[editor] press: no button \"%s\" #%d\n", arg, nth);
+        } else if ((!strcmp(cmd, "wpress") || !strcmp(cmd, "wset")) && arg) {
+            // wpress:<button text>[#n] / wset:<label>[#n]=<value>: the same on the open window (Settings, Controls)
+            char *eq = !strcmp(cmd, "wset") ? strchr(arg, '=') : NULL;
+            if (eq) *eq++ = 0;
+            int nth = 0;
+            char *hash = strrchr(arg, '#');
+            if (hash && hash[1] && strspn(hash + 1, "0123456789") == strlen(hash + 1)) {
+                *hash = 0;
+                nth = atoi(hash + 1);
+            }
+            const int ok = eq ? ed_gui_set_by_label(g_ed.el_menu_window, arg, nth, eq) : ed_gui_press_by_label(g_ed.el_menu_window, arg, nth);
+            if (!ok) fprintf(stderr, "[editor] %s: no control \"%s\" #%d\n", cmd, arg, nth);
         }
         else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
         else if (ed_tools_script(cmd, arg)) {} // tool: (editor_tools.c, tools_check.py)
@@ -1533,6 +1608,33 @@ static void run_script_text(const char *text) {
                     cJSON_AddItemToObject(g_ed.settings, arg, val);
                 }
             }
+        } else if (!strcmp(cmd, "edstate") && arg) {
+            dump_state(arg);
+        } else if (!strcmp(cmd, "search")) {
+            // search:TEXT: type into the T-key popup's #skinSearch (oninput KE.searchItems(this, textures))
+            const HtmlElem in = html_dom_by_id("skinSearch");
+            if (in) {
+                char oninput[96] = "";
+                html_dom_get_attr(in, "oninput", oninput, sizeof(oninput));
+                html_dom_set_value(in, arg ? arg : "");
+                HtmlArg a[2] = {{HTML_ARG_NUM, 0, NULL}, {HTML_ARG_BOOL, strstr(oninput, "true") != NULL, NULL}};
+                HtmlEvent ev = {.type = "input", .target = in};
+                html_ui_dispatch("KE.searchItems", &ev, a, 2);
+            }
+        } else if (!strcmp(cmd, "hover") && arg) {
+            // hover:X:Y (CSS px) or hover:obj:I (object I's centre): the mouse moves there (the container's
+            // mousemove: Highlight)
+            float hx = 0, hy = 0;
+            const float s = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
+            int oi = -1;
+            if (sscanf(arg, "obj:%d", &oi) == 1) {
+                if (oi >= 0 && (size_t) oi < g_ed.proj->count) {
+                    const EditorObject *o = g_ed.proj->objects[oi];
+                    vec3 p = ed_obj_vec(o, "p", (vec3) {0, 0, 0}), sz = ed_obj_vec(o, "s", (vec3) {0, 0, 0});
+                    p.y += sz.y * 0.5f;
+                    if (ed_project_point(p, &hx, &hy)) page_cursor(g_ed.client, hx, hy);
+                }
+            } else if (sscanf(arg, "%f:%f", &hx, &hy) == 2) page_cursor(g_ed.client, hx * s, hy * s);
         } else if (!strcmp(cmd, "objdump") && arg) {
             // objdump:<file>: every object's serialization, one per line
             FILE *f = fopen(arg, "w");
@@ -1647,9 +1749,13 @@ static void page_tick(Client *client, const float now, const float dt) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (g_ed.view_w <= 0 || g_ed.view_h <= 0) return;
 
-    glViewport(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
+    int target_w = 0, target_h = 0;
+    const int scaled = ed_view_target_begin(g_ed.view_w, g_ed.view_h, &target_w, &target_h); // setResMlt / antialias
+    if (scaled) glViewport(0, 0, target_w, target_h);
+    else glViewport(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
     glEnable(GL_SCISSOR_TEST);
-    glScissor(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
+    if (scaled) glScissor(0, 0, target_w, target_h);
+    else glScissor(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
     const vec4 sky = g_render_lighting.sky_color;
     glClearColor(sky.x, sky.y, sky.z, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1670,6 +1776,11 @@ static void page_tick(Client *client, const float now, const float dt) {
     ed_render_grid();
     scene_render(g_ed.proj->scene, &g_ed.proj->camera);
     ed_render_overlays();
+    if (scaled) {
+        ed_view_target_end(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
+        glViewport(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
+        glScissor(g_ed.view_x, g_ed.view_y, g_ed.view_w, g_ed.view_h);
+    }
     ed_net_frame(); // publish thumbnail: the view just drawn (before the 2D overlay)
     ed_overlay_render(now);
 
@@ -1833,6 +1944,11 @@ static int page_cursor(Client *client, const double x, const double y) {
         return 1;
     }
     g_ed.gizmo.hover = g_ed.proj->selected && in_view(x, y) ? ed_gizmo_hit(x, y) : 0;
+    // the container's mousemove (editor-10.0.7.js:15848-15862): removeHighlight unless Highlight is on, else
+    // setHighlight on the first bounding mesh under the mouse
+    EditorObject *hover = NULL;
+    if (editor_setting_bool("objectHighlight") && in_view(x, y)) ed_pick(x, y, 0, &hover, NULL, NULL);
+    ed_obj_set_highlight(hover);
     return 0;
 }
 

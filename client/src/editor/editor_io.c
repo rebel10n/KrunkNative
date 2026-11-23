@@ -180,14 +180,19 @@ int ed_map_import(const char *text) {
     if (!text || !*text) return 0;
     cJSON *e = cJSON_Parse(text);
     if (!e) {
-        editor_message("Failed to import map: not valid JSON.");
+        // alert("Failed to import map with error:\n" + error) (editor-10.0.7.js:17186, :17563): JSON.parse's SyntaxError
+        const char *at = cJSON_GetErrorPtr();
+        char msg[160];
+        snprintf(msg, sizeof(msg), "Failed to import map with error:\nSyntaxError: Unexpected token in JSON at position %ld",
+                 at && at >= text ? (long) (at - text) : 0L);
+        editor_message(msg);
         return 0;
     }
     ed_mp_import(1); // mapImportStart / mapImportEnded: the room gets the whole map
     const int ok = import_doc(e);
     ed_mp_import(0);
     cJSON_Delete(e);
-    if (!ok) editor_message("Failed to import map: no map data.");
+    if (!ok) editor_message("Failed to import map with error:\nTypeError: no map data");
     return ok;
 }
 
