@@ -244,7 +244,7 @@ typedef struct {
     ModeCollisionFn collision_check; // collisionCheck (sets player.onZone; king / dom)
     ModeGameStartFn on_pre_end;      // onPreEnd (endGame, before didWin)
     ModeGameStartFn on_end;          // onEnd (endGame, after the end packets)
-    int event;                       // event index (aon 4, md 5), 0 none
+    int event;                       // event index (aon 4, md 5, candy 10; stalk `true` = 1), 0 none
     unsigned char party:1;           // party / tag "Party" (client lists)
     unsigned char dom:1;             // Domination zones
     unsigned char oneflag:1;         // neutral flag (tm -1), anyone carries it, no capture (tdf / car)
