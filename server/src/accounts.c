@@ -1396,6 +1396,58 @@ static cJSON *acc_player_stats(ClientConnection *client, const int final) {
     return p;
 }
 
+// v10's endData.ed as endGame leaves it after the per-player ENDs (deob-10.0.7.js:195285-195292): for every player in
+// the end order, one value per endStats column. "name" is [name] (getName, no account), the others go through endForm
+// (deob-10.0.7.js:18315-18353): reward "<span style='color:#F8C55C'>+N</span> KR" / "NONE", time the timer / "DNF",
+// infected / found convs, weapon weaponTier, obj / objective objectiveScore, dmg round(dmgDealt), downs deaths,
+// points score; a column without an endForm entry is the player's own field. A MatchResult post (typ 8) keeps it as
+// its lnk2 (doc/v10/parity-audit-2026-11-20-social.md, round 8).
+static const char *const k_acc_end_stats[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL}; // config.endStats
+
+static cJSON *acc_end_value(const Player *p, const char *stat) {
+    if (!strcmp(stat, "sid")) return cJSON_CreateNumber(p->uid);
+    if (!strcmp(stat, "name")) {
+        cJSON *a = cJSON_CreateArray();
+        cJSON_AddItemToArray(a, cJSON_CreateString(p->name));
+        return a;
+    }
+    if (!strcmp(stat, "reward")) {
+        if (!p->reward) return cJSON_CreateString("NONE");
+        char s[96];
+        snprintf(s, sizeof(s), "<span style='color:#F8C55C'>+%d</span> KR", p->reward);
+        return cJSON_CreateString(s);
+    }
+    if (!strcmp(stat, "time")) {
+        if (!p->mode.has_timer) return cJSON_CreateString("DNF");
+        const int tenths = (int) floorf(p->mode.timer * 10.0f + 0.0001f);
+        char s[32];
+        snprintf(s, sizeof(s), "%02d:%02d.%d", tenths / 600 % 60, tenths / 10 % 60, tenths % 10);
+        return cJSON_CreateString(s);
+    }
+    if (!strcmp(stat, "infected") || !strcmp(stat, "found")) return cJSON_CreateNumber(p->mode.convs);
+    if (!strcmp(stat, "weapon")) return cJSON_CreateNumber(p->mode.weapon_tier);
+    if (!strcmp(stat, "obj")) return cJSON_CreateNumber(p->mode.objective_score);
+    if (!strcmp(stat, "melees")) return cJSON_CreateNumber(p->mode.melees);
+    if (!strcmp(stat, "setbacks")) return cJSON_CreateNumber(p->mode.setbacks);
+    if (!strcmp(stat, "assists")) return cJSON_CreateNumber(p->assists);
+    if (!strcmp(stat, "rounds")) return cJSON_CreateNumber(p->mode.rounds);
+    return cJSON_CreateNumber(mode_leader_stat_value(p, stat)); // score, kills, deaths, caps, dmg, zombies, downs, ...
+}
+
+static cJSON *acc_end_table(void) {
+    Game *game = &g_server->game;
+    Player *sorted[64];
+    size_t count = 0;
+    for (size_t i = 0; i < game->player_count && count < 64; i++)
+        if (game->players[i]) sorted[count++] = game->players[i];
+    if (game->mode) mode_sort_players(game, sorted, count);
+    const char *const *stats = game->mode && game->mode->config.end_stats ? game->mode->config.end_stats : k_acc_end_stats;
+    cJSON *ed = cJSON_CreateArray();
+    for (size_t i = 0; i < count; i++)
+        for (int k = 0; stats[k]; k++) cJSON_AddItemToArray(ed, acc_end_value(sorted[i], stats[k]));
+    return ed;
+}
+
 // One commit frame for `clients` (final: round end, else a mid-round leave).
 static void acc_commit(ClientConnection **clients, const int count, const int final, const char *match_id) {
     if (!g_acc.brain || !count) return;
@@ -1412,6 +1464,7 @@ static void acc_commit(ClientConnection **clients, const int count, const int fi
     cJSON_AddBoolToObject(frame, "custom", g_acc.custom);
     cJSON_AddBoolToObject(frame, "comp", g_server->game.config.comp); // v10 isComp: a competitive game gets no end-screen 2x XP
     cJSON_AddBoolToObject(frame, "classDouble", g_acc.class_double);  // v10 isDoubleClassXP, set when the round started
+    if (final) cJSON_AddItemToObject(frame, "ed", acc_end_table()); // the end table a Share Match Results posts (typ 8)
     cJSON *players = cJSON_AddArrayToObject(frame, "players");
     for (int i = 0; i < count; i++) {
         cJSON_AddItemToArray(players, acc_player_stats(clients[i], final));

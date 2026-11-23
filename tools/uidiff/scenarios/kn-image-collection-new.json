@@ -37,5 +37,5 @@
       ]
     ]
   },
-  "note": "KN's Add an image popup (image_collection.c imageNewPopup: name, link, tab; deob-10.0.7.js:214688-214700) opened from the collection. Own markup and wording. Reference: KN's own render."
+  "note": "v10's New Image popup (image_collection.c imageNewPopup, deob-10.0.7.js:214750-214756) opened from the collection. Reference: KN's own render."
 }

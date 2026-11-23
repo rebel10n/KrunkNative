@@ -449,6 +449,7 @@ static void handle_commit(NodeConn *c, const cJSON *frame) {
     snprintf(match_key, sizeof(match_key), "%s:%s", lobby, match);
     const cJSON *players = cJSON_GetObjectItemCaseSensitive(frame, "players");
     const int strike = node_is_strike(c, frame);
+    if (!strike && kn_json_bool(frame, "final", 1)) social_match_end_save(c->b, match_key, frame); /* Share Match Results */
     const cJSON *p;
     cJSON_ArrayForEach(p, players) {
         int64_t acc = kn_json_int(p, "accountId", 0);

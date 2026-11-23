@@ -177,6 +177,8 @@ void hud_ui_add_killfeed(Client*, const char *killer, const char *victim, const 
 void hud_ui_hit(Client*, int kill);
 
 // ---- ui_handlers.c
+// selectHostMap(name, creator)'s Host Game flow; also the game page's mapToLoad (the hub's hostMap, app_mode.c)
+void ui_host_map_select(const char *name, const char *creator);
 void ui_handlers_install(MenuUi *ui);            // html_ui_set_handlers + the non-inline listeners
 // Module handlers (ui_handlers.c h_fallback): the inline-handler names one module owns.
 // -1 = not ours, else the handler's result (0 = `return false`).

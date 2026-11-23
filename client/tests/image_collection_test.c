@@ -27,7 +27,7 @@ void html_storage_set(const char *key, const char *value) {
 }
 const char *i18n_tr(const char *key, const char *english) { (void) key; return english; }
 
-static char g_popup[16384], g_popup_cls[32], g_notice[256], g_set_key[64], g_set_val[600];
+static char g_popup[32768], g_popup_cls[32], g_notice[256], g_set_key[64], g_set_val[600];
 static int g_closed;
 void v10_popup_show(const char *cls, const char *html, V10RenderFn render) {
     (void) render;
@@ -63,56 +63,82 @@ int main(void) {
     image_collection_clean_name(out, sizeof(out), "My <b>Scope</b>_1-x!");
     CHECK(!strcmp(out, "My bScopeb_1-x"), "name keeps letters, digits, space, _ and -");
     CHECK(image_collection_clean_url(out, sizeof(out), "https://example.com/a.png"), "png accepted");
-    CHECK(image_collection_clean_url(out, sizeof(out), "https://example.com/A.WEBP?x=1"), "webp in any case");
+    CHECK(!image_collection_clean_url(out, sizeof(out), "https://example.com/A.WEBP?x=1"), "the extension test is case-sensitive");
+    CHECK(image_collection_clean_url(out, sizeof(out), "https://example.com/a.webp?x=1&y=2"), "a query");
+    CHECK(image_collection_clean_url(out, sizeof(out), "example.com/a.png"), "isURL: the scheme is optional");
+    CHECK(image_collection_clean_url(out, sizeof(out), "http://10.0.0.1:8080/a.gif#top"), "isURL: an IPv4 host, port and fragment");
     CHECK(!image_collection_clean_url(out, sizeof(out), "https://example.com/a.svg"), "svg refused");
     CHECK(!image_collection_clean_url(out, sizeof(out), "https://example.com/a.svg#.png"), "svg refused even with a png part");
     CHECK(!image_collection_clean_url(out, sizeof(out), "https://example.com/page.html"), "not an image refused");
-    CHECK(!image_collection_clean_url(out, sizeof(out), "javascript:alert(1)//.png"), "only http(s) links");
-    CHECK(image_collection_clean_url(out, sizeof(out), "https://e.com/\"a'.png") && !strchr(out, '"') && !strchr(out, '\''), "quotes dropped");
+    CHECK(!image_collection_clean_url(out, sizeof(out), "javascript:alert(1)//.png"), "not a URL");
+    CHECK(!image_collection_clean_url(out, sizeof(out), "https://-bad.com/a.png"), "a label starts alphanumeric");
+    CHECK(!image_collection_clean_url(out, sizeof(out), "https://e.c/a.png"), "a two-letter TLD at least");
+    CHECK(!image_collection_clean_url(out, sizeof(out), "https://e.com/a b.png"), "no spaces");
+    CHECK(image_collection_clean_url(out, sizeof(out), "https://e.com/\"a'.png") && !strcmp(out, "https://e.com/a.png"), "quotes dropped");
 
     // open the collection for a setting: tab 0 shows the built-in image, no own images yet
     HtmlArg open[1] = {str("customGameOverlay")};
     image_collection_handle("imagePopup", NULL, open, 1);
-    CHECK(!strcmp(g_popup_cls, "imagePop") && strstr(g_popup, "img/backgrounds/0.png"), "built-in image on tab 0");
-    CHECK(strstr(g_popup, "tabAIMG") != NULL, "a tab is active");
+    CHECK(!strcmp(g_popup_cls, "imagePop") && strstr(g_popup, "img/backgrounds/0.png") && strstr(g_popup, "Midnight Snow<span class='imageListType'>Default</span>"), "built-in image on tab 0");
+    CHECK(strstr(g_popup, "<div class='imageListHeader'>Image Collection<div class='imageListAdd' onclick='window.imageNewPopup(&quot;customGameOverlay&quot;)'") != NULL, "v10's header");
+    CHECK(strstr(g_popup, "<div class='imageTab tabAIMG' onmouseenter='playTick()'\n\t\tonclick='playSelect(0.1);imagePopup(&quot;customGameOverlay&quot;, 0)'>Backgrounds</div>") != NULL, "tab 0 active");
+    CHECK(strstr(g_popup, ">Reticles</div>") != NULL, "v10's tab names");
 
-    // add through the form, onto tab 2
+    // the New Image form
+    HtmlArg add_key[1] = {str("customGameOverlay")};
+    image_collection_handle("window.imageNewPopup", NULL, add_key, 1);
+    CHECK(!strcmp(g_popup_cls, "imageNewPop") && strstr(g_popup, ">New Image</div>") && strstr(g_popup, "onclick='window.addNewImage(&quot;customGameOverlay&quot;)'"), "the New Image form");
+
+    // add through the form, onto tab 2: the popup comes back on tab 0
     g_in_name = "Red dot";
     g_in_url = "https://example.com/dot.png";
     g_in_cat = "2";
-    image_collection_handle("addNewImage", NULL, NULL, 0);
+    image_collection_handle("window.addNewImage", NULL, add_key, 1);
     CHECK(image_collection_count() == 1 && strstr(g_store, "dot.png") && strstr(g_store, "Red dot"), "added and stored");
-    CHECK(strstr(g_popup, "dot.png") != NULL && !strstr(g_popup, "img/backgrounds/0.png"), "tab 2 shows the new image, not the built-in");
+    CHECK(!strstr(g_popup, "dot.png") && strstr(g_popup, "img/backgrounds/0.png"), "back on tab 0");
+    HtmlArg tab2[2] = {str("customGameOverlay"), num(2)};
+    image_collection_handle("imagePopup", NULL, tab2, 2);
+    CHECK(strstr(g_popup, "selectImage(-2, &quot;https://example.com/dot.png&quot;, &quot;customGameOverlay&quot;)") && strstr(g_popup, "removeImage(0, &quot;customGameOverlay&quot;)")
+          && strstr(g_popup, "Red dot<span class='imageListType'>Custom</span>") && !strstr(g_popup, "img/backgrounds/0.png"), "tab 2 shows the new image, not the built-in");
 
-    // a bad link is refused with a message and nothing is stored
+    // a bad link or name is refused with the response popup and nothing is stored
     g_in_name = "Bad";
     g_in_url = "https://example.com/x.svg";
-    image_collection_handle("addNewImage", NULL, NULL, 0);
-    CHECK(image_collection_count() == 1 && strstr(g_notice, "supported image"), "svg add refused");
+    image_collection_handle("addNewImage", NULL, add_key, 1);
+    CHECK(image_collection_count() == 1 && !strcmp(g_popup_cls, "responsePop") && strstr(g_popup, ">Invalid Image</div>"), "svg add refused");
+    g_in_name = "!!!";
+    g_in_url = "https://example.com/x.png";
+    image_collection_handle("addNewImage", NULL, add_key, 1);
+    CHECK(image_collection_count() == 1 && strstr(g_popup, ">Invalid Name</div>"), "empty name refused");
+    g_in_name = "";
+    image_collection_handle("addNewImage", NULL, add_key, 1);
+    CHECK(image_collection_count() == 1 && strstr(g_popup, ">Something Went Wrong</div>"), "missing name refused");
 
-    // picking sets the setting to the image's link and closes the popup
-    HtmlArg pick[2] = {num(-2), num(0)};
-    image_collection_handle("selectImage", NULL, pick, 2);
+    // Select sets the setting to the image's link and closes the popup
+    HtmlArg pick[3] = {num(-2), str("https://example.com/dot.png"), str("customGameOverlay")};
+    image_collection_handle("selectImage", NULL, pick, 3);
     CHECK(!strcmp(g_set_key, "customGameOverlay") && !strcmp(g_set_val, "https://example.com/dot.png") && g_closed, "pick sets the setting");
 
     // the built-in pick
     g_closed = 0;
-    HtmlArg pick0[2] = {num(0), num(-1)};
-    image_collection_handle("selectImage", NULL, pick0, 2);
+    HtmlArg pick0[3] = {num(0), str("null"), str("customGameOverlay")};
+    image_collection_handle("selectImage", NULL, pick0, 3);
     CHECK(!strcmp(g_set_val, "img/backgrounds/0.png") && g_closed, "built-in pick");
 
     // the list survives a reload from storage, and a removed entry is gone
     image_collection_reload();
     CHECK(image_collection_count() == 1, "reloaded from storage");
-    HtmlArg rm[1] = {num(0)};
-    image_collection_handle("removeImage", NULL, rm, 1);
+    HtmlArg rm[2] = {num(0), str("customGameOverlay")};
+    image_collection_handle("removeImage", NULL, rm, 2);
     image_collection_reload();
     CHECK(image_collection_count() == 0, "removed and saved");
 
-    // a hand-edited store with a bad row keeps only the good rows
+    // a hand-edited store: rows are kept as stored (v10 draws a bad link as an empty image), a non-row is left out
     html_storage_set("krk_custImgs", "[[\"ok\",\"https://e.com/a.jpg\",9],[\"\",\"https://e.com/b.jpg\",0],[\"x\",\"ftp://e.com/c.png\",0],5]");
     image_collection_reload();
-    CHECK(image_collection_count() == 1, "bad stored rows skipped");
+    CHECK(image_collection_count() == 3, "stored rows kept");
+    image_collection_handle("imagePopup", NULL, open, 1);
+    CHECK(strstr(g_popup, ">Custom<span class='imageListType'>Custom</span>") && strstr(g_popup, "src='' ") && strstr(g_popup, "selectImage(-2, &quot;null&quot;"), "a nameless row and a bad link");
 
     CHECK(image_collection_handle("openSocial", NULL, NULL, 0) == -1, "other names are not handled");
     if (!g_fail) printf("image_collection_test: OK\n");

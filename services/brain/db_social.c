@@ -8,6 +8,7 @@
 #include "db_procs.h"
 #include "knsvc/json.h"
 #include "ranked.h" /* RANKED_PLACEMENT_MATCHES: the profile's ranked row */
+#include "raids.h"  /* db_raid_stats: the profile's Raids tab (t.raidStats) */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -436,12 +437,14 @@ static kn_db_result *run_clan_discord(kn_dbconn *c, int n, const char *const *p)
 }
 const kn_proc P_CLAN_DISCORD = {"clan_discord", NULL, run_clan_discord};
 
-/* social page "clan" */
+/* social page "clan": the hub's clan page reads clan_link4, its Discord invite, which 0104's pg kn_clan_page lacks, so
+ * this C version runs on every driver (as clan_data does) */
 static kn_db_result *run_clan_page(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     cJSON *o = dbx_row(&x,
         SQL(.any = "SELECT c.clan_id, c.clan_name, c.clan_rank, c.clan_score,"
-                   " (SELECT username FROM accounts WHERE id = c.clan_playerid) AS creatorname"
+                   " (SELECT username FROM accounts WHERE id = c.clan_playerid) AS creatorname,"
+                   " c.clan_discord AS clan_link4"
                    " FROM clans c WHERE lower(c.clan_name) = lower($1)"),
         KN_DB_ARGS(nz(P(0))));
     if (o) {
@@ -457,7 +460,7 @@ static kn_db_result *run_clan_page(kn_dbconn *c, int n, const char *const *p) {
     }
     return dbx_json(&x, "kn_clan_page", o);
 }
-const kn_proc P_CLAN_PAGE = {"clan_page", "SELECT kn_clan_page($1)", run_clan_page};
+const kn_proc P_CLAN_PAGE = {"clan_page", NULL, run_clan_page};
 
 /* ------------------------------------------------------------------ mail */
 
@@ -528,7 +531,10 @@ const kn_proc P_CHAT_THREAD = {
     "         WHERE pt.account_id = r.player_id), '[]'::jsonb)," \
     "     'ranked', (SELECT jsonb_build_object('season', rp.season, 'cr', rp.cr, 'matches', rp.wins + rp.losses + rp.draws)" \
     "         FROM ranked_profiles rp WHERE rp.account_id = r.player_id" \
-    "         ORDER BY rp.season DESC, (rp.wins + rp.losses + rp.draws >= " PROFILE_STR(RANKED_PLACEMENT_MATCHES) ") DESC, rp.cr DESC LIMIT 1))," \
+    "         ORDER BY rp.season DESC, (rp.wins + rp.losses + rp.draws >= " PROFILE_STR(RANKED_PLACEMENT_MATCHES) ") DESC, rp.cr DESC LIMIT 1)," \
+    "     'raidStats', coalesce((SELECT jsonb_agg(jsonb_build_object('map_id', rs.map_id, 'completions', rs.completions," \
+    "         'attempts', rs.attempts, 'best_time', rs.best_time, 'ai_kills', rs.ai_kills, 'boss_kills', rs.boss_kills," \
+    "         'deaths', rs.deaths) ORDER BY rs.map_id) FROM raid_stats rs WHERE rs.account_id = r.player_id), '[]'::jsonb))," \
     " 'games', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
     "     'map_id', m.map_id, 'map_name', kn_html(m.map_name), 'map_date', m.map_date, 'map_info', m.map_info::text," \
     "     'map_votes', m.map_votes, 'creatorname', r.player_name, 'map_image', m.map_image, 'map_player', m.map_plays)" \
@@ -586,6 +592,10 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
                    " cr DESC LIMIT 1"),
         KN_DB_ARGS(id));
     if (ranked) cJSON_AddItemToObject(row, "ranked", ranked);
+    /* the Raids tab's t.raidStats (hub-10.0.7.js:2903-2948): raid_stats by map, as the account's own (account_life.c) */
+    cJSON *raids = db_raid_stats(&x, cJSON_IsNumber(pid) ? (int64_t)pid->valuedouble : 0);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "raidStats");
+    cJSON_AddItemToObject(row, "raidStats", raids ? raids : cJSON_CreateArray());
     cJSON *games = dbx_rows(&x,
         SQL(.any = "SELECT m.map_id, {html:m.map_name} AS map_name, m.map_date, m.map_info AS map_info__t, m.map_votes,"
                    " $2 AS creatorname, m.map_image, m.map_plays AS map_player FROM published_maps m"

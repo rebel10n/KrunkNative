@@ -172,59 +172,6 @@
 	white-space: nowrap;
 }
 
-/* client/src/ui/image_collection.c: a URL setting's image collection */
-.kn-image-grid {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 10px;
-	margin-top: 14px;
-	max-height: 420px;
-	overflow-y: auto;
-}
-.kn-image-grid .imageListItem {
-	position: relative;
-	width: 150px;
-	height: 100px;
-	background-size: cover;
-	background-position: center;
-	border-radius: 6px;
-}
-.kn-image-name {
-	position: absolute;
-	left: 6px;
-	right: 6px;
-	bottom: 4px;
-	font-size: 14px;
-	color: #fff;
-	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-}
-.kn-image-empty {
-	color: rgba(255, 255, 255, 0.6);
-	font-size: 18px;
-	padding: 20px 0;
-}
-.kn-image-field {
-	margin-top: 8px;
-	font-size: 18px;
-	color: rgba(255, 255, 255, 0.75);
-}
-.kn-image-field .inputGrey2 {
-	display: block;
-	float: none; /* main.css floats .inputGrey2 right: a float adds no height, so the field below overlapped it */
-	margin-left: 0;
-	width: 100%;
-	margin-top: 4px;
-	box-sizing: border-box;
-}
-.kn-image-actions {
-	display: flex;
-	gap: 10px;
-	margin-top: 14px;
-}
-
 /* Prize wheel "+ More": every item the wheel can roll (store_ui.c show_more_items; Krunker v10.0.7's
    showMoreItems modal). Box Office's own layout: one section per rarity or pool, a grid of icons. */
 .knMoreItems { display: flex; flex-direction: column; width: 100%; height: 100%; }

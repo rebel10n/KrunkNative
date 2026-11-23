@@ -120,7 +120,7 @@ extern const kn_proc P_POST_FULL, P_FEED, P_CLAN_CREATE, P_CLAN_REQUEST, P_CLAN_
 int db_map_snapshot(Dbx *x, const char *map_id);
 
 /* ---- the v10 Social hub (db_social_v10.c): POST /social/post, giveaway draws */
-extern const kn_proc P_POST_CREATE_V10, P_GIVEAWAY_SETTLE;
+extern const kn_proc P_POST_CREATE_V10, P_GIVEAWAY_SETTLE, P_MATCH_END_SAVE, P_SHARE_MATCH;
 
 /* ---- the K.P.D distress calls of the in-game player list (db_kpd.c, migrations 0209, 0346) */
 extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS, P_KPD_APPLY, P_KPD_APPS, P_KPD_OFFICER,

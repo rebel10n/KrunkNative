@@ -50,7 +50,7 @@ def check(name, ok, detail=""):
 
 
 def cfgdb():
-    with open("config/config.json") as f:
+    with open(os.environ.get("KN_TEST_CONFIG") or "config/config.json") as f:
         return json.load(f)["database"]
 
 
@@ -173,7 +173,9 @@ def main():
         json.dump({"database": cfgdb()}, f)
     subprocess.run(["sudo", "-n", "-u", "postgres", "createdb", "-O", cfgdb().get("user", "krunknative"), DB], check=True)
     try:
-        subprocess.run([f"{BUILD}/services/common/kn_migrate", "--set", f"database.name={DB}"], check=True,
+        # this checkout's migrations, not the config's tree (a worktree run against the main tree's config)
+        subprocess.run([f"{BUILD}/services/common/kn_migrate", "--set", f"database.name={DB}",
+                        "--set", "database.migrations_dir=" + os.path.abspath("services/db/migrations")], check=True,
                        stdout=open(os.path.join(WORK, "migrate.log"), "w"), stderr=subprocess.STDOUT)
         procs.append(subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--set", f"database.name={DB}", "--set", f"brain.port={BRAIN_PORT}",
                                        "--set", "brain.region=local"], stdout=open(os.path.join(WORK, "brain.log"), "w"),
@@ -320,6 +322,16 @@ def linked():
     match = psql(f"SELECT match_id FROM match_results WHERE account_id = {alice_id} AND match_id NOT LIKE '%#c%' LIMIT 1")
     check("L: nothing saved for the guests (one row in the round)",
           psql(f"SELECT count(*) FROM match_results WHERE match_id = '{match}'") == "1", match)
+    # the final commit's end table (v10's endData.ed, deob-10.0.7.js:195285-195292), kept for Share Match Results:
+    # every player of the round (the guests too), [name] and endForm's reward, endStats (6) values each
+    ed_text = wait_for(lambda: psql(f"SELECT ed FROM match_ends WHERE match_id = '{match}'"), 10)
+    ed = json.loads(ed_text) if ed_text else []
+    names = [ed[i + 1] for i in range(0, len(ed) - 5, 6)] if len(ed) % 6 == 0 else []
+    mine = ed[names.index([alice]) * 6:names.index([alice]) * 6 + 6] if [alice] in names else []
+    check("L: the round's end table is kept (match_ends) with every player", len(names) == 4, str(ed)[:400])
+    check("L: alice's row: [name], score 500, endForm's reward markup",
+          len(mine) == 6 and mine[2] >= 500 and str(mine[5]).startswith("<span style='color:#F8C55C'>+") and str(mine[5]).endswith("</span> KR"),
+          str(mine))
     check("L: the claimed account got no stats and no KR",
           psql(f"SELECT count(*) FROM match_results WHERE account_id = {victim_id}") == "0" and funds(victim_id) == victim_funds)
     check("L: no account created for a guest", int(psql("SELECT count(*) FROM accounts")) == accounts_before)

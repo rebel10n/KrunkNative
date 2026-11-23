@@ -446,3 +446,161 @@ Still different:
   They could share `ui_loadout_tag_color`.
 - Nothing in KN posts a game result (typ 8). The hub draws one when the feed holds it.
 
+## Hub round 8, 2026-11-23
+
+The sources are the same as in round 7: hub-10.0.7.js, config-10.0.7.js and classes-10.0.7.js. The game bundle
+is now on disk too, as deob-10.0.7.js (`~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js`).
+
+### Limited-tag colours: round 7's list was wrong
+
+Round 7 said nine UIs and triggers.c keep their own limited-tag colour tables. They do not: none of them draws a
+limited tag (store_ui.c's colours are the KR packs' sale tags). The tag-coloured views, ui_loadout.c and the hub
+(social_ui.c), already share `ui_loadout_tag_name` / `_color`, Battle Pass `#00BCD4` and Premium Spin `#fc038d`
+included. v10_menu.c has no table either, so it is unchanged.
+
+The real gap was the svelte item views. v10 draws a `limT` badge there in a fixed `#41c300`, not in the
+tag's own colour.
+- **v10_junkyard.c `item_view`** (deob-10.0.7.js:106727-106746) now does what v10 does. It picks the first
+  that applies:
+  - Black Market;
+  - the `limT` name in `#41c300`;
+  - Vaulted, for an item from another season, or a limited, noSpin item that is not in the Item Shop;
+  - Limited, for a limited or blocked item.
+- **Still open: v10_market.c.** Its item view draws the same badge without the `limT` branch (its line 3160). Its
+  category filter keeps its own copy of the tag names (line 576), which is complete. That file belongs to another
+  agent, so it is not changed here.
+
+### Game-result posts (typ 8)
+
+**When v10 posts one.** v10 never posts a typ 8 on its own. The end screen's table has a Share button
+(deob-10.0.7.js:226776). Custom games have no such button. The button's popup takes a note and sends
+`SHARE_MATCH_RESULT` = `["smr", note]` (deob-10.0.7.js:227055-227064). Krunker's server, which is not
+shipped, then posts a MatchResult (typ 8, deob-10.0.7.js:26213).
+- The post belongs to the player who shared.
+- The hub draws `lnk` as the mode, `lnk2` as the end table's flat rows, and `txt` as the note
+  (hub-10.0.7.js:4913-4936).
+
+**How Box Office does it.**
+- **Game server** (server/src/accounts.c). The final commit (`acc_commit`, final) now carries `ed`. This is
+  v10's `endData.ed` (deob-10.0.7.js:195285-195292):
+  - one value per `endStats` column (the mode's, or config's default `sid, name, score, kills, deaths,
+    reward`) for each player, in the end order;
+  - `name` is `[name]`;
+  - the other columns go through `endForm` (deob-10.0.7.js:18315-18353). For example, reward is
+    `<span style='color:#F8C55C'>+N</span> KR` or `NONE`, and time is the timer or `DNF`.
+- **Brain.** `internal_ws.c handle_commit` saves a final, non-custom commit's `ed` with its mode in the new
+  `match_ends` table (migration 0396, all three drivers), once per match (`P_MATCH_END_SAVE`).
+- **The post.** `smr` (`sh_share_match` → `P_SHARE_MATCH`, db_social_v10.c) posts the sharer's latest
+  finished match whose table was kept in the last 30 minutes, as `type 8, link = mode, link2 = ed, body =
+  note`. The hub's post rules apply: level 10, the post length, and the `spost` rate limit. With no such
+  match, nothing is posted, because v10's client expects no reply.
+
+**Tests.**
+- online_mode_e2e checks that a match's commit leaves its `ed` in `match_ends`. It now opens the config named
+  by `KN_TEST_CONFIG` and migrates the worktree's own migrations.
+- hub_creator_e2e checks `share_match` end to end: the post's table, ranks, reward markup and note in the feed.
+
+### Re-compare of the sections round 7 skipped
+
+Each of these was compared line by line against hub-10.0.7.js, and every gap found was ported.
+
+- **Games / Mods lists** (hub:6100-6560).
+  - The category tiles call `windows[0].switchTab(7)` only. That opens the hidden New & Popular list, as v10's
+    bug does.
+  - The Editor / Sandbox tabs are gone.
+  - Tab 0 groups the cards by category: maps after the shuffle, and mods too.
+  - Load More shows on every paged tab.
+  - The thumbnails use `inf` (maps) and `minf` / `inf` / `mod_info` (mods).
+  - Live player counts come from the coordinator's game list (`updatePlayers`, :6107-6131).
+  - The featured cards use v10's `fetMapVids` / `fetModVids` (a video link, or "Missing Preview").
+  - The ~Revenue box and the season leader buttons are removed.
+  - Share copies `origin/?play=` or `?mod=`.
+  - `hostMap` hands the map to the menu through storage `mapToLoad`: the game page opens Host Game with it
+    (`app_mode.c` → `ui_host_map_select`).
+  - Tweet uses v10's text.
+- **Map page** (hub:3150-3200, 5988-6029). The Servers tab lists the map's custom games from `/mm/game-list`
+  (`fetchGameList`). Starred games come first, then games by player count. The list shows region and
+  players, or "No active servers", and `#totalOnline` shows the total. The Versions tab is kept (see below).
+- **Clan page.** The Clan Discord button needs `clan_link4`, which kn_brain's `clan_page` did not send. It
+  is now the clan's `clan_discord`, from a C query that runs on every driver (0104's pg `kn_clan_page` lacks
+  it).
+- **Profile header and tabs** (hub:2760-2960).
+  - `#socialFlag` is `flag-icon flag-icon-<code>`.
+  - The presence dot has no title.
+  - The creator badge has v10's markup.
+  - The six stat tabs are General / Killstreaks / Other / Class Stats / Raids / Match History, replacing
+    KN's Season tab:
+    - Class Stats skips hidden classes.
+    - Raids sums `t.raidStats` and has a card per raid map. kn_brain's profile now sends `raidStats` from
+      `raid_stats`, in both the C and pg queries, and GET /players sends `raid_stats`.
+    - Match History has v10's svelte-1irqx9a list, with an entry's scoreboard and sorting.
+  - `creator_has` matches a creator exactly.
+  - `?autoReport`, `?autoGift` and `?autoTrade` behave as v10's.
+  - The sales total is comma-separated.
+  - The login's page updates run when the page was drawn signed out (hub:2173-2216). They cover:
+    - the staff's chat-ban fetch and `grp`;
+    - the Trade button (`tradeMinLvl` on both sides) and `?autoTrade`;
+    - Follow;
+    - `?autoGift` and `?openPubMo`;
+    - the `.canX` staff gates.
+- **Trading and viewOffer** (hub:2640-2720, 4960-5120).
+  - An offer row skips free items, shows KR with `format_num`, and adds painted copies.
+  - A removed offer updates its column's count, or shows "None".
+  - Trade items have the right-click `openSales` and the tooltip. removeItem cancels the tooltip.
+  - searchItems uses v10's whole predicate.
+  - showMissing only hides shared items.
+  - viewOffer draws KR as an `oCurrencyLine` before Est. Value.
+  - confOffer's NO refreshes the popup.
+  - shareProfile has no popup.
+- **Chat and friends** (hub:2200-2340, 5280-5350, 6930).
+  - The Friends tooltip reads "view friends list".
+  - The friends list is kept only when an answer has rows. removeFriend splices it.
+  - A chat line's `tim` is an age.
+  - A message is appended only while `#chatBox` shows that chat, under startChat's name.
+  - `openURL(url, self)` honours `_self`.
+  - `instaFollo` spends its button (`follBtnGivD` / `disFolB`).
+  - The logout clears the list.
+  - follow counts use `format_num`, and the labels go through i18n.
+- **Settings popup** (hub:1754-1984).
+  - The names are i18n keys (`settings.social.region` ... `settings.social.bg`).
+  - "Manage Ad Preferences" is the last row. `openOneTrust` does nothing without OneTrust.
+  - URL values are no longer cut at 64 / 256 bytes.
+  - The background takes `isURL` (config-10.0.7.js:4102-4108, run by hand in `image_collection_is_url`), plus
+    the page's own `img/` paths. That way the built-in background, `img/backgrounds/0.png`, now applies:
+    before, the http(s)-only check refused it.
+- **Image collection** (hub:6335-6440; the game's own copy is deob-10.0.7.js:214688-214775, with the same
+  markup). image_collection.c now draws v10's markup and wording on both the menu and the hub:
+  - Image Collection / Add Image;
+  - Backgrounds / Overlays / Scopes / Reticles / Icons;
+  - Select / Delete tiles marked Custom / Default;
+  - the built-in "Midnight Snow";
+  - the New Image form.
+
+  The behaviour also matches v10:
+  - The handlers carry the setting's key. Select gets the URL.
+  - After an add or a delete, tab 0 is shown.
+  - Errors use the response popup: Something Went Wrong / Invalid Name / Invalid Image.
+  - The extension test is case-sensitive, and the URL must pass isURL.
+  - Stored rows are kept as stored. A bad link draws an empty image.
+
+  The KN-only `.kn-image-*` CSS is removed. The uidiff baselines `kn-image-collection[-new]` were re-rendered
+  inside the popups' boxes (tools/uidiff/README.md).
+
+**Tests.**
+- hub_creator_e2e has new checks for: the six stat tabs and the Raids sums; Match History's empty text; the
+  settings rows and Manage Ad Preferences; the image collection (empty Add, a new image, Select on Midnight
+  Snow); and the clan page's Discord link.
+- image_collection_test covers isURL, the v10 markup, the error popups, and stored rows.
+
+**Kept on purpose (KN additions).**
+- The map page's Versions tab (aaf774e7, with its own e2e).
+- The developer-only creator button.
+- The native `clear:both` divs.
+
+**Still open.**
+- **Match History has no data.** No server sends `matchHistory`, so the tab shows "No match history
+  available." Recording it needs work in ranked.c, and ranked_ui.c belongs to another agent.
+- **v10_market.c's `limT` badge** (another agent's file).
+- **The profile's `sm`.** It reads "In game", not v10's "playing <map>".
+- **The gift popup's prefill.** v10 prefills "I like your <map> mod/map" from a creation's Gift. Not ported.
+- **createTip's vertical position** on trade items is not checked against v10.

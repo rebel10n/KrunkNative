@@ -417,10 +417,26 @@ static void item_view(const int index) {
                animate ? " rainbow" : "", col, img, animate ? " rainbow" : "", dark ? " dark" : "", col);
     sb_append_esc(&sb, s->name && s->name[0] ? s->name : "Unnamed Item");
     sb_appendf(&sb, "</div> <!----> <div class=\"item-description svelte-2tp35a\">%s</div> ", item_type(s));
+    // the badge (deob-10.0.7.js:106727-106746): Black Market; a limT's name in #41c300 (not store.tags' colour);
+    // Vaulted (not a paint: another season, or limited + noSpin outside the Item Shop); Limited (limited or blocked)
     const int seas = s->seas ? s->seas : 1;
-    if (econ_black_market_find(index)) sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #00ffff;\">Black Market</div>");
-    else if (s->type != 18 && seas != g_viewer_current_season) sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #666666;\">Vaulted</div>");
-    else if (s->flags & VS_BLOCKED) sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #faa332;\">Limited</div>");
+    const cJSON *sj = ui_loadout_skin_json(index);
+    const cJSON *lim_t = cJSON_GetObjectItemCaseSensitive(sj, "limT");
+    const int limited = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sj, "limited")),
+              no_spin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sj, "noSpin"));
+    const cJSON *item_shop = cJSON_GetObjectItemCaseSensitive(sj, "itemShop");
+    const int in_shop = item_shop && !cJSON_IsNull(item_shop) && !cJSON_IsFalse(item_shop) && !(cJSON_IsNumber(item_shop) && item_shop->valuedouble == 0);
+    if (econ_black_market_find(index)) {
+        sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #00ffff;\">Black Market</div>");
+    } else if (cJSON_IsString(lim_t) && lim_t->valuestring[0]) {
+        sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #41c300;\">");
+        sb_append_esc(&sb, lim_t->valuestring);
+        sb_append(&sb, "</div>");
+    } else if (s->type != 18 && (seas != g_viewer_current_season || (limited && no_spin && !in_shop))) {
+        sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #666666;\">Vaulted</div>");
+    } else if (limited || (s->flags & VS_BLOCKED)) {
+        sb_append(&sb, "<div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #faa332;\">Limited</div>");
+    }
     else sb_append(&sb, "<!---->");
     sb_appendf(&sb, "</div> <div class=\"item-showcase-btns svelte-2tp35a\"><button class=\"more-info-btn svelte-2tp35a\" onclick=\"openSales(%d)\">More info</button> "
                     "<button class=\"share-btn svelte-1524ito\" type=\"button\" title=\"Copy link\" id=\"v10jyShareBtn\" onclick=\"v10jy.share(%d)\"><i class=\"material-icons svelte-1524ito\">share</i> "

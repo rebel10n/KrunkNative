@@ -62,6 +62,7 @@ typedef struct {
     int returning;              // back to the game page, waiting for it to be ready
     int started;                // app_mode_start ran (web: later switches navigate)
     int test_pending;           // app_test_map: host knTestMap once the game page is back
+    int host_pending;           // the hub's hostMap: look for mapToLoad once the game page is up
     AppMode test_return;
     int callbacks_swapped;
     GLFWframebuffersizefun prev_resize;
@@ -175,6 +176,7 @@ void app_mode_navigate_self(Client *client, const char *query) {
     const AppMode self = g_start_mode_fwd();
     if (self == APP_MODE_GAME) {
         if (query && strstr(query, "testMap=1")) g_app.test_pending = 1;
+        g_app.host_pending = 1;   // the hub's hostMap opens "/" with mapToLoad saved
         servers_ui_query(query); // ?play=<map> / ?game=<id> (hub Play / Join links; brain, backend_ui.h)
         mods_ui_query(query);    // ?mod=<name> (the hub's Play Mod)
         download_ui_query(query); // ?download: the Download window (the hub's app badges)
@@ -222,6 +224,17 @@ static void test_map_host(Client *client) {
     fprintf(stderr, "[app] test map: this build cannot host custom maps offline yet (LOCAL_GAME_HAVE_HOST_CUSTOM)\n");
 #endif
     cJSON_Delete(map);
+}
+
+// The hub's hostMap(name) (hub-10.0.7.js:5809-5812) saves mapToLoad and opens "/"; the game takes it once, deletes it and
+// shows the Host Game window on that map (selectHostMap, deob-10.0.7.js:229320-229322; v10 does it on the game
+// socket's connect, KrunkNative once the game page is up).
+static void map_to_load(void) {
+    g_app.host_pending = 0;
+    char name[256];
+    if (html_storage_get("mapToLoad", name, sizeof(name)) <= 0) return;
+    html_storage_set("mapToLoad", NULL);
+    if (name[0]) ui_host_map_select(name, "");
 }
 
 void app_test_map(Client *client, cJSON *map, const AppMode return_to) {
@@ -425,6 +438,7 @@ void app_mode_start(Client *client) {
     if (g_start_mode != APP_MODE_GAME) app_set_mode(client, g_start_mode, g_start_query);
     // index.html?offline=1&testMap=1 / --game "testMap=1": the editor's Test Map in a new game window
     if (g_start_mode == APP_MODE_GAME && strstr(g_start_query, "testMap=1")) g_app.test_pending = 1;
+    if (g_start_mode == APP_MODE_GAME) g_app.host_pending = 1;
     if (g_start_mode == APP_MODE_GAME) servers_ui_query(g_start_query); // ?play= / ?game= (backend_ui.h)
     if (g_start_mode == APP_MODE_GAME) mods_ui_query(g_start_query);    // ?mod= (mods_ui.c)
     if (g_start_mode == APP_MODE_GAME) download_ui_query(g_start_query); // ?download (download_ui.h)
@@ -598,6 +612,7 @@ int app_mode_frame(Client *client, const float now, const float delta) {
     if (g_app.mode == APP_MODE_GAME) {
         if (!g_app.returning) {
             if (g_app.test_pending && html_ui_is_ready()) test_map_host(client);
+            if (g_app.host_pending && html_ui_is_ready()) map_to_load();
             return 0;
         }
         if (!html_ui_is_ready()) {

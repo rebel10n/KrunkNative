@@ -126,3 +126,65 @@ static kn_db_result *run_giveaway_settle(kn_dbconn *c, int n, const char *const 
     return dbx_json(&x, "giveaway_settle", o);
 }
 const kn_proc P_GIVEAWAY_SETTLE = {"giveaway_settle", NULL, run_giveaway_settle};
+
+/* (match_id, mode, ed) -> {saved}: a finished match's end table (v10's endData.ed, the game server's final commit:
+ * internal_ws.c handle_commit), once per match (0396_match_ends) */
+static kn_db_result *run_match_end_save(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    if (!P(0) || !*P(0) || !P(2)) return dbx_finish(&x, kn_db_result_user_error("match end: no match"));
+    const int64_t saved = dbx_exec(&x, SQL(.any = "{insert_ignore} INTO match_ends (match_id, mode, ed) VALUES ($1, {int:$2}, $3) {ignore_conflicts}"),
+                                   KN_DB_ARGS(P(0), I64S(PI(1)), P(2)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "saved", (double) (saved > 0));
+    return dbx_json(&x, "match_end_save", o);
+}
+const kn_proc P_MATCH_END_SAVE = {"match_end_save", NULL, run_match_end_save};
+
+/* (me, note, post_max_len, posts_per_hour) -> {post_id}: SHARE_MATCH_RESULT (deob-10.0.7.js:227055-227064). v10's
+ * server is not shipped; what its post holds is the hub's reading of a MatchResult (typ 8, deob-10.0.7.js:26213,
+ * hub-10.0.7.js:4913-4936, 107010-107050): lnk the mode index, lnk2 the end table's flat rows, txt the note. The match
+ * is the sharer's latest finished one (its end table kept in the last 30 minutes: the share is the end screen's);
+ * none (a custom game, whose end table has no share button in v10, deob-10.0.7.js:226776) is SOCIAL_CREATE_FAILED.
+ * The hub's post rules apply: level 10 and posts_per_hour. */
+static kn_db_result *run_share_match(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t me = PI(0), max_len = PI(2) > 0 ? PI(2) : 1024;
+    const int64_t score = dbx_int(&x, SQL(.any = "SELECT player_score FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(me)), -1);
+    if (score < 0) return dbx_finish(&x, kn_db_result_user_error("SOCIAL_CREATE_FAILED"));
+    if (db_level(score, 0.03) < 10) return dbx_finish(&x, kn_db_result_user_error("SOCIAL_LEVEL_TOO_LOW"));
+    const int64_t recent = dbx_int(&x, SQL(.pg = "SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > now() - interval '1 hour'",
+                                           .any = "SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > {ago:3600}"),
+                                   KN_DB_ARGS(I64S(me)), 0);
+    if (PI(3) > 0 && recent >= PI(3)) return dbx_finish(&x, kn_db_result_user_error("SOCIAL_RATE_LIMITED"));
+    cJSON *m = dbx_row(&x, SQL(.any = "SELECT e.mode, e.ed FROM match_results r JOIN match_ends e ON e.match_id = r.match_id"
+                                      " WHERE r.account_id = $1 AND e.ended_at > {ago:1800} ORDER BY e.ended_at DESC LIMIT 1"),
+                       KN_DB_ARGS(I64S(me)));
+    if (!m) return dbx_finish(&x, kn_db_result_user_error("SOCIAL_CREATE_FAILED"));
+    char mode[24]; /* the column's type varies by driver: a number or its text */
+    const cJSON *mv = cJSON_GetObjectItem(m, "mode");
+    snprintf(mode, sizeof mode, "%lld", cJSON_IsString(mv) ? strtoll(mv->valuestring, NULL, 10) : (long long) cJSON_GetNumberValue(mv));
+    const char *ed = cJSON_GetStringValue(cJSON_GetObjectItem(m, "ed"));
+    const char *text = P(1) ? P(1) : "";
+    size_t len = strlen(text);
+    if ((int64_t) len > max_len) {
+        len = (size_t) max_len;
+        while (len > 0 && ((unsigned char) text[len] & 0xC0) == 0x80) len--;
+    }
+    char *body = malloc(len + 1);
+    if (!body) {
+        cJSON_Delete(m);
+        return dbx_finish(&x, kn_db_result_user_error("SOCIAL_CREATE_FAILED"));
+    }
+    memcpy(body, text, len);
+    body[len] = 0;
+    const int64_t id = dbx_insert_id(&x, SQL(.pg = "INSERT INTO feed_posts (author_id, body, type, link, link2) VALUES ($1, $2, 8, $3, $4) RETURNING id",
+                                             .sqlite = "INSERT INTO feed_posts (author_id, body, type, link, link2) VALUES ($1, $2, 8, $3, $4) RETURNING id",
+                                             .mysql = "INSERT INTO feed_posts (author_id, body, type, link, link2) VALUES ($1, $2, 8, $3, $4)"),
+                                     KN_DB_ARGS(I64S(me), body, mode, ed ? ed : "[]"));
+    free(body);
+    cJSON_Delete(m);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "post_id", (double) id);
+    return dbx_json(&x, "share_match", o);
+}
+const kn_proc P_SHARE_MATCH = {"share_match", NULL, run_share_match};

@@ -388,9 +388,11 @@ static void social_create(SocialSession *s, const GapiReq *r) {
 }
 
 /* ["smr", note]: v10's SHARE_MATCH_RESULT from the end table's share popup (deob-10.0.7.js:227055-227064). The
- * client expects no reply (it closes its popups at once). Krunker's server side is not shipped; Box Office's reading
- * posts the share to the player's feed as an ordinary post, under the post rules above (level 10, the length cap,
- * the "spost" rate limit). An empty note posts Box Office's own line. */
+ * client expects no reply (it closes its popups at once). Krunker's server side is not shipped; its post is a
+ * MatchResult (typ 8, deob-10.0.7.js:26213), which the hub draws as the mode's endStats table over lnk2's rows
+ * (hub-10.0.7.js:4913-4936, deob-10.0.7.js:107010-107050) with the note under it. Box Office posts the sharer's latest
+ * finished match: its end table is the one the game server's final commit carried (social_match_end_save,
+ * db_social_v10.c run_share_match), under the post rules above (level 10, the "spost" rate limit). */
 static void share_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) s;
     (void) extra;
@@ -403,10 +405,26 @@ void sh_share_match(SocialSession *s, const cJSON *f) {
     const char *note = cJSON_IsString(n) ? n->valuestring : "";
     while (*note == ' ' || *note == '\n' || *note == '\t') note++;
     char me[24], max[24];
-    social_call(s, &P_POST_CREATE_V10,
-                KN_DB_ARGS(social_viewer(s, me), "0", *note ? note : "Just finished a match on Box Office", "0",
-                           acct_itoa(max, g_acct.post_max_len > 0 ? g_acct.post_max_len : 1024), "20", "24"),
+    social_call(s, &P_SHARE_MATCH, KN_DB_ARGS(social_viewer(s, me), note, acct_itoa(max, g_acct.post_max_len > 0 ? g_acct.post_max_len : 1024), "20"),
                 share_done, NULL);
+}
+
+/* the game server's final commit (internal_ws.c handle_commit): its "ed", v10's endData.ed (server/src/accounts.c
+ * acc_end_table), kept per match for Share Match Results. A custom game's is not: v10 draws no share button there
+ * (deob-10.0.7.js:226776). */
+static void match_end_saved(kn_db_result *res, void *ud) {
+    (void) ud;
+    if (!kn_db_ok(res)) KN_INFO("social", "match end not kept: %s", acct_db_error(res, "match end"));
+}
+
+void social_match_end_save(Brain *b, const char *match_key, const cJSON *frame) {
+    const cJSON *ed = cJSON_GetObjectItemCaseSensitive(frame, "ed");
+    if (!b || !b->db || !cJSON_IsArray(ed) || !cJSON_GetArraySize(ed) || kn_json_bool(frame, "custom", 0)) return;
+    char *text = cJSON_PrintUnformatted(ed);
+    char mode[24];
+    snprintf(mode, sizeof mode, "%lld", (long long) kn_json_int(frame, "mode", 0));
+    if (text) kn_db_call(b->db, &P_MATCH_END_SAVE, KN_DB_ARGS(match_key, mode, text), match_end_saved, NULL);
+    free(text);
 }
 
 /* the vote's reply {value}: the value the viewer now has (1 liked, 0 not) */
@@ -629,7 +647,9 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_AddItemToObject(row, "maps", maps);
     cJSON_AddItemToObject(row, "mods", mods);
     cJSON_AddItemToObject(row, "assets", take(obj, "assets"));
-    cJSON_AddItemToObject(row, "raid_stats", cJSON_CreateArray()); /* Box Office records no raids */
+    cJSON *raids = cJSON_DetachItemFromObjectCaseSensitive(row, "raidStats"); /* raid_stats (P_PROFILE's raidStats) */
+    cJSON_AddItemToObject(row, "raid_stats", cJSON_IsArray(raids) ? raids : cJSON_CreateArray());
+    if (!cJSON_IsArray(raids)) cJSON_Delete(raids);
     cJSON_AddItemToObject(row, "match_history", cJSON_CreateArray());
     /* player_badge: the earned badge indices (player_badges) as v10's "1,5,9" (deob-10.0.3.js:125762) */
     cJSON *badges = cJSON_DetachItemFromObjectCaseSensitive(row, "badges"), *b;

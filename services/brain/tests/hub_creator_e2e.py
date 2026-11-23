@@ -53,6 +53,7 @@ from kn_proto import free_ports  # noqa: E402
 FAILS = []
 WORK = tempfile.mkdtemp(prefix="kn-hub-creator.", dir=os.path.expanduser("~/.cache"))
 DB = os.path.join(WORK, "coordinator.db")
+SECRET = "hubc-e2e-%d" % os.getpid()  # the brain's internal_secret: the game server side of /mm/internal/ws
 PREFAB_LEADERBOARD = 72
 # the platform file dialog (ed_pick_file runs zenity): a stand-in that prints the path in PICK, the file "picked"
 PICK_BIN = os.path.join(WORK, "bin")
@@ -352,6 +353,10 @@ def staff_profile(port, ids, tokens, names):
     q("UPDATE players SET player_stats = json_set(player_stats, '$.bdg', 29) WHERE player_id = ?", B)
     # season 9 (brain.ranked.season), placed (6 matches), 1000 + 100 * 3.5 = 1350: Gold 1 (rankedRank 7)
     q("INSERT INTO ranked_profiles (account_id, season, region, cr, wins, losses) VALUES (?, 9, 'na', '3.5', 4, 2)", B)
+    # the Raids tab's t.raidStats (raid_stats): Tortuga (18) 2 of 3 cleared
+    q("INSERT INTO raid_stats (account_id, map_id, completions, attempts, best_time, ai_kills, boss_kills, deaths) VALUES (?, 18, 2, 3, 95000, 40, 2, 5)", B)
+    # a clan with a Discord invite (the clan page's clan_link4)
+    q("INSERT INTO clans (clan_name, clan_playerid, clan_discord) VALUES ('KNR8', ?, 'knr8invite')", B)
     c = Client(port, names[0], tokens[0], "p=profile&q=" + names[1], "staff")
     try:
         # the Reports tab (canViewReports, hub-10.0.7.js:2173-2175, 4176-4193)
@@ -370,7 +375,10 @@ def staff_profile(port, ids, tokens, names):
         check(wait(lambda: not q("SELECT 1 FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", B)),
               "Chat Unban revoked it")
         badges(c)
+        profile_stat_tabs(c)
+        settings_popup(c)
         premium_gift(c, names)
+        clan_page(c)
     finally:
         c.close()
         q("UPDATE players SET player_developer = 0 WHERE player_id = ?", A)
@@ -395,6 +403,49 @@ def badges(c):
     c.shot("badges")
     c.cmd("move 5 5")
     check(wait(lambda: c.count(".tooltip") == 0, 5), "cancelTip on mouseout removes it")
+
+
+def profile_stat_tabs(c):
+    """v10's six stat tabs (hub-10.0.7.js:2840-2850): Raids from t.raidStats (:2903-2948), Match History (:2950)"""
+    check([c.textof("#statTab%d" % i) for i in range(6)] == ["General Stats", "Killstreaks", "Other Stats", "Class Stats", "Raids", "Match History"]
+          and c.count("#statTab6") == 0, "the stat tabs: v10's six, no Season tab")
+    c.ui("switchStat(4)")
+    raids = c.textof(".statTabB4") or ""
+    check("Totals2/3 (67%)" in raids and "AI Kills40" in raids and "Boss Kills2" in raids and "Deaths5" in raids and "Tortuga" in raids,
+          "the Raids tab sums the profile's raid_stats: %r" % raids[:160])
+    c.ui("switchStat(5)")
+    check(c.text_has("#matchHistoryContainer", "No match history available.", 5), "Match History: none recorded")
+    c.ui("switchStat(0)")
+
+
+def settings_popup(c):
+    """openSettings (hub-10.0.7.js:1947-1971) and the image collection (:6335-6440)"""
+    c.ui("clearPops();openSettings()")
+    check(c.text_has("#genericPop", "Manage Ad Preferences") and "Region Stats" in (c.textof("#genericPop") or "")
+          and "Background Image" in (c.textof("#genericPop") or ""), "the settings popup: v10's rows and Manage Ad Preferences")
+    c.ui("imagePopup('background')")
+    check(c.text_has("#genericPop", "Image Collection") and "Midnight Snow" in (c.textof("#genericPop") or "")
+          and "Reticles" in (c.textof("#genericPop") or ""), "imagePopup: v10's header, tabs and the built-in Midnight Snow")
+    c.ui("window.imageNewPopup('background')")
+    check(c.has("newCustName") and c.text_has("#genericPop", "New Image"), "Add Image: the New Image form")
+    c.ui("window.addNewImage('background')")
+    check(c.text_has("#genericPop", "Something Went Wrong"), "Add with nothing filled in: Something Went Wrong")
+    c.ui("window.imageNewPopup('background')")
+    c.type("newCustName", "Sky R8")
+    c.type("newCustImg", "https://example.com/sky.png")
+    c.ui("window.addNewImage('background')")
+    check(c.text_has("#genericPop", "Sky R8") and "Custom" in (c.textof("#genericPop") or ""), "the new image on tab 0, marked Custom")
+    c.ui("selectImage(0, null, 'background')")
+    check(c.has("slid_background") and wait(lambda: c.value("slid_background") == "img/backgrounds/0.png", 5),
+          "Select on Midnight Snow: the setting takes it and the settings open again: %r" % c.value("slid_background"))
+    c.ui("setSetting('background', '')")
+    c.ui("clearPops()")
+
+
+def clan_page(c):
+    """the clan page's Clan Discord button opens discord.gg/<clan_link4> (the clan's Discord invite)"""
+    c.ui("clearPops();openURL('/social.html?p=clan&q=KNR8', 1)")
+    check(wait(lambda: c.count(".clanBut[onclick*='discord.gg/knr8invite']") == 1, 30), "the clan page's Clan Discord carries clan_link4")
 
 
 def premium_gift(c, names):
@@ -438,12 +489,12 @@ def trade_history(port, ids, tokens, names):
         # the settings' image collection (hub-10.0.7.js:6335-6440; image_collection.c)
         c.ui("clearPops();imagePopup('customScope')")
         check(c.has("imagesTabLayout"), "imagePopup opens the image collection")
-        c.ui("imageNewPopup()")
-        check(c.has("newCustName"), "Add an image asks for a name and a link")
+        c.ui("window.imageNewPopup('customScope')")
+        check(c.has("newCustName"), "Add Image asks for a name, a category and a link")
         c.type("newCustName", "Blue Scope")
         c.type("newCustImg", "https://example.com/scope.png")
-        c.ui("addNewImage()")
-        check(c.text_has(".kn-image-grid", "Blue Scope", 10), "the new image is in the collection")
+        c.ui("window.addNewImage('customScope')")
+        check(c.text_has("#skinList", "Blue Scope", 10), "the new image is in the collection (tab 0, v10 shows after an add)")
         # the Inventory / My Sales stats (#invStats, hub-10.0.7.js:3308-3349)
         c.ui("clearPops();updateWindow('market','inventory',null,null,'store')")
         check(wait(lambda: re.match(r"^2 / \d+ ItemsEst\. Value [\d,]+ KR$", c.textof("#invStats") or ""), 15),
@@ -551,9 +602,8 @@ def market_cards(port, ids, tokens, names):
         check(c.count("#weaponInfo .minMax") == 2, "the high / low boxes")
     finally:
         c.close()
-    # feed posts: a game result (typ 8) and a KR giveaway (typ 9)
-    rows = json.dumps(["s1", names[0], 500, 10, 2, 30, "s2", "rival", 100, 3, 5, 10])
-    q("INSERT INTO feed_posts (author_id, body, type, link, link2) VALUES (?, 'gg', 8, '0', ?)", A, rows)
+    # feed posts: a game result (typ 8: the end table's Share Match Results) and a KR giveaway (typ 9)
+    asyncio.run(share_match(port, ids, tokens, names))
     q("INSERT INTO feed_posts (author_id, body, type, funds, ends_at) VALUES (?, 'free KR', 9, 500, "
       "strftime('%Y-%m-%d %H:%M:%f', 'now', '+2 hours'))", A)
     c = Client(port, names[0], tokens[0], "p=feed", "feed")
@@ -562,8 +612,11 @@ def market_cards(port, ids, tokens, names):
         check(c.count("#postGameRes tr") == 3 and c.count("#postGameRes th") == 6,
               "a header (Rank + the 5 endStats after sid) and a row per player: %d rows" % c.count("#postGameRes tr"))
         res = c.textof("#postGameRes") or ""
-        check(res.startswith("RankNameScoreKillsDeathsReward") and ("1.%s5001023" % names[0]) in res and "2.rival100351" in res,
-              "the ranks and values: %r" % res)
+        check(res.startswith("RankNameScoreKillsDeathsReward") and ("1.%s500102+30 KR" % names[0]) in res and "2.rival10035NONE" in res,
+              "the ranks and values (name the [name] cell, reward endForm's): %r" % res)
+        check(c.count("#postGameRes td span[style='color:#F8C55C']") == 1, "the reward's markup drawn, the +30 in #F8C55C")
+        check(c.count("#postGameRes td[style='color:#fff']") == 3, "the ranks and the sharer's own name in white")
+        check("gg wp" in (c.textof("#feedHolder") or c.textof("body") or ""), "the note under the table")
         check(c.textof(".krGivPost") == "500 KR", "the giveaway's KR: %r" % c.textof(".krGivPost"))
         feed = c.textof("#feedHolder") or c.textof("body") or ""
         check(re.search(r"ends in 1h 5\dm|ends in 2h ", feed) is not None, "its time is when it ends: %r" % feed[:300])
@@ -572,6 +625,45 @@ def market_cards(port, ids, tokens, names):
         c.shot("feed")
     finally:
         c.close()
+
+
+async def share_match(port, ids, tokens, names):
+    """Share Match Results (deob-10.0.7.js:226776, 227048-227064): the game server's final commit carries v10's
+    endData.ed (server/src/accounts.c acc_end_table); "smr" then posts the sharer's latest match as a MatchResult (typ 8):
+    lnk the mode, lnk2 the end table, txt the note"""
+    A = ids[0]
+    ed = [1, [names[0]], 500, 10, 2, "<span style='color:#F8C55C'>+30</span> KR", 2, ["rival"], 100, 3, 5, "NONE"]
+    node = await websockets.connect("ws://127.0.0.1:%d/mm/internal/ws" % port,
+                                    additional_headers={"Authorization": "Bearer " + SECRET})
+    try:
+        await node.send(json.dumps({"type": "hello", "nodeId": "HUBC", "region": "local", "publicHost": "127.0.0.1",
+                                    "publicPort": 1, "version": "test"}))
+        while json.loads(await asyncio.wait_for(node.recv(), 10)).get("type") != "welcome":
+            pass
+        base = {"type": "commit", "lobbyId": "hubc", "map": "Burg", "mode": 0, "final": True, "players": [
+            {"accountId": A, "name": names[0], "kills": 10, "deaths": 2, "score": 500, "games": 1, "kr": 30}]}
+        for rid, extra in ((1, {"matchId": "custom", "custom": True, "ed": [9, ["x"], 1, 1, 1, "NONE"]}),
+                           (2, {"matchId": "pub", "custom": False, "ed": ed})):
+            await node.send(json.dumps(dict(base, rid=rid, **extra)))
+            while True:
+                m = json.loads(await asyncio.wait_for(node.recv(), 15))
+                if m.get("type") == "commit-reply" and m.get("rid") == rid:
+                    break
+    finally:
+        await node.close()
+    check(wait(lambda: q("SELECT ed FROM match_ends WHERE match_id = 'hubc:pub'"), 10), "the final commit's end table is kept")
+    check(not q("SELECT 1 FROM match_ends WHERE match_id = 'hubc:custom'"), "a custom game's is not (no share button)")
+    s = await Sock(port).open()
+    try:
+        f = await s.call("a", "a", 1, [names[0], None, tokens[0]])
+        check(f and f[1] is None, "the sharer's socket signs in")
+        await s.ws.send(json.dumps(["smr", "  gg wp"]))
+        check(wait(lambda: q("SELECT 1 FROM feed_posts WHERE author_id = ? AND type = 8", A), 10), "smr posts a MatchResult (typ 8)")
+    finally:
+        await s.close()
+    row = q("SELECT body, link, link2 FROM feed_posts WHERE author_id = ? AND type = 8", A)
+    check(row and row[0][0] == "gg wp" and str(row[0][1]) == "0" and json.loads(row[0][2]) == ed,
+          "its txt the note, lnk the mode, lnk2 the end table: %r" % (row,))
 
 
 def png(w, h, pad=0):
@@ -802,7 +894,7 @@ def main():
     cfg = os.path.join(WORK, "brain.json")  # its own config: never the developer's config/config.json
     with open(cfg, "w") as f:
         json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
-                   "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "hubc-e2e-%d" % os.getpid(),
+                   "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": SECRET,
                              "ranked": {"season": 9}},
                    "uploads": {"dir": os.path.join(WORK, "uploads"), "mod_cooldown_ms": 0},
                    "accounts": {"signup_rewards": {"enabled": False}, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0,

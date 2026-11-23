@@ -145,6 +145,8 @@ int leaderboards_http_init(Brain *b);
 void turf_shutdown(Brain *b);
 /* internal WS "turf-kills" {mapId, records}: cb once (same callback shape as ranked_result) */
 void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
+/* a final commit's end table (v10's endData.ed) for Share Match Results (social_gapi.c, 0396_match_ends) */
+void social_match_end_save(Brain *b, const char *match_key, const cJSON *frame);
 
 /* ---- v10 community feed: /creators/events, /social/news (community.c) */
 int community_init(Brain *b);

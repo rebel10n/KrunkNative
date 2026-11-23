@@ -8,14 +8,14 @@
     {
       "name": "popup",
       "rect": [
-        511,
-        224,
-        257,
-        227
+        510,
+        269,
+        260,
+        153
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#genericPop.imageNewPop: name / tab / link fields and Save / Back (the fields stack: .inputGrey2's float cleared)"
+      "note": "#genericPop.imageNewPop: v10's New Image form (Name, Category, Image and Add)"
     }
   ]
 }

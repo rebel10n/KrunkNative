@@ -301,6 +301,26 @@ static void on_host_map_fetched(void *user, const cJSON *json, const char *error
     free(pick);
 }
 
+void ui_host_map_select(const char *name, const char *creator) {
+    if (!name || !*name) return;
+    if (!creator) creator = "";
+    const int index = community_catalogue_index(name, creator);
+    if (index >= 0) {
+        host_flow_open_map(index);
+        return;
+    }
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        menu_log("selectHostMap: %s (krunker.io) -> host flow", name);
+        host_flow_open_published(name, creator);
+        return;
+    }
+    HostPick *pick = calloc(1, sizeof(*pick));
+    if (!pick) return;
+    snprintf(pick->name, sizeof(pick->name), "%s", name);
+    snprintf(pick->creator, sizeof(pick->creator), "%s", creator);
+    community_fetch(pick->name, on_host_map_fetched, pick);
+}
+
 H(h_select_host_map) {
     UNUSED;
     const char *name = arg_str(ev, args, argc, 0, ""), *creator = arg_str(ev, args, argc, 3, "");
@@ -313,20 +333,7 @@ H(h_select_host_map) {
         rent_servers_ui_pick(e && e->name ? e->name : name, e ? "" : creator, e ? e->key : "", id);
         return 1;
     }
-    if (index >= 0) {
-        host_flow_open_map(index);
-        return 1;
-    }
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
-        menu_log("selectHostMap: %s (krunker.io) -> host flow", name);
-        host_flow_open_published(name, creator);
-        return 1;
-    }
-    HostPick *pick = calloc(1, sizeof(*pick));
-    if (!pick) return 1;
-    snprintf(pick->name, sizeof(pick->name), "%s", name);
-    snprintf(pick->creator, sizeof(pick->creator), "%s", creator);
-    community_fetch(pick->name, on_host_map_fetched, pick);
+    ui_host_map_select(name, creator);
     return 1;
 }
 

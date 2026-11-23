@@ -9,13 +9,13 @@
       "name": "popup",
       "rect": [
         342,
-        255,
-        594,
-        176
+        163,
+        596,
+        330
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#genericPop.imagePop: My Images, Add an image, the five tabs and the Backgrounds tiles (stored images through remoteImages, the built-in one)"
+      "note": "#genericPop.imagePop: v10's Image Collection header and Add Image, the five tabs and the Backgrounds tiles (stored images through remoteImages, Custom; the built-in Midnight Snow, Default)"
     }
   ]
 }

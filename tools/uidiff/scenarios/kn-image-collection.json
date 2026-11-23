@@ -34,5 +34,5 @@
       ]
     ]
   },
-  "note": "KN's image collection popup (image_collection.c: imagePopup from a URL setting's collections button, deob-10.0.7.js:214688-214775): the Backgrounds tab with three stored images (krk_custImgs, local thumbnails through remoteImages) and the built-in background; the Overlays entry is on another tab. Own markup, CSS (kn-alt.css) and wording. Reference: KN's own render."
+  "note": "The image collection popup (image_collection.c: imagePopup from a URL setting's collections button, deob-10.0.7.js:214718-214749): v10's markup and wording on main.css; the Backgrounds tab with three stored images (krk_custImgs, local thumbnails through remoteImages) and the built-in Midnight Snow; the Overlays entry is on another tab. The sandbox cannot open it without Krunker's JS. Reference: KN's own render."
 }
