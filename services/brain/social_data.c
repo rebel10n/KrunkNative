@@ -180,11 +180,25 @@ static void rows_done(SocialSession *s, kn_db_result *res, void *extra) {
  * (the bubbles: online first, a status dot, the unread count, startChat with the status text and game) and 5324-5343
  * (showFriends: premium mark and picture, verified mark, Join while in a game, Remove Friend). cht = unread from that
  * friend, st = online (any brain), sm = "playing <map>" and gid = the game id while the friend is in a game (game_presence),
- * sub = premium, plf = verified. */
+ * sub = premium, plf = verified.
+ * The same rows are the game page's FRIENDS_LIST_RESPONSE ["gfrnd", rows] (deob-10.0.7.js:98673, 225186-225194: sorted
+ * by st, windows[4].friendsLoaded), which v10's server pushes after the sign-in for the profile window's Friends tab
+ * (windows[4] tab 1, :219085-219101: st, sm, sub / fid's picture, plf, fna, gid). kn_brain pushes it after the sign-in
+ * (social_ws.c) and again to both sides when a follow makes or breaks a friendship (social_eb.c). */
 typedef struct ChatFriends {
-    SocialSession *s; /* held */
+    SocialSession *s; /* held; NULL: pushed to the account's sockets */
+    int64_t account;
+    char label[8];
     cJSON *rows;
 } ChatFriends;
+
+#define CHAT_FRIENDS_SQL                                                                                               \
+    "SELECT a.id, a.username, "                                                                                        \
+    "(SELECT count(*) FROM chat_messages m WHERE m.sender_id = a.id AND m.receiver_id = $1 AND m.read_at IS NULL), "   \
+    "coalesce(p.player_premium, 0), coalesce(p.player_featured, 0) "                                                   \
+    "FROM follows f1 JOIN follows f2 ON f2.follower_id = f1.followee_id AND f2.followee_id = f1.follower_id "         \
+    "JOIN accounts a ON a.id = f1.followee_id LEFT JOIN players p ON p.player_id = a.id "                              \
+    "WHERE f1.follower_id = $1 ORDER BY lower(a.username) LIMIT 200"
 
 static void chat_friends_online(void *ud, const int *online, size_t n) {
     ChatFriends *w = ud;
@@ -201,24 +215,24 @@ static void chat_friends_online(void *ud, const int *online, size_t n) {
             cJSON_AddStringToObject(r, "gid", game);
         }
     }
-    social_send_n(w->s, "chtb", 1, w->rows);
-    social_unhold(w->s);
+    if (w->s) {
+        social_send_n(w->s, w->label, 1, w->rows);
+        social_unhold(w->s);
+    } else {
+        cJSON *f = social_frame(w->label);
+        cJSON_AddItemToArray(f, w->rows);
+        social_push_account_ex(w->account, f, 1);
+    }
     free(w);
 }
 
-static void chat_friends_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) extra;
-    if (!kn_db_ok(res)) {
-        acct_db_error(res, "chtb");
-        social_send_n(s, "chtb", 1, cJSON_CreateArray());
-        return;
-    }
+/* the rows of the query, then their presence; w is consumed */
+static void chat_friends_rows(ChatFriends *w, kn_db_result *res) {
     const int n = kn_db_rows(res);
-    ChatFriends *w = calloc(1, sizeof *w);
     int64_t *ids = calloc(n > 0 ? (size_t) n : 1, sizeof *ids);
-    if (!w || !ids) {
+    if (!ids) {
+        if (w->s) social_unhold(w->s);
         free(w);
-        free(ids);
         return;
     }
     w->rows = cJSON_CreateArray();
@@ -232,23 +246,62 @@ static void chat_friends_done(SocialSession *s, kn_db_result *res, void *extra) 
         cJSON_AddNumberToObject(o, "plf", kn_db_get_int64(res, i, 4, 0) > 0);
         cJSON_AddItemToArray(w->rows, o);
     }
-    w->s = social_hold(s);
     social_online_lookup(ids, (size_t) n, chat_friends_online, w);
     free(ids);
 }
 
-void sh_chat_blobs(SocialSession *s, const cJSON *f) {
-    (void) f;
+static void chat_friends_done(SocialSession *s, kn_db_result *res, void *extra) {
+    const char *label = extra ? (const char *) extra : "chtb";
+    if (!kn_db_ok(res)) {
+        acct_db_error(res, label);
+        social_send_n(s, label, 1, cJSON_CreateArray());
+        return;
+    }
+    ChatFriends *w = calloc(1, sizeof *w);
+    if (!w) return;
+    snprintf(w->label, sizeof w->label, "%s", label);
+    w->s = social_hold(s);
+    chat_friends_rows(w, res);
+}
+
+static void chat_friends_query(SocialSession *s, const char *label) {
     if (s->account_id <= 0) return;
     char me[24];
-    social_query(s,
-                 SQL(.any = "SELECT a.id, a.username, "
-                            "(SELECT count(*) FROM chat_messages m WHERE m.sender_id = a.id AND m.receiver_id = $1 AND m.read_at IS NULL), "
-                            "coalesce(p.player_premium, 0), coalesce(p.player_featured, 0) "
-                            "FROM follows f1 JOIN follows f2 ON f2.follower_id = f1.followee_id AND f2.followee_id = f1.follower_id "
-                            "JOIN accounts a ON a.id = f1.followee_id LEFT JOIN players p ON p.player_id = a.id "
-                            "WHERE f1.follower_id = $1 ORDER BY lower(a.username) LIMIT 200"),
-                 KN_DB_ARGS(me_str(s, me)), chat_friends_done, NULL);
+    char *l = strdup(label);
+    if (!l) return;
+    social_query(s, SQL(.any = CHAT_FRIENDS_SQL), KN_DB_ARGS(me_str(s, me)), chat_friends_done, l);
+}
+
+void sh_chat_blobs(SocialSession *s, const cJSON *f) {
+    (void) f;
+    chat_friends_query(s, "chtb");
+}
+
+/* ["gfrnd", rows] after the sign-in (JSON clients: the v3.1.1 page has no such label) */
+void social_push_friends(SocialSession *s) {
+    if (s->json) chat_friends_query(s, "gfrnd");
+}
+
+static void friends_account_done(kn_db_result *res, void *ud) {
+    ChatFriends *w = ud;
+    if (!kn_db_ok(res)) {
+        acct_db_error(res, "gfrnd");
+        free(w);
+        return;
+    }
+    chat_friends_rows(w, res);
+}
+
+/* ["gfrnd", rows] to every JSON socket of the account (its friends changed) */
+void social_push_friends_of(int64_t account_id) {
+    if (account_id <= 0 || !g_acct_brain || !g_acct_brain->db) return;
+    ChatFriends *w = calloc(1, sizeof *w);
+    if (!w) return;
+    w->account = account_id;
+    snprintf(w->label, sizeof w->label, "gfrnd");
+    char me[24];
+    if (kn_db_query_sql(g_acct_brain->db, SQL(.any = CHAT_FRIENDS_SQL), KN_DB_ARGS(acct_itoa(me, account_id)), friends_account_done, w) != 0)
+        free(w);
 }
 
 /* ["chs", {id, st, sm}]: the chat peer's presence for the header (v10: Online / Offline, or the
@@ -675,18 +728,21 @@ static void mail_list_done(SocialSession *s, kn_db_result *res, void *extra) {
 /* v10's notification window (windows[29], v10.js _71355): a row shows in the tab of its km_notificationtype
  * (0 Followers, 1 Clan, 2 Hub, 3 Inbox; 4 and 5 count as Inbox) and in Archive once read (km_archive).
  * A Followers row (kind 0, written by social_eb.c for a follow not followed back) carries the follower's
- * name as km_link ("X has followed you!", Follow Back). KrunkNative's other mail (gifts, sales, giveaways,
- * trades) is Inbox mail (kind 3). */
+ * name as km_link ("X has followed you!", Follow Back). KrunkNative's other mail (gifts, sales, trades) is Inbox mail
+ * (kind 3); a giveaway's winner gets Hub mail (kind 2) whose km_type 5 links its "Post!" to the post (km_link, 0401). */
 #define MAIL_COLS(html_l, html_r) \
     "SELECT id AS km_id, created_at AS km_datesent, " html_l "sender" html_r " AS km_playerfrom, " html_l "subject" html_r " AS km_subject, " \
     html_l "body" html_r " AS km_text, CASE WHEN read_at IS NULL THEN 0 ELSE 1 END AS km_archive, kr AS km_kr, " \
-    "kind AS km_notificationtype__i, CASE WHEN kind = 0 THEN sender ELSE '' END AS km_link FROM mail "
+    "kind AS km_notificationtype__i, mail_type AS km_type__i, CASE WHEN kind = 0 THEN sender ELSE coalesce(link, '') END AS km_link FROM mail "
 
-/* ["kml", tab] -> ["kml", tab, rows] (windows[29].onData; tab 0 unread, 1 read) */
+/* ["kml", archive, tabIndex] -> ["kml", tabIndex, rows]: windows[29] sends (0, or 1 for Archive, and its tabIndex)
+ * (deob-10.0.7.js:221326, 221348) and onData(tabIndex, rows) takes the tab back (:221237-221246). Every row comes,
+ * read or not: the window filters them (km_archive) and counts the unread per tab. A request without the tab (an
+ * older client) gets its first value back. */
 void sh_mail_list(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24];
-    const int64_t tab = fa_int(f, 1, 0) ? 1 : 0;
+    const int64_t tab = cJSON_GetArraySize(f) > 2 ? fa_int(f, 2, 0) : fa_int(f, 1, 0) ? 1 : 0;
     social_query(s, SQL(.pg = MAIL_COLS("kn_html(", ")") "WHERE account_id = $1 ORDER BY id DESC LIMIT 100",
                         .any = MAIL_COLS("{html:", "}") "WHERE account_id = $1 ORDER BY id DESC LIMIT 100"),
                  KN_DB_ARGS(me_str(s, me)),
@@ -694,18 +750,20 @@ void sh_mail_list(SocialSession *s, const cJSON *f) {
 }
 
 static void mail_read_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) extra;
+    const Ctx *c = extra;
     cJSON *rows = kn_db_ok(res) && kn_db_rows(res) > 0 ? kn_db_result_to_json(res) : NULL;
     if (!kn_db_ok(res)) acct_db_error(res, "rml");
-    social_send_n(s, "rml", 1, rows ? rows : cJSON_CreateNull());
+    social_send_n(s, "rml", 2, rows ? rows : cJSON_CreateNull(), cJSON_CreateNumber(c ? (double) c->a : 3));
 }
 
-/* ["rml", id] -> ["rml", [mail]] marks it read, credits attached KR once */
+/* ["rml", id, type] -> ["rml", [mail], type] marks it read, credits attached KR once. The type is the row's
+ * km_notificationtype as windows[29].readMail sends it (GET_MAIL, deob-10.0.7.js:221261-221264), echoed for
+ * onReadData(rows, type) (:223757-223758, 221247-221259): no text goes into a Followers (0) row. */
 void sh_mail_read(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24], id[24];
-    social_call(s, &P_MAIL_READ,
-                 KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 1, 0))), mail_read_done, NULL);
+    social_call(s, &P_MAIL_READ, KN_DB_ARGS(me_str(s, me), acct_itoa(id, fa_int(f, 1, 0))), mail_read_done,
+                ctx_new("rml", fa_int(f, 2, 3), 0));
 }
 
 /* ["raml"] mark every mail read */

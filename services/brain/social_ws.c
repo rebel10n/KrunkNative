@@ -572,6 +572,7 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
     social_after_login(s);
     if (registered) rewards_after_register(s); /* v10.0.2: the signup perks right after the registration ("prr", rewards.c) */
     social_eb_after_login(s); /* v10 friends: unread:summary */
+    social_push_friends(s); /* v10 FRIENDS_LIST_RESPONSE: the profile window's Friends tab */
     if (reg_email[0]) acct_email_after_register(s->account_id, reg_email, s->ip); /* pushes "emailS" when done */
     else sh_email_state(s, NULL);
     social_unhold(s);

@@ -113,9 +113,11 @@ static kn_db_result *run_giveaway_settle(kn_dbconn *c, int n, const char *const 
     kn_db_result_free(e);
     if (prize > 0) db_add_funds(&x, winner ? winner : author, prize, winner ? "giveaway-win" : "giveaway-refund", I64S(post), NULL);
     if (winner)
-        dbx_exec(&x, SQL(.any = "INSERT INTO mail (account_id, sender, subject, body, kr) SELECT $1, a.username, 'Giveaway Won', "
-                               "$3, 0 FROM accounts a WHERE a.id = $2"),
-                 KN_DB_ARGS(I64S(winner), I64S(author), "You won a KR giveaway!"));
+        /* Hub mail (kind 2) of v10's post type (mail_type 5): its "Post!" opens the giveaway (windows[29].onReadData,
+         * deob-10.0.7.js:221253, km_link = the post id; 0401) */
+        dbx_exec(&x, SQL(.any = "INSERT INTO mail (account_id, sender, subject, body, kr, kind, mail_type, link) SELECT $1, a.username, "
+                               "'Giveaway Won', $3, 0, 2, 5, $4 FROM accounts a WHERE a.id = $2"),
+                 KN_DB_ARGS(I64S(winner), I64S(author), "You won a KR giveaway! View the Post!", I64S(post)));
     dbx_exec(&x, SQL(.any = "UPDATE feed_posts SET settled_at = {now}, winner_id = NULLIF($2, 0) WHERE id = $1"),
              KN_DB_ARGS(I64S(post), I64S(winner)));
     cJSON *o = cJSON_CreateObject();

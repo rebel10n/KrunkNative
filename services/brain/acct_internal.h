@@ -293,6 +293,8 @@ void sh_get_post(SocialSession *s, const cJSON *f);    /* "gps" */
 void sh_like_post(SocialSession *s, const cJSON *f);   /* "lps" */
 void sh_delete_post(SocialSession *s, const cJSON *f); /* "dps" */
 void sh_chat_blobs(SocialSession *s, const cJSON *f);  /* "chtb" */
+void social_push_friends(SocialSession *s);            /* ["gfrnd", rows] after the sign-in */
+void social_push_friends_of(int64_t account_id);       /* ["gfrnd", rows] to the account's sockets */
 void sh_chat_thread(SocialSession *s, const cJSON *f); /* "ctd" */
 void sh_chat_send(SocialSession *s, const cJSON *f);   /* "ict" */
 /* v10 friends event bus (social_eb.c): ["eb", {type, ...}] */

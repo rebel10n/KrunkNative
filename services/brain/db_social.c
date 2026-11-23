@@ -467,7 +467,8 @@ const kn_proc P_CLAN_PAGE = {"clan_page", NULL, run_clan_page};
 
 #define MAIL_READ_COLS                                                                                         \
     "SELECT id AS km_id, created_at AS km_datesent, {html:sender} AS km_playerfrom, {html:subject} AS km_subject," \
-    " {html:body} AS km_text, 1 AS km_archive, {int:$3} AS km_credited FROM mail WHERE id = $2 AND account_id = $1"
+    " {html:body} AS km_text, 1 AS km_archive, mail_type AS km_type__i, CASE WHEN kind = 0 THEN sender ELSE coalesce(link, '') END" \
+    " AS km_link, {int:$3} AS km_credited FROM mail WHERE id = $2 AND account_id = $1"
 
 /* (me, id): mark read, credit attached KR once -> mail row (no row when not mine) */
 static kn_db_result *run_mail_read(kn_dbconn *c, int n, const char *const *p) {
@@ -489,7 +490,8 @@ const kn_proc P_MAIL_READ = {
     "  RETURNING *, (read_at = now() AND kr > 0) AS credit), "
     "k AS (SELECT kn_add_funds($1, kr, 'mail', id::text) FROM m WHERE credit) "
     "SELECT id AS km_id, created_at AS km_datesent, kn_html(sender) AS km_playerfrom, kn_html(subject) AS km_subject, "
-    "kn_html(body) AS km_text, 1 AS km_archive, (SELECT count(*) FROM k) AS km_credited FROM m",
+    "kn_html(body) AS km_text, 1 AS km_archive, mail_type AS km_type__i, CASE WHEN kind = 0 THEN sender ELSE coalesce(link, '') END AS km_link, "
+    "(SELECT count(*) FROM k) AS km_credited FROM m",
     run_mail_read};
 
 /* ------------------------------------------------------------------ chat */

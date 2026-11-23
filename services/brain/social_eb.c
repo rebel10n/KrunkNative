@@ -746,6 +746,8 @@ static void follow_checked(kn_db_result *res, void *ud) {
         if (b_follows) { /* the other side follows back: a friendship was made or broken */
             refresh_list_of(*a);
             refresh_list_of(b);
+            social_push_friends_of(*a); /* window 5's Friends tab (gfrnd, social_data.c) */
+            social_push_friends_of(b);
         }
         if (a_follows && !b_follows && b > 0 && b != *a) follower_mail(b, a_name ? a_name : ""); /* not followed back yet */
     }

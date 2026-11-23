@@ -160,6 +160,8 @@ async def scenario(names):
     await A.send(["eb", {"type": "friends:list", "offset": 0}])
     f = await A.eb("friends:list")
     check(f and f["friends"] == [] and f["offset"] == 0 and f["hasMore"] is False, "no friends yet: empty friends:list")
+    g = await A.recv_until(lambda f: f[0] == "gfrnd")
+    check(g == ["gfrnd", []], "the sign-in pushes FRIENDS_LIST_RESPONSE: [\"gfrnd\", []] (got %r)" % (g,))
     st, r = await A.gapi("POST", "/players/%s/follow" % bn, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "A follows B (gapi follow)")
     gm = await B.recv_until(lambda f: f[0] == "gmc" and f[1] == 1)
@@ -256,6 +258,13 @@ async def scenario(names):
     check(fa and fa["friends"][0]["id"] == b_id and fa["friends"][0]["name"] == bn and fa["friends"][0]["online"] is True,
           "the follow back pushes A's friends list: B online")
     check(fb and fb["friends"][0]["id"] == a_id, "and B's: A")
+    # FRIENDS_LIST_RESPONSE (deob-10.0.7.js:98673, 225186-225194): the profile window's Friends tab rows, pushed to both
+    # sides when the friendship is made ({fid, fna, st, sm, sub, plf, gid}, windows[4] tab 1 :219085-219101)
+    ga = await A.recv_until(lambda f: f[0] == "gfrnd" and len(f[1]) == 1)
+    gb = await B.recv_until(lambda f: f[0] == "gfrnd" and len(f[1]) == 1)
+    check(ga and ga[1][0]["fid"] == b_id and ga[1][0]["fna"] == bn and ga[1][0]["st"] == 1 and "sub" in ga[1][0]
+          and "plf" in ga[1][0] and "gid" not in ga[1][0], "gfrnd pushed to A: B online, not in a game (got %r)" % (ga,))
+    check(gb and gb[1][0]["fid"] == a_id, "gfrnd pushed to B: A")
     st, r = await B.gapi("GET", "/players/%s" % an)
     check(st == 200 and r["data"]["follow_state"] == 1, "A's profile now shows Unfollow (follow_state 1)")
     st, r = await A.gapi("GET", "/players/%s/followers" % an)
@@ -415,12 +424,22 @@ async def scenario(names):
     check(won and won[0][0] == b_id and q("SELECT player_funds FROM players WHERE player_id = ?", b_id)[0][0] == 1100,
           "giveaway ends: B (liked + follows) wins 100 KR")
 
-    # --- mail: the giveaway's mail is Inbox mail in v10's notification window (km_notificationtype 3)
-    await B.send(["kml", 0])
+    # --- mail: the giveaway's mail is Hub mail in v10's notification window (km_notificationtype 2) of the post type
+    # (km_type 5, its "Post!" opening km_link = the post, deob-10.0.7.js:221253). windows[29] sends (archive, tabIndex)
+    # and gets its tabIndex back (onData(tabIndex, rows), :221237).
+    await B.send(["kml", 0, 2])
     m = await B.recv_until(lambda f: f[0] == "kml")
     rows = m[2] if m else []
-    check(any(r.get("km_subject") == "Giveaway Won" and r.get("km_notificationtype") == 3 and r.get("km_link") == ""
-              for r in rows), "mail: the giveaway win is Inbox mail (km_notificationtype 3)")
+    check(m and m[1] == 2, "kml (0, tab 2): the reply names tab 2 (got %r)" % (m[1] if m else None))
+    won_mail = [r for r in rows if r.get("km_subject") == "Giveaway Won"]
+    check(len(won_mail) == 1 and won_mail[0].get("km_notificationtype") == 2 and won_mail[0].get("km_type") == 5
+          and won_mail[0].get("km_link") == str(gid) and "Post!" in won_mail[0].get("km_text", ""),
+          "mail: the giveaway win is Hub mail, km_type 5, km_link the post (got %r)" % won_mail)
+    if won_mail:
+        await B.send(["rml", won_mail[0]["km_id"], 2])
+        rd = await B.recv_until(lambda f: f[0] == "rml")
+        check(rd and len(rd) == 3 and rd[2] == 2 and rd[1] and rd[1][0].get("km_type") == 5 and rd[1][0].get("km_link") == str(gid),
+              "rml (id, type 2): the row with km_type / km_link and the type back (onReadData(rows, type)) (got %r)" % rd)
 
     # --- clans: the clan view and Request to Join
     cid = q("INSERT INTO clans (clan_name, clan_playerid, clan_score, clan_discord) VALUES ('TST', ?, 4321, 'abc') RETURNING clan_id", a_id)[0][0]
