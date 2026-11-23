@@ -187,6 +187,13 @@ static char g_search[64];        // windows[1].serverSearch
 enum { SERVER_TAB_KRUNK = 0, SERVER_TAB_KRUNKER = 1, SERVER_TAB_COUNT = 2 };
 static int g_server_tab = SERVER_TAB_KRUNK;
 static int g_server_tab_backend = -1; // the backend the default tab last followed (server_tab_follow)
+// v10's own windows[1].tabIndex (deob-10.0.7.js:218482-218487): with Legacy Browser off, the Official Servers (0) and
+// Custom Servers (1) tabs of the mode browser (iîíîííï, :16629). KrunkNative's backend tabs above are its own, so
+// this one is switched by windows[1].switchListTab (the name windows[1].switchTab is the backend tab's).
+static int g_list_tab;
+// windows[1].privateServerData (deob-10.0.7.js:218273-218276): the game-info tuple of the lobby this client is in when
+// the list does not have it (a private lobby), shown in Custom Games (owned; NULL none)
+static cJSON *g_private_row;
 
 // The one place the tab changes. The web build plays krunk.io only (its list is Box Office's, and
 // krunker_lobbies_enabled() is 0 there): it has no krunker.io tab, so the tab stays krunk.io's.
@@ -2150,17 +2157,108 @@ static int kio_group(ServerGroup *groups, int *count, const int max, const cJSON
     return gi;
 }
 
-// getServers(): the groups of the current tab, v10's layout (getServers' oldBrowser branch): Official Customs,
-// Custom Games, then one group per region, the default region first. The lists are the tab's (tab_lists);
-// empty groups are dropped. Returns the group count.
-static int build_groups(ServerGroup *groups, const int max) {
+// v10's regions table in its order (iîíìïiî, deob-10.0.7.js:16442-16464): the mode browser's row score adds 100 x
+// a row's index here (-1 for a region not in it)
+static int region_order(const char *region) {
+    static const char *const order[] = {"sgp", "jb-hnd", "us-nj", "us-fl", "us-ca-sv", "brz", "us-tx", "au-syd", "de-fra", "sss", "gb-lon",
+                                        "blr", "as-mb", "me-bhn", "as-seoul", "af-ct", "mx-cmx", "tor", "eu-stm", "pol", "us-hi"};
+    const char *id = region_id_of(region);
+    for (size_t i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
+        if (!strcmp(order[i], id)) return (int) i;
+    }
+    return -1;
+}
+
+// A mode browser row's custom game: c && !oc
+static int row_custom_only(const cJSON *t) { return row_custom(t) && !row_official(t); }
+
+// The mode browser's row order (deob-10.0.7.js:218422-218440), highest first: players + 100 x the region's place in
+// v10's table, + 20000 (a custom game) / 50 for a promoted one (pr: krunker.io's "promoted"; Box Office's pr is the
+// password lock), + 10000 in the default region, - 50000 when empty and not promoted
+static int row_score(const cJSON *t) {
+    const int promoted = meta_flag(t, "promoted"), players = row_players(t);
+    int score = players + 100 * region_order(tuple_str(t, 1));
+    if (promoted) score += row_custom_only(t) ? 20000 : 50;
+    if (!strcmp(region_id_of(tuple_str(t, 1)), g_sort_region)) score += 10000;
+    if (players <= 0 && !promoted) score -= 50000;
+    return score;
+}
+static int cmp_games_score(const void *a, const void *b) {
+    const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
+    return row_score(y) - row_score(x);
+}
+static int cmp_groups_players(const ServerGroup *x, const ServerGroup *y) { return (int) (y->players - x->players); }
+
+// getServers()'s mode browser (Legacy Browser off, deob-10.0.7.js:218365-218442): a group per game mode (gameModes'
+// order, its name), its rows the tab's: Official Servers every row but the custom games, Custom Servers those only;
+// a row with no known mode is in none. Groups by players, most first; rows by row_score.
+static int build_mode_groups(ServerGroup *groups, const int max, const int only_default, const char *def) {
+    int count = 0;
+    const cJSON *lists[2];
+    const int nlists = tab_lists(lists);
+    for (int l = 0; l < nlists; l++) {
+        const cJSON *t;
+        cJSON_ArrayForEach(t, lists[l]) {
+            if (!meta_of(t)) continue;
+            if (only_default && strcmp(def, region_id_of(tuple_str(t, 1)))) continue;
+            const GameModeConfig *mode = row_mode(t);
+            if (!mode || !mode->alias) continue;
+            const int custom = row_custom_only(t);
+            if ((g_list_tab == 0 && custom) || (g_list_tab == 1 && !custom)) continue;
+            char key[32];
+            snprintf(key, sizeof(key), "mode:%s", mode->alias);
+            int gi = find_group(groups, count, key);
+            if (gi < 0 && count < max) {
+                ServerGroup *g = &groups[count];
+                snprintf(g->key, sizeof(g->key), "%s", key);
+                snprintf(g->name, sizeof(g->name), "%s", mode->name ? mode->name : mode->alias);
+                const cJSON *m = cJSON_GetObjectItem(meta_of(t), "mode");
+                if (!cJSON_IsNumber(m)) m = cJSON_GetObjectItem(meta_of(t), "g");
+                g->region_rank = cJSON_IsNumber(m) ? m->valueint : 0; // gameModes' order breaks ties (a stable sort)
+                gi = count++;
+            }
+            if (gi >= 0) group_push(&groups[gi], t);
+        }
+    }
+    // a stable sort by players (v8's sort is stable): ties keep gameModes' order
+    for (int i = 0; i < count; i++) {
+        for (int j = i + 1; j < count; j++) {
+            const int swap = cmp_groups_players(&groups[i], &groups[j]) > 0 ||
+                             (!cmp_groups_players(&groups[i], &groups[j]) && groups[j].region_rank < groups[i].region_rank);
+            if (swap) {
+                ServerGroup tmp = groups[i];
+                groups[i] = groups[j];
+                groups[j] = tmp;
+            }
+        }
+    }
+    for (int i = 0; i < count; i++) stable_sort(groups[i].games, groups[i].game_count, cmp_games_score);
+    return count;
+}
+
+// The lobby this client is in, when the brain's list does not have it: privateServerData goes into Custom Games
+// (deob-10.0.7.js:218340). KrunkNative keeps it only while it is that lobby's.
+static int current_listed(const cJSON *list) {
+    const cJSON *t;
+    cJSON_ArrayForEach(t, list) {
+        if (is_current_game(tuple_str(t, 0))) return 1;
+    }
+    return 0;
+}
+
+// getServers(): the groups of the current tab. Legacy Browser on (the default), v10's oldBrowser branch: Official
+// Customs, Custom Games, then one group per region, the default region first; off, the mode browser
+// (build_mode_groups). The lists are the tab's (tab_lists); empty groups are dropped. force_default: getServers'
+// second argument (Quick Join's in the mode browser), the default region's rows only. Returns the group count.
+static int build_groups(ServerGroup *groups, const int max, const int force_default) {
     char def[32] = "";
     default_region(def, sizeof(def));
     snprintf(g_sort_region, sizeof(g_sort_region), "%s", def);
-    const int only_default = default_region_only();
+    const int only_default = force_default || default_region_only();
     memset(groups, 0, sizeof(*groups) * (size_t) max);
     int count = 0;
     rebuild_finder_rows();
+    if (!old_browser()) return build_mode_groups(groups, max, only_default, def);
     const cJSON *lists[2];
     const int nlists = tab_lists(lists);
     snprintf(groups[0].key, sizeof(groups[0].key), "official");
@@ -2198,6 +2296,9 @@ static int build_groups(ServerGroup *groups, const int max) {
             if (gi >= 0) group_push(&groups[gi], t);
         }
     }
+    if (g_server_tab == SERVER_TAB_KRUNK && g_private_row && meta_of(g_private_row) && is_current_game(tuple_str(g_private_row, 0)) &&
+        !current_listed(lists[0]) && groups[1].game_count < 256)
+        groups[1].games[groups[1].game_count++] = g_private_row; // pushed only: its players are not the group's
     int kept = 0;
     for (int i = 0; i < count; i++) {
         if (groups[i].game_count) groups[kept++] = groups[i];
@@ -2279,10 +2380,11 @@ static void row_title(StrBuf *sb, const cJSON *t) {
     sb_append(sb, map);
 }
 
-// An official krunker.io row's title exactly as v10's getServers writes it (v10.js:211428-211433):
-// h || i (Krunker's own map name, as sent), "<alias>_" before it on a public lobby ("ffa_Kanji"); in
-// the region browser a custom game without its own name gets the alias as a prefix before the badges.
-// Our own rows keep KrunkNative's "<mode> - <map>" (row_title).
+// A row's title exactly as v10's getServers writes it (deob-10.0.7.js:218468-218476): h || i (the map's name, as
+// sent), "<alias>_" before it on a public lobby in the mode browser ("ffa_Kanji"); in the region browser (and on a
+// custom game) the alias goes before the badges instead, unless the row is 24/7 or has its own name. krunker.io's rows
+// and Box Office's lobbies (whose i is the map's name, a custom game's map in meta.map: row_i); finder rows keep
+// KrunkNative's "<mode> - <map>" (row_title).
 static void krunker_row_title(StrBuf *prefix, StrBuf *name, const cJSON *t, const int old) {
     const int custom = row_custom(t), official = row_official(t), dedicated = row_dedicated(t);
     const char *alias = row_alias(t), *h = row_h(t);
@@ -2302,7 +2404,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     char def[32] = "";
     default_region(def, sizeof(def));
     StrBuf name = {0}, prefix = {0};
-    if (krunker) krunker_row_title(&prefix, &name, t, old);
+    if (krunker || !finder) krunker_row_title(&prefix, &name, t, old);
     else row_title(&name, t);
     // an official krunker.io row looks like v10's own (no tag); kioRow only marks it for tests
     sb_append(sb, krunker ? "<div class='settName settNameIn kioRow' onmouseenter='playTick()'style='" : "<div class='settName settNameIn' onmouseenter='playTick()'style='");
@@ -2326,8 +2428,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         sb_append_esc(sb, id);
         sb_append(sb, "\", this)'>");
     }
-    if (krunker) sb_append_esc(sb, prefix.data ? prefix.data : ""); // v10: "ffa_" before the badges
-    else if (!custom && !old) sb_append(sb, "[YEND] ");
+    sb_append_esc(sb, prefix.data ? prefix.data : ""); // v10: "ffa_" before the badges
     sb_free(&prefix);
     if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
     if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
@@ -2400,7 +2501,7 @@ static int group_has_krunker(const ServerGroup *g) {
 
 static char *get_servers(void) {
     static ServerGroup groups[SERVER_GROUPS_MAX];
-    const int count = build_groups(groups, SERVER_GROUPS_MAX);
+    const int count = build_groups(groups, SERVER_GROUPS_MAX, 0);
     const int old = old_browser();
     const int hide = hide_full();
     const double now = now_ms();
@@ -2412,14 +2513,15 @@ static char *get_servers(void) {
     for (int h = 0; h < count; h++) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
-        if (!kio_status && !strncmp(g->key, "kio:", 4)) { // the krunker.io tab's groups: their status line first
+        const int kio = !strncmp(g->key, "kio:", 4) || (!strncmp(g->key, "mode:", 5) && g_server_tab == SERVER_TAB_KRUNKER);
+        if (!kio_status && kio) { // the krunker.io tab's groups: their status line first
             append_krunker_status(&sb, kio_groups);
             kio_status = 1;
         }
         // v10's header (name, then Quick Join and "N online" floated right); an official region's own
         // group also carries kioHed, a class no sheet styles (tests find the krunker.io groups by it)
         sb_appendf(&sb, "<div class='setHed%s' style='margin-top:20px;' onmouseenter='playTick()' onclick='playSelect(0.1);setExpandedRegion(%d)' style='cursor: pointer;'",
-                   !strncmp(g->key, "kio:", 4) ? " kioHed" : "", open ? -1 : h);
+                   kio ? " kioHed" : "", open ? -1 : h);
         if (old && show_region() && strcmp(g->key, "custom") && strcmp(g->key, "official") && region_full_name(g->key)[0]) {
             sb_append(&sb, " title='"); // KrunkNative: the place name's region code (the links' prefix)
             sb_append_esc(&sb, region_name(g->key));
@@ -3198,8 +3300,20 @@ static char *gen_list(void) {
     for (int i = 0; i < SERVER_TAB_COUNT; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div>");
 #endif
-    carousel_html(&sb); // the tab's custom games' carousel (customsInfo.length >= 3)
-    sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
+    const int old = old_browser();
+    if (old) {
+        carousel_html(&sb); // the tab's custom games' carousel (customsInfo.length >= 3): the legacy browser's only
+        sb_append(&sb, "<div style='font-size:20px'>");
+    } else {
+        // the mode browser's Official Servers / Custom Servers (deob-10.0.7.js:218518-218522, iîíîííï :16629)
+        static const char *const list_tabs[] = {"Official Servers", "&nbsp;Custom Servers&nbsp;"};
+        sb_append(&sb, "<div class='bigMenTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
+        for (int i = 0; i < 2; i++)
+            sb_appendf(&sb, "<div class='bigMenTab%s' style='height:18px;' onclick='playSelect();windows[1].switchListTab(%d)'>%s</div>", g_list_tab == i ? " bigMenTabA" : "", i,
+                       list_tabs[i]);
+        sb_append(&sb, "</div><div>");
+    }
+    sb_append(&sb, "<div id='serverHolder'>");
     sb_append(&sb, servers);
     sb_append(&sb, "</div>");
     free(servers);
@@ -3233,6 +3347,20 @@ static char *gen_list(void) {
     return sb_finish(&sb);
 }
 
+// fetchGameInfo(current)'s answer (deob-10.0.7.js:218273-218276): privateServerData. KrunkNative keeps it only when it
+// is the lobby asked for (the brain's game-info may answer with another lobby of the region).
+static void on_private_row(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    cJSON *tuple = status == 200 && body ? cJSON_ParseWithLength(body, length) : NULL;
+    if (cJSON_IsArray(tuple) && cJSON_IsObject(cJSON_GetArrayItem(tuple, 4)) && is_current_game(tuple_str(tuple, 0))) {
+        cJSON_Delete(g_private_row);
+        g_private_row = tuple;
+        tuple = NULL;
+        if (ui_window_key(2)) menu_rerender_if_open(2); // showWindow(2, true) while it is open
+    }
+    cJSON_Delete(tuple);
+}
+
 static void on_game_list(void *user, const int status, const char *body, const size_t length) {
     (void) user;
     (void) length;
@@ -3260,6 +3388,13 @@ static void on_game_list(void *user, const int status, const char *body, const s
             if (id && count++ < 4 && len + strlen(id) + 2 < sizeof(ids)) len += (size_t) snprintf(ids + len, sizeof(ids) - len, "%s%s", len ? "," : "", id);
         }
         KN_LOG_DEBUG1("[mm] game list (%s): %d lobbies %s\n", flavor_current()->key, cJSON_GetArraySize(games), ids);
+    }
+    // loadData: the lobby this client is in is not listed (a private one): fetchGameInfo(it) (deob-10.0.7.js:218273)
+    if (g_game_id[0] && !current_listed(g_games)) {
+        char path[256], enc[192];
+        backend_url_encode(enc, sizeof(enc), g_game_id);
+        snprintf(path, sizeof(path), "/mm/game-info?game=%s", enc);
+        mm_get(path, on_private_row, NULL);
     }
     cJSON_Delete(res);
     g_loaded = 1;
@@ -3455,9 +3590,13 @@ void servers_quick_join_next(void) {
     if (g_quick_join_kio_group) ui_error_popup(I18N("windows.servers.none", "No Joinable Games Found..."));
 }
 
-static void quick_join_region(const int index) {
+// quickJoinRegion(index, defaultRegionOnly) (deob-10.0.7.js:223701-223703): getServers(index, defaultRegionOnly)'s
+// joinable games (0 < players < max, matching the search, not this one), up to 10 switchGame tries. The groups are
+// built again with that second argument, as v10 does, so in the mode browser (1) the index is of the default
+// region's groups.
+static void quick_join_region(const int index, const int default_only) {
     static ServerGroup groups[SERVER_GROUPS_MAX];
-    const int count = build_groups(groups, SERVER_GROUPS_MAX);
+    const int count = build_groups(groups, SERVER_GROUPS_MAX, default_only);
     for (int i = 0; i < g_quick_join_count; i++) free(g_quick_join[i]);
     free(g_quick_join);
     free(g_quick_join_kio);
@@ -3467,7 +3606,7 @@ static void quick_join_region(const int index) {
     g_quick_join_action = seek_claim_start(&g_claims);
     if (index < 0 || index >= count) return;
     const ServerGroup *g = &groups[index];
-    g_quick_join_kio_group = !strncmp(g->key, "kio:", 4);
+    g_quick_join_kio_group = !strncmp(g->key, "kio:", 4) || (!strncmp(g->key, "mode:", 5) && g_server_tab == SERVER_TAB_KRUNKER);
     g_quick_join = calloc((size_t) g->game_count + 1, sizeof(char *));
     g_quick_join_kio = calloc((size_t) g->game_count + 1, sizeof(int));
     int brain_rows = 0;
@@ -3494,8 +3633,7 @@ static void quick_join_region(const int index) {
             continue;
         }
         if (!(players < max_players && players > 0)) continue; // regionID.games.filter(p < max && p > 0)
-        const int krunker = row_krunker(t);
-        if (krunker && meta_flag(t, "pw")) continue; // a password lobby is not joinable from the list
+        const int krunker = row_krunker(t); // a password lobby too: v10 filters none (its password prompt follows)
         const cJSON *id = cJSON_GetArrayItem(t, 0);
         if (cJSON_IsString(id)) {
             g_quick_join_kio[g_quick_join_count] = krunker;
@@ -3607,6 +3745,8 @@ static void open_server_window(const int which) {
         if (which == 1) { // Customs: the active backend's tab (its customs are in its groups)
             set_server_tab(krunker_net_active() ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK);
             g_expanded = -1;
+            // oldBrowser ? setExpandedRegion(-1) : switchTab(1), the Custom Servers tab (deob-10.0.7.js:225462)
+            if (!old_browser()) g_list_tab = 1;
             menu_rerender_if_open(2);
         }
         return;
@@ -3674,6 +3814,13 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         host_flow_set_chooser_backend(g_server_tab == SERVER_TAB_KRUNKER);
         return 1;
     }
+    if (!strcmp(name, "windows.1.switchListTab")) { // v10's switchTab(i): tabIndex, expandedRegion -1, updateWindow(2)
+        const int tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        g_list_tab = tab == 1 ? 1 : 0;
+        g_expanded = -1;
+        menu_rerender_if_open(2);
+        return 1;
+    }
     if (!strcmp(name, "knCarousel")) { // the carousel's prev / next (PureJSCarousel's buttons)
         carousel_go(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 1);
         return 1;
@@ -3697,8 +3844,9 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         html_storage_set("krk_hideFull", g_hide_full ? "true" : "false");
         return 1;
     }
-    if (!strcmp(name, "quickJoinRegion")) {
-        quick_join_region(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
+    if (!strcmp(name, "quickJoinRegion")) { // quickJoinRegion(i, defaultRegionOnly): getServers(i, 1) in the mode browser
+        quick_join_region(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0,
+                          argc > 1 && (args[1].kind == HTML_ARG_NUM || args[1].kind == HTML_ARG_BOOL) && args[1].num != 0);
         return 1;
     }
     if (!strcmp(name, "windows.9.loadMore")) {

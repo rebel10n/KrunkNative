@@ -544,17 +544,28 @@ def client_hoist(port):
         krows = re.search(r"nodes t=\d+ @krows%d elements=\d+ match=(\d+)" % i, text)
         check("C7: krunker.io's tab: that group holds only krunker.io rows (no Box Office game)",
               rows and krows and rows.group(1) == krows.group(1) == "1", "%s / %s" % (rows.group(0) if rows else "", krows.group(0) if krows else ""))
-    # the Legacy Browser setting no longer changes the groups: the krunker.io tab reads the same with it off
+    # Legacy Browser off: v10's mode browser (deob-10.0.7.js:218365-218442), a group per game mode under its Official
+    # Servers / Custom Servers tabs. On krunker.io's tab the Custom Servers tab's first group is the custom game's mode
+    # (Free for All), holding that krunker.io row only; Official Servers never lists it
     p, log = client("hoist-modes", port, '0 play\n300 call setSetting "oldBrowser" "false"\n4000 call showWindow 2\n'
-                    "6000 call windows.1.switchTab 1\n6100 text @head .setHed\n6120 waitfor [id=serverHolder] .kioHed\n6200 call setExpandedRegion 0\n"
-                    "6300 nodes @rows .kioRow\n7500 quit\n")
+                    "6000 call windows.1.switchTab 1\n6050 waitfor [id=serverHolder] .kioHed\n6060 call setExpandedRegion 0\n"
+                    "6070 nodes @orows .kioRow\n6080 grep @official Somebody [id=serverHolder]\n"
+                    "6090 call windows.1.switchListTab 1\n6100 text @head .setHed\n6120 waitfor [id=serverHolder] .kioHed\n"
+                    "6200 call setExpandedRegion 0\n6300 nodes @rows .kioRow\n6310 grep @cg Somebody [id=serverHolder] .settNameIn\n"
+                    "6320 grep @tabs Custom [id=menuWindow] .bigMenTabA\n7500 quit\n")
     finish(p, 60)
     text = read_log(log)
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
-    check("C7: Legacy Browser off, krunker.io's tab: the first group is still its Custom Games",
-          m and "Custom Games" in m.group(1), m.group(1) if m else "")
+    check("C7: Legacy Browser off, krunker.io's Custom Servers tab: the first group is the custom game's mode",
+          m and "Free for All" in m.group(1), m.group(1) if m else "")
     m = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
-    check("C7: ... and that group holds the krunker.io custom game", m and m.group(1) == "1", m.group(0) if m else "")
+    check("C7: ... and that group holds the krunker.io custom game only", m and m.group(1) == "1"
+          and re.search(r"grep t=\d+ @cg needle=\S+ n=\d+ hits=1\b", text), m.group(0) if m else "")
+    check("C7: ... the Custom Servers tab is the selected one",
+          re.search(r"grep t=\d+ @tabs needle=\S+ n=\d+ hits=1\b", text), "")
+    m = re.search(r"nodes t=\d+ @orows elements=\d+ match=(\d+)", text)
+    check("C7: ... Official Servers lists the public lobbies by mode, not the custom game",
+          m and int(m.group(1)) >= 1 and re.search(r"grep t=\d+ @official needle=\S+ n=\d+ hits=0\b", text), m.group(0) if m else "")
 
 
 def client_both(port):

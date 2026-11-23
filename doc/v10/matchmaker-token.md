@@ -269,9 +269,14 @@ back in it without a word, as v10's matchmaker does. The startup seek also sends
 parity) but never opens krunker.io.
 
 The server browser (Servers, window 2) has two tabs, one per backend: krunk.io (ours) and krunker.io (the
-official lobbies, native). Each tab is one list in v10's legacy layout (the map carousel, Official Customs,
-Custom Games, then the regions) and never mixes the two; the default tab is the active backend's, and "+ Host
-Game" on a tab hosts on that tab's backend (host_flow_open_backend). Whatever the server type, every
+official lobbies, native). Each tab is one list and never mixes the two. With Settings > Legacy Browser on it is
+v10's legacy layout (the map carousel, Official Customs, Custom Games, then the regions; the private lobby the player
+is in joins Custom Games, privateServerData, deob-10.0.7.js:218340); off, it is v10.0.7's mode browser
+(deob-10.0.7.js:218365-218442): "Official Servers" / "Custom Servers" tabs (`windows.1.switchListTab`), one group per
+mode sorted by players, its rows by v10's score (players, the region's place, promoted, the default region first,
+empty last), every row with its region cell, Quick Join on the default region only. The default tab is the active
+backend's, and "+ Host Game" on a tab opens the server-type chooser (window 42, deob-10.0.7.js:218502) and hosts on
+that tab's backend (host_flow_set_chooser_backend). Whatever the server type, every
 row is listed whatever the Quickplay switches say: the seek mode and map switches only narrow what a seek
 picks, never the list.
 
