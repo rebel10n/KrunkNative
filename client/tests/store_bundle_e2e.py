@@ -123,6 +123,18 @@ def main():
           m.group(1) if m else "no #timer-text")
     check("popup: the timer's skull", "img/skull-small.svg" in pop and "img/warning-octagon-red.svg" in pop)
 
+    # 1b. a collection folds into one slot with "+N" (the collection's other store skins) and its later skins take no
+    # slot (deob-10.0.7.js:215897-215919): Group C (5284, 5302, 5305, 5308 in skins.json), then skin 1
+    coll = bundle(42, "Group Pack", SKINS="5284,5302,1")
+    doc = render("collection", {"officialSession": True, "storage": KIO_STORAGE, "kioBundles": [["abd", [coll]], ["gbdr", [42], [], {}, [], 0, 1]],
+                                "windowActions": [["bundlePopup", True, False, 42]]})
+    pop = section(doc, "bundlePop")
+    check("collection: twelve item slots", pop.count('class="bundlItmC"') == 12, pop.count('class="bundlItmC"'))
+    check("collection: one slot for Group C with +3", pop.count('class="bundlItmCnt"') == 1 and ">+3</div>" in pop,
+          re.findall(r'class="bundlItmCnt"[^<]*<', pop))
+    check("collection: 5302 takes no slot", "viewItem(5284)" in pop and "viewItem(5302)" not in pop and "viewItem(1)" in pop)
+    check("collection: ten grey slots", pop.count("border: 3px solid #707070") == 10, pop.count("border: 3px solid #707070"))
+
     # 2. "gbdr" with a conditional bundle: the automatic popup picks it, with its 24-hour countdown
     cond = bundle(30, "Comeback Deal", PRICE=1.99, SKINS="3")
     main_row = bundle(16, "Main Pack", PRICE=9.99, DATE="2026-11-01T00:00:00.000Z")

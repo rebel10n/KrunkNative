@@ -377,12 +377,34 @@ void bundle_offers_pops_reset(void) {
     timer_stop();
 }
 
+const cJSON *ui_loadout_skin_json(int index); // ui_loadout.c: assets/skins.json's entry (store.skins[index])
+
+// store.skins[index].collection (skins.json; the viewer table leaves it out), NULL when none
+static const char *skin_collection(const int index) {
+    const char *c = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(index), "collection"));
+    return c && c[0] ? c : NULL;
+}
+
+// store.skins.filter(s => s && s.collection == c).length (:215905-215907)
+static int collection_size(const char *c) {
+    int n = 0;
+    const cJSON *e;
+    for (int i = 0; (e = ui_loadout_skin_json(i)) != NULL; i++) {
+        const char *ec = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "collection"));
+        n += ec && strcmp(ec, c) == 0;
+    }
+    return n;
+}
+
 // the popup's twelve item slots (:215897-215919): each skin of SKINS in its rarity's border (a spray with frames
-// animated), an index past SKINS or without a skin an empty grey slot. (v10 also folds a skin collection into one
-// slot with a "+N" count; KrunkNative's skin table has no collection field, so every skin takes its slot.)
+// animated), an index past SKINS or without a skin an empty grey slot. A skin of a collection takes one slot for the
+// whole collection, with a "+N" count of the collection's other skins in the store; the collection's later skins in
+// SKINS take no slot (v10's `continue` leaves the slot count as it is).
 static void popup_items(StrBuf *sb, const char *skins, int *frames, int *nframes) {
     sb_append(sb, "<div style='margin-top:15px;'>");
     const char *p = skins ? skins : "";
+    const char *seen_coll[POPUP_SLOTS];
+    int nseen = 0;
     for (int slot = 0; slot < POPUP_SLOTS; slot++) {
         const ViewerSkin *k = NULL;
         int index = -1;
@@ -401,6 +423,18 @@ static void popup_items(StrBuf *sb, const char *skins, int *frames, int *nframes
             sb_append(sb, "<div class='bundlItmC' style='border: 3px solid #707070;'></div>");
             continue;
         }
+        int coll_n = 0; // iiÎîiíì
+        const char *coll = skin_collection(index);
+        if (coll) {
+            int dup = 0;
+            for (int c = 0; c < nseen; c++) dup |= strcmp(seen_coll[c], coll) == 0;
+            if (dup) { // already shown: this skin takes no slot
+                slot--;
+                continue;
+            }
+            if (nseen < POPUP_SLOTS) seen_coll[nseen++] = coll;
+            coll_n = collection_size(coll);
+        }
         char thumb[320];
         store_skin_preview(index, thumb, sizeof thumb);
         const int r = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? k->rarity : 0;
@@ -414,7 +448,9 @@ static void popup_items(StrBuf *sb, const char *skins, int *frames, int *nframes
         } else {
             sb_append(sb, "background-size: contain;background-position: center;");
         }
-        sb_appendf(sb, "border: 3px solid %s;' onclick='viewItem(%d)'></div>", g_viewer_rarities[r].color, index);
+        sb_appendf(sb, "border: 3px solid %s;' onclick='viewItem(%d)'>", g_viewer_rarities[r].color, index);
+        if (coll_n) sb_appendf(sb, "<div class='bundlItmCnt'>+%d</div>", coll_n - 1);
+        sb_append(sb, "</div>");
     }
     sb_append(sb, "</div>");
 }
