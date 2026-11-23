@@ -295,7 +295,7 @@ static const char *const K_OBJECT_KEYS[] = {
     "nm", "cl", "stc", "md", "ct", "te", "ta", "tac", "tam", "sfd", "tc", "tc2", "tce", "tct", "tcc", "tad", "cd", "cv0",
     "cv1", "cv2", "cha", "ci", "rt", "rr", "tsd", "rmt", "rmr", "aic", "vd", "igos", "dos", "ivos", "cs", "cnh", "xv",
     "tAi", "tPl", "aif", "exp", "spd", "fr", "aac", "hr", "shb", "sha", "shof", "shdy", "mldy", "mls", "ss", "se", "he",
-    "crd", "mlr", "mld", "prg", "prgl", "prgt", "prsc", "prms", "prs", "pjs", "pjd", "bh", "rew", "rewm", "rewr", "rewn",
+    "crd", "mlr", "mld", "prg", "prgl", "prgt", "prsc", "prms", "prs", "pjs", "pjd", "bh", "rew", "rewm", "rewr", "rewc", "rewn",
     "ain", "ail", "ains", "in", "tin", "wd", "dp", "obi", "obl", "ws", "wh", "tx", "tz", "es", "esa", "idl", "dth", "atk",
     "atkh", "mel", "melh", "agr", "ev", "ed", "edm", "ero", "er", "ef", "ms", "myo", "mro", "hbh", "hbw", "grv", "li",
     "lds", "ld", "opn", "rtp", "rbt", "thl", "ths", "sds", "skin", "cst", "rcv", "as", "ast", "pra", "ec", "nid", "phi",
@@ -921,6 +921,9 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
         const double rewm = pi_or(p, "rewm", 0), rewr = pi_or(p, "rewr", 0), rewn = pi_or(p, "rewn", 0);
         if (rewm > 0) put_num(out, "rewm", rewm);
         if (rewr > 0) put_num(out, "rewr", rewr);
+        // v10.0.7's Rarity Chances: digits, dots and commas, written when not empty (editor-10.0.7.js:7357, :8467-8468)
+        const char *rewc = id_string(G(p, "rewc"), "0123456789.,");
+        if (rewc) put(out, "rewc", cJSON_CreateString(rewc));
         if (rewn > 0) put_num(out, "rewn", rewn);
         const double bh = pi_or(p, "bh", 0), pht = pi_or(p, "pht", 0);
         if (num_truthy(bh)) put_num(out, "bh", bh);
@@ -2821,7 +2824,7 @@ static const PropDef K_PROPS[] = {
     P("meldmg", "mld", PK_INT, 10), P("projG", "prg", PK_NUM, 0), P("projGL", "prgl", PK_PRESENT, 0), P("projT", "prgt", PK_PRESENT, 0),
     P("projSC", "prsc", PK_NUM, 1), P("projMS", "prms", PK_NUM, 1), P("projS", "prs", PK_NUMN, 1), P("projSpd", "pjs", PK_NUM, 1),
     P("projDmg", "pjd", PK_INT, 100), P("projA", "pra", PK_STR, 0), P("behaviorType", "bh", PK_INT, 0), P("rewardType", "rew", PK_STR, 0),
-    P("rewardMethod", "rewm", PK_INT, 0), P("rewardReq", "rewr", PK_INT, 0), P("rewardNode", "rewn", PK_INT, 0),
+    P("rewardMethod", "rewm", PK_INT, 0), P("rewardReq", "rewr", PK_INT, 0), P("rewardChance", "rewc", PK_STR, 0), P("rewardNode", "rewn", PK_INT, 0),
     P("pathInput", "phi", PK_STR, 0), P("pathType", "pht", PK_INT, 0), P("gravity", "grv", PK_NUMN, 1),
     P("idleSound", "idl", PK_INT, 0), P("deathSound", "dth", PK_INT, 0), P("shootSound", "atk", PK_INT, 0),
     P("shootHitSound", "atkh", PK_INT, 0), P("melSound", "mel", PK_INT, 0), P("melHitSound", "melh", PK_INT, 0),

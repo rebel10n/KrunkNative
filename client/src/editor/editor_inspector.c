@@ -49,41 +49,49 @@ static const char *const k_billboards[7] = {"Random", "Krunkie Loans", "Krunker 
 #define EMITTER_ROLL_MIN 0.0
 #define EMITTER_ROLL_MAX 1.0 // CFG:2313-2320
 
-// ObjectInstance.prototype setters (the group "Key" select of v7.1.4, in prototype order)
+// ObjectInstance.prototype setters (the group "Key" select, in prototype order: the class setters, then
+// basicConfigVal's accessors; editor-10.0.7.js:6610-7112, :14019, index-10.0.7.js:8461-8477)
 static const char *const k_oi_setters[] = {
-    "pos", "rot", "size", "sprayTexture", "assetTexture", "texture", "collidable", "visible", "intensity", "angle", "penumbra",
-    "decay", "distance", "color", "emissive", "opacity", "forceTrans", "direction", "border", "highlighted", "renderSide",
-    "fog", "texOffX", "texOffY", "texRot", "prefab", "texturePrefab", "texStretch", "part", "partC", "partS", "partSP",
-    "partG", "partSC", "partD", "partB", "boost", "bounce", "edgeNoise", "team", "single", "weaponId", "weaponReplace",
-    "randWep", "poster", "channel", "node", "momentum", "ambient", "hidden", "closeable", "startClosed", "event", "action",
-    "constant", "fsize", "fcolor", "bcolor", "text", "backVisible", "tAlign", "cmpSpwn", "classIndx", "respawnT", "respawnR",
-    "turnSpd", "speed", "interfaceId", "interfaceT", "withdraw", "deposit", "objectiveId", "faces", "wSpeed", "wHeight",
-    "tilesX", "tilesZ", "fullcone", "snd", "vol", "dist", "roll", "rate", "emitfrom", "mSize", "spin", "texSmooth",
-    "constantTxt", "forceDir", "constE", "dynamic", "gravity", "itemID", "openEnded", "sides", "leaderOrder", "leaderType",
-    "canShoot", "assetID", "aiName", "assetSound", "visDis", "deathSound", "idleSound", "shootSound", "agroSound", "canHit",
-    "xrayVis", "frate", "projSpd", "rewardType", "behaviorType", "canDest", "health", "crouch", "canTrigger", "startDest",
-    "canWallJump", "chance", "singleP", "actionCost", "spinAxis", "actionMethod", "selfDestruct", "score", "method",
-    "penetrable", "movingSpeed", "movingAxis", "interfaceIdT", "teamOnly", "frameCount", "frameSpeed", "trigActions",
-    "telCheckPoint", "cast", "receive", "animS", "delay", "projA", "projG", "projSC", "projS", "hbHeight", "hbWidth", "mYOff",
-    "projDmg", "roamTime", "roamRad", "mROff", "meldmg", "hrate", "melrng", "enclose", "targAI", "aiChasd", "aicur", "targPlr",
-    "shoBrk", "projGL", "distM", "nodeId", "pathInput", "pathType", "vdrag", "vangDrag", "vturnSpd", "vturnLean", "vmaxPow",
-    "vpowerF", "vmaxRev", "vrevF", "vRange", "lightTarget", "interactM", "stype", "startAnim", "forceRender", "minimum",
-    "texScale", "static", "scriptId", "texEncode", "camType", "forceCam", "followPath", "canGrapple", "leaderTypeCust",
-    "radiusTop", "radiusBottom", "thetaLength", "texVar", "alphaTest", "ocolor", "othick", "mimicSprite", "spread", "shoArY",
-    "shoDel", "melDel", "projMS", "aiLvl", "aiTagScale", "melSound", "melHitSound", "shootHitSound", "friendly", "melShake",
-    "shoShake", "critDmg", "playerCollidable", "stepSrc", "skyDome", "skyDomeCol0", "skyDomeCol1", "skyDomeCol2", "skyDomeEmis",
-    "skyDomeEmisTex", "skyDomeTex", "skyDomeTexA", "skyDomeMovD", "skyDomeMovT", "shadowR", "shadowD", "ambientC", "ambientI",
-    "light", "lightD", "lightI", "sunAngX", "sunAngY", "sky", "fogC", "fogD", "correctLights", "toneMapping",
-    "toneMappingExposure", "outputEncoding", "spawnChance", "explode", "complexColl", "objLimit", "label", "eth", "canImpulse",
-    "thetaStart", "bulletColl", "lightC", "hitEff", "shotEff", "noSCF", "leaderResults", "darken", "aiColl", "perk",
-    "ignoreOnStuck", "bobS", "bobD", "pMov", "nodeTag", "projT", "driftOnStuck", "showPickupIcon", "showMinimap", "noTexture",
-    "botName", "botClass", "botForceClass", "botPrimSkin", "botDye", "botFace", "botHat", "botHead", "botBack", "botBody",
-    "botWaist", "botWrist", "botShoes", "botPet", "botLives", "botMelee", "botTargetBots", "botTargetTeam", "botForceCrouch",
-    "botAttackTarget", "botFollowTarget", "botWatchTarget", "botMimicTarget", "botSlideHop", "botCanRespawn",
-    "botUseSpawnDelay", "botRemoveOnDeath", "botNodYes", "botNodNo", "botJoinMessage", "botLeaveMessage", "botVoiceChat",
-    "botGodMode", "botRoam", "botRandomSpawn", "botTeam", "healthMlt", "dmgMlt", "spreadMlt", "botRecoil", "randWepGroup",
-    "objectiveLink", "rangeMlt", "speedMlt", "invincibleOnStuck", "rewardMethod", "shotOffH", "rewardReq", "rewardNode",
-    "anchorType", "botNodeGroup", "botNode", "botNodeNext", "botNodeRev",
+    "pos", "rot", "size", "sprayTexture", "assetTexture", "texture", "collidable", "visible", "intensity",
+    "lightMapChannel", "normalMapChannel", "bumpMapChannel", "displacementMapChannel", "emissiveMapChannel",
+    "specularMapChannel", "alphaMapChannel", "metalnessMapChannel", "roughnessMapChannel", "lightMapIntensity",
+    "bumpScale", "displacementScale", "normalScale", "lightMapFlipY", "normalMapFlipY", "bumpMapFlipY",
+    "displacementMapFlipY", "emissiveMapFlipY", "specularMapFlipY", "alphaMapFlipY", "metalnessMapFlipY",
+    "roughnessMapFlipY", "angle", "penumbra", "decay", "distance", "color", "emissive", "opacity", "forceTrans",
+    "direction", "border", "highlighted", "renderSide", "fog", "texOffX", "texOffY", "texRot", "prefab",
+    "texturePrefab", "texStretch", "part", "partC", "partS", "partSP", "partG", "partSC", "partD", "partB", "boost",
+    "bounce", "edgeNoise", "team", "single", "weaponId", "weaponReplace", "randWep", "poster", "channel", "node",
+    "momentum", "ambient", "hidden", "closeable", "startClosed", "event", "action", "constant", "fsize", "fcolor",
+    "bcolor", "text", "backVisible", "tAlign", "cmpSpwn", "classIndx", "respawnT", "respawnR", "turnSpd", "speed",
+    "interfaceId", "interfaceT", "withdraw", "deposit", "objectiveId", "faces", "wSpeed", "wHeight", "tilesX", "tilesZ",
+    "fullcone", "snd", "vol", "dist", "roll", "rate", "emitfrom", "mSize", "spin", "texSmooth", "constantTxt",
+    "forceDir", "constE", "dynamic", "gravity", "itemID", "openEnded", "sides", "leaderOrder", "leaderType", "canShoot",
+    "assetID", "aiName", "assetSound", "visDis", "deathSound", "idleSound", "shootSound", "agroSound", "canHit",
+    "canContactHit", "xrayVis", "frate", "projSpd", "rewardType", "behaviorType", "isBoss", "canDest", "health",
+    "crouch", "canTrigger", "startDest", "canWallJump", "chance", "singleP", "actionCost", "spinAxis", "actionMethod",
+    "selfDestruct", "score", "method", "penetrable", "movingSpeed", "movingAxis", "interfaceIdT", "teamOnly",
+    "frameCount", "frameSpeed", "trigActions", "telCheckPoint", "cast", "receive", "animS", "delay", "projA", "projG",
+    "projSC", "projS", "hbHeight", "hbWidth", "mYOff", "projDmg", "roamTime", "roamRad", "mROff", "meldmg", "hrate",
+    "melrng", "enclose", "targAI", "aiChasd", "aicur", "targPlr", "shoBrk", "projGL", "distM", "nodeId", "pathInput",
+    "pathType", "vdrag", "vangDrag", "vturnSpd", "vturnLean", "vmaxPow", "vpowerF", "vmaxRev", "vrevF", "vRange",
+    "lightTarget", "interactM", "stype", "startAnim", "forceRender", "minimum", "texScale", "static", "scriptId",
+    "texEncode", "camType", "forceCam", "followPath", "canGrapple", "leaderTypeCust", "radiusTop", "radiusBottom",
+    "thetaLength", "texVar", "alphaTest", "ocolor", "othick", "mimicSprite", "spread", "shoArY", "shoDel", "melDel",
+    "projMS", "aiLvl", "aiTagScale", "melSound", "melHitSound", "shootHitSound", "friendly", "melShake", "shoShake",
+    "critDmg", "playerCollidable", "stepSrc", "skyDome", "skyDomeCol0", "skyDomeCol1", "skyDomeCol2", "skyDomeEmis",
+    "skyDomeEmisTex", "skyDomeTex", "skyDomeTexA", "skyDomeMovD", "skyDomeMovT", "shadowR", "shadowD", "ambientC",
+    "ambientI", "light", "lightD", "lightI", "sunAngX", "sunAngY", "sky", "fogC", "fogD", "correctLights",
+    "toneMapping", "toneMappingExposure", "outputEncoding", "spawnChance", "explode", "complexColl", "objLimit",
+    "label", "eth", "canImpulse", "thetaStart", "bulletColl", "lightC", "hitEff", "shotEff", "noSCF", "leaderResults",
+    "darken", "aiColl", "perk", "ignoreOnStuck", "bobS", "bobD", "pMov", "nodeTag", "projT", "driftOnStuck",
+    "showPickupIcon", "showMinimap", "noTexture", "botName", "botClass", "botForceClass", "botPrimSkin", "botDye",
+    "botFace", "botHat", "botHead", "botBack", "botBody", "botWaist", "botWrist", "botShoes", "botPet", "botLives",
+    "botMelee", "botTargetBots", "botTargetTeam", "botForceCrouch", "botAttackTarget", "botFollowTarget",
+    "botWatchTarget", "botMimicTarget", "botSlideHop", "botCanRespawn", "botUseSpawnDelay", "botRemoveOnDeath",
+    "botNodYes", "botNodNo", "botJoinMessage", "botLeaveMessage", "botVoiceChat", "botGodMode", "botRoam",
+    "botRandomSpawn", "botTeam", "healthMlt", "dmgMlt", "spreadMlt", "botRecoil", "randWepGroup", "objectiveLink",
+    "rangeMlt", "speedMlt", "invincibleOnStuck", "rewardMethod", "shotOffH", "rewardReq", "rewardChance", "rewardNode",
+    "anchorType", "botNodeGroup", "botNode", "botNodeNext", "botNodeRev", "crateType", "dyn",
 };
 
 // ---------------------------------------------------------------------------
@@ -157,10 +165,12 @@ static const cJSON *skins(void) {
     return g_skins;
 }
 
-enum { IT_SPRAY = 4, IT_DYE = 5, IT_COLLECTIBLE = 10, IT_WRIST = 11, IT_TICKET = 13, IT_PLAYER_CARD = 16 }; // data/itemTypes.js
+enum { IT_SPRAY = 4, IT_DYE = 5, IT_COLLECTIBLE = 10, IT_WRIST = 11, IT_TICKET = 13, IT_PLAYER_CARD = 16, IT_EMOJI = 17, IT_PAINT = 18 }; // editor-config-10.0.7.js:4-20
 
 static int skin_listed(const int type) {
-    return !type || (type != IT_SPRAY && type != IT_DYE && type != IT_COLLECTIBLE && type != IT_WRIST && type != IT_TICKET && type != IT_PLAYER_CARD);
+    // skinList / viewTextureList (editor-10.0.7.js:14567, :20982): no sprays, dyes, collectibles, wrists, tickets, cards, emotes or paints
+    return !type || (type != IT_SPRAY && type != IT_DYE && type != IT_COLLECTIBLE && type != IT_WRIST && type != IT_TICKET && type != IT_PLAYER_CARD &&
+                     type != IT_EMOJI && type != IT_PAINT);
 }
 
 // Editor.getItemDesc: the i18n market label without " Item", else the weapon's name
@@ -249,6 +259,14 @@ static int event_is(const EditorObject *o, const char *name) {
 // onChange handlers
 
 static void refresh_panel(EdCtl *c, const cJSON *v) { (void) c; (void) v; g_ed.dirty_panel = 1; } // updateObjConfigGUI
+
+// regen() / regenM() without updateObjConfigGUI: v10's Asset ID, Variant, Item, weapon Type and sign Content
+// (index-10.0.7.js:7697, :7942, :7983, :7997, :8187, :10003, :11296) leave the panel as it is, so a text field
+// keeps its focus while typing
+static void regen_only(EdCtl *c, const cJSON *v) {
+    (void) c; (void) v;
+    if (g_ed.proj->selected) ed_obj_rebuild(g_ed.proj->selected);
+}
 
 static void regen_refresh(EdCtl *c, const cJSON *v) {
     (void) c; (void) v;
@@ -621,7 +639,7 @@ static void build_header(const EditorPrefab *pf) {
     if (IS("SHOWCASE")) {
         EdCtl *c = ed_gui_select_click(B, "Item", g_skin_opts, g_skin_count, 0, "dashboard_customize", act_texture_list);
         ed_ctl_bind_obj(c, "itemID");
-        edp_finish(B, c, regen_refresh);
+        edp_finish(B, c, regen_only);
     }
     if (HAS(EP_CANSETOBJECTIVE)) sl("Objective Id", "objectiveId", 0, 10, 1, 0, NULL);
     if (IS("CAMERA")) {
@@ -728,10 +746,10 @@ static void build_style(const EditorPrefab *pf, const int group) {
             if (cJSON_GetArraySize(variants) > 0) {
                 int n;
                 const EdOption *v = names_options(variants, 0, &n);
-                sel("Variant", "texVar", v, n, 1, regen_refresh);
+                sel("Variant", "texVar", v, n, 1, regen_only);
             }
             if (HAS(EP_ASSETTEXTURES)) {
-                txt("Asset ID", "assetTexture", "Texture Asset ID", 1, regen_refresh, 0);
+                txt("Asset ID", "assetTexture", "Texture Asset ID", 1, regen_only, 0);
                 select_button(B, "Select Custom", SEL_TEXTURE);
             }
             if (HAS(EP_CANSTRETCH)) {
@@ -763,7 +781,7 @@ static void build_style(const EditorPrefab *pf, const int group) {
         fend(1);
     }
     if (HAS(EP_AI) || IS("CUSTOM_ASSET") || IS("TRIGGER")) {
-        txt("Asset ID", "assetID", "ID", 1, regen_refresh, 1);
+        txt("Asset ID", "assetID", "ID", 1, regen_only, 1);
         select_button(B, "Select Custom", SEL_MODEL);
     }
     if (pf->variants > 0) {
@@ -774,7 +792,7 @@ static void build_style(const EditorPrefab *pf, const int group) {
         const EdOption *v = names_options(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(data_list("prefabVariants"), id), "names"), 0, &n);
         EdCtl *c = ed_gui_select_click(B, "Variant", v, n, 0, "dashboard_customize", act_model_list);
         ed_ctl_bind_obj(c, "texVar");
-        edp_finish(B, c, regen_refresh);
+        edp_finish(B, c, regen_only);
     }
     if (!spray) {
         int n;
@@ -903,6 +921,7 @@ static void build_ai(void) {
     static const EdOption req[] = {{"Player Active", 0, NULL}, {"Player Active & Damage", 1, NULL}, {"Player Killed", 2, NULL}};
     sel("Reward Method", "rewardMethod", method, 3, 1, NULL);
     sel("Reward Requirements", "rewardReq", req, 3, 1, NULL);
+    txt("Rarity Chances", "rewardChance", "8 values, one per rarity, summing to 100 (empty: default odds)", 1, NULL, 0); // index-10.0.7.js:9462
     sl("Reward Node Id", "rewardNode", 0, 1000, 1, 1, NULL);
     rule();
     fend(1);
@@ -1042,7 +1061,7 @@ static void build_technical(const EditorPrefab *pf, const int group) {
             i++;
         }
         fold("Weapon", 1, 0, 0, "technical.weapon");
-        sel("Type", "weaponId", w, n, 1, regen_refresh);
+        sel("Type", "weaponId", w, n, 1, regen_only);
         sw("Replaceable", "weaponReplace", 1, NULL);
         sw("Random", "randWep", 1, NULL);
         sl("Grouping Id", "randWepGroup", 0, 10000, 1, 1, NULL);
@@ -1233,7 +1252,7 @@ static void build_type_folders(const EditorPrefab *pf) {
         fold("Text", 0, 0, 0, "text");
         if (!IS("LEADERBOARD")) {
             static const EdOption align[] = {{"Left", 0, NULL}, {"Center", 1, NULL}, {"Right", 2, NULL}};
-            txt("Content", "text", "Content", 0, regen_refresh, 0);
+            txt("Content", "text", "Content", 0, regen_only, 0);
             sel("Align", "tAlign", align, 3, 0, NULL);
         }
         fold("Font", 1, 0, 0, "text.font");
@@ -1549,11 +1568,12 @@ static int select_item(const char *what, const HtmlArg *a, const int n) {
     const int arg0 = (int) a[0].num;
     if (!strcmp(what, "tex")) {
         if ((pf->flags & EP_NOTSTYLEABLE) || !(pf->flags & EP_TEXTURABLE) || arg0 < 0 || arg0 >= EDITOR_TEXTURE_COUNT) return 1;
-        // assetTexture = 0; texVar = v; texture = prefabs.textures[t].name
+        // assetTexture = 0; texVar = v; texture = prefabs.textures[t].name (editor-10.0.7.js:20899-20906)
+        set_num(o, "assetTexture", 0);
+        set_num(o, "texVar", n >= 2 ? (int) a[1].num : 0);
         cJSON *name = cJSON_CreateString(editor_textures[arg0]);
         ed_prop_set(o, "texture", name);
         cJSON_Delete(name);
-        set_num(o, "texVar", n >= 2 ? (int) a[1].num : 0);
     } else if (!strcmp(what, "model")) {
         if (!pf->variants) return 1;
         set_num(o, "texVar", arg0);
@@ -1570,42 +1590,66 @@ static int select_item(const char *what, const HtmlArg *a, const int n) {
     return 1;
 }
 
-// KE.searchItems(input, textures): filter the list items by name / alias / variant (textures) or
-// by keyword / name / weapon / creators (skins)
+// UTILS search match (editor-config-10.0.7.js:4406): either string contains the other, ignoring case
+static int search_match(const char *q, const char *field) {
+    if (!field) return 0;
+    char a[256], f[256];
+    snprintf(a, sizeof(a), "%s", q);
+    snprintf(f, sizeof(f), "%s", field);
+    for (char *p = a; *p; p++) *p = (char) tolower((unsigned char) *p);
+    for (char *p = f; *p; p++) *p = (char) tolower((unsigned char) *p);
+    return strstr(a, f) != NULL || strstr(f, a) != NULL;
+}
+
+static const char *json_str_or_null(const cJSON *o, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    return cJSON_IsString(v) && v->valuestring[0] ? v->valuestring : NULL;
+}
+
+// KE.searchItems(input, textures) (editor-10.0.7.js:20922-20968): an item shows when the query is empty, it has no
+// data-index or no store entry, or the query matches the texture's name / alias / a variant name, or the skin's
+// keyword, "drops" (drop items), limited tag, weapon name, name or a creator
+static int search_item_shown(const char *q, const char *index, const int textures) {
+    if (textures) {
+        const cJSON *t = cJSON_GetArrayItem(data_list("textures"), atoi(index)); // "<t>_<variant>"
+        if (!t) return 1;
+        if (search_match(q, json_str_or_null(t, "name"))) return 1;
+        if (search_match(q, json_str_or_null(t, "alias"))) return 1;
+        const cJSON *v;
+        cJSON_ArrayForEach(v, cJSON_GetObjectItemCaseSensitive(t, "variants")) {
+            if (search_match(q, cJSON_IsString(v) ? v->valuestring : json_str_or_null(v, "name"))) return 1;
+        }
+        return 0;
+    }
+    const cJSON *k = cJSON_GetArrayItem(skins(), atoi(index));
+    if (!k) return 1;
+    if (search_match(q, json_str_or_null(k, "keyW"))) return 1;
+    if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(k, "drop")) && search_match(q, "drops")) return 1;
+    if (search_match(q, json_str_or_null(k, "limT"))) return 1;
+    const int weapon = (int) ed_json_num(k, "weapon", 0);
+    if (weapon && search_match(q, ed_json_str(cJSON_GetArrayItem(data_list("weapons"), weapon - 1), "name", ""))) return 1;
+    if (search_match(q, ed_json_str(k, "name", ""))) return 1;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(k, "creators")) {
+        if (cJSON_IsString(c) && search_match(q, c->valuestring)) return 1;
+    }
+    return 0;
+}
+
 static int h_search(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
-    (void) u; (void) a; (void) n;
+    (void) u;
     char q[128] = "";
     html_dom_get_value(ev->target, q, sizeof(q));
-    for (char *p = q; *p; p++) *p = (char) tolower((unsigned char) *p);
     const int textures = n >= 2 && a[1].kind == HTML_ARG_BOOL && a[1].num != 0;
-    enum { MAX_ITEMS = 8192 }; // the skin list (store.skins): ~6000
+    enum { MAX_ITEMS = 16384 }; // the skin list (store.skins): ~8200
     HtmlElem *items = malloc(MAX_ITEMS * sizeof(*items));
     if (!items) return 1;
     int count = html_dom_query_all(html_dom_by_id("genericPop"), ".textureListItem", items, MAX_ITEMS);
     if (count > MAX_ITEMS) count = MAX_ITEMS;
     for (int i = 0; i < count; i++) {
         char index[32] = "";
-        int show = 1;
-        if (q[0] && html_dom_get_attr(items[i], "data-index", index, sizeof(index)) >= 0) {
-            show = 0;
-            char hay[512] = "";
-            if (textures) {
-                const cJSON *t = cJSON_GetArrayItem(data_list("textures"), atoi(index));
-                if (!t) show = 1;
-                else {
-                    snprintf(hay, sizeof(hay), "%s|%s", ed_json_str(t, "name", ""), ed_json_str(t, "alias", ""));
-                    const cJSON *v;
-                    cJSON_ArrayForEach(v, cJSON_GetObjectItemCaseSensitive(t, "variants")) {
-                        const size_t l = strlen(hay);
-                        if (cJSON_IsString(v) && l + 1 < sizeof(hay)) snprintf(hay + l, sizeof(hay) - l, "|%s", v->valuestring);
-                    }
-                }
-            } else {
-                html_dom_get_text(items[i], hay, sizeof(hay));
-            }
-            for (char *p = hay; *p; p++) *p = (char) tolower((unsigned char) *p);
-            if (!show) show = strstr(hay, q) != NULL;
-        }
+        const int has_index = html_dom_get_attr(items[i], "data-index", index, sizeof(index)) >= 0;
+        const int show = !q[0] || !has_index || search_item_shown(q, index, textures);
         html_dom_set_style(items[i], "display", show ? "inline-block" : "none");
     }
     free(items);

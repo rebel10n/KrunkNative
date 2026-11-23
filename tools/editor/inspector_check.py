@@ -69,6 +69,8 @@ V10_INSERTS = [
     # AI Boss and Can Contact Hit (IDX:17040, 17226)
     (("55",), r"L\[subsection\] Target other AI ", 0, "L[subsection] Boss : switch=0"),
     (("55",), r"L\[subsection\] Can Melee ", 0, "L[subsection] Can Contact Hit : switch=0"),
+    # AI Rewards' Rarity Chances after Reward Requirements (v10.0.7, index-10.0.7.js:9462-9472)
+    (("55",), r"L\[subsection\] Reward Requirements ", 0, "L[subsection] Rarity Chances : text(8 values, one per rarity, summing to 100 (empty: default odds))="),
     # Crate Type (IDX:16786-16829), the first line of Technical & Logic
     (("90",), r"F Technical & Logic", 1, "L[] Crate Type : select#4[Random..Power-ups]=Random"),
     # Environment Fade Time (IDX:18990, 20052): the ENVIRONMENT_ZONE dump and the Environment panel

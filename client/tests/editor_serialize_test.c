@@ -788,6 +788,16 @@ static void v10_checks(void) {
     o = obj_of("{\"i\":0,\"p\":[0,0,0],\"dyn\":true,\"pn\":\"door\",\"sfz\":1}");
     CHECK(o && num(o, "dyn") == 1 && has_key(o, "pn") && num(o, "sfz") == 1, "CUBE dyn / pn / sfz (E10:7814, 8783-8787)");
     cJSON_Delete(o);
+    // v10.0.7 AI Rarity Chances: rewc kept when it is digits, dots and commas, after rewr (editor-10.0.7.js:7357, :8467)
+    o = obj_of("{\"i\":55,\"p\":[0,0,0],\"rewr\":1,\"rewc\":\"50,25.5,24.5\",\"rewn\":2}");
+    const cJSON *rewc = o ? cJSON_GetObjectItemCaseSensitive(o, "rewc") : NULL;
+    CHECK(cJSON_IsString(rewc) && !strcmp(rewc->valuestring, "50,25.5,24.5") && rewc->prev && !strcmp(rewc->prev->string, "rewr") &&
+              rewc->next && !strcmp(rewc->next->string, "rewn"),
+          "AI_SPAWNER rewc kept between rewr and rewn");
+    cJSON_Delete(o);
+    o = obj_of("{\"i\":55,\"p\":[0,0,0],\"rewc\":\"50;50\"}");
+    CHECK(o && !has_key(o, "rewc"), "AI_SPAWNER: an invalid rewc is dropped");
+    cJSON_Delete(o);
     // botPaths: import -> BOT_PATH_NODEs -> export (E10:17046-17064, 16405-16420)
     cJSON *doc = cJSON_Parse("{\"name\":\"bp\",\"objects\":[],\"spawns\":[],\"botPaths\":[{\"p\":[[0,0,0],[10,0,0]],\"r\":0},{\"p\":[[5,5,5]],\"r\":1}],"
                              "\"scripts\":{\"shared\":\"c2hhcmVk\"}}");
