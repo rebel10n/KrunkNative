@@ -346,7 +346,7 @@ H(h_kn_host_map) {
 H(h_kn_retry) { UNUSED; menu_retry_connect(); return 0; }
 H(h_kn_host_offline) { UNUSED; menu_host_offline(); return 0; }
 
-// GUI.endScreen.changeTab('leaderboard'|'performance'|'clanwar'|'medals'): end-screen tabs (hud_ui.c)
+// GUI.endScreen.changeTab('leaderboard'|'performance'|'medals'|'rewards'): end-screen tabs (hud_ui.c); v10.0.7 has no 'clanwar' tab
 H(h_end_screen_tab) {
     UNUSED;
     hud_ui_end_screen_tab(arg_str(ev, args, argc, 0, ""));

@@ -311,6 +311,7 @@ static void kio_build(void) {
     a->is_dev = (int) obj_num("player_developer");
     const int role = (int) obj_num("player_role");
     a->is_mod = role == 2; // updatePerms: isMod = role 2 (a Deputy, role 3, gets no moderator actions: genList :214291)
+    a->is_deputy = role == 3; // isDeputy: Turf Wars' recruitment Take Down is isDev || isMod || isDeputy (deob-10.0.7.js:145470-145473)
     a->following = (int) obj_num("player_following");
     a->followers = (int) obj_num("player_followed");
     a->job_rating = (int) obj_num("jobrating");
@@ -374,6 +375,7 @@ static const AccountInfo *kio_account(void) {
         const int in_game = krunker_net_account(&k);
         g_kio_acc.is_dev = in_game && k.dev;
         g_kio_acc.is_mod = in_game && k.role == 2;
+        g_kio_acc.is_deputy = in_game && k.role == 3;
     }
     return &g_kio_acc;
 }

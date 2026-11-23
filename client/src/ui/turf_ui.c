@@ -73,6 +73,8 @@ typedef struct {
     int earn_page;    // 20 (My Clan) / 7 (clan view) per page
     int pay_daily;    // payouts: Daily View
     int pay_day;      // payouts day (-1 = the current day)
+    int pay_want;     // payouts: Daily View clicked, today's read pending (v10 switches on its success)
+    char pay_err[128]; // payouts: the last failed read's message (v10's error slot)
 } ClanFilters;
 
 static struct {
@@ -146,12 +148,44 @@ static void esc_attr(StrBuf *sb, const char *s) { sb_append_esc(sb, s ? s : "");
 
 static void loading(StrBuf *sb, const char *hash, const char *text) { sb_appendf(sb, "<div class=\"loading svelte-%s\">%s</div>", hash, text); }
 
+// A failed read's message as v10.0.7's territorialWars / clans readers show it: they throw
+// Error(body.error.message || "Failed to fetch <thing>") (deob-10.0.7.js:143400-143440, :144136-144139,
+// :144957-144960, :145494-145498) over the gapi wrapper's {data, error} (:iïîiíîï); a transport failure is the
+// browser's fetch TypeError, "Failed to fetch". `fallback` is the reader's "Failed to fetch <thing>".
+static const char *req_error(const V10Req *r, const char *fallback) {
+    if (r->status < 0) return "Failed to fetch";
+    const cJSON *e = cJSON_GetObjectItem(r->json, "error");
+    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItem(e, "message"));
+    if (!msg || !msg[0]) msg = cJSON_GetStringValue(cJSON_GetObjectItem(r->json, "message")); // KrunkNative: a flat {message}
+    return msg && msg[0] ? msg : fallback;
+}
+
 static void error_box(StrBuf *sb, const char *hash, const V10Req *r, const char *fallback) {
-    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItem(r->json, "message"));
-    if (!msg) msg = cJSON_GetStringValue(cJSON_GetObjectItem(r->json, "error"));
     sb_appendf(sb, "<div class=\"error svelte-%s\">", hash);
-    sb_append_esc(sb, msg && msg[0] ? msg : fallback);
+    sb_append_esc(sb, req_error(r, fallback));
     sb_append(sb, "</div>");
+}
+
+// v10's clan logo (iíïiììï, deob-10.0.7.js:27901): clans/<id>.png?v=<version> on Krunker's user-assets host,
+// drawn where the row's logo version is set. KrunkNative: a Box Office clan's picture is the brain's
+// GET /api/clans/<id>/logo?v=<version> (clan_logo.c, as clan_ui.c draws it); a krunker.io account's Turf Wars
+// reads come from krunker.io, so its clans' logos are on Krunker's host. Returns 0 (nothing drawn) without one.
+static int logo_img(StrBuf *sb, const char *cls, const double clan_id, const double version, const char *alt) {
+    if (clan_id <= 0 || version <= 0) return 0;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER)
+        sb_appendf(sb, "<img class=\"%s\" src=\"https://user-assets.krunker.io/clans/%.0f.png?v=%.0f\" alt=\"", cls, clan_id, version);
+    else {
+        const char *base = backend_url();
+        sb_appendf(sb, "<img class=\"%s\" src=\"%s/api/clans/%.0f/logo?v=%.0f\" alt=\"", cls, base ? base : "", clan_id, version);
+    }
+    sb_append_esc(sb, alt ? alt : "");
+    sb_append(sb, "\">");
+    return 1;
+}
+
+// logo_img or Svelte's empty-branch anchor
+static void logo_or_anchor(StrBuf *sb, const char *cls, const double clan_id, const double version, const char *alt) {
+    if (!logo_img(sb, cls, clan_id, version, alt)) sb_append(sb, "<!---->");
 }
 
 static const cJSON *data_of(const V10Req *r) { return r->status == 200 ? cJSON_GetObjectItem(r->json, "data") : NULL; }
@@ -345,13 +379,13 @@ static void gen_overview(StrBuf *sb) {
         sb_append(sb, "<div style=\"padding: 40px; text-align: center; color: rgba(255, 255, 255, 0.7);\" class=\"svelte-102279m\">Loading turf wars data...</div>");
         return;
     }
-    if (!cJSON_IsArray(status)) {
-        const char *msg = v10_str(r->json, "message");
+    if (r->status != 200) { // "Error: " + (error.message || "Failed to fetch territorial wars status") (deob-10.0.7.js:144136-144139, :144217)
         sb_append(sb, "<div style=\"padding: 40px; text-align: center; color: #E85656;\" class=\"svelte-102279m\">Error: ");
-        sb_append_esc(sb, msg[0] ? msg : "Failed to load turf wars data");
+        sb_append_esc(sb, req_error(r, "Failed to fetch territorial wars status"));
         sb_append(sb, "</div>");
         return;
     }
+    if (!cJSON_IsArray(status)) status = NULL; // `data || []` (:144140): the bare map
     const int sel = T.hover >= 0 ? T.hover : T.locked; // selectedTerritory = hovered || locked
     sb_append(sb, "<div class=\"territory-map-container svelte-102279m\"><div class=\"territory-map-wrapper svelte-102279m\">"
                   "<img alt=\"Territory Map\" class=\"territory-map svelte-102279m\" src=\"./img/territory_map.webp\"> ");
@@ -362,7 +396,9 @@ static void gen_overview(StrBuf *sb) {
     // the <svg> hit layer: clicking the map's background unlocks the territory
     sb_append(sb, " <div class=\"territory-svg-overlay svelte-102279m\" role=\"button\" tabindex=\"-1\" aria-label=\"Map background - click to unlock territory\" "
                   "onclick=\"knTwUnlock()\">");
-    for (int i = 0; i < TURF_MAP_COUNT; i++) hit_cells(sb, i);
+    // only the territories the status lists are drawn (the {#each territories} of :144143-144147, :144236)
+    for (int i = 0; i < TURF_MAP_COUNT; i++)
+        if (status_of(status, k_territory[i].map)) hit_cells(sb, i);
     sb_append(sb, "</div> ");
     for (int i = 0; i < TURF_MAP_COUNT; i++) {
         const cJSON *m = status_of(status, k_territory[i].map);
@@ -372,9 +408,11 @@ static void gen_overview(StrBuf *sb) {
             continue;
         }
         sb_appendf(sb, "<div class=\"territory-label-container svelte-102279m%s\" style=\"left: %g%%; top: %g%%;\"><div class=\"territory-label-wrapper svelte-102279m\">"
-                       "<div class=\"territory-clan svelte-102279m\"><!----> <span class=\"clan-name clickable-clan-name svelte-102279m\" style=\"color: %s;\" "
-                       "onclick=\"knTwClan('%.0f')\">",
-                   sel == i ? " selected" : "", k_territory[i].lx / VIEW_W * 100.0, k_territory[i].ly / VIEW_H * 100.0, clan_color(clan, "#ffffff"),
+                       "<div class=\"territory-clan svelte-102279m\">",
+                   sel == i ? " selected" : "", k_territory[i].lx / VIEW_W * 100.0, k_territory[i].ly / VIEW_H * 100.0);
+        // the controller's logo when clanId && clanLogo (deob-10.0.7.js:144260-144265)
+        logo_or_anchor(sb, "territory-clan-logo svelte-102279m", v10_num(m, "clan_id", 0), v10_num(m, "clan_logo", 0), clan);
+        sb_appendf(sb, " <span class=\"clan-name clickable-clan-name svelte-102279m\" style=\"color: %s;\" onclick=\"knTwClan('%.0f')\">", clan_color(clan, "#ffffff"),
                    v10_num(m, "clan_id", 0));
         sb_append_esc(sb, clan);
         sb_append(sb, "</span></div></div></div>");
@@ -390,12 +428,20 @@ static void gen_overview(StrBuf *sb) {
         sb_append(sb, "</h3> <button class=\"close-button svelte-102279m\" aria-label=\"Close details\" onclick=\"knTwClose()\"><i class=\"material-icons svelte-102279m\">close</i></button></div> "
                       "<div class=\"panel-content svelte-102279m\"><div class=\"detail-section svelte-102279m\"><div class=\"detail-label svelte-102279m\">Controlled by</div> "
                       "<div class=\"detail-value svelte-102279m\">");
-        const int has_id = m && cJSON_IsNumber(cJSON_GetObjectItem(m, "clan_id"));
+        const int has_id = m && cJSON_IsNumber(cJSON_GetObjectItem(m, "clan_id")) && v10_num(m, "clan_id", 0) != 0;
+        // clanId && clanLogo: the logo beside the name in .clan-info-with-logo, else the bare name (deob-10.0.7.js:144294-144324)
+        const int with_logo = has_id && v10_num(m, "clan_logo", 0) > 0;
+        if (with_logo) {
+            sb_append(sb, "<div class=\"clan-info-with-logo svelte-102279m\">");
+            logo_img(sb, "clan-logo-detail svelte-102279m", v10_num(m, "clan_id", 0), v10_num(m, "clan_logo", 0), clan[0] ? clan : "Clan");
+            sb_append(sb, " ");
+        }
         sb_appendf(sb, "<span class=\"clickable-clan-name svelte-102279m\" style=\"color: %s;\"", clan_color(clan, "#ffffff"));
         if (has_id) sb_appendf(sb, " onclick=\"knTwClan('%.0f')\"", v10_num(m, "clan_id", 0));
         sb_append(sb, ">");
         sb_append_esc(sb, clan[0] ? clan : "Eterno");
-        sb_append(sb, "</span></div></div> <div class=\"detail-section svelte-102279m\"><div class=\"detail-label svelte-102279m\">Top Clans Today</div> "
+        sb_append(sb, with_logo ? "</span></div>" : "</span>");
+        sb_append(sb, "</div></div> <div class=\"detail-section svelte-102279m\"><div class=\"detail-label svelte-102279m\">Top Clans Today</div> "
                       "<div class=\"leaderboard-list svelte-102279m\">");
         const cJSON *e;
         int k = 0;
@@ -406,8 +452,11 @@ static void gen_overview(StrBuf *sb) {
             char kills[32];
             v10_fmt_int(kills, sizeof(kills), v10_num(e, "kills", 0));
             sb_appendf(sb, "<div class=\"leaderboard-entry svelte-102279m%s\"><span class=\"leaderboard-position svelte-102279m\">%d.</span> "
-                           "<div class=\"leaderboard-clan-info svelte-102279m\"><!----> <span class=\"leaderboard-clan clickable-clan-name svelte-102279m\" style=\"color: %s;\"",
-                       pos <= TURF_SPLIT_COUNT ? " paid" : "", pos, clan_color(tag, "#ffffff"));
+                           "<div class=\"leaderboard-clan-info svelte-102279m\">",
+                       pos <= TURF_SPLIT_COUNT ? " paid" : "", pos);
+            // clan_logo > 0 (deob-10.0.7.js:144332-144337)
+            logo_or_anchor(sb, "leaderboard-clan-logo svelte-102279m", v10_num(e, "clan_id", 0), v10_num(e, "clan_logo", 0), tag[0] ? tag : "Clan");
+            sb_appendf(sb, " <span class=\"leaderboard-clan clickable-clan-name svelte-102279m\" style=\"color: %s;\"", clan_color(tag, "#ffffff"));
             if (cJSON_IsNumber(cJSON_GetObjectItem(e, "clan_id"))) sb_appendf(sb, " onclick=\"knTwClan('%.0f')\"", v10_num(e, "clan_id", 0));
             sb_append(sb, ">");
             sb_append_esc(sb, tag[0] ? tag : "Unknown");
@@ -592,9 +641,22 @@ static void payouts(StrBuf *sb, const char *clan, ClanFilters *f, const int curr
         sb_append(sb, "<div class=\"payouts-loading svelte-myp8tq\">Loading payouts...</div></div>");
         return;
     }
-    if (!cJSON_IsObject(t)) {
-        sb_append(sb, "<div class=\"payouts-error svelte-myp8tq\">Failed to load payouts</div></div>");
+    if (!cJSON_IsObject(t)) { // onMount's catch: error.message || "Failed to fetch clan payouts" (deob-10.0.7.js:143421-143426, :143542-143550)
+        sb_append(sb, "<div class=\"payouts-error svelte-myp8tq\">");
+        sb_append_esc(sb, req_error(totals, "Failed to fetch clan payouts"));
+        sb_append(sb, "</div></div>");
         return;
+    }
+    if (f->pay_want) { // "Daily View" fetches today first and switches only when that read succeeds (:143487-143489, :143528-143535)
+        const V10Req *wr = get_clan_payouts(clan, current_day);
+        if (wr->status == 200 && cJSON_IsObject(data_of(wr))) {
+            f->pay_want = 0;
+            f->pay_daily = 1;
+            f->pay_day = -1;
+        } else if (wr->status != 0) {
+            f->pay_want = 0;
+            snprintf(f->pay_err, sizeof(f->pay_err), "%s", req_error(wr, "Failed to fetch clan payouts"));
+        }
     }
     const int day = f->pay_day >= 0 ? f->pay_day : current_day;
     sb_appendf(sb, "<div class=\"payouts-controls svelte-myp8tq\"><div class=\"view-tabs svelte-myp8tq\"><button class=\"view-tab svelte-myp8tq%s\" onclick=\"knTwPayView('%s',0)\">"
@@ -670,10 +732,14 @@ static void payouts(StrBuf *sb, const char *clan, ClanFilters *f, const int curr
             }
             sb_append(sb, "</div>");
         }
-    } else if (dr && dr->status != 0) {
-        sb_append(sb, "<div class=\"payouts-error svelte-myp8tq\">Failed to load daily payouts</div>");
     } else sb_append(sb, "<div class=\"payouts-empty svelte-myp8tq\">Select a date above to view payouts.</div>");
-    sb_append(sb, " <!----></div>");
+    // a failed daily read: its message under the tables (the trailing {#if error}, :143683-143688)
+    if (f->pay_daily && dr && dr->status != 0 && dr->status != 200) snprintf(f->pay_err, sizeof(f->pay_err), "%s", req_error(dr, "Failed to fetch clan payouts"));
+    if (f->pay_err[0]) {
+        sb_append(sb, " <div class=\"payouts-error svelte-myp8tq\">");
+        sb_append_esc(sb, f->pay_err);
+        sb_append(sb, "</div></div>");
+    } else sb_append(sb, " <!----></div>");
 }
 
 static void historical_day(StrBuf *sb, const cJSON *clan, const cJSON *d) {
@@ -688,9 +754,10 @@ static void historical_day(StrBuf *sb, const cJSON *clan, const cJSON *d) {
                    "<span class=\"day-map svelte-51j5cz\">",
                v10_num(d, "day", 0));
     sb_append_esc(sb, v10_str(d, "map_name"));
-    sb_appendf(sb, "</span></div> <div class=\"vs-comparison svelte-51j5cz\"><div class=\"clan-side our-clan svelte-51j5cz\"><div class=\"clan-header svelte-51j5cz\"><!----> "
-                   "<div class=\"clan-name svelte-51j5cz\" style=\"color: %s;\">",
-               clan_color(tag, "#5ce05a"));
+    sb_append(sb, "</span></div> <div class=\"vs-comparison svelte-51j5cz\"><div class=\"clan-side our-clan svelte-51j5cz\"><div class=\"clan-header svelte-51j5cz\">");
+    // our clan's logo when clan_logo > 0 (deob-10.0.7.js:144729-144734)
+    logo_or_anchor(sb, "clan-logo-small svelte-51j5cz", v10_num(clan, "clan_id", 0), v10_num(clan, "clan_logo", 0), tag[0] ? tag : "Clan");
+    sb_appendf(sb, " <div class=\"clan-name svelte-51j5cz\" style=\"color: %s;\">", clan_color(tag, "#5ce05a"));
     sb_append_esc(sb, tag);
     sb_appendf(sb, "</div> <div class=\"clan-position svelte-51j5cz\">#%.0f</div></div> <div class=\"clan-stats svelte-51j5cz\"><div class=\"stat-row svelte-51j5cz\">"
                    "<span class=\"stat-label svelte-51j5cz\">Kills</span> <span class=\"stat-value kills svelte-51j5cz\">%s</span></div> <div class=\"stat-row svelte-51j5cz\">"
@@ -705,9 +772,10 @@ static void historical_day(StrBuf *sb, const cJSON *clan, const cJSON *d) {
         v10_fmt_int(deaths, sizeof(deaths), cd);
         if (cd > 0) snprintf(kd, sizeof(kd), "%.2f", ck / cd);
         else snprintf(kd, sizeof(kd), "%s", ck > 0 ? "\xe2\x88\x9e" : "0.00");
-        sb_appendf(sb, "<div class=\"clan-side comparison-clan svelte-51j5cz\"><div class=\"clan-header svelte-51j5cz\"><!----> <div class=\"clan-name clickable-clan-name svelte-51j5cz\" "
-                       "style=\"color: %s;\"",
-                   clan_color(ctag, "#ff6b6b"));
+        sb_append(sb, "<div class=\"clan-side comparison-clan svelte-51j5cz\"><div class=\"clan-header svelte-51j5cz\">");
+        // comparisonClanLogo > 0, src from comparisonClanId || 0 (deob-10.0.7.js:144755-144760)
+        logo_or_anchor(sb, "clan-logo-small svelte-51j5cz", v10_num(d, "comparison_clan_id", 0), v10_num(d, "comparison_clan_logo", 0), ctag);
+        sb_appendf(sb, " <div class=\"clan-name clickable-clan-name svelte-51j5cz\" style=\"color: %s;\"", clan_color(ctag, "#ff6b6b"));
         if (cJSON_IsNumber(cJSON_GetObjectItem(d, "comparison_clan_id"))) sb_appendf(sb, " onclick=\"knTwClan('%.0f')\"", v10_num(d, "comparison_clan_id", 0));
         sb_append(sb, ">");
         sb_append_esc(sb, ctag);
@@ -766,9 +834,12 @@ static void clan_stats(StrBuf *sb, const char *clan_id, const int mine) {
     }
     const char *tag = v10_str(clan, "clan_name");
     const int current = (int) v10_num(clan, "current_day", day_now());
-    sb_appendf(sb, "<div class=\"clan-stats-container svelte-%s\"><div class=\"clan-header svelte-%s\"><div class=\"clan-info svelte-%s\"><!----> "
-                   "<h2 class=\"clan-name svelte-%s\" style=\"color: %s;\">",
-               h, h, h, h, clan_color(tag, "#ffffff"));
+    sb_appendf(sb, "<div class=\"clan-stats-container svelte-%s\"><div class=\"clan-header svelte-%s\"><div class=\"clan-info svelte-%s\">", h, h, h);
+    // the clan's logo when clan_logo > 0 (My Clan deob-10.0.7.js:144628-144633, clan view :146078-146083)
+    char logo_cls[40];
+    snprintf(logo_cls, sizeof(logo_cls), "clan-logo svelte-%s", h);
+    logo_or_anchor(sb, logo_cls, v10_num(clan, "clan_id", 0), v10_num(clan, "clan_logo", 0), tag);
+    sb_appendf(sb, " <h2 class=\"clan-name svelte-%s\" style=\"color: %s;\">", h, clan_color(tag, "#ffffff"));
     sb_append_esc(sb, tag);
     sb_append(sb, "</h2></div>");
     if (!mine) {
@@ -850,7 +921,9 @@ static void clan_stats(StrBuf *sb, const char *clan_id, const int mine) {
     sb_appendf(sb, "</div> <div class=\"stats-section svelte-%s\"><div class=\"section-header svelte-%s\"><h3 class=\"section-title svelte-%s\">Individual Payouts</h3></div> ", h, h, h);
     char id[32];
     snprintf(id, sizeof(id), "%.0f", v10_num(clan, "clan_id", 0));
-    payouts(sb, id, f, current, mine ? "mine" : "other");
+    // My Clan's payouts get only clanId, so their "today" is the client clock (deob-10.0.7.js:144844-144847, :143517);
+    // the clan view's get the clan's current_day (:146214-146220)
+    payouts(sb, id, f, mine ? day_now() : current, mine ? "mine" : "other");
     sb_append(sb, "</div></div></div>");
 }
 
@@ -862,7 +935,7 @@ static void turf_no_clan(StrBuf *sb) {
                       "<p class=\"action-description svelte-51j5cz\">Start your own clan and lead the charge!</p> "
                       "<button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"clearPops();showWindow(13)\">Create Clan</button></div> "
                       "<div class=\"action-section svelte-51j5cz\"><h3 class=\"action-title svelte-51j5cz\">Join Clan</h3> <p class=\"action-description svelte-51j5cz\">Browse recruitment "
-                      "posts and find a clan!</p> <button class=\"main-button svelte-whnh40 main-button-accept-secondary\" type=\"button\" onclick=\"playSelect();knTwTab(3)\">Join Clan</button>"
+                      "posts and find a clan!</p> <button class=\"main-button svelte-whnh40 main-button-accept-secondary\" type=\"button\" onclick=\"knTwTab(3)\">Join Clan</button>"
                       "</div></div> <div class=\"clan-benefits svelte-51j5cz\"><h3 class=\"svelte-51j5cz\">Benefits of Joining a Clan:</h3> <ul class=\"svelte-51j5cz\"><li class=\"svelte-51j5cz\">"
                       "Compete in Turf Wars for map control</li> <li class=\"svelte-51j5cz\">Earn rewards for your clan's victories</li> <li class=\"svelte-51j5cz\">Track your clan's "
                       "performance and rankings</li> <li class=\"svelte-51j5cz\">Work together to dominate the battlefield</li></ul></div></div></div></div>");
@@ -910,7 +983,10 @@ static void gen_my_clan(StrBuf *sb) {
 static void clan_cell(StrBuf *sb, const V10Col *col, const cJSON *r) {
     StrBuf c = {0};
     const char *tag = v10_str(r, "clan_name");
-    sb_appendf(&c, "<div class=\"clan-name-cell svelte-1o1ab69 clickable\"><!----> <span class=\"clan-name svelte-1o1ab69\" style=\"color: %s;\">", clan_color(tag, "#ffffff"));
+    sb_append(&c, "<div class=\"clan-name-cell svelte-1o1ab69 clickable\">");
+    // clanLogo > 0 (deob-10.0.7.js:143809-143814)
+    logo_or_anchor(&c, "clan-logo svelte-1o1ab69", v10_num(r, "clan_id", 0), v10_num(r, "clan_logo", 0), tag);
+    sb_appendf(&c, " <span class=\"clan-name svelte-1o1ab69\" style=\"color: %s;\">", clan_color(tag, "#ffffff"));
     sb_append_esc(&c, tag);
     sb_append(&c, "</span></div>");
     char *html = sb_finish(&c);
@@ -1026,15 +1102,15 @@ static void board_body(StrBuf *sb, const char *hash, const V10Req *r, const char
 static void gen_boards(StrBuf *sb) {
     sb_append(sb, "<div class=\"leaderboards-tab svelte-raovk7\">");
     if (T.board < 0) {
-        sb_append(sb, "<div class=\"leaderboard-grid svelte-raovk7\"><button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(0)\">"
+        sb_append(sb, "<div class=\"leaderboard-grid svelte-raovk7\"><button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"knTwBoard(0)\">"
                       "<div class=\"card-icon svelte-raovk7\">");
         v10_emoji(sb, "\xf0\x9f\x8f\x86", "");
         sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Clans</h3> <p class=\"card-description svelte-raovk7\">"
-                      "View clans ranked by performance.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(1)\">"
+                      "View clans ranked by performance.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"knTwBoard(1)\">"
                       "<div class=\"card-icon svelte-raovk7\">");
         v10_emoji(sb, "\xf0\x9f\x92\xb0", "");
         sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Grossing Clans</h3> <p class=\"card-description svelte-raovk7\">"
-                      "See which clans have earned the most KR from Turf Wars.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(2)\">"
+                      "See which clans have earned the most KR from Turf Wars.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"knTwBoard(2)\">"
                       "<div class=\"card-icon svelte-raovk7\">");
         v10_emoji(sb, "\xe2\xad\x90", "");
         sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Players</h3> <p class=\"card-description svelte-raovk7\">"
@@ -1043,7 +1119,7 @@ static void gen_boards(StrBuf *sb) {
     }
     static const char *const titles[] = {"Top Performing Clans", "Top Grossing Clans", "Top Performing Players"};
     sb_append(sb, "<div class=\"leaderboard-view svelte-raovk7\"><div class=\"view-header svelte-raovk7\">");
-    v10_back_button(sb, "playSelect();knTwBoard(-1)");
+    v10_back_button(sb, "knTwBoard(-1)");
     sb_appendf(sb, " <h2 class=\"view-title svelte-raovk7\">%s</h2></div> ", titles[T.board]);
     char path[320], name[160];
     enc(name, sizeof(name), T.f_name);
@@ -1072,8 +1148,8 @@ static void gen_boards(StrBuf *sb) {
         sb_append(sb, "</div> <div class=\"filter-group svelte-49w24t\"><label class=\"filter-label svelte-49w24t\" for=\"clan-name-filter\">Search by Clan Name:</label> "
                       "<input id=\"clan-name-filter\" type=\"text\" class=\"filter-input svelte-49w24t\" placeholder=\"Clan name\" value=\"");
         esc_attr(sb, T.f_name);
-        sb_append(sb, "\"></div> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"playSelect();knTwApply()\">Apply Filters</button></div> ");
-        board_body(sb, "49w24t", v10_get(path, TTL_MS), "Failed to load top performing clans");
+        sb_append(sb, "\"></div> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"knTwApply()\">Apply Filters</button></div> ");
+        board_body(sb, "49w24t", v10_get(path, TTL_MS), "Failed to fetch top performing clans");
     } else if (T.board == 1) {
         if (T.f_name[0]) snprintf(path, sizeof(path), "/api/territorial-wars/leaderboards/top-grossing-clans?clan_name=%s", name);
         else snprintf(path, sizeof(path), "/api/territorial-wars/leaderboards/top-grossing-clans");
@@ -1081,8 +1157,8 @@ static void gen_boards(StrBuf *sb) {
                       "<label class=\"filter-label svelte-1rpti7l\" for=\"clan-name-filter\">Search by Clan Name:</label> <input id=\"clan-name-filter\" type=\"text\" "
                       "class=\"filter-input svelte-1rpti7l\" placeholder=\"Clan name\" value=\"");
         esc_attr(sb, T.f_name);
-        sb_append(sb, "\"></div> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"playSelect();knTwApply()\">Apply Filters</button></div> ");
-        board_body(sb, "1rpti7l", v10_get(path, TTL_MS), "Failed to load top grossing clans");
+        sb_append(sb, "\"></div> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"knTwApply()\">Apply Filters</button></div> ");
+        board_body(sb, "1rpti7l", v10_get(path, TTL_MS), "Failed to fetch top grossing clans");
     } else {
         int o = snprintf(path, sizeof(path), "/api/territorial-wars/leaderboards/top-performing-players");
         char sep = '?';
@@ -1094,8 +1170,8 @@ static void gen_boards(StrBuf *sb) {
         sb_append(sb, "</div> <div class=\"filter-group svelte-49w24t\"><label class=\"filter-label svelte-49w24t\" for=\"player-name-filter\">Search by Player Name (exact match):</label> "
                       "<input id=\"player-name-filter\" type=\"text\" class=\"filter-input svelte-49w24t\" placeholder=\"Player name\" value=\"");
         esc_attr(sb, T.f_name);
-        sb_append(sb, "\"></div> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"playSelect();knTwApply()\">Apply Filters</button></div> ");
-        board_body(sb, "49w24t", v10_get(path, TTL_MS), "Failed to load top performing players");
+        sb_append(sb, "\"></div> <button class=\"main-button svelte-whnh40 main-button-accept\" type=\"button\" onclick=\"knTwApply()\">Apply Filters</button></div> ");
+        board_body(sb, "49w24t", v10_get(path, TTL_MS), "Failed to fetch top performing players");
     }
     sb_append(sb, "</div></div></div>");
 }
@@ -1131,7 +1207,8 @@ static void gen_recruit(StrBuf *sb) {
     if (T.rc_lang[0]) snprintf(path + o, sizeof(path) - (size_t) o, "&language=%s", lang);
     const V10Req *r = v10_get(path, TTL_MS);
     const AccountInfo *a = active_account();
-    const int staff = a && (a->is_dev || a->is_mod), no_clan = a && !a->clan[0];
+    // isDev || isMod || isDeputy (deob-10.0.7.js:145465-145473)
+    const int staff = a && (a->is_dev || a->is_mod || a->is_deputy), no_clan = a && !a->clan[0];
     const int kio = account_backend() == ACCOUNT_BACKEND_KRUNKER;
     if (no_clan) { // getMyApplications (krunker.io: GET /clans/my-applications with the Bearer, no token)
         char t[256], p2[400];
@@ -1169,7 +1246,7 @@ static void gen_recruit(StrBuf *sb) {
     if (r->status == 0 && !d) sb_append(sb, "<div class=\"loading svelte-72bcy3\">Loading recruitment posts...</div>");
     else if (T.rc_error[0] || (r->status != 200 && r->status != 0)) {
         sb_append(sb, "<div class=\"error svelte-72bcy3\">");
-        sb_append_esc(sb, T.rc_error[0] ? T.rc_error : "Failed to load recruitment posts");
+        sb_append_esc(sb, T.rc_error[0] ? T.rc_error : req_error(r, "Failed to fetch recruitment posts")); // deob-10.0.7.js:145497
         sb_append(sb, "</div>");
     } else if (!shown) sb_append(sb, "<div class=\"no-data svelte-72bcy3\">No recruitment posts found. Try adjusting filters.</div>");
     else {
@@ -1178,9 +1255,10 @@ static void gen_recruit(StrBuf *sb) {
             const char *tag = v10_str(p, "clan_name");
             const int clan_id = (int) v10_num(p, "clan_id", 0);
             if (kio && id_in(g_kio_removed, g_kio_removed_count, clan_id)) continue;
-            sb_appendf(sb, "<div class=\"post-card svelte-72bcy3\"><div class=\"post-header svelte-72bcy3\"><div class=\"clan-info svelte-72bcy3\"><!----> "
-                           "<span class=\"clan-name svelte-72bcy3\" style=\"color: %s;\" onclick=\"knTwClan('%d')\">",
-                       clan_color(tag, "#ffffff"), clan_id);
+            sb_append(sb, "<div class=\"post-card svelte-72bcy3\"><div class=\"post-header svelte-72bcy3\"><div class=\"clan-info svelte-72bcy3\">");
+            // the post's clan logo; the name carries no click handler (deob-10.0.7.js:145606-145613)
+            logo_or_anchor(sb, "clan-logo svelte-72bcy3", clan_id, v10_num(p, "clan_logo", 0), tag);
+            sb_appendf(sb, " <span class=\"clan-name svelte-72bcy3\" style=\"color: %s;\">", clan_color(tag, "#ffffff"));
             sb_append_esc(sb, tag);
             sb_append(sb, "</span></div> <div class=\"post-tags svelte-72bcy3\">");
             const char *reg = v10_str(p, "region"), *lg = v10_str(p, "language");
@@ -1256,7 +1334,7 @@ static void gen_recruit(StrBuf *sb) {
                 else if ((min_level > 0 && a->level < min_level) || (min_kd > 0 && a->kills / (a->deaths > 1 ? a->deaths : 1) < min_kd)) // v10.0.3: K/D as the profile's KDR
                     sb_append(sb, "<button class=\"main-button svelte-whnh40 main-button-accept main-button-disabled\" type=\"button\" disabled>Requirements Not Met</button>");
                 else
-                    sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-accept%s\" type=\"button\"%s onclick=\"playSelect();knTwRcApply(%d)\">%s</button>",
+                    sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-accept%s\" type=\"button\"%s onclick=\"knTwRcApply(%d)\">%s</button>",
                                T.rc_applying == clan_id ? " main-button-disabled" : "", T.rc_applying == clan_id ? " disabled" : "", clan_id,
                                T.rc_applying == clan_id ? "Applying..." : "Apply");
             } else sb_append(sb, "<!---->");
@@ -1368,7 +1446,7 @@ static void gen_player_view(StrBuf *sb) {
         return;
     }
     if (!cJSON_IsObject(p)) {
-        error_box(sb, "7h12t9", pr, "Failed to load player profile");
+        error_box(sb, "7h12t9", pr, "Failed to fetch player profile");
         sb_append(sb, "</div>");
         return;
     }
@@ -1382,7 +1460,9 @@ static void gen_player_view(StrBuf *sb) {
     const char *clan = v10_str(p, "current_clan");
     if (clan[0]) {
         const int has_id = cJSON_IsNumber(cJSON_GetObjectItem(p, "current_clan_id"));
-        sb_appendf(sb, "<!----> <span class=\"player-clan svelte-7h12t9%s\"", has_id ? " clickable-clan" : "");
+        // current_clan_id && current_clan_logo > 0: the clan's logo (deob-10.0.7.js:146364-146369)
+        logo_or_anchor(sb, "clan-logo svelte-7h12t9", v10_num(p, "current_clan_id", 0), v10_num(p, "current_clan_logo", 0), clan);
+        sb_appendf(sb, " <span class=\"player-clan svelte-7h12t9%s\"", has_id ? " clickable-clan" : "");
         if (has_id) sb_appendf(sb, " onclick=\"knTwClan('%.0f')\"", v10_num(p, "current_clan_id", 0));
         sb_append(sb, ">");
         sb_append_esc(sb, clan);
@@ -1610,6 +1690,21 @@ static void on_kio_takedown(void *user, const int status, const cJSON *data, con
     render();
 }
 
+// Box Office: the DELETE's answer. On success the board reloads; a failure shows on the board as v10's catch does:
+// error.message || "Failed to take down post" (deob-10.0.7.js:145526-145531)
+static void on_takedown(void *user, const int status, const cJSON *json) {
+    (void) user;
+    if (status == 200) {
+        T.rc_error[0] = 0;
+        v10_forget("/api/clans/recruitment");
+    } else {
+        const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(json, "error"), "message"));
+        if (!e || !e[0]) e = v10_str(json, "message");
+        snprintf(T.rc_error, sizeof(T.rc_error), "%s", e && e[0] ? e : "Failed to take down post");
+    }
+    render();
+}
+
 static void takedown_closed(const int accepted, void *user) {
     const int clan = (int) (intptr_t) user;
     if (!accepted) return;
@@ -1622,9 +1717,7 @@ static void takedown_closed(const int accepted, void *user) {
     char t[256], path[400];
     v10_url_token(t, sizeof(t));
     snprintf(path, sizeof(path), "/api/clans/%d/recruitment?token=%s", clan, t);
-    v10_send("DELETE", path, NULL, NULL, NULL);
-    v10_forget("/api/clans/recruitment");
-    render();
+    v10_send("DELETE", path, NULL, on_takedown, NULL);
 }
 
 // _34410 confirm dialog (_6696 io-popup): Take Down Post
@@ -1665,7 +1758,27 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     char mine_id[32];
     const char *mine = my_clan_key(a, mine_id, sizeof(mine_id));
     if (!strcmp(name, "knTwTab")) {
-        if (a0 >= 0 && a0 < TW_TABS) T.tab = a0;
+        if (a0 >= 0 && a0 < TW_TABS && a0 != T.tab) {
+            // v10's tabs are {#if selectedIndex === n} blocks (deob-10.0.7.js:144081-144097): a tab switch unmounts the old tab and mounts
+            // the new one fresh, so its hover/lock, board, filters, sorts and reads all start over
+            T.tab = a0;
+            if (T.hover_timer) html_timer_cancel(T.hover_timer);
+            T.hover_timer = 0;
+            T.hover = T.locked = -1;
+            T.board = -1;
+            T.f_date[0] = T.f_name[0] = 0;
+            T.f_map = -1;
+            memset(&T.mine, 0, sizeof(T.mine));
+            T.mine.day = T.mine.map = T.mine.pay_day = -1;
+            T.rc_region[0] = T.rc_lang[0] = 0;
+            T.rc_page = 1;
+            T.rc_error[0] = 0;
+            for (int i = 0; i < (int) (sizeof(T.sorts) / sizeof(T.sorts[0])); i++)
+                if (strncmp(T.sorts[i].id, "cv-", 3)) memset(&T.sorts[i], 0, sizeof(T.sorts[i]));
+            v10_forget("/api/territorial-wars/");
+            v10_forget("/api/clans/recruitment");
+            kio_board_reset();
+        }
         T.view = VIEW_TABS;
     } else if (!strcmp(name, "knTwHover")) { // the territory hit cells
         if (a0 >= 0) {
@@ -1678,17 +1791,18 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
             return 1;
         }
     } else if (!strcmp(name, "knTwPanel")) { // the details panel keeps the hover alive
-        if (a0) {
+        if (a0) { // mouseenter: a locked territory drops the hover (deob-10.0.7.js:144194-144197)
             if (T.hover_timer) html_timer_cancel(T.hover_timer);
             T.hover_timer = 0;
-            return 1;
-        }
-        if (T.locked < 0 && T.hover >= 0) T.hover = -1;
+            if (T.locked < 0 || T.hover < 0) return 1;
+            T.hover = -1;
+        } else if (T.locked < 0 && T.hover >= 0) T.hover = -1; // mouseleave (:144198-144200)
         else return 1;
     } else if (!strcmp(name, "knTwLock")) {
         html_ui_stop_propagation();
         T.locked = T.locked == a0 ? -1 : a0;
-        html_ui_dispatch("playTick", ev, NULL, 0);
+        const HtmlArg vol = {.kind = HTML_ARG_NUM, .num = 0.5}; // playTick(0.5) (deob-10.0.7.js:144202-144206)
+        html_ui_dispatch("playTick", ev, &vol, 1);
     } else if (!strcmp(name, "knTwUnlock")) {
         T.locked = -1;
     } else if (!strcmp(name, "knTwClose")) {
@@ -1743,11 +1857,19 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     } else if (!strcmp(name, "knTwPayView") || !strcmp(name, "knTwPayDay") || !strcmp(name, "knTwPayDate")) {
         arg_str(ev, args, argc, 0, s, sizeof(s));
         ClanFilters *f = !strcmp(s, "other") ? &T.other : &T.mine;
-        const int current = clan_current_day(f == &T.mine ? mine : T.clan);
+        // My Clan's payouts know no currentDay, so their today is the client clock (deob-10.0.7.js:143517)
+        const int current = f == &T.mine ? day_now() : clan_current_day(T.clan);
         if (!strcmp(name, "knTwPayView")) {
-            f->pay_daily = arg_int(args, argc, 1, 0) != 0;
-            if (!f->pay_daily) f->pay_day = -1;
+            if (arg_int(args, argc, 1, 0)) { // Daily View: loadDay(today) unless already daily (iiîíìïï, :143487-143489)
+                if (f->pay_daily || f->pay_want) return 1;
+                f->pay_want = 1;
+                f->pay_err[0] = 0; // loadDay clears the error first (:143520-143522)
+            } else { // All-Time Totals: view, day and daily data reset; the error stays (:143479-143482)
+                f->pay_daily = f->pay_want = 0;
+                f->pay_day = -1;
+            }
         } else if (!strcmp(name, "knTwPayDay")) {
+            f->pay_err[0] = 0; // a day change is a loadDay too
             const int cur = f->pay_day >= 0 ? f->pay_day : current;
             int d = cur + arg_int(args, argc, 1, 0);
             f->pay_day = d < 0 ? 0 : d > current ? current : d;
@@ -1755,7 +1877,10 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
             char v[24];
             arg_str(ev, args, argc, 1, v, sizeof(v));
             const int d = date_day(v);
-            if (d >= 0) f->pay_day = d > current ? current : d;
+            if (d >= 0) {
+                f->pay_err[0] = 0;
+                f->pay_day = d > current ? current : d;
+            }
         }
     } else if (!strcmp(name, "knTwBoard")) {
         T.board = a0 >= -1 && a0 <= 2 ? a0 : -1;

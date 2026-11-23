@@ -402,7 +402,7 @@ static cJSON *view_status(Dbx *x, int64_t cur, int64_t per_kill, int64_t elapsed
             cJSON_AddNullToObject(m, "clan_name");
             cJSON_AddNumberToObject(m, "kills", 0);
         }
-        cJSON_AddNullToObject(m, "clan_logo"); /* KrunkNative clans have no uploaded logos */
+        cJSON_AddNullToObject(m, "clan_logo"); /* the approved logo version: fill_logos */
         cJSON *lb = cJSON_AddArrayToObject(m, "leaderboard");
         int64_t total = 0;
         int pos = 0;
@@ -644,6 +644,38 @@ static cJSON *view_controller(Dbx *x, int64_t cur, int64_t map) {
     return o;
 }
 
+/* The clans' approved logo versions (clans.clan_logo, 0332_clan_logos; 0 = none) into every clan_logo /
+ * comparison_clan_logo / current_clan_logo key a view carries next to its clan id: v10.0.7's Turf Wars draws
+ * a clan's logo as clans/<id>.png?v=<version> wherever that field is set (deob-10.0.7.js:144260, :144294,
+ * :144332, :144628, :144729, :144755, :143809, :146078, :146364). Absent keys stay absent and a clan without
+ * a logo keeps null. One read of the clans that have a logo per view. */
+static int64_t logo_in(const cJSON *logos, double clan) {
+    const cJSON *r;
+    cJSON_ArrayForEach(r, logos) if (jnum(r, "clan_id") == clan) return (int64_t) jnum(r, "clan_logo");
+    return 0;
+}
+
+static void fill_logos_in(cJSON *node, const cJSON *logos) {
+    static const char *const keys[][2] = {{"clan_id", "clan_logo"}, {"comparison_clan_id", "comparison_clan_logo"}, {"current_clan_id", "current_clan_logo"}};
+    if (cJSON_IsObject(node)) {
+        for (size_t k = 0; k < sizeof keys / sizeof *keys; k++) {
+            const cJSON *id = cJSON_GetObjectItemCaseSensitive(node, keys[k][0]);
+            if (!cJSON_IsNumber(id) || !cJSON_HasObjectItem(node, keys[k][1])) continue;
+            const int64_t v = logo_in(logos, id->valuedouble);
+            if (v > 0) cJSON_ReplaceItemInObjectCaseSensitive(node, keys[k][1], cJSON_CreateNumber((double) v));
+        }
+    }
+    cJSON *ch;
+    if (cJSON_IsObject(node) || cJSON_IsArray(node)) cJSON_ArrayForEach(ch, node) fill_logos_in(ch, logos);
+}
+
+static void fill_logos(Dbx *x, cJSON *out) {
+    if (!out) return;
+    cJSON *logos = dbx_rows(x, SQL(.any = "SELECT clan_id AS clan_id__i, clan_logo AS clan_logo__i FROM clans WHERE clan_logo > 0"), 0, NULL);
+    if (logos) fill_logos_in(out, logos);
+    cJSON_Delete(logos);
+}
+
 /* (view, current_day, a, b, c, d) */
 static kn_db_result *run_turf_view(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -722,6 +754,7 @@ static kn_db_result *run_turf_view(kn_dbconn *c, int n, const char *const *p) {
         dbx_refuse(&x, "unknown view");
         return dbx_finish(&x, NULL);
     }
+    if (strcmp(view, "recruitment") && strcmp(view, "recruitment_of") && strcmp(view, "controller") && strcmp(view, "my_applications")) fill_logos(&x, out);
     if (dbx_failed(&x)) {
         cJSON_Delete(out);
         return dbx_finish(&x, NULL);

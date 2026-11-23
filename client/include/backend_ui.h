@@ -29,6 +29,7 @@ typedef struct {
     int level;
     double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
+    int is_deputy;        // v10 isDeputy (player_role 3, deob-10.0.7.js:145472): the krunker.io account's; Box Office has no Deputy role (0)
     int creator;          // v10 creatorBadge: kn_brain's account info "creator_badge" (players.creator_badge)
     int following, followers;
     int job_rating, job_rating_pos; // K.P.D Helpful Reports: rated calls / tagged ones (data 38 / 39)

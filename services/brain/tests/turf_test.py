@@ -12,7 +12,9 @@ once (a second brain does not pay again), the controller in /api/territorial-war
 members' KR), the clan / player / leaderboard routes in v10's {data: ...} shapes, PUT loot-config
 permissions, recruitment posts (1,000 KR from the clan bank on create, owner / Captain+ only,
 validation, the 30 s cooldown, apply, my-applications, the minimum K/D on apply, join by name and the
-owner's approval (below refused, at or above accepted), delete), and clean logs.
+owner's approval (below refused, at or above accepted), delete), the clans' approved logo versions
+(clans.clan_logo) in every view's clan_logo / comparison_clan_logo / current_clan_logo (v10.0.7 draws
+them), and clean logs.
 """
 import asyncio
 import json
@@ -295,13 +297,84 @@ def recruitment(port, accs, clan_a, clan_c):
     check(code == 200 and r["data"]["posts"] == [], "removed: not listed")
 
 
+def sql(cfg, text):
+    """one statement on the test's database (setup only; no parameters)"""
+    d = cfg.get("driver")
+    if d == "sqlite":
+        import sqlite3
+        con = sqlite3.connect(cfg["path"], timeout=30)
+        try:
+            con.execute(text)
+            con.commit()
+        finally:
+            con.close()
+        return
+    if d == "postgres":
+        env = dict(os.environ, PGPASSWORD=str(cfg.get("password", "")), PGOPTIONS="-c search_path=" + cfg["search_path"])
+        cmd = ["psql", "-h", str(cfg.get("host", "127.0.0.1")), "-p", str(cfg.get("port", 5432)), "-U", str(cfg.get("user", "krunknative")),
+               "-d", cfg["name"], "-v", "ON_ERROR_STOP=1", "-qAtX", "-c", text]
+    else:
+        env = dict(os.environ, MYSQL_PWD=str(cfg.get("password", "")))
+        cmd = [os.environ.get("KN_TEST_MYSQL_CLIENT", shutil.which("mariadb") or "mysql"), "--no-defaults", "--protocol=TCP", "-h", str(cfg.get("host")),
+               "-P", str(cfg.get("port")), "-u", str(cfg.get("user")), "-D", cfg["name"], "-N", "-B", "-e", text]
+    r = subprocess.run(cmd, env=env, capture_output=True, timeout=60)
+    if r.returncode:
+        raise RuntimeError("sql failed: %s: %s" % (text[:120], r.stderr.decode(errors="replace")))
+
+
+def pg_cfg():
+    """the per-run schema's connection, as pg_schema.py / db_scratch.py reach it"""
+    try:
+        with open(os.environ.get("KN_TEST_CONFIG", os.path.join(ROOT, "config", "config.json"))) as fp:
+            db = json.load(fp).get("database", {})
+    except (OSError, ValueError):
+        db = {}
+    get = lambda k, d: os.environ.get("KN_DATABASE_" + k.upper(), str(db.get(k, d)))
+    return {"driver": "postgres", "host": get("host", "127.0.0.1"), "port": get("port", 5432), "user": get("user", "krunknative"),
+            "password": get("password", ""), "name": DB, "search_path": SCHEMA}
+
+
+def logos(port, accs, clan_a, clan_b, dbcfg):
+    """v10.0.7 draws a clan's logo (clans/<id>.png?v=<clan_logo>) wherever a Turf Wars view carries one
+    (deob-10.0.7.js:27901, :143809, :144280, :145606, :146364): the views fill the approved version in"""
+    sql(dbcfg, "UPDATE clans SET clan_logo = 3 WHERE clan_id = %d" % clan_a)
+    code, st = http(port, "/api/territorial-wars/status")
+    burg = [m for m in st.get("data", []) if m["map_id"] == 0][0] if code == 200 else {}
+    check(burg.get("clan_id") == clan_a and burg.get("clan_logo") == 3, "status: Burg's controller AAA carries logo 3 (%s)" % burg.get("clan_logo"))
+    code, cv = http(port, "/api/territorial-wars/clan/%d" % clan_a)
+    check(code == 200 and cv["data"].get("clan_logo") == 3, "clan view: clan_logo 3 (%s)" % (cv.get("data") or {}).get("clan_logo"))
+    code, cv = http(port, "/api/territorial-wars/clan/%d" % clan_b)
+    check(code == 200 and cv["data"].get("clan_logo") is None, "clan view: BBB has no logo (null)")
+    # yesterday's comparison clan (historicalData.comparisonClanLogo, deob-10.0.7.js:144436)
+    sql(dbcfg, "UPDATE clans SET clan_logo = 5 WHERE clan_id = %d" % clan_b)
+    code, cv = http(port, "/api/territorial-wars/clan/%d" % clan_a)
+    hist = [h for h in (cv.get("data") or {}).get("historical_days", []) if h.get("day") == DAY]
+    h = hist[0] if hist else {}
+    check(h.get("comparison_clan_id") == clan_b and h.get("comparison_clan_logo") == 5,
+          "clan view: day %d's comparison clan BBB carries logo 5 (%s)" % (DAY, {k: v for k, v in h.items() if k.startswith("comparison")}))
+    sql(dbcfg, "UPDATE clans SET clan_logo = 0 WHERE clan_id = %d" % clan_b)
+    code, top = http(port, "/api/territorial-wars/leaderboards/top-grossing-clans")
+    rows = {r["clan_name"]: r.get("clan_logo") for r in top.get("data") or []} if code == 200 else {}
+    check(rows.get("AAA") == 3 and rows.get("BBB") is None, "top grossing clans: AAA's logo 3, BBB's null (%s)" % rows)
+    code, top = http(port, "/api/territorial-wars/leaderboards/top-performing-clans", day=DAY)
+    rows = {r["clan_name"]: r.get("clan_logo") for r in top.get("data") or []} if code == 200 else {}
+    check(rows.get("AAA") == 3, "top performing clans: AAA's logo 3 (%s)" % rows)
+    code, pp = http(port, "/api/territorial-wars/player/%s" % accs[0]["name"])
+    check(code == 200 and pp["data"].get("current_clan_logo") == 3, "player profile: current_clan_logo 3 (%s)" % (pp.get("data") or {}).get("current_clan_logo"))
+    sql(dbcfg, "UPDATE clans SET clan_logo = 0 WHERE clan_id = %d" % clan_a)
+    code, cv = http(port, "/api/territorial-wars/clan/%d" % clan_a)
+    check(code == 200 and cv["data"].get("clan_logo") is None, "clan view: no logo again once clan_logo is 0")
+
+
 def main():
     if DRIVER == "postgres":
         pg = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "pg_schema.py"), ROOT, DB]
         rc = subprocess.run(pg + ["create", SCHEMA]).returncode
         if rc:
             sys.exit(rc)
-        dbenv = {"KN_DATABASE_NAME": DB, "KN_DATABASE_SEARCH_PATH": SCHEMA}
+        dbcfg = pg_cfg()
+        # the whole connection (KN_TEST_CONFIG's), so the brain reaches it from a worktree without config/config.json
+        dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in dbcfg.items()}
         drop = pg + ["drop", SCHEMA]
     else:
         pg = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
@@ -309,7 +382,8 @@ def main():
         if r.returncode:
             print("turf test: %s unavailable: skipped" % DRIVER)
             sys.exit(r.returncode)
-        dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in json.loads(r.stdout).items()}
+        dbcfg = json.loads(r.stdout)
+        dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in dbcfg.items()}
         drop = pg + ["drop", DRIVER, SCHEMA]
     work = tempfile.mkdtemp(prefix="kn-turf.")
     env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, **dbenv)
@@ -451,6 +525,7 @@ def main():
         code, pe = http(port, "/api/territorial-wars/player/%d/earnings" % accs[0]["id"])
         check(code == 200 and [r["amount"] for r in pe["data"]] == [156], "player earnings")
         recruitment(port, accs, clan_a, clan_c)
+        logos(port, accs, clan_a, clan_b, dbcfg)
         # v10's HTTP leaderboards (leaderboards.c): {data: [rows with position]}
         code, lb = http(port, "/api/leaderboards/player_funds")
         vals = [r["value"] for r in lb.get("data", [])] if code == 200 else []
