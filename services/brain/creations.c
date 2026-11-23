@@ -194,6 +194,37 @@ static void reply_page(ApiReq *a, cJSON *rows, const char *error) {
     cJSON_Delete(res);
 }
 
+/* An asset row's dat carries the model's per-map UV channels as mp ({letter: {ch: 1..7}}), which the editor's
+ * assetsLoaded keeps in KE.assetMapProps and a placed model takes as its mapProps (editor-10.0.7.js:13733-13738,
+ * 14366-14385; the letters of the object's _getMapProp(letter, "ch"), 6763-6814). The popup's channels are stored by
+ * letter in uvc (asset_upload.c); the diffuse map's ('c') has no map prop on the object and stays out. */
+static void asset_row_fields(cJSON *row) {
+    cJSON *uvc_txt = cJSON_DetachItemFromObject(row, "uvc");
+    cJSON *uvc = cJSON_IsString(uvc_txt) ? cJSON_Parse(uvc_txt->valuestring) : NULL;
+    cJSON *dat_it = cJSON_GetObjectItem(row, "dat");
+    cJSON *mp = NULL;
+    const cJSON *it;
+    cJSON *chans = cJSON_IsObject(uvc) ? uvc : NULL;
+    cJSON_ArrayForEach(it, chans) {
+        if (!it->string || strlen(it->string) != 1 || !strchr("lnbpesamr", it->string[0]) || !cJSON_IsNumber(it)) continue;
+        if (!mp) mp = cJSON_CreateObject();
+        cJSON_AddNumberToObject(cJSON_AddObjectToObject(mp, it->string), "ch", it->valuedouble);
+    }
+    cJSON *dat = mp && cJSON_IsString(dat_it) ? cJSON_Parse(dat_it->valuestring) : NULL;
+    if (cJSON_IsObject(dat)) {
+        cJSON_DeleteItemFromObject(dat, "mp");
+        cJSON_AddItemToObject(dat, "mp", mp);
+        mp = NULL;
+        char *txt = cJSON_PrintUnformatted(dat);
+        if (txt) cJSON_ReplaceItemInObject(row, "dat", cJSON_CreateString(txt));
+        free(txt);
+    }
+    cJSON_Delete(dat);
+    cJSON_Delete(mp);
+    cJSON_Delete(uvc);
+    cJSON_Delete(uvc_txt);
+}
+
 static void db_rows_done(kn_db_result *res, void *ud) {
     ApiReq *a = ud;
     cJSON *rows = cJSON_CreateArray();
@@ -206,6 +237,7 @@ static void db_rows_done(kn_db_result *res, void *ud) {
         int at = 0;
         while (db && (it = cJSON_DetachItemFromArray(db, 0)) != NULL) {
             if (maps) map_row_fields(it);
+            if (a->kind == 2) asset_row_fields(it);
             if (a->kind == 0 && a->tab == 2 && !a->val[0]) cJSON_InsertItemInArray(rows, at++, it);
             else cJSON_AddItemToArray(rows, it);
         }
@@ -362,13 +394,13 @@ static void assets_query(AssetsQuery *q, const int64_t viewer) {
     snprintf(me, sizeof me, "%lld", (long long) (viewer > 0 ? viewer : 0));
     kn_db_query_sql(g_acct_brain->db,
                 SQL(.pg = "SELECT x.id, kn_html(x.name) AS nm, x.data::text AS dat, x.created_at AS ini, a.username AS plrn, "
-                          "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
+                          "x.size_kb AS siz, x.category AS cat, x.uvc::text AS uvc FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
                           "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name ILIKE '%' || $1 || '%') "
                           "AND ($2::int < 0 OR x.category = $2::int) AND ($3 = '' OR lower(a.username) = lower($3)) "
                           "AND (NOT x.is_private OR x.creator_id = $4::bigint) "
                           "ORDER BY x.id DESC LIMIT 500",
                     .any = "SELECT x.id, {html:x.name} AS nm, x.data AS dat__t, x.created_at AS ini, a.username AS plrn, "
-                           "x.size_kb AS siz, x.category AS cat FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
+                           "x.size_kb AS siz, x.category AS cat, x.uvc AS uvc__t FROM published_assets x LEFT JOIN accounts a ON a.id = x.creator_id "
                            "WHERE x.deleted_at IS NULL AND ($1 = '' OR x.name {ilike} '%' || $1 || '%' ESCAPE '\\') "
                            "AND ({int:$2} < 0 OR x.category = {int:$2}) AND ($3 = '' OR lower(a.username) = lower($3)) "
                            "AND (x.is_private = 0 OR x.creator_id = {int:$4}) "
@@ -386,7 +418,11 @@ static void h_assets(kn_http_req *req, void *ud) {
     (void) ud;
     ApiReq *a = api_req(req, 2);
     if (!a) return;
-    a->tab = (int) query_int(req, "cat", -1);
+    /* v10's listAssets sends index (the tab: 0 New, 1 My Assets, 2 Search), cat and the signed-in username on every
+     * tab (editor-10.0.7.js:13082; deob-10.0.7.js:133252-133257; the tabs' sendUser, editor-config.deob.js:9444-9447):
+     * the username narrows My Assets only, and the answer's index is the tab the request named, under which
+     * assetsLoaded files the page (editor-10.0.7.js:13625-13629). */
+    const int cat = (int) query_int(req, "cat", -1);
     if (!g_acct_brain || !g_acct_brain->db) {
         run(a);
         return;
@@ -397,14 +433,22 @@ static void h_assets(kn_http_req *req, void *ud) {
         return;
     }
     q->a = a;
-    kn_http_query_get(req, "username", q->user, sizeof q->user);
+    if (a->tab == 1 && kn_http_query_get(req, "username", q->user, sizeof q->user) <= 0) {
+        /* My Assets of nobody (a signed-out editor sends no username): none */
+        cJSON *rows = cJSON_CreateArray();
+        reply_page(a, rows, NULL);
+        cJSON_Delete(rows);
+        free(q);
+        free(a);
+        return;
+    }
     size_t o = 0;
     for (const char *p = a->val; *p && o + 2 < sizeof q->pat; p++) {
         if (*p == '%' || *p == '_' || *p == '\\') q->pat[o++] = '\\';
         q->pat[o++] = *p;
     }
     q->pat[o] = 0;
-    acct_itoa(q->cat, a->tab);
+    acct_itoa(q->cat, cat);
     const char *token = kn_http_bearer(req);
     if (!token || !token[0]) {
         assets_query(q, 0);
@@ -545,33 +589,124 @@ static void h_map_config(kn_http_req *req, void *ud) {
 #define MAP_DATA_MAX 500000   /* social.js uploadGameAsset limit */
 #define THUMB_MAX (200 * 1024) /* data URL; config.maxThumbP 150 kb */
 
-static void publish_done(SocialSession *s, kn_db_result *res, void *extra) {
+/* one uploadM on its way through the premium check (v10's shape with a thumbnail) and the publish; the map data and
+ * the description live in buf (freed with the struct, as social_query's extra is) */
+typedef struct PubMap {
+    int v10, post, mob;
+    long long thumb;             /* v10: the declared thumbnail bytes, 0 none */
+    char nm[64], cat[24], vid[KN_YOUTUBE_ID_LEN + 1];
+    char *thumb_url;             /* v3.1.1: the inline data URL (in buf), NULL none */
+    char *info;                  /* map_info (in buf) */
+    size_t desc_at;              /* offset of the description in buf (after the data) */
+    char buf[];                  /* data \0 desc \0 info \0 [thumb_url \0] */
+} PubMap;
+
+static PubMap *pub_copy(const PubMap *p) {
+    const size_t used = (size_t) (p->info - p->buf) + strlen(p->info) + 1 + (p->thumb_url ? strlen(p->thumb_url) + 1 : 0);
+    PubMap *n = malloc(sizeof *n + used);
+    if (!n) return NULL;
+    memcpy(n, p, sizeof *n + used);
+    n->info = n->buf + (p->info - p->buf);
+    n->thumb_url = p->thumb_url ? n->buf + (p->thumb_url - p->buf) : NULL;
+    return n;
+}
+
+static void hub_post_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) s;
     (void) extra;
+    if (!kn_db_ok(res)) acct_db_error(res, "uploadM post");
+}
+
+static void publish_done(SocialSession *s, kn_db_result *res, void *extra) {
+    PubMap *p = extra;
     if (!kn_db_ok(res)) {
         social_send_n(s, "upMp", 1, cJSON_CreateString(acct_db_error(res, "uploadM")));
         return;
     }
     cJSON *v = acct_db_json(res);
     const int updated = (int) kn_json_int(v, "updated", 0);
-    social_send_n(s, "pubMR", 1, cJSON_CreateString(updated ? "Map Updated!" : "Map Published!"));
+    const int64_t id = kn_json_int(v, "id", 0), count = kn_json_int(v, "count", updated ? 2 : 1);
     cJSON_Delete(v);
+    char me[24], mid[24];
+    if (p->post && id > 0) {
+        /* Post to Hub: the hub's game post (feed type 2: the map's thumb.png and "Play it Now!" on its name,
+         * hub-10.0.7.js:4883-4910), the description as its text, within the feed's 20 posts an hour (social_data.c sh_post) */
+        social_query(s,
+                     SQL(.pg = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, 2, $3, $4 "
+                               "WHERE (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                         .any = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, 2, $3, $4 "
+                                "FROM accounts WHERE id = $1 "
+                                "AND (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > {ago:3600}) < 20"),
+                     KN_DB_ARGS(acct_itoa(me, s->account_id), p->buf + p->desc_at, acct_itoa(mid, id), p->nm), hub_post_done, NULL);
+    }
+    if (!p->v10) {
+        social_send_n(s, "pubMR", 1, cJSON_CreateString(updated ? "Map Updated!" : "Map Published!"));
+        return;
+    }
+    /* v10: ["pubMR", {fileId, srv}, map_updatecounter, name] (publishMapResp(fileInfo, updateCount, name), editor-10.0.7.js:20810):
+     * the editor then POSTs the fileId and its thumbnail to <srv>/upload-user-asset (asset_upload.c K_MAP_THUMB) */
+    char file_id[40] = "";
+    const char *srv = NULL, *why = NULL;
+    cJSON *info = cJSON_CreateObject();
+    if (id > 0 && asset_upload_map_thumb_open(s->account_id, s->username, id, p->nm, p->thumb, file_id, sizeof file_id, &srv, &why))
+        cJSON_AddStringToObject(info, "fileId", file_id);
+    else
+        cJSON_AddNullToObject(info, "fileId"); /* uploads off: no thumbnail (the editor says "Thumbnail Failed)" if it had one) */
+    if (srv) cJSON_AddStringToObject(info, "srv", srv);
+    else cJSON_AddNullToObject(info, "srv");
+    social_send_n(s, "pubMR", 3, info, cJSON_CreateNumber((double) count), cJSON_CreateString(p->nm));
 }
 
-/* ["uploadM", mapJson, thumbDataUrl|null, description, videoLink, category, postToHub, mobile] ->
- * ["pubMR", msg] | ["upMp", err]. The checks are the editor's publish (v10 editor publishMap /
- * uploadGame, validateMap; here shared/src/map_validate.c): the 500k data limit, a category in
- * the Games window's list, then the map itself (name 1-16 characters without < or >, spawns,
- * objects and the limits, first error as v7 words it). The name must not be a catalogue map.
- * Republishing your own map updates it (map_updatecounter + 1). postToHub / mobile are read and
- * not stored yet (no hub feed post, no mobile flag in the brain). The video is stored as its
- * YouTube id (v10's map_videolink, shared/include/youtube_link.h): any other text stores none. */
+static void pub_run(SocialSession *s, PubMap *p) {
+    char me[24];
+    PubMap *x = pub_copy(p); /* publish_done's extra (freed after it) */
+    if (!x) return;
+    social_call(s, &P_PUBLISH_MAP,
+                KN_DB_ARGS(acct_itoa(me, s->account_id), x->nm, x->buf, x->buf + x->desc_at, x->vid, x->cat, x->thumb_url, x->info,
+                           x->v10 ? (x->mob ? "1" : "0") : NULL),
+                publish_done, x);
+}
+
+/* the account's premium (the thumbnail limit, 250 / 500 kB: editor-config-10.0.7.js:9199-9200) */
+static void pub_premium_done(SocialSession *s, kn_db_result *res, void *extra) {
+    PubMap *p = extra;
+    const int premium = g_acct.free_premium || (kn_db_ok(res) && kn_db_rows(res) > 0 && kn_db_get_int64(res, 0, 0, 0) > 0);
+    if (p->thumb > (premium ? 500 : 250) * 1000ll) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("File size Limit Reached"));
+        return;
+    }
+    pub_run(s, p);
+}
+
+/* ["uploadM", ...] -> ["pubMR", ...] | ["upMp", err], in two shapes:
+ * - v10.0.7's editor (uploadGame, editor-10.0.7.js:20621-20647): [mapJson, description, videoLink, category,
+ *   {thumb: bytes}, postToHub, mobile] -> ["pubMR", {fileId, srv}, map_updatecounter, name]; the thumbnail comes after,
+ *   POST <srv>/upload-user-asset (asset_upload.c, K_MAP_THUMB), which makes it the map's map_image and sets map_info.t;
+ * - v3.1.1's social.js uploadGameAsset: [mapJson, thumbDataUrl|null, description, videoLink, category, postToHub,
+ *   mobile] -> ["pubMR", "Map Published!" | "Map Updated!"], the thumbnail inline (a PNG data URL up to 200 kB).
+ * The checks are the editor's publish (v10 editor publishMap / uploadGame, validateMap; here
+ * shared/src/map_validate.c): the 500k data limit, a category in the Games window's list, then the map itself (name
+ * 1-16 characters without < or >, spawns, objects and the limits, first error as v7 words it). The name must not be a
+ * catalogue map. Republishing your own map updates it (map_updatecounter + 1). postToHub makes the hub's game post;
+ * mobile is published_maps.map_mobile (0403; v10 shape only). The video is stored as its YouTube id (v10's
+ * map_videolink, shared/include/youtube_link.h): any other text stores none. */
 void sh_upload_map(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "upMp", 1, cJSON_CreateString("Must be logged in"));
         return;
     }
-    const char *data = fa_str(f, 1), *thumb = fa_str(f, 2), *desc = fa_str(f, 3), *video = fa_str(f, 4);
-    const int64_t cat = fa_int(f, 5, 0);
+    const int v10 = cJSON_IsObject(fa(f, 5));
+    const char *data = fa_str(f, 1), *thumb = v10 ? NULL : fa_str(f, 2), *desc = fa_str(f, v10 ? 2 : 3), *video = fa_str(f, v10 ? 3 : 4);
+    const cJSON *cj = fa(f, v10 ? 4 : 5);
+    const int64_t cat = cJSON_IsString(cj) ? (cj->valuestring[0] ? atoll(cj->valuestring) : -1) : fa_int(f, v10 ? 4 : 5, 0);
+    const cJSON *pj = fa(f, 6), *mj = fa(f, 7);
+    const int post = cJSON_IsTrue(pj) || (cJSON_IsNumber(pj) && pj->valuedouble != 0);
+    const int mob = cJSON_IsTrue(mj) || (cJSON_IsNumber(mj) && mj->valuedouble != 0);
+    const long long thumb_size = v10 ? (long long) kn_json_int(fa(f, 5), "thumb", 0) : 0;
+    if (v10 && (thumb_size < 0 || thumb_size > 500 * 1000ll)) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("File size Limit Reached"));
+        return;
+    }
     if (!data || strlen(data) > MAP_DATA_MAX) {
         social_send_n(s, "upMp", 1, cJSON_CreateString(data ? "Failed. 500k Character Game Data Limit" : "Invalid Map"));
         return;
@@ -609,13 +744,41 @@ void sh_upload_map(SocialSession *s, const cJSON *f) {
             return;
         }
     }
-    char me[24], c[24], vid[KN_YOUTUBE_ID_LEN + 1];
-    kn_youtube_id(video, vid, sizeof vid);
-    social_call(s, &P_PUBLISH_MAP,
-                 KN_DB_ARGS(acct_itoa(me, s->account_id), nm, data, desc ? desc : "", vid,
-                            acct_itoa(c, cat), thumb, info_s ? info_s : "{}"),
-                 publish_done, NULL);
+    if (!desc) desc = "";
+    if (!info_s) info_s = strdup("{}");
+    const size_t dl = strlen(data), sl = strlen(desc), il = info_s ? strlen(info_s) : 0, tl = thumb ? strlen(thumb) : 0;
+    PubMap *p = info_s ? calloc(1, sizeof *p + dl + sl + il + tl + 4) : NULL;
+    if (!p) {
+        free(info_s);
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Upload Request Failed"));
+        return;
+    }
+    p->v10 = v10;
+    p->post = post;
+    p->mob = mob;
+    p->thumb = thumb_size;
+    snprintf(p->nm, sizeof p->nm, "%s", nm);
+    acct_itoa(p->cat, cat);
+    kn_youtube_id(video, p->vid, sizeof p->vid);
+    memcpy(p->buf, data, dl + 1);
+    p->desc_at = dl + 1;
+    memcpy(p->buf + p->desc_at, desc, sl + 1);
+    p->info = p->buf + p->desc_at + sl + 1;
+    memcpy(p->info, info_s, il + 1);
+    if (thumb) {
+        p->thumb_url = p->info + il + 1;
+        memcpy(p->thumb_url, thumb, tl + 1);
+    }
     free(info_s);
+    if (v10 && thumb_size > 250 * 1000ll) {
+        char me[24];
+        social_query(s, SQL(.pg = "SELECT coalesce((SELECT player_premium FROM players WHERE player_id = $1::bigint), 0)",
+                            .any = "SELECT coalesce((SELECT player_premium FROM players WHERE player_id = $1), 0)"),
+                     KN_DB_ARGS(acct_itoa(me, s->account_id)), pub_premium_done, p);
+        return;
+    }
+    pub_run(s, p);
+    free(p);
 }
 
 static void edit_map_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -808,14 +971,32 @@ void sh_upload_files(SocialSession *s, const cJSON *f) {
     social_send(s, fr);
 }
 
-/* ["plm", modName]: the hub's Edit on one of the viewer's mods (updateMod, hub-10.0.7.js:6640-6646) -> ["plm", false,
- * {mod_id, mod_name, mod_info}], which opens the Update Mod popup on that mod (publishModPopup(false, mod), :6648-6651,
- * :6732-6759). The update itself is the menu's publish (asset_upload.c): a publish of a name the account already has
- * updates that mod. Not the viewer's mod (or deleted): ["po", null, "Mod not found"]. */
+/* ["plm", name], from two pages (Krunker's one message):
+ * - the editor's publishMap of a named map (editor-10.0.7.js:17000-17028): the viewer's published map of that name ->
+ *   ["plm", false, {map_id, ca, mob, vl, mi, map_description, map_updatecounter}], preloadMap(false, row): the Update
+ *   Game popup with its category, Mobile Friendly, video, description, thumbnail (mi.t) and "Publish v<n>"
+ *   (publishGamePopup, :20536-20575);
+ * - the hub's Edit on one of the viewer's mods (updateMod, hub-10.0.7.js:6640-6646) -> ["plm", false, {mod_id, mod_name,
+ *   mod_info}], which opens the Update Mod popup on that mod (publishModPopup(false, mod), :6648-6651, :6732-6759). The
+ *   update itself is the menu's publish (asset_upload.c): a publish of a name the account already has updates that mod.
+ * Neither: another account's live mod of that name -> ["po", null, "Mod not found"] (the hub's Edit); no mod of that
+ * name -> ["plm", true], preloadMap(true): the editor's Publish Game popup of a new map. */
+typedef struct PlmReq {
+    char name[160];
+} PlmReq;
+
 static void mod_republish_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
-    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
-        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(kn_db_ok(res) ? "Mod not found" : acct_db_error(res, "plm")));
+    if (!kn_db_ok(res)) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(acct_db_error(res, "plm")));
+        return;
+    }
+    if (kn_db_rows(res) < 1) {
+        social_send_n(s, "plm", 1, cJSON_CreateTrue());
+        return;
+    }
+    if (kn_db_get_int64(res, 0, 3, 0) <= 0) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString("Mod not found"));
         return;
     }
     cJSON *mod = cJSON_CreateObject();
@@ -826,15 +1007,50 @@ static void mod_republish_done(SocialSession *s, kn_db_result *res, void *extra)
     social_send_n(s, "plm", 2, cJSON_CreateFalse(), mod);
 }
 
+static void map_republish_done(SocialSession *s, kn_db_result *res, void *extra) {
+    const PlmReq *q = extra;
+    if (!kn_db_ok(res)) {
+        social_send_n(s, "po", 2, cJSON_CreateNull(), cJSON_CreateString(acct_db_error(res, "plm")));
+        return;
+    }
+    if (kn_db_rows(res) < 1) {
+        PlmReq *n = malloc(sizeof *n);
+        if (!n) return;
+        *n = *q;
+        char me[24];
+        social_query(s, SQL(.pg = "SELECT mod_id, mod_name, mod_info::text, CASE WHEN creator_id = $1 THEN 1 ELSE 0 END AS mine"
+                                  " FROM published_mods WHERE lower(mod_name) = lower($2) AND deleted_at IS NULL ORDER BY 4 DESC, mod_id LIMIT 1",
+                            .any = "SELECT mod_id, mod_name, mod_info, CASE WHEN creator_id = $1 THEN 1 ELSE 0 END AS mine"
+                                   " FROM published_mods WHERE lower(mod_name) = lower($2) AND deleted_at IS NULL ORDER BY 4 DESC, mod_id LIMIT 1"),
+                     KN_DB_ARGS(social_viewer(s, me), n->name), mod_republish_done, n);
+        return;
+    }
+    cJSON *row = cJSON_CreateObject();
+    cJSON_AddNumberToObject(row, "map_id", (double) kn_db_get_int64(res, 0, 0, 0));
+    cJSON_AddNumberToObject(row, "ca", (double) kn_db_get_int64(res, 0, 1, 0));
+    cJSON_AddNumberToObject(row, "mob", (double) kn_db_get_int64(res, 0, 2, 0));
+    const char *vl = kn_db_get(res, 0, 3), *mi = kn_db_get(res, 0, 4), *desc = kn_db_get(res, 0, 5);
+    if (vl && *vl) cJSON_AddStringToObject(row, "vl", vl);
+    else cJSON_AddNullToObject(row, "vl");
+    cJSON_AddStringToObject(row, "mi", mi && *mi ? mi : "{}");
+    cJSON_AddStringToObject(row, "map_description", desc ? desc : "");
+    cJSON_AddNumberToObject(row, "map_updatecounter", (double) kn_db_get_int64(res, 0, 6, 1));
+    social_send_n(s, "plm", 2, cJSON_CreateFalse(), row);
+}
+
 void sh_mod_republish(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
-    char me[24], name[160];
-    snprintf(name, sizeof name, "%s", fa_str(f, 1) ? fa_str(f, 1) : "");
-    social_query(s, SQL(.pg = "SELECT mod_id, mod_name, mod_info::text FROM published_mods WHERE creator_id = $1 AND lower(mod_name) = lower($2)"
-                              " AND deleted_at IS NULL ORDER BY mod_id LIMIT 1",
-                        .any = "SELECT mod_id, mod_name, mod_info FROM published_mods WHERE creator_id = $1 AND lower(mod_name) = lower($2)"
-                               " AND deleted_at IS NULL ORDER BY mod_id LIMIT 1"),
-                 KN_DB_ARGS(social_viewer(s, me), name), mod_republish_done, NULL);
+    PlmReq *q = malloc(sizeof *q);
+    if (!q) return;
+    snprintf(q->name, sizeof q->name, "%s", fa_str(f, 1) ? fa_str(f, 1) : "");
+    char me[24];
+    social_query(s, SQL(.pg = "SELECT map_id, coalesce(map_category, 0), map_mobile, coalesce(map_video, ''), coalesce(map_info::text, '{}'),"
+                              " coalesce(map_description, ''), map_updatecounter FROM published_maps WHERE creator_id = $1"
+                              " AND lower(map_name) = lower($2) AND deleted_at IS NULL ORDER BY map_id LIMIT 1",
+                        .any = "SELECT map_id, coalesce(map_category, 0), map_mobile, coalesce(map_video, ''), coalesce(map_info, '{}'),"
+                               " coalesce(map_description, ''), map_updatecounter FROM published_maps WHERE creator_id = $1"
+                               " AND lower(map_name) = lower($2) AND deleted_at IS NULL ORDER BY map_id LIMIT 1"),
+                 KN_DB_ARGS(social_viewer(s, me), q->name), map_republish_done, q);
 }
 
 /* ------------------------------------------------------------------ published map data for game servers */

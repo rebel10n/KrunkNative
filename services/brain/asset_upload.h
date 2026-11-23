@@ -17,6 +17,12 @@ void asset_upload_shutdown(struct Brain *b);
 /* ["uploadA", name, desc, category, private, data, sizes, mType, typeCode, uvc] (social_ws.c) -> ["pubR", {fileId, srv}]
  * or ["upMp", reason] */
 void asset_upload_begin(struct SocialSession *s, const cJSON *frame);
+/* The thumbnail upload of a map the editor's Publish Game (v10's uploadM) just published: a ticket for its
+ * "thumb" (thumb bytes, 0 when no thumbnail was picked: the POST of the fileId alone finishes it), posted to
+ * /upload-user-asset like an asset's files. 1 with the fileId (and *srv, uploads.public_host or NULL); 0 with *why. The
+ * size limit (250 / 500 kB premium) is the caller's. */
+int asset_upload_map_thumb_open(int64_t account, const char *username, int64_t map, const char *map_name, long long thumb,
+                                char *file_id, size_t file_id_n, const char **srv, const char **why);
 /* The stored file of a Box Office asset (rel "<id>/<file>", shared/include/user_asset_path.h): its path in out, 1 when
  * uploads are on (whether the file exists is the caller's question), 0 otherwise. */
 int asset_upload_path(const char *rel, char *out, size_t cap);

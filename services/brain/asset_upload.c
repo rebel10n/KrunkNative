@@ -14,7 +14,7 @@
  *   uploadA checks the request against the editor's own limits (thumbnail 250 kB, 500 kB premium; icon 100 kB; each
  *   texture 10 MB; sound 5 MB; video 20 MB; a model's files together 100 MB, 250 MB premium; prefab data 500k
  *   characters), the account's storage quota and upload rate, and opens an upload ticket: fileId is 128 random bits,
- *   the ticket's only key, bound to the account and to the declared files and sizes. ["pubR", {fileId, srv}]: srv is
+ *   the ticket's only key, bound to the account and to the declared files and sizes. ["pubR", {fileId, srv, funds}]: srv is
  *   uploads.public_host, or null (the client then posts to the brain it is talking to).
  *
  *   Deliberate difference: the files do not come as one multipart form. kn_brain takes request bodies up to 1 MiB
@@ -110,9 +110,14 @@
 #define ZIP_UNPACKED_MAX (1024ll * MB) /* a mod's entries unpacked together (a zip bomb is refused) */
 #define ZIP_ENTRIES_MAX 20000
 
-enum { K_MODEL, K_PREFAB, K_TEXTURE, K_SOUND, K_VIDEO, K_MOD, K_SKIN };
+/* K_MAP_THUMB: the thumbnail of a map the editor's Publish Game just published (v10's uploadM -> pubMR -> POST
+ * <srv>/upload-user-asset {fileId, thumb}, editor-10.0.7.js:20621-20647, :20810-20833; creations.c sh_upload_map) */
+enum { K_MODEL, K_PREFAB, K_TEXTURE, K_SOUND, K_VIDEO, K_MOD, K_SKIN, K_MAP_THUMB };
 /* the upload flows: a new ticket replaces the account's open one of the same flow (ticket_open) */
-#define FLOW(kind) ((kind) == K_MOD ? 1 : (kind) == K_SKIN ? 2 : 0)
+#define FLOW(kind) ((kind) == K_MOD ? 1 : (kind) == K_SKIN ? 2 : (kind) == K_MAP_THUMB ? 3 : 0)
+/* the route a ticket's chunks come on (h_upload's ud): /upload-user-asset 0 (the editor's assets and map thumbnails),
+ * /mods/publish 1, /skins/upload 2 */
+#define ROUTE(kind) ((kind) == K_MOD ? 1 : (kind) == K_SKIN ? 2 : 0)
 enum { V_IMAGE, V_SOUND, V_VIDEO, V_MODEL, V_DATA, V_ZIP };
 
 /* The popup's file fields: FormData key, stored file name (model: model.<mType>), asset id letter (0 = none), check,
@@ -158,11 +163,12 @@ static int field_allowed(const int kind, const int f) {
         case K_SOUND: return !strcmp(k, "sound");
         case K_VIDEO: return !strcmp(k, "video");
         case K_SKIN: return !strcmp(k, "file");
+        case K_MAP_THUMB: return 0;
         default: return !strcmp(k, "mod");
     }
 }
 
-static const char *const k_required[] = {"model", "data", "texture", "sound", "video", "mod", "file"};
+static const char *const k_required[] = {"model", "data", "texture", "sound", "video", "mod", "file", "thumb"};
 
 typedef struct Part {
     int field;
@@ -183,6 +189,7 @@ typedef struct Ticket {
     uint64_t touched;  /* kn_now_ms of the last activity */
     int committing;    /* the checks or the database run: chunks and a second done are refused */
     int64_t skin;      /* K_SKIN: the custom skin (skins.c) the file is for; name is then the file's ("texture_e.png") */
+    int64_t map;       /* K_MAP_THUMB: the published map (name is then the map's) */
 } Ticket;
 
 static struct {
@@ -271,6 +278,7 @@ static int ticket_save(const Ticket *t) {
     cJSON_AddStringToObject(o, "ext", t->ext);
     cJSON_AddStringToObject(o, "uvc", t->uvc);
     if (t->kind == K_SKIN) cJSON_AddNumberToObject(o, "skin", (double) t->skin);
+    if (t->kind == K_MAP_THUMB) cJSON_AddNumberToObject(o, "map", (double) t->map);
     cJSON *parts = cJSON_AddArrayToObject(o, "parts");
     for (int i = 0; i < t->nparts; i++) {
         cJSON *p = cJSON_CreateObject();
@@ -531,7 +539,11 @@ static const char *check_file(const Ticket *t, const Part *p) {
                                                     : V_IMAGE;
     if (!err) {
         switch (check) {
-            case V_IMAGE: err = check_image(d, n); break;
+            case V_IMAGE:
+                err = check_image(d, n);
+                /* a map's thumbnail is a PNG (the popup's accept='image/png'; it is served as m<id>/thumb.png) */
+                if (!err && t->kind == K_MAP_THUMB && (n < 8 || memcmp(d, "\x89PNG\r\n\x1a\n", 8))) err = "Invalid Thumbnail (PNG only)";
+                break;
             case V_SOUND:
                 /* a skin's sound may also be a WAV (RIFF....WAVE) or an Ogg Vorbis file, v10's drop zone's .wav / .ogg
                  * (deob-10.0.7.js:127038), which the client's decoder plays as well (miniaudio + stb_vorbis) */
@@ -761,7 +773,8 @@ static Ticket *ticket_open(const Ticket *req, const uint64_t now, const char **w
         *why = "Upload Request Failed";
         return NULL;
     }
-    if (req->kind != K_SKIN) hour_count(req->account, now, 1); /* a skin's files: skins.c's write limit instead */
+    /* a skin's files: skins.c's write limit instead; a map's thumbnail: its publish */
+    if (req->kind != K_SKIN && req->kind != K_MAP_THUMB) hour_count(req->account, now, 1);
     return slot;
 }
 
@@ -801,6 +814,10 @@ static void begin_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_AddStringToObject(o, "fileId", slot->id);
     if (C.host[0]) cJSON_AddStringToObject(o, "srv", C.host);
     else cJSON_AddNullToObject(o, "srv");
+    /* the account's KR, which publishAssetResp writes to KE.account.funds when not null (editor-10.0.7.js:20782-20785,
+     * 12912-12914): publishing costs nothing here, so it is the balance as it stands */
+    if (!kn_db_isnull(res, 0, 2)) cJSON_AddNumberToObject(o, "funds", (double) kn_db_get_int64(res, 0, 2, 0));
+    else cJSON_AddNullToObject(o, "funds");
     cJSON *fr = social_frame("pubR");
     cJSON_AddItemToArray(fr, o);
     social_send(s, fr);
@@ -910,9 +927,11 @@ void asset_upload_begin(SocialSession *s, const cJSON *f) {
     }
     char me[24];
     social_query(s, SQL(.pg = "SELECT coalesce((SELECT player_premium FROM players WHERE player_id = $1::bigint), 0),"
-                              " coalesce((SELECT sum(size_kb) FROM published_assets WHERE creator_id = $1::bigint AND deleted_at IS NULL), 0)",
+                              " coalesce((SELECT sum(size_kb) FROM published_assets WHERE creator_id = $1::bigint AND deleted_at IS NULL), 0),"
+                              " (SELECT player_funds FROM players WHERE player_id = $1::bigint)",
                         .any = "SELECT coalesce((SELECT player_premium FROM players WHERE player_id = $1), 0),"
-                               " coalesce((SELECT sum(size_kb) FROM published_assets WHERE creator_id = $1 AND deleted_at IS NULL), 0)"),
+                               " coalesce((SELECT sum(size_kb) FROM published_assets WHERE creator_id = $1 AND deleted_at IS NULL), 0),"
+                               " (SELECT player_funds FROM players WHERE player_id = $1)"),
                  KN_DB_ARGS(acct_itoa(me, s->account_id)), begin_done, b);
 }
 
@@ -966,10 +985,74 @@ typedef struct Commit {
     const char *err;   /* the worker's verdict */
     char data[160];    /* the asset's data JSON (its letters) */
     long long size_kb;
+    char *blob;        /* K_MAP_THUMB: the thumbnail as a PNG data URL (published_maps.map_image), NULL without one */
 } Commit;
 
 static void commit_db_done(kn_db_result *res, void *ud);
 static void skin_commit(Commit *c);
+
+/* (account, map, PNG data URL) -> {written}: a published map's thumbnail (K_MAP_THUMB), the creator's map only. It is
+ * published_maps.map_image, which every map list and GET /api/user-assets/m<id>/thumb.png (user_assets.c) read, and
+ * map_info gets the thumbnail flag "t" (v10's mi.t: publishGamePopup's preview, the map cards, editor-10.0.7.js:20543-20547). */
+static kn_db_result *run_map_thumb(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    if (n < 3) return kn_db_result_user_error("bad call");
+    char *info_s = dbx_text(&x, SQL(.pg = "SELECT coalesce(map_info::text, '{}') FROM published_maps WHERE map_id = $1::bigint"
+                                         " AND creator_id = $2::bigint AND deleted_at IS NULL",
+                                   .any = "SELECT coalesce(map_info, '{}') FROM published_maps WHERE map_id = $1 AND creator_id = $2"
+                                          " AND deleted_at IS NULL"),
+                           KN_DB_ARGS(p[1], p[0]));
+    int64_t written = 0;
+    if (info_s) {
+        cJSON *info = cJSON_Parse(info_s);
+        if (!cJSON_IsObject(info)) {
+            cJSON_Delete(info);
+            info = cJSON_CreateObject();
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(info, "t");
+        cJSON_AddNumberToObject(info, "t", 1);
+        char *txt = cJSON_PrintUnformatted(info);
+        cJSON_Delete(info);
+        written = dbx_exec(&x, SQL(.pg = "UPDATE published_maps SET map_image = $3, map_info = $4::jsonb WHERE map_id = $1::bigint"
+                                         " AND creator_id = $2::bigint AND deleted_at IS NULL",
+                                   .any = "UPDATE published_maps SET map_image = $3, map_info = $4 WHERE map_id = $1 AND creator_id = $2"
+                                          " AND deleted_at IS NULL"),
+                           KN_DB_ARGS(p[1], p[0], p[2], txt ? txt : "{\"t\":1}"));
+        free(txt);
+        free(info_s);
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "written", (double) (written > 0 ? written : 0));
+    return dbx_json(&x, "result", o);
+}
+
+static const kn_proc P_MAP_THUMB = {"map_thumb", NULL, run_map_thumb};
+
+static void map_thumb_done(kn_db_result *res, void *ud) {
+    Commit *c = ud;
+    Ticket *t = ticket_by_id(c->id);
+    cJSON *o = kn_db_ok(res) && kn_db_rows(res) > 0 ? cJSON_Parse(kn_db_get(res, 0, 0)) : NULL;
+    const int written = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(o, "written")) > 0;
+    cJSON_Delete(o);
+    if (!t) {
+        if (kn_http_req_alive(c->req)) reply_text(c->req, 410, "Upload expired");
+    } else if (!written) {
+        if (!kn_db_ok(res)) KN_WARN(MOD, "map %lld thumbnail failed: %s", (long long) t->map, kn_db_error(res));
+        t->committing = 0;
+        if (kn_http_req_alive(c->req)) reply_text(c->req, kn_db_ok(res) ? 404 : 503, kn_db_ok(res) ? "Map not found" : "Upload Request Failed");
+    } else {
+        KN_INFO(MOD, "%s set the thumbnail of map %lld \"%s\"", t->username, (long long) t->map, t->name);
+        if (kn_http_req_alive(c->req)) {
+            char body[64];
+            snprintf(body, sizeof body, "{\"id\":%lld}", (long long) t->map);
+            brain_cors_headers(c->req);
+            kn_http_respond(c->req, 200, "application/json", body, strlen(body));
+        }
+        ticket_free(t);
+    }
+    free(c->blob);
+    free(c);
+}
 
 /* loop thread: the checks are done */
 static void commit_checked(kn_loop *loop, void *ud) {
@@ -978,6 +1061,7 @@ static void commit_checked(kn_loop *loop, void *ud) {
     Ticket *t = ticket_by_id(c->id);
     if (!t || t != c->t) { /* cannot happen while committing; be safe */
         if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 410, "Upload expired");
+        free(c->blob);
         free(c);
         return;
     }
@@ -985,12 +1069,34 @@ static void commit_checked(kn_loop *loop, void *ud) {
         t->committing = 0;
         t->touched = kn_now_ms();
         if (kn_http_req_alive(c->req)) reply_fail(c->req, c->mod, 400, c->err);
+        free(c->blob);
         free(c);
         return;
     }
     char me[24], cat[24], kb[24], kind[24];
     if (t->kind == K_SKIN) {
         skin_commit(c);
+        return;
+    }
+    if (t->kind == K_MAP_THUMB) {
+        char map[24];
+        if (!c->blob) { /* no thumbnail was picked: v10's POST has the fileId alone, and the publish is done */
+            if (kn_http_req_alive(c->req)) {
+                char body[64];
+                snprintf(body, sizeof body, "{\"id\":%lld}", (long long) t->map);
+                brain_cors_headers(c->req);
+                kn_http_respond(c->req, 200, "application/json", body, strlen(body));
+            }
+            ticket_free(t);
+            free(c);
+            return;
+        }
+        if (kn_db_call(g_b->db, &P_MAP_THUMB, KN_DB_ARGS(acct_itoa(me, t->account), acct_itoa(map, t->map), c->blob), map_thumb_done, c) != 0) {
+            t->committing = 0;
+            if (kn_http_req_alive(c->req)) reply_text(c->req, 503, "Upload Request Failed");
+            free(c->blob);
+            free(c);
+        }
         return;
     }
     if (t->kind == K_MOD) {
@@ -1016,6 +1122,26 @@ static void *commit_thread(void *arg) {
     Commit *c = arg;
     const Ticket *t = c->t; /* committing: the loop leaves it alone */
     for (int i = 0; i < t->nparts && !c->err; i++) c->err = check_file(t, &t->parts[i]);
+    if (!c->err && t->kind == K_MAP_THUMB && t->nparts > 0) {
+        /* the map's thumbnail as published_maps.map_image: a PNG data URL */
+        char dir[1200], path[1400];
+        staging_dir(t, dir, sizeof dir);
+        snprintf(path, sizeof path, "%s/thumb.png", dir);
+        size_t n = 0;
+        unsigned char *d = read_all(path, &n);
+        static const char prefix[] = "data:image/png;base64,";
+        const size_t cap = sizeof prefix + (n + 2) / 3 * 4 + 1;
+        c->blob = d ? malloc(cap) : NULL;
+        if (c->blob) {
+            memcpy(c->blob, prefix, sizeof prefix - 1);
+            if (kn_base64_encode(d, n, c->blob + sizeof prefix - 1, cap - (sizeof prefix - 1), 0, 1) < 0) {
+                free(c->blob);
+                c->blob = NULL;
+            }
+        }
+        free(d);
+        if (!c->blob) c->err = "Upload Request Failed";
+    }
     if (!c->err) {
         /* the asset id's letters, in the popup's order (thumbnail first) */
         cJSON *d = cJSON_CreateObject();
@@ -1276,6 +1402,32 @@ int asset_upload_skin_open(const int64_t account, const char *username, const in
     return 1;
 }
 
+/* ------------------------------------------------------------------ a published map's thumbnail (K_MAP_THUMB) */
+
+int asset_upload_map_thumb_open(const int64_t account, const char *username, const int64_t map, const char *map_name,
+                                const long long thumb, char *file_id, const size_t file_id_n, const char **srv, const char **why) {
+    *srv = NULL;
+    if (!C.enabled || !g_b || !g_b->db) {
+        *why = "File uploads are not supported on this server";
+        return 0;
+    }
+    Ticket req;
+    memset(&req, 0, sizeof req);
+    req.kind = K_MAP_THUMB;
+    req.account = account;
+    req.map = map;
+    snprintf(req.username, sizeof req.username, "%s", username ? username : "");
+    snprintf(req.name, sizeof req.name, "%s", map_name && *map_name ? map_name : "map");
+    if (thumb > 0) req.parts[req.nparts++] = (Part){0, thumb, 0}; /* k_fields[0]: "thumb" */
+    const uint64_t now = kn_now_ms();
+    sweep(now);
+    const Ticket *t = ticket_open(&req, now, why);
+    if (!t) return 0;
+    snprintf(file_id, file_id_n, "%s", t->id);
+    if (C.host[0]) *srv = C.host;
+    return 1;
+}
+
 void asset_upload_skin_purge(const int64_t skin) {
     if (!C.enabled || skin <= 0) return;
     char dir[1200];
@@ -1433,7 +1585,7 @@ static void h_upload(kn_http_req *req, void *ud) {
     const uint64_t now = kn_now_ms();
     sweep(now);
     Ticket *t = ticket_by_id(id);
-    if (!t || FLOW(t->kind) != mod) {
+    if (!t || ROUTE(t->kind) != mod) {
         reply_fail(req, mod, 404, "Upload expired");
         return;
     }
@@ -1670,7 +1822,9 @@ static void tickets_restore(void) {
             snprintf(t->ext, sizeof t->ext, "%s", kn_json_str(o, "ext", "obj"));
             snprintf(t->uvc, sizeof t->uvc, "%s", kn_json_str(o, "uvc", ""));
             t->skin = kn_json_int(o, "skin", 0);
-            ok = t->name[0] && t->kind >= K_MODEL && t->kind <= K_SKIN && (t->kind != K_SKIN || t->skin > 0);
+            t->map = kn_json_int(o, "map", 0);
+            ok = t->name[0] && t->kind >= K_MODEL && t->kind <= K_MAP_THUMB && (t->kind != K_SKIN || t->skin > 0) &&
+                 (t->kind != K_MAP_THUMB || t->map > 0);
             /* the idle time: since the newest of the record and the staged files (a chunk touches its file) */
             time_t newest = st.st_mtime;
             char dir[1200], fp[1400], fb[24];

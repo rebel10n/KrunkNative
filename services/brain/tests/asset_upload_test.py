@@ -37,6 +37,7 @@ import os
 import re
 import shutil
 import sqlite3
+import base64
 import struct
 import subprocess
 import sys
@@ -302,6 +303,72 @@ async def scenario_mods(names):
     f = await other.recv_until(lambda f: f[0] in ("plm", "po"))
     check(f and f[0] == "po" and f[1] is None and f[2] == "Mod not found", "plm on another account's mod -> po Mod not found: %r" % (f,))
     await other.close()
+    await sock.close()
+
+
+async def scenario_maps(names):
+    """v10's Publish Game (editor-10.0.7.js:17000-17024, 20621-20647, 20810-20834): plm -> preloadMap, uploadM
+    [data, desc, video, cat, {thumb: bytes}, post, mob] -> pubMR {fileId, srv}, count, name; the thumbnail's POST"""
+    sock = await Sock().open()
+    await sock.register(names[0])
+    name = "Pm" + names[0][-6:]
+    doc = json.dumps({"name": name, "objects": [{"p": [0, 0, 0], "s": [10, 10, 10]}], "spawns": [[0, 10, 0, 0, 0, 0]]})
+    await sock.send(["plm", name])
+    f = await sock.recv_until(lambda f: f[0] in ("plm", "po"))
+    check(f == ["plm", True], "plm of an unpublished name -> preloadMap(true): %r" % (f,))
+    thumb = png(8, 8)
+    await sock.send(["uploadM", doc, "about it", "", "7", {"thumb": len(thumb)}, True, True])
+    r = await sock.recv_until(lambda f: f[0] in ("pubMR", "upMp", "po"))
+    check(r and r[0] == "pubMR" and isinstance(r[1], dict) and len(r[1].get("fileId") or "") == 32 and r[1].get("srv") is None
+          and r[2] == 1 and r[3] == name, "uploadM (v10) -> pubMR {fileId, srv null}, 1, name: %r" % (r,))
+    fid = r[1]["fileId"] if r and r[0] == "pubMR" else ""
+    send_file(fid, "thumb", thumb)
+    st, body = done(fid)
+    row = q("SELECT map_id, map_image, map_info, map_mobile, map_category FROM published_maps WHERE map_name = ?", name)
+    mid = int(row[0][0]) if row else 0
+    check(st == 200 and json.loads(body).get("id") == mid, "the thumbnail's done -> 200 {id: map}: %d %r" % (st, body))
+    check(row and row[0][1] == "data:image/png;base64," + base64.b64encode(thumb).decode(), "the thumbnail is the map's map_image")
+    check(row and json.loads(row[0][2] if isinstance(row[0][2], str) else json.dumps(row[0][2])).get("t") == 1, "map_info.t: %r" % (row,))
+    check(row and int(row[0][3]) == 1 and int(row[0][4]) == 7, "Mobile Friendly -> map_mobile 1, category 7: %r" % (row,))
+    posts = q("SELECT link, link2, body FROM feed_posts WHERE type = 2 AND link = ?", str(mid))
+    check(len(posts) == 1 and posts[0][1] == name and posts[0][2] == "about it", "Post to Hub -> one hub game post: %r" % (posts,))
+    st, got, _ = http("GET", "/api/user-assets/m%d/thumb.png" % mid)
+    check(st == 200 and got == thumb, "GET /api/user-assets/m<id>/thumb.png serves it")
+
+    await sock.send(["plm", name])
+    f = await sock.recv_until(lambda f: f[0] in ("plm", "po"))
+    m = f[2] if f and f[0] == "plm" and len(f) > 2 and isinstance(f[2], dict) else {}
+    check(f and f[1] is False and m.get("map_id") == mid and int(m.get("ca")) == 7 and m.get("mob") and m.get("map_description") == "about it"
+          and json.loads(m.get("mi") or "{}").get("t") == 1 and m.get("map_updatecounter") == 1,
+          "plm of the account's map -> preloadMap(false, {map_id, ca, mob, mi, map_description, ...}): %r" % (f,))
+
+    # an update without a thumbnail: the fileId alone finishes the ticket; the stored thumbnail and t stay
+    await sock.send(["uploadM", doc, "about it", "", 7, {}, False, False])
+    r = await sock.recv_until(lambda f: f[0] in ("pubMR", "upMp", "po"))
+    check(r and r[0] == "pubMR" and r[2] == 2, "the update -> pubMR count 2: %r" % (r,))
+    st, body = done(r[1]["fileId"] if r and r[0] == "pubMR" else "")
+    check(st == 200, "the fileId alone -> 200: %d %r" % (st, body))
+    row = q("SELECT map_image, map_info, map_mobile FROM published_maps WHERE map_id = ?", mid)
+    check(row and row[0][0].startswith("data:image/png") and int(row[0][2]) == 0
+          and json.loads(row[0][1] if isinstance(row[0][1], str) else json.dumps(row[0][1])).get("t") == 1,
+          "the update keeps the thumbnail (t), Mobile off: %r" % ((row[0][1], row[0][2]) if row else None,))
+    check(len(q("SELECT link FROM feed_posts WHERE type = 2 AND link = ?", str(mid))) == 1, "no hub post without Post to Hub")
+
+    # a thumbnail that is no PNG fails its POST (publishMapResp: "Game Updated, Thumbnail Failed)"); over 250 kB: upMp
+    gif = b"GIF89a not a png at all"
+    await sock.send(["uploadM", doc, "", "", 7, {"thumb": len(gif)}, False, False])
+    r = await sock.recv_until(lambda f: f[0] in ("pubMR", "upMp", "po"))
+    send_file(r[1]["fileId"] if r and r[0] == "pubMR" else "", "thumb", gif)
+    st, body = done(r[1]["fileId"] if r and r[0] == "pubMR" else "")
+    check(st != 200 and b"(PNG only)" in body, "a non-PNG thumbnail fails: %d %r" % (st, body))
+    await sock.send(["uploadM", doc, "", "", 7, {"thumb": 300 * 1000}, False, False])
+    r = await sock.recv_until(lambda f: f[0] in ("pubMR", "upMp", "po"))
+    check(r == ["upMp", "File size Limit Reached"] or (r and r[0] == "pubMR"),
+          "a 300 kB thumbnail: upMp File size Limit Reached (premium: 500 kB): %r" % (r,))
+
+    # pubR carries the account's funds (publishAssetResp sets KE.account.funds)
+    r = await sock.upload_a("Fund tex", 16, {"texture": len(thumb)}, None, 2)
+    check(r and r[0] == "pubR" and isinstance(r[1].get("funds"), (int, float)), "pubR {fileId, srv, funds}: %r" % (r,))
     await sock.close()
 
 
@@ -605,6 +672,8 @@ def main():
         asyncio.run(scenario(["upl%s" % stamp, "upo%s" % stamp]))
         print("mods:")
         asyncio.run(scenario_mods(["upm%s" % stamp, "upn%s" % stamp]))
+        print("maps (v10's uploadM and its thumbnail):")
+        asyncio.run(scenario_maps(["upg%s" % stamp]))
         print("a restart mid-upload:")
         time.sleep(0.35)
         pending = asyncio.run(scenario_restart_open(["upr%s" % stamp]))

@@ -760,15 +760,21 @@ static kn_db_result *run_map_snapshot(kn_dbconn *c, int n, const char *const *p)
 }
 const kn_proc P_MAP_SNAPSHOT = {"map_snapshot", NULL, run_map_snapshot};
 
-/* (me, name, data, desc, video, category, thumb) -> {updated, id, taken} */
+/* (me, name, data, desc, video, category, thumb, info, mobile) -> {updated, id, count, taken}: count is the map's
+ * map_updatecounter after the publish (1 for a new map; the editor's pubMR says "Game Updated!" above 1,
+ * editor-10.0.7.js:20826). map_info's thumbnail flag "t" stays while the map has a thumbnail (map_image): an update
+ * that sends none keeps the one it had (a v10 uploadM's thumbnail comes after it, asset_upload.c K_MAP_THUMB).
+ * mobile (0403): the popup's Mobile Friendly, kept when NULL. */
 static kn_db_result *run_publish_map(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const char *video = P(4) && *P(4) ? P(4) : NULL;
+    const char *mob = P(8) && *P(8) ? P(8) : NULL;
     int64_t up = dbx_exec(&x,
         SQL(.any = "UPDATE published_maps SET map_data = $3, map_description = coalesce($4, ''), map_video = $5,"
-                   " map_category = $6, map_image = coalesce($7, map_image), map_updatecounter = map_updatecounter + 1,"
+                   " map_category = $6, map_image = coalesce($7, map_image), map_mobile = coalesce($8, map_mobile),"
+                   " map_updatecounter = map_updatecounter + 1,"
                    " map_date = {now} WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id = $1"),
-        7, (const char *const[]){P(0), P(1), P(2), P(3), video, P(5), P(6)});
+        8, (const char *const[]){P(0), P(1), P(2), P(3), video, P(5), P(6), mob});
     int64_t id = 0;
     if (up > 0) {
         id = dbx_int(&x, SQL(.any = "SELECT map_id FROM published_maps WHERE lower(map_name) = lower($1) AND deleted_at IS NULL"),
@@ -779,16 +785,29 @@ static kn_db_result *run_publish_map(kn_dbconn *c, int n, const char *const *p) 
             return dbx_finish(&x, kn_db_result_user_error("Map name taken"));
         id = dbx_insert_id(&x,
             SQL(.any = "INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category,"
-                       " map_image) VALUES ($2, $1, $3, coalesce($4, ''), $5, $6, $7)"),
-            7, (const char *const[]){P(0), P(1), P(2), P(3), video, P(5), P(6)});
+                       " map_image, map_mobile) VALUES ($2, $1, $3, coalesce($4, ''), $5, $6, $7, coalesce($8, 0))"),
+            8, (const char *const[]){P(0), P(1), P(2), P(3), video, P(5), P(6), mob});
     }
-    /* P(7): map_info ({"m": mode ids}, creations.c); the thumbnail flag stays with map_image */
-    if (id > 0 && n > 7 && P(7) && *P(7))
-        dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_info = $2 WHERE map_id = $1"), KN_DB_ARGS(I64S(id), P(7)));
+    /* P(7): map_info ({"m": mode ids}, creations.c), with "t" while the map has a thumbnail */
+    if (id > 0 && n > 7 && P(7) && *P(7)) {
+        cJSON *info = cJSON_Parse(P(7));
+        if (cJSON_IsObject(info) && !cJSON_GetObjectItemCaseSensitive(info, "t") &&
+            dbx_exists(&x, SQL(.any = "SELECT 1 FROM published_maps WHERE map_id = $1 AND coalesce(map_image, '') <> ''"),
+                       KN_DB_ARGS(I64S(id))))
+            cJSON_AddNumberToObject(info, "t", 1);
+        char *txt = cJSON_IsObject(info) ? cJSON_PrintUnformatted(info) : NULL;
+        dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_info = $2 WHERE map_id = $1"), KN_DB_ARGS(I64S(id), txt ? txt : P(7)));
+        free(txt);
+        cJSON_Delete(info);
+    }
     if (id > 0) db_map_snapshot(&x, I64S(id)); /* the new live data is a version (0392) */
+    const int64_t count = id > 0 ? dbx_int(&x, SQL(.any = "SELECT map_updatecounter FROM published_maps WHERE map_id = $1"),
+                                           KN_DB_ARGS(I64S(id)), 1)
+                                 : 0;
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "updated", up > 0 ? 1 : 0);
     cJSON_AddNumberToObject(o, "id", (double)id);
+    cJSON_AddNumberToObject(o, "count", (double)count);
     cJSON_AddNullToObject(o, "taken");
     return dbx_json(&x, "jsonb_build_object", o);
 }
@@ -796,12 +815,15 @@ _Static_assert(MAP_VERSIONS_KEEP == 20, "P_PUBLISH_MAP's old_versions keeps MAP_
 const kn_proc P_PUBLISH_MAP = {
     "publish_map",
     "WITH up AS (UPDATE published_maps SET map_data = $3, map_description = coalesce($4, ''), map_video = nullif($5, ''), "
-    "  map_category = $6, map_image = coalesce($7, map_image), map_info = coalesce(nullif($8, '')::jsonb, map_info), "
+    "  map_category = $6, map_image = coalesce($7, map_image), "
+    "  map_info = coalesce(nullif($8, '')::jsonb, map_info, '{}'::jsonb) || CASE WHEN coalesce($7, map_image, '') <> '' "
+    "  THEN '{\"t\": 1}'::jsonb ELSE '{}'::jsonb END, map_mobile = coalesce(nullif($9, '')::smallint, map_mobile), "
     "  map_updatecounter = map_updatecounter + 1, map_date = now() "
     "  WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id = $1 RETURNING map_id, map_updatecounter, map_data), "
     "taken AS (SELECT 1 FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id IS DISTINCT FROM $1), "
-    "ins AS (INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category, map_image, map_info) "
-    "  SELECT $2, $1, $3, coalesce($4, ''), nullif($5, ''), $6, $7, coalesce(nullif($8, '')::jsonb, '{}'::jsonb) "
+    "ins AS (INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category, map_image, map_info, "
+    "  map_mobile) SELECT $2, $1, $3, coalesce($4, ''), nullif($5, ''), $6, $7, coalesce(nullif($8, '')::jsonb, '{}'::jsonb), "
+    "  coalesce(nullif($9, '')::smallint, 0) "
     "  WHERE NOT EXISTS (SELECT 1 FROM up) AND NOT EXISTS (SELECT 1 FROM taken) RETURNING map_id, map_updatecounter, map_data), "
     /* db_map_snapshot in the same statement: the new live data is a version, the oldest beyond MAP_VERSIONS_KEEP go */
     "snap AS (INSERT INTO map_versions (map_id, version, map_data, data_size) SELECT map_id, map_updatecounter, map_data, "
@@ -810,6 +832,7 @@ const kn_proc P_PUBLISH_MAP = {
     "  AND version <= (SELECT map_updatecounter FROM up) - 20) " /* MAP_VERSIONS_KEEP */
     "SELECT jsonb_build_object('updated', (SELECT count(*) FROM up), "
     "'id', coalesce((SELECT map_id FROM up), (SELECT map_id FROM ins)), "
+    "'count', coalesce((SELECT map_updatecounter FROM up), (SELECT map_updatecounter FROM ins)), "
     "'taken', CASE WHEN EXISTS (SELECT 1 FROM taken) THEN kn_fail('Map name taken')::text END)",
     run_publish_map};
 
