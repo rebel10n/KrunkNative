@@ -139,7 +139,9 @@ static void toolbar(StrBuf *out, const int tab) {
     static const char *const ICONS[3][2] = {{"class.png", "pixelated"}, {"loadout.png", "crisp-edges"}, {"outfit.png", "crisp-edges"}};
     const AccountInfo *acc = active_account();
     sb_append(out, "<div id='loadoutToolbar'><div id='loadoutCharName'>");
-    sb_append_esc(out, acc ? player_names_account(acc->alias[0] ? acc->alias : acc->name) : "Guest");
+    char guest[64];
+    menu_guest_name(guest, sizeof(guest)); // "Guest_" + the player's sid in a game, else "Guest" (deob-10.0.7.js:217967)
+    sb_append_esc(out, acc ? player_names_account(acc->alias[0] ? acc->alias : acc->name) : guest);
     sb_append(out, "</div><div id='loadoutTabs'>");
     for (int i = 0; i < 3; i++) {
         char src[96];
