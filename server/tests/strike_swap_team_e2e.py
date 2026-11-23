@@ -168,6 +168,20 @@ def scenario_tdm(port):
     settle(b)
     check("the team it is on already: nothing changes", not b.team_msgs(mark, uid))
 
+    # the menu's #teamSelector (comp_ui.c toggleTeam, v10 updSyncDat "t"): a pick sent before the first spawn
+    # (no player yet) is kept, and that spawn starts on it, the team the balance would not have given
+    counts = {1: 0, 2: 0}
+    for t in (other, sb["team"]):
+        counts[t] = counts.get(t, 0) + 1
+    balanced = 2 if counts[1] >= counts[2] else 1
+    c = Player(port, "SwG")
+    c.swap_team(3 - balanced)
+    settle(c, 0.5)
+    sc = c.spawn()
+    check("a pick before the first spawn: that spawn is on the picked team", sc is not None and sc["team"] == 3 - balanced,
+          f"{sc}, balance would pick {balanced}")
+    c.close()
+
     a.close()
     b.close()
 

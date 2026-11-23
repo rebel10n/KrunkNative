@@ -3616,9 +3616,11 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
                 return send_c2s(l, KRUNKER_C2S_SYNC_CONNECTION_DATA, args, 2);
             }
             if (c.key != 'c') return 0;
-            // s: the class's secondary pick (parseInt(secondaryInd)) when it has one, else null; our
-            // COMP_SET carries no secondary, so the server keeps the one the next "en" [5] names
-            const KrunkerValue kv[] = {KRUNKER_V_STR("c"), KRUNKER_V_NUM(c.value), KRUNKER_V_STR("s"), KRUNKER_V_NIL};
+            // s: the class's secondary pick (parseInt(secondaryInd)) when it has one, else null (deob-10.0.7.js:
+            // 217560-217563): NetCompSetClassPacket's (comp_ui.c), -1 = none; a bare NetCompSetPacket says null
+            int32_t sec = -1;
+            if (length >= sizeof(NetCompSetClassPacket)) memcpy(&sec, (const uint8_t *) payload + offsetof(NetCompSetClassPacket, secondary), sizeof(sec));
+            const KrunkerValue kv[] = {KRUNKER_V_STR("c"), KRUNKER_V_NUM(c.value), KRUNKER_V_STR("s"), sec >= 0 ? KRUNKER_V_NUM(sec) : KRUNKER_V_NIL};
             const KrunkerValue args[] = {KRUNKER_V_STR("c"), KRUNKER_V_MAP(kv, 2)};
             return send_c2s(l, KRUNKER_C2S_SYNC_CONNECTION_DATA, args, 2);
         }

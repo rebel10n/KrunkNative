@@ -1147,6 +1147,8 @@ static void net_spawn_client(ClientConnection *client) {
 
         player->uid = client->id;
         player->team = accounts_assigned_team(client); // ranked roster team (players.setTeam isFromQueue), 0 = mode picks
+        // the menu's team pick (net_handle_swap_team), when this game still takes one; the mode keeps a set team
+        if (!player->team && mode_swap_team_allowed(&g_server->game, client->team_pick)) player->team = client->team_pick;
         player->ping = client->ping_ms > 0 ? (float) client->ping_ms : 0.0f; // lag compensation (getStateConst)
         player->custom_values = client->custom_values; // WP-C: custVals survive the map change (v7 never resets them)
         client->player = player;
@@ -1987,11 +1989,18 @@ static void net_handle_premium_action(ClientConnection *client, const NetPacket 
 // NET_EXT_KN_SWAP_TEAM (Krunker Strike's Tap-to-Play "Switch Teams", FRVR SWAP_TEAM): the sender takes
 // the team it asked for between lives (mode_swap_team: team modes with selTeam, not comp). Ranked's
 // roster is fixed, as COMP_SET 't' says. A refused request changes nothing and gets no answer.
+// The menu's #teamSelector sends the same request (v10 toggleTeam -> updSyncDat("t", team), deob-10.0.7.js:226066-
+// 226072; its team also rides every ENTER_GAME, :215052 [8]): before the first spawn there is no player yet, so the
+// pick is kept for that spawn (net_spawn_client), which starts on it.
 static void net_handle_swap_team(ClientConnection *client, const uint8_t *body, const uint16_t length) {
     NetSwapTeamPacket req;
-    if (!client || !client->player || length < sizeof(req)) return;
+    if (!client || length < sizeof(req)) return;
     memcpy(&req, body, sizeof(req));
     if (accounts_ranked_active()) return;
+    if (!client->player) {
+        if (mode_swap_team_allowed(&g_server->game, req.team)) client->team_pick = req.team;
+        return;
+    }
     mode_swap_team(&g_server->game, client->player, req.team);
 }
 

@@ -3958,6 +3958,13 @@ typedef struct {
     uint8_t key;           // 't' team (0 leave, 1, 2) or 'c' class index
     int32_t value;
 } NetCompSetPacket;
+// NET_PACKET_COMP_SET 'c' to an official krunker.io game only (the in-process krunker_link reads it; KrunkNative
+// servers take the 5-byte NetCompSetPacket alone): selectClass's updSyncDat("c", {c, s}) (deob-10.0.7.js:217560-
+// 217563) carries the class's secondary pick, s = null for a class without a secondary slot (-1 here).
+typedef struct {
+    NetCompSetPacket set;
+    int32_t secondary;     // the secondary weapon id, -1 = none (s: null)
+} NetCompSetClassPacket;
 // ---- end WP-E lobby packets ----
 // ---- WP-C trigger / interaction packets (v7.1.4, doc/v7/map-logic.md §3.9, §5.3), ids in
 // NET_PACKET_BLOCK_TRIGGERS (120-129). Old peers ignore unknown ids; a client sends the C->S

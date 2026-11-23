@@ -15,8 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <modes.h>   // mode_team_name (#teamNm1 / #teamNm2)
+#include <net_ext.h> // NET_EXT_KN_SWAP_TEAM (the menu's team pick on a KrunkNative server)
 
 static int g_shown;     // #mMenuHolComp is up (f1904 took the comp branch)
+static int g_team_pick; // iïïíìïí: the menu's last toggleTeam (1, 2; 0 none sent yet, deob-10.0.7.js:226069)
+
+static void team_selector_round(Client *client);
 static char g_msg[NET_GAME_MESSAGE_SIZE];
 
 static void set_display(const char *id, const char *value) {
@@ -188,6 +193,7 @@ void comp_ui_match_gate(Client *client) {
 // f1904(Game.isComp) at every round start
 void comp_ui_round(Client *client) {
     menu_ads_apply(); // iíìíiíi at the init (deob-10.0.7.js:226471): the slots back after a comp menu hid #aHider
+    team_selector_round(client);
     set_display("mMenuHolDef", "none");
     set_display("mMenuHolComp", "none");
     set_display("vsHolder", "none");
@@ -243,27 +249,73 @@ void comp_ui_message(const char *text) {
 }
 
 // updSyncDat(key, value): NET_PACKET_COMP_SET to v7-protocol servers and offline (comp lobbies; official
-// krunker.io games always)
-static void comp_send(Client *client, const char key, const int value) {
+// krunker.io games always). 1 when it went out.
+static int comp_send(Client *client, const char key, const int value) {
     // v10's selectClass sends its "c" in every game (game.deob.js:210761): an official krunker.io game
     // gets it outside comp too (krunker_link.c "cd"); KrunkNative's servers keep it to comp lobbies
     if (!client || (!client->game.config.comp && !client->game.is_official) || (!client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_V7))
-        return;
+        return 0;
+    if (key == 'c' && client->game.is_official) {
+        // updSyncDat("c", {c, s}) (deob-10.0.7.js:217560-217563): s = the class's secondary pick when it has a
+        // secondary slot (classConfig[c].secondary), else null. KN sends the pick its ENTER_GAME [5] sends
+        // (ui_loadout_secondary: a pick the class's req refuses is the Pistol, as the server's updateSecIndex makes it)
+        const NetCompSetClassPacket packet = {.set = {.key = 'c', .value = value}, .secondary = ui_loadout_secondary(value)};
+        client_net_send(client, NET_PACKET_COMP_SET, &packet, sizeof(packet));
+        return 1;
+    }
     const NetCompSetPacket packet = {.key = (uint8_t) key, .value = value};
     client_net_send(client, NET_PACKET_COMP_SET, &packet, sizeof(packet));
+    return 1;
 }
 
-// selectClass(i): updSyncDat("c", i)
+// selectClass(i): updSyncDat("c", {c: i, s})
 void comp_ui_class_selected(Client *client, const int index) {
     comp_send(client, 'c', index);
 }
 
-// toggleTeam(team): updSyncDat("t", team), 0 leaves
+// A team pick outside a comp lobby on a KrunkNative server (or offline): v10's updSyncDat("t") and ENTER_GAME [8]
+// carry it to the server (deob-10.0.7.js:226072, :215052); here NET_EXT_KN_SWAP_TEAM does, which the server takes
+// between lives and keeps before the first spawn (server/src/net.c net_handle_swap_team, mode_swap_team_allowed)
+static void team_pick_send(Client *client, const int team) {
+    if (!client || team < 1 || team > 2 || client->game.is_official || client->game.config.comp) return;
+    NetSwapTeamPacket req = {.team = (uint8_t) team};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(req)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SWAP_TEAM, &req, sizeof(req));
+    if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
+}
+
+static void set_color(const char *id, const char *value) {
+    HtmlElem el = html_dom_by_id(id);
+    if (el) html_dom_set_style(el, "color", value);
+}
+
+// toggleTeam(team) (deob-10.0.7.js:226066-226072): iïïíìïí = team || 0; #teamNm1 / #teamNm2 colours (any team, 1
+// as well as 2, dims Alpha and lights Bravo: v10's own test is `team ? ...`); updSyncDat("t", team), 0 leaves.
+// The menu's #selectT sends 2 checked, 1 unchecked (deob-10.0.7.js:148223); the comp lists' Join / Leave Team 0, 1, 2.
 int comp_ui_toggle_team(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
+    Client *client = user;
     const int team = argc > 0 && args && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
-    comp_send(user, 't', team);
+    g_team_pick = team;
+    set_color("teamNm1", team ? "rgba(255,255,255,0.5)" : "#fff");
+    set_color("teamNm2", team ? "#fff" : "rgba(255,255,255,0.5)");
+    if (!comp_send(client, 't', team)) team_pick_send(client, team);
     return 1;
+}
+
+// INIT's setShowSelTeam(config.selTeam) (deob-10.0.7.js:163431-163433, :226420) and the team names (#teamNm1 /
+// #teamNm2: mode.teamOptions, else nameTeam1 / 2 unless blank, else Alpha / Bravo, :226386-226387). The pick stays
+// with the page (iïïíìïí); KN's page may be a new one, so #selectT shows it again, and a KrunkNative server hears it
+// again for this game (v10 sends it with every ENTER_GAME).
+static void team_selector_round(Client *client) {
+    const Game *game = &client->game;
+    const int on = game->config.select_team;
+    set_display("teamSelector", on ? "block" : "none");
+    HtmlElem el;
+    if ((el = html_dom_by_id("teamNm1"))) html_dom_set_text(el, mode_team_name(game, 1));
+    if ((el = html_dom_by_id("teamNm2"))) html_dom_set_text(el, mode_team_name(game, 2));
+    if ((el = html_dom_by_id("selectT"))) html_dom_set_checked(el, g_team_pick == 2);
+    if (on) team_pick_send(client, g_team_pick);
 }
 
 int comp_ui_packet(Client *client, const void *payload, const uint16_t length) {

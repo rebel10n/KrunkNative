@@ -1388,6 +1388,21 @@ static void test_actions(void) {
               krunker_num(krunker_get(c, "c"), -1) == 4 && krunker_is(krunker_get(c, "s"), KRUNKER_NIL), "cd c {c: 4, s: null}");
     }
     clear();
+    // selectClass's {c, s} with the class's secondary pick (deob-10.0.7.js:217560-217563): comp_ui's NetCompSetClassPacket
+    const NetCompSetClassPacket cls_sec = {.set = {.key = 'c', .value = 1}, .secondary = 6};
+    krunker_link_send_ours(&link, NET_PACKET_COMP_SET, &cls_sec, sizeof(cls_sec));
+    {
+        const KrunkerValue *c = g_out_count ? krunker_frame_arg(&g_out[0], 1) : NULL;
+        CHECK(g_out_count == 1 && krunker_num(krunker_get(c, "c"), -1) == 1 && krunker_num(krunker_get(c, "s"), -1) == 6, "cd c {c: 1, s: 6}");
+    }
+    clear();
+    const NetCompSetClassPacket cls_none = {.set = {.key = 'c', .value = 2}, .secondary = -1};
+    krunker_link_send_ours(&link, NET_PACKET_COMP_SET, &cls_none, sizeof(cls_none));
+    {
+        const KrunkerValue *c = g_out_count ? krunker_frame_arg(&g_out[0], 1) : NULL;
+        CHECK(g_out_count == 1 && krunker_num(krunker_get(c, "c"), -1) == 2 && krunker_is(krunker_get(c, "s"), KRUNKER_NIL), "cd c {c: 2, s: null}: no secondary slot");
+    }
+    clear();
     NetEntPacket ent;
     memset(&ent, 0, sizeof(ent));
     ent.secondary_index = -1;

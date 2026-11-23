@@ -302,7 +302,25 @@ static void test_swap_team(Game *game) {
         CHECK(team.uid == a->uid && team.team == other, "NET_PACKET_TEAM: uid %d team %d", team.uid, team.team);
     }
     CHECK(b->team == b_team, "the other player keeps its team");
+    // the menu's #teamSelector before the first spawn (server/src/net.c keeps the pick): a player added with its
+    // pick keeps it, where the balance (mode_pick_team) would have put it on the other team
+    {
+        int t1 = 0, t2 = 0;
+        for (size_t i = 0; i < game->player_count; i++) {
+            if (game->players[i] && game->players[i]->team == 1) t1++;
+            if (game->players[i] && game->players[i]->team == 2) t2++;
+        }
+        const int crowded = t1 >= t2 ? 1 : 2; // the team the balance would not pick
+        CHECK(mode_swap_team_allowed(game, crowded) && !mode_swap_team_allowed(game, 0) && !mode_swap_team_allowed(game, 3),
+              "selTeam: teams 1 and 2 may be picked");
+        Player *c = player_init(game);
+        c->uid = 3;
+        c->team = crowded;
+        game_players_add(game, c);
+        CHECK(c->team == crowded, "a pick made before the first spawn stays (team %d)", c->team);
+    }
     game->config.comp = 1;
+    CHECK(!mode_swap_team_allowed(game, 1), "comp: no pick");
     CHECK(!mode_swap_team(game, a, a->team == 1 ? 2 : 1), "a comp lobby's roster picks the teams");
     game->config.comp = 0;
     game->config.select_team = 0;

@@ -38,11 +38,15 @@ void mode_update_team(Game *game, Player *player, const int team) {
 // not friendly / clanWar / convertTeam), and the button FRVR shows needs selTeam. Between lives only:
 // a living player keeps its team (FRVR's switch is made on the Tap-to-Play screen, never mid-life).
 // A comp lobby's teams are its roster's (comp_lobby.c): refused here, as COMP_SET 't' is for ranked.
-int mode_swap_team(Game *game, Player *player, const int team) {
-    if (!game || !player || !game->mode || team < 1 || team > 2) return 0;
+int mode_swap_team_allowed(const Game *game, const int team) {
+    if (!game || !game->mode || team < 1 || team > 2) return 0;
     const GameModeConfig *cfg = &game->mode->config;
     if (!cfg->teams || cfg->friendly || cfg->clan_war || cfg->convert_team) return 0;
-    if (!game->config.select_team || game->config.comp) return 0;
+    return game->config.select_team && !game->config.comp;
+}
+
+int mode_swap_team(Game *game, Player *player, const int team) {
+    if (!player || !mode_swap_team_allowed(game, team)) return 0;
     if (player->active || player->team == team) return 0;
     mode_update_team(game, player, team); // "tm" to everyone: the scoreboards
     return 1;

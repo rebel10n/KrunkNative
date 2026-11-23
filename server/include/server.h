@@ -157,6 +157,7 @@ typedef struct {
     int player_number;
     int class_index;
     int secondary_index;           // ENT secondary pick (weapon id, -1 default)
+    int team_pick;                 // NET_EXT_KN_SWAP_TEAM before the first spawn (the menu's #teamSelector): its team, 0 none
     PlayerCosmetics cosmetics;     // ENT skin colour / cosmetic items (none for older ENTs)
     int slid_cont;                 // ENT slidCont (gameserver.ts ent[15]: player.slidCont), 1 for older ENTs
     int spray_index;               // ENT sprayIndex (gameserver.ts ent[1]: player.sprayIndex), 0 for older ENTs

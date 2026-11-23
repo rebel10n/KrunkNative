@@ -595,6 +595,10 @@ int mode_is_team(const struct Game_t*);                      // mode.teams
 // NET_EXT_KN_SWAP_TEAM (Krunker Strike's Tap-to-Play switch): `team` (1 or 2) for a player between lives
 // in a team mode with selTeam on, not a comp lobby. 1 when the team changed (broadcast), else 0.
 int mode_swap_team(struct Game_t*, struct Player_t*, int team);
+// Its game half: `team` (1 or 2) may be picked in this game (a team mode, not friendly / clanWar / convertTeam,
+// selTeam on, not comp). The server also takes a pick sent before the first spawn (the menu's #teamSelector,
+// server/src/net.c): that spawn starts on it.
+int mode_swap_team_allowed(const struct Game_t*, int team);
 int mode_team_class(const struct Game_t*, int team);         // the class a team is forced to, -1 none
 int mode_apply_outfit(const struct Game_t*, struct Player_t*); // modelOverrides (Infected, Stalker) into Player.cosmetics; 1 = changed
 // Domination capture interpolation between "uct" packets (game.js updateDomZones, client half),
