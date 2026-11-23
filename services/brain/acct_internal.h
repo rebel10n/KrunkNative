@@ -141,6 +141,7 @@ typedef struct SkinInfo {
     char spin_tag[24];                           /* v10 spinTag: a wheel with this tag draws it whatever its season / limT */
     unsigned char limited_spin, tradable, premium_spin; /* v10 limitedSpin (noSpin, still in wheels), tradable, premiumSpin */
     unsigned char craftable;                     /* v10 craftable: the result of a Junkyard recipe (craft.c) */
+    unsigned char wearable;                      /* v10.0.7 wearable: a spin mints it as an instance with a wear and serial */
     int styles;                                  /* v10.0.7 styles: how many (items.setStyle picks one, 0 the default) */
     char lim_t[24];
     char lim_g[32];                              /* limG */

@@ -244,9 +244,16 @@ def is_change_unknown(d):
 
 def is_spin(d):
     # the keys v10.0.3's consumer reads: fakeRands, itemIds, funds, usedTicket (deob-10.0.3.js:254636-254638)
+    # v10.0.7 also reads data.instances (deob-10.0.7.js:224680): every Starter item is wearable (itemConfig.wearable), so
+    # the one item is minted as an instance {id: copy id, m: {wear in [0, 1), serial >= 1}} (0398)
+    inst = d.get("instances") if isinstance(d, dict) else None
+    i0 = inst[0] if isinstance(inst, list) and len(inst) == 1 else None
+    m = i0.get("m") if isinstance(i0, dict) else None
     return (isinstance(d, dict) and isinstance(d.get("itemIds"), list) and len(d["itemIds"]) == 1
             and d.get("funds") == ACCOUNTS["dave"][0] - 50 and d.get("usedTicket") is None
-            and isinstance(d.get("fakeRands"), list) and len(d["fakeRands"]) == 1)
+            and isinstance(d.get("fakeRands"), list) and len(d["fakeRands"]) == 1
+            and isinstance(i0, dict) and isinstance(i0.get("id"), int) and i0["id"] >= 1000000 and isinstance(m, dict)
+            and isinstance(m.get("wear"), (int, float)) and 0 <= m["wear"] < 1 and isinstance(m.get("serial"), int) and m["serial"] >= 1)
 
 
 def is_none(d):

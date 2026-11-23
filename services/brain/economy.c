@@ -308,10 +308,9 @@ static int quick_sell_none(const SkinInfo *k);
 static void shape_inventory(cJSON *rows) {
     cJSON *it;
     cJSON_ArrayForEach(it, rows) {
-        const int copy = kn_json_str(it, "paint_color", "")[0] != '\0' || kn_json_int(it, "paint_shader", -1) >= 0;
-        cJSON *m = copy ? v10_paint_meta(kn_json_str(it, "paint_color", ""), (int) kn_json_int(it, "paint_shader", -1)) : NULL;
-        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_color");
-        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_shader");
+        const int copy = v10_copy_row(it); /* a painted or minted copy (0352, 0398) */
+        cJSON *m = copy ? v10_copy_meta_row(it) : NULL;
+        v10_copy_row_strip(it);
         if (!copy) cJSON_DeleteItemFromObjectCaseSensitive(it, "sid");
         if (m) cJSON_AddItemToObject(it, "m", m);
     }
@@ -427,7 +426,8 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 #define LISTING_ROWS \
     "SELECT l.skin_id AS i, l.skin_id AS s, l.price AS f, l.id AS m, {epoch_ms:l.created_at} AS ss, {epoch_ms:l.created_at} AS ms," \
-    " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.seller_id AS seller_id" \
+    " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.wear AS wear,"         \
+    " l.serial AS serial, l.seller_id AS seller_id"                                                                     \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* A refused query (the db will not take it) gets its reply anyway: the page's own reply with no data, so the
@@ -454,11 +454,11 @@ static void market_query(SocialSession *s, MarketCtx *c) {
          * the copy id, paint_color / paint_shader set: doc/v10/paint-copy.md). A stack row has no paint. */
         rc = social_query(s, SQL(.any = "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"
                                    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS c, i.skin_id AS sid,"
-                                   " NULL AS paint_color, NULL AS paint_shader FROM inventory i"
+                                   " NULL AS paint_color, NULL AS paint_shader, NULL AS wear, NULL AS serial FROM inventory i"
                                    " WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"
                                    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id)"
                                    " UNION ALL SELECT k.skin_id AS i, k.skin_id AS s, 1 AS c, k.copy_id AS sid,"
-                                   " k.paint_color, k.paint_shader FROM skin_copies k WHERE k.account_id = $1"
+                                   " k.paint_color, k.paint_shader, k.wear, k.serial FROM skin_copies k WHERE k.account_id = $1"
                                    " ORDER BY i, sid"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "sales")) {
@@ -1423,11 +1423,10 @@ static void live_rows_v10(cJSON *inv) {
         cJSON *sid = cJSON_DetachItemFromObjectCaseSensitive(it, "sid");
         if (sid) {
             cJSON_AddItemToObject(it, "id", sid);
-            cJSON *m = v10_paint_meta(kn_json_str(it, "paint_color", ""), (int) kn_json_int(it, "paint_shader", -1));
+            cJSON *m = v10_copy_meta_row(it);
             if (m) cJSON_AddItemToObject(it, "m", m);
         }
-        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_color");
-        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_shader");
+        v10_copy_row_strip(it);
     }
 }
 

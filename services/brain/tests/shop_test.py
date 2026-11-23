@@ -218,8 +218,8 @@ async def scenario(port):
         products = data.get("products", {})
         junk = {k: v for k, v in products.items() if int(k) >= JUNK_BASE}
         official = {k: v for k, v in products.items() if int(k) < JUNK_BASE}
-        check(status == 200 and set(junk) == {str(ja), str(jb)} and len(official) == 17,
-              "the display lists the two active Junk products (not the retired one) and the 17 official KR ones: %s %s"
+        check(status == 200 and set(junk) == {str(ja), str(jb)} and len(official) == 18,
+              "the display lists the two active Junk products (not the retired one) and the 18 official KR ones: %s %s"
               % (status, sorted(products)))
         pa = products.get(str(ja), {})
         pb = products.get(str(jb), {})
@@ -316,6 +316,16 @@ async def scenario(port):
               "every listed official product is priced in KR, so each one can be bought")
         dyn = [ch for ch in data.get("children", []) if ch.get("id") == 33]
         check(not dyn, "the dynamic USD node (Paint Ticket) is not listed: %s" % dyn)
+        # 0398: Box Office's own Paint Ticket product (90001, 50 KR), the catalogue entry the Spin Error's Purchase More
+        # finds (deob-10.0.7.js:224246-224264): its rewards name the ticket as {type "skin", id} (and skin_id, :117708)
+        pt = official.get("90001", {})
+        check(pt.get("name") == "Paint Ticket" and pt.get("prices") == [{"id": 90001, "price_ref": "kn.paintticket", "type": "virtual",
+              "virtual": {"amount": 50, "currency_id": 1, "currency": "KR"}, "available": True}]
+              and pt.get("rewards") == [{"type": "skin", "id": 7792, "skin_id": 7792, "amount": 1}]
+              and pt.get("display_ids") == [90001] and pt.get("available") is True,
+              "the Paint Ticket (90001) is a 50 KR catalogue product rewarding ticket 7792: %s" % pt)
+        check(hovi.get("rewards") == [{"type": "skin", "id": 7994, "skin_id": 7994, "amount": 1}],
+              "an official product's rewards are its skins: %s" % hovi.get("rewards"))
         query("UPDATE players SET player_funds = 0 WHERE player_id = %d" % a_id)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Not enough KR", "an official KR product with no KR is refused: %s %s" % (status, body))
@@ -362,6 +372,15 @@ async def scenario(port):
         check(status == 400 and err_of(body) == "Purchase limit reached", "Hovi's per-user limit of 1 refuses a second: %s" % body)
         status, body = http(port, "GET", "/api/shop/displays?tag=limited", token=a_tok)
         check(status == 200 and body["data"]["products"]["35"]["purchase_count"] == 1, "the display counts the one Hovi")
+        # Purchase More's catalogue path on Box Office: showPurchase('catalog:{"display":90001}|kn.paintticket') buys the
+        # Paint Ticket by its price_ref for KR, no payment
+        status, body = http(port, "POST", "/api/shop/purchase", {"display_id": 90001, "product_id": "kn.paintticket", "quantity": 1}, a_tok)
+        d = body.get("data", {}) if isinstance(body, dict) else {}
+        check(status == 200 and d.get("success") is True and d.get("price_paid") == 50 and d.get("kr") == 100
+              and d.get("rewards") == [{"type": "skin", "skin_id": 7792, "amount": 1}],
+              "the Paint Ticket by its price_ref costs 50 KR and grants ticket 7792: %s %s" % (status, body))
+        check(one("SELECT COALESCE(SUM(delta), 0) FROM skin_transactions WHERE account_id = %d AND skin_id = 7792" % a_id) == 1,
+              "one Paint Ticket is in the account (skin ledger)")
 
         # v10.0.6 "Fixed limited items sometimes being purchasable more than once": purchases of a limit-1 product sent
         # at the same time queue on the product row, so exactly one passes the limit and the KR is debited once

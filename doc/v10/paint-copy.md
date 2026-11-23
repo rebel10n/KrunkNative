@@ -149,7 +149,7 @@ Byte offsets are the start of the line in `~/jails/kru/src/Krunker_v10.0.3/deob/
 KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. The painted units are a second table:
 
 - `skin_copies` (migration 0352, sqlite / postgres / mysql): one row per painted unit of (account, skin), with
-  `copy_id` (identity from 1000000), `paint_color` or `paint_shader` (exactly one, CHECK), `painted_at`.
+  `copy_id` (identity from 1000000), `paint_color` or `paint_shader` (at most one since 0398, CHECK), `painted_at`, and since 0398 `wear` and `serial` (below).
 - `inventory.count` still counts every owned unit, painted or not, so ownership checks do not change. The unpainted
   units are `count - painted rows`.
 - Copy ids start at 1000000 (`V10_COPY_ID_BASE`, `services/brain/v10_paint.h`). A stack's `sid` is its store index
@@ -161,6 +161,16 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   paint. A craft takes the unpainted units first and then the copies (`db_take_units`), so a copy's paint goes with it
   when it is used up. The copy's paint is kept on the listing (`market_listings.paint_*`, migration 0353) and on the
   offer (`trade_copies`, side `s`: the escrowed copy's paint), and each returns with the copy.
+- Minted copies (migration 0398, v10.0.7's item instances): a store spin mints each `wearable` item (skins.json
+  `wearable`, v10's `itemConfig.wearable`) as a copy with a wear (`skin_copies.wear`, uniform in [0, 1): the
+  Flawless < 0.1 / Tested < 0.3 / Trashed < 0.6 / Wrecked tiers, deob-10.0.7.js:16478-16494) and the item's next serial
+  (`skin_copies.serial`, counted per item in `item_mints`, so a consumed copy's serial is never reused). A copy needs
+  no paint any more (the CHECK is "at most one paint"); a minted copy can be painted later and keeps its wear and serial.
+  `m` is `{paint | paintShader, wear, serial}`; the listing (`market_listings.wear / serial`) and the offer
+  (`trade_copies.wear / serial`) keep them as they keep the paint (`CopyPaint`, `copy_meta_*` in db_common.c;
+  `v10_copy_meta_row` in v10_paint.c). The spin answers the instances (`["spin", ..., usedTicket, instances]` on the
+  social socket, `data.instances` on `POST /spins/execute`; deob-10.0.7.js:224680-224697), and the client adds each as
+  v10's `addSkin(index, 1, id, m)` and draws its wear line and serial tag on the spin screen.
 
 ### Routes
 

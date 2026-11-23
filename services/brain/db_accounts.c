@@ -707,7 +707,9 @@ const kn_proc P_ENSURE_CENTRAL = {"ensure_central", NULL, run_ensure_central};
 /* ------------------------------------------------------------------ store (postgres/0106 for the KR wheel / daily reward) */
 
 /* v7.1.4 / v10.0.2 prize wheel spin (store.c), C on every driver (one transaction):
- * (id, ref, price_each, skins "a,b,c", ticket) -> {funds}. A ticket >= 0 is consumed first, one
+ * (id, ref, price_each, skins "a,b@wear,c", ticket) -> {funds, instances}. A skin with "@wear" (a v10.0.7 wearable
+ * item) is minted as an instance (copy_mint: a skin_copies row with that wear and the item's next serial, 0398);
+ * instances[i] is its {id: copy id, m: {wear, serial}}, null for a plain unit. A ticket >= 0 is consumed first, one
  * per roll (a TICKET item's wheel or a wheel's ticketIndex: no KR; v10 multi-spins take `multi`
  * tickets); else every roll is charged price_each with its own kr_transactions row. Each won skin
  * is granted with a skin_transactions row (source "spin", ref "<wheel>:<price_each>" or
@@ -720,15 +722,31 @@ static kn_db_result *run_spin_multi(kn_dbconn *c, int n, const char *const *p) {
     int64_t rolls = 1;
     for (const char *q = list; *q; q++) rolls += *q == ',';
     if (ticket >= 0) db_add_skin(&x, id, ticket, -rolls, "ticket", ref, NULL);
+    cJSON *instances = cJSON_CreateArray();
     for (const char *q = list; *q && !dbx_failed(&x);) {
         char *end = NULL;
         const long long skin = strtoll(q, &end, 10);
         if (!end || end == q) break;
         if (price > 0) db_add_funds(&x, id, -price, "spin", ref, NULL);
-        db_add_skin(&x, id, skin, 1, "spin", ref, NULL);
+        if (*end == '@') {
+            const double wear = strtod(end + 1, &end);
+            int64_t copy = 0, serial = 0;
+            if (copy_mint(&x, id, skin, wear, "spin", ref, &copy, &serial) == 0) {
+                cJSON *in = cJSON_CreateObject(), *m = cJSON_CreateObject();
+                cJSON_AddNumberToObject(in, "id", (double) copy);
+                cJSON_AddNumberToObject(m, "wear", wear < 0.0 ? 0.0 : wear >= 1.0 ? 0.9999 : wear);
+                cJSON_AddNumberToObject(m, "serial", (double) serial);
+                cJSON_AddItemToObject(in, "m", m);
+                cJSON_AddItemToArray(instances, in);
+            }
+        } else {
+            db_add_skin(&x, id, skin, 1, "spin", ref, NULL);
+            cJSON_AddItemToArray(instances, cJSON_CreateNull());
+        }
         q = *end == ',' ? end + 1 : end;
     }
     cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "instances", instances);
     cJSON_AddNumberToObject(o, "funds",
                             (double)dbx_int(&x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = $1"), KN_DB_ARGS(P(0)), 0));
     return dbx_json(&x, "spin", o);

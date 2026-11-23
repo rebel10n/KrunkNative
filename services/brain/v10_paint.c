@@ -40,3 +40,28 @@ cJSON *v10_paint_meta(const char *color, int shader) {
     }
     return NULL;
 }
+
+cJSON *v10_copy_meta_row(const cJSON *row) {
+    cJSON *m = v10_paint_meta(kn_json_str(row, "paint_color", ""), (int) kn_json_int(row, "paint_shader", -1));
+    const cJSON *wear = cJSON_GetObjectItemCaseSensitive(row, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(row, "serial");
+    const int has_wear = cJSON_IsNumber(wear), has_serial = cJSON_IsNumber(serial) && serial->valuedouble > 0;
+    if (!has_wear && !has_serial) return m;
+    if (!m) m = cJSON_CreateObject();
+    if (!m) return NULL;
+    if (has_wear) cJSON_AddNumberToObject(m, "wear", wear->valuedouble);
+    if (has_serial) cJSON_AddNumberToObject(m, "serial", serial->valuedouble);
+    return m;
+}
+
+int v10_copy_row(const cJSON *row) {
+    const cJSON *serial = cJSON_GetObjectItemCaseSensitive(row, "serial");
+    return kn_json_str(row, "paint_color", "")[0] != '\0' || kn_json_int(row, "paint_shader", -1) >= 0 ||
+           cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "wear")) || (cJSON_IsNumber(serial) && serial->valuedouble > 0);
+}
+
+void v10_copy_row_strip(cJSON *row) {
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "paint_color");
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "paint_shader");
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "wear");
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "serial");
+}

@@ -73,11 +73,29 @@ int db_active_ban(Dbx *x, int64_t account_id, const char *ip, char *reason, size
 /* kn_add_funds / kn_add_skin; -1 (refusal recorded) when not enough / not owned / no account */
 int db_add_funds(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref, int64_t *funds);
 int db_add_skin(Dbx *x, int64_t id, int64_t skin, int64_t delta, const char *source, const char *ref, int64_t *count);
-/* The paint of a copy (skin_copies, doc/v10/paint-copy.md): color "#rrggbb" (color[0] set) or shader n. */
+/* The metadata of a copy (skin_copies, doc/v10/paint-copy.md): its paint, color "#rrggbb" (color[0] set) or shader n
+ * (-1 none), and its v10.0.7 instance values (0398): wear (has_wear) and its mint serial (0 none). */
 typedef struct CopyPaint {
     char color[24];
     int64_t shader;
+    int has_wear;
+    double wear;
+    int64_t serial;
 } CopyPaint;
+/* no paint, wear or serial */
+void copy_meta_none(CopyPaint *p);
+/* 1 when the copy carries a paint, a wear or a serial (a row of a copy, not of a stack) */
+int copy_meta_any(const CopyPaint *p);
+/* the four copy columns paint_color, paint_shader, wear, serial of a result row, from column col */
+void copy_meta_read(const kn_db_result *r, int row, int col, CopyPaint *p);
+/* the four columns as statement parameters (NULL for none); buf holds the numbers' text */
+void copy_meta_params(const CopyPaint *p, const char **color, const char **shader, const char **wear, const char **serial,
+                      char buf[3][32]);
+/* the owned entry's m of the copy: {paint | paintShader, wear, serial}, NULL for none */
+cJSON *copy_meta_json(const CopyPaint *p);
+/* v10.0.7's spin instance: a new copy of `skin` for the account with wear `wear` and the item's next mint serial
+ * (item_mints), its unit added through db_add_skin (the audit row); its copy id and serial in *copy_id / *serial. */
+int copy_mint(Dbx *x, int64_t acc, int64_t skin, double wear, const char *source, const char *ref, int64_t *copy_id, int64_t *serial);
 /* The painted copies: copy_take removes one owned copy of `skin` (its paint in *paint, its unit out of the
  * inventory: db_add_skin, so the audit row is written); copy_give adds a unit of `skin` as a copy with `paint`
  * and returns its new copy id. A copy the account does not own is refused ("You don't own that copy."). Both

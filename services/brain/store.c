@@ -207,6 +207,7 @@ static void skins_load(void) {
                 k->tradable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "tradable"));
                 k->premium_spin = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "premiumSpin"));
                 k->craftable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "craftable"));
+                k->wearable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "wearable"));
                 const cJSON *styles = cJSON_GetObjectItemCaseSensitive(it, "styles");
                 k->styles = cJSON_IsArray(styles) ? cJSON_GetArraySize(styles) : 0; /* deob-10.0.7.js:108866 */
                 k->qs_kr = (int) kn_json_int(it, "qsKR", 0);
@@ -316,6 +317,7 @@ typedef struct SpinCtx {
     int price;      /* KR per roll */
     double pos[SPIN_MAX];
     int skin[SPIN_MAX];
+    double wear[SPIN_MAX]; /* a wearable item's minted wear (0 <= wear < 1), -1 a plain unit */
     int64_t kr;
     int index;
     int has_owned;  /* itemsAreUnique / duplicateProtectedPools: owned = the account's items */
@@ -345,6 +347,22 @@ static void spin_error(SocialSession *s, const char *err) { social_send_n(s, "sp
 
 static int owned(const SpinCtx *c, int item) { return c->has_owned && item >= 0 && item < OWNED_BITS && (c->owned[item >> 3] >> (item & 7)) & 1; }
 
+/* the spin's instances as v10.0.7 hands them to its spin handler: one per item, {id, m: {wear, serial}} for a minted
+ * copy, null for a plain unit; a single spin's is the one value (as its item is) */
+static cJSON *spin_instances(const SpinCtx *c, const cJSON *v) {
+    const cJSON *in = cJSON_GetObjectItemCaseSensitive(v, "instances");
+    if (c->count == 1) {
+        const cJSON *e = cJSON_GetArrayItem(in, 0);
+        return cJSON_IsObject(e) ? cJSON_Duplicate(e, 1) : cJSON_CreateNull();
+    }
+    cJSON *a = cJSON_CreateArray();
+    for (int i = 0; i < c->count; i++) {
+        const cJSON *e = cJSON_GetArrayItem(in, i);
+        cJSON_AddItemToArray(a, cJSON_IsObject(e) ? cJSON_Duplicate(e, 1) : cJSON_CreateNull());
+    }
+    return a;
+}
+
 static void spin_done(SocialSession *s, kn_db_result *res, void *extra) {
     SpinCtx *c = extra;
     cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
@@ -366,8 +384,10 @@ static void spin_done(SocialSession *s, kn_db_result *res, void *extra) {
             cJSON_AddItemToArray(skins, cJSON_CreateNumber(c->skin[i]));
         }
     }
-    social_send_n(s, "spin", 5, cJSON_CreateNull(), pos, skins, cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)),
-                  c->ticket >= 0 ? cJSON_CreateNumber(c->ticket) : cJSON_CreateNull());
+    /* the sixth value: the minted instances, [{id, m: {wear, serial}} | null] aligned with the items (v10.0.7's
+     * spin handler reads it as its sixth argument, deob-10.0.7.js:224680-224697) */
+    social_send_n(s, "spin", 6, cJSON_CreateNull(), pos, skins, cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)),
+                  c->ticket >= 0 ? cJSON_CreateNumber(c->ticket) : cJSON_CreateNull(), spin_instances(c, v));
     cJSON_Delete(v);
     spin_unboxed(s->account_id, c);
 }
@@ -415,7 +435,14 @@ static const char *spin_rolls(SpinCtx *c, int level, int64_t funds, char *list, 
     for (int i = 0; i < c->count; i++) {
         c->skin[i] = roll_item(c, i);
         if (c->skin[i] < 0) return "Error generating item";
-        used += (size_t) snprintf(list + used, cap - used, "%s%d", i ? "," : "", c->skin[i]);
+        /* a wearable item (v10.0.7 itemConfig.wearable) is minted as an instance: its wear, uniform in [0, 1) (the
+         * Flawless < 0.1 / Tested < 0.3 / Trashed < 0.6 / Wrecked tiers, deob-10.0.7.js:16478-16494), "skin@wear" */
+        const SkinInfo *k = acct_skin(c->skin[i]);
+        c->wear[i] = k && k->wearable ? (double) (kn_random_u64() % 1000000ULL) / 1000000.0 : -1.0;
+        if (c->wear[i] >= 0)
+            used += (size_t) snprintf(list + used, cap - used, "%s%d@%.6f", i ? "," : "", c->skin[i], c->wear[i]);
+        else
+            used += (size_t) snprintf(list + used, cap - used, "%s%d", i ? "," : "", c->skin[i]);
     }
     return NULL;
 }
@@ -448,7 +475,7 @@ static void spin_account(SocialSession *s, kn_db_result *res, void *extra) {
                          free_kr_done, next);
         return;
     }
-    char list[SPIN_MAX * 12] = "";
+    char list[SPIN_MAX * 24] = "";
     const char *err = spin_rolls(c, level, funds, list, sizeof list);
     if (err) {
         spin_error(s, err);
@@ -619,6 +646,14 @@ static void http_spin_done(kn_db_result *res, void *ud) {
     cJSON_AddNumberToObject(d, "funds", (double) kn_json_int(v, "funds", 0));
     if (c->ticket >= 0) cJSON_AddNumberToObject(d, "usedTicket", c->ticket);
     else cJSON_AddNullToObject(d, "usedTicket");
+    /* v10.0.7 reads data.instances too (aligned with itemIds; deob-10.0.7.js:224680) */
+    cJSON *inst = cJSON_CreateArray();
+    const cJSON *in = cJSON_GetObjectItemCaseSensitive(v, "instances");
+    for (int i = 0; i < c->count; i++) {
+        const cJSON *e = cJSON_GetArrayItem(in, i);
+        cJSON_AddItemToArray(inst, cJSON_IsObject(e) ? cJSON_Duplicate(e, 1) : cJSON_CreateNull());
+    }
+    cJSON_AddItemToObject(d, "instances", inst);
     cJSON_Delete(v);
     v10_reply_data(c->req, 200, d);
     spin_unboxed(c->account, c);
@@ -631,7 +666,7 @@ static void http_spin_player(kn_db_result *res, void *ud) {
     if (!kn_db_ok(res) || kn_db_rows(res) < 1) return http_spin_fail(c, 500, "internal", acct_db_error(res, "spin"));
     const int level = acct_level(kn_db_get_int64(res, 0, 0, 0), NULL);
     const int64_t funds = kn_db_get_int64(res, 0, 1, 0);
-    char list[SPIN_MAX * 12] = "";
+    char list[SPIN_MAX * 24] = "";
     const char *err = spin_rolls(c, level, funds, list, sizeof list);
     if (err) return http_spin_fail(c, 400, "SPIN_REFUSED", err);
     char id[24], a1[24], a2[24], ref[48];

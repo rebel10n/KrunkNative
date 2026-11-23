@@ -12,6 +12,11 @@ answered, so the client's item never waits on a frame that will not come.
   ["dsl"] signed in, score 0 >= accounts.daily_spin_score 0 -> ["dslr", {ticketId}] (the Starter ticket,
                                  a grant in skin_transactions); a second claim -> ["dslr", null, "Daily spin
                                  already claimed"]
+And a store spin's item instances (v10.0.7, deob-10.0.7.js:224680-224697; migration 0398), sqlite only:
+  ["spin", 0, null, false]       -> ["spin", null, rand, item, funds, null, {id, m: {wear, serial}}]: every Starter item
+                                 is wearable, so it is minted as a copy (skin_copies, copy id >= 1000000) with its wear
+                                 (0 <= wear < 1) and the item's next serial (item_mints)
+  ["spin", 0, null, true]        -> ten items and ten instances aligned with them; each item's serials count up
 The database is sqlite (db_scratch.py, no server needed); KN_TEST_DB_DRIVER=postgres|mysql runs there instead.
 Exit 77 = skip (no websockets, or the store driver is unavailable).
 """
@@ -19,6 +24,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -98,7 +104,73 @@ async def register(sock, name):
     return r[2]
 
 
-async def scenario(port):
+def sql(path, text, *args):
+    con = sqlite3.connect(path, timeout=30)
+    try:
+        rows = con.execute(text, args).fetchall()
+        con.commit()
+    finally:
+        con.close()
+    return rows
+
+
+def is_instance(e):
+    m = e.get("m") if isinstance(e, dict) else None
+    return (isinstance(e, dict) and isinstance(e.get("id"), int) and e["id"] >= 1000000 and isinstance(m, dict)
+            and isinstance(m.get("wear"), (int, float)) and 0 <= m["wear"] < 1 and isinstance(m.get("serial"), int) and m["serial"] >= 1)
+
+
+async def spin_instances(social, stamp, db_path):
+    print("== a store spin's item instances (0398)")
+    async with Social(social) as s:
+        name = "kdsi" + stamp
+        await register(s, name)
+        acct = sql(db_path, "SELECT id FROM accounts WHERE username = ?", name)[0][0]
+        sql(db_path, "UPDATE players SET player_funds = 10000 WHERE player_id = ?", acct)
+        r = await s.call("spin", "spin", 0, None, False)
+        check(r is not None and r[1] is None and len(r) == 7 and isinstance(r[3], int) and is_instance(r[6]),
+              "a single Starter spin answers its instance as the sixth value: %s" % (r,))
+        single = r[6] if r and len(r) == 7 else None
+        r = await s.call("spin", "spin", 0, None, True)
+        items = r[3] if r and isinstance(r[3], list) else []
+        inst = r[6] if r and len(r) == 7 and isinstance(r[6], list) else []
+        check(len(items) == 10 and len(inst) == 10 and all(is_instance(e) for e in inst),
+              "a multi-spin answers ten instances aligned with its ten items: %s" % (r,))
+        check(r is not None and r[4] == 10000 - 11 * 50, "the eleven rolls cost 50 KR each: %s" % (r[4] if r else None,))
+        every = ([single] if single else []) + inst
+        won = ([sql(db_path, "SELECT skin_id FROM skin_copies WHERE copy_id = ?", single["id"])[0][0]] if single else []) + items
+        # four more multi-spins: 51 Starter items out of 41, so some item is minted again
+        for _ in range(4):
+            r = await s.call("spin", "spin", 0, None, True)
+            if r and len(r) == 7 and isinstance(r[3], list) and isinstance(r[6], list) and len(r[3]) == len(r[6]):
+                won += r[3]
+                every += r[6]
+        ids = [e["id"] for e in every if isinstance(e, dict)]
+        check(len(set(ids)) == len(ids) == 51 and all(is_instance(e) for e in every), "every instance is its own copy: %s" % ids)
+        last = {}
+        rising, again = True, 0
+        for skin, e in zip(won, every):
+            if skin in last:
+                again += 1
+                rising = rising and e["m"]["serial"] == last[skin] + 1
+            last[skin] = e["m"]["serial"]
+        check(rising and again > 0, "an item minted again gets the next serial (%d repeats): %s"
+              % (again, list(zip(won, [e["m"]["serial"] for e in every]))))
+        rows = {row[0]: row[1:] for row in sql(db_path, "SELECT copy_id, skin_id, wear, serial, paint_color, paint_shader"
+                                                       " FROM skin_copies WHERE account_id = ?", acct)}
+        stored = all(e["id"] in rows and abs(rows[e["id"]][1] - e["m"]["wear"]) < 1e-9 and rows[e["id"]][2] == e["m"]["serial"]
+                     and rows[e["id"]][3] is None and rows[e["id"]][4] is None for e in every)
+        check(len(rows) == 51 and stored, "the copies are stored with their wear and serial and no paint: %s" % rows)
+        units = sql(db_path, "SELECT COALESCE(SUM(count), 0) FROM inventory WHERE account_id = ?", acct)[0][0]
+        check(units == 51, "the inventory counts the 51 copies as units: %s" % units)
+        mints = dict(sql(db_path, "SELECT skin_id, minted FROM item_mints"))
+        check(all(mints.get(skin) == serial for skin, serial in last.items()),
+              "item_mints holds each item's last serial: %s %s" % (mints, last))
+        funds = sql(db_path, "SELECT player_funds FROM players WHERE player_id = ?", acct)[0][0]
+        check(funds == 10000 - 51 * 50, "51 rolls at 50 KR: %s" % funds)
+
+
+async def scenario(port, db_path=None):
     stamp = str(int(time.time()) % 100000)
     social = "ws://127.0.0.1:%d/social/ws" % port
     print("== as a guest")
@@ -127,6 +199,8 @@ async def scenario(port):
         d = r[1] if r else None
         check(isinstance(d, dict) and d.get("claimed") is True and d.get("stage") == 1, "dsp after the claim: claimed, stage 1: %s" % (r,))
         check(ticket is not None and ticket > 0, "the ticket is a wheel ticket of the store: %s" % ticket)
+    if db_path:
+        await spin_instances(social, stamp, db_path)
 
 
 def main():
@@ -149,7 +223,7 @@ def main():
                                      "--accounts.daily_spin_score=0"],
                                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         port = bound_port(log_path, proc)
-        asyncio.run(scenario(port))
+        asyncio.run(scenario(port, dbcfg.get("path") if DRIVER == "sqlite" else None))
     finally:
         if proc is not None and proc.poll() is None:
             proc.terminate()

@@ -133,7 +133,23 @@ static int64_t official_products(Dbx *x, const char *tag, const int64_t account,
             cJSON_Delete(rows);
             return 0;
         }
+        /* rewards: the skins the product grants, as v10.0.7 reads a product's rewards: the shop card's first skin
+         * reward's skin_id (deob-10.0.7.js:117685, :117708) and the catalogue's {type "skin", id} (store.catalog, the
+         * Spin Error's Purchase More, :224251) */
+        cJSON *rewards = cJSON_CreateArray();
+        for (int k = 0; contents && k < cJSON_GetArraySize(contents); k++) {
+            const cJSON *c0 = cJSON_GetArrayItem(contents, k);
+            if (strcmp(jtext(c0, "type"), "skin") != 0) continue;
+            const int64_t skin = strtoll(jtext(c0, "ref"), NULL, 10);
+            cJSON *rw = cJSON_CreateObject();
+            cJSON_AddStringToObject(rw, "type", "skin");
+            cJSON_AddNumberToObject(rw, "id", (double) skin);
+            cJSON_AddNumberToObject(rw, "skin_id", (double) skin);
+            cJSON_AddNumberToObject(rw, "amount", (double) jint(c0, "quantity"));
+            cJSON_AddItemToArray(rewards, rw);
+        }
         cJSON_AddItemToObject(pr, "contents", contents ? contents : cJSON_CreateArray());
+        cJSON_AddItemToObject(pr, "rewards", rewards);
 
         const int64_t limit = jint(row, "limit");
         if (limit > 0) {

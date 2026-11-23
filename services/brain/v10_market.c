@@ -518,8 +518,8 @@ static cJSON *listing_row(const cJSON *r) {
      * seller_id (151768: no Buy on the caller's own listing, 146473) */
     cJSON_AddNumberToObject(o, "listed_time", (double) kn_json_int(r, "ms", 0));
     if (cJSON_GetObjectItemCaseSensitive(r, "seller_id")) cJSON_AddNumberToObject(o, "seller_id", (double) kn_json_int(r, "seller_id", 0));
-    /* a painted copy's listing carries its paint as m (the official card reads the listing's m as its metadata) */
-    cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+    /* a copy's listing carries its paint, wear and serial as m (the official card reads the listing's m as its metadata) */
+    cJSON *m = v10_copy_meta_row(r);
     if (m) cJSON_AddItemToObject(o, "m", m);
     return o;
 }
@@ -544,8 +544,7 @@ static cJSON *copy_inventory_row(const cJSON *r) {
     cJSON_AddNumberToObject(o, "st", 0);
     /* the row's m (the market page, shaped by economy.c shape_inventory), else its paint columns (the trade rows) */
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(r, "m");
-    cJSON *paint = m ? cJSON_Duplicate(m, 1)
-                     : v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+    cJSON *paint = m ? cJSON_Duplicate(m, 1) : v10_copy_meta_row(r);
     if (paint) cJSON_AddItemToObject(o, "m", paint);
     put_if(o, r, "nt");
     put_if(o, r, "qs");
@@ -591,7 +590,7 @@ static void add_copy_units(cJSON *units, const cJSON *copies) {
         cJSON *u = cJSON_CreateObject();
         cJSON_AddNumberToObject(u, "ind", (double) kn_json_int(r, "i", -1));
         cJSON_AddNumberToObject(u, "sid", (double) kn_json_int(r, "sid", 0));
-        cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+        cJSON *m = v10_copy_meta_row(r);
         if (m) cJSON_AddItemToObject(u, "m", m);
         cJSON_AddItemToArray(units, u);
     }
@@ -819,8 +818,7 @@ static void step_trades_page(Op *op) { step_page(op, "trades"); }
 /* a painted copy's row carries its m (the market page's rows, shaped by economy.c shape_inventory) or its paint
  * columns (the raw rows); a stack's has neither */
 static int is_copy_row(const cJSON *r) {
-    return cJSON_GetObjectItemCaseSensitive(r, "m") != NULL || kn_json_str(r, "paint_color", "")[0] != '\0'
-           || kn_json_int(r, "paint_shader", -1) >= 0;
+    return cJSON_GetObjectItemCaseSensitive(r, "m") != NULL || v10_copy_row(r);
 }
 
 /* the stacks (their unpainted units; sid = the store index, the Paint action's skinId) and the painted copies
@@ -1036,7 +1034,7 @@ static cJSON *trade_inv_side(const cJSON *side) {
     cJSON *a = cJSON_CreateArray();
     const cJSON *r;
     cJSON_ArrayForEach(r, side) {
-        if (kn_json_str(r, "paint_color", "")[0] == '\0' && kn_json_int(r, "paint_shader", -1) < 0) {
+        if (!v10_copy_row(r)) {
             cJSON *u = cJSON_Duplicate(r, 1);
             cJSON_DeleteItemFromObjectCaseSensitive(u, "st");
             cJSON_AddNumberToObject(u, "st", 1);

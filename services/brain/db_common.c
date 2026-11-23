@@ -256,9 +256,57 @@ int64_t db_unpainted_units(Dbx *x, int64_t acc, int64_t skin) {
         KN_DB_ARGS(I64S(acc), I64S(skin)), 0);
 }
 
+void copy_meta_none(CopyPaint *p) {
+    memset(p, 0, sizeof *p);
+    p->shader = -1;
+}
+
+int copy_meta_any(const CopyPaint *p) { return p->color[0] != '\0' || p->shader >= 0 || p->has_wear || p->serial > 0; }
+
+void copy_meta_read(const kn_db_result *r, const int row, const int col, CopyPaint *p) {
+    copy_meta_none(p);
+    if (!kn_db_isnull(r, row, col)) snprintf(p->color, sizeof p->color, "%s", kn_db_get(r, row, col));
+    if (!kn_db_isnull(r, row, col + 1)) p->shader = kn_db_get_int64(r, row, col + 1, -1);
+    if (!kn_db_isnull(r, row, col + 2)) {
+        p->has_wear = 1;
+        p->wear = kn_db_get_double(r, row, col + 2, 0.0);
+    }
+    if (!kn_db_isnull(r, row, col + 3)) p->serial = kn_db_get_int64(r, row, col + 3, 0);
+}
+
+void copy_meta_params(const CopyPaint *p, const char **color, const char **shader, const char **wear, const char **serial,
+                      char buf[3][32]) {
+    *color = p->color[0] ? p->color : NULL;
+    *shader = NULL;
+    if (!p->color[0] && p->shader >= 0) {
+        snprintf(buf[0], 32, "%lld", (long long) p->shader);
+        *shader = buf[0];
+    }
+    *wear = NULL;
+    if (p->has_wear) {
+        snprintf(buf[1], 32, "%.17g", p->wear);
+        *wear = buf[1];
+    }
+    *serial = NULL;
+    if (p->serial > 0) {
+        snprintf(buf[2], 32, "%lld", (long long) p->serial);
+        *serial = buf[2];
+    }
+}
+
+cJSON *copy_meta_json(const CopyPaint *p) {
+    cJSON *m = v10_paint_meta(p->color, p->color[0] ? -1 : (int) p->shader);
+    if (!p->has_wear && p->serial <= 0) return m;
+    if (!m) m = cJSON_CreateObject();
+    if (!m) return NULL;
+    if (p->has_wear) cJSON_AddNumberToObject(m, "wear", p->wear);
+    if (p->serial > 0) cJSON_AddNumberToObject(m, "serial", (double) p->serial);
+    return m;
+}
+
 int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint, const char *source, const char *ref) {
     kn_db_result *r = dbx_q(x,
-        SQL(.any = "SELECT paint_color, paint_shader FROM skin_copies WHERE copy_id = $1 AND account_id = $2"
+        SQL(.any = "SELECT paint_color, paint_shader, wear, serial FROM skin_copies WHERE copy_id = $1 AND account_id = $2"
                    " AND skin_id = $3 {for_update}"),
         KN_DB_ARGS(I64S(copy), I64S(acc), I64S(skin)));
     if (!r) return -1;
@@ -267,10 +315,7 @@ int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint,
         return dbx_refuse(x, "You don't own that copy.");
     }
     CopyPaint p;
-    memset(&p, 0, sizeof p);
-    p.shader = -1;
-    if (!kn_db_isnull(r, 0, 0)) snprintf(p.color, sizeof p.color, "%s", kn_db_get(r, 0, 0));
-    if (!kn_db_isnull(r, 0, 1)) p.shader = kn_db_get_int64(r, 0, 1, 0);
+    copy_meta_read(r, 0, 0, &p);
     kn_db_result_free(r);
     /* the copy row goes first: db_add_skin's guard then sees one painted unit fewer */
     if (dbx_exec(x, SQL(.any = "DELETE FROM skin_copies WHERE copy_id = $1"), KN_DB_ARGS(I64S(copy))) < 0) return -1;
@@ -281,18 +326,40 @@ int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint,
 
 int copy_give(Dbx *x, int64_t acc, int64_t skin, const CopyPaint *paint, const char *source, const char *ref, int64_t *copy_id) {
     if (db_add_skin(x, acc, skin, 1, source, ref, NULL) < 0) return -1;
-    const int colour = paint->color[0] != '\0';
-    char shader_t[24];
-    if (!colour) snprintf(shader_t, sizeof shader_t, "%lld", (long long) paint->shader);
+    const char *color, *shader, *wear, *serial;
+    char buf[3][32];
+    copy_meta_params(paint, &color, &shader, &wear, &serial, buf);
     const int64_t id = dbx_insert_id(x,
-        SQL(.pg = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1::int, $2::int, $3, $4::int)"
-                  " RETURNING copy_id",
-            .sqlite = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, $3, $4)"
-                      " RETURNING copy_id",
-            .mysql = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, $3, $4)"),
-        KN_DB_ARGS(I64S(acc), I64S(skin), colour ? paint->color : NULL, colour ? NULL : shader_t));
+        SQL(.pg = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader, wear, serial)"
+                  " VALUES ($1::int, $2::int, $3, $4::int, $5::double precision, $6::int) RETURNING copy_id",
+            .sqlite = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader, wear, serial)"
+                      " VALUES ($1, $2, $3, $4, $5, $6) RETURNING copy_id",
+            .mysql = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader, wear, serial)"
+                     " VALUES ($1, $2, $3, $4, $5, $6)"),
+        KN_DB_ARGS(I64S(acc), I64S(skin), color, shader, wear, serial));
     if (id < 0) return -1;
     if (copy_id) *copy_id = id;
+    return 0;
+}
+
+int copy_mint(Dbx *x, int64_t acc, int64_t skin, double wear, const char *source, const char *ref, int64_t *copy_id, int64_t *serial) {
+    if (dbx_exec(x, SQL(.pg = "INSERT INTO item_mints (skin_id, minted) VALUES ($1::int, 1)"
+                              " ON CONFLICT (skin_id) DO UPDATE SET minted = item_mints.minted + 1",
+                        .sqlite = "INSERT INTO item_mints (skin_id, minted) VALUES ($1, 1)"
+                                  " ON CONFLICT (skin_id) DO UPDATE SET minted = item_mints.minted + 1",
+                        .mysql = "INSERT INTO item_mints (skin_id, minted) VALUES ($1, 1)"
+                                 " ON DUPLICATE KEY UPDATE minted = minted + 1"),
+                 KN_DB_ARGS(I64S(skin))) < 0)
+        return -1;
+    const int64_t n = dbx_int(x, SQL(.any = "SELECT minted FROM item_mints WHERE skin_id = $1"), KN_DB_ARGS(I64S(skin)), 0);
+    if (dbx_failed(x) || n <= 0) return -1;
+    CopyPaint m;
+    copy_meta_none(&m);
+    m.has_wear = 1;
+    m.wear = wear < 0.0 ? 0.0 : wear >= 1.0 ? 0.9999 : wear;
+    m.serial = n;
+    if (copy_give(x, acc, skin, &m, source, ref, copy_id) < 0) return -1;
+    if (serial) *serial = n;
     return 0;
 }
 
@@ -354,7 +421,8 @@ static cJSON *display_name(const cJSON *r) {
 
 /* The owned list (v10.0.3's $account.skins, the account's data[10]), with the paints of the copies
  * (doc/v10/paint-copy.md): one {ind, cnt} row per skin with unpainted units (cnt = those units), then one
- * {ind, cnt: 1, id, m} row per painted copy (id = its copy id, m = {paint} or {paintShader}). NULL on a DB error. */
+ * {ind, cnt: 1, id, m} row per copy (id = its copy id, m = {paint} or {paintShader}, and a minted copy's wear and
+ * serial, v10.0.7's instances: 0398). NULL on a DB error. */
 cJSON *db_owned_skins(Dbx *x, int64_t id) {
     cJSON *rows = dbx_rows(x,
         SQL(.any = "SELECT i.skin_id AS ind, i.count - (SELECT count(*) FROM skin_copies c"
@@ -367,7 +435,7 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         return NULL;
     }
     cJSON *copies = dbx_rows(x,
-        SQL(.any = "SELECT copy_id AS id, skin_id AS ind, paint_color, paint_shader FROM skin_copies"
+        SQL(.any = "SELECT copy_id AS id, skin_id AS ind, paint_color, paint_shader, wear, serial FROM skin_copies"
                    " WHERE account_id = $1 ORDER BY copy_id"),
         KN_DB_ARGS(I64S(id)));
     if (dbx_failed(x)) {
@@ -384,7 +452,7 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         cJSON_AddNumberToObject(c, "cnt", 1);
         cJSON_AddNumberToObject(c, "st", 0); /* a copy is st 0 (addSkin / setSkin, deob-10.0.3.js:129099-129105) */
         cJSON_AddNumberToObject(c, "id", (double) kn_json_int(row, "id", 0));
-        cJSON *m = v10_paint_meta(kn_json_str(row, "paint_color", ""), (int) kn_json_int(row, "paint_shader", -1));
+        cJSON *m = v10_copy_meta_row(row); /* {paint | paintShader, wear, serial} (0352, 0398) */
         if (m) cJSON_AddItemToObject(c, "m", m);
         cJSON_AddItemToArray(rows, c);
     }
