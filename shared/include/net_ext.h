@@ -214,6 +214,9 @@ typedef enum {
     NET_EXT_KN_PLAYER_RANK_FLAG = 0x81B0, // S -> C NetPlayerRankFlagPacket, right after a player's NET_PACKET_PLAYER_INFO
     // 0x81C0 v10.0.7 loadout copies: the "<copyId>#<index>" slots (doc/v10/paint-copy.md section 6)
     NET_EXT_KN_SKIN_COPY_IDS = 0x81C0, // C -> S / link NetSkinCopyIdsPacket, right before each ENT: the copy each slot names
+    // 0x81D0 v10.0.7 item copies in a match: the end table's skin reward and the worn copies' wear, serial and name tag
+    NET_EXT_KN_END_REWARD = 0x81D0, // S -> C NetEndRewardPacket, one per player endGame dropped a skin for, ahead of the END
+    NET_EXT_KN_SKIN_META = 0x81D1,  // S -> C NetSkinMetaPacket, with a player's SKINS: its worn copies' m (client/include/skin_meta.h)
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -935,12 +938,49 @@ typedef struct {
 } NetPlayerRankFlagPacket;
 _Static_assert(sizeof(NetPlayerRankFlagPacket) == 12, "NetPlayerRankFlagPacket: the wire body is 12 bytes");
 
+// NET_EXT_KN_END_REWARD (S -> C, every peer): v10.0.7 endGame's player.skinReward (deob-10.0.7.js:195141, :195158: the
+// map's 1-in-100 mapReward skin, then the event's reward skin, the later one kept) makes that player's endData.ed
+// "reward" cell [reward, skinReward] (:195262), and the end table draws it as a .skinReward thumbnail in the skin's
+// rarity colour (openSales on click) before the cell's KR text (:226765-226770). Sent for each such player right before
+// the ENDs (and before a late END), so a client has it when it draws the table. A client that does not know the
+// subtype draws the plain KR cell.
+typedef struct {
+    int32_t uid;
+    int32_t kr;   // the reward cell's KR (player.reward), as the END's rewards[] has it
+    int32_t skin; // the store.skins index endGame dropped, > 0
+} NetEndRewardPacket;
+_Static_assert(sizeof(NetEndRewardPacket) == 12, "NetEndRewardPacket: the wire body is 12 bytes");
+
+// NET_EXT_KN_SKIN_META (S -> C, every EXT peer): v10.0.7's worn items carry their copy's metadata m (getPlayerAddData's
+// skin entries {i, id, m}, read by iïîìîîï, deob-10.0.7.js:24335-24337): generateMeshData draws m.wear with the item's
+// "<type><id>_wear" map (:173646-173651; the melee's :174102-174107, a weapon's :174184-174189) and the HUD's weapon
+// slot shows m.name as its "nametag" (.weapNametag, :176440). Box Office's copies (skin_copies 0352 / 0398 / 0401) keep
+// a wear, a mint serial and a name tag; this packet lists the worn items with any of them (the owner's first copy of
+// each store index, the plain-index rule of the paint and the style), sent with every SKINS of a player (before its
+// SPAWN and on a loadout change) and after a mid-match inventory refresh. count 0 clears the player's metadata.
+#define NET_SKIN_META_MAX 12  // primary, secondary, melee and the nine cosmetic slots
+#define NET_SKIN_META_NAME 24 // a name tag's UTF-8 bytes, NUL-terminated (kn_brain allows 20 characters, 23 bytes)
+typedef struct {
+    int32_t skin;                  // store.skins index of a worn item
+    float wear;                    // m.wear, 0 <= wear < 1; -1 = none
+    int32_t serial;                // m.serial (the mint number), 0 = none
+    char name[NET_SKIN_META_NAME]; // m.name, "" = none
+} NetSkinMetaEntry;
+typedef struct {
+    int32_t uid;
+    int32_t count; // entries used, 0..NET_SKIN_META_MAX
+    NetSkinMetaEntry e[NET_SKIN_META_MAX];
+} NetSkinMetaPacket;
+_Static_assert(sizeof(NetSkinMetaEntry) == 36, "NetSkinMetaEntry: 36 bytes");
+_Static_assert(sizeof(NetSkinMetaPacket) == 440, "NetSkinMetaPacket: the wire body is 440 bytes");
+
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)
 _Static_assert(sizeof(NetServerLinePacket) <= NET_EXT_BODY_MAX, "NetServerLinePacket exceeds NET_EXT_BODY_MAX");
 _Static_assert(sizeof(NetServerNamesPacket) <= NET_EXT_BODY_MAX, "NetServerNamesPacket exceeds NET_EXT_BODY_MAX");
 _Static_assert(sizeof(NetChatNamesPacket) <= NET_EXT_BODY_MAX, "NetChatNamesPacket exceeds NET_EXT_BODY_MAX");
 _Static_assert(sizeof(NetRankedNoticePacket) <= NET_EXT_BODY_MAX, "NetRankedNoticePacket exceeds NET_EXT_BODY_MAX");
+_Static_assert(sizeof(NetSkinMetaPacket) <= NET_EXT_BODY_MAX, "NetSkinMetaPacket exceeds NET_EXT_BODY_MAX");
 
 #pragma pack(push, 1)
 // The JSON-bodied subtypes (entities 0x0100-0x0105, live objects 0x8080-0x8081): one UTF-8 JSON

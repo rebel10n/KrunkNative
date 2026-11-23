@@ -615,6 +615,19 @@ int game_end_late_spawn(const Game *game, const Player *player) {
     return game->ready && game->end_timer > 0.0f && !(player && player->active);
 }
 
+// NET_EXT_KN_END_REWARD to `target` for every player with a skinReward (v10.0.7 endData.ed's [reward, skinReward] cell,
+// deob-10.0.7.js:195262), ahead of the END that draws the table.
+static void game_send_end_rewards(Game *game, const int target) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *player = game->players[i];
+        if (!player || player->skin_reward <= 0) continue;
+        const NetEndRewardPacket body = {.uid = player->uid, .kr = player->reward, .skin = player->skin_reward};
+        uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(body)];
+        const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_END_REWARD, &body, sizeof(body));
+        if (n) game_send(game, target, NET_PACKET_EXT, buffer, n);
+    }
+}
+
 // That late "end" (didWin -1) for one uid: the endData rows as they stand.
 void game_send_end_late(Game *game, const int uid) {
     if (!game->ready || game->end_timer <= 0.0f) return;
@@ -630,6 +643,7 @@ void game_send_end_late(Game *game, const int uid) {
     packet.winner_uid = winner.player ? winner.player->uid : -1;
     game_fill_board_from((const Player *const *) sorted, count, &packet.board);
     for (size_t i = 0; i < count; i++) packet.rewards[i] = sorted[i]->reward;
+    game_send_end_rewards(game, uid);
     game_send(game, uid, NET_PACKET_END, &packet, sizeof(packet));
     game_send_match_votes(game, uid); // WP-E: the vote cards of this end screen
 }
@@ -682,12 +696,16 @@ void game_end_round(Game *game) {
         if (!player) continue;
         player->reward = game->hooks.reward ? game->hooks.reward(game, player) : 0;
         player->additional_reward = 0;
+        player->skin_reward = game->hooks.skin_reward ? game->hooks.skin_reward(game, player) : 0; // player.skinReward
     }
 
     NetLeaderboardPacket board;
     game_fill_board_from((const Player *const *) sorted, count, &board);
     int32_t rewards[GAME_LEADERBOARD_MAX] = {0};
     for (size_t i = 0; i < count; i++) rewards[i] = sorted[i]->reward;
+
+    // endData.ed's skin rewards reach every peer before its END (NET_EXT_KN_END_REWARD)
+    game_send_end_rewards(game, NET_TARGET_ALL);
 
     // Spectators / menu clients see the end screen without a result (the v3.1.1 server's
     // vote-window "end" with didWin -1).

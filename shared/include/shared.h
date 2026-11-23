@@ -1297,6 +1297,8 @@ typedef struct Player_t {
     unsigned char show_badges;    // ENT showBadges (PLAYER_SHOW_BADGE_*), PLAYER_SHOW_BADGES_ALL by default
     int score;                    // Krunker player.score
     int reward;                   // Krunker player.reward: KR of the last endGame (END "reward" column)
+    int skin_reward;              // v10.0.7 player.skinReward: the store skin index the last endGame dropped (the map's
+                                  // or the event's reward, NET_EXT_KN_END_REWARD), 0 = none
     int additional_reward;        // Krunker player.additionalReward: KR from claimed KR Packages, added
                                   // to reward at endGame past the cap (airDropPackages.js / game.js:191329)
     unsigned int assists;
@@ -1994,6 +1996,10 @@ typedef struct {
     // min(premiumT ? 40 : 30, floor(score * rewardMlt / 100)), none in hosted games). The
     // server knows the accounts (server/src/accounts.c); NULL = 0 (guests / offline).
     int (*reward)(struct Game_t*, const Player*);
+    // endGame(): player.skinReward, the skin this round drops for the player (v10.0.7: the map's mapReward one time in
+    // 100, then the event's reward skin; deob-10.0.7.js:195141-195160), asked right after `reward`. The server grants
+    // it with the round's stats; the game sends it to every peer ahead of the ENDs (NET_EXT_KN_END_REWARD). NULL = 0.
+    int (*skin_reward)(struct Game_t*, const Player*);
     // Bot players (shared/src/bots.c): the game sends their SKINS / SPAWN / PLAYER_INFO / LEAVE
     // itself through `send`. The in-process offline client, whose game is its render state,
     // also needs their meshes: bot_spawning(done = 0) right before player_spawn (drop the old

@@ -33,6 +33,7 @@
 #include <hud_endscreen_v10.h> // NET_EXT_LATEST_RANKED_MMR_CHANGE: the end screen's rank card (lrmr)
 #include <skin_counter.h>      // v10.0.4 counter skins: kills / hits / AI kills / SKIN_STAT counted on the client
 #include <skin_style.h> // v10.0.7 item styles, before the next player SPAWN
+#include <skin_meta.h>  // v10.0.7 item copies: the worn copies' wear, serial and name tag
 #include <style_picker.h> // style_picker_account_style: your model's style before the server's first packet
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
@@ -1530,6 +1531,22 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                     skin_counter_set_seed(copies.v1.uid, worn[k], copies.v1.seed[k]);
                     skin_counter_set_wear(copies.v1.uid, worn[k], copies.wear[k]);
                 }
+            } else if (subtype == NET_EXT_KN_SKIN_META && body_length >= sizeof(NetSkinMetaPacket)) { // worn copies' m (skin_meta.h)
+                NetSkinMetaPacket meta;
+                memcpy(&meta, body, sizeof meta);
+                if (meta.count >= 0 && meta.count <= NET_SKIN_META_MAX) {
+                    int skins[NET_SKIN_META_MAX], serials[NET_SKIN_META_MAX];
+                    float wears[NET_SKIN_META_MAX];
+                    const char *names[NET_SKIN_META_MAX];
+                    for (int k = 0; k < meta.count; k++) {
+                        meta.e[k].name[NET_SKIN_META_NAME - 1] = 0;
+                        skins[k] = meta.e[k].skin;
+                        wears[k] = meta.e[k].wear;
+                        serials[k] = meta.e[k].serial;
+                        names[k] = meta.e[k].name;
+                    }
+                    skin_meta_set(meta.uid, meta.count, skins, wears, serials, names);
+                }
             } else if (subtype == NET_EXT_KN_SKIN_STYLES && body_length >= sizeof(NetSkinStylesPacket)) {
                 NetSkinStylesPacketV2 styles2;
                 memcpy(&styles2.v1, body, sizeof styles2.v1);
@@ -1612,6 +1629,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetRankedNoticePacket notice;
                 memcpy(&notice, body, sizeof(notice));
                 events_ranked_notice(client, &notice);
+            }
+            else if (subtype == NET_EXT_KN_END_REWARD && body_length >= sizeof(NetEndRewardPacket)) { // endData.ed's [reward, skinReward]
+                NetEndRewardPacket reward;
+                memcpy(&reward, body, sizeof(reward));
+                Player *p = events_find_player(client, reward.uid);
+                if (p && reward.skin > 0) p->skin_reward = reward.skin; // the END that follows draws it (hud_ui_end_reward_cell)
             }
             else if (subtype == NET_EXT_KN_PLAYER_RANK_FLAG && body_length == sizeof(NetPlayerRankFlagPacket)) { // ADD_PLAYERS' rankedRank / flagIndex
                 NetPlayerRankFlagPacket rank_flag;
@@ -1719,6 +1742,7 @@ void client_game_events_reset(Client *client) {
     // Every INIT starts fresh player styles. The server sends each player's complete
     // selection again before SPAWN, so reused uids cannot inherit old cosmetics.
     skin_style_reset();
+    skin_meta_reset(); // the same for the worn copies' metadata (NET_EXT_KN_SKIN_META comes with each SKINS)
     client_world_reset(); // WP-B: no speed-run time yet
     player_accounts_on_init();
     billboard_ad_on_init(); // the server's ad for this map, before client_load_map builds it

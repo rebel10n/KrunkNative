@@ -143,6 +143,20 @@ def main():
     doc = render("endtable-actions-guest", dict(end, scoreboard=acct_rows))
     check("end actions: a guest viewer gets neither button", doc and "reportBut" not in doc)
 
+    # v10.0.7's skin reward in the end table's reward cell (ed "reward" [kr, skinReward], deob-10.0.7.js:226765-226770; the
+    # server's NET_EXT_KN_END_REWARD): the item's .skinReward thumbnail in its rarity's border, openSales(index), then the KR
+    rows = [dict(r) for r in ROWS]
+    rows[1].update(reward=3, skinReward=7540)
+    rows[2].update(reward=2)
+    doc = render("endreward", dict(end, scoreboard=rows)).replace("'", '"')
+    m = re.search(r'<div class="skinReward" style="border: 2px solid (#[0-9A-Fa-f]{3,8});" onclick="openSales\(7540\)">'
+                  r'<img draggable="false" style="width: 32px;image-rendering: auto;" loading="lazy" src="([^"]+)"></div>'
+                  r'<span style="color:#F8C55C">\+3</span> KR', doc)
+    check("end reward: Quentin's cell draws the skin reward (.skinReward, openSales(7540)) before his +3 KR",
+          m is not None and m.group(2).endswith(".png"), (doc[doc.find("skinReward") - 200:doc.find("skinReward") + 400] if "skinReward" in doc else doc[-400:]))
+    check("end reward: one thumbnail only (Rhea's reward has no skin)", doc.count('class="skinReward"') == 1 and "\">+2</span> KR" in doc,
+          str(doc.count('class="skinReward"')))
+
     # Client > Hide player names (knClient.json hidePlayerNames, client/tests/hide_names_e2e.py)
     doc = render("endtable-hidden", dict(end, storage={"knClient": json.dumps({"hidePlayerNames": True})}))
     cells = [m.group(1) for m in re.finditer(r"<td style=['\"]position: relative;['\"]>(.*?)</td>", doc, re.S) if "endTableN" in m.group(1)]

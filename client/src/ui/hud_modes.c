@@ -888,8 +888,9 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
                 if (len < size) hud_ui_end_name_cell(html, size, &len, &info, player_names_hidden() ? NULL : player->name, raw_name, color);
                 len += (size_t) snprintf(html + len, size - len, "</td>");
             } else {
-                char value[64];
+                char value[768];
                 if (!strcmp(stats[i], "dmg") && row && row->dmg >= 0) snprintf(value, sizeof(value), "%d", (int) row->dmg); // endForm.dmg
+                else if (!strcmp(stats[i], "reward")) hud_ui_end_reward_cell(value, sizeof(value), player->reward, left ? 0 : player->skin_reward);
                 else hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
                 if (player_names_extras_hidden(player == client->me)) value[0] = 0; // Hide player names: the others' stats
                 len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'>%s</td>", value);

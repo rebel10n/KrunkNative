@@ -3679,6 +3679,23 @@ static const char *hud_reward_html(const int reward, char *out, const size_t siz
     return out;
 }
 
+void hud_ui_end_reward_cell(char *out, const size_t size, const int kr, const int skin) {
+    if (!out || !size) return;
+    out[0] = 0;
+    size_t len = 0;
+    const ViewerSkin *s = skin > 0 ? viewer_skin(skin) : NULL;
+    if (s) { // `"reward" == stat && Array.isArray(cell)`: store.skins[cell[1]] (deob-10.0.7.js:226765-226767)
+        const int rarity = s->rarity >= 0 && s->rarity < g_viewer_rarity_count ? s->rarity : 0;
+        char thumb[512];
+        store_skin_preview(skin, thumb, sizeof(thumb)); // skin.thumbnail
+        hb_append(out, size, &len, "<div class='skinReward' style='border: 2px solid %s;' onclick='openSales(%d)'><img draggable='false' "
+                                   "style='width: 32px;image-rendering: auto;' loading='lazy' src='%s'></div>",
+                  g_viewer_rarities[rarity].color, skin, thumb);
+    }
+    char text[96];
+    hb_append(out, size, &len, "%s", hud_reward_html(kr, text, sizeof(text))); // cell[0] || 0: endForm's text
+}
+
 void hud_ui_end_cell_info(const Client *client, const Player *player, HudEndCellInfo *out) {
     memset(out, 0, sizeof(*out));
     out->flag = -1;
@@ -3743,11 +3760,13 @@ void hud_ui_end_name_cell(char *out, const size_t size, size_t *len, const HudEn
 // the stats and the actions cell (end_share.c: your share button, another account's report button; none for a guest).
 static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *raw,
                              const char *name, const char *color, const int score, const int kills, const int deaths, const int reward,
-                             const int blank, const char *actions, const HudEndCellInfo *info) {
+                             const int skin_reward, const int blank, const char *actions, const HudEndCellInfo *info) {
     hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td style='position: relative;'>", last ? "border-bottom:none" : "", rank);
     hud_ui_end_name_cell(out, size, len, info, player_names_hidden() ? NULL : raw, name, color);
-    char cell[96], stat[3][16]; // blank: another player's stats are not shown (Hide player names)
-    const char *reward_html = blank ? "" : hud_reward_html(reward, cell, sizeof(cell));
+    char cell[768], stat[3][16]; // blank: another player's stats are not shown (Hide player names)
+    cell[0] = 0;
+    if (!blank) hud_ui_end_reward_cell(cell, sizeof(cell), reward, skin_reward);
+    const char *reward_html = cell;
     for (int k = 0; k < 3; k++) {
         if (blank) stat[k][0] = 0;
         else snprintf(stat[k], sizeof(stat[k]), "%d", k == 0 ? score : k == 1 ? kills : deaths);
@@ -3757,7 +3776,7 @@ static void hud_end_row_html(char *out, const size_t size, size_t *len, const in
     hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'>%s</td></tr>", actions ? actions : "");
 }
 
-// Scenario rows (state.scoreboard [{name, score, kills?, deaths?, reward?, me?}]): FFA, so
+// Scenario rows (state.scoreboard [{name, score, kills?, deaths?, reward?, skinReward?, me?}]): FFA, so
 // every row but ours gets COLORS.teams[1] like a live FFA table.
 static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, char *out, const size_t size, size_t *len) {
     const int count = cJSON_GetArraySize(rows);
@@ -3788,7 +3807,8 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
             info.clan = cJSON_IsString(clan) ? clan->valuestring : NULL;
         }
         hud_end_row_html(out, size, len, index, index >= count, name, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
-                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you), actions,
+                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), ROW_INT("skinReward"),
+                         player_names_extras_hidden(is_you), actions,
                          &info);
 #undef ROW_INT
     }
@@ -3834,7 +3854,7 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
         HudEndCellInfo info;
         hud_ui_end_cell_info(client, p, &info);
         hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_raw_player_name(client, p), shown, color, p->score, (int) p->kills,
-                         (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me), actions, &info);
+                         (int) p->deaths, p->reward, p->skin_reward, player_names_extras_hidden(p == client->me), actions, &info);
     }
     hb_append(out, size, len, "</table>");
 }

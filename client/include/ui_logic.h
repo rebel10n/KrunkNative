@@ -341,6 +341,10 @@ void hud_ui_end_cell_info(const Client *client, const Player *player, HudEndCell
 // names being hidden) with `shown` (streamer-scrambled here) in `color`, the badge icons and the rank.
 void hud_ui_end_name_cell(char *out, size_t size, size_t *len, const HudEndCellInfo *info, const char *profile_name, const char *shown,
                           const char *color);
+// The end table's "reward" cell without its <td> (endForm.reward, deob-10.0.7.js:18317, and v10.0.7's skinReward cell
+// :226765-226770): with a skin (> 0) a .skinReward thumbnail in its rarity colour (openSales on click), then
+// "<span style='color:#F8C55C'>+kr</span> KR" or "NONE".
+void hud_ui_end_reward_cell(char *out, size_t size, int kr, int skin);
 void hud_ui_add_reward_skin(int skin);
 // A mid-match CHALLENGE_COMPLETED's REW.jnk (deob-10.0.7.js:225219): into matchRewardSummary.junk, the Rewards tab's Junk card
 void hud_ui_add_reward_junk(double junk);

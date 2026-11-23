@@ -48,6 +48,8 @@ typedef enum {
 #define SERVER_TALLY_MAX 128      // challenge tallies of one round (key x weapon x streak x item)
 #define SERVER_SKIN_PAINT_MAX 256 // painted store indices of one account (one paint per index; more are not sent)
 #define SERVER_SKIN_STYLE_MAX 32  // styled store indices of one account (v10.0.7: two items have styles)
+#define SERVER_SKIN_META_MAX 256  // store indices of one account with a worn copy's wear / serial / name tag
+#define SERVER_SKIN_META_NAME 24  // NET_SKIN_META_NAME
 #define SERVER_CHALLENGES_MAX 64   // active challenges of one account the game server follows mid-match (chal_told bits)
 
 // one painted copy of the account, by store index (a shader paint has color -1, a colour paint shader -1)
@@ -67,6 +69,8 @@ typedef struct {
     int32_t style;
     int32_t seed;
     float wear;
+    int32_t serial;                    // m.serial, 0 none
+    char name[SERVER_SKIN_META_NAME];  // m.name (a Name Tag), "" none
 } ServerSkinCopy;
 
 // v10.0.4 counter skins (server/src/skin_counters_server.c): a counter skin the account owns, its copy's stat (m[stat],
@@ -112,6 +116,9 @@ typedef struct {
 
     float match_since;         // g_server->now of the first spawn in this round, 0 = not playing
     int round_result;          // END result of this round: 1 won, 0 lost, -1 draw / none
+    // v10.0.7 endGame's skin drops of this round, decided with the END (accounts_skin_reward) and granted with its stats
+    // commit: the map's mapReward skin and the event's reward skin, 0 = none
+    int end_map_skin, end_event_skin;
     unsigned char committed:1; // this round's stats were already sent
 
     // dedicated server (doc/backend.md 8.7-8.9)
@@ -147,6 +154,15 @@ typedef struct {
     // every owned copy with an id (accounts_load_skins), for the slots that name one (accounts_worn_copy)
     uint16_t skin_copy_count;
     ServerSkinCopy skin_copies[SERVER_SKIN_COPY_MAX];
+    // v10.0.7 item copies: the wear, mint serial and name tag of the account's copies, one per store index (the first
+    // copy of that index with any of them, the plain-index rule as the paint). Sent with the owner's SKINS
+    // (NET_EXT_KN_SKIN_META, accounts_skin_meta_send).
+    uint16_t skin_meta_count;
+    struct {
+        int32_t skin, serial;
+        float wear; // -1 none
+        char name[SERVER_SKIN_META_NAME];
+    } skin_metas[SERVER_SKIN_META_MAX];
     int badge;                        // badgeIndex (v7 account stats.bdg, badges.js), -1 none
     // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
     // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value

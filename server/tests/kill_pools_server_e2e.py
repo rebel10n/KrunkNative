@@ -17,7 +17,12 @@ to it. Two loopback connections (the server's own machine: DEV, so /god, /bot, /
   4. G, a guest, gets no item (endGame draws for accounts only)
   5. live events (doc/v10/events.md): a map change starts the first round after the brain's welcome, which plays the
      event (updateEventIndex; A's NET_EXT_INIT_EVENT 1); the event's reward skin (rewards.skins, rewardChance 100,
-     endGame :221732-221752) lands in A's inventory once, audited as "eventreward"
+     endGame :221732-221752) lands in A's inventory once, audited as "eventreward"; the end table's reward cell gets it
+     ahead of the END (NET_EXT_KN_END_REWARD {uid, kr, skin}: v10.0.7's ed "reward" [kr, skinReward], deob-10.0.7.js:
+     195123-195160, :195262), on every peer, for A only
+  6. item copies in a match: A wears a minted copy of the Sniper skin 7582 (wear 0.2, serial 4, name tag "Lucky":
+     skin_copies 0398 / 0401); with A's SKINS every peer gets NET_EXT_KN_SKIN_META {uid, [skin, wear, serial, name]}
+     (getPlayerAddData's {i, id, m}, deob-10.0.7.js:24335; the wear map :173646-173651, weapNametag :176440)
 Prints PASS/FAIL lines; exit code 0 only when everything passed. 77 = skipped (no server_bin / kn_brain).
 """
 import json
@@ -48,7 +53,8 @@ PORT_B = kn_proto.free_ports(1)[0]
 
 HELLO_EXT = bytes([1, 4, 2, 1])  # protocol 1.4: NET_PACKET_EXT
 CHAT_SEND, END, EXT = 8, 16, 254
-EXT_RIGHTS, EXT_END_ITEM = 0x8001, 0x8150
+EXT_RIGHTS, EXT_END_ITEM, EXT_END_REWARD, EXT_SKIN_META = 0x8001, 0x8150, 0x81D0, 0x81D1
+COPY_SKIN = 7582  # Fractured, a wearable Sniper skin (Triggerman's primary)
 SKIN = 5
 EVENT_SKIN = 7540  # a Rare store skin: the event's rewards.skins (its only candidate, rewardChance 100)
 results = []
@@ -117,6 +123,36 @@ def rights_since(conn, mark):
     return out
 
 
+def end_rewards(conn):
+    """NET_EXT_KN_END_REWARD bodies with their packet position: (position, uid, kr, skin)."""
+    out = []
+    for k, (t, p) in enumerate(conn.packets):
+        if t == EXT and len(p) >= 2 + 12 and struct.unpack("<H", p[:2])[0] == EXT_END_REWARD:
+            out.append((k,) + struct.unpack("<iii", p[2:14]))
+    return out
+
+
+def skin_metas(conn):
+    """NET_EXT_KN_SKIN_META bodies: (uid, [(skin, wear, serial, name)])."""
+    out = []
+    for t, p in conn.packets:
+        if t == EXT and len(p) >= 2 + 8 and struct.unpack("<H", p[:2])[0] == EXT_SKIN_META:
+            uid, count = struct.unpack("<ii", p[2:10])
+            entries = []
+            for k in range(max(0, min(count, 12))):
+                off = 10 + k * 36
+                if len(p) < off + 36:
+                    break
+                skin, wear, serial, name = struct.unpack("<ifi24s", p[off:off + 36])
+                entries.append((skin, round(wear, 4), serial, name.split(b"\0")[0].decode(errors="replace")))
+            out.append((uid, entries))
+    return out
+
+
+def first_end(conn):
+    return next((k for k, (t, p) in enumerate(conn.packets) if t == END), -1)
+
+
 def end_items(conn):
     """NET_EXT_KN_END_ITEM bodies: (skin, icon)."""
     out = []
@@ -156,8 +192,8 @@ class Peer(kn_proto.Conn):
                 return r
         return None
 
-    def spawn(self):
-        self.ent(class_index=0, lag_comp=1.0)
+    def spawn(self, skins=None):
+        self.ent(class_index=0, skins=skins, lag_comp=1.0)
         end = time.time() + 8
         while time.time() < end and not self.closed:
             p = self.read(until=kn_proto.SPAWN, timeout=1)
@@ -247,11 +283,20 @@ def main():
 
         # A joins as the account (JOIN.session): a live sign-in mid-round keeps the round out of the new
         # account's stats (accounts.c: "nothing of this round goes to whoever comes next")
+        # 6: A's copy of the Sniper skin, minted (wear, serial) and named, before the join reads A's owned list
+        acc_row = db_rows(db_path, "SELECT id FROM accounts WHERE username = ?", (USER,))
+        if acc_row:
+            con = sqlite3.connect(db_path, timeout=30)
+            con.execute("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (acc_row[0][0], COPY_SKIN))
+            con.execute("INSERT INTO skin_copies (account_id, skin_id, wear, serial, name_tag) VALUES (?, ?, 0.2, 4, 'Lucky')",
+                        (acc_row[0][0], COPY_SKIN))
+            con.commit()
+            con.close()
         a = Peer(PORT_B, session=token)
         g = Peer(PORT_B)
         account = a.push["account"] if a.push else 0
         check("A joins as the account", account > 0, str(a.push))
-        check("A and G spawn", a.spawn() and g.spawn())
+        check("A and G spawn (A's Triggerman wearing the copy)", a.spawn(skins=(COPY_SKIN, -1, -1)) and g.spawn())
         a.say("/god")
         g.say("/god")
         a.say("/bot 3")
@@ -288,6 +333,17 @@ def main():
         esrc = db_rows(db_path, "SELECT DISTINCT source FROM skin_transactions WHERE account_id = ? AND skin_id = ?", (account, EVENT_SKIN))
         check("5: the event's reward skin in A's inventory, once, audited as eventreward", won == 1 and esrc == [("eventreward",)],
               "count %s, sources %s" % (won, esrc))
+        metas = [m for m in skin_metas(g) if any(e[0] == COPY_SKIN for e in m[1])]
+        check("6: G gets A's worn copy's metadata (NET_EXT_KN_SKIN_META: skin %d, wear 0.2, serial 4, name tag Lucky)" % COPY_SKIN,
+              bool(metas) and (COPY_SKIN, 0.2, 4, "Lucky") in metas[-1][1], str(skin_metas(g))[:300])
+        check("6: A gets its own copy's metadata too", any((COPY_SKIN, 0.2, 4, "Lucky") in m[1] for m in skin_metas(a)),
+              str(skin_metas(a))[:300])
+        ra, rg = end_rewards(a), end_rewards(g)
+        check("5: A's end table gets the skin reward ahead of the END (NET_EXT_KN_END_REWARD, skin %d)" % EVENT_SKIN,
+              len(ra) == 1 and ra[0][3] == EVENT_SKIN and ra[0][2] >= 0 and 0 <= ra[0][0] < first_end(a),
+              "%s, END at %d" % (ra, first_end(a)))
+        check("5: G's end table shows the same one reward (A's row; the guest G gets none)",
+              len(rg) == 1 and ra and rg[0][1:] == ra[0][1:] and rg[0][0] < first_end(g), "%s, END at %d" % (rg, first_end(g)))
     finally:
         for p in procs:
             if p.poll() is None:

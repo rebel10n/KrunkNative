@@ -48,6 +48,10 @@ int accounts_list_account_bans(int *out, int max);
 
 // GameHooks.reward: KR of this player's round (v3.1.1 endGame rules + gameserver.kr_*).
 int accounts_reward(const Player*);
+// GameHooks.skin_reward (game_end_round, right after reward): v10.0.7 endGame's skinReward for an account player of a
+// public-type round (the map's mapReward one time in 100, then the event's reward skin), 0 none. The drops are
+// granted with the round's stats commit.
+int accounts_skin_reward(const Player*);
 // GameHooks.progress (WP-E part 2c): game.incStat (stat 1) / challenges.update (stat 0) of an
 // account's player, tallied for the next stats commit.
 void accounts_progress(const Player*, int stat, const char *key, int value, int weapon, int streak, int item);
@@ -128,6 +132,10 @@ float accounts_worn_wear(const ClientConnection *owner, int slot, int skin);
 // The paint of each worn skin, from the copy its slot names, else the owner's painted copies (NULL owner: none). Sent with
 // SKINS V2.
 void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out);
+// v10.0.7 item copies: NET_EXT_KN_SKIN_META to `to` with the wear, serial and name tag of the copies player wears (its
+// weapon skins, melee and cosmetics: the owner's copy of each store index). Nothing for a bot (owner NULL) or a peer
+// without EXT; an owner without such copies sends count 0, so a client drops what the uid wore before.
+void accounts_skin_meta_send(ClientConnection *to, const ClientConnection *owner, const Player *player);
 // v10.0.7 item styles: NET_EXT_KN_SKIN_STYLES to `to` with the styles player's worn cosmetics wear (the owner's styled
 // copies), sent before SPAWN and after a mid-match inventory refresh. A count-zero packet clears old styles.
 void accounts_skin_styles_send(ClientConnection *to, const ClientConnection *owner, const Player *player);

@@ -620,6 +620,27 @@ int accounts_reward(const Player *player) {
     return client ? acc_reward(client, player) : 0;
 }
 
+// GameHooks.skin_reward (game_end_round, after accounts_reward): v10.0.7 endGame, in a public-type round
+// (`isPubType() && null == endIndex`) for an account that is not flagged (deob-10.0.7.js:195123-195160): a 1 in 100
+// chance of the official map's current-season mapReward skin (giveSkin "mapreward"), then the round's event pays one
+// of its reward skins the account lacks (giveSkin "eventreward", server/src/live_events_server.c). skinReward is the
+// later of the two; both are granted with the round's stats commit (acc_add_progress). Never in a Krunker Strike match:
+// these are Box Office store skins; Strike's items are its own.
+int accounts_skin_reward(const Player *player) {
+    ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!client) return 0;
+    client->acct.end_map_skin = client->acct.end_event_skin = 0;
+    const Game *g = &g_server->game;
+    if (client->acct.account_id <= 0 || client->acct.hack || flavor_get() != FLAVOR_BASE || !game_is_pub_type(g)) return 0;
+    const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
+                              ? map_catalog_map_index_of_json(g->maps[g->current_map_index]) : -1;
+    const int map_skin = map_index >= 0 ? season_map_reward(SEASON_CURRENT, map_index) : 0;
+    if (map_skin > 0 && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1) client->acct.end_map_skin = map_skin;
+    const int event_skin = server_events_reward(client, map_index);
+    if (event_skin > 0) client->acct.end_event_skin = event_skin;
+    return client->acct.end_event_skin > 0 ? client->acct.end_event_skin : client->acct.end_map_skin;
+}
+
 // ------------------------------------------------------------------ WP-E part 2c: progression
 
 // ------------------------------------------------------------------ v10.0.7 mid-match challenges
@@ -1402,17 +1423,10 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
             .elapsed_ms = elapsed * 1000.0,
         };
         if (bp.pub_type) cJSON_AddNumberToObject(p, "bpp", (double) bp_match_points(&bp));
-        // endGame: a 1 in 100 chance of the official map's current-season reward skin
-        const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
-                                  ? map_catalog_map_index_of_json(g->maps[g->current_map_index]) : -1;
-        const int reward_skin = map_index >= 0 ? season_map_reward(SEASON_CURRENT, map_index) : 0;
-        // (never in a Krunker Strike match: these are Box Office store skins; Strike's items are its own)
-        if (reward_skin && player && flavor_get() == FLAVOR_BASE && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1)
-            accounts_give_skin(player, reward_skin, "mapreward");
-        // endGame's event reward, after the map reward (deob-10.0.3.js:221732-221752): the round's event pays one of its
-        // reward skins the account lacks (server/src/live_events_server.c), in a public-type round
-        const int event_skin = player && flavor_get() == FLAVOR_BASE && game_is_pub_type(g) ? server_events_reward(client, map_index) : -1;
-        if (event_skin >= 0) accounts_give_skin(player, event_skin, "eventreward");
+        // endGame's skin drops, decided with the END (accounts_skin_reward: the end table's skinReward cell): the map's
+        // reward skin, then the event's
+        if (player && client->acct.end_map_skin > 0) accounts_give_skin(player, client->acct.end_map_skin, "mapreward");
+        if (player && client->acct.end_event_skin > 0) accounts_give_skin(player, client->acct.end_event_skin, "eventreward");
     }
     cJSON *medals = cJSON_AddObjectToObject(p, "medals");
     for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
@@ -1574,7 +1588,8 @@ static cJSON *acc_player_stats(ClientConnection *client, const int final) {
 
 // v10's endData.ed as endGame leaves it after the per-player ENDs (deob-10.0.7.js:195285-195292): for every player in
 // the end order, one value per endStats column. "name" is [name] (getName, no account), the others go through endForm
-// (deob-10.0.7.js:18315-18353): reward "<span style='color:#F8C55C'>+N</span> KR" / "NONE", time the timer / "DNF",
+// (deob-10.0.7.js:18315-18353): reward "<span style='color:#F8C55C'>+N</span> KR" / "NONE" ([that, skinReward] for a
+// player endGame dropped a skin for, :195262), time the timer / "DNF",
 // infected / found convs, weapon weaponTier, obj / objective objectiveScore, dmg round(dmgDealt), downs deaths,
 // points score; a column without an endForm entry is the player's own field. A MatchResult post (typ 8) keeps it as
 // its lnk2 (doc/v10/parity-audit-2026-11-20-social.md, round 8).
@@ -1588,10 +1603,14 @@ static cJSON *acc_end_value(const Player *p, const char *stat) {
         return a;
     }
     if (!strcmp(stat, "reward")) {
-        if (!p->reward) return cJSON_CreateString("NONE");
-        char s[96];
-        snprintf(s, sizeof(s), "<span style='color:#F8C55C'>+%d</span> KR", p->reward);
-        return cJSON_CreateString(s);
+        char s[96] = "NONE";
+        if (p->reward) snprintf(s, sizeof(s), "<span style='color:#F8C55C'>+%d</span> KR", p->reward);
+        if (p->skin_reward <= 0) return cJSON_CreateString(s);
+        // `"reward" == stat && skinReward`: the cell is [reward, skinReward] (deob-10.0.7.js:195262)
+        cJSON *a = cJSON_CreateArray();
+        cJSON_AddItemToArray(a, cJSON_CreateString(s));
+        cJSON_AddItemToArray(a, cJSON_CreateNumber(p->skin_reward));
+        return a;
     }
     if (!strcmp(stat, "time")) {
         if (!p->mode.has_timer) return cJSON_CreateString("DNF");
@@ -2572,6 +2591,34 @@ static int acc_copy_style(const cJSON *entry) {
     return out;
 }
 
+// The wear, mint serial and name tag of an owned copy's metadata m (the object, or its JSON string): v10.0.7's m.wear,
+// m.serial and m.name (deob-10.0.7.js:173646-173651, :176440). 0 when the copy has none of them.
+static int acc_copy_meta(const cJSON *entry, float *wear, int32_t *serial, char *name, const size_t name_size) {
+    *wear = -1.0f;
+    *serial = 0;
+    name[0] = 0;
+    const cJSON *m = cJSON_IsObject(entry) ? cJSON_GetObjectItem(entry, "m") : NULL;
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+    if (parsed) m = parsed;
+    const cJSON *w = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "wear") : NULL;
+    const cJSON *n = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "serial") : NULL;
+    const cJSON *t = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "name") : NULL;
+    if (cJSON_IsNumber(w) && w->valuedouble >= 0.0 && w->valuedouble < 1.0) *wear = (float) w->valuedouble;
+    if (cJSON_IsNumber(n) && n->valuedouble >= 1 && n->valuedouble < 2147483647.0) *serial = (int32_t) n->valuedouble;
+    if (cJSON_IsString(t) && t->valuestring) {
+        // a whole UTF-8 sequence or none: cut the name at a character boundary when it is longer than the slot
+        size_t len = strlen(t->valuestring);
+        if (len >= name_size) {
+            len = name_size - 1;
+            while (len > 0 && ((unsigned char) t->valuestring[len] & 0xC0) == 0x80) len--;
+        }
+        memcpy(name, t->valuestring, len);
+        name[len] = 0;
+    }
+    cJSON_Delete(parsed);
+    return *wear >= 0.0f || *serial > 0 || name[0];
+}
+
 // The style the account's first styled copy of store index skin wears, 0 none.
 static int acc_style_of(const ServerAccount *acct, const int skin) {
     for (uint16_t i = 0; i < acct->skin_style_count; i++)
@@ -2642,6 +2689,7 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
     const cJSON *skins = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 10) : cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "skins") : NULL;
     client->acct.skins_known = cJSON_IsArray(skins);
     client->acct.skin_style_count = 0;
+    client->acct.skin_meta_count = 0;
     int count = 0;
     const cJSON *e;
     cJSON_ArrayForEach(e, skins) {
@@ -2655,6 +2703,20 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
         WornSkinPaint paint;
         if (acc_copy_paint(e, &paint) && !acc_has_paint(&client->acct, skin) && client->acct.skin_paint_count < SERVER_SKIN_PAINT_MAX) {
             client->acct.skin_paints[client->acct.skin_paint_count++] = (ServerSkinPaint) {skin, paint};
+        }
+        float wear;
+        int32_t serial;
+        char tag[SERVER_SKIN_META_NAME];
+        if (acc_copy_meta(e, &wear, &serial, tag, sizeof(tag)) && client->acct.skin_meta_count < SERVER_SKIN_META_MAX) {
+            int known = 0;
+            for (uint16_t i = 0; i < client->acct.skin_meta_count && !known; i++) known = client->acct.skin_metas[i].skin == skin;
+            if (!known) { // the first copy of the index keeps it
+                const uint16_t i = client->acct.skin_meta_count++;
+                client->acct.skin_metas[i].skin = skin;
+                client->acct.skin_metas[i].wear = wear;
+                client->acct.skin_metas[i].serial = serial;
+                snprintf(client->acct.skin_metas[i].name, sizeof(client->acct.skin_metas[i].name), "%s", tag);
+            }
         }
         const int style = acc_copy_style(e);
         if (style > 0 && !acc_style_of(&client->acct, skin) && client->acct.skin_style_count < SERVER_SKIN_STYLE_MAX) {
@@ -2670,6 +2732,8 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
             c->style = style;
             c->seed = acc_copy_seed(e);
             c->wear = acc_copy_wear(e);
+            float meta_wear;
+            acc_copy_meta(e, &meta_wear, &c->serial, c->name, sizeof(c->name));
         }
     }
     skin_counters_load(client, skins); // v10.0.4 counter skins: each one's copy stat m[stat]
@@ -2699,6 +2763,50 @@ void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skin
             }
         }
     }
+}
+
+void accounts_skin_meta_send(ClientConnection *to, const ClientConnection *owner, const Player *player) {
+    if (!to || !owner || !player || to->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    // the worn items: the weapon skins and melee (SKINS), then generateMeshes' cosmetic slots
+    const int32_t worn[NET_SKIN_META_MAX] = {player->skins.primary, player->skins.secondary, player->skins.melee,
+                                             player->cosmetics.hat, player->cosmetics.body, player->cosmetics.waist,
+                                             player->cosmetics.face, player->cosmetics_v7.head, player->cosmetics_v7.back,
+                                             player->cosmetics_v7.shoe, player->cosmetics_v7.pet, player->cosmetics_v7.wrist};
+    static const int slot_of[NET_SKIN_META_MAX] = {SKIN_COPY_SLOT_PRIMARY, SKIN_COPY_SLOT_SECONDARY, SKIN_COPY_SLOT_MELEE,
+                                                   SKIN_COPY_SLOT_HAT, SKIN_COPY_SLOT_BODY, SKIN_COPY_SLOT_WAIST,
+                                                   SKIN_COPY_SLOT_FACE, SKIN_COPY_SLOT_HEAD, SKIN_COPY_SLOT_BACK,
+                                                   SKIN_COPY_SLOT_SHOE, SKIN_COPY_SLOT_PET, SKIN_COPY_SLOT_WRIST};
+    NetSkinMetaPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.uid = player->uid;
+    for (int k = 0; k < NET_SKIN_META_MAX; k++) {
+        if (worn[k] < 0) continue;
+        int dup = 0;
+        for (int j = 0; j < packet.count && !dup; j++) dup = packet.e[j].skin == worn[k];
+        // the copy the slot names ("<copyId>#<index>", accounts_worn_copy) shows its own m; else the plain-index rule
+        const ServerSkinCopy *copy = dup ? NULL : accounts_worn_copy(owner, slot_of[k], worn[k]);
+        if (copy) {
+            if (copy->wear < 0.0f && copy->serial <= 0 && !copy->name[0]) continue;
+            NetSkinMetaEntry *e = &packet.e[packet.count++];
+            e->skin = worn[k];
+            e->wear = copy->wear;
+            e->serial = copy->serial;
+            snprintf(e->name, sizeof(e->name), "%s", copy->name);
+            continue;
+        }
+        for (uint16_t i = 0; !dup && i < owner->acct.skin_meta_count; i++) {
+            if (owner->acct.skin_metas[i].skin != worn[k]) continue;
+            NetSkinMetaEntry *e = &packet.e[packet.count++];
+            e->skin = worn[k];
+            e->wear = owner->acct.skin_metas[i].wear;
+            e->serial = owner->acct.skin_metas[i].serial;
+            snprintf(e->name, sizeof(e->name), "%s", owner->acct.skin_metas[i].name);
+            break;
+        }
+    }
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
+    const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SKIN_META, &packet, sizeof(packet));
+    if (len) net_send_packet(to->fd, NET_PACKET_EXT, buf, len);
 }
 
 void accounts_skin_styles_send(ClientConnection *to, const ClientConnection *owner, const Player *player) {
@@ -2809,8 +2917,10 @@ static int acc_handle_owned_reply(const cJSON *frame) {
             if (client->player) {
                 // A skin's new m.style can be chosen in the menu mid-match. The revalidated
                 // worn styles go to all peers, including this player, while they are alive.
-                for (size_t j = 0; j < g_server->client_count; j++)
+                for (size_t j = 0; j < g_server->client_count; j++) {
                     accounts_skin_styles_send(&g_server->clients[j], client, client->player);
+                    accounts_skin_meta_send(&g_server->clients[j], client, client->player); // its copies' wear / name tag
+                }
             }
             server_log("[accounts] %s: inventory refreshed (an item from mid-session)", client->name);
         }

@@ -544,6 +544,12 @@ static int net_game_reward(Game *game, const Player *player) {
     return accounts_reward(player);
 }
 
+// GameHooks.skin_reward: endGame's skinReward (accounts.c: the map and event reward skins)
+static int net_game_skin_reward(Game *game, const Player *player) {
+    (void) game;
+    return accounts_skin_reward(player);
+}
+
 // GameHooks.can_use_skin: v10 players.spray's canUseSkin, the coordinator's inventory (accounts.c).
 static int net_game_can_use_skin(const Game *game, const Player *player, const int skin) {
     (void) game;
@@ -962,6 +968,7 @@ static void net_send_skins(ClientConnection *client, const Player *player) {
     if (!net_peer_has_skin_paint(client->peer_minor, client->peer_patch)) {
         const NetSkinsPacket skins = {.uid = player->uid, .skins = player->skins};
         net_send_packet(client->fd, NET_PACKET_SKINS, &skins, NET_SKINS_PACKET_V1_SIZE);
+        accounts_skin_meta_send(client, net_client_of_player(player), player); // an EXT peer's copies (no paint patch needed)
         return;
     }
     NetSkinsPacketV2 skins = {.uid = player->uid, .skins = player->skins};
@@ -969,6 +976,7 @@ static void net_send_skins(ClientConnection *client, const Player *player) {
     accounts_skin_paints(owner, &player->skins, &skins.paints);
     net_send_packet(client->fd, NET_PACKET_SKINS, &skins, NET_SKINS_PACKET_V2_SIZE);
     skin_counters_send(client, owner, player); // v10.0.4: each worn counter skin's stat (generateMeshes' counter base)
+    accounts_skin_meta_send(client, owner, player); // v10.0.7 item copies: the worn copies' wear, serial and name tag
 }
 
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
@@ -2580,6 +2588,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
+    g_server->game.hooks.skin_reward = net_game_skin_reward; // endGame player.skinReward (accounts.c)
     g_server->game.hooks.progress = net_game_progress; // WP-E part 2c: stats / challenge tallies (accounts.c)
     g_server->game.hooks.give_skin = net_game_give_skin; // season-system: found skins (accounts.c)
     g_server->game.hooks.junk_credit = net_game_junk_credit; // Junk wallet: Reward Junk and Junk Packages (accounts.c)
