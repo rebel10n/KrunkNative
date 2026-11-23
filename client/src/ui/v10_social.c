@@ -473,6 +473,8 @@ static int ui_page_is_v10(void) { return html_dom_by_id("menuBtnSideCommunity") 
 
 // ------------------------------------------------------------------ friends event bus (store _49849)
 
+static cJSON *g_selected_friend; // a copy of the friend picked for the conversation (owned), NULL none
+
 static cJSON *friend_by_id(const int64_t id) {
     cJSON *f;
     cJSON_ArrayForEach(f, S.friends) if ((int64_t) jnum(f, "id") == id) return f;
@@ -697,26 +699,31 @@ char *v10_social_window_friends_html(void) {
     return sb_finish(&sb);
 }
 
-static void eb_send(cJSON *obj) {
+static int bus_open(void);
+
+// 1 = the bus was open to take it (v10's send returns false on a socket that is not open: the callers then drop their
+// loading state, deob-10.0.7.js:141820, 141866)
+static int eb_send(cJSON *obj) {
     if (kio()) { // v10 _49728: JSON text on the event bus socket (dropped when it is not open)
         char *t = cJSON_PrintUnformatted(obj);
         if (t) krunker_eb_send(t);
         free(t);
         cJSON_Delete(obj);
-        return;
+        return bus_open();
     }
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("eb"));
     cJSON_AddItemToArray(f, obj);
     backend_social_send(f);
     cJSON_Delete(f);
+    return bus_open();
 }
 
-static void eb_send_type(const char *type, const char *k1, const double v1) {
+static int eb_send_type(const char *type, const char *k1, const double v1) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "type", type);
     if (k1) cJSON_AddNumberToObject(o, k1, v1);
-    eb_send(o);
+    return eb_send(o);
 }
 
 static int bus_open(void) { return kio() ? krunker_eb_is_open() : backend_social_is_open(); }
@@ -752,7 +759,7 @@ static void eb_connected(void) {
 static void eb_load_more(void) {
     if (S.friends_loading || !S.friends_more) return;
     S.friends_loading = 1;
-    eb_send_type("friends:list", "offset", S.friends_next);
+    if (!eb_send_type("friends:list", "offset", S.friends_next)) S.friends_loading = 0;
 }
 
 // a friend that joined the list: an unread:summary that came first keeps its count, and the conversation is seeded
@@ -1005,6 +1012,26 @@ static void eb_on_error(const cJSON *o) {
 
 static void eb_dispatch(const cJSON *o);
 
+// the open conversation reads itself whenever its length changes (deob-10.0.7.js:142593-142595: markRead(friend.id) on
+// conversation.length, so a message received, one sent, an echo or an earlier page): unread 0, then msg:read
+static void conv_len_check(void) {
+    static int64_t peer;
+    static int len = -1;
+    if (!S.open || S.tab != TAB_FRIENDS || !S.selected) {
+        peer = 0;
+        len = -1;
+        return;
+    }
+    const Conv *c = conv_get(S.selected, 0);
+    const int n = c ? c->n : 0;
+    if (peer == S.selected && len >= 0 && n != len) {
+        set_unread(S.selected, 0);
+        eb_send_type("msg:read", "peer", (double) S.selected);
+    }
+    peer = S.selected;
+    len = n;
+}
+
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
@@ -1046,12 +1073,7 @@ static void eb_dispatch(const cJSON *o) {
     else if (!strcmp(type, "error")) eb_on_error(o);
     else return; // presence:pong, ranked:queued, friend:request / friend:accepted (no case in v10)
     if (!strcmp(type, "friends:list") || !strncmp(type, "presence:", 9)) menu_rerender_if_open(5); // window 5's Friends tab
-    // an open conversation reads what arrives (v10: msg:read whenever its length changes)
-    if (S.open && S.tab == TAB_FRIENDS && S.selected && !strcmp(type, "msg:recv") &&
-        (int64_t) jnum(o, "from") == S.selected) {
-        set_unread(S.selected, 0);
-        eb_send_type("msg:read", "peer", (double) S.selected);
-    }
+    conv_len_check();
     if (S.open) render();
 }
 
@@ -1176,8 +1198,13 @@ static void draft_load(const int64_t peer) {
 }
 
 static void conv_open(const int64_t peer) {
-    if (S.selected && S.selected != peer) draft_save(S.selected);
+    // the conversation's effect keys on the friend's id (deob-10.0.7.js:142508-142522): picking the open friend again
+    // reads nothing again and keeps what is typed
+    if (peer == S.selected) return;
+    if (S.selected) draft_save(S.selected);
     S.selected = peer;
+    cJSON_Delete(g_selected_friend); // the friend object picked (onselect), the conversation's fallback (:142441)
+    g_selected_friend = friend_by_id(peer) ? cJSON_Duplicate(friend_by_id(peer), 1) : NULL;
     social_conversation_read(S.friends, peer); // iìiíiíï (deob-10.0.6.js:141567-141575): unread 0, then msg:read
     for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
         if (g_unread_extra[i].id == peer) g_unread_extra[i].id = 0;
@@ -1191,7 +1218,7 @@ static void conv_open(const int64_t peer) {
         cJSON_AddNumberToObject(o, "peer", (double) peer);
         cJSON_AddNumberToObject(o, "before", 0);
         cJSON_AddNumberToObject(o, "limit", 15);
-        eb_send(o);
+        if (!eb_send(o)) c->loading = 0; // not sent: the next open asks again (deob-10.0.7.js:141820)
     }
 }
 
@@ -1209,7 +1236,7 @@ static void conv_load_earlier(void) {
     cJSON_AddNumberToObject(o, "peer", (double) S.selected);
     cJSON_AddNumberToObject(o, "before", (double) c->oldest);
     cJSON_AddNumberToObject(o, "limit", 25);
-    eb_send(o);
+    if (!eb_send(o)) c->loading = 0;
 }
 
 // a JS string's length of UTF-8 text: v10.0.3's canSend is text.length <= 512 and its counter 512 - length
@@ -1224,21 +1251,22 @@ static size_t utf16_len(const char *s) {
     return n;
 }
 
-// _50152 send: a pending bubble, then msg:send
-static void conv_send(void) {
+// _50152 send: a pending bubble, then msg:send. The box is emptied only when the message went out: one the bus could
+// not take fails its bubble ("Not connected.") and stays in the box (deob-10.0.7.js:142553-142559). 1 = sent.
+static int conv_send(void) {
     char text[sizeof(S.compose)];
     const char *t = S.compose;
     while (*t == ' ' || *t == '\n' || *t == '\t' || *t == '\r') t++;
     size_t len = strlen(t);
     while (len && (t[len - 1] == ' ' || t[len - 1] == '\n' || t[len - 1] == '\t' || t[len - 1] == '\r')) len--;
     const size_t chars = utf16_len(S.compose);
-    if (!S.selected || !len || chars > EB_TEXT_MAX || S.eb_status != EB_CONNECTED || S.selected == my_id()) return;
+    if (!S.selected || !len || chars > EB_TEXT_MAX || S.eb_status != EB_CONNECTED || S.selected == my_id()) return 0;
     memcpy(text, t, len);
     text[len] = 0;
     Conv *c = conv_get(S.selected, 1);
-    if (!c) return;
+    if (!c) return 0;
     Msg *m = conv_insert(c, c->n);
-    if (!m) return;
+    if (!m) return 0;
     m->sent = 1;
     m->text = strdup(text);
     m->ts = now_ms();
@@ -1253,8 +1281,10 @@ static void conv_send(void) {
         m->status = MSG_FAILED;
         snprintf(m->error, sizeof(m->error), "Not connected.");
         c->npending--;
+        return 0;
     }
     S.compose[0] = 0;
+    return 1;
 }
 
 // ------------------------------------------------------------------ gapi helpers
@@ -1546,12 +1576,15 @@ static void last_preview(const cJSON *f, char *out, const size_t n) {
         return;
     }
     const int mine = m ? m->sent : jtrue(f, "lastFromMe");
-    // 40 characters (code points) then "…"
+    // text.length > 40 ? text.slice(0, 40) + "…" (deob-10.0.7.js:142001): 40 UTF-16 units, a 4-byte sequence being 2
+    // (one that would straddle the cut is left out: the slice would end on half of it)
     size_t bytes = 0, chars = 0;
     while (text[bytes] && chars < 40) {
+        const size_t units = (unsigned char) text[bytes] >= 0xF0 ? 2 : 1;
+        if (chars + units > 40) break;
         bytes++;
         while (((unsigned char) text[bytes] & 0xC0) == 0x80) bytes++;
-        chars++;
+        chars += units;
     }
     snprintf(out, n, "%s%.*s%s", mine ? "You: " : "", (int) bytes, text, text[bytes] ? "…" : "");
 }
@@ -1569,10 +1602,16 @@ static void sb_friend_list(StrBuf *sb) {
         sb_append(sb, "</div>");
         return;
     }
+    // query.trim() for the match, "No matches" and Load more (deob-10.0.7.js:141939, 142013, 142019)
+    char q[sizeof(S.friend_filter)];
+    const char *qs = S.friend_filter;
+    while (*qs == ' ' || *qs == '\t' || *qs == '\n' || *qs == '\r') qs++;
+    snprintf(q, sizeof(q), "%s", qs);
+    for (size_t ql = strlen(q); ql && (q[ql - 1] == ' ' || q[ql - 1] == '\t' || q[ql - 1] == '\n' || q[ql - 1] == '\r');) q[--ql] = 0;
     const cJSON **sorted = calloc((size_t) n, sizeof(*sorted));
     int k = 0;
     const cJSON *f;
-    cJSON_ArrayForEach(f, S.friends) if (sorted && ci_contains(jstr(f, "name"), S.friend_filter)) sorted[k++] = f;
+    cJSON_ArrayForEach(f, S.friends) if (sorted && ci_contains(jstr(f, "name"), q)) sorted[k++] = f;
     if (sorted) qsort(sorted, (size_t) k, sizeof(*sorted), friend_cmp);
     sb_append(sb, "<div class=\"friend-list-scroll svelte-e2g8p2\" id=\"v10sFriendScroll\">");
     for (int i = 0; i < k; i++) {
@@ -1598,8 +1637,8 @@ static void sb_friend_list(StrBuf *sb) {
         sb_append(sb, "</div></div></button>");
     }
     free(sorted);
-    if (k == 0 && S.friend_filter[0]) sb_append(sb, "<div class=\"friend-list-empty svelte-e2g8p2\"><span class=\"svelte-e2g8p2\">No matches</span></div>");
-    if (S.friends_more && !S.friend_filter[0])
+    if (k == 0 && q[0]) sb_append(sb, "<div class=\"friend-list-empty svelte-e2g8p2\"><span class=\"svelte-e2g8p2\">No matches</span></div>");
+    if (S.friends_more && !q[0])
         sb_appendf(sb, "<button class=\"friend-list-more svelte-e2g8p2\"%s onclick=\"v10s('more')\">%s</button>", S.friends_loading ? " disabled" : "",
                    S.friends_loading ? "<i class=\"material-icons spin svelte-e2g8p2\">hourglass_empty</i> <span>Loading…</span>" : "<span>Load more</span>");
     sb_append(sb, "</div> <div class=\"friend-list-search svelte-e2g8p2\"><i class=\"material-icons svelte-e2g8p2\">search</i> "
@@ -1611,7 +1650,9 @@ static void sb_friend_list(StrBuf *sb) {
 
 static void sb_conversation(StrBuf *sb) {
     sb_append(sb, "<div class=\"conversation-root svelte-128yn5i\">");
+    // friends.find(id) ?? selected: the friend object picked, when a reloaded list no longer has them (deob-10.0.7.js:142441)
     const cJSON *f = S.selected ? friend_by_id(S.selected) : NULL;
+    if (!f && S.selected && g_selected_friend && (int64_t) jnum(g_selected_friend, "id") == S.selected) f = g_selected_friend;
     if (!f) {
         sb_append(sb, "<div class=\"conversation-empty svelte-128yn5i\"><i class=\"material-icons conversation-empty-icon svelte-128yn5i\">forum</i> "
                       "<div class=\"conversation-empty-title svelte-128yn5i\">Select a friend</div> <div class=\"conversation-empty-subtitle svelte-128yn5i\">"
@@ -4216,6 +4257,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         if (!strcmp(what, "socialq")) return v10_social_handle("v10s", ev, (HtmlArg[]) {{HTML_ARG_STR, 0, "socialsearch"}}, 1), 0;
         if (!strcmp(what, "msg") && !(ev->mods & 1)) { // Enter sends, Shift+Enter is a new line
             conv_send();
+            conv_len_check();
             render();
             const HtmlElem in = html_dom_by_id("v10sMsgInput");
             if (in) html_dom_focus(in);
@@ -4245,6 +4287,10 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         html_ui_stop_propagation();
     } else if (!strcmp(op, "noop")) {
     } else if (!strcmp(op, "tab")) {
+        if ((int) arg_num(args, argc, 1, 0) == S.tab) { // the tab it is on: the same value, nothing remounts (:142165-142168)
+            render();
+            return 1;
+        }
         if (S.tab == TAB_FRIENDS) draft_save(S.selected); // the conversation unmounts (deob-10.0.7.js:142519-142521)
         S.tab = (int) arg_num(args, argc, 1, 0);
         mount_tab(S.tab);
@@ -4295,6 +4341,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         post_reply(v);
     } else if (!strcmp(op, "friend")) {
         conv_open((int64_t) arg_num(args, argc, 1, 0));
+        conv_len_check();
         render();
         const HtmlElem in = html_dom_by_id("v10sMsgInput");
         if (in) html_dom_focus(in);
@@ -4305,15 +4352,27 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         conv_load_earlier();
         render();
     } else if (!strcmp(op, "send")) {
-        conv_send();
+        const int sent = conv_send();
+        conv_len_check();
         render();
+        const HtmlElem in = sent ? html_dom_by_id("v10sMsgInput") : 0; // a sent message: the box is focused again (:142559)
+        if (in) html_dom_focus(in);
     } else if (!strcmp(op, "emoji")) {
-        // toggle: insert ':' at the caret (no emoji skins are served, so no candidates panel opens)
+        // toggle (deob-10.0.7.js:142945-142961): ':' goes in at the caret (selectionStart), the caret after it (no emoji
+        // skins are served, so no candidates panel opens)
         const HtmlElem in = html_dom_by_id("v10sMsgInput");
         if (in && strlen(S.compose) + 1 < sizeof(S.compose)) {
-            strcat(S.compose, ":");
-            html_dom_set_value(in, S.compose);
-            html_dom_focus(in);
+            int start = 0, end = 0;
+            if (html_dom_text_selection(in, &start, &end)) {
+                html_dom_focus(in);
+                html_dom_text_replace(in, start, start, ":");
+                html_dom_text_set_selection(in, start + 1, start + 1);
+                html_dom_get_value(in, S.compose, sizeof(S.compose));
+            } else {
+                strcat(S.compose, ":");
+                html_dom_set_value(in, S.compose);
+                html_dom_focus(in);
+            }
         }
     } else if (!strcmp(op, "join")) {
         const char *game = arg_str(args, argc, 1);

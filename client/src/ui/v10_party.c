@@ -102,7 +102,9 @@ void v10_party_open_join_window(const int skip_clipboard) {
 int v10_party_join_game(const char *game_id) {
     if (!game_id || !game_id[0]) return 0;
     KN_LOG_DEBUG1("[party] join friend's game %s\n", game_id);
-    return servers_ui_join_game(game_id);
+    // switchServer(id) always switches (deob-10.0.7.js:204413-204415, 142055-142057): without a matchmaker (a krunker.io
+    // account's friend, a direct server) the id goes the way a pasted code does
+    return servers_ui_join_game(game_id) || servers_ui_join_link(game_id);
 }
 
 // The page's own site: a relative URL, this page's origin or the public web client's
