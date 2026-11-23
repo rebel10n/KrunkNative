@@ -1366,6 +1366,30 @@ void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, co
     }
 }
 
+static void fx_paint_graph_material(BasicMaterial *material, const int graph, const ViewerSkin *skin) {
+    fx_paint_material(material, (WornSkinPaint) {.color = -1, .shader = 0}, skin); // a shader paint's colour, intensity, mask
+    material->paint_shader = 100;
+    material->paint_graph = graph;
+    fx_paint_probe(material);
+}
+
+int skin_fx_apply_paint_graph(Mesh *mesh, GltfInstance *model, const int graph, const ViewerSkin *skin) {
+    if (graph <= 0) return 0;
+    int painted = 0;
+    if (mesh && mesh->material && mesh->material->vtable == &basic_material_vtable) {
+        fx_paint_graph_material((BasicMaterial *) mesh->material, graph, skin);
+        painted++;
+    }
+    for (size_t i = 0; model && i < model->mesh_count; i++) {
+        Mesh *m = model->meshes[i];
+        if (!m || !m->material || m->material->vtable != &basic_material_vtable) continue;
+        if (!fx_paint_target(skin ? skin->paint_targets : NULL, gltf_instance_mesh_name(model, i))) continue;
+        fx_paint_graph_material((BasicMaterial *) m->material, graph, skin);
+        painted++;
+    }
+    return painted;
+}
+
 // ---------------------------------------------------------------- wear (v10.0.6)
 
 int skin_fx_wear_key(const ViewerSkin *skin, char *out, const size_t n) {

@@ -3,7 +3,10 @@
 //   - every node type of the table, unwired, feeding the output from each of its ports, translates;
 //   - a surface graph's output ports and settings (deob:94197-94241, the material :95813-95847), its two stages sharing
 //     a param's uniform, and every node type allowed in a surface graph feeding its colour;
-//   - `--dump <dir>` writes those shaders (with a GLSL ES 3.00 header): <dir>/*.frag the post passes,
+//   - every node type allowed in a paint graph feeding its colour (mod_shader_graph_compile_paint), and the default
+//     paint graph: a GLSL chunk with no preprocessor line or // comment, defining kn_paint_graph;
+//   - `--dump <dir>` writes those shaders (with a GLSL ES 3.00 header): <dir>/*.frag the post passes and the paint
+//     chunks in a stand-in host (expanded from one line-continued macro, as basic.frag takes them),
 //     <dir>/surface/*.vert / *.frag the surface ones, for tools/modshader/check_glsl.sh and check_gl.py.
 #include "../src/mod_shader_graph.c"
 
@@ -284,6 +287,81 @@ static void test_every_surface_node(const char *dump) {
     printf("mod_shader_test: %d surface node outputs translate\n", compiled);
 }
 
+// a paint chunk as basic.c gives it to basic.frag: one macro (line-continued), expanded after the host's declarations
+static void write_paint(const char *dir, const char *name, const char *chunk) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/paint_%s.frag", dir, name);
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        CHECK(0, "cannot write %s", path);
+        return;
+    }
+    fputs("#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\n"
+          "#define kn_map tex\n#define kn_has_map 1.0\n#define KN_TEX(uv) texture(tex, uv)\n#define KN_PAINT_GRAPH_FUNCS \\\n", f);
+    for (const char *p = chunk; *p; p++) {
+        if (*p == '\n') fputs(" \\\n", f);
+        else fputc(*p, f);
+    }
+    fputs("\nuniform sampler2D tex;\nuniform mat4 transform;\nin vec2 uv;\nout vec4 frag;\nKN_PAINT_GRAPH_FUNCS\n"
+          "void main() { frag = vec4(kn_paint_graph(uv, 1.0, vec3(0.5), vec3(0.0), vec3(0.0), vec3(0.0, 0.0, 5.0), vec3(0.0, 1.0, 0.0)), 1.0); }\n",
+          f);
+    fclose(f);
+}
+
+static void test_paint(const char *dump) {
+    // the Skin Manager's default paint graph (iìíïïìí("paint"), deob-10.0.7.js:126255): a colour node into the output
+    const char *k_default = "{\"v\":1,\"kind\":\"paint\",\"nodes\":[{\"id\":\"color1\",\"type\":\"color\",\"params\":{\"value\":\"#ff8800\"}},"
+                            "{\"id\":\"out\",\"type\":\"output\",\"inputs\":{\"color\":{\"node\":\"color1\"}}}],\"output\":\"out\"}";
+    cJSON *g = cJSON_Parse(k_default);
+    ModShaderProgram prog;
+    char err[256] = "";
+    CHECK(mod_shader_graph_compile_paint(g, NULL, &prog, err, sizeof(err)), "the default paint graph did not compile: %s", err);
+    CHECK(prog.fragment && strstr(prog.fragment, "vec3 kn_paint_graph(") && !strchr(prog.fragment, '#') && !strstr(prog.fragment, "//"),
+          "a paint chunk defines kn_paint_graph, with no preprocessor line or // comment");
+    if (dump && prog.fragment) write_paint(dump, "default", prog.fragment);
+    mod_shader_program_free(&prog);
+    cJSON_Delete(g);
+    // a surface graph is not a paint
+    g = cJSON_Parse("{\"v\":1,\"kind\":\"surface\",\"nodes\":[{\"id\":\"o\",\"type\":\"output\"}],\"output\":\"o\"}");
+    CHECK(!mod_shader_graph_compile_paint(g, NULL, &prog, err, sizeof(err)), "a surface graph compiled as a paint");
+    cJSON_Delete(g);
+
+    int compiled = 0;
+    for (int i = 0; i < MSG_NODE_COUNT; i++) {
+        const MsgNodeDef *d = &MSG_NODES[i];
+        if (!strcmp(d->type, "output") || d->kinds == 1) continue;
+        for (int o = 0; o < d->nout; o++) {
+            char json[1024];
+            snprintf(json, sizeof(json),
+                     "{\"v\":1,\"kind\":\"paint\",\"nodes\":[{\"id\":\"n\",\"type\":\"%s\"%s},"
+                     "{\"id\":\"o\",\"type\":\"output\",\"inputs\":{\"color\":{\"node\":\"n\",\"port\":\"%s\"}}}],\"output\":\"o\"}",
+                     d->type, !strcmp(d->type, "param") ? ",\"params\":{\"name\":\"p\"}" : "", d->out[o].name);
+            g = cJSON_Parse(json);
+            err[0] = 0;
+            if (!mod_shader_graph_validate(g, "paint", err, sizeof(err))) { // a node a paint can't hold (the validator says why)
+                cJSON_Delete(g);
+                continue;
+            }
+            const int ok = mod_shader_graph_compile_paint(g, NULL, &prog, err, sizeof(err));
+            CHECK(ok, "paint %s.%s did not compile: %s", d->type, d->out[o].name, err);
+            if (ok) {
+                compiled++;
+                CHECK(!strchr(prog.fragment, '#') && !strstr(prog.fragment, "//"), "paint %s.%s: a preprocessor line or comment", d->type,
+                      d->out[o].name);
+                if (dump) {
+                    char name[96];
+                    snprintf(name, sizeof(name), "%s_%s", d->type, d->out[o].name);
+                    write_paint(dump, name, prog.fragment);
+                }
+            }
+            mod_shader_program_free(&prog);
+            cJSON_Delete(g);
+        }
+    }
+    CHECK(compiled > 50, "only %d paint node outputs compiled", compiled);
+    printf("mod_shader_test: %d paint node outputs translate\n", compiled);
+}
+
 // every node type alone (its inputs at their defaults) feeding the output from each port
 static void test_every_node(const char *dump) {
     int compiled = 0;
@@ -324,6 +402,7 @@ int main(const int argc, char **argv) {
     test_surface_validation();
     test_surface_compile();
     test_every_surface_node(dump);
+    test_paint(dump);
     if (dump) { // the two sample graphs too
         const char *samples[2] = {k_grey, NULL};
         for (int i = 0; samples[i]; i++) {

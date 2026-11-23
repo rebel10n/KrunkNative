@@ -6,6 +6,7 @@
 #include <sky.h>     // sky_physical_*: the Box Office rtSky (fog tint, the PMREM table it paints)
 #include <ruleset.h> // light_unit_factor: v10 PI (THREE r186 light units)
 #include <gltf.h>    // gltf_clock: the paint shaders' time
+#include <mod_shader.h> // mod_shader_graph_compile_paint: a paint's node graph (basic_paint_graph)
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <string.h>
@@ -58,6 +59,104 @@ static unsigned int basic_variant_program(const int variant) {
     return g_basic_variants[variant];
 }
 
+// ---- a paint's node graph (client.h basic_paint_graph): basic.frag's Krunker variant with the graph's chunk, one
+// program per graph. The chunk (mod_shader_graph_compile_paint) is one line of the macro KN_PAINT_GRAPH_FUNCS, which
+// basic.frag expands before paint_apply; its host names are macros too. A slot is reused oldest first, so a handle
+// names its graph (serial) and a stale one finds none.
+#define BASIC_PAINT_GRAPHS 8
+typedef struct {
+    int serial;   // the handle, 0 = free
+    char *json;   // the graph it was compiled from (cJSON_PrintUnformatted)
+    unsigned int program; // 0 = did not compile
+    ModShaderUniform uniforms[MOD_SHADER_MAX_UNIFORMS];
+    int uniform_count;
+    int location[MOD_SHADER_MAX_UNIFORMS];
+} BasicPaintGraph;
+static BasicPaintGraph g_paint_graphs[BASIC_PAINT_GRAPHS];
+static int g_paint_graph_serial;
+
+static const BasicPaintGraph *basic_paint_graph_find(const int handle) {
+    if (handle <= 0) return NULL;
+    for (int i = 0; i < BASIC_PAINT_GRAPHS; i++)
+        if (g_paint_graphs[i].serial == handle) return g_paint_graphs[i].program ? &g_paint_graphs[i] : NULL;
+    return NULL;
+}
+
+static unsigned int basic_paint_graph_program(const char *chunk) {
+    static const char head[] = "#define KN_RT 0\n#define KN_RT_CINE 0\n#define KN_PAINT_GRAPH 1\n#define kn_map tex\n#define kn_has_map 1.0\n"
+                               "#define KN_TEX(kn_tex_uv) texture(tex, kn_tex_uv)\n#define KN_PAINT_GRAPH_FUNCS ";
+    const size_t n = strlen(chunk);
+    char *defines = malloc(sizeof(head) + n + 2);
+    if (!defines) return 0;
+    memcpy(defines, head, sizeof(head) - 1);
+    char *o = defines + sizeof(head) - 1;
+    for (size_t i = 0; i < n; i++) *o++ = chunk[i] == '\n' || chunk[i] == '\r' ? ' ' : chunk[i]; // one line: no continuation (GLSL 4.10)
+    *o++ = '\n';
+    *o = 0;
+    char *vert_shader = concat(assets_path(), "shaders/basic.vert");
+    char *frag_shader = concat(assets_path(), "shaders/basic.frag");
+    const unsigned int program = vert_shader && frag_shader ? shader_compile_defines(vert_shader, frag_shader, defines) : 0;
+    free(vert_shader);
+    free(frag_shader);
+    free(defines);
+    return program;
+}
+
+int basic_paint_graph(const cJSON *graph) {
+    char *json = graph ? cJSON_PrintUnformatted(graph) : NULL;
+    if (!json) return 0;
+    int slot = -1;
+    for (int i = 0; i < BASIC_PAINT_GRAPHS; i++) {
+        BasicPaintGraph *g = &g_paint_graphs[i];
+        if (g->serial && !strcmp(g->json, json)) {
+            free(json);
+            return g->program ? g->serial : 0;
+        }
+        if (slot < 0 || !g->serial || (g_paint_graphs[slot].serial && g->serial < g_paint_graphs[slot].serial)) slot = i;
+    }
+    BasicPaintGraph *g = &g_paint_graphs[slot];
+    if (g->program) glDeleteProgram(g->program);
+    free(g->json);
+    memset(g, 0, sizeof(*g));
+    g->serial = ++g_paint_graph_serial;
+    g->json = json;
+    ModShaderProgram prog;
+    char err[256] = "";
+    if (!mod_shader_graph_compile_paint(graph, NULL, &prog, err, sizeof(err))) {
+        fprintf(stderr, "[basic] paint graph %d: %s\n", g->serial, err);
+        return 0;
+    }
+    g->program = basic_paint_graph_program(prog.fragment);
+    g->uniform_count = prog.uniform_count;
+    memcpy(g->uniforms, prog.uniforms, sizeof(g->uniforms));
+    mod_shader_program_free(&prog);
+    if (!g->program) {
+        fprintf(stderr, "[basic] paint graph %d: basic.frag's paint variant did not compile\n", g->serial);
+        return 0;
+    }
+    for (int u = 0; u < g->uniform_count; u++) {
+        char name[16];
+        snprintf(name, sizeof(name), "u_p%d", u);
+        g->location[u] = glGetUniformLocation(g->program, name);
+    }
+    fprintf(stderr, "[basic] paint graph %d: compiled (%d params)\n", g->serial, g->uniform_count);
+    return g->serial;
+}
+
+// the graph's params (u_p<i>, their defaults); `program` is bound
+static void basic_paint_graph_uniforms(const BasicPaintGraph *g) {
+    for (int u = 0; u < g->uniform_count; u++) {
+        const float *v = g->uniforms[u].value;
+        if (g->location[u] < 0) continue;
+        switch (g->uniforms[u].width) {
+        case 1: glUniform1f(g->location[u], v[0]); break;
+        case 2: glUniform2f(g->location[u], v[0], v[1]); break;
+        case 3: glUniform3f(g->location[u], v[0], v[1], v[2]); break;
+        default: glUniform4f(g->location[u], v[0], v[1], v[2], v[3]); break;
+        }
+    }
+}
+
 void basic_material_select_program(Material *base) {
     if (!base || base->vtable != &basic_material_vtable || !shader_program) return;
     unsigned int program = shader_program;
@@ -65,6 +164,10 @@ void basic_material_select_program(Material *base) {
         program = basic_variant_program(rt_cinematic() ? 2 : 1);
         if (!program) program = basic_variant_program(2);
         if (!program) program = shader_program;
+    } else {
+        const BasicMaterial *material = (const BasicMaterial *) base;
+        const BasicPaintGraph *g = material->paint_enabled && material->paint_shader == 100 ? basic_paint_graph_find(material->paint_graph) : NULL;
+        if (g) program = g->program;
     }
     base->program = program;
 }
@@ -551,6 +654,10 @@ void basic_material_update_uniforms(Material *base) {
         gl_uniform_3f(&u_paint_color, program, material->paint_color.x, material->paint_color.y, material->paint_color.z);
         gl_uniform_1f(&u_paint_intensity, program, material->paint_intensity);
         gl_uniform_1i(&u_paint_shader, program, material->paint_shader);
+        if (material->paint_shader == 100) { // a paint's node graph: its variant's params (basic_paint_graph)
+            const BasicPaintGraph *g = basic_paint_graph_find(material->paint_graph);
+            if (g && g->program == program) basic_paint_graph_uniforms(g);
+        }
         // the TSL `time` node: seconds on gltf_clock(), so --render-scenario captures pin the shader paints
         gl_uniform_1f(&u_paint_time, program, (float) gltf_clock());
         gl_uniform_1i(&u_paint_mask_enabled, program, material->paint_mask_texture != 0);

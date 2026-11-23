@@ -480,6 +480,10 @@ def paint_editor(A, pid):
     A.ui("knSkins('paintMode','shader')")
     check(A.has("knSmPgCanvas"), "Animated Shader: the node canvas")
     check("Valid graph" in A.wait_text("#knSmPgFooter", "Valid graph"), "the default paint graph is valid")
+    # the live preview of the graph (paintPreview's paintGraph, deob-10.0.7.js:126278-126286) on the preview item
+    check(A.wait_line("showcase=7798&paintGraph=%7B", m, 5.0), "Animated Shader: the preview takes the paint's graph (&paintGraph=)")
+    check(A.wait_line("[viewer] showcase paint graph ", m, 60.0), "the preview item draws the graph (basic.frag's paint variant compiles)")
+    check(A.wait_line("[paint] mesh enabled=1 shader=100", m, 5.0), "its meshes carry the graph paint (paint_shader 100)")
     A.shot("editor-paint")
     A.click("knSmSave")
     check(bool(wait_q("SELECT 1 FROM custom_skins WHERE id = ?", (pid,),

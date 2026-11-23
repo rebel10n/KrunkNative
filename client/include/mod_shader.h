@@ -108,4 +108,13 @@ int mod_shader_graph_compile(const struct cJSON *graph, const struct cJSON *para
 //   output      kn_frag_color (rgb, alpha = the alpha port)
 int mod_shader_graph_compile_surface(const struct cJSON *graph, const struct cJSON *params, ModShaderProgram *out, char *err,
                                      size_t err_size);
+// A "paint" graph (a paint's paintShaderGraph; the paint shader v10.0.7 builds from it, deob-10.0.7.js:95900-95925,
+// whose ctx is {uv, time, baseColor, params}) as a GLSL chunk in out->fragment for a host fragment shader to include
+// after its own declarations: the param uniforms u_p<i>, the graph library and
+//   vec3 kn_paint_graph(vec2 uv, float t, vec3 base, vec3 plocal, vec3 pworld, vec3 cam, vec3 nworld)
+// (the graph's colour; the paint material blends it over the base, :95732-95775). The host defines kn_map (its
+// sampler2D), kn_has_map and KN_TEX(uv) as macros, and the mat4 `transform`. The chunk has no preprocessor lines and
+// no // comments, so it can be one macro. The inputs the paint ctx has no source for take neutral values.
+int mod_shader_graph_compile_paint(const struct cJSON *graph, const struct cJSON *params, ModShaderProgram *out, char *err,
+                                   size_t err_size);
 void mod_shader_program_free(ModShaderProgram *program);

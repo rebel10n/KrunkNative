@@ -326,6 +326,7 @@ typedef struct {
     int paint_shader;         // paintShader: 0 Spectrum, 1 Synth, 2 Gold, 3 Silver, 4 Prism, 5 Codefall; -1 the colour paint
     unsigned int paint_mask_texture; // the skin's paintMask (paintMaskMap, unit 7): its red scales the intensity, 0 = none
     unsigned int paint_env_texture;  // the metal shaders' melee_190_env.png (unit 8), 0 = none
+    int paint_graph;          // paint_shader 100: basic_paint_graph's handle (a paint's node graph), 0 = none
     // Per-copy wear of a worn store skin (skin_fx_apply_wear): v10's wearMap node (deob-10.0.6.js:95705-95722, applied at
     // :204868 before the paint): the map's r / g / b / a masks rust / dirt / grime / scratches, each scaled by a
     // normalised sigmoid of wear_level (basic.frag wear_apply). 0 = no wear.
@@ -377,6 +378,11 @@ BasicMaterial *basic_material_init();
 // material->program. No-op for other material types.
 void basic_material_select_program(Material*);
 void basic_material_prewarm_rt(int variant); // rt_prewarm_tick: start compiling basic.frag variant 1 / 2 (shader_compile_async)
+// A paint's node graph (paintShaderGraph, kind "paint"; its params at their defaults, as v10.0.7's paint preview sends
+// them, deob-10.0.7.js:124641, :126281-126286) as basic.frag's paint variant: the handle a BasicMaterial with
+// paint_shader 100 takes in paint_graph (basic_material_select_program draws it with that program outside the traced
+// passes), 0 when the graph does not compile. One program per graph, kept while the last few graphs are in use.
+int basic_paint_graph(const cJSON *graph);
 
 // Texture unit of BasicMaterial.emissive_texture (unit 0: base map, 1: shadow map).
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2

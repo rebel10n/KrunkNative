@@ -35,8 +35,8 @@
 // the preview's and the game's material (skin_fx.c, mod_shader_graph.c). An OGG sound plays as MP3 and WAV do
 // (miniaudio with stb_vorbis, client/src/miniaudio.c).
 // Not ported: the preview's Kounter / charm tools (Snap to surface, the Move / Rotate / Scale gizmo: the showcase
-// iframe's attachEdit / charmEdit messages); the fields set the placement. A paint's node graph is saved, but the
-// paint preview draws only a solid colour (the viewer's &paint=).
+// iframe's attachEdit / charmEdit messages); the fields set the placement. The paint preview takes a Solid Colour as
+// the viewer's &paint= and an Animated Shader's graph as &paintGraph= (the paintPreview message, :126274-126295).
 // A krunker.io account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its
 // saves do.
 #include <v10_skin_manager.h>
@@ -2030,7 +2030,14 @@ static char *preview_src(void) {
     if ((int) jnum(SM.editing, "type") == T_PAINT) {
         sb_appendf(&sb, "/viewer.html?nobg&anim&showcase=%d", SM.ed.paint_base ? SM.ed.paint_base : PAINT_BASE_WEAPON);
         const char *c = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(editing_config(), "paintColor"));
-        if (c && c[0] && !paint_shader_mode()) sb_appendf(&sb, "&paint=%s", c[0] == '#' ? c + 1 : c);
+        if (paint_shader_mode()) { // paintPreview {base, paintGraph, paintShaderArgs: its params' defaults} (:126278-126286)
+            char *graph = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(editing_config(), "paintShaderGraph"));
+            if (graph) {
+                sb_append(&sb, "&paintGraph=");
+                uri_component(&sb, graph);
+                free(graph);
+            }
+        } else if (c && c[0]) sb_appendf(&sb, "&paint=%s", c[0] == '#' ? c + 1 : c);
     } else {
         sb_appendf(&sb, "/viewer.html?nobg&showcase=%s", SM.preview ? SM.preview : "");
         preview_extra(&sb);

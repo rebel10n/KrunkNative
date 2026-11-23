@@ -51,6 +51,10 @@ void skin_fx_apply_paint(Mesh *mesh, WornSkinPaint paint, const struct ViewerSki
 // The same on every mesh of a hasAnim (GLTF) item: v10 paints the meshes paintTargets names, or all of them when it
 // is true (deob-10.0.3.js:233833-233837). The GLTF meshes carry no names here, so every mesh is painted.
 void skin_fx_apply_paint_gltf(struct GltfInstance *model, WornSkinPaint paint, const struct ViewerSkin *skin);
+// A paint's own node graph (basic_paint_graph's handle `graph`) on the mesh or the model's paintTargets meshes, as the
+// Skin Manager's paint preview draws it (paintPreview {base, paintGraph, paintShaderArgs}, deob-10.0.7.js:126274-126295;
+// the paint material, :95732-95775): white, intensity 1, the item's paintMask. 0 = nothing painted (graph 0).
+int skin_fx_apply_paint_graph(Mesh *mesh, struct GltfInstance *model, int graph, const struct ViewerSkin *skin);
 
 // The per-copy wear of a worn typed item (v10.0.6): the wearMap <store.types[assetType || type]><id>_wear at level
 // `wear` (the copy's m.wear): a cosmetic's (generateMeshData, deob-10.0.6.js:173414-173419, which skips customTextures

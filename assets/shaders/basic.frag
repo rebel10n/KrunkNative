@@ -177,6 +177,9 @@ uniform bool projection_uv;
 // A shader number the list does not know is no paint (v10: the shader is null and intensity 0, deob:233828-233833).
 // paint_shader -1 = the colour paint. paint_time is the TSL `time` node (seconds). The mask (paintMask, unit 7) scales
 // the intensity by its red; the metal shaders read melee_190_env.png (deob:105842, unit 8) along the reflection.
+// paint_shader 100 is a paint's own node graph (paintShaderGraph, v10.0.7 deob-10.0.7.js:95900-95925): the variant
+// basic_paint_graph compiles defines KN_PAINT_GRAPH and the graph's kn_paint_graph (mod_shader_graph_compile_paint),
+// whose colour is overlaid like Spectrum's (not raw, :95732-95775). Without the variant it draws no paint.
 uniform bool paint_enabled;
 uniform vec3 paint_color;
 uniform float paint_intensity;
@@ -1275,6 +1278,10 @@ void paint_codefall(vec3 base, vec2 uv, float t, out vec3 diffuse, out vec3 glow
     glow = code * 1.2 * base_fac;
 }
 
+#ifdef KN_PAINT_GRAPH
+KN_PAINT_GRAPH_FUNCS
+#endif
+
 // deob:108706-108758: the painted albedo; sets paint_glow
 vec3 paint_apply(vec3 base, vec2 uv, vec2 mask_uv) {
     vec3 painted = base;
@@ -1291,6 +1298,11 @@ vec3 paint_apply(vec3 base, vec2 uv, vec2 mask_uv) {
         vec3 V = normalize(camera_position - world_pos);
         if (paint_shader == 5) paint_codefall(base, uv, t, painted, paint_glow);
         else paint_metal(paint_shader, base, uv, t, N, V, painted, paint_glow);
+#ifdef KN_PAINT_GRAPH
+    } else if (paint_shader == 100) { // the graph's ctx {uv, time, baseColor, params} (deob-10.0.7.js:95905-95911)
+        vec3 N = use_flat_normal ? normalize(flat_normal) : normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+        painted = paint_overlay(base, kn_paint_graph(uv, t, base, local_pos, world_pos, camera_position, N));
+#endif
     } else {
         return base; // an unknown shader: unpainted
     }

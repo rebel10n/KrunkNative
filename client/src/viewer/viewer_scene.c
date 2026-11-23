@@ -580,6 +580,20 @@ void viewer_item_keys(const ViewerSkin *n, char *model, const size_t model_n, ch
     }
 }
 
+// The Skin Manager's paint preview of an Animated Shader paint: the paintPreview message's paintGraph with its params at
+// their defaults (deob-10.0.7.js:126274-126295, :122512), which KrunkNative's iframe takes as &paintGraph=<JSON> (it
+// takes no messages), drawn on the preview item as the paint material draws it (:95732-95775, :95900-95925).
+static int item_paint_graph(Mesh *mesh, GltfInstance *model, const ViewerSkin *n) {
+    const char *json = viewer_param_get("paintGraph");
+    if (!json || !*json) return 0;
+    cJSON *graph = cJSON_Parse(json);
+    const int handle = basic_paint_graph(graph); // one program per graph (cached by its JSON)
+    cJSON_Delete(graph);
+    if (!skin_fx_apply_paint_graph(mesh, model, handle, n)) return 0;
+    fprintf(stderr, "[viewer] showcase paint graph %d\n", handle);
+    return 1;
+}
+
 // The Skin Manager preview's wear (its Wear button and level, deob-10.0.7.js:124874-124885 updateWear): a custom skin
 // with customTextures.wear shows its own texture_w map, the four layers its Wear section packed (:120680-120700)
 static int item_custom_wear(Mesh *mesh, GltfInstance *model, const ViewerSkin *n) {
@@ -602,7 +616,8 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
             return;
         }
         if (!item_custom_wear(NULL, built.model, n)) skin_fx_apply_wear_gltf(built.model, n, g_viewer.wear); // the page's wear param
-        if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint_gltf(built.model, g_viewer.paint, n); // the page's paint params
+        if ((n->flags2 & VS2_PAINTABLE) && !item_paint_graph(NULL, built.model, n))
+            skin_fx_apply_paint_gltf(built.model, g_viewer.paint, n); // the page's paint params
         skin_fx_set_seed(built.model, NULL, g_viewer.seed);
         vs.models[vs.model_count++] = built.model;
         scene_add_gltf(vs.scene, built.model);
@@ -610,7 +625,8 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
         return;
     }
     if (!item_custom_wear(built.mesh, NULL, n)) skin_fx_apply_wear(built.mesh, n, g_viewer.wear); // the page's wear param
-    if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(built.mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
+    if ((n->flags2 & VS2_PAINTABLE) && !item_paint_graph(built.mesh, NULL, n))
+        skin_fx_apply_paint(built.mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
     skin_fx_set_seed(NULL, built.mesh, g_viewer.seed);
     item_add(built.mesh);
     item_counter(n, &built.mesh->transform);

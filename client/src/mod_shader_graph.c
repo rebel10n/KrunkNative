@@ -1653,9 +1653,13 @@ static const char *output_enum(const cJSON *params, const char *name, const char
     return v ? v : def;
 }
 
+static void declare_uniform_list(Buf *src, const ModShaderProgram *out) {
+    for (int u = 0; u < out->uniform_count; u++) buf_printf(src, "uniform %s u_p%d;\n", TN[out->uniforms[u].width], u);
+}
+
 static void declare_uniforms(Buf *src, const ModShaderProgram *out) {
     buf_puts(src, k_surface_uniforms);
-    for (int u = 0; u < out->uniform_count; u++) buf_printf(src, "uniform %s u_p%d;\n", TN[out->uniforms[u].width], u);
+    declare_uniform_list(src, out);
 }
 
 int mod_shader_graph_compile_surface(const cJSON *graph, const cJSON *params, ModShaderProgram *out, char *err, const size_t err_size) {
@@ -1757,6 +1761,67 @@ int mod_shader_graph_compile_surface(const cJSON *graph, const cJSON *params, Mo
         }
     }
     ctx_free(&v);
+    ctx_free(&f);
+    if (!ok) {
+        if (!(err && err[0])) set_err(err, err_size, NULL, "the graph did not compile");
+        mod_shader_program_free(out);
+    }
+    return ok;
+}
+
+// ---------------------------------------------------------------- kind "paint": a paint's colour (mod_shader.h)
+
+// the surface inputs a paint's ctx (deob-10.0.7.js:95905-95911: uv, time, baseColor, params) has no source for:
+// derived from the host's position and normal, else neutral
+static const char k_paint_locals[] =
+    "  vec3 kn_pview = kn_pworld - kn_cam;\n"
+    "  vec3 kn_nlocal = kn_nworld;\n"
+    "  vec3 kn_nview = kn_nworld;\n"
+    "  vec3 kn_mscale = vec3(length(transform[0].xyz), length(transform[1].xyz), length(transform[2].xyz));\n"
+    "  float kn_near = 0.1;\n"
+    "  float kn_far = 1000.0;\n"
+    "  vec2 kn_resolution = vec2(1.0);\n"
+    "  float kn_dpr = 1.0;\n"
+    "  float kn_seed = 0.0;\n"
+    "  float kn_delta = 0.0;\n"
+    "  vec2 kn_scoord = gl_FragCoord.xy;\n"
+    "  vec2 kn_suv = kn_uv;\n"
+    "  float kn_front = gl_FrontFacing ? 1.0 : 0.0;\n"
+    "  float kn_vindex = 0.0;\n"
+    "  mat4 camera_world_inverse = mat4(1.0);\n"
+    "  mat4 camera_projection = mat4(1.0);\n";
+
+int mod_shader_graph_compile_paint(const cJSON *graph, const cJSON *params, ModShaderProgram *out, char *err, const size_t err_size) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!mod_shader_graph_validate(graph, "paint", err, err_size)) return 0;
+    const char *out_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(graph, "output"));
+    MsgCtx f = {0};
+    int ok = ctx_init(&f, graph, params, out, err, err_size, MSG_MODE_FRAGMENT);
+    const int fo = ok ? node_index(&f, out_id) : -1;
+    ok = ok && fo >= 0 && compile_node(&f, fo);
+    char color[256] = "kn_base"; // an unwired colour: the base (iìïîíìì's colorNode default)
+    MsgVal val;
+    if (ok && connected(&f, fo, "color", &val)) convert(color, sizeof(color), &val, 3);
+    ok = ok && !f.failed && !f.body.oom;
+    if (ok) graph_params(&f, out);
+    if (ok) {
+        Buf fs = {0};
+        declare_uniform_list(&fs, out);
+        buf_puts(&fs, k_lib_common);
+        if (f.noise) buf_puts(&fs, k_lib_noise);
+        buf_puts(&fs, k_surface_lib);
+        buf_puts(&fs, "vec3 kn_paint_graph(vec2 kn_uv, float kn_time, vec3 kn_base, vec3 kn_plocal, vec3 kn_pworld, vec3 kn_cam, vec3 kn_nworld) {\n");
+        buf_puts(&fs, k_paint_locals);
+        if (f.body.data) buf_puts(&fs, f.body.data);
+        buf_printf(&fs, "  return %s;\n}\n", color);
+        if (fs.oom) {
+            free(fs.data);
+            ok = 0;
+        } else {
+            out->fragment = fs.data;
+        }
+    }
     ctx_free(&f);
     if (!ok) {
         if (!(err && err[0])) set_err(err, err_size, NULL, "the graph did not compile");

@@ -113,7 +113,12 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
 
 - **Paintable** (`paintTargets` true, or a list of mesh names) and the paint mask (texture "mask", `texture_p.png`).
 - **Paint**: a paint's Solid Colour (`paintColor`) or its Animated Shader (`paintShaderGraph`). It is previewed on
-  `paintPreviewBase`, 7805 (Weapon) or 7798 (Cosmetic).
+  `paintPreviewBase`, 7805 (Weapon) or 7798 (Cosmetic): the colour as `&paint=`, the graph as `&paintGraph=<JSON>`
+  (v10's paintPreview message with its params at their defaults, :126274-126295). The viewer draws the graph as
+  v10's paint material does (:95732-95775, :95900-95925): `mod_shader_graph_compile_paint` turns it into a GLSL chunk
+  defining `kn_paint_graph(uv, time, base, ...)`, and `basic_paint_graph` compiles basic.frag's paint variant with
+  it (one macro, `KN_PAINT_GRAPH_FUNCS`, expanded before `paint_apply`; `paint_shader` 100). Its colour is overlaid
+  on the base like Spectrum's, through the item's paint mask.
 - **Wear**: four layers whose red channels are packed into R, G, B and A of a 1024 px `texture_w.png`, uploaded as
   texture "wear" (`customTextures.wear`). The preview draws that map at the Wear slider's level (the showcase's
   `skin_fx_apply_custom_wear`). v10.0.7's game never reads it: a worn item's wear map is always
@@ -130,11 +135,13 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
     charmEdit), and the wear level is the query's.
   - The preview's Snap to surface tool and its Move / Rotate / Scale gizmo are not ported. The Kounter and charm
     fields set the placement.
-  - The paint preview draws a solid colour only; a paint's graph is saved but not drawn.
+  - A graph paint is drawn in the preview only: the game has no paint shader number for it until the paint is
+    released (v10 assigns one on review).
 
 ## Tests
 
-- `mod_shader_test` (ctest): the validator's refusals, the sample graphs, and every node output translating.
+- `mod_shader_test` (ctest): the validator's refusals, the sample graphs, and every node output translating, as a
+  surface, a post pass and a paint (`--dump` writes the paint chunks in a stand-in host for `check_gl`).
 - `mod_shader_glsl` (ctest, needs glslangValidator): every node output's GLSL is valid ES 3.00 and 4.50 core.
 - `mod_shader_gl` (ctest, `tools/modshader/check_gl.py`, Mesa llvmpipe through surfaceless EGL): every post
   fragment compiles, and every surface node output's vertex / fragment pair compiles and links, as GLSL ES 3.00
@@ -147,7 +154,8 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
   - The other editors: Paintable and its mask, the Wear layers packed into `texture_w.png` (its first pixel
     checked) and the preview drawing it (`[viewer] showcase wear map`), the preview's wear and paint query, the
     Kounter (`[viewer] showcase counter`), the charm placement,
-    and a paint's colour and Animated Shader canvas.
+    and a paint's colour and Animated Shader canvas, its graph drawn on the preview item (`[viewer] showcase paint
+    graph`, `[paint] mesh enabled=1 shader=100`).
 - `tools/modshader/sample_e2e.sh`: grey and invert mods (`client/tests/data/mod_shader/`) on a Sandstorm copy
   whose `modURL` points at them, headless from a pinned camera. Checks: grey frame R=G=B with the plain frame's
   Rec. 709 luminance, invert frame = 255 minus plain.
