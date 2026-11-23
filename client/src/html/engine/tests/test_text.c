@@ -223,6 +223,15 @@ static void test_shaping(TextSystem *ts) {
     CHECK(fabsf(hh - 2 * h1) < 1e-3f, "unkerned pair HH adds up");
     CHECK(fabsf(text_measure(game, "LT", 2, 0) - text_measure(game, "L", 1, 0) - text_measure(game, "T", 1, 0)) < 1e-3f,
           "gamefont has no kern table");
+    // GPOS kerning: ChakraPetch (Krunker Strike's font) has no legacy 'kern' table, only GPOS pair
+    // adjustments, which Chrome applies (A/V = -85/1000 em, k/b = -10/1000)
+    TextFont *chakra = text_font(ts, "chakrapetch", 32, 700, 0);
+    float a = text_measure(chakra, "A", 1, 0), v = text_measure(chakra, "V", 1, 0), av = text_measure(chakra, "AV", 2, 0);
+    CHECK(fabsf((av - a - v) - (-85 * 32 / 1000.0f)) < 0.05f || !text_subpixel(ts), "GPOS: AV kerned by -2.72px (%.3f)", av - a - v);
+    float k = text_measure(chakra, "k", 1, 0), b = text_measure(chakra, "b", 1, 0), kb = text_measure(chakra, "kb", 2, 0);
+    CHECK(fabsf((kb - k - b) - (-10 * 32 / 1000.0f)) < 0.05f || !text_subpixel(ts), "GPOS: kb kerned by -0.32px (%.3f)", kb - k - b);
+    float oo = text_measure(chakra, "oo", 2, 0), o1 = text_measure(chakra, "o", 1, 0);
+    CHECK(fabsf(oo - 2 * o1) < 1e-3f, "GPOS: unkerned pair oo adds up");
 
     // zero-width marks and fallback
     n = text_shape(game, "a\xE2\x80\x8E" "b\xE2\x80\x8F", 8, 0, g, 64, &total);
@@ -505,6 +514,7 @@ int main(int argc, char **argv) {
     printf("hinting=%d subpixel=%d\n", text_hinting(ts), text_subpixel(ts));
     CHECK(!text_register_face(ts, "gamefont", "css/fonts/font2.ttf", 400, TEXT_STYLE_NORMAL), "register gamefont");
     CHECK(!text_register_face(ts, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL), "register headerfont");
+    CHECK(!text_register_face(ts, "chakrapetch", "css/fonts/ChakraPetch-Bold.ttf", 700, TEXT_STYLE_NORMAL), "register chakrapetch");
     // registered exactly as the cascade sees it: the woff2 url from material-icons.css
     CHECK(!text_register_face(ts, "material icons", "css/fonts/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2", 400, TEXT_STYLE_NORMAL), "register material icons (woff2 -> ttf)");
     // v7.1.4's material-icons-outlined.css woff2 -> the import's material-icons-outlined.ttf

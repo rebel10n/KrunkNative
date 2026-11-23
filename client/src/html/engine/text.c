@@ -74,7 +74,13 @@ struct TextFace {
     int id;
     FT_Face ft;          // NULL until loaded
     int load_failed;
-    int has_kerning;
+    int has_kerning;     // the legacy 'kern' table (FT_Get_Kerning)
+    // the GPOS 'kern' feature's pair adjustments (PairPos subtables, gpos_kern below): HarfBuzz applies these, and
+    // a font that has them gets no legacy 'kern' kerning. NULL when the font has none
+    unsigned char *gpos;
+    unsigned long gpos_len;
+    uint32_t *gpos_pairs; // offsets of its PairPos subtables in gpos, in lookup order
+    int gpos_pair_count;
     long cur_size64;     // last FT_Set_Char_Size applied to ft
 };
 
@@ -456,6 +462,8 @@ void text_destroy(TextSystem *ts) {
     for (int i = 0; i < ts->face_count; i++) {
         if (ts->faces[i].ft) FT_Done_Face(ts->faces[i].ft);
         free(ts->faces[i].path);
+        free(ts->faces[i].gpos);
+        free(ts->faces[i].gpos_pairs);
     }
     if (ts->tex) glDeleteTextures(1, &ts->tex);
     free(ts->entries);
@@ -506,6 +514,169 @@ int text_register_face(TextSystem *ts, const char *family, const char *path, int
     return text_add_face(ts, family, full, weight, style, 0) ? 0 : -1;
 }
 
+// ---- GPOS pair kerning ------------------------------------------------------
+// Chrome shapes with HarfBuzz, which kerns with the GPOS table's 'kern' feature (PairPos lookups, type 2, also
+// inside Extension lookups, type 9) and uses the legacy 'kern' table only for a font without it. FreeType's
+// FT_Get_Kerning reads the legacy table only, so a font kerned in GPOS alone (FRVR's ChakraPetch) drew its lines
+// wider than Chrome by every kerned pair ("kb", "nt", "at", "ra", ...). Only the first glyph's XAdvance is applied,
+// as HarfBuzz does for horizontal text; every 'kern' feature's lookups are taken, whatever the script.
+
+static unsigned gp_u16(const TextFace *f, const unsigned long o) {
+    return o + 2 <= f->gpos_len ? (unsigned) (f->gpos[o] << 8 | f->gpos[o + 1]) : 0;
+}
+
+static uint32_t gp_u32(const TextFace *f, const unsigned long o) {
+    return (uint32_t) gp_u16(f, o) << 16 | gp_u16(f, o + 2);
+}
+
+// the glyph's coverage index in the Coverage table at o, -1 when not covered
+static int gp_coverage(const TextFace *f, const unsigned long o, const unsigned glyph) {
+    const unsigned fmt = gp_u16(f, o), n = gp_u16(f, o + 2);
+    unsigned lo = 0, hi = n;
+    while (lo < hi) {
+        const unsigned mid = (lo + hi) / 2;
+        if (fmt == 1) {
+            const unsigned g = gp_u16(f, o + 4 + 2ul * mid);
+            if (g == glyph) return (int) mid;
+            if (g < glyph) lo = mid + 1;
+            else hi = mid;
+        } else if (fmt == 2) {
+            const unsigned long r = o + 4 + 6ul * mid;
+            const unsigned start = gp_u16(f, r), end = gp_u16(f, r + 2);
+            if (glyph < start) hi = mid;
+            else if (glyph > end) lo = mid + 1;
+            else return (int) (gp_u16(f, r + 4) + glyph - start);
+        } else return -1;
+    }
+    return -1;
+}
+
+// the glyph's class in the ClassDef table at o (0 when not listed)
+static unsigned gp_class(const TextFace *f, const unsigned long o, const unsigned glyph) {
+    const unsigned fmt = gp_u16(f, o);
+    if (fmt == 1) {
+        const unsigned start = gp_u16(f, o + 2), n = gp_u16(f, o + 4);
+        return glyph >= start && glyph < start + n ? gp_u16(f, o + 6 + 2ul * (glyph - start)) : 0;
+    }
+    if (fmt != 2) return 0;
+    unsigned lo = 0, hi = gp_u16(f, o + 2);
+    while (lo < hi) {
+        const unsigned mid = (lo + hi) / 2;
+        const unsigned long r = o + 4 + 6ul * mid;
+        const unsigned start = gp_u16(f, r), end = gp_u16(f, r + 2);
+        if (glyph < start) hi = mid;
+        else if (glyph > end) lo = mid + 1;
+        else return gp_u16(f, r + 4);
+    }
+    return 0;
+}
+
+static unsigned gp_value_size(const unsigned fmt) {
+    unsigned n = 0;
+    for (unsigned bit = 0; bit < 8; bit++) n += (fmt >> bit) & 1u;
+    return 2 * n;
+}
+
+// a ValueRecord's XAdvance (font units), 0 when its format has none
+static int gp_x_advance(const TextFace *f, const unsigned long o, const unsigned fmt) {
+    if (!(fmt & 4u)) return 0;
+    const unsigned long at = o + 2ul * ((fmt & 1u) + ((fmt >> 1) & 1u));
+    return (int16_t) gp_u16(f, at);
+}
+
+static void gpos_load(TextFace *f) {
+    FT_ULong len = 0;
+    const FT_ULong tag = FT_MAKE_TAG('G', 'P', 'O', 'S');
+    if (FT_Load_Sfnt_Table(f->ft, tag, 0, NULL, &len) || len < 10 || len > (64ul << 20)) return;
+    f->gpos = malloc(len);
+    if (!f->gpos || FT_Load_Sfnt_Table(f->ft, tag, 0, f->gpos, &len)) {
+        free(f->gpos);
+        f->gpos = NULL;
+        return;
+    }
+    f->gpos_len = len;
+    const unsigned long features = gp_u16(f, 6), lookups = gp_u16(f, 8);
+    const unsigned feature_count = gp_u16(f, features), lookup_count = gp_u16(f, lookups);
+    unsigned char *kern_lookup = lookup_count ? calloc(lookup_count, 1) : NULL;
+    if (!kern_lookup) return;
+    int any = 0;
+    for (unsigned i = 0; i < feature_count; i++) {
+        const unsigned long rec = features + 2 + 6ul * i;
+        if (rec + 6 > f->gpos_len || memcmp(f->gpos + rec, "kern", 4)) continue;
+        const unsigned long feature = features + gp_u16(f, rec + 4);
+        const unsigned n = gp_u16(f, feature + 2);
+        for (unsigned k = 0; k < n; k++) {
+            const unsigned li = gp_u16(f, feature + 4 + 2ul * k);
+            if (li < lookup_count) kern_lookup[li] = 1, any = 1;
+        }
+    }
+    int cap = 0;
+    for (unsigned li = 0; any && li < lookup_count; li++) {
+        if (!kern_lookup[li]) continue;
+        const unsigned long lookup = lookups + gp_u16(f, lookups + 2 + 2ul * li);
+        const unsigned type = gp_u16(f, lookup), subtables = gp_u16(f, lookup + 4);
+        for (unsigned s = 0; s < subtables; s++) {
+            unsigned long sub = lookup + gp_u16(f, lookup + 6 + 2ul * s);
+            unsigned sub_type = type;
+            if (type == 9) { // Extension: its own type and a 32-bit offset
+                sub_type = gp_u16(f, sub + 2);
+                sub += gp_u32(f, sub + 4);
+            }
+            if (sub_type != 2 || sub + 10 > f->gpos_len) continue;
+            if (f->gpos_pair_count == cap) {
+                cap = cap ? cap * 2 : 8;
+                uint32_t *grown = realloc(f->gpos_pairs, sizeof(uint32_t) * (size_t) cap);
+                if (!grown) break;
+                f->gpos_pairs = grown;
+            }
+            f->gpos_pairs[f->gpos_pair_count++] = (uint32_t) sub;
+        }
+    }
+    free(kern_lookup);
+    if (!f->gpos_pair_count) {
+        free(f->gpos);
+        free(f->gpos_pairs);
+        f->gpos = NULL;
+        f->gpos_pairs = NULL;
+        f->gpos_len = 0;
+    }
+}
+
+// the pair's kerning in font units: the first PairPos subtable that covers the first glyph decides (HarfBuzz)
+static int gpos_kern(const TextFace *f, const unsigned a, const unsigned b, int *found) {
+    *found = 0;
+    for (int i = 0; i < f->gpos_pair_count; i++) {
+        const unsigned long sub = f->gpos_pairs[i];
+        const unsigned fmt = gp_u16(f, sub), f1 = gp_u16(f, sub + 4), f2 = gp_u16(f, sub + 6);
+        const int cov = gp_coverage(f, sub + gp_u16(f, sub + 2), a);
+        if (cov < 0) continue;
+        const unsigned rec_size = gp_value_size(f1) + gp_value_size(f2);
+        if (fmt == 1) {
+            if ((unsigned) cov >= gp_u16(f, sub + 8)) continue;
+            const unsigned long set = sub + gp_u16(f, sub + 10 + 2ul * (unsigned) cov);
+            unsigned lo = 0, hi = gp_u16(f, set);
+            while (lo < hi) {
+                const unsigned mid = (lo + hi) / 2;
+                const unsigned long rec = set + 2 + (unsigned long) mid * (2 + rec_size);
+                const unsigned second = gp_u16(f, rec);
+                if (second == b) {
+                    *found = 1;
+                    return gp_x_advance(f, rec + 2, f1);
+                }
+                if (second < b) lo = mid + 1;
+                else hi = mid;
+            }
+        } else if (fmt == 2) {
+            const unsigned c1 = gp_class(f, sub + gp_u16(f, sub + 8), a), c2 = gp_class(f, sub + gp_u16(f, sub + 10), b);
+            const unsigned n1 = gp_u16(f, sub + 12), n2 = gp_u16(f, sub + 14);
+            if (c1 >= n1 || c2 >= n2) continue;
+            *found = 1;
+            return gp_x_advance(f, sub + 16 + ((unsigned long) c1 * n2 + c2) * rec_size, f1);
+        }
+    }
+    return 0;
+}
+
 // ---- face loading ------------------------------------------------------------
 
 static int face_load(TextSystem *ts, TextFace *f) {
@@ -518,6 +689,7 @@ static int face_load(TextSystem *ts, TextFace *f) {
         return 0;
     }
     f->has_kerning = FT_HAS_KERNING(f->ft) ? 1 : 0;
+    if (!f->is_icon) gpos_load(f);
     f->cur_size64 = -1;
     if (!f->is_fallback && !f->is_icon && f->ft->family_name &&
         !strncmp(f->ft->family_name, "Material Icons", 14)) {
@@ -790,7 +962,15 @@ static float text_glyph_advance(TextFont *font, TextFace *face, uint32_t gi) {
 }
 
 static float text_kerning(TextFont *font, TextFace *face, uint32_t prev, uint32_t cur) {
-    if (!face->has_kerning || !prev || !cur) return 0;
+    if (!prev || !cur) return 0;
+    if (face->gpos) { // GPOS kerning replaces the legacy table (HarfBuzz): unhinted, scaled from font units
+        int found = 0;
+        const int units = gpos_kern(face, prev, cur, &found);
+        if (!units || !face->ft || !face->ft->units_per_EM) return 0;
+        const float k = (float) units * font->size / (float) face->ft->units_per_EM;
+        return font->ts->linear_metrics ? k : roundf(k);
+    }
+    if (!face->has_kerning) return 0;
     FT_Vector d;
     FT_UInt mode = font->ts->linear_metrics ? FT_KERNING_UNFITTED : FT_KERNING_DEFAULT;
     if (!face_set_size(face, font->size64)) return 0;
