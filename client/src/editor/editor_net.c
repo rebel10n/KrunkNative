@@ -1,4 +1,4 @@
-// Map editor: Krunker v7.1.4's API-backed windows, asset selection and publishing (editor.js
+// Map editor: Krunker's API-backed windows, asset selection and publishing (editor.js
 // window.windows[1] Assets, [4] Mods, [6] Textures, [8] Sounds, [13] Maps (My Games); f954 /
 // f955 / f956 card builders; KE.selectAsset / selectMod / viewAssets / viewModels /
 // viewTextures / viewSounds / myAssets; publishMap / preloadMap / publishGamePopup /
@@ -11,56 +11,42 @@
 // database. HTTP: GET /api/assets?index=&cat=&username= (listAssets), ?index=2&cat=&val=
 // (searchAsset), /api/mods?index=&pos=&accountId= (listMods), /api/search?type=mod&val=
 // (searchMod), /api/maps?index=4&pos=0&accountId= (listMaps, My Games). Social socket:
-// uploadM -> pubMR / upMp, uploadA -> pubR / upMp, edMp -> edMp, delC -> po, ulb, mfnds -> mfr.
+// plm -> plm (preloadMap) / po, uploadM -> pubMR / upMp, uploadA -> pubR / upMp, edMp -> edMp, delC -> po,
+// ulb -> upMp, mfnds -> mfr.
 //
-// Intentional differences from v7.1.4:
-// - Without a brain (guest build, no kn_brain answering, HTTP error) v7's fetch fails and the
-//   list shows "Loading..." forever; here it shows the window's empty text ("No Assets found",
-//   "No Mods found", "No Textures found", "No Sounds found", "No Games found!").
-// - Tab indices: v7's config.modTabs / mapTabs order (Home, Popular, ...) is not the brain's
+// v10.0.7 behaviour (editor-10.0.7.js); the intentional differences:
+// - Tab indices: the Mods / Maps windows' config tab order (Home, Popular, ...) is not the brain's
 //   /api index space (0 Popular, 1 Featured, 2 New, 3 Favorites, 4 My Games / My Mods; the same
-//   mapping as the hub, social_ui.c). The asset lists send `username` only on the My Assets
-//   tab (config.assetTabs sendUser): kn_brain filters by it whenever it is given.
+//   mapping as the hub, social_ui.c). My Games of a signed-out editor shows "No Games found!" without
+//   asking (the brain's index 4 without an account would list every map). A failed request, or none
+//   at all (no brain), leaves "Loading..." as v10's failed fetch does.
+// - My Assets goes with the account's session (Authorization: Bearer): kn_brain lists a Private asset
+//   to its signed-in owner only (Krunker's listAssets is a bare fetch).
 // - Thumbnails, textures and sounds live under assets/user-assets/<id>/ (the v7 import), not on
 //   user-assets.krunker.io: natively a card shows the local file when it exists, else
-//   ./img/noimg.png (v7's onerror fallback); the web build uses the asset host's URL. A map card
-//   shows the thumbnail kn_brain stored with the map (map_image, a PNG data URL).
+//   ./img/noimg.png (the onerror fallback; the tree has no noimg2.png); the web build uses the asset
+//   host's URL. A map card shows the thumbnail kn_brain stored with the map (map_image, a PNG data
+//   URL); the Update Game popup fetches the stored one from the brain (/api/user-assets/m<id>/thumb.png).
 // - Prefab assets (selectAsset type 3) read user-assets/<id>/data.json from the asset tree.
-// - publishMap sends "plm" in v7; kn_brain has no such message, so the editor looks the map
-//   name up in the account's My Games list (/api/maps index 4) instead: found = "Update Game"
-//   with that row (description, version), else "Publish Game".
-// - uploadM: kn_brain takes the v3.1.1 shape [map, thumbDataUrl, description, video, category]
-//   with the thumbnail inline (it hosts no /upload-user-asset), followed by v7's Post to Hub and
-//   Mobile Friendly flags (kn_brain ignores them for now). The thumbnail defaults to a PNG of the
-//   3D view (v7 needs a picked file); Select picks a PNG instead. kn_brain keeps thumbnails up to
-//   200 kB of data URL, so larger ones are refused here.
-// - uploadA is sent as v10 sends it (editor-10.0.7.js:20656-20766); kn_brain answers pubR {fileId, srv} or upMp
-//   (services/brain/asset_upload.c). publishAssetResp's one multipart POST of every file to <srv>/upload-user-asset
-//   is a sequence of POSTs here, each file in order as raw chunks of 512 KiB at most
-//   (?fileId=&key=&offset=), then ?fileId=&done=1: kn_brain and its proxies take request bodies of 1 MiB / 16 MiB,
-//   below a 250 MB model. "Asset Uploaded!" on the done's 200, else the answer's text ("Upload Request Failed" when
-//   a request failed). The files are read again from where they were picked when they are sent. After a failure
-//   Publish/Update starts over with a new uploadA (Krunker 10.0.7: "a failed custom asset upload" is retryable). A chunk
-//   whose request got no answer at all is sent again (UP_RETRIES): kn_brain keeps its tickets over a restart.
-// - updateMapLB (ulb) is v10's: no reply timeout, so the "Please wait..." popup stays until the
-//   user closes it, and the upMp reply goes through uploadResp into #gameUpResp, which the
-//   leaderboard popup does not have (nothing shows). kn_brain stores the settings on the map's
-//   LEADERBOARD objects and answers upMp "Leaderboard Updated!" (creations.c sh_update_map_lb).
-// - chngMapFunds (mfnds) is sent as in v7; a server that never answers (kn_brain has neither
-//   yet) ends the "Please Wait..." popup after REPLY_TIMEOUT_S with an error instead of waiting
-//   forever.
-// - edMp with an unknown map ("edMp", null) shows "Map not found" (v7 ignores it).
-// - The Sounds window's empty / error text goes to its own list (v7 writes #assetTList).
-// - v7's mapResp share link and the update video field come from an archive.org capture
+// - uploadA / uploadM's thumbnail: publishAssetResp's / publishMapResp's one multipart POST of every
+//   file to <srv>/upload-user-asset is a sequence of POSTs here, each file in order as raw chunks of
+//   512 KiB at most (?fileId=&key=&offset=), then ?fileId=&done=1: kn_brain and its proxies take
+//   request bodies of 1 MiB / 16 MiB, below a 250 MB model (services/brain/asset_upload.c). The files
+//   are read again from where they were picked when they are sent. A chunk whose request got no
+//   answer at all is sent again (UP_RETRIES): kn_brain keeps its tickets over a restart. A brain with
+//   uploads off answers pubMR without a ticket: "Game Uploaded!" unless a thumbnail was picked.
+// - The mapResp share link and the update video field of the v7 captures are archive.org URLs
 //   ("https://web.archive.org/web/.../https://youtube.com/..."): the plain URLs are used.
-// - Asset ids are written into the cards without ' and " (v7 inserts them raw).
+// - Asset ids are written into the cards without ' and " (v10 inserts them raw), and openEdit's
+//   loadMap name is escaped.
+// - The edMp / plm / mfr / delC / ulb requests have no reply timeout, as in v10; a social socket that
+//   closes while one waits ends it with "Upload Request Failed".
 #include "editor_internal.h"
 #include "editor_model.h"
 #include <app_mode.h>
 #include <audio.h>
 #include <backend.h>
 #include <backend_ui.h>
-#include <gl.h>
 #include <html_ui.h>
 #include <map_validate.h> // publishMap: validateMap before the upload popup
 #include <math.h>
@@ -68,22 +54,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBI_WRITE_NO_STDIO
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#pragma GCC diagnostic ignored "-Wconversion"
-#pragma GCC diagnostic ignored "-Wdouble-promotion"
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif
-#include "../../lib/glfw/deps/stb_image_write.h"
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
 
 // ---------------------------------------------------------------------------
 // config.js tables
@@ -125,8 +95,6 @@ static const struct { const char *n; int api, search, no_load; } k_mod_tabs[] = 
 #define ASSET_SOUND 5
 #define ASSET_VIDEO 20
 #define MAP_DATA_MAX 500000
-#define BRAIN_THUMB_MAX (200 * 1024) // kn_brain's limit of a thumbnail data URL (creations.c THUMB_MAX)
-#define REPLY_TIMEOUT_S 8.0
 #define USER_ASSETS_URL "https://user-assets.krunker.io"
 
 // ---------------------------------------------------------------------------
@@ -316,7 +284,6 @@ static void upload_resp(const char *text) {
 
 static int g_listening;
 static char g_wait[16];       // the reply label a request waits for ("" none)
-static double g_wait_until;
 static int g_wait_upload;     // the wait belongs to a publish popup (replies go to #gameUpResp)
 
 static void on_social(void *user, const cJSON *frame);
@@ -327,7 +294,6 @@ static int social_send(cJSON *f, const char *reply, const int upload) {
     cJSON_Delete(f);
     if (ok) {
         snprintf(g_wait, sizeof(g_wait), "%s", reply ? reply : "");
-        g_wait_until = g_ed.now + REPLY_TIMEOUT_S;
         g_wait_upload = upload;
     }
     return ok;
@@ -409,6 +375,33 @@ static void open_list(const int w, const char *from) {
     rerender(w);
 }
 
+// KE.assetMapProps: {asset id: dat.mp} of every listed asset whose dat has an mp object (editor-10.0.7.js:13733-13738);
+// a placed model (createObjects) and selectModel take a copy as the object's mapProps (14366-14385)
+static cJSON *g_asset_mp;
+
+static void asset_mp_keep(const cJSON *id, const cJSON *mp) {
+    if (!cJSON_IsObject(mp)) return;
+    char key[32];
+    if (cJSON_IsNumber(id)) snprintf(key, sizeof(key), "%.0f", id->valuedouble);
+    else if (cJSON_IsString(id)) snprintf(key, sizeof(key), "%s", id->valuestring);
+    else return;
+    if (!g_asset_mp) g_asset_mp = cJSON_CreateObject();
+    cJSON_DeleteItemFromObjectCaseSensitive(g_asset_mp, key);
+    cJSON_AddItemToObject(g_asset_mp, key, cJSON_Duplicate(mp, 1));
+}
+
+// KE.assetMapProps[parseInt((id + "").replace(/[^\d]/g, ""))]
+static const cJSON *asset_mp(const char *id) {
+    char digits[32];
+    size_t n = 0;
+    for (const char *p = id; p && *p && n + 1 < sizeof(digits); p++) if (*p >= '0' && *p <= '9') digits[n++] = *p;
+    digits[n] = 0;
+    if (!n || !g_asset_mp) return NULL;
+    char key[32];
+    snprintf(key, sizeof(key), "%lld", atoll(digits));
+    return cJSON_GetObjectItemCaseSensitive(g_asset_mp, key);
+}
+
 // f954(rows, onlyShow, from, sort): asset cards
 static int cmp_nm(const void *a, const void *b) {
     const char *x = row_str(*(const cJSON *const *) a, "nm"), *y = row_str(*(const cJSON *const *) b, "nm");
@@ -425,6 +418,7 @@ static void cards_list(EdBuf *b, const cJSON *rows, const int only_show, const c
     for (int i = 0; i < n; i++) {
         const cJSON *row = list[i];
         cJSON *d = asset_data(cJSON_GetObjectItemCaseSensitive(row, "dat"));
+        asset_mp_keep(cJSON_GetObjectItemCaseSensitive(row, "id"), cJSON_GetObjectItemCaseSensitive(d, "mp"));
 #define FLAG(k) ed_json_truthy(cJSON_GetObjectItemCaseSensitive(d, k))
         int kind = 0;
         if (FLAG("d")) kind = 3;
@@ -440,9 +434,9 @@ static void cards_list(EdBuf *b, const cJSON *rows, const int only_show, const c
         edb_init(&idn);
         add_num_or_str(&idn, cJSON_GetObjectItemCaseSensitive(row, "id"));
         edb_add(&raw, idn.buf ? idn.buf : "");
-        if (kind < 3) {
+        if (kind < 3) { // the id's flag letters: the dat keys that match /^[lnbpesamrgqf]$/ (editor-10.0.7.js:13755-13757)
             const cJSON *k;
-            cJSON_ArrayForEach(k, d) edb_add(&raw, k->string);
+            cJSON_ArrayForEach(k, d) if (k->string && k->string[0] && !k->string[1] && strchr("lnbpesamrgqf", k->string[0])) edb_add(&raw, k->string);
         }
         cleanse(&id, raw.buf ? raw.buf : "");
         const char *aid = id.buf ? id.buf : "", *num = idn.buf ? idn.buf : "0";
@@ -585,11 +579,21 @@ static void on_http(void *user, const int status, const char *body, const size_t
     const unsigned gen = r->gen;
     free(r);
     if (!g_ed.active || gen != g_win[w].gen) return;
-    cJSON *res = status == 200 && body ? cJSON_ParseWithLength(body, length) : NULL;
+    // apiRequest: fetch(url).then(r => r.json()) — a request or a body that fails calls back with no data, which the
+    // windows' callbacks ignore (editor-10.0.7.js:13605-13631): the list keeps its "Loading..."
+    (void) status;
+    cJSON *res = body && length ? cJSON_ParseWithLength(body, length) : NULL;
+    if (!res || cJSON_IsNull(res) || cJSON_IsFalse(res)) {
+        cJSON_Delete(res);
+        return;
+    }
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(res, "data");
     const cJSON *err = cJSON_GetObjectItemCaseSensitive(res, "error");
+    // the asset windows file the page under the answer's index (data.index || 0)
+    const cJSON *index = cJSON_GetObjectItemCaseSensitive(res, "index");
+    const int at = w == LW_MODS || w == LW_MAPS ? tab : cJSON_IsNumber(index) ? (int) index->valuedouble : 0;
     if (search) search_loaded(w, cJSON_IsArray(data) ? data : NULL);
-    else loaded(w, tab, cJSON_IsArray(data) ? data : NULL, cJSON_IsString(err) && err->valuestring[0] ? err->valuestring : NULL);
+    else loaded(w, at, cJSON_IsArray(data) ? data : NULL, cJSON_IsString(err) && err->valuestring[0] ? err->valuestring : NULL);
     cJSON_Delete(res);
 }
 
@@ -600,8 +604,9 @@ static int request(const int w, const int tab, const int search, const char *pat
     *r = (Req) {w, tab, search, g_win[w].gen};
     // My Assets with the account's session (a deliberate difference: Krunker's listAssets is a bare fetch,
     // deob-10.0.7.js:133159, 133252): the brain lists a Private asset to its signed-in owner only, not to whoever names them
-    const int mine = !search && tab == ASSET_TAB_MINE && w != LW_MODS && w != LW_MAPS;
-    if (!(mine ? backend_http_get_auth(path, account_session_token(), on_http, r) : backend_http_get(path, on_http, r))) {
+    const char *token = account() ? account_session_token() : NULL;
+    const int mine = !search && tab == ASSET_TAB_MINE && w != LW_MODS && w != LW_MAPS && token && token[0];
+    if (!(mine ? backend_http_get_auth(path, token, on_http, r) : backend_http_get(path, on_http, r))) {
         free(r);
         return 0;
     }
@@ -642,8 +647,8 @@ static int list_request(const int w, const int tab) {
         snprintf(path, sizeof(path), "/api/assets");
         q_int(path, sizeof(path), "index", tab);
         q_int(path, sizeof(path), "cat", k_lw[w].cat);
-        if (tab == ASSET_TAB_MINE && a) q_add(path, sizeof(path), "username", a->name);
-        else if (tab == ASSET_TAB_MINE) return 0;
+        // every tab sends the signed-in name (editor-10.0.7.js:13082, 13345, 13450); kn_brain narrows My Assets by it
+        if (a && a->name[0]) q_add(path, sizeof(path), "username", a->name);
     }
     return request(w, tab, 0, path);
 }
@@ -658,7 +663,11 @@ static void loaded(const int w, const int tab, const cJSON *data, const char *er
     if (tab < 0 || tab >= LW_TABS) return;
     ListData *d = &lw->list[tab];
     d->waiting = 0;
-    if (data && cJSON_GetArraySize(data) > 0) {
+    const int empty = !data || cJSON_GetArraySize(data) <= 0;
+    // the Sounds window writes its empty / error text to assetTList, which only the Textures window has: the write
+    // throws inside the callback's try (editor-10.0.7.js:13398-13410, 13618-13624) and "Loading..." stays
+    if (w == LW_SOUNDS && (empty || error)) return;
+    if (!empty) {
         if (error) {
             if (!d->dat) {
                 set_list_html(w, error);
@@ -735,11 +744,13 @@ static void list_body(EdBuf *t, const int w) {
     } else {
         d->requested = 1;
         d->waiting = 0;
-        if (list_request(w, lw->tab)) {
-            edb_add(t, "<div class='loadMoreW'>Loading...</div>");
-        } else {
-            edb_add(t, k_lw[w].none); // no brain / no account: what an empty reply shows
+        if (w == LW_MAPS && !account() && brain_ok()) {
+            edb_add(t, k_lw[w].none); // My Games of nobody: what the brain's empty reply would show (see list_request)
             list_clear(d);
+        } else {
+            // a request that cannot go (no brain) is v10's failed fetch: "Loading..." stays
+            list_request(w, lw->tab);
+            edb_add(t, "<div class='loadMoreW'>Loading...</div>");
         }
     }
 }
@@ -873,11 +884,14 @@ static vec3 create_position(void) {
 }
 
 static void add_new_object(const char *key, const char *id, const int prefab) {
-    // addObject(new ObjectInstance({i, <key>: id, p}, true))
+    // addObject(new ObjectInstance({i, <key>: id, p}, true)); a model takes the asset's mapProps as mp
+    // (editor-10.0.7.js:14364-14376)
     const vec3 p = create_position();
     cJSON *d = cJSON_CreateObject();
     if (prefab >= 0) cJSON_AddNumberToObject(d, "i", prefab);
     cJSON_AddStringToObject(d, key, id);
+    const cJSON *mp = prefab == ED_PREFAB_CUSTOM_ASSET ? asset_mp(id) : NULL;
+    if (mp) cJSON_AddItemToObject(d, "mp", cJSON_Duplicate(mp, 1));
     cJSON *pa = cJSON_AddArrayToObject(d, "p");
     cJSON_AddItemToArray(pa, cJSON_CreateNumber(p.x));
     cJSON_AddItemToArray(pa, cJSON_CreateNumber(p.y));
@@ -939,6 +953,13 @@ static void select_asset(const char *id, const int type, const char *from_arg) {
     };
     for (size_t i = 0; i < sizeof(k_props) / sizeof(k_props[0]); i++) {
         if (strcmp(from, k_props[i].from)) continue;
+        EditorObject *sel = g_ed.proj->selected;
+        if (sel && !strcmp(from, "selectModel") && sel->data) {
+            // selectModel: owner.mapProps = a copy of the asset's, else null (editor-10.0.7.js:14380-14386)
+            const cJSON *mp = asset_mp(id);
+            cJSON_DeleteItemFromObjectCaseSensitive(sel->data, "mp");
+            if (mp) cJSON_AddItemToObject(sel->data, "mp", cJSON_Duplicate(mp, 1));
+        }
         set_selected(k_props[i].prop, k_props[i].number ? cJSON_CreateNumber(atoi(id)) : cJSON_CreateString(id), k_props[i].regen);
         return;
     }
@@ -962,17 +983,11 @@ static void select_mod(const char *url) {
 }
 
 // ---------------------------------------------------------------------------
-// publishing a game (publishMap / preloadMap / publishGamePopup / uploadGame / mapResp)
+// publishing: the game and asset popups' shared state
 
-static char *g_thumb;          // data:image/png;base64,... (the view or a picked file), NULL none
-static int g_capture_pending;  // read the view back after the next frame's overlays
 static int g_publish_sent;     // an uploadM is waiting for pubMR / upMp
-static int g_pub_state;        // 1: waiting for the view capture and the My Games lookup
-static int g_pub_lookup;       // the My Games lookup is still running
-static cJSON *g_pub_row;       // the published map of that name (Update Game), NULL = new
 static char *g_pub_map;        // localStorage "mapToPub": getMapExport() of publishMap
-static char g_pub_name[64];    // the map name of the last uploadM (mapResp share link)
-static unsigned g_pub_gen;
+static unsigned g_pub_gen;     // the popup's stored-thumbnail fetch: a newer popup drops an older answer
 
 static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -995,293 +1010,10 @@ static char *data_url(const char *mime, const unsigned char *data, const size_t 
     return s;
 }
 
-// UTILS.thumbnailSize(dataUrl) in kB: unpadded base64 length * 0.75 / 1000
-static double thumb_kb(const char *url) {
-    const char *comma = strchr(url, ',');
-    size_t n = 0;
-    for (const char *p = comma ? comma + 1 : url; *p; p++) if (*p != '=') n++;
-    return (double) (long) ((double) n * 0.75) / 1000.0;
-}
-
-static unsigned char *downscale(const unsigned char *src, const int w, const int h, const int dw, const int dh) {
-    unsigned char *dst = malloc((size_t) dw * (size_t) dh * 4);
-    if (!dst) return NULL;
-    for (int y = 0; y < dh; y++) {
-        const int y0 = y * h / dh, y1 = (y + 1) * h / dh > y0 ? (y + 1) * h / dh : y0 + 1;
-        for (int x = 0; x < dw; x++) {
-            const int x0 = x * w / dw, x1 = (x + 1) * w / dw > x0 ? (x + 1) * w / dw : x0 + 1;
-            unsigned sum[3] = {0, 0, 0}, cnt = 0;
-            for (int yy = y0; yy < y1; yy++) {
-                for (int xx = x0; xx < x1; xx++) {
-                    const unsigned char *p = src + ((size_t) yy * (size_t) w + (size_t) xx) * 4;
-                    sum[0] += p[0];
-                    sum[1] += p[1];
-                    sum[2] += p[2];
-                    cnt++;
-                }
-            }
-            unsigned char *q = dst + ((size_t) y * (size_t) dw + (size_t) x) * 4;
-            for (int k = 0; k < 3; k++) q[k] = (unsigned char) (sum[k] / cnt);
-            q[3] = 255;
-        }
-    }
-    return dst;
-}
-
-// the 3D view as a PNG data URL within `max_kb` (and kn_brain's data URL limit); NULL when it cannot be made
-static char *capture_view(const double max_kb) {
-    const int w = g_ed.view_w, h = g_ed.view_h;
-    if (w <= 0 || h <= 0) return NULL;
-    unsigned char *raw = malloc((size_t) w * (size_t) h * 4);
-    if (!raw) return NULL;
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(g_ed.view_x, g_ed.view_y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, raw);
-    unsigned char *row = malloc((size_t) w * 4);
-    for (int y = 0; row && y < h / 2; y++) { // GL rows are bottom-up
-        unsigned char *a = raw + (size_t) y * (size_t) w * 4, *b = raw + (size_t) (h - 1 - y) * (size_t) w * 4;
-        memcpy(row, a, (size_t) w * 4);
-        memcpy(a, b, (size_t) w * 4);
-        memcpy(b, row, (size_t) w * 4);
-    }
-    free(row);
-    char *url = NULL;
-    for (int dw = w < 480 ? w : 480; dw >= 32 && !url; dw = dw * 3 / 4) {
-        const int dh = (int) ((double) h * dw / w) > 0 ? (int) ((double) h * dw / w) : 1;
-        unsigned char *small = downscale(raw, w, h, dw, dh);
-        if (!small) break;
-        int len = 0;
-        unsigned char *png = stbi_write_png_to_mem(small, dw * 4, dw, dh, 4, &len);
-        free(small);
-        if (!png) break;
-        char *u = data_url("image/png", png, (size_t) len);
-        free(png);
-        if (u && thumb_kb(u) <= max_kb && strlen(u) <= BRAIN_THUMB_MAX) url = u;
-        else free(u);
-    }
-    free(raw);
-    return url;
-}
-
+// config.assetThumb / assetThumbP (kB): the thumbnail limit of the account
 static int thumb_limit_kb(void) {
     const AccountInfo *a = account();
     return a && a->premium ? ASSET_THUMB_P : ASSET_THUMB;
-}
-
-static void thumb_size_text(EdBuf *h, const double kb, const int limit) {
-    js_number(h, round(kb * 10000) / 10000);
-    edb_addf(h, " / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>KB</span>", limit);
-}
-
-// publishGamePopup(isNew, row)
-static void publish_game_popup(const int is_new, const cJSON *row) {
-    const int limit = thumb_limit_kb();
-    EdBuf h;
-    edb_init(&h);
-    edb_addf(&h, "<div><div class='pubHed'>%s Game</div><div id='publishGame' style='display:block'>", is_new ? "Publish" : "Update");
-    edb_add(&h, "<div class='publishLeft' id='gameThumbnailH'><img id='gameThumbnailPrev' src='");
-    const char *image = row_str(row, "map_image");
-    edb_add(&h, g_thumb ? g_thumb : !strncmp(image, "data:image/", 11) ? image : "./img/noimg.png");
-    edb_add(&h, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='width: 100%;height: 100%;'><div id='gameThumbnailSize'>");
-    thumb_size_text(&h, g_thumb ? thumb_kb(g_thumb) : 0, limit);
-    edb_addf(&h, "</div><input onclick='selectFile(&quot;gameThumbnail&quot;)' type='button' id='gameThumbnailSelect' value='Select'><div class='changeThumb'>Select Thumbnail</div>"
-                 "<input id='gameThumbnail' type='file' accept='image/png' style='width:1px;visibility:hidden;' onchange='updateFile(this.id,0,%d)'></div>", limit);
-    edb_add(&h, "<div class='publishRight'><div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Category<select id='gameCategory2' class='mapInput2'>");
-    const int ca = (int) ed_json_num(row, "ca", ed_json_num(row, "map_category", 0));
-    for (int i = 0; i < MAP_CAT_COUNT; i++) edb_addf(&h, "<option value='%d'%s>%s</option>", i, !is_new && i == ca ? " selected" : "", k_map_cats[i]);
-    edb_add(&h, "</select></div>");
-    edb_add(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Post to Hub <label class='switch2'><input id='gamePostNew' type='checkbox'><span class='slider2'></span></label></div>");
-    edb_addf(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Mobile Friendly <label class='switch2'><input id='gameMobNew' type='checkbox'%s><span class='slider2'></span></label></div>",
-             !is_new && ed_json_truthy(cJSON_GetObjectItemCaseSensitive(row, "mob")) ? " checked" : "");
-    edb_add(&h, "</div>");
-    // the map data is set as the field's value below (the attribute would need quoting)
-    edb_add(&h, "<input id='gameDataNew' type='text' class='mapInput' placeholder='Paste Data' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>");
-    edb_add(&h, "<input id='gameVideoNew' type='text' placeholder='Youtube Link (Optional)' class='mapInput' ");
-    const char *vl = row_str(row, "vl");
-    if (!is_new && vl[0]) {
-        edb_add(&h, " value='https://youtube.com/watch?v=");
-        cleanse(&h, vl);
-        edb_add(&h, "'");
-    }
-    edb_add(&h, " autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'><textarea id='gameDescNew' type='text' maxlength='500' placeholder='Description (Optional)' class='mapInput'  autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>");
-    if (!is_new) edb_add(&h, row_str(row, "map_description"));
-    edb_add(&h, "</textarea></div>");
-    const double version = fmax(1, ed_json_num(row, "map_updatecounter", 0) + 1) / 10;
-    edb_add(&h, "<div id='gameResHolder' style='margin-top:8px;margin-bottom:5px;display:none'><div id='gameUpResp' style='color:rgba(0,0,0,0.3);display: inline-block;'></div></div>"
-                "<div id='pubGame' style='margin-top:10px;width: calc(100% - 11px);' onclick='KE.uploadGame()'>");
-    if (is_new) edb_add(&h, "Publish");
-    else {
-        edb_add(&h, "Publish v");
-        js_number(&h, version);
-    }
-    edb_add(&h, "</div>");
-    ed_generic_popup(h.buf, "publishGamePop");
-    edb_free(&h);
-    // getSavedVal("mapToPub"); deleteVal("mapToPub")
-    if (g_pub_map) {
-        const HtmlElem data = html_dom_by_id("gameDataNew");
-        if (data) html_dom_set_value(data, g_pub_map);
-        free(g_pub_map);
-        g_pub_map = NULL;
-    }
-}
-
-static void preload_ready(void) {
-    if (g_pub_state != 1 || g_capture_pending || g_pub_lookup) return;
-    g_pub_state = 0;
-    ed_clear_pops();
-    publish_game_popup(g_pub_row == NULL, g_pub_row);
-    cJSON_Delete(g_pub_row);
-    g_pub_row = NULL;
-}
-
-typedef struct {
-    unsigned gen;
-    char name[64];
-} PubLookup;
-
-static void on_pub_lookup(void *user, const int status, const char *body, const size_t length) {
-    PubLookup *l = user;
-    const int stale = l->gen != g_pub_gen;
-    if (!stale && g_ed.active) {
-        cJSON *res = status == 200 && body ? cJSON_ParseWithLength(body, length) : NULL;
-        const cJSON *row;
-        cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(res, "data")) {
-            const char *n = row_str(row, "map_name");
-            size_t i = 0;
-            while (n[i] && l->name[i] && (n[i] | 32) == (l->name[i] | 32)) i++;
-            if (!n[i] && !l->name[i]) {
-                cJSON_Delete(g_pub_row);
-                g_pub_row = cJSON_Duplicate(row, 1);
-                break;
-            }
-        }
-        cJSON_Delete(res);
-        g_pub_lookup = 0;
-        preload_ready();
-    }
-    free(l);
-}
-
-void ed_net_publish(void) {
-    // publishMap()
-    if (!backend_enabled() || backend_available() == 0) {
-        editor_message(account_backend() == ACCOUNT_BACKEND_KRUNKER ? "Publishing is not available on krunker.io: use Export instead."
-                                                                    : "Publishing needs the Krunker Box Office backend (kn_brain); use Export instead.");
-        return;
-    }
-    const AccountInfo *a = account();
-    if (!a) {
-        io_po(NULL, "Must be logged in", NULL);
-        return;
-    }
-    // v10 publishMap: a named map is checked first (validateMap(JSON.parse(getMapExport()), cb,
-    // false)) and its first error is the failure popup; nothing is uploaded. An unnamed map opens
-    // the publish form unchecked, as in v10 (its name comes later; uploadM checks it then).
-    char *exported = ed_map_export_string();
-    if (ed_json_str(g_ed.proj->map_config, "name", "")[0]) {
-        cJSON *doc = exported ? cJSON_Parse(exported) : NULL;
-        const char *error = doc ? map_validate_error(doc, 0) : "Map error occured.";
-        if (error) {
-            char copy[256];
-            snprintf(copy, sizeof(copy), "%s", error); // map_validate_error's storage is static
-            cJSON_Delete(doc);
-            free(exported);
-            io_po(NULL, copy, NULL);
-            return;
-        }
-        cJSON_Delete(doc);
-    }
-    if (!g_listening) g_listening = backend_social_listen(on_social, NULL);
-    free(g_pub_map);
-    g_pub_map = exported; // saveVal("mapToPub", getMapExport())
-    cJSON_Delete(g_pub_row);
-    g_pub_row = NULL;
-    g_pub_gen++;
-    g_pub_state = 1;
-    g_capture_pending = 1; // the view is read back after the next frame (ed_net_frame)
-    g_pub_lookup = 0;
-    const char *name = ed_json_str(g_ed.proj->map_config, "name", "");
-    if (name[0]) {
-        wait_popup("Please Wait...");
-        // io.send("plm", name) -> preloadMap: the account's My Games list instead (see the notes)
-        PubLookup *l = calloc(1, sizeof(*l));
-        char path[256] = "/api/maps";
-        q_int(path, sizeof(path), "index", MAP_API_OWNED);
-        q_int(path, sizeof(path), "pos", 0);
-        q_int(path, sizeof(path), "accountId", a->id);
-        q_add(path, sizeof(path), "val", name);
-        if (l) {
-            l->gen = g_pub_gen;
-            snprintf(l->name, sizeof(l->name), "%s", name);
-            g_pub_lookup = backend_http_get(path, on_pub_lookup, l);
-            if (!g_pub_lookup) free(l);
-        }
-    }
-}
-
-// KE.uploadGame()
-static void upload_game(void) {
-    upload_resp("Loading...");
-    char cat[16], video[256], desc[600];
-    read_value("gameCategory2", cat, sizeof(cat));
-    const int ci = atoi(cat);
-    if (!cat[0] || ci < 0 || ci >= MAP_CAT_COUNT) {
-        upload_resp("Invalid Category");
-        return;
-    }
-    char *data = malloc(MAP_DATA_MAX + 2);
-    if (!data) return;
-    read_value("gameDataNew", data, MAP_DATA_MAX + 2);
-    if (strlen(data) > MAP_DATA_MAX) {
-        free(data);
-        upload_resp("Failed. 500k Character Game Data Limit");
-        return;
-    }
-    read_value("gameDescNew", desc, sizeof(desc));
-    read_value("gameVideoNew", video, sizeof(video));
-    const int post = read_checked("gamePostNew"), mob = read_checked("gameMobNew");
-    if (!account()) {
-        free(data);
-        upload_resp("Must be logged in");
-        return;
-    }
-    cJSON *map = cJSON_Parse(data);
-    snprintf(g_pub_name, sizeof(g_pub_name), "%s", ed_json_str(map, "name", ""));
-    cJSON_Delete(map);
-    cJSON *f = frame_new("uploadM");
-    cJSON_AddItemToArray(f, cJSON_CreateString(data));
-    cJSON_AddItemToArray(f, g_thumb ? cJSON_CreateString(g_thumb) : cJSON_CreateNull());
-    cJSON_AddItemToArray(f, cJSON_CreateString(desc));
-    cJSON_AddItemToArray(f, cJSON_CreateString(video));
-    cJSON_AddItemToArray(f, cJSON_CreateString(cat));
-    cJSON_AddItemToArray(f, cJSON_CreateBool(post));
-    cJSON_AddItemToArray(f, cJSON_CreateBool(mob));
-    free(data);
-    g_publish_sent = social_send(f, "pubMR", 1);
-    if (!g_publish_sent) upload_resp("Upload Request Failed");
-}
-
-// KE.mapResp(text, name)
-static void map_resp(const char *text, const char *name) {
-    EdBuf h, n;
-    edb_init(&h);
-    edb_init(&n);
-    escape_str(&n, name);
-    edb_addf(&h, "<div style='width:100%%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div>"
-                 "<div style='font-size:20px;color:rgba(255,255,255,0.5);margin-bottom: 20px;'>%s</div>"
-                 "<div class='eButton' style='padding-top: 7px;' onclick='shareMapLink(this, &quot;%s&quot;)'>Share the game here</div></div>",
-             text, n.buf ? n.buf : "");
-    ed_generic_popup(h.buf, "mapRespPop");
-    edb_free(&h);
-    edb_free(&n);
-}
-
-static void share_map_link(const HtmlElem button, const char *name) {
-    char origin[256], url[512];
-    html_page_origin(origin, sizeof(origin));
-    snprintf(url, sizeof(url), "%s/?play=%s", origin, name ? name : "");
-    html_clipboard_write(url);
-    if (button) html_dom_set_text(button, "Copied"); // menu.btn.invite.clicked (v7 restores the text after 1.25 s)
 }
 
 // ---------------------------------------------------------------------------
@@ -1391,7 +1123,7 @@ void ed_net_publish_asset(void) {
     if (!g_listening) g_listening = backend_social_listen(on_social, NULL);
     EdBuf h;
     edb_init(&h);
-    edb_add(&h, "<div><div class='pubHed'>Publish or Update Asset</div><div id='publishAsset' style='display:block'>");
+    edb_add(&h, "<div><div class='pubHed'>Publish or Update Asset</div><div id='publishAsset' style='display:block;max-height:600px;overflow-y:auto;'>");
     edb_add(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Type<select id='gameType' class='mapInput2' onchange='KE.updateAssetType(this.value)'>"
                 "<option value='0'>Model</option><option value='1'>Object Prefab</option><option value='2'>Texture / Image</option><option value='3'>Sound</option><option value='4'>Video</option></select></div>");
     edb_add(&h, "<div id='gameCategoryH' style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Category<select id='gameCategory' class='mapInput2'>");
@@ -1403,7 +1135,7 @@ void ed_net_publish_asset(void) {
     edb_addf(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;font-size:14px;margin-top:12px;border-top:2px solid;padding-top:10px;' id='maxSizeH'>Max Size"
                  "<span style='color:rgba(255, 255, 255, 0.6)!important;font-size:14px;float:right;' id='gameSize'>0 / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>mb</span></span></div>",
              a->premium ? ASSET_SIZE_P : ASSET_SIZE);
-    edb_add(&h, "<input id='gameNameNew' type='text' maxlength='500' placeholder='Name' class='mapInput'  autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>");
+    edb_add(&h, "<input id='gameNameNew' type='text' maxlength='500' placeholder='Name' class='mapInput'  style='box-sizing:border-box;width:100%;' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>");
     edb_add(&h, "<input id='gameDataNew2' style='display:none' type='text' placeholder='Paste Data' class='mapInput'  autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div>");
     edb_add(&h, "<div id='gameResHolder' style='margin-top:8px;margin-bottom:5px;display:none'><div id='gameUpResp' style='color:rgba(0,0,0,0.3);display: inline-block;'></div></div>"
                 "<div id='pubGame' style='margin-top:10px' onclick='KE.uploadAsset()'>Publish/Update</div>");
@@ -1453,25 +1185,18 @@ static void file_picked(void *user, const char *path) {
     html_dom_set_attr(html_dom_by_id(id), "title", base);
     snprintf(id, sizeof(id), "%sSelect", k_files[f].id);
     html_dom_set_value(html_dom_by_id(id), "Change");
-    if (f == AF_THUMBNAIL && data) {
-        // the publish game thumbnail: its preview and the data URL sent with uploadM
-        static const unsigned char sig[8] = {137, 'P', 'N', 'G', 13, 10, 26, 10};
-        if (got < 8 || memcmp(data, sig, 8)) {
-            upload_resp("Invalid Thumbnail (PNG only)");
-        } else {
-            char *url = data_url("image/png", data, got);
-            if (url && (thumb_kb(url) > thumb_limit_kb() || strlen(url) > BRAIN_THUMB_MAX)) {
-                upload_resp(strlen(url) > BRAIN_THUMB_MAX ? "Thumbnail too large for this server (150 KB)" : "Thumbnail too large");
-                free(url);
-            } else if (url) {
-                free(g_thumb);
-                g_thumb = url;
-                html_dom_set_attr(html_dom_by_id("gameThumbnailPrev"), "src", g_thumb);
-            }
-        }
+    snprintf(id, sizeof(id), "%sPrev", k_files[f].id);
+    const HtmlElem prev = html_dom_by_id(id);
+    if (prev && data) {
+        // <id>Prev (the publish game popup's thumbnail): FileReader.readAsDataURL of the file, unchecked (the server
+        // checks it when it arrives: the size at uploadM, a PNG at /upload-user-asset)
+        char *url = data_url("image/png", data, got);
+        if (url) html_dom_set_attr(prev, "src", url);
+        free(url);
     }
     free(data);
-    const int mb = !k_files[f].kb;
+    // updateFile(id, mb, limit): the model's field passes neither (its size in KB, no limit, outside #gameSize)
+    const int mb = !k_files[f].kb && f != AF_MODEL;
     int limit = k_files[f].limit;
     if (f == AF_THUMB || f == AF_THUMBNAIL) limit = thumb_limit_kb();
     snprintf(id, sizeof(id), "%sSize", k_files[f].id);
@@ -1486,13 +1211,13 @@ static void file_picked(void *user, const char *path) {
         edb_free(&t);
     }
     if (g_asset_type == 0) {
-        // #gameSize: the MB fields' sum
+        // #gameSize: the MB fields' sum (iîíiiïî), .round(2)
         double total = 0;
-        for (int i = 0; i < AF_THUMBNAIL; i++) if (!k_files[i].kb) total += g_files[i].size / 1000000.0;
+        for (int i = 0; i < AF_THUMBNAIL; i++) if (!k_files[i].kb && i != AF_MODEL) total += g_files[i].size / 1000000.0;
         const AccountInfo *a = account();
         EdBuf t;
         edb_init(&t);
-        js_number(&t, round(total * 10000) / 10000);
+        js_number(&t, round(total * 100) / 100);
         edb_addf(&t, " / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>mb</span>", a && a->premium ? ASSET_SIZE_P : ASSET_SIZE);
         const HtmlElem gs = html_dom_by_id("gameSize");
         if (gs) html_dom_set_html(gs, t.buf);
@@ -1503,6 +1228,223 @@ static void file_picked(void *user, const char *path) {
 static void add_sizes(cJSON *sizes, const int *fields, const int n) {
     for (int i = 0; i < n; i++)
         if (g_files[fields[i]].size > 0) cJSON_AddNumberToObject(sizes, k_files[fields[i]].key, g_files[fields[i]].size);
+}
+
+// ---------------------------------------------------------------------------
+// publishing a game: publishGamePopup / preloadMap / publishMap / uploadGame / mapResp / shareMapLink
+
+// the Update Game popup's stored thumbnail: v10's <img src> of the user-asset host's /m<id>/thumb.png
+// (editor-10.0.7.js:20549); natively the brain's copy (GET /api/user-assets/m<id>/thumb.png) as a data URL
+static void on_pub_thumb(void *user, const int status, const char *body, const size_t length) {
+    static const unsigned char sig[8] = {137, 'P', 'N', 'G', 13, 10, 26, 10};
+    if ((unsigned) (uintptr_t) user != g_pub_gen || !g_ed.active || status != 200 || !body || length < 8 || memcmp(body, sig, 8)) return;
+    const HtmlElem img = html_dom_by_id("gameThumbnailPrev");
+    if (!img || g_files[AF_THUMBNAIL].size > 0) return; // a picked file's preview stays
+    char *url = data_url("image/png", (const unsigned char *) body, length);
+    if (url) html_dom_set_attr(img, "src", url);
+    free(url);
+}
+
+// publishGamePopup(isNew, row) (editor-10.0.7.js:20536-20575); row: preloadMap's (map_id, ca, mob, vl, mi,
+// map_description, map_updatecounter), NULL = {}
+static void publish_game_popup(const int is_new, const cJSON *row) {
+    g_asset_type = -1; // iiìiííï = -1: updateFile leaves #gameSize alone
+    files_reset();    // iîíiiïî = []
+    g_pub_gen++;
+    const AccountInfo *a = account();
+    if (!a) {
+        io_po(NULL, "Must be logged in", NULL);
+        return;
+    }
+    // mi.t: the map has a stored thumbnail
+    int has_thumb = 0;
+    if (!is_new) {
+        const cJSON *mi = cJSON_GetObjectItemCaseSensitive(row, "mi");
+        cJSON *info = cJSON_IsString(mi) ? cJSON_Parse(mi->valuestring) : cJSON_IsObject(mi) ? cJSON_Duplicate(mi, 1) : NULL;
+        has_thumb = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(info, "t"));
+        cJSON_Delete(info);
+    }
+    const int limit = thumb_limit_kb();
+    EdBuf h;
+    edb_init(&h);
+    edb_addf(&h, "<div><div class='pubHed'>%s Game</div><div id='publishGame' style='display:block'>", is_new ? "Publish" : "Update");
+    edb_addf(&h, "<div class='publishLeft' id='gameThumbnailH'><img id='gameThumbnailPrev' src='./img/noimg.png' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' "
+                 "style='width: 100%%;height: 100%%;'><div id='gameThumbnailSize'>0 / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>KB</span></div>"
+                 "<input onclick='selectFile(&quot;gameThumbnail&quot;)' type='button' id='gameThumbnailSelect' value='Select'><div class='changeThumb'>Select Thumbnail</div>"
+                 "<input id='gameThumbnail' type='file' accept='image/png' style='width:1px;visibility:hidden;' onchange='updateFile(this.id,0,%d)'></div>",
+             limit, limit);
+    edb_add(&h, "<div class='publishRight'><div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Category<select id='gameCategory2' class='mapInput2'>");
+    const cJSON *ca = cJSON_GetObjectItemCaseSensitive(row, "ca");
+    const int cai = cJSON_IsNumber(ca) ? (int) ca->valuedouble : cJSON_IsString(ca) && ca->valuestring[0] ? atoi(ca->valuestring) : -1;
+    for (int i = 0; i < MAP_CAT_COUNT; i++) edb_addf(&h, "<option value='%d'%s>%s</option>", i, !is_new && i == cai ? " selected" : "", k_map_cats[i]);
+    edb_add(&h, "</select></div>");
+    edb_add(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Post to Hub <label class='switch2'><input id='gamePostNew' type='checkbox'><span class='slider2'></span></label></div>");
+    edb_addf(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;margin-top: 4px;margin-bottom: 4px;'>Mobile Friendly <label class='switch2'><input id='gameMobNew' type='checkbox'%s><span class='slider2'></span></label></div>",
+             !is_new && ed_json_truthy(cJSON_GetObjectItemCaseSensitive(row, "mob")) ? " checked" : "");
+    edb_add(&h, "</div>");
+    // getSavedVal("mapToPub"): the map data is set as the field's value below (the attribute would need quoting)
+    edb_addf(&h, "<input id='gameDataNew' type='text' class='mapInput' %s autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>",
+             g_pub_map ? "" : "placeholder='Paste Data'");
+    edb_add(&h, "<input id='gameVideoNew' type='text' placeholder='Youtube Link (Optional)' class='mapInput' ");
+    const char *vl = row_str(row, "vl");
+    if (!is_new && vl[0]) {
+        edb_add(&h, " value='https://youtube.com/watch?v=");
+        cleanse(&h, vl);
+        edb_add(&h, "'");
+    }
+    edb_add(&h, " autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'><textarea id='gameDescNew' type='text' maxlength='500' placeholder='Description (Optional)' class='mapInput'  autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'>");
+    if (!is_new) edb_add(&h, row_str(row, "map_description"));
+    edb_add(&h, "</textarea></div>");
+    const double version = fmax(1, ed_json_num(row, "map_updatecounter", 0) + 1) / 10;
+    edb_add(&h, "<div id='gameResHolder' style='margin-top:8px;margin-bottom:5px;display:none'><div id='gameUpResp' style='color:rgba(0,0,0,0.3);display: inline-block;'></div></div>"
+                "<div id='pubGame' style='margin-top:10px;width: calc(100% - 11px);' onclick='KE.uploadGame()'>");
+    if (is_new) edb_add(&h, "Publish");
+    else {
+        edb_add(&h, "Publish v");
+        js_number(&h, version);
+    }
+    edb_add(&h, "</div>");
+    ed_generic_popup(h.buf, "publishGamePop");
+    edb_free(&h);
+    // deleteVal("mapToPub")
+    if (g_pub_map) {
+        const HtmlElem data = html_dom_by_id("gameDataNew");
+        if (data) html_dom_set_value(data, g_pub_map);
+        free(g_pub_map);
+        g_pub_map = NULL;
+    }
+    const double map_id = ed_json_num(row, "map_id", 0);
+    if (has_thumb && map_id > 0 && brain_ok()) {
+        char path[96];
+        snprintf(path, sizeof(path), "/api/user-assets/m%.0f/thumb.png", map_id);
+        backend_http_get(path, on_pub_thumb, (void *) (uintptr_t) g_pub_gen);
+    }
+}
+
+// KE.preloadMap(isNew, row): the "plm" reply
+static void preload_map(const int is_new, const cJSON *row) {
+    ed_clear_pops();
+    publish_game_popup(is_new, row);
+}
+
+void ed_net_publish(void) {
+    // publishMap() (editor-10.0.7.js:17000-17024)
+    if (!backend_enabled() || backend_available() == 0) {
+        editor_message(account_backend() == ACCOUNT_BACKEND_KRUNKER ? "Publishing is not available on krunker.io: use Export instead."
+                                                                    : "Publishing needs the Krunker Box Office backend (kn_brain); use Export instead.");
+        return;
+    }
+    if (!account()) {
+        io_po(NULL, "Must be logged in", NULL);
+        return;
+    }
+    if (!g_listening) g_listening = backend_social_listen(on_social, NULL);
+    // an unnamed map opens the form at once, unchecked and without its data (its name comes later; uploadM checks it)
+    const char *name = ed_json_str(g_ed.proj->map_config, "name", "");
+    if (!name[0]) {
+        publish_game_popup(1, NULL);
+        return;
+    }
+    // a named map is checked first (validateMap(JSON.parse(getMapExport()), cb, false)): its first error is the
+    // failure popup and nothing is sent
+    char *exported = ed_map_export_string();
+    cJSON *doc = exported ? cJSON_Parse(exported) : NULL;
+    const char *error = doc ? map_validate_error(doc, 0) : "Map error occured.";
+    if (error) {
+        char copy[256];
+        snprintf(copy, sizeof(copy), "%s", error); // map_validate_error's storage is static
+        cJSON_Delete(doc);
+        free(exported);
+        io_po(NULL, copy, NULL);
+        return;
+    }
+    cJSON_Delete(doc);
+    wait_popup("Please Wait...");
+    free(g_pub_map);
+    g_pub_map = exported; // saveVal("mapToPub", getMapExport())
+    cJSON *f = frame_new("plm"); // -> preloadMap(isNew, row)
+    cJSON_AddItemToArray(f, cJSON_CreateString(name));
+    if (!social_send(f, "plm", 0)) io_po(NULL, "Upload Request Failed", NULL);
+}
+
+// KE.uploadGame() (editor-10.0.7.js:20621-20647)
+static void upload_game(void) {
+    upload_resp("Loading...");
+    char cat[16], video[256], desc[600];
+    read_value("gameCategory2", cat, sizeof(cat));
+    char *end = NULL;
+    const long ci = strtol(cat, &end, 10);
+    if (!cat[0] || !end || *end || ci < 0 || ci >= MAP_CAT_COUNT) { // !mapCategories[value]
+        upload_resp("Invalid Category");
+        return;
+    }
+    char *data = malloc(MAP_DATA_MAX + 2);
+    if (!data) return;
+    read_value("gameDataNew", data, MAP_DATA_MAX + 2);
+    if (strlen(data) > MAP_DATA_MAX) {
+        free(data);
+        upload_resp("Failed. 500k Character Game Data Limit");
+        return;
+    }
+    read_value("gameDescNew", desc, sizeof(desc));
+    read_value("gameVideoNew", video, sizeof(video));
+    const int post = read_checked("gamePostNew"), mob = read_checked("gameMobNew");
+    // {thumb: gameThumbnail.files[0]}: the picked file goes after pubMR (publishMapResp); uploadM sends its size
+    cJSON *sizes = cJSON_CreateObject();
+    if (g_files[AF_THUMBNAIL].size > 0) cJSON_AddNumberToObject(sizes, "thumb", g_files[AF_THUMBNAIL].size);
+    cJSON *f = frame_new("uploadM");
+    cJSON_AddItemToArray(f, cJSON_CreateString(data));
+    cJSON_AddItemToArray(f, cJSON_CreateString(desc));
+    cJSON_AddItemToArray(f, cJSON_CreateString(video));
+    cJSON_AddItemToArray(f, cJSON_CreateString(cat));
+    cJSON_AddItemToArray(f, sizes);
+    cJSON_AddItemToArray(f, cJSON_CreateBool(post));
+    cJSON_AddItemToArray(f, cJSON_CreateBool(mob));
+    free(data);
+    g_publish_sent = social_send(f, "pubMR", 1);
+    if (!g_publish_sent) upload_resp("Upload Request Failed");
+}
+
+// KE.mapResp(text, name)
+static void map_resp(const char *text, const char *name) {
+    EdBuf h, n;
+    edb_init(&h);
+    edb_init(&n);
+    escape_str(&n, name);
+    edb_addf(&h, "<div style='width:100%%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div>"
+                 "<div style='font-size:20px;color:rgba(255,255,255,0.5);margin-bottom: 20px;'>%s</div>"
+                 "<div class='eButton' style='padding-top: 7px;' onclick='shareMapLink(this, &quot;%s&quot;)'>Share the game here</div></div>",
+             text, n.buf ? n.buf : "");
+    ed_generic_popup(h.buf, "mapRespPop");
+    edb_free(&h);
+    edb_free(&n);
+}
+
+// shareMapLink(button, name): the link to the clipboard, the button says "Copied" (menu.btn.invite.clicked) and gets
+// its text back after 1250 ms (editor-10.0.7.js:20843-20848)
+static struct {
+    HtmlElem button;
+    char text[128];
+} g_share;
+
+static void share_map_link_restore(void *user) {
+    (void) user;
+    char now[32] = "";
+    if (g_share.button) html_dom_get_text(g_share.button, now, sizeof(now));
+    if (g_share.button && !strcmp(now, "Copied")) html_dom_set_text(g_share.button, g_share.text);
+    g_share.button = 0;
+}
+
+static void share_map_link(const HtmlElem button, const char *name) {
+    char origin[256], url[512];
+    html_page_origin(origin, sizeof(origin));
+    snprintf(url, sizeof(url), "%s/?play=%s", origin, name ? name : "");
+    html_clipboard_write(url);
+    if (!button) return;
+    g_share.button = button;
+    html_dom_get_text(button, g_share.text, sizeof(g_share.text));
+    html_dom_set_text(button, "Copied");
+    html_timer_add(1250, share_map_link_restore, NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -1526,6 +1468,9 @@ static struct {
     size_t at;                // the offset of the chunk in flight (sent again after a failed request)
     int retries;
     char *prefab;             // the prefab data text (uploadA's data)
+    int map;                  // publishMapResp's thumbnail upload: mapResp at the end, not "Asset Uploaded!"
+    int count;                // its map_updatecounter (> 1: "Game Updated")
+    char name[64];            // its map name (the share link)
 } g_up;
 
 static void up_end(const char *resp) {
@@ -1535,6 +1480,23 @@ static void up_end(const char *resp) {
     memset(&g_up, 0, sizeof(g_up));
     g_up.gen = gen;
     if (resp) upload_resp(resp);
+}
+
+// the end of an upload: publishAssetResp's "Asset Uploaded!" or the answer's text in the popup; publishMapResp's
+// mapResp("Game Uploaded!" / "Game Updated!", or ", Thumbnail Failed)" when the thumbnail POST failed, name)
+// (editor-10.0.7.js:20795-20805, 20821-20833)
+static void up_finish(const int ok, const char *resp) {
+    const int map = g_up.map, count = g_up.count;
+    char name[64];
+    snprintf(name, sizeof(name), "%s", g_up.name);
+    up_end(map || ok ? NULL : resp);
+    if (map) {
+        char text[64];
+        snprintf(text, sizeof(text), "Game %s%s", count > 1 ? "Updated" : "Uploaded", ok ? "!" : ", Thumbnail Failed)");
+        map_resp(text, name);
+    } else if (ok) {
+        io_po("SUCCESS", NULL, "Asset Uploaded!");
+    }
 }
 
 static void up_next(void);
@@ -1560,12 +1522,11 @@ static void up_answer(void *user, const int status, const char *body, const size
     g_up.retries = 0;
     if (status != 200) {
         // KE.publishAssetResp: the answer's text in the popup, "Upload Request Failed" when the request failed
-        up_end(status > 0 && body && body[0] && body[0] != '{' ? body : "Upload Request Failed");
+        up_finish(0, status > 0 && body && body[0] && body[0] != '{' ? body : "Upload Request Failed");
         return;
     }
     if (g_up.cur >= g_up.nfields) {
-        up_end(NULL);
-        io_po("SUCCESS", NULL, "Asset Uploaded!");
+        up_finish(1, NULL);
         return;
     }
     if (g_up.sent >= g_up.len) {
@@ -1598,7 +1559,7 @@ static void up_next(void) {
     if (g_up.cur >= g_up.nfields) {
         // every file sent: the server checks and stores them
         snprintf(url, sizeof(url), "%s/upload-user-asset?fileId=%s&done=1", g_up.base, g_up.file_id);
-        if (!backend_http_post_bytes(url, "application/octet-stream", "", 0, UP_TIMEOUT_MS, up_answer, (void *) user)) up_end("Upload Request Failed");
+        if (!backend_http_post_bytes(url, "application/octet-stream", "", 0, UP_TIMEOUT_MS, up_answer, (void *) user)) up_finish(0, "Upload Request Failed");
         return;
     }
     const int f = g_up.fields[g_up.cur];
@@ -1618,7 +1579,7 @@ static void up_next(void) {
             }
         }
         if (!g_up.data) {
-            up_end("Upload Request Failed");
+            up_finish(0, "Upload Request Failed");
             return;
         }
     }
@@ -1629,17 +1590,16 @@ static void up_next(void) {
     g_up.at = at;
     g_up.sent += n;
     if (!backend_http_post_bytes(url, "application/octet-stream", g_up.data + at, n, UP_TIMEOUT_MS, up_answer, (void *) user))
-        up_end("Upload Request Failed");
+        up_finish(0, "Upload Request Failed");
 }
 
-// KE.publishAssetResp({fileId, srv, funds})
-static void publish_asset_resp(const cJSON *r) {
+// the POSTs to <srv>/upload-user-asset of the ticket {fileId, srv} (the brain's URL when srv is null)
+static void up_start(const cJSON *r) {
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(r, "fileId"), *srv = cJSON_GetObjectItemCaseSensitive(r, "srv");
-    if (!g_up.nfields || !(cJSON_IsString(id) || cJSON_IsNumber(id))) {
-        up_end("Upload Request Failed");
+    if (!(cJSON_IsString(id) || cJSON_IsNumber(id))) {
+        up_finish(0, "Upload Request Failed");
         return;
     }
-    upload_resp("Uploading...");
     if (cJSON_IsString(id)) snprintf(g_up.file_id, sizeof(g_up.file_id), "%s", id->valuestring);
     else snprintf(g_up.file_id, sizeof(g_up.file_id), "%.0f", id->valuedouble);
     for (char *c = g_up.file_id; *c; c++)
@@ -1649,6 +1609,33 @@ static void publish_asset_resp(const cJSON *r) {
     g_up.active = 1;
     g_up.cur = 0;
     up_next();
+}
+
+// KE.publishAssetResp({fileId, srv, funds}) (editor-10.0.7.js:20782-20809)
+static void publish_asset_resp(const cJSON *r) {
+    const cJSON *funds = cJSON_GetObjectItemCaseSensitive(r, "funds");
+    if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble); // KE.account.funds = funds
+    upload_resp("Uploading...");
+    if (!g_up.nfields) {
+        up_finish(0, "Upload Request Failed");
+        return;
+    }
+    up_start(r);
+}
+
+// KE.publishMapResp({fileId, srv}, updateCount, name) (editor-10.0.7.js:20810-20834): the picked thumbnail, if any,
+// goes the way of an asset's files (the fileId alone when none was picked), then mapResp
+static void publish_map_resp(const cJSON *r, const cJSON *count, const cJSON *name) {
+    upload_resp("Uploading...");
+    up_end(NULL);
+    g_up.map = 1;
+    g_up.count = cJSON_IsNumber(count) ? (int) count->valuedouble : 0;
+    snprintf(g_up.name, sizeof(g_up.name), "%s", cJSON_IsString(name) ? name->valuestring : "");
+    if (g_files[AF_THUMBNAIL].size > 0) g_up.fields[g_up.nfields++] = AF_THUMBNAIL;
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(r, "fileId");
+    // a kn_brain with uploads off has no ticket (fileId null): the map is published, only a picked thumbnail failed
+    if (!g_up.nfields && !cJSON_IsString(id) && !cJSON_IsNumber(id)) up_finish(1, NULL);
+    else up_start(r);
 }
 
 // what uploadA declares: the fields it sent sizes for (KE.uploadAsset's iìïîíîî) and the prefab's text
@@ -1764,7 +1751,7 @@ static void open_edit(const char *name, const double id, const double fund) {
                  "<div style='font-size:18px;color:#fff'>Type:<select id='leaderType' class='inputGrey2' style='padding: 4px;margin-top: unset;width: unset;'><option value='0'>Score</option><option value='1'>Time</option></select></div>"
                  "<div style='margin-top: 5px;font-size:18px;color:#fff'>Custom Type:<input id='leaderTypeCust' class='inputGrey2' style='padding: 4px;'></div>"
                  "<div style='margin-top:5px;font-size:18px;color:#fff'>Order:<select id='leaderOrder' class='inputGrey2' style='padding: 4px;margin-top: unset;width: unset;'><option value='0'>ASC</option><option value='1'>DESC</option></select></div>"
-                 "<div class='mapLeaderB' onclick='updateMapLB(%s)'>Update Leaderboard</div>"
+                 "<div class='mapLeaderB' onclick='updateMapLB(%s)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>Update Leaderboard</div>"
                  "<div style='margin-top:25px;font-size:24px;color:#b2b2b2'>Map Funds:</div>"
                  "<div style='font-size:18px;color:#fff'>Funds <span style='float:right;color:rgba(255,255,255,0.5)'>",
              name, n.buf ? n.buf : "", sid);
@@ -1772,8 +1759,8 @@ static void open_edit(const char *name, const double id, const double fund) {
     edb_addf(&h, " <span style='color:#fff'>KR</span></span></div>"
                  "<div style='font-size:18px;color:#fff'>KR Fee <span  id='mapFeeVal' style='float:right;color:rgba(255,255,255,0.5)'>None</span></div>"
                  "<input type='number' oninput='calcMapFee(this)' id='mapFundsInp' placeholder='Enter KR Amount'></input>"
-                 "<div class='mapFndB' onclick='chngMapFunds(%s, 1)' style='background-color:#fc5a4e'>Withdraw</div>"
-                 "<div class='mapFndB' onclick='chngMapFunds(%s, 0)' style='margin-left:16px;background-color:#4ca9f5'>Deposit</div>",
+                 "<div class='mapFndB' onclick='chngMapFunds(%s, 1)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)' style='background-color:#fc5a4e'>Withdraw</div>"
+                 "<div class='mapFndB' onclick='chngMapFunds(%s, 0)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)' style='margin-left:16px;background-color:#4ca9f5'>Deposit</div>",
              sid, sid);
     ed_generic_popup(h.buf, "editPop");
     edb_free(&h);
@@ -1846,7 +1833,6 @@ static void update_map_lb(const double id) {
     cJSON_AddItemToArray(f, cJSON_CreateString(cust));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(atoi(order)));
     if (!social_send(f, "upMp", 0)) io_po(NULL, "Upload Request Failed", NULL);
-    else g_wait_until = HUGE_VAL; // v10 sets no timeout for ulb: the popup waits until it is closed
 }
 
 static void delete_creation_conf(const double id, const int kind) {
@@ -1858,7 +1844,7 @@ static void delete_creation_conf(const double id, const int kind) {
     ed_model_number(id, sid, sizeof(sid));
     char h[768];
     snprintf(h, sizeof(h), "<div style='color:#fff;font-size:19px;position:relative;margin-bottom:15px;'>Are you sure you want to delete this %s?</div>"
-                           "<div id='confirmBtn' onclick='deleteCreation(%s, %d)'>YES</div><div id='declineBtn' onclick='clearPops()'>NO</div>",
+                           "<div id='confirmBtn' onclick='deleteCreation(%s, %d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='clearPops()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
              kind == 0 ? "Map" : kind == 1 ? "Mod" : "Asset", sid, kind);
     ed_generic_popup(h, "confSubmitPop");
 }
@@ -1883,10 +1869,7 @@ static void delete_creation(const double id, const int kind) {
 
 // KE.editMap(json)
 static void edit_map(const cJSON *v) {
-    if (!cJSON_IsString(v)) {
-        io_po(NULL, "Map not found", NULL);
-        return;
-    }
+    if (!cJSON_IsString(v) || !v->valuestring[0]) return; // if (map): an unknown map does nothing
     cJSON *map = cJSON_Parse(v->valuestring);
     char *text = NULL;
     if (map) {
@@ -1916,11 +1899,16 @@ static void on_social(void *user, const cJSON *frame) {
     const cJSON *a1 = cJSON_GetArrayItem(frame, 1);
     const char *text = cJSON_IsString(a1) ? a1->valuestring : "";
     if (!strcmp(l, "pubMR")) {
-        // publishMapResp: kn_brain answers "Map Published!" / "Map Updated!" (the thumbnail came inline)
+        // publishMapResp({fileId, srv}, updateCount, name): the thumbnail's upload, then mapResp
         if (!g_publish_sent) return;
         g_publish_sent = 0;
         wait_done();
-        map_resp(strstr(text, "Updated") ? "Game Updated!" : "Game Uploaded!", g_pub_name);
+        publish_map_resp(a1, cJSON_GetArrayItem(frame, 2), cJSON_GetArrayItem(frame, 3));
+    } else if (!strcmp(l, "plm")) {
+        // preloadMap(isNew, row): publishMap's "plm" answer (an unknown name: isNew)
+        if (strcmp(g_wait, "plm")) return;
+        wait_done();
+        preload_map(ed_json_truthy(a1), cJSON_GetArrayItem(frame, 2));
     } else if (!strcmp(l, "upMp")) {
         if (cJSON_GetArraySize(frame) > 2) return; // mod uploads: uploadResp(e, 1)
         // v10's uploadResp for every upMp, ulb's included (see the notes): #gameUpResp when the popup has it
@@ -1937,10 +1925,14 @@ static void on_social(void *user, const cJSON *frame) {
         wait_done();
         edit_map(a1);
     } else if (!strcmp(l, "mfr")) {
+        // mapFundsRes(funds): KE.account.funds = funds, then SUCCESS; null: Error (editor-10.0.7.js:20868-20875)
         if (strcmp(g_wait, "mfr")) return;
         wait_done();
         if (!a1 || cJSON_IsNull(a1)) io_po("Error", NULL, NULL);
-        else io_po("SUCCESS", NULL, NULL);
+        else {
+            if (cJSON_IsNumber(a1)) account_set_funds(a1->valuedouble);
+            io_po("SUCCESS", NULL, NULL);
+        }
     } else if (!strcmp(l, "po")) {
         // io_po(type, err, msg): delC's "Deleted", or a request's error
         if (!g_wait[0]) return;
@@ -1974,7 +1966,7 @@ static void auto_publish(void) {
     if (g_auto == 1 && account() && brain_ok()) {
         g_auto = 2;
         ed_net_publish();
-    } else if (g_auto == 2 && html_dom_by_id("gameCategory2") && !g_pub_state) {
+    } else if (g_auto == 2 && html_dom_by_id("gameCategory2") && !g_wait[0]) {
         char v[8];
         snprintf(v, sizeof(v), "%d", g_auto_cat);
         html_dom_set_value(html_dom_by_id("gameCategory2"), v);
@@ -1990,13 +1982,6 @@ static void auto_publish(void) {
 void ed_net_frame(void) {
     // editor.c page_tick: right after the 3D view and its overlays were drawn
     if (g_auto) auto_publish();
-    if (g_wait[0] && g_ed.now > g_wait_until) wait_failed("No reply from the server");
-    if (!g_capture_pending) return;
-    g_capture_pending = 0;
-    free(g_thumb);
-    g_thumb = capture_view(fmin(thumb_limit_kb(), BRAIN_THUMB_MAX * 0.75 / 1000));
-    if (g_thumb) fprintf(stderr, "[editor] publish thumbnail %.1f kB\n", thumb_kb(g_thumb));
-    preload_ready();
 }
 
 // ---------------------------------------------------------------------------
@@ -2080,6 +2065,9 @@ static int h_net(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
         snprintf(snd, sizeof(snd), "asset:%d", (int) arg_num(a, n, 0));
         audio_stop_all();
         audio_play(snd, 1, 0, 1);
+    } else if (!strcmp(name, "SOUND.play")) {
+        // the popups' hover ticks: SOUND.play("tick_0", 0.1) (openEdit / deleteCreationConf, editor-10.0.7.js:13663-13673)
+        audio_play(arg_str(a, n, 0, s1, sizeof(s1)), (float) arg_num(a, n, 1), 0, 1);
     } else if (!strcmp(name, "copyAssetID")) {
         html_clipboard_write(arg_str(a, n, 0, s1, sizeof(s1)));
     } else if (!strcmp(name, "deleteCreationConf")) {
@@ -2151,6 +2139,7 @@ int ed_net_script(const char *cmd, const char *arg) {
     else if (!strcmp(p[0], "asset-type") && p[1]) update_asset_type(atoi(p[1]));
     else if (!strcmp(p[0], "upload-asset")) upload_asset();
     else if (!strcmp(p[0], "asset-name") && p[1]) html_dom_set_value(html_dom_by_id("gameNameNew"), p[1]);
+    else if (!strcmp(p[0], "check") && p[1]) html_dom_set_checked(html_dom_by_id(p[1]), !p[2] || atoi(p[2])); // a popup's switch
     else if (!strcmp(p[0], "file") && p[1] && p[2]) {
         // the OS file picker's answer for selectFile(<input id>) (p[2] holds the rest: a path may have ':')
         if (p[3]) p[3][-1] = ':';
@@ -2173,8 +2162,8 @@ int ed_net_script(const char *cmd, const char *arg) {
         snprintf(g_fake_account.name, sizeof(g_fake_account.name), "visuser");
         g_fake_account.id = 1;
         g_fake = 1;
-        char *thumb = g_thumb, *map = g_pub_map;
-        g_thumb = g_pub_map = NULL;
+        char *map = g_pub_map;
+        g_pub_map = NULL;
         if (!strcmp(p[1], "publish-game")) publish_game_popup(1, NULL);
         else if (!strcmp(p[1], "update-game")) {
             cJSON *row = cJSON_Parse("{\"map_id\":7,\"map_name\":\"VisMap\",\"map_description\":\"about\",\"map_updatecounter\":1,\"ca\":2,\"mob\":1}");
@@ -2189,7 +2178,6 @@ int ed_net_script(const char *cmd, const char *arg) {
         } else if (!strcmp(p[1], "edit-map")) open_edit("VisMap", 7, 1234);
         else if (!strcmp(p[1], "map-resp")) map_resp("Game Uploaded!", "VisMap");
         else if (!strcmp(p[1], "delete-map")) delete_creation_conf(7, 0);
-        g_thumb = thumb;
         g_pub_map = map;
         g_fake = 0;
     } else if (!strcmp(p[0], "uv") && p[1]) {
@@ -2232,16 +2220,9 @@ void ed_net_reset(void) {
         g_win[w].from[0] = 0;
         g_win[w].gen++;
     }
-    free(g_thumb);
-    g_thumb = NULL;
     free(g_pub_map);
     g_pub_map = NULL;
-    cJSON_Delete(g_pub_row);
-    g_pub_row = NULL;
     g_pub_gen++;
-    g_pub_state = 0;
-    g_pub_lookup = 0;
-    g_capture_pending = 0;
     g_publish_sent = 0;
     g_auto = 0;
     files_reset();
@@ -2254,7 +2235,7 @@ void ed_net_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
         {"windows.1.switchTab", h_net}, {"windows.4.switchTab", h_net}, {"windows.6.switchTab", h_net}, {"windows.8.switchTab", h_net},
         {"windows.1.updateSort", h_net}, {"windows.6.updateSort", h_net},
         {"windows.1.searchAssets", h_net}, {"windows.4.searchMods", h_net}, {"windows.6.searchAssets", h_net}, {"windows.8.searchAssets", h_net},
-        {"KE.selectAsset", h_net}, {"KE.selectMod", h_net}, {"testSound", h_net}, {"copyAssetID", h_net},
+        {"KE.selectAsset", h_net}, {"KE.selectMod", h_net}, {"testSound", h_net}, {"SOUND.play", h_net}, {"copyAssetID", h_net},
         {"deleteCreationConf", h_net}, {"deleteCreation", h_net}, {"openEdit", h_net}, {"loadMap", h_net}, {"calcMapFee", h_net},
         {"chngMapFunds", h_net}, {"updateMapLB", h_net}, {"KE.publishAssetPopup", h_net}, {"KE.updateAssetType", h_net},
         {"KE.uploadAsset", h_net}, {"KE.uploadGame", h_net}, {"KE.toggleAdvancedTexOptions", h_net}, {"selectFile", h_net}, {"shareMapLink", h_net},

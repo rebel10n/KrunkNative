@@ -12,9 +12,12 @@ tools/editor/v7ref.js) and compares it with doc/ref/krunker-v7.1.4/editor/window
 The popups are opened with the editor script's net:popup:<name> (a stand-in free account, like the
 captures' faked KE.account) and dumped with dump:popup.
 
-Documented differences (editor_net.c's header): v7's capture has no API, so its fetch never answers
-and the list shows "Loading..." forever; the native list shows the window's empty text when there
-is no brain. An empty text / number field dumps as `null` (no value attribute) or empty: the
+Without a brain the lists match the capture line for line: v7's capture has no API, so its fetch never
+answers and the list shows "Loading..." forever, and v10.0.7's windows leave "Loading..." when the
+fetch fails (their callbacks ignore a request without data, editor-10.0.7.js:13605-13631), as the native
+lists now do. The publish asset popups carry v10.0.7's "Advanced: per-map UV channel" switch and its ten
+channel rows (editor-10.0.7.js:20612-20615), which the v7.1.4 capture predates: they are checked by v10's
+names and left out of the comparison. Documented difference (editor_net.c's header): an empty text / number field dumps as `null` (no value attribute) or empty: the
 native engine gives a laid-out field an empty value attribute, Chromium does not; both count as
 empty. tools/editor/
 publish_e2e.py checks the same windows and popups with a kn_brain.
@@ -27,7 +30,7 @@ import subprocess
 import sys
 import tempfile
 
-WINDOWS = {2: "No Assets found", 5: "No Mods found", 7: "No Textures found", 9: "No Sounds found", 14: "No Games found!"}
+WINDOWS = (2, 5, 7, 9, 14)
 POPUPS = ("publish-game", "update-game", "publish-asset", "publish-asset-sound", "edit-map", "map-resp", "delete-map")
 
 
@@ -60,7 +63,7 @@ def main():
         print("client_bin exited with %d (log: %s)" % (r.returncode, os.path.join(out, "client.log")))
         return 1
     failed = same = 0
-    for n, none in WINDOWS.items():
+    for n in WINDOWS:
         exp = open(os.path.join(ref, "window%d.dump.txt" % n)).read().splitlines()
         try:
             got = open(os.path.join(out, "window%d.txt" % n)).read().splitlines()
@@ -68,13 +71,11 @@ def main():
             got = None
         if got == exp:
             same += 1
-        documented = [("X " + none) if l == "X Loading..." else l for l in exp]
-        if got == documented:
             print("ok   window %d" % n)
         else:
             failed += 1
             print("FAIL window %d (diff %s %s)" % (n, os.path.join(ref, "window%d.dump.txt" % n), os.path.join(out, "window%d.txt" % n)))
-    print("windows: %d/%d identical to v7.1.4, %d/%d with the documented difference" % (same, len(WINDOWS), len(WINDOWS) - failed, len(WINDOWS)))
+    print("windows: %d/%d identical to v7.1.4" % (same, len(WINDOWS)))
     psame = pfail = 0
     for n in POPUPS:
         theirs = os.path.join(ref, "net", n + ".dump.txt")
@@ -87,6 +88,16 @@ def main():
             psame += 1
         def empty_null(lines):
             return [re.sub(r"^(I (text|number)\(.*\))=null$", r"\1=", l) for l in lines]
+        if got is not None and n.startswith("publish-asset"):
+            uv = ["X Advanced: per-map UV channel", "I switch=0"]
+            for slot in ("Diffuse", "Emissive", "Normal", "Specular", "Alpha", "Displacement", "Roughness", "Metalness", "Bump", "Light"):
+                uv += ["X %s UV Channel" % slot, "I number()=0"]
+            at = next((i for i in range(len(got)) if got[i:i + len(uv)] == uv), -1)
+            if at < 0:
+                print("FAIL popup %s: v10's per-map UV channel rows missing" % n)
+                pfail += 1
+                continue
+            got = got[:at] + got[at + len(uv):]
         if got == exp or (got is not None and empty_null(got) == empty_null(exp)):
             print("ok   popup %s" % n)
         else:

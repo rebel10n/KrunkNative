@@ -22,6 +22,8 @@ the stderr log is read. Checks, one per v10 behaviour:
   test_publishing_guide    Publishing Guide (window 11): the five v10 steps.
   test_publish_asset_uv    Publish > Asset: "Advanced: per-map UV channel" and its ten 0..7 channel rows; the
                            uploadA uvc is {slot: channel} for the channels 1..7, null when the box is off.
+  test_publish_file_sizes  updateFile: the model's size in KB outside #gameSize (rounded to 2 places); the game
+                           thumbnail's kB, unchecked.
   test_teleport_popup      Teleport (explore button): X / Y / Z, Teleport and Reset.
 
 Exit status 0 = all passed. Some checks need v10's text in ui/editor.html's windows; no account, no brain.
@@ -190,6 +192,24 @@ def test_publish_asset_uv(c):
     check("[editor] uvc null" in log2, "uploadA's uvc with the box off must be null")
     log3, _ = run_editor(c, "uv-range", "net:popup:publish-asset;wait:0.5;net:uv:on;net:uv:0:0;net:uv:1:8;net:uv:2:7;net:uvc")
     check('[editor] uvc {"normal":7}' in log3, "channels outside 1..7 must not be sent: %s" % log3[-300:])
+
+
+@test
+def test_publish_file_sizes(c):
+    # updateFile(id, mb, limit) (editor-10.0.7.js:13925-13955): the model's field passes neither, so its size shows in KB
+    # without a limit and stays out of #gameSize, the MB fields' sum rounded to 2 places; the game popup's thumbnail
+    # shows its kB (no check of the file before the upload: the server checks it)
+    png = os.path.join(ROOT, "ui", "img", "noimg.png")  # 23025 bytes
+    text, _ = dump(c, "sizes-model", "popup", "net:popup:publish-asset;wait:0.5;net:file:gameModel:%s" % png)
+    lines = text.splitlines()
+    check("X 23.025" in lines and "X 0 / 100" in lines, "model: 23.025 KB, #gameSize still 0: %s" % text[-900:])
+    i = lines.index("X 23.025") if "X 23.025" in lines else -1
+    check(i >= 0 and lines[i + 1] == "X KB", "the model's size is in KB without a limit: %s" % lines[i:i + 2])
+    text, _ = dump(c, "sizes-diffuse", "popup", "net:popup:publish-asset;wait:0.5;net:file:gameModel:%s;net:file:gameDiffuse:%s" % (png, png))
+    check("X 0.02 / 100" in text.splitlines(), "#gameSize: the diffuse map's 0.023025 MB rounded to 2 places, the model left out: %s" % text[-900:])
+    text, log = dump(c, "sizes-thumb", "popup", "net:popup:publish-game;wait:0.5;net:file:gameThumbnail:%s" % png)
+    check("X 23.025 / 250" in text.splitlines(), "the game thumbnail's size: %s" % text[:400])
+    check("Invalid Thumbnail" not in text and "too large" not in text, "updateFile checks nothing: %s" % text[:400])
 
 
 @test
