@@ -633,7 +633,11 @@ static void menu_apply_chrome(void) {
         html_dom_set_class(base, "onSpect", spectate_active() && !on);
     }
     set_display("gameNameHolder", chrome ? "" : "none");
-    set_display("spectButton", chrome ? "" : "none");
+    // `spectButton.display = showSpect && on ? null : none` (deob-10.0.7.js:163418): showSpect is the game's
+    // allowSpect (setShowSpect, :226419), true until a game is in
+    const Client *client = g_ui.client;
+    const int allow_spect = !client || !client->game.ready || client->game.config.allow_spectate;
+    set_display("spectButton", chrome && allow_spect ? "" : "none");
 }
 
 void menu_apply_open(const int open) {
