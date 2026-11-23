@@ -15,10 +15,10 @@
       ],
       "ref_offset": [
         0,
-        18
+        17
       ],
       "kind": "text",
-      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button, which v10 lacks). KrunkNative's window is 33.6 px taller (the krunk.io / krunker.io tab strip, 732c9bfe), so, centred, it starts 16.8 px higher: the header text lands 18 px above v10's"
+      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button, which v10 lacks). KrunkNative's window is 33.6 px taller (the krunk.io / krunker.io tab strip, 732c9bfe), so, centred, it starts 16.8 px higher: the header lands 17 px above v10's (whole CSS px edges, 2026-11-23: 16.79 px)"
     },
     {
       "name": "top-groups",
@@ -30,7 +30,7 @@
       ],
       "ref_offset": [
         0,
-        -16
+        -17
       ],
       "kind": "text",
       "note": "Official Customs and Custom Games: v10's headers (name, Quick Join, N online). The rect starts below the tab strip (it ends at 240 px; the reference has the window background there): until 2026-11-23 it began at 227 px and compared the strip's bottom with v10's header (15.4 %)"
@@ -45,10 +45,10 @@
       ],
       "ref_offset": [
         0,
-        -16
+        -17
       ],
       "kind": "text",
-      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 16 px higher here: KrunkNative's tab strip comes before the groups, 30 px above the first one as in v10's tabbed windows"
+      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 17 px higher here (16.79 px: 29 CSS px at 0.579): KrunkNative's tab strip comes before the groups, 30 px above the first one as in v10's tabbed windows"
     },
     {
       "name": "footer",
@@ -60,7 +60,7 @@
       ],
       "ref_offset": [
         0,
-        -16
+        -17
       ],
       "kind": "text",
       "note": "61 In Game (krunker.io's totalPlayerCount): the In Game count only. KrunkNative leaves a count it has not read blank (3cec1138: the scenario reads no editor / social count), where the v10 capture shows 0 in Editor, 0 on Social"

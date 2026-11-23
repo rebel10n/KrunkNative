@@ -49,7 +49,8 @@ LLVM 19.1.7) on 2026-11-22, solid fills and text are pixel-identical to the desk
 e.g. `game-updating` credit: 124 pixels at fuzz 6, none at 8). The likeliest cause is the llvmpipe
 version (the desktop's was not recorded). The structural failures of that run were root-caused on
 2026-11-23 (see "Failing-region triage (2026-11-23)" below); after those fixes the devbox, run as four
-shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run).
+shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run),
+and 787 / 64 / 91 after the translated-window snapping fix.
 Compare a run on another machine with this baseline, not with zero failures, before treating a
 colour-only failure as a regression.
 
@@ -427,6 +428,7 @@ pixel follows an intended change; pixels that differed for any other reason keep
 | `kn-om-*` (10), `kn-om-tools-short` | 2026-10-15 (uidiff-red) | 1f32a8bc made the window a flex column and 422e6a02 wraps tile, tool and gun names; krunknative.css `.knOmMain` then lets the whole Tools pane set the row's height (a 3-tile search showed one tool). Only the window's box (x 290-990, y 140-580) is new; the chat behind it keeps the old pixels. Region rects follow the new boxes (`KRUNKNATIVE_SCENARIO_DUMP='#menuWindow'`). `kn-om-weapons` / `kn-om-search` are rendered with engine-replaced-pct (a percentage-width `<img>` adds only its border and padding to min-content, as in Chrome), which narrows the weapon icons. `kn-om-tools-short` is now 1920x600 with UI Scaling off (with scaling on the pane always fits) and has regions. |
 | `kn-ranked-sort` | 2026-11-23 | The baseline (a956c0fc3, 2026-10-15) predates 2eef54563, which made the ranked leaderboard sort descending as v10 does: `sortColumn` starts at score / ascending and is toggled once on open (`deob-10.0.7.js:110388-110394`, 110414), so the header shows U+2193 (110432; v10.0.2 `game.js` 108074 / 108099 / 108115 is the same). Only the arrow and the row order changed. |
 | `kn-servers-official-mixed` | 2026-11-23 | The empty `#kioStatus` line no longer collapses the gap under the tab strip to 22 px (see the 2026-11-23 triage); only the lobby list moved, 8 CSS px down. |
+| `game-updating`, `ingame-playerlist-spectate-centred`, `kn-end-share-pop`, `kn-image-collection`, `kn-image-collection-new`, `kn-lb-grid`, `kn-om-*` (10), `kn-ranked-error`, `kn-ranked-found`, `kn-ranked-sort`, `kn-rent-owned`, `kn-rent-server`, `kn-servers-official-error`, `kn-servers-official-mixed`, `kn-store-kio-eterno`, `kn-store-kio-ranked`, `kn-tip-item`, `kn-turf-boards`, `kn-turf-howto`, `lost-connection`, `lost-connection-inactive`, `v10-market/{browse,create,detail,sales,trading}`, `v10-wallet/skins` | 2026-11-23 | Translated windows snap in their parent's space (sub-pixel placement, see the 2026-11-23 triage). Only the failing regions were touched, and in them only the pixels that the paint change moved: the render of the same tree without it (base) against the render with it; every other pixel keeps the old reference (several have menu backgrounds that changed since, e.g. the market's Daily Spin row). |
 | `v10-market/browse`, `v10-market/inventory` | 2026-10-15 (uidiff-red) | the `.market-grid` box only: 4260815e (`all: unset` drops the Buy button's UA border) and 1657aa83 (`aspect-ratio: 1` on `.market-card-shell`), bisected. The left strip (the v10 menu column behind the popup, ~0.37 %) stays as it was in all eleven market baselines. |
 
 ### Paint pages (`make uidiff-paint`)
@@ -555,14 +557,40 @@ The structural (not fuzz-only) failures of the 2026-11-22 devbox run. Before -> 
   code passed at 2.4 % on the desktop (4b03e2be). The difference is KN's GL image sampling on this
   llvmpipe.
 
-**Still open**
-- **Server browser sub-pixel placement** (`kn-servers-official-open` new-york-header 2.92 -> 5.04 %,
-  other-groups 2.21 -> 3.21 %, both now failing; `kn-servers-carousel` and the open footer / header were
-  failing before): KN's window is 33.6 device px taller than v10's (the tab strip), so its lobby list sits
-  at a different fractional device-px phase and no integer `ref_offset` lines the anti-aliased text up.
-  The 8 CSS px (4.8 device px) gap fix moved the phase: the header moves by exactly 2 px (0.000 % at
-  dy +2 against the old render) but the rows by about 2.6 px (1.39 % at the best integer shift), and
-  the best integer offsets give 3.9 % for new-york-header. Even with v10-identical markup (no tab strip)
-  KN paints the translated `#menuWindow` 0.28 px higher (top edge 175.02 vs Chrome's 175.30) and the
-  rows 0.45 px higher (239.84 vs 240.29), which points at the translate / scroller snapping in
-  `paint.c` (`scroller_layer_snap`, `snap_rect`) and is not fixed here.
+**Sub-pixel placement of translated windows** (fixed later on 2026-11-23). With v10-identical
+markup (the tab strip and the status line hidden) KN painted the Servers window's sticky header
+0.28 device px higher than Chrome (top edge 175.02 vs 175.30) and its rows 0.45 px higher (a group's
+4 px top border at 239.84 vs 240.29). Two departures from Blink in `paint.c`, both measured there:
+- **A 2D translation kept its own snapping space.** `#menuWindow` is `top: 50%` (layout top 621.55 in
+  `#uiBase`, scale 0.579) with `translate(-50%, -50%)`. KN snapped the window's decorations from its
+  own origin (621.55 - 319); Blink keeps a translated box's sub-pixel paint offset (subpixel
+  accumulation, dropped only for non-translation transforms), so its boxes snap in the parent's space
+  at round(621.55 + y) and the translation moves them by its exact amount: (622 - 319 + 112) * 0.579 =
+  240.29, the measured row. `box_own_snap_space`: only composited boxes and non-translation transforms
+  start their own space. `scroller_layer_snap` takes T from the same snapped origin, which is what keeps
+  the scrolled windows (settings) right.
+- **A sticky box layerized a scroller without overflow.** The rule came from v7's retired `win-servers`
+  capture; v10's Servers window (638 of a 1013 px max height) does not overflow, and Chrome does not
+  snap its contents to whole device px (that snap put the rows at 239.84). A scroller is snapped only
+  when it really overflows (the hub's `#modsHolder` case stays).
+
+With both, the v10-markup renders match the references almost exactly at offset 0
+(`kn-servers-official` top-groups 6.77 -> 0.17 %, region-groups 6.86 -> 0.18 %; `-open`
+new-york-header 2.76 -> 0.25 %, new-york-rows 2.96 -> 0.05 %; carousel top-groups 3.04 -> 0.11 %).
+On the real markup the full run goes from 763 / 88 / 91 to 787 / 64 / 91 (passed / failed / skipped),
+no region from pass to fail. Real-capture regions that now pass: all of `kn-servers-official-open`, the
+carousel's header / carousel / names / footer, the customize toolbars (3.08 -> 0.39 %), `rewards-bp-*`
+bp-buttons (8.74 -> 0.00 %), `settings-general` / `settings-search` preset-buttons (16.8 -> 11.4 %),
+`seq-lost-connection` box (3.62 -> 0.70 %), `popup-kid`, `rewards-signup`, `store-eterno`,
+`social-feed`, `menu-host-type` community-card. `kn-lost-connection-official`'s id-line and
+extensions-hint had a `ref_offset` of +1 that only made up for the old placement: now 0.000 % at 0.
+The `kn-servers-official` offsets are 17 / -17 (16.79 px: the window is 58 CSS px taller, centred).
+36 KN-own baselines that encoded the old placement were refreshed (table above).
+
+**Still open**: `kn-servers-carousel` top-groups 4.23 % and region-groups 3.18 % (max 3). With the tab
+strip, KN's carousel window is 78 CSS px taller than v10's (48 px strip + 30 px margin, no group margin
+to collapse with), so, centred, its header sits 39 CSS px = 22.58 device px higher and the list 22.58
+px lower: the best whole-pixel offset (23) leaves 0.42 px. Comparing with the reference resampled at
+-22.58 / -22.75 px gives 2.38 / 2.32 % (top-groups) and 1.65 / 1.29 % (region-groups), and the
+v10-markup render passes at offset 0 (0.11 / 0.18 %): what is left is the KN-only strip's height, not
+the engine.

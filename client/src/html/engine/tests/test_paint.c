@@ -1172,6 +1172,53 @@ static void test_composited_origin_snap(void)
     if (found != 1) dump(&g_dl);
 }
 
+static void test_translate_keeps_parent_snap(void)
+{
+    printf("translate(-50%%, -50%%): decorations snap in the parent's space (Blink subpixel accumulation)\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    const float k = 0.579f;                                     /* #uiBase scale */
+    Box *base = mk(root, BOX_BLOCK, 0, 0, 2210, 1243.1f);
+    st(base)->transform.count = 1;
+    st(base)->transform.ops[0].kind = CSS_TRANSFORM_SCALE;
+    st(base)->transform.ops[0].sx = st(base)->transform.ops[0].sy = k;
+    st(base)->transform_origin_x = px(0);
+    st(base)->transform_origin_y = px(0);
+    /* #menuWindow: top 50% (621.55), translate(-50%, -50%) */
+    Box *win = mk(base, BOX_BLOCK, 1105, 621.55f, 100, 638);
+    set_positioned(win, 0);
+    st(win)->transform.count = 1;
+    st(win)->transform.ops[0].kind = CSS_TRANSFORM_TRANSLATE;
+    st(win)->transform.ops[0].tx = pct(-50);
+    st(win)->transform.ops[0].ty = pct(-50);
+    st(win)->background_color = rgba(1, 2, 3, 255);
+    Box *row = mk(win, BOX_BLOCK, 1105, 621.55f + 112, 100, 4);  /* a group header's top border */
+    st(row)->background_color = rgba(4, 5, 6, 255);
+    build(root);
+    int found = 0;
+    for (int i = 0; i < g_dl.n; i++) {
+        const DlItem *it = &g_dl.items[i];
+        if (it->op != DL_RECT) continue;
+        /* in the window's frame (origin at its layout position): round(621.55 + y) - 621.55 */
+        if (it->u.rect.color.b == 3) { found++; CHECK_F(it->u.rect.rect.y, 622 - 621.55f); }
+        if (it->u.rect.color.b == 6) { found++; CHECK_F(it->u.rect.rect.y, 734 - 621.55f); CHECK_F(it->u.rect.rect.h, 4); }
+    }
+    CHECK(found == 2);
+    if (found != 2) dump(&g_dl);
+    /* a scale is not a translation: the box keeps its own snapping space */
+    st(win)->transform.ops[0].kind = CSS_TRANSFORM_SCALE;
+    st(win)->transform.ops[0].sx = st(win)->transform.ops[0].sy = 0.5f;
+    win->paint_dirty = 1;
+    build(root);
+    found = 0;
+    for (int i = 0; i < g_dl.n; i++) {
+        const DlItem *it = &g_dl.items[i];
+        if (it->op == DL_RECT && it->u.rect.color.b == 6) { found++; CHECK_F(it->u.rect.rect.y, 112); }
+    }
+    CHECK(found == 1);
+    if (found != 1) dump(&g_dl);
+}
+
 static void test_scaled_scroller_text_snap(void)
 {
     printf("scaled body: text baselines rounded in layout space, composited scroller origin snapped\n");
@@ -1241,14 +1288,11 @@ static void test_scaled_scroller_text_snap(void)
     sc->paint_dirty = 1;
     build(root);
     CHECK(find_op(&g_dl, DL_SCROLL_OFFSET, 0) < 0);
-    /* ...unless it holds a sticky box (win-servers' .serverHeader): layerized, snapped */
+    /* ...a sticky box inside or not (v10's Servers window, its .serverHeader sticky) */
     st(line)->position = CSS_POSITION_STICKY;
     sc->paint_dirty = 1;
     build(root);
-    {
-        const int so2 = find_op(&g_dl, DL_SCROLL_OFFSET, 0);
-        CHECK(so2 >= 0 && fabsf(g_dl.items[so2].u.scroll.dy - (roundf(80 * k) - 80 * k) / k) < 1e-3f);
-    }
+    CHECK(find_op(&g_dl, DL_SCROLL_OFFSET, 0) < 0);
     st(line)->position = CSS_POSITION_STATIC;
     /* overflow hidden is not composited either */
     sc->scroll_h = 1084;
@@ -1733,6 +1777,7 @@ int main(void)
     test_anonymous_borrowed_style();
     test_composited_origin_snap();
     test_scaled_scroller_text_snap();
+    test_translate_keeps_parent_snap();
     test_atlas_reset_while_recording();
     test_url_base_and_cutout();
     test_three_dot_ellipsis();

@@ -1700,24 +1700,6 @@ typedef struct ClipMark {
     int start, body, children;
 } ClipMark;
 
-/* A position:sticky box inside the scroller (bounded walk): Chrome layerizes
- * sticky boxes and what paints after them in the scroller, so the scroller's
- * contents are drawn snapped even without overflow (win-servers'
- * .serverHeader: rows below it 1 px off otherwise). */
-static int has_sticky_descendant(const Box *b)
-{
-    int budget = 256;
-    const Box *c = b->first_child;
-    while (c && budget-- > 0) {
-        if (c->style && c->style->position == CSS_POSITION_STICKY) return 1;
-        if (c->first_child && !box_is_scroller(c)) { c = c->first_child; continue; }
-        while (c && c != b && !c->next) c = c->parent;
-        if (!c || c == b) break;
-        c = c->next;
-    }
-    return 0;
-}
-
 /* Chrome composites a scroller with scrollable overflow into its own cc
  * layer, rastered in its own space and drawn at a whole device pixel: its
  * contents move by round(T) - T, T = the padding-box origin in device px.
@@ -1733,11 +1715,18 @@ static void scroller_layer_snap(const Painter *p, const Box *b, float *cx, float
      * horizontal extents (scroll_w > client) do not match its layering */
     const CssComputed *st = b->style;
     if (!st || (st->overflow_y != CSS_OVERFLOW_AUTO && st->overflow_y != CSS_OVERFLOW_SCROLL)) return;
-    if (b->scroll_h <= box_padding_h(b) + 0.5f && !has_sticky_descendant(b)) return;
+    /* without overflow it stays in its parent layer, a sticky box inside or not: v10's Servers window
+     * (#menuWindow.stickyHeader, its .serverHeader sticky, 638 of max 1013 px tall) paints its rows at
+     * round(L) * s, not snapped to whole device px (rows 240.29 in the v10.0.2 capture, 239.84 with the snap) */
+    if (b->scroll_h <= box_padding_h(b) + 0.5f) return;
     const Mat2D dm = mat_mul(p->dev_frame, painter_local_matrix(p));
     if (fabsf(dm.b) > 1e-6f || fabsf(dm.c) > 1e-6f || fabsf(dm.a) < 1e-6f || fabsf(dm.d) < 1e-6f) return;
     float x, y;
     pos_rel(p, b, &x, &y);
+    /* T from the box's snapped origin (its paint offset, rounded in the snapping space as its
+     * decorations are): a translated window continues its parent's space (box_own_snap_space) */
+    x = roundf(x + p->snap_ox) - p->snap_ox;
+    y = roundf(y + p->snap_oy) - p->snap_oy;
     const float tx = dm.a * (x + b->border[CSS_LEFT]) + dm.e, ty = dm.d * (y + b->border[CSS_TOP]) + dm.f;
     *cx = (roundf(tx) - tx) / dm.a;
     *cy = (roundf(ty) - ty) / dm.d;
@@ -2913,6 +2902,22 @@ static int push_pop_transform(DisplayList *out)
     return dl_push(out, &it);
 }
 
+/* A box whose contents snap in their own space, from its own origin: a composited layer, or a
+ * transform other than a 2D translation. Blink keeps a translated box's sub-pixel paint offset
+ * (PaintPropertyTreeBuilder's subpixel accumulation, dropped only when the transform is not a 2D
+ * translation): its decorations snap in the parent's space, at round(layout offset), and the
+ * translation itself (translate(-50%, -50%) of a centred window) moves them by its exact amount.
+ * v10's Servers window (layout top 621.55 in #uiBase, scale 0.579): Chrome paints its rows at
+ * (622 - 319 + 112) * 0.579 = 240.29; snapped from its own origin (621.55) they were at 240.03. */
+static int box_own_snap_space(const Box *b)
+{
+    if (box_composited(b)) return 1;
+    if (!box_has_transform(b)) return 0;
+    if (b->style->transform.has_3d) return 1;
+    const Mat2D m = paint_box_transform(b);
+    return fabsf(m.a - 1.0f) > 1e-6f || fabsf(m.d - 1.0f) > 1e-6f || fabsf(m.b) > 1e-6f || fabsf(m.c) > 1e-6f;
+}
+
 /* top: the list the top-layer box goes to (paint_build_once). It is found at any depth: an ancestor
  * that catches fixed children (transform, will-change) makes the box a child of its own context, and
  * the box must still be routed out of the page list (the console stays above the page's later layers
@@ -2945,11 +2950,11 @@ static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, f
             const Mat2D child_dev = mat_mul(c->dev_in, mat_mul(ref->local, mat_translate(rdx, rdy)));
             const int tr = rdx != 0 || rdy != 0;
             if (tr && push_translate(out, rdx, rdy) != 0) return -1;
-            /* a transformed / composited child starts a new snapping space at its
-             * own origin; otherwise it continues ours */
+            /* a child with a non-translation transform, or a composited one, starts a new snapping
+             * space at its own origin; otherwise (a 2D translation included) it continues ours */
             float cox = 0, coy = 0;
-            if (!box_has_transform(ref->box) && !box_composited(ref->box)) {
-                const int own = box_has_transform(b) || box_composited(b);
+            if (!box_own_snap_space(ref->box)) {
+                const int own = box_own_snap_space(b);
                 cox = (own ? 0 : c->snap_ox) + ref->dx - ref->layer_snap_x - ref->scroll_x;
                 coy = (own ? 0 : c->snap_oy) + ref->dy - ref->layer_snap_y - ref->scroll_y;
             }
