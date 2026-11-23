@@ -322,6 +322,22 @@ void hud_ui_end_screen_tab(const char *tab);
 // (matchRewardSummary.skins of completed challenges) and #endChals' completed challenge cards
 // (io_challengeCompleted). All reset when the end screen goes (a new game).
 void hud_ui_set_end_medals(const NetEndMedalsPacket *packet);
+// The end table's player cell (v10 showTable, endStats[1], deob-10.0.7.js:226755-226764): what a row shows of the player.
+typedef struct {
+    int flag;                       // flagIndex (NET_EXT_KN_PLAYER_RANK_FLAG), -1 none
+    double pfp_id;                  // `premiumT ? iíìííìì(accid)`: the account whose picture shows, 0 = ./img/player_pfp.png
+    const char *clan;               // " [clan]" in the link, NULL / "" none
+    int creator, premium, featured; // the verified / beenhere / check_circle icons
+    int badge;                      // badgeIndex, -1 none
+    int rank;                       // rankedRank, 0 none
+} HudEndCellInfo;
+// What `player` of the live game shows there (its PLAYER_INFO, rank / flag and badge; nothing of the others while
+// Hide player names is on).
+void hud_ui_end_cell_info(const Client *client, const Player *player, HudEndCellInfo *out);
+// The cell's markup without its <td>: the flag, the picture, the profile link (profile_name NULL: a plain span, the
+// names being hidden) with `shown` (streamer-scrambled here) in `color`, the badge icons and the rank.
+void hud_ui_end_name_cell(char *out, size_t size, size_t *len, const HudEndCellInfo *info, const char *profile_name, const char *shown,
+                          const char *color);
 void hud_ui_add_reward_skin(int skin);
 void hud_ui_end_refresh(void); // re-render the end screen tab (the Battle Pass bpData came in late)
 void hud_ui_end_results_now(const Client*); // --render-scenario endscreen.results: skip config.endAnim
@@ -484,12 +500,6 @@ typedef struct {
 void hud_ui_add_killfeed_kill(Client*, const HudFeedKill*);
 // getClanCol(clan, fallback) (deob-10.0.7.js:104139): the staff clans' gold, else fallback
 const char *hud_ui_clan_col(const char *clan, const char *fallback);
-// The end table's name cell (deob-10.0.7.js:226756-226764): the profile picture (a premium account's own), the name
-// linked to openPlayerProfile(account name) in its colour with the " [clan]" tag, then the creator / premium /
-// featured icons and the badge. player: the row's player (NULL: a player who left, a guest's row); raw: the account
-// name, shown: the name the row shows (streamer mode, Hide player names). Appends to out.
-void hud_ui_end_name_cell_html(const Player *player, const char *raw, const char *shown, const char *color, char *out,
-                               size_t size, size_t *len);
 // The local player's team as v10 keeps it (deob-10.0.7.js:225784-225787, :227301): the team the join gave us,
 // 1 while spectating with none; 0 outside team modes.
 int hud_ui_local_team(const Client*);
@@ -825,6 +835,8 @@ int social_estimate_value(int skin);             // prices.estimateValue: kn_bra
 void social_set_estimates(const cJSON *rows); // v10 getPrices -> _36377: the server's [{ski, est}] (v10_market.c)
 // the hub's pfpUploaded: account id's picture changed at ms (epoch), so its p<id>/profile.png ?v= passes the hour (avatar_ui.c)
 void social_pfp_uploaded(int id, double ms);
+// v10's player picture URL, <userAssetsHost>/p<id>/profile.png?v=<the hour> (iíìííìì, deob-10.0.7.js:24307-24312)
+void social_pfp_url(char *out, size_t n, double id);
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
 const char *ui_police_class_name(void);          // his classN: "Deputy" / "Marshal" for an officer, else "Officer"
 int  ui_police_officer(void);                    // v10 isMod || isDeputy of the K.P.D's account (an official game: its krunker.io one)

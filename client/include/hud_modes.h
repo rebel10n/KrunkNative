@@ -32,6 +32,7 @@ void hud_modes_scenario(Client*, const struct cJSON *mode_hud); // --render-scen
 const char *const *hud_modes_end_stats(const Client*);
 int  hud_modes_end_rows(int *uids, int max);
 void hud_modes_end_cell(const Player*, const char *stat, char *out, size_t size);
+#define HUD_MODES_END_TABLE_HTML 40960 // room for NET_MODE_END_MAX rows with every icon of the player cell
 int  hud_modes_end_table_html(const Client*, char *html, size_t size); // the live #endTable rows (hud_modes.c); 0 without MODE_END
 int  hud_modes_end_team_score(int team);
 int  hud_modes_end_winner_team(void); // MODE_END's winner team: 1 / 2, -1 none (a draw, FFA, a public match), 0 no MODE_END yet

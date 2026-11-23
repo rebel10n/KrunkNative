@@ -737,6 +737,8 @@ static void pfp_url(char *out, const size_t n, const double id) {
         snprintf(out, n, "%s/user-assets/p%.0f/profile.png?v=%.0f", backend_url(), id, v);
 }
 
+void social_pfp_url(char *out, const size_t n, const double id) { pfp_url(out, n, id); } // the end table's (hud_ui.c)
+
 // iíìiíïi(img, id, cond, fallback) (hub-10.0.7.js:2143-2149): the picture when cond, else the fallback, which
 // also replaces a picture that fails to load
 static void set_pfp(const HtmlElem img, const double id, const int cond, const char *fallback) {

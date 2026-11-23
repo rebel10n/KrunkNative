@@ -32,6 +32,8 @@
 // browser can screenshot the HUD without clicking Play; `?kn_hud_demo=1`
 // (KRUNKNATIVE_HUD_DEMO=1) adds kill-feed rows and hit markers on a loop.
 #include <player_accounts.h>
+#include <ranked.h> // ranked_rank_icon: the board's and the end table's rankedRank
+#include "account_flags.h" // account_flag_code: the end table's flagIndex
 #include "klog.h"
 #include <backend_ui.h> // active_account: the local player's clan in the player list
 #include <backend.h>    // backend_http_request / backend_social_send_text: the punish popup's Flag and Chat Ban
@@ -587,6 +589,7 @@ typedef struct {
     int stats[BOARD_STAT_MAX];    // one per hud_board_keys() column
     int is_you, is_ally, team;
     int badge;                    // badgeIndex, -1 none
+    int rank;                     // rankedRank (NET_EXT_KN_PLAYER_RANK_FLAG), 0 none
     const NetPlayerInfoPacket *acc;
     int hide_stats;               // another player's stats are blank (Hide player names)
     NetPlayerInfoPacket acc_buf;  // a scenario row's account (verified / premium flags), for acc
@@ -610,6 +613,12 @@ static void hud_center_board_row_html(char *out, const size_t size, size_t *len,
     char shown[PLAYER_NAME_SIZE];
     hb_append(out, size, len, "<tr><td><div class='newLeaderItem'><div class='newLeaderCounter'>%d.</div>", rank);
     hb_append_badges(out, size, len, r->acc, r->badge);
+    // `!isUsingRankedNames() && rankedRank` (deob-10.0.7.js:227637): its icon (iîíìíîì, :98188-98191) after the badges
+    if (r->rank > 0) {
+        char url[160];
+        html_dom_asset_url(ranked_rank_icon(r->rank), url, sizeof(url));
+        hb_append(out, size, len, "<div class=\"newLeaderRanked\"><img src=\"%s\" alt=\"Rank\" class=\"newLeaderRankedIcon\"></div>", url);
+    }
     hb_append(out, size, len, "<div class='newLeaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
     hb_append_escaped(out, size, len, streamer_name(r->name && r->name[0] ? r->name : "Guest", shown, sizeof(shown)));
     hb_append_clan(out, size, len, r->acc && r->acc->account_id > 0 ? r->acc->clan : NULL, "#fff");
@@ -691,10 +700,14 @@ static void hud_board_fill(const Client *client, const Player *p, const int32_t 
     r->is_ally = hud_board_ally(client, r->is_you, r->team, my_team);
     r->acc = player_accounts_get(p->uid);
     r->badge = p->cosmetics_v7.badge;
+    r->rank = player_accounts_ranked_rank(p->uid);
     r->hide_stats = player_names_extras_hidden(r->is_you); // Hide player names: no stats, badges or level of the others
-    if (r->hide_stats) {
+    // v10 isUsingRankedNames (a ranked match up to WARMUP): both boards draw no badge, rank or clan (deob-10.0.7.js:227607,
+    // :227632-227638)
+    if (r->hide_stats || game_names_masked(&client->game)) {
         r->acc = NULL;
         r->badge = -1;
+        r->rank = 0;
     }
 }
 
@@ -724,6 +737,7 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
             for (int k = 0; k < columns; k++) r->stats[k] = ROW_INT(keys[k]);
             r->team = ROW_INT("team");
             r->badge = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "badge")) ? ROW_INT("badge") : -1;
+            r->rank = ROW_INT("rankedRank") > 0 ? ROW_INT("rankedRank") : 0; // a scenario row's rankedRank ("rank" is its place)
             if (ROW_INT("verified") || ROW_INT("premium") || ROW_INT("creator")) { // a scenario row's account flags
                 r->acc_buf.account_id = 1;
                 r->acc_buf.flags = (uint8_t) ((ROW_INT("premium") ? NET_PLAYER_INFO_PREMIUM : 0) | (ROW_INT("verified") ? NET_PLAYER_INFO_VERIFIED : 0) |
@@ -731,9 +745,10 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
                 r->acc = &r->acc_buf;
             }
             r->hide_stats = player_names_extras_hidden(r->is_you); // Hide player names
-            if (r->hide_stats) {
+            if (r->hide_stats || game_names_masked(&client->game)) {
                 r->acc = NULL;
                 r->badge = -1;
+                r->rank = 0;
             }
 #undef ROW_INT
             r->is_ally = hud_board_ally(client, r->is_you, r->team, my_team);
@@ -3649,41 +3664,6 @@ static void hud_pfp_url(const int account_id, char *out, const size_t size) {
         snprintf(out, size, "%s/user-assets/p%d/profile.png?v=%.0f", backend_url(), account_id, v);
 }
 
-void hud_ui_end_name_cell_html(const Player *player, const char *raw, const char *shown, const char *color, char *out,
-                               const size_t size, size_t *len) {
-    const NetPlayerInfoPacket *acc = player ? player_accounts_get(player->uid) : NULL;
-    const int account = acc && acc->account_id > 0 && !player_names_extras_hidden(0);
-    // the flagIndex flag (:226757) and the rankedRank icon (:226763) are not in a KrunkNative player's data
-    char pfp[256] = "./img/player_pfp.png";
-    if (account && (acc->flags & NET_PLAYER_INFO_PREMIUM)) hud_pfp_url(acc->account_id, pfp, sizeof(pfp)); // premiumT
-    hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='%s'>", pfp);
-    if (player_names_hidden()) { // no profile link while names are hidden (it is the real account's)
-        hb_append(out, size, len, "<span class='endTableN' style='color:%s'>", color);
-        hb_append_escaped(out, size, len, shown ? shown : "");
-        hb_append(out, size, len, "</span>");
-        return;
-    }
-    hb_append(out, size, len, "<a class='endTableN' href='javascript:void(0)' onclick='window.openPlayerProfile(&quot;");
-    hb_append_escaped(out, size, len, raw ? raw : "");
-    hb_append(out, size, len, "&quot;)' style='color:%s'>", color);
-    hb_append_escaped(out, size, len, shown ? shown : "");
-    hb_append_clan(out, size, len, account ? acc->clan : NULL, "#fff");
-    hb_append(out, size, len, "</a>");
-    if (!player) return;
-    if (account && (acc->flags & NET_PLAYER_INFO_CREATOR))
-        hb_append(out, size, len, "<i class='material-icons' style='color:#993299;margin-top:-12px;font-size:28px;vertical-align:middle;'>verified</i>");
-    if (account && (acc->flags & NET_PLAYER_INFO_PREMIUM))
-        hb_append(out, size, len, "<i class='material-icons' style='color:#FBC02D;margin-top:-12px;font-size:28px;vertical-align:middle;'>beenhere</i>");
-    if (account && (acc->flags & NET_PLAYER_INFO_VERIFIED))
-        hb_append(out, size, len, "<i class='material-icons' style='color:#40C4FF;margin-top:-12px;font-size:28px;vertical-align:middle;'>check_circle</i>");
-    const int badge = player->cosmetics_v7.badge;
-    if (!player_names_extras_hidden(0) && badge_get(badge)) {
-        char tex[64], url[160];
-        html_dom_asset_url(badge_texture(badge, tex, sizeof(tex)), url, sizeof(url));
-        hb_append(out, size, len, "<img src='%s' style='margin-top:-12px;font-size:28px;vertical-align:middle;width:26px;margin-left:2px;'>", url);
-    }
-}
-
 // GUI.endScreen (v7 src/ui/game.js): tab ids/names in their order.
 #define END_TAB_COUNT 4
 static const char *const END_TABS[END_TAB_COUNT][2] = {{"leaderboard", "Leaderboard"}, {"performance", "Performance"}, {"medals", "Medals"}, {"rewards", "Rewards"}};
@@ -3699,15 +3679,73 @@ static const char *hud_reward_html(const int reward, char *out, const size_t siz
     return out;
 }
 
-// f1917's row of #endTable (config.endStats: name, score, kills, deaths, reward): rank, the
-// pfp + profile link (local #fff, team mate rgba(255,255,255,0.6), else COLORS.teams[1]),
+void hud_ui_end_cell_info(const Client *client, const Player *player, HudEndCellInfo *out) {
+    memset(out, 0, sizeof(*out));
+    out->flag = -1;
+    out->badge = -1;
+    if (!player || player_names_extras_hidden(client && player == client->me)) return; // Hide player names: none of the others'
+    const NetPlayerInfoPacket *acc = player_accounts_get(player->uid);
+    const int account = acc && acc->account_id > 0;
+    out->flag = player_accounts_flag(player->uid);
+    out->rank = player_accounts_ranked_rank(player->uid);
+    out->badge = player->cosmetics_v7.badge;
+    if (!account) return;
+    out->premium = (acc->flags & NET_PLAYER_INFO_PREMIUM) != 0;
+    out->creator = (acc->flags & NET_PLAYER_INFO_CREATOR) != 0;
+    out->featured = (acc->flags & NET_PLAYER_INFO_VERIFIED) != 0;
+    out->pfp_id = out->premium ? acc->account_id : 0;
+    out->clan = acc->clan;
+}
+
+void hud_ui_end_name_cell(char *out, const size_t size, size_t *len, const HudEndCellInfo *info, const char *profile_name, const char *shown,
+                          const char *color) {
+    static const HudEndCellInfo none = {.flag = -1, .badge = -1};
+    if (!info) info = &none;
+    // flagIndex > -1: "<div class='endTableFlag flag-icon flag-icon-" + flags[flagIndex][1] (deob-10.0.7.js:226756)
+    const char *code = account_flag_code(info->flag);
+    if (code) hb_append(out, size, len, "<div class='endTableFlag flag-icon flag-icon-%s'></div>", code);
+    // the picture: ./img/player_pfp.png, the account's own for premiumT (iíìííìì(accid), :226757-226759)
+    char pfp[256] = "./img/player_pfp.png";
+    if (info->pfp_id > 0) hud_pfp_url((int) info->pfp_id, pfp, sizeof(pfp));
+    hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='");
+    hb_append_escaped(out, size, len, pfp);
+    hb_append(out, size, len, "'>");
+    char scrambled[PLAYER_NAME_SIZE];
+    if (profile_name) { // `href='javascript:void(0)' onclick='window.openPlayerProfile(&quot;<ed name>&quot;)'` (:226760)
+        hb_append(out, size, len, "<a class='endTableN' href='javascript:void(0)' onclick='window.openPlayerProfile(&quot;");
+        hb_append_escaped(out, size, len, profile_name);
+        hb_append(out, size, len, "&quot;)' style='color:%s'>", color);
+    } else { // no profile link while names are hidden (it is the real account's)
+        hb_append(out, size, len, "<span class='endTableN' style='color:%s'>", color);
+    }
+    hb_append_escaped(out, size, len, streamer_name(shown ? shown : "", scrambled, sizeof(scrambled))); // streamMode ? scrambleS(alias)
+    hb_append_clan(out, size, len, info->clan, "#fff"); // the clan in getClanCol(clan, "#fff") (:226761)
+    hb_append(out, size, len, profile_name ? "</a>" : "</span>");
+    // the badges after the link (:226762)
+    if (info->creator) hb_append(out, size, len, "<i class='material-icons' style='color:#993299;margin-top:-12px;font-size:28px;vertical-align:middle;'>verified</i>");
+    if (info->premium) hb_append(out, size, len, "<i class='material-icons' style='color:#FBC02D;margin-top:-12px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+    if (info->featured) hb_append(out, size, len, "<i class='material-icons' style='color:#40C4FF;margin-top:-12px;font-size:28px;vertical-align:middle;'>check_circle</i>");
+    if (badge_get(info->badge)) {
+        char tex[64], url[160];
+        html_dom_asset_url(badge_texture(info->badge, tex, sizeof(tex)), url, sizeof(url));
+        hb_append(out, size, len, "<img src='%s' style='margin-top:-12px;font-size:28px;vertical-align:middle;width:26px;margin-left:2px;'>", url);
+    }
+    // rankedRank: its icon (iîíìíîì, :98188-98191) last (:226763)
+    if (info->rank > 0) {
+        char url[160];
+        html_dom_asset_url(ranked_rank_icon(info->rank), url, sizeof(url));
+        hb_append(out, size, len, "<div class=\"endTableRanked\"><img src=\"%s\" alt=\"Rank\" class=\"endTableRankedIcon\"></div>", url);
+    }
+}
+
+// f1917's row of #endTable (config.endStats: name, score, kills, deaths, reward): rank, the player cell
+// (hud_ui_end_name_cell: local #fff, team mate rgba(255,255,255,0.6), else COLORS.teams[1]),
 // the stats and the actions cell (end_share.c: your share button, another account's report button; none for a guest).
-static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const Player *player,
-                             const char *raw, const char *name, const char *color, const int score, const int kills,
-                             const int deaths, const int reward, const int blank, const char *actions) {
-    char shown[PLAYER_NAME_SIZE];
+static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *raw,
+                             const char *name, const char *color, const int score, const int kills, const int deaths, const int reward,
+                             const int blank, const char *actions, const HudEndCellInfo *info) {
     hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td style='position: relative;'>", last ? "border-bottom:none" : "", rank);
-    hud_ui_end_name_cell_html(player, raw, streamer_name(name, shown, sizeof(shown)), color, out, size, len); // streamMode ? scrambleS(alias)
+    hud_ui_end_name_cell(out, size, len, info, player_names_hidden() ? NULL : raw, name, color);
     char cell[96], stat[3][16]; // blank: another player's stats are not shown (Hide player names)
     const char *reward_html = blank ? "" : hud_reward_html(reward, cell, sizeof(cell));
     for (int k = 0; k < 3; k++) {
@@ -3737,8 +3775,21 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
         index++;
         char actions[512];
         end_share_actions_html(actions, sizeof actions, is_you, ROW_INT("level") > 0, game_config_is_custom(&client->game), name);
-        hud_end_row_html(out, size, len, index, index >= count, NULL, name, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
-                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you), actions);
+        // a scenario row's player: flag, rank, clan, badge and the account flags (verified / premium / creator)
+        HudEndCellInfo info = {.flag = -1, .badge = -1};
+        if (!player_names_extras_hidden(is_you)) {
+            const cJSON *clan = cJSON_GetObjectItemCaseSensitive(row, "clan");
+            info.flag = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "flagIndex")) ? ROW_INT("flagIndex") : -1;
+            info.rank = ROW_INT("rankedRank") > 0 ? ROW_INT("rankedRank") : 0;
+            info.badge = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "badge")) ? ROW_INT("badge") : -1;
+            info.featured = ROW_INT("verified") != 0;
+            info.premium = ROW_INT("premium") != 0;
+            info.creator = ROW_INT("creator") != 0;
+            info.clan = cJSON_IsString(clan) ? clan->valuestring : NULL;
+        }
+        hud_end_row_html(out, size, len, index, index >= count, name, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
+                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you), actions,
+                         &info);
 #undef ROW_INT
     }
     return count;
@@ -3749,8 +3800,8 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
 static void hud_end_leaderboard_html(const Client *client, char *out, const size_t size, size_t *len) {
     // The live table: the mode's endStats columns, the same rows the end screen writes into #endTable
     // (hud_modes_end_screen). Without the mode's end packet the default columns below.
-    char *live = malloc(16384);
-    if (live && hud_modes_end_table_html(client, live, 16384)) {
+    char *live = malloc(HUD_MODES_END_TABLE_HTML);
+    if (live && hud_modes_end_table_html(client, live, HUD_MODES_END_TABLE_HTML)) {
         hb_append(out, size, len, "<table id=\"endTable\">%s</table>", live);
         free(live);
         return;
@@ -3780,8 +3831,10 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
         const NetPlayerInfoPacket *acc = player_accounts_get(p->uid);
         end_share_actions_html(actions, sizeof actions, p == client->me, acc && acc->level > 0 && !player_names_extras_hidden(0),
                                game_config_is_custom(&client->game), hud_raw_player_name(client, p)); // the account name, not a shown alias
-        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, p, hud_raw_player_name(client, p), shown, color, p->score, (int) p->kills,
-                         (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me), actions);
+        HudEndCellInfo info;
+        hud_ui_end_cell_info(client, p, &info);
+        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_raw_player_name(client, p), shown, color, p->score, (int) p->kills,
+                         (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me), actions, &info);
     }
     hb_append(out, size, len, "</table>");
 }
@@ -4038,9 +4091,10 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
 }
 
 static void hud_end_card_render(const Client *client) {
-    char *html = malloc(32768);
+    enum { END_CARD_HTML = 65536 }; // the leaderboard tab's table (END_TABLE_HTML) and the card around it
+    char *html = malloc(END_CARD_HTML);
     if (!html) return;
-    hud_end_card_html(client, html, 32768);
+    hud_end_card_html(client, html, END_CARD_HTML);
     const HtmlElem view = html_dom_by_id("endTabbedView");
     if (view) html_dom_set_html(view, html);
     hud_endscreen_v10_shown(); // v10 show(): the rank, earnings, raid promo and Collect Rewards mount

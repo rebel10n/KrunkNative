@@ -851,7 +851,7 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
     // v10:219638: localTeam = me.team || (spectating ? 1 : 0). A teamless (FFA) player's team is null
     // there, so `localTeam == team` is false and every other FFA row takes the enemy colour.
     const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
-    for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len + 1400 < size; r++) {
+    for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len + 2400 < size; r++) { // a row: its cells and the player cell's icons and URLs
         const NetModeEndEntry *entry = &g_modes.end.entries[r];
         const Player *player = client_find_player((Client *) client, entry->uid);
         // an official row prints its player even after it left (v10 :219871-219890: the row's own
@@ -871,19 +871,21 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
         if (left && !row) continue;
         if (left) player = &ghost;
 
-        // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode
-        char shown[PLAYER_NAME_SIZE];
+        // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode (hud_ui_end_name_cell)
         char pn[PLAYER_NAME_SIZE];
         const char *raw_name = player_names_shown(player->uid, player == client->me, player->name, pn, sizeof(pn)); // Hide player names
-        streamer_name(raw_name, shown, sizeof(shown));
         const char *color = player == client->me ? "#fff" : !left && player->team && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
 
         len += (size_t) snprintf(html + len, size - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
                                  r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
         for (int i = 1; i < stat_count; i++) {
-            if (!strcmp(stats[i], "name")) { // the flag, picture, profile link, clan and badges (deob-10.0.7.js:226756-226764)
+            if (!strcmp(stats[i], "name")) {
+                // the player cell (deob-10.0.7.js:226755-226764): flag, picture, link, clan, badges, rank. No profile link while
+                // names are hidden (it is the real account's); a player who left shows none of it (`iíìíiïi && ...`)
+                HudEndCellInfo info;
+                hud_ui_end_cell_info(client, left ? NULL : player, &info);
                 len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'>");
-                hud_ui_end_name_cell_html(left ? NULL : player, player->name, shown, color, html, size, &len);
+                if (len < size) hud_ui_end_name_cell(html, size, &len, &info, player_names_hidden() ? NULL : player->name, raw_name, color);
                 len += (size_t) snprintf(html + len, size - len, "</td>");
             } else {
                 char value[64];
@@ -939,9 +941,9 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
         }
     }
 
-    char *html = malloc(16384);
+    char *html = malloc(HUD_MODES_END_TABLE_HTML);
     if (!html) return;
-    hud_modes_end_table_html(client, html, 16384);
+    hud_modes_end_table_html(client, html, HUD_MODES_END_TABLE_HTML);
     html_dom_set_html(table, html);
     free(html);
 }
