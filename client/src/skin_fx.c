@@ -1421,6 +1421,27 @@ void skin_fx_apply_wear_gltf(GltfInstance *model, const ViewerSkin *skin, const 
     }
 }
 
+int skin_fx_apply_custom_wear(Mesh *mesh, GltfInstance *model, const ViewerSkin *skin, const double wear) {
+    if (!skin || !skin->custom_wear || !skin->custom_id || wear < 0.0) return 0;
+    char key[160];
+    snprintf(key, sizeof(key), VIEWER_USER_ASSET_KEY "skins/%s/texture_w", skin->custom_id);
+    const unsigned int texture = fx_texture(key);
+    if (!texture) return 0;
+    int took = 0;
+    if (mesh && mesh->material && mesh->material->vtable == &basic_material_vtable) {
+        fx_wear_material((BasicMaterial *) mesh->material, texture, wear);
+        took = 1;
+    }
+    for (size_t i = 0; model && i < model->mesh_count; i++) {
+        Mesh *m = model->meshes[i];
+        if (m && m->material && m->material->vtable == &basic_material_vtable) {
+            fx_wear_material((BasicMaterial *) m->material, texture, wear);
+            took = 1;
+        }
+    }
+    return took;
+}
+
 void skin_fx_forget(const Mesh *mesh) {
     if (!mesh) return;
     for (int i = g_fx.count - 1; i >= 0; i--) {

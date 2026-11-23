@@ -61,6 +61,11 @@ void skin_fx_apply_wear(Mesh *mesh, const struct ViewerSkin *skin, double wear);
 void skin_fx_apply_wear_gltf(struct GltfInstance *model, const struct ViewerSkin *skin, double wear);
 // The wearMap key (a textures/ key, no extension) of a typed item, or 0 when it has none (a weapon skin, no type).
 int skin_fx_wear_key(const struct ViewerSkin *skin, char *out, size_t n);
+// A custom skin's own wear map (customTextures.wear: user-assets/skins/<_id>/texture_w, the Skin Manager's packed
+// layers): the viewer's showcase draws it at `wear` (v10.0.7's Skin Manager preview, deob-10.0.7.js:124874-124878);
+// 1 when the mesh / model took it. Loaded through load_texture each time, so a regenerated map (asset_fetch_client_put
+// reloads the cached texture in place) or one that arrives later is the one drawn.
+int skin_fx_apply_custom_wear(Mesh *mesh, struct GltfInstance *model, const struct ViewerSkin *skin, double wear);
 
 // Drop a mesh's / model's registrations: call before freeing it (mesh_fini / gltf_instance_fini).
 void skin_fx_forget(const Mesh *mesh);

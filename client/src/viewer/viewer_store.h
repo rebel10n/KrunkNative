@@ -98,6 +98,8 @@ typedef struct ViewerSkin {
     float swap_snd_vol;   // swapSndVol, 0 = absent
     const char *custom_id; // a map studio's custom skin (VIEWER_CUSTOM_SKIN_MIN and up): its _id, the user-asset
                            // folder skins/<_id>/ of its customSound / customSwapSound / customInspectSound; NULL none
+    unsigned char custom_wear; // customTextures.wear: the Skin Manager's wear map skins/<_id>/texture_w.png (the preview's
+                               // wear, viewer_scene.c; v10.0.7's game never loads it, deob-10.0.7.js:173646)
     // ---- v10.0.4 (skin_fx.c, skin_counter.c)
     const char *shader_info; // customShaderInfo as compact JSON ({part | "*": {shaderNum, shaderArgs, matArgs}}), NULL none
                              // (getMat / the per-part apply, deob-10.0.4.js:203447-203475, :204930-204986)

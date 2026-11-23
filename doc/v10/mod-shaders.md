@@ -115,7 +115,10 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
 - **Paint**: a paint's Solid Colour (`paintColor`) or its Animated Shader (`paintShaderGraph`). It is previewed on
   `paintPreviewBase`, 7805 (Weapon) or 7798 (Cosmetic).
 - **Wear**: four layers whose red channels are packed into R, G, B and A of a 1024 px `texture_w.png`, uploaded as
-  texture "wear" (`customTextures.wear`).
+  texture "wear" (`customTextures.wear`). The preview draws that map at the Wear slider's level (the showcase's
+  `skin_fx_apply_custom_wear`). v10.0.7's game never reads it: a worn item's wear map is always
+  `<types><id>_wear`, `melee/melee_<id>_wear` or `weapons/<src>[_mid]_wear` (:173647, :174103, :174185, :224631), and
+  a `customTextures` item skips wear (:173646). The game does the same here.
 - **Kounter**: `itemConfig.attach`, a type 1 stat counter. `viewer_skin_define` reads it, so Test and the preview
   draw it (skin_counter.c).
 - **Charm**: `charmM{X,Y,Z}Off` / `charmMScl` (the weapon's spot to start from) and `noCharm`. player_mesh.c
@@ -142,7 +145,8 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
     Delete and Undo; Export JSON; Templates.
   - Save checks the edited graph in `customShader.graph`.
   - The other editors: Paintable and its mask, the Wear layers packed into `texture_w.png` (its first pixel
-    checked), the preview's wear and paint query, the Kounter (`[viewer] showcase counter`), the charm placement,
+    checked) and the preview drawing it (`[viewer] showcase wear map`), the preview's wear and paint query, the
+    Kounter (`[viewer] showcase counter`), the charm placement,
     and a paint's colour and Animated Shader canvas.
 - `tools/modshader/sample_e2e.sh`: grey and invert mods (`client/tests/data/mod_shader/`) on a Sandstorm copy
   whose `modURL` points at them, headless from a pinned camera. Checks: grey frame R=G=B with the plain frame's

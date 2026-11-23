@@ -419,11 +419,16 @@ def editors(A, sid, sdir):
 
     # the preview: Wear (a wear map) and the paint select (paintable); each sets the iframe's query
     check(A.has("knSmPvWear") and A.has("knSmPvPaint"), "the preview's Wear button and paint select")
+    # Clear Preview: the item's own material again (a Shader Studio graph replaces it, wear map and all, as v10's
+    # customShaderInfo material does after loadAnimMesh's wear, deob-10.0.7.js:207980-208000)
+    A.ui("knSkins('shader','clearPreview')")
     m = A.mark()
     A.ui("knSkins('pvWear')")
     check(A.has("knSmPvWearLevel"), "Wear opens its slider")
     A.ui("knSkins('pvWearLevel','0.5')")
     check(A.wait_line("&wear=0.5", m, 5.0), "the slider's wear is the preview's (&wear=0.5)")
+    check(A.wait_line("[viewer] showcase wear map: skins/%s/texture_w at 0.5" % sid, m, 10.0),
+          "the preview draws the skin's own texture_w wear map at that level")
     A.ui("knSkins('pvPaint','7776')")
     check(A.wait_line("&paint=dc3c3c", m, 5.0), "a paint picked is the preview's (Red Paint, &paint=dc3c3c)")
     A.shot("editor-preview-controls")

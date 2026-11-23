@@ -107,6 +107,8 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++)
         if (truthy(get(j, flags[i].key))) s->flags |= flags[i].bit;
     if (present(get(j, "pat"))) s->flags |= VS_PAT;
+    const cJSON *custom_textures = get(j, "customTextures"); // {diffuse, emissive, wear} (deob-10.0.7.js:125430, :126626)
+    s->custom_wear = cJSON_IsObject(custom_textures) && truthy(get(custom_textures, "wear"));
     if (cJSON_IsNumber(tex)) s->flags |= VS_TEX_NUM;
     // store.getSpnItems: limited / blackM / opensea / limT / limG never in a plain wheel's pool; a free item gets
     // limT "Free", noSale, noSpin (:116554-116558)
