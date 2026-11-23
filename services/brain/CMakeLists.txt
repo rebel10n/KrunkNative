@@ -783,6 +783,12 @@ if (Python3_FOUND)
     add_test(NAME brain_email_prefs_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/email_prefs_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_email_prefs_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # v10's login / register modal with an email (v10_login.c, accounts.c SQL_LOGIN_EMAIL) through client_bin, the
+    # brain's /auth/login by email; the script runs from the repository root (server/tests/kn_proto.py)
+    add_test(NAME brain_v10_email_login_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/v10_email_login_e2e.py ${CMAKE_BINARY_DIR}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_email_login_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;ui;e2e")
     # v10.0.7's Premium popups (no payments on Box Office), the display name's Clear and the disconnect report (client_bin)
     add_test(NAME brain_premium_dc_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/premium_dc_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

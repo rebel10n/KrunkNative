@@ -177,6 +177,7 @@ def logout(t, label):
             f"{t + 600} nodes @{label}w5old [id=menuWindow] [id=referralHeader]\n"
             f"{t + 600} nodes @{label}w5opt [placeholder*=\"optional\"]\n"
             f"{t + 700} down ESC\n{t + 720} up ESC\n"
+            f"{t + 760} vis @{label}esc1 knV10Login\n"
             f"{t + 800} down ESC\n{t + 820} up ESC\n"
             f"{t + 1000} vis @{label} {SIGNED}\n")
 
@@ -301,6 +302,9 @@ def ui_case(brain_port, db_path):
     for out in ("out1", "out2", "out3", "out4", "out5"):
         o = vis(text, out)
         check(f"{out}: logged out", o.get("signedOutHeaderBar") == "1" and o.get("signedInHeaderBar") == "0", str(o))
+        e1 = vis(text, out + "esc1")
+        check(f"{out}: the first Escape only leaves the Email field (the modal stays), the second closes it",
+              e1.get("knV10Login") == "1" and o.get("knV10Login") == "-", "%s %s" % (e1, o))
     check('logout -> showWindow(5) as a guest: v10\'s login modal, "Enter Email", no "(optional, ...)", no v7 guest form',
           nodes(text, "out1w5") == 1 and nodes(text, "out1w5opt") == 0 and nodes(text, "out1w5old") == 0,
           "%d %d %d" % (nodes(text, "out1w5"), nodes(text, "out1w5opt"), nodes(text, "out1w5old")))

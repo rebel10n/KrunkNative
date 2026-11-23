@@ -726,14 +726,14 @@ int v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         recover();
         return 1;
     }
-    if (!strcmp(name, "knV10LoginKey")) { // the form's submit on Enter, Escape closes
+    // The form's submit on Enter. Escape is not the form's: v10.0.7's login view has no key handler (deob-10.0.7.js:
+    // 117131-117455) and its view stack closes only on an overlay click (:119429); the window's keydown takes it
+    // (:209705), as for every page field, so it goes on to the page: a focused field blurs (ui_handlers.c), and
+    // the next Escape, out of the field, closes the modal (v10_menu_login_escape) with the menu kept.
+    if (!strcmp(name, "knV10LoginKey")) {
         if (ev && html_key_is_enter(ev->key)) {
             if (L.recover) recover();
             else submit();
-            return 0;
-        }
-        if (ev && html_key_is_escape(ev->key)) {
-            close_modal();
             return 0;
         }
         return 1;
