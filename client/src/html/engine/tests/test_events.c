@@ -398,6 +398,7 @@ static const char *k_inventory[] = {
     "knV10StreamsToggle", /* KrunkNative: the Live Streams overlay toggle (1572082c) */
     "sub2FA", /* KrunkNative: v7.1.4's #twoFAPop Submit on the game page (account_ui.c; doc/v10/kn-additions.md) */
     "knPurchaseResponseHide", /* purchaseResponse.onclick, set by v10's script (deob-10.0.7.js:216333-216335; kio_checkout.c) */
+    "toggleTeam", /* the menu's #selectT: toggleTeam(checked ? 2 : 1), deob-10.0.7.js:148223 (comp_ui.c) */
 };
 
 static void test_parser_corpus(const char *repo)
@@ -423,13 +424,14 @@ static void test_parser_corpus(const char *repo)
     // 2307: + the Render tab's Disable Video Skins switch (v10.0.3, ui/windows/settings-advanced-3.html)
     // 2308: + #twoFAPop's Submit (sub2FA) on the game page (2026-11-22)
     // 2309: + #purchaseResponse's click-to-hide (knPurchaseResponseHide)
-    CHECK(total == 2309);
+    // 2310: + the menu's #selectT (toggleTeam, v10.0.7's __click, deob-10.0.7.js:148223)
+    CHECK(total == 2310);
     CHECK(failed == 0);
     printf("callees:");
     for (int i = 0; i < g_callee_n; i++) printf(" %s(%d)", g_callees[i].name, g_callees[i].count);
     printf("\n");
     const int inv_n = (int)(sizeof(k_inventory) / sizeof(k_inventory[0]));
-    CHECK(inv_n == 110);
+    CHECK(inv_n == 111);
     for (int i = 0; i < inv_n; i++) {
         int found = 0;
         for (int j = 0; j < g_callee_n; j++) if (!strcmp(g_callees[j].name, k_inventory[i])) found = 1;
