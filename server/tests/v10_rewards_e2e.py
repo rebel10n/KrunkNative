@@ -52,7 +52,7 @@ def check(name, ok, detail=""):
 
 
 def cfgdb():
-    with open("config/config.json") as f:
+    with open(os.environ.get("KN_TEST_CONFIG") or "config/config.json") as f:
         return json.load(f)["database"]
 
 
@@ -108,7 +108,8 @@ class Client:
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
         env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": xdg, "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{BRAIN_PORT}",
                     "KRUNKNATIVE_UI_CMDS": self.cmds, "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_NO_BROWSER": "1",
-                    "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                    "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
+                    "KRUNKNATIVE_ALT_KEYSTORE": "file"})  # the vault key in <config>/krunknative/alt/master.key (vault_session)
         self.proc = subprocess.Popen([os.path.join(BUILD, "client_bin"), "--offline"], env=env,
                                      stdout=open(os.path.join(WORK, self.log_name), "w"), stderr=subprocess.STDOUT)
         procs.append(self.proc)
@@ -226,15 +227,24 @@ def run():
     check("brain: 24 h of premium (premiumT ms)", prem >= 86400000, str(prem))
     check("brain: one signup_rewards row", psql(f"SELECT count(*) FROM signup_rewards WHERE account_id = {acc_id}") == "1")
 
-    # 2. the next start: logged in from the saved session, nothing granted twice
-    # the session is kept sealed in the alt vault (client/src/alt/), never as a plain krunker_token
-    token = vault_session(xdg)
-    check("the session token was saved (sealed in the alt vault, not in plain krunker_token)",
-          bool(token) and not storage(xdg, "krunker_token"))
+    # 2. the next start: logged in from the saved session, nothing granted twice.
+    # The client stores a session only for an account the Account Manager lists (account_ui.c persist_session),
+    # sealed in the alt vault (client/src/alt/), never as a plain krunker_token: the registration stored none.
+    # A session in the older builds' plain keys moves into the vault at the next start (load_session), which
+    # lists the account and resumes it, so the test hands the account a session that way.
+    check("the registration keeps no plain krunker_token and stores no session for an unlisted account",
+          not storage(xdg, "krunker_token") and not vault_session(xdg))
+    token = secrets.token_hex(16)
+    psql(f"SELECT kn_login_success({acc_id}, '127.0.0.1', 'e2e', '{token}', 3600, 'e2e', NULL)")
+    for k, v in (("krunker_username", name), ("krunker_token", token)):
+        with open(os.path.join(xdg, "krunknative", k + ".json"), "w") as f:
+            f.write(v)
     c = Client("relogin", xdg)
     time.sleep(16)
     c.shot("4-relogin")
     c.quit()
+    check("the session moved into the alt vault (sealed, the plain krunker_token gone)",
+          vault_session(xdg) == token and not storage(xdg, "krunker_token"))
     check("the next login grants nothing again (no prr)", "[rewards] register rewards" not in c.text() and inventory(acc_id) == sorted(SIGNUP_SKINS)
           and int(psql(f"SELECT player_premium FROM players WHERE player_id = {acc_id}") or 0) == prem)
 

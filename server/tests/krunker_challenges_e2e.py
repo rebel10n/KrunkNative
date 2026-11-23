@@ -9,7 +9,7 @@
       UTILS.capFirst) and no other map; no "Loading" and no error text.
   T2  official krunker.io (the krunker_account_e2e stub; its account's activeChallenges carry one map challenge
       per official map, a "Complete all" map challenge with no mp, weapon rows, a nightmare row and a ranked
-      row, each named "STUB ..."): the window lists all 46 maps, the Complete-all card, the nightmare and the
+      row, each named "STUB ..."): the window lists all 47 maps, the Complete-all card, the nightmare and the
       "Ranked Challenges" header with its card; none of the brain's seeded names appear.
   T3  official, the stub account without an activeChallenges array: the headers, no map card, and no
       "Loading" / error text.
@@ -72,7 +72,7 @@ def check(name, ok, detail=""):
 
 
 def map_catalogue():
-    """(display name, mapIndex) of the 46 official maps, in mapIndex order, from shared/src/map_catalog.c"""
+    """(display name, mapIndex) of the 47 official maps, in mapIndex order, from shared/src/map_catalog.c"""
     with open(os.path.join(ROOT, "shared", "src", "map_catalog.c")) as f:
         src = f.read()
     rows = re.findall(r'OFFICIAL(?:_PIC)?\(\s*"[^"]*",\s*"([^"]*)",\s*(\d+)', src)
@@ -452,8 +452,8 @@ def main():
     if not (os.access(CLIENT, os.X_OK) and os.access(BRAIN, os.X_OK)):
         print("krunker_challenges_e2e: no client_bin / kn_brain in %s: skipped" % BUILD)
         return 77
-    if len(MAPS) != 46:
-        print("krunker_challenges_e2e: the catalogue has %d official maps, expected 46" % len(MAPS))
+    if len(MAPS) != 47:
+        print("krunker_challenges_e2e: the catalogue has %d official maps, expected 47" % len(MAPS))
         return 77
     http_brain, = kn_proto.free_ports(1)
     brain = Brain(http_brain)
