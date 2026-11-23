@@ -187,6 +187,7 @@ void comp_ui_match_gate(Client *client) {
 
 // f1904(Game.isComp) at every round start
 void comp_ui_round(Client *client) {
+    menu_ads_apply(); // iíìíiíi at the init (deob-10.0.7.js:226471): the slots back after a comp menu hid #aHider
     set_display("mMenuHolDef", "none");
     set_display("mMenuHolComp", "none");
     set_display("vsHolder", "none");

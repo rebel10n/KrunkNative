@@ -12,7 +12,8 @@
 // (v10_gapi.c -> services/brain/studios.c), or for a krunker.io account krunker.io's own gapi (v10_gapi.c kio_gapi:
 // the GET reads only; a write is not sent and shows its failure text); the studio view's "Your Games" list is
 // _10449.players.getProfile(me).maps, as in v10. v10's _10449.skins.list() (the Skin Manager's
-// custom skins) has no KrunkNative counterpart: the "Your Skins" select stays empty.
+// custom skins: v10_skin_manager.c, services/brain/skins.c) is not read here yet: the brain takes no studio
+// skin import (studios.c), so the "Your Skins" select stays empty.
 // The Games window's My Games tab shows the pending invite count (servers_ui.c, the functions at
 // the end).
 #include <v10_studios.h>
@@ -806,8 +807,8 @@ static void skins_markup(StrBuf *sb) {
     }
     sb_append(sb, " ");
     if (!is_owner()) return;
-    // _48469: "Your Skins" lists the Skin Manager's custom skins (_10449.skins.list()), which
-    // KrunkNative does not have: only the placeholder option
+    // _48469: "Your Skins" lists the Skin Manager's custom skins (_10449.skins.list()); the brain cannot
+    // import one into a studio yet (studios.c), so only the placeholder option
     sb_append(sb, "<div class=\"sd-form svelte-a9j4oe\"><label class=\"sd-field svelte-a9j4oe\"><span class=\"sd-label svelte-a9j4oe\">");
     sb_text(sb, I18N("studios.skins.addLabel", "Your Skins"));
     sb_append(sb, "</span> <select class=\"sd-input svelte-a9j4oe\"><option value=\"\">");

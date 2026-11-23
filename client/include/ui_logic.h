@@ -121,6 +121,7 @@ int menu_open_window_id(void);                  // the window shown in #windowHo
 void menu_toggle_window(int open);               // UI.toggleWindow
 void menu_close_window(void);                    // closeWindow
 void menu_rerender_if_open(int id);              // rerenderIfOpen
+void menu_ads_apply(void);                       // the menu's ad slots at every round's init (deob-10.0.7.js:226526-226527)
 
 // ---- mods_ui.c: the Mod Manager (4), Mod Loader (18) and Upload Mod (19)
 char *mods_ui_window_gen(int id);   // NULL: not ours (or 19 signed out: the static capture)

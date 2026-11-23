@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The chat (#chatUIHolder, #chatUI) is up whenever the game is not loading, and the in-game HUD only
-in a game (client/src/ui/hud_ui.c hud_chat_wanted, hud_v10.c hud_v10_tick, hud_apply_visibility).
+"""The chat (#chatUIHolder, #chatUI) is up whenever the game is not loading (a guest's not on the menu), and the
+in-game HUD only in a game (client/src/ui/hud_ui.c hud_chat_wanted, hud_v10.c hud_v10_tick, hud_apply_visibility).
 
   python3 -I server/tests/chat_ingame_gate_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -9,7 +9,7 @@ headless client_bin runs on the v10 page. The Quick Match at launch joins the lo
 stays up with no game entered (Play is not pressed):
   1. a signed-in account: the chat is hidden while the launch's join loads (the first frame) and up
      on the lobby's idle menu from the join on, every frame after; the in-game HUD stays hidden
-  2. a guest: the same
+  2. a guest: the same join, and no chat on the menu (hideChatIfGuestUser, deob-10.0.7.js:215587)
   3. F5 from that menu: the relaunched client rejoins the lobby; its first frames (loading) have no
      chat, then the chat is up on the menu, through Play, and the game shows the chat and the HUD
   4. F5 from an offline game: the game is back, with the chat and the HUD up
@@ -253,11 +253,14 @@ def scenarios(account):
           f"{len(m)} frames")
     check_idle_menu("1", t, m)
 
-    # 2: a guest: the same lobby and menu
+    # 2: a guest: the same lobby and menu, and no chat on it (hideChatIfGuestUser, deob-10.0.7.js:215587-215589:
+    # the menu shows #chatUIHolder to an account only)
     t = client("guest-menu", menu, account=None, args=())
     m = fields(t, "m")
     check("2: the guest joined the lobby (no sign-in)", joined in t and "[account] logged in" not in t, "")
-    check_idle_menu("2", t, m)
+    check("2: a guest has no chat on the lobby's idle menu (every frame)",
+          m and all(hidden(f) for _, f in m) and not in_game(t, "m"),
+          f"{len(m)} frames, {sum(shown(f) for _, f in m)} shown, in game {in_game(t, 'm')[:1]}")
 
     # 3: F5 from the lobby's menu: the relaunch rejoins the lobby; until Play, its frames have no chat
     # the join takes 2 to 8 s of game time: F5 comes after it, Play after the rejoin's join

@@ -182,40 +182,68 @@ def catalogue_index():
     return entry.get("index") if isinstance(entry, dict) and isinstance(entry.get("index"), int) else None
 
 
+def text_error(st, body, status):
+    """a refusal the Skin Manager service throws as new Error(res.error) (deob-10.0.7.js:124374-124426): a text error"""
+    return st == status and isinstance(body, dict) and body.get("data") is None and isinstance(body.get("error"), str) and body["error"]
+
+
 def section_skins(c):
-    """rows 71-77: the Skin Manager (custom skins); KrunkNative has none, so the reads are empty and the writes refused"""
+    """rows 71-77: v10.0.7's Skin Manager, the caller's custom skins (skins.c P_CUSTOM_SKIN, 0394_custom_skins); the
+    full suite is brain_skins (skins_test.py), these are the HTTP replies the window's service reads"""
     p = c.port
     st, body = http(p, "GET", "/skins")
-    check("[71] GET /skins signed out -> 200 {skins: []} (wrapper L5161; consumer v10.js 137427 reads data.skins)",
-          is_data(st, body, {"skins": []}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[71] GET /skins signed out -> 401 UNAUTHORIZED {code, message} (the list throws res.error.message, deob-10.0.7.js:124361)",
+          st == 401 and error_code(body) == "UNAUTHORIZED" and error_message(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/skins?page=1&page_size=10", token=c.tok_a)
+    check("[71] GET /skins signed in, none yet -> 200 {skins: [], total: 0} (consumer deob-10.0.7.js:124359 returns data: {skins, total})",
+          is_data(st, body, {"skins": [], "total": 0, "page": 1, "page_size": 10}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/skins", {"skinId": None, "name": "New Skin", "type": 0, "weapon": 1, "rarity": 0, "itemConfig": {}}, token=c.tok_a)
+    skin = dig(body, "data", "skin") or {}
+    sid = skin.get("skinId")
+    check("[73] POST /skins -> 200 {skin} with its skinId (consumer deob-10.0.7.js:124385 reads data.skin)",
+          st == 200 and isinstance(sid, int) and skin.get("name") == "New Skin" and skin.get("weapon") == 1 and skin.get("itemConfig") == {},
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/skins", {"name": ""}, token=c.tok_a)
+    check("[73] POST /skins with an empty name -> 400, a text error", text_error(st, body, 400), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/skins", {"name": "x"})
+    check("[73] POST /skins signed out -> 401, a text error", text_error(st, body, 401), "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "GET", "/skins", token=c.tok_a)
-    check("[71] GET /skins signed in -> 200 {skins: []} (no custom skin records: studios.c, db_studios.c)",
-          is_data(st, body, {"skins": []}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
-    st, body = http(p, "GET", "/skins/1", token=c.tok_a)
-    check("[72] GET /skins/1 -> 404 NOT_FOUND (wrapper L5161; consumer v10.js 122021 reads data.skin)",
-          st == 404 and error_code(body) == "NOT_FOUND", "HTTP %d %s" % (st, json.dumps(body)[:160]))
-    # skins.get reads data.skin, a Skin Manager record (the list above is empty, so there are none). A store
-    # skin has an index in assets/skins.json (GET /data/skins) but is no Skin Manager record: same 404
+    check("[71] GET /skins lists it", st == 200 and [s.get("skinId") for s in dig(body, "data", "skins") or []] == [sid]
+          and dig(body, "data", "total") == 1, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/skins/%d" % sid, token=c.tok_a)
+    check("[72] GET /skins/:id -> 200 {skin} (consumer deob-10.0.7.js:124372 reads data.skin)",
+          st == 200 and (dig(body, "data", "skin") or {}).get("skinId") == sid, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/skins/%d" % sid, token=c.tok_b)
+    check("[72] GET another account's skin -> 404, a text error", text_error(st, body, 404), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    # a store skin has an index in assets/skins.json (GET /data/skins) but is no Skin Manager record
     idx = catalogue_index()
     if idx is not None:
-        st, body = http(p, "GET", "/skins/%d" % idx, token=c.tok_a)
-        check("[72] GET /skins/<index %d of assets/skins.json> -> 404 NOT_FOUND: a store skin is not a Skin Manager record (v10.js 122021 reads data.skin)" % idx,
-              st == 404 and error_code(body) == "NOT_FOUND" and not (isinstance(body, dict) and body.get("data")),
+        st, body = http(p, "GET", "/skins/%d" % (idx + 1000000), token=c.tok_b)
+        check("[72] GET /skins/<a store skin index + 1e6> -> 404: no custom skin has that id", text_error(st, body, 404),
               "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "GET", "/skins/abc", token=c.tok_a)
-    check("[72] GET /skins/abc -> 404 NOT_FOUND (no skin has that id)", st == 404 and error_code(body) == "NOT_FOUND",
+    check("[72] GET /skins/abc -> 404 (no skin has that id)", text_error(st, body, 404), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "PUT", "/skins/%d" % sid, {"name": "Renamed", "rarity": 3}, token=c.tok_a)
+    check("[74] PUT /skins/:id -> 200 {skin} (consumer deob-10.0.7.js:124398 reads data.skin)",
+          st == 200 and (dig(body, "data", "skin") or {}).get("name") == "Renamed" and (dig(body, "data", "skin") or {}).get("rarity") == 3,
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
-    for row, method, path, payload, label in (
-            (73, "POST", "/skins", {"name": "x"}, "create (consumer v10.js 122040 reads data.skin)"),
-            (74, "PUT", "/skins/1", {"name": "x"}, "update (consumer v10.js 122054 reads data.skin)"),
-            (75, "DELETE", "/skins/1", None, "delete (consumer v10.js 122067 reads data)"),
-            (76, "POST", "/skins/1/upload", {"type": "thumbnail"}, "upload (consumer v10.js 122084 reads data.asset_path)"),
-            (77, "POST", "/skins/1/duplicate", {}, "duplicate (consumer v10.js 122079 reads data.skin)")):
-        st, body = http(p, method, path, payload, token=c.tok_a)
-        # a text error: the Skin Manager service throws new Error(res.error) (deob-10.0.3.js:138943 etc.)
-        check("[%d] %s %s -> 403 refusal, a text error: %s (deob-10.0.3.js:138943, 139265)" % (row, method, path, label),
-              st == 403 and isinstance(body, dict) and body.get("data") is None and isinstance(body.get("error"), str)
-              and "skin" in body["error"].lower(), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/skins/%d/duplicate" % sid, {}, token=c.tok_a)
+    dup = (dig(body, "data", "skin") or {}).get("skinId")
+    check("[77] POST /skins/:id/duplicate -> 200 {skin} \"<name> (Copy)\" (consumer deob-10.0.7.js:124424 reads data.skin)",
+          st == 200 and isinstance(dup, int) and dup != sid and (dig(body, "data", "skin") or {}).get("name") == "Renamed (Copy)",
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/skins/%d/upload" % sid, {"type": "thumbnail"}, token=c.tok_a)
+    check("[76] POST /skins/:id/upload -> 403 refusal, a text error: Box Office has no asset store for skin files",
+          text_error(st, body, 403) and "skin" in body["error"].lower(), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "DELETE", "/skins/%d" % sid, token=c.tok_b)
+    check("[75] DELETE another account's skin -> 404", text_error(st, body, 404), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    for k in (sid, dup):
+        st, body = http(p, "DELETE", "/skins/%d" % k, token=c.tok_a)
+        check("[75] DELETE /skins/:id -> 200 {deleted, skinId} (consumer deob-10.0.7.js:124411 reads data)",
+              is_data(st, body, {"deleted": True, "skinId": k}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/skins", token=c.tok_a)
+    check("[71] GET /skins after the deletes -> {skins: [], total: 0}", st == 200 and dig(body, "data", "total") == 0,
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
 
 def section_wild(c):

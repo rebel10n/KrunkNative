@@ -29,6 +29,7 @@ set(KN_BRAIN_SOURCES
     clan_v10.c
     clan_logo.c                     # clan logos (0332_clan_logos): the settings tab's upload, its review, GET /api/clans/<id>/logo
     studios.c                       # v10 Studios: the /studios gapi routes (db_studios.c, 0330_studios)
+    skins.c                         # v10.0.7 Skin Manager: the /skins custom skins (P_CUSTOM_SKIN, 0394_custom_skins)
     game_presence.c                 # v10 presence:game (account -> its game, pushed to friends)
     node_events.c                   # v10.0.3 game-server events: Turf clan, map wheel spins, studio charges, unb / lotWin pushes
     profiles.c
@@ -691,6 +692,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/studios_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_studios PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10.0.7 Skin Manager (0394_custom_skins): the /skins routes over the social socket and HTTP (skins.c)
+    add_test(NAME brain_skins
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/skins_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_skins PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # v10.0.3 gapi over the social socket: the 45 "tunnel" routes of doc/v10/api-inventory.md, each with the reply its consumer reads
     add_test(NAME brain_gapi_tunnel
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/gapi_tunnel_test.py
@@ -711,6 +717,10 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_studios_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_studios_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_studios_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # v10.0.7's sandbox Skin Manager through a headless client_bin --sandbox (client/src/ui/v10_skin_manager.c)
+    add_test(NAME brain_v10_skin_manager_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_skin_manager_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_skin_manager_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
     # v10.0.2 Social hub on the v10 page through two headless clients (v10_social.c, social_gapi.c, social_eb.c)
     add_test(NAME brain_v10_social_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_social_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

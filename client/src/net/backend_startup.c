@@ -4,6 +4,7 @@
 #include <remote_images.h>
 #include "klog.h"
 #include <v10_social.h>
+#include <v10_skin_manager.h> // the sandbox Skin Manager: its search debounce
 #include <backend.h>
 #include "backend_internal.h" // backend_probe_tick (backend_common.c)
 #include <kn_captcha.h>        // Box Office's captcha: kn_captcha_tick
@@ -157,5 +158,6 @@ void backend_frame(Client *client) {
     v10_menu_account_tick();   // the menu header: the active account (backend_ui.h), at once after a switch
     krunker_net_tick(client); // official krunker.io games: notices, captcha
     v10_social_tick(); // the v10 page's Social hub: friends event bus, menu badge (v10_social.c)
+    v10_skin_manager_tick(); // the sandbox Skin Manager's search debounce (v10_skin_manager.c)
     strike_econ_tick(); // Krunker Strike: the signed-in account's Strike wallet / items / loadout (strike_econ.c)
 }

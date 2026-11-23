@@ -28,3 +28,24 @@ Not gated, nothing to grant (no placeholder):
 
 Not verified live: the official server's answers to the ad frames ("spinKR", "rrqdxp", "bpclmr", "vad") were not
 exercised against krunker.io; the frames and shapes are the bundle's.
+
+## Display ads on the menu (v10.0.7)
+
+v10.0.7's `window.canShowAds` is `!(isMsPwa || isSteamClient || isEpicClient || isOAuthPage)` (the live page's
+index.html), so krunker.io's page has it. At every round's init (`iíìíiíi`, deob-10.0.7.js:226522-226527) the menu
+shows `#aHider` (the bottom-centre `#aContainer`: rgba(0,0,0,.6), padding 10px, at least 765x100, the dark box under
+Now Playing in the captures, doc/ref/krunker-v10.0.2/main-menu.png) and `#topRightAdHolder` (the right panel's first
+300x250 slot, transparent while empty), both hidden for a premium account (also at a login, :216881). The competitive
+menu hides `#aHider` (:226554). The right panel's swap slot holds the home bundle card (`#homeStoreAd`) and a second
+300x250 ad (`#adCon`); with `canShowAds` it flips every 20 s, to `#adCon`, then back to the card with the next bundle
+not owned (`iiííìïì`, :215644-215667), starting on the card (:215680-215682, :216888). The sandbox gives the ad row
+top 15px and inline-block (:229393) inside its hidden `#tlInfHold`.
+
+KrunkNative does the same with `canShowAds` true (Box Office always has its placeholder ad, as Krunker Strike's
+banner slot does: `strike_banner_ad.c`): `menu_ui.c` menu_ads_apply (at the page's setup and each round's init,
+`comp_ui.c` comp_ui_round), the premium login in `v10_menu.c` v10_menu_account_changed, the swap slot in
+`bundle_offers.c`, the sandbox row in `v10_menu.c` sandbox_apply. No ad network fills the slots, so they stay empty,
+as in v10's captures (uidiff main-menu `ad-strip`, menu-mobile `bottom-box`).
+
+Not ported: the settings' Manage Ads button (:218181, the consent manager of the ad network) stays stripped
+(`ui_windows.c`): there is no ad network whose consent it would manage.

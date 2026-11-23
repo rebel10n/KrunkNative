@@ -3,11 +3,13 @@
 // #timer-center / #warning), and the short-lived "limited offer" note on the shop button (#ltm-offer-container).
 //
 // Behaviour (deob-10.0.7.js):
-//   - home card: the first bundle the account does not own in the store's order (:215669-215684, :215696-215703),
-//     then the next one every 20 s (:215653-215667, 0x4e20); the art, the name and "$PRICE" fade in after 250 ms
-//     (:215607-215646); a discounted bundle shows "-N%" on the label (Math.round) and the price's discount class
-//     (:215628-215629); a click opens the bundle's popup (:215630-215632). Every bundle owned: an empty-state line
-//     (:215704). There are no ads in Box Office, so the card always takes the slot (the !canShowAds branch, :215657).
+//   - home card: the first bundle the account does not own in the store's order (:215669-215684, :215696-215703);
+//     the art, the name and "$PRICE" fade in after 250 ms (:215607-215646); a discounted bundle shows "-N%" on the
+//     label (Math.round) and the price's discount class (:215628-215629); a click opens the bundle's popup
+//     (:215630-215632). Every bundle owned: an empty-state line (:215704). The card shares #topLeftAdHolder's swap
+//     slot with #adCon (a 300x250 ad): with canShowAds (menu_ui.c menu_ads_apply) the slot flips every 20 s (0x4e20)
+//     to the empty #adCon, then back to the card with the next bundle not owned (iiííìïì, :215644-215667); each fill
+//     starts on the card (:215680-215682, :216888).
 //   - countdown: a bundle is timed by its event (EVENT_NAME + EVENT_ENDS_AT), its EXPIRY, or a 24-hour condition that
 //     starts when the account first saw it (valid_for_24_hours, :203294, :215809-215833). Each tick (1 s, :215945)
 //     shows the time left; the ring's dash offset is 240 - left * 240 / period (period 24 h, floored at 0) and the
@@ -43,6 +45,7 @@ static struct {
     int rotate_timer, fade_timer;
     int last_id;        // the bundle the card shows (0: none yet)
     int shown;          // the card was filled once
+    int card_turn;      // iïìììíì: the swap slot shows the card (0: #adCon's turn)
     int fade_id;        // the bundle the pending fade fills in
     int tick_timer;
     double ends_ms;     // the open popup's offer end (epoch ms), 0 = untimed
@@ -183,14 +186,11 @@ static void card_show(const cJSON *b) {
     B.fade_timer = html_timer_add(HOME_FADE_MS, card_fill, NULL);
 }
 
-// The card sits in #topLeftAdHolder's swap slot. Krunker never hides that row (only #topRightAdHolder goes when there
-// are no ads: deob-10.0.7.js:226527, 229393); Box Office hides the whole row while it holds nothing (menu_ui.c), so
-// the card brings it back as the page's flex row.
+// #topLeftAdHolder's swap slot: the card (on) or #adCon, which Box Office leaves empty (:215652-215656)
 static void card_slot(const int on) {
-    const HtmlElem card = html_dom_by_id("homeStoreAd"), ad = html_dom_by_id("adCon"), row = html_dom_by_id("topLeftAdHolder");
+    const HtmlElem card = html_dom_by_id("homeStoreAd"), ad = html_dom_by_id("adCon");
     if (card) html_dom_set_display(card, on ? "block" : "none");
-    if (row) html_dom_set_display(row, on ? "flex" : "none");
-    if (on && ad) html_dom_set_display(ad, "none");
+    if (ad) html_dom_set_display(ad, on ? "none" : "");
 }
 
 static void rotate(void *user);
@@ -200,10 +200,21 @@ static void arm_rotation(void) {
     B.rotate_timer = html_timer_add(HOME_ROTATE_MS, rotate, NULL);
 }
 
-// the next bundle not owned after the one shown, in the store's order (wrapping)
+// the 20 s flip (iiííìïì): #adCon's turn, or the card's with the next bundle not owned after the one shown, in the
+// store's order (wrapping)
 static void rotate(void *user) {
     (void) user;
     B.rotate_timer = 0;
+    if (!B.shown) { // the rows were still loading: the card's first fill
+        bundle_offers_home_refresh();
+        return;
+    }
+    B.card_turn = !B.card_turn;
+    card_slot(B.card_turn);
+    if (!B.card_turn) {
+        arm_rotation();
+        return;
+    }
     const cJSON *rows = junk_shop_bundles_rows();
     const cJSON *list[HOME_MAX];
     const int n = rows ? junk_shop_bundles_order(rows, list, HOME_MAX) : 0;
@@ -229,6 +240,7 @@ void bundle_offers_home_refresh(void) {
     const cJSON *first = NULL;
     for (int i = 0; i < n && !first; i++) if (!row_owned(list[i])) first = list[i];
     card_slot(1);
+    B.card_turn = 1;
     B.shown = 1;
     if (first) {
         if (row_id(first) != B.last_id) card_show(first);

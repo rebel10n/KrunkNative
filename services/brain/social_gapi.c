@@ -27,7 +27,8 @@
  *   and verify (POST .../verify). The v10 page sends them as socket ops "kr", "pst", "uml" and "ver".
  *   GET  /clans/<id>/profile, /clans/by-name/<name>                     clan profile (the clan view)
  *   POST /clans/<id>/apply                                              {}
- * Other /clans/* paths are clan_v10.c's (the clan window's settings tab), the /studios paths studios.c's.
+ * Other /clans/* paths are clan_v10.c's (the clan window's settings tab), the /studios paths studios.c's, the
+ * /skins paths (the Skin Manager's custom skins) skins.c's.
  */
 #include "acct_internal.h"
 
@@ -39,6 +40,7 @@
 #include "hot.h"
 #include "ranked.h" /* ranked_rank_of: the profile's ranked_rank */
 #include "strike_econ.h"
+#include "skins.h"
 #include "studios.h"
 #include "v10_api.h" /* v10_iso_ms */
 #include "knsvc/config.h"
@@ -202,6 +204,7 @@ void sh_gapi(SocialSession *s, const cJSON *f) {
     if (r.nseg > 0 && !strcmp(r.seg[0], "clans") && clan_v10_gapi(s, &r)) return;
     if (r.nseg > 0 && !strcmp(r.seg[0], "strike") && strike_econ_gapi(s, &r)) return; /* Krunker Strike (strike_econ.c) */
     if (r.nseg > 0 && !strcmp(r.seg[0], "studios") && studios_gapi(s, &r)) return; /* v10 Studios (studios.c) */
+    if (r.nseg > 0 && !strcmp(r.seg[0], "skins") && skins_gapi(s, &r)) return;     /* v10 Skin Manager (skins.c) */
     if (route(s, &r)) return;
     gapi_error(s, r.rid, 404, "NOT_FOUND", "Not found.");
 }

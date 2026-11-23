@@ -133,7 +133,7 @@ def client(name, brain_port, script, storage=None, secs=120):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
-                "KRUNKNATIVE_NET_TRANSPORT": "tcp",
+                "KRUNKNATIVE_NET_TRANSPORT": "tcp", "KRUNKNATIVE_DEBUG": "2",  # the [mm] join / seek lines (klog.h level 2)
                 # the server finder is this brain's (finder role): the nodes heartbeat to it
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
@@ -323,7 +323,7 @@ def signed_in_case(brain_port, games):
           and h.get("menuBtnQuickMatch") == "1", str(h))
     check("1: the class preview is drawn", h.get(":preview") == "1", str(h))
     # an account gets the Spectate switch on the menu (hideSpectateIfGuestUser v10:208579) and the chat
-    # (KrunkNative: up on the idle menu for a guest too, hud_ui.c hud_chat_wanted)
+    # (hideChatIfGuestUser, deob-10.0.7.js:215587; hud_v10.c hud_v10_tick)
     check("1: chat and Spectate switch on the menu for an account", h.get("chatUIHolder") == "1" and h.get("spectButtonHolder") == "1", str(h))
     n = vis(text, "nav")
     check("1: signed-in nav (Turf Wars, Market, Leaderboards, small Guide; no Guide card)",
@@ -351,7 +351,8 @@ def signed_in_case(brain_port, games):
           ft and int(ft.group(1)) > 0 and float(ft.group(2)) <= FIND_GAME_MAX_FRAME_MS, ft.group(0) if ft else "no ft line")
     cards = nodes(text, "games")
     check("1: Custom Games lists games", cards > 0, "%d cards" % cards)
-    check("1: Host Game opens the host chooser", nodes(text, "host") == 5, str(nodes(text, "host")))
+    # v10's five cards and Box Office's Rent a Server card (rent_servers_ui_chooser_card)
+    check("1: Host Game opens the host chooser", nodes(text, "host") == 6, str(nodes(text, "host")))
     # v10's popup has Mods, Sandbox, Editor and KPD; the Account Manager is the guest header's button
     check("1: More Krunker opens its popup with v10's four options", nodes(text, "more") == 4, str(nodes(text, "more")))
     check("1: the signed-in header has the Account Manager button, the guest one hidden",
@@ -378,8 +379,8 @@ def guest_case(brain_port):
     text = client("guest", brain_port, GUEST_SCRIPT.format(user=user, pw=pw))
     g = vis(text, "guest")
     check("2: guest header bar", g.get("signedOutHeaderBar") == "1" and g.get("signedInHeaderBar") in ("-", "0"), str(g))
-    check("2: a guest has the chat (KrunkNative, v10 hides it: Esc took it away) and no Spectate switch on the menu (v10:208579)",
-          g.get("chatUIHolder") == "1" and g.get("spectButtonHolder") == "0", str(g))
+    check("2: a guest has no chat (hideChatIfGuestUser, deob-10.0.7.js:215587) and no Spectate switch on the menu (v10:208579)",
+          g.get("chatUIHolder") == "0" and g.get("spectButtonHolder") == "0", str(g))
     m = vis(text, "modal")
     # a guest with no saved username: v10's Email field first (the "(use username instead)" toggle -> Username)
     check("2: Login or Register opens the modal", m.get("knV10Login") == "1" and m.get("accEmail") == "1", str(m))
@@ -391,7 +392,7 @@ def guest_case(brain_port):
     check("2: the account exists in the brain", st == 200 and isinstance(body, dict) and body.get("token"), str(body)[:200])
     o = vis(text, "loggedout")
     check("2: Logout: the guest header again", o.get("signedOutHeaderBar") == "1" and o.get("signedInHeaderBar") == "0", str(o))
-    check("2: Logout: the chat stays on the menu, no Spectate switch", o.get("chatUIHolder") == "1" and o.get("spectButtonHolder") == "0", str(o))
+    check("2: Logout: the chat goes from the menu (deob-10.0.7.js:216910), no Spectate switch", o.get("chatUIHolder") == "0" and o.get("spectButtonHolder") == "0", str(o))
     li = vis(text, "loggedin")
     check("2: Login from the modal: signed in again", li.get("knV10Login") == "-" and li.get("signedInHeaderBar") == "1", str(li))
 

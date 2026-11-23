@@ -20,7 +20,8 @@
  *   POST   /studios/<id>/currencies/<cid>/edit {name, symbol, decimals}  editStudioCurrency
  *   GET    /studios/<id>/analytics                  getStudioAnalytics
  *   GET    /studios/<id>/skins                      getStudioSkins        []
- *   POST   /studios/<id>/skins/import {custom_skin_id}         refused: KrunkNative has no custom skins
+ *   POST   /studios/<id>/skins/import {custom_skin_id}         refused: no studio skin store yet (skins.c has the
+ *                                                               Skin Manager's custom skins)
  *   POST   /studios/<id>/skins/<sid>/publish | /unpublish      refused: no such skin
  *   GET    /studios/<id>/monetization               getStudioMonetization the status
  *   POST   /studios/<id>/monetization {description, map_ids}  applyStudioMonetization
@@ -208,7 +209,7 @@ int studios_gapi(SocialSession *s, const GapiReq *r) {
         call(s, r, "skins", r->seg[1], NULL, NULL);
     } else if (gapi_is(r, "POST", "/studios/:id/skins/import") || gapi_is(r, "POST", "/studios/:id/skins/:sid/publish") ||
                gapi_is(r, "POST", "/studios/:id/skins/:sid/unpublish")) {
-        /* KrunkNative has no Skin Manager (v10 /skins custom skins): no skin can exist */
+        /* the Skin Manager's custom skins (skins.c) cannot be imported into a studio yet: no studio skin exists */
         gapi_error(s, r->rid, 404, "STUDIO_SKIN_NOT_FOUND", "Skin not found.");
     } else if (gapi_is(r, "GET", "/studios/:id/monetization")) {
         call(s, r, "monetization", r->seg[1], NULL, NULL);

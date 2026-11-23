@@ -48,7 +48,7 @@ nav, v10:147022-147167). The primary buttons come from `_50410({label,icon,varia
 | Market & Trading `#menuBtnMarket` | shop tab "Marketplace" | `openExchange()` -> `exchangeModal` (market grid, item detail, trading tab, quick-sell) | 147073, 215686 |
 | Store `#menuBtnShop` | "Shop", window 14 | "Store", window 14 | 147105 |
 | Challenges `#menuBtnChall` | `windows[32].openHome()` | same; new ranked challenges section `#challRankedHeadr` | 147114, 214584 |
-| Skin Manager `#menuBtnSkinManager` | - | `showSkinManager()` (hidden `visible:!1`) | 147122 |
+| Skin Manager `#menuBtnSkinManager` | - | `showSkinManager()` (hidden `visible:!1`; the sandbox menu shows it, deob-10.0.7.js:229392; KN: v10_skin_manager.c) | 147122 |
 | Leaderboards `#menuBtnLeaderboards` | social.html page | `genericPopup({component:_49281}, 'defaultModal')` (categories below) | 147139 |
 | Social `#menuBtnSocial` | "Hub" -> `window.open('/social.html')` | `openSocial()` -> `socialModal` (in-game hub) | 147150, 215708 |
 | Community & Events `#menuBtnSideCommunity` | - | `openCommunityMenu()` -> `communityPopup` (polls, events; uses `gapiClient`) | 147158, 215754 |

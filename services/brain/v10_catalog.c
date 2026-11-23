@@ -4,11 +4,10 @@
  * Route rows of doc/v10/api-inventory.md; the v10.0.3 wrappers are at decoded L5161, the consumers
  * are v10.js lines.
  *
- *   GET    /skins                              EMPTY {skins: []}: a custom skin is a Skin Manager
- *                                              record; KrunkNative has none (studios.c, db_studios.c)
- *   GET    /skins/:id                          NOT_FOUND: no custom skin has a KrunkNative id
- *   POST   /skins, PUT|DELETE /skins/:id,
- *   POST   /skins/:id/upload|duplicate         REFUSAL: the Skin Manager and its asset store do not exist
+ *   GET    /skins?page&page_size&type&weapon&search, GET|PUT|DELETE /skins/:id, POST /skins,
+ *   POST   /skins/:id/duplicate                the Skin Manager's custom skins of the caller (skins.c P_CUSTOM_SKIN,
+ *                                              0394_custom_skins; the same proc as the gapi tunnel's skins_gapi)
+ *   POST   /skins/:id/upload                   REFUSAL: Box Office has no asset store for skin files
  *   GET    /shop/wild-offer                    the day's offer (wild_offer.c P_WILD_OFFER); {offer: null}
  *                                              with no session
  *   POST   /shop/wild-offer/purchase {offer_id}  P_WILD_OFFER_BUY: KR from the account's funds, the skin
@@ -50,12 +49,12 @@
 #include "acct_internal.h"
 #include "db_procs.h"
 #include "shared.h" // PREFAB_LEADERBOARD (a map object's "i")
+#include "skins.h"  // P_CUSTOM_SKIN: the Skin Manager's custom skins
 #include "v10_api.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
 #include "knsvc/loop.h"
 
-#define WHY_SKIN "Box Office has no Skin Manager: custom skins are not stored"
 #define WHY_SKIN_ASSET "Box Office has no asset store for skin files"
 #define MSG_NO_MAP "Map not found"
 #define MSG_LOGIN "You must be logged in."
@@ -151,24 +150,101 @@ static int64_t query_int(kn_http_req *req, const char *key, int64_t def) {
     return query_str(req, key, v, sizeof v) ? strtoll(v, NULL, 10) : def;
 }
 
-/* ---- skins: the Skin Manager does not exist here */
+/* ---- skins: the Skin Manager's custom skins (skins.c P_CUSTOM_SKIN, 0394_custom_skins). The list's refusals are
+ * {error: {code, message}} (its service throws res.error.message, deob-10.0.7.js:124354-124361); every other call's are
+ * a text error, since the service does `throw new Error(res.error)` (:124374-124426) and the editor shows
+ * "Failed to save skin: " + message, so {code, message} would read "[object Object]". */
 
-static void h_skins_list(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *d = cJSON_CreateObject();
-    cJSON_AddItemToObject(d, "skins", cJSON_CreateArray());
-    v10_reply_data(req, 200, d);
+enum { SK_LIST, SK_GET, SK_CREATE, SK_UPDATE, SK_DELETE, SK_DUPLICATE };
+
+typedef struct CatSkin {
+    kn_http_req *req;
+    int kind;
+    char id[24];
+    char *body;                 /* the JSON body (create / update) */
+    char page[16], size[16], type[16], weapon[16], search[192];
+} CatSkin;
+
+static void skin_free(CatSkin *k) {
+    free(k->body);
+    free(k);
 }
 
-static void h_skin_not_found(kn_http_req *req, void *ud) {
-    (void) ud;
-    v10_reply_error(req, 404, "NOT_FOUND", "Skin not found");
+static void on_skin_proc(kn_db_result *res, void *ud) {
+    CatSkin *k = ud;
+    kn_http_req *req = k->req;
+    if (kn_db_ok(res)) {
+        cJSON *v = acct_db_json(res);
+        v10_reply_data(req, 200, v ? v : cJSON_CreateObject());
+    } else {
+        const char *code = kn_db_user_message(res) ? kn_db_user_message(res) : acct_db_error(res, "skins"), *message = NULL;
+        const int status = skins_error(code, &message);
+        if (k->kind == SK_LIST) v10_reply_error(req, status, status == 500 ? "INTERNAL_ERROR" : code, message);
+        else v10_reply_text_error(req, status, message);
+    }
+    skin_free(k);
 }
 
-/* The Skin Manager's writes, refused by design (no Skin Manager, no asset store). A text error: its service
- * does `throw new Error(res.error)` (deob-10.0.3.js:138943, 138956, 138969, 138982, 139011) and the editor
- * shows "Failed to save skin: " + message (139265, 139412, 139425), so {code, message} would read
- * "[object Object]". */
+static void skin_account(kn_http_req *req, int64_t id, void *ud) {
+    CatSkin *k = ud;
+    if (id <= 0) {
+        if (k->kind == SK_LIST) v10_reply_error(req, 401, "UNAUTHORIZED", MSG_LOGIN);
+        else v10_reply_text_error(req, 401, MSG_LOGIN);
+        skin_free(k);
+        return;
+    }
+    char me[24];
+    acct_itoa(me, id);
+    static const char *const ops[] = {"list", "get", "create", "update", "delete", "duplicate"};
+    const char *op = ops[k->kind];
+    if (k->kind == SK_LIST)
+        kn_db_call(g_b->db, &P_CUSTOM_SKIN, KN_DB_ARGS(op, me, k->page, k->size, k->type, k->weapon, k->search), on_skin_proc, k);
+    else if (k->kind == SK_CREATE)
+        kn_db_call(g_b->db, &P_CUSTOM_SKIN, KN_DB_ARGS(op, me, k->body ? k->body : "{}"), on_skin_proc, k);
+    else if (k->kind == SK_UPDATE)
+        kn_db_call(g_b->db, &P_CUSTOM_SKIN, KN_DB_ARGS(op, me, k->id, k->body ? k->body : "{}"), on_skin_proc, k);
+    else
+        kn_db_call(g_b->db, &P_CUSTOM_SKIN, KN_DB_ARGS(op, me, k->id), on_skin_proc, k);
+}
+
+static void skin_route(kn_http_req *req, int kind) {
+    if (!g_b->db) { reply_no_db(req); return; }
+    CatSkin *k = calloc(1, sizeof *k);
+    if (!k) { v10_reply_error(req, 500, "INTERNAL_ERROR", "Server error."); return; }
+    k->req = req;
+    k->kind = kind;
+    if (kind != SK_LIST && kind != SK_CREATE) {
+        const int64_t id = path_id(req, "id");
+        if (id <= 0) {
+            v10_reply_text_error(req, 404, "Skin not found");
+            skin_free(k);
+            return;
+        }
+        acct_itoa(k->id, id);
+    }
+    if (kind == SK_LIST) {
+        query_str(req, "page", k->page, sizeof k->page);
+        query_str(req, "page_size", k->size, sizeof k->size);
+        query_str(req, "type", k->type, sizeof k->type);
+        query_str(req, "weapon", k->weapon, sizeof k->weapon);
+        query_str(req, "search", k->search, sizeof k->search);
+    }
+    if (kind == SK_CREATE || kind == SK_UPDATE) {
+        cJSON *body = kn_http_body_json(req);
+        k->body = body ? cJSON_PrintUnformatted(body) : NULL;
+        cJSON_Delete(body);
+    }
+    with_account(req, skin_account, k);
+}
+
+static void h_skins_list(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_LIST); }
+static void h_skin_get(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_GET); }
+static void h_skin_create(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_CREATE); }
+static void h_skin_update(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_UPDATE); }
+static void h_skin_delete(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_DELETE); }
+static void h_skin_duplicate(kn_http_req *req, void *ud) { (void) ud; skin_route(req, SK_DUPLICATE); }
+
+/* skins.uploadAsset (models, textures, sounds, thumbnails): refused, a text error (see above) */
 static void h_refuse(kn_http_req *req, void *ud) { v10_reply_text_error(req, 403, ud); }
 
 /* ---- the wild offer (wild_offer.c's procs; the account and the clock are the same as the social frames') */
@@ -1190,12 +1266,12 @@ int v10_catalog_init(Brain *b) {
     g_b = b;
     if (!b->http) return 0;
     kn_http_route(b->http, "GET", "/skins", h_skins_list, NULL);
-    kn_http_route(b->http, "GET", "/skins/:id", h_skin_not_found, NULL);
-    kn_http_route(b->http, "POST", "/skins", h_refuse, (void *) WHY_SKIN);
-    kn_http_route(b->http, "PUT", "/skins/:id", h_refuse, (void *) WHY_SKIN);
-    kn_http_route(b->http, "DELETE", "/skins/:id", h_refuse, (void *) WHY_SKIN);
+    kn_http_route(b->http, "GET", "/skins/:id", h_skin_get, NULL);
+    kn_http_route(b->http, "POST", "/skins", h_skin_create, NULL);
+    kn_http_route(b->http, "PUT", "/skins/:id", h_skin_update, NULL);
+    kn_http_route(b->http, "DELETE", "/skins/:id", h_skin_delete, NULL);
     kn_http_route(b->http, "POST", "/skins/:id/upload", h_refuse, (void *) WHY_SKIN_ASSET);
-    kn_http_route(b->http, "POST", "/skins/:id/duplicate", h_refuse, (void *) WHY_SKIN);
+    kn_http_route(b->http, "POST", "/skins/:id/duplicate", h_skin_duplicate, NULL);
     kn_http_route(b->http, "GET", "/shop/wild-offer", h_wild_offer, NULL);
     kn_http_route(b->http, "POST", "/shop/wild-offer/purchase", h_wild_purchase, NULL);
     kn_http_route(b->http, "POST", "/shop/wild-offer/refresh", h_wild_refresh, NULL);

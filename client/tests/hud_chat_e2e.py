@@ -13,10 +13,11 @@ Offline (the in-process sandbox server), headless, fixed 16.667 ms frames:
      chat line in #chatList, #killFeed stays empty, no toast
   4. reload: #ammoHolder's background-size follows reloadUIAnim every frame, round(reloadTimer /
      reload time * 100) + "% 100%", from ~100 down to "0%" when the reload ends (no frame skipped)
-  5. chat menu: the chat (#chatUIHolder, #chatUI) is up on the idle menu, in a game and after Esc opens
-     the menu (a guest too); the chat log sits at its bottom as lines arrive (scrollTop = the maximum,
-     checked by a setscroll to the bottom), the wheel scrolls it up and back down to the bottom, and
-     lines that arrive while showUI hides it leave it at the bottom once it is shown again
+  5. chat menu: a guest has no chat (#chatUIHolder) on the idle menu nor after Esc opens it (v10.0.7's
+     hideChatIfGuestUser), and has it in a game; there the chat log sits at its bottom as lines arrive
+     (scrollTop = the maximum, checked by a setscroll to the bottom), lines that arrive while showUI
+     hides it leave it at the bottom once it is shown again, and on the end screen (the chat is up, the
+     pointer free) the wheel scrolls it up and back down to the bottom
      (the hidden-load case: a list not laid out cannot scroll; the join's loading is in
      server/tests/chat_ingame_gate_e2e.py, which needs a brain)
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
@@ -64,8 +65,13 @@ def run_client(tag, args, script, extra_env=None, timeout=240):
                 "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_INPUT_SCRIPT": script_path,
                 "KRUNKNATIVE_FIXED_DELTA": "16.667", "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
     env.update(extra_env or {})
-    # a worktree lacks the untracked font / asset dirs: the main checkout's assets (RELAUNCH notes)
-    env.setdefault("KRUNKNATIVE_ASSETS_DIR", "/home/user/src/KrunkNative/assets")
+    # the repository's assets when they have the untracked fonts, else the main checkout's (as
+    # chat_ingame_gate_e2e.py does; a worktree may lack them, RELAUNCH notes)
+    if "KRUNKNATIVE_ASSETS_DIR" not in env:
+        assets = os.path.join(os.getcwd(), "assets")
+        if not os.path.isfile(os.path.join(assets, "css", "fonts", "font2.ttf")):
+            assets = "/home/dev/src/KrunkNative/assets"
+        env["KRUNKNATIVE_ASSETS_DIR"] = assets
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin"] + args, stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -220,48 +226,55 @@ def scroll_top(lines, label):
 
 def chat_menu():
     CHAT = "chatUIHolder chatUI chatList"
-    script = [f"{t} vis @b{t} {CHAT}" for t in range(0, 1501, 250)]     # the idle menu, at boot
-    script += ["2000 play", "2500 vis @g2500 chatUI chatList inGameUI"]
-    script += ["3000 down ESC", "3010 up ESC",                          # the menu opens over the game
-               f"3400 vis @e3400 {CHAT} menuHolder"]
-    script += [f"3450 netchat 2 Menu line {i}" for i in range(1, 31)]  # 30 lines: the list overflows
-    script += ["3900 scroll @s1 chatList", "3910 setscroll chatList 99999", "3920 scroll @s2 chatList",
-               "4000 netchat 2 A new message", "4100 scroll @s3 chatList",   # the new line stuck to the bottom
-               "4110 setscroll chatList 99999", "4120 scroll @s4 chatList",
-               "4150 cursorid chatList 0.5 0.5",                            # the pointer over the list
-               "4200 wheel 1", "4210 wheel 1", "4220 scroll @s5 chatList",   # two clicks up
-               ] + [f"{4300 + 10 * i} wheel -1" for i in range(25)] + [
-               "4700 scroll @s6 chatList",                                  # back to the bottom
-               "4800 call setSetting \"showUI\" 0", "4900 vis @h4900 chatUI",
-               ] + [f"5000 netchat 2 Hidden line {i}" for i in range(1, 31)] + [
-               "5100 call setSetting \"showUI\" 1", "5200 vis @h5200 chatUI chatList",
-               "5210 scroll @h1 chatList", "5220 setscroll chatList 99999", "5230 scroll @h2 chatList",
-               "5300 quit"]
+    script = ["0 menu"] + [f"{t} vis @b{t} {CHAT} menuHolder" for t in range(0, 1501, 250)]  # the idle menu, at boot
+    script += ["2000 play", f"2500 vis @g2500 {CHAT} inGameUI"]
+    script += [f"2550 netchat 2 Game line {i}" for i in range(1, 31)]  # 30 lines: the list overflows
+    script += ["3000 scroll @s1 chatList", "3010 setscroll chatList 99999", "3020 scroll @s2 chatList",
+               "3100 netchat 2 A new message", "3200 scroll @s3 chatList",   # the new line stuck to the bottom
+               "3210 setscroll chatList 99999", "3220 scroll @s4 chatList",
+               "3900 call setSetting \"showUI\" 0", "4000 vis @h4000 chatUI",
+               ] + [f"4100 netchat 2 Hidden line {i}" for i in range(1, 31)] + [
+               "4200 call setSetting \"showUI\" 1", "4300 vis @h4300 chatUI chatList",
+               "4310 scroll @h1 chatList", "4320 setscroll chatList 99999", "4330 scroll @h2 chatList",
+               "4500 down ESC", "4510 up ESC",                              # the menu opens over the game
+               f"4900 vis @e4900 {CHAT} menuHolder",
+               "5000 down ESC", "5010 up ESC",                              # back in the game
+               "5500 con end",                                              # the end screen: the pointer is free
+               f"16000 vis @w16000 {CHAT} endUI",                           # and the chat is up (toggleMenuHider(false))
+               "16010 setscroll chatList 99999", "16020 scroll @w0 chatList",
+               "16050 cursorid chatList 0.5 0.5",                           # the pointer over the list
+               "16100 wheel 1", "16110 wheel 1", "16120 scroll @w1 chatList",  # two clicks up
+               ] + [f"{16200 + 10 * i} wheel -1" for i in range(25)] + [
+               "16600 scroll @w2 chatList",                                 # back to the bottom
+               "16700 quit"]
     lines = run_client("chat-menu", ["--offline", "assets/maps/official/10_kanji.json"], script)
     v = vis_samples(lines, "b")
     idle = [v[k] for k in v]
-    check("chat menu: the chat is up on the idle menu at boot (every frame)",
-          len(idle) >= 6 and all(f.get("chatUIHolder") == "1" and f.get("chatUI") == "1" for f in idle),
-          f"{len(idle)} frames, {[f.get('chatUI') for f in idle]}")
+    # hideChatIfGuestUser (deob-10.0.7.js:215587): on the menu a guest has no chat (hud_v10.c hud_v10_tick)
+    check("chat menu: a guest has no chat on the idle menu at boot (every frame)",
+          len(idle) >= 6 and all(f.get("chatUIHolder") == "0" and f.get("menuHolder") == "1" for f in idle),
+          f"{len(idle)} frames, {[(f.get('chatUIHolder'), f.get('menuHolder')) for f in idle]}")
     g = vis_samples(lines, "g")["g2500"]
-    check("chat menu: the chat is up in the game", g.get("chatUI") == "1" and g.get("inGameUI") == "1", str(g))
-    e = vis_samples(lines, "e")["e3400"]
-    check("chat menu: after Esc opens the menu the chat stays up (a guest too)",
-          e.get("menuHolder") == "1" and e.get("chatUIHolder") == "1" and e.get("chatUI") == "1" and e.get("chatList") == "1", str(e))
+    check("chat menu: the chat is up in the game", g.get("chatUIHolder") == "1" and g.get("chatUI") == "1" and g.get("inGameUI") == "1", str(g))
     s1, s2, s3, s4 = (scroll_top(lines, k) for k in ("s1", "s2", "s3", "s4"))
-    check("chat menu: 30 lines in the menu leave the log at the bottom", s1 is not None and s1 > 0 and s1 == s2,
+    check("chat menu: 30 lines in the game leave the log at the bottom", s1 is not None and s1 > 0 and s1 == s2,
           f"top {s1} bottom {s2}")
     check("chat menu: a new line keeps the log at the bottom", s3 is not None and s3 == s4 and s3 > s2,
           f"after the line {s3}, bottom {s4}")
-    s5, s6 = scroll_top(lines, "s5"), scroll_top(lines, "s6")
-    check("chat menu: the wheel scrolls the log up", s5 is not None and s5 < s4, f"top after two clicks {s5}, bottom {s4}")
-    check("chat menu: the wheel scrolls the log back down to the bottom", s6 == s4, f"top {s6}, bottom {s4}")
     h1, h2 = scroll_top(lines, "h1"), scroll_top(lines, "h2")
     hv = vis_samples(lines, "h")
     check("chat menu: showUI off hides the chat, showUI on shows it again",
-          hv.get("h4900", {}).get("chatUI") == "0" and hv.get("h5200", {}).get("chatUI") == "1", str(hv))
+          hv.get("h4000", {}).get("chatUI") == "0" and hv.get("h4300", {}).get("chatUI") == "1", str(hv))
     check("chat menu: lines that came in while hidden leave the log at the bottom once shown",
           h1 is not None and h2 is not None and h2 > 0 and h1 == h2, f"top {h1}, bottom {h2}")
+    e = vis_samples(lines, "e")["e4900"]
+    check("chat menu: Esc opens the menu and a guest's chat goes (hideChatIfGuestUser)",
+          e.get("menuHolder") == "1" and e.get("chatUIHolder") == "0", str(e))
+    w = vis_samples(lines, "w").get("w16000", {})
+    check("chat menu: the end screen has the chat (toggleMenuHider(!endUI))", w.get("endUI") == "1" and w.get("chatUIHolder") == "1", str(w))
+    w0, w1, w2 = (scroll_top(lines, k) for k in ("w0", "w1", "w2"))
+    check("chat menu: the wheel scrolls the log up", w0 is not None and w1 is not None and w1 < w0, f"top after two clicks {w1}, bottom {w0}")
+    check("chat menu: the wheel scrolls the log back down to the bottom", w2 is not None and w2 == w0, f"top {w2}, bottom {w0}")
 
 
 def main():

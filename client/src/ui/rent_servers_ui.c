@@ -311,8 +311,11 @@ char *rent_servers_ui_gen(void) {
     return sb_finish(&sb);
 }
 
+// The Host chooser's card (ui_windows.c gen_42). Its 14 px top margin makes the addition 107 css px, a whole 62 device
+// px at the 1280x720 #uiBase scale, so the centred window moves up a whole 31 px and its five cards keep v10's
+// sub-pixel phase (15 px moved it 31.3 px: text and images snapped a pixel apart; uidiff menu-host-type).
 void rent_servers_ui_chooser_card(StrBuf *sb) {
-    sb_append(sb, "<div class='serverHostOp serverHostOp-small' style='margin-top:15px;width:calc(100% - 12px);"
+    sb_append(sb, "<div class='serverHostOp serverHostOp-small' style='margin-top:14px;width:calc(100% - 12px);"
                   "background-image:url(&quot;img/host-bg/2.png&quot;);' onmouseenter='playTick()' "
                   "onclick='playSelect(0.1);openHostWindow(false, 2)'>");
     sb_append_esc(sb, I18N("kn.rent.card", "Rent a Server"));

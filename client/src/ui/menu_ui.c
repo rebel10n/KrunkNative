@@ -1878,6 +1878,21 @@ static int scenario_on(void) {
 #endif
 }
 
+// The menu's ad slots, as v10.0.7 sets them at every round's init (iíìíiíi, deob-10.0.7.js:226522-226527, run from
+// :226471): #aHider (the bottom-centre #aContainer strip, the dark rgba(0,0,0,.6) box under Now Playing in v10's
+// captures: doc/ref/krunker-v10.0.2/main-menu.png) block, #topRightAdHolder (the right panel's first 300x250 slot,
+// transparent while empty) inline-block, both none for a premium account. window.canShowAds is
+// !(isMsPwa || isSteamClient || isEpicClient || isOAuthPage) (the live page's index.html): true for krunker.io's
+// page, and true here, where Box Office's own placeholder ad (kn_ad.c, strike_banner_ad.c) always is. Box Office
+// fills no display ad, so the slots stay empty, as in v10's captures. The competitive menu hides #aHider again
+// (comp_ui.c, :226554); a login with premium hides both (v10_menu_account_changed, :216881).
+void menu_ads_apply(void) {
+    const AccountInfo *acc = active_account();
+    const int premium = acc && acc->premium;
+    set_display("aHider", premium ? "none" : "block");
+    set_display("topRightAdHolder", premium ? "none" : "inline-block");
+}
+
 // The inline state v7.1.4's client leaves on its static page once loaded, connected and
 // on the menu (DOM of the real page, tools/uidiff/capture-v7.js), minus the HUD's (hud_ui.c).
 static void setup_dom(void) {
@@ -1885,13 +1900,7 @@ static void setup_dom(void) {
     // #loadingBg1 (empty); #loadingBg is the map card (v10_loading.c)
     set_display("loadingBg1", "none");
     set_display("consentBlock", "none");
-    // ads: none in KrunkNative, as v10 with !window.canShowAds or premium (v10.js:219405): so no
-    // #aContainer, the dark rgba(0,0,0,.6) box v10's browser capture shows under Now Playing.
-    // The phone menu keeps #aHider (v10's phone capture never sets its inline display, so the
-    // strip shows at the bottom centre: doc/ref/krunker-v10/mobile/menu-mobile.html.gz).
-    if (!ui_mobile_active()) set_display("aHider", "none");
-    set_display("topRightAdHolder", "none");
-    set_display("topLeftAdHolder", "none");
+    menu_ads_apply();
     set_display("menuFPSDisplay", "none");
     set_style("vignette", "opacity", "0");
     set_display("teamSelector", "none");
@@ -1906,7 +1915,7 @@ static void setup_dom(void) {
     // has no answer), not the ad slot
     set_display("streamCon", "block");
     set_display("adCon", "none");
-    // the ad slot's other half: the home tab's bundle card (bundle_offers.c; Box Office shows no ads)
+    // the swap slot's other half: the home tab's bundle card, then the empty #adCon every other 20 s (bundle_offers.c)
     bundle_offers_home_refresh();
     // the FTUE / gradual-menu chrome stays as fullMenu() leaves it
     set_display("frvrFTUEVideoHolder", "none");

@@ -4191,9 +4191,10 @@ static void hud_gametime_step(const Client *client, const int shown, const doubl
 }
 
 // The chat (#chatUI, and v10's #chatUIHolder through hud_v10_tick) is up whenever the game is not
-// loading: the menu (a guest's too), a game, the death and end screens. It is hidden while the game
-// loads: the boot curtain, a connect or join spinner (menu_loading) and a map download. showUI still
-// turns it off. KrunkNative differs from v10 here: v10 hides a guest's chat on the menu, so Esc took it away.
+// loading: the menu, a game, the death and end screens. It is hidden while the game loads: the boot
+// curtain, a connect or join spinner (menu_loading) and a map download. showUI still turns it off. On
+// the v10 page its holder #chatUIHolder also follows hideChatIfGuestUser: a guest has no chat on the
+// menu (hud_v10.c hud_v10_tick).
 static int hud_chat_wanted(const Client *client) {
     return client_render_settings()->show_ui && !menu_loading() && !client->net_map_wait;
 }

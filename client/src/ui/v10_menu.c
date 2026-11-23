@@ -332,8 +332,8 @@ static void nav_update(const AccountInfo *acc) {
 // match-info bar), #newsHolder, #signedInHeaderBar and #signedOutHeaderBar (so .headerBarRight's Notifications /
 // Settings / More Krunker start the bar at the left; header_update) and #menuServerInfoContainer; the Store and
 // Challenges items get class mIH (main.css display:none !important) and the Skin Manager item is shown
-// ($skinManagerEnabled, a store that starts true and is never set: :128568). Its ad row needs canShowAds, which
-// KrunkNative never has (menu_ui.c). The same chrome as v7.1.4's connectToSandbox (v7 index.js:18405-18560) and
+// ($skinManagerEnabled, a store that starts true and is never set: :128568). With canShowAds (menu_ads_apply) the ad
+// row gets top 15px and inline-block (:229393), inside the hidden #tlInfHold. The same chrome as v7.1.4's connectToSandbox (v7 index.js:18405-18560) and
 // v10.0.2's captured DOM (doc/ref/krunker-v10/menu/menu-host-type.html.gz against menu-mobile.html.gz).
 // krunker_haslogin is no part of it: v10's live menu with krunker_haslogin=true (doc/ref/krunker-v10.0.2/
 // main-menu.png) shows the guest bar and the play column.
@@ -350,6 +350,10 @@ static void sandbox_apply(void) {
     if ((el = nav_item("menuBtnShop"))) html_dom_set_class(el, "mIH", on);
     if ((el = nav_item("menuBtnChall"))) html_dom_set_class(el, "mIH", on);
     set_display(nav_item("menuBtnSkinManager"), on ? "" : "none");
+    if ((el = by_id("topLeftAdHolder"))) {
+        html_dom_set_style(el, "top", on ? "15px" : "");
+        set_display(el, on ? "inline-block" : "flex"); // flex: the row as bundle_offers.c's card_slot keeps it
+    }
     V.sandbox_shown = on;
 }
 
@@ -383,6 +387,12 @@ void v10_menu_account_changed(void) {
     // hideSpectateIfGuestUser (v10:208579-208581, after a login v10:209811 and a logout v10:209874):
     // the menu's Spectate switch is for accounts only (main.css hides #spectButtonHolder)
     set_display(by_id("spectButtonHolder"), acc ? "block" : "none");
+    // a premium account's login takes the ad slots away (deob-10.0.7.js:216881); a logout leaves them until the next
+    // round's init brings them back (menu_ads_apply)
+    if (acc && acc->premium) {
+        set_display(by_id("aHider"), "none");
+        set_display(by_id("topRightAdHolder"), "none");
+    }
     V.signed_in = acc != NULL;
     V.level = acc ? acc->level : 0;
     ranked_ui_account_changed(); // v10's $account effect on the ranked popup (v10:111598-111600)
@@ -1217,6 +1227,7 @@ static void nav_setup(void) {
     wire_nav("menuBtnShop", "playSelect(),showWindow(14)");
     wire_nav("menuBtnChall", "playSelect(),windows[32].openHome()");
     wire_nav("menuBtnSocial", "playSelect(),openSocial()");
+    wire_nav("menuBtnSkinManager", "playSelect(),showSkinManager()"); // iîíïìîí (deob-10.0.7.js:203969); shown in the sandbox only
     // Exit: the web build has none (Krunker has none on the web). Natively its display is the Client settings'
     // exitButton (ui_client_settings.c apply_exit_button); v10's showExit gate is deob-10.0.3.js:262620
 #ifndef __EMSCRIPTEN__

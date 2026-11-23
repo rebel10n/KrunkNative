@@ -39,10 +39,10 @@
  * ok, required?, value?}]} for account_age (90 days), level (20), twofa, no_recent_ban (180 days)
  * and has_map (a published game in the studio), all of the studio owner. Times are ISO 8601 UTC.
  *
- * Deviations from v10 (KrunkNative takes no payments and has no Skin Manager): an application
+ * Deviations from v10 (KrunkNative takes no payments and has no studio skins): an application
  * stays pending until a developer reviews it in the database; currency balances are 0 (there are
- * no PAYMENTS currency balances); skins is always empty and studios.c refuses imports (no custom
- * skins exist). KR charged / earned are the studio's games' consented charges (0358_studio_charges).
+ * no PAYMENTS currency balances); skins is always empty and studios.c refuses imports (the Skin
+ * Manager's custom skins, skins.c, have no studio store yet). KR charged / earned are the studio's games' consented charges (0358_studio_charges).
  *
  * The game servers' side (P_STUDIO_GAME, P_STUDIO_CHARGE, at the end): whether a hosted published
  * map is monetized, and the KR of PAYMENTS.charge / transact after the player's consent.

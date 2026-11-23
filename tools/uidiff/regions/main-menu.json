@@ -108,6 +108,17 @@
       "fuzz": 20,
       "max_pct": 18.0,
       "note": "the match-info bar: #mapInfoHld + #menuRegionLabel + Invite / Join, and no Connect link: v10's bar ends at Join, the client adds Connect only outside scenarios or with state.clientChrome (servers_ui_menu_setup; kn-main-menu-connect). Same glyph rasterisation gap, multiplied by the empty #menuRegionLabel place: the reference draws a 6 px '...' the engine's block lays out at 0 x 0 (#menuRegionLabel { display: block }, kn-v10-menu.css); every other box in the bar matches (615..629 both)"
+    },
+    {
+      "name": "ad-strip",
+      "rect": [
+        416,
+        638,
+        448,
+        76
+      ],
+      "kind": "image",
+      "note": "#aHider: the empty #aContainer (rgba(0,0,0,.6), padding 10px, 765x100 min at the #uiBase scale, radius 6) under Now Playing. v10 shows it with window.canShowAds (krunker.io's page) unless the account is premium (deob-10.0.7.js:226526); Box Office has canShowAds and fills no display ad (menu_ui.c menu_ads_apply)"
     }
   ]
 }

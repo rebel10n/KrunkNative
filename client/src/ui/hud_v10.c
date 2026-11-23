@@ -5,10 +5,12 @@
 // from the v10.0.2 client (~/jails/kru/src/Krunker_v10.0.3/deob/v10.0.2/game.js, `v10:N` = its line) and checked against the
 // offline v10 sandbox captures (doc/ref/krunker-v10/ingame/, tools/uidiff/capture-v10.js):
 //   - #chatUIHolder (new in v10, markup display:none) wraps the chat: toggleMenuHider(on) runs
-//     hideChatIfGuestUser(on) (v10:161017, 208576): on the menu a guest has no chat, an account
-//     has it. KrunkNative keeps the chat up on the menu for a guest too (it went away on Esc), and
-//     hides it only while the game loads (hud_ui.c hud_chat_wanted: the boot curtain, a join's
-//     spinner, a map download);
+//     hideChatIfGuestUser(on) (deob-10.0.7.js:163415, 215587-215589): on the menu a guest has no
+//     chat (no "Enter Message" input), an account has it; in a game everyone has it. Login shows it
+//     and logout hides it on the menu (:216833, :216910). The live references agree:
+//     doc/ref/krunker-v10.0.2/main-menu.png (a guest) has none, rewards/menu-account.png has it.
+//     KrunkNative also hides it while the game loads (hud_ui.c hud_chat_wanted: the boot curtain,
+//     a join's spinner, a map download);
 //   - the Old Scoreboard holder #leaderboardHolder is always shown (switchLeaderboard writes
 //     style.display = true, v10:207925, which CSS ignores; hud_ui.c shows it);
 //   - the end screen's Performance tab is Combat Earnings + Combat Record (v10:203117) and a
@@ -56,9 +58,12 @@ static void double_xp_hud(void) {
 void hud_v10_tick(const int chat_wanted) {
     if (!hud_v10_page()) return;
     double_xp_hud();
-    // UI.toggleMenuHider(on) -> hideChatIfGuestUser(on): on ? (account ? block : none) : block.
-    // KrunkNative: block whenever the chat is wanted (not loading), on the menu for a guest too.
-    const char *want = chat_wanted ? "block" : "none";
+    // UI.toggleMenuHider(on) -> hideChatIfGuestUser(on): on ? (account ? block : none) : block. The menu hider is
+    // on while the menu shows (toggleMenu, deob-10.0.7.js:163354; the end screen's results: :163482), which is
+    // MenuUi.menu_open (#uiBase.onMenu). KrunkNative: and none while the game loads (chat_wanted).
+    const MenuUi *menu = menu_ui();
+    const int on_menu = menu && menu->menu_open;
+    const char *want = chat_wanted && (!on_menu || active_account()) ? "block" : "none";
     if (!strcmp(want, g_chat_shown)) return;
     const HtmlElem el = html_dom_by_id("chatUIHolder");
     if (!el) return;

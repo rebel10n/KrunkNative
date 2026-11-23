@@ -51,6 +51,9 @@ version (the desktop's was not recorded). The structural failures of that run we
 2026-11-23 (see "Failing-region triage (2026-11-23)" below); after those fixes the devbox, run as four
 shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run),
 and 787 / 64 / 91 after the translated-window snapping fix.
+`menu-host-type` was a layout of its own: the Rent a Server card's 15 px margin moved the centred window a
+fractional 31.3 px at the #uiBase scale (fixed 2026-11-23: 14 px, `rent_servers_ui.c`; the scenario also needed the
+sandbox menu its reference shows).
 Compare a run on another machine with this baseline, not with zero failures, before treating a
 colour-only failure as a regression.
 

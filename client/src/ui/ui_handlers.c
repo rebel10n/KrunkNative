@@ -12,6 +12,7 @@
 #include <image_collection.h>
 #include <v10_social.h>
 #include <v10_studios.h>  // v10 Studios (v10_studios.c)
+#include <v10_skin_manager.h> // v10.0.7 Skin Manager (v10_skin_manager.c)
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
 #include <v10_wallet.h> // v10 Wallet and Inventory (v10_wallet.c)
@@ -641,6 +642,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_studios_handle,        // v10_studios.c: v10 Studios (openStudios, knStudios)
     v10_junkyard_handle,       // v10_junkyard.c: the Junkyard (v10jy.*, windows[13].sendCraft / startCraft): its
                                // confirmation replaces the exchange in #genericPop, so it is not gated on the exchange
+    v10_skin_manager_handle,   // v10_skin_manager.c: v10.0.7's sandbox Skin Manager (showSkinManager, knSkins)
     v10_market_handle,         // v10_market.c: v10 Market & Trading (openExchange, v10mk.*)
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
@@ -804,6 +806,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
         if (v10_social_key(ev->key)) return 0; // v10's view stack (profile, clan view, post): Escape pops it
         if (v10_wallet_key(ev->key)) return 0; // the Wallet and Inventory modal (and the Quick Sell / item page over it)
         if (v10_studios_key(ev->key)) return 0; // the Studios window, a studio, its dialog and prompts
+        if (v10_skin_manager_key(ev->key)) return 0; // the Skin Manager and its delete prompt
         if (ui->menu_open && menu_window_is_open()) {
             if (object_manager_ui_escape()) return 0; // the Object Manager opened in game: straight back to it
             menu_toggle_window(0);

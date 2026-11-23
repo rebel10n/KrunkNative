@@ -241,8 +241,9 @@ static int load_tabs(const char *dir, const cJSON *list, UiTabFile *out, const i
 
 // What KrunkNative's settings tabs differ in from the captured v10.0.2 markup, applied once at load
 // so the window, its search and the default scrape all see it:
-//   - "Manage Ads" (openOneTrust) is only written when window.canShowAds: KrunkNative shows no ads
-//     and has no consent manager, so the header goes without it, as v10 renders it then;
+//   - "Manage Ads" (openOneTrust) is only written when window.canShowAds: the menu keeps v10's empty ad
+//     slots (menu_ui.c menu_ads_apply), but no ad network fills them and there is no consent manager
+//     (OneTrust) to open, so the header goes without it;
 //   - WebGPU rendering ("webgpu", needsRestart) picks three.js's WebGPU backend in a browser; the
 //     client renders through GL (ES on the web) only, so the row is hidden like v10's `hide` rows
 //     (<key>_div, display:none) and its stored value stays unread.

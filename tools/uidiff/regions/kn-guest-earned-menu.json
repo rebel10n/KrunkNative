@@ -7,11 +7,11 @@
   "regions": [
     {
       "name": "unclaimed",
-      "rect": [1046, 28, 234, 198],
+      "rect": [1046, 176, 234, 198],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#knGuestEarned (.guest-earned-collect) at the right panel's top with its glow: Unclaimed Rewards, 20 and 2500 red with CAPPED badges, the warning, REGISTER NOW / Claim your rewards"
+      "note": "#knGuestEarned (.guest-earned-collect) at the right panel's top with its glow: Unclaimed Rewards, 20 and 2500 red with CAPPED badges, the warning, REGISTER NOW / Claim your rewards Re-captured 2026-11-23 from the render: the menu keeps v10's ad row (canShowAds, deob-10.0.7.js:226526-226527; menu_ui.c menu_ads_apply), so the box sits under the empty 300x250 slots, and a guest has no chat on the menu (hideChatIfGuestUser, :215587)."
     },
     {
       "name": "header-guest",

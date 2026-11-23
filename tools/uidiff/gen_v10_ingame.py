@@ -151,6 +151,7 @@ def main():
     with open(os.path.join(HERE, "scenarios", "host.json")) as fh:
         st = json.load(fh)["state"]
     st["window"] = 42
+    st["sandbox"] = True  # the capture's menu is the offline sandbox's (connectToSandbox: v10_menu.c sandbox_apply)
     win = rc["menuWindow"]
     add("menu-host-type", st,
         [R("window", pad(win, 2), "text", "#menuWindow: Select a Server Type to Host, the five cards (outlined titles over "
