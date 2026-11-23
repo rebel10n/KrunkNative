@@ -1686,6 +1686,12 @@ else ()
             add_test(NAME chal_card_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chal_card_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(chal_card_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # challenge_mid_match_e2e: a seeded daily (and Burg map challenges) completed mid-match on a brain-linked server_bin
+            # by a signed-in client_bin: v10.0.7's mid-match chgC [index, true, REW] and uchp, the chat line, the commit's KR /
+            # BPP / skin credited once, nothing again after a rejoin (server/tests/challenge_mid_match_e2e.py)
+            add_test(NAME challenge_mid_match_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/challenge_mid_match_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(challenge_mid_match_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "server;client;e2e")
             # lottery_scenario_e2e: the raffle window on --render-scenario answers (costs, Grand Prize, timer states,
             # event_ended; client/tests/lottery_scenario_e2e.py)
             add_test(NAME lottery_scenario_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/lottery_scenario_e2e.py
