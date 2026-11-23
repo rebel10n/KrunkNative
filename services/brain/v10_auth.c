@@ -22,7 +22,7 @@
  *       enter_code step); a 2FA account gets no code (its sign-in is the password and the authenticator code).
  *   recover-account -> the reset mail of the socket's ["rpr"] (account_security.c): the consumer reads no field.
  *   the account's 2FA setup, verify and disable -> the 2FA procs of db_security.c (P_TWOFA_CONFIRM / _DISABLE).
- *   GET /account/usernames -> the account's own username: one name, active, never expires (accounts.username).
+ *   GET /account/usernames -> the account's own username: one name, active and original, never expires (accounts.username).
  *       Box Office sells no usernames and keeps no renewals, so reserve is refused and a swap only answers the
  *       active name.
  *   GET / POST /email/preferences -> the account's stored choice (accounts.email_pref_*, migration 0391). GET answers
@@ -891,13 +891,16 @@ static void h_disable(kn_http_req *req, void *ud) {
 
 /* ---------------------------------------------------------------- usernames (the account's one name) */
 
-/* {names: [{name, state: "active"}], cooldown_secs, held, hold_secs} (+ active for a swap) */
+/* {names: [{name, state: "active", original: true}], cooldown_secs, held, hold_secs} (+ active for a swap). The
+ * account's own username is its original one (the only name Box Office has): v10's list marks it `original`, which
+ * the buy confirmation's note reads (deob-10.0.7.js:115719-115724). */
 static cJSON *names_data(const char *username) {
     cJSON *d = cJSON_CreateObject();
     cJSON *names = cJSON_AddArrayToObject(d, "names");
     cJSON *n = cJSON_CreateObject();
     cJSON_AddStringToObject(n, "name", username);
     cJSON_AddStringToObject(n, "state", "active");
+    cJSON_AddBoolToObject(n, "original", 1);
     cJSON_AddItemToArray(names, n);
     cJSON_AddNumberToObject(d, "cooldown_secs", 0);
     cJSON_AddNullToObject(d, "held");

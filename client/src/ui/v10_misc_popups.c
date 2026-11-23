@@ -28,9 +28,11 @@
 //   premium shop    svelte-190e6fj (v10:129616+, cancel confirm 18wpngg): the Store Premium tab's subscription
 //                   branch, which v10.0.2 hides behind `() => !0x0` (the four legacy cards show instead), so v10
 //                   never shows it either: knMiscOpen("premium") only. Products / subscriptions: none (no shop).
-//   usernames       svelte-27udiy (v10:114613-115040): manageAccNames(), the Account window's Manage button. The
-//                   list is the account's own username (state active, never expires); the buy flow ($9.99,
-//                   renew $4.99) asks for the confirmation and then answers that purchases are unavailable.
+//   usernames       svelte-27udiy (deob-10.0.7.js:115381-115778): manageAccNames(), the Account window's Manage
+//                   button. GET /account/usernames, POST /account/usernames/reserve and /swap on the brain
+//                   (services/brain/v10_auth.c: the account's own username, active and original; reserve is
+//                   refused, a swap only answers the active name). Renewing and buying a held name end on the
+//                   popup's error line (no payments) where v10 opens its purchase selector.
 //
 // Everything is mounted through the shared popup API (client/include/v10_ui.h) or, for the k-ID dialog (top
 // layer) and the survey (the toast stack, .notification-list), as elements of its own. Scenario state:
@@ -48,6 +50,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 #ifdef _WIN32
@@ -1202,35 +1205,122 @@ static void prem_cancel(void) {
 }
 
 // ================================================================== usernames
+// The component of manageAccNames() (deob-10.0.7.js:115381-115778, svelte-27udiy). On open it asks for the list,
+// GET /account/usernames (listUsernames, :26409; :115497-115500, :115528): res.error goes to the error line, else
+// the data {names, cooldown_secs, held, hold_secs} is kept with the time it came (:115475-115481). Every *_secs is
+// relative to that time; a 1 s clock re-renders the countdowns (:115434, :115452-115461). Buy asks first, then
+// POST /account/usernames/reserve {username} (:115501-115515), Use asks first, then POST /account/usernames/swap
+// (:115516-115527), Renew asks first, then the payment (showUsernamePurchase, :216275). Box Office takes no payments:
+// that step ends on the error line (kn.store.noPurchases) where v10 closes the popup for the purchase selector.
+
+#define UN_KEEP_DAYS "365"    // iïïìììì (deob-10.0.7.js:16475): the days a name stays yours
+#define UN_RENEW_PRICE "$4.99" // '$' + iïiiíïï (deob-10.0.7.js:16474)
+#define UN_BUY_PRICE "$9.99"
 
 static struct {
-    char buy[24];
+    int open, depth;               // the view is up, at this view-stack depth
+    unsigned gen;                  // bumped on open / close: an answer for an earlier opening is dropped
+    char buy[64];                  // the input (bind:value)
     int confirm_buy;               // the inline "Buy X for $9.99?" confirmation
-    char feedback[200], message[200];
+    char renew_confirm[32];        // the row whose renew confirmation is open ("" none)
+    char swap_confirm[32];         // the row whose switch confirmation is open
+    char feedback[256], message[200]; // the error line / the message line
     int busy;
-    cJSON *names;                  // scenario: [{name, state, expires_secs, renew_secs, release_secs, original}]
-    double cooldown_s;
+    cJSON *names;                  // data.names; NULL until the list came ({name, state, expires_secs, renew_secs,
+                                   // release_secs, original, leave_grace, leave_release_secs})
+    double fetched_ms, now_ms;     // Date.now() when the list came / the 1 s clock
+    double cooldown_at, hold_at;   // Date.now() + 1000 * cooldown_secs / hold_secs
+    char held[32];                 // data.held || ''
+    double tick_ms;
+    char *shown;                   // the markup last rendered (the clock re-renders only what changed)
 } UN;
 
 static void un_render(void);
+
+static double un_clock_ms(void) { return now_s() * 1e3; }
 
 static void un_close(const int accepted, void *user) {
     (void) accepted;
     (void) user;
     cJSON_Delete(UN.names);
     UN.names = NULL;
+    UN.open = 0;
+    UN.gen++;
+    free(UN.shown);
+    UN.shown = NULL;
 }
 
-// a time left as v10's readable form for the usernames list: "3d 4h" (secs < 0: none given)
+// iIîíiîî(secs) = fetched + 1000 * secs (:115440-115442); NaN when the row has no such field
+static double un_at(const cJSON *row, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(row, key);
+    return cJSON_IsNumber(v) ? UN.fetched_ms + 1000.0 * v->valuedouble : NAN;
+}
+
+// iÎìîííi(at) = max(0, ceil((at - now) / 1000)) (:115443-115445); NaN reads as 0 (`NaN > 0` is false in v10)
+static double un_left(const double at) {
+    if (!isfinite(at)) return 0;
+    const double s = ceil((at - UN.now_ms) / 1000.0);
+    return s > 0 ? s : 0;
+}
+
+// iÎíïííî: new Date(ms).toLocaleDateString(undefined, {day: numeric, month: short, year: numeric}) (:115446-115451),
+// en-US in local time: "Mar 5, 2027"
+static void un_date(char *out, const size_t n, const double ms) {
+    if (!isfinite(ms)) {
+        snprintf(out, n, "Invalid Date");
+        return;
+    }
+    const time_t at = (time_t) floor(ms / 1000.0);
+    struct tm lt;
+#ifdef _WIN32
+    localtime_s(&lt, &at);
+#else
+    localtime_r(&at, &lt);
+#endif
+    static const char *const k_mon[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    snprintf(out, n, "%s %d, %d", k_mon[lt.tm_mon < 0 || lt.tm_mon > 11 ? 0 : lt.tm_mon], lt.tm_mday, lt.tm_year + 1900);
+}
+
+// iÌîiììi(secs) (:115452-115461): "3d 4h", else "2h 5m", else "4m 07s"
 static void un_time(char *out, const size_t n, const double secs) {
     const long s = secs > 0 ? (long) secs : 0;
-    snprintf(out, n, "%ldd %ldh", s / 86400, s % 86400 / 3600);
+    if (s / 86400 > 0) snprintf(out, n, "%ldd %ldh", s / 86400, s % 86400 / 3600);
+    else if (s / 3600 > 0) snprintf(out, n, "%ldh %ldm", s / 3600, s % 3600 / 60);
+    else snprintf(out, n, "%ldm %02lds", s / 60, s % 60);
 }
 
-static void un_row(StrBuf *sb, const char *name, const char *state, const double left_secs) {
-    char buf[200], arg[48], js[64];
+static const cJSON *un_find(const char *name) {
+    const cJSON *n;
+    cJSON_ArrayForEach(n, UN.names) if (!strcmp(v10_str(n, "name"), name)) return n;
+    return NULL;
+}
+
+// iÌîíïìî: the row in state active (:115439)
+static const cJSON *un_active(void) {
+    const cJSON *n;
+    cJSON_ArrayForEach(n, UN.names) if (!strcmp(v10_str(n, "state"), "active")) return n;
+    return NULL;
+}
+
+static double un_cooldown_left(void) { return un_left(UN.cooldown_at); } // iIîîïïi (:115437)
+
+// iIíîìïî(data) (:115475-115481): the list and the time it came
+static void un_store(const cJSON *data) {
+    cJSON_Delete(UN.names);
+    UN.names = cJSON_Duplicate(cJSON_GetObjectItem(data, "names"), 1);
+    if (!UN.names) UN.names = cJSON_CreateArray();
+    UN.fetched_ms = UN.now_ms = un_clock_ms();
+    UN.cooldown_at = UN.fetched_ms + 1000.0 * v10_num(data, "cooldown_secs", 0);
+    snprintf(UN.held, sizeof(UN.held), "%s", v10_str(data, "held"));
+    UN.hold_at = UN.fetched_ms + 1000.0 * v10_num(data, "hold_secs", 0);
+}
+
+static void un_row(StrBuf *sb, const cJSON *row) {
+    char buf[320], arg[48], date[32], js[64];
+    const char *name = v10_str(row, "name"), *state = v10_str(row, "state");
     js_name(js, sizeof(js), name);
     const int active = !strcmp(state, "active"), grace = !strcmp(state, "grace");
+    const int capped = un_left(un_at(row, "renew_secs")) > 0; // renewable later: paid up to the cap
     sb_appendf(sb, "<div class=\"username-row svelte-27udiy%s%s\"><div class=\"row-main svelte-27udiy\"><span class=\"username-name svelte-27udiy\">", active ? " active" : "", grace ? " grace" : "");
     sb_append_esc(sb, name);
     sb_append(sb, "</span> ");
@@ -1239,15 +1329,16 @@ static void un_row(StrBuf *sb, const char *name, const char *state, const double
         sb_append_esc(sb, tr("account.usernames.active", "Active"));
         sb_append(sb, "</span>");
     } else {
-        sb_append(sb, "<div class=\"row-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim svelte-27udiy\" onclick=\"knMiscUnRenew('");
-        sb_append(sb, js);
-        sb_append(sb, "')\">");
+        // Renew: disabled while busy or renewable later (title renew.cap), io-button--accept on a grace row (:115565-115582)
+        sb_appendf(sb, "<div class=\"row-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim svelte-27udiy%s\"%s title=\"",
+                   grace ? " io-button--accept" : "", UN.busy || capped ? " disabled" : "");
+        if (capped) sb_append_esc(sb, tr("account.usernames.renew.cap", "A username can be paid for up to 2 years ahead"));
+        sb_appendf(sb, "\" onclick=\"knMiscUnRenew('%s')\">", js);
         sb_append_esc(sb, tr("account.usernames.renew", "Renew"));
         sb_append(sb, "</button> ");
-        if (!grace) {
-            sb_append(sb, "<button type=\"button\" class=\"io-button io-button--slim io-button--accept-secondary svelte-27udiy\" onclick=\"knMiscUnSwap('");
-            sb_append(sb, js);
-            sb_append(sb, "')\">");
+        if (!grace) { // Use: disabled while busy or the switch cooldown runs (:115570)
+            sb_appendf(sb, "<button type=\"button\" class=\"io-button io-button--slim io-button--accept-secondary svelte-27udiy\"%s onclick=\"knMiscUnSwap('%s')\">",
+                       UN.busy || un_cooldown_left() > 0 ? " disabled" : "", js);
             sb_append_esc(sb, tr("account.usernames.use", "Use"));
             sb_append(sb, "</button>");
         } else {
@@ -1260,70 +1351,199 @@ static void un_row(StrBuf *sb, const char *name, const char *state, const double
         sb_append(sb, "<span class=\"username-meta svelte-27udiy\">");
         sb_append_esc(sb, tr("account.usernames.active.never", "Never expires while active"));
         sb_append(sb, "</span>");
-    } else if (grace) {
-        un_time(arg, sizeof(arg), left_secs);
+    } else if (grace) { // :115589-115597
+        un_time(arg, sizeof(arg), un_left(un_at(row, "release_secs")));
         I18N_F(buf, "account.usernames.grace.left", "Released in {0} unless renewed", arg);
         sb_append(sb, "<span class=\"username-meta grace-meta svelte-27udiy\"><i class=\"material-icons svelte-27udiy\">warning</i> <span class=\"username-grace svelte-27udiy\">");
         sb_append_esc(sb, tr("account.usernames.grace", "Pending release"));
         sb_append(sb, "</span> ");
         sb_append_esc(sb, buf);
         sb_append(sb, "</span>");
-    } else {
-        un_time(arg, sizeof(arg), left_secs);
-        I18N_F(buf, "account.usernames.expires", "Expires {0}", arg);
+    } else { // "Expires {date} <span class=meta-left>{t} left</span>" [+ "Renewable from {date}"] (:115598-115612)
+        const double release = un_at(row, "release_secs");
+        un_date(date, sizeof(date), release);
+        I18N_F(buf, "account.usernames.expires", "Expires {0}", date);
         sb_append(sb, "<span class=\"username-meta svelte-27udiy\">");
         sb_append_esc(sb, buf);
+        sb_append(sb, " <span class=\"meta-left svelte-27udiy\">");
+        un_time(arg, sizeof(arg), un_left(release));
+        I18N_F(buf, "account.usernames.expires.left", "{0} left", arg);
+        sb_append_esc(sb, buf);
+        sb_append(sb, "</span> ");
+        if (capped) {
+            un_date(date, sizeof(date), un_at(row, "renew_secs"));
+            I18N_F(buf, "account.usernames.renew.later", "Renewable from {0}", date);
+            sb_append(sb, "<span class=\"meta-left svelte-27udiy\">");
+            sb_append_esc(sb, buf);
+            sb_append(sb, "</span>");
+        } else {
+            sb_append(sb, "<!---->");
+        }
         sb_append(sb, "</span>");
     }
     sb_append(sb, "</div>");
 }
 
+// the renew confirmation under the list (:115625-115645): valid until max(expires, now) + 365 days
+static void un_renew_confirm(StrBuf *sb) {
+    const cJSON *row = UN.renew_confirm[0] ? un_find(UN.renew_confirm) : NULL;
+    if (!row) {
+        sb_append(sb, "<!---->");
+        return;
+    }
+    char buf[320], date[32], js[64];
+    const double expires = un_at(row, "expires_secs");
+    un_date(date, sizeof(date), (isfinite(expires) && expires > UN.now_ms ? expires : UN.now_ms) + 365.0 * 86400e3);
+    I18N_F(buf, "account.usernames.renew.confirm", "Renew {0} for {1}? It will be valid until {2}.", v10_str(row, "name"), UN_RENEW_PRICE, date);
+    js_name(js, sizeof(js), v10_str(row, "name"));
+    sb_append(sb, "<div class=\"inline-confirm svelte-27udiy\"><span>");
+    sb_append_esc(sb, buf);
+    sb_append(sb, "</span> <div class=\"confirm-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim\" onclick=\"knMiscUnRenewCancel()\">");
+    sb_append_esc(sb, tr("generic.cancel", "Cancel"));
+    sb_appendf(sb, "</button> <button type=\"button\" class=\"io-button io-button--slim io-button--accept\"%s onclick=\"knMiscUnRenew('%s')\">", UN.busy ? " disabled" : "", js);
+    sb_append_esc(sb, tr("account.usernames.renew", "Renew"));
+    sb_append(sb, " " UN_RENEW_PRICE "</button></div></div>");
+}
+
+// the switch confirmation (:115646-115692) with the note on the name being left (the active one)
+static void un_swap_confirm(StrBuf *sb) {
+    if (!UN.swap_confirm[0]) {
+        sb_append(sb, "<!---->");
+        return;
+    }
+    char buf[400], note[400], date[32], arg[48], js[64];
+    const cJSON *cur = un_active();
+    int warn = 0;
+    note[0] = 0;
+    if (cur) {
+        const double at = un_at(cur, "leave_release_secs");
+        const char *cn = v10_str(cur, "name");
+        un_date(date, sizeof(date), at);
+        if (cJSON_IsTrue(cJSON_GetObjectItem(cur, "leave_grace"))) {
+            un_time(arg, sizeof(arg), un_left(at));
+            I18N_F(note, "account.usernames.swap.grace", "If you switch, {0} is released for anyone to take on {1} ({2}) unless you renew it before then.", cn, date, arg);
+            warn = 1;
+        } else if (cJSON_IsTrue(cJSON_GetObjectItem(cur, "original"))) {
+            I18N_F(note, "account.usernames.swap.original", "{0} is your original username. It's kept for {1} days after you switch away, plus any renewals (until {2}), then released unless you renew it or switch back.", cn, UN_KEEP_DAYS, date);
+        } else {
+            I18N_F(note, "account.usernames.swap.keep", "{0} stays yours until {1} while you're not using it. Renew it to keep it longer.", cn, date);
+        }
+    }
+    I18N_F(buf, "account.usernames.swap.confirm", "Switch to {0}? You will sign in as {0} from now on.", UN.swap_confirm);
+    sb_append(sb, "<div class=\"inline-confirm svelte-27udiy\"><span>");
+    sb_append_esc(sb, buf);
+    sb_append(sb, "</span> ");
+    if (note[0]) {
+        sb_appendf(sb, "<span class=\"leave-note svelte-27udiy%s\">%s ", warn ? " warn" : "", warn ? "<i class=\"material-icons svelte-27udiy\">warning</i>" : "<!---->");
+        sb_append_esc(sb, note);
+        sb_append(sb, "</span>");
+    } else {
+        sb_append(sb, "<!---->");
+    }
+    js_name(js, sizeof(js), UN.swap_confirm);
+    sb_append(sb, " <div class=\"confirm-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim\" onclick=\"knMiscUnSwapCancel()\">");
+    sb_append_esc(sb, tr("generic.cancel", "Cancel"));
+    sb_appendf(sb, "</button> <button type=\"button\" class=\"io-button io-button--slim io-button--accept-secondary\"%s onclick=\"knMiscUnSwap('%s')\">",
+               UN.busy || un_cooldown_left() > 0 ? " disabled" : "", js);
+    sb_append_esc(sb, tr("account.usernames.swap.button", "Switch"));
+    sb_append(sb, "</button></div></div>");
+}
+
+// the input's value trimmed (String.prototype.trim)
+static void un_trimmed(char *out, const size_t n) {
+    const char *s = UN.buy;
+    while (*s && isspace((unsigned char) *s)) s++;
+    size_t len = strlen(s);
+    while (len && isspace((unsigned char) s[len - 1])) len--;
+    if (len >= n) len = n - 1;
+    memcpy(out, s, len);
+    out[len] = 0;
+}
+
 static char *un_html(void) {
-    char buf[320], a0[16], a1[16];
+    char buf[400], arg[48];
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 900px;\"><div class=\"io-popup-container\"><div class=\"io-popup-header io-popup-header--slim\">");
     sb_append_esc(&sb, tr("account.usernames.title", "Usernames"));
     sb_append(&sb, "</div> <div class=\"usernames-content svelte-27udiy\"><div class=\"usernames-top svelte-27udiy\"><p class=\"usernames-desc svelte-27udiy\">");
-    snprintf(a0, sizeof(a0), "7");
-    snprintf(a1, sizeof(a1), "365");
-    I18N_F(buf, "account.usernames.desc", "Switch between the usernames you own once every {0} days. A username you're not using is kept for {1} days, then released for anyone to take unless you renew it.", a0, a1);
+    I18N_F(buf, "account.usernames.desc", "Switch between the usernames you own once every {0} days. A username you're not using is kept for {1} days, then released for anyone to take unless you renew it.", "7", UN_KEEP_DAYS);
     sb_append_esc(&sb, buf);
     sb_append(&sb, "</p> <div class=\"usernames-login-note svelte-27udiy\"><i class=\"material-icons svelte-27udiy\">info</i> <span>");
     sb_append_esc(&sb, tr("account.usernames.login", "Your active username is also your login username. After switching, sign in with the new one."));
     sb_append(&sb, "</span></div></div> ");
     if (UN.names) {
-    sb_append(&sb, "<div class=\"usernames-columns svelte-27udiy\"><section class=\"usernames-col svelte-27udiy\"><div class=\"col-header svelte-27udiy\">");
-    sb_append_esc(&sb, tr("account.usernames.owned.header", "Your Usernames"));
-    sb_append(&sb, "</div> <div class=\"usernames-list svelte-27udiy\">");
-    {
+        sb_append(&sb, "<div class=\"usernames-columns svelte-27udiy\"><section class=\"usernames-col svelte-27udiy\"><div class=\"col-header svelte-27udiy\">");
+        sb_append_esc(&sb, tr("account.usernames.owned.header", "Your Usernames"));
+        sb_append(&sb, "</div> <div class=\"usernames-list svelte-27udiy\">");
         const cJSON *n;
-        cJSON_ArrayForEach(n, UN.names) un_row(&sb, v10_str(n, "name"), v10_str(n, "state"), v10_num(n, "release_secs", v10_num(n, "expires_secs", -1)));
-    }
-    sb_append(&sb, "</div> ");
-    sb_append(&sb, "<!----> <!----> <!----></section> <section class=\"usernames-col buy-col svelte-27udiy\"><div class=\"col-header svelte-27udiy\">");
-    sb_append_esc(&sb, tr("account.usernames.buy.header", "Buy a Username"));
-    sb_append(&sb, "</div> <p class=\"buy-desc svelte-27udiy\">");
-    snprintf(a0, sizeof(a0), "15");
-    I18N_F(buf, "account.usernames.buy.desc", "Pick any free username. It's valid for {1} days and nobody else can use it. It's held for you for {0} minutes while you pay.", a0, a1);
-    sb_append_esc(&sb, buf);
-    sb_append(&sb, "</p> <input class=\"io-input-field buy-input svelte-27udiy\" type=\"text\" maxlength=\"14\" id=\"knUnBuy\" placeholder=\"");
-    sb_append_esc(&sb, tr("account.usernames.buy.placeholder", "Enter a username"));
-    sb_appendf(&sb, "\" value=\"%s\" oninput=\"knMiscUnInput()\"> ", UN.buy);
-    if (UN.confirm_buy) {
-        char name[32];
-        snprintf(name, sizeof(name), "%s", UN.buy);
-        // {3} is the renewal price (v10.0.3: usernameRenewPriceUSD, 4.99; 10.0.2 put $9.99 in {1} here)
-        I18N_F(buf, "account.usernames.buy.confirm", "Buy {0} for {1}? It's valid for {2} days; renew it for {3} to keep it longer.", name, "$9.99", a1, "$4.99");
-        sb_append(&sb, "<div class=\"inline-confirm svelte-27udiy\"><span>");
+        cJSON_ArrayForEach(n, UN.names) un_row(&sb, n);
+        sb_append(&sb, "</div> ");
+        un_renew_confirm(&sb);
+        sb_append(&sb, " ");
+        un_swap_confirm(&sb);
+        sb_append(&sb, " ");
+        // the cooldown line while it runs and there is another name to switch to (:115693-115701)
+        if (un_cooldown_left() > 0 && cJSON_GetArraySize(UN.names) > 1) {
+            un_time(arg, sizeof(arg), un_cooldown_left());
+            I18N_F(buf, "account.usernames.cooldown", "You can switch again in {0}", arg);
+            sb_append(&sb, "<div class=\"usernames-cooldown svelte-27udiy\"><i class=\"material-icons svelte-27udiy\">schedule</i> ");
+            sb_append_esc(&sb, buf);
+            sb_append(&sb, "</div>");
+        } else {
+            sb_append(&sb, "<!---->");
+        }
+        sb_append(&sb, "</section> <section class=\"usernames-col buy-col svelte-27udiy\"><div class=\"col-header svelte-27udiy\">");
+        sb_append_esc(&sb, tr("account.usernames.buy.header", "Buy a Username"));
+        sb_append(&sb, "</div> <p class=\"buy-desc svelte-27udiy\">");
+        I18N_F(buf, "account.usernames.buy.desc", "Pick any free username. It's valid for {1} days and nobody else can use it. It's held for you for {0} minutes while you pay.", "15", UN_KEEP_DAYS);
         sb_append_esc(&sb, buf);
-        sb_appendf(&sb, "</span> <!----> <div class=\"confirm-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim\" onclick=\"knMiscUnBuyCancel()\">%s</button> "
-                        "<button type=\"button\" class=\"io-button io-button--slim io-button--accept\"%s onclick=\"knMiscUnBuy()\">%s</button></div></div>",
-                   tr("generic.cancel", "Cancel"), UN.busy ? " disabled" : "", tr("account.usernames.buy.button", "Buy"));
-    } else {
-        sb_appendf(&sb, "<button type=\"button\" class=\"io-button io-button--accept buy-button svelte-27udiy\"%s onclick=\"knMiscUnBuy()\">%s $9.99</button>",
-                   UN.busy || !UN.buy[0] ? " disabled" : "", tr("account.usernames.buy.button", "Buy"));
-    }
-    sb_append(&sb, " <!----></section></div> ");
+        sb_append(&sb, "</p> <input class=\"io-input-field buy-input svelte-27udiy\" type=\"text\" maxlength=\"14\" id=\"knUnBuy\" placeholder=\"");
+        sb_append_esc(&sb, tr("account.usernames.buy.placeholder", "Enter a username"));
+        sb_append(&sb, "\" value=\"");
+        sb_append_esc(&sb, UN.buy);
+        sb_append(&sb, "\" oninput=\"knMiscUnInput()\" onkeydown=\"knMiscUnKey()\"> ");
+        char name[64];
+        un_trimmed(name, sizeof(name));
+        if (UN.confirm_buy) { // :115702-115727
+            // {3} is the renewal price (v10.0.3: usernameRenewPriceUSD, 4.99; 10.0.2 put $9.99 in {1} here)
+            I18N_F(buf, "account.usernames.buy.confirm", "Buy {0} for {1}? It's valid for {2} days; renew it for {3} to keep it longer.", name, UN_BUY_PRICE, UN_KEEP_DAYS, UN_RENEW_PRICE);
+            sb_append(&sb, "<div class=\"inline-confirm svelte-27udiy\"><span>");
+            sb_append_esc(&sb, buf);
+            sb_append(&sb, "</span> ");
+            const cJSON *cur = un_active();
+            if (cur && cJSON_IsTrue(cJSON_GetObjectItem(cur, "original"))) { // the original name's note (:115719-115724)
+                I18N_F(buf, "account.usernames.buy.original", "Your original username {0} is kept for {1} days after you switch away from it, then released unless you renew it or switch back.", v10_str(cur, "name"), UN_KEEP_DAYS);
+                sb_append(&sb, "<span class=\"leave-note svelte-27udiy\">");
+                sb_append_esc(&sb, buf);
+                sb_append(&sb, "</span>");
+            } else {
+                sb_append(&sb, "<!---->");
+            }
+            sb_append(&sb, " <div class=\"confirm-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim\" onclick=\"knMiscUnBuyCancel()\">");
+            sb_append_esc(&sb, tr("generic.cancel", "Cancel"));
+            sb_appendf(&sb, "</button> <button type=\"button\" class=\"io-button io-button--slim io-button--accept\"%s onclick=\"knMiscUnBuy()\">", UN.busy ? " disabled" : "");
+            sb_append_esc(&sb, tr("account.usernames.buy.button", "Buy"));
+            sb_append(&sb, "</button></div></div>");
+        } else { // disabled while busy or the trimmed name is empty (:115728-115734)
+            sb_appendf(&sb, "<button type=\"button\" class=\"io-button io-button--accept buy-button svelte-27udiy\"%s onclick=\"knMiscUnBuy()\">", UN.busy || !name[0] ? " disabled" : "");
+            sb_append_esc(&sb, tr("account.usernames.buy.button", "Buy"));
+            sb_append(&sb, " " UN_BUY_PRICE "</button>");
+        }
+        sb_append(&sb, " ");
+        // the name held for payment (:115735-115745); kn_brain holds none (held null)
+        const double hold_left = un_left(UN.hold_at);
+        if (UN.held[0] && hold_left > 0) {
+            un_time(arg, sizeof(arg), hold_left);
+            I18N_F(buf, "account.usernames.buy.pending", "{0} is held for you for {1}", UN.held, arg);
+            sb_append(&sb, "<div class=\"pending-card svelte-27udiy\"><span>");
+            sb_append_esc(&sb, buf);
+            sb_append(&sb, "</span> <button type=\"button\" class=\"io-button io-button--slim io-button--accept\" onclick=\"knMiscUnHeld()\">");
+            sb_append_esc(&sb, tr("account.usernames.buy.button", "Buy"));
+            sb_append(&sb, " " UN_BUY_PRICE "</button></div>");
+        } else {
+            sb_append(&sb, "<!---->");
+        }
+        sb_append(&sb, "</section></div> ");
     }
     if (UN.feedback[0]) {
         sb_append(&sb, "<div class=\"io-error-message usernames-feedback svelte-27udiy\">");
@@ -1340,19 +1560,211 @@ static char *un_html(void) {
     return sb_finish(&sb);
 }
 
-static void un_render(void) { v10_view_set(un_html()); }
+// Re-render while the popup is the top view, keeping the buy input's focus and caret (v10 patches its nodes in place;
+// here the view's markup is replaced). Nothing is replaced when the markup did not change.
+static void un_render(void) {
+    if (!UN.open || v10_view_depth() != UN.depth) return;
+    char *html = un_html();
+    if (UN.shown && !strcmp(UN.shown, html)) {
+        free(html);
+        return;
+    }
+    free(UN.shown);
+    UN.shown = strdup(html);
+    HtmlElem in = html_dom_by_id("knUnBuy");
+    const int focused = in && html_dom_active_element() == in;
+    int s0 = 0, s1 = 0;
+    if (focused) html_dom_text_selection(in, &s0, &s1);
+    v10_view_set(html);
+    if (focused && (in = html_dom_by_id("knUnBuy"))) {
+        html_dom_focus(in);
+        html_dom_text_set_selection(in, s0, s1);
+    }
+}
+
+static void un_push(void) {
+    free(UN.shown);
+    UN.shown = un_html();
+    UN.open = 1;
+    UN.gen++;
+    v10_view_push(strdup(UN.shown), un_render, un_close, NULL);
+    UN.depth = v10_view_depth();
+}
+
+// res of v10's request helper (deob-10.0.7.js:26152-26197): 1 data, 0 res.error (in err), -1 it threw (a transport
+// error, a 5xx, a body that is not JSON) or answered nothing (204 / 304): the component then changes nothing more
+static int un_answer(const int status, const cJSON *json, char *err, const size_t n, const cJSON **data) {
+    *data = NULL;
+    err[0] = 0;
+    if (status < 200 || status >= 500 || status == 204 || status == 304) return -1;
+    if (status == 429) {
+        snprintf(err, n, "Rate limit exceeded. Try again later.");
+        return 0;
+    }
+    if (!json) return -1;
+    const cJSON *e = cJSON_GetObjectItem(json, "error");
+    if (cJSON_IsString(e) && e->valuestring[0]) {
+        snprintf(err, n, "%s", e->valuestring);
+        return 0;
+    }
+    if (cJSON_IsObject(e) || cJSON_IsArray(e)) { // the text setter shows an object as v10 does
+        snprintf(err, n, "%s", cJSON_IsObject(e) ? "[object Object]" : "");
+        if (err[0]) return 0;
+    }
+    *data = cJSON_GetObjectItem(json, "data");
+    return 1;
+}
+
+static void un_path(char *out, const size_t n, const char *suffix) {
+    char t[256];
+    v10_url_token(t, sizeof t);
+    snprintf(out, n, "/account/usernames%s%s%s", suffix, t[0] ? "?token=" : "", t);
+}
+
+// iIïîìiî: listUsernames(); res.error ? error = res.error : setData(res.data) (:115497-115500)
+static void un_listed(void *user, const int status, const cJSON *json) {
+    if ((unsigned) (uintptr_t) user != UN.gen || !UN.open) return;
+    char err[256];
+    const cJSON *data;
+    const int r = un_answer(status, json, err, sizeof err, &data);
+    if (r == 0) snprintf(UN.feedback, sizeof(UN.feedback), "%s", err);
+    else if (r == 1 && cJSON_IsObject(data)) un_store(data);
+    else return;
+    un_render();
+}
+
+static void un_fetch(void) {
+    char path[400];
+    un_path(path, sizeof path, "");
+    v10_send("GET", path, NULL, un_listed, (void *) (uintptr_t) UN.gen);
+}
+
+// iÍíîïîí(name, renew): showUsernamePurchase(name, renew) (:115482-115485, :216275). kn_brain takes no payments.
+static void un_purchase(const char *name, const int renew) {
+    (void) name;
+    (void) renew;
+    snprintf(UN.feedback, sizeof(UN.feedback), "%s", tr("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
+    UN.message[0] = 0;
+}
+
+static void un_reserved(void *user, const int status, const cJSON *json) {
+    if ((unsigned) (uintptr_t) user != UN.gen || !UN.open) return;
+    char err[256];
+    const cJSON *data;
+    const int r = un_answer(status, json, err, sizeof err, &data);
+    if (r < 0) return; // the await threw: busy and the confirmation stay as they are
+    UN.busy = 0;
+    UN.confirm_buy = 0;
+    if (r == 0) snprintf(UN.feedback, sizeof(UN.feedback), "%s", err);
+    else un_purchase(v10_str(data, "username"), 0);
+    un_render();
+}
+
+// iÏìîìïï (:115501-115515): the confirmation first, then reserveUsername(name)
+static void un_buy(void) {
+    char name[64];
+    un_trimmed(name, sizeof(name));
+    if (!name[0] || !UN.names) return;
+    if (!UN.confirm_buy) {
+        UN.confirm_buy = 1;
+        un_render();
+        return;
+    }
+    UN.busy = 1;
+    UN.feedback[0] = UN.message[0] = 0;
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "username", name);
+    char *text = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    char path[400];
+    un_path(path, sizeof path, "/reserve");
+    un_render();
+    v10_send("POST", path, text ? text : "{}", un_reserved, (void *) (uintptr_t) UN.gen);
+    free(text);
+}
+
+// iÏïiïîì(name) (:115486-115493): the first click opens the confirmation (closing the switch one), the second pays
+static void un_renew(const char *name) {
+    if (strcmp(UN.renew_confirm, name)) {
+        snprintf(UN.renew_confirm, sizeof(UN.renew_confirm), "%s", name);
+        UN.swap_confirm[0] = 0;
+    } else {
+        UN.renew_confirm[0] = 0;
+        un_purchase(name, 1);
+    }
+    un_render();
+}
+
+static void un_swapped(void *user, const int status, const cJSON *json) {
+    if ((unsigned) (uintptr_t) user != UN.gen || !UN.open) return;
+    char err[256], buf[200];
+    const cJSON *data;
+    const int r = un_answer(status, json, err, sizeof err, &data);
+    if (r < 0) return; // the await threw: busy stays
+    UN.busy = 0;
+    if (r == 0) {
+        snprintf(UN.feedback, sizeof(UN.feedback), "%s", err);
+    } else {
+        const char *active = v10_str(data, "active");
+        un_store(data);
+        // onSwapped (manageAccNames, deob-10.0.7.js:217073-217090): acc.name = name; updateWindow(5); updateClassRender()
+        if (active[0]) account_set_name(active);
+        I18N_F(buf, "account.usernames.swap.success", "Your username is now {0}", active);
+        snprintf(UN.message, sizeof(UN.message), "%s", buf);
+    }
+    un_render();
+}
+
+// iÍïìiïï(name) (:115516-115527): the first click opens the confirmation (closing the renew one), the second switches
+static void un_swap(const char *name) {
+    if (strcmp(UN.swap_confirm, name)) {
+        snprintf(UN.swap_confirm, sizeof(UN.swap_confirm), "%s", name);
+        UN.renew_confirm[0] = 0;
+        un_render();
+        return;
+    }
+    UN.swap_confirm[0] = 0;
+    UN.busy = 1;
+    UN.feedback[0] = UN.message[0] = 0;
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "username", name);
+    char *text = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    char path[400];
+    un_path(path, sizeof path, "/swap");
+    un_render();
+    v10_send("POST", path, text ? text : "{}", un_swapped, (void *) (uintptr_t) UN.gen);
+    free(text);
+}
+
+// the 1 s clock (setInterval(() => now = Date.now(), 1000), :115434); a --render-scenario stands still
+static void un_tick(void) {
+    if (!UN.open || G.scenario) return;
+    const double now = mono_ms();
+    if (now - UN.tick_ms < 1000) return;
+    UN.tick_ms = now;
+    UN.now_ms = un_clock_ms();
+    un_render();
+}
 
 static void un_open(void) {
-    UN.buy[0] = UN.feedback[0] = UN.message[0] = 0;
+    UN.buy[0] = UN.feedback[0] = UN.message[0] = UN.held[0] = 0;
+    UN.renew_confirm[0] = UN.swap_confirm[0] = 0;
     UN.confirm_buy = UN.busy = 0;
-    v10_view_push(un_html(), un_render, un_close, NULL);
+    cJSON_Delete(UN.names);
+    UN.names = NULL;
+    UN.fetched_ms = UN.now_ms = un_clock_ms();
+    UN.cooldown_at = UN.hold_at = 0;
+    UN.tick_ms = mono_ms();
+    un_push();
+    if (!G.scenario) un_fetch();
 }
 
 // ================================================================== opening / closing
 
 static void close_all(void) {
     v10_misc_survey_clear();
-    if (HK.open || UN.names || PR.shop) v10_view_clear();
+    if (HK.open || UN.open || PR.shop) v10_view_clear();
     if (KID.open) kid_close();
     if (v10_popup_open("defaultModal lotteryModal") || v10_popup_open("defaultModal premiumShopModal")) v10_popup_close();
 }
@@ -1402,6 +1814,7 @@ void v10_misc_popups_tick(void) {
     hook_tick();
     lot_tick();
     lot_bulbs_tick();
+    un_tick();
 }
 
 int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -1492,28 +1905,20 @@ int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         return 1;
     }
     // usernames
-    if (!strcmp(name, "knMiscUnInput")) {
+    if (!strcmp(name, "knMiscUnInput")) { // bind:value; on:input confirm = false (:115398)
         HtmlElem in = html_dom_by_id("knUnBuy");
         if (in) html_dom_get_value(in, UN.buy, sizeof(UN.buy));
         UN.confirm_buy = 0;
-        UN.feedback[0] = UN.message[0] = 0;
-        HtmlElem btn = html_dom_query(0, ".buy-button.svelte-27udiy");
-        if (btn) html_dom_set_attr(btn, UN.buy[0] ? "data-kn-ready" : "disabled", "");
         un_render();
-        HtmlElem again = html_dom_by_id("knUnBuy");
-        if (again) html_dom_focus(again);
+        return 1;
+    }
+    if (!strcmp(name, "knMiscUnKey")) { // on:keydown: Enter runs Buy (:115399, :115711)
+        if (ev && html_key_is_enter(ev->key)) un_buy();
         return 1;
     }
     if (!strcmp(name, "knMiscUnBuy")) {
-        if (!UN.buy[0]) return 1;
-        if (!UN.confirm_buy) {
-            UN.confirm_buy = 1; // the inline confirmation first
-        } else {
-            // account.reserveUsername(name): the brain has no username shop, so the answer is an error
-            UN.confirm_buy = 0;
-            snprintf(UN.feedback, sizeof(UN.feedback), "Username purchases are not available on this server.");
-        }
-        un_render();
+        if (UN.busy) return 1; // the disabled Buy buttons (Enter is not held back: knMiscUnKey)
+        un_buy();
         return 1;
     }
     if (!strcmp(name, "knMiscUnBuyCancel")) {
@@ -1521,8 +1926,30 @@ int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         un_render();
         return 1;
     }
-    if (!strcmp(name, "knMiscUnSwap") || !strcmp(name, "knMiscUnRenew")) {
-        snprintf(UN.feedback, sizeof(UN.feedback), "Username purchases are not available on this server.");
+    if (!strcmp(name, "knMiscUnRenew")) {
+        const cJSON *row = un_find(arg_str(args, argc, 0));
+        if (!row || UN.busy || un_left(un_at(row, "renew_secs")) > 0) return 1; // the disabled Renew buttons
+        un_renew(v10_str(row, "name"));
+        return 1;
+    }
+    if (!strcmp(name, "knMiscUnRenewCancel")) {
+        UN.renew_confirm[0] = 0;
+        un_render();
+        return 1;
+    }
+    if (!strcmp(name, "knMiscUnSwap")) {
+        const cJSON *row = un_find(arg_str(args, argc, 0));
+        if (!row || UN.busy || un_cooldown_left() > 0) return 1; // the disabled Use / Switch buttons
+        un_swap(v10_str(row, "name"));
+        return 1;
+    }
+    if (!strcmp(name, "knMiscUnSwapCancel")) {
+        UN.swap_confirm[0] = 0;
+        un_render();
+        return 1;
+    }
+    if (!strcmp(name, "knMiscUnHeld")) { // the pending card's Buy: showUsernamePurchase(held) (:115740)
+        if (UN.held[0]) un_purchase(UN.held, 0);
         un_render();
         return 1;
     }
@@ -1564,11 +1991,30 @@ void v10_misc_popups_scenario(const cJSON *p) {
     }
     const cJSON *un = cJSON_GetObjectItem(p, "usernames");
     if (un) {
+        // {names, cooldownSecs, held, holdSecs, buy, confirmBuy, renewConfirm, swapConfirm, busy, feedback, message}:
+        // the GET answer's data (names absent: the list never came) and the component's state; the clock stands
+        // still at the answer's time
         cJSON_Delete(UN.names);
-        UN.names = cJSON_Duplicate(cJSON_GetObjectItem(un, "names"), 1);
+        UN.names = NULL;
+        UN.fetched_ms = UN.now_ms = un_clock_ms();
+        UN.cooldown_at = UN.hold_at = 0;
+        UN.held[0] = 0;
+        if (cJSON_IsArray(cJSON_GetObjectItem(un, "names"))) {
+            cJSON *data = cJSON_CreateObject();
+            cJSON_AddItemToObject(data, "names", cJSON_Duplicate(cJSON_GetObjectItem(un, "names"), 1));
+            cJSON_AddNumberToObject(data, "cooldown_secs", v10_num(un, "cooldownSecs", 0));
+            cJSON_AddStringToObject(data, "held", v10_str(un, "held"));
+            cJSON_AddNumberToObject(data, "hold_secs", v10_num(un, "holdSecs", 0));
+            un_store(data);
+            cJSON_Delete(data);
+        }
         snprintf(UN.buy, sizeof(UN.buy), "%s", v10_str(un, "buy"));
         UN.confirm_buy = cJSON_IsTrue(cJSON_GetObjectItem(un, "confirmBuy"));
+        snprintf(UN.renew_confirm, sizeof(UN.renew_confirm), "%s", v10_str(un, "renewConfirm"));
+        snprintf(UN.swap_confirm, sizeof(UN.swap_confirm), "%s", v10_str(un, "swapConfirm"));
+        UN.busy = cJSON_IsTrue(cJSON_GetObjectItem(un, "busy"));
         snprintf(UN.feedback, sizeof(UN.feedback), "%s", v10_str(un, "feedback"));
+        snprintf(UN.message, sizeof(UN.message), "%s", v10_str(un, "message"));
     }
     if (!open[0]) return;
     if (!strcmp(open, "survey")) {
@@ -1576,7 +2022,7 @@ void v10_misc_popups_scenario(const cJSON *p) {
     } else if (!strcmp(open, "hook")) {
         hook_open((int) v10_num(hook, "secs", 30));
     } else if (!strcmp(open, "usernames")) {
-        v10_view_push(un_html(), un_render, un_close, NULL);
+        un_push();
     } else if (!strcmp(open, "lottery")) {
         lot_open(lot ? (int) v10_num(lot, "id", 3) : 3);
     } else if (!strcmp(open, "register")) {

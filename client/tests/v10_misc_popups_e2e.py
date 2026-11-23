@@ -15,13 +15,23 @@ back (`nodes` = matching elements, `vis` = shown or not):
   premium shop    knMiscOpen("premium") -> no shop on this server: the error state; knMiscClose -> gone
   lottery         knMiscOpen("lottery") / openLottery(3) -> the GET /api/lottery failure, shown as v10
                   shows a failed request; knMiscClose -> gone
-  usernames       knMiscOpen("usernames") -> the owned list; knViewPop(0) -> gone
+  usernames       knMiscOpen("usernames") -> the popup; its GET /account/usernames fails (no brain), which v10's
+                  request helper throws, so no list and no error line show (deob-10.0.7.js:115497-115500,
+                  :26152-26160); knViewPop(0) -> gone
+
+The usernames list itself renders from --render-scenario answers (tools/uidiff/scenarios/popup-usernames.json with
+state.community.popups.usernames {names, cooldownSecs, held, holdSecs, swapConfirm, renewConfirm, buy, confirmBuy}),
+read back from the captured document (KRUNKNATIVE_SCENARIO_HTML): the expiry line ("Expires Mar 5, 2027 <span
+class=meta-left>3d 4h left</span>" + "Renewable from"), the grace row, Renew capped (disabled, renew.cap title),
+the cooldown line ("4m 07s") with Use / Switch disabled, the switch confirmation's original-name note, the renew
+confirmation, the buy confirmation's original-name note, the held-name card and the escaped input value.
 
 The ranked message overlay (ranked_ui.c) is not here: a guest's Ranked button opens loginOrRegister (v10),
 and a signed-in player needs an account; its open sequence is the uidiff frames ranked-overlay-open-*.
 
 Exit 77 when the client binary is missing. Ports come from kn_proto.free_ports().
 """
+import json
 import os
 import re
 import shutil
@@ -45,7 +55,7 @@ results = []
 
 def check(name, ok, detail=""):
     results.append(bool(ok))
-    print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
+    print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + str(detail)) if detail else ''}", flush=True)
 
 
 SCRIPT = """\
@@ -76,6 +86,7 @@ SCRIPT = """\
 3500 nodes @lottery_closed .lottery-window-loading
 3600 call knMiscOpen "usernames"
 3700 nodes @usernames .usernames-content
+3750 nodes @usernames_list .usernames-columns
 3800 call knViewPop 0
 3900 nodes @usernames_closed .usernames-content
 4000 quit
@@ -126,7 +137,97 @@ def text(log, label):
     return m.group(1).strip() if m else ""
 
 
+DAY = 86400
+DATE = r"[A-Z][a-z]{2} \d{1,2}, \d{4}"  # toLocaleDateString(undefined, {day, month: short, year}) as en-US
+C = r"(?:<!---->)?"  # a Svelte anchor comment, when the serializer keeps it
+NAMES = [
+    {"name": "Sidney", "state": "active", "original": True, "leave_release_secs": 365 * DAY},
+    {"name": "Kestrel", "state": "owned", "expires_secs": 400 * DAY, "release_secs": 3 * DAY + 4 * 3600 + 1800,
+     "renew_secs": 40 * DAY},
+    {"name": "Wren", "state": "grace", "release_secs": 2 * 3600 + 5 * 60 + 50},
+]
+
+
+def render_usernames(name, usernames):
+    with open(os.path.join(ROOT, "tools/uidiff/scenarios/popup-usernames.json")) as fp:
+        scen = json.load(fp)
+    scen["state"]["community"]["popups"]["usernames"] = usernames
+    path = os.path.join(WORK, name + ".json")
+    with open(path, "w") as fp:
+        json.dump(scen, fp)
+    html = os.path.join(WORK, name + ".html")
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
+                "KRUNKNATIVE_SCENARIO_HTML": html, "TZ": "UTC"})
+    r = subprocess.run([os.path.join(BUILD, "client_bin"), "--render-scenario", path, os.path.join(WORK, name + ".png")], cwd=ROOT,
+                       env=env, capture_output=True, text=True, timeout=240)
+    check("usernames %s: client_bin exits 0" % name, r.returncode == 0, (r.stdout + r.stderr)[-600:])
+    try:
+        with open(html, encoding="utf-8") as fp:
+            return fp.read()
+    except OSError:
+        check("usernames %s: the document was written" % name, False)
+        return ""
+
+
+def usernames_scenarios():
+    doc = render_usernames("swap", {"names": NAMES, "cooldownSecs": 4 * 60 + 7, "swapConfirm": "Kestrel",
+                                    "buy": 'a"b<c'})
+    check("usernames: the list renders", doc.count('class="username-row svelte-27udiy') == 3,
+          "rows=%d" % doc.count('class="username-row svelte-27udiy'))
+    check("usernames: the expiry line (Expires {date}, meta-left {t} left, Renewable from {date})",
+          re.search(r'<span class="username-meta svelte-27udiy">Expires %s <span class="meta-left svelte-27udiy">3d 4h left</span> '
+                    r'<span class="meta-left svelte-27udiy">Renewable from %s</span></span>' % (DATE, DATE), doc),
+          re.findall(r'<span class="username-meta svelte-27udiy">Expires.{0,200}', doc)[:1])
+    check("usernames: the grace row's release countdown (Xh Ym)",
+          re.search(r'<span class="username-grace svelte-27udiy">Pending release</span> Released in 2h 5m unless renewed</span>', doc),
+          re.findall(r'grace-meta.{0,200}', doc)[:1])
+    check("usernames: a grace row's Renew is io-button--accept",
+          re.search(r'class="io-button io-button--slim svelte-27udiy io-button--accept"[^>]*>Renew<', doc))
+    check("usernames: Renew while renewable later is disabled with the renew.cap title",
+          re.search(r'<button type="button" class="io-button io-button--slim svelte-27udiy" disabled(?:="")? '
+                    r'title="A username can be paid for up to 2 years ahead"', doc))
+    check("usernames: the cooldown line",
+          re.search(r'<div class="usernames-cooldown svelte-27udiy"><i class="material-icons svelte-27udiy">schedule</i> '
+                    r'You can switch again in 4m 07s</div>', doc),
+          re.findall(r'usernames-cooldown.{0,160}', doc)[:1])
+    check("usernames: Use is disabled while the cooldown runs",
+          re.search(r'io-button--accept-secondary svelte-27udiy" disabled(?:="")?[^>]*>Use<', doc))
+    check("usernames: the switch confirmation with the original name's leave note",
+          re.search(r'<div class="inline-confirm svelte-27udiy"><span>Switch to Kestrel\? You will sign in as Kestrel from now on\.</span> '
+                    r'<span class="leave-note svelte-27udiy">%s Sidney is your original username\. It\'s kept for 365 days after you switch '
+                    r'away, plus any renewals \(until %s\)' % (C, DATE), doc),
+          re.findall(r'Switch to Kestrel.{0,300}', doc)[:1])
+    check("usernames: Switch is io-button--accept-secondary, disabled during the cooldown",
+          re.search(r'class="io-button io-button--slim io-button--accept-secondary" disabled(?:="")?[^>]*>Switch<', doc))
+    check("usernames: the buy input's value is escaped", 'value="a&quot;b&lt;c"' in doc or "value=\"a&quot;b<c\"" in doc,
+          re.findall(r'id="knUnBuy".{0,80}', doc)[:1])
+    check("usernames: Buy is enabled for a non-empty name",
+          re.search(r'<button type="button" class="io-button io-button--accept buy-button svelte-27udiy"(?! disabled)[^>]*>Buy \$9\.99<', doc))
+
+    doc = render_usernames("renew", {"names": NAMES, "renewConfirm": "Kestrel", "buy": "Neo", "confirmBuy": True,
+                                     "held": "Trinity", "holdSecs": 14 * 60 + 5})
+    check("usernames: the renew confirmation",
+          re.search(r'<div class="inline-confirm svelte-27udiy"><span>Renew Kestrel for \$4\.99\? It will be valid until %s\.</span> '
+                    r'<div class="confirm-buttons svelte-27udiy"><button type="button" class="io-button io-button--slim"[^>]*>Cancel</button> '
+                    r'<button type="button" class="io-button io-button--slim io-button--accept"[^>]*>Renew \$4\.99</button>' % DATE, doc),
+          re.findall(r'Renew Kestrel.{0,300}', doc)[:1])
+    check("usernames: no cooldown line when none runs", "usernames-cooldown" not in doc)
+    check("usernames: the buy confirmation with the original name's note",
+          re.search(r'<span>Buy Neo for \$9\.99\? It\'s valid for 365 days; renew it for \$4\.99 to keep it longer\.</span> '
+                    r'<span class="leave-note svelte-27udiy">Your original username Sidney is kept for 365 days', doc),
+          re.findall(r'Buy Neo.{0,300}', doc)[:1])
+    check("usernames: the held name's card",
+          re.search(r'<div class="pending-card svelte-27udiy"><span>Trinity is held for you for 14m 05s</span> '
+                    r'<button type="button" class="io-button io-button--slim io-button--accept"[^>]*>Buy \$9\.99</button></div>', doc),
+          re.findall(r'pending-card.{0,200}', doc)[:1])
+
+    doc = render_usernames("none", {})
+    check("usernames: no list before the answer", "usernames-columns" not in doc and "usernames-content" in doc)
+
+
 def main():
+    usernames_scenarios()
     log, rc = run_client(SCRIPT)
     check("the client ran the whole script and quit cleanly", "usernames_closed" in log and rc == 0,
           "exit %s, log: %s" % (rc, os.path.join(WORK, "popups.log")))
@@ -143,6 +244,8 @@ def main():
     check("lottery: the failed request is shown", nodes(log, "lottery") == 1, "match=%d" % nodes(log, "lottery"))
     check("lottery: knMiscClose closes it", nodes(log, "lottery_closed") == 0, "match=%d" % nodes(log, "lottery_closed"))
     check("usernames: the Usernames modal shows", nodes(log, "usernames") == 1, "match=%d" % nodes(log, "usernames"))
+    check("usernames: the failed list request shows no list", nodes(log, "usernames_list") == 0,
+          "match=%d" % nodes(log, "usernames_list"))
     check("usernames: Close (knViewPop 0) closes it", nodes(log, "usernames_closed") == 0,
           "match=%d" % nodes(log, "usernames_closed"))
     failed = [r for r in results if not r]
