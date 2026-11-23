@@ -15,9 +15,11 @@ void hud_v10_tick(int chat_wanted);
 
 // GUI.endScreen.tabs.performance.gen() of v10 (Combat Earnings + Combat Record) for the current
 // match: kr_html is the earned-KR cell ("NONE" = nothing earned), the rest the local player's
-// end stats. Appends to out.
-void hud_v10_end_performance_html(char *out, size_t size, size_t *len, const char *kr_html, int score, int kills,
-                                  int deaths, int rank);
+// end stats (iiíïíïï, deob-10.0.7.js:25068: score_label = mode.scoreLabel || "Score", rank 0 when the
+// player has no end row: "#0"). no_score_xp (mode.noScoreXP): no "+N EXP" and no score on the XP bar.
+// Appends to out.
+void hud_v10_end_performance_html(char *out, size_t size, size_t *len, const char *kr_html, int score,
+                                  const char *score_label, int kills, int deaths, int rank, int no_score_xp);
 
 // The match-end signup incentive (#matchEndSignupIncentives, v10's signup rewards component with
 // origin match_end, v10_rewards.c) for a guest; hidden for an account. Called when the results come up.

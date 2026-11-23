@@ -316,6 +316,8 @@ const char *hud_endscreen_v10_end_button_html(const Client *client) {
     static char html[512]; // the builder copies it at once
     if (client && client->game.config.comp) {
         snprintf(html, sizeof(html), RETURN_HTML, I18N("kn.endgame.returnToKrunker", "Return to Krunker"));
+    } else if (client && client->game.mode && client->game.mode->config.no_score_xp) {
+        html[0] = 0; // `mode && mode.noScoreXP || (+= doubleXPButton)` (deob-10.0.7.js:210089): no score XP to double
     } else {
         snprintf(html, sizeof(html), DOUBLE_XP_HTML, I18N("window.endgame.player.doubleGainedXP", "Double XP"));
     }

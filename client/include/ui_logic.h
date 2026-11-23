@@ -474,6 +474,12 @@ typedef struct {
 void hud_ui_add_killfeed_kill(Client*, const HudFeedKill*);
 // getClanCol(clan, fallback) (deob-10.0.7.js:104139): the staff clans' gold, else fallback
 const char *hud_ui_clan_col(const char *clan, const char *fallback);
+// The end table's name cell (deob-10.0.7.js:226756-226764): the profile picture (a premium account's own), the name
+// linked to openPlayerProfile(account name) in its colour with the " [clan]" tag, then the creator / premium /
+// featured icons and the badge. player: the row's player (NULL: a player who left, a guest's row); raw: the account
+// name, shown: the name the row shows (streamer mode, Hide player names). Appends to out.
+void hud_ui_end_name_cell_html(const Player *player, const char *raw, const char *shown, const char *color, char *out,
+                               size_t size, size_t *len);
 // The local player's team as v10 keeps it (deob-10.0.7.js:225784-225787, :227301): the team the join gave us,
 // 1 while spectating with none; 0 outside team modes.
 int hud_ui_local_team(const Client*);

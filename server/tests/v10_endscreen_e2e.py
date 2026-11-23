@@ -51,6 +51,8 @@ SCRIPT = """
 15000 rects @holder .endButtonsHolder
 15000 rects @card #endTabbedView
 15000 nodes @dxp .doubleXPButton
+15000 text @deftab .tabHeader.selected
+15000 text @scorelabel #combatRecordLayout .crLabel
 15000 rects @dxp .doubleXPButton
 15500 nodes @rank1 .rank-display
 15500 text @name1 .rank-display .rank-value
@@ -77,6 +79,10 @@ SCRIPT = """
 21000 nodes @button-gone .collect-rewards-button
 21000 text @tab .tabHeader.selected
 21000 nodes @rewards-list .rewItemHolder
+21200 call GUI.endScreen.changeTab "leaderboard"
+21500 text @lbtab .tabHeader.selected
+21500 attr @lb-onclick onclick #endTable .endTableN
+21500 nodes @lb-pfp #endTable .endTablePfp
 22000 quit
 """
 
@@ -188,6 +194,17 @@ def run():
     tab = texts.get("tab", (0, ""))[1]
     check("the Rewards tab is selected afterwards", tab == "Rewards", repr(tab))
     check("the Rewards tab lists the two skins", (n("rewards-list") or 0) == 2, f"{n('rewards-list')} .rewItemHolder")
+    # GUI.endScreen.init: changeTab(spectating || isCustom ? leaderboard : performance) (deob-10.0.7.js:210069); the
+    # offline sandbox is not a custom game
+    check("the results open on the Performance tab (not spectating, not a custom game)",
+          texts.get("deftab", (0, ""))[1] == "Performance", repr(texts.get("deftab")))
+    check("Combat Record's score label is the mode's scoreLabel, \"Score\" by default (deob-10.0.7.js:25087)",
+          texts.get("scorelabel", (0, ""))[1] == "Score", repr(texts.get("scorelabel")))
+    onclick = re.search(r"\[input_script\] attr t=\d+ @lb-onclick n=(\d+) onclick=(.*)$", "\n".join(lines), re.M)
+    check("the Leaderboard tab's names open the player's profile (window.openPlayerProfile, deob-10.0.7.js:226760)",
+          texts.get("lbtab", (0, ""))[1] == "Leaderboard" and onclick is not None and int(onclick.group(1)) >= 1
+          and onclick.group(2).startswith("window.openPlayerProfile("), repr(onclick.group(0) if onclick else None))
+    check("each end table row has its profile picture (.endTablePfp)", (n("lb-pfp") or 0) >= 1, f"{n('lb-pfp')} .endTablePfp")
     # v10 lrmr (the rating reply's packet, here the input script's lrmr): the rank card and "+N RP" (g:195637, g:195699)
     check("the rank card shows the rank the match left the player at (Silver 1), held from the end animation",
           n("rank1") == 1 and texts.get("name1", (0, ""))[1] == "Silver 1", f"{n('rank1')} .rank-display, name {texts.get('name1')}")

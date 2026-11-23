@@ -235,6 +235,17 @@ static void test_table(void) {
     const GameModeConfig *ffa = mode_config(MODE_ID_FFA);
     CHECK(!ffa->has_fog_dist && !ffa->has_fog_col && !ffa->has_sky_col && !ffa->has_light_col && !ffa->has_amb_col, "FFA keeps the map lighting");
     CHECK(mode_config(MODE_ID_INFECT)->speed_mlt[2] == 1.15f && mode_config(MODE_ID_HIDE)->speed_mlt[1] == 0.8f, "spdMlt");
+    // teamNm<n>: teamOptions, else nameTeam<n>, else iìiïiiì[n - 1] for a blank name (deob-10.0.7.js:16647, :226386)
+    static Game named;
+    memset(&named, 0, sizeof(named));
+    snprintf(named.config.team_names[1], sizeof(named.config.team_names[1]), "Reds");
+    snprintf(named.config.team_names[2], sizeof(named.config.team_names[2]), "  ");
+    CHECK(!strcmp(mode_team_name(&named, 1), "Reds") && !strcmp(mode_team_name(&named, 2), "Bravo") &&
+          !strcmp(mode_team_name(&named, 3), "Charlie") && !strcmp(mode_team_name(NULL, 5), "Echo"),
+          "team names: nameTeam, else Alpha..Echo (%s, %s)", mode_team_name(&named, 1), mode_team_name(&named, 2));
+    const GameModeConfig *candy = mode_config(MODE_ID_CANDY);
+    CHECK(candy->score_stat && !strcmp(candy->score_stat, "candy") && candy->score_label && !strcmp(candy->score_label, "Candy") &&
+          !mode_config(MODE_ID_FFA)->score_stat && !mode_config(MODE_ID_FFA)->score_label, "scoreStat / scoreLabel: Candy Heist's (deob-10.0.7.js:106119-106120)");
     // v10.0.2 weaponOrder (v10:105622): v7.1.4's plus the Charge Rifle (28) after the Sniper
     static const int order[] = {2, 27, 16, 10, 4, 11, 21, 5, 3, 9, 1, 14, 6, 0, 28, 18, 7, 8, 13, 22, 12};
     const GameModeConfig *gun = mode_config(MODE_ID_GUN);

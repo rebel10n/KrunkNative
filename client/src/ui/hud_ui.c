@@ -789,8 +789,8 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
             if (rank == 1) {
                 hb_append(out, size, &len, "<div class=\"centerLeaderContainer\"><div class=\"centerLeaderContainerInner\">");
                 if (teams) {
-                    const GameModeConfig *mc = &client->game.mode->config;
-                    const char *team_name = mc->team_options[group] ? mc->team_options[group] : group ? "Bravo" : "Alpha"; // #teamNm1/#teamNm2
+                    // #teamNm<n>'s text (deob-10.0.7.js:227618): teamOptions, else the host's nameTeam, else Alpha / Bravo
+                    const char *team_name = mode_team_name(&client->game, group + 1);
                     hb_append(out, size, &len, "<div class='newLeaderTeam'>");
                     hb_append_escaped(out, size, &len, team_name);
                     hb_append(out, size, &len, "<div class='newLeaderTeamScore'>%d</div></div>", client->game.mode->team_scores[group + 1]);
@@ -2840,14 +2840,19 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     hud_add_chat_markup(markup);
 }
 
+static double g_end_junk; // matchRewardSummary.junk: this match's found Junk (deob-10.0.7.js:215210)
+
 // v7 io_foundJunk's line: io_addChat(-1, null, "<span style='color:#fff'>You</span> found <span
 // style='color:#cc51f8'>[" + amount + "]</span> Junk", 1). `line` is the server's plain
 // "You found [x.xx] Junk"; anything else shows as a plain game line.
 void hud_ui_found_junk(const char *line) {
-    if (!html_ui_available() || !html_ui_is_ready() || !line) return;
+    if (!line) return;
     static const char prefix[] = "You found [";
     const char *amount = !strncmp(line, prefix, sizeof(prefix) - 1) ? line + sizeof(prefix) - 1 : NULL;
     const char *end = amount ? strchr(amount, ']') : NULL;
+    // matchRewardSummary.junk += parseFloat(amount) (deob-10.0.7.js:215210): the end screen's Rewards tab
+    if (end && !strcmp(end, "] Junk")) g_end_junk += strtod(amount, NULL);
+    if (!html_ui_available() || !html_ui_is_ready()) return;
     if (!end || strcmp(end, "] Junk") != 0) {
         hud_ui_add_chat(NULL, line, NULL);
         return;
@@ -3635,10 +3640,55 @@ static void hud_end_title_frame(const int show, const double dt_ms) {
     html_dom_set_display(title, "block");
 }
 
+// iíìííìì(accid) (deob-10.0.7.js:24307-24312): the account's picture on the user-assets host, v = the hour
+static void hud_pfp_url(const int account_id, char *out, const size_t size) {
+    const double v = floor((double) time(NULL) * 1000.0 / 3600000.0) * 3600000.0;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !backend_url()[0])
+        snprintf(out, size, "https://user-assets.krunker.io/p%d/profile.png?v=%.0f", account_id, v);
+    else
+        snprintf(out, size, "%s/user-assets/p%d/profile.png?v=%.0f", backend_url(), account_id, v);
+}
+
+void hud_ui_end_name_cell_html(const Player *player, const char *raw, const char *shown, const char *color, char *out,
+                               const size_t size, size_t *len) {
+    const NetPlayerInfoPacket *acc = player ? player_accounts_get(player->uid) : NULL;
+    const int account = acc && acc->account_id > 0 && !player_names_extras_hidden(0);
+    // the flagIndex flag (:226757) and the rankedRank icon (:226763) are not in a KrunkNative player's data
+    char pfp[256] = "./img/player_pfp.png";
+    if (account && (acc->flags & NET_PLAYER_INFO_PREMIUM)) hud_pfp_url(acc->account_id, pfp, sizeof(pfp)); // premiumT
+    hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='%s'>", pfp);
+    if (player_names_hidden()) { // no profile link while names are hidden (it is the real account's)
+        hb_append(out, size, len, "<span class='endTableN' style='color:%s'>", color);
+        hb_append_escaped(out, size, len, shown ? shown : "");
+        hb_append(out, size, len, "</span>");
+        return;
+    }
+    hb_append(out, size, len, "<a class='endTableN' href='javascript:void(0)' onclick='window.openPlayerProfile(&quot;");
+    hb_append_escaped(out, size, len, raw ? raw : "");
+    hb_append(out, size, len, "&quot;)' style='color:%s'>", color);
+    hb_append_escaped(out, size, len, shown ? shown : "");
+    hb_append_clan(out, size, len, account ? acc->clan : NULL, "#fff");
+    hb_append(out, size, len, "</a>");
+    if (!player) return;
+    if (account && (acc->flags & NET_PLAYER_INFO_CREATOR))
+        hb_append(out, size, len, "<i class='material-icons' style='color:#993299;margin-top:-12px;font-size:28px;vertical-align:middle;'>verified</i>");
+    if (account && (acc->flags & NET_PLAYER_INFO_PREMIUM))
+        hb_append(out, size, len, "<i class='material-icons' style='color:#FBC02D;margin-top:-12px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+    if (account && (acc->flags & NET_PLAYER_INFO_VERIFIED))
+        hb_append(out, size, len, "<i class='material-icons' style='color:#40C4FF;margin-top:-12px;font-size:28px;vertical-align:middle;'>check_circle</i>");
+    const int badge = player->cosmetics_v7.badge;
+    if (!player_names_extras_hidden(0) && badge_get(badge)) {
+        char tex[64], url[160];
+        html_dom_asset_url(badge_texture(badge, tex, sizeof(tex)), url, sizeof(url));
+        hb_append(out, size, len, "<img src='%s' style='margin-top:-12px;font-size:28px;vertical-align:middle;width:26px;margin-left:2px;'>", url);
+    }
+}
+
 // GUI.endScreen (v7 src/ui/game.js): tab ids/names in their order.
 #define END_TAB_COUNT 4
 static const char *const END_TABS[END_TAB_COUNT][2] = {{"leaderboard", "Leaderboard"}, {"performance", "Performance"}, {"medals", "Medals"}, {"rewards", "Rewards"}};
 static int g_end_tab;                 // GUI.endScreen.currentTab (index into END_TABS)
+static int g_end_voting;              // GUI.endScreen.hasVoting: the end shows the next-match vote cards
 static const Client *g_end_client;    // the client the results describe (tab switches re-render)
 
 // config.endForm.reward (applied by the server to its endData.ed cell): "<span
@@ -3652,23 +3702,19 @@ static const char *hud_reward_html(const int reward, char *out, const size_t siz
 // f1917's row of #endTable (config.endStats: name, score, kills, deaths, reward): rank, the
 // pfp + profile link (local #fff, team mate rgba(255,255,255,0.6), else COLORS.teams[1]),
 // the stats and the actions cell (end_share.c: your share button, another account's report button; none for a guest).
-static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *name,
-                             const char *color, const int score, const int kills, const int deaths, const int reward, const int blank,
-                             const char *actions) {
+static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const Player *player,
+                             const char *raw, const char *name, const char *color, const int score, const int kills,
+                             const int deaths, const int reward, const int blank, const char *actions) {
     char shown[PLAYER_NAME_SIZE];
     hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td style='position: relative;'>", last ? "border-bottom:none" : "", rank);
-    hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>");
-    hb_append(out, size, len, "<a class='endTableN' href='./social.html?p=profile&q=");
-    hb_append_escaped(out, size, len, name);
-    hb_append(out, size, len, "' target='_blank' style='color:%s'>", color);
-    hb_append_escaped(out, size, len, streamer_name(name, shown, sizeof(shown))); // streamMode ? scrambleS(alias)
+    hud_ui_end_name_cell_html(player, raw, streamer_name(name, shown, sizeof(shown)), color, out, size, len); // streamMode ? scrambleS(alias)
     char cell[96], stat[3][16]; // blank: another player's stats are not shown (Hide player names)
     const char *reward_html = blank ? "" : hud_reward_html(reward, cell, sizeof(cell));
     for (int k = 0; k < 3; k++) {
         if (blank) stat[k][0] = 0;
         else snprintf(stat[k], sizeof(stat[k]), "%d", k == 0 ? score : k == 1 ? kills : deaths);
     }
-    hb_append(out, size, len, "</a></td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td>"
+    hb_append(out, size, len, "</td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td>"
                               "<td style='position: relative;'>%s</td>", stat[0], stat[1], stat[2], reward_html);
     hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'>%s</td></tr>", actions ? actions : "");
 }
@@ -3691,7 +3737,7 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
         index++;
         char actions[512];
         end_share_actions_html(actions, sizeof actions, is_you, ROW_INT("level") > 0, game_config_is_custom(&client->game), name);
-        hud_end_row_html(out, size, len, index, index >= count, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
+        hud_end_row_html(out, size, len, index, index >= count, NULL, name, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
                          ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you), actions);
 #undef ROW_INT
     }
@@ -3734,25 +3780,66 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
         const NetPlayerInfoPacket *acc = player_accounts_get(p->uid);
         end_share_actions_html(actions, sizeof actions, p == client->me, acc && acc->level > 0 && !player_names_extras_hidden(0),
                                game_config_is_custom(&client->game), hud_raw_player_name(client, p)); // the account name, not a shown alias
-        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, shown, color, p->score, (int) p->kills,
+        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, p, hud_raw_player_name(client, p), shown, color, p->score, (int) p->kills,
                          (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me), actions);
     }
     hb_append(out, size, len, "</table>");
 }
 
-// tabs.performance.gen() for a guest (no account: no battle pass / XP bar; W/L from this
-// match). stats = f1914: rank "#N", score, kills, deaths, funds (the reward, "NONE" without).
-static void hud_end_performance_html(const Client *client, char *out, const size_t size, size_t *len) {
-    const Player *players[HUD_BOARD_PLAYERS_MAX];
-    const int count = client->game.players ? hud_sorted_players(client, players, HUD_BOARD_PLAYERS_MAX) : 0;
-    int rank = 1;
-    for (int i = 0; i < count; i++) {
-        if (players[i] == client->me) rank = i + 1;
-    }
+static int hud_end_stat_index(const char *const *stats, const char *key) {
+    for (int i = 0; stats && stats[i]; i++)
+        if (!strcmp(stats[i], key)) return i;
+    return -1;
+}
+
+// The local player's end stats, iiíïíïï (deob-10.0.7.js:25068-25100), read off the server's end rows (MODE_END, in its
+// endSort order) with the mode's endStats: rank = the row's place (0 = no row: "#0"), score = the scoreStat cell
+// (mode.scoreStat, else "points" when listed, else "score"), kills = kills + melees, deaths = deaths + setbacks (a
+// key the endStats lack counts 0), funds = the reward cell, else MMR, else "NONE". 0 without the end rows.
+static int hud_end_my_stats(const Client *client, int *rank, int *score, int *kills, int *deaths, char *funds,
+                            const size_t funds_size) {
+    int uids[NET_MODE_END_MAX];
+    const int rows = hud_modes_end_rows(uids, NET_MODE_END_MAX);
     const Player *me = client->me;
-    const int score = me ? me->score : 0;
-    const int kills = me ? (int) me->kills : 0;
-    const int deaths = me ? (int) me->deaths : 0;
+    if (!rows || !me) return 0;
+    const char *const *stats = hud_modes_end_stats(client);
+    const GameModeConfig *mc = client->game.mode ? &client->game.mode->config : NULL;
+    *rank = 0;
+    for (int i = 0; i < rows; i++)
+        if (uids[i] == me->uid) *rank = i + 1;
+    char cell[96];
+#define END_CELL(key) (hud_end_stat_index(stats, key) >= 0 ? (hud_modes_end_cell(me, key, cell, sizeof(cell)), atoi(cell)) : 0)
+    const char *score_stat = mc && mc->score_stat ? mc->score_stat : hud_end_stat_index(stats, "points") >= 0 ? "points" : "score";
+    *score = END_CELL(score_stat);
+    *kills = END_CELL("kills") + END_CELL("melees");
+    *deaths = END_CELL("deaths") + END_CELL("setbacks");
+    const int mmr = END_CELL("MMR");
+#undef END_CELL
+    if (hud_end_stat_index(stats, "reward") >= 0) hud_modes_end_cell(me, "reward", funds, funds_size);
+    else if (mmr) snprintf(funds, funds_size, "%d", mmr);
+    else snprintf(funds, funds_size, "NONE");
+    return 1;
+}
+
+// tabs.performance.gen(): the Battle Pass section (an account's), then Account Level, Combat Earnings and Combat
+// Record (hud_v10.c) with stats = iiíïíïï (hud_end_my_stats). Without the server's end rows (an offline game, a
+// scenario) the stats come from the players: rank by the board order, the player's score / kills / deaths / reward.
+static void hud_end_performance_html(const Client *client, char *out, const size_t size, size_t *len) {
+    const Player *me = client->me;
+    const GameModeConfig *mc = client->game.mode ? &client->game.mode->config : NULL;
+    int rank = 1, score, kills, deaths;
+    char kr[96];
+    if (!hud_end_my_stats(client, &rank, &score, &kills, &deaths, kr, sizeof(kr))) {
+        const Player *players[HUD_BOARD_PLAYERS_MAX];
+        const int count = client->game.players ? hud_sorted_players(client, players, HUD_BOARD_PLAYERS_MAX) : 0;
+        for (int i = 0; i < count; i++) {
+            if (players[i] == client->me) rank = i + 1;
+        }
+        score = me ? me->score : 0;
+        kills = me ? (int) me->kills : 0;
+        deaths = me ? (int) me->deaths : 0;
+        hud_reward_html(me ? me->reward : 0, kr, sizeof(kr));
+    }
     // Battle Pass: #endBPLayout only when account && !isCustom && bpData (deob-10.0.7.js:209967; battlepass_ui.c). A
     // custom game's challenge can still bring a tmpBPData from kn_brain: the section stays hidden there.
     StrBuf bp = {0};
@@ -3763,9 +3850,9 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     } else {
         sb_free(&bp);
     }
-    // v10: Account Level, Combat Earnings + Combat Record (hud_v10.c)
-    char kr[96];
-    hud_v10_end_performance_html(out, size, len, hud_reward_html(me ? me->reward : 0, kr, sizeof(kr)), score, kills, deaths, rank);
+    // v10: Account Level, Combat Earnings + Combat Record (hud_v10.c); mode.scoreLabel, mode.noScoreXP (:209959, :209965)
+    hud_v10_end_performance_html(out, size, len, kr, score, mc && mc->score_label ? mc->score_label : "Score", kills, deaths,
+                                 rank, mc && mc->no_score_xp);
 }
 
 // ---- WP-E part 2c: the Medals and Rewards tabs, the completed challenge cards
@@ -3866,25 +3953,48 @@ static void hud_end_medals_html(char *out, const size_t size, size_t *len) {
     hb_append(out, size, len, "</div>");
 }
 
-// tabs.rewards.gen(): matchRewardSummary (skins; KrunkNative has no junk)
+// tabs.rewards.gen() (deob-10.0.7.js:210029-210052): matchRewardSummary, the found Junk's card first (rarity 2's
+// border, "<x.xx> Junk"), then the skins: a spray (type 4) as its animated sheet (one @keyframes sprayAnmD<frames>
+// per sheet length, 120 px a frame), a card (type 16) as .rewCardImg, the rest as .rewItemImg.
 static void hud_end_rewards_html(char *out, const size_t size, size_t *len) {
-    if (!g_end_skin_count) {
+    if (!(g_end_junk != 0.0) && !g_end_skin_count) {
         hb_append(out, size, len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any rewards this game!</div>");
         return;
     }
-    hb_append(out, size, len, "<div id=\"rewardTable\">");
+    hb_append(out, size, len, "<div id='rewardTable'>");
+    if (g_end_junk != 0.0)
+        hb_append(out, size, len, "<div class='rewItemHolder' style='border: 2px solid %s;'><img draggable='false' class='rewJunkImg' loading='lazy' "
+                                  "src='./img/frvr-ui/junk-symbol.svg'><div class='rewItemN'>%.2f Junk</div></div>",
+                  g_viewer_rarity_count > 2 ? g_viewer_rarities[2].color : "#fff", g_end_junk);
+    int frames[END_REWARD_SKINS_MAX], frame_n = 0;
     for (int i = 0; i < g_end_skin_count; i++) {
         const ViewerSkin *skin = viewer_skin(g_end_skins[i][0]);
         if (!skin) continue;
         char url[256];
         store_skin_preview(g_end_skins[i][0], url, sizeof(url));
         const int rarity = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
-        hb_append(out, size, len, "<div class='rewItemHolder' style='border: 2px solid %s;' onclick='viewItem(%d)'><img draggable='false' class='rewItemImg' loading='lazy' src='%s'><div class='rewItemN'>",
-                  g_viewer_rarities[rarity].color, g_end_skins[i][0], url);
+        hb_append(out, size, len, "<div class='rewItemHolder' style='border: 2px solid %s;' onclick='viewItem(%d)'>", g_viewer_rarities[rarity].color, g_end_skins[i][0]);
+        if (skin->type == 4) {
+            hb_append(out, size, len, "<div class='rewItemSprayImg' style='background: url(&quot;%s&quot;);", url);
+            if (skin->frames > 0) // iííìíìí(skin, "sprayAnmD") (:24393)
+                hb_append(out, size, len, "animation: sprayAnmD%d %.15gs steps(%d) infinite;", skin->frames, 1 + skin->frame_t / 1000.0, skin->frames);
+            hb_append(out, size, len, "'></div>");
+            int k = 0;
+            while (k < frame_n && frames[k] != skin->frames) k++;
+            if (skin->frames > 0 && k == frame_n) frames[frame_n++] = skin->frames;
+        } else {
+            hb_append(out, size, len, "<img draggable='false' class='%s' loading='lazy' src='%s'>", skin->type == 16 ? "rewCardImg" : "rewItemImg", url);
+        }
+        hb_append(out, size, len, "<div class='rewItemN'>");
         hb_append_escaped(out, size, len, skin->name ? skin->name : "");
         hb_append(out, size, len, "</div><div class='rewItemCnt'>x%d</div></div>", g_end_skins[i][1]);
     }
     hb_append(out, size, len, "</div>");
+    if (frame_n) {
+        hb_append(out, size, len, "<style>");
+        for (int k = 0; k < frame_n; k++) hb_append(out, size, len, "@keyframes sprayAnmD%d {100%%{background-position:-%dpx}}", frames[k], 120 * frames[k]);
+        hb_append(out, size, len, "</style>");
+    }
 }
 
 // GUI.endScreen.show(): .endCard with the tab headers (not spectating) and the current tab.
@@ -3904,7 +4014,8 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
     } else {
         g_end_tab = 0;
     }
-    hb_append(out, size, &len, "\n\t\t\t\t\t<div id=\"endLayoutHolder\" class=\"tabBody\">"); // v10: endLayoutHolder
+    // #endLayoutHolder: 545 px at most under the vote cards (deob-10.0.7.js:210087 `hasVoting ? max-height:545px`)
+    hb_append(out, size, &len, "\n\t\t\t\t\t<div id=\"endLayoutHolder\" class=\"tabBody\"%s>", g_end_voting ? " style=\"max-height:545px\"" : "");
     switch (g_end_tab) {
         case 1:
             hud_end_performance_html(client, out, size, &len);
@@ -3982,13 +4093,19 @@ static void hud_end_results(const Client *client) {
     // `endMidHolder.style.top = mts.length <= 1 ? "205px" : "310px"`: the results start right below
     // the vote cards (#matchVoteHolder, top 220px + 100px). Without a top, #endMidHolder hangs from
     // its `bottom: 150px` and a short leaderboard leaves a wide gap under the votes.
-    dom_style("endMidHolder", "top", lobby_vote_show() ? "310px" : "205px");
+    // endScreen.init's hasVoting = !(isRanked || mts.length <= 1) (deob-10.0.7.js:226711): the cards are up
+    g_end_voting = lobby_vote_show();
+    dom_style("endMidHolder", "top", g_end_voting ? "310px" : "205px");
     // f1916: the team totals of a team mode
     const GameMode *mode = client->game.mode;
     if (mode && mode->config.teams) {
         char html[512];
-        const char *n1 = mode->config.team_options[0] ? mode->config.team_options[0] : "Alpha";
-        const char *n2 = mode->config.team_options[1] ? mode->config.team_options[1] : "Bravo";
+        // teamNm1 / teamNm2's text (deob-10.0.7.js:226723-226724, :226386-226387)
+        char n1[64], n2[64];
+        size_t l1 = 0, l2 = 0;
+        n1[0] = n2[0] = 0;
+        hb_append_escaped(n1, sizeof(n1), &l1, mode_team_name(&client->game, 1));
+        hb_append_escaped(n2, sizeof(n2), &l2, mode_team_name(&client->game, 2));
         // the trophy goes to the END's winner team (v10 teamTotal0 / 1, deob-10.0.3.js:257452: `winTeam == 1`): MODE_END's
         // winner team once it is in. Only before it, the team is read off our own result; a public match's defeat for
         // everyone (winner -1, deob-10.0.3.js:221681) has MODE_END say -1, so no team gets one.
@@ -4011,8 +4128,10 @@ static void hud_end_results(const Client *client) {
 
     g_end_client = client;
     hud_endscreen_v10_results(hud_now_ms(client)); // endScreen.init: autoCollectTime = now + 10 s (5 s after the END)
-    // GUI.endScreen.init(): changeTab(spectating || isCustom ? "leaderboard" : "performance")
-    g_end_tab = spectate_active() || !client->me ? 0 : 1;
+    // GUI.endScreen.init(): changeTab(spectating || isCustom ? "leaderboard" : "performance") (deob-10.0.7.js:210069).
+    // The offline sandbox is hosted as custom on its server, but v10's sandbox is not custom (hud_votekick.c)
+    const int custom = game_config_is_custom(&client->game) && !client->game.is_sandbox && !client->offline;
+    g_end_tab = spectate_active() || !client->me || custom ? 0 : 1;
     hud_end_card_render(client);
     hud_v10_end_signup(1); // v10: a guest's signup incentive under the results (init's last callback)
 }
@@ -4156,6 +4275,7 @@ void hud_ui_hide_end_screen(Client *client) {
     // WP-E part 2c: a new game: endData.mdls, matchRewardSummary = {} and endChals.innerHTML = ""
     memset(&g_end_medals, 0, sizeof(g_end_medals));
     g_end_skin_count = 0;
+    g_end_junk = 0.0;
     hud_endscreen_v10_reset(); // the held skins, the overlay and the collect state of that end
     battlepass_ui_end_clear(); // v7.1.4: the next end screen's bpData comes with its own commit
     if (!html_ui_available() || !html_ui_is_ready()) return;

@@ -80,10 +80,12 @@ static void ap(char *out, const size_t size, size_t *len, const char *fmt, ...) 
     if (n > 0) *len = *len + (size_t) n < size ? *len + (size_t) n : size - 1;
 }
 
-// tabs.performance.gen() (v10:203117), the part after the Battle Pass / Account Level sections:
-// funds ("NONE" -> "+0 KR"), the gained score as EXP, Score / Kills / Deaths / Rank / KDR.
+// tabs.performance.gen() (deob-10.0.7.js:209954-210006), the part after the Battle Pass section: Account Level,
+// funds ("NONE" -> "+0 KR"), the gained score as EXP (not in a noScoreXP mode), <scoreLabel> / Kills / Deaths /
+// Rank / KDR.
 void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, const char *kr_html, const int score,
-                                  const int kills, const int deaths, const int rank) {
+                                  const char *score_label, const int kills, const int deaths, const int rank,
+                                  const int no_score_xp) {
     const char *cell = "display: flex; align-items: center; justify-content: center; padding: 10px 15px;";
     const AccountInfo *acc = active_account();
     if (acc) {
@@ -94,7 +96,8 @@ void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, con
         const double base = lvl > 1 ? (lvl / k) * (lvl / k) : 0.0;
         const double next = ((lvl + 1) / k) * ((lvl + 1) / k);
         const double prog = acc->level_prog;
-        const double gained = next > base ? score / (next - base) * 100.0 : 0.0;
+        // getNewScoreProg(account, noScoreXP ? 0 : score) (:209999)
+        const double gained = next > base && !no_score_xp ? score / (next - base) * 100.0 : 0.0;
         const int over = prog > 100.0;
         int icon = (int) (lvl % 2 ? lvl + 1 : lvl) - 1; // Math.max(Math.min(101, roundToNearest(2) - 1), 0)
         icon = icon < 0 ? 0 : icon > 101 ? 101 : icon;
@@ -115,11 +118,14 @@ void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, con
     ap(out, size, len, "<div class='crStat' style=\"%s\"><div class='crVal'>", cell);
     if (!kr_html || !kr_html[0] || !strcmp(kr_html, "NONE")) ap(out, size, len, "<span style=\"color:#F8C55C\">+0</span> KR");
     else ap(out, size, len, "%s", kr_html);
-    ap(out, size, len, "</div></div><div class='crStat' style=\"%s\"><div class='crVal'><span style=\"color:#F8C55C\">+%d</span> EXP</div></div>",
-       cell, score);
+    ap(out, size, len, "</div></div>");
+    if (!no_score_xp) // :210006 `noScoreXP ? '' : +EXP`
+        ap(out, size, len, "<div class='crStat' style=\"%s\"><div class='crVal'><span style=\"color:#F8C55C\">+%d</span> EXP</div></div>",
+           cell, score);
     ap(out, size, len, "<div class=\"otherEarnings\"></div><div id=\"raidPromoContainer\"></div></div></div>");
     ap(out, size, len, "<div class='endSection'><div class='endTitle'>Combat Record</div><div id='combatRecordLayout'>");
-    ap(out, size, len, "<div class='crStat'><div class='crLabel'>Score</div><div class='crVal'>%d</div></div>", score);
+    ap(out, size, len, "<div class='crStat'><div class='crLabel'>%s</div><div class='crVal'>%d</div></div>",
+       score_label && score_label[0] ? score_label : "Score", score);
     ap(out, size, len, "<div id='kdLayout'><div class='crStat'><div class='crLabel'>Kills</div><div class='crVal'>%d</div></div>", kills);
     ap(out, size, len, "<div class='crStat'><div class='crLabel'>Deaths</div><div class='crVal'>%d</div></div></div>", deaths);
     ap(out, size, len, "<div class='crStat'><div class='crLabel'>Rank</div><div class='crVal'>#%d</div></div>", rank);

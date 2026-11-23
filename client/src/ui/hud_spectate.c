@@ -23,6 +23,7 @@
 #include <html_ui.h>
 #include <render_settings.h>
 #include <nav_overlay.h> // KrunkNative: the followed bot's AI state line (nav_overlay_bot_status)
+#include <player_accounts.h> // the followed player's level, clan and featured flag (NET_PACKET_PLAYER_INFO)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -343,18 +344,30 @@ static void hs_update_stats(const Client *client) {
     char width[32];
     hs_number(pct, width, sizeof(width));
 
-    // Guests: level 0, no flag, no clan, not featured (v7 f1766 writes #specStatsInner).
+    // #specStatsInner (deob-10.0.7.js:216367): the class icon, the flag (flagIndex: not in a KrunkNative player's
+    // data, f_-1), the level, the name with its " [clan]" in getClanCol(clan, rgba(255,255,255,0.5)), the featured
+    // check and the health bar. A guest: level 0, no clan, not featured.
+    const NetPlayerInfoPacket *acc = player_accounts_get(target->uid);
+    const int account = acc && acc->account_id > 0 && !player_names_extras_hidden(0);
+    const int level = account && acc->level > 0 ? acc->level : 0;
+    const char *clan = account ? player_names_clan(acc->clan) : NULL;
     char html[1536];
     size_t len = (size_t) snprintf(html, sizeof(html),
         "<img class='spectPIcon' src='textures/classes/icon_%d.png' /><span id='f_-1' class='specFlag'></span>"
-        "<div style='display:inline-block;width:200px;vertical-align:top'><div class='specLevelBox' id='lvl_0' "
-        "style='color:white;'>0</div><span class='specPHead' id='s_%d'>", target->class_index, target->uid);
+        "<div style='display:inline-block;width:200px;vertical-align:top'><div class='specLevelBox' id='lvl_%d' "
+        "style='color:white;'>%d</div><span class='specPHead' id='s_%d'>", target->class_index, level, level, target->uid);
     char pname[PLAYER_NAME_SIZE];
     hs_append_escaped(html, sizeof(html), &len, hs_name(target, pname, sizeof(pname)));
-    snprintf(html + len, sizeof(html) - len,
-        "</span><i class='material-icons specVerified' style='display:none'>check_circle</i><div id='spectHPB'>"
-        "<span id='spectHPV'>%d | %d</span><div id='spectHPBI' style='width:%s%%;background-color:%s'></div></div></div>",
-        hp, mhp, width, color);
+    if (clan && clan[0] && len < sizeof(html)) {
+        len += (size_t) snprintf(html + len, sizeof(html) - len, "<span style='color:%s'> [", hud_ui_clan_col(clan, "rgba(255,255,255,0.5)"));
+        if (len < sizeof(html)) hs_append_escaped(html, sizeof(html), &len, clan);
+        if (len < sizeof(html)) len += (size_t) snprintf(html + len, sizeof(html) - len, "]</span>");
+    }
+    if (len < sizeof(html))
+        snprintf(html + len, sizeof(html) - len,
+            "</span><i class='material-icons specVerified' style='display:%s'>check_circle</i><div id='spectHPB'>"
+            "<span id='spectHPV'>%d | %d</span><div id='spectHPBI' style='width:%s%%;background-color:%s'></div></div></div>",
+            account && (acc->flags & NET_PLAYER_INFO_VERIFIED) ? "inline-block" : "none", hp, mhp, width, color);
 
     const HtmlElem stats = html_dom_by_id("specStatsInner");
     if (stats) html_dom_set_html(stats, html);

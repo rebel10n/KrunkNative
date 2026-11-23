@@ -320,7 +320,8 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
     [MODE_ID_CANDY] = {BASE, .id = MODE_ID_CANDY, .key = CANDY_HEIST_MODE_KEY, .name = CANDY_HEIST_MODE_NAME,
         .alias = CANDY_HEIST_MODE_KEY, .end_stats = k_stats_candy, .leader_stats = k_lead_candy,
         .game_time = (float) CANDY_HEIST_GAME_TIME, .force_class = CANDY_HEIST_CLASS, .no_pickups = 1, .no_scr_limit = 1,
-        .no_score_xp = 1, .no_profile_stats = 1, .no_winner = 1, .prevent_custom = 1, .event = CANDY_HEIST_EVENT_ID},
+        .no_score_xp = 1, .no_profile_stats = 1, .no_winner = 1, .prevent_custom = 1, .event = CANDY_HEIST_EVENT_ID,
+        .score_stat = "candy", .score_label = "Candy"}, // scoreStat / scoreLabel (deob-10.0.7.js:106119-106120)
 };
 
 int mode_count(void) {
@@ -415,7 +416,8 @@ int mode_team_class(const Game *game, const int team) {
 
 // teamNm1..5: teamOptions, else the host's team names (nameTeam1..5), else "Team N".
 const char *mode_team_name(const Game *game, const int team) {
-    static const char *const k_default[MODE_TEAMS] = {"", "Team 1", "Team 2", "Team 3", "Team 4", "Team 5"};
+    // a blank nameTeam falls back to iìiïiiì[team - 1] (deob-10.0.7.js:16647, :226386-226387)
+    static const char *const k_default[MODE_TEAMS] = {"", "Alpha", "Bravo", "Charlie", "Delta", "Echo"};
     if (team < 1 || team >= MODE_TEAMS) return "";
     if (team <= 2 && game && game->mode && game->mode->config.team_options[team - 1]) return game->mode->config.team_options[team - 1];
 

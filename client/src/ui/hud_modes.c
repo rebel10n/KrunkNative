@@ -17,6 +17,9 @@
 #include <spectate.h>
 #include <cJSON.h>
 #include <lobby_ui.h> // the comp menu (comp_ui.c)
+#include <end_share.h>   // the end table's share / report buttons (deob-10.0.7.js:226776-226777)
+#include <game_config.h> // game_config_is_custom: no share button in a custom game
+#include <player_accounts.h>
 
 Player *client_find_player(Client*, int uid);                      // client/src/main.c
 void client_add_player_mesh(Client*, Player*, int render_you);      // client/src/main.c
@@ -869,22 +872,19 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
         if (left) player = &ghost;
 
         // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode
-        char name[PLAYER_NAME_SIZE * 6], shown_name[PLAYER_NAME_SIZE * 6], shown[PLAYER_NAME_SIZE];
+        char shown[PLAYER_NAME_SIZE];
         char pn[PLAYER_NAME_SIZE];
         const char *raw_name = player_names_shown(player->uid, player == client->me, player->name, pn, sizeof(pn)); // Hide player names
-        html_escape(raw_name, name, sizeof(name));
-        html_escape(streamer_name(raw_name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
+        streamer_name(raw_name, shown, sizeof(shown));
         const char *color = player == client->me ? "#fff" : !left && player->team && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
 
         len += (size_t) snprintf(html + len, size - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
                                  r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
         for (int i = 1; i < stat_count; i++) {
-            if (!strcmp(stats[i], "name") && player_names_hidden()) { // no profile link while names are hidden (it is the real account's)
-                len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
-                                         "<span class='endTableN' style='color:%s'>%s</span></td>", color, shown_name);
-            } else if (!strcmp(stats[i], "name")) {
-                len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
-                                         "<a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
+            if (!strcmp(stats[i], "name")) { // the flag, picture, profile link, clan and badges (deob-10.0.7.js:226756-226764)
+                len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'>");
+                hud_ui_end_name_cell_html(left ? NULL : player, player->name, shown, color, html, size, &len);
+                len += (size_t) snprintf(html + len, size - len, "</td>");
             } else {
                 char value[64];
                 if (!strcmp(stats[i], "dmg") && row && row->dmg >= 0) snprintf(value, sizeof(value), "%d", (int) row->dmg); // endForm.dmg
@@ -893,7 +893,13 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
                 len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'>%s</td>", value);
             }
         }
-        len += (size_t) snprintf(html + len, size - len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
+        // the actions cell (deob-10.0.7.js:226776-226777): your own row's share button (not in a custom game), another
+        // account's report button; none for a guest viewer (end_share.c)
+        char actions[512];
+        const NetPlayerInfoPacket *acc = left ? NULL : player_accounts_get(player->uid);
+        end_share_actions_html(actions, sizeof actions, player == client->me, acc && acc->level > 0 && !player_names_extras_hidden(0),
+                               game_config_is_custom(&client->game), player->name);
+        len += (size_t) snprintf(html + len, size - len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'>%s</td></tr>", actions);
     }
 
     return 1;

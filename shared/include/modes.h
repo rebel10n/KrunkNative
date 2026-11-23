@@ -328,6 +328,8 @@ typedef struct {
     unsigned char no_score_xp:1;     // noScoreXP (deob-10.0.4.js:105917, Candy Heist): no score XP
     unsigned char no_profile_stats:1;// noProfileStats: no games / kills / deaths / wins, no account.stats (transferStats),
                                      // no `lt` challenge progress (updateAccounts, transferStats, checkLeave, challenges.update)
+    const char *score_stat;          // scoreStat: the endStats key of the end screen's Score (NULL = "points" if listed, else "score")
+    const char *score_label;         // scoreLabel: that stat's label on the Performance tab (NULL = "Score")
     float spec_max_d;                // specMaxD: the spectator's follow distance cap (0 = config.specMaxD 160)
 } GameModeConfig;
 
