@@ -67,11 +67,11 @@ Office choice is named as such.
 
 | call | request | used by |
 |---|---|---|
-| `listDemos({off, q})` | `GET /kpd/demos?off=&q=` | Demos window (policeRes 4, :223198-223270) |
+| `listDemos({off, q})` | `GET /kpd/demos?off=&q=` | Demos window (policeRes 4, :223195-223224) |
 | `demoInfo(tok, ct)` | `GET /kpd/demos/<tok>?ct=` | `openDemoLink` popup (:229818-229833) |
 | `downloadDemo(tok)` | `GET /kpd/demos/<tok>/download` (raw bytes) | `watchDemo` (:229694-229702) |
 | `vote(tok, ct, verdict)` | `POST /kpd/demos/<tok>/vote {ct, verdict}` | the resolve area |
-| `reviewers()` | `GET /kpd/reviewers` | Reviewers window |
+| `reviewers()` | `GET /kpd/reviewers` | Reviewers window (:223225-223250) |
 
 `copyDemoLink` copies `<origin>/?demo=<tok>&sus=<ct>` (:229835-229845); the page opens it at load
 (:230167).

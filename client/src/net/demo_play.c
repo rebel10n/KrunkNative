@@ -355,7 +355,8 @@ static void apply_seek(Client *client, const int kf_index, const uint32_t target
     g_play.playhead = target;
     g_play.next = i;
     g_play.ended_flag = 1;
-    if (same_map) g_play.round_started = 1; // the players were re-added: the camera follows again (hud_replay)
+    // no onRoundStart for a same-map seek (_applySeek, deob-10.0.7.js:201934-201954): the menu and popups stay, and the
+    // camera finds the suspect again at the next 1.5 s re-follow (:229810-229812)
 }
 
 void demo_play_seek(Client *client, uint32_t t_ms) {
