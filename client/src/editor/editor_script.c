@@ -939,6 +939,7 @@ void editor_script_popup(void) {
         focus_keep(g_sw.tab);
         return;
     }
+    if (ed_mp_script_gate()) return; // in a multiplayer room: once the script lock is ours (editor_mp.c)
     build();
     if (!g_sw.win) return;
     g_sw.open = 1;
@@ -965,6 +966,7 @@ void ed_script_close(void) {
     update_script(1);
     flush_pending();
     g_sw.open = 0;
+    ed_mp_script_closed(); // the room gets the scripts and the lock back
     for (int i = 0; i < SW_SIDES; i++) html_dom_blur(g_sw.ta[i]);
     html_dom_set_display(g_sw.win, "none");
     if (g_sw.compile_timer) html_timer_cancel(g_sw.compile_timer);

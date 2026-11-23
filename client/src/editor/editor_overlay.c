@@ -15,7 +15,7 @@ Canvas2D *ed_overlay_canvas(void) { return g_canvas; }
 void ed_overlay_render(const double now_s) {
     // EditorOverlay.render: clearRect, then the FPS counter: frames in the last 1000 ms at
     // (18, h - 5), 13px GameFont, #00ff00 over a #2e2e2e stroke (lineWidth 2, round joins)
-    if (!editor_setting_bool("showFPS") && !ed_customgui_enabled() && !g_canvas) return;
+    if (!editor_setting_bool("showFPS") && !ed_customgui_enabled() && !ed_mp_active() && !g_canvas) return;
     if (!g_canvas) g_canvas = c2d_create();
     if (!g_canvas) return;
     const float scale = (g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1) * (g_ed.elem_scale > 0 ? g_ed.elem_scale : 1);
@@ -47,6 +47,7 @@ void ed_overlay_render(const double now_s) {
         g_frame_count = 0;
     }
     ed_customgui_draw(g_canvas, cw, ch); // if (enabled) HELPER.updateCustomGUI (editor_customgui.c)
+    ed_mp_draw_labels(g_canvas, cw, ch); // the room's editors' name sprites (editor_mp.c)
     c2d_composite(g_canvas); // over the view viewport (the caller's glViewport)
 }
 

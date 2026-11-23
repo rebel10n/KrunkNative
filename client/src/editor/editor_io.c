@@ -81,6 +81,7 @@ void ed_map_clear(void) {
     ed_panel_refresh_all();
     g_ed.dirty_counts = 1;
     ed_mark_changed();
+    ed_mp_map_cleared(); // dispatch("mapCleared"): the room's host clears the others' maps
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +183,9 @@ int ed_map_import(const char *text) {
         editor_message("Failed to import map: not valid JSON.");
         return 0;
     }
+    ed_mp_import(1); // mapImportStart / mapImportEnded: the room gets the whole map
     const int ok = import_doc(e);
+    ed_mp_import(0);
     cJSON_Delete(e);
     if (!ok) editor_message("Failed to import map: no map data.");
     return ok;

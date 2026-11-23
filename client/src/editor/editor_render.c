@@ -953,6 +953,7 @@ void ed_render_overlays(void) {
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
     draw_entity_previews();
+    ed_mp_draw(); // the room's editors and their selections (editor_mp.c)
     draw_tool_volumes();
     draw_real_hitboxes();
     draw_object_boxes();
@@ -976,6 +977,28 @@ void ed_render_overlays(void) {
     glDepthFunc(GL_LESS);
     glDepthMask(GL_TRUE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+// editor_mp.c: a translucent box (unit box -0.5..0.5 through m) in one colour, the depth kept
+void ed_render_tinted_box(const float m[16], const int hex, const float alpha) {
+    push_box_tris(&g_tris, m);
+    glDepthMask(GL_FALSE);
+    flush(&g_tris, GL_TRIANGLES, hex_rgba(hex, alpha), 1);
+    glDepthMask(GL_TRUE);
+}
+
+// editor_mp.c: world point -> CSS px of a cw x ch canvas over the view (the last overlay pass's
+// camera); *px_per_unit = screen px of one world unit at that depth. 0 behind the camera.
+int ed_render_project_point(const vec3 w, const int cw, const int ch, float *sx, float *sy, float *px_per_unit) {
+    const float *m = g_vp;
+    const float x = m[0] * w.x + m[1] * w.y + m[2] * w.z + m[3];
+    const float y = m[4] * w.x + m[5] * w.y + m[6] * w.z + m[7];
+    const float ww = m[12] * w.x + m[13] * w.y + m[14] * w.z + m[15];
+    if (ww <= 1e-5f) return 0;
+    *sx = (x / ww * 0.5f + 0.5f) * (float) cw;
+    *sy = (1.0f - (y / ww * 0.5f + 0.5f)) * (float) ch;
+    *px_per_unit = g_ed.proj->camera.projection_matrix[5] * 0.5f * (float) ch / ww;
+    return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -1143,6 +1166,7 @@ void ed_gizmo_drag(const double fb_x, const double fb_y) {
 void ed_gizmo_end(void) {
     if (!g_ed.gizmo.active) return;
     g_ed.gizmo.active = 0;
+    ed_mp_transform_end(g_ed.proj->selected); // transformControl "mouseUp": the room's transformEnd
     g_ed.dirty_panel = 1; // transformControl "mouseUp": updateObjConfigGUI
 }
 
@@ -1231,4 +1255,5 @@ void ed_rotate_end(const int cancel) {
     ed_history_batch_end(g_rot.batch);
     g_rot.batch = 0;
     g_ed.dirty_panel = 1; // updateObjConfigGUI: the inspector shows the new rotation
+    if (!cancel) ed_mp_transform_end(o);
 }

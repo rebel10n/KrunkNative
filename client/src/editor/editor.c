@@ -60,7 +60,7 @@ static const char k_default_settings[] =
     "\"uiScale\":1,\"borderVisuals\":true,\"testInEditor\":false,\"autoLog\":true,\"showFPS\":false,\"darkMode\":true,\"fowardKey\":\"W\","
     "\"backwardKey\":\"S\",\"leftKey\":\"A\",\"rightKey\":\"D\",\"upKey\":\"E\",\"downKey\":\"Q\",\"faceModeKey\":\"M\",\"groupModeKey\":\"N\","
     "\"wireframeKey\":\"\xc2\xbc\",\"translateKey\":\"1\",\"rotateKey\":\"2\",\"scaleKey\":\"3\",\"transformSpaceKey\":\"\xc3\x80\",\"placeHolderKey\":\"P\","
-    "\"quickAddKey\":\"X\",\"scriptingKey\":\"0\",\"textureKey\":\"T\",\"createCubeKey\":\"C\",\"createGateKey\":\"G\",\"createTriggerKey\":\"R\","
+    "\"quickAddKey\":\"X\",\"scriptingKey\":\"0\",\"textureKey\":\"T\",\"createCubeKey\":\"C\",\"createGateKey\":\"G\",\"createTriggerKey\":\"R\",\"mpPlayerListKey\":\"TAB\",\"mpChatKey\":\"ENTER\","
     "\"scriptFont\":13,\"quickAddButtons\":[{\"name\":\"Cube\",\"desc\":\"Basic building block\",\"item\":0},{\"name\":\"Spawn Point\","
     "\"desc\":\"Allows you to place where the player spawns\",\"item\":5},{\"name\":\"Custom Asset\",\"desc\":\"Import community made assets\","
     "\"cust\":true},{\"name\":\"Placeholder\",\"desc\":\"Stretch over objects to form a group\",\"place\":true},{\"type\":\"blank\"},"
@@ -860,6 +860,7 @@ static void install_handlers(void) {
     ed_quickgui_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_project_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_script_install(table, &count, sizeof(table) / sizeof(table[0]));
+    ed_mp_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_ai_install(table, &count, sizeof(table) / sizeof(table[0])); // the AI panel (editor_ai.c)
     ed_entities_install(table, &count, sizeof(table) / sizeof(table[0])); // entities / archetypes (editor_entities.c)
     html_ui_set_handlers(table, count, NULL, h_fallback);
@@ -993,6 +994,7 @@ static void page_enter(Client *client, const char *query) {
     if (playbar && !html_dom_by_id("mpToolbarBtn"))
         html_dom_insert_html(playbar, HTML_INSERT_BEFORE_END,
                              "<div id=\"mpToolbarBtn\" class=\"playbarItemR\" title=\"Multiplayer Editing\" onclick=\"showWindow(16)\"><i id=\"multiplayerIcon\" class=\"material-icons\">group_add</i></div>");
+    ed_mp_page_enter(query); // KE.multiplayer: #mp-chat, the socket's mp* frames, ?room= (editor_mp.c)
     editor_toggle_menu(0);
 
     // the Welcome window opens at boot unless a map comes with the page (checkEdit's
@@ -1034,6 +1036,7 @@ static void page_leave(Client *client) {
     if (!g_ed.active) return;
     ed_rotate_end(0); // a turn in progress is kept
     ed_script_close(); // the script window's edits into the map before it is stored
+    ed_mp_page_leave(); // out of the multiplayer room
     ed_bus_stop();
     ed_views_fini();
 #ifndef __EMSCRIPTEN__
@@ -1465,6 +1468,7 @@ static void run_script_text(const char *text) {
         }
         else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
         else if (ed_tools_script(cmd, arg)) {} // tool: (editor_tools.c, tools_check.py)
+        else if (!strcmp(cmd, "mp") && arg) ed_mp_script(arg); // mp: (editor_mp.c, tools/editor/mp_e2e.py)
         else if (!strcmp(cmd, "entity") && arg) ed_entities_script(arg); // entity: (editor_entities.c, entities_e2e.py)
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
         else if (!strcmp(cmd, "texlist")) editor_texture_list(); // the T-key picker (model variants / textures)
@@ -1484,6 +1488,8 @@ static void run_script_text(const char *text) {
                 } else break;
             }
             if (k[0] >= 'a' && k[0] <= 'z' && !k[1]) page_key(g_ed.client, 'A' + (k[0] - 'a'), 0, GLFW_PRESS, mods);
+            else if (!strcmp(k, "tab")) page_key(g_ed.client, GLFW_KEY_TAB, 0, GLFW_PRESS, mods);
+            else if (!strcmp(k, "enter")) page_key(g_ed.client, GLFW_KEY_ENTER, 0, GLFW_PRESS, mods);
         }
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c
         else if (ed_net_script(cmd, arg)) {} // net: (editor_net.c, tools/editor/publish_e2e.py)
@@ -1610,6 +1616,7 @@ static void page_tick(Client *client, const float now, const float dt) {
     tele_tick();
     ed_window_tick(dt);
     ed_script_tick();
+    ed_mp_tick(now);
     ed_ai_tick();
     ed_backup_tick(now);
     ed_toolbar_account_check(); // _toolbar.show() again on login / account change
@@ -1883,6 +1890,15 @@ static int key_is(const int key, const char *setting) {
     return (code && cp == code) || (key >= 32 && key < 127 && cp == key);
 }
 
+// v10's named keys (IDX:12839-12850: TAB 9, ENTER 13, ESCAPE 27), else key_is
+static int mp_key_is(const int key, const char *setting) {
+    const char *v = ed_json_str(g_ed.settings, setting, "");
+    if (!strcmp(v, "TAB")) return key == GLFW_KEY_TAB;
+    if (!strcmp(v, "ENTER")) return html_key_is_enter(key);
+    if (!strcmp(v, "ESCAPE")) return html_key_is_escape(key);
+    return key_is(key, setting);
+}
+
 // the keys that move the camera (and Shift) do not end a turn; Ctrl combinations (undo, save) do
 static int rotate_keeps_key(const int key, const int mods) {
     if (mods & GLFW_MOD_CONTROL) return 0;
@@ -2026,6 +2042,7 @@ static int page_key(Client *client, const int key, const int scancode, const int
         if (key_is(key, "createGateKey")) create_near(ED_PREFAB_GATE);
         if (key_is(key, "createTriggerKey")) create_near(ED_PREFAB_TRIGGER);
     }
+    ed_mp_key(mp_key_is(key, "mpPlayerListKey"), mp_key_is(key, "mpChatKey")); // only in a room (editor_mp.c)
     return 1;
 }
 

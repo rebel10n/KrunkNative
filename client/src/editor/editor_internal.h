@@ -674,3 +674,32 @@ int ed_entities_script(const char *arg);                 // KRUNKNATIVE_EDITOR_S
 int ed_entity_drop_dangling(cJSON *records);             // replaceObject: removes eid / ar records without an archetype; the count
 int ed_entity_strip_instances(cJSON *records);           // exportGroup: removes records with an eid; the count
 void ed_entities_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+
+// ---- editor_mp.c: v10 KE.multiplayer (rooms of editors on one map, kn_brain's editor_rooms.c)
+cJSON *ed_mp_settings(void);                             // localStorage "mp_settings" (editor_panels.c)
+void ed_mp_settings_save(void);
+void ed_mp_install(HtmlHandlerEntry *table, size_t *count, size_t max);
+void ed_mp_page_enter(const char *query);                // the page's ?room= (web), the socket listener
+void ed_mp_page_leave(void);
+void ed_mp_tick(double now);                             // the camera every 200 ms, the URL's room on connect
+int ed_mp_key(int list_key, int chat_key);               // Toggle Player List / Focus Chat in a room; 1 = handled
+void ed_mp_window_gen(int index, EdBuf *h);              // windows 16 Multiplayer / 17 Players
+void ed_mp_script(const char *arg);                      // KRUNKNATIVE_EDITOR_SCRIPT "mp:..."
+int ed_mp_active(void);                                  // in a room on the shown map
+void ed_mp_draw(void);                                   // the others' boxes and selection outlines (ed_render_overlays)
+void ed_mp_draw_labels(struct Canvas2D *c, int cw, int ch); // their name labels (ed_overlay_render)
+// the editor's events (dispatch(...)): editor_objects.c, editor_io.c, editor_render.c, editor_script.c
+void ed_mp_object_added(EditorObject *o);
+void ed_mp_object_removed(EditorObject *o);
+void ed_mp_object_selected(EditorObject *o);
+void ed_mp_group_removed(const EditorGroup *g);
+void ed_mp_mute(int delta);                              // removals that dispatch nothing (removeGroup's)
+void ed_mp_transform_end(EditorObject *o);
+void ed_mp_property_changed(EditorObject *o, const cJSON *before);
+void ed_mp_map_cleared(void);
+void ed_mp_import(int start);
+int ed_mp_script_gate(void);                             // scriptPopup in a room: 1 = waits for the lock
+void ed_mp_script_closed(void);
+// editor_render.c helpers for editor_mp.c
+void ed_render_tinted_box(const float m[16], int hex, float alpha);
+int ed_render_project_point(vec3 w, int cw, int ch, float *sx, float *sy, float *px_per_unit);

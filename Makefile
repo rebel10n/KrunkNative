@@ -1175,6 +1175,10 @@ editor-lighting-test: build ## Editor view lighting after a bright game (ACES / 
 editor-publish-test: build ## Editor publishing / My Games / asset windows against a local kn_brain (headless; needs config/config.json DB creds or KN_TEST_DB_DRIVER=sqlite)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_e2e.py $(DEBUG_DIR)
 
+.PHONY: editor-mp-e2e
+editor-mp-e2e: build ## Editor multiplayer rooms vs v10.0.7: windows 16/17, Controls > Multiplayer, join / host / chat / sync / script lock against a scratch kn_brain (headless; tools/editor/mp_e2e.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/mp_e2e.py --build $(DEBUG_DIR)
+
 .PHONY: editor-publish-ui-e2e
 editor-publish-ui-e2e: build ## Test play, Templates / Welcome / Publishing Guide windows, toolbar menus, asset UV channels vs v10.0.2 (headless, no brain; tools/editor/publish_ui_e2e.py)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_ui_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)

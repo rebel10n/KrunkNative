@@ -774,6 +774,11 @@ static void window_controls(EdBuild *b) {
         ed_gui_folder_begin(b, "File", 0, 0, 0, "controls.file");
         key_line(b, "Paste preset JSON", "Shift + Click (w/ Objectpainter)");
         ed_gui_folder_end(b, 0);
+        // v10 blueprint.multiplayer (IDX:13011-13037): in a room, TAB / ENTER (editor_mp.c)
+        ed_gui_folder_begin(b, "Multiplayer", 0, 0, 0, "controls.multiplayer");
+        key_bind(b, "Toggle Player List", "mpPlayerListKey", NULL);
+        key_bind(b, "Focus Chat", "mpChatKey", NULL);
+        ed_gui_folder_end(b, 0);
     }
     edb_add(&b->html, "</div>");
 }
@@ -881,12 +886,12 @@ static EdCtl *div_switch(EdBuild *b, const char *name, const char *key, const ch
     return c;
 }
 
-// v10's multiplayer settings (E10:9416-9468: localStorage "mp_settings", read by KE.multiplayer;
-// the Settings window's Multiplayer tab, IDX:21705-21760). Kept for parity; there is no editor room
-// server (window_multiplayer).
+// v10's multiplayer settings (E10:9483-9505: localStorage "mp_settings", read by KE.multiplayer,
+// editor_mp.c; the Settings window's Multiplayer tab, IDX:21705-21760). Every stored key loads
+// (the room code keeps _lastRoomId there too).
 static cJSON *g_mp_settings;
 
-static cJSON *mp_settings(void) {
+cJSON *ed_mp_settings(void) {
     if (g_mp_settings) return g_mp_settings;
     g_mp_settings = cJSON_Parse("{\"name\":\"Player\",\"renderOutlines\":true,\"playerOpacity\":0.6,\"streamerMode\":false,\"autoChatScroll\":true}");
     const int n = html_storage_get("mp_settings", NULL, 0);
@@ -897,6 +902,7 @@ static cJSON *mp_settings(void) {
         cJSON_ArrayForEach(it, saved) {
             if (cJSON_GetObjectItemCaseSensitive(g_mp_settings, it->string))
                 cJSON_ReplaceItemInObjectCaseSensitive(g_mp_settings, it->string, cJSON_Duplicate(it, 1));
+            else cJSON_AddItemToObject(g_mp_settings, it->string, cJSON_Duplicate(it, 1));
         }
         cJSON_Delete(saved);
     }
@@ -904,11 +910,27 @@ static cJSON *mp_settings(void) {
     return g_mp_settings;
 }
 
-static void on_mp_setting(EdCtl *c, const cJSON *v) {
-    (void) c; (void) v;
-    char *text = cJSON_PrintUnformatted(mp_settings());
+void ed_mp_settings_save(void) {
+    char *text = cJSON_PrintUnformatted(ed_mp_settings());
     if (text) html_storage_set("mp_settings", text);
     free(text);
+}
+
+// updateSetting: the name is (v || "").slice(0, 32), the opacity parseFloat(v).round(1)
+static void on_mp_setting(EdCtl *c, const cJSON *v) {
+    if (c->json && c->key && !strcmp(c->key, "name") && cJSON_IsString(v)) {
+        char name[160];
+        size_t i = 0;
+        for (int cp = 0; v->valuestring[i] && i + 1 < sizeof(name); i++) {
+            if (((unsigned char) v->valuestring[i] & 0xc0) != 0x80 && ++cp > 32) break;
+            name[i] = v->valuestring[i];
+        }
+        name[i] = 0;
+        if (strcmp(name, v->valuestring)) ed_json_set_str(c->json, c->key, name);
+    } else if (c->json && c->key && !strcmp(c->key, "playerOpacity") && cJSON_IsNumber(v)) {
+        cJSON_ReplaceItemInObjectCaseSensitive(c->json, c->key, cJSON_CreateNumber(round(v->valuedouble * 10) / 10));
+    }
+    ed_mp_settings_save();
 }
 
 static void window_settings(EdBuild *b) {
@@ -991,7 +1013,7 @@ static void window_settings(EdBuild *b) {
         ed_gui_button_line(b, "Reset Snapping", "Reset", snapping_reset, 0);
         ed_gui_folder_end(b, 0);
     } else if (g_settings_tab == 4) {
-        cJSON *m = mp_settings();
+        cJSON *m = ed_mp_settings();
         edp_json_text(b, "Player Name", m, "name", "", 0, on_mp_setting);
         edp_json_switch(b, "Render Coop Outlines", m, "renderOutlines", 0, on_mp_setting);
         edp_json_slider(b, "Player Opacity", m, "playerOpacity", 0, 1, 0.1, 0, on_mp_setting);
@@ -1414,29 +1436,6 @@ static void window_backups(EdBuild *b) {
     edb_add(h, "</div>");
 }
 
-// windows[15] / [16] (v10 KE.multiplayer, E10:9595-9646): collaborative editing rooms on Krunker's
-// editor socket (mpHost / mpJoin ... on editor.krunker.io/ws). Intentional difference: Krunker Box
-// Office has no editor room server, so the window is v10's "no room" form and Host / Join say so.
-static const char *const k_mp_unavailable = "Multiplayer editing needs an editor room server, which Krunker Box Office does not have yet.";
-
-static void window_multiplayer(EdBuild *b) {
-    edb_add(&b->html, "<div style=\"padding:10px\">\n\t\t\t<div style=\"margin-bottom:15px;padding:10px;background:rgba(255,200,0,0.1);border:1px solid rgba(255,200,0,0.3);border-radius:4px;color:#ffd700;font-size:12px\">\n\t\t\t\tOnly invite people you trust - they have full control over the map\n\t\t\t</div>"
-                      "\n\t\t\t<div style=\"margin-bottom:10px\">\n\t\t\t\t<label style=\"display:block;margin-bottom:4px;color:#aaa;font-size:12px\">Max Players</label>\n\t\t\t\t<input type=\"range\" id=\"mpMaxPlayers\" min=\"2\" max=\"20\" value=\"5\" style=\"width:100%\" />\n\t\t\t\t<span id=\"mpMaxPlayersVal\" style=\"color:#fff\">5</span>\n\t\t\t</div>"
-                      "\n\t\t\t<div style=\"margin-bottom:10px\">\n\t\t\t\t<label style=\"display:block;margin-bottom:4px;color:#aaa;font-size:12px\">Room Password (optional)</label>\n\t\t\t\t<input type=\"text\" id=\"mpPassword\" placeholder=\"Leave empty for no password\"\n\t\t\t\t\tstyle=\"width:100%;box-sizing:border-box;padding:6px;background:#333;color:#fff;border:1px solid #555;border-radius:3px\" />\n\t\t\t</div>"
-                      "\n\t\t\t<div style=\"margin-bottom:10px\">\n\t\t\t\t<label style=\"color:#aaa;font-size:12px\">\n\t\t\t\t\t<input type=\"checkbox\" id=\"mpCloseOnDisconnect\" checked /> Close room when host disconnects\n\t\t\t\t</label>\n\t\t\t</div>"
-                      "\n\t\t\t<div style=\"display:flex;gap:8px\">\n\t\t\t\t<button class=\"mpBtnPrimary\" onclick=\"KE.multiplayer.hostFromUI()\" style=\"flex:1\">Host Room</button>\n\t\t\t\t<button class=\"mpBtnPrimary\" onclick=\"KE.multiplayer.joinPrompt()\" style=\"flex:1\">Join Room</button>\n\t\t\t</div>\n\t\t</div>");
-}
-
-static void window_mp_players(EdBuild *b) {
-    edb_add(&b->html, "<div class=\"windowHeader\"><div>Players [0/?]</div></div><div style=\"padding:10px\"></div>");
-}
-
-static int h_mp_unavailable(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user; (void) ev; (void) args; (void) argc;
-    editor_message(k_mp_unavailable);
-    return 1;
-}
-
 void ed_window_show(const int index) {
     EdBuild b;
     ed_gui_begin(&b, PANEL_WINDOW);
@@ -1452,8 +1451,7 @@ void ed_window_show(const int index) {
         case 12: window_videos(&b, 0); break;
         case 13: window_videos(&b, 1); break;
         case 15: window_backups(&b); break;
-        case 16: window_multiplayer(&b); break;
-        case 17: window_mp_players(&b); break;
+        case 16: case 17: ed_mp_window_gen(index, &b.html); break; // editor_mp.c (Multiplayer, Players)
         case 2: case 5: case 7: case 9: case 14: ed_net_window_gen(index, &b.html); break; // editor_net.c (Assets, Mods, Textures, Sounds, Maps)
         default: break;
     }
@@ -1535,8 +1533,6 @@ void ed_panels_install(HtmlHandlerEntry *table, size_t *count, const size_t max)
         {"GUI.panel.state.lock", h_lock},
         {"windows.0.switchTab", h_switch_tab},
         {"windows.2.switchTab", h_settings_tab},
-        {"KE.multiplayer.hostFromUI", h_mp_unavailable},
-        {"KE.multiplayer.joinPrompt", h_mp_unavailable},
         {"windows.3.toggleEditMode", h_quick},
         {"windows.3.clickButton", h_quick},
         {"windows.3.deleteButton", h_quick},

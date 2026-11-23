@@ -562,6 +562,7 @@ void ed_obj_add(EditorObject *o, const int no_select, const int history) {
     cJSON_Delete(o->history);
     o->history = cJSON_Duplicate(o->data, 1);
     if (history) ed_history_add('a', o, NULL);
+    ed_mp_object_added(o); // dispatch("objectAdded"): the multiplayer room (editor_mp.c)
     if (!no_select) ed_obj_select(o);
 }
 
@@ -573,6 +574,7 @@ void ed_obj_remove(EditorObject *o, const int keep_selection, const int history)
         if (g_ed.proj->objects[i] == o) index = i;
     }
     if (index == g_ed.proj->count) return;
+    ed_mp_object_removed(o); // dispatch("objectRemoved")
     memmove(&g_ed.proj->objects[index], &g_ed.proj->objects[index + 1], (g_ed.proj->count - index - 1) * sizeof(EditorObject *));
     g_ed.proj->count--;
     g_ed.proj->obj_count[ed_obj_count_class(o)]--;
@@ -606,6 +608,7 @@ void ed_objects_clear(void) {
 }
 
 void ed_obj_select(EditorObject *o) {
+    ed_mp_object_selected(o); // objectSelected / objectDeSelected
     g_ed.proj->selected = o;
     g_ed.gizmo.active = 0;
     g_ed.dirty_panel = 1; // updateObjConfigGUI
@@ -667,12 +670,15 @@ void ed_remove_group(EditorObject *e) {
     if (!g_ed.proj->group_count || !(e = e ? e : g_ed.proj->selected)) return;
     EditorGroup *group = ed_group_of(e);
     if (!group) return;
+    ed_mp_group_removed(group); // dispatch("groupRemoved"); the removals below dispatch nothing
+    ed_mp_mute(1);
     for (size_t i = 0; i < group->count; i++) {
         EditorObject *m = ed_obj_find(group->objects[i]);
         if (m) ed_obj_remove(m, 1, 1);
     }
     group_drop(group);
     ed_obj_remove(e, 0, 1);
+    ed_mp_mute(-1);
 }
 
 void ed_obj_delete_selected(void) {
@@ -1292,6 +1298,7 @@ void ed_history_poll(void) {
     for (size_t i = 0; i < g_ed.proj->count; i++) {
         EditorObject *o = g_ed.proj->objects[i];
         if (o->history && !cJSON_Compare(o->history, o->data, 1)) {
+            ed_mp_property_changed(o, o->history); // objectPropertyChanged (p / r / s go as transformEnd)
             ed_history_add('u', o, o->history);
             o->history = NULL;
             ed_mark_changed();
