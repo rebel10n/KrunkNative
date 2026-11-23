@@ -34,6 +34,10 @@ void streams_shutdown(struct Brain *b);
  * (each {game:{name}, streamerNames:[...]}; a non-array gives []). */
 cJSON *streams_normalise(const cJSON *data, const cJSON *featured, int promo, const cJSON *campaigns);
 
+/* streams.event_tags ({"<login>": ["tag", ...]}, logins case-insensitive): the event chips v10's featured cards draw
+ * (stream.eventTags, deob-10.0.7.js:148565-148573), set on the matching streams of streams_normalise()'s object. */
+void streams_event_tags(cJSON *out, const cJSON *tags);
+
 /* The app access token of POST https://id.twitch.tv/oauth2/token: 1 = read (token, lifetime in
  * seconds), 0 = not an answer with an access_token. */
 int streams_parse_token(const char *body, char *token, size_t cap, long *expires_in);
@@ -43,10 +47,11 @@ int streams_parse_game_id(const char *body, char *id, size_t cap);
 
 /* ---- stream thumbnails (stream_thumbs.c: GET /streams/thumb?url=)
  *
- * No client asks this route now: a card's Twitch preview (thumbnailUrl) is its <img src>, as v10 sets it,
- * and the native engine fetches it itself (client/src/ui/remote_images.c). The route fetches an image from
- * an allow-listed Twitch CDN host (https only, no redirects, size-capped, cached) and answers it as a data:
- * URL. Pure checks below (tests/test_streams.c). */
+ * The native client's Live Streams cards load a Twitch preview through this route (their <img src>,
+ * client/src/ui/v10_menu.c, loaded by client/src/ui/remote_images.c). The route fetches an image from an
+ * allow-listed Twitch CDN host (https only, no redirects, size-capped, cached) and answers the image itself
+ * (its JPEG / PNG bytes and type); a refusal or failure is JSON {success: false, error, message}. Pure checks
+ * below (tests/test_streams.c). */
 
 int stream_thumbs_init(struct Brain *b);
 void stream_thumbs_shutdown(struct Brain *b);

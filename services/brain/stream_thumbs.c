@@ -2,9 +2,10 @@
  * services/brain/stream_thumbs.c - GET /streams/thumb?url= (and /api/streams/thumb): the Live
  * Streams cards' Twitch previews for the native client (streams.h).
  *
- * No client asks this route now: a card's <img src> is its thumbnailUrl, as v10 sets it, and the
- * native engine fetches http(s) images itself (client/src/ui/remote_images.c). The route answers
- * {success, data: {url, image: "data:image/jpeg;base64,..."}}, the image as a data: URL.
+ * The native client's Live Streams cards use this route as their <img src> for a Twitch-hosted preview
+ * (client/src/ui/v10_menu.c), which its image loader (client/src/ui/remote_images.c) reads as an image: the
+ * answer is the preview's bytes under its type (image/jpeg or image/png); a refusal or failure is JSON
+ * {success: false, error, message}. The cache keeps each preview as a data: URL.
  *
  * It is not an open proxy: the URL must be https on an allow-listed Twitch CDN host
  * (streams.thumbs.hosts, default static-cdn.jtvnw.net) with a plain image path
@@ -88,6 +89,33 @@ static void reply_error(kn_http_req *req, const int status, const char *code, co
     cJSON_Delete(o);
 }
 
+/* standard base64 (no line breaks) -> malloc'd bytes, NULL on a bad character */
+static unsigned char *b64_decode(const char *in, size_t *out_len) {
+    const size_t n = strlen(in);
+    unsigned char *out = malloc(n / 4 * 3 + 3);
+    if (!out) return NULL;
+    uint32_t acc = 0;
+    int bits = 0;
+    size_t o = 0;
+    for (size_t i = 0; i < n && in[i] != '='; i++) {
+        const char c = in[i];
+        int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+              : c == '+' ? 62 : c == '/' ? 63 : -1;
+        if (v < 0) {
+            free(out);
+            return NULL;
+        }
+        acc = acc << 6 | (uint32_t) v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[o++] = (unsigned char) (acc >> bits & 0xff);
+        }
+    }
+    *out_len = o;
+    return out;
+}
+
 static void reply_slot(kn_http_req *req, const Slot *s) {
     if (!kn_http_req_alive(req)) {
         kn_http_respond_error(req, 500, "gone");
@@ -99,13 +127,20 @@ static void reply_slot(kn_http_req *req, const Slot *s) {
                     too_large ? "the thumbnail is larger than the brain serves" : "the thumbnail could not be fetched");
         return;
     }
-    cJSON *o = cJSON_CreateObject(), *d = cJSON_CreateObject();
-    cJSON_AddBoolToObject(o, "success", 1);
-    cJSON_AddStringToObject(d, "url", s->url);
-    cJSON_AddStringToObject(d, "image", s->image);
-    cJSON_AddItemToObject(o, "data", d);
-    brain_reply_json(req, 200, o);
-    cJSON_Delete(o);
+    /* the image itself (the card's <img src> is this route, v10's <img src> is the thumbnail, deob-10.0.7.js:148584):
+     * the cached data: URL's bytes under its type */
+    const char *comma = strchr(s->image, ','), *semi = strchr(s->image, ';');
+    char mime[48] = "image/jpeg";
+    if (semi && semi - s->image > 5 && (size_t) (semi - s->image - 5) < sizeof mime)
+        snprintf(mime, sizeof mime, "%.*s", (int) (semi - s->image - 5), s->image + 5);
+    size_t len = 0;
+    unsigned char *bytes = comma ? b64_decode(comma + 1, &len) : NULL;
+    if (!bytes) {
+        reply_error(req, 502, "ThumbnailUnavailable", "the thumbnail could not be fetched");
+        return;
+    }
+    kn_http_respond(req, 200, mime, bytes, len);
+    free(bytes);
 }
 
 /* ------------------------------------------------------------------ fetch (worker thread) */

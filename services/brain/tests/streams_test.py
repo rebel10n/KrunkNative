@@ -288,30 +288,38 @@ def scenario_cache(port, tw):
     check(tw.streams_calls - before <= 1, "a cached answer makes no upstream call (%d calls)" % (tw.streams_calls - before))
 
 
-def thumb(port, url):
-    st, body = http_get(port, "/streams/thumb?url=" + urllib.parse.quote(url, safe=""))
+def thumb_raw(port, url):
+    """(status, content type, body bytes) of /streams/thumb?url="""
+    req = urllib.request.Request("http://127.0.0.1:%d/streams/thumb?url=%s" % (port, urllib.parse.quote(url, safe="")))
     try:
-        return st, json.loads(body)
-    except ValueError:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", ""), e.read()
+
+
+def thumb(port, url):
+    """a refusal / failure: (status, its JSON); an image: (status, {})"""
+    st, _ctype, body = thumb_raw(port, url)
+    try:
+        return st, json.loads(body.decode())
+    except (ValueError, UnicodeDecodeError):
         return st, {}
 
 
 def scenario_thumbs(port, cdn):
     cdn_host = "https://static-cdn.jtvnw.net"
     big = "/previews-ttv/live_user_big_streamer-440x248.jpg"
-    st, ans = thumb(port, cdn_host + big)
-    img = (ans.get("data") or {}).get("image") or ""
-    check(st == 200 and ans.get("success") is True, "an allow-listed preview is answered (HTTP %d)" % st)
-    check(img.startswith("data:image/jpeg;base64,") and base64.b64decode(img.split(",", 1)[1]) == THUMB_A,
-          "the answer is the preview's data: URL, byte for byte")
-    check((ans.get("data") or {}).get("url") == cdn_host + big, "the answer names the URL it is for")
+    # the image itself: the card's <img src> is this route and the client's image loader reads it as an image
+    st, ctype, img = thumb_raw(port, cdn_host + big)
+    check(st == 200, "an allow-listed preview is answered (HTTP %d)" % st)
+    check(ctype.startswith("image/jpeg") and img == THUMB_A, "the answer is the preview, image/jpeg, byte for byte (%s)" % ctype)
     check(cdn.count(big) == 1, "the CDN was asked once (%d)" % cdn.count(big))
     for _ in range(3):
-        st2, ans2 = thumb(port, cdn_host + big)
-    check(st2 == 200 and ans2 == ans and cdn.count(big) == 1, "asked again: served from the cache (CDN hits %d)" % cdn.count(big))
-    st, ans = thumb(port, cdn_host + "/previews-ttv/live_user_zeta_one-440x248.jpg")
-    check(st == 200 and base64.b64decode(((ans.get("data") or {}).get("image") or ",").split(",", 1)[1]) == THUMB_B,
-          "a second stream's preview is its own")
+        st2, ctype2, img2 = thumb_raw(port, cdn_host + big)
+    check(st2 == 200 and img2 == img and cdn.count(big) == 1, "asked again: served from the cache (CDN hits %d)" % cdn.count(big))
+    st, ctype, img = thumb_raw(port, cdn_host + "/previews-ttv/live_user_zeta_one-440x248.jpg")
+    check(st == 200 and img == THUMB_B, "a second stream's preview is its own")
 
     before = sum(cdn.hits.values())
     refused = [
@@ -348,10 +356,14 @@ def scenario_thumbs(port, cdn):
 
 
 def scenario_unconfigured(port):
+    # no Twitch source: no live streams, but the configured promo and drop campaigns, so v10's promo card shows
     st, body = http_get(port, "/streams/top?cb=2")
     ans = json.loads(body)
-    check(st == 200 and ans.get("success") is True and ans.get("data") == {"streams": []},
-          "no client secret: the empty list {success, data: {streams: []}} (HTTP %d)" % st)
+    data = ans.get("data") or {}
+    check(st == 200 and ans.get("success") is True and data.get("streams") == [],
+          "no client secret: no live streams (HTTP %d)" % st)
+    check(data.get("promo") is True and isinstance(data.get("dropCampaigns"), list),
+          "no client secret: the configured promo and drop campaigns still come (%s)" % body[:200])
 
 
 def main():

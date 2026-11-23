@@ -46,6 +46,16 @@ int main(void) {
     CHECK(cJSON_IsFalse(cJSON_GetObjectItem(a, "featured")));
     CHECK(!strcmp(cJSON_GetObjectItem(a, "provider")->valuestring, "twitch"));
     CHECK(cJSON_GetObjectItem(a, "eventTags") == NULL); /* the official answer carries no eventTags key */
+    /* streams.event_tags: the chips of v10's featured cards, by login (case-insensitive); others keep no key */
+    cJSON *tags = cJSON_Parse("{\"Zeta_One\":[\"KPL\",\"\",7,\"Finals\"],\"alpha\":[]}");
+    streams_event_tags(out, tags);
+    const cJSON *zt = cJSON_GetObjectItem(b, "eventTags");
+    CHECK(cJSON_IsArray(zt) && cJSON_GetArraySize(zt) == 2);
+    CHECK(zt && !strcmp(cJSON_GetArrayItem(zt, 0)->valuestring, "KPL") && !strcmp(cJSON_GetArrayItem(zt, 1)->valuestring, "Finals"));
+    CHECK(cJSON_GetObjectItem(a, "eventTags") == NULL && cJSON_GetObjectItem(c, "eventTags") == NULL);
+    streams_event_tags(out, NULL); /* no config: nothing changes */
+    CHECK(cJSON_GetArraySize(cJSON_GetObjectItem(b, "eventTags")) == 2);
+    cJSON_Delete(tags);
     cJSON_Delete(out);
     cJSON_Delete(featured);
     cJSON_Delete(campaigns);

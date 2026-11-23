@@ -123,6 +123,25 @@ cJSON *streams_normalise(const cJSON *data, const cJSON *featured, int promo, co
     return out;
 }
 
+void streams_event_tags(cJSON *out, const cJSON *tags) {
+    cJSON *list = cJSON_GetObjectItemCaseSensitive(out, "streams");
+    cJSON *e = NULL;
+    cJSON_ArrayForEach(e, list) {
+        const char *login = str_of(e, "username", "");
+        const cJSON *t = NULL, *mine = NULL;
+        cJSON_ArrayForEach(t, tags) {
+            if (t->string && !strcasecmp(t->string, login)) mine = t;
+        }
+        if (!cJSON_IsArray(mine) || !cJSON_GetArraySize(mine)) continue;
+        cJSON *arr = cJSON_CreateArray();
+        cJSON_ArrayForEach(t, mine) {
+            if (cJSON_IsString(t) && t->valuestring[0]) cJSON_AddItemToArray(arr, cJSON_CreateString(t->valuestring));
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(e, "eventTags");
+        cJSON_AddItemToObject(e, "eventTags", arr);
+    }
+}
+
 int streams_parse_token(const char *body, char *token, const size_t cap, long *expires_in) {
     if (!body || !token || cap < 2) return 0;
     cJSON *root = cJSON_Parse(body);

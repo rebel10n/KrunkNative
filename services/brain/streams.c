@@ -9,8 +9,9 @@
  * libcurl, like ai.c); its result comes back to the loop thread through kn_loop_post_threadsafe.
  * The answer is cached for streams.cache_s; while the upstream is down the last good list is
  * served. The client secret is sent only in the token request's body and is never logged.
- * With no Twitch source (streams.enabled off, or no client id / secret) the answer is the empty
- * list {success, data: {streams: []}}, not a 503 (reply_empty).
+ * With streams.enabled off the answer is the empty list {success, data: {streams: []}}; with no client
+ * id / secret it is no live streams with the configured promo and drop campaigns (reply_empty).
+ * streams.event_tags ({login: [tag]}) gives streams their event chips (streams_event_tags).
  */
 #include "streams.h"
 
@@ -50,6 +51,7 @@ typedef struct {
     cJSON *featured;        /* streams.featured: logins (a copy; read by the fetch thread too) */
     int promo;              /* streams.promo */
     cJSON *campaigns;       /* streams.drop_campaigns (a copy) */
+    cJSON *event_tags;      /* streams.event_tags (a copy): {login: [tag]} */
 } Cfg;
 
 static Cfg C;
@@ -96,6 +98,8 @@ static void config_load(const kn_config *cfg) {
     C.promo = kn_config_bool(cfg, "streams.promo", 1);
     cJSON_Delete(C.campaigns);
     C.campaigns = cJSON_Duplicate(kn_config_get(cfg, "streams.drop_campaigns"), 1);
+    cJSON_Delete(C.event_tags);
+    C.event_tags = cJSON_Duplicate(kn_config_get(cfg, "streams.event_tags"), 1);
 }
 
 static int configured(void) { return C.enabled && C.client_id[0] && C.client_secret[0]; }
@@ -232,6 +236,7 @@ static void job_fetch(Job *j) {
     if (code == 200 && b.data) {
         cJSON *root = cJSON_Parse(b.data);
         j->data = streams_normalise(cJSON_GetObjectItemCaseSensitive(root, "data"), C.featured, C.promo, C.campaigns);
+        if (j->data) streams_event_tags(j->data, C.event_tags);
         cJSON_Delete(root);
         j->ok = j->data != NULL;
     } else {
@@ -305,13 +310,16 @@ static int start_job(void) {
     return 1;
 }
 
-/* No Twitch source on this server (streams.enabled off, or no client id / secret): the empty list the
- * menu shows as "no live streams", the shape v10.0.3 reads (data.streams an array, deob-10.0.3.js:162140;
- * promo and dropCampaigns are optional there, 162158-162159). Not a 503: v10.0.3 throws on a 5xx
- * (29806) and shows its error state, and there is no outage to report here. */
+/* No Twitch source on this server: streams.enabled off answers the empty list {success, data: {streams: []}}, which
+ * hides the overlay; no client id / secret answers no live streams with the configured promo and drop campaigns
+ * (streams.promo, streams.drop_campaigns), so the promo card v10 draws when promo is true (deob-10.0.7.js:146756-146758,
+ * :148362) shows without Twitch too. Not a 503: v10 throws on a 5xx and there is no outage to report here. */
 static void reply_empty(kn_http_req *req) {
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddItemToObject(data, "streams", cJSON_CreateArray());
+    cJSON *data = C.enabled ? streams_normalise(NULL, C.featured, C.promo, C.campaigns) : NULL;
+    if (!data) {
+        data = cJSON_CreateObject();
+        cJSON_AddItemToObject(data, "streams", cJSON_CreateArray());
+    }
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "success", 1);
     cJSON_AddItemToObject(o, "data", data);
@@ -376,4 +384,6 @@ void streams_shutdown(Brain *b) {
     C.featured = NULL;
     cJSON_Delete(C.campaigns);
     C.campaigns = NULL;
+    cJSON_Delete(C.event_tags);
+    C.event_tags = NULL;
 }
