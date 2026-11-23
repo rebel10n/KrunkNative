@@ -65,6 +65,7 @@ const Weapon g_war_machine = {
     .no_comp = 1,
     .no_reload = 1,
     .no_swap = 1,
+    .no_mag_reserve = 1, // magReserve: 0 (deob-10.0.7.js:102290): no reserve in finiteAmmo modes
     .remove_on_empty = 1,
     .no_proj_spread = 1,
     .projectile_config = {.speed = 0.75f, .gravity = 0.001f, .range = 1000.0f, .damage = 60.0f, .explode = 70.0f, .explode_damage = 65.0f, .no_impact = 1},

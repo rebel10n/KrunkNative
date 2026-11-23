@@ -188,8 +188,10 @@ int strike_weapon_apply(Weapon *w, const char *key, const double value) {
     else if (!strcmp(key, "burstC")) w->burst_count = (unsigned int) value;
     else if (!strcmp(key, "type")) w->type = (unsigned char) value;
     else if (!strcmp(key, "minRec")) w->min_rec = (int) value;
-    else if (!strcmp(key, "magReserve")) w->mag_reserve = (int) value;
-    else return apply_flag(w, key, value != 0.0);
+    else if (!strcmp(key, "magReserve")) {
+        w->mag_reserve = (int) value;
+        w->no_mag_reserve = value == 0.0; // magReserve 0: no reserve (getReserveMags returns 0, not 1)
+    } else return apply_flag(w, key, value != 0.0);
     return 1;
 }
 

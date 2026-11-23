@@ -365,6 +365,10 @@ static void test_machines(Game *game) {
     for (int i = 0; i < a->loadout_size; i++) slot = a->loadout[i] == WEAPON_ID_PISTOL ? i : slot;
     CHECK(slot >= 0 && (a->upgraded_slots >> slot & 1) && a->weapon == weapon_upgraded(WEAPON_ID_PISTOL) && k->state == 0, "upgraded pistol back in hand");
     CHECK(game_interact_prompt(game, a, NULL) != GAME_INTERACT_KRUM, "no krum prompt for an upgraded weapon");
+    // giveWeapon(upgraded): the reserve is the upgraded Pistol's ammo 16 x its magReserve 7 (deob-10.0.7.js:175867-175882,
+    // upgradeWeapons :177855), not the base Pistol's
+    CHECK(slot >= 0 && player_reserve_ammo(a, slot) == 16 * 7 && a->ammo[slot] == 16, "upgraded pistol: reserve %d, ammo %u",
+          slot >= 0 ? player_reserve_ammo(a, slot) : -1, slot >= 0 ? a->ammo[slot] : 0);
 
     // perk machine (zp 2, 2500): the crouch bonus once, the perk, the cap of 4
     const int perk = object_of_prefab(game, PREFAB_PERK_MACHINE, 0);

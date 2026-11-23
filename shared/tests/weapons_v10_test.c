@@ -57,6 +57,8 @@ static int near(const double a, const double b) {
     return fabs(a - b) <= 1e-5 * fmax(1.0, fabs(b));
 }
 
+static int has_key(const cJSON *obj, const char *key);
+
 static const char *str(const cJSON *obj, const char *key) {
     return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(obj, key));
 }
@@ -203,7 +205,9 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
     CHECK(w->burst == flag(js, "burst") && (!w->burst || w->burst_count == (unsigned int) num(js, "burstC", 0)), "%s burst", w->name);
     CHECK(w->type == (int) num(js, "type", 0), "%s type", w->name);
     CHECK(w->min_rec == (int) num(js, "minRec", 0), "%s minRec", w->name);
-    if (!upgraded) CHECK(w->mag_reserve == (int) num(js, "magReserve", 0), "%s magReserve", w->name); // upgrades: not ported
+    // magReserve: null is getReserveMags 1 (mag_reserve 0), an explicit 0 (Minigun, War Machine) no reserve (no_mag_reserve)
+    CHECK(w->mag_reserve == (int) num(js, "magReserve", 0) && w->no_mag_reserve == (has_key(js, "magReserve") && num(js, "magReserve", -1) == 0),
+          "%s magReserve %d / no_mag_reserve %d, v10.0.7 %g", w->name, w->mag_reserve, w->no_mag_reserve, num(js, "magReserve", -1));
     const cJSON *kill = cJSON_GetObjectItemCaseSensitive(js, "kill");
     CHECK(w->kill_score == (cJSON_IsArray(kill) ? (int) cJSON_GetArrayItem(kill, 1)->valuedouble : 0), "%s kill score %d", w->name, w->kill_score);
     CHECK(near(w->leg_mlt ? w->leg_mlt : 0.5, num(js, "lsMlt", 0.5)), "%s lsMlt %g", w->name, (double) w->leg_mlt);

@@ -65,6 +65,7 @@ const Weapon g_minigun = {
     .type = 3,
     .no_reload = 1,
     .no_swap = 1,
+    .no_mag_reserve = 1, // magReserve: 0 (deob-10.0.7.js:102190): no reserve in finiteAmmo modes
     .no_jump = 1,
     .remove_on_empty = 1,
     .projectile_config = {.speed = 2.3f, .gravity = 0.0001f, .range = 3000.0f, .damage = 18.0f},
