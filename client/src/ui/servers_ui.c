@@ -3710,7 +3710,7 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         host_flow_switch_tab(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
         return 1;
     }
-    if (!strcmp(name, "favoriteM")) { // favoriteM(0, this, id): kn_brain's fvM (creations.c); krunker.io's is not sent
+    if (!strcmp(name, "favoriteM")) { // favoriteM(0, this, id): fvM [kind, id, flag] (fav_toggle)
         if (argc > 2 && args[0].kind == HTML_ARG_NUM && (int) args[0].num == 0) {
             char id[32];
             if (args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof(id), "%.0f", args[2].num);
@@ -3907,9 +3907,17 @@ static void fav_toggle(const char *id_text) {
     if (id <= 0 || !acc) return; // v10: if (account)
     fav_edits_sync();
     const int now = fav_known(id_text) != 1; // the star's sel class: set = not favourited yet
+    // FAVORITE_MAPMOD in v10.0.7's order (deob-10.0.7.js:228236): send(fvM, kind 0 map, id, !!sel), on the game socket
+    // for a krunker.io account (krunker_net_send_account_frame), else kn_brain's social socket (creations.c sh_fav_creation)
     char frame[96];
-    snprintf(frame, sizeof(frame), "[\"fvM\",%lld,0,%d]", (long long) id, now); // FAVORITE_MAPMOD (creations.c sh_fav_creation)
-    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) backend_social_send_text(frame);
+    snprintf(frame, sizeof(frame), "[\"fvM\",0,%lld,%s]", (long long) id, now ? "true" : "false");
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
+        backend_social_send_text(frame);
+    } else {
+        cJSON *f = cJSON_Parse(frame);
+        krunker_net_send_account_frame(f);
+        cJSON_Delete(f);
+    }
     int slot = -1;
     for (int i = 0; i < g_fav_edit_n; i++)
         if (g_fav_edits[i].id == id) slot = i;
@@ -4567,7 +4575,118 @@ static void on_play_list(void *user, const int status, const char *body, const s
     cJSON_Delete(res);
 }
 
+// ---- krunker.io: v10.0.7's map card Play, openURL("/?play=<name>"), with no brain download. The ?play= seek asks for a
+// game on the map (krunker_net_join_map); with none it seeks any game and, once connected, runs autoHostMap(name)
+// (deob-10.0.7.js:229213-229318, :225349-225453). Its getMapPreset
+// asks the data client's /webhooks/general/maps/config?mn=<name> (:133233-133239) for {da: the map's config as JSON
+// text, fu: its funds}; any answer goes on (none, or one that is not JSON, is no preset). Then CUSTOM_SERVER with
+// customMap = the name (ui_host_config_auto: defaultSetts, the preset's modes / classes / settings, krRewards while the
+// map has funds) on the official connection, and the game it makes is joined. The game's init brings the map's data
+// (krunker_map_source.h), as on the Host window's Start Game.
+// With no official connection open, a krunker.io seek goes first and the hosting follows once its socket is up.
+#define KIO_PLAY_CONNECT_S 60.0
+static char g_kio_play[96];
+static unsigned g_kio_play_gen;
+static int g_kio_play_wait;       // a seek is out for the Play: kio_play_tick hosts once it is connected
+static double g_kio_play_until;   // glfwGetTime() the wait ends at
+
+static void on_kio_play_hosted(void *user, const char *game_id, const char *region, const char *error) {
+    if ((unsigned) (uintptr_t) user != g_kio_play_gen) return;
+    if (!game_id) {
+        ui_alert(error && *error ? error : I18N("custom.tryagain", "Please try again."));
+        return;
+    }
+    KN_LOG_DEBUG1("[mm] play %s (krunker.io): hosted, joining\n", g_kio_play);
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    krunker_net_join(g_client, game_id, region ? region : "");
+}
+
+static void on_kio_play_preset(void *user, const int status, const char *body, const size_t length) {
+    if ((unsigned) (uintptr_t) user != g_kio_play_gen) return;
+    (void) status; // apiRequest reads any answer's JSON (fetch().json(), :133166): no status check
+    cJSON *res = body && length ? cJSON_ParseWithLength(body, length) : NULL;
+    const char *da = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(res, "da"));
+    const cJSON *fu = cJSON_GetObjectItemCaseSensitive(res, "fu");
+    cJSON *preset = da && da[0] ? cJSON_Parse(da) : NULL; // JSON.parse(da), null when it throws
+    if (preset && !cJSON_IsObject(preset)) {
+        cJSON_Delete(preset);
+        preset = NULL;
+    }
+    cJSON *config = ui_host_config_auto(g_kio_play, preset, cJSON_IsNumber(fu) && fu->valuedouble > 0, 0);
+    cJSON_Delete(preset);
+    cJSON_Delete(res);
+    KN_LOG_DEBUG1("[mm] play %s (krunker.io): hosting it (%s)\n", g_kio_play, da ? "the map's preset" : "no preset");
+    switch (config ? krunker_net_host_block() : KRUNKER_HOST_NOT_CONNECTED) {
+    case KRUNKER_HOST_NOT_CONNECTED:
+        ui_alert(I18N("kn.hostflow.kio.notConnected", "Join a krunker.io game first: a game hosted on krunker.io starts from your official connection."));
+        break;
+    case KRUNKER_HOST_BUSY:
+        ui_alert(I18N("kn.hostflow.kio.busy", "krunker.io is still answering the last game. Wait for it, then try again."));
+        break;
+    case KRUNKER_HOST_READY:
+        if (!krunker_net_host_custom(config, on_kio_play_hosted, (void *) (uintptr_t) g_kio_play_gen))
+            ui_alert(I18N("kn.hostflow.kio.unavailable", "krunker.io servers are unavailable right now. Try again, or host it yourself."));
+        break;
+    }
+    cJSON_Delete(config);
+}
+
+// getMapPreset, then the hosting (on_kio_play_preset), over the open official connection
+static void kio_play_preset_fetch(void) {
+    char enc[300], query[320], base[256], url[640];
+    backend_url_encode(enc, sizeof(enc), g_kio_play);
+    snprintf(query, sizeof(query), "mn=%s", enc);
+    krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
+    if (krunker_kio_webhook_url(url, sizeof(url), base, "maps/config", query) &&
+        backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_kio_play_preset, (void *) (uintptr_t) g_kio_play_gen))
+        return;
+    on_kio_play_preset((void *) (uintptr_t) g_kio_play_gen, 0, NULL, 0); // getMapPreset's failure: no preset
+}
+
+static int kio_play_map(const char *name) {
+#ifdef __EMSCRIPTEN__
+    // as the Host window's Start Game (host_flow_ui.c): the browser build has no official connection to host from
+    ui_alert(I18N("kn.hostflow.kio.web", "Hosting on krunker.io is not available in the browser build"));
+    return 1;
+#endif
+    // v10's ?play=<map> seek (krunker_net_join_map): a game on the map is joined; with none, the seek goes on with
+    // no map and autoHostMap runs once that game's socket is up (deob-10.0.7.js:229267, :229318): kio_play_tick
+    Client *client = g_client ? g_client : menu_ui()->client;
+    if (strlen(name) >= sizeof(g_kio_play) || !client) return 0;
+    snprintf(g_kio_play, sizeof(g_kio_play), "%s", name);
+    g_kio_play_gen++;
+    g_kio_play_wait = 0;
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    if (!krunker_net_join_map(client, name)) {
+        ui_alert(I18N("kn.hostflow.kio.unavailable", "krunker.io servers are unavailable right now. Try again, or host it yourself."));
+        return 1;
+    }
+    KN_LOG_DEBUG1("[mm] play %s (krunker.io): seeking a game on the map, no download\n", name);
+    g_kio_play_wait = 1;
+    g_kio_play_until = glfwGetTime() + KIO_PLAY_CONNECT_S;
+    return 1;
+}
+
+// the seek kio_play_map started, once its socket is open: autoHostMap when the matchmaker had no game on the map,
+// else the game on it is the one joined. A join that failed has said why (join_errors.c).
+static void kio_play_tick(void) {
+    if (!g_kio_play_wait) return;
+    if (krunker_net_open()) {
+        g_kio_play_wait = 0;
+        if (!krunker_net_play_host()) {
+            KN_LOG_DEBUG1("[mm] play %s (krunker.io): joined a game on the map\n", g_kio_play);
+            return;
+        }
+        KN_LOG_DEBUG1("[mm] play %s (krunker.io): no game on the map, autoHostMap\n", g_kio_play);
+        kio_play_preset_fetch();
+    } else if (!krunker_net_active() || glfwGetTime() > g_kio_play_until) {
+        g_kio_play_wait = 0;
+    }
+}
+
 int servers_ui_play_map(const char *name, const int catalogue) {
+    // a published map on krunker.io: autoHostMap by its name (above), never kn_brain's download
+    if (name && name[0] && !catalogue && account_backend() == ACCOUNT_BACKEND_KRUNKER) return kio_play_map(name);
     if (!name || !name[0] || backend_available() != 1) return 0;
     snprintf(g_play_name, sizeof(g_play_name), "%s", name);
     g_play_catalogue = catalogue;
@@ -5015,6 +5134,7 @@ void servers_ui_tick(Client *client) {
         menu_rerender_if_open(2); // the list and the counts come without reopening the window
     }
     quick_play_retry_tick(); // a Quick Play search's full lobby is tried again when its backoff is due
+    kio_play_tick();         // a krunker.io Play's seek: autoHostMap once it is connected
     rejoin_tick(client); // after a server restart / a refused join key: a fresh ticket
     servers_timer_tick(); // windows[1] "Ends in" countdown
     if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way

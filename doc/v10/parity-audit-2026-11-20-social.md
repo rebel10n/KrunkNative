@@ -127,9 +127,9 @@ social_ui.c, mods_ui.c and kn_brain.
   community_maps_test on SQLite, PostgreSQL and MySQL; hub_creator_e2e.
 - `favoriteM(kind, this, id)` (:6616-6622) was a no-op in the hub. It now flips the star's `sel` and sends
   `["fvM", kind, id, 1|0]`. That is v10's order (the game sends the same, deob-10.0.7.js:228231-228236). kn_brain
-  read `[id, kind, flag]`, so it now reads v10's order. The Mod Manager (mods_ui.c) sends v10's order too. The
-  Games window (servers_ui.c, another agent's file) still sends `[id, 0, flag]`. kn_brain still reads that form: its
-  third element is the kind 0, where v10's is an id. hub_creator_e2e.
+  read `[id, kind, flag]`, so it now reads v10's order. The Mod Manager (mods_ui.c) and the Games window
+  (servers_ui.c) send v10's order too, so kn_brain reads only that order (another kind, or no id, is dropped).
+  hub_creator_e2e; social_ws_test (fvM on the 3 stores); kio_play_e2e (the Games window's star).
 - Followers / following popups (fwsr / fwr :5360-5394): ported to v10. The header is "Your followers" / "You
   follow" for the viewer's own lists, else "<name>'s followers" / "<name> follows". The viewer's own following
   rows say Unfollow (`deleteFollower(index, this)` :5395-5406: unfollows, removes the row, counts down

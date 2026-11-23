@@ -2928,7 +2928,9 @@ static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
                                         // the Junkyard's CRAFT_DATA_RESPONSE / CRAFT_RESPONSE (v10_junkyard.c)
                                         "recps", "crftr",
                                         // the profile picture's UPLOAD_RESPONSE / UPLOAD_PROFILE_RESPONSE (account_ui.c)
-                                        "upR", "upPR"};
+                                        "upR", "upPR",
+                                        // GUEST_EARNED_REWARDS: the guest's FRVR profile again (v10_rewards.c)
+                                        "ger"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strlen(names[i]) != f->name_len || memcmp(names[i], f->name, f->name_len)) continue;
         *argc = i == 0 && f->argc > 4 ? 4 : (uint32_t) f->argc;

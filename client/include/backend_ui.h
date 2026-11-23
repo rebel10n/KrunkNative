@@ -135,6 +135,7 @@ void battlepass_ui_claim(int id);           // bpclm: claim one card (Strike's R
 void v10_show_signup_rewards(void);         // window.showSignupRewards
 void v10_rewards_signup_mount(HtmlElem el); // endScreen.init: the signup rewards into #matchEndSignupIncentives (guests)
 void v10_rewards_guest_earned_push(void);   // NET_EXT_KN_GUEST_EARNED ("ger"): the guest's balance changed, fetch it again
+void v10_rewards_kio_guest_earned(void);    // krunker.io's "ger" (GUEST_EARNED_REWARDS): gapi /guest/profile again
 const char *v10_rewards_guest_id(void);     // the device's guest id (32 lowercase hex, made on first use; "" if none): never print it
 void v10_rewards_guest_earned_scenario(const cJSON *state); // --render-scenario state.guestEarned {kr, score}
 int  v10_rewards_frame(const char *label, const cJSON *frame); // "prr"; 1 = handled
@@ -307,7 +308,9 @@ int  servers_ui_host_game(const char *config_json); // Start Game on Box Office 
 // Join a lobby with a ticket the brain issued elsewhere (ranked match): native TCP host:port,
 // web web_url or /native?target=.
 // playMap(name): join a brain lobby on that map, else host it (brain); a published map that
-// is not in the catalogue is fetched (/api/map-data) and played offline otherwise. 1 = handled.
+// is not in the catalogue is fetched (/api/map-data) and played offline otherwise. On a krunker.io account a
+// published map is v10.0.7's ?play=: a game on it is joined, else it is hosted by name (autoHostMap), never
+// downloaded. 1 = handled.
 int  servers_ui_play_map(const char *name, int catalogue);
 // Native: the startup seek's /mm/hot-seek, sent before the window and the menu page are set up (net_hot.h)
 void servers_ui_hot_start(void);

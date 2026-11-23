@@ -89,6 +89,11 @@ void krunker_net_attach(Client *client); // startup (backend_startup.c): the cli
 // Seek and join an official game (game_id NULL / "": the matchmaker picks one in the region;
 // region NULL: the default). Stops the knet transport / the offline game first. 1 = started.
 int krunker_net_join(Client *client, const char *game_id, const char *region);
+// v10.0.7's ?play=<map> (deob-10.0.7.js:229213-229267): seek-game with regionId "any" and dataQuery {v, i: the map};
+// a game on the map is joined. With none (NoServersMatchQuery) the seek goes on with no map, as v10's, and
+// krunker_net_play_host() is 1 for that join: once it is open the caller runs autoHostMap (servers_ui.c). 1 = started.
+int krunker_net_join_map(Client *client, const char *map_name);
+int krunker_net_play_host(void);
 // A queue hand-off (K.P.D's policeJoin(gameId, bypassToken, host, port)): the socket at host[:port] with gameId and
 // bpt=bypass, no seek (v10's load with a saved bpt, deob-10.0.3.js:261510-261526). 1 = started.
 int krunker_net_join_queue(Client *client, const char *game_id, const char *bypass, const char *host, const char *port);

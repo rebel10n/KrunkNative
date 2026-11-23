@@ -122,6 +122,15 @@ void krunker_account_listen_events(KrunkerAccountEventFn fn, void *user); // one
 // guest (not signed in, or the refresh failed). The token is valid during the call only.
 typedef void (*KrunkerAccountTokenFn)(void *user, const char *token);
 void krunker_account_fresh_token(KrunkerAccountTokenFn fn, void *user);
+// FRVR's current pair, as the SDK's getFreshAccessToken: the account's token (krunker_account_fresh_token)
+// when one is signed in, else FRVR's anonymous session's (the SDK's loginAsAnonymous, which krunker.io's page
+// enables: POST <auth>/login {"platform":"anonymous"}, started on the first call, once per run; refreshed
+// like the account's). NULL = no session (not allowed: a run whose krunker.io endpoints are a mirror without an
+// auth one; or the login failed). The krunker.io requests (krunker_account_api) and joins carry it.
+void krunker_account_frvr_token(KrunkerAccountTokenFn fn, void *user);
+// FRVR.auth.getCurrentPlatform() === "anonymous": no account signed in and the anonymous session's refresh
+// token names that platform (its claims' extra.platform).
+int krunker_account_anonymous(void);
 
 // The game server's ACCOUNT_RESPONSE ("a") for this account's socket: its name and level (-1 = not
 // in it). Main thread.

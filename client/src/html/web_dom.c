@@ -1586,10 +1586,22 @@ EM_JS(void, kn_js_push_subscribe, (void *req, const char *key), {
         return navigator.serviceWorker.ready;
     }).then(function (reg) {
         return reg.pushManager.getSubscription().then(function (sub) {
-            if (sub) return sub;
             var raw = atob(b64), bytes = new Uint8Array(raw.length);
             for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-            return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+            // the existing subscription when it is for this key (a browser that does not say keeps it); one for
+            // another server's key (Box Office's / krunker.io's) is let go first: its pushes are not this server's
+            var k = sub && sub.options && sub.options.applicationServerKey;
+            var same = !k;
+            if (k) {
+                var a = new Uint8Array(k);
+                same = a.length === bytes.length;
+                for (var j = 0; same && j < a.length; j++) same = a[j] === bytes[j];
+            }
+            if (sub && same) return sub;
+            var gone = sub ? Promise.resolve(sub.unsubscribe()).catch(function () {}) : Promise.resolve();
+            return gone.then(function () {
+                return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+            });
         });
     }).then(function (sub) {
         done(sub ? JSON.stringify(sub) : null);
@@ -1623,6 +1635,88 @@ EM_JS(void, kn_js_push_unsubscribe, (void *req), {
     });
 });
 
+// the browser's subscription now, as JSON (NULL: none); nothing is changed
+EM_JS(void, kn_js_push_current, (void *req), {
+    var finished = false;
+    var done = function (json) {
+        if (finished) return;
+        finished = true;
+        _kn_ui_push_done(req, json ? stringToNewUTF8(json) : 0);
+    };
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) {
+        done(null);
+        return;
+    }
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+        return reg ? reg.pushManager.getSubscription() : null;
+    }).then(function (sub) {
+        done(sub ? JSON.stringify(sub) : null);
+    }).catch(function () {
+        done(null);
+    });
+});
+
+EMSCRIPTEN_KEEPALIVE void kn_ui_push_event(const HtmlPushEventFn fn, void *user, char *type, char *json) {
+    if (fn && type) fn(user, type, json);
+    free(type);
+    free(json);
+}
+
+// Krunker v10.0.7's service worker messages (deob-10.0.7.js:148986-149003) and its queue of the changes made while no
+// page was open (iíîiîiï, :147015-147060: IndexedDB "webpush-storage" v1, store "subscription-changes", keyPath id;
+// a record with old_subscription or new_subscription is handed on, every record is deleted)
+EM_JS(void, kn_js_push_listen, (const char *key, void *fn, void *user), {
+    var st = window.knPushListen || (window.knPushListen = {});
+    st.key = UTF8ToString(key);
+    st.fn = fn;
+    st.user = user;
+    var emit = function (type, data) {
+        _kn_ui_push_event(st.fn, st.user, stringToNewUTF8(type), data ? stringToNewUTF8(JSON.stringify(data)) : 0);
+    };
+    if (!('serviceWorker' in navigator)) return;
+    if (!st.installed) {
+        st.installed = true;
+        navigator.serviceWorker.addEventListener('message', function (e) {
+            var d = e && e.data;
+            var type = d && d.type;
+            if (type === 'WEBPUSH_SUBSCRIPTION_LOST') emit('lost', null);
+            else if (type === 'WEBPUSH_REQUEST_VAPID_KEY') {
+                if (e.source && e.source.postMessage) e.source.postMessage({ type: 'WEBPUSH_VAPID_KEY_RESPONSE', vapidKey: st.key });
+            } else if (type === 'WEBPUSH_SUBSCRIPTION_CHANGED') {
+                var c = d.data || {};
+                emit('changed', { old_subscription: c.old_subscription, new_subscription: c.new_subscription });
+            }
+        });
+    }
+    if (typeof indexedDB === 'undefined') return;
+    try {
+        var open = indexedDB.open('webpush-storage', 1);
+        open.onupgradeneeded = function (ev) {
+            var db = ev.target.result;
+            if (!db.objectStoreNames.contains('subscription-changes')) db.createObjectStore('subscription-changes', { keyPath: 'id', autoIncrement: true });
+        };
+        open.onsuccess = function () {
+            var db = open.result;
+            if (!db.objectStoreNames.contains('subscription-changes')) {
+                db.close();
+                return;
+            }
+            var all = db.transaction(['subscription-changes'], 'readonly').objectStore('subscription-changes').getAll();
+            all.onsuccess = function () {
+                var rows = all.result || [];
+                var store = rows.length ? db.transaction(['subscription-changes'], 'readwrite').objectStore('subscription-changes') : null;
+                for (var i = 0; i < rows.length; i++) {
+                    var r = rows[i];
+                    if (r && (r.old_subscription || r.new_subscription)) emit('changed', { old_subscription: r.old_subscription, new_subscription: r.new_subscription });
+                    if (store) store.delete(r.id);
+                }
+                db.close();
+            };
+            all.onerror = function () { db.close(); };
+        };
+    } catch (err) {}
+});
+
 EM_JS(int, kn_js_push_permission, (void), {
     if (typeof Notification === 'undefined') return 0;
     return Notification.permission === 'granted' ? 1 : Notification.permission === 'denied' ? -1 : 0;
@@ -1641,6 +1735,21 @@ void html_push_subscribe(const char *vapid_public_key_b64url, const HtmlPushFn f
     req->fn = fn;
     req->user = user;
     kn_js_push_subscribe(req, vapid_public_key_b64url ? vapid_public_key_b64url : "");
+}
+
+void html_push_current(const HtmlPushFn fn, void *user) {
+    PushReq *req = calloc(1, sizeof(*req));
+    if (!req) {
+        if (fn) fn(user, NULL);
+        return;
+    }
+    req->fn = fn;
+    req->user = user;
+    kn_js_push_current(req);
+}
+
+void html_push_listen(const char *vapid_key, const HtmlPushEventFn fn, void *user) {
+    kn_js_push_listen(vapid_key ? vapid_key : "", (void *) fn, user);
 }
 
 void html_push_unsubscribe(const HtmlPushFn fn, void *user) {

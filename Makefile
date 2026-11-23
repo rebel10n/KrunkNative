@@ -812,6 +812,14 @@ kio-chatban-e2e: build ## The punish popup's Chat Ban on an official krunker.io 
 kio-hostmap-e2e: build ## Hosting a krunker.io community map from a krunker.io account: selectHostMap keeps {id, name} (no brain download), Start Game sends CUSTOM_SERVER with customMap = the name (krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I client/tests/kio_hostmap_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-play-e2e
+kio-play-e2e: build ## The Games window's Play and star on a krunker.io account: the ?play= map seek, then autoHostMap (maps/config preset, CUSTOM_SERVER customMap, no brain download); fvM in v10's order on the official socket (krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I client/tests/kio_play_e2e.py $(DEBUG_DIR)
+
+.PHONY: kio-guest-e2e
+kio-guest-e2e: build ## A krunker.io guest: FRVR's anonymous session (crucible /login {platform: anonymous}, /refresh), its Bearer on gapi / seek / socket, Unclaimed Rewards from gapi /guest/profile, "ger" refetches (krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I client/tests/kio_guest_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-pfp-e2e
 kio-pfp-e2e: build ## A premium krunker.io account's profile picture: user-assets /p<id>/profile.png, pfpPopup, the 250 kb check, "uploadP" on the official socket, "Uploaded!" on "upPR" (krunker.io stubs, a stub zenity, headless)
 	timeout 400 $(PYTHON) -I client/tests/kio_pfp_e2e.py $(DEBUG_DIR)

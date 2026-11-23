@@ -26,6 +26,10 @@
 #define KEY_REFRESH "kio_refresh_token"
 #define KEY_NAME "kio_username"
 #define KEY_LEVEL "kio_level"
+// FRVR's anonymous session (the SDK's loginAsAnonymous): its own pair, beside the account's
+#define KEY_ANON_ACCESS "kio_anon_access_token"
+#define KEY_ANON_REFRESH "kio_anon_refresh_token"
+#define ANON_TIMEOUT_S 5.0 // v10's seek waits 5 s for the SDK's token (deob-10.0.7.js:149728-149745)
 #define TOKEN_MAX 4096
 #define BODY_MAX (256u * 1024u)
 #define REQUEST_TIMEOUT_S 25.0 // a sign-in step / refresh with no answer by then fails (http_stream waits 180 s)
@@ -41,6 +45,8 @@ typedef enum {
     REQ_REFRESH, // <auth>/refresh
     REQ_RECOVER, // /auth/recover-account
     REQ_API,     // krunker_account_api: a window's request to krunker.io's services
+    REQ_ANON,         // <auth>/login {"platform":"anonymous"} (the FRVR SDK's loginAsAnonymous)
+    REQ_ANON_REFRESH, // <auth>/refresh with the anonymous session's refresh token
 } ReqKind;
 
 typedef struct {
@@ -79,6 +85,15 @@ static struct {
         void *user;
     } waiters[TOKEN_WAITERS];
     int waiter_count;
+    // FRVR's anonymous session: the guest's identity while no account is signed in (krunker_account_frvr_token)
+    char anon_access[TOKEN_MAX + 1], anon_refresh[TOKEN_MAX + 1];
+    int anon_tried; // the anonymous login ran this run (the SDK's init tries it once)
+    Req anon_req;
+    struct {
+        KrunkerAccountTokenFn fn;
+        void *user;
+    } anon_waiters[TOKEN_WAITERS];
+    int anon_waiter_count;
 } A;
 
 static KrunkerAccountEventFn g_event_fn;
@@ -232,6 +247,8 @@ static void load(void) {
     char level[16];
     storage_get(KEY_LEVEL, level, sizeof(level));
     A.level = atoi(level);
+    storage_get(KEY_ANON_ACCESS, A.anon_access, sizeof(A.anon_access));
+    storage_get(KEY_ANON_REFRESH, A.anon_refresh, sizeof(A.anon_refresh));
     if (A.access[0] || A.refresh[0]) {
         A.state = KRUNKER_ACCOUNT_SIGNED_IN;
         KN_LOG_DEBUG1("[kio-account] restored the krunker.io account %s\n", A.name[0] ? A.name : "(name unknown)");
@@ -276,15 +293,17 @@ static cJSON *jwt_payload(const char *token) {
     return cJSON_Parse(out);
 }
 
-// Seconds the access token stays valid (exp - now), a large number when it carries no exp.
-static double access_left(void) {
-    if (!A.access[0]) return -1;
-    cJSON *p = jwt_payload(A.access);
+// Seconds a token stays valid (exp - now), a large number when it carries no exp, -1 when there is none.
+static double token_left(const char *token) {
+    if (!token[0]) return -1;
+    cJSON *p = jwt_payload(token);
     const cJSON *exp = cJSON_GetObjectItemCaseSensitive(p, "exp");
     const double left = cJSON_IsNumber(exp) ? exp->valuedouble - (double) time(NULL) : 1e9;
     cJSON_Delete(p);
     return left;
 }
+
+static double access_left(void) { return token_left(A.access); }
 
 // A name in the token's claims (username / name), when it has one.
 static void name_from_token(void) {
@@ -319,6 +338,7 @@ static void on_data(void *user, const char *data, const size_t len) {
 }
 
 static void on_done(void *user, int status, const char *error);
+static void on_anon(int status, cJSON *res, ReqKind kind); // FRVR's anonymous session (below)
 
 static void req_clear(Req *r) {
     if (r->body) wipe(r->body, r->len);
@@ -606,6 +626,8 @@ static void on_done(void *user, const int status, const char *error) {
             else set_message(1, "%s", I18N("generic.error", "Error"));
             break;
         case REQ_REFRESH: on_refresh(http, res); break;
+        case REQ_ANON:
+        case REQ_ANON_REFRESH: on_anon(http, res, kind); break;
         default: break;
     }
     cJSON_Delete(res);
@@ -829,8 +851,9 @@ int krunker_account_api_body(const char *method, const KrunkerService svc, const
     q->fn = fn;
     q->user = user;
     // the API client's interceptor: Authorization: Bearer <FRVR's fresh access token>, refreshed
-    // first when it is about to expire; a guest's request goes without (public endpoints)
-    krunker_account_fresh_token(api_with_token, (void *) (uintptr_t) q->id);
+    // first when it is about to expire: the account's, else FRVR's anonymous session (deob-10.0.7.js:27762-27790);
+    // a request with neither goes without (public endpoints)
+    krunker_account_frvr_token(api_with_token, (void *) (uintptr_t) q->id);
     return 1;
 }
 
@@ -879,6 +902,136 @@ void krunker_account_fresh_token(const KrunkerAccountTokenFn fn, void *user) {
     A.waiter_count++;
     if (A.refresh_req.kind == REQ_REFRESH) return; // one refresh serves every waiter
     if (!start_refresh()) serve_waiters(left > 5 ? A.access : NULL);
+}
+
+// ---------------------------------------------------------------- FRVR's anonymous session
+//
+// krunker.io's page configures the SDK with auth.enableAnonymousLogin (v10.0.7 index.html), so a player
+// with no account gets one at the SDK's init (frvr-sdk: `if (!loggedIn && isAnonymousLoginEnabled())
+// loginAsAnonymous()`): POST <auth>/login {"platform":"anonymous"} -> 201 {accessToken, refreshToken};
+// the refresh token's claims name the platform (extra.platform, getCurrentPlatform). That pair is the
+// SDK's current pair until an account signs in: v10's API interceptors send it as the Bearer
+// (deob-10.0.7.js:27762-27790), the seek and the game socket carry it (:149727, :229296), and
+// "anonymous" === getCurrentPlatform() is what asks gapi GET /guest/profile (:230083, :119590).
+// Here it starts on the first use (the first krunker.io request or join), once per run like the SDK's
+// init; it refreshes through <auth>/refresh like the account's pair. It is never shown or logged.
+
+// A krunker.io endpoint named in the environment (native) or the page's query (web)
+static int endpoint_set(const char *env, const char *param) {
+    char v[256];
+    endpoint(env, param, "", v, sizeof(v));
+    return v[0] != 0;
+}
+
+// Not when the krunker.io endpoints point at a mirror (a test's stub) but FRVR's auth does not: the
+// anonymous login would reach crucible.frvr.com from a run that keeps everything else local.
+static int anon_allowed(void) {
+    if (endpoint_set("KRUNKNATIVE_KRUNKER_AUTH", "krunkerAuth")) return 1;
+    static const char *const mirrors[][2] = {
+        {"KRUNKNATIVE_KRUNKER_API", "krunkerApi"},       {"KRUNKNATIVE_KRUNKER_DATA_API", "krunkerDataApi"},
+        {"KRUNKNATIVE_KRUNKER_GAPI", "krunkerGapi"},     {"KRUNKNATIVE_KRUNKER_MATCHMAKER", "krunkerMM"},
+        {"KRUNKNATIVE_KRUNKER_SOCIAL", "krunkerSocial"}, {"KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend"},
+    };
+    for (size_t i = 0; i < sizeof(mirrors) / sizeof(mirrors[0]); i++)
+        if (endpoint_set(mirrors[i][0], mirrors[i][1])) return 0;
+    return 1;
+}
+
+static void anon_save(void) {
+    put(KEY_ANON_ACCESS, A.anon_access);
+    put(KEY_ANON_REFRESH, A.anon_refresh);
+}
+
+static void anon_forget(void) {
+    wipe(A.anon_access, sizeof(A.anon_access));
+    wipe(A.anon_refresh, sizeof(A.anon_refresh));
+    anon_save();
+}
+
+static void serve_anon(const char *token) {
+    const int count = A.anon_waiter_count;
+    A.anon_waiter_count = 0;
+    for (int i = 0; i < count; i++) {
+        if (A.anon_waiters[i].fn) A.anon_waiters[i].fn(A.anon_waiters[i].user, token);
+    }
+}
+
+// The pair's refresh while it is still valid, else the anonymous login (once per run). 0 = not started.
+static int start_anon(void) {
+    char url[512];
+    if (token_left(A.anon_refresh) > 5) {
+        char token[TOKEN_MAX + 8], body[TOKEN_MAX + 64];
+        auth_url(url, sizeof(url), "/refresh");
+        escape_json(token, sizeof(token), A.anon_refresh);
+        snprintf(body, sizeof(body), "{\"refreshToken\":\"%s\"}", token);
+        const int ok = req_start(&A.anon_req, REQ_ANON_REFRESH, "POST", url, NULL, body);
+        wipe(token, sizeof(token));
+        wipe(body, sizeof(body));
+        return ok;
+    }
+    if (A.anon_tried) return 0;
+    A.anon_tried = 1;
+    auth_url(url, sizeof(url), "/login");
+    return req_start(&A.anon_req, REQ_ANON, "POST", url, NULL, "{\"platform\":\"anonymous\"}");
+}
+
+// login: 201 {accessToken, refreshToken} (frvr-sdk login(), the pair kept when its access token is valid);
+// refresh: 201 the same (refreshTokens), 401 = the pair is over (then one anonymous login, as at init).
+static void on_anon(const int status, cJSON *res, const ReqKind kind) {
+    const char *access = json_str(res, "accessToken"), *refresh = json_str(res, "refreshToken");
+    if ((status == 200 || status == 201) && access && access[0] && refresh && refresh[0] && strlen(access) <= TOKEN_MAX &&
+        strlen(refresh) <= TOKEN_MAX && token_left(access) > 0) {
+        snprintf(A.anon_access, sizeof(A.anon_access), "%s", access);
+        snprintf(A.anon_refresh, sizeof(A.anon_refresh), "%s", refresh);
+        anon_save();
+        KN_LOG_DEBUG1("[kio-account] FRVR's anonymous session %s\n", kind == REQ_ANON ? "started" : "was refreshed");
+        changed();
+        serve_anon(A.anon_access);
+        return;
+    }
+    printf("[kio-account] FRVR's anonymous %s failed (HTTP %d): krunker.io is used without a session\n", kind == REQ_ANON ? "login" : "refresh", status);
+    if (kind == REQ_ANON_REFRESH && status == 401) {
+        anon_forget();
+        if (start_anon()) return;
+    }
+    serve_anon(kind == REQ_ANON_REFRESH && token_left(A.anon_access) > 5 ? A.anon_access : NULL);
+}
+
+void krunker_account_frvr_token(const KrunkerAccountTokenFn fn, void *user) {
+    load();
+    if (A.access[0] || A.refresh[0]) {
+        krunker_account_fresh_token(fn, user);
+        return;
+    }
+    if (!anon_allowed()) {
+        if (fn) fn(user, NULL);
+        return;
+    }
+    const double left = token_left(A.anon_access);
+    if (left > KRUNKER_ACCOUNT_REFRESH_MARGIN_S) {
+        if (fn) fn(user, A.anon_access);
+        return;
+    }
+    if (A.anon_waiter_count >= TOKEN_WAITERS) {
+        if (fn) fn(user, left > 5 ? A.anon_access : NULL);
+        return;
+    }
+    A.anon_waiters[A.anon_waiter_count].fn = fn;
+    A.anon_waiters[A.anon_waiter_count].user = user;
+    A.anon_waiter_count++;
+    if (A.anon_req.kind != REQ_NONE) return; // one login / refresh serves every waiter
+    if (!start_anon()) serve_anon(left > 5 ? A.anon_access : NULL);
+}
+
+int krunker_account_anonymous(void) {
+    load();
+    if (A.access[0] || A.refresh[0] || token_left(A.anon_refresh) <= 0) return 0;
+    cJSON *p = jwt_payload(A.anon_refresh);
+    const cJSON *extra = cJSON_GetObjectItemCaseSensitive(p, "extra");
+    const char *platform = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(extra, "platform"));
+    const int anonymous = platform && !strcmp(platform, "anonymous");
+    cJSON_Delete(p);
+    return anonymous;
 }
 
 // ---------------------------------------------------------------- state
@@ -937,16 +1090,17 @@ void krunker_account_tick(void) {
             fail_sign_in(I18N("kn.kio.account.failed", "krunker.io did not accept the sign-in."));
     }
     const double now = now_s();
-    Req *reqs[] = {&A.auth, &A.refresh_req, &A.recover_req};
+    Req *reqs[] = {&A.auth, &A.refresh_req, &A.recover_req, &A.anon_req};
     for (size_t i = 0; i < sizeof(reqs) / sizeof(reqs[0]); i++) {
         Req *r = reqs[i];
-        if (!r->stream || now - r->started < REQUEST_TIMEOUT_S) continue;
+        if (!r->stream || now - r->started < (r == &A.anon_req ? ANON_TIMEOUT_S : REQUEST_TIMEOUT_S)) continue;
         const ReqKind kind = r->kind;
         req_cancel(r);
         printf("[kio-account] request timed out\n");
         if (kind == REQ_LOGIN || kind == REQ_CODE)
             fail_sign_in(I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
         else if (kind == REQ_REFRESH) serve_waiters(access_left() > 5 ? A.access : NULL);
+        else if (kind == REQ_ANON || kind == REQ_ANON_REFRESH) serve_anon(token_left(A.anon_access) > 5 ? A.anon_access : NULL);
         else if (kind == REQ_RECOVER) set_message(1, "%s", I18N("generic.error", "Error"));
     }
     for (int i = 0; i < API_SLOTS; i++) {

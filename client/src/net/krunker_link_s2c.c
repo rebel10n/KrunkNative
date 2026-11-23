@@ -617,6 +617,8 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         // the profile picture upload's answers (account_ui.c's kio_frame: #pfpUpResp, "Uploaded!")
         case KRUNKER_S2C_UPLOAD_RESPONSE:
         case KRUNKER_S2C_UPLOAD_PROFILE_RESPONSE:
+        // GUEST_EARNED_REWARDS: the krunker.io guest's FRVR profile is fetched again (v10_rewards.c, deob-10.0.7.js:229362)
+        case KRUNKER_S2C_GUEST_EARNED_REWARDS:
             return 1;
 
         // Ignored on purpose (doc/v10/s2c-coverage.md, "irrelevant" and "KN equivalent" rows): real-money store and
@@ -669,7 +671,6 @@ int krunker_link_s2c_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerFra
         case KRUNKER_S2C_BOTS_POPUP:
         case KRUNKER_S2C_UPDATE_COUNTRY:
         case KRUNKER_S2C_GAME_SURVEY:
-        case KRUNKER_S2C_GUEST_EARNED_REWARDS:    // the krunker.io guest's FRVR profile, not our kn_brain guest's
         case KRUNKER_S2C_UPDATE_LOTTERY_ENTRIES:
         case KRUNKER_S2C_LOTTERY_PRIZE_WON_PLAYER:
         case KRUNKER_S2C_LOTTERY_STARTED:

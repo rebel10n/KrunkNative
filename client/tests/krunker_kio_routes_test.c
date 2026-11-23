@@ -209,6 +209,17 @@ int main(void) {
         CHECK(!krunker_kio_gapi_upload(not_upload[i].method, not_upload[i].path), "%s %s is not an upload",
               not_upload[i].method ? not_upload[i].method : "(null)", not_upload[i].path ? not_upload[i].path : "(null)");
 
+    // 6f. the Notifications panel's web push on gapi (deob-10.0.7.js:26455-26483): exactly the webpush client's four POSTs
+    const char *const webpush[] = {"/webpush/subscribe", "/webpush/unsubscribe", "/webpush/status", "/webpush/subscription-change"};
+    for (size_t i = 0; i < sizeof(webpush) / sizeof(webpush[0]); i++) {
+        CHECK(krunker_kio_gapi_write("POST", webpush[i]), "POST %s is a v10.0.7 webpush write", webpush[i]);
+        CHECK(!krunker_kio_gapi_write("GET", webpush[i]), "GET %s is not sent", webpush[i]);
+    }
+    const char *const push_refused[] = {"/webpush/subscribe?x=1", "/webpush/subscribe/", "/webpush", "/webpush/", "/webpush/vapid-key",
+                                        "/api/push/subscribe", "/webpush/subscription-changes"};
+    for (size_t i = 0; i < sizeof(push_refused) / sizeof(push_refused[0]); i++)
+        CHECK(!krunker_kio_gapi_write("POST", push_refused[i]), "POST %s is not sent", push_refused[i]);
+
     // 7. a mirror moves the data client: the webhooks and the streams follow KRUNKNATIVE_KRUNKER_DATA_API
     env_clear();
     setenv("KRUNKNATIVE_KRUNKER_DATA_API", "http://127.0.0.1:9101/api/", 1);

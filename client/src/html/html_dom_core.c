@@ -502,6 +502,16 @@ void html_push_subscribe(const char *vapid_public_key_b64url, const HtmlPushFn f
     if (fn) fn(user, NULL);
 }
 
+void html_push_current(const HtmlPushFn fn, void *user) {
+    if (fn) fn(user, NULL);
+}
+
+void html_push_listen(const char *vapid_key, const HtmlPushEventFn fn, void *user) {
+    (void) vapid_key;
+    (void) fn;
+    (void) user;
+}
+
 void html_push_unsubscribe(const HtmlPushFn fn, void *user) {
     if (fn) fn(user, NULL);
 }

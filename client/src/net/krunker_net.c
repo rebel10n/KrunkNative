@@ -122,6 +122,10 @@ static struct {
     unsigned qp_gen;        // quick_play_retry_generation() when the join began: a stop since drops its answer
     char exclude[96], fallback[96];
     int fallback_rank;
+    // krunker_net_join_map: v10's ?play=<map> seek (dataQuery.i = the map, regionId "any"); play_host once the
+    // matchmaker had no game on it (NoServersMatchQuery) and the seek went on with no map: the caller hosts it
+    char seek_map[96];
+    int play_host;
     char full[KRUNKER_FULL_MAX][RECENT_LOBBY_ID_MAX]; // the list's games at players >= max
     int full_count;
     // a reload's join (krunker_net_reload_join): the game the player was in; gone or full -> one
@@ -130,8 +134,8 @@ static struct {
     RecentLobbies recent; // the official games joined lately, most recent first (main thread)
     char ws_url[1024 + KRUNKER_ACCESS_MAX];
     char ws_log[1024];   // ws_url without the account's `at=`: what the log shows
-    // the krunker.io account's access token for this join (krunker_account_fresh_token), "" = a guest;
-    // seek-game's accessToken and the socket's at=. Never logged; wiped on leave.
+    // FRVR's access token for this join (krunker_account_frvr_token: the account's, else the anonymous
+    // session's), "" = none; seek-game's accessToken and the socket's at=. Never logged; wiped on leave.
     char access[KRUNKER_ACCESS_MAX];
     volatile int account_event; // the socket thread saw "a" ACCOUNT_RESPONSE: krunker_net_tick tells krunker_account
     volatile int points_event;  // the socket thread saw "ua" UPDATE_ACCOUNT's rankedPoints (the same, for the balance)
@@ -216,6 +220,9 @@ static struct {
     int set;
     char bypass[sizeof(K.bypass)], host[sizeof(K.queue_host)], port[sizeof(K.queue_port)];
 } g_queue_next;
+
+// krunker_net_join_map's map, taken by the join it starts (join() copies it into K.seek_map and clears it)
+static char g_play_next[sizeof(K.seek_map)];
 
 // ---------------------------------------------------------------- switches
 
@@ -733,6 +740,7 @@ static int clan_frame_ok(const double action, const int n, const cJSON *a2, cons
 //   ["recps"], ["crft", SID]  the Junkyard's recipes and a craft (answered "recps" / "crftr"), once in the game
 //   ["uploadP", dataURL]  UPLOAD_PROFILE_PICTURE: a premium account's profile picture, the PNG as the FileReader's data
 //                     URL (deob-10.0.7.js:223508-223524); answered "upPR" (done) or "upR" [message, 1] (account_ui.c)
+//   ["fvM", kind, id, flag]  FAVORITE_MAPMOD: a map (0) or mod (1) starred (true) or not (deob-10.0.7.js:228236), no answer
 //   ["vo", code]      REDEEM_VOUCHER (v10 sends it straight, deob-10.0.4.js:221047): grants KR, answered "vr"
 //                     [funds | null, message] (kio_store_voucher_answer)
 //   ["dsl"]           the Daily Spin claim, sent as v10's rpc(DAILY_SPIN_CLAIM) = ["_0", rpcId, "dsl"]
@@ -794,6 +802,10 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     }
     if (!strcmp(name, "uploadP") && n == 1 && cJSON_IsString(cJSON_GetArrayItem(frame, 1)) &&
         !strncmp(cJSON_GetArrayItem(frame, 1)->valuestring, "data:", 5))
+        ok = 1;
+    // FAVORITE_MAPMOD ["fvM", kind 0 map | 1 mod, id, flag]: the Games / Mods windows' star (favoriteM, deob-10.0.7.js:228236)
+    if (!strcmp(name, "fvM") && n == 3 && cJSON_IsNumber(a1) && (a1->valuedouble == 0 || a1->valuedouble == 1) &&
+        cJSON_IsNumber(a2) && a2->valuedouble >= 1 && cJSON_IsBool(cJSON_GetArrayItem(frame, 3)))
         ok = 1;
     if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)
     if (!ok || n > 10) return 0;
@@ -1725,7 +1737,8 @@ static void seek(void) {
     static char url[32768];
     snprintf(url, sizeof(url), "%s/seek-game", K.matchmaker);
     append_param(url, sizeof(url), "hostname", "krunker.io");
-    append_param(url, sizeof(url), "region", K.region);
+    const int play = K.seek_map[0] && !K.game_id[0] && !K.seek_new; // ?play=<map>: regionId "any" (:229222)
+    append_param(url, sizeof(url), "region", play ? "any" : K.region);
     append_param(url, sizeof(url), "autoChangeGame", "false");
     // the log shows where the validation token goes, never its value (like the captcha / access tokens)
     size_t token_at = 0, token_end = 0;
@@ -1744,6 +1757,15 @@ static void seek(void) {
         seek_prefs_dq_fields(fields, sizeof(fields));
         snprintf(dq, sizeof(dq), "{\"v\":\"%s\"%s}", KRUNKER_BUILD_VERSION, fields);
         append_param(url, sizeof(url), "dataQuery", dq);
+    } else if (play) {
+        // ?play=<map>: {v: buildVersion, i: the map} (deob-10.0.7.js:229216-229221)
+        cJSON *q = cJSON_CreateObject();
+        cJSON_AddStringToObject(q, "v", krunker_build()->build_version);
+        cJSON_AddStringToObject(q, "i", K.seek_map);
+        char *dq = cJSON_PrintUnformatted(q);
+        if (dq) append_param(url, sizeof(url), "dataQuery", dq);
+        cJSON_free(dq);
+        cJSON_Delete(q);
     } else {
         char dq[96];
         snprintf(dq, sizeof(dq), "{\"v\":\"%s\"}", krunker_build()->build_version); // iïîìîíì: {v: buildVersion}
@@ -1952,6 +1974,15 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         cJSON_Delete(res);
         seek();
         return;
+    } else if (error && !strcmp(error, "NoServersMatchQuery") && K.seek_map[0] && !K.game_id[0] && !K.seek_new) {
+        // ?play=<map> with no game on it: v10 keeps the map for autoHostMap and seeks again with no map
+        // (iïîíîií = play, play = false, the seek again: deob-10.0.7.js:229267); the caller hosts once it is open
+        KN_LOG_DEBUG1("[krunker] play %s: no game on the map, seeking any game to host it from\n", K.seek_map);
+        K.seek_map[0] = 0;
+        K.play_host = 1;
+        cJSON_Delete(res);
+        seek();
+        return;
     } else if (error && (!strcmp(error, "InvalidVersion") || !strcmp(error, "NoServersMatchQuery")) && retry_version(error)) {
         // (retry_version runs the refresh; on_build_retry seeks again or fails)
     } else if (token_refusal(error) && K.token_retries < 1) {
@@ -2035,7 +2066,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
         krunker_link_reset(&K.link); // (its rpcCounter starts over)
         K.rpc_pending_n = 0; // (a new socket: the old rpcs' answers can no longer come)
-        K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
+        K.link.account = K.access[0] != 0 && krunker_account_signed_in(); // "en" then carries the player's own loadout
         pthread_mutex_unlock(&K.lock);
         ws_open();
     }
@@ -2152,7 +2183,7 @@ static void open_match(void) {
     pthread_mutex_lock(&K.lock);
     krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
     krunker_link_reset(&K.link);
-    K.link.account = K.access[0] != 0;
+    K.link.account = K.access[0] != 0 && krunker_account_signed_in(); // (not FRVR's anonymous session: a guest)
     pthread_mutex_unlock(&K.lock);
     ws_open();
 }
@@ -2169,17 +2200,19 @@ static void open_queue(void) {
     pthread_mutex_lock(&K.lock);
     krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
     krunker_link_reset(&K.link);
-    K.link.account = K.access[0] != 0;
+    K.link.account = K.access[0] != 0 && krunker_account_signed_in(); // (not FRVR's anonymous session: a guest)
     pthread_mutex_unlock(&K.lock);
     ws_open();
 }
 
-// The krunker.io account's token for this join (krunker_account_fresh_token): NULL = as a guest.
+// FRVR's token for this join (krunker_account_frvr_token): the account's, else the anonymous session's (v10's
+// seek and game socket send getFreshAccessToken's, whichever platform, deob-10.0.7.js:149727, 229296); NULL = none.
 // Then the current Krunker build (on_build), then the seek.
 static void on_access(void *user, const char *token) {
     if (stale(user) || K.state != KS_ACCOUNT) return;
     snprintf(K.access, sizeof(K.access), "%s", token && strlen(token) < sizeof(K.access) ? token : "");
-    if (K.access[0]) KN_LOG_DEBUG1("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
+    if (K.access[0] && krunker_account_signed_in()) KN_LOG_DEBUG1("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
+    else if (K.access[0]) KN_LOG_DEBUG1("[krunker] joining as a guest with FRVR's anonymous session\n");
     else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
     if (K.match[0]) return open_match();
     if (K.bypass[0]) return open_queue();
@@ -2241,7 +2274,7 @@ static void join_seek(void) {
     // is about to expire), then on_access starts Find New Game's list or seek-game, no validation token;
     // generate-token only before a captcha retry (captcha_done) or after a refused token (on_seek)
     K.state = KS_ACCOUNT;
-    krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
+    krunker_account_frvr_token(on_access, (void *) (uintptr_t) K.generation);
 }
 
 static void on_region(void *user, const char *region) {
@@ -2318,11 +2351,14 @@ static int join(Client *client, const char *game_id, const char *region, const i
         snprintf(K.queue_port, sizeof(K.queue_port), "%s", g_queue_next.port);
         wipe(&g_queue_next, sizeof(g_queue_next));
     }
+    snprintf(K.seek_map, sizeof(K.seek_map), "%s", g_play_next); // krunker_net_join_map's, for this join only
+    g_play_next[0] = 0;
+    K.play_host = 0;
     if (K.match[0] || K.bypass[0]) { // a ranked match's socket (v10's _33929) or a queue hand-off: no region, no seek; the token first
         if (K.match[0]) KN_LOG_DEBUG1("[krunker] joining the ranked match at %s (game %s)\n", K.match, K.game_id[0] ? K.game_id : "(any)");
         else KN_LOG_DEBUG1("[krunker] joining game %s at %s through its queue hand-off\n", K.game_id, K.queue_host);
         K.state = KS_ACCOUNT;
-        krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
+        krunker_account_frvr_token(on_access, (void *) (uintptr_t) K.generation);
         return K.state != KS_CLOSED;
     }
     if (!K.region[0]) {
@@ -2339,6 +2375,16 @@ static int join(Client *client, const char *game_id, const char *region, const i
 int krunker_net_join(Client *client, const char *game_id, const char *region) {
     return join(client, game_id, region, 0, NULL, 0, NULL);
 }
+
+int krunker_net_join_map(Client *client, const char *map_name) {
+    if (!map_name || !map_name[0] || strlen(map_name) >= sizeof(g_play_next)) return 0;
+    snprintf(g_play_next, sizeof(g_play_next), "%s", map_name);
+    const int started = join(client, NULL, NULL, 0, NULL, 0, NULL);
+    g_play_next[0] = 0; // (a join refused before it took it)
+    return started;
+}
+
+int krunker_net_play_host(void) { return K.state != KS_OFF && K.play_host; }
 
 // K.P.D's policeJoin(gameId, bypassToken, host, port) (deob-10.0.3.js:252877-252884): v10 saves queueHost / queuePort /
 // bpt / gId and reloads; the load connects to queueHost:queuePort with {gameId, bypassToken} and no seek

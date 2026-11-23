@@ -30,3 +30,9 @@ int ui_host_config_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
 // raw map data and the community map are the caller's. NULL with `err` set when a check fails
 // (no mode / no class / long password), like v7's hostGameMsg errors.
 cJSON *ui_host_config_collect(int host_type, char *err, size_t err_size);
+// Krunker v10.0.7's autoHostMap request (deob-10.0.7.js:225349-225453), with no window: {private, krRewards,
+// defaultSetts true, override 0, customMap: the map's name, rawMapData null, maps [], modes, classes, passCode null,
+// every serverConfig varN, weps / cls / prks}. preset: the map's config (getMapPreset's `da`, parsed; NULL when it has
+// none): its modes (else mode 0), classes (else all), settings (numbers clamped to the account type's max) and the
+// weps / cls / prks keys that differ from the base tables. NULL only for an empty name. The caller owns it.
+cJSON *ui_host_config_auto(const char *map_name, const cJSON *preset, int kr_rewards, int private_game);

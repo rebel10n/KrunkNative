@@ -552,6 +552,27 @@ async def scenario(base, internal_url, secret):
         vs = (maps_api("GET", "/maps/%s/versions" % map_id) or {}).get("data") or []
         check((rv.get("data") or {}).get("version") == 3 and [v.get("version") for v in vs] == [3, 2, 1],
               "revert to v1: live as v3, v2 still listed: %r %r" % (rv, vs))
+        # FAVORITE_MAPMOD in v10.0.7's order, ["fvM", kind 0 map, id, flag] (deob-10.0.7.js:228231-228236; the Games
+        # window's star, servers_ui.c fav_toggle): no reply, the Favorites tab (/api/maps index 3) lists it
+        def fav_ids():
+            page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=3&pos=0&accountId=%d" % alice_id).read())
+            return [r.get("map_id") for r in page["data"] or []]
+
+        def fav_wait(want, timeout=5.0):
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if (map_id in fav_ids()) == want:
+                    return True
+                time.sleep(0.1)
+            return False
+        await a.send("fvM", 0, map_id, True)
+        check(fav_wait(True), "fvM [0, id, true] (v10's order) favourites the map")
+        await a.send("fvM", map_id, 0, False)  # the order KrunkNative sent before: no longer read
+        await a.send("fvM", 0, map_id, True)   # (a later frame, so the one above has been handled)
+        time.sleep(0.5)
+        check(map_id in fav_ids(), "the old order [id, 0, false] is not read as v10's")
+        await a.send("fvM", 0, map_id, False)
+        check(fav_wait(False), "fvM [0, id, false] takes the favourite back")
         try:
             urllib.request.urlopen(http_base + "/api/map-data?name=nope_" + stamp)
             check(False, "/api/map-data unknown map 404")

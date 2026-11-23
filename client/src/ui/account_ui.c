@@ -526,6 +526,10 @@ static void kio_frame(const char *label, const cJSON *frame) {
         kio_pfp_frame(label, frame);
         return;
     }
+    if (!strcmp(label, "ger")) { // GUEST_EARNED_REWARDS: v10 asks gapi /guest/profile again (iîíïîíî, deob-10.0.7.js:229362)
+        v10_rewards_kio_guest_earned();
+        return;
+    }
     if (strcmp(label, "a") && strcmp(label, "ua")) chal_capture(label, frame); // ("a" / "ua": after the account is set)
     if (!strcmp(label, "a")) {
         const cJSON *err = cJSON_GetArrayItem(frame, 1), *data = cJSON_GetArrayItem(frame, 4);

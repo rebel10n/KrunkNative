@@ -24,6 +24,7 @@
 #endif
 #include <backend.h>
 #include <backend_ui.h>
+#include <krunker_account.h> // krunker.io's guest: FRVR's anonymous session, gapi /guest/profile
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <map_catalog.h>
@@ -82,6 +83,7 @@ static struct {
     unsigned gen;   // bumped on each account change: an answer for an older state is dropped
     int page_fetch; // the page is ready: fetch the balance once the brain is available
     int signed_in;  // the account state the last tick saw
+    int backend;    // the active backend the last tick saw (AccountBackend + 1; 0 = not seen yet)
 } G;
 
 static char g_guest_id[GUEST_ID_LEN + 1]; // this device's guest id ("" until known); never printed
@@ -168,9 +170,49 @@ static void on_guest_profile(void *user, const int status, const char *body, con
     cJSON_Delete(o);
 }
 
+// krunker.io (v10's iîíïîíî, deob-10.0.7.js:119590-119594): gapi GET /guest/profile with FRVR's anonymous
+// session as the Bearer; {data: {profile: {funds, score}}} unless the answer has an error. Anything else keeps
+// the values the page has.
+static void on_kio_guest_profile(void *user, const int status, const cJSON *res) {
+    const unsigned gen = (unsigned) (uintptr_t) user;
+    if (gen != G.gen || G.scenario || active_account() || account_backend() != ACCOUNT_BACKEND_KRUNKER) return;
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(res, "error");
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(res, "data");
+    const cJSON *profile = cJSON_GetObjectItemCaseSensitive(data, "profile");
+    const cJSON *funds = cJSON_GetObjectItemCaseSensitive(profile, "funds");
+    const cJSON *score = cJSON_GetObjectItemCaseSensitive(profile, "score");
+    const int err = error && !cJSON_IsNull(error) && !cJSON_IsFalse(error) && !(cJSON_IsString(error) && !error->valuestring[0]);
+    if (status != 200 || err || !cJSON_IsNumber(funds) || !cJSON_IsNumber(score)) {
+        fprintf(stderr, "[rewards] krunker.io guest profile not loaded (HTTP %d)\n", status);
+        return;
+    }
+    G.kr = funds->valueint < 0 ? 0 : funds->valueint;
+    G.score = score->valueint < 0 ? 0 : score->valueint;
+    G.loaded = 1;
+    printf("[rewards] krunker.io guest profile: %d KR, %d score\n", G.kr, G.score);
+}
+
+// v10 asks only when FRVR's platform is "anonymous" (:230083): the anonymous session first (the SDK's init
+// login), then the profile.
+static void kio_guest_token(void *user, const char *token) {
+    const unsigned gen = (unsigned) (uintptr_t) user;
+    if (gen != G.gen || G.scenario || active_account() || account_backend() != ACCOUNT_BACKEND_KRUNKER) return;
+    if (!token || !krunker_account_anonymous()) {
+        printf("[rewards] krunker.io guest profile not asked: no anonymous FRVR session\n");
+        return;
+    }
+    if (!krunker_account_api("GET", KRUNKER_SVC_API, "/guest/profile", NULL, on_kio_guest_profile, user))
+        fprintf(stderr, "[rewards] krunker.io guest profile not sent\n");
+}
+
 // The balance of this device's guest. create: the id is made when there is none (the page's first fetch).
 static void guest_fetch(const int create) {
-    if (G.scenario || active_account() || !backend_enabled()) return;
+    if (G.scenario || active_account()) return;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        krunker_account_frvr_token(kio_guest_token, (void *) (uintptr_t) G.gen);
+        return;
+    }
+    if (!backend_enabled()) return;
     const char *id = guest_id_get(create);
     if (!id[0]) return;
     char path[96];
@@ -189,7 +231,7 @@ static void on_guest_claim(void *user, const int status, const char *body, const
 
 static void guest_claim(void) {
     const char *id = guest_id_get(0);
-    if (G.scenario || !id[0] || !backend_enabled()) return;
+    if (G.scenario || !id[0] || !backend_enabled() || account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's ledger)
     char url[320], json[96];
     snprintf(url, sizeof url, "%s/guest/claim", backend_url());
     snprintf(json, sizeof json, "{\"guest\":\"%s\"}", id);
@@ -200,7 +242,17 @@ static void guest_claim(void) {
 // is zeroed at once and claimed once. From present to none (a sign-out): the balance is fetched again.
 static void guest_account_tick(void) {
     if (G.scenario) return;
-    const int signed_in = active_account() != NULL;
+    const int signed_in = active_account() != NULL, backend = (int) account_backend() + 1;
+    if (G.backend && backend != G.backend) { // another backend's guest: its balance, from its own service
+        G.backend = backend;
+        G.signed_in = signed_in;
+        G.gen++;
+        G.kr = G.score = 0;
+        G.loaded = 0;
+        if (!signed_in) guest_fetch(0);
+        return;
+    }
+    G.backend = backend;
     if (signed_in == G.signed_in) return;
     G.signed_in = signed_in;
     G.gen++;
@@ -215,7 +267,7 @@ static void guest_account_tick(void) {
 // (a) the page is ready and nobody is signed in: the balance, once per page load (v10:222902). Waits until the
 // brain has answered its probe (backend_available() == 1; an explicit URL is one at once).
 static void guest_page_tick(void) {
-    if (!G.page_fetch || G.scenario || backend_available() != 1) return;
+    if (!G.page_fetch || G.scenario || (account_backend() != ACCOUNT_BACKEND_KRUNKER && backend_available() != 1)) return;
     G.page_fetch = 0;
     if (!active_account()) guest_fetch(1);
 }
@@ -226,7 +278,13 @@ const char *v10_rewards_guest_id(void) { return guest_id_get(1); }
 // NET_EXT_KN_GUEST_EARNED (S -> C, no body): the brain's balance for this device's guest changed (v10's "ger"),
 // so it is fetched again.
 void v10_rewards_guest_earned_push(void) {
-    if (G.scenario || active_account()) return;
+    if (G.scenario || active_account() || account_backend() == ACCOUNT_BACKEND_KRUNKER) return;
+    guest_fetch(0);
+}
+
+// krunker.io's GUEST_EARNED_REWARDS ("ger", account_ui.c): v10 fetches the guest profile again (deob-10.0.7.js:229362)
+void v10_rewards_kio_guest_earned(void) {
+    if (G.scenario || active_account() || account_backend() != ACCOUNT_BACKEND_KRUNKER) return;
     guest_fetch(0);
 }
 

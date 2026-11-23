@@ -757,3 +757,114 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
     }
     return request;
 }
+
+// ---------------------------------------------------------------- autoHostMap (no window)
+
+// One weps / cls / prks table of autoHostMap: an entry's key from the preset (else the base value), kept where it
+// differs from the base (deob-10.0.7.js:225405-225450)
+static void auto_matrix(cJSON *request, const char *key, const GameConfigTable table, const cJSON *preset) {
+    if (!cJSON_GetObjectItemCaseSensitive(preset, key)) return;
+    size_t count = 0;
+    const GameConfigOption *options = game_config_options(table, &count);
+    cJSON *all = NULL;
+    for (int id = 0; id < table_count(table); id++) {
+        const cJSON *given = preset_entry(preset, key, id);
+        cJSON *entry = NULL;
+        for (size_t k = 0; k < count; k++) {
+            const GameConfigOption *o = &options[k];
+            if (!game_config_has_key(table, id, o->var)) continue;
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(given, o->var);
+            if (!v || cJSON_IsNull(v)) continue; // the base value: not kept
+            double base = 0.0;
+            const char *base_str = NULL;
+            game_config_value(table, base_entry(table, id), o->var, &base, &base_str);
+            cJSON *out = NULL;
+            if (o->kind == GC_BOOL) {
+                const int on = cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0.0) || (cJSON_IsString(v) && v->valuestring[0]);
+                if (on != (base != 0.0)) out = cJSON_CreateBool(on);
+            } else if (o->kind == GC_SELECT) {
+                const int index = cJSON_IsNumber(v) ? v->valueint : cJSON_IsString(v) ? atoi(v->valuestring) : -1;
+                const double s = index >= 0 && index < o->option_count ? index : o->def;
+                if (s != base) out = cJSON_CreateNumber(s);
+            } else if (o->kind == GC_INPUT) {
+                const char *t = cJSON_GetStringValue(v);
+                const int ok = t && t[0] && strlen(t) <= (size_t) (o->len ? o->len : 16) &&
+                               strspn(t, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_ -|") == strlen(t);
+                if (ok && (!base_str || strcmp(t, base_str))) out = cJSON_CreateString(t);
+            } else if (cJSON_IsNumber(v) || cJSON_IsString(v)) {
+                const double n = cJSON_IsNumber(v) ? v->valuedouble : atof(v->valuestring);
+                if (fabs(n - base) > 1e-9 * fmax(1.0, fabs(base))) out = cJSON_CreateNumber(n);
+            }
+            if (!out) continue;
+            if (!all) all = cJSON_AddObjectToObject(request, key);
+            if (!entry) {
+                char name[16];
+                snprintf(name, sizeof(name), "%d", id);
+                entry = cJSON_AddObjectToObject(all, name);
+            }
+            cJSON_AddItemToObject(entry, o->var, out);
+        }
+    }
+}
+
+cJSON *ui_host_config_auto(const char *map_name, const cJSON *preset, const int kr_rewards, const int private_game) {
+    if (!map_name || !map_name[0]) return NULL;
+    const AccountInfo *acc = active_account();
+    const int account_type = acc && acc->featured ? 3 : acc && acc->premium ? 2 : acc ? 1 : 0; // UTILS.getAccountType (:24545)
+    cJSON *request = cJSON_CreateObject();
+    if (!request) return NULL;
+    cJSON_AddBoolToObject(request, "private", private_game);
+    cJSON_AddBoolToObject(request, "krRewards", kr_rewards);
+    cJSON_AddBoolToObject(request, "defaultSetts", 1);
+    cJSON_AddNumberToObject(request, "override", 0);
+    cJSON_AddStringToObject(request, "customMap", map_name);
+    cJSON_AddNullToObject(request, "rawMapData");
+    cJSON_AddArrayToObject(request, "maps");
+    // modes: the preset's (else mode 0), a preventCustomGames mode for a dev only; none -> [0]. classes: the preset's, else all
+    const cJSON *pmodes = cJSON_GetObjectItemCaseSensitive(preset, "modes"), *pclasses = cJSON_GetObjectItemCaseSensitive(preset, "classes");
+    cJSON *modes = cJSON_AddArrayToObject(request, "modes");
+    for (int id = 0; id < MODE_COUNT; id++) {
+        const GameModeConfig *mode = mode_config(id);
+        if (!mode || !mode->name || !(mode_hostable(id) || (acc && acc->is_dev))) continue;
+        if (preset ? cJSON_IsArray(pmodes) && preset_has(pmodes, id) : id == 0) cJSON_AddItemToArray(modes, cJSON_CreateNumber(id));
+    }
+    if (!cJSON_GetArraySize(modes)) cJSON_AddItemToArray(modes, cJSON_CreateNumber(0));
+    cJSON *classes = cJSON_AddArrayToObject(request, "classes");
+    for (int id = 0; id < CLASS_COUNT; id++)
+        if (!preset || !cJSON_IsArray(pclasses) || preset_has(pclasses, id)) cJSON_AddItemToArray(classes, cJSON_CreateNumber(id));
+    cJSON_AddNullToObject(request, "passCode");
+    // every serverConfig row: a bool or a number from the preset's settings (the number clamped to the account type's
+    // max), else its def; an input "", a select its def
+    const cJSON *settings = cJSON_GetObjectItemCaseSensitive(preset, "settings");
+    size_t count = 0;
+    const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
+    for (size_t k = 0; k < count; k++) {
+        const GameConfigOption *o = &options[k];
+        const cJSON *given = cJSON_GetObjectItemCaseSensitive(settings, o->var);
+        const int has = given && !cJSON_IsNull(given);
+        if (o->kind == GC_BOOL) {
+            const int on = has ? (cJSON_IsTrue(given) || (cJSON_IsNumber(given) && given->valuedouble != 0.0) || (cJSON_IsString(given) && given->valuestring[0]))
+                               : o->def != 0.0f;
+            cJSON_AddBoolToObject(request, o->var, on);
+        } else if (o->kind == GC_INPUT) {
+            cJSON_AddStringToObject(request, o->var, "");
+        } else if (o->kind == GC_SELECT) {
+            cJSON_AddNumberToObject(request, o->var, o->def);
+        } else {
+            double max = o->max;
+            if (account_type == 3 && o->max_f) max = o->max_f;
+            else if (account_type == 2 && o->max_p) max = o->max_p;
+            else if (account_type == 0 && o->max_g) max = o->max_g;
+            double v = o->def;
+            if (has) {
+                v = cJSON_IsNumber(given) ? given->valuedouble : cJSON_IsString(given) ? atof(given->valuestring) : 0.0;
+                if (v > max) v = max;
+            }
+            cJSON_AddNumberToObject(request, o->var, isfinite(v) ? v : 0.0);
+        }
+    }
+    auto_matrix(request, "weps", GAME_CONFIG_WEAPON, preset);
+    auto_matrix(request, "cls", GAME_CONFIG_CLASS, preset);
+    auto_matrix(request, "prks", GAME_CONFIG_EFFECT, preset);
+    return request;
+}

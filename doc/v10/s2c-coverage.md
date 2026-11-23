@@ -187,7 +187,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | DEBUG_RAYCAST | `debug_rc` | :261745 | collision debug drawing | irrelevant | developer view |
 | POPUP_REGISTER_REWARDS | `prr` | :242717 | register-rewards popup | irrelevant | FRVR registration promo |
 | LATEST_RANKED_MMR_CHANGE | `lrmr` | :255609 | end-screen rank card values when the change is non-zero | **ported** | `NET_EXT_LATEST_RANKED_MMR_CHANGE` (rp_change 0: the official balance comes as `ub`) |
-| GUEST_EARNED_REWARDS | `ger` | :133742 | refetches the FRVR guest profile | KN equivalent | about krunker.io's guest; KN's own `ger` is `NET_EXT_KN_GUEST_EARNED` from server/src/accounts.c for kn_brain's guest |
+| GUEST_EARNED_REWARDS | `ger` | :133742 | refetches the FRVR guest profile | by name | `account_scoped` -> account_ui.c -> `v10_rewards_kio_guest_earned`: gapi GET /guest/profile again with FRVR's anonymous session (deob-10.0.7.js:229362); KN's own `ger` is `NET_EXT_KN_GUEST_EARNED` from server/src/accounts.c for kn_brain's guest |
 | DAILY_SPIN_CLAIM_RESPONSE | `dslr` | :261748 | daily spin ticket | by name | `account_scoped` (v10_daily_spin.c) |
 | UPDATE_LOTTERY_ENTRIES | `lotEnt` | :255149 | raffle window entries | KN equivalent | the raffle is gapi / kn_brain's |
 | LOTTERY_PRIZE_WON | `lotWin` | :255154 | chat line "<player> won <prize> in the raffle!" | **ported** | `NET_EXT_LOTTERY_PRIZE_WON` -> `hud_ui_raffle_won` (skin / currency / subscription prizes). KN's server sends it too: kn_brain's draw pushes each prize (`raffle-win`) to the game server its winner plays on, which sends it to everyone there (the winner's uid) |
@@ -198,7 +198,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | PLAYER_POSE | `pz` | :261743 | `players.setPose` | ported | `NET_EXT_PLAYER_POSE` (krunker_link_script.c, init `plrPose` too; client/src/player_pose_render.c; doc/v10/player-pose.md) |
 
 Totals: 24 ported (`c`, `ready`, `sb`, `cd`, `cda`, `uid`, `sdc`, `lrmr`, `gameAnnouncement`, `jnk`, `ksL`, `pz`, `sd`,
-`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`, `aip`), 14 by name, 33 KN equivalent, 35
+`p`, `mp`, `unb`, `unbS`, `lotWin`, `spinW`, `chreq`, `warsClan`, `edMp`, `uai`, `aip`), 15 by name, 32 KN equivalent, 35
 irrelevant, 5 other agent, 0 open.
 
 ## Open work

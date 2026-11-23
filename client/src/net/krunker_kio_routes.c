@@ -184,6 +184,10 @@ int krunker_kio_gapi_write(const char *method, const char *path) {
     // The GET is here, not with the group reads (v10_gapi.c kio_readable), as it is staff-only and exact: one name
     // segment (no '/', no query, at most 64 characters)
     if (!strcmp(method, "POST") && !strcmp(path, "/moderation/chat")) return 1;
+    // the Notifications panel's web push (v10.0.7's webpush client, deob-10.0.7.js:26455-26483; web_push.c): four POSTs
+    static const char *const webpush[] = {"/webpush/subscribe", "/webpush/unsubscribe", "/webpush/status", "/webpush/subscription-change"};
+    for (size_t i = 0; i < sizeof(webpush) / sizeof(webpush[0]); i++)
+        if (!strcmp(path, webpush[i])) return !strcmp(method, "POST");
     static const char chat[] = "/moderation/chat/";
     if (!strcmp(method, "GET") && !strncmp(path, chat, sizeof(chat) - 1)) {
         const char *name = path + sizeof(chat) - 1;

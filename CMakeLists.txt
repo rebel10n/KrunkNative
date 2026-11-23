@@ -1408,6 +1408,19 @@ else ()
         target_link_libraries(krunker_kio_routes_test PRIVATE cJSON freetype m pthread)
         add_test(NAME krunker_kio_routes_test COMMAND krunker_kio_routes_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     endif ()
+    # web_push_kio_test (client/src/ui/web_push.c): the Notifications panel's web push on a krunker.io account, v10.0.7's
+    # /webpush/subscribe, /unsubscribe, /status and /subscription-change on gapi, with doubles for the browser and the API
+    if (NOT WIN32)
+        add_executable(web_push_kio_test client/tests/web_push_kio_test.c)
+        target_include_directories(web_push_kio_test PRIVATE client/include shared/include client/lib/glfw/include)
+        target_link_libraries(web_push_kio_test PRIVATE cJSON freetype m pthread)
+        add_test(NAME web_push_kio_test COMMAND web_push_kio_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
+    # web_push_glue_test (node): web_dom.c's push EM_JS bodies and ui/sw.js's pushsubscriptionchange with a stubbed browser
+    find_program(KN_NODE node)
+    if (KN_NODE)
+        add_test(NAME web_push_glue_test COMMAND ${KN_NODE} client/tests/web_push_glue_test.js WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
     # krunker_host_custom_test (client/src/net/krunker_net.c, krunker_net_host_custom): a custom game hosted on
     # krunker.io's official servers (CUSTOM_SERVER, the "cust" reply, the timeout). krunker_net.c is included
     # whole, with doubles for its client, account and map callers; no socket is opened

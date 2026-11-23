@@ -48,6 +48,7 @@ const char *i18n_trf(char *out, size_t n, const char *key, const char *english, 
 JoinErrorPlace join_error_place(int in_game) { (void) in_game; NOT_REACHED(); }
 void join_error_text(const char *code, char *out, size_t n) { (void) code; (void) out; (void) n; NOT_REACHED(); }
 void krunker_account_fresh_token(KrunkerAccountTokenFn fn, void *user) { (void) fn; (void) user; NOT_REACHED(); }
+void krunker_account_frvr_token(KrunkerAccountTokenFn fn, void *user) { (void) fn; (void) user; NOT_REACHED(); }
 const char *krunker_account_name(void) { NOT_REACHED(); }
 void krunker_account_note_game(const char *name, int level) { (void) name; (void) level; NOT_REACHED(); }
 void krunker_account_note_points(double points) { (void) points; NOT_REACHED(); }

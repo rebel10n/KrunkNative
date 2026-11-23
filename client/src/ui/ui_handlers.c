@@ -379,6 +379,13 @@ H(h_settings_collapse_folder) {
 
 H(h_switch_tab) { UNUSED; menu_set_active_tab(arg_int(args, argc, 0, 0)); return 1; } // windows[3]/[9].switchTab
 H(h_mods) { UNUSED; return mods_ui_handle(html_ui_current_handler(), ev, args, argc) >= 0; } // mods_ui.c
+// selectFile(id): v10.0.7's one file picker for each input: "pfp" is the Account window's profile picture
+// (account_ui.c kio_pfp_handle, deob-10.0.7.js:223508), the others Upload Mod's (mods_ui.c)
+H(h_select_file) {
+    UNUSED;
+    const int pfp = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str && !strcmp(args[0].str, "pfp");
+    return (pfp ? account_ui_handle("selectFile", ev, args, argc) : mods_ui_handle("selectFile", ev, args, argc)) >= 0;
+}
 
 // ---- loadout / pickers / K.P.D / changelog (client/src/ui/ui_loadout.c)
 static HtmlElem arg_elem(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i) {
@@ -599,7 +606,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"loadModURL", h_mods},
     {"loadMod", h_mods},
     {"knModPickLocal", h_mods},
-    {"selectFile", h_mods}, // Upload Mod (window 19, v10's mods_pub): the Select links, submit, the file inputs
+    {"selectFile", h_select_file}, // Upload Mod (window 19, v10's mods_pub) and the profile picture ("pfp")
     {"windows.18.submit", h_mods},
     {"windows.18.onFileChange", h_mods},
     // WP-E Host Game rows (ui_host_config.c, routed through servers_ui_handle; the flow's own rows: host_flow_ui.c)

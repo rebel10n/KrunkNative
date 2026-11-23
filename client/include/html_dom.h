@@ -222,6 +222,14 @@ int  html_push_supported(void);                                        // 1: a s
 int  html_push_permission(void);                                       // Notification.permission: 1 granted, -1 denied, 0 default
 void html_push_subscribe(const char *vapid_public_key_b64url, HtmlPushFn fn, void *user);
 void html_push_unsubscribe(HtmlPushFn fn, void *user);                 // fn gets the subscription it removed (NULL: none)
+void html_push_current(HtmlPushFn fn, void *user);                     // the browser's subscription now (NULL: none), kept
+// The service worker's messages (Krunker v10.0.7's, deob-10.0.7.js:148986-149003): WEBPUSH_REQUEST_VAPID_KEY is
+// answered here with vapid_key (WEBPUSH_VAPID_KEY_RESPONSE); WEBPUSH_SUBSCRIPTION_LOST comes as fn(user, "lost",
+// NULL) and WEBPUSH_SUBSCRIPTION_CHANGED as fn(user, "changed", {old_subscription, new_subscription}); the changes
+// the worker queued while no page was open (IndexedDB webpush-storage / subscription-changes) come as "changed" too,
+// each once, when this is called. Called again: the key is replaced (one listener). Native: nothing.
+typedef void (*HtmlPushEventFn)(void *user, const char *type, const char *json);
+void html_push_listen(const char *vapid_key, HtmlPushEventFn fn, void *user);
 
 // ---- cross-window channel: web, a BroadcastChannel between same-origin tabs (the editor's
 // tabs share their clipboard and project lists over it); natively unavailable (0 / NULL):
