@@ -738,6 +738,8 @@ class Stub:
                 self.frame_t.append(time.monotonic())
                 if name == "en":
                     self.got_en.set()
+                if name == "cptR":  # the server's own "cptR" accepts the answer: v10.0.7 hides its card on it (deob-10.0.7.js:98809)
+                    await send("cptR")
             stop.set()
 
         async def reader_safe():
@@ -1734,6 +1736,11 @@ def check_run(label, stub, client_lines, cheat_expected):
             sol = cptr[0]
     check(f"{label}: \"cptR\" solves the ALTCHA proof of work", isinstance(sol, dict) and sol.get("number") == ALTCHA_NUMBER and
           sol.get("challenge") == ALTCHA["challenge"] and sol.get("salt") == ALTCHA_SALT and sol.get("signature") == "e2esig", sol)
+    card_text = "\n".join(client_lines)
+    check(f"{label}: the \"cpt\" is answered on the Security Challenge card (shown, verified, hidden by the server's \"cptR\")",
+          "[captcha] security challenge card shown" in card_text and "[captcha] security challenge: verified" in card_text and
+          "[captcha] the security challenge card is hidden" in card_text,
+          [l for l in client_lines if "security challenge" in l][:6])
 
     text = "\n".join(client_lines)
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
@@ -1793,6 +1800,9 @@ def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), s
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_WINDOW_SIZE": "960x540", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % mm,
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off",
+                # the stub's "cpt" brings up v10.0.7's Security Challenge card (showCaptcha, deob-10.0.7.js:98801-98806):
+                # its checkbox is clicked for the player as it shows (altcha_modal.c)
+                "KRUNKNATIVE_ALTCHA_CLICK": "1",
                 # the link's "[krunker] ..." events, "[mm]" and "[console]" lines reach the log only at level 2 (5f55eef1)
                 "KRUNKNATIVE_DEBUG": "2"})
     if display:
@@ -4668,9 +4678,9 @@ def run_native_webview():
     page.start()
     # the widget's probes from the first seek until the game is in: both attempts of the matchmaker's
     # challenge (the stub solves each 1.5 s after it renders, the second starts after the first token is
-    # refused), the join, then the game socket's own ALTCHA "cpt", which the client answers itself: it
-    # shows no card either (the player sees only the loading state). Every 400 ms: a card would stay
-    # longer than that.
+    # refused), the join, then the game socket's own ALTCHA "cpt", which v10.0.7 puts on its Security Challenge
+    # card (#captcha-holder, not the Turnstile holder; clicked for the player here). Every 400 ms: a Turnstile
+    # widget would stay longer than that.
     probe_t = list(range(800, 15601, 400))
     probes = "".join("%d vis @silent turnstileHolder knCaptchaWebview\n" % t for t in probe_t)
     script = "0 boot\n" + probes + "16000 play\n21000 players\n21200 quit\n"
@@ -4687,10 +4697,11 @@ def run_native_webview():
           len(silent) == len(probe_t) and not any(re.search(r"turnstileHolder=1|knCaptchaWebview=1", s) for s in silent),
           [s for s in silent if "=1" in s][:4] or len(silent))
     probe_lines = [i for i, l in enumerate(lines) if "@silent " in l and "[input_script] vis" in l]
-    pow_ok = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
-    check(f"{label}: the game socket's \"cpt\" was answered inside the probed window, with no card",
+    pow_ok = [i for i, l in enumerate(lines) if "[captcha] security challenge: verified" in l]
+    check(f"{label}: the game socket's \"cpt\" was answered inside the probed window, on the Security Challenge card",
           pow_ok and probe_lines and pow_ok[0] < probe_lines[-1] and "security challenge answered" in text and
-          "proof of work failed" not in text, [l for l in lines if "proof of work" in l][:4])
+          "[captcha] security challenge card shown" in text and "proof of work failed" not in text,
+          [l for l in lines if "security challenge" in l][:4])
     check(f"{label}: the widget was never asked for (no player-needed line)",
           "[krunker] captcha: the player is needed" not in text)
     vis = [q.get("visibility") for q in page.probes if q.get("render")]
@@ -4730,7 +4741,8 @@ def run_native_webview_interactive():
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port, interactive=True)
     page.start()
-    # the stub's game server sends a SHA-512 "cpt" (the widget's G = SHA-256 / SHA-384 / SHA-512): solved, nothing shown
+    # the stub's game server sends a SHA-512 "cpt" (the widget's G = SHA-256 / SHA-384 / SHA-512): solved on the
+    # Security Challenge card (#captcha-holder), the Turnstile holder stays hidden
     probes = "".join("%d vis @pow turnstileHolder knCaptchaWebview instructions\n" % t for t in range(1000, 9801, 400))
     script = "0 boot\n" + probes + "10000 play\n15000 players\n15200 quit\n"
 
@@ -4752,8 +4764,8 @@ def run_native_webview_interactive():
           text.count("[krunker] captcha: solved in the webview") == 1 and "[webview] challenge closed" in text,
           [l for l in lines if "[webview]" in l or "captcha:" in l][:12])
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
-    pass_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
-    check(f"{label}: the SHA-512 \"cpt\" is solved after the token, nothing shown, the session goes on",
+    pass_i = [i for i, l in enumerate(lines) if "[captcha] security challenge: verified" in l]
+    check(f"{label}: the SHA-512 \"cpt\" is solved on the card after the token, the session goes on",
           len(pass_i) == 1 and solved and pass_i[0] > solved[0] and "proof of work failed" not in text and "CAPTCHA FAILED" not in text,
           [l for l in lines if "proof of work" in l or "CAPTCHA" in l][:4])
     cptr = [f[1] for f in stub.frames if f[0] == "cptR"] if stub else []
@@ -4767,7 +4779,7 @@ def run_native_webview_interactive():
           sol.get("number") == ALTCHA_NUMBER and sol.get("challenge") == ALTCHA_SHA512["challenge"], sol)
     after = [m.group(1) for i, l in enumerate(lines) if pass_i and i > pass_i[0]
              for m in [re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)] if m]
-    check(f"{label}: no card is drawn for the \"cpt\" (the widget holder stays hidden)",
+    check(f"{label}: the \"cpt\" draws no Turnstile widget (its holder stays hidden)",
           after and not any("turnstileHolder=1" in v for v in after), after[:4])
     # the widget takes the spinner's place: while it is drawn the join's spinner (#instructions) is hidden
     drawn = [v for v in (re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l) for l in lines) if v]
@@ -4930,7 +4942,7 @@ def run_web(mode):
         else:
             check(f"{label}: the stub widget rendered in the game", bool(seen_modal) and seen_modal.get("widget"), seen_modal)
             # CLICK TO PLAY once the map is in (menu_ui.c needs a trusted click), until the client's "en";
-            # meanwhile the page is watched for anything drawn: the "cpt" is solved by the client and shows nothing
+            # the "cpt" brings up the Security Challenge card, whose checkbox is clicked as the player would
             end = time.time() + 150
             while time.time() < end and not stub.got_en.is_set():
                 time.sleep(0.3)
@@ -4938,6 +4950,7 @@ def run_web(mode):
                                " const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
                 if box:
                     cdp.click(box[0], box[1])
+                cdp.eval("(() => { const c = document.getElementById('altcha_checkbox'); if (c && !c.checked) c.click(); })()")
             check("web: the page entered the game (\"en\" sent)", stub.got_en.is_set(), "\n".join(cdp.console[-25:]))
             timer_samples = []
 
@@ -4995,8 +5008,8 @@ def run_web(mode):
     if mode != "ok":
         check(f"{label}: no game socket: the join ended with the generic failure", not stub.ws_paths and f"joined as sid {MY_SID}" not in text, stub.ws_paths)
         return
-    check("web: the \"cpt\" was answered with nothing shown",
-          "security challenge answered" in text and "proof of work failed" not in text)
+    check("web: the \"cpt\" was answered on the Security Challenge card",
+          "security challenge answered" in text and "[captcha] security challenge card shown" in text and "proof of work failed" not in text)
     check_run("web", stub, lines, True)
     k = [l for l in lines if "[krunker] <= k " in l]
     check("web: the stub player's \"k\" updates arrived", len(k) >= 5, len(k))

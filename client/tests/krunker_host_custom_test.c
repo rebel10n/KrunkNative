@@ -58,8 +58,32 @@ const char *krunker_build_fetch_url(int production, const char *setting) { (void
 int krunker_build_refresh(const char *url, int force, KrunkerBuildReady done, void *user) { (void) url; (void) force; (void) done; (void) user; NOT_REACHED(); }
 void krunker_captcha_ask(int attempt, int rejected, KrunkerCaptchaDone done, void *user) { (void) attempt; (void) rejected; (void) done; (void) user; NOT_REACHED(); }
 void krunker_captcha_close(void) { NOT_REACHED(); }
-void krunker_captcha_pow_begin(void) { NOT_REACHED(); }
-void krunker_captcha_pow_end(int solved) { (void) solved; NOT_REACHED(); }
+// the pageless solve of a guest's bCpt (krunker_net.c altcha_tick): its begin and end, counted
+static int g_pow_begun, g_pow_ended, g_pow_solved;
+void krunker_captcha_pow_begin(void) { g_pow_begun++; }
+void krunker_captcha_pow_end(int solved) { g_pow_ended++; g_pow_solved = solved; }
+// the Security Challenge card (altcha_modal.c, v10.0.7's showCaptcha): g_card.page = 0 is a client with no page (the
+// slices answer), 1 shows the card, which keeps what it was given until the test answers for the player
+static struct {
+    int page, shown, hidden, open, hide_on_solve;
+    char json[512];
+    AltchaModalDone done;
+    AltchaModalAlive alive;
+    void *user;
+} g_card;
+int altcha_modal_show(const char *challenge_json, int hide_on_solve, AltchaModalDone done, AltchaModalAlive alive, void *user) {
+    if (!g_card.page) return 0;
+    g_card.shown++;
+    g_card.open = 1;
+    g_card.hide_on_solve = hide_on_solve;
+    snprintf(g_card.json, sizeof(g_card.json), "%s", challenge_json ? challenge_json : "");
+    g_card.done = done;
+    g_card.alive = alive;
+    g_card.user = user;
+    return 1;
+}
+void altcha_modal_hide(void) { g_card.hidden++; g_card.open = 0; }
+int altcha_modal_open(void) { return g_card.open; }
 void krunker_captcha_tick(void) { NOT_REACHED(); }
 // the socket's saved testCode / display mode (socket_extras, html_dom.h): none saved here
 int html_storage_get(const char *key, char *buf, size_t n) { (void) key; if (n) buf[0] = 0; return -1; }
@@ -424,9 +448,25 @@ static void test_guest(void) {
     const KrunkerValue chal[] = {KRUNKER_V_STR("algorithm"), KRUNKER_V_STR("SHA-256"), KRUNKER_V_STR("challenge"), KRUNKER_V_STR(hex),
                                  KRUNKER_V_STR("maxnumber"), KRUNKER_V_NUM(5000), KRUNKER_V_STR("salt"), KRUNKER_V_STR(salt),
                                  KRUNKER_V_STR("signature"), KRUNKER_V_STR("sig")};
+    memset(&g_card, 0, sizeof(g_card));
+    g_card.page = 1;
     deliver_rpc("_0", id + 5, KRUNKER_V_MAP(chal, 5));
     CHECK(!K.out_head, "another rpc's answer sends nothing");
     deliver_rpc("_0", id, KRUNKER_V_MAP(chal, 5));
+    CHECK(!K.out_head, "the challenge is not solved on the socket thread: nothing is sent before the player answers");
+    altcha_tick();
+    // showCaptcha(challenge, cb, true) (deob-10.0.7.js:119737-119738): the card, hidden once it is answered
+    CHECK(g_card.shown == 1 && g_card.hide_on_solve == 1 && strstr(g_card.json, "\"salt\":\"guest-salt?expires=2000000000\"") &&
+              strstr(g_card.json, "\"maxnumber\":5000") && strstr(g_card.json, "\"algorithm\":\"SHA-256\""),
+          "a guest's bCpt shows the Security Challenge card, hidden on solve (%d, %d, %s)", g_card.shown, g_card.hide_on_solve, g_card.json);
+    altcha_tick();
+    CHECK(g_card.shown == 1 && !K.out_head && g_pow_begun == 0, "the card answers it: shown once, nothing solved meanwhile");
+    CHECK(g_card.alive && g_card.alive(g_card.user), "the card's session is alive while the socket is open");
+    char *payload = NULL;
+    CHECK(krunker_altcha_solve("SHA-256", hex, salt, "sig", 5000, &payload) == 0 && payload, "the player's widget solves it");
+    if (g_card.done && payload) g_card.done(g_card.user, payload);
+    free(payload);
+    g_card.open = 0; // hide_on_solve: the card goes
     if (one_out(&f)) {
         char json[512] = "";
         const KrunkerValue *ans = krunker_frame_arg(&f, 1);
@@ -442,6 +482,32 @@ static void test_guest(void) {
     deliver_cust("Game Created", "NY:guest", 1);
     host_custom_tick(g_now + 0.5);
     CHECK(g_done.calls == 1 && g_done.game_set && !strcmp(g_done.game, "NY:guest"), "the guest's game is made (%s)", g_done.game);
+
+    // a client with no page for the card: solved in slices on the main thread (nothing shown), then the same "custom"
+    reset_all();
+    g_signed_in = 0;
+    memset(&g_card, 0, sizeof(g_card));
+    g_pow_begun = g_pow_ended = g_pow_solved = 0;
+    CHECK(krunker_net_host_custom(cfg, on_done, NULL) == 1, "a guest's request (no page)");
+    if (one_out(&f)) {
+        id = (int) krunker_frame_arg(&f, 0)->u.num;
+        krunker_frame_free(&f);
+    }
+    drain_out();
+    deliver_rpc("_0", id, KRUNKER_V_MAP(chal, 5));
+    for (int i = 0; i < 100 && !K.out_head; i++) altcha_tick();
+    CHECK(g_pow_begun == 1 && g_pow_ended == 1 && g_pow_solved == 1, "no page: the slices begin and end solved (%d, %d, %d)",
+          g_pow_begun, g_pow_ended, g_pow_solved);
+    if (one_out(&f)) {
+        char json[512] = "";
+        const KrunkerValue *ans = krunker_frame_arg(&f, 1);
+        if (ans && ans->type == KRUNKER_STR) b64_text(ans->u.str, ans->len, json, sizeof(json));
+        CHECK(f.name_len == 6 && !memcmp(f.name, "custom", 6) && strstr(json, "\"number\":777,"), "no page: custom with the answer (%s)", json);
+        krunker_frame_free(&f);
+    } else {
+        CHECK(0, "no page: one frame (the custom) left the socket");
+    }
+    drain_out();
 
     // refused: RPC_ERROR -> "Please try again.", no custom
     reset_all();

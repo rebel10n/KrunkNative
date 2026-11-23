@@ -16,9 +16,10 @@
 //              can be shown: the request ends with unavailable = 1 and the requester retries its seek
 //              without a token (krunker_net.c captcha_done). Nothing is ever pasted or posted by the player.
 //    Tokens are single-use, live ~300 s, are handed to krunker_net once, never logged or stored.
-// 2. The game socket's "cpt": an ALTCHA proof of work that krunker_altcha.c answers itself (computing it
-//    is how that captcha is passed). Nothing is shown while it works or when it passes: the player sees
-//    only the loading state. A failure shows nothing either (the server's own close says so).
+// 2. The game socket's "cpt" (and a guest host's bCpt): an ALTCHA proof of work, put on v10.0.7's Security
+//    Challenge card (altcha_modal.c; showCaptcha, deob-10.0.7.js:98801-98806), where the player clicks "I'm not
+//    a robot" and the widget's search answers it. Only a client with no page for the card has krunker_altcha.c
+//    answer it in slices with nothing shown (krunker_captcha_pow_begin / end below).
 #include <stddef.h>
 
 // token: the Turnstile response, valid during the call only (copy it). token NULL: no token. unavailable 1 =
@@ -46,7 +47,7 @@ int krunker_captcha_inline_pointer(int kind, double x, double y, int button);
 int krunker_captcha_inline_key(int kn_key, int pressed);
 int krunker_captcha_inline_char(unsigned codepoint);
 
-// The socket "cpt", solved by this client: begin / end(solved) show nothing (logged only); end(0) shows
+// The socket "cpt" solved by this client when the page cannot show the card: begin / end(solved) show nothing (logged only); end(0) shows
 // nothing is drawn either way (the log says which). Never blocks the game's pointer.
 void krunker_captcha_pow_begin(void);
 void krunker_captcha_pow_end(int solved);

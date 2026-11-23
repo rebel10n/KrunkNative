@@ -21,10 +21,12 @@ join's loading spinner is (`#instructions`, hidden while the widget is up), the 
 (game.deob.js getCaptchaToken: a fixed, centred holder, appearance `interaction-only`). No interface names the
 captcha or a security check: a failed challenge is the generic join failure.
 
-The in-game socket captcha `cpt` is a different thing: an ALTCHA proof of work that `krunker_altcha.c` computes
-(that is how it is meant to be passed). Nothing is shown while it is computed. One this client cannot solve ends the
-session the way v10.0.3's failure branch does (deob-10.0.3.js:111428-111431): the error "CAPTCHA FAILED" on the error
-screen and the socket closed (`krunker_link_captcha_failed`). The log says which.
+The in-game socket captcha `cpt` is a different thing: an ALTCHA proof of work, which v10.0.7 puts on its Security
+Challenge card (showCaptcha, deob-10.0.7.js:98801-98806): `altcha_modal.c` draws it, the player clicks "I'm not a
+robot", the widget's search answers it and the server's `cptR` hides the card ([captcha.md](captcha.md)). A client
+with no page for the card has `krunker_altcha.c` compute it in slices with nothing shown; one it cannot solve there
+ends the session the way v10.0.3's failure branch does (deob-10.0.3.js:111428-111431): the error "CAPTCHA FAILED" on
+the error screen and the socket closed (`krunker_link_captcha_failed`). The log says which.
 
 ## What the live client does (game.deob.js)
 
@@ -158,11 +160,12 @@ is needed: Turnstile's `before-interactive-callback`, no token within 20 s (`KN_
   each token; the stub page never sees a token; nothing of the run (WebKit's processes, Xvfb) is left;
 - native `native-webview-interactive`: the stub widget calls `before-interactive-callback` first: only then is the
   widget shown, in the game (no OS window is mapped), the spinner is hidden while the widget is drawn, the token
-  joins; the stub's game server then sends a SHA-512 `cpt` (one of the ALTCHA widget's three algorithms): it is solved, its
-  `cptR` is the SHA-512 solution and nothing is drawn;
+  joins; the stub's game server then sends a SHA-512 `cpt` (one of the ALTCHA widget's three algorithms): it is solved on
+  the Security Challenge card (its checkbox clicked by `KRUNKNATIVE_ALTCHA_CLICK`, which every native run of the test
+  sets), its `cptR` is the SHA-512 solution and no Turnstile widget is drawn;
 - web `web`: the page's request for `api.js` is answered over the DevTools protocol (in the test's own browser
   only) by a stub widget that calls back with a fake token; the widget is drawn in the game, the game runs as
-  before, and the `cpt` is answered with nothing shown;
+  before, and the `cpt` is answered on the Security Challenge card (the test clicks its checkbox);
 - web `web-domain`: the stub widget answers `110200`; the holder has no text of ours (the widget alone), and the
   join fails with the generic error after one retry without a token (two seeks).
 

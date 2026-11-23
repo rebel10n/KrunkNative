@@ -164,6 +164,7 @@ typedef enum {
     KRUNKER_LINK_EV_ACCOUNT_POINTS, // "ua" UPDATE_ACCOUNT: the account row's rankedPoints (account_ranked_points)
     KRUNKER_LINK_EV_HOST_FAILED,    // krunker_link_host_custom's guest challenge was refused or not solved: no "custom"
                                     // went (v10.0.3 shows custom.tryagain, deob-10.0.3.js:229994)
+    KRUNKER_LINK_EV_CAPTCHA_ACCEPTED, // the server's "cptR": the answer was taken (v10.0.7's _hideCaptcha, deob-10.0.7.js:98809)
 } KrunkerLinkEvent;
 
 // init [mapIndex, modeIndex, eventIndex, ..., customsData] (INIT_GAME, game.deob.js:219289): what the

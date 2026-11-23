@@ -27,6 +27,9 @@ typedef void (*KnCaptchaDone)(void *user, const char *payload);
 // every slot busy): done is then never called. Otherwise done is called exactly once, on the main thread (from
 // backend_poll or kn_captcha_tick, never from inside this call), unless kn_captcha_cancel(id) comes first.
 unsigned kn_captcha_request(const char *purpose, KnCaptchaDone done, void *user);
+// The challenge alone, for a card the player solves (v10.0.7's showCaptcha: altcha_modal.c): done(user, the challenge
+// JSON as the brain wrote it) once fetched, or done(user, NULL) when no usable one came; otherwise as kn_captcha_request.
+unsigned kn_captcha_fetch(const char *purpose, KnCaptchaDone done, void *user);
 // A challenge given by a game server (its in-game "cpt", NET_EXT_CAPTCHA: kn_captcha_game.c) instead of fetched: the
 // same search and done rules. 0 when it cannot be solved here (not SHA-256 / -384 / -512 ALTCHA, over the cap, malformed) or every
 // slot is busy: done is then never called.

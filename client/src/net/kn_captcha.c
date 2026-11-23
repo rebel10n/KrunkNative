@@ -18,6 +18,7 @@ typedef struct {
     SlotState state;
     unsigned id;
     char purpose[16];
+    int fetch_only;    // kn_captcha_fetch: done gets the challenge JSON, the player's widget solves it
     double started_ms; // the request's start: KN_CAPTCHA_DEADLINE_MS counts from it
     KnCaptchaDone done;
     void *user;
@@ -96,6 +97,17 @@ static void on_challenge(void *user, const int status, const char *body, const s
         finish(s, NULL);
         return;
     }
+    if (s->fetch_only) { // the challenge as the brain wrote it (the widget's challengejson)
+        char *json = malloc(length + 1);
+        if (json) {
+            memcpy(json, body, length);
+            json[length] = 0;
+        }
+        memset(&s->a, 0, sizeof(s->a));
+        finish(s, json);
+        free(json);
+        return;
+    }
     s->state = SLOT_SOLVE;
 }
 
@@ -130,6 +142,13 @@ static unsigned start(const char *purpose, const KnCaptchaDone done, void *user,
 
 unsigned kn_captcha_request(const char *purpose, const KnCaptchaDone done, void *user) {
     return start(purpose, done, user, NULL, 0, NULL);
+}
+
+unsigned kn_captcha_fetch(const char *purpose, const KnCaptchaDone done, void *user) {
+    const unsigned id = start(purpose, done, user, NULL, 0, NULL);
+    Slot *s = id ? slot_of(id) : NULL;
+    if (s) s->fetch_only = 1;
+    return id;
 }
 
 unsigned kn_captcha_solve(const char *purpose, const char *challenge_json, const KnCaptchaDone done, void *user) {

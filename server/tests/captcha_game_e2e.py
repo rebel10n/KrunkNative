@@ -12,8 +12,10 @@ every port from kn_proto.free_ports().
     gets NET_EXT_CAPTCHA [challenge], and its solved NET_EXT_CAPTCHA_ANSWER is accepted (an empty answer back) and it
     plays on; a wrong number, another connection's answer (a replay) and a peer without EXT packets are closed with
     NET_PACKET_ERROR "CAPTCHA FAILED" (004008)
-  client: a headless client_bin seeks at launch: CaptchaRequired, the seek's captcha solved, the seek again, the join,
-    the node's "cpt" answered and accepted, and the client is in the game
+  client: a headless client_bin seeks at launch: CaptchaRequired, the seek's captcha solved, the seek again, the join;
+    the node's "cpt" puts up v10.0.7's Security Challenge card (deob-10.0.7.js:98914-98968: its texts, the ALTCHA
+    widget unverified), nothing is answered until the player clicks "I'm not a robot", the click's value goes as "cptR"
+    and is accepted, and the server's "cptR" takes the card away
   off: a second brain without captcha.enforce: the seek needs no captcha and the node asks nothing
 
 Exit 0 when every check passes, 1 otherwise, 77 without kn_brain / server_bin / client_bin.
@@ -261,26 +263,56 @@ def protocol(brain_port, node_log):
         conn.close()
 
 
+CARD_ASKED = "[captcha] game: the server asks a security challenge (the Security Challenge card)"
+
+
+def ui_cmd(path, line):
+    with open(path, "a") as f:
+        f.write(line + "\n")
+
+
 def client_run(brain_port, dead_port):
+    """v10.0.7's "cpt" (deob-10.0.7.js:98801-98810, showCaptcha :98914-98968): the Security Challenge card waits for the
+    player's "I'm not a robot" click, the value goes back as "cptR" and the card stays until the server's "cptR"."""
     script = os.path.join(WORK, "client.script")
     with open(script, "w") as f:
-        f.write("0 menu\n9000 players\n9500 quit\n")
+        f.write("0 menu\n60000 quit\n")
+    cmds = os.path.join(WORK, "client.cmds")
+    open(cmds, "w").close()
     log = os.path.join(WORK, "client.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_DEBUG": "1",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
-                "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % dead_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
-    p = subprocess.Popen([os.path.join(BUILD, "client_bin")], cwd=ROOT, stdout=open(log, "w"), stderr=subprocess.STDOUT,
+                "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % dead_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io",
+                "KRUNKNATIVE_UI_CMDS": cmds})
+    # line-buffered: the card's lines are read while the client runs
+    p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(BUILD, "client_bin")], cwd=ROOT, stdout=open(log, "w"), stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, env=env, start_new_session=True)
     procs.append(p)
+    card = {}
     try:
-        p.wait(120)
+        asked = wait_for(lambda: CARD_ASKED in read(log), 45)
+        check("client: the node's \"cpt\" puts up the Security Challenge card", asked,
+              [l for l in read(log).splitlines() if "[captcha]" in l][:8])
+        if asked:
+            time.sleep(1.5)  # a card left alone answers nothing (no auto attribute on v10's widget)
+            card["unanswered"] = "the server's challenge answered" not in read(log)
+            ui_cmd(cmds, "count #captcha-holder")
+            ui_cmd(cmds, "textof #captcha-holder")
+            ui_cmd(cmds, "count #captcha-holder altcha-widget .altcha[data-state=unverified]")
+            ui_cmd(cmds, "clickid altcha_checkbox")
+            card["accepted"] = wait_for(lambda: "[captcha] game: the server accepted the answer" in read(log), 20)
+            time.sleep(0.5)
+            ui_cmd(cmds, "count #captcha-holder")
+            wait_for(lambda: read(log).count("[ui_cmds] count #captcha-holder =") >= 2, 10)
+        ui_cmd(cmds, "quit")
+        p.wait(60)
     except subprocess.TimeoutExpired:
         stop(p)
         check("client_bin finished its script", False, "timeout, log " + log)
-    return read(log)
+    return read(log), card
 
 
 def main():
@@ -299,14 +331,23 @@ def main():
         node, node_log = start_node(brain_port, "CPTA")
         protocol(brain_port, node_log)
 
-        log = client_run(brain_port, dead_port)
+        log, card = client_run(brain_port, dead_port)
         check("client: the launch seek is answered CaptchaRequired and the client solves the seek's captcha",
               "seek-game: CaptchaRequired: solving the seek's captcha (attempt 1)" in log and "[captcha] seek: solved" in log,
               [l for l in log.splitlines() if "captcha" in l.lower() or "[mm]" in l][:8])
         check("client: the brain accepted the seek's captcha", re.search(r"seek from \S+: captcha accepted", read(brain_log)))
-        check("client: it joined the node and answered its \"cpt\", accepted",
-              "[captcha] game: the server asks a security challenge" in log and "[captcha] game: the server accepted the answer" in log,
-              [l for l in log.splitlines() if "[captcha]" in l][:8])
+        counts = re.findall(r"\[ui_cmds\] count #captcha-holder = (\d+)", log)
+        text = re.search(r"\[ui_cmds\] textof #captcha-holder = '(.*)'$", log, re.M)
+        text = text.group(1) if text else ""
+        check("client: nothing is answered before the player clicks", card.get("unanswered"))
+        check("client: the card is up (#captcha-holder) with v10's texts and the ALTCHA widget, unverified",
+              counts[:1] == ["1"] and "Security Challenge" in text and "Please complete the security challenge to continue." in text
+              and "I'm not a robot" in text and "Protected by ALTCHA" in text
+              and "[ui_cmds] count #captcha-holder altcha-widget .altcha[data-state=unverified] = 1" in log, (counts, text))
+        check("client: the click verifies it and the value goes as \"cptR\", which the node accepts",
+              card.get("accepted") and "[captcha] security challenge: verified" in log and "[captcha] game: the server's challenge answered" in log,
+              [l for l in log.splitlines() if "[captcha]" in l][:12])
+        check("client: the server's \"cptR\" takes the card away (_hideCaptcha)", counts[1:2] == ["0"], counts)
         check("client: no CAPTCHA FAILED anywhere", "CAPTCHA FAILED" not in log)
         stop(node)
         stop(brain)

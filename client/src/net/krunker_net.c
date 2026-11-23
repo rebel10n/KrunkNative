@@ -13,6 +13,7 @@
 #include <krunker_build_live.h>
 #include <krunker_altcha.h>
 #include <krunker_captcha.h>
+#include <altcha_modal.h> // v10.0.7's Security Challenge card for the game socket's "cpt" and bCpt
 #include <recent_lobbies.h>
 #include <seek_prefs.h>
 #include <seek_filter.h> // SEEK_LOBBY_* (the lobby flags of seek_prefs_lobby_ok)
@@ -152,10 +153,13 @@ static struct {
     // the main thread's pending error popup (krunker_net_tick)
     char notice[256];
     int notice_pending, captcha_pending;
-    KrunkerAltcha altcha; // web: the "cpt" being solved in slices
+    KrunkerAltcha altcha; // the "cpt" / bCpt challenge the main thread answers (the card, or slices without a page)
     int altcha_pending;
-    int pow_shown;           // web: krunker_captcha_pow_begin was told of the "cpt" being solved
-    volatile int pow_result; // native: the socket thread's "cpt" outcome (1 solved, 2 not)
+    int pow_shown;           // the challenge was taken up by the main thread (the card shown, or the slices begun)
+    int altcha_card;         // it is on the Security Challenge card (altcha_modal.c), which answers it
+    unsigned card_generation; // K.generation the card was shown in
+    volatile int captcha_accepted; // the socket thread saw the server's "cptR": the card goes (_hideCaptcha)
+    volatile int pow_result; // 2: the socket thread refused a "cpt" it cannot take (KRUNKER_LINK_EV_CAPTCHA)
     // the matchmaker's Turnstile (game.deob.js seek, :147445-147467): prompts so far this join (the live
     // client gives up after 2), the player's token until the retry's seek-game takes it (then wiped),
     // and whether the last seek carried one (a CaptchaRequired after it = the token was refused)
@@ -448,6 +452,9 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
         case KRUNKER_LINK_EV_ACCOUNT_POINTS: // "ua": the account's rankedPoints changed (krunker_net_tick)
             K.points_event = 1;
             break;
+        case KRUNKER_LINK_EV_CAPTCHA_ACCEPTED: // "cptR": krunker_net_tick hides the Security Challenge card
+            K.captcha_accepted = 1;
+            break;
         default:
             break;
     }
@@ -467,24 +474,18 @@ static int link_cheat(void *user, const char *nonce, const char *ciphertext_b64,
 #endif
 }
 
-// "cpt" (ALTCHA proof of work, up to ~1 s at the default maximum). Natively on the socket thread
-// with K.lock released, like link_cheat; on the web (no threads) in slices from krunker_net_tick,
-// so the frame loop never stalls on it.
+// "cpt" and the guest host's bCpt (ALTCHA proof of work): handed to the main thread, which shows v10.0.7's Security
+// Challenge card for it (showCaptcha, deob-10.0.7.js:98801-98806, :119737-119738; altcha_modal.c) and sends the
+// player's answer. Without a page for the card krunker_net_tick solves it in slices itself, so the frame loop never
+// stalls on it (natively the socket thread once solved it at once, with nothing shown).
 #define KRUNKER_ALTCHA_SLICE 20000L // numbers per frame on the web (a few ms)
 static int link_altcha(void *user, const char *alg, const char *challenge, const char *salt, const char *signature, const long max, char **payload) {
     (void) user;
-#ifdef __EMSCRIPTEN__
     (void) payload;
     if (krunker_altcha_begin(&K.altcha, alg, challenge, salt, signature, max) != 0) return -1;
     K.altcha_pending = 1;
+    K.pow_shown = 0; // a newer challenge is shown afresh
     return 1;
-#else
-    pthread_mutex_unlock(&K.lock);
-    const int rc = krunker_altcha_solve(alg, challenge, salt, signature, max, payload);
-    pthread_mutex_lock(&K.lock);
-    K.pow_result = rc == 0 ? 1 : 2; // shown by krunker_net_tick (the UI is the main thread's)
-    return rc;
-#endif
 }
 
 // init (socket thread, K.lock held): the map is resolved on the main thread (kmap_tick); until then the
@@ -2482,6 +2483,8 @@ void krunker_net_leave(Client *client, const char *reason) {
     Client *owner = client ? client : K.client;
     if (owner) owner->game.is_official = 0; // back in KrunkNative's lobbies (the KN-only classes are playable again)
     K.altcha_pending = K.pow_shown = 0;
+    if (K.altcha_card) altcha_modal_hide(); // the socket's reset removes the Security Challenge card (deob-10.0.7.js:98984)
+    K.altcha_card = 0;
     kmap_reset();
     wipe(K.access, sizeof(K.access));
     if (!krunker_account_owns_captcha()) krunker_captcha_close(); // a pending Turnstile request ends with the session (not a sign-in's)
@@ -2735,6 +2738,94 @@ void krunker_net_account_signed_in(void) {
     krunker_account_fresh_token(on_login_token, (void *) (uintptr_t) K.generation);
 }
 
+// ---------------------------------------------------------------- the game socket's ALTCHA ("cpt", bCpt)
+
+static KrunkerAltcha g_altcha; // the main thread's copy of the challenge it answers (K.altcha is the socket thread's)
+
+// The answer goes: the guest host's "custom" (bCpt), else "cptR" [value] (deob-10.0.7.js:98805). payload NULL: the
+// pageless search found none, v10.0.3's failure branch (CAPTCHA FAILED, the socket closed).
+static void altcha_answer(const char *payload) {
+    pthread_mutex_lock(&K.lock);
+    const int for_host = krunker_link_host_solving(&K.link); // the guest host's bCpt, not a "cpt"
+    if (for_host) {
+        krunker_link_host_answer(&K.link, payload); // the "custom" goes (or EV_HOST_FAILED)
+    } else if (payload) {
+        const KrunkerValue args[] = {KRUNKER_V_STR(payload)};
+        if (krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_cptR), args, 1)) K.link.captchas_solved++;
+    } else if (K.state == KS_OPEN) {
+        krunker_link_captcha_failed(&K.link); // (deob-10.0.3.js:111428-111431)
+    }
+    pthread_mutex_unlock(&K.lock);
+    if (payload && !for_host) KN_LOG_VERBOSE2("[krunker] security challenge answered (%s proof of work)\n", g_altcha.algorithm);
+}
+
+// the card's session: this socket, still open
+static int altcha_card_alive(void *user) {
+    (void) user;
+    return K.state == KS_OPEN && K.generation == K.card_generation;
+}
+
+// the card's callback: the player's verified value (cb(value, null))
+static void altcha_card_done(void *user, const char *payload) {
+    (void) user;
+    K.altcha_pending = K.pow_shown = 0;
+    if (!altcha_card_alive(NULL)) return;
+    altcha_answer(payload);
+}
+
+// {algorithm, challenge, salt, signature, maxnumber}: the widget's challengejson
+static char *altcha_json(const KrunkerAltcha *a) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "algorithm", a->algorithm);
+    cJSON_AddStringToObject(o, "challenge", a->challenge);
+    cJSON_AddStringToObject(o, "salt", a->salt);
+    cJSON_AddStringToObject(o, "signature", a->signature);
+    cJSON_AddNumberToObject(o, "maxnumber", (double) a->max);
+    char *s = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    return s;
+}
+
+// Main thread, each frame: the server's "cptR" hides the card; a challenge the socket thread handed over is put on
+// the Security Challenge card (hidden once answered for the guest host's bCpt, :119738), or solved here in slices
+// when the page cannot show it.
+static void altcha_tick(void) {
+    if (K.captcha_accepted) {
+        K.captcha_accepted = 0;
+        altcha_modal_hide(); // _hideCaptcha (:98809-98810)
+    }
+    if (K.altcha_card && !altcha_modal_open()) K.altcha_card = 0; // gone with its session
+    pthread_mutex_lock(&K.lock);
+    const int take = K.altcha_pending && !K.pow_shown;
+    if (take) {
+        K.pow_shown = 1;
+        g_altcha = K.altcha;
+    }
+    const int for_host = take && krunker_link_host_solving(&K.link);
+    pthread_mutex_unlock(&K.lock);
+    if (take) {
+        char *json = altcha_json(&g_altcha);
+        const int card = json && altcha_modal_show(json, for_host, altcha_card_done, altcha_card_alive, NULL);
+        free(json);
+        if (card) {
+            K.altcha_card = 1;
+            K.card_generation = K.generation;
+            return;
+        }
+        K.altcha_card = 0;
+        krunker_captcha_pow_begin(); // no page: the slices start (nothing is shown unless it fails)
+    }
+    if (!K.altcha_pending || !K.pow_shown || K.altcha_card) return;
+    char *payload = NULL;
+    const int rc = K.state == KS_OPEN ? krunker_altcha_step(&g_altcha, KRUNKER_ALTCHA_SLICE, &payload) : -1;
+    if (rc != 0) {
+        K.altcha_pending = K.pow_shown = 0;
+        krunker_captcha_pow_end(rc == 1);
+        altcha_answer(rc == 1 ? payload : NULL);
+    }
+    free(payload);
+}
+
 void krunker_net_tick(Client *client) {
     krunker_captcha_tick(); // the matchmaker's Turnstile widget (the challenge webview natively)
     host_custom_tick(glfwGetTime()); // a custom game's answer or its timeout (krunker_net_host_custom)
@@ -2804,38 +2895,7 @@ void krunker_net_tick(Client *client) {
         K.pow_result = 0;
         krunker_captcha_pow_end(solved);
     }
-    if (K.altcha_pending && !K.pow_shown) { // web: the slices start (nothing is shown unless it fails)
-        K.pow_shown = 1;
-        krunker_captcha_pow_begin();
-    }
-    if (K.altcha_pending) {
-        char *payload = NULL;
-        const int rc = K.state == KS_OPEN ? krunker_altcha_step(&K.altcha, KRUNKER_ALTCHA_SLICE, &payload) : -1;
-        if (rc != 0) {
-            K.altcha_pending = K.pow_shown = 0;
-            krunker_captcha_pow_end(rc == 1);
-        }
-        pthread_mutex_lock(&K.lock);
-        const int for_host = krunker_link_host_solving(&K.link); // the guest host's bCpt, not a "cpt"
-        pthread_mutex_unlock(&K.lock);
-        if (rc != 0 && for_host) {
-            pthread_mutex_lock(&K.lock);
-            krunker_link_host_answer(&K.link, rc == 1 ? payload : NULL); // the "custom" goes (or EV_HOST_FAILED)
-            pthread_mutex_unlock(&K.lock);
-        } else if (rc == 1) {
-            const KrunkerValue args[] = {KRUNKER_V_STR(payload)};
-            pthread_mutex_lock(&K.lock);
-            if (krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_cptR), args, 1)) K.link.captchas_solved++;
-            pthread_mutex_unlock(&K.lock);
-            KN_LOG_VERBOSE2("[krunker] security challenge answered (%s proof of work, number %ld)\n", K.altcha.algorithm, K.altcha.next);
-        } else if (rc < 0 && K.state == KS_OPEN) {
-            // v10.0.3's failure branch: the error "CAPTCHA FAILED" and the socket closed (deob-10.0.3.js:111428-111431)
-            pthread_mutex_lock(&K.lock);
-            krunker_link_captcha_failed(&K.link);
-            pthread_mutex_unlock(&K.lock);
-        }
-        free(payload);
-    }
+    altcha_tick();
     if (!K.notice_pending) return;
     pthread_mutex_lock(&K.lock);
     char text[sizeof(K.notice)];

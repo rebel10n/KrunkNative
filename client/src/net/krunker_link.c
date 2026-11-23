@@ -3129,7 +3129,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_SOCKET_PING: send_c2s(l, KRUNKER_C2S_PING, NULL, 0); break; // iìîíîïí: "po"
         case KRUNKER_S2C_CHEAT_CHECK: on_cheat_check(l, &f); break;
         case KRUNKER_S2C_cpt: on_captcha(l, &f); break;
-        case KRUNKER_S2C_cptR: note(l, KRUNKER_LINK_EV_NOTE, "security challenge accepted"); break; // _hideCaptcha
+        case KRUNKER_S2C_cptR: note(l, KRUNKER_LINK_EV_CAPTCHA_ACCEPTED, "security challenge accepted"); break; // _hideCaptcha
         case KRUNKER_S2C_ERROR: on_error(l, &f); break;
         case KRUNKER_S2C_CUSTOM_RESPONSE: on_custom_response(l, &f); break; // "cust": our CUSTOM_SERVER's answer
         case KRUNKER_S2C_VOTE_KICK: on_vote_kick(l, &f); break;

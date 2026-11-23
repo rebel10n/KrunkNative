@@ -16,6 +16,7 @@
 // Tokens: read from the widget / the webview, checked for shape, handed to the requester once, then
 // wiped; never logged, never stored.
 #include <krunker_captcha.h>
+#include <altcha_modal.h>
 #include "klog.h"
 #include <krunker_build_live.h> // the current build's Turnstile site key
 #include <kn_webview.h>
@@ -123,7 +124,8 @@ static void hide_modal(void) {
 
 // The widget is up and waits for the player (krunker_captcha_needs_player): the menu's clicks and typing are left
 // to it (v10 frees the pointer for its modals, v10.js:219744; menu_ui.c and main.c ask this).
-int krunker_captcha_needs_player(void) { return C.asking && C.needs_player; }
+// v10.0.7's Security Challenge card (altcha_modal.c) waits for the player's click the same way.
+int krunker_captcha_needs_player(void) { return (C.asking && C.needs_player) || altcha_modal_open(); }
 
 // ---------------------------------------------------------------- web: the Turnstile widget
 

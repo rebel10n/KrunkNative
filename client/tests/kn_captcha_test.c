@@ -306,6 +306,22 @@ int main(void) {
         CHECK(g_done == 0 && kn_captcha_pending() == 0);
     }
 
+    // 8. the challenge alone, for the Security Challenge card (kn_captcha_fetch): done gets the brain's JSON as it came,
+    //    nothing is searched; no usable challenge: done(NULL)
+    {
+        char ch[512];
+        make_challenge(ch, sizeof(ch), "fetch-salt?expires=2000000000&for=hosting", 99, 5000);
+        g_done = 0;
+        const unsigned id = kn_captcha_fetch("hosting", on_done, NULL);
+        CHECK(id > 0 && !strcmp(g_path, "/mm/captcha?for=hosting") && g_done == 0);
+        answer(200, ch);
+        CHECK(g_done == 1 && g_had_payload && !strcmp(g_payload, ch) && kn_captcha_pending() == 0);
+        g_done = 0;
+        CHECK(kn_captcha_fetch("hosting", on_done, NULL) > 0);
+        answer(404, "not found");
+        CHECK(g_done == 1 && !g_had_payload && kn_captcha_pending() == 0);
+    }
+
     if (g_fail) return 1;
     printf("kn_captcha_test: ok\n");
     return 0;

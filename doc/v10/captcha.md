@@ -85,19 +85,27 @@ connection once its identity has settled: `{"type":"captcha","op":"issue"}` to t
 connection's challenge, so another connection's answer is refused). Accepted: an empty `NET_EXT_CAPTCHA_ANSWER` (the
 server's `cptR`). Refused, no answer within 45 s, or a peer without EXT packets: `NET_PACKET_ERROR` "CAPTCHA FAILED"
 (code `004008`), the text v10.0.3 closes with. The game goes on while it is solved (v10.0.3's modal does not stop it
-either). The client (`client/src/net/kn_captcha_game.c`) solves it with `kn_captcha_solve`, nothing shown; one it
-cannot solve closes the connection with "CAPTCHA FAILED" on the error screen, v10.0.3's failure branch
-(:111428-111431). Without a brain link (offline, direct servers) nothing is asked. When v10.0.3's servers send `cpt` is
+either). The client (`client/src/net/kn_captcha_game.c`) puts it on v10.0.7's Security Challenge card
+(`client/src/ui/altcha_modal.c`, showCaptcha at deob-10.0.7.js:98801-98806 and :98914-98968): `#captcha-holder`, the
+white card with "Security Challenge" / "Please complete the security challenge to continue." and the ALTCHA 1.0.6
+widget's own markup, strings and stylesheet (no `auto`: the player clicks "I'm not a robot", the widget shows
+"Verifying...", then "Verified"; a search that finds nothing shows "Verification failed. Try again later." and a
+click tries again). The 200 ms poll then sends the answer; the card stays until the server's accepted answer (its
+`cptR`, :98809), an error or the socket's end (:98984), as v10.0.7's does. Only a client with no page for the card
+solves it with `kn_captcha_solve`, nothing shown; one it cannot solve there closes the connection with "CAPTCHA
+FAILED" on the error screen, v10.0.3's failure branch (:111428-111431; dead code in v10.0.7, whose widget never
+calls back with an error). Checked by `captcha_game_e2e.py` (the card's texts, nothing answered before the click,
+verified, accepted, hidden). Without a brain link (offline, direct servers) nothing is asked. When v10.0.3's servers send `cpt` is
 their own rule, not in the client: Box Office asks each connection once.
 
 ### Official krunker.io servers (the official link)
 
 | 10.0.3 flow | What this client does |
 | --- | --- |
-| `cpt` / `cptR` (ALTCHA) | solved natively in C: on the socket thread natively, in slices of the frame loop on the web (`krunker_link.c` `on_captcha`, `krunker_net.c`); `cptR` goes without the ahNum step (`KRUNKER_AHNUM_EXEMPT`). The widget's three algorithms are solved (SHA-256, SHA-384, SHA-512, its `G`). One it cannot solve (another algorithm, `maxnumber` over 1e7, no solution): the "CAPTCHA FAILED" error and the socket closed (`krunker_link_captcha_failed`), v10.0.3's failure branch. Checked by `krunker_link_test` and `krunker_official_e2e.py` |
+| `cpt` / `cptR` (ALTCHA) | handed to the main thread (`krunker_link.c` `on_captcha`, `krunker_net.c` `altcha_tick`) and put on the Security Challenge card as for Box Office's own `cpt` (above; the server's `cptR` hides it); with no page for the card it is solved in slices of the frame loop, nothing shown; `cptR` goes without the ahNum step (`KRUNKER_AHNUM_EXEMPT`). The widget's three algorithms are solved (SHA-256, SHA-384, SHA-512, its `G`). One it cannot solve (another algorithm, `maxnumber` over 1e7, no solution): the "CAPTCHA FAILED" error and the socket closed (`krunker_link_captcha_failed`), v10.0.3's failure branch. Checked by `krunker_link_test` and `krunker_official_e2e.py` |
 | `/seek-game` `CaptchaRequired` (Turnstile) | retried at most twice with `captchaToken` and a fresh validation token (`krunker_net.c` `on_seek` / `captcha_done`). The token is Cloudflare's: the native client shows krunker.io's own Turnstile widget in a platform webview on a krunker.io page (WebKitGTK, WebView2, WKWebView; a build with `KN_WEBVIEW`), drawn in the game, and the player solves it when Cloudflare asks. Without a webview (or on an `HTML_ENGINE=OFF` build) no token can be had: one seek without it, then the generic failure. The web build renders the widget too, but the sitekey is bound to krunker.io, so on krunk.io it fails (Cloudflare 110200). Details: [official-captcha.md](official-captcha.md) |
 | `loginUsername` `b` (Turnstile) | the krunker.io account's sign-in asks the same widget first (`krunker_account.c` `start_sign_in`), the same limits |
-| `bCpt` before hosting (ALTCHA) | a guest hosting a krunker.io custom game: v10.0.3's `rpc("bCpt", "hosting")` (`krunker_link_rpc`, the socket's rpcCounter, :111527-111541), its `_0` answer's challenge solved like a `cpt`, then `["custom", config, answer, rehost]` (`krunker_link_host_custom`, :133912-133919, :229989-229998); an `_1` or an unsolvable challenge ends the request with custom.tryagain (:229994). A signed-in krunker.io account sends `custom` at once with a nil answer, as v10.0.3 does (`if (account)` at :229989). Checked by `krunker_link_test` and `krunker_host_custom_test` |
+| `bCpt` before hosting (ALTCHA) | a guest hosting a krunker.io custom game: v10.0.3's `rpc("bCpt", "hosting")` (`krunker_link_rpc`, the socket's rpcCounter, :111527-111541), its `_0` answer's challenge put on the same card, hidden once solved (showCaptcha(..., true), deob-10.0.7.js:119735-119741), then `["custom", config, answer, rehost]` (`krunker_link_host_custom`, :133912-133919, :229989-229998); an `_1` or an unsolvable challenge ends the request with custom.tryagain (:229994). A signed-in krunker.io account sends `custom` at once with a nil answer, as v10.0.3 does (`if (account)` at :229989). Checked by `krunker_link_test` and `krunker_host_custom_test` |
 
 What a native client cannot do: produce a Turnstile token without a browser engine on krunker.io's origin (the
 sitekey is bound to the domain and Cloudflare decides when a human must interact), or verify one (that takes
