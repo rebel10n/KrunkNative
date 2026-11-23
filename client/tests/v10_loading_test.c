@@ -84,8 +84,16 @@ int main(void) {
     CHECK(!strcmp(els[0].display, "block") && !els[0].loading_out, "card display block, not fading (%s, %d)", els[0].display, els[0].loading_out);
     CHECK(!strcmp(els[0].load_bg, "url(./img/maps/map_3.png)"), "--load-bg: %s", els[0].load_bg);
     CHECK(!strcmp(els[0].load_accent, "#fff"), "no accent from the mode table: %s", els[0].load_accent);
-    CHECK(!strcmp(els[3].text, "Sandstorm") && !strcmp(els[4].text, "Free for All") && !strcmp(els[5].text, "LOADING"),
+    // the map name as it is (main.css uppercases #loadingMapName), the mode uppercased by the script: mode.name.toUpperCase()
+    // (deob-10.0.7.js:226159; #loadingMapMode has no text-transform) and shown (display "")
+    CHECK(!strcmp(els[3].text, "Sandstorm") && !strcmp(els[4].text, "FREE FOR ALL") && !strcmp(els[5].text, "LOADING"),
           "texts: %s / %s / %s", els[3].text, els[4].text, els[5].text);
+    CHECK(!strcmp(els[4].display, ""), "the mode line shows: display '%s'", els[4].display);
+    char up[32];
+    v10_loading_upper(up, sizeof up, "Hide & Seek");
+    CHECK(!strcmp(up, "HIDE & SEEK"), "toUpperCase: %s", up);
+    v10_loading_upper(up, sizeof up, NULL);
+    CHECK(!strcmp(up, ""), "NULL: '%s'", up);
     CHECK(!strcmp(els[2].text, "UP NEXT"), "generic.loading.nextMap: %s", els[2].text);
 
     // the hold: no fade before 3000 ms (1000 + 2000), the fade class at 3000, display none 300 ms later

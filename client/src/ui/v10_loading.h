@@ -4,6 +4,7 @@
 // client/tests/v10_loading_test.c can check it; v10_loading.c writes the elements by id and does nothing
 // for an id the page lacks (see the markup note there).
 #pragma once
+#include <stddef.h>
 
 // loadInTime (deob-10.0.4.js:16549, 0x7d0 = 2000 ms): the card holds this long after a map load that is not the
 // session's first (iíÌiiïî = loads++ > 0, :223024-223025). The first load shows no card (the boot curtain covers it).
@@ -14,9 +15,12 @@
 typedef struct {
     const char *map_thumb; // "./img/maps/map_<n>.png"; NULL: no thumbnail (a custom map, or map 0 that is not Burg)
     const char *map_name;  // loadingMapName (map.name)
-    const char *mode_name; // loadingMapMode (mode.name, uppercased by the page); NULL: hidden
+    const char *mode_name; // loadingMapMode (mode.name; v10_loading_begin uppercases it, as v10 does); NULL: hidden
     const char *accent;    // --load-accent (mode.tag[1]); NULL: "#fff"
 } V10LoadingMap;
+
+// toUpperCase of the card's texts (ASCII letters; "" for NULL)
+void v10_loading_upper(char *out, size_t n, const char *s);
 
 // The hold a map load gets: 0 for the session's first load, V10_LOADING_HOLD_MS after.
 double v10_loading_hold_ms(int loads_before);

@@ -1,11 +1,13 @@
-// The v10.0.4 map loading screen: see v10_loading.h. Elements (the page's ids, ui/index.html):
+// The v10.0.4+ map loading screen: see v10_loading.h. Elements (the page's ids, ui/index.html as v10.0.7's
+// live index.html: #loadingBg > #loadingMapBg, #loadingMapShade, #loadingMapCard, #loadingMapText, #loadingMapBar):
 //   #loadingBg          the card: --load-bg (the thumbnail as a background), --load-accent, class loadingOut
 //   #loadingMapThumb    img: the map thumbnail (display block when there is one)
 //   #loadingMapNext     "UP NEXT" (generic.loading.nextMap)
-//   #loadingMapName     the map name
-//   #loadingMapMode     the mode name, uppercased
-//   #loadingMapText     "LOADING" (generic.loading.simple, uppercased)
-// The page does not have the last five yet: until it does, the calls find no element and write nothing.
+//   #loadingMapName     the map name (main.css uppercases it)
+//   #loadingMapMode     the mode name, uppercased here (mode.name.toUpperCase(), deob-10.0.7.js:226159: no CSS does it)
+//   #loadingMapText     "LOADING" (generic.loading.simple, uppercased; main.css's ::after counts the dots)
+// #loadingMapBar is CSS only (its slide, coloured by --load-accent). v10.0.7 rotates no loading tips: of its
+// generic.tips.* strings the bundle reads only generic.tips.register (the register reminder, v10_misc_popups.c).
 #include "v10_loading.h"
 
 #include <ctype.h>
@@ -19,6 +21,13 @@ static int g_loads;          // loads begun this session (iíîíïiì, :223024)
 static int g_visible;        // the card is on screen
 static double g_hide_at = -1.0;   // the fade starts at this time (iiïiiìi, :223025); -1: none scheduled
 static double g_gone_at = -1.0;   // the card goes display none at this time; -1: none
+
+// String.prototype.toUpperCase for the card's texts: ASCII letters only, as the tables' Latin strings need ("" for NULL)
+void v10_loading_upper(char *out, const size_t n, const char *s) {
+    if (!n) return;
+    snprintf(out, n, "%s", s ? s : "");
+    for (char *c = out; *c; c++) *c = (char) toupper((unsigned char) *c);
+}
 
 double v10_loading_hold_ms(const int loads_before) {
     return loads_before > 0 ? V10_LOADING_HOLD_MS : 0.0;
@@ -73,7 +82,9 @@ void v10_loading_begin(const V10LoadingMap *map, const double now_ms) {
     write_thumb(map->map_thumb);
     set_text_by_id("loadingMapNext", I18N("generic.loading.nextMap", "UP NEXT")); // :223035
     set_text_by_id("loadingMapName", map->map_name ? map->map_name : "");
-    set_text_by_id("loadingMapMode", map->mode_name ? map->mode_name : "");
+    char mode[96];
+    v10_loading_upper(mode, sizeof(mode), map->mode_name); // mode.name.toUpperCase() (deob-10.0.7.js:226159)
+    set_text_by_id("loadingMapMode", mode);
     set_display_by_id("loadingMapMode", map->mode_name ? "" : "none");
     const HtmlElem bg = html_dom_by_id("loadingBg");
     if (bg) {
@@ -81,10 +92,9 @@ void v10_loading_begin(const V10LoadingMap *map, const double now_ms) {
         html_dom_set_class(bg, "loadingOut", 0); // loadingBg.classList.remove("loadingOut") (:223039)
         html_dom_set_display(bg, "block");
     }
-    // t("generic.loading.simple").toUpperCase() (:223041); ASCII letters only, as the tables' Latin strings need
+    // t("generic.loading.simple").toUpperCase() (:223041)
     char loading[64];
-    snprintf(loading, sizeof(loading), "%s", I18N("generic.loading.simple", "Loading"));
-    for (char *c = loading; *c; c++) *c = (char) toupper((unsigned char) *c);
+    v10_loading_upper(loading, sizeof(loading), I18N("generic.loading.simple", "Loading"));
     set_text_by_id("loadingMapText", loading);
     g_visible = 1;
 }
