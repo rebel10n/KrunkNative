@@ -584,6 +584,43 @@ static const char *skin_name(const char *ref) {
     return skin && skin->name && skin->name[0] ? skin->name : "Item";
 }
 
+// The christmas theme's light bulbs blink (iíîiïíí, deob-10.0.7.js:127770-127793): each starts on in a random colour
+// tilted 60 * rand - 30 deg; after rand * 500 ms, then every 300 + 900 * rand ms, it toggles, taking a new random colour
+// as it comes on; style "--bulb-color: c; --opacity: (on ? 1 : 0.3); --tilt-angle: t deg". A bulb is mounted with the
+// window (lot_open resets them) and keeps its state over the window's re-renders. Slots: the 30 border bulbs, then the
+// 12 of the title separator. A --render-scenario window keeps the still, deterministic bulbs unless its state asks for
+// the blink (state.community.popups.lotteryBlink).
+#define LOT_BULBS 42
+static int g_lot_blink; // --render-scenario: the bulbs blink as they do live
+static const char *const k_lot_bulbs[] = {"#ff0000", "#00ff00", "#ffff00", "#ff6b6b", "#4ecdc4", "#ffe66d", "#ff8c42", "#a8e6cf", "#ffd93d", "#ff6b9d"};
+static struct {
+    int mounted, on, color;
+    double tilt, next_ms;
+} LB[LOT_BULBS];
+
+static double lot_rand(void) { return (double) rand() / ((double) RAND_MAX + 1.0); }
+
+static void lot_bulb_style(char *out, const size_t n, const int slot) {
+    snprintf(out, n, "--bulb-color: %s; --opacity: %s; --tilt-angle: %.17gdeg;", k_lot_bulbs[LB[slot].color], LB[slot].on ? "1" : "0.3",
+             LB[slot].tilt);
+}
+
+static void lot_bulbs_tick(void) {
+    if ((G.scenario && !g_lot_blink) || !v10_popup_open("defaultModal lotteryModal")) return;
+    const double now = mono_ms();
+    for (int i = 0; i < LOT_BULBS; i++) {
+        if (!LB[i].mounted || now < LB[i].next_ms) continue;
+        LB[i].on = !LB[i].on;
+        if (LB[i].on) LB[i].color = (int) (lot_rand() * 10) % 10;
+        LB[i].next_ms = now + 900.0 * lot_rand() + 300.0;
+        char id[24], style[128];
+        snprintf(id, sizeof(id), "knLotBulb%d", i);
+        HtmlElem el = html_dom_by_id(id);
+        lot_bulb_style(style, sizeof(style), i);
+        if (el) html_dom_set_attr(el, "style", style);
+    }
+}
+
 static void lot_decoration(StrBuf *sb, const char *kind, const int salt) {
     // deterministic stand-ins for Math.random() (v10 picks colours / tilt / bob delay per instance)
     static const char *const eggs[] = {"#FFB3BA", "#BAFFC9", "#BAE1FF", "#FFFFBA", "#E8BAFF", "#FFD9BA", "#BAFFEE", "#FFC9DE", "#C9BAFF"};
@@ -593,7 +630,20 @@ static void lot_decoration(StrBuf *sb, const char *kind, const int salt) {
     static const char *const bulbs[] = {"#ff0000", "#00ff00", "#ffff00", "#ff6b6b", "#4ecdc4", "#ffe66d", "#ff8c42", "#a8e6cf", "#ffd93d", "#ff6b9d"};
     const unsigned h = (unsigned) salt * 2654435761u;
     const double tilt = (double) ((h >> 8) % 1000) / 1000.0, bob = (double) ((h >> 4) % 1000) / 1000.0 * 3.0;
-    if (!strcmp(kind, "lightbulbs")) {
+    const int slot = salt >= 100 ? 30 + salt - 100 : salt - 1;
+    if (!strcmp(kind, "lightbulbs") && (!G.scenario || g_lot_blink) && slot >= 0 && slot < LOT_BULBS) {
+        if (!LB[slot].mounted) { // the bulb's mount: on, a random colour and tilt, its first toggle in rand * 500 ms
+            LB[slot].mounted = 1;
+            LB[slot].on = 1;
+            LB[slot].color = (int) (lot_rand() * 10) % 10;
+            LB[slot].tilt = 60.0 * lot_rand() - 30.0;
+            LB[slot].next_ms = mono_ms() + 500.0 * lot_rand();
+        }
+        char style[128];
+        lot_bulb_style(style, sizeof(style), slot);
+        sb_appendf(sb, "<div id=\"knLotBulb%d\" class=\"light-bulb svelte-1fenhdo\" style=\"%s\"><div class=\"connection svelte-1fenhdo\"></div> <div class=\"bulb svelte-1fenhdo\"></div></div>",
+                   slot, style);
+    } else if (!strcmp(kind, "lightbulbs")) {
         sb_appendf(sb, "<div class=\"light-bulb svelte-1fenhdo\" style=\"--bulb-color: %s; --opacity: 1; --tilt-angle: %.3fdeg;\"><div class=\"connection svelte-1fenhdo\"></div> <div class=\"bulb svelte-1fenhdo\"></div></div>",
                    bulbs[(h >> 12) % 10], 60.0 * tilt - 30.0);
     } else if (!strcmp(kind, "eggs")) {
@@ -857,6 +907,7 @@ static void lot_open(const int id) {
     LT.sent = -1;
     LT.live_total = -1;
     if (!G.scenario) LT.error[0] = 0; // a scenario's error (its answer) is the state it stands in for
+    memset(LB, 0, sizeof(LB)); // the window's bulbs mount anew
     lot_arm_deadline();
     char *html = lot_html();
     v10_popup_show("defaultModal lotteryModal", html, lot_render);
@@ -1350,6 +1401,7 @@ void v10_misc_popups_tick(void) {
     survey_tick();
     hook_tick();
     lot_tick();
+    lot_bulbs_tick();
 }
 
 int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -1486,6 +1538,7 @@ void v10_misc_popups_scenario(const cJSON *p) {
     const char *open = v10_str(p, "open");
     const cJSON *lot = cJSON_GetObjectItem(p, "lottery");
     const char *lot_error = v10_str(p, "lotteryError"); // the sandbox's answer: a non-JSON body (v10:25907)
+    g_lot_blink = cJSON_IsTrue(cJSON_GetObjectItem(p, "lotteryBlink"));
     if (lot_error[0]) snprintf(LT.error, sizeof(LT.error), "%s", lot_error);
     if (lot) {
         LT.frozen = cJSON_IsNumber(cJSON_GetObjectItem(p, "lotterySecondsLeft"));

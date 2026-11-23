@@ -11,6 +11,10 @@ document the frame was captured from (KRUNKNATIVE_SCENARIO_HTML):
   drawn     an ended, drawn window: "Next Draw: Drawing in progress" (deob-10.0.7.js:127996-128000)
   drawing   an ended window not drawn yet: "Status: Drawing in progress"
   ended     data.event_ended with no window: "The raffle event has ended" (deob-10.0.7.js:128541)
+  bulbs     the christmas theme's light bulbs: still (on, deterministic) in a scenario; with lotteryBlink, captured
+            2.5 s after the window opened, they blink as v10's do (deob-10.0.7.js:127770-127793): each its own
+            knLotBulbN with "--bulb-color: <one of the ten>; --opacity: 1 | 0.3; --tilt-angle: <-30..30>deg;", and some
+            are off by then (each toggles after rand * 500 ms, then every 300 + 900 * rand ms)
 
   python3 -I client/tests/lottery_scenario_e2e.py BUILD_DIR [SOURCE_DIR]   (run from the repository root)
 """
@@ -54,13 +58,17 @@ def check(name, ok, detail=""):
     print("%s %s%s" % ("PASS" if ok else "FAIL", name, (" -- " + str(detail)) if detail and not ok else ""))
 
 
-def render(name, lottery, seconds_left):
+def render(name, lottery, seconds_left, blink=False, after_ms=0):
     with open(os.path.join(SRC, "tools/uidiff/scenarios/popup-lottery.json")) as fp:
         scen = json.load(fp)
     popups = scen["state"]["community"]["popups"]
     popups.pop("lotteryError", None)
     popups["lottery"] = lottery
     popups["lotterySecondsLeft"] = seconds_left
+    if blink:
+        popups["lotteryBlink"] = True
+    if after_ms:
+        scen["state"]["after_ms"] = after_ms
     os.makedirs(SCRATCH, exist_ok=True)
     path = os.path.join(SCRATCH, name + ".json")
     with open(path, "w") as fp:
@@ -126,6 +134,21 @@ def main():
     ended["event_ended"] = True
     doc = render("ended", ended, 0)
     check("ended: data.event_ended shows the event's end", "The raffle event has ended. Thank you for participating!" in doc)
+
+    xmas = copy.deepcopy(LOTTERY)
+    xmas["lottery"]["theme"] = "christmas"
+    doc = render("bulbs-still", xmas, 3600)
+    still = re.findall(r'<div class="light-bulb svelte-1fenhdo" style="([^"]*)">', doc)
+    check("bulbs: a scenario's 42 bulbs are still and on", len(still) == 42 and all("--opacity: 1;" in s for s in still), still[:3])
+    doc = render("bulbs-blink", xmas, 3600, blink=True, after_ms=2500)
+    colours = {"#ff0000", "#00ff00", "#ffff00", "#ff6b6b", "#4ecdc4", "#ffe66d", "#ff8c42", "#a8e6cf", "#ffd93d", "#ff6b9d"}
+    bulbs = re.findall(r'<div id="knLotBulb(\d+)" class="light-bulb svelte-1fenhdo" style="--bulb-color: (#[0-9a-f]{6}); '
+                       r'--opacity: (1|0\.3); --tilt-angle: (-?[0-9.e-]+)deg;">', doc)
+    check("bulbs: 42 bulbs, knLotBulb0..41, in v10's style (a palette colour, opacity 1 / 0.3, a tilt in [-30, 30])",
+          sorted(int(b[0]) for b in bulbs) == list(range(42)) and all(b[1] in colours and -30 <= float(b[3]) <= 30 for b in bulbs),
+          bulbs[:4] or re.findall(r'<div[^>]*light-bulb[^>]*>', doc)[:3])
+    off = [b for b in bulbs if b[2] == "0.3"]
+    check("bulbs: 2.5 s in, some bulbs are off (opacity 0.3) and some on", 0 < len(off) < 42, [b[2] for b in bulbs])
 
     failed = sum(1 for _, ok, _ in results if not ok)
     print("lottery_scenario_e2e: %d checks, %d failed" % (len(results), failed))
