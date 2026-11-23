@@ -129,6 +129,12 @@ void  mods_ui_window_post(int id);
 int   mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void  mods_ui_query(const char *query); // ?mod=<name>: loads that mod
 void  mods_ui_favorite(const char *id, HtmlElem star); // favoriteM(1, this, id)
+// mod_pack.h hooks (main.c): canLoadMods, textures/logo.png -> #mainLogo (canChangeLogo), scripts/settings.txt
+int   mods_ui_can_load(void);
+void  mods_ui_pack_logo(const char *path);
+void  mods_ui_pack_settings(const char *text, size_t len);
+// startup: autoLoadLast's krk_lastMod loaded again (deob-10.0.7.js:225960)
+void  mods_ui_autoload_last(void);
 // The hub's Publish / Update Mod popup body (social_ui.c publishModPopup): window 19's form and upload. name, mod_id
 // and thumb (the mod has a thumbnail) prefill an update; name NULL is a new mod. done runs after a successful upload.
 char *mods_ui_hub_publish(const char *name, const char *mod_id, int thumb, void (*done)(void));

@@ -791,7 +791,8 @@ int main(int argc, char **argv) {
     vt_init(&g_texture_cache);
     // map resource packs: what is already loaded follows a pack coming or going (mod_pack.c)
     const ModPackHooks mod_hooks = {texture_cache_reload, geometry_cache_reload, gltf_model_forget, audio_reload,
-                                     mod_shader_insert_json, mod_shader_reset}; // + shaders/ post passes (mod_shader.c)
+                                     mod_shader_insert_json, mod_shader_reset, // + shaders/ post passes (mod_shader.c)
+                                     mods_ui_can_load, mods_ui_pack_logo, mods_ui_pack_settings}; // canLoadMods, logo, settings.txt
     mod_pack_set_hooks(&mod_hooks);
     vt_init(&g_glyph_cache);
 #ifndef __EMSCRIPTEN__
@@ -1135,6 +1136,7 @@ int main(int argc, char **argv) {
             ui_settings_load();
             seek_prefs_migrate_servers(); // once per profile: knSeekServersMigrated
             ui_settings_push_saved();
+            mods_ui_autoload_last(); // autoLoadLast: the last loaded mod again
         }
     }
 

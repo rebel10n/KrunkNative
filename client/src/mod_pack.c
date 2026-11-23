@@ -23,7 +23,7 @@
 
 #define MP_PATH_MAX 1024
 
-typedef enum { MP_TEXTURE, MP_MODEL_OBJ, MP_MODEL_GLTF, MP_SOUND } ModFileKind;
+typedef enum { MP_TEXTURE, MP_MODEL_OBJ, MP_MODEL_GLTF, MP_SOUND, MP_LOGO } ModFileKind;
 
 typedef struct {
     char *rel;  // the game file it replaces, relative to assets_path() ("textures/weapons/weapon_1.png")
@@ -47,7 +47,15 @@ static struct {
     size_t *shader_lens;
     int shader_count, shader_cap;
     int shader_passes; // the active pack added passes (mod_pack_clear resets them)
+    char *settings_txt; // scripts/settings.txt of the pack being loaded (iíîiiìï, deob-10.0.7.js:225630-225656)
+    size_t settings_len;
+    int logo;           // the active pack replaced textures/logo.png (hooks.logo)
+    int refused;        // the last load was refused (canLoadMods off)
 } g_mp;
+
+int mod_pack_refused(void) {
+    return g_mp.refused;
+}
 
 void mod_pack_set_hooks(const ModPackHooks *hooks) {
     if (hooks) g_mp.hooks = *hooks;
@@ -116,7 +124,12 @@ static int entry_target(const char *name, char *rel, const size_t n, ModFileKind
         // f1874: updateTexture(filename minus "textures/" / "img/" and ".png"); special keys go to
         // the page or the overlay instead (logo, medals)
         const char *key = name + (name[0] == 't' ? strlen("textures/") : strlen("img/"));
-        if (!ends_with(key, ".png") || !strcmp(name, "textures/logo.png") || starts_with(name, "img/medals/")) return 0;
+        if (!strcmp(name, "textures/logo.png")) { // mainLogo.src with canChangeLogo (deob-10.0.7.js:225561): hooks.logo
+            snprintf(rel, n, "%s", name);
+            *kind = MP_LOGO;
+            return 1;
+        }
+        if (!ends_with(key, ".png") || starts_with(name, "img/medals/")) return 0;
         snprintf(rel, n, "textures/%s", key);
         *kind = MP_TEXTURE;
         return 1;
@@ -203,6 +216,7 @@ static void refresh_caches(void) {
         case MP_MODEL_GLTF:
             if (g_mp.hooks.gltf) g_mp.hooks.gltf(full);
             break;
+        case MP_LOGO: break; // load_zip / mod_pack_clear hand it to hooks.logo
         case MP_SOUND:
             if (g_mp.hooks.sound) {
                 char name[256];
@@ -264,9 +278,29 @@ static void free_shaders(void) {
     g_mp.shader_count = 0;
 }
 
+// scripts/settings.txt: its text, applied once the pack is active (the last one in the zip wins)
+static int keep_settings_text(const char *name, const unsigned char *data, const size_t size) {
+    if (strcmp(name, "scripts/settings.txt")) return 0;
+    char *text = malloc(size + 1);
+    if (!text) return 1;
+    if (size) memcpy(text, data, size);
+    text[size] = 0;
+    free(g_mp.settings_txt);
+    g_mp.settings_txt = text;
+    g_mp.settings_len = size;
+    return 1;
+}
+
+static void free_settings_text(void) {
+    free(g_mp.settings_txt);
+    g_mp.settings_txt = NULL;
+    g_mp.settings_len = 0;
+}
+
 static int extract_entry(const char *name, const unsigned char *data, const size_t size, void *user) {
     (void) user;
     if (keep_shader(name, data, size)) return 1;
+    if (keep_settings_text(name, data, size)) return 1;
     char rel[MP_PATH_MAX];
     ModFileKind kind;
     if (!entry_target(name, rel, sizeof(rel), &kind)) return 1;
@@ -331,6 +365,8 @@ static void temp_root(char *out, const size_t n) {
 void mod_pack_clear(void) {
     if (g_mp.shader_passes && g_mp.hooks.shaders_reset) g_mp.hooks.shaders_reset(); // resetShaderPasses
     g_mp.shader_passes = 0;
+    if (g_mp.logo && g_mp.hooks.logo) g_mp.hooks.logo(NULL); // windows[3].reset: mainLogo.src back (deob-10.0.7.js:218827)
+    g_mp.logo = 0;
     if (!g_mp.url[0] && !g_mp.count) return;
     if (g_mp.url[0]) KN_LOG_DEBUG1("[mod] removed %s: the game's own files are back\n", g_mp.url);
     file_set_overlay(NULL); // first: the refresh reads the game's own files
@@ -345,6 +381,7 @@ void mod_pack_shutdown(void) {
     free_shaders();
     free(g_mp.shaders);
     free(g_mp.shader_lens);
+    free_settings_text();
     g_mp.shaders = NULL;
     g_mp.shader_lens = NULL;
     g_mp.shader_cap = 0;
@@ -372,16 +409,25 @@ static int load_zip(const char *url, char *zip_path) {
     snprintf(g_mp.dir, sizeof(g_mp.dir), "%s/kn_modpack_%d_%d", root, (int) MP_PID(), ++g_mp.serial);
     MP_MKDIR(g_mp.dir);
     free_shaders();
+    free_settings_text();
     const int entries = zip_read_entries(zip, size, extract_entry, NULL);
     free(zip);
-    if (!entries || (!g_mp.count && !g_mp.shader_count)) { // (a pack of only shaders still loads)
+    if (!entries || (!g_mp.count && !g_mp.shader_count && !g_mp.settings_txt)) { // (a pack of only shaders / settings still loads)
         KN_LOG_DEBUG1("[mod] %s: %s (%d entries, none replaces a game file)\n", url, entries ? "nothing to apply" : "not a zip archive", entries);
         delete_files();
         free_shaders();
+        free_settings_text();
         free(zip_path);
         return 0;
     }
     snprintf(g_mp.url, sizeof(g_mp.url), "%s", url);
+    for (int i = 0; i < g_mp.count; i++) {
+        if (g_mp.files[i].kind != MP_LOGO) continue;
+        if (g_mp.hooks.logo) g_mp.hooks.logo(g_mp.files[i].file);
+        g_mp.logo = 1;
+    }
+    if (g_mp.settings_txt && g_mp.hooks.settings_text) g_mp.hooks.settings_text(g_mp.settings_txt, g_mp.settings_len);
+    free_settings_text();
     if (g_mp.count) {
         file_set_overlay(mod_redirect);
         refresh_caches();
@@ -390,7 +436,7 @@ static int load_zip(const char *url, char *zip_path) {
         if (g_mp.hooks.shader && g_mp.hooks.shader(g_mp.shaders[i], g_mp.shader_lens[i])) g_mp.shader_passes = 1;
     if (g_mp.shader_count) KN_LOG_DEBUG1("[mod] %s: %d shader entries\n", url, g_mp.shader_count);
     free_shaders();
-    int counts[4] = {0, 0, 0, 0};
+    int counts[5] = {0, 0, 0, 0, 0};
     for (int i = 0; i < g_mp.count; i++) counts[g_mp.files[i].kind]++;
     KN_LOG_DEBUG1("[mod] loaded %s (%s): %d files replace the game's (%d textures, %d models, %d sounds)\n", url, zip_path, g_mp.count,
            counts[MP_TEXTURE], counts[MP_MODEL_OBJ] + counts[MP_MODEL_GLTF], counts[MP_SOUND]);
@@ -398,11 +444,20 @@ static int load_zip(const char *url, char *zip_path) {
     return 1;
 }
 
+// loadModPack: `if (!settings.tmp.canLoadMods) return modLInfo = t("mod.disabled")` before anything else, a map's
+// pack included (deob-10.0.7.js:225868); the active pack stays
+static int refused(void) {
+    g_mp.refused = g_mp.hooks.can_load && !g_mp.hooks.can_load();
+    if (g_mp.refused) printf("[mod] mods disabled (canLoadMods off)\n");
+    return g_mp.refused;
+}
+
 int mod_pack_load(const char *url) {
     if (!url || !*url) {
         mod_pack_clear();
         return 0;
     }
+    if (refused()) return 0;
     if (g_mp.url[0] && !strcmp(g_mp.url, url)) return 1;
     char *zip_path = mod_pack_resolve_url(url);
     if (!zip_path) {
@@ -429,6 +484,7 @@ int mod_pack_load_file(const char *path) {
     if (!path || !*path) return 0;
     char url[600];
     snprintf(url, sizeof(url), "file:%s", path); // the pack's name while it is active (a local file has no URL)
+    if (refused()) return 0;
     if (g_mp.url[0] && !strcmp(g_mp.url, url)) return 1;
     const int ok = load_zip(url, concat(path, ""));
     if (ok) snprintf(g_mp.user_url, sizeof(g_mp.user_url), "%s", url);

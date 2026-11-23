@@ -39,7 +39,7 @@ typedef struct {
     int frame_cap;           // updateRate: frames per second, 0 = uncapped (index.js gP)
     int aspect_w, aspect_h;  // aspectRatio "WxH": camera aspect override, 0 = window (55.js getRes)
     int anti_alias;          // antiAlias: MSAA on the scene (WebGL context antialias)
-    int post_processing;     // postProcessing: composer enabled (CopyShader unless a map shader) - no visible effect
+    int post_processing;     // postProcessing: postfx passes enabled: off, a mod's shader passes do not run (render_target.c)
     int low_spec;            // lowSpec: 95.js skips player/weapon detail meshes (flag for player_mesh.c)
     int no_textures;         // noTex (restart): map materials use the "default" texture (flag)
     int map_details;         // mapDet (restart): detail map objects (flag)

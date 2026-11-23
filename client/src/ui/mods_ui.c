@@ -193,9 +193,11 @@ static int load_user_mod(const char *name, const char *url, const char *id, cons
     mod_url_of(url, id, full, sizeof full);
     popup(2, I18N("generic.loading", "Loading..."));
     if (!mod_pack_load_user(full)) {
-        popup(0, "This mod could not be loaded");
+        popup(0, mod_pack_refused() ? I18N("mod.disabled", "mods disabled") : "This mod could not be loaded");
         return 0;
     }
+    // loadModPack(url, true): autoLoadLast keeps it for the next start (setLastMod, deob-10.0.7.js:225871)
+    if (!ui_setting_is_false("autoLoadLast") && ui_setting_value("autoLoadLast")) html_storage_set("krk_lastMod", full);
     loaded_add(name, full, id, creator, thumb);
     creation_vote_set_mod(id ? atoi(id) : 0, name, creator); // #modVote: the loaded mod's vote (:225872-225880)
     popup(1, "Mod loaded");
@@ -211,7 +213,7 @@ static void picked_local(void *user, const char *path) {
         return;
     }
     if (!mod_pack_load_file(path)) {
-        popup(0, "This mod could not be loaded");
+        popup(0, mod_pack_refused() ? I18N("mod.disabled", "mods disabled") : "This mod could not be loaded");
         return;
     }
     const char *base = strrchr(path, '/');
@@ -827,6 +829,46 @@ void mods_ui_favorite(const char *id, const HtmlElem star) {
     if (account_backend() != ACCOUNT_BACKEND_KRUNKER) backend_social_send_text(frame);
     free(M.data[TAB_FAV].html);
     memset(&M.data[TAB_FAV], 0, sizeof M.data[TAB_FAV]);
+}
+
+// ------------------------------------------------------------------ pack hooks (mod_pack.h)
+
+// settings.tmp.canLoadMods (deob-10.0.7.js:225868)
+int mods_ui_can_load(void) {
+    return !ui_setting_is_false("canLoadMods");
+}
+
+// textures/logo.png: mainLogo.src = the pack's image while canChangeLogo (deob-10.0.7.js:225561), the page's own
+// src back when the pack goes (windows[3].reset, :218827)
+static char g_logo_src[512];
+void mods_ui_pack_logo(const char *path) {
+    const HtmlElem logo = html_dom_by_id("mainLogo");
+    if (!path) {
+        if (logo && g_logo_src[0]) html_dom_set_attr(logo, "src", g_logo_src);
+        g_logo_src[0] = 0;
+        return;
+    }
+    if (!logo || ui_setting_is_false("canChangeLogo")) return;
+    if (!g_logo_src[0] && html_dom_get_attr(logo, "src", g_logo_src, sizeof g_logo_src) < 0) g_logo_src[0] = 0;
+    char url[512];
+    html_dom_asset_url("textures/logo.png", url, sizeof url); // the pack's copy through the asset overlay
+    html_dom_set_attr(logo, "src", url);
+}
+
+void mods_ui_pack_settings(const char *text, const size_t len) {
+    (void) len;
+    const int n = ui_settings_mod_text(text);
+    if (n) printf("[mod] scripts/settings.txt: %d settings\n", n);
+}
+
+// autoLoadLast && lastMod.length && loadModPack(lastMod, true) (deob-10.0.7.js:225960): windows[3].loaded names
+// it "Auto Loaded" (:218811)
+void mods_ui_autoload_last(void) {
+    char url[600];
+    if (ui_setting_is_false("autoLoadLast") || !ui_setting_value("autoLoadLast")) return;
+    if (html_storage_get("krk_lastMod", url, sizeof url) < 0 || !url[0]) return;
+    if (!mod_pack_load_user(url)) return;
+    loaded_add("Auto Loaded", url, "", "", 0);
 }
 
 // ------------------------------------------------------------------ the module

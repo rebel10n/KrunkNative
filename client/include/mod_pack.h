@@ -21,8 +21,10 @@
 //   - Only packs on the user-asset host load (user-assets.krunker.io/<path> and its old CDN
 //     names: assets/user-assets/<path>, fetched through ensure_asset_file on the web). v7 also
 //     loads Dropbox links; KrunkNative has no fetch outside its asset host, so those are skipped.
-//   - textures/logo.png (the menu logo, v7 only with canChangeLogo), img/medals/*, scripts/
-//     (settings.txt), css/ and css-img/ (page styles) are not applied.
+//   - img/medals/*, css/ and css-img/ (page styles) and every scripts/ file but settings.txt are not applied.
+//     textures/logo.png goes to hooks.logo (#mainLogo with canChangeLogo, deob-10.0.7.js:225561) and
+//     scripts/settings.txt to hooks.settings_text (setSetting per "key,value" line, :225634-225651), each once the
+//     pack is active; hooks.can_load (canLoadMods, :225868) refuses every pack, a map's included, while it is 0.
 //   - shaders/<name>.json (v10's post passes, client/include/mod_shader.h) go to hooks.shader in zip order once the
 //     pack is active; they belong to the pack (mod_pack_clear resets them), where Krunker keeps appending passes
 //     from every pack it loads until Reset Mods.
@@ -68,5 +70,10 @@ typedef struct {
     void (*sound)(const char *name);
     int (*shader)(const char *text, size_t len); // a shaders/ entry (mod_shader_insert_json): 1 when it added a pass
     void (*shaders_reset)(void);                 // the pack's passes go (mod_shader_reset)
+    int (*can_load)(void);                       // 0: packs are refused (canLoadMods off); NULL = always
+    void (*logo)(const char *path);              // textures/logo.png: the extracted file, NULL when the pack goes
+    void (*settings_text)(const char *text, size_t len); // scripts/settings.txt of the pack that became active
 } ModPackHooks;
+// 1 when the last mod_pack_load / mod_pack_load_file refused the pack because hooks.can_load said no
+int mod_pack_refused(void);
 void mod_pack_set_hooks(const ModPackHooks *hooks);

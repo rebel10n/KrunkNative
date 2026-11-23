@@ -46,6 +46,15 @@ static int hook_texture(const char *path) { note("tex", path); return 1; }
 static int hook_geometry(const char *path) { note("obj", path); return 1; }
 static void hook_gltf(const char *path) { note("gltf", path); }
 static void hook_sound(const char *name) { note("snd", name); }
+// canLoadMods (deob-10.0.7.js:225868), mainLogo (:225561), scripts/settings.txt (:225634-225651)
+static int g_can_load = 1, g_logo_calls;
+static char g_logo[700], g_settings_txt[256];
+static int hook_can_load(void) { return g_can_load; }
+static void hook_logo(const char *path) {
+    g_logo_calls++;
+    snprintf(g_logo, sizeof(g_logo), "%s", path ? path : "(gone)");
+}
+static void hook_settings_text(const char *text, const size_t len) { snprintf(g_settings_txt, sizeof(g_settings_txt), "%.*s", (int) len, text); }
 
 // ---- the resource swapper stand-in: everything under assets/ to "swapped"
 static int swap_all(const char *path, char *out, const size_t n) {
@@ -125,7 +134,13 @@ static void check_test_pack(const char *dir) {
     g_calls[0] = 0;
     map_loaded(url);
     CHECK(!strcmp(mod_pack_active_url(), url), "the pack is active (%s)", mod_pack_active_url());
-    CHECK(mod_pack_file_count() == 7, "7 files replace the game's (%d)", mod_pack_file_count());
+    CHECK(mod_pack_file_count() == 8, "7 files replace the game's, and textures/logo.png (%d)", mod_pack_file_count());
+    // textures/logo.png: hooks.logo with the extracted copy, which the overlay serves; scripts/settings.txt: its text
+    CHECK(g_logo_calls == 1 && strstr(g_logo, "textures/logo.png") && redirected("textures/logo.png", got, sizeof(got)) && !strcmp(got, g_logo),
+          "the logo goes to hooks.logo and the overlay (%s, %s)", g_logo, got);
+    read_asset("textures/logo.png", got, sizeof(got));
+    CHECK(!strcmp(got, "logo"), "textures/logo.png reads as the pack's (%s)", got);
+    CHECK(!strcmp(g_settings_txt, "showFPS,1"), "scripts/settings.txt goes to hooks.settings_text (%s)", g_settings_txt);
 
     // replaced files read as the pack's
     read_asset("textures/kntest/tex_a.png", got, sizeof(got));
@@ -143,7 +158,7 @@ static void check_test_pack(const char *dir) {
     CHECK(redirected("models/kntest/model_f.fbx", got, sizeof(got)), "models/<key>.fbx");
     CHECK(redirected("textures/kntest/tex_a.png", file_a, sizeof(file_a)), "");
     // what v7 does not apply
-    static const char *const kept[] = {"textures/logo.png", "textures/medals/medal_1.png", "img/medals/medal_1.png", "textures/kntest/readme.txt",
+    static const char *const kept[] = {"textures/medals/medal_1.png", "img/medals/medal_1.png", "textures/kntest/readme.txt",
                                        "sound/sub/deeper.mp3", "models/kntest/model_a.mtl", "models/kntest/event_0_x.obj",
                                        "weapons/weapon_1.obj", "models/weapons/weapon_1.obj", "scripts/settings.txt", "css/main.css", "evil.png",
                                        "../evil.png"};
@@ -165,7 +180,7 @@ static void check_test_pack(const char *dir) {
     // the pack is ahead of the resource swapper; the swapper still has everything else
     file_set_redirect(swap_all);
     CHECK(redirected("textures/kntest/tex_a.png", got, sizeof(got)) && !strcmp(got, file_a), "the pack wins over the swapper (%s)", got);
-    CHECK(redirected("textures/logo.png", got, sizeof(got)) && !strcmp(got, "swapped:textures/logo.png"), "the swapper keeps the rest (%s)", got);
+    CHECK(redirected("textures/medals/medal_1.png", got, sizeof(got)) && !strcmp(got, "swapped:textures/medals/medal_1.png"), "the swapper keeps the rest (%s)", got);
     file_set_redirect(NULL);
 
     // the next map has the same pack: nothing reloads
@@ -177,6 +192,7 @@ static void check_test_pack(const char *dir) {
     g_calls[0] = 0;
     map_loaded(NULL);
     CHECK(!mod_pack_active_url()[0] && mod_pack_file_count() == 0, "the pack is gone after the map change");
+    CHECK(g_logo_calls == 2 && !strcmp(g_logo, "(gone)"), "the logo is given back (hooks.logo(NULL)) (%d, %s)", g_logo_calls, g_logo);
     read_asset("textures/kntest/tex_a.png", got, sizeof(got));
     CHECK(!strcmp(got, "ORIG tex_a"), "textures/kntest/tex_a.png is the game's again (%s)", got);
     read_asset("textures/kntest/tex_c.png", got, sizeof(got));
@@ -191,7 +207,7 @@ static void check_test_pack(const char *dir) {
 
     // a map with a pack that cannot be used: nothing applies
     map_loaded(url);
-    CHECK(mod_pack_file_count() == 7, "the pack loads again (%d)", mod_pack_file_count());
+    CHECK(mod_pack_file_count() == 8, "the pack loads again (%d)", mod_pack_file_count());
     map_loaded("https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0");
     CHECK(!mod_pack_active_url()[0] && !redirected("textures/kntest/tex_a.png", got, sizeof(got)),
           "a map with a Dropbox pack (not loadable here) still has the previous map's pack");
@@ -202,7 +218,7 @@ static void check_test_pack(const char *dir) {
     // takes over while that map is up
     CHECK(mod_pack_load_user(url) && !strcmp(mod_pack_user_url(), url), "the player's mod loads (%s)", mod_pack_user_url());
     map_loaded(NULL);
-    CHECK(!strcmp(mod_pack_active_url(), url) && mod_pack_file_count() == 7, "a map without a pack keeps the player's mod (%s)",
+    CHECK(!strcmp(mod_pack_active_url(), url) && mod_pack_file_count() == 8, "a map without a pack keeps the player's mod (%s)",
           mod_pack_active_url());
     map_loaded("https://user-assets.krunker.io/mdbad/mod.zip");
     map_loaded(NULL);
@@ -211,6 +227,16 @@ static void check_test_pack(const char *dir) {
     CHECK(!mod_pack_active_url()[0] && !mod_pack_user_url()[0], "Reset Mods removes it");
     map_loaded(NULL);
     CHECK(!mod_pack_active_url()[0], "and the next map does not bring it back");
+
+    // canLoadMods off: every pack is refused, a map's included
+    g_can_load = 0;
+    map_loaded(url);
+    CHECK(!mod_pack_active_url()[0] && mod_pack_refused(), "canLoadMods off refuses a map's pack (%s)", mod_pack_active_url());
+    CHECK(!mod_pack_load_user(url) && !mod_pack_user_url()[0], "canLoadMods off refuses the player's mod");
+    g_can_load = 1;
+    map_loaded(url);
+    CHECK(!strcmp(mod_pack_active_url(), url) && !mod_pack_refused(), "canLoadMods on again: the pack loads (%s)", mod_pack_active_url());
+    map_loaded(NULL);
 }
 
 static void check_real_pack(void) {
@@ -224,12 +250,12 @@ static void check_real_pack(void) {
     fclose(f);
     char got[512];
     map_loaded("https://user-assets.krunker.io/md23677/mod.zip");
-    CHECK(mod_pack_file_count() == 27, "zombie_high's pack: 27 files (%d)", mod_pack_file_count());
+    CHECK(mod_pack_file_count() == 28, "zombie_high's pack: 27 files and its logo (%d)", mod_pack_file_count());
     CHECK(redirected("textures/weapons/weapon_1.png", got, sizeof(got)) && redirected("models/melee/melee_0.obj", got, sizeof(got)) &&
               redirected("sound/weapon_2.mp3", got, sizeof(got)) && redirected("textures/sky_6.png", got, sizeof(got)),
           "zombie_high's pack replaces weapon_1.png, melee_0.obj, weapon_2.mp3, sky_6.png");
-    CHECK(!redirected("textures/logo.png", got, sizeof(got)) && !redirected("weapons/weapon_1.obj", got, sizeof(got)),
-          "zombie_high's pack: logo.png and weapons/*.obj are not applied");
+    CHECK(redirected("textures/logo.png", got, sizeof(got)) && !redirected("weapons/weapon_1.obj", got, sizeof(got)),
+          "zombie_high's pack: logo.png goes to the logo, weapons/*.obj is not applied");
     map_loaded("");
     CHECK(!redirected("textures/weapons/weapon_1.png", got, sizeof(got)), "zombie_high's pack is gone after the map change");
 }
@@ -274,7 +300,7 @@ int main(int argc, char **argv) {
     char packs[600];
     snprintf(packs, sizeof(packs), "%s/packs", base);
     test_setenv("TMPDIR", packs, 1);
-    const ModPackHooks hooks = {hook_texture, hook_geometry, hook_gltf, hook_sound};
+    const ModPackHooks hooks = {hook_texture, hook_geometry, hook_gltf, hook_sound, NULL, NULL, hook_can_load, hook_logo, hook_settings_text};
     mod_pack_set_hooks(&hooks);
 
     check_urls();

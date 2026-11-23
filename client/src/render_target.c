@@ -725,9 +725,10 @@ int render_target_begin(Client *client) {
     int bloom = s->rt_bloom && s->rt_mode > RT_MODE_OFF && !rt.bloom_failed && rt_supported() && bloom_init_program();
     rt.bloom = 0;
     if (!bloom) bloom_delete_targets();
-    // mod shader passes (mod_shader.h) read the scene from the target; none enabled: nothing changes here
+    // mod shader passes (mod_shader.h) read the scene from the target; none enabled: nothing changes here.
+    // postProcessing off: postfx.render(cb, postprocessing.enabled) runs no pass (deob-10.0.7.js:206152, :195987-195997)
     const int need = fabsf(scale - 1.0f) > 1e-4f || s->anti_alias || aspect || rt_filtered(s) || laced || taa || bloom ||
-                     mod_shader_active();
+                     (s->post_processing && mod_shader_active());
     if (!need) {
         if (rt.fbo) rt_delete_targets(); // back to the direct path: release the buffers
         return 0;
@@ -829,7 +830,7 @@ void render_target_end(Client *client) {
     post_timing_mark(3);
     // the mod's post passes (insertShaderPass -> postfx, deob-10.0.7.js:205848-205942, :195864-196010) over the
     // finished scene at its own size; the upscale / sharpen and the saturation / hue filter then take their result
-    scene_tex = mod_shader_render(scene_tex, rt.width, rt.height);
+    if (s->post_processing) scene_tex = mod_shader_render(scene_tex, rt.width, rt.height); // postprocessing.enabled
 
     glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int) rt.prev_draw_fbo);
     glViewport(0, 0, rt.fb_width, rt.fb_height);
