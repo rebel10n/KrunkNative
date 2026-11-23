@@ -17,6 +17,7 @@
 #include "klog.h"
 #include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
+#include <bundle_offers.h> // bundle_offers_readable_time: v10's getReadableTime
 #include <backend_ui.h>
 #include <kio_market.h> // kio_market_time_ms: acc.createDate
 #include <krunker_link.h> // krunker_net_take_drop_instance: the drops the game server gave (account_add_skin)
@@ -187,19 +188,8 @@ static void comma_number(char *out, const size_t n, const double value) {
     out[o] = 0;
 }
 
-// UTILS.getReadableTime(ms)
-static void readable_time(char *out, const size_t n, const double ms) {
-    long long s = (long long) floor(ms / 1000.0);
-    long long m = s / 60;
-    long long h = m / 60;
-    m %= 60;
-    const long long d = h / 24;
-    h %= 24;
-    char dp[24] = "", hp[24] = "";
-    if (d) snprintf(dp, sizeof(dp), "%lldd ", d);
-    if (h) snprintf(hp, sizeof(hp), "%lldh ", h);
-    snprintf(out, n, "%s%s%lldm ", dp, hp, m);
-}
+// UTILS.getReadableTime(ms) (deob-10.0.7.js:23957-23970): "1y 2d 3h 4m ", years, days and hours left out at 0
+static void readable_time(char *out, const size_t n, const double ms) { bundle_offers_readable_time(ms, out, n); }
 
 void account_readable_time(char *out, const size_t n, const double ms) { readable_time(out, n, ms); }
 
