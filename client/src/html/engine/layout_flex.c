@@ -76,7 +76,7 @@ static float clampf_mm(float v, float mn, float mx) { if (v > mx) v = mx; if (v 
 /* row-gap / column-gap in px ("normal" is 0 in flex layout; a percentage needs a definite base). */
 static float flex_gap(const CssLength *l, float base) { return kn_maxf(0, layout_resolve_len(l, base, 0)); }
 
-void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h)
+void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h, LayoutOutput *out)
 {
     const CssComputed *s = b->style;
     int row = is_row(b), rev = is_reverse(b);
@@ -360,6 +360,11 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         ln->cross = mx;
         total_cross += mx + (l ? gap_cross : 0);
     }
+    /* the height its lines give a row container whose own is auto, before a definite height
+       replaces it: the content size suggestion of the automatic minimum size (CSS Flexbox 4.5).
+       v10.0.7 Strike's 20px .item-selection__item-label holds a 16px span, so Chrome shrinks it
+       to 19.33 beside the 100px image (4px over 116, 100:20) where its own height kept it at 20 */
+    if (row && out) { out->has_auto_h = 1; out->auto_h = total_cross; }
     float lines_lead = 0, lines_between = 0;      /* align-content of a multi-line container */
     if (nl == 1 && cross_avail >= 0) { total_cross = cross_avail; lines[0].cross = cross_avail; }
     else if (nl == 1 && row) {
@@ -501,6 +506,16 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
     b->baseline_offset = b->first_baseline;   /* flex containers export their first baseline */
 
     *content_h = row ? total_cross : (main_avail >= 0 ? main_avail : container_main);
+    if (!row && main_avail >= 0 && out) {
+        /* a definite column's contents at their hypothetical sizes, as an auto height would hold them */
+        float used = 0;
+        for (int l = 0; l < nl; l++) {
+            float sum = gap_main * (float)(lines[l].count - 1);
+            for (int j = 0; j < lines[l].count; j++) { FItem *it = &items[lines[l].first + j]; sum += it->hypo + it->mm0 + it->mm1; }
+            used = kn_maxf(used, sum);
+        }
+        out->has_auto_h = 1; out->auto_h = used;
+    }
     if (!row && main_avail < 0) {
         float used = 0;
         for (int l = 0; l < nl; l++) {

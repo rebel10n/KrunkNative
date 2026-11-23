@@ -1915,6 +1915,33 @@ static void t_container_scrollbars(void)
     fx_free(fx);
 }
 
+/* A column item that is itself a flex container with a definite height: its automatic minimum
+ * height comes from its contents, not from that height (CSS Flexbox 4.5). Krunker Strike 1.37.2's
+ * .item-selection__item-square (120 px border box, 2 px border: 116 px of content) holds a 100 px
+ * image and a 20 px row-flex label around a 16 px span; Chrome shrinks both by their 100:20 base
+ * (image 96.67, label 19.33). The label's own 20 px once froze it, so the image took all 4 px. */
+static void t_flex_column_definite_item_min(void)
+{
+    Fx *fx = fx_html(
+        "<div style='display:flex;flex-direction:column;align-items:center;height:120px;width:98px;"
+        "border:2px solid transparent;box-sizing:border-box'>"
+        "<div id=im style='display:flex;height:100px;min-width:92px'><div style='height:94px;width:94px'></div></div>"
+        "<div id=lb style='display:flex;width:100%;height:20px;box-sizing:border-box;align-items:center'>"
+        "<span style='display:inline-block;height:16px;width:40px'></span></div></div>"
+        "<div style='display:flex;flex-direction:column;height:40px'>"
+        "<div id=co style='display:flex;flex-direction:column;height:40px'><div style='height:10px;flex-shrink:0'></div></div>"
+        "<div id=cx style='height:20px'></div></div>", NULL);
+    HtmlRect im = rc(fx, "im"), lb = rc(fx, "lb");
+    CHECK_NEAR(im.h, 100 - 4 * 100.0f / 120.0f, 0.02, "column of definite flex items: the image shrinks by its share");
+    CHECK_NEAR(lb.h, 20 - 4 * 20.0f / 120.0f, 0.02, "column of definite flex items: the label shrinks to 19.33, not kept at 20");
+    CHECK_NEAR(lb.y, im.y + im.h, 0.02, "column of definite flex items: the label follows the image");
+    /* a definite column item's minimum is its items' height (10), not its own 40 */
+    HtmlRect co = rc(fx, "co"), cx = rc(fx, "cx");
+    CHECK_NEAR(co.h, 40 - 20 * 40.0f / 60.0f, 0.02, "a definite column item shrinks below its own height");
+    CHECK_NEAR(cx.h, 20 - 20 * 20.0f / 60.0f, 0.02, "its sibling takes only its share");
+    fx_free(fx);
+}
+
 /* The Object Manager's window (ui/css/krunknative.css .knOm*): an abs-pos flex column under
  * max-height: calc(100% - 230px) whose middle row shrinks (min-height:0) and whose panes scroll:
  * the grid (flex 0 1 auto, max-height) beside the Tools pane, an abs-pos inset:0 flex column in a
@@ -2877,6 +2904,7 @@ int main(int argc, char **argv)
     t_bfc_roots();
     t_nested_scroll_passes();
     t_flex_select_intrinsic();
+    t_flex_column_definite_item_min();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

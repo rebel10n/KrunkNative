@@ -79,6 +79,9 @@ typedef struct LayoutOutput {
     float top_pos, top_neg;     /* margins collapsing through the top (incl. own) */
     float bot_pos, bot_neg;     /* margins collapsing through the bottom (incl. own) */
     int collapses_through;      /* empty: top and bottom margins are one set    */
+    int has_auto_h;             /* auto_h is set: the contents' height had the box's own been auto */
+    float auto_h;               /* (a flex container with a definite height reports that as its
+                                   content height; the content size suggestion wants this one) */
 } LayoutOutput;
 
 /* content box relative to the border-box origin (valid during layout) */
@@ -153,7 +156,7 @@ float layout_box_baseline(const Box *b);        /* baseline from border-box top;
 float layout_line_height(const Box *b);         /* resolved line-height px for a box's style/font */
 
 /* ---- layout_flex.c / layout_grid.c / layout_table.c --------------------- */
-void  layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h);
+void  layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h, LayoutOutput *out);
 void  layout_flex_intrinsic(LayoutTree *t, Box *b, float *min_w, float *max_w);
 void  layout_grid_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h);
 void  layout_grid_intrinsic(LayoutTree *t, Box *b, float *min_w, float *max_w);

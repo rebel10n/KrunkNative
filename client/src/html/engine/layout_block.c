@@ -831,7 +831,7 @@ void layout_finish_scroll(LayoutTree *t, Box *b)
 static void layout_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h, LayoutOutput *out)
 {
     switch (b->type) {
-    case BOX_FLEX:  layout_flex_contents(t, b, in, content_h); break;
+    case BOX_FLEX:  layout_flex_contents(t, b, in, content_h, out); break;
     case BOX_GRID:  layout_grid_contents(t, b, in, content_h); break;
     case BOX_TABLE: layout_table_contents(t, b, in, content_h); break;
     case BOX_IMAGE: case BOX_CANVAS: case BOX_VIDEO: case BOX_INPUT: case BOX_SELECT: *content_h = 0; break;
@@ -1014,7 +1014,8 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         else if (tentative_h >= 0) bh = tentative_h;
         else if (box_is_replaced(b)) bh = content_h + box_border_padding_h(b);
         else bh = content_h + layout_vertical_extras(b);
-        b->content_auto_h = box_is_replaced(b) ? content_h + box_border_padding_h(b) : content_h + layout_vertical_extras(b);
+        b->content_auto_h = box_is_replaced(b) ? content_h + box_border_padding_h(b)
+                          : (o.has_auto_h ? o.auto_h : content_h) + layout_vertical_extras(b);
         if (in.override_h < 0) layout_apply_min_max_h(b, in.cb_h, &bh);
         b->h = bh;
 
