@@ -36,6 +36,7 @@
 #include <v10_menu.h>      // v10_menu_kr_sale: the Purchase KR tab's sale weekends
 #include <ks_game.h>       // ks_wall_ms: the Prize Wheels tab's clock
 #include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
+#include <v10_ui.h>        // v10_view_push: the Premium Benefits modal
 #include <kio_checkout.h>  // krunker.io's real-money purchases (showPurchase, premiumPopup, directPurchase, bundles)
 #include <krunker_net.h>   // the krunker.io account's Free KR spin (AD_FINISHED "fkr") on the official game socket
 #include <html_dom.h>
@@ -172,6 +173,7 @@ static const UiWheel *ticket_wheel(const int skin) {
 static int store_window_handle(const char *name, const HtmlArg *args, int argc);
 static void generic_popup(const char *html, const char *cls);
 static void history_add(int item, int kr);
+static void sub_tab_show(void);
 void store_ui_sub_tab_tick(double delta_ms);
 static const UiWheel *g_cur;   // v11667: the wheel on screen
 static int g_spin_index = -1;     // vLN01914: its store.wheels index (-1: a ticket's wheel)
@@ -1025,6 +1027,28 @@ static void readable_time(char *out, const size_t n, double ms) {
     else snprintf(out, n, "%ldm", m);
 }
 
+// showPremiumBenefits (deob-10.0.7.js:128613-128630): the io-popup with every benefit of iiíïiíî (:16479)
+static char *premium_benefits_html(void) {
+    static const char *const benefits[] = {"Reduced Ads", "Golden Badge on Profile", "Custom Profile Pictures", "Custom Display Name",
+                                           "Increased Customization Options", "Custom Skin, Hair & Chat Colors", "Access to Spray Wheel & +1 Spray limit",
+                                           "Increased Max KR per Round to 40", "Custom Commands: /god /noclip /kill /smite", "Can host 16 player lobbies",
+                                           "Bigger Thumbnails for Maps", "Reduced Trade Fees & Cooldowns", "Increased Trade Limit to 20 items",
+                                           "Increased Market Sale Limit to 40", "Can enter Limited Premium Areas on Custom Maps", "Increased Object Limit in Customs",
+                                           "Increased Asset File Size", "Increased Asset Upload Limit"};
+    StrBuf sb = {0};
+    // the Popup wrapper (svelte-1wz7ymp, deob-10.0.7.js:12088-12110) at its default width 800; svelte.css has the styles
+    sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\">"
+                   "<div class=\"io-popup-container svelte-1vap6hy\"><div style=\"font-size: 24px; margin-bottom: 20px; background: #000; width: 100%; text-align: center; padding-bottom: 10px; padding-top: 10px; color: white;\">Premium Benefits</div> "
+                   "<div style=\"background-color: #333; padding: 15px; border-radius: 6px; border: 5px solid var(--yellow); overflow-y: auto;\">");
+    for (size_t i = 0; i < sizeof(benefits) / sizeof(benefits[0]); i++) {
+        sb_append(&sb, "<div class=\"settNameSmall premText svelte-1vap6hy\"><i class=\"material-icons\">grade</i> ");
+        sb_append_esc(&sb, benefits[i]);
+        sb_append(&sb, "</div>");
+    }
+    sb_append(&sb, "</div></div></div></div>");
+    return sb_finish(&sb);
+}
+
 // windows[13].genSubBtns()
 static void store_sub_btns(StrBuf *sb) {
     for (int i = 0; i < 3; i++) {
@@ -1266,7 +1290,7 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
                    i == 2 ? "" : "playSelect();", i == 0 ? (acc ? "showWindow(6)" : "showWindow(5)") : PANELS[i].click,
                    g_store_sub == i ? "" : "none", grad, bg, PANELS[i].bg_style);
         for (int d = 0; d < 3; d++)
-            sb_appendf(sb, "<div class=\"sub-tab-dot svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"event.stopPropagation();windows[13].subTabT=5000;windows[13].subTab=%d;updateWindow(14);\" style=\"background: %s\"></div>",
+            sb_appendf(sb, "<div class=\"sub-tab-dot svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"event.stopPropagation();knStoreSubTab(%d)\" style=\"background: %s\"></div>",
                        d, d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
         sb_appendf(sb, "</div> <div class=\"sub-tab-nav svelte-lri212\">%s</div> ", PANELS[i].nav);
         if (i == 2) { // acc.junk: the Junk wallet's balance (doc/v10/junk.md); the crafting itself is another owner's
@@ -1516,8 +1540,9 @@ static void v10_store_premium(StrBuf *sb, const AccountInfo *acc) {
                    (int) i, k_premium[i].col, k_premium[i].col, crd, k_premium[i].days, k_premium[i].price);
     sb_append(sb, "</div> <div class=\"premium-res svelte-1dbkhl\"></div> ");
     if (acc && acc->premium > 0) {
-        char t[32];
-        readable_time(t, sizeof(t), acc->data ? cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 27)) : 0);
+        char t[64];
+        // getReadableTime(Math.floor(premiumT)) (deob-10.0.7.js:130464)
+        bundle_offers_readable_time(acc->data ? floor(cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 27))) : 0, t, sizeof(t));
         sb_appendf(sb, "<div class=\"premium-time-section svelte-1dbkhl\"><span style=\"color: #fff\">Time Remaining</span> <span class=\"premium-time svelte-1dbkhl\">%s</span></div>", t);
     }
     sb_append(sb, " ");
@@ -1568,11 +1593,15 @@ static void v10_store_eterno(StrBuf *sb) {
     // the display loads, "Error: <message>" and a Retry that fetches it again when it fails, and nothing more
     // when it loads with no product (deob-10.0.3.js:144540-144551, 145746-145757)
     v10_wild_offer_shop(sb);
-    const int state = junk_shop_render(sb);
-    if (state == 0)
+    char err[256];
+    const int state = junk_shop_render(sb, err, sizeof err);
+    if (state == 0) {
         sb_append(sb, "<div class=\"loading-container svelte-gh77t9\"><div class=\"loading-spinner svelte-gh77t9\"></div> <div class=\"loading-text svelte-gh77t9\">Loading eterno shop...</div></div>");
-    else if (state < 0)
-        sb_append(sb, "<div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">Error: Failed to load eterno shop</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>");
+    } else if (state < 0) { // Retry: loadShopData() again (deob-10.0.7.js:130637-130660)
+        sb_append(sb, "<div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">Error: ");
+        sb_append_esc(sb, err);
+        sb_append(sb, "</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"knEternoRetry()\">Retry</button></div>");
+    }
 }
 
 static char *v10_store_window_gen(void) {
@@ -1728,8 +1757,23 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     }
     if (!strcmp(name, "bundlePopup")) { // bundlePopup(true, false, ID): a home-tab bundle card (junk_shop_ui.c), the purchase
         const int id = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 0;
-        if (kio_store_active()) kio_checkout_bundle_popup(id); // the bundle's BUY / GIFT popup (deob-10.0.4.js:212740-212935)
-        else if (id > 0) bundle_offers_popup(id); // the Box Office bundle's popup (bundle_offers.c), BUY = knBundleBuy
+        if (kio_store_active()) kio_checkout_bundle_popup(id); // v10's popup with the krunker.io rows (deob-10.0.7.js:215745-215950)
+        else if (id > 0) bundle_offers_popup(id); // v10's popup with the brain's rows (bundle_offers.c)
+        return 1;
+    }
+    if (!strcmp(name, "selectBundle")) { // Box Office (krunker.io's is kio_checkout_handle's): the brain's purchase
+        const int id = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
+        if (!active_account()) menu_show_window(5, 1); // selectBundle without an account: showWindow(5)
+        else if (id > 0) junk_shop_bundle_buy(id);
+        return 1;
+    }
+    if (!strcmp(name, "selectBundleGift")) { // Box Office takes no payment, so a gift has nothing to pay with
+        ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
+        return 1;
+    }
+    if (!strcmp(name, "knEternoRetry")) { // the Eterno Shop's Retry: the display read again
+        junk_shop_reload();
+        menu_rerender_if_open(14);
         return 1;
     }
     if (!strcmp(name, "knBundleBuy")) { // the Box Office bundle popup's BUY: the brain's purchase
@@ -1752,16 +1796,24 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         return 1;
     }
     if (!strcmp(name, "windows.13.subTab=")) { g_store_sub = a0 >= 0 && a0 < 3 ? a0 : 0; return 1; }
+    if (!strcmp(name, "knStoreSubTab")) { // a home dot (IÎìiîii, deob-10.0.7.js:129779-129783): that panel, in place
+        g_store_sub = a0 >= 0 && a0 < 3 ? a0 : 0;
+        sub_tab_show();
+        return 1;
+    }
     if (!strcmp(name, "windows.13.subTabT=")) { g_store_sub_t = a0; return 1; }
     if (!strcmp(name, "windows.13.craftMenu")) {
         const HtmlArg tab = {.kind = HTML_ARG_NUM, .num = 3}; // v10: window.openExchange(3), the exchange's Junkyard
         html_ui_dispatch("openExchange", NULL, &tab, 1);
         return 1;
     }
-    if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // Box Office: no payments
-        if (kio_store_active() && strcmp(name, "showPremiumBenefits")) kio_checkout_kr_pack_direct(argc > 0 ? a0 : 0); // :217616-217619
+    if (!strcmp(name, "showPremiumBenefits")) { // the benefits' modal, signed in or not
+        v10_view_push(premium_benefits_html(), NULL, NULL, NULL);
+        return 1;
+    }
+    if (!strcmp(name, "windows.13.directPurchase")) { // Box Office: no payments
+        if (kio_store_active()) kio_checkout_kr_pack_direct(argc > 0 ? a0 : 0); // :217616-217619
         else if (!active_account()) menu_show_window(5, 1);
-        else if (!strcmp(name, "showPremiumBenefits")) menu_show_window(36, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
     }
@@ -1771,15 +1823,21 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         sb_append(&sb, "<div><div class=\"popHeader\" style=\"margin-bottom: 30px;\">Spin Tickets</div>");
         const AccountInfo *acc = active_account();
         const cJSON *e;
-        cJSON_ArrayForEach(e, (acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL)) { // acc.skins of type TICKET
-            const int skin = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "ind")), cnt = owned_count(skin);
+        // acc.skins of type TICKET, whatever their count or wheel; the wheel is spinWheelId or the index of the one named
+        // spinWheelName (-1 none)
+        cJSON_ArrayForEach(e, (acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL)) {
+            const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *cnt = cJSON_GetObjectItem(e, "cnt");
+            if (!cJSON_IsNumber(ind)) continue;
+            const int skin = ind->valueint;
             const ViewerSkin *k = viewer_skin(skin);
-            if (!cnt || !k || k->type != 13 || (wheel_of_ticket(skin) < 0 && !ticket_wheel(skin))) continue;
-            char thumb[256];
+            if (!k || k->type != 13) continue;
+            char thumb[256], count[32];
             store_skin_preview(skin, thumb, sizeof(thumb));
-            const char *col = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? g_viewer_rarities[k->rarity].color : "#fff";
-            sb_appendf(&sb, "<div class=\"ticketCard\" onmouseenter=\"playTick()\" onclick=\"playSelect();prizeWheel(%d, %d);cancelTip()\"\n\t\t\t\tdata-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'\n\t\t\t\tstyle=\"background-image:url(%s);border-color:%s!important\">\n\t\t\t\t<div class=\"ticketCount\" style=\"width: unset;top:2px;right: 2px;color:%s\">x%d</div>\n\t\t\t\t<div class=\"ticketText\" style=\"color:%s!important\">Redeem</div>\n\t\t\t</div>",
-                       wheel_of_ticket(skin), skin, skin, thumb, col, col, cnt, col);
+            const char *col = g_viewer_rarities[k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? k->rarity : 0].color; // rarities[rarity || 0]
+            if (cJSON_IsNumber(cnt)) snprintf(count, sizeof count, "%.15g", cnt->valuedouble);
+            else snprintf(count, sizeof count, "undefined");
+            sb_appendf(&sb, "<div class=\"ticketCard\" onmouseenter=\"playTick()\" onclick=\"playSelect();prizeWheel(%d, %d);cancelTip()\"\n\t\t\t\tdata-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'\n\t\t\t\tstyle=\"background-image:url(%s);border-color:%s!important\">\n\t\t\t\t<div class=\"ticketCount\" style=\"width: unset;top:2px;right: 2px;color:%s\">x%s</div>\n\t\t\t\t<div class=\"ticketText\" style=\"color:%s!important\">Redeem</div>\n\t\t\t</div>",
+                       wheel_of_ticket(skin), skin, skin, thumb, col, col, count, col);
             n++;
         }
         sb_append(&sb, "</div>");
@@ -1794,11 +1852,8 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
             menu_show_window(5, 1);
             return 1;
         }
-        if (kio_store_active()) { // krunker.io: the code goes over the game socket as "vo" (kio_store_redeem_prompt)
-            kio_store_redeem_prompt();
-            return 1;
-        }
-        char pop[512];
+        if (kio_store_active()) kio_store_redeem_prompt(); // krunker.io: redeemVoucher's "vo", its "vr" answer
+        char pop[512]; // vouchPop (deob-10.0.7.js:224172-224181)
         snprintf(pop, sizeof(pop), "<div style='color:rgba(255,255,255,0.7);margin-top:-5px;font-size:19px;text-align:center;margin-bottom:5px;'>%s</div><div><input type='text' id='redVouch' class='smlInput' placeholder='Enter KR Code' /><div class='redVouchBtn' onclick='redeemVoucher()'>Redeem</div></div><div id='vouchRes' style='display:none'></div>",
                  I18N("windows.store.voucherinfo", "Redeem Vouchers from certain Streams & Game Events"));
         generic_popup(pop, "vouchPop");
@@ -1834,16 +1889,9 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     return -1;
 }
 
-// the home tab's banner rotation (updSubTab): every 3 s while the Store shows tab 0; the Prize Wheels tab's clock
-void store_ui_sub_tab_tick(const double delta_ms) {
-    if (!menu_window_is_open() || menu_ui()->active_window != 14) return;
-    if (g_store_tab == 1) wheels_clock_tick();
-    if (g_store_tab != 0) return;
-    if ((g_store_sub_t -= delta_ms) > 0) return;
-    g_store_sub_t = 3000.0;
-    g_store_sub = (g_store_sub + 1) % 3;
+// the home tab's panel and its dots, in place (the Svelte state's display / dot styles, deob-10.0.7.js:129815-129857)
+static void sub_tab_show(void) {
     HtmlElem tabs[8];
-    // the home tab's setInterval: the panel shows, its dots follow
     const int n = html_dom_query_all(0, "#menuWindow .sub-tab-panel", tabs, 8);
     for (int i = 0; i < n; i++) {
         html_dom_set_display(tabs[i], i == g_store_sub ? "" : "none");
@@ -1851,6 +1899,18 @@ void store_ui_sub_tab_tick(const double delta_ms) {
         const int nd = html_dom_query_all(tabs[i], ".sub-tab-dot", dots, 3);
         for (int d = 0; d < nd; d++) html_dom_set_style(dots[d], "background", d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
     }
+}
+
+// the home tab's banner rotation (the component's setInterval, 3 s, deob-10.0.7.js:129793-129799); the Prize Wheels
+// tab's clock
+void store_ui_sub_tab_tick(const double delta_ms) {
+    if (!menu_window_is_open() || menu_ui()->active_window != 14) return;
+    if (g_store_tab == 1) wheels_clock_tick();
+    if (g_store_tab != 0) return;
+    if ((g_store_sub_t -= delta_ms) > 0) return;
+    g_store_sub_t = 3000.0;
+    g_store_sub = (g_store_sub + 1) % 3;
+    sub_tab_show();
 }
 
 // windows[13].updateScroll(dir, columns): the home tab's bundle slider, columnsToScroll 5 and no wrapAround
@@ -1885,8 +1945,9 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         return 1;
     }
     if (!strcmp(name, "windows.13.updateScrollWheel")) { // updateScroll(window.event.deltaY > 0 ? -1 : 1)
-        const double dy = ev && ev->value ? strtod(ev->value, NULL) : 0.0;
-        if (dy != 0.0) bundle_update_scroll(dy > 0.0 ? -1 : 1, 0);
+        // the home bundle slider's wheel (deob-10.0.7.js:129701-129706): an inline onwheel's HtmlEvent.key is
+        // WheelEvent.deltaY in px (html_dom.h; ev->value is the element's value, "" for .bundleCols). deltaY 0 scrolls right.
+        bundle_update_scroll(ev && ev->key > 0 ? -1 : 1, 0);
         return 1;
     }
     if (kio_store_handle(name, ev, args, argc) >= 0) return 1; // knKioShop*: the krunker.io store's cards

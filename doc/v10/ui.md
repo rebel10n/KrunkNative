@@ -318,10 +318,12 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     `+N` box past four, empty boxes past the list's end. BUY reads `"BUY $" + PRICE` unformatted or
     "Already Purchased"; the art and BUY call `playSelect(0.1)` then `bundlePopup(true, false, ID)`. Order
     (144811-144823): newest DATE first, cheapest first for a guest or level 10 and below, owned last; the
-    grid is asked with the session token, so OWNED is the account's. Box Office has no bundle popup (v10's
-    bundlePop, 242965: items, offer timer, BUY / GIFT through the payment provider) and no conditional
-    bundles (they come with v10's bundle-availability push): `bundlePopup` goes to the bundle's purchase,
-    which the brain refuses (USD).
+    grid is asked with the session token, so OWNED is the account's. On krunker.io the conditional bundles
+    ("gbdr" [2]) come first (deob-10.0.7.js:129801). `bundlePopup` opens v10.0.7's bundle popup on both
+    backends (bundle_offers.c, deob-10.0.7.js:215745-215950: items, contents, offer timer, BUY / GIFT); on
+    Box Office its BUY is the brain's purchase, which the brain refuses (USD), and GIFT says no payments.
+    "gbdr" also opens it unasked (the conditional bundles once a day, at most one popup in 8 hours), and
+    Box Office has no conditional bundles (they come with v10's bundle-availability push).
   - Purchase KR (deob-10.0.3.js:145668-145702, 116856-116929, 28524-28532): on KR sale weekends (Saturday /
     Sunday UTC of an odd ISO week, the menu's `v10_menu_kr_sale`, the same rule as its KR DISCOUNT badge)
     every card shows `10% Off` on `#E040FB` and its `priceSale`; the 160000 KR ("???", `goldenKr`) and
@@ -396,6 +398,5 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     Cleared / Best Time (deob-10.0.3.js:125736-126880). The brain's profile reply gained
     `player_badge`, `player_titles`, `player_twitchname` and `ranked_rank` (doc/v10/social.md, "Player
     profile").
-- **Known gaps left** (larger ports, not done here): the store's bundle popup (`bundlePopup`, with
-  conditional bundles), `showPremiumBenefits()`; the host form's
+- **Known gaps left** (larger ports, not done here): the host form's
   non-Custom host types' banners and map lists, the community-map Select block, `canRehost`.

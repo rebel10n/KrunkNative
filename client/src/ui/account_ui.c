@@ -26,6 +26,7 @@
 #include <account_split.h>   // the account split: a krunker.io login is never sent to kn_brain (and the reverse)
 #include <app_mode.h>
 #include <html_dom.h>
+#include <kio_store.h> // redeemVoucher on krunker.io: "vo" (kio_store_redeem_send)
 #include <html_ui.h>
 #include <i18n.h>
 #include <ui_logic.h>
@@ -1577,10 +1578,10 @@ static void redeem_voucher_frame(const cJSON *frame) {
     g_vouch_timer = 0;
     g_vouch_pending = 0;
     HtmlElem res = html_dom_by_id("vouchRes");
-    if (res) {
+    if (res) { // innerHTML = msg || "" (deob-10.0.7.js:223752-223756)
         const char *msg = str_at(frame, 2);
-        html_dom_set_text(res, msg ? msg : "");
         html_dom_set_display(res, "block");
+        html_dom_set_html(res, msg ? msg : "");
     }
     const cJSON *funds = cJSON_GetArrayItem(frame, 1);
     if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
@@ -3309,6 +3310,10 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         if (res) {
             html_dom_set_text(res, "Loading...");
             html_dom_set_display(res, "block");
+        }
+        if (kio_store_active()) { // krunker.io: REDEEM_VOUCHER "vo" on its game socket (deob-10.0.7.js:224161-224171)
+            kio_store_redeem_send(code);
+            return 1;
         }
         cJSON *frame = cJSON_CreateArray();
         cJSON_AddItemToArray(frame, cJSON_CreateString("vr"));

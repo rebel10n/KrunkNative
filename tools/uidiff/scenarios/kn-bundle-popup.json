@@ -53,7 +53,12 @@
         "gbdr",
         [
           41
-        ]
+        ],
+        [],
+        {},
+        [],
+        0,
+        1
       ]
     ],
     "storage": {
@@ -62,5 +67,5 @@
       "kio_level": "5"
     }
   },
-  "note": "KN only: the bundle popup (kio_checkout.c) with its countdown (.strike-timer: #progress-circle, #timer-center, #timer-text, deob-10.0.7.js:215809-215892), signed in to a krunker.io account. EXPIRY is far ahead (the ring's offset floors at 0, the day count in #timer-text moves by one a day). Reference: KN's own render."
+  "note": "KN only: v10.0.7's bundle popup (bundle_offers.c, deob-10.0.7.js:215745-215950) with its countdown (.strike-timer: #progress-circle, #timer-center, #timer-text in getReadableTime's format, :215858-215897), signed in to a krunker.io account; gbdr [6] keeps the automatic popup out. EXPIRY is far ahead (the ring's offset floors at 0, the time left in #timer-text moves by the minute). Reference: KN's own render."
 }

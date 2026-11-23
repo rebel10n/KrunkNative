@@ -47,11 +47,13 @@ void kio_store_display_purchased(int display_id);
 // :221350). index / ticket are -1 for null (a TICKET item's spin has no wheel). fn gets the answer's data
 // (fakeRands, itemIds, funds, usedTicket) or the error, as kio_store_write does. 1 = sent.
 int kio_store_spin(int index, int ticket, int multi, KioWriteFn fn, void *user);
-// Redeem Keys (the shop's tab 4, voucherPopup deob-10.0.4.js:221051): asks for a KR code and sends it over the game
-// socket as "vo" [code]. The account's own sign-in rule applies (a guest gets loginOrRegister).
+// Redeem Keys (the shop's tab 4): voucherPopup's vouchPop is store_ui.c's; this arms the "vr" answer for it
 void kio_store_redeem_prompt(void);
-// The game socket's "vr" answer (REDEEM_VOUCHER_RESPONSE, deob-10.0.4.js:221042): funds when has_funds, and the
-// message, shown with its HTML stripped.
+// redeemVoucher on krunker.io (deob-10.0.7.js:224161-224171): the code over the game socket as "vo" [code]; 0 when
+// not connected (#vouchRes then says so)
+int kio_store_redeem_send(const char *code);
+// The game socket's "vr" answer (REDEEM_VOUCHER_RESPONSE, deob-10.0.7.js:223752-223756): the message as #vouchRes's
+// HTML, and the funds when has_funds.
 void kio_store_voucher_answer(int has_funds, double funds, const char *message);
 // A krunker.io action KrunkNative does not send yet: the notice says so (never a read-only refusal).
 void kio_store_unwired(const char *what); // what: the request it stands for (logged)

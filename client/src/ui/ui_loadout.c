@@ -20,6 +20,7 @@
 #include <ui_tooltip.h> // createTip / createStreakTip / createSpinHistoryTip / cancelTip
 #include <audio.h>
 #include <backend_ui.h>
+#include <bundle_offers.h> // resetPops stops the bundle popup's music and countdown
 #include <online_mode.h> // offline mode: every skin unlocked
 #include <app_mode.h> // app_route_url_target (openSales)
 #include <render_settings.h>
@@ -2283,6 +2284,7 @@ static void reset_pops(void) {
         html_dom_set_html(generic, "");
     }
     ui_loadout_hide_police_pop();
+    bundle_offers_pops_reset(); // the bundle's music stopped and its countdown cleared (deob-10.0.7.js:222986-222989)
 }
 
 void ui_loadout_reset_pops(void) { reset_pops(); }

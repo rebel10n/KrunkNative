@@ -336,51 +336,38 @@ int kio_store_spin(const int index, const int ticket, const int multi, const Kio
     return sent;
 }
 
-// Redeem Keys: the KR code goes over the game socket as "vo" [code] (v10 sends it straight, deob-10.0.4.js:221047).
-static void voucher_answered(const int accepted, const char *text, void *user) {
-    (void) user;
-    if (!accepted || !text || !text[0]) return;
+// Redeem Keys on krunker.io: v10's vouchPop (voucherPopup, deob-10.0.7.js:224172-224181, store_ui.c) whose Redeem sends
+// the code over the game socket as REDEEM_VOUCHER "vo" [code] (redeemVoucher, :224161-224171); the "vr" answer comes
+// back to whoever sent it.
+void kio_store_redeem_prompt(void) { krunker_net_voucher_listen(kio_store_voucher_answer); }
+
+int kio_store_redeem_send(const char *code) {
+    if (!code || !code[0]) return 0;
+    krunker_net_voucher_listen(kio_store_voucher_answer);
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("vo"));
-    cJSON_AddItemToArray(frame, cJSON_CreateString(text));
+    cJSON_AddItemToArray(frame, cJSON_CreateString(code));
     const int sent = krunker_net_send_account_frame(frame);
     cJSON_Delete(frame);
-    if (!sent) // not connected: the answer never comes, so say so now
-        v10_view_push(v10_io_error(I18N("kn.kio.store.redeemTitle", "Redeem Keys"),
-                                   I18N("kn.kio.store.redeemOffline", "Not connected to krunker.io. Try again in a moment.")), NULL, NULL, NULL);
-}
-
-void kio_store_redeem_prompt(void) {
-    if (!active_account()) { // v10: a guest is sent to the login window (voucherPopup, deob-10.0.4.js:221055)
-        v10_menu_handle("loginOrRegister", NULL, NULL, 0);
-        return;
+    if (!sent) { // not connected: the answer never comes, so say so now
+        const HtmlElem res = html_dom_by_id("vouchRes");
+        if (res) {
+            html_dom_set_display(res, "block");
+            html_dom_set_text(res, I18N("kn.kio.store.redeemOffline", "Not connected to krunker.io. Try again in a moment."));
+        }
     }
-    krunker_net_voucher_listen(kio_store_voucher_answer); // the "vr" answer comes back to whoever sent "vo"
-    ui_prompt(I18N("windows.store.voucherinfo", "Redeem Vouchers from certain Streams & Game Events"), voucher_answered, NULL); // deob-10.0.4.js:221053
+    return sent;
 }
 
-// The text of the answer, its HTML tags removed (v10 sets it as innerHTML, deob-10.0.4.js:221042).
-static char *strip_tags(const char *s) {
-    char *out = malloc(strlen(s) + 1);
-    if (!out) return NULL;
-    size_t n = 0;
-    int in_tag = 0;
-    for (; *s; s++) {
-        if (*s == '<') in_tag = 1;
-        else if (*s == '>') in_tag = 0;
-        else if (!in_tag) out[n++] = *s;
-    }
-    out[n] = 0;
-    return out;
-}
-
+// REDEEM_VOUCHER_RESPONSE (iìïíìíî, deob-10.0.7.js:223752-223756): #vouchRes shows the message as HTML; funds, when
+// sent, set the account's KR and the open window is drawn again
 void kio_store_voucher_answer(const int has_funds, const double funds, const char *message) {
+    const HtmlElem res = html_dom_by_id("vouchRes");
+    if (res) {
+        html_dom_set_display(res, "block");
+        html_dom_set_html(res, message ? message : "");
+    }
     if (has_funds) account_set_funds(funds);
-    if (!message || !message[0]) return;
-    char *text = strip_tags(message);
-    if (!text) return;
-    v10_view_push(v10_io_error(I18N("kn.kio.store.redeemTitle", "Redeem Keys"), text), NULL, NULL, NULL);
-    free(text);
 }
 
 void kio_store_unwired(const char *what) {

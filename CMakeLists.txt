@@ -1621,6 +1621,11 @@ else ()
             add_test(NAME bp_scenario_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/bp_scenario_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(bp_scenario_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # store_bundle_e2e: v10's bundle popup, the "gbdr" automatic popup, Premium Benefits, View Tickets, the home
+            # dots, vouchPop and the Eterno Shop's error, in the rendered document (client/tests/store_bundle_e2e.py)
+            add_test(NAME store_bundle_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/store_bundle_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(store_bundle_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # rent_servers_e2e: Rent a Server end to end: the window against kn_brain (sqlite), kn_rentd starting the
             # server_bin, the browser's 24/7 row, the expiry (client/tests/rent_servers_e2e.py, doc/v10/rented-servers.md)
             add_test(NAME rent_servers_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/rent_servers_e2e.py

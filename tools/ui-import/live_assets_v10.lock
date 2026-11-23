@@ -3498,6 +3498,7 @@ ui	img/menu-bg/8.png	https://assets.krunker.io/img/menu-bg/8.png	b85ce5b5302c17d
 ui	img/menu-bg/9.png	https://assets.krunker.io/img/menu-bg/9.png	2498cb0d6336aef22935f3777180332034a039c57cb9e6a032f494b6dc8362be	1330788
 ui	img/menu/free_spin.png	https://krunker.io/img/menu/free_spin.png	f94de6b76c10eb9fc534fffcac82da3b6b5ac653da3a034e667f8ccb42696f5c	37752
 ui	img/mouse/10002.png	https://assets.krunker.io/img/mouse/10002.png	c85d64a5732cdbb179169184b35af4e9402234dbc820edcc95b1c4a972fb8661	2266
+ui	img/skull-small.svg	https://krunker.io/img/skull-small.svg	71d7044277c8c293c93fed9cfe92d70dabe2e1d40ed67d2b6e3795f4c3cb400e	791
 ui	img/snowy_bg.webp	https://krunker.io/img/snowy_bg.webp	23c717b7ee2c0363ddb1811e29f5594bc55d78f3d79d4e39c06820885b43363b	70278
 ui	img/social/twitter.png	https://krunker.io/img/social/twitter.png	376d2c0268300470ae445a67f7808ea5a34433b0a38cb68bcad97f9768768620	864
 ui	img/templates/0.png	https://assets.krunker.io/img/templates/0.png	c500fc8886a1225a208f87cd4319d6802b47ed00fe4fbed7818a4848e1d2f918	22862
@@ -3547,3 +3548,4 @@ ui	img/templates/scripts/6.png	https://assets.krunker.io/img/templates/scripts/6
 ui	img/templates/scripts/7.png	https://assets.krunker.io/img/templates/scripts/7.png	3efed6341eb2b73f4e04adb3af12e9b3a821807a221829c864ceb1f05ebe10c0	98092
 ui	img/templates/scripts/8.png	https://assets.krunker.io/img/templates/scripts/8.png	5ad4885d84093de371192691a4421c1c4afc3cc975879532fb19df3bcf98d7b9	50843
 ui	img/templates/scripts/9.png	https://assets.krunker.io/img/templates/scripts/9.png	25c78a491021e894d097b3a3908407efa90d3c4dbb0c608d727473fb02cca15f	104617
+ui	img/warning-octagon-red.svg	https://krunker.io/img/warning-octagon-red.svg	57fd7a9fa6a85987eec0222316e2f934b187bc1684fa97d299641ef3fbe9cf52	1389

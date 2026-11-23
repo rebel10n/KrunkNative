@@ -75,7 +75,7 @@ static void load_poll(void *user) {
     menu_rerender_if_open(STORE_WINDOW);
 }
 
-int junk_shop_render(StrBuf *sb) {
+int junk_shop_render(StrBuf *sb, char *err, const size_t err_n) {
     char t[256], path[400];
     v10_url_token(t, sizeof t);
     snprintf(path, sizeof path, "/api/shop/displays?tag=limited%s%s", t[0] ? "&token=" : "", t);
@@ -84,13 +84,23 @@ int junk_shop_render(StrBuf *sb) {
         if (!g_load_timer) g_load_timer = html_timer_add(250.0, load_poll, NULL);
         return 0;
     }
-    if (r->status != 200) return -1;
+    if (r->status != 200) {
+        // loadShop's Error(response.error || "Failed to load shop") (deob-10.0.7.js:116253-116256); the brain's
+        // answer carries its reason as "error" or "message"
+        const cJSON *e = r->json ? cJSON_GetObjectItem(r->json, "error") : NULL;
+        if (!cJSON_IsString(e) || !e->valuestring[0]) e = r->json ? cJSON_GetObjectItem(r->json, "message") : NULL;
+        if (err && err_n) snprintf(err, err_n, "%s", cJSON_IsString(e) && e->valuestring[0] ? e->valuestring : "Failed to load shop");
+        return -1;
+    }
     const cJSON *data = r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
     const cJSON *products = cJSON_IsObject(data) ? cJSON_GetObjectItem(data, "products") : NULL;
     if (!products || cJSON_GetArraySize(products) == 0) return 1; // no product: nothing to draw
     kio_store_display_html(sb, data);
     return 1;
 }
+
+// the Eterno Shop's Retry (loadShopData again, deob-10.0.7.js:130637-130660): the display is read anew
+void junk_shop_reload(void) { v10_forget("/api/shop/displays"); }
 
 // the bundle card's text: the brain's rows are staff data, so the markup is escaped
 static void esc_into(StrBuf *sb, const char *s) {
@@ -223,12 +233,21 @@ static void bundle_card(StrBuf *sb, const cJSON *b, const int id) {
     sb_append(sb, "</div></div></div>");
 }
 
-// The home tab's bundle columns: [...conditionalBundleData, ...bundleData], each ordered (deob-10.0.3.js:144823). The
-// brain sends the account's OWNED with its token. Box Office has no conditional bundles (v10's come with the account's
-// bundle-availability push, 242876), so the brain's rows are the list.
+// The home tab's bundle columns: [...ordered(conditionalBundleData), ...ordered(bundleData)] (deob-10.0.7.js:129784-
+// 129801). The brain sends the account's OWNED with its token. Box Office has no conditional bundles (v10's come with
+// the account's bundle-availability push "gbdr"), so the brain's rows are the list.
 void junk_shop_bundles_render(StrBuf *sb) {
     const cJSON *data;
     if (kio_store_active()) { // krunker.io: the official store's bundles, as its game server pushed them (kio_checkout.c)
+        const cJSON *cond = kio_checkout_cond_bundles();
+        if (cJSON_IsArray(cond)) { // the conditional bundles first
+            const cJSON *list[BUNDLES_MAX];
+            const int n = bundles_ordered(cond, list, BUNDLES_MAX);
+            for (int i = 0; i < n; i++) {
+                const cJSON *id = cJSON_GetObjectItem(list[i], "ID");
+                if (cJSON_IsNumber(id)) bundle_card(sb, list[i], (int) id->valuedouble);
+            }
+        }
         data = kio_checkout_bundles();
     } else {
         char t[256], path[320];

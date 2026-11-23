@@ -1,30 +1,35 @@
 // Bundle offers on the menu (Krunker v10.0.7): the home tab's bundle card (#homeStoreAd with its discount label
-// #bundleHomeDiscountLabel), the countdown a timed bundle's popup carries (#timer-text / #progress-circle /
-// #timer-center / #warning), and the short-lived "limited offer" note on the shop button (#ltm-offer-container).
+// #bundleHomeDiscountLabel), the bundle popup (bundlePopup's #bundlePop) with a timed bundle's countdown
+// (#timer-text / #progress-circle / #timer-center / #warning), and the short-lived "limited offer" note on the shop
+// button (#ltm-offer-container).
 //
 // Behaviour (deob-10.0.7.js):
-//   - home card: the first bundle the account does not own in the store's order (:215669-215684, :215696-215703);
-//     the art, the name and "$PRICE" fade in after 250 ms (:215607-215646); a discounted bundle shows "-N%" on the
-//     label (Math.round) and the price's discount class (:215628-215629); a click opens the bundle's popup
-//     (:215630-215632). Every bundle owned: an empty-state line (:215704). The card shares #topLeftAdHolder's swap
-//     slot with #adCon (a 300x250 ad): with canShowAds (menu_ui.c menu_ads_apply) the slot flips every 20 s (0x4e20)
-//     to the empty #adCon, then back to the card with the next bundle not owned (iiííìïì, :215644-215667); each fill
-//     starts on the card (:215680-215682, :216888).
-//   - countdown: a bundle is timed by its event (EVENT_NAME + EVENT_ENDS_AT), its EXPIRY, or a 24-hour condition that
-//     starts when the account first saw it (valid_for_24_hours, :203294, :215809-215833). Each tick (1 s, :215945)
-//     shows the time left; the ring's dash offset is 240 - left * 240 / period (period 24 h, floored at 0) and the
-//     state is calm / middle / urgent at >= 50 % / >= 25 % / below (:215880-215892). At 0 the timer shows that the
-//     offer is over, the ring is full and the warning shows (:215861-215879).
-//   - shop-button note: a random conditional bundle with a 24-hour condition puts a note on #menuItemShop with the
-//     time left; it goes away after 15 s (:215714-215739, 0x3a98).
-// The wording is Box Office's own (ui/i18n/kn/en.json, kn.bundle.*); the class names are the page's identifiers.
+//   - home card: the first bundle the account does not own in v10's priority order (iìiïìîï, :16477; :215669-215684,
+//     :215696-215703); the art, the name and "$PRICE" fade in after 250 ms (:215607-215646); a discounted bundle
+//     shows "-N%" on the label (Math.round) and the price's discount class (:215628-215629); a click opens the
+//     bundle's popup (:215630-215632). Every bundle owned: "You got them all!" / "More Incoming!" (:215704). The card
+//     shares #topLeftAdHolder's swap slot with #adCon (a 300x250 ad): with canShowAds (menu_ui.c menu_ads_apply) the
+//     slot flips every 20 s (0x4e20) to the empty #adCon, then back to the card with the next bundle not owned
+//     (iiííìïì, :215644-215667: a counter over the rows not owned); each fill starts on the card (:215680-215682,
+//     :216888).
+//   - popup (:215785-215945): the discount, the sprays' keyframes, the "Time-limited offer!" / event label, the art,
+//     the Junk / KR / Premium days it adds, NAME, INFO, twelve item slots, the struck price, BUY / GIFT, and the
+//     countdown; the bundle's music (bundle_<ID>), bundle_<ID> and lastBundlePopupShown saved.
+//   - countdown: a bundle is timed by its event (EVENT_NAME + EVENT_ENDS_AT), its 24-hour condition that starts when
+//     the account first saw it (valid_for_24_hours, :203294), or its EXPIRY (:215809-215833). The seconds left are
+//     taken once and counted down each second (1 s, :215945); the text is getReadableTime, the ring's dash offset
+//     240 - left * 240 / 24 h (floored at 0), the state chill / fine / panic at >= 50 % / >= 25 % / below
+//     (:215880-215892). At 0: "Offer is up", "Offer has ended", the ring full and the warning (:215861-215879).
+//   - shop-button note: a random conditional bundle with a 24-hour condition puts "Time-limited Offer Available!"
+//     with its time left on #menuItemShop; it goes away after 15 s (:215714-215739, 0x3a98).
 #include <bundle_offers.h>
 
+#include <audio.h>
 #include <html_dom.h>
 #include <i18n.h>
 #include <junk_shop_ui.h>
 #include <ks_game.h> // ks_wall_ms
-#include <backend_ui.h> // store_skin_preview
+#include <backend_ui.h> // store_skin_preview, active_account
 #include "../viewer/viewer_store.h" // the popup's skins and their rarity colours
 #include <ui_logic.h>
 
@@ -36,19 +41,23 @@
 
 #define HOME_ROTATE_MS 20000.0 // 0x4e20
 #define HOME_FADE_MS 250.0     // 0xfa
-#define OFFER_PERIOD_MS 86400000.0
+#define OFFER_PERIOD_MS 86400000.0 // 0x5265c00
 #define TIMER_TICK_MS 1000.0
 #define LTM_NOTE_MS 15000.0    // 0x3a98
 #define HOME_MAX 128
+#define POPUP_SLOTS 12         // the popup's item slots (:215897)
 
 static struct {
     int rotate_timer, fade_timer;
     int last_id;        // the bundle the card shows (0: none yet)
     int shown;          // the card was filled once
     int card_turn;      // iïìììíì: the swap slot shows the card (0: #adCon's turn)
+    int rot_i;          // iiììïìi: the rotation's counter over the bundles not owned
     int fade_id;        // the bundle the pending fade fills in
     int tick_timer;
-    double ends_ms;     // the open popup's offer end (epoch ms), 0 = untimed
+    long left_s;        // iìÌïîïï: the open popup's seconds left
+    double period_ms;   // iiÍîiïï: its refresh time (24 h)
+    char music[32];     // iíîìïïi: the open popup's bundle music
     int ltm_timer;
 } B;
 
@@ -69,6 +78,20 @@ double bundle_offers_iso_ms(const char *s) {
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     const double days = (double) era * 146097 + (double) doe - 719468;
     return ((days * 24 + h) * 60 + mi) * 60000.0 + sec * 1000.0;
+}
+
+void bundle_offers_readable_time(const double ms, char *out, const size_t n) {
+    long long s = ms > 0 ? (long long) floor(ms / 1000.0) : 0; // Math.max(0, floor(ms / 1000))
+    long long m = s / 60, h = m / 60, d = h / 24;
+    m %= 60;
+    h %= 24;
+    const long long y = d / 365;
+    d %= 365;
+    char yp[24] = "", dp[24] = "", hp[24] = "";
+    if (y) snprintf(yp, sizeof yp, "%lldy ", y);
+    if (d) snprintf(dp, sizeof dp, "%lldd ", d);
+    if (h) snprintf(hp, sizeof hp, "%lldh ", h);
+    snprintf(out, n, "%s%s%s%lldm ", yp, dp, hp, m);
 }
 
 static const char *row_text(const cJSON *b, const char *key) {
@@ -99,14 +122,25 @@ static void escape(char *out, const size_t n, const char *s) {
     out[k] = 0;
 }
 
-// "1d 3h", "3h 12m", "12m 05s", "5s": the time left, compact
-void bundle_offers_format_left(const double ms, char *out, const size_t n) {
-    long s = ms > 0 ? (long) floor(ms / 1000.0) : 0;
-    const long d = s / 86400, h = s % 86400 / 3600, m = s % 3600 / 60, sec = s % 60;
-    if (d > 0) snprintf(out, n, "%ldd %ldh", d, h);
-    else if (h > 0) snprintf(out, n, "%ldh %02ldm", h, m);
-    else if (m > 0) snprintf(out, n, "%ldm %02lds", m, sec);
-    else snprintf(out, n, "%lds", sec);
+// ---------------------------------------------------------------- v10's bundle priority
+
+// iìiïìîï = [30, 21, 29, 28, 26, 27, 25, 24, 22, 23, 20, 19, 6, 8, 10, 9, 18, 16].reverse() (deob-10.0.7.js:16477); the
+// sorts take indexOf(b.ID) - indexOf(a.ID): the highest index first, an id not listed (-1) last
+static const int k_priority[] = {16, 18, 9, 10, 8, 6, 19, 20, 23, 22, 24, 25, 27, 26, 28, 29, 21, 30};
+
+static int priority(const int id) {
+    for (int i = 0; i < (int) (sizeof k_priority / sizeof k_priority[0]); i++)
+        if (k_priority[i] == id) return i;
+    return -1;
+}
+
+void bundle_offers_priority_sort(const cJSON **v, const int n) {
+    for (int i = 1; i < n; i++) { // stable, as Array.prototype.sort
+        const cJSON *x = v[i];
+        int j = i;
+        for (; j > 0 && priority(row_id(x)) > priority(row_id(v[j - 1])); j--) v[j] = v[j - 1];
+        v[j] = x;
+    }
 }
 
 // ---------------------------------------------------------------- the home tab's card
@@ -200,8 +234,17 @@ static void arm_rotation(void) {
     B.rotate_timer = html_timer_add(HOME_ROTATE_MS, rotate, NULL);
 }
 
-// the 20 s flip (iiííìïì): #adCon's turn, or the card's with the next bundle not owned after the one shown, in the
-// store's order (wrapping)
+// the rows the card goes through: the store's bundles in their order (a guest's sorted by priority, as v10's
+// ALL_BUNDLE_DATA handler sorts them in place for one, :215672-215675), the owned ones left out
+static int rows_not_owned(const cJSON *rows, const cJSON **out, const int max) {
+    int n = 0;
+    const cJSON *b;
+    cJSON_ArrayForEach(b, rows) if (n < max && !row_owned(b)) out[n++] = b;
+    if (!active_account()) bundle_offers_priority_sort(out, n);
+    return n;
+}
+
+// the 20 s flip (iiííìïì): #adCon's turn, or the card's with the next bundle not owned (iiììïìi = (iiììïìi + 1) % n)
 static void rotate(void *user) {
     (void) user;
     B.rotate_timer = 0;
@@ -216,16 +259,12 @@ static void rotate(void *user) {
         return;
     }
     const cJSON *rows = junk_shop_bundles_rows();
-    const cJSON *list[HOME_MAX];
-    const int n = rows ? junk_shop_bundles_order(rows, list, HOME_MAX) : 0;
     const cJSON *open[HOME_MAX];
-    int m = 0, at = -1;
-    for (int i = 0; i < n; i++) {
-        if (row_owned(list[i])) continue;
-        if (row_id(list[i]) == B.last_id) at = m;
-        open[m++] = list[i];
+    const int m = rows ? rows_not_owned(rows, open, HOME_MAX) : 0;
+    if (m > 0) {
+        B.rot_i = (B.rot_i + 1) % m;
+        card_show(open[B.rot_i]);
     }
-    if (m > 0) card_show(open[(at + 1) % m]);
     arm_rotation();
 }
 
@@ -235,50 +274,41 @@ void bundle_offers_home_refresh(void) {
         if (!B.rotate_timer) B.rotate_timer = html_timer_add(1000.0, rotate, NULL); // the rows are still loading
         return;
     }
+    // the first bundle not owned by priority (:215673-215675 for a guest, :215696-215703 with the account's OWNED)
     const cJSON *list[HOME_MAX];
-    const int n = junk_shop_bundles_order(rows, list, HOME_MAX);
-    const cJSON *first = NULL;
-    for (int i = 0; i < n && !first; i++) if (!row_owned(list[i])) first = list[i];
+    int n = 0;
+    const cJSON *b;
+    cJSON_ArrayForEach(b, rows) if (n < HOME_MAX && !row_owned(b)) list[n++] = b;
+    bundle_offers_priority_sort(list, n);
+    const cJSON *first = n > 0 ? list[0] : NULL;
     card_slot(1);
     B.card_turn = 1;
     B.shown = 1;
     if (first) {
         if (row_id(first) != B.last_id) card_show(first);
-    } else { // every bundle is owned
+    } else { // every bundle is owned (:215704); a fill still pending from the rows before would put one back
+        if (B.fade_timer) html_timer_cancel(B.fade_timer);
+        B.fade_timer = 0;
         const HtmlElem name = html_dom_by_id("homeStoreAdTx"), price = html_dom_by_id("bundleQuickBuyB");
-        if (name) html_dom_set_text(name, I18N("kn.bundle.allOwned", "Every bundle is already yours"));
-        if (price) html_dom_set_text(price, I18N("kn.bundle.moreSoon", "New bundles are on the way"));
+        if (name) html_dom_set_html(name, "You got them all!");
+        if (price) html_dom_set_html(price, "More Incoming!");
         B.last_id = 0;
     }
     arm_rotation();
 }
 
-// ---------------------------------------------------------------- a timed bundle's countdown
+// ---------------------------------------------------------------- the popup and its countdown
 
-double bundle_offers_ends_ms(const cJSON *b, const double first_seen_ms) {
-    const char *event = row_text(b, "EVENT_NAME"), *event_end = row_text(b, "EVENT_ENDS_AT");
-    if (event && *event && event_end) return bundle_offers_iso_ms(event_end);
-    const char *expiry = row_text(b, "EXPIRY");
-    if (expiry && *expiry) return bundle_offers_iso_ms(expiry);
-    if (first_seen_ms > 0) return first_seen_ms + OFFER_PERIOD_MS;
-    return 0;
+static int is_event(const cJSON *b) { // iiIiìíí = EVENT_NAME && EVENT_ENDS_AT
+    const char *event = row_text(b, "EVENT_NAME"), *end = row_text(b, "EVENT_ENDS_AT");
+    return event && *event && end && *end;
 }
 
-void bundle_offers_timer_html(StrBuf *sb, const cJSON *b, const double ends_ms) {
-    if (ends_ms <= 0 || ends_ms - bundle_offers_now_ms() <= 0) return; // the timer shows only while time is left (:215942)
-    const char *event = row_text(b, "EVENT_NAME");
-    char title[160];
-    escape(title, sizeof title, event && *event && row_text(b, "EVENT_ENDS_AT") ? event : I18N("kn.bundle.limited", "Limited-time bundle"));
-    sb_appendf(sb, "<div class=\"bundle-popup-lmt-offer\"><span>%s</span></div>", title);
-    sb_appendf(sb,
-               "<div class=\"strike-timer\"><div class=\"strike-timer__holder\">"
-               "<div id=\"warning\" class=\"strike-timer__warning\" style=\"display:none\"><span class=\"material-icons\">warning</span></div>"
-               "<div class=\"strike-timer__timer\"><div class=\"strike-timer__timer-inner\"><svg><circle id=\"progress-circle\" class=\"strike-timer__stroke-mod--chill\" style=\"stroke-dashoffset:0%%\"></circle></svg></div>"
-               "<div id=\"timer-center\" class=\"strike-timer__timer-center strike-timer__background-mod--chill\"></div></div>"
-               "<div class=\"strike-timer__info\"><div id=\"kn-timer-label\" class=\"strike-timer__info-text\">%s</div>"
-               "<div id=\"timer-text\" class=\"strike-timer__info-text strike-timer__info-text--time strike-timer__text-mod--chill\"></div></div>"
-               "</div></div>",
-               I18N("kn.bundle.endsIn", "Ends in"));
+double bundle_offers_ends_ms(const cJSON *b, const int has_condition, const double first_seen_ms) {
+    if (is_event(b)) return bundle_offers_iso_ms(row_text(b, "EVENT_ENDS_AT")); // iïÏíiîi
+    if (has_condition) return first_seen_ms > 0 ? first_seen_ms + OFFER_PERIOD_MS : 0; // iïÎiíïi: no first_seen, no end
+    const char *expiry = row_text(b, "EXPIRY"); // iïÏììïí
+    return expiry && *expiry ? bundle_offers_iso_ms(expiry) : 0;
 }
 
 static void set_cls(const char *id, const char *cls) {
@@ -286,18 +316,28 @@ static void set_cls(const char *id, const char *cls) {
     if (e) html_dom_set_attr(e, "class", cls);
 }
 
+static void timer_stop(void) {
+    if (B.tick_timer) html_timer_cancel(B.tick_timer);
+    B.tick_timer = 0;
+}
+
+// iïÌìîïí (:215858-215897): one second of the countdown
 static void tick(void *user) {
     (void) user;
     B.tick_timer = 0;
     const HtmlElem text = html_dom_by_id("timer-text");
-    if (!text || B.ends_ms <= 0) return; // the popup closed
-    const double left = B.ends_ms - bundle_offers_now_ms();
+    if (!text) return; // the popup is gone
     char buf[96];
-    if (left <= 0) {
-        html_dom_set_text(text, I18N("kn.bundle.over", "Expired"));
+    if (B.left_s <= 0) {
+        html_dom_set_text(text, "Offer is up");
         set_cls("timer-text", "strike-timer__info-text strike-timer__info-text--time strike-timer__text-mod--panic");
-        const HtmlElem label = html_dom_by_id("kn-timer-label");
-        if (label) html_dom_set_text(label, I18N("kn.bundle.ended", "This bundle's offer has ended"));
+        HtmlElem infos[4]; // the .strike-timer__info line that reads "Offer ends in:"
+        const int ni = html_dom_query_all(0, "#bundlePop .strike-timer__info .strike-timer__info-text", infos, 4);
+        for (int i = 0; i < ni; i++) {
+            char t[64] = "";
+            html_dom_get_text(infos[i], t, sizeof t);
+            if (strstr(t, "Offer ends in:")) html_dom_set_text(infos[i], "Offer has ended");
+        }
         const HtmlElem ring = html_dom_by_id("progress-circle");
         if (ring) {
             html_dom_set_style(ring, "stroke-dashoffset", "240%");
@@ -306,13 +346,13 @@ static void tick(void *user) {
         set_cls("timer-center", "strike-timer__timer-center strike-timer__background-mod--panic");
         const HtmlElem warn = html_dom_by_id("warning");
         if (warn) html_dom_set_display(warn, "flex");
-        B.ends_ms = 0;
-        return;
+        return; // clearInterval
     }
-    const char *state = left >= 0.5 * OFFER_PERIOD_MS ? "chill" : left >= 0.25 * OFFER_PERIOD_MS ? "fine" : "panic";
-    double offset = 240.0 - left * (240.0 / OFFER_PERIOD_MS);
+    const double left = 1000.0 * (double) B.left_s, period = B.period_ms;
+    const char *state = left >= 0.5 * period ? "chill" : left >= 0.25 * period ? "fine" : "panic";
+    double offset = 240.0 - left * (240.0 / period);
     if (offset < 0) offset = 0;
-    bundle_offers_format_left(left, buf, sizeof buf);
+    bundle_offers_readable_time(left, buf, sizeof buf);
     html_dom_set_text(text, buf);
     snprintf(buf, sizeof buf, "strike-timer__info-text strike-timer__info-text--time strike-timer__text-mod--%s", state);
     set_cls("timer-text", buf);
@@ -320,21 +360,153 @@ static void tick(void *user) {
     if (ring) {
         snprintf(buf, sizeof buf, "strike-timer__stroke-mod--%s", state);
         html_dom_set_attr(ring, "class", buf);
-        snprintf(buf, sizeof buf, "%.4g%%", offset);
+        snprintf(buf, sizeof buf, "%.15g%%", offset);
         html_dom_set_style(ring, "stroke-dashoffset", buf);
     }
     snprintf(buf, sizeof buf, "strike-timer__timer-center strike-timer__background-mod--%s", state);
     set_cls("timer-center", buf);
     const HtmlElem warn = html_dom_by_id("warning");
     if (warn) html_dom_set_display(warn, strcmp(state, "panic") ? "none" : "flex");
+    B.left_s -= 1;
     B.tick_timer = html_timer_add(TIMER_TICK_MS, tick, NULL);
 }
 
-void bundle_offers_timer_start(const double ends_ms) {
-    if (B.tick_timer) html_timer_cancel(B.tick_timer);
-    B.tick_timer = 0;
-    B.ends_ms = ends_ms > 0 && ends_ms - bundle_offers_now_ms() > 0 ? ends_ms : 0;
-    if (B.ends_ms > 0) tick(NULL);
+void bundle_offers_pops_reset(void) {
+    if (B.music[0]) audio_stop(B.music);
+    B.music[0] = 0;
+    timer_stop();
+}
+
+// the popup's twelve item slots (:215897-215919): each skin of SKINS in its rarity's border (a spray with frames
+// animated), an index past SKINS or without a skin an empty grey slot. (v10 also folds a skin collection into one
+// slot with a "+N" count; KrunkNative's skin table has no collection field, so every skin takes its slot.)
+static void popup_items(StrBuf *sb, const char *skins, int *frames, int *nframes) {
+    sb_append(sb, "<div style='margin-top:15px;'>");
+    const char *p = skins ? skins : "";
+    for (int slot = 0; slot < POPUP_SLOTS; slot++) {
+        const ViewerSkin *k = NULL;
+        int index = -1;
+        if (*p) {
+            char *end = NULL;
+            const long v = strtol(p, &end, 10);
+            const int whole = end && end != p && (*end == ',' || !*end);
+            const char *comma = strchr(p, ',');
+            p = comma ? comma + 1 : p + strlen(p);
+            if (whole) {
+                index = (int) v;
+                k = viewer_skin(index);
+            }
+        }
+        if (!k) {
+            sb_append(sb, "<div class='bundlItmC' style='border: 3px solid #707070;'></div>");
+            continue;
+        }
+        char thumb[320];
+        store_skin_preview(index, thumb, sizeof thumb);
+        const int r = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? k->rarity : 0;
+        sb_appendf(sb, "<div class='bundlItmC' style='background:url(%s);", thumb);
+        if (k->type == 4 && k->frames > 0) { // iííìíìí(skin, "sprayAnmB") (:24393)
+            int seen = 0;
+            for (int f = 0; f < *nframes; f++) seen |= frames[f] == k->frames;
+            if (!seen && *nframes < POPUP_SLOTS) frames[(*nframes)++] = k->frames;
+            sb_appendf(sb, "background-size: cover !important;animation: sprayAnmB%d %.15gs steps(%d) infinite;", k->frames, 1.0 + k->frame_t / 1000.0,
+                       k->frames);
+        } else {
+            sb_append(sb, "background-size: contain;background-position: center;");
+        }
+        sb_appendf(sb, "border: 3px solid %s;' onclick='viewItem(%d)'></div>", g_viewer_rarities[r].color, index);
+    }
+    sb_append(sb, "</div>");
+}
+
+void bundle_offers_popup_show(const cJSON *b, const int has_condition, const double first_seen_ms) {
+    if (!b) return;
+    const int id = row_id(b), owned = row_owned(b);
+    const double price = row_num(b, "PRICE"), disc_pct = row_num(b, "DISCOUNT_PCT");
+    const int free_bundle = price == 0; // PRICE === 0: no BUY, no GIFT (:215800)
+    const long funds = (long) row_num(b, "FUNDS"), premium = (long) row_num(b, "PREMIUM"); // parseInt
+    const double junk = floor(row_num(b, "JUNK") * 100.0 + 0.5) / 100.0;                  // toFixed(2)
+    const cJSON *disc_v = cJSON_GetObjectItem(b, "DISCOUNT_PCT");
+    const int discounted = disc_v && !cJSON_IsNull(disc_v) && disc_pct > 0; // null != DISCOUNT_PCT && DISCOUNT_PCT > 0
+    const int event = is_event(b);
+    const int timed = event || row_text(b, "EXPIRY") || has_condition; // iïÍîîiï
+    // the seconds left and the period (:215809-215857): the event's, the condition's, else the EXPIRY's
+    double ends = bundle_offers_ends_ms(b, has_condition, first_seen_ms);
+    const int has_end = event || (has_condition ? first_seen_ms > 0 : row_text(b, "EXPIRY") != NULL);
+    long left_s = has_end && ends > 0 ? (long) floor((ends - bundle_offers_now_ms()) / 1000.0) : 0;
+    if (left_s < 0) left_s = 0;
+    const double period = has_end ? OFFER_PERIOD_MS : 0;
+
+    StrBuf items = {0};
+    int frames[POPUP_SLOTS], nframes = 0;
+    popup_items(&items, row_text(b, "SKINS"), frames, &nframes);
+    char *items_html = sb_finish(&items);
+
+    StrBuf sb = {0};
+    if (discounted) sb_appendf(&sb, "<div class='bundlPopDiscountLabel'>-%.0f%% OFF</div>", floor(disc_pct + 0.5)); // Math.round
+    if (nframes) {
+        sb_append(&sb, "<style>");
+        for (int f = 0; f < nframes; f++) sb_appendf(&sb, "@keyframes sprayAnmB%d {100%%{background-position:-%dpx}}", frames[f], 81 * frames[f]);
+        sb_append(&sb, "</style>");
+    }
+    if (timed) sb_appendf(&sb, "<div class=\"bundle-popup-lmt-offer\"><span>%s</span></div>", event ? row_text(b, "EVENT_NAME") : "Time-limited offer!");
+    char art[320], path[64];
+    snprintf(path, sizeof path, "img/backgrounds/bundles/b_%d.png", id);
+    html_dom_asset_url(path, art, sizeof art);
+    sb_appendf(&sb, "<div class='bundlPopImg' style='background:url(%s);background-size: cover;'></div><div class='bundlPopCurncs'>", art);
+    if (junk > 0)
+        sb_appendf(&sb, "<div style='color:#cfcfcf'>+ <span style='color:#7d7d7d;'>%.2f</span> <span class='material-icons' style='color:#cc51f8;font-size:35px;margin-left:-5px;vertical-align:top;'>plumbing</span></div>",
+                   junk);
+    if (funds) sb_appendf(&sb, "<div style='color:#cfcfcf'>+ <span style='color:#7d7d7d;'>%ld</span> <span style='color:#fbc02d'>KR</span></div>", funds);
+    if (premium)
+        sb_appendf(&sb, "<div style='color:#cfcfcf'>+ <span style='color:#7d7d7d;'>%ld</span> <span style='color:#42ed56;font-size:18px;'>Premium Days</span></div>", premium);
+    // NAME and INFO go in as v10 writes them (innerHTML)
+    const char *name = row_text(b, "NAME"), *info = row_text(b, "INFO");
+    sb_appendf(&sb, "</div><div class='bundlPopSidH'><div class='bundlPopNam'>%s</div><div class='bundlPopInfo'>%s</div>%s", name ? name : "undefined",
+               info ? info : "undefined", items_html);
+    free(items_html);
+    sb_append(&sb, "<div class='bundlPopBuyH'>");
+    const cJSON *orig = cJSON_GetObjectItem(b, "ORIGINAL_PRICE");
+    if (discounted && orig && !cJSON_IsNull(orig)) sb_appendf(&sb, "<div class='bundlPopOriginalPrice'>previously $%.2f</div>", row_num(b, "ORIGINAL_PRICE"));
+    if (!free_bundle) {
+        if (!owned)
+            sb_appendf(&sb, "<div class='bundlPopBuyC%s' onclick='selectBundle(this, %d, false, undefined, undefined)'>BUY $%.15g USD</div>",
+                       discounted ? " bundlPopBuy--discount" : "", id, price);
+        if (owned) sb_appendf(&sb, "<div class='bundlPopBuyGift bundlPopBuyGift--owned' onclick='selectBundleGift(this, %d)'>GIFT $%.15g USD</div>", id, price);
+        else sb_appendf(&sb, "<div class='bundlPopBuyGift' onclick='selectBundleGift(this, %d)'>GIFT</div>", id);
+    }
+    sb_append(&sb, "</div>");
+    if (timed && left_s > 0 && period > 0)
+        sb_append(&sb, "<div class='strike-timer'><div class='strike-timer__holder'><div id='warning' class='strike-timer__warning' style='display: none;'><img src='./img/warning-octagon-red.svg' alt='Warning'></div>"
+                       "<div class='strike-timer__info-holder'><div class='strike-timer__info'><div class='strike-timer__info-text'>Offer ends in:</div><div id='timer-text' class='strike-timer__info-text strike-timer__info-text--time strike-timer__text-mod--chill'>00:00:00</div></div></div>"
+                       "<div class='strike-timer__timer-bg'><div class='strike-timer__timer-outer'><svg><circle class='strike-timer__stroke-mod--chill'></circle></svg></div>"
+                       "<div class='strike-timer__timer-inner'><svg><circle id='progress-circle' class='strike-timer__stroke-mod--chill' style='stroke-dashoffset: 0%;'></circle></svg></div>"
+                       "<div id='timer-center' class='strike-timer__timer-center strike-timer__background-mod--chill'></div>"
+                       "<div class='strike-timer__timer-center-img'><img src='./img/skull-small.svg' alt='Timer icon'></div></div></div></div>");
+    sb_append(&sb, "</div>"); // .bundlPopSidH (v10 leaves it to the parser)
+    char *html = sb_finish(&sb);
+    ui_loadout_reset_pops(); // resetPops(): also stops the last bundle's music and countdown
+    const HtmlElem pop = html_dom_by_id("bundlePop");
+    if (pop) {
+        html_dom_set_display(pop, "block");
+        html_dom_set_html(pop, html);
+    }
+    free(html);
+    // the bundle's music: bundle_<ID> looped, at 1 for bundle 12 and 0.1 otherwise, rate 1.25 for bundle 6 (:215942)
+    if (id > 1) {
+        snprintf(B.music, sizeof B.music, "bundle_%d", id);
+        audio_play(B.music, id == 12 ? 1.0f : 0.1f, 1, id == 6 ? 1.25f : 1.0f);
+    }
+    char key[32], now[32];
+    snprintf(key, sizeof key, "bundle_%d", id);
+    snprintf(now, sizeof now, "%.0f", bundle_offers_now_ms());
+    html_storage_set(key, now);
+    html_storage_set("lastBundlePopupShown", now);
+    if (timed && left_s > 0 && period > 0) {
+        B.left_s = left_s;
+        B.period_ms = period;
+        tick(NULL);
+    }
 }
 
 // ---------------------------------------------------------------- the shop button's note
@@ -352,8 +524,8 @@ void bundle_offers_ltm_note(const int bundle_id, const double left_ms) {
     const HtmlElem shop = html_dom_by_id("menuItemShop");
     if (!shop || bundle_id <= 0) return;
     char left[48], path[64], url[320];
-    bundle_offers_format_left(left_ms, left, sizeof left);
-    snprintf(path, sizeof path, "img/backgrounds/bundles/b_%d.png", bundle_id);
+    bundle_offers_readable_time(left_ms, left, sizeof left); // getReadableTime(Math.max(0, floor(end - now)))
+    snprintf(path, sizeof path, "img/backgrounds/bundles/b_%d_tiny.png", bundle_id);
     html_dom_asset_url(path, url, sizeof url);
     StrBuf sb = {0};
     sb_appendf(&sb,
@@ -361,10 +533,10 @@ void bundle_offers_ltm_note(const int bundle_id, const double left_ms) {
                "<div class=\"ltm-offer-container__time-bar-bg\"><div class=\"ltm-offer-container__time-bar-progress\"></div></div>"
                "<div class=\"ltm-offer-container__arrow-container\"><div class=\"ltm-offer-container__arrow\"></div></div>"
                "<div class=\"ltm-offer-container__body\"><div class=\"ltm-offer-container__text-holder\">"
-               "<div class=\"ltm-offer-container__lmt-text\">%s</div>"
-               "<div class=\"ltm-offer-container__time-left\">%s %s</div></div>"
-               "<div class=\"ltm-offer-container__img-holder\"><img src=\"%s\" alt=\"\"></div></div></div>",
-               I18N("kn.bundle.ltmNote", "A limited bundle is waiting for you"), I18N("kn.bundle.endsIn", "Ends in"), left, url);
+               "<div class=\"ltm-offer-container__lmt-text\">Time-limited Offer Available!</div>"
+               "<div class=\"ltm-offer-container__time-left\">Time left: %s</div></div>"
+               "<div class=\"ltm-offer-container__img-holder\"><img src=%s alt=\"Timer icon\"></div></div></div>",
+               left, url);
     char *html = sb_finish(&sb);
     html_dom_insert_html(shop, HTML_INSERT_BEFORE_END, html);
     free(html);
@@ -373,56 +545,13 @@ void bundle_offers_ltm_note(const int bundle_id, const double left_ms) {
 
 // ---------------------------------------------------------------- a Box Office bundle's popup
 
-// bundlePopup(true, false, id) on Box Office (deob-10.0.7.js:215769-215945): the bundle's skins (up to 12, each in its
-// rarity's border), the discount, the art, the Junk it adds, the price before the discount, BUY unless owned, and the
-// countdown for a timed bundle. BUY is the brain's purchase (junk_shop_bundle_buy). Wording: kn.bundle.*.
+// bundlePopup(true, false, id) on Box Office (deob-10.0.7.js:215745-215950): the brain's row in v10's popup. Box
+// Office bundles carry no condition. With no such row v10 redraws the Store (updateWindow(14)).
 void bundle_offers_popup(const int id) {
     const cJSON *b = row_by_id(junk_shop_bundles_rows(), id);
     if (!b) {
-        junk_shop_bundle_buy(id); // the rows are not here yet: the purchase answers as before
+        menu_rerender_if_open(14);
         return;
     }
-    const int owned = row_owned(b);
-    const double price = row_num(b, "PRICE"), disc = row_num(b, "DISCOUNT_PCT"), orig = row_num(b, "ORIGINAL_PRICE"), junk = row_num(b, "JUNK");
-    StrBuf sb = {0};
-    sb_append(&sb, "<div class='bundlItmCnt'>");
-    const char *p = row_text(b, "SKINS");
-    for (int n = 0; p && *p && n < 12;) {
-        char *end = NULL;
-        const long index = strtol(p, &end, 10);
-        p = end && *end == ',' ? end + 1 : (end && end != p ? end : p + strlen(p));
-        const ViewerSkin *k = viewer_skin((int) index);
-        if (!k) continue;
-        char thumb[320];
-        store_skin_preview((int) index, thumb, sizeof thumb);
-        const int r = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? k->rarity : 0;
-        sb_appendf(&sb, "<div class='bundlItmC' style='background:url(%s);background-size:contain;background-position:center;border:3px solid %s;' onclick='viewItem(%ld)'></div>",
-                   thumb, g_viewer_rarities[r].color, index);
-        n++;
-    }
-    sb_append(&sb, "</div>");
-    if (disc > 0) sb_appendf(&sb, "<div class='bundlPopDiscountLabel'>%s -%.0f%%</div>", I18N("kn.bundle.save", "Save"), floor(disc + 0.5));
-    const double ends = bundle_offers_ends_ms(b, 0);
-    bundle_offers_timer_html(&sb, b, ends);
-    char art[320], path[64];
-    snprintf(path, sizeof path, "img/backgrounds/bundles/b_%d.png", id);
-    html_dom_asset_url(path, art, sizeof art);
-    sb_appendf(&sb, "<div class='bundlPopImg' style='background:url(%s);background-size:cover;'></div><div class='bundlPopCurncs'>", art);
-    if (junk > 0) sb_appendf(&sb, "<div style='color:#cfcfcf'>+ <span style='color:#7d7d7d;'>%.2f</span> <span class='material-icons'>delete</span></div>", junk);
-    sb_append(&sb, "</div><div class='bundlPopBuyH'>");
-    if (disc > 0 && orig > 0) sb_appendf(&sb, "<div class='bundlPopOriginalPrice'>%s $%.2f</div>", I18N("kn.bundle.was", "Regular price"), orig);
-    if (!owned) sb_appendf(&sb, "<div class='bundlPopBuyC%s' onclick='knBundleBuy(%d)'>%s $%.15g</div>", disc > 0 ? " bundlPopBuy--discount" : "", id, I18N("kn.bundle.buy", "Get it for"), price);
-    else sb_appendf(&sb, "<div class='bundlPopBuyC'>%s</div>", I18N("kn.bundle.owned", "Owned"));
-    sb_append(&sb, "</div>");
-    char *html = sb_finish(&sb);
-    ui_loadout_clear_pops(); // resetPops()
-    const HtmlElem holder = html_dom_by_id("popupHolder");
-    if (holder) html_dom_set_display(holder, "block");
-    const HtmlElem pop = html_dom_by_id("bundlePop");
-    if (pop) {
-        html_dom_set_html(pop, html);
-        html_dom_set_display(pop, "block");
-    }
-    free(html);
-    bundle_offers_timer_start(ends);
+    bundle_offers_popup_show(b, 0, 0);
 }

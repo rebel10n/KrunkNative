@@ -36,9 +36,15 @@ void kio_checkout_bundle(int bundle, const char *gift_to);
 const cJSON *kio_checkout_bundles(void);
 // --render-scenario: state.kioBundles, frames as the game socket sends them ([["abd", rows], ["gbdr", ids, ...]])
 void kio_checkout_scenario(const cJSON *frames);
-// bundlePopup(true, false, id) (:212740-212862): the bundle's popup (#bundlePop) with BUY (selectBundle) and GIFT
-// (selectBundleGift: the player's name, then "xstb" with it).
+// "gbdr" [2]: the conditional bundles' rows (their OWNED set), drawn ahead of the store's in the Store's grid
+// (deob-10.0.7.js:129815). NULL until the game server sent them.
+const cJSON *kio_checkout_cond_bundles(void);
+// bundlePopup(true, false, id) (deob-10.0.7.js:215745-215950): the bundle's popup (#bundlePop, bundle_offers.c) with
+// BUY (selectBundle) and GIFT (selectBundleGift: the player's name, then "xstb" with it).
 void kio_checkout_bundle_popup(int bundle);
+// a game's INIT with its isRanked (hud_ui_match_gate): "gbdr" shows no popup in a ranked game, and a pending
+// conditional-bundle popup ("gbdr" [5]) opens at the next game with the menu up (:226520)
+void kio_checkout_game_init(int ranked);
 // The window (GLFW's focus callback, main.c) or the page (focus / visibilitychange, web_dom.c) got the focus back: a
 // payment waiting for the browser reads the account again (as the Done button, the wait goes on). Headless: never.
 void kio_checkout_window_focused(void);

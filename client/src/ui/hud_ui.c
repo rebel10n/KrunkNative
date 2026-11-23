@@ -48,6 +48,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h>
+#include <kio_checkout.h> // kio_checkout_game_init
 #include <bhop_toast.h>
 #include <v10_notify.h> // S5: chat emoji (v10_emoji_append_chat)
 #include <third_person.h>
@@ -4616,6 +4617,7 @@ void hud_ui_relayout(void) {
 void hud_ui_match_gate(Client *client) {
     comp_ui_match_gate(client);
     v10_menu_match_gate(client->game.is_ranked, client->game.is_official);
+    kio_checkout_game_init(client->game.is_ranked); // the bundle popups' isRanked, initGame's conditional popup (:226520)
 }
 
 // The page parts of a round (INIT, and a fresh page during one).

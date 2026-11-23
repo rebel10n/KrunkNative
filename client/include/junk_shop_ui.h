@@ -9,8 +9,11 @@
 #include <cJSON.h>
 
 // appends the products under the Eterno Shop's wild offer (store_ui.c v10_store_eterno). Returns the
-// display request's state: 0 loading, 1 loaded (with or without products), -1 failed
-int junk_shop_render(StrBuf *sb);
+// display request's state: 0 loading, 1 loaded (with or without products), -1 failed (err: its reason, v10's
+// "Error: <message>")
+int junk_shop_render(StrBuf *sb, char *err, size_t err_n);
+// the Eterno Shop's Retry: the display is fetched again on the next render
+void junk_shop_reload(void);
 // knKioShopBuy on Box Office (kio_store.c): the product's purchase, one unit; an accepted one counts on the card of
 // display_id at once (updateDisplayPurchaseCount, deob-10.0.6.js:115979-116030)
 void junk_shop_buy(int display_id, int product_id);
