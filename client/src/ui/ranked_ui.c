@@ -1380,15 +1380,18 @@ static void scroll_to_ranked_challenges(HtmlElem mw, HtmlElem head) {
     html_dom_set_scroll(mw, s.left, s.top + (hr.y - mr.y) / scale);
 }
 
-// The window shows "Loading" until its challenges arrive (account_ui.c gen_challenges), so the Ranked
-// block is there a little later: look for it every 100 ms for up to 10 s, then scroll once.
+// v10's account carries its challenges, so openHome draws the whole list and the scroll lands on the Ranked
+// block. KN's list can come after the window opens: until then the window is the layout of an empty list
+// (v10_rewards.c gen_challenges), whose Ranked header sits where the map cards will go, and the answer
+// re-renders it. So wait for the header and the list, every 100 ms for up to 10 s, then scroll once.
 #define RANKED_SCROLL_TRIES 100
 static int g_ranked_scroll_tries;
 static void scroll_ranked_header_fire(void *user) {
     (void) user;
     HtmlElem mw = html_dom_by_id("menuWindow"), head = html_dom_by_id("challRankedHeadr");
-    if (!mw || !head) {
-        if (++g_ranked_scroll_tries < RANKED_SCROLL_TRIES) html_timer_add(100.0, scroll_ranked_header_fire, NULL);
+    const int last = ++g_ranked_scroll_tries >= RANKED_SCROLL_TRIES;
+    if (!mw || !head || (!account_challenges() && !last)) {
+        if (!last) html_timer_add(100.0, scroll_ranked_header_fire, NULL);
         return;
     }
     scroll_to_ranked_challenges(mw, head);
