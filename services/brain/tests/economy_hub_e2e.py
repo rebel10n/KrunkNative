@@ -226,7 +226,9 @@ def scenario(port, ids, tokens, names):
         c.ui("clearPops();updateWindow('market','inventory')")
         check(c.has("marketList", 30), "bob's inventory")
         time.sleep(1.5)
-        c.ui("showPopup('inventory', 4, 0)")
+        # the card's List: v10's eleven-argument showPopup (hub-10.0.7.js:3337) through the inline-handler parser
+        c.cmd('clicksel 0 #marketList .marketCard[data-index="4"] .cardAction')
+        time.sleep(0.4)
         check(c.has("sellPriceIn"), "List popup for the item")
         c.type("sellPriceIn", "300")
         c.shot("list")
@@ -244,7 +246,8 @@ def scenario(port, ids, tokens, names):
     try:
         check(c.has("marketList", 60), "alice on the market")
         time.sleep(1.5)
-        c.ui("showPopup('market', 4, 0)")
+        c.cmd('clicksel 0 #marketList .marketCard[data-index="4"] .cardAction')  # Purchase
+        time.sleep(0.4)
         check(c.has("popupContent"), "the listing's popup")
         c.shot("buy")
         af, bf = one("SELECT player_funds FROM players WHERE player_id = ?", A), one("SELECT player_funds FROM players WHERE player_id = ?", B)

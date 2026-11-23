@@ -49,10 +49,15 @@ static const kn_sql SQL_NOW_MS = {.any = "SELECT {epoch_ms:{now}}"};
 
 /* ------------------------------------------------------------------ feed */
 
-/* kn_post_json(post, viewer): NULL when missing / deleted */
+/* kn_post_json(post, viewer): NULL when missing / deleted. A game result's (typ 8) lnk2 is its JSON rows, sent raw for the
+ * hub to parse (hub-10.0.7.js:4914-4936; the hub escapes each value); a KR giveaway (typ 9) carries fds (its KR) and exp
+ * (ms until it ends, 0 once settled or over: hub-10.0.7.js:4879, 4940), as the GET /social/feed rows do */
 static cJSON *post_json(Dbx *x, int64_t post, const char *viewer, int64_t now_ms) {
     cJSON *r = dbx_row(x,
         SQL(.any = "SELECT fp.id, fp.author_id, fp.body, fp.type, fp.link, fp.link2, {epoch_ms:fp.created_at} AS cms,"
+                   " coalesce(fp.funds, 0) AS fds,"
+                   " CASE WHEN fp.type = 9 AND fp.settled_at IS NULL AND fp.ends_at > {now}"
+                   " THEN {epoch_ms:fp.ends_at} - {epoch_ms:{now}} ELSE 0 END AS exp_ms,"
                    " r.player_name, r.player_premium, r.player_featured, r.player_clan, r.clan_rank, r.player_followed,"
                    " (SELECT count(*) FROM feed_likes l WHERE l.post_id = fp.id) AS vot,"
                    " (SELECT count(*) FROM feed_comments c WHERE c.post_id = fp.id) AS cnt,"
@@ -71,9 +76,15 @@ static cJSON *post_json(Dbx *x, int64_t post, const char *viewer, int64_t now_ms
     take(o, "clr", r, "clan_rank");
     take(o, "flw", r, "player_followed");
     cJSON_AddItemToObject(o, "txt", html_item(kn_json_str_or(r, "body")));
+    const int64_t typ = kn_json_int(r, "type", 0);
     take(o, "typ", r, "type");
     cJSON_AddItemToObject(o, "lnk", html_item(kn_json_str_or(r, "link")));
-    cJSON_AddItemToObject(o, "lnk2", html_item(kn_json_str_or(r, "link2")));
+    if (typ == 8) cJSON_AddStringToObject(o, "lnk2", kn_json_str_or(r, "link2") ? kn_json_str_or(r, "link2") : "");
+    else cJSON_AddItemToObject(o, "lnk2", html_item(kn_json_str_or(r, "link2")));
+    if (typ == 9) {
+        take(o, "fds", r, "fds");
+        take(o, "exp", r, "exp_ms");
+    }
     const cJSON *cms = cJSON_GetObjectItemCaseSensitive(r, "cms");
     cJSON_AddNumberToObject(o, "tim", (double)(now_ms - (cJSON_IsNumber(cms) ? (int64_t)cms->valuedouble : now_ms)));
     take(o, "vot", r, "vot");

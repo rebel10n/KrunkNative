@@ -713,6 +713,8 @@ void ui_loadout_select_stat(int index);         // selectStat
 void ui_loadout_skin_selector(int weapon, int secondary); // skinSelector
 void ui_loadout_select_skin(int index, int weapon); // selectSkin
 const cJSON *ui_loadout_skin_json(int index);        // the store item's JSON (skins.json), NULL when unknown
+const char *ui_loadout_tag_color(const char *tag);  // store.tags: a limT badge's colour (#41c300 when untagged)
+const char *ui_loadout_tag_name(int i);             // store.tags' i-th name, NULL past the last
 int ui_loadout_wears(int index);                     // a cosmetic slot or a weapon's saved skin is this store index
 void ui_loadout_owned_changed(void);                 // the owned list changed: the open skin / item choosers list it again
 void ui_loadout_action(int action);              // windows[2].action

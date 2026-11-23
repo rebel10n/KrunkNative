@@ -268,6 +268,8 @@ typedef struct MarketCtx {
     int season;       /* 0 = all */
     int desc;         /* fil order "0": highest price first */
     int all;          /* stats: every row (the HTTP /market/stats pages them itself), not the socket page's 50 */
+    int missing;      /* srt onlyMissing: the matching store items this account does not have, read-only */
+    int non_tradable; /* srt nonTradable: no item that cannot be traded */
     char text[64];
 } MarketCtx;
 
@@ -277,8 +279,13 @@ static int item_matches(const MarketCtx *c, int64_t skin_id) {
     const SkinInfo *k = acct_skin(skin_id);
     if (!k) return 0;
     if (c->rar_mask && !(c->rar_mask & (1u << (k->rarity & 31)))) return 0;
-    if (c->wep_mask && !(c->wep_mask & (1u << (k->weapon & 31)))) return 0;
-    if (c->type_mask && !(c->type_mask & (1u << (k->type & 31)))) return 0;
+    /* the popup's Weapons tab (keys weapon + 1) covers the weapon skins, its Cosmetics tab (types from 1) the rest:
+     * a weapon skin has type 0 and a cosmetic weapon 0, neither ever in the other tab's keys */
+    if (k->weapon > 0) {
+        if (c->wep_mask && !(c->wep_mask & (1u << (k->weapon & 31)))) return 0;
+    } else if (c->type_mask && !(c->type_mask & (1u << (k->type & 31)))) {
+        return 0;
+    }
     if (c->season && k->seas != c->season) return 0;
     if (c->text[0]) {
         char a[64], b[64];
@@ -336,6 +343,18 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
         acct_db_error(res, "market");
     } else if (!strcmp(c->sub, "trades") || !strcmp(c->page, "itemsales") || !strcmp(c->page, "listing")) {
         data = acct_db_json(res);
+    } else if (!strcmp(c->sub, "blackm")) {
+        /* the Black Market's t: the blackM items this account already has (hub-10.0.7.js:3244, a card with its index
+         * in t gets the blackMDone tick); run_blackm_buy sells each once */
+        cJSON *rows = kn_db_result_to_json(res);
+        data = cJSON_CreateArray();
+        const cJSON *it;
+        cJSON_ArrayForEach(it, rows) {
+            const int64_t i = kn_json_int(it, "i", -1);
+            const SkinInfo *k = acct_skin(i);
+            if (k && k->black_m) cJSON_AddItemToArray(data, cJSON_CreateNumber((double) i));
+        }
+        cJSON_Delete(rows);
     } else {
         cJSON *rows = kn_db_result_to_json(res);
         data = cJSON_CreateArray();
@@ -344,6 +363,35 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
             const cJSON *it = cJSON_GetArrayItem(rows, c->desc ? n - 1 - k : k);
             if (item_matches(c, kn_json_int(it, "i", kn_json_int(it, "ski", -1))))
                 cJSON_AddItemToArray(data, cJSON_Duplicate(it, 1));
+        }
+        if (c->kind == 2 && c->missing) {
+            /* Only Show Missing (hub-10.0.7.js:4518-4600): every store item the filters keep that no row holds, one
+             * unit each so the inventory's checkItem shows it; the reply's readOnly hides its List / estimate / count */
+            const int count = acct_skin_count();
+            unsigned char *owned = calloc((size_t) (count > 0 ? count : 1), 1);
+            const cJSON *it;
+            cJSON_ArrayForEach(it, data) {
+                const int64_t i = kn_json_int(it, "i", -1);
+                if (owned && i >= 0 && i < count && kn_json_int(it, "c", 0) > 0) owned[i] = 1;
+            }
+            cJSON_Delete(data);
+            data = cJSON_CreateArray();
+            for (int i = 0; owned && i < count; i++) {
+                const SkinInfo *k = acct_skin(i);
+                if (owned[i] || !k || k->blocked || k->free_item || !item_matches(c, i)) continue;
+                if (c->non_tradable && !skin_tradable(k)) continue;
+                cJSON *o = cJSON_CreateObject();
+                cJSON_AddNumberToObject(o, "i", i);
+                cJSON_AddNumberToObject(o, "s", i);
+                cJSON_AddNumberToObject(o, "c", 1);
+                cJSON_AddItemToArray(data, o);
+            }
+            free(owned);
+        } else if (c->kind == 2 && c->non_tradable) { /* Hide Non-Tradable Skins */
+            for (int k = cJSON_GetArraySize(data) - 1; k >= 0; k--) {
+                const SkinInfo *si = acct_skin(kn_json_int(cJSON_GetArrayItem(data, k), "i", -1));
+                if (si && !skin_tradable(si)) cJSON_DeleteItemFromArray(data, k);
+            }
         }
         cJSON_Delete(rows);
         if (!strcmp(c->sub, "inventory")) {
@@ -359,8 +407,8 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
         social_send_n(s, "fr", 2, cJSON_CreateNumber((double) c->token), data ? data : cJSON_CreateNull());
         return;
     }
-    if (c->kind == 2) { /* io_str(We, list) */
-        social_send_n(s, "str", 2, cJSON_CreateNumber((double) c->token), data ? data : cJSON_CreateNull());
+    if (c->kind == 2) { /* io_str(We, list, readOnly) (hub-10.0.7.js:4596) */
+        social_send_n(s, "str", 3, cJSON_CreateNumber((double) c->token), data ? data : cJSON_CreateNull(), cJSON_CreateBool(c->missing));
         return;
     }
     cJSON *fr = social_frame("0");
@@ -460,6 +508,11 @@ static void market_query(SocialSession *s, MarketCtx *c) {
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "trades")) {
         rc = social_call(s, &P_TRADE_PAGE, KN_DB_ARGS(me), market_done, c);
+    } else if (!strcmp(c->sub, "blackm")) {
+        /* bought here before (once per account, run_blackm_buy) or owned now */
+        rc = social_query(s, SQL(.any = "SELECT skin_id AS i FROM skin_transactions WHERE account_id = $1 AND source = 'blackmarket'"
+                                   " UNION SELECT skin_id AS i FROM inventory WHERE account_id = $1 AND count > 0 ORDER BY i"),
+                          KN_DB_ARGS(me), market_done, c);
     } else { /* market: cheapest open listing first */
         rc = social_query(s, SQL(.any = LISTING_ROWS "WHERE l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.price ASC, l.id LIMIT 1000"),
                           0, NULL, market_done, c);
@@ -485,8 +538,8 @@ void market_page(SocialSession *s, const char *page, const cJSON *f) {
             free(c);
             return;
         }
-    } else if (!strcmp(c->sub, "blackm")) {
-        /* rendered from the client's own store data: any truthy t */
+    } else if (!strcmp(c->sub, "blackm") && s->account_id <= 0) {
+        /* the cards come from the client's own store data: a guest's t is [] (nothing done) */
         social_send_n(s, "0", 3, cJSON_CreateString(page), cJSON_CreateString(c->sub), cJSON_CreateArray());
         free(c);
         return;
@@ -543,7 +596,8 @@ void sh_market_filter(SocialSession *s, const cJSON *f) {
     market_query(s, c);
 }
 
-/* ["srt", We, text, rarities, weapons, types, season, onlyMissing] -> ["str", We, inventory|null] */
+/* ["srt", We, text, rarities, weapons, types, season, onlyMissing, nonTradable] -> ["str", We, inventory|null, readOnly]
+ * (hub-10.0.7.js:4560-4600: Only Show Missing answers the store items not owned, read-only) */
 void sh_inventory_sort(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     MarketCtx *c = calloc(1, sizeof *c);
@@ -553,6 +607,8 @@ void sh_inventory_sort(SocialSession *s, const cJSON *f) {
     c->kind = 2;
     c->item = -1;
     filter_args(c, f);
+    c->missing = cJSON_IsTrue(fa(f, 7));
+    c->non_tradable = cJSON_IsTrue(fa(f, 8));
     market_query(s, c);
 }
 

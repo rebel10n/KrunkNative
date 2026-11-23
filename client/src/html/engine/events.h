@@ -87,7 +87,7 @@ extern "C" {
 
 /* ---- inline handler parsing ---------------------------------------------- */
 
-#define EV_HANDLER_MAX_ARGS 8
+#define EV_HANDLER_MAX_ARGS 12 /* v10.0.7 hub showPopup passes 11 (hub-10.0.7.js:3337, 4790) */
 #define EV_HANDLER_MAX_CALLS 8
 
 /* One statement of an inline handler attribute.
@@ -108,7 +108,7 @@ typedef struct HandlerCall {
                                           arguments: its handler's return value is the condition; NULL = none */
     int guard_key;                     /* > 0: run only when the event's keyCode is this (`13 == event.keyCode && f()`,
                                           `if (event.keyCode == 13) f()`) */
-    uint8_t tern_mask;                 /* bit a: args[a] is `this.checked ? args[a].num : tern_else[a]` */
+    uint16_t tern_mask;                /* bit a: args[a] is `this.checked ? args[a].num : tern_else[a]` */
     float tern_else[EV_HANDLER_MAX_ARGS];
 } HandlerCall;
 

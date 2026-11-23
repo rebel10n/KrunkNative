@@ -533,6 +533,11 @@ static void test_parser_grammar(void)
     CHECK(n == 1 && c[0].guard_key == 13); CHECK_STR(c[0].name, "windows.9.searchMaps");
     n = events_parse_handler("toggleTeam(this.checked?2:1)", c, 8);
     CHECK(n == 1 && (c[0].tern_mask & 1) && c[0].args[0].num == 2 && c[0].tern_else[0] == 1);
+    /* v10.0.7 hub market cards: showPopup with 11 arguments (hub-10.0.7.js:3337) */
+    n = events_parse_handler("showPopup(\"market\",12,\"./img/a.png\",\"AK-47\",\"34\",\"1500\",1,\"1700000000000\",\"bob\",3,77)", c, 8);
+    CHECK(n == 1 && c[0].argc == 11); CHECK_STR(c[0].name, "showPopup"); CHECK_STR(c[0].args[8].str, "bob");
+    CHECK(c[0].args[9].num == 3 && c[0].args[10].num == 77);
+    CHECK(events_parse_handler("f(1,2,3,4,5,6,7,8,9,10,11,12,13)", c, 8) == -1); /* past EV_HANDLER_MAX_ARGS */
 
     /* errors */
     CHECK(events_parse_handler("foo(", c, 8) == -1);
@@ -546,7 +551,7 @@ static void test_parser_grammar(void)
     CHECK(events_parse_handler("windows[a].b()", c, 8) == -1);
     CHECK(events_parse_handler("return", c, 8) == -1);
     CHECK(events_parse_handler("a();b();c();d();e();f();g();h();i()", c, 8) == -1); /* > max */
-    CHECK(events_parse_handler("f(1,2,3,4,5,6,7,8,9)", c, 8) == -1);                  /* > max args */
+    CHECK(events_parse_handler("f(1,2,3,4,5,6,7,8,9,10,11,12,13)", c, 8) == -1);      /* > max args (12) */
 }
 
 /* ========================================================================= */

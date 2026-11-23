@@ -54,7 +54,7 @@ and MariaDB 11.8.
 
 | # | Item | 10.0.7 source | KN state | Severity |
 |---|------|---------------|----------|----------|
-| 5 | Mod page Edit (`updateMod` -> `plm` -> the publish popup prefilled, then `/upload-user-mod`). The button is drawn (`social_ui.c` creation actions) but has no handler, and kn_brain has no `plm`. | hub-10.0.7.js:6640-6651, 6814-6838 | dead button | medium |
+| 5 | Mod page Edit (`updateMod` -> `plm` -> the publish popup prefilled, then `/upload-user-mod`). | hub-10.0.7.js:6640-6651, 6814-6838 | done (4b4a74ee): `h_update_mod` in `social_ui.c`, brain `plm` in `creations.c` | medium |
 | 6 | Gift Premium (`confPremium` / `premiumGiftConfirmed` -> `prm`). | hub-10.0.7.js:5751-5759 | done (2026-11-23): `confPremium` / `premiumGiftConfirmed` in `social_ui.c`, brain `prm` (`sh_premium_gift`) | medium: Premium is real money only (Xsolla), so `prm` checks the target and option and answers v10's error frame with Box Office's no-payments text |
 | 7 | Hub functions with no Box Office handler. Each needs checking, since some are drawn under other names and some (`getSavedVal`, `saveVal`, `genericPopup`, `resetPops`, `createTip`, `cancelTip`) are page helpers the C side replaces: `removeFriend`, `showFriends`, `chatBanUser`, `copyProfile`, `shareGameTweet`, `socPostRes`, `updateChatList`, `clanRSr`, `changeRegion`, `hideAll`, `openListing`, `buyblackM`, `confListPopup`, `confQSPopup`, `loadMoreTradeHistory`, `bundleFilters`, `openReport`, `viewReporter`, `uploadMod` / `selectFile` / `updateFile`, `setCustomImages`, `createBadgeTip`. These are drawn but dead: `clanRSr`, `changeRegion`, `shareGameTweet`, `updateChatList`, `socPostRes`, `hideAll`. | hub-10.0.7.js `window.*` | done (2026-11-23): rechecked, no dead hub button left; `createBadgeTip` and the badge cards added | medium |
 | 8 | Item styles: `POST /items/:id/style {item_id, style}` (the style picker, deob-10.0.7.js:108820-108848), a copy's `m.style` (inventory 110719, cards 222514, 223502) and the `_s<n>` texture of a styled item in game (173602). Two items carry `styles`: KrunkCup Jerseys (48 styles, from bundle #30, a USD bundle Box Office does not sell: ui-backend-audit.md row 16) and the KrunkCup Participation Band. kn_brain refuses the route (`WHY_ITEM_STYLE`). | deob-10.0.7.js:108820-108848, 173602 | refused | medium (low reach) |
@@ -307,15 +307,142 @@ otherwise) and hub_creator_e2e (a seeded approved WebP drawn in a chat message a
     ?p=market&q=trades stayed on "You must be logged in....".
   - Now that request waits for the login reply (io_a, either way).
   - economy_hub_e2e's "bob sees the incoming offer" failed on this.
-- **Still different, found while doing this.** These are bigger than this round:
-  - The Market Stats tab is v3.1.1's "Rarest Items" list. v10 shows market cards with "In Circulation" (:3197-3226).
-  - The market and Black Market cards miss v10's fields:
-    - `data-index` and the tip (Black Market);
-    - the developer's "ID:" line;
-    - `marketImgP` / `marketImgS`;
-    - v10's isAnim conditions and the `hasSnd` icon;
-    - Preview / Info actions;
-    - `blackMDone`.
-  - KN's `showPopup(page, skin, row)` is v3.1.1's signature, not v10's twelve arguments.
-  - Feed posts do not draw game results (typ 8, `#postGameRes`) or KR giveaways (typ 9, `krGivPost`).
+- **Still different, found while doing this.** All four are done in the next section:
+  - the Market Stats tab was v3.1.1's "Rarest Items" list;
+  - the market and Black Market cards missed v10's fields;
+  - `showPopup` had v3.1.1's signature;
+  - feed posts drew no game results (typ 8) or KR giveaways (typ 9).
+
+## Hub round 7, 2026-11-23
+
+There is no deob-10.0.7.js on disk. Line numbers below are from the three bundles the hub loads, de-obfuscated:
+hub-10.0.7.js (`hub.deob.js`), config-10.0.7.js (`config-BDN_kuhS.deob.js`) and classes-10.0.7.js
+(`classes-Wgqksi18.deob.js`).
+
+Every section below was compared line by line against those sources.
+
+- **Market cards** (hub:3312-3346, `market_card`).
+  - id `itemCard<sub>_<uid>` and `data-index`.
+  - The copy's `data-nametag`, `data-wear`, `data-wear-float`, `data-serial` and `data-seed`.
+  - createTip / cancelTip.
+  - The nametag line, the type line, and the developer's `ID:` line (`?dev`).
+  - `marketImgP` (paints) and `marketImgS` (sprays).
+  - Inventory shows the estimate (`~ N KR`, "Unknown" with no price) and the count. The other lists show the
+    price.
+  - The badges: the limited tag, the sound icon, and isAnim. KN uses the rarity's animate flag for
+    "rarity 6".
+  - The action is Purchase / List / Unlist with v10's eleven-argument `showPopup`. A read-only list keeps
+    the label without the onclick.
+  - Inventory then shows Quick Sell. The other lists show Search, with Share (`shareListing`) everywhere
+    except the inventory.
+  - Last come Info | Preview.
+- **Stats tab** (hub:3197-3226). Market cards with "In Circulation", Preview / Search / Info, and the badges.
+  The v3.1.1 Rarest Items list is gone.
+  - v10 writes the keyframes as `sprayStatAnm*` (60 px), while the cards animate `sprayAnm`. So the sprays
+    stand still in v10, and in KN too.
+  - v10's extra trailing `</div>` is kept.
+- **Black Market** (hub:3229-3264).
+  - Every blackM item that is not hidden and not free, priced (FREE when 0), with `data-index` and the tip.
+  - Purchase calls `showPopup("blackm", i, thumb, label, i, funds)`, followed by Info | Preview.
+  - An item the account already has gets `blackMDone`. For that, kn_brain's `blackm` page now answers the
+    indices bought through the Black Market or owned. A guest gets `[]`.
+- **showPopup** (hub:4790-4857) takes twelve arguments: `(page, skin, thumb, label, skinid, funds, c,
+  salestart, player, uid, marketid, refresh)`.
+  - Changes:
+    - `lastPop`;
+    - `refreshPopup`;
+    - the 300000 ms grace window, with its one-second timer (hub:4363-4377, config:9456);
+    - the count overrides that a list reply sets and that io_0 clears (hub:5250, 2721);
+    - the 3D button, plus `rainbowBorder` on sprays;
+    - `pItemOwn` with a link to `./?profile=`, which KN routes to the hub profile;
+    - `pItemTime` (getReadableTime with seconds, config:4311).
+  - Callers updated:
+    - the market cards;
+    - the Black Market;
+    - the profile's Listings (`io_ul`, hub:4104-4154);
+    - `refreshPopup`.
+  - The native inline-handler parser now takes 12 arguments (`EV_HANDLER_MAX_ARGS`).
+- **A listing's page** (`hub_render_listing`): v10's `pItemDesc2` markup, `buyItem(id, null)` and the grace
+  timer. A blocked item writes into `itemsalesHolder`.
+- **Feed posts** (hub:4875-4944).
+  - typ 8: the `#postGameRes` table. Its columns are the mode's `endStats` (or config's default,
+    config:9067), capitalised, with `sid` left out. The rows are `lnk2`'s flat values, ranked, and the
+    poster's name is shown in white.
+  - typ 9: "ends in" plus the time left, `krGivPost` with the KR, and "Follow and Like to Enter" outside a
+    single post.
+  - `yt-<id>` tags are stripped from the text.
+  - On a profile, the posts are `socPost fromProfile`, and an empty list shows `noneText`.
+  - kn_brain's socket posts (`post_json`) now send typ 8's `lnk2` raw, so the client can parse its JSON
+    rows. Each value is escaped when drawn. They also send typ 9's `fds` and `exp`, as GET /social/feed
+    does.
+- **Items page** (hub:2413-2541, 3364-3417). The card has:
+  - the `ID:` line;
+  - the Viewer action;
+  - the badges;
+  - `hasSnd` after the actions.
+
+  The filters:
+  - the season and rarity presence;
+  - the store.tags limited tags, from classes-10.0.7.js:3586-3618, now complete with Battle Pass
+    `#00BCD4` and Premium Spin `#fc038d` (`ui_loadout_tag_name` / `_color`);
+  - the spinnable rules;
+  - v10's exclusive categories;
+  - blocked and opensea items excluded;
+  - a two-way search over keywords, drops, limited tag, weapon, name and creators.
+
+  The season list runs up to the current season.
+- **The item page** (`itemsales`, hub:3418-3494).
+  - `spraySalesImg` / `imgWepP`, the label's position, 3D (`viewItem(i, 2)`) and the bound lock.
+  - The creators' links, the contraband name colour, the lore, the event name (one of config's 23), the emoji
+    text and the streamers.
+  - For an opensea item, the tabs are hidden.
+  - For a noSale item, "Cannot be Sold" is shown.
+  - The owners' rows are drawn in `#5c5c5c`.
+- **viewItem** (hub:2054-2069): `blackShad` except on contraband items; the Black Market / limited / Vaulted /
+  Limited labels; card, emoji and paint views for types 16-18.
+- **Filter / Sort popups** (hub:4392-4600).
+  - The labels Filter/Sort, Inventory Sort, Sort and Search.
+  - `seaFilt` / `seaSort` up to the current season.
+  - "Hide Non-Tradable Skins".
+  - `srt` sends onlyMissing and nonTradable.
+  - kn_brain answers Only Show Missing with the store items the filters keep that the account lacks, as
+    `str`'s read-only third value. Non-tradable items are dropped on request.
+  - **Bug fixed in the brain's filter.** A weapon skin is now tested only against the Weapons tab and a
+    cosmetic only against the Cosmetics tab.
+    - Before, a weapon skin (type 0) failed the Cosmetics keys, and a cosmetic (weapon 0) failed the
+      Weapons keys.
+    - So any Filter or Sort with the popup's default all-ticked boxes answered nothing.
+- **List / Quick Sell** (hub:3717-3754, 5212-5230).
+  - `listItem` refuses noSale and opensea items.
+  - `confQSPopup` shows the item's quick-sell KR and Junk (market_qs_value), or "This item has no value" and
+    Destroy for noQuickSell, then NO at 15%.
+  - `sellConfirmed(skin, mode, uid)` sends `qsi`.
+- **Tests.**
+  - hub_creator_e2e (`market_cards`), 140 checks in all:
+    - the inventory card;
+    - the List and Quick Sell popups;
+    - Only Show Missing's read-only cards;
+    - Stats' In Circulation;
+    - the Black Market's 36 cards, `blackMDone` once an item is owned, and its Purchase popup;
+    - the item page;
+    - a typ 8 table and a typ 9 giveaway in the feed.
+  - economy_hub_e2e opens the popups by clicking the cards.
+
+Not compared this round. These were ported in earlier rounds and not re-read line by line here:
+- the leaderboards;
+- the Games and Mods lists and pages;
+- the clan page;
+- the profile's header and its other tabs;
+- the trading window and viewOffer;
+- chat and friends;
+- the settings popups.
+
+Still different:
+- Other UIs keep their own copy of the limited-tag colours, without Battle Pass or Premium Spin:
+  - account_ui.c, store_ui.c, battlepass_ui.c, hud_ui.c;
+  - v10_rewards.c, v10_wallet.c, v10_competitive.c, v10_junkyard.c, v10_menu.c;
+  - shared/src/triggers.c.
+
+  They could share `ui_loadout_tag_color`.
+- Nothing in KN posts a game result (typ 8). The hub draws one when the feed holds it.
 

@@ -234,7 +234,7 @@ static int parse_call(Cur *c, HandlerCall *call)
             if (parse_arg(c, &no) < 0 || no.kind != HTML_ARG_NUM) return -1;
             arg->kind = HTML_ARG_NUM;
             arg->num = yes.num;
-            call->tern_mask |= (uint8_t)(1u << call->argc);
+            call->tern_mask |= (uint16_t)(1u << call->argc);
             call->tern_else[call->argc] = (float) no.num;
             skip_ws(c);
         }

@@ -467,6 +467,113 @@ def trade_history(port, ids, tokens, names):
         c.close()
 
 
+def market_cards(port, ids, tokens, names):
+    """v10's market cards (hub-10.0.7.js:3187-3361): the inventory's (data-index, estimate, List / Quick Sell, Info |
+    Preview), Only Show Missing's read-only cards, Stats' In Circulation, the Black Market's with blackMDone; the item
+    page (hub-10.0.7.js:3418-3494); a game result's table and a KR giveaway in the feed (hub-10.0.7.js:4875-4944)"""
+    A, B = ids
+    with open(os.path.join(ROOT, "client", "src", "ui", "economy_black_market_table.c")) as f:
+        on_sale = len(re.findall(r"\.hide = 0, \.free_ = 0\}", f.read()))
+    c = Client(port, names[0], tokens[0], "p=market&q=inventory", "cards")
+    try:
+        card = "#marketList .marketCard[data-index='20']"
+        check(wait(lambda: c.count(card) == 1, 60), "Inventory: Kodac AK's card carries data-index 20")
+        check(c.count(card + "[onmouseover='createTip(this)']") == 1 and c.count(card + "[id^='itemCardinventory_']") == 1,
+              "its id is itemCardinventory_<uid>, createTip on hover")
+        check(c.count(card + " .cardEst") == 1 and c.count(card + " .cardCnt") == 1, "the estimate and the count")
+        acts = c.textof(card + " .cardActions") or ""
+        check(acts == "ListQuick SellInfoPreview", "List, Quick Sell, Info | Preview: %r" % acts)
+        check(c.count(card + " .cardActionSepVert") == 1, "Info and Preview split by cardActionSepVert")
+        c.cmd("clicksel 0 %s .cardAction" % card)  # List: showPopup("inventory", 20, thumbnail, label, ...)
+        check(c.has("sellPriceIn"), "List opens showPopup's inventory popup with the price input")
+        c.shot("list-popup")
+        c.ui("clearPops()")
+        c.cmd("clicksel 1 %s .cardAction" % card)  # Quick Sell: confQSPopup
+        check(c.has("quickSellBtn") and c.text_has("#quickSellBtn", "Get KR"), "Quick Sell: confQSPopup with Get KR")
+        check(c.has("declineBtn", 5), "and NO")
+        c.ui("clearPops()")
+        # sortPopup's Only Show Missing (hub-10.0.7.js:4518-4600): the store items not owned, read-only
+        c.ui("sortPopup()")
+        check(c.has("invSortTxt") and c.count("#onlyMissing") == 1 and c.count("#nonTradable") == 1,
+              "sortPopup: Only Show Missing and Hide Non-Tradable Skins")
+        check("Only Show Missing" in (c.textof("#genericPop") or "") and "Hide Non-Tradable Skins" in (c.textof("#genericPop") or ""),
+              "both labelled: %r" % c.textof("#genericPop"))
+        c.type("invSortTxt", "Seafarer")
+        c.cmd("clicksel 0 .filterSwitch")  # the label's click toggles its hidden checkbox
+        time.sleep(0.4)
+        c.ui("runSort()")
+        miss = "#marketList .marketCard[data-index='21']"
+        check(wait(lambda: c.count(miss) == 1, 15), "Only Show Missing lists Seafarer AK (not owned): %r" % (c.textof("#marketList") or "")[:300])
+        c.shot("missing")
+        check(c.count("#marketList .marketCard[data-index='20']") == 0, "and not the owned Kodac AK")
+        check(c.count(miss + " .cardEst") == 0 and c.count(miss + " .cardCnt") == 0, "read-only: no estimate, no count")
+        acts = c.textof(miss + " .cardActions") or ""
+        # hub-10.0.7.js:3336: the List label stays, without its showPopup onclick
+        check(acts == "ListSearchInfoPreview", "read-only: List, then Search instead of Quick Sell: %r" % acts)
+        check(c.count(miss + " .cardAction[onclick]") == 3, "read-only: List has no onclick (Search, Info, Preview do)")
+        check(c.count("#marketList .marketCard[data-index='21'] .cardAction[onclick^='showPopup(']") == 0, "no showPopup")
+        c.ui("clearPops();resetSortFilter(1)")
+        # Stats (hub-10.0.7.js:3197-3226): a card per item with In Circulation
+        c.ui("clearPops();updateWindow('market','stats',null,null,'store')")
+        st = "#marketList .marketCard[data-index='20']"
+        check(wait(lambda: c.count(st + " .cardEst") == 1, 15), "Stats: Kodac AK's card")
+        check(c.textof(st + " .cardEst") == "In Circulation 1", "In Circulation 1: %r" % c.textof(st + " .cardEst"))
+        acts = c.textof(st + " .cardActions") or ""
+        check(acts == "PreviewSearchInfo", "Stats: Preview, Search, Info: %r" % acts)
+        check(c.count("#marketList .rarestItem") == 0, "no v3.1.1 Rarest Items list")
+        c.shot("stats")
+        # the Black Market (hub-10.0.7.js:3229-3264): every blackM item not hidden or free, owned ones ticked
+        c.ui("updateWindow('market','blackm',null,null,'store')")
+        bm = "#marketList .marketCard[data-index='1483']"
+        check(wait(lambda: c.count(bm) == 1, 15), "Black Market: 1 Year Cape's card")
+        check(c.count("#marketList .marketCard") == on_sale, "a card per blackM item on sale: %d of %d" % (c.count("#marketList .marketCard"), on_sale))
+        check(c.textof(bm + " .marketPrice") == "100 KR", "its price: %r" % c.textof(bm + " .marketPrice"))
+        check((c.textof(bm + " .cardActions") or "") == "PurchaseInfoPreview", "Purchase, Info | Preview: %r" % c.textof(bm + " .cardActions"))
+        check(c.count("#marketList .blackMDone") == 0, "nothing owned: no blackMDone")
+        q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, 1483, 1)", A)
+        c.ui("updateWindow('market','market',null,null,'store')")
+        time.sleep(1)
+        c.ui("updateWindow('market','blackm',null,null,'store')")
+        check(wait(lambda: c.count(bm + " .blackMDone") == 1, 15), "owned: 1 Year Cape's card gets blackMDone")
+        check(c.count("#marketList .blackMDone") == 1, "only that one")
+        c.cmd("clicksel 0 %s .cardAction" % bm)  # Purchase: showPopup("blackm", ...)
+        check(c.has("popupContent") and c.text_has("#popupContent", "100", 5),
+              "Purchase opens the Black Market popup with its price: %r" % c.textof("#popupContent"))
+        c.shot("blackm")
+    finally:
+        c.close()
+    # the item page (hub-10.0.7.js:3418-3494)
+    c = Client(port, names[0], tokens[0], "p=itemsales&i=20", "item")
+    try:
+        check(c.text_has("#weaponInfo", "Kodac AK", 60), "the item page names the item")
+        info = c.textof("#weaponInfo") or ""
+        check("In Circulation" in info and "units" in info and "Season" in info and "3D" in info, "On Sale / In Circulation, Season, 3D: %r" % info)
+        check(c.count("#weaponInfo .minMax") == 2, "the high / low boxes")
+    finally:
+        c.close()
+    # feed posts: a game result (typ 8) and a KR giveaway (typ 9)
+    rows = json.dumps(["s1", names[0], 500, 10, 2, 30, "s2", "rival", 100, 3, 5, 10])
+    q("INSERT INTO feed_posts (author_id, body, type, link, link2) VALUES (?, 'gg', 8, '0', ?)", A, rows)
+    q("INSERT INTO feed_posts (author_id, body, type, funds, ends_at) VALUES (?, 'free KR', 9, 500, "
+      "strftime('%Y-%m-%d %H:%M:%f', 'now', '+2 hours'))", A)
+    c = Client(port, names[0], tokens[0], "p=feed", "feed")
+    try:
+        check(wait(lambda: c.count("#postGameRes") == 1, 60), "the game result's table")
+        check(c.count("#postGameRes tr") == 3 and c.count("#postGameRes th") == 6,
+              "a header (Rank + the 5 endStats after sid) and a row per player: %d rows" % c.count("#postGameRes tr"))
+        res = c.textof("#postGameRes") or ""
+        check(res.startswith("RankNameScoreKillsDeathsReward") and ("1.%s5001023" % names[0]) in res and "2.rival100351" in res,
+              "the ranks and values: %r" % res)
+        check(c.textof(".krGivPost") == "500 KR", "the giveaway's KR: %r" % c.textof(".krGivPost"))
+        feed = c.textof("#feedHolder") or c.textof("body") or ""
+        check(re.search(r"ends in 1h 5\dm|ends in 2h ", feed) is not None, "its time is when it ends: %r" % feed[:300])
+        check(c.count(".krGivFol .follBtnGiv") == 1 and "Follow and Like to Enter" in (c.textof(".krGivFol") or ""),
+              "Follow and Like to Enter")
+        c.shot("feed")
+    finally:
+        c.close()
+
+
 def png(w, h, pad=0):
     raw = b"".join(b"\0" + b"\x80\x40\x20\xff" * w for _ in range(h))
 
@@ -741,6 +848,7 @@ def main():
         map_page(port, ids, tokens, names, map_name, map_id, stamp)
         staff_profile(port, ids, tokens, names)
         trade_history(port, ids, tokens, names)
+        market_cards(port, ids, tokens, names)
         mod_window(port, ids, tokens, names, stamp)
 
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", ids[0], ids[1], ids[1], ids[0])

@@ -51,6 +51,8 @@
 
 #include "../viewer/viewer_store.h"
 #include <ruleset.h>
+#include <modes.h> // mode_config: a game-results post's end stats
+#include <market_bulk.h> // market_qs_value: the Quick Sell popup's KR / Junk
 
 #define HUB_KEY_MAX 128
 
@@ -324,7 +326,7 @@ typedef struct {
     int built;
     int checked[3][40];  // [rarity | weapon | type][index]
     char text[128], season[8], order[8];
-    int missing;
+    int missing, non_tradable; // sortPopup's Only Show Missing / Hide Non-Tradable Skins
 } HubFilterState;
 static HubFilterState g_filter_state[2]; // 0 filter (market search), 1 sort (inventory)
 static void filter_state_save(int sort);
@@ -369,8 +371,10 @@ static void generic_popup(const char *html, const char *cls, const char *style) 
     html_dom_set_display(pop, "block");
 }
 
-// showPopup() with no item: closes the popup (popupBack's onclick).
+// showPopup() with no item: closes the popup (popupBack's onclick); lastPop becomes that empty call (hub-10.0.7.js:4791)
+static void last_pop_clear(void);
 static void show_popup_none(void) {
+    last_pop_clear();
     reset_pops();
     set_display("popupHolder", "none");
     set_style("popupContent", "width", "618px");
@@ -1433,9 +1437,11 @@ static void format_num(char *out, const size_t n, const double v) {
     else js_num(out, n, v);
 }
 
-// UTILS.getReadableTime(ms) (v7.1.4: years too; no seconds)
-static void readable_time(char *out, const size_t n, const double ms) {
-    long long sec = (long long) floor(ms / 1000.0), m = sec / 60, h = m / 60;
+// getReadableTime(ms, withSec) (config-10.0.7.js:4311-4325): "Ny Nd Nh Nm ", and with withSec the seconds ("Ns", no
+// trailing space): the market grace timer (hub-10.0.7.js:4372, 4832)
+static void readable_time_s(char *out, const size_t n, const double ms, const int with_sec) {
+    long long sec = ms > 0 ? (long long) floor(ms / 1000.0) : 0, m = sec / 60, h = m / 60;
+    sec %= 60;
     m %= 60;
     long long d = h / 24;
     h %= 24;
@@ -1445,8 +1451,11 @@ static void readable_time(char *out, const size_t n, const double ms) {
     if (y) snprintf(yp, sizeof(yp), "%lldy ", y);
     if (d) snprintf(dp, sizeof(dp), "%lldd ", d);
     if (h) snprintf(hp, sizeof(hp), "%lldh ", h);
-    snprintf(out, n, "%s%s%s%lldm ", yp, dp, hp, m);
+    char sp[24] = "";
+    if (with_sec) snprintf(sp, sizeof(sp), "%llds", sec);
+    snprintf(out, n, "%s%s%s%lldm %s", yp, dp, hp, m, sp);
 }
+static void readable_time(char *out, const size_t n, const double ms) { readable_time_s(out, n, ms, 0); }
 
 // the offers' and reports' age (config-10.0.7.js:4342-4361, used at hub-10.0.7.js:2665, 4185): the largest unit only
 static void time_ago(char *out, const size_t n, const double ms) {
@@ -2225,27 +2234,93 @@ static void append_post_author(StrBuf *sb, const cJSON *e) {
     if (jnum(e, "ftr")) sb_append(sb, " <i class='material-icons' style='margin-bottom:5px;font-size:25px;color:#40C4FF;vertical-align:middle;margin-left:-2px'>check_circle</i>");
 }
 
-// iïiïiìî's post (hub-10.0.7.js:4878-4944): text posts, game / mod links and invites with their thumb.png, skin
-// unboxings with the skin's picture (game results, typ 8, and KR giveaways, typ 9, are not drawn yet)
+// iïìììiì(post, single, fromProfile) (hub-10.0.7.js:4875-4944): text posts (a yt-<id> tag taken out), game / mod
+// links and invites with their thumb.png, skin unboxings with the skin's picture, game results (typ 8: the mode's end
+// stats table) and KR giveaways (typ 9: the KR, "Follow and Like to Enter", "ends in")
 static const ViewerSkin *hub_skin(int index);
 static const char *rarity_color(const ViewerSkin *s);
 static int rarity_animate(const ViewerSkin *s);
 static void skin_preview(char *out, size_t n, const ViewerSkin *skin);
 
-static void append_post(StrBuf *sb, const cJSON *e, const int single) {
+// iïîïïíí(txt) (config-10.0.7.js): the first "yt-<11 characters>" removed
+static void strip_yt_tag(char *t) {
+    for (char *p = t; p && (p = strstr(p, "yt-")) != NULL; p++) {
+        int ok = 1;
+        for (int i = 0; i < 11 && ok; i++) ok = isalnum((unsigned char) p[3 + i]) || p[3 + i] == '_' || p[3 + i] == '-';
+        if (!ok) continue;
+        memmove(p, p + 14, strlen(p + 14) + 1);
+        return;
+    }
+}
+
+// typ 8's table (hub-10.0.7.js:4914-4936): lnk the mode (its endStats, else config.endStats), lnk2 the flat JSON
+// rows, len values each (the first, sid, not shown); the poster's own name in white
+static void append_game_results(StrBuf *sb, const cJSON *e) {
+    static const char *const k_default[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL}; // config-10.0.7.js:9067
+    const char *lnk = jstr(e, "lnk"), *lnk2 = jstr(e, "lnk2"), *pln = jstr(e, "pln");
+    const cJSON *lj = cJSON_GetObjectItemCaseSensitive(e, "lnk");
+    const int mode = cJSON_IsNumber(lj) ? (int) lj->valuedouble : lnk ? atoi(lnk) : 0;
+    const GameModeConfig *mc = mode_config(mode);
+    sb_append(sb, "<table id='postGameRes'>");
+    if (mc) {
+        const char *const *stats = mc->end_stats ? mc->end_stats : k_default;
+        int len = 0;
+        while (stats[len]) len++;
+        sb_append(sb, "<tr><th class='postResRo'>Rank</th>");
+        for (int i = 1; i < len; i++) {
+            char cap[48];
+            snprintf(cap, sizeof(cap), "%s", stats[i]);
+            cap[0] = (char) toupper((unsigned char) cap[0]);
+            sb_appendf(sb, "<th class='postResRo'>%s</th>", cap);
+        }
+        sb_append(sb, "</tr>");
+        cJSON *rows = lnk2 ? cJSON_Parse(lnk2) : NULL;
+        const int n = cJSON_GetArraySize(rows);
+        for (int i = 0, rank = 1; len > 0 && i < n; i += len, rank++) {
+            sb_appendf(sb, "<tr style='%s'><td class='postResRoD' style='color:#fff'>%d.</td>", i + len >= n ? "border-bottom:none" : "", rank);
+            for (int j = 1; j < len; j++) {
+                const cJSON *v = cJSON_GetArrayItem(rows, i + j);
+                char val[96] = "0";
+                if (cJSON_IsString(v) && v->valuestring[0]) snprintf(val, sizeof(val), "%s", v->valuestring);
+                else if (cJSON_IsNumber(v) && v->valuedouble != 0) js_num(val, sizeof(val), v->valuedouble);
+                else if (cJSON_IsTrue(v)) snprintf(val, sizeof(val), "true");
+                const int me = pln && !strcmp(val, pln);
+                sb_appendf(sb, "<td class='postResRoD' style='%s'>", me ? "color:#fff" : "");
+                sb_append_esc(sb, val);
+                sb_append(sb, "</td>");
+            }
+            sb_append(sb, "</tr>");
+        }
+        cJSON_Delete(rows);
+    }
+    sb_append(sb, "</table>");
+}
+
+static void append_post(StrBuf *sb, const cJSON *e, const int single, const int from_profile) {
+    const int typ = (int) jnum(e, "typ");
     char ago[64] = "Just Now";
     if (jnum(e, "tim") > 0) {
         readable_time(ago, sizeof(ago) - 4, jnum(e, "tim"));
         strcat(ago, " ago");
     }
+    char *txt = strdup(jstr(e, "txt") ? jstr(e, "txt") : "");
+    if (txt) strip_yt_tag(txt);
     char flw[32];
     comma_number(flw, sizeof(flw), jnum(e, "flw"));
-    sb_appendf(sb, "<div></div><div %s><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='", single ? "" : "class='socPost'");
+    if (single) sb_append(sb, "<div></div><div ><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='");
+    else sb_appendf(sb, "<div></div><div class='socPost%s'><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='", from_profile ? " fromProfile" : "");
     sb_pfp(sb, jnum(e, "pli"), jnum(e, "prm") > 0, "./img/player_pfp.png");
     sb_append(sb, "' /><div class='postInfo'><div>");
     append_post_author(sb, e);
-    sb_appendf(sb, "<span class='postTime'>%s</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'>", ago, flw);
-    const int typ = (int) jnum(e, "typ");
+    sb_append(sb, "<span class='postTime'>");
+    if (typ == 9) { // a giveaway's time is when it ends
+        char ends[64] = "0m";
+        if (jnum(e, "exp")) readable_time(ends, sizeof(ends), jnum(e, "exp"));
+        sb_appendf(sb, "<span style='color:rgba(255,255,255,0.6)'>ends in %s</span>", ends);
+    } else {
+        sb_append(sb, ago);
+    }
+    sb_appendf(sb, "</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'>", flw);
     const char *lnk = jstr(e, "lnk"), *lnk2 = jstr(e, "lnk2");
     // the post's picture (hub-10.0.7.js:4883-4910, 4944): a game's or mod's thumb.png (lnk / lnk2 as parseInt), an
     // unboxed skin's thumbnail with its name over it
@@ -2284,8 +2359,12 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
         }
     }
     sb_append(sb, "<div style='overflow-x:hidden;color:rgba(255,255,255,0.8);user-select: text;'>");
-    const char *txt = jstr(e, "txt");
-    if (txt) sb_append_served(sb, txt);
+    if (typ == 9) {
+        char kr[32];
+        comma_number(kr, sizeof(kr), jnum(e, "fds"));
+        sb_appendf(sb, "<div class='krGivPost'>%s <span style='color:#FBC02D'>KR</span></div>", kr);
+    }
+    if (typ != 8 && txt) sb_append_served(sb, txt);
     if (typ == 2 && lnk2) {
         sb_append(sb, " <a href='/?play=");
         sb_append_served(sb, lnk2);
@@ -2302,10 +2381,24 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
         sb_append(sb, "Just unboxed a ");
         sb_append_esc(sb, unboxed->name);
         sb_append(sb, "!");
+    } else if (typ == 8) {
+        append_game_results(sb, e);
+        if (txt && txt[0]) {
+            sb_append(sb, "<div style='overflow-x:hidden;margin-top:10px;color:rgba(255,255,255,0.7)'>");
+            sb_append_served(sb, txt);
+            sb_append(sb, "</div>");
+        }
     }
     sb_append(sb, "</div></div></div>");
+    if (typ == 9 && !single) { // instaFollo(pln, this, 1)
+        const char *pln = jstr(e, "pln");
+        sb_append(sb, "<div class='krGivFol'><div class='follBtnGiv' onclick='instaFollo(&quot;");
+        sb_append_esc(sb, pln ? pln : "");
+        sb_append(sb, "&quot;,this,1)'>Follow</div> and Like to Enter</div>");
+    }
     if (!single) append_post_footer(sb, e, 0);
     sb_append(sb, "</div>");
+    free(txt);
 }
 
 static void hub_render_feed(const cJSON *t) {
@@ -2323,7 +2416,7 @@ static void hub_render_feed(const cJSON *t) {
     const cJSON *post;
     int i = 0, ads = 0;
     cJSON_ArrayForEach(post, t) {
-        append_post(&sb, post, 0);
+        append_post(&sb, post, 0, 0);
         if (i++ % 3 == 0) sb_appendf(&sb, "<div id=\"innerDiv%d\" class=\"innerContent\"></div>", ++ads); // the in-feed ad slots (empty: no ads)
     }
     char *html = sb_finish(&sb);
@@ -2454,32 +2547,149 @@ static void skin_preview(char *out, const size_t n, const ViewerSkin *skin) {
     html_dom_asset_url(path, out, n);
 }
 
-// me(skin): the item's type line
+// iiííììì(skin, weapons, i18n) (config-10.0.7.js:5160, 5166): the item's type line, i18n.get of its type's key, else
+// its weapon's name
+static const char *const k_type_key[19] = {
+    NULL, "social.market.hat", "social.market.body", "social.market.melee", "social.market.spray", "social.market.dye", "social.market.waist",
+    "social.market.face", "social.market.shoe", "social.market.pet", "social.market.collectible", "social.market.wrist", "social.market.charm",
+    "social.market.ticket", "social.market.back", "social.market.head", "social.market.playerCard", "social.market.emoji", "social.market.paint",
+};
+static const char *const k_type_label[19] = {
+    "", "Hat Item", "Body Item", "Melee Item", "Spray Item", "Dye Item", "Waist Item", "Face Item", "Shoe Item", "Pet Item",
+    "Collectible Item", "Wrist Item", "Charm Item", "Spin Ticket Item", "Back Item", "Head Item", "Player Card", "Emoji", "Paint",
+};
 static const char *skin_type_label(const ViewerSkin *s) {
-    switch (s->type) {
-        case 1: return "Head Item";
-        case 2: return "Back Item";
-        case 3: return "Melee Item";
-        case 4: return "Spray Item";
-        case 5: return "Dye Item";
-        case 6: return "Waist Item";
-        case 7: return "Face Item";
-        default: return s->weapon >= 1 && s->weapon <= rules_krunker_weapon_count() && rules_weapon(s->weapon - 1) ? rules_weapon(s->weapon - 1)->name : "";
+    if (s->type >= 1 && s->type <= 18) return I18N(k_type_key[s->type], k_type_label[s->type]);
+    return s->weapon >= 1 && s->weapon <= rules_krunker_weapon_count() && rules_weapon(s->weapon - 1) ? rules_weapon(s->weapon - 1)->name : "";
+}
+
+// store.skins[index] as assets/skins.json has it (ui_loadout.c): the fields the viewer table leaves out (blackM, limT,
+// limited, itemShop, noSale, opensea, lore, event, streamer, text, keyW, drop, ranked, challenge, ...)
+static const cJSON *skin_field(const int index, const char *key) {
+    return cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(index), key);
+}
+static int skin_true(const int index, const char *key) { // JavaScript truthiness
+    const cJSON *v = skin_field(index, key);
+    return v && !cJSON_IsFalse(v) && !cJSON_IsNull(v) && !(cJSON_IsNumber(v) && v->valuedouble == 0) && !(cJSON_IsString(v) && !v->valuestring[0]);
+}
+static const char *skin_str(const int index, const char *key) {
+    const char *s = cJSON_GetStringValue(skin_field(index, key));
+    return s && s[0] ? s : NULL;
+}
+
+// the cards' badges (hub-10.0.7.js:3208, 3251, 3334): an animated item's loop (import_export for an rAnimT bob), a
+// sound's volume_up. The profile's Listings test neither video nor projection (:4135).
+static void append_card_badges(StrBuf *sb, const ViewerSkin *s, const int listings) {
+    if ((s->flags & VS_HAS_ANIM) || s->puls_t || s->frames || s->mov_t || s->r_anim || (s->flags & VS_RGB) || (s->flags2 & VS2_SHADER) ||
+        (!listings && (s->flags2 & (VS2_VIDEO | VS2_PROJECTION))))
+        sb_appendf(sb, "<div class='material-icons isAnim'>%s</div>", s->r_anim_t ? "import_export" : "loop");
+    if (s->flags2 & VS2_SND) sb_append(sb, "<div class='material-icons hasSnd'>volume_up</div>");
+}
+
+// the card picture's class (hub-10.0.7.js:3208): marketImg, + D (emoji, dye), P (player card and up), S (shoe and
+// up), C (any other type)
+static const char *market_img_class(const ViewerSkin *s) {
+    if (!s->type) return "marketImg";
+    return s->type == 17 ? "marketImgD" : s->type >= 16 ? "marketImgP" : s->type >= 8 ? "marketImgS" : s->type == 5 ? "marketImgD" : "marketImgC";
+}
+
+// the corner label (hub-10.0.7.js:4808, 3451, 3513): ??? (Black Market), the limT tag in its store.tags colour, Vaulted
+// (another season than the current one, or a limited noSpin item outside the shop), Limited. pos: the item sales
+// page's placement, written first for ??? / limT and last for Limited, as v10 does.
+static void append_item_label(StrBuf *sb, const ViewerSkin *s, const int index, const char *pos) {
+    const char *lim_t = skin_str(index, "limT");
+    if (skin_true(index, "blackM")) {
+        sb_appendf(sb, "<div class='itemLabel' style='%sbackground-color:#00ffff'>?\?\?</div>", pos);
+    } else if (lim_t) {
+        sb_appendf(sb, "<div class='itemLabel' style='%sbackground:%s'>", pos, ui_loadout_tag_color(lim_t));
+        sb_append_esc(sb, lim_t);
+        sb_append(sb, "</div>");
+    } else if (s->seas != g_viewer_current_season || (skin_true(index, "limited") && (s->flags & VS_NO_SPIN) && !skin_true(index, "itemShop"))) {
+        sb_appendf(sb, "<div class='itemLabel'%s%s%s>Vaulted</div>", pos[0] ? " style='" : "", pos, pos[0] ? "'" : "");
+    } else if (skin_true(index, "limited") || (s->flags & VS_BLOCKED)) {
+        sb_appendf(sb, "<div class='itemLabel' style='background-color:#faa332;%s'>Limited</div>", pos);
     }
 }
 
-static int skin_animated(const ViewerSkin *s) {
-    return s->puls_t > 0 || s->frames > 0 || s->mov_t > 0 || s->r_anim > 0 || (s->flags & VS_RGB);
+// iiìîíïî(wear, i18n) (config-10.0.7.js:4255-4263, the tiers :7052-7068): the wear's name, NULL past the last tier
+static const char *wear_name(const double wear) {
+    static const double max[] = {0.1, 0.3, 0.6, 1};
+    static const char *const keys[] = {"wear_flawless", "wear_tested", "wear_trashed", "wear_wrecked"};
+    for (int i = 0; i < 4; i++)
+        if (wear < max[i]) return i18n_t(keys[i]);
+    return NULL;
 }
 
-// the Limited / Vaulted corner label (illicit / limT events are not in the client's table)
-static void append_item_label(StrBuf *sb, const ViewerSkin *s, const char *cls, const char *style) {
-    const int seas = s->seas ? s->seas : 1;
-    if (seas == g_viewer_current_season) {
-        if (s->flags & VS_BLOCKED) sb_appendf(sb, "<div class='%s' style='background-color:#faa332;%s'>Limited</div>", cls, style);
-    } else {
-        sb_appendf(sb, "<div class='%s'%s%s%s>Vaulted</div>", cls, style[0] ? " style='" : "", style, style[0] ? "'" : "");
+// A row's item metadata, its m when that is a JSON string (hub-10.0.7.js:3325-3333, 4124-4134; KrunkNative's brain
+// sends a painted copy's as an object, read the same way). The market rows outlive the reply frame: copied flat.
+typedef struct CardMeta {
+    char name[64];
+    double wear, serial, seed;
+    unsigned char has_wear, has_serial, has_seed;
+} CardMeta;
+
+static void card_meta(const cJSON *r, CardMeta *cm) {
+    memset(cm, 0, sizeof(*cm));
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(r, "m");
+    cJSON *parsed = cJSON_IsString(m) ? cJSON_Parse(m->valuestring) : NULL;
+    const cJSON *o = parsed ? parsed : m;
+    if (cJSON_IsObject(o)) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, "name"));
+        const cJSON *wear = cJSON_GetObjectItemCaseSensitive(o, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(o, "serial");
+        const cJSON *seed = cJSON_GetObjectItemCaseSensitive(o, "seed");
+        snprintf(cm->name, sizeof(cm->name), "%s", name ? name : "");
+        if (cJSON_IsNumber(wear) && wear_name(wear->valuedouble)) cm->has_wear = 1, cm->wear = wear->valuedouble;
+        if (cJSON_IsNumber(serial)) cm->has_serial = 1, cm->serial = serial->valuedouble;
+        if (cJSON_IsNumber(seed)) cm->has_seed = 1, cm->seed = seed->valuedouble;
     }
+    cJSON_Delete(parsed);
+}
+
+// iiìîiîï (config-10.0.7.js:4255): quotes dropped (KrunkNative: and < > & escaped)
+static void sb_append_unquoted(StrBuf *sb, const char *s) {
+    for (; s && *s; s++) {
+        if (*s == '"' || *s == '\'') continue;
+        if (*s == '<') sb_append(sb, "&lt;");
+        else if (*s == '>') sb_append(sb, "&gt;");
+        else if (*s == '&') sb_append(sb, "&amp;");
+        else sb_appendf(sb, "%c", *s);
+    }
+}
+
+// a card's data-nametag / data-wear / data-serial for its tooltip, and (seed) iïîîíiï's data-seed (config-10.0.7.js:4828)
+static void append_meta_attrs(StrBuf *sb, const CardMeta *cm, const double skinid, const int seed) {
+    if (cm->name[0]) {
+        sb_append(sb, " data-nametag='");
+        sb_append_unquoted(sb, cm->name);
+        sb_append(sb, "'");
+    }
+    if (cm->has_wear) sb_appendf(sb, " data-wear='%s' data-wear-float='%.4f'", wear_name(cm->wear), cm->wear);
+    if (cm->has_serial) sb_appendf(sb, " data-serial='%.15g'", cm->serial);
+    if (!seed) return;
+    const int32_t v = skin_copy_seed((int64_t) skinid, cm->has_seed, cm->seed);
+    if (v) sb_appendf(sb, " data-seed='%d'", (int) v);
+}
+
+// the card's name, then its nametag in quotes and its wear / serial line (hub-10.0.7.js:3334, 4135)
+static void append_card_name(StrBuf *sb, const ViewerSkin *s, const CardMeta *cm) {
+    sb_append_esc(sb, s->name);
+    if (cm->name[0]) {
+        sb_append(sb, "<div class='itemOwn' style='font-style:italic;color:#ffdd57'>\"");
+        sb_append_unquoted(sb, cm->name);
+        sb_append(sb, "\"</div>");
+    }
+    if (cm->has_wear || cm->has_serial) {
+        sb_appendf(sb, "<div class='itemOwn' style='color:rgba(255,255,255,0.5)'>%s", cm->has_wear ? wear_name(cm->wear) : "");
+        if (cm->has_serial) sb_appendf(sb, "<span class='serialTag'>#%.15g</span>", cm->serial);
+        sb_append(sb, "</div>");
+    }
+}
+
+static int query_param(const char *query, const char *name, char *out, size_t n);
+// iîîîíïì (hub-10.0.7.js:1518): the hub's URL has ?dev: the cards' "ID:" line
+static int hub_dev(void) {
+    char v[8];
+    return query_param(g_hub.query, "dev", v, sizeof(v));
 }
 
 // A spray's animation, v10's iìïîìiî(skin, name) (config-10.0.7.js:4870): the sheet steps through the store item's
@@ -2597,6 +2807,7 @@ typedef struct {
     int uid, skin, skin_id, count, market_id;
     double funds, salestart;
     char player[64];  // seller ("" = none); copied, the rows outlive the reply frame
+    CardMeta meta;    // m: the copy's nametag / wear / serial / seed
 } MarketRow;
 
 // io_0's row normalisation (ss/f/m/p/i|ind|sx/s|sid|sk) for one market row
@@ -2613,12 +2824,12 @@ static MarketRow market_row(const cJSON *r, const int uid) {
     const char *player = jstr(r, "p");
     if (!player) player = jstr(r, "player");
     snprintf(m.player, sizeof(m.player), "%s", player ? player : "");
+    card_meta(r, &m.meta);
     return m;
 }
 
 static int g_market_no_sort; // io_fr: the filtered market keeps the server's order
-// The rows of the last market list: the cards call showPopup(page, skin, uid) (v3.1.1 passes 11
-// arguments; the native inline-handler parser takes 8) and the popup reads the row back.
+// The rows of the last market list (remove_card / inventory_count / quickSell find a card by its uid).
 static MarketRow *g_market_rows;
 static int g_market_row_count;
 static char g_market_sub[16];
@@ -2841,99 +3052,179 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     }
 }
 
-// One market / inventory / sales card (row v of g_market_rows; showPopup reads it back).
+// The sold-out market card's showPopup string argument (hub-10.0.7.js:3337): iiíiììi's quotes dropped, a backslash
+// doubled (the inline handler's string escape)
+static void sb_popup_arg(StrBuf *sb, const char *v) {
+    for (; v && *v; v++) {
+        if (*v == '"' || *v == '\'') continue;
+        if (*v == '\\') sb_append(sb, "\\\\");
+        else if (*v == '<') sb_append(sb, "&lt;");
+        else if (*v == '&') sb_append(sb, "&amp;");
+        else sb_appendf(sb, "%c", *v);
+    }
+}
+
+// The cards' Preview / Info pair (hub-10.0.7.js:3256, 3342): Info, a vertical separator, Preview
+static void append_info_preview(StrBuf *sb, const int index) {
+    sb_appendf(sb, "<div><a class='cardAction' style='display: inline-block;' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a><div class='cardActionSepVert'></div>"
+                   "<a class='cardAction' style='display: inline-block;' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='viewItem(%d)'>Preview</a></div>", index, index);
+}
+
+// One market / inventory / sales card (hub-10.0.7.js:3312-3346): row v of g_market_rows
 static SprayAnims g_market_anims = {.name = "sprayAnm"};
+static int g_market_ro; // iïiíììî, io_0's 4th argument: the list is read-only (no Purchase / List, estimate, price)
 
 static void market_card(StrBuf *sb, const int pos, void *user) {
     (void) user;
-    g_spray_anims = &g_market_anims;
     if (pos < 0 || pos >= g_market_view_n) return;
-    const int v = g_market_view[pos];
-    const MarketRow *m = &g_market_rows[v];
+    const MarketRow *m = &g_market_rows[g_market_view[pos]];
     const ViewerSkin *pe = hub_skin(m->skin);
     if (!pe) return;
+    g_spray_anims = &g_market_anims;
     const char *sub = g_market_sub;
-    const int inventory = !strcmp(sub, "inventory");
-    char prev[256];
+    const int inventory = !strcmp(sub, "inventory"), sales = !strcmp(sub, "sales");
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
+    char prev[256], v[32];
     skin_preview(prev, sizeof(prev), pe);
-    const char *col = rarity_color(pe);
-    sb_appendf(sb, "<div class='marketCard%s' id='itemCard%s_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)'>", rarity_animate(pe) ? " rainbow" : "", sub, m->uid, col, col);
-    sb_append_esc(sb, pe->name);
-    sb_appendf(sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
-    append_skin_img(sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
-    if (inventory) {
-        char est_s[32];
-        comma_number(est_s, sizeof(est_s), estimate_value(m->skin));
-        sb_appendf(sb, "<div class='cardEst'>~ %s <span style='color:#fff'>KR</span></div><div class='cardCnt'>x <span id='invCnt%d' style='color:#fff'>%d</span></div>", est_s, m->uid, m->count);
-    } else {
-        char price[32];
-        comma_number(price, sizeof(price), m->funds);
-        if (m->funds) sb_appendf(sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
+    const char *col = rarity_color(pe), *label = skin_type_label(pe);
+    sb_appendf(sb, "<div class='marketCard%s' id='itemCard%s_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)' data-index='%d'",
+               g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", sub, m->uid, col, col, m->skin);
+    append_meta_attrs(sb, &m->meta, m->skin_id, 1);
+    sb_append(sb, " onmouseover='createTip(this)' onmouseout='cancelTip()'>");
+    append_card_name(sb, pe, &m->meta);
+    sb_appendf(sb, "<div class='itemOwn'>%s</div>", label);
+    if (hub_dev()) sb_appendf(sb, "<div class='itemOwn'>ID: %d</div>", m->skin);
+    append_skin_img(sb, pe, prev, "sprayMarketImg", market_img_class(pe));
+    if (inventory && !g_market_ro) {
+        // iiiïiìì(skinindex): the estimate, "Unknown" when the price list has none
+        const int est = estimate_value(m->skin);
+        comma_number(v, sizeof(v), est);
+        sb_appendf(sb, "<div class='cardEst'>~ %s%s</div><div class='cardCnt'>x <span id='invCnt%d' style='color:#fff'>%d</span></div>", est ? v : "Unknown",
+                   est ? " <span style='color:#fff'>KR</span>" : "", m->uid, m->count);
+    }
+    if (!inventory && !g_market_ro) {
+        comma_number(v, sizeof(v), m->funds);
+        if (m->funds) sb_appendf(sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", v);
         else sb_append(sb, "<div class='marketPrice'><span style='opacity:0'>s</span></div>");
     }
-    if (skin_animated(pe)) sb_append(sb, "<div class='material-icons isAnim'>loop</div>");
-    // v3.1.1: showPopup(page, skin, preview, typeLabel, skinid, funds, count, salestart, player, uid, marketid)
-    sb_appendf(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='showPopup(&quot;%s&quot;,%d,%d)'>%s</a><div class='cardActionSep'></div>",
-               sub, m->skin, v, !strcmp(sub, "market") ? I18N("social.market.purchase", "Purchase") : inventory ? "List" : !strcmp(sub, "sales") ? I18N("social.market.unlist", "Unlist") : "");
-    if (!inventory) sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='searchItem(%d)'>Search</a>", m->skin);
-    else sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='quickSell(%d,%d,%d)'>Quick Sell</a>", m->skin, pe->rarity, m->uid);
-    sb_appendf(sb, "<div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>Info</a></div></div>", m->skin);
+    append_card_badges(sb, pe, 0);
+    sb_append(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)'");
+    if (!g_market_ro) {
+        // showPopup(sub, skinindex, thumbnail, label, skinid, funds, c, salestart, player || acc.name || 0, uid, marketid)
+        sb_appendf(sb, " onclick='showPopup(&quot;%s&quot;,%d,&quot;%s&quot;,&quot;%s&quot;,&quot;%d&quot;,&quot;%.15g&quot;,%d,&quot;%.15g&quot;,", sub, m->skin, prev, label, m->skin_id,
+                   m->funds, m->count, m->salestart);
+        const char *who = m->player[0] ? m->player : acc ? acc->name : NULL;
+        if (who) {
+            sb_append(sb, "&quot;");
+            sb_popup_arg(sb, who);
+            sb_append(sb, "&quot;");
+        } else {
+            sb_append(sb, "0");
+        }
+        sb_appendf(sb, ",%d,%d)'", m->uid, m->market_id);
+    }
+    sb_appendf(sb, ">%s</a><div class='cardActionSep'></div>", !strcmp(sub, "market") ? "Purchase" : inventory ? "List" : sales ? "Unlist" : "");
+    if (inventory && !g_market_ro) {
+        sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='quickSell(%d,%d,%d)'>Quick Sell</a>", m->skin, pe->rarity, m->uid);
+    } else {
+        sb_appendf(sb, "<div><a class='cardAction' style='display: inline-block;' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='searchItem(%d)'>Search</a>", m->skin);
+        if (!inventory) sb_appendf(sb, "<div class='cardActionSepVert'></div><a class='cardAction' style='display: inline-block;' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='shareListing(this, %d)'>Share</a>", m->market_id);
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "<div class='cardActionSep'></div>");
+    append_info_preview(sb, m->skin);
+    sb_append(sb, "</div></div>");
     g_spray_anims = NULL;
 }
 
-// io_0("market", sub, rows): the market / inventory / sales / stats / trades lists
-static void hub_render_market(const char *a, const cJSON *t) {
+// io_0("market", sub, rows, readOnly, ..., list) (hub-10.0.7.js:2717, 3187-3361): the market / inventory / sales /
+// stats / Black Market / trades lists. readOnly (Only Show Missing's reply, :4600) draws the cards without their
+// Purchase / List, estimate and price; list keeps only those store indices.
+static void hub_render_market(const char *a, const cJSON *t, const int read_only, const cJSON *list) {
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     StrBuf sb = {0};
     int shown = 0;
     const char *sub = a ? a : "market";
     if (cJSON_IsArray(t) || cJSON_IsObject(t)) {
         if (!strcmp(sub, "stats")) {
-            side_boxes();
-            sb_appendf(&sb, "<div class='scrollItem' style='width:680px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;'><div style='margin-bottom:10px;'>Rarest Items<span style='float: right;'>%s</span></div>", I18N("social.market.stats.circulation", "In Circulation"));
+            // hub-10.0.7.js:3197-3226: a market card per item (createTip, the "ID:" line, In Circulation, the badges;
+            // Preview / Search / Info). v10 names the keyframes sprayStatAnm (60 px frames) while the cards' animation is
+            // sprayAnm: a stat card's spray stays on its first frame, as in v10. Its trailing "</div>" closes nothing.
+            SprayAnims anims = {.name = "sprayAnm"};
+            g_spray_anims = &anims;
+            StrBuf cards = {0};
             const cJSON *r;
             cJSON_ArrayForEach(r, t) {
                 const int ski = row_int(r, "ski", NULL, NULL, -1);
                 const ViewerSkin *pe = hub_skin(ski);
-                if (!pe || (pe->flags & VS_BLOCKED)) continue;
+                if (!pe || (pe->flags & (VS_BLOCKED | VS_FREE))) continue;
                 shown++;
                 char prev[256];
                 skin_preview(prev, sizeof(prev), pe);
-                sb_appendf(&sb, "<div class='statCard'><div class='statImgH%s' style='border:5px solid %s'>", rarity_animate(pe) ? " rainbowBorder" : "", rarity_color(pe));
-                append_skin_img(&sb, pe, prev, "sprayStatImg", "statImg");
-                sb_append(&sb, "</div>");
-                append_item_label(&sb, pe, "itemLabel small", "");
-                sb_appendf(&sb, "<div style='display:inline-block'><div class='statItem%s' style='color:%s;' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>", rarity_animate(pe) ? " rainbowText" : "", rarity_color(pe), ski);
-                sb_append_esc(&sb, pe->name);
-                sb_appendf(&sb, "</div><div style='color:rgba(255,255,255,0.4);font-size: 14px;'>%s</div><div class='statInC'><span style='color:rgba(255,255,255,0.4)'>x </span>%d</div><div class='statFind' onclick='openLink(&quot;/social.html?p=market&i=%d&quot;, &quot;_blank&quot;)'>Find</div></div></div>",
-                           skin_type_label(pe), row_int(r, "inC", "cnt", NULL, 0), ski);
+                const char *col = rarity_color(pe);
+                sb_appendf(&cards, "<div class='marketCard%s' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)'data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>",
+                           g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", col, col, ski);
+                sb_append_esc(&cards, pe->name);
+                sb_appendf(&cards, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
+                if (hub_dev()) sb_appendf(&cards, "<div class='itemOwn'>ID: %d</div>", ski);
+                append_skin_img(&cards, pe, prev, "sprayMarketImg", market_img_class(pe));
+                sb_appendf(&cards, "<div class='cardEst'>%s <span style='color:#fff'>%d</span></div>", I18N("social.market.stats.circulation", "In Circulation"), row_int(r, "inC", NULL, NULL, 0));
+                append_card_badges(&cards, pe, 0);
+                sb_appendf(&cards, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='viewItem(%d)'>Preview</a><div class='cardActionSep'></div>"
+                                   "<a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='searchItem(%d)'>Search</a><div class='cardActionSep'></div>"
+                                   "<div><a class='cardAction' style='display: inline-block;' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a></div></div></div>", ski, ski, ski);
             }
-            sb_append(&sb, "</div>");
+            g_spray_anims = NULL;
+            anims.name = "sprayStatAnm";
+            StrBuf kf = {0};
+            spray_anims_keyframes(&kf, &anims, 60);
+            char *kfs = sb_finish(&kf), *body = sb_finish(&cards);
+            sb_appendf(&sb, "%s%s</div>%s", kfs, body, kfs); // marketList = styles + (cards + "</div>" + styles)
+            free(kfs);
+            free(body);
         } else if (!strcmp(sub, "blackm")) {
-            // every store.skins entry with `illicit` (re = 1: never "No Items Found")
+            // hub-10.0.7.js:3229-3264: every store item with blackM && !free && !hide (shown = 1: never "none"); t holds
+            // the ones this account already has (kn_brain: bought here or owned), each card of those gets the blackMDone
+            // tick. Purchase is showPopup("blackm", index, thumbnail, label, index, funds).
             shown = 1;
             SprayAnims anims = {.name = "sprayAnm"};
             g_spray_anims = &anims;
+            StrBuf cards = {0};
             int n_illicit = 0;
             const IllicitSkin *illicit = econ_black_market(&n_illicit);
             for (int i = 0; i < n_illicit; i++) {
                 const IllicitSkin *il = &illicit[i];
-                if (il->hide || il->free_) continue; // blackM && !free && !hide, as v10's tab (deob-10.0.7.js:137667)
+                if (il->hide || il->free_) continue;
                 const ViewerSkin *pe = hub_skin(il->skin);
                 if (!pe) continue;
+                int done = 0;
+                const cJSON *o;
+                cJSON_ArrayForEach(o, t) done |= cJSON_IsNumber(o) && (int) o->valuedouble == il->skin;
                 char prev[256], price[32];
                 skin_preview(prev, sizeof(prev), pe);
-                const char *col = rarity_color(pe);
-                sb_appendf(&sb, "<div class='marketCard%s' id='itemCard_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='showPopup(&quot;blackm&quot;,%d)'>",
-                           rarity_animate(pe) ? " rainbow" : "", il->skin, col, col, il->skin);
-                sb_append_esc(&sb, pe->name);
-                sb_appendf(&sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
-                append_skin_img(&sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
+                const char *col = rarity_color(pe), *label = skin_type_label(pe);
+                sb_appendf(&cards, "<div class='marketCard%s' id='itemCard_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>",
+                           g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", il->skin, col, col, il->skin);
+                sb_append_esc(&cards, pe->name);
+                sb_appendf(&cards, "<div class='itemOwn'>%s</div>", label);
+                if (hub_dev()) sb_appendf(&cards, "<div class='itemOwn'>ID: %d</div>", il->skin);
+                append_skin_img(&cards, pe, prev, "sprayMarketImg", market_img_class(pe));
                 comma_number(price, sizeof(price), il->funds);
-                sb_appendf(&sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div><div class='purchInfoBtn' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>?</div></div>", price, il->skin);
+                if (il->funds) sb_appendf(&cards, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
+                else sb_append(&cards, "<div class='marketPrice'><span style='color:#fff'>FREE</span></div>");
+                append_card_badges(&cards, pe, 0);
+                sb_appendf(&cards, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='showPopup(&quot;blackm&quot;,%d,&quot;%s&quot;,&quot;%s&quot;,&quot;%d&quot;,&quot;%d&quot;)'>Purchase</a><div class='cardActionSep'></div>",
+                           il->skin, prev, label, il->skin, il->funds);
+                append_info_preview(&cards, il->skin);
+                sb_append(&cards, "</div>");
+                if (done) sb_append(&cards, "<div class=\"blackMDone\"><span class=\"material-icons\" style=\"font-size:160px;color:#38cd3a;line-height:215px\">done</span></div>");
+                sb_append(&cards, "</div>");
             }
             g_spray_anims = NULL;
-            spray_anims_keyframes(&sb, &anims, 200);
+            spray_anims_keyframes(&sb, &anims, 200); // marketList = styles + cards
+            char *body = sb_finish(&cards);
+            sb_append(&sb, body);
+            free(body);
         } else if (!strcmp(sub, "trades")) {
             hub_render_trades(&sb, t, &shown);
             if (shown < 0) {
@@ -2953,6 +3244,7 @@ static void hub_render_market(const char *a, const cJSON *t) {
                 g_market_row_count = g_market_rows ? n : 0;
                 if (g_market_rows) memcpy(g_market_rows, rows, (size_t) n * sizeof(*rows));
                 snprintf(g_market_sub, sizeof(g_market_sub), "%s", sub);
+                g_market_ro = read_only;
                 const int inventory = !strcmp(sub, "inventory"), sales = !strcmp(sub, "sales");
                 int te = 0;
                 double oe = 0;
@@ -2961,11 +3253,17 @@ static void hub_render_market(const char *a, const cJSON *t) {
                 g_market_view_n = 0;
                 for (int v = 0; v < n; v++) {
                     const MarketRow *m = &rows[v];
-                    const ViewerSkin *pe = hub_skin(m->skin);
-                    if (!pe) continue;
-                    // config.marketQueries[a].checkItem
+                    const ViewerSkin *pe = hub_skin(m->skin); // NULL past the store (skinindex >= 1e7: a custom skin)
+                    if (!pe || (pe->flags & (VS_FREE | VS_BLOCKED))) continue;
+                    // config.marketQueries[a].checkItem (config-10.0.7.js:9496)
                     if ((!strcmp(sub, "market") || !strcmp(sub, "sales")) && !m->funds) continue;
                     if (inventory && (m->funds || !m->count)) continue;
+                    if (cJSON_IsArray(list)) { // list.indexOf(skinindex) >= 0
+                        int in = 0;
+                        const cJSON *o;
+                        cJSON_ArrayForEach(o, list) in |= cJSON_IsNumber(o) && (int) o->valuedouble == m->skin;
+                        if (!in) continue;
+                    }
                     shown++;
                     te++;
                     // the stat's value (hub-10.0.7.js:3321-3322): a sale's price, else the estimate, times the count
@@ -3009,70 +3307,167 @@ static void hub_render_market(const char *a, const cJSON *t) {
     free(html);
 }
 
-// io_0("itemsales", "market", {ind, high, low, onS, inC}, owners[])
+// config.events' names (config-10.0.7.js:10098-10406): a store item's `event`
+static const char *const k_event_names[] = {
+    "#FORTHEKIDS Charity Event", "April Drops", "June Drops", "#FORTHEKIDS Charity Event", "#FORTHEKIDS Charity Event",
+    "Final #FORTHEKIDS Charity Event", "End of Holiday Season Drops", "Junkyard Tuesdays #1", "Junkyard Tuesdays #2",
+    "Junkyard Tuesdays #3", "Junkyard Tuesdays #4", "Junkyard Tuesdays #5", "Junkyard Tuesdays #6", "Junkyard Tuesdays #7",
+    "Junkyard Tuesdays #8", "Junkyard Tuesdays #9", "Junkyard Tuesdays #10", "Junkyard Tuesdays #11", "Junkyard Tuesdays #12",
+    "Junkyard Tuesdays #13", "Junkyard Tuesdays #14", "Krunker x FRVR", "Season 7 Launch",
+};
+
+static void open_item_tab(const char *tab);
+
+// io_0("itemsales", "market", {ind, high, low, onS, inC}, owners[]) (hub-10.0.7.js:3418-3494): the item's page: its
+// picture, corner label, season, 3D (viewItem(ind, 2)), the lock of an item that cannot be sold, Find, the creators'
+// profile links, its type, lore, event, emoji text, streamers, On Sale / In Circulation, the high / low and owners.
+// An opensea item shows only its owners tab.
 static void hub_render_itemsales(const cJSON *t, const cJSON *owners) {
     side_boxes();
     set_display("itemsalesList", "none");
-    const ViewerSkin *pe = cJSON_IsObject(t) ? hub_skin(row_int(t, "ind", NULL, NULL, -1)) : NULL;
-    if (!pe) {
+    const int ind = cJSON_IsObject(t) ? row_int(t, "ind", NULL, NULL, -1) : -1;
+    const ViewerSkin *pe = hub_skin(ind);
+    if (!pe || (pe->flags & VS_BLOCKED)) {
         set_market_note("itemsalesHolder", STR_MARKET_NONE);
         set_display("itemsalesHolder", "block");
         return;
     }
-    const int ind = row_int(t, "ind", NULL, NULL, 0);
     set_display("itemsalesList", "block");
-    if (pe->name) hub_title(pe->name, 0, " Skin - Krunker Hub");
     char prev[256], a[32], b[32];
     skin_preview(prev, sizeof(prev), pe);
     const char *col = rarity_color(pe);
+    const int rb = g_hub.rarity_anim && rarity_animate(pe);
+    const int opensea = skin_true(ind, "opensea");
+    const cJSON *item_shop = skin_field(ind, "itemShop");
+    const int bound = (pe->flags & VS_FREE) || skin_true(ind, "free") || skin_true(ind, "noSale") || skin_true(ind, "blackM") || opensea ||
+                      (cJSON_IsNumber(item_shop) && item_shop->valuedouble == 1);
+    const char *lore = skin_str(ind, "lore"), *streamer = skin_str(ind, "streamer"), *creator = skin_str(ind, "creator");
+    const cJSON *event = skin_field(ind, "event"), *text = skin_field(ind, "text");
+    const int has_event = event && !cJSON_IsNull(event);
+    const int top = 94 - (lore ? 25 : 0) - (has_event ? 25 : 0) - (streamer ? 30 : 0);
     StrBuf sb = {0};
+    if (pe->type == 4 && pe->frames) sb_appendf(&sb, "<style>@keyframes sprayAnm%d {100%%{background-position:-%dpx}}</style>", pe->frames, pe->frames * 220);
     if (pe->type == 4) {
-        if (pe->frames) sb_appendf(&sb, "<style>@keyframes sprayAnm%d {100%%{background-position:-%dpx}}</style>", pe->frames, pe->frames * 220);
-        sb_appendf(&sb, "<div class='sprayPopupImg' style='background: url(&quot;%s&quot;);margin-top:0px;border:5px solid %s;", prev, col);
+        sb_appendf(&sb, "<div class='spraySalesImg' style='background: url(&quot;%s&quot;);margin-top:0px;", prev);
         spray_anim_style(&sb, pe, "sprayAnm");
-        sb_append(&sb, "'></div>");
+        sb_appendf(&sb, "border:5px solid %s'></div>", col);
+    } else {
+        sb_appendf(&sb, "<div class='imgWepH%s' style='border:5px solid %s'><img draggable='false' class='imgWep%s%s' src='%s'></div>", rb ? " rainbowBorder" : "", col, pe->type == 16 ? "P" : "",
+                   (pe->flags & VS_RGB) ? " rgbHue" : "", prev);
     }
-    else sb_appendf(&sb, "<div class='imgWepH%s' style='border:5px solid %s'><img draggable='false' class='imgWep%s' src='%s'></div>", rarity_animate(pe) ? " rainbowBorder" : "", col, (pe->flags & VS_RGB) ? " rgbHue" : "", prev);
-    append_item_label(&sb, pe, "itemLabel", "top: 202px;left: 0px;");
-    sb_appendf(&sb, "<div class='popupImgSeason' style='top: 8px;left: 12px;'>Season %d</div>", pe->seas ? pe->seas : 1);
-    if (pe->type != 4) sb_appendf(&sb, "<div class='popupImgInfo' style='left: 181px;top: 9px;' onclick='openViewer(%d)'>3D</div>", ind);
-    sb_appendf(&sb, "<div class='buyBtn' onclick='openLink(&quot;/social.html?p=market&i=%d&quot;, &quot;_blank&quot;)'>Find</div><div style='display:inline-block'><div class='details%s' style='color:%s'>", ind, rarity_animate(pe) ? " rainbowText" : "", col);
+    append_item_label(&sb, pe, ind, "top: 202px;left: -1px;");
+    sb_appendf(&sb, "<div class='popupImgSeason' style='top: 8px;left: 12px;'>Season %d</div><div class='popupImgInfo' style='left: 181px;top: 9px;' onclick='viewItem(%d, 2)'>3D</div>", pe->seas ? pe->seas : 1, ind);
+    if (bound) sb_append(&sb, "<div class='popupImgBound'><span class='material-icons' style='font-size:30px;color:#fff;'>lock</span></div>");
+    // an opensea item's OpenSea button needs window.canShowNFTs, which KrunkNative never sets: Find
+    sb_appendf(&sb, "<div class='buyBtn' onclick='openLink(&quot;/social.html?p=market&i=%d&quot;, &quot;_blank&quot;)'>Find</div><div style='display:inline-block'><div class='details%s' style='color:%s'>", ind, rb ? " rainbowText" : "",
+               pe->rarity == 5 ? "rgba(255,255,255,0.4)" : col); // CONTRABAND (hub-10.0.7.js:478)
     sb_append_esc(&sb, pe->name);
-    comma_number(a, sizeof(a), jnum(t, "onS"));
-    comma_number(b, sizeof(b), jnum(t, "inC"));
-    sb_appendf(&sb, "</div><div class='smDetails'>by Krunker.io</div><div class='smDetails'>%s</div><div class='smDetails' style='margin-top: 94px;'>On Sale <span style='float:right'>%s <span style='color:#787878'> units</span></span></div><div class='smDetails'>In Circulation <span style='float:right'>%s <span style='color:#787878'> units</span></span></div></div>",
-               skin_type_label(pe), a, b);
-    comma_number(a, sizeof(a), jnum(t, "high"));
-    comma_number(b, sizeof(b), jnum(t, "low"));
-    sb_appendf(&sb, "<div style='position:absolute;top: 240px;right: 0px;'><div class='minMax' style='background-color:#41c300'><i class='material-icons' style='color:#fff;font-size:26px;vertical-align:middle;margin-top:-5px'>arrow_upward</i>%s</div><div class='minMax' style='background-color:rgb(244,67,54)'><i class='material-icons' style='color:#fff;font-size:26px;vertical-align:middle;margin-top:-5px'>arrow_downward</i>%s</div>", a, b);
+    sb_append(&sb, "</div><div class='smDetails'>by ");
+    if (creator) { // creator.split(", "): a profile link each
+        for (const char *c = creator; *c;) {
+            const char *e = strstr(c, ", ");
+            const size_t len = e ? (size_t) (e - c) : strlen(c);
+            char name[96];
+            snprintf(name, sizeof(name), "%.*s", (int) (len < sizeof(name) ? len : sizeof(name) - 1), c);
+            if (c != creator) sb_append(&sb, ", ");
+            sb_append(&sb, "<a style='color:#fff;' href='/social.html?p=profile&q=");
+            sb_append_esc(&sb, name);
+            sb_append(&sb, "' target='_blank'>");
+            sb_append_esc(&sb, name);
+            sb_append(&sb, "</a>");
+            c = e ? e + 2 : c + len;
+        }
+    } else {
+        sb_append(&sb, "Krunker.io");
+    }
+    sb_appendf(&sb, "</div><div class='smDetails'>%s</div>", skin_type_label(pe));
+    if (lore) {
+        sb_append(&sb, "<div class='smDetails' style='font-style:italic;'>");
+        sb_append_esc(&sb, lore);
+        sb_append(&sb, "</div>");
+    }
+    if (has_event) {
+        const int ev_i = cJSON_IsNumber(event) ? event->valueint : -1;
+        sb_appendf(&sb, "<div class='smDetails' style='font-style:italic;'>%s</div>",
+                   ev_i >= 0 && ev_i < (int) (sizeof(k_event_names) / sizeof(k_event_names[0])) ? k_event_names[ev_i] : "");
+    }
+    if (cJSON_IsArray(text) && cJSON_GetStringValue(cJSON_GetArrayItem(text, 0))) {
+        sb_append(&sb, "<div class='smDetails' style='margin-top: 20px'>Type <span style='color:#ccc'>:");
+        sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetArrayItem(text, 0)));
+        sb_append(&sb, ":</span> in chat to use</div>");
+    }
+    if (streamer) { // several: a link each; one: the whole line links
+        if (strstr(streamer, ", ")) {
+            sb_append(&sb, "<div class='smDetails' id='streamerSkinH'><img id='streamerSkin' src='./img/twitch.png'>");
+            for (const char *c = streamer; *c;) {
+                const char *e = strstr(c, ", ");
+                const size_t len = e ? (size_t) (e - c) : strlen(c);
+                char name[96];
+                snprintf(name, sizeof(name), "%.*s", (int) (len < sizeof(name) ? len : sizeof(name) - 1), c);
+                sb_append(&sb, "<span id='streamerSkinN' onclick='openLink(&quot;https://twitch.tv/");
+                sb_append_esc(&sb, name);
+                sb_append(&sb, "&quot;, &quot;_blank&quot;)'>");
+                sb_append_esc(&sb, name);
+                sb_append(&sb, "</span>");
+                if (e) sb_append(&sb, ", ");
+                c = e ? e + 2 : c + len;
+            }
+            sb_append(&sb, "</div>");
+        } else {
+            sb_append(&sb, "<div class='smDetails' id='streamerSkinH' onclick='openLink(&quot;https://twitch.tv/");
+            sb_append_esc(&sb, streamer);
+            sb_append(&sb, "&quot;, &quot;_blank&quot;)'><img id='streamerSkin' src='./img/twitch.png'><span id='streamerSkinN'>");
+            sb_append_esc(&sb, streamer);
+            sb_append(&sb, "</span></div>");
+        }
+    }
+    if (opensea) {
+        set_display("iTab_avg", "none");
+        set_display("iTab_sold", "none");
+        set_style("iTab_owners", "width", "100%");
+        set_display("dateInfo", "none");
+        open_item_tab("owners");
+    } else {
+        comma_number(a, sizeof(a), jnum(t, "onS"));
+        comma_number(b, sizeof(b), jnum(t, "inC"));
+        sb_appendf(&sb, "<div class='smDetails' style='margin-top: %dpx;'>On Sale <span style='float:right;color: rgba(255,255,255,0.6);'>", top);
+        if (skin_true(ind, "noSale")) sb_append(&sb, "Cannot be Sold");
+        else sb_appendf(&sb, "%s <span style='color:#787878'> units</span>", a);
+        sb_appendf(&sb, "</span></div><div class='smDetails'>%s <span style='float:right;color: rgba(255,255,255,0.6);'>%s <span style='color:#787878'> %s</span></span></div></div>",
+                   I18N("social.market.stats.circulation", "In Circulation"), b, I18N("social.market.stats.units", "units"));
+        comma_number(a, sizeof(a), jnum(t, "high"));
+        comma_number(b, sizeof(b), jnum(t, "low"));
+        sb_appendf(&sb, "<div style='position:absolute;top: 240px;right: 0px;'><div class='minMax' style='background-color:#41c300'><i class='material-icons' style='color:#fff;font-size:26px;vertical-align:middle;margin-top:-5px'>arrow_upward</i>%s</div><div class='minMax' style='background-color:rgb(244,67,54)'><i class='material-icons' style='color:#fff;font-size:26px;vertical-align:middle;margin-top:-5px'>arrow_downward</i>%s</div></div>", a, b);
+        // iíîîîìì(ind, range): the price graph data (["st"] -> ["gd"]; KrunkNative draws no chart)
+        cJSON *f = cJSON_CreateArray();
+        cJSON_AddItemToArray(f, cJSON_CreateString("st"));
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(ind));
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(30));
+        cJSON_AddItemToArray(f, cJSON_CreateTrue());
+        hub_send(f);
+    }
     char *html = sb_finish(&sb);
     set_html("weaponInfo", html);
     free(html);
-    // _e(ind, 30): the price graph data (["st"] -> ["gd"]; KrunkNative draws no chart)
-    cJSON *f = cJSON_CreateArray();
-    cJSON_AddItemToArray(f, cJSON_CreateString("st"));
-    cJSON_AddItemToArray(f, cJSON_CreateNumber(ind));
-    cJSON_AddItemToArray(f, cJSON_CreateNumber(30));
-    cJSON_AddItemToArray(f, cJSON_CreateTrue());
-    hub_send(f);
     if (cJSON_IsArray(owners) && cJSON_GetArraySize(owners)) {
         int v = 0;
         const cJSON *r;
         cJSON_ArrayForEach(r, owners) {
             const char *nm = jstr(r, "nm");
-            sb_appendf(&sb, "<div>%d. <div class='leaderText'>", ++v);
+            sb_appendf(&sb, "<div style='color:#5c5c5c'>%d. <div class='leaderText'>", ++v);
             if (jnum(r, "su")) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
             if (jnum(r, "ft")) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:4px;margin-right: 4px;font-size:28px;vertical-align:baseline;'>check_circle</i>");
             sb_append(&sb, "<a target='_blank' href='/social.html?p=profile&q=");
             sb_append_esc(&sb, nm ? nm : "");
             sb_append(&sb, "&autoTrade' class='lName'>");
             sb_append_esc(&sb, nm ? nm : "");
-            sb_appendf(&sb, "</a></div><div style='float:right'>x%d</div></div>", (int) jnum(r, "ct"));
+            sb_appendf(&sb, "</a></div><div style='float:right;color:#5c5c5c'>x%d</div></div>", (int) jnum(r, "ct"));
         }
         html = sb_finish(&sb);
         set_html("iTabContent_owners", html);
         free(html);
     }
+    if (pe->name) hub_title(pe->name, 0, " Skin - Krunker Hub");
     set_display("itemsalesHolder", "block");
 }
 
@@ -3157,9 +3552,10 @@ static void hub_render_clan(const cJSON *t) {
 // io_uf(posts): the profile's Activity tab
 static void hub_render_activity(const cJSON *posts) {
     StrBuf sb = {0};
-    if (!cJSON_IsArray(posts) || !cJSON_GetArraySize(posts)) sb_append(&sb, "<div class='scrollItemNew'><div style='font-size:40px;text-align:center;'>No Current Posts!</div></div>");
+    // hub-10.0.7.js:4165-4174: the profile's posts are socPost fromProfile
+    if (!cJSON_IsArray(posts) || !cJSON_GetArraySize(posts)) sb_append(&sb, "<div class='scrollItemNew'><div class='noneText'>No Current Posts!</div></div>");
     const cJSON *p;
-    cJSON_ArrayForEach(p, posts) append_post(&sb, p, 0);
+    cJSON_ArrayForEach(p, posts) append_post(&sb, p, 0, 1);
     char *html = sb_finish(&sb);
     set_html("pTabContent_activity", html);
     free(html);
@@ -3211,16 +3607,20 @@ static void hub_render_item_graph(const cJSON *days) {
 
 // ------------------------------------------------------------------ item list (io_0 "items", f494-f496, itemFilter)
 
+// The Skin List's filters, iiiîiìi (hub-10.0.7.js:2413-2453): a store field and the value it must equal (-1 / NULL: no
+// such filter). The categories (seas, limT, blackM, drop, ranked, challenge, spinable) exclude each other.
 typedef struct {
-    int seas, rarity, weapon, type; // -1 = no filter (vO81 keys); seas 0..: Season n
-    int blackm;                     // categories ViewerSkin has no field for: always empty
-    int sort;                       // vLN0570: 0 normal (rarity), 1 newest, 2 oldest
-    int *list;                      // vA156: skin indices
-    int count, shown;               // vLN0571 chunks rendered (unused: the grid shows every item)
-    VGrid grid;                     // #itemsList: a virtual grid over list (ui_vgrid.h)
+    int seas, rarity, weapon, type; // -1 = no filter
+    char cat[16];                   // blackM / drop / ranked / challenge / spinable / limT ("" none)
+    char lim_t[32];                 // limT's tag
+    int sort;                       // iîïïîíì: 0 normal (rarity), 1 newest, 2 oldest
+    int *list;                      // iiîiiìi: skin indices
+    int count, shown;
+    VGrid grid;                     // #itemsList: a virtual grid over list (ui_vgrid.h; v10 appends 500 at a time)
 } HubItems;
-static HubItems g_items = {-1, -1, -1, -1, 0, 0, NULL, 0, 0, {{0}}};
+static HubItems g_items = {-1, -1, -1, -1, "", "", 0, NULL, 0, 0, {{0}}};
 
+// iïïíìîì(item) (hub-10.0.7.js:2535-2541): the Skin List's card (no tooltip); ?dev adds the "ID:" line and Viewer
 static void items_card(StrBuf *sb, const int index) {
     const ViewerSkin *sk = hub_skin(index);
     if (!sk) return;
@@ -3232,17 +3632,23 @@ static void items_card(StrBuf *sb, const int index) {
                g_hub.rarity_anim && rarity_animate(sk) ? " rainbow" : "", col, col);
     sb_append_esc(sb, sk->name);
     sb_appendf(sb, "<div class='itemOwn'>%s</div>", skin_type_label(sk));
+    const int dev = hub_dev();
+    if (dev) sb_appendf(sb, "<div class='itemOwn'>ID: %d</div>", index);
     if (sk->type == 4) {
         sb_appendf(sb, "<div class='sprayMarketImg' style='background: url(&quot;%s&quot;);", url);
-        if (sk->frames) sb_appendf(sb, "animation: itemAnm%d %.15gs steps(%d) infinite;", sk->frames, 1 + sk->frame_t / 1000.0, sk->frames);
+        spray_anim_style(sb, sk, "itemAnm");
         sb_append(sb, "'></div>");
     } else {
-        const char *suffix = !sk->type ? "" : sk->type >= 16 ? "P" : sk->type >= 8 ? "S" : sk->type == 5 ? "D" : "C";
-        sb_appendf(sb, "<img draggable='false' loading='lazy' class='marketImg%s%s' src='%s'/>", suffix, (sk->flags & VS_RGB) ? " rgbHue" : "", url);
+        sb_appendf(sb, "<img draggable='false' loading='lazy' class='%s%s' src='%s'/>", market_img_class(sk), (sk->flags & VS_RGB) ? " rgbHue" : "", url);
     }
-    if (skin_animated(sk)) sb_append(sb, "<div class='material-icons isAnim'>loop</div>");
-    sb_appendf(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='viewItem(%d)'>Preview</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openLink(&quot;/social.html?p=market&i=%d&quot;, &quot;_blank&quot;)'>Listings</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a></div></div>",
+    if ((sk->flags & VS_HAS_ANIM) || sk->puls_t || sk->frames || sk->mov_t || sk->r_anim || (sk->flags & VS_RGB) || (sk->flags2 & (VS2_SHADER | VS2_VIDEO | VS2_PROJECTION)))
+        sb_appendf(sb, "<div class='material-icons isAnim'>%s</div>", sk->r_anim_t ? "import_export" : "loop");
+    sb_appendf(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='viewItem(%d)'>Preview</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openLink(&quot;/social.html?p=market&i=%d&quot;, &quot;_blank&quot;)'>Listings</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a>",
                index, index, index);
+    if (dev) sb_appendf(sb, "<div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openURL(&quot;/viewer.html?cosmetic=%d&quot;)'>Viewer</a>", index);
+    sb_append(sb, "</div>");
+    if (sk->flags2 & VS2_SND) sb_append(sb, "<div class='material-icons hasSnd'>volume_up</div>");
+    sb_append(sb, "</div>");
 }
 
 static void items_grid_card(StrBuf *sb, const int pos, void *user) {
@@ -3250,7 +3656,9 @@ static void items_grid_card(StrBuf *sb, const int pos, void *user) {
     if (pos >= 0 && pos < g_items.count) items_card(sb, g_items.list[pos]);
 }
 
-static int items_rarity_cmp(const void *pa, const void *pb) { // rarity desc, then the table order
+// iiîìïïì's normal order (hub-10.0.7.js:2523-2527): rarity, highest first. v10 breaks a tie on `size`, which no store
+// item has (its comparator then answers 1 both ways); KrunkNative keeps the table order.
+static int items_rarity_cmp(const void *pa, const void *pb) {
     const int a = *(const int *) pa, b = *(const int *) pb;
     const ViewerSkin *sa = hub_skin(a), *sbk = hub_skin(b);
     const int ra = sa ? sa->rarity : 0, rb = sbk ? sbk->rarity : 0;
@@ -3260,7 +3668,7 @@ static int items_rarity_cmp(const void *pa, const void *pb) { // rarity desc, th
 
 static int items_index_cmp(const void *pa, const void *pb) { return *(const int *) pa - *(const int *) pb; }
 
-// f494(): the keyframes, the count, sort, first chunk
+// iîìiíìï + iiîìïïì (hub-10.0.7.js:2506-2530): the keyframes, the count, sort, the cards
 static void items_show(void) {
     StrBuf sb = {0};
     sb_append(&sb, "<style>");
@@ -3285,7 +3693,7 @@ static void items_show(void) {
         qsort(g_items.list, (size_t) g_items.count, sizeof(int), items_rarity_cmp);
     }
     vgrid_begin(&g_items.grid, "itemsList", g_items.count, items_grid_card, NULL);
-    vgrid_set_prefix(&g_items.grid, style); // v7 keeps the @keyframes inside #itemsList
+    vgrid_set_prefix(&g_items.grid, style); // v10 keeps the @keyframes inside #itemsList
     free(style);
     StrBuf list = {0};
     vgrid_html(&g_items.grid, &list);
@@ -3299,47 +3707,89 @@ static void items_alloc(void) {
     g_items.count = 0;
 }
 
-// f495(): store.skins filtered by vO81
+// item[key] == true, JavaScript's loose equality (true, 1)
+static int skin_is_true(const int index, const char *key) {
+    const cJSON *v = skin_field(index, key);
+    return cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble == 1) || (cJSON_IsString(v) && !strcmp(v->valuestring, "1"));
+}
+
+// iïïíîìì (hub-10.0.7.js:2512-2522): store.skins without the blocked / opensea ones, each filter's field equal to its
+// value (a missing field fails); spinable: this season's, none of limT / limG / noSpin / opensea / blackM / blocked /
+// limited / req / mapReward / eventReward
 static void items_filter_apply(void) {
     items_alloc();
     for (int i = 0; g_items.list && i < g_viewer_skin_count; i++) {
         const ViewerSkin *sk = &g_viewer_skins[i];
-        if (sk->flags & VS_BLOCKED) continue;
-        if (g_items.blackm) continue;
-        if (g_items.seas >= 0 && (sk->seas ? sk->seas : 1) != g_items.seas) continue;
-        if (g_items.rarity >= 0 && sk->rarity != g_items.rarity) continue;
+        if ((sk->flags & VS_BLOCKED) || skin_true(i, "opensea")) continue;
+        if (g_items.seas >= 0 && (!skin_field(i, "seas") || sk->seas != g_items.seas)) continue;
+        if (g_items.rarity >= 0 && (!skin_field(i, "rarity") || sk->rarity != g_items.rarity)) continue;
         if (g_items.weapon >= 0 && sk->weapon != g_items.weapon) continue;
         if (g_items.type >= 0 && sk->type != g_items.type) continue;
+        if (!strcmp(g_items.cat, "limT")) {
+            const char *t = skin_str(i, "limT");
+            if (!t || strcmp(t, g_items.lim_t) != 0) continue;
+        } else if (!strcmp(g_items.cat, "spinable")) {
+            static const char *const no[] = {"limT", "limG", "noSpin", "opensea", "blackM", "limited", "req", "mapReward", "eventReward"};
+            int bad = sk->seas != g_viewer_current_season;
+            for (size_t k = 0; !bad && k < sizeof(no) / sizeof(no[0]); k++) bad = skin_true(i, no[k]);
+            if (bad) continue;
+        } else if (g_items.cat[0] && !skin_is_true(i, g_items.cat)) {
+            continue;
+        }
         g_items.list[g_items.count++] = i;
     }
     items_show();
 }
 
-// itemFilter(key, value): key seas / rarity / weapon / type / sort / category / the
-// category groups (blackM, drop, ranked, challenge, spinable)
+// window.itemFilter(key, value) (hub-10.0.7.js:2419-2453): sort; "all" drops the filter (weapon / type both,
+// category every category); a weapon drops the type and back, a category the other categories
 static void items_filter(const char *key, const char *value) {
     const int all = !value || !strcmp(value, "all");
     if (!strcmp(key, "sort")) {
-        g_items.sort = all ? 0 : !strcmp(value, "new") ? 1 : !strcmp(value, "old") ? 2 : 0;
+        if (all) g_items.sort = 0;
+        else if (!strcmp(value, "new")) g_items.sort = 1;
+        else if (!strcmp(value, "old")) g_items.sort = 2;
         items_filter_apply();
         return;
     }
-    const int v = all ? -1 : atoi(value);
-    if (!strcmp(key, "weapon")) { g_items.type = -1; g_items.weapon = v; }
-    else if (!strcmp(key, "type")) { g_items.weapon = -1; g_items.type = v; }
-    else if (!strcmp(key, "rarity")) g_items.rarity = v;
-    else if (!strcmp(key, "seas")) { g_items.blackm = 0; g_items.seas = v; }
-    else if (!strcmp(key, "category")) { g_items.seas = -1; g_items.blackm = 0; }
-    else { g_items.seas = -1; g_items.blackm = !all; } // blackM / drop / ranked / challenge / spinable: no such fields in the table
+    static const char *const cats[] = {"seas", "limT", "blackM", "drop", "ranked", "challenge", "spinable"};
+    int is_cat = 0;
+    for (size_t i = 0; i < sizeof(cats) / sizeof(cats[0]); i++) is_cat |= !strcmp(key, cats[i]);
+    if (all) {
+        if (!strcmp(key, "weapon") || !strcmp(key, "type")) g_items.weapon = g_items.type = -1;
+        else if (!strcmp(key, "rarity")) g_items.rarity = -1;
+        else if (!strcmp(key, "seas")) g_items.seas = -1;
+        else if (!strcmp(key, "category")) g_items.seas = -1, g_items.cat[0] = 0;
+        else if (!strcmp(key, g_items.cat)) g_items.cat[0] = 0;
+    } else {
+        if (is_cat) { // the other categories go
+            if (strcmp(key, "seas") != 0) g_items.seas = -1;
+            if (strcmp(key, g_items.cat) != 0) g_items.cat[0] = 0;
+        }
+        if (!strcmp(key, "weapon")) g_items.type = -1, g_items.weapon = atoi(value);
+        else if (!strcmp(key, "type")) g_items.weapon = -1, g_items.type = atoi(value);
+        else if (!strcmp(key, "rarity")) g_items.rarity = atoi(value);
+        else if (!strcmp(key, "seas")) g_items.seas = atoi(value);
+        else if (is_cat) {
+            snprintf(g_items.cat, sizeof(g_items.cat), "%s", key);
+            if (!strcmp(key, "limT")) snprintf(g_items.lim_t, sizeof(g_items.lim_t), "%s", value);
+        }
+    }
     const HtmlElem in = el("itemFilterInput");
     if (in) html_dom_set_value(in, "");
     items_filter_apply();
 }
 
-// itemFilterSearch(text): every skin whose name / weapon matches (case-insensitive)
+// iíïíiií(a, b) (config-10.0.7.js): either contains the other, ignoring case
+static int contains_either_ci(const char *a, const char *b) {
+    return a && b && (contains_ci_str(a, b) || contains_ci_str(b, a));
+}
+
+// window.itemFilterSearch(text) (hub-10.0.7.js:2466-2499): the filters reset; every item whose keyW, "drops" (a drop),
+// limT, weapon, name or a creator matches the text either way round, without the blocked / opensea ones
 static void items_search(const char *text) {
     g_items.seas = g_items.rarity = g_items.weapon = g_items.type = -1;
-    g_items.blackm = 0;
+    g_items.cat[0] = 0;
     g_items.sort = 0;
     static const char *const sels[] = {"itemCategory", "itemWeapon", "itemRarity", "itemCosm", "itemSortOther"};
     for (size_t i = 0; i < sizeof(sels) / sizeof(sels[0]); i++) {
@@ -3355,10 +3805,21 @@ static void items_search(const char *text) {
     for (int i = 0; g_items.list && i < g_viewer_skin_count; i++) {
         const ViewerSkin *sk = &g_viewer_skins[i];
         int hit = !text || !*text;
-        if (!hit && sk->name && contains_ci_str(sk->name, text)) hit = 1;
-        if (!hit && sk->weapon >= 1 && sk->weapon <= rules_krunker_weapon_count() && rules_weapon(sk->weapon - 1) && contains_ci_str(rules_weapon(sk->weapon - 1)->name, text)) hit = 1;
-        if (!hit && sk->creator && contains_ci_str(sk->creator, text)) hit = 1;
-        if (sk->flags & VS_BLOCKED) hit = 0;
+        if (!hit && skin_str(i, "keyW") && contains_either_ci(text, skin_str(i, "keyW"))) hit = 1;
+        else if (!hit && skin_true(i, "drop") && contains_either_ci(text, "drops")) hit = 1;
+        else if (!hit && skin_str(i, "limT") && contains_either_ci(text, skin_str(i, "limT"))) hit = 1;
+        else if (!hit && sk->weapon >= 1 && sk->weapon <= rules_krunker_weapon_count() && rules_weapon(sk->weapon - 1) && contains_either_ci(text, rules_weapon(sk->weapon - 1)->name)) hit = 1;
+        else if (!hit && sk->name && contains_either_ci(text, sk->name)) hit = 1;
+        else if (!hit) {
+            const cJSON *c;
+            cJSON_ArrayForEach(c, skin_field(i, "creators")) {
+                if (cJSON_IsString(c) && contains_either_ci(text, c->valuestring)) {
+                    hit = 1;
+                    break;
+                }
+            }
+        }
+        if ((sk->flags & VS_BLOCKED) || skin_true(i, "opensea")) hit = 0;
         if (hit) g_items.list[g_items.count++] = i;
     }
     items_show();
@@ -3372,9 +3833,15 @@ static void items_filter_change(const HtmlElem sel) {
     html_dom_get_attr(sel, "id", id, sizeof(id));
     html_dom_get_value(sel, text, sizeof(text));
     if (!strcmp(id, "itemCategory")) {
+        static const char *const cats[][2] = {{"Black Market", "blackM"}, {"Drops", "drop"}, {"Ranked", "ranked"}, {"Challenge", "challenge"}, {"Spinable", "spinable"}};
         if (!strcmp(text, "All")) items_filter("category", "all");
         else if (!strncmp(text, "Season ", 7)) items_filter("seas", text + 7);
-        else items_filter("blackM", "true");
+        else {
+            int done = 0;
+            for (size_t i = 0; !done && i < sizeof(cats) / sizeof(cats[0]); i++)
+                if (!strcmp(text, cats[i][0])) items_filter(cats[i][1], "true"), done = 1;
+            if (!done) items_filter("limT", text); // the store.tags options
+        }
     } else if (!strcmp(id, "itemRarity")) {
         if (!strcmp(text, "All")) items_filter("rarity", "all");
         for (int i = 0; i < g_viewer_rarity_count; i++) {
@@ -3416,8 +3883,11 @@ static void items_filter_change(const HtmlElem sel) {
 static void items_page(const char *a, const char *k) {
     StrBuf sb = {0};
     sb_append(&sb, "<select id='itemCategory' onchange='itemFilterChange(this)'><option disabled selected>Category</option><option onclick='itemFilter(`category`,`all`)'>All</option>");
-    for (int i = 1; i <= 7; i++) sb_appendf(&sb, "<option onclick='itemFilter(`seas`,%d)'>Season %d</option>", i, i); // config.currentSeason
-    sb_append(&sb, "<option onclick='itemFilter(`blackM`,true)'>Black Market</option><option onclick='itemFilter(`drop`,true)'>Drops</option><option onclick='itemFilter(`ranked`,true)'>Ranked</option><option onclick='itemFilter(`challenge`,true)'>Challenge</option><option onclick='itemFilter(`spinable`,true)'>Spinable</option></select>");
+    // hub-10.0.7.js:3364-3377: Season 1..currentSeason, the categories, one option per store.tags name
+    for (int i = 1; i <= g_viewer_current_season; i++) sb_appendf(&sb, "<option onclick='itemFilter(`seas`,%d)'>Season %d</option>", i, i);
+    sb_append(&sb, "<option onclick='itemFilter(`blackM`,true)'>Black Market</option><option onclick='itemFilter(`drop`,true)'>Drops</option><option onclick='itemFilter(`ranked`,true)'>Ranked</option><option onclick='itemFilter(`challenge`,true)'>Challenge</option><option onclick='itemFilter(`spinable`,true)'>Spinable</option>");
+    for (int i = 0; ui_loadout_tag_name(i); i++) sb_appendf(&sb, "<option onclick='itemFilter(`limT`,`%s`)'>%s</option>", ui_loadout_tag_name(i), ui_loadout_tag_name(i));
+    sb_append(&sb, "</select>");
     sb_append(&sb, "<select id='itemRarity' onchange='itemFilterChange(this)'><option disabled selected>Rarity</option><option onclick='itemFilter(`rarity`,`all`)'>All</option>");
     for (int i = 0; i < g_viewer_rarity_count; i++) sb_appendf(&sb, "<option onclick='itemFilter(`rarity`,%d)'>%s</option>", i, g_viewer_rarities[i].name);
     sb_append(&sb, "</select><select id='itemWeapon' onchange='itemFilterChange(this)'><option disabled selected>Weapon</option><option onclick='itemFilter(`weapon`,`all`)'>All</option>");
@@ -3442,7 +3912,7 @@ static void items_page(const char *a, const char *k) {
     set_display("itemsHolder", "block");
     set_html("itemsList", "");
     g_items.seas = g_items.rarity = g_items.weapon = g_items.type = -1;
-    g_items.blackm = 0;
+    g_items.cat[0] = 0;
     g_items.sort = 0;
     items_filter("seas", "all");
     // ?p=items&q=<key>&s=<value>: a preset filter
@@ -3451,81 +3921,159 @@ static void items_page(const char *a, const char *k) {
 
 // ------------------------------------------------------------------ brain: market popups (showPopup and friends)
 
+// showPopup's twelve arguments (hub-10.0.7.js:4790): page, skin, thumbnail, label, skinid, funds, count, salestart,
+// player, uid, marketid, refresh. The strings are kept as passed ("" for an absent one).
 typedef struct {
     char page[16], preview[256], label[64], skin_id[24], funds[24], salestart[24], player[64];
-    int skin, count, uid, market_id, valid;
+    int skin, count, uid, market_id, refresh;
+    unsigned char has_count, has_uid, valid;
 } MarketPop;
-static MarketPop g_last_pop; // lastPop (refreshPopup)
+static MarketPop g_last_pop; // iïiiïïí: lastPop, the arguments again with refresh = true (refreshPopup)
+static void last_pop_clear(void) { g_last_pop = (MarketPop) {.refresh = 1, .valid = 1}; }
+static double g_grace_start; // iîïììîi: the salestart the grace timer counts from (0: none)
+static int g_grace_timer;
 
-static void market_popup_html(StrBuf *out, const MarketPop *p);
+// iïìiiïì: an inventory row's count after a listing (hub-10.0.7.js:5250), cleared by every io_0 (:2721); the popup
+// shows it in place of the card's count (:4792)
+typedef struct { int uid, cnt; } CountOverride;
+static CountOverride g_count_over[64];
+static int g_count_over_n;
 
-static void market_popup(const MarketPop *p) {
+static void count_override_set(const int uid, const int cnt) {
+    for (int i = 0; i < g_count_over_n; i++)
+        if (g_count_over[i].uid == uid) {
+            g_count_over[i].cnt = cnt;
+            return;
+        }
+    if (g_count_over_n < (int) (sizeof(g_count_over) / sizeof(g_count_over[0]))) g_count_over[g_count_over_n++] = (CountOverride) {uid, cnt};
+}
+
+static const CountOverride *count_override(const int uid) {
+    for (int i = 0; i < g_count_over_n; i++)
+        if (g_count_over[i].uid == uid) return &g_count_over[i];
+    return NULL;
+}
+
+static void market_popup_html(StrBuf *out, const MarketPop *p, double elapsed);
+static void grace_tick(void *user);
+
+// window.showPopup (hub-10.0.7.js:4790-4857)
+static void market_popup(const MarketPop *in) {
+    MarketPop p = *in;
+    g_last_pop = p;
+    g_last_pop.refresh = 1;
+    g_last_pop.valid = 1;
+    const CountOverride *co = p.has_uid ? count_override(p.uid) : NULL;
+    if (co) p.count = co->cnt, p.has_count = 1;
     reset_pops();
-    set_display("popupHolder", "block");
+    set_display("popupHolder", p.page[0] ? "block" : "none");
     set_style("popupContent", "width", "618px");
     set_display("popupContent", "block");
-    if (!hub_skin(p->skin)) return;
-    g_last_pop = *p;
-    g_last_pop.valid = 1;
+    if (!hub_skin(p.skin) || !p.page[0]) return;
+    const double salestart = atof(p.salestart);
+    const double elapsed = fmax(0, now_epoch_ms() - salestart);
+    if (!p.refresh && elapsed < SALE_GRACE_MS) g_grace_start = salestart;
+    if (g_grace_start && !g_grace_timer) g_grace_timer = html_timer_add(1000, grace_tick, NULL);
     StrBuf sb = {0};
-    market_popup_html(&sb, p);
+    market_popup_html(&sb, &p, elapsed);
     char *html = sb_finish(&sb);
     set_html("popupContent", html);
     free(html);
 }
 
-// The popup's content (also the listing page's, hub_render_listing).
-static void market_popup_html(StrBuf *out, const MarketPop *p) {
+// iíííïiï, every second (hub-10.0.7.js:4363-4377): the open grace timer's "ready in" with seconds; once the window has
+// passed, refreshPopup. (KrunkNative: the interval runs while a grace start is set; it does nothing otherwise.)
+static void grace_tick(void *user) {
+    (void) user;
+    g_grace_timer = 0;
+    if (!g_grace_start) return;
+    const double h = now_epoch_ms() - g_grace_start;
+    if (h >= SALE_GRACE_MS) {
+        g_grace_start = 0;
+        if (g_last_pop.valid && g_hub.brain) {
+            const MarketPop p = g_last_pop;
+            market_popup(&p);
+        }
+        return;
+    }
+    char t[48], ready[96];
+    readable_time_s(t, sizeof(t), fmax(0, SALE_GRACE_MS - h), 1);
+    I18N_F(ready, "social.market.grace", "ready in {0}", t);
+    set_html("graceTimer", ready);
+    g_grace_timer = html_timer_add(1000, grace_tick, NULL);
+}
+
+// the "Login to Buy" / "lvl N required" block (hub-10.0.7.js:4811-4818, 3515-3522)
+static const char *market_block(const AccountInfo *acc, const int sell, char *buf, const size_t n) {
+    if (!acc) return sell ? I18N("social.login.sell", "Login to Sell") : I18N("social.login.buy", "Login to Buy");
+    if (acc->level >= MARKET_MIN_LVL) return NULL;
+    char lvl[16];
+    snprintf(lvl, sizeof(lvl), "%d", MARKET_MIN_LVL);
+    I18N_F(buf, "social.market.req", "lvl {0} required", lvl);
+    (void) n;
+    return buf;
+}
+
+// the popup's image, 3D button and corner label (hub-10.0.7.js:4806-4808; the listing page's :3513)
+static void append_popup_head(StrBuf *sb, const ViewerSkin *g, const int skin, const char *preview) {
+    const char *col = rarity_color(g);
+    const int rb = g_hub.rarity_anim && rarity_animate(g);
+    sb_appendf(sb, "<div class='popupImgSeason'>Season %d</div>", g->seas ? g->seas : 1);
+    if (g->type == 4) {
+        sb_appendf(sb, "<div class='sprayPopupImg%s' style='background: url(&quot;%s&quot;);border:5px solid %s;", rb ? " rainbowBorder" : "", preview, col);
+        spray_anim_style(sb, g, "sprayPopAnm");
+        sb_append(sb, "'></div>");
+    } else {
+        sb_appendf(sb, "<div class='popupImgH%s' style='border:5px solid %s;'><img draggable='false' class='popupImg%s' src='%s'/></div>", rb ? " rainbowBorder" : "", col, (g->flags & VS_RGB) ? " rgbHue" : "", preview);
+    }
+    sb_appendf(sb, "<div class='popupImgInfo' onclick='openViewer(%d)'>3D</div>", skin);
+    append_item_label(sb, g, skin, "");
+}
+
+// The popup's content (hub-10.0.7.js:4806-4855)
+static void market_popup_html(StrBuf *out, const MarketPop *p, const double elapsed) {
     const ViewerSkin *g = hub_skin(p->skin);
     if (!g) return;
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
-    const double l = atof(p->salestart);
-    const double h = now_epoch_ms() - l > 0 ? now_epoch_ms() - l : 0;
     const char *col = rarity_color(g);
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='popupImgSeason'>Season %d</div>", g->seas ? g->seas : 1);
-    if (g->type == 4) {
-        if (g->frames) sb_appendf(&sb, "<style>@keyframes sprayPopAnm%d {100%%{background-position:-%dpx}}</style>", g->frames, g->frames * 220);
-        sb_appendf(&sb, "<div class='sprayPopupImg' style='background: url(&quot;%s&quot;);border:5px solid %s;", p->preview, col);
-        spray_anim_style(&sb, g, "sprayPopAnm");
-        sb_append(&sb, "'></div>");
-    }
-    else sb_appendf(&sb, "<div class='popupImgH%s' style='border:5px solid %s;'><img draggable='false' class='popupImg%s' src='%s'/></div><div class='popupImgInfo' onclick='openViewer(%d)'>3D</div>", rarity_animate(g) ? " rainbowBorder" : "", col, (g->flags & VS_RGB) ? " rgbHue" : "", p->preview, p->skin);
-    const IllicitSkin *il = illicit_skin(p->skin);
-    if (il) sb_append(&sb, "<div class='itemLabel' style='background-color:#00ffff'>?\?\?</div>");
-    else append_item_label(&sb, g, "itemLabel", "");
-    sb_appendf(&sb, "<div class='popupInfo'><div class='pItemName%s' style='color:%s'>", rarity_animate(g) ? " rainbowText" : "", col);
+    if (g->type == 4 && g->frames) sb_appendf(&sb, "<style>@keyframes sprayPopAnm%d {100%%{background-position:-%dpx}}</style>", g->frames, g->frames * 220);
+    append_popup_head(&sb, g, p->skin, p->preview);
+    sb_appendf(&sb, "<div class='popupInfo'><div class='pItemName%s' style='color:%s'>", g_hub.rarity_anim && rarity_animate(g) ? " rainbowText" : "", col);
     sb_append_esc(&sb, g->name);
-    sb_appendf(&sb, "</div><div class='pItemRar'>x <span style='color:rgba(255,255,255,0.8);font-size:22px'>%d</span></div><div class='pItemDesc'>", p->count ? p->count : 1);
+    sb_appendf(&sb, "</div><div class='pItemRar'>x <span style='color:rgba(255,255,255,0.8);font-size:22px'>%d</span></div><div class='pItemDesc'>", p->has_count && p->count ? p->count : 1);
     sb_append_esc(&sb, p->label);
     sb_append(&sb, "</div>");
     const int inventory = !strcmp(p->page, "inventory"), blackm = !strcmp(p->page, "blackm");
+    const IllicitSkin *il = illicit_skin(p->skin);
     if (blackm) {
-        sb_append(&sb, "<div class='pItemOwn' style='bottom: 70px;'>");
+        sb_append(&sb, "<div class='pItemOwn' style='bottom: 70px;max-width: 240px;'>");
         sb_append_esc(&sb, il && il->req_t ? il->req_t : "I got what you need");
         sb_append(&sb, "</div>");
     } else if (!inventory) {
-        const char *who = p->player[0] && strcmp(p->player, "0") ? p->player : "You";
-        sb_append(&sb, "<a class='pItemOwn' href='/social.html?p=profile&q=");
-        sb_append_esc(&sb, who);
+        // iïîííïì(player || "You"): "./?profile=" + encodeURIComponent(the name without quotes)
+        const char *who = p->player[0] ? p->player : "You";
+        sb_append(&sb, "<a class='pItemOwn' href='./?profile=");
+        for (const unsigned char *c = (const unsigned char *) who; *c; c++) {
+            if (*c == '"' || *c == '\'') continue;
+            if (isalnum(*c) || strchr("-_.!~*()", *c)) sb_appendf(&sb, "%c", *c);
+            else sb_appendf(&sb, "%%%02X", *c);
+        }
         sb_append(&sb, "' target='_blank'>");
-        sb_append_esc(&sb, who);
+        sb_append_unquoted(&sb, who);
         sb_append(&sb, "</a>");
     }
-    if (l > 0 && !inventory) {
-        char ago[48];
-        readable_time(ago, sizeof(ago), h);
-        char listed[96];
+    if (atof(p->salestart) && !inventory) {
+        char ago[48], listed[96];
+        readable_time(ago, sizeof(ago), elapsed);
         I18N_F(listed, "social.market.listed", "listed {0} ago", ago);
         sb_appendf(&sb, "<div class='pItemTime'>%s</div>", listed);
     }
-    char a[32], b[32], c[32];
-    if (!strcmp(p->page, "market")) {
-        const int grace = h < SALE_GRACE_MS;
-        char req[64], lvl[16];
-        snprintf(lvl, sizeof(lvl), "%d", MARKET_MIN_LVL);
-        I18N_F(req, "social.market.req", "lvl {0} required", lvl);
-        const char *block = !acc ? I18N("social.login.buy", "Login to Buy") : acc->level < MARKET_MIN_LVL ? req : NULL;
+    char a[32], b[32], c[32], req[64];
+    if (!strcmp(p->page, "market") || blackm) {
+        const int grace = !blackm && elapsed < SALE_GRACE_MS;
+        const char *block = blackm ? (!acc ? I18N("social.login.buy", "Login to Buy") : il && il->req != ECON_REQ_NONE && !illicit_req_ok(il, acc) ? "Access Denied" : NULL)
+                                   : market_block(acc, 0, req, sizeof(req));
         const double funds = acc ? acc->funds : 0, price = atof(p->funds), left = funds - price;
         comma_number(a, sizeof(a), funds);
         comma_number(b, sizeof(b), price);
@@ -3533,9 +4081,14 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
         sb_appendf(&sb, "<div class='pItemPricing'><div class='priceP'>%s <span style='color:#fff'>KR</span></div><div class='priceP'>-%s <span style='color:#fff'>KR</span></div><div class='pricePF' style='%s'>%s <span style='color:#fff'>KR</span></div></div>",
                    a, b, left < 0 ? "color:#ed4242" : "", c);
         sb_appendf(&sb, "<div class='pItemButton' style='%s' ", block || grace ? "background-color:#2b2b2b" : left < 0 ? "background-color:#ed4242" : "");
-        if (!block && !grace && left >= 0) sb_appendf(&sb, "onclick='buyItem(%d,%d)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->market_id, p->uid);
+        if (blackm) econ_new_op(g_pbm_key, sizeof(g_pbm_key), "pbm"); // KrunkNative: one purchase per popup, however often it is clicked
+        if (!block && !grace && left >= 0) {
+            if (blackm) sb_appendf(&sb, "onclick='buyblackM(%d)'", p->skin);
+            else sb_appendf(&sb, "onclick='buyItem(%d,%d)'", p->market_id, p->uid);
+        }
+        if (!block && !grace && left >= 0) sb_append(&sb, "onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'");
         if (grace) {
-            readable_time(a, sizeof(a), SALE_GRACE_MS - h);
+            readable_time_s(a, sizeof(a), SALE_GRACE_MS - elapsed, 1);
             char ready[96];
             I18N_F(ready, "social.market.grace", "ready in {0}", a);
             sb_appendf(&sb, "><span id='graceTimer' style='color:rgba(255,255,255,0.6)';'>%s</span></div>", ready);
@@ -3543,26 +4096,11 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
             sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? I18N("social.market.cant", "Can't Afford") : I18N("social.market.purchase", "Purchase"));
         }
     } else if (inventory) {
-        char req[64], lvl[16];
-        snprintf(lvl, sizeof(lvl), "%d", MARKET_MIN_LVL);
-        I18N_F(req, "social.market.req", "lvl {0} required", lvl);
-        const char *block = !acc ? I18N("social.login.sell", "Login to Sell") : acc->level < MARKET_MIN_LVL ? req : NULL;
+        const char *block = market_block(acc, 1, req, sizeof(req));
         sb_appendf(&sb, "<div class='pItemPricing'><div id='sellPricFee'>%s</div><input id='sellPriceIn' oninput='calcFee(this)' type='number' placeholder='%s KR' min='0' max='%d' step='1'></div><div id='cPostSaleBtn' class='pItemButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div><div id='postSaleBtn' class='pItemButton' %s",
                    I18N("social.market.fee", "No List Fee"), I18N("social.market.price.list", "List Price in"), SALE_MAX, block ? "style='background-color:#2b2b2b'" : "");
-        if (!block) sb_appendf(&sb, "onclick='listItem(%d,%s,%d)'", p->skin, p->skin_id, p->uid);
+        if (!block) sb_appendf(&sb, "onclick='listItem(%d,%s,%d)'", p->skin, p->skin_id[0] ? p->skin_id : "0", p->uid);
         sb_appendf(&sb, "onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div>", block ? block : I18N("social.market.list", "List Item"));
-    } else if (blackm) {
-        const char *block = !acc ? I18N("social.login.buy", "Login to Buy") : !il || !illicit_req_ok(il, acc) ? "Access Denied" : NULL;
-        const double funds = acc ? acc->funds : 0, price = atof(p->funds), left = funds - price;
-        comma_number(a, sizeof(a), funds);
-        comma_number(b, sizeof(b), price);
-        comma_number(c, sizeof(c), left);
-        sb_appendf(&sb, "<div class='pItemPricing'><div class='priceP'>%s <span style='color:#fff'>KR</span></div><div class='priceP'>-%s <span style='color:#fff'>KR</span></div><div class='pricePF' style='%s'>%s <span style='color:#fff'>KR</span></div></div>",
-                   a, b, left < 0 ? "color:#ed4242" : "", c);
-        sb_appendf(&sb, "<div class='pItemButton' style='%s' ", block ? "background-color:#2b2b2b" : left < 0 ? "background-color:#ed4242" : "");
-        econ_new_op(g_pbm_key, sizeof(g_pbm_key), "pbm"); // one purchase per popup, however often it is clicked
-        if (!block && left >= 0) sb_appendf(&sb, "onclick='buyblackM(%d)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->skin);
-        sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? I18N("social.market.cant", "Can't Afford") : I18N("social.market.purchase", "Purchase"));
     } else if (!strcmp(p->page, "sales")) {
         comma_number(a, sizeof(a), atof(p->funds));
         sb_appendf(&sb, "<div class='pItemPricing'>%s <span style='color:rgba(255,255,255,0.4)'>KR</span></div><div class='pItemButton' onclick='unlistItem(%d,%d,%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div>", a, p->skin, p->market_id, p->uid,
@@ -3593,8 +4131,10 @@ static void remove_card(const char *page, const int uid) {
     if (e) html_dom_remove(e);
 }
 
-// An inventory row's count changed (io_lir / io_qsr): the row (re-rendered cards) and its card.
-static void inventory_count(const int uid, const int cnt) {
+// An inventory row's count changed (io_lir / io_qsr): the row (re-rendered cards) and its card. A listing (listed)
+// also keeps the count for the row's popup (iïìiiïì, hub-10.0.7.js:5250).
+static void inventory_count(const int uid, const int cnt, const int listed) {
+    if (listed && cnt) count_override_set(uid, cnt);
     for (int i = 0; i < g_market_row_count; i++) {
         if (g_market_rows[i].uid == uid) g_market_rows[i].count = cnt;
     }
@@ -3633,6 +4173,7 @@ static void filter_state_save(const int sort) {
     if (el(id)) html_dom_get_value(el(id), st->season, sizeof(st->season));
     if (!sort && el("sortFilt")) html_dom_get_value(el("sortFilt"), st->order, sizeof(st->order));
     if (sort && el("onlyMissing")) st->missing = html_dom_get_checked(el("onlyMissing"));
+    if (sort && el("nonTradable")) st->non_tradable = html_dom_get_checked(el("nonTradable"));
 }
 
 static void market_filter_popup(const int sort) {
@@ -3646,17 +4187,21 @@ static void market_filter_popup(const int sort) {
     const char *pre = sort ? "Sort" : "Filt";
     const char *nav = sort ? "sort" : "filter";
     StrBuf sb = {0};
+    // filterPopup / sortPopup (hub-10.0.7.js:4392-4448, 4518-4558)
     if (!sort) {
         sb_appendf(&sb, "<div class='filterPopHeader'>Market Search</div><div class='filterName'>%s</div><div id='orderBySel'><select id='sortFilt' onchange='retainSelected(this)'><option value='0'%s>%s</option><option value='1'%s>%s</option></select></div>",
-                   I18N("social.market.sort2", "Sort"), !strcmp(st->order, "0") ? " selected" : "", I18N("social.market.price.high", "Highest Price"),
+                   I18N("social.market.sort", "Filter/Sort"), !strcmp(st->order, "0") ? " selected" : "", I18N("social.market.price.high", "Highest Price"),
                    strcmp(st->order, "0") ? " selected" : "", I18N("social.market.price.low", "Lowest Price"));
+        sb_append(&sb, "<div class='filterName'>Season</div><div id='orderBySel'><select id='seaFilt' onchange='retainSelected(this)'><option value='0'>All Seasons</option>");
     } else {
-        sb_append(&sb, "<div class='filterPopHeader'>Sort Inventory</div>");
+        sb_append(&sb, "<div class='filterPopHeader'>Inventory Sort</div><div class='filterName'>Season</div><div id='orderBySel'><select id='seaSort' style='color: #353535;' onchange='retainSelected(this)'><option value='0'>All Seasons</option>");
     }
-    sb_appendf(&sb, "<div class='filterName'>Season</div><div id='orderBySel'><select id='sea%s' onchange='retainSelected(this)'><option value='0'>All Seasons</option>", pre);
-    for (int s2 = 1; s2 <= 7; s2++) sb_appendf(&sb, "<option%s>%d</option>", atoi(st->season) == s2 ? " selected" : "", s2); // config.currentSeason
+    for (int s2 = 1; s2 <= g_viewer_current_season; s2++) sb_appendf(&sb, "<option%s>%d</option>", atoi(st->season) == s2 ? " selected" : "", s2);
     sb_append(&sb, "</select></div>");
-    if (sort) sb_appendf(&sb, "<div class='filterName' style='position: relative;display: block;width: 100%%;'>Only Show Missing<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='onlyMissing'%s><span class='filterSlider'></span></label></div>", st->missing ? " checked" : "");
+    if (sort) {
+        sb_appendf(&sb, "<div class='filterName' style='position: relative;display: block;width: 100%%;margin-top: 5px;'>Only Show Missing<label class='filterSwitch'><input type='checkbox' id='onlyMissing' onchange='retainChecked(this)'%s><span class='filterSlider'></span></label></div>", st->missing ? " checked" : "");
+        sb_appendf(&sb, "<div class='filterName' style='position: relative;display: block;width: 100%%;margin-top: 5px;'>Hide Non-Tradable Skins<label class='filterSwitch'><input type='checkbox' id='nonTradable' onchange='retainChecked(this)'%s><span class='filterSlider'></span></label></div>", st->non_tradable ? " checked" : "");
+    }
     sb_appendf(&sb, "<input type='search' id='%s' onkeydown='if(window.event.keyCode==13) run%s()' placeholder='Keyword: Sniper, Plasma, Wings' value='", sort ? "invSortTxt" : "marketFiltTxt", sort ? "Sort" : "Filter");
     sb_append_esc(&sb, st->text);
     sb_appendf(&sb, "' /><div class='filterNav' id='%sNav_0' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='switchSortFilter(%d, 0)' style='color:#faa332'>Rarities</div><div class='filterNav' id='%sNav_1' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='switchSortFilter(%d, 1)'>Weapons</div><div class='filterNav' id='%sNav_2' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='switchSortFilter(%d, 2)'>Cosmetics</div><div id='%sTog' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='toggleSortFilters(%d)'>Toggle</div>",
@@ -3664,7 +4209,7 @@ static void market_filter_popup(const int sort) {
     sb_appendf(&sb, "<div class='filterDiv' id='%sDiv_0'>", nav);
     for (int a = g_viewer_rarity_count - 1; a >= 0; --a) {
         sb_append(&sb, "<div class='raritySel'>");
-        if (g_hub.rarity_anim && a == 6) sb_append(&sb, "<div class='colCub rainbowBG'></div>");
+        if (g_hub.rarity_anim && a == 6) sb_append(&sb, "<div class='colCub rainbowBG'></div>"); // store.rarities[6].animate
         else sb_appendf(&sb, "<div class='colCub' style='background-color:%s'></div>", g_viewer_rarities[a].color);
         sb_appendf(&sb, "%s<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='rar%s%d'%s><span class='filterSlider'></span></label></div>",
                    g_viewer_rarities[a].name, pre, a, st->checked[0][a] ? " checked" : "");
@@ -3686,7 +4231,7 @@ static void market_filter_popup(const int sort) {
                    name, pre, a, st->checked[2][a] ? " checked" : "");
     }
     sb_appendf(&sb, "</div><div id='filterRBtn' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='run%s()'>%s</div><div id='resetFBtn' onmouseover='SOUND.play(`tick_0`,0.1)' onclick='resetSortFilter(%d)'>Reset</div>",
-               sort ? "Sort" : "Filter", sort ? "Sort" : "Search", sort);
+               sort ? "Sort" : "Filter", sort ? I18N("social.market.sort2", "Sort") : I18N("social.market.filter", "Search"), sort);
     char *html = sb_finish(&sb);
     generic_popup(html, sort ? "sortPop" : "filterPop", NULL);
     free(html);
@@ -3694,7 +4239,8 @@ static void market_filter_popup(const int sort) {
 
 static int g_filter_n, g_sort_n; // the latest request (stale replies are dropped)
 
-// runFilter / runSort: io.send("fil"|"srt", n, text, rarities{}, weapons{}, types{}, season, order|missing)
+// runFilter / runSort (hub-10.0.7.js:4449-4470, 4560-4590): io.send("fil", n, text, rarities{}, weapons{}, types{},
+// season, order) / io.send("srt", n, text, rarities{}, weapons{}, types{}, season, onlyMissing, nonTradable)
 static void market_run_filter(const int sort) {
     filter_state_save(sort);
     const HubFilterState *st = &g_filter_state[sort];
@@ -3720,8 +4266,12 @@ static void market_run_filter(const int sort) {
     cJSON_AddItemToArray(f, wep);
     cJSON_AddItemToArray(f, typ);
     cJSON_AddItemToArray(f, cJSON_CreateString(st->season));
-    if (sort) cJSON_AddItemToArray(f, cJSON_CreateBool(st->missing));
-    else cJSON_AddItemToArray(f, cJSON_CreateString(st->order));
+    if (sort) {
+        cJSON_AddItemToArray(f, cJSON_CreateBool(st->missing));
+        cJSON_AddItemToArray(f, cJSON_CreateBool(st->non_tradable));
+    } else {
+        cJSON_AddItemToArray(f, cJSON_CreateString(st->order));
+    }
     io_wait(I18N("social.market.searching", "Searching"));
     hub_send(f);
 }
@@ -3733,7 +4283,7 @@ static void market_reset_filter(const int sort) {
     st->text[0] = 0;
     snprintf(st->season, sizeof(st->season), "0");
     snprintf(st->order, sizeof(st->order), "1");
-    st->missing = 0;
+    st->missing = st->non_tradable = 0;
     market_filter_popup(sort);
     filter_state_save(sort);
     market_run_filter(sort);
@@ -3792,7 +4342,7 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
             io_po(0, "Max Items on Sale");
         } else if (cJSON_GetObjectItemCaseSensitive(a1, "cnt")) {
             if (cJSON_GetObjectItemCaseSensitive(a1, "funds")) hub_set_funds(jnum(a1, "funds"));
-            inventory_count((int) cJSON_GetNumberValue(a2), (int) jnum(a1, "cnt"));
+            inventory_count((int) cJSON_GetNumberValue(a2), (int) jnum(a1, "cnt"), 1);
             io_po(1, NULL);
         } else {
             io_po(0, NULL);
@@ -3806,7 +4356,7 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
     } else if (!strcmp(label, "qsr")) { // io_qsr({f, c, i})
         if (cJSON_IsObject(a1)) {
             if (cJSON_GetObjectItemCaseSensitive(a1, "f")) hub_set_funds(jnum(a1, "f"));
-            inventory_count((int) jnum(a1, "i"), (int) jnum(a1, "c"));
+            inventory_count((int) jnum(a1, "i"), (int) jnum(a1, "c"), 0);
             io_po(1, NULL);
         } else {
             io_po(0, "Unable to sell");
@@ -3821,7 +4371,15 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
         update_window("market", sort ? "inventory" : "market", NULL, NULL, NULL, 1);
         show_popup_none();
         g_market_no_sort = !sort;
-        io_0("market", sort ? "inventory" : "market", a2, NULL);
+        // iïîiiíï(n, rows, readOnly) (hub-10.0.7.js:4596-4600): the sort reply's third value is io_0's readOnly
+        cJSON *fr = cJSON_CreateArray();
+        cJSON_AddItemToArray(fr, cJSON_CreateString("0"));
+        cJSON_AddItemToArray(fr, cJSON_CreateString("market"));
+        cJSON_AddItemToArray(fr, cJSON_CreateString(sort ? "inventory" : "market"));
+        cJSON_AddItemToArray(fr, cJSON_CreateNull());
+        cJSON_AddItemToArray(fr, cJSON_CreateBool(sort && cJSON_IsTrue(a3)));
+        io_0("market", sort ? "inventory" : "market", a2, fr);
+        cJSON_Delete(fr);
     } else {
         return 0;
     }
@@ -3856,6 +4414,7 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
     if (g_hub.has_s && strcmp(g_hub.S, key) != 0) return;
     if (!e) return;
     const int has_t = t && !cJSON_IsNull(t);
+    g_count_over_n = 0; // iïìiiïì = {} (hub-10.0.7.js:2721)
     hub_title(NULL, 0, NULL); // the page's own title below
     hide_all(0);
     set_display("loadMessage", "none");
@@ -3895,7 +4454,7 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         set_display("marketSearchB", a && !strcmp(a, "market") ? "table-cell" : "none");
         set_display("invStats", a && (!strcmp(a, "inventory") || !strcmp(a, "sales")) ? "table-cell" : "none");
         // no listings / inventory for a guest: social.market.login (K is null)
-        if (g_hub.brain) hub_render_market(a, has_t ? t : NULL);
+        if (g_hub.brain) hub_render_market(a, has_t ? t : NULL, cJSON_IsTrue(cJSON_GetArrayItem(extra, 4)), cJSON_GetArrayItem(extra, 8));
         else set_market_note("marketList", STR_MARKET_LOGIN);
     } else if (!strcmp(e, "items")) {
         items_page(a, g_hub.k);
@@ -4350,7 +4909,7 @@ static void handle_reply_frame(const cJSON *frame) {
             StrBuf sb = {0};
             if (post) {
                 sb_append(&sb, "<div style='height:10px'></div>");
-                append_post(&sb, post, 1);
+                append_post(&sb, post, 1, 0);
                 const AccountInfo *me = g_hub.logged_in ? active_account() : NULL;
                 sb_append(&sb, "<div class='replyHolder'><img src='");
                 sb_pfp(&sb, me ? me->id : 0, me && me->premium, "./img/player_pfp.png");
@@ -4994,59 +5553,43 @@ H(h_clear_pops) { UNUSED; clear_pops(); return 1; }
 
 // ---- brain: market / clan / profile tab handlers (social.js window.*)
 
-// showPopup(page, skin, preview, label, skinid, funds, count, salestart, player, uid, marketid); no args: close
+// window.showPopup(page, skin, thumbnail, label, skinid, funds, count, salestart, player, uid, marketid, refresh)
+// (hub-10.0.7.js:4790): the market / Black Market / inventory / sales popup; no page closes it
+static void pop_str(char *out, const size_t n, const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i) {
+    out[0] = 0;
+    if (i >= argc) return;
+    if (args[i].kind == HTML_ARG_NUM) js_num(out, n, args[i].num);
+    else if (args[i].kind == HTML_ARG_STR && args[i].str && strcmp(args[i].str, "undefined") && strcmp(args[i].str, "null")) snprintf(out, n, "%s", arg_s(ev, args, argc, i));
+}
+
 H(h_show_popup) {
     UNUSED;
-    if (!g_hub.brain || argc < 2) {
-        show_popup_none();
-        return 1;
-    }
-    const char *page = arg_s(ev, args, argc, 0);
-    if (page && !strcmp(page, "blackm")) { // showPopup("blackm", v, preview, me(Pe), v, Pe.funds)
-        const int skin = (int) arg_n(args, argc, 1, -1);
-        const IllicitSkin *il = illicit_skin(skin);
-        const ViewerSkin *pe = hub_skin(skin);
-        if (!il || !pe) return 1;
-        MarketPop p = {0};
-        snprintf(p.page, sizeof(p.page), "blackm");
-        p.skin = skin;
-        skin_preview(p.preview, sizeof(p.preview), pe);
-        snprintf(p.label, sizeof(p.label), "%s", skin_type_label(pe));
-        snprintf(p.skin_id, sizeof(p.skin_id), "%d", skin);
-        snprintf(p.funds, sizeof(p.funds), "%d", il->funds);
-        market_popup(&p);
-        return 1;
-    }
-    // showPopup(page, skin, row): the row of the last market list (hub_render_market)
-    const int row = (int) arg_n(args, argc, 2, -1);
-    if (row < 0 || row >= g_market_row_count) return 1;
-    const MarketRow *m = &g_market_rows[row];
-    const ViewerSkin *pe = hub_skin(m->skin);
-    if (!pe) return 1;
-    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     MarketPop p = {0};
-    snprintf(p.page, sizeof(p.page), "%s", arg_s(ev, args, argc, 0) ? arg_s(ev, args, argc, 0) : g_market_sub);
-    p.skin = m->skin;
-    skin_preview(p.preview, sizeof(p.preview), pe);
-    snprintf(p.label, sizeof(p.label), "%s", skin_type_label(pe));
-    snprintf(p.skin_id, sizeof(p.skin_id), "%d", m->skin_id);
-    snprintf(p.funds, sizeof(p.funds), "%.0f", m->funds);
-    p.count = m->count;
-    snprintf(p.salestart, sizeof(p.salestart), "%.0f", m->salestart);
-    snprintf(p.player, sizeof(p.player), "%s", m->player[0] ? m->player : acc ? acc->name : "0");
-    p.uid = m->uid;
-    p.market_id = m->market_id;
+    pop_str(p.page, sizeof(p.page), ev, args, argc, 0);
+    if (!g_hub.brain) p.page[0] = 0; // KrunkNative: no market without kn_brain
+    p.skin = (int) arg_n(args, argc, 1, -1);
+    pop_str(p.preview, sizeof(p.preview), ev, args, argc, 2);
+    pop_str(p.label, sizeof(p.label), ev, args, argc, 3);
+    pop_str(p.skin_id, sizeof(p.skin_id), ev, args, argc, 4);
+    pop_str(p.funds, sizeof(p.funds), ev, args, argc, 5);
+    p.has_count = argc > 6 && args[6].kind == HTML_ARG_NUM;
+    p.count = (int) arg_n(args, argc, 6, 0);
+    pop_str(p.salestart, sizeof(p.salestart), ev, args, argc, 7);
+    if (argc > 8 && !(args[8].kind == HTML_ARG_NUM && args[8].num == 0)) pop_str(p.player, sizeof(p.player), ev, args, argc, 8);
+    p.has_uid = argc > 9 && args[9].kind == HTML_ARG_NUM;
+    p.uid = (int) arg_n(args, argc, 9, 0);
+    p.market_id = (int) arg_n(args, argc, 10, 0);
+    p.refresh = argc > 11 && arg_n(args, argc, 11, 0) != 0;
     market_popup(&p);
     return 1;
 }
 
+// window.refreshPopup (hub-10.0.7.js:4378-4382): showPopup(...lastPop)
 H(h_refresh_popup) {
     UNUSED;
     if (g_last_pop.valid) {
         const MarketPop p = g_last_pop;
         market_popup(&p);
-    } else {
-        show_popup_none();
     }
     return 1;
 }
@@ -5067,10 +5610,10 @@ static void send_econ(const char *label, const int n, const double *v, const cha
     hub_send(econ_frame(label, n, v, key));
 }
 
-// buyItem(marketid, uid): io.send("pi", marketid, uid)
+// buyItem(marketid, uid): io.send("pi", marketid, uid); the listing page passes null (hub-10.0.7.js:3530): no card
 H(h_buy_item) {
     UNUSED;
-    const double v[2] = {arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0)};
+    const double v[2] = {arg_n(args, argc, 0, 0), argc > 1 && args[1].kind == HTML_ARG_NUM ? args[1].num : -1};
     char key[48];
     snprintf(key, sizeof(key), "buy-%.0f", v[0]);
     send_econ("pi", 2, v, key);
@@ -5088,7 +5631,8 @@ H(h_buy_illicit) {
     return 1;
 }
 
-// listItem(skin, skinid, uid) -> confListPopup -> listConfirmed: io.send("li", skin, skinid, uid, price)
+// listItem(skin, skinid, uid) -> confListPopup (hub-10.0.7.js:5212-5230: a noSale or opensea item cannot be listed)
+// -> listConfirmed: io.send("li", skin, skinid, uid, price)
 H(h_list_item) {
     UNUSED;
     char price[32] = "";
@@ -5098,6 +5642,14 @@ H(h_list_item) {
     const int skin = (int) arg_n(args, argc, 0, 0);
     const ViewerSkin *pa = hub_skin(skin);
     if (!pa) return 1;
+    if (skin_true(skin, "noSale")) {
+        io_po(0, "Item cant be sold.");
+        return 1;
+    }
+    if (skin_true(skin, "opensea")) {
+        io_po(0, I18N("item.sell.cant.krunker", "Item cant be sold on krunker."));
+        return 1;
+    }
     StrBuf sb = {0};
     sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want to list <span style='color:%s'>", rarity_color(pa));
     sb_append_esc(&sb, pa->name);
@@ -5136,7 +5688,9 @@ H(h_unlist_item) {
     return 1;
 }
 
-// quickSell(skin, rarity, uid) -> confQSPopup
+// quickSell(skin, rarity, uid) -> confQSPopup(skin, uid) (hub-10.0.7.js:3717-3754): the item's quick sell KR and Junk
+// (store.rarities' sell / scrap, minQuickSell, qsKR, qsJunk: market_qs_value), Get KR / Get Junk, or Destroy for a
+// noQuickSell item; a Black Market noSale or an opensea item cannot be sold
 H(h_quick_sell) {
     UNUSED;
     if (!g_hub.logged_in) {
@@ -5146,30 +5700,67 @@ H(h_quick_sell) {
     const int skin = (int) arg_n(args, argc, 0, 0), uid = (int) arg_n(args, argc, 2, 0);
     const ViewerSkin *pa = hub_skin(skin);
     if (!pa) return 1;
-    StrBuf sb = {0};
-    sb_appendf(&sb, "<div style='color:#fff;font-size:19px;position:relative;margin-bottom:15px;'>Are you sure you want to Quick Sell <span style='color:%s'>", rarity_color(pa));
-    sb_append_esc(&sb, pa->name);
-    char key[48];
+    const int no_qs = skin_true(skin, "noQuickSell");
+    if (skin_true(skin, "blackM") && skin_true(skin, "noSale")) {
+        io_po(0, I18N("item.sell.cant", "Item cant be sold."));
+        return 1;
+    }
+    if (skin_true(skin, "opensea")) {
+        io_po(0, I18N("item.sell.cant.krunker", "Item cant be sold on krunker."));
+        return 1;
+    }
+    const MarketQsValue qv = market_qs_value(ui_loadout_skin_json(skin));
+    char key[48], name[160], head[320];
     econ_new_op(key, sizeof(key), "qs");
-    sb_appendf(&sb, "</span>?</div><div class='quickSellText'>KR<div class='quickSellKR'><span style='color: #FBC02D'>%d</span> KR (each)</div></div><div class='quickSellText'>Amount<select id='quickSellSelect'><option value='0'>1 Item</option><option value='1'>All But 1</option><option value='2'>All</option></select></div><div id='confirmBtn' onclick='sellConfirmed(%d,%d,&quot;%s&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
-               econ_rarity_sell(pa->rarity), skin, uid, key);
+    snprintf(name, sizeof(name), "<span style='color:%s'>", rarity_color(pa));
+    {
+        StrBuf n = {0};
+        sb_append(&n, name);
+        sb_append_esc(&n, pa->name);
+        sb_append(&n, "</span>");
+        char *t = sb_finish(&n);
+        I18N_F(head, no_qs ? "item.sell.destroy" : "item.sell.quick", no_qs ? "Are you sure you want to Destroy {0}?" : "Are you sure you want to Quick Sell {0}?", t);
+        free(t);
+    }
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div style='color:#FBC02D;font-size:19px;position:relative;margin-bottom:15px;'>%s</div>", head);
+    if (no_qs) sb_append(&sb, "<div style='color:#ed4242;font-size:15px;'>This item has no value</div>");
+    char v[32];
+    if (qv.kr) {
+        js_num(v, sizeof(v), qv.kr);
+        sb_appendf(&sb, "<div class='quickSellText'>KR<div class='quickSellKR'><span style='color: #FBC02D'>%s</span> KR (each)</div></div>", v);
+    }
+    if (qv.junk) sb_appendf(&sb, "<div class='quickSellText'>Junk<div class='quickSellKR'><span style='color: #FBC02D'>%.2f</span> Junk (each)</div></div>", qv.junk);
+    sb_append(&sb, "<div class='quickSellText'>Amount<select id='quickSellSelect'><option value='0'>1 Item</option><option value='1'>All But 1</option><option value='2'>All</option></select></div>");
+    if (no_qs) {
+        sb_appendf(&sb, "<div id='quickSellBtn' onclick='sellConfirmed(%d,2,%d,&quot;%s&quot;)' style='width:74%%' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>Destroy</div>", skin, uid, key);
+    } else {
+        sb_appendf(&sb, "<div id='quickSellBtn' onclick='sellConfirmed(%d,0,%d,&quot;%s&quot;)' %sonmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>Get KR</div>", skin, uid, key, qv.junk ? "" : "style='width:74%' ");
+        if (qv.junk) sb_appendf(&sb, "<div id='scrapBtn' onclick='sellConfirmed(%d,1,%d,&quot;%s&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>Get Junk</div>", skin, uid, key);
+    }
+    sb_append(&sb, "<div id='declineBtn' style='width: 15%;' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>");
     char *html = sb_finish(&sb);
     generic_popup(html, "confQSPop", NULL); // confQSPopup
     free(html);
     return 1;
 }
 
+// sellConfirmed(skin, mode, uid) (hub-10.0.7.js:3741-3748): io.send("qsi", mode (0 KR, 1 Junk, 2 destroy), skin, uid,
+// amount); KrunkNative passes the popup's op key fourth
 H(h_sell_confirmed) {
     UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, I18N("account.login.required", "Must be logged in"));
+        return 1;
+    }
     char amount[8] = "0";
     const HtmlElem sel = el("quickSellSelect");
     if (sel) html_dom_get_value(sel, amount, sizeof(amount));
-    // v7.1.4 io.send("qsi", mode 0 = KR, skin, uid, amount)
-    const double v[4] = {0, arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0), atoi(amount)};
-    const char *key = arg_s(ev, args, argc, 2);
+    const double v[4] = {arg_n(args, argc, 1, 0), arg_n(args, argc, 0, 0), arg_n(args, argc, 2, 0), atoi(amount)};
+    const char *key = arg_s(ev, args, argc, 3);
     char fresh[48];
     if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "qs");
-    io_wait("Please Wait...");
+    io_wait(I18N("generic.wait", "Please Wait..."));
     send_econ("qsi", 4, v, key && *key ? key : fresh);
     return 1;
 }
@@ -5219,7 +5810,7 @@ H(h_load_more_trade_history) {
     if (!g_trades_cache || strcmp(g_hub.v, "market") || strcmp(g_hub.b, "trades")) return 1;
     g_his_page += TRADE_HISTORY_PAGE;
     g_his_keep = 1;
-    hub_render_market("trades", g_trades_cache);
+    hub_render_market("trades", g_trades_cache, 0, NULL);
     return 1;
 }
 
@@ -6005,7 +6596,7 @@ static void io_krh(const cJSON *rows) {
 
 // ---- the profile's Listings tab (io_ul) and the listing page
 
-// The rows the Purchase buttons read back (showPopup(page, skin, row)).
+// The rows of a list whose cards remove_card finds by uid (the profile's listings, the listing page).
 static void set_market_rows(MarketRow *rows, const int n, const char *sub) {
     free(g_market_rows);
     g_market_rows = rows;
@@ -6013,6 +6604,9 @@ static void set_market_rows(MarketRow *rows, const int n, const char *sub) {
     snprintf(g_market_sub, sizeof(g_market_sub), "%s", sub);
 }
 
+// io_ul(rows): the profile's Listings tab (hub-10.0.7.js:4104-4154): market cards without the seed, the video /
+// projection badges or the Share / Preview actions; Purchase is showPopup("market", sk, thumbnail, label, skid, kr, c,
+// ms, the profile's name, uid, id)
 static void io_ul(const cJSON *rows) {
     clear_pops();
     const int n = cJSON_GetArraySize(rows);
@@ -6032,10 +6626,11 @@ static void io_ul(const cJSON *rows) {
             row->salestart = jnum(r, "ms");
             row->market_id = (int) jnum(r, "id");
             snprintf(row->player, sizeof(row->player), "%s", g_hub.profile_name);
+            card_meta(r, &row->meta);
             k++;
         }
         set_market_rows(m, k, "market");
-        sb_appendf(&sb, "<div class='scrollItemNew' style='width:%dpx'>", k > 3 ? 1000 : 900);
+        sb_appendf(&sb, "<div class='scrollItemNew' style='width:%dpx'>", n > 3 ? 1000 : 900);
         SprayAnims anims = {.name = "sprayAnm"};
         g_spray_anims = &anims;
         for (int i = 0; i < k; i++) {
@@ -6043,21 +6638,28 @@ static void io_ul(const cJSON *rows) {
             if (!pe || (pe->flags & (VS_FREE | VS_BLOCKED))) continue;
             char prev[256], price[32];
             skin_preview(prev, sizeof(prev), pe);
-            const char *col = rarity_color(pe);
-            // the item's tooltip on hover (createTip(this), hub-10.0.7.js:3210)
-            sb_appendf(&sb, "<div class='marketCard%s' id='itemCardmarket_%d' style='color:%s;border:5px solid %s' data-index='%d' onmouseenter='SOUND.play(`tick_0`,0.1)' "
-                            "onmouseover='createTip(this)' onmouseout='cancelTip()'>", g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", i, col, col, m[i].skin);
-            sb_append_esc(&sb, pe->name);
-            sb_appendf(&sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
-            append_skin_img(&sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
+            const char *col = rarity_color(pe), *label = skin_type_label(pe);
+            sb_appendf(&sb, "<div class='marketCard%s' id='itemCardmarket_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)' data-index='%d'",
+                       g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", i, col, col, m[i].skin);
+            append_meta_attrs(&sb, &m[i].meta, 0, 0);
+            sb_append(&sb, " onmouseover='createTip(this)' onmouseout='cancelTip()'>");
+            append_card_name(&sb, pe, &m[i].meta);
+            sb_appendf(&sb, "<div class='itemOwn'>%s</div>", label);
+            if (hub_dev()) sb_appendf(&sb, "<div class='itemOwn'>ID: %d</div>", m[i].skin);
+            append_skin_img(&sb, pe, prev, "sprayMarketImg", market_img_class(pe));
             comma_number(price, sizeof(price), m[i].funds);
-            sb_appendf(&sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
-            sb_appendf(&sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='showPopup(&quot;market&quot;,%d,%d)'>Purchase</a><div class='cardActionSep'></div>", m[i].skin, i);
+            if (m[i].funds) sb_appendf(&sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
+            else sb_append(&sb, "<div class='marketPrice'><span style='opacity:0'>s</span></div>");
+            append_card_badges(&sb, pe, 1);
+            sb_appendf(&sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='showPopup(&quot;market&quot;,%d,&quot;%s&quot;,&quot;%s&quot;,&quot;%d&quot;,&quot;%.15g&quot;,%d,&quot;%.15g&quot;,&quot;",
+                       m[i].skin, prev, label, m[i].skin_id, m[i].funds, m[i].count, m[i].salestart);
+            sb_popup_arg(&sb, g_hub.profile_name);
+            sb_appendf(&sb, "&quot;,%d,%d)'>Purchase</a><div class='cardActionSep'></div>", i, m[i].market_id);
             sb_appendf(&sb, "<a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='searchItem(%d)'>Search</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a></div></div>", m[i].skin, m[i].skin);
         }
         g_spray_anims = NULL;
-        spray_anims_keyframes(&sb, &anims, 200);
         sb_append(&sb, "</div>");
+        spray_anims_keyframes(&sb, &anims, 200);
     } else {
         sb_append(&sb, "<div class='scrollItemNew'><div class='noneText'>No Market Listings!</div></div>");
     }
@@ -6066,43 +6668,69 @@ static void io_ul(const cJSON *rows) {
     free(html);
 }
 
-static void market_popup_html(StrBuf *sb, const MarketPop *p);
-
-// io_0("listing", q, row): one listing on its own page (?p=listing&i=<marketId>)
+// io_0("listing", q, {sk, ms, kr, id}) (hub-10.0.7.js:3495-3537): one listing on its own page (?p=listing&i=<id>),
+// its own markup (pItemDesc2 / pItemTime2 / priceP2 / pricePF2 / pItemButton2, buyItem(id, null)). v10's spray branch
+// reads an undefined `src` and throws; KrunkNative draws the thumbnail. A blocked item's note goes to
+// #itemsalesHolder, as v10 writes it.
 static void hub_render_listing(const cJSON *t) {
-    const ViewerSkin *pe = cJSON_IsObject(t) ? hub_skin((int) jnum(t, "sk")) : NULL;
-    if (!pe || (pe->flags & VS_BLOCKED)) {
+    const int sk = cJSON_IsObject(t) ? (int) jnum(t, "sk") : -1;
+    const ViewerSkin *pe = hub_skin(sk);
+    if (cJSON_IsObject(t) && !pe) return;
+    if (!pe) {
         set_market_note("listingHolder", STR_MARKET_NONE);
+        set_display("listingHolder", "block");
         return;
     }
-    MarketRow *m = calloc(1, sizeof(MarketRow));
-    if (!m) return;
-    m->skin = (int) jnum(t, "sk");
-    m->skin_id = m->skin;
-    m->count = 1;
-    m->funds = jnum(t, "kr");
-    m->salestart = jnum(t, "ms");
-    m->market_id = (int) jnum(t, "id");
-    snprintf(m->player, sizeof(m->player), "%s", jstr(t, "p") ? jstr(t, "p") : "");
-    set_market_rows(m, 1, "market");
-    MarketPop p = {0};
-    snprintf(p.page, sizeof(p.page), "market");
-    p.skin = m->skin;
-    skin_preview(p.preview, sizeof(p.preview), pe);
-    snprintf(p.label, sizeof(p.label), "%s", skin_type_label(pe));
-    snprintf(p.skin_id, sizeof(p.skin_id), "%d", m->skin_id);
-    snprintf(p.funds, sizeof(p.funds), "%.0f", m->funds);
-    p.count = 1;
-    snprintf(p.salestart, sizeof(p.salestart), "%.0f", m->salestart);
-    snprintf(p.player, sizeof(p.player), "%s", m->player);
-    p.market_id = m->market_id;
+    if (pe->flags & VS_BLOCKED) {
+        set_market_note("itemsalesHolder", STR_MARKET_NONE);
+        set_display("listingHolder", "block");
+        return;
+    }
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
+    const double ms = jnum(t, "ms"), kr = jnum(t, "kr");
+    const double elapsed = fmax(0, now_epoch_ms() - ms);
+    if (elapsed < SALE_GRACE_MS) {
+        g_grace_start = ms;
+        if (!g_grace_timer) g_grace_timer = html_timer_add(1000, grace_tick, NULL);
+    }
+    char prev[256], a[32], b[32], c[32], req[64];
+    skin_preview(prev, sizeof(prev), pe);
     StrBuf sb = {0};
     sb_append(&sb, "<div class='scrollView'><div class='scrollItem' style='position:relative;overflow-y:auto;padding-top: 20px;padding: 15px;'>");
-    market_popup_html(&sb, &p);
-    sb_append(&sb, "</div></div>");
+    append_popup_head(&sb, pe, sk, prev);
+    sb_appendf(&sb, "<div class='popupInfo'><div class='pItemName%s' style='color:%s'>", g_hub.rarity_anim && rarity_animate(pe) ? " rainbowText" : "", rarity_color(pe));
+    sb_append_esc(&sb, pe->name);
+    sb_appendf(&sb, "</div><div class='pItemDesc2'>%s</div>", skin_type_label(pe));
+    if (ms) {
+        char ago[48], listed[96];
+        readable_time(ago, sizeof(ago), elapsed);
+        I18N_F(listed, "social.market.listed", "listed {0} ago", ago);
+        sb_appendf(&sb, "<div class='pItemTime2'>%s</div>", listed);
+    }
+    const int grace = elapsed < SALE_GRACE_MS;
+    const char *block = market_block(acc, 0, req, sizeof(req));
+    const double funds = acc ? acc->funds : 0, left = funds - kr;
+    comma_number(a, sizeof(a), funds);
+    comma_number(b, sizeof(b), kr);
+    comma_number(c, sizeof(c), left);
+    sb_appendf(&sb, "<div class='pItemPricing'><div class='priceP2'>%s <span style='color:#000'>KR</span></div><div class='priceP2'>-%s <span style='color:#000'>KR</span></div><div class='pricePF2' style='%s'>%s <span style='color:#000'>KR</span></div></div>",
+               a, b, left < 0 ? "color:#ed4242" : "", c);
+    sb_appendf(&sb, "<div class='pItemButton2' style='%s' ", block || grace ? "background-color:#2b2b2b" : left < 0 ? "background-color:#ed4242" : "");
+    if (!block && !grace && left >= 0) sb_appendf(&sb, "onclick='buyItem(%d,null)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", (int) jnum(t, "id"));
+    if (grace) {
+        readable_time_s(a, sizeof(a), SALE_GRACE_MS - elapsed, 1);
+        char ready[96];
+        I18N_F(ready, "social.market.grace", "ready in {0}", a);
+        sb_appendf(&sb, "><span id='graceTimer' style='color:rgba(255,255,255,0.6)';'>%s</span></div>", ready);
+    } else {
+        sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? I18N("social.market.cant", "Can't Afford") : I18N("social.market.purchase", "Purchase"));
+    }
+    sb_append(&sb, "</div></div></div></div>");
+    if (pe->type == 4 && pe->frames) sb_appendf(&sb, "<style>@keyframes sprayPopAnm%d {100%%{background-position:-%dpx}}</style>", pe->frames, pe->frames * 220);
     char *html = sb_finish(&sb);
     set_html("listingHolder", html);
     free(html);
+    set_display("listingHolder", "block");
 }
 
 // ---- economy frames (handle_reply_frame -> hub_market_frame); 1 = handled
@@ -6191,10 +6819,7 @@ H(h_open_profile_tab) {
 }
 
 // openItemTab(tab): itemsales avg / sold / owners
-H(h_open_item_tab) {
-    UNUSED;
-    const char *tab = arg_s(ev, args, argc, 0);
-    if (!tab) return 1;
+static void open_item_tab(const char *tab) {
     HtmlElem found[8];
     int n = html_dom_query_all(0, "div[id^=iTab_]", found, 8);
     for (int i = 0; i < n; i++) {
@@ -6208,6 +6833,12 @@ H(h_open_item_tab) {
         html_dom_get_attr(found[i], "id", id, sizeof(id));
         html_dom_set_display(found[i], !strcmp(id + 12, tab) ? "block" : "none");
     }
+}
+
+H(h_open_item_tab) {
+    UNUSED;
+    const char *tab = arg_s(ev, args, argc, 0);
+    if (tab) open_item_tab(tab);
     return 1;
 }
 
@@ -6285,9 +6916,9 @@ H(h_switch_names) {
     return 1;
 }
 
-// viewItem(index, mode): the item popup with v7's 3D showcase iframe
-// (viewer.html?nobg&showcase=<i>; natively drawn into the iframe's box by viewer_embed.h),
-// a player card's thumbnail instead.
+// window.viewItem(index, mode) (hub-10.0.7.js:2054-2069): the item popup with the 3D showcase iframe
+// (viewer.html?nobg&showcase=<i>; natively drawn into the iframe's box by viewer_embed.h), a player card's / emoji's /
+// paint's thumbnail instead; its Black Market / limT / Vaulted / Limited label; mode 2 offers the model viewer.
 H(h_view_item) {
     UNUSED;
     const int index = (int) arg_n(args, argc, 0, -1);
@@ -6311,19 +6942,33 @@ H(h_view_item) {
     viewer_skin_preview_path(sk, path, sizeof(path));
     html_dom_asset_url(path, url, sizeof(url));
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='itemViewName blackShad%s' style='color:%s;'>", g_hub.rarity_anim && rarity_animate(sk) ? " rainbow" : "", col);
+    sb_appendf(&sb, "<div class='itemViewName%s%s' style='color:%s;'>", sk->rarity != 5 ? " blackShad" : "", g_hub.rarity_anim && rarity_animate(sk) ? " rainbow" : "", col); // 5: CONTRABAND
     sb_append_esc(&sb, sk->name);
     sb_append(&sb, "</div>");
-    if ((sk->seas ? sk->seas : 1) != g_viewer_current_season) sb_append(&sb, "<div class='itemViewSea'>Vaulted</div>");
-    else if (sk->flags & VS_BLOCKED) sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
-    if (sk->type == 16) sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url); // PLAYER_CARD thumbnail
+    const char *lim_t = skin_str(index, "limT");
+    const int flat = sk->type == 16 || sk->type == 17 || sk->type == 18; // PLAYER_CARD, EMOJI, PAINT
+    if (skin_true(index, "blackM")) {
+        sb_append(&sb, "<div class='itemViewSea' style='background:#00ffff'>Black Market</div>");
+    } else if (lim_t) {
+        sb_appendf(&sb, "<div class='itemViewSea' style='background:%s'>", ui_loadout_tag_color(lim_t));
+        sb_append_esc(&sb, lim_t);
+        sb_append(&sb, "</div>");
+    } else if (sk->type != 18 && (sk->seas != g_viewer_current_season || (skin_true(index, "limited") && (sk->flags & VS_NO_SPIN) && !skin_true(index, "itemShop")))) {
+        sb_append(&sb, "<div class='itemViewSea'>Vaulted</div>");
+    } else if (skin_true(index, "limited") || (sk->flags & VS_BLOCKED)) {
+        sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
+    }
+    if (flat) sb_appendf(&sb, "<div class='viewItem%s' style='background-image:url(%s)'></div>", sk->type == 16 ? "Card" : sk->type == 17 ? "Emoji" : "Paint", url);
     else {
         char paint[80]; // the account's own worn / painted copy on the showcase (v10's instance → viewer URL, deob-10.0.6.js:221934)
         ui_loadout_paint_query(index, paint, sizeof(paint));
         sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d%s'></iframe>", index, paint);
     }
-    if ((int) arg_n(args, argc, 1, 0) == 2) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>%s</div>", index, I18N("item.view.open", "Open Model Viewer"));
-    else sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>%s</div>", index, I18N("item.view.more", "More Information"));
+    if ((int) arg_n(args, argc, 1, 0) == 2) {
+        if (!flat) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>%s</div>", index, I18N("item.view.open", "Open Model Viewer"));
+    } else {
+        sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>%s</div>", index, I18N("item.view.more", "More Information"));
+    }
     char *html = sb_finish(&sb);
     html_dom_set_html(pop, html);
     free(html);
@@ -8018,6 +8663,14 @@ static int l_document_click(void *user, const HtmlEvent *ev, const HtmlArg *args
     if (!strncmp(href, "javascript:", 11)) return 0;
     char target[16] = "";
     html_dom_get_attr(a, "target", target, sizeof(target));
+    // iïîííïì's "./?profile=<name>" (config-10.0.7.js:4877: the market popup's seller): v10 opens the game page's
+    // profile; KrunkNative's game page has no ?profile, so the hub's own profile page opens
+    if (!strncmp(href, "./?profile=", 11) || !strncmp(href, "/?profile=", 10)) {
+        char url[600];
+        snprintf(url, sizeof(url), "/social.html?p=profile&q=%s", strchr(href, '=') + 1);
+        app_route_url_target(url, !strcmp(target, "_blank"));
+        return 0;
+    }
     if (!app_route_url_target(href, !strcmp(target, "_blank"))) ui_open_external(href);
     return 0;
 }

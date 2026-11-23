@@ -2297,20 +2297,26 @@ void ui_loadout_clear_pops(void) {
     menu_schedule_rect();
 }
 
-// store.tags: the limT badge colours (null ones fall back to #41c300)
+// store.tags (classes-10.0.7.js:3586-3618, in its order): the limT badge colours, NULL for v10's null ones (they fall
+// back to #41c300); the hub's Skin List offers every name
+static const struct { const char *name, *color; } k_store_tags[] = {
+    {"Debug", "#000000"}, {"Easter", NULL}, {"Twitch", "#6441a5"}, {"Clan Wars", NULL}, {"Charity", "#6441a5"}, {"Raid", "#eb347a"},
+    {"Canteen", "#fe4002"}, {"Gift", NULL}, {"Free", NULL}, {"Christmas", NULL}, {"Burg", "#ADE4F9"}, {"Sandstorm", "#ADE4F9"},
+    {"Littletown", "#ADE4F9"}, {"Site", "#ADE4F9"}, {"Industry", "#ADE4F9"}, {"Subzero", "#ADE4F9"}, {"Freight", "#ADE4F9"},
+    {"Undergrowth", "#ADE4F9"}, {"Lostworld", "#ADE4F9"}, {"Kanji", "#ADE4F9"}, {"Citadel", "#ADE4F9"}, {"Oasis", "#ADE4F9"},
+    {"Evacuation", "#ADE4F9"}, {"Craftable", "#cc51f8"}, {"NFT", "#f3b8ff"}, {"Ranked", "#ff5500"}, {"Discord", "#5865f2"},
+    {"FRVR", "linear-gradient(132deg, rgba(0,189,255,1) 0%, rgba(155,0,255,1) 25%, rgba(255,0,41,1) 50%, rgba(255,150,3,1) 75%, rgba(255,199,0,1) 100%)"},
+    {"Halloween", "#ff5500"}, {"Battle Pass", "#00BCD4"}, {"Premium Spin", "#fc038d"},
+};
 static const char *store_tag_color(const char *tag) {
-    static const struct { const char *name, *color; } tags[] = {
-        {"Debug", "#000000"}, {"Twitch", "#6441a5"}, {"Charity", "#6441a5"}, {"Raid", "#eb347a"}, {"Canteen", "#fe4002"},
-        {"Burg", "#ADE4F9"}, {"Sandstorm", "#ADE4F9"}, {"Littletown", "#ADE4F9"}, {"Site", "#ADE4F9"}, {"Industry", "#ADE4F9"},
-        {"Subzero", "#ADE4F9"}, {"Freight", "#ADE4F9"}, {"Undergrowth", "#ADE4F9"}, {"Lostworld", "#ADE4F9"}, {"Kanji", "#ADE4F9"},
-        {"Citadel", "#ADE4F9"}, {"Oasis", "#ADE4F9"}, {"Evacuation", "#ADE4F9"}, {"Craftable", "#cc51f8"}, {"NFT", "#f3b8ff"},
-        {"Ranked", "#ff5500"}, {"Discord", "#5865f2"}, {"Halloween", "#ff5500"}, // Discord: v10.0.7 (deob-10.0.7.js:103481)
-        {"FRVR", "linear-gradient(132deg, rgba(0,189,255,1) 0%, rgba(155,0,255,1) 25%, rgba(255,0,41,1) 50%, rgba(255,150,3,1) 75%, rgba(255,199,0,1) 100%)"},
-    };
-    for (size_t i = 0; tag && i < sizeof(tags) / sizeof(tags[0]); i++) {
-        if (!strcmp(tags[i].name, tag)) return tags[i].color;
+    for (size_t i = 0; tag && i < sizeof(k_store_tags) / sizeof(k_store_tags[0]); i++) {
+        if (!strcmp(k_store_tags[i].name, tag)) return k_store_tags[i].color ? k_store_tags[i].color : "#41c300";
     }
     return "#41c300";
+}
+const char *ui_loadout_tag_color(const char *tag) { return store_tag_color(tag); } // social_ui.c: the hub's limT labels
+const char *ui_loadout_tag_name(const int i) { // social_ui.c: the Skin List's limT options (for (t in store.tags))
+    return i >= 0 && (size_t) i < sizeof(k_store_tags) / sizeof(k_store_tags[0]) ? k_store_tags[i].name : NULL;
 }
 
 // account.getSkinCount(index): the cnt of acc.skins' entry (0 for a guest / offline)
