@@ -96,6 +96,7 @@ void account_ui_scenario_official(int on);      // --render-scenario: state.offi
 void account_ui_scenario_post(void);             // after the scenario's window: account.c2fa (the 2FA popup)
 int account_ui_scenario_signed_in(void);        // --render-scenario: state.account's stand-in login is on
 int account_owns_badge(int badge);
+void account_add_badge(int badge); // acc.badges.push(badge) unless already owned (purchaseLvlRes, deob-10.0.7.js:219485)
 void account_popup(int kind, const char *error, const char *text); // popupResponse: 0 error, 1 success, 2 loading
 // Strike's message popups: 1 when the Strike page shows the answer of a request it made (strike_popup_expect),
 // so account_ui's popup_response stops there; 0 otherwise (the v10 popup).

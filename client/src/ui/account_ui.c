@@ -1485,6 +1485,7 @@ static void add_badge(const int badge) {
     if (!g_acc.badges) g_acc.badges = cJSON_CreateArray();
     cJSON_AddItemToArray(g_acc.badges, cJSON_CreateNumber(badge));
 }
+void account_add_badge(const int badge) { if (g_logged_in) add_badge(badge); } // battlepass_ui.c: purchaseLvlRes's badge
 
 // acc.stats[key] = value in both copies (g_acc.stats and data[16])
 static void set_stat(const char *key, const double value) {

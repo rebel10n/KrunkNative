@@ -874,6 +874,8 @@ int battlepass_ui_frame(const char *label, const cJSON *frame) {
             purchase_error(frame, product);
         } else {
             if (cJSON_IsNumber(bpp)) g_bpp = (int64_t) bpp->valuedouble;
+            const cJSON *badge = cJSON_GetArrayItem(frame, 10); // arg 9: badge && account.badges.push(badge) (:219485)
+            if (cJSON_IsNumber(badge) && badge->valueint) account_add_badge(badge->valueint);
             menu_rerender_if_open(BP_WINDOW);
             skipped_level_pop(cJSON_IsNumber(levels) ? levels->valueint : 0);
         }
