@@ -1803,6 +1803,12 @@ else ()
     target_include_directories(settings_defaults_test PRIVATE client/include)
     add_test(NAME settings_defaults_test COMMAND settings_defaults_test)
 
+    # settings_rules_test: v10.0.7's pure settings rules (crosshair rows, img / aspectRatio checks, updateRate,
+    # toggleADS, the import's loadout keys; client/src/ui/ui_settings_rules.c)
+    add_executable(settings_rules_test client/tests/settings_rules_test.c client/src/ui/ui_settings_rules.c)
+    target_include_directories(settings_rules_test PRIVATE client/include)
+    add_test(NAME settings_rules_test COMMAND settings_rules_test)
+
     # win_geom_test: the shared geometry rule of the draggable / resizable windows (developer
     # console, editor Quick GUI and side panels): off-screen saves, small windows, grip resizes
     add_executable(win_geom_test client/tests/win_geom_test.c client/src/ui/win_geom.c)

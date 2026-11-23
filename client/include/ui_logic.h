@@ -253,6 +253,9 @@ float ui_setting_weapon_float(const char *key, int weapon, float fallback); // t
 void ui_setting_to_string(const cJSON *value, char *buf, size_t n); // String(value)
 void ui_settings_set(const char *key, const HtmlArg *value); // setSetting(key, value)
 void ui_settings_set_string(const char *key, const char *value);
+// The player changed `key` (the window, a key bind, KrunkScript, the image picker): the preset becomes Custom
+// (set()'s selectSettingPre(2, true), deob-10.0.7.js:214445). Programmatic writes skip it.
+void ui_settings_user_changed(const char *key);
 void ui_settings_reset(void);                    // resetSettings
 void ui_settings_export(void);                   // exportSettings (log)
 char *ui_settings_export_text(void);             // exportSettings(true): the text, malloc'd (account settings upload)
@@ -838,6 +841,10 @@ void ui_settings_reset_confirm(void);            // resetSettings(): confirm, De
 void ui_settings_select_preset(int index);       // selectSettingPre(index)
 void ui_settings_import_prompt(void);            // importSettings(): prompt + settings.import
 int  ui_settings_import_text(const char *text);  // settings.import(text): 1 on success
+// A mod's scripts/settings.txt: setSetting(key, value, true, true, true) per "key,value" line (deob-10.0.7.js:225634-
+// 225651): the value takes effect without being saved; url / text / dev / kpd / admin / premium / verified / noMod
+// settings are left alone. Returns how many lines applied.
+int  ui_settings_mod_text(const char *text);
 // the pieces of windows[2] the v10 page's Change Loadout shell reuses (v10_customize.c)
 void ui_loadout_tab_html(StrBuf *out, int tab);  // a tab's body: 0 class cards, 1 loadout, 2 Customize slots, 3 v7 Other
 int  ui_loadout_tab(void);                       // windows[2].tabIndex

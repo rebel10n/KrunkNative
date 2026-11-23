@@ -40,6 +40,7 @@ void ui_settings_set_string(const char *key, const char *value) {
     snprintf(g_set_key, sizeof(g_set_key), "%s", key);
     snprintf(g_set_val, sizeof(g_set_val), "%s", value);
 }
+void ui_settings_user_changed(const char *key) { (void) key; } // the preset becomes Custom (not under test)
 
 // the Add form's three inputs
 static const char *g_in_name = "", *g_in_url = "", *g_in_cat = "0";

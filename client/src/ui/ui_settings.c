@@ -10,6 +10,8 @@
 #include "klog.h"
 #include <ui_mobile.h> // the phone defaults (collect_defaults) and the KN presets' phone hiding
 #include <ui_settings_defaults.h> // v10's phone and desktop defaults (ui_settings_defaults.c)
+#include <ui_settings_rules.h>    // set() rules: crosshair rows, img / testfor checks (ui_settings_rules.c)
+#include <image_collection.h>     // image_collection_reload: an imported customize.images list
 #include <audio.h>
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
 #include <client_settings.h> // the Client tab's rows in searchList (ui_client_settings.c)
@@ -173,9 +175,11 @@ static cJSON *normalize_setting(const char *key, cJSON *v);
 // as booleans (dmgColor: true), "true"/"false" strings, out-of-range numbers, and slider
 // numbers saved for boolean settings (invertYMbl: 50, the range input's sanitised value
 // the old default scrape stored) -- those go back to the default.
+static int g_testfor;
 static void settings_repair(void) {
     if (!g_settings) return;
     int changed = 0;
+    g_testfor++; // init() checks testfor (deob-10.0.7.js:214432)
     cJSON *item = g_settings->child;
     while (item) {
         cJSON *next = item->next;
@@ -200,6 +204,7 @@ static void settings_repair(void) {
         }
         item = next;
     }
+    g_testfor--;
     if (changed) ui_settings_save();
 }
 
@@ -384,10 +389,11 @@ static int color_setting(const char *key) {
 // v10 SETTINGS.init (v10.js:207505) clones every `perWep` (viewmodel) and `perWepG` (gameplay) setting
 // once per weapon as "<key>_<weapon id>", with the setting's own default and range. With vmSetts /
 // gpSetts on "Per Weapon" (1), the held weapon reads its clone (RENDER.getPlayerWeaponId, v10.js:199009;
-// CONTROLS.getSetByWep, v10.js:202383), every other time the setting itself. toggleADS is perWep in v10
-// too; KrunkNative has no toggle ADS yet, so it has no clone.
+// CONTROLS.getSetByWep, v10.js:202383), every other time the setting itself. toggleADS is perWep too
+// (deob-10.0.7.js:213449-213460: CONTROLS.toggleADS[weapon + 1], read by the aim key, ui_controls.c).
 static const char *const PER_WEP[] = {"fov", "fpsFOV", "weaponBob", "weaponLean", "weaponRot", "weaponOffX", "weaponOffY",
-                                      "weaponOffZ", "weaponADSOffY", "weapSwapY", "weapReloadY", "adsFovMlt", "aimAnim", "hideADS"};
+                                      "weaponOffZ", "weaponADSOffY", "weapSwapY", "weapReloadY", "adsFovMlt", "toggleADS",
+                                      "aimAnim", "hideADS"};
 static const char *const PER_WEP_G[] = {"sensitivityX", "sensitivityY", "aimSensitivityX", "aimSensitivityY", "scrollDir", "invertY"};
 static int g_curr_wep; // windows[0].currWep: the weapon the window's Per Weapon rows edit
 
@@ -442,9 +448,39 @@ static cJSON *default_copy(const char *key) {
 // type and value the real client keeps in settings.list[key].val:
 //   "false"/"true" -> booleans, "undefined" -> default; colour settings that are not a
 //   hex colour -> default; settings with min/max -> Math.min(max, Math.max(min, +G)).
+// v10.0.7's set() / init() (deob-10.0.7.js:214431-214445) adds: every string loses its < and >;
+// an `img` setting whose value does not match /\.(jpg|jpeg|png|gif|webp|ico)/ goes back to its
+// default; `str` and `img` settings lose their quotes; `testfor` (aspectRatio's
+// /^[-]?\d*x[-]?\d*$/) is checked by init() and by import (set()'s fourth argument: g_testfor).
 // Takes ownership of `v`, returns the value to store.
+static const char *const IMG_SETTINGS[] = {"crosshairImage", "crosshairImageM", "customHitmarker", "customAmmo", "customKills",
+                                           "customDeaths", "customStreak", "customDamage", "customGameOverlay"};
+static const char *const STR_SETTINGS[] = {"endMessage"};
+// g_testfor (declared above settings_repair) > 0: set() with its testfor argument (settings.import, init)
+
+static int key_in(const char *key, const char *const *list, const size_t n) {
+    for (size_t i = 0; i < n; i++) if (!strcmp(list[i], key)) return 1;
+    return 0;
+}
+
+// String.replace(re, "") of every character in `drop`
+static void strip_chars(cJSON *v, const char *drop) {
+    const char *str = cJSON_GetStringValue(v);
+    if (!str || !strpbrk(str, drop)) return;
+    char *out = malloc(strlen(str) + 1);
+    if (!out) return;
+    size_t k = 0;
+    for (const char *c = str; *c; c++) if (!strchr(drop, *c)) out[k++] = *c;
+    out[k] = 0;
+    cJSON_SetValuestring(v, out);
+    free(out);
+}
+
 static cJSON *normalize_setting(const char *key, cJSON *v) {
     if (!v) return v;
+    char base_buf[96];
+    const char *bkey = base_key(key, base_buf, sizeof(base_buf));
+    if (cJSON_IsString(v)) strip_chars(v, "<>"); // val.replace(/[><]/g, "")
     if (cJSON_IsString(v)) {
         const char *str = cJSON_GetStringValue(v);
         cJSON *fixed = !strcmp(str, "false") ? cJSON_CreateFalse()
@@ -455,6 +491,20 @@ static cJSON *normalize_setting(const char *key, cJSON *v) {
             v = fixed;
         }
     }
+    const int img = key_in(bkey, IMG_SETTINGS, sizeof(IMG_SETTINGS) / sizeof(IMG_SETTINGS[0]));
+    char text[64];
+    ui_setting_to_string(v, text, sizeof(text));
+    const int bad_aspect = g_testfor && !strcmp(bkey, "aspectRatio") && !settings_rule_aspect_ok(text);
+    const int bad_img = img && !settings_rule_img_ok(cJSON_IsString(v) ? cJSON_GetStringValue(v) : text);
+    if (bad_aspect || bad_img) {
+        cJSON *def = default_copy(key);
+        if (def) {
+            cJSON_Delete(v);
+            v = def;
+        }
+    }
+    if (cJSON_IsString(v) && (img || key_in(bkey, STR_SETTINGS, sizeof(STR_SETTINGS) / sizeof(STR_SETTINGS[0]))))
+        strip_chars(v, "'\"");
     if (color_setting(key) && !(cJSON_IsString(v) && is_hex_color(cJSON_GetStringValue(v)))) {
         cJSON *def = default_copy(key);
         if (def) {
@@ -490,6 +540,27 @@ static cJSON *normalize_setting(const char *key, cJSON *v) {
     return v;
 }
 
+// settings.list[key].hide of a crosshair row by the current crosshairSho / crosshairShoM; -1 none of those
+static int crosshair_row_hidden(const char *key) {
+    double t = 1.0, m = 3.0; // the settings' val
+    ui_setting_number("crosshairSho", &t);
+    ui_setting_number("crosshairShoM", &m);
+    return settings_rule_crosshair_hidden(key, (int) t, (int) m);
+}
+
+// crosshairSho / crosshairShoM set() (deob-10.0.7.js:211866-211890, :212126-212150; init calls them too):
+// every dependent row's "<key>_div" display:none / block on the page
+static void sync_crosshair_rows(void) {
+    size_t n = 0;
+    const char *const *rows = settings_rule_crosshair_rows(&n);
+    for (size_t i = 0; i < n; i++) {
+        char id[64];
+        snprintf(id, sizeof(id), "%s_div", rows[i]);
+        const HtmlElem el = html_dom_by_id(id);
+        if (el) html_dom_set_style(el, "display", crosshair_row_hidden(rows[i]) == 1 ? "none" : "block");
+    }
+}
+
 // Store an already-coerced value, forward it and sync the page (setSetting's tail).
 static void store_setting(const char *key, cJSON *value) {
     if (!g_settings) ui_settings_load();
@@ -505,6 +576,7 @@ static void store_setting(const char *key, cJSON *value) {
     sync_controls(key, text);
     if (!strcmp(key, "scaleUI") || !strcmp(key, "uiScaling")) menu_scale_base();
     if (!strcmp(key, "vmSetts") || !strcmp(key, "gpSetts")) menu_rerender_if_open(1); // set(): updateWindow(1)
+    if (!strcmp(key, "crosshairSho") || !strcmp(key, "crosshairShoM")) sync_crosshair_rows();
     if (!strcmp(key, SEEK_SERVERS_KEY)) v10_menu_sources_changed(); // Server Type: Popular Now / Live Streams follow it at once
 }
 
@@ -517,9 +589,15 @@ static cJSON *coerce_string(const char *key, const char *value) {
     return cJSON_CreateString(value ? value : "");
 }
 
+static void preset_to_custom(const char *key, int show);
+
 void ui_settings_set_string(const char *key, const char *value) {
     if (!key || !*key) return;
     store_setting(key, coerce_string(key, value));
+}
+
+void ui_settings_user_changed(const char *key) {
+    preset_to_custom(key, 1);
 }
 
 void ui_settings_set(const char *key, const HtmlArg *value) {
@@ -552,15 +630,105 @@ void ui_settings_reset(void) {
 // settings.export(): every setting whose value differs from its default, as JSON, handed
 // to downloadFile("settings.txt", ...). Natively the "download" is ./settings.txt.
 // exportSettings(true): the settings text (changed values + controls), malloc'd; NULL on failure.
+// The localStorage lists of customizeExport() / settings.import's `customize` block. v10's reticle key is
+// krk_custRet; KrunkNative's reticle picker (ui_loadout.c) keeps them under krk_custRets.
+#define CUSTOMIZE_RETICLES_KEY "krk_custRets"
+#define CUSTOMIZE_SCOPES_KEY "krk_custScps"
+#define CUSTOMIZE_IMAGES_KEY "krk_custImgs"
+#define CUSTOMIZE_FAVORITES_KEY "krk_favList"
+#define CUSTOMIZE_LOADOUTS_KEY "krk_loadouts"
+#define CUSTOMIZE_STORE_MAX (256 * 1024)
+
+static cJSON *storage_json(const char *key) {
+    char *buf = malloc(CUSTOMIZE_STORE_MAX);
+    cJSON *v = NULL;
+    if (buf && html_storage_get(key, buf, CUSTOMIZE_STORE_MAX) >= 0 && buf[0]) v = cJSON_Parse(buf);
+    free(buf);
+    return v;
+}
+
+static void storage_set_json(const char *key, const cJSON *v) {
+    char *text = cJSON_PrintUnformatted(v);
+    if (text) html_storage_set(key, text);
+    free(text);
+}
+
+// customizeExport() (deob-10.0.7.js:217209-217219): the custom reticles, scopes, images and favourites
+// when non-empty, krk_loadouts when it has a key; NULL when there is nothing
+static cJSON *customize_export(void) {
+    static const struct { const char *name, *key; } LISTS[] = {
+        {"reticles", CUSTOMIZE_RETICLES_KEY}, {"scopes", CUSTOMIZE_SCOPES_KEY},
+        {"images", CUSTOMIZE_IMAGES_KEY}, {"favorites", CUSTOMIZE_FAVORITES_KEY},
+    };
+    cJSON *out = cJSON_CreateObject();
+    for (size_t i = 0; i < sizeof(LISTS) / sizeof(LISTS[0]); i++) {
+        cJSON *list = storage_json(LISTS[i].key);
+        if (cJSON_IsArray(list) && cJSON_GetArraySize(list) > 0) cJSON_AddItemToObject(out, LISTS[i].name, list);
+        else cJSON_Delete(list);
+    }
+    cJSON *loadouts = storage_json(CUSTOMIZE_LOADOUTS_KEY);
+    if (cJSON_IsObject(loadouts) && loadouts->child) cJSON_AddItemToObject(out, "loadouts", loadouts);
+    else cJSON_Delete(loadouts);
+    if (!out->child) {
+        cJSON_Delete(out);
+        return NULL;
+    }
+    return out;
+}
+
+// JS truthiness of a JSON value
+static int json_truthy(const cJSON *v) {
+    if (!v || cJSON_IsNull(v) || cJSON_IsFalse(v)) return 0;
+    if (cJSON_IsNumber(v)) return cJSON_GetNumberValue(v) != 0.0 && !isnan(cJSON_GetNumberValue(v));
+    if (cJSON_IsString(v)) return cJSON_GetStringValue(v)[0] != 0;
+    return 1;
+}
+
+// settings.import's customize block (deob-10.0.7.js:214502-214508): windows[2].import(loadouts) (its keys
+// cleaned, falsy entries dropped, :218587-218595), setCustomRets / setCustomScopes / setCustomImages /
+// updateFavList(list, true): each saved as given
+static void customize_import(const cJSON *c) {
+    if (!cJSON_IsObject(c)) return;
+    const cJSON *loadouts = cJSON_GetObjectItem(c, "loadouts");
+    if (json_truthy(loadouts)) {
+        cJSON *clean = cJSON_CreateObject();
+        const cJSON *item;
+        int index = 0;
+        cJSON_ArrayForEach(item, loadouts) {
+            char raw[24], key[128];
+            snprintf(raw, sizeof(raw), "%d", index++);
+            settings_rule_loadout_key(item->string ? item->string : raw, key, sizeof(key));
+            if (!json_truthy(item)) continue;
+            cJSON_DeleteItemFromObject(clean, key);
+            cJSON_AddItemToObject(clean, key, cJSON_Duplicate(item, 1));
+        }
+        storage_set_json(CUSTOMIZE_LOADOUTS_KEY, clean);
+        cJSON_Delete(clean);
+    }
+    static const struct { const char *name, *key; } LISTS[] = {
+        {"reticles", CUSTOMIZE_RETICLES_KEY}, {"scopes", CUSTOMIZE_SCOPES_KEY},
+        {"images", CUSTOMIZE_IMAGES_KEY}, {"favorites", CUSTOMIZE_FAVORITES_KEY},
+    };
+    for (size_t i = 0; i < sizeof(LISTS) / sizeof(LISTS[0]); i++) {
+        const cJSON *list = cJSON_GetObjectItem(c, LISTS[i].name);
+        if (json_truthy(list)) storage_set_json(LISTS[i].key, list);
+    }
+    if (json_truthy(cJSON_GetObjectItem(c, "images"))) image_collection_reload(); // the popup reads storage again
+}
+
 char *ui_settings_export_text(void) {
     cJSON *out = cJSON_CreateObject();
     const cJSON *item;
     cJSON_ArrayForEach(item, g_settings) {
-        const cJSON *def = item->string ? cJSON_GetObjectItem(g_defaults, item->string) : NULL;
+        char base[96];
+        // a per-weapon clone's def is its setting's (deob-10.0.7.js:214417)
+        const cJSON *def = item->string ? cJSON_GetObjectItem(g_defaults, base_key(item->string, base, sizeof(base))) : NULL;
         if (item->string && (!def || !cJSON_Compare(item, def, 1))) cJSON_AddItemToObject(out, item->string, cJSON_Duplicate(item, 1));
     }
     cJSON *controls = ui_controls_export_json(); // G.controls = CONTROLS.export() when non-empty
     if (controls) cJSON_AddItemToObject(out, "controls", controls);
+    cJSON *customize = customize_export(); // G.customize = customizeExport() when non-empty
+    if (customize) cJSON_AddItemToObject(out, "customize", customize);
     char *text = cJSON_PrintUnformatted(out);
     cJSON_Delete(out);
     return text;
@@ -668,8 +836,7 @@ static const SettingPreset PRESETS[] = {
 //                       apply once they land
 //   lighting 3          "Physical": MeshStandardMaterial (GGX + rect-area lights, basic.frag);
 //                       v7's default is 1 (Normal)
-//   reflection 6        2048 px ocean mirror (v7 options 1..6 = 32..2048; stored, ocean.c
-//                       still uses the map's ocRefRes)
+//   reflection 6        2048 px ocean mirror (v7 options 1..6 = 32..2048; ocean.c, next map)
 //   particlesDist 1000  slider max: particles and impacts drawn at any distance (vfx.c)
 //   renderDist 100      slider max: camera far = 6000
 //   weaponShine, sniperFlap  v7's quality extras (viewmodel flags)
@@ -805,6 +972,23 @@ static int preset_index(void) {
     return atoi(buf);
 }
 
+// set()'s tail `noPre || selectSettingPre(2, true)` (deob-10.0.7.js:214445): a setting of settings.list
+// changed by anything but a preset (the window, a key bind, import, Apply To All; a mod's settings.txt passes noPre)
+// makes the preset Custom, without restoring krk_customPre (hk = true), saves preIndex and redraws the
+// settings window (showWindow(1, true), deob-10.0.7.js:216584-216620). Krunker Strike has no presets.
+// KrunkNative's own programmatic writes (seek prefs, windowMode, scenarios) call ui_settings_set without
+// it; the player's paths call ui_settings_user_changed. showWindow(1, true) would also open a closed
+// Settings window (a key bind's flip, KrunkScript): here only an open one is redrawn.
+static void preset_to_custom(const char *key, const int show) {
+    if (flavor_current()->rules || !key) return;
+    char buf[96];
+    const char *base = base_key(key, buf, sizeof(buf));
+    if (!(g_defaults && cJSON_GetObjectItem(g_defaults, base)) && !preset_for(base) && !kn_preset_key(base)) return;
+    if (preset_index() == 2) return;
+    html_storage_set("preIndex", "2");
+    if (show && menu_open_window_id() == 1) menu_show_window(1, 1);
+}
+
 typedef struct {
     int target, from;   // hj, cG
     cJSON *custom;      // hm
@@ -928,6 +1112,75 @@ static void import_visit(const char *key, const cJSON *def, void *user) {
     else if (def) batch_set(key, def);
 }
 
+// The settings a mod's settings.txt may not touch: `type` url / text, or dev, kpd, admin, premium, verified or
+// noMod set (read off v10.0.7's settings list, deob-10.0.7.js:209900-214410)
+static const char *const MOD_BLOCKED[] = {
+    "anonMode", "autoLoadLast", "canChangeLogo", "canLoadMods", "crosshairImage", "crosshairImageM", "customAmmo",
+    "customBadge", "customDamage", "customDeaths", "customGameOverlay", "customHitmarker", "customKills", "customStreak",
+    "defaultRegion", "endMessage", "extraBan", "forceRegen", "forceUpdate", "hideGameP", "kpdVision", "kpdVisionCol",
+    "lang", "muteSpec", "netRate", "premiumBadge", "rankBadge", "showNetStat", "showRegion", "showServerTimer",
+    "verifiedBadge",
+};
+// the switches a settings.txt may write as 0 / 1 (iiíïíìì, deob-10.0.7.js:225628)
+static const char *const MOD_BOOL_01[] = {"aimAnim", "hideADS", "showHands", "showWeapon", "showWeaponSec", "showWeaponMel"};
+
+int ui_settings_mod_text(const char *text) {
+    if (!text || !*text) return 0; // iîiííií: a non-empty string
+    int applied = 0;
+    const char *p = text;
+    while (*p) {
+        const size_t len = strcspn(p, "\n");
+        char line[512];
+        snprintf(line, sizeof(line), "%.*s", (int) (len < sizeof(line) ? len : sizeof(line) - 1), p);
+        p += len + (p[len] == '\n');
+        // split(/\r?\n/).filter(length).map(trim)
+        size_t n = strlen(line);
+        if (n && line[n - 1] == '\r') line[--n] = 0;
+        if (!n) continue;
+        char *b = line;
+        while (isspace((unsigned char) *b)) b++;
+        n = strlen(b);
+        while (n && isspace((unsigned char) b[n - 1])) b[--n] = 0;
+        // line.split(","): [0] the key, [1] the value (trimmed; "" when missing)
+        char *comma = strchr(b, ',');
+        const char *key = b, *value = "";
+        if (comma) {
+            *comma = 0;
+            value = comma + 1;
+            char *end = strchr(comma + 1, ',');
+            if (end) *end = 0;
+            while (isspace((unsigned char) *value)) value++;
+            char *v_end = (char *) value + strlen(value);
+            while (v_end > value && isspace((unsigned char) v_end[-1])) *--v_end = 0;
+        }
+        char kbuf[96];
+        const char *base = base_key(key, kbuf, sizeof(kbuf));
+        if (!*key || !(g_defaults && cJSON_GetObjectItem(g_defaults, base)) ||
+            key_in(base, MOD_BLOCKED, sizeof(MOD_BLOCKED) / sizeof(MOD_BLOCKED[0]))) continue; // ("defaultSkins": no counterpart)
+        cJSON *v = coerce_string(key, value);
+        if (key_in(key, MOD_BOOL_01, sizeof(MOD_BOOL_01) / sizeof(MOD_BOOL_01[0]))) {
+            const int i = atoi(value); // parseInt(v) == 0 / == 1
+            if ((i == 0 && (isdigit((unsigned char) value[0]) || value[0] == '-')) || i == 1) {
+                cJSON_Delete(v);
+                v = cJSON_CreateBool(i == 1);
+            }
+        }
+        // setSetting(key, value, true, true, true): no preset change, testfor checked, nothing saved; the slider
+        // and its number box show it, the setting's set() takes it
+        g_testfor++;
+        v = normalize_setting(key, v);
+        g_testfor--;
+        if (!v) continue;
+        char shown[256];
+        ui_setting_to_string(v, shown, sizeof(shown));
+        cJSON_Delete(v);
+        sync_controls(key, shown);
+        client_apply_setting(menu_ui()->client, key, shown);
+        applied++;
+    }
+    return applied;
+}
+
 int ui_settings_import_text(const char *text) {
     if (!text || !*text) return 0;
     cJSON *parsed = cJSON_Parse(text);
@@ -939,10 +1192,32 @@ int ui_settings_import_text(const char *text) {
         return 0;
     }
     g_save_batch++;
+    g_testfor++; // setSetting(key, value, null, true): testfor checked
     each_setting(import_visit, parsed);
+#ifdef UI_HAVE_RENDER_SETTINGS
+    // settings.list holds the per-weapon clones too (deob-10.0.7.js:214411-214419): each takes the
+    // text's value or its setting's default
+    for (int group = 1; group <= 2; group++) {
+        const char *const *keys = group == 2 ? PER_WEP_G : PER_WEP;
+        const size_t count = group == 2 ? sizeof(PER_WEP_G) / sizeof(PER_WEP_G[0]) : sizeof(PER_WEP) / sizeof(PER_WEP[0]);
+        for (size_t k = 0; k < count; k++) {
+            for (size_t w = 0; w < rules_weapon_count(); w++) {
+                char clone[112];
+                snprintf(clone, sizeof(clone), "%s_%d", keys[k], (int) w);
+                const cJSON *v = cJSON_GetObjectItem(parsed, clone);
+                if (v && !cJSON_IsNull(v)) batch_set(clone, v);
+                else cJSON_DeleteItemFromObject(g_settings, clone); // read on demand: unsaved = the default
+            }
+        }
+    }
+#endif
+    g_testfor--;
     g_save_batch--;
     ui_settings_save();
+    // the import's setSetting calls have no noPre: the preset becomes Custom (the caller redraws the window)
+    if (!flavor_current()->rules && preset_index() != 2) html_storage_set("preIndex", "2");
     ui_controls_import_json(cJSON_GetObjectItem(parsed, "controls"));
+    customize_import(cJSON_GetObjectItem(parsed, "customize"));
     cJSON_Delete(parsed);
     menu_scale_base();
     return 1;
@@ -1110,6 +1385,7 @@ static void per_weapon_all(const char *mode, const int reset) {
             snprintf(clone, sizeof(clone), "%s_%d", keys[k], (int) w);
             store_setting(clone, cJSON_Duplicate(src, 1));
         }
+        preset_to_custom(keys[k], 0); // setSetting(clone, ...): Custom; the redraw below shows it
     }
     menu_rerender_if_open(1);
 }
@@ -1174,6 +1450,8 @@ void ui_settings_apply_values(const HtmlElem root) {
     ui_setting_to_string(ui_setting_value("voiceChatType"), type, sizeof(type));
     const HtmlElem distance = atoi(type) ? html_dom_by_id("voiceDistance_div") : 0;
     if (distance) html_dom_set_style(distance, "display", "block");
+    // the captured rows show crosshairSho 1 / crosshairShoM 3: the current types' rows instead
+    sync_crosshair_rows();
     // `kpd: true` rows (v10 :211087): hidden unless the account is K.P.D. The captured tabs were made
     // without one, so for an officer the KPD folder and its kpdVisionCol row (with kpdVision's switch;
     // kpdVision's own row has hide: true) are shown here.
@@ -1453,7 +1731,20 @@ static void search_holder(StrBuf *out, const char *body, const char *query, StrB
                 const char *tag_end = strchr(r, '>');
                 char tag[512];
                 snprintf(tag, sizeof(tag), "%.*s", (int) (tag_end - r < (long) sizeof(tag) ? tag_end - r : (long) sizeof(tag) - 1), r);
-                const int hidden = strstr(tag, "display:none") != NULL;
+                int hidden = strstr(tag, "display:none") != NULL;
+                // a row crosshairSho / crosshairShoM shows or hides: its hide for the current types
+                // (getSettings leaves `hide` rows out of a search, deob-10.0.7.js:218149)
+                const char *idp = strstr(tag, "id=\"");
+                if (idp) {
+                    char row_id[64];
+                    idp += 4;
+                    const size_t l = strcspn(idp, "\"");
+                    if (l > 4 && l < sizeof(row_id) && !strncmp(idp + l - 4, "_div", 4)) {
+                        snprintf(row_id, sizeof(row_id), "%.*s", (int) (l - 4), idp);
+                        const int rule = crosshair_row_hidden(row_id);
+                        if (rule >= 0) hidden = rule;
+                    }
+                }
                 char label[256];
                 row_label(r, r_end, label, sizeof(label));
                 const int basic_skip = menu_ui()->settings_view == 0 && advanced_only(r, r_end);
@@ -1505,6 +1796,15 @@ static char *search_html(const char *query) {
         char *rows = ui_settings_shader_html();
         if (rows) sb_append(&out, rows);
         free(rows);
+    }
+    // the Backup Settings row when searchMatches({name: "settings.backup"}), signed in or not
+    // (deob-10.0.7.js:218120-218122; ui_windows.c adds it to the General tab for an account)
+    char backup_label[128];
+    snprintf(backup_label, sizeof(backup_label), "%s", I18N("settings.backup", "Backup Settings"));
+    for (char *c = backup_label; *c; c++) *c = (char) tolower((unsigned char) *c);
+    if (matches(backup_label, query)) {
+        sb_appendf(&out, "<div class='setBodH'><div class=\"settName\" style=\"margin-top:15px\">\n\t\t\t\t%s\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n\t\t\t</div></div>",
+                   I18N("settings.backup", "Backup Settings"));
     }
     for (int tab = 0; tab < ui_settings_view_tab_count(view); tab++) {
         const char *tpl = ui_settings_view_tab_html(view, tab);
@@ -1808,7 +2108,10 @@ typedef struct {
 static void delayed_set_fire(void *user) {
     DelayedSet *d = user;
     char value[64];
-    if (d->el && html_dom_get_value(d->el, value, sizeof(value)) >= 0) ui_settings_set_string(d->key, value);
+    if (d->el && html_dom_get_value(d->el, value, sizeof(value)) >= 0) {
+        ui_settings_set_string(d->key, value);
+        ui_settings_user_changed(d->key);
+    }
     free(d);
 }
 
@@ -1832,6 +2135,7 @@ static void aspect_select(const char *key, const HtmlElem select, const char *pi
     if (box) html_dom_set_value(box, value);
     if (select) html_dom_set_value(select, "");
     ui_settings_set_string(key, value);
+    ui_settings_user_changed(key);
 }
 
 // windows[0].toggleType(this): settingType = checked ? "advanced" : "basic",

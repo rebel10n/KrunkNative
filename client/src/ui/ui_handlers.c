@@ -141,6 +141,7 @@ H(h_set_setting) {
     else snprintf(text, sizeof(text), "%.15g", value.num);
     KN_LOG_VERBOSE2("[ui] handler setSetting %s=%s\n", key, text);
     ui_settings_set(key, &value);
+    ui_settings_user_changed(key);
     return 1;
 }
 

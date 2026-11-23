@@ -333,7 +333,10 @@ void image_collection_reload(void) { g_loaded = 0; }
 static void set_url_setting(const char *url) {
     if (!g_key[0] || !url) return;
     if (g_host && g_host->set) g_host->set(g_key, url);
-    else ui_settings_set_string(g_key, url);
+    else {
+        ui_settings_set_string(g_key, url);
+        ui_settings_user_changed(g_key);
+    }
 }
 
 static const char *arg_str(const HtmlArg *args, const int argc, const int i) {

@@ -162,6 +162,7 @@ static KsValue st_set(KsScript *s, void *u, const KsValue *a, int n) {
     else if (v.tag == KS_BOOL) arg = (HtmlArg) {HTML_ARG_BOOL, v.as.b ? 1 : 0, NULL};
     else arg.str = ksc_str(s, v, text, sizeof(text));
     ui_settings_set(key, &arg);
+    ui_settings_user_changed(key); // setSetting without noPre: the preset becomes Custom
     return ks_undef();
 }
 

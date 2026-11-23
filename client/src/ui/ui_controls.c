@@ -41,6 +41,7 @@
 #include <flavor.h>       // Krunker Strike: FRVR's default binds (strike_rules.h)
 #include <strike_rules.h>
 #include <strike_assist_client.h> // Krunker Strike's mobile aim assist / auto-fire
+#include <ui_settings_rules.h> // toggleADS: CONTROLS.adsToggled
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -456,6 +457,8 @@ static struct {
     unsigned char did_pressed[KEY_SLOTS];
     int shoot;               // left mouse button (v7 routes it through binds.shoot: 10001)
     int aim;                 // right mouse button (binds.aim: 10003)
+    int ads_toggled;         // CONTROLS.adsToggled: the aim bind pressed (held, or toggled with toggleADS)
+    int ads_weapon;          // the held weapon adsToggled was last judged for (the swap rule)
     int pending_swap;        // aba6: 1 swap(secondary) 2 melee 3 primary 4 equipment
     int pending_slot;        // KrunkNative Object Manager: Input.select_slot (0 none), kept until an input frame takes it
     int scroll_pressed;      // the wheel "key" is down until the end of this input frame
@@ -1336,6 +1339,7 @@ void ui_controls_reset_keys(void) {
     memset(g_ctl.keys, 0, sizeof(g_ctl.keys));
     memset(g_ctl.did_pressed, 0, sizeof(g_ctl.did_pressed));
     g_ctl.shoot = g_ctl.aim = 0;
+    g_ctl.ads_toggled = 0; // resetKeys: adsToggled = false (deob-10.0.7.js:209888)
     g_ctl.pending_swap = 0;
     g_ctl.scroll_pressed = 0;
 }
@@ -1354,6 +1358,7 @@ static void flip_setting(const char *key) {
         (cJSON_IsString(v) && cJSON_GetStringValue(v)[0] && strcmp(cJSON_GetStringValue(v), "false") != 0);
     const HtmlArg value = {HTML_ARG_BOOL, on ? 0.0 : 1.0, NULL};
     ui_settings_set(key, &value);
+    ui_settings_user_changed(key);
 }
 
 static void show_player_list(void *user) {
@@ -1463,6 +1468,14 @@ static void press_button(Client *client, const int code) {
     }
 }
 
+// toggleADS[getPlayerWeaponId(you)] (deob-10.0.7.js:205686, :213449-213460): the held weapon's clone with
+// vmSetts on Per Weapon, else the setting itself
+static int toggle_ads_for(const int weapon) {
+    const cJSON *v = ui_setting_value("toggleADS");
+    const float base = cJSON_IsTrue(v) || (cJSON_IsNumber(v) && cJSON_GetNumberValue(v) != 0.0) ? 1.0f : 0.0f;
+    return ui_setting_weapon_float("toggleADS", weapon, base) != 0.0f;
+}
+
 // CONTROLS N(code, 1) while the game owns the input.
 static void press_code(Client *client, const int code) {
     const int slot = key_slot(code);
@@ -1470,6 +1483,8 @@ static void press_code(Client *client, const int code) {
     if (bind_is(UI_CONTROL_VOICE, code)) g_voice_key = 1;
     g_ctl.keys[slot] = 1;
     g_ctl.did_pressed[slot] = 1;
+    // pressButton: the aim bind sets adsToggled, or with toggleADS flips it (deob-10.0.7.js:228303)
+    if (bind_is(UI_CONTROL_AIM, code)) g_ctl.ads_toggled = settings_rule_ads_press(toggle_ads_for(held_weapon(client)), g_ctl.ads_toggled);
     if (bind_is(UI_CONTROL_JUMP, code)) strike_ftue_controls_control_down(UI_CONTROL_JUMP);
     else if (bind_is(UI_CONTROL_RELOAD, code)) strike_ftue_controls_control_down(UI_CONTROL_RELOAD);
     // KrunkNative Object Manager: with extra loadout weapons the number row (1-9) picks slots and
@@ -1491,6 +1506,8 @@ static void release_code(Client *client, const int code) {
     if (v7_is("prop", code)) prop_hunt_wheel_release(client ? client : menu_ui()->client); // releaseButton: pick the wheel's prop
     const int slot = key_slot(code);
     if (bind_is(UI_CONTROL_VOICE, code)) g_voice_key = 0;
+    // releaseButton: without toggleADS the aim ends with the release (deob-10.0.7.js:228427)
+    if (bind_is(UI_CONTROL_AIM, code)) g_ctl.ads_toggled = settings_rule_ads_release(toggle_ads_for(held_weapon(client)), g_ctl.ads_toggled);
     if (slot >= 0) g_ctl.keys[slot] = 0;
 }
 
@@ -1840,7 +1857,7 @@ void ui_controls_fill_look(Client *client, Input *input, const float dx, const f
     const float look_y = dy + g_ctl.look_y;
     g_ctl.look_x = g_ctl.look_y = 0.0f;
     const UiControllerInput *c = &g_ctl.cntrl;
-    const int aiming = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
+    const int aiming = g_ctl.aim || g_ctl.ads_toggled; // updateMouseInp: adsToggled picks aimX / aimY (deob-10.0.7.js:209257)
     // gpSetts "Per Weapon": the mouse reads the held weapon's clones (CONTROLS.getSetByWep, v10.js:202383)
     const int weapon = held_weapon(client);
     const float sens_x = g_ctl.input_cntrl ? (aiming ? c->aim_x : c->sens_x)
@@ -1894,7 +1911,13 @@ void ui_controls_fill_input(Client *client, Input *input, const float dx, const 
     // Krunker Strike on a phone: auto-fire drives the shoot key while it is on a target (strike_assist.h)
     const int auto_shoot = strike_assist_client_tick(client);
     if (auto_shoot >= 0) input->shoot = (unsigned char) auto_shoot;
-    input->scope = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
+    // a weapon swap ends a toggled aim when the new weapon holds to aim (deob-10.0.7.js:176417-176419)
+    const int weapon = held_weapon(client);
+    if (weapon != g_ctl.ads_weapon) {
+        g_ctl.ads_toggled = settings_rule_ads_swap(g_ctl.ads_toggled, toggle_ads_for(g_ctl.ads_weapon), toggle_ads_for(weapon));
+        g_ctl.ads_weapon = weapon;
+    }
+    input->scope = g_ctl.aim || g_ctl.ads_toggled; // input[6] adsToggled (deob-10.0.7.js:228683)
     input->swap = input_swap(client ? client->me : NULL);
     input->select_slot = (unsigned char) g_ctl.pending_slot; // Object Manager slot pick (number keys)
     g_ctl.pending_slot = 0;

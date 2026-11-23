@@ -18,6 +18,7 @@
 #include <window_state.h>    // the window across F4 / relaunch / restarts
 #include <app_mode.h>        // app_window_has_router: page windows keep no geometry
 #include <skin_video.h>      // noVideoSkins
+#include <ui_settings_rules.h> // updateRate: settings_rule_update_rate
 #include <ctype.h>
 #include <math.h>
 #include <stddef.h>
@@ -684,6 +685,8 @@ int client_apply_render_setting(Client *client, const char *key, const char *val
         case RS_T_URL: localize_image_url(value, field, e->size); break;
         case RS_T_ASPECT: parse_aspect(value); break;
     }
+    // updateRate.set: a cap below 10 (but not 0) is 10 (deob-10.0.7.js:210431); the row keeps the typed value
+    if (!strcmp(key, "updateRate")) g_rs.frame_cap = settings_rule_update_rate(g_rs.frame_cap);
     // The KRUNKNATIVE_* overrides beat the store (a saved updateRate / vsync) for the whole run
     if (!strcmp(key, "updateRate") && g_frame_cap_override >= 0) g_rs.frame_cap = g_frame_cap_override;
     if (!strcmp(key, "vsync") && g_vsync_override >= 0) g_rs.vsync = g_vsync_override;

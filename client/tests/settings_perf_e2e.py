@@ -14,6 +14,12 @@ Headless client_bin runs (offline Kanji, private XDG_CONFIG_HOME):
      "[client] SIG...: shutting down" line, no crash.
   5. a windowed run (xvfb-run, a private X server; needs xvfb-run) with vsync off and no frame cap
      is uncapped: its fps lines show cap 0, and KRUNKNATIVE_HEADLESS=false does not make it headless.
+  6. crosshairSho shows and hides its rows (deob-10.0.7.js:211866-211890): searching "crosshair" with type 1
+     lists the dot row, not the image row; after setSetting crosshairSho 4 the image row, not the dot row.
+  7. editing a setting under a preset makes it Custom (preIndex 2, deob-10.0.7.js:214445).
+  8. the customize block (deob-10.0.7.js:217209-217219, :214502-214508): exportSettings writes the stored
+     scopes / favourites (krk_favList) / loadouts into settings.txt; importing a text with a customize block
+     stores its lists, cleans the loadout keys and drops falsy loadouts, and makes the preset Custom.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -207,6 +213,74 @@ def main():
         check("windowed, vsync off: the fps lines say vsync 0", lines and all(v == "0" for _, v in lines), str(lines[:3]))
     else:
         print("SKIP  windowed checks: xvfb-run is not installed", flush=True)
+
+    # 6. crosshairSho: the rows it hides drop out of search (a rendered row reports 1, an absent one "-")
+    code, text = run("crosshair-rows", """0 menu
+500 call showWindow 1
+900 call windows.0.searchList "crosshair"
+1300 vis @type1 crosshairDot_div crosshairImage_div
+1400 call setSetting "crosshairSho" 4
+1700 call windows.0.searchList "crosshair"
+2100 vis @type4 crosshairDot_div crosshairImage_div
+2200 quit
+""")
+    vis = {m.group(1): dict(kv.split("=") for kv in m.group(2).split()) for m in
+           re.finditer(r"\[input_script\] vis t=\d+ (@\S+) (.*)", text)}
+    t1, t4 = vis.get("@type1", {}), vis.get("@type4", {})
+    check("crosshairSho 1: the search lists the dot row, not the image row (only rows with a hide get an id, deob-10.0.7.js:218134)",
+          t1.get("crosshairDot_div") == "1" and t1.get("crosshairImage_div") == "-", str(t1))
+    check("crosshairSho 4: the image row shows and the dot row is gone",
+          t4.get("crosshairImage_div") == "1" and t4.get("crosshairDot_div") == "-", str(t4))
+
+    # 7. a setting changed under a preset: Custom
+    code, text = run("preset-custom", "0 menu\n500 call selectSettingPre 4\n1200 call setSetting \"fov\" 95\n1700 quit\n")
+    try:
+        stored = json.loads(read_store("preset-custom", "knSettings") or "{}")
+    except ValueError:
+        stored = {}
+    check("setSetting under Beautiful makes the preset Custom (preIndex 2)",
+          read_store("preset-custom", "preIndex") in ("2", '"2"'), str(read_store("preset-custom", "preIndex")))
+    check("... and stores the value", stored.get("fov") == 95, f"fov={stored.get('fov')!r}")
+
+    # 8. the customize block: export
+    scopes = [{"name": "kn-scope", "img": "https://example.invalid/scope.png"}]
+    write_store("customize-export", "knSettings", json.dumps({"fov": 95}))
+    write_store("customize-export", "krk_custScps", json.dumps(scopes))
+    write_store("customize-export", "krk_favList", json.dumps(["fav-1"]))
+    write_store("customize-export", "krk_loadouts", json.dumps({"Loadout A": {"w": 1}}))
+    downloads = os.path.join(WORK, "customize-export", "dl")
+    os.makedirs(downloads, exist_ok=True)
+    code, text = run("customize-export", "0 menu\n500 call exportSettings\n1000 quit\n", {"XDG_DOWNLOAD_DIR": downloads})
+    try:
+        with open(os.path.join(downloads, "settings.txt")) as f:
+            exported = json.load(f)
+    except (OSError, ValueError):
+        exported = {}
+    cust = exported.get("customize") or {}
+    check("export: settings.txt has the changed fov", exported.get("fov") == 95, str(exported)[:200])
+    check("export: the customize block carries scopes, favorites and loadouts",
+          cust.get("scopes") == scopes and cust.get("favorites") == ["fav-1"] and cust.get("loadouts") == {"Loadout A": {"w": 1}},
+          str(cust)[:300])
+    check("export: no empty lists in the customize block", "reticles" not in cust and "images" not in cust, str(sorted(cust)))
+
+    # 8b. import (typed into the import popup, as a player pastes it)
+    blob = json.dumps({"fov": 96, "customize": {"loadouts": {"My<L>oad": {"w": 2}, "gone": 0},
+                                                "favorites": ["fav-2"], "scopes": scopes}}, separators=(",", ":"))
+    write_store("customize-import", "preIndex", "4")
+    code, text = run("customize-import", f"0 menu\n500 call importSettings\n800 type {blob}\n1300 call importSettings\n1800 quit\n")
+    try:
+        stored = json.loads(read_store("customize-import", "knSettings") or "{}")
+        loadouts = json.loads(read_store("customize-import", "krk_loadouts") or "null")
+        favs = json.loads(read_store("customize-import", "krk_favList") or "null")
+        got_scopes = json.loads(read_store("customize-import", "krk_custScps") or "null")
+    except ValueError:
+        stored, loadouts, favs, got_scopes = {}, None, None, None
+    check("import: the setting is stored", stored.get("fov") == 96, f"fov={stored.get('fov')!r}")
+    check("import: loadout keys cleaned, falsy loadouts dropped", loadouts == {"MyLoad": {"w": 2}}, str(loadouts))
+    check("import: favorites (krk_favList) and scopes stored as given", favs == ["fav-2"] and got_scopes == scopes,
+          f"favs={favs!r} scopes={got_scopes!r}")
+    check("import: the preset becomes Custom", read_store("customize-import", "preIndex") in ("2", '"2"'),
+          str(read_store("customize-import", "preIndex")))
 
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'}: {sum(results)}/{len(results)}")
