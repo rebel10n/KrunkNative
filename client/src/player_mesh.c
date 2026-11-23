@@ -1209,13 +1209,22 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     mount_mat->base.transparent = 1;
     arms->charm_mount = mesh_init(mount_geo, (Material *) mount_mat);
     arms->charm_mount->transform.position = (vec3) {mount->mount[0], mount->mount[1], mount->mount[2]};
+    // v10.0.7: the skin's own mount (`skin.charmMXOff || weapon.charmMXOff`, scale weapon.charmMScl * (skin.charmMScl
+    // || 1), deob-10.0.7.js:174210), set in the Skin Manager's Charm section
+    float mount_scl = mount->mount_scl;
+    if (weapon_skin) {
+        if (weapon_skin->charm_m[0] != 0.0f) arms->charm_mount->transform.position.x = weapon_skin->charm_m[0];
+        if (weapon_skin->charm_m[1] != 0.0f) arms->charm_mount->transform.position.y = weapon_skin->charm_m[1];
+        if (weapon_skin->charm_m[2] != 0.0f) arms->charm_mount->transform.position.z = weapon_skin->charm_m[2];
+        if (weapon_skin->charm_m_scl != 0.0f) mount_scl *= weapon_skin->charm_m_scl;
+    }
     if (alt) {
         if (alt->charm_m[0] != 0.0f) arms->charm_mount->transform.position.x = alt->charm_m[0];
         if (alt->charm_m[1] != 0.0f) arms->charm_mount->transform.position.y = alt->charm_m[1];
         if (alt->charm_m[2] != 0.0f) arms->charm_mount->transform.position.z = alt->charm_m[2];
     }
     arms->charm_mount->transform.rotation.y = (float) M_PI * 0.5f;
-    arms->charm_mount->transform.scale = (vec3) {mount->mount_scl, mount->mount_scl, mount->mount_scl};
+    arms->charm_mount->transform.scale = (vec3) {mount_scl, mount_scl, mount_scl};
     arms->charm_mount->transform.parent = &arms->anchor;
 
     const vec3 rotation = {0.0f, (float) -M_PI, 0.0f};

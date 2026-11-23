@@ -35,6 +35,7 @@
 #include <frame_target.h>
 #include <pets.h>
 #include <render_settings.h>
+#include <skin_counter.h> // a counter skin's Kounter on the showcase item
 #include <skin_fx.h>
 #include <store_item_model.h> // a store item's model (the showcase, the cosmetic page)
 #include <fast_obj.h>
@@ -98,6 +99,7 @@ static struct {
     MeshTransform *holders[VIEWER_MAX_ITEMS];
     int holder_count;
     Player *item_player;           // v5621: the showcase dye / cosmetic-page preview Player
+    SkinCounter *counter;          // a counter skin's Kounter on the showcase item (skin_counter.c)
 
     // orbit controls
     vec3 target;
@@ -487,6 +489,23 @@ static void items_clear(void) {
     vs.cube_count = 0;
     for (int i = 0; i < vs.holder_count; i++) free(vs.holders[i]);
     vs.holder_count = 0;
+    if (vs.counter) {
+        skin_counter_scene_remove(vs.scene, vs.counter);
+        skin_counter_fini(vs.counter);
+        vs.counter = NULL;
+    }
+}
+
+// a counter skin's Kounter on the shown weapon / melee (generateMeshes' attach, deob-10.0.7.js:173029-173038), showing
+// the page's count of its stat: the Skin Manager's preview asks for "&<stat>=1284" (iIìííiî, :124880-124883)
+static void item_counter(const ViewerSkin *n, MeshTransform *parent) {
+    if (vs.counter || !parent || !n || n->counter_digits <= 0 || (n->type != 0 && n->type != ITEM_MELEE)) return;
+    vs.counter = skin_counter_create(n, 0, parent);
+    if (!vs.counter) return;
+    const char *count = viewer_param_get(skin_counter_stat(vs.counter));
+    skin_counter_set_count(vs.counter, count ? strtol(count, NULL, 10) : 0);
+    skin_counter_scene_add(vs.scene, vs.counter);
+    fprintf(stderr, "[viewer] showcase counter: %s %ld, %d digits\n", skin_counter_stat(vs.counter), skin_counter_count(vs.counter), n->counter_digits);
 }
 
 static MeshTransform *holder_new(MeshTransform *parent) {
@@ -579,12 +598,14 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
         skin_fx_set_seed(built.model, NULL, g_viewer.seed);
         vs.models[vs.model_count++] = built.model;
         scene_add_gltf(vs.scene, built.model);
+        item_counter(n, &built.model->root);
         return;
     }
     skin_fx_apply_wear(built.mesh, n, g_viewer.wear); // the page's wear param
     if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(built.mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
     skin_fx_set_seed(NULL, built.mesh, g_viewer.seed);
     item_add(built.mesh);
+    item_counter(n, &built.mesh->transform);
 }
 
 // player_update_meshes() (third person) poses legs[0..1] / crouched_legs[0..1] without checking

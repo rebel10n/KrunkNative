@@ -79,6 +79,56 @@ output's `color`, `alpha`, `emissive`, `positionOffset` and `normal` ports and `
   `map` reads white, and `map` without a texture reads (0, 0, 0, 1); `textureBicubic` samples one mip level
   (`strength * maxMip`); the Lambert term has the ambient light and the sun only, without the map's point lights.
 
+## The node canvas (sgEditor)
+
+v10.0.7 edits a graph on a node canvas (sgEditor, deob-10.0.7.js:122896-124145). Shader Studio mounts it with
+`kind: "surface"`, and its onChange is `itemConfig.customShader` (iÌiïíîi, :127145). A paint's Animated Shader
+mounts it with `kind: "paint"`, and its onChange is `itemConfig.paintShaderGraph` (iÍííiïi, :126258). The
+port is `client/src/ui/shader_graph_ui.c` (`shader_graph_ui.h`). Its DOM ids take the caller's prefix
+(`knSmSg`, `knSmPg`).
+
+- The node table and the templates are v10's own data. `tools/modshader/gen_editor.cjs <deob>` evaluates the deob's
+  node table and editor region and writes `client/src/ui/shader_graph_defs.inc` (172 node defs, 9 templates).
+- Layout (iïïiiìï, :122303): nodes are 210 px wide, with a 26 px header and 24 px rows (outputs, then params,
+  then inputs). Wires are cubic beziers (iïïíîíî, :122453), drawn as one SVG image.
+- The view: pan, wheel zoom (exp(-deltaY * 0.0015), 0.2 to 3) and Fit (80 px margin, 0.2 to 1.25). The pointer's
+  screen px are divided by the canvas's on-screen scale, getBoundingClientRect().width / offsetWidth (iÌiíïïî,
+  :123076), so a drag follows the pointer inside the window's `scale(--ui-scale)`.
+- Editing works as in v10:
+  - nodes are added from the palette (sorted by category, then title);
+  - a wire dropped on empty canvas opens the palette filtered to that port's type;
+  - pressing a connected input detaches its wire;
+  - connections that would self-connect, mismatch types or make a cycle are refused with v10's messages.
+- Keys: Delete removes, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo and redo, Ctrl+A selects all, F fits, Escape clears.
+  History merges edits with the same key within 800 ms and keeps 200 entries. onChange is debounced by 100 ms.
+- Also ported: Templates, Import / Export JSON, the footer's validation (`mod_shader_graph_errors`, each error
+  clickable to its node), and the param and input value editors.
+- HTML engine support the canvas needed: inline `onmousemove` (key = MouseEvent.buttons) and `onwheel` (key = deltaY
+  px; `return false` keeps the page from scrolling). A text field's own `onkeydown` also sees Escape, so the
+  palette's search closes the palette (:122695).
+
+## Skin Manager's other Appearance sections
+
+These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-126978):
+
+- **Paintable** (`paintTargets` true, or a list of mesh names) and the paint mask (texture "mask", `texture_p.png`).
+- **Paint**: a paint's Solid Colour (`paintColor`) or its Animated Shader (`paintShaderGraph`). It is previewed on
+  `paintPreviewBase`, 7805 (Weapon) or 7798 (Cosmetic).
+- **Wear**: four layers whose red channels are packed into R, G, B and A of a 1024 px `texture_w.png`, uploaded as
+  texture "wear" (`customTextures.wear`).
+- **Kounter**: `itemConfig.attach`, a type 1 stat counter. `viewer_skin_define` reads it, so Test and the preview
+  draw it (skin_counter.c).
+- **Charm**: `charmM{X,Y,Z}Off` / `charmMScl` (the weapon's spot to start from) and `noCharm`. player_mesh.c
+  moves the mount to `skin || weapon` and scales it by `weapon.charmMScl * (skin.charmMScl || 1)` (:174210).
+- **The preview's Wear slider and paint select** add `&wear=` and `&paint=` to the iframe's query. The query also
+  carries `&<stat>=1284`, so the showcase's Kounter shows 1284.
+- **Differences**:
+  - The iframe takes no postMessage. attach and the charm keys stay in the showcase JSON (v10 posts attachEdit /
+    charmEdit), and the wear level is the query's.
+  - The preview's Snap to surface tool and its Move / Rotate / Scale gizmo are not ported. The Kounter and charm
+    fields set the placement.
+  - The paint preview draws a solid colour only; a paint's graph is saved but not drawn.
+
 ## Tests
 
 - `mod_shader_test` (ctest): the validator's refusals, the sample graphs, and every node output translating.
@@ -87,6 +137,13 @@ output's `color`, `alpha`, `emissive`, `positionOffset` and `normal` ports and `
   fragment compiles, and every surface node output's vertex / fragment pair compiles and links, as GLSL ES 3.00
   and 4.50 core. It skips (77) unless the renderer is llvmpipe.
 - `v10_skin_manager_e2e`: Shader Studio's Refresh Preview and the table's Test both put the graph material on.
+  - The node canvas: the default graph; Add node via the palette, search and arrow keys; a wire dragged
+    port to port; a wire dropped on the canvas (the palette for vec3); a node drag and Undo; pan; wheel zoom; Fit;
+    Delete and Undo; Export JSON; Templates.
+  - Save checks the edited graph in `customShader.graph`.
+  - The other editors: Paintable and its mask, the Wear layers packed into `texture_w.png` (its first pixel
+    checked), the preview's wear and paint query, the Kounter (`[viewer] showcase counter`), the charm placement,
+    and a paint's colour and Animated Shader canvas.
 - `tools/modshader/sample_e2e.sh`: grey and invert mods (`client/tests/data/mod_shader/`) on a Sandstorm copy
   whose `modURL` points at them, headless from a pinned camera. Checks: grey frame R=G=B with the plain frame's
   Rec. 709 luminance, invert frame = 255 minus plain.

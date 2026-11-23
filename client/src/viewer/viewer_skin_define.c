@@ -186,6 +186,22 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
         d->shader_info = cJSON_PrintUnformatted(info);
         s->shader_info = d->shader_info;
     }
+    // attach (generateMeshes' counter, deob-10.0.7.js:173029-173038; loadCounter :207436-207438): a type 1 attach is a
+    // stat counter, digits round(digits) || 5 in 1..10, at x / y / z, rot, scl, glowing in color || "#7fe3ff"
+    const cJSON *attach = get(j, "attach");
+    if (cJSON_IsObject(attach) && num(get(attach, "type"), 0) == 1) {
+        const double dg = floor(num(get(attach, "digits"), 0) + 0.5);
+        s->counter_digits = dg >= 1 ? (dg > 10 ? 10 : (int) dg) : 5;
+        s->counter_pos[0] = f(attach, "x"), s->counter_pos[1] = f(attach, "y"), s->counter_pos[2] = f(attach, "z");
+        const cJSON *rot = get(attach, "rot");
+        for (int i = 0; i < 3; i++) s->counter_rot[i] = (float) num(cJSON_GetArrayItem(rot, i), 0.0);
+        s->counter_scl = f(attach, "scl");
+        const char *color = str(get(attach, "color"));
+        s->counter_color = color && color[0] == '#' ? (int) strtol(color + 1, NULL, 16) : -1;
+        s->counter_stat = str(get(attach, "stat"));
+    }
+    s->charm_m[0] = f(j, "charmMXOff"), s->charm_m[1] = f(j, "charmMYOff"), s->charm_m[2] = f(j, "charmMZOff");
+    s->charm_m_scl = f(j, "charmMScl");
     s->title = (int) num(get(j, "title"), 0);
     s->set = str(get(j, "set"));
     if (s->set) s->set_min = (int) num(get(j, "setMin"), 0);

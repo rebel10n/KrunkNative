@@ -28,12 +28,17 @@
 // (skinManager.setSkin: viewer_skin_define) and puts it on the local player's slot of its type (a weapon skin: the
 // class whose primary it is), then rebuilds the player's meshes.
 //
-// Not ported: the wear map, paint target / paint colour, Kounter, attachment and charm editors of the Appearance tab
-// and the preview's wear / paint controls (no Box Office data behind them yet), Shader Studio's node canvas (the graph
-// is the skin's own, or v10's default surface graph; its params, parts, Apply to all parts, Refresh / Clear Preview
-// and Remove Shader are here) and the graph's look: itemConfig.customShader is saved as v10 saves it, but the
-// preview and the game draw the skin without it (the client compiles no node graph; skin_fx has v10's fixed shaders). An OGG sound plays as
-// MP3 and WAV do (miniaudio with stb_vorbis, client/src/miniaudio.c). A krunker.io account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its saves do.
+// The Appearance tab's Paintable (paintTargets, the paint mask texture_p.png), Paint (a paint's colour or its node graph,
+// previewed on paintPreviewBase), Wear (four layers packed into texture_w.png), Kounter (itemConfig.attach) and Charm
+// (charmM{X,Y,Z}Off / charmMScl, noCharm) sections and the preview's Wear slider / paint pick are v10's
+// (:126048-126978, :127496-127530). Shader Studio's node canvas is sgEditor (shader_graph_ui.c); its graph compiles to
+// the preview's and the game's material (skin_fx.c, mod_shader_graph.c). An OGG sound plays as MP3 and WAV do
+// (miniaudio with stb_vorbis, client/src/miniaudio.c).
+// Not ported: the preview's Kounter / charm tools (Snap to surface, the Move / Rotate / Scale gizmo: the showcase
+// iframe's attachEdit / charmEdit messages); the fields set the placement. A paint's node graph is saved, but the
+// paint preview draws only a solid colour (the viewer's &paint=).
+// A krunker.io account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its
+// saves do.
 #include <v10_skin_manager.h>
 #include <v10_social.h>
 #include <v10_ui.h>
@@ -49,6 +54,9 @@
 #include <png_write.h>     // the captured thumbnail
 #include <user_asset_path.h> // user_asset_rel_is_kn: a Box Office skin's files are the brain's
 #include <viewer_embed.h>  // the preview iframe's showcase and its capture
+#include <shader_graph_ui.h> // Shader Studio's node canvas (sgEditor)
+#include <stb_image.h>     // the wear layers (the canvas drawImage of iÏiìíiì)
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -66,7 +74,7 @@
 #define TEST_WAIT_MS 10000.0      // KrunkNative: how long Test waits for the local player / its new class
 #define CHUNK (512u * 1024u)      // kn_brain's request bodies are 1 MiB at most (mods_ui.c's uploads)
 #define CHUNK_TIMEOUT_MS 60000
-#define SLOT_ERRORS 12
+#define SLOT_ERRORS 16
 
 // the platform file dialog (client/src/editor/editor_tools.c; editor_internal.h pulls in GL)
 typedef void (*EdFileFn)(void *user, const char *path);
@@ -129,7 +137,26 @@ static struct {
         cJSON *graph, *parts;
         int64_t skin;
         int loaded;
+        SgEditor *canvas; // the node canvas editor (kind "surface", onChange iÌiïíîi :127145)
+        int render_due;   // the canvas changed the exposed params: the window again on the next tick
     } sh;
+    // the Appearance tab's Paintable, Paint, Wear, Kounter and Charm sections and the preview's controls, per skin
+    struct {
+        int64_t skin;                // the skin they were set up for (another one: they start over)
+        int ready;
+        int wear_on;                 // iÎíïíiî: the Wear toggle
+        unsigned char *layer[4];     // iÎïïíii: the picked layers (the files), NULL none
+        size_t layer_len[4];
+        int generating;              // iÏiîìïï
+        char wear_error[200];        // iIïîïiï
+        char targets[256];           // iIíìííi: the mesh names' text
+        int attach_mode, charm_mode; // iIíîììî / iÍîïïíí: PLACE_TOOLS' index, 0 View
+        SgEditor *paint_canvas;      // a paint's node canvas (kind "paint")
+        int paint_base;              // paintPreviewBase (iÍìîîíi): the item the paint is previewed on
+        int wear_open, wear_touched; // iIììììì, iÍïííîï: the preview's Wear slider shown / asked for
+        double wear_level;           // iÎïîìïî
+        int paint_pick;              // iÍìïíìî: the preview's paint (a catalogue index), -1 none
+    } ed;
 } SM;
 
 // Test's pending swap (outlives the window, which Test closes): the skin, its game skin, when it is due
@@ -424,13 +451,14 @@ static void uri_component(StrBuf *sb, const char *s) {
     }
 }
 
-// the preview's showcase query value (:124688-124701): the game skin without name, rarity, rarity_meta,
-// customShader, attach and the charm offsets (iïiîïîï :120757), as encodeURIComponent(JSON.stringify(...)); with
-// Shader Studio's Refresh Preview, the shader as customShaderInfo (the iframe's shaderStudioUpdate, :124651-124656)
+// the preview's showcase query value (:124688-124701): the game skin without name, rarity, rarity_meta and
+// customShader, as encodeURIComponent(JSON.stringify(...)); with Shader Studio's Refresh Preview, the shader as
+// customShaderInfo (the iframe's shaderStudioUpdate, :124651-124656). v10 leaves out attach and the charm offsets
+// (iïiîïîï :120757) and posts them as attachEdit / charmEdit (:124719-124732); KrunkNative's iframe takes no
+// messages, so they stay in the query (the showcase draws the Kounter, viewer_scene.c item_counter).
 static char *preview_query(void) {
     cJSON *g = game_skin(SM.editing);
-    static const char *const strip[] = {"name", "rarity", "rarity_meta", "customShader", "attach", "charmMXOff", "charmMYOff", "charmMZOff",
-                                        "charmMScl"};
+    static const char *const strip[] = {"name", "rarity", "rarity_meta", "customShader"};
     for (size_t i = 0; i < sizeof(strip) / sizeof(strip[0]); i++) cJSON_DeleteItemFromObjectCaseSensitive(g, strip[i]);
     if (SM.sh.preview) {
         cJSON *info = shader_info(cJSON_GetObjectItemCaseSensitive(editing_config(), "customShader"));
@@ -688,6 +716,7 @@ typedef struct {
 static const DropKind DROP_MODEL = {"model", "", ".obj,.gltf,.glb", 0x3200000};       // :125747-125749
 static const DropKind DROP_TEXTURE = {"texture", "", ".png,.jpg,.jpeg", 0xa00000};    // :125944-125946
 static const DropKind DROP_SOUND = {"sound", "", ".mp3,.wav,.ogg", 0x200000};         // :127022-127024
+static const DropKind DROP_WEAR = {"wear", "", ".png,.jpg,.jpeg", 0xa00000};          // a wear layer, :126545-126547
 
 // "Max: 10.0MB" / "500KB" (:11999)
 static void size_text(char *out, const size_t n, const long long max) {
@@ -989,6 +1018,30 @@ static void param_text(StrBuf *sb, const char *type, const cJSON *v) {
     } else sb_appendf(sb, "%g", round((cJSON_IsNumber(v) ? v->valuedouble : 0) * 1000.0) / 1000.0);
 }
 
+static void shader_write(void);
+
+// the canvas's onChange (iÌiïíîi, :127145-127170): itemConfig.customShader takes the graph (onSkinChange, the legacy
+// notice goes) and the preview shows it (onShaderStudioUpdate); the window again when the exposed params changed
+static void on_canvas_change(void *user, const cJSON *graph) {
+    (void) user;
+    if (!SM.editing || !SM.sh.loaded || !graph) return;
+    cJSON *before = graph_params();
+    cJSON_Delete(SM.sh.graph);
+    SM.sh.graph = cJSON_Duplicate(graph, 1);
+    cJSON *after = graph_params();
+    if (!cJSON_Compare(before, after, 1) || SM.sh.legacy) SM.sh.render_due = 1;
+    cJSON_Delete(before);
+    cJSON_Delete(after);
+    shader_write();
+    SM.sh.legacy = 0;
+    SM.sh.preview = 1;
+}
+
+static SgEditor *canvas(void) {
+    if (!SM.sh.canvas) SM.sh.canvas = sg_editor_new("knSmSg", "knSkins('sg'", "surface", on_canvas_change, NULL);
+    return SM.sh.canvas;
+}
+
 // the studio's state of the edited skin (the effect at :127106-127124): its graph customShader, else the default
 static void shader_load(void) {
     const int64_t id = editing_id();
@@ -1013,6 +1066,8 @@ static void shader_load(void) {
     if (cs) SM.sh.open = 1;
     SM.sh.skin = id;
     SM.sh.loaded = 1;
+    SM.sh.render_due = 0;
+    sg_editor_set_graph(canvas(), SM.sh.graph); // a new document: the canvas's history and view start over
 }
 
 static void shader_section(StrBuf *sb) {
@@ -1032,6 +1087,12 @@ static void shader_section(StrBuf *sb) {
         sb_text(sb, i18n_tr("shaderGraph.legacyNotice", "This item used a GLSL shader, which is no longer supported."));
         sb_append(sb, "</div>");
     }
+    // the node canvas (iïiìííí, kind "surface"): its pending change first, then the studio's graph as its prop
+    sg_editor_flush(canvas());
+    sg_editor_set_graph(canvas(), SM.sh.graph);
+    sb_append(sb, " ");
+    sg_editor_html(canvas(), sb);
+    sb_append(sb, " ");
     cJSON *params = graph_params();
     sb_append(sb, " <div class=\"params-section svelte-1x46pbz\"><div class=\"editor-label svelte-1x46pbz\">");
     sb_text(sb, i18n_tr("shaderGraph.params.title", "Exposed params"));
@@ -1129,9 +1190,776 @@ static void shader_section(StrBuf *sb) {
                i18n_tr("shaderGraph.removeShader", "Remove Shader"));
 }
 
+static void changed(void);
+static void unset_asset(const char *type, const char *category);
+static void up_start(const char *slot, const char *type, const char *category, const char *file_name, unsigned char *data, size_t len);
+static int64_t arg_i64(const HtmlArg *args, int argc, int i);
+static const char *arg_s(const HtmlArg *args, int argc, int i);
+
+// ------------------------------------------------------------------ Paintable, Paint, Wear, Kounter and Charm
+
+#define WEAR_SIZE 1024        // the packed wear map's size (iIïìíiì, :126414)
+#define PAINT_BASE_WEAPON 7805 // the Paint section's Weapon / Cosmetic quick picks (iïíìíìì / iìîììií, :124210-124211)
+#define PAINT_BASE_COSMETIC 7798
+
+// the wear layers (iÌíïììì, :126415-126431): each picked file's red channel is packed into one channel
+static const struct {
+    const char *key, *label, *desc;
+} WEAR_LAYERS[4] = {{"rust", "Rust", "Rust patches and corrosion (packed into red channel)"},
+                    {"dirt", "Dirt", "Dirt and grime buildup (packed into green channel)"},
+                    {"scratch", "Scratches", "Scratches and gouges (packed into blue channel)"},
+                    {"wear", "General Wear", "Overall degradation (packed into alpha channel)"}};
+
+// the Kounter's / charm's preview tools (iIiìíìì :126670-126690, iÍiïîìî :126851-126867)
+static const struct {
+    const char *mode, *icon, *label;
+} PLACE_TOOLS[5] = {{"off", "3d_rotation", "View"},       {"snap", "ads_click", "Snap to surface"}, {"translate", "open_with", "Move"},
+                    {"rotate", "rotate_90_degrees_ccw", "Rotate"}, {"scale", "open_in_full", "Scale"}};
+
+// the Kounter's stats (iiîïîìî :106682) and their labels (iIïíîiì :126692-126701)
+static const char *const KOUNTER_STATS[8] = {"kills", "hskills", "aikills", "headshots", "hits", "shots", "jumps", "candy"};
+static const char *const KOUNTER_LABELS[8] = {"Kills", "Headshot kills", "AI kills", "Headshots", "Shots hit", "Shots fired", "Jumps", "Candy (map script)"};
+static const char *const CHARM_KEYS[4] = {"charmMXOff", "charmMYOff", "charmMZOff", "charmMScl"}; // iïiîïîï (:120757)
+
+// a JS number as String(n) gives it (enough for the fields' values)
+static void js_number(char *out, const size_t n, const double v) {
+    if (v == (double) (long long) v && fabs(v) < 1e15) snprintf(out, n, "%lld", (long long) v);
+    else snprintf(out, n, "%.15g", v);
+}
+
+static double js_float(const float v) {
+    char t[32];
+    snprintf(t, sizeof(t), "%.7g", (double) v);
+    return strtod(t, NULL);
+}
+
+static int tool_index(const char *mode) {
+    for (int i = 0; i < 5; i++)
+        if (!strcmp(mode, PLACE_TOOLS[i].mode)) return i;
+    return 0;
+}
+
+static void wear_layers_clear(void) {
+    for (int i = 0; i < 4; i++) {
+        free(SM.ed.layer[i]);
+        SM.ed.layer[i] = NULL;
+        SM.ed.layer_len[i] = 0;
+        char slot[24];
+        snprintf(slot, sizeof(slot), "wear:%s", WEAR_LAYERS[i].key);
+        SlotState *st = slot_state(slot, 0);
+        if (st) st->file_name[0] = st->drop_error[0] = 0;
+    }
+}
+
+static SgEditor *paint_canvas(void);
+
+// each section's own state, started over for another skin (the effects keyed on editingSkin.skinId: :126097-126102,
+// :126254-126259, :126495-126497, and the preview's :124876-124878)
+static void editors_load(void) {
+    if (!SM.editing) return;
+    const int64_t id = editing_id();
+    if (SM.ed.ready && SM.ed.skin == id) return;
+    const cJSON *cfg = editing_config();
+    SM.ed.ready = 1;
+    SM.ed.skin = id;
+    wear_layers_clear();
+    SM.ed.wear_on = cfg_true(cJSON_GetObjectItemCaseSensitive(cfg, "customTextures"), "wear");
+    SM.ed.generating = 0;
+    SM.ed.wear_error[0] = 0;
+    SM.ed.targets[0] = 0; // the mesh names: paintTargets.join(", ") when it is a list
+    const cJSON *targets = cJSON_GetObjectItemCaseSensitive(cfg, "paintTargets");
+    if (cJSON_IsArray(targets)) {
+        size_t at = 0;
+        const cJSON *t;
+        cJSON_ArrayForEach(t, targets) {
+            char part[64];
+            if (cJSON_IsString(t)) snprintf(part, sizeof(part), "%s", t->valuestring);
+            else if (cJSON_IsNumber(t)) js_number(part, sizeof(part), t->valuedouble);
+            else snprintf(part, sizeof(part), "%s", cJSON_IsNull(t) ? "null" : cJSON_IsTrue(t) ? "true" : "false");
+            const int w = snprintf(SM.ed.targets + at, sizeof(SM.ed.targets) - at, "%s%s", at ? ", " : "", part);
+            if (w < 0 || (size_t) w >= sizeof(SM.ed.targets) - at) break;
+            at += (size_t) w;
+        }
+    }
+    SM.ed.attach_mode = SM.ed.charm_mode = 0;
+    SM.ed.wear_open = SM.ed.wear_touched = 0;
+    SM.ed.wear_level = 0.0;
+    SM.ed.paint_pick = -1;
+    if (!SM.ed.paint_base) SM.ed.paint_base = PAINT_BASE_WEAPON;
+    // the paint's canvas: paintShaderGraph when it is a graph (iìïìïïï :122528). A Solid Colour paint has none: v10
+    // mounts the sgEditor only in Animated Shader mode (:126258), so its default graph (an onChange that drops
+    // paintColor) waits for paintMode "shader"
+    const cJSON *pg = cJSON_GetObjectItemCaseSensitive(cfg, "paintShaderGraph");
+    if (graph_ok(pg)) sg_editor_set_graph(paint_canvas(), pg);
+    else if (SM.ed.paint_canvas) {
+        sg_editor_free(SM.ed.paint_canvas);
+        SM.ed.paint_canvas = NULL;
+    }
+}
+
+// ---- Paintable (iìïïiiî, svelte-16sjsp2, :126048-126213): paintTargets true / a list of mesh names, the paint mask
+
+// iÌiíììì: the text split at ",", trimmed, without the empty names
+static cJSON *mesh_list(const char *text) {
+    cJSON *a = cJSON_CreateArray();
+    const char *p = text;
+    while (p && *p) {
+        const char *e = strchr(p, ',');
+        const size_t n = e ? (size_t) (e - p) : strlen(p);
+        char part[256];
+        snprintf(part, sizeof(part), "%.*s", (int) (n < sizeof(part) - 1 ? n : sizeof(part) - 1), p);
+        char t[256];
+        trimmed(t, sizeof(t), part);
+        if (t[0]) cJSON_AddItemToArray(a, cJSON_CreateString(t));
+        p = e ? e + 1 : NULL;
+    }
+    return a;
+}
+
+static void paintable_section(StrBuf *sb) {
+    const cJSON *cfg = editing_config();
+    const cJSON *targets = cJSON_GetObjectItemCaseSensitive(cfg, "paintTargets");
+    const int on = cfg_true(cfg, "paintTargets"), specific = cJSON_IsArray(targets);
+    sb_appendf(sb, "<div class=\"section paintable-section svelte-16sjsp2\" id=\"knSmPaintable\"><h3 class=\"section-title svelte-16sjsp2\"><i class=\"material-icons svelte-16sjsp2\">"
+                   "format_paint</i> Paintable</h3> <div class=\"section-content svelte-16sjsp2\"><p class=\"section-description svelte-16sjsp2\">Allow players to apply a "
+                   "Paint to this item to recolor it. Optionally restrict which parts get painted with a\n        mask or by naming meshes.</p> <div class=\"paintable-settings "
+                   "svelte-16sjsp2\"><label class=\"toggle-switch svelte-16sjsp2\"><span class=\"svelte-16sjsp2\">Paintable</span> <input type=\"checkbox\" class=\"svelte-16sjsp2\" "
+                   "id=\"knSmPaintableOn\" onchange=\"knSkins('paintable',this.checked)\"%s> <span class=\"slider svelte-16sjsp2\"></span></label></div> ",
+               on ? " checked" : "");
+    if (on) {
+        sb_appendf(sb, "<div class=\"form-group form-row svelte-16sjsp2\"><label for=\"paint-targets-mode\" class=\"svelte-16sjsp2\">Paint area</label> <select "
+                       "id=\"paint-targets-mode\" class=\"form-select svelte-16sjsp2\" onchange=\"knSkins('paintArea',this.value)\"><option class=\"svelte-16sjsp2\" value=\"all\"%s>"
+                       "All meshes</option><option class=\"svelte-16sjsp2\" value=\"specific\"%s>Specific meshes</option></select></div> ",
+                   specific ? "" : " selected", specific ? " selected" : "");
+        if (specific) {
+            sb_append(sb, "<div class=\"form-group svelte-16sjsp2\"><label for=\"paint-targets-meshes\" class=\"svelte-16sjsp2\">Mesh names</label> <input id=\"knSmPaintMeshes\" "
+                          "type=\"text\" class=\"form-input svelte-16sjsp2\" placeholder=\"e.g. head, body, barrel\" oninput=\"knSkins('input','paintMeshes')\" value=\"");
+            sb_text(sb, SM.ed.targets);
+            sb_append(sb, "\"> <p class=\"field-hint svelte-16sjsp2\">Comma-separated mesh/material names. Only these meshes will accept paint.</p></div>");
+        }
+        sb_append(sb, " <div class=\"texture-upload-item svelte-16sjsp2\" id=\"knSmPaintMask\"><div class=\"texture-header svelte-16sjsp2\"><h5 class=\"svelte-16sjsp2\">Paint Mask</h5> "
+                      "<span class=\"optional-badge svelte-16sjsp2\">Optional</span>");
+        if (uploading("texture:mask"))
+            sb_append(sb, " <span class=\"uploading-badge svelte-16sjsp2\"><i class=\"material-icons spinning svelte-16sjsp2\">sync</i> Uploading...</span>");
+        sb_append(sb, "</div> <p class=\"texture-description svelte-16sjsp2\">Grayscale texture whose red channel limits the paintable region (suffix: _p). White = "
+                      "paintable, black =\n            untouched.</p> ");
+        upload_error_markup(sb, "16sjsp2", "texture:mask");
+        if (cfg_true(cJSON_GetObjectItemCaseSensitive(cfg, "customTextures"), "mask")) {
+            char url[600];
+            skin_url("texture_p.png", url, sizeof(url));
+            sb_appendf(sb, " <div class=\"existing-texture svelte-16sjsp2\"><div class=\"texture-preview svelte-16sjsp2\"><img alt=\"Paint mask texture\" class=\"texture-image "
+                           "svelte-16sjsp2\" src=\"%s\"></div> <div class=\"existing-texture-actions svelte-16sjsp2\"><button type=\"button\" class=\"btn-remove svelte-16sjsp2\" "
+                           "id=\"knSmPaintMaskRemove\" onclick=\"knSkins('unset','texture','mask')\"><i class=\"material-icons svelte-16sjsp2\">delete</i> Remove</button></div></div>",
+                       url);
+        } else {
+            sb_append(sb, " <div class=\"file-drop-container svelte-16sjsp2\">");
+            file_drop(sb, &DROP_TEXTURE, "mask", "texture:mask", uploading("texture:mask") ? "Uploading..." : "Drop paint mask here");
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// ---- Paint (iiììiìî, svelte-1qb7o10, :126215-126400): a paint's solid colour or its node graph shader
+
+static void on_paint_canvas_change(void *user, const cJSON *graph) { // iÍííiïi: paintShaderGraph, no paintColor
+    (void) user;
+    if (!SM.editing || !graph) return;
+    cJSON *cfg = editing_config();
+    put(cfg, "paintShaderGraph", cJSON_Duplicate(graph, 1));
+    put(cfg, "paintColor", NULL);
+    put(cfg, "paintShaderCode", NULL); // iÍìiìíï: the GLSL of old goes with any change
+    put(cfg, "paintShaderUniforms", NULL);
+    changed();
+}
+
+static SgEditor *paint_canvas(void) {
+    if (!SM.ed.paint_canvas) SM.ed.paint_canvas = sg_editor_new("knSmPg", "knSkins('pg'", "paint", on_paint_canvas_change, NULL);
+    return SM.ed.paint_canvas;
+}
+
+static int paint_shader_mode(void) { return graph_ok(cJSON_GetObjectItemCaseSensitive(editing_config(), "paintShaderGraph")); } // iÍïìïïî
+
+static void paint_section(StrBuf *sb) {
+    const cJSON *cfg = editing_config();
+    const int shader = paint_shader_mode();
+    const char *color = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cfg, "paintColor"));
+    sb_append(sb, "<div class=\"section paint-section svelte-1qb7o10\" id=\"knSmPaint\"><h3 class=\"section-title svelte-1qb7o10\"><i class=\"material-icons svelte-1qb7o10\">"
+                  "colorize</i> Paint</h3> <div class=\"section-content svelte-1qb7o10\"><p class=\"section-description svelte-1qb7o10\">A Paint is a consumable players apply "
+                  "to paintable items to recolor them. Choose a solid colour or author an\n        animated shader, then preview it on a real item.</p> ");
+    if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(cfg, "paintShaderCode"))) {
+        sb_append(sb, "<div class=\"legacy-notice svelte-1qb7o10\"><i class=\"material-icons svelte-1qb7o10\">warning</i> ");
+        sb_text(sb, i18n_tr("shaderGraph.paint.legacyNotice", "This Paint used a GLSL shader, which is no longer supported. Pick Animated Shader to author it as a node "
+                                                              "graph; the old code is dropped on save."));
+        sb_append(sb, "</div>");
+    }
+    sb_appendf(sb, " <div class=\"paint-mode-row svelte-1qb7o10\"><button type=\"button\" class=\"paint-mode-btn svelte-1qb7o10%s\" id=\"knSmPaintModeColor\" "
+                   "onclick=\"knSkins('paintMode','color')\">Solid Colour</button> <button type=\"button\" class=\"paint-mode-btn svelte-1qb7o10%s\" id=\"knSmPaintModeShader\" "
+                   "onclick=\"knSkins('paintMode','shader')\">Animated Shader</button></div> ",
+               shader ? "" : " active", shader ? " active" : "");
+    if (!shader) {
+        sb_append(sb, "<div class=\"paint-color-row svelte-1qb7o10\"><label class=\"paint-color-label svelte-1qb7o10\" for=\"paint-color\">Paint color:</label> <div "
+                      "class=\"paint-color-input-wrapper svelte-1qb7o10\"><input type=\"color\" id=\"knSmPaintColor\" class=\"paint-color-input svelte-1qb7o10\" value=\"");
+        sb_text(sb, color && color[0] ? color : "#ffffff");
+        sb_append(sb, "\" oninput=\"knSkins('paintColor',this.value)\">");
+        if (color && color[0]) {
+            sb_append(sb, " <span class=\"paint-color-value svelte-1qb7o10\" id=\"knSmPaintColorValue\">");
+            sb_text(sb, color);
+            sb_append(sb, "</span> <button type=\"button\" class=\"paint-color-remove svelte-1qb7o10\" title=\"Clear color\" id=\"knSmPaintColorClear\" "
+                          "onclick=\"knSkins('paintColor','')\"><i class=\"material-icons svelte-1qb7o10\">close</i></button>");
+        }
+        sb_append(sb, "</div></div>");
+    } else {
+        sb_append(sb, "<p class=\"shader-hint svelte-1qb7o10\">");
+        sb_text(sb, i18n_tr("shaderGraph.paint.shaderHint", "The graph's output is the paint colour; the game keeps texture detail, mask and intensity. The shader "
+                                                          "id is assigned when this Paint is reviewed for release."));
+        sb_append(sb, "</p> ");
+        sg_editor_flush(paint_canvas());
+        sg_editor_set_graph(paint_canvas(), cJSON_GetObjectItemCaseSensitive(cfg, "paintShaderGraph"));
+        sg_editor_html(paint_canvas(), sb);
+    }
+    sb_appendf(sb, " <div class=\"paint-preview-base svelte-1qb7o10\"><label class=\"field-label svelte-1qb7o10\" for=\"paint-preview-base\">Preview on item:</label> <div "
+                   "class=\"preview-base-controls svelte-1qb7o10\"><input id=\"knSmPaintBase\" type=\"number\" class=\"preview-base-input svelte-1qb7o10\" value=\"%d\" "
+                   "onchange=\"knSkins('paintBase',this.value)\"> <button type=\"button\" class=\"preview-base-quick svelte-1qb7o10\" id=\"knSmPaintBaseWeapon\" "
+                   "onclick=\"knSkins('paintBase','%d')\">Weapon</button> <button type=\"button\" class=\"preview-base-quick svelte-1qb7o10\" id=\"knSmPaintBaseCosmetic\" "
+                   "onclick=\"knSkins('paintBase','%d')\">Cosmetic</button></div> <span class=\"preview-base-note svelte-1qb7o10\">The paint is applied to this item in the "
+                   "3D preview.</span></div></div></div>",
+               SM.ed.paint_base, PAINT_BASE_WEAPON, PAINT_BASE_COSMETIC);
+}
+
+// ---- Wear (iíîîíii, svelte-e65miw, :126401-126616): four layers packed into texture_w.png, uploaded as the wear map
+
+static void wear_section(StrBuf *sb) {
+    const cJSON *cfg = editing_config();
+    const int existing = cfg_true(cJSON_GetObjectItemCaseSensitive(cfg, "customTextures"), "wear");
+    const int up = uploading("texture:wear");
+    sb_appendf(sb, "<div class=\"section wear-section svelte-e65miw\" id=\"knSmWear\"><h3 class=\"section-title svelte-e65miw\"><i class=\"material-icons svelte-e65miw\">"
+                   "healing</i> Wear</h3> <div class=\"section-content svelte-e65miw\"><p class=\"section-description svelte-e65miw\">Give this skin a wear map so unboxed "
+                   "instances show rust, dirt, and scratches that scale with their wear level.\n        Upload the individual effect layers and they are packed into a single "
+                   "wear texture.</p> <div class=\"wear-settings svelte-e65miw\"><label class=\"toggle-switch svelte-e65miw\"><span class=\"svelte-e65miw\">Wear</span> <input "
+                   "type=\"checkbox\" class=\"svelte-e65miw\" id=\"knSmWearOn\" onchange=\"knSkins('wearOn',this.checked)\"%s> <span class=\"slider svelte-e65miw\"></span>"
+                   "</label></div> ",
+               SM.ed.wear_on ? " checked" : "");
+    if (SM.ed.wear_on) {
+        const char *err = upload_error("texture:wear");
+        if (!err[0]) err = SM.ed.wear_error;
+        if (err[0]) {
+            sb_append(sb, "<div class=\"upload-error svelte-e65miw\" id=\"knSmWearError\"><i class=\"material-icons svelte-e65miw\">error</i> ");
+            sb_text(sb, err);
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, " ");
+        if (existing) {
+            char url[600];
+            skin_url("texture_w.png", url, sizeof(url));
+            sb_appendf(sb, "<div class=\"existing-texture svelte-e65miw\" id=\"knSmWearExisting\"><div class=\"texture-preview svelte-e65miw\"><img alt=\"Packed wear map\" "
+                           "class=\"texture-image svelte-e65miw\" src=\"%s\"></div> <p class=\"texture-description svelte-e65miw\">Packed wear map uploaded. Upload new layers "
+                           "below to replace it.</p></div>",
+                       url);
+        }
+        sb_append(sb, " <div class=\"channel-uploads svelte-e65miw\">");
+        int count = 0;
+        for (int i = 0; i < 4; i++) {
+            char slot[24], label[64];
+            snprintf(slot, sizeof(slot), "wear:%s", WEAR_LAYERS[i].key);
+            snprintf(label, sizeof(label), "Drop %s layer here", WEAR_LAYERS[i].label);
+            for (char *p = label + 5; *p && strcmp(p, " layer here"); p++) *p = (char) tolower((unsigned char) *p);
+            if (SM.ed.layer[i]) count++;
+            sb_appendf(sb, "<div class=\"texture-upload-item svelte-e65miw\" id=\"knSmWear-%s\"><div class=\"texture-header svelte-e65miw\"><h5 class=\"svelte-e65miw\">%s</h5> ",
+                       WEAR_LAYERS[i].key, WEAR_LAYERS[i].label);
+            if (SM.ed.layer[i]) sb_append(sb, "<span class=\"ready-badge svelte-e65miw\">Ready</span>");
+            sb_appendf(sb, "</div> <p class=\"texture-description svelte-e65miw\">%s</p> <div class=\"file-drop-container svelte-e65miw\">", WEAR_LAYERS[i].desc);
+            const SlotState *st = slot_state(slot, 0);
+            file_drop(sb, &DROP_WEAR, WEAR_LAYERS[i].key, slot, SM.ed.layer[i] && st && st->file_name[0] ? st->file_name : label);
+            sb_append(sb, "</div></div>");
+        }
+        sb_appendf(sb, "</div> <div class=\"wear-actions svelte-e65miw\"><button type=\"button\" class=\"btn-generate svelte-e65miw\" id=\"knSmWearGenerate\" "
+                       "onclick=\"knSkins('wearGenerate')\"");
+        disabled_attr(sb, SM.ed.generating || up || !count);
+        if (SM.ed.generating || up)
+            sb_appendf(sb, "><i class=\"material-icons spinning svelte-e65miw\">sync</i> %s</button></div>", SM.ed.generating ? "Generating..." : "Uploading...");
+        else sb_appendf(sb, "><i class=\"material-icons svelte-e65miw\">auto_fix_high</i> Generate &amp; Upload Wear Map (%d/4 layers)</button></div>", count);
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// the layer's pixels drawn into the 1024 px canvas (drawImage, smoothed) and its red channel read back (iÏiìíiì)
+static int wear_layer_red(const unsigned char *file, const size_t len, unsigned char *out) {
+    int w = 0, h = 0, n = 0;
+    unsigned char *px = stbi_load_from_memory(file, (int) len, &w, &h, &n, 4);
+    if (!px || w <= 0 || h <= 0) {
+        if (px) stbi_image_free(px);
+        return 0;
+    }
+    for (int y = 0; y < WEAR_SIZE; y++) {
+        const double fy = ((double) y + 0.5) * h / WEAR_SIZE - 0.5;
+        const int y0 = fy < 0 ? 0 : (int) fy, y1 = y0 + 1 < h ? y0 + 1 : h - 1;
+        const double ty = fy < 0 ? 0 : fy - y0;
+        for (int x = 0; x < WEAR_SIZE; x++) {
+            const double fx = ((double) x + 0.5) * w / WEAR_SIZE - 0.5;
+            const int x0 = fx < 0 ? 0 : (int) fx, x1 = x0 + 1 < w ? x0 + 1 : w - 1;
+            const double tx = fx < 0 ? 0 : fx - x0;
+            // premultiplied, as the canvas keeps it; read back unpremultiplied (getImageData)
+            double r = 0, a = 0;
+            const int xs[2] = {x0, x1 < x0 ? x0 : x1}, ys[2] = {y0, y1 < y0 ? y0 : y1};
+            const double wx[2] = {1 - tx, tx}, wy[2] = {1 - ty, ty};
+            for (int j = 0; j < 2; j++)
+                for (int i = 0; i < 2; i++) {
+                    const unsigned char *p = px + ((size_t) ys[j] * (size_t) w + (size_t) xs[i]) * 4;
+                    const double k = wx[i] * wy[j] * p[3] / 255.0;
+                    r += k * p[0];
+                    a += k;
+                }
+            const double v = a > 0 ? r / a : 0;
+            out[(size_t) y * WEAR_SIZE + (size_t) x] = (unsigned char) (v < 0 ? 0 : v > 255 ? 255 : lround(v));
+        }
+    }
+    stbi_image_free(px);
+    return 1;
+}
+
+// Generate & Upload (iïííîîi, :120676-120705): each layer's red into its channel (the others 0), PNG, then
+// onWearGenerated (:126583-126610): a saved skin's texture "wear" (texture_w.png), customTextures.wear on success
+static void wear_generate(void) {
+    int count = 0;
+    for (int i = 0; i < 4; i++) count += SM.ed.layer[i] != NULL;
+    if (!count || SM.ed.generating || uploading("texture:wear")) return;
+    SM.ed.generating = 1;
+    SM.ed.wear_error[0] = 0;
+    unsigned char *rgba = calloc((size_t) WEAR_SIZE * WEAR_SIZE, 4);
+    unsigned char *red = malloc((size_t) WEAR_SIZE * WEAR_SIZE);
+    if (!rgba || !red) {
+        snprintf(SM.ed.wear_error, sizeof(SM.ed.wear_error), "Failed to generate wear map");
+        free(rgba);
+        free(red);
+        SM.ed.generating = 0;
+        return;
+    }
+    for (int i = 0; i < 4 && !SM.ed.wear_error[0]; i++) {
+        if (!SM.ed.layer[i]) continue;
+        if (!wear_layer_red(SM.ed.layer[i], SM.ed.layer_len[i], red)) {
+            char slot[24];
+            snprintf(slot, sizeof(slot), "wear:%s", WEAR_LAYERS[i].key);
+            const SlotState *st = slot_state(slot, 0);
+            snprintf(SM.ed.wear_error, sizeof(SM.ed.wear_error), "Failed to decode %s", st && st->file_name[0] ? st->file_name : WEAR_LAYERS[i].key);
+            break;
+        }
+        for (size_t p = 0; p < (size_t) WEAR_SIZE * WEAR_SIZE; p++) rgba[4 * p + (size_t) i] = red[p];
+    }
+    free(red);
+    size_t len = 0;
+    unsigned char *png = SM.ed.wear_error[0] ? NULL : png_encode_rgba(rgba, WEAR_SIZE, WEAR_SIZE, &len);
+    free(rgba);
+    SM.ed.generating = 0;
+    if (SM.ed.wear_error[0]) return;
+    if (!png) {
+        snprintf(SM.ed.wear_error, sizeof(SM.ed.wear_error), "PNG encode failed");
+        return;
+    }
+    fprintf(stderr, "[skins] wear map packed: %d layer(s), %zu bytes\n", count, len);
+    if (!editing_id()) {
+        snprintf(SM.ed.wear_error, sizeof(SM.ed.wear_error), "Please save the skin first before uploading a wear map");
+        free(png);
+        return;
+    }
+    if (SM.up.active) {
+        snprintf(SM.ed.wear_error, sizeof(SM.ed.wear_error), "Another upload is still running");
+        free(png);
+        return;
+    }
+    set_upload_error("texture:wear", "");
+    up_start("texture:wear", "texture", "wear", "texture_w.png", png, len);
+}
+
+// the Wear toggle (iÎïìiïí): off drops the layers, and an uploaded map (onWearRemoved: its texture removed)
+static void wear_toggle(const int on) {
+    SM.ed.wear_on = on;
+    if (on) return;
+    wear_layers_clear();
+    SM.ed.wear_error[0] = 0;
+    if (cfg_true(cJSON_GetObjectItemCaseSensitive(editing_config(), "customTextures"), "wear")) {
+        set_upload_error("texture:wear", "");
+        unset_asset("texture", "wear");
+    }
+}
+
+// ---- Kounter (iïíìiïí, svelte-1rov8jm, :126656-126848): itemConfig.attach, a stat counter on the weapon
+
+static const cJSON *attach_of(void) {
+    const cJSON *a = cJSON_GetObjectItemCaseSensitive(editing_config(), "attach");
+    return cJSON_IsObject(a) ? a : NULL;
+}
+
+// iíììíîï (:106684): the attach's stat when it is one of the eight, else "kills"
+static const char *attach_stat(const cJSON *attach) {
+    const char *s = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(attach, "stat"));
+    for (int i = 0; s && i < 8; i++)
+        if (!strcmp(s, KOUNTER_STATS[i])) return s;
+    return "kills";
+}
+
+static void place_tools(StrBuf *sb, const char *hash, const char *op, const int mode, const int rotate) {
+    sb_appendf(sb, "<div class=\"tools svelte-%s\">", hash);
+    for (int i = 0; i < 5; i++) {
+        if (i == 3 && !rotate) continue; // the charm has no Rotate
+        sb_appendf(sb, "<button class=\"tool-btn svelte-%s%s\" title=\"%s\" id=\"knSm%sTool-%s\" onclick=\"knSkins('%s','%s')\"><span class=\"material-icons svelte-%s\">%s</span> %s</button>",
+                   hash, mode == i ? " active" : "", PLACE_TOOLS[i].label, op, PLACE_TOOLS[i].mode, op, PLACE_TOOLS[i].mode, hash, PLACE_TOOLS[i].icon, PLACE_TOOLS[i].label);
+    }
+    sb_append(sb, "</div> ");
+}
+
+static void kounter_section(StrBuf *sb) {
+    const cJSON *a = attach_of();
+    sb_append(sb, "<div class=\"section svelte-1rov8jm\" id=\"knSmKounter\"><h3 class=\"section-title svelte-1rov8jm\"><span class=\"material-icons svelte-1rov8jm\">pin</span> "
+                  "Kounter</h3> <div class=\"section-content\"><p class=\"section-description svelte-1rov8jm\">A Kounter is mounted on the weapon and tracks one stat for this "
+                  "exact item. Kounter skins are never stackable.</p> ");
+    if (!a) {
+        sb_append(sb, "<button class=\"attach-btn svelte-1rov8jm\" id=\"knSmKounterAdd\" onclick=\"knSkins('attachAdd')\"><span class=\"material-icons svelte-1rov8jm\">add</span> "
+                      "Add Kounter</button></div></div>");
+        return;
+    }
+    place_tools(sb, "1rov8jm", "attachMode", SM.ed.attach_mode, 1);
+    sb_appendf(sb, "<p class=\"hint svelte-1rov8jm\">%s</p> <div class=\"fields svelte-1rov8jm\">",
+               SM.ed.attach_mode == 1 ? "Click the weapon in the preview to mount the Kounter on that surface."
+               : !SM.ed.attach_mode   ? "The preview spins freely. Pick a tool to hold it still and place the Kounter."
+                                      : "Drag the gizmo in the preview. Drag anywhere else to look around.");
+    static const char *const axes[3] = {"X", "Y", "Z"}, *const keys[3] = {"x", "y", "z"};
+    char v[40];
+    for (int i = 0; i < 3; i++) { // attach[x] ?? 0
+        const cJSON *n = cJSON_GetObjectItemCaseSensitive(a, keys[i]);
+        js_number(v, sizeof(v), cJSON_IsNumber(n) ? n->valuedouble : 0);
+        sb_appendf(sb, "<label class=\"svelte-1rov8jm\"><span>%s</span> <input type=\"number\" step=\"0.01\" class=\"svelte-1rov8jm\" id=\"knSmKounter%s\" value=\"%s\" "
+                       "onchange=\"knSkins('attachSet','%s',this.value)\"></label>",
+                   axes[i], axes[i], v, keys[i]);
+    }
+    const cJSON *rot = cJSON_GetObjectItemCaseSensitive(a, "rot");
+    for (int i = 0; i < 3; i++) { // Math.round(180 * (rot[i] || 0) / PI)
+        const cJSON *n = cJSON_GetArrayItem(rot, i);
+        const double deg = floor(180.0 * (cJSON_IsNumber(n) ? n->valuedouble : 0) / M_PI + 0.5);
+        js_number(v, sizeof(v), deg);
+        sb_appendf(sb, "<label class=\"svelte-1rov8jm\"><span>Rot %s (deg)</span> <input type=\"number\" step=\"1\" class=\"svelte-1rov8jm\" id=\"knSmKounterRot%s\" value=\"%s\" "
+                       "onchange=\"knSkins('attachRot',%d,this.value)\"></label>",
+                   axes[i], axes[i], v, i);
+    }
+    const cJSON *scl = cJSON_GetObjectItemCaseSensitive(a, "scl"), *digits = cJSON_GetObjectItemCaseSensitive(a, "digits");
+    js_number(v, sizeof(v), cJSON_IsNumber(scl) ? scl->valuedouble : 1);
+    sb_appendf(sb, " <label class=\"svelte-1rov8jm\"><span>Scale</span> <input type=\"number\" step=\"0.01\" min=\"0.01\" class=\"svelte-1rov8jm\" id=\"knSmKounterScale\" value=\"%s\" "
+                   "onchange=\"knSkins('attachSet','scl',this.value)\"></label>",
+               v);
+    js_number(v, sizeof(v), cJSON_IsNumber(digits) ? digits->valuedouble : 5);
+    sb_appendf(sb, " <label class=\"svelte-1rov8jm\"><span>Digits</span> <input type=\"number\" step=\"1\" min=\"1\" class=\"svelte-1rov8jm\" max=\"10\" id=\"knSmKounterDigits\" "
+                   "value=\"%s\" onchange=\"knSkins('attachSet','digits',this.value)\"></label> <label class=\"svelte-1rov8jm\"><span>Tracks</span> <select class=\"svelte-1rov8jm\" "
+                   "id=\"knSmKounterStat\" onchange=\"knSkins('attachStat',this.value)\">",
+               v);
+    const char *stat = attach_stat(a);
+    for (int i = 0; i < 8; i++)
+        sb_appendf(sb, "<option value=\"%s\"%s>%s</option>", KOUNTER_STATS[i], !strcmp(stat, KOUNTER_STATS[i]) ? " selected" : "", KOUNTER_LABELS[i]);
+    const char *color = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a, "color"));
+    sb_append(sb, "</select></label> <label class=\"svelte-1rov8jm\"><span>Glow</span> <input type=\"color\" class=\"svelte-1rov8jm\" id=\"knSmKounterGlow\" value=\"");
+    sb_text(sb, color && color[0] ? color : "#7fe3ff");
+    sb_append(sb, "\" onchange=\"knSkins('attachColor',this.value)\"></label></div> <button class=\"attach-btn danger svelte-1rov8jm\" id=\"knSmKounterRemove\" "
+                  "onclick=\"knSkins('attachRemove')\"><span class=\"material-icons svelte-1rov8jm\">delete</span> Remove Kounter</button></div></div>");
+}
+
+// iIîìïïì: itemConfig.attach set (NULL deletes it)
+static void attach_write(cJSON *attach) {
+    put(editing_config(), "attach", attach);
+    changed();
+}
+
+// ---- Charm (iìîïîïi, svelte-sr5bk2, :126848-126978): charmM{X,Y,Z}Off / charmMScl, noCharm
+
+// iïïíîíï (:120758): the weapon's charm mount (weapons[weapon - 1].charm), NULL when it takes none
+static const ViewerCharmMount *weapon_charm(void) {
+    const int w = (int) jnum(SM.editing, "weapon");
+    return w > 0 ? viewer_charm_mount(w - 1) : NULL;
+}
+
+// iììïïíí (:120762-120774): the skin's own placement when it sets any of the four keys, else none
+static int charm_placement(double out[4]) {
+    const ViewerCharmMount *m = weapon_charm();
+    const cJSON *cfg = editing_config();
+    int any = 0;
+    for (int i = 0; i < 4; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(cfg, CHARM_KEYS[i]);
+        any |= v && !cJSON_IsNull(v);
+    }
+    if (!m || !any) return 0;
+    for (int i = 0; i < 3; i++) { // skin || weapon || 0
+        const double v = jnum(cfg, CHARM_KEYS[i]);
+        out[i] = v != 0 ? v : js_float(m->mount[i]);
+    }
+    const double s = jnum(cfg, "charmMScl");
+    out[3] = s != 0 ? s : 1;
+    return 1;
+}
+
+// iìiîìíì (:120779-120792): the four keys go; a placement sets them (never exactly 0: ±0.001), the scale at least 0.05
+static void charm_write(const double *p) {
+    cJSON *cfg = editing_config();
+    for (int i = 0; i < 4; i++) put(cfg, CHARM_KEYS[i], NULL);
+    if (p) {
+        for (int i = 0; i < 3; i++) put(cfg, CHARM_KEYS[i], cJSON_CreateNumber(fabs(p[i]) < 0.001 ? (p[i] < 0 ? -0.001 : 0.001) : p[i]));
+        put(cfg, "charmMScl", cJSON_CreateNumber(p[3] != 0 ? (p[3] > 0.05 ? p[3] : 0.05) : 1));
+    }
+    changed();
+}
+
+static void charm_section(StrBuf *sb) {
+    const int hidden = cfg_true(editing_config(), "noCharm");
+    sb_appendf(sb, "<div class=\"section svelte-sr5bk2\" id=\"knSmCharm\"><h3 class=\"section-title svelte-sr5bk2\"><span class=\"material-icons svelte-sr5bk2\">key</span> Charm</h3> "
+                   "<div class=\"section-content\"><p class=\"section-description svelte-sr5bk2\">Where a player's charm hangs on this skin. Without a custom placement the "
+                   "charm uses the weapon's default spot.</p> <label class=\"hide-toggle svelte-sr5bk2\"><input type=\"checkbox\" id=\"knSmNoCharm\" "
+                   "onchange=\"knSkins('noCharm',this.checked)\"%s> Hide charms on this skin</label> ",
+               hidden ? " checked" : "");
+    double p[4];
+    if (!hidden && !charm_placement(p)) {
+        sb_append(sb, "<button class=\"attach-btn svelte-sr5bk2\" id=\"knSmCharmCustomize\" onclick=\"knSkins('charmCustomize')\"><span class=\"material-icons svelte-sr5bk2\">tune"
+                      "</span> Customize charm placement</button>");
+    } else if (!hidden) {
+        place_tools(sb, "sr5bk2", "charmMode", SM.ed.charm_mode, 0);
+        sb_appendf(sb, "<p class=\"hint svelte-sr5bk2\">%s</p> <div class=\"fields svelte-sr5bk2\">",
+                   SM.ed.charm_mode == 1 ? "Click the weapon in the preview to hang the charm from that spot."
+                   : !SM.ed.charm_mode   ? "The preview spins freely. Pick a tool to hold it still and place the charm."
+                                         : "Drag the gizmo in the preview. Drag anywhere else to look around.");
+        static const char *const axes[3] = {"X", "Y", "Z"}, *const keys[3] = {"x", "y", "z"};
+        char v[40];
+        for (int i = 0; i < 3; i++) {
+            js_number(v, sizeof(v), p[i]);
+            sb_appendf(sb, "<label class=\"svelte-sr5bk2\"><span>%s</span> <input type=\"number\" step=\"0.01\" class=\"svelte-sr5bk2\" id=\"knSmCharm%s\" value=\"%s\" "
+                           "onchange=\"knSkins('charmSet','%s',this.value)\"></label>",
+                       axes[i], axes[i], v, keys[i]);
+        }
+        js_number(v, sizeof(v), p[3]);
+        sb_appendf(sb, " <label class=\"svelte-sr5bk2\"><span>Scale</span> <input type=\"number\" step=\"0.05\" min=\"0.05\" class=\"svelte-sr5bk2\" id=\"knSmCharmScale\" value=\"%s\" "
+                       "onchange=\"knSkins('charmSet','scl',this.value)\"></label></div> <button class=\"attach-btn danger svelte-sr5bk2\" id=\"knSmCharmReset\" "
+                       "onclick=\"knSkins('charmReset')\"><span class=\"material-icons svelte-sr5bk2\">restart_alt</span> Reset to weapon default</button>",
+                   v);
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// ---- the preview's controls (:127496-127530): Wear (its slider) and a paint, with the query they add (iIìííiî)
+
+static int preview_wear_control(void) { // iÌíïïîï: customTextures.wear or wearable
+    const cJSON *cfg = editing_config();
+    return cfg_true(cJSON_GetObjectItemCaseSensitive(cfg, "customTextures"), "wear") || cfg_true(cfg, "wearable");
+}
+
+static int preview_paint_control(void) { return cfg_true(editing_config(), "paintTargets"); } // iÎiîîîï
+
+// iÏíiííì: the catalogue's paints (a paintColor; the store's shader paints carry no paintShader in this catalogue)
+static int is_preview_paint(const ViewerSkin *s) { return s && s->type == T_PAINT && s->paint_color && s->paint_color[0]; }
+
+// the query after the showcase (iIìííiî :124880-124889): the Kounter's stat at 1284, the wear the slider set
+// (KrunkNative: as &wear=<level>, the iframe's updateWear message folded into its query), the paint picked
+static void preview_extra(StrBuf *sb) {
+    sb_appendf(sb, "&%s=1284", attach_stat(attach_of()));
+    if (SM.ed.wear_touched) {
+        char v[24];
+        js_number(v, sizeof(v), SM.ed.wear_level);
+        sb_appendf(sb, "&wear=%s", v);
+    }
+    const ViewerSkin *p = SM.ed.paint_pick >= 0 ? viewer_skin(SM.ed.paint_pick) : NULL;
+    if (is_preview_paint(p)) sb_appendf(sb, "&paint=%s", p->paint_color[0] == '#' ? p->paint_color + 1 : p->paint_color);
+}
+
+static void preview_controls(StrBuf *sb) {
+    const int wear = preview_wear_control(), paint = preview_paint_control();
+    if (!wear && !paint) return;
+    sb_append(sb, " <div class=\"preview-controls svelte-103lu6x\">");
+    if (wear) {
+        sb_appendf(sb, "<button class=\"preview-control-btn svelte-103lu6x%s\" id=\"knSmPvWear\" onclick=\"knSkins('pvWear')\"><i class=\"material-icons svelte-103lu6x\">healing</i> "
+                       "Wear</button> ",
+                   SM.ed.wear_open ? " active" : "");
+        if (SM.ed.wear_open) {
+            char v[24];
+            js_number(v, sizeof(v), SM.ed.wear_level);
+            sb_appendf(sb, "<input type=\"range\" min=\"0\" max=\"1\" step=\"0.01\" class=\"wear-slider svelte-103lu6x\" id=\"knSmPvWearLevel\" value=\"%s\" "
+                           "oninput=\"knSkins('pvWearLevel',this.value)\"> <span class=\"wear-value svelte-103lu6x\" id=\"knSmPvWearValue\">%.2f</span>",
+                       v, SM.ed.wear_level);
+        }
+    }
+    sb_append(sb, " ");
+    if (paint) {
+        sb_appendf(sb, "<select class=\"paint-select svelte-103lu6x\" id=\"knSmPvPaint\" onchange=\"knSkins('pvPaint',this.value)\"><option class=\"svelte-103lu6x\" value=\"\"%s>"
+                       "No paint</option>",
+                   SM.ed.paint_pick < 0 ? " selected" : "");
+        for (int i = 0; i < g_viewer_skin_count; i++) {
+            const ViewerSkin *s = viewer_skin(i);
+            if (!is_preview_paint(s) || !s->name) continue;
+            sb_appendf(sb, "<option class=\"svelte-103lu6x\" value=\"%d\"%s>", i, i == SM.ed.paint_pick ? " selected" : "");
+            sb_text(sb, s->name);
+            sb_append(sb, "</option>");
+        }
+        sb_append(sb, "</select>");
+    }
+    sb_append(sb, "</div>");
+}
+
+// the editors' actions; 1 = handled (the window renders again), 2 = handled, no new markup
+static int editors_op(const char *op, const HtmlArg *args, const int argc) {
+    cJSON *cfg = editing_config();
+    if (!strcmp(op, "paintable")) { // iÏiïiïi
+        put(cfg, "paintTargets", arg_i64(args, argc, 1) ? cJSON_CreateTrue() : NULL);
+    } else if (!strcmp(op, "paintArea")) { // iÌïïìiì: "all" is true, "specific" the mesh names
+        put(cfg, "paintTargets", !strcmp(arg_s(args, argc, 1), "all") ? cJSON_CreateTrue() : mesh_list(SM.ed.targets));
+    } else if (!strcmp(op, "paintMode")) { // iÍïïìïì: Animated Shader keeps a graph (the default paint one), Solid Colour drops it
+        const int shader = !strcmp(arg_s(args, argc, 1), "shader");
+        if (shader == paint_shader_mode()) return 2;
+        if (shader) {
+            put(cfg, "paintColor", NULL);
+            sg_editor_flush(paint_canvas());
+            const cJSON *g = sg_editor_graph(paint_canvas());
+            if (!graph_ok(g)) {
+                sg_editor_set_graph(paint_canvas(), NULL);
+                g = sg_editor_graph(paint_canvas());
+            }
+            put(cfg, "paintShaderGraph", g ? cJSON_Duplicate(g, 1) : NULL);
+        } else put(cfg, "paintShaderGraph", NULL);
+        put(cfg, "paintShaderCode", NULL);
+        put(cfg, "paintShaderUniforms", NULL);
+    } else if (!strcmp(op, "paintColor")) { // iÌïïïiì: the colour, "" deletes it
+        const char *c = arg_s(args, argc, 1);
+        const int had = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(cfg, "paintColor"));
+        put(cfg, "paintColor", c[0] ? cJSON_CreateString(c) : NULL);
+        put(cfg, "paintShaderCode", NULL);
+        put(cfg, "paintShaderUniforms", NULL);
+        changed();
+        if (had && c[0]) { // the picker keeps its drag: only the shown value follows
+            const HtmlElem out = html_dom_by_id("knSmPaintColorValue");
+            if (out) html_dom_set_html(out, c);
+            return 2;
+        }
+        return 1;
+    } else if (!strcmp(op, "paintBase")) { // iîiììiì: parseInt || the one it was
+        const char *t = arg_s(args, argc, 1);
+        const int n = t[0] ? atoi(t) : (int) arg_i64(args, argc, 1);
+        if (n) SM.ed.paint_base = n;
+        SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+        return 1;
+    } else if (!strcmp(op, "wearOn")) {
+        wear_toggle(arg_i64(args, argc, 1) != 0);
+        return 1;
+    } else if (!strcmp(op, "wearGenerate")) {
+        wear_generate();
+        return 1;
+    } else if (!strcmp(op, "attachAdd")) { // iïïííïï: the default Kounter (iIîìîií :126662-126671)
+        cJSON *a = cJSON_CreateObject();
+        cJSON_AddNumberToObject(a, "type", 1);
+        cJSON_AddNumberToObject(a, "x", -0.4);
+        cJSON_AddNumberToObject(a, "y", 0.1);
+        cJSON_AddNumberToObject(a, "z", 0.5);
+        const double rot[3] = {0, -1.571, 0};
+        cJSON_AddItemToObject(a, "rot", cJSON_CreateDoubleArray(rot, 3));
+        cJSON_AddNumberToObject(a, "scl", 0.36);
+        cJSON_AddStringToObject(a, "color", "#7fe3ff");
+        cJSON_AddNumberToObject(a, "digits", 5);
+        attach_write(a);
+        return 1;
+    } else if (!strcmp(op, "attachRemove")) { // iìîiîíí: no attach, the View tool
+        attach_write(NULL);
+        SM.ed.attach_mode = 0;
+        return 1;
+    } else if (!strcmp(op, "attachMode") || !strcmp(op, "charmMode")) { // the tools; one of the two at a time (:124633-124638)
+        const int m = tool_index(arg_s(args, argc, 1));
+        if (!strcmp(op, "attachMode")) SM.ed.attach_mode = m, SM.ed.charm_mode = m ? 0 : SM.ed.charm_mode;
+        else SM.ed.charm_mode = m, SM.ed.attach_mode = m ? 0 : SM.ed.attach_mode;
+        return 1;
+    } else if (!strcmp(op, "attachSet")) { // iÎììíîî: parseFloat; digits rounded into 1..10
+        const cJSON *a = attach_of();
+        const char *key = arg_s(args, argc, 1), *t = arg_s(args, argc, 2);
+        char *end = NULL;
+        double v = strtod(t, &end);
+        if (!a || end == t || (strcmp(key, "x") && strcmp(key, "y") && strcmp(key, "z") && strcmp(key, "scl") && strcmp(key, "digits"))) return 2;
+        if (!strcmp(key, "digits")) v = fmin(10, fmax(1, floor(v + 0.5)));
+        cJSON *n = cJSON_Duplicate(a, 1);
+        put(n, key, cJSON_CreateNumber(v));
+        attach_write(n);
+        return 1;
+    } else if (!strcmp(op, "attachRot")) { // degrees to radians, to 0.001
+        const cJSON *a = attach_of();
+        const int i = (int) arg_i64(args, argc, 1);
+        const char *t = arg_s(args, argc, 2);
+        char *end = NULL;
+        const double v = strtod(t, &end);
+        if (!a || end == t || i < 0 || i > 2) return 2;
+        double rot[3] = {0, 0, 0};
+        const cJSON *r = cJSON_GetObjectItemCaseSensitive(a, "rot");
+        for (int k = 0; k < 3; k++) {
+            const cJSON *it = cJSON_GetArrayItem(r, k);
+            rot[k] = cJSON_IsNumber(it) ? it->valuedouble : 0;
+        }
+        rot[i] = floor(v * M_PI / 180.0 * 1000.0 + 0.5) / 1000.0;
+        cJSON *n = cJSON_Duplicate(a, 1);
+        put(n, "rot", cJSON_CreateDoubleArray(rot, 3));
+        attach_write(n);
+        return 1;
+    } else if (!strcmp(op, "attachStat") || !strcmp(op, "attachColor")) { // iìîîìïî / iíïiiiì
+        const cJSON *a = attach_of();
+        if (!a) return 2;
+        cJSON *n = cJSON_Duplicate(a, 1);
+        put(n, !strcmp(op, "attachStat") ? "stat" : "color", cJSON_CreateString(arg_s(args, argc, 1)));
+        attach_write(n);
+        return 1;
+    } else if (!strcmp(op, "noCharm")) { // iÍìîíìì: hidden charms drop the tool
+        const int on = arg_i64(args, argc, 1) != 0;
+        put(cfg, "noCharm", on ? cJSON_CreateTrue() : NULL);
+        if (on) SM.ed.charm_mode = 0;
+    } else if (!strcmp(op, "charmCustomize")) { // iìíîìíi: the weapon's spot, scale 1
+        const ViewerCharmMount *m = weapon_charm();
+        if (!m) return 2;
+        const double p[4] = {js_float(m->mount[0]), js_float(m->mount[1]), js_float(m->mount[2]), 1};
+        charm_write(p);
+        return 1;
+    } else if (!strcmp(op, "charmReset")) { // iîíìiïi
+        charm_write(NULL);
+        SM.ed.charm_mode = 0;
+        return 1;
+    } else if (!strcmp(op, "charmSet")) { // iÍíîíîï: parseFloat into the placement
+        double p[4];
+        const char *key = arg_s(args, argc, 1), *t = arg_s(args, argc, 2);
+        char *end = NULL;
+        const double v = strtod(t, &end);
+        if (end == t || !charm_placement(p)) return 2;
+        const int k = !strcmp(key, "x") ? 0 : !strcmp(key, "y") ? 1 : !strcmp(key, "z") ? 2 : !strcmp(key, "scl") ? 3 : -1;
+        if (k < 0) return 2;
+        p[k] = v;
+        charm_write(p);
+        return 1;
+    } else if (!strcmp(op, "pvWear")) { // iìïiîíï: the slider; the first time the query asks for the wear
+        SM.ed.wear_open = !SM.ed.wear_open;
+        if (SM.ed.wear_open && !SM.ed.wear_touched) {
+            SM.ed.wear_touched = 1;
+            SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+        }
+        return 1;
+    } else if (!strcmp(op, "pvWearLevel")) { // updateWear (iÍìíîìì)
+        const double v = atof(arg_s(args, argc, 1));
+        SM.ed.wear_level = v < 0 ? 0 : v > 1 ? 1 : v;
+        SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+        const HtmlElem out = html_dom_by_id("knSmPvWearValue");
+        if (out) {
+            char t[16];
+            snprintf(t, sizeof(t), "%.2f", SM.ed.wear_level);
+            html_dom_set_html(out, t);
+        }
+        return 2; // the slider keeps its drag
+    } else if (!strcmp(op, "pvPaint")) {
+        const char *t = arg_s(args, argc, 1);
+        SM.ed.paint_pick = t[0] ? atoi(t) : -1;
+        SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;
+        return 1;
+    } else return 0;
+    changed();
+    return 1;
+}
+
 // iïìiiìì (:124527, :125610): Same attributes as (not for a paint), Dye Colors (a dye), Model (not for a spray, card,
-// emoji, face, dye or paint), Textures (not with a GLTF / GLB model or for a dye), Sounds (not for those six types),
-// Shader Studio (not for a paint)
+// emoji, face, dye or paint), Textures (not with a GLTF / GLB model or for a dye), Paintable (not for those six types),
+// Paint (a paint), Wear and Kounter (a weapon or melee), Charm (a weapon whose weapon takes a charm), Sounds (not for
+// those six types), Shader Studio (not for a paint)
 static void appearance_markup(StrBuf *sb) {
     const int type = (int) jnum(SM.editing, "type"), weapon = (int) jnum(SM.editing, "weapon");
     sb_append(sb, "<div class=\"appearance-tab svelte-wfs5t6\">");
@@ -1167,6 +1995,11 @@ static void appearance_markup(StrBuf *sb) {
     if (type == 5) dye_section(sb);
     if (!no_model) model_section(sb);
     if (!(!strcmp(ext, "gltf") || !strcmp(ext, "glb") || type == 5)) textures_section(sb, type); // iÎîììïï hides it
+    editors_load();
+    if (!no_model) paintable_section(sb); // iIíïììi
+    if (type == T_PAINT) paint_section(sb);
+    if (type == 0 || type == 3) wear_section(sb), kounter_section(sb);
+    if (type == 0 && weapon_charm()) charm_section(sb);
     if (!no_model) sounds_section(sb, type);
     if (type != T_PAINT) shader_section(sb);
     sb_append(sb, "</div>");
@@ -1190,8 +2023,33 @@ static void advanced_markup(StrBuf *sb) {
     free(autos);
 }
 
+// the iframe's src: a paint on its preview item (paintPreviewBase, :127470; its colour as the viewer's &paint=, the
+// paintPreview message's place), else the edited skin's JSON and the controls' query (preview_extra)
+static char *preview_src(void) {
+    StrBuf sb = {0};
+    if ((int) jnum(SM.editing, "type") == T_PAINT) {
+        sb_appendf(&sb, "/viewer.html?nobg&anim&showcase=%d", SM.ed.paint_base ? SM.ed.paint_base : PAINT_BASE_WEAPON);
+        const char *c = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(editing_config(), "paintColor"));
+        if (c && c[0] && !paint_shader_mode()) sb_appendf(&sb, "&paint=%s", c[0] == '#' ? c + 1 : c);
+    } else {
+        sb_appendf(&sb, "/viewer.html?nobg&showcase=%s", SM.preview ? SM.preview : "");
+        preview_extra(&sb);
+    }
+    char *src = sb_finish(&sb);
+    static char *shown; // the e2e's probe: each new src once (the JSON's long tail left out)
+    if (src && (!shown || strcmp(shown, src))) {
+        free(shown);
+        shown = strdup(src);
+        const char *q = strstr(src, "showcase=");
+        const char *tail = q ? strchr(q, '&') : NULL;
+        if (q && (tail ? tail - q : (long) strlen(q)) <= 24) q = NULL, tail = NULL; // an index: the whole src
+        fprintf(stderr, "[skins] preview %.*s%s\n", (int) (q ? q - src + 9 : (long) strlen(src)), src, tail ? tail : "");
+    }
+    return src;
+}
+
 // the preview pane (iiìíiiì, :127463-127540) once its JSON is set: a paint's animated preview, a player card's /
-// emoji's texture (or thumbnail), else the 3D preview (its wear / paint controls are not ported)
+// emoji's texture (or thumbnail), else the 3D preview with its wear / paint controls
 static void preview_markup(StrBuf *sb) {
     if (!SM.preview) {
         sb_append(sb, "<!---->");
@@ -1206,10 +2064,13 @@ static void preview_markup(StrBuf *sb) {
         else url[0] = 0;
         if (url[0]) sb_appendf(sb, "<img alt=\"Thumbnail\" class=\"preview-frame svelte-103lu6x\" style=\"object-fit: contain; border: none\" id=\"knSmPreviewImg\" src=\"%s\">", url);
     } else {
-        sb_appendf(sb, "<iframe class=\"preview-frame svelte-103lu6x\" style=\"border: none\" title=\"%s\" id=\"knSmPreview\" src=\"/viewer.html?nobg%s&amp;showcase=",
-                   type == T_PAINT ? "Paint Preview" : "3D Preview", type == T_PAINT ? "&amp;anim" : "");
-        sb_text(sb, SM.preview);
+        char *src = preview_src();
+        sb_appendf(sb, "<iframe class=\"preview-frame svelte-103lu6x\" style=\"border: none\" title=\"%s\" id=\"knSmPreview\" src=\"",
+                   type == T_PAINT ? "Paint Preview" : "3D Preview");
+        sb_text(sb, src ? src : "");
         sb_append(sb, "\"></iframe>");
+        free(src);
+        if (type != T_PAINT) preview_controls(sb);
     }
     sb_append(sb, "</div>");
 }
@@ -1316,6 +2177,9 @@ static void reset(void) {
     free(SM.up.data);
     cJSON_Delete(SM.sh.graph);
     cJSON_Delete(SM.sh.parts);
+    sg_editor_free(SM.sh.canvas);
+    sg_editor_free(SM.ed.paint_canvas);
+    for (int i = 0; i < 4; i++) free(SM.ed.layer[i]);
     const unsigned gen = SM.gen + 1, rev = SM.asset_rev;
     memset(&SM, 0, sizeof(SM));
     SM.gen = gen;
@@ -1403,6 +2267,7 @@ static void editor_opened(void) {
     memset(SM.slots, 0, sizeof(SM.slots));
     SM.sh.loaded = 0;
     SM.sh.open = SM.sh.preview = 0;
+    SM.ed.ready = 0;
 }
 
 // value: the inline handler's third argument when it has one (a scripted call), else this.value
@@ -1419,6 +2284,11 @@ static void on_input(const char *what, const HtmlEvent *ev, const char *value) {
     if (!strcmp(what, "name")) {
         cJSON_DeleteItemFromObjectCaseSensitive(SM.editing, "name");
         cJSON_AddStringToObject(SM.editing, "name", v);
+        changed();
+        set_disabled("knSmSave", SM.busy);
+    } else if (!strcmp(what, "paintMeshes")) { // iÎiiiîï: the text kept, paintTargets its names
+        snprintf(SM.ed.targets, sizeof(SM.ed.targets), "%s", v);
+        put(editing_config(), "paintTargets", mesh_list(v));
         changed();
         set_disabled("knSmSave", SM.busy);
     } else if (!strcmp(what, "config")) { // iìîîííi: a text that parses replaces itemConfig; else nothing changes
@@ -1597,6 +2467,7 @@ static void up_stored(const char *asset_path) {
             }
             put(tex, SM.up.category, cJSON_CreateTrue());
             if (!strcmp(SM.up.category, "emissive")) put(cfg, "glow", cJSON_CreateTrue());
+            if (!strcmp(SM.up.category, "wear")) wear_layers_clear(); // iïííîîi: the layers once the map is up
             changed();
         }
     } else if (!strcmp(SM.up.type, "sound")) {
@@ -1710,7 +2581,11 @@ static void apply_config(void) {
 }
 
 static const DropKind *drop_kind(const char *type) {
-    return !strcmp(type, "model") ? &DROP_MODEL : !strcmp(type, "texture") ? &DROP_TEXTURE : !strcmp(type, "sound") ? &DROP_SOUND : NULL;
+    return !strcmp(type, "model")     ? &DROP_MODEL
+           : !strcmp(type, "texture") ? &DROP_TEXTURE
+           : !strcmp(type, "sound")   ? &DROP_SOUND
+           : !strcmp(type, "wear")    ? &DROP_WEAR
+                                      : NULL;
 }
 
 static void slot_name(const char *type, const char *category, char *out, const size_t n) {
@@ -1758,6 +2633,20 @@ static void file_chosen(const char *type, const char *category, const char *path
     }
     snprintf(st->file_name, sizeof(st->file_name), "%s", name);
     st->upload_error[0] = 0;
+    if (!strcmp(type, "wear")) { // a wear layer: kept for Generate (iÎïïíii), nothing uploads yet
+        int i = 0;
+        while (i < 4 && strcmp(cat, WEAR_LAYERS[i].key)) i++;
+        if (i == 4) {
+            st->file_name[0] = 0;
+            free(data);
+            return;
+        }
+        free(SM.ed.layer[i]);
+        SM.ed.layer[i] = data;
+        SM.ed.layer_len[i] = len;
+        SM.ed.wear_error[0] = 0;
+        return;
+    }
     const char *wait = "";
     if (!strcmp(type, "model")) {
         snprintf(SM.model_ext, sizeof(SM.model_ext), "%s", ext + 1);
@@ -1820,6 +2709,13 @@ static void unset_asset(const char *type, const char *category) {
     } else if (!strcmp(type, "sound")) {
         put(cfg, !strcmp(cat, "swap") ? "customSwapSound" : !strcmp(cat, "inspect") ? "customInspectSound" : "customSound", cJSON_CreateFalse());
         apply_config();
+    } else if (!strcmp(type, "wear")) { // a layer's remove (the drop zone's onfileRemoved)
+        for (int i = 0; i < 4; i++)
+            if (!strcmp(cat, WEAR_LAYERS[i].key)) {
+                free(SM.ed.layer[i]);
+                SM.ed.layer[i] = NULL;
+                SM.ed.layer_len[i] = 0;
+            }
     }
 }
 
@@ -1996,9 +2892,7 @@ static void preview_tick(void) {
     const HtmlElem frame = first ? 0 : html_dom_by_id("knSmPreview");
     const int type = (int) jnum(SM.editing, "type");
     if (frame && type != T_PLAYER_CARD && type != T_EMOJI) {
-        StrBuf sb = {0};
-        sb_appendf(&sb, "/viewer.html?nobg%s&showcase=%s", type == T_PAINT ? "&anim" : "", q);
-        char *src = sb_finish(&sb);
+        char *src = preview_src();
         if (src) html_dom_set_attr(frame, "src", src);
         free(src);
     } else render();
@@ -2084,6 +2978,28 @@ int v10_skin_manager_handle(const char *name, const HtmlEvent *ev, const HtmlArg
     if (!strcmp(op, "input")) {
         on_input(arg_s(args, argc, 1), ev, arg_s(args, argc, 2));
         return 1;
+    }
+    if (!strcmp(op, "sg")) { // Shader Studio's node canvas: its own partial updates
+        if (!SM.editing) return 1;
+        shader_load();
+        return sg_editor_handle(canvas(), ev, args + 1, argc - 1);
+    }
+    if (!strcmp(op, "pg")) { // the Paint section's node canvas (kind "paint")
+        if (!SM.editing) return 1;
+        editors_load();
+        return sg_editor_handle(paint_canvas(), ev, args + 1, argc - 1);
+    }
+    // any other action (Save, Remove Shader, a tab) sees the canvas's last edit (its 100 ms onChange now)
+    if (SM.sh.canvas) sg_editor_flush(SM.sh.canvas);
+    if (SM.ed.paint_canvas) sg_editor_flush(SM.ed.paint_canvas);
+    if (SM.editing) {
+        editors_load();
+        const int r = editors_op(op, args, argc);
+        if (r == 2) return 1;
+        if (r == 1) {
+            render();
+            return 1;
+        }
     }
     if (!strcmp(op, "close")) { // iïìiïîï: the view stack's pop
         if (v10_view_depth() == SM.depth) v10_view_pop(0);
@@ -2240,6 +3156,14 @@ int v10_skin_manager_key(const int key) {
 void v10_skin_manager_tick(void) {
     test_tick();
     if (SM.depth) preview_tick();
+    if (SM.depth && SM.editing && SM.ed.paint_canvas) sg_editor_tick(SM.ed.paint_canvas);
+    if (SM.depth && SM.editing && SM.sh.canvas) {
+        sg_editor_tick(SM.sh.canvas);
+        if (SM.sh.render_due) {
+            SM.sh.render_due = 0;
+            render();
+        }
+    }
     if (!SM.depth || SM.search_due <= 0 || now_ms() < SM.search_due) return;
     SM.search_due = 0;
     char t[sizeof(SM.filter)];

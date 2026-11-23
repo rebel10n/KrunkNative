@@ -105,6 +105,9 @@ typedef struct ViewerSkin {
     float counter_pos[3], counter_rot[3], counter_scl; // attach x / y / z, rot, scl
     int counter_color;       // attach color, -1 = the default
     const char *counter_stat; // attach stat (deob-10.0.4.js:106489-106492), NULL = "kills"
+    // ---- v10.0.7: a weapon skin's own charm mount (the Skin Manager's Charm section, deob-10.0.7.js:120779-120792)
+    float charm_m[3];        // charmM{X,Y,Z}Off, 0 = the weapon's (`skin || weapon`, :174210)
+    float charm_m_scl;       // charmMScl: the weapon's charmMScl times this (0 = 1)
 } ViewerSkin;
 
 // game.customSkins ids start here (deob-10.0.3.js:20133, iïìíiîï = 10000000): a custom game's studio skins (its
