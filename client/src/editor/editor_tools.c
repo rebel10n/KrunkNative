@@ -12,10 +12,11 @@
 //   kdialog dialog when installed, else the prompt asks for a file path.
 // - download() (convert without Import, reflect): the web build downloads the file;
 //   natively it is written to the user maps directory (editor_io.c) and copied.
-// - Intentional differences from v7.1.4 (doc/v7/editor.md 1.13): Color Merging visits every object
-//   once (v7 reuses the loop index), Frame's "Has Ceiling" edits frameCeiling (v7 binds the
-//   thickness), Colorize > Gold colours the map gold (a no-op in v7), the Object Painter's div
-//   follows the switch; Optimize Faces and Color Merging are one undo step each.
+// - As v10.0.7 (editor-10.0.7.js:19106, 19863, 20205; index-10.0.7.js:12189): Color Merging reuses its
+//   object loop's index for the palette loops, Frame's "Has Ceiling" edits the thickness, Colorize >
+//   Gold does nothing. Differences (doc/v7/editor.md 1.13): the Object Painter's div follows the
+//   switch; Optimize Faces and Color Merging are one undo step each (the history records every
+//   object change).
 #include "editor_internal.h"
 #include <ctype.h>
 #include <math.h>
@@ -775,21 +776,11 @@ static void colorize(const char *list, const int random) {
 }
 
 static void act_colorize_random(EdCtl *c) { (void) c; colorize(NULL, 1); }
-// Colorize > Gold: colorizeMap(false, true) is a no-op in v7.1.4 (the gold flag is never read).
-// Intentional difference from v7.1.4 (doc/v7/editor.md 1.13): every object becomes gold, colour
-// #FFD700 with a dark gold emissive #4D4100 (30 %), so the button does what it says.
+// Colorize > Gold: colorizeMap(false, true) changes nothing in v10.0.7 (editor-10.0.7.js:14824, 19106:
+// the gold flag is never read)
 static void act_colorize_gold(EdCtl *c) {
     (void) c;
-    ed_history_poll();
-    const uint32_t batch = ed_history_batch_begin("colorize gold");
-    for (size_t i = 0; i < g_ed.proj->count; i++) {
-        EditorObject *o = g_ed.proj->objects[i];
-        set_prop_str(o, "color", "#FFD700");
-        set_prop_str(o, "emissive", "#4D4100");
-        apply_object_change(o);
-    }
-    ed_history_poll();
-    ed_history_batch_end(batch);
+    colorize(NULL, 0);
 }
 
 static void colorize_input(void *user, const char *value) {
@@ -1225,63 +1216,99 @@ static long color_value(const char *c) {
 
 #define MERGE_PALETTE_MAX 4096
 
-// one colour key of Editor.mergeColors: 1 = merged into a palette entry
-static int merge_one(EditorObject *o, const char *prop, const char *skip, char (*pal)[16], int *count, const double range) {
+// one colour key of one object for Editor.mergeColors, worked on as a string and written back once
+typedef struct {
+    char c[16];   // the current value, upper-cased
+    char orig[16];
+    int has;      // `color != "#FFFFFF" && color != null` (emissive: "#000000"), before the case change
+    int orig_str; // the object holds orig as a string
+    int done;     // searched once: the value is in the palette since, so a later visit changes nothing
+} MergeVal;
+
+static void merge_load(EditorObject *o, const char *prop, const char *skip, MergeVal *m) {
     cJSON *v = ed_prop_get(o, prop);
-    int merged = 0;
-    char c[16];
-    // `color != "#FFFFFF" && color != null` (emissive: "#000000"), compared before the case change
-    if (v && !(cJSON_IsString(v) && !strcmp(v->valuestring, skip)) && color_upper(v, c, sizeof(c))) {
-        int known = 0;
-        for (int k = 0; k < *count && !known; k++) known = !strcmp(pal[k], c);
-        if (!known) {
-            const long x = color_value(c);
-            for (int k = 0; k < *count && x >= 0; k++) {
-                const long y = color_value(pal[k]);
-                if (y >= 0 && fabs((double) (x - y)) <= range) {
-                    snprintf(c, sizeof(c), "%s", pal[k]);
-                    merged = 1;
-                    break;
-                }
-            }
-            if (!merged && *count < MERGE_PALETTE_MAX) snprintf(pal[(*count)++], 16, "%s", c);
-        }
-        if (!cJSON_IsString(v) || strcmp(v->valuestring, c)) {
-            cJSON *nv = cJSON_CreateString(c); // the setter stores the upper-case string
-            ed_prop_set(o, prop, nv);
-            cJSON_Delete(nv);
-            apply_object_change(o);
-        }
+    memset(m, 0, sizeof(*m));
+    if (v && !(cJSON_IsString(v) && !strcmp(v->valuestring, skip)) && color_upper(v, m->c, sizeof(m->c))) {
+        m->has = 1;
+        m->orig_str = cJSON_IsString(v);
+        if (m->orig_str) snprintf(m->orig, sizeof(m->orig), "%s", v->valuestring);
     }
     cJSON_Delete(v);
-    return merged;
 }
 
-// Editor.mergeColors (E:6212): each colour / emissive snaps to the first palette colour (seeded with
-// #FFFFFF, #000000, then every colour not merged) whose integer value is within colorRange.
-// Alerts "N Colors Merged". One undo step.
-// Intentional difference from v7.1.4: v7 reuses the object loop's index for the palette loops, so
-// objects are skipped or visited again depending on the palette; here every object is visited once.
+// one palette pass of mergeColors; returns the shared loop index after it: unchanged without a search, else
+// the palette index the search stopped at (the match, or the palette's length before the push)
+static long merge_step(MergeVal *m, char (*pal)[16], int *count, const double range, int *merged, const long idx) {
+    if (!m->has || m->done) return idx;
+    m->done = 1;
+    for (int k = 0; k < *count; k++)
+        if (!strcmp(pal[k], m->c)) return idx; // iiiiii.indexOf(color) != -1
+    const long x = color_value(m->c);
+    int k = 0;
+    for (; k < *count; k++) {
+        const long y = color_value(pal[k]);
+        if (x >= 0 && y >= 0 && fabs((double) (x - y)) <= range) { // NaN never within range
+            (*merged)++;
+            snprintf(m->c, sizeof(m->c), "%s", pal[k]);
+            return k;
+        }
+    }
+    if (*count < MERGE_PALETTE_MAX) snprintf(pal[(*count)++], 16, "%s", m->c);
+    return k;
+}
+
+static void merge_store(EditorObject *o, const char *prop, const MergeVal *m) {
+    // an object the shared index skipped keeps its value as it was (not even upper-cased)
+    if (!m->has || !m->done || (m->orig_str && !strcmp(m->orig, m->c))) return;
+    cJSON *nv = cJSON_CreateString(m->c); // the setter stores the upper-case string
+    ed_prop_set(o, prop, nv);
+    cJSON_Delete(nv);
+    apply_object_change(o);
+}
+
+// Editor.mergeColors (editor-10.0.7.js:20205-20260): each colour / emissive snaps to the first palette colour
+// (seeded with #FFFFFF, #000000, then every colour not merged) whose integer value is within colorRange.
+// Alerts "N Colors Merged". As v10, the palette loops reuse the object loop's `var` index: after a search
+// the object loop goes on from where the palette loop stopped, so objects are skipped or visited again
+// (the emissive pass works on the object the colour pass started with). One undo step.
 static void merge_colors(void) {
     advanced_defaults();
     const cJSON *rv = cJSON_GetObjectItemCaseSensitive(g_ed.advanced, "colorRange");
     double range = cJSON_IsNumber(rv) ? trunc(rv->valuedouble) : cJSON_IsString(rv) ? (double) atoi(rv->valuestring) : 0;
     if (range == 0) range = 1500; // parseInt(colorRange) || 1500
+    const long n = (long) g_ed.proj->count;
     char (*pal)[16] = calloc(MERGE_PALETTE_MAX, 16);
-    if (!pal) return;
+    MergeVal *col = calloc(n ? (size_t) n : 1, sizeof(MergeVal)), *emi = calloc(n ? (size_t) n : 1, sizeof(MergeVal));
+    if (!pal || !col || !emi) {
+        free(pal);
+        free(col);
+        free(emi);
+        return;
+    }
     int count = 2, merged = 0;
     snprintf(pal[0], 16, "#FFFFFF");
     snprintf(pal[1], 16, "#000000");
+    for (long i = 0; i < n; i++) {
+        merge_load(g_ed.proj->objects[i], "color", "#FFFFFF", &col[i]);
+        merge_load(g_ed.proj->objects[i], "emissive", "#000000", &emi[i]);
+    }
+    for (long i = 0; i < n;) {
+        const long o = i; // iiiiii = this.objInsts[i], read before the palette loops move i
+        i = merge_step(&col[o], pal, &count, range, &merged, i);
+        i = merge_step(&emi[o], pal, &count, range, &merged, i);
+        i++;
+    }
     ed_history_poll();
     const uint32_t batch = ed_history_batch_begin("merge colors");
-    for (size_t i = 0; i < g_ed.proj->count; i++) {
-        EditorObject *o = g_ed.proj->objects[i];
-        merged += merge_one(o, "color", "#FFFFFF", pal, &count, range);
-        merged += merge_one(o, "emissive", "#000000", pal, &count, range);
+    for (long i = 0; i < n; i++) {
+        merge_store(g_ed.proj->objects[i], "color", &col[i]);
+        merge_store(g_ed.proj->objects[i], "emissive", &emi[i]);
     }
     ed_history_poll();
     ed_history_batch_end(batch);
     free(pal);
+    free(col);
+    free(emi);
     char msg[64];
     snprintf(msg, sizeof(msg), "%d Colors Merged", merged);
     editor_message(msg);
@@ -1357,9 +1384,10 @@ static void panel_tools(void) {
     ed_gui_folder_end(&b, 0);
     ed_gui_folder_begin(&b, "Frame", 0, 1, 0, "tools.frame");
     with(&b, ed_gui_number(&b, "Wall Thickness", "Thickness", NAN, 0), g_ed.advanced, "frameThickness", NULL);
-    // intentional difference from v7.1.4: v7 binds "Has Ceiling" to frameThickness (it shows on
-    // while the thickness is set and edits the thickness); it edits frameCeiling here
-    with(&b, ed_gui_switch(&b, "Has Ceiling", 0), g_ed.advanced, "frameCeiling", NULL);
+    // v10 binds "Has Ceiling" to frameThickness (index-10.0.7.js:12189): it shows on while the thickness
+    // is set and edits the thickness (true / false, so Frame It's walls are 1 thick or refused);
+    // frameCeiling stays false, so no ceiling is ever added
+    with(&b, ed_gui_switch(&b, "Has Ceiling", 0), g_ed.advanced, "frameThickness", NULL);
     with(&b, ed_gui_switch(&b, "Has Floor", 0), g_ed.advanced, "frameFloor", NULL);
     ed_gui_button(&b, "Frame It", act_frame);
     ed_gui_folder_end(&b, 0);

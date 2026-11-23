@@ -8,9 +8,9 @@
 // QuickSettings.setPosition; quicksettings.js' injected stylesheet is in editor-kn.css.
 // The items call KE.quickGUI.action(<index>) instead of GUI.action(['_quicksettings', ...]).
 //
+// - "Fix Hitbox" in the menu does nothing, as v10.0.7: it reads this.quickGUI on the item's config
+//   and throws a TypeError (index-10.0.7.js:13806); Shift+F fixes the selection.
 // Differences from v3.1.1 (intentional):
-// - "Fix Hitbox" in the menu calls fixHitbox(menu object); v3.1.1 reads this.quickGUI on
-//   the blueprint and throws a TypeError, so the item did nothing there.
 // - Duplicate / Delete keep v3.1.1's behaviour: they test quickGUI.obj.objType, which the
 //   bounding mesh never has, so a group placeholder is duplicated / removed as an object.
 // - Group > Stop calls stopGroup(false, obj), whose second argument v3.1.1 ignores: it
@@ -338,7 +338,9 @@ static int h_qs_action(void *user, const HtmlEvent *ev, const HtmlArg *args, con
         case QG_GROUP_STOP: ed_group_stop(0); break;
         case QG_GROUP_COPY: ed_copy_objects(0, 0, o); break;
         case QG_GROUP_PASTE: ed_paste_objects(o); break;
-        case QG_FIX_HITBOX: ed_fix_hitbox(o); break;
+        // v10.0.7's item reads this.quickGUI.obj with `this` the item's own config (index-10.0.7.js:13806,
+        // 6124): a TypeError, so the menu hides and nothing else happens (Shift+F still fixes the selection)
+        case QG_FIX_HITBOX: break;
         case QG_COLLISION_MESH: ed_convert_to_collision_mesh(o); break; // convertToCollisionMesh(quickGUI.obj)
         case QG_REPLACE_JSON: replace_into(0, o); break;
         case QG_REPLACE_FILE: replace_into(1, o); break;

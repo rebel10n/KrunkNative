@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""Tools and Prefabs panels vs Krunker v7.1.4 (doc/v7/editor.md WP6, client/src/editor/editor_tools.c).
+"""Tools and Prefabs panels vs Krunker v10.0.7 (v7.1.4's capture + v10's deltas; client/src/editor/editor_tools.c).
 
     python3 -I tools/editor/tools_check.py --bin <build>/client_bin [--root .] [--keep DIR] [-v]
 
 One headless native editor run (EGL, no window on any display), three checks:
 
 1. Panel dumps: Component > Tools and Object > Prefab > Tools (dump:right) against
-   doc/ref/krunker-v7.1.4/editor/right-tools.dump.txt / right-prefab.dump.txt.
+   doc/ref/krunker-v7.1.4/editor/right-tools.dump.txt / right-prefab.dump.txt, the Tools one with v10's
+   Deoptimizations folder (index-10.0.7.js:12117-12119).
 2. Optimize Faces: every optimizeFaces case of tools/editor/tools_cases.json imported into a fresh
    map (tool:import), the tool run (tool:optimizeFaces), the alert ("N% Face Reduction") and the
    objects compared with v7's (doc/ref/krunker-v7.1.4/editor/tools/<case>.json, tools/editor/v7ref.js
    state "tools").
-3. Color Merging: v7 reuses its object loop's index for the palette loops (objects are skipped or
-   visited again). The check models mergeColors here twice: with v7's loop it must reproduce v7's
-   capture exactly (alert and objects), which validates the model; without it (every object once,
-   the native fix) it gives the native expectation (alert and objects).
+3. Color Merging: v7 and v10.0.7 reuse the object loop's index for the palette loops (objects are
+   skipped or visited again; editor-10.0.7.js:20205). The model of that loop here must reproduce v7's
+   capture exactly (alert and objects), and the native run must give the same.
 
-Documented differences (doc/v7/editor.md 1.13; editor_tools.c's header):
-- Tools "Has Ceiling" shows / edits frameCeiling (v7 binds frameThickness, so it shows on).
-- Color Merging visits every object once (above).
+As v10.0.7: "Has Ceiling" is bound to frameThickness (index-10.0.7.js:12189), so it shows on.
 """
 import argparse
 import json
@@ -42,8 +40,12 @@ def json_eq(a, b):
     return a == b
 
 
-def documented_tools(lines):
-    return [l.replace("L[] Has Ceiling : switch=1", "L[] Has Ceiling : switch=0") for l in lines]
+def v10_tools(lines):
+    """v7.1.4's Tools dump with v10.0.7's Deoptimizations folder after Optimizations (index-10.0.7.js:12117)."""
+    out = list(lines)
+    i = out.index("F Text Generator closed")
+    out[i:i] = ["F Deoptimizations open", "-", "L[] Turn On All Faces : button:Execute", "-", "-"]
+    return out
 
 
 def js_parse_hex(s):
@@ -154,15 +156,14 @@ def main():
     failed = 0
 
     # 1. panels
-    for name, doc in (("tools", documented_tools), ("prefab", lambda x: x)):
+    for name, doc in (("tools", v10_tools), ("prefab", lambda x: x)):
         try:
             got = open(os.path.join(out, "panel-%s.txt" % name)).read().splitlines()
         except OSError:
             got = None
         exp = open(os.path.join(ref, "right-%s.dump.txt" % name)).read().splitlines()
-        if got is not None and doc(got) == doc(exp):
-            print("panel %s: %s v7.1.4%s" % (name, "identical to" if got == exp else "matches",
-                                             "" if got == exp else " with the documented differences"))
+        if got is not None and got == doc(exp):
+            print("panel %s: identical to v7.1.4%s" % (name, "" if got == exp else " + v10.0.7's deltas"))
         else:
             failed += 1
             print("FAIL panel %s (diff %s %s)" % (name, os.path.join(ref, "right-%s.dump.txt" % name),
@@ -190,7 +191,7 @@ def main():
             m_alert, m_objs = merge_colors(v7["before"], c.get("range", 1500), True)
             if m_alert != v7["alert"] or not json_eq(m_objs, v7["after"]):
                 problems.append("the v7-loop model does not reproduce v7 (%s vs %s)" % (m_alert, v7["alert"]))
-            want_alert, want = merge_colors(v7["before"], c.get("range", 1500), False)
+            want_alert, want = m_alert, m_objs  # v10.0.7's loop is v7's
         else:
             want_alert, want = v7["alert"], v7["after"]
         if alert != want_alert:

@@ -131,6 +131,8 @@ V10_ESSENTIAL_LINES = [
     'L[subsection] Webhook : text()=',                              # Other (serverConfig webhook)
     'L[subsection] Player Damage Off : switch=0',                   # Teams (serverConfig noPvp)
     'L[subsection] Hurtbox Scale : sval=1 range[1,2,0.1]=1',        # every class's Hitbox folder
+    'L[] Solid Ramp Sides : switch=0',                              # map settings (rampFix, v10.0.3)
+    'L[subsection] Solid Ramp Sides : switch=0',                    # Other (serverConfig rampFix, CFG:7810)
 ]
 
 
