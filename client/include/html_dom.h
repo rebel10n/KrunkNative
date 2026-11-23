@@ -142,11 +142,12 @@ HtmlElem html_dom_active_element(void);                             // document.
 
 // ---- events: page -> C
 typedef struct {
-    const char *type;      // "click" "mousedown" "input" "change" "keypress" "keydown" "mouseenter" "mouseover" "focus" "blur" "resize"
+    const char *type;      // "click" "mousedown" "mousemove" "wheel" "input" "change" "keypress" "keydown" "mouseenter" "mouseover" "focus" "blur" "resize"
     HtmlElem    target;    // element the inline handler / listener is attached to (bubbling already resolved)
     const char *value;     // this.value for form controls, else ""
     int         checked;   // this.checked
-    int         key;       // keydown/keypress: GLFW key code natively, DOM keyCode on web (Enter=257/13, Escape=256/27 are normalised: use html_key_is_enter/escape)
+    int         key;       // keydown/keypress: GLFW key code natively, DOM keyCode on web (Enter=257/13, Escape=256/27 are normalised: use html_key_is_enter/escape);
+                           // wheel: deltaY in CSS px (positive = down); mousemove: the held buttons (MouseEvent.buttons)
     int         button;    // mouse button 0/1/2
     float       x, y;      // CSS px
     int         mods;      // key events: modifier bits as GLFW_MOD_* (1 Shift, 2 Control, 4 Alt, 8 Super)

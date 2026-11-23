@@ -80,7 +80,10 @@
     var target = el && el.nodeType ? el : (ev && (ev.currentTarget && ev.currentTarget.nodeType === 1 ? ev.currentTarget : ev.target));
     var value = valueOverride != null ? String(valueOverride) : (target && target.value != null ? String(target.value) : '');
     var checked = target && target.checked ? 1 : 0;
-    var key = ev && /^key/.test(ev.type || '') ? (ev.keyCode || ev.which || 0) : 0;
+    // key events: keyCode; wheel: deltaY in px (the native engine's onwheel); mousemove: the held buttons
+    var key = ev && /^key/.test(ev.type || '') ? (ev.keyCode || ev.which || 0)
+      : ev && ev.type === 'wheel' ? Math.round(ev.deltaY * (ev.deltaMode === 1 ? 100 / 3 : ev.deltaMode === 2 ? 1000 / 3 : 1))
+      : ev && ev.type === 'mousemove' ? (ev.buttons | 0) : 0;
     var button = ev && typeof ev.button === 'number' ? ev.button : 0;
     // key events carry no position: x = 1 tells C that Shift is held (the console's Shift+Tab)
     var x = ev && typeof ev.clientX === 'number' ? ev.clientX : (ev && ev.shiftKey ? 1 : 0);

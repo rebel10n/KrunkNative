@@ -88,6 +88,13 @@ typedef struct {
 
 // The graph validator (deob:94463-94792) for `kind` ("surface", "paint", "post"; NULL any); 1 when valid, else 0 with the first error in `err`.
 int mod_shader_graph_validate(const struct cJSON *graph, const char *kind, char *err, size_t err_size);
+// Every error of the validator (v10's validate returns them all; the node canvas editor's footer lists them): the
+// count (0 = valid), the first `max` stored in `out`. `node` is the node's id, "" for a graph-level error.
+typedef struct {
+    char node[64];
+    char message[192];
+} ModShaderGraphError;
+int mod_shader_graph_errors(const struct cJSON *graph, const char *kind, ModShaderGraphError *out, int max);
 // Validates and translates a post graph with the instance `params` (shaderArgs.params, may be NULL). 1 on success.
 int mod_shader_graph_compile(const struct cJSON *graph, const struct cJSON *params, ModShaderProgram *out, char *err,
                              size_t err_size);

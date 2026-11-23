@@ -171,6 +171,7 @@ void debug_capture_frame_end(Client *client) {
 // kn-drive.sh). Append one command per line:
 //   ui showWindow(14);selectClass(2)   inline-handler calls dispatched on the shown page
 //   move x y | click x y | scroll dy    pointer through the window's GLFW callbacks (fb px)
+//   press x y | release x y             the left button down / up there (a drag: press, move ..., release)
 //   clickid <id>                        click the centre of #id
 //   key <glfw key> [press|release]      key through the GLFW key callback (default: both)
 //   text <chars>                        characters through the char callback
@@ -321,6 +322,15 @@ static void ui_cmds_run(Client *client, char *line) {
         if (pos) pos(w, x, y);
     } else if (!strcmp(cmd, "click") && sscanf(rest, "%lf %lf", &x, &y) == 2) {
         ui_cmds_click(w, x, y);
+    } else if ((!strcmp(cmd, "press") || !strcmp(cmd, "release")) && sscanf(rest, "%lf %lf", &x, &y) == 2) {
+        // one half of a click, for drags: "press x y", "move x y" ..., "release x y"
+        GLFWcursorposfun pos = glfwSetCursorPosCallback(w, NULL);
+        glfwSetCursorPosCallback(w, pos);
+        GLFWmousebuttonfun btn = glfwSetMouseButtonCallback(w, NULL);
+        glfwSetMouseButtonCallback(w, btn);
+        glfwSetCursorPos(w, x, y);
+        if (pos) pos(w, x, y);
+        if (btn) btn(w, GLFW_MOUSE_BUTTON_LEFT, cmd[0] == 'p' ? GLFW_PRESS : GLFW_RELEASE, 0);
     } else if (!strcmp(cmd, "clickid") || !strcmp(cmd, "rect")) {
         HtmlRect r;
         const HtmlElem e = html_dom_by_id(rest);

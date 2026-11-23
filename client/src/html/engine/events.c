@@ -941,6 +941,9 @@ void events_mouse_move(EventSystem *es, float x, float y)
     }
     if (es->bar_elem) scrollbar_drag(es);
     update_hover(es);
+    /* inline onmousemove on the hovered element and its ancestors (the shader graph canvas's pan / drag);
+     * key = the held buttons as MouseEvent.buttons (bit 0 left, 1 right, 2 middle) */
+    if (es->hover_len && alive(es, es->hover_chain[0])) fire_ex(es, es->hover_chain[0], "mousemove", (int)es->buttons, 0, 1);
 }
 
 void events_mouse_leave(EventSystem *es)
@@ -1182,6 +1185,12 @@ int events_scroll(EventSystem *es, float dx, float dy, float x, float y)
     es->mouse_x = x;
     es->mouse_y = y;
     es->has_mouse = 1;
+    /* inline onwheel (the shader graph canvas's zoom): key = WheelEvent.deltaY in px; `return false` keeps the
+     * page from scrolling (preventDefault) */
+    if (dy != 0.0f) {
+        HtmlElem t = hit_elem(es, x, y);
+        if (t && !fire_ex(es, t, "wheel", (int)lroundf(-dy * EV_SCROLL_PIXELS_PER_CLICK), 0, 1)) return 1;
+    }
     if (!es->host.elem_box || !es->host.scroll_info || !es->host.set_scroll) return 0;
     float px = -dx * EV_SCROLL_PIXELS_PER_CLICK;
     float py = -dy * EV_SCROLL_PIXELS_PER_CLICK;
@@ -1276,6 +1285,14 @@ int events_key(EventSystem *es, int key, int scancode, int action, int mods)
          * were focused (the menu's Spectate switch must not swallow the Escape that closes
          * the menu). */
         if (!takes_text(es, f)) return fire_ex(es, 0, type, key, 0, 0) == 0;
+        /* the field's own inline onkeydown still sees its Escape, as in a browser (the shader graph palette's
+         * search closes the palette, deob-10.0.7.js:122695); no ancestor's, no window listener's */
+        if (attr(es, f, "onkeydown")) {
+            HtmlElem one[1] = {f};
+            HtmlEvent ev;
+            fill_event(es, &ev, type, f, key, 0);
+            dispatch_inline(es, one, 1, type, &ev);
+        }
         return 1;
     }
     int r = fire_ex(es, f, type, key, 0, 1); /* document capture listener first, then on<type> up the tree */

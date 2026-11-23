@@ -139,13 +139,25 @@ static void buf_printf(Buf *b, const char *fmt, ...) {
     free(big);
 }
 
+// mod_shader_graph_errors' list: every error the validator reports, as v10's validator returns them all
+static ModShaderGraphError *g_err_list;
+static int g_err_max, g_err_count;
+
 static void set_err(char *err, const size_t n, const char *id, const char *fmt, ...) {
-    if (!err || !n || err[0]) return; // the first error is kept
+    if (!g_err_list && (!err || !n || err[0])) return; // the first error is kept
     char msg[192];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
+    if (g_err_list) {
+        if (g_err_count < g_err_max) {
+            snprintf(g_err_list[g_err_count].node, sizeof(g_err_list[g_err_count].node), "%s", id ? id : "");
+            snprintf(g_err_list[g_err_count].message, sizeof(g_err_list[g_err_count].message), "%s", msg);
+        }
+        g_err_count++;
+    }
+    if (!err || !n || err[0]) return;
     if (id) snprintf(err, n, "%s: %s", id, msg);
     else snprintf(err, n, "%s", msg);
 }
@@ -519,6 +531,23 @@ int mod_shader_graph_validate(const cJSON *graph, const char *kind, char *err, c
     free(list);
     free(state);
     return !(err && err[0]);
+}
+
+int mod_shader_graph_errors(const cJSON *graph, const char *kind, ModShaderGraphError *out, const int max) {
+    char first[256];
+    g_err_list = out;
+    g_err_max = out ? max : 0;
+    g_err_count = 0;
+    const int ok = mod_shader_graph_validate(graph, kind, first, sizeof(first));
+    const int count = g_err_count;
+    g_err_list = NULL;
+    g_err_max = g_err_count = 0;
+    if (!ok && !count && out && max > 0) { // a refusal with no message of its own
+        out[0].node[0] = 0;
+        snprintf(out[0].message, sizeof(out[0].message), "%s", first[0] ? first : "invalid graph");
+        return 1;
+    }
+    return ok ? 0 : count;
 }
 
 // ---------------------------------------------------------------- the GLSL library (three.js TSL equivalents)
