@@ -383,6 +383,7 @@ static void warn_unknown_keys(void) {
         "sandbox", // true: the menu of v10's in-page sandbox (a custMap / ?sandbox page: v10_menu_set_sandbox)
         "remoteImages", // {url: local file}: the http(s) images the page shows, no network (remote_images.h)
         "krunkerLobbies", // krunker.io's /game-list answer {games, totalPlayerCount} or {error} (krunker_lobbies_set_fixed)
+        "guideVideo", // false: the Guide's Basics <video> as before its metadata arrives (v10's capture: 300 x 150, v10_news.c)
     };
     static const char *const known_seq[] = {
         "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
@@ -1292,6 +1293,7 @@ static int ui_scenario_apply(Client *client) {
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
+    v10_news_guide_video_scenario(st_bool("guideVideo", 1)); // false: the guide's Basics video never loaded
     if (st_has("events")) { // v10.0.3 live events without a brain: the list, the round's eventIndex, a fixed clock
         const cJSON *events = st("events");
         v10_events_scenario(cJSON_GetObjectItem(events, "list"), obj_num(events, "now", 0.0));

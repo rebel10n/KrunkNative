@@ -51,7 +51,7 @@ version (the desktop's was not recorded). The structural failures of that run we
 2026-11-23 (see "Failing-region triage (2026-11-23)" below); after those fixes the devbox, run as four
 shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run),
 and 787 / 64 / 91 after the translated-window snapping fix (791 / 60 / 91 after the percentage and
-transformed-origin fixes of "Failing-region triage, round 3").
+transformed-origin fixes of "Failing-region triage, round 3"; 794 / 59 / 89 after round 4).
 `menu-host-type` was a layout of its own: the Rent a Server card's 15 px margin moved the centred window a
 fractional 31.3 px at the #uiBase scale (fixed 2026-11-23: 14 px, `rent_servers_ui.c`; the scenario also needed the
 sandbox menu its reference shows).
@@ -654,3 +654,44 @@ region from pass to fail. `main-menu` and `menu-mobile*` were left to their owne
   capture of that frame there is no evidence for which is right, so the baseline is kept.
 - **`menu-host-type` window** (3.16 %) belongs to the menu work; **`kn-servers-carousel`** is as
   described in the previous section.
+
+### Failing-region triage, round 4 (2026-11-23)
+
+Baseline: round 3 (75670edd on ccb73fee), 791 / 60 / 91. After the changes below: 794 passed / 59
+failed / 89 skipped, no region from pass to fail (every other region within 0.2 points).
+
+**Fixed**
+- **Percentages elsewhere**: table column widths (`layout_table.c`, both the auto and the fixed
+  algorithm), `font-size` / `line-height` percentages and `zoom: N%` (`css_values.c`) and
+  `background-position` / `object-position` percentages (`image.c`) now divide by 100 as Blink does,
+  where `pct * 0.01f` gave e.g. 10 % of 720 = 71.99999 and 5 % of 300 = 14.999999. Unit checks in
+  `test_layout.c` (`t_table_percent_exact`), `test_css_values.c` and `test_image.c`; no uidiff region
+  moved.
+- **`guide` intro-text** (5.50 -> 0.19 %), intro (8.37 -> 0.09 %, max 12 -> 3), controls and footer
+  (skipped at 18.2 / 18.9 %, now 0.22 / 0.17 %). The first line's 0.12-0.35 px offset was not text
+  layout: text-indent and the inline start are 0, GameFont has no kern / GPOS so the advances are the
+  hmtx ones, and the Skia-style glyph snap matches. The capture's Basics `<video>` never loaded: it
+  is 300 x 150 naturally and the flex row's automatic minimum (content size suggestion = the natural
+  width, Blink computes it with `kIgnoreInlineLengths`) lets it shrink from its 700 px style to
+  444.7 px. KN used the styled width as the minimum, laid the video out 700 wide, so
+  `.tutorialSectionContent` overflowed (931.9 of 910 px) and `scroller_layer_snap` moved its content
+  -0.32 CSS px; Chrome has nothing to scroll and no layer. `layout_flex.c` now takes
+  `layout_replaced_natural_width` (`layout_block.c`) for replaced items
+  (`t_flex_shrink_auto_min`), and the scenario's `"guideVideo": false` renders the unloaded video
+  (`v10_news.c`).
+- **`spin-item*` buttons** (6.34 / 7.91 / 6.90 / 7.91 -> 5.62 / 7.29 / 6.28 / 7.29 %, still failing
+  at max 5.5): round 3's "icon font version" was wrong. v10.0.7's `css/material-icons.css` links
+  `fonts/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2`, the same file as KN's (both "Version 1.017",
+  512 units / em, and `ui/css/fonts/material-icons.ttf` is its conversion). The reference glyph is
+  KN's `refresh` turned ~225 degrees by `#spinAgainBtn > i`'s 2 s spin (the earlier rotation search
+  scored the border lines pulled in by the rotated crop, not the glyph). `anim_time` 0.05 (capture
+  at 1.6 k + 0.05 s) matches that phase in all four scenarios; 0.8 drew it at 0 degrees.
+
+**Still open**
+- **`spin-item*` buttons, borders**: not a uniform device-pixel floor. Under `#uiBase`'s 0.579 scale
+  the 4 px borders are 2.32 device px in KN; in Chrome the purple Equip box's left / right are 2.31
+  (as KN), its top / bottom 2.03-2.06, the cyan respin box 2.08 (left) and 2.0 (right). The top
+  border differs at its outer edge (601.80 Chrome, 601.58 KN), the bottom at its inner edge
+  (631.98 / 631.69); the button text matches to 0.01 px. Floor-snapping every border width would
+  break the left / right edges that already match, so nothing changed; the likeliest source is still
+  the compositor raster of the scaled layer.

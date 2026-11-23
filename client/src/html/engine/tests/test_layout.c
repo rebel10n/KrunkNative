@@ -1059,6 +1059,24 @@ static void t_table_colspan(void)
     fx_free(fx);
 }
 
+/* A percentage column resolves as Blink's percent * available / 100: 10% of 720 is 72 exactly,
+ * where 10 * 0.01f * 720 is 71.99999 (the next column then starts a hair before 72). */
+static void t_table_percent_exact(void)
+{
+    Fx *fx = fx_html(
+        "<table id=pf style='table-layout:fixed;width:720px;border-spacing:0'>"
+        "<tr><td id=pa style='width:10%'>a</td><td id=pb>b</td></tr></table>", "td, th { padding: 0; }");
+    HtmlRect pa = rc(fx, "pa"), pb = rc(fx, "pb"), pf = rc(fx, "pf");
+    CHECK(pa.w == 72.0f && pb.x - pf.x == 72.0f, "table fixed 10%% of 720: %.7g wide, next at %.7g", pa.w, pb.x - pf.x);
+    fx_free(fx);
+    fx = fx_html(
+        "<table id=qf style='width:720px;border-spacing:0'>"
+        "<tr><td id=qa style='width:10%'>a</td><td id=qb style='width:90%'>b</td></tr></table>", "td, th { padding: 0; }");
+    HtmlRect qa = rc(fx, "qa"), qb = rc(fx, "qb"), qf = rc(fx, "qf");
+    CHECK(qa.w == 72.0f && qb.x - qf.x == 72.0f, "table auto 10%% of 720: %.7g wide, next at %.7g", qa.w, qb.x - qf.x);
+    fx_free(fx);
+}
+
 /* rowspan (HTML 4.4.6): a cell takes its column in the rows it covers, so those rows skip the
  * column; its width is its column's, its height is shared out over its rows. */
 static void t_table_rowspan(void)
@@ -2124,6 +2142,18 @@ static void t_flex_shrink_auto_min(void)
     CHECK_NEAR(rc(fx, "e1").h, 50, 0.01, "column: height 80 items shrink to share 100 px");
     CHECK_NEAR(rc(fx, "e2").h, 50, 0.01, "column: height 80 items shrink (2)");
     fx_free(fx);
+
+    /* a replaced item's content size suggestion is its natural width (its own width ignored): a 300 x 150
+     * canvas styled 400 px wide stops shrinking at 300, not 400 (v10's guide: a <video style="width:
+     * 700px"> before it loads is 444.7 px beside the controls column, as in the capture) */
+    fx = fx_html(
+        "<div style='display:flex;width:600px'><canvas id=rc style='width:400px'></canvas><div id=rd style='width:100%;height:4px'></div></div>"
+        "<div style='display:flex;width:600px'><canvas id=re style='width:200px'></canvas><div id=rf style='width:100%;height:4px'></div></div>",
+        NULL);
+    CHECK_NEAR(rc(fx, "rc").w, 300, 0.01, "replaced: shrinks to its natural 300, below its 400 px style");
+    CHECK_NEAR(rc(fx, "rd").w, 300, 0.01, "replaced: the other item takes the rest");
+    CHECK_NEAR(rc(fx, "re").w, 200, 0.01, "replaced: a style below the natural size is the minimum");
+    fx_free(fx);
 }
 
 /* textContent of a flex container whose text sat in a child element (v10's #inviteButton:
@@ -2805,6 +2835,7 @@ int main(int argc, char **argv)
     t_all_unset();
     t_table();
     t_table_colspan();
+    t_table_percent_exact();
     t_table_rowspan();
     t_positioned();
     t_sticky_scroll();

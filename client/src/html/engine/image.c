@@ -1220,7 +1220,7 @@ void image_bg_size(const float img_w, const float img_h, const float box_w, cons
 }
 
 float image_resolve_position_axis(const float px, const float pct, const float box, const float img) {
-    return pct * 0.01f * (box - img) + px;
+    return pct * (box - img) / 100.0f + px;
 }
 
 void image_resolve_position(const CssLength *x, const CssLength *y, const float box_w, const float box_h,

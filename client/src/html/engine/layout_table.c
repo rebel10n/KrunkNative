@@ -213,7 +213,7 @@ static void distribute(ColInfo *cols, int nc, float avail)
     float sum_min = 0, sum_target = 0;
     float target[TBL_MAX_COLS];
     for (int i = 0; i < nc; i++) {
-        if (cols[i].pct >= 0) target[i] = kn_maxf(cols[i].min, cols[i].pct * 0.01f * avail);
+        if (cols[i].pct >= 0) target[i] = kn_maxf(cols[i].min, cols[i].pct * avail / 100.0f);
         else if (cols[i].fixed >= 0) target[i] = kn_maxf(cols[i].min, cols[i].fixed);
         else target[i] = cols[i].max;
         sum_min += cols[i].min; sum_target += target[i];
@@ -267,7 +267,7 @@ static void distribute_fixed(LayoutTree *t, Box *b, ColInfo *cols, int nc, float
         const CssLength *w = &c->style->width;
         float cw = -1;
         if (w->kind == CSS_LEN_VALUE && w->calc && w->pct != 0) cw = layout_box_sizing_w(c, css_len_value(w, avail));
-        else if (w->kind == CSS_LEN_VALUE && w->pct > 0) cw = w->pct * 0.01f * avail;
+        else if (w->kind == CSS_LEN_VALUE && w->pct > 0) cw = w->pct * avail / 100.0f;
         else if (w->kind == CSS_LEN_VALUE) cw = layout_box_sizing_w(c, w->px);
         /* a spanning cell's width (less the spacing) is split evenly over its columns */
         if (cw >= 0) for (int k = 0; k < span; k++) cols[ci + k].w = kn_maxf(0, cw - hs * (float)(span - 1)) / (float)span;

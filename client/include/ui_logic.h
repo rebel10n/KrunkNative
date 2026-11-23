@@ -700,6 +700,7 @@ void v10_news_setup(void);                       // the page is up: the v10 menu
 void v10_news_tick(void);                        // per frame: the What's New item
 int  v10_news_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 not ours
 void v10_news_scenario(const cJSON *community);  // --render-scenario state.community
+void v10_news_guide_video_scenario(int loaded);   // --render-scenario state.guideVideo (false: never loaded)
 // END v10_news block
 
 // BEGIN ui_loadout block (client/src/ui/ui_loadout.c): Change Loadout + item pickers,

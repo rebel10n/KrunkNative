@@ -155,9 +155,12 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             /* the content size suggestion of the automatic minimum size (CSS Flexbox 4.5) is the
              * min-content size of the item's contents: its own width (layout_intrinsic_width) would
              * make a width: Npx item refuse to shrink below N (a Strike friend row's Join button
-             * pushed off the card); a replaced item's is its natural size */
-            content_min = box_is_replaced(c) ? layout_intrinsic_width(t, c, 0)
-                                             : layout_content_kw_width(t, c, CSS_LEN_MIN_CONTENT, -1.0f);
+             * pushed off the card); a replaced item's is its natural size with its own width ignored
+             * (Blink's kIgnoreInlineLengths), so the specified size suggestion caps it but does not
+             * replace it: v10's guide <video style="width: 700px"> before it loads (300 x 150) shrinks
+             * to 444.7 px beside the controls, as in the capture */
+            content_min = !box_is_replaced(c) ? layout_content_kw_width(t, c, CSS_LEN_MIN_CONTENT, -1.0f)
+                          : kn_minf(layout_intrinsic_width(t, c, 0), layout_replaced_natural_width(t, c, -1.0f));
             t->intrinsic_cb_set = prev_set;
             t->intrinsic_cb_w = prev_w;
         } else {

@@ -40,9 +40,9 @@
         48
       ],
       "kind": "text",
-      "note": "the Basics headline (22px bold orange #ff9501 on dark, synthetic bold): 19.5% while the engine's fake bold was anchored bottom-left and size/24 wide; 9.9% with Skia's centred one. What is left is the engine's glyph coverage / gamma on this colour (no offset helps)",
+      "note": "the Basics headline (22px bold orange #ff9501 on dark, synthetic bold). Was 8.4 % (max 12, put down to glyph coverage): the section content was painted 0.18 device px left, see intro-text; 0.05 % since 2026-11-23",
       "fuzz": 12,
-      "max_pct": 12.0
+      "max_pct": 3.0
     },
     {
       "name": "intro-text",
@@ -53,7 +53,7 @@
         26
       ],
       "kind": "text",
-      "note": "the first intro line (16px). Offset 0 since the 2026-11-23 translate snapping fix (the vertical ink centroid matches Chrome to 0.001 px; the old -1 offset costs 12 %). Residual: glyph x phase, line 1 sits 0.12-0.35 px left of Chrome",
+      "note": "the first intro line (16px). Was 5.5 % with the glyphs 0.12-0.35 px left of Chrome's: KN laid the unloaded video out 700 px wide, so .tutorialSectionContent overflowed (931.9 of 910 px) and was layer-snapped (scroller_layer_snap, -0.32 CSS px); in the capture the video is 444.7 px and nothing overflows. 0.19 % since 2026-11-23 (guideVideo false, flex content size suggestion of replaced items)",
       "fuzz": 12,
       "max_pct": 3.0
     },
@@ -66,10 +66,9 @@
         212
       ],
       "kind": "text",
-      "note": "the controls list right of the login popup: the capture's video never loaded (a 300x150 box), the render shows its first frame at 16:9 as Chrome does with the video, so this moves",
+      "note": "the controls list right of the login popup: the capture's video never loaded (300 x 150), which the flex row shrinks to 444.7 px (automatic minimum = its natural 300, not its 700 px style); guideVideo false renders that state",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true
+      "max_pct": 3.0
     },
     {
       "name": "footer",
@@ -80,10 +79,9 @@
         62
       ],
       "kind": "text",
-      "note": "Once a match ends ...: the capture's video never loaded (a 300x150 box), the render shows its first frame at 16:9 as Chrome does with the video, so this moves",
+      "note": "Once a match ends ...: the capture's video never loaded (300 x 150), which the flex row shrinks to 444.7 px (automatic minimum = its natural 300, not its 700 px style); guideVideo false renders that state",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "skip": true
+      "max_pct": 3.0
     }
   ]
 }

@@ -678,6 +678,8 @@ static void test_geometry(void) {
     CHECK(near(x, 12) && near(y, 0), "12px (y default): %g %g", x, y);
 
     CHECK(near(image_resolve_position_axis(-8, 100, 200, 16), 176), "axis helper");
+    /* percent * (box - img) / 100 as in Blink: 10% of 720 is 72 exactly (10 * 0.01f * 720 is 71.99999) */
+    CHECK(image_resolve_position_axis(0, 10, 736, 16) == 72.0f, "axis helper: exact percentage");
 
     /* background-repeat: round */
     CHECK(image_repeat_round_count(100, 30) == 3 && near(image_repeat_round_size(100, 30), 100.0f / 3), "round 100/30");

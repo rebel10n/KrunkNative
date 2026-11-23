@@ -686,6 +686,27 @@ static void replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *
     *out_w = bw; *out_h = bh;
 }
 
+/* A replaced box's min-content width with its own width ignored (Blink's ReplacedSizeMode
+ * kIgnoreInlineLengths): the natural width, or the width a definite height gives through the
+ * ratio, clamped by max-width; border and padding included. The content size suggestion of a
+ * flex item's automatic minimum size (CSS Flexbox 4.5): a <video style="width: 700px"> whose
+ * source has not loaded (300 x 150) may shrink to 300 in a flex row. */
+float layout_replaced_natural_width(LayoutTree *t, Box *b, float cb_h)
+{
+    const CssComputed *saved = b->style;
+    CssComputed tmp = *saved;
+    tmp.width.kind = CSS_LEN_AUTO;
+    tmp.min_width.kind = CSS_LEN_AUTO;
+    const float saved_attr = b->attr_w;
+    b->style = &tmp;
+    b->attr_w = -1.0f;
+    float w, h;
+    replaced_size(t, b, -1.0f, cb_h, &w, &h);
+    b->style = saved;
+    b->attr_w = saved_attr;
+    return w;
+}
+
 float layout_replaced_width(LayoutTree *t, Box *b, float cb_h)
 {
     float w, h;

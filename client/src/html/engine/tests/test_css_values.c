@@ -352,11 +352,20 @@ static void test_lengths(void)
     CssComputed child = fresh();
     CHECK(apply(&child, &parent, "font-size", "0.5em") && feq(child.font_size, 15));
     CHECK(apply(&child, &parent, "font-size", "200%") && feq(child.font_size, 60));
+    /* percent * base / 100 as in Blink: 5% of 300 is 15 exactly (5 * 0.01f * 300 is 14.999999) */
+    parent.font_size = 300;
+    CHECK(apply(&child, &parent, "font-size", "5%") && child.font_size == 15.0f);
+    parent.font_size = 30;
     CHECK(apply(&child, &parent, "font-size", "165px") && feq(child.font_size, 165));
     /* line-height */
     CHECK(apply(&c, NULL, "line-height", "1") && c.line_height.kind == CSS_LEN_NUMBER && feq(c.line_height.px, 1));
     CHECK(apply(&c, NULL, "line-height", "28px") && len_is(c.line_height, 28, 0));
     CHECK(apply(&c, NULL, "line-height", "normal") && c.line_height.kind == CSS_LEN_NORMAL);
+    {   /* a % line-height is the element's font size * percent / 100: 5% of 600 is 30 (not 29.999998) */
+        CssComputed lh = fresh();
+        lh.font_size = 600;
+        CHECK(apply(&lh, NULL, "line-height", "5%") && lh.line_height.px == 30.0f && lh.line_height.pct == 0);
+    }
     CHECK(apply(&c, NULL, "letter-spacing", "-2px") && len_is(c.letter_spacing, -2, 0));
 }
 
@@ -775,6 +784,7 @@ static void test_zoom(void)
     CHECK(feq(c.zoom, 1));
     CHECK(apply(&c, NULL, "zoom", "0.7") && feq(c.zoom, 0.7f));
     CHECK(apply(&c, NULL, "zoom", "150%") && feq(c.zoom, 1.5f));
+    CHECK(apply(&c, NULL, "zoom", "5%") && c.zoom == 0.05f);                    /* 5 * 0.01f is 0.049999997 */
     CHECK(apply(&c, NULL, "zoom", "normal") && feq(c.zoom, 1));
     CHECK(apply(&c, NULL, "zoom", "0") && feq(c.zoom, 1));
     CHECK(!apply(&c, NULL, "zoom", "-1"));

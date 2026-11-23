@@ -21,8 +21,9 @@
       [
         "openGuide"
       ]
-    ]
+    ],
+    "guideVideo": false
   },
   "frames": 3,
-  "note": "ui/v10 Guide (#menuBtnGuide: openGuide(), tutorialPopup), Basics, guest (4 locked sections). Ref: the live v10 capture's guide state (states/guide.png) undimmed (/0.70: v10 had its login popup open over it); the login popup's area and the video (not loaded in the capture) are not compared"
+  "note": "ui/v10 Guide (#menuBtnGuide: openGuide(), tutorialPopup), Basics, guest (4 locked sections). Ref: the live v10 capture's guide state (states/guide.png) undimmed (/0.70: v10 had its login popup open over it); the login popup's area is not compared. guideVideo false: the capture's video never loaded (300 x 150), so the section's flex row shrinks it to 444.7 px and the section does not overflow"
 }

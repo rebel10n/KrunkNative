@@ -4629,7 +4629,7 @@ static int computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
             d->font_size = kn_maxf_cv(0.0f, css_calc_eval(l.calc, base));
             return 1;
         }
-        d->font_size = l.px + l.em * base + l.pct * 0.01f * base;
+        d->font_size = l.px + l.em * base + l.pct * base / 100.0f;
         return 1;
     }
     case CSS_PROP_FONT_WEIGHT: {
@@ -4651,7 +4651,7 @@ static int computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
             l.kind = CSS_LEN_VALUE;
             l.px = v;
         }
-        if (l.kind == CSS_LEN_VALUE && l.pct != 0) { l.px += l.pct * 0.01f * font_px; l.pct = 0; }
+        if (l.kind == CSS_LEN_VALUE && l.pct != 0) { l.px += l.pct * font_px / 100.0f; l.pct = 0; }
         d->line_height = l;
         return 1;
     }
@@ -4946,7 +4946,7 @@ static int computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         if (m != 1) return 0;
         if (tok_is_ident(&t[0], "normal") || tok_is_ident(&t[0], "reset")) z = 1.0f;
         else if (t[0].type == CSS_TOK_NUMBER) z = (float)t[0].num;
-        else if (t[0].type == CSS_TOK_PERCENTAGE) z = (float)t[0].num * 0.01f;
+        else if (t[0].type == CSS_TOK_PERCENTAGE) z = (float)(t[0].num / 100.0);
         else return 0;
         if (z < 0.0f) return 0;
         d->zoom = z == 0.0f ? 1.0f : z;

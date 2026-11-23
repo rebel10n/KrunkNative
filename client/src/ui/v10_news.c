@@ -550,7 +550,18 @@ static int guide_unlocked(const int i) {
     return !k_guide[i].unlock || (a && a->level >= k_guide[i].unlock);
 }
 
+// --render-scenario state.guideVideo false: the Basics video as before its metadata arrives (no source
+// size, no frame), what v10's guide capture shows: a 300 x 150 <video>, which the section's flex row
+// shrinks to 444.7 px (its automatic minimum is the natural 300, not the 700 of its style)
+static int g_guide_video_unloaded = 0;
+
+void v10_news_guide_video_scenario(const int loaded) { g_guide_video_unloaded = !loaded; }
+
 static void guide_video(StrBuf *out) {
+    if (g_guide_video_unloaded) {
+        sb_append(out, "<video style=\"width: 700px;\" preload=\"auto\" autoplay=\"\" loop=\"\" playsinline=\"\"></video>");
+        return;
+    }
     char url[512];
     html_dom_asset_url("videos/tutorial/basics.mp4", url, sizeof(url));
     sb_append(out, "<video style=\"width: 700px;\" preload=\"auto\" src=\"");

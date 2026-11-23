@@ -116,6 +116,7 @@ int   layout_len_is_content_kw(const CssLength *l);
 /* a replaced box's border-box width with its height resolved against cb_h (a percentage height
  * in a definite container transfers through the natural ratio) */
 float layout_replaced_width(LayoutTree *t, Box *b, float cb_h);
+float layout_replaced_natural_width(LayoutTree *t, Box *b, float cb_h);
 /* aspect-ratio (CSS Sizing 4) of a non-replaced box (0: none; replaced boxes: replaced_size),
  * and the border-box size it transfers from the other one (< 0 without a ratio) */
 float layout_pref_ratio(const Box *b);
