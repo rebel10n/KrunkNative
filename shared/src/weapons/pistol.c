@@ -2,7 +2,7 @@
 
 // Krunker v7.1.4 weapon 2 (src/data/weapons.js): the base of its upgradeWeapons entry (upgraded.c); v10
 // plays the rebalanced copy in shared/src/rules/v10/weapons_rebalance_v10.c. Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: noAo, transp, kill, type, shine, caseZOff, caseYOff, muzOff, muzOffY, muzMlt, rumble, icnPad, expScale.
+// recoil from per-ms to per-s; fields not ported yet: noAo, transp, kill, type, caseZOff, caseYOff, muzOff, muzOffY, muzMlt, rumble, icnPad, expScale.
 const Weapon g_pistol = {
     .name = "Pistol",
     .src = "weapon_3",
@@ -56,6 +56,7 @@ const Weapon g_pistol = {
     .right_hold = {0.13f, -0.62f, -0.32f},
     // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
     .swap_wiggle = 0.3f,
+    .shine = 10.0f,
     .has_recoil_anim = 1,
     .recoil_anim_time = 0.2f,
     .recoil_tween_y = 0.28f,

@@ -44,6 +44,7 @@ const Weapon g_slimer = {
     .inspect_rotation = 0.1f,
     .inspect_mlt = 1.5f,
     .swap_wiggle = 0.3f,
+    .shine = 20.0f,
     .crouch_lean = 0.2f,
     .crouch_rotation = 0.1f,
     .crouch_drop = 0.1f,

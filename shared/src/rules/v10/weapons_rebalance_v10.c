@@ -141,6 +141,7 @@ const Weapon g_pistol_v10 = {
     .right_hold = {0.13f, -0.62f, -0.32f},
     // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
     .swap_wiggle = 0.3f,
+    .shine = 10.0f,
     .has_recoil_anim = 1,
     .recoil_anim_time = 0.2f,
     .recoil_tween_y = 0.28f,
@@ -216,6 +217,7 @@ const Weapon g_smg_v10 = {
     .right_hold = {0.0f, -0.5f, -0.95f},
     // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
     .swap_wiggle = 0.5f,
+    .shine = 50.0f,
     .has_recoil_anim = 1,
     .recoil_anim_time = 0.19f,
     .recoil_tween_y = 0.06f,

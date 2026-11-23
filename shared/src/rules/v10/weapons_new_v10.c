@@ -6,7 +6,7 @@
 // entry ("deob-10.0.3.js:N" = line N of ~/jails/kru/src/Krunker_v10.0.3/deob/game.deob.js); checked
 // field by field against shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times in s (JS ms / 1000),
 // recoil per s (JS per ms x 1000). Not ported (cosmetic / no KN consumer): assetIcon, refDist,
-// rollOff, transp, noAo, nCase, nMuz, nRing, shine, wyOff, muzOff, muzMlt, rumble, icnPad, expScale.
+// rollOff, transp, noAo, nCase, nMuz, nRing, wyOff, muzOff, muzMlt, rumble, icnPad, expScale.
 
 // id 29 Boulder (deob-10.0.3.js:115235-115286): a carried rock (models/weapons/weapon_30.obj "Rock",
 // textures/weapons/weapon_30.png, icon_30). type 3 (equipment slot) but `secondary`, no damage
@@ -81,6 +81,7 @@ const Weapon g_compressor = {
     .r_shoot = 1,           // 'rShoot': !0 (new)
 
     .swap_wiggle = 0.4f,    // 'swapWiggle': 0.4
+    .shine = 35.0f,         // 'shine': 0x23
     .physical_range = 50.0f,// 'physRang': 50
     .physical_power = 0.1f, // 'physPow': 0.1
     .swap_time = 0.35f,     // 'swapTime': 350

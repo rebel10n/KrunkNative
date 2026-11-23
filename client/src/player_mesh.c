@@ -1631,8 +1631,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                             melee = mesh_init(melee_geo, (Material *) melee_mat);
                             melee_mat->texture = melee_texture;
                             // !preview && !renderYou || noShine ? null : weaponShine ? Phong : Lambert, specular
-                            // 0x292929, shininess 100 (deob-10.0.7.js:174083-174086; noShine is not parsed)
-                            weapon_shine_material(melee_mat, render_you || player->uid == -1, 100.0f, WEAPON_SPECULAR);
+                            // 0x292929, shininess 100 (deob-10.0.7.js:174083-174086): the melee skin's noShine keeps
+                            // the default Lambert
+                            const int no_shine = skin && (skin->flags3 & VS3_NO_SHINE);
+                            weapon_shine_material(melee_mat, (render_you || player->uid == -1) && !no_shine, 100.0f, WEAPON_SPECULAR);
                             rt_mask_apply(melee_mat, model); // rt_masks.c (rtMode > 0)
                             rt_materials_hint_weapon(melee_mat, player->loadout[i]); // rt.h material classes
                         }
@@ -1728,8 +1730,12 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
                             weapon_mat->texture = weapon_tex;
-                            // the same mat, shininess noShine ? shine || 60 : 0, specular 0x292929 (deob-10.0.7.js:174138-174157)
-                            weapon_shine_material(weapon_mat, render_you || player->uid == -1, 0.0f, WEAPON_SPECULAR);
+                            // the same mat (noShine: null, the default Lambert), shininess noShine ? skin.shine ||
+                            // weapon.shine || 60 : 0, specular 0x292929 (deob-10.0.7.js:174138-174157; no store skin
+                            // has a shine of its own, the Skin Manager has none either, :120484)
+                            const int no_shine = skin && (skin->flags3 & VS3_NO_SHINE);
+                            const float shininess = no_shine ? (weapon->shine ? weapon->shine : 60.0f) : 0.0f;
+                            weapon_shine_material(weapon_mat, (render_you || player->uid == -1) && !no_shine, shininess, WEAPON_SPECULAR);
                             rt_mask_apply(weapon_mat, model); // rt_masks.c: the model's metal / roughness parts (rtMode > 0)
                             rt_materials_hint_weapon(weapon_mat, player->loadout[i]); // rt.h material classes
                             if (weapon->tint) { // KrunkNative weapons (the Tool Gun): a colour over the reused model

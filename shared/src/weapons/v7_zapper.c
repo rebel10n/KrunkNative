@@ -39,6 +39,7 @@ const Weapon g_zapper = {
     .inspect_rotation = 0.3f,
     .inspect_mlt = 0.8f,
     .swap_wiggle = 0.3f,
+    .shine = 10.0f,
     .crouch_lean = 0.3f,
     .crouch_rotation = 0.3f,
     .scale = 0.84f,

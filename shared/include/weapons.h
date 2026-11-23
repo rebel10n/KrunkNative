@@ -150,6 +150,9 @@ typedef struct {
     float crouch_drop;
     float attach_y_offset; // JS `attachYOff`
     float attach_z_offset; // JS `attachZOff`
+    // JS `shine`: the Phong shininess of the weapon mesh when its skin has noShine (`noShine ? skin.shine || shine || 60
+    // : 0`, deob-10.0.7.js:174156), 0 = absent
+    float shine;
     // JS `flap` (the Sniper Rifle, copied by the AWP Blaster): the scope flap attach/<src> at offset, scale scl,
     // swung open to rot * swapTweenA (client/src/player_mesh.c: sniperFlap / sniperFlapAnim). src NULL: none.
     struct {

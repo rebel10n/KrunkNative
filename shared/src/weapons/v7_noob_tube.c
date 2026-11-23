@@ -42,6 +42,7 @@ const Weapon g_noob_tube = {
     .inspect_rotation = 0.1f,
     .inspect_mlt = 1.9f,
     .swap_wiggle = 0.4f,
+    .shine = 35.0f,
     .crouch_lean = 0.2f,
     .crouch_rotation = 0.2f,
     .crouch_drop = 0.1f,

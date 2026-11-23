@@ -90,7 +90,7 @@ static const FloatField k_weapon_floats[] = {
     WF("holdW", hold_width, UNIT_SAME), WF("hDstOff", hold_distance_offset, UNIT_SAME),
     WF("adSpread", aim_spread, UNIT_SAME), WF("chrgTime", charge_time, UNIT_MS), WF("chrgDec", charge_decay, UNIT_SAME),
     WF("fullChrgMlt", full_charge_mlt, UNIT_SAME), WF("deployRang", deploy_range, UNIT_SAME), WF("grapRang", grapple_range, UNIT_SAME),
-    WF("aimY", aim_y, UNIT_SAME),
+    WF("shine", shine, UNIT_SAME), WF("aimY", aim_y, UNIT_SAME),
 };
 
 // The view-model vectors: JS x / y / z keys -> a vec3 of Weapon (absent = 0)

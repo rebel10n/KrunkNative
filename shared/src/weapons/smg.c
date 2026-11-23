@@ -2,7 +2,7 @@
 
 // Krunker v7.1.4 weapon 3 (src/data/weapons.js): the base of its upgradeWeapons entry (upgraded.c); v10
 // plays the rebalanced copy in shared/src/rules/v10/weapons_rebalance_v10.c. Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: noAo, type, shine, caseYOff, caseZOff, muzOff, muzOffY, expScale, rumble, icnPad.
+// recoil from per-ms to per-s; fields not ported yet: noAo, type, caseYOff, caseZOff, muzOff, muzOffY, expScale, rumble, icnPad.
 const Weapon g_smg = {
     .name = "Submachine Gun",
     .src = "weapon_4",
@@ -62,6 +62,7 @@ const Weapon g_smg = {
     .right_hold = {0.0f, -0.5f, -0.95f},
     // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
     .swap_wiggle = 0.5f,
+    .shine = 50.0f,
     .has_recoil_anim = 1,
     .recoil_anim_time = 0.19f,
     .recoil_tween_y = 0.06f,

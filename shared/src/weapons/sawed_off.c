@@ -2,7 +2,7 @@
 
 // Krunker v7.1.4 weapon 15 (src/data/weapons.js), unchanged in v10.0.3: the ruleset's entry, checked against
 // shared/tests/data/v10/weapons.json by shared/tests/weapons_v10_test.c. Times are converted from ms to s and
-// recoil from per-ms to per-s; fields not ported yet: noAo, nCase, nRing, minRec, shine, type, muzOff, muzMlt, rumble, icnPad, expScale.
+// recoil from per-ms to per-s; fields not ported yet: noAo, nCase, nRing, minRec, type, muzOff, muzMlt, rumble, icnPad, expScale.
 const Weapon g_sawed_off = {
     .name = "Sawed Off",
     .src = "weapon_16",
@@ -71,6 +71,7 @@ const Weapon g_sawed_off = {
     },
     // v3.1.1 first-person feel (players.js shoot recoilAnim / swapWeapon swapWiggle / inspect insX)
     .swap_wiggle = 0.4f,
+    .shine = 35.0f,
     .has_recoil_anim = 1,
     .recoil_anim_time = 0.34f,
     .recoil_tween_y = 0.35f,
