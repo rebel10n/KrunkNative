@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Email verification and v7.1.4 2FA through the real web client (doc/backend.md 7.9):
+"""Email verification and v10.0.7 2FA through the real web client (doc/backend.md 7.9):
 headless Chromium on the Emscripten build (dist/web) against kn_brain (sqlite) and
 services/common/tests/fake_smtp.py.
 
   register in the menu's v10 login modal (Register here) with an email -> the verification mail arrives
   at the fake SMTP server -> its link (fetched like a mail client would) verifies the address -> the open
-  Account window's Account Security block turns "Verified" (the "emailS" push) -> Enable 2FA shows v7's popup
-  with the QR code -> the six code inputs (typed into, as a player would) enable it -> "Disable".
+  Account window's Account Security block turns "Verified" (the "emailS" push) -> Enable 2FA shows v10.0.7's form
+  popup (act2FA) with the QR code -> the six code boxes (typed into, as a player would) enable it -> "Disable".
 
   email_verify_web_e2e.py <native build dir> <repo root> [<web dist dir>]
 Web dist: argument, else $KN_WEB_DIST. 77 = skip (no web build, Chromium, websockets or openssl).
@@ -189,21 +189,21 @@ async def scenario(http_port, cdp_port, brain_port, smtp, db_path, work):
     check(ok, "the open menu turns Verified (emailS push)")
     await c.shot(os.path.join(work, "email-verified.png"))
 
-    # v7.1.4 2FA: Enable -> popup with the QR code -> six digits -> enabled
+    # v10.0.7 2FA (act2FA, deob-10.0.7.js:217005): Enable -> the form popup with the QR code -> six digits -> enabled
     await c.eval("document.querySelector('[onclick*=\"act2FA()\"]').click()")
-    ok = await c.wait("getComputedStyle(document.getElementById('twoFAPop')).display !== 'none' && "
-                      "(document.querySelector('#twoFAqr img').getAttribute('src') || '').startsWith('data:image/svg+xml')", 20)
-    check(ok, "Enable 2FA opens v7's popup with the QR code")
-    n = await c.eval("document.querySelectorAll('.twoFAIn').length")
-    check(n == 6, "six code inputs (config.twoFAKeyLen): %r" % n)
+    ok = await c.wait("!!document.getElementById('knTfaQr') && "
+                      "(document.getElementById('knTfaQr').getAttribute('src') || '').startsWith('data:image/')", 20)
+    check(ok, "Enable 2FA opens v10's form popup with the QR code")
+    n = await c.eval("document.querySelectorAll('.code-input-container input').length")
+    check(n == 6, "six code boxes (codeLength 6): %r" % n)
     await c.shot(os.path.join(work, "twofa-popup.png"))
     secret = sqlite3.connect(db_path).execute("SELECT twofa_pending FROM accounts WHERE username = ?", (name,)).fetchone()
     code = totp(secret[0] if secret else "AAAA", 0)
-    await c.eval("document.querySelector('.twoFAIn').focus()")
+    await c.eval("document.getElementById('knTfaCode0').focus()")
     for d in code:
         await c.send("Input.insertText", text=d)
         await asyncio.sleep(0.15)
-    ok = await c.wait("getComputedStyle(document.getElementById('twoFAPop')).display === 'none' && "
+    ok = await c.wait("!document.getElementById('knTfaCode0') && "
                       "!!document.querySelector('[onclick*=\"dact2FA()\"]')", 20)
     check(ok, "typing the code enables 2FA (the button turns Disable)")
     on = sqlite3.connect(db_path).execute("SELECT twofa_secret IS NOT NULL FROM accounts WHERE username = ?", (name,)).fetchone()

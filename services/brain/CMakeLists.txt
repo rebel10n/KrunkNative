@@ -731,6 +731,10 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_social_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_social_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_social_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;social;e2e")
+    # the account window's Settings tab (password, 2FA, deletion) against v10.0.7 through the native client
+    add_test(NAME brain_account_settings_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_settings_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_account_settings_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;account;e2e")
     # creators: v10's creator badge ("crt", 0210_creator_badge) and the maps' YouTube video ids
     add_test(NAME brain_creator
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/creator_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
