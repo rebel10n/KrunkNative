@@ -90,6 +90,7 @@ static const FloatField k_weapon_floats[] = {
     WF("holdW", hold_width, UNIT_SAME), WF("hDstOff", hold_distance_offset, UNIT_SAME),
     WF("adSpread", aim_spread, UNIT_SAME), WF("chrgTime", charge_time, UNIT_MS), WF("chrgDec", charge_decay, UNIT_SAME),
     WF("fullChrgMlt", full_charge_mlt, UNIT_SAME), WF("deployRang", deploy_range, UNIT_SAME), WF("grapRang", grapple_range, UNIT_SAME),
+    WF("aimY", aim_y, UNIT_SAME),
 };
 
 // The view-model vectors: JS x / y / z keys -> a vec3 of Weapon (absent = 0)
@@ -461,6 +462,19 @@ int main(int argc, char **argv) {
           near(weapon_attachment_y_offset(&g_attachments[ATTACHMENT_ACOG], 3), 0.0), "Acog yOff");
     // The MG has no forceAttach (since v7): the player's sight applies
     CHECK(weapon_attachment(rules_weapon(6), ATTACHMENT_ACOG) == &g_attachments[ATTACHMENT_ACOG], "MG takes the Acog");
+    // v10.0.7's skin rule (deob-10.0.7.js:173380): (weapon.attach != null || skin.attachBypass) && !skin.noAttach.
+    // The Shotgun has no attach; Vince Mastery's attachBypass mounts the pick on it. noAttach takes it off any weapon.
+    const Weapon *shotgun = rules_weapon(5), *ar = rules_weapon(1);
+    CHECK(shotgun && !shotgun->has_attach && !weapon_attachment(shotgun, 0) && !weapon_skin_attachment(shotgun, 0, 0, 0), "Shotgun: no sight");
+    CHECK(weapon_skin_attachment(shotgun, ATTACHMENT_ACOG, 1, 0) == &g_attachments[ATTACHMENT_ACOG] &&
+          weapon_skin_attachment(shotgun, 0, 1, 0) == &g_attachments[0], "attachBypass: the Shotgun takes the pick");
+    CHECK(!weapon_skin_attachment(shotgun, 0, 1, 1), "attachBypass with noAttach: none");
+    CHECK(ar && ar->has_attach && weapon_skin_attachment(ar, ATTACHMENT_ACOG, 0, 0) == &g_attachments[ATTACHMENT_ACOG] &&
+          !weapon_skin_attachment(ar, ATTACHMENT_ACOG, 0, 1) && !weapon_skin_attachment(ar, 2, 1, 0) && !weapon_skin_attachment(NULL, 0, 1, 0),
+          "noAttach: the AR without its sight; an index past attach[]: none");
+    // the ADS zoom follows: the Acog's zoomMlt on the bypass Shotgun, none under noAttach (updateAim, :174581-174583)
+    CHECK(near(weapon_aim_zoom(shotgun, weapon_skin_attachment(shotgun, ATTACHMENT_ACOG, 1, 0)), shotgun->zoom * 1.35) &&
+          near(weapon_aim_zoom(ar, weapon_skin_attachment(ar, ATTACHMENT_ACOG, 0, 1)), ar->zoom), "skin sight zoom");
 
     CHECK(cJSON_GetArraySize(scopes) == SCOPE_OVERLAY_COUNT, "scope overlay count");
     for (int i = 0; i < SCOPE_OVERLAY_COUNT && i < cJSON_GetArraySize(scopes); i++) {

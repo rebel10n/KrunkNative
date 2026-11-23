@@ -110,6 +110,15 @@ typedef struct ViewerSkin {
     // ---- v10.0.7: a weapon skin's own charm mount (the Skin Manager's Charm section, deob-10.0.7.js:120779-120792)
     float charm_m[3];        // charmM{X,Y,Z}Off, 0 = the weapon's (`skin || weapon`, :174210)
     float charm_m_scl;       // charmMScl: the weapon's charmMScl times this (0 = 1)
+    // ---- v10.0.7 weapon skin: the sight, the aim origin and the shine (updateMsh deob-10.0.7.js:173380-173385, :173499;
+    // generateMeshes :173960, :174083-174156, :174255)
+    unsigned flags3;         // VS3_*
+    float attach_y_off;      // attachYOff: the sight's y (`skin.attachYOff || weapon.attachYOff`), 0 = the weapon's
+    float attach_z_off;      // attachZOff: the sight's z, 0 = the weapon's
+    float attach_scale;      // attachScale: the sight's scale, 0 = the attachment's
+    float attach_aim_y;      // attachAimY: added to the aim offset while a sight is mounted
+    float aim_y;             // aimY: added to the aim offset
+    float y_org, z_org;      // yOrg: added to the weapon's yOrg at the aim; zOrg: the aim's z (0 = the weapon's zOrg)
 } ViewerSkin;
 
 // game.customSkins ids start here (deob-10.0.3.js:20133, iïìíiîï = 10000000): a custom game's studio skins (its
@@ -153,6 +162,12 @@ enum {
     VS2_CUSTOM_SOUND = 1 << 28,  // custom skin customSound: the shot plays user asset skins/<_id>/sound.mp3
     VS2_CUSTOM_SWAP_SOUND = 1 << 29,    // customSwapSound: a swap to it plays skins/<_id>/sound_swap.mp3
     VS2_CUSTOM_INSPECT_SOUND = 1 << 30, // customInspectSound: an inspect plays skins/<_id>/sound_inspect.mp3
+};
+
+enum {
+    VS3_ATTACH_BYPASS = 1 << 0, // weapon skin attachBypass: the sight on a weapon without `attach` (Vince Mastery)
+    VS3_NO_ATTACH = 1 << 1,     // weapon skin noAttach: no sight on it
+    VS3_NO_SHINE = 1 << 2,      // weapon / melee skin noShine: the default (Lambert) material, shininess shine || 60
 };
 
 // A dye's colour overrides (players.js generateMeshes): per part up to 4 colours, one picked at

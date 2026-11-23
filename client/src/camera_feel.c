@@ -75,8 +75,9 @@ static float camera_feel_zoom(const Player *me) {
 
     const int held = me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->loadout[me->loadout_index] : -1;
     const float ads_fov_mlt = ui_setting_weapon_float("adsFovMlt", held, menu_ui()->settings.ads_fov_mlt); // vmSetts Per Weapon
-    // v7.1.4: weapon.zoom * attach.zoomMlt (the Acog Scope x1.35; FOV only)
-    const float zoom = weapon_aim_zoom(weapon, weapon_attachment(weapon, player_attach_index(me)));
+    // v7.1.4: weapon.zoom * attach.zoomMlt (the Acog Scope x1.35; FOV only); v10.0.7 updateAim: the sight by the held
+    // skin's attachBypass / noAttach (deob-10.0.7.js:174581-174583)
+    const float zoom = weapon_aim_zoom(weapon, player_attachment(me));
     // toggleAim: scopes jump straight to the full zoom once aimed (and back at the
     // first un-aim tick); everything else eases with aimVal (updateAimZoom).
     if (weapon->scope) return me->aim_val >= 1.0f ? 1.0f + (zoom - 1.0f) * ads_fov_mlt : 1.0f;

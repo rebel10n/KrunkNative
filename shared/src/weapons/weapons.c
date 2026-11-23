@@ -21,7 +21,13 @@ const WeaponAttachment g_attachments[ATTACHMENT_COUNT] = {
 };
 
 const WeaponAttachment *weapon_attachment(const Weapon *weapon, const int attach_index) {
-    if (!weapon || !weapon->has_attach) return NULL;
+    return weapon_skin_attachment(weapon, attach_index, 0, 0);
+}
+
+// null == weapon.attach && !skin.attachBypass || skin.noAttach || !attach[attachIndex] ? null : attach[attachIndex]
+// (deob-10.0.7.js:173380, :173960, :174576; :120157 and :174581 are the same test negated)
+const WeaponAttachment *weapon_skin_attachment(const Weapon *weapon, const int attach_index, const int skin_bypass, const int skin_no_attach) {
+    if (!weapon || (!weapon->has_attach && !skin_bypass) || skin_no_attach) return NULL;
 
     const int index = weapon->force_attach ? 0 : attach_index;
     return index >= 0 && index < ATTACHMENT_COUNT ? &g_attachments[index] : NULL;

@@ -1148,6 +1148,14 @@ void combat_call_in_streak(Client*, int slot); // window.callInStreak(slot): the
 // The sight a player's weapons take (attach.js index): the local player's saved attachIndex,
 // others' Player.attach_index (0 Reflex until the v7 SPAWN carries attachIndex, WP-C).
 int player_attach_index(const Player*);
+struct ViewerSkin;
+// players.currentSkin for a loadout slot (the held one: player->loadout_index): the melee skin on a melee weapon, else
+// the player's skin made for the slot's weapon; NULL none or an upgraded slot (deob-10.0.7.js:171409-171415)
+const struct ViewerSkin *player_slot_current_skin(const Player*, int slot);
+// The sight `weapon` (the slot's) mounts with that skin: weapon_skin_attachment(weapon, player_attach_index, the skin's
+// attachBypass, noAttach) (deob-10.0.7.js:173380, :173960, :174576, :174581); player_attachment: the held weapon's
+const WeaponAttachment *player_slot_attachment(const Player*, int slot, const Weapon *weapon);
+const WeaponAttachment *player_attachment(const Player*);
 int client_saved_attach_index(void); // getSavedVal("attachIndex") || 0: our pick (ENT V8 ent[12])
 // window.updateScope(scopeIndex, savedScope) (v7.1.4 aimRecticles.js): the #recticleImg source for
 // the saved scopeIndex (getSavedVal, 0 Default) into buf; NULL when scopeIndex is -1 (no overlay).

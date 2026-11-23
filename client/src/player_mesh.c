@@ -503,7 +503,11 @@ static Mesh *generate_flap_mesh(const Weapon *weapon, MeshTransform *parent) {
     return mesh;
 }
 
-static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachment *attachment, MeshTransform *parent) {
+// generateMeshes' sight (deob-10.0.7.js:174244-174255): loadMesh({src: "attach/" + attach.src, shininess 60, side, mat
+// weaponShine's, specular 0x292929, transparent}, 0, -(weapon.yOrg || 0) + (skin.attachYOff || weapon.attachYOff || 0) -
+// attach.yOff[weapon.id], -(skin.attachZOff || weapon.attachZOff || 0) - (attach.zOff || 0), PI / 2, skin.attachScale ||
+// attach.scale, weaponMeshes[i]); `skin` is the slot's (NULL none)
+static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachment *attachment, const ViewerSkin *skin, MeshTransform *parent) {
     char model[128];
     char texture[128];
     snprintf(model, sizeof(model), "models/attach/%s.obj", attachment->src);
@@ -526,10 +530,11 @@ static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachme
 
     Mesh *mesh = mesh_init(geometry, (Material *) material);
     mesh->transform.position.x = 0.0f;
-    mesh->transform.position.y = -weapon->origin.y + weapon->attach_y_offset;
-    mesh->transform.position.z = -weapon->attach_z_offset;
+    mesh->transform.position.y = -weapon->origin.y + (skin && skin->attach_y_off ? skin->attach_y_off : weapon->attach_y_offset);
+    mesh->transform.position.z = -(skin && skin->attach_z_off ? skin->attach_z_off : weapon->attach_z_offset);
     mesh->transform.rotation.y = (float) M_PI * 0.5f;
-    mesh->transform.scale.x = mesh->transform.scale.y = mesh->transform.scale.z = attachment->scale ? attachment->scale : 1.0f;
+    const float scale = skin && skin->attach_scale ? skin->attach_scale : attachment->scale ? attachment->scale : 1.0f;
+    mesh->transform.scale.x = mesh->transform.scale.y = mesh->transform.scale.z = scale;
     mesh->transform.parent = parent;
 
     return mesh;
@@ -1835,10 +1840,12 @@ void player_generate_meshes(Player *player, const int render_you) {
                 if (look.wrist) player_generate_wrist(arms, look.wrist, third_person, look.wrist_wear, look.wrist_style);
 
                 // Sight attachment: only on the first-person (U) and preview (V) models, like jLrR6.
-                // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff.
-                const WeaponAttachment *attachment = weapon_attachment(weapon, player_attach_index(player));
+                // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff. v10.0.7: with the
+                // slot's skin, attachBypass mounts it on a weapon without one and noAttach takes it off (:173960), and
+                // the skin's attachYOff / attachZOff / attachScale place it (:174255)
+                const WeaponAttachment *attachment = player_slot_attachment(player, i, weapon);
                 if (attachment && (render_you || player->uid == -1)) {
-                    arms->attachment = generate_attachment_mesh(weapon, attachment, &arms->anchor);
+                    arms->attachment = generate_attachment_mesh(weapon, attachment, player_slot_current_skin(player, i), &arms->anchor);
                     if (arms->attachment) {
                         arms->attachment->transform.position.y -= weapon_attachment_y_offset(attachment, player->loadout[i]);
                         arms->attachment->transform.position.z -= attachment->z_offset;
@@ -1973,8 +1980,9 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float anim_mlt_lean = player->render_you ? (1.0f - aim_val_mlt) * game_constants.anim_mlt : 0.0f; // a3 = Z * animMult
     // JS: (1 - (1 - Z) * (weapon.recoilYMA || 1)) * animMult; no v3.1.1 weapon defines recoilYMA.
     const float recoil_y_mlt = (1.0f - aim_val_mlt) * game_constants.anim_mlt;
-    // v7.1.4: the sight's zRec (Acog 0.9) replaces the weapon's recoilZM
-    const WeaponAttachment *recoil_attachment = weapon_attachment(player->weapon, player_attach_index(player));
+    // v7.1.4: the sight's zRec (Acog 0.9) replaces the weapon's recoilZM; v10.0.7: the sight by the held skin's
+    // attachBypass / noAttach (deob-10.0.7.js:173380, :173394)
+    const WeaponAttachment *recoil_attachment = player_attachment(player);
     const float recoil_z_base = recoil_attachment && recoil_attachment->z_recoil ? recoil_attachment->z_recoil :
                                 player->weapon->recoil_z_mlt ? player->weapon->recoil_z_mlt : 0.5f;
     const float recoil_z_mlt = 1.0f - recoil_z_base * aim_mlt;
@@ -2096,11 +2104,17 @@ void player_update_meshes(Player *player, const int is_preview) {
         player_update_melee_arms(player, held_arms, step_anim, step_half_rotate);
     }
 
-    // aA = attach && attach.aimOffY + (weapon.aimOffY || 0) || 0 (TODO: settings weaponADSOffY scaling)
-    const WeaponAttachment *attachment = weapon_attachment(player->weapon, player_attach_index(player));
+    // updateMsh (deob-10.0.7.js:173380-173385): aA = attach && attach.aimOffY + (weapon.aimOffY || 0) || 0, with the sight
+    // by currentSkin's attachBypass / noAttach
+    const ViewerSkin *current_skin = player_slot_current_skin(player, player->loadout_index);
+    const WeaponAttachment *attachment = player_attachment(player);
     float aim_offset_y = attachment ? attachment->aim_offset_y + player->weapon->aim_offset_y : 0.0f;
     // weaponADSOffY: if (renderYou && weaponADSOffY != 1) aA = (aA || 0.1) * weaponADSOffY
     if (player->render_you && weapon_ads_off_y != 1.0f) aim_offset_y = (aim_offset_y ? aim_offset_y : 0.1f) * weapon_ads_off_y;
+    // + skin.aimY, + weapon.aimY, + skin.attachAimY while a sight is mounted
+    if (current_skin) aim_offset_y += current_skin->aim_y;
+    aim_offset_y += player->weapon->aim_y;
+    if (attachment && current_skin) aim_offset_y += current_skin->attach_aim_y;
 
     // toggleAim: a `scope` weapon (Sniper Rifle) hides its viewmodel once fully aimed so the scope reticle is clear.
     // v10 toggleAim hides weaponMeshes[loadoutIndex] whatever the camera (v10.js 172054): KrunkNative's third
@@ -2150,9 +2164,11 @@ void player_update_meshes(Player *player, const int is_preview) {
         jump_bob_y + land_bob_y * 0.5f - bob_anim_y * 1.5f -
         (player->weapon->bomb ? player->interact_progress * 3.0f : 0.0f) +
         (step_half * 0.85f - player->weapon->crouch_drop * player->crouch_val * anim_mlt_lean) * anim_mlt +
-        weapon_offset.y - (weapon_offset.y - player->weapon->origin.y + 0.0f /* TODO: weapon skin y origin */ + aim_offset_y) * aim_val;
+        weapon_offset.y - (weapon_offset.y - player->weapon->origin.y + (current_skin ? current_skin->y_org : 0.0f) + aim_offset_y) * aim_val;
 
-    arm_anchor->position.z = weapon_offset.z - (weapon_offset.z - player->weapon->origin.z) * aim_val +
+    // (skin.zOrg || weapon.zOrg) (deob-10.0.7.js:173499)
+    const float aim_z_origin = current_skin && current_skin->z_org ? current_skin->z_org : player->weapon->origin.z;
+    arm_anchor->position.z = weapon_offset.z - (weapon_offset.z - aim_z_origin) * aim_val +
         player->recoil_tween[3] + player->bob_anim.z * anim_mlt + player->recoil_anim * player->weapon->recoil_z * recoil_z_mlt;
 
 

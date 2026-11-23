@@ -103,6 +103,30 @@ int main(void) {
           !strcmp(model, "user-assets/skins/k9/model") && !strcmp(texture, "user-assets/skins/k9/texture"),
           "the custom knife's model / texture are its user assets (%s, %s)", model, texture);
 
+    // v10.0.7 weapon skins' sight / aim / shine fields (gen_viewer_store.js; deob-10.0.7.js:173380-173385, :174156,
+    // :174255): Vince Mastery's attachBypass and its sight placement, a noAttach remodel, Eternal Flame's noShine
+    const ViewerSkin *vince = viewer_skin(3041);
+    CHECK(vince && !strcmp(vince->name, "Vince Mastery") && vince->weapon == 6 && vince->flags3 == VS3_ATTACH_BYPASS &&
+          vince->attach_y_off == 0.2f && vince->attach_z_off == -1.1f && vince->attach_scale == 1.3f && vince->aim_y == 0.3f,
+          "3041 Vince Mastery: attachBypass, attachYOff / ZOff / Scale, aimY");
+    const ViewerSkin *mp5 = viewer_skin(2426);
+    CHECK(mp5 && !strcmp(mp5->name, "MP5") && mp5->flags3 == VS3_NO_ATTACH, "2426 MP5: noAttach");
+    const ViewerSkin *flame = viewer_skin(3207);
+    CHECK(flame && !strcmp(flame->name, "Eternal Flame") && flame->flags3 == VS3_NO_SHINE, "3207 Eternal Flame: noShine");
+    const ViewerSkin *keeper = viewer_skin(3950), *scout = viewer_skin(1734), *trigger = viewer_skin(2538);
+    CHECK(keeper && keeper->attach_aim_y == 0.05f && scout && scout->y_org == -0.2f && trigger && trigger->z_org == -3.5f &&
+          (trigger->flags3 & VS3_NO_ATTACH), "attachAimY (Keeper Of The Deep), yOrg (Scout Mastery), zOrg (Trigger Mastery)");
+    CHECK(viewer_skin(3) && !viewer_skin(3)->flags3 && !viewer_skin(3)->attach_scale, "a plain skin: none of them");
+    CHECK(define(VIEWER_CUSTOM_SKIN_MIN + 10, "{\"name\":\"Studio Pump\",\"type\":0,\"weapon\":6,\"attachBypass\":true,\"noShine\":true,"
+                                              "\"attachYOff\":0.1,\"attachZOff\":-0.5,\"attachScale\":\"1.5\",\"attachAimY\":0.02,\"zOrg\":-2}"),
+          "a custom skin with the sight fields defined");
+    const ViewerSkin *pump = viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 10);
+    CHECK(pump && pump->flags3 == (VS3_ATTACH_BYPASS | VS3_NO_SHINE) && pump->attach_y_off == 0.1f && pump->attach_z_off == -0.5f &&
+          pump->attach_scale == 1.5f && pump->attach_aim_y == 0.02f && pump->z_org == -2.0f,
+          "a custom skin's attachBypass / noShine / sight placement (the Skin Manager's fields, deob-10.0.7.js:120484)");
+    CHECK(define(VIEWER_CUSTOM_SKIN_MIN + 11, "{\"name\":\"No Rail\",\"type\":0,\"weapon\":2,\"noAttach\":true}") &&
+          viewer_skin(VIEWER_CUSTOM_SKIN_MIN + 11)->flags3 == VS3_NO_ATTACH, "a custom skin's noAttach");
+
     printf("skin_define_test: %d/%d passed\n", g_checks - g_failures, g_checks);
     return g_failures ? 1 : 0;
 }

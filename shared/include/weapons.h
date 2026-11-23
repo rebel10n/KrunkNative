@@ -114,6 +114,7 @@ typedef struct {
     float rotation_offset;
     float rotation_offset_aim;
     float aim_offset_y;   // JS `aimOffY`: extra Y offset applied to the aim origin
+    float aim_y;          // JS `aimY`: added to the aim origin's Y offset (updateMsh, deob-10.0.7.js:173384; War Machine)
     float jump_y_mlt;     // JS `jYMlt`: bob Y multiplier while aiming
     float jump_bob_y_mlt; // JS `jumpYM`: jump bob Y multiplier
     float land_bob;
@@ -301,7 +302,13 @@ extern const ScopeOverlay g_scope_overlays[SCOPE_OVERLAY_COUNT];
 extern const WeaponAttachment g_attachments[ATTACHMENT_COUNT];
 
 // The attachment mounted on `weapon` for a player with `attach_index`, or NULL (weapon.attach == null or no such entry).
+// The weapon alone: weapon_skin_attachment(weapon, attach_index, 0, 0).
 const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index);
+// v10.0.7's rule with the player's skin of that weapon (updateMsh / generateMeshes / toggleAim / updateAim and the
+// viewmodel recoil, deob-10.0.7.js:120157, :173380, :173960, :174576, :174581): `(weapon.attach != null ||
+// skin.attachBypass) && !skin.noAttach && attach[attachIndex]`. skin_bypass / skin_no_attach: the skin's attachBypass
+// (Vince Mastery mounts the sight on the Shotgun) and noAttach (a remodel without a rail); 0 / 0 without a skin.
+const WeaponAttachment *weapon_skin_attachment(const Weapon *weapon, int attach_index, int skin_bypass, int skin_no_attach);
 
 // Indexed exactly like Krunker v7.1.4's weaponConfig (class loadouts and packets use these ids;
 // 0-18 keep their v3.1.1 meaning).

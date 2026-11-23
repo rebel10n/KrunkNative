@@ -10,6 +10,7 @@
 #include <ui_logic.h>
 #include <html_dom.h>
 #include <cosmetics.h> // cosmetics_attach_index
+#include "../viewer/viewer_store.h" // player_slot_current_skin: the skin's attachBypass / noAttach
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,6 +81,29 @@ int player_attach_index(const Player *player) {
     // forceAttach like the ENT and the menu preview (cosmetics_attach_index)
     if (player->is_you) return cosmetics_attach_index(player->skins.primary, client_saved_attach_index());
     return player->attach_index;
+}
+
+// players.currentSkin (deob-10.0.7.js:171409-171415) for a slot: getWeapon(slot) is melee ? the meleeIndex skin :
+// getSkinForLoadout(slot) (the player's skin made for the slot's weapon); none on an upgraded slot
+const ViewerSkin *player_slot_current_skin(const Player *player, const int slot) {
+    if (!player || !player->loadout || slot < 0 || slot >= player->loadout_size) return NULL;
+    if (slot < 8 && (player->upgraded_slots >> slot & 1)) return NULL; // weapon.upgraded: no skin
+    const Weapon *weapon = player->game ? player_slot_weapon(player, slot) : NULL;
+    if (weapon && weapon->melee) return viewer_skin(player->skins.melee);
+    return viewer_skin(viewer_loadout_skin(player->skins.primary, player->skins.secondary, player->loadout[slot]));
+}
+
+// v10.0.7's sight test with the slot's skin (updateMsh / generateMeshes / toggleAim / updateAim, deob-10.0.7.js:173380,
+// :173960, :174576, :174581): (weapon.attach != null || skin.attachBypass) && !skin.noAttach && attach[attachIndex]
+const WeaponAttachment *player_slot_attachment(const Player *player, const int slot, const Weapon *weapon) {
+    if (!player || !weapon) return NULL;
+    const ViewerSkin *skin = player_slot_current_skin(player, slot);
+    const unsigned flags = skin ? skin->flags3 : 0;
+    return weapon_skin_attachment(weapon, player_attach_index(player), (flags & VS3_ATTACH_BYPASS) != 0, (flags & VS3_NO_ATTACH) != 0);
+}
+
+const WeaponAttachment *player_attachment(const Player *player) {
+    return player ? player_slot_attachment(player, player->loadout_index, player->weapon) : NULL;
 }
 
 int combat_events_handle(Client *client, const int type, const void *payload, const uint16_t length) {

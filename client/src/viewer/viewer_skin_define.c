@@ -204,6 +204,14 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
     }
     s->charm_m[0] = f(j, "charmMXOff"), s->charm_m[1] = f(j, "charmMYOff"), s->charm_m[2] = f(j, "charmMZOff");
     s->charm_m_scl = f(j, "charmMScl");
+    // v10.0.7 weapon skin: the sight, the aim origin and noShine (deob-10.0.7.js:173380-173385, :173499, :174083-174156,
+    // :174255; the Skin Manager's attachAimY / attachBypass / attachScale / attachYOff / attachZOff / noAttach / noShine /
+    // yOrg / zOrg, :120484)
+    if (truthy(get(j, "attachBypass"))) s->flags3 |= VS3_ATTACH_BYPASS;
+    if (truthy(get(j, "noAttach"))) s->flags3 |= VS3_NO_ATTACH;
+    if (truthy(get(j, "noShine"))) s->flags3 |= VS3_NO_SHINE;
+    s->attach_y_off = f(j, "attachYOff"), s->attach_z_off = f(j, "attachZOff"), s->attach_scale = f(j, "attachScale");
+    s->attach_aim_y = f(j, "attachAimY"), s->aim_y = f(j, "aimY"), s->y_org = f(j, "yOrg"), s->z_org = f(j, "zOrg");
     s->title = (int) num(get(j, "title"), 0);
     s->set = str(get(j, "set"));
     if (s->set) s->set_min = (int) num(get(j, "setMin"), 0);

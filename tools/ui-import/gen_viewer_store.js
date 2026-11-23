@@ -144,6 +144,15 @@ const rows = store.skins.map((s, i) => {
     fields.push(`.left_hold = {${f(hold('leftHoldX'))}, ${f(hold('leftHoldY'))}, ${f(hold('leftHoldZ'))}}`);
     fields.push(`.right_hold = {${f(hold('rightHoldX'))}, ${f(hold('rightHoldY'))}, ${f(hold('rightHoldZ'))}}`);
   }
+  // v10.0.7 weapon skin: the sight (attachBypass / noAttach and its place), the aim origin and noShine (updateMsh
+  // deob-10.0.7.js:173380-173385, :173499; generateMeshes :173960, :174083-174156, :174255)
+  const flags3 = [];
+  if (truthy(s.attachBypass)) flags3.push('VS3_ATTACH_BYPASS');
+  if (truthy(s.noAttach)) flags3.push('VS3_NO_ATTACH');
+  if (truthy(s.noShine)) flags3.push('VS3_NO_SHINE');
+  if (flags3.length) fields.push(`.flags3 = ${flags3.join(' | ')}`);
+  opt('attachYOff', 'attach_y_off', 0); opt('attachZOff', 'attach_z_off', 0); opt('attachScale', 'attach_scale', 0);
+  opt('attachAimY', 'attach_aim_y', 0); opt('aimY', 'aim_y', 0); opt('yOrg', 'y_org', 0); opt('zOrg', 'z_org', 0);
   return `    /* ${i} */ {${fields.join(', ')}},`;
 });
 
