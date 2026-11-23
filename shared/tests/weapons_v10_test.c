@@ -1,10 +1,12 @@
-// Krunker v10.0.3 table test: every class, weapon, effect, streak, attachment, scope and upgraded-weapon
+// Krunker v10.0.7 table test: every class, weapon, effect, streak, attachment, scope and upgraded-weapon
 // field KrunkNative's tables carry (shared/src/rules/v10/, shared/src/weapons/, shared/src/effects.c),
-// against fixtures dumped from the decoded 10.0.3 bundle: shared/tests/data/v10/*.json, written by
-// tools/kref/v10-fixtures.py from deob-10.0.3.js (weaponConfig :112381, classConfig :115405, effects
+// against fixtures dumped from the decoded 10.0.7 bundle: shared/tests/data/v10/*.json, written by
+// tools/kref/v10-fixtures.py from deob-10.0.7.js (weaponConfig :99659, classConfig :102638, effects :164539,
+// upgradeWeapons :177550, attachments :180663, streaks :180987, scope overlays :202747; the tables
+// are the same as 10.0.3's, whose lines the older comments below cite: weaponConfig :112381, classConfig :115405, effects
 // :182046, upgradeWeapons :199770, attachments :202939, streaks :203338, scope overlays :227658; the
 // sources and how to regenerate them: shared/tests/data/v10/README.md), and the physics constants and limits
-// against its config object (config.json, deob-10.0.3.js:22367). Times are compared in seconds
+// against its config object (config.json, deob-10.0.7.js:19503; 10.0.3 :22367). Times are compared in seconds
 // (JS ms / 1000), recoil per s (JS per ms * 1000), as KrunkNative stores them. KrunkNative's own entries
 // (weapons from WEAPON_ID_KN_BASE, classes from KN_CLASS_BASE: the Nettspend) are not in the bundle and
 // not compared. Run from the repository root (or its build directory).
@@ -116,7 +118,7 @@ static void check_weapon_view(const Weapon *w, const cJSON *js) {
         const VecField *f = &k_weapon_vecs[i];
         const vec3 have = *(const vec3 *) ((const char *) w + f->offset);
         CHECK(near(have.x, num(js, f->js[0], 0)) && near(have.y, num(js, f->js[1], 0)) && near(have.z, num(js, f->js[2], 0)),
-              "%s %s / %s / %s = %g %g %g, v10.0.3 %g %g %g", w->name, f->js[0], f->js[1], f->js[2], (double) have.x, (double) have.y,
+              "%s %s / %s / %s = %g %g %g, v10.0.7 %g %g %g", w->name, f->js[0], f->js[1], f->js[2], (double) have.x, (double) have.y,
               (double) have.z, num(js, f->js[0], 0), num(js, f->js[1], 0), num(js, f->js[2], 0));
     }
 
@@ -142,7 +144,7 @@ static void check_weapon_view(const Weapon *w, const cJSON *js) {
         unsigned int mask = 0;
         for (int k = 0; k < 4; k++) {
             if (cJSON_GetObjectItemCaseSensitive(ra, tweens[k])) mask |= 1u << k;
-            CHECK(near(have[k], num(ra, tweens[k], 0)), "%s recoilAnim.%s = %g, v10.0.3 %g", w->name, tweens[k], (double) have[k],
+            CHECK(near(have[k], num(ra, tweens[k], 0)), "%s recoilAnim.%s = %g, v10.0.7 %g", w->name, tweens[k], (double) have[k],
                   num(ra, tweens[k], 0));
         }
         CHECK(w->recoil_anim_mask == mask, "%s recoilAnim targets 0x%x, v10.0.3 0x%x", w->name, w->recoil_anim_mask, mask);
@@ -175,7 +177,7 @@ static void check_weapon_view(const Weapon *w, const cJSON *js) {
 
 static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, const int upgraded) {
     const char *name = str(js, "name");
-    CHECK(w && name && !strcmp(w->name, name), "weapon %d is %s, v10.0.3 %s", id, w ? w->name : "(null)", name ? name : "?");
+    CHECK(w && name && !strcmp(w->name, name), "weapon %d is %s, v10.0.7 %s", id, w ? w->name : "(null)", name ? name : "?");
     if (!w) return;
 
     const char *src = str(js, "src");
@@ -185,7 +187,7 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
     CHECK(icon && w->icon && !strcmp(icon, w->icon), "%s icon", w->name);
     // sound: the Boulder ships 'sound': "" (deob-10.0.3.js:115240; it never fires), which KrunkNative keeps as
     // NULL (no sound to play)
-    CHECK((sound && w->sound && !strcmp(sound, w->sound)) || (sound && !sound[0] && !w->sound), "%s sound %s (v10.0.3 %s)", w->name,
+    CHECK((sound && w->sound && !strcmp(sound, w->sound)) || (sound && !sound[0] && !w->sound), "%s sound %s (v10.0.7 %s)", w->name,
           w->sound ? w->sound : "(null)", sound ? sound : "?");
 
     for (size_t i = 0; i < sizeof(k_weapon_floats) / sizeof(k_weapon_floats[0]); i++) {
@@ -193,10 +195,10 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(js, f->js);
         const double expect = cJSON_IsNumber(v) ? js_to_c(v->valuedouble, f->unit) : f->def;
         const float have = *(const float *) ((const char *) w + f->offset);
-        CHECK(near(have, expect), "%s %s = %g, v10.0.3 %g", w->name, f->js, (double) have, expect);
+        CHECK(near(have, expect), "%s %s = %g, v10.0.7 %g", w->name, f->js, (double) have, expect);
     }
 
-    CHECK(w->ammo == (unsigned int) num(js, "ammo", 0), "%s ammo %u, v10.0.3 %g", w->name, w->ammo, num(js, "ammo", 0));
+    CHECK(w->ammo == (unsigned int) num(js, "ammo", 0), "%s ammo %u, v10.0.7 %g", w->name, w->ammo, num(js, "ammo", 0));
     CHECK(w->shots == (unsigned int) num(js, "shots", 0), "%s shots", w->name);
     CHECK(w->burst == flag(js, "burst") && (!w->burst || w->burst_count == (unsigned int) num(js, "burstC", 0)), "%s burst", w->name);
     CHECK(w->type == (int) num(js, "type", 0), "%s type", w->name);
@@ -261,7 +263,7 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
         }
         CHECK(ok && pair == w->custom_spread_count, "%s cSpread", w->name);
     } else {
-        CHECK(!w->custom_spread, "%s has a cSpread v10.0.3 lacks", w->name);
+        CHECK(!w->custom_spread, "%s has a cSpread v10.0.7 lacks", w->name);
     }
 
     if (!upgraded) check_weapon_view(w, js); // upgrades keep their base weapon's view model (upgraded.c)
@@ -270,7 +272,7 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
 static void check_class(const int id, const cJSON *js) {
     const ClassConfig *c = &rules_classes()[id];
     const char *name = str(js, "name");
-    CHECK(name && c->name && !strcmp(c->name, name), "class %d is %s, v10.0.3 %s", id, c->name, name ? name : "?");
+    CHECK(name && c->name && !strcmp(c->name, name), "class %d is %s, v10.0.7 %s", id, c->name, name ? name : "?");
     CHECK(c->loadout && c->loadout[0] == (int) cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(js, "loadout"), 0)->valuedouble, "%s loadout", c->name);
     CHECK(c->secondary == flag(js, "secondary"), "%s secondary", c->name);
     CHECK(c->wall_jump == flag(js, "wallJ"), "%s wallJ", c->name);
@@ -296,7 +298,7 @@ static void check_class(const int id, const cJSON *js) {
     CHECK(near(c->hurtbox_scale ? c->hurtbox_scale : 1.0, num(js, "hurtboxScale", 1)), "%s hurtboxScale %g", c->name, (double) c->hurtbox_scale);
 }
 
-// ---- config (deob-10.0.3.js:22367-23014): GameConstants (constants_v10.c) and the limits KrunkNative keeps as
+// ---- config (deob-10.0.7.js:19503-20147, 10.0.3 :22367-23014): GameConstants (constants_v10.c) and the limits KrunkNative keeps as
 // #defines, against config.json. Per-ms values are stored per second (x 1000), times in seconds.
 typedef struct {
     const char *js;
@@ -336,7 +338,7 @@ static void check_config(const cJSON *config) {
         const ConstField *f = &k_constants[i];
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(config, f->js);
         const float have = *(const float *) ((const char *) k + f->offset);
-        CHECK(cJSON_IsNumber(v) && near(have, js_to_c(v->valuedouble, f->unit)), "config.%s: KrunkNative %g, v10.0.3 %g", f->js,
+        CHECK(cJSON_IsNumber(v) && near(have, js_to_c(v->valuedouble, f->unit)), "config.%s: KrunkNative %g, v10.0.7 %g", f->js,
               (double) have, cJSON_IsNumber(v) ? js_to_c(v->valuedouble, f->unit) : NAN);
     }
     // not config scalars: dltMx = Math.round(1000 / 30) (deob-10.0.3.js:19242), procInputs' 1 ms floor at deltaMlt 1
@@ -380,7 +382,7 @@ static void check_config(const cJSON *config) {
         {"triggerActionLimit", TRIGGER_V10_ACTION_LIMIT}, {"voiceChatMaxLength", VOICE_CHAT_MAX_LENGTH}, {"voiceRate", VOICE_RATE_MS},
     };
     for (size_t i = 0; i < sizeof(limits) / sizeof(limits[0]); i++) {
-        CHECK(near(limits[i].have, num(config, limits[i].js, NAN)), "config.%s: KrunkNative %g, v10.0.3 %g", limits[i].js, limits[i].have,
+        CHECK(near(limits[i].have, num(config, limits[i].js, NAN)), "config.%s: KrunkNative %g, v10.0.7 %g", limits[i].js, limits[i].have,
               num(config, limits[i].js, NAN));
     }
     CHECK(TRIGGER_V7_CHAIN_LIMIT == TRIGGER_LIMIT, "triggerLimit (chain)");
@@ -403,7 +405,7 @@ int main(int argc, char **argv) {
     check_config(config);
     cJSON_Delete(config);
 
-    CHECK(cJSON_GetArraySize(weapons) == weapon_count && weapon_count == WEAPON_V10_COUNT, "weapon count %d, v10.0.3 %d", weapon_count,
+    CHECK(cJSON_GetArraySize(weapons) == weapon_count && weapon_count == WEAPON_V10_COUNT, "weapon count %d, v10.0.7 %d", weapon_count,
           cJSON_GetArraySize(weapons));
     for (int i = 0; i < weapon_count && i < cJSON_GetArraySize(weapons); i++) check_weapon_entry(rules_weapon(i), i, cJSON_GetArrayItem(weapons, i), 0);
     // the ids between Krunker's table and KrunkNative's are holes
@@ -414,8 +416,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < WEAPON_COUNT && i < cJSON_GetArraySize(upgrades); i++) check_weapon_entry(weapon_upgraded(i), i, cJSON_GetArrayItem(upgrades, i), 1);
     cJSON_Delete(upgrades);
 
-    // v10.0.3's 16 classes; KrunkNative's from KN_CLASS_BASE (the Nettspend) come after them and are not compared
-    CHECK(cJSON_GetArraySize(classes) == CLASS_COUNT && rules_class_count() >= CLASS_COUNT, "class count %d, v10.0.3 %d", CLASS_COUNT,
+    // v10.0.7's 16 classes; KrunkNative's from KN_CLASS_BASE (the Nettspend) come after them and are not compared
+    CHECK(cJSON_GetArraySize(classes) == CLASS_COUNT && rules_class_count() >= CLASS_COUNT, "class count %d, v10.0.7 %d", CLASS_COUNT,
           cJSON_GetArraySize(classes));
     for (int i = 0; i < CLASS_COUNT && i < cJSON_GetArraySize(classes); i++) check_class(i, cJSON_GetArrayItem(classes, i));
 
