@@ -6,6 +6,7 @@
 #include <app_url.h> // the page URL split (parse_page_url)
 #include <i18n.h> // the page markup in the chosen language
 #include <backend_ui.h>
+#include <lobby_ui.h>
 #include <download_ui.h> // ?download
 #include <debug_capture.h>
 #include <map_environment.h> // the game's environment back after a page (leave_page)
@@ -178,6 +179,7 @@ void app_mode_navigate_self(Client *client, const char *query) {
         if (query && strstr(query, "testMap=1")) g_app.test_pending = 1;
         g_app.host_pending = 1;   // the hub's hostMap opens "/" with mapToLoad saved
         servers_ui_query(query); // ?play=<map> / ?game=<id> (hub Play / Join links; brain, backend_ui.h)
+        comp_ui_query(query);    // ?tm= (lobby_ui.h)
         mods_ui_query(query);    // ?mod=<name> (the hub's Play Mod)
         download_ui_query(query); // ?download: the Download window (the hub's app badges)
     } else {
@@ -440,6 +442,7 @@ void app_mode_start(Client *client) {
     if (g_start_mode == APP_MODE_GAME && strstr(g_start_query, "testMap=1")) g_app.test_pending = 1;
     if (g_start_mode == APP_MODE_GAME) g_app.host_pending = 1;
     if (g_start_mode == APP_MODE_GAME) servers_ui_query(g_start_query); // ?play= / ?game= (backend_ui.h)
+    if (g_start_mode == APP_MODE_GAME) comp_ui_query(g_start_query);    // ?tm= (lobby_ui.h)
     if (g_start_mode == APP_MODE_GAME) mods_ui_query(g_start_query);    // ?mod= (mods_ui.c)
     if (g_start_mode == APP_MODE_GAME) download_ui_query(g_start_query); // ?download (download_ui.h)
     g_app.started = 1;

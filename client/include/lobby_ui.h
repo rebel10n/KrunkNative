@@ -31,3 +31,4 @@ void comp_ui_refresh(Client*);                   // f1892: lists, class locks, J
 void comp_ui_message(const char *text);          // io_updateGameMessage: #compTimBox
 void comp_ui_class_selected(Client*, int index); // selectClass: updSyncDat("c", i)
 int  comp_ui_toggle_team(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc); // toggleTeam(t)
+void comp_ui_query(const char *query);           // the page's ?tm= (iiiîíìï, deob-10.0.7.js:204367)

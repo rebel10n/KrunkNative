@@ -12,6 +12,7 @@
 #include <html_ui.h>
 #include <weapons.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
@@ -19,7 +20,8 @@
 #include <net_ext.h> // NET_EXT_KN_SWAP_TEAM (the menu's team pick on a KrunkNative server)
 
 static int g_shown;     // #mMenuHolComp is up (f1904 took the comp branch)
-static int g_team_pick; // iïïíìïí: the menu's last toggleTeam (1, 2; 0 none sent yet, deob-10.0.7.js:226069)
+static int g_team_pick = 1; // iïïíìïí: the menu's last toggleTeam, 1 until one (deob-10.0.7.js:217234, :226069)
+static int g_url_team;      // iiiîíìï: the page's ?tm= (deob-10.0.7.js:204367), taken by the first selTeam game
 
 static void team_selector_round(Client *client);
 static char g_msg[NET_GAME_MESSAGE_SIZE];
@@ -292,15 +294,39 @@ static void set_color(const char *id, const char *value) {
 // toggleTeam(team) (deob-10.0.7.js:226066-226072): iïïíìïí = team || 0; #teamNm1 / #teamNm2 colours (any team, 1
 // as well as 2, dims Alpha and lights Bravo: v10's own test is `team ? ...`); updSyncDat("t", team), 0 leaves.
 // The menu's #selectT sends 2 checked, 1 unchecked (deob-10.0.7.js:148223); the comp lists' Join / Leave Team 0, 1, 2.
-int comp_ui_toggle_team(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) ev;
-    Client *client = user;
-    const int team = argc > 0 && args && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+static void toggle_team(Client *client, const int team) {
     g_team_pick = team;
     set_color("teamNm1", team ? "rgba(255,255,255,0.5)" : "#fff");
     set_color("teamNm2", team ? "#fff" : "rgba(255,255,255,0.5)");
     if (!comp_send(client, 't', team)) team_pick_send(client, team);
+}
+
+int comp_ui_toggle_team(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) ev;
+    toggle_team(user, argc > 0 && args && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
     return 1;
+}
+
+// The page's ?tm= (deob-10.0.7.js:204360-204367): iîíiíïì("tm", 0) is the value unless it has a character outside
+// [\w_\-.! ] (then 0), and parseInt(...) || 0 the team. A reload with a new query reads it again.
+void comp_ui_query(const char *query) {
+    if (!query) return;
+    const char *p = strstr(query, "tm=");
+    while (p && p != query && p[-1] != '&' && p[-1] != '?') p = strstr(p + 1, "tm=");
+    if (!p) return;
+    p += 3;
+    char value[32];
+    size_t n = 0;
+    for (; *p && *p != '&' && *p != '#' && n + 1 < sizeof(value); p++) value[n++] = *p == '+' ? ' ' : *p;
+    value[n] = 0;
+    for (size_t i = 0; i < n; i++) {
+        const unsigned char ch = (unsigned char) value[i];
+        if (!(isalnum(ch) || ch == '_' || ch == '-' || ch == '.' || ch == '!' || ch == ' ')) {
+            g_url_team = 0;
+            return;
+        }
+    }
+    g_url_team = (int) strtol(value, NULL, 10); // parseInt: the leading number, else NaN -> 0
 }
 
 // INIT's setShowSelTeam(config.selTeam) (deob-10.0.7.js:163431-163433, :226420) and the team names (#teamNm1 /
@@ -316,6 +342,16 @@ static void team_selector_round(Client *client) {
     if ((el = html_dom_by_id("teamNm2"))) html_dom_set_text(el, mode_team_name(game, 2));
     if ((el = html_dom_by_id("selectT"))) html_dom_set_checked(el, g_team_pick == 2);
     if (on) team_pick_send(client, g_team_pick);
+    // the page's ?tm= on the first selTeam game (:226421, :228977): tm 2 clicks #selectT (its onchange sends
+    // toggleTeam(checked ? 2 : 1), :148223), any other number only clears it
+    if (on && g_url_team) {
+        if (g_url_team == 2 && (el = html_dom_by_id("selectT"))) {
+            const int checked = !html_dom_get_checked(el);
+            html_dom_set_checked(el, checked);
+            toggle_team(client, checked ? 2 : 1);
+        }
+        g_url_team = 0;
+    }
 }
 
 int comp_ui_packet(Client *client, const void *payload, const uint16_t length) {

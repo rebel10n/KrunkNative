@@ -1658,6 +1658,11 @@ else ()
             add_test(NAME strike_swap_team_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/strike_swap_team_e2e.py
                      ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
             set_tests_properties(strike_swap_team_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "server;strike;e2e")
+            # team_select_e2e: the menu's team pick on a selTeam server_bin game through client_bin --connect: team 1 by
+            # default (iïïíìïí), the page's ?tm=2 clicking #selectT (comp_ui.c), the spawn on the picked team
+            add_test(NAME team_select_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/team_select_e2e.py
+                     ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(team_select_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chal_card_e2e: v10.0.7's challenge cards (title / RP tiles, DAT.bits progress, the capped bar) on the
             # Challenges window and the Battle Pass Challenges tab (client/tests/chal_card_e2e.py)
             add_test(NAME chal_card_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chal_card_e2e.py
