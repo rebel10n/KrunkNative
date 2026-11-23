@@ -266,7 +266,7 @@ async def scenario(port):
         check(st == 400 and code(err) == "STUDIO_CURRENCY_INVALID", "currency: " + what + " is refused", err)
     st, data, err = await own.gapi("POST", "/studios/%d/currencies" % sid, {"name": "Gold Coins", "symbol": "GLD", "decimals": 2})
     cid = (data or {}).get("currency_id")
-    check(st == 200 and cid and data["symbol"] == "GLD" and data["decimals"] == 2 and data["active"] is True, "currency: create", (st, data, err))
+    check(st == 200 and cid and data["symbol"] == "GLD" and data["decimals"] == 2 and data["is_active"] is True, "currency: create", (st, data, err))
     st, data, err = await own.gapi("POST", "/studios/%d/currencies" % sid, {"name": "Golden", "symbol": "GLD", "decimals": 0})
     check(st == 409 and code(err) == "STUDIO_CURRENCY_TAKEN", "currency: the symbol is unique in the studio", err)
     # v10.0.4: 20 in total, 5 published at once (studios.currencies.hint / publishCap, deob-10.0.4.js:139268, :139320)
@@ -281,29 +281,40 @@ async def scenario(port):
     st, data, err = await own.gapi("POST", "/studios/%d/currencies" % sid, {"name": "Coin twenty", "symbol": "FA", "decimals": 0})
     made.append((st, data))
     check(all(st == 200 for st, _ in made), "currency: 20 per studio can be created", [m[0] for m in made])
-    check([d["active"] for _, d in made[:4]] == [True] * 4 and not any(d["active"] for _, d in made[4:]),
-          "currency: the first 5 are published, the rest start unpublished", [d.get("active") for _, d in made])
+    check([d["is_active"] for _, d in made[:4]] == [True] * 4 and not any(d["is_active"] for _, d in made[4:]),
+          "currency: the first 5 are published, the rest start unpublished", [d.get("is_active") for _, d in made])
     st, data, err = await own.gapi("POST", "/studios/%d/currencies" % sid, {"name": "Coin twenty one", "symbol": "ZZ", "decimals": 0})
     check(st == 400 and code(err) == "STUDIO_CURRENCY_LIMIT", "currency: 20 per studio", err)
     sixth = made[4][1]["currency_id"]
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/publish" % (sid, sixth))
     check(st == 400 and code(err) == "STUDIO_CURRENCY_PUBLISH_CAP", "currency: 5 published at once", err)
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/publish" % (sid, cid))
-    check(st == 200 and data["active"] is True, "currency: re-publishing a published one is not a sixth", (st, data, err))
+    check(st == 200 and data["is_active"] is True, "currency: re-publishing a published one is not a sixth", (st, data, err))
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/unpublish" % (sid, cid))
-    check(st == 200 and data == {"currency_id": cid, "active": False}, "currency: unpublish", (st, data, err))
+    check(st == 200 and data == {"currency_id": cid, "is_active": False}, "currency: unpublish", (st, data, err))
     st, data, err = await mem.gapi("GET", "/studios/%d" % sid)
     cur = [c for c in data["currencies"] if c["currency_id"] == cid]
-    check(len(data["currencies"]) == 20 and cur and cur[0]["active"] is False and cur[0]["name"] == "Gold Coins", "get: the currencies", data["currencies"])
+    check(len(data["currencies"]) == 20 and cur and cur[0]["is_active"] is False and cur[0]["name"] == "Gold Coins", "get: the currencies", data["currencies"])
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/publish" % (sid, sixth))
-    check(st == 200 and data["active"] is True, "currency: publish once one was unpublished", (st, data, err))
+    check(st == 200 and data["is_active"] is True, "currency: publish once one was unpublished", (st, data, err))
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/publish" % (sid, cid))
     check(st == 400 and code(err) == "STUDIO_CURRENCY_PUBLISH_CAP", "currency: publish again at the cap", err)
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/unpublish" % (sid, sixth))
     st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/publish" % (sid, cid))
-    check(st == 200 and data["active"] is True, "currency: publish", (st, data, err))
+    check(st == 200 and data["is_active"] is True, "currency: publish", (st, data, err))
     st, data, err = await mem.gapi("POST", "/studios/%d/currencies/%d/publish" % (sid, cid))
     check(st == 403, "currency: only the owner publishes", err)
+    # editStudioCurrency (deob-10.0.7.js:138897-138939): the Edit popup's name, symbol and decimals; the ID stays
+    st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/edit" % (sid, cid), {"name": "Gold Bars", "symbol": "GLB", "decimals": 1})
+    check(st == 200 and data == {"currency_id": cid, "name": "Gold Bars", "symbol": "GLB", "decimals": 1}, "currency: edit", (st, data, err))
+    st, data, err = await own.gapi("POST", "/studios/%d/currencies/%d/edit" % (sid, cid), {"name": "Gold Bars", "symbol": "FA", "decimals": 1})
+    check(st == 409 and code(err) == "STUDIO_CURRENCY_TAKEN", "currency: an edit keeps the symbols unique", err)
+    st, data, err = await mem.gapi("POST", "/studios/%d/currencies/%d/edit" % (sid, cid), {"name": "Mine", "symbol": "MNE", "decimals": 0})
+    check(st == 403, "currency: only the owner edits", err)
+    st, data, err = await own.gapi("GET", "/studios/%d" % sid)
+    cur = [c for c in (data or {}).get("currencies", []) if c["currency_id"] == cid]
+    check(cur and cur[0]["name"] == "Gold Bars" and cur[0]["symbol"] == "GLB" and cur[0]["decimals"] == 1 and cur[0]["is_active"] is True,
+          "get: the edited currency, still published", cur)
 
     # ---- analytics, skins
     st, data, err = await mem.gapi("GET", "/studios/%d/analytics" % sid)

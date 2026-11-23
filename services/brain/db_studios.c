@@ -15,7 +15,7 @@
  *   get (studio)                 -> {id, name, owner, my_role, monetization, members [{name, role,
  *                                   creator_badge}], invites [{invite_id, name, invited_by,
  *                                   expires_at}], maps [{map_id, map_name, map_videolink}],
- *                                   currencies [{currency_id, name, symbol, decimals, active}]}
+ *                                   currencies [{currency_id, name, symbol, decimals, is_active}]}
  *   delete (studio)              -> {}                        owner
  *   invite (studio, name)        -> {invite_id, name, expires_at}   owner; 20 members + invites
  *   invite_cancel (studio, id)   -> {}                        owner
@@ -26,7 +26,7 @@
  *   map_add (studio, map)        -> {map_id, map_name}        owner; the owner's own published map
  *   map_remove (studio, map)     -> {}                        owner
  *   currency_create (studio, {name, symbol, decimals}) -> the currency          owner
- *   currency_active (studio, currency, 1|0)            -> {currency_id, active} owner
+ *   currency_active (studio, currency, 1|0)            -> {currency_id, is_active} owner
  *   analytics (studio)           -> {kr_earned, kr_charged, currencies [{currency_id, name, symbol,
  *                                   circulating, holders}]}
  *   skins (studio)               -> [{skin_id, name, type, weapon, rarity, active, has_thumbnail, csrc,
@@ -230,11 +230,11 @@ static kn_db_result *op_get(Dbx *x, int64_t actor, int64_t studio) {
     cJSON_AddItemToObject(o, "maps", maps ? maps : cJSON_CreateArray());
 
     cJSON *cur = dbx_rows(x, SQL(.any = "SELECT id AS currency_id__i, name AS name__t, symbol AS symbol__t, decimals AS decimals__i,"
-                                        " active AS active__i FROM studio_currencies WHERE studio_id = {int:$1} ORDER BY id"),
+                                        " active AS is_active__i FROM studio_currencies WHERE studio_id = {int:$1} ORDER BY id"),
                           KN_DB_ARGS(I64S(studio)));
-    cJSON_ArrayForEach(r, cur) {
-        const int a = jnum(r, "active") != 0;
-        cJSON_ReplaceItemInObjectCaseSensitive(r, "active", cJSON_CreateBool(a));
+    cJSON_ArrayForEach(r, cur) { /* v10.0.7 reads is_active (deob-10.0.7.js:138888, :139457) */
+        const int a = jnum(r, "is_active") != 0;
+        cJSON_ReplaceItemInObjectCaseSensitive(r, "is_active", cJSON_CreateBool(a));
     }
     cJSON_AddItemToObject(o, "currencies", cur ? cur : cJSON_CreateArray());
     return dbx_json(x, "studio", o);
@@ -451,7 +451,7 @@ static kn_db_result *op_currency_create(Dbx *x, int64_t actor, int64_t studio, c
     cJSON_AddStringToObject(o, "name", name);
     cJSON_AddStringToObject(o, "symbol", symbol);
     cJSON_AddNumberToObject(o, "decimals", (double) decimals);
-    cJSON_AddBoolToObject(o, "active", (int) active);
+    cJSON_AddBoolToObject(o, "is_active", (int) active);
     return dbx_json(x, "currency", o);
 }
 
@@ -469,7 +469,7 @@ static kn_db_result *op_currency_active(Dbx *x, int64_t actor, int64_t studio, i
     dbx_exec(x, SQL(.any = "UPDATE studio_currencies SET active = {int:$2} WHERE id = {int:$1}"), KN_DB_ARGS(I64S(currency), I64S(active)));
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "currency_id", (double) currency);
-    cJSON_AddBoolToObject(o, "active", active);
+    cJSON_AddBoolToObject(o, "is_active", active);
     return dbx_json(x, "currency", o);
 }
 

@@ -1,7 +1,8 @@
-// Krunker v10.0.2's Studios on the v10 page: the Studios window (window.openStudios ->
-// _5235(_49033).push(), v10.js 215744; component _49033, svelte-kqehnu, 138200-138440), the studio
-// view it opens (_48488, svelte-a9j4oe, 137011-137610) and its monetization dialog (svelte-1veg8cv),
-// plus the confirm / transfer prompts (_34410 / _6696 io-popups). All of them are entries of the
+// Krunker v10.0.7's Studios on the v10 page: the Studios window (window.openStudios, deob-10.0.7.js:222804; component
+// iïìîîïî, svelte-kqehnu, :139780-140040), the studio view it opens (iïiíîìí, svelte-a9j4oe, :138440-139790) and its
+// monetization dialog (svelte-1veg8cv, :139626-139780), plus the io-popups (iìïíïíì, :15102): the confirm prompt
+// (iìiîíïî, :104114), Transfer Ownership's one text field and Edit Currency's name, symbol and Decimals slider
+// (:138897-138930). All of them are entries of the
 // page's one view stack (v10_view_push, v10_competitive.c); this module keeps each entry's state
 // and re-renders its markup (v10_view_set) while it is the top one.
 //
@@ -35,8 +36,8 @@
 
 enum { TAB_MEMBERS, TAB_MAPS, TAB_SKINS, TAB_CURRENCIES, TAB_ANALYTICS, TAB_COUNT };
 // R_ACTION flags: what a successful call also does
-enum { AF_MON = 1, AF_INVITE_NAME = 2, AF_MAP_SEL = 4, AF_CURRENCY = 8 };
-enum { CONFIRM_DELETE = 1, CONFIRM_REMOVE, CONFIRM_LEAVE, CONFIRM_REMOVE_MAP, CONFIRM_CANCEL_MON, CONFIRM_TRANSFER };
+enum { AF_MON = 1, AF_INVITE_NAME = 2, AF_MAP_SEL = 4, AF_CURRENCY = 8, AF_MON_ALWAYS = 16, AF_CUR_BUSY = 32 };
+enum { CONFIRM_DELETE = 1, CONFIRM_REMOVE, CONFIRM_LEAVE, CONFIRM_REMOVE_MAP, CONFIRM_CANCEL_MON, CONFIRM_TRANSFER, CONFIRM_EDIT_CURRENCY };
 
 static struct {
     // the Studios window (_49033)
@@ -69,7 +70,9 @@ static struct {
     int skin_busy[4];
     char cur_name[64], cur_symbol[16];
     int cur_decimals, cur_creating;
-    int64_t cur_edit;        // the currency the form edits (0: it creates one)
+    int64_t cur_busy[8];     // IIîìïïí: currencies being published / unpublished (their Edit and toggle are off)
+    char ed_name[64], ed_symbol[16]; // the Edit Currency popup's fields (iìïíïíì, deob-10.0.7.js:138897-138930)
+    int ed_decimals;
     cJSON *mon;              // getStudioMonetization
     char mon_error[MSG];
     int mon_cancelling;
@@ -176,17 +179,37 @@ static int studio_name_ok(const char *s) {
     return 1;
 }
 
-static int currency_ok(void) {
-    char name[64], sym[16];
-    trimmed(name, sizeof(name), S.cur_name);
-    trimmed(sym, sizeof(sym), S.cur_symbol);
-    const size_t nl = strlen(name), sl = strlen(sym);
-    if (nl < 3 || nl > 20 || sl < 2 || sl > 4) return 0;
+// IÎííìïi = /^[a-zA-Z0-9 _]{3,20}$/ on a trimmed name (deob-10.0.7.js:138677)
+static int currency_name_ok(const char *raw) {
+    char name[64];
+    trimmed(name, sizeof(name), raw);
+    const size_t nl = strlen(name);
+    if (nl < 3 || nl > 20) return 0;
     for (const char *p = name; *p; p++)
         if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == ' ')) return 0;
-    for (const char *p = sym; *p; p++)
+    return 1;
+}
+
+// IÎììîìì = /^[A-Z]{2,4}$/ on trim().toUpperCase(), and not KR / JNK / RP (IÌiîïíï, :138678-138679)
+static int currency_symbol_ok(const char *raw) {
+    char sym[16];
+    trimmed(sym, sizeof(sym), raw);
+    const size_t sl = strlen(sym);
+    if (sl < 2 || sl > 4) return 0;
+    for (char *p = sym; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') *p = (char) (*p - 32);
         if (*p < 'A' || *p > 'Z') return 0;
+    }
     return strcmp(sym, "KR") && strcmp(sym, "JNK") && strcmp(sym, "RP");
+}
+
+static int currency_ok(void) { return currency_name_ok(S.cur_name) && currency_symbol_ok(S.cur_symbol); }
+
+static int published_currencies(void);
+
+// Create's disabled test (deob-10.0.7.js:139528): creating || !IÍïiîïî || 20 currencies || 5 published
+static int currency_create_ok(void) {
+    return !S.cur_creating && currency_ok() && cJSON_GetArraySize(cJSON_GetObjectItem(S.studio, "currencies")) < 20 && published_currencies() < 5;
 }
 
 // ------------------------------------------------------------------ requests
@@ -263,10 +286,14 @@ static void load_skins(void) {
 static void load_my_skins(void) { send_req("GET", "/skins", NULL, R_MY_SKINS, S.sd_gen, 0, 0, NULL, NULL); }
 
 // _48555: run a studio call, show its success text and reload the studio, or show the error
-static void action(const char *method, const char *path, cJSON *body, const int flags, const char *ok_text, const char *fail_text) {
+static void action_id(const char *method, const char *path, cJSON *body, const int flags, const int64_t id, const char *ok_text, const char *fail_text) {
     S.sd_error[0] = S.sd_success[0] = 0;
-    send_req(method, path, body, R_ACTION, S.sd_gen, 0, flags, ok_text, fail_text);
+    send_req(method, path, body, R_ACTION, S.sd_gen, id, flags, ok_text, fail_text);
     render();
+}
+
+static void action(const char *method, const char *path, cJSON *body, const int flags, const char *ok_text, const char *fail_text) {
+    action_id(method, path, body, flags, 0, ok_text, fail_text);
 }
 
 static int busy_has(const int64_t *set, const int n, const int64_t id) {
@@ -387,12 +414,13 @@ static void on_answer(void *user, const int status, const cJSON *data, const cJS
         cJSON_Delete(list);
         break;
     }
-    case R_SKIN_IMPORT: // iiîìiíî: the message, the select back to its placeholder on success, the list again
+    case R_SKIN_IMPORT: // iiîìiíî: IÌïíiïï's message and studio reload, the select back to its placeholder on success, the list again
         if (!sd_live) break;
         S.skin_assigning = 0;
         if (good) {
             set_msg(S.sd_success, r->ok_text);
             S.skin_sel[0] = 0;
+            load_studio();
         } else set_err(S.sd_error, error, r->fail_text);
         load_skins();
         break;
@@ -415,12 +443,13 @@ static void on_answer(void *user, const int status, const cJSON *data, const cJS
             if (r->flag & AF_CURRENCY) {
                 S.cur_name[0] = S.cur_symbol[0] = 0;
                 S.cur_decimals = 0;
-                S.cur_edit = 0;
             }
             load_studio();
         } else {
             set_err(S.sd_error, error, r->fail_text);
         }
+        if (r->flag & AF_MON_ALWAYS) load_mon(); // IIïïìiî: the status again after a transfer, whatever its answer (:138873)
+        if (r->flag & AF_CUR_BUSY) busy_set(S.cur_busy, 8, r->id, 0);
         S.inviting = S.assigning = S.cur_creating = 0;
         break;
     case R_LEAVE:
@@ -864,17 +893,21 @@ static void skins_markup(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
-// Currencies the studio publishes: the Publish toggle stops at 5 (studios.currencies.publishCap, deob-10.0.4.js:139268).
+// IÍiììií: the currencies the studio publishes (is_active); Publish stops at 5 (studios.currencies.publishCap,
+// deob-10.0.7.js:139474-139482) and Create at 5 published or 20 in all (:139528)
 static int published_currencies(void) {
     int n = 0;
     const cJSON *c;
-    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies")) n += (int) jnum(c, "active") != 0;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies")) n += cJSON_IsTrue(cJSON_GetObjectItem(c, "is_active"));
     return n;
 }
 
+// the Currencies tab (deob-10.0.7.js:139431-139534): each row with its symbol, its ID (click to copy), its decimals,
+// Published / Unpublished, and for the owner Edit (the popup) and Publish / Unpublish; then the owner's Create form
 static void currencies_markup(StrBuf *sb) {
     char buf[MSG];
     const cJSON *list = cJSON_GetObjectItem(S.studio, "currencies");
+    const int published = published_currencies();
     if (cJSON_GetArraySize(list) == 0) {
         sb_append(sb, "<div class=\"sd-empty svelte-a9j4oe\">");
         sb_text(sb, I18N("studios.currencies.empty", "No currencies created yet."));
@@ -883,25 +916,44 @@ static void currencies_markup(StrBuf *sb) {
         sb_append(sb, "<div class=\"sd-list svelte-a9j4oe\">");
         const cJSON *c;
         cJSON_ArrayForEach(c, list) {
-            sb_append(sb, "<div class=\"sd-row svelte-a9j4oe\"><i class=\"material-icons sd-row-icon svelte-a9j4oe\">paid</i> <span class=\"sd-row-name svelte-a9j4oe\">");
+            const int64_t cid = (int64_t) jnum(c, "currency_id");
+            const int live = cJSON_IsTrue(cJSON_GetObjectItem(c, "is_active"));
+            sb_appendf(sb, "<div class=\"sd-row svelte-a9j4oe%s\" id=\"knStCur%lld\"><i class=\"material-icons sd-row-icon svelte-a9j4oe\">paid</i> "
+                           "<span class=\"sd-row-name svelte-a9j4oe\">",
+                       live ? "" : " sd-row-off", (long long) cid);
             sb_text(sb, jstr(c, "name"));
             sb_append(sb, "</span> <span class=\"sd-badge sd-badge-plain svelte-a9j4oe\">");
             sb_text(sb, jstr(c, "symbol"));
-            sb_append(sb, "</span> <span class=\"sd-row-meta svelte-a9j4oe\">");
+            sb_append(sb, "</span> <button class=\"sd-badge sd-badge-plain sd-skin-id svelte-a9j4oe\" type=\"button\" title=\"");
+            sb_text(sb, I18N("studios.currencies.idTitle", "Currency ID \xe2\x80\x94 use it in your scripts so a rename does not break them. Click to copy."));
+            sb_appendf(sb, "\" id=\"knStCurId%lld\" onclick=\"knStudios('copycur',%lld)\">ID %lld</button> <span class=\"sd-row-meta svelte-a9j4oe\">", (long long) cid,
+                       (long long) cid, (long long) cid);
             char d[16];
             snprintf(d, sizeof(d), "%d", (int) jnum(c, "decimals"));
             I18N_F(buf, "studios.currencies.decimals", "{0} decimals", d);
             sb_text(sb, buf);
-            sb_append(sb, "</span>");
+            sb_append(sb, "</span> ");
+            if (live) {
+                sb_append(sb, "<span class=\"sd-badge sd-badge-live svelte-a9j4oe\">");
+                sb_text(sb, I18N("studios.skins.published", "Published"));
+            } else {
+                sb_append(sb, "<span class=\"sd-badge sd-badge-down svelte-a9j4oe\">");
+                sb_text(sb, I18N("studios.skins.unpublished", "Unpublished"));
+            }
+            sb_append(sb, "</span> ");
             if (is_owner()) {
-                const int64_t cid = (int64_t) jnum(c, "currency_id");
-                const int live = (int) jnum(c, "active") != 0;
-                const int capped = !live && published_currencies() >= 5;
-                sb_appendf(sb, " <button type=\"button\" class=\"sd-mini svelte-a9j4oe\" onclick=\"knStudios('curedit',%lld)\">", (long long) cid);
+                const int busy = busy_has(S.cur_busy, 8, cid), capped = !live && published >= 5;
+                sb_appendf(sb, "<button class=\"sd-mini svelte-a9j4oe\" type=\"button\" id=\"knStCurEdit%lld\" onclick=\"knStudios('curedit',%lld)\"%s>",
+                           (long long) cid, (long long) cid, busy ? " disabled" : "");
                 sb_text(sb, I18N("studios.currencies.edit", "Edit"));
-                sb_append(sb, "</button> ");
-                sb_appendf(sb, "<button type=\"button\" class=\"sd-mini svelte-a9j4oe\" onclick=\"knStudios('curtoggle',%lld)\"%s>", (long long) cid, capped ? " disabled" : "");
-                // the row button's label is the skins' (deob-10.0.4.js:139270)
+                sb_appendf(sb, "</button> <button type=\"button\" class=\"sd-mini %s svelte-a9j4oe\" title=\"", live ? "sd-mini-danger" : "sd-mini-ok");
+                if (capped) {
+                    char cap[MSG];
+                    sb_text(sb, I18N_F(cap, "studios.currencies.publishCap", "Unpublish a currency first. Up to {0} can be published.", "5"));
+                }
+                sb_appendf(sb, "\" id=\"knStCurToggle%lld\" onclick=\"knStudios('curtoggle',%lld)\"%s>", (long long) cid, (long long) cid,
+                           busy || capped ? " disabled" : "");
+                // the row button's label is the skins' (:139478)
                 sb_text(sb, live ? I18N("studios.skins.unpublish", "Unpublish") : I18N("studios.skins.publish", "Publish"));
                 sb_append(sb, "</button>");
             }
@@ -926,17 +978,11 @@ static void currencies_markup(StrBuf *sb) {
     sb_append(sb, "</span> <select class=\"sd-input svelte-a9j4oe\" id=\"knStCurDecimals\" onchange=\"knStudios('input','curdec')\">");
     for (int d = 0; d <= 2; d++) sb_appendf(sb, "<option value=\"%d\"%s>%d</option>", d, S.cur_decimals == d ? " selected" : "", d);
     sb_appendf(sb, "</select></label> <button class=\"sd-primary svelte-a9j4oe\" type=\"button\" id=\"knStCurCreate\" onclick=\"knStudios('currency')\"%s>"
-                   "<i class=\"material-icons svelte-a9j4oe\">%s</i> ",
-               S.cur_creating || !currency_ok() ? " disabled" : "", S.cur_edit ? "save" : "add");
-    sb_text(sb, S.cur_edit ? I18N("studios.currencies.save", "Save") : I18N("studios.currencies.create", "Create"));
-    sb_append(sb, "</button>");
-    if (S.cur_edit) {
-        sb_append(sb, " <button class=\"sd-mini svelte-a9j4oe\" type=\"button\" onclick=\"knStudios('curcancel')\">");
-        sb_text(sb, I18N("studios.transfer.cancel", "Cancel")); // the edit dialog's cancelButton (deob-10.0.4.js:138722)
-        sb_append(sb, "</button>");
-    }
-    sb_append(sb, "</div> <div class=\"sd-hint svelte-a9j4oe\">");
-    char hint[320]; // 5 published at once, 20 in total (deob-10.0.4.js:139320; the brain's limits, db_studios.c)
+                   "<i class=\"material-icons svelte-a9j4oe\">add</i> ",
+               !currency_create_ok() ? " disabled" : "");
+    sb_text(sb, I18N("studios.currencies.create", "Create"));
+    sb_append(sb, "</button></div> <div class=\"sd-hint svelte-a9j4oe\">");
+    char hint[320]; // 5 published at once, 20 in total (:139527; the brain's limits, db_studios.c)
     sb_text(sb, I18N_F(hint, "studios.currencies.hint",
                        "Symbols are 2-4 uppercase letters. Names and symbols must be unique in the studio and can’t match a Krunker currency (KR, JNK, RP...). Up to {0} published at once, {1} in total.",
                        "5", "20"));
@@ -1232,7 +1278,7 @@ static void studio_reset(void) {
     S.sd_error[0] = S.sd_success[0] = S.mon_error[0] = S.an_error[0] = S.dlg_error[0] = 0;
     S.invite_name[0] = S.map_sel[0] = S.cur_name[0] = S.cur_symbol[0] = S.desc[0] = 0;
     S.cur_decimals = 0;
-    S.cur_edit = 0;
+    memset(S.cur_busy, 0, sizeof(S.cur_busy));
     S.tab = TAB_MEMBERS;
     memset(S.skin_busy, 0, sizeof(S.skin_busy));
 }
@@ -1324,6 +1370,100 @@ static void push_prompt(const int kind, const char *title, const char *desc, con
     }
 }
 
+static const cJSON *currency_by_id(const int64_t cid) {
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies")) if ((int64_t) jnum(c, "currency_id") == cid) return c;
+    return NULL;
+}
+
+// the io-popup's text field (deob-10.0.7.js:15461-15535: the label row, then the input with its value and placeholder)
+static void form_text_field(StrBuf *sb, const char *id, const char *label, const char *value, const char *what, const int maxlen) {
+    sb_appendf(sb, "<div class=\"label-row\"><label class=\"input-label\" for=\"%s\">", id);
+    sb_text(sb, label);
+    sb_appendf(sb, "</label></div> <input class=\"io-input-field\" id=\"%s\" type=\"text\" maxlength=\"%d\" placeholder=\"", id, maxlen);
+    sb_text(sb, value);
+    sb_append(sb, "\" value=\"");
+    sb_text(sb, value);
+    sb_appendf(sb, "\" required oninput=\"knStudios('input','%s')\" onkeydown=\"knStudios('key','%s')\"> ", what, what);
+}
+
+// IIííiìì (deob-10.0.7.js:138897-138930): Edit Currency, the io-popup form with the name, the symbol and a 0-2 Decimals
+// slider (:15372-15403: the label row, the range input, the value under it), Save / Cancel
+static void push_currency_edit(const int64_t cid) {
+    const cJSON *c = currency_by_id(cid);
+    if (!c) return;
+    char buf[640], id[24];
+    snprintf(id, sizeof(id), "%lld", (long long) cid);
+    snprintf(S.ed_name, sizeof(S.ed_name), "%s", jstr(c, "name"));
+    snprintf(S.ed_symbol, sizeof(S.ed_symbol), "%s", jstr(c, "symbol"));
+    S.ed_decimals = (int) jnum(c, "decimals");
+    if (S.ed_decimals < 0 || S.ed_decimals > 2) S.ed_decimals = 0;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\"><div class=\"io-popup-container\" id=\"knStCurEditPopup\">"
+                   "<div class=\"io-popup-header\">");
+    sb_text(&sb, I18N("studios.currencies.editTitle", "Edit Currency"));
+    sb_append(&sb, "</div> <div class=\"io-popup-content\"><div class=\"io-card\"><p>");
+    sb_text(&sb, I18N_F(buf, "studios.currencies.editDesc",
+                        "Scripts that use the name \"{0}\" stop finding it after a rename; use the currency ID {1} to keep them working. Balances are stored in "
+                        "the smallest unit, so changing decimals changes how they display (100 with 2 decimals shows as 1.00).",
+                        jstr(c, "name"), id));
+    sb_append(&sb, "</p> <form><div class=\"io-input-container\">");
+    form_text_field(&sb, "knStCurEditName", I18N("studios.currencies.name", "Name"), S.ed_name, "edname", 64);
+    form_text_field(&sb, "knStCurEditSymbol", I18N("studios.currencies.symbol", "Symbol"), S.ed_symbol, "edsym", 15);
+    sb_append(&sb, "<div class=\"io-section\"><div class=\"label-row\"><label class=\"input-label\" for=\"knStCurEditDecimals\">");
+    sb_text(&sb, I18N("studios.currencies.decimalsLabel", "Decimals"));
+    sb_appendf(&sb, "</label></div> <div class=\"slider-container svelte-1xwmszg\"><input class=\"slider-input svelte-1xwmszg\" type=\"range\" id=\"knStCurEditDecimals\" "
+                    "min=\"0\" max=\"2\" step=\"1\" value=\"%d\" oninput=\"knStudios('input','eddec')\"> <span class=\"slider-display svelte-1xwmszg\" "
+                    "id=\"knStCurEditDecimalsShow\">%d</span></div></div> ",
+               S.ed_decimals, S.ed_decimals);
+    sb_append(&sb, "<div class=\"io-button-group\"><button type=\"button\" class=\"io-button\" id=\"knStConfirmCancel\" onclick=\"knViewPop(0)\">");
+    sb_text(&sb, I18N("studios.transfer.cancel", "Cancel"));
+    sb_append(&sb, "</button> <button type=\"button\" class=\"io-button io-button--accept\" id=\"knStConfirm\" onclick=\"knStudios('edsave')\">");
+    sb_text(&sb, I18N("studios.currencies.save", "Save"));
+    sb_append(&sb, "</button></div></div></form></div></div></div></div></div>");
+    S.confirm_kind = CONFIRM_EDIT_CURRENCY;
+    S.confirm_id = cid;
+    v10_view_push(sb_finish(&sb), NULL, confirm_closed, NULL);
+    S.confirm_depth = v10_view_depth();
+}
+
+// After Save (:138931-138939): nothing changed does nothing; a bad name or symbol is the view's error; else
+// editStudioCurrency through IÌïíiïï (its success text, the studio again)
+static void currency_edit_submit(void) {
+    const cJSON *c = currency_by_id(S.confirm_id);
+    if (!c) return;
+    char name[64], sym[16], path[96], ok_text[MSG];
+    trimmed(name, sizeof(name), S.ed_name);
+    trimmed(sym, sizeof(sym), S.ed_symbol);
+    for (char *p = sym; *p; p++)
+        if (*p >= 'a' && *p <= 'z') *p = (char) (*p - 32);
+    if (!strcmp(name, jstr(c, "name")) && !strcmp(sym, jstr(c, "symbol")) && S.ed_decimals == (int) jnum(c, "decimals")) return;
+    if (!currency_name_ok(name)) {
+        S.sd_success[0] = 0;
+        set_msg(S.sd_error, I18N("studios.error.currencyName", "Names are 3-20 letters, numbers, spaces or underscores."));
+        return;
+    }
+    if (!currency_symbol_ok(sym)) {
+        S.sd_success[0] = 0;
+        set_msg(S.sd_error, I18N("studios.error.currencySymbol", "Symbols are 2-4 uppercase letters and can\xe2\x80\x99t be KR, JNK or RP."));
+        return;
+    }
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "name", name);
+    cJSON_AddStringToObject(body, "symbol", sym);
+    cJSON_AddNumberToObject(body, "decimals", S.ed_decimals);
+    snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/edit", (long long) S.sid, (long long) S.confirm_id);
+    I18N_F(ok_text, "studios.currencies.edited", "Updated {0} ({1}).", name, sym);
+    action("POST", path, body, 0, ok_text, I18N("studios.error.editCurrency", "Failed to update that currency."));
+}
+
+// Save submits the form: its required name and symbol must not be empty (the browser's form validation), then the
+// popup answers with the values (currency_edit_submit through confirm_closed)
+static void currency_edit_save(void) {
+    if (!S.ed_name[0] || !S.ed_symbol[0]) return;
+    v10_view_pop(1);
+}
+
 static void confirm_closed(const int accepted, void *user) {
     (void) user;
     const int kind = S.confirm_kind;
@@ -1373,9 +1513,10 @@ static void confirm_closed(const int accepted, void *user) {
             snprintf(path, sizeof(path), "/studios/%lld/transfer", (long long) S.sid);
             I18N_F(buf, "studios.transfer.done", "{0} is now the owner of the studio.", S.confirm_name);
             S.sd_error[0] = S.sd_success[0] = 0;
-            send_req("POST", path, body, R_ACTION, S.sd_gen, 0, AF_MON, buf, I18N("studios.error.transfer", "Failed to transfer the studio."));
+            send_req("POST", path, body, R_ACTION, S.sd_gen, 0, AF_MON_ALWAYS, buf, I18N("studios.error.transfer", "Failed to transfer the studio."));
             break;
         }
+        case CONFIRM_EDIT_CURRENCY: currency_edit_submit(); break;
         default: break;
         }
     }
@@ -1423,7 +1564,7 @@ static void on_input(const char *what, const HtmlEvent *ev, const char *value) {
                 if (caret) html_dom_text_set_selection(ev->target, c0, c1);
             }
         }
-        set_disabled("knStCurCreate", S.cur_creating || !currency_ok());
+        set_disabled("knStCurCreate", !currency_create_ok());
     } else if (!strcmp(what, "desc")) {
         snprintf(S.desc, sizeof(S.desc), "%s", v);
         const HtmlElem count = html_dom_by_id("knStMonCount");
@@ -1446,6 +1587,19 @@ static void on_input(const char *what, const HtmlEvent *ev, const char *value) {
         snprintf(S.transfer_value, sizeof(S.transfer_value), "%s", v);
         trimmed(t, sizeof(t), v);
         set_disabled("knStConfirm", !t[0]);
+    } else if (!strcmp(what, "edname")) { // the Edit Currency popup's fields (iìiïîïî / iiïiiìi: values[id] = value)
+        snprintf(S.ed_name, sizeof(S.ed_name), "%s", v);
+    } else if (!strcmp(what, "edsym")) {
+        snprintf(S.ed_symbol, sizeof(S.ed_symbol), "%s", v);
+    } else if (!strcmp(what, "eddec")) {
+        const int d = atoi(v);
+        S.ed_decimals = d < 0 || d > 2 ? 0 : d;
+        const HtmlElem show = html_dom_by_id("knStCurEditDecimalsShow"); // the slider's value under it (:15391-15394)
+        if (show) {
+            char n[8];
+            snprintf(n, sizeof(n), "%d", S.ed_decimals);
+            html_dom_set_html(show, n);
+        }
     }
 }
 
@@ -1480,58 +1634,39 @@ static void do_invite(void) { // _48561
     action("POST", path, body, AF_INVITE_NAME, buf, I18N("studios.error.addMember", "Failed to invite that player."));
 }
 
-// The row's Edit: the form takes the currency's name, symbol and decimals, and Save edits it (do_currency).
-static void currency_edit_start(const int64_t cid) {
-    const cJSON *c;
-    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies")) {
-        if ((int64_t) jnum(c, "currency_id") != cid) continue;
-        snprintf(S.cur_name, sizeof(S.cur_name), "%s", jstr(c, "name"));
-        snprintf(S.cur_symbol, sizeof(S.cur_symbol), "%s", jstr(c, "symbol"));
-        S.cur_decimals = (int) jnum(c, "decimals");
-        S.cur_edit = cid;
-    }
-    S.sd_error[0] = S.sd_success[0] = 0;
-}
 
-// The row's Publish / Unpublish (op_currency_active): publishing stops at 5 (published_currencies).
+// IÌíiíií (deob-10.0.7.js:138888-138896): the row's Publish / Unpublish, once at a time per currency (its Edit and toggle
+// off meanwhile), through IÌïíiïï; the button is off at 5 published (published_currencies)
 static void currency_toggle(const int64_t cid) {
-    const cJSON *c;
-    int live = 0;
-    const char *name = "";
-    cJSON_ArrayForEach(c, cJSON_GetObjectItem(S.studio, "currencies"))
-        if ((int64_t) jnum(c, "currency_id") == cid) {
-            live = (int) jnum(c, "active") != 0;
-            name = jstr(c, "name");
-        }
+    const cJSON *c = currency_by_id(cid);
+    if (!c || busy_has(S.cur_busy, 8, cid)) return;
+    const int live = cJSON_IsTrue(cJSON_GetObjectItem(c, "is_active"));
     if (!live && published_currencies() >= 5) return;
+    busy_set(S.cur_busy, 8, cid, 1);
     char path[96];
     snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/%s", (long long) S.sid, (long long) cid, live ? "unpublish" : "publish");
-    char ok[160]; // "{0} unpublished." / "{0} published." with the currency's name (deob-10.0.4.js:138685)
-    if (live) I18N_F(ok, "studios.currencies.unpublished", "{0} unpublished.", name);
-    else I18N_F(ok, "studios.currencies.publishedMsg", "{0} published.", name);
-    action("POST", path, NULL, 0, ok, I18N("studios.error.toggleCurrency", "Failed to update that currency."));
+    char ok[160]; // "{0} unpublished." / "{0} published." with the currency's name
+    if (live) I18N_F(ok, "studios.currencies.unpublished", "{0} unpublished.", jstr(c, "name"));
+    else I18N_F(ok, "studios.currencies.publishedMsg", "{0} published.", jstr(c, "name"));
+    action_id("POST", path, NULL, AF_CUR_BUSY, cid, ok, I18N("studios.error.toggleCurrency", "Failed to update that currency."));
 }
 
-static void do_currency(void) { // _48364
+static void do_currency(void) { // iíìiíìï (:138566): createStudioCurrency(name.trim(), symbol.trim().toUpperCase(), decimals)
     if (!currency_ok() || S.cur_creating) return;
     char name[64], sym[16], path[64];
     trimmed(name, sizeof(name), S.cur_name);
     trimmed(sym, sizeof(sym), S.cur_symbol);
+    for (char *p = sym; *p; p++)
+        if (*p >= 'a' && *p <= 'z') *p = (char) (*p - 32);
     S.cur_creating = 1;
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "name", name);
     cJSON_AddStringToObject(body, "symbol", sym);
     cJSON_AddNumberToObject(body, "decimals", S.cur_decimals);
-    if (S.cur_edit) {
-        snprintf(path, sizeof(path), "/studios/%lld/currencies/%lld/edit", (long long) S.sid, (long long) S.cur_edit);
-        char ok[160]; // "Updated {0} ({1})." with the new name and symbol (deob-10.0.4.js:138732)
-        I18N_F(ok, "studios.currencies.edited", "Updated {0} ({1}).", name, sym);
-        action("POST", path, body, AF_CURRENCY, ok, I18N("studios.error.editCurrency", "Failed to update that currency."));
-        return;
-    }
     snprintf(path, sizeof(path), "/studios/%lld/currencies", (long long) S.sid);
     action("POST", path, body, AF_CURRENCY, I18N("studios.currencies.created", "Currency created."), I18N("studios.error.createCurrency", "Failed to create that currency."));
 }
+
 
 static void do_assign_map(void) { // _48356
     if (!S.map_sel[0] || S.assigning) return;
@@ -1592,8 +1727,14 @@ int v10_studios_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
             char t[64];
             trimmed(t, sizeof(t), S.transfer_value);
             if (t[0]) v10_view_pop(1); // the form submits on Enter
+        } else if ((!strcmp(what, "edname") || !strcmp(what, "edsym")) && S.confirm_depth == v10_view_depth()) {
+            currency_edit_save();
         }
         return 0;
+    }
+    if (!strcmp(op, "edsave")) { // the Edit Currency popup's Save (type=submit)
+        if (S.confirm_kind == CONFIRM_EDIT_CURRENCY && S.confirm_depth == v10_view_depth()) currency_edit_save();
+        return 1;
     }
     if (!strcmp(op, "back")) { // _5221()
         const int top = v10_view_depth();
@@ -1686,17 +1827,18 @@ int v10_studios_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
     } else if (!strcmp(op, "currency")) {
         do_currency();
         return 1;
-    } else if (!strcmp(op, "curedit")) {
-        currency_edit_start(a1);
+    } else if (!strcmp(op, "curedit")) { // IIííiìì: the Edit Currency popup
+        if (is_owner() && !busy_has(S.cur_busy, 8, a1)) push_currency_edit(a1);
         return 1;
     } else if (!strcmp(op, "curtoggle")) {
         currency_toggle(a1);
         return 1;
-    } else if (!strcmp(op, "curcancel")) {
-        S.cur_edit = 0;
-        S.cur_name[0] = S.cur_symbol[0] = 0;
-        S.cur_decimals = 0;
-        return 1;
+    } else if (!strcmp(op, "copycur")) { // IIïiïïi (:138884-138887)
+        char id[24];
+        snprintf(id, sizeof(id), "%lld", (long long) a1);
+        html_clipboard_write(id);
+        S.sd_error[0] = 0;
+        I18N_F(S.sd_success, "studios.currencies.idCopied", "Currency ID {0} copied.", id);
     } else if (!strcmp(op, "skin")) { // _48551
         const cJSON *k;
         int active = -1;

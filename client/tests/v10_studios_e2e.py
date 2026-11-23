@@ -208,6 +208,26 @@ def main():
         check(wait_q("SELECT name, symbol FROM studio_currencies WHERE studio_id = ?", (sid,), lambda r: r) == [("Gold Coins", "GLD")],
               "Create currency: Gold Coins / GLD in kn_brain")
         A.shot("studio-currencies")
+        # v10.0.7's currency row (deob-10.0.7.js:139431-139534) and Edit Currency popup (:138897-138930)
+        cid = (q("SELECT id FROM studio_currencies WHERE studio_id = ?", sid) or [[0]])[0][0]
+        check(A.has("knStCurId%d" % cid), "the currency row has its ID button")
+        t = A.textof("#knStCur%d" % cid)
+        check(("ID %d" % cid) in t and "Published" in t and "Unpublish" in t and "Edit" in t,
+              "the currency row: its ID, Published, Edit and Unpublish")
+        A.click("knStCurEdit%d" % cid)
+        check(A.has("knStCurEditPopup"), "Edit opens the Edit Currency popup")
+        check(A.value("knStCurEditName") == "Gold Coins" and A.value("knStCurEditSymbol") == "GLD",
+              "the popup holds the currency's name and symbol")
+        A.shot("currency-edit")
+        A.ui("knStudios('input','edname','Gold_Bars')")
+        A.ui("knStudios('input','edsym','glb')")
+        A.ui("knStudios('input','eddec','1')")
+        check(A.textof("#knStCurEditDecimalsShow") == "1", "the Decimals slider's value shows beside it")
+        A.click("knStConfirm")
+        rows = wait_q("SELECT name, symbol, decimals FROM studio_currencies WHERE id = ?", (cid,), lambda r: r and r[0][0] == "Gold_Bars")
+        check(rows == [("Gold_Bars", "GLB", 1)], "Save: the currency is Gold_Bars / GLB with 1 decimal in kn_brain")
+        time.sleep(0.8)
+        check("Gold_Bars" in A.textof("#knStCur%d" % cid), "the row shows the new name")
 
         A.click("knStTab1")
         check(A.has("knStMonApply"), "the Games tab offers Apply for monetization")
