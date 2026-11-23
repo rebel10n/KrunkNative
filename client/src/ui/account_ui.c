@@ -123,6 +123,8 @@ static cJSON *g_mail_rows;       // mailData.d (owned), NULL = not loaded
 static int g_mail_loaded;        // mailData != null
 static int g_mail_failed;        // the kml answer was refused, or none came by the deadline: the list says so
 static int g_mail_timer;         // the deadline of the kml request in flight (html_timer id, 0 none)
+// windows[4] tab 1 (the Friends tab): FRIENDS_LIST_RESPONSE ["gfrnd", rows] (deob-10.0.7.js:225186-225194), sorted by st
+static cJSON *g_friends;         // iiiîiiï (owned), NULL = not loaded ("Loading Friends...")
 // v7.1.4 2FA (authenticator app): v10808, the label sub2FA sends the code with ("2fa" = the
 // login step, "a2FAc" / "d2FAc" = confirm enabling / disabling)
 #define TWOFA_KEY_LEN 6 // config.twoFAKeyLen
@@ -1401,6 +1403,8 @@ static void clear_account(void) {
     optin_close();
     battlepass_ui_reset(); // windows[5].data / account.BP
     memset(&g_email, 0, sizeof(g_email));
+    cJSON_Delete(g_friends); // iííîíïí: iiiîiiï = null
+    g_friends = NULL;
 }
 
 // dxp.offer of kn_brain's account info (v10's account object: dxp = {offer: null | {games, xp, claimable},
@@ -1687,7 +1691,9 @@ static int progress_handle(const char *name, const HtmlArg *args, int argc);
 static void medal_tab_html(StrBuf *sb);
 static void badge_url(int index, char *out, size_t n);
 static void mail_count(int count);
-static void mail_read_data(const cJSON *rows);
+static void mail_read_data(const cJSON *rows, const cJSON *type);
+static void mail_fix_types(cJSON *rows);
+static void friends_loaded(const cJSON *rows);
 static void twofa_res(const cJSON *frame);
 static void email_frame(const char *label, const cJSON *frame);
 static int reset_frame(const char *label, const cJSON *frame);
@@ -1781,18 +1787,23 @@ static void on_social(void *user, const cJSON *frame) {
         // no economy notes: a gift or a sale is Inbox mail (gmc), a trade shows in the hub's Trades.
     } else if (!strcmp(label, "gmc")) { // updateMailCount(count)
         mail_count((int) num_at(frame, 1));
-    } else if (!strcmp(label, "kml")) { // mailListResponse(tab, rows)
+    } else if (!strcmp(label, "kml")) { // windows[29].onData(tabIndex, rows) (deob-10.0.7.js:221237-221246)
         html_timer_cancel(g_mail_timer);
         g_mail_timer = 0;
-        g_mail_tab = (int) num_at(frame, 1);
+        const int tab = (int) num_at(frame, 1);
+        if (tab >= 0 && tab < 5) g_mail_view = tab; // this.tabIndex = tab
+        g_mail_tab = g_mail_view == 4;
         cJSON_Delete(g_mail_rows);
         const cJSON *rows = cJSON_GetArrayItem(frame, 2);
         g_mail_rows = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : NULL;
+        mail_fix_types(g_mail_rows);
         g_mail_loaded = g_mail_rows != NULL;
         g_mail_failed = !g_mail_loaded;
         menu_rerender_if_open(30);
-    } else if (!strcmp(label, "rml")) { // readMailResponse(rows)
-        mail_read_data(cJSON_GetArrayItem(frame, 1));
+    } else if (!strcmp(label, "rml")) { // onReadData(rows, type)
+        mail_read_data(cJSON_GetArrayItem(frame, 1), cJSON_GetArrayItem(frame, 2));
+    } else if (!strcmp(label, "gfrnd")) { // FRIENDS_LIST_RESPONSE: iïïìïíî(rows)
+        friends_loaded(cJSON_GetArrayItem(frame, 1));
     } else if (!strcmp(label, "c2fa")) {
         twofa_res(frame);
     } else if (!strcmp(label, "emailS") || !strcmp(label, "cemail") || !strcmp(label, "emailv")) {
@@ -2002,18 +2013,100 @@ static void mail_arg(StrBuf *sb, const char *s) {
     sb_append(sb, "'");
 }
 
-// v10's Followers entry (windows[29].gen, km_notificationtype 0): "X has followed you!" with Follow Back
-// (followPlayer, v10_social.c) and the name opening the profile. An unread entry is highlighted like
-// v10's unread rows (mailUnread, the 2 px border); the Archive tab shows it plain.
-static void mail_follower_row(StrBuf *sb, const int id, const char *ago, const char *name, const int unread) {
-    sb_appendf(sb, "<div class='mailObj%s' id='mail_%d' onclick='windows[29].readMail(this, %d, 0)'%s><div style='position:relative;'><div class='mailDate'>%s<div class='followBack' onclick=\"followPlayer(",
-               unread ? " mailUnread" : "", id, id, unread ? " style='border: 2px solid #5699eb;'" : "", ago);
-    mail_arg(sb, name);
-    sb_append(sb, ", this)\">Follow Back</div></div></div><div class='followFrom'><a onclick=\"openPlayerProfile(");
-    mail_arg(sb, name);
-    sb_append(sb, ")\">");
-    sb_append_esc(sb, name);
-    sb_append(sb, "</a> has followed you!</div></div>");
+// v10's cleaning of km_link / km_text (deob-10.0.7.js:221308, 221251): .replace(/<|>/g, "").replace("&", "") (the
+// first "&" only) .replace(/[^\x00-\x7F]/g, "")
+static char *mail_clean(const char *s) {
+    StrBuf sb = {0};
+    int amp = 0;
+    for (; s && *s; s++) {
+        if (*s == '<' || *s == '>' || (unsigned char) *s >= 0x80) continue;
+        if (*s == '&' && !amp) {
+            amp = 1;
+            continue;
+        }
+        sb_append_n(&sb, s, 1);
+    }
+    return sb_finish(&sb);
+}
+
+// kn_brain serves the mail's text HTML-escaped (kn_html: the v3.1.1 page inserts it with innerHTML); v10's server sends
+// it as written, which onReadData cleans and inserts: undo kn_html's five escapes first
+static char *mail_unescape(const char *s) {
+    static const struct { const char *e; char c; } ents[] = {{"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&#39;", '\''}};
+    StrBuf sb = {0};
+    while (s && *s) {
+        size_t i = 0;
+        for (; i < sizeof(ents) / sizeof(ents[0]); i++)
+            if (!strncmp(s, ents[i].e, strlen(ents[i].e))) break;
+        if (i < sizeof(ents) / sizeof(ents[0])) {
+            sb_append_n(&sb, &ents[i].c, 1);
+            s += strlen(ents[i].e);
+        } else {
+            sb_append_n(&sb, s++, 1);
+        }
+    }
+    return sb_finish(&sb);
+}
+
+static int mail_type(const cJSON *r) { // km_notificationtype; kn_brain always sends one (mail.kind), else Inbox
+    const cJSON *v = cJSON_GetObjectItem(r, "km_notificationtype");
+    return cJSON_IsNumber(v) ? v->valueint : 3;
+}
+
+static void mail_set_type(cJSON *r, const int type) {
+    cJSON_DeleteItemFromObject(r, "km_notificationtype");
+    cJSON_AddNumberToObject(r, "km_notificationtype", type);
+}
+
+// onData's fix-ups (deob-10.0.7.js:221240-221241): a type 4 with a link whose subject names a "Creator code" is 5, an
+// untyped "Item sold" is 4
+static void mail_fix_types(cJSON *rows) {
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        const cJSON *t = cJSON_GetObjectItem(r, "km_notificationtype");
+        const char *link = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_link"));
+        const char *subj = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_subject"));
+        if (cJSON_IsNumber(t) && t->valueint == 4 && link && link[0] && subj && strstr(subj, "Creator code")) mail_set_type(r, 5);
+        if (!cJSON_IsNumber(t) && subj && !strcmp(subj, "Item sold")) mail_set_type(r, 4);
+    }
+}
+
+static int mail_archived(const cJSON *r) {
+    const cJSON *archive = cJSON_GetObjectItem(r, "km_archive");
+    return cJSON_IsTrue(archive) || (cJSON_IsNumber(archive) && archive->valuedouble != 0);
+}
+
+// one row of windows[29].gen (deob-10.0.7.js:221303-221316 Archive, 221339 the other tabs): unread rows are
+// mailObj mailUnread with the 2 px border. A Followers entry (type 0): "X has followed you!" with Follow Back
+// (followPlayer, v10_social.c); a creator code (5): "X used your creator code!"; the name opens the profile
+// (clickFollow). Any other: the sender, the subject and the text box readMail fills.
+static void mail_row(StrBuf *sb, const cJSON *r, const int type, const int unread, const double now) {
+    const int id = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "km_id"));
+    char ago[32];
+    readable_time2(ago, sizeof(ago), now - parse_date_ms(cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_datesent"))));
+    sb_appendf(sb, "<div class='mailObj%s' id='mail_%d' onclick='windows[29].readMail(this, %d, %d)'%s><div style='position:relative;'><div class='mailDate'>%s",
+               unread ? " mailUnread" : "", id, id, type, unread ? " style='border: 2px solid #5699eb;'" : "", ago);
+    if (type == 0 || type == 5) {
+        char *name = mail_clean(cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_link")));
+        if (type == 0) {
+            sb_append(sb, "<div class='followBack' onclick=\"followPlayer(");
+            mail_arg(sb, name);
+            sb_append(sb, ", this)\">Follow Back</div>");
+        }
+        sb_appendf(sb, "</div></div><div class='followFrom'><a onclick='windows[29].clickFollow(this, %d, %d)'>", id, type);
+        sb_append_esc(sb, name);
+        sb_append(sb, type == 0 ? "</a> has followed you!</div></div>" : "</a> used your creator code!</div></div>");
+        free(name);
+        return;
+    }
+    // km_playerfrom / km_subject go in as HTML, as v10 inserts its server's text (kn_brain's is escaped: kn_html)
+    const char *from = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_playerfrom"));
+    const char *subject = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_subject"));
+    sb_append(sb, "</div></div><div class='mailFrom' style='margin-bottom:15px'>");
+    sb_append(sb, from ? from : "");
+    sb_append(sb, "</div><span class='mailSubj'>");
+    sb_append(sb, subject ? subject : "");
+    sb_append(sb, "</span><div class='mailText'></div></div>");
 }
 
 // A kml whose answer never comes (the socket dropped with it) is failed by its deadline: the list says so, and
@@ -2027,17 +2120,34 @@ static void mail_expired(void *user) {
     menu_rerender_if_open(30);
 }
 
+// windows[29].gen (deob-10.0.7.js:221282-221354)
 static char *gen_mail(void) {
-    static const char *const tabs[5] = {"Followers", "Clan", "Hub", "Inbox", "Archive"}; // config.mailTabs
+    static const char *const tabs[5] = {"Followers", "Clan", "Hub", "Inbox", "Archive"}; // config.mailTabs (:18604-18614)
+    int counts[5] = {0}; // the tabs' unread counts (mailData only: none while loading): every row not archived, 4 and 5 as Inbox
+    if (g_mail_loaded && g_mail_rows) {
+        const cJSON *r;
+        cJSON_ArrayForEach(r, g_mail_rows) {
+            if (mail_archived(r)) continue;
+            int type = mail_type(r);
+            if (type == 4 || type == 5) type = 3;
+            if (type >= 0 && type < 5) counts[type]++;
+        }
+    }
     StrBuf sb = {0};
-    sb_append(&sb, "<div>Your Notifications<div class='button buttonR readAll' onclick='windows[29].readAll()'>Read All</div></div><div style='height:30px;'></div><div class='bigMenTabs' style='table-layout: fixed;'>");
-    for (int i = 0; i < 5; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='windows[29].switchTab(%d)' style='height:30px;'>%s</div>", g_mail_view == i ? " bigMenTabA" : "", i, tabs[i]);
+    sb_append(&sb, "<div>Your Notifications");
+    if (g_mail_view != 4) sb_append(&sb, "<div class='button buttonR readAll' onclick='windows[29].readAll()'>Read All</div>");
+    sb_append(&sb, "</div><div style='height:30px;'></div><div class='bigMenTabs' style='table-layout: fixed;'>");
+    for (int i = 0; i < 5; i++) {
+        sb_appendf(&sb, "<div class='bigMenTab%s' onclick='windows[29].switchTab(%d)' style='height:30px;'>%s", g_mail_view == i ? " bigMenTabA" : "", i, tabs[i]);
+        if (counts[i]) sb_appendf(&sb, "<div class='unreadBtnM'>%d</div>", counts[i]);
+        sb_append(&sb, "</div>");
+    }
     sb_append(&sb, "</div><div id='mailList'>");
     if (!g_mail_loaded && g_mail_failed) {
         sb_appendf(&sb, "<span>%s</span>", I18N("kn.mail.loadFailed", "Couldn't load your notifications. Switch tabs to try again."));
-    } else if (!g_mail_loaded) {
-        char frame[32];
-        snprintf(frame, sizeof(frame), "[\"kml\",%d]", g_mail_view == 4 ? 1 : 0);
+    } else if (!g_mail_loaded) { // iîíìiìï.send("kml", archive, tabIndex)
+        char frame[40];
+        snprintf(frame, sizeof(frame), "[\"kml\",%d,%d]", g_mail_view == 4 ? 1 : 0, g_mail_view);
         html_timer_cancel(g_mail_timer);
         g_mail_timer = html_timer_add(MAIL_WAIT_MS, mail_expired, NULL);
         backend_social_send_text(frame);
@@ -2045,37 +2155,30 @@ static char *gen_mail(void) {
     } else if (!g_mail_rows) {
         sb_append(&sb, "Loading...");
     } else {
-        int shown = 0;
+        int shown = 0, listed = 0;
         const cJSON *r;
         const double now = (double) time(NULL) * 1000.0;
         cJSON_ArrayForEach(r, g_mail_rows) {
-            const cJSON *archive = cJSON_GetObjectItem(r, "km_archive");
-            const int archived = cJSON_IsTrue(archive) || (cJSON_IsNumber(archive) && archive->valuedouble != 0);
+            const int archived = mail_archived(r);
             if (archived != (g_mail_view == 4)) continue;
-            // km_notificationtype: 0 follow, 1 clan, 2 hub, 3 inbox (4 / 5 count as 3); none = inbox
-            const cJSON *type_v = cJSON_GetObjectItem(r, "km_notificationtype");
-            int type = cJSON_IsNumber(type_v) ? type_v->valueint : 3;
-            if (type == 4 || type == 5) type = 3;
-            if (g_mail_view != 4 && type != g_mail_view) continue;
-            shown++;
-            const int id = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "km_id"));
-            char ago[32];
-            readable_time2(ago, sizeof(ago), now - parse_date_ms(cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_datesent"))));
-            const char *follower = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_link"));
-            if (type == 0 && follower && follower[0]) {
-                mail_follower_row(&sb, id, ago, follower, !archived);
-                continue;
+            listed++;
+            const int type = mail_type(r);
+            const char *link = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_link"));
+            const int linked = link && link[0];
+            if (g_mail_view == 4) {
+                if (!linked && type == 0) continue; // km_link || 0 != type
+            } else {
+                if (!linked && type == 0) continue;
+                if (type != g_mail_view && !((type == 4 || type == 5) && g_mail_view == 3)) continue;
             }
-            sb_appendf(&sb, "<div class='mailObj' id='mail_%d' onclick='windows[29].readMail(this, %d, %d)'><div style='position:relative;'><div class='mailDate'>%s</div></div><div class='mailFrom' style='margin-bottom:15px'>",
-                       id, id, type, ago);
-            const char *from = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_playerfrom"));
-            const char *subject = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_subject"));
-            sb_append_esc(&sb, from ? from : "");
-            sb_append(&sb, "</div><span class='mailSubj'>");
-            sb_append_esc(&sb, subject ? subject : "");
-            sb_append(&sb, "</span><div class='mailText'></div></div>");
+            shown++;
+            mail_row(&sb, r, type, !archived, now);
         }
-        if (!shown) sb_append(&sb, "No messages");
+        if (g_mail_view == 4) {
+            if (!listed) sb_append(&sb, "No archive messages"); // iiÌïiïí.length (the archived rows)
+        } else if (!shown || !listed) {
+            sb_append(&sb, "No messages");
+        }
         cJSON_Delete(g_mail_rows); // this.mailData = null: the next render asks again
         g_mail_rows = NULL;
         g_mail_loaded = 0;
@@ -2089,6 +2192,7 @@ static char *gen_mail(void) {
 // row asks again. The answer for the row in flight clears the deadline.
 #define MAIL_READ_WAIT_MS 15000
 static int g_read_id;    // the message whose rml is in flight (0 none)
+static int g_read_type;  // its km_notificationtype
 static int g_read_timer; // its deadline (html_timer id, 0 none)
 
 static const char *read_failed_text(void) {
@@ -2117,11 +2221,13 @@ static void read_expired(void *user) {
     read_failed(id);
 }
 
-// onReadData([row]): the message text into the opened row
-static void mail_read_data(const cJSON *rows) {
+// onReadData(rows, type) (deob-10.0.7.js:221247-221259): the row loses its unread border; unless it is a Followers
+// entry its text goes in (a km_type 5 message's "Post!" opens the post, km_link); the count drops by one
+static void mail_read_data(const cJSON *rows, const cJSON *type_v) {
     const cJSON *row = cJSON_GetArrayItem(rows, 0);
+    const int type = cJSON_IsNumber(type_v) ? type_v->valueint : g_read_type;
     if (!row) { // no such message (its row is gone): the row says so instead of "Loading..." for good
-        read_failed(g_read_id);
+        if (type != 0 && type != 5) read_failed(g_read_id);
         read_pending_clear();
         return;
     }
@@ -2132,18 +2238,116 @@ static void mail_read_data(const cJSON *rows) {
     if (el) {
         html_dom_set_style(el, "border", "");
         html_dom_set_class(el, "mailUnread", 0);
-        const HtmlElem text = html_dom_query(el, ".mailText");
-        const char *km_text = cJSON_GetStringValue(cJSON_GetObjectItem(row, "km_text"));
+    }
+    const HtmlElem text = el && type != 0 ? html_dom_query(el, ".mailText") : 0;
+    if (text) {
+        char *raw = mail_unescape(cJSON_GetStringValue(cJSON_GetObjectItem(row, "km_text")));
+        char *clean = mail_clean(raw);
         StrBuf sb = {0};
-        for (const char *p = km_text ? km_text : ""; *p; p++) { // replace(/<|>/g,"").replace("&","") + ASCII only
-            if (*p == '<' || *p == '>' || (unsigned char) *p >= 0x80) continue;
-            sb_append_n(&sb, p, 1);
+        const cJSON *km_type = cJSON_GetObjectItem(row, "km_type");
+        const char *post = cJSON_IsNumber(km_type) && km_type->valueint == 5 ? strstr(clean, "Post!") : NULL;
+        if (post) { // .replace("Post!", "<a href='javascript:void(0)' onclick='window.openPost(" + JSON.stringify(String(km_link)) + ")'>Post</a>")
+            const cJSON *link = cJSON_GetObjectItem(row, "km_link");
+            char num[32] = "";
+            if (cJSON_IsNumber(link)) snprintf(num, sizeof(num), "%.0f", link->valuedouble);
+            const char *ls = cJSON_IsString(link) ? link->valuestring : num;
+            sb_append_n(&sb, clean, (size_t) (post - clean));
+            sb_append(&sb, "<a href='javascript:void(0)' onclick=\"window.openPost(");
+            mail_arg(&sb, ls);
+            sb_append(&sb, ")\">Post</a>");
+            sb_append(&sb, post + 5);
+        } else {
+            sb_append(&sb, clean);
         }
-        char *clean = sb_finish(&sb);
-        if (text) html_dom_set_text(text, clean[0] ? clean : "No message provided");
+        char *html = sb_finish(&sb);
+        html_dom_set_html(text, html[0] ? html : "No message provided");
+        free(html);
         free(clean);
+        free(raw);
     }
     mail_count(g_acc.mail_unread - 1);
+}
+
+// ---- windows[4] tab 1: the Friends tab (deob-10.0.7.js:219085-219101)
+
+// iíìííìì(fid) (deob-10.0.7.js:24307-24312): <userAssetsHost>/p<id>/profile.png?v=<the hour>; Box Office's user assets
+// for a Box Office account (kn_brain serves the approved picture, 404 without one: the onerror fallback)
+static void friend_pfp_url(char *out, const size_t n, const double id) {
+    const double v = floor((double) time(NULL) * 1000.0 / 3600000.0) * 3600000.0;
+    if (backend_url()[0]) snprintf(out, n, "%s/user-assets/p%.0f/profile.png?v=%.0f", backend_url(), id, v);
+    else snprintf(out, n, "https://user-assets.krunker.io/p%.0f/profile.png?v=%.0f", id, v);
+}
+
+// iïïìïíî(rows): sorted by st, online first (a stable sort, as V8's), then windows[4].friendsLoaded: updateWindow(5)
+static void friends_loaded(const cJSON *rows) {
+    cJSON_Delete(g_friends);
+    g_friends = cJSON_CreateArray();
+    for (int pass = 0; pass < 2 && cJSON_IsArray(rows); pass++) {
+        const cJSON *f;
+        cJSON_ArrayForEach(f, rows) {
+            const cJSON *st = cJSON_GetObjectItem(f, "st");
+            const int on = cJSON_IsNumber(st) && st->valuedouble > 0;
+            if (on == !pass) cJSON_AddItemToArray(g_friends, cJSON_Duplicate(f, 1));
+        }
+    }
+    menu_rerender_if_open(5);
+}
+
+// the #friendList of the Box Office account (gfrnd rows); a krunker.io account's comes from its event bus (v10_social.c)
+static char *friends_html(void) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return v10_social_window_friends_html();
+    if (!g_friends) return NULL; // "Loading Friends..."
+    StrBuf sb = {0};
+    sb_append(&sb, "<div id='friendList'>");
+    if (!cJSON_GetArraySize(g_friends)) sb_append(&sb, "<span style='color:#9a9a9a'>You don't have any friends yet.</span>");
+    int i = 0;
+    const cJSON *f;
+    cJSON_ArrayForEach(f, g_friends) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(f, "fna"));
+        const char *sm = cJSON_GetStringValue(cJSON_GetObjectItem(f, "sm"));
+        const char *gid = cJSON_GetStringValue(cJSON_GetObjectItem(f, "gid"));
+        const cJSON *st = cJSON_GetObjectItem(f, "st"), *sub = cJSON_GetObjectItem(f, "sub"), *plf = cJSON_GetObjectItem(f, "plf");
+        const int online = cJSON_IsNumber(st) && st->valuedouble == 1;
+        const int premium = cJSON_IsTrue(sub) || (cJSON_IsNumber(sub) && sub->valuedouble != 0);
+        const int verified = cJSON_IsTrue(plf) || (cJSON_IsNumber(plf) && plf->valuedouble != 0);
+        if (!name) name = "";
+        sb_append(&sb, "<div><div style='margin-bottom:10px;text-align:left;padding-bottom:10px;border-bottom:3px solid #ffffff33;padding-top:10px;'>"
+                       "<img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='");
+        if (premium) { // iíìííìì(fid): the player's picture (user assets p<id>/profile.png)
+            char url[256];
+            friend_pfp_url(url, sizeof(url), cJSON_GetNumberValue(cJSON_GetObjectItem(f, "fid")));
+            sb_append_esc(&sb, url);
+        } else {
+            sb_append(&sb, "./img/player_pfp.png");
+        }
+        sb_append(&sb, "' /><div class='folInfHldr'>");
+        if (premium) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+        if (verified) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;margin-right: 4px;font-size:28px;vertical-align:middle;'>check_circle</i>");
+        sb_append(&sb, "<a href='javascript:void(0)' onclick=\"openPlayerProfile(");
+        mail_arg(&sb, name);
+        sb_append(&sb, ")\" class='lName' style='color:rgba(255,255,255,0.9)'>");
+        sb_append_esc(&sb, name);
+        sb_append(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:16px;margin-top:4px;max-width:500px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;'>");
+        if (online) {
+            sb_append(&sb, "<div class='onStatus' style='background:#27ab32'></div>");
+            sb_append_esc(&sb, sm && sm[0] ? sm : "Online");
+        } else {
+            sb_append(&sb, "<div class='onStatus' style='background:#7f7f7f'></div>Offline");
+        }
+        sb_append(&sb, "</div></div><div style='float:right;'>");
+        if (gid && gid[0]) { // openURL(`/?game=${gid}`, 1)
+            char url[160];
+            snprintf(url, sizeof(url), "/?game=%s", gid);
+            sb_append(&sb, "<div class='button buttonG' style='padding:10px;margin-right:15px;' onclick=\"openURL(");
+            mail_arg(&sb, url);
+            sb_append(&sb, ",1)\">Join</div>");
+        }
+        sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
+        mail_arg(&sb, name);
+        sb_appendf(&sb, ",%d)\">Remove Friend</div></div></div></div>", i++);
+    }
+    sb_append(&sb, "</div>");
+    return sb_finish(&sb);
 }
 
 // ---- 2FA: v7.1.4 index.js twoFAres / f1789 / onInput2FA / onKeyDown2FA / sub2FA / act2FA / dact2FA
@@ -3345,27 +3549,67 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         }
         return 1;
     }
-    if (!strcmp(name, "windows.29.readMail")) { // toggle the text; "Loading..." + io.send("rml", id)
+    if (!strcmp(name, "windows.29.readMail") || !strcmp(name, "windows.29.clickFollow")) {
+        // readMail(el, id, type) (deob-10.0.7.js:221261-221264): a message's text box shows "Loading...", then
+        // send(GET_MAIL, id, type); clickFollow (:221265-221268) reads the entry, then opens the profile of the name
+        const int id = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
+        const int type = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 3;
         HtmlElem obj = ev ? ev->target : 0;
-        const HtmlElem text = obj ? html_dom_query(obj, ".mailText") : 0;
-        if (!text) return 1;
-        char cur[256] = "";
-        html_dom_get_text(text, cur, sizeof(cur));
-        if (cur[0] && strcmp(cur, read_failed_text())) {
-            html_dom_set_html(text, "");
-        } else { // closed, or the failed read asked again
-            const int id = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
-            if (g_read_id && g_read_id != id) read_failed(g_read_id); // another read is still in flight: its row says so
-            read_pending_clear();
+        const HtmlElem text = obj && type != 0 && type != 5 ? html_dom_query(obj, ".mailText") : 0;
+        if (g_read_id && g_read_id != id) read_failed(g_read_id); // another read is still in flight: its row says so
+        read_pending_clear();
+        if (text) {
+            html_dom_set_display(text, "block");
             html_dom_set_html(text, "Loading...");
-            char frame[48];
-            snprintf(frame, sizeof(frame), "[\"rml\",%d]", id);
-            g_read_id = id;
-            g_read_timer = html_timer_add(MAIL_READ_WAIT_MS, read_expired, NULL);
-            if (!backend_social_send_text(frame)) { // no socket: no answer can come
-                read_pending_clear();
-                read_failed(id);
-            }
+        }
+        char frame[64];
+        snprintf(frame, sizeof(frame), "[\"rml\",%d,%d]", id, type);
+        g_read_id = id;
+        g_read_type = type;
+        g_read_timer = html_timer_add(MAIL_READ_WAIT_MS, read_expired, NULL);
+        if (!backend_social_send_text(frame)) { // no socket: no answer can come
+            read_pending_clear();
+            if (text) read_failed(id);
+        }
+        if (name[11] == 'c' && obj) { // openPlayerProfile(el.innerText)
+            char who[64] = "";
+            html_dom_get_text(obj, who, sizeof(who));
+            const HtmlArg a = {.kind = HTML_ARG_STR, .str = who};
+            if (who[0]) v10_social_handle("openPlayerProfile", NULL, &a, 1);
+        }
+        return 1;
+    }
+    if (!strcmp(name, "deleteFollower") && account_backend() != ACCOUNT_BACKEND_KRUNKER) {
+        // window 5's Remove Friend (deob-10.0.7.js:227041-227047): iiiîiiï.splice(index, 1), updateWindow(5), then
+        // send(FOLLOW_PLAYER, name, 0)
+        const char *who = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? args[0].str : "";
+        const int index = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : -1;
+        if (g_friends && index >= 0 && index < cJSON_GetArraySize(g_friends)) {
+            cJSON_DeleteItemFromArray(g_friends, index);
+            menu_rerender_if_open(5);
+        }
+        if (who[0]) {
+            cJSON *f = cJSON_CreateArray();
+            cJSON_AddItemToArray(f, cJSON_CreateString("f"));
+            cJSON_AddItemToArray(f, cJSON_CreateString(who));
+            cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+            backend_social_send(f);
+            cJSON_Delete(f);
+        }
+        return 1;
+    }
+    if (!strcmp(name, "followPlayer")) { // (deob-10.0.7.js:227034-227040) el.style.visibility = "hidden", send(FOLLOW_PLAYER, name, 1)
+        const HtmlElem el = argc > 1 && args[1].kind == HTML_ARG_THIS && ev ? ev->target : 0;
+        if (el) html_dom_set_style(el, "visibility", "hidden");
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return -1; // the krunker.io account: v10_social.c's
+        const char *who = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? args[0].str : "";
+        if (who[0]) {
+            cJSON *f = cJSON_CreateArray();
+            cJSON_AddItemToArray(f, cJSON_CreateString("f"));
+            cJSON_AddItemToArray(f, cJSON_CreateString(who));
+            cJSON_AddItemToArray(f, cJSON_CreateNumber(1));
+            backend_social_send(f);
+            cJSON_Delete(f);
         }
         return 1;
     }
@@ -3906,9 +4150,9 @@ static char *gen_account(void) {
                    I18N("generic.level", "Level"), g_acc.level);
         stats_html(&sb, &g_acc, 0);
     } else if (g_tab_index == PROFILE_TAB_FRIENDS) {
-        // v10's friends tab: mutual follows from the friends event bus (v10_social.c)
+        // v10's friends tab: FRIENDS_LIST_RESPONSE (gfrnd); a krunker.io account's from its friends event bus (v10_social.c)
         sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div>");
-        char *friends = v10_social_window_friends_html();
+        char *friends = friends_html();
         sb_append(&sb, friends ? friends : "<div id='friendList'>Loading Friends...</div>");
         free(friends);
     } else if (g_tab_index == PROFILE_TAB_SETTINGS) { // deob-10.0.3.js:247656-247685
