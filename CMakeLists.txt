@@ -2132,6 +2132,9 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(gltf_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # headless from the repo root (it loads assets/); 77 = skipped without the game content or GL
+    add_test(NAME gltf_test COMMAND gltf_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(gltf_test PROPERTIES ENVIRONMENT "KRUNKNATIVE_HEADLESS=1" SKIP_RETURN_CODE 77 TIMEOUT 300)
 
     # projectiles_render_test: thrown-knife visuals over the owner's "pr" / "pre" sequences (stuck
     # knives keep their end, the throw's charge speed). GL-free: it includes projectiles_render.c and

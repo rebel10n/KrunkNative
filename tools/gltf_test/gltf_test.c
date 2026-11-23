@@ -16,6 +16,7 @@
 //     sound a remodel plays (weapon.sound_<mid>, noSnd, upgraded, blast) and getSkinForLoadout; a custom studio skin's
 //     model / texture keys and files (user-assets/skins/<_id>/).
 //   gltf_test [--headless]      (from the repo root; KRUNKNATIVE_HEADLESS=1 works too)
+// ctest runs it as gltf_test (headless); it exits 77 (skipped) without the game content (assets/models) or GL.
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <client.h>
@@ -32,10 +33,10 @@
 #include <user_asset_path.h>
 #include "../../client/src/viewer/viewer_store.h"
 #include <math.h>
+#include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
 #else
-#include <sys/stat.h>
 #include <unistd.h>
 #endif
 #include <stdio.h>
@@ -724,9 +725,14 @@ int main(int argc, char **argv) {
     vt_init(&g_glyph_cache);
     g_settings.texture_anim = 1;
     g_settings.lighting = 1;
+    struct stat content;
+    if (stat("assets/models", &content) != 0 || !S_ISDIR(content.st_mode)) { // gitignored game content
+        printf("gltf_test: no game content (assets/models, run from the repo root): skipped\n");
+        return 77;
+    }
     if (!headless_glfw_init()) {
-        fprintf(stderr, "gltf_test: glfwInit failed (use --headless / KRUNKNATIVE_HEADLESS=1)\n");
-        return 1;
+        fprintf(stderr, "gltf_test: glfwInit failed (use --headless / KRUNKNATIVE_HEADLESS=1): skipped\n");
+        return 77;
     }
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 #ifdef KRUNKNATIVE_GL_ANGLE
@@ -747,8 +753,8 @@ int main(int argc, char **argv) {
     headless_window_hints();
     GLFWwindow *window = glfwCreateWindow(64, 64, "gltf_test", NULL, NULL);
     if (!window || !headless_make_context_current(window) || !kn_gl_load(headless_get_proc_address)) {
-        fprintf(stderr, "gltf_test: no GL context\n");
-        return 1;
+        fprintf(stderr, "gltf_test: no GL context: skipped\n");
+        return 77;
     }
 
     check_gltf_pet(4249, "Kronix Gold wrist_0.gltf");
